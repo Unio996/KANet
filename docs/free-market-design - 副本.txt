@@ -1,0 +1,279 @@
+# 自由市场完整设计 — 待讨论确认
+
+> 2026-03-25 设计稿。**先讨论确认，再编码。**
+
+---
+
+## 一、现状（已有什么）
+
+| 模块 | 状态 | 问题 |
+|------|------|------|
+| order-machine.js | 状态机完整（9状态+转换校验+对手方同步+超时） | mode 字段存了但没逻辑 |
+| trading.js /action | 手动触发状态推进（accept/verify/pay/send_kas/cancel） | 无权限检查 |
+| mm_orders 表 | 全字段就绪（mode/timeout/counterparty/timestamps） | 新旧状态名并存 |
+| trading.eta UI | 能显示订单列表、接单、操作 | 只认旧状态名 |
+| action-executor.mjs | 通信类 ACTION 完备 | 没有交易 ACTION |
+| execution_states 表 | 表结构就绪 | 空表，无写入 |
+
+---
+
+## 二、交易状态机（不变，继承现有）
+
+```
+published → accepted → paying → paid → verified → delivering → completed
+                                                              ↘ disputed
+任何状态 → cancelled / expired
+```
+
+每个状态的含义：
+
+| 状态 | 谁负责 | 含义 |
+|------|--------|------|
+| published | 卖方 | 订单发布到市场（链上广播或本地发布）|
+| accepted | 买方 | 买方接受订单，双方锁定 |
+| paying | 买方 | 买方正在发送跨链付款（USDT）|
+| paid | 买方 | 付款已发送，等待卖方验证 |
+| verified | 卖方 | 卖方确认收到付款 |
+| delivering | 卖方 | 卖方正在发送 KAS |
+| completed | 系统 | 双方交割完成 |
+| disputed | 任一方 | 争议（付了但没收到 / 金额不对）|
+| cancelled | 任一方 | 主动取消 |
+| expired | 系统 | 超时自动取消 |
+
+---
+
+## 三、三模式设计
+
+**核心原则：mode 只决定 pending→approved 这一步由谁推。状态机逻辑不变。**
+
+### 3.1 execution_states 在每个转换中的角色
+
+```
+订单状态变化时：
+  1. 创建 execution_states 记录（status=pending, type=xxx, source=xxx）
+  2. 权限检查（source 能不能触发这个 type？）
+  3. 模式判断：
+     - auto: pending → approved（自动）→ executing → completed/failed
+     - approval: pending → 停住，等 owner 确认 → approved → executing → ...
+     - manual: 不创建 execution_states，人直接操作 UI
+  4. 执行具体动作
+  5. 更新 mm_orders 状态
+  6. 记录 output_txid
+```
+
+### 3.2 每个状态转换的具体行为
+
+#### published → accepted（接单）
+
+| 模式 | 触发者 | 流程 |
+|------|--------|------|
+| auto | Agent 收到 kanet_accept_v1 消息 | Mind 识别 → execution_states(pending) → 自动 approve → 创建对手订单 → 链接双方 |
+| approval | Agent 收到接单消息 | Mind 识别 → execution_states(pending) → UI 显示"有人接单，确认？" → owner 点确认 → 执行 |
+| manual | Owner 在 UI 点"接受" | 直接调 /action accept，不经 execution_states |
+
+#### accepted → paying → paid（付款）
+
+| 模式 | 触发者 | 流程 |
+|------|--------|------|
+| auto | 系统（接单后自动） | execution_states(type=pay_usdt) → 查钱包余额 → 够？签名发送 → paid → 记 txhash |
+| approval | 系统准备好付款 | execution_states(pending) → UI 显示"将付 X USDT 到 Y 地址，确认？" → owner 确认 → 发送 |
+| manual | Owner 在 UI 点"付款" | 调 /action pay_usdt → 直接执行 |
+
+**失败处理：**
+- 余额不足 → execution_states(status=failed, error='insufficient_balance') → paying 回退到 accepted
+- 链拥堵/发送失败 → execution_states(status=failed, error=xxx) → paying 回退到 accepted → 可重试
+- Gas 不够 → 同上
+
+#### paid → verified（验证收款）
+
+| 模式 | 触发者 | 流程 |
+|------|--------|------|
+| auto | cross_chain_verify 技能 | 自动查链确认 USDT 到账 → execution_states(type=verify_payment) → verified |
+| approval | 系统检测到到账 | UI 显示"检测到 X USDT 到账，确认？" → owner 确认 |
+| manual | Owner 查链后在 UI 点"确认收款" | 直接推进 |
+
+**失败处理：**
+- 金额不对（少付/多付）→ 不自动 verify，通知 owner
+- TX 未确认 → 等待，超时后报警
+- 错误地址（付到别人那了）→ disputed
+
+#### verified → delivering → completed（发 KAS）
+
+| 模式 | 触发者 | 流程 |
+|------|--------|------|
+| auto | 系统（验证后自动） | execution_states(type=send_kas) → Relay 发送 KAS → delivering → 确认到账 → completed |
+| approval | 系统准备好 | UI 显示"将发送 X KAS 到 Y 地址，确认？" → owner 确认 → 发送 |
+| manual | Owner 点"发送 KAS" | 直接调 Relay 发送 |
+
+**失败处理：**
+- KAS 余额不足 → failed → 回退到 verified → 通知 owner 充值
+- UTXO 不够（需要拆分）→ 自动拆分后重试
+- Relay 不在线 → 等待重试，超时报警
+
+---
+
+## 四、execution_states 字段设计
+
+```sql
+-- 已有表结构，确认每个字段的用法
+execution_states:
+  id              -- UUID
+  intent_id       -- 关联 Mind 意图（proactive/reactive 触发时填）
+  type            -- 动作类型（见下表）
+  source          -- 触发来源：owner / peer / agent / system
+  agent_address   -- 哪个 Agent
+  permission_level-- 这个 type 需要的权限：owner / connected / public
+  status          -- pending / approved / executing / completed / failed / rejected
+  input_txid      -- 触发这个动作的链上事件（对方的付款TX / 接单TX 等）
+  output_txid     -- 执行结果的链上事件（我们发的TX）
+  error_text      -- 失败原因
+  created_at
+  updated_at
+```
+
+### 动作类型表
+
+| type | 含义 | permission_level | 典型 source |
+|------|------|-----------------|-------------|
+| accept_order | 接受一个市场订单 | owner | peer（对方发来）/ owner（手动） |
+| pay_usdt | 发送跨链 USDT 付款 | owner | agent（auto模式）/ owner（手动） |
+| verify_payment | 确认收到付款 | owner | system（自动查链）/ owner（手动） |
+| send_kas | 发送 KAS | owner | agent（auto模式）/ owner（手动） |
+| cancel_order | 取消订单 | owner | owner / system（超时） |
+| publish_order | 发布新订单到市场 | owner | owner / agent |
+
+### 权限校验规则
+
+```
+if source == 'owner':
+  → 总是允许
+if source == 'peer':
+  → 只允许 accept_order（对方接我的单是合法的）
+  → 其他一律拒绝
+if source == 'agent':
+  → 看 mode：
+     auto → 允许（Agent 自主执行）
+     approval → 创建 pending 等确认
+     manual → 拒绝（manual 模式 Agent 不能自动操作）
+if source == 'system':
+  → 只允许 verify_payment / cancel_order（超时）
+```
+
+---
+
+## 五、异常场景完整清单
+
+| 场景 | 检测方式 | 处理 |
+|------|---------|------|
+| 付款后对方消失 | timeout_minutes 超时 | order → expired, execution_states 记录 |
+| 付了但金额不对 | verify 时金额校验 | → disputed, 通知 owner |
+| 付了但地址错 | verify 时查不到 TX | → disputed, 记录错误详情 |
+| 链拥堵（TX 长时间 pending） | 周期查询 TX 状态 | 等待，超时后 → disputed |
+| 余额不足（下单时够，付款时不够） | 付款前检查 | execution_states(failed), 回退状态 |
+| Gas 不够 | 发送时报错 | failed, 提示充 Gas |
+| Relay 不在线 | 发 KAS 时连接失败 | failed, 等 Relay 重连后重试 |
+| 对方付了假 TX（伪造 txhash） | verify 查链 | 查不到 → 不推进，通知 owner |
+| 双方同时取消 | 竞态条件 | 状态机保证幂等，谁先到谁生效 |
+| 重复付款 | 同一 order 两次 pay_usdt | execution_states 检查最近一次是否完成 |
+
+---
+
+## 六、UI 设计（一页闭环）
+
+### 6.1 交易室布局
+
+```
+┌─────────────────────────────────────────────────┐
+│ 交易室 — Martin                    [模式: 审批 ▾] │
+├─────────────┬───────────────────────────────────┤
+│ 市场订单     │  当前交易详情                       │
+│             │                                    │
+│ [买] 500 KAS│  状态：verified ✓                   │
+│   $0.085    │  买方已付 42.5 USDT (BNB)          │
+│   BNB链     │  TX: 0xabc...def                   │
+│   Sophie发布│                                    │
+│             │  ┌──────────────────────────────┐  │
+│ [卖] 200 KAS│  │ 下一步：发送 200 KAS           │  │
+│   $0.086    │  │ 到: kaspa:qp28...5v           │  │
+│   BNB链     │  │                               │  │
+│             │  │    [确认发送]  [取消交易]       │  │
+│             │  └──────────────────────────────┘  │
+│             │                                    │
+│ ──历史──    │  执行记录：                         │
+│ ✓ 完成 3笔  │  1. accept_order → completed       │
+│ ✗ 取消 1笔  │  2. verify_payment → completed     │
+│             │  3. send_kas → pending (等你确认)   │
+├─────────────┴───────────────────────────────────┤
+│ 钱包: 1,234.5 KAS | 50.2 USDT (BNB) | 0.01 BNB │
+└─────────────────────────────────────────────────┘
+```
+
+### 6.2 模式切换
+
+右上角下拉框：
+- **全自动** — Agent 全权处理，你是观察者
+- **审批** — Agent 准备，你确认（默认）
+- **手动** — 你操作每一步
+
+切换时提示："切换到全自动模式？Agent 将自动接单、付款、发送 KAS，无需你确认。"
+
+### 6.3 审批模式的 pending 卡片
+
+```
+┌──────────────────────────────────────┐
+│ ⏳ 等待你的确认                       │
+│                                      │
+│ Agent 建议：发送 42.5 USDT 到         │
+│ 0x742d...8f2a (BNB Chain)            │
+│                                      │
+│ 原因：接受了 Sophie 的 500 KAS 卖单   │
+│ 当前 USDT 余额：50.2 USDT            │
+│ 预计 Gas：0.0005 BNB                 │
+│                                      │
+│ [确认执行]  [拒绝]  [稍后再说]        │
+└──────────────────────────────────────┘
+```
+
+---
+
+## 七、实现步骤（讨论确认后）
+
+### Phase 1：execution_states 基础层
+1. 写 `execution-state.js` 服务（create/approve/execute/complete/fail/reject）
+2. 在 order-machine.js 的 transition() 中接入 execution_states 记录
+3. 在 trading.js /action 端点中写入 execution_states
+4. **测试**：手动模式下，每个操作都有 execution_states 记录
+
+### Phase 2：权限闸门
+1. action-executor.mjs 加交易 ACTION（accept_order / pay_usdt / send_kas）
+2. 权限校验逻辑（source + permission_level + mode）
+3. **测试**：陌生人消息不能触发下单
+
+### Phase 3：auto 模式
+1. Mind 识别 kanet_accept_v1 消息 → 自动触发 accept_order
+2. accepted 后自动触发 pay_usdt（如果是买方）
+3. verified 后自动触发 send_kas（如果是卖方）
+4. **测试**：全自动流程跑通
+
+### Phase 4：approval 模式
+1. pending 状态不自动推进，等 owner 确认
+2. UI 审批卡片
+3. WebSocket 或轮询通知
+4. **测试**：审批流程跑通
+
+### Phase 5：UI 统一 + 异常处理
+1. 状态名统一（清理旧状态）
+2. 一页闭环 UI
+3. 所有异常场景处理
+4. **真实小额测试**
+
+---
+
+## 八、安全底线
+
+1. **每笔花钱操作必须经过 execution_states** — 没有绕过的路
+2. **execution_states 的 approve 不能被外部 API 直接调用** — 只有 owner 确认或 auto 模式
+3. **付款前必须验证余额** — 不是"余额够再发"，是"锁定余额再发"
+4. **每笔 TX 必须入 chain_events** — 不管成功失败
+5. **超时必须生效** — 不能有挂起的订单永远不过期
+6. **disputed 状态必须有人工介入路径** — 不能自动解决争议

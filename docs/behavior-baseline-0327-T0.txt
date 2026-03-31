@@ -1,0 +1,62 @@
+
+============================================================
+  Agent Behavior Analysis — last 1h (since 2026-03-27T00:29)
+============================================================
+
+--- 1. GOAL TRACKING ---
+
+  Martin:
+    Active: 7 | Retired: 5 | Tracked: 2
+    Success: 2 | Failed: 0 | Cooling: 0 | Auto-retired: 0
+    Unused (0 attempts): 5
+  Kasia_1:
+    Active: 10 | Retired: 2 | Tracked: 0
+    Success: 0 | Failed: 0 | Cooling: 0 | Auto-retired: 0
+    Unused (0 attempts): 10
+  Sophie:
+    Active: 6 | Retired: 0 | Tracked: 0
+    Success: 0 | Failed: 0 | Cooling: 0 | Auto-retired: 0
+    Unused (0 attempts): 6
+  Qwen:
+    Active: 7 | Retired: 0 | Tracked: 1
+    Success: 1 | Failed: 0 | Cooling: 0 | Auto-retired: 0
+    Unused (0 attempts): 6
+
+--- 2. PROACTIVE BEHAVIOR ---
+
+  Martin: 4 proactive events
+    do_nothing: 0 (0%) | follow_up: 0 | message: 2 | broadcast: 2 | handshake: 0 | other: 0
+  Kasia_1: 4 proactive events
+    do_nothing: 0 (0%) | follow_up: 0 | message: 0 | broadcast: 0 | handshake: 0 | other: 4
+  Sophie: 4 proactive events
+    do_nothing: 0 (0%) | follow_up: 0 | message: 0 | broadcast: 0 | handshake: 0 | other: 4
+  Qwen: 1 proactive events
+    do_nothing: 0 (0%) | follow_up: 1 | message: 0 | broadcast: 0 | handshake: 0 | other: 0
+
+--- 3. SOCIAL QUALITY ---
+
+  Martin: sent 0 | recv 1 | peers 0 | repeat(>3): 0
+  Kasia_1: sent 0 | recv 0 | peers 0 | repeat(>3): 0
+  Sophie: sent 0 | recv 0 | peers 0 | repeat(>3): 0
+  Qwen: sent 0 | recv 0 | peers 0 | repeat(>3): 0
+
+--- 4. DEDUP & BLOCKING ---
+
+  Martin: dedup-blocked 0 | hallucination 0 | silent 0 / 1 reactive
+  Kasia_1: dedup-blocked 0 | hallucination 0 | silent 0 / 0 reactive
+  Sophie: dedup-blocked 0 | hallucination 0 | silent 0 / 0 reactive
+  Qwen: dedup-blocked 0 | hallucination 0 | silent 0 / 0 reactive
+
+--- 5. ECONOMICS ---
+
+  Martin: 1 TXs | fees: 0.0000 KAS | actions: 4 | cost/action: 0.000009 KAS
+    chain_events: comm:2
+  Kasia_1: 0 TXs | fees: 0.0000 KAS | actions: 4 | cost/action: 0.000000 KAS
+  Sophie: 0 TXs | fees: 0.0000 KAS | actions: 4 | cost/action: 0.000000 KAS
+  Qwen: 0 TXs | fees: 0.0000 KAS | actions: 1 | cost/action: 0.000000 KAS
+    chain_events: comm:1 | text:1
+
+============================================================
+  Analysis complete. Run again with --hours 48 for wider window.
+============================================================
+
