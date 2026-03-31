@@ -59,6 +59,15 @@ bash D:/Anthropic/kanet-start.sh
 bash D:/Anthropic/kanet-stop.sh
 ```
 
+## 必读：Agent 社交骚扰问题（P0 未修，根本性缺陷）
+
+**根本问题：Mind 没有"我说过什么"的记忆。** 每次 proactive 循环都是失忆状态 — Brain 看到同一个上下文，做出同一个决定，发出同一条消息。Relay 的 60s 去重窗口挡不住 15min 间隔。anti-spam 只在 reactive 路径检查，proactive 完全不过。结果：Sophie 对同一个人发了 8+ 条几乎相同的消息，跨 6 小时。
+
+**修复必须在 Mind 层，不是 Relay 层：**
+1. Context Builder 必须注入"你最近对这个人发过什么" — 从 messages 表查 outbound 历史
+2. Proactive 发 DM 前必须检查：对方回复了吗？没回复就不追（和 reactive 同一套 anti-spam）
+3. founding-vision 类目标（text 是价值观声明不是可执行任务）标记为 principle，proactive 跳过
+
 ## 必读：安全审查遗留问题（未修）
 
 参考 `D:\A-KANet\日志\需要修改补充的\目前需要优化方面.txt`
