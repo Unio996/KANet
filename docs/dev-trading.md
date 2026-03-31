@@ -6,6 +6,8 @@
 
 ## Fatal Traps (First 30 Seconds)
 
+0. **不猜代码，查了再写。** 列名用 `PRAGMA table_info`，函数名用 grep，参数名看调用方。记忆不可信，代码是唯一真相。每次引用前先验证，零例外。
+
 1. **Post-payment orders CANNOT be expired or cancelled.** `paid`, `verified`, `delivering` can only → `disputed`. If you add an `expired` transition from these states, you break fund protection. See `order-machine.js:28-41`.
 
 2. **Source is hardcoded, never client-declared.** `trading.js /action` always sets `source='owner'`. Mind callback sets `source='agent'`. Ingest sets `source='peer'`. Don't trust any `source` from request body.

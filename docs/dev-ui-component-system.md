@@ -1,5 +1,11 @@
 # UI Component System — 开发者文档
 
+## Fatal Traps
+
+0. **不猜代码，查了再写。** 列名用 `PRAGMA table_info`，函数名用 grep，参数名看调用方。记忆不可信，代码是唯一真相。每次引用前先验证，零例外。
+
+---
+
 ## 概述
 
 KANet Console 的 UI 组件系统，基于 Eta 模板引擎的 partial include 机制 + Tailwind CSS + Alpine.js。

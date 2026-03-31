@@ -1,5 +1,11 @@
 # Episode System — 开发者文档
 
+## Fatal Traps
+
+0. **不猜代码，查了再写。** 列名用 `PRAGMA table_info`，函数名用 grep，参数名看调用方。记忆不可信，代码是唯一真相。每次引用前先验证，零例外。
+
+---
+
 ## 概述
 
 Episode 系统将离散的链上事件聚合为"对话故事线"——用户不再看一堆 txid 和 event_type，而是看到"与 Martin 的买入交易，已完成，+320 KAS"。

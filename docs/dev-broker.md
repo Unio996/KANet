@@ -6,6 +6,8 @@
 
 ## Fatal Traps (First 30 Seconds)
 
+0. **不猜代码，查了再写。** 列名用 `PRAGMA table_info`，函数名用 grep，参数名看调用方。记忆不可信，代码是唯一真相。每次引用前先验证，零例外。
+
 1. **IBKR 需要本地 Gateway 保持运行。** Session 几分钟不活动就过期。`startKeepAlive()` 每 60s 发 tickle。session 断了 → broker_accounts.status 自动标 'disconnected'。不要假设 IBKR 永远在线。
 
 2. **Alpaca 的 Paper vs Live 是不同的 base URL。** `paper-api.alpaca.markets` vs `api.alpaca.markets`。由 `paper_trading` 字段控制。配错了不是报错，是操作真钱。
@@ -186,3 +188,112 @@ Polymarket 不走 broker 体系，有独立的服务和端点：
 | `/api/predictions/order` | POST | 下单 |
 | `/api/predictions/order/:id` | DELETE | 撤单 |
 | `/api/predictions/book/:tokenId` | GET | 订单簿 |
+
+## 待实现（下次会话）
+
+### 1. IBKR 一键登录（KANet 内直接输入盈透账密）
+
+**当前问题**：用户必须手动打开 IB Gateway → 输账密 → 登录 → 然后 KANet 才能连。
+
+**目标**：用户在 KANet 股票页面输入盈透用户名+密码 → KANet 自动启动 Gateway 并登录 → 用户无感。
+
+**实现方案**：
+
+```
+broker_accounts 表新增字段：
+  username_encrypted TEXT    -- 盈透用户名（AES 加密）
+  password_encrypted TEXT    -- 盈透密码（AES 加密）
+
+system-actions.js 新增：
+  launchGatewayWithCredentials(username, password)
+    → spawn ibgateway.exe -Dusername=xxx -Dpassword=xxx
+    → 或用 IBC (IB Controller) 自动化登录
+
+stocks.eta 改动：
+  1. 连接表单加用户名+密码字段
+  2. 保存后自动调 launchGatewayWithCredentials
+  3. 启动时检测 Gateway 没跑 → 用存储凭证自动启动
+
+broker.js 自动重连改进：
+  1. 检测 status=connected 但 Gateway 没跑
+  2. 用存储凭证自动启动 Gateway
+  3. 等 Gateway 就绪 → 自动连接
+```
+
+**安全考虑**：
+- 密码 AES-256 加密存储，解密需要 CONSOLE_ENCRYPTION_KEY
+- 进程启动后密码不驻留内存（spawn 参数传完即丢）
+- 考虑用 IBC (IB Controller) 替代命令行参数（更安全）
+
+### 2. 交易安全层（PIN 码 + 审批模式）
+
+**当前问题**：连接后任何 API 调用都能直接下单，无二次验证。
+
+**实现方案**：
+
+```
+交易前验证（三选一）：
+  1. PIN 码：owner 设置 4-6 位 PIN，每次下单前输入
+  2. 审批模式：Agent 建议下单 → owner 在 UI 确认/拒绝（复用 OTC 的 approval 机制）
+  3. 限额模式：小额直接执行，超额需要 PIN
+
+config_entries 新增：
+  broker_trade_pin_hash    -- PIN 码 hash
+  broker_trade_mode        -- 'pin' | 'approval' | 'auto'
+  broker_auto_limit        -- auto 模式单笔限额
+```
+
+### 3. Agent 持仓感知（扩展 trade_sense + trade_executor）
+
+**目标**：Agent 能分析 IBKR 持仓并给建议，能通过对话执行股票交易。
+
+**实现方案**：
+
+```
+trade_sense.mjs 扩展：
+  gatherContext 新增：
+    → 查 /api/broker/accounts → 有券商？
+    → 查 /api/broker/:id/positions → 持仓列表
+    → 查 /api/broker/:id/account → 余额/购买力
+  formatForBrain 新增：
+    YOUR STOCK PORTFOLIO:
+      TSLA: 11 shares @ $413, current $248, -39.9%
+      QS: 88 shares @ $55, current $6.8, -87.6%
+      Cash: $293, Buying Power: $9,706
+    → Brain 据此给出分析和建议
+
+trade_executor.mjs 扩展：
+  新增 ACTION: [ACTION:STOCK_ORDER broker=ibkr side=buy symbol=AAPL qty=10 type=limit price=191]
+  → 但遵循 Mind 执行 Brain 汇报原则
+  → 执行在 gatherContext 或 action-executor 中完成
+  → Brain 只汇报结果
+
+stock_executor.mjs（可选，新技能）：
+  专门处理股票交易对话
+  "帮我买 10 股 AAPL" → 直接执行
+  "分析下我的持仓" → 调 trade_sense 数据
+```
+
+### 4. IBKR TWS API 注意事项
+
+```
+已确认可用：
+  ✅ reqManagedAccts → 获取账户列表
+  ✅ reqAccountSummary → 余额/购买力/净值
+  ✅ reqPositions → 持仓列表
+  ✅ placeOrder → 下单（STK/SMART/USD）
+  ✅ cancelOrder → 撤单
+  ✅ reqAllOpenOrders → 活跃订单
+  ✅ reqMatchingSymbols → 搜索标的
+
+需要市场数据订阅才能用：
+  ⚠ reqMktData → 实时报价（需要付费订阅）
+  ⚠ reqHistoricalData → 历史K线
+  替代方案：用 Yahoo Finance 免费行情（已有 market-data.js）
+
+已知限制：
+  - TWS socket 连接是内存态，重启即断
+  - Gateway 默认 10 分钟无操作锁屏，需要 IBC 保活
+  - Paper 账户端口 4002，Live 端口 4001
+  - 同一 clientId 不能多次连接，用随机 ID
+```

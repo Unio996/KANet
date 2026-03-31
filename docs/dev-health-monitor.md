@@ -6,6 +6,8 @@
 
 ## Fatal Traps (First 30 Seconds)
 
+0. **不猜代码，查了再写。** 列名用 `PRAGMA table_info`，函数名用 grep，参数名看调用方。记忆不可信，代码是唯一真相。每次引用前先验证，零例外。
+
 1. **Agent 目录名有下划线。** Mind 写 `minds/kasia_1/`（`config.name.toLowerCase()`），Health 读取时必须用 `replace(/[^a-z0-9_]/g, '')`（保留下划线）。曾因 `replace(/[^a-z0-9]/g, '')` 丢掉下划线导致 Kasia_1 假红灯 4 天。见 `agent-health.js:127`。
 
 2. **Health check 首次执行必须显式调用。** `setInterval` 首次执行在一个周期后（30 分钟），不是立即。`_runHealthCheck()` 必须在 `setTimeout` 回调中先调一次再注册 interval。见 `mind-manager.js` health check loop。

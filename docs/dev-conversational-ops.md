@@ -1,5 +1,11 @@
 # Conversational Ops — Developer Guide
 
+## Fatal Traps
+
+0. **不猜代码，查了再写。** 列名用 `PRAGMA table_info`，函数名用 grep，参数名看调用方。记忆不可信，代码是唯一真相。每次引用前先验证，零例外。
+
+---
+
 ## Overview
 
 `conversational-ops` is KANet's first **core-level package skill**. It turns the chat dialog into a unified control interface — users query data and execute operations through natural conversation with their Agent.

@@ -6,6 +6,8 @@
 
 ## Fatal Traps
 
+0. **不猜代码，查了再写。** 列名用 `PRAGMA table_info`，函数名用 grep，参数名看调用方。记忆不可信，代码是唯一真相。每次引用前先验证，零例外。
+
 1. **部署只改 `kanet.env` 一处。** `KANET_ROOT=D:/Anthropic` 在 kanet.env 中定义。所有 JS 文件用 `process.env.KANET_ROOT || 'D:/Anthropic'` 回退。不要在代码里硬编码绝对路径。
 
 2. **Console 不签名，不提交 RPC。** 三个碰链文件已删除/重写：

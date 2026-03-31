@@ -6,6 +6,8 @@
 
 ## 致命陷阱（前 30 秒必看）
 
+0. **不猜代码，查了再写。** 列名用 `PRAGMA table_info`，函数名用 grep，参数名看调用方。记忆不可信，代码是唯一真相。每次引用前先验证，零例外。
+
 1. **Agent 的记忆在 DB，不在文件。** `minds/*/memory.json` 只是 peerNotes + shortTermEvents 的小缓存。真正的记忆来自 Console DB 的 6 张表（见下文）。别看到 peerNotes 为空就以为"学习失效"。
 
 2. **`relation_states` 是 Agent 社交决策的唯一真相源。** Context Builder 从 `/api/discovery/list` 读这张表，按 active/accepted/observed 分三桶喂给 Brain。Brain 的一切社交行为（握手谁、发消息给谁、跟进谁）都从这里来。
