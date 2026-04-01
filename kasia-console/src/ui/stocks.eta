@@ -22,7 +22,12 @@
         :class="healthData.maxSectorPct >= 0.8 ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-600'"
         x-text="'行业集中 ' + Math.round(healthData.maxSectorPct * 100) + '%'"></span>
     </template>
-    <div class="ml-auto flex gap-2">
+    <div class="ml-auto flex items-center gap-2">
+      <select x-model="selectedAgent" class="rounded-lg border border-warm-300 px-2 py-1 text-xs bg-white">
+        <% it.relayNodes.forEach(r => { %>
+        <option value="<%= r.id %>"><%= r.name %></option>
+        <% }) %>
+      </select>
       <button @click="showTools = !showTools" class="btn btn-sm btn-secondary" x-text="showTools ? '收起' : '设置'"></button>
     </div>
   </div>
