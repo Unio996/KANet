@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Whale Signal — KANet Console</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="bg-gray-100 font-sans min-h-screen">
+
+  <div class="max-w-4xl mx-auto py-8 px-4" x-data="whaleSignal()" x-init="init()">
+
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-2xl font-bold text-gray-800">Whale Signal</h1>
+        <p class="text-sm text-gray-500 mt-1">链上大额异动信号 — 频率 + 金额 + 价格耦合</p>
+      </div>
+      <a href="/agent" class="text-sm text-indigo-600 hover:text-indigo-800">← Console</a>
+    </div>
+
+    <!-- Time window selector -->
+    <div class="flex items-center space-x-2 mb-4">
+      <template x-for="w in windows" :key="w.min">
+        <button @click="activeWindow = w.min; refresh()"
+          :class="activeWindow === w.min ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-100'"
+          class="px-4 py-1.5 text-xs font-medium rounded-md transition-colors" x-text="w.label"></button>
+      </template>
+    </div>
+
+    <!-- Multi-window overview -->
+    <div class="grid grid-cols-4 gap-3 mb-6">
+      <template x-for="w in windows" :key="'ov-' + w.min">
+        <div @click="activeWindow = w.min; refresh()" class="bg-white rounded-lg border p-3 cursor-pointer hover:border-indigo-300 transition-colors"
+             :class="activeWindow === w.min ? 'border-indigo-500 ring-1 ring-indigo-200' : 'border-gray-200'">
+          <div class="text-xs text-gray-400 mb-1" x-text="w.label"></div>
+          <div class="text-xl font-bold" :class="(multiSignals[w.min]?.score || 0) >= 70 ? 'text-red-600' : (multiSignals[w.min]?.score || 0) >= 40 ? 'text-amber-600' : 'text-green-600'"
+               x-text="multiSignals[w.min]?.score ?? '-'"></div>
+          <div class="text-xs mt-0.5" :class="multiSignals[w.min]?.direction === 'accumulation' ? 'text-green-600' : multiSignals[w.min]?.direction === 'distribution' ? 'text-red-600' : 'text-gray-400'"
+               x-text="multiSignals[w.min]?.direction || '-'"></div>
+        </div>
+      </template>
+    </div>
+
+    <!-- Signal Score (active window) -->
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+      <div class="flex items-center justify-between mb-4">
+        <div class="text-sm font-medium text-gray-500">SIGNAL DETAIL — <span x-text="windows.find(w => w.min === activeWindow)?.label || ''"></span></div>
+        <button @click="refresh()" class="text-xs text-indigo-600 hover:text-indigo-800">刷新</button>
+      </div>
+
+      <div class="flex items-center space-x-6">
+        <!-- Score circle -->
+        <div class="relative w-28 h-28 flex-shrink-0">
+          <svg viewBox="0 0 100 100" class="w-full h-full -rotate-90">
+            <circle cx="50" cy="50" r="42" fill="none" stroke="#e5e7eb" stroke-width="8"/>
+            <circle cx="50" cy="50" r="42" fill="none"
+              :stroke="signal.score >= 70 ? '#ef4444' : signal.score >= 40 ? '#f59e0b' : '#22c55e'"
+              stroke-width="8" stroke-linecap="round"
+              :stroke-dasharray="263.9" :stroke-dashoffset="263.9 - (263.9 * signal.score / 100)"/>
+          </svg>
+          <div class="absolute inset-0 flex flex-col items-center justify-center">
+            <span class="text-3xl font-bold" :class="signal.score >= 70 ? 'text-red-600' : signal.score >= 40 ? 'text-amber-600' : 'text-green-600'" x-text="signal.score"></span>
+            <span class="text-xs text-gray-400">/100</span>
+          </div>
+        </div>
+
+        <!-- Signal details -->
+        <div class="flex-1 space-y-2">
+          <div class="flex items-center space-x-2">
+            <span class="text-sm font-medium text-gray-700">Direction:</span>
+            <span class="px-2 py-0.5 rounded-full text-xs font-semibold"
+              :class="signal.direction === 'accumulation' ? 'bg-green-100 text-green-700' : signal.direction === 'distribution' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'"
+              x-text="signal.direction"></span>
+          </div>
+          <p class="text-sm text-gray-600" x-text="signal.summary"></p>
+          <div class="text-xs text-gray-400" x-text="'KAS Price: $' + (signal.details?.kasPrice?.toFixed(4) || '?')"></div>
+        </div>
+      </div>
+
+      <!-- Sub-scores bar -->
+      <div class="mt-6 grid grid-cols-3 gap-4">
+        <div class="text-center">
+          <div class="text-xs text-gray-400 mb-1">Frequency</div>
+          <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
+            <div class="h-full bg-blue-500 rounded-full transition-all" :style="'width:' + (signal.details?.frequencyScore || 0) + '%'"></div>
+          </div>
+          <div class="text-xs text-gray-500 mt-1" x-text="(signal.details?.frequencyScore || 0) + '/100'"></div>
+        </div>
+        <div class="text-center">
+          <div class="text-xs text-gray-400 mb-1">Volume</div>
+          <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
+            <div class="h-full bg-amber-500 rounded-full transition-all" :style="'width:' + (signal.details?.volumeScore || 0) + '%'"></div>
+          </div>
+          <div class="text-xs text-gray-500 mt-1" x-text="(signal.details?.volumeScore || 0) + '/100'"></div>
+        </div>
+        <div class="text-center">
+          <div class="text-xs text-gray-400 mb-1">Direction</div>
+          <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
+            <div class="h-full bg-purple-500 rounded-full transition-all" :style="'width:' + (signal.details?.directionScore || 0) + '%'"></div>
+          </div>
+          <div class="text-xs text-gray-500 mt-1" x-text="(signal.details?.directionScore || 0) + '/100'"></div>
+        </div>
+      </div>
+
+      <!-- Flow breakdown -->
+      <div class="mt-4 flex items-center space-x-4 text-xs">
+        <span class="text-green-600">Inflow: $<span x-text="((signal.details?.inflowUsd || 0) / 1000).toFixed(0)"></span>K</span>
+        <span class="text-red-600">Outflow: $<span x-text="((signal.details?.outflowUsd || 0) / 1000).toFixed(0)"></span>K</span>
+        <span class="text-gray-500">Transfer: $<span x-text="((signal.details?.transferUsd || 0) / 1000).toFixed(0)"></span>K</span>
+        <span class="text-gray-400">|</span>
+        <span class="text-gray-500">Baseline: <span x-text="signal.details?.baselineRate?.toFixed(1) || '?'"></span>/window</span>
+        <span class="text-gray-500">Current: <span x-text="signal.details?.currentRate || 0"></span>/window</span>
+      </div>
+    </div>
+
+    <!-- Parameters -->
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+      <div class="flex items-center justify-between mb-4">
+        <div class="text-sm font-medium text-gray-500">PARAMETERS</div>
+        <button @click="saveParams()" class="text-xs bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700">Save</button>
+      </div>
+
+      <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Window (min)</label>
+          <input type="number" x-model.number="params.windowMinutes" class="w-full border rounded px-3 py-1.5 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">USD Threshold ($)</label>
+          <input type="number" x-model.number="params.usdThreshold" step="10000" class="w-full border rounded px-3 py-1.5 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Baseline (hours)</label>
+          <input type="number" x-model.number="params.baselineHours" class="w-full border rounded px-3 py-1.5 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Frequency Weight</label>
+          <input type="number" x-model.number="params.frequencyWeight" step="0.05" min="0" max="1" class="w-full border rounded px-3 py-1.5 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Volume Weight</label>
+          <input type="number" x-model.number="params.volumeWeight" step="0.05" min="0" max="1" class="w-full border rounded px-3 py-1.5 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Direction Weight</label>
+          <input type="number" x-model.number="params.directionWeight" step="0.05" min="0" max="1" class="w-full border rounded px-3 py-1.5 text-sm" />
+        </div>
+      </div>
+
+      <p x-show="paramMsg" class="text-xs mt-2" :class="paramMsg.startsWith('OK') ? 'text-green-600' : 'text-red-500'" x-text="paramMsg"></p>
+      <p class="text-xs text-gray-400 mt-2">Weights should sum to 1.0. Adjust and observe how the signal changes.</p>
+    </div>
+
+    <!-- Recent significant alerts -->
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+      <div class="text-sm font-medium text-gray-500 mb-3">RECENT WHALE MOVES (window)</div>
+      <div x-show="!recentAlerts.length" class="text-xs text-gray-400 py-4 text-center">No significant moves in current window</div>
+      <div class="space-y-1.5 max-h-64 overflow-y-auto">
+        <template x-for="a in recentAlerts" :key="a.timestamp">
+          <div class="flex items-center justify-between text-xs px-2 py-1.5 rounded bg-gray-50">
+            <div class="flex items-center space-x-2">
+              <span class="w-1.5 h-1.5 rounded-full"
+                :class="a.direction === 'INFLOW' ? 'bg-green-400' : a.direction === 'OUTFLOW' ? 'bg-red-400' : 'bg-yellow-400'"></span>
+              <span :class="a.direction === 'INFLOW' ? 'text-green-600' : a.direction === 'OUTFLOW' ? 'text-red-600' : 'text-yellow-600'"
+                x-text="a.direction"></span>
+              <span class="font-mono text-gray-800" x-text="Math.round(a.amountKas).toLocaleString() + ' KAS'"></span>
+              <span class="text-gray-400" x-text="'($' + (a.amountKas * (signal.details?.kasPrice || 0) / 1000).toFixed(0) + 'K)'"></span>
+            </div>
+            <div class="flex items-center space-x-2 text-gray-400">
+              <span x-text="a.label || a.address?.slice(-8) || '?'"></span>
+              <span x-text="a.timestamp ? new Date(a.timestamp).toLocaleTimeString() : ''"></span>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- Auto-refresh -->
+    <div class="mt-4 flex items-center justify-between text-xs text-gray-400">
+      <span>Auto-refresh: <span x-text="autoRefresh ? 'every 30s' : 'off'"></span>
+        <button @click="toggleAutoRefresh()" class="ml-1 text-indigo-600 hover:underline" x-text="autoRefresh ? 'stop' : 'start'"></button>
+      </span>
+      <span x-text="lastUpdate ? 'Updated: ' + lastUpdate : ''"></span>
+    </div>
+  </div>
+
+  <script>
+    function whaleSignal() {
+      return {
+        signal: { score: 0, direction: 'neutral', summary: 'Loading...', details: {} },
+        params: {},
+        paramMsg: '',
+        recentAlerts: [],
+        autoRefresh: true,
+        _interval: null,
+        lastUpdate: '',
+        activeWindow: 60,
+        windows: [
+          { min: 10, label: '10 min' },
+          { min: 60, label: '1 hour' },
+          { min: 240, label: '4 hours' },
+          { min: 1440, label: '24 hours' },
+        ],
+        multiSignals: {},
+
+        async init() {
+          await this.loadParams();
+          await this.refreshAll();
+          this._interval = setInterval(() => this.refreshAll(), 30000);
+        },
+
+        async refreshAll() {
+          // Fetch all windows in parallel
+          const results = await Promise.all(
+            this.windows.map(w => fetch('/api/chain/whale-signal?window=' + w.min).then(r => r.json()).catch(() => ({ score: 0, direction: 'neutral' })))
+          );
+          this.windows.forEach((w, i) => this.multiSignals[w.min] = results[i]);
+          // Set active window detail
+          this.signal = this.multiSignals[this.activeWindow] || results[0];
+          this.lastUpdate = new Date().toLocaleTimeString();
+          // Recent alerts
+          try {
+            const aRes = await fetch('/api/chain/whale-alerts?limit=30');
+            const alerts = await aRes.json();
+            const kasPrice = this.signal.details?.kasPrice || 0;
+            const threshold = this.params.usdThreshold || 50000;
+            this.recentAlerts = alerts.filter(a => (a.amountKas || 0) * kasPrice >= threshold).slice(0, 15);
+          } catch {}
+        },
+
+        async refresh() {
+          await this.refreshAll();
+        },
+
+        async loadParams() {
+          try {
+            const res = await fetch('/api/chain/whale-signal/params');
+            this.params = await res.json();
+          } catch {}
+        },
+
+        async saveParams() {
+          try {
+            const res = await fetch('/api/chain/whale-signal/params', {
+              method: 'PUT', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(this.params),
+            });
+            const data = await res.json();
+            if (data.ok) { this.paramMsg = 'OK — saved'; await this.refresh(); }
+            else this.paramMsg = 'Error';
+            setTimeout(() => this.paramMsg = '', 2000);
+          } catch (e) { this.paramMsg = e.message; }
+        },
+
+        toggleAutoRefresh() {
+          this.autoRefresh = !this.autoRefresh;
+          if (this.autoRefresh) this._interval = setInterval(() => this.refresh(), 30000);
+          else { clearInterval(this._interval); this._interval = null; }
+        },
+      };
+    }
+  </script>
+
+</body>
+</html>

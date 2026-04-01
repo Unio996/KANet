@@ -1,0 +1,1377 @@
+<%~ include('partials/page-open', { _page: 'agent', pageTitle: '我的 Agent', ...it }) %>
+
+<div class="p-6" x-data="{
+  agents: [],
+  selectedIdx: 0,
+  loading: true,
+  activeTab: null,
+  balance: null, balLoading: false,
+  spending: null, spendLoading: false,
+  wallets: null, walletsLoading: false,
+  goals: [], goalsLoading: false,
+  mindSkills: [], recentActivity: [],
+  txHistory: [], txLoading: false,
+  episodes: [], episodesLoading: false,
+  health: null,
+
+  showCreateWallet: false, showImportWallet: false,
+  newWalletChain: 'bnb', newWalletLabel: '',
+  importKey: '', importChain: 'bnb', importLabel: '',
+  walletCreating: false, walletImporting: false,
+
+  newGoalText: '', editingGoalId: null, editingGoalText: '',
+
+  cardEditing: false, cardPublishing: false, cardPublished: false, cardError: '',
+  cardForm: { name: '', entityType: 'agent', summary: '', mode: 'public' },
+
+  showPrivKey: null, privKeyValue: '',
+  swapWallet: null, swapForm: { from: 'usdc', to: 'usdc.e', amount: '' }, swapping: false, swapMsg: '',
+
+  pendingApprovals: [],
+
+  get agent() { return this.agents[this.selectedIdx] || null; },
+
+  async init() {
+    try {
+      const res = await fetch('/api/agent/profile');
+      this.agents = await res.json();
+    } catch (e) { console.error(e); }
+    this.loading = false;
+    if (this.agents.length > 0) await this.loadAll();
+    // 读取 URL ?tab= 参数，自动打开对应 tab
+    const urlTab = new URLSearchParams(location.search).get('tab');
+    if (urlTab) this.activeTab = urlTab;
+    this.$watch('selectedIdx', () => this.loadAll());
+  },
+
+  async loadAll() {
+    this.loadBal(); this.loadSpent(); this.loadWallets();
+    this.loadGoals(); this.loadSkills(); this.loadTxHistory(); this.loadEpisodes();
+    this.loadPendingApprovals(); this.loadHealth();
+  },
+
+  async loadHealth() {
+    try {
+      const r = await fetch('/api/health/agents');
+      const d = await r.json();
+      this.health = (d.agents || []).find(a => a.address === this.agent?.address) || null;
+    } catch { this.health = null; }
+  },
+
+  healthReasonText(r) {
+    const map = { reflection:'反思周期超时', errors:'近期错误偏多', adapter:'AI 引擎离线', relay_down:'Relay 未运行', lastEvent:'长时间无活动', blocks:'消息拦截过多', payFails:'支付失败过多', proactive:'主动行为超时' };
+    return map[r] || r || '';
+  },
+
+  get sortedIndicators() {
+    if (!this.health?.indicators) return [];
+    const order = { red: 0, yellow: 1, green: 2 };
+    const labels = { adapter:'AI 引擎', lastEvent:'最近活动', proactive:'主动行为', reflection:'反思周期', errors:'错误 (2h)', blocks:'拦截 (2h)', payFails:'支付失败 (24h)' };
+    const links = { adapter:'/adapters', lastEvent:'/events', proactive:'/events', reflection:'/events', errors:'/events', blocks:'/events', payFails:'/market' };
+    const h = this.health;
+    const details = {
+      adapter: () => h.indicators.adapter === 'green' ? '运行中' : '离线',
+      lastEvent: () => KANet.relativeTime(h.stats.lastEvent) || '从未',
+      proactive: () => KANet.relativeTime(h.stats.lastProactive) || '从未',
+      reflection: () => KANet.relativeTime(h.stats.lastReflection) || '从未',
+      errors: () => h.stats.errors2h + ' 次',
+      blocks: () => h.stats.blocks2h + ' 次',
+      payFails: () => h.stats.payFails24h + ' 次',
+    };
+    return Object.entries(h.indicators)
+      .map(([k, v]) => ({ key: k, status: v, label: labels[k]||k, detail: details[k]?.() || '', link: links[k] || '/events' }))
+      .sort((a, b) => order[a.status] - order[b.status]);
+  },
+
+  async loadPendingApprovals() {
+    try { this.pendingApprovals = await (await fetch('/api/trade/pending-approvals')).json(); } catch { this.pendingApprovals = []; }
+  },
+  async approveExec(id) {
+    try { await fetch('/api/trade/approve-execution/' + id, { method: 'POST' }); await this.loadPendingApprovals(); } catch(e) { alert(e.message); }
+  },
+  async rejectExec(id) {
+    try { await fetch('/api/trade/reject-execution/' + id, { method: 'POST' }); await this.loadPendingApprovals(); } catch(e) { alert(e.message); }
+  },
+
+  async loadBal() {
+    if (!this.agent) return; this.balLoading = true;
+    try { const r = await fetch('/api/relay/' + this.agent.id + '/balance'); this.balance = (await r.json()).balance; }
+    catch { this.balance = null; } this.balLoading = false;
+  },
+  async loadSpent() {
+    if (!this.agent) return; this.spendLoading = true;
+    try { const r = await fetch('/api/agent/spending?relay_node_id=' + this.agent.id + '&days=1'); this.spending = await r.json(); }
+    catch { this.spending = null; } this.spendLoading = false;
+  },
+  async loadWallets() {
+    if (!this.agent) return; this.walletsLoading = true;
+    try { const r = await fetch('/api/relay/' + this.agent.id + '/wallets'); this.wallets = await r.json(); }
+    catch { this.wallets = null; } this.walletsLoading = false;
+  },
+  async loadGoals() {
+    if (!this.agent) return; this.goalsLoading = true;
+    try { const r = await fetch('/api/relay/' + this.agent.id + '/goals'); this.goals = await r.json(); }
+    catch { this.goals = []; } this.goalsLoading = false;
+  },
+  async loadSkills() {
+    if (!this.agent) return;
+    try { const r = await fetch('/api/agent/mind-skills?relay_node_id=' + this.agent.id); this.mindSkills = await r.json(); } catch { this.mindSkills = []; }
+    try { const r2 = await fetch('/api/agent/mind-events?limit=20'); const evts = await r2.json();
+      this.recentActivity = evts.filter(e => e.event_type === 'skill_cycle' && e.source === this.agent.name).slice(0, 5);
+    } catch { this.recentActivity = []; }
+  },
+  async loadTxHistory() {
+    if (!this.agent) return; this.txLoading = true;
+    try { const r = await fetch('/api/agent/tx-history?relay_node_id=' + this.agent.id + '&limit=20'); this.txHistory = await r.json(); }
+    catch { this.txHistory = []; } this.txLoading = false;
+  },
+  async loadEpisodes() {
+    if (!this.agent) return; this.episodesLoading = true;
+    try { const r = await fetch('/api/history/episodes?relay_node_id=' + this.agent.id + '&limit=30'); this.episodes = await r.json(); }
+    catch { this.episodes = []; } this.episodesLoading = false;
+  },
+
+  // Episode helpers
+  episodeTitle(ep) {
+    const peer = ep.counterparty_name || (ep.counterparty_addr ? KANet.shortAddr(ep.counterparty_addr) : '未知');
+    if (ep.episode_type === 'trade') return `与 ${peer} 的${ep.side === 'buy' ? '买入' : '卖出'}交易`;
+    return `与 ${peer} 的连接`;
+  },
+  episodeStatusBadge(ep) {
+    const map = { completed: 'badge-success', cancelled: 'badge-neutral', disputed: 'badge-error', in_progress: 'badge-warning' };
+    return map[ep.status] || 'badge-neutral';
+  },
+  episodeStatusLabel(ep) {
+    const map = { completed: '已完成', cancelled: '已取消', disputed: '争议中', in_progress: '进行中' };
+    return map[ep.status] || ep.status;
+  },
+  episodeResult(ep) {
+    if (ep.result_kas == null) return null;
+    return ep.result_kas > 0 ? `+${KANet.formatKas(ep.result_kas)} KAS` : `${KANet.formatKas(ep.result_kas)} KAS`;
+  },
+  episodeResultColor(ep) {
+    if (ep.result_kas == null) return 'text-ink-300';
+    return ep.result_kas > 0 ? 'text-green-600' : 'text-red-500';
+  },
+  stepBadgeColor(type) {
+    const map = { handshake: 'bg-brand-100 text-brand-700', publish: 'bg-ink-50 text-ink-500', negotiate: 'bg-warm-200 text-ink-500', payment: 'bg-amber-100 text-amber-700', verify: 'bg-brand-50 text-brand-600', transfer: 'bg-green-100 text-green-700', complete: 'bg-green-100 text-green-700', cancelled: 'bg-warm-200 text-ink-400', disputed: 'bg-red-100 text-red-700' };
+    return map[type] || 'bg-warm-100 text-ink-400';
+  },
+  stepDotColor(type, done) {
+    if (!done) return 'border-2 border-warm-300 bg-white'; // hollow dot for pending
+    const map = { handshake: 'bg-brand-500', publish: 'bg-ink-400', negotiate: 'bg-ink-300', payment: 'bg-amber-500', verify: 'bg-brand-500', transfer: 'bg-green-500', complete: 'bg-green-500', cancelled: 'bg-ink-300', disputed: 'bg-red-500' };
+    return map[type] || 'bg-ink-300';
+  },
+  stepTypeLabel(type) {
+    const map = { handshake: '连接', publish: '发布', negotiate: '协商', payment: '付款', verify: '验证', transfer: '转账', complete: '完成', cancelled: '取消', disputed: '争议' };
+    return map[type] || type;
+  },
+
+  async createWallet() {
+    if (!this.agent) return; this.walletCreating = true;
+    try { const r = await fetch('/api/relay/' + this.agent.id + '/wallets', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({chain:this.newWalletChain, label:this.newWalletLabel||undefined}) });
+      if (!r.ok) throw new Error((await r.json()).error); this.showCreateWallet = false; this.newWalletLabel = ''; await this.loadWallets();
+    } catch(e) { alert(e.message); } this.walletCreating = false;
+  },
+  async importWallet() {
+    if (!this.agent || !this.importKey.trim()) return; this.walletImporting = true;
+    try { const r = await fetch('/api/relay/' + this.agent.id + '/wallets/import', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({chain:this.importChain, privateKey:this.importKey.trim(), label:this.importLabel||undefined}) });
+      if (!r.ok) throw new Error((await r.json()).error); this.showImportWallet = false; this.importKey = ''; this.importLabel = ''; await this.loadWallets();
+    } catch(e) { alert(e.message); } this.walletImporting = false;
+  },
+  async deleteWallet(wid) {
+    if (!this.agent || !confirm('确定删除此钱包？')) return;
+    try { await fetch('/api/relay/' + this.agent.id + '/wallets/' + wid, {method:'DELETE'}); await this.loadWallets(); } catch(e) { alert(e.message); }
+  },
+  async showPrivkey(wid) {
+    if (this.showPrivKey === wid) { this.showPrivKey = null; return; }
+    try { const r = await fetch('/api/relay/' + this.agent.id + '/wallets/' + wid + '/privkey'); this.privKeyValue = (await r.json()).privateKey; this.showPrivKey = wid;
+    } catch(e) { alert(e.message); }
+  },
+
+  async doSwap(w) {
+    if (!this.swapForm.amount || this.swapping) return;
+    this.swapping = true; this.swapMsg = '';
+    try {
+      const r = await fetch('/api/relay/' + this.agent.id + '/wallets/' + w.id + '/swap', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fromToken: this.swapForm.from, toToken: this.swapForm.to, amount: this.swapForm.amount }),
+      });
+      const d = await r.json();
+      if (d.ok) { this.swapMsg = '兑换成功! TX: ' + d.txHash?.slice(0,12) + '...'; this.swapForm.amount = ''; await this.loadWallets(); }
+      else this.swapMsg = '失败: ' + (d.error || '');
+    } catch (e) { this.swapMsg = '失败: ' + e.message; }
+    this.swapping = false;
+  },
+
+  async addGoal() {
+    if (!this.agent || !this.newGoalText.trim()) return;
+    try { await fetch('/api/relay/' + this.agent.id + '/goals', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text:this.newGoalText.trim(), priority:5}) });
+      this.newGoalText = ''; await this.loadGoals();
+    } catch(e) { alert(e.message); }
+  },
+  startEditGoal(g) { this.editingGoalId = g.id; this.editingGoalText = g.text; },
+  cancelEditGoal() { this.editingGoalId = null; },
+  async saveGoal(g) {
+    if (!this.agent) return;
+    try { await fetch('/api/relay/' + this.agent.id + '/goals/' + g.id, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text:this.editingGoalText, priority:g.priority}) });
+      this.editingGoalId = null; await this.loadGoals();
+    } catch(e) { alert(e.message); }
+  },
+  async retireGoal(g) {
+    if (!this.agent) return;
+    try { await fetch('/api/relay/' + this.agent.id + '/goals/' + g.id, {method:'DELETE'}); await this.loadGoals(); } catch(e) { alert(e.message); }
+  },
+  // 三档优先级：高(8) / 中(5) / 低(2)，循环切换
+  goalTier(p) { return p >= 7 ? '高' : p >= 4 ? '中' : '低'; },
+  goalTierColor(p) { return p >= 7 ? 'text-red-500 bg-red-50 border-red-200' : p >= 4 ? 'text-brand-600 bg-brand-50 border-brand-200' : 'text-ink-400 bg-warm-50 border-warm-300'; },
+  async cyclePriority(g) {
+    // 低(2) → 中(5) → 高(8) → 低(2)
+    const next = g.priority >= 7 ? 2 : g.priority >= 4 ? 8 : 5;
+    try { await fetch('/api/relay/' + this.agent.id + '/goals/' + g.id, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({priority:next}) }); await this.loadGoals(); } catch {}
+  },
+
+  startCardEdit() {
+    if (!this.agent) return;
+    this.cardForm = { name: this.agent.name, entityType: this.agent.card?.entityType || 'agent', summary: this.agent.card?.summary || '', mode: this.agent.card?.mode || 'public' };
+    this.cardEditing = true; this.cardError = ''; this.cardPublished = false;
+  },
+  async publishCard() {
+    this.cardPublishing = true; this.cardError = '';
+    try { const r = await fetch('/api/relay/' + this.agent.id + '/publish-card', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(this.cardForm) });
+      const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Failed');
+      this.cardPublished = d.txId || true; this.cardEditing = false; this.agent.card = { ...this.agent.card, ...this.cardForm };
+    } catch(e) { this.cardError = e.message; } this.cardPublishing = false;
+  },
+
+  chainBadgeClass(chain) {
+    const map = { bnb: 'bg-amber-50 text-amber-700 border-amber-100', eth: 'bg-blue-50 text-blue-700 border-blue-100', polygon: 'bg-violet-50 text-violet-700 border-violet-100', sol: 'bg-purple-50 text-purple-700 border-purple-100', tron: 'bg-red-50 text-red-700 border-red-100' };
+    return map[chain] || 'bg-warm-100 text-ink-500 border-warm-300';
+  }
+}" x-cloak>
+
+  <!-- ================================ -->
+  <!-- LOADING SKELETON                 -->
+  <!-- ================================ -->
+  <div x-show="loading" class="space-y-4">
+    <div class="flex items-center justify-between">
+      <div class="skeleton" style="width:160px;height:36px;border-radius:8px;"></div>
+      <div class="skeleton" style="width:120px;height:20px;"></div>
+    </div>
+    <div class="card">
+      <div class="flex items-center gap-4">
+        <div class="skeleton" style="width:48px;height:48px;border-radius:12px;"></div>
+        <div class="space-y-2">
+          <div class="skeleton" style="width:140px;height:18px;"></div>
+          <div class="skeleton" style="width:200px;height:14px;"></div>
+        </div>
+      </div>
+      <div class="grid grid-cols-4 gap-4 mt-5">
+        <div class="skeleton" style="height:52px;border-radius:8px;"></div>
+        <div class="skeleton" style="height:52px;border-radius:8px;"></div>
+        <div class="skeleton" style="height:52px;border-radius:8px;"></div>
+        <div class="skeleton" style="height:52px;border-radius:8px;"></div>
+      </div>
+    </div>
+    <div class="skeleton" style="height:40px;border-radius:8px;"></div>
+    <div class="card">
+      <div class="space-y-3">
+        <div class="skeleton" style="height:16px;width:60%;"></div>
+        <div class="skeleton" style="height:16px;width:80%;"></div>
+        <div class="skeleton" style="height:16px;width:45%;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================ -->
+  <!-- AGENT SELECTOR + BALANCE HEADER  -->
+  <!-- ================================ -->
+  <div x-show="!loading && agents.length > 0" class="flex items-center justify-between mb-5">
+    <select x-model.number="selectedIdx"
+      class="px-4 py-2 border border-warm-300 rounded-lg text-sm font-medium text-ink-600 bg-white focus:ring-2 focus:ring-brand-200 focus:border-brand-400 focus:outline-none transition-shadow">
+      <template x-for="(a, idx) in agents" :key="a.id">
+        <option :value="idx" x-text="a.name"></option>
+      </template>
+    </select>
+    <div class="flex items-center gap-4">
+      <button class="addr addr-short cursor-pointer hover:text-brand-500 transition-colors"
+        x-text="agent ? KANet.shortAddr(agent.address) : ''"
+        :title="agent?.address"
+        @click="agent && KANet.copy(agent.address)"></button>
+      <div class="flex items-center gap-1.5">
+        <template x-if="balLoading">
+          <div class="skeleton" style="width:80px;height:18px;"></div>
+        </template>
+        <template x-if="!balLoading">
+          <span class="text-sm font-bold text-ink-700" x-text="balance != null ? KANet.formatKas(balance, 4) + ' KAS' : '--'"></span>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================ -->
+  <!-- MAIN CONTENT (when agent loaded) -->
+  <!-- ================================ -->
+  <template x-if="!loading && agent">
+    <div class="space-y-5">
+
+      <!-- ============================== -->
+      <!-- AGENT INFO CARD                -->
+      <!-- ============================== -->
+      <div class="card card-flush overflow-hidden">
+        <div class="px-6 py-5 border-b border-warm-200">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-4">
+              <!-- Avatar -->
+              <div class="w-12 h-12 bg-gradient-to-br from-brand-500 to-brand-700 rounded-xl flex items-center justify-center text-white text-lg font-bold shadow-sm"
+                x-text="agent.name.charAt(0)"></div>
+              <!-- Name + Address -->
+              <div>
+                <div class="flex items-center gap-2">
+                  <h2 class="text-lg font-bold text-ink-700" x-text="agent.name"></h2>
+                  <!-- Health dot next to name -->
+                  <template x-if="health">
+                    <span class="status-dot" :class="KANet.healthDot(health.status)"
+                      :title="health.status === 'green' ? '运行正常' : healthReasonText(health.reason)"></span>
+                  </template>
+                </div>
+                <p class="addr text-ink-300 mt-0.5" x-text="KANet.shortAddr(agent.address)" :title="agent.address"></p>
+              </div>
+            </div>
+            <!-- Card type badge -->
+            <template x-if="agent.card">
+              <span class="badge badge-info">
+                KANet <span x-text="agent.card.entityType" class="ml-1"></span>
+                <span class="opacity-60 ml-0.5" x-text="'(' + agent.card.mode + ')'"></span>
+              </span>
+            </template>
+            <template x-if="!agent.card">
+              <span class="badge badge-neutral">未发布 Card</span>
+            </template>
+          </div>
+          <!-- Summary -->
+          <template x-if="agent.card && agent.card.summary">
+            <p class="mt-3 text-sm text-ink-500 leading-relaxed" x-text="agent.card.summary"></p>
+          </template>
+        </div>
+
+        <!-- Stats Row -->
+        <div class="grid grid-cols-4 divide-x divide-warm-200">
+          <div class="px-5 py-4 text-center">
+            <div class="text-2xl font-bold text-ink-700" x-text="agent.stats?.contactCount || 0"></div>
+            <div class="text-xs text-ink-300 mt-1">通讯录</div>
+          </div>
+          <a :href="'/contacts?agent=' + (agent?.id || '')" class="px-5 py-4 text-center block hover:bg-warm-50 transition-colors rounded-lg cursor-pointer">
+            <div class="text-2xl font-bold text-brand-500" x-text="agent.stats?.interactionCount || 0"></div>
+            <div class="text-xs text-ink-300 mt-1">链上行为</div>
+          </a>
+          <a :href="'/handshakes?agent=' + (agent?.id || '')" class="px-5 py-4 text-center block hover:bg-warm-50 transition-colors rounded-lg cursor-pointer">
+            <div class="text-2xl font-bold text-amber-600" x-text="agent.stats?.handshakeCount || 0"></div>
+            <div class="text-xs text-ink-300 mt-1">握手</div>
+          </a>
+          <div class="px-5 py-4 text-center">
+            <template x-if="spendLoading">
+              <div class="skeleton mx-auto" style="width:60px;height:24px;"></div>
+            </template>
+            <template x-if="!spendLoading">
+              <div class="text-lg font-bold"
+                :class="spending && spending.total > 0 ? 'text-red-500' : 'text-ink-300'"
+                x-text="spending ? KANet.formatKas(spending.total, 4) + ' KAS' : '--'"></div>
+            </template>
+            <div class="text-xs text-ink-300 mt-1">今日花费</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================== -->
+      <!-- SOCIAL STYLE                   -->
+      <!-- ============================== -->
+      <div class="card" x-data="{
+        ssMode: 'balanced',
+        ssOverrides: {},
+        ssShowAdv: false,
+        ssEditTag: '',
+        ssEditNote: '',
+        ssSaving: false,
+
+        ssPresets: {
+          active:       { peerCooldownHours: 24,  crossAgentHours: 6,  maxNewHandshakes: 5, followUpHours: 24,   maxFollowUps: 3, unansweredMax: 5, unansweredCooldownDays: 7  },
+          balanced:     { peerCooldownHours: 48,  crossAgentHours: 12, maxNewHandshakes: 2, followUpHours: 48,   maxFollowUps: 2, unansweredMax: 3, unansweredCooldownDays: 30 },
+          conservative: { peerCooldownHours: 96,  crossAgentHours: 24, maxNewHandshakes: 0, followUpHours: null, maxFollowUps: 0, unansweredMax: 1, unansweredCooldownDays: 90 },
+        },
+        ssLabels: { active: '积极', balanced: '稳健', conservative: '保守' },
+        ssDescs:  { active: '主动出击，适合推广期', balanced: '日常运营，攻守兼备', conservative: '仅回应，低调运行' },
+        ssColors: { active: 'bg-green-500', balanced: 'bg-brand-500', conservative: 'bg-warm-400' },
+        ssBadges: { active: 'badge-success', balanced: 'badge-info', conservative: 'badge-neutral' },
+        ssParams: [
+          { key: 'peerCooldownHours', label: '同一人冷却', unit: '小时' },
+          { key: 'crossAgentHours', label: '跨Agent防重', unit: '小时' },
+          { key: 'maxNewHandshakes', label: '每日新握手', unit: '次/天' },
+          { key: 'followUpHours', label: '跟进间隔', unit: '小时' },
+          { key: 'maxFollowUps', label: '跟进上限', unit: '次' },
+          { key: 'unansweredMax', label: '无回复上限', unit: '条' },
+          { key: 'unansweredCooldownDays', label: '无回复冷却', unit: '天' },
+        ],
+
+        get ssEffective() {
+          const base = { ...this.ssPresets[this.ssMode] };
+          for (const [k, v] of Object.entries(this.ssOverrides)) { if (v !== null && v !== '' && base[k] !== undefined) base[k] = Number(v); }
+          return base;
+        },
+        get ssHasOverrides() { return Object.values(this.ssOverrides).some(v => v !== null && v !== '' && v !== undefined); },
+
+        async ssInit() {
+          if (!agent?.id) return;
+          try {
+            const res = await fetch('/api/relay/' + agent.id + '/mind-config');
+            const cfg = await res.json();
+            this.ssMode = cfg.socialStyle || 'balanced';
+            this.ssOverrides = cfg.socialOverrides || {};
+          } catch {}
+        },
+
+        async ssSave() {
+          if (!agent?.id) return;
+          this.ssSaving = true;
+          await fetch('/api/relay/' + agent.id + '/mind-config', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ socialStyle: this.ssMode, socialOverrides: this.ssHasOverrides ? this.ssOverrides : null }),
+          });
+          this.ssSaving = false;
+        },
+      }" x-init="$watch('agent', () => ssInit()); ssInit()">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <div class="w-1.5 h-5 rounded-full" :class="ssColors[ssMode]"></div>
+            <h3 class="text-sm font-semibold text-ink-700">社交风格</h3>
+            <span class="badge text-[10px]" :class="ssBadges[ssMode]" x-text="ssLabels[ssMode]"></span>
+          </div>
+          <button @click="ssShowAdv = !ssShowAdv" class="text-[11px] text-ink-400 hover:text-brand-600 transition-colors">
+            <span x-text="ssShowAdv ? '收起' : '高级设置 ›'"></span>
+          </button>
+        </div>
+        <!-- Three mode cards -->
+        <div class="grid grid-cols-3 gap-2 mb-3">
+          <template x-for="m in ['active', 'balanced', 'conservative']" :key="m">
+            <button @click="ssMode = m; ssSave()"
+              class="rounded-lg border px-3 py-2.5 text-left transition-all"
+              :class="ssMode === m ? 'border-brand-400 bg-brand-50/60' : 'border-warm-200 bg-white hover:border-warm-300'">
+              <div class="text-xs font-semibold mb-0.5" :class="ssMode === m ? 'text-ink-700' : 'text-ink-500'" x-text="ssLabels[m]"></div>
+              <div class="text-[10px]" :class="ssMode === m ? 'text-ink-500' : 'text-ink-300'" x-text="ssDescs[m]"></div>
+              <div class="flex gap-1.5 mt-1.5">
+                <span class="text-[9px] text-ink-400 bg-warm-100 px-1 py-0.5 rounded" x-text="'握手 ' + ssPresets[m].maxNewHandshakes + '/天'"></span>
+                <span class="text-[9px] text-ink-400 bg-warm-100 px-1 py-0.5 rounded" x-text="'冷却 ' + ssPresets[m].peerCooldownHours + 'h'"></span>
+              </div>
+            </button>
+          </template>
+        </div>
+        <!-- Effective params -->
+        <div class="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-ink-400">
+          <span>冷却: <strong class="text-ink-600" x-text="ssEffective.peerCooldownHours + 'h'"></strong></span>
+          <span>跨Agent: <strong class="text-ink-600" x-text="ssEffective.crossAgentHours + 'h'"></strong></span>
+          <span>握手: <strong class="text-ink-600" x-text="ssEffective.maxNewHandshakes + '/天'"></strong></span>
+          <span>跟进: <strong class="text-ink-600" x-text="ssEffective.followUpHours ? ssEffective.followUpHours + 'h' : '不跟进'"></strong></span>
+          <span>退避: <strong class="text-ink-600" x-text="ssEffective.unansweredMax + '条/' + ssEffective.unansweredCooldownDays + '天'"></strong></span>
+        </div>
+        <!-- Advanced overrides -->
+        <div x-show="ssShowAdv" x-transition class="mt-3 pt-3 border-t border-warm-200">
+          <div class="text-[10px] text-ink-400 mb-2">微调参数（留空使用预设值）</div>
+          <div class="grid grid-cols-2 gap-x-4 gap-y-2">
+            <template x-for="p in ssParams" :key="p.key">
+              <div class="flex items-center gap-2">
+                <label class="text-[11px] text-ink-500 w-24 flex-shrink-0" x-text="p.label"></label>
+                <input type="number" :placeholder="ssPresets[ssMode][p.key] ?? '-'"
+                  :value="ssOverrides[p.key] ?? ''"
+                  @input="if($event.target.value==='') delete ssOverrides[p.key]; else ssOverrides[p.key]=Number($event.target.value)"
+                  class="w-16 text-[11px] border border-warm-300 rounded px-2 py-1 bg-white text-ink-700 text-right focus:border-brand-400 focus:outline-none" />
+                <span class="text-[10px] text-ink-300" x-text="p.unit"></span>
+              </div>
+            </template>
+          </div>
+          <div class="flex justify-between items-center mt-3">
+            <button x-show="ssHasOverrides" @click="ssOverrides = {}; ssSave()" class="text-[10px] text-ink-400 hover:text-red-500">重置为预设</button>
+            <div></div>
+            <button @click="ssSave()" class="btn btn-primary btn-sm text-[11px]" x-text="ssSaving ? '保存中...' : '保存'"></button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================== -->
+      <!-- SOCIAL PRINCIPLES              -->
+      <!-- ============================== -->
+      <div class="card" x-data="{
+        principles: [],
+        newRule: '',
+        spLoading: false,
+        spSaving: false,
+
+        async spInit() {
+          if (!agent?.id) return;
+          this.spLoading = true;
+          try {
+            const res = await fetch('/api/relay/' + agent.id + '/mind-config');
+            const cfg = await res.json();
+            this.principles = cfg.principles || [];
+          } catch {}
+          this.spLoading = false;
+        },
+
+        async spSave() {
+          if (!agent?.id) return;
+          this.spSaving = true;
+          await fetch('/api/relay/' + agent.id + '/mind-config', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ principles: this.principles }),
+          });
+          this.spSaving = false;
+        },
+
+        addRule() {
+          if (!this.newRule.trim()) return;
+          this.principles.push(this.newRule.trim());
+          this.newRule = '';
+          this.spSave();
+        },
+
+        removeRule(i) {
+          this.principles.splice(i, 1);
+          this.spSave();
+        },
+
+        moveUp(i) {
+          if (i <= 0) return;
+          [this.principles[i-1], this.principles[i]] = [this.principles[i], this.principles[i-1]];
+          this.spSave();
+        },
+      }" x-init="$watch('agent', () => spInit()); spInit()">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-semibold text-ink-700">社交原则</h3>
+          <span class="text-[10px] text-ink-300" x-text="principles.length + ' 条'"></span>
+        </div>
+        <div x-show="spLoading" class="text-xs text-ink-300 py-2">加载中...</div>
+        <div class="space-y-1">
+          <template x-for="(p, i) in principles" :key="i">
+            <div class="flex items-start gap-2 group text-xs">
+              <span class="text-ink-300 w-4 flex-shrink-0 pt-0.5" x-text="(i+1) + '.'"></span>
+              <div class="flex-1 text-ink-600" x-text="p"></div>
+              <button @click="moveUp(i)" x-show="i > 0" class="text-ink-300 hover:text-brand-600 opacity-0 group-hover:opacity-100 text-[10px]">↑</button>
+              <button @click="removeRule(i)" class="text-ink-300 hover:text-red-500 opacity-0 group-hover:opacity-100 text-[10px]">✕</button>
+            </div>
+          </template>
+        </div>
+        <div class="flex items-center gap-2 mt-3 pt-3 border-t border-warm-200">
+          <input x-model="newRule" @keydown.enter.prevent="addRule()" placeholder="添加新原则..."
+            class="flex-1 text-xs border border-warm-300 rounded-lg px-3 py-1.5 bg-white" />
+          <button @click="addRule()" class="btn btn-primary btn-sm text-[10px]" :disabled="!newRule.trim()">添加</button>
+        </div>
+      </div>
+
+      <!-- ============================== -->
+      <!-- PENDING APPROVALS              -->
+      <!-- ============================== -->
+      <template x-if="pendingApprovals.length > 0">
+        <div class="space-y-2">
+          <div class="text-xs font-medium text-amber-700 uppercase tracking-wider px-1">待审批操作</div>
+          <template x-for="pa in pendingApprovals" :key="pa.id">
+            <div class="approval-card flex items-center justify-between gap-4">
+              <div class="min-w-0 flex-1">
+                <div class="text-sm font-medium text-ink-700" x-text="pa.display_summary || pa.type"></div>
+                <div class="text-xs text-ink-300 mt-0.5">
+                  <span x-text="pa.agent_name || '?'"></span>
+                  <span class="mx-1">&middot;</span>
+                  <span x-text="KANet.relativeTime(pa.created_at)"></span>
+                </div>
+                <template x-if="pa.params">
+                  <div class="text-xs text-amber-700 mt-1 font-mono truncate" x-text="JSON.stringify(pa.params)"></div>
+                </template>
+              </div>
+              <div class="flex gap-2 flex-shrink-0">
+                <button @click="approveExec(pa.id)" class="btn btn-sm" style="background:#16a34a;color:#fff;">批准</button>
+                <button @click="rejectExec(pa.id)" class="btn btn-sm btn-danger">拒绝</button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </template>
+
+      <!-- ============================== -->
+      <!-- TAB BAR                        -->
+      <!-- ============================== -->
+      <div class="tab-bar">
+        <template x-for="t in [
+          {id:'wallet', l:'钱包'},
+          {id:'card',   l:'Card'},
+          {id:'goals',  l:'目标'},
+          {id:'skills', l:'技能'},
+          {id:'history',l:'历史'},
+          {id:'status', l:'状态'}
+        ]" :key="t.id">
+          <button @click="activeTab = activeTab === t.id ? null : t.id"
+            class="tab-item"
+            :class="{
+              'active': activeTab === t.id,
+              '!text-red-500': t.id === 'status' && health?.status === 'red' && activeTab !== t.id,
+              '!text-amber-500': t.id === 'status' && health?.status === 'yellow' && activeTab !== t.id
+            }">
+            <span x-text="t.l"></span>
+            <template x-if="t.id === 'status' && health && health.status !== 'green'">
+              <span class="inline-block w-1.5 h-1.5 rounded-full ml-1 -mt-0.5"
+                :class="health.status === 'red' ? 'bg-red-500' : 'bg-amber-400'"></span>
+            </template>
+          </button>
+        </template>
+      </div>
+
+      <!-- ========================================= -->
+      <!-- TAB CONTENT: 钱包 (wallet)                -->
+      <!-- ========================================= -->
+      <div x-show="activeTab === 'wallet'" class="card card-flush overflow-hidden">
+        <!-- Header -->
+        <div class="px-5 py-3.5 border-b border-warm-200 flex items-center justify-between">
+          <span class="text-xs font-medium text-ink-300 uppercase tracking-wider">钱包管理</span>
+          <div class="flex gap-2">
+            <button @click="showCreateWallet = !showCreateWallet; showImportWallet = false"
+              class="btn btn-sm btn-secondary">创建钱包</button>
+            <button @click="showImportWallet = !showImportWallet; showCreateWallet = false"
+              class="btn btn-sm btn-ghost">导入钱包</button>
+          </div>
+        </div>
+
+        <!-- Create wallet form -->
+        <div x-show="showCreateWallet" x-transition class="px-5 py-4 bg-brand-50 border-b border-brand-100">
+          <div class="flex items-center gap-3">
+            <select x-model="newWalletChain"
+              class="px-3 py-1.5 border border-warm-300 rounded-lg text-sm bg-white focus:border-brand-300 focus:outline-none">
+              <option value="bnb">BNB (BSC)</option>
+              <option value="eth">ETH</option>
+              <option value="polygon">Polygon</option>
+              <option value="sol">SOL</option>
+              <option value="tron">TRON</option>
+            </select>
+            <input x-model="newWalletLabel" type="text" placeholder="备注（可选）"
+              class="flex-1 px-3 py-1.5 border border-warm-300 rounded-lg text-sm bg-white focus:border-brand-300 focus:outline-none" />
+            <button @click="createWallet()" :disabled="walletCreating" class="btn btn-sm btn-primary"
+              x-text="walletCreating ? '创建中...' : '创建'"></button>
+          </div>
+        </div>
+
+        <!-- Import wallet form -->
+        <div x-show="showImportWallet" x-transition class="px-5 py-4 bg-warm-50 border-b border-warm-200">
+          <div class="flex items-center gap-3">
+            <select x-model="importChain"
+              class="px-3 py-1.5 border border-warm-300 rounded-lg text-sm bg-white focus:border-brand-300 focus:outline-none">
+              <option value="bnb">BNB</option>
+              <option value="eth">ETH</option>
+              <option value="polygon">Polygon</option>
+              <option value="sol">SOL</option>
+              <option value="tron">TRON</option>
+            </select>
+            <input x-model="importKey" type="password" placeholder="私钥"
+              class="flex-1 px-3 py-1.5 border border-warm-300 rounded-lg text-sm font-mono bg-white focus:border-brand-300 focus:outline-none" />
+            <input x-model="importLabel" type="text" placeholder="备注"
+              class="w-28 px-3 py-1.5 border border-warm-300 rounded-lg text-sm bg-white focus:border-brand-300 focus:outline-none" />
+            <button @click="importWallet()" :disabled="walletImporting"
+              class="btn btn-sm" style="background:#2d2e3a;color:#fff;"
+              x-text="walletImporting ? '导入中...' : '导入'"></button>
+          </div>
+        </div>
+
+        <!-- Wallet list -->
+        <div class="divide-y divide-warm-200">
+          <!-- Loading -->
+          <div x-show="walletsLoading" class="px-5 py-8 text-center">
+            <div class="skeleton mx-auto" style="width:120px;height:14px;"></div>
+          </div>
+
+          <!-- KAS wallet (always first) -->
+          <template x-if="!walletsLoading && wallets && wallets.kaspa">
+            <div class="px-5 py-4 flex items-center justify-between">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="badge badge-success">KAS</span>
+                  <span class="addr addr-short" x-text="KANet.shortAddr(wallets.kaspa.address)" :title="wallets.kaspa.address"></span>
+                </div>
+                <div class="text-xs text-ink-300 mt-1" x-text="KANet.formatKas(balance, 4) + ' KAS'"></div>
+              </div>
+              <button @click="KANet.copy(wallets.kaspa.address)" class="btn btn-sm btn-ghost">复制</button>
+            </div>
+          </template>
+
+          <!-- Cross-chain wallets -->
+          <template x-if="!walletsLoading && wallets && wallets.chains">
+            <template x-for="w in wallets.chains" :key="w.id">
+              <div class="px-5 py-4">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <span class="px-2 py-0.5 text-xs font-semibold rounded-md border"
+                        :class="chainBadgeClass(w.chain)"
+                        x-text="w.chain.toUpperCase()"></span>
+                      <span class="addr addr-short" x-text="KANet.shortAddr(w.address)" :title="w.address"></span>
+                      <template x-if="w.isDefault">
+                        <span class="badge badge-success" style="padding:1px 5px;font-size:10px;">默认</span>
+                      </template>
+                      <template x-if="w.label">
+                        <span class="text-xs text-ink-300" x-text="w.label"></span>
+                      </template>
+                    </div>
+                    <div class="text-xs text-ink-300 mt-1 flex flex-wrap gap-x-1">
+                      <template x-if="w.usdtBalance != null && w.usdtBalance > 0">
+                        <span x-text="w.usdtBalance.toFixed(2) + ' USDT'"></span>
+                      </template>
+                      <template x-if="w.usdcBalance != null && w.usdcBalance > 0">
+                        <span x-text="w.usdcBalance.toFixed(2) + ' USDC'"></span>
+                      </template>
+                      <template x-if="(w.usdtBalance == null || w.usdtBalance === 0) && (w.usdcBalance == null || w.usdcBalance === 0)">
+                        <span>0 USDT/USDC</span>
+                      </template>
+                      <span>&middot;</span>
+                      <span x-text="w.nativeBalance != null ? w.nativeBalance.toFixed(4) + ' ' + (w.chain === 'polygon' ? 'MATIC' : w.chain.toUpperCase()) : '--'"></span>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-1">
+                    <button @click="KANet.copy(w.address)" class="btn btn-sm btn-ghost">复制</button>
+                    <template x-if="w.chain === 'polygon' || w.chain === 'bnb' || w.chain === 'eth'">
+                      <button @click="swapWallet = w; swapForm = {from:'usdc',to:'usdc.e',amount:''}; swapMsg=''" class="btn btn-sm btn-secondary">Swap</button>
+                    </template>
+                    <button @click="showPrivkey(w.id)" class="btn btn-sm btn-ghost" x-text="showPrivKey === w.id ? '隐藏' : '私钥'"></button>
+                    <button @click="deleteWallet(w.id)" class="btn btn-sm btn-danger">删除</button>
+                  </div>
+                </div>
+                <!-- Private key reveal -->
+                <div x-show="showPrivKey === w.id" x-transition
+                  class="mt-2 p-2.5 bg-red-50 border border-red-100 rounded-lg text-xs font-mono text-red-700 break-all"
+                  x-text="privKeyValue"></div>
+                <!-- Swap panel -->
+                <template x-if="swapWallet?.id === w.id">
+                  <div class="mt-2 p-3 bg-brand-50 border border-brand-200 rounded-lg">
+                    <div class="text-xs font-medium text-ink-700 mb-2">代币兑换 (Swap)</div>
+                    <div class="flex items-center gap-2">
+                      <select x-model="swapForm.from" class="text-xs border border-warm-300 rounded px-2 py-1 bg-white">
+                        <option value="usdc">USDC</option>
+                        <option value="usdc.e">USDC.e</option>
+                        <option value="usdt">USDT</option>
+                      </select>
+                      <span class="text-ink-300">→</span>
+                      <select x-model="swapForm.to" class="text-xs border border-warm-300 rounded px-2 py-1 bg-white">
+                        <option value="usdc.e">USDC.e</option>
+                        <option value="usdc">USDC</option>
+                        <option value="usdt">USDT</option>
+                      </select>
+                      <input type="number" step="0.01" x-model="swapForm.amount" placeholder="金额"
+                        class="w-24 text-xs border border-warm-300 rounded px-2 py-1" />
+                      <button @click="doSwap(w)" :disabled="swapping || !swapForm.amount" class="btn btn-sm btn-primary text-[10px]">
+                        <span x-text="swapping ? '兑换中...' : '兑换'"></span>
+                      </button>
+                      <button @click="swapWallet = null" class="text-ink-300 hover:text-ink-600 text-xs">取消</button>
+                    </div>
+                    <div x-show="swapMsg" class="mt-1.5 text-[10px]" :class="swapMsg.includes('成功') ? 'text-green-600' : 'text-red-500'" x-text="swapMsg"></div>
+                  </div>
+                </template>
+              </div>
+            </template>
+          </template>
+
+          <!-- Empty state -->
+          <div x-show="!walletsLoading && wallets && (!wallets.chains || wallets.chains.length === 0)"
+            class="px-5 py-6 text-center text-xs text-ink-300">
+            暂无跨链钱包
+          </div>
+        </div>
+      </div>
+
+      <!-- ========================================= -->
+      <!-- TAB CONTENT: Card                         -->
+      <!-- ========================================= -->
+      <div x-show="activeTab === 'card'" class="card card-flush overflow-hidden">
+        <!-- Header -->
+        <div class="px-5 py-3.5 border-b border-warm-200 flex items-center justify-between">
+          <span class="text-xs font-medium text-ink-300 uppercase tracking-wider">Agent Card</span>
+          <button @click="startCardEdit()" class="btn btn-sm btn-secondary"
+            x-text="agent.card ? '编辑 Card' : '创建 Agent Card'"></button>
+        </div>
+
+        <!-- Publish success banner -->
+        <div x-show="cardPublished" x-transition
+          class="px-5 py-2.5 bg-green-50 border-b border-green-100 flex items-center gap-2">
+          <span class="status-dot green"></span>
+          <span class="text-xs text-green-700">Card 已上链!</span>
+          <span class="text-xs font-mono text-green-600" x-text="typeof cardPublished === 'string' ? 'TX: ' + cardPublished.slice(0, 16) + '...' : ''"></span>
+        </div>
+
+        <!-- Edit form -->
+        <template x-if="cardEditing">
+          <div class="px-5 py-4 space-y-3 bg-brand-50 border-b border-brand-100">
+            <div class="flex items-center justify-between">
+              <span class="text-sm font-medium text-brand-700">编辑 Agent Card</span>
+              <button @click="cardEditing = false" class="btn btn-sm btn-ghost">取消</button>
+            </div>
+
+            <!-- Mode selector -->
+            <div class="flex gap-2">
+              <template x-for="m in ['public','mixed','private']" :key="m">
+                <button type="button" @click="cardForm.mode = m"
+                  class="btn btn-sm transition-colors"
+                  :class="cardForm.mode === m ? 'btn-primary' : 'btn-ghost border border-warm-300'"
+                  x-text="m"></button>
+              </template>
+            </div>
+
+            <!-- Name -->
+            <div>
+              <label class="block text-xs text-ink-400 mb-1">名称</label>
+              <input type="text" x-model="cardForm.name"
+                class="w-full px-3 py-1.5 border border-warm-300 rounded-lg text-sm bg-white focus:border-brand-300 focus:outline-none" />
+            </div>
+
+            <!-- Entity type -->
+            <div>
+              <label class="block text-xs text-ink-400 mb-1">类型</label>
+              <div class="flex gap-3">
+                <template x-for="t in ['agent','human','service','org']" :key="t">
+                  <label class="flex items-center gap-1.5 text-sm text-ink-500 cursor-pointer">
+                    <input type="radio" :value="t" x-model="cardForm.entityType" class="text-brand-500" />
+                    <span x-text="t"></span>
+                  </label>
+                </template>
+              </div>
+            </div>
+
+            <!-- Summary -->
+            <div>
+              <label class="block text-xs text-ink-400 mb-1">简介 (280字以内)</label>
+              <input type="text" x-model="cardForm.summary" maxlength="280"
+                class="w-full px-3 py-1.5 border border-warm-300 rounded-lg text-sm bg-white focus:border-brand-300 focus:outline-none" />
+            </div>
+
+            <!-- Error -->
+            <div x-show="cardError" class="text-xs text-red-600" x-text="cardError"></div>
+
+            <!-- Publish button -->
+            <button @click="publishCard()" :disabled="cardPublishing"
+              class="btn btn-primary w-full py-2.5"
+              x-text="cardPublishing ? '发布中...' : '发布到 Kaspa 链上'"></button>
+          </div>
+        </template>
+
+        <!-- Card display (read-only) -->
+        <template x-if="!cardEditing">
+          <div class="px-5 py-4">
+            <template x-if="agent.card">
+              <div class="space-y-3 text-sm">
+                <div class="flex justify-between">
+                  <span class="text-ink-300">模式</span>
+                  <span class="badge" :class="agent.card.mode === 'public' ? 'badge-success' : agent.card.mode === 'mixed' ? 'badge-warning' : 'badge-neutral'"
+                    x-text="agent.card.mode"></span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-ink-300">类型</span>
+                  <span class="text-ink-600 font-medium" x-text="agent.card.entityType"></span>
+                </div>
+                <!-- On-chain declared skills -->
+                <template x-if="agent.card.skills && agent.card.skills.length > 0">
+                  <div>
+                    <span class="text-ink-300 text-xs block mb-1.5">链上声明技能</span>
+                    <div class="flex flex-wrap gap-1.5">
+                      <template x-for="s in agent.card.skills" :key="s">
+                        <span class="badge badge-info" x-text="s"></span>
+                      </template>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </template>
+            <template x-if="!agent.card">
+              <div class="text-center py-6">
+                <p class="text-sm text-ink-300">尚未创建 Agent Card</p>
+                <button @click="startCardEdit()" class="btn btn-sm btn-secondary mt-3">创建 Card</button>
+              </div>
+            </template>
+          </div>
+        </template>
+      </div>
+
+      <!-- ========================================= -->
+      <!-- TAB CONTENT: 目标 (goals)                 -->
+      <!-- ========================================= -->
+      <div x-show="activeTab === 'goals'" class="card card-flush overflow-hidden">
+        <!-- Header -->
+        <div class="px-5 py-3.5 border-b border-warm-200 flex items-center justify-between">
+          <span class="text-xs font-medium text-ink-300 uppercase tracking-wider">目标</span>
+          <span class="text-xs text-ink-300" x-text="goals.filter(g => g.status === 'active').length + ' 个活跃目标'"></span>
+        </div>
+
+        <!-- Add goal input -->
+        <div class="px-5 py-3 border-b border-warm-200 flex items-center gap-2">
+          <input x-model="newGoalText" @keydown.enter="addGoal()" type="text"
+            placeholder="添加新目标..."
+            class="flex-1 px-3 py-1.5 border border-warm-300 rounded-lg text-sm bg-white focus:border-brand-300 focus:outline-none" />
+          <button @click="addGoal()" class="btn btn-sm btn-primary">添加</button>
+        </div>
+
+        <!-- Goal list -->
+        <div class="divide-y divide-warm-200">
+          <!-- Loading -->
+          <div x-show="goalsLoading" class="px-5 py-6 text-center">
+            <div class="skeleton mx-auto" style="width:100px;height:14px;"></div>
+          </div>
+
+          <template x-for="g in goals.filter(g => g.status === 'active').sort((a,b) => b.priority - a.priority)" :key="g.id">
+            <div class="px-5 py-3 flex items-center gap-3 group">
+              <!-- Priority tier badge (click to cycle: 低→中→高→低) -->
+              <button @click="cyclePriority(g)"
+                class="flex-shrink-0 w-8 text-center px-1.5 py-0.5 rounded text-[10px] font-semibold border cursor-pointer transition-colors"
+                :class="goalTierColor(g.priority)"
+                :title="'优先级：' + goalTier(g.priority) + '（点击切换）'"
+                x-text="goalTier(g.priority)"></button>
+
+              <!-- Goal text -->
+              <div class="flex-1 min-w-0">
+                <template x-if="editingGoalId !== g.id">
+                  <span @dblclick="startEditGoal(g)"
+                    class="text-sm text-ink-600 cursor-pointer hover:text-ink-700 transition-colors" x-text="g.text"></span>
+                </template>
+                <template x-if="editingGoalId === g.id">
+                  <input x-model="editingGoalText" @keydown.enter="saveGoal(g)" @keydown.escape="cancelEditGoal()"
+                    class="w-full px-2 py-1 border border-brand-300 rounded-lg text-sm focus:outline-none" />
+                </template>
+                <div class="text-xs text-ink-300 mt-0.5">
+                  <span class="badge badge-neutral" style="padding:0 4px;font-size:10px;"
+                    x-text="g.source === 'owner' ? '手动' : '自动'"></span>
+                  <span class="ml-1" x-text="KANet.relativeTime(g.createdAt)"></span>
+                </div>
+              </div>
+
+              <!-- Actions -->
+              <template x-if="editingGoalId === g.id">
+                <button @click="saveGoal(g)" class="btn btn-sm btn-primary">保存</button>
+              </template>
+              <button @click="retireGoal(g)"
+                class="text-xs text-ink-200 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all flex-shrink-0">退役</button>
+            </div>
+          </template>
+
+          <!-- Empty -->
+          <div x-show="!goalsLoading && goals.filter(g => g.status === 'active').length === 0"
+            class="px-5 py-8 text-center text-xs text-ink-300">
+            暂无目标。给 Agent 设定一个方向吧。
+          </div>
+        </div>
+      </div>
+
+      <!-- ========================================= -->
+      <!-- TAB CONTENT: 技能 (skills)                -->
+      <!-- ========================================= -->
+      <div x-show="activeTab === 'skills'" class="card card-flush overflow-hidden">
+        <!-- Header -->
+        <div class="px-5 py-3.5 border-b border-warm-200 flex items-center justify-between">
+          <span class="text-xs font-medium text-ink-300 uppercase tracking-wider">Mind 技能</span>
+          <a href="/skills" class="btn btn-sm btn-secondary">管理技能</a>
+        </div>
+
+        <div class="px-5 py-4">
+          <!-- Skill tags -->
+          <template x-if="mindSkills.length > 0">
+            <div class="flex flex-wrap gap-2 mb-4">
+              <template x-for="s in mindSkills" :key="s.name">
+                <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-green-50 text-green-700 border border-green-100">
+                  <span class="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0"></span>
+                  <span x-text="s.display_name || s.name"></span>
+                </div>
+              </template>
+            </div>
+          </template>
+          <template x-if="mindSkills.length === 0">
+            <div class="text-center py-4">
+              <p class="text-xs text-ink-300 mb-2">无启用的 Mind 技能</p>
+              <a href="/skills" class="btn btn-sm btn-secondary">前往管理</a>
+            </div>
+          </template>
+
+          <!-- Recent skill activity -->
+          <template x-if="recentActivity.length > 0">
+            <div class="mt-4 pt-4 border-t border-warm-200">
+              <div class="text-xs text-ink-300 mb-2 font-medium">最近活动</div>
+              <div class="space-y-2">
+                <template x-for="evt in recentActivity" :key="evt.created_at">
+                  <div class="flex items-start gap-3 text-xs">
+                    <span class="text-ink-300 flex-shrink-0 w-20" x-text="KANet.relativeTime(evt.created_at)"></span>
+                    <span class="text-ink-500 leading-relaxed" x-text="evt.summary"></span>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- ========================================= -->
+      <!-- TAB CONTENT: 历史 (history) — 对话故事线      -->
+      <!-- ========================================= -->
+      <div x-show="activeTab === 'history'" class="space-y-3">
+        <!-- Loading -->
+        <div x-show="episodesLoading" class="card text-center py-8">
+          <div class="skeleton mx-auto mb-2" style="width:160px;height:14px;"></div>
+          <div class="skeleton mx-auto" style="width:100px;height:10px;"></div>
+        </div>
+
+        <!-- Episode cards -->
+        <template x-for="ep in episodes" :key="ep.episode_id">
+          <div class="card card-flush overflow-hidden"
+            x-data="{
+              open: ep.status === 'in_progress' || ep.status === 'disputed',
+              innerTab: 'timeline',
+              detail: null, detailLoading: false,
+              async loadDetail() {
+                if (this.detail) return;
+                this.detailLoading = true;
+                try {
+                  const params = new URLSearchParams({ relay_node_id: $data.agent.id });
+                  if (ep.episode_type === 'trade') params.set('order_id', ep.episode_id);
+                  else params.set('peer_address', ep.counterparty_addr);
+                  const r = await fetch('/api/history/episode-detail?' + params);
+                  this.detail = await r.json();
+                } catch { this.detail = { profile: null, messages: [], evidence: [] }; }
+                this.detailLoading = false;
+              }
+            }">
+            <!-- Episode header (always visible) -->
+            <button @click="open = !open; if(open) loadDetail()" class="w-full px-5 py-4 flex items-center justify-between hover:bg-warm-50 transition-colors text-left">
+              <div class="flex items-center gap-3 min-w-0">
+                <div class="w-9 h-9 rounded-lg flex items-center justify-center text-sm font-bold flex-shrink-0"
+                  :class="ep.episode_type === 'trade' ? 'bg-brand-50 text-brand-600' : 'bg-warm-200 text-ink-500'"
+                  x-text="(ep.counterparty_name || '?').charAt(0).toUpperCase()"></div>
+                <div class="min-w-0">
+                  <div class="text-sm font-medium text-ink-700 truncate" x-text="episodeTitle(ep)"></div>
+                  <div class="flex items-center gap-2 mt-0.5">
+                    <span class="badge" :class="episodeStatusBadge(ep)" x-text="episodeStatusLabel(ep)"></span>
+                    <span class="text-[11px] text-ink-300" x-text="KANet.relativeTime(ep.started_at)"></span>
+                    <template x-if="ep.ended_at && ep.ended_at !== ep.started_at">
+                      <span class="text-[11px] text-ink-300" x-text="'→ ' + KANet.relativeTime(ep.ended_at)"></span>
+                    </template>
+                  </div>
+                </div>
+              </div>
+              <div class="flex items-center gap-3 flex-shrink-0">
+                <template x-if="episodeResult(ep)">
+                  <span class="text-sm font-semibold" :class="episodeResultColor(ep)" x-text="episodeResult(ep)"></span>
+                </template>
+                <svg class="w-4 h-4 text-ink-300 transition-transform" :class="open ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+              </div>
+            </button>
+
+            <!-- Expanded content with 4 inner tabs -->
+            <div x-show="open" x-transition>
+              <!-- Inner tab bar -->
+              <div class="flex border-t border-b border-warm-200 bg-warm-50">
+                <template x-for="it in [{id:'timeline',l:'故事线'},{id:'contact',l:'通讯录'},{id:'chat',l:'会话'},{id:'evidence',l:'链上凭证'}]" :key="it.id">
+                  <button @click="innerTab = it.id; if(it.id !== 'timeline') loadDetail()"
+                    class="flex-1 py-2 text-[11px] font-medium transition-colors border-b-2"
+                    :class="innerTab === it.id ? 'text-brand-600 border-brand-500 bg-white' : 'text-ink-400 border-transparent hover:text-ink-600'"
+                    x-text="it.l"></button>
+                </template>
+              </div>
+
+              <!-- ── Inner Tab 1: 故事线 (timeline + reasons) ── -->
+              <div x-show="innerTab === 'timeline'" class="px-5 py-4">
+                <div class="ml-4 border-l-2 border-warm-200 pl-5 space-y-0">
+                  <template x-for="(step, idx) in ep.steps" :key="idx">
+                    <div class="relative py-2.5" :class="!step.done ? 'opacity-60' : ''">
+                      <div class="absolute -left-[27px] top-3.5 w-3 h-3 rounded-full"
+                        :class="stepDotColor(step.type, step.done)"></div>
+                      <div class="flex items-start justify-between gap-3">
+                        <div class="min-w-0">
+                          <div class="flex items-center gap-2">
+                            <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                              :class="stepBadgeColor(step.type)" x-text="stepTypeLabel(step.type)"></span>
+                            <span class="text-sm text-ink-600" :class="!step.done ? 'text-ink-400' : ''" x-text="step.label"></span>
+                          </div>
+                          <template x-if="step.detail">
+                            <div class="text-xs text-ink-300 mt-0.5" x-text="step.detail"></div>
+                          </template>
+                          <!-- Agent decision reason -->
+                          <template x-if="step.reason">
+                            <div class="mt-1.5 pl-2 border-l-2 border-ink-100 bg-warm-50 rounded-r py-1.5 px-2.5">
+                              <div class="text-[10px] text-ink-300 mb-0.5" x-text="(step.reasonSource === 'agent' ? 'Agent 决策' : step.reasonSource === 'owner' ? '人工操作' : '系统自动')"></div>
+                              <div class="text-[11px] text-ink-500 leading-relaxed" x-text="step.reason"></div>
+                            </div>
+                          </template>
+                        </div>
+                        <span class="text-[11px] text-ink-300 flex-shrink-0 pt-0.5"
+                          x-text="step.ts ? KANet.relativeTime(step.ts) : ''"></span>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+
+              <!-- ── Inner Tab 2: 通讯录 (contact profile) ── -->
+              <div x-show="innerTab === 'contact'" class="px-5 py-4">
+                <template x-if="detailLoading">
+                  <div class="space-y-2">
+                    <div class="skeleton" style="width:120px;height:14px;"></div>
+                    <div class="skeleton" style="width:200px;height:12px;"></div>
+                  </div>
+                </template>
+                <template x-if="!detailLoading && detail?.profile">
+                  <div class="space-y-4">
+                    <!-- Name + address -->
+                    <div>
+                      <div class="text-base font-semibold text-ink-700" x-text="detail.profile.displayName || KANet.shortAddr(detail.profile.address)"></div>
+                      <div class="addr text-ink-300 mt-0.5" x-text="detail.profile.address"></div>
+                    </div>
+                    <!-- Trust level bar -->
+                    <div>
+                      <div class="flex items-center justify-between mb-1">
+                        <span class="text-xs text-ink-400">信任等级</span>
+                        <span class="text-xs font-medium text-ink-600" x-text="detail.profile.trustLevel"></span>
+                      </div>
+                      <div class="h-2 bg-warm-200 rounded-full overflow-hidden">
+                        <div class="h-full bg-brand-500 rounded-full transition-all"
+                          :style="'width:' + ({owner:100,recommended:80,normal:50,stranger:20,blocked:0}[detail.profile.trustLevel] || 20) + '%'"></div>
+                      </div>
+                    </div>
+                    <!-- Stats grid -->
+                    <div class="grid grid-cols-3 gap-3">
+                      <div class="bg-warm-50 rounded-lg p-3 text-center">
+                        <div class="text-lg font-bold text-ink-700" x-text="detail.profile.tradeCount"></div>
+                        <div class="text-[10px] text-ink-300">历史交易</div>
+                      </div>
+                      <div class="bg-warm-50 rounded-lg p-3 text-center">
+                        <div class="text-lg font-bold text-ink-700" x-text="KANet.formatKas(detail.profile.totalVolume) + ' KAS'"></div>
+                        <div class="text-[10px] text-ink-300">累计交易量</div>
+                      </div>
+                      <div class="rounded-lg p-3 text-center"
+                        :class="detail.profile.disputeRate > 20 ? 'bg-red-50' : 'bg-warm-50'">
+                        <div class="text-lg font-bold" :class="detail.profile.disputeRate > 20 ? 'text-red-600' : 'text-ink-700'"
+                          x-text="detail.profile.disputeRate + '%'"></div>
+                        <div class="text-[10px]" :class="detail.profile.disputeRate > 20 ? 'text-red-400' : 'text-ink-300'">争议率</div>
+                      </div>
+                    </div>
+                    <template x-if="detail.profile.firstContact">
+                      <div class="text-xs text-ink-300">首次联系: <span x-text="KANet.relativeTime(detail.profile.firstContact)"></span></div>
+                    </template>
+                  </div>
+                </template>
+                <template x-if="!detailLoading && !detail?.profile">
+                  <div class="text-xs text-ink-300 text-center py-4">无对手方信息</div>
+                </template>
+              </div>
+
+              <!-- ── Inner Tab 3: 会话 (chat bubbles) ── -->
+              <div x-show="innerTab === 'chat'" class="px-5 py-4">
+                <template x-if="detailLoading">
+                  <div class="space-y-2">
+                    <div class="skeleton" style="width:180px;height:32px;"></div>
+                    <div class="skeleton ml-auto" style="width:140px;height:32px;"></div>
+                  </div>
+                </template>
+                <template x-if="!detailLoading && detail?.messages?.length > 0">
+                  <div class="space-y-2 max-h-60 overflow-y-auto">
+                    <template x-for="(msg, mi) in detail.messages" :key="mi">
+                      <div class="flex" :class="msg.sender === 'self' ? 'justify-end' : 'justify-start'">
+                        <div class="max-w-[75%] px-3 py-2 text-[12px] leading-relaxed"
+                          :class="msg.sender === 'self'
+                            ? 'bg-brand-50 text-ink-600 border border-brand-100 rounded-xl rounded-tr-sm'
+                            : 'bg-white text-ink-600 border border-warm-300 rounded-xl rounded-tl-sm'">
+                          <div x-text="msg.text"></div>
+                          <div class="text-[10px] mt-1" :class="msg.sender === 'self' ? 'text-brand-400' : 'text-ink-300'"
+                            x-text="KANet.relativeTime(msg.ts)"></div>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+                <template x-if="!detailLoading && (!detail?.messages || detail.messages.length === 0)">
+                  <div class="text-xs text-ink-300 text-center py-4">暂无对话记录</div>
+                </template>
+              </div>
+
+              <!-- ── Inner Tab 4: 链上凭证 (evidence) ── -->
+              <div x-show="innerTab === 'evidence'" class="px-5 py-4">
+                <template x-if="detailLoading">
+                  <div class="space-y-2">
+                    <div class="skeleton" style="width:100%;height:28px;"></div>
+                    <div class="skeleton" style="width:100%;height:28px;"></div>
+                  </div>
+                </template>
+                <template x-if="!detailLoading && detail?.evidence?.length > 0">
+                  <div class="space-y-1.5">
+                    <template x-for="(ev, ei) in detail.evidence" :key="ei">
+                      <div>
+                        <!-- Conclusion row (special) -->
+                        <template x-if="ev.type === 'conclusion'">
+                          <div class="rounded-lg px-3 py-2.5 text-xs font-medium"
+                            :class="{
+                              'bg-green-50 text-green-700 border border-green-200': ev.status === 'success',
+                              'bg-amber-50 text-amber-700 border border-amber-200': ev.status === 'warning',
+                              'bg-red-50 text-red-700 border border-red-200': ev.status === 'error',
+                              'bg-warm-50 text-ink-500 border border-warm-300': ev.status === 'neutral'
+                            }"
+                            x-text="ev.description"></div>
+                        </template>
+                        <!-- Normal evidence row -->
+                        <template x-if="ev.type !== 'conclusion'">
+                          <div class="flex items-center gap-3 py-1.5">
+                            <!-- Status dot -->
+                            <span class="flex-shrink-0 w-4 text-center text-xs font-bold"
+                              :class="ev.status === 'confirmed' ? 'text-green-500' : ev.status === 'missing' || ev.status === 'failed' ? 'text-red-500' : 'text-ink-300'"
+                              x-text="ev.status === 'confirmed' ? '✓' : ev.status === 'missing' || ev.status === 'failed' ? '✗' : '—'"></span>
+                            <!-- Description -->
+                            <span class="flex-1 text-xs text-ink-600" x-text="ev.description"></span>
+                            <!-- TX hash -->
+                            <template x-if="ev.txhash">
+                              <span class="addr text-[11px] text-ink-300 flex-shrink-0 cursor-pointer hover:text-brand-500"
+                                @click.stop="KANet.copy(ev.txhash)"
+                                :title="ev.txhash"
+                                x-text="ev.txhash.slice(0,6) + '...' + ev.txhash.slice(-4)"></span>
+                            </template>
+                            <template x-if="!ev.txhash">
+                              <span class="text-[11px] text-ink-200 flex-shrink-0">无 TX</span>
+                            </template>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+                <template x-if="!detailLoading && (!detail?.evidence || detail.evidence.length === 0)">
+                  <div class="text-xs text-ink-300 text-center py-4">暂无链上凭证</div>
+                </template>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- Empty -->
+        <div x-show="!episodesLoading && episodes.length === 0"
+          class="card text-center py-8 text-sm text-ink-300">
+          暂无交互记录
+        </div>
+      </div>
+
+      <!-- ========================================= -->
+      <!-- TAB CONTENT: 状态 (status)                -->
+      <!-- ========================================= -->
+      <div x-show="activeTab === 'status'" class="space-y-4">
+        <!-- Health data loaded -->
+        <template x-if="health">
+          <div class="space-y-4">
+            <!-- Alert banner (non-green only) -->
+            <template x-if="health.status !== 'green'">
+              <div class="card flex items-center justify-between"
+                :class="health.status === 'red' ? 'border-red-200 bg-red-50' : 'border-amber-200 bg-amber-50'"
+                :style="'border-left-width:3px'">
+                <div class="flex items-center gap-3">
+                  <span class="status-dot" :class="KANet.healthDot(health.status)"></span>
+                  <span class="text-sm font-medium"
+                    :class="health.status === 'red' ? 'text-red-800' : 'text-amber-800'"
+                    x-text="healthReasonText(health.reason)"></span>
+                </div>
+                <span class="badge"
+                  :class="health.status === 'red' ? 'badge-error' : 'badge-warning'"
+                  x-text="health.status.toUpperCase()"></span>
+              </div>
+            </template>
+
+            <!-- 7 Health Indicators -->
+            <div class="card card-flush overflow-hidden">
+              <div class="px-5 py-3 border-b border-warm-200 flex items-center justify-between">
+                <span class="text-xs font-medium text-ink-300 uppercase tracking-wider">健康指标</span>
+                <div class="flex items-center gap-3">
+                  <span class="flex items-center gap-1"><span class="status-dot green" style="width:6px;height:6px;"></span><span class="text-[10px] text-ink-300">正常</span></span>
+                  <span class="flex items-center gap-1"><span class="status-dot yellow" style="width:6px;height:6px;"></span><span class="text-[10px] text-ink-300">注意</span></span>
+                  <span class="flex items-center gap-1"><span class="status-dot red" style="width:6px;height:6px;"></span><span class="text-[10px] text-ink-300">异常</span></span>
+                </div>
+              </div>
+              <div class="divide-y divide-warm-200">
+                <template x-for="ind in sortedIndicators" :key="ind.key">
+                  <a :href="ind.status !== 'green' ? ind.link : null"
+                    class="px-5 py-3 flex items-center justify-between transition-colors block"
+                    :class="ind.status !== 'green' ? 'hover:bg-warm-50 cursor-pointer' : ''">
+                    <div class="flex items-center gap-3">
+                      <span class="status-dot" :class="KANet.healthDot(ind.status)"></span>
+                      <span class="text-sm text-ink-600" x-text="ind.label"></span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <span class="text-xs font-mono"
+                        :class="ind.status === 'green' ? 'text-ink-300' : ind.status === 'yellow' ? 'text-amber-600' : 'text-red-600 font-semibold'"
+                        x-text="ind.detail"></span>
+                      <template x-if="ind.status !== 'green'">
+                        <svg class="w-3.5 h-3.5 text-ink-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                        </svg>
+                      </template>
+                    </div>
+                  </a>
+                </template>
+              </div>
+            </div>
+
+            <!-- Activity Stats (2h) -->
+            <div class="card card-flush overflow-hidden">
+              <div class="px-5 py-3 border-b border-warm-200">
+                <span class="text-xs font-medium text-ink-300 uppercase tracking-wider">近 2 小时活动</span>
+              </div>
+              <div class="grid grid-cols-4 divide-x divide-warm-200">
+                <div class="px-4 py-4 text-center">
+                  <div class="text-xl font-bold text-ink-700" x-text="health.stats?.active2h || 0"></div>
+                  <div class="text-[10px] text-ink-300 mt-1">总事件</div>
+                </div>
+                <div class="px-4 py-4 text-center">
+                  <div class="text-xl font-bold text-ink-700"
+                    x-text="(health.stats?.active2h || 0) - (health.stats?.silent2h || 0)"></div>
+                  <div class="text-[10px] text-ink-300 mt-1">有效响应</div>
+                </div>
+                <div class="px-4 py-4 text-center">
+                  <div class="text-xl font-bold"
+                    :class="(health.stats?.silent2h || 0) > 10 ? 'text-amber-600' : 'text-ink-400'"
+                    x-text="health.stats?.silent2h || 0"></div>
+                  <div class="text-[10px] text-ink-300 mt-1">静默</div>
+                </div>
+                <div class="px-4 py-4 text-center">
+                  <div class="text-xl font-bold"
+                    :class="(health.stats?.errors2h || 0) > 0 ? 'text-red-500' : 'text-ink-400'"
+                    x-text="health.stats?.errors2h || 0"></div>
+                  <div class="text-[10px] text-ink-300 mt-1">错误</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- Health not loaded -->
+        <div x-show="!health" class="card text-center py-8">
+          <div class="skeleton mx-auto mb-2" style="width:140px;height:14px;"></div>
+          <div class="text-xs text-ink-300">健康数据加载中...</div>
+        </div>
+      </div>
+
+      <!-- ============================== -->
+      <!-- QUICK ACTION LINKS             -->
+      <!-- ============================== -->
+      <div class="flex items-center gap-2 pt-1">
+        <a :href="'/discovered?account=' + agent.id" class="btn btn-sm btn-ghost border border-warm-300">查看发现</a>
+        <a href="/network" class="btn btn-sm btn-ghost border border-warm-300">网络活动</a>
+        <a href="/chat" class="btn btn-sm btn-ghost border border-warm-300">聊天频道</a>
+        <a href="/market" class="btn btn-sm btn-secondary">自由市场</a>
+      </div>
+
+    </div>
+  </template>
+
+  <!-- ================================ -->
+  <!-- EMPTY STATE                      -->
+  <!-- ================================ -->
+  <div x-show="!loading && agents.length === 0" class="card text-center py-12">
+    <p class="text-sm text-ink-400 mb-3">尚未创建 Agent</p>
+    <a href="/relays" class="btn btn-primary">前往账户管理添加</a>
+  </div>
+
+</div>
+
+<%~ include('partials/page-close', it) %>

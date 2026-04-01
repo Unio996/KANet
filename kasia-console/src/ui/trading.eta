@@ -1,0 +1,2905 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KANet Trading</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    .thinking-dots span {
+      display: inline-block; width: 6px; height: 6px; margin: 0 2px;
+      border-radius: 50%; background: #9ca3af; animation: thinking 1.4s infinite;
+    }
+    .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+    .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes thinking {
+      0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+      40% { opacity: 1; transform: scale(1); }
+    }
+    [x-cloak] { display: none !important; }
+    .price-up { color: #10b981; }
+    .price-down { color: #ef4444; }
+    .mini-chart { display: flex; align-items: flex-end; gap: 1px; height: 60px; }
+    .mini-chart .bar { min-width: 3px; flex: 1; border-radius: 1px 1px 0 0; }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen font-sans" x-data="{
+  portfolio: null,
+  loading: true,
+  agents: <%= JSON.stringify(it.relays.map(r => ({ id: r.id, name: r.name }))) %>,
+  selectedAgent: '__all__',
+  question: '',
+  asking: false,
+  chatHistory: [],
+  configured: <%= it.configured %>,
+  mode: '<%= it.mode %>',
+  agentTradeMode: 'manual',
+  tradeAnchor: 'kas',
+  polling: null,
+  showSettings: false,
+  agentConfigs: [],
+  savingConfig: false,
+  chainData: null,
+  triggers: null,
+  triggerRunning: '',
+  fundamentals: null,
+  whaleAlerts: [],
+  whaleActivity: null,
+  orderbook: null,
+  chartHover: null,
+
+  // Market
+  activeView: 'exchange',
+  marketView: 'feed',  // 'feed' | 'orderbook'
+  marketLayout: 'both',  // 'both' | 'left' | 'right'
+  marketOrders: [],
+  marketBroadcasts: [],
+  marketLoading: false,
+  showPublishForm: false,
+  publishForm: {
+    side: 'sell',
+    amount: '',
+    price: '',
+    token: 'KAS',
+    wantToken: 'USDT',
+    chain: 'bnb',
+    agentId: '',
+  },
+  publishingOrder: false,
+  // Accept flow
+  acceptingOrder: null,
+  acceptAgentId: '',
+  acceptSending: false,
+  activeTradeInfo: null,
+
+  // Order detail expansion
+  expandedOrderId: null,
+
+  // Exchange account management
+  exchangeRegistry: <%= it.exchangeRegistry %>,
+  exchangeAccounts: [],
+  showExchangeForm: false,
+  editingAccountId: null,
+  exForm: { exchange: 'mexc', customName: '', label: '', apiKey: '', apiSecret: '', passphrase: '', baseUrl: '' },
+  exSaving: false,
+  exTesting: '',
+  exTestResult: null,
+
+  // Baseline tracking
+  baselines: [],
+  baselineLoading: false,
+
+  async loadBaselines() {
+    try {
+      const res = await fetch('/api/trade/baseline');
+      this.baselines = await res.json();
+    } catch {}
+  },
+
+  async createBaseline() {
+    this.baselineLoading = true;
+    try {
+      const res = await fetch('/api/trade/baseline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (data.ok) await this.loadBaselines();
+    } catch {}
+    this.baselineLoading = false;
+  },
+
+  async settleBaseline(id) {
+    if (!confirm('结算此基准？将记录最终盈亏。')) return;
+    await fetch('/api/trade/baseline/' + id + '/settle', { method: 'POST' });
+    await this.loadBaselines();
+  },
+
+  // Quick Trade
+  qtSide: 'BUY',
+  qtQty: '',
+  qtExecuting: false,
+  qtResult: null,
+  qtPreview: null,
+  qtReady: false,
+
+  submitQuickTrade() {
+    if (!this.qtQty || this.qtQty < 100) return;
+    const side = this.qtSide === 'BUY' ? '买入' : '卖出';
+    this.question = `请分析当前市场，帮我${side} ${this.qtQty} KAS。根据订单簿深度规划拆单方案，给出拆几笔、每笔价格、预计均价和滑点。`;
+    this.qtResult = null;
+    this.qtPreview = null;
+    this.qtReady = false;
+    // Ask Agent + fetch structured preview in parallel
+    this.askAgent();
+    this.fetchPreview();
+  },
+
+  async fetchPreview() {
+    // Only show execute for single agent, not All Agents
+    if (this.selectedAgent === '__all__') { this.qtReady = false; return; }
+    try {
+      const res = await fetch('/api/trade/preview-split', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ side: this.qtSide, qty: this.qtQty }),
+      });
+      this.qtPreview = await res.json();
+      if (this.qtPreview?.ok) this.qtReady = true;
+    } catch {}
+  },
+
+  async toggleTradeMode() {
+    const newMode = this.mode === 'LIVE' ? 'DRY-RUN' : 'LIVE';
+    if (newMode === 'LIVE' && !confirm('Switch to LIVE mode? Real orders will be placed with real money.')) return;
+    await fetch('/api/trade/mode', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: newMode }) });
+    this.mode = newMode;
+  },
+
+  async executeQuickTrade() {
+    if (!this.qtQty || this.qtQty < 100 || this.qtExecuting) return;
+    const p = this.qtPreview?.params;
+    const planCount = this.qtPreview?.orders?.length || '?';
+    const desc = p
+      ? `${this.qtSide} ${this.qtQty} KAS\n策略: ${p.reason}\n${planCount} 笔 | 每档 ${Math.round(p.maxPctPerLevel*100)}% | 滑点≤${p.maxSlippagePct}%`
+      : `${this.qtSide} ${this.qtQty} KAS`;
+    if (!confirm(`确认执行？模式: ${this.mode}\n\n${desc}`)) return;
+
+    this.qtExecuting = true;
+    this.qtResult = null;
+
+    // Start server-side execution (survives page refresh)
+    let execId;
+    try {
+      const body = { side: this.qtSide, qty: this.qtQty };
+      if (p) { body.maxPctPerLevel = p.maxPctPerLevel; body.maxSlippagePct = p.maxSlippagePct; body.intervalMs = p.intervalMs; }
+      const res = await fetch('/api/trade/execute-split', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        this.chatHistory.push({ role: 'agent', name: 'System', text: 'Error: ' + (data.error || 'unknown') });
+        this.qtExecuting = false;
+        return;
+      }
+      execId = data.execId;
+      this.chatHistory.push({ role: 'agent', name: 'System',
+        text: `[${data.mode}] 开始执行 ${this.qtSide} ${this.qtQty} KAS — ${data.planned} 笔拆单${p ? '\n策略: ' + p.reason : ''}` });
+    } catch (e) {
+      this.chatHistory.push({ role: 'agent', name: 'System', text: 'Error: ' + e.message });
+      this.qtExecuting = false;
+      return;
+    }
+
+    // Poll for progress
+    const progressIdx = this.chatHistory.length;
+    this.chatHistory.push({ role: 'agent', name: 'Executor', text: '⏳ 执行中...' });
+    this.$nextTick(() => this.scrollChat());
+
+    let lastCount = 0;
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/trade/execution/' + execId);
+        const exec = await res.json();
+        const results = exec.results || [];
+        const plan = exec.plan || [];
+
+        // Show new orders since last poll
+        for (let i = lastCount; i < results.length; i++) {
+          const r = results[i];
+          const icon = r.ok ? '✓' : '✗';
+          const detail = r.orderId ? ' → ' + r.orderId : (r.status === 'DRY-RUN' ? ' (模拟)' : '');
+          const errMsg = r.error ? ' — ' + r.error : '';
+          if (i === lastCount && lastCount === 0) {
+            this.chatHistory[progressIdx] = { role: 'agent', name: 'Executor',
+              text: `${icon} ${r.index}/${plan.length} | ${r.qty} KAS @ $${r.price}${detail}${errMsg}` };
+          } else {
+            this.chatHistory.push({ role: 'agent', name: 'Executor',
+              text: `${icon} ${r.index}/${plan.length} | ${r.qty} KAS @ $${r.price}${detail}${errMsg}` });
+          }
+        }
+        lastCount = results.length;
+        this.$nextTick(() => this.scrollChat());
+
+        if (exec.status === 'running') {
+          setTimeout(poll, 800);
+          return;
+        }
+
+        // Execution finished
+        const s = exec.summary;
+        if (s) {
+          this.chatHistory.push({ role: 'agent', name: 'System',
+            text: `[${exec.mode}] ${exec.status === 'done' ? '完成' : '部分完成'}: ${exec.side} ${s.totalQty} KAS\n✓ ${s.executed} 笔 | ✗ ${s.failed} 笔\n均价 $${s.avgPrice} | $${s.totalUsdt} USDT | ${s.elapsedMs}ms` });
+          this.qtResult = { ok: exec.status === 'done', mode: exec.mode, summary: s };
+        }
+        if (exec.error) {
+          this.chatHistory.push({ role: 'agent', name: 'System', text: '⚠ ' + exec.error });
+        }
+        this.$nextTick(() => this.scrollChat());
+        this.loadPortfolio();
+        this.qtExecuting = false;
+      } catch {
+        setTimeout(poll, 1500);
+      }
+    };
+
+    setTimeout(poll, 600);
+  },
+
+  async init() {
+    fetch('/api/trade/agent-mode').then(r=>r.json()).then(d=>{ if(d.mode) this.agentTradeMode = d.mode; }).catch(()=>{});
+    fetch('/api/trade/anchor').then(r=>r.json()).then(d=>{ if(d.anchor) this.tradeAnchor = d.anchor; }).catch(()=>{});
+    await Promise.all([this.loadPortfolio(), this.loadConfigs(), this.loadChain(), this.loadTriggers(), this.loadFundamentals(), this.loadWhaleAlerts(), this.loadWhaleActivity(), this.loadOrderbook(), this.loadExchangeAccounts(), this.loadBaselines()]);
+    this.polling = setInterval(() => { this.loadPortfolio(); this.loadChain(); this.loadTriggers(); this.loadFundamentals(); this.loadWhaleAlerts(); this.loadWhaleActivity(); this.loadOrderbook(); this.loadBaselines(); }, 15000);
+  },
+
+  async loadTriggers() {
+    try {
+      const res = await fetch('/api/trade/triggers');
+      this.triggers = await res.json();
+    } catch {}
+  },
+
+  async updateTrigger(field, value) {
+    const body = {}; body[field] = value;
+    await fetch('/api/trade/triggers', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    await this.loadTriggers();
+  },
+
+  async fireTrigger(type, agent) {
+    this.triggerRunning = type + (agent || 'all');
+    this.chatHistory.push({ role: 'user', text: '[Manual ' + type + '] Triggering all agents...' });
+    this.chatHistory.push({ role: 'agent', name: 'System', text: '', thinking: true });
+    this.$nextTick(() => this.scrollChat());
+
+    try {
+      const res = await fetch('/api/trade/trigger/' + type, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent: agent || undefined })
+      });
+      const data = await res.json();
+      // Replace thinking with individual agent responses
+      this.chatHistory.pop(); // remove thinking bubble
+      for (const r of (data.results || [])) {
+        this.chatHistory.push({
+          role: 'agent',
+          name: r.name,
+          text: r.ok ? (r.reply || 'done') : ('Error: ' + r.error),
+        });
+      }
+    } catch (e) {
+      this.chatHistory[this.chatHistory.length - 1] = { role: 'agent', name: 'System', text: 'Error: ' + e.message };
+    }
+    await this.loadTriggers();
+    this.triggerRunning = '';
+    this.$nextTick(() => this.scrollChat());
+  },
+
+  async loadChain() {
+    try {
+      const res = await fetch('/api/chain/stats');
+      this.chainData = await res.json();
+    } catch {}
+  },
+
+  async loadConfigs() {
+    try {
+      const res = await fetch('/api/trade/config');
+      this.agentConfigs = await res.json();
+    } catch {}
+  },
+
+  async saveConfig(cfg) {
+    this.savingConfig = true;
+    try {
+      await fetch('/api/trade/config/' + cfg.id, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cfg)
+      });
+    } catch {}
+    this.savingConfig = false;
+  },
+
+  async loadPortfolio() {
+    try {
+      const res = await fetch('/api/trade/portfolio');
+      this.portfolio = await res.json();
+    } catch {}
+    this.loading = false;
+  },
+
+  async askAgent() {
+    if (!this.question.trim() || this.asking) return;
+    const q = this.question.trim();
+    this.question = '';
+    this.chatHistory.push({ role: 'user', text: q });
+    this.asking = true;
+
+    const isAll = this.selectedAgent === '__all__';
+    const targets = isAll ? this.agents : [this.agents.find(a => a.id === this.selectedAgent)].filter(Boolean);
+
+    // Add thinking bubbles for each agent
+    const thinkingIndexes = [];
+    for (const agent of targets) {
+      this.chatHistory.push({ role: 'agent', name: agent.name, text: '', thinking: true });
+      thinkingIndexes.push(this.chatHistory.length - 1);
+    }
+    this.$nextTick(() => this.scrollChat());
+
+    // Parallel fetch for all agents
+    const results = await Promise.all(
+      targets.map(async (agent) => {
+        try {
+          const res = await fetch('/api/trade/ask', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ relayId: agent.id, question: q })
+          });
+          const data = await res.json();
+          return { name: agent.name, text: data.reply || data.error || 'No response' };
+        } catch (e) {
+          return { name: agent.name, text: 'Error: ' + e.message };
+        }
+      })
+    );
+
+    // Replace thinking bubbles with real replies
+    results.forEach((r, i) => {
+      this.chatHistory[thinkingIndexes[i]] = { role: 'agent', name: r.name, text: r.text };
+    });
+
+    this.asking = false;
+    this.$nextTick(() => this.scrollChat());
+  },
+
+  scrollChat() {
+    const el = document.getElementById('chat-scroll');
+    if (el) el.scrollTop = el.scrollHeight;
+  },
+
+  fmtNum(n, decimals = 2) {
+    if (n == null) return '--';
+    return Number(n).toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  },
+
+  fmtBig(n) {
+    if (n == null) return '--';
+    if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+    return n.toFixed(2);
+  },
+
+  agentName() {
+    if (this.selectedAgent === '__all__') return 'All Agents';
+    return this.agents.find(a => a.id === this.selectedAgent)?.name || '';
+  },
+
+  chartBars() {
+    if (!this.portfolio?.chart?.length) return [];
+    const data = this.portfolio.chart;
+    const closes = data.map(d => d.c);
+    const min = Math.min(...closes);
+    const max = Math.max(...closes);
+    const range = max - min || 1;
+    return data.map(d => ({
+      height: ((d.c - min) / range) * 100,
+      up: d.c >= d.o,
+    }));
+  },
+
+  // SVG line chart path from kline data (uses high/low range for better scale)
+  pricePath() {
+    if (!this.portfolio?.chart?.length) return '';
+    const data = this.portfolio.chart;
+    const min = Math.min(...data.map(d => d.l));
+    const max = Math.max(...data.map(d => d.h));
+    const range = max - min || 1;
+    const w = 600, h = 130;
+    return data.map((d, i) => {
+      const x = (i / (data.length - 1)) * w;
+      const y = h - ((d.c - min) / range) * 120;
+      return (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1);
+    }).join(' ');
+  },
+
+  priceAreaPath() {
+    const line = this.pricePath();
+    if (!line) return '';
+    return line + ' L600,130 L0,130 Z';
+  },
+
+  // Orderbook depth bars
+  async loadOrderbook() {
+    try {
+      const res = await fetch('/api/trade/orderbook');
+      this.orderbook = await res.json();
+    } catch {}
+  },
+
+  depthBids() {
+    if (!this.orderbook?.bids?.length) return [];
+    const bids = this.orderbook.bids.slice(0, 8).map(b => ({ price: parseFloat(b[0]), qty: parseFloat(b[1]) }));
+    const maxQty = Math.max(...bids.map(b => b.qty));
+    return bids.map(b => ({ ...b, pct: (b.qty / maxQty) * 100 }));
+  },
+
+  depthAsks() {
+    if (!this.orderbook?.asks?.length) return [];
+    const asks = this.orderbook.asks.slice(0, 8).map(a => ({ price: parseFloat(a[0]), qty: parseFloat(a[1]) }));
+    const maxQty = Math.max(...asks.map(a => a.qty));
+    return asks.map(a => ({ ...a, pct: (a.qty / maxQty) * 100 }));
+  },
+
+  // ── Exchange Account Methods ──
+  async loadExchangeAccounts() {
+    try {
+      const res = await fetch('/api/trade/accounts');
+      this.exchangeAccounts = await res.json();
+      this.configured = this.exchangeAccounts.length > 0;
+    } catch {}
+  },
+
+  exFields() {
+    if (this.exForm.exchange === 'custom') return ['apiKey', 'apiSecret', 'passphrase', 'baseUrl'];
+    const def = this.exchangeRegistry.find(e => e.id === this.exForm.exchange);
+    return def?.fields || ['apiKey', 'apiSecret'];
+  },
+
+  exNeedsPassphrase() { return this.exFields().includes('passphrase'); },
+
+  openExchangeForm(account) {
+    this.exTestResult = null;
+    if (account) {
+      this.editingAccountId = account.id;
+      this.exForm = { exchange: account.exchange, customName: '', label: account.label || '', apiKey: '', apiSecret: '', passphrase: '', baseUrl: account.baseUrl || '' };
+    } else {
+      this.editingAccountId = null;
+      this.exForm = { exchange: 'mexc', customName: '', label: '', apiKey: '', apiSecret: '', passphrase: '', baseUrl: '' };
+    }
+    this.showExchangeForm = true;
+  },
+
+  async saveExchangeAccount() {
+    this.exSaving = true;
+    const exchange = this.exForm.exchange === 'custom' ? (this.exForm.customName.trim() || 'custom') : this.exForm.exchange;
+    const body = {
+      exchange,
+      label: this.exForm.label || null,
+      apiKey: this.exForm.apiKey || undefined,
+      apiSecret: this.exForm.apiSecret || undefined,
+      passphrase: this.exNeedsPassphrase() ? (this.exForm.passphrase || undefined) : undefined,
+      baseUrl: this.exForm.exchange === 'custom' ? (this.exForm.baseUrl || undefined) : undefined,
+    };
+
+    try {
+      if (this.editingAccountId) {
+        await fetch('/api/trade/accounts/' + this.editingAccountId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      } else {
+        await fetch('/api/trade/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      }
+      this.showExchangeForm = false;
+      await this.loadExchangeAccounts();
+      this.loadPortfolio();
+    } catch {}
+    this.exSaving = false;
+  },
+
+  async deleteExchangeAccount(id) {
+    if (!confirm('Delete this exchange account?')) return;
+    await fetch('/api/trade/accounts/' + id, { method: 'DELETE' });
+    await this.loadExchangeAccounts();
+    this.loadPortfolio();
+  },
+
+  async setDefaultAccount(id) {
+    await fetch('/api/trade/accounts/' + id + '/default', { method: 'POST' });
+    await this.loadExchangeAccounts();
+    this.loadPortfolio();
+  },
+
+  async testExchangeAccount(id) {
+    this.exTesting = id;
+    this.exTestResult = null;
+    try {
+      const res = await fetch('/api/trade/accounts/' + id + '/test', { method: 'POST' });
+      this.exTestResult = await res.json();
+    } catch (e) {
+      this.exTestResult = { ok: false, error: e.message };
+    }
+    this.exTesting = '';
+  },
+
+  exName(exchange) {
+    const def = this.exchangeRegistry.find(e => e.id === exchange);
+    return def?.name || exchange;
+  },
+
+  async loadFundamentals() {
+    try {
+      const res = await fetch('/api/chain/fundamentals');
+      this.fundamentals = await res.json();
+    } catch {}
+  },
+
+  async loadWhaleAlerts() {
+    try {
+      const res = await fetch('/api/chain/whale-alerts?limit=10');
+      this.whaleAlerts = await res.json();
+    } catch {}
+  },
+
+  async loadWhaleActivity() {
+    try {
+      const res = await fetch('/api/chain/whale-activity');
+      this.whaleActivity = await res.json();
+    } catch {}
+  },
+
+  onChartMouseMove(event) {
+    const data = this.portfolio?.chart;
+    if (!data?.length) return;
+    const svg = event.currentTarget;
+    const rect = svg.getBoundingClientRect();
+    const xPct = (event.clientX - rect.left) / rect.width;
+    const idx = Math.round(xPct * (data.length - 1));
+    if (idx < 0 || idx >= data.length) { this.chartHover = null; return; }
+    const d = data[idx];
+    const min = Math.min(...data.map(k => k.l));
+    const max = Math.max(...data.map(k => k.h));
+    const range = max - min || 1;
+    const svgX = (idx / (data.length - 1)) * 600;
+    const svgY = 130 - ((d.c - min) / range) * 120;
+    this.chartHover = {
+      x: svgX,
+      idx,
+      price: d.c,
+      open: d.o,
+      high: d.h,
+      low: d.l,
+      vol: d.v,
+      time: d.t,
+      svgY,
+    };
+  },
+
+  onChartMouseLeave() {
+    this.chartHover = null;
+  },
+
+  async loadMarketData() {
+    this.marketLoading = true;
+    try {
+      const [orders, broadcasts] = await Promise.all([
+        fetch('/api/trade/mm-orders').then(r => r.json()),
+        fetch('/api/chat/messages?channel=otc-market&limit=50').then(r => r.json()).then(d => d.messages || []).catch(() => []),
+      ]);
+      this.marketOrders = orders;
+      // 只保留结构化订单，过滤掉 Agent 聊天
+      this.marketBroadcasts = broadcasts.filter(b => {
+        try { const p = JSON.parse(b.content); return p.type?.startsWith('kanet_'); } catch { return false; }
+      });
+    } catch {} finally { this.marketLoading = false; }
+  },
+
+  async publishIntent() {
+    if (!this.publishForm.amount || !this.publishForm.agentId) return;
+    const agName = this.agents.find(a => a.id === this.publishForm.agentId)?.name || '?';
+    if (!confirm('确认用 ' + agName + ' 广播 ' + this.publishForm.side.toUpperCase() + ' ' + this.publishForm.amount + ' KAS？此操作将广播到链上。')) return;
+    this.publishingOrder = true;
+    try {
+      const f = this.publishForm;
+      const payload = JSON.stringify({
+        type: f.side === 'sell' ? 'kanet_sell_v1' : 'kanet_buy_v1',
+        amount: parseFloat(f.amount),
+        token: f.token,
+        [f.side === 'sell' ? 'want' : 'pay']: f.wantToken,
+        chains: [f.chain],
+      });
+      // Broadcast to otc-market channel
+      await fetch('/api/chat/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          relayId: f.agentId,
+          channel: 'otc-market',
+          message: payload,
+        }),
+      });
+      // Also record as mm_order
+      await fetch('/api/trade/mm-orders/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          relay_node_id: f.agentId,
+          side: f.side,
+          kas_amount: parseFloat(f.amount),
+          price: f.price ? parseFloat(f.price) : undefined,
+          chain: f.chain,
+        }),
+      });
+      this.showPublishForm = false;
+      this.publishForm.amount = '';
+      this.publishForm.price = '';
+      await this.loadMarketData();
+    } catch (err) {
+      alert('Failed: ' + err.message);
+    } finally { this.publishingOrder = false; }
+  },
+
+  startAccept(broadcast) {
+    this.acceptingOrder = broadcast;
+    this.acceptAgentId = '';
+    this.acceptSending = false;
+  },
+
+  cancelAccept() {
+    this.acceptingOrder = null;
+    this.acceptAgentId = '';
+  },
+
+  async sendAcceptInvite() {
+    if (!this.acceptAgentId || !this.acceptingOrder) return;
+    this.acceptSending = true;
+    try {
+      const b = this.acceptingOrder;
+      let orderInfo = b.content;
+      try { orderInfo = JSON.parse(b.content); } catch {}
+
+      const myAgent = this.agents.find(a => a.id === this.acceptAgentId);
+      const peerAddr = b.sender_address;
+      const amount = typeof orderInfo === 'object' ? orderInfo.amount : 0;
+      const chain = typeof orderInfo === 'object' ? (orderInfo.chains?.[0] || 'bnb') : 'bnb';
+
+      // 1. Create counter-order via publish (with peer linking)
+      const counterSide = (orderInfo?.type === 'kanet_sell_v1') ? 'buy' : 'sell';
+      const orderRes = await fetch('/api/trade/mm-orders/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          relay_node_id: this.acceptAgentId,
+          side: counterSide,
+          kas_amount: amount,
+          chain,
+          peer_address: peerAddr,
+        }),
+      }).then(r => r.json());
+
+      // 2. Find seller's order and link + accept both
+      if (orderRes.ok && orderRes.id) {
+        // Find matching seller order by amount + side + status
+        const sellerOrders = (this.marketOrders || []).filter(o =>
+          o.side !== counterSide && o.kas_amount === amount && ['published'].includes(o.status)
+        );
+        if (sellerOrders.length > 0) {
+          // Accept seller's order with counterparty link
+          await fetch('/api/trade/mm-orders/' + sellerOrders[0].id + '/action', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'accept', counterparty_order_id: orderRes.id, customer_address: myAgent?.address }),
+          }).catch(() => {});
+          // Accept buyer's order with counterparty link
+          await fetch('/api/trade/mm-orders/' + orderRes.id + '/action', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'accept', counterparty_order_id: sellerOrders[0].id, customer_address: peerAddr }),
+          }).catch(() => {});
+        }
+      }
+
+      // 3. Send structured accept message to seller via relay
+      const acceptMsg = JSON.stringify({
+        type: 'kanet_accept_v1',
+        ref_type: orderInfo?.type,
+        amount,
+        token: orderInfo?.token || 'KAS',
+        chain,
+        order_id: orderRes?.id || null,
+      });
+      await fetch('/api/relay/' + this.acceptAgentId + '/send-command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'send_message', target: peerAddr, message: acceptMsg }),
+      });
+
+      this.acceptingOrder = null;
+      this.acceptAgentId = '';
+
+      // 4. Stay on trading page, switch to trading room view to manage the deal
+      await this.loadMarketData();
+      this.marketLayout = 'right'; // show trading room
+      alert('接单成功！订单已创建，请在右侧交易室管理。可点[私聊]进入对话。');
+    } catch (err) {
+      alert('接单失败: ' + (err?.message || err));
+    } finally { this.acceptSending = false; }
+  },
+
+  fmtExp(n) {
+    if (n == null) return '--';
+    if (n >= 1e15) return (n / 1e15).toFixed(1) + 'P';
+    if (n >= 1e12) return (n / 1e12).toFixed(1) + 'T';
+    if (n >= 1e9) return (n / 1e9).toFixed(1) + 'G';
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    return n.toFixed(0);
+  },
+
+  orderStatusCn(status) {
+    const map = { published: '已发布', accepted: '已接单', paying: '付款中', paid: '已付款', verified: '已验证', delivering: '交割中', completed: '已完成', cancelled: '已取消', expired: '已过期', disputed: '争议中', resolved: '已解决' };
+    return map[status] || status;
+  },
+
+  timeAgo(dateStr) {
+    if (!dateStr) return '';
+    const diff = Date.now() - new Date(dateStr).getTime();
+    if (diff < 60000) return '刚刚';
+    if (diff < 3600000) return Math.floor(diff / 60000) + '分钟前';
+    if (diff < 86400000) return Math.floor(diff / 3600000) + '小时前';
+    return Math.floor(diff / 86400000) + '天前';
+  }
+}" x-init="init()">
+
+  <!-- Header -->
+  <header class="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
+    <div class="flex items-center space-x-3">
+      <img src="/public/kanet-logo.png" alt="KANet" class="h-8 w-8" />
+      <h1 class="text-xl font-bold">KANet Trading</h1>
+      <!-- View Toggle -->
+      <div class="flex ml-4 bg-gray-800 rounded-lg p-0.5">
+        <button @click="activeView = 'exchange'"
+          :class="activeView === 'exchange' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'"
+          class="px-3 py-1 text-sm rounded-md transition-colors">Exchange</button>
+        <button @click="activeView = 'market'; loadMarketData()"
+          :class="activeView === 'market' ? 'bg-purple-700 text-white' : 'text-gray-400 hover:text-white'"
+          class="px-3 py-1 text-sm rounded-md transition-colors">自由市场</button>
+      </div>
+      <span class="px-2 py-0.5 rounded text-xs font-mono"
+        :class="mode === 'LIVE' ? 'bg-red-900 text-red-300' : 'bg-yellow-900 text-yellow-300'"
+        x-text="mode"></span>
+      <span class="px-2 py-0.5 rounded text-xs ml-2"
+        :class="agentTradeMode==='auto' ? 'bg-green-900 text-green-300' : agentTradeMode==='approval' ? 'bg-blue-900 text-blue-300' : 'bg-gray-800 text-gray-400'"
+        x-text="agentTradeMode==='auto' ? 'Agent: 全自动' : agentTradeMode==='approval' ? 'Agent: 审批' : 'Agent: 手动'"></span>
+      <!-- Settings toggle (inline with tabs) -->
+      <button @click="showSettings = !showSettings"
+        title="交易设置（模式 / 交易所 API）"
+        class="ml-3 p-1.5 rounded-md transition-colors"
+        :class="showSettings ? 'bg-gray-700 text-white' : 'text-gray-500 hover:text-white'">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+      </button>
+    </div>
+    <a href="/chat" class="text-sm text-gray-400 hover:text-white">返回</a>
+  </header>
+
+  <!-- ══ Shared Settings Panel (drops down from header) ══ -->
+  <div class="max-w-7xl mx-auto px-6 pt-4" x-show="showSettings" x-transition>
+
+      <!-- Settings Panel -->
+      <div x-show="showSettings" x-transition class="space-y-4">
+
+        <!-- ── Trade Mode ── -->
+        <div class="bg-gray-900 rounded-xl border border-gray-800 p-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <span class="text-sm font-medium text-gray-400">Trading Mode</span>
+              <p class="text-xs text-gray-600 mt-0.5" x-text="mode === 'LIVE' ? 'Real orders will be placed on exchange' : 'Simulation only — no real orders'"></p>
+            </div>
+            <div class="flex items-center space-x-3">
+              <span class="text-xs font-mono" :class="mode === 'DRY-RUN' ? 'text-yellow-400' : 'text-gray-600'">DRY-RUN</span>
+              <label class="flex items-center cursor-pointer">
+                <div class="relative">
+                  <input type="checkbox" :checked="mode === 'LIVE'" @change="toggleTradeMode()" class="sr-only" />
+                  <div class="w-10 h-5 rounded-full transition-colors" :class="mode === 'LIVE' ? 'bg-red-600' : 'bg-gray-700'"></div>
+                  <div class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform" :class="mode === 'LIVE' ? 'translate-x-5' : ''"></div>
+                </div>
+              </label>
+              <span class="text-xs font-mono font-bold" :class="mode === 'LIVE' ? 'text-red-400' : 'text-gray-600'">LIVE</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Agent 交易控制面板（per-agent） ── -->
+        <div class="bg-gray-900 rounded-xl border border-gray-800 p-4" x-data="agentTradePanel()" x-init="load()">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <span class="text-sm font-medium text-gray-300">Agent 交易权限</span>
+              <p class="text-xs text-gray-500 mt-0.5">每个 Agent 独立设置交易模式</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-[10px] text-gray-500 uppercase tracking-wider">锚定</span>
+              <button @click="setAnchor(panelAnchor==='kas'?'usd':'kas')"
+                class="px-2.5 py-1 rounded text-[11px] font-medium transition-all border"
+                :class="panelAnchor==='kas' ? 'bg-yellow-900/60 text-yellow-400 border-yellow-700/50' : 'bg-green-900/60 text-green-400 border-green-700/50'"
+                x-text="panelAnchor==='kas' ? 'KAS 本币锚' : 'USD 法币锚'">
+              </button>
+            </div>
+          </div>
+
+          <!-- Agent rows -->
+          <div class="space-y-2">
+            <template x-for="a in agentList" :key="a.id">
+              <div class="flex items-center gap-3 bg-gray-800/50 rounded-lg px-3 py-2.5 border border-gray-800 hover:border-gray-700 transition-colors">
+                <!-- Status dot -->
+                <div class="w-2 h-2 rounded-full flex-shrink-0"
+                     :class="a.mode==='auto' ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.4)]' : a.mode==='approval' ? 'bg-blue-400 shadow-[0_0_6px_rgba(96,165,250,0.3)]' : a.mode==='disabled' ? 'bg-red-400' : 'bg-gray-600'"></div>
+                <!-- Name + address -->
+                <div class="flex-1 min-w-0">
+                  <span class="text-sm font-medium text-gray-200" x-text="a.name"></span>
+                  <span class="text-[10px] text-gray-600 ml-2 font-mono" x-text="'...' + a.address.slice(-8)"></span>
+                </div>
+                <!-- Mode selector (4 buttons) -->
+                <div class="flex items-center gap-1">
+                  <button @click="setMode(a.id, 'disabled')"
+                    class="px-2 py-1 rounded text-[10px] font-medium transition-all border"
+                    :class="a.mode==='disabled' ? 'bg-red-900/60 text-red-300 border-red-700/50' : 'text-gray-600 border-gray-800 hover:border-red-900 hover:text-red-400'">
+                    禁止
+                  </button>
+                  <button @click="setMode(a.id, 'manual')"
+                    class="px-2 py-1 rounded text-[10px] font-medium transition-all border"
+                    :class="a.mode==='manual' ? 'bg-gray-700 text-gray-200 border-gray-500' : 'text-gray-600 border-gray-800 hover:border-gray-600 hover:text-gray-400'">
+                    手动
+                  </button>
+                  <button @click="setMode(a.id, 'approval')"
+                    class="px-2 py-1 rounded text-[10px] font-medium transition-all border"
+                    :class="a.mode==='approval' ? 'bg-blue-900/60 text-blue-300 border-blue-700/50' : 'text-gray-600 border-gray-800 hover:border-blue-900 hover:text-blue-400'">
+                    批准
+                  </button>
+                  <button @click="setMode(a.id, 'auto')"
+                    class="px-2 py-1 rounded text-[10px] font-medium transition-all border"
+                    :class="a.mode==='auto' ? 'bg-green-900/60 text-green-300 border-green-700/50' : 'text-gray-600 border-gray-800 hover:border-green-900 hover:text-green-400'">
+                    自动
+                  </button>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- Mode legend -->
+          <div class="flex items-center gap-4 mt-3 pt-3 border-t border-gray-800 text-[10px] text-gray-600">
+            <span><span class="inline-block w-1.5 h-1.5 rounded-full bg-red-400 mr-1"></span>禁止：不允许交易</span>
+            <span><span class="inline-block w-1.5 h-1.5 rounded-full bg-gray-600 mr-1"></span>手动：仅 Owner 操作</span>
+            <span><span class="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 mr-1"></span>批准：Agent 发起，Owner 确认</span>
+            <span><span class="inline-block w-1.5 h-1.5 rounded-full bg-green-500 mr-1"></span>自动：限额内自主交易</span>
+          </div>
+        </div>
+
+        <script>
+        function agentTradePanel() {
+          return {
+            agentList: [],
+            panelAnchor: 'kas',
+            async load() {
+              try {
+                const res = await fetch('/api/trade/agent-modes');
+                const data = await res.json();
+                this.agentList = data.agents || [];
+                this.panelAnchor = data.anchor || 'usd';
+                // Sync parent state
+                if (typeof tradeAnchor !== 'undefined') tradeAnchor = this.panelAnchor;
+              } catch {}
+            },
+            async setMode(agentId, mode) {
+              if (mode === 'auto' && !confirm('开启自动模式？Agent 将在限额内自主交易。')) return;
+              try {
+                const res = await fetch('/api/trade/agent-mode', {
+                  method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ mode, relayNodeId: agentId }),
+                });
+                const d = await res.json();
+                if (d.ok) {
+                  const a = this.agentList.find(x => x.id === agentId);
+                  if (a) { a.mode = mode; a.isPerAgent = true; }
+                }
+              } catch {}
+            },
+            async setAnchor(anchor) {
+              try {
+                const res = await fetch('/api/trade/set-anchor', {
+                  method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ anchor }),
+                });
+                const d = await res.json();
+                if (d.ok) this.panelAnchor = anchor;
+              } catch {}
+            },
+          };
+        }
+        </script>
+
+        <!-- ── Exchange Accounts ── -->
+        <div class="bg-gray-900 rounded-xl border border-gray-800 p-4">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-sm font-medium text-gray-400">Exchange API Accounts</span>
+            <button @click="openExchangeForm(null)"
+              class="text-xs px-3 py-1 rounded bg-purple-600/20 text-purple-400 hover:bg-purple-600/40">+ Add</button>
+          </div>
+
+          <!-- Existing Accounts List -->
+          <div x-show="exchangeAccounts.length > 0" class="space-y-2 mb-3">
+            <template x-for="acc in exchangeAccounts" :key="acc.id">
+              <div class="flex items-center justify-between px-3 py-2.5 rounded-lg bg-gray-800/50">
+                <div class="flex items-center space-x-3">
+                  <span class="w-2 h-2 rounded-full" :class="acc.isDefault ? 'bg-emerald-400' : 'bg-gray-600'"></span>
+                  <div>
+                    <span class="text-sm font-medium text-gray-200" x-text="acc.exchangeName"></span>
+                    <span x-show="acc.label" class="text-xs text-gray-500 ml-2" x-text="acc.label"></span>
+                    <div class="text-xs text-gray-600 font-mono" x-text="'Key: ' + (acc.apiKeyHint || '****')"></div>
+                  </div>
+                </div>
+                <div class="flex items-center space-x-2">
+                  <!-- Test -->
+                  <button @click="testExchangeAccount(acc.id)" :disabled="exTesting === acc.id"
+                    class="text-xs px-2 py-1 rounded bg-gray-700 text-gray-400 hover:text-white hover:bg-gray-600">
+                    <span x-show="exTesting !== acc.id">Test</span>
+                    <span x-show="exTesting === acc.id">...</span>
+                  </button>
+                  <!-- Set Default -->
+                  <button x-show="!acc.isDefault" @click="setDefaultAccount(acc.id)"
+                    class="text-xs px-2 py-1 rounded bg-gray-700 text-gray-400 hover:text-emerald-400 hover:bg-gray-600">Default</button>
+                  <span x-show="acc.isDefault" class="text-xs text-emerald-500 px-2">Active</span>
+                  <!-- Edit -->
+                  <button @click="openExchangeForm(acc)"
+                    class="text-xs px-2 py-1 rounded bg-gray-700 text-gray-400 hover:text-white hover:bg-gray-600">Edit</button>
+                  <!-- Delete -->
+                  <button @click="deleteExchangeAccount(acc.id)"
+                    class="text-xs px-2 py-1 rounded bg-gray-700 text-gray-400 hover:text-red-400 hover:bg-gray-600">Del</button>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- Test Result -->
+          <div x-show="exTestResult" x-transition class="mb-3 px-3 py-2 rounded text-xs"
+            :class="exTestResult?.ok ? 'bg-emerald-900/30 border border-emerald-800 text-emerald-300' : 'bg-red-900/30 border border-red-800 text-red-300'"
+            x-text="exTestResult?.ok ? exTestResult.message : ('Failed: ' + (exTestResult?.error || 'unknown'))"></div>
+
+          <!-- No accounts message -->
+          <div x-show="exchangeAccounts.length === 0 && !showExchangeForm" class="text-xs text-gray-600 text-center py-4">
+            No exchange account configured. Click + Add to connect your exchange.
+          </div>
+
+          <!-- Add/Edit Form -->
+          <div x-show="showExchangeForm" x-transition class="bg-gray-800/50 rounded-lg p-4 space-y-3">
+            <div class="flex items-center justify-between">
+              <span class="text-sm font-medium text-gray-300" x-text="editingAccountId ? 'Edit Account' : 'New Exchange Account'"></span>
+              <button @click="showExchangeForm = false" class="text-xs text-gray-500 hover:text-white">Cancel</button>
+            </div>
+
+            <!-- Exchange Select -->
+            <div>
+              <label class="text-xs text-gray-500 block mb-1">Exchange</label>
+              <select x-model="exForm.exchange" :disabled="!!editingAccountId"
+                class="w-full bg-gray-800 text-gray-200 text-sm rounded px-3 py-2 border border-gray-700 focus:outline-none focus:border-purple-500">
+                <template x-for="ex in exchangeRegistry" :key="ex.id">
+                  <option :value="ex.id" x-text="ex.name"></option>
+                </template>
+                <option value="custom">-- Custom Exchange --</option>
+              </select>
+            </div>
+
+            <!-- Custom Exchange Name -->
+            <div x-show="exForm.exchange === 'custom'">
+              <label class="text-xs text-gray-500 block mb-1">Exchange Name</label>
+              <input type="text" x-model="exForm.customName" placeholder="e.g. Kraken, Upbit..."
+                class="w-full bg-gray-800 text-gray-200 text-sm rounded px-3 py-2 border border-gray-700 focus:outline-none focus:border-purple-500" />
+            </div>
+
+            <!-- Custom Base URL -->
+            <div x-show="exForm.exchange === 'custom'">
+              <label class="text-xs text-gray-500 block mb-1">API Base URL</label>
+              <input type="text" x-model="exForm.baseUrl" placeholder="https://api.example.com"
+                class="w-full bg-gray-800 text-gray-200 text-sm rounded px-3 py-2 border border-gray-700 focus:outline-none focus:border-purple-500" />
+            </div>
+
+            <!-- Label -->
+            <div>
+              <label class="text-xs text-gray-500 block mb-1">Label (optional)</label>
+              <input type="text" x-model="exForm.label" placeholder="e.g. Main Account, Trading Bot..."
+                class="w-full bg-gray-800 text-gray-200 text-sm rounded px-3 py-2 border border-gray-700 focus:outline-none focus:border-purple-500" />
+            </div>
+
+            <!-- API Key -->
+            <div>
+              <label class="text-xs text-gray-500 block mb-1">API Key</label>
+              <input type="password" x-model="exForm.apiKey" :placeholder="editingAccountId ? 'Leave blank to keep current' : 'Enter API Key'"
+                class="w-full bg-gray-800 text-gray-200 text-sm rounded px-3 py-2 border border-gray-700 focus:outline-none focus:border-purple-500 font-mono" />
+            </div>
+
+            <!-- API Secret -->
+            <div>
+              <label class="text-xs text-gray-500 block mb-1">API Secret</label>
+              <input type="password" x-model="exForm.apiSecret" :placeholder="editingAccountId ? 'Leave blank to keep current' : 'Enter API Secret'"
+                class="w-full bg-gray-800 text-gray-200 text-sm rounded px-3 py-2 border border-gray-700 focus:outline-none focus:border-purple-500 font-mono" />
+            </div>
+
+            <!-- Passphrase (conditional) -->
+            <div x-show="exNeedsPassphrase()">
+              <label class="text-xs text-gray-500 block mb-1">Passphrase</label>
+              <input type="password" x-model="exForm.passphrase" :placeholder="editingAccountId ? 'Leave blank to keep current' : 'Enter Passphrase'"
+                class="w-full bg-gray-800 text-gray-200 text-sm rounded px-3 py-2 border border-gray-700 focus:outline-none focus:border-purple-500 font-mono" />
+              <div class="text-xs text-gray-600 mt-1">Required by <span x-text="exName(exForm.exchange)"></span></div>
+            </div>
+
+            <!-- Security Note -->
+            <div class="text-xs text-gray-600 flex items-start space-x-1.5 pt-1">
+              <svg class="h-3.5 w-3.5 mt-0.5 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+              <span>Credentials are encrypted with AES-256-GCM and stored locally. Never transmitted to any third party.</span>
+            </div>
+
+            <!-- Save Button -->
+            <button @click="saveExchangeAccount()" :disabled="exSaving || (!editingAccountId && (!exForm.apiKey || !exForm.apiSecret))"
+              class="w-full py-2 rounded text-sm font-medium transition-colors"
+              :class="exSaving ? 'bg-gray-700 text-gray-500' : 'bg-purple-600 text-white hover:bg-purple-700'">
+              <span x-show="!exSaving" x-text="editingAccountId ? 'Update' : 'Save Account'"></span>
+              <span x-show="exSaving">Saving...</span>
+            </button>
+          </div>
+        </div>
+
+      </div>
+  </div>
+  <!-- ══ End Shared Settings ══ -->
+
+  <!-- ══ Exchange View ══ -->
+  <div class="max-w-7xl mx-auto px-6 py-6 grid grid-cols-12 gap-6" x-show="activeView === 'exchange'">
+    <div class="col-span-12 lg:col-span-8 space-y-6">
+
+      <!-- ── Agent Trading Configs ── -->
+      <div x-data="{ showAgentConfigs: false }">
+        <button @click="showAgentConfigs = !showAgentConfigs"
+          class="flex items-center space-x-2 text-sm text-gray-400 hover:text-white transition-colors mb-2">
+          <svg class="h-4 w-4 transition-transform" :class="showAgentConfigs ? 'rotate-90' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+          <span x-text="showAgentConfigs ? '隐藏 Agent 交易配置' : 'Agent 交易配置'"></span>
+        </button>
+        <div x-show="showAgentConfigs" x-transition class="space-y-3">
+          <template x-for="cfg in agentConfigs" :key="cfg.id">
+            <div class="bg-gray-900 rounded-xl border border-gray-800 p-4">
+              <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center space-x-3">
+                  <span class="text-sm font-bold" x-text="cfg.name"></span>
+                  <label class="flex items-center space-x-2 cursor-pointer">
+                    <div class="relative">
+                      <input type="checkbox" x-model="cfg.enabled" @change="saveConfig(cfg)" class="sr-only" />
+                      <div class="w-8 h-4 rounded-full transition-colors" :class="cfg.enabled ? 'bg-emerald-600' : 'bg-gray-700'"></div>
+                      <div class="absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform" :class="cfg.enabled ? 'translate-x-4' : ''"></div>
+                    </div>
+                    <span class="text-xs" :class="cfg.enabled ? 'text-emerald-400' : 'text-gray-500'" x-text="cfg.enabled ? 'Enabled' : 'Disabled'"></span>
+                  </label>
+                  <select x-model="cfg.baseCurrency" @change="saveConfig(cfg)"
+                    class="bg-gray-800 text-xs rounded px-2 py-1 border border-gray-700 ml-2"
+                    :class="cfg.baseCurrency === 'KAS' ? 'text-emerald-400 border-emerald-700' : 'text-yellow-400 border-yellow-700'">
+                    <option value="USDT">USDT</option>
+                    <option value="KAS">KAS</option>
+                  </select>
+                </div>
+                <button @click="saveConfig(cfg)" :disabled="savingConfig"
+                  class="text-xs px-3 py-1 rounded bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white">Save</button>
+              </div>
+              <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div>
+                  <label class="text-xs text-gray-500 block mb-1" x-text="'Capital (' + cfg.baseCurrency + ')'"></label>
+                  <input type="number" x-model.number="cfg.capital" @change="saveConfig(cfg)"
+                    class="w-full bg-gray-800 text-gray-200 text-sm rounded px-2 py-1.5 border border-gray-700 focus:outline-none focus:border-purple-500" />
+                </div>
+                <div>
+                  <label class="text-xs text-gray-500 block mb-1" x-text="'Max/Trade (' + cfg.baseCurrency + ')'"></label>
+                  <input type="number" x-model.number="cfg.maxPerTrade" @change="saveConfig(cfg)"
+                    class="w-full bg-gray-800 text-gray-200 text-sm rounded px-2 py-1.5 border border-gray-700 focus:outline-none focus:border-purple-500" />
+                </div>
+                <div>
+                  <label class="text-xs text-gray-500 block mb-1">Max Position %</label>
+                  <input type="number" x-model.number="cfg.maxPositionPct" @change="saveConfig(cfg)" min="0" max="100"
+                    class="w-full bg-gray-800 text-gray-200 text-sm rounded px-2 py-1.5 border border-gray-700 focus:outline-none focus:border-purple-500" />
+                </div>
+                <div>
+                  <label class="text-xs text-gray-500 block mb-1" x-text="'Daily Loss (' + cfg.baseCurrency + ')'"></label>
+                  <input type="number" x-model.number="cfg.dailyLossLimit" @change="saveConfig(cfg)"
+                    class="w-full bg-gray-800 text-gray-200 text-sm rounded px-2 py-1.5 border border-gray-700 focus:outline-none focus:border-purple-500" />
+                </div>
+              </div>
+              <div class="mt-3">
+                <label class="text-xs text-gray-500 block mb-1">Strategy / Goal</label>
+                <input type="text" x-model="cfg.strategy" @change="saveConfig(cfg)"
+                  :placeholder="'e.g. Conservative KAS accumulation, buy dips below $0.035'"
+                  class="w-full bg-gray-800 text-gray-200 text-sm rounded px-2 py-1.5 border border-gray-700 focus:outline-none focus:border-purple-500" />
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Portfolio Cards -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <!-- Total Value -->
+        <div class="bg-gray-900 rounded-xl p-4 border border-gray-800">
+          <div class="text-xs text-gray-500 uppercase tracking-wider">Total Value</div>
+          <div class="text-2xl font-bold mt-1" x-text="'$' + fmtNum(portfolio?.totalUsd)"></div>
+        </div>
+        <!-- KAS -->
+        <div class="bg-gray-900 rounded-xl p-4 border border-gray-800">
+          <div class="text-xs text-gray-500 uppercase tracking-wider">KAS</div>
+          <div class="text-2xl font-bold mt-1 text-emerald-400" x-text="fmtBig(portfolio?.balances?.find(b => b.asset === 'KAS')?.free)"></div>
+          <div class="text-xs text-gray-500 mt-0.5" x-text="'≈ $' + fmtNum(portfolio?.kasValue)"></div>
+        </div>
+        <!-- USDT -->
+        <div class="bg-gray-900 rounded-xl p-4 border border-gray-800">
+          <div class="text-xs text-gray-500 uppercase tracking-wider">USDT</div>
+          <div class="text-2xl font-bold mt-1 text-yellow-400" x-text="fmtNum(portfolio?.balances?.find(b => b.asset === 'USDT')?.free || 0)"></div>
+          <div class="text-xs text-gray-500 mt-0.5">Available</div>
+        </div>
+        <!-- KAS Price -->
+        <div class="bg-gray-900 rounded-xl p-4 border border-gray-800">
+          <div class="text-xs text-gray-500 uppercase tracking-wider">KAS Price</div>
+          <div class="text-2xl font-bold mt-1" x-text="'$' + fmtNum(portfolio?.market?.price, 5)"></div>
+          <div class="text-xs mt-0.5"
+            :class="(portfolio?.market?.change24h || 0) >= 0 ? 'price-up' : 'price-down'"
+            x-text="((portfolio?.market?.change24h || 0) >= 0 ? '+' : '') + fmtNum(portfolio?.market?.change24h) + '% · Vol $' + fmtBig(portfolio?.market?.volume24h)"></div>
+        </div>
+      </div>
+
+      <!-- Performance Baseline -->
+      <div class="bg-gray-900 rounded-xl border border-gray-800 p-4">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-sm font-medium text-gray-400">Performance Baseline</span>
+          <button @click="createBaseline()" :disabled="baselineLoading"
+            class="text-xs px-3 py-1 rounded bg-purple-600/20 text-purple-400 hover:bg-purple-600/40"
+            x-text="baselineLoading ? '...' : baselines.length ? '⟳ Reset' : '+ Set Baseline'"></button>
+        </div>
+
+        <!-- No baseline -->
+        <div x-show="baselines.length === 0" class="text-xs text-gray-600 text-center py-4">
+          No baseline set. Click "Set Baseline" to start tracking performance from current holdings.
+        </div>
+
+        <!-- Active baselines — one card per agent -->
+        <div class="space-y-3">
+          <template x-for="b in baselines" :key="b.id">
+            <div class="bg-gray-800/50 rounded-lg p-3">
+              <!-- Agent name + Risk status -->
+              <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center space-x-2">
+                  <span class="w-2 h-2 rounded-full"
+                    :class="b.risk?.status === 'OK' ? 'bg-emerald-400' : b.risk?.status === 'WARNING' ? 'bg-yellow-400 animate-pulse' : 'bg-red-500 animate-pulse'"></span>
+                  <span class="text-sm font-bold text-gray-200" x-text="b.agent"></span>
+                  <span class="text-xs px-1.5 py-0.5 rounded" :class="b.risk?.status === 'OK' ? 'bg-emerald-900/30 text-emerald-400' : b.risk?.status === 'WARNING' ? 'bg-yellow-900/30 text-yellow-400' : 'bg-red-900/30 text-red-400'"
+                    x-text="b.risk?.status"></span>
+                </div>
+                <button @click="settleBaseline(b.id)" class="text-xs text-gray-600 hover:text-gray-300">Settle</button>
+              </div>
+              <!-- P&L + Holdings -->
+              <div class="flex items-center justify-between">
+                <div>
+                  <div class="text-xs text-gray-500">Virtual Account</div>
+                  <div class="text-sm font-mono text-gray-300" x-text="(b.current?.kas > 0 ? b.current.kas.toLocaleString() + ' KAS' : '') + (b.current?.kas > 0 && b.current?.usdt > 0 ? ' + ' : '') + (b.current?.usdt > 0 ? '$' + b.current.usdt.toFixed(2) : '')"></div>
+                  <div class="text-xs text-gray-500" x-text="'≈ ' + (b.current?.equivalentKas?.toLocaleString() || '--') + ' KAS eq'"></div>
+                </div>
+                <div class="text-right">
+                  <div class="text-lg font-bold" :class="(b.pnl?.kas || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'"
+                    x-text="b.pnl?.kas != null ? ((b.pnl.kas >= 0 ? '+' : '') + b.pnl.kas.toLocaleString() + ' KAS') : '--'"></div>
+                  <div class="text-xs font-mono" :class="(b.pnl?.pct || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'"
+                    x-text="b.pnl?.pct != null ? ((b.pnl.pct >= 0 ? '+' : '') + b.pnl.pct + '%') : ''"></div>
+                </div>
+              </div>
+              <!-- Baseline info -->
+              <div class="flex items-center justify-between mt-2 text-xs text-gray-600">
+                <span x-text="'Base: ' + b.baseline?.equivalentKas?.toLocaleString() + ' KAS @ $' + b.baseline?.kasPrice?.toFixed(5)"></span>
+                <span x-text="new Date(b.baseline?.createdAt).toLocaleString()"></span>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Price Chart (SVG Line + Labels) -->
+      <div class="bg-gray-900 rounded-xl p-4 border border-gray-800">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-sm font-medium text-gray-400">KAS/USDT — 72h</span>
+          <div class="flex items-center space-x-3">
+            <span class="text-xs text-gray-600" x-text="portfolio?.market ? fmtNum(portfolio.market.low24h, 5) + ' — ' + fmtNum(portfolio.market.high24h, 5) + ' (24h)' : ''"></span>
+            <span class="text-xs font-mono" :class="(portfolio?.market?.change24h || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'"
+              x-text="((portfolio?.market?.change24h || 0) >= 0 ? '+' : '') + fmtNum(portfolio?.market?.change24h) + '%'"></span>
+          </div>
+        </div>
+        <!-- SVG Line Chart with Y-axis labels -->
+        <div class="flex" x-show="pricePath()">
+          <!-- Y-axis price labels -->
+          <div class="flex flex-col justify-between text-right pr-2 py-1" style="width: 60px; height: 140px;">
+            <span class="text-xs font-mono text-gray-500" x-text="portfolio?.chart?.length ? '$' + Math.max(...portfolio.chart.map(d=>d.h)).toFixed(4) : ''"></span>
+            <span class="text-xs font-mono text-gray-500" x-text="portfolio?.chart?.length ? '$' + ((Math.max(...portfolio.chart.map(d=>d.h)) + Math.min(...portfolio.chart.map(d=>d.l))) / 2).toFixed(4) : ''"></span>
+            <span class="text-xs font-mono text-gray-500" x-text="portfolio?.chart?.length ? '$' + Math.min(...portfolio.chart.map(d=>d.l)).toFixed(4) : ''"></span>
+          </div>
+          <div class="flex-1">
+            <svg viewBox="0 0 600 140" class="w-full" style="height: 140px; cursor: crosshair;"
+              @mousemove="onChartMouseMove($event)" @mouseleave="onChartMouseLeave()">
+              <defs>
+                <linearGradient id="priceGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" :stop-color="(portfolio?.market?.change24h || 0) >= 0 ? '#10b981' : '#ef4444'" stop-opacity="0.3"/>
+                  <stop offset="100%" :stop-color="(portfolio?.market?.change24h || 0) >= 0 ? '#10b981' : '#ef4444'" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <!-- Grid lines -->
+              <line x1="0" y1="10" x2="600" y2="10" stroke="#374151" stroke-width="0.5" stroke-dasharray="4"/>
+              <line x1="0" y1="45" x2="600" y2="45" stroke="#374151" stroke-width="0.5" stroke-dasharray="4"/>
+              <line x1="0" y1="80" x2="600" y2="80" stroke="#374151" stroke-width="0.5" stroke-dasharray="4"/>
+              <line x1="0" y1="115" x2="600" y2="115" stroke="#374151" stroke-width="0.5" stroke-dasharray="4"/>
+              <!-- Area fill -->
+              <path :d="priceAreaPath()" fill="url(#priceGrad)"/>
+              <!-- Price line -->
+              <path :d="pricePath()" fill="none"
+                :stroke="(portfolio?.market?.change24h || 0) >= 0 ? '#10b981' : '#ef4444'"
+                stroke-width="2" stroke-linejoin="round"/>
+              <!-- Current price dot -->
+              <template x-if="portfolio?.chart?.length > 0">
+                <circle :cx="600" :cy="(() => { const d = portfolio.chart; const c = d[d.length-1].c; const min = Math.min(...d.map(x=>x.l)); const max = Math.max(...d.map(x=>x.h)); return 130 - ((c - min) / (max - min || 1)) * 120; })()" r="4"
+                  :fill="(portfolio?.market?.change24h || 0) >= 0 ? '#10b981' : '#ef4444'"/>
+              </template>
+              <!-- Current price label -->
+              <template x-if="portfolio?.market?.price && !chartHover">
+                <text x="590" :y="(() => { const d = portfolio.chart || []; if (!d.length) return 70; const c = d[d.length-1].c; const min = Math.min(...d.map(x=>x.l)); const max = Math.max(...d.map(x=>x.h)); return 130 - ((c - min) / (max - min || 1)) * 120 - 8; })()" text-anchor="end"
+                  :fill="(portfolio?.market?.change24h || 0) >= 0 ? '#10b981' : '#ef4444'"
+                  font-size="11" font-family="monospace" x-text="'$' + portfolio.market.price.toFixed(5)"></text>
+              </template>
+
+              <!-- Crosshair on hover (x-show on g, not template x-if) -->
+              <g x-show="chartHover" x-cloak>
+                <!-- Vertical line -->
+                <line :x1="chartHover?.x||0" y1="0" :x2="chartHover?.x||0" y2="140" stroke="#9ca3af" stroke-width="0.8" stroke-dasharray="3,2"/>
+                <!-- Horizontal line -->
+                <line x1="0" :y1="chartHover?.svgY||0" x2="600" :y2="chartHover?.svgY||0" stroke="#9ca3af" stroke-width="0.8" stroke-dasharray="3,2"/>
+                <!-- Dot on curve -->
+                <circle :cx="chartHover?.x||0" :cy="chartHover?.svgY||0" r="4.5" fill="#fff" stroke="#a855f7" stroke-width="2"/>
+                <!-- Price tag on right edge -->
+                <rect x="536" :y="(chartHover?.svgY||0) - 10" width="64" height="20" rx="3" fill="#a855f7"/>
+                <text x="568" :y="(chartHover?.svgY||0) + 4" text-anchor="middle" fill="#fff" font-size="10" font-family="monospace"
+                  x-text="chartHover ? '$' + chartHover.price.toFixed(5) : ''"></text>
+                <!-- Time tag on bottom -->
+                <rect :x="Math.max(0, Math.min((chartHover?.x||0) - 45, 510))" y="126" width="90" height="14" rx="2" fill="#374151"/>
+                <text :x="Math.max(45, Math.min(chartHover?.x||0, 555))" y="136" text-anchor="middle" fill="#d1d5db" font-size="9" font-family="monospace"
+                  x-text="chartHover?.time ? new Date(chartHover.time).toLocaleString(undefined, {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : ''"></text>
+                <!-- OHLCV info box -->
+                <rect :x="(chartHover?.x||0) > 400 ? (chartHover?.x||0) - 145 : (chartHover?.x||0) + 12" y="2" width="133" height="62" rx="4" fill="#1f2937" fill-opacity="0.95" stroke="#374151"/>
+                <text :x="(chartHover?.x||0) > 400 ? (chartHover?.x||0) - 138 : (chartHover?.x||0) + 19" y="15" fill="#9ca3af" font-size="9" font-family="monospace"
+                  x-text="chartHover?.time ? new Date(chartHover.time).toLocaleString(undefined, {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : ''"></text>
+                <text :x="(chartHover?.x||0) > 400 ? (chartHover?.x||0) - 138 : (chartHover?.x||0) + 19" y="27" fill="#e5e7eb" font-size="10" font-family="monospace"
+                  x-text="chartHover ? 'C $' + chartHover.price.toFixed(5) : ''"></text>
+                <text :x="(chartHover?.x||0) > 400 ? (chartHover?.x||0) - 138 : (chartHover?.x||0) + 19" y="39" fill="#6b7280" font-size="9" font-family="monospace"
+                  x-text="chartHover ? 'O $' + chartHover.open.toFixed(5) + '  H $' + chartHover.high.toFixed(5) : ''"></text>
+                <text :x="(chartHover?.x||0) > 400 ? (chartHover?.x||0) - 138 : (chartHover?.x||0) + 19" y="51" fill="#6b7280" font-size="9" font-family="monospace"
+                  x-text="chartHover ? 'L $' + chartHover.low.toFixed(5) : ''"></text>
+                <text :x="(chartHover?.x||0) > 400 ? (chartHover?.x||0) - 138 : (chartHover?.x||0) + 19" y="61" fill="#6b7280" font-size="9" font-family="monospace"
+                  x-text="chartHover ? 'Vol ' + (chartHover.vol >= 1e6 ? (chartHover.vol/1e6).toFixed(1)+'M' : chartHover.vol >= 1e3 ? (chartHover.vol/1e3).toFixed(0)+'K' : chartHover.vol.toFixed(0)) : ''"></text>
+              </g>
+            </svg>
+            <!-- X-axis time labels -->
+            <div class="flex justify-between text-xs text-gray-600 mt-1 font-mono">
+              <span x-text="portfolio?.chart?.[0]?.t ? new Date(portfolio.chart[0].t).toLocaleString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : ''"></span>
+              <span x-text="portfolio?.chart?.length > 36 ? new Date(portfolio.chart[Math.floor(portfolio.chart.length/3)].t).toLocaleString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : ''"></span>
+              <span x-text="portfolio?.chart?.length > 36 ? new Date(portfolio.chart[Math.floor(portfolio.chart.length*2/3)].t).toLocaleString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : ''"></span>
+              <span x-text="portfolio?.chart?.length > 1 ? new Date(portfolio.chart[portfolio.chart.length-1].t).toLocaleString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : ''"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Volume Bars (original mini-chart) -->
+      <div class="bg-gray-900 rounded-xl p-4 border border-gray-800">
+        <div class="text-sm font-medium text-gray-400 mb-2">Volume — 72h</div>
+        <div class="mini-chart">
+          <template x-for="(bar, i) in chartBars()" :key="i">
+            <div class="bar" :style="'height:' + Math.max(bar.height, 2) + '%'"
+              :class="bar.up ? 'bg-emerald-500' : 'bg-red-500'"
+              :title="portfolio?.chart?.[i] ? '$' + portfolio.chart[i].c.toFixed(5) + ' | Vol: ' + fmtBig(portfolio.chart[i].v) : ''"></div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Orderbook Depth + Chain Fundamentals (side by side) -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+        <!-- Orderbook Depth -->
+        <div class="bg-gray-900 rounded-xl p-4 border border-gray-800">
+          <div class="text-sm font-medium text-gray-400 mb-3">Order Book (MEXC)</div>
+          <div x-show="orderbook" class="space-y-0.5">
+            <!-- Asks (sell walls) — reversed so cheapest is at bottom -->
+            <div class="text-xs text-gray-600 mb-1">Sell</div>
+            <template x-for="ask in depthAsks().reverse()" :key="ask.price">
+              <div class="flex items-center text-sm h-6 relative">
+                <div class="absolute inset-0 bg-red-500/15 rounded-sm" :style="'width:' + ask.pct + '%'"></div>
+                <span class="relative z-10 w-24 font-mono text-red-400" x-text="ask.price.toFixed(5)"></span>
+                <span class="relative z-10 flex-1 text-right font-mono font-medium text-gray-300"
+                  x-text="ask.qty >= 1e6 ? (ask.qty/1e6).toFixed(1)+'M' : ask.qty >= 1e3 ? (ask.qty/1e3).toFixed(1)+'K' : ask.qty.toFixed(0)"></span>
+              </div>
+            </template>
+            <!-- Spread -->
+            <div class="text-center py-1.5 border-y border-gray-800 my-1">
+              <span class="text-xs text-gray-500">Spread </span>
+              <span class="text-sm text-yellow-400 font-mono font-medium" x-text="orderbook?.asks?.[0] && orderbook?.bids?.[0] ? (parseFloat(orderbook.asks[0][0]) - parseFloat(orderbook.bids[0][0])).toFixed(6) : '--'"></span>
+            </div>
+            <!-- Bids (buy walls) -->
+            <div class="text-xs text-gray-600 mb-1">Buy</div>
+            <template x-for="bid in depthBids()" :key="bid.price">
+              <div class="flex items-center text-sm h-6 relative">
+                <div class="absolute inset-0 bg-emerald-500/15 rounded-sm" :style="'width:' + bid.pct + '%'"></div>
+                <span class="relative z-10 w-24 font-mono text-emerald-400" x-text="bid.price.toFixed(5)"></span>
+                <span class="relative z-10 flex-1 text-right font-mono font-medium text-gray-300"
+                  x-text="bid.qty >= 1e6 ? (bid.qty/1e6).toFixed(1)+'M' : bid.qty >= 1e3 ? (bid.qty/1e3).toFixed(1)+'K' : bid.qty.toFixed(0)"></span>
+              </div>
+            </template>
+          </div>
+          <div x-show="!orderbook" class="text-xs text-gray-600 text-center py-8">Loading orderbook...</div>
+        </div>
+
+        <!-- Chain Fundamentals -->
+        <div class="bg-gray-900 rounded-xl p-4 border border-gray-800">
+          <div class="text-sm font-medium text-gray-400 mb-3">Kaspa Blockchain</div>
+          <template x-if="fundamentals?.available">
+            <div class="space-y-3">
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <div class="text-xs text-gray-500">Hashrate</div>
+                  <div class="text-lg font-bold text-blue-400" x-text="fmtExp(fundamentals.latest.hashrate) + ' H/s'"></div>
+                  <div class="text-xs" :class="fundamentals.trend1h?.hashrateChange?.startsWith('-') ? 'text-red-400' : 'text-emerald-400'"
+                    x-text="fundamentals.trend1h?.hashrateChange ? '1h: ' + fundamentals.trend1h.hashrateChange : ''"></div>
+                </div>
+                <div>
+                  <div class="text-xs text-gray-500">Difficulty</div>
+                  <div class="text-lg font-bold text-purple-400" x-text="fmtExp(fundamentals.latest.difficulty)"></div>
+                  <div class="text-xs" :class="fundamentals.trend1h?.difficultyChange?.startsWith('-') ? 'text-red-400' : 'text-emerald-400'"
+                    x-text="fundamentals.trend1h?.difficultyChange ? '1h: ' + fundamentals.trend1h.difficultyChange : ''"></div>
+                </div>
+                <div>
+                  <div class="text-xs text-gray-500">Circulating</div>
+                  <div class="text-lg font-bold" x-text="fundamentals.latest.circulatingSupply ? (fundamentals.latest.circulatingSupply / 1e9).toFixed(2) + 'B' : '--'"></div>
+                  <div class="text-xs text-yellow-400" x-text="fundamentals.latest.circulatingSupply && fundamentals.latest.maxSupply ? (fundamentals.latest.circulatingSupply / fundamentals.latest.maxSupply * 100).toFixed(1) + '% mined' : ''"></div>
+                </div>
+                <div>
+                  <div class="text-xs text-gray-500">DAG Tips</div>
+                  <div class="text-lg font-bold" x-text="fundamentals.latest.tipsCount || '--'"></div>
+                  <div class="text-xs text-gray-500" x-text="'Blocks: ' + (fundamentals.latest.blockCount?.toLocaleString() || '--')"></div>
+                </div>
+              </div>
+              <!-- Mined % progress bar -->
+              <div x-show="fundamentals.latest.circulatingSupply && fundamentals.latest.maxSupply">
+                <div class="flex justify-between text-xs text-gray-500 mb-1">
+                  <span>Supply Mined</span>
+                  <span x-text="(fundamentals.latest.circulatingSupply / fundamentals.latest.maxSupply * 100).toFixed(1) + '%'"></span>
+                </div>
+                <div class="w-full h-2 bg-gray-800 rounded-full overflow-hidden">
+                  <div class="h-full bg-gradient-to-r from-emerald-500 to-yellow-500 rounded-full transition-all"
+                    :style="'width:' + (fundamentals.latest.circulatingSupply / fundamentals.latest.maxSupply * 100) + '%'"></div>
+                </div>
+              </div>
+            </div>
+          </template>
+          <div x-show="!fundamentals?.available" class="text-xs text-gray-600 text-center py-8">
+            <span x-text="fundamentals?.message || 'Loading chain data...'"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Whale Activity -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+        <!-- Whale Alert Feed -->
+        <div class="bg-gray-900 rounded-xl p-4 border border-gray-800">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-sm font-medium text-gray-400">Whale Alerts</span>
+            <span class="text-xs text-gray-600" x-text="whaleAlerts.length > 0 ? whaleAlerts.length + ' recent' : 'monitoring...'"></span>
+          </div>
+          <div x-show="whaleAlerts.length > 0" class="space-y-1.5 max-h-48 overflow-y-auto">
+            <template x-for="alert in whaleAlerts" :key="alert.timestamp">
+              <div class="flex items-center justify-between text-xs px-2 py-1.5 rounded bg-gray-800/50">
+                <div class="flex items-center space-x-2">
+                  <span class="w-1.5 h-1.5 rounded-full"
+                    :class="alert.direction === 'INFLOW' ? 'bg-emerald-400' : alert.direction === 'OUTFLOW' ? 'bg-red-400' : 'bg-yellow-400'"></span>
+                  <span :class="alert.direction === 'INFLOW' ? 'text-emerald-400' : alert.direction === 'OUTFLOW' ? 'text-red-400' : 'text-yellow-400'"
+                    x-text="alert.direction"></span>
+                  <span class="font-mono text-white" x-text="fmtBig(alert.amountKas) + ' KAS'"></span>
+                </div>
+                <div class="flex items-center space-x-2 text-gray-500">
+                  <span x-text="alert.label || alert.address?.slice(-8)"></span>
+                  <span class="text-gray-600" x-text="alert.timestamp ? new Date(alert.timestamp).toLocaleTimeString() : ''"></span>
+                </div>
+              </div>
+            </template>
+          </div>
+          <div x-show="whaleAlerts.length === 0" class="text-xs text-gray-600 text-center py-6">
+            No large transfers detected yet. Threshold: 100K KAS.
+          </div>
+        </div>
+
+        <!-- Exchange + Whale Holdings -->
+        <div class="bg-gray-900 rounded-xl p-4 border border-gray-800">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-sm font-medium text-gray-400">Holdings Tracker</span>
+            <span class="text-xs text-gray-600" x-text="whaleActivity?.summary ? whaleActivity.summary.trackedAddresses + ' tracked' : ''"></span>
+          </div>
+          <template x-if="whaleActivity?.summary">
+            <div class="space-y-3">
+              <!-- Summary -->
+              <div class="grid grid-cols-2 gap-2 text-center">
+                <div class="bg-gray-800/50 rounded-lg p-2">
+                  <div class="text-xs text-gray-500">Exchange Total</div>
+                  <div class="text-sm font-bold text-red-400" x-text="fmtBig(whaleActivity.summary.exchangeBalance) + ' KAS'"></div>
+                </div>
+                <div class="bg-gray-800/50 rounded-lg p-2">
+                  <div class="text-xs text-gray-500">Whale Total</div>
+                  <div class="text-sm font-bold text-blue-400" x-text="fmtBig(whaleActivity.summary.whaleBalance) + ' KAS'"></div>
+                </div>
+              </div>
+              <!-- Top holders list -->
+              <div class="space-y-1 max-h-36 overflow-y-auto">
+                <template x-for="ex in (whaleActivity?.exchanges || []).slice(0, 5)" :key="ex.address">
+                  <div class="flex items-center justify-between text-xs px-2 py-1 rounded bg-gray-800/30">
+                    <span class="text-gray-300" x-text="ex.label"></span>
+                    <div class="flex items-center space-x-2">
+                      <span class="font-mono text-gray-400" x-text="fmtBig(ex.balance)"></span>
+                      <span x-show="ex.changePct !== null" class="text-xs"
+                        :class="ex.changePct > 0 ? 'text-emerald-400' : ex.changePct < 0 ? 'text-red-400' : 'text-gray-600'"
+                        x-text="(ex.changePct > 0 ? '+' : '') + ex.changePct + '%'"></span>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+          <div x-show="!whaleActivity?.summary" class="text-xs text-gray-600 text-center py-6">Loading whale data...</div>
+        </div>
+      </div>
+
+      <!-- Chain Intelligence -->
+      <div x-show="chainData" class="bg-gray-900 rounded-xl border border-gray-800 p-4">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-sm font-medium text-gray-400">Chain Intelligence (KANet)</span>
+          <span class="text-xs text-gray-600">Scout-scanned</span>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+          <!-- Activity 24h -->
+          <div>
+            <div class="text-xs text-gray-500">Activity (24h)</div>
+            <div class="text-lg font-bold" x-text="chainData?.activity?.last24h?.toLocaleString() || '--'"></div>
+            <div class="text-xs" :class="(chainData?.activity?.weekTrend || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'"
+              x-text="chainData?.activity?.weekTrend != null ? 'WoW ' + (chainData.activity.weekTrend >= 0 ? '+' : '') + chainData.activity.weekTrend + '%' : ''"></div>
+          </div>
+          <!-- Active Addresses -->
+          <div>
+            <div class="text-xs text-gray-500">Active Addresses</div>
+            <div class="text-lg font-bold" x-text="chainData?.addresses?.active || '--'"></div>
+            <div class="text-xs text-emerald-400" x-text="chainData?.addresses?.new24h > 0 ? '+' + chainData.addresses.new24h + ' new (24h)' : ''"></div>
+          </div>
+          <!-- Protocols -->
+          <div>
+            <div class="text-xs text-gray-500">Comms / Handshakes</div>
+            <div class="text-lg font-bold" x-text="(chainData?.activity?.protocols?.comm || 0).toLocaleString()"></div>
+            <div class="text-xs text-gray-500" x-text="'HS: ' + (chainData?.activity?.protocols?.handshake || 0)"></div>
+          </div>
+          <!-- Ecosystem -->
+          <div>
+            <div class="text-xs text-gray-500">Agent Cards</div>
+            <div class="text-lg font-bold" x-text="chainData?.ecosystem?.agentCards || 0"></div>
+            <div class="text-xs text-gray-500" x-text="'Broadcasts: ' + (chainData?.ecosystem?.broadcasts || 0)"></div>
+          </div>
+        </div>
+
+        <!-- Top Addresses -->
+        <div x-show="chainData?.topAddresses?.length > 0">
+          <div class="text-xs text-gray-500 mb-1">Top Addresses</div>
+          <div class="flex flex-wrap gap-2">
+            <template x-for="addr in (chainData?.topAddresses || []).slice(0, 5)" :key="addr.address">
+              <span class="text-xs px-2 py-1 rounded bg-gray-800 text-gray-300">
+                <span x-text="addr.name || addr.address.slice(-8)"></span>
+                <span class="text-gray-500 ml-1" x-text="addr.interactions"></span>
+              </span>
+            </template>
+          </div>
+        </div>
+
+        <!-- Hourly Activity Sparkline -->
+        <div x-show="chainData?.hourlyActivity?.length > 0" class="mt-3">
+          <div class="text-xs text-gray-500 mb-1">24h Activity Pattern</div>
+          <div class="flex items-end gap-px h-8">
+            <template x-for="h in chainData?.hourlyActivity || []" :key="h.hour">
+              <div class="flex-1 rounded-t bg-purple-500 opacity-60 hover:opacity-100 transition-opacity"
+                :style="'height:' + Math.max(h.n / Math.max(...(chainData?.hourlyActivity || []).map(x=>x.n)) * 100, 4) + '%'"
+                :title="h.hour + ':00 — ' + h.n + ' txs'"></div>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <!-- Agent Triggers Panel -->
+      <div x-show="triggers" class="bg-gray-900 rounded-xl border border-gray-800 p-4">
+        <div class="text-sm font-medium text-gray-400 mb-3">Agent Activation</div>
+        <div class="grid grid-cols-3 gap-4 mb-4">
+          <!-- Proactive -->
+          <div class="bg-gray-800/50 rounded-lg p-3">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-medium text-gray-300">Proactive</span>
+              <label class="flex items-center cursor-pointer">
+                <div class="relative">
+                  <input type="checkbox" :checked="triggers?.proactive?.enabled" @change="updateTrigger('proactiveEnabled', $event.target.checked)" class="sr-only" />
+                  <div class="w-7 h-3.5 rounded-full" :class="triggers?.proactive?.enabled ? 'bg-emerald-600' : 'bg-gray-700'"></div>
+                  <div class="absolute top-0.5 left-0.5 w-2.5 h-2.5 rounded-full bg-white transition-transform" :class="triggers?.proactive?.enabled ? 'translate-x-3.5' : ''"></div>
+                </div>
+              </label>
+            </div>
+            <div class="text-xs text-gray-500" x-text="'Every ' + (triggers?.proactive?.intervalMin || 60) + ' min'"></div>
+            <button @click="fireTrigger('proactive')" :disabled="triggerRunning==='proactiveall'"
+              class="mt-2 w-full text-xs px-2 py-1 rounded bg-purple-600/20 text-purple-400 hover:bg-purple-600/40">
+              <span x-show="triggerRunning!=='proactiveall'">Run Now</span>
+              <span x-show="triggerRunning==='proactiveall'">Running...</span>
+            </button>
+          </div>
+          <!-- Reflection -->
+          <div class="bg-gray-800/50 rounded-lg p-3">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-medium text-gray-300">Reflection</span>
+              <label class="flex items-center cursor-pointer">
+                <div class="relative">
+                  <input type="checkbox" :checked="triggers?.reflection?.enabled" @change="updateTrigger('reflectionEnabled', $event.target.checked)" class="sr-only" />
+                  <div class="w-7 h-3.5 rounded-full" :class="triggers?.reflection?.enabled ? 'bg-emerald-600' : 'bg-gray-700'"></div>
+                  <div class="absolute top-0.5 left-0.5 w-2.5 h-2.5 rounded-full bg-white transition-transform" :class="triggers?.reflection?.enabled ? 'translate-x-3.5' : ''"></div>
+                </div>
+              </label>
+            </div>
+            <div class="text-xs text-gray-500" x-text="'Every ' + (triggers?.reflection?.intervalHours || 24) + 'h'"></div>
+            <button @click="fireTrigger('reflection')" :disabled="triggerRunning==='reflectionall'"
+              class="mt-2 w-full text-xs px-2 py-1 rounded bg-blue-600/20 text-blue-400 hover:bg-blue-600/40">
+              <span x-show="triggerRunning!=='reflectionall'">Run Now</span>
+              <span x-show="triggerRunning==='reflectionall'">Running...</span>
+            </button>
+          </div>
+          <!-- Price Alert -->
+          <div class="bg-gray-800/50 rounded-lg p-3">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-medium text-gray-300">Price Alert</span>
+              <label class="flex items-center cursor-pointer">
+                <div class="relative">
+                  <input type="checkbox" :checked="triggers?.priceAlert?.enabled" @change="updateTrigger('priceAlertEnabled', $event.target.checked)" class="sr-only" />
+                  <div class="w-7 h-3.5 rounded-full" :class="triggers?.priceAlert?.enabled ? 'bg-emerald-600' : 'bg-gray-700'"></div>
+                  <div class="absolute top-0.5 left-0.5 w-2.5 h-2.5 rounded-full bg-white transition-transform" :class="triggers?.priceAlert?.enabled ? 'translate-x-3.5' : ''"></div>
+                </div>
+              </label>
+            </div>
+            <div class="flex items-center space-x-1 mt-1">
+              <span class="text-xs text-gray-500">±</span>
+              <input type="number" :value="triggers?.priceAlert?.thresholdPct || 3" step="0.5" min="0.5" max="20"
+                @change="updateTrigger('priceThresholdPct', $event.target.value)"
+                class="w-14 bg-gray-700 text-gray-200 text-xs rounded px-1.5 py-0.5 border border-gray-600 focus:outline-none focus:border-purple-500" />
+              <span class="text-xs text-gray-500">%</span>
+            </div>
+            <template x-if="triggers?.priceAlert?.baselinePrice">
+              <div class="text-xs mt-1.5 space-y-0.5">
+                <div class="flex justify-between">
+                  <span class="text-red-400">Sell</span>
+                  <span class="text-red-400 font-mono" x-text="'$' + (triggers.priceAlert.baselinePrice * (1 + (triggers.priceAlert.thresholdPct || 3) / 100)).toFixed(5)"></span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-gray-500">Base</span>
+                  <span class="text-gray-400 font-mono" x-text="'$' + triggers.priceAlert.baselinePrice.toFixed(5)"></span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-emerald-400">Buy</span>
+                  <span class="text-emerald-400 font-mono" x-text="'$' + (triggers.priceAlert.baselinePrice * (1 - (triggers.priceAlert.thresholdPct || 3) / 100)).toFixed(5)"></span>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- Agent status rows -->
+        <div class="space-y-1">
+          <template x-for="ag in (triggers?.agents || [])" :key="ag.relayId">
+            <div class="flex items-center justify-between text-xs px-2 py-1.5 rounded bg-gray-800/30">
+              <div class="flex items-center space-x-2">
+                <span class="w-1.5 h-1.5 rounded-full" :class="ag.hasMind ? 'bg-emerald-400' : 'bg-red-400'"></span>
+                <span class="text-gray-300 font-medium" x-text="ag.name"></span>
+              </div>
+              <div class="flex items-center space-x-3 text-gray-500">
+                <span x-show="ag.lastProactive" x-text="'P: ' + new Date(ag.lastProactive).toLocaleTimeString()"></span>
+                <span x-show="ag.lastReflection" x-text="'R: ' + new Date(ag.lastReflection).toLocaleTimeString()"></span>
+                <span x-show="!ag.lastProactive && !ag.lastReflection">awaiting first cycle</span>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Balances Table -->
+      <div class="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+        <div class="px-4 py-3 border-b border-gray-800">
+          <span class="text-sm font-medium text-gray-400" x-text="(portfolio?.exchange || 'Exchange') + ' Balances'"></span>
+        </div>
+        <table class="w-full text-sm">
+          <thead class="text-xs text-gray-500 uppercase">
+            <tr><th class="px-4 py-2 text-left">Asset</th><th class="px-4 py-2 text-right">Free</th><th class="px-4 py-2 text-right">Locked</th></tr>
+          </thead>
+          <tbody>
+            <template x-for="b in (portfolio?.balances || [])" :key="b.asset">
+              <tr class="border-t border-gray-800/50 hover:bg-gray-800/30">
+                <td class="px-4 py-2 font-medium" x-text="b.asset"></td>
+                <td class="px-4 py-2 text-right font-mono" x-text="fmtNum(b.free, b.asset === 'KAS' ? 2 : 6)"></td>
+                <td class="px-4 py-2 text-right font-mono text-gray-500" x-text="fmtNum(b.locked, 6)"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Not configured warning -->
+      <div x-show="!configured" class="bg-yellow-900/30 border border-yellow-700 rounded-xl p-4 text-sm text-yellow-300">
+        No exchange account configured. Open <button @click="showSettings = true" class="underline hover:text-white">Settings</button> to add your exchange API key.
+      </div>
+    </div>
+
+    <!-- Right: Agent Advisor (4 cols) -->
+    <div class="col-span-12 lg:col-span-4">
+      <div class="bg-gray-900 rounded-xl border border-gray-800 flex flex-col" style="height: calc(100vh - 160px)">
+        <!-- Agent selector -->
+        <div class="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
+          <span class="text-sm font-medium text-gray-400">Trading Advisor</span>
+          <select x-model="selectedAgent" @change="qtReady = false; qtResult = null; if (selectedAgent !== '__all__' && qtQty >= 100 && qtPreview) fetchPreview()" class="bg-gray-800 text-gray-200 text-xs rounded px-2 py-1 border border-gray-700">
+            <template x-for="a in agents" :key="a.id">
+              <option :value="a.id" x-text="a.name"></option>
+            </template>
+            <option value="__all__">All Agents</option>
+          </select>
+        </div>
+
+        <!-- Quick Trade Panel -->
+        <div class="px-4 py-3 border-b border-gray-800">
+          <div class="flex items-center space-x-2">
+            <button @click="qtSide = 'BUY'; qtReady = false; qtResult = null" class="flex-1 py-1.5 rounded text-xs font-bold transition-colors"
+              :class="qtSide === 'BUY' ? 'bg-emerald-600 text-white' : 'bg-gray-800 text-gray-500 hover:text-emerald-400'">BUY</button>
+            <button @click="qtSide = 'SELL'; qtReady = false; qtResult = null" class="flex-1 py-1.5 rounded text-xs font-bold transition-colors"
+              :class="qtSide === 'SELL' ? 'bg-red-600 text-white' : 'bg-gray-800 text-gray-500 hover:text-red-400'">SELL</button>
+            <input type="number" x-model.number="qtQty" placeholder="数量" min="100" step="100"
+              class="w-28 bg-gray-800 text-gray-200 text-xs rounded px-2 py-1.5 border border-gray-700 focus:outline-none focus:border-purple-500 font-mono text-right"
+              @keydown.enter="submitQuickTrade()" @input="qtReady = false; qtResult = null" />
+            <button @click="submitQuickTrade()" :disabled="asking || !qtQty || qtQty < 100"
+              class="px-3 py-1.5 rounded text-xs font-medium transition-colors"
+              :class="(asking || !qtQty || qtQty < 100) ? 'bg-gray-700 text-gray-500 cursor-not-allowed' : 'bg-purple-600 text-white hover:bg-purple-700'">
+              <span x-show="!asking">Go</span>
+              <span x-show="asking">...</span>
+            </button>
+          </div>
+          <div class="flex items-center justify-between mt-1.5">
+            <span class="text-xs text-gray-600" x-text="selectedAgent === '__all__' ? '→ 咨询所有 Agent（选定一个后可执行）' : '→ ' + agentName() + ' 分析并执行'"></span>
+            <div class="flex items-center space-x-2">
+              <span x-show="qtExecuting" class="text-xs text-purple-400 animate-pulse">执行中...</span>
+              <span class="text-xs font-mono" :class="mode === 'LIVE' ? 'text-red-400' : 'text-yellow-400'" x-text="mode"></span>
+            </div>
+          </div>
+          <!-- Execute / Cancel — appears after Go -->
+          <div x-show="qtReady" x-transition class="mt-2 flex space-x-2">
+            <button @click="executeQuickTrade()" :disabled="qtExecuting"
+              class="flex-1 py-2 rounded text-sm font-bold transition-colors"
+              :class="qtExecuting ? 'bg-gray-800 text-gray-600 cursor-not-allowed' : mode === 'LIVE' ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-yellow-600 text-black hover:bg-yellow-500'"
+              x-text="qtExecuting ? '执行中...' : mode === 'LIVE' ? '⚡ 确认' : '▶ 模拟'">
+            </button>
+            <button @click="qtReady = false; qtPreview = null; qtResult = null"
+              class="px-4 py-2 rounded text-sm font-bold bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white transition-colors">
+              取消
+            </button>
+          </div>
+          <!-- Preview (from smart params) -->
+          <div x-show="qtPreview?.ok && !qtResult" x-transition class="mt-1.5 px-2 py-1.5 rounded text-xs font-mono bg-purple-900/20 border border-purple-800 text-purple-300">
+            <div x-text="qtPreview?.summary?.orderCount + ' orders | avg $' + qtPreview?.summary?.avgPrice + ' | $' + qtPreview?.summary?.totalUsdt + ' USDT'"></div>
+            <div class="text-purple-500 mt-0.5" x-text="'策略: ' + qtPreview?.params?.reason + ' | 每档' + Math.round((qtPreview?.params?.maxPctPerLevel||0)*100) + '% | 滑点≤' + qtPreview?.params?.maxSlippagePct + '%'"></div>
+          </div>
+          <!-- Execution result -->
+          <div x-show="qtResult" x-transition class="mt-1.5 px-2 py-1.5 rounded text-xs font-mono"
+            :class="qtResult?.ok ? 'bg-emerald-900/30 border border-emerald-800 text-emerald-300' : 'bg-red-900/30 border border-red-800 text-red-300'">
+            <template x-if="qtResult?.summary">
+              <span x-text="(qtResult.ok ? '✓' : '⚠') + ' ' + qtResult.summary.executed + '/' + qtResult.summary.planned + ' orders | avg $' + qtResult.summary.avgPrice + ' | $' + qtResult.summary.totalUsdt"></span>
+            </template>
+            <template x-if="qtResult?.error && !qtResult?.summary">
+              <span x-text="'✗ ' + qtResult.error"></span>
+            </template>
+          </div>
+        </div>
+
+        <!-- Chat messages -->
+        <div id="chat-scroll" class="flex-1 overflow-y-auto p-4 space-y-3">
+          <!-- Welcome message -->
+          <div x-show="chatHistory.length === 0" class="text-center text-gray-600 mt-8">
+            <p class="text-sm">Ask <span class="text-purple-400" x-text="agentName()"></span> for trading advice</p>
+            <p class="text-xs mt-2 text-gray-700">Try: "Should I buy or sell KAS now?"</p>
+          </div>
+
+          <template x-for="(msg, i) in chatHistory" :key="i">
+            <div class="flex" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
+              <div class="max-w-[85%] rounded-lg px-3 py-2 text-sm"
+                :class="msg.role === 'user' ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-200'">
+                <template x-if="msg.thinking">
+                  <div class="thinking-dots py-1"><span></span><span></span><span></span></div>
+                </template>
+                <template x-if="!msg.thinking">
+                  <div>
+                    <div x-show="msg.name" class="text-xs font-semibold text-purple-400 mb-1" x-text="msg.name"></div>
+                    <p x-text="msg.text" style="white-space: pre-wrap;"></p>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- Input -->
+        <div class="px-4 py-3 border-t border-gray-800">
+          <div class="flex space-x-2">
+            <input type="text" x-model="question" @keydown.enter="askAgent()"
+              placeholder="Ask about KAS..."
+              class="flex-1 bg-gray-800 text-gray-200 text-sm rounded-lg px-3 py-2 border border-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-500" />
+            <button @click="askAgent()" :disabled="asking || !question.trim()"
+              class="px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+              :class="asking ? 'bg-gray-700 text-gray-500' : 'bg-purple-600 text-white hover:bg-purple-700'">
+              Ask
+            </button>
+          </div>
+
+          <!-- Quick questions -->
+          <div class="flex flex-wrap gap-1.5 mt-2">
+            <button @click="question = 'KAS market analysis'; askAgent()"
+              class="text-xs px-2 py-1 rounded bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white">Market Analysis</button>
+            <button @click="question = 'Should I buy or sell KAS now?'; askAgent()"
+              class="text-xs px-2 py-1 rounded bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white">Buy or Sell?</button>
+            <button @click="question = 'What does the on-chain data say about KAS demand?'; askAgent()"
+              class="text-xs px-2 py-1 rounded bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white">Chain Intel</button>
+            <button @click="question = '当前订单簿深度如何？适合大单操作吗？'; askAgent()"
+              class="text-xs px-2 py-1 rounded bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white">Depth Check</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══════════════ MARKET VIEW ══════════════ -->
+  <div class="max-w-7xl mx-auto px-6 py-6" x-show="activeView === 'market'" x-cloak>
+
+    <!-- Market 钱包管理 -->
+    <div class="mb-6" x-data="{
+      showMarketSettings: false,
+      agentAccounts: [],
+      kasPrice: 0,
+      selectedSettingsAgent: null,
+      showMnemonic: {},
+      mnemonicData: {},
+      showPrivkey: {},
+      privkeyData: {},
+      creatingWallet: '',
+
+      async loadAccounts() {
+        const agents = [<% it.relays.forEach(function(r, i) { %>{id:'<%= r.id %>',name:'<%= r.name %>'}<%if(i<it.relays.length-1){%>,<%}%><%})%>];
+        // Load all in parallel (don't let one slow agent block others)
+        const results = await Promise.all(agents.map(async (a) => {
+          try {
+            const wallets = await fetch('/api/relay/' + a.id + '/wallets').then(r => r.json());
+            const chainMap = {};
+            for (const w of (wallets.chains || [])) {
+              if (w.isDefault || !chainMap[w.chain]) chainMap[w.chain] = w;
+            }
+            return { ...a, kas: wallets.kaspa?.balance, wallets: { kaspa: wallets.kaspa, ...chainMap }, chainWallets: wallets.chains || [] };
+          } catch {
+            // Even if balance fails, still show the agent with basic info
+            return { ...a, kas: null, wallets: { kaspa: { address: null } }, chainWallets: [] };
+          }
+        }));
+        this.agentAccounts = results;
+        // Get KAS price (reuse backend proxy)
+        try { const r = await fetch('/api/trade/kas-price').then(r=>r.json()); if(r?.price) this.kasPrice = r.price; } catch {}
+      },
+
+      async createWallet(agentId, chain) {
+        this.creatingWallet = agentId + chain;
+        try {
+          await fetch('/api/relay/' + agentId + '/wallets', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ chain })
+          });
+          await this.loadAccounts();
+        } catch {} finally { this.creatingWallet = ''; }
+      },
+
+      copyAddr(text) {
+        navigator.clipboard.writeText(text);
+      },
+
+      async toggleMnemonic(agentId) {
+        if (this.showMnemonic[agentId]) { this.showMnemonic[agentId] = false; return; }
+        if (!confirm('确定要显示助记词？请确保安全环境。')) return;
+        try {
+          const res = await fetch('/relays/' + agentId + '/mnemonic').then(r => r.json());
+          this.mnemonicData[agentId] = res.mnemonic;
+          this.showMnemonic[agentId] = true;
+        } catch {}
+      },
+
+      async showPrivateKey(agentId, walletId) {
+        if (!confirm('确定要显示私钥？请确保安全环境。')) return;
+        try {
+          const res = await fetch('/api/relay/' + agentId + '/wallets/' + walletId + '/privkey').then(r => r.json());
+          this.privkeyData[walletId] = res.privateKey;
+          this.showPrivkey[walletId] = true;
+        } catch {}
+      },
+
+      async importWallet(agentId, chain) {
+        const key = prompt('请输入 ' + chain.toUpperCase() + ' 私钥：');
+        if (!key) return;
+        try {
+          await fetch('/api/relay/' + agentId + '/wallets/import', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ chain, privateKey: key })
+          });
+          await this.loadAccounts();
+        } catch(e) { alert('导入失败: ' + e.message); }
+      },
+
+      async deleteWallet(agentId, walletId) {
+        if (!confirm('确定要删除此钱包？此操作不可逆！')) return;
+        if (!confirm('再次确认：删除后私钥将无法恢复！')) return;
+        try {
+          await fetch('/api/relay/' + agentId + '/wallets/' + walletId, { method: 'DELETE' });
+          await this.loadAccounts();
+        } catch {}
+      },
+
+      withdrawing: null,
+
+      startWithdraw(agentId, wallet) {
+        this.withdrawing = { agentId, wallet, toAddress: '', amount: '' };
+      },
+
+      cancelWithdraw() {
+        this.withdrawing = null;
+      },
+
+      async executeWithdraw() {
+        if (!this.withdrawing) return;
+        const w = this.withdrawing;
+        if (!w.toAddress || !w.amount) { alert('请填写地址和金额'); return; }
+        if (!confirm('确认提取 ' + w.amount + ' 从 ' + w.wallet.chain.toUpperCase() + ' 钱包到 ' + w.toAddress + '？')) return;
+        try {
+          let res;
+          if (w.wallet.chain === 'kas') {
+            // KAS uses Relay transfer API
+            res = await fetch('/api/relay/' + w.agentId + '/transfer', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ to: w.toAddress, amount: w.amount }),
+            });
+          } else {
+            // EVM/SOL/TRON uses wallet withdraw API
+            res = await fetch('/api/relay/' + w.agentId + '/wallets/' + w.wallet.id + '/withdraw', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ to: w.toAddress, amount: w.amount }),
+            });
+          }
+          const result = await res.json();
+          if (result.ok) {
+            alert('提取成功！TX: ' + (result.txHash || ''));
+            this.withdrawing = null;
+            await this.loadAccounts();
+          } else {
+            alert('提取失败: ' + (result.error || ''));
+          }
+        } catch (err) {
+          alert('提取失败: ' + err.message);
+        }
+      },
+
+      init() { this.loadAccounts(); }
+    }">
+      <!-- 钱包管理（折叠，在资产上方） -->
+      <button @click="showMarketSettings = !showMarketSettings"
+        class="text-sm text-gray-400 hover:text-white transition-colors mb-3">
+        <span x-text="showMarketSettings ? '▼ 隐藏钱包管理' : '▶ 钱包管理'"></span>
+      </button>
+
+      <div x-show="showMarketSettings" x-transition class="space-y-3">
+        <template x-for="a in agentAccounts" :key="a.id">
+          <div class="bg-gray-900 rounded-xl border border-gray-800 p-4">
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-sm font-semibold" x-text="a.name"></span>
+            </div>
+
+            <!-- Kaspa（Agent 身份，不能删除） -->
+            <div class="flex items-center justify-between py-1.5 border-b border-gray-800">
+              <div class="flex items-center space-x-2 flex-1">
+                <span class="text-xs font-medium text-purple-400 w-12">KAS</span>
+                <span class="text-xs font-mono text-gray-300" x-text="a.wallets?.kaspa?.address?.slice(0,12) + '...' + a.wallets?.kaspa?.address?.slice(-8)"></span>
+                <span class="text-xs font-mono text-white font-semibold" x-text="(a.kas ?? 0).toFixed(3) + ' KAS'"></span>
+              </div>
+              <div class="flex items-center space-x-1">
+                <button @click="startWithdraw(a.id, { id: 'kas_' + a.id, chain: 'kas', address: a.wallets?.kaspa?.address })" class="text-xs text-gray-500 hover:text-blue-400 px-1">提取</button>
+                <button @click="copyAddr(a.wallets?.kaspa?.address)" class="text-xs text-gray-500 hover:text-white px-1">复制</button>
+                <button @click="toggleMnemonic(a.id)" class="text-xs text-gray-500 hover:text-yellow-400 px-1" x-text="showMnemonic[a.id] ? '隐藏' : '助记词'"></button>
+              </div>
+            </div>
+            <div x-show="showMnemonic[a.id]" class="py-2 px-3 bg-yellow-900/20 border border-yellow-800/30 rounded text-xs font-mono text-yellow-300 break-all select-all" x-text="mnemonicData[a.id]"></div>
+            <!-- KAS 提取表单 -->
+            <template x-if="withdrawing && withdrawing.wallet.chain === 'kas' && withdrawing.agentId === a.id">
+              <div class="py-2 px-3 bg-blue-900/10 border border-blue-800/30 rounded mt-1">
+                <div class="flex items-center space-x-2 text-xs">
+                  <input type="text" x-model="withdrawing.toAddress" placeholder="Kaspa 目标地址"
+                    class="flex-1 bg-gray-800 text-white text-xs rounded px-2 py-1 border border-gray-700" />
+                  <input type="text" x-model="withdrawing.amount" placeholder="KAS 数量"
+                    class="w-24 bg-gray-800 text-white text-xs rounded px-2 py-1 border border-gray-700" />
+                  <button @click="executeWithdraw()" class="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-xs">确认</button>
+                  <button @click="cancelWithdraw()" class="text-gray-500 hover:text-white text-xs">取消</button>
+                </div>
+              </div>
+            </template>
+
+            <!-- 已有钱包（动态循环，只显示已创建的） -->
+            <template x-for="w in (a.chainWallets || [])" :key="w.id">
+              <div>
+                <div class="flex items-center justify-between py-1.5 border-b border-gray-800">
+                  <div class="flex items-center space-x-2 flex-1">
+                    <span class="text-xs text-gray-500 w-12 uppercase" x-text="w.chain"></span>
+                    <span class="text-xs font-mono text-gray-300" x-text="w.address.slice(0,6) + '...' + w.address.slice(-4)"></span>
+                    <span class="text-xs font-mono text-green-400" x-text="w.balance !== null && w.balance !== undefined ? w.balance + ' USDT' : '0'"></span>
+                    <span x-show="w.label" class="text-xs text-gray-600" x-text="w.label"></span>
+                  </div>
+                  <div class="flex space-x-1">
+                    <button @click="copyAddr(w.address)" class="text-xs text-gray-500 hover:text-white px-1">复制</button>
+                    <button @click="startWithdraw(a.id, w)" class="text-xs text-gray-500 hover:text-blue-400 px-1">提取</button>
+                    <button @click="showPrivateKey(a.id, w.id)" class="text-xs text-gray-500 hover:text-yellow-400 px-1">私钥</button>
+                    <button @click="deleteWallet(a.id, w.id)" class="text-xs text-gray-500 hover:text-red-400 px-1">删除</button>
+                  </div>
+                </div>
+                <!-- Private key display -->
+                <template x-if="showPrivkey[w.id]">
+                  <div class="py-1.5 px-3 bg-yellow-900/20 border border-yellow-800/30 rounded text-xs font-mono text-yellow-300 break-all select-all flex justify-between">
+                    <span x-text="privkeyData[w.id]"></span>
+                    <button @click="showPrivkey[w.id] = false" class="text-yellow-500 hover:text-yellow-300 ml-2">隐藏</button>
+                  </div>
+                </template>
+                <!-- 提取表单 -->
+                <template x-if="withdrawing && withdrawing.wallet.id === w.id">
+                  <div class="py-2 px-3 bg-blue-900/10 border border-blue-800/30 rounded mt-1">
+                    <div class="flex items-center space-x-2 text-xs">
+                      <input type="text" x-model="withdrawing.toAddress" placeholder="目标地址"
+                        class="flex-1 bg-gray-800 text-white text-xs rounded px-2 py-1 border border-gray-700" />
+                      <input type="text" x-model="withdrawing.amount" placeholder="金额"
+                        class="w-24 bg-gray-800 text-white text-xs rounded px-2 py-1 border border-gray-700" />
+                      <button @click="executeWithdraw()" class="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-xs">确认</button>
+                      <button @click="cancelWithdraw()" class="text-gray-500 hover:text-white text-xs">取消</button>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </template>
+
+            <!-- 添加钱包 -->
+            <div class="pt-2" x-data="{ showAddForm: false, addChain: 'bnb' }">
+              <template x-if="!showAddForm">
+                <button @click="showAddForm = true" class="text-xs text-purple-400 hover:text-purple-300">+ 添加钱包</button>
+              </template>
+              <template x-if="showAddForm">
+                <div class="flex items-center space-x-2">
+                  <select x-model="addChain" class="bg-gray-800 text-white text-xs rounded px-2 py-1 border border-gray-700">
+                    <option value="bnb">BNB Chain</option>
+                    <option value="eth">Ethereum</option>
+                    <option value="sol">Solana</option>
+                    <option value="tron">TRON</option>
+                  </select>
+                  <button @click="createWallet(a.id, addChain); showAddForm = false" class="text-xs bg-purple-600 hover:bg-purple-700 text-white px-2 py-1 rounded">新建</button>
+                  <button @click="importWallet(a.id, addChain); showAddForm = false" class="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded">导入</button>
+                  <button @click="showAddForm = false" class="text-xs text-gray-500 hover:text-white px-1">取消</button>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- 我的资产 -->
+      <div class="mb-4">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <template x-for="a in agentAccounts" :key="a.id">
+            <div class="bg-gray-900 rounded-xl p-3 border border-gray-800">
+              <div class="text-sm font-semibold mb-1" x-text="a.name"></div>
+              <div class="flex items-center space-x-1 text-xs">
+                <span class="text-white font-mono" x-text="(a.kas ?? 0).toFixed(2) + ' KAS'"></span>
+              </div>
+              <template x-for="w in (a.chainWallets || [])" :key="w.id">
+                <div class="flex items-center space-x-1 text-xs">
+                  <span class="text-gray-500 uppercase" x-text="w.chain"></span>
+                  <span class="font-mono text-green-400" x-text="(w.balance !== null && w.balance !== undefined ? w.balance : 0) + ' USDT'"></span>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+        <!-- 锁定余额 -->
+        <div class="mt-2 bg-yellow-900/20 rounded-lg px-4 py-1.5 text-xs" x-data="{ fundLocks: {}, async init() { await this.loadLocks(); }, async loadLocks() { try { const acct = agentAccounts[0]; if(!acct) return; const res = await fetch('/api/trade/fund-locks?relay_node_id='+acct.relayNodeId); const d = await res.json(); this.fundLocks = d.totals || {}; } catch{} } }" x-init="$watch('agentAccounts', () => loadLocks())">
+          <template x-if="Object.keys(fundLocks).length > 0">
+            <div class="flex items-center space-x-3">
+              <span class="text-yellow-500">锁定中</span>
+              <template x-for="[asset, amt] in Object.entries(fundLocks)" :key="asset">
+                <span class="text-yellow-400 font-mono" x-text="amt.toFixed(2) + ' ' + asset.toUpperCase()"></span>
+              </template>
+            </div>
+          </template>
+        </div>
+        <!-- 资产总计 -->
+        <div class="mt-2 bg-gray-900/50 rounded-lg px-4 py-2 text-xs" x-data="{ unit: 'kas' }">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+              <span class="text-gray-500">总资产</span>
+              <div class="flex bg-gray-800 rounded p-0.5">
+                <button @click="unit = 'kas'" :class="unit === 'kas' ? 'bg-gray-700 text-white' : 'text-gray-500'" class="px-1.5 py-0.5 text-xs rounded">KAS</button>
+                <button @click="unit = 'usdt'" :class="unit === 'usdt' ? 'bg-gray-700 text-white' : 'text-gray-500'" class="px-1.5 py-0.5 text-xs rounded">USDT</button>
+              </div>
+            </div>
+            <span x-show="unit === 'kas'" class="font-mono text-white font-semibold"
+              x-text="(() => { const k = agentAccounts.reduce((s,a) => s+(a.kas||0), 0); const u = agentAccounts.reduce((s,a) => s+(a.chainWallets||[]).reduce((ss,w) => ss+(w.balance||0), 0), 0); return (k + (kasPrice > 0 ? u/kasPrice : 0)).toFixed(2) + ' KAS'; })()"></span>
+            <span x-show="unit === 'usdt'" class="font-mono text-green-400 font-semibold"
+              x-text="(() => { const k = agentAccounts.reduce((s,a) => s+(a.kas||0), 0); const u = agentAccounts.reduce((s,a) => s+(a.chainWallets||[]).reduce((ss,w) => ss+(w.balance||0), 0), 0); return '$' + (k*kasPrice + u).toFixed(2); })()"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 行情 + 操作 -->
+    <div class="bg-gray-900 rounded-xl p-4 border border-gray-800 mb-6 flex items-center justify-between">
+      <div class="flex items-center space-x-6">
+        <div>
+          <span class="text-xs text-gray-500">KAS/USDT</span>
+          <span class="text-xl font-bold text-white ml-2" x-text="portfolio?.market?.price ? '$' + portfolio.market.price.toFixed(6) : '—'"></span>
+        </div>
+        <div>
+          <span class="text-xs text-gray-500">24h</span>
+          <span class="text-sm ml-1" :class="(portfolio?.market?.change24h || 0) >= 0 ? 'text-green-400' : 'text-red-400'" x-text="(portfolio?.market?.change24h >= 0 ? '+' : '') + (portfolio?.market?.change24h || 0).toFixed(2) + '%'"></span>
+        </div>
+      </div>
+      <div class="flex space-x-2">
+        <button @click="showPublishForm = true; publishForm.side = 'sell'; publishForm.price = portfolio?.market?.price || ''"
+          class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-colors">
+          + 我要卖
+        </button>
+        <button @click="showPublishForm = true; publishForm.side = 'buy'; publishForm.price = portfolio?.market?.price || ''"
+          class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors">
+          + 我要买
+        </button>
+      </div>
+    </div>
+
+    <!-- 活跃交易提示 -->
+    <div x-show="activeTradeInfo" x-transition class="bg-purple-900/20 border border-purple-800 rounded-xl p-4 mb-6">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-sm font-semibold text-purple-300">交易进行中</h3>
+        <button @click="activeTradeInfo = null" class="text-gray-500 hover:text-white text-xs">关闭</button>
+      </div>
+      <div class="text-sm text-gray-300 space-y-1">
+        <p>已向对方发送接单邀约，请到 <a href="/chat" class="text-purple-400 underline">聊天页面</a> 继续协商。</p>
+        <p class="text-xs text-gray-500" x-text="'对方: ' + (activeTradeInfo?.peer || '—')"></p>
+      </div>
+    </div>
+
+    <!-- Publish Form — Agent-guided -->
+    <div x-show="showPublishForm" x-transition class="bg-gray-900 rounded-xl border border-gray-800 p-6 mb-6">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-lg font-semibold" x-text="publishForm.side === 'sell' ? '卖出 KAS' : '买入 KAS'"></h2>
+        <button @click="showPublishForm = false" class="text-gray-500 hover:text-white text-xl">&times;</button>
+      </div>
+
+      <!-- Agent 建议 -->
+      <div class="bg-purple-950/30 border border-purple-800/50 rounded-lg p-3 mb-4">
+        <p class="text-sm text-purple-300">
+          <span class="font-medium">Agent 建议：</span>
+          <span x-text="'当前市价 $' + (portfolio?.market?.price || 0).toFixed(4) + '。'"></span>
+          <span x-show="publishForm.side === 'sell'" class="text-purple-400">卖单建议略高于市价以获得更好收益。</span>
+          <span x-show="publishForm.side === 'buy'" class="text-purple-400">买单建议略低于市价以节省成本。</span>
+        </p>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <!-- Amount -->
+        <div>
+          <label class="text-xs text-gray-500 block mb-1">数量 (KAS)</label>
+          <input type="number" x-model="publishForm.amount" placeholder="100"
+            class="w-full bg-gray-800 text-white text-lg rounded-lg px-3 py-2.5 border border-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-500" />
+        </div>
+        <!-- Price — auto-filled -->
+        <div>
+          <label class="text-xs text-gray-500 block mb-1">单价 (USDT/KAS)</label>
+          <input type="number" step="0.0001" x-model="publishForm.price"
+            class="w-full bg-gray-800 text-white text-lg rounded-lg px-3 py-2.5 border border-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-500" />
+          <span class="text-xs text-green-500">已自动填入当前市价，可修改</span>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-3 gap-4 mt-3">
+        <!-- Agent -->
+        <div>
+          <label class="text-xs text-gray-500 block mb-1">执行 Agent</label>
+          <select x-model="publishForm.agentId"
+            class="w-full bg-gray-800 text-white text-sm rounded-lg px-3 py-2 border border-gray-700 focus:outline-none">
+            <option value="">选择 Agent...</option>
+            <template x-for="a in agents" :key="a.id">
+              <option :value="a.id" x-text="a.name"></option>
+            </template>
+          </select>
+        </div>
+        <!-- Chain -->
+        <div>
+          <label class="text-xs text-gray-500 block mb-1">结算链</label>
+          <select x-model="publishForm.chain"
+            class="w-full bg-gray-800 text-white text-sm rounded-lg px-3 py-2 border border-gray-700 focus:outline-none">
+            <option value="bnb">BNB Chain</option>
+            <option value="eth">Ethereum</option>
+          </select>
+        </div>
+        <!-- Settlement token -->
+        <div>
+          <label class="text-xs text-gray-500 block mb-1" x-text="publishForm.side === 'sell' ? '收取' : '支付'"></label>
+          <select x-model="publishForm.wantToken"
+            class="w-full bg-gray-800 text-white text-sm rounded-lg px-3 py-2 border border-gray-700 focus:outline-none">
+            <option value="USDT">USDT</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- 确认摘要 — Agent 替你算清楚 -->
+      <div x-show="publishForm.amount > 0 && publishForm.price > 0 && publishForm.agentId"
+        class="mt-4 bg-gray-800 rounded-lg p-4 border border-gray-700">
+        <p class="text-xs text-gray-500 mb-2">订单摘要（确认后将广播到链上）</p>
+        <div class="space-y-1.5">
+          <div class="flex justify-between text-sm">
+            <span class="text-gray-400" x-text="publishForm.side === 'sell' ? '你将卖出' : '你将买入'"></span>
+            <span class="text-white font-bold" x-text="publishForm.amount + ' KAS'"></span>
+          </div>
+          <div class="flex justify-between text-sm">
+            <span class="text-gray-400">单价</span>
+            <span class="text-white" x-text="'$' + parseFloat(publishForm.price).toFixed(4)"></span>
+          </div>
+          <div class="flex justify-between text-sm">
+            <span class="text-gray-400" x-text="publishForm.side === 'sell' ? '预计收到' : '预计支付'"></span>
+            <span class="text-xl font-bold" :class="publishForm.side === 'sell' ? 'text-green-400' : 'text-red-400'"
+              x-text="(publishForm.amount * publishForm.price).toFixed(2) + ' USDT'"></span>
+          </div>
+          <div class="flex justify-between text-sm">
+            <span class="text-gray-400">结算链</span>
+            <span class="text-white" x-text="(publishForm.chain || 'bnb').toUpperCase()"></span>
+          </div>
+          <div class="flex justify-between text-sm">
+            <span class="text-gray-400">执行 Agent</span>
+            <span class="text-purple-400" x-text="agents.find(a => a.id === publishForm.agentId)?.name || '—'"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Submit -->
+      <div class="mt-4">
+        <button @click="publishIntent()" :disabled="publishingOrder || !publishForm.amount || !publishForm.agentId || !publishForm.price"
+          class="w-full py-3 rounded-lg text-sm font-bold transition-colors"
+          :class="publishingOrder ? 'bg-gray-700 text-gray-500' : publishForm.side === 'sell' ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-green-600 hover:bg-green-700 text-white'">
+          <span x-show="!publishingOrder" x-text="publishForm.side === 'sell' ? '确认卖出 — 广播到链上' : '确认买入 — 广播到链上'"></span>
+          <span x-show="publishingOrder">广播中...</span>
+        </button>
+        <p class="text-xs text-gray-600 text-center mt-2">订单将通过 Kaspa 链广播，所有人可见。不是承诺，是你在喊价。</p>
+      </div>
+    </div>
+
+    <!-- ═══ 我的挂单 + 最近成交（全宽，在市场/交易室上方）═══ -->
+    <div class="bg-gray-900 rounded-xl border border-gray-800 mb-4">
+      <div class="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
+        <h2 class="text-sm font-semibold">我的挂单</h2>
+        <button @click="loadMarketData()" class="text-xs text-gray-500 hover:text-white">刷新</button>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-gray-500 text-xs uppercase">
+              <th class="text-left px-4 py-2">时间</th>
+              <th class="text-left px-4 py-2">方向</th>
+              <th class="text-right px-4 py-2">数量</th>
+              <th class="text-right px-4 py-2">价格</th>
+              <th class="text-left px-4 py-2">链</th>
+              <th class="text-left px-4 py-2">对方</th>
+              <th class="text-left px-4 py-2">状态</th>
+              <th class="text-left px-4 py-2">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="o in marketOrders" :key="o.id">
+              <tr class="border-t border-gray-800 hover:bg-gray-800/50 cursor-pointer" @click="expandedOrderId = expandedOrderId === o.id ? null : o.id">
+                <td class="px-4 py-2 text-gray-400 text-xs" x-text="o.created_at?.slice(5, 16)"></td>
+                <td class="px-4 py-2"><span class="px-1.5 py-0.5 rounded text-xs font-medium" :class="o.side === 'buy' ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'" x-text="o.side.toUpperCase()"></span></td>
+                <td class="px-4 py-2 text-right font-mono" x-text="o.kas_amount?.toLocaleString() + ' KAS'"></td>
+                <td class="px-4 py-2 text-right font-mono text-purple-400" x-text="o.price > 0 ? '$' + o.price.toFixed(6) : '面议'"></td>
+                <td class="px-4 py-2 uppercase text-xs" x-text="o.chain"></td>
+                <td class="px-4 py-2 text-xs font-mono text-gray-500" x-text="o.peer_address ? o.peer_address.slice(-12) : '—'"></td>
+                <td class="px-4 py-2"><span class="px-1.5 py-0.5 rounded text-xs" :class="{'bg-yellow-900 text-yellow-300': o.status === 'published', 'bg-cyan-900 text-cyan-300': o.status === 'accepted', 'bg-blue-900 text-blue-300': ['paying','paid'].includes(o.status), 'bg-purple-900 text-purple-300': o.status === 'verified', 'bg-orange-900 text-orange-300': o.status === 'delivering', 'bg-green-900 text-green-300': ['completed','resolved'].includes(o.status), 'bg-red-900 text-red-300': o.status === 'disputed', 'bg-gray-700 text-gray-400': ['cancelled','expired'].includes(o.status)}" x-text="orderStatusCn(o.status)"></span></td>
+                <td class="px-4 py-2">
+                  <button x-show="o.status !== 'completed' && o.status !== 'expired'"
+                    class="text-xs text-red-400 hover:text-red-300"
+                    @click.stop="if(confirm('确认取消此订单？')) { fetch('/api/trade/mm-orders/' + o.id + '/action', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'cancel'}) }).then(()=>{ o.status='expired'; }).catch(e=>alert(e.message)); }">取消</button>
+                </td>
+              </tr>
+            </template>
+            <template x-for="o in marketOrders.filter(o => o.id === expandedOrderId)" :key="'detail-' + o.id">
+              <tr class="bg-gray-800/30">
+                <td colspan="8" class="px-4 py-3" x-data="{ execLog: [] }" x-init="try { execLog = await fetch('/api/trade/order-executions?order_id=' + o.id).then(r => r.json()) } catch {}">
+                  <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs mb-3">
+                    <div><span class="text-gray-500">订单 ID</span><p class="font-mono text-gray-300 mt-0.5" x-text="o.id.slice(0,8) + '...'"></p></div>
+                    <div><span class="text-gray-500">单价</span><p class="text-white font-bold mt-0.5" x-text="o.price > 0 ? '$' + o.price.toFixed(6) : '—'"></p></div>
+                    <div><span class="text-gray-500">USDT 金额</span><p class="text-white mt-0.5" x-text="o.usdt_amount ? o.usdt_amount.toFixed(2) + ' USDT' : (o.kas_amount * (o.price || 0)).toFixed(2) + ' USDT'"></p></div>
+                    <div><span class="text-gray-500">创建时间</span><p class="text-gray-300 mt-0.5" x-text="o.created_at ? new Date(o.created_at).toLocaleString() : '—'"></p></div>
+                  </div>
+                  <div class="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs mb-3">
+                    <div><span class="text-gray-500">我的 KAS 地址</span><p class="font-mono text-gray-300 mt-0.5 break-all" x-text="o.customer_pay_address || o.agent_address || '—'"></p></div>
+                    <div><span class="text-gray-500">我的跨链钱包</span><p class="font-mono text-gray-300 mt-0.5" x-text="o.mm_receive_address || '—'"></p></div>
+                    <div><span class="text-gray-500">对方地址</span><p class="font-mono text-gray-300 mt-0.5 break-all" x-text="o.peer_address || '—'"></p></div>
+                  </div>
+                  <div class="grid grid-cols-2 gap-3 text-xs mb-3">
+                    <div><span class="text-gray-500">USDT TX</span><p class="font-mono text-blue-400 mt-0.5 break-all" x-text="o.payment_txhash || '—'"></p></div>
+                    <div><span class="text-gray-500">KAS TX</span><p class="font-mono text-green-400 mt-0.5 break-all" x-text="o.kas_txhash || '—'"></p></div>
+                  </div>
+                  <!-- 决策时间线 -->
+                  <template x-if="execLog.length > 0">
+                    <div class="border-t border-gray-700 pt-2 mt-2">
+                      <span class="text-gray-500 text-xs">决策时间线</span>
+                      <div class="mt-1 space-y-1.5">
+                        <template x-for="ex in execLog" :key="ex.id">
+                          <div class="relative pl-4 border-l-2" :class="ex.status === 'completed' ? 'border-green-800' : ex.status === 'failed' || ex.status === 'rejected' ? 'border-red-800' : 'border-yellow-800'">
+                            <span class="absolute -left-1 top-0.5 w-2 h-2 rounded-full" :class="ex.status === 'completed' ? 'bg-green-500' : ex.status === 'failed' || ex.status === 'rejected' ? 'bg-red-500' : 'bg-yellow-500'"></span>
+                            <div class="text-xs">
+                              <span class="text-gray-500" x-text="ex.created_at ? new Date(ex.created_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : ''"></span>
+                              <span class="text-gray-200 ml-1" x-text="
+                                ex.type === 'accept_order' ? 'Agent 接单' :
+                                ex.type === 'pay_usdt' ? 'Agent 付款' :
+                                ex.type === 'verify_payment' ? '验证到账' :
+                                ex.type === 'send_kas' ? '发送 KAS' :
+                                ex.type === 'cancel_order' ? '取消' :
+                                ex.display_summary || ex.type
+                              "></span>
+                              <span class="text-green-600" x-show="ex.status === 'completed'"> ✓</span>
+                              <span class="text-red-500" x-show="ex.status === 'failed' || ex.status === 'rejected'"> ✗</span>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-0.5" x-show="ex.display_summary" x-text="ex.display_summary"></p>
+                            <p class="text-xs text-blue-500 mt-0.5 cursor-pointer hover:underline" x-show="ex.output_txid" @click="navigator.clipboard.writeText(ex.output_txid)" x-text="ex.output_txid ? 'TX: ' + ex.output_txid.slice(0,12) + '... (点击复制)' : ''"></p>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+                </td>
+              </tr>
+            </template>
+            <template x-if="marketOrders.length === 0">
+              <tr><td colspan="8" class="px-4 py-6 text-center text-gray-600 text-sm">暂无挂单</td></tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      <!-- 最近成交 -->
+      <div class="border-t border-gray-800" x-data="{
+        completed: [],
+        async init() { try { const r = await fetch('/api/trade/mm-orders?status=completed&limit=5').then(r => r.json()); this.completed = Array.isArray(r) ? r : []; } catch {} }
+      }">
+        <div class="px-4 py-2 flex items-center justify-between">
+          <span class="text-xs text-gray-500">最近成交</span>
+        </div>
+        <template x-for="d in completed" :key="d.id">
+          <div class="px-4 py-1.5 flex justify-between text-xs border-t border-gray-800/50">
+            <span :class="d.side === 'buy' ? 'text-green-400' : 'text-red-400'" x-text="(d.side === 'buy' ? '买 ' : '卖 ') + d.kas_amount + ' KAS'"></span>
+            <span class="text-gray-500" x-text="d.completed_at?.slice(5,16) || d.created_at?.slice(5,16)"></span>
+          </div>
+        </template>
+        <template x-if="completed.length === 0">
+          <div class="px-4 py-3 text-center text-gray-600 text-xs">暂无成交</div>
+        </template>
+      </div>
+    </div>
+
+    <!-- ═══ 面板切换 ═══ -->
+    <div class="flex justify-end mb-2">
+      <div class="flex bg-gray-800 rounded p-0.5">
+        <button @click="marketLayout = 'both'" :class="marketLayout === 'both' ? 'bg-gray-700 text-white' : 'text-gray-500'" class="px-2 py-0.5 text-xs rounded">双栏</button>
+        <button @click="marketLayout = 'left'" :class="marketLayout === 'left' ? 'bg-gray-700 text-white' : 'text-gray-500'" class="px-2 py-0.5 text-xs rounded">市场</button>
+        <button @click="marketLayout = 'right'" :class="marketLayout === 'right' ? 'bg-gray-700 text-white' : 'text-gray-500'" class="px-2 py-0.5 text-xs rounded">交易室</button>
+      </div>
+    </div>
+
+    <div class="grid gap-6" :class="marketLayout === 'both' ? 'grid-cols-12' : 'grid-cols-1'">
+
+      <!-- 左侧：市场 -->
+      <div x-show="marketLayout !== 'right'" :class="marketLayout === 'both' ? 'col-span-7' : ''" class="space-y-6">
+
+        <!-- 市场（市场动态）-->
+        <div class="bg-gray-900 rounded-xl border border-gray-800">
+          <div class="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
+            <h2 class="text-sm font-semibold">市场</h2>
+            <div class="flex bg-gray-800 rounded p-0.5">
+              <button @click="marketView = 'feed'" :class="marketView === 'feed' ? 'bg-gray-700 text-white' : 'text-gray-500'"
+                class="px-2 py-0.5 text-xs rounded transition-colors">动态</button>
+              <button @click="marketView = 'orderbook'" :class="marketView === 'orderbook' ? 'bg-gray-700 text-white' : 'text-gray-500'"
+                class="px-2 py-0.5 text-xs rounded transition-colors">报价单</button>
+            </div>
+          </div>
+
+          <!-- Feed View -->
+          <div x-show="marketView === 'feed'" class="divide-y divide-gray-800">
+            <template x-for="b in marketBroadcasts" :key="b.id || b.created_at">
+              <div class="px-4 py-3 hover:bg-gray-800/50"
+                x-data="{ parsed: JSON.parse(b.content) }">
+                <div class="flex items-start justify-between">
+                  <div class="flex-1">
+                    <div class="flex items-center space-x-2 mb-1">
+                      <span class="px-2 py-0.5 rounded text-sm font-bold"
+                        :class="parsed.type?.includes('sell') ? 'bg-red-900 text-red-300' : 'bg-green-900 text-green-300'"
+                        x-text="parsed.type?.includes('sell') ? 'SELL' : 'BUY'"></span>
+                      <span class="text-lg font-bold text-white" x-text="(parsed.amount?.toLocaleString() || '?') + ' ' + (parsed.token || 'KAS')"></span>
+                    </div>
+                    <div class="flex items-center space-x-3 text-xs text-gray-400">
+                      <span x-text="(parsed.type?.includes('sell') ? '收取 ' : '支付 ') + (parsed.want || parsed.pay || 'USDT')"></span>
+                      <span class="text-gray-600">|</span>
+                      <span x-text="(parsed.chains || []).join(' / ').toUpperCase() || '—'"></span>
+                    </div>
+                    <div class="flex items-center space-x-2 mt-1 text-xs">
+                      <span class="font-mono text-gray-500" x-text="b.sender_address?.slice(-12) || '—'"></span>
+                      <span class="text-gray-600">|</span>
+                      <span class="text-gray-500" x-text="timeAgo(b.created_at)"></span>
+                    </div>
+                  </div>
+                  <!-- Accept button -->
+                  <div class="ml-4 flex-shrink-0">
+                    <template x-if="acceptingOrder?.id !== b.id">
+                      <button @click="startAccept(b)"
+                        class="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded text-xs whitespace-nowrap transition-colors">
+                        接单
+                      </button>
+                    </template>
+                    <!-- Accept form (inline) -->
+                    <template x-if="acceptingOrder?.id === b.id">
+                      <div class="flex items-center space-x-2">
+                        <select x-model="acceptAgentId" class="bg-gray-800 text-white text-xs rounded px-2 py-1.5 border border-gray-700">
+                          <option value="">选择 Agent...</option>
+                          <template x-for="a in agents" :key="a.id">
+                            <option :value="a.id" x-text="a.name"></option>
+                          </template>
+                        </select>
+                        <button @click="sendAcceptInvite()" :disabled="!acceptAgentId || acceptSending"
+                          class="px-2 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-700 text-white rounded text-xs transition-colors">
+                          <span x-show="!acceptSending">发送</span>
+                          <span x-show="acceptSending">...</span>
+                        </button>
+                        <button @click="cancelAccept()" class="px-2 py-1.5 text-gray-500 hover:text-white text-xs">X</button>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </div>
+            </template>
+            <template x-if="marketBroadcasts.length === 0">
+              <div class="px-4 py-8 text-center text-gray-600">暂无市场广播。链上发布的买卖意愿将显示在这里。</div>
+            </template>
+          </div>
+
+          <!-- Order Book View -->
+          <div x-show="marketView === 'orderbook'" class="grid grid-cols-2 divide-x divide-gray-800">
+            <!-- Bids (Buy orders) -->
+            <div>
+              <div class="px-3 py-2 text-xs text-green-400 font-medium uppercase bg-green-900/10">买单</div>
+              <div class="divide-y divide-gray-800/50">
+                <template x-for="b in marketBroadcasts.filter(x => { try { return JSON.parse(x.content).type?.includes('buy'); } catch { return false; } })" :key="b.id">
+                  <div class="px-3 py-2 hover:bg-gray-800/50 flex justify-between items-center" x-data="{ o: JSON.parse(b.content) }">
+                    <div>
+                      <span class="text-sm font-mono text-white" x-text="o.amount?.toLocaleString()"></span>
+                      <span class="text-xs text-gray-500 ml-1" x-text="o.token || 'KAS'"></span>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                      <span class="text-xs text-gray-500" x-text="(o.chains || []).join('/').toUpperCase()"></span>
+                      <button @click="startAccept(b)" class="text-xs text-purple-400 hover:text-purple-300">接单</button>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+            <!-- Asks (Sell orders) -->
+            <div>
+              <div class="px-3 py-2 text-xs text-red-400 font-medium uppercase bg-red-900/10">卖单</div>
+              <div class="divide-y divide-gray-800/50">
+                <template x-for="b in marketBroadcasts.filter(x => { try { return JSON.parse(x.content).type?.includes('sell'); } catch { return false; } })" :key="b.id">
+                  <div class="px-3 py-2 hover:bg-gray-800/50 flex justify-between items-center" x-data="{ o: JSON.parse(b.content) }">
+                    <div>
+                      <span class="text-sm font-mono text-white" x-text="o.amount?.toLocaleString()"></span>
+                      <span class="text-xs text-gray-500 ml-1" x-text="o.token || 'KAS'"></span>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                      <span class="text-xs text-gray-500" x-text="(o.chains || []).join('/').toUpperCase()"></span>
+                      <button @click="startAccept(b)" class="text-xs text-purple-400 hover:text-purple-300">接单</button>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 右侧：交易室 -->
+      <div x-show="marketLayout !== 'left'" :class="marketLayout === 'both' ? 'col-span-5' : ''" class="space-y-4">
+        <div class="bg-gray-900 rounded-xl border border-gray-800">
+          <div class="px-4 py-3 border-b border-gray-800">
+            <h2 class="text-sm font-semibold">交易室</h2>
+          </div>
+
+          <!-- 活跃交易列表 -->
+          <div class="divide-y divide-gray-800" x-data="{
+            activeDeals: [],
+            expandedDeal: null,
+            chatDeal: null,
+            chatMsg: '',
+            chatSending: false,
+            chatHistory: [],
+            actionLoading: null,
+            async loadDeals() {
+              try {
+                const orders = await fetch('/api/trade/mm-orders?limit=30').then(r => r.json());
+                const all = Array.isArray(orders) ? orders : [];
+                // Active first, then recently completed/cancelled (last 5)
+                const active = all.filter(o => !['completed','cancelled','expired','resolved'].includes(o.status));
+                const done = all.filter(o => ['completed','cancelled','expired','resolved'].includes(o.status)).slice(0, 5);
+                // 附加 pending execution_state（审批卡片用）
+                try {
+                  const pendingExecs = await fetch('/api/trade/pending-approvals').then(r => r.json());
+                  if (Array.isArray(pendingExecs)) {
+                    for (const deal of [...active, ...done]) {
+                      deal._pendingExec = pendingExecs.find(p => p.order_id === deal.id) || null;
+                    }
+                  }
+                } catch {}
+                this.activeDeals = [...active, ...done];
+                // 刚完成的订单闪烁提示
+                if (this._prevActive && done.length > 0) {
+                  const newlyDone = done.filter(d => !this._prevDone?.some(pd => pd.id === d.id));
+                  if (newlyDone.length > 0) this._justCompleted = newlyDone[0].id;
+                  setTimeout(() => { this._justCompleted = null; }, 5000);
+                }
+                this._prevDone = done;
+              } catch {}
+            },
+            async sendKas(deal) {
+              const target = deal.customer_address || deal.peer_address;
+              if (!target) { alert('对方地址未知 — 请先在订单中设置收款地址'); return; }
+              if (!confirm('确认发送 ' + deal.kas_amount + ' KAS？')) return;
+              this.actionLoading = deal.id;
+              try {
+                const res = await fetch('/api/trade/mm-orders/' + deal.id + '/action', {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'send_kas', customer_address: target }),
+                });
+                const data = await res.json();
+                if (data.ok) {
+                  deal.status = 'completed';
+                  alert('KAS 发送成功！TX: ' + (data.txId || '已提交'));
+                  await this.loadDeals();
+                } else alert('发送失败: ' + (data.error || ''));
+              } catch (e) { alert(e.message); }
+              finally { this.actionLoading = null; }
+            },
+            async toggleChat(deal) {
+              if (this.chatDeal?.id === deal.id) { this.chatDeal = null; return; }
+              this.chatDeal = deal;
+              this.chatHistory = [];
+              // Load recent messages with this peer — fallback chain: customer_address → peer_address → mm_receive_address
+              const peer = deal.customer_address || deal.peer_address || deal.mm_receive_address;
+              if (!peer) return;
+              try {
+                const myAddr = deal.agent_address || '';
+                const r = await fetch('/api/agent/peer-context?my_address=' + encodeURIComponent(myAddr) + '&peer_address=' + encodeURIComponent(peer) + '&limit=10').then(r => r.json());
+                this.chatHistory = (r.chatHistory || []).slice(-8);
+              } catch {}
+            },
+            async sendChat(deal) {
+              if (!this.chatMsg.trim() || this.chatSending) return;
+              this.chatSending = true;
+              const target = deal.customer_address || deal.peer_address || deal.mm_receive_address;
+              if (!target) { alert('对手方地址未知'); this.chatSending = false; return; }
+              try {
+                await fetch('/api/relay/' + deal.relay_node_id + '/send-command', {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ type: 'send_message', target: target, message: this.chatMsg.trim() }),
+                });
+                this.chatHistory.push({ dir: 'out', text: this.chatMsg.trim(), ts: new Date().toISOString() });
+                this.chatMsg = '';
+              } catch (e) { alert(e.message); }
+              finally { this.chatSending = false; }
+            },
+            openFullChat(deal) {
+              const peer = deal.customer_address || deal.mm_receive_address;
+              if (!peer) return;
+              const myRelay = deal.relay_node_id;
+              const myAddr = this.$root?._x_dataStack?.[0]?.agents?.find(a => a.id === myRelay)?.address || '';
+              fetch('/api/conversations/find?peer=' + encodeURIComponent(peer) + '&local=' + encodeURIComponent(myAddr))
+                .then(r => r.json()).then(d => {
+                  if (d.convId) window.open('/conversations/' + d.convId, '_blank');
+                  else window.open('/conversations?search=' + peer.slice(-12), '_blank');
+                });
+            },
+            init() { this.loadDeals(); setInterval(() => this.loadDeals(), 15000); }
+          }">
+            <template x-for="deal in activeDeals" :key="deal.id">
+              <div class="px-4 py-4 border-b border-gray-800">
+                <!-- 订单头 -->
+                <div class="flex items-center justify-between mb-3">
+                  <div class="flex items-center space-x-2">
+                    <span class="px-2 py-1 rounded text-xs font-bold"
+                      :class="deal.side === 'buy' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'"
+                      x-text="deal.side === 'buy' ? 'BUY' : 'SELL'"></span>
+                    <span class="text-lg text-white font-bold" x-text="deal.kas_amount?.toLocaleString() + ' KAS'"></span>
+                    <span class="text-xs text-gray-500" x-text="deal.chain?.toUpperCase()"></span>
+                  </div>
+                  <div class="flex items-center space-x-2">
+                    <span class="text-xs px-2 py-1 rounded-full"
+                      :class="{
+                        'bg-gray-700 text-gray-300': deal.status === 'published',
+                        'bg-yellow-900/50 text-yellow-400': deal.status === 'accepted',
+                        'bg-blue-900/50 text-blue-400': deal.status === 'paying',
+                        'bg-cyan-900/50 text-cyan-400': deal.status === 'paid',
+                        'bg-purple-900/50 text-purple-400': deal.status === 'verified',
+                        'bg-indigo-900/50 text-indigo-400': deal.status === 'delivering',
+                        'bg-green-900/50 text-green-400': ['completed','resolved'].includes(deal.status),
+                        'bg-red-900/50 text-red-400': ['cancelled','expired','disputed'].includes(deal.status),
+                      }"
+                      x-text="({published:'已发布', accepted:'已接单', paying:'付款中', paid:'已付款', verified:'已验证', delivering:'交割中', completed:'已完成', cancelled:'已取消', expired:'已过期', disputed:'争议中', resolved:'已解决'})[deal.status] || deal.status"></span>
+                    <button @click.stop="if(confirm('取消此订单？')){ fetch('/api/trade/mm-orders/'+deal.id+'/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'cancel'})}).then(()=>loadDeals()) }"
+                      class="text-xs text-red-500 hover:text-red-400">取消</button>
+                  </div>
+                </div>
+
+                <!-- 步骤进度条 -->
+                <div class="flex items-center space-x-1 mb-3 text-xs">
+                  <template x-for="(step, i) in ['接单','付款','验证','交割','完成']" :key="step">
+                    <div class="flex items-center">
+                      <span class="px-1.5 py-0.5 rounded"
+                        :class="i <= (['published'].includes(deal.status)?0 : ['accepted'].includes(deal.status)?1 : ['paying','paid'].includes(deal.status)?2 : ['verified'].includes(deal.status)?3 : ['delivering'].includes(deal.status)?4 : 5) - 1 ? 'bg-green-700 text-white' : 'bg-gray-800 text-gray-500'"
+                        x-text="step"></span>
+                      <span x-show="i < 4" class="text-gray-700 mx-0.5">→</span>
+                    </div>
+                  </template>
+                </div>
+
+                <!-- 步骤引导 -->
+                <div class="space-y-3">
+
+                  <!-- published: 等待接单 -->
+                  <template x-if="['published'].includes(deal.status) && deal.side === 'sell'">
+                    <div class="bg-yellow-950/40 border border-yellow-700 rounded-lg p-4">
+                      <p class="text-sm text-purple-300 mb-2">你的 Agent 已将卖单广播到链上，正在等待买家。</p>
+                      <div class="space-y-1.5 text-sm">
+                        <div class="flex justify-between">
+                          <span class="text-gray-400">卖出</span>
+                          <span class="text-white font-bold" x-text="deal.kas_amount + ' KAS'"></span>
+                        </div>
+                        <div class="flex justify-between">
+                          <span class="text-gray-400">单价</span>
+                          <span class="text-white" x-text="deal.price > 0 ? '$' + deal.price.toFixed(4) : '面议'"></span>
+                        </div>
+                        <div class="flex justify-between">
+                          <span class="text-gray-400">预期收到</span>
+                          <span class="text-green-400 font-bold" x-text="(deal.usdt_amount || (deal.kas_amount * (deal.price || 0))).toFixed(2) + ' USDT'"></span>
+                        </div>
+                        <div class="flex justify-between">
+                          <span class="text-gray-400">收款网络</span>
+                          <span class="text-white" x-text="(deal.chain || 'bnb').toUpperCase()"></span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                          <span class="text-gray-400">你的收款地址</span>
+                          <span class="font-mono text-xs text-green-400 cursor-pointer hover:underline" @click="navigator.clipboard.writeText(deal.mm_receive_address||'')"
+                            x-text="deal.mm_receive_address || '未设置'" title="点击复制"></span>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+                  <template x-if="['published'].includes(deal.status) && deal.side === 'buy'">
+                    <div class="bg-yellow-950/40 border border-yellow-700 rounded-lg p-4">
+                      <p class="text-sm text-purple-300 mb-2">你的 Agent 已将买单广播到链上，正在等待卖家。</p>
+                      <div class="space-y-1.5 text-sm">
+                        <div class="flex justify-between">
+                          <span class="text-gray-400">买入</span>
+                          <span class="text-white font-bold" x-text="deal.kas_amount + ' KAS'"></span>
+                        </div>
+                        <div class="flex justify-between">
+                          <span class="text-gray-400">单价</span>
+                          <span class="text-white" x-text="deal.price > 0 ? '$' + deal.price.toFixed(4) : '面议'"></span>
+                        </div>
+                        <div class="flex justify-between">
+                          <span class="text-gray-400">预计支付</span>
+                          <span class="text-red-400 font-bold" x-text="(deal.usdt_amount || (deal.kas_amount * (deal.price || 0))).toFixed(2) + ' USDT'"></span>
+                        </div>
+                        <div class="flex justify-between">
+                          <span class="text-gray-400">结算链</span>
+                          <span class="text-white" x-text="(deal.chain || 'bnb').toUpperCase()"></span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                          <span class="text-gray-400">你的 KAS 地址</span>
+                          <span class="font-mono text-xs text-green-400 cursor-pointer hover:underline" @click="navigator.clipboard.writeText(deal.customer_pay_address||'')"
+                            x-text="deal.customer_pay_address ? deal.customer_pay_address.slice(0,12)+'...'+deal.customer_pay_address.slice(-8) : '未设置'" title="点击复制"></span>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+
+                  <!-- 审批卡片（approval 模式，有 pending execution_state 时显示）-->
+                  <template x-if="deal._pendingExec">
+                    <div class="bg-yellow-950/40 border border-yellow-700 rounded-lg p-4 mb-3">
+                      <div class="flex items-center justify-between mb-2">
+                        <span class="text-yellow-400 text-sm font-medium">⏳ 等待你确认</span>
+                        <span class="text-xs text-gray-500" x-text="deal._pendingExec.approval_deadline ? '截止: ' + new Date(deal._pendingExec.approval_deadline).toLocaleTimeString() : ''"></span>
+                      </div>
+                      <p class="text-sm text-gray-300 mb-3" x-text="deal._pendingExec.display_summary || deal._pendingExec.type"></p>
+                      <div class="flex space-x-3">
+                        <button @click="fetch('/api/trade/approve-execution/'+deal._pendingExec.id,{method:'POST'}).then(r=>r.json()).then(d=>{if(d.ok){deal._pendingExec=null;loadDeals();}else{alert(d.error||'审批失败')}})"
+                          class="flex-1 py-2 bg-green-700 hover:bg-green-600 text-white rounded text-sm font-medium">确认执行</button>
+                        <button @click="if(confirm('拒绝将取消订单，确定？'))fetch('/api/trade/reject-execution/'+deal._pendingExec.id,{method:'POST'}).then(r=>r.json()).then(d=>{deal._pendingExec=null;loadDeals();})"
+                          class="flex-1 py-2 bg-red-900 hover:bg-red-800 text-red-300 rounded text-sm font-medium">拒绝</button>
+                      </div>
+                      <p class="text-xs text-gray-600 mt-2 text-center">超时未操作将自动取消或转为争议</p>
+                    </div>
+                  </template>
+
+                  <!-- accepted: 买家需要付款 -->
+                  <template x-if="['accepted'].includes(deal.status) && deal.side === 'buy'">
+                    <div class="bg-blue-950/40 border border-blue-700 rounded-lg p-4">
+                      <p class="text-sm text-purple-300 mb-3">卖家已接单。你的 Agent 准备好支付 USDT。</p>
+                      <div class="space-y-2 mb-3 bg-gray-800/50 rounded-lg p-3">
+                        <div class="flex justify-between text-sm">
+                          <span class="text-gray-400">应付金额</span>
+                          <span class="text-xl text-white font-bold" x-text="(deal.usdt_amount || (deal.kas_amount * (deal.price || 0))).toFixed(2) + ' USDT'"></span>
+                        </div>
+                        <div class="flex justify-between text-sm">
+                          <span class="text-gray-400">支付网络</span>
+                          <span class="text-white" x-text="(deal.chain || 'bnb').toUpperCase()"></span>
+                        </div>
+                        <div class="text-sm">
+                          <span class="text-gray-400">付款到（卖方 USDT 钱包）：</span>
+                          <p class="font-mono text-xs text-green-400 mt-1 break-all cursor-pointer hover:underline"
+                            @click="navigator.clipboard.writeText(deal.mm_receive_address || deal.counterparty_wallet || '')"
+                            x-text="deal.mm_receive_address || deal.counterparty_wallet || '等待卖方提供钱包地址...'"></p>
+                        </div>
+                      </div>
+                      <button @click.stop="if(!confirm('确认从你的 Agent 钱包支付 '+(deal.usdt_amount||(deal.kas_amount*(deal.price||0))).toFixed(2)+' USDT 到卖方地址？'))return; actionLoading=deal.id; fetch('/api/trade/mm-orders/'+deal.id+'/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'pay_usdt'})}).then(r=>r.json()).then(d=>{if(d.ok){deal.status=d.status;deal.payment_txhash=d.txHash;}else{alert(d.error||'付款失败');}}).catch(e=>alert(e.message)).finally(()=>{actionLoading=null;loadDeals();})"
+                        :disabled="actionLoading === deal.id"
+                        class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold disabled:opacity-50">
+                        <span x-text="actionLoading === deal.id ? '链上发送中，请等待...' : '支付 USDT'"></span></button>
+                      <p class="text-xs text-gray-500 mt-2 text-center">Agent 钱包直接签名发送，资金从你的钱包直达卖方，无中间托管。</p>
+                    </div>
+                  </template>
+
+                  <!-- paying: 付款进行中 -->
+                  <template x-if="deal.status === 'paying'">
+                    <div class="bg-blue-950/40 border border-blue-700 rounded-lg p-4">
+                      <p class="text-sm text-blue-300 font-medium">USDT 正在发送，等待链上确认...</p>
+                      <div class="thinking-dots mt-2"><span></span><span></span><span></span></div>
+                    </div>
+                  </template>
+
+                  <!-- paid: 已付款，等验证 -->
+                  <template x-if="['paid'].includes(deal.status) && deal.side === 'buy'">
+                    <div class="bg-purple-950/40 border border-purple-700 rounded-lg p-4">
+                      <p class="text-sm text-purple-300 font-medium">USDT 已发送，等待卖家确认到账</p>
+                      <p class="font-mono text-xs text-gray-500 mt-1" x-show="deal.payment_txhash" x-text="'TX: ' + (deal.payment_txhash||'').slice(0,20) + '...'"></p>
+                    </div>
+                  </template>
+
+                  <template x-if="['paid'].includes(deal.status) && deal.side === 'sell'">
+                    <div class="bg-blue-950/40 border border-blue-700 rounded-lg p-4">
+                      <p class="text-base text-white font-bold mb-2">买家已付款</p>
+                      <p class="font-mono text-xs text-blue-400 mb-2" x-show="deal.payment_txhash" x-text="'TX: ' + (deal.payment_txhash||'')"></p>
+                      <p class="text-xs text-green-400 mb-1">系统正在自动验证链上到账（约 60 秒）...</p>
+                      <p class="text-xs text-gray-500 mb-3">也可手动验证：</p>
+                      <button @click.stop="actionLoading=deal.id; fetch('/api/trade/mm-orders/'+deal.id+'/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'verify_payment',payment_txhash:deal.payment_txhash})}).then(r=>r.json()).then(d=>{if(d.ok){deal.status=d.status||'verified';}else alert(d.error)}).finally(()=>{actionLoading=null;loadDeals()})"
+                        :disabled="actionLoading === deal.id || !deal.payment_txhash"
+                        class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold disabled:opacity-50">
+                        <span x-text="actionLoading === deal.id ? '链上验证中...' : '手动验证到账'"></span></button>
+                    </div>
+                  </template>
+
+                  <!-- verified: 卖家发 KAS -->
+                  <template x-if="['verified'].includes(deal.status) && deal.side === 'sell'">
+                    <div class="bg-green-950/30 border border-green-800 rounded-lg p-4">
+                      <p class="text-sm text-purple-300 mb-2">USDT 已到账并通过链上验证。现在轮到你发送 KAS。</p>
+                      <div class="space-y-1.5 text-sm mb-3 bg-gray-800/50 rounded-lg p-3">
+                        <div class="flex justify-between">
+                          <span class="text-gray-400">发送数量</span>
+                          <span class="text-white font-bold" x-text="deal.kas_amount + ' KAS'"></span>
+                        </div>
+                        <div class="text-sm">
+                          <span class="text-gray-400">发送到（买方 KAS 地址）：</span>
+                          <p class="font-mono text-xs text-green-400 mt-1 break-all" x-text="deal.peer_address || '未设置'"></p>
+                        </div>
+                      </div>
+                      <button @click.stop="sendKas(deal)" :disabled="actionLoading === deal.id"
+                        class="w-full py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-bold disabled:opacity-50">
+                        <span x-text="actionLoading === deal.id ? '链上发送中...' : '发送 ' + deal.kas_amount + ' KAS'"></span></button>
+                      <p class="text-xs text-gray-500 mt-2 text-center">通过 Kaspa 链直接发送到买方地址。</p>
+                    </div>
+                  </template>
+
+                  <template x-if="['verified'].includes(deal.status) && deal.side === 'buy'">
+                    <div class="bg-green-950/30 border border-green-800 rounded-lg p-4">
+                      <p class="text-sm text-purple-300">你的 USDT 已到账并通过验证。等待卖家发送 KAS 到你的地址...</p>
+                      <p class="font-mono text-xs text-gray-500 mt-1" x-text="'你的 KAS 地址: ' + (deal.customer_pay_address || '—')"></p>
+                    </div>
+                  </template>
+
+                  <!-- delivering: KAS 发送中 -->
+                  <template x-if="deal.status === 'delivering'">
+                    <div class="bg-indigo-950/40 border border-indigo-700 rounded-lg p-4">
+                      <p class="text-sm text-indigo-300 font-medium">KAS 正在链上发送...</p>
+                      <div class="thinking-dots mt-2"><span></span><span></span><span></span></div>
+                    </div>
+                  </template>
+
+                  <!-- completed -->
+                  <template x-if="deal.status === 'completed'">
+                    <div class="bg-green-950/30 border border-green-800 rounded-lg p-4">
+                      <p class="text-sm text-green-400 font-bold mb-2">交易完成</p>
+                      <div class="space-y-1.5 text-xs">
+                        <div class="flex justify-between">
+                          <span class="text-gray-400" x-text="deal.side === 'sell' ? '卖出' : '买入'"></span>
+                          <span class="text-white font-bold" x-text="deal.kas_amount + ' KAS'"></span>
+                        </div>
+                        <div class="flex justify-between">
+                          <span class="text-gray-400" x-text="deal.side === 'sell' ? '收到' : '支付'"></span>
+                          <span :class="deal.side === 'sell' ? 'text-green-400' : 'text-red-400'" class="font-bold"
+                            x-text="(deal.usdt_amount || (deal.kas_amount * (deal.price||0))).toFixed(2) + ' USDT'"></span>
+                        </div>
+                        <div class="flex justify-between">
+                          <span class="text-gray-400">成交价</span>
+                          <span class="text-white" x-text="'$' + (deal.price||0).toFixed(4)"></span>
+                        </div>
+                      </div>
+                      <div class="mt-2 pt-2 border-t border-gray-700 space-y-1">
+                        <p class="font-mono text-xs text-blue-400 break-all" x-show="deal.payment_txhash" x-text="'USDT TX: ' + (deal.payment_txhash||'')"></p>
+                        <p class="font-mono text-xs text-green-400 break-all" x-show="deal.kas_txhash && deal.kas_txhash !== 'pending'" x-text="'KAS TX: ' + (deal.kas_txhash||'')"></p>
+                      </div>
+                      <p class="text-xs text-gray-600 mt-2">每笔交易链上可查，无中间方。</p>
+                    </div>
+                  </template>
+
+                  <!-- cancelled/expired/disputed -->
+                  <template x-if="['cancelled','expired','disputed'].includes(deal.status)">
+                    <div class="bg-red-950/30 border border-red-800 rounded-lg p-3">
+                      <p class="text-sm text-red-400 font-medium" x-text="deal.status === 'disputed' ? '交易争议中' : '交易已取消'"></p>
+                      <p class="text-xs text-gray-500 mt-1" x-show="deal.cancel_reason" x-text="deal.cancel_reason"></p>
+                    </div>
+                  </template>
+
+                </div>
+
+                <!-- 决策时间线 -->
+                <div class="mt-3 pt-2 border-t border-gray-800" x-data="{ execs: [], async loadExecs() { try { const r = await fetch('/api/trade/order-executions?order_id='+deal.id); this.execs = await r.json(); } catch{} } }" x-init="loadExecs()">
+                  <template x-if="execs.length > 0">
+                    <div class="space-y-2">
+                      <span class="text-xs text-gray-500">决策时间线</span>
+                      <template x-for="e in execs" :key="e.id">
+                        <div class="relative pl-5 pb-1 border-l-2" :class="e.status === 'completed' ? 'border-green-800' : e.status === 'failed' || e.status === 'rejected' ? 'border-red-800' : e.status === 'pending' ? 'border-yellow-800' : 'border-blue-800'">
+                          <span class="absolute -left-1.5 top-0.5 w-3 h-3 rounded-full border-2 border-gray-900" :class="e.status === 'completed' ? 'bg-green-500' : e.status === 'failed' || e.status === 'rejected' ? 'bg-red-500' : e.status === 'pending' ? 'bg-yellow-500' : 'bg-blue-500'"></span>
+                          <div class="text-xs">
+                            <span class="text-gray-500" x-text="e.created_at ? new Date(e.created_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : ''"></span>
+                            <span class="text-gray-200 ml-1" x-text="
+                              e.type === 'accept_order' ? '你的 Agent 接了这笔单' :
+                              e.type === 'pay_usdt' ? '你的 Agent 发送了 USDT 付款' :
+                              e.type === 'verify_payment' ? '系统验证了链上付款' :
+                              e.type === 'send_kas' ? '你的 Agent 发送了 KAS' :
+                              e.type === 'cancel_order' ? '订单已取消' :
+                              e.type === 'publish_order' ? '你的 Agent 发布了订单' :
+                              e.display_summary || e.type
+                            "></span>
+                          </div>
+                          <div class="text-xs mt-0.5" x-show="e.display_summary">
+                            <span class="text-gray-500">理由：</span>
+                            <span class="text-gray-400" x-text="e.display_summary"></span>
+                          </div>
+                          <div class="text-xs mt-0.5 space-x-3">
+                            <template x-if="e.amount">
+                              <span>
+                                <span class="text-gray-500" x-text="e.asset === 'kas' ? 'KAS' : 'USDT'"></span>
+                                <span class="text-white font-medium" x-text="e.amount"></span>
+                                <span class="text-green-600" x-text="e.status === 'completed' ? ' ✓' : e.status === 'failed' ? ' ✗' : ''"></span>
+                              </span>
+                            </template>
+                            <template x-if="e.output_txid">
+                              <span class="text-blue-500 hover:underline cursor-pointer" @click="navigator.clipboard.writeText(e.output_txid)" x-text="'TX: ' + e.output_txid.slice(0,12) + '...'"></span>
+                            </template>
+                          </div>
+                          <div class="text-xs mt-0.5" x-show="e.error_text">
+                            <span class="text-red-400" x-text="e.error_text"></span>
+                          </div>
+                        </div>
+                      </template>
+                    </div>
+                  </template>
+                </div>
+
+                <!-- 底部操作栏 -->
+                <div class="flex space-x-2 mt-3 pt-2 border-t border-gray-800">
+                  <button @click.stop="toggleChat(deal)"
+                    class="px-3 py-1.5 rounded text-xs"
+                    :class="chatDeal?.id === deal.id ? 'bg-blue-700 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-300'"
+                    x-text="chatDeal?.id === deal.id ? '收起聊天' : '聊天'"></button>
+                  <button @click.stop="openFullChat(deal)" class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded text-xs">新窗口打开</button>
+                  <span class="text-xs text-gray-600 leading-6" x-text="'#' + deal.id?.slice(0,8)"></span>
+                </div>
+
+                <!-- 内嵌聊天面板 -->
+                <template x-if="chatDeal?.id === deal.id">
+                  <div class="mt-3 border border-gray-700 rounded-lg overflow-hidden">
+                    <!-- 原始订单数据 -->
+                    <div class="bg-gray-900/80 px-3 py-2 border-b border-gray-700 text-xs">
+                      <span class="text-gray-500">订单数据:</span>
+                      <span class="font-mono text-gray-400 ml-1" x-text="deal.side.toUpperCase() + ' ' + deal.kas_amount + ' KAS | ' + (deal.price > 0 ? '$'+deal.price.toFixed(4) : '面议') + ' | ' + (deal.chain||'bnb').toUpperCase()"></span>
+                      <span class="text-gray-600 ml-2" x-text="deal.customer_address ? '对方: ...' + deal.customer_address.slice(-8) : ''"></span>
+                    </div>
+                    <!-- 消息历史 -->
+                    <div class="max-h-40 overflow-y-auto px-3 py-2 space-y-1 bg-gray-950">
+                      <template x-if="chatHistory.length === 0">
+                        <p class="text-xs text-gray-600 text-center py-2">暂无消息记录</p>
+                      </template>
+                      <template x-for="h in chatHistory" :key="h.ts">
+                        <div class="text-xs" :class="h.dir === 'out' ? 'text-right' : ''">
+                          <span :class="h.dir === 'out' ? 'bg-green-900/50 text-green-300' : 'bg-blue-900/50 text-blue-300'"
+                            class="inline-block px-2 py-1 rounded max-w-[80%]" x-text="h.text?.slice(0, 200)"></span>
+                        </div>
+                      </template>
+                    </div>
+                    <!-- 输入框 -->
+                    <div class="flex border-t border-gray-700">
+                      <input type="text" x-model="chatMsg" @keydown.enter="sendChat(deal)"
+                        placeholder="输入消息..."
+                        class="flex-1 bg-gray-900 text-sm text-white px-3 py-2 focus:outline-none" />
+                      <button @click="sendChat(deal)" :disabled="chatSending || !chatMsg.trim()"
+                        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs disabled:opacity-50"
+                        x-text="chatSending ? '...' : '发送'"></button>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </template>
+
+            <template x-if="activeDeals.length === 0">
+              <div class="px-4 py-8 text-center text-gray-600 text-sm">暂无进行中的交易</div>
+            </template>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+
+</body>
+</html>

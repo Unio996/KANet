@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="<%= it.t.html_lang %>" dir="<%= it.dir %>">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title><%= it.t.page_skills %> — KANet Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: { colors: {
+        warm: { 50: '#faf9f7', 100: '#f7f6f3', 200: '#efeee9', 300: '#e4e2dc', 400: '#d4d0c8' },
+        ink: { 50: '#f5f5f7', 100: '#e8e8ec', 200: '#c8c8d0', 300: '#9496a1', 400: '#6b6d7b', 500: '#4a4b57', 600: '#2d2e3a', 700: '#1a1a2e' },
+        brand: { 50: '#eff6ff', 100: '#dbeafe', 200: '#bfdbfe', 300: '#93c5fd', 400: '#60a5fa', 500: '#3b82f6', 600: '#2563eb', 700: '#1d4ed8' }
+      }, fontFamily: { sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'] } } } }
+  </script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>[x-cloak] { display: none !important; }</style>
+</head>
+<body class="flex h-screen bg-warm-100 font-sans">
+
+  <!-- ═══════ Sidebar ═══════ -->
+  <aside class="w-56 bg-white border-r border-warm-300 flex flex-col flex-shrink-0">
+    <div class="px-4 py-4 border-b border-warm-300 flex items-center space-x-3">
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white font-bold text-sm shadow-sm shadow-brand-200 flex-shrink-0">K</div>
+      <span class="text-base font-bold tracking-wide text-ink-700 leading-tight">KANet<br/><span class="text-xs font-normal text-ink-300">Console</span></span>
+    </div>
+    <nav class="flex-1 py-4 space-y-1 px-3 overflow-y-auto">
+      <a href="/agent" class="flex items-center px-3 py-2 rounded-lg text-sm font-medium text-ink-500 hover:bg-warm-200 hover:text-ink-700 transition-colors">
+        我的 Agent
+      </a>
+      <a href="/conversations" class="flex items-center px-3 py-2 rounded-lg text-sm font-medium text-ink-500 hover:bg-warm-200 hover:text-ink-700 transition-colors">
+        会话
+      </a>
+      <a href="/identities" class="flex items-center px-3 py-2 rounded-lg text-sm font-medium text-ink-500 hover:bg-warm-200 hover:text-ink-700 transition-colors">
+        通讯录
+      </a>
+      <a href="/network" class="flex items-center px-3 py-2 rounded-lg text-sm font-medium text-ink-500 hover:bg-warm-200 hover:text-ink-700 transition-colors">
+        网络
+      </a>
+      <a href="/chat" class="flex items-center px-3 py-2 rounded-lg text-sm font-medium text-ink-500 hover:bg-warm-200 hover:text-ink-700 transition-colors">
+        聊天
+      </a>
+      <a href="/skills" class="flex items-center px-3 py-2 rounded-lg text-sm font-medium bg-brand-50 text-brand-600 transition-colors">
+        技能
+      </a>
+      <div class="pt-4 border-t border-warm-300 mt-4 space-y-1">
+        <a href="/events" class="flex items-center px-3 py-2 rounded-lg text-sm font-medium text-ink-500 hover:bg-warm-200 hover:text-ink-700 transition-colors">
+          活动日志
+        </a>
+        <div class="flex items-center px-3 py-2 text-xs font-medium text-ink-300 uppercase tracking-wider">
+          系统设置
+        </div>
+        <a href="/relays" class="flex items-center px-3 py-2 rounded-lg text-sm font-medium text-ink-500 hover:bg-warm-200 hover:text-ink-700 transition-colors pl-6">
+          账户管理
+        </a>
+        <a href="/adapters" class="flex items-center px-3 py-2 rounded-lg text-sm font-medium text-ink-500 hover:bg-warm-200 hover:text-ink-700 transition-colors pl-6">
+          AI 引擎
+        </a>
+      </div>
+    </nav>
+    <div class="px-3 pb-2">
+      <form method="POST" action="/lang">
+        <select name="lang" onchange="this.form.submit()"
+          class="w-full bg-warm-50 text-ink-500 text-xs rounded-lg px-2 py-1.5 border border-warm-300 focus:outline-none focus:ring-1 focus:ring-brand-300 cursor-pointer">
+          <% Object.entries(it.langs).forEach(function([code, label]) { %>
+          <option value="<%= code %>" <%= it.lang === code ? 'selected' : '' %>><%= label %></option>
+          <% }) %>
+        </select>
+      </form>
+    </div>
+    <div class="px-5 py-3 border-t border-warm-300 text-xs text-ink-300">
+      KANet Console v0.1
+    </div>
+  </aside>
+
+  <!-- ═══════ Main Content ═══════ -->
+  <div class="flex-1 flex flex-col overflow-hidden">
+
+    <!-- Header -->
+    <header class="bg-white border-b border-warm-200 px-6 py-4 flex items-center justify-between flex-shrink-0">
+      <h1 class="text-xl font-semibold text-ink-700"><%= it.t.page_skills %></h1>
+      <form method="GET" action="/skills" class="flex items-center gap-3">
+        <label class="text-sm text-ink-400"><%= it.t.label_account %>:</label>
+        <select name="account" onchange="this.form.submit()"
+          class="border border-warm-300 rounded-lg px-3 py-1.5 text-sm text-ink-600 bg-white focus:ring-2 focus:ring-brand-300 focus:border-brand-400 cursor-pointer min-w-[180px]">
+          <option value="" <%= !it.selectedAccount ? 'selected' : '' %>><%= it.t.filter_all %></option>
+          <% it.relayNodes.forEach(function(rn) { %>
+          <option value="<%= rn.id %>" <%= it.selectedAccount === rn.id ? 'selected' : '' %>>
+            <%= rn.name %> (<%= rn.address ? rn.address.slice(-8) : '...' %>)
+          </option>
+          <% }) %>
+        </select>
+      </form>
+    </header>
+
+    <main class="flex-1 overflow-y-auto p-6 space-y-6">
+
+      <%
+        /* ── Sort skills: active first, then by name ── */
+        const sorted = [...it.skills].sort((a, b) => {
+          const statusOrder = { active: 0, frozen: 1, disabled: 2 };
+          const sa = statusOrder[a.status] ?? 9, sb = statusOrder[b.status] ?? 9;
+          if (sa !== sb) return sa - sb;
+          return (a.display_name || '').localeCompare(b.display_name || '');
+        });
+
+        /* ── Build category groups ── */
+        const CATEGORY_META = {
+          core:       { label: '核心 Core',       order: 0 },
+          perception: { label: '感知 Perception', order: 1 },
+          social:     { label: '社交 Social',     order: 2 },
+          trading:    { label: '交易 Trading',    order: 3 },
+          info:       { label: '信息 Information',order: 4 },
+          dev:        { label: '开发 Development',order: 5 },
+          self:       { label: '自我 Self',       order: 6 },
+          contacts:   { label: '通讯录 Contacts', order: 7 },
+          other:      { label: '其他 Other',      order: 99 },
+        };
+
+        const grouped = {};
+        sorted.forEach(function(sk) {
+          const cat = sk.category || 'other';
+          if (!grouped[cat]) grouped[cat] = [];
+          grouped[cat].push(sk);
+        });
+
+        /* Sort categories by order */
+        const categoryKeys = Object.keys(grouped).sort((a, b) => {
+          const oa = (CATEGORY_META[a] || {}).order ?? 99;
+          const ob = (CATEGORY_META[b] || {}).order ?? 99;
+          return oa - ob;
+        });
+
+        const totalSkills = sorted.length;
+        const activeSkills = sorted.filter(s => s.status === 'active').length;
+      %>
+
+      <!-- Stats bar -->
+      <div class="flex items-center justify-between">
+        <div class="text-sm text-ink-400">
+          共 <span class="font-semibold text-ink-600"><%= totalSkills %></span> 个技能，
+          <span class="font-semibold text-green-600"><%= activeSkills %></span> 个已启用
+        </div>
+        <button @click="openCatAdd()" class="px-3 py-1 text-xs font-medium text-brand-600 bg-brand-50 rounded-lg hover:bg-brand-100 border border-brand-100">新增分类</button>
+      </div>
+
+      <!-- ═══════ Category-grouped skill cards ═══════ -->
+      <div x-data="{
+        expandedCategories: {
+          <% categoryKeys.forEach(function(cat, i) { %>
+          '<%= cat %>': true<%= i < categoryKeys.length - 1 ? ',' : '' %>
+          <% }) %>
+        },
+        editingId: null,
+        catMgr: { show: false, action: '', cat: '', newName: '' },
+
+        toggleCategory(cat) {
+          this.expandedCategories[cat] = !this.expandedCategories[cat];
+        },
+
+        startEdit(id) { this.editingId = id; },
+        cancelEdit() { this.editingId = null; },
+
+        openCatRename(cat) {
+          this.catMgr = { show: true, action: 'rename', cat, newName: '' };
+        },
+        openCatDelete(cat) {
+          this.catMgr = { show: true, action: 'delete', cat, newName: '' };
+        },
+        openCatAdd() {
+          this.catMgr = { show: true, action: 'add', cat: '', newName: '' };
+        },
+        async submitCatAction() {
+          if (this.catMgr.action === 'rename') {
+            if (!this.catMgr.newName.trim()) return;
+            const resp = await fetch('/skills/rename-category', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ from: this.catMgr.cat, to: this.catMgr.newName.trim() })
+            });
+            if (resp.ok) location.reload();
+          } else if (this.catMgr.action === 'delete') {
+            if (!confirm('确定删除分类「' + this.catMgr.cat + '」？其中的技能将归入「其他」。')) return;
+            const resp = await fetch('/skills/delete-category', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ category: this.catMgr.cat })
+            });
+            if (resp.ok) location.reload();
+          } else if (this.catMgr.action === 'add') {
+            if (!this.catMgr.newName.trim()) return;
+            // Create empty category by renaming a placeholder — or just rename 'other' skills later
+            // For now: just reload to show it appears once a skill is assigned
+            alert('新分类「' + this.catMgr.newName.trim() + '」已创建。将技能移入此分类即可生效。');
+            this.catMgr.show = false;
+            return;
+          }
+          this.catMgr.show = false;
+        }
+      }" class="space-y-4">
+
+        <% if (totalSkills === 0) { %>
+          <div class="bg-white rounded-xl border border-warm-300 p-8 text-center">
+            <p class="text-ink-400 text-sm">暂无技能</p>
+          </div>
+        <% } %>
+
+        <% categoryKeys.forEach(function(cat) {
+          const skills = grouped[cat];
+          const meta = CATEGORY_META[cat] || { label: cat, order: 99 };
+          const catActiveCount = skills.filter(s => s.status === 'active').length;
+        %>
+
+        <!-- Category: <%= cat %> -->
+        <div class="bg-white rounded-xl border border-warm-300 overflow-hidden">
+          <!-- Category header -->
+          <div class="flex items-center justify-between px-5 py-3 bg-warm-50 border-b border-warm-200 cursor-pointer select-none"
+               @click="toggleCategory('<%= cat %>')">
+            <div class="flex items-center gap-3">
+              <span class="text-ink-400 text-xs transition-transform duration-200"
+                    :class="expandedCategories['<%= cat %>'] ? 'rotate-90' : ''">&#9654;</span>
+              <span class="text-sm font-semibold text-ink-600"><%= meta.label %></span>
+              <span class="text-xs text-ink-300 font-normal"><%= skills.length %> 个技能 &middot; <%= catActiveCount %> 已启用</span>
+            </div>
+            <div class="flex items-center gap-2" @click.stop>
+              <% if (cat !== 'other') { %>
+              <button @click="openCatRename('<%= cat %>')"
+                class="text-xs text-ink-300 hover:text-brand-500 px-1.5 py-0.5 rounded hover:bg-brand-50 transition-colors">重命名</button>
+              <button @click="openCatDelete('<%= cat %>')"
+                class="text-xs text-ink-300 hover:text-red-500 px-1.5 py-0.5 rounded hover:bg-red-50 transition-colors">删除分类</button>
+              <% } %>
+            </div>
+          </div>
+
+          <!-- Skills table (collapsible) -->
+          <div x-show="expandedCategories['<%= cat %>']" x-collapse>
+            <table class="min-w-full divide-y divide-warm-200 text-sm">
+              <thead class="bg-warm-50">
+                <tr>
+                  <th class="px-5 py-2.5 text-left font-medium text-ink-400 text-xs">技能</th>
+                  <th class="px-5 py-2.5 text-left font-medium text-ink-400 text-xs">说明</th>
+                  <th class="px-5 py-2.5 text-center font-medium text-ink-400 text-xs">状态</th>
+                  <th class="px-5 py-2.5 text-center font-medium text-ink-400 text-xs">调用次数</th>
+                  <th class="px-5 py-2.5 text-center font-medium text-ink-400 text-xs">操作</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-warm-200">
+                <% skills.forEach(function(sk) { %>
+                <tr class="hover:bg-warm-50 transition-colors">
+                  <!-- Display mode -->
+                  <template x-if="editingId !== '<%= sk.id %>'">
+                    <td class="px-5 py-3">
+                      <div class="flex items-center gap-2">
+                        <span class="font-medium text-ink-700"><%= sk.display_name %></span>
+                        <% if (sk.source === 'uploaded') { %>
+                        <span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-orange-100 text-orange-600 leading-none">外部</span>
+                        <% } %>
+                      </div>
+                      <div class="text-xs text-ink-300 font-mono mt-0.5"><%= sk.name %></div>
+                    </td>
+                  </template>
+                  <template x-if="editingId !== '<%= sk.id %>'">
+                    <td class="px-5 py-3 text-ink-500 max-w-xs text-sm"><%= sk.description %></td>
+                  </template>
+                  <template x-if="editingId !== '<%= sk.id %>'">
+                    <td class="px-5 py-3 text-center">
+                      <% if (sk.status === 'active') { %>
+                        <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-50 text-green-600 border border-green-200">已启用</span>
+                      <% } else if (sk.status === 'frozen') { %>
+                        <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold bg-yellow-50 text-yellow-600 border border-yellow-200">待激活</span>
+                      <% } else { %>
+                        <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold bg-warm-100 text-ink-400 border border-warm-300">已禁用</span>
+                      <% } %>
+                    </td>
+                  </template>
+                  <template x-if="editingId !== '<%= sk.id %>'">
+                    <td class="px-5 py-3 text-center">
+                      <span class="text-ink-500 font-mono text-xs tabular-nums"><%= sk.invoke_count %></span>
+                    </td>
+                  </template>
+                  <template x-if="editingId !== '<%= sk.id %>'">
+                    <td class="px-5 py-3 text-center space-x-2">
+                      <button @click="startEdit('<%= sk.id %>')"
+                        class="text-brand-500 hover:text-brand-700 text-xs font-medium transition-colors">编辑</button>
+                      <% if (sk.source !== 'builtin') { %>
+                      <button onclick="if(confirm('确定卸载「<%= sk.display_name %>」?')) document.getElementById('del-<%= sk.id %>').submit()"
+                        class="text-red-400 hover:text-red-600 text-xs font-medium transition-colors">卸载</button>
+                      <% } %>
+                    </td>
+                  </template>
+
+                  <!-- Edit mode -->
+                  <template x-if="editingId === '<%= sk.id %>'">
+                    <td colspan="5" class="px-5 py-4 bg-warm-50">
+                      <form method="POST" action="/skills/<%= sk.id %>" class="space-y-3">
+                        <div class="flex flex-wrap gap-3 items-end">
+                          <div>
+                            <label class="block text-xs text-ink-400 mb-1 font-medium">名称</label>
+                            <input type="text" name="displayName" value="<%= sk.display_name %>"
+                              class="border border-warm-300 rounded-lg px-3 py-1.5 text-sm w-44 focus:ring-2 focus:ring-brand-300 focus:border-brand-400 bg-white text-ink-700" />
+                          </div>
+                          <div class="flex-1 min-w-[200px]">
+                            <label class="block text-xs text-ink-400 mb-1 font-medium">说明</label>
+                            <input type="text" name="description" value="<%= sk.description %>"
+                              class="border border-warm-300 rounded-lg px-3 py-1.5 text-sm w-full focus:ring-2 focus:ring-brand-300 focus:border-brand-400 bg-white text-ink-700" />
+                          </div>
+                          <div>
+                            <label class="block text-xs text-ink-400 mb-1 font-medium">状态</label>
+                            <select name="status"
+                              class="border border-warm-300 rounded-lg px-3 py-1.5 text-sm bg-white text-ink-700 focus:ring-2 focus:ring-brand-300 cursor-pointer">
+                              <option value="active" <%= sk.status === 'active' ? 'selected' : '' %>>已启用</option>
+                              <option value="disabled" <%= sk.status === 'disabled' ? 'selected' : '' %>>已禁用</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label class="block text-xs text-ink-400 mb-1 font-medium">分类</label>
+                            <select name="category"
+                              class="border border-warm-300 rounded-lg px-3 py-1.5 text-sm bg-white text-ink-700 focus:ring-2 focus:ring-brand-300 cursor-pointer">
+                              <option value="core" <%= sk.category === 'core' ? 'selected' : '' %>>核心 Core</option>
+                              <option value="perception" <%= sk.category === 'perception' ? 'selected' : '' %>>感知 Perception</option>
+                              <option value="social" <%= sk.category === 'social' ? 'selected' : '' %>>社交 Social</option>
+                              <option value="trading" <%= sk.category === 'trading' ? 'selected' : '' %>>交易 Trading</option>
+                              <option value="info" <%= sk.category === 'info' ? 'selected' : '' %>>信息 Information</option>
+                              <option value="dev" <%= sk.category === 'dev' ? 'selected' : '' %>>开发 Development</option>
+                              <option value="self" <%= sk.category === 'self' ? 'selected' : '' %>>自我 Self</option>
+                              <option value="contacts" <%= sk.category === 'contacts' ? 'selected' : '' %>>通讯录 Contacts</option>
+                              <option value="other" <%= (sk.category === 'other' || !sk.category) ? 'selected' : '' %>>其他 Other</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div class="flex gap-2">
+                          <button type="submit"
+                            class="bg-brand-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium hover:bg-brand-700 transition-colors shadow-sm">保存</button>
+                          <button type="button" @click="cancelEdit()"
+                            class="bg-warm-200 text-ink-600 px-4 py-1.5 rounded-lg text-sm font-medium hover:bg-warm-300 transition-colors">取消</button>
+                        </div>
+                      </form>
+                    </td>
+                  </template>
+
+                  <% if (sk.source !== 'builtin') { %>
+                  <form id="del-<%= sk.id %>" method="POST" action="/skills/<%= sk.id %>/delete" class="hidden"></form>
+                  <% } %>
+                </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <% }) %>
+
+        <!-- ═══════ Category management modal ═══════ -->
+        <template x-if="catMgr.show">
+          <div class="fixed inset-0 bg-black/30 flex items-center justify-center z-50" @click.self="catMgr.show = false">
+            <div class="bg-white rounded-xl border border-warm-300 shadow-xl p-6 w-96 space-y-4">
+              <template x-if="catMgr.action === 'rename'">
+                <div>
+                  <h3 class="text-base font-semibold text-ink-700">重命名分类</h3>
+                  <p class="text-xs text-ink-400 mt-1">将分类 <span class="font-mono text-ink-600" x-text="catMgr.cat"></span> 重命名为：</p>
+                  <input type="text" x-model="catMgr.newName" placeholder="新分类名"
+                    class="mt-3 w-full border border-warm-300 rounded-lg px-3 py-2 text-sm text-ink-700 focus:ring-2 focus:ring-brand-300 focus:border-brand-400" />
+                </div>
+              </template>
+              <template x-if="catMgr.action === 'delete'">
+                <div>
+                  <h3 class="text-base font-semibold text-ink-700">删除分类</h3>
+                  <p class="text-sm text-ink-500 mt-2">分类 <span class="font-mono font-semibold text-ink-700" x-text="catMgr.cat"></span> 中的所有技能将被归入「其他」分类。</p>
+                </div>
+              </template>
+              <template x-if="catMgr.action === 'add'">
+                <div>
+                  <h3 class="text-base font-semibold text-ink-700">新增分类</h3>
+                  <p class="text-xs text-ink-400 mt-1">创建一个新的技能分类，之后可将技能移入。</p>
+                  <input type="text" x-model="catMgr.newName" placeholder="分类名称（英文小写）"
+                    class="mt-3 w-full border border-warm-300 rounded-lg px-3 py-2 text-sm text-ink-700 focus:ring-2 focus:ring-brand-300 focus:border-brand-400" />
+                </div>
+              </template>
+              <div class="flex justify-end gap-2 pt-2">
+                <button @click="catMgr.show = false"
+                  class="px-4 py-1.5 text-sm font-medium text-ink-500 bg-warm-200 rounded-lg hover:bg-warm-300 transition-colors">取消</button>
+                <button @click="submitCatAction()"
+                  class="px-4 py-1.5 text-sm font-medium text-white rounded-lg transition-colors shadow-sm"
+                  :class="catMgr.action === 'delete' ? 'bg-red-500 hover:bg-red-600' : 'bg-brand-600 hover:bg-brand-700'"
+                  x-text="catMgr.action === 'delete' ? '确认删除' : catMgr.action === 'add' ? '创建' : '确认重命名'"></button>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- ═══════ Upload skill file ═══════ -->
+      <div class="bg-white rounded-xl border border-warm-300 p-6" x-data="{
+        fileName: '',
+        fileContent: '',
+        skillInfo: null,
+        displayName: '',
+        description: '',
+        category: 'other',
+        error: '',
+        handleFile(e) {
+          const file = e.target.files[0];
+          if (!file) return;
+          if (!file.name.endsWith('.mjs')) { this.error = '请选择 .mjs 文件'; return; }
+          this.fileName = file.name;
+          this.error = '';
+          const reader = new FileReader();
+          reader.onload = (ev) => {
+            this.fileContent = ev.target.result;
+            const m = this.fileContent.match(/super\(\s*'([^']+)'\s*,\s*'([^']+)'\s*\)/);
+            if (m) {
+              this.skillInfo = { name: m[1], desc: m[2] };
+              this.displayName = m[1];
+              this.description = m[2];
+            } else {
+              this.error = '文件格式不正确，缺少技能声明';
+              this.skillInfo = null;
+            }
+          };
+          reader.readAsText(file);
+        }
+      }">
+        <h2 class="text-base font-semibold text-ink-700 mb-1">安装技能</h2>
+        <p class="text-xs text-ink-400 mb-4">选择一个 .mjs 技能文件，安装后重启 Mind 即可使用。</p>
+
+        <button type="button" @click="$refs.fileInput.click()"
+          class="px-4 py-2 text-sm font-medium text-brand-600 bg-brand-50 rounded-lg border border-brand-200 hover:bg-brand-100 transition-colors">
+          选择 .mjs 技能文件
+        </button>
+        <input type="file" accept=".mjs" x-ref="fileInput" @change="handleFile($event)" class="hidden" />
+
+        <div x-show="error" class="mt-2 text-xs text-red-600" x-text="error"></div>
+
+        <template x-if="skillInfo">
+          <div class="mt-4 p-5 bg-warm-50 rounded-xl border border-warm-300 space-y-4">
+            <div class="text-xs text-ink-400">
+              文件: <span class="text-ink-600" x-text="fileName"></span>
+              &middot; 标识: <span class="font-mono text-ink-600" x-text="skillInfo.name"></span>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label class="block text-xs text-ink-400 mb-1 font-medium">显示名称</label>
+                <input type="text" x-model="displayName"
+                  class="w-full border border-warm-300 rounded-lg px-3 py-1.5 text-sm text-ink-700 bg-white focus:ring-2 focus:ring-brand-300 focus:border-brand-400" />
+              </div>
+              <div>
+                <label class="block text-xs text-ink-400 mb-1 font-medium">说明</label>
+                <input type="text" x-model="description"
+                  class="w-full border border-warm-300 rounded-lg px-3 py-1.5 text-sm text-ink-700 bg-white focus:ring-2 focus:ring-brand-300 focus:border-brand-400" />
+              </div>
+              <div>
+                <label class="block text-xs text-ink-400 mb-1 font-medium">分类</label>
+                <select x-model="category"
+                  class="w-full border border-warm-300 rounded-lg px-3 py-1.5 text-sm text-ink-700 bg-white focus:ring-2 focus:ring-brand-300 cursor-pointer">
+                  <option value="core">核心 Core</option>
+                  <option value="perception">感知 Perception</option>
+                  <option value="social">社交 Social</option>
+                  <option value="trading">交易 Trading</option>
+                  <option value="info">信息 Information</option>
+                  <option value="dev">开发 Development</option>
+                  <option value="self">自我 Self</option>
+                  <option value="contacts">通讯录 Contacts</option>
+                  <option value="other" selected>其他 Other</option>
+                </select>
+              </div>
+            </div>
+            <form method="POST" action="/skills/upload">
+              <input type="hidden" name="fileName" :value="fileName" />
+              <input type="hidden" name="fileContent" :value="fileContent" />
+              <input type="hidden" name="displayName" :value="displayName" />
+              <input type="hidden" name="description" :value="description" />
+              <input type="hidden" name="category" :value="category" />
+              <button type="submit"
+                class="bg-brand-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-brand-700 transition-colors shadow-sm">
+                安装技能
+              </button>
+            </form>
+          </div>
+        </template>
+      </div>
+
+    </main>
+  </div>
+</body>
+</html>

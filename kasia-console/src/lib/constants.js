@@ -1,0 +1,14 @@
+export const NETWORKS = ['mainnet', 'testnet-10', 'testnet-11'];
+export const DIRECTIONS = ['inbound', 'outbound'];
+export const CHANNEL_TYPES = ['dm', 'group', 'system'];
+export const IDENTITY_TYPES = ['local', 'remote', 'system'];
+export const CONV_STATUSES = ['active', 'archived', 'blocked', 'pending'];
+export const MSG_TYPES = ['text', 'handshake', 'ack', 'system', 'unknown'];
+export const REPLY_TYPES = ['ai', 'manual', 'system'];
+export const REPLY_STATUSES = ['draft', 'sent', 'failed', 'skipped'];
+export const INTENT_STATUSES = ['pending', 'done', 'failed'];
+export const TX_STATUSES = ['draft', 'broadcasted', 'confirmed', 'failed'];
+export const EVENT_SCOPES = ['system', 'domain'];
+export const EVENT_LEVELS = ['debug', 'info', 'warn', 'error'];
+export const EVENT_SOURCES = ['relay', 'adapter', 'console', 'worker', 'user'];
+export const CONTRACT_STATUSES = ['draft', 'compiled', 'compile_failed', 'broadcasted', 'confirmed'];

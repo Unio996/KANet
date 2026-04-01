@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="<%= it.t.html_lang %>" dir="<%= it.dir %>">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title><%= it.title %> — KANet Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+  tailwind.config = {
+    theme: { extend: { colors: {
+      warm: { 50: '#faf9f7', 100: '#f7f6f3', 200: '#efeee9', 300: '#e4e2dc', 400: '#d4d0c8' },
+      ink: { 50: '#f5f5f7', 100: '#e8e8ec', 200: '#c8c8d0', 300: '#9496a1', 400: '#6b6d7b', 500: '#4a4b57', 600: '#2d2e3a', 700: '#1a1a2e' },
+      brand: { 50: '#eff6ff', 100: '#dbeafe', 200: '#bfdbfe', 300: '#93c5fd', 400: '#60a5fa', 500: '#3b82f6', 600: '#2563eb', 700: '#1d4ed8' }
+    }, fontFamily: { sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'] } } } }
+  </script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>[x-cloak] { display: none !important; }</style>
+</head>
+<body class="flex h-screen bg-warm-100 font-sans">
+
+  <!-- Sidebar -->
+  <aside class="w-56 bg-white border-r border-warm-300 flex flex-col flex-shrink-0">
+    <div class="px-4 py-4 border-b border-warm-300 flex items-center space-x-3">
+      <img src="/public/kanet-logo.png" alt="KANet" class="h-8 w-8 object-contain flex-shrink-0" />
+      <span class="text-base font-bold tracking-wide text-ink-700 leading-tight">KANet<br/><span class="text-xs font-normal text-ink-300">Console</span></span>
+    </div>
+    <nav class="flex-1 py-4 space-y-0.5 px-3 overflow-y-auto">
+      <a href="/agent" class="block px-3 py-2 rounded-lg text-sm text-ink-300 hover:bg-warm-50 hover:text-ink-500 transition-colors">
+        我的 Agent
+      </a>
+      <a href="/conversations" class="block px-3 py-2 rounded-lg text-sm text-ink-300 hover:bg-warm-50 hover:text-ink-500 transition-colors">
+        会话
+      </a>
+      <a href="/identities" class="block px-3 py-2 rounded-lg text-sm text-ink-300 hover:bg-warm-50 hover:text-ink-500 transition-colors">
+        通讯录
+      </a>
+      <a href="/network" class="block px-3 py-2 rounded-lg text-sm font-medium bg-brand-50 text-brand-600">
+        网络
+      </a>
+      <a href="/chat" class="block px-3 py-2 rounded-lg text-sm text-ink-300 hover:bg-warm-50 hover:text-ink-500 transition-colors">
+        聊天
+      </a>
+      <a href="/market" class="block px-3 py-2 rounded-lg text-sm text-ink-300 hover:bg-warm-50 hover:text-ink-500 transition-colors">
+        自由市场
+      </a>
+
+      <!-- Divider -->
+      <div class="border-t border-warm-300 my-3"></div>
+
+      <a href="/events" class="block px-3 py-2 rounded-lg text-sm text-ink-300 hover:bg-warm-50 hover:text-ink-500 transition-colors">
+        活动日志
+      </a>
+
+      <div class="px-3 py-2 text-xs font-medium text-ink-300 uppercase tracking-wider">
+        系统
+      </div>
+      <a href="/relays" class="block px-3 py-2 rounded-lg text-sm text-ink-300 hover:bg-warm-50 hover:text-ink-500 transition-colors pl-6">
+        账户管理
+      </a>
+      <a href="/adapters" class="block px-3 py-2 rounded-lg text-sm text-ink-300 hover:bg-warm-50 hover:text-ink-500 transition-colors pl-6">
+        AI 引擎
+      </a>
+      <a href="/skills" class="block px-3 py-2 rounded-lg text-sm text-ink-300 hover:bg-warm-50 hover:text-ink-500 transition-colors pl-6">
+        技能
+      </a>
+    </nav>
+    <div class="px-3 pb-2">
+      <form method="POST" action="/lang">
+        <select name="lang" onchange="this.form.submit()"
+          class="w-full bg-warm-50 text-ink-500 text-xs rounded-lg px-2 py-1.5 border border-warm-300 focus:outline-none focus:ring-1 focus:ring-brand-500 cursor-pointer">
+          <% Object.entries(it.langs).forEach(function([code, label]) { %>
+          <option value="<%= code %>" <%= it.lang === code ? 'selected' : '' %>><%= label %></option>
+          <% }) %>
+        </select>
+      </form>
+    </div>
+    <div class="px-5 py-3 border-t border-warm-300 text-xs text-ink-300">
+      KANet Console v0.1
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <div class="flex-1 flex flex-col overflow-hidden">
+    <header class="bg-white border-b border-warm-200 px-6 py-4 flex items-center justify-between flex-shrink-0">
+      <div class="flex items-center space-x-3">
+        <a href="/identities?account=<%= it.accountId %>" class="text-sm text-brand-500 hover:text-brand-600 transition-colors">&larr; <%= it.t.nav_identities %></a>
+        <span class="text-warm-300">|</span>
+        <h1 class="text-lg font-semibold text-ink-700"><%= it.title %></h1>
+        <span class="text-sm text-ink-300">— <%= it.accountName %></span>
+      </div>
+    </header>
+
+    <main class="flex-1 overflow-y-auto p-6" x-data="{
+      accountId: '<%= it.accountId %>',
+      addresses: [],
+      loading: true,
+      filterStatus: '',
+
+      async init() {
+        await this.load();
+      },
+
+      async load() {
+        this.loading = true;
+        try {
+          let url = '/api/discovery/list?accountId=' + encodeURIComponent(this.accountId);
+          if (this.filterStatus) url += '&status=' + encodeURIComponent(this.filterStatus);
+          const res = await fetch(url);
+          this.addresses = await res.json();
+        } catch (e) {
+          console.error('Failed to load discovered addresses:', e);
+          this.addresses = [];
+        }
+        this.loading = false;
+      },
+
+      truncAddr(addr) {
+        if (!addr) return '...';
+        if (addr.length <= 20) return addr;
+        return addr.slice(0, 10) + '...' + addr.slice(-8);
+      },
+
+      statusBadgeClass(status) {
+        switch (status) {
+          case 'active':
+          case 'confirmed':
+            return 'bg-green-50 text-green-700 border border-green-200';
+          case 'accepted':
+            return 'bg-amber-50 text-amber-700 border border-amber-200';
+          case 'observed':
+            return 'bg-warm-100 text-ink-400 border border-warm-300';
+          case 'blocked':
+            return 'bg-red-50 text-red-700 border border-red-200';
+          case 'stale':
+            return 'bg-warm-100 text-ink-300 border border-warm-300';
+          default:
+            return 'bg-warm-100 text-ink-400 border border-warm-300';
+        }
+      },
+
+      statusLabel(status) {
+        switch (status) {
+          case 'active': return 'active';
+          case 'confirmed': return 'confirmed';
+          case 'accepted': return 'accepted';
+          case 'observed': return 'observed';
+          case 'blocked': return 'blocked';
+          case 'stale': return 'stale';
+          default: return status || '-';
+        }
+      },
+
+      fmtDate(d) {
+        if (!d) return '-';
+        try { return new Date(d).toLocaleString(); } catch { return d; }
+      },
+
+      fmtRelative(d) {
+        if (!d) return '-';
+        try {
+          const diff = Date.now() - new Date(d).getTime();
+          const mins = Math.floor(diff / 60000);
+          if (mins < 1) return 'just now';
+          if (mins < 60) return mins + 'm ago';
+          const hrs = Math.floor(mins / 60);
+          if (hrs < 24) return hrs + 'h ago';
+          const days = Math.floor(hrs / 24);
+          if (days < 30) return days + 'd ago';
+          return new Date(d).toLocaleDateString();
+        } catch { return d; }
+      },
+
+      parseTags(tags) {
+        if (!tags) return [];
+        try {
+          if (typeof tags === 'string') return tags.split(',').map(t => t.trim()).filter(Boolean);
+          return Array.isArray(tags) ? tags : [];
+        } catch { return []; }
+      }
+    }" x-cloak>
+
+      <!-- Filter bar -->
+      <div class="mb-5 flex items-center space-x-2 flex-wrap gap-y-2">
+        <span class="text-sm text-ink-400 mr-1">Status:</span>
+        <template x-for="s in [
+          { value: '', label: '全部' },
+          { value: 'active', label: 'active' },
+          { value: 'accepted', label: 'accepted' },
+          { value: 'observed', label: 'observed' },
+          { value: 'confirmed', label: 'confirmed' },
+          { value: 'blocked', label: 'blocked' },
+          { value: 'stale', label: 'stale' },
+        ]" :key="s.value">
+          <button @click="filterStatus = s.value; load()"
+            class="px-3 py-1 rounded-lg text-xs font-medium transition-colors"
+            :class="filterStatus === s.value
+              ? 'bg-brand-500 text-white'
+              : 'bg-white text-ink-400 border border-warm-300 hover:bg-warm-50 hover:text-ink-500'"
+            x-text="s.label">
+          </button>
+        </template>
+        <span class="text-xs text-ink-300 ml-3" x-show="!loading" x-text="addresses.length + ' results'"></span>
+      </div>
+
+      <!-- Loading state -->
+      <div x-show="loading" class="flex items-center justify-center py-16">
+        <svg class="animate-spin h-5 w-5 text-brand-500" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+        </svg>
+        <span class="ml-2 text-sm text-ink-300">Loading...</span>
+      </div>
+
+      <!-- Empty state -->
+      <div x-show="!loading && addresses.length === 0" class="bg-white rounded-xl border border-warm-300 p-12 text-center">
+        <p class="text-sm text-ink-300">No discovered addresses found.</p>
+        <p class="text-xs text-ink-200 mt-1">Discovered peers will appear here once the scanner detects network activity.</p>
+      </div>
+
+      <!-- Table -->
+      <div x-show="!loading && addresses.length > 0" class="bg-white rounded-xl border border-warm-300 overflow-hidden">
+        <table class="w-full text-sm">
+          <thead class="bg-warm-50 border-b border-warm-300">
+            <tr>
+              <th class="px-5 py-3 text-left text-xs font-medium text-ink-300 uppercase tracking-wider">Address</th>
+              <th class="px-5 py-3 text-left text-xs font-medium text-ink-300 uppercase tracking-wider">Type</th>
+              <th class="px-5 py-3 text-left text-xs font-medium text-ink-300 uppercase tracking-wider">Summary</th>
+              <th class="px-5 py-3 text-left text-xs font-medium text-ink-300 uppercase tracking-wider">Status</th>
+              <th class="px-5 py-3 text-left text-xs font-medium text-ink-300 uppercase tracking-wider">Tags</th>
+              <th class="px-5 py-3 text-left text-xs font-medium text-ink-300 uppercase tracking-wider">Interactions</th>
+              <th class="px-5 py-3 text-left text-xs font-medium text-ink-300 uppercase tracking-wider">First Seen</th>
+              <th class="px-5 py-3 text-left text-xs font-medium text-ink-300 uppercase tracking-wider">Last Seen</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-warm-200">
+            <template x-for="row in addresses" :key="row.address">
+              <tr class="hover:bg-warm-50 transition-colors">
+                <!-- Address / Name -->
+                <td class="px-5 py-3">
+                  <div class="flex flex-col">
+                    <span class="font-medium text-ink-700" x-show="row.display_name" x-text="row.display_name"></span>
+                    <span class="font-mono text-xs text-ink-300" x-text="truncAddr(row.address)" :title="row.address"></span>
+                  </div>
+                </td>
+
+                <!-- Entity Type -->
+                <td class="px-5 py-3">
+                  <template x-if="row.identity_type === 'kanet_agent'">
+                    <div class="flex flex-col gap-1">
+                      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-brand-50 text-brand-600">
+                        KANet Agent
+                      </span>
+                      <span class="text-xs text-ink-300" x-show="row.card_entity_type && row.card_entity_type !== 'agent'" x-text="row.card_entity_type"></span>
+                      <span class="text-xs text-ink-300" x-show="row.card_mode === 'private'">private</span>
+                      <span class="text-xs text-ink-300" x-show="row.card_mode === 'mixed'">mixed</span>
+                      <span class="text-xs text-ink-300" x-show="row.card_has_ext" title="Has encrypted extensions">+ ext</span>
+                    </div>
+                  </template>
+                  <template x-if="row.identity_type !== 'kanet_agent'">
+                    <span class="text-xs text-ink-400" x-text="row.card_entity_type || row.identity_type || '-'"></span>
+                  </template>
+                </td>
+
+                <!-- Summary + Skills -->
+                <td class="px-5 py-3 max-w-xs">
+                  <div class="flex flex-col gap-1">
+                    <span class="text-xs text-ink-500 line-clamp-2" x-show="row.card_summary" x-text="row.card_summary"></span>
+                    <template x-if="row.card_skills_json">
+                      <div class="flex flex-wrap gap-1 mt-0.5">
+                        <template x-for="skill in JSON.parse(row.card_skills_json || '[]')" :key="skill">
+                          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-brand-50 text-brand-500" x-text="skill"></span>
+                        </template>
+                      </div>
+                    </template>
+                    <span class="text-xs text-ink-200" x-show="!row.card_summary && !row.card_skills_json">-</span>
+                  </div>
+                </td>
+
+                <!-- Status badge -->
+                <td class="px-5 py-3">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
+                    :class="statusBadgeClass(row.status)"
+                    x-text="statusLabel(row.status)"></span>
+                </td>
+
+                <!-- Tags -->
+                <td class="px-5 py-3">
+                  <template x-if="parseTags(row.tags).length > 0">
+                    <div class="flex flex-wrap gap-1">
+                      <template x-for="tag in parseTags(row.tags)" :key="tag">
+                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-warm-100 text-ink-400" x-text="tag"></span>
+                      </template>
+                    </div>
+                  </template>
+                  <template x-if="parseTags(row.tags).length === 0">
+                    <span class="text-xs text-ink-200">-</span>
+                  </template>
+                </td>
+
+                <!-- Interaction count -->
+                <td class="px-5 py-3 text-sm text-ink-700 font-medium" x-text="row.interaction_count || 0"></td>
+
+                <!-- First seen -->
+                <td class="px-5 py-3">
+                  <span class="text-xs text-ink-300" x-text="fmtDate(row.first_seen_at)" :title="row.first_seen_at"></span>
+                </td>
+
+                <!-- Last seen -->
+                <td class="px-5 py-3">
+                  <span class="text-xs text-ink-400" x-text="fmtRelative(row.last_seen_at)" :title="fmtDate(row.last_seen_at)"></span>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+    </main>
+  </div>
+
+</body>
+</html>

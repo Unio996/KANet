@@ -1,0 +1,33 @@
+# 继承子项目已有规则（kasia-console/.gitignore 等）
+node_modules/
+data/
+.env
+*.log
+*.pid
+
+# === 根目录敏感配置 ===
+kanet.env
+_relay_env.txt
+
+# === 数据库 ===
+*.db
+*.sqlite
+
+# === 运行时数据 ===
+agent-mind/minds/
+health_tmp.json
+hex-debug-payload.json
+
+# === 备份与下载 ===
+backups/
+downloads/
+
+# === 临时/调试文件 ===
+sophie-debug-*.txt
+sophie-live-*.txt
+tmp-*.html
+*.pid
+
+# === IDE / 工具 ===
+.claude/
+.superpowers/

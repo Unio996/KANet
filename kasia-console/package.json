@@ -1,0 +1,25 @@
+{
+  "name": "kasia-console",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "@fastify/formbody": "^7.4.0",
+    "@fastify/static": "^7.0.4",
+    "@fastify/view": "^9.1.0",
+    "@polymarket/clob-client": "^5.8.1",
+    "@solana/web3.js": "^1.98.4",
+    "@stoqey/ib": "^1.5.3",
+    "better-sqlite3": "^9.6.0",
+    "bs58": "^6.0.0",
+    "drizzle-orm": "^0.30.10",
+    "eta": "^3.4.0",
+    "ethers": "^6.16.0",
+    "fastify": "^4.28.1",
+    "kaspa-wasm": "file:../kasia-relay/node_modules/kaspa-wasm",
+    "tronweb": "^6.2.2"
+  }
+}

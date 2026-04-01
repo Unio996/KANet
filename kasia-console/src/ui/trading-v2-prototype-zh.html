@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KANet 自由市场</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        base: { 900: '#0a0e17', 800: '#0f1520', 700: '#161d2e', 600: '#1e2740', 500: '#283350' },
+        cyan: { 400: '#00f0ff', 500: '#00d4e0' },
+        buy: '#10b981', sell: '#ef4444', pending: '#f59e0b', dispute: '#f97316',
+      },
+      fontFamily: {
+        mono: ['JetBrains Mono', 'monospace'],
+        sans: ['Noto Sans SC', 'system-ui', 'sans-serif'],
+      }
+    }
+  }
+}
+</script>
+<style>
+  body { background: #0a0e17; color: #e2e8f0; font-family: 'Noto Sans SC', sans-serif; }
+  .font-data { font-family: 'JetBrains Mono', monospace; }
+
+  .glass { background: rgba(15,21,32,0.8); border: 1px solid rgba(0,240,255,0.08); backdrop-filter: blur(12px); }
+  .glass:hover { border-color: rgba(0,240,255,0.18); }
+
+  .manifesto {
+    background: linear-gradient(90deg, rgba(0,240,255,0.03) 0%, rgba(0,240,255,0.10) 50%, rgba(0,240,255,0.03) 100%);
+    border-top: 1px solid rgba(0,240,255,0.12); border-bottom: 1px solid rgba(0,240,255,0.12);
+  }
+
+  /* 管线 LED */
+  .sn { width: 10px; height: 10px; border-radius: 50%; transition: all 0.3s; flex-shrink: 0; }
+  .sn.done { background: #10b981; box-shadow: 0 0 6px rgba(16,185,129,0.4); }
+  .sn.active { background: #00f0ff; box-shadow: 0 0 10px rgba(0,240,255,0.5); animation: pc 2s infinite; }
+  .sn.wait { background: #1e2740; }
+  .sl { height: 2px; flex: 1; transition: background 0.5s; }
+  .sl.done { background: rgba(16,185,129,0.5); }
+  .sl.cur { background: linear-gradient(90deg,#10b981,#00f0ff); }
+  .sl.wait { background: #1e2740; }
+  @keyframes pc { 0%,100%{box-shadow:0 0 6px rgba(0,240,255,0.3)} 50%{box-shadow:0 0 16px rgba(0,240,255,0.7)} }
+
+  /* 检查点分割线 */
+  .checkpoint {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 0; margin: 4px 0;
+  }
+  .checkpoint-line { flex: 1; height: 1px; }
+  .checkpoint-line.done { background: linear-gradient(90deg, transparent, rgba(16,185,129,0.3), transparent); }
+  .checkpoint-line.active { background: linear-gradient(90deg, transparent, rgba(0,240,255,0.3), transparent); }
+  .checkpoint-line.wait { background: linear-gradient(90deg, transparent, rgba(30,39,64,0.8), transparent); }
+
+  /* 对话气泡 */
+  .bubble { max-width: 85%; padding: 8px 12px; border-radius: 12px; font-size: 13px; line-height: 1.5; }
+  .bubble-peer { background: rgba(30,39,64,0.8); border: 1px solid rgba(255,255,255,0.04); border-radius: 12px 12px 12px 2px; }
+  .bubble-self { background: rgba(0,240,255,0.06); border: 1px solid rgba(0,240,255,0.1); border-radius: 12px 12px 2px 12px; }
+  .bubble-agent { border-left: 2px solid rgba(0,240,255,0.2); padding-left: 10px; background: transparent; border-radius: 0; }
+
+  /* 系统事件卡片 */
+  .sys-card { background: rgba(15,21,32,0.6); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; padding: 8px 12px; }
+  .sys-card.success { border-left: 3px solid #10b981; }
+  .sys-card.lock { border-left: 3px solid #f59e0b; }
+  .sys-card.verify { border-left: 3px solid #00f0ff; }
+  .sys-card.fail { border-left: 3px solid #ef4444; }
+
+  /* 审批卡片 */
+  .approval-card {
+    border: 1px solid rgba(245,158,11,0.25);
+    animation: ga 3s infinite;
+  }
+  @keyframes ga { 0%,100%{box-shadow:0 0 10px rgba(245,158,11,0.06)} 50%{box-shadow:0 0 24px rgba(245,158,11,0.15)} }
+
+  /* 订单卡片 */
+  .order-card { transition: transform 0.12s, border-color 0.2s; cursor: pointer; }
+  .order-card:hover { transform: translateX(3px); }
+  .order-card.sel { border-color: rgba(0,240,255,0.35) !important; background: rgba(0,240,255,0.04) !important; }
+
+  /* 确认进度条 */
+  .conf-bar { height: 3px; border-radius: 2px; background: #1e2740; overflow: hidden; }
+  .conf-fill { height: 100%; border-radius: 2px; background: linear-gradient(90deg, #10b981, #00f0ff); transition: width 1s; }
+
+  .wallet-bar { background: linear-gradient(180deg,rgba(15,21,32,0.95),rgba(10,14,23,1)); border-top: 1px solid rgba(0,240,255,0.08); }
+  ::-webkit-scrollbar { width: 3px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: rgba(0,240,255,0.12); border-radius: 2px; }
+</style>
+</head>
+
+<body class="min-h-screen flex flex-col" x-data="tradingRoom()">
+
+<!-- ═══ 顶栏 ═══ -->
+<header class="flex items-center justify-between px-5 py-2.5 border-b border-base-700">
+  <div class="flex items-center gap-4">
+    <h1 class="text-base font-semibold tracking-tight">
+      <span class="text-cyan-400 font-data font-bold">K</span><span class="text-slate-300">ANet</span>
+      <span class="text-slate-500 font-normal text-sm ml-1.5">自由市场</span>
+    </h1>
+    <div class="h-4 w-px bg-base-600"></div>
+    <select x-model="selectedAgent" @change="loadData()"
+      class="bg-base-700 border border-base-600 text-sm rounded px-3 py-1 font-data text-cyan-400 focus:border-cyan-400/40 focus:outline-none">
+      <template x-for="a in agents" :key="a.id"><option :value="a.id" x-text="a.name"></option></template>
+    </select>
+  </div>
+  <div class="flex items-center gap-4">
+    <div class="flex rounded overflow-hidden border border-base-600">
+      <template x-for="m in modes" :key="m.id">
+        <button @click="mode = m.id" :class="mode===m.id?'bg-cyan-400/10 text-cyan-400':'text-slate-500 hover:text-slate-300'"
+          class="px-3 py-1 text-[11px] tracking-wide transition-all border-r border-base-600 last:border-0" x-text="m.label"></button>
+      </template>
+    </div>
+    <div class="flex items-center gap-1.5">
+      <div class="w-1.5 h-1.5 rounded-full bg-buy animate-pulse"></div>
+      <span class="text-[10px] text-slate-500 font-data">LIVE</span>
+    </div>
+  </div>
+</header>
+
+<!-- ═══ 宣言 ═══ -->
+<div class="manifesto py-1.5 px-5 flex items-center justify-center gap-3">
+  <span class="text-[11px] font-data text-cyan-400/50 tracking-widest uppercase">Three-Layer Verifiable</span>
+  <span class="text-slate-600">/</span>
+  <span class="text-[12px] text-slate-400 tracking-wide">不是"请相信我们"，是<span class="text-cyan-400/70">三层可验证</span>。链上可查，规则透明，过程可审。</span>
+</div>
+
+<!-- ═══ 主体 ═══ -->
+<main class="flex-1 flex overflow-hidden">
+
+  <!-- ── 左栏：市场订单 ── -->
+  <aside class="w-[300px] border-r border-base-700 flex flex-col flex-shrink-0">
+    <div class="flex border-b border-base-700">
+      <button @click="tab='market'" :class="tab==='market'?'text-cyan-400 border-b-2 border-cyan-400':'text-slate-500'"
+        class="flex-1 py-2 text-xs tracking-wide">市场 <span class="font-data text-[10px]" x-text="activeOrders.length"></span></button>
+      <button @click="tab='history'" :class="tab==='history'?'text-cyan-400 border-b-2 border-cyan-400':'text-slate-500'"
+        class="flex-1 py-2 text-xs tracking-wide">历史</button>
+    </div>
+    <div class="flex-1 overflow-y-auto p-2.5 space-y-1.5">
+      <template x-for="o in displayOrders" :key="o.id">
+        <div @click="selectDeal(o)" :class="deal?.id===o.id?'sel':''" class="order-card glass rounded-lg px-3 py-2.5 border border-transparent">
+          <div class="flex items-center justify-between mb-1">
+            <div class="flex items-center gap-2">
+              <span :class="o.side==='buy'?'bg-buy/15 text-buy':'bg-sell/15 text-sell'" class="text-[10px] font-data font-bold px-1.5 py-0.5 rounded" x-text="o.side==='buy'?'买':'卖'"></span>
+              <span class="font-data text-[13px] font-semibold text-white" x-text="o.kas_amount+' KAS'"></span>
+            </div>
+            <span class="font-data text-xs" :class="o.side==='buy'?'text-buy':'text-sell'" x-text="'$'+o.price"></span>
+          </div>
+          <div class="flex items-center justify-between text-[10px] text-slate-500">
+            <span x-text="o.chain?.toUpperCase()+' 链'"></span>
+            <div class="flex items-center gap-1"><div class="w-1 h-1 rounded-full" :class="stDot(o.status)"></div><span class="font-data" x-text="stL(o.status)"></span></div>
+          </div>
+          <div class="text-[10px] text-slate-600 mt-0.5" x-text="o.peer_name||'...'+(o.agent_address?.slice(-8)||'')"></div>
+        </div>
+      </template>
+      <div x-show="displayOrders.length===0" class="py-16 text-center text-slate-600 text-[11px]">暂无订单</div>
+    </div>
+    <div class="p-2.5 border-t border-base-700">
+      <button class="w-full py-2 rounded-lg bg-cyan-400/8 text-cyan-400 border border-cyan-400/15 text-xs font-semibold hover:bg-cyan-400/15 transition-all">+ 发布订单</button>
+    </div>
+  </aside>
+
+  <!-- ── 右栏：交易对话 ── -->
+  <section class="flex-1 flex flex-col overflow-hidden">
+
+    <!-- 空状态 -->
+    <div x-show="!deal" class="flex-1 flex items-center justify-center">
+      <div class="text-center"><div class="text-5xl text-base-600 mb-3 font-data opacity-30">&lbrace; &rbrace;</div><div class="text-sm text-slate-500">选择一个订单开始交易</div></div>
+    </div>
+
+    <div x-show="deal" class="flex-1 flex flex-col overflow-hidden">
+
+      <!-- 交易头 + 紧凑管线 -->
+      <div class="px-5 py-3 border-b border-base-700">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-3">
+            <span :class="deal?.side==='buy'?'text-buy':'text-sell'" class="font-data font-bold text-base" x-text="(deal?.side==='buy'?'买入 ':'卖出 ')+deal?.kas_amount+' KAS'"></span>
+            <span class="text-slate-500">@</span>
+            <span class="font-data text-base text-white" x-text="'$'+deal?.price"></span>
+            <span class="px-1.5 py-0.5 rounded text-[9px] font-data bg-base-600 text-slate-400" x-text="deal?.chain?.toUpperCase()"></span>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="text-[10px] text-slate-500" x-text="deal?.peer_name ? '对手方: '+deal.peer_name : ''"></span>
+            <span class="text-[10px] text-slate-600 font-data" x-text="deal?.id?.slice(0,8)"></span>
+          </div>
+        </div>
+        <!-- 紧凑管线 -->
+        <div class="flex items-center gap-0.5">
+          <template x-for="(s,i) in pipe" :key="s.id">
+            <div class="flex items-center" :class="i>0?'flex-1':''">
+              <div x-show="i>0" class="sl" :class="lnCls(i)"></div>
+              <div class="relative group"><div class="sn" :class="ndCls(s.id)"></div>
+                <span class="absolute top-3 left-1/2 -translate-x-1/2 text-[8px] font-data whitespace-nowrap"
+                  :class="ndCls(s.id)==='active'?'text-cyan-400':ndCls(s.id)==='done'?'text-buy/50':'text-slate-600'" x-text="s.label"></span>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- ════ 对话流（核心：检查点 + 消息 + 系统事件 融合） ════ -->
+      <div class="flex-1 overflow-y-auto px-5 py-3 space-y-1" id="chatScroll">
+        <template x-for="(item, idx) in conversationFlow" :key="idx">
+          <div>
+
+            <!-- 类型1: 检查点分割线 -->
+            <template x-if="item.type === 'checkpoint'">
+              <div class="checkpoint">
+                <div class="checkpoint-line" :class="item.reached ? 'done' : item.current ? 'active' : 'wait'"></div>
+                <div class="flex items-center gap-2">
+                  <div class="sn" style="width:6px;height:6px" :class="item.reached ? 'done' : item.current ? 'active' : 'wait'"></div>
+                  <span class="text-[10px] font-data uppercase tracking-widest"
+                    :class="item.current ? 'text-cyan-400' : item.reached ? 'text-buy/60' : 'text-slate-600'" x-text="item.label"></span>
+                  <span class="text-[9px] font-data text-slate-600" x-text="item.time || ''"></span>
+                </div>
+                <div class="checkpoint-line" :class="item.reached ? 'done' : item.current ? 'active' : 'wait'"></div>
+              </div>
+            </template>
+
+            <!-- 类型2: 对手方消息（左侧气泡） -->
+            <template x-if="item.type === 'peer'">
+              <div class="flex gap-2 mb-2">
+                <div class="w-6 h-6 rounded-full bg-base-600 flex items-center justify-center flex-shrink-0 mt-1">
+                  <span class="text-[9px] font-data text-slate-400" x-text="item.avatar"></span>
+                </div>
+                <div>
+                  <div class="text-[10px] text-slate-500 mb-0.5"><span x-text="item.sender"></span> <span class="font-data text-slate-600" x-text="item.time"></span></div>
+                  <div class="bubble bubble-peer text-slate-300" x-text="item.text"></div>
+                </div>
+              </div>
+            </template>
+
+            <!-- 类型3: 我方 Agent 消息（右侧/缩进 + 推理） -->
+            <template x-if="item.type === 'agent'">
+              <div class="flex gap-2 mb-2 justify-end">
+                <div class="text-right">
+                  <div class="text-[10px] text-slate-500 mb-0.5"><span x-text="item.sender"></span> <span class="font-data text-slate-600" x-text="item.time"></span></div>
+                  <div class="bubble bubble-self text-slate-200" x-text="item.text"></div>
+                  <div x-show="item.reasoning" class="mt-1 text-[10px] text-cyan-400/40 italic text-right" x-text="item.reasoning"></div>
+                </div>
+                <div class="w-6 h-6 rounded-full bg-cyan-400/10 flex items-center justify-center flex-shrink-0 mt-1">
+                  <span class="text-[9px] font-data text-cyan-400" x-text="item.avatar"></span>
+                </div>
+              </div>
+            </template>
+
+            <!-- 类型4: Owner 消息 -->
+            <template x-if="item.type === 'owner'">
+              <div class="flex gap-2 mb-2 justify-end">
+                <div class="text-right">
+                  <div class="text-[10px] text-slate-500 mb-0.5">你 <span class="font-data text-slate-600" x-text="item.time"></span></div>
+                  <div class="bubble bubble-self text-white" style="background:rgba(0,240,255,0.1);border-color:rgba(0,240,255,0.2)" x-text="item.text"></div>
+                </div>
+              </div>
+            </template>
+
+            <!-- 类型5: 系统事件卡片 -->
+            <template x-if="item.type === 'system'">
+              <div class="my-2 mx-4">
+                <div class="sys-card" :class="item.style || ''">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                      <span class="text-[12px]" x-text="item.icon"></span>
+                      <span class="text-[12px]" x-text="item.text"></span>
+                    </div>
+                    <span class="text-[9px] font-data text-slate-600" x-text="item.time"></span>
+                  </div>
+                  <!-- 确认进度条 -->
+                  <div x-show="item.confirmations" class="mt-2">
+                    <div class="conf-bar"><div class="conf-fill" :style="'width:'+item.confirmPct+'%'"></div></div>
+                    <div class="text-[9px] font-data text-slate-500 mt-0.5" x-text="item.confirmations"></div>
+                  </div>
+                  <!-- 可展开详情 -->
+                  <button x-show="item.proof" @click="item._open=!item._open" class="text-[9px] font-data text-cyan-400/30 hover:text-cyan-400/60 mt-1 transition-colors">
+                    <span x-text="item._open?'收起 \u25b4':'查看详情 \u25be'"></span>
+                  </button>
+                  <div x-show="item._open" x-transition class="mt-1 pt-1 border-t border-base-700 text-[10px] font-data text-slate-500 space-y-0.5">
+                    <template x-for="(v,k) in item.proof" :key="k">
+                      <div><span class="text-slate-600" x-text="k+': '"></span><span :class="k==='TX'?'text-cyan-400/50':''" x-text="v"></span></div>
+                    </template>
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <!-- 类型6: 审批卡片 -->
+            <template x-if="item.type === 'approval'">
+              <div class="my-3 mx-2">
+                <div class="approval-card glass rounded-xl p-4">
+                  <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-2"><div class="w-2 h-2 rounded-full bg-pending animate-pulse"></div><span class="text-[11px] text-pending">等待你的确认</span></div>
+                    <span class="font-data text-sm text-pending" x-text="item.countdown"></span>
+                  </div>
+                  <p class="text-[13px] text-slate-200 leading-relaxed" x-text="item.summary"></p>
+                  <div class="mt-2 px-3 py-1.5 rounded bg-base-800/60 border-l-2 border-cyan-400/20">
+                    <div class="text-[9px] font-data text-cyan-400/40 uppercase tracking-widest mb-0.5">Agent 推理</div>
+                    <p class="text-[11px] text-slate-400" x-text="item.reasoning"></p>
+                  </div>
+                  <div class="flex gap-2.5 mt-3">
+                    <button @click="approveExec()" class="flex-1 py-2 rounded-lg bg-buy/10 text-buy border border-buy/20 text-sm font-semibold hover:bg-buy/20 transition-all">确认执行</button>
+                    <button @click="rejectExec()" class="flex-1 py-2 rounded-lg bg-sell/8 text-sell border border-sell/15 text-sm font-semibold hover:bg-sell/15 transition-all">拒绝</button>
+                  </div>
+                  <p class="text-[9px] text-slate-600 mt-1.5 text-center">超时自动转为争议</p>
+                </div>
+              </div>
+            </template>
+
+          </div>
+        </template>
+      </div>
+
+      <!-- 输入栏 -->
+      <div class="px-5 py-2.5 border-t border-base-700 flex gap-2">
+        <input x-model="chatInput" @keydown.enter="sendChat()" placeholder="输入消息或指令..."
+          class="flex-1 bg-base-700 border border-base-600 rounded-lg px-3 py-2 text-sm focus:border-cyan-400/30 focus:outline-none placeholder-slate-600">
+        <button @click="sendChat()" class="px-4 py-2 rounded-lg bg-cyan-400/10 text-cyan-400 text-sm font-semibold hover:bg-cyan-400/20 transition-all border border-cyan-400/15">发送</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- ═══ 钱包栏 ═══ -->
+<footer class="wallet-bar px-5 py-2 flex items-center justify-between">
+  <div class="flex items-center gap-5">
+    <div class="flex items-center gap-1.5"><span class="text-[10px] text-slate-500">KAS</span><span class="font-data text-sm text-white" x-text="W.kas.toFixed(1)"></span>
+      <span x-show="W.kas_locked>0" class="font-data text-[10px] text-pending" x-text="'('+W.kas_locked.toFixed(1)+' 锁定)'"></span></div>
+    <div class="h-3 w-px bg-base-700"></div>
+    <template x-for="c in W.chains" :key="c.name"><div class="flex items-center gap-1"><span class="text-[9px] font-data text-slate-600" x-text="c.name"></span><span class="font-data text-[11px] text-slate-300" x-text="c.usdt.toFixed(2)+' USDT'"></span>
+      <span x-show="c.locked>0" class="font-data text-[9px] text-pending" x-text="'('+c.locked.toFixed(2)+' 锁定)'"></span></div></template>
+  </div>
+  <div class="text-[10px] font-data text-slate-600"><span x-text="agentName"></span> · <span x-text="modeLabel"></span></div>
+</footer>
+
+<script>
+function tradingRoom() {
+  return {
+    selectedAgent:'martin', mode:'approval', tab:'market', deal:null, chatInput:'',
+    terminal:['completed','cancelled','expired','resolved','escalated'],
+    agents:[{id:'martin',name:'Martin'},{id:'kasia1',name:'Kasia_1'},{id:'sophie',name:'Sophie'},{id:'qwen',name:'Qwen'}],
+    modes:[{id:'manual',label:'手动'},{id:'approval',label:'审批'},{id:'auto',label:'自动'}],
+    pipe:[{id:'published',label:'发布'},{id:'accepted',label:'接受'},{id:'paying',label:'付款'},{id:'paid',label:'已付'},{id:'verified',label:'验证'},{id:'delivering',label:'交割'},{id:'completed',label:'完成'}],
+
+    orders:[
+      {id:'ord-001',side:'sell',kas_amount:500,price:0.0385,chain:'bnb',status:'verified',peer_name:'Sophie'},
+      {id:'ord-002',side:'buy',kas_amount:200,price:0.0382,chain:'bnb',status:'accepted',peer_name:'Martin'},
+      {id:'ord-003',side:'sell',kas_amount:1000,price:0.0390,chain:'eth',status:'published',peer_name:null,agent_address:'kaspa:qqp49...wq200'},
+      {id:'ord-004',side:'buy',kas_amount:300,price:0.0380,chain:'sol',status:'completed',peer_name:'Kasia_1'},
+      {id:'ord-005',side:'sell',kas_amount:150,price:0.0388,chain:'tron',status:'cancelled',peer_name:'Sophie'},
+    ],
+
+    // ═══ 核心：对话流数据 ═══
+    // 类型: checkpoint | peer | agent | owner | system | approval
+    conversationFlow: [
+      // ── 发布阶段 ──
+      { type:'checkpoint', label:'发布', reached:true, time:'12:01' },
+      { type:'peer', sender:'Sophie', avatar:'S', time:'12:01', text:'发布卖单: 500 KAS @ $0.0385 (BNB 链)' },
+
+      // ── 接受阶段 ──
+      { type:'checkpoint', label:'接受', reached:true, time:'12:03' },
+      { type:'agent', sender:'Martin·Agent', avatar:'M', time:'12:03', text:'接受订单',
+        reasoning:'价格 $0.0385 在近 10 笔成交均价 $0.0383 附近，在限额内（500 < 1000 KAS），建议接单。' },
+      { type:'system', icon:'🔒', text:'资金锁定: 19.25 USDT (BNB)', time:'12:03', style:'lock',
+        proof:{'执行规则':'fund_lock','锁定金额':'19.25 USDT','锁前可用':'26.95 USDT','锁后可用':'7.70 USDT'}, _open:false },
+      { type:'owner', time:'12:03', text:'没问题，继续' },
+
+      // ── 付款阶段 ──
+      { type:'checkpoint', label:'付款', reached:true, time:'12:04' },
+      { type:'agent', sender:'Martin·Agent', avatar:'M', time:'12:04', text:'发送 19.25 USDT → 0x742d...8f2a (BNB 链)',
+        reasoning:'对手方 BNB 收款地址已验证，Gas 费约 0.0005 BNB，余额充足。' },
+      { type:'system', icon:'📤', text:'USDT 付款已广播', time:'12:04', style:'',
+        confirmations:'确认中: 8 / 15 blocks', confirmPct: 53,
+        proof:{'TX':'0xabc123def456789abcdef...','链':'BNB (BSC)','金额':'19.25 USDT','Gas':'0.0005 BNB'}, _open:false },
+
+      // ── 已付款 ──
+      { type:'checkpoint', label:'已付', reached:true, time:'12:04' },
+      { type:'system', icon:'✅', text:'付款已入链 — 15/15 确认', time:'12:05', style:'verify', confirmations:'确认: 15 / 15 blocks ✓', confirmPct:100,
+        proof:{'执行规则':'verify_payment','来源':'system (自动验证)','TX':'0xabc123def456789abcdef...','确认数':'15/15 ✓','金额校验':'19.25 ≥ 19.15 (0.5% 容差) ✓','收款地址':'0x742d...8f2a ✓'}, _open:false },
+      { type:'peer', sender:'Sophie·Agent', avatar:'S', time:'12:05', text:'确认收到 19.25 USDT，准备发送 KAS。' },
+
+      // ── 已验证 ──
+      { type:'checkpoint', label:'验证', current:true, time:'12:05' },
+      { type:'agent', sender:'Martin·Agent', avatar:'M', time:'12:05', text:'等待对方发送 500 KAS...',
+        reasoning:'付款已验证到账，对方应在 30 分钟内发送 KAS。超时将自动转为争议。' },
+
+      // ── 未来阶段（灰色） ──
+      { type:'checkpoint', label:'交割', wait:true },
+      { type:'checkpoint', label:'完成', wait:true },
+    ],
+
+    W:{kas:1234.5,kas_locked:500,chains:[{name:'BNB',usdt:7.70,locked:19.25},{name:'ETH',usdt:0,locked:0},{name:'SOL',usdt:15.50,locked:0},{name:'TRON',usdt:25.00,locked:0}]},
+
+    get agentName(){return this.agents.find(a=>a.id===this.selectedAgent)?.name||'';},
+    get modeLabel(){return this.modes.find(m=>m.id===this.mode)?.label||'';},
+    get activeOrders(){return this.orders.filter(o=>!this.terminal.includes(o.status));},
+    get displayOrders(){return this.tab==='market'?this.activeOrders:this.orders.filter(o=>this.terminal.includes(o.status));},
+
+    stL(s){const m={published:'待接',accepted:'已接',paying:'付款中',paid:'已付',verified:'已验证',delivering:'交割中',completed:'已完成',cancelled:'已取消',expired:'已过期',disputed:'争议中',escalated:'已升级',resolved:'已解决'};return m[s]||s;},
+    stDot(s){return{'completed':'bg-buy','published':'bg-cyan-400','accepted':'bg-pending','paying':'bg-pending','paid':'bg-pending','verified':'bg-cyan-400','delivering':'bg-pending','cancelled':'bg-sell','disputed':'bg-sell','escalated':'bg-sell'}[s]||'bg-slate-600';},
+    ndCls(id){if(!this.deal)return'wait';const ids=this.pipe.map(p=>p.id),c=ids.indexOf(this.deal.status),i=ids.indexOf(id);return i<c?'done':i===c?'active':'wait';},
+    lnCls(i){if(!this.deal)return'wait';const c=this.pipe.map(p=>p.id).indexOf(this.deal.status);return i<=c?'done':i===c+1?'cur':'wait';},
+
+    selectDeal(o){
+      this.deal=o;
+      // 真实场景下从 API 加载对话流 — 这里用 mock 数据演示
+      // this.loadConversation(o.id);
+    },
+    sendChat(){
+      if(!this.chatInput.trim())return;
+      // 找到最后一个非 wait 检查点的位置，插入 owner 消息
+      this.conversationFlow.push({type:'owner',time:new Date().toTimeString().slice(0,5),text:this.chatInput});
+      this.chatInput='';
+      // 滚动到底部
+      this.$nextTick(()=>{const el=document.getElementById('chatScroll');if(el)el.scrollTop=el.scrollHeight;});
+    },
+    loadData(){},
+    approveExec(){console.log('confirmed');},
+    rejectExec(){console.log('rejected');},
+  };
+}
+</script>
+</body>
+</html>

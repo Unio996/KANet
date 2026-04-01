@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="<%= it.t.html_lang %>" dir="<%= it.dir %>">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title><%= it.t.page_relays %> — KANet Console</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="flex h-screen bg-gray-100 font-sans">
+
+  <!-- Sidebar -->
+  <aside class="w-56 bg-gray-900 text-gray-100 flex flex-col flex-shrink-0">
+    <div class="px-4 py-4 border-b border-gray-700 flex items-center space-x-3">
+      <img src="/public/kanet-logo.png" alt="KANet" class="h-8 w-8 object-contain flex-shrink-0" />
+      <span class="text-base font-bold tracking-wide text-white leading-tight">KANet<br/><span class="text-xs font-normal text-gray-400">Console</span></span>
+    </div>
+    <nav class="flex-1 py-4 space-y-1 px-3 overflow-y-auto">
+      <a href="/agent" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
+        <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        我的 Agent
+      </a>
+      <a href="/conversations" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
+        <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>
+        会话
+      </a>
+      <a href="/identities" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
+        <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+        通讯录
+      </a>
+      <a href="/network" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
+        <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/></svg>
+        网络
+      </a>
+      <a href="/chat" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
+        <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+        聊天
+      </a>
+      <div class="pt-4 border-t border-gray-700 mt-4 space-y-1">
+        <a href="/events" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
+          <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+          活动日志
+        </a>
+        <div class="flex items-center px-3 py-2 text-xs font-medium text-gray-500 uppercase tracking-wider">
+          <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          系统设置
+        </div>
+        <a href="/relays" class="flex items-center px-3 py-2 rounded-md text-sm font-medium bg-gray-700 text-white pl-9">
+          <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"/></svg>
+          账户管理
+        </a>
+        <a href="/adapters" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors pl-9">
+          <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          AI 引擎
+        </a>
+      </div>
+    </nav>
+    <div class="px-3 pb-2">
+      <form method="POST" action="/lang">
+        <select name="lang" onchange="this.form.submit()"
+          class="w-full bg-gray-800 text-gray-200 text-xs rounded px-2 py-1.5 border border-gray-700 focus:outline-none cursor-pointer">
+          <% Object.entries(it.langs).forEach(function([code, label]) { %>
+          <option value="<%= code %>" <%= it.lang === code ? 'selected' : '' %>><%= label %></option>
+          <% }) %>
+        </select>
+      </form>
+    </div>
+    <div class="px-5 py-3 border-t border-gray-700 text-xs text-gray-500">KANet Console v0.1</div>
+  </aside>
+
+  <div class="flex-1 flex flex-col overflow-hidden">
+    <header class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between flex-shrink-0">
+      <h1 class="text-xl font-semibold text-gray-800"><%= it.t.page_relays %></h1>
+      <span class="text-sm text-gray-500">KANet Console</span>
+    </header>
+
+    <main class="flex-1 overflow-y-auto p-6">
+      <div class="max-w-3xl mx-auto space-y-6">
+
+        <!-- ═══ Node Configuration ═══ -->
+        <div class="bg-white rounded-lg border border-gray-200" x-data="{
+          mode: '<%= it.rpcMode %>',
+          customUrl: '<%= it.rpcMode === 'custom' ? it.rpcUrl : '' %>',
+          discoveredUrl: '<%= it.rpcMode === 'discovered' ? it.rpcUrl : '' %>',
+          nodes: [],
+          discovering: false,
+          testing: false,
+          testResult: null,
+          get activeUrl() {
+            if (this.mode === 'local') return 'ws://127.0.0.1:17110';
+            if (this.mode === 'discovered') return this.discoveredUrl;
+            if (this.mode === 'custom') return this.customUrl;
+            return '';
+          },
+          async discover() {
+            this.discovering = true;
+            this.nodes = [];
+            try {
+              const res = await fetch('/settings/node/discover', { method: 'POST' });
+              this.nodes = await res.json();
+            } catch {}
+            this.discovering = false;
+          },
+          selectNode(url) {
+            this.discoveredUrl = url;
+            this.mode = 'discovered';
+          },
+          async testNode() {
+            const url = this.activeUrl;
+            if (!url) return;
+            this.testing = true;
+            this.testResult = null;
+            try {
+              const res = await fetch('/settings/node/test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url })
+              });
+              this.testResult = await res.json();
+            } catch (e) {
+              this.testResult = { ok: false, error: e.message };
+            }
+            this.testing = false;
+          }
+        }">
+          <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+              <svg class="h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>
+              <h2 class="text-sm font-semibold text-gray-700"><%= it.t.node_config %></h2>
+            </div>
+            <% if (it.rpcUrl) { %>
+            <span class="text-xs text-gray-400 font-mono"><%= it.rpcUrl %></span>
+            <% } %>
+          </div>
+
+          <form method="POST" action="/settings/node" class="px-6 py-5 space-y-4">
+
+            <!-- Mode tabs -->
+            <div class="flex space-x-2">
+              <button type="button" @click="mode='local'" :class="mode==='local' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'" class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors"><%= it.t.local_node %></button>
+              <button type="button" @click="discover(); mode='discovered'" :class="mode==='discovered' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'" class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors"><%= it.t.discover_nodes %></button>
+              <button type="button" @click="mode='custom'" :class="mode==='custom' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'" class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors"><%= it.t.custom_node %></button>
+            </div>
+            <input type="hidden" name="mode" :value="mode" />
+
+            <!-- Local node -->
+            <div x-show="mode==='local'" x-transition class="bg-green-50 border border-green-200 rounded-lg p-4">
+              <div class="flex items-center space-x-2">
+                <svg class="h-5 w-5 text-green-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+                <span class="text-sm font-medium text-green-800"><%= it.t.local_node %></span>
+                <span class="text-xs text-green-600 font-mono">ws://127.0.0.1:17110</span>
+              </div>
+              <p class="text-xs text-green-700 mt-1"><%= it.t.local_node_desc %></p>
+            </div>
+
+            <!-- Discover nodes -->
+            <div x-show="mode==='discovered'" x-transition>
+              <!-- Loading state -->
+              <div x-show="discovering" class="flex items-center justify-center py-8 text-sm text-gray-500">
+                <svg class="animate-spin h-5 w-5 mr-2 text-blue-500" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                <%= it.t.discovering %>
+              </div>
+
+              <!-- Node list -->
+              <div x-show="!discovering && nodes.length > 0" class="space-y-1.5">
+                <div class="flex items-center justify-between mb-2">
+                  <span class="text-xs font-medium text-gray-500 uppercase tracking-wider"><%= it.t.available_nodes %></span>
+                  <button type="button" @click="discover()" class="text-xs text-blue-600 hover:text-blue-800"><%= it.t.btn_refresh %></button>
+                </div>
+                <template x-for="node in nodes" :key="node.url">
+                  <label class="flex items-center p-3 rounded-lg border cursor-pointer transition-colors"
+                    :class="discoveredUrl === node.url ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'"
+                    @click="selectNode(node.url)">
+                    <input type="radio" name="discovered_url" :value="node.url" :checked="discoveredUrl === node.url" class="text-blue-600" />
+                    <span class="ml-3 text-sm font-mono text-gray-700 flex-1 truncate" x-text="node.url"></span>
+                    <span class="ml-2 text-xs font-medium px-2 py-0.5 rounded-full"
+                      :class="node.latency < 50 ? 'bg-green-100 text-green-700' : node.latency < 100 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'"
+                      x-text="node.latency + 'ms'"></span>
+                  </label>
+                </template>
+              </div>
+
+              <!-- No results -->
+              <div x-show="!discovering && nodes.length === 0" class="text-center py-6 text-sm text-gray-400">
+                <button type="button" @click="discover()" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"><%= it.t.btn_discover %></button>
+              </div>
+            </div>
+
+            <!-- Custom URL -->
+            <div x-show="mode==='custom'" x-transition>
+              <input type="text" name="custom_url" x-model="customUrl" placeholder="ws://hostname:port  /  wss://hostname/path"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+
+            <!-- Current + test -->
+            <div class="bg-gray-50 rounded-lg p-3 flex items-center justify-between" x-show="activeUrl">
+              <div class="min-w-0 flex-1">
+                <span class="text-xs text-gray-500"><%= it.t.current_node %></span>
+                <p class="text-sm font-mono text-gray-800 truncate" x-text="activeUrl"></p>
+              </div>
+              <div class="flex items-center space-x-2 ml-3 flex-shrink-0">
+                <template x-if="testResult && testResult.ok">
+                  <span class="text-xs text-green-600 font-medium" x-text="testResult.latency + 'ms'"></span>
+                </template>
+                <template x-if="testResult && !testResult.ok">
+                  <span class="text-xs text-red-600 font-medium">FAIL</span>
+                </template>
+                <button type="button" @click="testNode()" :disabled="testing"
+                  class="px-2.5 py-1 text-xs font-medium rounded transition-colors"
+                  :class="testing ? 'bg-gray-200 text-gray-400' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'">
+                  <span x-show="!testing"><%= it.t.btn_test %></span>
+                  <span x-show="testing">...</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Save -->
+            <div class="flex justify-end">
+              <button type="submit" class="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors"><%= it.t.btn_save %></button>
+            </div>
+          </form>
+        </div>
+
+        <!-- ═══ Relay list ═══ -->
+        <% if (it.relays.length === 0) { %>
+        <div class="bg-white rounded-lg border border-gray-200 px-6 py-10 text-center text-sm text-gray-400">
+          <%= it.t.no_relays %>
+        </div>
+        <% } else { %>
+        <div class="space-y-3">
+          <% it.relays.forEach(function(r) { %>
+          <div class="bg-white rounded-lg border border-gray-200 p-5">
+            <div class="flex items-start justify-between">
+              <div class="flex items-center space-x-3">
+                <span class="text-base font-semibold text-gray-800"><%= r.name %></span>
+                <% if (r.mnemonic_hint) { %>
+                <span class="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded mnemonic-hint-<%= r.id %>"><%= r.mnemonic_hint %></span>
+                <button onclick="revealMnemonic('<%= r.id %>')" class="text-xs text-blue-500 hover:text-blue-700 mnemonic-btn-<%= r.id %>"><%= it.t.btn_reveal || 'Reveal' %></button>
+                <% } %>
+              </div>
+              <!-- Mnemonic reveal area (hidden until clicked) -->
+              <div class="hidden mt-2 p-3 bg-amber-50 border border-amber-200 rounded-lg mnemonic-area-<%= r.id %>">
+                <div class="flex items-center justify-between">
+                  <code class="text-sm font-mono text-amber-900 select-all mnemonic-text-<%= r.id %>"></code>
+                  <button onclick="copyMnemonic('<%= r.id %>')" class="ml-3 text-xs px-3 py-1 bg-amber-200 text-amber-800 rounded hover:bg-amber-300 flex-shrink-0 mnemonic-copy-<%= r.id %>"><%= it.t.btn_copy || 'Copy' %></button>
+                </div>
+              </div>
+              <form method="POST" action="/relays/<%= r.id %>/delete" onsubmit="return confirm('<%= it.t.confirm_pre %>' + '<%= r.name %>' + '<%= it.t.confirm_post %>')">
+                <button type="submit" class="text-xs text-red-500 hover:text-red-700"><%= it.t.btn_delete %></button>
+              </form>
+            </div>
+
+            <!-- Mind info: vision + style -->
+            <% if (r.mind_vision || r.mind_style) { %>
+            <div class="mt-3 space-y-1">
+              <% if (r.mind_vision) { %>
+              <div class="text-sm text-gray-500 italic">"<%= r.mind_vision %>"</div>
+              <% } %>
+              <% if (r.mind_style) { %>
+              <div class="text-xs text-gray-400"><%= r.mind_style %></div>
+              <% } %>
+            </div>
+            <% } %>
+
+            <div class="mt-3 grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
+              <div>
+                <span class="text-gray-400"><%= it.t.col_address %></span>
+                <% if (r.address) { %>
+                <span class="font-mono text-gray-700 ml-2 text-xs break-all"><%= r.address %></span>
+                <button onclick="navigator.clipboard.writeText('<%= r.address %>');this.textContent='OK';setTimeout(()=>this.textContent='<%= it.t.btn_copy || 'Copy' %>',1200)"
+                  class="ml-1.5 px-1.5 py-0.5 text-xs text-gray-400 hover:text-blue-600 bg-gray-100 hover:bg-blue-50 rounded transition-colors flex-shrink-0"><%= it.t.btn_copy || 'Copy' %></button>
+                <button onclick="openTransfer('<%= r.id %>', '<%= r.name %>')"
+                  class="ml-1 px-1.5 py-0.5 text-xs text-gray-400 hover:text-orange-600 bg-gray-100 hover:bg-orange-50 rounded transition-colors flex-shrink-0"><%= it.t.btn_withdraw || 'Withdraw' %></button>
+                <% } else { %>
+                <span class="text-gray-300 ml-2"><%= it.t.not_configured %></span>
+                <% } %>
+              </div>
+              <div><span class="text-gray-400"><%= it.t.label_network %></span> <span class="ml-2 text-gray-700"><%= r.network %></span></div>
+              <% if (r.address) { %>
+              <div x-data="{ balance: null, loading: true }" x-init="
+                fetch('/api/relay/<%= r.id %>/balance').then(r=>r.json()).then(d=>{ balance=d.balance; loading=false }).catch(()=>{ loading=false })
+              ">
+                <span class="text-gray-400">Balance</span>
+                <span class="ml-2 text-gray-700" x-show="loading">...</span>
+                <span class="ml-2 font-medium" x-show="!loading && balance !== null" :class="balance > 0 ? 'text-green-600' : 'text-gray-400'" x-text="balance !== null ? (balance + ' KAS') : ''"></span>
+                <span class="ml-2 text-gray-400 text-xs" x-show="!loading && balance === null">unavailable</span>
+              </div>
+              <% } %>
+              <div>
+                <span class="text-gray-400"><%= it.t.col_adapter %></span>
+                <% if (r.adapter_name) { %>
+                <span class="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">
+                  <%= r.adapter_name %> (:<%= r.adapter_port %>)
+                </span>
+                <% } else { %>
+                <span class="ml-2 text-yellow-600 text-xs"><%= it.t.unassigned %></span>
+                <% } %>
+              </div>
+            </div>
+
+            <!-- Assign adapter -->
+            <form method="POST" action="/relays/<%= r.id %>/assign" class="mt-4 flex items-center space-x-2">
+              <select name="adapter_node_id" class="flex-1 px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value=""><%= it.t.no_adapter_opt %></option>
+                <% it.adapters.forEach(function(a) { %>
+                <option value="<%= a.id %>" <%= r.adapter_node_id === a.id ? 'selected' : '' %>>
+                  <%= a.name %> (:<%= a.http_port %>)
+                </option>
+                <% }) %>
+              </select>
+              <button type="submit" class="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded-md hover:bg-gray-200"><%= it.t.btn_update_map %></button>
+            </form>
+
+            <!-- ── Agent Card ── -->
+            <% if (r.address) { %>
+            <div class="mt-4 pt-4 border-t border-gray-100" x-data="{
+              card: null,
+              skills: [],
+              editing: false,
+              publishing: false,
+              published: false,
+              error: '',
+              form: { name: '', entityType: 'agent', summary: '', mode: 'public' },
+              async init() {
+                try {
+                  const res = await fetch('/api/relay/<%= r.id %>/card');
+                  const data = await res.json();
+                  this.card = data.card;
+                  this.skills = data.skills || [];
+                  if (this.card) {
+                    this.form.name = this.card.summary ? '<%= r.name %>' : '<%= r.name %>';
+                    this.form.entityType = this.card.entityType || 'agent';
+                    this.form.summary = this.card.summary || '';
+                    this.form.mode = this.card.mode || 'public';
+                  }
+                } catch {}
+              },
+              startEdit() {
+                if (!this.form.name) this.form.name = '<%= r.name %>';
+                this.editing = true;
+                this.error = '';
+                this.published = false;
+              },
+              async publish() {
+                this.publishing = true;
+                this.error = '';
+                try {
+                  const res = await fetch('/api/relay/<%= r.id %>/publish-card', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.form)
+                  });
+                  const data = await res.json();
+                  if (!res.ok) throw new Error(data.error || 'Failed');
+                  this.card = { ...this.form, latestTx: data.txId, skills: this.skills, timestamp: Math.floor(Date.now()/1000) };
+                  this.editing = false;
+                  this.published = data.txId;
+                } catch (e) {
+                  this.error = e.message;
+                }
+                this.publishing = false;
+              }
+            }">
+              <!-- Card: not published yet -->
+              <template x-if="!card && !editing">
+                <div class="flex items-center justify-between">
+                  <div class="text-sm text-gray-400">
+                    <span>On-Chain Identity</span>
+                    <span class="ml-2 text-xs">— not published</span>
+                  </div>
+                  <button @click="startEdit()" class="px-3 py-1.5 text-xs font-medium text-purple-600 bg-purple-50 rounded-md hover:bg-purple-100 transition-colors">
+                    <%= it.t.btn_setup_card || 'Set Up Agent Card' %>
+                  </button>
+                </div>
+              </template>
+
+              <!-- Card: published (view mode) -->
+              <template x-if="card && !editing">
+                <div>
+                  <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center space-x-2">
+                      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">KANet Agent</span>
+                      <span class="text-xs text-gray-400" x-text="card.mode"></span>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                      <button @click="startEdit()" class="text-xs text-blue-600 hover:text-blue-800">Edit</button>
+                      <a x-show="card.latestTx" :href="'https://explorer.kaspa.org/txs/' + card.latestTx" target="_blank" class="text-xs text-gray-400 hover:text-gray-600">View TX</a>
+      <a href="/network" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
+        <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/></svg>
+        Kasia Network
+      </a>
+      <a href="/chat" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
+        <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z"/></svg>
+        Chat
+      </a>
+                    </div>
+                  </div>
+                  <div class="text-sm font-medium text-gray-800" x-text="form.name || card.entityType"></div>
+                  <div class="text-xs text-gray-500 mt-0.5" x-show="card.summary" x-text="card.summary"></div>
+                  <div class="flex flex-wrap gap-1 mt-2" x-show="skills.length > 0 || (card.skills && card.skills.length > 0)">
+                    <template x-for="s in (card.skills && card.skills.length > 0 ? card.skills : skills)" :key="s">
+                      <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-blue-50 text-blue-600" x-text="s"></span>
+                    </template>
+                  </div>
+                </div>
+              </template>
+
+              <!-- Published success banner -->
+              <div x-show="published" x-transition class="mt-2 p-2 bg-green-50 border border-green-200 rounded text-xs text-green-700">
+                Card published! TX: <span class="font-mono" x-text="published"></span>
+              </div>
+
+              <!-- Edit form -->
+              <template x-if="editing">
+                <div class="space-y-3 mt-2">
+                  <div class="flex items-center justify-between">
+                    <span class="text-sm font-medium text-gray-700">Agent Card</span>
+                    <button @click="editing=false" class="text-xs text-gray-400 hover:text-gray-600"><%= it.t.btn_cancel || 'Cancel' %></button>
+                  </div>
+
+                  <!-- Visibility -->
+                  <div class="flex space-x-2">
+                    <template x-for="m in ['public','mixed','private']" :key="m">
+                      <button type="button" @click="form.mode = m"
+                        class="px-3 py-1 text-xs font-medium rounded-md transition-colors"
+                        :class="form.mode === m ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
+                        x-text="m">
+                      </button>
+                    </template>
+                  </div>
+
+                  <div>
+                    <label class="block text-xs text-gray-500 mb-1">Name</label>
+                    <input type="text" x-model="form.name" placeholder="Agent name"
+                      class="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                  </div>
+
+                  <div>
+                    <label class="block text-xs text-gray-500 mb-1">Type</label>
+                    <div class="flex space-x-3">
+                      <template x-for="t in ['agent','human','service','org']" :key="t">
+                        <label class="flex items-center space-x-1 text-sm text-gray-600 cursor-pointer">
+                          <input type="radio" :value="t" x-model="form.entityType" class="text-purple-600" />
+                          <span x-text="t"></span>
+                        </label>
+                      </template>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label class="block text-xs text-gray-500 mb-1">Summary <span class="text-gray-300">(optional, 280 chars)</span></label>
+                    <input type="text" x-model="form.summary" maxlength="280" placeholder="Short description"
+                      class="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                  </div>
+
+                  <!-- Skills preview -->
+                  <div>
+                    <div class="flex items-center justify-between">
+                      <label class="block text-xs text-gray-500">Skills (from account)</label>
+                      <a href="/skills?account=<%= r.id %>" class="text-xs text-blue-600 hover:text-blue-800">Manage</a>
+      <a href="/network" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
+        <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/></svg>
+        Kasia Network
+      </a>
+      <a href="/chat" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
+        <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z"/></svg>
+        Chat
+      </a>
+                    </div>
+                    <div class="flex flex-wrap gap-1 mt-1" x-show="skills.length > 0">
+                      <template x-for="s in skills" :key="s">
+                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-blue-50 text-blue-600" x-text="s"></span>
+                      </template>
+                    </div>
+                    <span class="text-xs text-gray-300" x-show="skills.length === 0">No active skills</span>
+                  </div>
+
+                  <!-- Error -->
+                  <div x-show="error" class="text-xs text-red-600" x-text="error"></div>
+
+                  <!-- Publish button -->
+                  <div class="flex items-center justify-between pt-1">
+                    <span class="text-xs text-gray-400">Writes to Kaspa blockchain (costs ~0.2 KAS)</span>
+                    <button @click="publish()" :disabled="publishing || !form.name.trim()"
+                      class="px-4 py-1.5 text-sm font-medium rounded-md transition-colors"
+                      :class="publishing ? 'bg-gray-300 text-gray-500' : 'bg-purple-600 text-white hover:bg-purple-700'">
+                      <span x-show="!publishing" x-text="card ? 'Update on Chain' : 'Publish to Chain'"></span>
+                      <span x-show="publishing">Publishing...</span>
+                    </button>
+                  </div>
+                </div>
+              </template>
+            </div>
+            <% } %>
+          </div>
+          <% }) %>
+        </div>
+        <% } %>
+
+        <!-- ═══ Add Relay form ═══ -->
+        <div class="bg-white rounded-lg border border-gray-200">
+          <div class="px-6 py-4 border-b border-gray-200">
+            <h2 class="text-sm font-semibold text-gray-700"><%= it.t.add_relay %></h2>
+          </div>
+          <form method="POST" action="/relays" class="px-6 py-5 space-y-4">
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1"><%= it.t.label_name %></label>
+                <input type="text" name="name" placeholder="Relay A" required
+                  class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1"><%= it.t.label_network %></label>
+                <select name="network" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="mainnet">mainnet</option>
+                  <option value="testnet">testnet</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label class="block text-xs font-medium text-gray-600"><%= it.t.label_mnemonic %></label>
+                <button type="button" onclick="generateMnemonic()"
+                  class="text-xs text-blue-600 hover:text-blue-800 font-medium"><%= it.t.btn_generate || 'Generate New' %></button>
+              </div>
+              <textarea name="mnemonic" id="mnemonic-input" rows="2" placeholder="<%= it.t.mnemonic_ph %>"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"></textarea>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1"><%= it.t.label_addr_opt %></label>
+                <input type="text" name="address" placeholder="kaspa:q..."
+                  class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-600 mb-1"><%= it.t.label_assign_adapter %></label>
+                <select name="adapter_node_id" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value=""><%= it.t.assign_later %></option>
+                  <% it.adapters.forEach(function(a) { %>
+                  <option value="<%= a.id %>"><%= a.name %> (:<%= a.http_port %>)</option>
+                  <% }) %>
+                </select>
+              </div>
+            </div>
+            <div class="flex justify-end">
+              <button type="submit" class="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700"><%= it.t.btn_save %></button>
+            </div>
+          </form>
+        </div>
+
+      </div>
+    </main>
+  </div>
+<script>
+async function revealMnemonic(id) {
+  const res = await fetch('/relays/' + id + '/mnemonic');
+  const { mnemonic } = await res.json();
+  if (!mnemonic) return;
+  document.querySelector('.mnemonic-text-' + id).textContent = mnemonic;
+  document.querySelector('.mnemonic-area-' + id).classList.remove('hidden');
+  document.querySelector('.mnemonic-btn-' + id).classList.add('hidden');
+  document.querySelector('.mnemonic-hint-' + id).classList.add('hidden');
+}
+function copyMnemonic(id) {
+  const text = document.querySelector('.mnemonic-text-' + id).textContent;
+  navigator.clipboard.writeText(text);
+  const btn = document.querySelector('.mnemonic-copy-' + id);
+  btn.textContent = '<%= it.t.btn_copied || "Copied!" %>';
+  setTimeout(() => { btn.textContent = '<%= it.t.btn_copy || "Copy" %>'; }, 1500);
+}
+async function generateMnemonic() {
+  const network = document.querySelector('select[name="network"]').value || 'mainnet';
+  const res = await fetch('/relays/generate-mnemonic', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ network })
+  });
+  const { mnemonic, address } = await res.json();
+  if (mnemonic) {
+    document.getElementById('mnemonic-input').value = mnemonic;
+    const addrInput = document.querySelector('input[name="address"]');
+    if (addrInput) addrInput.value = address || '';
+  }
+}
+
+// ── Transfer / Withdraw ──
+let _transferRelayId = null;
+function openTransfer(relayId, name) {
+  _transferRelayId = relayId;
+  document.getElementById('transfer-agent-name').textContent = name;
+  document.getElementById('transfer-to').value = '';
+  document.getElementById('transfer-amount').value = '';
+  document.getElementById('transfer-result').classList.add('hidden');
+  document.getElementById('transfer-modal').classList.remove('hidden');
+}
+function closeTransfer() {
+  document.getElementById('transfer-modal').classList.add('hidden');
+}
+async function submitTransfer() {
+  const to = document.getElementById('transfer-to').value.trim();
+  const amount = parseFloat(document.getElementById('transfer-amount').value);
+  const resultEl = document.getElementById('transfer-result');
+  const btn = document.getElementById('transfer-btn');
+
+  if (!to || !amount || amount <= 0) { resultEl.textContent = 'Please enter address and amount'; resultEl.className = 'mt-3 text-sm text-red-600'; resultEl.classList.remove('hidden'); return; }
+
+  btn.disabled = true; btn.textContent = 'Sending...';
+  resultEl.classList.add('hidden');
+
+  try {
+    const res = await fetch('/api/relay/' + _transferRelayId + '/transfer', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to, amount })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      const msg = data.adjusted
+        ? 'Sent ' + data.actualAmount + ' KAS (adjusted from ' + data.requestedAmount + ' due to KIP-9). TX: ' + data.txId.slice(0, 16) + '...'
+        : 'Sent ' + data.actualAmount + ' KAS. TX: ' + data.txId.slice(0, 16) + '...';
+      resultEl.textContent = msg;
+      resultEl.className = 'mt-3 text-sm text-green-600';
+    } else {
+      resultEl.textContent = data.error || 'Transfer failed';
+      resultEl.className = 'mt-3 text-sm text-red-600';
+    }
+  } catch (e) {
+    resultEl.textContent = 'Network error: ' + e.message;
+    resultEl.className = 'mt-3 text-sm text-red-600';
+  }
+  resultEl.classList.remove('hidden');
+  btn.disabled = false; btn.textContent = '<%= it.t.btn_send || "Send" %>';
+}
+</script>
+
+<!-- Transfer Modal -->
+<div id="transfer-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+  <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="text-lg font-semibold"><%= it.t.btn_withdraw || 'Withdraw' %> — <span id="transfer-agent-name"></span></h3>
+      <button onclick="closeTransfer()" class="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+    </div>
+    <div class="space-y-3">
+      <div>
+        <label class="block text-sm text-gray-500 mb-1"><%= it.t.col_address || 'To Address' %></label>
+        <input id="transfer-to" type="text" placeholder="kaspa:q..."
+          class="w-full px-3 py-2 border rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-300 focus:border-blue-400">
+      </div>
+      <div>
+        <label class="block text-sm text-gray-500 mb-1">KAS</label>
+        <input id="transfer-amount" type="number" step="0.01" min="0.01" placeholder="0.1"
+          class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-300 focus:border-blue-400">
+      </div>
+      <p class="text-xs text-gray-400">KIP-9: small UTXOs may send full balance instead of partial amount.</p>
+    </div>
+    <div id="transfer-result" class="hidden mt-3 text-sm"></div>
+    <div class="mt-4 flex justify-end gap-2">
+      <button onclick="closeTransfer()" class="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg"><%= it.t.btn_cancel || 'Cancel' %></button>
+      <button id="transfer-btn" onclick="submitTransfer()" class="px-4 py-2 text-sm text-white bg-orange-500 hover:bg-orange-600 rounded-lg"><%= it.t.btn_send || 'Send' %></button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

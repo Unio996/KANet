@@ -1,0 +1,228 @@
+<%~ include('partials/page-open', { _page: 'chat', ...it }) %>
+
+<style>
+.thinking-dots span { display:inline-block; width:5px; height:5px; margin:0 2px; border-radius:50%; background:#9496a1; animation:thinking 1.4s infinite; }
+.thinking-dots span:nth-child(2) { animation-delay:.2s; }
+.thinking-dots span:nth-child(3) { animation-delay:.4s; }
+@keyframes thinking { 0%,80%,100%{opacity:.3;transform:scale(.8)} 40%{opacity:1;transform:scale(1)} }
+</style>
+
+<div class="flex h-[calc(100vh-0px)]" x-data="{
+  channel: '',
+  channelInput: 'kanet-public',
+  messages: [],
+  accounts: <%= JSON.stringify(it.relays.map(r => ({ id: r.id, name: r.name, address: r.address }))) %>,
+  selectedAccount: '<%= it.relays[0]?.id || '' %>',
+  mode: 'local',
+  msgInput: '',
+  sending: false,
+  error: '',
+  polling: null,
+  lastTime: '',
+
+  async init() {
+    this.channel = this._agentChannel();
+    await this.loadMessages();
+    this.polling = setInterval(() => this.poll(), 3000);
+  },
+  _agentChannel() {
+    if (this.selectedAccount === '__all__') return 'group';
+    const acct = this.accounts.find(a => a.id === this.selectedAccount);
+    return acct ? acct.name : 'home';
+  },
+  switchAgent() {
+    if (this.mode === 'local') { this.channel = this._agentChannel(); this.messages = []; this.lastTime = ''; this.loadMessages(); }
+  },
+  async loadMessages() {
+    try {
+      const res = await fetch('/api/chat/messages?channel=' + encodeURIComponent(this.channel) + '&limit=100');
+      const data = await res.json();
+      this.messages = data.messages || [];
+      if (this.messages.length > 0) this.lastTime = this.messages[this.messages.length - 1].created_at;
+      this.$nextTick(() => this.scrollBottom());
+    } catch {}
+  },
+  async poll() {
+    if (!this.lastTime) return this.loadMessages();
+    try {
+      const res = await fetch('/api/chat/messages?channel=' + encodeURIComponent(this.channel) + '&after=' + encodeURIComponent(this.lastTime));
+      const data = await res.json();
+      if (data.messages?.length > 0) {
+        this.messages.push(...data.messages);
+        this.lastTime = data.messages[data.messages.length - 1].created_at;
+        this.$nextTick(() => this.scrollBottom());
+      }
+    } catch {}
+  },
+  switchChannel() { if (this.channelInput.trim()) { this.channel = this.channelInput.trim(); this.messages = []; this.lastTime = ''; this.loadMessages(); } },
+  async send() {
+    if (!this.msgInput.trim() || !this.selectedAccount || this.sending) return;
+    const content = this.msgInput.trim();
+    this.msgInput = ''; this.error = ''; this.sending = true;
+    const now = new Date().toISOString();
+    this.messages.push({ id: 'temp-' + Date.now(), sender_address: 'owner:' + this.selectedAccount, content, created_at: now, _temp: true });
+    const isGroup = this.selectedAccount === '__all__';
+    const targets = isGroup ? this.accounts : [this.accounts.find(a => a.id === this.selectedAccount)].filter(Boolean);
+    for (const acct of targets) this.messages.push({ id: 'thinking-' + acct.id, sender_address: acct.address, content: '', created_at: now, _thinking: true });
+    this.$nextTick(() => this.scrollBottom());
+    if (this.polling) clearInterval(this.polling);
+    try {
+      const endpoint = this.mode === 'local' ? '/api/chat/local' : '/api/chat/send';
+      const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relayId: this.selectedAccount, channel: this.channel, message: content }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Send failed');
+    } catch (e) { this.error = e.message; }
+    await this.loadMessages(); this.sending = false;
+    this.polling = setInterval(() => this.poll(), 3000);
+  },
+  scrollBottom() { const el = document.getElementById('chat-messages'); if (el) el.scrollTop = el.scrollHeight; },
+  displayName(addr) { if (!addr) return '?'; if (addr.startsWith('owner:')) return 'You'; const acct = this.accounts.find(a => a.address === addr); return acct ? acct.name : addr.slice(-8); },
+  isMe(addr) { return addr && addr.startsWith('owner:'); },
+  isLocalAgent(addr) { return this.accounts.some(a => a.address === addr); },
+  isConfirmCard(c) { if (!c) return false; try { const p = JSON.parse(c); return p.type === 'confirm' && p.token; } catch { return false; } },
+  isQueryCard(c) { if (!c) return false; try { const p = JSON.parse(c); return p.type === 'query_card'; } catch { return false; } },
+  parseCard(c) { try { return JSON.parse(c); } catch { return null; } },
+  cardDataEntries(data) { if (!data || typeof data !== 'object') return []; const e = []; const f = (o, p) => { for (const [k,v] of Object.entries(o)) { if (v == null) continue; const key = p ? p+'.'+k : k; if (Array.isArray(v)) e.push([key, v.length+' items']); else if (typeof v === 'object') f(v,key); else e.push([key, String(v)]); } }; f(data,''); return e.slice(0,12); },
+  async doConfirm(msg) { const card = this.parseCard(msg.content); if (!card) return; try { const r = await fetch('/api/chat/confirm', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({relayNodeId:this.selectedAccount,token:card.token}) }); const d = await r.json(); msg.content = d.ok ? '已执行: ' + (typeof d.result === 'string' ? d.result : JSON.stringify(d.result)) : '失败: ' + (d.error||'unknown'); } catch(e) { msg.content = '执行失败: ' + e.message; } },
+  fmtTime(t) { if (!t) return ''; try { return new Date(t).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}); } catch { return t; } },
+}">
+
+  <!-- Left: Agent selector + mode -->
+  <div class="w-52 border-r border-warm-200 flex flex-col bg-warm-50/50 flex-shrink-0">
+    <div class="px-3 py-3 border-b border-warm-200 space-y-2">
+      <select x-model="selectedAccount" @change="switchAgent()"
+        class="w-full bg-white border border-warm-200 rounded-lg px-3 py-2 text-sm text-ink-700 focus:outline-none focus:border-brand-400">
+        <template x-for="a in accounts" :key="a.id">
+          <option :value="a.id" x-text="a.name"></option>
+        </template>
+        <option value="__all__">全体 Agent</option>
+      </select>
+      <div class="flex gap-1">
+        <button @click="mode='local'; channel=_agentChannel(); messages=[]; lastTime=''; loadMessages();"
+          class="flex-1 text-[11px] py-1 rounded transition-colors"
+          :class="mode==='local' ? 'bg-green-50 text-green-700 font-medium' : 'text-ink-400 hover:bg-warm-100'">
+          内部
+        </button>
+        <button @click="mode='chain'; channel=channelInput||'kanet-public'; messages=[]; lastTime=''; loadMessages();"
+          class="flex-1 text-[11px] py-1 rounded transition-colors"
+          :class="mode==='chain' ? 'bg-brand-50 text-brand-700 font-medium' : 'text-ink-400 hover:bg-warm-100'">
+          链上
+        </button>
+      </div>
+    </div>
+    <!-- Channel input for chain mode -->
+    <div x-show="mode==='chain'" class="px-3 py-2 border-b border-warm-200">
+      <div class="flex gap-1">
+        <input x-model="channelInput" @keydown.enter="switchChannel()" placeholder="频道名..."
+          class="flex-1 text-xs border border-warm-200 rounded px-2 py-1.5 bg-white focus:outline-none focus:border-brand-300" />
+        <button @click="switchChannel()" class="text-xs text-brand-500 hover:text-brand-700 px-2">加入</button>
+      </div>
+    </div>
+    <!-- Info -->
+    <div class="flex-1"></div>
+    <div class="px-3 py-2 text-[10px] text-ink-300">
+      <span x-show="mode==='local'" class="text-green-600">内部通道 · 不消耗 KAS</span>
+      <span x-show="mode==='chain'">链上广播 · #<span x-text="channel"></span></span>
+    </div>
+  </div>
+
+  <!-- Right: conversation -->
+  <div class="flex-1 flex flex-col min-w-0">
+    <!-- Header -->
+    <div class="px-5 py-3 border-b border-warm-200 flex items-center justify-between bg-white flex-shrink-0">
+      <div class="flex items-center gap-2">
+        <span class="text-sm font-semibold text-ink-700" x-text="mode==='local' ? (selectedAccount==='__all__' ? '全体对话' : _agentChannel()) : '#' + channel"></span>
+        <span class="text-xs text-ink-300" x-text="messages.length + ' 条'"></span>
+      </div>
+    </div>
+
+    <!-- Messages -->
+    <div id="chat-messages" class="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+      <div x-show="messages.length === 0" class="flex items-center justify-center h-full">
+        <div class="text-center text-ink-300 text-sm">
+          <p x-text="mode==='local' ? '和 ' + _agentChannel() + ' 说点什么' : '#' + channel + ' 暂无消息'"></p>
+        </div>
+      </div>
+
+      <template x-for="msg in messages" :key="msg.id">
+        <div class="flex gap-2.5" :class="isMe(msg.sender_address) ? 'flex-row-reverse' : ''">
+          <!-- Avatar -->
+          <div class="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold"
+            :class="isMe(msg.sender_address) ? 'bg-brand-100 text-brand-600' : isLocalAgent(msg.sender_address) ? 'bg-green-50 text-green-600' : 'bg-warm-200 text-ink-400'"
+            x-text="displayName(msg.sender_address).slice(0,2)"></div>
+          <!-- Bubble -->
+          <div class="max-w-[70%]">
+            <div x-show="!isMe(msg.sender_address)" class="text-[10px] font-medium mb-0.5"
+              :class="isLocalAgent(msg.sender_address) ? 'text-green-600' : 'text-ink-400'"
+              x-text="displayName(msg.sender_address)"></div>
+            <div class="rounded-xl px-3.5 py-2 text-sm leading-relaxed"
+              :class="isMe(msg.sender_address)
+                ? 'bg-brand-500 text-white rounded-br-sm'
+                : 'bg-white border border-warm-200 text-ink-700 rounded-bl-sm shadow-sm'">
+              <template x-if="msg._thinking">
+                <div class="thinking-dots py-1"><span></span><span></span><span></span></div>
+              </template>
+              <template x-if="!msg._thinking && !isConfirmCard(msg.content) && !isQueryCard(msg.content)">
+                <p class="whitespace-pre-wrap" x-text="msg.content"></p>
+              </template>
+              <!-- Query card -->
+              <template x-if="!msg._thinking && isQueryCard(msg.content)">
+                <div>
+                  <div class="bg-brand-50 border border-brand-100 rounded-lg p-2.5 mb-1.5">
+                    <div class="text-[10px] font-semibold text-brand-700 mb-1.5" x-text="parseCard(msg.content)?.label"></div>
+                    <div class="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px]">
+                      <template x-for="[k,v] in cardDataEntries(parseCard(msg.content)?.data)" :key="k">
+                        <div class="contents">
+                          <span class="text-brand-400 truncate" x-text="k"></span>
+                          <span class="text-brand-800 font-mono text-right" x-text="v"></span>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                  <p class="text-sm" x-text="parseCard(msg.content)?.summary"></p>
+                </div>
+              </template>
+              <!-- Confirm card -->
+              <template x-if="!msg._thinking && isConfirmCard(msg.content)">
+                <div class="bg-amber-50 border border-amber-200 rounded-lg p-2.5 my-0.5">
+                  <div class="text-[10px] font-semibold text-amber-800 mb-1.5" x-text="'待确认：' + parseCard(msg.content)?.label"></div>
+                  <div class="text-[11px] text-amber-700 space-y-0.5 mb-2">
+                    <template x-for="[k,v] in Object.entries(parseCard(msg.content)?.params || {})" :key="k">
+                      <div><span class="font-medium" x-text="k"></span>: <span class="font-mono" x-text="v"></span></div>
+                    </template>
+                  </div>
+                  <div class="flex gap-2">
+                    <button @click="doConfirm(msg)" class="px-2.5 py-1 text-[11px] font-medium text-white bg-amber-600 rounded hover:bg-amber-700">确认</button>
+                    <button @click="msg.content='已取消'" class="px-2.5 py-1 text-[11px] font-medium text-amber-700 bg-white border border-amber-300 rounded hover:bg-amber-50">取消</button>
+                  </div>
+                  <div class="text-[9px] text-amber-400 mt-1">30秒后过期</div>
+                </div>
+              </template>
+            </div>
+            <div x-show="!msg._temp && !msg._thinking" class="text-[10px] text-ink-300 mt-0.5 px-1"
+              :class="isMe(msg.sender_address) ? 'text-right' : ''"
+              x-text="fmtTime(msg.created_at)"></div>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- Input -->
+    <div class="px-5 py-3 border-t border-warm-200 bg-white flex-shrink-0">
+      <div class="flex gap-2 items-end">
+        <input type="text" x-model="msgInput" @keydown.enter="send()"
+          :placeholder="mode!=='local' ? '链上广播...' : selectedAccount==='__all__' ? '对全体 Agent 说...' : '对 ' + _agentChannel() + ' 说...'"
+          class="flex-1 px-4 py-2.5 border border-warm-200 rounded-xl text-sm text-ink-700 placeholder-ink-300 bg-warm-50/50 focus:outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-100" />
+        <button @click="send()" :disabled="sending || !msgInput.trim()"
+          class="px-5 py-2.5 rounded-xl text-sm font-medium transition-colors flex-shrink-0"
+          :class="sending || !msgInput.trim() ? 'bg-warm-200 text-ink-300' : 'bg-brand-500 text-white hover:bg-brand-600'">
+          <span x-show="!sending">发送</span>
+          <span x-show="sending">...</span>
+        </button>
+      </div>
+      <div x-show="error" class="mt-1 text-xs text-red-500" x-text="error"></div>
+    </div>
+  </div>
+</div>
+
+<%~ include('partials/page-close', it) %>

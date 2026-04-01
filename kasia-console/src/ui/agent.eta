@@ -1,0 +1,778 @@
+<%~ include('partials/page-open', { _page: 'agent', pageTitle: '我的 Agent', ...it }) %>
+
+    <div class="p-6" x-data="{
+      agents: [],
+      selectedIdx: 0,
+      loading: true,
+      activeTab: 'contacts',
+      contactsList: [],
+      contactsSearch: '',
+      contactsView: 'list',  // 'list' or 'graph'
+      graphNodes: [], graphEdges: [], selectedGraphNode: null,
+      balance: null, balLoading: false,
+      spending: null, spendLoading: false,
+      wallets: null, walletsLoading: false,
+      goals: [], goalsLoading: false,
+      mindSkills: [], recentActivity: [],
+      txHistory: [], txLoading: false,
+      health: null,
+
+      showCreateWallet: false, showImportWallet: false,
+      newWalletChain: 'bnb', newWalletLabel: '',
+      importKey: '', importChain: 'bnb', importLabel: '',
+      walletCreating: false, walletImporting: false,
+
+      newGoalText: '', editingGoalId: null, editingGoalText: '',
+
+      cardEditing: false, cardPublishing: false, cardPublished: false, cardError: '',
+      cardForm: { name: '', entityType: 'agent', summary: '', mode: 'public' },
+
+      showPrivKey: null, privKeyValue: '',
+
+      pendingApprovals: [],
+      tradeSignal: null,
+      tradeProposal: null,
+
+      get agent() { return this.agents[this.selectedIdx] || null; },
+
+      async init() {
+        try {
+          const res = await fetch('/api/agent/profile');
+          this.agents = await res.json();
+        } catch (e) { console.error(e); }
+        this.loading = false;
+        if (this.agents.length > 0) await this.loadAll();
+        this.$watch('selectedIdx', () => this.loadAll());
+        // Poll signals every 60s
+        this.loadTradeSignal();
+        setInterval(() => this.loadTradeSignal(), 60000);
+      },
+
+      async loadAll() {
+        this.loadBal(); this.loadSpent(); this.loadWallets();
+        this.loadGoals(); this.loadSkills(); this.loadTxHistory();
+        this.loadPendingApprovals(); this.loadHealth(); this.loadContacts();
+      },
+
+      async loadHealth() {
+        try {
+          const r = await fetch('/api/health/agents');
+          const d = await r.json();
+          this.health = (d.agents || []).find(a => a.address === this.agent?.address) || null;
+        } catch { this.health = null; }
+      },
+
+      healthRelTime(iso) {
+        if (!iso) return '从未';
+        const diff = Date.now() - new Date(iso).getTime();
+        const m = Math.floor(diff / 60000);
+        if (m < 1) return '刚刚';
+        if (m < 60) return m + ' 分钟前';
+        const h = Math.floor(m / 60);
+        if (h < 24) return h + ' 小时前';
+        return Math.floor(h / 24) + ' 天前';
+      },
+
+      healthReasonText(r) {
+        const map = { reflection:'反思周期超时', errors:'近期错误偏多', adapter:'AI 引擎离线', relay_down:'Relay 未运行', lastEvent:'长时间无活动', blocks:'消息拦截过多', payFails:'支付失败过多', proactive:'主动行为超时' };
+        return map[r] || r || '';
+      },
+
+      get sortedIndicators() {
+        if (!this.health?.indicators) return [];
+        const order = { red: 0, yellow: 1, green: 2 };
+        const labels = { adapter:'AI 引擎', lastEvent:'最近活动', proactive:'主动行为', reflection:'反思周期', errors:'错误 (2h)', blocks:'拦截 (2h)', payFails:'支付失败 (24h)' };
+        const links = { adapter:'/adapters', lastEvent:'/events', proactive:'/events', reflection:'/events', errors:'/events', blocks:'/events', payFails:'/market' };
+        const h = this.health;
+        const details = {
+          adapter: () => h.indicators.adapter === 'green' ? '运行中' : '离线',
+          lastEvent: () => this.healthRelTime(h.stats.lastEvent),
+          proactive: () => this.healthRelTime(h.stats.lastProactive),
+          reflection: () => this.healthRelTime(h.stats.lastReflection),
+          errors: () => h.stats.errors2h + ' 次',
+          blocks: () => h.stats.blocks2h + ' 次',
+          payFails: () => h.stats.payFails24h + ' 次',
+        };
+        return Object.entries(h.indicators)
+          .map(([k, v]) => ({ key: k, status: v, label: labels[k]||k, detail: details[k]?.() || '', link: links[k] || '/events' }))
+          .sort((a, b) => order[a.status] - order[b.status]);
+      },
+
+      async loadPendingApprovals() {
+        try { this.pendingApprovals = await (await fetch('/api/trade/pending-approvals')).json(); } catch { this.pendingApprovals = []; }
+      },
+      async loadContacts() {
+        if (!this.agent) return;
+        try {
+          const relayId = this.agents[this.selectedIdx]?.relayNodeId || this.agents[this.selectedIdx]?.id;
+          if (!relayId) return;
+          const res = await fetch(`/api/contacts/list?relay_node_id=${relayId}`);
+          this.contactsList = await res.json();
+        } catch { this.contactsList = []; }
+      },
+      get filteredContacts() {
+        const q = this.contactsSearch.toLowerCase();
+        if (!q) return this.contactsList;
+        return this.contactsList.filter(c => (c.name||'').toLowerCase().includes(q) || (c.address||'').includes(q));
+      },
+      async loadTradeSignal() {
+        try {
+          const res = await fetch('/api/trade/proposal');
+          const data = await res.json();
+          this.tradeSignal = data.analysis || null;
+          this.tradeProposal = data.proposal || null;
+        } catch { this.tradeSignal = null; this.tradeProposal = null; }
+      },
+      async approveExec(id) {
+        try { await fetch('/api/trade/approve-execution/' + id, { method: 'POST' }); await this.loadPendingApprovals(); } catch(e) { alert(e.message); }
+      },
+      async rejectExec(id) {
+        try { await fetch('/api/trade/reject-execution/' + id, { method: 'POST' }); await this.loadPendingApprovals(); } catch(e) { alert(e.message); }
+      },
+      buildGraph() {
+        const area = this.$refs.graphArea;
+        if (!area) return;
+        const W = area.clientWidth || 600, H = area.clientHeight || 400;
+        const cx = W/2, cy = H/2;
+        const myAddr = this.agent?.address || '';
+        const myName = this.agent?.name || 'Me';
+        const nodes = [{ id: myAddr, label: myName, x: cx, y: cy, status: 'active', isMe: true, trades: 0, volume: 0 }];
+        const total = this.contactsList.length || 1;
+        this.contactsList.forEach((c, i) => {
+          const angle = (2 * Math.PI * i) / total - Math.PI/2;
+          const r = Math.min(W, H) * 0.35;
+          nodes.push({ id: c.address, label: c.name || c.address.slice(-8), x: cx + r*Math.cos(angle), y: cy + r*Math.sin(angle), status: c.status, isMe: false, trades: c.tradeCount||0, volume: c.tradeVolume||0 });
+        });
+        this.graphNodes = nodes;
+        this.graphEdges = this.contactsList.map((c, i) => ({ id: 'e'+i, source: myAddr, target: c.address, volume: c.tradeVolume||1, disputed: c.tradeDisputed>0 }));
+      },
+      getGraphNode(id) { return this.graphNodes.find(n => n.id === id); },
+      edgeStyle(e) {
+        const s = this.getGraphNode(e.source), t = this.getGraphNode(e.target);
+        if (!s || !t) return 'display:none';
+        const dx = t.x-s.x, dy = t.y-s.y, len = Math.sqrt(dx*dx+dy*dy);
+        const angle = Math.atan2(dy,dx)*180/Math.PI;
+        const w = Math.max(1, Math.min(3, (e.volume||1)/100));
+        return `left:${s.x}px;top:${s.y}px;width:${len}px;height:${w}px;background:${e.disputed?'#dc2626':'#e4e2dc'};transform-origin:0 50%;transform:rotate(${angle}deg)`;
+      },
+
+      async loadBal() {
+        if (!this.agent) return; this.balLoading = true;
+        try { const r = await fetch('/api/relay/' + this.agent.id + '/balance'); this.balance = (await r.json()).balance; }
+        catch { this.balance = null; } this.balLoading = false;
+      },
+      async loadSpent() {
+        if (!this.agent) return; this.spendLoading = true;
+        try { const r = await fetch('/api/agent/spending?relay_node_id=' + this.agent.id + '&days=1'); this.spending = await r.json(); }
+        catch { this.spending = null; } this.spendLoading = false;
+      },
+      async loadWallets() {
+        if (!this.agent) return; this.walletsLoading = true;
+        try { const r = await fetch('/api/relay/' + this.agent.id + '/wallets'); this.wallets = await r.json(); }
+        catch { this.wallets = null; } this.walletsLoading = false;
+      },
+      async loadGoals() {
+        if (!this.agent) return; this.goalsLoading = true;
+        try { const r = await fetch('/api/relay/' + this.agent.id + '/goals'); this.goals = await r.json(); }
+        catch { this.goals = []; } this.goalsLoading = false;
+      },
+      async loadSkills() {
+        if (!this.agent) return;
+        try { const r = await fetch('/api/agent/mind-skills?relay_node_id=' + this.agent.id); this.mindSkills = await r.json(); } catch { this.mindSkills = []; }
+        try { const r2 = await fetch('/api/agent/mind-events?limit=20'); const evts = await r2.json();
+          this.recentActivity = evts.filter(e => e.event_type === 'skill_cycle' && e.source === this.agent.name).slice(0, 5);
+        } catch { this.recentActivity = []; }
+      },
+      async loadTxHistory() {
+        if (!this.agent) return; this.txLoading = true;
+        try { const r = await fetch('/api/agent/tx-history?relay_node_id=' + this.agent.id + '&limit=20'); this.txHistory = await r.json(); }
+        catch { this.txHistory = []; } this.txLoading = false;
+      },
+
+      async createWallet() {
+        if (!this.agent) return; this.walletCreating = true;
+        try { const r = await fetch('/api/relay/' + this.agent.id + '/wallets', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({chain:this.newWalletChain, label:this.newWalletLabel||undefined}) });
+          if (!r.ok) throw new Error((await r.json()).error); this.showCreateWallet = false; this.newWalletLabel = ''; await this.loadWallets();
+        } catch(e) { alert(e.message); } this.walletCreating = false;
+      },
+      async importWallet() {
+        if (!this.agent || !this.importKey.trim()) return; this.walletImporting = true;
+        try { const r = await fetch('/api/relay/' + this.agent.id + '/wallets/import', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({chain:this.importChain, privateKey:this.importKey.trim(), label:this.importLabel||undefined}) });
+          if (!r.ok) throw new Error((await r.json()).error); this.showImportWallet = false; this.importKey = ''; this.importLabel = ''; await this.loadWallets();
+        } catch(e) { alert(e.message); } this.walletImporting = false;
+      },
+      async deleteWallet(wid) {
+        if (!this.agent || !confirm('确定删除此钱包？')) return;
+        try { await fetch('/api/relay/' + this.agent.id + '/wallets/' + wid, {method:'DELETE'}); await this.loadWallets(); } catch(e) { alert(e.message); }
+      },
+      async showPrivkey(wid) {
+        if (this.showPrivKey === wid) { this.showPrivKey = null; return; }
+        try { const r = await fetch('/api/relay/' + this.agent.id + '/wallets/' + wid + '/privkey'); this.privKeyValue = (await r.json()).privateKey; this.showPrivKey = wid;
+        } catch(e) { alert(e.message); }
+      },
+      copyAddr(t) { navigator.clipboard.writeText(t); },
+
+      async addGoal() {
+        if (!this.agent || !this.newGoalText.trim()) return;
+        try { await fetch('/api/relay/' + this.agent.id + '/goals', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text:this.newGoalText.trim(), priority:5}) });
+          this.newGoalText = ''; await this.loadGoals();
+        } catch(e) { alert(e.message); }
+      },
+      startEditGoal(g) { this.editingGoalId = g.id; this.editingGoalText = g.text; },
+      cancelEditGoal() { this.editingGoalId = null; },
+      async saveGoal(g) {
+        if (!this.agent) return;
+        try { await fetch('/api/relay/' + this.agent.id + '/goals/' + g.id, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text:this.editingGoalText, priority:g.priority}) });
+          this.editingGoalId = null; await this.loadGoals();
+        } catch(e) { alert(e.message); }
+      },
+      async retireGoal(g) {
+        if (!this.agent) return;
+        try { await fetch('/api/relay/' + this.agent.id + '/goals/' + g.id, {method:'DELETE'}); await this.loadGoals(); } catch(e) { alert(e.message); }
+      },
+      async updatePriority(g, delta) {
+        const np = Math.max(1, Math.min(10, g.priority + delta));
+        try { await fetch('/api/relay/' + this.agent.id + '/goals/' + g.id, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({priority:np}) }); await this.loadGoals(); } catch {}
+      },
+
+      startCardEdit() {
+        if (!this.agent) return;
+        this.cardForm = { name: this.agent.name, entityType: this.agent.card?.entityType || 'agent', summary: this.agent.card?.summary || '', mode: this.agent.card?.mode || 'public' };
+        this.cardEditing = true; this.cardError = ''; this.cardPublished = false;
+      },
+      async publishCard() {
+        this.cardPublishing = true; this.cardError = '';
+        try { const r = await fetch('/api/relay/' + this.agent.id + '/publish-card', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(this.cardForm) });
+          const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Failed');
+          this.cardPublished = d.txId || true; this.cardEditing = false; this.agent.card = { ...this.agent.card, ...this.cardForm };
+        } catch(e) { this.cardError = e.message; } this.cardPublishing = false;
+      },
+
+      fmtDate(d) { if (!d) return '-'; try { return new Date(d).toLocaleString(undefined, {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); } catch { return d; } },
+      shortAddr(a) { return a ? a.slice(0, 14) + '...' + a.slice(-8) : ''; },
+      fmtBal(v) { return v != null ? parseFloat(v).toFixed(4) : '-'; }
+    }" x-cloak>
+
+      <!-- Loading -->
+      <div x-show="loading" class="flex items-center justify-center py-12">
+        <svg class="animate-spin h-6 w-6 text-brand-500" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+      </div>
+
+      <!-- Agent Selector (outside x-if) -->
+      <div x-show="!loading && agents.length > 0" class="mb-5 flex items-center justify-between">
+        <select x-model.number="selectedIdx" class="px-4 py-2 border border-warm-300 rounded-lg text-sm font-medium text-ink-600 bg-white focus:ring-2 focus:ring-brand-200 focus:border-brand-400 focus:outline-none">
+          <template x-for="(a, idx) in agents" :key="a.id"><option :value="idx" x-text="a.name"></option></template>
+        </select>
+        <div class="flex items-center gap-4 text-sm">
+          <span class="text-ink-300 font-mono text-xs" x-text="agent ? shortAddr(agent.address) : ''"></span>
+          <span class="font-bold text-ink-700" x-text="balLoading ? '...' : (balance != null ? fmtBal(balance) + ' KAS' : '-')"></span>
+        </div>
+      </div>
+
+      <template x-if="!loading && agent">
+        <div>
+          <!-- Agent Header Card -->
+          <div class="bg-white rounded-xl border border-warm-300 overflow-hidden mb-5">
+            <div class="px-6 py-5 border-b border-warm-200">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-4">
+                  <div class="w-12 h-12 bg-gradient-to-br from-brand-500 to-brand-700 rounded-xl flex items-center justify-center text-white text-lg font-bold shadow-sm" x-text="agent.name.charAt(0)"></div>
+                  <div>
+                    <h2 class="text-lg font-bold text-ink-700" x-text="agent.name"></h2>
+                    <p class="text-xs font-mono text-ink-300 mt-0.5" x-text="shortAddr(agent.address)" :title="agent.address"></p>
+                  </div>
+                </div>
+                <template x-if="agent.card">
+                  <span class="inline-flex items-center px-3 py-1 rounded-lg text-xs font-semibold bg-brand-50 text-brand-600 border border-brand-100">
+                    KANet <span x-text="agent.card.entityType" class="ml-1"></span>
+                    <span class="ml-1 text-brand-400" x-text="'(' + agent.card.mode + ')'"></span>
+                  </span>
+                </template>
+              </div>
+              <template x-if="agent.card && agent.card.summary">
+                <p class="mt-3 text-sm text-ink-500 leading-relaxed" x-text="agent.card.summary"></p>
+              </template>
+            </div>
+            <!-- Stats -->
+            <div class="grid grid-cols-4 divide-x divide-warm-200">
+              <div class="px-5 py-4 text-center">
+                <div class="text-2xl font-bold text-ink-700" x-text="agent.stats.contactCount"></div>
+                <div class="text-xs text-ink-300 mt-1">通讯录</div>
+              </div>
+              <div class="px-5 py-4 text-center">
+                <div class="text-2xl font-bold text-brand-500" x-text="agent.stats.interactionCount"></div>
+                <div class="text-xs text-ink-300 mt-1">链上交互</div>
+              </div>
+              <div class="px-5 py-4 text-center">
+                <div class="text-2xl font-bold text-amber-600" x-text="agent.stats.handshakeCount"></div>
+                <div class="text-xs text-ink-300 mt-1">握手</div>
+              </div>
+              <div class="px-5 py-4 text-center">
+                <div class="text-lg font-bold" :class="spending && spending.total > 0 ? 'text-red-500' : 'text-ink-300'" x-text="spendLoading ? '...' : (spending ? spending.total.toFixed(4) + ' KAS' : '-')"></div>
+                <div class="text-xs text-ink-300 mt-1">今日花费</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Trade Signal / Proposal -->
+          <div class="rounded-xl p-4 mb-5 border" :class="tradeProposal ? 'bg-brand-50 border-brand-200' : tradeSignal ? 'bg-warm-50 border-warm-200' : 'hidden'">
+            <!-- Has proposal -->
+            <template x-if="tradeProposal">
+              <div>
+                <div class="flex items-center justify-between mb-3">
+                  <div class="text-sm font-semibold text-brand-700">交易提案</div>
+                  <span class="text-[10px] px-2 py-0.5 rounded-full bg-brand-100 text-brand-600" x-text="tradeProposal.anchor === 'kas' ? 'KAS 本币锚' : 'USD 法币锚'"></span>
+                </div>
+                <div class="bg-white rounded-lg border border-brand-100 p-3 space-y-2">
+                  <div class="flex items-center justify-between">
+                    <span class="text-sm font-medium text-ink-700" x-text="tradeProposal.strategyName"></span>
+                    <span class="text-xs font-mono" :class="tradeProposal.action === 'buy' ? 'text-green-600' : 'text-red-500'"
+                          x-text="tradeProposal.action.toUpperCase() + ' ' + tradeProposal.params?.amount + ' KAS @ $' + tradeProposal.params?.price"></span>
+                  </div>
+                  <div class="text-xs text-ink-500" x-text="'信号: ' + tradeProposal.signal?.composite + '/100 (置信度 ' + Math.round((tradeProposal.signal?.confidence||0)*100) + '%) · ' + tradeProposal.regime + ' (ADX=' + tradeProposal.adx + ')'"></div>
+                  <div class="text-xs text-ink-400 bg-warm-50 rounded px-2 py-1.5 border-l-2 border-brand-300" x-text="tradeProposal.params?.reason"></div>
+                  <!-- Risk -->
+                  <div class="flex gap-3 text-[11px] text-ink-400">
+                    <template x-if="tradeProposal.riskCheck?.anchor === 'kas'">
+                      <div class="flex gap-3">
+                        <span x-text="'弹药: ' + (tradeProposal.riskCheck.usdtDeployed || 'N/A')"></span>
+                        <span x-text="'预估净增: ' + (tradeProposal.riskCheck.netKasGain || 'N/A')"></span>
+                      </div>
+                    </template>
+                    <template x-if="tradeProposal.riskCheck?.anchor !== 'kas'">
+                      <div class="flex gap-3">
+                        <span x-text="'仓位: ' + (tradeProposal.riskCheck?.positionPct || 'N/A')"></span>
+                        <span x-text="'最大亏损: ' + (tradeProposal.riskCheck?.maxLoss || 'N/A')"></span>
+                      </div>
+                    </template>
+                    <span x-text="'日限额: ' + (tradeProposal.riskCheck?.dailyUsed || '')"></span>
+                  </div>
+                  <!-- Stop/Take -->
+                  <div class="flex gap-4 text-[11px]">
+                    <span class="text-red-400" x-show="tradeProposal.params?.stopLoss" x-text="'止损: $' + tradeProposal.params?.stopLoss"></span>
+                    <span class="text-green-500" x-show="tradeProposal.params?.takeProfit" x-text="'止盈: $' + tradeProposal.params?.takeProfit"></span>
+                    <span class="text-ink-300" x-show="!tradeProposal.params?.stopLoss && !tradeProposal.params?.takeProfit">无止损止盈（本币锚策略）</span>
+                  </div>
+                </div>
+                <div class="text-[10px] text-ink-300 mt-2">Agent 将根据交易模式自动处理此提案（自动=直接执行，批准=等你确认）</div>
+              </div>
+            </template>
+            <!-- No proposal, show signal status -->
+            <template x-if="!tradeProposal && tradeSignal">
+              <div>
+                <div class="text-sm font-medium text-ink-500 mb-2">市场信号</div>
+                <div class="flex items-center gap-4 text-xs">
+                  <span class="text-ink-400" x-text="'综合: ' + (tradeSignal.composite||0) + '/100'"></span>
+                  <span class="text-ink-400" x-text="'置信度: ' + (tradeSignal.confidence||0)"></span>
+                  <span class="text-ink-400" x-text="'环境: ' + (tradeSignal.regime||'?')"></span>
+                  <span class="text-ink-300 text-[10px]">信号未达阈值，不交易</span>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- Pending Approvals -->
+          <template x-if="pendingApprovals.length > 0">
+            <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-5">
+              <div class="text-sm font-semibold text-amber-800 mb-3">Agent 待审批操作</div>
+              <div class="space-y-2">
+                <template x-for="pa in pendingApprovals" :key="pa.id">
+                  <div class="bg-white border border-amber-200 rounded-lg p-3 flex items-center justify-between">
+                    <div>
+                      <div class="text-sm font-medium text-ink-700" x-text="pa.display_summary || pa.type"></div>
+                      <div class="text-xs text-ink-300 mt-0.5">
+                        <span x-text="pa.agent_name || '?'"></span> · <span x-text="fmtDate(pa.created_at)"></span>
+                      </div>
+                      <template x-if="pa.params">
+                        <div class="text-xs text-amber-700 mt-1 font-mono" x-text="JSON.stringify(pa.params)"></div>
+                      </template>
+                    </div>
+                    <div class="flex gap-2 flex-shrink-0">
+                      <button @click="approveExec(pa.id)" class="px-3 py-1 text-xs font-medium text-white bg-green-600 rounded-lg hover:bg-green-700">批准</button>
+                      <button @click="rejectExec(pa.id)" class="px-3 py-1 text-xs font-medium text-red-600 bg-white border border-red-200 rounded-lg hover:bg-red-50">拒绝</button>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+
+          <!-- Tabs: 高频（通讯录/目标/历史） + 状态 + 低频折叠（钱包/Card/技能） -->
+          <div class="flex gap-1 mb-4 bg-white rounded-xl p-1 border border-warm-300">
+            <template x-for="t in [{id:'contacts',l:'通讯录'},{id:'goals',l:'目标'},{id:'history',l:'历史'}]" :key="t.id">
+              <button @click="activeTab = t.id; if(t.id==='contacts') loadContacts();" class="flex-1 px-3 py-2 text-sm font-medium rounded-lg transition-colors"
+                :class="activeTab === t.id ? 'bg-brand-50 text-brand-600' : 'text-ink-400 hover:text-ink-600'" x-text="t.l"></button>
+            </template>
+            <button @click="activeTab = 'status'" class="px-3 py-2 text-sm font-medium rounded-lg transition-all duration-200"
+              :class="activeTab === 'status'
+                ? (health?.status === 'red' ? 'bg-red-50 text-red-700 ring-1 ring-red-200' : health?.status === 'yellow' ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-200' : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200')
+                : (health?.status === 'red' ? 'text-red-500 bg-red-50/60' : health?.status === 'yellow' ? 'text-amber-500 bg-amber-50/60' : 'text-ink-400 hover:text-ink-600')
+              ">状态</button>
+            <!-- 低频折叠 -->
+            <div class="relative" x-data="{ moreOpen: false }">
+              <button @click="moreOpen = !moreOpen" class="px-3 py-2 text-sm font-medium rounded-lg transition-colors"
+                :class="['wallet','card','skills'].includes(activeTab) ? 'bg-brand-50 text-brand-600' : 'text-ink-400 hover:text-ink-600'">
+                <span x-text="['wallet','card','skills'].includes(activeTab) ? {wallet:'钱包',card:'Card',skills:'技能'}[activeTab] : '更多'"></span>
+              </button>
+              <div x-show="moreOpen" @click.away="moreOpen = false" x-transition
+                class="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-lg border border-warm-200 py-1 z-20 w-24">
+                <button @click="activeTab='wallet'; moreOpen=false" class="w-full text-left px-3 py-1.5 text-sm hover:bg-warm-50" :class="activeTab==='wallet' ? 'text-brand-600' : 'text-ink-500'">钱包</button>
+                <button @click="activeTab='card'; moreOpen=false" class="w-full text-left px-3 py-1.5 text-sm hover:bg-warm-50" :class="activeTab==='card' ? 'text-brand-600' : 'text-ink-500'">Card</button>
+                <button @click="activeTab='skills'; moreOpen=false" class="w-full text-left px-3 py-1.5 text-sm hover:bg-warm-50" :class="activeTab==='skills' ? 'text-brand-600' : 'text-ink-500'">技能</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- ===== TAB: 通讯录 ===== -->
+          <div x-show="activeTab === 'contacts'" class="bg-white rounded-xl border border-warm-300 overflow-hidden">
+            <div class="px-6 py-3 border-b border-warm-200 flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <input x-model="contactsSearch" placeholder="搜索..." class="text-sm border border-warm-200 rounded-lg px-3 py-1.5 w-48 focus:outline-none focus:border-brand-300" />
+                <span class="text-xs text-ink-300" x-text="filteredContacts.length + ' 联系人'"></span>
+              </div>
+              <div class="flex gap-1 bg-warm-50 rounded-lg p-0.5">
+                <button @click="contactsView='list'" class="px-2 py-1 text-[11px] rounded transition-colors" :class="contactsView==='list' ? 'bg-white shadow-sm text-ink-600' : 'text-ink-400'">列表</button>
+                <button @click="contactsView='graph'" class="px-2 py-1 text-[11px] rounded transition-colors" :class="contactsView==='graph' ? 'bg-white shadow-sm text-ink-600' : 'text-ink-400'">图谱</button>
+              </div>
+            </div>
+
+            <!-- List view -->
+            <div x-show="contactsView==='list'" class="divide-y divide-warm-100 max-h-[60vh] overflow-y-auto">
+              <template x-for="c in filteredContacts" :key="c.address">
+                <a :href="'/story?peer=' + encodeURIComponent(c.address) + '&agent=' + (agents[selectedIdx]?.relayNodeId || agents[selectedIdx]?.id)"
+                   class="flex items-center gap-3 px-6 py-3 hover:bg-warm-50 transition-colors cursor-pointer">
+                  <div class="w-2 h-2 rounded-full flex-shrink-0" :class="c.status==='active' ? 'bg-green-500' : c.status==='accepted' ? 'bg-blue-400' : 'bg-warm-300'"></div>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="text-sm font-medium text-ink-700 truncate" x-text="c.name || c.address.slice(-12)"></span>
+                      <span class="text-[10px] px-1.5 py-0.5 rounded bg-warm-100 text-ink-400" x-text="c.trustLevel" x-show="c.trustLevel && c.trustLevel !== 'normal'"></span>
+                    </div>
+                    <div class="text-[11px] text-ink-300 font-mono truncate" x-text="c.address"></div>
+                  </div>
+                  <div class="text-right flex-shrink-0" x-show="c.tradeCount > 0">
+                    <div class="text-xs font-medium text-ink-500" x-text="c.tradeCount + ' 笔'"></div>
+                    <div class="text-[10px]" :class="c.tradeDisputed > 0 ? 'text-red-500' : 'text-green-600'"
+                         x-text="c.tradeDisputed > 0 ? c.tradeDisputed + ' 争议' : c.tradeVolume.toFixed(0) + ' KAS'"></div>
+                  </div>
+                </a>
+              </template>
+              <div x-show="filteredContacts.length === 0" class="text-center text-ink-300 py-12 text-sm">暂无联系人</div>
+            </div>
+
+            <!-- Graph view (inline) -->
+            <div x-show="contactsView==='graph'" class="relative" style="height: 450px" x-ref="graphArea">
+              <div class="absolute inset-0 overflow-hidden" x-init="$watch('contactsView', v => { if (v==='graph') buildGraph() })">
+                <!-- Nodes rendered as divs -->
+                <template x-for="n in graphNodes" :key="n.id">
+                  <div class="absolute flex flex-col items-center cursor-pointer select-none"
+                       :style="'left:' + (n.x-24) + 'px; top:' + (n.y-24) + 'px; width:48px'"
+                       @click="selectedGraphNode = selectedGraphNode?.id === n.id ? null : n"
+                       @dblclick="window.location='/story?peer='+encodeURIComponent(n.id)+'&agent='+(agents[selectedIdx]?.relayNodeId||agents[selectedIdx]?.id)">
+                    <div class="w-4 h-4 rounded-full border-2 border-white shadow-sm"
+                         :class="n.isMe ? 'bg-brand-500 w-5 h-5' : n.status==='active' ? 'bg-green-500' : n.status==='accepted' ? 'bg-blue-400' : 'bg-warm-300'"></div>
+                    <span class="text-[9px] text-ink-500 mt-0.5 truncate w-full text-center" x-text="n.label"></span>
+                  </div>
+                </template>
+                <!-- Edges -->
+                <template x-for="e in graphEdges" :key="e.id">
+                  <div class="absolute pointer-events-none" :style="edgeStyle(e)"></div>
+                </template>
+                <!-- Selected node card -->
+                <div x-show="selectedGraphNode" x-transition class="absolute bottom-3 left-3 bg-white rounded-lg shadow-lg border border-warm-200 p-3 w-56 z-10">
+                  <div class="font-medium text-sm text-ink-700" x-text="selectedGraphNode?.label"></div>
+                  <div class="text-[10px] font-mono text-ink-300 truncate" x-text="selectedGraphNode?.id"></div>
+                  <div class="flex gap-3 mt-2 text-xs text-ink-500">
+                    <span x-text="(selectedGraphNode?.trades||0) + ' 交易'"></span>
+                    <span x-text="(selectedGraphNode?.volume||0).toFixed(0) + ' KAS'"></span>
+                  </div>
+                  <a :href="'/story?peer='+encodeURIComponent(selectedGraphNode?.id||'')+'&agent='+(agents[selectedIdx]?.relayNodeId||agents[selectedIdx]?.id)"
+                     class="block mt-2 text-xs text-brand-500 hover:text-brand-700">查看故事线 →</a>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ===== TAB: 钱包 ===== -->
+          <div x-show="activeTab === 'wallet'" class="bg-white rounded-xl border border-warm-300 overflow-hidden">
+            <div class="px-6 py-4 border-b border-warm-200 flex items-center justify-between">
+              <div class="text-xs font-medium text-ink-300 uppercase tracking-wider">钱包管理</div>
+              <div class="flex gap-2">
+                <button @click="showCreateWallet = !showCreateWallet; showImportWallet = false" class="px-3 py-1 text-xs font-medium text-brand-600 bg-brand-50 rounded-lg hover:bg-brand-100 border border-brand-100">创建钱包</button>
+                <button @click="showImportWallet = !showImportWallet; showCreateWallet = false" class="px-3 py-1 text-xs font-medium text-ink-500 bg-warm-100 rounded-lg hover:bg-warm-200 border border-warm-300">导入钱包</button>
+              </div>
+            </div>
+            <!-- Create form -->
+            <div x-show="showCreateWallet" x-transition class="px-6 py-4 bg-brand-50 border-b border-brand-100">
+              <div class="flex items-center gap-3">
+                <select x-model="newWalletChain" class="px-3 py-1.5 border border-warm-300 rounded-lg text-sm bg-white"><option value="bnb">BNB (BSC)</option><option value="eth">ETH</option><option value="sol">SOL</option><option value="tron">TRON</option></select>
+                <input x-model="newWalletLabel" type="text" placeholder="备注（可选）" class="flex-1 px-3 py-1.5 border border-warm-300 rounded-lg text-sm bg-white focus:border-brand-300 focus:outline-none" />
+                <button @click="createWallet()" :disabled="walletCreating" class="px-4 py-1.5 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 disabled:opacity-50" x-text="walletCreating ? '创建中...' : '创建'"></button>
+              </div>
+            </div>
+            <!-- Import form -->
+            <div x-show="showImportWallet" x-transition class="px-6 py-4 bg-warm-50 border-b border-warm-200">
+              <div class="flex items-center gap-3">
+                <select x-model="importChain" class="px-3 py-1.5 border border-warm-300 rounded-lg text-sm bg-white"><option value="bnb">BNB</option><option value="eth">ETH</option><option value="sol">SOL</option><option value="tron">TRON</option></select>
+                <input x-model="importKey" type="password" placeholder="私钥" class="flex-1 px-3 py-1.5 border border-warm-300 rounded-lg text-sm font-mono bg-white focus:border-brand-300 focus:outline-none" />
+                <input x-model="importLabel" type="text" placeholder="备注" class="w-28 px-3 py-1.5 border border-warm-300 rounded-lg text-sm bg-white" />
+                <button @click="importWallet()" :disabled="walletImporting" class="px-4 py-1.5 text-sm font-medium text-white bg-ink-600 rounded-lg hover:bg-ink-700 disabled:opacity-50" x-text="walletImporting ? '导入中...' : '导入'"></button>
+              </div>
+            </div>
+            <!-- Wallet list -->
+            <div class="divide-y divide-warm-200">
+              <template x-if="wallets && wallets.kaspa">
+                <div class="px-6 py-4 flex items-center justify-between">
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <span class="px-2 py-0.5 text-xs font-semibold bg-green-50 text-green-700 rounded-md border border-green-100">KAS</span>
+                      <span class="text-sm font-mono text-ink-500" x-text="shortAddr(wallets.kaspa.address)" :title="wallets.kaspa.address"></span>
+                    </div>
+                    <div class="text-xs text-ink-300 mt-1" x-text="fmtBal(balance) + ' KAS'"></div>
+                  </div>
+                  <button @click="copyAddr(wallets.kaspa.address)" class="text-xs text-ink-300 hover:text-brand-500">复制</button>
+                </div>
+              </template>
+              <template x-if="wallets && wallets.chains">
+                <template x-for="w in wallets.chains" :key="w.id">
+                  <div class="px-6 py-4">
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <div class="flex items-center gap-2">
+                          <span class="px-2 py-0.5 text-xs font-semibold rounded-md border"
+                            :class="w.chain==='bnb'?'bg-amber-50 text-amber-700 border-amber-100':w.chain==='eth'?'bg-blue-50 text-blue-700 border-blue-100':w.chain==='sol'?'bg-purple-50 text-purple-700 border-purple-100':'bg-red-50 text-red-700 border-red-100'"
+                            x-text="w.chain.toUpperCase()"></span>
+                          <span class="text-sm font-mono text-ink-500" x-text="shortAddr(w.address)" :title="w.address"></span>
+                          <template x-if="w.isDefault"><span class="text-[10px] text-green-600 font-medium">默认</span></template>
+                          <template x-if="w.label"><span class="text-xs text-ink-300" x-text="w.label"></span></template>
+                        </div>
+                        <div class="text-xs text-ink-300 mt-1">
+                          <span x-text="w.usdtBalance != null ? w.usdtBalance.toFixed(2) + ' USDT' : '-'"></span>
+                          <span class="mx-1">·</span>
+                          <span x-text="w.nativeBalance != null ? w.nativeBalance.toFixed(4) + ' ' + w.chain.toUpperCase() : '-'"></span>
+                        </div>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <button @click="copyAddr(w.address)" class="text-xs text-ink-300 hover:text-brand-500">复制</button>
+                        <button @click="showPrivkey(w.id)" class="text-xs text-ink-300 hover:text-ink-600" x-text="showPrivKey === w.id ? '隐藏' : '私钥'"></button>
+                        <button @click="deleteWallet(w.id)" class="text-xs text-red-400 hover:text-red-600">删除</button>
+                      </div>
+                    </div>
+                    <div x-show="showPrivKey === w.id" x-transition class="mt-2 p-2 bg-red-50 border border-red-100 rounded-lg text-xs font-mono text-red-700 break-all" x-text="privKeyValue"></div>
+                  </div>
+                </template>
+              </template>
+              <div x-show="walletsLoading" class="px-6 py-8 text-center text-sm text-ink-300">加载中...</div>
+              <div x-show="!walletsLoading && wallets && (!wallets.chains || wallets.chains.length === 0)" class="px-6 py-6 text-center text-xs text-ink-300">暂无跨链钱包</div>
+            </div>
+          </div>
+
+          <!-- ===== TAB: Card ===== -->
+          <div x-show="activeTab === 'card'" class="bg-white rounded-xl border border-warm-300 overflow-hidden">
+            <div class="px-6 py-4 border-b border-warm-200 flex items-center justify-between">
+              <div class="text-xs font-medium text-ink-300 uppercase tracking-wider">Agent Card</div>
+              <button @click="startCardEdit()" class="text-xs text-brand-500 hover:text-brand-600 font-medium" x-text="agent.card ? '编辑 Card' : '创建 Agent Card'"></button>
+            </div>
+            <div x-show="cardPublished" x-transition class="px-6 py-2 bg-green-50 border-b border-green-100 text-xs text-green-700">Card 已上链! TX: <span class="font-mono" x-text="cardPublished"></span></div>
+            <template x-if="cardEditing">
+              <div class="px-6 py-4 space-y-3 bg-brand-50">
+                <div class="flex items-center justify-between"><span class="text-sm font-medium text-brand-700">编辑 Agent Card</span><button @click="cardEditing=false" class="text-xs text-ink-300 hover:text-ink-500">取消</button></div>
+                <div class="flex gap-2">
+                  <template x-for="m in ['public','mixed','private']" :key="m">
+                    <button type="button" @click="cardForm.mode = m" class="px-3 py-1 text-xs font-medium rounded-lg transition-colors" :class="cardForm.mode === m ? 'bg-brand-500 text-white' : 'bg-white text-ink-500 border border-warm-300 hover:bg-warm-100'" x-text="m"></button>
+                  </template>
+                </div>
+                <div><label class="block text-xs text-ink-400 mb-1">名称</label><input type="text" x-model="cardForm.name" class="w-full px-3 py-1.5 border border-warm-300 rounded-lg text-sm bg-white focus:border-brand-300 focus:outline-none" /></div>
+                <div><label class="block text-xs text-ink-400 mb-1">类型</label>
+                  <div class="flex gap-3"><template x-for="t in ['agent','human','service','org']" :key="t"><label class="flex items-center gap-1 text-sm text-ink-500 cursor-pointer"><input type="radio" :value="t" x-model="cardForm.entityType" class="text-brand-500" /><span x-text="t"></span></label></template></div>
+                </div>
+                <div><label class="block text-xs text-ink-400 mb-1">简介 (280字以内)</label><input type="text" x-model="cardForm.summary" maxlength="280" class="w-full px-3 py-1.5 border border-warm-300 rounded-lg text-sm bg-white focus:border-brand-300 focus:outline-none" /></div>
+                <div x-show="cardError" class="text-xs text-red-600" x-text="cardError"></div>
+                <button @click="publishCard()" :disabled="cardPublishing" class="w-full py-2 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 disabled:opacity-50 transition-colors" x-text="cardPublishing ? '发布中...' : '发布到 Kaspa 链上'"></button>
+              </div>
+            </template>
+            <template x-if="!cardEditing">
+              <div class="px-6 py-4">
+                <template x-if="agent.card">
+                  <div class="space-y-2 text-sm text-ink-500">
+                    <div class="flex justify-between"><span class="text-ink-300">模式</span><span x-text="agent.card.mode"></span></div>
+                    <div class="flex justify-between"><span class="text-ink-300">类型</span><span x-text="agent.card.entityType"></span></div>
+                    <template x-if="agent.card.skills && agent.card.skills.length > 0">
+                      <div><span class="text-ink-300 text-xs">链上声明技能</span><div class="flex flex-wrap gap-1 mt-1"><template x-for="s in agent.card.skills" :key="s"><span class="px-2 py-0.5 text-xs bg-brand-50 text-brand-600 rounded-md border border-brand-100" x-text="s"></span></template></div></div>
+                    </template>
+                  </div>
+                </template>
+                <template x-if="!agent.card"><p class="text-xs text-ink-300">尚未创建 Agent Card</p></template>
+              </div>
+            </template>
+          </div>
+
+          <!-- ===== TAB: 目标 ===== -->
+          <div x-show="activeTab === 'goals'" class="bg-white rounded-xl border border-warm-300 overflow-hidden">
+            <div class="px-6 py-4 border-b border-warm-200 flex items-center justify-between">
+              <div class="text-xs font-medium text-ink-300 uppercase tracking-wider">目标</div>
+              <span class="text-xs text-ink-300" x-text="goals.filter(g => g.status === 'active').length + ' 个活跃目标'"></span>
+            </div>
+            <div class="px-6 py-3 border-b border-warm-200 flex items-center gap-2">
+              <input x-model="newGoalText" @keydown.enter="addGoal()" type="text" placeholder="添加新目标..." class="flex-1 px-3 py-1.5 border border-warm-300 rounded-lg text-sm bg-white focus:border-brand-300 focus:outline-none" />
+              <button @click="addGoal()" class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600">添加</button>
+            </div>
+            <div class="divide-y divide-warm-200">
+              <template x-for="g in goals.filter(g => g.status === 'active').sort((a,b) => b.priority - a.priority)" :key="g.id">
+                <div class="px-6 py-3 flex items-center gap-3 group">
+                  <div class="flex flex-col items-center gap-0.5">
+                    <button @click="updatePriority(g, 1)" class="text-ink-200 hover:text-ink-500 text-xs leading-none">&#9650;</button>
+                    <span class="text-xs font-bold text-ink-500 w-5 text-center" x-text="g.priority"></span>
+                    <button @click="updatePriority(g, -1)" class="text-ink-200 hover:text-ink-500 text-xs leading-none">&#9660;</button>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <template x-if="editingGoalId !== g.id"><span @dblclick="startEditGoal(g)" class="text-sm text-ink-600 cursor-pointer" x-text="g.text"></span></template>
+                    <template x-if="editingGoalId === g.id"><input x-model="editingGoalText" @keydown.enter="saveGoal(g)" @keydown.escape="cancelEditGoal()" class="w-full px-2 py-1 border border-brand-300 rounded-lg text-sm focus:outline-none" /></template>
+                    <div class="text-xs text-ink-300 mt-0.5"><span x-text="g.source === 'owner' ? '手动' : '自动'"></span> · <span x-text="fmtDate(g.createdAt)"></span></div>
+                  </div>
+                  <template x-if="editingGoalId === g.id"><button @click="saveGoal(g)" class="text-xs text-brand-500 font-medium">保存</button></template>
+                  <button @click="retireGoal(g)" class="text-xs text-ink-200 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">退役</button>
+                </div>
+              </template>
+              <div x-show="goalsLoading" class="px-6 py-4 text-center text-xs text-ink-300">加载中...</div>
+              <div x-show="!goalsLoading && goals.filter(g => g.status === 'active').length === 0" class="px-6 py-8 text-center text-xs text-ink-300">暂无目标</div>
+            </div>
+          </div>
+
+          <!-- ===== TAB: 技能 ===== -->
+          <div x-show="activeTab === 'skills'" class="bg-white rounded-xl border border-warm-300 overflow-hidden">
+            <div class="px-6 py-4 border-b border-warm-200 flex items-center justify-between">
+              <div class="text-xs font-medium text-ink-300 uppercase tracking-wider">Mind 技能</div>
+              <a href="/skills" class="text-xs text-brand-500 hover:text-brand-600 font-medium">管理技能</a>
+            </div>
+            <div class="px-6 py-4">
+              <template x-if="mindSkills.length > 0">
+                <div class="flex flex-wrap gap-2 mb-4"><template x-for="s in mindSkills" :key="s.name">
+                  <div class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-green-50 text-green-700 border border-green-100">
+                    <span class="w-1.5 h-1.5 rounded-full bg-green-400 mr-1.5"></span><span x-text="s.display_name || s.name"></span>
+                  </div>
+                </template></div>
+              </template>
+              <template x-if="mindSkills.length === 0"><p class="text-xs text-ink-300 mb-3">无启用的 Mind 技能。<a href="/skills" class="text-brand-500 hover:underline">前往管理</a></p></template>
+              <template x-if="recentActivity.length > 0">
+                <div class="space-y-1.5 mt-4 pt-4 border-t border-warm-200">
+                  <div class="text-xs text-ink-300 mb-1">最近活动</div>
+                  <template x-for="evt in recentActivity" :key="evt.created_at">
+                    <div class="flex items-start gap-2 text-xs"><span class="text-ink-300 flex-shrink-0 w-28" x-text="fmtDate(evt.created_at)"></span><span class="text-ink-500" x-text="evt.summary"></span></div>
+                  </template>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- ===== TAB: 历史 ===== -->
+          <div x-show="activeTab === 'history'" class="bg-white rounded-xl border border-warm-300 overflow-hidden">
+            <div class="px-6 py-4 border-b border-warm-200"><div class="text-xs font-medium text-ink-300 uppercase tracking-wider">交易历史</div></div>
+            <div class="divide-y divide-warm-200">
+              <template x-for="tx in txHistory" :key="tx.txid || tx.created_at">
+                <div class="px-6 py-3 flex items-center justify-between text-sm">
+                  <div><span class="font-mono text-xs text-ink-300" x-text="tx.txid ? tx.txid.slice(0,12) + '...' : '-'"></span><span class="ml-2 text-ink-500" x-text="tx.message_type || ''"></span></div>
+                  <div class="text-right"><span class="text-xs text-ink-400" x-text="tx.fee ? tx.fee + ' KAS' : ''"></span><div class="text-xs text-ink-300" x-text="fmtDate(tx.created_at)"></div></div>
+                </div>
+              </template>
+              <div x-show="txLoading" class="px-6 py-4 text-center text-xs text-ink-300">加载中...</div>
+              <div x-show="!txLoading && txHistory.length === 0" class="px-6 py-8 text-center text-xs text-ink-300">暂无交易记录</div>
+            </div>
+          </div>
+
+          <!-- ===== TAB: 状态 ===== -->
+          <div x-show="activeTab === 'status'" class="space-y-4">
+            <template x-if="health">
+              <div class="space-y-4">
+                <!-- Alert banner (non-green only) -->
+                <template x-if="health.status !== 'green'">
+                  <div class="rounded-xl border px-5 py-3 flex items-center justify-between"
+                    :class="health.status === 'red' ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'">
+                    <div class="flex items-center gap-3">
+                      <div class="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                        :class="health.status === 'red' ? 'bg-red-500' : 'bg-amber-500'"></div>
+                      <span class="text-sm font-medium"
+                        :class="health.status === 'red' ? 'text-red-800' : 'text-amber-800'"
+                        x-text="healthReasonText(health.reason)"></span>
+                    </div>
+                    <span class="text-xs font-mono"
+                      :class="health.status === 'red' ? 'text-red-400' : 'text-amber-400'"
+                      x-text="health.status.toUpperCase()"></span>
+                  </div>
+                </template>
+                <!-- 7 Indicators -->
+                <div class="bg-white rounded-xl border border-warm-300 overflow-hidden">
+                  <div class="px-5 py-3 border-b border-warm-200 flex items-center justify-between">
+                    <span class="text-xs font-medium text-ink-300 uppercase tracking-wider">健康指标</span>
+                    <div class="flex items-center gap-1.5">
+                      <span class="w-2 h-2 rounded-full bg-emerald-400"></span><span class="text-[10px] text-ink-300">正常</span>
+                      <span class="w-2 h-2 rounded-full bg-amber-400 ml-2"></span><span class="text-[10px] text-ink-300">注意</span>
+                      <span class="w-2 h-2 rounded-full bg-red-500 ml-2"></span><span class="text-[10px] text-ink-300">异常</span>
+                    </div>
+                  </div>
+                  <div class="divide-y divide-warm-200">
+                    <template x-for="ind in sortedIndicators" :key="ind.key">
+                      <a :href="ind.status !== 'green' ? ind.link : null"
+                        class="px-5 py-3 flex items-center justify-between transition-colors block"
+                        :class="ind.status !== 'green' ? 'hover:bg-warm-50 cursor-pointer' : ''">
+                        <div class="flex items-center gap-3">
+                          <span class="w-2 h-2 rounded-full flex-shrink-0"
+                            :class="ind.status === 'green' ? 'bg-emerald-400' : ind.status === 'yellow' ? 'bg-amber-400' : 'bg-red-500'"></span>
+                          <span class="text-sm text-ink-600" x-text="ind.label"></span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                          <span class="text-xs font-mono"
+                            :class="ind.status === 'green' ? 'text-ink-300' : ind.status === 'yellow' ? 'text-amber-600' : 'text-red-600 font-semibold'"
+                            x-text="ind.detail"></span>
+                          <template x-if="ind.status !== 'green'">
+                            <svg class="w-3.5 h-3.5 text-ink-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                          </template>
+                        </div>
+                      </a>
+                    </template>
+                  </div>
+                </div>
+                <!-- Activity Stats -->
+                <div class="bg-white rounded-xl border border-warm-300 overflow-hidden">
+                  <div class="px-5 py-3 border-b border-warm-200">
+                    <span class="text-xs font-medium text-ink-300 uppercase tracking-wider">近 2 小时活动</span>
+                  </div>
+                  <div class="grid grid-cols-4 divide-x divide-warm-200">
+                    <div class="px-4 py-4 text-center">
+                      <div class="text-xl font-bold text-ink-700" x-text="health.stats?.active2h || 0"></div>
+                      <div class="text-[10px] text-ink-300 mt-1">总事件</div>
+                    </div>
+                    <div class="px-4 py-4 text-center">
+                      <div class="text-xl font-bold text-ink-700" x-text="(health.stats?.active2h || 0) - (health.stats?.silent2h || 0)"></div>
+                      <div class="text-[10px] text-ink-300 mt-1">有效响应</div>
+                    </div>
+                    <div class="px-4 py-4 text-center">
+                      <div class="text-xl font-bold" :class="(health.stats?.silent2h || 0) > 10 ? 'text-amber-600' : 'text-ink-400'" x-text="health.stats?.silent2h || 0"></div>
+                      <div class="text-[10px] text-ink-300 mt-1">静默</div>
+                    </div>
+                    <div class="px-4 py-4 text-center">
+                      <div class="text-xl font-bold" :class="(health.stats?.errors2h || 0) > 0 ? 'text-red-500' : 'text-ink-400'" x-text="health.stats?.errors2h || 0"></div>
+                      <div class="text-[10px] text-ink-300 mt-1">错误</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </template>
+            <div x-show="!health" class="bg-white rounded-xl border border-warm-300 p-8 text-center text-xs text-ink-300">健康数据加载中...</div>
+          </div>
+
+          <!-- Quick actions -->
+          <div class="mt-5 flex items-center gap-3">
+            <a :href="'/discovered?account=' + agent.id" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-white border border-warm-300 text-ink-500 hover:bg-warm-100">查看发现</a>
+            <a href="/network" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-white border border-warm-300 text-ink-500 hover:bg-warm-100">网络活动</a>
+            <a href="/chat" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-white border border-warm-300 text-ink-500 hover:bg-warm-100">聊天频道</a>
+            <a href="/market" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-brand-50 border border-brand-100 text-brand-600 hover:bg-brand-100">自由市场</a>
+          </div>
+        </div>
+      </template>
+
+      <!-- Empty -->
+      <div x-show="!loading && agents.length === 0" class="bg-white rounded-xl border border-warm-300 p-12 text-center">
+        <p class="text-ink-300">尚未创建 Agent。前往 <a href="/relays" class="text-brand-500 hover:underline">账户管理</a> 添加。</p>
+      </div>
+
+<%~ include('partials/page-close', it) %>

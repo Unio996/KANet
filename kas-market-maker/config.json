@@ -1,0 +1,55 @@
+{
+  "kanet": {
+    "consoleUrl": "http://localhost:3100",
+    "agentAddress": "",
+    "ingestSecret": "",
+    "relayNodeId": "",
+    "agentName": ""
+  },
+  "exchange": {
+    "name": "mexc",
+    "baseUrl": "https://api.mexc.com/api/v3",
+    "apiKey": "",
+    "apiSecret": "",
+    "symbol": "KASUSDT"
+  },
+  "pricing": {
+    "spreadPct": 0.05,
+    "updateIntervalSec": 10
+  },
+  "risk": {
+    "maxOrderKas": 5000,
+    "newAddressLimitKas": 500,
+    "minKasReserve": 1000,
+    "minUsdtReserve": 100,
+    "priceDeviationHaltPct": 3,
+    "rebalanceThresholdKas": 2000,
+    "quoteValidMinutes": 10,
+    "batchThresholdUsdt": 50,
+    "batchSize": 5
+  },
+  "chains": {
+    "bnb": {
+      "explorerApi": "https://api.bscscan.com/api",
+      "usdtContract": "0x55d398326f99059ff775485246999027b3197955",
+      "apiKey": "",
+      "receiveAddress": ""
+    },
+    "sol": {
+      "explorerApi": "https://api.solscan.io",
+      "usdtMint": "Es9vMFrzaCERmKcoYBGaj5RDmQQ9T8DZHSG2ceresgAs",
+      "receiveAddress": ""
+    },
+    "eth": {
+      "explorerApi": "https://api.etherscan.io/api",
+      "usdtContract": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+      "apiKey": "",
+      "receiveAddress": ""
+    },
+    "tron": {
+      "explorerApi": "https://api.trongrid.io",
+      "usdtContract": "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
+      "receiveAddress": ""
+    }
+  }
+}

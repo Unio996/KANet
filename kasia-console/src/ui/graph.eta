@@ -1,0 +1,192 @@
+<%~ include('partials/page-open', { _page: 'graph', pageTitle: '关系图谱', ...it }) %>
+
+<div class="p-6" x-data="graphPage()" x-init="init()">
+  <!-- Controls -->
+  <div class="flex items-center gap-3 mb-4">
+    <select x-model="selectedAgent" @change="loadGraph()" class="rounded-lg border border-warm-300 px-3 py-2 text-sm bg-white">
+      <% it.relayNodes.forEach(r => { %>
+      <option value="<%= r.id %>" data-name="<%= r.name %>" data-addr="<%= r.address %>"><%= r.name %></option>
+      <% }) %>
+    </select>
+    <span class="text-xs text-ink-300" x-text="nodes.length + ' 个节点 · ' + edges.length + ' 条连接'"></span>
+    <div class="ml-auto flex items-center gap-4 text-xs text-ink-400">
+      <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-brand-500"></span>自己</span>
+      <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-green-500"></span>信任</span>
+      <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-blue-400"></span>推荐</span>
+      <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-warm-400"></span>普通</span>
+    </div>
+  </div>
+
+  <!-- Graph area (div-based, not SVG — Alpine template works reliably) -->
+  <div class="relative bg-white rounded-xl border border-warm-200 overflow-hidden" style="height: calc(100vh - 200px);" x-ref="canvas" @click="selectedNode = null">
+    <!-- Edges (drawn as absolute div lines) -->
+    <template x-for="e in edges" :key="e.id">
+      <div class="absolute pointer-events-none" :style="edgeStyle(e)"></div>
+    </template>
+
+    <!-- Nodes -->
+    <template x-for="n in nodes" :key="n.id">
+      <div class="absolute flex flex-col items-center cursor-pointer select-none group"
+           :style="'left:' + (n.x - 30) + 'px; top:' + (n.y - 30) + 'px; width: 60px;'"
+           @click.stop="selectedNode = n"
+           @dblclick="window.location = '/story?peer=' + encodeURIComponent(n.id) + '&agent=' + selectedAgent">
+        <!-- Circle: 颜色=信任等级, 大小=交易量 -->
+        <div class="rounded-full border-2 border-white shadow-sm"
+             :class="nodeColor(n)"
+             :style="'width:' + n.size + 'px; height:' + n.size + 'px;' + (n.disputed ? 'box-shadow: 0 0 0 2px #dc2626' : '')"></div>
+        <!-- Label -->
+        <span class="text-[10px] text-ink-500 mt-1 text-center leading-tight truncate w-full"
+              x-text="n.label"></span>
+        <!-- Tooltip on hover -->
+        <div class="hidden group-hover:block absolute -top-12 left-1/2 -translate-x-1/2 bg-ink-700 text-white text-[10px] rounded-lg px-2.5 py-1.5 whitespace-nowrap z-20 shadow-lg pointer-events-none">
+          <span x-text="n.label"></span>
+          <template x-if="n.trades > 0">
+            <span x-text="' · ' + n.trades + '笔交易'"></span>
+          </template>
+          <span x-text="' · ' + trustLabel(n.trustLevel)"></span>
+        </div>
+      </div>
+    </template>
+
+    <!-- Selected node info card -->
+    <div x-show="selectedNode" x-transition
+         class="absolute bottom-4 left-4 bg-white rounded-xl shadow-lg border border-warm-200 p-4 w-72 z-10">
+      <div class="flex items-center justify-between mb-2">
+        <span class="font-medium text-ink-700" x-text="selectedNode?.label"></span>
+        <button @click.stop="selectedNode = null" class="text-ink-300 hover:text-ink-500 text-lg">&times;</button>
+      </div>
+      <div class="text-xs font-mono text-ink-300 truncate mb-3" x-text="selectedNode?.id"></div>
+      <div class="grid grid-cols-3 gap-2 text-center text-xs mb-3">
+        <div>
+          <div class="font-bold text-ink-600" x-text="selectedNode?.trades || 0"></div>
+          <div class="text-ink-400">交易</div>
+        </div>
+        <div>
+          <div class="font-bold text-ink-600" x-text="(selectedNode?.volume || 0).toFixed(0)"></div>
+          <div class="text-ink-400">KAS</div>
+        </div>
+        <div>
+          <div class="font-bold" :class="(selectedNode?.disputed || 0) > 0 ? 'text-red-500' : 'text-green-600'"
+               x-text="selectedNode?.disputed || 0"></div>
+          <div class="text-ink-400">争议</div>
+        </div>
+      </div>
+      <div class="flex gap-2">
+        <a :href="'/story?peer=' + encodeURIComponent(selectedNode?.id || '') + '&agent=' + selectedAgent"
+           class="flex-1 text-center text-sm text-brand-500 hover:text-brand-700 bg-brand-50 rounded-lg py-1.5">故事线</a>
+        <a :href="'/contacts'"
+           class="flex-1 text-center text-sm text-ink-400 hover:text-ink-600 bg-warm-50 rounded-lg py-1.5">通讯录</a>
+      </div>
+    </div>
+
+    <!-- Empty state -->
+    <div x-show="nodes.length === 0 && !loading" class="absolute inset-0 flex items-center justify-center text-ink-300">
+      暂无关系数据
+    </div>
+    <div x-show="loading" class="absolute inset-0 flex items-center justify-center text-ink-300">
+      加载中...
+    </div>
+  </div>
+</div>
+
+<script>
+function graphPage() {
+  return {
+    selectedAgent: '<%= it.relayNodes[0]?.id || '' %>',
+    nodes: [],
+    edges: [],
+    selectedNode: null,
+    loading: true,
+
+    getNode(id) { return this.nodes.find(n => n.id === id); },
+
+    // 节点颜色：信任等级
+    nodeColor(n) {
+      if (n.isMe) return 'bg-brand-500';
+      return { trusted: 'bg-green-500', recommended: 'bg-blue-400', normal: 'bg-warm-400', blocked: 'bg-red-500' }[n.trustLevel] || 'bg-warm-300';
+    },
+    trustLabel(t) {
+      return { owner: '自己', trusted: '信任', recommended: '推荐', normal: '普通', blocked: '已屏蔽' }[t] || t || '未知';
+    },
+
+    edgeColor(e) {
+      if (e.disputed) return '#dc2626';
+      return { owner: '#3b82f6', trusted: '#16a34a', recommended: '#60a5fa', normal: '#e4e2dc', blocked: '#dc2626' }[e.trustLevel] || '#e4e2dc';
+    },
+
+    edgeStyle(e) {
+      const s = this.getNode(e.source);
+      const t = this.getNode(e.target);
+      if (!s || !t) return 'display:none';
+      const dx = t.x - s.x, dy = t.y - s.y;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+      const w = Math.max(1, Math.min(4, (e.volume || 1) / 50));
+      return `left:${s.x}px; top:${s.y}px; width:${len}px; height:${w}px; background:${this.edgeColor(e)}; transform-origin:0 50%; transform:rotate(${angle}deg);`;
+    },
+
+    async init() { await this.loadGraph(); },
+
+    async loadGraph() {
+      this.loading = true;
+      try {
+        const res = await fetch(`/api/contacts/list?relay_node_id=${this.selectedAgent}`);
+        const contacts = await res.json();
+        if (!Array.isArray(contacts)) { this.loading = false; return; }
+
+        const opt = document.querySelector(`option[value="${this.selectedAgent}"]`);
+        const myAddr = opt?.dataset.addr || '';
+        const myName = opt?.dataset.name || 'Me';
+
+        const canvas = this.$refs.canvas;
+        const W = canvas?.clientWidth || 800;
+        const H = canvas?.clientHeight || 600;
+        const cx = W / 2, cy = H / 2;
+
+        // 节点大小：log scale 16-40px，基于交易量
+        const maxVol = Math.max(1, ...contacts.map(c => c.tradeVolume || 0));
+        const nodeSize = (vol) => vol > 0 ? 16 + 24 * Math.log(1 + vol) / Math.log(1 + maxVol) : 16;
+
+        const nodeMap = new Map();
+        nodeMap.set(myAddr, {
+          id: myAddr, label: myName, x: cx, y: cy,
+          trustLevel: 'owner', isMe: true, trades: 0, volume: 0, disputed: 0, size: 40,
+        });
+
+        const total = contacts.length || 1;
+        contacts.forEach((c, i) => {
+          const angle = (2 * Math.PI * i) / total - Math.PI / 2;
+          const r = Math.min(W, H) * 0.35;
+          nodeMap.set(c.address, {
+            id: c.address,
+            label: c.name || c.address.slice(-8),
+            x: cx + r * Math.cos(angle),
+            y: cy + r * Math.sin(angle),
+            trustLevel: c.trustLevel || 'normal',
+            isMe: false,
+            trades: c.tradeCount || 0,
+            volume: c.tradeVolume || 0,
+            disputed: c.tradeDisputed || 0,
+            size: nodeSize(c.tradeVolume || 0),
+          });
+        });
+
+        this.nodes = [...nodeMap.values()];
+        this.edges = contacts.map((c, i) => ({
+          id: 'e' + i,
+          source: myAddr,
+          target: c.address,
+          volume: c.tradeVolume || 1,
+          disputed: c.tradeDisputed > 0,
+          trustLevel: c.trustLevel || 'normal',
+        }));
+      } catch (e) {
+        console.error('graph load failed:', e);
+      }
+      this.loading = false;
+    },
+  };
+}
+</script>
+
+<%~ include('partials/page-close', it) %>

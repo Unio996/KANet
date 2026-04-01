@@ -2,10 +2,16 @@
 
 ## 你必须先读这些文档
 
-1. **系统架构** → `D:\Anthropic\docs\kanet-system-architecture.md`
+1. **开发者指南（唯一权威文档）** → `D:\Anthropic\docs\DEVELOPER-GUIDE.md`
+   - 必须先读完再动任何代码。全系统 11 章：架构、消息管道、Mind、交易、Health、UI、市场(8源)、致命陷阱
+   - 持续更新（最近：2026-04-01）。有改动就在此文件上更新，不新建 dev-*.md
+
+2. **Alpha 达标标准** → `D:\Anthropic\docs\ALPHA-CHECKLIST.md`
+
+3. **系统架构（详细版）** → `D:\Anthropic\docs\kanet-system-architecture.md`
    - 五大模块职责、25张表读写映射、数据流、已知裂缝、API 清单
 
-2. **数据架构危机** → `C:\Users\Y\.claude\projects\D--Anthropic\memory\kanet-data-architecture-crisis.md`
+4. **数据架构危机** → `C:\Users\Y\.claude\projects\D--Anthropic\memory\kanet-data-architecture-crisis.md`
    - Scout/Relay 双写问题、identity 断链路、catch-up 半盲
 
 3. **最新会话总结** → `C:\Users\Y\.claude\projects\D--Anthropic\memory\kanet-session-0325.md`

@@ -1,0 +1,263 @@
+<%~ include('partials/page-open', { _page: 'market-overview', pageTitle: '市场概览', ...it }) %>
+
+<div class="p-6" x-data="overviewPage()" x-init="init()">
+
+  <!-- Agent 市场综述 -->
+  <div class="card card-flush overflow-hidden mb-5" :class="brief ? 'border-brand-200' : ''">
+    <div class="px-5 py-3.5 border-b border-warm-200 flex items-center justify-between">
+      <span class="text-xs font-medium text-ink-300 uppercase tracking-wider">Agent 市场综述</span>
+      <button @click="loadBrief()" class="btn btn-sm btn-ghost text-xs" :disabled="briefLoading"
+        x-text="briefLoading ? '生成中...' : brief ? '刷新' : '生成综述'"></button>
+    </div>
+    <div class="px-5 py-4">
+      <template x-if="briefLoading && !brief">
+        <div class="space-y-2">
+          <div class="skeleton" style="height:14px;width:90%;"></div>
+          <div class="skeleton" style="height:14px;width:75%;"></div>
+          <div class="skeleton" style="height:14px;width:60%;"></div>
+        </div>
+      </template>
+      <template x-if="brief">
+        <div>
+          <p class="text-sm text-ink-600 leading-relaxed" x-text="brief"></p>
+          <div class="text-[10px] text-ink-300 mt-2" x-text="briefAgent ? '— ' + briefAgent + (briefCached ? '（缓存）' : '') : ''"></div>
+        </div>
+      </template>
+      <template x-if="!brief && !briefLoading">
+        <p class="text-xs text-ink-300">点击"生成综述"让 Agent 分析当前市场</p>
+      </template>
+    </div>
+  </div>
+
+  <!-- 今日经济事件 -->
+  <template x-if="calendarToday?.length > 0">
+    <div class="card card-compact mb-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="text-xs font-medium text-ink-700">今日事件</span>
+        <span class="text-[10px] text-ink-300" x-text="calendarToday.length + ' 项'"></span>
+        <button @click="showAllCalendar = !showAllCalendar" class="ml-auto text-[10px] text-brand-500 hover:text-brand-700" x-text="showAllCalendar ? '收起' : '本周全部 (' + calendarWeekCount + '项)'"></button>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <template x-for="(ev, i) in calendarToday" :key="i">
+          <span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px]"
+            :class="ev.impact === 'High' ? 'bg-red-50 text-red-700 font-medium' : ev.impact === 'Medium' ? 'bg-amber-50 text-amber-700' : 'bg-warm-100 text-ink-500'">
+            <span x-text="ev.time || '--:--'"></span>
+            <span x-text="ev.country"></span>
+            <span x-text="ev.title"></span>
+            <template x-if="ev.actual"><span class="font-bold" x-text="'→ ' + ev.actual"></span></template>
+            <template x-if="!ev.actual && ev.forecast"><span class="text-ink-400" x-text="'预期 ' + ev.forecast"></span></template>
+          </span>
+        </template>
+      </div>
+      <!-- 本周全部（展开） -->
+      <template x-if="showAllCalendar && calendarAll?.length > 0">
+        <div class="mt-3 border-t border-warm-200 pt-3 space-y-1">
+          <template x-for="(ev, i) in calendarAll" :key="'w'+i">
+            <div class="flex items-center gap-2 text-[10px] py-0.5">
+              <span class="w-16 text-ink-300" x-text="ev.date?.slice(5)"></span>
+              <span class="w-10" x-text="ev.time || '--:--'"></span>
+              <span class="w-6" :class="ev.impact === 'High' ? 'text-red-500 font-bold' : ev.impact === 'Medium' ? 'text-amber-500' : 'text-ink-300'" x-text="ev.impact === 'High' ? '!!!' : ev.impact === 'Medium' ? '!!' : '!'"></span>
+              <span class="w-8 text-ink-400" x-text="ev.country"></span>
+              <span class="flex-1 text-ink-600" x-text="ev.title"></span>
+              <span class="text-ink-300" x-text="ev.forecast ? '预期 ' + ev.forecast : ''"></span>
+              <span class="font-medium" :class="ev.actual ? 'text-ink-700' : 'text-ink-200'" x-text="ev.actual || '—'"></span>
+            </div>
+          </template>
+        </div>
+      </template>
+    </div>
+  </template>
+
+  <!-- 三栏数据面板 -->
+  <div class="grid grid-cols-3 gap-4 mb-5">
+    <!-- 加密货币 -->
+    <div class="card card-flush overflow-hidden">
+      <div class="px-4 py-2.5 border-b border-warm-200 flex items-center justify-between">
+        <span class="text-[10px] font-medium text-ink-300 uppercase">加密货币</span>
+        <a href="/trading" class="text-[10px] text-brand-500 hover:text-brand-700">交易所 &rarr;</a>
+      </div>
+      <!-- CoinGecko 大盘 -->
+      <template x-if="cryptoGlobal?.totalMarketCap">
+        <div class="px-4 py-2 bg-warm-50 border-b border-warm-200 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-ink-500">
+          <span>总市值 <strong class="text-ink-700" x-text="'$' + (cryptoGlobal.totalMarketCap / 1e12).toFixed(2) + 'T'"></strong></span>
+          <span :class="cryptoGlobal.marketCapChange24h > 0 ? 'text-green-600' : 'text-red-500'"
+            x-text="(cryptoGlobal.marketCapChange24h > 0 ? '+' : '') + cryptoGlobal.marketCapChange24h.toFixed(1) + '%'"></span>
+          <span>BTC <strong x-text="cryptoGlobal.btcDominance.toFixed(1) + '%'"></strong></span>
+          <span>ETH <strong x-text="cryptoGlobal.ethDominance.toFixed(1) + '%'"></strong></span>
+          <span class="text-ink-300" x-text="cryptoGlobal.activeCryptos.toLocaleString() + ' 币种'"></span>
+        </div>
+      </template>
+      <div class="divide-y divide-warm-200">
+        <template x-for="[sym, d] in Object.entries(crypto)" :key="sym">
+          <div class="px-4 py-2.5 flex items-center justify-between">
+            <span class="text-xs font-medium text-ink-600" x-text="sym"></span>
+            <div class="text-right">
+              <div class="text-sm font-bold text-ink-700" x-text="sym === 'BTC' ? '$' + Math.round(d.price).toLocaleString() : '$' + d.price"></div>
+              <div class="text-[10px]" :class="d.change24h > 0 ? 'text-green-600' : d.change24h < 0 ? 'text-red-500' : 'text-ink-300'"
+                x-text="(d.change24h > 0 ? '+' : '') + (d.change24h * 100)?.toFixed(1) + '%'"></div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- 股票指数 -->
+    <div class="card card-flush overflow-hidden">
+      <div class="px-4 py-2.5 border-b border-warm-200 flex items-center justify-between">
+        <span class="text-[10px] font-medium text-ink-300 uppercase">自选股</span>
+        <a href="/stocks" class="text-[10px] text-brand-500 hover:text-brand-700">详情 &rarr;</a>
+      </div>
+      <div class="divide-y divide-warm-200">
+        <template x-for="[sym, d] in Object.entries(stocks)" :key="sym">
+          <div class="px-4 py-2.5 flex items-center justify-between">
+            <span class="text-xs font-medium text-ink-600" x-text="sym"></span>
+            <div class="text-right">
+              <div class="text-sm font-bold text-ink-700" x-text="'$' + d.price?.toFixed(2)"></div>
+              <div class="text-[10px]" :class="d.change24h > 0 ? 'text-green-600' : d.change24h < 0 ? 'text-red-500' : 'text-ink-300'"
+                x-text="d.change24h != null ? (d.change24h > 0 ? '+' : '') + d.change24h.toFixed(2) + '%' : '--'"></div>
+            </div>
+          </div>
+        </template>
+        <div x-show="Object.keys(stocks).length === 0" class="px-4 py-3 text-xs text-ink-300 text-center">暂无自选股</div>
+      </div>
+    </div>
+
+    <!-- 大宗商品 -->
+    <div class="card card-flush overflow-hidden">
+      <div class="px-4 py-2.5 border-b border-warm-200">
+        <span class="text-[10px] font-medium text-ink-300 uppercase">大宗商品</span>
+      </div>
+      <div class="divide-y divide-warm-200">
+        <template x-for="[name, d] in Object.entries(commodities)" :key="name">
+          <div class="px-4 py-2.5 flex items-center justify-between">
+            <span class="text-xs font-medium text-ink-600" x-text="name"></span>
+            <div class="text-right">
+              <div class="text-sm font-bold text-ink-700" x-text="'$' + d.price?.toFixed(1)"></div>
+              <div class="text-[10px]" :class="d.change24h > 0 ? 'text-green-600' : d.change24h < 0 ? 'text-red-500' : 'text-ink-300'"
+                x-text="d.change24h != null ? (d.change24h > 0 ? '+' : '') + d.change24h.toFixed(2) + '%' : '--'"></div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <!-- 情绪指标栏 -->
+  <div class="grid grid-cols-3 gap-4 mb-5">
+    <!-- 恐贪指数 -->
+    <div class="card">
+      <div class="text-[10px] text-ink-300 uppercase mb-2">恐贪指数</div>
+      <template x-if="sentiment">
+        <div>
+          <div class="flex items-center gap-3">
+            <span class="text-2xl font-bold" :class="sentiment.value < 25 ? 'text-red-500' : sentiment.value > 75 ? 'text-green-600' : 'text-ink-600'"
+              x-text="sentiment.value"></span>
+            <span class="text-xs" :class="sentiment.value < 25 ? 'text-red-500' : sentiment.value > 75 ? 'text-green-600' : 'text-ink-400'"
+              x-text="sentiment.label"></span>
+          </div>
+          <div class="mt-2 h-2 bg-warm-200 rounded-full overflow-hidden">
+            <div class="h-full rounded-full transition-all"
+              :class="sentiment.value < 25 ? 'bg-red-500' : sentiment.value < 50 ? 'bg-amber-500' : sentiment.value < 75 ? 'bg-green-400' : 'bg-green-600'"
+              :style="'width:' + sentiment.value + '%'"></div>
+          </div>
+        </div>
+      </template>
+      <span x-show="!sentiment" class="text-xs text-ink-300">--</span>
+    </div>
+
+    <!-- 资金费率 -->
+    <div class="card">
+      <div class="text-[10px] text-ink-300 uppercase mb-2">BTC 资金费率</div>
+      <template x-if="funding?.BTC">
+        <div>
+          <div class="text-2xl font-bold" :class="funding.BTC.rate > 0 ? 'text-green-600' : funding.BTC.rate < 0 ? 'text-red-500' : 'text-ink-600'"
+            x-text="(funding.BTC.rate * 100).toFixed(4) + '%'"></div>
+          <div class="text-xs mt-1" :class="funding.BTC.sentiment === 'longs_pay' ? 'text-amber-600' : funding.BTC.sentiment === 'shorts_pay' ? 'text-blue-600' : 'text-ink-400'"
+            x-text="funding.BTC.sentiment === 'longs_pay' ? '多方付费（偏乐观）' : funding.BTC.sentiment === 'shorts_pay' ? '空方付费（偏悲观）' : '中性'"></div>
+        </div>
+      </template>
+      <span x-show="!funding?.BTC" class="text-xs text-ink-300">--</span>
+    </div>
+
+    <!-- 预测市场热门 -->
+    <div class="card">
+      <div class="text-[10px] text-ink-300 uppercase mb-2 flex items-center justify-between">
+        <span>预测市场</span>
+        <a href="/predictions" class="text-brand-500 hover:text-brand-700 normal-case">详情 &rarr;</a>
+      </div>
+      <template x-if="predictions.length > 0">
+        <div class="space-y-2">
+          <template x-for="(m, i) in predictions.slice(0, 2)" :key="i">
+            <div>
+              <div class="text-xs text-ink-600 leading-snug truncate" x-text="m.question"></div>
+              <div class="text-[10px] text-ink-400" x-text="m.outcome || ''"></div>
+            </div>
+          </template>
+        </div>
+      </template>
+      <span x-show="predictions.length === 0" class="text-xs text-ink-300">--</span>
+    </div>
+  </div>
+
+  <!-- 数据来源 -->
+  <div class="text-[10px] text-ink-300 text-center">
+    数据来源: Forex Factory · CoinGecko · MEXC · Yahoo Finance · Polymarket · Binance Futures · Alternative.me
+    <span x-show="summary" class="ml-2" x-text="'(' + sourcesOk + '/' + sourcesTotal + ' 源在线)'"></span>
+  </div>
+</div>
+
+<script>
+function overviewPage() {
+  return {
+    crypto: {}, stocks: {}, commodities: {},
+    sentiment: null, funding: {}, cryptoGlobal: null,
+    calendarToday: [], calendarAll: [], calendarWeekCount: 0, showAllCalendar: false,
+    predictions: [],
+    summary: '', sourcesOk: 0, sourcesTotal: 8,
+    brief: null, briefAgent: null, briefCached: false, briefLoading: false,
+
+    async init() {
+      await Promise.all([this.loadData(), this.loadBrief()]);
+      setInterval(() => this.loadData(), 5 * 60 * 1000);
+    },
+
+    async loadData() {
+      try {
+        const res = await fetch('/api/market/overview');
+        const d = await res.json();
+        this.crypto = d.crypto?.data || {};
+        this.stocks = d.stocks?.data || {};
+        this.commodities = d.commodities?.data || {};
+        this.sentiment = d.sentiment?.data?.fearGreed || null;
+        this.funding = d.funding?.data || {};
+        this.cryptoGlobal = d.cryptoGlobal?.data || null;
+        this.calendarToday = d.calendar?.data?.today || [];
+        this.calendarAll = d.calendar?.data?.events || [];
+        this.calendarWeekCount = d.calendar?.data?.totalThisWeek || 0;
+        this.summary = d.summary || '';
+        this.sourcesOk = d.sourcesOk || 0;
+        this.sourcesTotal = d.sourcesTotal || 8;
+      } catch {}
+      try {
+        const pRes = await fetch('/api/predictions/markets');
+        const pData = await pRes.json();
+        this.predictions = pData.data || [];
+      } catch {}
+    },
+
+    async loadBrief() {
+      this.briefLoading = true;
+      try {
+        const res = await fetch('/api/market/brief');
+        const d = await res.json();
+        this.brief = d.text || null;
+        this.briefAgent = d.agent || null;
+        this.briefCached = d.cached || false;
+      } catch {}
+      this.briefLoading = false;
+    },
+  };
+}
+</script>
+
+<%~ include('partials/page-close', it) %>

@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="<%= it.t.html_lang %>" dir="<%= it.dir %>">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title><%= it.t.page_dashboard %> — KANet Console</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="flex h-screen bg-gray-100 font-sans">
+
+  <!-- Sidebar -->
+  <aside class="w-56 bg-gray-900 text-gray-100 flex flex-col flex-shrink-0">
+    <div class="px-4 py-4 border-b border-gray-700 flex items-center space-x-3">
+      <img src="/public/kanet-logo.png" alt="KANet" class="h-8 w-8 object-contain flex-shrink-0" />
+      <span class="text-base font-bold tracking-wide text-white leading-tight">KANet<br/><span class="text-xs font-normal text-gray-400">Console</span></span>
+    </div>
+    <nav class="flex-1 py-4 space-y-1 px-3 overflow-y-auto">
+      <a href="/agent" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
+        <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        我的 Agent
+      </a>
+      <a href="/conversations" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
+        <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>
+        会话
+      </a>
+      <a href="/identities" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
+        <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+        通讯录
+      </a>
+      <a href="/network" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
+        <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/></svg>
+        网络
+      </a>
+      <a href="/chat" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
+        <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+        聊天
+      </a>
+      <div class="pt-4 border-t border-gray-700 mt-4 space-y-1">
+        <a href="/events" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
+          <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+          活动日志
+        </a>
+        <div class="flex items-center px-3 py-2 text-xs font-medium text-gray-500 uppercase tracking-wider">
+          <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          系统设置
+        </div>
+        <a href="/relays" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors pl-9">
+          <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"/></svg>
+          账户管理
+        </a>
+        <a href="/adapters" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors pl-9">
+          <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          AI 引擎
+        </a>
+      </div>
+    </nav>
+    <div class="px-3 pb-2">
+      <form method="POST" action="/lang">
+        <select name="lang" onchange="this.form.submit()"
+          class="w-full bg-gray-800 text-gray-200 text-xs rounded px-2 py-1.5 border border-gray-700 focus:outline-none cursor-pointer">
+          <% Object.entries(it.langs).forEach(function([code, label]) { %>
+          <option value="<%= code %>" <%= it.lang === code ? 'selected' : '' %>><%= label %></option>
+          <% }) %>
+        </select>
+      </form>
+    </div>
+    <div class="px-5 py-3 border-t border-gray-700 text-xs text-gray-500">
+      KANet Console v0.1
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <div class="flex-1 flex flex-col overflow-hidden">
+    <!-- Top bar -->
+    <header class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between flex-shrink-0">
+      <h1 class="text-xl font-semibold text-gray-800"><%= it.t.page_dashboard %></h1>
+      <span class="text-sm text-gray-500">KANet Console</span>
+    </header>
+
+    <!-- Page content -->
+    <main class="flex-1 overflow-y-auto p-6">
+
+      <!-- Stats cards -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-5">
+          <p class="text-xs font-medium text-gray-500 uppercase tracking-wider"><%= it.t.stat_total_convs %></p>
+          <p class="mt-2 text-3xl font-bold text-gray-900"><%= it.stats.total %></p>
+        </div>
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-5">
+          <p class="text-xs font-medium text-gray-500 uppercase tracking-wider"><%= it.t.stat_active_convs %></p>
+          <p class="mt-2 text-3xl font-bold text-green-600"><%= it.stats.active %></p>
+        </div>
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-5">
+          <p class="text-xs font-medium text-gray-500 uppercase tracking-wider"><%= it.t.stat_today_msgs %></p>
+          <p class="mt-2 text-3xl font-bold text-blue-600"><%= it.stats.todayMsgs %></p>
+        </div>
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-5">
+          <p class="text-xs font-medium text-gray-500 uppercase tracking-wider"><%= it.t.stat_today_replies %></p>
+          <p class="mt-2 text-3xl font-bold text-purple-600"><%= it.stats.todayReplies %></p>
+        </div>
+      </div>
+
+      <!-- Event stats -->
+      <div class="grid grid-cols-3 gap-4 mb-6">
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 flex items-center space-x-4">
+          <div class="flex-shrink-0 w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center">
+            <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          </div>
+          <div>
+            <p class="text-xs text-gray-500"><%= it.t.stat_total_events %></p>
+            <p class="text-xl font-bold text-gray-800"><%= it.eventStats.total %></p>
+          </div>
+        </div>
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 flex items-center space-x-4">
+          <div class="flex-shrink-0 w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
+            <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          </div>
+          <div>
+            <p class="text-xs text-gray-500"><%= it.t.level_error %></p>
+            <p class="text-xl font-bold text-red-600"><%= it.eventStats.errors %></p>
+          </div>
+        </div>
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 flex items-center space-x-4">
+          <div class="flex-shrink-0 w-10 h-10 rounded-full bg-yellow-100 flex items-center justify-center">
+            <svg class="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+          </div>
+          <div>
+            <p class="text-xs text-gray-500"><%= it.t.level_warn %></p>
+            <p class="text-xl font-bold text-yellow-600"><%= it.eventStats.warns %></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+
+        <!-- Recent Events -->
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200">
+          <div class="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
+            <h2 class="text-sm font-semibold text-gray-700"><%= it.t.recent_events %></h2>
+            <a href="/events" class="text-xs text-blue-600 hover:text-blue-800"><%= it.t.view_all %></a>
+          </div>
+          <div class="divide-y divide-gray-100">
+            <% if (!it.recentEvents || it.recentEvents.length === 0) { %>
+            <p class="px-5 py-8 text-center text-sm text-gray-400"><%= it.t.no_events %></p>
+            <% } else { %>
+            <% it.recentEvents.forEach(function(ev) { %>
+            <div class="px-5 py-3 flex items-start space-x-3">
+              <% if (ev.level === 'error') { %>
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700 flex-shrink-0 mt-0.5"><%= it.t.level_error %></span>
+              <% } else if (ev.level === 'warn') { %>
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-700 flex-shrink-0 mt-0.5"><%= it.t.level_warn %></span>
+              <% } else if (ev.level === 'info') { %>
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 flex-shrink-0 mt-0.5"><%= it.t.level_info %></span>
+              <% } else { %>
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 flex-shrink-0 mt-0.5"><%= it.t.level_debug %></span>
+              <% } %>
+              <div class="flex-1 min-w-0">
+                <p class="text-sm text-gray-800 truncate"><%= ev.summary %></p>
+                <p class="text-xs text-gray-400 mt-0.5"><%= ev.source %> · <%= it.relativeTime(ev.created_at) %></p>
+              </div>
+            </div>
+            <% }) %>
+            <% } %>
+          </div>
+        </div>
+
+        <!-- Recent Conversations -->
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200">
+          <div class="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
+            <h2 class="text-sm font-semibold text-gray-700"><%= it.t.recent_convs %></h2>
+            <a href="/conversations" class="text-xs text-blue-600 hover:text-blue-800"><%= it.t.view_all %></a>
+          </div>
+          <div class="divide-y divide-gray-100">
+            <% if (!it.stats.recentConvs || it.stats.recentConvs.length === 0) { %>
+            <p class="px-5 py-8 text-center text-sm text-gray-400"><%= it.t.no_convs %></p>
+            <% } else { %>
+            <% it.stats.recentConvs.forEach(function(conv) { %>
+            <a href="/conversations/<%= conv.id %>" class="block px-5 py-3 hover:bg-gray-50 transition-colors">
+              <div class="flex items-center justify-between">
+                <div class="min-w-0 flex-1">
+                  <p class="text-sm font-medium text-gray-800 truncate"><%= conv.remote_name || conv.remote_address %></p>
+                  <p class="text-xs text-gray-400 mt-0.5 truncate font-mono"><%= conv.remote_address %></p>
+                </div>
+                <div class="ml-4 flex-shrink-0 text-right">
+                  <% if (conv.status === 'active') { %>
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700"><%= it.t.status_active %></span>
+                  <% } else { %>
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600"><%= conv.status %></span>
+                  <% } %>
+                  <p class="text-xs text-gray-400 mt-1"><%= it.relativeTime(conv.last_message_at) %></p>
+                </div>
+              </div>
+            </a>
+            <% }) %>
+            <% } %>
+          </div>
+        </div>
+
+      </div>
+    </main>
+  </div>
+
+</body>
+</html>

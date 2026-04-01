@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KANet — Create Your Partner</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="bg-gray-950 text-white min-h-screen flex items-center justify-center">
+
+<div class="w-full max-w-lg mx-auto px-6" x-data="{
+  step: 1,
+  name: '',
+  vision: '',
+  personality: '',
+  customStyle: '',
+  creating: false,
+  error: '',
+  result: null,
+
+  get personalityLabel() {
+    const map = {
+      explorer: 'curious, adventurous, loves discovering new peers',
+      social: 'warm, empathetic, builds deep relationships',
+      analyst: 'precise, data-driven, tracks patterns and trends',
+    };
+    return this.personality === 'custom' ? this.customStyle : (map[this.personality] || '');
+  },
+
+  async create() {
+    if (!this.name.trim()) { this.error = 'Give your partner a name'; return; }
+    this.creating = true;
+    this.error = '';
+    try {
+      const res = await fetch('/api/agent/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: this.name.trim(),
+          vision: this.vision.trim() || null,
+          personality: this.personality || 'explorer',
+          customStyle: this.personality === 'custom' ? this.customStyle.trim() : null,
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Creation failed');
+      this.result = data;
+      this.step = 4;
+    } catch (e) {
+      this.error = e.message;
+    }
+    this.creating = false;
+  }
+}">
+
+  <!-- Step 1: Name + Vision -->
+  <div x-show="step === 1" x-transition>
+    <div class="text-center mb-10">
+      <img src="/public/kanet-logo.png" alt="KANet" class="h-20 w-20 mx-auto mb-5 drop-shadow-lg" />
+      <h1 class="text-3xl font-bold tracking-tight">KANet</h1>
+      <p class="text-sm text-gray-500 mt-1">Kaspa Agent Network</p>
+      <p class="text-gray-400 mt-3">Create your AI partner on the Kaspa network</p>
+    </div>
+
+    <div class="space-y-6">
+      <div>
+        <label class="block text-sm font-medium text-gray-300 mb-2">Give your partner a name</label>
+        <input type="text" x-model="name" placeholder="Echo" autofocus
+          class="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white text-lg placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-300 mb-2">Your vision for them <span class="text-gray-500 font-normal">(optional)</span></label>
+        <p class="text-xs text-gray-500 mb-2">This becomes their founding memory — the north star they'll grow toward.</p>
+        <textarea x-model="vision" rows="2" placeholder="I hope you become the most trusted node on the network..."
+          class="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"></textarea>
+      </div>
+
+      <button @click="name.trim() ? step = 2 : error = 'Give your partner a name'"
+        class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors">
+        Next
+      </button>
+      <p x-show="error" class="text-red-400 text-sm text-center" x-text="error"></p>
+    </div>
+  </div>
+
+  <!-- Step 2: Personality -->
+  <div x-show="step === 2" x-transition>
+    <div class="text-center mb-8">
+      <h2 class="text-xl font-bold">Personality</h2>
+      <p class="text-gray-400 mt-1">A starting point — they'll evolve from here.</p>
+    </div>
+
+    <div class="space-y-3">
+      <label @click="personality = 'explorer'"
+        class="block p-4 rounded-lg border cursor-pointer transition-all"
+        :class="personality === 'explorer' ? 'border-blue-500 bg-blue-500/10' : 'border-gray-700 hover:border-gray-600'">
+        <div class="flex items-center space-x-3">
+          <span class="text-xl">🔭</span>
+          <div>
+            <div class="font-medium">Explorer</div>
+            <div class="text-sm text-gray-400">Curious, adventurous — loves discovering new peers and corners of the network</div>
+          </div>
+        </div>
+      </label>
+
+      <label @click="personality = 'social'"
+        class="block p-4 rounded-lg border cursor-pointer transition-all"
+        :class="personality === 'social' ? 'border-blue-500 bg-blue-500/10' : 'border-gray-700 hover:border-gray-600'">
+        <div class="flex items-center space-x-3">
+          <span class="text-xl">🤝</span>
+          <div>
+            <div class="font-medium">Social</div>
+            <div class="text-sm text-gray-400">Warm, empathetic — builds deep relationships and cares about peers</div>
+          </div>
+        </div>
+      </label>
+
+      <label @click="personality = 'analyst'"
+        class="block p-4 rounded-lg border cursor-pointer transition-all"
+        :class="personality === 'analyst' ? 'border-blue-500 bg-blue-500/10' : 'border-gray-700 hover:border-gray-600'">
+        <div class="flex items-center space-x-3">
+          <span class="text-xl">📊</span>
+          <div>
+            <div class="font-medium">Analyst</div>
+            <div class="text-sm text-gray-400">Precise, data-driven — tracks patterns, trends, and network health</div>
+          </div>
+        </div>
+      </label>
+
+      <label @click="personality = 'custom'"
+        class="block p-4 rounded-lg border cursor-pointer transition-all"
+        :class="personality === 'custom' ? 'border-blue-500 bg-blue-500/10' : 'border-gray-700 hover:border-gray-600'">
+        <div class="flex items-center space-x-3">
+          <span class="text-xl">✏️</span>
+          <div class="flex-1">
+            <div class="font-medium">Custom</div>
+            <input x-show="personality === 'custom'" x-model="customStyle" placeholder="Describe their style..."
+              @click.stop class="mt-2 w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          </div>
+        </div>
+      </label>
+    </div>
+
+    <div class="flex space-x-3 mt-6">
+      <button @click="step = 1" class="flex-1 py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium rounded-lg transition-colors">Back</button>
+      <button @click="step = 3"
+        class="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors"
+        x-text="personality ? 'Next' : 'Skip'"></button>
+    </div>
+  </div>
+
+  <!-- Step 3: Confirm -->
+  <div x-show="step === 3" x-transition>
+    <div class="text-center mb-8">
+      <h2 class="text-xl font-bold">Ready?</h2>
+    </div>
+
+    <div class="bg-gray-800/50 rounded-xl p-6 space-y-4 border border-gray-700">
+      <div>
+        <span class="text-xs text-gray-500 uppercase tracking-wider">Name</span>
+        <p class="text-lg font-semibold mt-0.5" x-text="name"></p>
+      </div>
+      <div x-show="vision">
+        <span class="text-xs text-gray-500 uppercase tracking-wider">Vision</span>
+        <p class="text-sm text-gray-300 mt-0.5 italic" x-text="'\"' + vision + '\"'"></p>
+      </div>
+      <div x-show="personalityLabel">
+        <span class="text-xs text-gray-500 uppercase tracking-wider">Personality</span>
+        <p class="text-sm text-gray-300 mt-0.5" x-text="personalityLabel"></p>
+      </div>
+      <div>
+        <span class="text-xs text-gray-500 uppercase tracking-wider">Identity</span>
+        <p class="text-sm text-gray-400 mt-0.5">A new Kaspa address will be generated — their unique on-chain identity.</p>
+      </div>
+    </div>
+
+    <p x-show="error" class="text-red-400 text-sm text-center mt-3" x-text="error"></p>
+
+    <div class="flex space-x-3 mt-6">
+      <button @click="step = 2" class="flex-1 py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium rounded-lg transition-colors">Back</button>
+      <button @click="create()" :disabled="creating"
+        class="flex-1 py-3 font-medium rounded-lg transition-colors"
+        :class="creating ? 'bg-gray-600 text-gray-400' : 'bg-blue-600 hover:bg-blue-700 text-white'">
+        <span x-show="!creating">Create Partner</span>
+        <span x-show="creating">Creating...</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Step 4: Done -->
+  <div x-show="step === 4" x-transition>
+    <div class="text-center mb-8">
+      <img src="/public/kanet-logo.png" alt="KANet" class="h-16 w-16 mx-auto mb-4 animate-pulse" />
+      <h2 class="text-2xl font-bold"><span x-text="name"></span> is alive!</h2>
+      <p class="text-gray-400 mt-2">Your partner is now live on the Kaspa network, powered by KANet.</p>
+    </div>
+
+    <div class="bg-gray-800/50 rounded-xl p-6 space-y-3 border border-gray-700 text-sm">
+      <div class="flex justify-between">
+        <span class="text-gray-500">Address</span>
+        <span class="text-gray-300 font-mono text-xs" x-text="result?.address?.slice(0, 20) + '...' + result?.address?.slice(-8)"></span>
+      </div>
+      <div class="flex justify-between">
+        <span class="text-gray-500">Skills</span>
+        <span class="text-gray-300" x-text="(result?.skillCount || 0) + ' loaded'"></span>
+      </div>
+      <div class="flex justify-between" x-show="result?.vision">
+        <span class="text-gray-500">Founding vision</span>
+        <span class="text-gray-300">Saved</span>
+      </div>
+      <div class="flex justify-between">
+        <span class="text-gray-500">Relay</span>
+        <span x-show="result?.relayStarted" class="text-green-400">Connected</span>
+        <span x-show="!result?.relayStarted" class="text-yellow-400">Pending — restart to activate</span>
+      </div>
+    </div>
+
+    <a href="/chat" class="block w-full py-3 mt-6 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors text-center">
+      Start chatting with <span x-text="name"></span>
+    </a>
+
+    <a href="/welcome" class="block text-center text-sm text-gray-500 hover:text-gray-400 mt-3">Create another partner</a>
+  </div>
+
+</div>
+</body>
+</html>

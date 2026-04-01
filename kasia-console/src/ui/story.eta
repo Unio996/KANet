@@ -1,0 +1,163 @@
+<%~ include('partials/page-open', { _page: 'story', pageTitle: '故事线', ...it }) %>
+
+<div class="p-6" x-data="storyPage()" x-init="init()">
+  <!-- Header -->
+  <div class="flex items-center gap-3 mb-6">
+    <a href="/contacts" class="text-brand-500 hover:text-brand-700 text-sm">&larr; 返回通讯录</a>
+    <span class="text-ink-300">|</span>
+    <span class="font-medium text-ink-700" x-text="peerName || shortAddr(peerAddress)"></span>
+    <span class="badge" :class="trustLevel === 'recommended' ? 'badge-green' : trustLevel === 'owner' ? 'badge-blue' : 'badge-default'"
+          x-text="trustLevel" x-show="trustLevel"></span>
+    <select x-model="selectedAgent" @change="loadAll()" class="ml-auto rounded-lg border border-warm-300 px-3 py-2 text-sm bg-white">
+      <% it.relayNodes.forEach(r => { %>
+      <option value="<%= r.id %>"><%= r.name %></option>
+      <% }) %>
+    </select>
+  </div>
+
+  <!-- Peer summary card -->
+  <div class="bg-white rounded-xl border border-warm-200 p-4 mb-6" x-show="profile">
+    <div class="grid grid-cols-4 gap-4 text-center">
+      <div>
+        <div class="text-2xl font-bold text-ink-700" x-text="profile?.tradeCount || 0"></div>
+        <div class="text-xs text-ink-400">交易</div>
+      </div>
+      <div>
+        <div class="text-2xl font-bold text-green-600" x-text="(profile?.totalVolume || 0).toFixed(0)"></div>
+        <div class="text-xs text-ink-400">KAS 总量</div>
+      </div>
+      <div>
+        <div class="text-2xl font-bold" :class="(profile?.disputeRate || 0) > 20 ? 'text-red-500' : 'text-ink-700'"
+             x-text="(profile?.disputeRate || 0) + '%'"></div>
+        <div class="text-xs text-ink-400">争议率</div>
+      </div>
+      <div>
+        <div class="text-2xl font-bold text-ink-700" x-text="profile?.relationStatus || '—'"></div>
+        <div class="text-xs text-ink-400">状态</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="flex border-b border-warm-200 mb-4">
+    <button @click="tab='timeline'" class="px-4 py-2 text-sm font-medium border-b-2 transition-colors"
+            :class="tab==='timeline' ? 'border-brand-500 text-brand-600' : 'border-transparent text-ink-400 hover:text-ink-600'">
+      故事线
+    </button>
+    <button @click="tab='chat'" class="px-4 py-2 text-sm font-medium border-b-2 transition-colors"
+            :class="tab==='chat' ? 'border-brand-500 text-brand-600' : 'border-transparent text-ink-400 hover:text-ink-600'">
+      会话
+    </button>
+    <button @click="tab='evidence'" class="px-4 py-2 text-sm font-medium border-b-2 transition-colors"
+            :class="tab==='evidence' ? 'border-brand-500 text-brand-600' : 'border-transparent text-ink-400 hover:text-ink-600'">
+      链上凭证
+    </button>
+  </div>
+
+  <!-- Timeline tab -->
+  <div x-show="tab==='timeline'">
+    <template x-for="ep in episodes" :key="ep.episode_id">
+      <div class="mb-6">
+        <!-- Episode header -->
+        <div class="flex items-center gap-2 mb-3">
+          <span class="badge" :class="ep.status==='completed' ? 'badge-green' : ep.status==='disputed' ? 'badge-red' : ep.status==='cancelled' ? 'badge-default' : 'badge-blue'"
+                x-text="ep.status"></span>
+          <span class="text-sm font-medium text-ink-600" x-text="ep.episode_type === 'trade' ? (ep.side==='buy' ? '买入' : '卖出') + ' ' + ep.kas_amount + ' KAS @ $' + ep.price : '社交'"></span>
+          <span class="text-xs text-ink-300" x-text="relativeTime(ep.started_at)"></span>
+        </div>
+        <!-- Steps -->
+        <div class="border-l-2 border-warm-200 ml-3 pl-4 space-y-3">
+          <template x-for="(step, i) in ep.steps" :key="i">
+            <div class="relative">
+              <div class="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full border-2 border-white"
+                   :class="step.done ? 'bg-green-500' : 'bg-warm-300'"></div>
+              <div class="text-sm text-ink-600" x-text="step.label"></div>
+              <div class="text-xs text-ink-300" x-text="step.detail" x-show="step.detail"></div>
+              <div class="text-xs text-ink-400 mt-0.5" x-show="step.ts" x-text="relativeTime(step.ts)"></div>
+              <!-- Decision reason -->
+              <div x-show="step.reason" class="mt-1 bg-warm-50 border-l-2 border-brand-300 px-3 py-1.5 rounded-r text-xs text-ink-500">
+                <span class="font-medium" x-text="step.reasonSource === 'agent' ? 'Agent 决策' : step.reasonSource === 'owner' ? '人工操作' : '系统自动'"></span>:
+                <span x-text="step.reason"></span>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </template>
+    <div x-show="episodes.length === 0 && !loading" class="text-center text-ink-300 py-12">暂无交互记录</div>
+  </div>
+
+  <!-- Chat tab -->
+  <div x-show="tab==='chat'" class="space-y-2">
+    <template x-for="(msg, i) in messages" :key="i">
+      <div class="flex" :class="msg.sender === 'self' ? 'justify-end' : 'justify-start'">
+        <div class="max-w-[70%] rounded-xl px-3 py-2 text-sm"
+             :class="msg.sender === 'self' ? 'bg-brand-50 text-brand-800' : 'bg-white border border-warm-200 text-ink-600'">
+          <div x-text="msg.text"></div>
+          <div class="text-[10px] mt-1 opacity-50" x-text="msg.ts ? relativeTime(msg.ts) : ''"></div>
+        </div>
+      </div>
+    </template>
+    <div x-show="messages.length === 0 && !loading" class="text-center text-ink-300 py-12">暂无对话</div>
+  </div>
+
+  <!-- Evidence tab -->
+  <div x-show="tab==='evidence'" class="space-y-2">
+    <template x-for="(ev, i) in evidence" :key="i">
+      <div class="flex items-center gap-3 bg-white rounded-lg border border-warm-200 px-4 py-3">
+        <span class="text-lg" x-text="ev.confirmed ? '✓' : ev.failed ? '✗' : '—'"
+              :class="ev.confirmed ? 'text-green-600' : ev.failed ? 'text-red-500' : 'text-ink-300'"></span>
+        <div class="flex-1">
+          <div class="text-sm text-ink-600" x-text="ev.label"></div>
+          <div class="text-xs text-ink-300 font-mono truncate" x-text="ev.txhash || '—'" x-show="ev.txhash"></div>
+        </div>
+        <button x-show="ev.txhash" @click="copy(ev.txhash)" class="text-xs text-brand-500 hover:text-brand-700">复制</button>
+      </div>
+    </template>
+    <div x-show="evidence.length === 0 && !loading" class="text-center text-ink-300 py-12">暂无链上凭证</div>
+  </div>
+
+  <div x-show="loading" class="text-center text-ink-300 py-12">加载中...</div>
+</div>
+
+<script>
+function storyPage() {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    selectedAgent: params.get('agent') || '<%= it.relayNodes[0]?.id || '' %>',
+    peerAddress: params.get('peer') || '',
+    peerName: '',
+    trustLevel: '',
+    profile: null,
+    episodes: [],
+    messages: [],
+    evidence: [],
+    tab: 'timeline',
+    loading: true,
+
+    async init() { await this.loadAll(); },
+
+    async loadAll() {
+      this.loading = true;
+      try {
+        // Load episodes
+        const epRes = await fetch(`/api/history/episodes?relay_node_id=${this.selectedAgent}&limit=20`);
+        const allEps = await epRes.json();
+        this.episodes = allEps.filter(e => e.counterparty_addr === this.peerAddress);
+
+        // Load detail (profile + messages + evidence)
+        const detRes = await fetch(`/api/history/episode-detail?relay_node_id=${this.selectedAgent}&peer_address=${encodeURIComponent(this.peerAddress)}`);
+        const detail = await detRes.json();
+        this.profile = detail.profile || null;
+        this.peerName = detail.profile?.displayName || '';
+        this.trustLevel = detail.profile?.trustLevel || '';
+        this.messages = detail.messages || [];
+        this.evidence = detail.evidence || [];
+      } catch (e) { console.error('load failed:', e); }
+      this.loading = false;
+    },
+  };
+}
+</script>
+
+<%~ include('partials/page-close', it) %>

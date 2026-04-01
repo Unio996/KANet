@@ -1,0 +1,95 @@
+<%~ include('partials/page-open', { _page: 'handshakes', pageTitle: '握手报告', ...it }) %>
+
+<div class="p-6" x-data="hsReport()">
+  <div x-show="loading" class="text-center text-ink-300 py-16">加载中...</div>
+
+  <div x-show="!loading" class="space-y-6">
+    <!-- 顶栏：Agent 选择 + 总览 -->
+    <div class="flex items-center gap-4 mb-4">
+      <select x-model="selected" class="rounded-lg border border-warm-300 px-3 py-2 text-sm bg-white font-medium">
+        <option value="all">全部 Agent</option>
+        <template x-for="a in report" :key="a.agent_id">
+          <option :value="a.agent_id" x-text="a.agent"></option>
+        </template>
+      </select>
+      <span class="text-sm">发出: <strong x-text="cur.sent_total"></strong></span>
+      <span class="text-sm">收到: <strong x-text="cur.recv_total"></strong></span>
+      <span class="text-sm text-red-500">成本: <strong x-text="'~' + cur.cost_kas + ' KAS'"></strong></span>
+      <template x-if="cur.no_reply > 0">
+        <span class="badge badge-warning text-[9px]" x-text="cur.no_reply + ' 个无回应'"></span>
+      </template>
+    </div>
+
+    <!-- 明细表 -->
+    <div class="card card-flush overflow-hidden">
+      <table class="w-full text-xs">
+          <thead>
+            <tr class="border-b border-warm-200 bg-warm-50 text-left text-ink-400">
+              <th class="px-3 py-2">对方</th>
+              <th class="px-3 py-2 text-right">发出次数</th>
+              <th class="px-3 py-2">回应</th>
+              <th class="px-3 py-2">类型</th>
+              <th class="px-3 py-2">首次</th>
+              <th class="px-3 py-2">最近</th>
+              <th class="px-3 py-2">成本</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-warm-100">
+            <template x-for="d in cur.details" :key="d.peer">
+              <tr class="hover:bg-warm-50" :class="!d.replied && !d.is_local ? 'bg-red-50/30' : ''">
+                <td class="px-3 py-2">
+                  <div class="font-medium text-ink-700" x-text="d.name || '未命名'"></div>
+                  <div class="text-[10px] text-ink-300 font-mono cursor-copy" @click="navigator.clipboard.writeText(d.peer)" x-text="d.peer.slice(0,12) + '...' + d.peer.slice(-12)"></div>
+                </td>
+                <td class="px-3 py-2 text-right font-medium" x-text="d.count"></td>
+                <td class="px-3 py-2">
+                  <span class="badge text-[9px]" :class="d.replied ? 'badge-success' : d.is_local ? 'badge-info' : 'badge-error'"
+                    x-text="d.replied ? '已回应' : d.is_local ? '内部' : '未回应'"></span>
+                </td>
+                <td class="px-3 py-2">
+                  <span class="badge text-[9px]" :class="d.is_local ? 'badge-info' : 'badge-neutral'" x-text="d.is_local ? '内部Agent' : '外部'"></span>
+                </td>
+                <td class="px-3 py-2 text-ink-400" x-text="d.first?.slice(5,16)?.replace('T',' ') || '-'"></td>
+                <td class="px-3 py-2 text-ink-400" x-text="d.last?.slice(5,16)?.replace('T',' ') || '-'"></td>
+                <td class="px-3 py-2 text-red-500" x-text="'~' + (d.count * 0.2).toFixed(1)"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+    </div>
+  </div>
+</div>
+
+<script>
+function hsReport() {
+  return {
+    report: [],
+    loading: true,
+    selected: new URLSearchParams(location.search).get('agent') || 'all',
+
+    get cur() {
+      if (this.selected === 'all') {
+        const allDetails = this.report.flatMap(a => a.details);
+        return {
+          sent_total: this.report.reduce((a, r) => a + r.sent_total, 0),
+          recv_total: this.report.reduce((a, r) => a + r.recv_total, 0),
+          cost_kas: (this.report.reduce((a, r) => a + r.sent_total, 0) * 0.2).toFixed(1),
+          no_reply: this.report.reduce((a, r) => a + r.no_reply, 0),
+          details: allDetails,
+        };
+      }
+      return this.report.find(a => a.agent_id === this.selected) || { sent_total:0, recv_total:0, cost_kas:'0', no_reply:0, details:[] };
+    },
+
+    async init() {
+      try {
+        const res = await fetch('/api/agent/handshake-report');
+        this.report = await res.json();
+      } catch { this.report = []; }
+      this.loading = false;
+    },
+  };
+}
+</script>
+
+<%~ include('partials/page-close', it) %>
