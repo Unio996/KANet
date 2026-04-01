@@ -28,7 +28,8 @@ export async function registerStockRoutes(fastify) {
   fastify.get('/stocks', async (request, reply) => {
     const lang = parseLang(request.headers.cookie);
     const t = getT(lang);
-    return reply.view('stocks', { title: '股票市场', t, lang, dir: isRtl(lang) ? 'rtl' : 'ltr', langs: LANG_NAMES, _page: 'stocks' });
+    const relayNodes = sqlite.prepare('SELECT id, name FROM relay_nodes ORDER BY name').all();
+    return reply.view('stocks', { title: '股票市场', t, lang, dir: isRtl(lang) ? 'rtl' : 'ltr', langs: LANG_NAMES, _page: 'stocks', relayNodes });
   });
 
   fastify.get('/predictions', async (request, reply) => {
