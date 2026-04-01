@@ -1,0 +1,548 @@
+/**
+ * server.mjs — Web UI for Market Maker operator dashboard
+ * Separate from KANet Console. MM's own control panel.
+ */
+
+import http from 'node:http';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { getReputation, getPnL, getRecentTrades, db } from './db.mjs';
+import { getLastPrice } from './price-engine.mjs';
+import { writeFileSync } from 'node:fs';
+
+const PORT = process.env.MM_UI_PORT || 3200;
+const __dir = import.meta.dirname;
+
+export function startServer(getState) {
+  const server = http.createServer(async (req, res) => {
+    // API endpoints
+    if (req.url === '/api/state') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(getState()));
+      return;
+    }
+
+    if (req.url === '/api/orders') {
+      const orders = db.prepare('SELECT * FROM orders ORDER BY created_at DESC LIMIT 50').all();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(orders));
+      return;
+    }
+
+    if (req.url === '/api/quotes') {
+      const quotes = db.prepare('SELECT * FROM quotes ORDER BY created_at DESC LIMIT 100').all();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(quotes));
+      return;
+    }
+
+    if (req.url === '/api/reputation') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(getReputation()));
+      return;
+    }
+
+    if (req.url?.startsWith('/api/pnl')) {
+      const url = new URL(req.url, 'http://localhost');
+      const days = parseInt(url.searchParams.get('days') || '1');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ daily: getPnL(1), weekly: getPnL(7), monthly: getPnL(30) }));
+      return;
+    }
+
+    if (req.url === '/api/trades') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(getRecentTrades(30)));
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/api/exchange-config') {
+      let body = '';
+      req.on('data', c => body += c);
+      req.on('end', () => {
+        try {
+          const { apiKey, apiSecret } = JSON.parse(body);
+          const configPath = resolve(__dir, '..', 'config.json');
+          const current = JSON.parse(readFileSync(configPath, 'utf8'));
+          if (apiKey) current.exchange.apiKey = apiKey;
+          if (apiSecret) current.exchange.apiSecret = apiSecret;
+          writeFileSync(configPath, JSON.stringify(current, null, 2));
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+        } catch (err) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+
+    // Connect to KANet: discover agents
+    if (req.method === 'POST' && req.url === '/api/connect') {
+      let body = '';
+      req.on('data', c => body += c);
+      req.on('end', async () => {
+        try {
+          const { consoleUrl } = JSON.parse(body);
+          const res2 = await fetch(`${consoleUrl}/api/agent/profile`, { signal: AbortSignal.timeout(5000) });
+          const agents = await res2.json();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, agents }));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: err.message }));
+        }
+      });
+      return;
+    }
+
+    // Save connection: console URL + selected agent
+    if (req.method === 'POST' && req.url === '/api/save-connection') {
+      let body = '';
+      req.on('data', c => body += c);
+      req.on('end', () => {
+        try {
+          const { consoleUrl, agentId, agentName, agentAddress } = JSON.parse(body);
+          const configPath = resolve(__dir, '..', 'config.json');
+          const current = JSON.parse(readFileSync(configPath, 'utf8'));
+          current.kanet.consoleUrl = consoleUrl;
+          current.kanet.agentAddress = agentAddress;
+          current.kanet.relayNodeId = agentId;
+          current.kanet.agentName = agentName;
+          writeFileSync(configPath, JSON.stringify(current, null, 2));
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/api/config') {
+      let body = '';
+      req.on('data', c => body += c);
+      req.on('end', () => {
+        try {
+          const updates = JSON.parse(body);
+          // Write back to config file
+          const configPath = resolve(__dir, '..', 'config.json');
+          const current = JSON.parse(readFileSync(configPath, 'utf8'));
+          Object.assign(current.pricing, updates.pricing || {});
+          Object.assign(current.risk, updates.risk || {});
+          writeFileSync(configPath, JSON.stringify(current, null, 2));
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+        } catch (err) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+
+    // Serve UI
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(DASHBOARD_HTML);
+  });
+
+  server.listen(PORT, () => {
+    console.log(`[mm-ui] Dashboard: http://localhost:${PORT}`);
+  });
+}
+
+const DASHBOARD_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KAS Market Maker</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { background: #0f172a; color: #e2e8f0; font-family: 'Inter', system-ui, sans-serif; }
+  .glow-green { box-shadow: 0 0 12px rgba(34, 197, 94, 0.3); }
+  .glow-red { box-shadow: 0 0 12px rgba(239, 68, 68, 0.3); }
+  .pulse { animation: pulse 2s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+</style>
+</head>
+<body class="min-h-screen p-6">
+
+<!-- ══ Setup Guide (shown when not connected) ══ -->
+<div id="setupGuide" class="max-w-lg mx-auto mt-20">
+  <div class="text-center mb-8">
+    <h1 class="text-3xl font-bold text-white">KAS Market Maker</h1>
+    <p class="text-slate-400 mt-2">Connect to KANet to start</p>
+  </div>
+  <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
+    <div id="step1">
+      <label class="text-sm text-slate-300">KANet Console Address</label>
+      <div class="flex mt-2 space-x-2">
+        <input id="consoleUrl" type="text" value="http://127.0.0.1:3100" class="flex-1 bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white text-sm" />
+        <button onclick="connectKanet()" id="connectBtn" class="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Connect</button>
+      </div>
+      <p id="connectError" class="text-red-400 text-xs mt-2" style="display:none;"></p>
+    </div>
+    <div id="step2" style="display:none;" class="mt-4">
+      <label class="text-sm text-slate-300">Select Agent</label>
+      <div id="agentList" class="mt-2 space-y-2"></div>
+      <button onclick="confirmAgent()" id="confirmBtn" class="mt-4 w-full px-4 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700">Start Market Maker</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ Main Dashboard (shown when connected) ══ -->
+<div id="mainDashboard" class="max-w-7xl mx-auto" style="display:none;">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-2xl font-bold text-white">KAS Market Maker</h1>
+      <p class="text-sm text-slate-400" id="connInfo">Connected to KANet</p>
+    </div>
+    <div id="status" class="flex items-center space-x-2">
+      <span class="w-3 h-3 rounded-full bg-green-500 pulse"></span>
+      <span class="text-sm text-green-400">Running</span>
+    </div>
+  </div>
+
+  <!-- Quote + Balance Cards -->
+  <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700 glow-green">
+      <p class="text-xs text-slate-400 uppercase">Buy Price (MM buys KAS)</p>
+      <p id="buyPrice" class="text-2xl font-bold text-green-400 mt-1">--</p>
+    </div>
+    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700 glow-red">
+      <p class="text-xs text-slate-400 uppercase">Sell Price (MM sells KAS)</p>
+      <p id="sellPrice" class="text-2xl font-bold text-red-400 mt-1">--</p>
+    </div>
+    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+      <p class="text-xs text-slate-400 uppercase">MEXC Price</p>
+      <p id="mexcPrice" class="text-2xl font-bold text-blue-400 mt-1">--</p>
+    </div>
+    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+      <p class="text-xs text-slate-400 uppercase">KAS Balance</p>
+      <p id="kasBalance" class="text-2xl font-bold text-amber-400 mt-1">--</p>
+    </div>
+  </div>
+
+  <!-- Risk + Reputation -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+      <h3 class="text-sm font-semibold text-slate-300 mb-3">Risk Status</h3>
+      <div class="space-y-2 text-sm">
+        <div class="flex justify-between"><span class="text-slate-400">Status</span><span id="riskStatus" class="font-mono">--</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Can Sell</span><span id="canSell" class="font-mono">--</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Can Buy</span><span id="canBuy" class="font-mono">--</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Spread</span><span id="spread" class="font-mono">--</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Active Orders</span><span id="activeOrders" class="font-mono">--</span></div>
+      </div>
+    </div>
+    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+      <h3 class="text-sm font-semibold text-slate-300 mb-3">Reputation (On-chain verifiable)</h3>
+      <div class="space-y-2 text-sm" id="reputation">
+        <div class="flex justify-between"><span class="text-slate-400">Total Orders</span><span class="font-mono">0</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Completed</span><span class="font-mono text-green-400">0</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Disputes</span><span class="font-mono text-red-400">0</span></div>
+        <div class="flex justify-between"><span class="text-slate-400">Total Volume</span><span class="font-mono">0 KAS</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- P&L -->
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+      <p class="text-xs text-slate-400 uppercase">Today</p>
+      <p id="pnlDaily" class="text-xl font-bold text-green-400 mt-1">--</p>
+      <p id="pnlDailyTrades" class="text-xs text-slate-500 mt-1">-- trades</p>
+    </div>
+    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+      <p class="text-xs text-slate-400 uppercase">7 Days</p>
+      <p id="pnlWeekly" class="text-xl font-bold text-green-400 mt-1">--</p>
+      <p id="pnlWeeklyTrades" class="text-xs text-slate-500 mt-1">-- trades</p>
+    </div>
+    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+      <p class="text-xs text-slate-400 uppercase">30 Days</p>
+      <p id="pnlMonthly" class="text-xl font-bold text-green-400 mt-1">--</p>
+      <p id="pnlMonthlyTrades" class="text-xs text-slate-500 mt-1">-- trades</p>
+    </div>
+  </div>
+
+  <!-- Trade History -->
+  <div class="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden mb-6">
+    <div class="px-4 py-3 border-b border-slate-700">
+      <h3 class="text-sm font-semibold text-slate-300">Trade History (每笔利润)</h3>
+    </div>
+    <table class="w-full text-sm">
+      <thead class="bg-slate-700/50">
+        <tr>
+          <th class="px-3 py-2 text-left text-xs text-slate-400">Time</th>
+          <th class="px-3 py-2 text-left text-xs text-slate-400">Side</th>
+          <th class="px-3 py-2 text-left text-xs text-slate-400">KAS</th>
+          <th class="px-3 py-2 text-left text-xs text-slate-400">On-chain Price</th>
+          <th class="px-3 py-2 text-left text-xs text-slate-400">Exchange Price</th>
+          <th class="px-3 py-2 text-left text-xs text-slate-400">Profit (USDT)</th>
+        </tr>
+      </thead>
+      <tbody id="tradesBody">
+        <tr><td colspan="6" class="px-3 py-4 text-center text-slate-500">No trades yet</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Settings -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+      <h3 class="text-sm font-semibold text-slate-300 mb-3">Trading Settings</h3>
+      <div class="grid grid-cols-2 gap-4 text-sm">
+        <div>
+          <label class="text-xs text-slate-400">Spread %</label>
+          <input id="cfgSpread" type="number" step="0.01" class="w-full mt-1 bg-slate-700 border border-slate-600 rounded px-2 py-1 text-white text-sm" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-400">Max Order (KAS)</label>
+          <input id="cfgMaxOrder" type="number" class="w-full mt-1 bg-slate-700 border border-slate-600 rounded px-2 py-1 text-white text-sm" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-400">Min KAS Reserve</label>
+          <input id="cfgMinKas" type="number" class="w-full mt-1 bg-slate-700 border border-slate-600 rounded px-2 py-1 text-white text-sm" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-400">Price Halt %</label>
+          <input id="cfgHaltPct" type="number" step="0.1" class="w-full mt-1 bg-slate-700 border border-slate-600 rounded px-2 py-1 text-white text-sm" />
+        </div>
+      </div>
+      <button onclick="saveConfig()" class="mt-3 px-4 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Save</button>
+    </div>
+    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+      <h3 class="text-sm font-semibold text-slate-300 mb-3">Exchange API (MEXC)</h3>
+      <div class="space-y-3 text-sm">
+        <div>
+          <label class="text-xs text-slate-400">API Key</label>
+          <input id="cfgApiKey" type="password" placeholder="mx0v..." class="w-full mt-1 bg-slate-700 border border-slate-600 rounded px-2 py-1 text-white text-sm" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-400">API Secret</label>
+          <input id="cfgApiSecret" type="password" placeholder="••••" class="w-full mt-1 bg-slate-700 border border-slate-600 rounded px-2 py-1 text-white text-sm" />
+        </div>
+      </div>
+      <button onclick="saveExchange()" class="mt-3 px-4 py-1.5 bg-amber-600 text-white text-sm rounded hover:bg-amber-700">Save Exchange API</button>
+    </div>
+  </div>
+
+  <!-- Orders Table -->
+  <div class="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
+    <div class="px-4 py-3 border-b border-slate-700">
+      <h3 class="text-sm font-semibold text-slate-300">Recent Orders</h3>
+    </div>
+    <table class="w-full text-sm">
+      <thead class="bg-slate-700/50">
+        <tr>
+          <th class="px-3 py-2 text-left text-xs text-slate-400">Time</th>
+          <th class="px-3 py-2 text-left text-xs text-slate-400">Side</th>
+          <th class="px-3 py-2 text-left text-xs text-slate-400">KAS</th>
+          <th class="px-3 py-2 text-left text-xs text-slate-400">USDT</th>
+          <th class="px-3 py-2 text-left text-xs text-slate-400">Price</th>
+          <th class="px-3 py-2 text-left text-xs text-slate-400">Chain</th>
+          <th class="px-3 py-2 text-left text-xs text-slate-400">Status</th>
+          <th class="px-3 py-2 text-left text-xs text-slate-400">Batch</th>
+        </tr>
+      </thead>
+      <tbody id="ordersBody" class="divide-y divide-slate-700/50">
+        <tr><td colspan="8" class="px-3 py-6 text-center text-slate-500">No orders yet</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<script>
+(async function(){
+const STATUS_COLORS = {
+  quoted: 'text-slate-400', awaiting_payment: 'text-yellow-400',
+  payment_verified: 'text-blue-400', kas_sent: 'text-purple-400',
+  completed: 'text-green-400', expired: 'text-slate-600', disputed: 'text-red-400'
+};
+
+async function refresh() {
+  try {
+    const state = await fetch('/api/state').then(r => r.json());
+    document.getElementById('buyPrice').textContent = state.quote?.buyPrice ? '$' + state.quote.buyPrice : 'Paused';
+    document.getElementById('sellPrice').textContent = state.quote?.sellPrice ? '$' + state.quote.sellPrice : 'Paused';
+    document.getElementById('mexcPrice').textContent = state.quote?.mexcPrice ? '$' + state.quote.mexcPrice : '--';
+    document.getElementById('kasBalance').textContent = state.kasBalance ? Math.floor(state.kasBalance) + ' KAS' : '--';
+    document.getElementById('spread').textContent = state.quote?.spread ? state.quote.spread.toFixed(6) : '--';
+    document.getElementById('riskStatus').textContent = state.halted ? 'HALTED' : 'OK';
+    document.getElementById('riskStatus').className = 'font-mono ' + (state.halted ? 'text-red-400' : 'text-green-400');
+    document.getElementById('canSell').textContent = state.canSell ? 'Yes' : 'No';
+    document.getElementById('canSell').className = 'font-mono ' + (state.canSell ? 'text-green-400' : 'text-red-400');
+    document.getElementById('canBuy').textContent = state.canBuy ? 'Yes' : 'No';
+    document.getElementById('canBuy').className = 'font-mono ' + (state.canBuy ? 'text-green-400' : 'text-red-400');
+    document.getElementById('activeOrders').textContent = state.activeOrders || 0;
+
+    if (!document.getElementById('cfgSpread').value) {
+      document.getElementById('cfgSpread').value = state.config?.spreadPct || '';
+      document.getElementById('cfgMaxOrder').value = state.config?.maxOrderKas || '';
+      document.getElementById('cfgMinKas').value = state.config?.minKasReserve || '';
+      document.getElementById('cfgHaltPct').value = state.config?.priceDeviationHaltPct || '';
+    }
+  } catch {}
+
+  try {
+    const rep = await fetch('/api/reputation').then(r => r.json());
+    document.getElementById('reputation').innerHTML =
+      '<div class="flex justify-between"><span class="text-slate-400">Total Orders</span><span class="font-mono">' + (rep.total_orders || 0) + '</span></div>' +
+      '<div class="flex justify-between"><span class="text-slate-400">Completed</span><span class="font-mono text-green-400">' + (rep.completed || 0) + '</span></div>' +
+      '<div class="flex justify-between"><span class="text-slate-400">Disputes</span><span class="font-mono text-red-400">' + (rep.disputes || 0) + '</span></div>' +
+      '<div class="flex justify-between"><span class="text-slate-400">Total Volume</span><span class="font-mono">' + (rep.total_kas_volume || 0) + ' KAS</span></div>' +
+      '<div class="flex justify-between"><span class="text-slate-400">Since</span><span class="font-mono">' + (rep.operating_since?.slice(0, 10) || '--') + '</span></div>';
+  } catch {}
+
+  try {
+    const orders = await fetch('/api/orders').then(r => r.json());
+    const tbody = document.getElementById('ordersBody');
+    if (orders.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="8" class="px-3 py-6 text-center text-slate-500">No orders yet</td></tr>';
+    } else {
+      tbody.innerHTML = orders.map(o =>
+        '<tr class="hover:bg-slate-700/30">' +
+        '<td class="px-3 py-2 text-slate-400 font-mono text-xs">' + (o.created_at?.slice(5, 16) || '') + '</td>' +
+        '<td class="px-3 py-2 font-semibold ' + (o.side === 'buy' ? 'text-green-400' : 'text-red-400') + '">' + o.side.toUpperCase() + '</td>' +
+        '<td class="px-3 py-2 font-mono">' + o.kas_amount + '</td>' +
+        '<td class="px-3 py-2 font-mono">' + o.usdt_amount + '</td>' +
+        '<td class="px-3 py-2 font-mono text-blue-400">$' + o.price + '</td>' +
+        '<td class="px-3 py-2 uppercase text-xs">' + o.chain + '</td>' +
+        '<td class="px-3 py-2 ' + (STATUS_COLORS[o.status] || 'text-slate-400') + '">' + o.status + '</td>' +
+        '<td class="px-3 py-2 text-xs text-slate-500">' + (o.batch_total > 1 ? (o.batch_index+1) + '/' + o.batch_total : '-') + '</td>' +
+        '</tr>'
+      ).join('');
+    }
+  } catch {}
+}
+
+  try {
+    const pnl = await fetch('/api/pnl').then(r => r.json());
+    const fmt = (v) => v >= 0 ? '+' + v.toFixed(4) : v.toFixed(4);
+    const clr = (v) => v >= 0 ? 'text-green-400' : 'text-red-400';
+    if (pnl.daily) {
+      document.getElementById('pnlDaily').textContent = fmt(pnl.daily.total_profit || 0) + ' USDT';
+      document.getElementById('pnlDaily').className = 'text-xl font-bold mt-1 ' + clr(pnl.daily.total_profit || 0);
+      document.getElementById('pnlDailyTrades').textContent = (pnl.daily.trades || 0) + ' trades | ' + (pnl.daily.volume_kas || 0) + ' KAS';
+    }
+    if (pnl.weekly) {
+      document.getElementById('pnlWeekly').textContent = fmt(pnl.weekly.total_profit || 0) + ' USDT';
+      document.getElementById('pnlWeekly').className = 'text-xl font-bold mt-1 ' + clr(pnl.weekly.total_profit || 0);
+      document.getElementById('pnlWeeklyTrades').textContent = (pnl.weekly.trades || 0) + ' trades | ' + (pnl.weekly.volume_kas || 0) + ' KAS';
+    }
+    if (pnl.monthly) {
+      document.getElementById('pnlMonthly').textContent = fmt(pnl.monthly.total_profit || 0) + ' USDT';
+      document.getElementById('pnlMonthly').className = 'text-xl font-bold mt-1 ' + clr(pnl.monthly.total_profit || 0);
+      document.getElementById('pnlMonthlyTrades').textContent = (pnl.monthly.trades || 0) + ' trades | ' + (pnl.monthly.volume_kas || 0) + ' KAS';
+    }
+  } catch {}
+
+  try {
+    const trades = await fetch('/api/trades').then(r => r.json());
+    const tbody = document.getElementById('tradesBody');
+    if (trades.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="px-3 py-4 text-center text-slate-500">No trades yet</td></tr>';
+    } else {
+      tbody.innerHTML = trades.map(t =>
+        '<tr class="hover:bg-slate-700/30">' +
+        '<td class="px-3 py-2 text-slate-400 font-mono text-xs">' + (t.created_at?.slice(5, 19) || '') + '</td>' +
+        '<td class="px-3 py-2 font-semibold ' + (t.side === 'sell' ? 'text-red-400' : 'text-green-400') + '">' + t.side.toUpperCase() + '</td>' +
+        '<td class="px-3 py-2 font-mono">' + t.kas_amount + '</td>' +
+        '<td class="px-3 py-2 font-mono text-blue-400">$' + t.onchain_price + '</td>' +
+        '<td class="px-3 py-2 font-mono text-purple-400">$' + t.exchange_price + '</td>' +
+        '<td class="px-3 py-2 font-bold ' + (t.profit_usdt >= 0 ? 'text-green-400' : 'text-red-400') + '">' + (t.profit_usdt >= 0 ? '+' : '') + t.profit_usdt.toFixed(4) + '</td>' +
+        '</tr>'
+      ).join('');
+    }
+  } catch {}
+}
+
+function saveExchange() {
+  var body = {
+    apiKey: document.getElementById('cfgApiKey').value,
+    apiSecret: document.getElementById('cfgApiSecret').value,
+  };
+  fetch('/api/exchange-config', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) })
+    .then(function(){ alert('Exchange API saved'); });
+}
+
+function saveConfig() {
+  const body = {
+    pricing: { spreadPct: parseFloat(document.getElementById('cfgSpread').value) },
+    risk: {
+      maxOrderKas: parseInt(document.getElementById('cfgMaxOrder').value),
+      minKasReserve: parseInt(document.getElementById('cfgMinKas').value),
+      priceDeviationHaltPct: parseFloat(document.getElementById('cfgHaltPct').value),
+    }
+  };
+  fetch('/api/config', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) })
+    .then(function(){ alert('Saved'); });
+}
+
+// ── Setup Guide Logic ──
+let _selectedAgent = null;
+
+function connectKanet() {
+  var url = document.getElementById('consoleUrl').value.trim();
+  var btn = document.getElementById('connectBtn');
+  var err = document.getElementById('connectError');
+  btn.textContent = 'Connecting...'; btn.disabled = true; err.style.display = 'none';
+  fetch('/api/connect', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ consoleUrl: url }) })
+    .then(function(r){return r.json()})
+    .then(function(data){
+      if (!data.ok) throw new Error(data.error || 'Connection failed');
+      var agents = Array.isArray(data.agents) ? data.agents : [];
+      if (agents.length === 0) throw new Error('No agents found');
+      var list = document.getElementById('agentList');
+      list.innerHTML = agents.map(function(a){return '<label class="flex items-center p-3 bg-slate-700 rounded cursor-pointer hover:bg-slate-600 transition-colors"><input type="radio" name="agent" value="'+a.id+'" data-name="'+a.name+'" data-addr="'+(a.address||'')+'" class="mr-3" '+(agents.length===1?'checked':'')+'/>  <div><span class="text-white font-medium">'+a.name+'</span><br/><span class="text-xs text-slate-400 font-mono">'+(a.address||'no address')+'</span></div></label>'}).join('');
+      document.getElementById('step2').style.display = 'block';
+      if (agents.length === 1) _selectedAgent = { id: agents[0].id, name: agents[0].name, address: agents[0].address };
+      list.addEventListener('change', function(e){
+        var r = e.target; _selectedAgent = { id: r.value, name: r.dataset.name, address: r.dataset.addr };
+      });
+      btn.textContent = 'Connect'; btn.disabled = false;
+    })
+    .catch(function(e){
+      err.textContent = e.message; err.style.display = 'block';
+      btn.textContent = 'Connect'; btn.disabled = false;
+    });
+}
+
+function confirmAgent() {
+  if (!_selectedAgent) { alert('Please select an agent'); return; }
+  var url = document.getElementById('consoleUrl').value.trim();
+  fetch('/api/save-connection', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ consoleUrl: url, agentId: _selectedAgent.id, agentName: _selectedAgent.name, agentAddress: _selectedAgent.address })
+  }).then(function(){
+    document.getElementById('setupGuide').style.display = 'none';
+    document.getElementById('mainDashboard').style.display = 'block';
+    document.getElementById('connInfo').textContent = 'Connected to KANet | Agent: ' + _selectedAgent.name;
+    refresh();
+    setInterval(refresh, 3000);
+  });
+}
+
+// Check if already connected
+fetch('/api/state').then(function(r){return r.json()}).then(function(state){
+  if (state.connected) {
+    document.getElementById('setupGuide').style.display = 'none';
+    document.getElementById('mainDashboard').style.display = 'block';
+    document.getElementById('connInfo').textContent = 'Connected to KANet | Agent: ' + (state.agentName || '');
+    refresh();
+    setInterval(refresh, 3000);
+  }
+}).catch(function(){});
+
+window.connectKanet = connectKanet;
+window.confirmAgent = confirmAgent;
+window.saveExchange = saveExchange;
+window.saveConfig = saveConfig;
+})();
+</script>
+</body>
+</html>`;

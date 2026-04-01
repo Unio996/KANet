@@ -1,0 +1,231 @@
+import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
+import { randomUUID } from 'crypto';
+
+export const identities = sqliteTable('identities', {
+  id: text('id').primaryKey().$defaultFn(() => randomUUID()),
+  network: text('network').notNull(),
+  address: text('address').notNull(),
+  displayName: text('display_name'),
+  identityType: text('identity_type').notNull().default('remote'),
+  pubkey: text('pubkey'),
+  metadataJson: text('metadata_json'),
+  notes: text('notes').default(''),
+  isBlocked: integer('is_blocked').notNull().default(0),
+  tags: text('tags').default(''),
+  trustLevel: text('trust_level').notNull().default('normal'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const conversations = sqliteTable('conversations', {
+  id: text('id').primaryKey().$defaultFn(() => randomUUID()),
+  traceId: text('trace_id'),
+  network: text('network').notNull(),
+  channelType: text('channel_type').notNull().default('dm'),
+  channelId: text('channel_id'),
+  localIdentityId: text('local_identity_id').notNull().references(() => identities.id),
+  remoteIdentityId: text('remote_identity_id').references(() => identities.id),
+  title: text('title').notNull().default(''),
+  status: text('status').notNull().default('active'),
+  lastMessageAt: text('last_message_at'),
+  lastReplyAt: text('last_reply_at'),
+  lastTxAt: text('last_tx_at'),
+  unreadCount: integer('unread_count').notNull().default(0),
+  metadataJson: text('metadata_json'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const messages = sqliteTable('messages', {
+  id: text('id').primaryKey().$defaultFn(() => randomUUID()),
+  traceId: text('trace_id').notNull(),
+  conversationId: text('conversation_id').references(() => conversations.id),
+  sourceMessageId: text('source_message_id'),
+  sourceTxid: text('source_txid'),
+  direction: text('direction').notNull().default('inbound'),
+  senderIdentityId: text('sender_identity_id').references(() => identities.id),
+  receiverIdentityId: text('receiver_identity_id').references(() => identities.id),
+  messageType: text('message_type').notNull().default('text'),
+  contentText: text('content_text').notNull().default(''),
+  contentJson: text('content_json'),
+  rawPayload: text('raw_payload'),
+  receivedAt: text('received_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const replies = sqliteTable('replies', {
+  id: text('id').primaryKey().$defaultFn(() => randomUUID()),
+  traceId: text('trace_id').notNull(),
+  conversationId: text('conversation_id').references(() => conversations.id),
+  messageId: text('message_id').references(() => messages.id),
+  replyType: text('reply_type').notNull().default('ai'),
+  provider: text('provider').notNull().default('openclaw'),
+  modelName: text('model_name'),
+  promptVersion: text('prompt_version'),
+  replyText: text('reply_text').notNull().default(''),
+  replyJson: text('reply_json'),
+  intentCapturedJson: text('intent_captured_json'),
+  intentStatus: text('intent_status'),
+  status: text('status').notNull().default('draft'),
+  sentTxid: text('sent_txid'),
+  errorText: text('error_text'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const txRecords = sqliteTable('tx_records', {
+  id: text('id').primaryKey().$defaultFn(() => randomUUID()),
+  traceId: text('trace_id').notNull(),
+  conversationId: text('conversation_id').references(() => conversations.id),
+  messageId: text('message_id').references(() => messages.id),
+  replyId: text('reply_id').references(() => replies.id),
+  direction: text('direction').notNull().default('outbound'),
+  network: text('network').notNull(),
+  txid: text('txid').notNull().unique(),
+  amount: text('amount'),
+  fee: text('fee'),
+  confirmations: integer('confirmations'),
+  status: text('status').notNull().default('broadcasted'),
+  rawTxJson: text('raw_tx_json'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const events = sqliteTable('events', {
+  id: text('id').primaryKey().$defaultFn(() => randomUUID()),
+  traceId: text('trace_id'),
+  eventScope: text('event_scope').notNull().default('system'),
+  eventType: text('event_type').notNull(),
+  source: text('source').notNull(),
+  level: text('level').notNull().default('info'),
+  conversationId: text('conversation_id').references(() => conversations.id),
+  messageId: text('message_id').references(() => messages.id),
+  replyId: text('reply_id').references(() => replies.id),
+  txRecordId: text('tx_record_id').references(() => txRecords.id),
+  summary: text('summary').notNull().default(''),
+  payloadJson: text('payload_json'),
+  createdAt: text('created_at').notNull(),
+});
+
+export const configEntries = sqliteTable('config_entries', {
+  id: text('id').primaryKey().$defaultFn(() => randomUUID()),
+  key: text('key').notNull().unique(),
+  category: text('category').notNull().default('general'),
+  valueEncrypted: text('value_encrypted'),
+  valuePlainHint: text('value_plain_hint'),
+  isSensitive: integer('is_sensitive').notNull().default(0),
+  updatedAt: text('updated_at').notNull(),
+  createdAt: text('created_at').notNull(),
+});
+
+export const contracts = sqliteTable('contracts', {
+  id: text('id').primaryKey().$defaultFn(() => randomUUID()),
+  traceId: text('trace_id'),
+  conversationId: text('conversation_id').references(() => conversations.id),
+  replyId: text('reply_id').references(() => replies.id),
+  contractName: text('contract_name').notNull().default(''),
+  sourceSil: text('source_sil').notNull().default(''),
+  compiledOutputJson: text('compiled_output_json'),
+  network: text('network').notNull().default('mainnet'),
+  status: text('status').notNull().default('draft'),
+  txid: text('txid'),
+  errorText: text('error_text'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const skills = sqliteTable('skills', {
+  id: text('id').primaryKey().$defaultFn(() => randomUUID()),
+  relayNodeId: text('relay_node_id'),  // null = global skill; FK to relay_nodes.id
+  name: text('name').notNull(),
+  displayName: text('display_name').notNull(),
+  description: text('description').notNull().default(''),
+  actionType: text('action_type').notNull().default('builtin'),
+  actionConfigJson: text('action_config_json'),
+  minTrustLevel: text('min_trust_level').notNull().default('owner'),
+  status: text('status').notNull().default('frozen'),
+  source: text('source').notNull().default('manual'),
+  invokeCount: integer('invoke_count').notNull().default(0),
+  lastInvokedAt: text('last_invoked_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const accountRelations = sqliteTable('account_relations', {
+  id: text('id').primaryKey().$defaultFn(() => randomUUID()),
+  relayNodeId: text('relay_node_id').notNull(),
+  localIdentityId: text('local_identity_id').notNull(),
+  remoteIdentityId: text('remote_identity_id').notNull(),
+  status: text('status').notNull().default('discovered'),
+  trustLevel: text('trust_level').notNull().default('normal'),
+  isBlocked: integer('is_blocked').notNull().default(0),
+  source: text('source').notNull().default('scout'),
+  firstSeenAt: text('first_seen_at'),
+  lastSeenAt: text('last_seen_at'),
+  lastInteractionAt: text('last_interaction_at'),
+  interactionCount: integer('interaction_count').notNull().default(0),
+  notes: text('notes').default(''),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const mmOrders = sqliteTable('mm_orders', {
+  id: text('id').primaryKey().$defaultFn(() => randomUUID()),
+  relayNodeId: text('relay_node_id').notNull(),
+  side: text('side').notNull(),
+  kasAmount: real('kas_amount').notNull(),
+  usdtAmount: real('usdt_amount').notNull(),
+  price: real('price').notNull(),
+  chain: text('chain').notNull(),
+  customerAddress: text('customer_address'),
+  customerPayAddress: text('customer_pay_address'),
+  mmReceiveAddress: text('mm_receive_address'),
+  status: text('status').notNull().default('published'),
+  paymentTxhash: text('payment_txhash'),
+  kasTxhash: text('kas_txhash'),
+  batchIndex: integer('batch_index'),
+  batchTotal: integer('batch_total'),
+  createdAt: text('created_at').notNull(),
+  completedAt: text('completed_at'),
+});
+
+export const mmQuotes = sqliteTable('mm_quotes', {
+  id: text('id').primaryKey().$defaultFn(() => randomUUID()),
+  relayNodeId: text('relay_node_id').notNull(),
+  buyPrice: real('buy_price'),
+  sellPrice: real('sell_price'),
+  kasStock: real('kas_stock'),
+  usdtStock: real('usdt_stock'),
+  mexcPrice: real('mexc_price'),
+  createdAt: text('created_at').notNull(),
+});
+
+export const agentWallets = sqliteTable('agent_wallets', {
+  id: text('id').primaryKey().$defaultFn(() => randomUUID()),
+  relayNodeId: text('relay_node_id').notNull(),
+  chain: text('chain').notNull(),
+  address: text('address').notNull(),
+  label: text('label').default(''),
+  privkeyEncrypted: text('privkey_encrypted'),
+  privkeyHint: text('privkey_hint'),
+  isDefault: integer('is_default').notNull().default(0),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const tables = {
+  identities,
+  conversations,
+  messages,
+  replies,
+  txRecords,
+  events,
+  configEntries,
+  contracts,
+  skills,
+  accountRelations,
+  mmOrders,
+  mmQuotes,
+  agentWallets,
+};

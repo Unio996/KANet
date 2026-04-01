@@ -1,0 +1,197 @@
+<!--
+  Social Style Configuration Component
+  Embeds into Agent overview page (agent-v2.eta)
+  Dependencies: Alpine.js, Tailwind CSS (with warm/ink/brand tokens)
+-->
+
+<div x-data="socialStyleConfig()" class="social-style-block">
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-4">
+    <div class="flex items-center gap-2">
+      <div class="w-1.5 h-5 rounded-full" :class="modeColor[mode]"></div>
+      <h3 class="text-sm font-semibold text-ink-700">社交风格</h3>
+      <span class="text-[10px] px-1.5 py-0.5 rounded font-medium"
+        :class="modeBadge[mode]"
+        x-text="modeLabel[mode]"></span>
+    </div>
+    <button @click="showAdvanced = !showAdvanced"
+      class="text-[11px] text-ink-400 hover:text-brand-600 transition-colors flex items-center gap-1">
+      <span x-text="showAdvanced ? '收起' : '高级设置'"></span>
+      <span class="text-[8px] transition-transform" :class="showAdvanced ? 'rotate-90' : ''" >›</span>
+    </button>
+  </div>
+
+  <!-- Three mode selector -->
+  <div class="grid grid-cols-3 gap-2 mb-3">
+    <template x-for="m in ['active', 'balanced', 'conservative']" :key="m">
+      <button @click="setMode(m)"
+        class="social-mode-card relative rounded-lg border px-3 py-2.5 text-left transition-all"
+        :class="mode === m
+          ? 'border-brand-400 bg-brand-50/60 shadow-sm'
+          : 'border-warm-200 bg-white hover:border-warm-300 hover:bg-warm-50'">
+        <!-- Active indicator dot -->
+        <div class="absolute top-2 right-2 w-1.5 h-1.5 rounded-full transition-all"
+          :class="mode === m ? modeColor[m] : 'bg-warm-300'"></div>
+        <!-- Label -->
+        <div class="text-xs font-semibold mb-1" :class="mode === m ? 'text-ink-700' : 'text-ink-500'"
+          x-text="modeLabel[m]"></div>
+        <!-- One-line desc -->
+        <div class="text-[10px] leading-tight" :class="mode === m ? 'text-ink-500' : 'text-ink-300'"
+          x-text="modeDesc[m]"></div>
+        <!-- Key stats -->
+        <div class="flex gap-2 mt-2">
+          <span class="text-[9px] text-ink-400 bg-warm-100 px-1 py-0.5 rounded"
+            x-text="'握手 ' + presets[m].maxNewHandshakes + '/天'"></span>
+          <span class="text-[9px] text-ink-400 bg-warm-100 px-1 py-0.5 rounded"
+            x-text="'冷却 ' + presets[m].peerCooldownHours + 'h'"></span>
+        </div>
+      </button>
+    </template>
+  </div>
+
+  <!-- Current effective params (always visible, compact) -->
+  <div class="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-ink-400 px-1">
+    <span>同一人冷却: <strong class="text-ink-600" x-text="effective.peerCooldownHours + 'h'"></strong></span>
+    <span>跨Agent防重: <strong class="text-ink-600" x-text="effective.crossAgentHours + 'h'"></strong></span>
+    <span>每日握手: <strong class="text-ink-600" x-text="effective.maxNewHandshakes"></strong></span>
+    <span>跟进间隔: <strong class="text-ink-600" x-text="effective.followUpHours ? effective.followUpHours + 'h' : '不跟进'"></strong></span>
+    <span>跟进上限: <strong class="text-ink-600" x-text="effective.maxFollowUps + '次'"></strong></span>
+    <span>无回复退避: <strong class="text-ink-600" x-text="effective.unansweredMax + '条/' + effective.unansweredCooldownDays + '天'"></strong></span>
+  </div>
+
+  <!-- Advanced: per-param override -->
+  <div x-show="showAdvanced" x-transition class="mt-3 pt-3 border-t border-warm-200">
+    <div class="text-[10px] text-ink-400 mb-2">微调参数（留空使用预设值）</div>
+    <div class="grid grid-cols-2 gap-x-4 gap-y-2">
+      <template x-for="p in paramDefs" :key="p.key">
+        <div class="flex items-center gap-2">
+          <label class="text-[11px] text-ink-500 w-24 flex-shrink-0" x-text="p.label"></label>
+          <input type="number" :placeholder="presets[mode][p.key]"
+            :value="overrides[p.key] ?? ''"
+            @input="setOverride(p.key, $event.target.value)"
+            class="w-16 text-[11px] border border-warm-300 rounded px-2 py-1 bg-white text-ink-700 text-right
+              focus:border-brand-400 focus:outline-none transition-colors" />
+          <span class="text-[10px] text-ink-300" x-text="p.unit"></span>
+        </div>
+      </template>
+    </div>
+    <div class="flex justify-between items-center mt-3">
+      <button @click="resetOverrides()" x-show="hasOverrides"
+        class="text-[10px] text-ink-400 hover:text-red-500 transition-colors">重置为预设</button>
+      <div></div>
+      <button @click="save()" class="btn btn-primary btn-sm text-[11px]">保存</button>
+    </div>
+  </div>
+</div>
+
+<style>
+.social-style-block {
+  padding: 16px;
+  background: #ffffff;
+  border: 1px solid #e4e2dc;
+  border-radius: 12px;
+}
+.social-mode-card {
+  cursor: pointer;
+  user-select: none;
+}
+.social-mode-card:active {
+  transform: scale(0.98);
+}
+</style>
+
+<script>
+function socialStyleConfig() {
+  return {
+    mode: 'balanced',
+    overrides: {},
+    showAdvanced: false,
+    saving: false,
+
+    // ── Presets ──
+    presets: {
+      active:       { peerCooldownHours: 24,  crossAgentHours: 6,  maxNewHandshakes: 5, followUpHours: 24,   maxFollowUps: 3, unansweredMax: 5, unansweredCooldownDays: 7  },
+      balanced:     { peerCooldownHours: 48,  crossAgentHours: 12, maxNewHandshakes: 2, followUpHours: 48,   maxFollowUps: 2, unansweredMax: 3, unansweredCooldownDays: 30 },
+      conservative: { peerCooldownHours: 96,  crossAgentHours: 24, maxNewHandshakes: 0, followUpHours: null, maxFollowUps: 0, unansweredMax: 1, unansweredCooldownDays: 90 },
+    },
+
+    // ── Display ──
+    modeLabel: { active: '积极', balanced: '稳健', conservative: '保守' },
+    modeDesc: { active: '主动出击，适合推广期', balanced: '日常运营，攻守兼备', conservative: '仅回应，低调运行' },
+    modeColor: { active: 'bg-green-500', balanced: 'bg-brand-500', conservative: 'bg-warm-400' },
+    modeBadge: {
+      active: 'bg-green-50 text-green-700 border border-green-200',
+      balanced: 'bg-brand-50 text-brand-700 border border-brand-200',
+      conservative: 'bg-warm-100 text-ink-500 border border-warm-300',
+    },
+
+    paramDefs: [
+      { key: 'peerCooldownHours',      label: '同一人冷却',   unit: '小时' },
+      { key: 'crossAgentHours',        label: '跨Agent防重', unit: '小时' },
+      { key: 'maxNewHandshakes',       label: '每日新握手',   unit: '次/天' },
+      { key: 'followUpHours',          label: '跟进间隔',     unit: '小时' },
+      { key: 'maxFollowUps',           label: '跟进上限',     unit: '次' },
+      { key: 'unansweredMax',          label: '无回复上限',   unit: '条' },
+      { key: 'unansweredCooldownDays', label: '无回复冷却',   unit: '天' },
+    ],
+
+    // ── Computed ──
+    get effective() {
+      const base = { ...this.presets[this.mode] };
+      for (const [k, v] of Object.entries(this.overrides)) {
+        if (v !== null && v !== undefined && v !== '') base[k] = Number(v);
+      }
+      return base;
+    },
+
+    get hasOverrides() {
+      return Object.values(this.overrides).some(v => v !== null && v !== undefined && v !== '');
+    },
+
+    // ── Actions ──
+    setMode(m) {
+      this.mode = m;
+    },
+
+    setOverride(key, val) {
+      if (val === '' || val === null) {
+        delete this.overrides[key];
+      } else {
+        this.overrides[key] = Number(val);
+      }
+    },
+
+    resetOverrides() {
+      this.overrides = {};
+    },
+
+    async save() {
+      this.saving = true;
+      try {
+        // Save to Mind Config API
+        const relayId = this.$root?.closest('[x-data]')?.__x?.$data?.agents?.[0]?.id
+          || new URLSearchParams(location.search).get('agent')
+          || '';
+        await fetch(`/api/relay/${relayId}/mind-config`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            socialStyle: this.mode,
+            socialOverrides: this.hasOverrides ? this.overrides : null,
+          }),
+        });
+        console.log('[social-style] Saved:', this.mode, this.overrides);
+      } catch (e) {
+        console.error('[social-style] Save failed:', e);
+      }
+      this.saving = false;
+    },
+
+    // ── Init: load from Mind Config ──
+    async init() {
+      // Will be populated by parent component passing data
+      // or can fetch from API
+    },
+  };
+}
+</script>

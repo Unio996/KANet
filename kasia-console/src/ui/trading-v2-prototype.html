@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KANet Free Market</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        base: { 900: '#0a0e17', 800: '#0f1520', 700: '#161d2e', 600: '#1e2740' },
+        cyan: { 400: '#00f0ff', 500: '#00d4e0', 600: '#00b8c4' },
+        buy: '#10b981',
+        sell: '#ef4444',
+        pending: '#f59e0b',
+        dispute: '#f97316',
+      },
+      fontFamily: {
+        mono: ['JetBrains Mono', 'monospace'],
+        sans: ['DM Sans', 'system-ui', 'sans-serif'],
+      }
+    }
+  }
+}
+</script>
+<style>
+  body { background: #0a0e17; color: #e2e8f0; font-family: 'DM Sans', sans-serif; }
+  .font-data { font-family: 'JetBrains Mono', monospace; }
+
+  /* Glassmorphism panels */
+  .glass { background: rgba(15, 21, 32, 0.8); border: 1px solid rgba(0, 240, 255, 0.08); backdrop-filter: blur(12px); }
+  .glass-hover:hover { border-color: rgba(0, 240, 255, 0.2); }
+
+  /* Manifesto bar */
+  .manifesto {
+    background: linear-gradient(90deg, rgba(0,240,255,0.05) 0%, rgba(0,240,255,0.12) 50%, rgba(0,240,255,0.05) 100%);
+    border-top: 1px solid rgba(0,240,255,0.15);
+    border-bottom: 1px solid rgba(0,240,255,0.15);
+  }
+
+  /* State pipeline LED nodes */
+  .state-node { width: 10px; height: 10px; border-radius: 50%; transition: all 0.3s; }
+  .state-node.completed { background: #10b981; box-shadow: 0 0 8px rgba(16,185,129,0.5); }
+  .state-node.active { background: #00f0ff; box-shadow: 0 0 12px rgba(0,240,255,0.6); animation: pulse-cyan 2s infinite; }
+  .state-node.pending { background: #334155; }
+  .state-node.disputed { background: #f97316; box-shadow: 0 0 8px rgba(249,115,22,0.5); }
+  .state-line { height: 2px; flex: 1; transition: background 0.3s; }
+  .state-line.done { background: #10b981; }
+  .state-line.current { background: linear-gradient(90deg, #10b981, #00f0ff); }
+  .state-line.waiting { background: #1e293b; }
+
+  @keyframes pulse-cyan {
+    0%, 100% { box-shadow: 0 0 8px rgba(0,240,255,0.4); }
+    50% { box-shadow: 0 0 20px rgba(0,240,255,0.8); }
+  }
+
+  /* Approval card glow */
+  .approval-glow {
+    animation: glow-amber 3s infinite;
+    border: 1px solid rgba(245,158,11,0.3);
+  }
+  @keyframes glow-amber {
+    0%, 100% { box-shadow: 0 0 15px rgba(245,158,11,0.1); }
+    50% { box-shadow: 0 0 30px rgba(245,158,11,0.25); }
+  }
+
+  /* Order card hover */
+  .order-card { transition: transform 0.15s, border-color 0.15s; }
+  .order-card:hover { transform: translateX(4px); }
+
+  /* Timeline connector */
+  .timeline-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .timeline-line { width: 2px; min-height: 24px; }
+
+  /* Detail expand */
+  .detail-expand { max-height: 0; overflow: hidden; transition: max-height 0.3s ease; }
+  .detail-expand.open { max-height: 200px; }
+
+  /* Wallet bar */
+  .wallet-bar {
+    background: linear-gradient(180deg, rgba(15,21,32,0.95) 0%, rgba(10,14,23,0.98) 100%);
+    border-top: 1px solid rgba(0,240,255,0.1);
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(0,240,255,0.15); border-radius: 2px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(0,240,255,0.3); }
+
+  /* Number highlights */
+  .num-green { color: #10b981; }
+  .num-red { color: #ef4444; }
+  .num-cyan { color: #00f0ff; }
+</style>
+</head>
+
+<body class="min-h-screen flex flex-col" x-data="tradingRoom()">
+
+<!-- ══════ HEADER ══════ -->
+<header class="flex items-center justify-between px-5 py-3 border-b border-base-700">
+  <div class="flex items-center gap-4">
+    <h1 class="text-lg font-semibold tracking-tight">
+      <span class="text-cyan-400">K</span>ANet
+      <span class="text-slate-500 font-normal ml-1">Free Market</span>
+    </h1>
+    <div class="h-4 w-px bg-base-600"></div>
+    <!-- Agent Selector -->
+    <select x-model="selectedAgent" @change="loadData()"
+      class="bg-base-700 border border-base-600 text-sm rounded px-3 py-1.5 font-mono text-cyan-400 focus:border-cyan-400/40 focus:outline-none">
+      <template x-for="a in agents" :key="a.id">
+        <option :value="a.id" x-text="a.name"></option>
+      </template>
+    </select>
+  </div>
+
+  <div class="flex items-center gap-4">
+    <!-- Mode Selector -->
+    <div class="flex rounded-lg overflow-hidden border border-base-600">
+      <template x-for="m in ['manual','approval','auto']" :key="m">
+        <button @click="mode = m"
+          :class="mode === m ? 'bg-cyan-400/10 text-cyan-400 border-cyan-400/20' : 'text-slate-500 hover:text-slate-300'"
+          class="px-3 py-1 text-xs font-mono uppercase tracking-wider transition-all border-r border-base-600 last:border-0"
+          x-text="m"></button>
+      </template>
+    </div>
+    <!-- Live indicator -->
+    <div class="flex items-center gap-1.5">
+      <div class="w-1.5 h-1.5 rounded-full bg-buy animate-pulse"></div>
+      <span class="text-xs text-slate-500 font-mono">LIVE</span>
+    </div>
+  </div>
+</header>
+
+<!-- ══════ MANIFESTO BAR ══════ -->
+<div class="manifesto py-1.5 px-5 text-center">
+  <span class="text-xs tracking-widest text-cyan-400/60 font-mono uppercase">
+    Three-Layer Verifiable
+  </span>
+  <span class="text-xs text-slate-500 mx-3">&mdash;</span>
+  <span class="text-xs text-slate-400">
+    不是"请相信我们"，是三层可验证。每笔交易，链上可查，规则透明，过程可审。
+  </span>
+</div>
+
+<!-- ══════ MAIN CONTENT ══════ -->
+<main class="flex-1 flex overflow-hidden">
+
+  <!-- ── LEFT: Market Orders ── -->
+  <aside class="w-80 border-r border-base-700 flex flex-col">
+    <!-- Tab header -->
+    <div class="flex border-b border-base-700">
+      <button @click="marketTab = 'active'"
+        :class="marketTab === 'active' ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-slate-500'"
+        class="flex-1 py-2.5 text-xs font-mono uppercase tracking-wider transition-colors">
+        Market <span class="font-data" x-text="orders.length"></span>
+      </button>
+      <button @click="marketTab = 'history'"
+        :class="marketTab === 'history' ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-slate-500'"
+        class="flex-1 py-2.5 text-xs font-mono uppercase tracking-wider transition-colors">
+        History
+      </button>
+    </div>
+
+    <!-- Order list -->
+    <div class="flex-1 overflow-y-auto p-3 space-y-2">
+      <template x-for="order in filteredOrders" :key="order.id">
+        <div @click="selectDeal(order)" :class="activeDeal?.id === order.id ? 'border-cyan-400/30' : 'border-transparent'"
+          class="order-card glass glass-hover rounded-lg p-3 cursor-pointer border">
+          <!-- Side badge + amount -->
+          <div class="flex items-center justify-between mb-1.5">
+            <div class="flex items-center gap-2">
+              <span :class="order.side === 'buy' ? 'bg-buy/15 text-buy' : 'bg-sell/15 text-sell'"
+                class="text-[10px] font-mono font-bold uppercase px-1.5 py-0.5 rounded"
+                x-text="order.side"></span>
+              <span class="font-data text-sm font-semibold" x-text="order.kas_amount + ' KAS'"></span>
+            </div>
+            <span class="font-data text-xs" :class="order.side === 'buy' ? 'text-buy' : 'text-sell'"
+              x-text="'$' + order.price"></span>
+          </div>
+          <!-- Meta row -->
+          <div class="flex items-center justify-between text-[11px] text-slate-500">
+            <span x-text="order.chain?.toUpperCase() + ' Chain'"></span>
+            <span x-text="order.peer_name || order.agent_address?.slice(-8)"></span>
+          </div>
+          <!-- Status -->
+          <div class="mt-1.5 flex items-center gap-1.5">
+            <div class="w-1.5 h-1.5 rounded-full"
+              :class="{'bg-buy': order.status==='completed', 'bg-cyan-400': order.status==='published', 'bg-pending': ['accepted','paying','paid','verified','delivering'].includes(order.status), 'bg-sell': order.status==='cancelled' || order.status==='disputed'}"></div>
+            <span class="text-[10px] font-mono uppercase text-slate-400" x-text="order.status"></span>
+          </div>
+        </div>
+      </template>
+
+      <!-- Empty state -->
+      <div x-show="filteredOrders.length === 0" class="text-center py-12 text-slate-600">
+        <div class="text-3xl mb-2">~</div>
+        <div class="text-xs font-mono">NO ORDERS</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── RIGHT: Active Deal Workspace ── -->
+  <section class="flex-1 flex flex-col overflow-hidden">
+
+    <!-- No deal selected -->
+    <div x-show="!activeDeal" class="flex-1 flex items-center justify-center">
+      <div class="text-center">
+        <div class="text-6xl text-base-600 mb-4 font-mono">{ }</div>
+        <div class="text-sm text-slate-500">Select an order to begin</div>
+        <div class="text-xs text-slate-600 mt-1">or publish a new one</div>
+      </div>
+    </div>
+
+    <!-- Deal workspace -->
+    <div x-show="activeDeal" class="flex-1 flex flex-col overflow-hidden">
+
+      <!-- Deal header -->
+      <div class="px-5 py-3 border-b border-base-700 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <span :class="activeDeal?.side === 'buy' ? 'text-buy' : 'text-sell'"
+            class="font-data font-bold text-lg" x-text="(activeDeal?.side === 'buy' ? 'BUY' : 'SELL') + ' ' + activeDeal?.kas_amount + ' KAS'"></span>
+          <span class="text-slate-500">@</span>
+          <span class="font-data text-lg text-white" x-text="'$' + activeDeal?.price"></span>
+          <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-base-600 text-slate-400"
+            x-text="activeDeal?.chain?.toUpperCase()"></span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-slate-500 font-mono" x-text="'ID: ' + activeDeal?.id?.slice(0,8)"></span>
+        </div>
+      </div>
+
+      <!-- State Pipeline -->
+      <div class="px-5 py-4 border-b border-base-700">
+        <div class="flex items-center gap-1">
+          <template x-for="(state, idx) in pipelineStates" :key="state">
+            <template x-if="true">
+              <div class="flex items-center gap-1" :class="idx > 0 ? 'flex-1' : ''">
+                <div x-show="idx > 0" class="state-line"
+                  :class="getStateLineClass(state, idx)"></div>
+                <div class="relative group">
+                  <div class="state-node" :class="getStateNodeClass(state)"></div>
+                  <div class="absolute -bottom-5 left-1/2 -translate-x-1/2 text-[9px] font-mono text-slate-500 whitespace-nowrap"
+                    x-text="state"></div>
+                </div>
+              </div>
+            </template>
+          </template>
+        </div>
+      </div>
+
+      <!-- Scrollable content area -->
+      <div class="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+
+        <!-- Approval Card (if pending) -->
+        <template x-if="pendingApproval">
+          <div class="approval-glow glass rounded-xl p-5">
+            <div class="flex items-center justify-between mb-3">
+              <div class="flex items-center gap-2">
+                <div class="w-2 h-2 rounded-full bg-pending animate-pulse"></div>
+                <span class="text-xs font-mono text-pending uppercase tracking-wider">Awaiting Approval</span>
+              </div>
+              <div class="font-data text-sm text-pending" x-text="approvalCountdown"></div>
+            </div>
+
+            <p class="text-sm text-slate-300 mb-1" x-text="pendingApproval.display_summary"></p>
+
+            <!-- Agent reasoning -->
+            <div class="mt-3 px-3 py-2 rounded bg-base-800/50 border-l-2 border-cyan-400/30">
+              <div class="text-[10px] font-mono text-cyan-400/50 uppercase mb-1">Agent Reasoning</div>
+              <p class="text-xs text-slate-400" x-text="pendingApproval.reason || 'Based on current market conditions and order parameters.'"></p>
+            </div>
+
+            <div class="flex gap-3 mt-4">
+              <button @click="approveExecution()" class="flex-1 py-2 rounded-lg bg-buy/20 text-buy text-sm font-semibold hover:bg-buy/30 transition-colors">
+                Confirm
+              </button>
+              <button @click="rejectExecution()" class="flex-1 py-2 rounded-lg bg-sell/20 text-sell text-sm font-semibold hover:bg-sell/30 transition-colors">
+                Reject
+              </button>
+            </div>
+
+            <p class="text-[10px] text-slate-600 mt-2 text-center">Timeout auto-escalates to dispute</p>
+          </div>
+        </template>
+
+        <!-- Execution Timeline -->
+        <div>
+          <h3 class="text-xs font-mono text-slate-500 uppercase tracking-wider mb-3">Execution Timeline</h3>
+          <div class="space-y-0">
+            <template x-for="(ev, idx) in executionLog" :key="ev.id">
+              <div class="flex gap-3">
+                <!-- Timeline connector -->
+                <div class="flex flex-col items-center">
+                  <div class="timeline-dot"
+                    :class="ev.status === 'completed' ? 'bg-buy' : ev.status === 'executing' ? 'bg-cyan-400' : ev.status === 'failed' ? 'bg-sell' : 'bg-slate-600'"></div>
+                  <div x-show="idx < executionLog.length - 1" class="timeline-line"
+                    :class="ev.status === 'completed' ? 'bg-buy/30' : 'bg-base-600'"></div>
+                </div>
+
+                <!-- Event content -->
+                <div class="pb-4 flex-1 min-w-0">
+                  <!-- Default layer: human-readable -->
+                  <div class="flex items-baseline justify-between">
+                    <span class="text-sm" x-text="ev.display_summary"></span>
+                    <span class="text-[10px] font-data text-slate-500 ml-2 flex-shrink-0" x-text="ev.time"></span>
+                  </div>
+
+                  <!-- Expand trigger -->
+                  <button x-show="ev.details" @click="ev._expanded = !ev._expanded"
+                    class="text-[10px] font-mono text-cyan-400/50 hover:text-cyan-400 mt-1 transition-colors">
+                    <span x-text="ev._expanded ? 'Hide Details' : 'View Details'"></span>
+                    <span x-text="ev._expanded ? ' \u25b4' : ' \u25be'"></span>
+                  </button>
+
+                  <!-- Expand layer: technical details -->
+                  <div x-show="ev._expanded" x-transition class="mt-2 px-3 py-2 rounded bg-base-800/50 border border-base-600 text-[11px] font-data text-slate-500 space-y-1">
+                    <div x-show="ev.details?.rule"><span class="text-slate-600">Rule:</span> <span x-text="ev.details?.rule"></span></div>
+                    <div x-show="ev.details?.source"><span class="text-slate-600">Source:</span> <span x-text="ev.details?.source"></span></div>
+                    <div x-show="ev.details?.tx"><span class="text-slate-600">TX:</span> <span class="text-cyan-400/60" x-text="ev.details?.tx"></span></div>
+                    <div x-show="ev.details?.confirmations"><span class="text-slate-600">Confirmations:</span> <span x-text="ev.details?.confirmations"></span></div>
+                    <div x-show="ev.details?.chain"><span class="text-slate-600">Chain:</span> <span x-text="ev.details?.chain"></span></div>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <div x-show="executionLog.length === 0" class="text-xs text-slate-600 font-mono py-4 text-center">
+            No executions yet
+          </div>
+        </div>
+
+        <!-- Action buttons (context-dependent) -->
+        <div x-show="activeDeal && !pendingApproval" class="flex gap-2">
+          <template x-if="activeDeal?.status === 'published'">
+            <button @click="doAction('accept')" class="flex-1 py-2.5 rounded-lg bg-cyan-400/10 text-cyan-400 text-sm font-semibold hover:bg-cyan-400/20 transition-colors border border-cyan-400/20">
+              Accept Order
+            </button>
+          </template>
+          <template x-if="activeDeal?.status === 'accepted' && activeDeal?.side === 'buy'">
+            <button @click="doAction('pay_usdt')" class="flex-1 py-2.5 rounded-lg bg-buy/10 text-buy text-sm font-semibold hover:bg-buy/20 transition-colors border border-buy/20">
+              Pay USDT
+            </button>
+          </template>
+          <template x-if="activeDeal?.status === 'paid'">
+            <button @click="doAction('verify_payment')" class="flex-1 py-2.5 rounded-lg bg-cyan-400/10 text-cyan-400 text-sm font-semibold hover:bg-cyan-400/20 transition-colors border border-cyan-400/20">
+              Verify Payment
+            </button>
+          </template>
+          <template x-if="activeDeal?.status === 'verified' && activeDeal?.side === 'sell'">
+            <button @click="doAction('send_kas')" class="flex-1 py-2.5 rounded-lg bg-buy/10 text-buy text-sm font-semibold hover:bg-buy/20 transition-colors border border-buy/20">
+              Send KAS
+            </button>
+          </template>
+          <button x-show="activeDeal && !['completed','cancelled','expired','resolved','escalated'].includes(activeDeal?.status)"
+            @click="doAction('cancel')" class="py-2.5 px-4 rounded-lg text-slate-500 text-sm hover:bg-sell/10 hover:text-sell transition-colors">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- ══════ WALLET BAR ══════ -->
+<footer class="wallet-bar px-5 py-2.5 flex items-center justify-between">
+  <div class="flex items-center gap-6">
+    <!-- KAS balance -->
+    <div class="flex items-center gap-2">
+      <span class="text-[10px] font-mono text-slate-500 uppercase">KAS</span>
+      <span class="font-data text-sm text-white" x-text="wallet.kas.toFixed(1)"></span>
+      <span x-show="wallet.kas_locked > 0" class="font-data text-[10px] text-pending">
+        (<span x-text="wallet.kas_locked.toFixed(1)"></span> locked)
+      </span>
+    </div>
+    <div class="h-3 w-px bg-base-600"></div>
+    <!-- USDT balances per chain -->
+    <template x-for="chain in wallet.chains" :key="chain.name">
+      <div class="flex items-center gap-1.5">
+        <span class="text-[10px] font-mono text-slate-600" x-text="chain.name"></span>
+        <span class="font-data text-xs text-slate-300" x-text="chain.usdt.toFixed(2) + ' USDT'"></span>
+        <span x-show="chain.locked > 0" class="font-data text-[10px] text-pending"
+          x-text="'(' + chain.locked.toFixed(2) + ' locked)'"></span>
+      </div>
+    </template>
+  </div>
+  <div class="text-[10px] font-mono text-slate-600">
+    <span x-text="agentName"></span> &middot; <span x-text="mode.toUpperCase()"></span> mode
+  </div>
+</footer>
+
+<!-- ══════ ALPINE DATA ══════ -->
+<script>
+function tradingRoom() {
+  return {
+    // State
+    selectedAgent: 'martin',
+    mode: 'approval',
+    marketTab: 'active',
+    activeDeal: null,
+    pendingApproval: null,
+    approvalCountdown: '12:30',
+
+    // Data
+    agents: [
+      { id: 'martin', name: 'Martin' },
+      { id: 'kasia1', name: 'Kasia_1' },
+      { id: 'sophie', name: 'Sophie' },
+      { id: 'qwen', name: 'Qwen' },
+    ],
+
+    // Mock orders
+    orders: [
+      { id: 'a1b2c3d4-0001', side: 'sell', kas_amount: 500, price: 0.0385, chain: 'bnb', status: 'published', peer_name: 'Sophie', agent_address: 'kaspa:qpjjv2uh...x2ktetp' },
+      { id: 'a1b2c3d4-0002', side: 'buy', kas_amount: 200, price: 0.0382, chain: 'bnb', status: 'accepted', peer_name: 'Martin', agent_address: 'kaspa:qptg465n...ewvmcmv' },
+      { id: 'a1b2c3d4-0003', side: 'sell', kas_amount: 1000, price: 0.0390, chain: 'eth', status: 'published', peer_name: null, agent_address: 'kaspa:qqp49k5h...wq2wq200' },
+      { id: 'a1b2c3d4-0004', side: 'buy', kas_amount: 300, price: 0.0380, chain: 'sol', status: 'verified', peer_name: 'Kasia_1', agent_address: 'kaspa:qptle8yz...09mkzc55' },
+      { id: 'a1b2c3d4-0005', side: 'sell', kas_amount: 150, price: 0.0388, chain: 'tron', status: 'completed', peer_name: 'Sophie', agent_address: 'kaspa:qpjjv2uh...x2ktetp' },
+      { id: 'a1b2c3d4-0006', side: 'buy', kas_amount: 50, price: 0.0375, chain: 'bnb', status: 'cancelled', peer_name: 'External', agent_address: 'kaspa:qz...' },
+    ],
+
+    // Mock execution log
+    executionLog: [
+      { id: 1, display_summary: 'Order accepted - 500 KAS @ $0.0385', status: 'completed', time: '12:03:14',
+        details: { rule: 'accept_order', source: 'owner', chain: 'BNB' }, _expanded: false },
+      { id: 2, display_summary: 'Fund locked: 19.25 USDT (BNB)', status: 'completed', time: '12:03:15',
+        details: { rule: 'fund_lock', source: 'system' }, _expanded: false },
+      { id: 3, display_summary: 'Payment sent: 19.25 USDT to 0x742d...8f2a', status: 'completed', time: '12:04:02',
+        details: { rule: 'pay_usdt', source: 'owner', tx: '0xabc123def456...', chain: 'BNB', confirmations: '15/15' }, _expanded: false },
+      { id: 4, display_summary: 'Payment verified: 19.25 USDT confirmed on BNB', status: 'completed', time: '12:05:08',
+        details: { rule: 'verify_payment', source: 'system', tx: '0xabc123def456...', chain: 'BNB', confirmations: '15/15' }, _expanded: false },
+      { id: 5, display_summary: 'Sending 500 KAS to counterparty...', status: 'executing', time: '12:05:10',
+        details: { rule: 'send_kas', source: 'auto' }, _expanded: false },
+    ],
+
+    // Pipeline states
+    pipelineStates: ['published', 'accepted', 'paying', 'paid', 'verified', 'delivering', 'completed'],
+
+    // Wallet
+    wallet: {
+      kas: 1234.5,
+      kas_locked: 500,
+      chains: [
+        { name: 'BNB', usdt: 7.70, locked: 19.25, gas: 0.01 },
+        { name: 'ETH', usdt: 0, locked: 0, gas: 0.002 },
+        { name: 'SOL', usdt: 15.50, locked: 0, gas: 0.1 },
+        { name: 'TRON', usdt: 25.00, locked: 0, gas: 50 },
+      ],
+    },
+
+    get agentName() {
+      return this.agents.find(a => a.id === this.selectedAgent)?.name || '';
+    },
+
+    get filteredOrders() {
+      if (this.marketTab === 'active') {
+        return this.orders.filter(o => !['completed', 'cancelled', 'expired', 'resolved'].includes(o.status));
+      }
+      return this.orders.filter(o => ['completed', 'cancelled', 'expired', 'resolved'].includes(o.status));
+    },
+
+    selectDeal(order) {
+      this.activeDeal = order;
+      // Mock: show approval for accepted orders in approval mode
+      if (this.mode === 'approval' && order.status === 'accepted' && order.side === 'buy') {
+        this.pendingApproval = {
+          display_summary: `Pay ${(order.kas_amount * order.price).toFixed(2)} USDT to counterparty (${order.chain?.toUpperCase()} Chain) for ${order.kas_amount} KAS`,
+          reason: `Market price is $${order.price}. This is within your auto-limit of 200 KAS. Counterparty has completed 3 previous trades successfully.`,
+        };
+      } else {
+        this.pendingApproval = null;
+      }
+    },
+
+    getStateNodeClass(state) {
+      if (!this.activeDeal) return 'pending';
+      const idx = this.pipelineStates.indexOf(state);
+      const currentIdx = this.pipelineStates.indexOf(this.activeDeal.status);
+      if (this.activeDeal.status === 'disputed') return state === 'disputed' ? 'disputed' : idx <= currentIdx ? 'completed' : 'pending';
+      if (idx < currentIdx) return 'completed';
+      if (idx === currentIdx) return 'active';
+      return 'pending';
+    },
+
+    getStateLineClass(state, idx) {
+      if (!this.activeDeal) return 'waiting';
+      const currentIdx = this.pipelineStates.indexOf(this.activeDeal.status);
+      if (idx <= currentIdx) return 'done';
+      if (idx === currentIdx + 1) return 'current';
+      return 'waiting';
+    },
+
+    loadData() { /* Wire to real API */ },
+    doAction(action) { console.log('Action:', action, this.activeDeal?.id); },
+    approveExecution() { console.log('Approved'); this.pendingApproval = null; },
+    rejectExecution() { console.log('Rejected'); this.pendingApproval = null; },
+  };
+}
+</script>
+</body>
+</html>

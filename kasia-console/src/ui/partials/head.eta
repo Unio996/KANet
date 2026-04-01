@@ -1,0 +1,29 @@
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title><%= it.pageTitle || 'KANet Console' %> — KANet Console</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        warm: { 50: '#faf9f7', 100: '#f7f6f3', 200: '#efeee9', 300: '#e4e2dc', 400: '#d4d0c8' },
+        ink: { 50: '#f5f5f7', 100: '#e8e8ec', 200: '#c8c8d0', 300: '#9496a1', 400: '#6b6d7b', 500: '#4a4b57', 600: '#2d2e3a', 700: '#1a1a2e' },
+        brand: { 50: '#eff6ff', 100: '#dbeafe', 200: '#bfdbfe', 300: '#93c5fd', 400: '#60a5fa', 500: '#3b82f6', 600: '#2563eb', 700: '#1d4ed8' }
+      },
+      fontFamily: {
+        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif']
+      }
+    }
+  }
+}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<script src="/public/kanet-ui.js"></script>
+<%~ include('./styles', it) %>
+<style>
+  [x-cloak] { display: none !important; }
+</style>

@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="<%= it.t.html_lang %>" dir="<%= it.dir %>">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title><%= it.title %> — KANet Console</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    .thinking-dots span {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      margin: 0 2px;
+      border-radius: 50%;
+      background: #9ca3af;
+      animation: thinking 1.4s infinite;
+    }
+    .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+    .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes thinking {
+      0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+      40% { opacity: 1; transform: scale(1); }
+    }
+  </style>
+</head>
+<body class="flex h-screen bg-gray-100 font-sans">
+
+  <!-- Sidebar -->
+  <aside class="w-56 bg-gray-900 text-gray-100 flex flex-col flex-shrink-0">
+    <div class="px-4 py-4 border-b border-gray-700 flex items-center space-x-3">
+      <img src="/public/kanet-logo.png" alt="KANet" class="h-8 w-8 object-contain flex-shrink-0" />
+      <span class="text-base font-bold tracking-wide text-white leading-tight">KANet<br/><span class="text-xs font-normal text-gray-400">Console</span></span>
+    </div>
+    <nav class="flex-1 py-4 space-y-1 px-3 overflow-y-auto">
+      <a href="/agent" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
+        <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        我的 Agent
+      </a>
+      <a href="/conversations" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
+        <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>
+        会话
+      </a>
+      <a href="/identities" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
+        <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+        通讯录
+      </a>
+      <a href="/network" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
+        <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/></svg>
+        网络
+      </a>
+      <a href="/chat" class="flex items-center px-3 py-2 rounded-md text-sm font-medium bg-gray-700 text-white">
+        <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+        聊天
+      </a>
+      <div class="pt-4 border-t border-gray-700 mt-4 space-y-1">
+        <a href="/events" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
+          <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+          活动日志
+        </a>
+        <div class="flex items-center px-3 py-2 text-xs font-medium text-gray-500 uppercase tracking-wider">
+          <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          系统设置
+        </div>
+        <a href="/relays" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors pl-9">
+          <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"/></svg>
+          账户管理
+        </a>
+        <a href="/adapters" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors pl-9">
+          <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          AI 引擎
+        </a>
+      </div>
+    </nav>
+    <div class="px-3 pb-2">
+      <form method="POST" action="/lang">
+        <select name="lang" onchange="this.form.submit()"
+          class="w-full bg-gray-800 text-gray-200 text-xs rounded px-2 py-1.5 border border-gray-700 focus:outline-none cursor-pointer">
+          <% Object.entries(it.langs).forEach(function([code, label]) { %>
+          <option value="<%= code %>" <%= it.lang === code ? 'selected' : '' %>><%= label %></option>
+          <% }) %>
+        </select>
+      </form>
+    </div>
+    <div class="px-5 py-3 border-t border-gray-700 text-xs text-gray-500">KANet Console v0.1</div>
+  </aside>
+
+  <!-- Main -->
+  <div class="flex-1 flex flex-col overflow-hidden" x-data="{
+    channel: '',
+    channelInput: 'kanet-public',
+    messages: [],
+    accounts: <%= JSON.stringify(it.relays.map(r => ({ id: r.id, name: r.name, address: r.address }))) %>,
+    selectedAccount: '<%= it.relays[0]?.id || '' %>',
+    mode: 'local',
+    msgInput: '',
+    sending: false,
+    error: '',
+    polling: null,
+    lastTime: '',
+
+    async init() {
+      // Local mode: per-agent channel
+      this.channel = this._agentChannel();
+      await this.loadMessages();
+      this.polling = setInterval(() => this.poll(), 3000);
+    },
+
+    _agentChannel() {
+      if (this.selectedAccount === '__all__') return 'group';
+      const acct = this.accounts.find(a => a.id === this.selectedAccount);
+      return acct ? acct.name : 'home';
+    },
+
+    switchAgent() {
+      if (this.mode === 'local') {
+        this.channel = this._agentChannel();
+        this.messages = [];
+        this.lastTime = '';
+        this.loadMessages();
+      }
+    },
+
+    async loadMessages() {
+      try {
+        const res = await fetch('/api/chat/messages?channel=' + encodeURIComponent(this.channel) + '&limit=100');
+        const data = await res.json();
+        this.messages = data.messages || [];
+        if (this.messages.length > 0) {
+          this.lastTime = this.messages[this.messages.length - 1].created_at;
+        }
+        this.$nextTick(() => this.scrollBottom());
+      } catch {}
+    },
+
+    async poll() {
+      if (!this.lastTime) return this.loadMessages();
+      try {
+        const res = await fetch('/api/chat/messages?channel=' + encodeURIComponent(this.channel) + '&after=' + encodeURIComponent(this.lastTime));
+        const data = await res.json();
+        if (data.messages && data.messages.length > 0) {
+          this.messages.push(...data.messages);
+          this.lastTime = data.messages[data.messages.length - 1].created_at;
+          this.$nextTick(() => this.scrollBottom());
+        }
+      } catch {}
+    },
+
+    switchChannel() {
+      if (this.channelInput.trim()) {
+        this.channel = this.channelInput.trim();
+        this.messages = [];
+        this.lastTime = '';
+        this.loadMessages();
+      }
+    },
+
+    async send() {
+      if (!this.msgInput.trim() || !this.selectedAccount || this.sending) return;
+      const content = this.msgInput.trim();
+      this.msgInput = '';
+      this.error = '';
+      this.sending = true;
+
+      const now = new Date().toISOString();
+
+      // Optimistic: show user message immediately
+      this.messages.push({
+        id: 'temp-' + Date.now(),
+        sender_address: 'owner:' + this.selectedAccount,
+        content: content,
+        created_at: now,
+        _temp: true,
+      });
+
+      // Thinking bubble(s) for target agent(s)
+      const isGroup = this.selectedAccount === '__all__';
+      const targets = isGroup
+        ? this.accounts
+        : [this.accounts.find(a => a.id === this.selectedAccount)].filter(Boolean);
+
+      for (const acct of targets) {
+        this.messages.push({
+          id: 'thinking-' + acct.id,
+          sender_address: acct.address,
+          content: '',
+          created_at: now,
+          _thinking: true,
+        });
+      }
+      this.$nextTick(() => this.scrollBottom());
+
+      // Pause polling to avoid duplicates
+      if (this.polling) clearInterval(this.polling);
+
+      // Fire API
+      const endpoint = this.mode === 'local' ? '/api/chat/local' : '/api/chat/send';
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            relayId: this.selectedAccount,
+            channel: this.channel,
+            message: content
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Send failed');
+      } catch (e) {
+        this.error = e.message;
+      }
+
+      // Reload real messages (replaces temp/thinking with DB data)
+      await this.loadMessages();
+      this.sending = false;
+      this.polling = setInterval(() => this.poll(), 3000);
+    },
+
+    scrollBottom() {
+      const el = document.getElementById('chat-messages');
+      if (el) el.scrollTop = el.scrollHeight;
+    },
+
+    displayName(addr) {
+      if (!addr) return '?';
+      if (addr.startsWith('owner:')) return 'Owner';
+      const acct = this.accounts.find(a => a.address === addr);
+      if (acct) return acct.name;
+      return addr.slice(-8);
+    },
+
+    selectedAddress() {
+      const acct = this.accounts.find(a => a.id === this.selectedAccount);
+      return acct?.address || '';
+    },
+
+    isMe(addr) {
+      return addr && addr.startsWith('owner:');
+    },
+
+    isLocalAgent(addr) {
+      return this.accounts.some(a => a.address === addr);
+    },
+
+    isConfirmCard(content) {
+      if (!content || typeof content !== 'string') return false;
+      try { const p = JSON.parse(content); return p.type === 'confirm' && p.token; } catch { return false; }
+    },
+
+    isQueryCard(content) {
+      if (!content || typeof content !== 'string') return false;
+      try { const p = JSON.parse(content); return p.type === 'query_card'; } catch { return false; }
+    },
+
+    parseCard(content) {
+      try { return JSON.parse(content); } catch { return null; }
+    },
+
+    cardDataEntries(data) {
+      if (!data || typeof data !== 'object') return [];
+      const entries = [];
+      const flatten = (obj, prefix) => {
+        for (const [k, v] of Object.entries(obj)) {
+          if (v === null || v === undefined) continue;
+          const key = prefix ? prefix + '.' + k : k;
+          if (Array.isArray(v)) {
+            entries.push([key, v.length + ' items']);
+          } else if (typeof v === 'object') {
+            flatten(v, key);
+          } else {
+            entries.push([key, String(v)]);
+          }
+        }
+      };
+      flatten(data, '');
+      return entries.slice(0, 12);
+    },
+
+    parseConfirm(content) {
+      try { return JSON.parse(content); } catch { return null; }
+    },
+
+    async doConfirm(msg) {
+      const card = this.parseConfirm(msg.content);
+      if (!card) return;
+      try {
+        const res = await fetch('/api/chat/confirm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relayNodeId: this.selectedAccount, token: card.token }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          msg.content = '已执行: ' + (typeof data.result === 'string' ? data.result : JSON.stringify(data.result));
+        } else {
+          msg.content = '失败: ' + (data.error || 'unknown');
+        }
+      } catch (e) { msg.content = '执行失败: ' + e.message; }
+    },
+
+    fmtTime(t) {
+      if (!t) return '';
+      try { return new Date(t).toLocaleTimeString(); } catch { return t; }
+    },
+
+    addrColor(addr) {
+      if (!addr) return 'bg-gray-200 text-gray-600';
+      if (this.isMe(addr)) return 'bg-purple-100 text-purple-700';
+      const colors = [
+        'bg-blue-50 text-blue-600', 'bg-green-50 text-green-600',
+        'bg-orange-50 text-orange-600', 'bg-teal-50 text-teal-600',
+        'bg-pink-50 text-pink-600', 'bg-indigo-50 text-indigo-600',
+      ];
+      let hash = 0;
+      for (let i = 0; i < addr.length; i++) hash = (hash * 31 + addr.charCodeAt(i)) & 0x7fffffff;
+      return colors[hash % colors.length];
+    }
+  }">
+
+    <!-- Header -->
+    <header class="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between flex-shrink-0">
+      <div class="flex items-center space-x-3">
+        <!-- Local mode: show agent name -->
+        <template x-if="mode === 'local'">
+          <div class="flex items-center space-x-2">
+            <h1 class="text-lg font-semibold text-gray-800" x-text="selectedAccount === '__all__' ? 'Group Chat' : 'Chat with ' + _agentChannel()"></h1>
+          </div>
+        </template>
+        <!-- Chain mode: show channel input -->
+        <template x-if="mode === 'chain'">
+          <div class="flex items-center space-x-3">
+            <h1 class="text-lg font-semibold text-gray-800">Broadcast</h1>
+            <span class="text-sm text-gray-400">#</span>
+            <input type="text" x-model="channelInput" @keydown.enter="switchChannel()"
+              class="text-sm font-medium text-gray-700 bg-gray-50 border border-gray-200 rounded px-2 py-1 w-48 focus:outline-none focus:ring-2 focus:ring-purple-500" />
+            <button @click="switchChannel()" class="text-xs text-purple-600 hover:text-purple-800">Join</button>
+          </div>
+        </template>
+      </div>
+      <div class="flex items-center space-x-3">
+        <button @click="mode = mode === 'local' ? 'chain' : 'local'; channel = mode === 'local' ? _agentChannel() : 'kanet-public'; channelInput = mode === 'chain' ? channel : ''; messages = []; lastTime = ''; loadMessages();"
+          class="flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors"
+          :class="mode === 'local' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'">
+          <span x-text="mode === 'local' ? '🏠' : '🌐'"></span>
+          <span x-text="mode === 'local' ? 'Local' : 'On-chain'"></span>
+        </button>
+        <select x-model="selectedAccount" @change="switchAgent()" class="text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none">
+          <template x-for="a in accounts" :key="a.id">
+            <option :value="a.id" x-text="a.name"></option>
+          </template>
+          <option value="__all__">全体成员</option>
+        </select>
+      </div>
+    </header>
+
+    <!-- Messages -->
+    <div id="chat-messages" class="flex-1 overflow-y-auto p-6 space-y-3">
+      <!-- Empty state -->
+      <div x-show="messages.length === 0" class="flex items-center justify-center h-full">
+        <div class="text-center text-gray-400">
+          <p class="text-sm" x-text="mode === 'local' ? 'Say hi to ' + _agentChannel() + '!' : 'No messages in #' + channel + ' yet.'"></p>
+          <p class="text-xs mt-1" x-text="mode === 'local' ? 'Free, instant, just you and your Agent.' : 'Send the first message! On-chain forever, minimal fee.'"></p>
+        </div>
+      </div>
+
+      <!-- Message list -->
+      <template x-for="msg in messages" :key="msg.id">
+        <div class="flex items-start space-x-3" :class="isMe(msg.sender_address) ? 'flex-row-reverse space-x-reverse' : ''">
+          <!-- Avatar -->
+          <div class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
+            :class="addrColor(msg.sender_address)"
+            x-text="displayName(msg.sender_address).slice(0, 2)">
+          </div>
+          <!-- Bubble -->
+          <div class="max-w-lg rounded-lg px-4 py-2 text-sm"
+            :class="isMe(msg.sender_address)
+              ? 'bg-purple-600 text-white'
+              : isLocalAgent(msg.sender_address)
+                ? 'bg-gray-50 border border-gray-200 text-gray-800'
+                : 'bg-white border border-gray-300 text-gray-800'">
+            <!-- Name label for non-me messages -->
+            <div x-show="!isMe(msg.sender_address)" class="text-xs font-semibold mb-1"
+              :class="isLocalAgent(msg.sender_address) ? 'text-blue-500' : 'text-gray-500'"
+              x-text="displayName(msg.sender_address)"></div>
+            <template x-if="msg._thinking">
+              <div class="thinking-dots py-1"><span></span><span></span><span></span></div>
+            </template>
+            <template x-if="!msg._thinking && !isConfirmCard(msg.content) && !isQueryCard(msg.content)">
+              <p x-text="msg.content"></p>
+            </template>
+            <!-- Query data card (multi-dimension results) -->
+            <template x-if="!msg._thinking && isQueryCard(msg.content)">
+              <div>
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-2">
+                  <div class="text-xs font-semibold text-blue-700 mb-2" x-text="parseCard(msg.content)?.label"></div>
+                  <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                    <template x-for="[k,v] in cardDataEntries(parseCard(msg.content)?.data)" :key="k">
+                      <div class="contents">
+                        <span class="text-blue-400 truncate" x-text="k"></span>
+                        <span class="text-blue-800 font-mono text-right" x-text="v"></span>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+                <p class="text-sm" x-text="parseCard(msg.content)?.summary"></p>
+              </div>
+            </template>
+            <!-- Confirm card for execute intents -->
+            <template x-if="!msg._thinking && isConfirmCard(msg.content)">
+              <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 my-1">
+                <div class="text-xs font-semibold text-amber-800 mb-2" x-text="'待确认：' + parseConfirm(msg.content)?.label"></div>
+                <div class="text-xs text-amber-700 space-y-0.5 mb-2">
+                  <template x-for="[k,v] in Object.entries(parseConfirm(msg.content)?.params || {})" :key="k">
+                    <div><span class="font-medium" x-text="k"></span>: <span class="font-mono" x-text="v"></span></div>
+                  </template>
+                </div>
+                <div class="flex gap-2">
+                  <button @click="doConfirm(msg)" class="px-3 py-1 text-xs font-medium text-white bg-amber-600 rounded-md hover:bg-amber-700">确认执行</button>
+                  <button @click="msg.content = '已取消'" class="px-3 py-1 text-xs font-medium text-amber-700 bg-white border border-amber-300 rounded-md hover:bg-amber-50">取消</button>
+                </div>
+                <div class="text-[10px] text-amber-400 mt-1">30秒后过期</div>
+              </div>
+            </template>
+            <div x-show="!msg._temp && !msg._thinking" class="flex items-center space-x-2 mt-1"
+              :class="isMe(msg.sender_address) ? 'text-purple-200' : 'text-gray-400'">
+              <span class="text-xs" x-text="fmtTime(msg.created_at)"></span>
+              <a x-show="msg.tx_hash && !msg.tx_hash.startsWith('local-')" :href="'https://explorer.kaspa.org/txs/' + msg.tx_hash" target="_blank"
+                class="text-xs underline opacity-60 hover:opacity-100">tx</a>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- Input -->
+    <div class="bg-white border-t border-gray-200 px-6 py-3 flex-shrink-0">
+      <div class="flex items-center space-x-3">
+        <input type="text" x-model="msgInput" @keydown.enter="send()"
+          :placeholder="mode !== 'local' ? 'Broadcast on-chain...' : selectedAccount === '__all__' ? 'Message all agents...' : 'Message ' + _agentChannel() + '...'"
+          class="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-50" />
+        <button @click="send()" :disabled="sending || !msgInput.trim()"
+          class="px-5 py-2 rounded-lg text-sm font-medium transition-colors"
+          :class="sending ? 'bg-gray-300 text-gray-500' : 'bg-purple-600 text-white hover:bg-purple-700'">
+          <span x-show="!sending">Send</span>
+          <span x-show="sending">...</span>
+        </button>
+      </div>
+      <div x-show="error" class="mt-1 text-xs text-red-500" x-text="error"></div>
+      <div class="mt-1 text-xs text-gray-400">
+        <span x-show="mode === 'local'" class="text-green-600">🏠 Local mode — free, instant, just you and your Agent</span>
+        <span x-show="mode === 'chain'">🌐 On-chain broadcast to <span class="font-medium" x-text="'#' + channel"></span> — Fee: ~0.00002 KAS</span>
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>

@@ -1,0 +1,105 @@
+<style>
+/* ── KANet Design System v2 — Shared Utilities ── */
+
+/* Status indicator dots */
+.status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.status-dot.green  { background: #16a34a; box-shadow: 0 0 6px rgba(22,163,74,0.4); }
+.status-dot.yellow { background: #d97706; box-shadow: 0 0 6px rgba(217,119,6,0.3); }
+.status-dot.red    { background: #dc2626; box-shadow: 0 0 6px rgba(220,38,38,0.3); }
+.status-dot.gray   { background: #9496a1; }
+
+/* Semantic badges */
+.badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 4px;
+  font-size: 11px; font-weight: 500; line-height: 1.4;
+  white-space: nowrap;
+}
+.badge-success { background: #f0fdf4; border: 1px solid #bbf7d0; color: #16a34a; }
+.badge-warning { background: #fffbeb; border: 1px solid #fde68a; color: #d97706; }
+.badge-error   { background: #fef2f2; border: 1px solid #fecaca; color: #dc2626; }
+.badge-info    { background: #eff6ff; border: 1px solid #bfdbfe; color: #2563eb; }
+.badge-neutral { background: #f5f5f7; border: 1px solid #e8e8ec; color: #6b6d7b; }
+
+/* Cards */
+.card {
+  background: #ffffff; border: 1px solid #e4e2dc; border-radius: 12px;
+  padding: 16px;
+}
+.card-compact { padding: 12px; }
+.card-flush   { padding: 0; }
+
+/* Three-level verifiable pattern */
+.verify-layer-1 { /* Human language — default visible */ }
+.verify-layer-2 { background: #faf9f7; border-radius: 8px; padding: 12px; font-size: 13px; }
+.verify-layer-3 { background: #f7f6f3; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 12px; word-break: break-all; }
+
+/* Tabs */
+.tab-bar { display: flex; gap: 0; border-bottom: 1px solid #e4e2dc; }
+.tab-item {
+  padding: 8px 16px; font-size: 13px; font-weight: 500;
+  color: #9496a1; cursor: pointer; border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+.tab-item:hover { color: #4a4b57; }
+.tab-item.active { color: #3b82f6; border-bottom-color: #3b82f6; }
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 6px 14px; border-radius: 8px;
+  font-size: 13px; font-weight: 500;
+  cursor: pointer; transition: all 0.15s;
+  border: none; outline: none;
+}
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary { background: #3b82f6; color: white; }
+.btn-primary:hover:not(:disabled) { background: #2563eb; }
+.btn-secondary { background: #eff6ff; color: #2563eb; }
+.btn-secondary:hover:not(:disabled) { background: #dbeafe; }
+.btn-ghost { background: transparent; color: #6b6d7b; }
+.btn-ghost:hover:not(:disabled) { background: #f7f6f3; color: #4a4b57; }
+.btn-danger { background: #fef2f2; color: #dc2626; }
+.btn-danger:hover:not(:disabled) { background: #fecaca; }
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+
+/* Address display */
+.addr { font-family: monospace; font-size: 12px; color: #4a4b57; }
+.addr-short { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Order status colors — non-intrusive, integrated into flow */
+.order-published  { border-left: 3px solid #3b82f6; }
+.order-accepted   { border-left: 3px solid #8b5cf6; }
+.order-paying     { border-left: 3px solid #d97706; }
+.order-paid       { border-left: 3px solid #d97706; }
+.order-verified   { border-left: 3px solid #16a34a; }
+.order-delivering { border-left: 3px solid #16a34a; }
+.order-completed  { border-left: 3px solid #16a34a; }
+.order-cancelled  { border-left: 3px solid #9496a1; }
+.order-expired    { border-left: 3px solid #9496a1; }
+.order-disputed   { border-left: 3px solid #dc2626; }
+.order-escalated  { border-left: 3px solid #dc2626; }
+
+/* Approval card — subtle amber glow, not intrusive */
+.approval-card {
+  border: 1px solid #fde68a; background: #fffbeb; border-radius: 12px;
+  padding: 16px; transition: box-shadow 0.3s;
+}
+.approval-card:hover { box-shadow: 0 0 12px rgba(217,119,6,0.1); }
+
+/* Loading skeleton */
+.skeleton {
+  background: linear-gradient(90deg, #efeee9 25%, #f7f6f3 50%, #efeee9 75%);
+  background-size: 200% 100%;
+  animation: skeleton-pulse 1.5s infinite;
+  border-radius: 4px;
+}
+@keyframes skeleton-pulse {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Transition helpers */
+.fade-enter { opacity: 0; transform: translateY(4px); }
+.fade-enter-active { transition: opacity 0.2s, transform 0.2s; }
+</style>

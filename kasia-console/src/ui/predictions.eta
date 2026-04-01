@@ -1,0 +1,725 @@
+<%~ include('partials/page-open', { _page: 'predictions', pageTitle: '预测市场', ...it }) %>
+
+<div class="p-6" x-data="predictionsPage()" x-init="init()">
+
+  <!-- 钱包状态栏 -->
+  <div class="card card-compact mb-4 flex items-center gap-4 flex-wrap">
+    <select x-model="selectedAgent" @change="loadWalletStatus()" class="rounded-lg border border-warm-300 px-3 py-1.5 text-sm bg-white font-medium">
+      <% it.relayNodes.forEach(r => { %>
+      <option value="<%= r.id %>"><%= r.name %></option>
+      <% }) %>
+    </select>
+
+    <template x-if="walletStatus.hasWallet">
+      <div class="flex items-center gap-3 text-sm">
+        <span class="font-mono text-xs text-ink-400 cursor-pointer" @click="navigator.clipboard.writeText(walletStatus.address)" title="点击复制" x-text="walletStatus.address?.slice(0,8) + '...' + walletStatus.address?.slice(-6)"></span>
+        <span class="font-bold" :class="walletStatus.usdc > 0 ? 'text-green-600' : 'text-ink-400'" x-text="(walletStatus.usdc ?? 0).toFixed(2) + ' USDC'"></span>
+        <template x-if="walletStatus.usdt > 0">
+          <span class="text-xs text-ink-500" x-text="walletStatus.usdt.toFixed(2) + ' USDT'"></span>
+        </template>
+        <template x-if="walletStatus.matic > 0">
+          <span class="text-xs text-ink-400" x-text="walletStatus.matic.toFixed(4) + ' MATIC'"></span>
+        </template>
+        <template x-if="walletStatus.approved">
+          <span class="badge badge-success text-[9px]">已授权</span>
+        </template>
+        <template x-if="!walletStatus.approved && walletStatus.hasWallet">
+          <button @click="doApprove()" :disabled="approving" class="btn btn-sm btn-warning text-[10px]">
+            <span x-text="approving ? '授权中...' : '授权 USDC'"></span>
+          </button>
+        </template>
+        <template x-if="walletStatus.hasClobKey">
+          <span class="badge badge-info text-[9px]">API 就绪</span>
+        </template>
+        <template x-if="!walletStatus.hasClobKey && walletStatus.hasWallet">
+          <button @click="setupClob()" :disabled="settingUp" class="btn btn-sm btn-secondary text-[10px]">
+            <span x-text="settingUp ? '设置中...' : '设置 API Key'"></span>
+          </button>
+        </template>
+        <button @click="logoutPolymarket()" class="btn btn-sm btn-ghost text-[10px] text-red-400">退出</button>
+      </div>
+    </template>
+    <template x-if="!walletStatus.hasWallet">
+      <div class="flex items-center gap-2">
+        <span class="text-xs text-ink-400">无 Polygon 钱包</span>
+        <button @click="createPolygonWallet()" :disabled="creatingWallet" class="btn btn-sm btn-primary text-[10px]">
+          <span x-text="creatingWallet ? '创建中...' : '创建 Polygon 钱包'"></span>
+        </button>
+        <span x-show="walletMsg && !walletStatus.hasWallet" class="text-xs text-red-500" x-text="walletMsg"></span>
+      </div>
+    </template>
+    <div x-show="walletMsg" class="text-xs ml-2" :class="walletMsg.includes('失败') ? 'text-red-500' : 'text-green-600'" x-text="walletMsg"></div>
+  </div>
+
+  <!-- 新手引导 -->
+  <template x-if="showGuide">
+    <div class="card card-flush overflow-hidden mb-5 border-brand-200">
+      <div class="px-5 py-4 bg-brand-50 border-b border-brand-100">
+        <div class="flex items-center justify-between">
+          <span class="text-sm font-medium text-brand-700">预测市场是什么？</span>
+          <button @click="showGuide = false; localStorage.setItem('prediction_guide_seen','1')" class="text-xs text-brand-400 hover:text-brand-600">知道了，不再显示</button>
+        </div>
+      </div>
+      <div class="px-5 py-4 space-y-3 text-sm text-ink-600 leading-relaxed">
+        <p><strong>预测市场 = 用真金白银投票的民意调查。</strong></p>
+        <p>每个市场是一个问题，比如"美国会进入衰退吗？"。参与者用 USDC 押注 Yes 或 No。</p>
+        <div class="bg-warm-50 rounded-lg p-3 text-xs space-y-1">
+          <p><strong>怎么参与？</strong></p>
+          <p>1. 创建 Polygon 钱包（Agent 页 → 钱包）</p>
+          <p>2. 充值 USDC 到 Polygon 钱包地址</p>
+          <p>3. 点上方"授权 USDC"+ "设置 API Key"</p>
+          <p>4. 在下方市场卡片点"交易"下单</p>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-4">
+    <div class="flex items-center gap-3">
+      <span class="text-sm text-ink-400" x-text="filtered.length + '/' + markets.length + ' 个市场'"></span>
+      <button x-show="!showGuide" @click="showGuide = true" class="text-[10px] text-brand-500 hover:text-brand-700">新手指南</button>
+    </div>
+    <div class="flex items-center gap-3">
+      <button @click="showPositions = !showPositions" class="btn btn-sm btn-ghost text-[10px]" x-text="showPositions ? '隐藏持仓' : '我的持仓'"></button>
+      <input x-model="search" @input="page = 1" placeholder="搜索市场..." class="rounded-lg border border-warm-300 px-3 py-1.5 text-xs w-48" />
+      <label class="flex items-center gap-1 text-[10px] text-ink-400 cursor-pointer">
+        <input type="checkbox" x-model="showExpired" @change="page = 1" class="w-3 h-3" />
+        含历史
+      </label>
+      <a href="https://polymarket.com" target="_blank" class="text-xs text-brand-500 hover:text-brand-700">Polymarket &nearr;</a>
+    </div>
+  </div>
+
+  <!-- Sort + Filter tabs -->
+  <div class="flex items-center gap-2 mb-4 flex-wrap">
+    <div class="tab-bar">
+      <button class="tab-item" :class="sortBy === 'volume' && 'active'" @click="sortBy = 'volume'; page = 1">热门</button>
+      <button class="tab-item" :class="sortBy === 'ending' && 'active'" @click="sortBy = 'ending'; page = 1">即将到期</button>
+      <button class="tab-item" :class="sortBy === 'volatile' && 'active'" @click="sortBy = 'volatile'; page = 1">争议最大</button>
+      <button class="tab-item" :class="sortBy === 'newest' && 'active'" @click="sortBy = 'newest'; page = 1">最新</button>
+    </div>
+    <div class="flex gap-1 ml-2">
+      <button class="px-2 py-1 rounded text-[10px] transition-colors" :class="filterCat === '' ? 'bg-brand-100 text-brand-700' : 'text-ink-400 hover:bg-warm-100'" @click="filterCat = ''; page = 1">全部</button>
+      <template x-for="cat in categories" :key="cat">
+        <button class="px-2 py-1 rounded text-[10px] transition-colors" :class="filterCat === cat ? 'bg-brand-100 text-brand-700' : 'text-ink-400 hover:bg-warm-100'" @click="filterCat = cat; page = 1" x-text="cat"></button>
+      </template>
+    </div>
+  </div>
+
+  <!-- 持仓面板 -->
+  <template x-if="showPositions">
+    <div class="card mb-5">
+      <div class="text-sm font-medium text-ink-700 mb-3">我的持仓</div>
+      <div x-show="!positions.length" class="text-xs text-ink-400 py-4 text-center">暂无持仓</div>
+      <template x-for="pos in positions" :key="pos.asset">
+        <div class="py-2 border-b border-warm-100 last:border-0 text-xs">
+          <div class="flex items-center gap-2">
+            <span class="font-medium text-ink-700 flex-1" x-text="pos.question || pos.title || pos.market?.slice(0,20) + '...'"></span>
+            <span class="px-1.5 py-0.5 rounded text-[10px] font-medium" :class="pos.outcome === 'Yes' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'" x-text="pos.outcome"></span>
+            <span class="font-bold" x-text="pos.size + ' 份'"></span>
+            <span class="text-ink-400" x-text="'@ $' + (pos.avgPrice || 0).toFixed(3)"></span>
+            <span x-show="pos.closed" class="px-1.5 py-0.5 rounded bg-warm-200 text-ink-500 text-[10px]">待结算</span>
+          </div>
+          <div class="text-[10px] text-ink-400 mt-0.5" x-show="pos.totalCost > 0" x-text="'投入 $' + pos.totalCost.toFixed(2) + ' · 预期价值 $' + (pos.size * 1).toFixed(2) + ' (如胜)'"></div>
+        </div>
+      </template>
+      <!-- 活跃订单 -->
+      <div class="mt-3">
+        <div class="text-xs font-medium text-ink-500 mb-2">活跃订单</div>
+        <div x-show="!orders.length" class="text-xs text-ink-300 text-center py-2">无活跃订单</div>
+        <template x-for="ord in orders" :key="ord.id">
+          <div class="flex items-center gap-2 py-1.5 border-b border-warm-50 last:border-0 text-xs">
+            <span class="badge text-[8px]" :class="ord.side==='BUY'?'badge-success':'badge-error'" x-text="ord.side"></span>
+            <span class="text-ink-600" x-text="'$' + (ord.price || 0)"></span>
+            <span class="text-ink-400" x-text="ord.original_size + ' 份'"></span>
+            <button @click="cancelOrd(ord.id)" class="ml-auto text-red-400 hover:text-red-600 text-[10px]">撤单</button>
+          </div>
+        </template>
+      </div>
+    </div>
+  </template>
+
+  <!-- Market list -->
+  <div class="space-y-3">
+    <template x-for="(m, idx) in paged" :key="idx">
+      <div class="bg-white rounded-xl border border-warm-200 p-4 hover:border-brand-300 transition-colors">
+        <!-- Question + 概率 -->
+        <div class="flex items-start justify-between gap-4">
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium text-ink-700 leading-relaxed" x-text="m.question"></div>
+            <template x-if="m.description">
+              <div class="text-xs text-ink-400 mt-1 line-clamp-2" x-text="m.description.substring(0, 120) + (m.description.length > 120 ? '...' : '')"></div>
+            </template>
+          </div>
+          <template x-if="m.yes != null">
+            <div class="text-right flex-shrink-0">
+              <div class="text-2xl font-bold" :class="m.yes > 70 ? 'text-green-600' : m.yes < 30 ? 'text-red-500' : 'text-amber-600'"
+                x-text="m.yes + '%'"></div>
+              <div class="text-[10px] text-ink-300">Yes 概率</div>
+            </div>
+          </template>
+        </div>
+
+        <!-- 概率条 -->
+        <template x-if="m.yes != null">
+          <div class="mt-3">
+            <div class="flex items-center gap-2">
+              <span class="text-[10px] text-green-600 w-8" x-text="m.yes + '%'"></span>
+              <div class="flex-1 h-3 bg-warm-200 rounded-full overflow-hidden flex">
+                <div class="h-full bg-green-500 rounded-l-full transition-all" :style="'width:' + m.yes + '%'"></div>
+                <div class="h-full bg-red-400 rounded-r-full transition-all" :style="'width:' + m.no + '%'"></div>
+              </div>
+              <span class="text-[10px] text-red-500 w-8 text-right" x-text="m.no + '%'"></span>
+            </div>
+          </div>
+        </template>
+
+        <!-- 交易数据 -->
+        <div class="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-[11px] text-ink-400">
+          <template x-if="m.volume24h > 0"><span x-text="'24h: $' + formatVol(m.volume24h)"></span></template>
+          <template x-if="m.liquidity > 0"><span x-text="'流动性: $' + formatVol(m.liquidity)"></span></template>
+          <template x-if="m.spread != null"><span x-text="'价差: ' + (m.spread * 100).toFixed(1) + '%'"></span></template>
+          <template x-if="m.endDate"><span x-text="'截止 ' + m.endDate.substring(0, 10)"></span></template>
+        </div>
+
+        <!-- 中文解读 -->
+        <template x-if="m.yes != null">
+          <div class="mt-2 text-xs px-3 py-2 rounded-lg"
+            :class="m.yes > 70 ? 'bg-green-50 text-green-700' : m.yes < 30 ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'"
+            x-text="interpret(m)"></div>
+        </template>
+
+        <!-- 操作栏 -->
+        <div class="flex items-center gap-2 mt-3">
+          <button @click="toggleTrade(idx)" class="btn btn-sm btn-primary text-[10px]"
+            x-text="tradeIdx === idx ? '收起' : '交易'"></button>
+          <button @click="askAgent(m)" :disabled="m._asking" class="btn btn-sm btn-secondary text-[10px]"
+            x-text="m._asking ? '分析中...' : m._agentReply ? '再问一次' : '问 Agent'"></button>
+          <template x-if="m.slug">
+            <a :href="'https://polymarket.com/event/' + m.slug" target="_blank" class="text-[10px] text-brand-500 hover:text-brand-700">详情 &rarr;</a>
+          </template>
+          <template x-if="m.description">
+            <button @click="m._showRule = !m._showRule" class="text-[10px] text-ink-400 hover:text-ink-600" x-text="m._showRule ? '收起规则' : '分辨规则'"></button>
+          </template>
+        </div>
+
+        <!-- Agent 对话 -->
+        <template x-if="m._agentReply">
+          <div class="mt-3 border border-brand-200 rounded-xl p-4 bg-brand-50/20">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="w-5 h-5 rounded-full bg-brand-500 text-white text-[10px] flex items-center justify-center font-bold">A</span>
+              <span class="text-xs font-medium text-brand-700">Agent</span>
+              <button @click="m._agentReply = null; m._chatHistory = null" class="ml-auto text-[10px] text-ink-300 hover:text-ink-500">结束对话</button>
+            </div>
+            <!-- Chat history -->
+            <template x-if="m._chatHistory?.length > 0">
+              <div class="space-y-2 mb-3">
+                <template x-for="(msg, mi) in m._chatHistory" :key="mi">
+                  <div class="text-sm leading-relaxed whitespace-pre-line"
+                    :class="msg.role === 'agent' ? 'text-ink-600' : 'text-brand-700 bg-brand-50 rounded-lg px-3 py-1.5'">
+                    <span x-text="msg.text"></span>
+                  </div>
+                </template>
+              </div>
+            </template>
+            <!-- Latest reply (if no history yet) -->
+            <div x-show="!m._chatHistory?.length" class="text-sm text-ink-600 leading-relaxed whitespace-pre-line mb-3" x-text="m._agentReply"></div>
+            <!-- Reply input -->
+            <div class="flex gap-2">
+              <input type="text" x-model="m._replyInput" @keydown.enter="replyToAgent(m)"
+                :disabled="m._asking" placeholder="回复 Agent..."
+                class="flex-1 text-sm border border-warm-300 rounded-lg px-3 py-1.5" />
+              <button @click="replyToAgent(m)" :disabled="m._asking || !m._replyInput"
+                class="btn btn-sm btn-primary text-[10px]"
+                x-text="m._asking ? '...' : '发送'"></button>
+            </div>
+          </div>
+        </template>
+
+        <!-- 分辨规则 -->
+        <template x-if="m._showRule">
+          <div class="mt-2 text-[11px] text-ink-500 bg-warm-50 rounded-lg p-3 leading-relaxed">
+            <p x-text="m.description"></p>
+            <template x-if="m.resolutionSource"><p class="mt-1 font-medium" x-text="'信息来源: ' + m.resolutionSource"></p></template>
+          </div>
+        </template>
+
+        <!-- 交易面板 -->
+        <template x-if="tradeIdx === idx">
+          <div class="mt-3 border border-brand-200 rounded-xl p-4 bg-brand-50/30">
+            <div class="grid grid-cols-2 gap-4">
+              <!-- 下单表单 -->
+              <div>
+                <div class="text-xs font-medium text-ink-700 mb-2">下单</div>
+                <div class="space-y-2">
+                  <div class="flex gap-2">
+                    <button @click="tradeForm.outcome = 'yes'" class="flex-1 btn btn-sm text-[10px]"
+                      :class="tradeForm.outcome === 'yes' ? 'btn-primary bg-green-600 hover:bg-green-700' : 'btn-ghost'">Yes</button>
+                    <button @click="tradeForm.outcome = 'no'" class="flex-1 btn btn-sm text-[10px]"
+                      :class="tradeForm.outcome === 'no' ? 'btn-primary bg-red-500 hover:bg-red-600' : 'btn-ghost'">No</button>
+                  </div>
+                  <div class="flex gap-2">
+                    <button @click="tradeForm.side = 'BUY'" class="flex-1 btn btn-sm text-[10px]"
+                      :class="tradeForm.side === 'BUY' ? 'btn-primary' : 'btn-ghost'">买入</button>
+                    <button @click="tradeForm.side = 'SELL'" class="flex-1 btn btn-sm text-[10px]"
+                      :class="tradeForm.side === 'SELL' ? 'btn-secondary' : 'btn-ghost'">卖出</button>
+                  </div>
+                  <div>
+                    <label class="text-[10px] text-ink-400">价格 (0.01-0.99)</label>
+                    <input type="number" step="0.01" min="0.01" max="0.99" x-model.number="tradeForm.price"
+                      class="w-full text-sm border border-warm-300 rounded-lg px-3 py-1.5" />
+                  </div>
+                  <div>
+                    <label class="text-[10px] text-ink-400">数量 (USDC)</label>
+                    <input type="number" step="1" min="1" x-model.number="tradeForm.size"
+                      class="w-full text-sm border border-warm-300 rounded-lg px-3 py-1.5" />
+                  </div>
+                  <div class="text-[10px] text-ink-400" x-show="tradeForm.price && tradeForm.size">
+                    <span x-text="'成本: $' + (tradeForm.price * tradeForm.size).toFixed(2)"></span>
+                    <span class="ml-2" x-text="'潜在盈利: $' + ((1 - tradeForm.price) * tradeForm.size).toFixed(2)"></span>
+                  </div>
+                  <button @click="submitOrder(m)" :disabled="ordering || !canTrade" class="btn btn-primary w-full text-xs">
+                    <span x-text="ordering ? '提交中...' : '提交订单'"></span>
+                  </button>
+                  <div x-show="tradeMsg" class="text-[10px]" :class="tradeMsg.includes('成功') ? 'text-green-600' : 'text-red-500'" x-text="tradeMsg"></div>
+                </div>
+              </div>
+              <!-- 订单簿 -->
+              <div>
+                <div class="text-xs font-medium text-ink-700 mb-2">订单簿</div>
+                <div x-show="bookLoading" class="text-xs text-ink-300 py-4 text-center">加载中...</div>
+                <template x-if="!bookLoading && book">
+                  <div class="text-[10px] space-y-1">
+                    <div class="text-ink-400 font-medium">卖出 (Asks)</div>
+                    <template x-for="ask in (book.asks || []).slice(0,5)" :key="ask.price">
+                      <div class="flex justify-between">
+                        <span class="text-red-500" x-text="'$' + ask.price"></span>
+                        <span class="text-ink-400" x-text="ask.size"></span>
+                      </div>
+                    </template>
+                    <div class="border-t border-warm-200 my-1"></div>
+                    <div class="text-ink-400 font-medium">买入 (Bids)</div>
+                    <template x-for="bid in (book.bids || []).slice(0,5)" :key="bid.price">
+                      <div class="flex justify-between">
+                        <span class="text-green-600" x-text="'$' + bid.price"></span>
+                        <span class="text-ink-400" x-text="bid.size"></span>
+                      </div>
+                    </template>
+                    <div x-show="!(book.asks||[]).length && !(book.bids||[]).length" class="text-ink-300 text-center py-2">暂无订单簿数据</div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </template>
+    <div x-show="filtered.length === 0 && !loading" class="text-center text-ink-300 py-12">
+      <template x-if="search"><span x-text="'未找到包含「' + search + '」的市场'"></span></template>
+      <template x-if="!search"><span>暂无预测市场数据</span></template>
+    </div>
+    <div x-show="loading" class="text-center text-ink-300 py-12">加载中...</div>
+  </div>
+
+  <!-- Pagination -->
+  <div x-show="totalPages > 1" class="flex items-center justify-center gap-2 mt-5">
+    <button @click="page = Math.max(1, page - 1)" :disabled="page <= 1"
+      class="btn btn-sm btn-ghost text-xs" :class="page <= 1 && 'opacity-30'">上一页</button>
+    <template x-for="p in Array.from({length: Math.min(totalPages, 7)}, (_, i) => {
+      if (totalPages <= 7) return i + 1;
+      if (page <= 4) return i + 1;
+      if (page >= totalPages - 3) return totalPages - 6 + i;
+      return page - 3 + i;
+    })" :key="p">
+      <button @click="page = p; window.scrollTo(0, 300)"
+        class="w-8 h-8 rounded-lg text-xs font-medium transition-colors"
+        :class="page === p ? 'bg-brand-500 text-white' : 'text-ink-400 hover:bg-warm-100'"
+        x-text="p"></button>
+    </template>
+    <button @click="page = Math.min(totalPages, page + 1)" :disabled="page >= totalPages"
+      class="btn btn-sm btn-ghost text-xs" :class="page >= totalPages && 'opacity-30'">下一页</button>
+    <span class="text-[10px] text-ink-300 ml-2" x-text="page + '/' + totalPages + ' · ' + filtered.length + ' 个市场'"></span>
+  </div>
+
+  <div class="text-[10px] text-ink-300 text-center mt-6">
+    数据来源: Polymarket (Polygon) · 概率 = 市场出清价格 · 非投资建议
+  </div>
+</div>
+
+<script>
+function predictionsPage() {
+  return {
+    markets: [],
+    loading: true,
+    search: '',
+    sortBy: 'volume',
+    filterCat: '',
+    categories: [],
+    page: 1,
+    pageSize: 20,
+    showExpired: false,
+    showGuide: !localStorage.getItem('prediction_guide_seen'),
+    selectedAgent: '<%= it.relayNodes[0]?.id || "" %>',
+    walletStatus: { hasWallet: false },
+    walletMsg: '',
+    approving: false,
+    settingUp: false,
+    showPositions: false,
+    positions: [],
+    orders: [],
+    tradeIdx: null,
+    tradeForm: { outcome: 'yes', side: 'BUY', price: 0.50, size: 10 },
+    tradeMsg: '',
+    ordering: false,
+    book: null,
+    bookLoading: false,
+    creatingWallet: false,
+
+    get filtered() {
+      let list = this.markets;
+      // Text search
+      if (this.search) {
+        const q = this.search.toLowerCase();
+        list = list.filter(m =>
+          (m.question || '').toLowerCase().includes(q) ||
+          (m.description || '').toLowerCase().includes(q)
+        );
+      }
+      // Hide expired markets (endDate passed) unless user opts in
+      if (!this.showExpired) {
+        const today = new Date().toISOString().slice(0, 10); // "2026-04-01"
+        list = list.filter(m => !m.endDate || m.endDate >= today);
+      }
+      // Category filter
+      if (this.filterCat) {
+        list = list.filter(m => m._cat === this.filterCat);
+      }
+      // Sort
+      if (this.sortBy === 'volume') {
+        list = [...list].sort((a, b) => (b.volume24h || 0) - (a.volume24h || 0));
+      } else if (this.sortBy === 'ending') {
+        const now = new Date().toISOString();
+        list = [...list].filter(m => m.endDate && m.endDate > now)
+          .sort((a, b) => (a.endDate || '').localeCompare(b.endDate || ''));
+      } else if (this.sortBy === 'volatile') {
+        // Closest to 50/50 = most controversial
+        list = [...list].sort((a, b) => Math.abs((a.yes || 50) - 50) - Math.abs((b.yes || 50) - 50));
+      } else if (this.sortBy === 'newest') {
+        list = [...list].sort((a, b) => (b._created || '').localeCompare(a._created || ''));
+      }
+      return list;
+    },
+
+    get totalPages() { return Math.ceil(this.filtered.length / this.pageSize) || 1; },
+
+    get paged() {
+      const start = (this.page - 1) * this.pageSize;
+      return this.filtered.slice(start, start + this.pageSize);
+    },
+
+    get canTrade() {
+      return this.walletStatus.hasWallet && this.walletStatus.hasClobKey
+        && this.tradeForm.price > 0 && this.tradeForm.price < 1 && this.tradeForm.size > 0;
+    },
+
+    async init() {
+      // 先查哪个 Agent 有 Polygon 钱包，优先选它
+      for (const opt of document.querySelectorAll('select[x-model="selectedAgent"] option')) {
+        try {
+          const res = await fetch('/api/predictions/wallet?relay_node_id=' + opt.value);
+          const data = await res.json();
+          if (data.hasWallet) { this.selectedAgent = opt.value; break; }
+        } catch {}
+      }
+      await Promise.all([this.loadMarkets(), this.loadWalletStatus()]);
+      // 有 CLOB key 时加载持仓
+      if (this.walletStatus.hasClobKey) this.loadPositions();
+    },
+
+    async loadMarkets() {
+      try {
+        const res = await fetch('/api/predictions/markets');
+        const data = await res.json();
+        const catKeywords = {
+          'Crypto': ['bitcoin','btc','eth','crypto','token','defi','solana','kaspa'],
+          'Politics': ['trump','biden','president','election','congress','vote','democrat','republican','government','regime','war','tariff','sanction'],
+          'Economy': ['gdp','recession','fed','interest rate','inflation','oil','crude','s&p','nasdaq','stock','market'],
+          'Sports': ['nba','nfl','mlb','soccer','football','championship','world cup','match'],
+          'Tech': ['ai','openai','google','apple','tesla','spacex','launch'],
+        };
+        function classify(q) {
+          const lower = (q || '').toLowerCase();
+          for (const [cat, kws] of Object.entries(catKeywords)) {
+            if (kws.some(k => lower.includes(k))) return cat;
+          }
+          return 'Other';
+        }
+        this.markets = (data.data || []).map(m => ({
+          ...m, _showRule: false, _asking: false, _agentReply: null, _chatHistory: null, _replyInput: '',
+          _cat: classify(m.question),
+          _created: m.startDate || m.createdAt || '',
+        }));
+        // Extract unique categories that have markets
+        const catSet = new Set(this.markets.map(m => m._cat));
+        this.categories = [...catSet].sort();
+      } catch (e) { console.error(e); }
+      this.loading = false;
+    },
+
+    async createPolygonWallet() {
+      this.creatingWallet = true;
+      this.walletMsg = '';
+      try {
+        const res = await fetch('/api/relay/' + this.selectedAgent + '/wallets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chain: 'polygon', label: 'Polymarket' }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          this.walletMsg = '钱包创建成功: ' + data.address;
+          await this.loadWalletStatus();
+        } else {
+          this.walletMsg = '创建失败: ' + (data.error || '');
+        }
+      } catch (e) { this.walletMsg = '创建失败: ' + e.message; }
+      this.creatingWallet = false;
+    },
+
+    async logoutPolymarket() {
+      if (!confirm('退出 Polymarket？API Key 将被删除，下次使用需重新连接。')) return;
+      try {
+        await fetch('/api/settings/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: 'polymarket_api_' + this.selectedAgent, value: null, action: 'delete' }),
+        });
+      } catch {}
+      this.walletStatus = { hasWallet: true, approved: false, hasClobKey: false, usdc: 0 };
+      this.showPositions = false;
+      this.positions = [];
+      this.orders = [];
+      this.tradeIdx = null;
+      this.walletMsg = '';
+      await this.loadWalletStatus();
+    },
+
+    async loadWalletStatus() {
+      if (!this.selectedAgent) return;
+      try {
+        const res = await fetch('/api/polymarket/' + this.selectedAgent + '/status');
+        this.walletStatus = await res.json();
+      } catch { this.walletStatus = { hasWallet: false }; }
+    },
+
+    async doApprove() {
+      this.approving = true;
+      this.walletMsg = '';
+      try {
+        const res = await fetch('/api/polymarket/' + this.selectedAgent + '/approve', { method: 'POST' });
+        const data = await res.json();
+        if (data.ok) {
+          this.walletMsg = '授权 TX 已发送: ' + (data.txHash?.slice(0,12) || '') + '...';
+          // 轮询确认
+          const txHash = data.txHash;
+          const poll = setInterval(async () => {
+            const r = await fetch('/api/polymarket/' + this.selectedAgent + '/approve-status?txHash=' + txHash);
+            const s = await r.json();
+            if (s.confirmed) {
+              clearInterval(poll);
+              if (s.status === 'success') {
+                this.walletMsg = '授权成功';
+                this.walletStatus.approved = true;
+              } else {
+                this.walletMsg = '授权失败';
+              }
+              this.approving = false;
+            }
+          }, 3000);
+          // 60s 超时
+          setTimeout(() => { clearInterval(poll); this.approving = false; }, 60000);
+        } else {
+          this.walletMsg = '授权失败: ' + (data.error || '');
+          this.approving = false;
+        }
+      } catch (e) {
+        this.walletMsg = '授权失败: ' + e.message;
+        this.approving = false;
+      }
+    },
+
+    async setupClob() {
+      this.settingUp = true;
+      this.walletMsg = '';
+      try {
+        const res = await fetch('/api/predictions/setup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relay_node_id: this.selectedAgent }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          this.walletMsg = 'API Key 设置成功';
+          this.walletStatus.hasClobKey = true;
+        } else {
+          this.walletMsg = '设置失败: ' + (data.error || '');
+        }
+      } catch (e) { this.walletMsg = '设置失败: ' + e.message; }
+      this.settingUp = false;
+    },
+
+    async toggleTrade(idx) {
+      if (this.tradeIdx === idx) { this.tradeIdx = null; return; }
+      this.tradeIdx = idx;
+      this.tradeMsg = '';
+      this.book = null;
+      // 加载订单簿
+      const m = this.filtered[idx];
+      if (m?.clobTokenIds) {
+        this.bookLoading = true;
+        const tokenId = this.tradeForm.outcome === 'yes'
+          ? (m.clobTokenIds[0] || m.clobTokenIds)
+          : (m.clobTokenIds[1] || m.clobTokenIds);
+        try {
+          const res = await fetch('/api/predictions/book/' + tokenId);
+          this.book = await res.json();
+        } catch {}
+        this.bookLoading = false;
+      }
+    },
+
+    async submitOrder(m) {
+      if (!this.canTrade || this.ordering) return;
+      this.ordering = true;
+      this.tradeMsg = '';
+      // 找 token ID
+      const tokenId = this.tradeForm.outcome === 'yes'
+        ? (m.clobTokenIds?.[0] || m.clobTokenIds)
+        : (m.clobTokenIds?.[1] || m.clobTokenIds);
+      if (!tokenId) { this.tradeMsg = '无法获取 Token ID'; this.ordering = false; return; }
+
+      try {
+        const res = await fetch('/api/predictions/order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            relay_node_id: this.selectedAgent,
+            tokenId,
+            side: this.tradeForm.side,
+            price: this.tradeForm.price,
+            size: this.tradeForm.size,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok || data.success) {
+          this.tradeMsg = '下单成功 #' + (data.orderID || data.orderId || '').slice(0,12);
+          this.loadPositions();
+        } else {
+          this.tradeMsg = '下单失败: ' + (data.error || data.errorMsg || '');
+        }
+      } catch (e) { this.tradeMsg = '下单失败: ' + e.message; }
+      this.ordering = false;
+    },
+
+    async loadPositions() {
+      if (!this.walletStatus.hasClobKey) return;
+      try {
+        const [posRes, ordRes] = await Promise.all([
+          fetch('/api/predictions/positions?relay_node_id=' + this.selectedAgent),
+          fetch('/api/predictions/orders?relay_node_id=' + this.selectedAgent),
+        ]);
+        const posData = await posRes.json();
+        const ordData = await ordRes.json();
+        this.positions = posData.positions || [];
+        this.orders = ordData.orders || [];
+      } catch {}
+    },
+
+    async cancelOrd(orderId) {
+      if (!confirm('撤销此订单？')) return;
+      try {
+        await fetch('/api/predictions/order/' + orderId + '?relay_node_id=' + this.selectedAgent, { method: 'DELETE' });
+        this.loadPositions();
+      } catch {}
+    },
+
+    async askAgent(m) {
+      if (m._asking) return;
+      m._asking = true;
+      m._agentReply = null;
+      const question = `分析这个预测市场并给出你的判断：
+"${m.question}"
+当前概率: Yes ${m.yes}% / No ${m.no}%
+24h成交: $${this.formatVol(m.volume24h || 0)}
+流动性: $${this.formatVol(m.liquidity || 0)}
+截止日期: ${m.endDate || '未知'}
+${m.description ? '规则: ' + m.description.slice(0, 200) : ''}
+请分析：1) 你认为结果会怎样？2) 当前市场定价合理吗？3) 如果要下注，你建议什么方向和仓位？`;
+      try {
+        const res = await fetch('/api/agent/reply', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            relayNodeId: this.selectedAgent,
+            peer: 'owner:predictions',
+            message: question,
+          }),
+        });
+        const data = await res.json();
+        const reply = data.reply || data.error || '无回复';
+        m._agentReply = reply;
+        m._chatHistory = [{ role: 'agent', text: reply }];
+      } catch (e) {
+        m._agentReply = '分析失败: ' + e.message;
+      }
+      m._asking = false;
+    },
+
+    async replyToAgent(m) {
+      const msg = (m._replyInput || '').trim();
+      if (!msg || m._asking) return;
+      m._asking = true;
+      m._replyInput = '';
+      if (!m._chatHistory) m._chatHistory = [];
+      m._chatHistory.push({ role: 'user', text: msg });
+      try {
+        const context = `关于预测市场 "${m.question}" (Yes ${m.yes}%/No ${m.no}%)，用户说: ${msg}`;
+        const res = await fetch('/api/agent/reply', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            relayNodeId: this.selectedAgent,
+            peer: 'owner:predictions',
+            message: context,
+          }),
+        });
+        const data = await res.json();
+        const reply = data.reply || data.error || '无回复';
+        m._chatHistory.push({ role: 'agent', text: reply });
+      } catch (e) {
+        m._chatHistory.push({ role: 'agent', text: '回复失败: ' + e.message });
+      }
+      m._asking = false;
+    },
+
+    formatVol(v) {
+      if (v > 1e6) return (v / 1e6).toFixed(1) + 'M';
+      if (v > 1e3) return (v / 1e3).toFixed(0) + 'K';
+      return v.toFixed(0);
+    },
+
+    interpret(m) {
+      if (m.yes > 90) return '市场几乎确定会发生（' + m.yes + '%）';
+      if (m.yes > 70) return '市场认为很可能发生 — 可以据此做决策';
+      if (m.yes > 55) return '略偏向发生，但不确定 — 需要关注后续变化';
+      if (m.yes > 45) return '市场还拿不准（' + m.yes + '/' + m.no + '）— 高不确定性';
+      if (m.yes > 30) return '略偏向不发生，但有变数';
+      if (m.yes > 10) return '市场认为不太可能发生';
+      return '市场几乎确定不会发生（仅 ' + m.yes + '%）';
+    },
+  };
+}
+</script>
+
+<%~ include('partials/page-close', it) %>

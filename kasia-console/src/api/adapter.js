@@ -1,0 +1,139 @@
+import { listAdapterNodes, createAdapterNode, updateAdapterNode, deleteAdapterNode, getAdapterToken, getAdapterProviderKey } from '../data/settings/adapter-nodes.js';
+import { startAdapter, stopAdapter, restartAdapter, getAdapterStatus } from '../services/adapter-launcher.js';
+import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
+import { getConfig } from '../data/settings/configs.js';
+
+// Fast health check (port only, <2s)
+async function pingAdapter(port) {
+  try {
+    const res = await fetch(`http://localhost:${port}/health`, { signal: AbortSignal.timeout(2000) });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {}
+  return null;
+}
+
+// Deep API check cache: port → { apiOk, apiError, checkedAt }
+const _apiCheckCache = {};
+
+// Deep check: call AI API, cache result for 2 minutes
+async function deepCheckAdapter(port) {
+  const cached = _apiCheckCache[port];
+  if (cached && Date.now() - cached.checkedAt < 120_000) return cached;
+  try {
+    const res = await fetch(`http://localhost:${port}/reply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ peer: '_ping', message: 'hi' }),
+      signal: AbortSignal.timeout(15000),
+    });
+    const result = { apiOk: res.ok, apiError: null, checkedAt: Date.now() };
+    if (!res.ok) result.apiError = (await res.text().catch(() => '')).slice(0, 100);
+    _apiCheckCache[port] = result;
+    return result;
+  } catch (e) {
+    const result = { apiOk: false, apiError: e.message, checkedAt: Date.now() };
+    _apiCheckCache[port] = result;
+    return result;
+  }
+}
+
+export async function registerAdapterRoutes(fastify) {
+  fastify.get('/adapters', async (request, reply) => {
+    const lang = parseLang(request.headers.cookie);
+    const t = getT(lang);
+    const dir = isRtl(lang) ? 'rtl' : 'ltr';
+    const langs = LANG_NAMES;
+    const adapters = listAdapterNodes();
+    // ping each adapter for live status
+    const withStatus = await Promise.all(adapters.map(async a => {
+      const managed = getAdapterStatus(a.id);
+      const ping = await pingAdapter(a.http_port);
+      const online = managed.running || !!ping;
+      // Use cached deep check (non-blocking), trigger fresh check in background
+      const cached = _apiCheckCache[a.http_port];
+      const apiOk = online ? (cached?.apiOk ?? null) : null;
+      if (online) deepCheckAdapter(a.http_port).catch(() => {}); // refresh cache async
+      return { ...a, online, apiOk, apiError: cached?.apiError || null, managed: managed.running, pid: managed.pid, startedAt: managed.startedAt };
+    }));
+    return reply.view('adapters', { adapters: withStatus, t, lang, dir, langs });
+  });
+
+  fastify.post('/adapters', async (request, reply) => {
+    const { name, gateway_ws_url, token, agent_id, ai_provider, ai_provider_url, ai_provider_key, ai_model } = request.body;
+    if (!name?.trim()) return reply.redirect('/adapters');
+    const agentId = agent_id?.trim() || 'main';
+    createAdapterNode({
+      name: name.trim(),
+      gatewayWsUrl: gateway_ws_url?.trim(),
+      token: token?.trim() || null,
+      agentId,
+      sessionKey: `agent:${agentId}:${agentId}`,
+      aiProvider: ai_provider?.trim() || 'openclaw',
+      aiProviderUrl: ai_provider_url?.trim() || null,
+      aiProviderKey: ai_provider_key?.trim() || null,
+      aiModel: ai_model?.trim() || null,
+    });
+    return reply.redirect('/adapters');
+  });
+
+  // Reveal decrypted adapter token (AJAX, local UI only)
+  fastify.get('/adapters/:id/token', async (request, reply) => {
+    const token = getAdapterToken(request.params.id);
+    return reply.send({ token: token || null });
+  });
+
+  // Reveal ingest secret (AJAX, local UI only)
+  fastify.get('/adapters/ingest-secret', async (request, reply) => {
+    const secret = await getConfig('ingest_secret');
+    return reply.send({ secret: secret || null });
+  });
+
+  // Start adapter process
+  fastify.post('/adapters/:id/start', async (request, reply) => {
+    const result = await startAdapter(request.params.id);
+    if (!result.ok) console.log('[adapter] start failed:', result.reason);
+    return reply.redirect('/adapters');
+  });
+
+  // Stop adapter process
+  fastify.post('/adapters/:id/stop', async (request, reply) => {
+    await stopAdapter(request.params.id);
+    return reply.redirect('/adapters');
+  });
+
+  // Restart adapter — stop old process, start with fresh DB config
+  fastify.post('/adapters/:id/restart', async (request, reply) => {
+    const result = await restartAdapter(request.params.id);
+    if (!result.ok) console.log('[adapter] restart failed:', result.reason);
+    return reply.redirect('/adapters');
+  });
+
+  // Update adapter
+  fastify.post('/adapters/:id', async (request, reply) => {
+    const { name, gateway_ws_url, token, agent_id, ai_provider, ai_provider_url, ai_provider_key, ai_model } = request.body;
+    const agentId = agent_id?.trim() || undefined;
+    updateAdapterNode(request.params.id, {
+      name: name?.trim() || undefined,
+      gatewayWsUrl: gateway_ws_url?.trim() || undefined,
+      token: token?.trim() || null,
+      agentId,
+      sessionKey: agentId ? `agent:${agentId}:${agentId}` : undefined,
+      aiProvider: ai_provider?.trim() || undefined,
+      aiProviderUrl: ai_provider_url?.trim() || undefined,
+      aiProviderKey: ai_provider_key?.trim() || null,
+      aiModel: ai_model?.trim() || undefined,
+    });
+    return reply.redirect('/adapters');
+  });
+
+  fastify.post('/adapters/:id/delete', async (request, reply) => {
+    await stopAdapter(request.params.id);
+    deleteAdapterNode(request.params.id);
+    return reply.redirect('/adapters');
+  });
+
+  // Keep old /adapter route as redirect for backward compat
+  fastify.get('/adapter', async (request, reply) => reply.redirect('/adapters'));
+  fastify.post('/adapter/config', async (request, reply) => reply.redirect('/adapters'));
+}

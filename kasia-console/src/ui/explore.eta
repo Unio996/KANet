@@ -1,0 +1,359 @@
+<%~ include('partials/page-open', { _page: 'explore', pageTitle: '探索', ...it }) %>
+
+<style>
+  .pulse-ring { animation: pulse-ring 2s cubic-bezier(0.4,0,0.6,1) infinite; }
+  @keyframes pulse-ring { 0%,100% { opacity:0.3; transform:scale(1); } 50% { opacity:0.8; transform:scale(1.8); } }
+  .scan-line { background: linear-gradient(90deg, transparent, rgba(59,130,246,0.08), transparent); animation: scan 3s ease-in-out infinite; }
+  @keyframes scan { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+  .bar-fill { transition: width 0.6s cubic-bezier(0.4,0,0.2,1); }
+  .sort-col { cursor: pointer; user-select: none; }
+  .sort-col:hover { color: #3b82f6; }
+  .expand-row { animation: expandIn 0.2s ease-out; }
+  @keyframes expandIn { from { opacity:0; max-height:0; } to { opacity:1; max-height:200px; } }
+  .tag { display:inline-flex; align-items:center; padding:1px 6px; border-radius:4px; font-size:10px; font-weight:500; white-space:nowrap; }
+</style>
+
+<div class="p-5" x-data="{
+  profiles: [], handshakes: [], stats: null, scanner: null,
+  whaleSignal: { score: null, direction: null, summary: '' },
+  whaleAlerts: [],
+  loading: true, sortBy: 'total', sortAsc: false, expanded: null,
+  search: '', showHandshakes: false,
+
+  async init() {
+    await Promise.all([this.loadActivity(), this.loadScanner(), this.loadWhale()]);
+    this.loading = false;
+  },
+
+  async loadActivity() {
+    try {
+      const r = await fetch('/api/discovery/activity?limit=200');
+      const d = await r.json();
+      this.profiles = d.profiles || [];
+      this.handshakes = d.handshakes || [];
+      this.stats = d.stats || null;
+    } catch (e) { console.error('activity:', e); }
+  },
+
+  async loadScanner() {
+    try {
+      const r = await fetch('/api/discovery/scanner/status');
+      const d = await r.json();
+      this.scanner = d.scanner || d || null;
+    } catch { this.scanner = null; }
+  },
+
+  async loadWhale() {
+    try {
+      const [sigR, alertR] = await Promise.all([
+        fetch('/api/chain/whale-signal').then(r => r.json()).catch(() => ({})),
+        fetch('/api/chain/whale-alerts?limit=20').then(r => r.json()).catch(() => []),
+      ]);
+      this.whaleSignal = { score: sigR.score ?? null, direction: sigR.direction ?? null, summary: sigR.summary || '' };
+      this.whaleAlerts = Array.isArray(alertR) ? alertR : alertR.alerts || [];
+    } catch {}
+  },
+
+  async toggleScanner() {
+    const action = this.scanner?.running ? 'stop' : 'start';
+    await fetch('/api/discovery/scanner/' + action, { method: 'POST' });
+    await this.loadScanner();
+  },
+
+  sorted() {
+    const key = this.sortBy;
+    const dir = this.sortAsc ? 1 : -1;
+    let list = this.profiles;
+    if (this.search) {
+      const q = this.search.toLowerCase();
+      list = list.filter(p => (p.display_name || '').toLowerCase().includes(q) || p.address.includes(q));
+    }
+    return [...list].sort((a, b) => {
+      const av = a[key] ?? 0, bv = b[key] ?? 0;
+      return av < bv ? dir : av > bv ? -dir : 0;
+    });
+  },
+
+  toggleSort(col) {
+    if (this.sortBy === col) this.sortAsc = !this.sortAsc;
+    else { this.sortBy = col; this.sortAsc = false; }
+  },
+
+  sortIcon(col) {
+    if (this.sortBy !== col) return '';
+    return this.sortAsc ? '▲' : '▼';
+  },
+
+  actBar(p) {
+    const max = this.profiles[0]?.total || 1;
+    return Math.max(2, Math.round(p.total / max * 100));
+  },
+
+  shortAddr(a) { return a ? '...' + a.slice(-14) : '?'; },
+
+  fmtDate(d) {
+    if (!d) return '—';
+    try { return new Date(d).toLocaleDateString('zh-CN', { month:'numeric', day:'numeric' }) + ' ' + new Date(d).toLocaleTimeString('zh-CN', { hour:'2-digit', minute:'2-digit' }); }
+    catch { return d.slice(0, 16); }
+  },
+
+  fmtShortDate(d) {
+    if (!d) return '—';
+    try { return new Date(d).toLocaleDateString('zh-CN', { month:'numeric', day:'numeric' }); }
+    catch { return d.slice(0, 10); }
+  },
+
+  relTime(d) {
+    if (!d) return '';
+    const ms = Date.now() - new Date(d).getTime();
+    if (ms < 60000) return '刚刚';
+    if (ms < 3600000) return Math.floor(ms/60000) + '分钟前';
+    if (ms < 86400000) return Math.floor(ms/3600000) + '小时前';
+    return Math.floor(ms/86400000) + '天前';
+  },
+}">
+
+  <!-- ═══ 1. SCANNER CONTROL BAR ═══ -->
+  <div class="flex items-center justify-between bg-white rounded-xl border border-warm-200 px-5 py-3.5 mb-5 shadow-sm relative overflow-hidden">
+    <!-- Scan animation when running -->
+    <div x-show="scanner?.running" class="absolute inset-0 scan-line pointer-events-none"></div>
+
+    <div class="flex items-center gap-4 relative z-10">
+      <!-- Status indicator -->
+      <div class="relative">
+        <template x-if="scanner?.running">
+          <span class="flex h-3 w-3">
+            <span class="pulse-ring absolute inline-flex h-full w-full rounded-full bg-green-400"></span>
+            <span class="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+          </span>
+        </template>
+        <template x-if="!scanner?.running">
+          <span class="flex h-3 w-3">
+            <span class="relative inline-flex rounded-full h-3 w-3 bg-warm-300"></span>
+          </span>
+        </template>
+      </div>
+
+      <div>
+        <div class="text-sm font-medium" :class="scanner?.running ? 'text-green-700' : 'text-ink-400'"
+             x-text="scanner?.running ? '链上探针运行中' : '链上探针已停止'"></div>
+        <div class="flex items-center gap-3 text-[10px] text-ink-300 mt-0.5" x-show="scanner?.running">
+          <span x-show="scanner?.pid" x-text="'PID ' + scanner.pid"></span>
+          <span x-show="scanner?.mode" x-text="scanner.mode.toUpperCase() + ' 模式'"></span>
+          <span x-show="scanner?.seed" x-text="'种子 ' + scanner.seed"></span>
+        </div>
+      </div>
+    </div>
+
+    <button @click="toggleScanner()" class="relative z-10 px-4 py-2 text-xs font-medium rounded-lg transition-all"
+            :class="scanner?.running
+              ? 'text-red-600 bg-red-50 border border-red-100 hover:bg-red-100'
+              : 'text-green-600 bg-green-50 border border-green-100 hover:bg-green-100'"
+            x-text="scanner?.running ? '停止探针' : '启动探针'">
+    </button>
+  </div>
+
+  <!-- Loading state -->
+  <template x-if="loading">
+    <div class="flex items-center justify-center py-20">
+      <svg class="animate-spin h-5 w-5 text-brand-500 mr-3" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+      </svg>
+      <span class="text-sm text-ink-400">加载网络数据...</span>
+    </div>
+  </template>
+
+  <template x-if="!loading && stats">
+    <div>
+
+      <!-- ═══ 2. STATS CARDS ═══ -->
+      <div class="grid grid-cols-5 gap-3 mb-5">
+        <div class="bg-white rounded-xl border border-warm-200 px-4 py-3.5 shadow-sm">
+          <div class="text-xl font-bold text-ink-700 tabular-nums" x-text="stats.total_interactions?.toLocaleString() || '0'"></div>
+          <div class="text-[11px] text-ink-400 mt-1">总交互</div>
+        </div>
+        <div class="bg-white rounded-xl border border-warm-200 px-4 py-3.5 shadow-sm">
+          <div class="text-xl font-bold text-ink-700 tabular-nums" x-text="stats.unique_addresses || '0'"></div>
+          <div class="text-[11px] text-ink-400 mt-1">地址数</div>
+        </div>
+        <div class="bg-white rounded-xl border border-warm-200 px-4 py-3.5 shadow-sm">
+          <div class="text-xl font-bold text-amber-600 tabular-nums" x-text="stats.unique_handshakes || '0'"></div>
+          <div class="text-[11px] text-ink-400 mt-1">握手数</div>
+        </div>
+        <div class="bg-white rounded-xl border border-warm-200 px-4 py-3.5 shadow-sm">
+          <div class="text-sm text-ink-600 tabular-nums" x-text="fmtShortDate(stats.earliest) + ' — ' + fmtShortDate(stats.latest)"></div>
+          <div class="text-[11px] text-ink-400 mt-1">时间跨度</div>
+        </div>
+        <div class="bg-white rounded-xl border border-warm-200 px-4 py-3.5 shadow-sm">
+          <div class="flex items-baseline gap-1.5">
+            <span class="text-xl font-bold tabular-nums" :class="whaleSignal.direction === 'accumulation' ? 'text-green-600' : whaleSignal.direction === 'distribution' ? 'text-red-500' : 'text-ink-700'"
+                  x-text="whaleSignal.score !== null ? whaleSignal.score : '—'"></span>
+            <span class="text-[11px] text-ink-300" x-text="whaleSignal.score !== null ? '/100' : ''"></span>
+          </div>
+          <div class="text-[11px] text-ink-400 mt-1">鲸鱼信号
+            <span x-show="whaleSignal.direction" class="font-medium"
+                  :class="whaleSignal.direction === 'accumulation' ? 'text-green-500' : whaleSignal.direction === 'distribution' ? 'text-red-400' : 'text-ink-300'"
+                  x-text="whaleSignal.direction === 'accumulation' ? '累积' : whaleSignal.direction === 'distribution' ? '派发' : '中性'"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ 3. HANDSHAKE CONNECTIONS (collapsible) ═══ -->
+      <div class="bg-white rounded-xl border border-warm-200 mb-5 shadow-sm" x-show="handshakes.length > 0">
+        <button @click="showHandshakes = !showHandshakes"
+                class="w-full flex items-center justify-between px-5 py-3 text-sm font-medium text-ink-600 hover:bg-warm-50 transition-colors rounded-xl">
+          <span>握手连接 <span class="text-ink-300 font-normal" x-text="'(' + handshakes.length + ')'"></span></span>
+          <span class="text-[10px] text-ink-300 transition-transform" :class="showHandshakes ? 'rotate-180' : ''">▼</span>
+        </button>
+        <div x-show="showHandshakes" x-transition class="px-5 pb-4 space-y-1 max-h-48 overflow-y-auto border-t border-warm-100">
+          <template x-for="h in handshakes.slice(0, 30)" :key="h.tx_hash">
+            <div class="flex items-center text-[11px] font-mono py-1 hover:bg-warm-50 -mx-2 px-2 rounded">
+              <span class="text-ink-300 w-24 flex-shrink-0" x-text="fmtDate(h.occurred_at)"></span>
+              <span class="text-brand-600 font-medium" x-text="shortAddr(h.from_addr)"></span>
+              <span class="mx-2 text-amber-500">→</span>
+              <span class="text-brand-600 font-medium" x-text="shortAddr(h.to_addr)"></span>
+              <span class="ml-auto text-ink-200 text-[9px]" x-text="h.tx_hash?.slice(0, 12) + '...'"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- ═══ 4. MAIN ACTIVITY TABLE ═══ -->
+      <div class="bg-white rounded-xl border border-warm-200 shadow-sm overflow-hidden">
+        <!-- Table header with search -->
+        <div class="flex items-center justify-between px-5 py-3 border-b border-warm-100">
+          <div class="text-sm font-medium text-ink-600">
+            活跃地址
+            <span class="text-ink-300 font-normal" x-text="'(' + sorted().length + '/' + profiles.length + ')'"></span>
+          </div>
+          <input x-model="search" placeholder="搜索地址或名称..." class="text-xs border border-warm-200 rounded-lg px-3 py-1.5 w-56 focus:outline-none focus:border-brand-300 bg-warm-50/50" />
+        </div>
+
+        <!-- Table -->
+        <div class="overflow-x-auto">
+          <table class="w-full text-[12px]">
+            <thead class="bg-warm-50 border-b border-warm-100">
+              <tr>
+                <th class="px-4 py-2.5 text-left text-[10px] font-semibold text-ink-400 uppercase tracking-wider w-8">#</th>
+                <th class="px-4 py-2.5 text-left text-[10px] font-semibold text-ink-400 uppercase tracking-wider">地址</th>
+                <th class="px-4 py-2.5 text-left text-[10px] font-semibold text-ink-400 uppercase tracking-wider sort-col" @click="toggleSort('total')">
+                  活跃度 <span class="text-brand-500 text-[9px]" x-text="sortIcon('total')"></span>
+                </th>
+                <th class="px-4 py-2.5 text-left text-[10px] font-semibold text-ink-400 uppercase tracking-wider">类型</th>
+                <th class="px-4 py-2.5 text-left text-[10px] font-semibold text-ink-400 uppercase tracking-wider sort-col" @click="toggleSort('first_active')">
+                  首次 <span class="text-brand-500 text-[9px]" x-text="sortIcon('first_active')"></span>
+                </th>
+                <th class="px-4 py-2.5 text-left text-[10px] font-semibold text-ink-400 uppercase tracking-wider sort-col" @click="toggleSort('last_active')">
+                  最近 <span class="text-brand-500 text-[9px]" x-text="sortIcon('last_active')"></span>
+                </th>
+                <th class="px-4 py-2.5 text-left text-[10px] font-semibold text-ink-400 uppercase tracking-wider">时长</th>
+                <th class="px-4 py-2.5 text-left text-[10px] font-semibold text-ink-400 uppercase tracking-wider sort-col" @click="toggleSort('freq_per_hour')">
+                  频率 <span class="text-brand-500 text-[9px]" x-text="sortIcon('freq_per_hour')"></span>
+                </th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-warm-50">
+              <template x-for="(p, idx) in sorted()" :key="p.address">
+                <tr>
+                  <td colspan="8" class="p-0">
+                    <!-- Main row -->
+                    <div class="flex items-center hover:bg-warm-50/60 transition-colors cursor-pointer" @click="expanded = expanded === p.address ? null : p.address">
+                      <div class="px-4 py-2.5 text-ink-300 w-8 text-[11px]" x-text="idx + 1"></div>
+                      <div class="px-4 py-2.5 flex-1 min-w-0">
+                        <div class="flex items-center gap-2">
+                          <span class="font-medium text-ink-700 text-[12px]" x-show="p.display_name" x-text="p.display_name"></span>
+                          <span class="font-mono text-ink-400 text-[11px] truncate" x-text="shortAddr(p.address)" :title="p.address"></span>
+                          <template x-if="p.card_mode">
+                            <span class="tag bg-brand-50 text-brand-600">Card <span x-text="p.card_entity_type || ''"></span></span>
+                          </template>
+                          <template x-if="p.tags && p.tags.includes('kbeam_user')">
+                            <span class="tag bg-amber-50 text-amber-600">KBeam</span>
+                          </template>
+                          <template x-if="p.identity_type === 'local'">
+                            <span class="tag bg-green-50 text-green-600">本地</span>
+                          </template>
+                        </div>
+                      </div>
+                      <div class="px-4 py-2.5 w-36">
+                        <div class="flex items-center gap-2">
+                          <span class="font-semibold text-ink-700 tabular-nums text-[12px]" x-text="p.total.toLocaleString()"></span>
+                          <div class="flex-1 h-1 bg-warm-100 rounded-full overflow-hidden">
+                            <div class="h-full bg-brand-400 rounded-full bar-fill" :style="'width:' + actBar(p) + '%'"></div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="px-4 py-2.5 w-48">
+                        <div class="flex items-center gap-1 flex-wrap">
+                          <span x-show="p.comm > 0" class="tag bg-indigo-50 text-indigo-600" x-text="'通信' + p.comm"></span>
+                          <span x-show="p.handshake > 0" class="tag bg-amber-50 text-amber-700" x-text="'握手' + p.handshake"></span>
+                          <span x-show="p.self_stash > 0" class="tag bg-emerald-50 text-emerald-700" x-text="'存储' + p.self_stash"></span>
+                          <span x-show="p.bcast > 0" class="tag bg-pink-50 text-pink-600" x-text="'广播' + p.bcast"></span>
+                        </div>
+                      </div>
+                      <div class="px-4 py-2.5 text-ink-400 w-24 tabular-nums" x-text="fmtShortDate(p.first_active)"></div>
+                      <div class="px-4 py-2.5 text-ink-400 w-24 tabular-nums" x-text="fmtShortDate(p.last_active)"></div>
+                      <div class="px-4 py-2.5 text-ink-400 w-16 tabular-nums" x-text="p.hours_active ? p.hours_active.toFixed(0) + 'h' : '<1h'"></div>
+                      <div class="px-4 py-2.5 w-16 tabular-nums font-medium"
+                           :class="p.freq_per_hour > 50 ? 'text-red-600' : p.freq_per_hour > 10 ? 'text-amber-600' : 'text-ink-500'"
+                           x-text="p.freq_per_hour ? p.freq_per_hour.toFixed(1) + '/h' : '—'"></div>
+                    </div>
+                    <!-- Expanded detail -->
+                    <div x-show="expanded === p.address" x-transition class="expand-row bg-warm-50/60 px-12 py-3 border-t border-warm-100">
+                      <div class="grid grid-cols-4 gap-x-8 gap-y-2 text-[11px]">
+                        <div><span class="text-ink-400">完整地址：</span><span class="font-mono text-ink-600 break-all text-[10px]" x-text="p.address"></span></div>
+                        <div><span class="text-ink-400">首次发现：</span><span class="text-ink-600" x-text="fmtDate(p.first_active)"></span></div>
+                        <div><span class="text-ink-400">最近活跃：</span><span class="text-ink-600" x-text="fmtDate(p.last_active) + ' (' + relTime(p.last_active) + ')'"></span></div>
+                        <div><span class="text-ink-400">活跃时长：</span><span class="text-ink-600" x-text="(p.hours_active || 0).toFixed(1) + ' 小时'"></span></div>
+                        <div x-show="p.card_summary"><span class="text-ink-400">简介：</span><span class="text-ink-600" x-text="p.card_summary"></span></div>
+                        <div x-show="p.legacy > 0"><span class="text-ink-400">旧版协议：</span><span class="text-ink-600" x-text="p.legacy"></span></div>
+                        <div x-show="p.tags"><span class="text-ink-400">标签：</span><span class="text-ink-500 text-[10px]" x-text="p.tags"></span></div>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+
+        <div x-show="sorted().length === 0 && !loading" class="text-center text-ink-300 py-12 text-sm">
+          <span x-show="search">无匹配结果</span>
+          <span x-show="!search">暂无数据</span>
+        </div>
+      </div>
+
+      <!-- ═══ 5. WHALE SECTION ═══ -->
+      <div class="bg-white rounded-xl border border-warm-200 mt-5 shadow-sm overflow-hidden" x-show="whaleAlerts.length > 0 || whaleSignal.score !== null">
+        <div class="px-5 py-3 border-b border-warm-100 flex items-center justify-between">
+          <span class="text-sm font-medium text-ink-600">鲸鱼动态</span>
+          <div class="flex items-center gap-2" x-show="whaleSignal.score !== null">
+            <span class="text-xs font-medium tabular-nums"
+                  :class="whaleSignal.direction === 'accumulation' ? 'text-green-600' : whaleSignal.direction === 'distribution' ? 'text-red-500' : 'text-ink-400'"
+                  x-text="'信号 ' + whaleSignal.score + '/100 · ' + (whaleSignal.direction === 'accumulation' ? '累积' : whaleSignal.direction === 'distribution' ? '派发' : '中性')"></span>
+          </div>
+        </div>
+        <div class="divide-y divide-warm-50 max-h-48 overflow-y-auto">
+          <template x-for="w in whaleAlerts" :key="w.created_at">
+            <div class="flex items-center gap-3 px-5 py-2.5 hover:bg-warm-50/60 transition-colors">
+              <div class="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                   :class="w.direction === 'inflow' ? 'bg-green-500' : w.direction === 'outflow' ? 'bg-red-500' : 'bg-warm-300'"></div>
+              <span class="text-sm font-medium text-ink-700 tabular-nums" x-text="(w.amountKas || 0).toLocaleString() + ' KAS'"></span>
+              <span class="text-[11px] text-ink-300" x-text="'$' + ((w.amountKas || 0) * 0.033).toFixed(0)"></span>
+              <span class="text-[10px] font-mono text-ink-300 ml-auto" x-text="(w.address || '').slice(-12)"></span>
+              <span class="text-[10px] text-ink-300" x-text="relTime(w.created_at)"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="mt-3 text-[10px] text-ink-300">
+        数据来源：Kaspa 链上 Kasia 协议活动 · Scout 被动扫描，不写入链
+      </div>
+
+    </div>
+  </template>
+</div>
+
+<%~ include('partials/page-close', it) %>

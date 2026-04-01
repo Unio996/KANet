@@ -1,0 +1,156 @@
+<aside class="w-48 bg-white border-r border-warm-300 flex flex-col flex-shrink-0">
+  <!-- Logo -->
+  <div class="px-4 py-4 border-b border-warm-200 flex items-center gap-3">
+    <img src="/public/kanet-logo.png" alt="KANet" class="h-7 w-7 object-contain flex-shrink-0" />
+    <span class="text-sm font-semibold text-ink-700 leading-tight">KANet <span class="text-xs font-normal text-ink-300">Console</span></span>
+  </div>
+
+  <!-- Main nav — 4 entries, that's it -->
+  <nav class="flex-1 py-3 px-3 space-y-0.5 overflow-y-auto">
+    <a href="/chat"
+      class="flex items-center px-3 py-2.5 rounded-lg text-sm transition-colors <%= it._page === 'chat' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
+      聊天
+    </a>
+    <a href="/contacts"
+      class="flex items-center px-3 py-2.5 rounded-lg text-sm transition-colors <%= it._page === 'contacts' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
+      通讯录
+    </a>
+    <% const _isAgent = ['agent','agent-v2','story','graph'].includes(it._page); %>
+    <% const _inMore = it._page === 'graph' || ['goals','wallet','skills','card'].includes(it._agentTab); %>
+    <div x-data="{ open: <%= _isAgent ? 'true' : 'false' %>, more: <%= _inMore ? 'true' : 'false' %> }">
+      <button @click="open = !open"
+        class="flex items-center justify-between w-full px-3 py-2.5 rounded-lg text-sm transition-colors <%= _isAgent ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
+        <span>Agent</span>
+        <span class="text-[10px] transition-transform" :class="open ? 'rotate-90' : ''">›</span>
+      </button>
+      <div x-show="open" x-transition class="mt-1 space-y-0.5">
+        <a href="/agent"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'agent' && !it._agentTab ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          概览
+        </a>
+        <a href="/agent?tab=history"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._agentTab === 'history' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          历史
+        </a>
+        <a href="/agent?tab=status"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._agentTab === 'status' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          状态
+        </a>
+        <!-- 更多 -->
+        <button @click="more = !more"
+          class="flex items-center justify-between w-full px-3 py-1.5 rounded-lg text-xs text-ink-400 hover:bg-warm-100 hover:text-ink-600 transition-colors pl-5">
+          <span>更多</span>
+          <span class="text-[10px] transition-transform" :class="more ? 'rotate-90' : ''">›</span>
+        </button>
+        <div x-show="more" x-transition class="space-y-0.5">
+          <a href="/graph"
+            class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-7 <%= it._page === 'graph' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+            图谱
+          </a>
+          <a href="/agent?tab=goals"
+            class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-7 <%= it._agentTab === 'goals' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+            目标
+          </a>
+          <a href="/agent?tab=wallet"
+            class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-7 <%= it._agentTab === 'wallet' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+            钱包
+          </a>
+          <a href="/agent?tab=skills"
+            class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-7 <%= it._agentTab === 'skills' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+            技能
+          </a>
+          <a href="/agent?tab=card"
+            class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-7 <%= it._agentTab === 'card' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+            Card
+          </a>
+        </div>
+      </div>
+    </div>
+    <a href="/explore"
+      class="flex items-center px-3 py-2.5 rounded-lg text-sm transition-colors <%= it._page === 'explore' || it._page === 'discovered' || it._page === 'network' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
+      探索
+    </a>
+    <% const _isMarket = ['trading','market','market-overview','stocks','predictions'].includes(it._page); %>
+    <div x-data="{ open: <%= _isMarket ? 'true' : 'false' %> }">
+      <button @click="open = !open"
+        class="flex items-center justify-between w-full px-3 py-2.5 rounded-lg text-sm transition-colors <%= _isMarket ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
+        <span>市场</span>
+        <span class="text-[10px] transition-transform" :class="open ? 'rotate-90' : ''">›</span>
+      </button>
+      <div x-show="open" x-transition class="mt-1 space-y-0.5">
+        <a href="/market-overview"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'market-overview' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          概览
+        </a>
+        <a href="/market"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'market' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          自由市场
+        </a>
+        <a href="/trading"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'trading' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          交易所
+        </a>
+        <a href="/stocks"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'stocks' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          股票
+        </a>
+        <a href="/predictions"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'predictions' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          预测市场
+        </a>
+      </div>
+    </div>
+
+    <!-- Settings (collapsed) -->
+    <div class="pt-4 mt-4 border-t border-warm-200" x-data="{ open: false }">
+      <button @click="open = !open" class="flex items-center justify-between w-full px-3 py-2 rounded-lg text-sm text-ink-400 hover:bg-warm-100 hover:text-ink-600 transition-colors">
+        <span>设置</span>
+        <span class="text-[10px] transition-transform" :class="open ? 'rotate-90' : ''" >›</span>
+      </button>
+      <div x-show="open" x-transition class="mt-1 space-y-0.5">
+        <a href="/relays"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'relays' || it._page === 'relay' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          账户管理
+        </a>
+        <a href="/adapters"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'adapters' || it._page === 'adapter' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          AI 引擎
+        </a>
+        <a href="/skills"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'skills' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          技能
+        </a>
+        <a href="/events"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'events' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          日志
+        </a>
+        <a href="/whale-signal"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'whale-signal' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          鲸鱼信号
+        </a>
+        <a href="/settings"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'settings' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          节点 RPC
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Language selector -->
+  <% if (it.langs) { %>
+  <div class="px-3 pb-2">
+    <form method="POST" action="/lang">
+      <select name="lang" onchange="this.form.submit()"
+        class="w-full bg-warm-50 text-ink-500 text-xs rounded-lg px-2 py-1.5 border border-warm-300 focus:outline-none focus:border-brand-300 cursor-pointer">
+        <% Object.entries(it.langs).forEach(function([code, label]) { %>
+        <option value="<%= code %>" <%= it.lang === code ? 'selected' : '' %>><%= label %></option>
+        <% }) %>
+      </select>
+    </form>
+  </div>
+  <% } %>
+
+  <div class="px-4 py-2.5 border-t border-warm-200 text-[10px] text-ink-300">
+    KANet v0.1
+  </div>
+</aside>

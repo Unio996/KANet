@@ -1,0 +1,15 @@
+version: '3.8'
+services:
+  kasia-console:
+    build: .
+    ports:
+      - "3100:3100"
+    environment:
+      - PORT=3100
+      - CONSOLE_ENCRYPTION_KEY=${CONSOLE_ENCRYPTION_KEY}
+      - INGEST_SECRET=${INGEST_SECRET}
+      - ADAPTER_URL=${ADAPTER_URL:-http://host.docker.internal:3000}
+      - DB_PATH=/app/data/console.db
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
