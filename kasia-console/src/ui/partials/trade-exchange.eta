@@ -1,0 +1,548 @@
+<!-- trade-exchange partial — Exchange accounts, orderbook, chart, quick trade + agent advisor -->
+<div x-data="tradeExchange()" x-init="init()">
+
+  <div class="grid grid-cols-12 gap-6">
+
+    <!-- ═══ Left: Market Data + Exchange Config (8 cols) ═══ -->
+    <div class="col-span-12 lg:col-span-8 space-y-5">
+
+      <!-- Exchange Accounts -->
+      <div class="card">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-sm font-medium text-ink-700">Exchange Accounts</span>
+          <button @click="openExchangeForm(null)" class="btn btn-sm btn-primary">+ Add</button>
+        </div>
+
+        <!-- Account list -->
+        <div x-show="exchangeAccounts.length > 0" class="space-y-2 mb-3">
+          <template x-for="acc in exchangeAccounts" :key="acc.id">
+            <div class="flex items-center justify-between px-3 py-2.5 rounded-lg bg-warm-50 border border-warm-200">
+              <div class="flex items-center gap-3">
+                <div class="status-dot" :class="acc.isDefault ? 'green' : 'gray'"></div>
+                <div>
+                  <span class="text-sm font-medium text-ink-700" x-text="acc.exchangeName"></span>
+                  <span x-show="acc.label" class="text-xs text-ink-400 ml-2" x-text="acc.label"></span>
+                  <div class="text-xs text-ink-300 font-mono" x-text="'Key: ' + (acc.apiKeyHint || '****')"></div>
+                </div>
+              </div>
+              <div class="flex items-center gap-1">
+                <button @click="testExchangeAccount(acc.id)" :disabled="exTesting === acc.id" class="btn btn-sm btn-ghost">
+                  <span x-text="exTesting === acc.id ? '...' : 'Test'"></span>
+                </button>
+                <button x-show="!acc.isDefault" @click="setDefaultAccount(acc.id)" class="btn btn-sm btn-ghost">Default</button>
+                <span x-show="acc.isDefault" class="badge badge-success">Active</span>
+                <button @click="openExchangeForm(acc)" class="btn btn-sm btn-ghost">Edit</button>
+                <button @click="deleteExchangeAccount(acc.id)" class="btn btn-sm btn-danger">Del</button>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- Test result -->
+        <div x-show="exTestResult" x-transition class="mb-3 px-3 py-2 rounded-lg text-xs"
+          :class="exTestResult?.ok ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-red-50 border border-red-200 text-red-700'"
+          x-text="exTestResult?.ok ? exTestResult.message : ('Failed: ' + (exTestResult?.error || 'unknown'))"></div>
+
+        <!-- No accounts -->
+        <div x-show="exchangeAccounts.length === 0 && !showExchangeForm" class="text-xs text-ink-300 text-center py-4">
+          No exchange account configured. Click + Add to connect.
+        </div>
+
+        <!-- Add/Edit Form -->
+        <div x-show="showExchangeForm" x-transition class="bg-warm-50 rounded-lg p-4 space-y-3 border border-warm-200">
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-medium text-ink-700" x-text="editingAccountId ? 'Edit Account' : 'New Exchange Account'"></span>
+            <button @click="showExchangeForm = false" class="btn btn-sm btn-ghost">Cancel</button>
+          </div>
+
+          <div>
+            <label class="text-xs text-ink-400 block mb-1">Exchange</label>
+            <select x-model="exForm.exchange" :disabled="!!editingAccountId"
+              class="w-full bg-white text-ink-600 text-sm rounded-lg px-3 py-2 border border-warm-300 focus:outline-none focus:border-brand-500">
+              <template x-for="ex in $root.exchangeRegistry" :key="ex.id">
+                <option :value="ex.id" x-text="ex.name"></option>
+              </template>
+              <option value="custom">-- Custom Exchange --</option>
+            </select>
+          </div>
+
+          <div x-show="exForm.exchange === 'custom'">
+            <label class="text-xs text-ink-400 block mb-1">Exchange Name</label>
+            <input type="text" x-model="exForm.customName" placeholder="e.g. Kraken, Upbit..."
+              class="w-full bg-white text-ink-600 text-sm rounded-lg px-3 py-2 border border-warm-300 focus:outline-none focus:border-brand-500" />
+          </div>
+
+          <div x-show="exForm.exchange === 'custom'">
+            <label class="text-xs text-ink-400 block mb-1">API Base URL</label>
+            <input type="text" x-model="exForm.baseUrl" placeholder="https://api.example.com"
+              class="w-full bg-white text-ink-600 text-sm rounded-lg px-3 py-2 border border-warm-300 focus:outline-none focus:border-brand-500" />
+          </div>
+
+          <div>
+            <label class="text-xs text-ink-400 block mb-1">Label (optional)</label>
+            <input type="text" x-model="exForm.label" placeholder="e.g. Main Account"
+              class="w-full bg-white text-ink-600 text-sm rounded-lg px-3 py-2 border border-warm-300 focus:outline-none focus:border-brand-500" />
+          </div>
+
+          <div>
+            <label class="text-xs text-ink-400 block mb-1">API Key</label>
+            <input type="password" x-model="exForm.apiKey" :placeholder="editingAccountId ? 'Leave blank to keep' : 'Enter API Key'"
+              class="w-full bg-white text-ink-600 text-sm rounded-lg px-3 py-2 border border-warm-300 focus:outline-none focus:border-brand-500 font-mono" />
+          </div>
+
+          <div>
+            <label class="text-xs text-ink-400 block mb-1">API Secret</label>
+            <input type="password" x-model="exForm.apiSecret" :placeholder="editingAccountId ? 'Leave blank to keep' : 'Enter API Secret'"
+              class="w-full bg-white text-ink-600 text-sm rounded-lg px-3 py-2 border border-warm-300 focus:outline-none focus:border-brand-500 font-mono" />
+          </div>
+
+          <div x-show="exNeedsPassphrase()">
+            <label class="text-xs text-ink-400 block mb-1">Passphrase</label>
+            <input type="password" x-model="exForm.passphrase" :placeholder="editingAccountId ? 'Leave blank to keep' : 'Enter Passphrase'"
+              class="w-full bg-white text-ink-600 text-sm rounded-lg px-3 py-2 border border-warm-300 focus:outline-none focus:border-brand-500 font-mono" />
+            <div class="text-xs text-ink-300 mt-1">Required by <span x-text="exName(exForm.exchange)"></span></div>
+          </div>
+
+          <div class="text-xs text-ink-400 flex items-start gap-1.5 pt-1">
+            <svg class="h-3.5 w-3.5 mt-0.5 text-ink-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+            <span>Credentials encrypted with AES-256-GCM, stored locally. Never transmitted to third parties.</span>
+          </div>
+
+          <button @click="saveExchangeAccount()" :disabled="exSaving || (!editingAccountId && (!exForm.apiKey || !exForm.apiSecret))"
+            class="btn btn-primary w-full">
+            <span x-show="!exSaving" x-text="editingAccountId ? 'Update' : 'Save Account'"></span>
+            <span x-show="exSaving">Saving...</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ═══ Price Chart ═══ -->
+      <div class="card">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-sm font-medium text-ink-700">KAS/USDT — 72h</span>
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-ink-300" x-text="$root.portfolio?.market ? $root.fmtNum($root.portfolio.market.low24h, 5) + ' — ' + $root.fmtNum($root.portfolio.market.high24h, 5) + ' (24h)' : ''"></span>
+            <span class="text-xs font-mono" :class="($root.portfolio?.market?.change24h || 0) >= 0 ? 'price-up' : 'price-down'"
+              x-text="(($root.portfolio?.market?.change24h || 0) >= 0 ? '+' : '') + $root.fmtNum($root.portfolio?.market?.change24h) + '%'"></span>
+          </div>
+        </div>
+        <div class="flex" x-show="pricePath()">
+          <div class="flex flex-col justify-between text-right pr-2 py-1" style="width: 60px; height: 140px;">
+            <span class="text-xs font-mono text-ink-400" x-text="$root.portfolio?.chart?.length ? '$' + Math.max(...$root.portfolio.chart.map(d=>d.h)).toFixed(4) : ''"></span>
+            <span class="text-xs font-mono text-ink-400" x-text="$root.portfolio?.chart?.length ? '$' + ((Math.max(...$root.portfolio.chart.map(d=>d.h)) + Math.min(...$root.portfolio.chart.map(d=>d.l))) / 2).toFixed(4) : ''"></span>
+            <span class="text-xs font-mono text-ink-400" x-text="$root.portfolio?.chart?.length ? '$' + Math.min(...$root.portfolio.chart.map(d=>d.l)).toFixed(4) : ''"></span>
+          </div>
+          <div class="flex-1">
+            <svg viewBox="0 0 600 140" class="w-full" style="height: 140px; cursor: crosshair;"
+              @mousemove="onChartMouseMove($event)" @mouseleave="chartHover = null">
+              <defs>
+                <linearGradient id="priceGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" :stop-color="($root.portfolio?.market?.change24h || 0) >= 0 ? '#16a34a' : '#dc2626'" stop-opacity="0.15"/>
+                  <stop offset="100%" :stop-color="($root.portfolio?.market?.change24h || 0) >= 0 ? '#16a34a' : '#dc2626'" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <line x1="0" y1="10" x2="600" y2="10" stroke="#e4e2dc" stroke-width="0.5" stroke-dasharray="4"/>
+              <line x1="0" y1="45" x2="600" y2="45" stroke="#e4e2dc" stroke-width="0.5" stroke-dasharray="4"/>
+              <line x1="0" y1="80" x2="600" y2="80" stroke="#e4e2dc" stroke-width="0.5" stroke-dasharray="4"/>
+              <line x1="0" y1="115" x2="600" y2="115" stroke="#e4e2dc" stroke-width="0.5" stroke-dasharray="4"/>
+              <path :d="priceAreaPath()" fill="url(#priceGrad)"/>
+              <path :d="pricePath()" fill="none"
+                :stroke="($root.portfolio?.market?.change24h || 0) >= 0 ? '#16a34a' : '#dc2626'"
+                stroke-width="2" stroke-linejoin="round"/>
+              <template x-if="$root.portfolio?.chart?.length > 0">
+                <circle :cx="600" :cy="(() => { const d = $root.portfolio.chart; const c = d[d.length-1].c; const min = Math.min(...d.map(x=>x.l)); const max = Math.max(...d.map(x=>x.h)); return 130 - ((c - min) / (max - min || 1)) * 120; })()" r="4"
+                  :fill="($root.portfolio?.market?.change24h || 0) >= 0 ? '#16a34a' : '#dc2626'"/>
+              </template>
+              <!-- Crosshair on hover -->
+              <g x-show="chartHover" x-cloak>
+                <line :x1="chartHover?.x||0" y1="0" :x2="chartHover?.x||0" y2="140" stroke="#9496a1" stroke-width="0.8" stroke-dasharray="3,2"/>
+                <line x1="0" :y1="chartHover?.svgY||0" x2="600" :y2="chartHover?.svgY||0" stroke="#9496a1" stroke-width="0.8" stroke-dasharray="3,2"/>
+                <circle :cx="chartHover?.x||0" :cy="chartHover?.svgY||0" r="4.5" fill="#fff" stroke="#3b82f6" stroke-width="2"/>
+                <rect x="536" :y="(chartHover?.svgY||0) - 10" width="64" height="20" rx="3" fill="#3b82f6"/>
+                <text x="568" :y="(chartHover?.svgY||0) + 4" text-anchor="middle" fill="#fff" font-size="10" font-family="monospace"
+                  x-text="chartHover ? '$' + chartHover.price.toFixed(5) : ''"></text>
+              </g>
+            </svg>
+            <div class="flex justify-between text-xs text-ink-300 mt-1 font-mono">
+              <span x-text="$root.portfolio?.chart?.[0]?.t ? new Date($root.portfolio.chart[0].t).toLocaleString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : ''"></span>
+              <span x-text="$root.portfolio?.chart?.length > 1 ? new Date($root.portfolio.chart[$root.portfolio.chart.length-1].t).toLocaleString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : ''"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ Orderbook + Volume (side by side) ═══ -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- Orderbook -->
+        <div class="card">
+          <div class="text-sm font-medium text-ink-700 mb-3">Order Book</div>
+          <div x-show="orderbook" class="space-y-0.5">
+            <div class="text-xs text-ink-400 mb-1">Sell</div>
+            <template x-for="ask in depthAsks().reverse()" :key="ask.price">
+              <div class="flex items-center text-sm h-6 relative">
+                <div class="absolute inset-0 bg-red-100 rounded-sm" :style="'width:' + ask.pct + '%'"></div>
+                <span class="relative z-10 w-24 font-mono price-down" x-text="ask.price.toFixed(5)"></span>
+                <span class="relative z-10 flex-1 text-right font-mono font-medium text-ink-600"
+                  x-text="ask.qty >= 1e6 ? (ask.qty/1e6).toFixed(1)+'M' : ask.qty >= 1e3 ? (ask.qty/1e3).toFixed(1)+'K' : ask.qty.toFixed(0)"></span>
+              </div>
+            </template>
+            <div class="text-center py-1.5 border-y border-warm-200 my-1">
+              <span class="text-xs text-ink-400">Spread </span>
+              <span class="text-sm text-ink-700 font-mono font-medium" x-text="orderbook?.asks?.[0] && orderbook?.bids?.[0] ? (parseFloat(orderbook.asks[0][0]) - parseFloat(orderbook.bids[0][0])).toFixed(6) : '--'"></span>
+            </div>
+            <div class="text-xs text-ink-400 mb-1">Buy</div>
+            <template x-for="bid in depthBids()" :key="bid.price">
+              <div class="flex items-center text-sm h-6 relative">
+                <div class="absolute inset-0 bg-green-100 rounded-sm" :style="'width:' + bid.pct + '%'"></div>
+                <span class="relative z-10 w-24 font-mono price-up" x-text="bid.price.toFixed(5)"></span>
+                <span class="relative z-10 flex-1 text-right font-mono font-medium text-ink-600"
+                  x-text="bid.qty >= 1e6 ? (bid.qty/1e6).toFixed(1)+'M' : bid.qty >= 1e3 ? (bid.qty/1e3).toFixed(1)+'K' : bid.qty.toFixed(0)"></span>
+              </div>
+            </template>
+          </div>
+          <div x-show="!orderbook" class="text-xs text-ink-300 text-center py-8">Loading orderbook...</div>
+        </div>
+
+        <!-- Volume -->
+        <div class="card">
+          <div class="text-sm font-medium text-ink-700 mb-2">Volume — 72h</div>
+          <div class="mini-chart">
+            <template x-for="(bar, i) in chartBars()" :key="i">
+              <div class="bar" :style="'height:' + Math.max(bar.height, 2) + '%'"
+                :class="bar.up ? 'bg-green-400' : 'bg-red-400'"></div>
+            </template>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ═══ Right: Trading Advisor Chat (4 cols) ═══ -->
+    <div class="col-span-12 lg:col-span-4">
+      <div class="card card-flush flex flex-col" style="height: calc(100vh - 220px)">
+        <div class="px-4 py-3 border-b border-warm-200 flex items-center justify-between">
+          <span class="text-sm font-medium text-ink-700">Trading Advisor</span>
+        </div>
+
+        <!-- Quick Trade Panel -->
+        <div class="px-4 py-3 border-b border-warm-200">
+          <div class="flex items-center gap-2">
+            <button @click="qtSide = 'BUY'; qtReady = false; qtResult = null" class="flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors"
+              :class="qtSide === 'BUY' ? 'bg-green-600 text-white' : 'bg-warm-200 text-ink-400 hover:text-green-600'">BUY</button>
+            <button @click="qtSide = 'SELL'; qtReady = false; qtResult = null" class="flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors"
+              :class="qtSide === 'SELL' ? 'bg-red-600 text-white' : 'bg-warm-200 text-ink-400 hover:text-red-600'">SELL</button>
+            <input type="number" x-model.number="qtQty" placeholder="Qty" min="100" step="100"
+              class="w-24 bg-white text-ink-600 text-xs rounded-lg px-2 py-1.5 border border-warm-300 font-mono text-right"
+              @keydown.enter="submitQuickTrade()" @input="qtReady = false; qtResult = null" />
+            <button @click="submitQuickTrade()" :disabled="asking || !qtQty || qtQty < 100" class="btn btn-sm btn-primary">
+              <span x-text="asking ? '...' : 'Go'"></span>
+            </button>
+          </div>
+          <div class="flex items-center justify-between mt-1.5">
+            <span class="text-xs text-ink-300" x-text="$root.selectedAgent === '__all__' ? 'Ask all agents (select one to execute)' : $root.agentName() + ' analyzes + executes'"></span>
+            <span class="text-xs font-mono" :class="$root.mode === 'LIVE' ? 'text-red-600' : 'text-amber-600'" x-text="$root.mode"></span>
+          </div>
+
+          <!-- Execute / Cancel -->
+          <div x-show="qtReady" x-transition class="mt-2 flex gap-2">
+            <button @click="executeQuickTrade()" :disabled="qtExecuting" class="flex-1 py-2 rounded-lg text-sm font-bold transition-colors"
+              :class="qtExecuting ? 'bg-warm-200 text-ink-300' : $root.mode === 'LIVE' ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-amber-500 text-white hover:bg-amber-600'"
+              x-text="qtExecuting ? 'Executing...' : $root.mode === 'LIVE' ? 'Confirm' : 'Simulate'"></button>
+            <button @click="qtReady = false; qtPreview = null; qtResult = null" class="btn btn-ghost px-4 py-2">Cancel</button>
+          </div>
+
+          <!-- Preview -->
+          <div x-show="qtPreview?.ok && !qtResult" x-transition class="mt-1.5 px-2 py-1.5 rounded-lg text-xs font-mono bg-brand-50 border border-brand-200 text-brand-700">
+            <div x-text="qtPreview?.summary?.orderCount + ' orders | avg $' + qtPreview?.summary?.avgPrice + ' | $' + qtPreview?.summary?.totalUsdt + ' USDT'"></div>
+          </div>
+
+          <!-- Execution result -->
+          <div x-show="qtResult" x-transition class="mt-1.5 px-2 py-1.5 rounded-lg text-xs font-mono"
+            :class="qtResult?.ok ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-red-50 border border-red-200 text-red-700'">
+            <template x-if="qtResult?.summary">
+              <span x-text="(qtResult.ok ? 'OK' : 'WARN') + ' ' + qtResult.summary.executed + '/' + qtResult.summary.planned + ' orders | avg $' + qtResult.summary.avgPrice + ' | $' + qtResult.summary.totalUsdt"></span>
+            </template>
+          </div>
+        </div>
+
+        <!-- Chat messages -->
+        <div id="chat-scroll" class="flex-1 overflow-y-auto p-4 space-y-3">
+          <div x-show="chatHistory.length === 0" class="text-center text-ink-300 mt-8">
+            <p class="text-sm">Ask <span class="text-brand-600" x-text="$root.agentName()"></span> for trading advice</p>
+            <p class="text-xs mt-2 text-ink-300">Try: "Should I buy or sell KAS now?"</p>
+          </div>
+          <template x-for="(msg, i) in chatHistory" :key="i">
+            <div class="flex" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
+              <div class="max-w-[85%] rounded-lg px-3 py-2 text-sm"
+                :class="msg.role === 'user' ? 'bg-brand-500 text-white' : 'bg-warm-100 text-ink-600'">
+                <template x-if="msg.thinking">
+                  <div class="thinking-dots py-1"><span></span><span></span><span></span></div>
+                </template>
+                <template x-if="!msg.thinking">
+                  <div>
+                    <div x-show="msg.name" class="text-xs font-semibold text-brand-600 mb-1" x-text="msg.name"></div>
+                    <p x-text="msg.text" style="white-space: pre-wrap;"></p>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- Input -->
+        <div class="px-4 py-3 border-t border-warm-200">
+          <div class="flex gap-2">
+            <input type="text" x-model="question" @keydown.enter="askAgent()"
+              placeholder="Ask about KAS..."
+              class="flex-1 bg-white text-ink-600 text-sm rounded-lg px-3 py-2 border border-warm-300 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+            <button @click="askAgent()" :disabled="asking || !question.trim()" class="btn btn-primary">Ask</button>
+          </div>
+          <div class="flex flex-wrap gap-1.5 mt-2">
+            <button @click="question = 'KAS market analysis'; askAgent()" class="btn btn-sm btn-ghost">Market Analysis</button>
+            <button @click="question = 'Should I buy or sell KAS now?'; askAgent()" class="btn btn-sm btn-ghost">Buy or Sell?</button>
+            <button @click="question = 'What does the on-chain data say about KAS demand?'; askAgent()" class="btn btn-sm btn-ghost">Chain Intel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+function tradeExchange() {
+  return {
+    // Exchange accounts
+    exchangeAccounts: [],
+    showExchangeForm: false,
+    editingAccountId: null,
+    exForm: { exchange: 'mexc', customName: '', label: '', apiKey: '', apiSecret: '', passphrase: '', baseUrl: '' },
+    exSaving: false,
+    exTesting: '',
+    exTestResult: null,
+    // Chart
+    chartHover: null,
+    orderbook: null,
+    // Quick trade
+    qtSide: 'BUY',
+    qtQty: '',
+    qtExecuting: false,
+    qtResult: null,
+    qtPreview: null,
+    qtReady: false,
+    // Chat
+    question: '',
+    asking: false,
+    chatHistory: [],
+
+    async init() {
+      await Promise.all([this.loadExchangeAccounts(), this.loadOrderbook()]);
+      setInterval(() => this.loadOrderbook(), 15000);
+    },
+
+    // ── Exchange account methods ──
+    async loadExchangeAccounts() {
+      try { const res = await fetch('/api/trade/accounts'); this.exchangeAccounts = await res.json(); } catch {}
+    },
+
+    exFields() {
+      if (this.exForm.exchange === 'custom') return ['apiKey', 'apiSecret', 'passphrase', 'baseUrl'];
+      const def = this.$root.exchangeRegistry.find(e => e.id === this.exForm.exchange);
+      return def?.fields || ['apiKey', 'apiSecret'];
+    },
+    exNeedsPassphrase() { return this.exFields().includes('passphrase'); },
+    exName(exchange) { return this.$root.exchangeRegistry.find(e => e.id === exchange)?.name || exchange; },
+
+    openExchangeForm(account) {
+      this.exTestResult = null;
+      if (account) {
+        this.editingAccountId = account.id;
+        this.exForm = { exchange: account.exchange, customName: '', label: account.label || '', apiKey: '', apiSecret: '', passphrase: '', baseUrl: account.baseUrl || '' };
+      } else {
+        this.editingAccountId = null;
+        this.exForm = { exchange: 'mexc', customName: '', label: '', apiKey: '', apiSecret: '', passphrase: '', baseUrl: '' };
+      }
+      this.showExchangeForm = true;
+    },
+
+    async saveExchangeAccount() {
+      this.exSaving = true;
+      const exchange = this.exForm.exchange === 'custom' ? (this.exForm.customName.trim() || 'custom') : this.exForm.exchange;
+      const body = {
+        exchange, label: this.exForm.label || null,
+        apiKey: this.exForm.apiKey || undefined, apiSecret: this.exForm.apiSecret || undefined,
+        passphrase: this.exNeedsPassphrase() ? (this.exForm.passphrase || undefined) : undefined,
+        baseUrl: this.exForm.exchange === 'custom' ? (this.exForm.baseUrl || undefined) : undefined,
+      };
+      try {
+        if (this.editingAccountId) {
+          await fetch('/api/trade/accounts/' + this.editingAccountId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        } else {
+          await fetch('/api/trade/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        }
+        this.showExchangeForm = false;
+        await this.loadExchangeAccounts();
+        this.$root.loadPortfolio();
+      } catch {}
+      this.exSaving = false;
+    },
+
+    async deleteExchangeAccount(id) {
+      if (!confirm('Delete this exchange account?')) return;
+      await fetch('/api/trade/accounts/' + id, { method: 'DELETE' });
+      await this.loadExchangeAccounts();
+      this.$root.loadPortfolio();
+    },
+
+    async setDefaultAccount(id) {
+      await fetch('/api/trade/accounts/' + id + '/default', { method: 'POST' });
+      await this.loadExchangeAccounts();
+      this.$root.loadPortfolio();
+    },
+
+    async testExchangeAccount(id) {
+      this.exTesting = id; this.exTestResult = null;
+      try { const res = await fetch('/api/trade/accounts/' + id + '/test', { method: 'POST' }); this.exTestResult = await res.json(); }
+      catch (e) { this.exTestResult = { ok: false, error: e.message }; }
+      this.exTesting = '';
+    },
+
+    // ── Chart ──
+    pricePath() {
+      if (!this.$root.portfolio?.chart?.length) return '';
+      const data = this.$root.portfolio.chart;
+      const min = Math.min(...data.map(d => d.l)); const max = Math.max(...data.map(d => d.h));
+      const range = max - min || 1; const w = 600, h = 130;
+      return data.map((d, i) => {
+        const x = (i / (data.length - 1)) * w; const y = h - ((d.c - min) / range) * 120;
+        return (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1);
+      }).join(' ');
+    },
+    priceAreaPath() { const line = this.pricePath(); if (!line) return ''; return line + ' L600,130 L0,130 Z'; },
+
+    chartBars() {
+      if (!this.$root.portfolio?.chart?.length) return [];
+      const data = this.$root.portfolio.chart;
+      const closes = data.map(d => d.c); const min = Math.min(...closes); const max = Math.max(...closes); const range = max - min || 1;
+      return data.map(d => ({ height: ((d.c - min) / range) * 100, up: d.c >= d.o }));
+    },
+
+    onChartMouseMove(event) {
+      const data = this.$root.portfolio?.chart;
+      if (!data?.length) return;
+      const svg = event.currentTarget; const rect = svg.getBoundingClientRect();
+      const xPct = (event.clientX - rect.left) / rect.width;
+      const idx = Math.round(xPct * (data.length - 1));
+      if (idx < 0 || idx >= data.length) { this.chartHover = null; return; }
+      const d = data[idx];
+      const min = Math.min(...data.map(k => k.l)); const max = Math.max(...data.map(k => k.h));
+      const range = max - min || 1;
+      const svgX = (idx / (data.length - 1)) * 600;
+      const svgY = 130 - ((d.c - min) / range) * 120;
+      this.chartHover = { x: svgX, price: d.c, svgY };
+    },
+
+    // ── Orderbook ──
+    async loadOrderbook() {
+      try { const res = await fetch('/api/trade/orderbook'); this.orderbook = await res.json(); } catch {}
+    },
+    depthBids() {
+      if (!this.orderbook?.bids?.length) return [];
+      const bids = this.orderbook.bids.slice(0, 8).map(b => ({ price: parseFloat(b[0]), qty: parseFloat(b[1]) }));
+      const maxQty = Math.max(...bids.map(b => b.qty));
+      return bids.map(b => ({ ...b, pct: (b.qty / maxQty) * 100 }));
+    },
+    depthAsks() {
+      if (!this.orderbook?.asks?.length) return [];
+      const asks = this.orderbook.asks.slice(0, 8).map(a => ({ price: parseFloat(a[0]), qty: parseFloat(a[1]) }));
+      const maxQty = Math.max(...asks.map(a => a.qty));
+      return asks.map(a => ({ ...a, pct: (a.qty / maxQty) * 100 }));
+    },
+
+    // ── Quick trade ──
+    submitQuickTrade() {
+      if (!this.qtQty || this.qtQty < 100) return;
+      const side = this.qtSide === 'BUY' ? 'buy' : 'sell';
+      this.question = 'Analyze current market and help me ' + side + ' ' + this.qtQty + ' KAS. Plan split orders with optimal pricing.';
+      this.qtResult = null; this.qtPreview = null; this.qtReady = false;
+      this.askAgent();
+      this.fetchPreview();
+    },
+
+    async fetchPreview() {
+      if (this.$root.selectedAgent === '__all__') { this.qtReady = false; return; }
+      try {
+        const res = await fetch('/api/trade/preview-split', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ side: this.qtSide, qty: this.qtQty }),
+        });
+        this.qtPreview = await res.json();
+        if (this.qtPreview?.ok) this.qtReady = true;
+      } catch {}
+    },
+
+    async executeQuickTrade() {
+      if (!this.qtQty || this.qtQty < 100 || this.qtExecuting) return;
+      const p = this.qtPreview?.params;
+      if (!confirm('Execute in ' + this.$root.mode + ' mode? ' + this.qtSide + ' ' + this.qtQty + ' KAS')) return;
+      this.qtExecuting = true; this.qtResult = null;
+      try {
+        const body = { side: this.qtSide, qty: this.qtQty };
+        if (p) { body.maxPctPerLevel = p.maxPctPerLevel; body.maxSlippagePct = p.maxSlippagePct; body.intervalMs = p.intervalMs; }
+        const res = await fetch('/api/trade/execute-split', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const data = await res.json();
+        if (!data.ok) { this.chatHistory.push({ role: 'agent', name: 'System', text: 'Error: ' + (data.error || 'unknown') }); this.qtExecuting = false; return; }
+        this.chatHistory.push({ role: 'agent', name: 'System', text: '[' + data.mode + '] Starting ' + this.qtSide + ' ' + this.qtQty + ' KAS — ' + data.planned + ' split orders' });
+        // Poll for progress
+        const poll = async (execId) => {
+          try {
+            const res = await fetch('/api/trade/execution/' + execId);
+            const exec = await res.json();
+            if (exec.status === 'running') { setTimeout(() => poll(execId), 800); return; }
+            const s = exec.summary;
+            if (s) {
+              this.chatHistory.push({ role: 'agent', name: 'System', text: '[' + exec.mode + '] Done: ' + exec.side + ' ' + s.totalQty + ' KAS | avg $' + s.avgPrice + ' | $' + s.totalUsdt + ' USDT' });
+              this.qtResult = { ok: exec.status === 'done', mode: exec.mode, summary: s };
+            }
+            this.$root.loadPortfolio();
+            this.qtExecuting = false;
+          } catch { setTimeout(() => poll(execId), 1500); }
+        };
+        setTimeout(() => poll(data.execId), 600);
+      } catch (e) {
+        this.chatHistory.push({ role: 'agent', name: 'System', text: 'Error: ' + e.message });
+        this.qtExecuting = false;
+      }
+    },
+
+    // ── Agent chat ──
+    scrollChat() { const el = document.getElementById('chat-scroll'); if (el) el.scrollTop = el.scrollHeight; },
+
+    async askAgent() {
+      if (!this.question.trim() || this.asking) return;
+      const q = this.question.trim(); this.question = '';
+      this.chatHistory.push({ role: 'user', text: q }); this.asking = true;
+      const isAll = this.$root.selectedAgent === '__all__';
+      const targets = isAll ? this.$root.agents : [this.$root.agents.find(a => a.id === this.$root.selectedAgent)].filter(Boolean);
+      const thinkingIndexes = [];
+      for (const agent of targets) {
+        this.chatHistory.push({ role: 'agent', name: agent.name, text: '', thinking: true });
+        thinkingIndexes.push(this.chatHistory.length - 1);
+      }
+      this.$nextTick(() => this.scrollChat());
+      const results = await Promise.all(
+        targets.map(async (agent) => {
+          try {
+            const res = await fetch('/api/trade/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relayId: agent.id, question: q }) });
+            const data = await res.json();
+            return { name: agent.name, text: data.reply || data.error || 'No response' };
+          } catch (e) { return { name: agent.name, text: 'Error: ' + e.message }; }
+        })
+      );
+      results.forEach((r, i) => { this.chatHistory[thinkingIndexes[i]] = { role: 'agent', name: r.name, text: r.text }; });
+      this.asking = false;
+      this.$nextTick(() => this.scrollChat());
+    },
+  };
+}
+</script>

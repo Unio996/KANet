@@ -18,6 +18,7 @@ import { recordChainEvent } from '../services/chain-event.js';
 import { analyzeMarket } from '../services/signal-engine.js';
 import { generateProposal } from '../services/strategy-engine.js';
 import { fetchAllMarkets, fetchCryptoData, fetchStockData, fetchPredictionData, fetchCommodityData, fetchFundingRates, fetchSentiment, fetchCryptoGlobal, fetchEconomicCalendar } from '../services/market-data.js';
+import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 
 /** Trade mode: DB → default DRY-RUN */
 async function getTradeMode() {
@@ -141,7 +142,7 @@ export async function registerTradingRoutes(fastify) {
     }
   });
 
-  // GET /trading — render trading page (legacy)
+  // GET /trading — render trading page (legacy, preserved)
   fastify.get('/trading', async (request, reply) => {
     const relays = sqlite.prepare('SELECT id, name, address FROM relay_nodes').all();
     const creds = getCredentials();
@@ -151,6 +152,19 @@ export async function registerTradingRoutes(fastify) {
       configured: !!creds,
       mode: await getTradeMode(),
       exchangeRegistry: JSON.stringify(EXCHANGE_REGISTRY),
+    });
+  });
+
+  // GET /trading-v2 — new design system trading page
+  fastify.get('/trading-v2', async (request, reply) => {
+    const relayNodes = sqlite.prepare('SELECT id, name, address FROM relay_nodes').all();
+    const lang = parseLang(request.headers.cookie);
+    const t = getT(lang);
+    return reply.viewAsync('trading-v2.eta', {
+      title: 'Trading — KANet',
+      relayNodes,
+      t, lang, dir: isRtl(lang) ? 'rtl' : 'ltr', langs: LANG_NAMES,
+      _page: 'trading',
     });
   });
 
@@ -246,13 +260,26 @@ export async function registerTradingRoutes(fastify) {
     }
   });
 
-  // GET /market — 自由市场 v2（对话即交易）
+  // GET /market — 自由市场（旧版，preserved）
   fastify.get('/market', async (request, reply) => {
     const relays = sqlite.prepare('SELECT id, name, address FROM relay_nodes').all();
     return reply.viewAsync('market.eta', {
       title: '自由市场',
       relays,
       mode: await getTradeMode(),
+    });
+  });
+
+  // GET /market-v2 — 自由市场（新设计系统）
+  fastify.get('/market-v2', async (request, reply) => {
+    const relayNodes = sqlite.prepare('SELECT id, name, address FROM relay_nodes').all();
+    const lang = parseLang(request.headers.cookie);
+    const t = getT(lang);
+    return reply.viewAsync('market-v2.eta', {
+      title: '自由市场 — KANet',
+      relayNodes,
+      t, lang, dir: isRtl(lang) ? 'rtl' : 'ltr', langs: LANG_NAMES,
+      _page: 'market',
     });
   });
 

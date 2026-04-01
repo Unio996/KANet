@@ -1,0 +1,442 @@
+<%~ include('partials/page-open', { _page: 'market', pageTitle: '', ...it }) %>
+
+<div class="flex h-[calc(100vh-3.5rem)]" x-data="marketApp()" x-init="init()" x-cloak>
+  <!-- Left: Orders Panel -->
+  <div class="w-80 border-r border-warm-200 flex flex-col bg-white flex-shrink-0">
+    <%~ include('partials/market-orders', it) %>
+  </div>
+
+  <!-- Right: Deal Detail + Wallet -->
+  <div class="flex-1 flex flex-col overflow-hidden">
+    <%~ include('partials/market-deal', it) %>
+    <%~ include('partials/market-wallet', it) %>
+  </div>
+
+  <!-- Publish Order Modal -->
+  <div x-show="showPublish" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center bg-black/30" @click.self="showPublish=false">
+    <div class="card w-96" x-transition.scale.95>
+      <h3 class="text-base font-semibold text-ink-700 mb-4">发布订单</h3>
+      <div class="space-y-3">
+        <div class="flex gap-2">
+          <button @click="pubForm.side='sell'" :class="pubForm.side==='sell'?'btn-danger':'btn-ghost'" class="btn flex-1">卖出 KAS</button>
+          <button @click="pubForm.side='buy'" :class="pubForm.side==='buy'?'btn-primary':'btn-ghost'" class="btn flex-1">买入 KAS</button>
+        </div>
+        <div>
+          <label class="text-xs text-ink-400">数量 (KAS)</label>
+          <input x-model.number="pubForm.amount" type="number" class="w-full mt-1 border border-warm-300 rounded-lg px-3 py-2 text-sm focus:border-brand-400 focus:outline-none bg-warm-50">
+        </div>
+        <div>
+          <label class="text-xs text-ink-400">价格 (USD) <span x-show="kasPrice" class="text-brand-500" x-text="'-- 市场 $'+kasPrice"></span></label>
+          <input x-model.number="pubForm.price" type="number" step="0.0001" class="w-full mt-1 border border-warm-300 rounded-lg px-3 py-2 text-sm focus:border-brand-400 focus:outline-none bg-warm-50">
+        </div>
+        <div>
+          <label class="text-xs text-ink-400">结算链</label>
+          <select x-model="pubForm.chain" class="w-full mt-1 border border-warm-300 rounded-lg px-3 py-2 text-sm focus:border-brand-400 focus:outline-none bg-warm-50">
+            <option value="bnb">BNB Chain</option><option value="eth">Ethereum</option><option value="sol">Solana</option><option value="tron">TRON</option>
+          </select>
+        </div>
+      </div>
+      <div class="flex gap-2 mt-5">
+        <button @click="publishOrder()" class="btn btn-primary flex-1">发布到市场</button>
+        <button @click="showPublish=false" class="btn btn-ghost">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function marketApp() {
+  const agents = [<% it.relayNodes.forEach(function(r,i) { %>{id:'<%=r.id%>',name:'<%=r.name%>',addr:'<%=r.address%>'}<%if(i<it.relayNodes.length-1){%>,<%}%><%})%>];
+  const TERM = ['completed','cancelled','expired','resolved','escalated'];
+  const ST = {published:'已发布',accepted:'已接受',paying:'付款中',paid:'已付款',verified:'已验证',delivering:'交割中',completed:'已完成',cancelled:'已取消',expired:'已过期',disputed:'争议中',escalated:'已上报',resolved:'已解决'};
+  const PIPE = [{id:'accepted',label:'接受'},{id:'paid',label:'付款'},{id:'verified',label:'验证'},{id:'completed',label:'交割完成'}];
+  const STATUS_TO_NODE = {published:'_pre',accepted:'accepted',paying:'paid',paid:'paid',verified:'verified',delivering:'completed',completed:'completed',disputed:'completed',escalated:'completed'};
+
+  return {
+    agents, TERM, ST, pipe: PIPE,
+    agentId: agents[0]?.id || '',
+    mode: '<%= it.mode %>',
+    tab: 'market',
+    deal: null,
+    orders: [],
+    flow: [],
+    chatInput: '',
+    showPublish: false,
+    pubForm: { side: 'sell', amount: 100, price: 0, chain: 'bnb' },
+    kasPrice: 0,
+    wallet: { kas: 0, kasLocked: 0, chains: [] },
+    _pollTimer: null,
+    _storyCache: {},
+    storyNode: null,
+    storyData: null,
+    ordersTotal: 0,
+    ordersOffset: 0,
+    ordersLimit: 20,
+    ordersHasMore: false,
+    ordersLoading: false,
+    walletPanel: null,
+
+    get agentName() { return this.agents.find(a => a.id === this.agentId)?.name || ''; },
+    get agentAddr() { return this.agents.find(a => a.id === this.agentId)?.addr || ''; },
+    get modeLabel() { return { manual:'手动', approval:'审批', auto:'自动' }[this.mode] || this.mode; },
+    get displayOrders() { return this.orders; },
+    get hasPendingApproval() { return this.flow.some(f => f.t === 'approval'); },
+    get panelWallets() {
+      if (!this.walletPanel || this.walletPanel === 'kas') return [];
+      return this.wallet.chains.filter(w => w.chain === this.walletPanel);
+    },
+    get chainSummary() {
+      const map = {};
+      for (const w of this.wallet.chains) {
+        if (!map[w.chain]) map[w.chain] = { name: w.name, chain: w.chain, usdt: 0, usdc: 0, locked: 0, count: 0 };
+        map[w.chain].usdt += w.usdt || 0;
+        map[w.chain].usdc += w.usdc || 0;
+        map[w.chain].locked += w.locked || 0;
+        map[w.chain].count++;
+      }
+      return Object.values(map);
+    },
+
+    // Pipeline helpers
+    pipeNodeClass(id) {
+      if (!this.deal) return 'wait';
+      const ids = PIPE.map(p => p.id);
+      const cur = STATUS_TO_NODE[this.deal.status] || '_pre';
+      const ci = ids.indexOf(cur), ni = ids.indexOf(id);
+      if (ci < 0) return 'wait';
+      if (ni < ci) return 'done';
+      if (ni === ci) return 'active';
+      return 'wait';
+    },
+    pipeLineClass(i) {
+      if (!this.deal) return 'wait';
+      const ids = PIPE.map(p => p.id);
+      const cur = STATUS_TO_NODE[this.deal.status] || '_pre';
+      const ci = ids.indexOf(cur);
+      if (ci < 0) return 'wait';
+      return i <= ci ? 'done' : i === ci + 1 ? 'cur' : 'wait';
+    },
+
+    async init() {
+      this.loadOrders();
+      this.loadWallet();
+      try { const r = await fetch('/api/trade/agent-mode').then(r => r.json()); if (r?.mode) this.mode = r.mode; } catch {}
+      try { const r = await fetch('/api/trade/kas-price').then(r => r.json()); if (r?.price) { this.kasPrice = r.price; this.pubForm.price = r.price; } } catch {}
+      this._pollTimer = setInterval(() => {
+        this.loadOrders();
+        if (this.deal) this.loadDealFlow(this.deal.id);
+        this.loadWallet();
+      }, 15000);
+    },
+
+    async loadOrders(append = false) {
+      if (this.ordersLoading) return;
+      this.ordersLoading = true;
+      try {
+        const offset = append ? this.ordersOffset + this.ordersLimit : 0;
+        const statusParam = this.tab === 'market' ? '&status=active' : '';
+        const url = '/api/trade/mm-orders?page=1&limit=' + this.ordersLimit + '&offset=' + offset + statusParam;
+        const data = await fetch(url).then(r => r.json());
+        const rows = data.orders || data || [];
+        for (const o of rows) { if (!o._peerName && o.peer_address) o._peerName = o.peer_address.slice(-8); }
+        this.orders = append ? [...this.orders, ...rows] : rows;
+        this.ordersTotal = data.total || rows.length;
+        this.ordersOffset = offset;
+        this.ordersHasMore = data.hasMore || false;
+        if (this.deal) {
+          const fresh = this.orders.find(o => o.id === this.deal.id);
+          if (fresh && fresh.status !== this.deal.status) { this.deal = fresh; this.loadDealFlow(fresh.id); }
+        }
+      } catch {} finally { this.ordersLoading = false; }
+    },
+
+    loadMore() { if (this.ordersHasMore && !this.ordersLoading) this.loadOrders(true); },
+
+    async loadWallet() {
+      try {
+        const data = await fetch('/api/relay/' + this.agentId + '/wallets').then(r => r.json());
+        const allWallets = (data.chains || []).map(w => ({
+          id: w.id, chain: w.chain, name: w.chain === 'polygon' ? 'POLYGON' : w.chain.toUpperCase(),
+          address: w.address, label: w.label || (w.isDefault ? '默认' : ''),
+          isDefault: w.isDefault,
+          usdt: w.usdtBalance || 0, usdc: w.usdcBalance || 0, gas: w.nativeBalance || 0, locked: 0,
+        }));
+        try {
+          const locks = await fetch('/api/trade/fund-locks?relay_node_id=' + encodeURIComponent(this.agentId)).then(r => r.json());
+          const lm = {};
+          for (const l of (locks || [])) { if (l.status === 'locked') lm[l.asset] = (lm[l.asset] || 0) + l.amount; }
+          for (const w of allWallets) w.locked = lm['usdt_' + w.chain] || 0;
+          this.wallet = { kas: data.kaspa?.balance || 0, kasLocked: lm['kas'] || 0, chains: allWallets };
+        } catch {
+          this.wallet = { kas: data.kaspa?.balance || 0, kasLocked: 0, chains: allWallets };
+        }
+      } catch {}
+    },
+
+    async selectDeal(order) { this.deal = order; await this.loadDealFlow(order.id); },
+
+    async loadDealFlow(orderId) {
+      try {
+        const [execs, order] = await Promise.all([
+          fetch('/api/trade/order-executions?orderId=' + orderId).then(r => r.json()),
+          fetch('/api/trade/mm-orders/' + orderId).then(r => r.json()).catch(() => this.deal),
+        ]);
+        if (order && order.id) this.deal = order;
+
+        const flow = [];
+        const storyCache = {};
+        const pipeIds = PIPE.map(p => p.id);
+        const curNode = STATUS_TO_NODE[this.deal.status] || '_pre';
+        const curIdx = pipeIds.indexOf(curNode);
+        const peerName = this.deal._peerName || this.deal.peer_address?.slice(-8) || '对手方';
+        const myName = this.agentName;
+
+        storyCache['published'] = {
+          title: '发布', ok: true, time: this.deal.created_at?.slice(0, 19).replace('T', ' '),
+          summary: peerName + ' 发布了' + (this.deal.side === 'buy' ? '买入' : '卖出') + ' ' + this.deal.kas_amount + ' KAS @ $' + this.deal.price,
+        };
+
+        flow.push({ t: 'cp', label: '发布', done: curIdx >= 0, time: this.deal.created_at?.slice(11, 16) });
+        flow.push({ t: 'peer', who: peerName, av: peerName[0], time: this.deal.created_at?.slice(11, 16),
+          msg: '发布' + (this.deal.side === 'buy' ? '买入' : '卖出') + '订单: ' + this.deal.kas_amount + ' KAS @ $' + this.deal.price + ' (' + (this.deal.chain || 'bnb').toUpperCase() + ')' });
+
+        let lastCheckpoint = 'published';
+        for (const ex of (execs || []).sort((a, b) => a.created_at > b.created_at ? 1 : -1)) {
+          const time = ex.created_at?.slice(11, 16);
+          const typeLabel = { accept_order: '接受', pay_usdt: '付款', verify_payment: '验证', send_kas: '交割', cancel_order: '取消' }[ex.type] || ex.type;
+          const checkpointMap = { accept_order: 'accepted', pay_usdt: 'paying', verify_payment: 'verified', send_kas: 'delivering' };
+          const cpId = checkpointMap[ex.type];
+          if (cpId && cpId !== lastCheckpoint) {
+            const cpIdx = pipeIds.indexOf(cpId);
+            flow.push({ t: 'cp', label: PIPE[cpIdx]?.label || cpId, done: cpIdx < curIdx, now: cpIdx === curIdx, time });
+            lastCheckpoint = cpId;
+          }
+
+          const storyNodeMap = { accept_order: 'accepted', pay_usdt: 'paid', verify_payment: 'verified', send_kas: 'completed' };
+          const storyNodeId = storyNodeMap[ex.type];
+          if (storyNodeId && ex.status === 'completed') {
+            const details = ex.action_details ? JSON.parse(ex.action_details || '{}') : {};
+            storyCache[storyNodeId] = {
+              title: typeLabel, ok: true, time: ex.created_at?.slice(0, 19).replace('T', ' '),
+              summary: ex.display_summary || (typeLabel + '完成'),
+              tx: ex.output_txid || null,
+              reasoning: details.reasoning || null,
+              proof: ex.output_txid ? { 'TX': ex.output_txid, '来源': ex.source, '规则': ex.type } : null,
+            };
+          } else if (storyNodeId && ex.status === 'executing') {
+            storyCache[storyNodeId] = { title: typeLabel, active: true, time: ex.created_at?.slice(11, 19), summary: ex.display_summary || (typeLabel + '执行中...') };
+          } else if (storyNodeId && ex.status === 'failed') {
+            storyCache[storyNodeId] = { title: typeLabel, summary: '失败: ' + (ex.error_text || ''), time: ex.created_at?.slice(11, 19) };
+          }
+
+          if (ex.status === 'pending') {
+            flow.push({ t: 'approval', summary: ex.display_summary, reasoning: ex.action_details ? (JSON.parse(ex.action_details || '{}').reasoning || '') : '', execId: ex.id });
+          } else if (ex.status === 'completed') {
+            flow.push({ t: 'agent', who: myName + ' Agent', av: myName[0], time, msg: ex.display_summary || typeLabel });
+            if (ex.output_txid) {
+              const txShort = ex.output_txid.slice(0, 16) + '...' + ex.output_txid.slice(-6);
+              const isKas = !ex.output_txid.startsWith('0x');
+              const explorers = { bnb: 'https://bscscan.com/tx/', eth: 'https://etherscan.io/tx/', sol: 'https://solscan.io/tx/', tron: 'https://tronscan.org/#/transaction/' };
+              const url = isKas ? 'https://explorer.kaspa.org/txs/' + ex.output_txid : (explorers[this.deal?.chain] || 'https://bscscan.com/tx/') + ex.output_txid;
+              flow.push({ t: 'sys', icon: 'tx', msg: txShort, time, style: 'success', txUrl: url, proof: { 'TX': ex.output_txid, '来源': ex.source, '规则': ex.type, '时间': time }, _o: false });
+            }
+          } else if (ex.status === 'executing') {
+            flow.push({ t: 'agent', who: myName + ' Agent', av: myName[0], time, msg: ex.display_summary || (typeLabel + '执行中...') });
+          } else if (ex.status === 'failed') {
+            flow.push({ t: 'sys', icon: 'err', msg: typeLabel + '失败: ' + (ex.error_text || ''), time, style: 'fail', proof: { '规则': ex.type, '错误': ex.error_text }, _o: false });
+          } else if (ex.status === 'rejected') {
+            flow.push({ t: 'sys', icon: 'rej', msg: '拒绝: ' + (ex.error_text || ''), time, style: 'fail' });
+          }
+        }
+
+        for (let i = curIdx + 1; i < PIPE.length; i++) {
+          flow.push({ t: 'cp', label: PIPE[i].label, wait: true });
+        }
+
+        try {
+          const chatRes = await fetch('/api/chat/messages?channel=' + encodeURIComponent('trade-' + orderId) + '&limit=30').then(r => r.json());
+          for (const cm of (chatRes.messages || chatRes || [])) {
+            const isMe = cm.sender_address === this.agentAddr;
+            const sn = isMe ? this.agentName : (peerName || cm.sender_address?.slice(-8));
+            flow.push({ t: isMe ? 'owner' : 'peer', who: sn, av: sn?.[0] || '?', time: cm.created_at?.slice(11, 16) || '', msg: cm.content || cm.message || '' });
+          }
+        } catch {}
+
+        this._storyCache = storyCache;
+        this.flow = flow;
+        if (this.storyNode && storyCache[this.storyNode]) this.storyData = storyCache[this.storyNode];
+        this.$nextTick(() => { if (this.$refs.chatScroll) this.$refs.chatScroll.scrollTop = this.$refs.chatScroll.scrollHeight; });
+      } catch (err) { console.log('loadDealFlow error:', err); }
+    },
+
+    toggleStory(nodeId) {
+      if (this.storyNode === nodeId) { this.storyNode = null; this.storyData = null; return; }
+      const cls = this.pipeNodeClass(nodeId);
+      if (cls === 'wait') {
+        const futures = {
+          accepted: '对手方接受订单。系统锁定资金，建立链上连接。',
+          paid: '买方发起 USDT 转账，等待区块确认。',
+          verified: '到账金额经链上验证，匹配无误。',
+          completed: '双方交割完成，资金锁定释放，记录上链。',
+        };
+        this.storyNode = nodeId;
+        this.storyData = { title: this.pipe.find(p => p.id === nodeId)?.label, future: futures[nodeId] || '等待执行...' };
+        return;
+      }
+      const cached = this._storyCache?.[nodeId];
+      if (cached) { this.storyNode = nodeId; this.storyData = cached; return; }
+      const pipeIds = PIPE.map(p => p.id);
+      const ci = pipeIds.indexOf(STATUS_TO_NODE[this.deal?.status] || '_pre');
+      const ni = pipeIds.indexOf(nodeId);
+      this.storyNode = nodeId;
+      this.storyData = { title: this.pipe.find(p => p.id === nodeId)?.label || nodeId, summary: ni <= ci ? '此步骤已完成' : '进行中...', ok: ni < ci, active: ni === ci };
+    },
+
+    switchAgent() {
+      this.deal = null; this.flow = []; this.walletPanel = null;
+      this.wallet = { kas: 0, kasLocked: 0, chains: [] }; this.orders = [];
+      this.loadOrders(); this.loadWallet();
+      fetch('/api/trade/agent-mode').then(r => r.json()).then(r => { if (r?.mode) this.mode = r.mode; }).catch(() => {});
+    },
+
+    async setMode(m) {
+      if (m === 'auto' && !confirm('切换到全自动模式？\n\nAgent 将自主接单和执行交易。\n单笔上限: 200 KAS / 20 USDT\n自动限额 = 手动限额的 30%')) return;
+      try {
+        await fetch('/api/trade/agent-mode', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: m }) });
+        this.mode = m;
+      } catch {}
+    },
+
+    async doAction(action) {
+      if (!this.deal) return;
+      if (action === 'accept') {
+        const order = this.deal;
+        if (order.relay_node_id === this.agentId) return this._doActionRaw(order.id, 'accept');
+        try {
+          const counterSide = order.side === 'sell' ? 'buy' : 'sell';
+          const counterId = crypto.randomUUID();
+          let chainAddr = '';
+          try {
+            const wr = await fetch('/api/relay/' + this.agentId + '/wallets').then(r => r.json());
+            const cw = (wr.wallets || wr || []).find(w => w.chain === (order.chain || 'bnb'));
+            chainAddr = cw?.address || '';
+          } catch {}
+          const payload = { t: 'kanet_accept_v1', v: 1, ref: order.id, counter_id: counterId, chain: order.chain || 'bnb', kas_addr: this.agentAddr };
+          if (counterSide === 'buy') payload.pay_from = chainAddr;
+          const bRes = await fetch('/api/chat/send', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ relayId: this.agentId, channel: order.id, message: JSON.stringify(payload) }) });
+          const bd = await bRes.json();
+          if (!bd.ok) { alert('广播失败: ' + (bd.error || '')); return; }
+          let accepted = false;
+          for (let i = 0; i < 6; i++) {
+            await new Promise(r => setTimeout(r, 500));
+            try { const ck = await fetch('/api/trade/mm-orders?broadcast_txid=' + encodeURIComponent(bd.txId)).then(r => r.json()); if ((Array.isArray(ck) ? ck : (ck.orders || [])).length > 0) { accepted = true; break; } } catch {}
+          }
+          await this.loadOrders();
+          const myOrder = this.orders.find(o => o.id === counterId);
+          if (myOrder) { this.deal = myOrder; await this.loadDealFlow(counterId); }
+          return;
+        } catch (err) { alert('接单失败: ' + err.message); return; }
+      }
+      return this._doActionRaw(this.deal.id, action);
+    },
+
+    async _doActionRaw(orderId, action) {
+      try {
+        const res = await fetch('/api/trade/mm-orders/' + orderId + '/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) });
+        const data = await res.json();
+        if (data.ok) { await this.loadOrders(); if (this.deal) await this.loadDealFlow(this.deal.id); }
+        else alert(data.error || '操作失败');
+      } catch (err) { alert('请求失败: ' + err.message); }
+    },
+
+    async approveExec(execId) {
+      try { await fetch('/api/trade/approve-execution', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ executionId: execId }) }); await this.loadDealFlow(this.deal.id); } catch {}
+    },
+    async rejectExec(execId) {
+      try { await fetch('/api/trade/reject-execution', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ executionId: execId }) }); await this.loadDealFlow(this.deal.id); } catch {}
+    },
+
+    async publishOrder() {
+      try {
+        const f = this.pubForm;
+        const amt = parseFloat(f.amount), price = parseFloat(f.price);
+        if (!amt || !price) { alert('请填写数量和价格'); return; }
+        const orderId = crypto.randomUUID();
+        let chainAddr = '';
+        try { const wr = await fetch('/api/relay/' + this.agentId + '/wallets').then(r => r.json()); const cw = (wr.wallets || wr || []).find(w => w.chain === f.chain); chainAddr = cw?.address || ''; } catch {}
+        const payload = f.side === 'sell'
+          ? { t: 'kanet_sell_v1', v: 1, id: orderId, amt, price, want: 'USDT', chain: f.chain, recv: chainAddr }
+          : { t: 'kanet_buy_v1', v: 1, id: orderId, amt, price, pay: 'USDT', chain: f.chain, pay_from: chainAddr };
+        const bRes = await fetch('/api/chat/send', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relayId: this.agentId, channel: orderId, message: JSON.stringify(payload) }) });
+        const bd = await bRes.json();
+        if (!bd.ok) { alert('广播失败: ' + (bd.error || '')); return; }
+        this.showPublish = false;
+        for (let i = 0; i < 6; i++) { await new Promise(r => setTimeout(r, 500)); try { const ck = await fetch('/api/trade/mm-orders?broadcast_txid=' + encodeURIComponent(bd.txId)).then(r => r.json()); if ((Array.isArray(ck) ? ck : (ck.orders || [])).length > 0) break; } catch {} }
+        await this.loadOrders();
+      } catch (err) { alert('发布失败: ' + err.message); }
+    },
+
+    openWalletPanel(chain) { this.walletPanel = this.walletPanel === chain ? null : chain; },
+
+    copyAddr(addr) {
+      if (!addr) return;
+      KANet.copy(addr);
+    },
+
+    async showPrivkeyFor(wallet) {
+      if (!confirm('确定查看私钥？请确保周围环境安全。')) return;
+      try {
+        const res = await fetch('/api/relay/' + encodeURIComponent(this.agentId) + '/wallets/' + encodeURIComponent(wallet.id) + '/privkey').then(r => r.json());
+        if (res.privkey) prompt('私钥（请妥善保管）:', res.privkey);
+        else alert(res.error || '无法获取私钥');
+      } catch { alert('获取失败'); }
+    },
+
+    withdrawPrompt(wallet) {
+      const cn = wallet.chain.toUpperCase();
+      const choice = prompt('提现资产:\n  1 = USDT (' + (wallet.usdt||0).toFixed(2) + ')\n  2 = ' + cn + ' 原生币 (' + (wallet.gas||0).toFixed(4) + ')\n输入 1 或 2:');
+      if (!choice) return;
+      const asset = choice.trim() === '2' ? 'native' : 'usdt';
+      const label = asset === 'native' ? cn : 'USDT';
+      const to = prompt('目标地址 (' + cn + '):');
+      if (!to) return;
+      const amt = prompt('金额 (' + label + '):');
+      if (!amt || isNaN(amt)) return;
+      if (!confirm('确认提现 ' + amt + ' ' + label + '\n-> ' + to)) return;
+      this.doWithdraw(wallet, to, parseFloat(amt), asset);
+    },
+
+    async doWithdraw(wallet, toAddr, amount, asset = 'usdt') {
+      try {
+        const res = await fetch('/api/trade/withdraw', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ walletId: wallet.id, chain: wallet.chain, to: toAddr, amount, asset }) });
+        const data = await res.json();
+        if (data.ok || data.txHash) { alert('提现成功! TX: ' + (data.txHash || '').slice(0, 20) + '...'); await this.loadWallet(); }
+        else alert('提现失败: ' + (data.error || ''));
+      } catch (err) { alert('提现失败: ' + err.message); }
+    },
+
+    async createWallet(chain) {
+      try {
+        await fetch('/api/relay/' + this.agentId + '/wallets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chain }) });
+        await this.loadWallet(); this.openWalletPanel(chain);
+      } catch (err) { alert('创建失败: ' + err.message); }
+    },
+
+    async sendChat() {
+      if (!this.chatInput.trim() || !this.deal) return;
+      const msg = this.chatInput; this.chatInput = '';
+      this.flow.push({ t: 'owner', time: new Date().toTimeString().slice(0, 5), msg });
+      this.$nextTick(() => { if (this.$refs.chatScroll) this.$refs.chatScroll.scrollTop = this.$refs.chatScroll.scrollHeight; });
+      try {
+        await fetch('/api/chat/send', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relayId: this.agentId, channel: 'trade-' + (this.deal.id || 'unknown'), message: msg }) });
+      } catch {}
+    },
+  };
+}
+</script>
+
+<%~ include('partials/page-close', it) %>

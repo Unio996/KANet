@@ -1,0 +1,151 @@
+<%~ include('partials/page-open', { _page: 'trading', pageTitle: 'Trading', ...it }) %>
+
+<style>
+  .thinking-dots span {
+    display: inline-block; width: 6px; height: 6px; margin: 0 2px;
+    border-radius: 50%; background: #9496a1; animation: thinking 1.4s infinite;
+  }
+  .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes thinking {
+    0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+    40% { opacity: 1; transform: scale(1); }
+  }
+  .price-up { color: #16a34a; }
+  .price-down { color: #dc2626; }
+  .mini-chart { display: flex; align-items: flex-end; gap: 1px; height: 60px; }
+  .mini-chart .bar { min-width: 3px; flex: 1; border-radius: 1px 1px 0 0; }
+</style>
+
+<div class="p-6 space-y-5" x-data="tradingApp()" x-init="init()">
+
+  <!-- ═══ Status bar ═══ -->
+  <div class="flex items-center gap-3 text-sm flex-wrap">
+    <span class="badge" :class="mode === 'LIVE' ? 'badge-error' : 'badge-warning'" x-text="mode"></span>
+    <span class="badge" :class="agentTradeMode === 'auto' ? 'badge-success' : agentTradeMode === 'approval' ? 'badge-info' : 'badge-neutral'"
+      x-text="agentTradeMode === 'auto' ? 'Agent: Auto' : agentTradeMode === 'approval' ? 'Agent: Approval' : 'Agent: Manual'"></span>
+    <template x-if="portfolio?.market?.price">
+      <span class="text-ink-500 font-mono text-xs" x-text="'KAS $' + portfolio.market.price.toFixed(5)"></span>
+    </template>
+    <div class="ml-auto flex items-center gap-2">
+      <select x-model="selectedAgent" class="rounded-lg border border-warm-300 px-2 py-1 text-xs bg-white text-ink-600">
+        <template x-for="a in agents" :key="a.id">
+          <option :value="a.id" x-text="a.name"></option>
+        </template>
+        <option value="__all__">All Agents</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- ═══ Tab bar ═══ -->
+  <div class="tab-bar">
+    <button class="tab-item" :class="tab === 'portfolio' && 'active'" @click="tab = 'portfolio'">Portfolio</button>
+    <button class="tab-item" :class="tab === 'exchange' && 'active'" @click="tab = 'exchange'">Exchange</button>
+    <button class="tab-item" :class="tab === 'otc' && 'active'" @click="tab = 'otc'; loadMarketData()">OTC Market</button>
+    <button class="tab-item" :class="tab === 'settings' && 'active'" @click="tab = 'settings'">Settings</button>
+  </div>
+
+  <!-- ═══ Tab content ═══ -->
+  <div x-show="tab === 'portfolio'">
+    <%~ include('partials/trade-portfolio', it) %>
+  </div>
+  <div x-show="tab === 'exchange'" x-cloak>
+    <%~ include('partials/trade-exchange', it) %>
+  </div>
+  <div x-show="tab === 'otc'" x-cloak>
+    <%~ include('partials/trade-otc', it) %>
+  </div>
+  <div x-show="tab === 'settings'" x-cloak>
+    <%~ include('partials/trade-settings', it) %>
+  </div>
+</div>
+
+<script>
+function tradingApp() {
+  return {
+    tab: 'portfolio',
+    // Shared state
+    agents: <%= JSON.stringify(it.relayNodes.map(r => ({ id: r.id, name: r.name }))) %>,
+    selectedAgent: '__all__',
+    portfolio: null,
+    loading: true,
+    configured: <%= it.configured %>,
+    mode: '<%= it.mode %>',
+    agentTradeMode: 'manual',
+    tradeAnchor: 'kas',
+    polling: null,
+    exchangeRegistry: <%= it.exchangeRegistry %>,
+    // Market data (shared for OTC tab)
+    marketOrders: [],
+    marketBroadcasts: [],
+    marketLoading: false,
+
+    async init() {
+      fetch('/api/trade/agent-mode').then(r => r.json()).then(d => { if (d.mode) this.agentTradeMode = d.mode; }).catch(() => {});
+      fetch('/api/trade/anchor').then(r => r.json()).then(d => { if (d.anchor) this.tradeAnchor = d.anchor; }).catch(() => {});
+      await this.loadPortfolio();
+      this.polling = setInterval(() => this.loadPortfolio(), 15000);
+    },
+
+    async loadPortfolio() {
+      try {
+        const res = await fetch('/api/trade/portfolio');
+        this.portfolio = await res.json();
+      } catch {}
+      this.loading = false;
+    },
+
+    async loadMarketData() {
+      this.marketLoading = true;
+      try {
+        const [orders, broadcasts] = await Promise.all([
+          fetch('/api/trade/mm-orders').then(r => r.json()),
+          fetch('/api/chat/messages?channel=otc-market&limit=50').then(r => r.json()).then(d => d.messages || []).catch(() => []),
+        ]);
+        this.marketOrders = orders;
+        this.marketBroadcasts = broadcasts.filter(b => {
+          try { const p = JSON.parse(b.content); return p.type?.startsWith('kanet_'); } catch { return false; }
+        });
+      } catch {} finally { this.marketLoading = false; }
+    },
+
+    // ── Shared helpers ──
+    fmtNum(n, decimals = 2) {
+      if (n == null) return '--';
+      return Number(n).toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+    },
+    fmtBig(n) {
+      if (n == null) return '--';
+      if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+      if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+      return n.toFixed(2);
+    },
+    fmtExp(n) {
+      if (n == null) return '--';
+      if (n >= 1e15) return (n / 1e15).toFixed(1) + 'P';
+      if (n >= 1e12) return (n / 1e12).toFixed(1) + 'T';
+      if (n >= 1e9) return (n / 1e9).toFixed(1) + 'G';
+      if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+      return n.toFixed(0);
+    },
+    agentName() {
+      if (this.selectedAgent === '__all__') return 'All Agents';
+      return this.agents.find(a => a.id === this.selectedAgent)?.name || '';
+    },
+    timeAgo(dateStr) {
+      if (!dateStr) return '';
+      const diff = Date.now() - new Date(dateStr).getTime();
+      if (diff < 60000) return 'just now';
+      if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+      if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+      return Math.floor(diff / 86400000) + 'd ago';
+    },
+    orderStatusCn(status) {
+      const map = { published: 'Published', accepted: 'Accepted', paying: 'Paying', paid: 'Paid', verified: 'Verified', delivering: 'Delivering', completed: 'Completed', cancelled: 'Cancelled', expired: 'Expired', disputed: 'Disputed', resolved: 'Resolved' };
+      return map[status] || status;
+    },
+  };
+}
+</script>
+
+<%~ include('partials/page-close', it) %>
