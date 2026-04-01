@@ -1,89 +1,6 @@
-<!DOCTYPE html>
-<html lang="<%= it.t.html_lang %>" dir="<%= it.dir %>">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title><%= it.title %> — KANet Console</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-  tailwind.config = {
-    theme: { extend: { colors: {
-      warm: { 50: '#faf9f7', 100: '#f7f6f3', 200: '#efeee9', 300: '#e4e2dc', 400: '#d4d0c8' },
-      ink: { 50: '#f5f5f7', 100: '#e8e8ec', 200: '#c8c8d0', 300: '#9496a1', 400: '#6b6d7b', 500: '#4a4b57', 600: '#2d2e3a', 700: '#1a1a2e' },
-      brand: { 50: '#eff6ff', 100: '#dbeafe', 200: '#bfdbfe', 300: '#93c5fd', 400: '#60a5fa', 500: '#3b82f6', 600: '#2563eb', 700: '#1d4ed8' }
-    }, fontFamily: { sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'] } } } }
-  </script>
-  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
-  <style>[x-cloak] { display: none !important; }</style>
-</head>
-<body class="flex h-screen bg-warm-100 font-sans">
+<%~ include('partials/page-open', { _page: 'discovered', pageTitle: '', ...it }) %>
+</main>
 
-  <!-- Sidebar -->
-  <aside class="w-56 bg-white border-r border-warm-300 flex flex-col flex-shrink-0">
-    <div class="px-4 py-4 border-b border-warm-300 flex items-center space-x-3">
-      <img src="/public/kanet-logo.png" alt="KANet" class="h-8 w-8 object-contain flex-shrink-0" />
-      <span class="text-base font-bold tracking-wide text-ink-700 leading-tight">KANet<br/><span class="text-xs font-normal text-ink-300">Console</span></span>
-    </div>
-    <nav class="flex-1 py-4 space-y-0.5 px-3 overflow-y-auto">
-      <a href="/agent" class="block px-3 py-2 rounded-lg text-sm text-ink-300 hover:bg-warm-50 hover:text-ink-500 transition-colors">
-        我的 Agent
-      </a>
-      <a href="/conversations" class="block px-3 py-2 rounded-lg text-sm text-ink-300 hover:bg-warm-50 hover:text-ink-500 transition-colors">
-        会话
-      </a>
-      <a href="/identities" class="block px-3 py-2 rounded-lg text-sm text-ink-300 hover:bg-warm-50 hover:text-ink-500 transition-colors">
-        通讯录
-      </a>
-      <a href="/network" class="block px-3 py-2 rounded-lg text-sm font-medium bg-brand-50 text-brand-600">
-        网络
-      </a>
-      <a href="/chat" class="block px-3 py-2 rounded-lg text-sm text-ink-300 hover:bg-warm-50 hover:text-ink-500 transition-colors">
-        聊天
-      </a>
-      <a href="/market" class="block px-3 py-2 rounded-lg text-sm text-ink-300 hover:bg-warm-50 hover:text-ink-500 transition-colors">
-        自由市场
-      </a>
-
-      <!-- Divider -->
-      <div class="border-t border-warm-300 my-3"></div>
-
-      <a href="/events" class="block px-3 py-2 rounded-lg text-sm text-ink-300 hover:bg-warm-50 hover:text-ink-500 transition-colors">
-        活动日志
-      </a>
-
-      <div class="px-3 py-2 text-xs font-medium text-ink-300 uppercase tracking-wider">
-        系统
-      </div>
-      <a href="/relays" class="block px-3 py-2 rounded-lg text-sm text-ink-300 hover:bg-warm-50 hover:text-ink-500 transition-colors pl-6">
-        账户管理
-      </a>
-      <a href="/adapters" class="block px-3 py-2 rounded-lg text-sm text-ink-300 hover:bg-warm-50 hover:text-ink-500 transition-colors pl-6">
-        AI 引擎
-      </a>
-      <a href="/skills" class="block px-3 py-2 rounded-lg text-sm text-ink-300 hover:bg-warm-50 hover:text-ink-500 transition-colors pl-6">
-        技能
-      </a>
-    </nav>
-    <div class="px-3 pb-2">
-      <form method="POST" action="/lang">
-        <select name="lang" onchange="this.form.submit()"
-          class="w-full bg-warm-50 text-ink-500 text-xs rounded-lg px-2 py-1.5 border border-warm-300 focus:outline-none focus:ring-1 focus:ring-brand-500 cursor-pointer">
-          <% Object.entries(it.langs).forEach(function([code, label]) { %>
-          <option value="<%= code %>" <%= it.lang === code ? 'selected' : '' %>><%= label %></option>
-          <% }) %>
-        </select>
-      </form>
-    </div>
-    <div class="px-5 py-3 border-t border-warm-300 text-xs text-ink-300">
-      KANet Console v0.1
-    </div>
-  </aside>
-
-  <!-- Main content -->
-  <div class="flex-1 flex flex-col overflow-hidden">
     <header class="bg-white border-b border-warm-200 px-6 py-4 flex items-center justify-between flex-shrink-0">
       <div class="flex items-center space-x-3">
         <a href="/identities?account=<%= it.accountId %>" class="text-sm text-brand-500 hover:text-brand-600 transition-colors">&larr; <%= it.t.nav_identities %></a>
@@ -318,8 +235,4 @@
         </table>
       </div>
 
-    </main>
-  </div>
-
-</body>
-</html>
+<%~ include('partials/page-close', it) %>
