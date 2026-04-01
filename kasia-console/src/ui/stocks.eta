@@ -15,13 +15,13 @@
     </template>
     <template x-if="healthData.avgBeta != null">
       <span class="px-2 py-0.5 rounded-full text-xs font-medium"
-        :class="healthData.avgBeta >= 2.0 ? 'bg-red-50 text-red-600' : healthData.avgBeta >= 1.5 ? 'bg-amber-50 text-amber-600' : 'bg-warm-100 text-ink-500'"
-        x-text="'Beta ' + healthData.avgBeta"></span>
+        :class="healthData.avgBeta >= 2.0 ? 'bg-red-50 text-red-600' : healthData.avgBeta >= 1.5 ? 'bg-amber-50 text-amber-600' : 'bg-green-50 text-green-600'"
+        x-text="'波动性 ' + (healthData.avgBeta >= 2.0 ? '高' : healthData.avgBeta >= 1.5 ? '偏高' : '正常')"></span>
     </template>
-    <template x-if="healthData.maxSectorPct > 0">
+    <template x-if="healthData.maxSectorPct >= 0.6">
       <span class="px-2 py-0.5 rounded-full text-xs font-medium"
-        :class="healthData.maxSectorPct >= 0.8 ? 'bg-red-50 text-red-600' : healthData.maxSectorPct >= 0.6 ? 'bg-amber-50 text-amber-600' : 'bg-warm-100 text-ink-500'"
-        x-text="'集中度 ' + Math.round(healthData.maxSectorPct * 100) + '%'"></span>
+        :class="healthData.maxSectorPct >= 0.8 ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-600'"
+        x-text="'行业集中 ' + Math.round(healthData.maxSectorPct * 100) + '%'"></span>
     </template>
     <div class="ml-auto flex gap-2">
       <button @click="showBroker = !showBroker" class="btn btn-sm btn-secondary" x-text="showBroker ? '收起券商' : '连接券商'"></button>
@@ -361,24 +361,26 @@
   </template>
 
   <!-- Stock list -->
-  <div class="space-y-2">
+  <div class="space-y-3">
     <template x-for="item in watchlist" :key="item.id">
-      <div class="bg-white rounded-xl border border-warm-200 p-4 hover:border-brand-300 transition-colors">
-        <!-- Row 1: Symbol, badges, name, 52w range, price, change, delete -->
-        <div class="flex items-center justify-between">
+      <div class="bg-white rounded-xl border border-warm-200 overflow-hidden hover:border-brand-300 transition-colors">
+
+        <!-- ▌Header: identity + price -->
+        <div class="p-4 flex items-start justify-between">
           <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2">
-              <span class="font-bold text-ink-700" x-text="item.symbol"></span>
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-lg font-bold text-ink-700" x-text="item.symbol"></span>
               <span class="badge text-[10px]" :class="item.market === 'us' ? 'badge-info' : item.market === 'hk' ? 'badge-warning' : 'badge-neutral'" x-text="item.market?.toUpperCase()"></span>
               <template x-if="fundData[item.symbol]?.industry">
                 <span class="badge badge-neutral text-[9px]" x-text="fundData[item.symbol].industry"></span>
               </template>
-              <span class="text-xs text-ink-400 truncate" x-text="quotes[item.symbol]?.name || item.name || ''"></span>
             </div>
+            <div class="text-xs text-ink-400" x-text="quotes[item.symbol]?.name || item.name || ''"></div>
+            <!-- 52-week range -->
             <template x-if="quotes[item.symbol]?.high52w">
               <div class="mt-2 flex items-center gap-2">
                 <span class="text-[10px] text-ink-300" x-text="'$' + quotes[item.symbol].low52w?.toFixed(0)"></span>
-                <div class="flex-1 h-1 bg-warm-200 rounded-full relative">
+                <div class="flex-1 h-1.5 bg-warm-200 rounded-full relative">
                   <div class="absolute h-full bg-brand-400 rounded-full"
                     :style="'width:' + Math.max(2, Math.min(98, ((quotes[item.symbol].price - quotes[item.symbol].low52w) / (quotes[item.symbol].high52w - quotes[item.symbol].low52w) * 100))) + '%'"></div>
                 </div>
@@ -389,87 +391,49 @@
           <div class="text-right flex-shrink-0 ml-4">
             <template x-if="quotes[item.symbol]">
               <div>
-                <div class="text-lg font-bold text-ink-700" x-text="'$' + quotes[item.symbol].price?.toFixed(2)"></div>
-                <div class="text-xs font-medium"
+                <div class="text-xl font-bold text-ink-700" x-text="'$' + quotes[item.symbol].price?.toFixed(2)"></div>
+                <div class="text-sm font-semibold"
                   :class="quotes[item.symbol].change24h > 0 ? 'text-green-600' : quotes[item.symbol].change24h < 0 ? 'text-red-500' : 'text-ink-400'"
                   x-text="quotes[item.symbol].change24h != null ? (quotes[item.symbol].change24h > 0 ? '+' : '') + quotes[item.symbol].change24h.toFixed(2) + '%' : '--'"></div>
               </div>
             </template>
             <template x-if="!quotes[item.symbol] && !loading"><span class="text-xs text-ink-300">--</span></template>
-            <template x-if="loading"><div class="skeleton" style="width:60px;height:20px;"></div></template>
+            <template x-if="loading"><div class="skeleton" style="width:60px;height:24px;"></div></template>
           </div>
-          <button @click="removeStock(item.id)" class="ml-3 text-ink-300 hover:text-red-500 transition-colors text-lg">&times;</button>
+          <button @click="removeStock(item.id)" class="ml-2 text-ink-200 hover:text-red-500 transition-colors text-sm">&times;</button>
         </div>
 
-        <!-- Row 2: Fundamentals grid (FwdPE / Revenue / Margin / Analysts) -->
-        <template x-if="fundData[item.symbol]">
-          <div class="grid grid-cols-4 gap-3 mt-3 pt-3 border-t border-warm-100">
-            <div>
-              <div class="text-[10px] text-ink-400">Fwd P/E</div>
-              <div class="text-sm font-medium text-ink-700" x-text="fundData[item.symbol].forwardPE ? fundData[item.symbol].forwardPE.toFixed(1) : '—'"></div>
-            </div>
-            <div>
-              <div class="text-[10px] text-ink-400">Revenue</div>
-              <div class="text-sm font-medium text-ink-700">
-                <span x-text="fmtRevenue(fundData[item.symbol].revenue)"></span>
-                <template x-if="fundData[item.symbol].revenueGrowth != null">
-                  <span class="text-[10px] ml-0.5"
-                    :class="fundData[item.symbol].revenueGrowth > 0 ? 'text-green-600' : 'text-red-500'"
-                    x-text="(fundData[item.symbol].revenueGrowth > 0 ? '+' : '') + (fundData[item.symbol].revenueGrowth * 100).toFixed(0) + '%'"></span>
-                </template>
-              </div>
-            </div>
-            <div>
-              <div class="text-[10px] text-ink-400">Margin</div>
-              <div class="text-sm font-medium text-ink-700" x-text="fundData[item.symbol].profitMargin != null ? (fundData[item.symbol].profitMargin * 100).toFixed(1) + '%' : '—'"></div>
-            </div>
-            <div>
-              <div class="text-[10px] text-ink-400">Analysts</div>
-              <div class="text-sm font-medium text-ink-700">
-                <span x-text="fundData[item.symbol].analystRating || '—'"></span>
-                <template x-if="fundData[item.symbol].targetPrice">
-                  <span class="text-[10px] text-ink-400 ml-0.5" x-text="'→$' + fundData[item.symbol].targetPrice.toFixed(0)"></span>
-                </template>
-              </div>
+        <!-- ▌Agent 分析 — 人话，不是术语 -->
+        <template x-if="getAgentInsight(item.symbol)">
+          <div class="px-4 pb-3">
+            <div class="bg-brand-50/50 rounded-lg px-3 py-2.5">
+              <div class="text-[10px] font-medium text-brand-600 mb-1.5">Agent 分析</div>
+              <template x-for="(line, i) in getAgentInsight(item.symbol)" :key="i">
+                <p class="text-xs text-ink-600 leading-relaxed" x-text="line"></p>
+              </template>
             </div>
           </div>
         </template>
 
-        <!-- Row 3: Competitor fold -->
+        <!-- ▌同行对比 — 直接可见，不需要展开 -->
         <template x-if="getPeersForStock(item.symbol).length > 0">
-          <div class="mt-3 pt-3 border-t border-warm-100">
-            <button @click="expandedPeers[item.symbol] = !expandedPeers[item.symbol]"
-              class="text-[11px] text-brand-500 hover:text-brand-700 font-medium">
-              <span x-text="expandedPeers[item.symbol] ? '收起竞争对手 ▲' : '展开竞争对手 ▼'"></span>
+          <div class="px-4 pb-4">
+            <div class="text-[10px] font-medium text-ink-400 mb-2">
+              <span>同行对比</span>
               <template x-if="getDivergence(item.symbol) && Math.abs(getDivergence(item.symbol).value) >= divergenceThreshold">
-                <span class="ml-2 px-1.5 py-0.5 rounded text-[10px] font-medium"
-                  :class="getDivergence(item.symbol).value > 0 ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'"
-                  x-text="'偏离 ' + (getDivergence(item.symbol).value > 0 ? '+' : '') + getDivergence(item.symbol).value + '%'"></span>
+                <span class="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold"
+                  :class="getDivergence(item.symbol).value > 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'"
+                  x-text="item.symbol + ' 偏离同行 ' + (getDivergence(item.symbol).value > 0 ? '+' : '') + getDivergence(item.symbol).value + '%'"></span>
               </template>
-            </button>
-            <div x-show="expandedPeers[item.symbol]" x-transition class="mt-2">
-              <div class="grid grid-cols-2 gap-2">
-                <template x-for="peer in getPeersForStock(item.symbol)" :key="peer.symbol">
-                  <div class="flex items-center justify-between bg-warm-50 rounded-lg px-3 py-2">
-                    <div>
-                      <span class="text-xs font-bold text-ink-600" x-text="peer.symbol"></span>
-                      <span class="text-[10px] text-ink-300 ml-1" x-text="peer.name || ''"></span>
-                    </div>
-                    <div class="text-right">
-                      <div class="text-xs font-medium text-ink-700" x-text="peer.price != null ? '$' + peer.price.toFixed(2) : '—'"></div>
-                      <div class="text-[10px]"
-                        :class="peer.change24h > 0 ? 'text-green-600' : peer.change24h < 0 ? 'text-red-500' : 'text-ink-300'"
-                        x-text="peer.change24h != null ? (peer.change24h > 0 ? '+' : '') + peer.change24h.toFixed(2) + '%' : '--'"></div>
-                    </div>
-                  </div>
-                </template>
-              </div>
-              <template x-if="getDivergence(item.symbol)">
-                <div class="mt-2 text-[10px] text-ink-400">
-                  <span x-text="item.symbol + ' ' + (getDivergence(item.symbol).myChange > 0 ? '+' : '') + getDivergence(item.symbol).myChange.toFixed(1) + '%'"></span>
-                  <span> vs 同行均值 </span>
-                  <span x-text="(getDivergence(item.symbol).peerAvg > 0 ? '+' : '') + getDivergence(item.symbol).peerAvg.toFixed(1) + '%'"></span>
-                  <span x-text="' (偏离 ' + (getDivergence(item.symbol).value > 0 ? '+' : '') + getDivergence(item.symbol).value + '%)'"></span>
+            </div>
+            <div class="flex flex-wrap gap-1.5">
+              <template x-for="peer in getPeersForStock(item.symbol)" :key="peer.symbol">
+                <div class="flex items-center gap-1.5 bg-warm-50 rounded-md px-2 py-1">
+                  <span class="text-[11px] font-bold text-ink-600" x-text="peer.symbol"></span>
+                  <span class="text-[10px] text-ink-500" x-text="peer.price != null ? '$' + peer.price.toFixed(0) : ''"></span>
+                  <span class="text-[10px] font-medium"
+                    :class="peer.change24h > 0 ? 'text-green-600' : peer.change24h < 0 ? 'text-red-500' : 'text-ink-300'"
+                    x-text="peer.change24h != null ? (peer.change24h > 0 ? '+' : '') + peer.change24h.toFixed(1) + '%' : ''"></span>
                 </div>
               </template>
             </div>
@@ -589,6 +553,50 @@ function stocksPage() {
       if (v >= 1e9) return (v / 1e9).toFixed(1) + 'B';
       if (v >= 1e6) return (v / 1e6).toFixed(0) + 'M';
       return v.toLocaleString();
+    },
+
+    /** 把原始数据翻译成人话 — Agent 视角的个股分析 */
+    getAgentInsight(symbol) {
+      const f = this.fundData[symbol];
+      const q = this.quotes[symbol];
+      if (!f) return null;
+      const lines = [];
+
+      // 分析师共识
+      if (f.recommendationKey && f.numberOfAnalysts) {
+        const ratingMap = { strong_buy: '强烈买入', buy: '买入', hold: '持有', sell: '卖出', underperform: '减持' };
+        const rating = ratingMap[f.recommendationKey] || f.recommendationKey;
+        let targetNote = '';
+        if (f.targetMeanPrice && q?.price) {
+          const diff = ((f.targetMeanPrice - q.price) / q.price * 100).toFixed(0);
+          targetNote = diff > 0
+            ? `，目标价 $${f.targetMeanPrice.toFixed(0)}（+${diff}% 上涨空间）`
+            : `，目标价 $${f.targetMeanPrice.toFixed(0)}（当前已超目标价 ${diff}%）`;
+        }
+        lines.push(`${f.numberOfAnalysts} 位分析师评级「${rating}」${targetNote}`);
+      }
+
+      // 营收 + 利润
+      const parts = [];
+      if (f.revenue) {
+        let revStr = '营收 ' + this.fmtRevenue(f.revenue);
+        if (f.revenueGrowth != null) revStr += `（${f.revenueGrowth > 0 ? '+' : ''}${f.revenueGrowth.toFixed(1)}%）`;
+        parts.push(revStr);
+      }
+      if (f.profitMargin != null) parts.push(`利润率 ${f.profitMargin.toFixed(1)}%`);
+      if (f.forwardPE) parts.push(`P/E ${f.forwardPE.toFixed(1)}`);
+      if (parts.length > 0) lines.push(parts.join('，'));
+
+      // 风险
+      const risks = [];
+      if (f.beta != null) {
+        const label = f.beta >= 2.0 ? '高波动' : f.beta >= 1.5 ? '中高波动' : '稳健';
+        risks.push(`${label}（Beta ${f.beta.toFixed(1)}）`);
+      }
+      if (f.shortRatio && f.shortRatio > 3) risks.push(`做空压力偏高（${f.shortRatio.toFixed(1)}）`);
+      if (risks.length > 0) lines.push(risks.join('，'));
+
+      return lines;
     },
 
     async addStock() {
