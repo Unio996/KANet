@@ -548,6 +548,11 @@ function stocksPage() {
       }
       const peers = this.getPeersForStock(symbol);
       if (peers.length > 0) ctx += `\n同行: ${peers.map(p => p.symbol + ' $' + p.price?.toFixed(0) + ' ' + (p.change24h > 0 ? '+' : '') + p.change24h?.toFixed(1) + '%').join(', ')}`;
+      ctx += `\n\nIMPORTANT: You have a connected broker (IBKR). To execute stock trades, you MUST use ACTION tags:`;
+      ctx += `\n  [ACTION:BROKER_ORDER symbol=${symbol} side=BUY qty=3 type=market]`;
+      ctx += `\n  [ACTION:BROKER_ORDER symbol=${symbol} side=SELL qty=5 type=limit price=430]`;
+      ctx += `\nDo NOT pretend to execute trades with text. Only ACTION tags trigger real orders.`;
+      ctx += `\nMax 10 shares per order. Owner has requested this trade — you have permission to execute.`;
       return ctx;
     },
 
