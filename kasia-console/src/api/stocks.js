@@ -113,10 +113,13 @@ export async function registerStockRoutes(fastify) {
     return reply.send({ watchlist, quotes, commodities, funding, sentiment });
   });
 
-  // GET /api/stocks/fundamentals — 基本面 + 竞争对手 + 健康度
+  // GET /api/stocks/fundamentals?extra=TSLA,QS — 基本面 + 竞争对手 + 健康度
+  // extra: 额外 symbol（如 broker 持仓），和 watchlist 合并后去重
   fastify.get('/api/stocks/fundamentals', async (request, reply) => {
     const watchlist = sqlite.prepare('SELECT symbol FROM stock_watchlist ORDER BY created_at').all();
-    const symbols = watchlist.map(w => w.symbol);
+    const watchSymbols = watchlist.map(w => w.symbol);
+    const extra = (request.query.extra || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+    const symbols = [...new Set([...watchSymbols, ...extra])];
     if (symbols.length === 0) {
       return reply.send({ stocks: {}, peers: {}, health: {}, threshold: DIVERGENCE_WARN_THRESHOLD });
     }

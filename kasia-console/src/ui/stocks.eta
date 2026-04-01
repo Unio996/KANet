@@ -2,16 +2,15 @@
 
 <div class="p-6" x-data="stocksPage()" x-init="init()">
 
-  <!-- Stats bar -->
-  <div class="flex items-center gap-4 mb-5 text-sm">
-    <span class="text-ink-400" x-text="watchlist.length + ' 只自选股'"></span>
+  <!-- ═══ Stats bar ═══ -->
+  <div class="flex items-center gap-3 mb-5 text-sm flex-wrap">
+    <template x-if="showPositionPanel && brokerAccount?.ok">
+      <span class="font-medium text-ink-700" x-text="'净值 $' + (brokerAccount.netLiquidation?.toLocaleString(undefined,{minimumFractionDigits:0}) || '--')"></span>
+    </template>
     <template x-if="sentiment">
       <span class="px-2 py-0.5 rounded-full text-xs font-medium"
         :class="sentiment.value < 25 ? 'bg-red-50 text-red-600' : sentiment.value > 75 ? 'bg-green-50 text-green-600' : 'bg-warm-100 text-ink-500'"
         x-text="'恐贪 ' + sentiment.value + ' ' + sentiment.label"></span>
-    </template>
-    <template x-if="funding?.BTC">
-      <span class="text-xs text-ink-400" x-text="'BTC费率 ' + (funding.BTC.rate * 100).toFixed(4) + '%'"></span>
     </template>
     <template x-if="healthData.avgBeta != null">
       <span class="px-2 py-0.5 rounded-full text-xs font-medium"
@@ -24,156 +23,128 @@
         x-text="'行业集中 ' + Math.round(healthData.maxSectorPct * 100) + '%'"></span>
     </template>
     <div class="ml-auto flex gap-2">
-      <button @click="showBroker = !showBroker" class="btn btn-sm btn-secondary" x-text="showBroker ? '收起券商' : '连接券商'"></button>
-      <button @click="showAdd = !showAdd" class="btn btn-sm btn-primary">添加股票</button>
+      <button @click="showTools = !showTools" class="btn btn-sm btn-secondary" x-text="showTools ? '收起工具' : '券商 / 添加'"></button>
     </div>
   </div>
 
-  <!-- ═══ 券商操作台（已连接时自动展示） ═══ -->
-  <template x-if="showPositionPanel">
-    <div class="space-y-3 mb-5">
-      <!-- 头部：状态+账户摘要 -->
-      <div class="card">
-        <div class="flex items-center justify-between mb-3">
-          <div class="flex items-center gap-2">
-            <span class="status-dot green"></span>
-            <span class="text-sm font-medium text-ink-700" x-text="activeBrokerName"></span>
-            <span class="text-xs text-ink-400 font-mono" x-text="activeBrokerAccount || ''"></span>
-          </div>
-          <div class="flex items-center gap-2">
-            <button @click="refreshBroker()" class="btn btn-ghost btn-sm text-[10px]">刷新</button>
-            <button @click="disconnectBroker()" class="btn btn-ghost btn-sm text-[10px] text-red-500">断开</button>
-          </div>
-        </div>
-        <template x-if="brokerAccount?.ok">
-          <div class="grid grid-cols-4 gap-3">
-            <div class="bg-warm-50 rounded-lg p-3">
-              <div class="text-[10px] text-ink-400">现金余额</div>
-              <div class="text-lg font-bold text-ink-700" x-text="'$' + (brokerAccount.balance?.toLocaleString(undefined,{minimumFractionDigits:2}) || '--')"></div>
-            </div>
-            <div class="bg-warm-50 rounded-lg p-3">
-              <div class="text-[10px] text-ink-400">购买力</div>
-              <div class="text-lg font-bold text-ink-700" x-text="'$' + (brokerAccount.buyingPower?.toLocaleString(undefined,{minimumFractionDigits:2}) || '--')"></div>
-            </div>
-            <div class="bg-warm-50 rounded-lg p-3">
-              <div class="text-[10px] text-ink-400">总净值</div>
-              <div class="text-lg font-bold text-ink-700" x-text="'$' + (brokerAccount.netLiquidation?.toLocaleString(undefined,{minimumFractionDigits:2}) || '--')"></div>
-            </div>
-            <div class="bg-warm-50 rounded-lg p-3">
-              <div class="text-[10px] text-ink-400">持仓市值</div>
-              <div class="text-lg font-bold text-ink-700" x-text="'$' + (brokerAccount.grossPosition?.toLocaleString(undefined,{minimumFractionDigits:2}) || '--')"></div>
-            </div>
-          </div>
-        </template>
-        <div x-show="!brokerAccount?.ok && brokerAccount" class="text-xs text-ink-400 py-2">加载账户数据中...</div>
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!--  Section 1: 我的持仓 — 页面主角                    -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <template x-if="brokerPositions.length > 0">
+    <div class="mb-6">
+      <div class="flex items-center gap-2 mb-3">
+        <h2 class="text-sm font-bold text-ink-700">我的持仓</h2>
+        <span class="text-xs text-ink-400" x-text="activeBrokerName"></span>
+        <span class="status-dot green"></span>
+        <button @click="refreshBroker()" class="text-[10px] text-brand-500 hover:text-brand-700 ml-auto">刷新</button>
       </div>
 
-      <!-- 持仓列表 -->
-      <div class="card">
-        <div class="text-sm font-medium text-ink-700 mb-3" x-text="'持仓 (' + brokerPositions.length + ')'"></div>
-        <div x-show="brokerPositions.length === 0" class="text-xs text-ink-400 py-4 text-center">暂无持仓</div>
-        <div class="divide-y divide-warm-100">
-          <template x-for="p in brokerPositions" :key="p.conid">
-            <div class="flex items-center gap-3 py-3">
-              <div class="w-20">
-                <div class="font-bold text-ink-700" x-text="p.symbol"></div>
-                <div class="text-[10px] text-ink-300" x-text="p.exchange || p.secType || ''"></div>
-              </div>
-              <div class="w-16 text-right">
-                <div class="text-sm text-ink-600" x-text="p.qty + ' 股'"></div>
-              </div>
-              <div class="w-24 text-right">
-                <div class="text-xs text-ink-400">均价</div>
-                <div class="text-sm text-ink-600" x-text="'$' + (p.avgCost?.toFixed(2) || '--')"></div>
-              </div>
-              <div class="ml-auto">
-                <button @click="prepareOrder(p.symbol, p.conid, 'SELL', p.qty)" class="btn btn-sm btn-ghost text-[10px] text-red-500">卖出</button>
-              </div>
-            </div>
-          </template>
+      <!-- 账户概要 — 紧凑一行 -->
+      <template x-if="brokerAccount?.ok">
+        <div class="flex gap-4 mb-3 text-xs text-ink-500 bg-warm-50 rounded-lg px-3 py-2">
+          <span>现金 <b class="text-ink-700" x-text="'$' + (brokerAccount.balance?.toLocaleString(undefined,{minimumFractionDigits:0}) || '--')"></b></span>
+          <span>购买力 <b class="text-ink-700" x-text="'$' + (brokerAccount.buyingPower?.toLocaleString(undefined,{minimumFractionDigits:0}) || '--')"></b></span>
+          <span>净值 <b class="text-ink-700" x-text="'$' + (brokerAccount.netLiquidation?.toLocaleString(undefined,{minimumFractionDigits:0}) || '--')"></b></span>
+          <span>持仓 <b class="text-ink-700" x-text="'$' + (brokerAccount.grossPosition?.toLocaleString(undefined,{minimumFractionDigits:0}) || '--')"></b></span>
         </div>
-      </div>
+      </template>
 
-      <!-- 搜索+下单 -->
-      <div class="card">
-        <div class="text-sm font-medium text-ink-700 mb-3">搜索标的</div>
-        <div class="flex gap-2 mb-3">
-          <input x-model="searchQuery" placeholder="输入股票代码或名称..." @keydown.enter="searchStock()"
-            class="flex-1 text-sm border border-warm-300 rounded-lg px-3 py-2" />
-          <button @click="searchStock()" :disabled="searching || !searchQuery.trim()" class="btn btn-primary btn-sm">
-            <span x-text="searching ? '搜索中...' : '搜索'"></span>
-          </button>
-        </div>
-        <!-- 搜索结果 -->
-        <template x-if="searchResults.length > 0">
-          <div class="divide-y divide-warm-100 border border-warm-200 rounded-lg overflow-hidden">
-            <template x-for="r in searchResults" :key="r.conid">
-              <div class="flex items-center gap-3 px-3 py-2 hover:bg-warm-50">
-                <span class="font-bold text-ink-700 w-16" x-text="r.symbol"></span>
-                <span class="text-xs text-ink-500 flex-1 truncate" x-text="r.name"></span>
-                <span class="text-[10px] text-ink-300" x-text="r.exchange"></span>
-                <span class="text-[10px] text-ink-300" x-text="r.currency"></span>
-                <button @click="prepareOrder(r.symbol, r.conid, 'BUY')" class="btn btn-sm btn-primary text-[10px]">买入</button>
+      <!-- 持仓卡片 — 统一卡片样式 + Agent 分析 + 同行 -->
+      <div class="space-y-3">
+        <template x-for="p in brokerPositions" :key="p.conid || p.symbol">
+          <div class="bg-white rounded-xl border border-warm-200 overflow-hidden hover:border-brand-300 transition-colors">
+            <!-- Header: symbol + price -->
+            <div class="p-4 flex items-start justify-between">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-lg font-bold text-ink-700" x-text="p.symbol"></span>
+                  <template x-if="fundData[p.symbol]?.industry">
+                    <span class="badge badge-neutral text-[9px]" x-text="fundData[p.symbol].industry"></span>
+                  </template>
+                  <span class="text-xs text-ink-400 truncate" x-text="quotes[p.symbol]?.name || ''"></span>
+                </div>
+                <!-- 持仓信息 — 醒目 -->
+                <div class="flex items-center gap-3 mt-1">
+                  <span class="text-xs font-medium text-ink-600" x-text="p.qty + ' 股'"></span>
+                  <span class="text-xs text-ink-400" x-text="'成本 $' + (p.avgCost?.toFixed(2) || '--')"></span>
+                  <template x-if="p.pnlPct != null">
+                    <span class="text-xs font-bold px-1.5 py-0.5 rounded"
+                      :class="p.pnlPct >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'"
+                      x-text="(p.pnlPct >= 0 ? '+' : '') + p.pnlPct.toFixed(1) + '%'"></span>
+                  </template>
+                  <template x-if="p.marketValue">
+                    <span class="text-xs text-ink-400" x-text="'市值 $' + p.marketValue.toLocaleString(undefined,{minimumFractionDigits:0})"></span>
+                  </template>
+                </div>
+              </div>
+              <div class="text-right flex-shrink-0 ml-4">
+                <template x-if="quotes[p.symbol]">
+                  <div>
+                    <div class="text-xl font-bold text-ink-700" x-text="'$' + quotes[p.symbol].price?.toFixed(2)"></div>
+                    <div class="text-sm font-semibold"
+                      :class="quotes[p.symbol].change24h > 0 ? 'text-green-600' : quotes[p.symbol].change24h < 0 ? 'text-red-500' : 'text-ink-400'"
+                      x-text="quotes[p.symbol].change24h != null ? (quotes[p.symbol].change24h > 0 ? '+' : '') + quotes[p.symbol].change24h.toFixed(2) + '%' : '--'"></div>
+                  </div>
+                </template>
+              </div>
+              <button @click="prepareOrder(p.symbol, p.conid, 'SELL', p.qty)" class="ml-2 text-ink-200 hover:text-red-500 transition-colors text-xs">卖出</button>
+            </div>
+
+            <!-- Agent 分析 -->
+            <template x-if="getAgentInsight(p.symbol)">
+              <div class="px-4 pb-3">
+                <div class="bg-brand-50/50 rounded-lg px-3 py-2.5">
+                  <div class="text-[10px] font-medium text-brand-600 mb-1.5">Agent 分析</div>
+                  <template x-for="(line, i) in getAgentInsight(p.symbol)" :key="i">
+                    <p class="text-xs text-ink-600 leading-relaxed" x-text="line"></p>
+                  </template>
+                  <!-- 针对持仓的额外分析：目标价 vs 成本价 -->
+                  <template x-if="fundData[p.symbol]?.targetMeanPrice && p.avgCost">
+                    <p class="text-xs mt-1 font-medium"
+                      :class="fundData[p.symbol].targetMeanPrice > p.avgCost ? 'text-green-600' : 'text-red-600'"
+                      x-text="'目标价 $' + fundData[p.symbol].targetMeanPrice.toFixed(0) + ' vs 你的成本 $' + p.avgCost.toFixed(0) + ' → ' + (fundData[p.symbol].targetMeanPrice > p.avgCost ? '分析师看好' : '低于你的成本价')"></p>
+                  </template>
+                </div>
+              </div>
+            </template>
+
+            <!-- 同行对比 -->
+            <template x-if="getPeersForStock(p.symbol).length > 0">
+              <div class="px-4 pb-4">
+                <div class="text-[10px] font-medium text-ink-400 mb-2">
+                  <span>同行对比</span>
+                  <template x-if="getDivergence(p.symbol) && Math.abs(getDivergence(p.symbol).value) >= divergenceThreshold">
+                    <span class="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold"
+                      :class="getDivergence(p.symbol).value > 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'"
+                      x-text="p.symbol + ' 偏离同行 ' + (getDivergence(p.symbol).value > 0 ? '+' : '') + getDivergence(p.symbol).value + '%'"></span>
+                  </template>
+                </div>
+                <div class="flex flex-wrap gap-1.5">
+                  <template x-for="peer in getPeersForStock(p.symbol)" :key="peer.symbol">
+                    <div class="flex items-center gap-1.5 bg-warm-50 rounded-md px-2 py-1">
+                      <span class="text-[11px] font-bold text-ink-600" x-text="peer.symbol"></span>
+                      <span class="text-[10px] text-ink-500" x-text="peer.price != null ? '$' + peer.price.toFixed(0) : ''"></span>
+                      <span class="text-[10px] font-medium"
+                        :class="peer.change24h > 0 ? 'text-green-600' : peer.change24h < 0 ? 'text-red-500' : 'text-ink-300'"
+                        x-text="peer.change24h != null ? (peer.change24h > 0 ? '+' : '') + peer.change24h.toFixed(1) + '%' : ''"></span>
+                    </div>
+                  </template>
+                </div>
               </div>
             </template>
           </div>
         </template>
       </div>
 
-      <!-- 下单面板 -->
-      <template x-if="orderForm.symbol">
-        <div class="card border-brand-300">
-          <div class="flex items-center justify-between mb-3">
-            <div class="text-sm font-medium text-ink-700">
-              <span x-text="orderForm.side === 'BUY' ? '买入' : '卖出'"></span>
-              <span class="font-bold ml-1" x-text="orderForm.symbol"></span>
-            </div>
-            <button @click="orderForm.symbol = ''" class="text-ink-300 hover:text-ink-600">&times;</button>
-          </div>
-          <div class="grid grid-cols-4 gap-3 mb-3">
-            <div>
-              <label class="text-[10px] text-ink-400 block mb-1">方向</label>
-              <div class="flex gap-1">
-                <button @click="orderForm.side = 'BUY'" class="flex-1 btn btn-sm text-[10px]"
-                  :class="orderForm.side === 'BUY' ? 'btn-primary' : 'btn-ghost'">买入</button>
-                <button @click="orderForm.side = 'SELL'" class="flex-1 btn btn-sm text-[10px]"
-                  :class="orderForm.side === 'SELL' ? 'btn-primary bg-red-500 hover:bg-red-600' : 'btn-ghost'">卖出</button>
-              </div>
-            </div>
-            <div>
-              <label class="text-[10px] text-ink-400 block mb-1">数量</label>
-              <input type="number" x-model.number="orderForm.qty" min="1" class="w-full text-sm border border-warm-300 rounded-lg px-3 py-1.5" />
-            </div>
-            <div>
-              <label class="text-[10px] text-ink-400 block mb-1">类型</label>
-              <select x-model="orderForm.type" class="w-full text-sm border border-warm-300 rounded-lg px-3 py-1.5 bg-white">
-                <option value="market">市价</option>
-                <option value="limit">限价</option>
-              </select>
-            </div>
-            <div>
-              <label class="text-[10px] text-ink-400 block mb-1" x-text="orderForm.type === 'limit' ? '限价' : '—'"></label>
-              <input type="number" step="0.01" x-model.number="orderForm.price" :disabled="orderForm.type !== 'limit'"
-                class="w-full text-sm border border-warm-300 rounded-lg px-3 py-1.5" :class="orderForm.type !== 'limit' ? 'bg-warm-100' : ''" />
-            </div>
-          </div>
-          <button @click="submitBrokerOrder()" :disabled="ordering || !orderForm.qty"
-            class="btn w-full" :class="orderForm.side === 'BUY' ? 'btn-primary' : 'btn-primary bg-red-500 hover:bg-red-600'">
-            <span x-text="ordering ? '提交中...' : (orderForm.side === 'BUY' ? '确认买入' : '确认卖出') + ' ' + orderForm.qty + ' 股 ' + orderForm.symbol"></span>
-          </button>
-          <div x-show="orderMsg" class="mt-2 text-xs" :class="orderMsg.includes('成功') ? 'text-green-600' : 'text-red-500'" x-text="orderMsg"></div>
-        </div>
-      </template>
-
       <!-- 活跃订单 -->
       <template x-if="brokerOrders.length > 0">
-        <div class="card">
-          <div class="text-sm font-medium text-ink-700 mb-3">活跃订单</div>
+        <div class="card mt-3">
+          <div class="text-xs font-medium text-ink-700 mb-2">活跃订单</div>
           <div class="divide-y divide-warm-100">
             <template x-for="o in brokerOrders" :key="o.orderId">
               <div class="flex items-center gap-3 py-2">
                 <span class="badge text-[9px]" :class="o.side==='BUY'?'badge-success':'badge-error'" x-text="o.side"></span>
-                <span class="font-bold text-ink-700" x-text="o.symbol"></span>
+                <span class="font-bold text-ink-700 text-xs" x-text="o.symbol"></span>
                 <span class="text-xs text-ink-500" x-text="o.qty + ' 股'"></span>
                 <span class="text-xs text-ink-400" x-text="o.orderType + (o.price ? ' $' + o.price : '')"></span>
                 <span class="badge badge-neutral text-[8px] ml-auto" x-text="o.status"></span>
@@ -186,167 +157,115 @@
     </div>
   </template>
 
-  <!-- 券商连接面板（未连接时展开） -->
-  <template x-if="showBroker">
-    <div class="card mb-5">
-      <div class="text-sm font-medium text-ink-700 mb-3">券商账户</div>
-
-      <!-- 已连接列表 -->
-      <template x-for="b in brokers" :key="b.id">
-        <div class="flex items-center gap-3 py-2 border-b border-warm-100 last:border-0">
-          <span class="status-dot" :class="b.status === 'connected' ? 'green' : b.status === 'error' ? 'red' : 'gray'"></span>
-          <span class="text-sm font-medium text-ink-700" x-text="b.name"></span>
-          <span class="badge badge-neutral text-[9px]" x-text="b.broker_type.toUpperCase()"></span>
-          <span class="text-xs text-ink-400" x-text="'账户: ' + b.account_id"></span>
-          <template x-if="b.paper_trading"><span class="badge badge-warning text-[8px]">模拟盘</span></template>
-          <span class="text-[10px] text-ink-300 ml-auto" x-text="b.status"></span>
-          <button @click="testBroker(b.id)" class="btn btn-ghost btn-sm text-[10px]" :disabled="testing">测试</button>
-          <button @click="viewBroker(b.id)" class="btn btn-primary btn-sm text-[10px]" x-show="b.status === 'connected'">持仓</button>
-          <button @click="removeBroker(b.id)" class="text-ink-300 hover:text-red-500 text-lg">&times;</button>
-        </div>
-      </template>
-
-      <!-- 添加新券商 -->
-      <div class="mt-3 pt-3 border-t border-warm-200">
-        <div class="text-xs text-ink-500 mb-2">添加券商连接</div>
-        <div class="grid grid-cols-2 gap-3 mb-3">
-          <div>
-            <label class="text-[10px] text-ink-400 block mb-1">券商</label>
-            <select x-model="brokerForm.broker_type" class="w-full text-sm border border-warm-300 rounded-lg px-3 py-1.5 bg-white">
-              <option value="alpaca">Alpaca — 美股零佣金，最简单</option>
-              <option value="ibkr">Interactive Brokers — 全球 150+ 市场</option>
-              <option value="tradier">Tradier — 美股 + 期权</option>
-              <option value="tiger">Tiger (老虎证券) — 美股/港股/A股</option>
-            </select>
-          </div>
-          <div>
-            <label class="text-[10px] text-ink-400 block mb-1">名称</label>
-            <input x-model="brokerForm.name" placeholder="我的券商" class="w-full text-sm border border-warm-300 rounded-lg px-3 py-1.5" />
-          </div>
-        </div>
-
-        <!-- Alpaca 字段 -->
-        <template x-if="brokerForm.broker_type === 'alpaca'">
-          <div class="grid grid-cols-2 gap-3 mb-3">
-            <div>
-              <label class="text-[10px] text-ink-400 block mb-1">API Key</label>
-              <input x-model="brokerForm.api_key" placeholder="PK..." class="w-full text-sm border border-warm-300 rounded-lg px-3 py-1.5 font-mono" />
-            </div>
-            <div>
-              <label class="text-[10px] text-ink-400 block mb-1">Secret Key</label>
-              <input x-model="brokerForm.api_secret" type="password" placeholder="Secret" class="w-full text-sm border border-warm-300 rounded-lg px-3 py-1.5 font-mono" />
-            </div>
-          </div>
-        </template>
-
-        <!-- IBKR 字段 -->
-        <template x-if="brokerForm.broker_type === 'ibkr'">
-          <div class="grid grid-cols-2 gap-3 mb-3">
-            <div>
-              <label class="text-[10px] text-ink-400 block mb-1">账户 ID</label>
-              <input x-model="brokerForm.account_id" placeholder="DU1234567" class="w-full text-sm border border-warm-300 rounded-lg px-3 py-1.5 font-mono" />
-            </div>
-            <div>
-              <label class="text-[10px] text-ink-400 block mb-1">Gateway 地址</label>
-              <input x-model="brokerForm.gateway_url" placeholder="https://localhost:5000" class="w-full text-sm border border-warm-300 rounded-lg px-3 py-1.5 font-mono" />
-            </div>
-          </div>
-        </template>
-
-        <!-- Tradier 字段 -->
-        <template x-if="brokerForm.broker_type === 'tradier'">
-          <div class="mb-3">
-            <label class="text-[10px] text-ink-400 block mb-1">Access Token</label>
-            <input x-model="brokerForm.access_token" type="password" placeholder="Bearer Token" class="w-full text-sm border border-warm-300 rounded-lg px-3 py-1.5 font-mono" />
-          </div>
-        </template>
-
-        <!-- Tiger 字段 -->
-        <template x-if="brokerForm.broker_type === 'tiger'">
-          <div class="grid grid-cols-2 gap-3 mb-3">
-            <div>
-              <label class="text-[10px] text-ink-400 block mb-1">Tiger ID</label>
-              <input x-model="brokerForm.tiger_id" placeholder="20150001" class="w-full text-sm border border-warm-300 rounded-lg px-3 py-1.5 font-mono" />
-            </div>
-            <div>
-              <label class="text-[10px] text-ink-400 block mb-1">RSA Private Key</label>
-              <textarea x-model="brokerForm.private_key" placeholder="-----BEGIN RSA PRIVATE KEY-----" class="w-full text-xs border border-warm-300 rounded-lg px-3 py-1.5 font-mono h-16"></textarea>
-            </div>
-          </div>
-        </template>
-
-        <div class="flex items-center gap-3 mb-3">
-          <label class="flex items-center gap-1.5 text-xs text-ink-500 cursor-pointer">
-            <input type="checkbox" x-model="brokerForm.paper_trading" class="rounded" checked />
-            模拟盘 (Paper Trading)
-          </label>
-          <button @click="addBroker()" :disabled="!brokerForm.name?.trim()" class="btn btn-primary btn-sm">添加</button>
-        </div>
-
-        <!-- 动态提示 -->
-        <div class="bg-warm-50 rounded-lg p-3 text-[11px] text-ink-500 space-y-1">
-          <template x-if="brokerForm.broker_type === 'alpaca'">
-            <div>
-              <p><strong>Alpaca 设置：</strong></p>
-              <p>1. 注册: <a href="https://app.alpaca.markets/signup" target="_blank" class="text-brand-500">app.alpaca.markets</a></p>
-              <p>2. 登录后进入 Dashboard → 左侧 API Keys → Generate</p>
-              <p>3. 复制 API Key 和 Secret Key 填入上方</p>
-              <p>4. 模拟盘自动使用 Paper Trading 环境</p>
-            </div>
-          </template>
-          <template x-if="brokerForm.broker_type === 'ibkr'">
-            <div>
-              <p><strong>IBKR 设置：</strong></p>
-              <p>1. 下载 IB Gateway: <a href="https://www.interactivebrokers.com/en/trading/ibgateway-stable.php" target="_blank" class="text-brand-500">interactivebrokers.com</a></p>
-              <p>2. 启动选 Paper Trading 模式，用 IBKR 账号登录</p>
-              <p>3. 填入账户 ID（Paper 以 DU 开头）和 Gateway 地址</p>
-            </div>
-          </template>
-          <template x-if="brokerForm.broker_type === 'tradier'">
-            <div>
-              <p><strong>Tradier 设置：</strong></p>
-              <p>1. 注册开发者账户: <a href="https://developer.tradier.com/user/sign_up" target="_blank" class="text-brand-500">developer.tradier.com</a></p>
-              <p>2. Dashboard → API Access → 创建或复制 Access Token</p>
-              <p>3. Sandbox Token 用于模拟盘，Production Token 用于实盘</p>
-            </div>
-          </template>
-          <template x-if="brokerForm.broker_type === 'tiger'">
-            <div>
-              <p><strong>老虎证券设置：</strong></p>
-              <p>1. 注册开发者: <a href="https://quant.itigerup.com/" target="_blank" class="text-brand-500">quant.itigerup.com</a></p>
-              <p>2. 获取 Tiger ID 和 RSA Private Key（PEM 格式）</p>
-              <p>3. 支持美股、港股、A股（沪港通）</p>
-            </div>
-          </template>
-        </div>
-      </div>
-
-      <div x-show="brokerMsg" class="mt-2 text-xs" :class="brokerMsg.includes('成功') || brokerMsg.includes('connected') ? 'text-green-600' : 'text-red-500'" x-text="brokerMsg"></div>
+  <!-- 无持仓提示 -->
+  <template x-if="showPositionPanel && brokerPositions.length === 0">
+    <div class="card mb-5 text-center text-ink-300 py-6">
+      <p class="text-sm">券商已连接，暂无持仓</p>
     </div>
   </template>
 
-  <!-- Add stock form -->
-  <div x-show="showAdd" x-transition class="card mb-4">
-    <div class="flex gap-3 items-end">
-      <div class="flex-1">
-        <label class="text-xs text-ink-400 block mb-1">股票代码</label>
-        <input x-model="addSymbol" placeholder="AAPL, NVDA, 0700.HK..." class="w-full rounded-lg border border-warm-300 px-3 py-2 text-sm" @keydown.enter="addStock()" />
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!--  Section 2: 自选观察 — 辅助                        -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <template x-if="watchlist.length > 0">
+    <div class="mb-5">
+      <div class="flex items-center gap-2 mb-3">
+        <h2 class="text-sm font-bold text-ink-700">自选观察</h2>
+        <span class="text-xs text-ink-300" x-text="watchlist.length + ' 只'"></span>
       </div>
-      <div class="w-32">
-        <label class="text-xs text-ink-400 block mb-1">市场</label>
-        <select x-model="addMarket" class="w-full rounded-lg border border-warm-300 px-3 py-2 text-sm bg-white">
-          <option value="us">美股</option>
-          <option value="hk">港股</option>
-          <option value="cn">A股</option>
-          <option value="other">其他</option>
-        </select>
-      </div>
-      <button @click="addStock()" :disabled="adding || !addSymbol.trim()" class="btn btn-sm btn-secondary" x-text="adding ? '添加中...' : '添加'"></button>
-    </div>
-    <div x-show="addError" class="text-xs text-red-500 mt-2" x-text="addError"></div>
-  </div>
 
-  <!-- Commodities bar -->
+      <div class="space-y-3">
+        <template x-for="item in watchlist" :key="item.id">
+          <div class="bg-white rounded-xl border border-warm-200 overflow-hidden hover:border-brand-300 transition-colors">
+            <!-- Header -->
+            <div class="p-4 flex items-start justify-between">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-lg font-bold text-ink-700" x-text="item.symbol"></span>
+                  <span class="badge text-[10px]" :class="item.market === 'us' ? 'badge-info' : item.market === 'hk' ? 'badge-warning' : 'badge-neutral'" x-text="item.market?.toUpperCase()"></span>
+                  <template x-if="fundData[item.symbol]?.industry">
+                    <span class="badge badge-neutral text-[9px]" x-text="fundData[item.symbol].industry"></span>
+                  </template>
+                </div>
+                <div class="text-xs text-ink-400" x-text="quotes[item.symbol]?.name || item.name || ''"></div>
+                <template x-if="quotes[item.symbol]?.high52w">
+                  <div class="mt-2 flex items-center gap-2">
+                    <span class="text-[10px] text-ink-300" x-text="'$' + quotes[item.symbol].low52w?.toFixed(0)"></span>
+                    <div class="flex-1 h-1.5 bg-warm-200 rounded-full relative">
+                      <div class="absolute h-full bg-brand-400 rounded-full"
+                        :style="'width:' + Math.max(2, Math.min(98, ((quotes[item.symbol].price - quotes[item.symbol].low52w) / (quotes[item.symbol].high52w - quotes[item.symbol].low52w) * 100))) + '%'"></div>
+                    </div>
+                    <span class="text-[10px] text-ink-300" x-text="'$' + quotes[item.symbol].high52w?.toFixed(0)"></span>
+                  </div>
+                </template>
+              </div>
+              <div class="text-right flex-shrink-0 ml-4">
+                <template x-if="quotes[item.symbol]">
+                  <div>
+                    <div class="text-xl font-bold text-ink-700" x-text="'$' + quotes[item.symbol].price?.toFixed(2)"></div>
+                    <div class="text-sm font-semibold"
+                      :class="quotes[item.symbol].change24h > 0 ? 'text-green-600' : quotes[item.symbol].change24h < 0 ? 'text-red-500' : 'text-ink-400'"
+                      x-text="quotes[item.symbol].change24h != null ? (quotes[item.symbol].change24h > 0 ? '+' : '') + quotes[item.symbol].change24h.toFixed(2) + '%' : '--'"></div>
+                  </div>
+                </template>
+                <template x-if="!quotes[item.symbol] && !loading"><span class="text-xs text-ink-300">--</span></template>
+                <template x-if="loading"><div class="skeleton" style="width:60px;height:24px;"></div></template>
+              </div>
+              <button @click="removeStock(item.id)" class="ml-2 text-ink-200 hover:text-red-500 transition-colors text-sm">&times;</button>
+            </div>
+
+            <!-- Agent 分析 -->
+            <template x-if="getAgentInsight(item.symbol)">
+              <div class="px-4 pb-3">
+                <div class="bg-brand-50/50 rounded-lg px-3 py-2.5">
+                  <div class="text-[10px] font-medium text-brand-600 mb-1.5">Agent 分析</div>
+                  <template x-for="(line, i) in getAgentInsight(item.symbol)" :key="i">
+                    <p class="text-xs text-ink-600 leading-relaxed" x-text="line"></p>
+                  </template>
+                </div>
+              </div>
+            </template>
+
+            <!-- 同行对比 -->
+            <template x-if="getPeersForStock(item.symbol).length > 0">
+              <div class="px-4 pb-4">
+                <div class="text-[10px] font-medium text-ink-400 mb-2">
+                  <span>同行对比</span>
+                  <template x-if="getDivergence(item.symbol) && Math.abs(getDivergence(item.symbol).value) >= divergenceThreshold">
+                    <span class="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold"
+                      :class="getDivergence(item.symbol).value > 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'"
+                      x-text="item.symbol + ' 偏离同行 ' + (getDivergence(item.symbol).value > 0 ? '+' : '') + getDivergence(item.symbol).value + '%'"></span>
+                  </template>
+                </div>
+                <div class="flex flex-wrap gap-1.5">
+                  <template x-for="peer in getPeersForStock(item.symbol)" :key="peer.symbol">
+                    <div class="flex items-center gap-1.5 bg-warm-50 rounded-md px-2 py-1">
+                      <span class="text-[11px] font-bold text-ink-600" x-text="peer.symbol"></span>
+                      <span class="text-[10px] text-ink-500" x-text="peer.price != null ? '$' + peer.price.toFixed(0) : ''"></span>
+                      <span class="text-[10px] font-medium"
+                        :class="peer.change24h > 0 ? 'text-green-600' : peer.change24h < 0 ? 'text-red-500' : 'text-ink-300'"
+                        x-text="peer.change24h != null ? (peer.change24h > 0 ? '+' : '') + peer.change24h.toFixed(1) + '%' : ''"></span>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+        </template>
+      </div>
+    </div>
+  </template>
+
+  <!-- 无内容提示 -->
+  <div x-show="watchlist.length === 0 && brokerPositions.length === 0 && !loading" class="text-center text-ink-300 py-12">
+    <p>尚无持仓或自选股</p>
+    <p class="text-xs mt-1">连接券商查看持仓，或添加自选股开始观察</p>
+  </div>
+  <div x-show="loading && watchlist.length === 0 && brokerPositions.length === 0" class="text-center text-ink-300 py-12">加载中...</div>
+
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!--  Commodities bar                                   -->
+  <!-- ═══════════════════════════════════════════════════ -->
   <template x-if="commodities && Object.keys(commodities).length > 0">
     <div class="flex gap-3 mb-5 overflow-x-auto">
       <template x-for="[name, data] in Object.entries(commodities)" :key="name">
@@ -360,93 +279,163 @@
     </div>
   </template>
 
-  <!-- Stock list -->
-  <div class="space-y-3">
-    <template x-for="item in watchlist" :key="item.id">
-      <div class="bg-white rounded-xl border border-warm-200 overflow-hidden hover:border-brand-300 transition-colors">
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!--  Tools panel — 折叠，不碍事                        -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <div x-show="showTools" x-transition class="space-y-3 mb-5">
 
-        <!-- ▌Header: identity + price -->
-        <div class="p-4 flex items-start justify-between">
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-1">
-              <span class="text-lg font-bold text-ink-700" x-text="item.symbol"></span>
-              <span class="badge text-[10px]" :class="item.market === 'us' ? 'badge-info' : item.market === 'hk' ? 'badge-warning' : 'badge-neutral'" x-text="item.market?.toUpperCase()"></span>
-              <template x-if="fundData[item.symbol]?.industry">
-                <span class="badge badge-neutral text-[9px]" x-text="fundData[item.symbol].industry"></span>
-              </template>
-            </div>
-            <div class="text-xs text-ink-400" x-text="quotes[item.symbol]?.name || item.name || ''"></div>
-            <!-- 52-week range -->
-            <template x-if="quotes[item.symbol]?.high52w">
-              <div class="mt-2 flex items-center gap-2">
-                <span class="text-[10px] text-ink-300" x-text="'$' + quotes[item.symbol].low52w?.toFixed(0)"></span>
-                <div class="flex-1 h-1.5 bg-warm-200 rounded-full relative">
-                  <div class="absolute h-full bg-brand-400 rounded-full"
-                    :style="'width:' + Math.max(2, Math.min(98, ((quotes[item.symbol].price - quotes[item.symbol].low52w) / (quotes[item.symbol].high52w - quotes[item.symbol].low52w) * 100))) + '%'"></div>
-                </div>
-                <span class="text-[10px] text-ink-300" x-text="'$' + quotes[item.symbol].high52w?.toFixed(0)"></span>
-              </div>
-            </template>
-          </div>
-          <div class="text-right flex-shrink-0 ml-4">
-            <template x-if="quotes[item.symbol]">
-              <div>
-                <div class="text-xl font-bold text-ink-700" x-text="'$' + quotes[item.symbol].price?.toFixed(2)"></div>
-                <div class="text-sm font-semibold"
-                  :class="quotes[item.symbol].change24h > 0 ? 'text-green-600' : quotes[item.symbol].change24h < 0 ? 'text-red-500' : 'text-ink-400'"
-                  x-text="quotes[item.symbol].change24h != null ? (quotes[item.symbol].change24h > 0 ? '+' : '') + quotes[item.symbol].change24h.toFixed(2) + '%' : '--'"></div>
-              </div>
-            </template>
-            <template x-if="!quotes[item.symbol] && !loading"><span class="text-xs text-ink-300">--</span></template>
-            <template x-if="loading"><div class="skeleton" style="width:60px;height:24px;"></div></template>
-          </div>
-          <button @click="removeStock(item.id)" class="ml-2 text-ink-200 hover:text-red-500 transition-colors text-sm">&times;</button>
+    <!-- 添加自选股 -->
+    <div class="card">
+      <div class="text-xs font-medium text-ink-700 mb-2">添加自选股</div>
+      <div class="flex gap-3 items-end">
+        <div class="flex-1">
+          <input x-model="addSymbol" placeholder="AAPL, NVDA, 0700.HK..." class="w-full rounded-lg border border-warm-300 px-3 py-2 text-sm" @keydown.enter="addStock()" />
         </div>
+        <div class="w-28">
+          <select x-model="addMarket" class="w-full rounded-lg border border-warm-300 px-3 py-2 text-sm bg-white">
+            <option value="us">美股</option>
+            <option value="hk">港股</option>
+            <option value="cn">A股</option>
+            <option value="other">其他</option>
+          </select>
+        </div>
+        <button @click="addStock()" :disabled="adding || !addSymbol.trim()" class="btn btn-sm btn-primary" x-text="adding ? '...' : '添加'"></button>
+      </div>
+      <div x-show="addError" class="text-xs text-red-500 mt-2" x-text="addError"></div>
+    </div>
 
-        <!-- ▌Agent 分析 — 人话，不是术语 -->
-        <template x-if="getAgentInsight(item.symbol)">
-          <div class="px-4 pb-3">
-            <div class="bg-brand-50/50 rounded-lg px-3 py-2.5">
-              <div class="text-[10px] font-medium text-brand-600 mb-1.5">Agent 分析</div>
-              <template x-for="(line, i) in getAgentInsight(item.symbol)" :key="i">
-                <p class="text-xs text-ink-600 leading-relaxed" x-text="line"></p>
-              </template>
-            </div>
-          </div>
-        </template>
-
-        <!-- ▌同行对比 — 直接可见，不需要展开 -->
-        <template x-if="getPeersForStock(item.symbol).length > 0">
-          <div class="px-4 pb-4">
-            <div class="text-[10px] font-medium text-ink-400 mb-2">
-              <span>同行对比</span>
-              <template x-if="getDivergence(item.symbol) && Math.abs(getDivergence(item.symbol).value) >= divergenceThreshold">
-                <span class="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold"
-                  :class="getDivergence(item.symbol).value > 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'"
-                  x-text="item.symbol + ' 偏离同行 ' + (getDivergence(item.symbol).value > 0 ? '+' : '') + getDivergence(item.symbol).value + '%'"></span>
-              </template>
-            </div>
-            <div class="flex flex-wrap gap-1.5">
-              <template x-for="peer in getPeersForStock(item.symbol)" :key="peer.symbol">
-                <div class="flex items-center gap-1.5 bg-warm-50 rounded-md px-2 py-1">
-                  <span class="text-[11px] font-bold text-ink-600" x-text="peer.symbol"></span>
-                  <span class="text-[10px] text-ink-500" x-text="peer.price != null ? '$' + peer.price.toFixed(0) : ''"></span>
-                  <span class="text-[10px] font-medium"
-                    :class="peer.change24h > 0 ? 'text-green-600' : peer.change24h < 0 ? 'text-red-500' : 'text-ink-300'"
-                    x-text="peer.change24h != null ? (peer.change24h > 0 ? '+' : '') + peer.change24h.toFixed(1) + '%' : ''"></span>
-                </div>
-              </template>
-            </div>
+    <!-- 搜索+下单（需要券商连接） -->
+    <template x-if="activeBrokerId">
+      <div class="card">
+        <div class="text-xs font-medium text-ink-700 mb-2">搜索标的下单</div>
+        <div class="flex gap-2 mb-2">
+          <input x-model="searchQuery" placeholder="搜索股票..." @keydown.enter="searchStock()"
+            class="flex-1 text-sm border border-warm-300 rounded-lg px-3 py-2" />
+          <button @click="searchStock()" :disabled="searching || !searchQuery.trim()" class="btn btn-primary btn-sm">
+            <span x-text="searching ? '...' : '搜索'"></span>
+          </button>
+        </div>
+        <template x-if="searchResults.length > 0">
+          <div class="divide-y divide-warm-100 border border-warm-200 rounded-lg overflow-hidden">
+            <template x-for="r in searchResults" :key="r.conid">
+              <div class="flex items-center gap-3 px-3 py-2 hover:bg-warm-50">
+                <span class="font-bold text-ink-700 w-16 text-xs" x-text="r.symbol"></span>
+                <span class="text-xs text-ink-500 flex-1 truncate" x-text="r.name"></span>
+                <span class="text-[10px] text-ink-300" x-text="r.exchange"></span>
+                <button @click="prepareOrder(r.symbol, r.conid, 'BUY')" class="btn btn-sm btn-primary text-[10px]">买入</button>
+              </div>
+            </template>
           </div>
         </template>
       </div>
     </template>
-    <div x-show="watchlist.length === 0 && !loading" class="text-center text-ink-300 py-12">
-      <p>尚无自选股</p>
-      <p class="text-xs mt-1">点击"添加股票"追踪你关注的标的</p>
+
+    <!-- 下单面板 -->
+    <template x-if="orderForm.symbol">
+      <div class="card border-brand-300">
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-sm font-medium text-ink-700">
+            <span x-text="orderForm.side === 'BUY' ? '买入' : '卖出'"></span>
+            <span class="font-bold ml-1" x-text="orderForm.symbol"></span>
+          </div>
+          <button @click="orderForm.symbol = ''" class="text-ink-300 hover:text-ink-600">&times;</button>
+        </div>
+        <div class="grid grid-cols-4 gap-3 mb-3">
+          <div>
+            <label class="text-[10px] text-ink-400 block mb-1">方向</label>
+            <div class="flex gap-1">
+              <button @click="orderForm.side = 'BUY'" class="flex-1 btn btn-sm text-[10px]"
+                :class="orderForm.side === 'BUY' ? 'btn-primary' : 'btn-ghost'">买入</button>
+              <button @click="orderForm.side = 'SELL'" class="flex-1 btn btn-sm text-[10px]"
+                :class="orderForm.side === 'SELL' ? 'btn-primary bg-red-500 hover:bg-red-600' : 'btn-ghost'">卖出</button>
+            </div>
+          </div>
+          <div>
+            <label class="text-[10px] text-ink-400 block mb-1">数量</label>
+            <input type="number" x-model.number="orderForm.qty" min="1" class="w-full text-sm border border-warm-300 rounded-lg px-3 py-1.5" />
+          </div>
+          <div>
+            <label class="text-[10px] text-ink-400 block mb-1">类型</label>
+            <select x-model="orderForm.type" class="w-full text-sm border border-warm-300 rounded-lg px-3 py-1.5 bg-white">
+              <option value="market">市价</option>
+              <option value="limit">限价</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-[10px] text-ink-400 block mb-1" x-text="orderForm.type === 'limit' ? '限价' : '—'"></label>
+            <input type="number" step="0.01" x-model.number="orderForm.price" :disabled="orderForm.type !== 'limit'"
+              class="w-full text-sm border border-warm-300 rounded-lg px-3 py-1.5" :class="orderForm.type !== 'limit' ? 'bg-warm-100' : ''" />
+          </div>
+        </div>
+        <button @click="submitBrokerOrder()" :disabled="ordering || !orderForm.qty"
+          class="btn w-full" :class="orderForm.side === 'BUY' ? 'btn-primary' : 'btn-primary bg-red-500 hover:bg-red-600'">
+          <span x-text="ordering ? '提交中...' : (orderForm.side === 'BUY' ? '确认买入' : '确认卖出') + ' ' + orderForm.qty + ' 股 ' + orderForm.symbol"></span>
+        </button>
+        <div x-show="orderMsg" class="mt-2 text-xs" :class="orderMsg.includes('成功') ? 'text-green-600' : 'text-red-500'" x-text="orderMsg"></div>
+      </div>
+    </template>
+
+    <!-- 券商管理 -->
+    <div class="card">
+      <div class="text-xs font-medium text-ink-700 mb-2">券商连接</div>
+      <template x-for="b in brokers" :key="b.id">
+        <div class="flex items-center gap-3 py-2 border-b border-warm-100 last:border-0">
+          <span class="status-dot" :class="b.status === 'connected' ? 'green' : b.status === 'error' ? 'red' : 'gray'"></span>
+          <span class="text-xs font-medium text-ink-700" x-text="b.name"></span>
+          <span class="badge badge-neutral text-[9px]" x-text="b.broker_type.toUpperCase()"></span>
+          <span class="text-[10px] text-ink-300 ml-auto" x-text="b.status"></span>
+          <button @click="testBroker(b.id)" class="btn btn-ghost btn-sm text-[10px]" :disabled="testing">测试</button>
+          <button @click="viewBroker(b.id)" class="btn btn-primary btn-sm text-[10px]" x-show="b.status === 'connected'">持仓</button>
+          <button @click="removeBroker(b.id)" class="text-ink-300 hover:text-red-500 text-sm">&times;</button>
+        </div>
+      </template>
+
+      <!-- 添加新券商 -->
+      <div class="mt-3 pt-3 border-t border-warm-200">
+        <div class="text-[10px] text-ink-500 mb-2">添加券商</div>
+        <div class="grid grid-cols-2 gap-3 mb-2">
+          <select x-model="brokerForm.broker_type" class="text-xs border border-warm-300 rounded-lg px-2 py-1.5 bg-white">
+            <option value="alpaca">Alpaca — 美股</option>
+            <option value="ibkr">IBKR — 全球</option>
+            <option value="tradier">Tradier — 美股+期权</option>
+            <option value="tiger">老虎 — 美/港/A</option>
+          </select>
+          <input x-model="brokerForm.name" placeholder="名称" class="text-xs border border-warm-300 rounded-lg px-2 py-1.5" />
+        </div>
+        <template x-if="brokerForm.broker_type === 'alpaca'">
+          <div class="grid grid-cols-2 gap-2 mb-2">
+            <input x-model="brokerForm.api_key" placeholder="API Key" class="text-xs border border-warm-300 rounded-lg px-2 py-1.5 font-mono" />
+            <input x-model="brokerForm.api_secret" type="password" placeholder="Secret" class="text-xs border border-warm-300 rounded-lg px-2 py-1.5 font-mono" />
+          </div>
+        </template>
+        <template x-if="brokerForm.broker_type === 'ibkr'">
+          <div class="grid grid-cols-2 gap-2 mb-2">
+            <input x-model="brokerForm.account_id" placeholder="账户ID" class="text-xs border border-warm-300 rounded-lg px-2 py-1.5 font-mono" />
+            <input x-model="brokerForm.gateway_url" placeholder="Gateway URL" class="text-xs border border-warm-300 rounded-lg px-2 py-1.5 font-mono" />
+          </div>
+        </template>
+        <template x-if="brokerForm.broker_type === 'tradier'">
+          <div class="mb-2">
+            <input x-model="brokerForm.access_token" type="password" placeholder="Access Token" class="w-full text-xs border border-warm-300 rounded-lg px-2 py-1.5 font-mono" />
+          </div>
+        </template>
+        <template x-if="brokerForm.broker_type === 'tiger'">
+          <div class="grid grid-cols-2 gap-2 mb-2">
+            <input x-model="brokerForm.tiger_id" placeholder="Tiger ID" class="text-xs border border-warm-300 rounded-lg px-2 py-1.5 font-mono" />
+            <textarea x-model="brokerForm.private_key" placeholder="RSA Key" class="text-xs border border-warm-300 rounded-lg px-2 py-1.5 font-mono h-12"></textarea>
+          </div>
+        </template>
+        <div class="flex items-center gap-3">
+          <label class="flex items-center gap-1 text-[10px] text-ink-500 cursor-pointer">
+            <input type="checkbox" x-model="brokerForm.paper_trading" class="rounded" checked /> 模拟盘
+          </label>
+          <button @click="addBroker()" :disabled="!brokerForm.name?.trim()" class="btn btn-primary btn-sm text-[10px]">添加</button>
+        </div>
+      </div>
+      <div x-show="brokerMsg" class="mt-2 text-xs" :class="brokerMsg.includes('成功') || brokerMsg.includes('connected') ? 'text-green-600' : 'text-red-500'" x-text="brokerMsg"></div>
     </div>
-    <div x-show="loading && watchlist.length === 0" class="text-center text-ink-300 py-12">加载中...</div>
   </div>
+
 </div>
 
 <script>
@@ -457,17 +446,15 @@ function stocksPage() {
     commodities: {},
     funding: {},
     sentiment: null,
-    // 基本面 + 竞争对手
-    fundData: {},      // { TSLA: { sector, industry, ... } }
-    peersData: {},     // { "Auto Manufacturers": [{ symbol, price, ... }] }
-    healthData: {},    // { avgBeta, sectorConcentration, maxSectorPct, analystSummary }
+    fundData: {},
+    peersData: {},
+    healthData: {},
     divergenceThreshold: 3,
-    expandedPeers: {}, // { TSLA: true/false }
     loading: true,
     showAdd: false,
+    showTools: false,
     addSymbol: '', addMarket: 'us', adding: false, addError: '',
     // 券商
-    showBroker: false,
     brokers: [],
     brokerForm: { broker_type: 'alpaca', name: '', account_id: '', gateway_url: 'https://localhost:5000', api_key: '', api_secret: '', access_token: '', tiger_id: '', private_key: '', paper_trading: true },
     brokerMsg: '',
@@ -479,21 +466,18 @@ function stocksPage() {
     brokerAccount: null,
     brokerPositions: [],
     brokerOrders: [],
-    // 搜索+下单
-    searchQuery: '',
-    searchResults: [],
-    searching: false,
+    searchQuery: '', searchResults: [], searching: false,
     orderForm: { symbol: '', conid: null, side: 'BUY', qty: 1, type: 'market', price: 0 },
-    ordering: false,
-    orderMsg: '',
+    ordering: false, orderMsg: '',
 
     async init() {
-      await Promise.all([this.loadAll(), this.loadBrokers(), this.loadFundamentals()]);
-      // 有已连接券商 → 自动展开持仓
+      await Promise.all([this.loadAll(), this.loadBrokers()]);
       const connected = this.brokers.find(b => b.status === 'connected');
-      if (connected) {
-        this.viewBroker(connected.id);
-      }
+      if (connected) await this.viewBroker(connected.id);
+      // 加载基本面时包含持仓 symbol
+      await this.loadFundamentals();
+      // 为持仓股票也拉行情
+      await this.loadPositionQuotes();
       setInterval(() => this.loadQuotes(), 5 * 60 * 1000);
       setInterval(() => this.loadFundamentals(), 60 * 60 * 1000);
     },
@@ -516,13 +500,29 @@ function stocksPage() {
       try {
         const res = await fetch('/api/stocks/quotes');
         const data = await res.json();
-        if (data.ok) this.quotes = data.data || {};
+        if (data.ok) this.quotes = { ...this.quotes, ...(data.data || {}) };
       } catch {}
+      await this.loadPositionQuotes();
+    },
+
+    /** 为 broker 持仓股票拉行情（它们可能不在 watchlist 里） */
+    async loadPositionQuotes() {
+      const posSymbols = this.brokerPositions.map(p => p.symbol).filter(s => !this.quotes[s]);
+      for (const sym of posSymbols) {
+        try {
+          const res = await fetch('/api/stocks/quote/' + encodeURIComponent(sym));
+          const data = await res.json();
+          if (data?.price) this.quotes[sym] = data;
+        } catch {}
+      }
     },
 
     async loadFundamentals() {
       try {
-        const res = await fetch('/api/stocks/fundamentals');
+        // 把持仓 symbol 也传给 API，这样持仓也能有基本面分析
+        const posSymbols = this.brokerPositions.map(p => p.symbol);
+        const extra = posSymbols.length > 0 ? '?extra=' + posSymbols.join(',') : '';
+        const res = await fetch('/api/stocks/fundamentals' + extra);
         const data = await res.json();
         this.fundData = data.stocks || {};
         this.peersData = data.peers || {};
@@ -555,14 +555,11 @@ function stocksPage() {
       return v.toLocaleString();
     },
 
-    /** 把原始数据翻译成人话 — Agent 视角的个股分析 */
     getAgentInsight(symbol) {
       const f = this.fundData[symbol];
       const q = this.quotes[symbol];
       if (!f) return null;
       const lines = [];
-
-      // 分析师共识
       if (f.recommendationKey && f.numberOfAnalysts) {
         const ratingMap = { strong_buy: '强烈买入', buy: '买入', hold: '持有', sell: '卖出', underperform: '减持' };
         const rating = ratingMap[f.recommendationKey] || f.recommendationKey;
@@ -575,8 +572,6 @@ function stocksPage() {
         }
         lines.push(`${f.numberOfAnalysts} 位分析师评级「${rating}」${targetNote}`);
       }
-
-      // 营收 + 利润
       const parts = [];
       if (f.revenue) {
         let revStr = '营收 ' + this.fmtRevenue(f.revenue);
@@ -586,8 +581,6 @@ function stocksPage() {
       if (f.profitMargin != null) parts.push(`利润率 ${f.profitMargin.toFixed(1)}%`);
       if (f.forwardPE) parts.push(`P/E ${f.forwardPE.toFixed(1)}`);
       if (parts.length > 0) lines.push(parts.join('，'));
-
-      // 风险
       const risks = [];
       if (f.beta != null) {
         const label = f.beta >= 2.0 ? '高波动' : f.beta >= 1.5 ? '中高波动' : '稳健';
@@ -595,7 +588,6 @@ function stocksPage() {
       }
       if (f.shortRatio && f.shortRatio > 3) risks.push(`做空压力偏高（${f.shortRatio.toFixed(1)}）`);
       if (risks.length > 0) lines.push(risks.join('，'));
-
       return lines.length > 0 ? lines : null;
     },
 
@@ -603,11 +595,8 @@ function stocksPage() {
       if (!this.addSymbol.trim() || this.adding) return;
       this.adding = true; this.addError = '';
       try {
-        const res = await fetch('/api/stocks/watchlist', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ symbol: this.addSymbol.trim(), market: this.addMarket }),
-        });
+        const res = await fetch('/api/stocks/watchlist', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol: this.addSymbol.trim(), market: this.addMarket }) });
         const data = await res.json();
         if (!res.ok) { this.addError = data.error || 'failed'; this.adding = false; return; }
         this.addSymbol = '';
@@ -623,54 +612,37 @@ function stocksPage() {
       await this.loadAll();
     },
 
-    // ── 券商 ──
-
     async loadBrokers() {
-      try {
-        const res = await fetch('/api/broker/accounts');
-        this.brokers = await res.json();
-      } catch { this.brokers = []; }
+      try { this.brokers = await (await fetch('/api/broker/accounts')).json(); } catch { this.brokers = []; }
     },
-
     async addBroker() {
       this.brokerMsg = '';
       try {
-        const res = await fetch('/api/broker/accounts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ...this.brokerForm,
-            paper_trading: this.brokerForm.paper_trading ? 1 : 0,
-          }),
-        });
+        const res = await fetch('/api/broker/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...this.brokerForm, paper_trading: this.brokerForm.paper_trading ? 1 : 0 }) });
         const data = await res.json();
         if (data.ok) {
-          this.brokerMsg = '添加成功，请点击"测试"验证连接';
+          this.brokerMsg = '添加成功，请点击"测试"验证';
           this.brokerForm = { broker_type: 'alpaca', name: '', account_id: '', gateway_url: 'https://localhost:5000', api_key: '', api_secret: '', access_token: '', tiger_id: '', private_key: '', paper_trading: true };
           await this.loadBrokers();
-        } else { this.brokerMsg = '添加失败: ' + (data.error || ''); }
-      } catch (e) { this.brokerMsg = '添加失败: ' + e.message; }
+        } else { this.brokerMsg = '失败: ' + (data.error || ''); }
+      } catch (e) { this.brokerMsg = '失败: ' + e.message; }
     },
-
     async testBroker(id) {
-      this.testing = true;
-      this.brokerMsg = '测试连接中...';
+      this.testing = true; this.brokerMsg = '测试中...';
       try {
-        const res = await fetch('/api/broker/accounts/' + id + '/test', { method: 'POST' });
-        const data = await res.json();
-        this.brokerMsg = data.ok ? '连接成功 (connected)' : '连接失败: ' + (data.error || '');
+        const data = await (await fetch('/api/broker/accounts/' + id + '/test', { method: 'POST' })).json();
+        this.brokerMsg = data.ok ? '连接成功' : '失败: ' + (data.error || '');
         await this.loadBrokers();
-      } catch (e) { this.brokerMsg = '测试失败: ' + e.message; }
+      } catch (e) { this.brokerMsg = '失败: ' + e.message; }
       this.testing = false;
     },
-
     async removeBroker(id) {
-      if (!confirm('删除此券商连接？')) return;
+      if (!confirm('删除此券商？')) return;
       await fetch('/api/broker/accounts/' + id, { method: 'DELETE' });
       await this.loadBrokers();
       if (this.activeBrokerId === id) this.showPositionPanel = false;
     },
-
     async viewBroker(id) {
       this.activeBrokerId = id;
       const broker = this.brokers.find(b => b.id === id);
@@ -679,7 +651,6 @@ function stocksPage() {
       this.showPositionPanel = true;
       await this.refreshBroker();
     },
-
     async refreshBroker() {
       if (!this.activeBrokerId) return;
       const id = this.activeBrokerId;
@@ -690,68 +661,39 @@ function stocksPage() {
           fetch('/api/broker/' + id + '/orders'),
         ]);
         this.brokerAccount = await accRes.json();
-        const posData = await posRes.json();
-        const ordData = await ordRes.json();
-        this.brokerPositions = posData.positions || [];
-        this.brokerOrders = ordData.orders || [];
-      } catch (e) { console.error('load broker data:', e); }
+        this.brokerPositions = (await posRes.json()).positions || [];
+        this.brokerOrders = (await ordRes.json()).orders || [];
+      } catch (e) { console.error('broker:', e); }
     },
-
     async disconnectBroker() {
-      if (!this.activeBrokerId || !confirm('断开券商连接？')) return;
+      if (!this.activeBrokerId || !confirm('断开？')) return;
       await fetch('/api/broker/accounts/' + this.activeBrokerId, { method: 'DELETE' });
-      this.showPositionPanel = false;
-      this.activeBrokerId = null;
+      this.showPositionPanel = false; this.activeBrokerId = null;
       await this.loadBrokers();
     },
-
     async searchStock() {
       if (!this.searchQuery.trim() || !this.activeBrokerId || this.searching) return;
-      this.searching = true;
-      this.searchResults = [];
-      try {
-        const res = await fetch('/api/broker/' + this.activeBrokerId + '/search?q=' + encodeURIComponent(this.searchQuery.trim()));
-        this.searchResults = await res.json();
-      } catch {}
+      this.searching = true; this.searchResults = [];
+      try { this.searchResults = await (await fetch('/api/broker/' + this.activeBrokerId + '/search?q=' + encodeURIComponent(this.searchQuery.trim()))).json(); } catch {}
       this.searching = false;
     },
-
     prepareOrder(symbol, conid, side, qty) {
       this.orderForm = { symbol, conid, side: side || 'BUY', qty: qty || 1, type: 'market', price: 0 };
-      this.orderMsg = '';
+      this.orderMsg = ''; this.showTools = true;
     },
-
     async submitBrokerOrder() {
       if (!this.activeBrokerId || !this.orderForm.symbol || this.ordering) return;
-      this.ordering = true;
-      this.orderMsg = '';
+      this.ordering = true; this.orderMsg = '';
       try {
-        const res = await fetch('/api/broker/' + this.activeBrokerId + '/order', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            symbol: this.orderForm.symbol,
-            conid: this.orderForm.conid,
-            side: this.orderForm.side,
-            qty: this.orderForm.qty,
-            type: this.orderForm.type,
-            price: this.orderForm.type === 'limit' ? this.orderForm.price : undefined,
-          }),
-        });
-        const data = await res.json();
-        if (data.ok) {
-          this.orderMsg = '下单成功 #' + (data.orderId || '');
-          this.orderForm.symbol = '';
-          setTimeout(() => this.refreshBroker(), 2000);
-        } else {
-          this.orderMsg = '下单失败: ' + (data.error || '');
-        }
-      } catch (e) { this.orderMsg = '下单失败: ' + e.message; }
+        const data = await (await fetch('/api/broker/' + this.activeBrokerId + '/order', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol: this.orderForm.symbol, conid: this.orderForm.conid, side: this.orderForm.side, qty: this.orderForm.qty, type: this.orderForm.type, price: this.orderForm.type === 'limit' ? this.orderForm.price : undefined }) })).json();
+        if (data.ok) { this.orderMsg = '下单成功 #' + (data.orderId || ''); this.orderForm.symbol = ''; setTimeout(() => this.refreshBroker(), 2000); }
+        else { this.orderMsg = '失败: ' + (data.error || ''); }
+      } catch (e) { this.orderMsg = '失败: ' + e.message; }
       this.ordering = false;
     },
-
     async cancelBrokerOrder(orderId) {
-      if (!this.activeBrokerId || !confirm('撤销此订单？')) return;
+      if (!this.activeBrokerId || !confirm('撤销？')) return;
       await fetch('/api/broker/' + this.activeBrokerId + '/order/' + orderId, { method: 'DELETE' });
       setTimeout(() => this.refreshBroker(), 1000);
     },
