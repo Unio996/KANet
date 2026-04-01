@@ -474,13 +474,13 @@ export async function fetchStockFundamentals(symbols) {
           grossMargin: fin.grossMargins?.raw != null ? +(fin.grossMargins.raw * 100).toFixed(2) : null,
           targetMeanPrice: fin.targetMeanPrice?.raw || null,
           recommendationKey: fin.recommendationKey || null,
-          numberOfAnalystOpinions: fin.numberOfAnalystOpinions?.raw || null,
+          numberOfAnalysts: fin.numberOfAnalystOpinions?.raw || null,
           forwardPE: stats.forwardPE?.raw || null,
           trailingPE: stats.trailingPE?.raw || null,
           beta: stats.beta?.raw || null,
           shortRatio: stats.shortRatio?.raw || null,
-          marketCap: stats.enterpriseValue?.raw || null,
-          marketCapFmt: stats.enterpriseValue?.fmt || null,
+          marketCap: stats.marketCap?.raw || null,
+          marketCapFmt: stats.marketCap?.fmt || null,
         };
       } catch {
         return null; // individual symbol failure — silent
