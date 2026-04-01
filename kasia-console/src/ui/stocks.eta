@@ -185,24 +185,6 @@
               <button @click="prepareOrder(p.symbol, p.conid, 'SELL', p.qty)" class="ml-2 text-ink-200 hover:text-red-500 transition-colors text-xs">卖出</button>
             </div>
 
-            <!-- Agent 分析 -->
-            <template x-if="getAgentInsight(p.symbol)">
-              <div class="px-4 pb-3">
-                <div class="bg-brand-50/50 rounded-lg px-3 py-2.5">
-                  <div class="text-[10px] font-medium text-brand-600 mb-1.5">Agent 分析</div>
-                  <template x-for="(line, i) in getAgentInsight(p.symbol)" :key="i">
-                    <p class="text-xs text-ink-600 leading-relaxed" x-text="line"></p>
-                  </template>
-                  <!-- 针对持仓的额外分析：目标价 vs 成本价 -->
-                  <template x-if="fundData[p.symbol]?.targetMeanPrice && p.avgCost">
-                    <p class="text-xs mt-1 font-medium"
-                      :class="fundData[p.symbol].targetMeanPrice > p.avgCost ? 'text-green-600' : 'text-red-600'"
-                      x-text="'目标价 $' + fundData[p.symbol].targetMeanPrice.toFixed(0) + ' vs 你的成本 $' + p.avgCost.toFixed(0) + ' → ' + (fundData[p.symbol].targetMeanPrice > p.avgCost ? '分析师看好' : '低于你的成本价')"></p>
-                  </template>
-                </div>
-              </div>
-            </template>
-
             <!-- 同行对比 -->
             <template x-if="getPeersForStock(p.symbol).length > 0">
               <div class="px-4 pb-3">
@@ -341,18 +323,6 @@
               </div>
               <button @click="removeStock(item.id)" class="ml-2 text-ink-200 hover:text-red-500 transition-colors text-sm">&times;</button>
             </div>
-
-            <!-- Agent 分析 -->
-            <template x-if="getAgentInsight(item.symbol)">
-              <div class="px-4 pb-3">
-                <div class="bg-brand-50/50 rounded-lg px-3 py-2.5">
-                  <div class="text-[10px] font-medium text-brand-600 mb-1.5">Agent 分析</div>
-                  <template x-for="(line, i) in getAgentInsight(item.symbol)" :key="i">
-                    <p class="text-xs text-ink-600 leading-relaxed" x-text="line"></p>
-                  </template>
-                </div>
-              </div>
-            </template>
 
             <!-- 同行对比 -->
             <template x-if="getPeersForStock(item.symbol).length > 0">
@@ -560,42 +530,6 @@ function stocksPage() {
       if (v >= 1e9) return (v / 1e9).toFixed(1) + 'B';
       if (v >= 1e6) return (v / 1e6).toFixed(0) + 'M';
       return v.toLocaleString();
-    },
-
-    getAgentInsight(symbol) {
-      const f = this.fundData[symbol];
-      const q = this.quotes[symbol];
-      if (!f) return null;
-      const lines = [];
-      if (f.recommendationKey && f.numberOfAnalysts) {
-        const ratingMap = { strong_buy: '强烈买入', buy: '买入', hold: '持有', sell: '卖出', underperform: '减持' };
-        const rating = ratingMap[f.recommendationKey] || f.recommendationKey;
-        let targetNote = '';
-        if (f.targetMeanPrice && q?.price) {
-          const diff = ((f.targetMeanPrice - q.price) / q.price * 100).toFixed(0);
-          targetNote = diff > 0
-            ? `，目标价 $${f.targetMeanPrice.toFixed(0)}（+${diff}% 上涨空间）`
-            : `，目标价 $${f.targetMeanPrice.toFixed(0)}（当前已超目标价 ${diff}%）`;
-        }
-        lines.push(`${f.numberOfAnalysts} 位分析师评级「${rating}」${targetNote}`);
-      }
-      const parts = [];
-      if (f.revenue) {
-        let revStr = '营收 ' + this.fmtRevenue(f.revenue);
-        if (f.revenueGrowth != null) revStr += `（${f.revenueGrowth > 0 ? '+' : ''}${f.revenueGrowth.toFixed(1)}%）`;
-        parts.push(revStr);
-      }
-      if (f.profitMargin != null) parts.push(`利润率 ${f.profitMargin.toFixed(1)}%`);
-      if (f.forwardPE) parts.push(`P/E ${f.forwardPE.toFixed(1)}`);
-      if (parts.length > 0) lines.push(parts.join('，'));
-      const risks = [];
-      if (f.beta != null) {
-        const label = f.beta >= 2.0 ? '高波动' : f.beta >= 1.5 ? '中高波动' : '稳健';
-        risks.push(`${label}（Beta ${f.beta.toFixed(1)}）`);
-      }
-      if (f.shortRatio && f.shortRatio > 3) risks.push(`做空压力偏高（${f.shortRatio.toFixed(1)}）`);
-      if (risks.length > 0) lines.push(risks.join('，'));
-      return lines.length > 0 ? lines : null;
     },
 
     /** 构造股票上下文 prompt — Agent 自动知道你在看什么 */
