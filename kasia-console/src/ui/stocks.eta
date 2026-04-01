@@ -596,7 +596,7 @@ function stocksPage() {
       if (f.shortRatio && f.shortRatio > 3) risks.push(`做空压力偏高（${f.shortRatio.toFixed(1)}）`);
       if (risks.length > 0) lines.push(risks.join('，'));
 
-      return lines;
+      return lines.length > 0 ? lines : null;
     },
 
     async addStock() {
