@@ -1,73 +1,6 @@
-<!DOCTYPE html>
-<html lang="<%= it.t.html_lang %>" dir="<%= it.dir %>">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title><%= it.title %> — KANet Console</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
-</head>
-<body class="flex h-screen bg-gray-100 font-sans">
+<%~ include('partials/page-open', { _page: 'network', pageTitle: 'Kasia Network', headerRight: '<span class="text-sm text-ink-300" x-data x-text="\'Last refresh: \' + new Date().toLocaleTimeString()"></span>', ...it }) %>
 
-  <!-- Sidebar -->
-  <aside class="w-56 bg-gray-900 text-gray-100 flex flex-col flex-shrink-0">
-    <div class="px-4 py-4 border-b border-gray-700 flex items-center space-x-3">
-      <img src="/public/kanet-logo.png" alt="KANet" class="h-8 w-8 object-contain flex-shrink-0" />
-      <span class="text-base font-bold tracking-wide text-white leading-tight">KANet<br/><span class="text-xs font-normal text-gray-400">Console</span></span>
-    </div>
-    <nav class="flex-1 py-4 space-y-1 px-3 overflow-y-auto">
-      <a href="/agent" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
-        <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-        我的 Agent
-      </a>
-      <a href="/conversations" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
-        <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>
-        会话
-      </a>
-      <a href="/identities" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
-        <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-        通讯录
-      </a>
-      <a href="/network" class="flex items-center px-3 py-2 rounded-md text-sm font-medium bg-gray-700 text-white">
-        <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/></svg>
-        网络
-      </a>
-      <a href="/chat" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
-        <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
-        聊天
-      </a>
-      <div class="pt-4 border-t border-gray-700 mt-4 space-y-1">
-        <a href="/events" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
-          <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-          活动日志
-        </a>
-        <div class="flex items-center px-3 py-2 text-xs font-medium text-gray-500 uppercase tracking-wider">
-          <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-          系统设置
-        </div>
-        <a href="/relays" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors pl-9">
-          <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"/></svg>
-          账户管理
-        </a>
-        <a href="/adapters" class="flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors pl-9">
-          <svg class="mr-2 h-4 w-4 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-          AI 引擎
-        </a>
-      </div>
-    </nav>
-    <div class="px-5 py-3 border-t border-gray-700 text-xs text-gray-500">
-      KANet Console v0.1
-    </div>
-  </aside>
-
-  <!-- Main -->
-  <div class="flex-1 flex flex-col overflow-hidden">
-    <header class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between flex-shrink-0">
-      <h1 class="text-xl font-semibold text-gray-800">Kasia Network</h1>
-      <span class="text-sm text-gray-400" x-data x-text="'Last refresh: ' + new Date().toLocaleTimeString()"></span>
-    </header>
-
-    <main class="flex-1 overflow-y-auto p-6" x-data="{
+    <div class="p-6" x-data="{
       profiles: [],
       handshakes: [],
       stats: null,
@@ -128,27 +61,27 @@
 
       <!-- Loading -->
       <div x-show="loading" class="flex items-center justify-center py-12">
-        <svg class="animate-spin h-6 w-6 text-blue-500" fill="none" viewBox="0 0 24 24">
+        <svg class="animate-spin h-6 w-6 text-brand-500" fill="none" viewBox="0 0 24 24">
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
           <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
         </svg>
-        <span class="ml-2 text-sm text-gray-500">Loading network data...</span>
+        <span class="ml-2 text-sm text-ink-400">Loading network data...</span>
       </div>
 
       <template x-if="!loading && stats">
         <div>
 
           <!-- Scanner status bar (system-level) -->
-          <div class="flex items-center justify-between bg-white rounded-lg border border-gray-200 px-4 py-3 mb-4">
+          <div class="flex items-center justify-between bg-white rounded-lg border border-warm-200 px-4 py-3 mb-4">
             <div class="flex items-center space-x-3">
               <span class="relative flex h-2.5 w-2.5" x-show="scanner?.running">
                 <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
                 <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
               </span>
               <span class="relative flex h-2.5 w-2.5" x-show="!scanner?.running">
-                <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-gray-300"></span>
+                <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-ink-200"></span>
               </span>
-              <span class="text-sm" :class="scanner?.running ? 'text-green-700' : 'text-gray-500'"
+              <span class="text-sm" :class="scanner?.running ? 'text-green-700' : 'text-ink-400'"
                 x-text="scanner?.running ? '链上探针运行中' : '链上探针已停止'"></span>
             </div>
             <div class="flex items-center space-x-2">
@@ -167,31 +100,31 @@
 
           <!-- Stats cards -->
           <div class="grid grid-cols-4 gap-4 mb-6">
-            <div class="bg-white rounded-lg border border-gray-200 p-4">
+            <div class="bg-white rounded-lg border border-warm-200 p-4">
               <div class="text-2xl font-bold text-indigo-600" x-text="stats.total_interactions.toLocaleString()"></div>
-              <div class="text-xs text-gray-500 mt-1">Total Interactions</div>
+              <div class="text-xs text-ink-400 mt-1">Total Interactions</div>
             </div>
-            <div class="bg-white rounded-lg border border-gray-200 p-4">
-              <div class="text-2xl font-bold text-gray-800" x-text="stats.unique_senders"></div>
-              <div class="text-xs text-gray-500 mt-1">Unique Addresses</div>
+            <div class="bg-white rounded-lg border border-warm-200 p-4">
+              <div class="text-2xl font-bold text-ink-700" x-text="stats.unique_senders"></div>
+              <div class="text-xs text-ink-400 mt-1">Unique Addresses</div>
             </div>
-            <div class="bg-white rounded-lg border border-gray-200 p-4">
+            <div class="bg-white rounded-lg border border-warm-200 p-4">
               <div class="text-2xl font-bold text-amber-600" x-text="stats.total_handshakes"></div>
-              <div class="text-xs text-gray-500 mt-1">Handshakes</div>
+              <div class="text-xs text-ink-400 mt-1">Handshakes</div>
             </div>
-            <div class="bg-white rounded-lg border border-gray-200 p-4">
-              <div class="text-sm text-gray-600" x-text="fmtDate(stats.earliest) + ' — ' + fmtDate(stats.latest)"></div>
-              <div class="text-xs text-gray-500 mt-1">Time Range</div>
+            <div class="bg-white rounded-lg border border-warm-200 p-4">
+              <div class="text-sm text-ink-500" x-text="fmtDate(stats.earliest) + ' — ' + fmtDate(stats.latest)"></div>
+              <div class="text-xs text-ink-400 mt-1">Time Range</div>
             </div>
           </div>
 
           <!-- Handshake graph -->
-          <div class="bg-white rounded-lg border border-gray-200 p-4 mb-6" x-show="handshakes.length > 0">
-            <h2 class="text-sm font-semibold text-gray-700 mb-3">Handshake Connections</h2>
+          <div class="bg-white rounded-lg border border-warm-200 p-4 mb-6" x-show="handshakes.length > 0">
+            <h2 class="text-sm font-semibold text-ink-600 mb-3">Handshake Connections</h2>
             <div class="space-y-1.5">
               <template x-for="h in handshakes" :key="h.tx_hash">
                 <div class="flex items-center text-xs font-mono">
-                  <span class="text-gray-400 w-32 flex-shrink-0" x-text="fmtDate(h.occurred_at)"></span>
+                  <span class="text-ink-300 w-32 flex-shrink-0" x-text="fmtDate(h.occurred_at)"></span>
                   <span class="text-indigo-700 font-medium" x-text="shortAddr(h.from_addr)" :title="h.from_addr"></span>
                   <span class="mx-2 text-amber-500">&#8594;</span>
                   <span class="text-indigo-700 font-medium" x-text="shortAddr(h.to_addr)" :title="h.to_addr"></span>
@@ -201,36 +134,36 @@
           </div>
 
           <!-- Activity table -->
-          <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
+          <div class="bg-white rounded-lg border border-warm-200 overflow-hidden">
             <table class="w-full text-sm">
-              <thead class="bg-gray-50 border-b border-gray-200">
+              <thead class="bg-warm-100 border-b border-warm-200">
                 <tr>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-8">#</th>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Address</th>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none" @click="toggleSort('total')">
+                  <th class="px-4 py-3 text-left text-xs font-medium text-ink-400 uppercase w-8">#</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-ink-400 uppercase">Address</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-ink-400 uppercase cursor-pointer select-none" @click="toggleSort('total')">
                     Activity <span x-show="sortBy==='total'" x-text="sortAsc ? '&#9650;' : '&#9660;'"></span>
                   </th>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Types</th>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none" @click="toggleSort('first_active')">
+                  <th class="px-4 py-3 text-left text-xs font-medium text-ink-400 uppercase">Types</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-ink-400 uppercase cursor-pointer select-none" @click="toggleSort('first_active')">
                     First Active <span x-show="sortBy==='first_active'" x-text="sortAsc ? '&#9650;' : '&#9660;'"></span>
                   </th>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none" @click="toggleSort('last_active')">
+                  <th class="px-4 py-3 text-left text-xs font-medium text-ink-400 uppercase cursor-pointer select-none" @click="toggleSort('last_active')">
                     Last Active <span x-show="sortBy==='last_active'" x-text="sortAsc ? '&#9650;' : '&#9660;'"></span>
                   </th>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none" @click="toggleSort('freq_per_hour')">
+                  <th class="px-4 py-3 text-left text-xs font-medium text-ink-400 uppercase">Duration</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-ink-400 uppercase cursor-pointer select-none" @click="toggleSort('freq_per_hour')">
                     Freq <span x-show="sortBy==='freq_per_hour'" x-text="sortAsc ? '&#9650;' : '&#9660;'"></span>
                   </th>
                 </tr>
               </thead>
-              <tbody class="divide-y divide-gray-100">
+              <tbody class="divide-y divide-warm-100">
                 <template x-for="(p, idx) in sorted()" :key="p.address">
-                  <tr class="hover:bg-gray-50 transition-colors cursor-pointer" @click="expanded = expanded === p.address ? null : p.address">
-                    <td class="px-4 py-2.5 text-xs text-gray-400" x-text="idx + 1"></td>
+                  <tr class="hover:bg-warm-100 transition-colors cursor-pointer" @click="expanded = expanded === p.address ? null : p.address">
+                    <td class="px-4 py-2.5 text-xs text-ink-300" x-text="idx + 1"></td>
                     <td class="px-4 py-2.5">
                       <div class="flex flex-col">
-                        <span class="font-medium text-gray-800 text-xs" x-show="p.display_name" x-text="p.display_name"></span>
-                        <span class="font-mono text-xs text-gray-500" x-text="shortAddr(p.address)" :title="p.address"></span>
+                        <span class="font-medium text-ink-700 text-xs" x-show="p.display_name" x-text="p.display_name"></span>
+                        <span class="font-mono text-xs text-ink-400" x-text="shortAddr(p.address)" :title="p.address"></span>
                         <template x-if="p.card_mode">
                           <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-100 text-purple-700 w-fit mt-0.5">
                             KANet <span x-text="p.card_entity_type || ''"></span>
@@ -240,8 +173,8 @@
                     </td>
                     <td class="px-4 py-2.5">
                       <div class="flex items-center space-x-2">
-                        <span class="font-semibold text-gray-800 text-sm" x-text="p.total.toLocaleString()"></span>
-                        <div class="w-20 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <span class="font-semibold text-ink-700 text-sm" x-text="p.total.toLocaleString()"></span>
+                        <div class="w-20 h-1.5 bg-warm-100 rounded-full overflow-hidden">
                           <div class="h-full bg-indigo-400 rounded-full" :style="'width:' + actBar(p) + '%'"></div>
                         </div>
                       </div>
@@ -258,32 +191,30 @@
                           <span title="向自己存储加密数据" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-emerald-50 text-emerald-700 cursor-help" x-text="'存储' + p.self_stash"></span>
                         </template>
                         <template x-if="p.legacy > 0">
-                          <span title="旧版 Kasia 协议消息" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-gray-100 text-gray-600 cursor-help" x-text="'旧版' + p.legacy"></span>
+                          <span title="旧版 Kasia 协议消息" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-warm-100 text-ink-500 cursor-help" x-text="'旧版' + p.legacy"></span>
                         </template>
                         <template x-if="p.bcast > 0">
                           <span title="公开频道广播消息" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-pink-50 text-pink-600 cursor-help" x-text="'广播' + p.bcast"></span>
                         </template>
                       </div>
                     </td>
-                    <td class="px-4 py-2.5 text-xs text-gray-500" x-text="fmtDate(p.first_active)"></td>
-                    <td class="px-4 py-2.5 text-xs text-gray-500" x-text="fmtDate(p.last_active)"></td>
-                    <td class="px-4 py-2.5 text-xs text-gray-500" x-text="p.hours_active ? p.hours_active + 'h' : '<1h'"></td>
-                    <td class="px-4 py-2.5 text-xs font-medium" :class="p.freq_per_hour > 50 ? 'text-red-600' : p.freq_per_hour > 10 ? 'text-amber-600' : 'text-gray-600'" x-text="p.freq_per_hour ? p.freq_per_hour + '/h' : '-'"></td>
+                    <td class="px-4 py-2.5 text-xs text-ink-400" x-text="fmtDate(p.first_active)"></td>
+                    <td class="px-4 py-2.5 text-xs text-ink-400" x-text="fmtDate(p.last_active)"></td>
+                    <td class="px-4 py-2.5 text-xs text-ink-400" x-text="p.hours_active ? p.hours_active + 'h' : '<1h'"></td>
+                    <td class="px-4 py-2.5 text-xs font-medium" :class="p.freq_per_hour > 50 ? 'text-red-600' : p.freq_per_hour > 10 ? 'text-amber-600' : 'text-ink-500'" x-text="p.freq_per_hour ? p.freq_per_hour + '/h' : '-'"></td>
                   </tr>
                 </template>
               </tbody>
             </table>
           </div>
 
-          <div class="mt-3 text-xs text-gray-400">
+          <div class="mt-3 text-xs text-ink-300">
             Data sourced from on-chain Kasia protocol activity.
           </div>
 
         </div>
       </template>
 
-    </main>
-  </div>
+    </div>
 
-</body>
-</html>
+<%~ include('partials/page-close', it) %>
