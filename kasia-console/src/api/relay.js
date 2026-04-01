@@ -478,12 +478,10 @@ export async function registerRelayRoutes(fastify) {
       let usdt = null, native = null;
 
       if (EVM_RPC_URLS[wallet.chain]) {
-        // BNB / ETH
-        usdt = await getEvmUsdtBalance(wallet.chain, wallet.address);
-        const { ethers } = await import('ethers');
-        const provider = new ethers.JsonRpcProvider(EVM_RPC_URLS[wallet.chain]);
-        const bal = await timeout(provider.getBalance(wallet.address));
-        native = parseFloat(ethers.formatEther(bal));
+        // BNB / ETH — reuse getEvmBalances which fetches USDT+USDC+native in one call
+        const balances = await getEvmBalances(wallet.chain, wallet.address);
+        usdt = balances.usdt;
+        native = balances.native;
 
       } else if (wallet.chain === 'sol') {
         // Solana

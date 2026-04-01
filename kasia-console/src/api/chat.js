@@ -245,6 +245,34 @@ export async function registerChatRoutes(fastify) {
 
     return reply.send({ ok: true, id, duplicate: false });
   });
+
+  // ── Conversational Ops: confirm execute action ──
+  fastify.post('/api/chat/confirm', async (request, reply) => {
+    const { relayNodeId, token } = request.body || {};
+    if (!relayNodeId || !token) return reply.code(400).send({ error: 'Missing relayNodeId or token' });
+
+    try {
+      const KANET_ROOT = process.env.KANET_ROOT || 'D:/Anthropic';
+      const { consumeConfirmToken } = await import(`file:///${KANET_ROOT}/agent-mind/src/confirm-store.mjs`);
+      const entry = consumeConfirmToken(token, relayNodeId);
+      if (!entry) return reply.send({ error: 'Token expired or invalid' });
+
+      const ACTION_MAP = {
+        send_kas: 'SEND_KAS',
+        publish_order: 'CREATE_MM_ORDER',
+        cancel_order: 'CANCEL_ORDER',
+      };
+
+      const actionType = ACTION_MAP[entry.intent];
+      if (!actionType) return reply.send({ error: `Unknown execute intent: ${entry.intent}` });
+
+      const actionMsg = `[ACTION:${actionType} ${Object.entries(entry.params).map(([k,v]) => `${k}=${v}`).join(' ')}]`;
+      const result = await getReply(relayNodeId, 'owner:confirm', actionMsg);
+      return reply.send({ ok: true, result: result || 'Action executed' });
+    } catch (err) {
+      return reply.send({ error: err.message });
+    }
+  });
 }
 
 /**
@@ -374,34 +402,4 @@ async function triggerAutoReply(responder, channelName, senderAddress, content, 
       }, cascadeDelay);
     }
   }
-
-  // ── Conversational Ops: confirm execute action ──
-  fastify.post('/api/chat/confirm', async (request, reply) => {
-    const { relayNodeId, token } = request.body || {};
-    if (!relayNodeId || !token) return reply.code(400).send({ error: 'Missing relayNodeId or token' });
-
-    try {
-      const KANET_ROOT = process.env.KANET_ROOT || 'D:/Anthropic';
-      const { consumeConfirmToken } = await import(`file:///${KANET_ROOT}/agent-mind/src/confirm-store.mjs`);
-      const entry = consumeConfirmToken(token, relayNodeId);
-      if (!entry) return reply.send({ error: 'Token expired or invalid' });
-
-      // Map intent → existing ACTION type
-      const ACTION_MAP = {
-        send_kas: 'SEND_KAS',
-        publish_order: 'CREATE_MM_ORDER',
-        cancel_order: 'CANCEL_ORDER',
-      };
-
-      const actionType = ACTION_MAP[entry.intent];
-      if (!actionType) return reply.send({ error: `Unknown execute intent: ${entry.intent}` });
-
-      // Use Mind's getReply with an action directive so it flows through existing action executor
-      const actionMsg = `[ACTION:${actionType} ${Object.entries(entry.params).map(([k,v]) => `${k}=${v}`).join(' ')}]`;
-      const result = await getReply(relayNodeId, 'owner:confirm', actionMsg);
-      return reply.send({ ok: true, result: result || 'Action executed' });
-    } catch (err) {
-      return reply.send({ error: err.message });
-    }
-  });
 }

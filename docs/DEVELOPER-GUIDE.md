@@ -97,7 +97,7 @@ conversations    ──→  Intent Kernel     ──┘                    │
                                             │
 minds/*/intent.json ←── 目标持久化         │
 minds/*/memory.json ←── peerNotes缓存     │
-minds/*/evolution.json ←── 反思持久化       │
+minds/*/reflections.json ←── 反思持久化       │
                                             │
                       Action Executor  ←── 候选动作 ←───────────┘
                           │
