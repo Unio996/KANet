@@ -1,0 +1,574 @@
+<!-- trade-otc partial — OTC market: orders, publish, deal management, trade chat -->
+<div x-data="tradeOtc()" x-init="init()">
+
+  <!-- ═══ Market Header ═══ -->
+  <div class="card mb-5 flex items-center justify-between">
+    <div class="flex items-center gap-6">
+      <div>
+        <span class="text-xs text-ink-400">KAS/USDT</span>
+        <span class="text-xl font-bold text-ink-700 ml-2" x-text="$root.portfolio?.market?.price ? '$' + $root.portfolio.market.price.toFixed(6) : '--'"></span>
+      </div>
+      <div>
+        <span class="text-xs text-ink-400">24h</span>
+        <span class="text-sm ml-1" :class="($root.portfolio?.market?.change24h || 0) >= 0 ? 'price-up' : 'price-down'"
+          x-text="(($root.portfolio?.market?.change24h || 0) >= 0 ? '+' : '') + ($root.portfolio?.market?.change24h || 0).toFixed(2) + '%'"></span>
+      </div>
+    </div>
+    <div class="flex gap-2">
+      <button @click="openPublish('sell')" class="btn btn-danger">+ Sell KAS</button>
+      <button @click="openPublish('buy')" class="btn btn-primary">+ Buy KAS</button>
+    </div>
+  </div>
+
+  <!-- ═══ Publish Order Form ═══ -->
+  <div x-show="showPublishForm" x-transition class="card mb-5 border-brand-200">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-semibold text-ink-700" x-text="publishForm.side === 'sell' ? 'Sell KAS' : 'Buy KAS'"></h2>
+      <button @click="showPublishForm = false" class="btn btn-sm btn-ghost text-lg">&times;</button>
+    </div>
+
+    <!-- Agent advice -->
+    <div class="bg-brand-50 border border-brand-200 rounded-lg p-3 mb-4 text-sm text-brand-700">
+      <span class="font-medium">Agent suggestion: </span>
+      <span x-text="'Current market $' + ($root.portfolio?.market?.price || 0).toFixed(4) + '. '"></span>
+      <span x-show="publishForm.side === 'sell'" class="text-brand-600">Sell above market for better returns.</span>
+      <span x-show="publishForm.side === 'buy'" class="text-brand-600">Buy below market to save cost.</span>
+    </div>
+
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="text-xs text-ink-400 block mb-1">Amount (KAS)</label>
+        <input type="number" x-model="publishForm.amount" placeholder="100"
+          class="w-full bg-white text-ink-700 text-lg rounded-lg px-3 py-2.5 border border-warm-300 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+      </div>
+      <div>
+        <label class="text-xs text-ink-400 block mb-1">Price (USDT/KAS)</label>
+        <input type="number" step="0.0001" x-model="publishForm.price"
+          class="w-full bg-white text-ink-700 text-lg rounded-lg px-3 py-2.5 border border-warm-300 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+        <span class="text-xs text-ink-300">Auto-filled with market price</span>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-3 gap-4 mt-3">
+      <div>
+        <label class="text-xs text-ink-400 block mb-1">Agent</label>
+        <select x-model="publishForm.agentId"
+          class="w-full bg-white text-ink-600 text-sm rounded-lg px-3 py-2 border border-warm-300 focus:outline-none">
+          <option value="">Select Agent...</option>
+          <template x-for="a in $root.agents" :key="a.id">
+            <option :value="a.id" x-text="a.name"></option>
+          </template>
+        </select>
+      </div>
+      <div>
+        <label class="text-xs text-ink-400 block mb-1">Settlement Chain</label>
+        <select x-model="publishForm.chain"
+          class="w-full bg-white text-ink-600 text-sm rounded-lg px-3 py-2 border border-warm-300 focus:outline-none">
+          <option value="bnb">BNB Chain</option>
+          <option value="eth">Ethereum</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-xs text-ink-400 block mb-1" x-text="publishForm.side === 'sell' ? 'Receive' : 'Pay with'"></label>
+        <select x-model="publishForm.wantToken"
+          class="w-full bg-white text-ink-600 text-sm rounded-lg px-3 py-2 border border-warm-300 focus:outline-none">
+          <option value="USDT">USDT</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Order summary -->
+    <div x-show="publishForm.amount > 0 && publishForm.price > 0 && publishForm.agentId"
+      class="mt-4 bg-warm-50 rounded-lg p-4 border border-warm-200">
+      <p class="text-xs text-ink-400 mb-2">Order Summary (will be broadcast on-chain)</p>
+      <div class="space-y-1.5">
+        <div class="flex justify-between text-sm">
+          <span class="text-ink-400" x-text="publishForm.side === 'sell' ? 'You will sell' : 'You will buy'"></span>
+          <span class="text-ink-700 font-bold" x-text="publishForm.amount + ' KAS'"></span>
+        </div>
+        <div class="flex justify-between text-sm">
+          <span class="text-ink-400">Price</span>
+          <span class="text-ink-700" x-text="'$' + parseFloat(publishForm.price).toFixed(4)"></span>
+        </div>
+        <div class="flex justify-between text-sm">
+          <span class="text-ink-400" x-text="publishForm.side === 'sell' ? 'Expected receive' : 'Expected pay'"></span>
+          <span class="text-xl font-bold" :class="publishForm.side === 'sell' ? 'price-up' : 'price-down'"
+            x-text="(publishForm.amount * publishForm.price).toFixed(2) + ' USDT'"></span>
+        </div>
+        <div class="flex justify-between text-sm">
+          <span class="text-ink-400">Chain</span>
+          <span class="text-ink-700" x-text="(publishForm.chain || 'bnb').toUpperCase()"></span>
+        </div>
+        <div class="flex justify-between text-sm">
+          <span class="text-ink-400">Agent</span>
+          <span class="text-brand-600" x-text="$root.agents.find(a => a.id === publishForm.agentId)?.name || '--'"></span>
+        </div>
+      </div>
+    </div>
+
+    <button @click="publishIntent()" :disabled="publishingOrder || !publishForm.amount || !publishForm.agentId || !publishForm.price"
+      class="w-full mt-4 py-3 rounded-lg text-sm font-bold transition-colors"
+      :class="publishingOrder ? 'bg-warm-200 text-ink-300' : publishForm.side === 'sell' ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-green-600 hover:bg-green-700 text-white'">
+      <span x-show="!publishingOrder" x-text="publishForm.side === 'sell' ? 'Confirm Sell — Broadcast on-chain' : 'Confirm Buy — Broadcast on-chain'"></span>
+      <span x-show="publishingOrder">Broadcasting...</span>
+    </button>
+    <p class="text-xs text-ink-300 text-center mt-2">Order is broadcast via Kaspa chain. Visible to all. Not a commitment — it's your bid.</p>
+  </div>
+
+  <div class="grid grid-cols-12 gap-6">
+    <!-- ═══ Left: My Orders + Market Feed ═══ -->
+    <div class="col-span-12 lg:col-span-7 space-y-5">
+
+      <!-- My Orders -->
+      <div class="card card-flush overflow-hidden">
+        <div class="px-4 py-3 border-b border-warm-200 flex items-center justify-between">
+          <h2 class="text-sm font-medium text-ink-700">My Orders</h2>
+          <button @click="$root.loadMarketData()" class="btn btn-sm btn-ghost">Refresh</button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="text-xs text-ink-400 uppercase bg-warm-50">
+              <tr><th class="text-left px-4 py-2">Time</th><th class="text-left px-4 py-2">Side</th><th class="text-right px-4 py-2">Amount</th><th class="text-right px-4 py-2">Price</th><th class="text-left px-4 py-2">Chain</th><th class="text-left px-4 py-2">Status</th><th class="px-4 py-2"></th></tr>
+            </thead>
+            <tbody>
+              <template x-for="o in $root.marketOrders" :key="o.id">
+                <tr class="border-t border-warm-200 hover:bg-warm-50 cursor-pointer" @click="expandedOrderId = expandedOrderId === o.id ? null : o.id">
+                  <td class="px-4 py-2 text-ink-400 text-xs" x-text="o.created_at?.slice(5, 16)"></td>
+                  <td class="px-4 py-2"><span class="badge" :class="o.side === 'buy' ? 'badge-success' : 'badge-error'" x-text="o.side.toUpperCase()"></span></td>
+                  <td class="px-4 py-2 text-right font-mono text-ink-700" x-text="o.kas_amount?.toLocaleString() + ' KAS'"></td>
+                  <td class="px-4 py-2 text-right font-mono text-brand-600" x-text="o.price > 0 ? '$' + o.price.toFixed(6) : 'Negotiate'"></td>
+                  <td class="px-4 py-2 uppercase text-xs text-ink-400" x-text="o.chain"></td>
+                  <td class="px-4 py-2"><span class="badge badge-neutral" x-text="$root.orderStatusCn(o.status)"></span></td>
+                  <td class="px-4 py-2">
+                    <button x-show="!['completed','expired','cancelled'].includes(o.status)"
+                      class="btn btn-sm btn-danger"
+                      @click.stop="if(confirm('Cancel this order?')) { fetch('/api/trade/mm-orders/' + o.id + '/action', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'cancel'}) }).then(()=>$root.loadMarketData()) }">Cancel</button>
+                  </td>
+                </tr>
+              </template>
+              <!-- Expanded order detail -->
+              <template x-for="o in $root.marketOrders.filter(o => o.id === expandedOrderId)" :key="'detail-' + o.id">
+                <tr class="bg-warm-50">
+                  <td colspan="7" class="px-4 py-3" x-data="{ execLog: [] }" x-init="try { execLog = await fetch('/api/trade/order-executions?order_id=' + o.id).then(r => r.json()) } catch {}">
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs mb-3">
+                      <div><span class="text-ink-400">Order ID</span><p class="font-mono text-ink-600 mt-0.5" x-text="o.id.slice(0,8) + '...'"></p></div>
+                      <div><span class="text-ink-400">Price</span><p class="text-ink-700 font-bold mt-0.5" x-text="o.price > 0 ? '$' + o.price.toFixed(6) : '--'"></p></div>
+                      <div><span class="text-ink-400">USDT Amount</span><p class="text-ink-700 mt-0.5" x-text="o.usdt_amount ? o.usdt_amount.toFixed(2) + ' USDT' : (o.kas_amount * (o.price || 0)).toFixed(2) + ' USDT'"></p></div>
+                      <div><span class="text-ink-400">Created</span><p class="text-ink-600 mt-0.5" x-text="o.created_at ? new Date(o.created_at).toLocaleString() : '--'"></p></div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3 text-xs">
+                      <div><span class="text-ink-400">USDT TX</span><p class="font-mono text-brand-600 mt-0.5 break-all" x-text="o.payment_txhash || '--'"></p></div>
+                      <div><span class="text-ink-400">KAS TX</span><p class="font-mono price-up mt-0.5 break-all" x-text="o.kas_txhash || '--'"></p></div>
+                    </div>
+                    <!-- Execution timeline -->
+                    <template x-if="execLog.length > 0">
+                      <div class="border-t border-warm-200 pt-2 mt-3">
+                        <span class="text-ink-400 text-xs">Decision Timeline</span>
+                        <div class="mt-1 space-y-1.5">
+                          <template x-for="ex in execLog" :key="ex.id">
+                            <div class="relative pl-5 border-l-2" :class="ex.status === 'completed' ? 'border-green-300' : ex.status === 'failed' || ex.status === 'rejected' ? 'border-red-300' : 'border-warm-300'">
+                              <div class="status-dot absolute -left-1 top-0.5" :class="ex.status === 'completed' ? 'green' : ex.status === 'failed' || ex.status === 'rejected' ? 'red' : 'yellow'"></div>
+                              <div class="text-xs">
+                                <span class="text-ink-400" x-text="ex.created_at ? new Date(ex.created_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : ''"></span>
+                                <span class="text-ink-600 ml-1" x-text="ex.display_summary || ex.type"></span>
+                              </div>
+                              <p class="text-xs text-brand-500 mt-0.5 cursor-pointer hover:underline" x-show="ex.output_txid" @click="navigator.clipboard.writeText(ex.output_txid)"
+                                x-text="ex.output_txid ? 'TX: ' + ex.output_txid.slice(0,12) + '...' : ''"></p>
+                            </div>
+                          </template>
+                        </div>
+                      </div>
+                    </template>
+                  </td>
+                </tr>
+              </template>
+              <template x-if="$root.marketOrders.length === 0">
+                <tr><td colspan="7" class="px-4 py-6 text-center text-ink-300 text-sm">No orders yet</td></tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+        <!-- Recent completed -->
+        <div class="border-t border-warm-200" x-data="{
+          completed: [],
+          async init() { try { const r = await fetch('/api/trade/mm-orders?status=completed&limit=5').then(r => r.json()); this.completed = Array.isArray(r) ? r : []; } catch {} }
+        }">
+          <div class="px-4 py-2 text-xs text-ink-400">Recent Completed</div>
+          <template x-for="d in completed" :key="d.id">
+            <div class="px-4 py-1.5 flex justify-between text-xs border-t border-warm-100">
+              <span :class="d.side === 'buy' ? 'price-up' : 'price-down'" x-text="(d.side === 'buy' ? 'Buy ' : 'Sell ') + d.kas_amount + ' KAS'"></span>
+              <span class="text-ink-300" x-text="d.completed_at?.slice(5,16) || d.created_at?.slice(5,16)"></span>
+            </div>
+          </template>
+          <template x-if="completed.length === 0">
+            <div class="px-4 py-3 text-center text-ink-300 text-xs">No completed trades</div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Market Broadcasts -->
+      <div class="card card-flush">
+        <div class="px-4 py-3 border-b border-warm-200">
+          <h2 class="text-sm font-medium text-ink-700">Market Feed</h2>
+        </div>
+        <div class="divide-y divide-warm-200">
+          <template x-for="b in $root.marketBroadcasts" :key="b.id || b.created_at">
+            <div class="px-4 py-3 hover:bg-warm-50" x-data="{ parsed: JSON.parse(b.content) }">
+              <div class="flex items-start justify-between">
+                <div class="flex-1">
+                  <div class="flex items-center gap-2 mb-1">
+                    <span class="badge" :class="parsed.type?.includes('sell') ? 'badge-error' : 'badge-success'"
+                      x-text="parsed.type?.includes('sell') ? 'SELL' : 'BUY'"></span>
+                    <span class="text-lg font-bold text-ink-700" x-text="(parsed.amount?.toLocaleString() || '?') + ' ' + (parsed.token || 'KAS')"></span>
+                  </div>
+                  <div class="flex items-center gap-3 text-xs text-ink-400">
+                    <span x-text="(parsed.type?.includes('sell') ? 'Receive ' : 'Pay ') + (parsed.want || parsed.pay || 'USDT')"></span>
+                    <span x-text="(parsed.chains || []).join(' / ').toUpperCase() || '--'"></span>
+                  </div>
+                  <div class="flex items-center gap-2 mt-1 text-xs">
+                    <span class="addr addr-short" x-text="b.sender_address?.slice(-12) || '--'"></span>
+                    <span class="text-ink-300" x-text="$root.timeAgo(b.created_at)"></span>
+                  </div>
+                </div>
+                <div class="ml-4 flex-shrink-0">
+                  <template x-if="acceptingOrder?.id !== b.id">
+                    <button @click="startAccept(b)" class="btn btn-sm btn-primary">Accept</button>
+                  </template>
+                  <template x-if="acceptingOrder?.id === b.id">
+                    <div class="flex items-center gap-2">
+                      <select x-model="acceptAgentId" class="rounded-lg border border-warm-300 px-2 py-1.5 text-xs bg-white text-ink-600">
+                        <option value="">Select Agent...</option>
+                        <template x-for="a in $root.agents" :key="a.id">
+                          <option :value="a.id" x-text="a.name"></option>
+                        </template>
+                      </select>
+                      <button @click="sendAcceptInvite()" :disabled="!acceptAgentId || acceptSending" class="btn btn-sm btn-primary">
+                        <span x-text="acceptSending ? '...' : 'Send'"></span>
+                      </button>
+                      <button @click="cancelAccept()" class="btn btn-sm btn-ghost">X</button>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </template>
+          <template x-if="$root.marketBroadcasts.length === 0">
+            <div class="px-4 py-8 text-center text-ink-300">No market broadcasts yet.</div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ Right: Trade Room (active deals) ═══ -->
+    <div class="col-span-12 lg:col-span-5 space-y-4">
+      <div class="card card-flush">
+        <div class="px-4 py-3 border-b border-warm-200">
+          <h2 class="text-sm font-medium text-ink-700">Trade Room</h2>
+        </div>
+        <div class="divide-y divide-warm-200" x-data="tradeRoom()" x-init="init()">
+          <template x-for="deal in activeDeals" :key="deal.id">
+            <div class="px-4 py-4">
+              <!-- Deal header -->
+              <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center gap-2">
+                  <span class="badge" :class="deal.side === 'buy' ? 'badge-success' : 'badge-error'" x-text="deal.side === 'buy' ? 'BUY' : 'SELL'"></span>
+                  <span class="text-lg text-ink-700 font-bold" x-text="deal.kas_amount?.toLocaleString() + ' KAS'"></span>
+                  <span class="text-xs text-ink-400" x-text="deal.chain?.toUpperCase()"></span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="badge badge-neutral" x-text="$root.orderStatusCn(deal.status)"></span>
+                  <button @click.stop="if(confirm('Cancel this order?')){ fetch('/api/trade/mm-orders/'+deal.id+'/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'cancel'})}).then(()=>loadDeals()) }"
+                    class="btn btn-sm btn-danger">Cancel</button>
+                </div>
+              </div>
+
+              <!-- Progress bar -->
+              <div class="flex items-center gap-1 mb-3 text-xs">
+                <template x-for="(step, i) in ['Accept','Pay','Verify','Deliver','Done']" :key="step">
+                  <div class="flex items-center">
+                    <span class="px-1.5 py-0.5 rounded"
+                      :class="i <= (['published'].includes(deal.status)?0 : ['accepted'].includes(deal.status)?1 : ['paying','paid'].includes(deal.status)?2 : ['verified'].includes(deal.status)?3 : ['delivering'].includes(deal.status)?4 : 5) - 1 ? 'bg-green-600 text-white' : 'bg-warm-200 text-ink-400'"
+                      x-text="step"></span>
+                    <span x-show="i < 4" class="text-ink-300 mx-0.5">&rarr;</span>
+                  </div>
+                </template>
+              </div>
+
+              <!-- Approval card -->
+              <template x-if="deal._pendingExec">
+                <div class="approval-card mb-3">
+                  <div class="flex items-center justify-between mb-2">
+                    <span class="badge badge-warning">Awaiting Your Approval</span>
+                    <span class="text-xs text-ink-300" x-text="deal._pendingExec.approval_deadline ? 'Deadline: ' + new Date(deal._pendingExec.approval_deadline).toLocaleTimeString() : ''"></span>
+                  </div>
+                  <p class="text-sm text-ink-600 mb-3" x-text="deal._pendingExec.display_summary || deal._pendingExec.type"></p>
+                  <div class="flex gap-3">
+                    <button @click="fetch('/api/trade/approve-execution/'+deal._pendingExec.id,{method:'POST'}).then(r=>r.json()).then(d=>{if(d.ok){deal._pendingExec=null;loadDeals();}else{alert(d.error||'Failed')}})"
+                      class="btn btn-primary flex-1">Approve</button>
+                    <button @click="if(confirm('Reject will cancel order. Sure?'))fetch('/api/trade/reject-execution/'+deal._pendingExec.id,{method:'POST'}).then(r=>r.json()).then(d=>{deal._pendingExec=null;loadDeals();})"
+                      class="btn btn-danger flex-1">Reject</button>
+                  </div>
+                  <p class="text-xs text-ink-300 mt-2 text-center">Auto-cancel or escalate if not acted on in time</p>
+                </div>
+              </template>
+
+              <!-- Status-specific guidance -->
+              <!-- accepted: buyer pays -->
+              <template x-if="deal.status === 'accepted' && deal.side === 'buy'">
+                <div class="bg-brand-50 border border-brand-200 rounded-lg p-4 mb-3">
+                  <p class="text-sm text-ink-600 mb-3">Seller accepted. Your Agent is ready to pay USDT.</p>
+                  <div class="space-y-2 mb-3 bg-warm-50 rounded-lg p-3 text-sm">
+                    <div class="flex justify-between"><span class="text-ink-400">Amount due</span><span class="text-xl text-ink-700 font-bold" x-text="(deal.usdt_amount || (deal.kas_amount * (deal.price || 0))).toFixed(2) + ' USDT'"></span></div>
+                    <div class="flex justify-between"><span class="text-ink-400">Chain</span><span class="text-ink-700" x-text="(deal.chain || 'bnb').toUpperCase()"></span></div>
+                    <div class="text-sm"><span class="text-ink-400">Pay to:</span><p class="addr mt-1 break-all cursor-pointer hover:underline" @click="navigator.clipboard.writeText(deal.mm_receive_address||deal.counterparty_wallet||'')" x-text="deal.mm_receive_address || deal.counterparty_wallet || 'Waiting for seller wallet...'"></p></div>
+                  </div>
+                  <button @click.stop="if(!confirm('Confirm pay '+(deal.usdt_amount||(deal.kas_amount*(deal.price||0))).toFixed(2)+' USDT?'))return; actionLoading=deal.id; fetch('/api/trade/mm-orders/'+deal.id+'/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'pay_usdt'})}).then(r=>r.json()).then(d=>{if(d.ok){deal.status=d.status;deal.payment_txhash=d.txHash;}else{alert(d.error||'Pay failed');}}).catch(e=>alert(e.message)).finally(()=>{actionLoading=null;loadDeals();})"
+                    :disabled="actionLoading === deal.id" class="btn btn-primary w-full py-3">
+                    <span x-text="actionLoading === deal.id ? 'Sending on-chain...' : 'Pay USDT'"></span></button>
+                </div>
+              </template>
+
+              <!-- paid: seller verifies -->
+              <template x-if="deal.status === 'paid' && deal.side === 'sell'">
+                <div class="bg-brand-50 border border-brand-200 rounded-lg p-4 mb-3">
+                  <p class="text-sm text-ink-700 font-medium mb-2">Buyer has paid</p>
+                  <p class="addr break-all mb-2" x-show="deal.payment_txhash" x-text="'TX: ' + (deal.payment_txhash||'')"></p>
+                  <p class="text-xs text-ink-400 mb-3">Auto-verifying on-chain (~60s). Or verify manually:</p>
+                  <button @click.stop="actionLoading=deal.id; fetch('/api/trade/mm-orders/'+deal.id+'/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'verify_payment',payment_txhash:deal.payment_txhash})}).then(r=>r.json()).then(d=>{if(d.ok){deal.status=d.status||'verified';}else alert(d.error)}).finally(()=>{actionLoading=null;loadDeals()})"
+                    :disabled="actionLoading === deal.id || !deal.payment_txhash" class="btn btn-primary w-full">
+                    <span x-text="actionLoading === deal.id ? 'Verifying...' : 'Verify Payment'"></span></button>
+                </div>
+              </template>
+
+              <!-- verified: seller sends KAS -->
+              <template x-if="deal.status === 'verified' && deal.side === 'sell'">
+                <div class="bg-green-50 border border-green-200 rounded-lg p-4 mb-3">
+                  <p class="text-sm text-ink-600 mb-2">USDT verified on-chain. Time to send KAS.</p>
+                  <div class="space-y-1.5 text-sm mb-3 bg-warm-50 rounded-lg p-3">
+                    <div class="flex justify-between"><span class="text-ink-400">Send</span><span class="text-ink-700 font-bold" x-text="deal.kas_amount + ' KAS'"></span></div>
+                    <div class="text-sm"><span class="text-ink-400">To:</span><p class="addr mt-1 break-all" x-text="deal.peer_address || 'Unknown'"></p></div>
+                  </div>
+                  <button @click.stop="sendKas(deal)" :disabled="actionLoading === deal.id" class="btn btn-primary w-full py-3">
+                    <span x-text="actionLoading === deal.id ? 'Sending...' : 'Send ' + deal.kas_amount + ' KAS'"></span></button>
+                </div>
+              </template>
+
+              <!-- completed -->
+              <template x-if="deal.status === 'completed'">
+                <div class="bg-green-50 border border-green-200 rounded-lg p-4 mb-3">
+                  <p class="text-sm price-up font-bold mb-2">Trade Completed</p>
+                  <div class="space-y-1.5 text-xs">
+                    <div class="flex justify-between"><span class="text-ink-400" x-text="deal.side === 'sell' ? 'Sold' : 'Bought'"></span><span class="text-ink-700 font-bold" x-text="deal.kas_amount + ' KAS'"></span></div>
+                    <div class="flex justify-between"><span class="text-ink-400" x-text="deal.side === 'sell' ? 'Received' : 'Paid'"></span><span class="font-bold" :class="deal.side === 'sell' ? 'price-up' : 'price-down'" x-text="(deal.usdt_amount || (deal.kas_amount * (deal.price||0))).toFixed(2) + ' USDT'"></span></div>
+                  </div>
+                  <div class="mt-2 pt-2 border-t border-warm-200 space-y-1">
+                    <p class="addr break-all" x-show="deal.payment_txhash" x-text="'USDT TX: ' + (deal.payment_txhash||'')"></p>
+                    <p class="addr break-all price-up" x-show="deal.kas_txhash && deal.kas_txhash !== 'pending'" x-text="'KAS TX: ' + (deal.kas_txhash||'')"></p>
+                  </div>
+                </div>
+              </template>
+
+              <!-- cancelled/expired/disputed -->
+              <template x-if="['cancelled','expired','disputed'].includes(deal.status)">
+                <div class="bg-red-50 border border-red-200 rounded-lg p-3 mb-3">
+                  <p class="text-sm text-red-600 font-medium" x-text="deal.status === 'disputed' ? 'Trade Disputed' : 'Trade Cancelled'"></p>
+                  <p class="text-xs text-ink-400 mt-1" x-show="deal.cancel_reason" x-text="deal.cancel_reason"></p>
+                </div>
+              </template>
+
+              <!-- Chat toggle -->
+              <div class="flex gap-2 mt-2 pt-2 border-t border-warm-200">
+                <button @click.stop="toggleChat(deal)" class="btn btn-sm" :class="chatDeal?.id === deal.id ? 'btn-primary' : 'btn-ghost'"
+                  x-text="chatDeal?.id === deal.id ? 'Hide Chat' : 'Chat'"></button>
+                <button @click.stop="openFullChat(deal)" class="btn btn-sm btn-ghost">Open in window</button>
+                <span class="text-xs text-ink-300 leading-6" x-text="'#' + deal.id?.slice(0,8)"></span>
+              </div>
+
+              <!-- Inline chat -->
+              <template x-if="chatDeal?.id === deal.id">
+                <div class="mt-3 border border-warm-200 rounded-lg overflow-hidden">
+                  <div class="max-h-40 overflow-y-auto px-3 py-2 space-y-1 bg-warm-50">
+                    <template x-if="tradeChat.length === 0">
+                      <p class="text-xs text-ink-300 text-center py-2">No messages</p>
+                    </template>
+                    <template x-for="h in tradeChat" :key="h.ts">
+                      <div class="text-xs" :class="h.dir === 'out' ? 'text-right' : ''">
+                        <span :class="h.dir === 'out' ? 'bg-green-100 text-green-700' : 'bg-brand-50 text-brand-700'"
+                          class="inline-block px-2 py-1 rounded max-w-[80%]" x-text="h.text?.slice(0, 200)"></span>
+                      </div>
+                    </template>
+                  </div>
+                  <div class="flex border-t border-warm-200">
+                    <input type="text" x-model="chatMsg" @keydown.enter="sendChat(deal)"
+                      placeholder="Type message..."
+                      class="flex-1 bg-white text-sm text-ink-600 px-3 py-2 focus:outline-none" />
+                    <button @click="sendChat(deal)" :disabled="chatSending || !chatMsg.trim()" class="btn btn-primary rounded-none"
+                      x-text="chatSending ? '...' : 'Send'"></button>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+
+          <template x-if="activeDeals.length === 0">
+            <div class="px-4 py-8 text-center text-ink-300 text-sm">No active trades</div>
+          </template>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function tradeOtc() {
+  return {
+    showPublishForm: false,
+    publishForm: { side: 'sell', amount: '', price: '', token: 'KAS', wantToken: 'USDT', chain: 'bnb', agentId: '' },
+    publishingOrder: false,
+    acceptingOrder: null,
+    acceptAgentId: '',
+    acceptSending: false,
+    expandedOrderId: null,
+
+    async init() { await this.$root.loadMarketData(); },
+
+    openPublish(side) {
+      this.publishForm.side = side;
+      this.publishForm.price = this.$root.portfolio?.market?.price || '';
+      this.showPublishForm = true;
+    },
+
+    async publishIntent() {
+      if (!this.publishForm.amount || !this.publishForm.agentId) return;
+      const agName = this.$root.agents.find(a => a.id === this.publishForm.agentId)?.name || '?';
+      if (!confirm('Broadcast ' + this.publishForm.side.toUpperCase() + ' ' + this.publishForm.amount + ' KAS via ' + agName + '?')) return;
+      this.publishingOrder = true;
+      try {
+        const f = this.publishForm;
+        const payload = JSON.stringify({
+          type: f.side === 'sell' ? 'kanet_sell_v1' : 'kanet_buy_v1',
+          amount: parseFloat(f.amount), token: f.token,
+          [f.side === 'sell' ? 'want' : 'pay']: f.wantToken, chains: [f.chain],
+        });
+        await fetch('/api/chat/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relayId: f.agentId, channel: 'otc-market', message: payload }) });
+        await fetch('/api/trade/mm-orders/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relay_node_id: f.agentId, side: f.side, kas_amount: parseFloat(f.amount), price: f.price ? parseFloat(f.price) : undefined, chain: f.chain }) });
+        this.showPublishForm = false;
+        this.publishForm.amount = ''; this.publishForm.price = '';
+        await this.$root.loadMarketData();
+      } catch (err) { alert('Failed: ' + err.message); }
+      finally { this.publishingOrder = false; }
+    },
+
+    startAccept(broadcast) { this.acceptingOrder = broadcast; this.acceptAgentId = ''; this.acceptSending = false; },
+    cancelAccept() { this.acceptingOrder = null; this.acceptAgentId = ''; },
+
+    async sendAcceptInvite() {
+      if (!this.acceptAgentId || !this.acceptingOrder) return;
+      this.acceptSending = true;
+      try {
+        const b = this.acceptingOrder;
+        let orderInfo = b.content; try { orderInfo = JSON.parse(b.content); } catch {}
+        const peerAddr = b.sender_address;
+        const amount = typeof orderInfo === 'object' ? orderInfo.amount : 0;
+        const chain = typeof orderInfo === 'object' ? (orderInfo.chains?.[0] || 'bnb') : 'bnb';
+        const counterSide = (orderInfo?.type === 'kanet_sell_v1') ? 'buy' : 'sell';
+        const orderRes = await fetch('/api/trade/mm-orders/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relay_node_id: this.acceptAgentId, side: counterSide, kas_amount: amount, chain, peer_address: peerAddr }) }).then(r => r.json());
+        if (orderRes.ok && orderRes.id) {
+          const sellerOrders = (this.$root.marketOrders || []).filter(o => o.side !== counterSide && o.kas_amount === amount && ['published'].includes(o.status));
+          if (sellerOrders.length > 0) {
+            await fetch('/api/trade/mm-orders/' + sellerOrders[0].id + '/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'accept', counterparty_order_id: orderRes.id }) }).catch(() => {});
+            await fetch('/api/trade/mm-orders/' + orderRes.id + '/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'accept', counterparty_order_id: sellerOrders[0].id, customer_address: peerAddr }) }).catch(() => {});
+          }
+        }
+        const acceptMsg = JSON.stringify({ type: 'kanet_accept_v1', ref_type: orderInfo?.type, amount, token: orderInfo?.token || 'KAS', chain, order_id: orderRes?.id || null });
+        await fetch('/api/relay/' + this.acceptAgentId + '/send-command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'send_message', target: peerAddr, message: acceptMsg }) });
+        this.acceptingOrder = null; this.acceptAgentId = '';
+        await this.$root.loadMarketData();
+        alert('Order accepted! Manage it in the Trade Room.');
+      } catch (err) { alert('Accept failed: ' + (err?.message || err)); }
+      finally { this.acceptSending = false; }
+    },
+  };
+}
+
+function tradeRoom() {
+  return {
+    activeDeals: [],
+    chatDeal: null,
+    chatMsg: '',
+    chatSending: false,
+    tradeChat: [],
+    actionLoading: null,
+
+    async init() {
+      await this.loadDeals();
+      setInterval(() => this.loadDeals(), 15000);
+    },
+
+    async loadDeals() {
+      try {
+        const orders = await fetch('/api/trade/mm-orders?limit=30').then(r => r.json());
+        const all = Array.isArray(orders) ? orders : [];
+        const active = all.filter(o => !['completed','cancelled','expired','resolved'].includes(o.status));
+        const done = all.filter(o => ['completed','cancelled','expired','resolved'].includes(o.status)).slice(0, 5);
+        try {
+          const pendingExecs = await fetch('/api/trade/pending-approvals').then(r => r.json());
+          if (Array.isArray(pendingExecs)) {
+            for (const deal of [...active, ...done]) { deal._pendingExec = pendingExecs.find(p => p.order_id === deal.id) || null; }
+          }
+        } catch {}
+        this.activeDeals = [...active, ...done];
+      } catch {}
+    },
+
+    async sendKas(deal) {
+      const target = deal.customer_address || deal.peer_address;
+      if (!target) { alert('Peer address unknown'); return; }
+      if (!confirm('Confirm send ' + deal.kas_amount + ' KAS?')) return;
+      this.actionLoading = deal.id;
+      try {
+        const res = await fetch('/api/trade/mm-orders/' + deal.id + '/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'send_kas', customer_address: target }) });
+        const data = await res.json();
+        if (data.ok) { deal.status = 'completed'; alert('KAS sent! TX: ' + (data.txId || 'submitted')); await this.loadDeals(); }
+        else alert('Send failed: ' + (data.error || ''));
+      } catch (e) { alert(e.message); }
+      finally { this.actionLoading = null; }
+    },
+
+    async toggleChat(deal) {
+      if (this.chatDeal?.id === deal.id) { this.chatDeal = null; return; }
+      this.chatDeal = deal; this.tradeChat = [];
+      const peer = deal.customer_address || deal.peer_address || deal.mm_receive_address;
+      if (!peer) return;
+      try {
+        const myAddr = deal.agent_address || '';
+        const r = await fetch('/api/agent/peer-context?my_address=' + encodeURIComponent(myAddr) + '&peer_address=' + encodeURIComponent(peer) + '&limit=10').then(r => r.json());
+        this.tradeChat = (r.chatHistory || []).slice(-8);
+      } catch {}
+    },
+
+    async sendChat(deal) {
+      if (!this.chatMsg.trim() || this.chatSending) return;
+      this.chatSending = true;
+      const target = deal.customer_address || deal.peer_address || deal.mm_receive_address;
+      if (!target) { alert('Peer address unknown'); this.chatSending = false; return; }
+      try {
+        await fetch('/api/relay/' + deal.relay_node_id + '/send-command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'send_message', target: target, message: this.chatMsg.trim() }) });
+        this.tradeChat.push({ dir: 'out', text: this.chatMsg.trim(), ts: new Date().toISOString() });
+        this.chatMsg = '';
+      } catch (e) { alert(e.message); }
+      finally { this.chatSending = false; }
+    },
+
+    openFullChat(deal) {
+      const peer = deal.customer_address || deal.mm_receive_address;
+      if (!peer) return;
+      fetch('/api/conversations/find?peer=' + encodeURIComponent(peer))
+        .then(r => r.json()).then(d => {
+          if (d.convId) window.open('/conversations/' + d.convId, '_blank');
+          else window.open('/conversations?search=' + peer.slice(-12), '_blank');
+        });
+    },
+  };
+}
+</script>

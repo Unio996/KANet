@@ -1,0 +1,79 @@
+<!-- Market Orders Panel -->
+
+<!-- Header: Agent selector + mode toggle -->
+<div class="px-3 py-3 border-b border-warm-200">
+  <div class="flex items-center gap-2 mb-2">
+    <select x-model="agentId" @change="switchAgent()"
+      class="flex-1 bg-warm-50 border border-warm-300 text-sm rounded-lg px-2 py-1.5 text-ink-600 focus:border-brand-400 focus:outline-none">
+      <% it.relayNodes.forEach(function(r) { %>
+      <option value="<%= r.id %>"><%= r.name %></option>
+      <% }) %>
+    </select>
+    <div class="flex items-center gap-0.5">
+      <div class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
+      <span class="text-[10px] text-ink-300">LIVE</span>
+    </div>
+  </div>
+  <!-- Mode toggle -->
+  <div class="flex rounded-lg overflow-hidden border border-warm-300">
+    <template x-for="m in [{id:'manual',l:'手动'},{id:'approval',l:'审批'},{id:'auto',l:'自动'}]" :key="m.id">
+      <button @click="setMode(m.id)" :class="mode===m.id ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:text-ink-600 hover:bg-warm-50'"
+        class="flex-1 py-1 text-[11px] transition-colors border-r border-warm-300 last:border-0" x-text="m.l"></button>
+    </template>
+  </div>
+</div>
+
+<!-- Tabs: Market / History -->
+<div class="tab-bar">
+  <button @click="tab='market';loadOrders()" :class="tab==='market' ? 'active' : ''" class="tab-item flex-1">
+    市场 <span class="text-[10px]" x-text="ordersTotal ? '('+ordersTotal+')' : ''"></span>
+  </button>
+  <button @click="tab='history';loadOrders()" :class="tab==='history' ? 'active' : ''" class="tab-item flex-1">
+    历史
+  </button>
+</div>
+
+<!-- Order List -->
+<div class="flex-1 overflow-y-auto p-2 space-y-1">
+  <template x-for="o in displayOrders" :key="o.id">
+    <div @click="selectDeal(o)"
+      :class="deal?.id === o.id ? 'border-brand-300 bg-brand-50' : 'border-transparent hover:bg-warm-50'"
+      class="rounded-lg px-3 py-2.5 border cursor-pointer transition-all">
+      <!-- Row 1: side badge + amount + price -->
+      <div class="flex items-center justify-between mb-1">
+        <div class="flex items-center gap-2">
+          <span :class="o.side==='buy' ? 'badge-info' : 'badge-error'" class="badge text-[10px] font-semibold"
+            x-text="o.side==='buy' ? 'BUY' : 'SELL'"></span>
+          <span class="text-sm font-semibold text-ink-700" x-text="o.kas_amount + ' KAS'"></span>
+        </div>
+        <span class="text-xs font-medium" :class="o.side==='buy' ? 'text-brand-600' : 'text-red-500'" x-text="'$'+o.price"></span>
+      </div>
+      <!-- Row 2: chain + status -->
+      <div class="flex items-center justify-between text-[11px] text-ink-400">
+        <span x-text="KANet.chainName(o.chain || 'bnb')"></span>
+        <span :class="'badge badge-' + KANet.statusColor(o.status)" x-text="KANet.statusLabel(o.status)"></span>
+      </div>
+      <!-- Row 3: peer -->
+      <div class="text-[10px] text-ink-300 mt-0.5" x-text="o._peerName || KANet.shortAddr(o.peer_address || o.agent_address || '')"></div>
+    </div>
+  </template>
+
+  <!-- Empty -->
+  <div x-show="displayOrders.length === 0 && !ordersLoading" class="py-16 text-center text-ink-300 text-xs">
+    暂无订单
+  </div>
+
+  <!-- Loading -->
+  <div x-show="ordersLoading" class="py-8 text-center text-ink-300 text-xs">加载中...</div>
+
+  <!-- Load more -->
+  <button x-show="ordersHasMore && !ordersLoading" @click="loadMore()"
+    class="w-full py-2 text-xs text-brand-500 hover:text-brand-700 transition-colors">
+    加载更多 (<span x-text="orders.length"></span>/<span x-text="ordersTotal"></span>)
+  </button>
+</div>
+
+<!-- Publish button -->
+<div class="p-2 border-t border-warm-200">
+  <button @click="showPublish=true" class="btn btn-primary w-full">+ 发布订单</button>
+</div>

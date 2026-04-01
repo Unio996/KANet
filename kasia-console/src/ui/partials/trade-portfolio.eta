@@ -1,0 +1,607 @@
+<!-- trade-portfolio partial — Portfolio overview, wallets, baselines, chain intel, triggers -->
+<div x-data="tradePortfolio()" x-init="init()">
+
+  <!-- ═══ Portfolio Summary Cards ═══ -->
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+    <div class="card">
+      <div class="text-xs text-ink-400 uppercase tracking-wider">Total Value</div>
+      <div class="text-2xl font-bold text-ink-700 mt-1" x-text="'$' + $root.fmtNum($root.portfolio?.totalUsd)"></div>
+    </div>
+    <div class="card">
+      <div class="text-xs text-ink-400 uppercase tracking-wider">KAS</div>
+      <div class="text-2xl font-bold text-brand-600 mt-1" x-text="$root.fmtBig($root.portfolio?.balances?.find(b => b.asset === 'KAS')?.free)"></div>
+      <div class="text-xs text-ink-300 mt-0.5" x-text="'~ $' + $root.fmtNum($root.portfolio?.kasValue)"></div>
+    </div>
+    <div class="card">
+      <div class="text-xs text-ink-400 uppercase tracking-wider">USDT</div>
+      <div class="text-2xl font-bold text-ink-700 mt-1" x-text="$root.fmtNum($root.portfolio?.balances?.find(b => b.asset === 'USDT')?.free || 0)"></div>
+      <div class="text-xs text-ink-300 mt-0.5">Available</div>
+    </div>
+    <div class="card">
+      <div class="text-xs text-ink-400 uppercase tracking-wider">KAS Price</div>
+      <div class="text-2xl font-bold text-ink-700 mt-1" x-text="'$' + $root.fmtNum($root.portfolio?.market?.price, 5)"></div>
+      <div class="text-xs mt-0.5" :class="($root.portfolio?.market?.change24h || 0) >= 0 ? 'price-up' : 'price-down'"
+        x-text="(($root.portfolio?.market?.change24h || 0) >= 0 ? '+' : '') + $root.fmtNum($root.portfolio?.market?.change24h) + '% | Vol $' + $root.fmtBig($root.portfolio?.market?.volume24h)"></div>
+    </div>
+  </div>
+
+  <!-- ═══ Agent Wallets (Multi-chain) ═══ -->
+  <div class="card mb-5">
+    <div class="flex items-center justify-between mb-3">
+      <span class="text-sm font-medium text-ink-700">Agent Wallets</span>
+      <button @click="showWallets = !showWallets" class="btn btn-sm btn-ghost" x-text="showWallets ? 'Hide' : 'Manage'"></button>
+    </div>
+
+    <!-- Asset summary (always visible) -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+      <template x-for="a in agentAccounts" :key="a.id">
+        <div class="bg-warm-50 rounded-lg p-3">
+          <div class="text-sm font-medium text-ink-600 mb-1" x-text="a.name"></div>
+          <div class="text-xs font-mono text-ink-500" x-text="(a.kas ?? 0).toFixed(2) + ' KAS'"></div>
+          <template x-for="w in (a.chainWallets || [])" :key="w.id">
+            <div class="text-xs font-mono text-ink-400">
+              <span class="uppercase" x-text="w.chain"></span>
+              <span x-text="(w.balance ?? 0) + ' USDT'"></span>
+            </div>
+          </template>
+        </div>
+      </template>
+    </div>
+
+    <!-- Fund locks -->
+    <template x-if="Object.keys(fundLocks).length > 0">
+      <div class="bg-warm-50 border border-warm-200 rounded-lg px-4 py-2 text-xs flex items-center gap-3 mb-3">
+        <span class="badge badge-warning">Locked</span>
+        <template x-for="[asset, amt] in Object.entries(fundLocks)" :key="asset">
+          <span class="font-mono text-ink-500" x-text="amt.toFixed(2) + ' ' + asset.toUpperCase()"></span>
+        </template>
+      </div>
+    </template>
+
+    <!-- Totals -->
+    <div class="bg-warm-50 rounded-lg px-4 py-2 text-xs flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <span class="text-ink-400">Total Assets</span>
+        <div class="flex bg-warm-200 rounded p-0.5">
+          <button @click="totalUnit = 'kas'" :class="totalUnit === 'kas' ? 'bg-white text-ink-700 shadow-sm' : 'text-ink-400'" class="px-1.5 py-0.5 text-xs rounded">KAS</button>
+          <button @click="totalUnit = 'usdt'" :class="totalUnit === 'usdt' ? 'bg-white text-ink-700 shadow-sm' : 'text-ink-400'" class="px-1.5 py-0.5 text-xs rounded">USDT</button>
+        </div>
+      </div>
+      <span x-show="totalUnit === 'kas'" class="font-mono font-medium text-ink-700"
+        x-text="(() => { const k = agentAccounts.reduce((s,a) => s+(a.kas||0), 0); const u = agentAccounts.reduce((s,a) => s+(a.chainWallets||[]).reduce((ss,w) => ss+(w.balance||0), 0), 0); return (k + (kasPrice > 0 ? u/kasPrice : 0)).toFixed(2) + ' KAS'; })()"></span>
+      <span x-show="totalUnit === 'usdt'" class="font-mono font-medium text-ink-700"
+        x-text="(() => { const k = agentAccounts.reduce((s,a) => s+(a.kas||0), 0); const u = agentAccounts.reduce((s,a) => s+(a.chainWallets||[]).reduce((ss,w) => ss+(w.balance||0), 0), 0); return '$' + (k*kasPrice + u).toFixed(2); })()"></span>
+    </div>
+
+    <!-- Wallet management (expanded) -->
+    <div x-show="showWallets" x-transition class="mt-4 space-y-3">
+      <template x-for="a in agentAccounts" :key="a.id">
+        <div class="bg-warm-50 rounded-lg p-4 border border-warm-200">
+          <div class="text-sm font-medium text-ink-700 mb-3" x-text="a.name"></div>
+
+          <!-- KAS wallet (identity, cannot delete) -->
+          <div class="flex items-center justify-between py-2 border-b border-warm-200">
+            <div class="flex items-center gap-2 flex-1 min-w-0">
+              <span class="badge badge-info">KAS</span>
+              <span class="addr addr-short" x-text="a.wallets?.kaspa?.address"></span>
+              <span class="text-xs font-mono text-ink-600 font-medium" x-text="(a.kas ?? 0).toFixed(3) + ' KAS'"></span>
+            </div>
+            <div class="flex items-center gap-1">
+              <button @click="startWithdraw(a.id, { id: 'kas_' + a.id, chain: 'kas', address: a.wallets?.kaspa?.address })" class="btn btn-sm btn-ghost">Withdraw</button>
+              <button @click="copyAddr(a.wallets?.kaspa?.address)" class="btn btn-sm btn-ghost">Copy</button>
+            </div>
+          </div>
+
+          <!-- Withdraw form for KAS -->
+          <template x-if="withdrawing && withdrawing.wallet.chain === 'kas' && withdrawing.agentId === a.id">
+            <div class="py-2 px-3 bg-brand-50 border border-brand-200 rounded-lg mt-2">
+              <div class="flex items-center gap-2 text-xs">
+                <input type="text" x-model="withdrawing.toAddress" placeholder="Target Kaspa address"
+                  class="flex-1 bg-white text-ink-600 text-xs rounded-lg px-2 py-1.5 border border-warm-300" />
+                <input type="text" x-model="withdrawing.amount" placeholder="Amount"
+                  class="w-24 bg-white text-ink-600 text-xs rounded-lg px-2 py-1.5 border border-warm-300" />
+                <button @click="executeWithdraw()" class="btn btn-sm btn-primary">Send</button>
+                <button @click="cancelWithdraw()" class="btn btn-sm btn-ghost">Cancel</button>
+              </div>
+            </div>
+          </template>
+
+          <!-- Chain wallets -->
+          <template x-for="w in (a.chainWallets || [])" :key="w.id">
+            <div>
+              <div class="flex items-center justify-between py-2 border-b border-warm-200">
+                <div class="flex items-center gap-2 flex-1 min-w-0">
+                  <span class="badge badge-neutral uppercase" x-text="w.chain"></span>
+                  <span class="addr addr-short" x-text="w.address"></span>
+                  <span class="text-xs font-mono text-ink-500" x-text="(w.balance ?? 0) + ' USDT'"></span>
+                </div>
+                <div class="flex items-center gap-1">
+                  <button @click="copyAddr(w.address)" class="btn btn-sm btn-ghost">Copy</button>
+                  <button @click="startWithdraw(a.id, w)" class="btn btn-sm btn-ghost">Withdraw</button>
+                  <button @click="deleteWallet(a.id, w.id)" class="btn btn-sm btn-danger">Del</button>
+                </div>
+              </div>
+              <!-- Withdraw form for chain wallet -->
+              <template x-if="withdrawing && withdrawing.wallet.id === w.id">
+                <div class="py-2 px-3 bg-brand-50 border border-brand-200 rounded-lg mt-1">
+                  <div class="flex items-center gap-2 text-xs">
+                    <input type="text" x-model="withdrawing.toAddress" placeholder="Target address"
+                      class="flex-1 bg-white text-ink-600 text-xs rounded-lg px-2 py-1.5 border border-warm-300" />
+                    <input type="text" x-model="withdrawing.amount" placeholder="Amount"
+                      class="w-24 bg-white text-ink-600 text-xs rounded-lg px-2 py-1.5 border border-warm-300" />
+                    <button @click="executeWithdraw()" class="btn btn-sm btn-primary">Send</button>
+                    <button @click="cancelWithdraw()" class="btn btn-sm btn-ghost">Cancel</button>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+
+          <!-- Add wallet -->
+          <div class="pt-2" x-data="{ showAdd: false, addChain: 'bnb' }">
+            <button x-show="!showAdd" @click="showAdd = true" class="btn btn-sm btn-secondary">+ Add Wallet</button>
+            <div x-show="showAdd" class="flex items-center gap-2">
+              <select x-model="addChain" class="rounded-lg border border-warm-300 px-2 py-1 text-xs bg-white text-ink-600">
+                <option value="bnb">BNB Chain</option>
+                <option value="eth">Ethereum</option>
+                <option value="sol">Solana</option>
+                <option value="tron">TRON</option>
+              </select>
+              <button @click="createWallet(a.id, addChain); showAdd = false" class="btn btn-sm btn-primary">Create</button>
+              <button @click="importWallet(a.id, addChain); showAdd = false" class="btn btn-sm btn-secondary">Import</button>
+              <button @click="showAdd = false" class="btn btn-sm btn-ghost">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- ═══ Performance Baselines ═══ -->
+  <div class="card mb-5">
+    <div class="flex items-center justify-between mb-3">
+      <span class="text-sm font-medium text-ink-700">Performance Baseline</span>
+      <button @click="createBaseline()" :disabled="baselineLoading" class="btn btn-sm btn-secondary"
+        x-text="baselineLoading ? '...' : baselines.length ? 'Reset' : '+ Set Baseline'"></button>
+    </div>
+    <div x-show="baselines.length === 0" class="text-xs text-ink-300 text-center py-4">
+      No baseline set. Click "Set Baseline" to start tracking performance.
+    </div>
+    <div class="space-y-3">
+      <template x-for="b in baselines" :key="b.id">
+        <div class="bg-warm-50 rounded-lg p-3">
+          <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center gap-2">
+              <div class="status-dot" :class="b.risk?.status === 'OK' ? 'green' : b.risk?.status === 'WARNING' ? 'yellow' : 'red'"></div>
+              <span class="text-sm font-medium text-ink-700" x-text="b.agent"></span>
+              <span class="badge" :class="b.risk?.status === 'OK' ? 'badge-success' : b.risk?.status === 'WARNING' ? 'badge-warning' : 'badge-error'"
+                x-text="b.risk?.status"></span>
+            </div>
+            <button @click="settleBaseline(b.id)" class="btn btn-sm btn-ghost">Settle</button>
+          </div>
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-xs text-ink-400">Virtual Account</div>
+              <div class="text-sm font-mono text-ink-600" x-text="(b.current?.kas > 0 ? b.current.kas.toLocaleString() + ' KAS' : '') + (b.current?.kas > 0 && b.current?.usdt > 0 ? ' + ' : '') + (b.current?.usdt > 0 ? '$' + b.current.usdt.toFixed(2) : '')"></div>
+              <div class="text-xs text-ink-300" x-text="'~ ' + (b.current?.equivalentKas?.toLocaleString() || '--') + ' KAS eq'"></div>
+            </div>
+            <div class="text-right">
+              <div class="text-lg font-bold" :class="(b.pnl?.kas || 0) >= 0 ? 'price-up' : 'price-down'"
+                x-text="b.pnl?.kas != null ? ((b.pnl.kas >= 0 ? '+' : '') + b.pnl.kas.toLocaleString() + ' KAS') : '--'"></div>
+              <div class="text-xs font-mono" :class="(b.pnl?.pct || 0) >= 0 ? 'price-up' : 'price-down'"
+                x-text="b.pnl?.pct != null ? ((b.pnl.pct >= 0 ? '+' : '') + b.pnl.pct + '%') : ''"></div>
+            </div>
+          </div>
+          <div class="flex items-center justify-between mt-2 text-xs text-ink-300">
+            <span x-text="'Base: ' + b.baseline?.equivalentKas?.toLocaleString() + ' KAS @ $' + b.baseline?.kasPrice?.toFixed(5)"></span>
+            <span x-text="new Date(b.baseline?.createdAt).toLocaleString()"></span>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- ═══ Whale Alerts + Chain Intel ═══ -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+    <!-- Whale Alerts -->
+    <div class="card">
+      <div class="flex items-center justify-between mb-3">
+        <span class="text-sm font-medium text-ink-700">Whale Alerts</span>
+        <span class="text-xs text-ink-300" x-text="whaleAlerts.length > 0 ? whaleAlerts.length + ' recent' : 'monitoring...'"></span>
+      </div>
+      <div x-show="whaleAlerts.length > 0" class="space-y-1.5 max-h-48 overflow-y-auto">
+        <template x-for="alert in whaleAlerts" :key="alert.timestamp">
+          <div class="flex items-center justify-between text-xs px-2 py-1.5 rounded-lg bg-warm-50">
+            <div class="flex items-center gap-2">
+              <div class="status-dot" :class="alert.direction === 'INFLOW' ? 'green' : alert.direction === 'OUTFLOW' ? 'red' : 'yellow'"></div>
+              <span class="font-medium" :class="alert.direction === 'INFLOW' ? 'price-up' : alert.direction === 'OUTFLOW' ? 'price-down' : 'text-ink-500'"
+                x-text="alert.direction"></span>
+              <span class="font-mono text-ink-700" x-text="$root.fmtBig(alert.amountKas) + ' KAS'"></span>
+            </div>
+            <div class="flex items-center gap-2 text-ink-300">
+              <span x-text="alert.label || alert.address?.slice(-8)"></span>
+              <span x-text="alert.timestamp ? new Date(alert.timestamp).toLocaleTimeString() : ''"></span>
+            </div>
+          </div>
+        </template>
+      </div>
+      <div x-show="whaleAlerts.length === 0" class="text-xs text-ink-300 text-center py-6">
+        No large transfers detected. Threshold: 100K KAS.
+      </div>
+    </div>
+
+    <!-- Chain Fundamentals -->
+    <div class="card">
+      <div class="text-sm font-medium text-ink-700 mb-3">Kaspa Blockchain</div>
+      <template x-if="fundamentals?.available">
+        <div class="space-y-3">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <div class="text-xs text-ink-400">Hashrate</div>
+              <div class="text-lg font-bold text-brand-600" x-text="$root.fmtExp(fundamentals.latest.hashrate) + ' H/s'"></div>
+              <div class="text-xs" :class="fundamentals.trend1h?.hashrateChange?.startsWith('-') ? 'price-down' : 'price-up'"
+                x-text="fundamentals.trend1h?.hashrateChange ? '1h: ' + fundamentals.trend1h.hashrateChange : ''"></div>
+            </div>
+            <div>
+              <div class="text-xs text-ink-400">Difficulty</div>
+              <div class="text-lg font-bold text-ink-600" x-text="$root.fmtExp(fundamentals.latest.difficulty)"></div>
+            </div>
+            <div>
+              <div class="text-xs text-ink-400">Circulating</div>
+              <div class="text-lg font-bold text-ink-700" x-text="fundamentals.latest.circulatingSupply ? (fundamentals.latest.circulatingSupply / 1e9).toFixed(2) + 'B' : '--'"></div>
+            </div>
+            <div>
+              <div class="text-xs text-ink-400">DAG Tips</div>
+              <div class="text-lg font-bold text-ink-700" x-text="fundamentals.latest.tipsCount || '--'"></div>
+            </div>
+          </div>
+          <!-- Supply bar -->
+          <div x-show="fundamentals.latest.circulatingSupply && fundamentals.latest.maxSupply">
+            <div class="flex justify-between text-xs text-ink-400 mb-1">
+              <span>Supply Mined</span>
+              <span x-text="(fundamentals.latest.circulatingSupply / fundamentals.latest.maxSupply * 100).toFixed(1) + '%'"></span>
+            </div>
+            <div class="w-full h-2 bg-warm-200 rounded-full overflow-hidden">
+              <div class="h-full bg-brand-500 rounded-full transition-all"
+                :style="'width:' + (fundamentals.latest.circulatingSupply / fundamentals.latest.maxSupply * 100) + '%'"></div>
+            </div>
+          </div>
+        </div>
+      </template>
+      <div x-show="!fundamentals?.available" class="text-xs text-ink-300 text-center py-8">
+        <span x-text="fundamentals?.message || 'Loading chain data...'"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Chain Intelligence (KANet) ═══ -->
+  <div x-show="chainData" class="card mb-5">
+    <div class="flex items-center justify-between mb-3">
+      <span class="text-sm font-medium text-ink-700">Chain Intelligence (KANet)</span>
+      <span class="text-xs text-ink-300">Scout-scanned</span>
+    </div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+      <div>
+        <div class="text-xs text-ink-400">Activity (24h)</div>
+        <div class="text-lg font-bold text-ink-700" x-text="chainData?.activity?.last24h?.toLocaleString() || '--'"></div>
+        <div class="text-xs" :class="(chainData?.activity?.weekTrend || 0) >= 0 ? 'price-up' : 'price-down'"
+          x-text="chainData?.activity?.weekTrend != null ? 'WoW ' + (chainData.activity.weekTrend >= 0 ? '+' : '') + chainData.activity.weekTrend + '%' : ''"></div>
+      </div>
+      <div>
+        <div class="text-xs text-ink-400">Active Addresses</div>
+        <div class="text-lg font-bold text-ink-700" x-text="chainData?.addresses?.active || '--'"></div>
+        <div class="text-xs price-up" x-text="chainData?.addresses?.new24h > 0 ? '+' + chainData.addresses.new24h + ' new (24h)' : ''"></div>
+      </div>
+      <div>
+        <div class="text-xs text-ink-400">Comms / Handshakes</div>
+        <div class="text-lg font-bold text-ink-700" x-text="(chainData?.activity?.protocols?.comm || 0).toLocaleString()"></div>
+        <div class="text-xs text-ink-300" x-text="'HS: ' + (chainData?.activity?.protocols?.handshake || 0)"></div>
+      </div>
+      <div>
+        <div class="text-xs text-ink-400">Agent Cards</div>
+        <div class="text-lg font-bold text-ink-700" x-text="chainData?.ecosystem?.agentCards || 0"></div>
+        <div class="text-xs text-ink-300" x-text="'Broadcasts: ' + (chainData?.ecosystem?.broadcasts || 0)"></div>
+      </div>
+    </div>
+    <div x-show="chainData?.topAddresses?.length > 0">
+      <div class="text-xs text-ink-400 mb-1">Top Addresses</div>
+      <div class="flex flex-wrap gap-2">
+        <template x-for="addr in (chainData?.topAddresses || []).slice(0, 5)" :key="addr.address">
+          <span class="text-xs px-2 py-1 rounded-lg bg-warm-100 text-ink-600">
+            <span x-text="addr.name || addr.address.slice(-8)"></span>
+            <span class="text-ink-300 ml-1" x-text="addr.interactions"></span>
+          </span>
+        </template>
+      </div>
+    </div>
+    <div x-show="chainData?.hourlyActivity?.length > 0" class="mt-3">
+      <div class="text-xs text-ink-400 mb-1">24h Activity Pattern</div>
+      <div class="flex items-end gap-px h-8">
+        <template x-for="h in chainData?.hourlyActivity || []" :key="h.hour">
+          <div class="flex-1 rounded-t bg-brand-400 opacity-60 hover:opacity-100 transition-opacity"
+            :style="'height:' + Math.max(h.n / Math.max(...(chainData?.hourlyActivity || []).map(x=>x.n)) * 100, 4) + '%'"
+            :title="h.hour + ':00 — ' + h.n + ' txs'"></div>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Agent Triggers ═══ -->
+  <div x-show="triggers" class="card mb-5">
+    <div class="text-sm font-medium text-ink-700 mb-3">Agent Activation</div>
+    <div class="grid grid-cols-3 gap-4 mb-4">
+      <!-- Proactive -->
+      <div class="bg-warm-50 rounded-lg p-3">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-medium text-ink-600">Proactive</span>
+          <label class="flex items-center cursor-pointer">
+            <div class="relative">
+              <input type="checkbox" :checked="triggers?.proactive?.enabled" @change="updateTrigger('proactiveEnabled', $event.target.checked)" class="sr-only" />
+              <div class="w-8 h-4 rounded-full transition-colors" :class="triggers?.proactive?.enabled ? 'bg-green-500' : 'bg-warm-300'"></div>
+              <div class="absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform" :class="triggers?.proactive?.enabled ? 'translate-x-4' : ''"></div>
+            </div>
+          </label>
+        </div>
+        <div class="text-xs text-ink-300" x-text="'Every ' + (triggers?.proactive?.intervalMin || 60) + ' min'"></div>
+        <button @click="fireTrigger('proactive')" :disabled="triggerRunning === 'proactive'" class="btn btn-sm btn-secondary mt-2 w-full">
+          <span x-text="triggerRunning === 'proactive' ? 'Running...' : 'Run Now'"></span>
+        </button>
+      </div>
+      <!-- Reflection -->
+      <div class="bg-warm-50 rounded-lg p-3">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-medium text-ink-600">Reflection</span>
+          <label class="flex items-center cursor-pointer">
+            <div class="relative">
+              <input type="checkbox" :checked="triggers?.reflection?.enabled" @change="updateTrigger('reflectionEnabled', $event.target.checked)" class="sr-only" />
+              <div class="w-8 h-4 rounded-full transition-colors" :class="triggers?.reflection?.enabled ? 'bg-green-500' : 'bg-warm-300'"></div>
+              <div class="absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform" :class="triggers?.reflection?.enabled ? 'translate-x-4' : ''"></div>
+            </div>
+          </label>
+        </div>
+        <div class="text-xs text-ink-300" x-text="'Every ' + (triggers?.reflection?.intervalHours || 24) + 'h'"></div>
+        <button @click="fireTrigger('reflection')" :disabled="triggerRunning === 'reflection'" class="btn btn-sm btn-secondary mt-2 w-full">
+          <span x-text="triggerRunning === 'reflection' ? 'Running...' : 'Run Now'"></span>
+        </button>
+      </div>
+      <!-- Price Alert -->
+      <div class="bg-warm-50 rounded-lg p-3">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-medium text-ink-600">Price Alert</span>
+          <label class="flex items-center cursor-pointer">
+            <div class="relative">
+              <input type="checkbox" :checked="triggers?.priceAlert?.enabled" @change="updateTrigger('priceAlertEnabled', $event.target.checked)" class="sr-only" />
+              <div class="w-8 h-4 rounded-full transition-colors" :class="triggers?.priceAlert?.enabled ? 'bg-green-500' : 'bg-warm-300'"></div>
+              <div class="absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform" :class="triggers?.priceAlert?.enabled ? 'translate-x-4' : ''"></div>
+            </div>
+          </label>
+        </div>
+        <div class="flex items-center gap-1 mt-1">
+          <span class="text-xs text-ink-400">+/-</span>
+          <input type="number" :value="triggers?.priceAlert?.thresholdPct || 3" step="0.5" min="0.5" max="20"
+            @change="updateTrigger('priceThresholdPct', $event.target.value)"
+            class="w-14 bg-white text-ink-600 text-xs rounded-lg px-1.5 py-0.5 border border-warm-300" />
+          <span class="text-xs text-ink-400">%</span>
+        </div>
+        <template x-if="triggers?.priceAlert?.baselinePrice">
+          <div class="text-xs mt-1.5 space-y-0.5">
+            <div class="flex justify-between">
+              <span class="price-down">Sell</span>
+              <span class="price-down font-mono" x-text="'$' + (triggers.priceAlert.baselinePrice * (1 + (triggers.priceAlert.thresholdPct || 3) / 100)).toFixed(5)"></span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-ink-400">Base</span>
+              <span class="text-ink-500 font-mono" x-text="'$' + triggers.priceAlert.baselinePrice.toFixed(5)"></span>
+            </div>
+            <div class="flex justify-between">
+              <span class="price-up">Buy</span>
+              <span class="price-up font-mono" x-text="'$' + (triggers.priceAlert.baselinePrice * (1 - (triggers.priceAlert.thresholdPct || 3) / 100)).toFixed(5)"></span>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+    <!-- Agent status rows -->
+    <div class="space-y-1">
+      <template x-for="ag in (triggers?.agents || [])" :key="ag.relayId">
+        <div class="flex items-center justify-between text-xs px-2 py-1.5 rounded-lg bg-warm-50">
+          <div class="flex items-center gap-2">
+            <div class="status-dot" :class="ag.hasMind ? 'green' : 'red'"></div>
+            <span class="text-ink-600 font-medium" x-text="ag.name"></span>
+          </div>
+          <div class="flex items-center gap-3 text-ink-300">
+            <span x-show="ag.lastProactive" x-text="'P: ' + new Date(ag.lastProactive).toLocaleTimeString()"></span>
+            <span x-show="ag.lastReflection" x-text="'R: ' + new Date(ag.lastReflection).toLocaleTimeString()"></span>
+            <span x-show="!ag.lastProactive && !ag.lastReflection">awaiting first cycle</span>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- ═══ Exchange Balances Table ═══ -->
+  <div class="card card-flush overflow-hidden">
+    <div class="px-4 py-3 border-b border-warm-200">
+      <span class="text-sm font-medium text-ink-700" x-text="($root.portfolio?.exchange || 'Exchange') + ' Balances'"></span>
+    </div>
+    <table class="w-full text-sm">
+      <thead class="text-xs text-ink-400 uppercase bg-warm-50">
+        <tr><th class="px-4 py-2 text-left">Asset</th><th class="px-4 py-2 text-right">Free</th><th class="px-4 py-2 text-right">Locked</th></tr>
+      </thead>
+      <tbody>
+        <template x-for="b in ($root.portfolio?.balances || [])" :key="b.asset">
+          <tr class="border-t border-warm-200 hover:bg-warm-50">
+            <td class="px-4 py-2 font-medium text-ink-700" x-text="b.asset"></td>
+            <td class="px-4 py-2 text-right font-mono text-ink-600" x-text="$root.fmtNum(b.free, b.asset === 'KAS' ? 2 : 6)"></td>
+            <td class="px-4 py-2 text-right font-mono text-ink-300" x-text="$root.fmtNum(b.locked, 6)"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Not configured warning -->
+  <div x-show="!$root.configured" class="card border-warm-300 bg-warm-50 text-sm text-ink-500 mt-4">
+    No exchange account configured. Go to the <button @click="$root.tab = 'exchange'" class="text-brand-600 underline">Exchange tab</button> to add your API key.
+  </div>
+
+</div>
+
+<script>
+function tradePortfolio() {
+  return {
+    // Wallet management
+    agentAccounts: [],
+    kasPrice: 0,
+    showWallets: false,
+    totalUnit: 'kas',
+    fundLocks: {},
+    withdrawing: null,
+    // Baselines
+    baselines: [],
+    baselineLoading: false,
+    // Chain intel
+    chainData: null,
+    whaleAlerts: [],
+    fundamentals: null,
+    triggers: null,
+    triggerRunning: '',
+
+    async init() {
+      await Promise.all([
+        this.loadAccounts(),
+        this.loadBaselines(),
+        this.loadWhaleAlerts(),
+        this.loadFundamentals(),
+        this.loadTriggers(),
+        this.loadFundLocks(),
+        this.loadChainData(),
+      ]);
+      setInterval(() => {
+        this.loadBaselines();
+        this.loadWhaleAlerts();
+        this.loadFundamentals();
+        this.loadTriggers();
+        this.loadChainData();
+      }, 30000);
+    },
+
+    // ── Wallet methods ──
+    async loadAccounts() {
+      const agents = this.$root.agents;
+      const results = await Promise.all(agents.map(async (a) => {
+        try {
+          const wallets = await fetch('/api/relay/' + a.id + '/wallets').then(r => r.json());
+          const chainMap = {};
+          for (const w of (wallets.chains || [])) {
+            if (w.isDefault || !chainMap[w.chain]) chainMap[w.chain] = w;
+          }
+          return { ...a, kas: wallets.kaspa?.balance, wallets: { kaspa: wallets.kaspa, ...chainMap }, chainWallets: wallets.chains || [] };
+        } catch {
+          return { ...a, kas: null, wallets: { kaspa: { address: null } }, chainWallets: [] };
+        }
+      }));
+      this.agentAccounts = results;
+      try { const r = await fetch('/api/trade/kas-price').then(r => r.json()); if (r?.price) this.kasPrice = r.price; } catch {}
+    },
+
+    async loadFundLocks() {
+      try {
+        const res = await fetch('/api/trade/fund-locks');
+        const d = await res.json();
+        this.fundLocks = d.totals || {};
+      } catch {}
+    },
+
+    copyAddr(text) { navigator.clipboard.writeText(text); },
+
+    async createWallet(agentId, chain) {
+      try {
+        await fetch('/api/relay/' + agentId + '/wallets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chain }) });
+        await this.loadAccounts();
+      } catch {}
+    },
+
+    async importWallet(agentId, chain) {
+      const key = prompt('Enter ' + chain.toUpperCase() + ' private key:');
+      if (!key) return;
+      try {
+        await fetch('/api/relay/' + agentId + '/wallets/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chain, privateKey: key }) });
+        await this.loadAccounts();
+      } catch (e) { alert('Import failed: ' + e.message); }
+    },
+
+    async deleteWallet(agentId, walletId) {
+      if (!confirm('Delete this wallet? This action is irreversible!')) return;
+      if (!confirm('Are you sure? The private key cannot be recovered after deletion!')) return;
+      try {
+        await fetch('/api/relay/' + agentId + '/wallets/' + walletId, { method: 'DELETE' });
+        await this.loadAccounts();
+      } catch {}
+    },
+
+    startWithdraw(agentId, wallet) { this.withdrawing = { agentId, wallet, toAddress: '', amount: '' }; },
+    cancelWithdraw() { this.withdrawing = null; },
+
+    async executeWithdraw() {
+      if (!this.withdrawing) return;
+      const w = this.withdrawing;
+      if (!w.toAddress || !w.amount) { alert('Please fill in address and amount'); return; }
+      if (!confirm('Confirm withdraw ' + w.amount + ' from ' + w.wallet.chain.toUpperCase() + ' to ' + w.toAddress + '?')) return;
+      try {
+        let res;
+        if (w.wallet.chain === 'kas') {
+          res = await fetch('/api/relay/' + w.agentId + '/transfer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: w.toAddress, amount: w.amount }) });
+        } else {
+          res = await fetch('/api/relay/' + w.agentId + '/wallets/' + w.wallet.id + '/withdraw', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: w.toAddress, amount: w.amount }) });
+        }
+        const result = await res.json();
+        if (result.ok) { alert('Withdrawal successful! TX: ' + (result.txHash || '')); this.withdrawing = null; await this.loadAccounts(); }
+        else { alert('Withdrawal failed: ' + (result.error || '')); }
+      } catch (err) { alert('Withdrawal failed: ' + err.message); }
+    },
+
+    // ── Baselines ──
+    async loadBaselines() {
+      try { const res = await fetch('/api/trade/baseline'); this.baselines = await res.json(); } catch {}
+    },
+    async createBaseline() {
+      this.baselineLoading = true;
+      try { const res = await fetch('/api/trade/baseline', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) }); const d = await res.json(); if (d.ok) await this.loadBaselines(); } catch {}
+      this.baselineLoading = false;
+    },
+    async settleBaseline(id) {
+      if (!confirm('Settle this baseline? Final P&L will be recorded.')) return;
+      await fetch('/api/trade/baseline/' + id + '/settle', { method: 'POST' });
+      await this.loadBaselines();
+    },
+
+    // ── Chain intel ──
+    async loadChainData() {
+      try { const res = await fetch('/api/chain/stats'); this.chainData = await res.json(); } catch {}
+    },
+    async loadWhaleAlerts() {
+      try { const res = await fetch('/api/chain/whale-alerts?limit=10'); this.whaleAlerts = await res.json(); } catch {}
+    },
+    async loadFundamentals() {
+      try { const res = await fetch('/api/chain/fundamentals'); this.fundamentals = await res.json(); } catch {}
+    },
+    async loadTriggers() {
+      try { const res = await fetch('/api/trade/triggers'); this.triggers = await res.json(); } catch {}
+    },
+    async updateTrigger(field, value) {
+      const body = {}; body[field] = value;
+      await fetch('/api/trade/triggers', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      await this.loadTriggers();
+    },
+    async fireTrigger(type) {
+      this.triggerRunning = type;
+      try {
+        await fetch('/api/trade/trigger/' + type, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      } catch {}
+      await this.loadTriggers();
+      this.triggerRunning = '';
+    },
+  };
+}
+</script>

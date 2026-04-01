@@ -1,0 +1,98 @@
+<!-- Wallet Bar -->
+<div class="relative border-t border-warm-200 bg-warm-50 flex-shrink-0">
+
+  <!-- Expandable wallet management panel -->
+  <div x-show="walletPanel" x-transition class="absolute bottom-full left-0 right-0 bg-white border-t border-warm-200 shadow-lg p-4 max-h-80 overflow-y-auto z-10">
+    <div class="flex items-center justify-between mb-3">
+      <h4 class="text-sm font-semibold text-ink-700" x-text="walletPanel==='kas' ? 'Kaspa 钱包' : (walletPanel?.toUpperCase()+' 链钱包')"></h4>
+      <button @click="walletPanel=null" class="btn btn-ghost btn-sm">关闭</button>
+    </div>
+
+    <!-- KAS wallet detail -->
+    <template x-if="walletPanel==='kas'">
+      <div class="space-y-2 text-xs">
+        <div class="flex items-center justify-between">
+          <span class="text-ink-400">地址</span>
+          <span class="font-mono text-[10px] text-brand-500 cursor-pointer hover:text-brand-700" @click="copyAddr(agentAddr)" x-text="agentAddr" title="点击复制"></span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-ink-400">余额</span>
+          <span class="font-mono text-ink-600" x-text="(wallet.kas||0).toFixed(2)+' KAS'"></span>
+        </div>
+        <div x-show="wallet.kasLocked>0" class="flex items-center justify-between">
+          <span class="text-ink-400">锁定</span>
+          <span class="font-mono text-amber-600" x-text="(wallet.kasLocked||0).toFixed(2)+' KAS'"></span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-ink-400">可用</span>
+          <span class="font-mono text-green-600" x-text="((wallet.kas||0)-(wallet.kasLocked||0)).toFixed(2)+' KAS'"></span>
+        </div>
+        <!-- KAS withdraw -->
+        <div x-data="{showSend:false,sendAddr:'',sendAmt:''}" class="mt-2 pt-2 border-t border-warm-200">
+          <button @click="showSend=!showSend" class="text-xs text-brand-500 hover:text-brand-700">提现 KAS</button>
+          <div x-show="showSend" class="mt-2 space-y-2">
+            <input x-model="sendAddr" placeholder="目标 kaspa:q... 地址" class="w-full border border-warm-300 rounded-lg px-2 py-1.5 text-[11px] font-mono bg-warm-50 focus:border-brand-400 focus:outline-none">
+            <input x-model.number="sendAmt" placeholder="金额 (KAS)" type="number" class="w-full border border-warm-300 rounded-lg px-2 py-1.5 text-[11px] font-mono bg-warm-50 focus:border-brand-400 focus:outline-none">
+            <button @click="$dispatch('send-kas',{addr:sendAddr,amt:sendAmt})" class="btn btn-danger btn-sm w-full">发送</button>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- EVM/SOL/TRON wallets -->
+    <template x-if="walletPanel && walletPanel!=='kas'">
+      <div class="space-y-3">
+        <template x-for="w in panelWallets" :key="w.id||w.address">
+          <div class="card card-compact">
+            <div class="flex items-center justify-between mb-2">
+              <span class="font-mono text-[10px] text-brand-500 cursor-pointer" @click="copyAddr(w.address)" x-text="w.address" title="点击复制"></span>
+              <span x-show="w.isDefault" class="badge badge-info text-[9px]">默认</span>
+            </div>
+            <div class="grid grid-cols-4 gap-2 text-[11px]">
+              <div><span class="text-ink-300">USDT</span><div class="font-mono text-ink-600" x-text="(w.usdt||0).toFixed(2)"></div></div>
+              <div><span class="text-ink-300">USDC</span><div class="font-mono text-ink-600" x-text="(w.usdc||0).toFixed(2)"></div></div>
+              <div><span class="text-ink-300">Gas</span><div class="font-mono text-ink-600" x-text="(w.gas||0).toFixed(4)"></div></div>
+              <div x-show="w.locked>0"><span class="text-ink-300">锁定</span><div class="font-mono text-amber-600" x-text="(w.locked||0).toFixed(2)"></div></div>
+            </div>
+            <div class="flex gap-2 mt-2">
+              <button @click="copyAddr(w.address)" class="btn btn-ghost btn-sm">复制</button>
+              <button @click="withdrawPrompt(w)" class="btn btn-ghost btn-sm text-red-500">提现</button>
+              <button @click="showPrivkeyFor(w)" class="btn btn-ghost btn-sm text-amber-600">私钥</button>
+            </div>
+          </div>
+        </template>
+        <!-- Create new wallet -->
+        <button @click="createWallet(walletPanel)"
+          class="w-full py-2 rounded-lg border border-dashed border-warm-300 text-xs text-ink-400 hover:text-brand-600 hover:border-brand-300 transition-colors">
+          + 创建新 <span x-text="walletPanel?.toUpperCase()"></span> 钱包
+        </button>
+      </div>
+    </template>
+  </div>
+
+  <!-- Wallet bar body -->
+  <div class="px-5 py-2 flex items-center justify-between">
+    <div class="flex items-center gap-4">
+      <!-- KAS balance -->
+      <button @click="openWalletPanel('kas')" class="flex items-center gap-1.5 hover:text-brand-600 transition-colors">
+        <span class="text-[10px] text-ink-400">KAS</span>
+        <span class="font-mono text-sm text-ink-700 font-medium" x-text="(wallet.kas||0).toFixed(1)"></span>
+        <span x-show="wallet.kasLocked>0" class="font-mono text-[10px] text-amber-600" x-text="'('+(wallet.kasLocked||0).toFixed(1)+' 锁定)'"></span>
+      </button>
+      <div class="h-3 w-px bg-warm-300"></div>
+      <!-- Chain balances -->
+      <template x-for="c in chainSummary" :key="c.chain">
+        <button @click="openWalletPanel(c.chain)" class="flex items-center gap-1 hover:text-brand-600 transition-colors">
+          <span class="text-[9px] text-ink-300 font-medium" x-text="c.name"></span>
+          <span class="font-mono text-[11px] text-ink-500"
+            x-text="((c.usdt||0)>0?(c.usdt||0).toFixed(2)+' USDT':'') + ((c.usdc||0)>0?((c.usdt||0)>0?' / ':'')+(c.usdc||0).toFixed(2)+' USDC':'') + ((c.usdt||0)===0&&(c.usdc||0)===0?'0 USDT':'')"></span>
+          <span x-show="c.count>1" class="text-[8px] text-ink-300" x-text="'('+c.count+'个钱包)'"></span>
+          <span x-show="c.locked>0" class="font-mono text-[9px] text-amber-600" x-text="'('+(c.locked||0).toFixed(2)+' 锁定)'"></span>
+        </button>
+      </template>
+    </div>
+    <div class="text-[10px] text-ink-300">
+      <span x-text="agentName"></span> · <span x-text="modeLabel"></span>
+    </div>
+  </div>
+</div>
