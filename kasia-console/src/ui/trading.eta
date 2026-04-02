@@ -5,6 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>KANet Trading</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+  tailwind.config = { theme: { extend: { colors: {
+    warm: { 50:'#faf9f7', 100:'#f7f6f3', 200:'#efeee9', 300:'#e4e2dc', 400:'#d4d0c8' },
+    ink: { 50:'#f5f5f7', 100:'#e8e8ec', 200:'#c8c8d0', 300:'#9496a1', 400:'#6b6d7b', 500:'#4a4b57', 600:'#2d2e3a', 700:'#1a1a2e' },
+    brand: { 50:'#eff6ff', 100:'#dbeafe', 200:'#bfdbfe', 300:'#93c5fd', 400:'#60a5fa', 500:'#3b82f6', 600:'#2563eb', 700:'#1d4ed8' }
+  }, fontFamily: { sans: ['Inter','-apple-system','BlinkMacSystemFont','sans-serif'] } } } }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <style>
     .thinking-dots span {
@@ -24,7 +33,7 @@
     .mini-chart .bar { min-width: 3px; flex: 1; border-radius: 1px 1px 0 0; }
   </style>
 </head>
-<body class="bg-gray-950 text-gray-100 min-h-screen font-sans" x-data="{
+<body class="bg-ink-700 text-ink-100 min-h-screen font-sans" x-data="{
   portfolio: null,
   loading: true,
   agents: <%= JSON.stringify(it.relays.map(r => ({ id: r.id, name: r.name }))) %>,
@@ -764,34 +773,34 @@
 }" x-init="init()">
 
   <!-- Header -->
-  <header class="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
+  <header class="border-b border-ink-600 px-6 py-4 flex items-center justify-between">
     <div class="flex items-center space-x-3">
       <img src="/public/kanet-logo.png" alt="KANet" class="h-8 w-8" />
       <h1 class="text-xl font-bold">KANet Trading</h1>
       <!-- View Toggle -->
-      <div class="flex ml-4 bg-gray-800 rounded-lg p-0.5">
+      <div class="flex ml-4 bg-ink-600 rounded-lg p-0.5">
         <button @click="activeView = 'exchange'"
-          :class="activeView === 'exchange' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'"
+          :class="activeView === 'exchange' ? 'bg-ink-500 text-white' : 'text-ink-400 hover:text-white'"
           class="px-3 py-1 text-sm rounded-md transition-colors">Exchange</button>
         <button @click="activeView = 'market'; loadMarketData()"
-          :class="activeView === 'market' ? 'bg-purple-700 text-white' : 'text-gray-400 hover:text-white'"
+          :class="activeView === 'market' ? 'bg-purple-700 text-white' : 'text-ink-400 hover:text-white'"
           class="px-3 py-1 text-sm rounded-md transition-colors">自由市场</button>
       </div>
       <span class="px-2 py-0.5 rounded text-xs font-mono"
         :class="mode === 'LIVE' ? 'bg-red-900 text-red-300' : 'bg-yellow-900 text-yellow-300'"
         x-text="mode"></span>
       <span class="px-2 py-0.5 rounded text-xs ml-2"
-        :class="agentTradeMode==='auto' ? 'bg-green-900 text-green-300' : agentTradeMode==='approval' ? 'bg-blue-900 text-blue-300' : 'bg-gray-800 text-gray-400'"
+        :class="agentTradeMode==='auto' ? 'bg-green-900 text-green-300' : agentTradeMode==='approval' ? 'bg-blue-900 text-blue-300' : 'bg-ink-600 text-ink-400'"
         x-text="agentTradeMode==='auto' ? 'Agent: 全自动' : agentTradeMode==='approval' ? 'Agent: 审批' : 'Agent: 手动'"></span>
       <!-- Settings toggle (inline with tabs) -->
       <button @click="showSettings = !showSettings"
         title="交易设置（模式 / 交易所 API）"
         class="ml-3 p-1.5 rounded-md transition-colors"
-        :class="showSettings ? 'bg-gray-700 text-white' : 'text-gray-500 hover:text-white'">
+        :class="showSettings ? 'bg-ink-500 text-white' : 'text-ink-400 hover:text-white'">
         <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
       </button>
     </div>
-    <a href="/chat" class="text-sm text-gray-400 hover:text-white">返回</a>
+    <a href="/chat" class="text-sm text-ink-400 hover:text-white">返回</a>
   </header>
 
   <!-- ══ Shared Settings Panel (drops down from header) ══ -->
@@ -801,35 +810,35 @@
       <div x-show="showSettings" x-transition class="space-y-4">
 
         <!-- ── Trade Mode ── -->
-        <div class="bg-gray-900 rounded-xl border border-gray-800 p-4">
+        <div class="bg-ink-700 rounded-xl border border-ink-600 p-4">
           <div class="flex items-center justify-between">
             <div>
-              <span class="text-sm font-medium text-gray-400">Trading Mode</span>
-              <p class="text-xs text-gray-600 mt-0.5" x-text="mode === 'LIVE' ? 'Real orders will be placed on exchange' : 'Simulation only — no real orders'"></p>
+              <span class="text-sm font-medium text-ink-400">Trading Mode</span>
+              <p class="text-xs text-ink-500 mt-0.5" x-text="mode === 'LIVE' ? 'Real orders will be placed on exchange' : 'Simulation only — no real orders'"></p>
             </div>
             <div class="flex items-center space-x-3">
-              <span class="text-xs font-mono" :class="mode === 'DRY-RUN' ? 'text-yellow-400' : 'text-gray-600'">DRY-RUN</span>
+              <span class="text-xs font-mono" :class="mode === 'DRY-RUN' ? 'text-yellow-400' : 'text-ink-500'">DRY-RUN</span>
               <label class="flex items-center cursor-pointer">
                 <div class="relative">
                   <input type="checkbox" :checked="mode === 'LIVE'" @change="toggleTradeMode()" class="sr-only" />
-                  <div class="w-10 h-5 rounded-full transition-colors" :class="mode === 'LIVE' ? 'bg-red-600' : 'bg-gray-700'"></div>
+                  <div class="w-10 h-5 rounded-full transition-colors" :class="mode === 'LIVE' ? 'bg-red-600' : 'bg-ink-500'"></div>
                   <div class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform" :class="mode === 'LIVE' ? 'translate-x-5' : ''"></div>
                 </div>
               </label>
-              <span class="text-xs font-mono font-bold" :class="mode === 'LIVE' ? 'text-red-400' : 'text-gray-600'">LIVE</span>
+              <span class="text-xs font-mono font-bold" :class="mode === 'LIVE' ? 'text-red-400' : 'text-ink-500'">LIVE</span>
             </div>
           </div>
         </div>
 
         <!-- ── Agent 交易控制面板（per-agent） ── -->
-        <div class="bg-gray-900 rounded-xl border border-gray-800 p-4" x-data="agentTradePanel()" x-init="load()">
+        <div class="bg-ink-700 rounded-xl border border-ink-600 p-4" x-data="agentTradePanel()" x-init="load()">
           <div class="flex items-center justify-between mb-4">
             <div>
-              <span class="text-sm font-medium text-gray-300">Agent 交易权限</span>
-              <p class="text-xs text-gray-500 mt-0.5">每个 Agent 独立设置交易模式</p>
+              <span class="text-sm font-medium text-ink-300">Agent 交易权限</span>
+              <p class="text-xs text-ink-400 mt-0.5">每个 Agent 独立设置交易模式</p>
             </div>
             <div class="flex items-center gap-2">
-              <span class="text-[10px] text-gray-500 uppercase tracking-wider">锚定</span>
+              <span class="text-[10px] text-ink-400 uppercase tracking-wider">锚定</span>
               <button @click="setAnchor(panelAnchor==='kas'?'usd':'kas')"
                 class="px-2.5 py-1 rounded text-[11px] font-medium transition-all border"
                 :class="panelAnchor==='kas' ? 'bg-yellow-900/60 text-yellow-400 border-yellow-700/50' : 'bg-green-900/60 text-green-400 border-green-700/50'"
@@ -841,35 +850,35 @@
           <!-- Agent rows -->
           <div class="space-y-2">
             <template x-for="a in agentList" :key="a.id">
-              <div class="flex items-center gap-3 bg-gray-800/50 rounded-lg px-3 py-2.5 border border-gray-800 hover:border-gray-700 transition-colors">
+              <div class="flex items-center gap-3 bg-ink-600/50 rounded-lg px-3 py-2.5 border border-ink-600 hover:border-ink-500 transition-colors">
                 <!-- Status dot -->
                 <div class="w-2 h-2 rounded-full flex-shrink-0"
-                     :class="a.mode==='auto' ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.4)]' : a.mode==='approval' ? 'bg-blue-400 shadow-[0_0_6px_rgba(96,165,250,0.3)]' : a.mode==='disabled' ? 'bg-red-400' : 'bg-gray-600'"></div>
+                     :class="a.mode==='auto' ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.4)]' : a.mode==='approval' ? 'bg-blue-400 shadow-[0_0_6px_rgba(96,165,250,0.3)]' : a.mode==='disabled' ? 'bg-red-400' : 'bg-ink-400'"></div>
                 <!-- Name + address -->
                 <div class="flex-1 min-w-0">
-                  <span class="text-sm font-medium text-gray-200" x-text="a.name"></span>
-                  <span class="text-[10px] text-gray-600 ml-2 font-mono" x-text="'...' + a.address.slice(-8)"></span>
+                  <span class="text-sm font-medium text-ink-200" x-text="a.name"></span>
+                  <span class="text-[10px] text-ink-500 ml-2 font-mono" x-text="'...' + a.address.slice(-8)"></span>
                 </div>
                 <!-- Mode selector (4 buttons) -->
                 <div class="flex items-center gap-1">
                   <button @click="setMode(a.id, 'disabled')"
                     class="px-2 py-1 rounded text-[10px] font-medium transition-all border"
-                    :class="a.mode==='disabled' ? 'bg-red-900/60 text-red-300 border-red-700/50' : 'text-gray-600 border-gray-800 hover:border-red-900 hover:text-red-400'">
+                    :class="a.mode==='disabled' ? 'bg-red-900/60 text-red-300 border-red-700/50' : 'text-ink-500 border-ink-600 hover:border-red-900 hover:text-red-400'">
                     禁止
                   </button>
                   <button @click="setMode(a.id, 'manual')"
                     class="px-2 py-1 rounded text-[10px] font-medium transition-all border"
-                    :class="a.mode==='manual' ? 'bg-gray-700 text-gray-200 border-gray-500' : 'text-gray-600 border-gray-800 hover:border-gray-600 hover:text-gray-400'">
+                    :class="a.mode==='manual' ? 'bg-ink-500 text-ink-200 border-ink-400' : 'text-ink-500 border-ink-600 hover:border-ink-400 hover:text-ink-400'">
                     手动
                   </button>
                   <button @click="setMode(a.id, 'approval')"
                     class="px-2 py-1 rounded text-[10px] font-medium transition-all border"
-                    :class="a.mode==='approval' ? 'bg-blue-900/60 text-blue-300 border-blue-700/50' : 'text-gray-600 border-gray-800 hover:border-blue-900 hover:text-blue-400'">
+                    :class="a.mode==='approval' ? 'bg-blue-900/60 text-blue-300 border-blue-700/50' : 'text-ink-500 border-ink-600 hover:border-blue-900 hover:text-blue-400'">
                     批准
                   </button>
                   <button @click="setMode(a.id, 'auto')"
                     class="px-2 py-1 rounded text-[10px] font-medium transition-all border"
-                    :class="a.mode==='auto' ? 'bg-green-900/60 text-green-300 border-green-700/50' : 'text-gray-600 border-gray-800 hover:border-green-900 hover:text-green-400'">
+                    :class="a.mode==='auto' ? 'bg-green-900/60 text-green-300 border-green-700/50' : 'text-ink-500 border-ink-600 hover:border-green-900 hover:text-green-400'">
                     自动
                   </button>
                 </div>
@@ -878,9 +887,9 @@
           </div>
 
           <!-- Mode legend -->
-          <div class="flex items-center gap-4 mt-3 pt-3 border-t border-gray-800 text-[10px] text-gray-600">
+          <div class="flex items-center gap-4 mt-3 pt-3 border-t border-ink-600 text-[10px] text-ink-500">
             <span><span class="inline-block w-1.5 h-1.5 rounded-full bg-red-400 mr-1"></span>禁止：不允许交易</span>
-            <span><span class="inline-block w-1.5 h-1.5 rounded-full bg-gray-600 mr-1"></span>手动：仅 Owner 操作</span>
+            <span><span class="inline-block w-1.5 h-1.5 rounded-full bg-ink-400 mr-1"></span>手动：仅 Owner 操作</span>
             <span><span class="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 mr-1"></span>批准：Agent 发起，Owner 确认</span>
             <span><span class="inline-block w-1.5 h-1.5 rounded-full bg-green-500 mr-1"></span>自动：限额内自主交易</span>
           </div>
@@ -930,9 +939,9 @@
         </script>
 
         <!-- ── Exchange Accounts ── -->
-        <div class="bg-gray-900 rounded-xl border border-gray-800 p-4">
+        <div class="bg-ink-700 rounded-xl border border-ink-600 p-4">
           <div class="flex items-center justify-between mb-3">
-            <span class="text-sm font-medium text-gray-400">Exchange API Accounts</span>
+            <span class="text-sm font-medium text-ink-400">Exchange API Accounts</span>
             <button @click="openExchangeForm(null)"
               class="text-xs px-3 py-1 rounded bg-purple-600/20 text-purple-400 hover:bg-purple-600/40">+ Add</button>
           </div>
@@ -940,32 +949,32 @@
           <!-- Existing Accounts List -->
           <div x-show="exchangeAccounts.length > 0" class="space-y-2 mb-3">
             <template x-for="acc in exchangeAccounts" :key="acc.id">
-              <div class="flex items-center justify-between px-3 py-2.5 rounded-lg bg-gray-800/50">
+              <div class="flex items-center justify-between px-3 py-2.5 rounded-lg bg-ink-600/50">
                 <div class="flex items-center space-x-3">
-                  <span class="w-2 h-2 rounded-full" :class="acc.isDefault ? 'bg-emerald-400' : 'bg-gray-600'"></span>
+                  <span class="w-2 h-2 rounded-full" :class="acc.isDefault ? 'bg-emerald-400' : 'bg-ink-400'"></span>
                   <div>
-                    <span class="text-sm font-medium text-gray-200" x-text="acc.exchangeName"></span>
-                    <span x-show="acc.label" class="text-xs text-gray-500 ml-2" x-text="acc.label"></span>
-                    <div class="text-xs text-gray-600 font-mono" x-text="'Key: ' + (acc.apiKeyHint || '****')"></div>
+                    <span class="text-sm font-medium text-ink-200" x-text="acc.exchangeName"></span>
+                    <span x-show="acc.label" class="text-xs text-ink-400 ml-2" x-text="acc.label"></span>
+                    <div class="text-xs text-ink-500 font-mono" x-text="'Key: ' + (acc.apiKeyHint || '****')"></div>
                   </div>
                 </div>
                 <div class="flex items-center space-x-2">
                   <!-- Test -->
                   <button @click="testExchangeAccount(acc.id)" :disabled="exTesting === acc.id"
-                    class="text-xs px-2 py-1 rounded bg-gray-700 text-gray-400 hover:text-white hover:bg-gray-600">
+                    class="text-xs px-2 py-1 rounded bg-ink-500 text-ink-400 hover:text-white hover:bg-ink-400">
                     <span x-show="exTesting !== acc.id">Test</span>
                     <span x-show="exTesting === acc.id">...</span>
                   </button>
                   <!-- Set Default -->
                   <button x-show="!acc.isDefault" @click="setDefaultAccount(acc.id)"
-                    class="text-xs px-2 py-1 rounded bg-gray-700 text-gray-400 hover:text-emerald-400 hover:bg-gray-600">Default</button>
+                    class="text-xs px-2 py-1 rounded bg-ink-500 text-ink-400 hover:text-emerald-400 hover:bg-ink-400">Default</button>
                   <span x-show="acc.isDefault" class="text-xs text-emerald-500 px-2">Active</span>
                   <!-- Edit -->
                   <button @click="openExchangeForm(acc)"
-                    class="text-xs px-2 py-1 rounded bg-gray-700 text-gray-400 hover:text-white hover:bg-gray-600">Edit</button>
+                    class="text-xs px-2 py-1 rounded bg-ink-500 text-ink-400 hover:text-white hover:bg-ink-400">Edit</button>
                   <!-- Delete -->
                   <button @click="deleteExchangeAccount(acc.id)"
-                    class="text-xs px-2 py-1 rounded bg-gray-700 text-gray-400 hover:text-red-400 hover:bg-gray-600">Del</button>
+                    class="text-xs px-2 py-1 rounded bg-ink-500 text-ink-400 hover:text-red-400 hover:bg-ink-400">Del</button>
                 </div>
               </div>
             </template>
@@ -977,22 +986,22 @@
             x-text="exTestResult?.ok ? exTestResult.message : ('Failed: ' + (exTestResult?.error || 'unknown'))"></div>
 
           <!-- No accounts message -->
-          <div x-show="exchangeAccounts.length === 0 && !showExchangeForm" class="text-xs text-gray-600 text-center py-4">
+          <div x-show="exchangeAccounts.length === 0 && !showExchangeForm" class="text-xs text-ink-500 text-center py-4">
             No exchange account configured. Click + Add to connect your exchange.
           </div>
 
           <!-- Add/Edit Form -->
-          <div x-show="showExchangeForm" x-transition class="bg-gray-800/50 rounded-lg p-4 space-y-3">
+          <div x-show="showExchangeForm" x-transition class="bg-ink-600/50 rounded-lg p-4 space-y-3">
             <div class="flex items-center justify-between">
-              <span class="text-sm font-medium text-gray-300" x-text="editingAccountId ? 'Edit Account' : 'New Exchange Account'"></span>
-              <button @click="showExchangeForm = false" class="text-xs text-gray-500 hover:text-white">Cancel</button>
+              <span class="text-sm font-medium text-ink-300" x-text="editingAccountId ? 'Edit Account' : 'New Exchange Account'"></span>
+              <button @click="showExchangeForm = false" class="text-xs text-ink-400 hover:text-white">Cancel</button>
             </div>
 
             <!-- Exchange Select -->
             <div>
-              <label class="text-xs text-gray-500 block mb-1">Exchange</label>
+              <label class="text-xs text-ink-400 block mb-1">Exchange</label>
               <select x-model="exForm.exchange" :disabled="!!editingAccountId"
-                class="w-full bg-gray-800 text-gray-200 text-sm rounded px-3 py-2 border border-gray-700 focus:outline-none focus:border-purple-500">
+                class="w-full bg-ink-600 text-ink-200 text-sm rounded px-3 py-2 border border-ink-500 focus:outline-none focus:border-purple-500">
                 <template x-for="ex in exchangeRegistry" :key="ex.id">
                   <option :value="ex.id" x-text="ex.name"></option>
                 </template>
@@ -1002,57 +1011,57 @@
 
             <!-- Custom Exchange Name -->
             <div x-show="exForm.exchange === 'custom'">
-              <label class="text-xs text-gray-500 block mb-1">Exchange Name</label>
+              <label class="text-xs text-ink-400 block mb-1">Exchange Name</label>
               <input type="text" x-model="exForm.customName" placeholder="e.g. Kraken, Upbit..."
-                class="w-full bg-gray-800 text-gray-200 text-sm rounded px-3 py-2 border border-gray-700 focus:outline-none focus:border-purple-500" />
+                class="w-full bg-ink-600 text-ink-200 text-sm rounded px-3 py-2 border border-ink-500 focus:outline-none focus:border-purple-500" />
             </div>
 
             <!-- Custom Base URL -->
             <div x-show="exForm.exchange === 'custom'">
-              <label class="text-xs text-gray-500 block mb-1">API Base URL</label>
+              <label class="text-xs text-ink-400 block mb-1">API Base URL</label>
               <input type="text" x-model="exForm.baseUrl" placeholder="https://api.example.com"
-                class="w-full bg-gray-800 text-gray-200 text-sm rounded px-3 py-2 border border-gray-700 focus:outline-none focus:border-purple-500" />
+                class="w-full bg-ink-600 text-ink-200 text-sm rounded px-3 py-2 border border-ink-500 focus:outline-none focus:border-purple-500" />
             </div>
 
             <!-- Label -->
             <div>
-              <label class="text-xs text-gray-500 block mb-1">Label (optional)</label>
+              <label class="text-xs text-ink-400 block mb-1">Label (optional)</label>
               <input type="text" x-model="exForm.label" placeholder="e.g. Main Account, Trading Bot..."
-                class="w-full bg-gray-800 text-gray-200 text-sm rounded px-3 py-2 border border-gray-700 focus:outline-none focus:border-purple-500" />
+                class="w-full bg-ink-600 text-ink-200 text-sm rounded px-3 py-2 border border-ink-500 focus:outline-none focus:border-purple-500" />
             </div>
 
             <!-- API Key -->
             <div>
-              <label class="text-xs text-gray-500 block mb-1">API Key</label>
+              <label class="text-xs text-ink-400 block mb-1">API Key</label>
               <input type="password" x-model="exForm.apiKey" :placeholder="editingAccountId ? 'Leave blank to keep current' : 'Enter API Key'"
-                class="w-full bg-gray-800 text-gray-200 text-sm rounded px-3 py-2 border border-gray-700 focus:outline-none focus:border-purple-500 font-mono" />
+                class="w-full bg-ink-600 text-ink-200 text-sm rounded px-3 py-2 border border-ink-500 focus:outline-none focus:border-purple-500 font-mono" />
             </div>
 
             <!-- API Secret -->
             <div>
-              <label class="text-xs text-gray-500 block mb-1">API Secret</label>
+              <label class="text-xs text-ink-400 block mb-1">API Secret</label>
               <input type="password" x-model="exForm.apiSecret" :placeholder="editingAccountId ? 'Leave blank to keep current' : 'Enter API Secret'"
-                class="w-full bg-gray-800 text-gray-200 text-sm rounded px-3 py-2 border border-gray-700 focus:outline-none focus:border-purple-500 font-mono" />
+                class="w-full bg-ink-600 text-ink-200 text-sm rounded px-3 py-2 border border-ink-500 focus:outline-none focus:border-purple-500 font-mono" />
             </div>
 
             <!-- Passphrase (conditional) -->
             <div x-show="exNeedsPassphrase()">
-              <label class="text-xs text-gray-500 block mb-1">Passphrase</label>
+              <label class="text-xs text-ink-400 block mb-1">Passphrase</label>
               <input type="password" x-model="exForm.passphrase" :placeholder="editingAccountId ? 'Leave blank to keep current' : 'Enter Passphrase'"
-                class="w-full bg-gray-800 text-gray-200 text-sm rounded px-3 py-2 border border-gray-700 focus:outline-none focus:border-purple-500 font-mono" />
-              <div class="text-xs text-gray-600 mt-1">Required by <span x-text="exName(exForm.exchange)"></span></div>
+                class="w-full bg-ink-600 text-ink-200 text-sm rounded px-3 py-2 border border-ink-500 focus:outline-none focus:border-purple-500 font-mono" />
+              <div class="text-xs text-ink-500 mt-1">Required by <span x-text="exName(exForm.exchange)"></span></div>
             </div>
 
             <!-- Security Note -->
-            <div class="text-xs text-gray-600 flex items-start space-x-1.5 pt-1">
-              <svg class="h-3.5 w-3.5 mt-0.5 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+            <div class="text-xs text-ink-500 flex items-start space-x-1.5 pt-1">
+              <svg class="h-3.5 w-3.5 mt-0.5 text-ink-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
               <span>Credentials are encrypted with AES-256-GCM and stored locally. Never transmitted to any third party.</span>
             </div>
 
             <!-- Save Button -->
             <button @click="saveExchangeAccount()" :disabled="exSaving || (!editingAccountId && (!exForm.apiKey || !exForm.apiSecret))"
               class="w-full py-2 rounded text-sm font-medium transition-colors"
-              :class="exSaving ? 'bg-gray-700 text-gray-500' : 'bg-purple-600 text-white hover:bg-purple-700'">
+              :class="exSaving ? 'bg-ink-500 text-ink-400' : 'bg-purple-600 text-white hover:bg-purple-700'">
               <span x-show="!exSaving" x-text="editingAccountId ? 'Update' : 'Save Account'"></span>
               <span x-show="exSaving">Saving...</span>
             </button>
@@ -1070,61 +1079,61 @@
       <!-- ── Agent Trading Configs ── -->
       <div x-data="{ showAgentConfigs: false }">
         <button @click="showAgentConfigs = !showAgentConfigs"
-          class="flex items-center space-x-2 text-sm text-gray-400 hover:text-white transition-colors mb-2">
+          class="flex items-center space-x-2 text-sm text-ink-400 hover:text-white transition-colors mb-2">
           <svg class="h-4 w-4 transition-transform" :class="showAgentConfigs ? 'rotate-90' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
           <span x-text="showAgentConfigs ? '隐藏 Agent 交易配置' : 'Agent 交易配置'"></span>
         </button>
         <div x-show="showAgentConfigs" x-transition class="space-y-3">
           <template x-for="cfg in agentConfigs" :key="cfg.id">
-            <div class="bg-gray-900 rounded-xl border border-gray-800 p-4">
+            <div class="bg-ink-700 rounded-xl border border-ink-600 p-4">
               <div class="flex items-center justify-between mb-3">
                 <div class="flex items-center space-x-3">
                   <span class="text-sm font-bold" x-text="cfg.name"></span>
                   <label class="flex items-center space-x-2 cursor-pointer">
                     <div class="relative">
                       <input type="checkbox" x-model="cfg.enabled" @change="saveConfig(cfg)" class="sr-only" />
-                      <div class="w-8 h-4 rounded-full transition-colors" :class="cfg.enabled ? 'bg-emerald-600' : 'bg-gray-700'"></div>
+                      <div class="w-8 h-4 rounded-full transition-colors" :class="cfg.enabled ? 'bg-emerald-600' : 'bg-ink-500'"></div>
                       <div class="absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform" :class="cfg.enabled ? 'translate-x-4' : ''"></div>
                     </div>
-                    <span class="text-xs" :class="cfg.enabled ? 'text-emerald-400' : 'text-gray-500'" x-text="cfg.enabled ? 'Enabled' : 'Disabled'"></span>
+                    <span class="text-xs" :class="cfg.enabled ? 'text-emerald-400' : 'text-ink-400'" x-text="cfg.enabled ? 'Enabled' : 'Disabled'"></span>
                   </label>
                   <select x-model="cfg.baseCurrency" @change="saveConfig(cfg)"
-                    class="bg-gray-800 text-xs rounded px-2 py-1 border border-gray-700 ml-2"
+                    class="bg-ink-600 text-xs rounded px-2 py-1 border border-ink-500 ml-2"
                     :class="cfg.baseCurrency === 'KAS' ? 'text-emerald-400 border-emerald-700' : 'text-yellow-400 border-yellow-700'">
                     <option value="USDT">USDT</option>
                     <option value="KAS">KAS</option>
                   </select>
                 </div>
                 <button @click="saveConfig(cfg)" :disabled="savingConfig"
-                  class="text-xs px-3 py-1 rounded bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white">Save</button>
+                  class="text-xs px-3 py-1 rounded bg-ink-600 text-ink-400 hover:bg-ink-500 hover:text-white">Save</button>
               </div>
               <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div>
-                  <label class="text-xs text-gray-500 block mb-1" x-text="'Capital (' + cfg.baseCurrency + ')'"></label>
+                  <label class="text-xs text-ink-400 block mb-1" x-text="'Capital (' + cfg.baseCurrency + ')'"></label>
                   <input type="number" x-model.number="cfg.capital" @change="saveConfig(cfg)"
-                    class="w-full bg-gray-800 text-gray-200 text-sm rounded px-2 py-1.5 border border-gray-700 focus:outline-none focus:border-purple-500" />
+                    class="w-full bg-ink-600 text-ink-200 text-sm rounded px-2 py-1.5 border border-ink-500 focus:outline-none focus:border-purple-500" />
                 </div>
                 <div>
-                  <label class="text-xs text-gray-500 block mb-1" x-text="'Max/Trade (' + cfg.baseCurrency + ')'"></label>
+                  <label class="text-xs text-ink-400 block mb-1" x-text="'Max/Trade (' + cfg.baseCurrency + ')'"></label>
                   <input type="number" x-model.number="cfg.maxPerTrade" @change="saveConfig(cfg)"
-                    class="w-full bg-gray-800 text-gray-200 text-sm rounded px-2 py-1.5 border border-gray-700 focus:outline-none focus:border-purple-500" />
+                    class="w-full bg-ink-600 text-ink-200 text-sm rounded px-2 py-1.5 border border-ink-500 focus:outline-none focus:border-purple-500" />
                 </div>
                 <div>
-                  <label class="text-xs text-gray-500 block mb-1">Max Position %</label>
+                  <label class="text-xs text-ink-400 block mb-1">Max Position %</label>
                   <input type="number" x-model.number="cfg.maxPositionPct" @change="saveConfig(cfg)" min="0" max="100"
-                    class="w-full bg-gray-800 text-gray-200 text-sm rounded px-2 py-1.5 border border-gray-700 focus:outline-none focus:border-purple-500" />
+                    class="w-full bg-ink-600 text-ink-200 text-sm rounded px-2 py-1.5 border border-ink-500 focus:outline-none focus:border-purple-500" />
                 </div>
                 <div>
-                  <label class="text-xs text-gray-500 block mb-1" x-text="'Daily Loss (' + cfg.baseCurrency + ')'"></label>
+                  <label class="text-xs text-ink-400 block mb-1" x-text="'Daily Loss (' + cfg.baseCurrency + ')'"></label>
                   <input type="number" x-model.number="cfg.dailyLossLimit" @change="saveConfig(cfg)"
-                    class="w-full bg-gray-800 text-gray-200 text-sm rounded px-2 py-1.5 border border-gray-700 focus:outline-none focus:border-purple-500" />
+                    class="w-full bg-ink-600 text-ink-200 text-sm rounded px-2 py-1.5 border border-ink-500 focus:outline-none focus:border-purple-500" />
                 </div>
               </div>
               <div class="mt-3">
-                <label class="text-xs text-gray-500 block mb-1">Strategy / Goal</label>
+                <label class="text-xs text-ink-400 block mb-1">Strategy / Goal</label>
                 <input type="text" x-model="cfg.strategy" @change="saveConfig(cfg)"
                   :placeholder="'e.g. Conservative KAS accumulation, buy dips below $0.035'"
-                  class="w-full bg-gray-800 text-gray-200 text-sm rounded px-2 py-1.5 border border-gray-700 focus:outline-none focus:border-purple-500" />
+                  class="w-full bg-ink-600 text-ink-200 text-sm rounded px-2 py-1.5 border border-ink-500 focus:outline-none focus:border-purple-500" />
               </div>
             </div>
           </template>
@@ -1134,25 +1143,25 @@
       <!-- Portfolio Cards -->
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
         <!-- Total Value -->
-        <div class="bg-gray-900 rounded-xl p-4 border border-gray-800">
-          <div class="text-xs text-gray-500 uppercase tracking-wider">Total Value</div>
+        <div class="bg-ink-700 rounded-xl p-4 border border-ink-600">
+          <div class="text-xs text-ink-400 uppercase tracking-wider">Total Value</div>
           <div class="text-2xl font-bold mt-1" x-text="'$' + fmtNum(portfolio?.totalUsd)"></div>
         </div>
         <!-- KAS -->
-        <div class="bg-gray-900 rounded-xl p-4 border border-gray-800">
-          <div class="text-xs text-gray-500 uppercase tracking-wider">KAS</div>
+        <div class="bg-ink-700 rounded-xl p-4 border border-ink-600">
+          <div class="text-xs text-ink-400 uppercase tracking-wider">KAS</div>
           <div class="text-2xl font-bold mt-1 text-emerald-400" x-text="fmtBig(portfolio?.balances?.find(b => b.asset === 'KAS')?.free)"></div>
-          <div class="text-xs text-gray-500 mt-0.5" x-text="'≈ $' + fmtNum(portfolio?.kasValue)"></div>
+          <div class="text-xs text-ink-400 mt-0.5" x-text="'≈ $' + fmtNum(portfolio?.kasValue)"></div>
         </div>
         <!-- USDT -->
-        <div class="bg-gray-900 rounded-xl p-4 border border-gray-800">
-          <div class="text-xs text-gray-500 uppercase tracking-wider">USDT</div>
+        <div class="bg-ink-700 rounded-xl p-4 border border-ink-600">
+          <div class="text-xs text-ink-400 uppercase tracking-wider">USDT</div>
           <div class="text-2xl font-bold mt-1 text-yellow-400" x-text="fmtNum(portfolio?.balances?.find(b => b.asset === 'USDT')?.free || 0)"></div>
-          <div class="text-xs text-gray-500 mt-0.5">Available</div>
+          <div class="text-xs text-ink-400 mt-0.5">Available</div>
         </div>
         <!-- KAS Price -->
-        <div class="bg-gray-900 rounded-xl p-4 border border-gray-800">
-          <div class="text-xs text-gray-500 uppercase tracking-wider">KAS Price</div>
+        <div class="bg-ink-700 rounded-xl p-4 border border-ink-600">
+          <div class="text-xs text-ink-400 uppercase tracking-wider">KAS Price</div>
           <div class="text-2xl font-bold mt-1" x-text="'$' + fmtNum(portfolio?.market?.price, 5)"></div>
           <div class="text-xs mt-0.5"
             :class="(portfolio?.market?.change24h || 0) >= 0 ? 'price-up' : 'price-down'"
@@ -1161,40 +1170,40 @@
       </div>
 
       <!-- Performance Baseline -->
-      <div class="bg-gray-900 rounded-xl border border-gray-800 p-4">
+      <div class="bg-ink-700 rounded-xl border border-ink-600 p-4">
         <div class="flex items-center justify-between mb-3">
-          <span class="text-sm font-medium text-gray-400">Performance Baseline</span>
+          <span class="text-sm font-medium text-ink-400">Performance Baseline</span>
           <button @click="createBaseline()" :disabled="baselineLoading"
             class="text-xs px-3 py-1 rounded bg-purple-600/20 text-purple-400 hover:bg-purple-600/40"
             x-text="baselineLoading ? '...' : baselines.length ? '⟳ Reset' : '+ Set Baseline'"></button>
         </div>
 
         <!-- No baseline -->
-        <div x-show="baselines.length === 0" class="text-xs text-gray-600 text-center py-4">
+        <div x-show="baselines.length === 0" class="text-xs text-ink-500 text-center py-4">
           No baseline set. Click "Set Baseline" to start tracking performance from current holdings.
         </div>
 
         <!-- Active baselines — one card per agent -->
         <div class="space-y-3">
           <template x-for="b in baselines" :key="b.id">
-            <div class="bg-gray-800/50 rounded-lg p-3">
+            <div class="bg-ink-600/50 rounded-lg p-3">
               <!-- Agent name + Risk status -->
               <div class="flex items-center justify-between mb-2">
                 <div class="flex items-center space-x-2">
                   <span class="w-2 h-2 rounded-full"
                     :class="b.risk?.status === 'OK' ? 'bg-emerald-400' : b.risk?.status === 'WARNING' ? 'bg-yellow-400 animate-pulse' : 'bg-red-500 animate-pulse'"></span>
-                  <span class="text-sm font-bold text-gray-200" x-text="b.agent"></span>
+                  <span class="text-sm font-bold text-ink-200" x-text="b.agent"></span>
                   <span class="text-xs px-1.5 py-0.5 rounded" :class="b.risk?.status === 'OK' ? 'bg-emerald-900/30 text-emerald-400' : b.risk?.status === 'WARNING' ? 'bg-yellow-900/30 text-yellow-400' : 'bg-red-900/30 text-red-400'"
                     x-text="b.risk?.status"></span>
                 </div>
-                <button @click="settleBaseline(b.id)" class="text-xs text-gray-600 hover:text-gray-300">Settle</button>
+                <button @click="settleBaseline(b.id)" class="text-xs text-ink-500 hover:text-ink-300">Settle</button>
               </div>
               <!-- P&L + Holdings -->
               <div class="flex items-center justify-between">
                 <div>
-                  <div class="text-xs text-gray-500">Virtual Account</div>
-                  <div class="text-sm font-mono text-gray-300" x-text="(b.current?.kas > 0 ? b.current.kas.toLocaleString() + ' KAS' : '') + (b.current?.kas > 0 && b.current?.usdt > 0 ? ' + ' : '') + (b.current?.usdt > 0 ? '$' + b.current.usdt.toFixed(2) : '')"></div>
-                  <div class="text-xs text-gray-500" x-text="'≈ ' + (b.current?.equivalentKas?.toLocaleString() || '--') + ' KAS eq'"></div>
+                  <div class="text-xs text-ink-400">Virtual Account</div>
+                  <div class="text-sm font-mono text-ink-300" x-text="(b.current?.kas > 0 ? b.current.kas.toLocaleString() + ' KAS' : '') + (b.current?.kas > 0 && b.current?.usdt > 0 ? ' + ' : '') + (b.current?.usdt > 0 ? '$' + b.current.usdt.toFixed(2) : '')"></div>
+                  <div class="text-xs text-ink-400" x-text="'≈ ' + (b.current?.equivalentKas?.toLocaleString() || '--') + ' KAS eq'"></div>
                 </div>
                 <div class="text-right">
                   <div class="text-lg font-bold" :class="(b.pnl?.kas || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'"
@@ -1204,7 +1213,7 @@
                 </div>
               </div>
               <!-- Baseline info -->
-              <div class="flex items-center justify-between mt-2 text-xs text-gray-600">
+              <div class="flex items-center justify-between mt-2 text-xs text-ink-500">
                 <span x-text="'Base: ' + b.baseline?.equivalentKas?.toLocaleString() + ' KAS @ $' + b.baseline?.kasPrice?.toFixed(5)"></span>
                 <span x-text="new Date(b.baseline?.createdAt).toLocaleString()"></span>
               </div>
@@ -1214,11 +1223,11 @@
       </div>
 
       <!-- Price Chart (SVG Line + Labels) -->
-      <div class="bg-gray-900 rounded-xl p-4 border border-gray-800">
+      <div class="bg-ink-700 rounded-xl p-4 border border-ink-600">
         <div class="flex items-center justify-between mb-3">
-          <span class="text-sm font-medium text-gray-400">KAS/USDT — 72h</span>
+          <span class="text-sm font-medium text-ink-400">KAS/USDT — 72h</span>
           <div class="flex items-center space-x-3">
-            <span class="text-xs text-gray-600" x-text="portfolio?.market ? fmtNum(portfolio.market.low24h, 5) + ' — ' + fmtNum(portfolio.market.high24h, 5) + ' (24h)' : ''"></span>
+            <span class="text-xs text-ink-500" x-text="portfolio?.market ? fmtNum(portfolio.market.low24h, 5) + ' — ' + fmtNum(portfolio.market.high24h, 5) + ' (24h)' : ''"></span>
             <span class="text-xs font-mono" :class="(portfolio?.market?.change24h || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'"
               x-text="((portfolio?.market?.change24h || 0) >= 0 ? '+' : '') + fmtNum(portfolio?.market?.change24h) + '%'"></span>
           </div>
@@ -1227,9 +1236,9 @@
         <div class="flex" x-show="pricePath()">
           <!-- Y-axis price labels -->
           <div class="flex flex-col justify-between text-right pr-2 py-1" style="width: 60px; height: 140px;">
-            <span class="text-xs font-mono text-gray-500" x-text="portfolio?.chart?.length ? '$' + Math.max(...portfolio.chart.map(d=>d.h)).toFixed(4) : ''"></span>
-            <span class="text-xs font-mono text-gray-500" x-text="portfolio?.chart?.length ? '$' + ((Math.max(...portfolio.chart.map(d=>d.h)) + Math.min(...portfolio.chart.map(d=>d.l))) / 2).toFixed(4) : ''"></span>
-            <span class="text-xs font-mono text-gray-500" x-text="portfolio?.chart?.length ? '$' + Math.min(...portfolio.chart.map(d=>d.l)).toFixed(4) : ''"></span>
+            <span class="text-xs font-mono text-ink-400" x-text="portfolio?.chart?.length ? '$' + Math.max(...portfolio.chart.map(d=>d.h)).toFixed(4) : ''"></span>
+            <span class="text-xs font-mono text-ink-400" x-text="portfolio?.chart?.length ? '$' + ((Math.max(...portfolio.chart.map(d=>d.h)) + Math.min(...portfolio.chart.map(d=>d.l))) / 2).toFixed(4) : ''"></span>
+            <span class="text-xs font-mono text-ink-400" x-text="portfolio?.chart?.length ? '$' + Math.min(...portfolio.chart.map(d=>d.l)).toFixed(4) : ''"></span>
           </div>
           <div class="flex-1">
             <svg viewBox="0 0 600 140" class="w-full" style="height: 140px; cursor: crosshair;"
@@ -1294,7 +1303,7 @@
               </g>
             </svg>
             <!-- X-axis time labels -->
-            <div class="flex justify-between text-xs text-gray-600 mt-1 font-mono">
+            <div class="flex justify-between text-xs text-ink-500 mt-1 font-mono">
               <span x-text="portfolio?.chart?.[0]?.t ? new Date(portfolio.chart[0].t).toLocaleString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : ''"></span>
               <span x-text="portfolio?.chart?.length > 36 ? new Date(portfolio.chart[Math.floor(portfolio.chart.length/3)].t).toLocaleString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : ''"></span>
               <span x-text="portfolio?.chart?.length > 36 ? new Date(portfolio.chart[Math.floor(portfolio.chart.length*2/3)].t).toLocaleString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : ''"></span>
@@ -1305,8 +1314,8 @@
       </div>
 
       <!-- Volume Bars (original mini-chart) -->
-      <div class="bg-gray-900 rounded-xl p-4 border border-gray-800">
-        <div class="text-sm font-medium text-gray-400 mb-2">Volume — 72h</div>
+      <div class="bg-ink-700 rounded-xl p-4 border border-ink-600">
+        <div class="text-sm font-medium text-ink-400 mb-2">Volume — 72h</div>
         <div class="mini-chart">
           <template x-for="(bar, i) in chartBars()" :key="i">
             <div class="bar" :style="'height:' + Math.max(bar.height, 2) + '%'"
@@ -1320,81 +1329,81 @@
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 
         <!-- Orderbook Depth -->
-        <div class="bg-gray-900 rounded-xl p-4 border border-gray-800">
-          <div class="text-sm font-medium text-gray-400 mb-3">Order Book (MEXC)</div>
+        <div class="bg-ink-700 rounded-xl p-4 border border-ink-600">
+          <div class="text-sm font-medium text-ink-400 mb-3">Order Book (MEXC)</div>
           <div x-show="orderbook" class="space-y-0.5">
             <!-- Asks (sell walls) — reversed so cheapest is at bottom -->
-            <div class="text-xs text-gray-600 mb-1">Sell</div>
+            <div class="text-xs text-ink-500 mb-1">Sell</div>
             <template x-for="ask in depthAsks().reverse()" :key="ask.price">
               <div class="flex items-center text-sm h-6 relative">
                 <div class="absolute inset-0 bg-red-500/15 rounded-sm" :style="'width:' + ask.pct + '%'"></div>
                 <span class="relative z-10 w-24 font-mono text-red-400" x-text="ask.price.toFixed(5)"></span>
-                <span class="relative z-10 flex-1 text-right font-mono font-medium text-gray-300"
+                <span class="relative z-10 flex-1 text-right font-mono font-medium text-ink-300"
                   x-text="ask.qty >= 1e6 ? (ask.qty/1e6).toFixed(1)+'M' : ask.qty >= 1e3 ? (ask.qty/1e3).toFixed(1)+'K' : ask.qty.toFixed(0)"></span>
               </div>
             </template>
             <!-- Spread -->
-            <div class="text-center py-1.5 border-y border-gray-800 my-1">
-              <span class="text-xs text-gray-500">Spread </span>
+            <div class="text-center py-1.5 border-y border-ink-600 my-1">
+              <span class="text-xs text-ink-400">Spread </span>
               <span class="text-sm text-yellow-400 font-mono font-medium" x-text="orderbook?.asks?.[0] && orderbook?.bids?.[0] ? (parseFloat(orderbook.asks[0][0]) - parseFloat(orderbook.bids[0][0])).toFixed(6) : '--'"></span>
             </div>
             <!-- Bids (buy walls) -->
-            <div class="text-xs text-gray-600 mb-1">Buy</div>
+            <div class="text-xs text-ink-500 mb-1">Buy</div>
             <template x-for="bid in depthBids()" :key="bid.price">
               <div class="flex items-center text-sm h-6 relative">
                 <div class="absolute inset-0 bg-emerald-500/15 rounded-sm" :style="'width:' + bid.pct + '%'"></div>
                 <span class="relative z-10 w-24 font-mono text-emerald-400" x-text="bid.price.toFixed(5)"></span>
-                <span class="relative z-10 flex-1 text-right font-mono font-medium text-gray-300"
+                <span class="relative z-10 flex-1 text-right font-mono font-medium text-ink-300"
                   x-text="bid.qty >= 1e6 ? (bid.qty/1e6).toFixed(1)+'M' : bid.qty >= 1e3 ? (bid.qty/1e3).toFixed(1)+'K' : bid.qty.toFixed(0)"></span>
               </div>
             </template>
           </div>
-          <div x-show="!orderbook" class="text-xs text-gray-600 text-center py-8">Loading orderbook...</div>
+          <div x-show="!orderbook" class="text-xs text-ink-500 text-center py-8">Loading orderbook...</div>
         </div>
 
         <!-- Chain Fundamentals -->
-        <div class="bg-gray-900 rounded-xl p-4 border border-gray-800">
-          <div class="text-sm font-medium text-gray-400 mb-3">Kaspa Blockchain</div>
+        <div class="bg-ink-700 rounded-xl p-4 border border-ink-600">
+          <div class="text-sm font-medium text-ink-400 mb-3">Kaspa Blockchain</div>
           <template x-if="fundamentals?.available">
             <div class="space-y-3">
               <div class="grid grid-cols-2 gap-3">
                 <div>
-                  <div class="text-xs text-gray-500">Hashrate</div>
+                  <div class="text-xs text-ink-400">Hashrate</div>
                   <div class="text-lg font-bold text-blue-400" x-text="fmtExp(fundamentals.latest.hashrate) + ' H/s'"></div>
                   <div class="text-xs" :class="fundamentals.trend1h?.hashrateChange?.startsWith('-') ? 'text-red-400' : 'text-emerald-400'"
                     x-text="fundamentals.trend1h?.hashrateChange ? '1h: ' + fundamentals.trend1h.hashrateChange : ''"></div>
                 </div>
                 <div>
-                  <div class="text-xs text-gray-500">Difficulty</div>
+                  <div class="text-xs text-ink-400">Difficulty</div>
                   <div class="text-lg font-bold text-purple-400" x-text="fmtExp(fundamentals.latest.difficulty)"></div>
                   <div class="text-xs" :class="fundamentals.trend1h?.difficultyChange?.startsWith('-') ? 'text-red-400' : 'text-emerald-400'"
                     x-text="fundamentals.trend1h?.difficultyChange ? '1h: ' + fundamentals.trend1h.difficultyChange : ''"></div>
                 </div>
                 <div>
-                  <div class="text-xs text-gray-500">Circulating</div>
+                  <div class="text-xs text-ink-400">Circulating</div>
                   <div class="text-lg font-bold" x-text="fundamentals.latest.circulatingSupply ? (fundamentals.latest.circulatingSupply / 1e9).toFixed(2) + 'B' : '--'"></div>
                   <div class="text-xs text-yellow-400" x-text="fundamentals.latest.circulatingSupply && fundamentals.latest.maxSupply ? (fundamentals.latest.circulatingSupply / fundamentals.latest.maxSupply * 100).toFixed(1) + '% mined' : ''"></div>
                 </div>
                 <div>
-                  <div class="text-xs text-gray-500">DAG Tips</div>
+                  <div class="text-xs text-ink-400">DAG Tips</div>
                   <div class="text-lg font-bold" x-text="fundamentals.latest.tipsCount || '--'"></div>
-                  <div class="text-xs text-gray-500" x-text="'Blocks: ' + (fundamentals.latest.blockCount?.toLocaleString() || '--')"></div>
+                  <div class="text-xs text-ink-400" x-text="'Blocks: ' + (fundamentals.latest.blockCount?.toLocaleString() || '--')"></div>
                 </div>
               </div>
               <!-- Mined % progress bar -->
               <div x-show="fundamentals.latest.circulatingSupply && fundamentals.latest.maxSupply">
-                <div class="flex justify-between text-xs text-gray-500 mb-1">
+                <div class="flex justify-between text-xs text-ink-400 mb-1">
                   <span>Supply Mined</span>
                   <span x-text="(fundamentals.latest.circulatingSupply / fundamentals.latest.maxSupply * 100).toFixed(1) + '%'"></span>
                 </div>
-                <div class="w-full h-2 bg-gray-800 rounded-full overflow-hidden">
+                <div class="w-full h-2 bg-ink-600 rounded-full overflow-hidden">
                   <div class="h-full bg-gradient-to-r from-emerald-500 to-yellow-500 rounded-full transition-all"
                     :style="'width:' + (fundamentals.latest.circulatingSupply / fundamentals.latest.maxSupply * 100) + '%'"></div>
                 </div>
               </div>
             </div>
           </template>
-          <div x-show="!fundamentals?.available" class="text-xs text-gray-600 text-center py-8">
+          <div x-show="!fundamentals?.available" class="text-xs text-ink-500 text-center py-8">
             <span x-text="fundamentals?.message || 'Loading chain data...'"></span>
           </div>
         </div>
@@ -1404,14 +1413,14 @@
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 
         <!-- Whale Alert Feed -->
-        <div class="bg-gray-900 rounded-xl p-4 border border-gray-800">
+        <div class="bg-ink-700 rounded-xl p-4 border border-ink-600">
           <div class="flex items-center justify-between mb-3">
-            <span class="text-sm font-medium text-gray-400">Whale Alerts</span>
-            <span class="text-xs text-gray-600" x-text="whaleAlerts.length > 0 ? whaleAlerts.length + ' recent' : 'monitoring...'"></span>
+            <span class="text-sm font-medium text-ink-400">Whale Alerts</span>
+            <span class="text-xs text-ink-500" x-text="whaleAlerts.length > 0 ? whaleAlerts.length + ' recent' : 'monitoring...'"></span>
           </div>
           <div x-show="whaleAlerts.length > 0" class="space-y-1.5 max-h-48 overflow-y-auto">
             <template x-for="alert in whaleAlerts" :key="alert.timestamp">
-              <div class="flex items-center justify-between text-xs px-2 py-1.5 rounded bg-gray-800/50">
+              <div class="flex items-center justify-between text-xs px-2 py-1.5 rounded bg-ink-600/50">
                 <div class="flex items-center space-x-2">
                   <span class="w-1.5 h-1.5 rounded-full"
                     :class="alert.direction === 'INFLOW' ? 'bg-emerald-400' : alert.direction === 'OUTFLOW' ? 'bg-red-400' : 'bg-yellow-400'"></span>
@@ -1419,46 +1428,46 @@
                     x-text="alert.direction"></span>
                   <span class="font-mono text-white" x-text="fmtBig(alert.amountKas) + ' KAS'"></span>
                 </div>
-                <div class="flex items-center space-x-2 text-gray-500">
+                <div class="flex items-center space-x-2 text-ink-400">
                   <span x-text="alert.label || alert.address?.slice(-8)"></span>
-                  <span class="text-gray-600" x-text="alert.timestamp ? new Date(alert.timestamp).toLocaleTimeString() : ''"></span>
+                  <span class="text-ink-500" x-text="alert.timestamp ? new Date(alert.timestamp).toLocaleTimeString() : ''"></span>
                 </div>
               </div>
             </template>
           </div>
-          <div x-show="whaleAlerts.length === 0" class="text-xs text-gray-600 text-center py-6">
+          <div x-show="whaleAlerts.length === 0" class="text-xs text-ink-500 text-center py-6">
             No large transfers detected yet. Threshold: 100K KAS.
           </div>
         </div>
 
         <!-- Exchange + Whale Holdings -->
-        <div class="bg-gray-900 rounded-xl p-4 border border-gray-800">
+        <div class="bg-ink-700 rounded-xl p-4 border border-ink-600">
           <div class="flex items-center justify-between mb-3">
-            <span class="text-sm font-medium text-gray-400">Holdings Tracker</span>
-            <span class="text-xs text-gray-600" x-text="whaleActivity?.summary ? whaleActivity.summary.trackedAddresses + ' tracked' : ''"></span>
+            <span class="text-sm font-medium text-ink-400">Holdings Tracker</span>
+            <span class="text-xs text-ink-500" x-text="whaleActivity?.summary ? whaleActivity.summary.trackedAddresses + ' tracked' : ''"></span>
           </div>
           <template x-if="whaleActivity?.summary">
             <div class="space-y-3">
               <!-- Summary -->
               <div class="grid grid-cols-2 gap-2 text-center">
-                <div class="bg-gray-800/50 rounded-lg p-2">
-                  <div class="text-xs text-gray-500">Exchange Total</div>
+                <div class="bg-ink-600/50 rounded-lg p-2">
+                  <div class="text-xs text-ink-400">Exchange Total</div>
                   <div class="text-sm font-bold text-red-400" x-text="fmtBig(whaleActivity.summary.exchangeBalance) + ' KAS'"></div>
                 </div>
-                <div class="bg-gray-800/50 rounded-lg p-2">
-                  <div class="text-xs text-gray-500">Whale Total</div>
+                <div class="bg-ink-600/50 rounded-lg p-2">
+                  <div class="text-xs text-ink-400">Whale Total</div>
                   <div class="text-sm font-bold text-blue-400" x-text="fmtBig(whaleActivity.summary.whaleBalance) + ' KAS'"></div>
                 </div>
               </div>
               <!-- Top holders list -->
               <div class="space-y-1 max-h-36 overflow-y-auto">
                 <template x-for="ex in (whaleActivity?.exchanges || []).slice(0, 5)" :key="ex.address">
-                  <div class="flex items-center justify-between text-xs px-2 py-1 rounded bg-gray-800/30">
-                    <span class="text-gray-300" x-text="ex.label"></span>
+                  <div class="flex items-center justify-between text-xs px-2 py-1 rounded bg-ink-600/30">
+                    <span class="text-ink-300" x-text="ex.label"></span>
                     <div class="flex items-center space-x-2">
-                      <span class="font-mono text-gray-400" x-text="fmtBig(ex.balance)"></span>
+                      <span class="font-mono text-ink-400" x-text="fmtBig(ex.balance)"></span>
                       <span x-show="ex.changePct !== null" class="text-xs"
-                        :class="ex.changePct > 0 ? 'text-emerald-400' : ex.changePct < 0 ? 'text-red-400' : 'text-gray-600'"
+                        :class="ex.changePct > 0 ? 'text-emerald-400' : ex.changePct < 0 ? 'text-red-400' : 'text-ink-500'"
                         x-text="(ex.changePct > 0 ? '+' : '') + ex.changePct + '%'"></span>
                     </div>
                   </div>
@@ -1466,52 +1475,52 @@
               </div>
             </div>
           </template>
-          <div x-show="!whaleActivity?.summary" class="text-xs text-gray-600 text-center py-6">Loading whale data...</div>
+          <div x-show="!whaleActivity?.summary" class="text-xs text-ink-500 text-center py-6">Loading whale data...</div>
         </div>
       </div>
 
       <!-- Chain Intelligence -->
-      <div x-show="chainData" class="bg-gray-900 rounded-xl border border-gray-800 p-4">
+      <div x-show="chainData" class="bg-ink-700 rounded-xl border border-ink-600 p-4">
         <div class="flex items-center justify-between mb-3">
-          <span class="text-sm font-medium text-gray-400">Chain Intelligence (KANet)</span>
-          <span class="text-xs text-gray-600">Scout-scanned</span>
+          <span class="text-sm font-medium text-ink-400">Chain Intelligence (KANet)</span>
+          <span class="text-xs text-ink-500">Scout-scanned</span>
         </div>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
           <!-- Activity 24h -->
           <div>
-            <div class="text-xs text-gray-500">Activity (24h)</div>
+            <div class="text-xs text-ink-400">Activity (24h)</div>
             <div class="text-lg font-bold" x-text="chainData?.activity?.last24h?.toLocaleString() || '--'"></div>
             <div class="text-xs" :class="(chainData?.activity?.weekTrend || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'"
               x-text="chainData?.activity?.weekTrend != null ? 'WoW ' + (chainData.activity.weekTrend >= 0 ? '+' : '') + chainData.activity.weekTrend + '%' : ''"></div>
           </div>
           <!-- Active Addresses -->
           <div>
-            <div class="text-xs text-gray-500">Active Addresses</div>
+            <div class="text-xs text-ink-400">Active Addresses</div>
             <div class="text-lg font-bold" x-text="chainData?.addresses?.active || '--'"></div>
             <div class="text-xs text-emerald-400" x-text="chainData?.addresses?.new24h > 0 ? '+' + chainData.addresses.new24h + ' new (24h)' : ''"></div>
           </div>
           <!-- Protocols -->
           <div>
-            <div class="text-xs text-gray-500">Comms / Handshakes</div>
+            <div class="text-xs text-ink-400">Comms / Handshakes</div>
             <div class="text-lg font-bold" x-text="(chainData?.activity?.protocols?.comm || 0).toLocaleString()"></div>
-            <div class="text-xs text-gray-500" x-text="'HS: ' + (chainData?.activity?.protocols?.handshake || 0)"></div>
+            <div class="text-xs text-ink-400" x-text="'HS: ' + (chainData?.activity?.protocols?.handshake || 0)"></div>
           </div>
           <!-- Ecosystem -->
           <div>
-            <div class="text-xs text-gray-500">Agent Cards</div>
+            <div class="text-xs text-ink-400">Agent Cards</div>
             <div class="text-lg font-bold" x-text="chainData?.ecosystem?.agentCards || 0"></div>
-            <div class="text-xs text-gray-500" x-text="'Broadcasts: ' + (chainData?.ecosystem?.broadcasts || 0)"></div>
+            <div class="text-xs text-ink-400" x-text="'Broadcasts: ' + (chainData?.ecosystem?.broadcasts || 0)"></div>
           </div>
         </div>
 
         <!-- Top Addresses -->
         <div x-show="chainData?.topAddresses?.length > 0">
-          <div class="text-xs text-gray-500 mb-1">Top Addresses</div>
+          <div class="text-xs text-ink-400 mb-1">Top Addresses</div>
           <div class="flex flex-wrap gap-2">
             <template x-for="addr in (chainData?.topAddresses || []).slice(0, 5)" :key="addr.address">
-              <span class="text-xs px-2 py-1 rounded bg-gray-800 text-gray-300">
+              <span class="text-xs px-2 py-1 rounded bg-ink-600 text-ink-300">
                 <span x-text="addr.name || addr.address.slice(-8)"></span>
-                <span class="text-gray-500 ml-1" x-text="addr.interactions"></span>
+                <span class="text-ink-400 ml-1" x-text="addr.interactions"></span>
               </span>
             </template>
           </div>
@@ -1519,7 +1528,7 @@
 
         <!-- Hourly Activity Sparkline -->
         <div x-show="chainData?.hourlyActivity?.length > 0" class="mt-3">
-          <div class="text-xs text-gray-500 mb-1">24h Activity Pattern</div>
+          <div class="text-xs text-ink-400 mb-1">24h Activity Pattern</div>
           <div class="flex items-end gap-px h-8">
             <template x-for="h in chainData?.hourlyActivity || []" :key="h.hour">
               <div class="flex-1 rounded-t bg-purple-500 opacity-60 hover:opacity-100 transition-opacity"
@@ -1531,22 +1540,22 @@
       </div>
 
       <!-- Agent Triggers Panel -->
-      <div x-show="triggers" class="bg-gray-900 rounded-xl border border-gray-800 p-4">
-        <div class="text-sm font-medium text-gray-400 mb-3">Agent Activation</div>
+      <div x-show="triggers" class="bg-ink-700 rounded-xl border border-ink-600 p-4">
+        <div class="text-sm font-medium text-ink-400 mb-3">Agent Activation</div>
         <div class="grid grid-cols-3 gap-4 mb-4">
           <!-- Proactive -->
-          <div class="bg-gray-800/50 rounded-lg p-3">
+          <div class="bg-ink-600/50 rounded-lg p-3">
             <div class="flex items-center justify-between mb-2">
-              <span class="text-xs font-medium text-gray-300">Proactive</span>
+              <span class="text-xs font-medium text-ink-300">Proactive</span>
               <label class="flex items-center cursor-pointer">
                 <div class="relative">
                   <input type="checkbox" :checked="triggers?.proactive?.enabled" @change="updateTrigger('proactiveEnabled', $event.target.checked)" class="sr-only" />
-                  <div class="w-7 h-3.5 rounded-full" :class="triggers?.proactive?.enabled ? 'bg-emerald-600' : 'bg-gray-700'"></div>
+                  <div class="w-7 h-3.5 rounded-full" :class="triggers?.proactive?.enabled ? 'bg-emerald-600' : 'bg-ink-500'"></div>
                   <div class="absolute top-0.5 left-0.5 w-2.5 h-2.5 rounded-full bg-white transition-transform" :class="triggers?.proactive?.enabled ? 'translate-x-3.5' : ''"></div>
                 </div>
               </label>
             </div>
-            <div class="text-xs text-gray-500" x-text="'Every ' + (triggers?.proactive?.intervalMin || 60) + ' min'"></div>
+            <div class="text-xs text-ink-400" x-text="'Every ' + (triggers?.proactive?.intervalMin || 60) + ' min'"></div>
             <button @click="fireTrigger('proactive')" :disabled="triggerRunning==='proactiveall'"
               class="mt-2 w-full text-xs px-2 py-1 rounded bg-purple-600/20 text-purple-400 hover:bg-purple-600/40">
               <span x-show="triggerRunning!=='proactiveall'">Run Now</span>
@@ -1554,18 +1563,18 @@
             </button>
           </div>
           <!-- Reflection -->
-          <div class="bg-gray-800/50 rounded-lg p-3">
+          <div class="bg-ink-600/50 rounded-lg p-3">
             <div class="flex items-center justify-between mb-2">
-              <span class="text-xs font-medium text-gray-300">Reflection</span>
+              <span class="text-xs font-medium text-ink-300">Reflection</span>
               <label class="flex items-center cursor-pointer">
                 <div class="relative">
                   <input type="checkbox" :checked="triggers?.reflection?.enabled" @change="updateTrigger('reflectionEnabled', $event.target.checked)" class="sr-only" />
-                  <div class="w-7 h-3.5 rounded-full" :class="triggers?.reflection?.enabled ? 'bg-emerald-600' : 'bg-gray-700'"></div>
+                  <div class="w-7 h-3.5 rounded-full" :class="triggers?.reflection?.enabled ? 'bg-emerald-600' : 'bg-ink-500'"></div>
                   <div class="absolute top-0.5 left-0.5 w-2.5 h-2.5 rounded-full bg-white transition-transform" :class="triggers?.reflection?.enabled ? 'translate-x-3.5' : ''"></div>
                 </div>
               </label>
             </div>
-            <div class="text-xs text-gray-500" x-text="'Every ' + (triggers?.reflection?.intervalHours || 24) + 'h'"></div>
+            <div class="text-xs text-ink-400" x-text="'Every ' + (triggers?.reflection?.intervalHours || 24) + 'h'"></div>
             <button @click="fireTrigger('reflection')" :disabled="triggerRunning==='reflectionall'"
               class="mt-2 w-full text-xs px-2 py-1 rounded bg-blue-600/20 text-blue-400 hover:bg-blue-600/40">
               <span x-show="triggerRunning!=='reflectionall'">Run Now</span>
@@ -1573,23 +1582,23 @@
             </button>
           </div>
           <!-- Price Alert -->
-          <div class="bg-gray-800/50 rounded-lg p-3">
+          <div class="bg-ink-600/50 rounded-lg p-3">
             <div class="flex items-center justify-between mb-2">
-              <span class="text-xs font-medium text-gray-300">Price Alert</span>
+              <span class="text-xs font-medium text-ink-300">Price Alert</span>
               <label class="flex items-center cursor-pointer">
                 <div class="relative">
                   <input type="checkbox" :checked="triggers?.priceAlert?.enabled" @change="updateTrigger('priceAlertEnabled', $event.target.checked)" class="sr-only" />
-                  <div class="w-7 h-3.5 rounded-full" :class="triggers?.priceAlert?.enabled ? 'bg-emerald-600' : 'bg-gray-700'"></div>
+                  <div class="w-7 h-3.5 rounded-full" :class="triggers?.priceAlert?.enabled ? 'bg-emerald-600' : 'bg-ink-500'"></div>
                   <div class="absolute top-0.5 left-0.5 w-2.5 h-2.5 rounded-full bg-white transition-transform" :class="triggers?.priceAlert?.enabled ? 'translate-x-3.5' : ''"></div>
                 </div>
               </label>
             </div>
             <div class="flex items-center space-x-1 mt-1">
-              <span class="text-xs text-gray-500">±</span>
+              <span class="text-xs text-ink-400">±</span>
               <input type="number" :value="triggers?.priceAlert?.thresholdPct || 3" step="0.5" min="0.5" max="20"
                 @change="updateTrigger('priceThresholdPct', $event.target.value)"
-                class="w-14 bg-gray-700 text-gray-200 text-xs rounded px-1.5 py-0.5 border border-gray-600 focus:outline-none focus:border-purple-500" />
-              <span class="text-xs text-gray-500">%</span>
+                class="w-14 bg-ink-500 text-ink-200 text-xs rounded px-1.5 py-0.5 border border-ink-400 focus:outline-none focus:border-purple-500" />
+              <span class="text-xs text-ink-400">%</span>
             </div>
             <template x-if="triggers?.priceAlert?.baselinePrice">
               <div class="text-xs mt-1.5 space-y-0.5">
@@ -1598,8 +1607,8 @@
                   <span class="text-red-400 font-mono" x-text="'$' + (triggers.priceAlert.baselinePrice * (1 + (triggers.priceAlert.thresholdPct || 3) / 100)).toFixed(5)"></span>
                 </div>
                 <div class="flex justify-between">
-                  <span class="text-gray-500">Base</span>
-                  <span class="text-gray-400 font-mono" x-text="'$' + triggers.priceAlert.baselinePrice.toFixed(5)"></span>
+                  <span class="text-ink-400">Base</span>
+                  <span class="text-ink-400 font-mono" x-text="'$' + triggers.priceAlert.baselinePrice.toFixed(5)"></span>
                 </div>
                 <div class="flex justify-between">
                   <span class="text-emerald-400">Buy</span>
@@ -1613,12 +1622,12 @@
         <!-- Agent status rows -->
         <div class="space-y-1">
           <template x-for="ag in (triggers?.agents || [])" :key="ag.relayId">
-            <div class="flex items-center justify-between text-xs px-2 py-1.5 rounded bg-gray-800/30">
+            <div class="flex items-center justify-between text-xs px-2 py-1.5 rounded bg-ink-600/30">
               <div class="flex items-center space-x-2">
                 <span class="w-1.5 h-1.5 rounded-full" :class="ag.hasMind ? 'bg-emerald-400' : 'bg-red-400'"></span>
-                <span class="text-gray-300 font-medium" x-text="ag.name"></span>
+                <span class="text-ink-300 font-medium" x-text="ag.name"></span>
               </div>
-              <div class="flex items-center space-x-3 text-gray-500">
+              <div class="flex items-center space-x-3 text-ink-400">
                 <span x-show="ag.lastProactive" x-text="'P: ' + new Date(ag.lastProactive).toLocaleTimeString()"></span>
                 <span x-show="ag.lastReflection" x-text="'R: ' + new Date(ag.lastReflection).toLocaleTimeString()"></span>
                 <span x-show="!ag.lastProactive && !ag.lastReflection">awaiting first cycle</span>
@@ -1629,20 +1638,20 @@
       </div>
 
       <!-- Balances Table -->
-      <div class="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
-        <div class="px-4 py-3 border-b border-gray-800">
-          <span class="text-sm font-medium text-gray-400" x-text="(portfolio?.exchange || 'Exchange') + ' Balances'"></span>
+      <div class="bg-ink-700 rounded-xl border border-ink-600 overflow-hidden">
+        <div class="px-4 py-3 border-b border-ink-600">
+          <span class="text-sm font-medium text-ink-400" x-text="(portfolio?.exchange || 'Exchange') + ' Balances'"></span>
         </div>
         <table class="w-full text-sm">
-          <thead class="text-xs text-gray-500 uppercase">
+          <thead class="text-xs text-ink-400 uppercase">
             <tr><th class="px-4 py-2 text-left">Asset</th><th class="px-4 py-2 text-right">Free</th><th class="px-4 py-2 text-right">Locked</th></tr>
           </thead>
           <tbody>
             <template x-for="b in (portfolio?.balances || [])" :key="b.asset">
-              <tr class="border-t border-gray-800/50 hover:bg-gray-800/30">
+              <tr class="border-t border-ink-600/50 hover:bg-ink-600/30">
                 <td class="px-4 py-2 font-medium" x-text="b.asset"></td>
                 <td class="px-4 py-2 text-right font-mono" x-text="fmtNum(b.free, b.asset === 'KAS' ? 2 : 6)"></td>
-                <td class="px-4 py-2 text-right font-mono text-gray-500" x-text="fmtNum(b.locked, 6)"></td>
+                <td class="px-4 py-2 text-right font-mono text-ink-400" x-text="fmtNum(b.locked, 6)"></td>
               </tr>
             </template>
           </tbody>
@@ -1657,11 +1666,11 @@
 
     <!-- Right: Agent Advisor (4 cols) -->
     <div class="col-span-12 lg:col-span-4">
-      <div class="bg-gray-900 rounded-xl border border-gray-800 flex flex-col" style="height: calc(100vh - 160px)">
+      <div class="bg-ink-700 rounded-xl border border-ink-600 flex flex-col" style="height: calc(100vh - 160px)">
         <!-- Agent selector -->
-        <div class="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
-          <span class="text-sm font-medium text-gray-400">Trading Advisor</span>
-          <select x-model="selectedAgent" @change="qtReady = false; qtResult = null; if (selectedAgent !== '__all__' && qtQty >= 100 && qtPreview) fetchPreview()" class="bg-gray-800 text-gray-200 text-xs rounded px-2 py-1 border border-gray-700">
+        <div class="px-4 py-3 border-b border-ink-600 flex items-center justify-between">
+          <span class="text-sm font-medium text-ink-400">Trading Advisor</span>
+          <select x-model="selectedAgent" @change="qtReady = false; qtResult = null; if (selectedAgent !== '__all__' && qtQty >= 100 && qtPreview) fetchPreview()" class="bg-ink-600 text-ink-200 text-xs rounded px-2 py-1 border border-ink-500">
             <template x-for="a in agents" :key="a.id">
               <option :value="a.id" x-text="a.name"></option>
             </template>
@@ -1670,24 +1679,24 @@
         </div>
 
         <!-- Quick Trade Panel -->
-        <div class="px-4 py-3 border-b border-gray-800">
+        <div class="px-4 py-3 border-b border-ink-600">
           <div class="flex items-center space-x-2">
             <button @click="qtSide = 'BUY'; qtReady = false; qtResult = null" class="flex-1 py-1.5 rounded text-xs font-bold transition-colors"
-              :class="qtSide === 'BUY' ? 'bg-emerald-600 text-white' : 'bg-gray-800 text-gray-500 hover:text-emerald-400'">BUY</button>
+              :class="qtSide === 'BUY' ? 'bg-emerald-600 text-white' : 'bg-ink-600 text-ink-400 hover:text-emerald-400'">BUY</button>
             <button @click="qtSide = 'SELL'; qtReady = false; qtResult = null" class="flex-1 py-1.5 rounded text-xs font-bold transition-colors"
-              :class="qtSide === 'SELL' ? 'bg-red-600 text-white' : 'bg-gray-800 text-gray-500 hover:text-red-400'">SELL</button>
+              :class="qtSide === 'SELL' ? 'bg-red-600 text-white' : 'bg-ink-600 text-ink-400 hover:text-red-400'">SELL</button>
             <input type="number" x-model.number="qtQty" placeholder="数量" min="100" step="100"
-              class="w-28 bg-gray-800 text-gray-200 text-xs rounded px-2 py-1.5 border border-gray-700 focus:outline-none focus:border-purple-500 font-mono text-right"
+              class="w-28 bg-ink-600 text-ink-200 text-xs rounded px-2 py-1.5 border border-ink-500 focus:outline-none focus:border-purple-500 font-mono text-right"
               @keydown.enter="submitQuickTrade()" @input="qtReady = false; qtResult = null" />
             <button @click="submitQuickTrade()" :disabled="asking || !qtQty || qtQty < 100"
               class="px-3 py-1.5 rounded text-xs font-medium transition-colors"
-              :class="(asking || !qtQty || qtQty < 100) ? 'bg-gray-700 text-gray-500 cursor-not-allowed' : 'bg-purple-600 text-white hover:bg-purple-700'">
+              :class="(asking || !qtQty || qtQty < 100) ? 'bg-ink-500 text-ink-400 cursor-not-allowed' : 'bg-purple-600 text-white hover:bg-purple-700'">
               <span x-show="!asking">Go</span>
               <span x-show="asking">...</span>
             </button>
           </div>
           <div class="flex items-center justify-between mt-1.5">
-            <span class="text-xs text-gray-600" x-text="selectedAgent === '__all__' ? '→ 咨询所有 Agent（选定一个后可执行）' : '→ ' + agentName() + ' 分析并执行'"></span>
+            <span class="text-xs text-ink-500" x-text="selectedAgent === '__all__' ? '→ 咨询所有 Agent（选定一个后可执行）' : '→ ' + agentName() + ' 分析并执行'"></span>
             <div class="flex items-center space-x-2">
               <span x-show="qtExecuting" class="text-xs text-purple-400 animate-pulse">执行中...</span>
               <span class="text-xs font-mono" :class="mode === 'LIVE' ? 'text-red-400' : 'text-yellow-400'" x-text="mode"></span>
@@ -1697,11 +1706,11 @@
           <div x-show="qtReady" x-transition class="mt-2 flex space-x-2">
             <button @click="executeQuickTrade()" :disabled="qtExecuting"
               class="flex-1 py-2 rounded text-sm font-bold transition-colors"
-              :class="qtExecuting ? 'bg-gray-800 text-gray-600 cursor-not-allowed' : mode === 'LIVE' ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-yellow-600 text-black hover:bg-yellow-500'"
+              :class="qtExecuting ? 'bg-ink-600 text-ink-500 cursor-not-allowed' : mode === 'LIVE' ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-yellow-600 text-black hover:bg-yellow-500'"
               x-text="qtExecuting ? '执行中...' : mode === 'LIVE' ? '⚡ 确认' : '▶ 模拟'">
             </button>
             <button @click="qtReady = false; qtPreview = null; qtResult = null"
-              class="px-4 py-2 rounded text-sm font-bold bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white transition-colors">
+              class="px-4 py-2 rounded text-sm font-bold bg-ink-600 text-ink-400 hover:bg-ink-500 hover:text-white transition-colors">
               取消
             </button>
           </div>
@@ -1725,15 +1734,15 @@
         <!-- Chat messages -->
         <div id="chat-scroll" class="flex-1 overflow-y-auto p-4 space-y-3">
           <!-- Welcome message -->
-          <div x-show="chatHistory.length === 0" class="text-center text-gray-600 mt-8">
+          <div x-show="chatHistory.length === 0" class="text-center text-ink-500 mt-8">
             <p class="text-sm">Ask <span class="text-purple-400" x-text="agentName()"></span> for trading advice</p>
-            <p class="text-xs mt-2 text-gray-700">Try: "Should I buy or sell KAS now?"</p>
+            <p class="text-xs mt-2 text-ink-600">Try: "Should I buy or sell KAS now?"</p>
           </div>
 
           <template x-for="(msg, i) in chatHistory" :key="i">
             <div class="flex" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
               <div class="max-w-[85%] rounded-lg px-3 py-2 text-sm"
-                :class="msg.role === 'user' ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-200'">
+                :class="msg.role === 'user' ? 'bg-purple-600 text-white' : 'bg-ink-600 text-ink-200'">
                 <template x-if="msg.thinking">
                   <div class="thinking-dots py-1"><span></span><span></span><span></span></div>
                 </template>
@@ -1749,14 +1758,14 @@
         </div>
 
         <!-- Input -->
-        <div class="px-4 py-3 border-t border-gray-800">
+        <div class="px-4 py-3 border-t border-ink-600">
           <div class="flex space-x-2">
             <input type="text" x-model="question" @keydown.enter="askAgent()"
               placeholder="Ask about KAS..."
-              class="flex-1 bg-gray-800 text-gray-200 text-sm rounded-lg px-3 py-2 border border-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-500" />
+              class="flex-1 bg-ink-600 text-ink-200 text-sm rounded-lg px-3 py-2 border border-ink-500 focus:outline-none focus:ring-1 focus:ring-purple-500" />
             <button @click="askAgent()" :disabled="asking || !question.trim()"
               class="px-3 py-2 rounded-lg text-sm font-medium transition-colors"
-              :class="asking ? 'bg-gray-700 text-gray-500' : 'bg-purple-600 text-white hover:bg-purple-700'">
+              :class="asking ? 'bg-ink-500 text-ink-400' : 'bg-purple-600 text-white hover:bg-purple-700'">
               Ask
             </button>
           </div>
@@ -1764,13 +1773,13 @@
           <!-- Quick questions -->
           <div class="flex flex-wrap gap-1.5 mt-2">
             <button @click="question = 'KAS market analysis'; askAgent()"
-              class="text-xs px-2 py-1 rounded bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white">Market Analysis</button>
+              class="text-xs px-2 py-1 rounded bg-ink-600 text-ink-400 hover:bg-ink-500 hover:text-white">Market Analysis</button>
             <button @click="question = 'Should I buy or sell KAS now?'; askAgent()"
-              class="text-xs px-2 py-1 rounded bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white">Buy or Sell?</button>
+              class="text-xs px-2 py-1 rounded bg-ink-600 text-ink-400 hover:bg-ink-500 hover:text-white">Buy or Sell?</button>
             <button @click="question = 'What does the on-chain data say about KAS demand?'; askAgent()"
-              class="text-xs px-2 py-1 rounded bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white">Chain Intel</button>
+              class="text-xs px-2 py-1 rounded bg-ink-600 text-ink-400 hover:bg-ink-500 hover:text-white">Chain Intel</button>
             <button @click="question = '当前订单簿深度如何？适合大单操作吗？'; askAgent()"
-              class="text-xs px-2 py-1 rounded bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white">Depth Check</button>
+              class="text-xs px-2 py-1 rounded bg-ink-600 text-ink-400 hover:bg-ink-500 hover:text-white">Depth Check</button>
           </div>
         </div>
       </div>
@@ -1918,28 +1927,28 @@
     }">
       <!-- 钱包管理（折叠，在资产上方） -->
       <button @click="showMarketSettings = !showMarketSettings"
-        class="text-sm text-gray-400 hover:text-white transition-colors mb-3">
+        class="text-sm text-ink-400 hover:text-white transition-colors mb-3">
         <span x-text="showMarketSettings ? '▼ 隐藏钱包管理' : '▶ 钱包管理'"></span>
       </button>
 
       <div x-show="showMarketSettings" x-transition class="space-y-3">
         <template x-for="a in agentAccounts" :key="a.id">
-          <div class="bg-gray-900 rounded-xl border border-gray-800 p-4">
+          <div class="bg-ink-700 rounded-xl border border-ink-600 p-4">
             <div class="flex items-center justify-between mb-3">
               <span class="text-sm font-semibold" x-text="a.name"></span>
             </div>
 
             <!-- Kaspa（Agent 身份，不能删除） -->
-            <div class="flex items-center justify-between py-1.5 border-b border-gray-800">
+            <div class="flex items-center justify-between py-1.5 border-b border-ink-600">
               <div class="flex items-center space-x-2 flex-1">
                 <span class="text-xs font-medium text-purple-400 w-12">KAS</span>
-                <span class="text-xs font-mono text-gray-300" x-text="a.wallets?.kaspa?.address?.slice(0,12) + '...' + a.wallets?.kaspa?.address?.slice(-8)"></span>
+                <span class="text-xs font-mono text-ink-300" x-text="a.wallets?.kaspa?.address?.slice(0,12) + '...' + a.wallets?.kaspa?.address?.slice(-8)"></span>
                 <span class="text-xs font-mono text-white font-semibold" x-text="(a.kas ?? 0).toFixed(3) + ' KAS'"></span>
               </div>
               <div class="flex items-center space-x-1">
-                <button @click="startWithdraw(a.id, { id: 'kas_' + a.id, chain: 'kas', address: a.wallets?.kaspa?.address })" class="text-xs text-gray-500 hover:text-blue-400 px-1">提取</button>
-                <button @click="copyAddr(a.wallets?.kaspa?.address)" class="text-xs text-gray-500 hover:text-white px-1">复制</button>
-                <button @click="toggleMnemonic(a.id)" class="text-xs text-gray-500 hover:text-yellow-400 px-1" x-text="showMnemonic[a.id] ? '隐藏' : '助记词'"></button>
+                <button @click="startWithdraw(a.id, { id: 'kas_' + a.id, chain: 'kas', address: a.wallets?.kaspa?.address })" class="text-xs text-ink-400 hover:text-blue-400 px-1">提取</button>
+                <button @click="copyAddr(a.wallets?.kaspa?.address)" class="text-xs text-ink-400 hover:text-white px-1">复制</button>
+                <button @click="toggleMnemonic(a.id)" class="text-xs text-ink-400 hover:text-yellow-400 px-1" x-text="showMnemonic[a.id] ? '隐藏' : '助记词'"></button>
               </div>
             </div>
             <div x-show="showMnemonic[a.id]" class="py-2 px-3 bg-yellow-900/20 border border-yellow-800/30 rounded text-xs font-mono text-yellow-300 break-all select-all" x-text="mnemonicData[a.id]"></div>
@@ -1948,11 +1957,11 @@
               <div class="py-2 px-3 bg-blue-900/10 border border-blue-800/30 rounded mt-1">
                 <div class="flex items-center space-x-2 text-xs">
                   <input type="text" x-model="withdrawing.toAddress" placeholder="Kaspa 目标地址"
-                    class="flex-1 bg-gray-800 text-white text-xs rounded px-2 py-1 border border-gray-700" />
+                    class="flex-1 bg-ink-600 text-white text-xs rounded px-2 py-1 border border-ink-500" />
                   <input type="text" x-model="withdrawing.amount" placeholder="KAS 数量"
-                    class="w-24 bg-gray-800 text-white text-xs rounded px-2 py-1 border border-gray-700" />
+                    class="w-24 bg-ink-600 text-white text-xs rounded px-2 py-1 border border-ink-500" />
                   <button @click="executeWithdraw()" class="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-xs">确认</button>
-                  <button @click="cancelWithdraw()" class="text-gray-500 hover:text-white text-xs">取消</button>
+                  <button @click="cancelWithdraw()" class="text-ink-400 hover:text-white text-xs">取消</button>
                 </div>
               </div>
             </template>
@@ -1960,18 +1969,18 @@
             <!-- 已有钱包（动态循环，只显示已创建的） -->
             <template x-for="w in (a.chainWallets || [])" :key="w.id">
               <div>
-                <div class="flex items-center justify-between py-1.5 border-b border-gray-800">
+                <div class="flex items-center justify-between py-1.5 border-b border-ink-600">
                   <div class="flex items-center space-x-2 flex-1">
-                    <span class="text-xs text-gray-500 w-12 uppercase" x-text="w.chain"></span>
-                    <span class="text-xs font-mono text-gray-300" x-text="w.address.slice(0,6) + '...' + w.address.slice(-4)"></span>
+                    <span class="text-xs text-ink-400 w-12 uppercase" x-text="w.chain"></span>
+                    <span class="text-xs font-mono text-ink-300" x-text="w.address.slice(0,6) + '...' + w.address.slice(-4)"></span>
                     <span class="text-xs font-mono text-green-400" x-text="w.balance !== null && w.balance !== undefined ? w.balance + ' USDT' : '0'"></span>
-                    <span x-show="w.label" class="text-xs text-gray-600" x-text="w.label"></span>
+                    <span x-show="w.label" class="text-xs text-ink-500" x-text="w.label"></span>
                   </div>
                   <div class="flex space-x-1">
-                    <button @click="copyAddr(w.address)" class="text-xs text-gray-500 hover:text-white px-1">复制</button>
-                    <button @click="startWithdraw(a.id, w)" class="text-xs text-gray-500 hover:text-blue-400 px-1">提取</button>
-                    <button @click="showPrivateKey(a.id, w.id)" class="text-xs text-gray-500 hover:text-yellow-400 px-1">私钥</button>
-                    <button @click="deleteWallet(a.id, w.id)" class="text-xs text-gray-500 hover:text-red-400 px-1">删除</button>
+                    <button @click="copyAddr(w.address)" class="text-xs text-ink-400 hover:text-white px-1">复制</button>
+                    <button @click="startWithdraw(a.id, w)" class="text-xs text-ink-400 hover:text-blue-400 px-1">提取</button>
+                    <button @click="showPrivateKey(a.id, w.id)" class="text-xs text-ink-400 hover:text-yellow-400 px-1">私钥</button>
+                    <button @click="deleteWallet(a.id, w.id)" class="text-xs text-ink-400 hover:text-red-400 px-1">删除</button>
                   </div>
                 </div>
                 <!-- Private key display -->
@@ -1986,11 +1995,11 @@
                   <div class="py-2 px-3 bg-blue-900/10 border border-blue-800/30 rounded mt-1">
                     <div class="flex items-center space-x-2 text-xs">
                       <input type="text" x-model="withdrawing.toAddress" placeholder="目标地址"
-                        class="flex-1 bg-gray-800 text-white text-xs rounded px-2 py-1 border border-gray-700" />
+                        class="flex-1 bg-ink-600 text-white text-xs rounded px-2 py-1 border border-ink-500" />
                       <input type="text" x-model="withdrawing.amount" placeholder="金额"
-                        class="w-24 bg-gray-800 text-white text-xs rounded px-2 py-1 border border-gray-700" />
+                        class="w-24 bg-ink-600 text-white text-xs rounded px-2 py-1 border border-ink-500" />
                       <button @click="executeWithdraw()" class="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-xs">确认</button>
-                      <button @click="cancelWithdraw()" class="text-gray-500 hover:text-white text-xs">取消</button>
+                      <button @click="cancelWithdraw()" class="text-ink-400 hover:text-white text-xs">取消</button>
                     </div>
                   </div>
                 </template>
@@ -2004,7 +2013,7 @@
               </template>
               <template x-if="showAddForm">
                 <div class="flex items-center space-x-2">
-                  <select x-model="addChain" class="bg-gray-800 text-white text-xs rounded px-2 py-1 border border-gray-700">
+                  <select x-model="addChain" class="bg-ink-600 text-white text-xs rounded px-2 py-1 border border-ink-500">
                     <option value="bnb">BNB Chain</option>
                     <option value="eth">Ethereum</option>
                     <option value="sol">Solana</option>
@@ -2012,7 +2021,7 @@
                   </select>
                   <button @click="createWallet(a.id, addChain); showAddForm = false" class="text-xs bg-purple-600 hover:bg-purple-700 text-white px-2 py-1 rounded">新建</button>
                   <button @click="importWallet(a.id, addChain); showAddForm = false" class="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded">导入</button>
-                  <button @click="showAddForm = false" class="text-xs text-gray-500 hover:text-white px-1">取消</button>
+                  <button @click="showAddForm = false" class="text-xs text-ink-400 hover:text-white px-1">取消</button>
                 </div>
               </template>
             </div>
@@ -2024,14 +2033,14 @@
       <div class="mb-4">
         <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
           <template x-for="a in agentAccounts" :key="a.id">
-            <div class="bg-gray-900 rounded-xl p-3 border border-gray-800">
+            <div class="bg-ink-700 rounded-xl p-3 border border-ink-600">
               <div class="text-sm font-semibold mb-1" x-text="a.name"></div>
               <div class="flex items-center space-x-1 text-xs">
                 <span class="text-white font-mono" x-text="(a.kas ?? 0).toFixed(2) + ' KAS'"></span>
               </div>
               <template x-for="w in (a.chainWallets || [])" :key="w.id">
                 <div class="flex items-center space-x-1 text-xs">
-                  <span class="text-gray-500 uppercase" x-text="w.chain"></span>
+                  <span class="text-ink-400 uppercase" x-text="w.chain"></span>
                   <span class="font-mono text-green-400" x-text="(w.balance !== null && w.balance !== undefined ? w.balance : 0) + ' USDT'"></span>
                 </div>
               </template>
@@ -2050,13 +2059,13 @@
           </template>
         </div>
         <!-- 资产总计 -->
-        <div class="mt-2 bg-gray-900/50 rounded-lg px-4 py-2 text-xs" x-data="{ unit: 'kas' }">
+        <div class="mt-2 bg-ink-700/50 rounded-lg px-4 py-2 text-xs" x-data="{ unit: 'kas' }">
           <div class="flex items-center justify-between">
             <div class="flex items-center space-x-2">
-              <span class="text-gray-500">总资产</span>
-              <div class="flex bg-gray-800 rounded p-0.5">
-                <button @click="unit = 'kas'" :class="unit === 'kas' ? 'bg-gray-700 text-white' : 'text-gray-500'" class="px-1.5 py-0.5 text-xs rounded">KAS</button>
-                <button @click="unit = 'usdt'" :class="unit === 'usdt' ? 'bg-gray-700 text-white' : 'text-gray-500'" class="px-1.5 py-0.5 text-xs rounded">USDT</button>
+              <span class="text-ink-400">总资产</span>
+              <div class="flex bg-ink-600 rounded p-0.5">
+                <button @click="unit = 'kas'" :class="unit === 'kas' ? 'bg-ink-500 text-white' : 'text-ink-400'" class="px-1.5 py-0.5 text-xs rounded">KAS</button>
+                <button @click="unit = 'usdt'" :class="unit === 'usdt' ? 'bg-ink-500 text-white' : 'text-ink-400'" class="px-1.5 py-0.5 text-xs rounded">USDT</button>
               </div>
             </div>
             <span x-show="unit === 'kas'" class="font-mono text-white font-semibold"
@@ -2069,14 +2078,14 @@
     </div>
 
     <!-- 行情 + 操作 -->
-    <div class="bg-gray-900 rounded-xl p-4 border border-gray-800 mb-6 flex items-center justify-between">
+    <div class="bg-ink-700 rounded-xl p-4 border border-ink-600 mb-6 flex items-center justify-between">
       <div class="flex items-center space-x-6">
         <div>
-          <span class="text-xs text-gray-500">KAS/USDT</span>
+          <span class="text-xs text-ink-400">KAS/USDT</span>
           <span class="text-xl font-bold text-white ml-2" x-text="portfolio?.market?.price ? '$' + portfolio.market.price.toFixed(6) : '—'"></span>
         </div>
         <div>
-          <span class="text-xs text-gray-500">24h</span>
+          <span class="text-xs text-ink-400">24h</span>
           <span class="text-sm ml-1" :class="(portfolio?.market?.change24h || 0) >= 0 ? 'text-green-400' : 'text-red-400'" x-text="(portfolio?.market?.change24h >= 0 ? '+' : '') + (portfolio?.market?.change24h || 0).toFixed(2) + '%'"></span>
         </div>
       </div>
@@ -2096,19 +2105,19 @@
     <div x-show="activeTradeInfo" x-transition class="bg-purple-900/20 border border-purple-800 rounded-xl p-4 mb-6">
       <div class="flex items-center justify-between mb-2">
         <h3 class="text-sm font-semibold text-purple-300">交易进行中</h3>
-        <button @click="activeTradeInfo = null" class="text-gray-500 hover:text-white text-xs">关闭</button>
+        <button @click="activeTradeInfo = null" class="text-ink-400 hover:text-white text-xs">关闭</button>
       </div>
-      <div class="text-sm text-gray-300 space-y-1">
+      <div class="text-sm text-ink-300 space-y-1">
         <p>已向对方发送接单邀约，请到 <a href="/chat" class="text-purple-400 underline">聊天页面</a> 继续协商。</p>
-        <p class="text-xs text-gray-500" x-text="'对方: ' + (activeTradeInfo?.peer || '—')"></p>
+        <p class="text-xs text-ink-400" x-text="'对方: ' + (activeTradeInfo?.peer || '—')"></p>
       </div>
     </div>
 
     <!-- Publish Form — Agent-guided -->
-    <div x-show="showPublishForm" x-transition class="bg-gray-900 rounded-xl border border-gray-800 p-6 mb-6">
+    <div x-show="showPublishForm" x-transition class="bg-ink-700 rounded-xl border border-ink-600 p-6 mb-6">
       <div class="flex items-center justify-between mb-2">
         <h2 class="text-lg font-semibold" x-text="publishForm.side === 'sell' ? '卖出 KAS' : '买入 KAS'"></h2>
-        <button @click="showPublishForm = false" class="text-gray-500 hover:text-white text-xl">&times;</button>
+        <button @click="showPublishForm = false" class="text-ink-400 hover:text-white text-xl">&times;</button>
       </div>
 
       <!-- Agent 建议 -->
@@ -2124,15 +2133,15 @@
       <div class="grid grid-cols-2 gap-4">
         <!-- Amount -->
         <div>
-          <label class="text-xs text-gray-500 block mb-1">数量 (KAS)</label>
+          <label class="text-xs text-ink-400 block mb-1">数量 (KAS)</label>
           <input type="number" x-model="publishForm.amount" placeholder="100"
-            class="w-full bg-gray-800 text-white text-lg rounded-lg px-3 py-2.5 border border-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-500" />
+            class="w-full bg-ink-600 text-white text-lg rounded-lg px-3 py-2.5 border border-ink-500 focus:outline-none focus:ring-1 focus:ring-purple-500" />
         </div>
         <!-- Price — auto-filled -->
         <div>
-          <label class="text-xs text-gray-500 block mb-1">单价 (USDT/KAS)</label>
+          <label class="text-xs text-ink-400 block mb-1">单价 (USDT/KAS)</label>
           <input type="number" step="0.0001" x-model="publishForm.price"
-            class="w-full bg-gray-800 text-white text-lg rounded-lg px-3 py-2.5 border border-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-500" />
+            class="w-full bg-ink-600 text-white text-lg rounded-lg px-3 py-2.5 border border-ink-500 focus:outline-none focus:ring-1 focus:ring-purple-500" />
           <span class="text-xs text-green-500">已自动填入当前市价，可修改</span>
         </div>
       </div>
@@ -2140,9 +2149,9 @@
       <div class="grid grid-cols-3 gap-4 mt-3">
         <!-- Agent -->
         <div>
-          <label class="text-xs text-gray-500 block mb-1">执行 Agent</label>
+          <label class="text-xs text-ink-400 block mb-1">执行 Agent</label>
           <select x-model="publishForm.agentId"
-            class="w-full bg-gray-800 text-white text-sm rounded-lg px-3 py-2 border border-gray-700 focus:outline-none">
+            class="w-full bg-ink-600 text-white text-sm rounded-lg px-3 py-2 border border-ink-500 focus:outline-none">
             <option value="">选择 Agent...</option>
             <template x-for="a in agents" :key="a.id">
               <option :value="a.id" x-text="a.name"></option>
@@ -2151,18 +2160,18 @@
         </div>
         <!-- Chain -->
         <div>
-          <label class="text-xs text-gray-500 block mb-1">结算链</label>
+          <label class="text-xs text-ink-400 block mb-1">结算链</label>
           <select x-model="publishForm.chain"
-            class="w-full bg-gray-800 text-white text-sm rounded-lg px-3 py-2 border border-gray-700 focus:outline-none">
+            class="w-full bg-ink-600 text-white text-sm rounded-lg px-3 py-2 border border-ink-500 focus:outline-none">
             <option value="bnb">BNB Chain</option>
             <option value="eth">Ethereum</option>
           </select>
         </div>
         <!-- Settlement token -->
         <div>
-          <label class="text-xs text-gray-500 block mb-1" x-text="publishForm.side === 'sell' ? '收取' : '支付'"></label>
+          <label class="text-xs text-ink-400 block mb-1" x-text="publishForm.side === 'sell' ? '收取' : '支付'"></label>
           <select x-model="publishForm.wantToken"
-            class="w-full bg-gray-800 text-white text-sm rounded-lg px-3 py-2 border border-gray-700 focus:outline-none">
+            class="w-full bg-ink-600 text-white text-sm rounded-lg px-3 py-2 border border-ink-500 focus:outline-none">
             <option value="USDT">USDT</option>
           </select>
         </div>
@@ -2170,28 +2179,28 @@
 
       <!-- 确认摘要 — Agent 替你算清楚 -->
       <div x-show="publishForm.amount > 0 && publishForm.price > 0 && publishForm.agentId"
-        class="mt-4 bg-gray-800 rounded-lg p-4 border border-gray-700">
-        <p class="text-xs text-gray-500 mb-2">订单摘要（确认后将广播到链上）</p>
+        class="mt-4 bg-ink-600 rounded-lg p-4 border border-ink-500">
+        <p class="text-xs text-ink-400 mb-2">订单摘要（确认后将广播到链上）</p>
         <div class="space-y-1.5">
           <div class="flex justify-between text-sm">
-            <span class="text-gray-400" x-text="publishForm.side === 'sell' ? '你将卖出' : '你将买入'"></span>
+            <span class="text-ink-400" x-text="publishForm.side === 'sell' ? '你将卖出' : '你将买入'"></span>
             <span class="text-white font-bold" x-text="publishForm.amount + ' KAS'"></span>
           </div>
           <div class="flex justify-between text-sm">
-            <span class="text-gray-400">单价</span>
+            <span class="text-ink-400">单价</span>
             <span class="text-white" x-text="'$' + parseFloat(publishForm.price).toFixed(4)"></span>
           </div>
           <div class="flex justify-between text-sm">
-            <span class="text-gray-400" x-text="publishForm.side === 'sell' ? '预计收到' : '预计支付'"></span>
+            <span class="text-ink-400" x-text="publishForm.side === 'sell' ? '预计收到' : '预计支付'"></span>
             <span class="text-xl font-bold" :class="publishForm.side === 'sell' ? 'text-green-400' : 'text-red-400'"
               x-text="(publishForm.amount * publishForm.price).toFixed(2) + ' USDT'"></span>
           </div>
           <div class="flex justify-between text-sm">
-            <span class="text-gray-400">结算链</span>
+            <span class="text-ink-400">结算链</span>
             <span class="text-white" x-text="(publishForm.chain || 'bnb').toUpperCase()"></span>
           </div>
           <div class="flex justify-between text-sm">
-            <span class="text-gray-400">执行 Agent</span>
+            <span class="text-ink-400">执行 Agent</span>
             <span class="text-purple-400" x-text="agents.find(a => a.id === publishForm.agentId)?.name || '—'"></span>
           </div>
         </div>
@@ -2201,24 +2210,24 @@
       <div class="mt-4">
         <button @click="publishIntent()" :disabled="publishingOrder || !publishForm.amount || !publishForm.agentId || !publishForm.price"
           class="w-full py-3 rounded-lg text-sm font-bold transition-colors"
-          :class="publishingOrder ? 'bg-gray-700 text-gray-500' : publishForm.side === 'sell' ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-green-600 hover:bg-green-700 text-white'">
+          :class="publishingOrder ? 'bg-ink-500 text-ink-400' : publishForm.side === 'sell' ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-green-600 hover:bg-green-700 text-white'">
           <span x-show="!publishingOrder" x-text="publishForm.side === 'sell' ? '确认卖出 — 广播到链上' : '确认买入 — 广播到链上'"></span>
           <span x-show="publishingOrder">广播中...</span>
         </button>
-        <p class="text-xs text-gray-600 text-center mt-2">订单将通过 Kaspa 链广播，所有人可见。不是承诺，是你在喊价。</p>
+        <p class="text-xs text-ink-500 text-center mt-2">订单将通过 Kaspa 链广播，所有人可见。不是承诺，是你在喊价。</p>
       </div>
     </div>
 
     <!-- ═══ 我的挂单 + 最近成交（全宽，在市场/交易室上方）═══ -->
-    <div class="bg-gray-900 rounded-xl border border-gray-800 mb-4">
-      <div class="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
+    <div class="bg-ink-700 rounded-xl border border-ink-600 mb-4">
+      <div class="px-4 py-3 border-b border-ink-600 flex items-center justify-between">
         <h2 class="text-sm font-semibold">我的挂单</h2>
-        <button @click="loadMarketData()" class="text-xs text-gray-500 hover:text-white">刷新</button>
+        <button @click="loadMarketData()" class="text-xs text-ink-400 hover:text-white">刷新</button>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead>
-            <tr class="text-gray-500 text-xs uppercase">
+            <tr class="text-ink-400 text-xs uppercase">
               <th class="text-left px-4 py-2">时间</th>
               <th class="text-left px-4 py-2">方向</th>
               <th class="text-right px-4 py-2">数量</th>
@@ -2231,14 +2240,14 @@
           </thead>
           <tbody>
             <template x-for="o in marketOrders" :key="o.id">
-              <tr class="border-t border-gray-800 hover:bg-gray-800/50 cursor-pointer" @click="expandedOrderId = expandedOrderId === o.id ? null : o.id">
-                <td class="px-4 py-2 text-gray-400 text-xs" x-text="o.created_at?.slice(5, 16)"></td>
+              <tr class="border-t border-ink-600 hover:bg-ink-600/50 cursor-pointer" @click="expandedOrderId = expandedOrderId === o.id ? null : o.id">
+                <td class="px-4 py-2 text-ink-400 text-xs" x-text="o.created_at?.slice(5, 16)"></td>
                 <td class="px-4 py-2"><span class="px-1.5 py-0.5 rounded text-xs font-medium" :class="o.side === 'buy' ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'" x-text="o.side.toUpperCase()"></span></td>
                 <td class="px-4 py-2 text-right font-mono" x-text="o.kas_amount?.toLocaleString() + ' KAS'"></td>
                 <td class="px-4 py-2 text-right font-mono text-purple-400" x-text="o.price > 0 ? '$' + o.price.toFixed(6) : '面议'"></td>
                 <td class="px-4 py-2 uppercase text-xs" x-text="o.chain"></td>
-                <td class="px-4 py-2 text-xs font-mono text-gray-500" x-text="o.peer_address ? o.peer_address.slice(-12) : '—'"></td>
-                <td class="px-4 py-2"><span class="px-1.5 py-0.5 rounded text-xs" :class="{'bg-yellow-900 text-yellow-300': o.status === 'published', 'bg-cyan-900 text-cyan-300': o.status === 'accepted', 'bg-blue-900 text-blue-300': ['paying','paid'].includes(o.status), 'bg-purple-900 text-purple-300': o.status === 'verified', 'bg-orange-900 text-orange-300': o.status === 'delivering', 'bg-green-900 text-green-300': ['completed','resolved'].includes(o.status), 'bg-red-900 text-red-300': o.status === 'disputed', 'bg-gray-700 text-gray-400': ['cancelled','expired'].includes(o.status)}" x-text="orderStatusCn(o.status)"></span></td>
+                <td class="px-4 py-2 text-xs font-mono text-ink-400" x-text="o.peer_address ? o.peer_address.slice(-12) : '—'"></td>
+                <td class="px-4 py-2"><span class="px-1.5 py-0.5 rounded text-xs" :class="{'bg-yellow-900 text-yellow-300': o.status === 'published', 'bg-cyan-900 text-cyan-300': o.status === 'accepted', 'bg-blue-900 text-blue-300': ['paying','paid'].includes(o.status), 'bg-purple-900 text-purple-300': o.status === 'verified', 'bg-orange-900 text-orange-300': o.status === 'delivering', 'bg-green-900 text-green-300': ['completed','resolved'].includes(o.status), 'bg-red-900 text-red-300': o.status === 'disputed', 'bg-ink-500 text-ink-400': ['cancelled','expired'].includes(o.status)}" x-text="orderStatusCn(o.status)"></span></td>
                 <td class="px-4 py-2">
                   <button x-show="o.status !== 'completed' && o.status !== 'expired'"
                     class="text-xs text-red-400 hover:text-red-300"
@@ -2247,34 +2256,34 @@
               </tr>
             </template>
             <template x-for="o in marketOrders.filter(o => o.id === expandedOrderId)" :key="'detail-' + o.id">
-              <tr class="bg-gray-800/30">
+              <tr class="bg-ink-600/30">
                 <td colspan="8" class="px-4 py-3" x-data="{ execLog: [] }" x-init="try { execLog = await fetch('/api/trade/order-executions?order_id=' + o.id).then(r => r.json()) } catch {}">
                   <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs mb-3">
-                    <div><span class="text-gray-500">订单 ID</span><p class="font-mono text-gray-300 mt-0.5" x-text="o.id.slice(0,8) + '...'"></p></div>
-                    <div><span class="text-gray-500">单价</span><p class="text-white font-bold mt-0.5" x-text="o.price > 0 ? '$' + o.price.toFixed(6) : '—'"></p></div>
-                    <div><span class="text-gray-500">USDT 金额</span><p class="text-white mt-0.5" x-text="o.usdt_amount ? o.usdt_amount.toFixed(2) + ' USDT' : (o.kas_amount * (o.price || 0)).toFixed(2) + ' USDT'"></p></div>
-                    <div><span class="text-gray-500">创建时间</span><p class="text-gray-300 mt-0.5" x-text="o.created_at ? new Date(o.created_at).toLocaleString() : '—'"></p></div>
+                    <div><span class="text-ink-400">订单 ID</span><p class="font-mono text-ink-300 mt-0.5" x-text="o.id.slice(0,8) + '...'"></p></div>
+                    <div><span class="text-ink-400">单价</span><p class="text-white font-bold mt-0.5" x-text="o.price > 0 ? '$' + o.price.toFixed(6) : '—'"></p></div>
+                    <div><span class="text-ink-400">USDT 金额</span><p class="text-white mt-0.5" x-text="o.usdt_amount ? o.usdt_amount.toFixed(2) + ' USDT' : (o.kas_amount * (o.price || 0)).toFixed(2) + ' USDT'"></p></div>
+                    <div><span class="text-ink-400">创建时间</span><p class="text-ink-300 mt-0.5" x-text="o.created_at ? new Date(o.created_at).toLocaleString() : '—'"></p></div>
                   </div>
                   <div class="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs mb-3">
-                    <div><span class="text-gray-500">我的 KAS 地址</span><p class="font-mono text-gray-300 mt-0.5 break-all" x-text="o.customer_pay_address || o.agent_address || '—'"></p></div>
-                    <div><span class="text-gray-500">我的跨链钱包</span><p class="font-mono text-gray-300 mt-0.5" x-text="o.mm_receive_address || '—'"></p></div>
-                    <div><span class="text-gray-500">对方地址</span><p class="font-mono text-gray-300 mt-0.5 break-all" x-text="o.peer_address || '—'"></p></div>
+                    <div><span class="text-ink-400">我的 KAS 地址</span><p class="font-mono text-ink-300 mt-0.5 break-all" x-text="o.customer_pay_address || o.agent_address || '—'"></p></div>
+                    <div><span class="text-ink-400">我的跨链钱包</span><p class="font-mono text-ink-300 mt-0.5" x-text="o.mm_receive_address || '—'"></p></div>
+                    <div><span class="text-ink-400">对方地址</span><p class="font-mono text-ink-300 mt-0.5 break-all" x-text="o.peer_address || '—'"></p></div>
                   </div>
                   <div class="grid grid-cols-2 gap-3 text-xs mb-3">
-                    <div><span class="text-gray-500">USDT TX</span><p class="font-mono text-blue-400 mt-0.5 break-all" x-text="o.payment_txhash || '—'"></p></div>
-                    <div><span class="text-gray-500">KAS TX</span><p class="font-mono text-green-400 mt-0.5 break-all" x-text="o.kas_txhash || '—'"></p></div>
+                    <div><span class="text-ink-400">USDT TX</span><p class="font-mono text-blue-400 mt-0.5 break-all" x-text="o.payment_txhash || '—'"></p></div>
+                    <div><span class="text-ink-400">KAS TX</span><p class="font-mono text-green-400 mt-0.5 break-all" x-text="o.kas_txhash || '—'"></p></div>
                   </div>
                   <!-- 决策时间线 -->
                   <template x-if="execLog.length > 0">
-                    <div class="border-t border-gray-700 pt-2 mt-2">
-                      <span class="text-gray-500 text-xs">决策时间线</span>
+                    <div class="border-t border-ink-500 pt-2 mt-2">
+                      <span class="text-ink-400 text-xs">决策时间线</span>
                       <div class="mt-1 space-y-1.5">
                         <template x-for="ex in execLog" :key="ex.id">
                           <div class="relative pl-4 border-l-2" :class="ex.status === 'completed' ? 'border-green-800' : ex.status === 'failed' || ex.status === 'rejected' ? 'border-red-800' : 'border-yellow-800'">
                             <span class="absolute -left-1 top-0.5 w-2 h-2 rounded-full" :class="ex.status === 'completed' ? 'bg-green-500' : ex.status === 'failed' || ex.status === 'rejected' ? 'bg-red-500' : 'bg-yellow-500'"></span>
                             <div class="text-xs">
-                              <span class="text-gray-500" x-text="ex.created_at ? new Date(ex.created_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : ''"></span>
-                              <span class="text-gray-200 ml-1" x-text="
+                              <span class="text-ink-400" x-text="ex.created_at ? new Date(ex.created_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : ''"></span>
+                              <span class="text-ink-200 ml-1" x-text="
                                 ex.type === 'accept_order' ? 'Agent 接单' :
                                 ex.type === 'pay_usdt' ? 'Agent 付款' :
                                 ex.type === 'verify_payment' ? '验证到账' :
@@ -2285,7 +2294,7 @@
                               <span class="text-green-600" x-show="ex.status === 'completed'"> ✓</span>
                               <span class="text-red-500" x-show="ex.status === 'failed' || ex.status === 'rejected'"> ✗</span>
                             </div>
-                            <p class="text-xs text-gray-500 mt-0.5" x-show="ex.display_summary" x-text="ex.display_summary"></p>
+                            <p class="text-xs text-ink-400 mt-0.5" x-show="ex.display_summary" x-text="ex.display_summary"></p>
                             <p class="text-xs text-blue-500 mt-0.5 cursor-pointer hover:underline" x-show="ex.output_txid" @click="navigator.clipboard.writeText(ex.output_txid)" x-text="ex.output_txid ? 'TX: ' + ex.output_txid.slice(0,12) + '... (点击复制)' : ''"></p>
                           </div>
                         </template>
@@ -2296,37 +2305,37 @@
               </tr>
             </template>
             <template x-if="marketOrders.length === 0">
-              <tr><td colspan="8" class="px-4 py-6 text-center text-gray-600 text-sm">暂无挂单</td></tr>
+              <tr><td colspan="8" class="px-4 py-6 text-center text-ink-500 text-sm">暂无挂单</td></tr>
             </template>
           </tbody>
         </table>
       </div>
       <!-- 最近成交 -->
-      <div class="border-t border-gray-800" x-data="{
+      <div class="border-t border-ink-600" x-data="{
         completed: [],
         async init() { try { const r = await fetch('/api/trade/mm-orders?status=completed&limit=5').then(r => r.json()); this.completed = Array.isArray(r) ? r : []; } catch {} }
       }">
         <div class="px-4 py-2 flex items-center justify-between">
-          <span class="text-xs text-gray-500">最近成交</span>
+          <span class="text-xs text-ink-400">最近成交</span>
         </div>
         <template x-for="d in completed" :key="d.id">
-          <div class="px-4 py-1.5 flex justify-between text-xs border-t border-gray-800/50">
+          <div class="px-4 py-1.5 flex justify-between text-xs border-t border-ink-600/50">
             <span :class="d.side === 'buy' ? 'text-green-400' : 'text-red-400'" x-text="(d.side === 'buy' ? '买 ' : '卖 ') + d.kas_amount + ' KAS'"></span>
-            <span class="text-gray-500" x-text="d.completed_at?.slice(5,16) || d.created_at?.slice(5,16)"></span>
+            <span class="text-ink-400" x-text="d.completed_at?.slice(5,16) || d.created_at?.slice(5,16)"></span>
           </div>
         </template>
         <template x-if="completed.length === 0">
-          <div class="px-4 py-3 text-center text-gray-600 text-xs">暂无成交</div>
+          <div class="px-4 py-3 text-center text-ink-500 text-xs">暂无成交</div>
         </template>
       </div>
     </div>
 
     <!-- ═══ 面板切换 ═══ -->
     <div class="flex justify-end mb-2">
-      <div class="flex bg-gray-800 rounded p-0.5">
-        <button @click="marketLayout = 'both'" :class="marketLayout === 'both' ? 'bg-gray-700 text-white' : 'text-gray-500'" class="px-2 py-0.5 text-xs rounded">双栏</button>
-        <button @click="marketLayout = 'left'" :class="marketLayout === 'left' ? 'bg-gray-700 text-white' : 'text-gray-500'" class="px-2 py-0.5 text-xs rounded">市场</button>
-        <button @click="marketLayout = 'right'" :class="marketLayout === 'right' ? 'bg-gray-700 text-white' : 'text-gray-500'" class="px-2 py-0.5 text-xs rounded">交易室</button>
+      <div class="flex bg-ink-600 rounded p-0.5">
+        <button @click="marketLayout = 'both'" :class="marketLayout === 'both' ? 'bg-ink-500 text-white' : 'text-ink-400'" class="px-2 py-0.5 text-xs rounded">双栏</button>
+        <button @click="marketLayout = 'left'" :class="marketLayout === 'left' ? 'bg-ink-500 text-white' : 'text-ink-400'" class="px-2 py-0.5 text-xs rounded">市场</button>
+        <button @click="marketLayout = 'right'" :class="marketLayout === 'right' ? 'bg-ink-500 text-white' : 'text-ink-400'" class="px-2 py-0.5 text-xs rounded">交易室</button>
       </div>
     </div>
 
@@ -2336,21 +2345,21 @@
       <div x-show="marketLayout !== 'right'" :class="marketLayout === 'both' ? 'col-span-7' : ''" class="space-y-6">
 
         <!-- 市场（市场动态）-->
-        <div class="bg-gray-900 rounded-xl border border-gray-800">
-          <div class="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
+        <div class="bg-ink-700 rounded-xl border border-ink-600">
+          <div class="px-4 py-3 border-b border-ink-600 flex items-center justify-between">
             <h2 class="text-sm font-semibold">市场</h2>
-            <div class="flex bg-gray-800 rounded p-0.5">
-              <button @click="marketView = 'feed'" :class="marketView === 'feed' ? 'bg-gray-700 text-white' : 'text-gray-500'"
+            <div class="flex bg-ink-600 rounded p-0.5">
+              <button @click="marketView = 'feed'" :class="marketView === 'feed' ? 'bg-ink-500 text-white' : 'text-ink-400'"
                 class="px-2 py-0.5 text-xs rounded transition-colors">动态</button>
-              <button @click="marketView = 'orderbook'" :class="marketView === 'orderbook' ? 'bg-gray-700 text-white' : 'text-gray-500'"
+              <button @click="marketView = 'orderbook'" :class="marketView === 'orderbook' ? 'bg-ink-500 text-white' : 'text-ink-400'"
                 class="px-2 py-0.5 text-xs rounded transition-colors">报价单</button>
             </div>
           </div>
 
           <!-- Feed View -->
-          <div x-show="marketView === 'feed'" class="divide-y divide-gray-800">
+          <div x-show="marketView === 'feed'" class="divide-y divide-ink-600">
             <template x-for="b in marketBroadcasts" :key="b.id || b.created_at">
-              <div class="px-4 py-3 hover:bg-gray-800/50"
+              <div class="px-4 py-3 hover:bg-ink-600/50"
                 x-data="{ parsed: JSON.parse(b.content) }">
                 <div class="flex items-start justify-between">
                   <div class="flex-1">
@@ -2360,15 +2369,15 @@
                         x-text="parsed.type?.includes('sell') ? 'SELL' : 'BUY'"></span>
                       <span class="text-lg font-bold text-white" x-text="(parsed.amount?.toLocaleString() || '?') + ' ' + (parsed.token || 'KAS')"></span>
                     </div>
-                    <div class="flex items-center space-x-3 text-xs text-gray-400">
+                    <div class="flex items-center space-x-3 text-xs text-ink-400">
                       <span x-text="(parsed.type?.includes('sell') ? '收取 ' : '支付 ') + (parsed.want || parsed.pay || 'USDT')"></span>
-                      <span class="text-gray-600">|</span>
+                      <span class="text-ink-500">|</span>
                       <span x-text="(parsed.chains || []).join(' / ').toUpperCase() || '—'"></span>
                     </div>
                     <div class="flex items-center space-x-2 mt-1 text-xs">
-                      <span class="font-mono text-gray-500" x-text="b.sender_address?.slice(-12) || '—'"></span>
-                      <span class="text-gray-600">|</span>
-                      <span class="text-gray-500" x-text="timeAgo(b.created_at)"></span>
+                      <span class="font-mono text-ink-400" x-text="b.sender_address?.slice(-12) || '—'"></span>
+                      <span class="text-ink-500">|</span>
+                      <span class="text-ink-400" x-text="timeAgo(b.created_at)"></span>
                     </div>
                   </div>
                   <!-- Accept button -->
@@ -2382,18 +2391,18 @@
                     <!-- Accept form (inline) -->
                     <template x-if="acceptingOrder?.id === b.id">
                       <div class="flex items-center space-x-2">
-                        <select x-model="acceptAgentId" class="bg-gray-800 text-white text-xs rounded px-2 py-1.5 border border-gray-700">
+                        <select x-model="acceptAgentId" class="bg-ink-600 text-white text-xs rounded px-2 py-1.5 border border-ink-500">
                           <option value="">选择 Agent...</option>
                           <template x-for="a in agents" :key="a.id">
                             <option :value="a.id" x-text="a.name"></option>
                           </template>
                         </select>
                         <button @click="sendAcceptInvite()" :disabled="!acceptAgentId || acceptSending"
-                          class="px-2 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-700 text-white rounded text-xs transition-colors">
+                          class="px-2 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-ink-500 text-white rounded text-xs transition-colors">
                           <span x-show="!acceptSending">发送</span>
                           <span x-show="acceptSending">...</span>
                         </button>
-                        <button @click="cancelAccept()" class="px-2 py-1.5 text-gray-500 hover:text-white text-xs">X</button>
+                        <button @click="cancelAccept()" class="px-2 py-1.5 text-ink-400 hover:text-white text-xs">X</button>
                       </div>
                     </template>
                   </div>
@@ -2401,24 +2410,24 @@
               </div>
             </template>
             <template x-if="marketBroadcasts.length === 0">
-              <div class="px-4 py-8 text-center text-gray-600">暂无市场广播。链上发布的买卖意愿将显示在这里。</div>
+              <div class="px-4 py-8 text-center text-ink-500">暂无市场广播。链上发布的买卖意愿将显示在这里。</div>
             </template>
           </div>
 
           <!-- Order Book View -->
-          <div x-show="marketView === 'orderbook'" class="grid grid-cols-2 divide-x divide-gray-800">
+          <div x-show="marketView === 'orderbook'" class="grid grid-cols-2 divide-x divide-ink-600">
             <!-- Bids (Buy orders) -->
             <div>
               <div class="px-3 py-2 text-xs text-green-400 font-medium uppercase bg-green-900/10">买单</div>
-              <div class="divide-y divide-gray-800/50">
+              <div class="divide-y divide-ink-600/50">
                 <template x-for="b in marketBroadcasts.filter(x => { try { return JSON.parse(x.content).type?.includes('buy'); } catch { return false; } })" :key="b.id">
-                  <div class="px-3 py-2 hover:bg-gray-800/50 flex justify-between items-center" x-data="{ o: JSON.parse(b.content) }">
+                  <div class="px-3 py-2 hover:bg-ink-600/50 flex justify-between items-center" x-data="{ o: JSON.parse(b.content) }">
                     <div>
                       <span class="text-sm font-mono text-white" x-text="o.amount?.toLocaleString()"></span>
-                      <span class="text-xs text-gray-500 ml-1" x-text="o.token || 'KAS'"></span>
+                      <span class="text-xs text-ink-400 ml-1" x-text="o.token || 'KAS'"></span>
                     </div>
                     <div class="flex items-center space-x-2">
-                      <span class="text-xs text-gray-500" x-text="(o.chains || []).join('/').toUpperCase()"></span>
+                      <span class="text-xs text-ink-400" x-text="(o.chains || []).join('/').toUpperCase()"></span>
                       <button @click="startAccept(b)" class="text-xs text-purple-400 hover:text-purple-300">接单</button>
                     </div>
                   </div>
@@ -2428,15 +2437,15 @@
             <!-- Asks (Sell orders) -->
             <div>
               <div class="px-3 py-2 text-xs text-red-400 font-medium uppercase bg-red-900/10">卖单</div>
-              <div class="divide-y divide-gray-800/50">
+              <div class="divide-y divide-ink-600/50">
                 <template x-for="b in marketBroadcasts.filter(x => { try { return JSON.parse(x.content).type?.includes('sell'); } catch { return false; } })" :key="b.id">
-                  <div class="px-3 py-2 hover:bg-gray-800/50 flex justify-between items-center" x-data="{ o: JSON.parse(b.content) }">
+                  <div class="px-3 py-2 hover:bg-ink-600/50 flex justify-between items-center" x-data="{ o: JSON.parse(b.content) }">
                     <div>
                       <span class="text-sm font-mono text-white" x-text="o.amount?.toLocaleString()"></span>
-                      <span class="text-xs text-gray-500 ml-1" x-text="o.token || 'KAS'"></span>
+                      <span class="text-xs text-ink-400 ml-1" x-text="o.token || 'KAS'"></span>
                     </div>
                     <div class="flex items-center space-x-2">
-                      <span class="text-xs text-gray-500" x-text="(o.chains || []).join('/').toUpperCase()"></span>
+                      <span class="text-xs text-ink-400" x-text="(o.chains || []).join('/').toUpperCase()"></span>
                       <button @click="startAccept(b)" class="text-xs text-purple-400 hover:text-purple-300">接单</button>
                     </div>
                   </div>
@@ -2450,13 +2459,13 @@
 
       <!-- 右侧：交易室 -->
       <div x-show="marketLayout !== 'left'" :class="marketLayout === 'both' ? 'col-span-5' : ''" class="space-y-4">
-        <div class="bg-gray-900 rounded-xl border border-gray-800">
-          <div class="px-4 py-3 border-b border-gray-800">
+        <div class="bg-ink-700 rounded-xl border border-ink-600">
+          <div class="px-4 py-3 border-b border-ink-600">
             <h2 class="text-sm font-semibold">交易室</h2>
           </div>
 
           <!-- 活跃交易列表 -->
-          <div class="divide-y divide-gray-800" x-data="{
+          <div class="divide-y divide-ink-600" x-data="{
             activeDeals: [],
             expandedDeal: null,
             chatDeal: null,
@@ -2551,7 +2560,7 @@
             init() { this.loadDeals(); setInterval(() => this.loadDeals(), 15000); }
           }">
             <template x-for="deal in activeDeals" :key="deal.id">
-              <div class="px-4 py-4 border-b border-gray-800">
+              <div class="px-4 py-4 border-b border-ink-600">
                 <!-- 订单头 -->
                 <div class="flex items-center justify-between mb-3">
                   <div class="flex items-center space-x-2">
@@ -2559,12 +2568,12 @@
                       :class="deal.side === 'buy' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'"
                       x-text="deal.side === 'buy' ? 'BUY' : 'SELL'"></span>
                     <span class="text-lg text-white font-bold" x-text="deal.kas_amount?.toLocaleString() + ' KAS'"></span>
-                    <span class="text-xs text-gray-500" x-text="deal.chain?.toUpperCase()"></span>
+                    <span class="text-xs text-ink-400" x-text="deal.chain?.toUpperCase()"></span>
                   </div>
                   <div class="flex items-center space-x-2">
                     <span class="text-xs px-2 py-1 rounded-full"
                       :class="{
-                        'bg-gray-700 text-gray-300': deal.status === 'published',
+                        'bg-ink-500 text-ink-300': deal.status === 'published',
                         'bg-yellow-900/50 text-yellow-400': deal.status === 'accepted',
                         'bg-blue-900/50 text-blue-400': deal.status === 'paying',
                         'bg-cyan-900/50 text-cyan-400': deal.status === 'paid',
@@ -2584,9 +2593,9 @@
                   <template x-for="(step, i) in ['接单','付款','验证','交割','完成']" :key="step">
                     <div class="flex items-center">
                       <span class="px-1.5 py-0.5 rounded"
-                        :class="i <= (['published'].includes(deal.status)?0 : ['accepted'].includes(deal.status)?1 : ['paying','paid'].includes(deal.status)?2 : ['verified'].includes(deal.status)?3 : ['delivering'].includes(deal.status)?4 : 5) - 1 ? 'bg-green-700 text-white' : 'bg-gray-800 text-gray-500'"
+                        :class="i <= (['published'].includes(deal.status)?0 : ['accepted'].includes(deal.status)?1 : ['paying','paid'].includes(deal.status)?2 : ['verified'].includes(deal.status)?3 : ['delivering'].includes(deal.status)?4 : 5) - 1 ? 'bg-green-700 text-white' : 'bg-ink-600 text-ink-400'"
                         x-text="step"></span>
-                      <span x-show="i < 4" class="text-gray-700 mx-0.5">→</span>
+                      <span x-show="i < 4" class="text-ink-600 mx-0.5">→</span>
                     </div>
                   </template>
                 </div>
@@ -2600,23 +2609,23 @@
                       <p class="text-sm text-purple-300 mb-2">你的 Agent 已将卖单广播到链上，正在等待买家。</p>
                       <div class="space-y-1.5 text-sm">
                         <div class="flex justify-between">
-                          <span class="text-gray-400">卖出</span>
+                          <span class="text-ink-400">卖出</span>
                           <span class="text-white font-bold" x-text="deal.kas_amount + ' KAS'"></span>
                         </div>
                         <div class="flex justify-between">
-                          <span class="text-gray-400">单价</span>
+                          <span class="text-ink-400">单价</span>
                           <span class="text-white" x-text="deal.price > 0 ? '$' + deal.price.toFixed(4) : '面议'"></span>
                         </div>
                         <div class="flex justify-between">
-                          <span class="text-gray-400">预期收到</span>
+                          <span class="text-ink-400">预期收到</span>
                           <span class="text-green-400 font-bold" x-text="(deal.usdt_amount || (deal.kas_amount * (deal.price || 0))).toFixed(2) + ' USDT'"></span>
                         </div>
                         <div class="flex justify-between">
-                          <span class="text-gray-400">收款网络</span>
+                          <span class="text-ink-400">收款网络</span>
                           <span class="text-white" x-text="(deal.chain || 'bnb').toUpperCase()"></span>
                         </div>
                         <div class="flex justify-between items-center">
-                          <span class="text-gray-400">你的收款地址</span>
+                          <span class="text-ink-400">你的收款地址</span>
                           <span class="font-mono text-xs text-green-400 cursor-pointer hover:underline" @click="navigator.clipboard.writeText(deal.mm_receive_address||'')"
                             x-text="deal.mm_receive_address || '未设置'" title="点击复制"></span>
                         </div>
@@ -2628,23 +2637,23 @@
                       <p class="text-sm text-purple-300 mb-2">你的 Agent 已将买单广播到链上，正在等待卖家。</p>
                       <div class="space-y-1.5 text-sm">
                         <div class="flex justify-between">
-                          <span class="text-gray-400">买入</span>
+                          <span class="text-ink-400">买入</span>
                           <span class="text-white font-bold" x-text="deal.kas_amount + ' KAS'"></span>
                         </div>
                         <div class="flex justify-between">
-                          <span class="text-gray-400">单价</span>
+                          <span class="text-ink-400">单价</span>
                           <span class="text-white" x-text="deal.price > 0 ? '$' + deal.price.toFixed(4) : '面议'"></span>
                         </div>
                         <div class="flex justify-between">
-                          <span class="text-gray-400">预计支付</span>
+                          <span class="text-ink-400">预计支付</span>
                           <span class="text-red-400 font-bold" x-text="(deal.usdt_amount || (deal.kas_amount * (deal.price || 0))).toFixed(2) + ' USDT'"></span>
                         </div>
                         <div class="flex justify-between">
-                          <span class="text-gray-400">结算链</span>
+                          <span class="text-ink-400">结算链</span>
                           <span class="text-white" x-text="(deal.chain || 'bnb').toUpperCase()"></span>
                         </div>
                         <div class="flex justify-between items-center">
-                          <span class="text-gray-400">你的 KAS 地址</span>
+                          <span class="text-ink-400">你的 KAS 地址</span>
                           <span class="font-mono text-xs text-green-400 cursor-pointer hover:underline" @click="navigator.clipboard.writeText(deal.customer_pay_address||'')"
                             x-text="deal.customer_pay_address ? deal.customer_pay_address.slice(0,12)+'...'+deal.customer_pay_address.slice(-8) : '未设置'" title="点击复制"></span>
                         </div>
@@ -2657,16 +2666,16 @@
                     <div class="bg-yellow-950/40 border border-yellow-700 rounded-lg p-4 mb-3">
                       <div class="flex items-center justify-between mb-2">
                         <span class="text-yellow-400 text-sm font-medium">⏳ 等待你确认</span>
-                        <span class="text-xs text-gray-500" x-text="deal._pendingExec.approval_deadline ? '截止: ' + new Date(deal._pendingExec.approval_deadline).toLocaleTimeString() : ''"></span>
+                        <span class="text-xs text-ink-400" x-text="deal._pendingExec.approval_deadline ? '截止: ' + new Date(deal._pendingExec.approval_deadline).toLocaleTimeString() : ''"></span>
                       </div>
-                      <p class="text-sm text-gray-300 mb-3" x-text="deal._pendingExec.display_summary || deal._pendingExec.type"></p>
+                      <p class="text-sm text-ink-300 mb-3" x-text="deal._pendingExec.display_summary || deal._pendingExec.type"></p>
                       <div class="flex space-x-3">
                         <button @click="fetch('/api/trade/approve-execution/'+deal._pendingExec.id,{method:'POST'}).then(r=>r.json()).then(d=>{if(d.ok){deal._pendingExec=null;loadDeals();}else{alert(d.error||'审批失败')}})"
                           class="flex-1 py-2 bg-green-700 hover:bg-green-600 text-white rounded text-sm font-medium">确认执行</button>
                         <button @click="if(confirm('拒绝将取消订单，确定？'))fetch('/api/trade/reject-execution/'+deal._pendingExec.id,{method:'POST'}).then(r=>r.json()).then(d=>{deal._pendingExec=null;loadDeals();})"
                           class="flex-1 py-2 bg-red-900 hover:bg-red-800 text-red-300 rounded text-sm font-medium">拒绝</button>
                       </div>
-                      <p class="text-xs text-gray-600 mt-2 text-center">超时未操作将自动取消或转为争议</p>
+                      <p class="text-xs text-ink-500 mt-2 text-center">超时未操作将自动取消或转为争议</p>
                     </div>
                   </template>
 
@@ -2674,17 +2683,17 @@
                   <template x-if="['accepted'].includes(deal.status) && deal.side === 'buy'">
                     <div class="bg-blue-950/40 border border-blue-700 rounded-lg p-4">
                       <p class="text-sm text-purple-300 mb-3">卖家已接单。你的 Agent 准备好支付 USDT。</p>
-                      <div class="space-y-2 mb-3 bg-gray-800/50 rounded-lg p-3">
+                      <div class="space-y-2 mb-3 bg-ink-600/50 rounded-lg p-3">
                         <div class="flex justify-between text-sm">
-                          <span class="text-gray-400">应付金额</span>
+                          <span class="text-ink-400">应付金额</span>
                           <span class="text-xl text-white font-bold" x-text="(deal.usdt_amount || (deal.kas_amount * (deal.price || 0))).toFixed(2) + ' USDT'"></span>
                         </div>
                         <div class="flex justify-between text-sm">
-                          <span class="text-gray-400">支付网络</span>
+                          <span class="text-ink-400">支付网络</span>
                           <span class="text-white" x-text="(deal.chain || 'bnb').toUpperCase()"></span>
                         </div>
                         <div class="text-sm">
-                          <span class="text-gray-400">付款到（卖方 USDT 钱包）：</span>
+                          <span class="text-ink-400">付款到（卖方 USDT 钱包）：</span>
                           <p class="font-mono text-xs text-green-400 mt-1 break-all cursor-pointer hover:underline"
                             @click="navigator.clipboard.writeText(deal.mm_receive_address || deal.counterparty_wallet || '')"
                             x-text="deal.mm_receive_address || deal.counterparty_wallet || '等待卖方提供钱包地址...'"></p>
@@ -2694,7 +2703,7 @@
                         :disabled="actionLoading === deal.id"
                         class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold disabled:opacity-50">
                         <span x-text="actionLoading === deal.id ? '链上发送中，请等待...' : '支付 USDT'"></span></button>
-                      <p class="text-xs text-gray-500 mt-2 text-center">Agent 钱包直接签名发送，资金从你的钱包直达卖方，无中间托管。</p>
+                      <p class="text-xs text-ink-400 mt-2 text-center">Agent 钱包直接签名发送，资金从你的钱包直达卖方，无中间托管。</p>
                     </div>
                   </template>
 
@@ -2710,7 +2719,7 @@
                   <template x-if="['paid'].includes(deal.status) && deal.side === 'buy'">
                     <div class="bg-purple-950/40 border border-purple-700 rounded-lg p-4">
                       <p class="text-sm text-purple-300 font-medium">USDT 已发送，等待卖家确认到账</p>
-                      <p class="font-mono text-xs text-gray-500 mt-1" x-show="deal.payment_txhash" x-text="'TX: ' + (deal.payment_txhash||'').slice(0,20) + '...'"></p>
+                      <p class="font-mono text-xs text-ink-400 mt-1" x-show="deal.payment_txhash" x-text="'TX: ' + (deal.payment_txhash||'').slice(0,20) + '...'"></p>
                     </div>
                   </template>
 
@@ -2719,7 +2728,7 @@
                       <p class="text-base text-white font-bold mb-2">买家已付款</p>
                       <p class="font-mono text-xs text-blue-400 mb-2" x-show="deal.payment_txhash" x-text="'TX: ' + (deal.payment_txhash||'')"></p>
                       <p class="text-xs text-green-400 mb-1">系统正在自动验证链上到账（约 60 秒）...</p>
-                      <p class="text-xs text-gray-500 mb-3">也可手动验证：</p>
+                      <p class="text-xs text-ink-400 mb-3">也可手动验证：</p>
                       <button @click.stop="actionLoading=deal.id; fetch('/api/trade/mm-orders/'+deal.id+'/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'verify_payment',payment_txhash:deal.payment_txhash})}).then(r=>r.json()).then(d=>{if(d.ok){deal.status=d.status||'verified';}else alert(d.error)}).finally(()=>{actionLoading=null;loadDeals()})"
                         :disabled="actionLoading === deal.id || !deal.payment_txhash"
                         class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold disabled:opacity-50">
@@ -2731,27 +2740,27 @@
                   <template x-if="['verified'].includes(deal.status) && deal.side === 'sell'">
                     <div class="bg-green-950/30 border border-green-800 rounded-lg p-4">
                       <p class="text-sm text-purple-300 mb-2">USDT 已到账并通过链上验证。现在轮到你发送 KAS。</p>
-                      <div class="space-y-1.5 text-sm mb-3 bg-gray-800/50 rounded-lg p-3">
+                      <div class="space-y-1.5 text-sm mb-3 bg-ink-600/50 rounded-lg p-3">
                         <div class="flex justify-between">
-                          <span class="text-gray-400">发送数量</span>
+                          <span class="text-ink-400">发送数量</span>
                           <span class="text-white font-bold" x-text="deal.kas_amount + ' KAS'"></span>
                         </div>
                         <div class="text-sm">
-                          <span class="text-gray-400">发送到（买方 KAS 地址）：</span>
+                          <span class="text-ink-400">发送到（买方 KAS 地址）：</span>
                           <p class="font-mono text-xs text-green-400 mt-1 break-all" x-text="deal.peer_address || '未设置'"></p>
                         </div>
                       </div>
                       <button @click.stop="sendKas(deal)" :disabled="actionLoading === deal.id"
                         class="w-full py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-bold disabled:opacity-50">
                         <span x-text="actionLoading === deal.id ? '链上发送中...' : '发送 ' + deal.kas_amount + ' KAS'"></span></button>
-                      <p class="text-xs text-gray-500 mt-2 text-center">通过 Kaspa 链直接发送到买方地址。</p>
+                      <p class="text-xs text-ink-400 mt-2 text-center">通过 Kaspa 链直接发送到买方地址。</p>
                     </div>
                   </template>
 
                   <template x-if="['verified'].includes(deal.status) && deal.side === 'buy'">
                     <div class="bg-green-950/30 border border-green-800 rounded-lg p-4">
                       <p class="text-sm text-purple-300">你的 USDT 已到账并通过验证。等待卖家发送 KAS 到你的地址...</p>
-                      <p class="font-mono text-xs text-gray-500 mt-1" x-text="'你的 KAS 地址: ' + (deal.customer_pay_address || '—')"></p>
+                      <p class="font-mono text-xs text-ink-400 mt-1" x-text="'你的 KAS 地址: ' + (deal.customer_pay_address || '—')"></p>
                     </div>
                   </template>
 
@@ -2769,24 +2778,24 @@
                       <p class="text-sm text-green-400 font-bold mb-2">交易完成</p>
                       <div class="space-y-1.5 text-xs">
                         <div class="flex justify-between">
-                          <span class="text-gray-400" x-text="deal.side === 'sell' ? '卖出' : '买入'"></span>
+                          <span class="text-ink-400" x-text="deal.side === 'sell' ? '卖出' : '买入'"></span>
                           <span class="text-white font-bold" x-text="deal.kas_amount + ' KAS'"></span>
                         </div>
                         <div class="flex justify-between">
-                          <span class="text-gray-400" x-text="deal.side === 'sell' ? '收到' : '支付'"></span>
+                          <span class="text-ink-400" x-text="deal.side === 'sell' ? '收到' : '支付'"></span>
                           <span :class="deal.side === 'sell' ? 'text-green-400' : 'text-red-400'" class="font-bold"
                             x-text="(deal.usdt_amount || (deal.kas_amount * (deal.price||0))).toFixed(2) + ' USDT'"></span>
                         </div>
                         <div class="flex justify-between">
-                          <span class="text-gray-400">成交价</span>
+                          <span class="text-ink-400">成交价</span>
                           <span class="text-white" x-text="'$' + (deal.price||0).toFixed(4)"></span>
                         </div>
                       </div>
-                      <div class="mt-2 pt-2 border-t border-gray-700 space-y-1">
+                      <div class="mt-2 pt-2 border-t border-ink-500 space-y-1">
                         <p class="font-mono text-xs text-blue-400 break-all" x-show="deal.payment_txhash" x-text="'USDT TX: ' + (deal.payment_txhash||'')"></p>
                         <p class="font-mono text-xs text-green-400 break-all" x-show="deal.kas_txhash && deal.kas_txhash !== 'pending'" x-text="'KAS TX: ' + (deal.kas_txhash||'')"></p>
                       </div>
-                      <p class="text-xs text-gray-600 mt-2">每笔交易链上可查，无中间方。</p>
+                      <p class="text-xs text-ink-500 mt-2">每笔交易链上可查，无中间方。</p>
                     </div>
                   </template>
 
@@ -2794,23 +2803,23 @@
                   <template x-if="['cancelled','expired','disputed'].includes(deal.status)">
                     <div class="bg-red-950/30 border border-red-800 rounded-lg p-3">
                       <p class="text-sm text-red-400 font-medium" x-text="deal.status === 'disputed' ? '交易争议中' : '交易已取消'"></p>
-                      <p class="text-xs text-gray-500 mt-1" x-show="deal.cancel_reason" x-text="deal.cancel_reason"></p>
+                      <p class="text-xs text-ink-400 mt-1" x-show="deal.cancel_reason" x-text="deal.cancel_reason"></p>
                     </div>
                   </template>
 
                 </div>
 
                 <!-- 决策时间线 -->
-                <div class="mt-3 pt-2 border-t border-gray-800" x-data="{ execs: [], async loadExecs() { try { const r = await fetch('/api/trade/order-executions?order_id='+deal.id); this.execs = await r.json(); } catch{} } }" x-init="loadExecs()">
+                <div class="mt-3 pt-2 border-t border-ink-600" x-data="{ execs: [], async loadExecs() { try { const r = await fetch('/api/trade/order-executions?order_id='+deal.id); this.execs = await r.json(); } catch{} } }" x-init="loadExecs()">
                   <template x-if="execs.length > 0">
                     <div class="space-y-2">
-                      <span class="text-xs text-gray-500">决策时间线</span>
+                      <span class="text-xs text-ink-400">决策时间线</span>
                       <template x-for="e in execs" :key="e.id">
                         <div class="relative pl-5 pb-1 border-l-2" :class="e.status === 'completed' ? 'border-green-800' : e.status === 'failed' || e.status === 'rejected' ? 'border-red-800' : e.status === 'pending' ? 'border-yellow-800' : 'border-blue-800'">
-                          <span class="absolute -left-1.5 top-0.5 w-3 h-3 rounded-full border-2 border-gray-900" :class="e.status === 'completed' ? 'bg-green-500' : e.status === 'failed' || e.status === 'rejected' ? 'bg-red-500' : e.status === 'pending' ? 'bg-yellow-500' : 'bg-blue-500'"></span>
+                          <span class="absolute -left-1.5 top-0.5 w-3 h-3 rounded-full border-2 border-ink-700" :class="e.status === 'completed' ? 'bg-green-500' : e.status === 'failed' || e.status === 'rejected' ? 'bg-red-500' : e.status === 'pending' ? 'bg-yellow-500' : 'bg-blue-500'"></span>
                           <div class="text-xs">
-                            <span class="text-gray-500" x-text="e.created_at ? new Date(e.created_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : ''"></span>
-                            <span class="text-gray-200 ml-1" x-text="
+                            <span class="text-ink-400" x-text="e.created_at ? new Date(e.created_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : ''"></span>
+                            <span class="text-ink-200 ml-1" x-text="
                               e.type === 'accept_order' ? '你的 Agent 接了这笔单' :
                               e.type === 'pay_usdt' ? '你的 Agent 发送了 USDT 付款' :
                               e.type === 'verify_payment' ? '系统验证了链上付款' :
@@ -2821,13 +2830,13 @@
                             "></span>
                           </div>
                           <div class="text-xs mt-0.5" x-show="e.display_summary">
-                            <span class="text-gray-500">理由：</span>
-                            <span class="text-gray-400" x-text="e.display_summary"></span>
+                            <span class="text-ink-400">理由：</span>
+                            <span class="text-ink-400" x-text="e.display_summary"></span>
                           </div>
                           <div class="text-xs mt-0.5 space-x-3">
                             <template x-if="e.amount">
                               <span>
-                                <span class="text-gray-500" x-text="e.asset === 'kas' ? 'KAS' : 'USDT'"></span>
+                                <span class="text-ink-400" x-text="e.asset === 'kas' ? 'KAS' : 'USDT'"></span>
                                 <span class="text-white font-medium" x-text="e.amount"></span>
                                 <span class="text-green-600" x-text="e.status === 'completed' ? ' ✓' : e.status === 'failed' ? ' ✗' : ''"></span>
                               </span>
@@ -2846,28 +2855,28 @@
                 </div>
 
                 <!-- 底部操作栏 -->
-                <div class="flex space-x-2 mt-3 pt-2 border-t border-gray-800">
+                <div class="flex space-x-2 mt-3 pt-2 border-t border-ink-600">
                   <button @click.stop="toggleChat(deal)"
                     class="px-3 py-1.5 rounded text-xs"
-                    :class="chatDeal?.id === deal.id ? 'bg-blue-700 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-300'"
+                    :class="chatDeal?.id === deal.id ? 'bg-blue-700 text-white' : 'bg-ink-600 hover:bg-ink-500 text-ink-300'"
                     x-text="chatDeal?.id === deal.id ? '收起聊天' : '聊天'"></button>
-                  <button @click.stop="openFullChat(deal)" class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded text-xs">新窗口打开</button>
-                  <span class="text-xs text-gray-600 leading-6" x-text="'#' + deal.id?.slice(0,8)"></span>
+                  <button @click.stop="openFullChat(deal)" class="px-3 py-1.5 bg-ink-600 hover:bg-ink-500 text-ink-300 rounded text-xs">新窗口打开</button>
+                  <span class="text-xs text-ink-500 leading-6" x-text="'#' + deal.id?.slice(0,8)"></span>
                 </div>
 
                 <!-- 内嵌聊天面板 -->
                 <template x-if="chatDeal?.id === deal.id">
-                  <div class="mt-3 border border-gray-700 rounded-lg overflow-hidden">
+                  <div class="mt-3 border border-ink-500 rounded-lg overflow-hidden">
                     <!-- 原始订单数据 -->
-                    <div class="bg-gray-900/80 px-3 py-2 border-b border-gray-700 text-xs">
-                      <span class="text-gray-500">订单数据:</span>
-                      <span class="font-mono text-gray-400 ml-1" x-text="deal.side.toUpperCase() + ' ' + deal.kas_amount + ' KAS | ' + (deal.price > 0 ? '$'+deal.price.toFixed(4) : '面议') + ' | ' + (deal.chain||'bnb').toUpperCase()"></span>
-                      <span class="text-gray-600 ml-2" x-text="deal.customer_address ? '对方: ...' + deal.customer_address.slice(-8) : ''"></span>
+                    <div class="bg-ink-700/80 px-3 py-2 border-b border-ink-500 text-xs">
+                      <span class="text-ink-400">订单数据:</span>
+                      <span class="font-mono text-ink-400 ml-1" x-text="deal.side.toUpperCase() + ' ' + deal.kas_amount + ' KAS | ' + (deal.price > 0 ? '$'+deal.price.toFixed(4) : '面议') + ' | ' + (deal.chain||'bnb').toUpperCase()"></span>
+                      <span class="text-ink-500 ml-2" x-text="deal.customer_address ? '对方: ...' + deal.customer_address.slice(-8) : ''"></span>
                     </div>
                     <!-- 消息历史 -->
-                    <div class="max-h-40 overflow-y-auto px-3 py-2 space-y-1 bg-gray-950">
+                    <div class="max-h-40 overflow-y-auto px-3 py-2 space-y-1 bg-ink-700">
                       <template x-if="chatHistory.length === 0">
-                        <p class="text-xs text-gray-600 text-center py-2">暂无消息记录</p>
+                        <p class="text-xs text-ink-500 text-center py-2">暂无消息记录</p>
                       </template>
                       <template x-for="h in chatHistory" :key="h.ts">
                         <div class="text-xs" :class="h.dir === 'out' ? 'text-right' : ''">
@@ -2877,10 +2886,10 @@
                       </template>
                     </div>
                     <!-- 输入框 -->
-                    <div class="flex border-t border-gray-700">
+                    <div class="flex border-t border-ink-500">
                       <input type="text" x-model="chatMsg" @keydown.enter="sendChat(deal)"
                         placeholder="输入消息..."
-                        class="flex-1 bg-gray-900 text-sm text-white px-3 py-2 focus:outline-none" />
+                        class="flex-1 bg-ink-700 text-sm text-white px-3 py-2 focus:outline-none" />
                       <button @click="sendChat(deal)" :disabled="chatSending || !chatMsg.trim()"
                         class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs disabled:opacity-50"
                         x-text="chatSending ? '...' : '发送'"></button>
@@ -2891,7 +2900,7 @@
             </template>
 
             <template x-if="activeDeals.length === 0">
-              <div class="px-4 py-8 text-center text-gray-600 text-sm">暂无进行中的交易</div>
+              <div class="px-4 py-8 text-center text-ink-500 text-sm">暂无进行中的交易</div>
             </template>
           </div>
         </div>
