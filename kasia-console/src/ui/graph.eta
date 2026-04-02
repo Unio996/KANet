@@ -27,7 +27,7 @@
     <!-- Nodes -->
     <template x-for="n in nodes" :key="n.id">
       <div class="absolute flex flex-col items-center cursor-pointer select-none group"
-           :style="'left:' + (n.x - 30) + 'px; top:' + (n.y - 30) + 'px; width: 60px;'"
+           :style="'left:' + (n.x - 30) + 'px; top:' + (n.y - 30) + 'px; width: 60px; z-index:' + (n.isMe ? 10 : 1)"
            @click.stop="selectedNode = n"
            @dblclick="window.location = '/story?peer=' + encodeURIComponent(n.id) + '&agent=' + selectedAgent">
         <!-- Circle: 颜色=信任等级, 大小=交易量 -->
@@ -155,6 +155,7 @@ function graphPage() {
 
         const total = contacts.length || 1;
         contacts.forEach((c, i) => {
+          if (c.address === myAddr) return; // skip self
           const angle = (2 * Math.PI * i) / total - Math.PI / 2;
           const r = Math.min(W, H) * 0.35;
           nodeMap.set(c.address, {
