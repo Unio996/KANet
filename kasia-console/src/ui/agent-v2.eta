@@ -109,10 +109,10 @@
 
         <!-- Stats Row -->
         <div class="grid grid-cols-4 divide-x divide-warm-200">
-          <div class="px-5 py-4 text-center">
-            <div class="text-2xl font-bold text-ink-700" x-text="agent.stats?.contactCount || 0"></div>
+          <a :href="'/contacts?agent=' + (agent?.id || '')" class="px-5 py-4 text-center block hover:bg-warm-50 transition-colors rounded-lg cursor-pointer">
+            <div class="text-2xl font-bold text-brand-500" x-text="agent.stats?.contactCount || 0"></div>
             <div class="text-xs text-ink-300 mt-1">通讯录</div>
-          </div>
+          </a>
           <a :href="'/contacts?agent=' + (agent?.id || '')" class="px-5 py-4 text-center block hover:bg-warm-50 transition-colors rounded-lg cursor-pointer">
             <div class="text-2xl font-bold text-brand-500" x-text="agent.stats?.interactionCount || 0"></div>
             <div class="text-xs text-ink-300 mt-1">链上行为</div>
