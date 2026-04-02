@@ -1373,5 +1373,56 @@ export function runMigrations() {
     console.log('[migrate] v35: broker_accounts table created.');
   }
 
+  // ── v37: agent_connections — dynamic credential management ──
+  const hasAgentConnections = sqlite.prepare(
+    "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='agent_connections'"
+  ).get().cnt;
+  if (!hasAgentConnections) {
+    sqlite.exec(`
+      CREATE TABLE agent_connections (
+        id                     TEXT PRIMARY KEY,
+        adapter_node_id        TEXT NOT NULL REFERENCES adapter_nodes(id),
+        provider               TEXT NOT NULL,
+        auth_mode              TEXT NOT NULL DEFAULT 'api_key',
+        status                 TEXT NOT NULL DEFAULT 'connected',
+        base_url               TEXT,
+        model                  TEXT,
+        api_key_enc            TEXT,
+        access_token_enc       TEXT,
+        refresh_token_enc      TEXT,
+        gateway_token_enc      TEXT,
+        expires_at             TEXT,
+        refresh_after          TEXT,
+        last_refresh_at        TEXT,
+        last_refresh_error     TEXT,
+        credential_version     INTEGER NOT NULL DEFAULT 1,
+        created_at             TEXT NOT NULL,
+        updated_at             TEXT NOT NULL
+      )
+    `);
+    // Migrate existing adapter_nodes into agent_connections
+    const adapters = sqlite.prepare('SELECT * FROM adapter_nodes').all();
+    const now = new Date().toISOString();
+    const ins = sqlite.prepare(`
+      INSERT INTO agent_connections (id, adapter_node_id, provider, auth_mode, status, base_url, model,
+        api_key_enc, gateway_token_enc, credential_version, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'connected', ?, ?, ?, ?, 1, ?, ?)
+    `);
+    for (const a of adapters) {
+      const provider = a.ai_provider || 'openclaw';
+      const authMode = (provider === 'openclaw') ? 'gateway' : 'api_key';
+      const baseUrl = (provider === 'openclaw')
+        ? (a.gateway_ws_url || 'ws://127.0.0.1:18789')
+        : (a.ai_provider_url || null);
+      ins.run(
+        randomUUID(), a.id, provider, authMode, baseUrl, a.ai_model || null,
+        a.ai_provider_key_encrypted || null,
+        a.token_encrypted || null,
+        now, now
+      );
+    }
+    console.log(`[migrate] v37: agent_connections table created, ${adapters.length} connections migrated.`);
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

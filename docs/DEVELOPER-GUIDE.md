@@ -1,7 +1,8 @@
 # KANet Developer Guide
 
 > **修改任何代码前必读。** 一个文件，覆盖全系统。唯一权威开发者文档。
-> 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-01。
+> 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-02。
+> 4/2 更新：陷阱 #7 下划线修复、陷阱 #12 技能注册统一链路、第十三章认证系统（agent_connections + OAuth）、Skill 系统架构（两种格式同一链路）、code-ops 行为分层模型（L1-L4）。
 
 ---
 
@@ -158,11 +159,69 @@ minds/*/reflections.json ←── 反思持久化       │
 4. **Brain 超时 180 秒。** 不要调低。
 5. **目标 success 也有频率限制。** ≥10 次 success → 12h 冷却。founding-vision 目标失败 50 次也会退役。
 6. **启动时 Agent 操作要错开。** staggerMs = agentIndex * 25_000。
-7. **Agent 目录名保留下划线。** Kasia_1 → minds/kasia_1/（不是 kasia1）。
+7. **Agent 目录名保留下划线。** 正则必须是 `[^a-z0-9_]`（保留下划线），不是 `[^a-z0-9]`。Kasia_1 → minds/kasia_1/（不是 kasia1）。涉及文件：relay.js（创建/Goals）、agent-health.js、mind-manager.js。
 8. **reflection lastReflectionTime 必须始终更新。** 不管 JSON 解析成功与否。反思文件名是 `reflections.json`（不是 evolution.json）。
 9. **RPC 节点 TCP 可达 ≠ 数据可用。** rpc-health.js 用 getBlockDagInfo() 验证 blockCount > 0 && headerCount > 0，防止未同步节点返回空 UTXO 导致 Agent 余额显示为 0 并自我瘫痪。
 10. **Eta 模板 x-data 属性不能包含 > < 字符。** 浏览器会把 `>` 当 HTML 标签结束符，导致 JS 泄露为可见文本。超过 10 行的 x-data 必须提取到 `<script>` 里的命名函数（如 `x-data="agentApp()"`）。
 11. **graph.eta 必须跳过自己的地址。** 如果 Agent 地址出现在联系人列表中，nodeMap.set 会覆盖中心节点。用 `if (c.address === myAddr) return` 跳过。
+
+12. **技能注册走统一链路。** Console `registerMindSkills()` 启动时扫描 `.mjs` 文件和子目录 `skill.json`，写入 skills 表。Mind `registry.autoDiscover()` 查 Console skills 表 `isActive` 后加载。**一条链路，一个开关。** 新 Agent 自动继承已有 Agent 的 category 分类。中文正则不能用 `\b`（word boundary 对中文无效）。
+
+### Skill 系统架构
+
+**两种技能格式（同一条注册链路）：**
+
+| 格式 | Console 注册 | Mind 加载 | 示例 |
+|------|-------------|----------|------|
+| 单文件 `.mjs` | registerMindSkills 扫描 super('name','desc') | registry.autoDiscover 查 isActive | self-awareness.mjs |
+| 包式 `skill.json` | registerMindSkills 扫描子目录 skill.json | registry.autoDiscover 查 isActive | conversational-ops/, code-ops/ |
+
+**包式技能结构：**
+```
+skills/my-skill/
+  skill.json       ← 元数据（id, name, version）
+  intents.json     ← 意图注册（可选，conversational-ops 模式）
+  tools.json       ← 工具定义（可选，code-ops 模式）
+  executor.mjs     ← 执行器
+```
+
+**注册链路（唯一）：**
+```
+Console 启动 → registerMindSkills()
+  ├─ 扫描 .mjs 文件 → super('name','desc') 提取 → 写入 skills 表
+  └─ 扫描子目录 skill.json → meta.id 提取 → 写入 skills 表
+  └─ 新 Agent 自动继承 sibling 的 category/trust/side_effect
+
+Mind 启动 → registry.autoDiscover()
+  ├─ 查 Console /api/agent/mind-skills → activeNames
+  ├─ .mjs 文件 → isActive 检查 → 加载
+  └─ 子目录 skill.json → isActive 检查 → 加载
+```
+
+### code-ops: 行为分层模型
+
+Agent 根据上下文在四个行为层之间切换：
+
+| 层级 | 名称 | 工具 | 激活条件 |
+|------|------|------|---------|
+| L1 | 社交态 | 无 | 默认 |
+| L2 | 任务态 | 无（输出文本方案） | owner 请求方案 |
+| L3 | 观察态 | read_file, search_code, http_get | owner 请求诊断（二段确认） |
+| L4 | 行动态 | write_file, run_command, http_mutate | owner 请求执行（二段确认） |
+
+**关键规则：** 默认 L1，Agent 不主动升级。L4 idle 5min / 最长 30min 自动降回 L1。Self-healing L4 屏蔽 write_file 和变更 HTTP。非 owner 最高 L3。
+
+**文件：** `agent-mind/src/skills/code-ops/`（layer-engine.mjs + intent-detector.mjs + executor.mjs + tools.json）
+
+**实现关键点：**
+- 工具执行在 `mind.mjs:executeTradeAction()` 的 switch 里（和交易 ACTION 同一个 dispatch）
+- Brain context 注入在 `context-builder.mjs:_buildReactiveUser()` 的 sections 最前面（确保 Brain 优先看到工具）
+- 包式技能注册在 `skills.js:registerMindSkills()` 扫描子目录 skill.json（与 .mjs 同一条路径）
+- intent-detector 中文正则不能用 `\b`（word boundary 对中文无效）
+
+**2026-04-02 验证通过：** Eric 通过 code-ops L3 读取 relay.log，分析 200 行日志，识别出 MCP server 重复启动问题。
+
+详见设计文档：`docs/code-ops-design.md`
 
 ---
 
@@ -493,3 +552,73 @@ Agent 决策理由从 execution_states.display_summary 注入。
 | 6 | Adapter 遗留 <<SKILL:annotate:...>> 系统 | 和 Mind Skill Registry 两套并存 P3 |
 | 7 | protocol.mjs Relay/Scout 各一份 | shared/ 可合并 P3 |
 | 8 | kaspa-scout/package.json 硬编码 file: 路径 | npm 构建时依赖，部署时替换 |
+
+---
+
+## 十三、认证系统（agent_connections）
+
+### 架构原则
+
+> **Console 拥有凭证，Adapter 消费凭证。resolveRequestAuth 是唯一入口。**
+
+```
+Console (凭证所有者)              Adapter (凭证消费者)
+─────────────────               ─────────────────
+agent_connections 表             resolve-auth.mjs 本地缓存
+  api_key / oauth / gateway      ↓
+Connection Manager               GET /api/auth/resolve-by-adapter/:id
+  resolveRequestAuth()           ↓
+  refresh worker (60s)           拿到 { headers, baseUrl, model }
+  OAuth callback (port 1455)     ↓
+                                 发 AI 请求（401 → 重试一次）
+```
+
+### agent_connections 表
+
+| 字段 | 说明 |
+|------|------|
+| auth_mode | api_key / oauth / gateway |
+| status | connected / expiring / refreshing / expired / refresh_failed / reauth_required / revoked |
+| credential_version | 每次 token 更新 +1，Adapter 缓存据此失效 |
+
+### 三种连接模式
+
+| 模式 | 用户体验 | token 生命周期 |
+|------|---------|---------------|
+| api_key | 填 API Key | 永久 |
+| oauth | 浏览器登录授权 | access_token ~1h-10d，refresh_token 自动续期 |
+| gateway | 填 gateway token | 永久（OpenClaw 管理） |
+
+### OAuth 流程（OpenAI Codex）
+
+1. Console 生成 PKCE code_verifier + code_challenge
+2. 浏览器跳转 auth.openai.com/oauth/authorize
+3. 用户登录 ChatGPT 账号授权
+4. OpenAI 回调 localhost:1455/auth/callback
+5. Console 用 authorization_code 换 access_token + refresh_token
+6. 加密存入 agent_connections
+7. Adapter 通过 resolveRequestAuth 拿到 Bearer token
+
+**关键：** OAuth token 调的是 `chatgpt.com/backend-api/codex/responses`（Codex Responses API），不是 `api.openai.com/v1/chat/completions`。openai.mjs 自动检测 baseUrl 切换请求格式。
+
+### Adapter 请求流程
+
+```
+1. 检查本地缓存（未过期 && >5min margin && 未 401）
+2. 无缓存 → GET /api/auth/resolve-by-adapter/:adapterId
+3. 用返回的 headers + baseUrl 发请求
+4. 成功 → 返回
+5. 401 → 清缓存 → resolve(force_refresh=true)
+   status=connected → 重试一次
+   其他 → 直接失败
+6. 每个请求最多重试一次
+```
+
+### 关键文件
+
+| 文件 | 职责 |
+|------|------|
+| kasia-console/src/services/connection-manager.js | resolveRequestAuth + CRUD + refresh worker |
+| kasia-console/src/api/auth.js | resolve / connections 端点 |
+| kasia-console/src/api/oauth.js | OAuth start/callback + 临时 1455 端口监听 |
+| agent-adapter/src/providers/resolve-auth.mjs | 共享 auth 缓存 + 401 恢复 |

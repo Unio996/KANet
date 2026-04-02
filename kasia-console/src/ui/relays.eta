@@ -523,9 +523,10 @@ async function submitTransfer() {
     });
     const data = await res.json();
     if (data.ok) {
-      const msg = data.adjusted
-        ? 'Sent ' + data.actualAmount + ' KAS (adjusted from ' + data.requestedAmount + ' due to KIP-9). TX: ' + data.txId.slice(0, 16) + '...'
-        : 'Sent ' + data.actualAmount + ' KAS. TX: ' + data.txId.slice(0, 16) + '...';
+      let msg = 'Transfer submitted';
+      if (data.txId) msg += '. TX: ' + data.txId.slice(0, 16) + '...';
+      if (data.adjusted) msg = 'Sent ' + data.actualAmount + ' KAS (adjusted due to KIP-9).' + (data.txId ? ' TX: ' + data.txId.slice(0, 16) + '...' : '');
+      else if (data.actualAmount) msg = 'Sent ' + data.actualAmount + ' KAS.' + (data.txId ? ' TX: ' + data.txId.slice(0, 16) + '...' : '');
       resultEl.textContent = msg;
       resultEl.className = 'mt-3 text-sm text-green-600';
     } else {
