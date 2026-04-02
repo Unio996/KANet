@@ -549,6 +549,22 @@ export async function registerConversationRoutes(fastify) {
     return reply.viewAsync('graph', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', relayNodes, _page: 'graph' });
   });
 
+  // Page: /agent/status — standalone health monitor
+  fastify.get('/agent/status', async (request, reply) => {
+    const lang = parseLang(request.headers.cookie);
+    const t = getT(lang);
+    const relayNodes = listRelayNodes();
+    return reply.viewAsync('agent-status', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', langs: LANG_NAMES, relayNodes, _page: 'agent-status' });
+  });
+
+  // Page: /agent/history — standalone episode history
+  fastify.get('/agent/history', async (request, reply) => {
+    const lang = parseLang(request.headers.cookie);
+    const t = getT(lang);
+    const relayNodes = listRelayNodes();
+    return reply.viewAsync('agent-history', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', langs: LANG_NAMES, relayNodes, _page: 'agent-history' });
+  });
+
   // Legacy dashboard (keep for backward compat)
   fastify.get('/dashboard', async (request, reply) => {
     const lang = parseLang(request.headers.cookie);
