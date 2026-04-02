@@ -15,7 +15,7 @@
       class="flex items-center px-3 py-2.5 rounded-lg text-sm transition-colors <%= it._page === 'contacts' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
       通讯录
     </a>
-    <% const _isAgent = ['agent','agent-v2','story','graph'].includes(it._page); %>
+    <% const _isAgent = ['agent','agent-v2','agent-status','agent-history','story','graph'].includes(it._page); %>
     <% const _inMore = it._page === 'graph' || ['goals','wallet','skills','card'].includes(it._agentTab); %>
     <div x-data="{ open: <%= _isAgent ? 'true' : 'false' %>, more: <%= _inMore ? 'true' : 'false' %> }">
       <button @click="open = !open"
@@ -28,12 +28,12 @@
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'agent' && !it._agentTab ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
           概览
         </a>
-        <a href="/agent?tab=history"
-          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._agentTab === 'history' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+        <a href="/agent/history"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'agent-history' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
           历史
         </a>
-        <a href="/agent?tab=status"
-          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._agentTab === 'status' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+        <a href="/agent/status"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'agent-status' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
           状态
         </a>
         <!-- 更多 -->
@@ -55,8 +55,8 @@
             class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-7 <%= it._agentTab === 'wallet' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
             钱包
           </a>
-          <a href="/agent?tab=skills"
-            class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-7 <%= it._agentTab === 'skills' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          <a href="/skills"
+            class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-7 <%= it._page === 'skills' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
             技能
           </a>
           <a href="/agent?tab=card"

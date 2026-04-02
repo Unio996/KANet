@@ -1,254 +1,6 @@
 <%~ include('partials/page-open', { _page: 'agent', pageTitle: '我的 Agent', ...it }) %>
 
-<div class="p-6" x-data="{
-  agents: [],
-  selectedIdx: 0,
-  loading: true,
-  activeTab: null,
-  balance: null, balLoading: false,
-  spending: null, spendLoading: false,
-  wallets: null, walletsLoading: false,
-  goals: [], goalsLoading: false,
-  mindSkills: [], recentActivity: [],
-  txHistory: [], txLoading: false,
-  episodes: [], episodesLoading: false,
-  health: null,
-
-  showCreateWallet: false, showImportWallet: false,
-  newWalletChain: 'bnb', newWalletLabel: '',
-  importKey: '', importChain: 'bnb', importLabel: '',
-  walletCreating: false, walletImporting: false,
-
-  newGoalText: '', editingGoalId: null, editingGoalText: '',
-
-  cardEditing: false, cardPublishing: false, cardPublished: false, cardError: '',
-  cardForm: { name: '', entityType: 'agent', summary: '', mode: 'public' },
-
-  showPrivKey: null, privKeyValue: '',
-  swapWallet: null, swapForm: { from: 'usdc', to: 'usdc.e', amount: '' }, swapping: false, swapMsg: '',
-
-  pendingApprovals: [],
-
-  get agent() { return this.agents[this.selectedIdx] || null; },
-
-  async init() {
-    try {
-      const res = await fetch('/api/agent/profile');
-      this.agents = await res.json();
-    } catch (e) { console.error(e); }
-    this.loading = false;
-    if (this.agents.length > 0) await this.loadAll();
-    // 读取 URL ?tab= 参数，自动打开对应 tab
-    const urlTab = new URLSearchParams(location.search).get('tab');
-    if (urlTab) this.activeTab = urlTab;
-    this.$watch('selectedIdx', () => this.loadAll());
-  },
-
-  async loadAll() {
-    this.loadBal(); this.loadSpent(); this.loadWallets();
-    this.loadGoals(); this.loadSkills(); this.loadTxHistory(); this.loadEpisodes();
-    this.loadPendingApprovals(); this.loadHealth();
-  },
-
-  async loadHealth() {
-    try {
-      const r = await fetch('/api/health/agents');
-      const d = await r.json();
-      this.health = (d.agents || []).find(a => a.address === this.agent?.address) || null;
-    } catch { this.health = null; }
-  },
-
-  healthReasonText(r) {
-    const map = { reflection:'反思周期超时', errors:'近期错误偏多', adapter:'AI 引擎离线', relay_down:'Relay 未运行', lastEvent:'长时间无活动', blocks:'消息拦截过多', payFails:'支付失败过多', proactive:'主动行为超时' };
-    return map[r] || r || '';
-  },
-
-  get sortedIndicators() {
-    if (!this.health?.indicators) return [];
-    const order = { red: 0, yellow: 1, green: 2 };
-    const labels = { adapter:'AI 引擎', lastEvent:'最近活动', proactive:'主动行为', reflection:'反思周期', errors:'错误 (2h)', blocks:'拦截 (2h)', payFails:'支付失败 (24h)' };
-    const links = { adapter:'/adapters', lastEvent:'/events', proactive:'/events', reflection:'/events', errors:'/events', blocks:'/events', payFails:'/market' };
-    const h = this.health;
-    const details = {
-      adapter: () => h.indicators.adapter === 'green' ? '运行中' : '离线',
-      lastEvent: () => KANet.relativeTime(h.stats.lastEvent) || '从未',
-      proactive: () => KANet.relativeTime(h.stats.lastProactive) || '从未',
-      reflection: () => KANet.relativeTime(h.stats.lastReflection) || '从未',
-      errors: () => h.stats.errors2h + ' 次',
-      blocks: () => h.stats.blocks2h + ' 次',
-      payFails: () => h.stats.payFails24h + ' 次',
-    };
-    return Object.entries(h.indicators)
-      .map(([k, v]) => ({ key: k, status: v, label: labels[k]||k, detail: details[k]?.() || '', link: links[k] || '/events' }))
-      .sort((a, b) => order[a.status] - order[b.status]);
-  },
-
-  async loadPendingApprovals() {
-    try { this.pendingApprovals = await (await fetch('/api/trade/pending-approvals')).json(); } catch { this.pendingApprovals = []; }
-  },
-  async approveExec(id) {
-    try { await fetch('/api/trade/approve-execution/' + id, { method: 'POST' }); await this.loadPendingApprovals(); } catch(e) { alert(e.message); }
-  },
-  async rejectExec(id) {
-    try { await fetch('/api/trade/reject-execution/' + id, { method: 'POST' }); await this.loadPendingApprovals(); } catch(e) { alert(e.message); }
-  },
-
-  async loadBal() {
-    if (!this.agent) return; this.balLoading = true;
-    try { const r = await fetch('/api/relay/' + this.agent.id + '/balance'); this.balance = (await r.json()).balance; }
-    catch { this.balance = null; } this.balLoading = false;
-  },
-  async loadSpent() {
-    if (!this.agent) return; this.spendLoading = true;
-    try { const r = await fetch('/api/agent/spending?relay_node_id=' + this.agent.id + '&days=1'); this.spending = await r.json(); }
-    catch { this.spending = null; } this.spendLoading = false;
-  },
-  async loadWallets() {
-    if (!this.agent) return; this.walletsLoading = true;
-    try { const r = await fetch('/api/relay/' + this.agent.id + '/wallets'); this.wallets = await r.json(); }
-    catch { this.wallets = null; } this.walletsLoading = false;
-  },
-  async loadGoals() {
-    if (!this.agent) return; this.goalsLoading = true;
-    try { const r = await fetch('/api/relay/' + this.agent.id + '/goals'); this.goals = await r.json(); }
-    catch { this.goals = []; } this.goalsLoading = false;
-  },
-  async loadSkills() {
-    if (!this.agent) return;
-    try { const r = await fetch('/api/agent/mind-skills?relay_node_id=' + this.agent.id); this.mindSkills = await r.json(); } catch { this.mindSkills = []; }
-    try { const r2 = await fetch('/api/agent/mind-events?limit=20'); const evts = await r2.json();
-      this.recentActivity = evts.filter(e => e.event_type === 'skill_cycle' && e.source === this.agent.name).slice(0, 5);
-    } catch { this.recentActivity = []; }
-  },
-  async loadTxHistory() {
-    if (!this.agent) return; this.txLoading = true;
-    try { const r = await fetch('/api/agent/tx-history?relay_node_id=' + this.agent.id + '&limit=20'); this.txHistory = await r.json(); }
-    catch { this.txHistory = []; } this.txLoading = false;
-  },
-  async loadEpisodes() {
-    if (!this.agent) return; this.episodesLoading = true;
-    try { const r = await fetch('/api/history/episodes?relay_node_id=' + this.agent.id + '&limit=30'); this.episodes = await r.json(); }
-    catch { this.episodes = []; } this.episodesLoading = false;
-  },
-
-  // Episode helpers
-  episodeTitle(ep) {
-    const peer = ep.counterparty_name || (ep.counterparty_addr ? KANet.shortAddr(ep.counterparty_addr) : '未知');
-    if (ep.episode_type === 'trade') return `与 ${peer} 的${ep.side === 'buy' ? '买入' : '卖出'}交易`;
-    return `与 ${peer} 的连接`;
-  },
-  episodeStatusBadge(ep) {
-    const map = { completed: 'badge-success', cancelled: 'badge-neutral', disputed: 'badge-error', in_progress: 'badge-warning' };
-    return map[ep.status] || 'badge-neutral';
-  },
-  episodeStatusLabel(ep) {
-    const map = { completed: '已完成', cancelled: '已取消', disputed: '争议中', in_progress: '进行中' };
-    return map[ep.status] || ep.status;
-  },
-  episodeResult(ep) {
-    if (ep.result_kas == null) return null;
-    return ep.result_kas > 0 ? `+${KANet.formatKas(ep.result_kas)} KAS` : `${KANet.formatKas(ep.result_kas)} KAS`;
-  },
-  episodeResultColor(ep) {
-    if (ep.result_kas == null) return 'text-ink-300';
-    return ep.result_kas > 0 ? 'text-green-600' : 'text-red-500';
-  },
-  stepBadgeColor(type) {
-    const map = { handshake: 'bg-brand-100 text-brand-700', publish: 'bg-ink-50 text-ink-500', negotiate: 'bg-warm-200 text-ink-500', payment: 'bg-amber-100 text-amber-700', verify: 'bg-brand-50 text-brand-600', transfer: 'bg-green-100 text-green-700', complete: 'bg-green-100 text-green-700', cancelled: 'bg-warm-200 text-ink-400', disputed: 'bg-red-100 text-red-700' };
-    return map[type] || 'bg-warm-100 text-ink-400';
-  },
-  stepDotColor(type, done) {
-    if (!done) return 'border-2 border-warm-300 bg-white'; // hollow dot for pending
-    const map = { handshake: 'bg-brand-500', publish: 'bg-ink-400', negotiate: 'bg-ink-300', payment: 'bg-amber-500', verify: 'bg-brand-500', transfer: 'bg-green-500', complete: 'bg-green-500', cancelled: 'bg-ink-300', disputed: 'bg-red-500' };
-    return map[type] || 'bg-ink-300';
-  },
-  stepTypeLabel(type) {
-    const map = { handshake: '连接', publish: '发布', negotiate: '协商', payment: '付款', verify: '验证', transfer: '转账', complete: '完成', cancelled: '取消', disputed: '争议' };
-    return map[type] || type;
-  },
-
-  async createWallet() {
-    if (!this.agent) return; this.walletCreating = true;
-    try { const r = await fetch('/api/relay/' + this.agent.id + '/wallets', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({chain:this.newWalletChain, label:this.newWalletLabel||undefined}) });
-      if (!r.ok) throw new Error((await r.json()).error); this.showCreateWallet = false; this.newWalletLabel = ''; await this.loadWallets();
-    } catch(e) { alert(e.message); } this.walletCreating = false;
-  },
-  async importWallet() {
-    if (!this.agent || !this.importKey.trim()) return; this.walletImporting = true;
-    try { const r = await fetch('/api/relay/' + this.agent.id + '/wallets/import', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({chain:this.importChain, privateKey:this.importKey.trim(), label:this.importLabel||undefined}) });
-      if (!r.ok) throw new Error((await r.json()).error); this.showImportWallet = false; this.importKey = ''; this.importLabel = ''; await this.loadWallets();
-    } catch(e) { alert(e.message); } this.walletImporting = false;
-  },
-  async deleteWallet(wid) {
-    if (!this.agent || !confirm('确定删除此钱包？')) return;
-    try { await fetch('/api/relay/' + this.agent.id + '/wallets/' + wid, {method:'DELETE'}); await this.loadWallets(); } catch(e) { alert(e.message); }
-  },
-  async showPrivkey(wid) {
-    if (this.showPrivKey === wid) { this.showPrivKey = null; return; }
-    try { const r = await fetch('/api/relay/' + this.agent.id + '/wallets/' + wid + '/privkey'); this.privKeyValue = (await r.json()).privateKey; this.showPrivKey = wid;
-    } catch(e) { alert(e.message); }
-  },
-
-  async doSwap(w) {
-    if (!this.swapForm.amount || this.swapping) return;
-    this.swapping = true; this.swapMsg = '';
-    try {
-      const r = await fetch('/api/relay/' + this.agent.id + '/wallets/' + w.id + '/swap', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fromToken: this.swapForm.from, toToken: this.swapForm.to, amount: this.swapForm.amount }),
-      });
-      const d = await r.json();
-      if (d.ok) { this.swapMsg = '兑换成功! TX: ' + d.txHash?.slice(0,12) + '...'; this.swapForm.amount = ''; await this.loadWallets(); }
-      else this.swapMsg = '失败: ' + (d.error || '');
-    } catch (e) { this.swapMsg = '失败: ' + e.message; }
-    this.swapping = false;
-  },
-
-  async addGoal() {
-    if (!this.agent || !this.newGoalText.trim()) return;
-    try { await fetch('/api/relay/' + this.agent.id + '/goals', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text:this.newGoalText.trim(), priority:5}) });
-      this.newGoalText = ''; await this.loadGoals();
-    } catch(e) { alert(e.message); }
-  },
-  startEditGoal(g) { this.editingGoalId = g.id; this.editingGoalText = g.text; },
-  cancelEditGoal() { this.editingGoalId = null; },
-  async saveGoal(g) {
-    if (!this.agent) return;
-    try { await fetch('/api/relay/' + this.agent.id + '/goals/' + g.id, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text:this.editingGoalText, priority:g.priority}) });
-      this.editingGoalId = null; await this.loadGoals();
-    } catch(e) { alert(e.message); }
-  },
-  async retireGoal(g) {
-    if (!this.agent) return;
-    try { await fetch('/api/relay/' + this.agent.id + '/goals/' + g.id, {method:'DELETE'}); await this.loadGoals(); } catch(e) { alert(e.message); }
-  },
-  // 三档优先级：高(8) / 中(5) / 低(2)，循环切换
-  goalTier(p) { return p >= 7 ? '高' : p >= 4 ? '中' : '低'; },
-  goalTierColor(p) { return p >= 7 ? 'text-red-500 bg-red-50 border-red-200' : p >= 4 ? 'text-brand-600 bg-brand-50 border-brand-200' : 'text-ink-400 bg-warm-50 border-warm-300'; },
-  async cyclePriority(g) {
-    // 低(2) → 中(5) → 高(8) → 低(2)
-    const next = g.priority >= 7 ? 2 : g.priority >= 4 ? 8 : 5;
-    try { await fetch('/api/relay/' + this.agent.id + '/goals/' + g.id, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({priority:next}) }); await this.loadGoals(); } catch {}
-  },
-
-  startCardEdit() {
-    if (!this.agent) return;
-    this.cardForm = { name: this.agent.name, entityType: this.agent.card?.entityType || 'agent', summary: this.agent.card?.summary || '', mode: this.agent.card?.mode || 'public' };
-    this.cardEditing = true; this.cardError = ''; this.cardPublished = false;
-  },
-  async publishCard() {
-    this.cardPublishing = true; this.cardError = '';
-    try { const r = await fetch('/api/relay/' + this.agent.id + '/publish-card', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(this.cardForm) });
-      const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Failed');
-      this.cardPublished = d.txId || true; this.cardEditing = false; this.agent.card = { ...this.agent.card, ...this.cardForm };
-    } catch(e) { this.cardError = e.message; } this.cardPublishing = false;
-  },
-
-  chainBadgeClass(chain) {
-    const map = { bnb: 'bg-amber-50 text-amber-700 border-amber-100', eth: 'bg-blue-50 text-blue-700 border-blue-100', polygon: 'bg-violet-50 text-violet-700 border-violet-100', sol: 'bg-purple-50 text-purple-700 border-purple-100', tron: 'bg-red-50 text-red-700 border-red-100' };
-    return map[chain] || 'bg-warm-100 text-ink-500 border-warm-300';
-  }
-}" x-cloak>
+<div class="p-6" x-data="agentApp()" x-cloak>
 
   <!-- ================================ -->
   <!-- LOADING SKELETON                 -->
@@ -627,7 +379,7 @@
       <!-- ========================================= -->
       <!-- TAB CONTENT: 钱包 (wallet)                -->
       <!-- ========================================= -->
-      <div x-show="activeTab === 'wallet'" class="card card-flush overflow-hidden">
+      <div id="tab-wallet" x-show="activeTab === 'wallet'" class="card card-flush overflow-hidden">
         <!-- Header -->
         <div class="px-5 py-3.5 border-b border-warm-200 flex items-center justify-between">
           <span class="text-xs font-medium text-ink-300 uppercase tracking-wider">钱包管理</span>
@@ -785,7 +537,7 @@
       <!-- ========================================= -->
       <!-- TAB CONTENT: Card                         -->
       <!-- ========================================= -->
-      <div x-show="activeTab === 'card'" class="card card-flush overflow-hidden">
+      <div id="tab-card" x-show="activeTab === 'card'" class="card card-flush overflow-hidden">
         <!-- Header -->
         <div class="px-5 py-3.5 border-b border-warm-200 flex items-center justify-between">
           <span class="text-xs font-medium text-ink-300 uppercase tracking-wider">Agent Card</span>
@@ -896,7 +648,7 @@
       <!-- ========================================= -->
       <!-- TAB CONTENT: 目标 (goals)                 -->
       <!-- ========================================= -->
-      <div x-show="activeTab === 'goals'" class="card card-flush overflow-hidden">
+      <div id="tab-goals" x-show="activeTab === 'goals'" class="card card-flush overflow-hidden">
         <!-- Header -->
         <div class="px-5 py-3.5 border-b border-warm-200 flex items-center justify-between">
           <span class="text-xs font-medium text-ink-300 uppercase tracking-wider">目标</span>
@@ -964,7 +716,7 @@
       <!-- ========================================= -->
       <!-- TAB CONTENT: 技能 (skills)                -->
       <!-- ========================================= -->
-      <div x-show="activeTab === 'skills'" class="card card-flush overflow-hidden">
+      <div id="tab-skills" x-show="activeTab === 'skills'" class="card card-flush overflow-hidden">
         <!-- Header -->
         <div class="px-5 py-3.5 border-b border-warm-200 flex items-center justify-between">
           <span class="text-xs font-medium text-ink-300 uppercase tracking-wider">Mind 技能</span>
@@ -1010,7 +762,7 @@
       <!-- ========================================= -->
       <!-- TAB CONTENT: 历史 (history) — 对话故事线      -->
       <!-- ========================================= -->
-      <div x-show="activeTab === 'history'" class="space-y-3">
+      <div id="tab-history" x-show="activeTab === 'history'" class="space-y-3">
         <!-- Loading -->
         <div x-show="episodesLoading" class="card text-center py-8">
           <div class="skeleton mx-auto mb-2" style="width:160px;height:14px;"></div>
@@ -1257,7 +1009,7 @@
       <!-- ========================================= -->
       <!-- TAB CONTENT: 状态 (status)                -->
       <!-- ========================================= -->
-      <div x-show="activeTab === 'status'" class="space-y-4">
+      <div id="tab-status" x-show="activeTab === 'status'" class="space-y-4">
         <!-- Health data loaded -->
         <template x-if="health">
           <div class="space-y-4">
@@ -1373,5 +1125,215 @@
   </div>
 
 </div>
+
+<script>
+function agentApp() {
+  return {
+    agents: [], selectedIdx: 0, loading: true, activeTab: null,
+    balance: null, balLoading: false, spending: null, spendLoading: false,
+    wallets: null, walletsLoading: false, goals: [], goalsLoading: false,
+    mindSkills: [], recentActivity: [], txHistory: [], txLoading: false,
+    episodes: [], episodesLoading: false, health: null,
+    showCreateWallet: false, showImportWallet: false,
+    newWalletChain: 'bnb', newWalletLabel: '',
+    importKey: '', importChain: 'bnb', importLabel: '',
+    walletCreating: false, walletImporting: false,
+    newGoalText: '', editingGoalId: null, editingGoalText: '',
+    cardEditing: false, cardPublishing: false, cardPublished: false, cardError: '',
+    cardForm: { name: '', entityType: 'agent', summary: '', mode: 'public' },
+    showPrivKey: null, privKeyValue: '',
+    swapWallet: null, swapForm: { from: 'usdc', to: 'usdc.e', amount: '' }, swapping: false, swapMsg: '',
+    pendingApprovals: [],
+
+    get agent() { return this.agents[this.selectedIdx] || null; },
+
+    async init() {
+      try { const res = await fetch('/api/agent/profile'); this.agents = await res.json(); } catch (e) { console.error(e); }
+      this.loading = false;
+      if (this.agents.length) await this.loadAll();
+      const urlTab = new URLSearchParams(location.search).get('tab');
+      if (urlTab) {
+        this.activeTab = urlTab;
+        var scrollAttempts = 0;
+        var scrollTimer = setInterval(function() {
+          var el = document.getElementById('tab-' + urlTab);
+          var main = document.querySelector('main');
+          scrollAttempts++;
+          if (el && el.offsetHeight > 0 && main) {
+            clearInterval(scrollTimer);
+            var offset = el.offsetTop - main.offsetTop - 16;
+            main.scrollTo({ top: offset, behavior: 'smooth' });
+          } else if (scrollAttempts > 20) {
+            clearInterval(scrollTimer);
+          }
+        }, 200);
+      }
+      this.$watch('selectedIdx', () => this.loadAll());
+    },
+
+    async loadAll() {
+      this.loadBal(); this.loadSpent(); this.loadWallets();
+      this.loadGoals(); this.loadSkills(); this.loadTxHistory(); this.loadEpisodes();
+      this.loadPendingApprovals(); this.loadHealth();
+    },
+    async loadHealth() {
+      try { const r = await fetch('/api/health/agents'); const d = await r.json();
+        this.health = (d.agents || []).find(a => a.address === this.agent?.address) || null;
+      } catch { this.health = null; }
+    },
+    healthReasonText(r) {
+      const map = { reflection:'反思周期超时', errors:'近期错误偏多', adapter:'AI 引擎离线', relay_down:'Relay 未运行', lastEvent:'长时间无活动', blocks:'消息拦截过多', payFails:'支付失败过多', proactive:'主动行为超时' };
+      return map[r] || r || '';
+    },
+    get sortedIndicators() {
+      if (!this.health?.indicators) return [];
+      const order = { red: 0, yellow: 1, green: 2 };
+      const labels = { adapter:'AI 引擎', lastEvent:'最近活动', proactive:'主动行为', reflection:'反思周期', errors:'错误 (2h)', blocks:'拦截 (2h)', payFails:'支付失败 (24h)' };
+      const links = { adapter:'/adapters', lastEvent:'/events', proactive:'/events', reflection:'/events', errors:'/events', blocks:'/events', payFails:'/market' };
+      const h = this.health;
+      const details = {
+        adapter: () => h.indicators.adapter === 'green' ? '运行中' : '离线',
+        lastEvent: () => KANet.relativeTime(h.stats.lastEvent) || '从未',
+        proactive: () => KANet.relativeTime(h.stats.lastProactive) || '从未',
+        reflection: () => KANet.relativeTime(h.stats.lastReflection) || '从未',
+        errors: () => h.stats.errors2h + ' 次',
+        blocks: () => h.stats.blocks2h + ' 次',
+        payFails: () => h.stats.payFails24h + ' 次',
+      };
+      return Object.entries(h.indicators)
+        .map(([k, v]) => ({ key: k, status: v, label: labels[k]||k, detail: details[k]?.() || '', link: links[k] || '/events' }))
+        .sort((a, b) => order[a.status] - order[b.status]);
+    },
+    async loadPendingApprovals() { try { this.pendingApprovals = await (await fetch('/api/trade/pending-approvals')).json(); } catch { this.pendingApprovals = []; } },
+    async approveExec(id) { try { await fetch('/api/trade/approve-execution/' + id, { method: 'POST' }); await this.loadPendingApprovals(); } catch(e) { alert(e.message); } },
+    async rejectExec(id) { try { await fetch('/api/trade/reject-execution/' + id, { method: 'POST' }); await this.loadPendingApprovals(); } catch(e) { alert(e.message); } },
+    async loadBal() {
+      if (!this.agent) return; this.balLoading = true;
+      try { const r = await fetch('/api/relay/' + this.agent.id + '/balance'); this.balance = (await r.json()).balance; }
+      catch { this.balance = null; } this.balLoading = false;
+    },
+    async loadSpent() {
+      if (!this.agent) return; this.spendLoading = true;
+      try { const r = await fetch('/api/agent/spending?relay_node_id=' + this.agent.id + '&days=1'); this.spending = await r.json(); }
+      catch { this.spending = null; } this.spendLoading = false;
+    },
+    async loadWallets() {
+      if (!this.agent) return; this.walletsLoading = true;
+      try { const r = await fetch('/api/relay/' + this.agent.id + '/wallets'); this.wallets = await r.json(); }
+      catch { this.wallets = null; } this.walletsLoading = false;
+    },
+    async loadGoals() {
+      if (!this.agent) return; this.goalsLoading = true;
+      try { const r = await fetch('/api/relay/' + this.agent.id + '/goals'); this.goals = await r.json(); }
+      catch { this.goals = []; } this.goalsLoading = false;
+    },
+    async loadSkills() {
+      if (!this.agent) return;
+      try { const r = await fetch('/api/agent/mind-skills?relay_node_id=' + this.agent.id); this.mindSkills = await r.json(); } catch { this.mindSkills = []; }
+      try { const r2 = await fetch('/api/agent/mind-events?limit=20'); const evts = await r2.json();
+        this.recentActivity = evts.filter(e => e.event_type === 'skill_cycle' && e.source === this.agent.name).slice(0, 5);
+      } catch { this.recentActivity = []; }
+    },
+    async loadTxHistory() {
+      if (!this.agent) return; this.txLoading = true;
+      try { const r = await fetch('/api/agent/tx-history?relay_node_id=' + this.agent.id + '&limit=20'); this.txHistory = await r.json(); }
+      catch { this.txHistory = []; } this.txLoading = false;
+    },
+    async loadEpisodes() {
+      if (!this.agent) return; this.episodesLoading = true;
+      try { const r = await fetch('/api/history/episodes?relay_node_id=' + this.agent.id + '&limit=30'); this.episodes = await r.json(); }
+      catch { this.episodes = []; } this.episodesLoading = false;
+    },
+    episodeTitle(ep) {
+      const peer = ep.counterparty_name || (ep.counterparty_addr ? KANet.shortAddr(ep.counterparty_addr) : '未知');
+      if (ep.episode_type === 'trade') return '与 ' + peer + ' 的' + (ep.side === 'buy' ? '买入' : '卖出') + '交易';
+      return '与 ' + peer + ' 的连接';
+    },
+    episodeStatusBadge(ep) { return ({ completed: 'badge-success', cancelled: 'badge-neutral', disputed: 'badge-error', in_progress: 'badge-warning' })[ep.status] || 'badge-neutral'; },
+    episodeStatusLabel(ep) { return ({ completed: '已完成', cancelled: '已取消', disputed: '争议中', in_progress: '进行中' })[ep.status] || ep.status; },
+    episodeResult(ep) {
+      if (ep.result_kas == null) return null;
+      return ep.result_kas > 0 ? '+' + KANet.formatKas(ep.result_kas) + ' KAS' : KANet.formatKas(ep.result_kas) + ' KAS';
+    },
+    episodeResultColor(ep) { return ep.result_kas == null ? 'text-ink-300' : ep.result_kas > 0 ? 'text-green-600' : 'text-red-500'; },
+    stepBadgeColor(type) { return ({ handshake: 'bg-brand-100 text-brand-700', publish: 'bg-ink-50 text-ink-500', negotiate: 'bg-warm-200 text-ink-500', payment: 'bg-amber-100 text-amber-700', verify: 'bg-brand-50 text-brand-600', transfer: 'bg-green-100 text-green-700', complete: 'bg-green-100 text-green-700', cancelled: 'bg-warm-200 text-ink-400', disputed: 'bg-red-100 text-red-700' })[type] || 'bg-warm-100 text-ink-400'; },
+    stepDotColor(type, done) {
+      if (!done) return 'border-2 border-warm-300 bg-white';
+      return ({ handshake: 'bg-brand-500', publish: 'bg-ink-400', negotiate: 'bg-ink-300', payment: 'bg-amber-500', verify: 'bg-brand-500', transfer: 'bg-green-500', complete: 'bg-green-500', cancelled: 'bg-ink-300', disputed: 'bg-red-500' })[type] || 'bg-ink-300';
+    },
+    stepTypeLabel(type) { return ({ handshake: '连接', publish: '发布', negotiate: '协商', payment: '付款', verify: '验证', transfer: '转账', complete: '完成', cancelled: '取消', disputed: '争议' })[type] || type; },
+    async createWallet() {
+      if (!this.agent) return; this.walletCreating = true;
+      try { const r = await fetch('/api/relay/' + this.agent.id + '/wallets', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({chain:this.newWalletChain, label:this.newWalletLabel||undefined}) });
+        if (!r.ok) throw new Error((await r.json()).error); this.showCreateWallet = false; this.newWalletLabel = ''; await this.loadWallets();
+      } catch(e) { alert(e.message); } this.walletCreating = false;
+    },
+    async importWallet() {
+      if (!this.agent || !this.importKey.trim()) return; this.walletImporting = true;
+      try { const r = await fetch('/api/relay/' + this.agent.id + '/wallets/import', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({chain:this.importChain, privateKey:this.importKey.trim(), label:this.importLabel||undefined}) });
+        if (!r.ok) throw new Error((await r.json()).error); this.showImportWallet = false; this.importKey = ''; this.importLabel = ''; await this.loadWallets();
+      } catch(e) { alert(e.message); } this.walletImporting = false;
+    },
+    async deleteWallet(wid) {
+      if (!this.agent || !confirm('确定删除此钱包？')) return;
+      try { await fetch('/api/relay/' + this.agent.id + '/wallets/' + wid, {method:'DELETE'}); await this.loadWallets(); } catch(e) { alert(e.message); }
+    },
+    async showPrivkey(wid) {
+      if (this.showPrivKey === wid) { this.showPrivKey = null; return; }
+      try { const r = await fetch('/api/relay/' + this.agent.id + '/wallets/' + wid + '/privkey'); this.privKeyValue = (await r.json()).privateKey; this.showPrivKey = wid; } catch(e) { alert(e.message); }
+    },
+    async doSwap(w) {
+      if (!this.swapForm.amount || this.swapping) return;
+      this.swapping = true; this.swapMsg = '';
+      try {
+        const r = await fetch('/api/relay/' + this.agent.id + '/wallets/' + w.id + '/swap', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fromToken: this.swapForm.from, toToken: this.swapForm.to, amount: this.swapForm.amount }) });
+        const d = await r.json();
+        if (d.ok) { this.swapMsg = '兑换成功! TX: ' + (d.txHash || '').slice(0,12) + '...'; this.swapForm.amount = ''; await this.loadWallets(); }
+        else this.swapMsg = '失败: ' + (d.error || '');
+      } catch (e) { this.swapMsg = '失败: ' + e.message; }
+      this.swapping = false;
+    },
+    async addGoal() {
+      if (!this.agent || !this.newGoalText.trim()) return;
+      try { await fetch('/api/relay/' + this.agent.id + '/goals', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text:this.newGoalText.trim(), priority:5}) });
+        this.newGoalText = ''; await this.loadGoals();
+      } catch(e) { alert(e.message); }
+    },
+    startEditGoal(g) { this.editingGoalId = g.id; this.editingGoalText = g.text; },
+    cancelEditGoal() { this.editingGoalId = null; },
+    async saveGoal(g) {
+      if (!this.agent) return;
+      try { await fetch('/api/relay/' + this.agent.id + '/goals/' + g.id, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text:this.editingGoalText, priority:g.priority}) });
+        this.editingGoalId = null; await this.loadGoals();
+      } catch(e) { alert(e.message); }
+    },
+    async retireGoal(g) {
+      if (!this.agent) return;
+      try { await fetch('/api/relay/' + this.agent.id + '/goals/' + g.id, {method:'DELETE'}); await this.loadGoals(); } catch(e) { alert(e.message); }
+    },
+    goalTier(p) { return p >= 7 ? '高' : p >= 4 ? '中' : '低'; },
+    goalTierColor(p) { return p >= 7 ? 'text-red-500 bg-red-50 border-red-200' : p >= 4 ? 'text-brand-600 bg-brand-50 border-brand-200' : 'text-ink-400 bg-warm-50 border-warm-300'; },
+    async cyclePriority(g) {
+      const next = g.priority >= 7 ? 2 : g.priority >= 4 ? 8 : 5;
+      try { await fetch('/api/relay/' + this.agent.id + '/goals/' + g.id, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({priority:next}) }); await this.loadGoals(); } catch {}
+    },
+    startCardEdit() {
+      if (!this.agent) return;
+      this.cardForm = { name: this.agent.name, entityType: this.agent.card?.entityType || 'agent', summary: this.agent.card?.summary || '', mode: this.agent.card?.mode || 'public' };
+      this.cardEditing = true; this.cardError = ''; this.cardPublished = false;
+    },
+    async publishCard() {
+      this.cardPublishing = true; this.cardError = '';
+      try { const r = await fetch('/api/relay/' + this.agent.id + '/publish-card', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(this.cardForm) });
+        const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Failed');
+        this.cardPublished = d.txId || true; this.cardEditing = false; this.agent.card = { ...this.agent.card, ...this.cardForm };
+      } catch(e) { this.cardError = e.message; } this.cardPublishing = false;
+    },
+    chainBadgeClass(chain) {
+      return ({ bnb: 'bg-amber-50 text-amber-700 border-amber-100', eth: 'bg-blue-50 text-blue-700 border-blue-100', polygon: 'bg-violet-50 text-violet-700 border-violet-100', sol: 'bg-purple-50 text-purple-700 border-purple-100', tron: 'bg-red-50 text-red-700 border-red-100' })[chain] || 'bg-warm-100 text-ink-500 border-warm-300';
+    }
+  };
+}
+</script>
 
 <%~ include('partials/page-close', it) %>

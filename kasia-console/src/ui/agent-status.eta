@@ -1,0 +1,284 @@
+<%~ include('partials/page-open', { _page: 'agent', pageTitle: '', ...it }) %>
+
+<div class="p-6 space-y-5" x-data="agentStatusPage()" x-init="init()" x-cloak>
+
+  <!-- Header -->
+  <div class="flex items-center justify-between">
+    <div class="flex items-center gap-4">
+      <h1 class="text-lg font-semibold text-ink-700">Agent 状态监控</h1>
+      <select x-model="selectedAgent" @change="loadHealth()"
+        class="rounded-lg border border-warm-300 px-3 py-2 text-sm bg-white">
+        <option value="">全部 Agent</option>
+        <% it.relayNodes.forEach(r => { %>
+        <option value="<%= r.address %>" data-name="<%= r.name %>"><%= r.name %></option>
+        <% }) %>
+      </select>
+    </div>
+    <div class="flex items-center gap-3">
+      <span class="text-xs text-ink-300" x-show="lastRefresh"
+        x-text="'刷新于 ' + KANet.relativeTime(lastRefresh)"></span>
+      <button @click="refresh()"
+        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm bg-white border border-warm-300 text-ink-500 hover:bg-warm-50 hover:text-ink-700 transition-colors"
+        :disabled="loading">
+        <svg class="w-3.5 h-3.5" :class="loading ? 'animate-spin' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        刷新
+      </button>
+    </div>
+  </div>
+
+  <!-- Global summary bar -->
+  <div x-show="summary" class="card card-flush px-5 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-4">
+      <span class="text-sm font-medium text-ink-600"
+        x-text="summary.total + ' 个 Agent'"></span>
+      <div class="flex items-center gap-3 text-xs">
+        <span class="flex items-center gap-1.5">
+          <span class="status-dot green" style="width:6px;height:6px;"></span>
+          <span class="text-ink-500" x-text="summary.green + ' 正常'"></span>
+        </span>
+        <span class="flex items-center gap-1.5" x-show="summary.yellow > 0">
+          <span class="status-dot yellow" style="width:6px;height:6px;"></span>
+          <span class="text-amber-600" x-text="summary.yellow + ' 注意'"></span>
+        </span>
+        <span class="flex items-center gap-1.5" x-show="summary.red > 0">
+          <span class="status-dot red" style="width:6px;height:6px;"></span>
+          <span class="text-red-600" x-text="summary.red + ' 异常'"></span>
+        </span>
+      </div>
+    </div>
+    <span class="text-[10px] text-ink-300" x-show="dataTs"
+      x-text="'数据时间: ' + KANet.relativeTime(dataTs)"></span>
+  </div>
+
+  <!-- Loading state -->
+  <div x-show="loading && !agentHealthList.length" class="card text-center py-8">
+    <div class="skeleton mx-auto mb-2" style="width:140px;height:14px;"></div>
+    <div class="text-xs text-ink-300">健康数据加载中...</div>
+  </div>
+
+  <!-- Agent health cards -->
+  <template x-for="agent in agentHealthList" :key="agent.address">
+    <div class="space-y-4 mb-6">
+
+      <!-- Agent name header -->
+      <div class="flex items-center gap-3">
+        <span class="status-dot" :class="KANet.healthDot(agent.status)"></span>
+        <span class="text-sm font-semibold text-ink-700" x-text="agent.name"></span>
+        <span class="text-xs font-mono text-ink-300" x-text="agent.address ? agent.address.slice(0, 16) + '...' : ''"></span>
+        <span class="badge ml-auto"
+          :class="agent.status === 'green' ? 'badge-success' : agent.status === 'red' ? 'badge-error' : 'badge-warning'"
+          x-text="agent.status.toUpperCase()"></span>
+      </div>
+
+      <!-- Alert banner (non-green only) -->
+      <template x-if="agent.status !== 'green'">
+        <div class="card flex items-center justify-between"
+          :class="agent.status === 'red' ? 'border-red-200 bg-red-50' : 'border-amber-200 bg-amber-50'"
+          :style="'border-left-width:3px'">
+          <div class="flex items-center gap-3">
+            <span class="status-dot" :class="KANet.healthDot(agent.status)"></span>
+            <span class="text-sm font-medium"
+              :class="agent.status === 'red' ? 'text-red-800' : 'text-amber-800'"
+              x-text="healthReasonText(agent.reason)"></span>
+          </div>
+          <span class="badge"
+            :class="agent.status === 'red' ? 'badge-error' : 'badge-warning'"
+            x-text="agent.status.toUpperCase()"></span>
+        </div>
+      </template>
+
+      <!-- 7 Health Indicators -->
+      <template x-if="agent.indicators">
+        <div class="card card-flush overflow-hidden">
+          <div class="px-5 py-3 border-b border-warm-200 flex items-center justify-between">
+            <span class="text-xs font-medium text-ink-300 uppercase tracking-wider">健康指标</span>
+            <div class="flex items-center gap-3">
+              <span class="flex items-center gap-1"><span class="status-dot green" style="width:6px;height:6px;"></span><span class="text-[10px] text-ink-300">正常</span></span>
+              <span class="flex items-center gap-1"><span class="status-dot yellow" style="width:6px;height:6px;"></span><span class="text-[10px] text-ink-300">注意</span></span>
+              <span class="flex items-center gap-1"><span class="status-dot red" style="width:6px;height:6px;"></span><span class="text-[10px] text-ink-300">异常</span></span>
+            </div>
+          </div>
+          <div class="divide-y divide-warm-200">
+            <template x-for="ind in sortedIndicatorsFor(agent)" :key="ind.key">
+              <a :href="ind.status !== 'green' ? ind.link : null"
+                class="px-5 py-3 flex items-center justify-between transition-colors block"
+                :class="ind.status !== 'green' ? 'hover:bg-warm-50 cursor-pointer' : ''">
+                <div class="flex items-center gap-3">
+                  <span class="status-dot" :class="KANet.healthDot(ind.status)"></span>
+                  <span class="text-sm text-ink-600" x-text="ind.label"></span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-mono"
+                    :class="ind.status === 'green' ? 'text-ink-300' : ind.status === 'yellow' ? 'text-amber-600' : 'text-red-600 font-semibold'"
+                    x-text="ind.detail"></span>
+                  <template x-if="ind.status !== 'green'">
+                    <svg class="w-3.5 h-3.5 text-ink-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                    </svg>
+                  </template>
+                </div>
+              </a>
+            </template>
+          </div>
+        </div>
+      </template>
+
+      <!-- Activity Stats (2h) -->
+      <template x-if="agent.stats">
+        <div class="card card-flush overflow-hidden">
+          <div class="px-5 py-3 border-b border-warm-200">
+            <span class="text-xs font-medium text-ink-300 uppercase tracking-wider">近 2 小时活动</span>
+          </div>
+          <div class="grid grid-cols-4 divide-x divide-warm-200">
+            <div class="px-4 py-4 text-center">
+              <div class="text-xl font-bold text-ink-700" x-text="agent.stats.active2h || 0"></div>
+              <div class="text-[10px] text-ink-300 mt-1">总事件</div>
+            </div>
+            <div class="px-4 py-4 text-center">
+              <div class="text-xl font-bold text-ink-700"
+                x-text="(agent.stats.active2h || 0) - (agent.stats.silent2h || 0)"></div>
+              <div class="text-[10px] text-ink-300 mt-1">有效响应</div>
+            </div>
+            <div class="px-4 py-4 text-center">
+              <div class="text-xl font-bold"
+                :class="(agent.stats.silent2h || 0) > 10 ? 'text-amber-600' : 'text-ink-400'"
+                x-text="agent.stats.silent2h || 0"></div>
+              <div class="text-[10px] text-ink-300 mt-1">静默</div>
+            </div>
+            <div class="px-4 py-4 text-center">
+              <div class="text-xl font-bold"
+                :class="(agent.stats.errors2h || 0) > 0 ? 'text-red-500' : 'text-ink-400'"
+                x-text="agent.stats.errors2h || 0"></div>
+              <div class="text-[10px] text-ink-300 mt-1">错误</div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- No indicators (relay down) -->
+      <template x-if="!agent.indicators">
+        <div class="card text-center py-6">
+          <div class="text-sm text-red-600 font-medium">Relay 未运行</div>
+          <div class="text-xs text-ink-300 mt-1">无法获取详细指标</div>
+        </div>
+      </template>
+
+    </div>
+  </template>
+
+  <!-- Empty state -->
+  <div x-show="!loading && agentHealthList.length === 0" class="card text-center py-12">
+    <div class="text-ink-400 text-sm">暂无 Agent 健康数据</div>
+    <a href="/agent" class="text-brand-500 hover:text-brand-700 text-sm mt-2 inline-block">前往 Agent 页面</a>
+  </div>
+
+</div>
+
+<script>
+function agentStatusPage() {
+  return {
+    agents: [],
+    selectedAgent: '',
+    healthData: null,
+    summary: null,
+    dataTs: null,
+    loading: true,
+    lastRefresh: null,
+
+    async init() {
+      await this.loadHealth();
+    },
+
+    async loadHealth() {
+      this.loading = true;
+      try {
+        var r = await fetch('/api/health/agents');
+        var d = await r.json();
+        this.healthData = d.agents || [];
+        this.summary = d.summary || null;
+        this.dataTs = d.ts || null;
+        this.lastRefresh = new Date().toISOString();
+      } catch (e) {
+        console.error('[agent-status] health load failed:', e);
+        this.healthData = [];
+        this.summary = null;
+      }
+      this.loading = false;
+    },
+
+    async refresh() {
+      await this.loadHealth();
+    },
+
+    get agentHealthList() {
+      if (!this.healthData) return [];
+      if (!this.selectedAgent) return this.healthData;
+      return this.healthData.filter(function(a) { return a.address === this.selectedAgent; }.bind(this));
+    },
+
+    healthReasonText(r) {
+      var map = {
+        reflection: '反思周期超时',
+        errors: '近期错误偏多',
+        adapter: 'AI 引擎离线',
+        relay_down: 'Relay 未运行',
+        lastEvent: '长时间无活动',
+        blocks: '消息拦截过多',
+        payFails: '支付失败过多',
+        proactive: '主动行为超时'
+      };
+      return map[r] || r || '';
+    },
+
+    sortedIndicatorsFor(agent) {
+      if (!agent || !agent.indicators) return [];
+      var order = { red: 0, yellow: 1, green: 2 };
+      var labels = {
+        adapter: 'AI 引擎',
+        lastEvent: '最近活动',
+        proactive: '主动行为',
+        reflection: '反思周期',
+        errors: '错误 (2h)',
+        blocks: '拦截 (2h)',
+        payFails: '支付失败 (24h)'
+      };
+      var links = {
+        adapter: '/adapters',
+        lastEvent: '/events',
+        proactive: '/events',
+        reflection: '/events',
+        errors: '/events',
+        blocks: '/events',
+        payFails: '/market'
+      };
+      var h = agent;
+      var details = {
+        adapter: function() { return h.indicators.adapter === 'green' ? '运行中' : '离线'; },
+        lastEvent: function() { return KANet.relativeTime(h.stats.lastEvent) || '从未'; },
+        proactive: function() { return KANet.relativeTime(h.stats.lastProactive) || '从未'; },
+        reflection: function() { return KANet.relativeTime(h.stats.lastReflection) || '从未'; },
+        errors: function() { return h.stats.errors2h + ' 次'; },
+        blocks: function() { return h.stats.blocks2h + ' 次'; },
+        payFails: function() { return h.stats.payFails24h + ' 次'; }
+      };
+      return Object.entries(h.indicators)
+        .map(function(entry) {
+          var k = entry[0], v = entry[1];
+          var detailFn = details[k];
+          return {
+            key: k,
+            status: v,
+            label: labels[k] || k,
+            detail: detailFn ? detailFn() : '',
+            link: links[k] || '/events'
+          };
+        })
+        .sort(function(a, b) { return order[a.status] - order[b.status]; });
+    }
+  };
+}
+</script>
+
+<%~ include('partials/page-close', it) %>

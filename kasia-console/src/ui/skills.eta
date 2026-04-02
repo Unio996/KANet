@@ -1,5 +1,4 @@
 <%~ include('partials/page-open', { _page: 'skills', pageTitle: '', ...it }) %>
-</main>
 
     <!-- Header -->
     <header class="bg-white border-b border-warm-200 px-6 py-4 flex items-center justify-between flex-shrink-0">
@@ -18,7 +17,7 @@
       </form>
     </header>
 
-    <main class="flex-1 overflow-y-auto p-6 space-y-6">
+    <div class="p-6 space-y-6">
 
       <%
         /* ── Sort skills: active first, then by name ── */
@@ -402,5 +401,6 @@
           </div>
         </template>
       </div>
+    </div>
 
 <%~ include('partials/page-close', it) %>
