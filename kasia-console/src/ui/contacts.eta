@@ -84,7 +84,7 @@
           <span class="text-xs text-blue-600 w-12 flex-shrink-0" x-text="'↑' + p.out_count"></span>
           <span class="text-xs text-green-600 w-12 flex-shrink-0" x-text="'↓' + p.in_count"></span>
           <span class="text-xs font-bold text-ink-700 w-14 flex-shrink-0" x-text="'Σ' + (p.unique_total || p.total)"></span>
-          <span class="text-[10px] text-ink-300 ml-auto flex-shrink-0" x-text="p.last_ts?.slice(5,16)?.replace('T',' ') || '-'"></span>
+          <span class="text-[10px] text-ink-300 ml-auto flex-shrink-0" x-text="p.last_ts ? KANet.formatTime(p.last_ts) : '-'"></span>
           <span class="text-ink-300 text-[10px]" x-text="expanded===p.peer ? '▼' : '▶'"></span>
         </div>
 

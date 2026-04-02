@@ -93,14 +93,14 @@
 
   fmtDate(d) {
     if (!d) return '—';
-    try { return new Date(d).toLocaleDateString('zh-CN', { month:'numeric', day:'numeric' }) + ' ' + new Date(d).toLocaleTimeString('zh-CN', { hour:'2-digit', minute:'2-digit' }); }
-    catch { return d.slice(0, 16); }
+    try { return new Date(d).toLocaleDateString(undefined, { month:'numeric', day:'numeric' }) + ' ' + new Date(d).toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit', hour12:false }); }
+    catch { return d; }
   },
 
   fmtShortDate(d) {
     if (!d) return '—';
-    try { return new Date(d).toLocaleDateString('zh-CN', { month:'numeric', day:'numeric' }); }
-    catch { return d.slice(0, 10); }
+    try { return new Date(d).toLocaleDateString(undefined, { month:'numeric', day:'numeric' }); }
+    catch { return d; }
   },
 
   relTime(d) {

@@ -2241,7 +2241,7 @@
           <tbody>
             <template x-for="o in marketOrders" :key="o.id">
               <tr class="border-t border-ink-600 hover:bg-ink-600/50 cursor-pointer" @click="expandedOrderId = expandedOrderId === o.id ? null : o.id">
-                <td class="px-4 py-2 text-ink-400 text-xs" x-text="o.created_at?.slice(5, 16)"></td>
+                <td class="px-4 py-2 text-ink-400 text-xs" x-text="KANet.formatTime(o.created_at)"></td>
                 <td class="px-4 py-2"><span class="px-1.5 py-0.5 rounded text-xs font-medium" :class="o.side === 'buy' ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'" x-text="o.side.toUpperCase()"></span></td>
                 <td class="px-4 py-2 text-right font-mono" x-text="o.kas_amount?.toLocaleString() + ' KAS'"></td>
                 <td class="px-4 py-2 text-right font-mono text-purple-400" x-text="o.price > 0 ? '$' + o.price.toFixed(6) : '面议'"></td>
@@ -2321,7 +2321,7 @@
         <template x-for="d in completed" :key="d.id">
           <div class="px-4 py-1.5 flex justify-between text-xs border-t border-ink-600/50">
             <span :class="d.side === 'buy' ? 'text-green-400' : 'text-red-400'" x-text="(d.side === 'buy' ? '买 ' : '卖 ') + d.kas_amount + ' KAS'"></span>
-            <span class="text-ink-400" x-text="d.completed_at?.slice(5,16) || d.created_at?.slice(5,16)"></span>
+            <span class="text-ink-400" x-text="KANet.formatTime(d.completed_at || d.created_at)"></span>
           </div>
         </template>
         <template x-if="completed.length === 0">

@@ -32,20 +32,26 @@ const KANet = {
     }
   },
 
-  /** Relative time: "3 分钟前", "2 小时前", "昨天" */
+  /** Relative time: "3 分钟前", "2 小时前", "昨天" — auto-detects locale */
   relativeTime(iso) {
     if (!iso) return '';
     const diff = Date.now() - new Date(iso).getTime();
     const sec = Math.floor(diff / 1000);
     if (sec < 60) return '刚刚';
     const min = Math.floor(sec / 60);
-    if (min < 60) return `${min} 分钟前`;
+    if (min < 60) return min + ' 分钟前';
     const hr = Math.floor(min / 60);
-    if (hr < 24) return `${hr} 小时前`;
+    if (hr < 24) return hr + ' 小时前';
     const day = Math.floor(hr / 24);
     if (day === 1) return '昨天';
-    if (day < 30) return `${day} 天前`;
-    return new Date(iso).toLocaleDateString('zh-CN');
+    if (day < 30) return day + ' 天前';
+    return new Date(iso).toLocaleDateString();
+  },
+
+  /** Format absolute time in user's local timezone */
+  formatTime(iso) {
+    if (!iso) return '';
+    return new Date(iso).toLocaleString(undefined, { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
   },
 
   /** Format KAS amount: 1234.56789 → "1,234.57" */
