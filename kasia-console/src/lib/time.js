@@ -4,7 +4,7 @@ export function nowIso() {
 
 export function fmtDate(isoStr) {
   if (!isoStr) return '—';
-  return new Date(isoStr).toLocaleString('zh-CN', { hour12: false });
+  return new Date(isoStr).toLocaleString(undefined, { hour12: false });
 }
 
 export function relativeTime(isoStr) {

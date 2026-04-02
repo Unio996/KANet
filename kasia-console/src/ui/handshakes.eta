@@ -49,8 +49,8 @@
                 <td class="px-3 py-2">
                   <span class="badge text-[9px]" :class="d.is_local ? 'badge-info' : 'badge-neutral'" x-text="d.is_local ? '内部Agent' : '外部'"></span>
                 </td>
-                <td class="px-3 py-2 text-ink-400" x-text="d.first?.slice(5,16)?.replace('T',' ') || '-'"></td>
-                <td class="px-3 py-2 text-ink-400" x-text="d.last?.slice(5,16)?.replace('T',' ') || '-'"></td>
+                <td class="px-3 py-2 text-ink-400" x-text="d.first ? KANet.formatTime(d.first) : '-'"></td>
+                <td class="px-3 py-2 text-ink-400" x-text="d.last ? KANet.formatTime(d.last) : '-'"></td>
                 <td class="px-3 py-2 text-red-500" x-text="'~' + (d.count * 0.2).toFixed(1)"></td>
               </tr>
             </template>
