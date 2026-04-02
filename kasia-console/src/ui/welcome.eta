@@ -9,50 +9,7 @@
 </head>
 <body class="bg-gray-950 text-white min-h-screen flex items-center justify-center">
 
-<div class="w-full max-w-lg mx-auto px-6" x-data="{
-  step: 1,
-  name: '',
-  vision: '',
-  personality: '',
-  customStyle: '',
-  creating: false,
-  error: '',
-  result: null,
-
-  get personalityLabel() {
-    const map = {
-      explorer: 'curious, adventurous, loves discovering new peers',
-      social: 'warm, empathetic, builds deep relationships',
-      analyst: 'precise, data-driven, tracks patterns and trends',
-    };
-    return this.personality === 'custom' ? this.customStyle : (map[this.personality] || '');
-  },
-
-  async create() {
-    if (!this.name.trim()) { this.error = 'Give your partner a name'; return; }
-    this.creating = true;
-    this.error = '';
-    try {
-      const res = await fetch('/api/agent/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: this.name.trim(),
-          vision: this.vision.trim() || null,
-          personality: this.personality || 'explorer',
-          customStyle: this.personality === 'custom' ? this.customStyle.trim() : null,
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Creation failed');
-      this.result = data;
-      this.step = 4;
-    } catch (e) {
-      this.error = e.message;
-    }
-    this.creating = false;
-  }
-}">
+<div class="w-full max-w-lg mx-auto px-6" x-data="onboardApp()">
 
   <!-- Step 1: Name + Vision -->
   <div x-show="step === 1" x-transition>
@@ -77,7 +34,7 @@
           class="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"></textarea>
       </div>
 
-      <button @click="name.trim() ? step = 2 : error = 'Give your partner a name'"
+      <button @click="name.trim() ? (error = '', step = 2) : error = 'Give your partner a name'"
         class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors">
         Next
       </button>
@@ -97,7 +54,7 @@
         class="block p-4 rounded-lg border cursor-pointer transition-all"
         :class="personality === 'explorer' ? 'border-blue-500 bg-blue-500/10' : 'border-gray-700 hover:border-gray-600'">
         <div class="flex items-center space-x-3">
-          <span class="text-xl">🔭</span>
+          <span class="text-xl">&#x1F52D;</span>
           <div>
             <div class="font-medium">Explorer</div>
             <div class="text-sm text-gray-400">Curious, adventurous — loves discovering new peers and corners of the network</div>
@@ -109,7 +66,7 @@
         class="block p-4 rounded-lg border cursor-pointer transition-all"
         :class="personality === 'social' ? 'border-blue-500 bg-blue-500/10' : 'border-gray-700 hover:border-gray-600'">
         <div class="flex items-center space-x-3">
-          <span class="text-xl">🤝</span>
+          <span class="text-xl">&#x1F91D;</span>
           <div>
             <div class="font-medium">Social</div>
             <div class="text-sm text-gray-400">Warm, empathetic — builds deep relationships and cares about peers</div>
@@ -121,7 +78,7 @@
         class="block p-4 rounded-lg border cursor-pointer transition-all"
         :class="personality === 'analyst' ? 'border-blue-500 bg-blue-500/10' : 'border-gray-700 hover:border-gray-600'">
         <div class="flex items-center space-x-3">
-          <span class="text-xl">📊</span>
+          <span class="text-xl">&#x1F4CA;</span>
           <div>
             <div class="font-medium">Analyst</div>
             <div class="text-sm text-gray-400">Precise, data-driven — tracks patterns, trends, and network health</div>
@@ -133,7 +90,7 @@
         class="block p-4 rounded-lg border cursor-pointer transition-all"
         :class="personality === 'custom' ? 'border-blue-500 bg-blue-500/10' : 'border-gray-700 hover:border-gray-600'">
         <div class="flex items-center space-x-3">
-          <span class="text-xl">✏️</span>
+          <span class="text-xl">&#x270F;&#xFE0F;</span>
           <div class="flex-1">
             <div class="font-medium">Custom</div>
             <input x-show="personality === 'custom'" x-model="customStyle" placeholder="Describe their style..."
@@ -144,15 +101,123 @@
     </div>
 
     <div class="flex space-x-3 mt-6">
-      <button @click="step = 1" class="flex-1 py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium rounded-lg transition-colors">Back</button>
-      <button @click="step = 3"
+      <button @click="error = ''; step = 1" class="flex-1 py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium rounded-lg transition-colors">Back</button>
+      <button @click="error = ''; step = 3"
         class="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors"
         x-text="personality ? 'Next' : 'Skip'"></button>
     </div>
   </div>
 
-  <!-- Step 3: Confirm -->
+  <!-- Step 3: AI Brain -->
   <div x-show="step === 3" x-transition>
+    <div class="text-center mb-8">
+      <h2 class="text-xl font-bold">Connect AI</h2>
+      <p class="text-gray-400 mt-1">Give your partner the ability to think.</p>
+    </div>
+
+    <div class="space-y-3">
+      <!-- OAuth: ChatGPT subscription -->
+      <label @click="aiMode = 'oauth'"
+        class="block p-4 rounded-lg border cursor-pointer transition-all"
+        :class="aiMode === 'oauth' ? 'border-blue-500 bg-blue-500/10' : 'border-gray-700 hover:border-gray-600'">
+        <div class="flex items-center space-x-3">
+          <div class="w-8 h-8 rounded bg-green-900/50 flex items-center justify-center text-green-400 text-sm font-bold">G</div>
+          <div class="flex-1">
+            <div class="font-medium">ChatGPT Subscription</div>
+            <div class="text-sm text-gray-400">Login with your OpenAI account — no API key needed</div>
+          </div>
+          <template x-if="oauthConnected">
+            <span class="text-xs text-green-400 font-medium">Connected</span>
+          </template>
+        </div>
+      </label>
+
+      <!-- API Key -->
+      <label @click="aiMode = 'api_key'"
+        class="block p-4 rounded-lg border cursor-pointer transition-all"
+        :class="aiMode === 'api_key' ? 'border-blue-500 bg-blue-500/10' : 'border-gray-700 hover:border-gray-600'">
+        <div class="flex items-center space-x-3">
+          <div class="w-8 h-8 rounded bg-blue-900/50 flex items-center justify-center text-blue-400 text-sm font-bold">K</div>
+          <div class="flex-1">
+            <div class="font-medium">API Key</div>
+            <div class="text-sm text-gray-400">OpenAI, DeepSeek, xAI Grok, Google Gemini, and more</div>
+          </div>
+        </div>
+      </label>
+
+      <!-- Ollama -->
+      <label @click="aiMode = 'ollama'"
+        class="block p-4 rounded-lg border cursor-pointer transition-all"
+        :class="aiMode === 'ollama' ? 'border-blue-500 bg-blue-500/10' : 'border-gray-700 hover:border-gray-600'">
+        <div class="flex items-center space-x-3">
+          <div class="w-8 h-8 rounded bg-purple-900/50 flex items-center justify-center text-purple-400 text-sm font-bold">L</div>
+          <div class="flex-1">
+            <div class="font-medium">Ollama (Local)</div>
+            <div class="text-sm text-gray-400">Free, runs on your machine — no account needed</div>
+          </div>
+        </div>
+      </label>
+    </div>
+
+    <!-- OAuth: Login button -->
+    <div x-show="aiMode === 'oauth'" x-transition class="mt-4">
+      <template x-if="!oauthConnected">
+        <button @click="startOAuth()" :disabled="oauthLoading"
+          class="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors disabled:bg-gray-600 disabled:text-gray-400">
+          <span x-show="!oauthLoading">Login with ChatGPT Account</span>
+          <span x-show="oauthLoading">Waiting for authorization...</span>
+        </button>
+      </template>
+      <template x-if="oauthConnected">
+        <div class="p-3 bg-green-900/30 border border-green-800 rounded-lg text-sm text-green-300 text-center">
+          OpenAI connected via ChatGPT subscription
+        </div>
+      </template>
+    </div>
+
+    <!-- API Key: Provider + Key fields -->
+    <div x-show="aiMode === 'api_key'" x-transition class="mt-4 space-y-3">
+      <div>
+        <label class="block text-xs text-gray-400 mb-1">Provider</label>
+        <select x-model="aiProvider" class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <option value="anthropic">Anthropic Claude</option>
+          <option value="openai">OpenAI</option>
+          <option value="deepseek">DeepSeek</option>
+          <option value="xai">xAI Grok</option>
+          <option value="google">Google Gemini</option>
+          <option value="siliconflow">SiliconFlow</option>
+          <option value="groq">Groq</option>
+          <option value="together">Together AI</option>
+          <option value="mistral">Mistral AI</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs text-gray-400 mb-1">API Key</label>
+        <input type="password" x-model="aiKey" placeholder="sk-..."
+          class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm font-mono placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      </div>
+    </div>
+
+    <!-- Ollama: just a note -->
+    <div x-show="aiMode === 'ollama'" x-transition class="mt-4">
+      <div class="p-3 bg-purple-900/20 border border-purple-800/50 rounded-lg text-sm text-purple-300">
+        Make sure Ollama is running on <span class="font-mono">localhost:11434</span>
+      </div>
+    </div>
+
+    <p x-show="error" class="text-red-400 text-sm text-center mt-3" x-text="error"></p>
+
+    <div class="flex space-x-3 mt-6">
+      <button @click="error = ''; step = 2" class="flex-1 py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium rounded-lg transition-colors">Back</button>
+      <button @click="goToConfirm()"
+        class="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors">
+        Next
+      </button>
+    </div>
+  </div>
+
+  <!-- Step 4: Confirm -->
+  <div x-show="step === 4" x-transition>
     <div class="text-center mb-8">
       <h2 class="text-xl font-bold">Ready?</h2>
     </div>
@@ -171,6 +236,10 @@
         <p class="text-sm text-gray-300 mt-0.5" x-text="personalityLabel"></p>
       </div>
       <div>
+        <span class="text-xs text-gray-500 uppercase tracking-wider">AI</span>
+        <p class="text-sm text-gray-300 mt-0.5" x-text="aiSummary"></p>
+      </div>
+      <div>
         <span class="text-xs text-gray-500 uppercase tracking-wider">Identity</span>
         <p class="text-sm text-gray-400 mt-0.5">A new Kaspa address will be generated — their unique on-chain identity.</p>
       </div>
@@ -179,7 +248,7 @@
     <p x-show="error" class="text-red-400 text-sm text-center mt-3" x-text="error"></p>
 
     <div class="flex space-x-3 mt-6">
-      <button @click="step = 2" class="flex-1 py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium rounded-lg transition-colors">Back</button>
+      <button @click="error = ''; step = 3" class="flex-1 py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium rounded-lg transition-colors">Back</button>
       <button @click="create()" :disabled="creating"
         class="flex-1 py-3 font-medium rounded-lg transition-colors"
         :class="creating ? 'bg-gray-600 text-gray-400' : 'bg-blue-600 hover:bg-blue-700 text-white'">
@@ -189,8 +258,8 @@
     </div>
   </div>
 
-  <!-- Step 4: Done -->
-  <div x-show="step === 4" x-transition>
+  <!-- Step 5: Done -->
+  <div x-show="step === 5" x-transition>
     <div class="text-center mb-8">
       <img src="/public/kanet-logo.png" alt="KANet" class="h-16 w-16 mx-auto mb-4 animate-pulse" />
       <h2 class="text-2xl font-bold"><span x-text="name"></span> is alive!</h2>
@@ -201,6 +270,10 @@
       <div class="flex justify-between">
         <span class="text-gray-500">Address</span>
         <span class="text-gray-300 font-mono text-xs" x-text="result?.address?.slice(0, 20) + '...' + result?.address?.slice(-8)"></span>
+      </div>
+      <div class="flex justify-between">
+        <span class="text-gray-500">AI</span>
+        <span class="text-gray-300" x-text="aiSummary"></span>
       </div>
       <div class="flex justify-between">
         <span class="text-gray-500">Skills</span>
@@ -225,5 +298,154 @@
   </div>
 
 </div>
+
+<script>
+const AI_CATALOG = {
+  openai:      { label: 'OpenAI',           url: 'https://api.openai.com/v1',                            model: 'gpt-5-mini', provider: 'openai' },
+  deepseek:    { label: 'DeepSeek',         url: 'https://api.deepseek.com/v1',                          model: 'deepseek-chat', provider: 'openai' },
+  xai:         { label: 'xAI Grok',         url: 'https://api.x.ai/v1',                                 model: 'grok-3-mini', provider: 'openai' },
+  google:      { label: 'Google Gemini',    url: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.5-flash', provider: 'openai' },
+  anthropic:   { label: 'Anthropic Claude', url: 'https://api.anthropic.com',                            model: 'claude-sonnet-4-20250514', provider: 'anthropic' },
+  siliconflow: { label: 'SiliconFlow',      url: 'https://api.siliconflow.cn/v1',                       model: 'deepseek-ai/DeepSeek-V3', provider: 'openai' },
+  groq:        { label: 'Groq',             url: 'https://api.groq.com/openai/v1',                      model: 'llama-3.3-70b-versatile', provider: 'openai' },
+  together:    { label: 'Together AI',      url: 'https://api.together.xyz/v1',                          model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', provider: 'openai' },
+  mistral:     { label: 'Mistral AI',       url: 'https://api.mistral.ai/v1',                           model: 'mistral-large-latest', provider: 'openai' },
+};
+
+function onboardApp() {
+  return {
+    step: 1,
+    name: '',
+    vision: '',
+    personality: '',
+    customStyle: '',
+    creating: false,
+    error: '',
+    result: null,
+
+    // AI step
+    aiMode: 'oauth',
+    aiProvider: 'openai',
+    aiKey: '',
+    oauthConnected: false,
+    oauthAdapterId: null,
+    oauthLoading: false,
+
+    get personalityLabel() {
+      const map = {
+        explorer: 'curious, adventurous, loves discovering new peers',
+        social: 'warm, empathetic, builds deep relationships',
+        analyst: 'precise, data-driven, tracks patterns and trends',
+      };
+      return this.personality === 'custom' ? this.customStyle : (map[this.personality] || '');
+    },
+
+    get aiSummary() {
+      if (this.aiMode === 'oauth') return 'ChatGPT subscription (OAuth)';
+      if (this.aiMode === 'ollama') return 'Ollama (local)';
+      const svc = AI_CATALOG[this.aiProvider];
+      return svc ? svc.label + ' (' + svc.model + ')' : this.aiProvider;
+    },
+
+    async startOAuth() {
+      this.error = '';
+      this.oauthLoading = true;
+      try {
+        // Create a temporary adapter to hold the OAuth connection
+        const res = await fetch('/api/agent/create-adapter', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: this.name.trim() + '-brain', provider: 'openai' }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to create adapter');
+        this.oauthAdapterId = data.adapterId;
+
+        // Open OAuth in new window
+        const authWin = window.open(
+          '/api/oauth/openai/start?adapter_id=' + data.adapterId,
+          'oauth', 'width=500,height=700'
+        );
+
+        // Poll for completion
+        const poll = setInterval(async () => {
+          try {
+            const r = await fetch('/api/auth/resolve-by-adapter/' + data.adapterId);
+            const auth = await r.json();
+            if (auth.status === 'connected' && auth.baseUrl && auth.baseUrl.includes('chatgpt.com')) {
+              clearInterval(poll);
+              this.oauthConnected = true;
+              this.oauthLoading = false;
+              if (authWin && !authWin.closed) authWin.close();
+            }
+          } catch {}
+        }, 2000);
+
+        // Stop polling after 5 min
+        setTimeout(() => { clearInterval(poll); this.oauthLoading = false; }, 5 * 60_000);
+      } catch (e) {
+        this.error = e.message;
+        this.oauthLoading = false;
+      }
+    },
+
+    goToConfirm() {
+      this.error = '';
+      if (this.aiMode === 'oauth' && !this.oauthConnected) {
+        this.error = 'Please login with your ChatGPT account first';
+        return;
+      }
+      if (this.aiMode === 'api_key' && !this.aiKey.trim()) {
+        this.error = 'Please enter your API key';
+        return;
+      }
+      this.step = 4;
+    },
+
+    async create() {
+      if (!this.name.trim()) { this.error = 'Give your partner a name'; return; }
+      this.creating = true;
+      this.error = '';
+      try {
+        const body = {
+          name: this.name.trim(),
+          vision: this.vision.trim() || null,
+          personality: this.personality || 'explorer',
+          customStyle: this.personality === 'custom' ? this.customStyle.trim() : null,
+          aiMode: this.aiMode,
+        };
+
+        if (this.aiMode === 'oauth') {
+          body.oauthAdapterId = this.oauthAdapterId;
+        } else if (this.aiMode === 'api_key') {
+          const svc = AI_CATALOG[this.aiProvider];
+          body.aiProvider = svc?.provider || 'openai';
+          body.aiProviderUrl = svc?.url || null;
+          body.aiModel = svc?.model || null;
+          body.aiProviderKey = this.aiKey.trim();
+        } else if (this.aiMode === 'ollama') {
+          body.aiProvider = 'openai';
+          body.aiProviderUrl = 'http://localhost:11434/v1';
+          body.aiModel = 'llama3.3';
+          body.aiProviderKey = 'ollama';
+        }
+
+        const res = await fetch('/api/agent/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Creation failed');
+        this.result = data;
+        this.step = 5;
+      } catch (e) {
+        this.error = e.message;
+      }
+      this.creating = false;
+    }
+  };
+}
+</script>
 </body>
 </html>

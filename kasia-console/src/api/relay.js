@@ -1,5 +1,5 @@
 import { listRelayNodes, createRelayNode, updateRelayNode, deleteRelayNode, getRelayMnemonic, getRelayNode } from '../data/settings/relay-nodes.js';
-import { listAdapterNodes, getAdapterNode } from '../data/settings/adapter-nodes.js';
+import { listAdapterNodes, getAdapterNode, createAdapterNode } from '../data/settings/adapter-nodes.js';
 import { getConfig } from '../data/settings/configs.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 import { addressFromMnemonic } from '../services/wallet.js';
@@ -76,7 +76,7 @@ export async function registerRelayRoutes(fastify) {
       `).run(JSON.stringify(defaultPrinciples), 'friendly, direct', 24, 60, newId);
 
       // Still create minds/ directory for state files (memory.json, intent.json, reflections.json)
-      const agentName = name.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+      const agentName = name.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
       const mindDir = join(MINDS_DIR, agentName);
       await mkdir(mindDir, { recursive: true });
 
@@ -779,7 +779,7 @@ export async function registerRelayRoutes(fastify) {
   async function _readIntentFile(relay) {
     // 必须和 mind-manager.js 的 toAgentName() 一致：去掉非字母数字字符
     // 否则 "Kasia_1" → "kasia_1"(这里) vs "kasia1"(Mind) 读不同目录
-    const agentName = (relay.name || relay.id).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const agentName = (relay.name || relay.id).toLowerCase().replace(/[^a-z0-9_]/g, '');
     const intentPath = join(MINDS_DIR, agentName, 'intent.json');
     try {
       const raw = await readFile(intentPath, 'utf8');
@@ -937,8 +937,20 @@ export async function registerRelayRoutes(fastify) {
     return reply.view('welcome', {});
   });
 
+  // Create adapter for OAuth flow (called before agent creation)
+  fastify.post('/api/agent/create-adapter', async (request, reply) => {
+    const { name, provider } = request.body || {};
+    if (!name?.trim()) return reply.code(400).send({ error: 'name is required' });
+    const adapterId = createAdapterNode({
+      name: name.trim(),
+      aiProvider: provider || 'openai',
+    });
+    console.log(`[onboarding] Pre-created adapter "${name.trim()}" → ${adapterId}`);
+    return reply.send({ ok: true, adapterId });
+  });
+
   fastify.post('/api/agent/create', async (request, reply) => {
-    const { name, vision, personality, customStyle } = request.body || {};
+    const { name, vision, personality, customStyle, aiMode, oauthAdapterId, aiProvider, aiProviderUrl, aiModel, aiProviderKey } = request.body || {};
     if (!name?.trim()) return reply.code(400).send({ error: 'Name is required' });
 
     try {
@@ -946,9 +958,34 @@ export async function registerRelayRoutes(fastify) {
       const mnemonic = Mnemonic.random(12).phrase;
       const address = addressFromMnemonic(mnemonic, 'mainnet');
 
-      // 2. Pick an adapter (first available, or null)
-      const adapters = listAdapterNodes();
-      const adapter = adapters[0] || null;
+      // 2. Resolve adapter based on AI mode
+      let adapterId = null;
+      if (aiMode === 'oauth' && oauthAdapterId) {
+        // OAuth: adapter was pre-created during OAuth flow
+        adapterId = oauthAdapterId;
+      } else if (aiMode === 'api_key' && aiProviderKey) {
+        // API Key: create new adapter with provided credentials
+        adapterId = createAdapterNode({
+          name: name.trim() + '-brain',
+          aiProvider: aiProvider || 'openai',
+          aiProviderUrl: aiProviderUrl || null,
+          aiProviderKey: aiProviderKey,
+          aiModel: aiModel || null,
+        });
+      } else if (aiMode === 'ollama') {
+        // Ollama: create adapter for local model
+        adapterId = createAdapterNode({
+          name: name.trim() + '-brain',
+          aiProvider: 'openai',
+          aiProviderUrl: 'http://localhost:11434/v1',
+          aiProviderKey: 'ollama',
+          aiModel: aiModel || 'llama3.3',
+        });
+      } else {
+        // Fallback: pick first available adapter
+        const adapters = listAdapterNodes();
+        adapterId = adapters[0]?.id || null;
+      }
 
       // 3. Create relay node (account)
       const relayId = createRelayNode({
@@ -956,7 +993,7 @@ export async function registerRelayRoutes(fastify) {
         mnemonic,
         address,
         network: 'mainnet',
-        adapterNodeId: adapter?.id || null,
+        adapterNodeId: adapterId,
         pollMs: 2000,
       });
 
@@ -1008,7 +1045,7 @@ export async function registerRelayRoutes(fastify) {
       `).run(vision || null, JSON.stringify(principles), style, 24, 60, relayId);
 
       // Create minds/ directory for state files (intent.json, reflections.json, memory.json)
-      const agentName = name.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+      const agentName = name.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
       const mindDir = join(MINDS_DIR, agentName);
       await mkdir(mindDir, { recursive: true });
 
@@ -1062,7 +1099,18 @@ export async function registerRelayRoutes(fastify) {
         console.log(`[onboarding] Mind warm skipped: ${err.message}`);
       }
 
-      // 10. Start relay process immediately
+      // 10. Start adapter process (Agent needs a brain to respond)
+      if (adapterId) {
+        try {
+          const { startAdapter } = await import('../services/adapter-launcher.js');
+          const adapterResult = await startAdapter(adapterId);
+          console.log(`[onboarding] ${name.trim()} adapter → ${adapterResult.ok ? 'PID ' + adapterResult.pid : adapterResult.reason}`);
+        } catch (err) {
+          console.log(`[onboarding] ${name.trim()} adapter start skipped: ${err.message}`);
+        }
+      }
+
+      // 11. Start relay process immediately
       const relayResult = await startRelay(relayId);
       const relayStatus = relayResult.ok ? `relay PID ${relayResult.pid}` : `relay: ${relayResult.reason}`;
       console.log(`[onboarding] ${name.trim()} → ${relayStatus}`);

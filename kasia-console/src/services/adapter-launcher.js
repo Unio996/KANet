@@ -7,6 +7,7 @@ import { spawn } from 'child_process';
 import { resolve } from 'path';
 import { listAdapterNodes, getAdapterNode, getAdapterToken, getAdapterProviderKey } from '../data/settings/adapter-nodes.js';
 import { getConfig } from '../data/settings/configs.js';
+import { ensureConnection } from './connection-manager.js';
 
 const KANET_ROOT = process.env.KANET_ROOT || 'D:/Anthropic';
 const ADAPTER_DIR = resolve(process.env.ADAPTER_DIR || `${KANET_ROOT}/agent-adapter`);
@@ -35,6 +36,9 @@ export async function startAdapter(adapterId) {
   const providerKey = getAdapterProviderKey(adapterId);
   const ingestSecret = await getConfig('ingest_secret') || process.env.INGEST_SECRET || '';
 
+  // Ensure connection record exists for dynamic auth (Phase 2)
+  const connectionId = ensureConnection(adapterId);
+
   // Build env based on provider type
   const env = {
     ...process.env,
@@ -42,6 +46,8 @@ export async function startAdapter(adapterId) {
     CONSOLE_URL: `http://localhost:${CONSOLE_PORT}`,
     INGEST_SECRET: ingestSecret,
     AI_PROVIDER: node.ai_provider || 'openclaw',
+    // Phase 2: adapter uses ADAPTER_ID to resolve auth dynamically from Console
+    ADAPTER_ID: adapterId,
   };
 
   if (node.ai_provider === 'openclaw' || !node.ai_provider) {

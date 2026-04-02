@@ -27,6 +27,8 @@ import { registerTradingRoutes } from './api/trading.js';
 import { registerChainDataRoutes } from './api/chain-data.js';
 import { registerStockRoutes } from './api/stocks.js';
 import { registerBrokerRoutes } from './api/broker.js';
+import { registerAuthRoutes } from './api/auth.js';
+import { registerOAuthRoutes } from './api/oauth.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from './i18n/index.js';
 import { autoStartIfEnabled } from './services/scanner.js';
 import { startAllAdapters, stopAllAdapters } from './services/adapter-launcher.js';
@@ -101,6 +103,8 @@ await registerTradingRoutes(fastify);
 await registerChainDataRoutes(fastify);
 await registerStockRoutes(fastify);
 await registerBrokerRoutes(fastify);
+await registerAuthRoutes(fastify);
+await registerOAuthRoutes(fastify);
 
 // Anti-spam API endpoints
 import { checkOutboundAllowed, getActivityLog, getActivityByPeer, getOutboundStats, detectStopRequest, getMergedContacts } from './services/anti-spam.js';
@@ -259,6 +263,10 @@ await autoSplitAll();
 
 // Auto-start scanner if it was enabled before restart
 await autoStartIfEnabled();
+
+// Start OAuth token refresh worker
+import { startRefreshWorker } from './services/connection-manager.js';
+startRefreshWorker();
 
 // Graceful shutdown — stop all child processes
 async function shutdown() {
