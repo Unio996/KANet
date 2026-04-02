@@ -156,10 +156,13 @@ minds/*/reflections.json ←── 反思持久化       │
 2. **Agent 的记忆在 DB，不在文件。** minds/*/memory.json 只是 peerNotes 小缓存。
 3. **Adapter JSON 必须 ASCII-safe。** openai.mjs 的 asciiSafeStringify 处理 surrogate pairs。
 4. **Brain 超时 180 秒。** 不要调低。
-5. **目标 success 也有频率限制。** ≥10 次 success → 12h 冷却。
+5. **目标 success 也有频率限制。** ≥10 次 success → 12h 冷却。founding-vision 目标失败 50 次也会退役。
 6. **启动时 Agent 操作要错开。** staggerMs = agentIndex * 25_000。
 7. **Agent 目录名保留下划线。** Kasia_1 → minds/kasia_1/（不是 kasia1）。
-8. **reflection lastReflectionTime 必须始终更新。** 不管 JSON 解析成功与否。
+8. **reflection lastReflectionTime 必须始终更新。** 不管 JSON 解析成功与否。反思文件名是 `reflections.json`（不是 evolution.json）。
+9. **RPC 节点 TCP 可达 ≠ 数据可用。** rpc-health.js 用 getBlockDagInfo() 验证 blockCount > 0 && headerCount > 0，防止未同步节点返回空 UTXO 导致 Agent 余额显示为 0 并自我瘫痪。
+10. **Eta 模板 x-data 属性不能包含 > < 字符。** 浏览器会把 `>` 当 HTML 标签结束符，导致 JS 泄露为可见文本。超过 10 行的 x-data 必须提取到 `<script>` 里的命名函数（如 `x-data="agentApp()"`）。
+11. **graph.eta 必须跳过自己的地址。** 如果 Agent 地址出现在联系人列表中，nodeMap.set 会覆盖中心节点。用 `if (c.address === myAddr) return` 跳过。
 
 ---
 
@@ -254,7 +257,46 @@ badge / card / btn / tab-bar / status-dot / approval-card / skeleton / verify-la
 
 ### KANet.js 全局工具
 
-shortAddr / copy / relativeTime / formatKas / statusLabel / statusColor / healthDot / sideLabel / chainName
+shortAddr / copy / relativeTime / **formatTime** / formatKas / statusLabel / statusColor / healthDot / sideLabel / chainName
+
+### 页面路由表（2026-04-02 更新）
+
+**独立页面（新设计系统）：**
+
+| 路由 | 模板 | 说明 |
+|------|------|------|
+| `/chat` | chat-v3.eta | 广播聊天 |
+| `/contacts` | contacts.eta | 通讯录 |
+| `/agent` | agent-v2.eta | Agent 概览（含 tab: wallet/card/goals/skills/history/status） |
+| `/agent/status` | agent-status.eta | Agent 健康监控（独立页） |
+| `/agent/history` | agent-history.eta | Episode 历史（独立页） |
+| `/skills` | skills.eta | 技能管理 |
+| `/graph` | graph.eta | 关系图谱 |
+| `/explore` | explore.eta | 网络探索 |
+| `/discovered` | discovered.eta | 发现的地址 |
+| `/market-overview` | market-overview.eta | 市场概览 |
+| `/stocks` | stocks.eta | 股票 |
+| `/predictions` | predictions.eta | 预测市场 |
+| `/handshakes` | handshakes.eta | 握手报告 |
+| `/story` | story.eta | Episode 视图 |
+
+**保留页面（已调色融合，功能完整）：**
+
+| 路由 | 模板 | 说明 |
+|------|------|------|
+| `/trading` | trading.eta | 交易所（ink 色调，2906 行） |
+| `/market` | market.eta | 自由市场（深色主题，1049 行） |
+| `/events` | events.eta | 事件日志 |
+| `/conversations` | conversations.eta | 会话列表 |
+| `/identities` | identities.eta | 地址簿 |
+| `/network` | network.eta | 网络分析 |
+| `/relays` | relays.eta | 账户管理 |
+| `/adapters` | adapters.eta | AI 引擎 |
+| `/dashboard` | dashboard.eta | 仪表盘 |
+
+**新设计框架（待调通）：** `/trading-v2`, `/market-v2`
+
+**GitHub 仓库：** https://github.com/Unio996/KANet （私有）
 
 ---
 
@@ -419,7 +461,27 @@ Agent 决策理由从 execution_states.display_summary 注入。
 
 ---
 
-## 十一、已知局限（不修，记录在案）
+## 十一、时间显示规范
+
+**所有时间显示必须使用用户本地时区，不硬编码语言/时区。**
+
+| 场景 | 正确做法 | 错误做法 |
+|------|---------|---------|
+| 服务端格式化 | `toLocaleString(undefined, { hour12: false })` | `toISOString()` / `toLocaleString('zh-CN')` |
+| 客户端绝对时间 | `KANet.formatTime(iso)` | `.slice(5,16)` 截取 ISO 字符串 |
+| 客户端相对时间 | `KANet.relativeTime(iso)` | 手写差值计算 |
+| Relay 日志 | `toLocaleString(undefined, { hour12: false })` | `toISOString()` |
+| DB 存储 | `toISOString()`（UTC，这是正确的） | 本地时间字符串 |
+
+**kanet-ui.js 工具函数：**
+- `KANet.formatTime(iso)` — 绝对时间，本地时区，格式 `MM/DD HH:MM:SS`
+- `KANet.relativeTime(iso)` — 相对时间，"3 分钟前"、"昨天"
+
+**致命陷阱：** `new Date(iso).toISOString()` 永远输出 UTC。如果把它显示在 UI 上，用户看到的时间会偏移。必须用 `toLocaleString()` 或 `KANet.formatTime()`。
+
+---
+
+## 十二、已知局限（不修，记录在案）
 
 | # | 问题 | 原因 |
 |---|------|------|
