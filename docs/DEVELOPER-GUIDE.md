@@ -1,8 +1,8 @@
 # KANet Developer Guide
 
 > **修改任何代码前必读。** 一个文件，覆盖全系统。唯一权威开发者文档。
-> 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-02。
-> 4/2 更新：陷阱 #7 下划线修复、陷阱 #12 技能注册统一链路、第十三章认证系统（agent_connections + OAuth）、Skill 系统架构（两种格式同一链路）、code-ops 行为分层模型（L1-L4）。
+> 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-03。
+> 4/3 更新：社交缺陷 #13 已修（迟回复警告）、陷阱 #13 messages.message_type 必须正确、陷阱 #14 comm self-send 覆盖 sender=null、陷阱 #15 OAuth adapter_nodes 回填。
 
 ---
 
@@ -145,6 +145,7 @@ minds/*/reflections.json ←── 反思持久化       │
 |----|------|------|
 | 认知 | Brain 看到自己最近发了什么 DM/广播 | context-builder.mjs YOUR RECENT OUTBOUND |
 | 认知 | Brain 看到"我发了 N 条，对方 0 回复" | context-builder.mjs YOUR CONNECTIONS |
+| 认知 | Brain 看到"对方 N 天前发消息，你没回" | context-builder.mjs ⚠ PEER MESSAGED YOU |
 | 安全网 | sendMessage 本地去重（同目标相似度） | action-executor.mjs |
 | 安全网 | anti-spam 查 chain_events（per-peer/跨Agent/无回复退避） | anti-spam.js via /api/agent/outbound-check |
 | 安全网 | anti-spam fail-closed（API 不可达→拒绝） | action-executor.mjs |
@@ -153,7 +154,7 @@ minds/*/reflections.json ←── 反思持久化       │
 
 ### 已知社交缺陷（待修）
 
-13. **迟回复比不回更尴尬。** anti-spam 只查"我发了多少对方没回"，不查反向："对方发了多少我没回"。案例：rjmke5c4 在 3/14 发了 5 条消息，Kasia_1 沉默 20 天后才回"Hi there!"。修复方向：Context Builder 注入"对方上次发消息时间 + 你是否回过"，gap > 7 天应提示 Brain 先道歉；social_outreach 应把"对方主动找过但我没回"排在最前面。
+13. **~~迟回复比不回更尴尬~~（2026-04-03 已修）。** context-builder.mjs 对外部 peer（identity_type≠local）计算时间差：peer_last_sent_at 之后我方无回复且间隔≥1天 → 注入 `⚠ PEER MESSAGED YOU N DAYS AGO — NO REPLY YET. Acknowledge the delay before anything else.` Brain 看到后自然先道歉再说事。同时修复了 messages 表计数偏差（query_card 系统消息+handshake 被计入 DM 统计 → discovery/list SQL 加 message_type='text' 过滤 + Relay 写入端标记 query_card）。
 
 14. **Agent 信息泄露：系统诊断发给陌生人。** Sophie proactive 检测到节点/Scout 问题后，把诊断信息通过 SEND_MESSAGE 发给了 trust_level=normal 的外部用户。根因：proactive 无 Gate 2 身份注入 + Gate 3 不按信息敏感度过滤。**系统状态、节点模式、服务运行状况、错误日志属于内部信息，只能发给 owner。** 修复方向：建立信息分级（公开/内部/敏感），proactive 发 DM 时 action-executor 检查内容敏感度 × 目标 trust_level。
 
@@ -172,6 +173,12 @@ minds/*/reflections.json ←── 反思持久化       │
 11. **graph.eta 必须跳过自己的地址。** 如果 Agent 地址出现在联系人列表中，nodeMap.set 会覆盖中心节点。用 `if (c.address === myAddr) return` 跳过。
 
 12. **技能注册走统一链路。** Console `registerMindSkills()` 启动时扫描 `.mjs` 文件和子目录 `skill.json`，写入 skills 表。Mind `registry.autoDiscover()` 查 Console skills 表 `isActive` 后加载。**一条链路，一个开关。** 新 Agent 自动继承已有 Agent 的 category 分类。中文正则不能用 `\b`（word boundary 对中文无效）。
+
+13. **messages 表 message_type 必须正确。** `message_type='text'` 才是真正的 DM 消息。query_card（Conversational Ops 系统响应）写入时必须标记 `messageType='query_card'`。discovery/list SQL 的 4 个统计子查询只计 `message_type='text'`。handshake 已有独立 message_type。新增系统消息类型时在 Relay ingest.mjs 写入端标记，不需要改统计 SQL。
+
+14. **Relay comm 消息的 self-send 检测必须覆盖 sender=null。** 广播（comm）是自发自收协议，extractSender 对 self-send TX 可能返回 null。rpc-listener.mjs processComm 的 self-send 检查：`senderAddress === _myAddress || (!senderAddress && plaintext?.startsWith('bcast:'))`。漏掉会导致自己的广播被当成 unknown 来源的 inbound 消息写入。
+
+15. **OAuth 创建 Agent 时 adapter_nodes 表必须回填 url 和 model。** create-adapter 预创建时只有 name+provider，OAuth 回调成功后 oauth.js 必须 updateAdapterNode 写入 ai_provider_url 和 ai_model。否则 UI 显示"未设置"。
 
 ### Skill 系统架构
 

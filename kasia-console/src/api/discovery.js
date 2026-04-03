@@ -112,16 +112,16 @@ export async function registerDiscoveryRoutes(fastify) {
              conv.last_message_at,
              conv.last_reply_at,
              (SELECT COUNT(*) FROM messages m2
-              WHERE m2.conversation_id = conv.id AND m2.direction = 'outbound'
+              WHERE m2.conversation_id = conv.id AND m2.direction = 'outbound' AND m2.message_type = 'text'
              ) as my_messages_sent,
              (SELECT COUNT(*) FROM messages m3
-              WHERE m3.conversation_id = conv.id AND m3.direction = 'inbound'
+              WHERE m3.conversation_id = conv.id AND m3.direction = 'inbound' AND m3.message_type = 'text'
              ) as peer_messages_received,
              (SELECT MAX(m4.created_at) FROM messages m4
-              WHERE m4.conversation_id = conv.id AND m4.direction = 'outbound'
+              WHERE m4.conversation_id = conv.id AND m4.direction = 'outbound' AND m4.message_type = 'text'
              ) as my_last_sent_at,
              (SELECT MAX(m5.created_at) FROM messages m5
-              WHERE m5.conversation_id = conv.id AND m5.direction = 'inbound'
+              WHERE m5.conversation_id = conv.id AND m5.direction = 'inbound' AND m5.message_type = 'text'
              ) as peer_last_sent_at
       FROM relation_states rs
       JOIN identities i ON i.address = rs.peer_address

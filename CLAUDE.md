@@ -65,24 +65,24 @@ bash D:/Anthropic/kanet-start.sh
 bash D:/Anthropic/kanet-stop.sh
 ```
 
-## 必读：Agent 社交骚扰问题（P0 未修，根本性缺陷）
+## 必读：Agent 社交骚扰问题（4/1 已修，认知修复）
 
-**根本问题：Mind 没有"我说过什么"的记忆。** 每次 proactive 循环都是失忆状态 — Brain 看到同一个上下文，做出同一个决定，发出同一条消息。Relay 的 60s 去重窗口挡不住 15min 间隔。anti-spam 只在 reactive 路径检查，proactive 完全不过。结果：Sophie 对同一个人发了 8+ 条几乎相同的消息，跨 6 小时。
+**已修复（2026-04-01）。** 根因：Brain proactive 不知道自己发了什么 DM。修复后 Brain 看到 YOUR RECENT OUTBOUND（DM+广播）+ YOUR CONNECTIONS 含消息计数和迟回复警告 + anti-spam fail-closed + Relay 30min 去重。4/1 之后零骚扰。详见 DEVELOPER-GUIDE 第三章"社交认知链"。
 
-**修复必须在 Mind 层，不是 Relay 层：**
-1. Context Builder 必须注入"你最近对这个人发过什么" — 从 messages 表查 outbound 历史
-2. Proactive 发 DM 前必须检查：对方回复了吗？没回复就不追（和 reactive 同一套 anti-spam）
-3. founding-vision 类目标（text 是价值观声明不是可执行任务）标记为 principle，proactive 跳过
+**2026-04-03 补充修复：**
+1. 迟回复警告 — context-builder.mjs 对外部 peer 注入 `⚠ PEER MESSAGED YOU N DAYS AGO`
+2. messages 表计数修正 — query_card/handshake 过滤，discovery/list 只计 message_type='text'
+3. unknown 脏数据 — comm self-send 检测覆盖 sender=null + bcast: 前缀
 
-## 必读：安全审查遗留问题（未修）
+## 必读：安全审查遗留问题
 
 参考 `D:\A-KANet\日志\需要修改补充的\目前需要优化方面.txt`
 
-1. **verifyIngestRequest() 是 async 但被当同步用** — 多处 `if (!verifyIngestRequest(...)) return` 实际不生效（Promise 是真值）
-2. **Console 直接碰链** — bcast-sender.js / card-publisher.js / utxo-splitter.js 绕过 Relay 直接用 kaspa-wasm，违反架构原则
-3. **market-maker 消息轮询参数名不匹配** — 客户端发 `since`，服务端读 `after`，导致重复消费
-4. **OTC 收款无唯一订单绑定** — 只查"最近差不多金额的转账"，存在串单/重放风险
-5. **硬编码绝对路径** — 多处 `D:/Anthropic/...`，部署迁移会断
+1. ~~**verifyIngestRequest() async**~~ — **已修**，12 个调用点全部 `await`
+2. ~~**Console 直接碰链**~~ — **已修（3/29）**，card-publisher/bcast-sender 删除，utxo-splitter 改 IPC
+3. ~~**market-maker since vs after**~~ — **已修**，chat.js:28 `const afterTs = after || since`
+4. **OTC 收款无唯一订单绑定** — **未修**，只查"最近差不多金额的转账"，存在串单/重放风险
+5. ~~**硬编码绝对路径**~~ — **已修（3/29）**，全部改为 `process.env.KANET_ROOT || 'D:/Anthropic'`
 
 ## 必读：KANet 定位
 
