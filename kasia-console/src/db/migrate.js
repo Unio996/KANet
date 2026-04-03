@@ -1494,5 +1494,32 @@ export function runMigrations() {
     console.log('[migrate] v39: exchange_offers state machine columns added.');
   }
 
+  // v40: UNIQUE index on mm_orders.payment_txhash — prevent race condition double-binding
+  // The existing anti-replay SELECT in trading.js is TOCTOU-vulnerable.
+  // This UNIQUE partial index (WHERE NOT NULL) makes the DB enforce it atomically.
+  const hasPaymentTxhashIdx = sqlite.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_mm_orders_payment_txhash_unique'"
+  ).get();
+  if (!hasPaymentTxhashIdx) {
+    // Check for existing duplicates first — clean them before adding UNIQUE
+    const dupes = sqlite.prepare(`
+      SELECT payment_txhash, COUNT(*) as cnt FROM mm_orders
+      WHERE payment_txhash IS NOT NULL
+      GROUP BY payment_txhash HAVING cnt > 1
+    `).all();
+    for (const d of dupes) {
+      // Keep the earliest order, null out the rest
+      const rows = sqlite.prepare(
+        'SELECT id FROM mm_orders WHERE payment_txhash = ? ORDER BY created_at ASC'
+      ).all(d.payment_txhash);
+      for (let i = 1; i < rows.length; i++) {
+        sqlite.prepare('UPDATE mm_orders SET payment_txhash = NULL WHERE id = ?').run(rows[i].id);
+        console.log(`[migrate] v40: cleared duplicate payment_txhash on order ${rows[i].id.slice(0, 8)}`);
+      }
+    }
+    sqlite.exec(`CREATE UNIQUE INDEX idx_mm_orders_payment_txhash_unique ON mm_orders(payment_txhash) WHERE payment_txhash IS NOT NULL`);
+    console.log('[migrate] v40: UNIQUE index on mm_orders.payment_txhash (anti-replay hardening).');
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

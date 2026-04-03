@@ -2204,9 +2204,34 @@ export async function registerTradingRoutes(fastify) {
 
           const actualAmount = parseFloat(ethers.formatUnits(transferLog.data, USDT[chain].decimals));
           const recipient = '0x' + transferLog.topics[2].slice(26);
+          const txSender = '0x' + transferLog.topics[1].slice(26);
           // 设计文档：允许 0.5% 误差（覆盖链上手续费）
           const amountOk = actualAmount >= expectedAmount * 0.995;
           const recipientOk = !receiveAddr || recipient.toLowerCase() === receiveAddr.toLowerCase();
+
+          // Sender verification: if buyer has a known wallet, check it matches
+          if (order.side === 'sell' && order.counterparty_order_id) {
+            const buyerOrder = sqlite.prepare('SELECT relay_node_id FROM mm_orders WHERE id = ?').get(order.counterparty_order_id);
+            const buyerWallet = buyerOrder
+              ? sqlite.prepare('SELECT address FROM agent_wallets WHERE relay_node_id = ? AND chain = ?').get(buyerOrder.relay_node_id, chain)
+              : null;
+            if (buyerWallet && txSender.toLowerCase() !== buyerWallet.address.toLowerCase()) {
+              console.log(`[trade] verify_payment WARN: sender ${txSender.slice(0,10)} != expected buyer ${buyerWallet.address.slice(0,10)}`);
+              recordChainEvent({
+                txid: txHash, eventType: 'payment_verified',
+                fromAddress: txSender, toAddress: recipient, observedBy: 'system',
+                payload: { orderId: id, warning: 'sender_mismatch', expectedSender: buyerWallet.address, actualSender: txSender, chain },
+              });
+              // Also record as visible event so Brain can flag suspicious payments
+              const { insertEvent } = await import('../data/state/events.js');
+              insertEvent({
+                eventType: 'payment_sender_mismatch', source: 'trade', level: 'warning',
+                agentAddress: order.agent_address,
+                summary: `⚠ Payment sender mismatch on order ${id.slice(0,8)}: expected ${buyerWallet.address.slice(0,10)}..., got ${txSender.slice(0,10)}... (${chain.toUpperCase()})`,
+                payloadJson: { orderId: id, expectedSender: buyerWallet.address, actualSender: txSender, chain, amount: actualAmount },
+              });
+            }
+          }
 
           if (!amountOk) {
             // 设计文档：金额不足 → disputed(reason='underpayment')，fund_lock 保持 locked
