@@ -58,6 +58,8 @@ export async function onBroadcastWritten(row) {
         await handleExchangeAccept(msg); break;
       case 'kanet_exchange_cancel_v1':
         await handleExchangeCancel(msg); break;
+      case 'kanet_confirm_v1':
+        await handleManualConfirm(msg); break;
     }
   } catch (err) {
     console.error(`[trade-filter] Error processing ${msg.t}: ${err.message}`);
@@ -342,6 +344,7 @@ async function tryNextAccept(orderId) {
 // ── Exchange Protocol (v1.1 自由市场) ────────────────────────
 
 import { randomUUID } from 'crypto';
+import { processAccept as machineAccept, processManualConfirm, processCancel as machineCancel } from './exchange-machine.js';
 
 /**
  * Derive market_key: alphabetical sort ensures KAS|USDT === USDT|KAS
@@ -398,60 +401,30 @@ async function handleExchange(msg) {
 }
 
 /**
- * kanet_exchange_accept_v1 — someone accepts an offer
- *
- * msg: { t, offer_id, _tx, _from, _at }
+ * kanet_exchange_accept_v1 — someone accepts an offer.
+ * Delegates to exchange-machine.js: first-valid-accept → matched → verification routing.
  */
 async function handleExchangeAccept(msg) {
   if (!msg.offer_id) return;
-
-  const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(msg.offer_id);
-  if (!offer) {
-    console.log(`[exchange] Accept for unknown offer: ${msg.offer_id}`);
-    return;
-  }
-  if (offer.protocol_status !== 'open') {
-    console.log(`[exchange] Accept rejected — offer ${msg.offer_id.slice(0, 8)} is ${offer.protocol_status}`);
-    return;
-  }
-
-  sqlite.prepare(`
-    UPDATE exchange_offers
-    SET protocol_status = 'matched', taker = ?, taker_tx_id = ?, updated_at = ?
-    WHERE id = ?
-  `).run(msg._from, msg._tx, msg._at || new Date().toISOString(), msg.offer_id);
-
-  console.log(`[exchange] Offer matched: ${msg.offer_id.slice(0, 8)} by ${msg._from.slice(-12)}`);
+  machineAccept(msg);
 }
 
 /**
- * kanet_exchange_cancel_v1 — maker cancels their offer
- *
- * msg: { t, offer_id, _tx, _from, _at }
+ * kanet_exchange_cancel_v1 — maker cancels their offer.
+ * Delegates to exchange-machine.js: only valid from 'open' status.
  */
 async function handleExchangeCancel(msg) {
   if (!msg.offer_id) return;
+  machineCancel(msg);
+}
 
-  const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(msg.offer_id);
-  if (!offer) return;
-
-  // Only maker can cancel
-  if (offer.maker !== msg._from) {
-    console.log(`[exchange] Cancel rejected — ${msg._from.slice(-12)} is not maker`);
-    return;
-  }
-  if (offer.protocol_status !== 'open') {
-    console.log(`[exchange] Cancel rejected — offer ${msg.offer_id.slice(0, 8)} is ${offer.protocol_status}`);
-    return;
-  }
-
-  sqlite.prepare(`
-    UPDATE exchange_offers
-    SET protocol_status = 'cancelled', updated_at = ?
-    WHERE id = ?
-  `).run(msg._at || new Date().toISOString(), msg.offer_id);
-
-  console.log(`[exchange] Offer cancelled: ${msg.offer_id.slice(0, 8)}`);
+/**
+ * kanet_confirm_v1 — manual verification confirmation (maker or taker).
+ * Delegates to exchange-machine.js.
+ */
+async function handleManualConfirm(msg) {
+  if (!msg.offer_id) return;
+  processManualConfirm(msg);
 }
 
 // ── Helpers ───────────────────────────────────────────────────
