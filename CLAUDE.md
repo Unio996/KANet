@@ -81,7 +81,7 @@ bash D:/Anthropic/kanet-stop.sh
 1. ~~**verifyIngestRequest() async**~~ — **已修**，12 个调用点全部 `await`
 2. ~~**Console 直接碰链**~~ — **已修（3/29）**，card-publisher/bcast-sender 删除，utxo-splitter 改 IPC
 3. ~~**market-maker since vs after**~~ — **已修**，chat.js:28 `const afterTs = after || since`
-4. **OTC 收款无唯一订单绑定** — **未修**，只查"最近差不多金额的转账"，存在串单/重放风险
+4. ~~**OTC 收款无唯一订单绑定**~~ — **已修（4/3）**，UNIQUE 索引堵竞态 + 付款方地址校验 + 审计日志（chain_events + events 表 Brain 可见）
 5. ~~**硬编码绝对路径**~~ — **已修（3/29）**，全部改为 `process.env.KANET_ROOT || 'D:/Anthropic'`
 
 ## 必读：KANet 定位

@@ -156,7 +156,7 @@ minds/*/reflections.json ←── 反思持久化       │
 
 13. **~~迟回复比不回更尴尬~~（2026-04-03 已修）。** context-builder.mjs 对外部 peer（identity_type≠local）计算时间差：peer_last_sent_at 之后我方无回复且间隔≥1天 → 注入 `⚠ PEER MESSAGED YOU N DAYS AGO — NO REPLY YET. Acknowledge the delay before anything else.` Brain 看到后自然先道歉再说事。同时修复了 messages 表计数偏差（query_card 系统消息+handshake 被计入 DM 统计 → discovery/list SQL 加 message_type='text' 过滤 + Relay 写入端标记 query_card）。
 
-14. **Agent 信息泄露：系统诊断发给陌生人。** Sophie proactive 检测到节点/Scout 问题后，把诊断信息通过 SEND_MESSAGE 发给了 trust_level=normal 的外部用户。根因：proactive 无 Gate 2 身份注入 + Gate 3 不按信息敏感度过滤。**系统状态、节点模式、服务运行状况、错误日志属于内部信息，只能发给 owner。** 修复方向：建立信息分级（公开/内部/敏感），proactive 发 DM 时 action-executor 检查内容敏感度 × 目标 trust_level。
+14. **~~Agent 信息泄露：系统诊断发给陌生人~~（2026-04-03 已修）。** 三层修复：(a) system-status.mjs 禁止 proactive 激活（系统诊断只在 owner reactive 时注入），(b) action-executor.mjs 内容敏感度门控（14 种模式：端口号/服务名/文件路径/主机名/API端点 × 目标非owner→拦截，sibling agent 免检），(c) self-awareness.mjs proactive 模式模糊化财务数据（'sufficient' 替代精确余额，'funded' 替代钱包地址和金额）。历史泄露证据：Martin 泄露主机名+OS版本，Qwen 泄露完整代码结构，Kasia_1 泄露服务文件名。
 
 ### 致命陷阱
 
@@ -179,6 +179,10 @@ minds/*/reflections.json ←── 反思持久化       │
 14. **Relay comm 消息的 self-send 检测必须覆盖 sender=null。** 广播（comm）是自发自收协议，extractSender 对 self-send TX 可能返回 null。rpc-listener.mjs processComm 的 self-send 检查：`senderAddress === _myAddress || (!senderAddress && plaintext?.startsWith('bcast:'))`。漏掉会导致自己的广播被当成 unknown 来源的 inbound 消息写入。
 
 15. **OAuth 创建 Agent 时 adapter_nodes 表必须回填 url 和 model。** create-adapter 预创建时只有 name+provider，OAuth 回调成功后 oauth.js 必须 updateAdapterNode 写入 ai_provider_url 和 ai_model。否则 UI 显示"未设置"。
+
+16. **proactive SEND_MESSAGE 内容敏感度门控。** action-executor.mjs 的 `_checkContentSensitivity()` 只拦截 proactive（`!_senderMeta`）对外部 peer 的消息。Sibling agent（`siblingAddresses`）不拦。新增敏感模式时在 `SENSITIVE_PATTERNS` 数组添加 `[/regex/, 'category']`。
+
+17. **mm_orders.payment_txhash 有 UNIQUE 索引。** v40 迁移添加了 `idx_mm_orders_payment_txhash_unique`（partial，WHERE NOT NULL）。同一 TX hash 不能绑定两个订单。并发 verify_payment 请求中第二个会被 SQLite UNIQUE 约束拒绝。EVM 验证时还会从 Transfer event 日志提取 sender 地址与预期买方钱包比对，mismatch 写 chain_events + events（Brain 可见）。
 
 ### Skill 系统架构
 
