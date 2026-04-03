@@ -50,7 +50,7 @@
                   data-token-hint="<%= a.token_hint || '' %>"
                 ><%= it.t.btn_edit || '编辑' %></button>
                 <form method="POST" action="/adapters/<%= a.id %>/delete" onsubmit="return confirm('<%= it.t.confirm_pre %>' + '<%= a.name %>' + '<%= it.t.confirm_post %>')">
-                  <button type="submit" class="text-xs text-red-500 hover:text-red-700"><%= it.t.btn_delete %></button>
+                  <button type="submit" class="px-3 py-1 text-xs font-medium text-red-600 bg-red-50 rounded hover:bg-red-100"><%= it.t.btn_delete %></button>
                 </form>
               </div>
             </div>
@@ -409,8 +409,7 @@
             } else {
               // Find matching service by URL
               var matched = false;
-              var keys = providerServices[providerSel.value] || [];
-              keys.forEach(function(k) {
+              allServices.forEach(function(k) {
                 if (k !== 'custom' && catalog[k] && catalog[k].url === d.url) {
                   serviceSel.value = k;
                   matched = true;
