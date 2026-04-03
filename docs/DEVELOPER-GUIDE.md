@@ -338,6 +338,7 @@ shortAddr / copy / relativeTime / **formatTime** / formatKas / statusLabel / sta
 | `/predictions` | predictions.eta | 预测市场 |
 | `/handshakes` | handshakes.eta | 握手报告 |
 | `/story` | story.eta | Episode 视图 |
+| `/exchange` | exchange.eta | 协议级自由市场 |
 
 **保留页面（已调色融合，功能完整）：**
 
@@ -510,6 +511,13 @@ Agent 决策理由从 execution_states.display_summary 注入。
 | shared/lib/event-types.mjs | chain_events event_type 枚举（写入方和查询方统一引用） |
 | shared/lib/rpc-utils.mjs | Relay/Scout 共用 resolveRpcUrl + backoffDelay |
 
+### 协议级自由市场
+
+| 文件 | 职责 |
+|------|------|
+| kasia-console/src/api/exchange.js | 7 API 端点 + /exchange 页面路由 |
+| kasia-console/src/ui/exchange.eta | 协议级自由市场 UI |
+
 ### 测试与文档
 
 | 文件 | 职责 |
@@ -622,3 +630,114 @@ Connection Manager               GET /api/auth/resolve-by-adapter/:id
 | kasia-console/src/api/auth.js | resolve / connections 端点 |
 | kasia-console/src/api/oauth.js | OAuth start/callback + 临时 1455 端口监听 |
 | agent-adapter/src/providers/resolve-auth.mjs | 共享 auth 缓存 + 401 恢复 |
+
+---
+
+## 十四、协议级自由市场（/exchange）
+
+> 2026-04-03 上线。设计文档：`自由市场设计决策文档 v1.1`，哲学文档：`kanet-free-market.md`。
+
+### 核心哲学
+
+**协议不是规则，协议是格式。** 规则说"你只能交易这些资产"，协议说"你要交易什么，填在这个字段里"。KANet 自由市场是 Kaspa 底层哲学（转账不可干预）在应用层的延伸：交易本身不可干预。
+
+### 与现有交易系统的关系
+
+```
+/trading  — KAS/USDT 专用交易所接口（保留，不碰）
+/market   — KAS/USDT OTC（保留，不碰）
+/exchange — 协议级自由市场（新建，从这里开始长）
+```
+
+三条路线独立运行。`/exchange` 不依赖 order-machine.js 或 trading.js。
+
+### 数据模型（exchange_offers 表，v38）
+
+```sql
+exchange_offers:
+  id                  — UUID（本地生成或从广播 msg.id 取）
+  broadcast_tx_id     — 链上广播 TX hash（乐观写入时为 pending_xxx）
+  message_index       — 同一 TX 多条广播时的序号
+
+  give_asset          — 我给什么（自由字符串：KAS / BTC / "代码审计10h"）
+  give_amount         — 数量（字符串存储，避免跨精度炸弹）
+  give_chain          — 资产所在链（kaspa / bitcoin / null）
+
+  want_asset          — 我要什么（自由字符串）
+  want_amount         — 数量（字符串存储）
+  want_chain          — 期望对方用哪条链
+
+  maker               — 挂单方地址
+  broadcast_at        — 广播时间
+  expires_at          — 过期时间
+
+  verification        — 验证类型：manual / cross_chain_tx / kaspa_tx
+  verification_meta   — 验证参数 JSON
+
+  protocol_status     — open / matched / completed / cancelled / expired / timed_out
+  is_fully_observed   — 本节点是否观测到完整生命周期（0/1）
+  market_key          — 派生分组键（字母排序：[give,want].sort().join('|')）
+```
+
+**关键设计：**
+- `give_asset` / `want_asset` 是**自由字符串**，不是枚举。协议不审判标的。
+- `market_key` 不进链上协议，只是本地索引派生。
+- `give_amount` / `want_amount` 用字符串存储（KAS sompi 精度、跨链精度、服务类无标准单位）。
+
+### 协议消息（3 种）
+
+| 消息类型 | JSON `t` 值 | 作用 |
+|---------|-------------|------|
+| 发布报价 | `kanet_exchange_v1` | 广播 give/want/verification 等 |
+| 接单 | `kanet_exchange_accept_v1` | 引用 offer_id |
+| 取消 | `kanet_exchange_cancel_v1` | 引用 offer_id，仅 maker 可取消 |
+
+消息流经 `onBroadcastWritten()` → switch dispatch → `handleExchange()` 等处理器（trade-protocol-filter.js）。
+
+### 乐观更新
+
+publish/accept/cancel 操作**先写本地 DB，再异步广播到链上**。链上广播是锚定确认，不阻塞 UI 显示。广播失败（如 Relay 同步中）不影响本地操作。
+
+### 验证器注册表（可扩展）
+
+```
+"cross_chain_tx"  → 现有 cross-chain-verify.mjs（BNB/ETH/SOL/TRON USDT）
+"kaspa_tx"        → Kaspa TX 确认
+"manual"          → 双方手动确认（服务类交易、无链资产）
+"btc_tx"          → BTC TX 确认（待建）
+"oracle"          → 第三方预言机（未来）
+```
+
+每个报价自带 `verification` 字段。新资产 = 新验证器实现，状态机代码不变。
+
+### 节点索引机制
+
+**参与即索引，缺席即空白。** 没有中心索引服务器。每个节点只索引自己启动后观测到的广播。节点间数据不一致是设计，不是 bug。
+
+### API 端点
+
+| 方法 | 路由 | 说明 |
+|------|------|------|
+| GET | `/api/exchange/offers` | 报价列表（支持 market_key/status/maker 过滤） |
+| GET | `/api/exchange/offers/:id` | 单个报价详情 |
+| GET | `/api/exchange/markets` | 活跃市场对列表 |
+| GET | `/api/exchange/agents` | 可用 Agent 列表 |
+| POST | `/api/exchange/publish` | 发起报价（乐观写 DB + 异步广播） |
+| POST | `/api/exchange/accept` | 接单（乐观更新 + 异步广播） |
+| POST | `/api/exchange/cancel` | 取消（乐观更新 + 异步广播） |
+
+### 关键文件
+
+| 文件 | 职责 |
+|------|------|
+| kasia-console/src/api/exchange.js | 7 API 端点 + /exchange 页面路由 |
+| kasia-console/src/services/trade-protocol-filter.js | handleExchange + handleExchangeAccept + handleExchangeCancel |
+| kasia-console/src/ui/exchange.eta | 协议级自由市场 UI（广播流 + 分组 + 发布表单） |
+| kasia-console/src/db/migrate.js | v38: exchange_offers 表 |
+
+### 待实现（Step 6）
+
+- matched 之后的完整交割流程（paying → paid → verified → delivering → completed）
+- 验证路由（根据 verification 字段分发到不同验证器）
+- dispute 处理
+- 信誉系统接入

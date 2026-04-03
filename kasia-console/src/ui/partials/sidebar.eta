@@ -70,7 +70,7 @@
       class="flex items-center px-3 py-2.5 rounded-lg text-sm transition-colors <%= it._page === 'explore' || it._page === 'discovered' || it._page === 'network' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
       探索
     </a>
-    <% const _isMarket = ['trading','market','market-overview','stocks','predictions'].includes(it._page); %>
+    <% const _isMarket = ['trading','market','market-overview','stocks','predictions','exchange'].includes(it._page); %>
     <div x-data="{ open: <%= _isMarket ? 'true' : 'false' %> }">
       <button @click="open = !open"
         class="flex items-center justify-between w-full px-3 py-2.5 rounded-lg text-sm transition-colors <%= _isMarket ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
@@ -82,9 +82,13 @@
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'market-overview' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
           概览
         </a>
+        <a href="/exchange"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'exchange' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          Free Market
+        </a>
         <a href="/market"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'market' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          自由市场
+          OTC (legacy)
         </a>
         <a href="/trading"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'trading' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
