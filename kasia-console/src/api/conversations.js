@@ -9,6 +9,7 @@ import { fmtDate, relativeTime } from '../lib/time.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 import { sqlite } from '../db/client.js';
 import { getReply, resolveRelayNodeId } from '../services/mind-manager.js';
+import { getStatus as getRelayStatus } from '../services/relay-manager.js';
 import { buildEpisodes, getEpisodeDetail, buildMindSummary } from '../services/episode-builder.js';
 
 export async function registerConversationRoutes(fastify) {
@@ -41,6 +42,8 @@ export async function registerConversationRoutes(fastify) {
   // v28: reads from relation_states (unified protocol state layer)
   fastify.get('/api/agent/profile', async (request, reply) => {
     const relays = listRelayNodes();
+    const relayStatuses = getRelayStatus();
+    const relayRunningSet = new Set(relayStatuses.map(rs => rs.relayNodeId));
     const agents = [];
     for (const r of relays) {
       const identity = sqlite.prepare('SELECT * FROM identities WHERE address = ?').get(r.address);
@@ -64,10 +67,21 @@ export async function registerConversationRoutes(fastify) {
         'SELECT MAX(updated_at) as t FROM relation_states WHERE local_address = ?'
       ).get(r.address)?.t || null;
 
+      // Adapter info from DB
+      const adapter = r.adapter_node_id
+        ? sqlite.prepare('SELECT id, name, http_port, ai_provider, ai_model FROM adapter_nodes WHERE id = ?').get(r.adapter_node_id)
+        : null;
+
       agents.push({
         id: r.id,
         name: r.name,
         address: r.address,
+        adapter_node_id: r.adapter_node_id || null,
+        adapterName: adapter?.name || null,
+        adapterPort: adapter?.http_port || null,
+        adapterProvider: adapter?.ai_provider || null,
+        adapterModel: adapter?.ai_model || null,
+        relayRunning: relayRunningSet.has(r.id),
         card: identity ? {
           mode: identity.card_mode,
           entityType: identity.card_entity_type,
