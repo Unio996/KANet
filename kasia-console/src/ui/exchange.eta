@@ -1,0 +1,310 @@
+<%~ include('partials/page-open', { _page: 'exchange', pageTitle: 'Free Market', ...it }) %>
+
+<div class="p-6 max-w-5xl mx-auto" x-data="exchangeApp()">
+
+  <!-- Node visibility notice -->
+  <div class="mb-6 bg-warm-50 border border-warm-200 rounded-lg p-4 text-sm text-ink-500">
+    <p class="font-medium text-ink-600 mb-1">Protocol-Level Market</p>
+    <p>This is the broadcast stream observed by your local node — not a complete global orderbook.</p>
+    <p>Your view depends on the index coverage since this node started scanning.</p>
+  </div>
+
+  <!-- Market groups bar -->
+  <div class="flex items-center gap-2 mb-4 flex-wrap">
+    <button @click="filter = ''"
+      :class="filter === '' ? 'bg-brand-500 text-white' : 'bg-warm-100 text-ink-500 hover:bg-warm-200'"
+      class="px-3 py-1.5 rounded-full text-xs font-medium transition-colors">
+      All
+    </button>
+    <template x-for="g in groups" :key="g.market_key">
+      <button @click="filter = g.market_key"
+        :class="filter === g.market_key ? 'bg-brand-500 text-white' : 'bg-warm-100 text-ink-500 hover:bg-warm-200'"
+        class="px-3 py-1.5 rounded-full text-xs font-medium transition-colors">
+        <span x-text="g.market_key"></span>
+        <span class="ml-1 opacity-60" x-text="'(' + g.cnt + ')'"></span>
+      </button>
+    </template>
+  </div>
+
+  <!-- Action bar -->
+  <div class="flex items-center justify-between mb-4">
+    <div class="flex items-center gap-4">
+      <div class="text-sm text-ink-400">
+        <span x-text="filtered.length"></span> offers
+        <span x-show="filter" class="ml-1">in <span x-text="filter" class="font-medium text-ink-600"></span></span>
+      </div>
+      <div class="flex items-center gap-2 text-xs">
+        <span class="text-ink-400">Agent:</span>
+        <select x-model="form.relayNodeId"
+          class="px-2 py-1 border border-warm-200 rounded text-xs bg-white focus:ring-1 focus:ring-brand-300">
+          <template x-for="r in relays" :key="r.id">
+            <option :value="r.id" x-text="r.name"></option>
+          </template>
+        </select>
+      </div>
+    </div>
+    <button @click="showForm = !showForm"
+      class="px-4 py-2 bg-brand-500 text-white rounded-lg text-sm font-medium hover:bg-brand-600 transition-colors">
+      + Publish Offer
+    </button>
+  </div>
+
+  <!-- Publish form (collapsed) -->
+  <div x-show="showForm" x-transition class="mb-6 bg-white border border-warm-200 rounded-lg p-5">
+    <h3 class="text-sm font-semibold text-ink-700 mb-4">Publish an Offer</h3>
+    <div class="grid grid-cols-2 gap-4">
+      <!-- Give side -->
+      <div>
+        <label class="block text-xs font-medium text-ink-500 mb-1">I give</label>
+        <div class="flex gap-2">
+          <input x-model="form.give_amount" type="text" placeholder="Amount"
+            class="flex-1 px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
+          <input x-model="form.give_asset" type="text" placeholder="Asset (e.g. KAS)"
+            class="w-32 px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
+        </div>
+        <input x-model="form.give_chain" type="text" placeholder="Chain (optional, e.g. kaspa)"
+          class="mt-2 w-full px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
+      </div>
+      <!-- Want side -->
+      <div>
+        <label class="block text-xs font-medium text-ink-500 mb-1">I want</label>
+        <div class="flex gap-2">
+          <input x-model="form.want_amount" type="text" placeholder="Amount"
+            class="flex-1 px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
+          <input x-model="form.want_asset" type="text" placeholder="Asset (e.g. USDT)"
+            class="w-32 px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
+        </div>
+        <input x-model="form.want_chain" type="text" placeholder="Chain (optional, e.g. bnb)"
+          class="mt-2 w-full px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
+      </div>
+    </div>
+    <div class="grid grid-cols-3 gap-4 mt-4">
+      <div>
+        <label class="block text-xs font-medium text-ink-500 mb-1">Verification</label>
+        <select x-model="form.verification"
+          class="w-full px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300">
+          <option value="manual">Manual (both confirm)</option>
+          <option value="cross_chain_tx">Cross-chain TX</option>
+          <option value="kaspa_tx">Kaspa TX</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-ink-500 mb-1">Expires</label>
+        <select x-model="form.expires_minutes"
+          class="w-full px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300">
+          <option value="30">30 min</option>
+          <option value="60" selected>1 hour</option>
+          <option value="360">6 hours</option>
+          <option value="1440">24 hours</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-ink-500 mb-1">Agent</label>
+        <select x-model="form.relayNodeId"
+          class="w-full px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300">
+          <template x-for="r in relays" :key="r.id">
+            <option :value="r.id" x-text="r.name"></option>
+          </template>
+        </select>
+      </div>
+    </div>
+    <div class="mt-4 flex justify-end gap-2">
+      <button @click="showForm = false"
+        class="px-4 py-2 text-sm text-ink-500 hover:text-ink-700 transition-colors">Cancel</button>
+      <button @click="publishOffer()"
+        :disabled="publishing"
+        class="px-4 py-2 bg-brand-500 text-white rounded-lg text-sm font-medium hover:bg-brand-600 transition-colors disabled:opacity-50">
+        <span x-show="!publishing">Broadcast to Network</span>
+        <span x-show="publishing">Broadcasting...</span>
+      </button>
+    </div>
+    <p x-show="formError" x-text="formError" class="mt-2 text-xs text-red-600"></p>
+    <p x-show="formSuccess" x-text="formSuccess" class="mt-2 text-xs text-green-600"></p>
+  </div>
+
+  <!-- Offer stream -->
+  <div class="space-y-3">
+    <template x-if="loading">
+      <div class="text-center py-12 text-ink-400 text-sm">Loading offers...</div>
+    </template>
+    <template x-if="!loading && filtered.length === 0">
+      <div class="text-center py-12 text-ink-400">
+        <p class="text-sm">No offers observed yet</p>
+        <p class="text-xs mt-1">Publish the first offer to start the market</p>
+      </div>
+    </template>
+    <template x-for="o in filtered" :key="o.id">
+      <div class="bg-white border border-warm-200 rounded-lg p-4 hover:border-brand-200 transition-colors">
+        <div class="flex items-start justify-between">
+          <!-- Offer content -->
+          <div class="flex-1">
+            <div class="flex items-center gap-3">
+              <span class="text-lg font-semibold text-ink-700">
+                <span x-text="o.give_amount"></span>
+                <span x-text="o.give_asset" class="text-brand-600"></span>
+              </span>
+              <span class="text-ink-300">→</span>
+              <span class="text-lg font-semibold text-ink-700">
+                <span x-text="o.want_amount"></span>
+                <span x-text="o.want_asset" class="text-brand-600"></span>
+              </span>
+            </div>
+            <div class="flex items-center gap-3 mt-2 text-xs text-ink-400">
+              <span x-text="'by ' + KANet.shortAddr(o.maker)"></span>
+              <span x-show="o.give_chain" x-text="o.give_chain + ' →'"></span>
+              <span x-show="o.want_chain" x-text="o.want_chain"></span>
+              <span class="px-1.5 py-0.5 rounded text-[10px] font-medium"
+                :class="{
+                  'bg-green-50 text-green-700': o.protocol_status === 'open',
+                  'bg-blue-50 text-blue-700': o.protocol_status === 'matched',
+                  'bg-warm-100 text-ink-500': o.protocol_status === 'completed',
+                  'bg-red-50 text-red-600': o.protocol_status === 'cancelled' || o.protocol_status === 'expired',
+                }"
+                x-text="o.protocol_status"></span>
+              <span x-text="KANet.relativeTime(o.broadcast_at)"></span>
+              <span x-show="o.verification !== 'manual'"
+                class="px-1.5 py-0.5 bg-brand-50 text-brand-600 rounded text-[10px]"
+                x-text="o.verification"></span>
+            </div>
+          </div>
+          <!-- Accept button -->
+          <button x-show="o.protocol_status === 'open'"
+            @click="acceptOffer(o)"
+            class="px-3 py-1.5 bg-green-500 text-white rounded-lg text-xs font-medium hover:bg-green-600 transition-colors">
+            Accept
+          </button>
+        </div>
+      </div>
+    </template>
+  </div>
+
+  <!-- Refresh -->
+  <div class="mt-6 text-center">
+    <button @click="loadOffers()" class="text-xs text-ink-400 hover:text-brand-500 transition-colors">
+      Refresh
+    </button>
+  </div>
+</div>
+
+<script>
+function exchangeApp() {
+  return {
+    offers: [],
+    groups: [],
+    relays: [],
+    filter: '',
+    loading: true,
+    showForm: false,
+    publishing: false,
+    formError: '',
+    formSuccess: '',
+    form: {
+      give_asset: '', give_amount: '', give_chain: '',
+      want_asset: '', want_amount: '', want_chain: '',
+      verification: 'manual', expires_minutes: '60',
+      relayNodeId: '',
+    },
+
+    get filtered() {
+      if (!this.filter) return this.offers;
+      return this.offers.filter(o => o.market_key === this.filter);
+    },
+
+    async init() {
+      await this.loadRelays();
+      await this.loadOffers();
+      setInterval(() => this.loadOffers(), 30000);
+    },
+
+    get selectedAgent() {
+      return this.relays.find(r => r.id === this.form.relayNodeId)?.name || 'No agent';
+    },
+
+    async loadRelays() {
+      try {
+        const res = await fetch('/api/exchange/agents');
+        const data = await res.json();
+        this.relays = data.agents || [];
+        if (this.relays.length && !this.form.relayNodeId) {
+          this.form.relayNodeId = this.relays[0].id;
+        }
+      } catch {}
+    },
+
+    async loadOffers() {
+      try {
+        const res = await fetch('/api/exchange/offers?limit=100');
+        const data = await res.json();
+        this.offers = data.offers || [];
+        this.groups = data.groups || [];
+      } catch (e) {
+        console.error('Failed to load offers:', e);
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async publishOffer() {
+      this.formError = '';
+      this.formSuccess = '';
+      if (!this.form.give_asset || !this.form.give_amount || !this.form.want_asset || !this.form.want_amount) {
+        this.formError = 'Fill in all required fields';
+        return;
+      }
+      this.publishing = true;
+      try {
+        const res = await fetch('/api/exchange/publish', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.form),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          this.formSuccess = `Offer published! ID: ${data.offer_id?.slice(0, 8)}`;
+          this.showForm = false;
+          // Reset form
+          this.form.give_asset = ''; this.form.give_amount = ''; this.form.give_chain = '';
+          this.form.want_asset = ''; this.form.want_amount = ''; this.form.want_chain = '';
+          await this.loadOffers();
+        } else {
+          this.formError = data.error || 'Broadcast failed';
+        }
+      } catch (e) {
+        this.formError = e.message;
+      } finally {
+        this.publishing = false;
+      }
+    },
+
+    async acceptOffer(offer) {
+      // Ensure an agent is selected
+      if (!this.form.relayNodeId && this.relays.length) {
+        this.form.relayNodeId = this.relays[0].id;
+      }
+      if (!this.form.relayNodeId) {
+        alert('No agent available');
+        return;
+      }
+      const agentName = this.relays.find(r => r.id === this.form.relayNodeId)?.name || 'Agent';
+      if (!confirm(`${agentName} accepts: ${offer.give_amount} ${offer.give_asset} → ${offer.want_amount} ${offer.want_asset}?`)) return;
+      try {
+        const res = await fetch('/api/exchange/accept', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relayNodeId: this.form.relayNodeId, offer_id: offer.id }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          await this.loadOffers();
+        } else {
+          alert(data.error || 'Accept failed');
+        }
+      } catch (e) {
+        alert(e.message);
+      }
+    },
+  };
+}
+</script>
+
+<%~ include('partials/page-close', it) %>

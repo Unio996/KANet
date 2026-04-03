@@ -1424,5 +1424,57 @@ export function runMigrations() {
     console.log(`[migrate] v37: agent_connections table created, ${adapters.length} connections migrated.`);
   }
 
+  // v38: exchange_offers — 协议级自由市场索引表
+  // 设计文档: kanet-free-market.md + 自由市场设计决策文档 v1.1
+  const hasExchangeOffers = sqlite.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='exchange_offers'"
+  ).get();
+  if (!hasExchangeOffers) {
+    sqlite.exec(`
+      CREATE TABLE exchange_offers (
+        id                  TEXT PRIMARY KEY,
+        broadcast_tx_id     TEXT NOT NULL,
+        message_index       INTEGER NOT NULL DEFAULT 0,
+
+        give_asset          TEXT NOT NULL,
+        give_amount         TEXT NOT NULL,
+        give_chain          TEXT,
+
+        want_asset          TEXT NOT NULL,
+        want_amount         TEXT NOT NULL,
+        want_chain          TEXT,
+
+        maker               TEXT NOT NULL,
+        broadcast_block     INTEGER,
+        broadcast_at        TEXT,
+        expires_at          TEXT,
+
+        verification        TEXT NOT NULL DEFAULT 'manual',
+        verification_meta   TEXT DEFAULT '{}',
+
+        protocol_status     TEXT NOT NULL DEFAULT 'open',
+        is_fully_observed   INTEGER NOT NULL DEFAULT 0,
+
+        market_key          TEXT NOT NULL,
+        observed_by_node    TEXT,
+
+        taker               TEXT,
+        taker_tx_id         TEXT,
+        completed_at        TEXT,
+
+        created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+
+        UNIQUE(broadcast_tx_id, message_index)
+      );
+
+      CREATE INDEX idx_exchange_offers_market_key ON exchange_offers(market_key);
+      CREATE INDEX idx_exchange_offers_status ON exchange_offers(protocol_status);
+      CREATE INDEX idx_exchange_offers_maker ON exchange_offers(maker);
+      CREATE INDEX idx_exchange_offers_broadcast_at ON exchange_offers(broadcast_at);
+    `);
+    console.log('[migrate] v38: exchange_offers table created (protocol-level free market).');
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
