@@ -11,7 +11,7 @@
         <% } else { %>
         <div class="space-y-3">
           <% it.adapters.forEach(function(a) { %>
-          <div class="bg-white rounded-lg border border-warm-200 p-5">
+          <div class="bg-white rounded-lg border border-warm-200 p-5" x-data="{ renaming: false, newName: '<%= a.name %>' }">
             <div class="flex items-start justify-between">
               <div class="flex items-center space-x-3">
                 <% if (a.online) { %>
@@ -23,34 +23,35 @@
                   <span class="w-1.5 h-1.5 mr-1.5 rounded-full bg-ink-300"></span><%= it.t.status_offline %>
                 </span>
                 <% } %>
-                <span class="text-base font-semibold text-ink-700"><%= a.name %></span>
+                <!-- Inline rename -->
+                <template x-if="!renaming">
+                  <span class="text-base font-semibold text-ink-700 cursor-pointer hover:text-brand-500" @click="renaming = true" title="Click to rename"><%= a.name %></span>
+                </template>
+                <template x-if="renaming">
+                  <form method="POST" action="/adapters/<%= a.id %>" class="flex items-center space-x-2">
+                    <input type="text" name="name" x-model="newName" @keydown.escape="renaming = false"
+                      class="px-2 py-1 border border-brand-300 rounded text-sm font-semibold text-ink-700 focus:outline-none focus:ring-1 focus:ring-brand-500 w-48"
+                      x-init="$nextTick(() => $el.focus())" />
+                    <button type="submit" class="text-xs text-brand-500 hover:text-brand-700">OK</button>
+                    <button type="button" @click="renaming = false; newName = '<%= a.name %>'" class="text-xs text-ink-400 hover:text-ink-600">&times;</button>
+                  </form>
+                </template>
               </div>
-              <div class="flex items-center space-x-3">
+              <div class="flex items-center space-x-4 text-xs text-ink-400">
                 <% if (a.online) { %>
                 <form method="POST" action="/adapters/<%= a.id %>/restart">
-                  <button type="submit" class="px-3 py-1 text-xs font-medium text-brand-500 bg-brand-50 rounded hover:bg-brand-100"><%= it.t.adapter_restart || '重启' %></button>
+                  <button type="submit" class="hover:text-ink-600"><%= it.t.adapter_restart || 'Restart' %></button>
                 </form>
                 <form method="POST" action="/adapters/<%= a.id %>/stop">
-                  <button type="submit" class="px-3 py-1 text-xs font-medium text-red-600 bg-red-50 rounded hover:bg-red-100"><%= it.t.adapter_stop || '停止' %></button>
+                  <button type="submit" class="hover:text-red-500"><%= it.t.adapter_stop || 'Stop' %></button>
                 </form>
                 <% } else { %>
                 <form method="POST" action="/adapters/<%= a.id %>/start">
-                  <button type="submit" class="px-3 py-1 text-xs font-medium text-green-600 bg-green-50 rounded hover:bg-green-100"><%= it.t.adapter_start || '启动' %></button>
+                  <button type="submit" class="hover:text-green-600"><%= it.t.adapter_start || 'Start' %></button>
                 </form>
                 <% } %>
-                <button type="button" class="px-3 py-1 text-xs font-medium text-ink-500 bg-warm-100 rounded hover:bg-warm-200 btn-edit"
-                  data-id="<%= a.id %>"
-                  data-name="<%= a.name %>"
-                  data-provider="<%= a.ai_provider || 'openclaw' %>"
-                  data-url="<%= a.ai_provider_url || '' %>"
-                  data-model="<%= a.ai_model || '' %>"
-                  data-gateway="<%= a.gateway_ws_url || '' %>"
-                  data-agent="<%= a.agent_id || 'main' %>"
-                  data-key-hint="<%= a.ai_provider_key_hint || '' %>"
-                  data-token-hint="<%= a.token_hint || '' %>"
-                ><%= it.t.btn_edit || '编辑' %></button>
                 <form method="POST" action="/adapters/<%= a.id %>/delete" onsubmit="return confirm('<%= it.t.confirm_pre %>' + '<%= a.name %>' + '<%= it.t.confirm_post %>')">
-                  <button type="submit" class="px-3 py-1 text-xs font-medium text-red-600 bg-red-50 rounded hover:bg-red-100"><%= it.t.btn_delete %></button>
+                  <button type="submit" class="hover:text-red-500"><%= it.t.btn_delete %></button>
                 </form>
               </div>
             </div>
@@ -75,11 +76,10 @@
         </div>
         <% } %>
 
-        <!-- Add / Edit form -->
+        <!-- Add new adapter -->
         <div class="bg-white rounded-lg border border-warm-200" id="formCard">
-          <div class="px-6 py-4 border-b border-warm-200 flex items-center justify-between">
-            <h2 class="text-sm font-semibold text-ink-600" id="formTitle"><%= it.t.add_adapter %></h2>
-            <button type="button" id="cancelEdit" class="hidden text-xs text-ink-400 hover:text-ink-600"><%= it.t.btn_cancel || '取消编辑' %></button>
+          <div class="px-6 py-4 border-b border-warm-200">
+            <h2 class="text-sm font-semibold text-ink-600"><%= it.t.add_adapter %></h2>
           </div>
           <form method="POST" action="/adapters" class="px-6 py-5 space-y-4" id="adapterForm">
             <div>
@@ -121,7 +121,7 @@
             <div id="fields-api" class="hidden space-y-4">
               <!-- Service preset dropdown -->
               <div>
-                <label class="block text-xs font-medium text-ink-500 mb-1"><%= it.t.label_service || '服务商' %></label>
+                <label class="block text-xs font-medium text-ink-500 mb-1"><%= it.t.label_service || 'Service' %></label>
                 <select id="serviceSelect"
                   class="w-full px-3 py-2 border border-warm-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
                 </select>
@@ -141,7 +141,7 @@
               </div>
               <!-- Custom model name (only when "custom" selected) -->
               <div id="customModelRow" class="hidden">
-                <label class="block text-xs font-medium text-ink-500 mb-1"><%= it.t.label_custom || '自定义' %> — <%= it.t.label_ai_model %></label>
+                <label class="block text-xs font-medium text-ink-500 mb-1"><%= it.t.label_custom || 'Custom' %> — <%= it.t.label_ai_model %></label>
                 <input type="text" id="customModelInput" placeholder="model-name"
                   class="w-full px-3 py-2 border border-warm-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500" />
               </div>
@@ -192,63 +192,31 @@
           var customModelIn  = document.getElementById('customModelInput');
           var urlHidden      = document.getElementById('aiUrlHidden');
           var modelHidden    = document.getElementById('aiModelHidden');
-          var CUSTOM         = '<%= it.t.label_custom || "自定义" %>';
+          var form           = document.getElementById('adapterForm');
+          var CUSTOM         = '<%= it.t.label_custom || "Custom" %>';
 
           var catalog = {
-            openai: {
-              label: 'OpenAI', url: 'https://api.openai.com/v1',
-              models: ['gpt-5.4', 'gpt-5-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano', 'o3', 'o4-mini']
-            },
-            deepseek: {
-              label: 'DeepSeek', url: 'https://api.deepseek.com/v1',
-              models: ['deepseek-chat', 'deepseek-reasoner']
-            },
-            google: {
-              label: 'Google Gemini', url: 'https://generativelanguage.googleapis.com/v1beta/openai',
-              models: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite']
-            },
-            ollama: {
-              label: 'Ollama (local)', url: 'http://localhost:11434/v1',
-              models: ['llama3.3', 'llama3.2', 'qwen3', 'qwen2.5', 'gemma3', 'deepseek-r1', 'mistral', 'phi-4']
-            },
-            groq: {
-              label: 'Groq', url: 'https://api.groq.com/openai/v1',
-              models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'gemma2-9b-it', 'mixtral-8x7b-32768']
-            },
-            together: {
-              label: 'Together AI', url: 'https://api.together.xyz/v1',
-              models: ['meta-llama/Llama-3.3-70B-Instruct-Turbo', 'deepseek-ai/DeepSeek-V3', 'deepseek-ai/DeepSeek-R1', 'Qwen/Qwen2.5-72B-Instruct-Turbo']
-            },
-            mistral: {
-              label: 'Mistral AI', url: 'https://api.mistral.ai/v1',
-              models: ['mistral-large-latest', 'pixtral-large-latest', 'pixtral-12b-2409', 'mistral-small-latest', 'codestral-latest', 'open-mixtral-8x22b']
-            },
-            xai: {
-              label: 'xAI Grok', url: 'https://api.x.ai/v1',
-              models: ['grok-3', 'grok-3-mini', 'grok-2']
-            },
-            siliconflow: {
-              label: 'SiliconFlow (硅基流动)', url: 'https://api.siliconflow.cn/v1',
-              models: ['deepseek-ai/DeepSeek-V3', 'deepseek-ai/DeepSeek-R1', 'Qwen/Qwen2.5-72B-Instruct', 'Qwen/Qwen3-235B-A22B']
-            },
-            anthropic_default: {
-              label: 'Anthropic', url: 'https://api.anthropic.com',
-              models: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-sonnet-4-20250514', 'claude-opus-4-20250514', 'claude-haiku-4-5-20251001']
-            }
+            anthropic_default: { label: 'Anthropic', url: 'https://api.anthropic.com', models: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-sonnet-4-20250514', 'claude-opus-4-20250514', 'claude-haiku-4-5-20251001'] },
+            openai: { label: 'OpenAI', url: 'https://api.openai.com/v1', models: ['gpt-5.4', 'gpt-5-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano', 'o3', 'o4-mini'] },
+            deepseek: { label: 'DeepSeek', url: 'https://api.deepseek.com/v1', models: ['deepseek-chat', 'deepseek-reasoner'] },
+            xai: { label: 'xAI Grok', url: 'https://api.x.ai/v1', models: ['grok-3', 'grok-3-mini', 'grok-2'] },
+            google: { label: 'Google Gemini', url: 'https://generativelanguage.googleapis.com/v1beta/openai', models: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'] },
+            ollama: { label: 'Ollama (local)', url: 'http://localhost:11434/v1', models: ['llama3.3', 'llama3.2', 'qwen3', 'qwen2.5', 'gemma3', 'deepseek-r1', 'mistral', 'phi-4'] },
+            groq: { label: 'Groq', url: 'https://api.groq.com/openai/v1', models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'gemma2-9b-it', 'mixtral-8x7b-32768'] },
+            together: { label: 'Together AI', url: 'https://api.together.xyz/v1', models: ['meta-llama/Llama-3.3-70B-Instruct-Turbo', 'deepseek-ai/DeepSeek-V3', 'deepseek-ai/DeepSeek-R1', 'Qwen/Qwen2.5-72B-Instruct-Turbo'] },
+            mistral: { label: 'Mistral AI', url: 'https://api.mistral.ai/v1', models: ['mistral-large-latest', 'pixtral-large-latest', 'pixtral-12b-2409', 'mistral-small-latest', 'codestral-latest', 'open-mixtral-8x22b'] },
+            siliconflow: { label: 'SiliconFlow', url: 'https://api.siliconflow.cn/v1', models: ['deepseek-ai/DeepSeek-V3', 'deepseek-ai/DeepSeek-R1', 'Qwen/Qwen2.5-72B-Instruct', 'Qwen/Qwen3-235B-A22B'] },
+            dashscope: { label: 'DashScope (Qwen)', url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: ['qwen3.5-plus', 'qwen-plus', 'qwen-turbo', 'qwen-max'] }
           };
 
-          // All API Key services in one list — Anthropic first
-          var allServices = ['anthropic_default','openai','deepseek','google','xai','ollama','groq','together','mistral','siliconflow','custom'];
+          var allServices = Object.keys(catalog).concat(['custom']);
 
-          function makeOpt(value, label) {
-            var o = document.createElement('option'); o.value = value; o.textContent = label; return o;
-          }
+          function makeOpt(v, l) { var o = document.createElement('option'); o.value = v; o.textContent = l; return o; }
 
           function populateServices() {
             serviceSel.innerHTML = '';
             allServices.forEach(function(k) {
-              if (k === 'custom') { serviceSel.appendChild(makeOpt('custom', CUSTOM)); }
-              else { serviceSel.appendChild(makeOpt(k, catalog[k].label)); }
+              serviceSel.appendChild(makeOpt(k, k === 'custom' ? CUSTOM : catalog[k].label));
             });
             onServiceChange();
           }
@@ -256,9 +224,7 @@
           function populateModels() {
             var svc = catalog[serviceSel.value];
             modelSel.innerHTML = '';
-            if (svc) {
-              svc.models.forEach(function(m) { modelSel.appendChild(makeOpt(m, m)); });
-            }
+            if (svc) svc.models.forEach(function(m) { modelSel.appendChild(makeOpt(m, m)); });
             modelSel.appendChild(makeOpt('custom', CUSTOM));
             onModelChange();
           }
@@ -266,22 +232,16 @@
           function onServiceChange() {
             var isCustom = serviceSel.value === 'custom';
             customUrlRow.classList.toggle('hidden', !isCustom);
-            if (!isCustom) {
-              var svc = catalog[serviceSel.value];
-              if (svc) urlHidden.value = svc.url;
-            }
+            if (!isCustom) { var svc = catalog[serviceSel.value]; if (svc) urlHidden.value = svc.url; }
             populateModels();
+            // Set real provider for backend
+            var h = document.getElementById('realProviderHidden');
+            if (h) h.value = serviceSel.value === 'anthropic_default' ? 'anthropic' : 'openai';
           }
 
           function onModelChange() {
-            var isCustom = modelSel.value === 'custom';
-            customModelRow.classList.toggle('hidden', !isCustom);
-            if (!isCustom) modelHidden.value = modelSel.value;
-          }
-
-          function syncBeforeSubmit() {
-            if (serviceSel.value === 'custom') urlHidden.value = customUrlInput.value;
-            if (modelSel.value === 'custom') modelHidden.value = customModelIn.value;
+            customModelRow.classList.toggle('hidden', modelSel.value !== 'custom');
+            if (modelSel.value !== 'custom') modelHidden.value = modelSel.value;
           }
 
           var fieldsChatgpt = document.getElementById('fields-chatgpt');
@@ -289,15 +249,12 @@
           window.startAdapterOAuth = function() {
             var nameVal = form.querySelector('input[name="name"]').value.trim();
             if (!nameVal) { alert('Please enter a name first'); return; }
-
             var loginBtn = document.getElementById('oauthLoginBtn');
             var waitMsg  = document.getElementById('oauthWaiting');
             loginBtn.classList.add('hidden');
             waitMsg.classList.remove('hidden');
-
             fetch('/api/agent/create-adapter', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ name: nameVal, provider: 'openai' })
             }).then(function(r) { return r.json(); }).then(function(data) {
               if (!data.ok) throw new Error(data.error || 'Failed');
@@ -313,148 +270,30 @@
                   }
                 }).catch(function(){});
               }, 2000);
-              setTimeout(function() {
-                clearInterval(poll);
-                loginBtn.classList.remove('hidden');
-                waitMsg.classList.add('hidden');
-              }, 300000);
-            }).catch(function(e) {
-              alert(e.message);
-              loginBtn.classList.remove('hidden');
-              waitMsg.classList.add('hidden');
-            });
+              setTimeout(function() { clearInterval(poll); loginBtn.classList.remove('hidden'); waitMsg.classList.add('hidden'); }, 300000);
+            }).catch(function(e) { alert(e.message); loginBtn.classList.remove('hidden'); waitMsg.classList.add('hidden'); });
           };
 
           function toggleProvider() {
             var v = providerSel.value;
-            ocFields.classList.add('hidden');
-            apiFields.classList.add('hidden');
-            fieldsChatgpt.classList.add('hidden');
-
-            if (v === 'openclaw') {
-              ocFields.classList.remove('hidden');
-            } else if (v === 'chatgpt_oauth') {
-              fieldsChatgpt.classList.remove('hidden');
-            } else if (v === 'api_key') {
-              apiFields.classList.remove('hidden');
-              populateServices();
-            }
-          }
-
-          // When service changes, set the real ai_provider for backend
-          function syncProviderFromService() {
-            var svc = serviceSel.value;
-            if (svc === 'anthropic_default' || svc === 'custom') {
-              var cat = catalog[svc];
-              // Anthropic uses its own provider type in backend
-              if (svc === 'anthropic_default') {
-                providerSel.value = 'api_key';
-                // Set a hidden field so backend knows it's Anthropic
-                var h = document.getElementById('realProviderHidden');
-                if (h) h.value = 'anthropic';
-              }
-            } else {
-              var h = document.getElementById('realProviderHidden');
-              if (h) h.value = 'openai';
-            }
+            ocFields.classList.add('hidden'); apiFields.classList.add('hidden'); fieldsChatgpt.classList.add('hidden');
+            if (v === 'openclaw') ocFields.classList.remove('hidden');
+            else if (v === 'chatgpt_oauth') fieldsChatgpt.classList.remove('hidden');
+            else if (v === 'api_key') { apiFields.classList.remove('hidden'); populateServices(); }
           }
 
           providerSel.addEventListener('change', toggleProvider);
-          serviceSel.addEventListener('change', function() { onServiceChange(); syncProviderFromService(); });
+          serviceSel.addEventListener('change', onServiceChange);
           modelSel.addEventListener('change', onModelChange);
           customUrlInput.addEventListener('input', function() { urlHidden.value = customUrlInput.value; });
           customModelIn.addEventListener('input', function() { modelHidden.value = customModelIn.value; });
-          document.getElementById('adapterForm').addEventListener('submit', function(e) {
-            syncBeforeSubmit();
-            // If ChatGPT OAuth mode, don't submit the form — OAuth handles it
+          form.addEventListener('submit', function(e) {
+            if (serviceSel.value === 'custom') urlHidden.value = customUrlInput.value;
+            if (modelSel.value === 'custom') modelHidden.value = customModelIn.value;
             if (providerSel.value === 'chatgpt_oauth') { e.preventDefault(); return; }
-            // Set ai_provider from service selection for API Key mode
-            if (providerSel.value === 'api_key') {
-              providerSel.value = document.getElementById('realProviderHidden').value || 'openai';
-            }
+            if (providerSel.value === 'api_key') providerSel.value = document.getElementById('realProviderHidden').value || 'openai';
           });
           toggleProvider();
-
-          // ── Edit mode ──────────────────────────────────────────
-          var form        = document.getElementById('adapterForm');
-          var formCard    = document.getElementById('formCard');
-          var formTitle   = document.getElementById('formTitle');
-          var cancelBtn   = document.getElementById('cancelEdit');
-          var nameInput   = form.querySelector('input[name="name"]');
-          var keyInput    = form.querySelector('input[name="ai_provider_key"]');
-          var tokenInput  = form.querySelector('input[name="token"]');
-          var agentInput  = form.querySelector('input[name="agent_id"]');
-          var gatewayInput= form.querySelector('input[name="gateway_ws_url"]');
-          var submitBtn   = form.querySelector('button[type="submit"]');
-          var origAction  = form.action;
-          var origTitle   = formTitle.textContent;
-          var origBtnText = submitBtn.textContent;
-
-          function enterEditMode(btn) {
-            var d = btn.dataset;
-            form.action = '/adapters/' + d.id;
-            formTitle.textContent = '<%= it.t.edit_adapter || "编辑 Adapter" %>: ' + d.name;
-            cancelBtn.classList.remove('hidden');
-            submitBtn.textContent = '<%= it.t.btn_update || "保存修改" %>';
-            nameInput.value = d.name;
-
-            // Set provider and trigger cascade
-            providerSel.value = d.provider;
-            toggleProvider();
-
-            if (d.provider === 'openclaw') {
-              gatewayInput.value = d.gateway;
-              agentInput.value = d.agent;
-              if (d.tokenHint) tokenInput.placeholder = d.tokenHint + ' (<%= it.t.leave_blank || "留空不改" %>)';
-            } else {
-              // Find matching service by URL
-              var matched = false;
-              allServices.forEach(function(k) {
-                if (k !== 'custom' && catalog[k] && catalog[k].url === d.url) {
-                  serviceSel.value = k;
-                  matched = true;
-                }
-              });
-              if (!matched && d.url) {
-                serviceSel.value = 'custom';
-                customUrlInput.value = d.url;
-              }
-              onServiceChange();
-
-              // Set model
-              var modelFound = false;
-              for (var i = 0; i < modelSel.options.length; i++) {
-                if (modelSel.options[i].value === d.model) { modelSel.value = d.model; modelFound = true; break; }
-              }
-              if (!modelFound && d.model) {
-                modelSel.value = 'custom';
-                customModelIn.value = d.model;
-              }
-              onModelChange();
-              urlHidden.value = d.url;
-              modelHidden.value = d.model;
-
-              if (d.keyHint) keyInput.placeholder = d.keyHint + ' (<%= it.t.leave_blank || "留空不改" %>)';
-            }
-
-            formCard.scrollIntoView({ behavior: 'smooth' });
-          }
-
-          function exitEditMode() {
-            form.action = origAction;
-            formTitle.textContent = origTitle;
-            cancelBtn.classList.add('hidden');
-            submitBtn.textContent = origBtnText;
-            form.reset();
-            keyInput.placeholder = 'sk-...';
-            if (tokenInput) tokenInput.placeholder = '<%= it.t.token_ph || "" %>';
-            toggleProvider();
-          }
-
-          document.querySelectorAll('.btn-edit').forEach(function(btn) {
-            btn.addEventListener('click', function() { enterEditMode(btn); });
-          });
-          cancelBtn.addEventListener('click', exitEditMode);
         })();
         </script>
 
