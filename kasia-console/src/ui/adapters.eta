@@ -37,21 +37,21 @@
                   </form>
                 </template>
               </div>
-              <div class="flex items-center space-x-4 text-xs text-ink-400">
+              <div class="flex items-center space-x-1.5">
                 <% if (a.online) { %>
                 <form method="POST" action="/adapters/<%= a.id %>/restart">
-                  <button type="submit" class="hover:text-ink-600"><%= it.t.adapter_restart || 'Restart' %></button>
+                  <button type="submit" class="px-2.5 py-1 text-xs text-ink-400 rounded hover:bg-warm-100 hover:text-ink-600 transition-colors" title="<%= it.t.adapter_restart || 'Restart' %>">&#8635;</button>
                 </form>
                 <form method="POST" action="/adapters/<%= a.id %>/stop">
-                  <button type="submit" class="hover:text-red-500"><%= it.t.adapter_stop || 'Stop' %></button>
+                  <button type="submit" class="px-2.5 py-1 text-xs text-ink-300 rounded hover:bg-red-50 hover:text-red-500 transition-colors" title="<%= it.t.adapter_stop || 'Stop' %>">&#9632;</button>
                 </form>
                 <% } else { %>
                 <form method="POST" action="/adapters/<%= a.id %>/start">
-                  <button type="submit" class="hover:text-green-600"><%= it.t.adapter_start || 'Start' %></button>
+                  <button type="submit" class="px-2.5 py-1 text-xs text-ink-300 rounded hover:bg-green-50 hover:text-green-600 transition-colors" title="<%= it.t.adapter_start || 'Start' %>">&#9654;</button>
                 </form>
                 <% } %>
                 <form method="POST" action="/adapters/<%= a.id %>/delete" onsubmit="return confirm('<%= it.t.confirm_pre %>' + '<%= a.name %>' + '<%= it.t.confirm_post %>')">
-                  <button type="submit" class="hover:text-red-500"><%= it.t.btn_delete %></button>
+                  <button type="submit" class="px-2.5 py-1 text-xs text-ink-200 rounded hover:bg-red-50 hover:text-red-400 transition-colors" title="<%= it.t.btn_delete %>">&times;</button>
                 </form>
               </div>
             </div>
