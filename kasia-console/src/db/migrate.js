@@ -1476,5 +1476,23 @@ export function runMigrations() {
     console.log('[migrate] v38: exchange_offers table created (protocol-level free market).');
   }
 
+  // v39: exchange_offers — state machine columns (matched_at, verifying, disputed, etc.)
+  const hasMatchedAt = sqlite.prepare(
+    "SELECT 1 FROM pragma_table_info('exchange_offers') WHERE name = 'matched_at'"
+  ).get();
+  if (!hasMatchedAt) {
+    sqlite.exec(`
+      ALTER TABLE exchange_offers ADD COLUMN accept_commitment TEXT;
+      ALTER TABLE exchange_offers ADD COLUMN matched_at TEXT;
+      ALTER TABLE exchange_offers ADD COLUMN verifying_started_at TEXT;
+      ALTER TABLE exchange_offers ADD COLUMN disputed_at TEXT;
+      ALTER TABLE exchange_offers ADD COLUMN timed_out_at TEXT;
+      ALTER TABLE exchange_offers ADD COLUMN cancelled_at TEXT;
+      ALTER TABLE exchange_offers ADD COLUMN maker_confirmed_at TEXT;
+      ALTER TABLE exchange_offers ADD COLUMN taker_confirmed_at TEXT;
+    `);
+    console.log('[migrate] v39: exchange_offers state machine columns added.');
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

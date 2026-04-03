@@ -7,6 +7,7 @@
  */
 
 import { sqlite } from '../db/client.js';
+import { processAccept, processCancel, processManualConfirm, expireStale } from '../services/exchange-machine.js';
 
 export async function registerExchangeRoutes(fastify) {
 
@@ -203,27 +204,30 @@ export async function registerExchangeRoutes(fastify) {
       return reply.code(400).send({ error: `Offer is ${offer.protocol_status}, cannot accept` });
     }
 
-    // Get taker address
     const relay = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(relayNodeId);
     const takerAddr = relay?.address || relayNodeId;
 
-    // Optimistic: update local DB immediately
-    sqlite.prepare(`
-      UPDATE exchange_offers
-      SET protocol_status = 'matched', taker = ?, updated_at = datetime('now')
-      WHERE id = ? AND protocol_status = 'open'
-    `).run(takerAddr, offer_id);
+    // Use state machine: open → matched → verification routing
+    const result = processAccept({
+      offer_id,
+      _from: takerAddr,
+      _tx: 'pending_accept_' + offer_id,
+    });
 
-    // Async: broadcast to chain
+    if (!result) {
+      return reply.code(400).send({ error: 'Accept failed (offer may no longer be open)' });
+    }
+
+    // Async: broadcast to chain (anchor confirmation)
     let acceptTx = null;
     try {
       const { sendCommandAsync } = await import('../services/relay-manager.js');
-      const result = await sendCommandAsync(relayNodeId, {
+      const res = await sendCommandAsync(relayNodeId, {
         command: 'send_broadcast',
         channel,
         message: JSON.stringify({ t: 'kanet_exchange_accept_v1', offer_id }),
       });
-      acceptTx = result?.txId || null;
+      acceptTx = res?.txId || null;
       if (acceptTx) {
         sqlite.prepare('UPDATE exchange_offers SET taker_tx_id = ? WHERE id = ?')
           .run(acceptTx, offer_id);
@@ -232,7 +236,7 @@ export async function registerExchangeRoutes(fastify) {
       console.log(`[exchange] Accept broadcast pending: ${err.message}`);
     }
 
-    return reply.send({ ok: true, offer_id, accept_tx: acceptTx });
+    return reply.send({ ok: true, offer_id, status: result.protocol_status, accept_tx: acceptTx });
   });
 
   // ── POST /api/exchange/cancel — 取消报价 ─────────────────
@@ -246,28 +250,66 @@ export async function registerExchangeRoutes(fastify) {
     const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer_id);
     if (!offer) return reply.code(404).send({ error: 'Offer not found' });
 
-    // Optimistic: update local DB immediately
-    sqlite.prepare(`
-      UPDATE exchange_offers
-      SET protocol_status = 'cancelled', updated_at = datetime('now')
-      WHERE id = ? AND protocol_status = 'open'
-    `).run(offer_id);
+    const relay = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(relayNodeId);
+    const makerAddr = relay?.address || relayNodeId;
+
+    // Use state machine: only from open, only by maker
+    const result = processCancel({ offer_id, _from: makerAddr });
+    if (!result) {
+      return reply.code(400).send({ error: 'Cancel failed (may not be open or not maker)' });
+    }
 
     // Async: broadcast to chain
     let cancelTx = null;
     try {
       const { sendCommandAsync } = await import('../services/relay-manager.js');
-      const result = await sendCommandAsync(relayNodeId, {
+      const res = await sendCommandAsync(relayNodeId, {
         command: 'send_broadcast',
         channel,
         message: JSON.stringify({ t: 'kanet_exchange_cancel_v1', offer_id }),
       });
-      cancelTx = result?.txId || null;
+      cancelTx = res?.txId || null;
     } catch (err) {
       console.log(`[exchange] Cancel broadcast pending: ${err.message}`);
     }
 
     return reply.send({ ok: true, offer_id, cancel_tx: cancelTx });
+  });
+
+  // ── POST /api/exchange/confirm — manual verification confirm ──
+  fastify.post('/api/exchange/confirm', async (request, reply) => {
+    const { relayNodeId, offer_id, role, channel = 'kanet-exchange' } = request.body || {};
+
+    if (!relayNodeId || !offer_id || !role) {
+      return reply.code(400).send({ error: 'Missing relayNodeId, offer_id, or role (maker/taker)' });
+    }
+
+    const relay = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(relayNodeId);
+    const addr = relay?.address || relayNodeId;
+
+    const result = processManualConfirm({
+      offer_id,
+      role,
+      confirmer_address: addr,
+    });
+
+    if (!result) {
+      return reply.code(400).send({ error: 'Confirm failed' });
+    }
+
+    // Broadcast confirmation to chain
+    try {
+      const { sendCommandAsync } = await import('../services/relay-manager.js');
+      await sendCommandAsync(relayNodeId, {
+        command: 'send_broadcast',
+        channel,
+        message: JSON.stringify({ t: 'kanet_confirm_v1', offer_id, role, confirmer_address: addr }),
+      });
+    } catch (err) {
+      console.log(`[exchange] Confirm broadcast pending: ${err.message}`);
+    }
+
+    return reply.send({ ok: true, offer_id, status: result.protocol_status });
   });
 
   // ── GET /api/exchange/agents — 可用 Agent 列表 ───────────
