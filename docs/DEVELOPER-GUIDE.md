@@ -151,6 +151,10 @@ minds/*/reflections.json ←── 反思持久化       │
 | 兜底 | Relay 30min 窗口 85% 相似度去重 | relay.mjs shouldBlockOutbound |
 | 兜底 | 每次 proactive max 3 ACTION | mind.mjs |
 
+### 已知社交缺陷（待修）
+
+13. **迟回复比不回更尴尬。** anti-spam 只查"我发了多少对方没回"，不查反向："对方发了多少我没回"。案例：rjmke5c4 在 3/14 发了 5 条消息，Kasia_1 沉默 20 天后才回"Hi there!"。修复方向：Context Builder 注入"对方上次发消息时间 + 你是否回过"，gap > 7 天应提示 Brain 先道歉；social_outreach 应把"对方主动找过但我没回"排在最前面。
+
 ### 致命陷阱
 
 1. **relation_states 是社交决策唯一真相源。** Context Builder 从 /api/discovery/list 读这张表。
