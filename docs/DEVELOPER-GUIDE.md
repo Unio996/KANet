@@ -2,6 +2,7 @@
 
 > **修改任何代码前必读。** 一个文件，覆盖全系统。唯一权威开发者文档。
 > 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-04。
+> 4/4 下午更新：做市三层架构（market-scanner + order-executor + 自动对冲）、activity-log 改读 messages、contacts.eta 时间本地化、PLACE_ORDER free_market 指向 /exchange。
 > 4/4 更新：陷阱 #18-21（alias 链路/ingestMessage null 保护/Scout 检查点/历史 comm 补全），新增消息补全文件速查表，Scout light mode。
 > 4/3 更新：社交缺陷 #13 已修（迟回复警告）、陷阱 #13-17。第十五章 API 速查表（~200 个端点）。
 
@@ -191,7 +192,11 @@ minds/*/reflections.json ←── 反思持久化       │
 
 20. **Scout 不持久化扫描进度 = 停机期间消息丢失。** `subscribeBlockAdded` 只收新块。`scout_checkpoint` 表记录 `last_block_time`，`message-indexer.mjs` 每 30s flush 一次。`history-fetcher.mjs` 启动时读检查点，按地址从 `api.kaspa.org` 查历史 TX 补全。
 
-21. **历史 comm 消息必须走 processComm（和实时完全相同的路径）。** Relay catch-up 从 `kanet_message_index` 取未处理 comm TX → 按 txid 从链上取 payload → `processComm(txid, payload, null)` → `findAddressByAlias` 查 `relation_states.their_alias`。不新建任何函数或端点。`processed_at` 字段做幂等保护。
+21. **历史 comm 消息必须走 processComm（和实时完全相同的路径）。**
+22. **activity-log（getActivityLog）必须以 messages 表为主查询。** chain_events 只作为补充（payment/kas_delivery/self_stash）。messages 是 DM 消息的唯一真相源，chain_events 可能漏记（如历史补全场景）。query_card 必须排除。位置：`anti-spam.js:getActivityLog()`。
+23. **registerMindSkills 的 category 不能传 null。** skills 表 category 列有 NOT NULL 约束。新技能没有 sibling 时 fallback 到 `'other'`，不是 `null`。位置：`skills.js:221`。
+
+ Relay catch-up 从 `kanet_message_index` 取未处理 comm TX → 按 txid 从链上取 payload → `processComm(txid, payload, null)` → `findAddressByAlias` 查 `relation_states.their_alias`。不新建任何函数或端点。`processed_at` 字段做幂等保护。
 
 ### Skill 系统架构
 
@@ -517,11 +522,13 @@ Agent 决策理由从 execution_states.display_summary 注入。
 |------|------|
 | agent-mind/src/mind.mjs | handleMessage + runProactive(max 3 actions) + runReflection |
 | agent-mind/src/context-builder.mjs | 四层 prompt + YOUR RECENT OUTBOUND + CONNECTIONS + founding-vision 过滤 |
-| agent-mind/src/action-executor.mjs | Gate 3 + sendMessage(去重+fail-closed) + POLYMARKET_ORDER + 交易 |
+| agent-mind/src/action-executor.mjs | Gate 3 + sendMessage(去重+fail-closed) + POLYMARKET_ORDER + MAKE_MARKET + CANCEL_OFFERS + 交易 |
 | agent-mind/src/kernels/intent.mjs | 目标 + recordAttempt + cooldown + auto-retire |
 | agent-mind/src/skills/self-awareness.mjs | KAS余额 + 多链钱包 + Polymarket持仓 + broker持仓 + OTC订单 |
 | agent-mind/src/skills/stock-tracker.mjs | 自选股 + 大宗 + CoinGecko大盘 + 经济日历 + 恐贪 → Brain宏观视野 |
 | agent-mind/src/skills/prediction-sense.mjs | Polymarket 热门事件 → Brain 情绪信号 |
+| agent-mind/src/skills/market-scanner.mjs | 8 CEX + KANet 价差扫描（1h proactive / reactive 关键词）|
+| agent-mind/src/skills/order-executor.mjs | KANet 做市指令生成（MAKE_MARKET ACTION + 对冲参考）|
 
 ### 链上通信
 
@@ -549,7 +556,11 @@ Agent 决策理由从 execution_states.display_summary 注入。
 
 | 文件 | 职责 |
 |------|------|
-| kasia-console/src/api/exchange.js | 7 API 端点 + /exchange 页面路由 |
+| kasia-console/src/api/exchange.js | 8 API 端点 + /exchange 页面路由 |
+| kasia-console/src/services/exchange-machine.js | 状态机（open→matched→verifying→completed） |
+| kasia-console/src/services/exchange-verifiers.js | 可插拔验证器（manual/cross_chain_tx/kaspa_tx） |
+| kasia-console/src/services/exchange-orders.js | 8 交易所统一下单（placeOrder/cancelOrders/getOpenOrders） |
+| kasia-console/src/services/trade-protocol-filter.js | 链上协议→本地索引 + matched 自动 CEX 对冲 |
 | kasia-console/src/ui/exchange.eta | 协议级自由市场 UI |
 
 ### 测试与文档
@@ -769,12 +780,58 @@ publish/accept/cancel 操作**先写本地 DB，再异步广播到链上**。链
 | kasia-console/src/ui/exchange.eta | 协议级自由市场 UI（广播流 + 分组 + 发布表单） |
 | kasia-console/src/db/migrate.js | v38: exchange_offers 表 |
 
-### 待实现（Step 6）
+### 做市与对冲（2026-04-04）
+
+**三层架构**：
+
+| 层 | 职责 | 文件 |
+|----|------|------|
+| L1 扫描 | 8 CEX + KANet 价差矩阵 | market-scanner.mjs |
+| L2 指令 | MAKE_MARKET ACTION 生成 | order-executor.mjs → action-executor.mjs |
+| L3 对冲 | offer matched → CEX 反向单 | trade-protocol-filter.js → exchange-orders.js |
+
+**MAKE_MARKET 流程**：
+```
+Brain: [ACTION:MAKE_MARKET amount=500 sell_price=0.03135 buy_price=0.03117 hedge_cex=Gate]
+  → action-executor.mjs:executeMakeMarket()
+  → POST /api/exchange/publish × 2（卖单 + 买单）
+  → execution_states 记录
+```
+
+**自动对冲流程**：
+```
+KANet offer matched（kanet_exchange_accept_v1）
+  → trade-protocol-filter.js:handleExchangeAccept()
+  → 判断 maker 是本地 Agent
+  → _executeHedge()：exchange_accounts 凭证 → exchange-orders.js:placeOrder()
+  → chain_events 记录（hedge_placed / hedge_failed / hedge_skipped）
+```
+
+**对冲断路器**：1h 内 ≥3 次 hedge_failed → 停止对冲，写 hedge_skipped 事件。
+
+**market-scanner 8 家交易所**：
+
+| 交易所 | 类型 | 端点 |
+|--------|------|------|
+| MEXC | 现货 | api.mexc.com bookTicker |
+| Gate | 现货 | api.gateio.ws tickers |
+| KuCoin | 现货 | api.kucoin.com level1 |
+| Bybit | 现货 | api.bybit.com tickers |
+| Bitget | 现货 | api.bitget.com tickers |
+| HTX | 现货 | api.huobi.pro merged |
+| Binance | **永续合约** | fapi.binance.com bookTicker |
+| Kraken | 现货 | api.kraken.com Ticker |
+
+全部公开 API，无需认证。30s 缓存。proactive 每小时一次，reactive 关键词触发。
+
+**Brain 输出格式**：无机会（<0.3%）→ 4 行摘要；有机会（≥0.3%）→ 展开⚡机会 + 完整价格表。
+
+### 待实现
 
 - matched 之后的完整交割流程（paying → paid → verified → delivering → completed）
-- 验证路由（根据 verification 字段分发到不同验证器）
 - dispute 处理
 - 信誉系统接入
+- Binance/Kraken exchange_accounts 添加（用户有 API Key，待配置）
 
 ---
 

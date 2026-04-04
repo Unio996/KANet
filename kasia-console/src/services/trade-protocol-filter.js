@@ -14,6 +14,8 @@ import { releaseFunds } from './fund-lock.js';
 import { quickStart } from './execution-state.js';
 import { recordChainEvent } from './chain-event.js';
 import { checkLimits } from './trade-limits.js';
+import { placeOrder } from './exchange-orders.js';
+import { decrypt } from './crypto.js';
 
 /**
  * Called after every broadcast_messages INSERT.
@@ -403,10 +405,28 @@ async function handleExchange(msg) {
 /**
  * kanet_exchange_accept_v1 — someone accepts an offer.
  * Delegates to exchange-machine.js: first-valid-accept → matched → verification routing.
+ * After matching, triggers CEX hedge if maker is a local agent with hedge config.
  */
 async function handleExchangeAccept(msg) {
   if (!msg.offer_id) return;
-  machineAccept(msg);
+  const result = machineAccept(msg);
+  if (!result || result.protocol_status !== 'awaiting_manual_confirm') return;
+
+  // Check if maker is a local agent — only local agents can hedge
+  const localAgent = sqlite.prepare('SELECT id, name FROM relay_nodes WHERE address = ?').get(result.maker);
+  if (!localAgent) return; // External maker, no hedge
+
+  // Determine hedge direction: if agent gave KAS → buy KAS on CEX; if agent gave USDT → sell KAS on CEX
+  const agentGaveKas = result.give_asset === 'KAS';
+  const hedgeSide = agentGaveKas ? 'BUY' : 'SELL';
+  const hedgeQty = agentGaveKas ? parseFloat(result.give_amount) : parseFloat(result.want_amount);
+
+  if (!hedgeQty || hedgeQty <= 0) return;
+
+  // Fire-and-forget hedge (async, non-blocking)
+  _executeHedge(result.id, localAgent.name, hedgeSide, hedgeQty).catch(err => {
+    console.log(`[exchange-hedge] FAILED for offer ${result.id.slice(0, 8)}: ${err.message}`);
+  });
 }
 
 /**
@@ -425,6 +445,110 @@ async function handleExchangeCancel(msg) {
 async function handleManualConfirm(msg) {
   if (!msg.offer_id) return;
   processManualConfirm(msg);
+}
+
+// ── CEX Hedge ────────────────────────────────────────────────
+
+const EXCHANGE_REGISTRY = [
+  { id: 'mexc',    authStyle: 'binance-like', headerName: 'X-MEXC-APIKEY', kasPair: 'KASUSDT', baseUrl: 'https://api.mexc.com/api/v3' },
+  { id: 'gateio',  authStyle: 'gateio',       kasPair: 'KAS_USDT',         baseUrl: 'https://api.gateio.ws/api/v4' },
+  { id: 'kucoin',  authStyle: 'kucoin',       kasPair: 'KAS-USDT',         baseUrl: 'https://api.kucoin.com' },
+  { id: 'bybit',   authStyle: 'bybit',        kasPair: 'KASUSDT',          baseUrl: 'https://api.bybit.com' },
+  { id: 'bitget',  authStyle: 'bitget',       kasPair: 'KASUSDT',          baseUrl: 'https://api.bitget.com' },
+  { id: 'htx',     authStyle: 'htx',          kasPair: 'kasusdt',          baseUrl: 'https://api.huobi.pro' },
+  { id: 'kraken',  authStyle: 'kraken',       kasPair: 'KASUSDT',          baseUrl: 'https://api.kraken.com' },
+];
+
+// Circuit breaker: 1h window, ≥3 failures → stop hedging
+let _hedgeFailures = [];
+const HEDGE_CIRCUIT_WINDOW_MS = 60 * 60 * 1000;
+const HEDGE_CIRCUIT_THRESHOLD = 3;
+
+function _isHedgeCircuitOpen() {
+  const cutoff = Date.now() - HEDGE_CIRCUIT_WINDOW_MS;
+  _hedgeFailures = _hedgeFailures.filter(t => t > cutoff);
+  return _hedgeFailures.length >= HEDGE_CIRCUIT_THRESHOLD;
+}
+
+/**
+ * Execute a hedge order on the best available CEX.
+ * Tries the default exchange account first.
+ */
+async function _executeHedge(offerId, agentName, side, qty) {
+  if (_isHedgeCircuitOpen()) {
+    console.log(`[exchange-hedge] CIRCUIT OPEN — ${_hedgeFailures.length} failures in 1h, skipping hedge for ${offerId.slice(0, 8)}`);
+    recordChainEvent({
+      txid: offerId, eventType: 'hedge_skipped',
+      fromAddress: null, toAddress: null, observedBy: 'system',
+      payload: { reason: 'circuit_breaker', failures: _hedgeFailures.length },
+    });
+    return;
+  }
+
+  // Get best available exchange account
+  const account = sqlite.prepare(
+    'SELECT * FROM exchange_accounts WHERE is_default = 1 LIMIT 1'
+  ).get() || sqlite.prepare('SELECT * FROM exchange_accounts LIMIT 1').get();
+
+  if (!account) {
+    console.log(`[exchange-hedge] No exchange account configured — cannot hedge ${offerId.slice(0, 8)}`);
+    return;
+  }
+
+  const def = EXCHANGE_REGISTRY.find(e => e.id === account.exchange);
+  if (!def) {
+    console.log(`[exchange-hedge] Unknown exchange: ${account.exchange}`);
+    return;
+  }
+
+  let apiKey, apiSecret, extra;
+  try {
+    apiKey = account.api_key_encrypted ? decrypt(account.api_key_encrypted) : null;
+    apiSecret = account.api_secret_encrypted ? decrypt(account.api_secret_encrypted) : null;
+    extra = account.extra_encrypted ? JSON.parse(decrypt(account.extra_encrypted)) : {};
+  } catch (err) {
+    console.log(`[exchange-hedge] Credential decrypt failed: ${err.message}`);
+    return;
+  }
+
+  // Fetch current market price for limit order (aggressive: use best bid/ask)
+  let price;
+  try {
+    const ticker = await fetch(`https://api.mexc.com/api/v3/ticker/bookTicker?symbol=KASUSDT`, { signal: AbortSignal.timeout(3000) }).then(r => r.json());
+    price = side === 'BUY' ? parseFloat(ticker.askPrice) * 1.002 : parseFloat(ticker.bidPrice) * 0.998;
+  } catch {
+    console.log(`[exchange-hedge] Price fetch failed — aborting hedge`);
+    _hedgeFailures.push(Date.now());
+    return;
+  }
+
+  console.log(`[exchange-hedge] ${agentName} ${side} ${qty} KAS @ ${price.toFixed(5)} on ${account.exchange} (hedge for offer ${offerId.slice(0, 8)})`);
+
+  const result = await placeOrder({
+    authStyle: def.authStyle,
+    baseUrl: account.base_url || def.baseUrl,
+    headerName: def.headerName,
+    apiKey, apiSecret, extra,
+    symbol: def.kasPair, kasPair: def.kasPair,
+    side, price, qty,
+  });
+
+  if (result.ok) {
+    console.log(`[exchange-hedge] SUCCESS orderId=${result.orderId} for offer ${offerId.slice(0, 8)}`);
+    recordChainEvent({
+      txid: offerId, eventType: 'hedge_placed',
+      fromAddress: null, toAddress: null, observedBy: 'system',
+      payload: { exchange: account.exchange, side, qty, price, orderId: result.orderId },
+    });
+  } else {
+    console.log(`[exchange-hedge] FAILED: ${result.error} for offer ${offerId.slice(0, 8)}`);
+    _hedgeFailures.push(Date.now());
+    recordChainEvent({
+      txid: offerId, eventType: 'hedge_failed',
+      fromAddress: null, toAddress: null, observedBy: 'system',
+      payload: { exchange: account.exchange, side, qty, price, error: result.error },
+    });
+  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────
