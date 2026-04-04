@@ -139,16 +139,22 @@
                 <div class="px-4 py-2 text-xs" :class="e.dir==='out' ? 'bg-blue-50/30' : ''">
                   <div class="flex gap-2 items-start">
                     <span class="w-5 flex-shrink-0 font-bold" :class="e.dir==='out' ? 'text-blue-500' : 'text-green-500'" x-text="e.dir==='out' ? '→' : '←'"></span>
-                    <span class="w-28 flex-shrink-0 text-ink-400 font-mono" x-text="e.ts?.slice(5,19)?.replace('T',' ')"></span>
+                    <span class="w-28 flex-shrink-0 text-ink-400 font-mono" x-text="KANet.formatTime(e.ts)"></span>
                     <span class="badge badge-neutral text-[8px] flex-shrink-0" x-text="e.type"></span>
                     <div class="flex-1 min-w-0">
                       <template x-if="e.content">
                         <div class="text-ink-600 whitespace-pre-wrap break-words" x-text="e.content"></div>
                       </template>
-                      <template x-if="!e.content && e.txid">
+                      <template x-if="!e.content && e.type==='handshake' && e.dir==='out'">
+                        <span class="text-green-600">已接受握手</span>
+                      </template>
+                      <template x-if="!e.content && e.type==='handshake' && e.dir==='in'">
+                        <span class="text-blue-600">收到握手请求</span>
+                      </template>
+                      <template x-if="!e.content && e.type!=='handshake' && e.txid">
                         <div class="font-mono text-ink-300 break-all text-[10px]" x-text="'tx: ' + e.txid"></div>
                       </template>
-                      <template x-if="!e.content && !e.txid">
+                      <template x-if="!e.content && e.type!=='handshake' && !e.txid">
                         <span class="text-ink-300">—</span>
                       </template>
                     </div>

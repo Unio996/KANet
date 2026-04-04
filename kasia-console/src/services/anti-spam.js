@@ -152,12 +152,51 @@ export function detectStopRequest(fromAddress, messageText) {
 }
 
 /**
- * 获取 Agent 全部链上行为 — 直接从 chain_events 读，和链上总数一一对应
- * 支持按地址分组、按时间排序
+ * 获取 Agent 行为日志 — messages 为主查询（DM 权威源），chain_events 补充链上事���
+ * 返回格式：[{ dir, type, peer, peer_name, ts, txid, content }]
  */
 export function getActivityLog(agentAddress, limit = 200, offset = 0, peerAddress = null) {
-  // 支持按 peer 筛选 + 分页
-  let sql = `
+  // ── 主查询：messages 表（DM 消息权威源）──
+  // 通过 conversations 关联 identities 拿到 peer address
+  let msgSql = `
+    SELECT
+      m.id,
+      m.direction as dir,
+      m.message_type as event_type,
+      m.content_text,
+      m.source_txid as txid,
+      m.created_at as ts,
+      CASE m.direction
+        WHEN 'inbound'  THEN ri.address
+        WHEN 'outbound' THEN ri.address
+      END as peer_address
+    FROM messages m
+    JOIN conversations c ON m.conversation_id = c.id
+    JOIN identities li ON li.id = c.local_identity_id
+    LEFT JOIN identities ri ON ri.id = c.remote_identity_id
+    WHERE li.address = ?
+      AND m.message_type != 'query_card'`;
+  const msgParams = [agentAddress];
+
+  if (peerAddress) {
+    msgSql += ` AND ri.address = ?`;
+    msgParams.push(peerAddress);
+  }
+  msgSql += ` ORDER BY m.created_at DESC LIMIT 500`;
+
+  const msgRows = sqlite.prepare(msgSql).all(...msgParams).map(r => ({
+    dir: r.dir === 'inbound' ? 'in' : 'out',
+    event_type: r.event_type,
+    from_address: r.dir === 'inbound' ? r.peer_address : agentAddress,
+    to_address: r.dir === 'inbound' ? agentAddress : r.peer_address,
+    ts: r.ts,
+    txid: r.txid || null,
+    content: r.content_text || null,
+    source: 'message',
+  }));
+
+  // ���─ 补充查询：chain_events 表（链上事件，排除已在 messages 里��类型）──
+  let ceSql = `
     SELECT
       ce.id,
       CASE WHEN ce.from_address = ? THEN 'out' ELSE 'in' END as dir,
@@ -166,64 +205,58 @@ export function getActivityLog(agentAddress, limit = 200, offset = 0, peerAddres
       ce.to_address,
       ce.observed_at as ts,
       ce.txid,
-      ce.payload,
-      m.content_text as msg_content,
-      r.reply_text as reply_content
+      ce.payload
     FROM chain_events ce
-    LEFT JOIN messages m ON m.source_txid = ce.txid AND ce.txid IS NOT NULL
-    LEFT JOIN replies r ON r.sent_txid = ce.txid AND ce.txid IS NOT NULL
-    WHERE (ce.from_address = ? OR ce.to_address = ?)`;
-  const params = [agentAddress, agentAddress, agentAddress];
+    WHERE (ce.from_address = ? OR ce.to_address = ?)
+      AND ce.event_type IN ('payment', 'payment_verified', 'payment_failed',
+                            'kas_delivery', 'self_stash')`;
+  const ceParams = [agentAddress, agentAddress, agentAddress];
 
   if (peerAddress) {
-    sql += ` AND (ce.from_address = ? OR ce.to_address = ?)`;
-    params.push(peerAddress, peerAddress);
+    ceSql += ` AND (ce.from_address = ? OR ce.to_address = ?)`;
+    ceParams.push(peerAddress, peerAddress);
   }
+  ceSql += ` ORDER BY ce.observed_at DESC LIMIT 200`;
 
-  sql += ` ORDER BY ce.observed_at DESC`;
-  // 不在 SQL 里 LIMIT，后面合并 replies 后再分页
-  const events = sqlite.prepare(sql).all(...params);
+  const ceRows = sqlite.prepare(ceSql).all(...ceParams).map(r => {
+    let content = null;
+    if (r.payload) {
+      try {
+        const p = JSON.parse(r.payload);
+        content = p.message || p.text || p.content || p.body || null;
+      } catch {}
+      if (!content && r.payload.length > 0 && r.payload.length < 500 && !r.payload.startsWith('{')) {
+        content = r.payload;
+      }
+    }
+    return {
+      dir: r.dir,
+      event_type: r.event_type,
+      from_address: r.from_address,
+      to_address: r.to_address,
+      ts: r.ts,
+      txid: r.txid || null,
+      content,
+      source: 'chain_event',
+    };
+  });
 
-  // 补充 Agent 的回复（replies 表，很多没有 chain_events 对应记录）
-  let replySql = `
-    SELECT
-      'out' as dir, 'reply' as event_type,
-      li.address as from_address, ri.address as to_address,
-      r.created_at as ts, r.sent_txid as txid, NULL as payload,
-      NULL as msg_content, r.reply_text as reply_content
-    FROM replies r
-    JOIN conversations c ON c.id = r.conversation_id
-    JOIN identities li ON li.id = c.local_identity_id
-    LEFT JOIN identities ri ON ri.id = c.remote_identity_id
-    WHERE li.address = ?`;
-  const replyParams = [agentAddress];
+  // ── 合并 + 去重（同一 txid 优先保留 message）──
+  const merged = [...msgRows, ...ceRows];
+  merged.sort((a, b) => (b.ts || '').localeCompare(a.ts || ''));
 
-  if (peerAddress) {
-    replySql += ` AND ri.address = ?`;
-    replyParams.push(peerAddress);
-  }
-  replySql += ` ORDER BY r.created_at DESC`;
+  const seenTxids = new Set();
+  const deduped = merged.filter(row => {
+    if (!row.txid) return true;
+    if (seenTxids.has(row.txid)) return false;
+    seenTxids.add(row.txid);
+    return true;
+  });
 
-  const replyRows = sqlite.prepare(replySql).all(...replyParams);
+  // ── 分页 ──
+  const paged = deduped.slice(offset, offset + limit);
 
-  // 去重：如果 reply 的 sent_txid 已经在 chain_events 里出现过，跳过
-  const existingTxids = new Set(events.filter(e => e.txid).map(e => e.txid));
-  // 也按时间去重：如果同一秒有 chain_event out，跳过对应 reply
-  const existingOutTs = new Set(events.filter(e => e.dir === 'out').map(e => e.ts?.slice(0, 19)));
-
-  for (const r of replyRows) {
-    if (r.txid && existingTxids.has(r.txid)) continue;
-    // 检查是否有同一秒的 chain_event（避免重复）
-    const rTs = r.ts?.slice(0, 19);
-    if (rTs && existingOutTs.has(rTs)) continue;
-    events.push(r);
-  }
-
-  // 按时间排序后分页
-  events.sort((a, b) => (b.ts || '').localeCompare(a.ts || ''));
-  const paged = events.slice(offset, offset + limit);
-
-  // 补充 peer 名称（批量查一次）
+  // ── 补充 peer 名称 ──
   const peerAddrs = new Set();
   for (const e of paged) {
     const peer = e.dir === 'out' ? e.to_address : e.from_address;
@@ -236,61 +269,8 @@ export function getActivityLog(agentAddress, limit = 200, offset = 0, peerAddres
     nameMap[addr] = rn?.name || id?.display_name || null;
   }
 
-  // 对 dir=out 且 txid 没匹配到的，按时间窗口从 replies 补内容
-  // 先按 peer 批量查 conversation_id
-  const convCache = {};
-  function getConvId(agentAddr, peerAddr) {
-    const key = agentAddr + ':' + peerAddr;
-    if (convCache[key] !== undefined) return convCache[key];
-    const conv = sqlite.prepare(`
-      SELECT c.id FROM conversations c
-      JOIN identities li ON li.id = c.local_identity_id
-      JOIN identities ri ON ri.id = c.remote_identity_id
-      WHERE li.address = ? AND ri.address = ?
-      LIMIT 1
-    `).get(agentAddr, peerAddr);
-    convCache[key] = conv?.id || null;
-    return convCache[key];
-  }
-
-  // 预加载需要的 replies（按会话+时间段）
-  const replyCache = {};
-  function getReplyByTime(convId, ts) {
-    if (!convId || !ts) return null;
-    const key = convId + ':' + ts;
-    if (replyCache[key] !== undefined) return replyCache[key];
-    // 在事件时间前后 5 秒内找 reply
-    const r = sqlite.prepare(`
-      SELECT reply_text FROM replies
-      WHERE conversation_id = ?
-        AND created_at BETWEEN datetime(?, '-5 seconds') AND datetime(?, '+5 seconds')
-      LIMIT 1
-    `).get(convId, ts, ts);
-    replyCache[key] = r?.reply_text || null;
-    return replyCache[key];
-  }
-
   return paged.map(e => {
     const peer = e.dir === 'out' ? e.to_address : e.from_address;
-
-    // 优先从 txid JOIN 取内容
-    let content = e.msg_content || e.reply_content || null;
-
-    // 回退：对 out 的 comm/text 事件，按时间从 replies 补
-    if (!content && e.dir === 'out' && ['comm', 'comm_sent', 'text'].includes(e.event_type)) {
-      const convId = getConvId(agentAddress, peer);
-      content = getReplyByTime(convId, e.ts);
-    }
-    if (!content && e.payload) {
-      try {
-        const p = JSON.parse(e.payload);
-        content = p.message || p.text || p.content || p.body || null;
-      } catch {}
-      if (!content && e.payload.length > 0 && e.payload.length < 500 && !e.payload.startsWith('{')) {
-        content = e.payload;
-      }
-    }
-
     return {
       dir: e.dir,
       type: e.event_type,
@@ -298,7 +278,7 @@ export function getActivityLog(agentAddress, limit = 200, offset = 0, peerAddres
       peer_name: nameMap[peer] || null,
       ts: e.ts,
       txid: e.txid || null,
-      content: content,
+      content: e.content,
     };
   });
 }
