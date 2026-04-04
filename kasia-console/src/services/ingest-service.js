@@ -76,15 +76,24 @@ export async function handleIngestMessage(payload) {
   }
 
   // Handshake → 写入 relation_states（唯一真相源）
+  // accepted 只能由 Scout 链上观察写入（discovery.js），Relay 的上报不触发状态推进
   if (messageType === 'handshake' && localAddress && remoteAddress) {
     try {
       if (direction === 'inbound') {
         observeHandshake(localAddress, remoteAddress, txid, timestamp || nowIso());
-      } else if (direction === 'outbound') {
-        acceptHandshake(localAddress, remoteAddress);
       }
     } catch (err) {
       console.log(`[ingest] relation_states update failed: ${err.message}`);
+    }
+
+    // 存储对方的 alias（握手 payload 携带，用于 comm 消息发送方识别）
+    const theirAlias = payload.theirAlias;
+    if (theirAlias) {
+      try {
+        sqlite.prepare(
+          'UPDATE relation_states SET their_alias = ? WHERE local_address = ? AND peer_address = ? AND their_alias IS NULL'
+        ).run(theirAlias, localAddress, remoteAddress);
+      } catch {}
     }
   }
 

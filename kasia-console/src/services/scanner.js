@@ -25,6 +25,7 @@ let _running = false;
 let _seedAddress = null;
 let _startedAt = null;
 let _lastLog = '';
+let _scanMode = null;
 
 /**
  * Start the scanner (system-level).
@@ -34,10 +35,12 @@ let _lastLog = '';
 export async function startScanner() {
   if (_child) return { ok: false, reason: 'already_running' };
 
-  // Scout 只在本地节点可用时运行——远程节点扛不住全链扫描
-  if (!await isLocalNode()) {
-    console.log('[scanner] Scout 需要本地节点 (127.0.0.1:17110)，当前无本地节点，不启动');
-    return { ok: false, reason: 'no_local_node' };
+  // 检测本地节点——决定全量模式还是轻量模式
+  const hasLocalNode = await isLocalNode();
+  const scanMode = hasLocalNode ? 'rpc' : 'light';
+
+  if (!hasLocalNode) {
+    console.log('[scanner] 无本地节点，Scout 以轻量模式启动（仅监控本地 Agent 地址）');
   }
 
   // Pick first relay node as seed (for local address identification)
@@ -50,19 +53,29 @@ export async function startScanner() {
   _startedAt = new Date().toISOString();
   _lastLog = '';
 
-  // Resolve RPC URL and ingest secret from DB config
+  // Resolve RPC URL and ingest secret
   const rpcUrl = await getConfig('rpc_url') || process.env.KASPA_RPC_URL || '';
-  const ingestSecret = await getConfig('ingest_secret') || process.env.INGEST_SECRET || '';
+  // INGEST_SECRET is set by ensureIngestSecret() in index.js at startup
+  const ingestSecret = process.env.INGEST_SECRET || '';
+
+  // 读取 watch 配置（light 模式额外监控的地址和协议信号）
+  // 移动端轻量客户端将来会填充这两个字段
+  const watchAddressesRaw = await getConfig('scout_watch_addresses');
+  const watchSignalsRaw = await getConfig('scout_watch_signals');
+  const watchAddresses = watchAddressesRaw ? watchAddressesRaw : '';
+  const watchSignals = watchSignalsRaw ? watchSignalsRaw : '';
 
   // Spawn kaspa-scout as child process — system-level, no account binding
   const env = {
     ...process.env,
-    SCAN_MODE: 'rpc',
+    SCAN_MODE: scanMode,
     KASPA_RPC_URL: rpcUrl,
     KASPA_NETWORK: 'mainnet',
     CONSOLE_URL: `http://localhost:${CONSOLE_PORT}`,
     INGEST_SECRET: ingestSecret,
     SCOUT_SEED_ADDRESS: _seedAddress,
+    SCOUT_WATCH_ADDRESSES: watchAddresses,
+    SCOUT_WATCH_SIGNALS: watchSignals,
   };
 
   try {
@@ -73,6 +86,7 @@ export async function startScanner() {
     });
 
     _running = true;
+    _scanMode = scanMode;
 
     // Capture last log line for status display
     _child.stdout.on('data', (data) => {
@@ -100,7 +114,15 @@ export async function startScanner() {
     // Save enabled flag for auto-restart
     await setConfig('scanner_enabled', 'true', { category: 'scanner' });
 
-    console.log(`[scanner] started scout (RPC) seed=${_seedAddress.slice(-8)} PID ${_child.pid}`);
+    if (scanMode === 'light') {
+      const extraCount = watchAddresses ? watchAddresses.split(',').filter(Boolean).length : 0;
+      console.log(`[scanner] Scout 运行模式：轻量（无本地节点）`);
+      console.log(`[scanner] 监控地址：本地 Agent + 关注地址 ${extraCount} 个`);
+      if (watchSignals) console.log(`[scanner] 关注信号：${watchSignals}`);
+    } else {
+      console.log(`[scanner] Scout 运行模式：全量（本地节点）`);
+    }
+    console.log(`[scanner] started scout (${scanMode}) seed=${_seedAddress.slice(-8)} PID ${_child.pid}`);
 
     // Write PID file so kanet-stop.sh can kill orphaned scout processes
     try {
@@ -149,6 +171,7 @@ export async function stopScanner() {
   _running = false;
   _seedAddress = null;
   _startedAt = null;
+  _scanMode = null;
 
   return { ok: true };
 }
@@ -167,6 +190,7 @@ export function getScannerStatus() {
 
   return {
     running: _running,
+    mode: _scanMode || null,
     startedAt: _startedAt,
     pid: _child?.pid || null,
     lastLog: _lastLog,
@@ -182,10 +206,6 @@ export function getScannerStatus() {
 export async function autoStartIfEnabled() {
   const enabled = await getConfig('scanner_enabled');
   if (enabled && enabled !== 'false') {
-    if (!await isLocalNode()) {
-      console.log('[scanner] auto-start skipped: Scout 需要本地节点，当前无本地节点');
-      return;
-    }
     console.log('[scanner] auto-starting (was enabled before restart)');
     await startScanner();
   }

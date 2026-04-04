@@ -1,9 +1,9 @@
 # KANet Developer Guide
 
 > **修改任何代码前必读。** 一个文件，覆盖全系统。唯一权威开发者文档。
-> 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-03。
-> 4/3 更新：社交缺陷 #13 已修（迟回复警告）、陷阱 #13 messages.message_type 必须正确、陷阱 #14 comm self-send 覆盖 sender=null、陷阱 #15 OAuth adapter_nodes 回填。
-> 4/3 新增：第十五章 API 速查表（~200 个端点，18 文件，按域分组）。
+> 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-04。
+> 4/4 更新：陷阱 #18-21（alias 链路/ingestMessage null 保护/Scout 检查点/历史 comm 补全），新增消息补全文件速查表，Scout light mode。
+> 4/3 更新：社交缺陷 #13 已修（迟回复警告）、陷阱 #13-17。第十五章 API 速查表（~200 个端点）。
 
 ---
 
@@ -184,6 +184,14 @@ minds/*/reflections.json ←── 反思持久化       │
 16. **proactive SEND_MESSAGE 内容敏感度门控。** action-executor.mjs 的 `_checkContentSensitivity()` 只拦截 proactive（`!_senderMeta`）对外部 peer 的消息。Sibling agent（`siblingAddresses`）不拦。新增敏感模式时在 `SENSITIVE_PATTERNS` 数组添加 `[/regex/, 'category']`。
 
 17. **mm_orders.payment_txhash 有 UNIQUE 索引。** v40 迁移添加了 `idx_mm_orders_payment_txhash_unique`（partial，WHERE NOT NULL）。同一 TX hash 不能绑定两个订单。并发 verify_payment 请求中第二个会被 SQLite UNIQUE 约束拒绝。EVM 验证时还会从 Transfer event 日志提取 sender 地址与预期买方钱包比对，mismatch 写 chain_events + events（Brain 可见）。
+
+18. **握手 alias 必须沿链路传递，不能丢弃。** Relay 解密握手后 `parsed.alias` 是对方的 comm 通信别名。必须传给 `ingestHandshake({ theirAlias })`，Console 存入 `relation_states.their_alias`。`findAddressByAlias` 查这个字段匹配 comm 消息的发送方。丢弃 alias = 所有跨钱包用户的 comm 消息永远找不到发送方。
+
+19. **ingestMessage 的 remoteAddress 不能是 null 或 'unknown'。** `processComm` 和 `processPayment` 必须先判断 `senderAddress` 有效性再调 `ingestMessage`。null/unknown 会导致 `ensureConversation` 创建孤立 conversation（`remote_identity_id = NULL`），违反唯一真相源原则。
+
+20. **Scout 不持久化扫描进度 = 停机期间消息丢失。** `subscribeBlockAdded` 只收新块。`scout_checkpoint` 表记录 `last_block_time`，`message-indexer.mjs` 每 30s flush 一次。`history-fetcher.mjs` 启动时读检查点，按地址从 `api.kaspa.org` 查历史 TX 补全。
+
+21. **历史 comm 消息必须走 processComm（和实时完全相同的路径）。** Relay catch-up 从 `kanet_message_index` 取未处理 comm TX → 按 txid 从链上取 payload → `processComm(txid, payload, null)` → `findAddressByAlias` 查 `relation_states.their_alias`。不新建任何函数或端点。`processed_at` 字段做幂等保护。
 
 ### Skill 系统架构
 
@@ -528,6 +536,14 @@ Agent 决策理由从 execution_states.display_summary 注入。
 |------|------|
 | shared/lib/event-types.mjs | chain_events event_type 枚举（写入方和查询方统一引用） |
 | shared/lib/rpc-utils.mjs | Relay/Scout 共用 resolveRpcUrl + backoffDelay |
+
+### 消息补全与索引
+
+| 文件 | 职责 |
+|------|------|
+| kaspa-scout/src/light-scanner.mjs | 无本地节点降级模式（subscribeUtxosChanged + blockAdded 双订阅） |
+| kaspa-scout/src/message-indexer.mjs | 扫链时为认识的地址写 kanet_message_index + 检查点持久化 |
+| kaspa-scout/src/history-fetcher.mjs | 启动时按地址查 api.kaspa.org 补全停机期间历史 TX |
 
 ### 协议级自由市场
 

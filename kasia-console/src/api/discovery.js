@@ -276,17 +276,20 @@ export async function registerDiscoveryRoutes(fastify) {
       }
     }
 
-    // 双写：Scout 发现的握手 → relation_states（仅涉及本地 Agent 的）
+    // Scout 链上观察 → relation_states（唯一写入路径）
+    // accepted 只能在这里写：Scout 观察到本地 Agent 发出的握手 TX = 链上事实
     if (interactionType === 'handshake') {
       try {
-        const { observeHandshake } = await import('../services/relation-state.js');
+        const { observeHandshake, acceptHandshake } = await import('../services/relation-state.js');
         const localAddrs = sqlite.prepare('SELECT address FROM relay_nodes').all().map(r => r.address);
         // addressA = sender, addressB = receiver
         if (localAddrs.includes(addressB)) {
+          // 外部地址发给本地 Agent → observed（有人找我）
           observeHandshake(addressB, addressA, txHash, occurredAt || new Date().toISOString());
         }
         if (localAddrs.includes(addressA)) {
-          observeHandshake(addressA, addressB, txHash, occurredAt || new Date().toISOString());
+          // 本地 Agent 发给外部地址 → accepted（我回复了，链上有 TX 为证）
+          acceptHandshake(addressA, addressB);
         }
       } catch (err) {
         console.log(`[discovery] relation_states update failed: ${err.message}`);
@@ -297,6 +300,16 @@ export async function registerDiscoveryRoutes(fastify) {
     if (interactionType === 'handshake') {
       const { triggerProactiveAll } = await import('../services/mind-manager.js');
       triggerProactiveAll({ newHandshake: { from: addressA, to: addressB, txHash } }).catch(() => {});
+
+      // Scout 发现 inbound 握手 → Console 主动通知 Relay 去回复（不依赖 Relay 独立扫链）
+      const localAddrs = sqlite.prepare('SELECT id, address FROM relay_nodes').all();
+      const receiver = localAddrs.find(r => r.address === addressB);
+      if (receiver) {
+        const { sendCommandAsync } = await import('../services/relay-manager.js');
+        sendCommandAsync(receiver.id, { type: 'handshake', target: addressA }, 15000).catch(err => {
+          console.log(`[discovery] Relay handshake IPC failed for ${addressB.slice(-12)}: ${err?.message || err}`);
+        });
+      }
     } else if (interactionType === 'comm') {
       // Comm is too frequent to trigger proactive (causes message storms).
       // Agents handle comm via reactive (incoming messages) and timed proactive cycles.
@@ -329,5 +342,122 @@ export async function registerDiscoveryRoutes(fastify) {
       "SELECT DISTINCT address FROM identities WHERE identity_type = 'local' AND length(address) >= 60"
     ).all();
     return reply.send({ addresses: rows.map(r => r.address) });
+  });
+
+  // GET /api/discovery/known-addresses — all addresses we "know" (relation_states)
+  // Scout uses this to decide which TX to index in kanet_message_index.
+  // "Known" = observed or accepted in relation_states (ever had handshake interaction).
+  fastify.get('/api/discovery/known-addresses', async (request, reply) => {
+    const rows = sqlite.prepare(
+      "SELECT DISTINCT peer_address FROM relation_states WHERE status IN ('observed','accepted','confirmed','active') AND length(peer_address) >= 60"
+    ).all();
+    const localRows = sqlite.prepare(
+      "SELECT DISTINCT local_address FROM relation_states WHERE length(local_address) >= 60"
+    ).all();
+    const addresses = new Set([
+      ...rows.map(r => r.peer_address),
+      ...localRows.map(r => r.local_address),
+    ]);
+    return reply.send({ addresses: [...addresses], count: addresses.size });
+  });
+
+  // POST /api/discovery/message-index — Scout 写入消息索引
+  // Scout 扫链时发现认识的地址有 TX → 写入 kanet_message_index
+  fastify.post('/api/discovery/message-index', async (request, reply) => {
+    const { entries } = request.body || {};
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return reply.code(400).send({ error: 'entries required' });
+    }
+
+    const insert = sqlite.prepare(`
+      INSERT OR IGNORE INTO kanet_message_index
+        (id, txid, for_address, from_address, payload_type, payload_hash, block_time, blue_score, indexed_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    let inserted = 0;
+    const tx = sqlite.transaction(() => {
+      for (const e of entries) {
+        const id = `${e.txid}:${e.for_address}`;
+        const result = insert.run(
+          id, e.txid, e.for_address, e.from_address,
+          e.payload_type, e.payload_hash,
+          e.block_time, e.blue_score || null,
+          e.indexed_by || 'local'
+        );
+        if (result.changes > 0) inserted++;
+      }
+    });
+    tx();
+
+    return reply.send({ inserted, total: entries.length });
+  });
+
+  // GET /api/discovery/message-index — 查询消息索引（支持过滤）
+  fastify.get('/api/discovery/message-index', async (request, reply) => {
+    const { type, unprocessed } = request.query;
+    let sql = 'SELECT txid, for_address, from_address, payload_type, block_time, indexed_by, processed_at FROM kanet_message_index WHERE 1=1';
+    const params = [];
+    if (type) { sql += ' AND payload_type = ?'; params.push(type); }
+    if (unprocessed === 'true') { sql += ' AND processed_at IS NULL'; }
+    sql += ' ORDER BY block_time ASC LIMIT 100';
+    const rows = sqlite.prepare(sql).all(...params);
+    return reply.send(rows);
+  });
+
+  // POST /api/discovery/message-index/:txid/processed — 标记已处理
+  fastify.post('/api/discovery/message-index/:txid/processed', async (request, reply) => {
+    const now = new Date().toISOString();
+    // txid 可能对应多条记录（同一 TX 为多个地址索引），全部标记
+    const result = sqlite.prepare(
+      'UPDATE kanet_message_index SET processed_at = ? WHERE txid = ? AND processed_at IS NULL'
+    ).run(now, request.params.txid);
+    return reply.send({ ok: true, updated: result.changes });
+  });
+
+  // GET /api/discovery/alias-lookup — 通过 alias 查 relation_states 找 peer 地址
+  // comm 消息里的 alias 是发送方握手时携带的，存在 relation_states.their_alias
+  fastify.get('/api/discovery/alias-lookup', async (request, reply) => {
+    const { alias, localAddress } = request.query;
+    if (!alias || !localAddress) return reply.send({ peerAddress: null });
+    const row = sqlite.prepare(
+      'SELECT peer_address FROM relation_states WHERE their_alias = ? AND local_address = ? LIMIT 1'
+    ).get(alias, localAddress);
+    return reply.send({ peerAddress: row?.peer_address || null });
+  });
+
+  // GET /api/discovery/checkpoint — Scout 读取扫描检查点
+  fastify.get('/api/discovery/checkpoint', async (request, reply) => {
+    const key = request.query.key || '_global_';
+    const row = sqlite.prepare(
+      'SELECT * FROM scout_checkpoint WHERE address = ?'
+    ).get(key);
+    return reply.send(row || { address: key, last_block_time: null, last_blue_score: null });
+  });
+
+  // POST /api/discovery/checkpoint — Scout 写入扫描检查点
+  fastify.post('/api/discovery/checkpoint', async (request, reply) => {
+    const { key = '_global_', last_block_time, last_blue_score } = request.body || {};
+    if (!last_block_time) {
+      return reply.code(400).send({ error: 'last_block_time required' });
+    }
+    const now = new Date().toISOString();
+    const existing = sqlite.prepare(
+      'SELECT id FROM scout_checkpoint WHERE address = ?'
+    ).get(key);
+
+    if (existing) {
+      sqlite.prepare(
+        'UPDATE scout_checkpoint SET last_block_time = ?, last_blue_score = ?, updated_at = ? WHERE address = ?'
+      ).run(last_block_time, last_blue_score || null, now, key);
+    } else {
+      const { randomUUID } = await import('crypto');
+      const id = randomUUID();
+      sqlite.prepare(
+        'INSERT INTO scout_checkpoint (id, address, last_block_time, last_blue_score, updated_at) VALUES (?, ?, ?, ?, ?)'
+      ).run(id, key, last_block_time, last_blue_score || null, now);
+    }
+
+    return reply.send({ ok: true, key, last_block_time });
   });
 }
