@@ -1521,5 +1521,72 @@ export function runMigrations() {
     console.log('[migrate] v40: UNIQUE index on mm_orders.payment_txhash (anti-replay hardening).');
   }
 
+  // v41: kanet_message_index — 协作消息索引
+  // 节点在线时为认识的地址（relation_states）记录链上消息索引。
+  // 用途：节点重启后补全停机期间遗漏的消息，未来节点间协作查询。
+  // 设计文档：docs/kanet-cooperative-index.md
+  const hasMessageIndex = sqlite.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='kanet_message_index'"
+  ).get();
+  if (!hasMessageIndex) {
+    sqlite.exec(`
+      CREATE TABLE kanet_message_index (
+        id              TEXT PRIMARY KEY,
+        txid            TEXT NOT NULL,
+        for_address     TEXT NOT NULL,
+        from_address    TEXT NOT NULL,
+        payload_type    TEXT NOT NULL,
+        payload_hash    TEXT,
+        block_time      TEXT NOT NULL,
+        blue_score      INTEGER,
+        indexed_by      TEXT NOT NULL,
+        created_at      TEXT DEFAULT (datetime('now')),
+        UNIQUE(txid, for_address)
+      );
+      CREATE INDEX idx_kanet_msg_for_address ON kanet_message_index(for_address, block_time);
+      CREATE INDEX idx_kanet_msg_from_address ON kanet_message_index(from_address, block_time);
+      CREATE INDEX idx_kanet_msg_txid ON kanet_message_index(txid);
+    `);
+    console.log('[migrate] v41: kanet_message_index table created (cooperative message index).');
+  }
+
+  // v41b: scout_checkpoint — Scout 扫描进度持久化
+  // 记录每个 Agent 地址最后处理的链上时间，重启时从检查点补扫。
+  const hasScoutCheckpoint = sqlite.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='scout_checkpoint'"
+  ).get();
+  if (!hasScoutCheckpoint) {
+    sqlite.exec(`
+      CREATE TABLE scout_checkpoint (
+        id              TEXT PRIMARY KEY,
+        address         TEXT NOT NULL UNIQUE,
+        last_block_time TEXT NOT NULL,
+        last_blue_score INTEGER,
+        updated_at      TEXT DEFAULT (datetime('now'))
+      );
+    `);
+    console.log('[migrate] v41b: scout_checkpoint table created (scan progress persistence).');
+  }
+
+  // v42: kanet_message_index 加 processed_at 字段
+  // Relay catch-up 处理历史 comm 后标记，防重复处理
+  const hasProcessedAt = sqlite.prepare(
+    "SELECT 1 FROM pragma_table_info('kanet_message_index') WHERE name = 'processed_at'"
+  ).get();
+  if (!hasProcessedAt) {
+    sqlite.exec(`ALTER TABLE kanet_message_index ADD COLUMN processed_at TEXT DEFAULT NULL`);
+    console.log('[migrate] v42: kanet_message_index.processed_at column added.');
+  }
+
+  // v43: relation_states 加 their_alias 字段
+  // 握手时对方携带的 alias，用于 comm 消息发送方识别（跨钱包兼容）
+  const hasTheirAlias = sqlite.prepare(
+    "SELECT 1 FROM pragma_table_info('relation_states') WHERE name = 'their_alias'"
+  ).get();
+  if (!hasTheirAlias) {
+    sqlite.exec(`ALTER TABLE relation_states ADD COLUMN their_alias TEXT DEFAULT NULL`);
+    console.log('[migrate] v43: relation_states.their_alias column added.');
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

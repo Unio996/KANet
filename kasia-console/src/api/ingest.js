@@ -44,4 +44,5 @@ export async function registerIngestRoutes(fastify) {
     const results = getUnrepliedMessages(network, limit);
     return reply.send({ messages: results });
   });
+
 }

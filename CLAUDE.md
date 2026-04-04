@@ -3,8 +3,8 @@
 ## 你必须先读这些文档
 
 1. **开发者指南（唯一权威文档）** → `D:\Anthropic\docs\DEVELOPER-GUIDE.md`
-   - 必须先读完再动任何代码。全系统 11 章：架构、消息管道、Mind、交易、Health、UI、市场(8源)、致命陷阱
-   - 持续更新（最近：2026-04-01）。有改动就在此文件上更新，不新建 dev-*.md
+   - 必须先读完再动任何代码。全系统 15 章：架构、消息管道、Mind、交易、Health、UI、市场(8源)、致命陷阱、API速查表
+   - 持续更新（最近：2026-04-03）。有改动就在此文件上更新，不新建 dev-*.md
 
 2. **Alpha 达标标准** → `D:\Anthropic\docs\ALPHA-CHECKLIST.md`
 
@@ -13,6 +13,11 @@
 
 4. **数据架构危机** → `C:\Users\Y\.claude\projects\D--Anthropic\memory\kanet-data-architecture-crisis.md`
    - Scout/Relay 双写问题、identity 断链路、catch-up 半盲
+
+5. **系统调查方法论（强制）** → `D:\Anthropic\docs\kanet-investigation-methodology.md`
+   - 遇到系统异常必须按六层顺序调查，不允许跳步
+   - 六层：场景→真实数据→协议→执行逻辑→数据流向→存储表
+   - 修复前必须完成前三层输出并得到确认
 
 3. **最新会话总结** → `C:\Users\Y\.claude\projects\D--Anthropic\memory\kanet-session-0325.md`
 
@@ -28,6 +33,7 @@
 - **改了什么必须说清楚** — 包括顺手改的 UI 文案
 - **每笔链上交易必须入库** — 地址 + TX 双锚点
 - **花钱代码验证所有路径** — 失败也要处理
+- **调查异常必须走六层** — 场景→数据→协议→逻辑→流向→存储，不跳步。修复前先完成前三层。详见 `docs/kanet-investigation-methodology.md`
 
 ## 五大系统
 

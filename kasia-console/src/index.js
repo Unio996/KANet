@@ -60,6 +60,8 @@ async function ensureIngestSecret() {
     console.log(`  CONSOLE_URL=http://localhost:${process.env.PORT || 3100}`);
     console.log('========================================\n');
   }
+  // 确保进程内其他模块（scanner.js 等）能通过 env 读到
+  process.env.INGEST_SECRET = secret;
   return secret;
 }
 
