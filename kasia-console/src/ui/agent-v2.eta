@@ -1214,12 +1214,7 @@ function agentApp() {
     },
     async loadSpent() {
       if (!this.agent) return; this.spendLoading = true;
-      try {
-        const r = await fetch('/api/agent/ledger?relay_node_id=' + this.agent.id + '&limit=5000');
-        const data = await r.json();
-        const agentSummary = data.summary?.[this.agent.name];
-        this.spending = agentSummary ? { total: agentSummary.amount + agentSummary.fee, count: agentSummary.count } : { total: 0, count: 0 };
-      }
+      try { const r = await fetch('/api/agent/spending?relay_node_id=' + this.agent.id + '&days=1'); this.spending = await r.json(); }
       catch { this.spending = null; } this.spendLoading = false;
     },
     async loadWallets() {
