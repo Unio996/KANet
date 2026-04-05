@@ -668,6 +668,12 @@ export async function triggerProactiveAll(eventContext) {
       continue;
     }
 
+    // Skip newHandshake events where from = this agent (don't react to own handshakes)
+    if (eventContext?.newHandshake?.from === mind.config?.address) {
+      console.log(`[mind-manager] ${name} event-trigger skipped (own handshake)`);
+      continue;
+    }
+
     _proactiveRunning.add(name);
     mind.runProactive(eventContext).then((result) => {
       _lastProactiveTime[name] = new Date().toISOString();
