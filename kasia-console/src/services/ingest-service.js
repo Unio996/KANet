@@ -177,7 +177,7 @@ export async function handleIngestReply(payload) {
 }
 
 export async function handleIngestTx(payload) {
-  const { traceId, conversationId = null, messageId = null, replyId = null, direction = 'outbound', network = 'mainnet', txid, amount = null, fee = null, status = 'broadcasted', rawTxJson = null, timestamp } = payload;
+  const { traceId, conversationId = null, messageId = null, replyId = null, direction = 'outbound', network = 'mainnet', txid, amount = null, fee = null, localAddress = null, status = 'broadcasted', rawTxJson = null, timestamp } = payload;
 
   let convId = conversationId;
   if (!convId) {
@@ -191,6 +191,7 @@ export async function handleIngestTx(payload) {
     direction, network, txid,
     amount: amount ? String(amount) : null,
     fee: fee ? String(fee) : null,
+    localAddress,
     status, rawTxJson,
   });
 
