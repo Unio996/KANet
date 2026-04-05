@@ -11,12 +11,10 @@
     </select>
     <select x-model="typeFilter" @change="applyFilters()" class="border border-warm-200 rounded px-3 py-1.5 text-sm bg-white">
       <option value="">All Types</option>
-      <option value="transfer">Transfer</option>
       <option value="handshake">Handshake</option>
-      <option value="message">Message</option>
-      <option value="broadcast">Broadcast</option>
       <option value="transfer">Transfer</option>
       <option value="utxo_split">UTXO Split</option>
+      <option value="message">Message</option>
     </select>
     <span class="text-sm text-ink-400" x-text="filtered.length + ' / ' + rows.length + ' transactions'"></span>
     <span class="ml-auto text-sm font-semibold text-ink-700" x-text="'Total: ' + totalCost.toFixed(4) + ' KAS'"></span>
@@ -98,7 +96,13 @@ function ledgerApp() {
 
     async init() {
       const params = new URLSearchParams(window.location.search);
-      if (params.get('relay_node_id')) this.agentFilter = params.get('relay_node_id');
+      if (params.get('relay_node_id')) {
+        this.agentFilter = params.get('relay_node_id');
+      } else {
+        // Default to first agent
+        const firstOption = document.querySelector('select option[value]:not([value=""])');
+        if (firstOption) this.agentFilter = firstOption.value;
+      }
       await this.load();
     },
 
@@ -107,7 +111,7 @@ function ledgerApp() {
       try {
         const params = new URLSearchParams();
         if (this.agentFilter) params.set('relay_node_id', this.agentFilter);
-        params.set('limit', '2000');
+        params.set('limit', '500');
         const res = await fetch('/api/agent/ledger?' + params);
         const data = await res.json();
         this.rows = data.transactions || [];
