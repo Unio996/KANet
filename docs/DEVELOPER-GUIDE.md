@@ -205,6 +205,10 @@ minds/*/reflections.json ←── 反思持久化       │
 
 27. **花钱路径必须先写意图再花钱。** 四条握手路径（Brain 主动、Relay 自动接受、catch-up、Scout 观察）都必须先在 `pending_actions` 写入记录并 claim 成功，才能调 sendKaspa。claim 失败 = 别的消费者已在处理，直接跳过。`pending_actions` 的写入统一用 `INSERT OR IGNORE`（`idempotent_key` UNIQUE 约束去重），状态推进用乐观锁。
 
+28. **triggerProactiveAll 必须过滤自发握手事件。** newHandshake.from = 当前 Agent 地址时跳过 proactive 触发。否则 Agent 发出的握手被 Scout 扫到后反触发自己的 proactive → Brain 把自己的地址当成外部 peer → 循环自发握手（Sophie 4/4 28 笔）。实际只浪费 fee（amount 回到自己），但噪音大。位置：`mind-manager.js:triggerProactiveAll`。context-builder.mjs RECENT ACTIVITY 也标注自身地址 `[THIS IS YOUR OWN ADDRESS — DO NOT CONTACT]`。
+
+29. **tx_records 必须有 local_address 字段（v45）。** 握手 TX 没有 conversation_id，无法通过 conversations JOIN 归属 Agent。`local_address` 在 ingestTx 时由 Relay 传入（16 个调用处全部补传）。ledger 查询握手分支用 `WHERE local_address = ?` 过滤。历史补填 60/207 条（29%），剩余为历史缺口不影响金额统计。
+
 ### pending_actions 架构（v44）
 
 **意图与事实分离：**
