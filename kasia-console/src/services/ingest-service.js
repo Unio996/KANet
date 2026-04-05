@@ -9,6 +9,7 @@ import { observeHandshake, acceptHandshake, confirmSession, activateRelation } f
 import { recordChainEvent } from './chain-event.js';
 import { nowIso } from '../lib/time.js';
 import { sqlite } from '../db/client.js';
+import { randomUUID } from 'crypto';
 
 async function ensureIdentity(network, address, type = 'remote') {
   return upsertIdentity({ network, address, identityType: type });
@@ -81,6 +82,34 @@ export async function handleIngestMessage(payload) {
     try {
       if (direction === 'inbound') {
         observeHandshake(localAddress, remoteAddress, txid, timestamp || nowIso());
+
+        // 写入 pending_actions 意图队列 — catch-up 从这里消费
+        // outbound 不写（由 action-executor 写）
+        try {
+          const now = nowIso();
+          sqlite.prepare(`
+            INSERT OR IGNORE INTO pending_actions
+              (id, action_type, direction, local_address, target_address, source, idempotent_key, status, trigger_txid, created_at, updated_at)
+            VALUES (?, 'handshake_accept', 'inbound', ?, ?, 'ingest', ?, 'pending', ?, ?, ?)
+          `).run(
+            randomUUID(), localAddress, remoteAddress,
+            `handshake_accept:${localAddress}:${remoteAddress}`,
+            txid || null, now, now,
+          );
+        } catch (paErr) {
+          console.log(`[ingest] pending_actions write failed: ${paErr.message}`);
+        }
+      }
+      // outbound handshake = Relay 已接受 → 完成 pending_actions
+      if (direction === 'outbound') {
+        try {
+          sqlite.prepare(`
+            UPDATE pending_actions SET status = 'done', result_txid = ?, updated_at = ?
+            WHERE action_type IN ('handshake_accept', 'handshake_init') AND local_address = ? AND target_address = ? AND status IN ('pending', 'executing')
+          `).run(txid || null, nowIso(), localAddress, remoteAddress);
+        } catch (paErr) {
+          console.log(`[ingest] pending_actions complete failed: ${paErr.message}`);
+        }
       }
     } catch (err) {
       console.log(`[ingest] relation_states update failed: ${err.message}`);
@@ -189,6 +218,15 @@ export async function handleIngestEvent(payload) {
     conversationId, messageId, replyId,
     summary, payloadJson, agentAddress,
   });
+
+  // catch-up 握手失败 → 标记 pending_actions failed
+  if (eventType === 'catchup_handshake_failed' && traceId?.startsWith('catchup-fail:')) {
+    try {
+      const { failPendingAction } = await import('./catchup-service.js');
+      const actionId = traceId.replace('catchup-fail:', '');
+      failPendingAction(actionId, summary || 'catch-up execution failed');
+    } catch {}
+  }
 
   return { eventId };
 }

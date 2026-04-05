@@ -126,11 +126,11 @@
               <div class="skeleton mx-auto" style="width:60px;height:24px;"></div>
             </template>
             <template x-if="!spendLoading">
-              <div class="text-lg font-bold"
+              <a :href="'/ledger?relay_node_id=' + agent?.id" class="text-lg font-bold hover:underline cursor-pointer"
                 :class="spending && spending.total > 0 ? 'text-red-500' : 'text-ink-300'"
-                x-text="spending ? KANet.formatKas(spending.total, 4) + ' KAS' : '--'"></div>
+                x-text="spending ? KANet.formatKas(spending.total, 4) + ' KAS' : '--'"></a>
             </template>
-            <div class="text-xs text-ink-300 mt-1">今日花费</div>
+            <div class="text-xs text-ink-300 mt-1"><a :href="'/ledger?relay_node_id=' + agent?.id" class="hover:underline">今日花费</a></div>
           </div>
         </div>
       </div>
@@ -1214,7 +1214,12 @@ function agentApp() {
     },
     async loadSpent() {
       if (!this.agent) return; this.spendLoading = true;
-      try { const r = await fetch('/api/agent/spending?relay_node_id=' + this.agent.id + '&days=1'); this.spending = await r.json(); }
+      try {
+        const r = await fetch('/api/agent/ledger?relay_node_id=' + this.agent.id + '&limit=5000');
+        const data = await r.json();
+        const agentSummary = data.summary?.[this.agent.name];
+        this.spending = agentSummary ? { total: agentSummary.amount + agentSummary.fee, count: agentSummary.count } : { total: 0, count: 0 };
+      }
       catch { this.spending = null; } this.spendLoading = false;
     },
     async loadWallets() {
