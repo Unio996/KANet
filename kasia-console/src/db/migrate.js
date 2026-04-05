@@ -1618,5 +1618,27 @@ export function runMigrations() {
     console.log('[migrate] v44: pending_actions table created.');
   }
 
+  // v45: tx_records 加 local_address — 花费归属到 Agent
+  const txCols = sqlite.prepare("SELECT 1 FROM pragma_table_info('tx_records') WHERE name = 'local_address'").get();
+  if (!txCols) {
+    sqlite.exec(`ALTER TABLE tx_records ADD COLUMN local_address TEXT`);
+
+    // 补填历史握手记录：chain_events.from_address 匹配，只保留本地 Agent 地址
+    const localAddrs = sqlite.prepare('SELECT address FROM relay_nodes WHERE address IS NOT NULL').all().map(r => r.address);
+    const bf = sqlite.prepare(`
+      UPDATE tx_records
+      SET local_address = (
+        SELECT ce.from_address FROM chain_events ce
+        WHERE ce.txid = tx_records.txid AND ce.event_type = 'handshake'
+          AND ce.from_address IN (${localAddrs.map(() => '?').join(',')})
+        LIMIT 1
+      )
+      WHERE local_address IS NULL
+        AND (trace_id LIKE 'handshake:%' OR trace_id LIKE 'handshake-init:%' OR trace_id LIKE 'catchup:%')
+    `).run(...localAddrs);
+
+    console.log(`[migrate] v45: tx_records.local_address added. Backfilled ${bf.changes} handshake records.`);
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

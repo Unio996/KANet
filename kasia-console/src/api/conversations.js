@@ -293,67 +293,75 @@ export async function registerConversationRoutes(fastify) {
   });
 
   // ── Ledger: spending from tx_records (花费真相源) ──
-  // tx_records 有 amount + fee + direction，由 Relay ingestTx 写入
+  // UNION ALL: 有 conversation 的（消息+转账）+ 无 conversation 的握手
   fastify.get('/api/agent/ledger', async (request, reply) => {
-    const { relay_node_id, since } = request.query;
+    const { relay_node_id } = request.query;
     const limit = Math.min(parseInt(request.query.limit) || 500, 5000);
 
     const agents = sqlite.prepare('SELECT id, name, address FROM relay_nodes WHERE address IS NOT NULL').all();
     const agentByAddr = {};
     agents.forEach(a => { agentByAddr[a.address] = a.name; });
 
-    // Resolve agent via conversation OR chain_events fallback
-    let addressFilter = '';
-    const params = [];
+    let convFilter = '';
+    let hsFilter = '';
+    const convParams = [];
+    const hsParams = [];
     if (relay_node_id) {
       const relay = agents.find(a => a.id === relay_node_id);
       if (!relay) return reply.code(404).send({ error: 'Agent not found' });
-      addressFilter = `AND (
-        c.local_identity_id IN (SELECT id FROM identities WHERE address = ?)
-        OR ce.from_address = ?
-      )`;
-      params.push(relay.address, relay.address);
+      convFilter = `AND c.local_identity_id IN (SELECT id FROM identities WHERE address = ?)`;
+      convParams.push(relay.address);
+      hsFilter = `AND t.local_address = ?`;
+      hsParams.push(relay.address);
     }
 
     const rows = sqlite.prepare(`
-      SELECT t.txid, t.trace_id, t.amount, t.fee, t.created_at,
-             li.address AS local_address, ri.address AS peer_address,
-             ce.from_address AS ce_from, ce.to_address AS ce_to, ce.event_type AS ce_type
-      FROM tx_records t
-      LEFT JOIN conversations c ON t.conversation_id = c.id
-      LEFT JOIN identities li ON c.local_identity_id = li.id
-      LEFT JOIN identities ri ON c.remote_identity_id = ri.id
-      LEFT JOIN chain_events ce ON t.txid = ce.txid
-      WHERE t.direction = 'outbound'
-        AND (CAST(COALESCE(t.amount, '0') AS REAL) + CAST(COALESCE(t.fee, '0') AS REAL)) > 0
-        ${addressFilter}
-      ORDER BY CAST(COALESCE(t.amount, '0') AS REAL) DESC, t.created_at DESC
+      SELECT txid, trace_id, amount, fee, created_at, type, agent_address, peer_address FROM (
+        SELECT t.txid, t.trace_id, t.amount, t.fee, t.created_at,
+               'conv' AS type,
+               li.address AS agent_address,
+               ri.address AS peer_address
+        FROM tx_records t
+        JOIN conversations c ON t.conversation_id = c.id
+        JOIN identities li ON c.local_identity_id = li.id
+        LEFT JOIN identities ri ON c.remote_identity_id = ri.id
+        WHERE t.direction = 'outbound'
+          AND (CAST(COALESCE(t.amount, '0') AS REAL) + CAST(COALESCE(t.fee, '0') AS REAL)) > 0
+          ${convFilter}
+
+        UNION ALL
+
+        SELECT t.txid, t.trace_id, t.amount, t.fee, t.created_at,
+               'handshake' AS type,
+               t.local_address AS agent_address,
+               NULL AS peer_address
+        FROM tx_records t
+        WHERE t.direction = 'outbound'
+          AND t.conversation_id IS NULL
+          AND (t.trace_id LIKE 'handshake:%' OR t.trace_id LIKE 'handshake-init:%' OR t.trace_id LIKE 'catchup:%')
+          ${hsFilter}
+      )
+      ORDER BY CAST(COALESCE(amount, '0') AS REAL) DESC, created_at DESC
       LIMIT ?
-    `).all(...params, limit);
+    `).all(...convParams, ...hsParams, limit);
 
     const result = rows.map(r => {
-      // Agent: conversation path first, chain_events fallback
-      const agentAddr = r.local_address || r.ce_from || null;
-      const agentName = agentAddr ? (agentByAddr[agentAddr] || agentAddr.slice(-12)) : null;
-      const peerAddr = r.peer_address || r.ce_to || null;
+      const agentName = r.agent_address ? (agentByAddr[r.agent_address] || r.agent_address.slice(-12)) : null;
+      const peerAddr = r.peer_address || null;
       const peerName = peerAddr ? (agentByAddr[peerAddr] || peerAddr.slice(-12)) : null;
       const amt = parseFloat(r.amount || '0');
       const fee = parseFloat(r.fee || '0');
 
-      // Classify by trace_id + chain_events + amount
-      const tr = r.trace_id || '';
-      const ceType = r.ce_type || '';
       let type = 'message';
-      if (tr.includes('handshake') || ceType === 'handshake') type = 'handshake';
+      if (r.type === 'handshake' || (r.trace_id || '').includes('handshake')) type = 'handshake';
       else if (amt >= 0.15 && amt <= 0.25) type = 'handshake';
-      else if (ceType === 'kas_delivery') type = 'transfer';
       else if (amt > 0.25 && peerAddr && agentByAddr[peerAddr]) type = 'transfer';
       else if (amt > 0.25) type = 'utxo_split';
 
       return {
         date: r.created_at,
         agent: agentName,
-        peer: peerName,
+        peer: type === 'handshake' && !peerName ? '(unknown)' : peerName,
         peerAddr,
         type,
         amount: amt,
@@ -363,7 +371,6 @@ export async function registerConversationRoutes(fastify) {
       };
     });
 
-    // Summary per agent
     const summary = {};
     result.forEach(r => {
       const name = r.agent || '(unlinked)';
