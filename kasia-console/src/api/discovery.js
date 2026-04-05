@@ -286,6 +286,23 @@ export async function registerDiscoveryRoutes(fastify) {
         if (localAddrs.includes(addressB)) {
           // 外部地址发给本地 Agent → observed（有人找我）
           observeHandshake(addressB, addressA, txHash, occurredAt || new Date().toISOString());
+
+          // 写入 pending_actions — inbound 握手等待 Relay 接受
+          try {
+            const { randomUUID } = await import('crypto');
+            const now = new Date().toISOString();
+            sqlite.prepare(`
+              INSERT OR IGNORE INTO pending_actions
+                (id, action_type, direction, local_address, target_address, source, idempotent_key, status, trigger_txid, created_at, updated_at)
+              VALUES (?, 'handshake_accept', 'inbound', ?, ?, 'scout', ?, 'pending', ?, ?, ?)
+            `).run(
+              randomUUID(), addressB, addressA,
+              `handshake_accept:${addressB}:${addressA}`,
+              txHash || null, now, now,
+            );
+          } catch (paErr) {
+            console.log(`[discovery] pending_actions write failed: ${paErr.message}`);
+          }
         }
         if (localAddrs.includes(addressA)) {
           // 本地 Agent 发给外部地址 → accepted（我回复了，链上有 TX 为证）

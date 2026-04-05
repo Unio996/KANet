@@ -1,7 +1,8 @@
 # KANet Developer Guide
 
 > **修改任何代码前必读。** 一个文件，覆盖全系统。唯一权威开发者文档。
-> 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-04。
+> 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-05。
+> 4/5 更新：陷阱 #24-25（do_not_contact 过滤 + health 阈值自适应）。
 > 4/4 下午更新：做市三层架构（market-scanner + order-executor + 自动对冲）、activity-log 改读 messages、contacts.eta 时间本地化、PLACE_ORDER free_market 指向 /exchange。
 > 4/4 更新：陷阱 #18-21（alias 链路/ingestMessage null 保护/Scout 检查点/历史 comm 补全），新增消息补全文件速查表，Scout light mode。
 > 4/3 更新：社交缺陷 #13 已修（迟回复警告）、陷阱 #13-17。第十五章 API 速查表（~200 个端点）。
@@ -195,6 +196,10 @@ minds/*/reflections.json ←── 反思持久化       │
 21. **历史 comm 消息必须走 processComm（和实时完全相同的路径）。**
 22. **activity-log（getActivityLog）必须以 messages 表为主查询。** chain_events 只作为补充（payment/kas_delivery/self_stash）。messages 是 DM 消息的唯一真相源，chain_events 可能漏记（如历史补全场景）。query_card 必须排除。位置：`anti-spam.js:getActivityLog()`。
 23. **registerMindSkills 的 category 不能传 null。** skills 表 category 列有 NOT NULL 约束。新技能没有 sibling 时 fallback 到 `'other'`，不是 `null`。位置：`skills.js:221`。
+
+24. **context-builder YOUR CONNECTIONS 必须过滤 do_not_contact 和 blocked 标签。** 否则迟回复检测会对这些 peer 触发 `⚠ PEER MESSAGED YOU N DAYS AGO` 警告，Brain 每个 proactive cycle 都生成无效道歉 ACTION。Anti-spam 会拦截但浪费 AI token。位置：`context-builder.mjs:743`。与 `kbeam_user` 同等过滤。
+
+25. **agent-health lastEvent 黄色阈值必须跟随 proactive 间隔。** 硬编码 30min 对 60min 间隔的 Agent 会每小时误触发 `health_yellow` + `silent repair`。用 `Math.max(T.eventYellow, proIntervalMs)` 让阈值自适应。位置：`agent-health.js:149`。
 
  Relay catch-up 从 `kanet_message_index` 取未处理 comm TX → 按 txid 从链上取 payload → `processComm(txid, payload, null)` → `findAddressByAlias` 查 `relation_states.their_alias`。不新建任何函数或端点。`processed_at` 字段做幂等保护。
 

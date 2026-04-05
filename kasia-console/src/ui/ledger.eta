@@ -1,0 +1,133 @@
+<%~ include('partials/page-open', { _page: 'ledger', pageTitle: 'Spending Ledger', ...it }) %>
+<div class="p-6" x-data="ledgerApp()">
+
+  <!-- Filters -->
+  <div class="flex items-center gap-4 mb-4">
+    <select x-model="agentFilter" @change="load()" class="border border-warm-200 rounded px-3 py-1.5 text-sm bg-white">
+      <option value="">All Agents</option>
+      <% it.agents.forEach(a => { %>
+      <option value="<%= a.id %>"><%= a.name %></option>
+      <% }) %>
+    </select>
+    <select x-model="typeFilter" @change="applyFilters()" class="border border-warm-200 rounded px-3 py-1.5 text-sm bg-white">
+      <option value="">All Types</option>
+      <option value="transfer">Transfer</option>
+      <option value="handshake">Handshake</option>
+      <option value="message">Message</option>
+      <option value="broadcast">Broadcast</option>
+      <option value="transfer">Transfer</option>
+      <option value="utxo_split">UTXO Split</option>
+    </select>
+    <span class="text-sm text-ink-400" x-text="filtered.length + ' / ' + rows.length + ' transactions'"></span>
+    <span class="ml-auto text-sm font-semibold text-ink-700" x-text="'Total: ' + totalCost.toFixed(4) + ' KAS'"></span>
+  </div>
+
+  <!-- Summary cards -->
+  <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+    <template x-for="[name, s] in Object.entries(summary)" :key="name">
+      <div class="bg-white rounded-lg border border-warm-200 p-3">
+        <div class="text-xs text-ink-400" x-text="name"></div>
+        <div class="text-lg font-bold text-ink-700" x-text="(s.amount + s.fee).toFixed(4) + ' KAS'"></div>
+        <div class="text-xs text-ink-400" x-text="s.count + ' txs | amt ' + s.amount.toFixed(4) + ' + fee ' + s.fee.toFixed(4)"></div>
+      </div>
+    </template>
+  </div>
+
+  <!-- Loading -->
+  <div x-show="loading" class="text-center py-8 text-ink-400">Loading...</div>
+
+  <!-- Table -->
+  <div x-show="!loading" class="bg-white rounded-lg border border-warm-200 overflow-hidden">
+    <table class="w-full text-sm">
+      <thead class="bg-warm-50 text-ink-500 text-left">
+        <tr>
+          <th class="px-3 py-2 w-8">#</th>
+          <th class="px-3 py-2">Date</th>
+          <th class="px-3 py-2">Agent</th>
+          <th class="px-3 py-2">Type</th>
+          <th class="px-3 py-2 text-right">Amount</th>
+          <th class="px-3 py-2 text-right">Fee</th>
+          <th class="px-3 py-2 text-right font-semibold">Total</th>
+          <th class="px-3 py-2">Peer</th>
+          <th class="px-3 py-2">TX</th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="(tx, i) in filtered" :key="tx.txid || i">
+          <tr class="border-t border-warm-100 hover:bg-warm-50"
+              :class="{ 'bg-red-50': tx.amount >= 1, 'bg-amber-50': tx.amount >= 0.15 && tx.amount < 1 }">
+            <td class="px-3 py-1.5 text-ink-400" x-text="i + 1"></td>
+            <td class="px-3 py-1.5 text-ink-500 whitespace-nowrap" x-text="tx.date ? tx.date.slice(0,16).replace('T',' ') : '-'"></td>
+            <td class="px-3 py-1.5 font-medium" x-text="tx.agent || '(unlinked)'"></td>
+            <td class="px-3 py-1.5">
+              <span class="inline-block px-1.5 py-0.5 rounded text-xs"
+                    :class="{
+                      'bg-red-100 text-red-700': tx.type === 'transfer',
+                      'bg-amber-100 text-amber-700': tx.type === 'handshake',
+                      'bg-blue-100 text-blue-700': tx.type === 'message',
+                      'bg-purple-100 text-purple-700': tx.type === 'broadcast',
+                      'bg-warm-200 text-ink-400': tx.type === 'utxo_split',
+                    }"
+                    x-text="tx.type"></span>
+            </td>
+            <td class="px-3 py-1.5 text-right font-mono" :class="tx.amount > 0 ? 'text-red-600 font-semibold' : 'text-ink-400'" x-text="tx.amount > 0 ? tx.amount.toFixed(5) : '-'"></td>
+            <td class="px-3 py-1.5 text-right font-mono text-ink-400" x-text="tx.fee > 0 ? tx.fee.toFixed(5) : '-'"></td>
+            <td class="px-3 py-1.5 text-right font-mono font-semibold" :class="tx.total >= 1 ? 'text-red-700' : tx.total >= 0.1 ? 'text-amber-700' : 'text-ink-600'" x-text="tx.total.toFixed(5)"></td>
+            <td class="px-3 py-1.5 text-ink-500 max-w-[140px] truncate" :title="tx.peerAddr || ''" x-text="tx.peer || tx.peerAddr?.slice(-12) || '-'"></td>
+            <td class="px-3 py-1.5">
+              <a x-show="tx.txid" :href="'https://explorer.kaspa.org/txs/' + tx.txid" target="_blank" class="text-brand-500 hover:underline text-xs" x-text="tx.txid?.slice(0,8) + '...'"></a>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+    <div x-show="filtered.length === 0" class="text-center py-8 text-ink-400">No transactions found</div>
+  </div>
+</div>
+
+<script>
+function ledgerApp() {
+  return {
+    rows: [],
+    filtered: [],
+    summary: {},
+    loading: true,
+    agentFilter: '',
+    typeFilter: '',
+    totalCost: 0,
+
+    async init() {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('relay_node_id')) this.agentFilter = params.get('relay_node_id');
+      await this.load();
+    },
+
+    async load() {
+      this.loading = true;
+      try {
+        const params = new URLSearchParams();
+        if (this.agentFilter) params.set('relay_node_id', this.agentFilter);
+        params.set('limit', '2000');
+        const res = await fetch('/api/agent/ledger?' + params);
+        const data = await res.json();
+        this.rows = data.transactions || [];
+        this.summary = data.summary || {};
+        this.applyFilters();
+      } catch (e) {
+        console.error('Ledger load failed:', e);
+      }
+      this.loading = false;
+    },
+
+    applyFilters() {
+      let list = this.rows;
+      if (this.typeFilter) {
+        list = list.filter(r => r.type === this.typeFilter || r.type.startsWith(this.typeFilter));
+      }
+      this.filtered = list;
+      this.totalCost = list.reduce((s, r) => s + r.total, 0);
+    },
+  };
+}
+</script>
+<%~ include('partials/page-close', it) %>

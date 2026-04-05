@@ -3,28 +3,74 @@
 import { sqlite } from '../db/client.js';
 
 /**
- * Find handshakes that need Relay to accept — relation_states status = 'observed'.
- * Returns: [{ remoteAddress, txid, traceId, receivedAt }]
+ * Find pending actions for Relay to execute.
+ * Returns: [{ id, actionType, direction, remoteAddress, localAddress, txid, traceId, receivedAt }]
  *
- * v28: reads from relation_states (single source of truth).
- * 'observed' = Scout/ingest saw the handshake, Relay hasn't accepted yet.
- * This eliminates the old half-blind problem where catch-up only checked messages table.
+ * v44: reads from pending_actions (意图队列), not relation_states (事实层).
+ * Only returns actions that haven't exceeded max_retries.
  */
 export function getPendingHandshakes(network = 'mainnet', localAddress = null) {
   const rows = sqlite.prepare(`
     SELECT
-      rs.peer_address              AS remoteAddress,
-      rs.first_seen_tx             AS txid,
-      'catchup:' || rs.id          AS traceId,
-      rs.handshake_observed_at     AS receivedAt
-    FROM relation_states rs
-    WHERE rs.status = 'observed'
-      ${localAddress ? 'AND rs.local_address = ?' : ''}
-    ORDER BY rs.handshake_observed_at DESC
+      pa.id,
+      pa.action_type               AS actionType,
+      pa.direction,
+      pa.target_address            AS remoteAddress,
+      pa.local_address             AS localAddress,
+      pa.trigger_txid              AS txid,
+      'catchup:' || pa.id          AS traceId,
+      pa.created_at                AS receivedAt
+    FROM pending_actions pa
+    WHERE pa.status = 'pending'
+      AND pa.action_type = 'handshake_accept'
+      AND pa.retry_count < pa.max_retries
+      ${localAddress ? 'AND pa.local_address = ?' : ''}
+    ORDER BY pa.created_at ASC
     LIMIT 100
   `).all(...(localAddress ? [localAddress] : []));
 
   return rows;
+}
+
+/**
+ * Optimistic lock: atomically claim a pending action before executing.
+ * Returns true if claimed, false if already taken by another consumer.
+ */
+export function claimPendingAction(actionId) {
+  const now = new Date().toISOString();
+  const result = sqlite.prepare(
+    `UPDATE pending_actions SET status = 'executing', updated_at = ? WHERE id = ? AND status = 'pending'`
+  ).run(now, actionId);
+  return result.changes > 0;
+}
+
+/**
+ * Mark action as done after successful execution.
+ */
+export function completePendingAction(actionId, resultTxid) {
+  const now = new Date().toISOString();
+  sqlite.prepare(
+    `UPDATE pending_actions SET status = 'done', result_txid = ?, updated_at = ? WHERE id = ?`
+  ).run(resultTxid || null, now, actionId);
+}
+
+/**
+ * Mark action as failed. Increments retry_count, expires if over max_retries.
+ */
+export function failPendingAction(actionId, errorMsg) {
+  const now = new Date().toISOString();
+  const row = sqlite.prepare('SELECT retry_count, max_retries FROM pending_actions WHERE id = ?').get(actionId);
+  if (!row) return;
+
+  const newRetry = row.retry_count + 1;
+  const newStatus = newRetry >= row.max_retries ? 'expired' : 'failed';
+
+  // failed → back to pending for next retry; expired → terminal
+  const finalStatus = newStatus === 'failed' ? 'pending' : 'expired';
+
+  sqlite.prepare(
+    `UPDATE pending_actions SET status = ?, retry_count = ?, error = ?, updated_at = ? WHERE id = ?`
+  ).run(finalStatus, newRetry, errorMsg || null, now, actionId);
 }
 
 /**

@@ -1588,5 +1588,35 @@ export function runMigrations() {
     console.log('[migrate] v43: relation_states.their_alias column added.');
   }
 
+  // v44: pending_actions — 意图队列（与事实层 relation_states 分离）
+  // catch-up 从此表消费待执行动作，不再用 relation_states.status 推断行为
+  const hasPendingActions = sqlite.prepare(
+    "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='pending_actions'"
+  ).get().cnt > 0;
+  if (!hasPendingActions) {
+    sqlite.exec(`
+      CREATE TABLE pending_actions (
+        id              TEXT PRIMARY KEY,
+        action_type     TEXT NOT NULL,
+        direction       TEXT NOT NULL,
+        local_address   TEXT NOT NULL,
+        target_address  TEXT NOT NULL,
+        source          TEXT NOT NULL,
+        idempotent_key  TEXT NOT NULL UNIQUE,
+        status          TEXT NOT NULL DEFAULT 'pending',
+        retry_count     INTEGER NOT NULL DEFAULT 0,
+        max_retries     INTEGER NOT NULL DEFAULT 3,
+        trigger_txid    TEXT,
+        result_txid     TEXT,
+        error           TEXT,
+        created_at      TEXT NOT NULL,
+        updated_at      TEXT NOT NULL
+      );
+      CREATE INDEX idx_pa_status ON pending_actions(status, action_type);
+      CREATE INDEX idx_pa_local ON pending_actions(local_address, status);
+    `);
+    console.log('[migrate] v44: pending_actions table created.');
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

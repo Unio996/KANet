@@ -292,6 +292,90 @@ export async function registerConversationRoutes(fastify) {
     });
   });
 
+  // ── Ledger: spending from local DB (chain_events + tx_records) ──
+  // chain_events is the local index of on-chain activity (built by Scout + Relay)
+  // tx_records supplements with fee data
+  fastify.get('/api/agent/ledger', async (request, reply) => {
+    const { relay_node_id, since } = request.query;
+    const limit = Math.min(parseInt(request.query.limit) || 500, 5000);
+
+    const agents = sqlite.prepare('SELECT id, name, address FROM relay_nodes WHERE address IS NOT NULL').all();
+    const agentByAddr = {};
+    agents.forEach(a => { agentByAddr[a.address] = a.name; });
+
+    // Which agents to query
+    const addresses = relay_node_id
+      ? agents.filter(a => a.id === relay_node_id).map(a => a.address)
+      : agents.map(a => a.address);
+
+    if (!addresses.length) return reply.code(404).send({ error: 'Agent not found' });
+
+    // Query chain_events for outbound activity + LEFT JOIN tx_records for fee/amount
+    const placeholders = addresses.map(() => '?').join(',');
+    const rows = sqlite.prepare(`
+      SELECT ce.txid, ce.event_type, ce.from_address, ce.to_address, ce.observed_at, ce.payload,
+             t.amount AS tx_amount, t.fee AS tx_fee, t.trace_id
+      FROM chain_events ce
+      LEFT JOIN tx_records t ON ce.txid = t.txid
+      WHERE ce.from_address IN (${placeholders})
+      ORDER BY CAST(COALESCE(t.amount, '0') AS REAL) DESC, ce.observed_at DESC
+      LIMIT ?
+    `).all(...addresses, limit);
+
+    const result = rows.map(r => {
+      const agentName = agentByAddr[r.from_address] || r.from_address?.slice(-12);
+      const peerAddr = r.to_address || null;
+      const peerName = peerAddr ? (agentByAddr[peerAddr] || peerAddr.slice(-12)) : null;
+      const amt = parseFloat(r.tx_amount || '0');
+      const fee = parseFloat(r.tx_fee || '0');
+
+      // Classify by event_type + amount
+      let type = r.event_type || 'unknown';
+      if (type === 'tx' || type === 'text' || type === 'comm') {
+        if (amt >= 0.15 && amt <= 0.25) type = 'handshake';
+        else if (amt > 0.25 && peerName && agentByAddr[peerAddr]) type = 'transfer';
+        else if (amt > 0.25) type = 'utxo_split';
+        else type = r.event_type === 'comm' ? 'broadcast' : 'message';
+      } else if (type === 'handshake') {
+        // already correct
+      } else if (type === 'kas_delivery') {
+        type = 'transfer';
+      }
+
+      return {
+        date: r.observed_at,
+        agent: agentName,
+        peer: peerName,
+        peerAddr,
+        type,
+        amount: amt,
+        fee,
+        total: amt + fee,
+        txid: r.txid,
+      };
+    });
+
+    // Summary per agent
+    const summary = {};
+    result.forEach(r => {
+      if (!summary[r.agent]) summary[r.agent] = { count: 0, amount: 0, fee: 0 };
+      summary[r.agent].count++;
+      summary[r.agent].amount += r.amount;
+      summary[r.agent].fee += r.fee;
+    });
+
+    return reply.send({ transactions: result, summary, total: result.length });
+  });
+
+  // Ledger page
+  fastify.get('/ledger', async (request, reply) => {
+    return reply.view('ledger.eta', {
+      _page: 'ledger',
+      pageTitle: 'Spending Ledger',
+      agents: sqlite.prepare('SELECT id, name, address FROM relay_nodes WHERE address IS NOT NULL').all(),
+    });
+  });
+
   // Agent TX history — returns tx_records associated with a relay node
   fastify.get('/api/agent/tx-history', async (request, reply) => {
     const { relay_node_id } = request.query;

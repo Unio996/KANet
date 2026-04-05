@@ -125,26 +125,8 @@ fi
 
 ok "Console 就绪  →  http://localhost:$CONSOLE_PORT  (PID $CONSOLE_PID)"
 
-# ── IB Gateway 自动启动 ────────────────────────────────────────────────────
-# 检测是否已有盈透账户配置，如有则自动启动 Gateway（需用户手动登录窗口）
-IBGW_EXE="$KANET_ROOT/../Jts/ibgateway/1045/ibgateway.exe"
-[ ! -f "$IBGW_EXE" ] && IBGW_EXE="/d/Jts/ibgateway/1045/ibgateway.exe"
-
-if [ -f "$IBGW_EXE" ]; then
-  # 检查 Gateway 是否已在运行
-  IBGW_RUNNING=$(powershell -Command "(Get-Process ibgateway -ErrorAction SilentlyContinue).Count" 2>/dev/null | tr -d '\r\n ' || echo "0")
-  if [ "$IBGW_RUNNING" = "0" ]; then
-    # 检查 KANet 是否配置了盈透账户
-    HAS_IBKR=$(curl -sf "http://localhost:$CONSOLE_PORT/api/broker/accounts" 2>/dev/null | grep -c '"ibkr"' || echo "0")
-    if [ "$HAS_IBKR" -gt 0 ]; then
-      log "检测到盈透账户配置，启动 IB Gateway..."
-      powershell -Command "Start-Process '$IBGW_EXE'" 2>/dev/null &
-      info "IB Gateway 窗口已打开 — 请登录后 KANet 自动连接"
-    fi
-  else
-    ok "IB Gateway 已运行"
-  fi
-fi
+# ── IB Gateway ──────────────────────────────────────────────────────────────
+# 不随 KANet 自动启动。需要时手动运行 IB Gateway。
 
 # 从日志中提取 INGEST_SECRET（如有新生成）
 NEW_SECRET=$(grep -oP 'INGEST_SECRET=\K[0-9a-f]+' "$CONSOLE_LOG" 2>/dev/null | head -1 || true)

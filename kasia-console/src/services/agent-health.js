@@ -146,7 +146,7 @@ function computeOne(relay, relayStatuses, adapterStatuses) {
 
   const indicators = {
     adapter:    adapterRunning ? 'green' : 'red',
-    lastEvent:  _ageLight(lastEventTs, now, T.eventYellow, T.eventRed),
+    lastEvent:  _ageLight(lastEventTs, now, Math.max(T.eventYellow, proIntervalMs), T.eventRed),
     proactive:  _intervalLight(lastProTs, now, proIntervalMs),
     reflection: _intervalLight(lastReflectionTs, now, reflIntervalMs),
     errors:     _countLight(errorCnt, T.errorYellow, T.errorRed),
