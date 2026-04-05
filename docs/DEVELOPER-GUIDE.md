@@ -2,7 +2,7 @@
 
 > **修改任何代码前必读。** 一个文件，覆盖全系统。唯一权威开发者文档。
 > 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-05。
-> 4/5 更新：陷阱 #24-25（do_not_contact 过滤 + health 阈值自适应）。
+> 4/5 更新：pending_actions 意图队列（v44）— 意图与事实分离，修复 catch-up 重复握手双花。陷阱 #24-27。花费账本页 /ledger。IB Gateway 不随启动。
 > 4/4 下午更新：做市三层架构（market-scanner + order-executor + 自动对冲）、activity-log 改读 messages、contacts.eta 时间本地化、PLACE_ORDER free_market 指向 /exchange。
 > 4/4 更新：陷阱 #18-21（alias 链路/ingestMessage null 保护/Scout 检查点/历史 comm 补全），新增消息补全文件速查表，Scout light mode。
 > 4/3 更新：社交缺陷 #13 已修（迟回复警告）、陷阱 #13-17。第十五章 API 速查表（~200 个端点）。
@@ -200,6 +200,46 @@ minds/*/reflections.json ←── 反思持久化       │
 24. **context-builder YOUR CONNECTIONS 必须过滤 do_not_contact 和 blocked 标签。** 否则迟回复检测会对这些 peer 触发 `⚠ PEER MESSAGED YOU N DAYS AGO` 警告，Brain 每个 proactive cycle 都生成无效道歉 ACTION。Anti-spam 会拦截但浪费 AI token。位置：`context-builder.mjs:743`。与 `kbeam_user` 同等过滤。
 
 25. **agent-health lastEvent 黄色阈值必须跟随 proactive 间隔。** 硬编码 30min 对 60min 间隔的 Agent 会每小时误触发 `health_yellow` + `silent repair`。用 `Math.max(T.eventYellow, proIntervalMs)` 让阈值自适应。位置：`agent-health.js:149`。
+
+26. **catch-up 不能读 relation_states 决定行为。** `status='observed'` 同时承载 inbound（别人发来）和 outbound（我已发出）两种语义，catch-up 无法区分，导致对已发出的握手重复发送（双花 0.2 KAS）。改用 `pending_actions` 表（v44）作为意图队列，catch-up 只消费 `action_type='handshake_accept'` + `status='pending'` 的记录。所有花钱操作必须先写 pending_actions 再执行 sendKaspa，通过乐观锁（`UPDATE WHERE status='pending'`）防止并发重复执行。
+
+27. **花钱路径必须先写意图再花钱。** 四条握手路径（Brain 主动、Relay 自动接受、catch-up、Scout 观察）都必须先在 `pending_actions` 写入记录并 claim 成功，才能调 sendKaspa。claim 失败 = 别的消费者已在处理，直接跳过。`pending_actions` 的写入统一用 `INSERT OR IGNORE`（`idempotent_key` UNIQUE 约束去重），状态推进用乐观锁。
+
+### pending_actions 架构（v44）
+
+**意图与事实分离：**
+```
+意图层                    执行层               事实层
+pending_actions 表  →   Relay sendKaspa  →   relation_states
+(谁该做什么)            (实际花钱)            messages / chain_events
+                                              (链上事实记录)
+```
+
+**表结构：** `id, action_type, direction, local_address, target_address, source, idempotent_key(UNIQUE), status, retry_count, max_retries, trigger_txid, result_txid, error, created_at, updated_at`
+
+**状态机：** `pending → executing → done` / `pending → executing → failed(→pending 重试) → expired`
+
+**四条路径的写入和消费：**
+
+| 路径 | 谁写 pending_actions | 谁消费 | idempotent_key |
+|------|---------------------|--------|----------------|
+| Brain 主动握手 | action-executor（source=mind） | action-executor claim + Relay IPC | handshake_init:{local}:{peer} |
+| Relay 自动接受 | rpc-listener create_and_claim（source=relay）| 自己（实时执行） | handshake_accept:{local}:{peer} |
+| catch-up | 不写（消费 ingest/scout 写的） | catch-up claim → sendKaspa | — |
+| Scout 观察 | discovery.js（source=scout） | catch-up 消费 | handshake_accept:{local}:{peer} |
+| ingest 上报 | ingest-service.js（source=ingest） | Relay 实时或 catch-up | handshake_accept:{local}:{peer} |
+
+**关键文件：**
+
+| 文件 | 职责 |
+|------|------|
+| kasia-console/src/db/migrate.js | v44: pending_actions 表 |
+| kasia-console/src/services/catchup-service.js | getPendingHandshakes（查 pending_actions）+ claim/complete/fail |
+| kasia-console/src/services/ingest-service.js | inbound 写 pending_actions，outbound 标 done |
+| kasia-console/src/api/ingest.js | ?claim= 乐观锁 + ?create_and_claim= 原子创建+锁定 |
+| kasia-console/src/api/discovery.js | Scout 上报 inbound 时写 pending_actions |
+| kasia-relay/src/rpc-listener.mjs | 实时 create_and_claim + catch-up 消费 |
+| agent-mind/src/action-executor.mjs | Brain 握手前写 pending_actions(handshake_init) |
 
  Relay catch-up 从 `kanet_message_index` 取未处理 comm TX → 按 txid 从链上取 payload → `processComm(txid, payload, null)` → `findAddressByAlias` 查 `relation_states.their_alias`。不新建任何函数或端点。`processed_at` 字段做幂等保护。
 
