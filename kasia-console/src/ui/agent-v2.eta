@@ -128,7 +128,7 @@
             <template x-if="!spendLoading">
               <div class="text-2xl font-bold"
                 :class="spending && spending.total > 0 ? 'text-red-500' : 'text-ink-300'"
-                x-text="spending ? KANet.formatKas(spending.total, 4) : '--'"></div>
+                x-text="spending ? KANet.formatKas(spending.total, 6) : '--'"></div>
             </template>
             <div class="text-xs text-ink-300 mt-1">今日花费</div>
           </a>

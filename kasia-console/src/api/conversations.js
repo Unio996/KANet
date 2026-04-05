@@ -342,8 +342,7 @@ export async function registerConversationRoutes(fastify) {
           ${hsFilter}
       )
       ORDER BY CAST(COALESCE(amount, '0') AS REAL) DESC, created_at DESC
-      LIMIT ?
-    `).all(...convParams, ...hsParams, limit);
+    `).all(...convParams, ...hsParams);
 
     const result = rows.map(r => {
       const agentName = r.agent_address ? (agentByAddr[r.agent_address] || r.agent_address.slice(-12)) : null;
