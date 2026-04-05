@@ -121,17 +121,17 @@
             <div class="text-2xl font-bold text-amber-600" x-text="agent.stats?.handshakeCount || 0"></div>
             <div class="text-xs text-ink-300 mt-1">握手</div>
           </a>
-          <div class="px-5 py-4 text-center">
+          <a :href="'/ledger?relay_node_id=' + (agent?.id || '')" class="px-5 py-4 text-center block hover:bg-warm-50 transition-colors rounded-lg cursor-pointer">
             <template x-if="spendLoading">
               <div class="skeleton mx-auto" style="width:60px;height:24px;"></div>
             </template>
             <template x-if="!spendLoading">
-              <a :href="'/ledger?relay_node_id=' + agent?.id" class="text-lg font-bold hover:underline cursor-pointer"
+              <div class="text-2xl font-bold"
                 :class="spending && spending.total > 0 ? 'text-red-500' : 'text-ink-300'"
-                x-text="spending ? KANet.formatKas(spending.total, 4) + ' KAS' : '--'"></a>
+                x-text="spending ? KANet.formatKas(spending.total, 4) : '--'"></div>
             </template>
-            <div class="text-xs text-ink-300 mt-1"><a :href="'/ledger?relay_node_id=' + agent?.id" class="hover:underline">今日花费</a></div>
-          </div>
+            <div class="text-xs text-ink-300 mt-1">花费 KAS</div>
+          </a>
         </div>
       </div>
 
