@@ -1,7 +1,8 @@
 # KANet Developer Guide
 
 > **修改任何代码前必读。** 一个文件，覆盖全系统。唯一权威开发者文档。
-> 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-05。
+> 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-06。
+> 4/6 更新：技术债清零 — account_relations(v46 DROP) + interaction_records(v47 DROP) + replies.sent_txid hack 删除。数据库字典 `docs/DATABASE.md` 建立。当前 34 张活跃表。
 > 4/5 更新：pending_actions 意图队列（v44）— 意图与事实分离，修复 catch-up 重复握手双花。陷阱 #24-27。花费账本页 /ledger。IB Gateway 不随启动。
 > 4/4 下午更新：做市三层架构（market-scanner + order-executor + 自动对冲）、activity-log 改读 messages、contacts.eta 时间本地化、PLACE_ORDER free_market 指向 /exchange。
 > 4/4 更新：陷阱 #18-21（alias 链路/ingestMessage null 保护/Scout 检查点/历史 comm 补全），新增消息补全文件速查表，Scout light mode。
@@ -654,6 +655,11 @@ Agent 决策理由从 execution_states.display_summary 注入。
 | 6 | Adapter 遗留 <<SKILL:annotate:...>> 系统 | 和 Mind Skill Registry 两套并存 P3 |
 | 7 | protocol.mjs Relay/Scout 各一份 | shared/ 可合并 P3 |
 | 8 | kaspa-scout/package.json 硬编码 file: 路径 | npm 构建时依赖，部署时替换 |
+| 9 | ~~account_relations 双写~~ | **已解决（v46 DROP TABLE, 2026-04-06）** |
+| 10 | ~~interaction_records 残留读取~~ | **已解决（v47 DROP TABLE, 2026-04-06，17 处迁移到 chain_events）** |
+| 11 | ~~replies.sent_txid 盲匹配 hack~~ | **已解决（2026-04-06，chain_events 是真相源）** |
+
+> **数据库字典：** 改表前必查 `docs/DATABASE.md`，34 张活跃表全覆盖。migrate.js 当前最新版本 v47。
 
 ---
 

@@ -4,10 +4,10 @@
 
 1. **开发者指南（唯一权威文档）** → `D:\Anthropic\docs\DEVELOPER-GUIDE.md`
    - 必须先读完再动任何代码。全系统 15 章：架构、消息管道、Mind、交易、Health、UI、市场(8源)、致命陷阱、API速查表
-   - 持续更新（最近：2026-04-03）。有改动就在此文件上更新，不新建 dev-*.md
+   - 持续更新（最近：2026-04-06）。有改动就在此文件上更新，不新建 dev-*.md
 
 2. **数据库字典（改表前必查）** → `D:\Anthropic\docs\DATABASE.md`
-   - 36 张表全覆盖：用途、字段、写入方、读取方、陷阱、技术债处置建议
+   - 34 张活跃表全覆盖：用途、字段、写入方、读取方、陷阱
    - 持续更新（最近：2026-04-06）。改表前必查本文档确认影响范围
 
 3. **Alpha 达标标准** → `D:\Anthropic\docs\ALPHA-CHECKLIST.md`
@@ -44,8 +44,8 @@
 改任何数据库表之前，必须先读 `docs/DATABASE.md`：
 - 确认这张表的用途和当前状态
 - 确认写入方和读取方
-- 确认是否是技术债（account_relations/interaction_records 禁止新增调用）
-- migrate.js 版本号必须接当前最新版本后面（当前最新：v45）
+- 确认是否是已删除表（account_relations v46 已删、interaction_records v47 已删）
+- migrate.js 版本号必须接当前最新版本后面（当前最新：v47）
 
 DATABASE.md 有改动时（新表/删表/加字段），必须同步更新文档后一起提交。
 
@@ -59,24 +59,29 @@ DATABASE.md 有改动时（新表/删表/加字段），必须同步更新文档
 | agent-mind | `D:\Anthropic\agent-mind` | Agent 灵魂（五核、技能、决策）|
 | agent-adapter | `D:\Anthropic\agent-adapter` | AI 大脑桥接（多 provider）|
 
-## 当前进行中的工作
+## 当前系统状态（2026-04-06 更新）
 
-### 协议收口（P0）
-- `relation_states` + `chain_events` + `execution_states` 三张协议状态表已建好
-- `relation_states` 71 条数据从旧表 backfill，agent.eta 已迁移并验证通过
-- `relation-state.js` 服务已写好（状态机 + 推进规则）
-- 剩余 6 个页面待迁移：identities / discovered / network / events / conversation / trading
-- Trade ACTION 权限漏洞已堵（executeTradeAction 加了 owner 检查）
-- 消息风暴已修（comm 不再触发 proactive，cascade 关闭，60s 冷却）
-- 8 个交易所 API 测试 + 余额读取全部实现
-- 多交易所合并视图待做（P2）
+### 数据架构 — 技术债已清零
+- `relation_states` 是社交关系唯一真相源（196 条）
+- `chain_events` 是链上事件唯一真相源（63230 条）
+- `account_relations` 已删除（v46 DROP TABLE，account-relations.js 同步删除）
+- `interaction_records` 已删除（v47 DROP TABLE，17 处读取全迁移到 chain_events）
+- `replies.sent_txid` hack 已删除（chain_events 是真相源）
+- 数据库字典 `docs/DATABASE.md` 已建立，34 张活跃表全覆盖
+- 当前 migrate.js 最新版本：v47
 
-### 自由市场
-- `order-machine.js` 状态机已建
-- trading.js `/action` 端点已接入状态机
-- UI 交易室已更新全状态
-- 三模式（auto/approval/manual）待实现
-- 测试需要充值后进行
+### 协议与交易 — 全部已实现
+- `relation_states` + `chain_events` + `execution_states` + `pending_actions` 四张协议状态表
+- 自由市场 Phase 0-5 全部完成（fund_lock/limits/权限/三模式/dispute）
+- 协议级自由市场 /exchange 上线（报价/接单/取消 + 乐观更新 + 可插拔验证器）
+- 做市管线（market-scanner 8 CEX + order-executor + CEX 自动对冲）
+- 交易协议上链（trade-protocol-filter.js，7 种协议消息）
+
+### Agent 自治 — 5 Agent 全绿
+- Health Monitor + Self-Healing + patrol 脚本持续监控
+- 社交认知链（防骚扰）+ anti-spam fail-closed
+- 目标反馈机制（cooldown + auto-retire）
+- pending_actions 意图队列（意图与事实分离）
 
 ## 启动/停止
 
