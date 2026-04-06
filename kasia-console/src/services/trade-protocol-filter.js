@@ -410,8 +410,17 @@ async function handleExchange(msg) {
 async function handleExchangeAccept(msg) {
   if (!msg.offer_id) return;
   const result = machineAccept(msg);
-  if (!result || result.protocol_status !== 'awaiting_manual_confirm') return;
+  if (!result) return;
+  if (result.protocol_status !== 'awaiting_manual_confirm' &&
+      result.protocol_status !== 'verifying') return;
 
+  // manual 验证：等待手动确认，不触发对冲
+  if (result.protocol_status === 'awaiting_manual_confirm') {
+    console.log(`[exchange] manual confirm pending offer=${result.id.slice(0,8)} maker=${result.maker.slice(-8)} taker=${result.taker?.slice(-8)}`);
+    return;
+  }
+
+  // verifying（cross_chain_tx / kaspa_tx）：继续走对冲逻辑
   // Check if maker is a local agent — only local agents can hedge
   const localAgent = sqlite.prepare('SELECT id, name FROM relay_nodes WHERE address = ?').get(result.maker);
   if (!localAgent) return; // External maker, no hedge

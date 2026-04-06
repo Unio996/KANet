@@ -290,3 +290,77 @@ export function timeoutVerifying() {
 
   return stuck.length;
 }
+
+// ── Payment Submit (cross_chain_tx / kaspa_tx verification) ──
+
+/**
+ * Taker submits a payment TX hash for on-chain verification.
+ * Writes to verification_meta, kicks off async verification.
+ */
+export function processPaymentSubmit({ offer_id, payment_tx, payment_chain }) {
+  const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer_id);
+  if (!offer) return { error: 'offer_not_found' };
+  if (offer.protocol_status !== 'verifying') return { error: 'invalid_status', current: offer.protocol_status };
+  if (!payment_tx) return { error: 'payment_tx_required' };
+
+  const now = new Date().toISOString();
+  const meta = JSON.parse(offer.verification_meta || '{}');
+  meta.payment_tx = payment_tx;
+  meta.payment_chain = payment_chain;
+  meta.submitted_at = now;
+
+  sqlite.prepare(
+    'UPDATE exchange_offers SET verification_meta = ?, updated_at = ? WHERE id = ?'
+  ).run(JSON.stringify(meta), now, offer_id);
+
+  // Async verification — does not block API response
+  _verifyAndComplete(offer_id, payment_tx, payment_chain).catch(err =>
+    console.error(`[exchange] _verifyAndComplete error offer=${offer_id.slice(0,8)}:`, err.message)
+  );
+
+  return { ok: true, status: 'verifying', message: 'Payment submitted, verifying on-chain...' };
+}
+
+async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt = 1) {
+  const MAX_ATTEMPTS = 3;
+  const RETRY_MS = 60_000;
+
+  const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer_id);
+  if (!offer || offer.protocol_status !== 'verifying') return;
+
+  const meta = JSON.parse(offer.verification_meta || '{}');
+  const expectedAmount = parseFloat(offer.want_amount) || 0;
+  const expectedTo = meta.receive_address || null;
+
+  try {
+    const { verifyCrossChainTx } = await import('./cross-chain-verify.mjs');
+    const vr = await verifyCrossChainTx({
+      txHash: payment_tx,
+      chain: payment_chain,
+      expectedAmount,
+      expectedTo,
+    });
+
+    if (vr.confirmed) {
+      meta.verified_tx = payment_tx;
+      meta.verified_at = new Date().toISOString();
+      meta.confirmations = vr.confirmations;
+
+      sqlite.prepare(
+        'UPDATE exchange_offers SET verification_meta = ?, updated_at = ? WHERE id = ?'
+      ).run(JSON.stringify(meta), new Date().toISOString(), offer_id);
+
+      transition(offer_id, 'completed', {});
+      console.log(`[exchange] offer ${offer_id.slice(0,8)} payment verified → completed (${vr.actualAmount} USDT, ${vr.confirmations}/${vr.required} conf)`);
+
+    } else if (attempt < MAX_ATTEMPTS) {
+      console.log(`[exchange] offer ${offer_id.slice(0,8)} not confirmed yet (attempt ${attempt}/${MAX_ATTEMPTS}): ${vr.error}. Retry in 60s`);
+      setTimeout(() => _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt + 1), RETRY_MS);
+
+    } else {
+      console.log(`[exchange] offer ${offer_id.slice(0,8)} verification failed after ${MAX_ATTEMPTS} attempts: ${vr.error}`);
+    }
+  } catch (err) {
+    console.error(`[exchange] _verifyAndComplete error:`, err.message);
+  }
+}

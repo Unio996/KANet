@@ -15,6 +15,7 @@ import { quickStart, completeExecution, failExecution } from '../services/execut
 import { lockFunds } from '../services/fund-lock.js';
 import { checkLimits } from '../services/trade-limits.js';
 import { recordChainEvent } from '../services/chain-event.js';
+import { verifyCrossChainTx } from '../services/cross-chain-verify.mjs';
 import { analyzeMarket } from '../services/signal-engine.js';
 import { generateProposal } from '../services/strategy-engine.js';
 import { fetchAllMarkets, fetchCryptoData, fetchStockData, fetchPredictionData, fetchCommodityData, fetchFundingRates, fetchSentiment, fetchCryptoGlobal, fetchEconomicCalendar } from '../services/market-data.js';
@@ -2150,293 +2151,66 @@ export async function registerTradingRoutes(fastify) {
       const expectedAmount = order.usdt_amount || order.kas_amount * (order.price || 0);
       const receiveAddr = order.mm_receive_address;
 
-      // EVM chains: mandatory on-chain verification
-      const EVM_CHAINS = ['bnb', 'eth'];
+      // ── Cross-chain verification via shared module (extracted 2026-04-06) ──
+      const SUPPORTED_AUTO = ['bnb', 'eth', 'sol', 'tron'];
       let verifyResult = null;
-      if (EVM_CHAINS.includes(chain)) {
+
+      // Resolve expected sender for EVM chains (buyer wallet address matching)
+      let expectedFrom = null;
+      if (['bnb', 'eth'].includes(chain) && order.side === 'sell' && order.counterparty_order_id) {
+        const buyerOrder = sqlite.prepare('SELECT relay_node_id FROM mm_orders WHERE id = ?').get(order.counterparty_order_id);
+        const buyerWallet = buyerOrder
+          ? sqlite.prepare('SELECT address FROM agent_wallets WHERE relay_node_id = ? AND chain = ?').get(buyerOrder.relay_node_id, chain)
+          : null;
+        if (buyerWallet) expectedFrom = buyerWallet.address;
+      }
+
+      if (SUPPORTED_AUTO.includes(chain)) {
         const execId = quickStart({ orderId: id, type: 'verify_payment', source: 'owner', agentAddress: order.agent_address, inputTxid: txHash,
           displaySummary: `验证到账 ${expectedAmount.toFixed(2)} USDT（${chain.toUpperCase()} 链）` });
 
         try {
-          const { ethers } = await import('ethers');
-          const EVM_RPC = { bnb: 'https://bsc-dataseed1.binance.org', eth: 'https://eth.llamarpc.com' };
-          const USDT = {
-            bnb: { address: '0x55d398326f99059fF775485246999027B3197955', decimals: 18 },
-            eth: { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', decimals: 6 },
-          };
+          const vr = await verifyCrossChainTx({ txHash, chain, expectedAmount, expectedTo: receiveAddr, expectedFrom });
 
-          const provider = new ethers.JsonRpcProvider(EVM_RPC[chain]);
-          const receipt = await provider.getTransactionReceipt(txHash);
-
-          if (!receipt) {
-            failExecution(execId, 'TX not found or still pending');
-            return reply.code(400).send({ error: 'TX not found on chain — still pending or invalid hash' });
-          }
-          if (receipt.status !== 1) {
-            failExecution(execId, 'TX reverted (status=0)');
-            return reply.code(400).send({ error: 'TX reverted on chain — payment failed' });
-          }
-
-          // 确认数校验（设计文档 Section 3.3）
-          const currentBlock = await provider.getBlockNumber();
-          const confirmations = receipt.blockNumber ? (currentBlock - receipt.blockNumber) : 0;
-          const REQUIRED_CONFIRMATIONS = { bnb: 15, eth: 12 };
-          const requiredConf = REQUIRED_CONFIRMATIONS[chain] || 15;
-          if (confirmations < requiredConf) {
-            failExecution(execId, `Insufficient confirmations: ${confirmations}/${requiredConf}`);
-            return reply.code(400).send({
-              error: `TX found but only ${confirmations}/${requiredConf} confirmations — retry later`,
-              confirmations, required: requiredConf
-            });
-          }
-
-          // Check USDT transfer in logs
-          const transferTopic = ethers.id('Transfer(address,address,uint256)');
-          const usdtLower = USDT[chain].address.toLowerCase();
-          const transferLog = receipt.logs.find(l =>
-            l.address.toLowerCase() === usdtLower && l.topics[0] === transferTopic
-          );
-
-          if (!transferLog) {
-            failExecution(execId, 'No USDT transfer found in TX');
-            return reply.code(400).send({ error: 'No USDT transfer found in this TX' });
-          }
-
-          const actualAmount = parseFloat(ethers.formatUnits(transferLog.data, USDT[chain].decimals));
-          const recipient = '0x' + transferLog.topics[2].slice(26);
-          const txSender = '0x' + transferLog.topics[1].slice(26);
-          // 设计文档：允许 0.5% 误差（覆盖链上手续费）
-          const amountOk = actualAmount >= expectedAmount * 0.995;
-          const recipientOk = !receiveAddr || recipient.toLowerCase() === receiveAddr.toLowerCase();
-
-          // Sender verification: if buyer has a known wallet, check it matches
-          if (order.side === 'sell' && order.counterparty_order_id) {
-            const buyerOrder = sqlite.prepare('SELECT relay_node_id FROM mm_orders WHERE id = ?').get(order.counterparty_order_id);
-            const buyerWallet = buyerOrder
-              ? sqlite.prepare('SELECT address FROM agent_wallets WHERE relay_node_id = ? AND chain = ?').get(buyerOrder.relay_node_id, chain)
-              : null;
-            if (buyerWallet && txSender.toLowerCase() !== buyerWallet.address.toLowerCase()) {
-              console.log(`[trade] verify_payment WARN: sender ${txSender.slice(0,10)} != expected buyer ${buyerWallet.address.slice(0,10)}`);
-              recordChainEvent({
-                txid: txHash, eventType: 'payment_verified',
-                fromAddress: txSender, toAddress: recipient, observedBy: 'system',
-                payload: { orderId: id, warning: 'sender_mismatch', expectedSender: buyerWallet.address, actualSender: txSender, chain },
-              });
-              // Also record as visible event so Brain can flag suspicious payments
-              const { insertEvent } = await import('../data/state/events.js');
-              insertEvent({
-                eventType: 'payment_sender_mismatch', source: 'trade', level: 'warning',
-                agentAddress: order.agent_address,
-                summary: `⚠ Payment sender mismatch on order ${id.slice(0,8)}: expected ${buyerWallet.address.slice(0,10)}..., got ${txSender.slice(0,10)}... (${chain.toUpperCase()})`,
-                payloadJson: { orderId: id, expectedSender: buyerWallet.address, actualSender: txSender, chain, amount: actualAmount },
-              });
+          if (!vr.confirmed) {
+            // Underpayment → disputed
+            if (vr.underpayment) {
+              failExecution(execId, `Underpayment: expected ${expectedAmount.toFixed(2)}, got ${vr.actualAmount.toFixed(2)}`);
+              recordChainEvent({ txid: txHash, eventType: 'payment_underpayment',
+                fromAddress: vr.recipient, toAddress: receiveAddr || order.agent_address, observedBy: 'system',
+                payload: { orderId: id, expected: expectedAmount, actual: vr.actualAmount, chain } });
+              transition(id, 'disputed', { reason: `underpayment: expected ${expectedAmount.toFixed(2)} USDT, received ${vr.actualAmount.toFixed(2)} USDT` });
+              return reply.code(400).send({ error: 'Underpayment — order moved to disputed', expected: expectedAmount, actual: vr.actualAmount, status: 'disputed' });
             }
+            failExecution(execId, vr.error);
+            return reply.code(400).send({ error: vr.error, confirmations: vr.confirmations, required: vr.required });
           }
 
-          if (!amountOk) {
-            // 设计文档：金额不足 → disputed(reason='underpayment')，fund_lock 保持 locked
-            failExecution(execId, `Underpayment: expected ${expectedAmount.toFixed(2)}, got ${actualAmount.toFixed(2)}`);
-            recordChainEvent({
-              txid: txHash,
-              eventType: 'payment_underpayment',
-              fromAddress: recipient,
-              toAddress: receiveAddr || order.agent_address,
-              observedBy: 'system',
-              payload: { orderId: id, expected: expectedAmount, actual: actualAmount, chain },
-            });
-            transition(id, 'disputed', { reason: `underpayment: expected ${expectedAmount.toFixed(2)} USDT, received ${actualAmount.toFixed(2)} USDT` });
-            return reply.code(400).send({ error: 'Underpayment — order moved to disputed', expected: expectedAmount, actual: actualAmount, status: 'disputed' });
-          }
-          if (!recipientOk) {
-            failExecution(execId, `Recipient mismatch: expected ${receiveAddr}, got ${recipient}`);
-            return reply.code(400).send({ error: `Recipient mismatch: expected ${receiveAddr}, TX went to ${recipient}` });
+          // Sender mismatch warning (non-blocking)
+          if (vr.senderMismatch && expectedFrom) {
+            console.log(`[trade] verify_payment WARN: sender ${vr.sender.slice(0,10)} != expected ${expectedFrom.slice(0,10)}`);
+            recordChainEvent({ txid: txHash, eventType: 'payment_verified',
+              fromAddress: vr.sender, toAddress: vr.recipient, observedBy: 'system',
+              payload: { orderId: id, warning: 'sender_mismatch', expectedSender: expectedFrom, actualSender: vr.sender, chain } });
+            const { insertEvent } = await import('../data/state/events.js');
+            insertEvent({ eventType: 'payment_sender_mismatch', source: 'trade', level: 'warning',
+              agentAddress: order.agent_address,
+              summary: `⚠ Payment sender mismatch on order ${id.slice(0,8)}: expected ${expectedFrom.slice(0,10)}..., got ${vr.sender.slice(0,10)}... (${chain.toUpperCase()})`,
+              payloadJson: { orderId: id, expectedSender: expectedFrom, actualSender: vr.sender, chain, amount: vr.actualAmount } });
           }
 
-          verifyResult = { actualAmount, recipient, confirmations, required: requiredConf };
-          completeExecution(execId, { outputTxid: txHash, summary: `✅ 到账确认 — ${actualAmount.toFixed(2)} USDT 已验证（${chain.toUpperCase()} 链，${confirmations}/${requiredConf} 区块确认）` });
-          // 设计底线 7：验证事实入 chain_events
-          recordChainEvent({
-            txid: txHash,
-            eventType: 'payment_verified',
-            fromAddress: recipient,
-            toAddress: receiveAddr || order.agent_address,
-            observedBy: 'system',
-            payload: { orderId: id, actualAmount, confirmations, required: requiredConf, chain },
-          });
-          console.log(`[trade] verify_payment OK: ${actualAmount.toFixed(2)} USDT → ${recipient} on ${chain}`);
+          verifyResult = { actualAmount: vr.actualAmount, recipient: vr.recipient, confirmations: vr.confirmations, required: vr.required };
+          completeExecution(execId, { outputTxid: txHash, summary: `✅ 到账确认 — ${vr.actualAmount.toFixed(2)} USDT 已验证（${chain.toUpperCase()} 链，${vr.confirmations}/${vr.required} 确认）` });
+          recordChainEvent({ txid: txHash, eventType: 'payment_verified',
+            fromAddress: vr.sender || vr.recipient, toAddress: receiveAddr || order.agent_address, observedBy: 'system',
+            payload: { orderId: id, actualAmount: vr.actualAmount, confirmations: vr.confirmations, required: vr.required, chain } });
+          console.log(`[trade] verify_payment OK: ${vr.actualAmount.toFixed(2)} USDT → ${vr.recipient} on ${chain}`);
         } catch (err) {
           failExecution(execId, err.message);
+          recordChainEvent({ txid: `failed_verify_${chain}_${id.slice(0, 8)}_${Date.now()}`, eventType: 'verify_failed', fromAddress: order.agent_address, observedBy: 'system',
+            payload: { orderId: id, error: err.message, chain } });
           return reply.code(500).send({ error: 'Chain verification failed: ' + err.message });
         }
-      } else if (chain === 'sol') {
-        // ── Solana SPL token (USDT) verification ──
-        const execId = quickStart({ orderId: id, type: 'verify_payment', source: 'owner', agentAddress: order.agent_address, inputTxid: txHash,
-          displaySummary: `验证到账 ${expectedAmount.toFixed(2)} USDT（Solana 链）` });
-
-        try {
-          const { Connection } = await import('@solana/web3.js');
-          const SOL_RPC = 'https://api.mainnet-beta.solana.com';
-          const USDT_MINT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenEPs';
-          const REQUIRED_CONF = 32; // Solana finality
-
-          const connection = new Connection(SOL_RPC, 'finalized');
-          const tx = await connection.getTransaction(txHash, { maxSupportedTransactionVersion: 0 });
-
-          if (!tx) {
-            failExecution(execId, 'TX not found or still pending');
-            return reply.code(400).send({ error: 'TX not found on Solana — still pending or invalid' });
-          }
-          if (tx.meta?.err) {
-            failExecution(execId, `TX failed: ${JSON.stringify(tx.meta.err)}`);
-            return reply.code(400).send({ error: 'TX reverted on Solana' });
-          }
-
-          // Confirmation check via slot distance
-          const currentSlot = await connection.getSlot('finalized');
-          const confirmations = currentSlot - tx.slot;
-          if (confirmations < REQUIRED_CONF) {
-            failExecution(execId, `Insufficient confirmations: ${confirmations}/${REQUIRED_CONF}`);
-            return reply.code(400).send({ error: `Solana TX not finalized: ${confirmations}/${REQUIRED_CONF} slots`, confirmations, required: REQUIRED_CONF });
-          }
-
-          // Find USDT transfer in postTokenBalances
-          const postBalances = tx.meta?.postTokenBalances || [];
-          const preBalances = tx.meta?.preTokenBalances || [];
-          let actualAmount = 0;
-          let recipient = null;
-
-          for (const post of postBalances) {
-            if (post.mint !== USDT_MINT) continue;
-            // Find matching pre-balance to compute delta
-            const pre = preBalances.find(p => p.accountIndex === post.accountIndex && p.mint === USDT_MINT);
-            const postAmt = parseFloat(post.uiTokenAmount?.uiAmountString || '0');
-            const preAmt = pre ? parseFloat(pre.uiTokenAmount?.uiAmountString || '0') : 0;
-            const delta = postAmt - preAmt;
-            if (delta > 0 && delta > actualAmount) {
-              actualAmount = delta;
-              recipient = post.owner || null;
-            }
-          }
-
-          if (actualAmount === 0 || !recipient) {
-            failExecution(execId, 'No USDT transfer found in TX');
-            return reply.code(400).send({ error: 'No USDT transfer detected in Solana TX' });
-          }
-
-          const amountOk = actualAmount >= expectedAmount * 0.995;
-          const recipientOk = !receiveAddr || recipient === receiveAddr;
-
-          if (!amountOk) {
-            failExecution(execId, `Underpayment: expected ${expectedAmount.toFixed(2)}, got ${actualAmount.toFixed(2)}`);
-            recordChainEvent({ txid: txHash, eventType: 'payment_underpayment', fromAddress: 'solana', toAddress: recipient, observedBy: 'system',
-              payload: { orderId: id, expected: expectedAmount, actual: actualAmount, chain: 'sol' } });
-            transition(id, 'disputed', { reason: `underpayment: expected ${expectedAmount.toFixed(2)} USDT, received ${actualAmount.toFixed(2)} USDT (Solana)` });
-            return reply.code(400).send({ error: 'Underpayment on Solana — order disputed', expected: expectedAmount, actual: actualAmount });
-          }
-          if (!recipientOk) {
-            failExecution(execId, `Recipient mismatch: expected ${receiveAddr}, got ${recipient}`);
-            return reply.code(400).send({ error: `Recipient mismatch on Solana: expected ${receiveAddr}, got ${recipient}` });
-          }
-
-          verifyResult = { actualAmount, recipient, confirmations, required: REQUIRED_CONF };
-          completeExecution(execId, { outputTxid: txHash });
-          recordChainEvent({ txid: txHash, eventType: 'payment_verified', fromAddress: 'solana_sender', toAddress: recipient, observedBy: 'system',
-            payload: { orderId: id, actualAmount, confirmations, required: REQUIRED_CONF, chain: 'sol' } });
-          console.log(`[trade] verify_payment OK (Solana): ${actualAmount.toFixed(2)} USDT → ${recipient?.slice(0, 12)} (${confirmations} slots)`);
-        } catch (err) {
-          failExecution(execId, err.message);
-          recordChainEvent({ txid: `failed_verify_sol_${id.slice(0, 8)}_${Date.now()}`, eventType: 'verify_failed', fromAddress: order.agent_address, observedBy: 'system',
-            payload: { orderId: id, error: err.message, chain: 'sol' } });
-          return reply.code(500).send({ error: 'Solana verification failed: ' + err.message });
-        }
-
-      } else if (chain === 'tron') {
-        // ── TRON TRC20 (USDT) verification ──
-        const execId = quickStart({ orderId: id, type: 'verify_payment', source: 'owner', agentAddress: order.agent_address, inputTxid: txHash,
-          displaySummary: `验证到账 ${expectedAmount.toFixed(2)} USDT（TRON 链）` });
-
-        try {
-          const TronWebModule = await import('tronweb');
-          const TronWeb = TronWebModule.default || TronWebModule;
-          const TRON_RPC = 'https://api.trongrid.io';
-          const USDT_ADDR = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
-          const REQUIRED_CONF = 19; // ~57 seconds
-
-          const tronWeb = new TronWeb({ fullHost: TRON_RPC });
-
-          // Fetch transaction info (includes receipt + logs)
-          const txInfo = await tronWeb.trx.getTransactionInfo(txHash);
-          if (!txInfo || !txInfo.id) {
-            failExecution(execId, 'TX not found or still pending');
-            return reply.code(400).send({ error: 'TX not found on TRON — still pending or invalid' });
-          }
-
-          // Check receipt status
-          if (txInfo.receipt?.result && txInfo.receipt.result !== 'SUCCESS') {
-            failExecution(execId, `TX failed: ${txInfo.receipt.result}`);
-            return reply.code(400).send({ error: `TX reverted on TRON: ${txInfo.receipt.result}` });
-          }
-
-          // Confirmation check
-          const txBlock = txInfo.blockNumber;
-          const currentBlock = await tronWeb.trx.getCurrentBlock();
-          const currentBlockNum = currentBlock?.block_header?.raw_data?.number || 0;
-          const confirmations = currentBlockNum - txBlock;
-          if (confirmations < REQUIRED_CONF) {
-            failExecution(execId, `Insufficient confirmations: ${confirmations}/${REQUIRED_CONF}`);
-            return reply.code(400).send({ error: `TRON TX not confirmed: ${confirmations}/${REQUIRED_CONF} blocks`, confirmations, required: REQUIRED_CONF });
-          }
-
-          // Parse TRC20 Transfer from logs
-          const transferTopic = 'ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
-          let actualAmount = 0;
-          let recipient = null;
-          let sender = null;
-
-          for (const log of (txInfo.log || [])) {
-            const addr = log.address || '';
-            if (addr.toLowerCase() !== tronWeb.address.toHex(USDT_ADDR).replace(/^41/, '').toLowerCase()) continue;
-            if (!log.topics || log.topics[0] !== transferTopic) continue;
-
-            sender = '41' + log.topics[1].slice(-40);
-            recipient = '41' + log.topics[2].slice(-40);
-            actualAmount = parseInt(log.data, 16) / 1e6; // USDT decimals = 6
-            break;
-          }
-
-          if (actualAmount === 0 || !recipient) {
-            failExecution(execId, 'No USDT transfer found in TX');
-            return reply.code(400).send({ error: 'No USDT transfer detected in TRON TX' });
-          }
-
-          const recipientBase58 = tronWeb.address.fromHex(recipient);
-          const amountOk = actualAmount >= expectedAmount * 0.995;
-          const recipientOk = !receiveAddr || recipientBase58 === receiveAddr;
-
-          if (!amountOk) {
-            failExecution(execId, `Underpayment: expected ${expectedAmount.toFixed(2)}, got ${actualAmount.toFixed(2)}`);
-            recordChainEvent({ txid: txHash, eventType: 'payment_underpayment', fromAddress: tronWeb.address.fromHex(sender), toAddress: recipientBase58, observedBy: 'system',
-              payload: { orderId: id, expected: expectedAmount, actual: actualAmount, chain: 'tron' } });
-            transition(id, 'disputed', { reason: `underpayment: expected ${expectedAmount.toFixed(2)} USDT, received ${actualAmount.toFixed(2)} USDT (TRON)` });
-            return reply.code(400).send({ error: 'Underpayment on TRON — order disputed', expected: expectedAmount, actual: actualAmount });
-          }
-          if (!recipientOk) {
-            failExecution(execId, `Recipient mismatch: expected ${receiveAddr}, got ${recipientBase58}`);
-            return reply.code(400).send({ error: `Recipient mismatch on TRON: expected ${receiveAddr}, got ${recipientBase58}` });
-          }
-
-          verifyResult = { actualAmount, recipient: recipientBase58, confirmations, required: REQUIRED_CONF };
-          completeExecution(execId, { outputTxid: txHash });
-          recordChainEvent({ txid: txHash, eventType: 'payment_verified', fromAddress: tronWeb.address.fromHex(sender), toAddress: recipientBase58, observedBy: 'system',
-            payload: { orderId: id, actualAmount, confirmations, required: REQUIRED_CONF, chain: 'tron' } });
-          console.log(`[trade] verify_payment OK (TRON): ${actualAmount.toFixed(2)} USDT → ${recipientBase58} (${confirmations} blocks)`);
-        } catch (err) {
-          failExecution(execId, err.message);
-          recordChainEvent({ txid: `failed_verify_tron_${id.slice(0, 8)}_${Date.now()}`, eventType: 'verify_failed', fromAddress: order.agent_address, observedBy: 'system',
-            payload: { orderId: id, error: err.message, chain: 'tron' } });
-          return reply.code(500).send({ error: 'TRON verification failed: ' + err.message });
-        }
-
       } else {
         // Unknown chain — manual fallback
         const execId = quickStart({ orderId: id, type: 'verify_payment', source: 'owner', agentAddress: order.agent_address, inputTxid: txHash,
