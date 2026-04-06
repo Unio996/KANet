@@ -110,6 +110,13 @@ await registerAuthRoutes(fastify);
 await registerOAuthRoutes(fastify);
 await registerExchangeRoutes(fastify);
 
+// Exchange: expire stale offers + timeout stuck verifications (every 5min)
+import { expireStale, timeoutVerifying } from './services/exchange-machine.js';
+try { expireStale(); timeoutVerifying(); } catch (err) { console.error('[exchange] startup expire/timeout:', err.message); }
+setInterval(() => {
+  try { expireStale(); timeoutVerifying(); } catch (err) { console.error('[exchange] expire/timeout error:', err.message); }
+}, 5 * 60 * 1000);
+
 // Anti-spam API endpoints
 import { checkOutboundAllowed, getActivityLog, getActivityByPeer, getOutboundStats, detectStopRequest, getMergedContacts } from './services/anti-spam.js';
 import { listRelayNodes as _listRelayNodes } from './data/settings/relay-nodes.js';
