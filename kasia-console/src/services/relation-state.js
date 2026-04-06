@@ -60,7 +60,14 @@ export function observeHandshake(localAddress, peerAddress, txid, observedAt) {
  * Relay 接受握手 → accepted
  */
 export function acceptHandshake(localAddress, peerAddress) {
-  return _advance(localAddress, peerAddress, 'accepted', { handshake_accepted_at: new Date().toISOString() });
+  const result = _advance(localAddress, peerAddress, 'accepted', { handshake_accepted_at: new Date().toISOString() });
+  // 握手完成 → 升级 classification（只升不降）
+  sqlite.prepare(`
+    UPDATE relation_states SET classification = 'responsive_agent'
+    WHERE local_address = ? AND peer_address = ?
+      AND classification IN ('seen_candidate', 'declared_candidate')
+  `).run(localAddress, peerAddress);
+  return result;
 }
 
 /**

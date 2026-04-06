@@ -47,8 +47,9 @@
 | handshake_accepted_at | TEXT | 接受握手的时间 |
 | session_confirmed_at | TEXT | 会话确认时间 |
 | updated_at | TEXT NOT NULL | 最后更新时间 |
+| classification | TEXT | 身份质量（和 status 正交）：seen_candidate / declared_candidate / responsive_agent / verified_agent / inactive_agent，只升不降 |
 
-**写入方**：ingest-service.js（observeHandshake/acceptHandshake）
+**写入方**：ingest-service.js（observeHandshake/acceptHandshake）、relation-state.js（acceptHandshake → responsive_agent）、exchange-machine.js（completed → verified_agent）、agent-cards.js（processAgentCard → declared_candidate）
 **读取方**：context-builder.mjs、discovery.js、contacts API、anti-spam.js
 
 ---
@@ -183,9 +184,10 @@
 | block_time | TEXT NOT NULL | 出块时间 |
 | indexed_by | TEXT NOT NULL | 索引来源 |
 | processed_at | TEXT | 处理时间（NULL=待处理，幂等保护） |
+| reply_to | TEXT | kanet:v1:msg: 格式消息的引用 ID（支持 /story 线程展示） |
 
-**写入方**：kaspa-scout/src/message-indexer.mjs
-**读取方**：Relay catch-up 逻辑
+**写入方**：kaspa-scout/src/message-indexer.mjs（v49 起含 reply_to）
+**读取方**：Relay catch-up 逻辑、/story 线程展示
 
 ---
 

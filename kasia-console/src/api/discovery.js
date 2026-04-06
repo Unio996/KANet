@@ -416,8 +416,8 @@ export async function registerDiscoveryRoutes(fastify) {
 
     const insert = sqlite.prepare(`
       INSERT OR IGNORE INTO kanet_message_index
-        (id, txid, for_address, from_address, payload_type, payload_hash, block_time, blue_score, indexed_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, txid, for_address, from_address, payload_type, payload_hash, block_time, blue_score, indexed_by, reply_to)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     let inserted = 0;
@@ -428,7 +428,8 @@ export async function registerDiscoveryRoutes(fastify) {
           id, e.txid, e.for_address, e.from_address,
           e.payload_type, e.payload_hash,
           e.block_time, e.blue_score || null,
-          e.indexed_by || 'local'
+          e.indexed_by || 'local',
+          e.reply_to || null
         );
         if (result.changes > 0) inserted++;
       }
