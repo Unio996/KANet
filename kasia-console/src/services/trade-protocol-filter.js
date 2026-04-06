@@ -479,11 +479,19 @@ function _isHedgeCircuitOpen() {
   return _hedgeFailures.length >= HEDGE_CIRCUIT_THRESHOLD;
 }
 
+// hedge_cex 名称映射（scanner 显示名 → DB exchange 字段）
+const HEDGE_CEX_MAP = {
+  'gate': 'gateio', 'gateio': 'gateio',
+  'mexc': 'mexc', 'bybit': 'bybit', 'kucoin': 'kucoin',
+  'bitget': 'bitget', 'htx': 'htx', 'huobi': 'htx',
+  'binance': 'binance', 'kraken': 'kraken',
+};
+
 /**
  * Execute a hedge order on the best available CEX.
- * Tries the default exchange account first.
+ * If preferredCex specified, try that first; otherwise use default account.
  */
-async function _executeHedge(offerId, agentName, side, qty) {
+async function _executeHedge(offerId, agentName, side, qty, preferredCex = null) {
   if (_isHedgeCircuitOpen()) {
     console.log(`[exchange-hedge] CIRCUIT OPEN — ${_hedgeFailures.length} failures in 1h, skipping hedge for ${offerId.slice(0, 8)}`);
     recordChainEvent({
@@ -494,10 +502,17 @@ async function _executeHedge(offerId, agentName, side, qty) {
     return;
   }
 
-  // Get best available exchange account
-  const account = sqlite.prepare(
-    'SELECT * FROM exchange_accounts WHERE is_default = 1 LIMIT 1'
-  ).get() || sqlite.prepare('SELECT * FROM exchange_accounts LIMIT 1').get();
+  // Get best available exchange account (prefer specified CEX, fallback to default)
+  let account = null;
+  if (preferredCex) {
+    const normalized = HEDGE_CEX_MAP[preferredCex.toLowerCase()] || preferredCex.toLowerCase();
+    account = sqlite.prepare('SELECT * FROM exchange_accounts WHERE exchange = ?').get(normalized);
+  }
+  if (!account) {
+    account = sqlite.prepare(
+      'SELECT * FROM exchange_accounts WHERE is_default = 1 LIMIT 1'
+    ).get() || sqlite.prepare('SELECT * FROM exchange_accounts LIMIT 1').get();
+  }
 
   if (!account) {
     console.log(`[exchange-hedge] No exchange account configured — cannot hedge ${offerId.slice(0, 8)}`);
