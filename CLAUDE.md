@@ -6,22 +6,26 @@
    - 必须先读完再动任何代码。全系统 15 章：架构、消息管道、Mind、交易、Health、UI、市场(8源)、致命陷阱、API速查表
    - 持续更新（最近：2026-04-03）。有改动就在此文件上更新，不新建 dev-*.md
 
-2. **Alpha 达标标准** → `D:\Anthropic\docs\ALPHA-CHECKLIST.md`
+2. **数据库字典（改表前必查）** → `D:\Anthropic\docs\DATABASE.md`
+   - 36 张表全覆盖：用途、字段、写入方、读取方、陷阱、技术债处置建议
+   - 持续更新（最近：2026-04-06）。改表前必查本文档确认影响范围
 
-3. **系统架构（详细版）** → `D:\Anthropic\docs\kanet-system-architecture.md`
+3. **Alpha 达标标准** → `D:\Anthropic\docs\ALPHA-CHECKLIST.md`
+
+4. **系统架构（详细版）** → `D:\Anthropic\docs\kanet-system-architecture.md`
    - 五大模块职责、25张表读写映射、数据流、已知裂缝、API 清单
 
-4. **数据架构危机** → `C:\Users\Y\.claude\projects\D--Anthropic\memory\kanet-data-architecture-crisis.md`
+5. **数据架构危机** → `C:\Users\Y\.claude\projects\D--Anthropic\memory\kanet-data-architecture-crisis.md`
    - Scout/Relay 双写问题、identity 断链路、catch-up 半盲
 
-5. **系统调查方法论（强制）** → `D:\Anthropic\docs\kanet-investigation-methodology.md`
+6. **系统调查方法论（强制）** → `D:\Anthropic\docs\kanet-investigation-methodology.md`
    - 遇到系统异常必须按六层顺序调查，不允许跳步
    - 六层：场景→真实数据→协议→执行逻辑→数据流向→存储表
    - 修复前必须完成前三层输出并得到确认
 
-3. **最新会话总结** → `C:\Users\Y\.claude\projects\D--Anthropic\memory\kanet-session-0325.md`
+7. **最新会话总结** → `C:\Users\Y\.claude\projects\D--Anthropic\memory\kanet-session-0325.md`
 
-4. **记忆索引** → `C:\Users\Y\.claude\projects\D--Anthropic\memory\MEMORY.md`
+8. **记忆索引** → `C:\Users\Y\.claude\projects\D--Anthropic\memory\MEMORY.md`
 
 ## 核心原则（违反即退回）
 
@@ -34,6 +38,16 @@
 - **每笔链上交易必须入库** — 地址 + TX 双锚点
 - **花钱代码验证所有路径** — 失败也要处理
 - **调查异常必须走六层** — 场景→数据→协议→逻辑→流向→存储，不跳步。修复前先完成前三层。详见 `docs/kanet-investigation-methodology.md`
+
+## 数据库修改规范
+
+改任何数据库表之前，必须先读 `docs/DATABASE.md`：
+- 确认这张表的用途和当前状态
+- 确认写入方和读取方
+- 确认是否是技术债（account_relations/interaction_records 禁止新增调用）
+- migrate.js 版本号必须接当前最新版本后面（当前最新：v45）
+
+DATABASE.md 有改动时（新表/删表/加字段），必须同步更新文档后一起提交。
 
 ## 五大系统
 

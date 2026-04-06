@@ -1640,5 +1640,15 @@ export function runMigrations() {
     console.log(`[migrate] v45: tx_records.local_address added. Backfilled ${bf.changes} handshake records.`);
   }
 
+  // v46: DROP account_relations — 已由 relation_states 完全替代（v28+v31 迁移完成）
+  // account-relations.js 文件同步删除，0 调用方确认
+  const arExists = sqlite.prepare(
+    "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='account_relations'"
+  ).get().cnt > 0;
+  if (arExists) {
+    sqlite.exec('DROP TABLE account_relations');
+    console.log('[migrate] v46: account_relations dropped.');
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
