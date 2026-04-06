@@ -1,7 +1,7 @@
 import { verifyIngestRequest } from '../services/ingest-auth.js';
 import { registerDiscoveredAddress, getProbeTargets, getDiscoveryStats } from '../data/discovery/discovery.js';
 import { processAgentCard } from '../data/discovery/agent-cards.js';
-import { recordInteraction, hasInteraction, getActivityProfiles, getHandshakeGraph, getNetworkStats } from '../data/discovery/interaction-records.js';
+// interaction-records.js 已废弃（v47, 2026-04-06）— 以下函数从 chain_events 直接查询
 import { getFunnelMetrics } from '../data/discovery/probe-logs.js';
 import { startScanner, stopScanner, getScannerStatus } from '../services/scanner.js';
 import { sqlite } from '../db/client.js';
@@ -55,9 +55,46 @@ export async function registerDiscoveryRoutes(fastify) {
   // GET /api/discovery/activity — global Kasia activity profiles (no auth)
   fastify.get('/api/discovery/activity', async (request, reply) => {
     const limit = Math.min(parseInt(request.query.limit) || 100, 500);
-    const profiles = getActivityProfiles(limit);
-    const handshakes = getHandshakeGraph();
-    const stats = getNetworkStats();
+    // Activity profiles from chain_events (v47: interaction_records dropped)
+    const profiles = sqlite.prepare(`
+      SELECT addr as address,
+        MIN(observed_at) as first_active, MAX(observed_at) as last_active,
+        COUNT(*) as total,
+        SUM(CASE WHEN t IN ('comm','comm_sent','comm_received') THEN 1 ELSE 0 END) as comm,
+        SUM(CASE WHEN t='handshake' THEN 1 ELSE 0 END) as handshake,
+        SUM(CASE WHEN t='self_stash' THEN 1 ELSE 0 END) as self_stash,
+        SUM(CASE WHEN t='text' THEN 1 ELSE 0 END) as legacy,
+        SUM(CASE WHEN t='comm_sent' THEN 1 ELSE 0 END) as bcast,
+        ROUND((julianday(MAX(observed_at)) - julianday(MIN(observed_at))) * 24, 1) as hours_active
+      FROM (
+        SELECT from_address as addr, event_type as t, observed_at FROM chain_events WHERE from_address IS NOT NULL
+        UNION ALL
+        SELECT to_address as addr, event_type as t, observed_at FROM chain_events WHERE to_address IS NOT NULL AND to_address != from_address
+      )
+      GROUP BY addr ORDER BY total DESC LIMIT ?
+    `).all(limit);
+
+    const handshakes = sqlite.prepare(`
+      SELECT from_address as from_addr, to_address as to_addr, observed_at, txid as tx_hash
+      FROM chain_events WHERE event_type = 'handshake' ORDER BY observed_at
+    `).all();
+
+    const stats = sqlite.prepare(`
+      SELECT COUNT(*) as total_interactions,
+        (SELECT COUNT(*) FROM (
+          SELECT from_address AS addr FROM chain_events WHERE from_address IS NOT NULL
+          UNION
+          SELECT to_address AS addr FROM chain_events WHERE to_address IS NOT NULL
+        )) as unique_addresses,
+        (SELECT COUNT(*) FROM (
+          SELECT DISTINCT
+            CASE WHEN from_address < to_address THEN from_address ELSE to_address END AS a,
+            CASE WHEN from_address < to_address THEN to_address ELSE from_address END AS b
+          FROM chain_events WHERE event_type = 'handshake'
+        )) as unique_handshakes,
+        MIN(observed_at) as earliest, MAX(observed_at) as latest
+      FROM chain_events
+    `).get();
 
     // Enrich with display names from identities
     const addresses = profiles.map(p => p.address);
@@ -101,9 +138,9 @@ export async function registerDiscoveryRoutes(fastify) {
     let sql = `
       SELECT rs.status, rs.handshake_observed_at as first_seen_at, rs.updated_at as last_seen_at,
              rs.first_seen_tx,
-             (SELECT COUNT(*) FROM interaction_records
-              WHERE (address_a = rs.peer_address OR address_b = rs.peer_address)
-                AND (address_a = rs.local_address OR address_b = rs.local_address)
+             (SELECT COUNT(*) FROM chain_events
+              WHERE (from_address = rs.peer_address OR to_address = rs.peer_address)
+                AND (from_address = rs.local_address OR to_address = rs.local_address)
              ) as interaction_count,
              i.address, i.identity_type, i.display_name,
              i.card_mode, i.card_entity_type, i.card_skills_json, i.card_summary,
@@ -227,9 +264,9 @@ export async function registerDiscoveryRoutes(fastify) {
     if (!addressA || !addressB) return reply.code(400).send({ error: 'addressA and addressB required' });
 
     const row = sqlite.prepare(`
-      SELECT COUNT(*) as c FROM interaction_records
-      WHERE ((address_a LIKE ? AND address_b LIKE ?) OR (address_a LIKE ? AND address_b LIKE ?))
-      ${type ? "AND interaction_type = ?" : ""}
+      SELECT COUNT(*) as c FROM chain_events
+      WHERE ((from_address LIKE ? AND to_address LIKE ?) OR (from_address LIKE ? AND to_address LIKE ?))
+      ${type ? "AND event_type = ?" : ""}
       LIMIT 1
     `).get(
       '%' + addressA.slice(-12), '%' + addressB.slice(-12),
@@ -247,22 +284,13 @@ export async function registerDiscoveryRoutes(fastify) {
       return reply.code(400).send({ error: 'addressA, addressB, txHash are required' });
     }
 
-    // Deduplicate by txHash
-    if (hasInteraction(txHash)) {
+    // Deduplicate by txHash (v47: check chain_events instead of interaction_records)
+    const dup = sqlite.prepare('SELECT 1 FROM chain_events WHERE txid = ?').get(txHash);
+    if (dup) {
       return reply.send({ ok: true, duplicate: true });
     }
 
-    const id = recordInteraction({
-      addressA,
-      addressB,
-      protocol: protocol || 'kasia',
-      txHash,
-      interactionType: interactionType || 'message',
-      occurredAt: occurredAt || null,
-      weight: weight || 1.0,
-    });
-
-    // 链上事实归档（Scout 观测的所有交互）
+    // v47: interaction_records 停写，chain_events 是唯一真相源
     if (txHash) {
       try {
         const { recordChainEvent } = await import('../services/chain-event.js');

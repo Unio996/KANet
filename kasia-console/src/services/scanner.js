@@ -185,7 +185,7 @@ export function getScannerStatus() {
   const discovery = getDiscoveryStats();
 
   const interactionCount = sqlite.prepare(
-    "SELECT COUNT(*) as n FROM interaction_records"
+    "SELECT COUNT(*) as n FROM chain_events"
   ).get()?.n || 0;
 
   return {

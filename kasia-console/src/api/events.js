@@ -68,23 +68,23 @@ export async function registerEventRoutes(fastify) {
 
           UNION ALL
 
-          -- Handshakes from interaction_records
-          SELECT tx_hash as id,
-                 CASE WHEN address_a IN (SELECT address FROM relay_nodes) THEN 'handshake_sent' ELSE 'handshake_received' END as event_type,
+          -- Handshakes from chain_events (P1 migration 2026-04-06)
+          SELECT txid as id,
+                 CASE WHEN from_address IN (SELECT address FROM relay_nodes) THEN 'handshake_sent' ELSE 'handshake_received' END as event_type,
                  COALESCE(
-                   (SELECT name FROM relay_nodes WHERE address = ir.address_a),
-                   (SELECT name FROM relay_nodes WHERE address = ir.address_b),
+                   (SELECT name FROM relay_nodes WHERE address = ce.from_address),
+                   (SELECT name FROM relay_nodes WHERE address = ce.to_address),
                    'unknown'
                  ) as source,
                  'info' as level,
-                 CASE WHEN address_a IN (SELECT address FROM relay_nodes)
-                   THEN (SELECT COALESCE(name, address) FROM relay_nodes WHERE address = ir.address_a) || ' → ' || SUBSTR(ir.address_b, -8)
-                   ELSE SUBSTR(ir.address_a, -8) || ' → ' || (SELECT COALESCE(name, address) FROM relay_nodes WHERE address = ir.address_b)
+                 CASE WHEN from_address IN (SELECT address FROM relay_nodes)
+                   THEN (SELECT COALESCE(name, address) FROM relay_nodes WHERE address = ce.from_address) || ' → ' || SUBSTR(ce.to_address, -8)
+                   ELSE SUBSTR(ce.from_address, -8) || ' → ' || (SELECT COALESCE(name, address) FROM relay_nodes WHERE address = ce.to_address)
                  END as summary,
-                 occurred_at as created_at,
+                 observed_at as created_at,
                  'handshake' as scope
-          FROM interaction_records ir
-          WHERE interaction_type = 'handshake'
+          FROM chain_events ce
+          WHERE event_type = 'handshake'
 
           UNION ALL
 
@@ -123,25 +123,25 @@ export async function registerEventRoutes(fastify) {
         "SELECT COUNT(*) as c FROM broadcast_messages WHERE sender_address = ? AND created_at > ?"
       ).get(r.address, day7).c;
 
-      // Handshakes (sent or received)
+      // Handshakes (sent or received) — from chain_events (P1 migration 2026-04-06)
       const hs24h = sqlite.prepare(
-        "SELECT COUNT(*) as c FROM interaction_records WHERE (address_a = ? OR address_b = ?) AND interaction_type = 'handshake' AND occurred_at > ?"
+        "SELECT COUNT(*) as c FROM chain_events WHERE (from_address = ? OR to_address = ?) AND event_type = 'handshake' AND observed_at > ?"
       ).get(r.address, r.address, day1).c;
       const hs7d = sqlite.prepare(
-        "SELECT COUNT(*) as c FROM interaction_records WHERE (address_a = ? OR address_b = ?) AND interaction_type = 'handshake' AND occurred_at > ?"
+        "SELECT COUNT(*) as c FROM chain_events WHERE (from_address = ? OR to_address = ?) AND event_type = 'handshake' AND observed_at > ?"
       ).get(r.address, r.address, day7).c;
 
       // Total interactions
       const interactions24h = sqlite.prepare(
-        "SELECT COUNT(*) as c FROM interaction_records WHERE (address_a = ? OR address_b = ?) AND occurred_at > ?"
+        "SELECT COUNT(*) as c FROM chain_events WHERE (from_address = ? OR to_address = ?) AND observed_at > ?"
       ).get(r.address, r.address, day1).c;
       const interactions7d = sqlite.prepare(
-        "SELECT COUNT(*) as c FROM interaction_records WHERE (address_a = ? OR address_b = ?) AND occurred_at > ?"
+        "SELECT COUNT(*) as c FROM chain_events WHERE (from_address = ? OR to_address = ?) AND observed_at > ?"
       ).get(r.address, r.address, day7).c;
 
       // Unique peers (7d)
       const peers7d = sqlite.prepare(
-        "SELECT COUNT(DISTINCT CASE WHEN address_a = ? THEN address_b ELSE address_a END) as c FROM interaction_records WHERE (address_a = ? OR address_b = ?) AND occurred_at > ?"
+        "SELECT COUNT(DISTINCT CASE WHEN from_address = ? THEN to_address ELSE from_address END) as c FROM chain_events WHERE (from_address = ? OR to_address = ?) AND observed_at > ?"
       ).get(r.address, r.address, r.address, day7).c;
 
       // Mind events (reflections, proactive, skills)

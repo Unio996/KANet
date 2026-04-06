@@ -17,16 +17,16 @@ export async function registerChainDataRoutes(fastify) {
   // GET /api/chain/stats — chain intelligence from KANet DB
   fastify.get('/api/chain/stats', async (request, reply) => {
     try {
-      // 1. Interaction volume (network activity)
-      const total = sqlite.prepare('SELECT COUNT(*) as n FROM interaction_records').get().n;
+      // 1. Interaction volume (network activity) — from chain_events (P1 migration 2026-04-06)
+      const total = sqlite.prepare('SELECT COUNT(*) as n FROM chain_events').get().n;
       const last24h = sqlite.prepare(
-        "SELECT COUNT(*) as n FROM interaction_records WHERE occurred_at > datetime('now','-1 day')"
+        "SELECT COUNT(*) as n FROM chain_events WHERE observed_at > datetime('now','-1 day')"
       ).get().n;
       const last7d = sqlite.prepare(
-        "SELECT COUNT(*) as n FROM interaction_records WHERE occurred_at > datetime('now','-7 day')"
+        "SELECT COUNT(*) as n FROM chain_events WHERE observed_at > datetime('now','-7 day')"
       ).get().n;
       const prev7d = sqlite.prepare(
-        "SELECT COUNT(*) as n FROM interaction_records WHERE occurred_at > datetime('now','-14 day') AND occurred_at <= datetime('now','-7 day')"
+        "SELECT COUNT(*) as n FROM chain_events WHERE observed_at > datetime('now','-14 day') AND observed_at <= datetime('now','-7 day')"
       ).get().n;
 
       // Week-over-week trend
@@ -34,10 +34,10 @@ export async function registerChainDataRoutes(fastify) {
 
       // 2. Protocol breakdown
       const protocols = sqlite.prepare(
-        'SELECT interaction_type, COUNT(*) as n FROM interaction_records GROUP BY interaction_type'
+        'SELECT event_type, COUNT(*) as n FROM chain_events GROUP BY event_type'
       ).all();
       const protocolMap = {};
-      protocols.forEach(p => { protocolMap[p.interaction_type] = p.n; });
+      protocols.forEach(p => { protocolMap[p.event_type] = p.n; });
 
       // 3. Address intelligence
       const totalAddresses = sqlite.prepare('SELECT COUNT(*) as n FROM identities').get().n;
@@ -68,9 +68,9 @@ export async function registerChainDataRoutes(fastify) {
 
       // 7. Hourly activity trend (last 24h)
       const hourlyActivity = sqlite.prepare(`
-        SELECT strftime('%H', occurred_at) as hour, COUNT(*) as n
-        FROM interaction_records
-        WHERE occurred_at > datetime('now','-1 day')
+        SELECT strftime('%H', observed_at) as hour, COUNT(*) as n
+        FROM chain_events
+        WHERE observed_at > datetime('now','-1 day')
         GROUP BY hour ORDER BY hour
       `).all();
 
