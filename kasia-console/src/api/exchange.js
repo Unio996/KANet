@@ -7,7 +7,7 @@
  */
 
 import { sqlite } from '../db/client.js';
-import { processAccept, processCancel, processManualConfirm, expireStale } from '../services/exchange-machine.js';
+import { processAccept, processCancel, processManualConfirm, processPaymentSubmit, expireStale } from '../services/exchange-machine.js';
 
 export async function registerExchangeRoutes(fastify) {
 
@@ -310,6 +310,27 @@ export async function registerExchangeRoutes(fastify) {
     }
 
     return reply.send({ ok: true, offer_id, status: result.protocol_status });
+  });
+
+  // ── POST /api/exchange/submit-payment — taker 提交付款 TX ──
+  fastify.post('/api/exchange/submit-payment', async (request, reply) => {
+    const { relayNodeId, offer_id, payment_tx, payment_chain } = request.body || {};
+
+    if (!offer_id || !payment_tx || !payment_chain) {
+      return reply.code(400).send({ error: 'offer_id, payment_tx, payment_chain required' });
+    }
+
+    const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer_id);
+    if (!offer) return reply.code(404).send({ error: 'offer_not_found' });
+
+    const relay = relayNodeId ? sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(relayNodeId) : null;
+    if (!relay || relay.address !== offer.taker) {
+      return reply.code(403).send({ error: 'only taker can submit payment' });
+    }
+
+    const result = processPaymentSubmit({ offer_id, payment_tx, payment_chain });
+    if (result.error) return reply.code(400).send(result);
+    return reply.send(result);
   });
 
   // ── GET /api/exchange/agents — 可用 Agent 列表 ───────────
