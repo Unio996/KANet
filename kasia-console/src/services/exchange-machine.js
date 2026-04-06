@@ -358,9 +358,50 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
       setTimeout(() => _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt + 1), RETRY_MS);
 
     } else {
-      console.log(`[exchange] offer ${offer_id.slice(0,8)} verification failed after ${MAX_ATTEMPTS} attempts: ${vr.error}`);
+      // Auto-dispute after MAX_ATTEMPTS failed verifications
+      console.log(`[exchange] offer ${offer_id.slice(0,8)} auto-dispute after ${MAX_ATTEMPTS} failed verifications`);
+      const dmeta = JSON.parse(offer.verification_meta || '{}');
+      dmeta.dispute_reason = `Auto-dispute: verification failed ${MAX_ATTEMPTS} times. Last error: ${vr.error}`;
+      dmeta.dispute_by = 'system';
+      dmeta.dispute_at = new Date().toISOString();
+      sqlite.prepare(
+        'UPDATE exchange_offers SET verification_meta = ?, updated_at = ? WHERE id = ?'
+      ).run(JSON.stringify(dmeta), new Date().toISOString(), offer_id);
+      transition(offer_id, 'disputed', {});
     }
   } catch (err) {
     console.error(`[exchange] _verifyAndComplete error:`, err.message);
   }
+}
+
+// ── Dispute ──────────────────────────────────────────────────
+
+/**
+ * Maker or taker raises a dispute on an in-progress offer.
+ */
+export function processDispute({ offer_id, disputer_address, reason }) {
+  const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer_id);
+  if (!offer) return { error: 'offer_not_found' };
+
+  const isParty = offer.maker === disputer_address || offer.taker === disputer_address;
+  if (!isParty) return { error: 'only_parties_can_dispute' };
+
+  const DISPUTABLE = ['verifying', 'awaiting_manual_confirm', 'matched'];
+  if (!DISPUTABLE.includes(offer.protocol_status)) {
+    return { error: 'invalid_status', current: offer.protocol_status };
+  }
+
+  const meta = JSON.parse(offer.verification_meta || '{}');
+  meta.dispute_reason = reason || 'No reason provided';
+  meta.dispute_by = disputer_address;
+  meta.dispute_at = new Date().toISOString();
+
+  sqlite.prepare(
+    'UPDATE exchange_offers SET verification_meta = ?, updated_at = ? WHERE id = ?'
+  ).run(JSON.stringify(meta), new Date().toISOString(), offer_id);
+
+  transition(offer_id, 'disputed', {});
+  console.log(`[exchange] offer ${offer_id.slice(0,8)} disputed by ${disputer_address.slice(-8)}: ${reason}`);
+
+  return { ok: true, status: 'disputed' };
 }

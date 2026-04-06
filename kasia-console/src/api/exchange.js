@@ -7,7 +7,7 @@
  */
 
 import { sqlite } from '../db/client.js';
-import { processAccept, processCancel, processManualConfirm, processPaymentSubmit, expireStale } from '../services/exchange-machine.js';
+import { processAccept, processCancel, processManualConfirm, processPaymentSubmit, processDispute, expireStale } from '../services/exchange-machine.js';
 
 export async function registerExchangeRoutes(fastify) {
 
@@ -329,6 +329,26 @@ export async function registerExchangeRoutes(fastify) {
     }
 
     const result = processPaymentSubmit({ offer_id, payment_tx, payment_chain });
+    if (result.error) return reply.code(400).send(result);
+    return reply.send(result);
+  });
+
+  // ── POST /api/exchange/dispute — 发起争议 ─────────────────
+  fastify.post('/api/exchange/dispute', async (request, reply) => {
+    const { relayNodeId, offer_id, reason } = request.body || {};
+    if (!offer_id) return reply.code(400).send({ error: 'offer_id required' });
+
+    const relay = relayNodeId
+      ? sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(relayNodeId)
+      : null;
+    if (!relay) return reply.code(403).send({ error: 'relayNodeId required' });
+
+    const result = processDispute({
+      offer_id,
+      disputer_address: relay.address,
+      reason: reason || '',
+    });
+
     if (result.error) return reply.code(400).send(result);
     return reply.send(result);
   });
