@@ -2,7 +2,7 @@
 
 > **修改任何代码前必读。** 一个文件，覆盖全系统。唯一权威开发者文档。
 > 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-06。
-> 4/6 更新：技术债清零 — account_relations(v46 DROP) + interaction_records(v47 DROP) + replies.sent_txid hack 删除。数据库字典 `docs/DATABASE.md` 建立。当前 34 张活跃表。
+> 4/6 更新：技术债清零（v46/v47 DROP 两张表） + DATABASE.md 数据字典 + exchange 交割全流程（manual/cross_chain_tx/超时/争议/套利链路）。cross-chain-verify.mjs 独立模块。
 > 4/5 更新：pending_actions 意图队列（v44）— 意图与事实分离，修复 catch-up 重复握手双花。陷阱 #24-27。花费账本页 /ledger。IB Gateway 不随启动。
 > 4/4 下午更新：做市三层架构（market-scanner + order-executor + 自动对冲）、activity-log 改读 messages、contacts.eta 时间本地化、PLACE_ORDER free_market 指向 /exchange。
 > 4/4 更新：陷阱 #18-21（alias 链路/ingestMessage null 保护/Scout 检查点/历史 comm 补全），新增消息补全文件速查表，Scout light mode。
@@ -879,13 +879,59 @@ KANet offer matched（kanet_exchange_accept_v1）
 
 全部公开 API，无需认证。30s 缓存。proactive 每小时一次，reactive 关键词触发。
 
-**Brain 输出格式**：无机会（<0.3%）→ 4 行摘要；有机会（≥0.3%）→ 展开⚡机会 + 完整价格表。
+**Brain 输出格式**：无机会（<0.3%）→ 4 行摘要 + "observation only"；有机会（≥0.3%）→ 展开⚡机会 + 完整价格表 + MAKE_MARKET 授权提示。
+
+### 交割流程（2026-04-06 补完）
+
+**manual 验证路径：**
+```
+open → matched → awaiting_manual_confirm → maker confirm + taker confirm → completed
+```
+POST `/api/exchange/confirm` { relayNodeId, offer_id, role:'maker'|'taker' }
+processManualConfirm：验证 confirmer_address 是 maker/taker → 写 maker/taker_confirmed_at → 双方都确认 → completed。
+
+**cross_chain_tx 验证路径：**
+```
+open → matched → verifying → taker submit-payment → 异步验证 → completed
+```
+POST `/api/exchange/submit-payment` { relayNodeId, offer_id, payment_tx, payment_chain }
+processPaymentSubmit → 写 verification_meta.payment_tx → _verifyAndComplete 异步验证（verifyCrossChainTx）→ confirmed → completed。失败最多重试 3 次（60s 间隔），3 次后自动 disputed。
+
+**cross-chain-verify.mjs**（新模块）：
+```
+verifyCrossChainTx({ txHash, chain, expectedAmount, expectedTo, expectedFrom })
+→ { confirmed, confirmations, required, actualAmount, recipient, sender, error?, underpayment? }
+```
+支持 BNB/ETH（ethers.js Transfer log）、SOL（SPL token balance delta）、TRON（TRC20 log 解析）。trading.js 也已改用此模块。
+
+**争议处理：**
+POST `/api/exchange/dispute` { relayNodeId, offer_id, reason }
+processDispute：只允许 maker/taker，只允许 verifying/awaiting_manual_confirm/matched 状态。
+
+**超时处理：**
+index.js 启动时 + 每 5 分钟：expireStale()（open 过期→expired）+ timeoutVerifying()（verifying/awaiting 超时→timed_out）。
+
+**对冲：**
+handleExchangeAccept 按 verification 分叉：manual → log + return，verifying → _executeHedge。
+_executeHedge 支持 preferredCex 参数 + HEDGE_CEX_MAP（scanner 显示名→DB exchange 字段映射）。
+
+### 关键文件（exchange 补充）
+
+| 文件 | 职责 |
+|------|------|
+| kasia-console/src/services/cross-chain-verify.mjs | 跨链 USDT 验证（BNB/ETH/SOL/TRON 统一接口） |
+| kasia-console/src/services/exchange-machine.js | 状态机 + processPaymentSubmit + processDispute |
+| kasia-console/src/api/exchange.js | 10 个 API 端点（含 submit-payment、dispute） |
+
+### 致命陷阱（exchange 补充）
+
+30. **handleExchangeAccept 必须按 verification 分叉。** manual → awaiting_manual_confirm（不触发对冲），cross_chain_tx → verifying（触发对冲）。单一条件 `!== 'awaiting_manual_confirm'` 会让 cross_chain_tx 报价卡死。
+
+31. **HEDGE_CEX_MAP 名称映射。** scanner venue 名是大写显示名（Gate/MEXC/Bybit），exchange_accounts 表存小写 ID（gateio/mexc/bybit）。_executeHedge 必须用 HEDGE_CEX_MAP 转换后查 DB。
 
 ### 待实现
 
-- matched 之后的完整交割流程（paying → paid → verified → delivering → completed）
-- dispute 处理
-- 信誉系统接入
+- 信誉系统接入（reputation.js 骨架在，probe_address 未实现）
 - Binance/Kraken exchange_accounts 添加（用户有 API Key，待配置）
 
 ---
@@ -1245,7 +1291,9 @@ KANet offer matched（kanet_exchange_accept_v1）
 | POST | `/api/exchange/publish` | 发布报价 | exchange.js |
 | POST | `/api/exchange/accept` | 接受报价 | exchange.js |
 | POST | `/api/exchange/cancel` | 取消报价 | exchange.js |
-| POST | `/api/exchange/confirm` | 确认交割 | exchange.js |
+| POST | `/api/exchange/confirm` | 确认交割（manual 双方确认） | exchange.js |
+| POST | `/api/exchange/submit-payment` | taker 提交付款 TX（cross_chain_tx） | exchange.js |
+| POST | `/api/exchange/dispute` | 发起争议（maker/taker） | exchange.js |
 
 ### 市场数据 / Market Data
 
