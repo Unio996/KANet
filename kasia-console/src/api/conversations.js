@@ -253,12 +253,12 @@ export async function registerConversationRoutes(fastify) {
     const addr = relay.address;
     const since = new Date(Date.now() - parseInt(days) * 86400000).toISOString();
 
-    // Count activities — handshakes from relation_states, comms from interaction_records
+    // Count activities — handshakes from relation_states, comms from chain_events (P1 migration 2026-04-06)
     const handshakes = sqlite.prepare(
       "SELECT COUNT(*) as c FROM relation_states WHERE local_address = ? AND handshake_accepted_at > ?"
     ).get(addr, since);
     const comms = sqlite.prepare(
-      "SELECT COUNT(*) as c FROM interaction_records WHERE address_a = ? AND interaction_type = 'comm' AND occurred_at > ?"
+      "SELECT COUNT(*) as c FROM chain_events WHERE from_address = ? AND event_type IN ('comm','comm_sent') AND observed_at > ?"
     ).get(addr, since);
     const bcasts = sqlite.prepare(
       "SELECT COUNT(*) as c FROM broadcast_messages WHERE sender_address = ? AND created_at > ?"

@@ -569,25 +569,9 @@ v46（2026-04-06）DROP TABLE，account-relations.js 同步删除。
 
 ---
 
-### interaction_records（73163 条）⚠ 半死表
-**应迁移到 chain_events，但仍有 17 处活跃读取**
-
-```
-状态：
-    写入：discovery.js:255 仍在写（Scout 上报时）
-    读取：chain-data.js(7处) + events.js(7处) + discovery.js(2处) + conversations.js(1处)
-    替代：chain_events 字段是其超集，完全可迁移
-处置：P1 — 逐步迁移 17 处读取到 chain_events，再停写，最后 DROP TABLE
-```
-
-字段对照：
-
-| interaction_records | chain_events 等价 |
-|---------------------|-------------------|
-| interaction_type='handshake' | event_type='handshake' |
-| interaction_type='comm' | event_type IN ('comm','comm_sent','comm_received') |
-| occurred_at | observed_at |
-| address_a/address_b | from_address/to_address |
+### interaction_records — 已删除（v47）
+v47（2026-04-06）DROP TABLE。
+所有读取已迁移到 chain_events，discovery.js 停止写入。
 
 ---
 

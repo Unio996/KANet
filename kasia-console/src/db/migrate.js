@@ -1650,5 +1650,16 @@ export function runMigrations() {
     console.log('[migrate] v46: account_relations dropped.');
   }
 
+  // v47: interaction_records 停写 + DROP TABLE
+  // P1 迁移完成（2026-04-06）：所有读取已迁移到 chain_events
+  // 写入方 discovery.js:recordInteraction() 同步停写
+  const irExists = sqlite.prepare(
+    "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='interaction_records'"
+  ).get().cnt > 0;
+  if (irExists) {
+    sqlite.exec('DROP TABLE interaction_records');
+    console.log('[migrate] v47: interaction_records dropped.');
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
