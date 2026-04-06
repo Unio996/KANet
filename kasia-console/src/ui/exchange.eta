@@ -3,197 +3,412 @@
 <div class="p-6 max-w-5xl mx-auto" x-data="exchangeApp()">
 
   <!-- Node visibility notice -->
-  <div class="mb-6 bg-warm-50 border border-warm-200 rounded-lg p-4 text-sm text-ink-500">
-    <p class="font-medium text-ink-600 mb-1">Protocol-Level Market</p>
-    <p>This is the broadcast stream observed by your local node — not a complete global orderbook.</p>
-    <p>Your view depends on the index coverage since this node started scanning.</p>
+  <div class="mb-5 bg-warm-50 border border-warm-200 rounded-lg px-4 py-3 text-xs text-ink-500">
+    <span class="font-medium text-ink-600">Protocol-Level Market</span> —
+    Broadcast stream observed by your local node. Not a global orderbook.
   </div>
 
-  <!-- Market groups bar -->
-  <div class="flex items-center gap-2 mb-4 flex-wrap">
-    <button @click="filter = ''"
-      :class="filter === '' ? 'bg-brand-500 text-white' : 'bg-warm-100 text-ink-500 hover:bg-warm-200'"
-      class="px-3 py-1.5 rounded-full text-xs font-medium transition-colors">
-      All
+  <!-- Tab bar -->
+  <div class="flex items-center border-b border-warm-200 mb-5">
+    <button @click="activeTab = 'market'"
+      :class="activeTab === 'market' ? 'border-brand-500 text-brand-600' : 'border-transparent text-ink-400 hover:text-ink-600'"
+      class="px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors">
+      Market
     </button>
-    <template x-for="g in groups" :key="g.market_key">
-      <button @click="filter = g.market_key"
-        :class="filter === g.market_key ? 'bg-brand-500 text-white' : 'bg-warm-100 text-ink-500 hover:bg-warm-200'"
-        class="px-3 py-1.5 rounded-full text-xs font-medium transition-colors">
-        <span x-text="g.market_key"></span>
-        <span class="ml-1 opacity-60" x-text="'(' + g.cnt + ')'"></span>
-      </button>
-    </template>
+    <button @click="activeTab = 'deals'"
+      :class="activeTab === 'deals' ? 'border-brand-500 text-brand-600' : 'border-transparent text-ink-400 hover:text-ink-600'"
+      class="px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5">
+      My Deals
+      <span x-show="activeDeals.length > 0"
+        class="bg-brand-500 text-white text-[10px] leading-none px-1.5 py-0.5 rounded-full"
+        x-text="activeDeals.length"></span>
+    </button>
+    <div class="ml-auto flex items-center gap-2 text-xs pb-1">
+      <span class="text-ink-400">Agent:</span>
+      <select x-model="form.relayNodeId" @change="onAgentChange()"
+        class="px-2 py-1 border border-warm-200 rounded text-xs bg-white focus:ring-1 focus:ring-brand-300">
+        <template x-for="r in relays" :key="r.id">
+          <option :value="r.id" x-text="r.name"></option>
+        </template>
+      </select>
+    </div>
   </div>
 
-  <!-- Action bar -->
-  <div class="flex items-center justify-between mb-4">
-    <div class="flex items-center gap-4">
+  <!-- ═══ MARKET TAB ═══ -->
+  <div x-show="activeTab === 'market'">
+
+    <!-- Market groups bar -->
+    <div class="flex items-center gap-2 mb-4 flex-wrap">
+      <button @click="filter = ''"
+        :class="filter === '' ? 'bg-brand-500 text-white' : 'bg-warm-100 text-ink-500 hover:bg-warm-200'"
+        class="px-3 py-1.5 rounded-full text-xs font-medium transition-colors">
+        All
+      </button>
+      <template x-for="g in groups" :key="g.market_key">
+        <button @click="filter = g.market_key"
+          :class="filter === g.market_key ? 'bg-brand-500 text-white' : 'bg-warm-100 text-ink-500 hover:bg-warm-200'"
+          class="px-3 py-1.5 rounded-full text-xs font-medium transition-colors">
+          <span x-text="g.market_key"></span>
+          <span class="ml-1 opacity-60" x-text="'(' + g.cnt + ')'"></span>
+        </button>
+      </template>
+    </div>
+
+    <!-- Action bar -->
+    <div class="flex items-center justify-between mb-4">
       <div class="text-sm text-ink-400">
         <span x-text="filtered.length"></span> offers
         <span x-show="filter" class="ml-1">in <span x-text="filter" class="font-medium text-ink-600"></span></span>
       </div>
-      <div class="flex items-center gap-2 text-xs">
-        <span class="text-ink-400">Agent:</span>
-        <select x-model="form.relayNodeId"
-          class="px-2 py-1 border border-warm-200 rounded text-xs bg-white focus:ring-1 focus:ring-brand-300">
-          <template x-for="r in relays" :key="r.id">
-            <option :value="r.id" x-text="r.name"></option>
-          </template>
-        </select>
-      </div>
-    </div>
-    <button @click="showForm = !showForm"
-      class="px-4 py-2 bg-brand-500 text-white rounded-lg text-sm font-medium hover:bg-brand-600 transition-colors">
-      + Publish Offer
-    </button>
-  </div>
-
-  <!-- Publish form (collapsed) -->
-  <div x-show="showForm" x-transition class="mb-6 bg-white border border-warm-200 rounded-lg p-5">
-    <h3 class="text-sm font-semibold text-ink-700 mb-4">Publish an Offer</h3>
-    <div class="grid grid-cols-2 gap-4">
-      <!-- Give side -->
-      <div>
-        <label class="block text-xs font-medium text-ink-500 mb-1">I give</label>
-        <div class="flex gap-2">
-          <input x-model="form.give_amount" type="text" placeholder="Amount"
-            class="flex-1 px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
-          <input x-model="form.give_asset" type="text" placeholder="Asset (e.g. KAS)"
-            class="w-32 px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
-        </div>
-        <input x-model="form.give_chain" type="text" placeholder="Chain (optional, e.g. kaspa)"
-          class="mt-2 w-full px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
-      </div>
-      <!-- Want side -->
-      <div>
-        <label class="block text-xs font-medium text-ink-500 mb-1">I want</label>
-        <div class="flex gap-2">
-          <input x-model="form.want_amount" type="text" placeholder="Amount"
-            class="flex-1 px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
-          <input x-model="form.want_asset" type="text" placeholder="Asset (e.g. USDT)"
-            class="w-32 px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
-        </div>
-        <input x-model="form.want_chain" type="text" placeholder="Chain (optional, e.g. bnb)"
-          class="mt-2 w-full px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
-      </div>
-    </div>
-    <div class="grid grid-cols-3 gap-4 mt-4">
-      <div>
-        <label class="block text-xs font-medium text-ink-500 mb-1">Verification</label>
-        <select x-model="form.verification"
-          class="w-full px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300">
-          <option value="manual">Manual (both confirm)</option>
-          <option value="cross_chain_tx">Cross-chain TX</option>
-          <option value="kaspa_tx">Kaspa TX</option>
-        </select>
-      </div>
-      <div>
-        <label class="block text-xs font-medium text-ink-500 mb-1">Expires</label>
-        <select x-model="form.expires_minutes"
-          class="w-full px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300">
-          <option value="30">30 min</option>
-          <option value="60" selected>1 hour</option>
-          <option value="360">6 hours</option>
-          <option value="1440">24 hours</option>
-        </select>
-      </div>
-      <div>
-        <label class="block text-xs font-medium text-ink-500 mb-1">Agent</label>
-        <select x-model="form.relayNodeId"
-          class="w-full px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300">
-          <template x-for="r in relays" :key="r.id">
-            <option :value="r.id" x-text="r.name"></option>
-          </template>
-        </select>
-      </div>
-    </div>
-    <div class="mt-4 flex justify-end gap-2">
-      <button @click="showForm = false"
-        class="px-4 py-2 text-sm text-ink-500 hover:text-ink-700 transition-colors">Cancel</button>
-      <button @click="publishOffer()"
-        :disabled="publishing"
-        class="px-4 py-2 bg-brand-500 text-white rounded-lg text-sm font-medium hover:bg-brand-600 transition-colors disabled:opacity-50">
-        <span x-show="!publishing">Broadcast to Network</span>
-        <span x-show="publishing">Broadcasting...</span>
+      <button @click="showForm = !showForm"
+        class="px-4 py-2 bg-brand-500 text-white rounded-lg text-sm font-medium hover:bg-brand-600 transition-colors">
+        + Publish Offer
       </button>
     </div>
-    <p x-show="formError" x-text="formError" class="mt-2 text-xs text-red-600"></p>
-    <p x-show="formSuccess" x-text="formSuccess" class="mt-2 text-xs text-green-600"></p>
-  </div>
 
-  <!-- Offer stream -->
-  <div class="space-y-3">
-    <template x-if="loading">
-      <div class="text-center py-12 text-ink-400 text-sm">Loading offers...</div>
-    </template>
-    <template x-if="!loading && filtered.length === 0">
-      <div class="text-center py-12 text-ink-400">
-        <p class="text-sm">No offers observed yet</p>
-        <p class="text-xs mt-1">Publish the first offer to start the market</p>
-      </div>
-    </template>
-    <template x-for="o in filtered" :key="o.id">
-      <div class="bg-white border border-warm-200 rounded-lg p-4 hover:border-brand-200 transition-colors">
-        <div class="flex items-start justify-between">
-          <!-- Offer content -->
-          <div class="flex-1">
-            <div class="flex items-center gap-3">
-              <span class="text-lg font-semibold text-ink-700">
-                <span x-text="o.give_amount"></span>
-                <span x-text="o.give_asset" class="text-brand-600"></span>
-              </span>
-              <span class="text-ink-300">→</span>
-              <span class="text-lg font-semibold text-ink-700">
-                <span x-text="o.want_amount"></span>
-                <span x-text="o.want_asset" class="text-brand-600"></span>
-              </span>
-            </div>
-            <div class="flex items-center gap-3 mt-2 text-xs text-ink-400">
-              <span x-text="'by ' + KANet.shortAddr(o.maker)"></span>
-              <span x-show="o.give_chain" x-text="o.give_chain + ' →'"></span>
-              <span x-show="o.want_chain" x-text="o.want_chain"></span>
-              <span class="px-1.5 py-0.5 rounded text-[10px] font-medium"
-                :class="{
-                  'bg-green-50 text-green-700': o.protocol_status === 'open',
-                  'bg-blue-50 text-blue-700': o.protocol_status === 'matched',
-                  'bg-warm-100 text-ink-500': o.protocol_status === 'completed',
-                  'bg-red-50 text-red-600': o.protocol_status === 'cancelled' || o.protocol_status === 'expired',
-                }"
-                x-text="o.protocol_status"></span>
-              <span x-text="KANet.relativeTime(o.broadcast_at)"></span>
-              <span x-show="o.verification !== 'manual'"
-                class="px-1.5 py-0.5 bg-brand-50 text-brand-600 rounded text-[10px]"
-                x-text="o.verification"></span>
-            </div>
+    <!-- Publish form (collapsed) -->
+    <div x-show="showForm" x-transition class="mb-6 bg-white border border-warm-200 rounded-lg p-5">
+      <h3 class="text-sm font-semibold text-ink-700 mb-4">Publish an Offer</h3>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-xs font-medium text-ink-500 mb-1">I give</label>
+          <div class="flex gap-2">
+            <input x-model="form.give_amount" type="text" placeholder="Amount"
+              class="flex-1 px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
+            <input x-model="form.give_asset" type="text" placeholder="Asset (e.g. KAS)"
+              class="w-32 px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
           </div>
-          <!-- Accept button -->
-          <button x-show="o.protocol_status === 'open'"
-            @click="acceptOffer(o)"
-            class="px-3 py-1.5 bg-green-500 text-white rounded-lg text-xs font-medium hover:bg-green-600 transition-colors">
-            Accept
-          </button>
+          <input x-model="form.give_chain" type="text" placeholder="Chain (optional, e.g. kaspa)"
+            class="mt-2 w-full px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-ink-500 mb-1">I want</label>
+          <div class="flex gap-2">
+            <input x-model="form.want_amount" type="text" placeholder="Amount"
+              class="flex-1 px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
+            <input x-model="form.want_asset" type="text" placeholder="Asset (e.g. USDT)"
+              class="w-32 px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
+          </div>
+          <input x-model="form.want_chain" type="text" placeholder="Chain (optional, e.g. bnb)"
+            class="mt-2 w-full px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
         </div>
       </div>
-    </template>
+      <div class="grid grid-cols-3 gap-4 mt-4">
+        <div>
+          <label class="block text-xs font-medium text-ink-500 mb-1">Verification</label>
+          <select x-model="form.verification"
+            class="w-full px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300">
+            <option value="manual">Manual (both confirm)</option>
+            <option value="cross_chain_tx">Cross-chain TX</option>
+            <option value="kaspa_tx">Kaspa TX</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-ink-500 mb-1">Expires</label>
+          <select x-model="form.expires_minutes"
+            class="w-full px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300">
+            <option value="30">30 min</option>
+            <option value="60" selected>1 hour</option>
+            <option value="360">6 hours</option>
+            <option value="1440">24 hours</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-ink-500 mb-1">Agent</label>
+          <select x-model="form.relayNodeId"
+            class="w-full px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300">
+            <template x-for="r in relays" :key="r.id">
+              <option :value="r.id" x-text="r.name"></option>
+            </template>
+          </select>
+        </div>
+      </div>
+      <div class="mt-4 flex justify-end gap-2">
+        <button @click="showForm = false"
+          class="px-4 py-2 text-sm text-ink-500 hover:text-ink-700 transition-colors">Cancel</button>
+        <button @click="publishOffer()" :disabled="publishing"
+          class="px-4 py-2 bg-brand-500 text-white rounded-lg text-sm font-medium hover:bg-brand-600 transition-colors disabled:opacity-50">
+          <span x-show="!publishing">Broadcast to Network</span>
+          <span x-show="publishing">Broadcasting...</span>
+        </button>
+      </div>
+      <p x-show="formError" x-text="formError" class="mt-2 text-xs text-red-600"></p>
+      <p x-show="formSuccess" x-text="formSuccess" class="mt-2 text-xs text-green-600"></p>
+    </div>
+
+    <!-- Offer stream -->
+    <div class="space-y-3">
+      <template x-if="loading">
+        <div class="text-center py-12 text-ink-400 text-sm">Loading offers...</div>
+      </template>
+      <template x-if="!loading && filtered.length === 0">
+        <div class="text-center py-12 text-ink-400">
+          <p class="text-sm">No offers observed yet</p>
+          <p class="text-xs mt-1">Publish the first offer to start the market</p>
+        </div>
+      </template>
+      <template x-for="o in filtered" :key="o.id">
+        <div class="bg-white border border-warm-200 rounded-lg p-4 hover:border-brand-200 transition-colors">
+          <div class="flex items-start justify-between">
+            <div class="flex-1">
+              <div class="flex items-center gap-3">
+                <span class="text-lg font-semibold text-ink-700">
+                  <span x-text="o.give_amount"></span>
+                  <span x-text="o.give_asset" class="text-brand-600"></span>
+                </span>
+                <span class="text-ink-300">&rarr;</span>
+                <span class="text-lg font-semibold text-ink-700">
+                  <span x-text="o.want_amount"></span>
+                  <span x-text="o.want_asset" class="text-brand-600"></span>
+                </span>
+              </div>
+              <div class="flex items-center gap-3 mt-2 text-xs text-ink-400">
+                <span x-text="'by ' + KANet.shortAddr(o.maker)"></span>
+                <span x-show="o.give_chain" x-text="o.give_chain + ' &rarr;'"></span>
+                <span x-show="o.want_chain" x-text="o.want_chain"></span>
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-medium" :class="statusBadge(o.protocol_status)"
+                  x-text="o.protocol_status"></span>
+                <span x-text="KANet.relativeTime(o.broadcast_at)"></span>
+                <span x-show="o.verification !== 'manual'"
+                  class="px-1.5 py-0.5 bg-brand-50 text-brand-600 rounded text-[10px]"
+                  x-text="o.verification"></span>
+              </div>
+            </div>
+            <!-- Accept (only open offers that are not mine) -->
+            <button x-show="o.protocol_status === 'open' && !isMine(o)"
+              @click="acceptOffer(o)"
+              class="px-3 py-1.5 bg-green-500 text-white rounded-lg text-xs font-medium hover:bg-green-600 transition-colors">
+              Accept
+            </button>
+            <!-- Cancel (only open offers that I made) -->
+            <button x-show="o.protocol_status === 'open' && isMaker(o)"
+              @click="cancelOffer(o)"
+              class="px-3 py-1.5 bg-warm-200 text-ink-600 rounded-lg text-xs font-medium hover:bg-warm-300 transition-colors">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <div class="mt-6 text-center">
+      <button @click="loadOffers()" class="text-xs text-ink-400 hover:text-brand-500 transition-colors">Refresh</button>
+    </div>
   </div>
 
-  <!-- Refresh -->
-  <div class="mt-6 text-center">
-    <button @click="loadOffers()" class="text-xs text-ink-400 hover:text-brand-500 transition-colors">
-      Refresh
-    </button>
+  <!-- ═══ MY DEALS TAB ═══ -->
+  <div x-show="activeTab === 'deals'">
+
+    <template x-if="myDeals.length === 0">
+      <div class="text-center py-16 text-ink-400">
+        <p class="text-sm">No deals yet</p>
+        <p class="text-xs mt-1">Publish or accept an offer to start trading</p>
+      </div>
+    </template>
+
+    <!-- Active deals -->
+    <div x-show="activeDeals.length > 0" class="mb-8">
+      <h3 class="text-xs font-semibold text-ink-500 uppercase tracking-wider mb-3">Active</h3>
+      <div class="space-y-3">
+        <template x-for="o in activeDeals" :key="o.id">
+          <div class="bg-white border rounded-lg overflow-hidden transition-all"
+            :class="expandedId === o.id ? 'border-brand-300 ring-1 ring-brand-100' : 'border-warm-200'">
+
+            <!-- Summary row -->
+            <div @click="toggleDetail(o.id)" class="p-4 flex items-center justify-between cursor-pointer hover:bg-warm-50/50 transition-colors">
+              <div class="flex items-center gap-3 min-w-0">
+                <div class="text-sm font-semibold text-ink-700 truncate">
+                  <span x-text="o.give_amount + ' ' + o.give_asset"></span>
+                  <span class="text-ink-300 mx-1">&rarr;</span>
+                  <span x-text="o.want_amount + ' ' + o.want_asset"></span>
+                </div>
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0"
+                  :class="statusBadge(o.protocol_status)" x-text="statusLabel(o.protocol_status)"></span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded-full shrink-0"
+                  :class="isMaker(o) ? 'bg-brand-50 text-brand-600' : 'bg-green-50 text-green-700'"
+                  x-text="isMaker(o) ? 'maker' : 'taker'"></span>
+              </div>
+              <svg class="w-4 h-4 text-ink-400 shrink-0 transition-transform" :class="expandedId === o.id && 'rotate-180'"
+                fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/>
+              </svg>
+            </div>
+
+            <!-- Detail panel -->
+            <template x-if="expandedId === o.id">
+              <div class="border-t border-warm-100 bg-warm-50/30">
+                <!-- Info grid -->
+                <div class="px-4 pt-4 pb-2 grid grid-cols-2 gap-x-8 gap-y-1.5 text-xs">
+                  <div class="text-ink-500">Maker <span class="text-ink-700 font-mono ml-1" x-text="KANet.shortAddr(o.maker)"></span></div>
+                  <div class="text-ink-500">Taker <span class="text-ink-700 font-mono ml-1" x-text="o.taker ? KANet.shortAddr(o.taker) : '—'"></span></div>
+                  <div class="text-ink-500">Verification <span class="text-ink-700 ml-1" x-text="o.verification"></span></div>
+                  <div class="text-ink-500">Published <span class="text-ink-700 ml-1" x-text="KANet.formatTime(o.broadcast_at)"></span></div>
+                </div>
+
+                <!-- Timeline -->
+                <div class="px-4 py-3">
+                  <template x-for="(step, i) in getTimeline(o)" :key="i">
+                    <div class="flex items-start gap-2.5">
+                      <div class="flex flex-col items-center" style="min-width:14px">
+                        <div class="w-2 h-2 rounded-full shrink-0 mt-1"
+                          :class="step.done ? 'bg-green-500' : (step.active ? 'bg-brand-500 ring-2 ring-brand-200' : 'bg-warm-300')"></div>
+                        <div x-show="i < getTimeline(o).length - 1"
+                          class="w-px grow min-h-[16px]"
+                          :class="step.done ? 'bg-green-200' : 'bg-warm-200'"></div>
+                      </div>
+                      <div class="pb-2 min-w-0">
+                        <span class="text-xs font-medium" :class="step.done || step.active ? 'text-ink-700' : 'text-ink-400'" x-text="step.label"></span>
+                        <span x-show="step.time" class="text-[10px] text-ink-400 ml-1.5" x-text="KANet.relativeTime(step.time)"></span>
+                        <span x-show="step.detail" class="text-[10px] text-ink-400 ml-1" x-text="step.detail"></span>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+
+                <!-- Action buttons -->
+                <div class="px-4 pb-3 flex flex-wrap gap-2" x-show="canConfirm(o) || canSubmitPayment(o) || canDispute(o)">
+                  <button x-show="canConfirm(o)" @click="confirmDeal(o)" :disabled="actionLoading"
+                    class="px-3 py-1.5 bg-green-500 text-white rounded text-xs font-medium hover:bg-green-600 transition-colors disabled:opacity-50">
+                    Confirm Delivery
+                  </button>
+                  <button x-show="canSubmitPayment(o)" @click="actionMode = (actionMode === 'payment' ? null : 'payment')"
+                    class="px-3 py-1.5 bg-brand-500 text-white rounded text-xs font-medium hover:bg-brand-600 transition-colors">
+                    Submit Payment
+                  </button>
+                  <button x-show="canDispute(o)" @click="actionMode = (actionMode === 'dispute' ? null : 'dispute')"
+                    class="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded text-xs font-medium hover:bg-red-100 transition-colors">
+                    Dispute
+                  </button>
+                </div>
+
+                <!-- Payment form (inline) -->
+                <div x-show="actionMode === 'payment' && expandedId === o.id" class="px-4 pb-4">
+                  <div class="bg-white border border-warm-200 rounded-lg p-3 space-y-2">
+                    <div class="text-xs font-medium text-ink-600 mb-2">Submit cross-chain payment proof</div>
+                    <input x-model="paymentTx" type="text" placeholder="TX Hash (e.g. 0xabc...)"
+                      class="w-full px-3 py-2 border border-warm-200 rounded text-xs focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
+                    <div class="flex gap-2">
+                      <select x-model="paymentChain"
+                        class="px-3 py-2 border border-warm-200 rounded text-xs focus:ring-1 focus:ring-brand-300">
+                        <option value="bnb">BNB</option>
+                        <option value="eth">ETH</option>
+                        <option value="sol">SOL</option>
+                        <option value="tron">TRON</option>
+                      </select>
+                      <button @click="submitPayment(o)" :disabled="actionLoading || !paymentTx"
+                        class="px-4 py-2 bg-brand-500 text-white rounded text-xs font-medium hover:bg-brand-600 disabled:opacity-50 transition-colors">
+                        <span x-show="!actionLoading">Submit</span>
+                        <span x-show="actionLoading">Verifying...</span>
+                      </button>
+                      <button @click="actionMode = null" class="px-3 py-2 text-xs text-ink-400 hover:text-ink-600">Cancel</button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Dispute form (inline) -->
+                <div x-show="actionMode === 'dispute' && expandedId === o.id" class="px-4 pb-4">
+                  <div class="bg-red-50 border border-red-200 rounded-lg p-3 space-y-2">
+                    <div class="text-xs font-medium text-red-700 mb-2">Raise a dispute</div>
+                    <input x-model="disputeReason" type="text" placeholder="Reason for dispute"
+                      class="w-full px-3 py-2 border border-red-200 rounded text-xs bg-white focus:ring-1 focus:ring-red-300 focus:border-red-300" />
+                    <div class="flex gap-2">
+                      <button @click="disputeDeal(o)" :disabled="actionLoading || !disputeReason"
+                        class="px-4 py-2 bg-red-500 text-white rounded text-xs font-medium hover:bg-red-600 disabled:opacity-50 transition-colors">
+                        Confirm Dispute
+                      </button>
+                      <button @click="actionMode = null" class="px-3 py-2 text-xs text-ink-400 hover:text-ink-600">Cancel</button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Action feedback -->
+                <div x-show="actionError" class="px-4 pb-3">
+                  <p class="text-xs text-red-600" x-text="actionError"></p>
+                </div>
+              </div>
+            </template>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- Completed deals -->
+    <div x-show="completedDeals.length > 0">
+      <h3 class="text-xs font-semibold text-ink-500 uppercase tracking-wider mb-3">Completed</h3>
+      <div class="space-y-2">
+        <template x-for="o in completedDeals" :key="o.id">
+          <div class="bg-white border border-warm-200 rounded-lg overflow-hidden"
+            :class="expandedId === o.id ? 'ring-1 ring-warm-300' : ''">
+
+            <div @click="toggleDetail(o.id)" class="p-3 flex items-center justify-between cursor-pointer hover:bg-warm-50/50 transition-colors">
+              <div class="flex items-center gap-3 min-w-0">
+                <div class="text-sm text-ink-600 truncate">
+                  <span x-text="o.give_amount + ' ' + o.give_asset"></span>
+                  <span class="text-ink-300 mx-1">&rarr;</span>
+                  <span x-text="o.want_amount + ' ' + o.want_asset"></span>
+                </div>
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0"
+                  :class="statusBadge(o.protocol_status)" x-text="o.protocol_status"></span>
+                <span class="text-[10px] text-ink-400 shrink-0" x-text="KANet.relativeTime(o.completed_at || o.disputed_at || o.timed_out_at || o.cancelled_at || o.updated_at)"></span>
+              </div>
+              <svg class="w-4 h-4 text-ink-400 shrink-0 transition-transform" :class="expandedId === o.id && 'rotate-180'"
+                fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/>
+              </svg>
+            </div>
+
+            <template x-if="expandedId === o.id">
+              <div class="border-t border-warm-100 bg-warm-50/30">
+                <div class="px-4 pt-3 pb-2 grid grid-cols-2 gap-x-8 gap-y-1.5 text-xs">
+                  <div class="text-ink-500">Maker <span class="text-ink-700 font-mono ml-1" x-text="KANet.shortAddr(o.maker)"></span></div>
+                  <div class="text-ink-500">Taker <span class="text-ink-700 font-mono ml-1" x-text="o.taker ? KANet.shortAddr(o.taker) : '—'"></span></div>
+                  <div class="text-ink-500">Verification <span class="text-ink-700 ml-1" x-text="o.verification"></span></div>
+                  <div class="text-ink-500">Published <span class="text-ink-700 ml-1" x-text="KANet.formatTime(o.broadcast_at)"></span></div>
+                </div>
+                <div class="px-4 py-3">
+                  <template x-for="(step, i) in getTimeline(o)" :key="i">
+                    <div class="flex items-start gap-2.5">
+                      <div class="flex flex-col items-center" style="min-width:14px">
+                        <div class="w-2 h-2 rounded-full shrink-0 mt-1"
+                          :class="step.done ? 'bg-green-500' : (step.active ? 'bg-brand-500' : 'bg-warm-300')"></div>
+                        <div x-show="i < getTimeline(o).length - 1"
+                          class="w-px grow min-h-[16px]"
+                          :class="step.done ? 'bg-green-200' : 'bg-warm-200'"></div>
+                      </div>
+                      <div class="pb-2">
+                        <span class="text-xs font-medium" :class="step.done ? 'text-ink-700' : 'text-ink-400'" x-text="step.label"></span>
+                        <span x-show="step.time" class="text-[10px] text-ink-400 ml-1.5" x-text="KANet.relativeTime(step.time)"></span>
+                        <span x-show="step.detail" class="text-[10px] text-ink-400 ml-1" x-text="step.detail"></span>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <div class="mt-6 text-center">
+      <button @click="loadOffers()" class="text-xs text-ink-400 hover:text-brand-500 transition-colors">Refresh</button>
+    </div>
   </div>
+
 </div>
 
 <script>
 function exchangeApp() {
   return {
+    // ── State ──
     offers: [],
     groups: [],
     relays: [],
+    myAddresses: [],
+    currentAddress: null,
     filter: '',
     loading: true,
+    activeTab: 'market',
     showForm: false,
     publishing: false,
     formError: '',
@@ -204,20 +419,39 @@ function exchangeApp() {
       verification: 'manual', expires_minutes: '60',
       relayNodeId: '',
     },
+    // Deal detail
+    expandedId: null,
+    actionMode: null, // null | 'payment' | 'dispute'
+    actionLoading: false,
+    actionError: '',
+    paymentTx: '',
+    paymentChain: 'bnb',
+    disputeReason: '',
 
+    // ── Computed ──
     get filtered() {
       if (!this.filter) return this.offers;
       return this.offers.filter(o => o.market_key === this.filter);
     },
+    get myDeals() {
+      return this.offers.filter(o => this.isMine(o));
+    },
+    get activeDeals() {
+      return this.myDeals.filter(o =>
+        ['open', 'matched', 'verifying', 'awaiting_manual_confirm'].includes(o.protocol_status)
+      );
+    },
+    get completedDeals() {
+      return this.myDeals.filter(o =>
+        ['completed', 'disputed', 'timed_out', 'expired', 'cancelled'].includes(o.protocol_status)
+      );
+    },
 
+    // ── Init ──
     async init() {
       await this.loadRelays();
       await this.loadOffers();
       setInterval(() => this.loadOffers(), 30000);
-    },
-
-    get selectedAgent() {
-      return this.relays.find(r => r.id === this.form.relayNodeId)?.name || 'No agent';
     },
 
     async loadRelays() {
@@ -225,15 +459,21 @@ function exchangeApp() {
         const res = await fetch('/api/exchange/agents');
         const data = await res.json();
         this.relays = data.agents || [];
+        this.myAddresses = this.relays.map(r => r.address).filter(Boolean);
         if (this.relays.length && !this.form.relayNodeId) {
           this.form.relayNodeId = this.relays[0].id;
         }
+        this.currentAddress = this.relays.find(r => r.id === this.form.relayNodeId)?.address || null;
       } catch {}
+    },
+
+    onAgentChange() {
+      this.currentAddress = this.relays.find(r => r.id === this.form.relayNodeId)?.address || null;
     },
 
     async loadOffers() {
       try {
-        const res = await fetch('/api/exchange/offers?limit=100');
+        const res = await fetch('/api/exchange/offers?limit=200');
         const data = await res.json();
         this.offers = data.offers || [];
         this.groups = data.groups || [];
@@ -244,64 +484,206 @@ function exchangeApp() {
       }
     },
 
+    // ── Role helpers (scoped to current Agent) ──
+    isMaker(o) { return this.currentAddress && o.maker === this.currentAddress; },
+    isTaker(o) { return this.currentAddress && o.taker === this.currentAddress; },
+    isMine(o) { return this.isMaker(o) || this.isTaker(o); },
+
+    // ── Action visibility ──
+    canConfirm(o) {
+      if (o.protocol_status !== 'awaiting_manual_confirm') return false;
+      if (this.isMaker(o) && !o.maker_confirmed_at) return true;
+      if (this.isTaker(o) && !o.taker_confirmed_at) return true;
+      return false;
+    },
+    canSubmitPayment(o) {
+      if (o.verification !== 'cross_chain_tx') return false;
+      if (!['matched', 'verifying'].includes(o.protocol_status)) return false;
+      if (!this.isTaker(o)) return false;
+      try { const m = JSON.parse(o.verification_meta || '{}'); return !m.payment_tx; } catch { return true; }
+    },
+    canDispute(o) {
+      return ['matched', 'verifying', 'awaiting_manual_confirm'].includes(o.protocol_status) &&
+        (this.isMaker(o) || this.isTaker(o));
+    },
+
+    // ── Detail panel ──
+    toggleDetail(id) {
+      if (this.expandedId === id) { this.expandedId = null; }
+      else { this.expandedId = id; this.actionMode = null; this.actionError = ''; this.paymentTx = ''; this.disputeReason = ''; }
+    },
+
+    // ── Timeline ──
+    getTimeline(o) {
+      const steps = [];
+      steps.push({ label: 'Published', done: true, time: o.broadcast_at });
+
+      const isMatched = !!o.matched_at;
+      steps.push({
+        label: 'Matched',
+        done: isMatched,
+        active: o.protocol_status === 'matched',
+        time: o.matched_at,
+        detail: o.taker ? 'by ' + KANet.shortAddr(o.taker) : '',
+      });
+
+      if (o.verification === 'manual') {
+        const awaitDone = o.protocol_status === 'completed' || !!o.maker_confirmed_at && !!o.taker_confirmed_at;
+        const parts = [];
+        if (o.maker_confirmed_at) parts.push('maker confirmed');
+        if (o.taker_confirmed_at) parts.push('taker confirmed');
+        steps.push({
+          label: 'Confirmation',
+          done: awaitDone,
+          active: o.protocol_status === 'awaiting_manual_confirm',
+          time: o.maker_confirmed_at || o.taker_confirmed_at,
+          detail: parts.length ? parts.join(', ') : (isMatched ? 'waiting for both parties' : ''),
+        });
+      } else {
+        let verifyDetail = '';
+        try {
+          const m = JSON.parse(o.verification_meta || '{}');
+          if (m.payment_tx) verifyDetail = 'TX: ' + m.payment_tx.slice(0, 16) + '...';
+        } catch {}
+        steps.push({
+          label: 'Verification',
+          done: ['completed', 'disputed'].includes(o.protocol_status) && !!o.verifying_started_at,
+          active: o.protocol_status === 'verifying',
+          time: o.verifying_started_at,
+          detail: verifyDetail || (o.protocol_status === 'verifying' ? 'checking payment...' : ''),
+        });
+      }
+
+      // Terminal state
+      if (o.completed_at) {
+        steps.push({ label: 'Completed', done: true, time: o.completed_at });
+      } else if (o.disputed_at) {
+        steps.push({ label: 'Disputed', done: true, time: o.disputed_at, detail: 'escalated' });
+      } else if (o.timed_out_at) {
+        steps.push({ label: 'Timed out', done: true, time: o.timed_out_at });
+      } else if (o.cancelled_at) {
+        steps.push({ label: 'Cancelled', done: true, time: o.cancelled_at });
+      } else if (['expired'].includes(o.protocol_status)) {
+        steps.push({ label: 'Expired', done: true, time: o.expires_at });
+      } else {
+        steps.push({ label: 'Settlement', done: false });
+      }
+
+      return steps;
+    },
+
+    // ── Status helpers ──
+    statusBadge(s) {
+      return {
+        'bg-green-50 text-green-700': s === 'open',
+        'bg-blue-50 text-blue-700': s === 'matched',
+        'bg-amber-50 text-amber-700': s === 'verifying' || s === 'awaiting_manual_confirm',
+        'bg-green-100 text-green-800': s === 'completed',
+        'bg-red-50 text-red-600': s === 'disputed' || s === 'timed_out',
+        'bg-warm-100 text-ink-500': s === 'cancelled' || s === 'expired',
+      };
+    },
+    statusLabel(s) {
+      const map = { awaiting_manual_confirm: 'awaiting confirm', timed_out: 'timed out' };
+      return map[s] || s;
+    },
+
+    // ── Market actions ──
     async publishOffer() {
-      this.formError = '';
-      this.formSuccess = '';
+      this.formError = ''; this.formSuccess = '';
       if (!this.form.give_asset || !this.form.give_amount || !this.form.want_asset || !this.form.want_amount) {
-        this.formError = 'Fill in all required fields';
-        return;
+        this.formError = 'Fill in all required fields'; return;
       }
       this.publishing = true;
       try {
         const res = await fetch('/api/exchange/publish', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(this.form),
         });
         const data = await res.json();
         if (data.ok) {
           this.formSuccess = `Offer published! ID: ${data.offer_id?.slice(0, 8)}`;
           this.showForm = false;
-          // Reset form
           this.form.give_asset = ''; this.form.give_amount = ''; this.form.give_chain = '';
           this.form.want_asset = ''; this.form.want_amount = ''; this.form.want_chain = '';
           await this.loadOffers();
-        } else {
-          this.formError = data.error || 'Broadcast failed';
-        }
-      } catch (e) {
-        this.formError = e.message;
-      } finally {
-        this.publishing = false;
-      }
+        } else { this.formError = data.error || 'Broadcast failed'; }
+      } catch (e) { this.formError = e.message; }
+      finally { this.publishing = false; }
     },
 
     async acceptOffer(offer) {
-      // Ensure an agent is selected
-      if (!this.form.relayNodeId && this.relays.length) {
-        this.form.relayNodeId = this.relays[0].id;
-      }
-      if (!this.form.relayNodeId) {
-        alert('No agent available');
-        return;
-      }
-      const agentName = this.relays.find(r => r.id === this.form.relayNodeId)?.name || 'Agent';
-      if (!confirm(`${agentName} accepts: ${offer.give_amount} ${offer.give_asset} → ${offer.want_amount} ${offer.want_asset}?`)) return;
+      if (!this.form.relayNodeId && this.relays.length) this.form.relayNodeId = this.relays[0].id;
+      if (!this.form.relayNodeId) { alert('No agent available'); return; }
+      const name = this.relays.find(r => r.id === this.form.relayNodeId)?.name || 'Agent';
+      if (!confirm(`${name} accepts: ${offer.give_amount} ${offer.give_asset} \u2192 ${offer.want_amount} ${offer.want_asset}?`)) return;
       try {
         const res = await fetch('/api/exchange/accept', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ relayNodeId: this.form.relayNodeId, offer_id: offer.id }),
         });
         const data = await res.json();
-        if (data.ok) {
-          await this.loadOffers();
-        } else {
-          alert(data.error || 'Accept failed');
-        }
-      } catch (e) {
-        alert(e.message);
-      }
+        if (data.ok) { await this.loadOffers(); this.activeTab = 'deals'; }
+        else { alert(data.error || 'Accept failed'); }
+      } catch (e) { alert(e.message); }
+    },
+
+    async cancelOffer(offer) {
+      if (!confirm('Cancel this offer?')) return;
+      try {
+        const res = await fetch('/api/exchange/cancel', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relayNodeId: this.form.relayNodeId, offer_id: offer.id }),
+        });
+        const data = await res.json();
+        if (data.ok) { await this.loadOffers(); } else { alert(data.error || 'Cancel failed'); }
+      } catch (e) { alert(e.message); }
+    },
+
+    // ── Deal actions ──
+    async confirmDeal(o) {
+      const role = this.isMaker(o) ? 'maker' : 'taker';
+      this.actionLoading = true; this.actionError = '';
+      try {
+        const res = await fetch('/api/exchange/confirm', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relayNodeId: this.form.relayNodeId, offer_id: o.id, role }),
+        });
+        const data = await res.json();
+        if (data.ok) { await this.loadOffers(); this.actionMode = null; }
+        else { this.actionError = data.error || 'Confirm failed'; }
+      } catch (e) { this.actionError = e.message; }
+      finally { this.actionLoading = false; }
+    },
+
+    async submitPayment(o) {
+      if (!this.paymentTx) return;
+      this.actionLoading = true; this.actionError = '';
+      try {
+        const res = await fetch('/api/exchange/submit-payment', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relayNodeId: this.form.relayNodeId, offer_id: o.id, payment_tx: this.paymentTx, payment_chain: this.paymentChain }),
+        });
+        const data = await res.json();
+        if (data.ok) { await this.loadOffers(); this.actionMode = null; this.paymentTx = ''; }
+        else { this.actionError = data.error || 'Submit failed'; }
+      } catch (e) { this.actionError = e.message; }
+      finally { this.actionLoading = false; }
+    },
+
+    async disputeDeal(o) {
+      if (!this.disputeReason) return;
+      this.actionLoading = true; this.actionError = '';
+      try {
+        const res = await fetch('/api/exchange/dispute', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relayNodeId: this.form.relayNodeId, offer_id: o.id, reason: this.disputeReason }),
+        });
+        const data = await res.json();
+        if (data.ok) { await this.loadOffers(); this.actionMode = null; this.disputeReason = ''; }
+        else { this.actionError = data.error || 'Dispute failed'; }
+      } catch (e) { this.actionError = e.message; }
+      finally { this.actionLoading = false; }
     },
   };
 }
