@@ -1661,5 +1661,27 @@ export function runMigrations() {
     console.log('[migrate] v47: interaction_records dropped.');
   }
 
+  // v48: relation_states 加 classification 字段
+  // 记录对方 Agent 的身份质量（和 status 正交）
+  // 取值：seen_candidate / declared_candidate / responsive_agent / verified_agent / inactive_agent
+  // 只升级不降级（seen → declared → responsive → verified），inactive 由定时任务标记
+  const hasClassification = sqlite.prepare(
+    "SELECT 1 FROM pragma_table_info('relation_states') WHERE name='classification'"
+  ).get();
+  if (!hasClassification) {
+    sqlite.exec("ALTER TABLE relation_states ADD COLUMN classification TEXT DEFAULT 'seen_candidate'");
+    console.log('[migrate] v48: relation_states.classification added');
+  }
+
+  // v49: kanet_message_index 加 reply_to 字段
+  // 存储 kanet:v1:msg: 格式消息的引用关系，支持 /story 线程展示
+  const hasReplyTo = sqlite.prepare(
+    "SELECT 1 FROM pragma_table_info('kanet_message_index') WHERE name='reply_to'"
+  ).get();
+  if (!hasReplyTo) {
+    sqlite.exec("ALTER TABLE kanet_message_index ADD COLUMN reply_to TEXT");
+    console.log('[migrate] v49: kanet_message_index.reply_to added');
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

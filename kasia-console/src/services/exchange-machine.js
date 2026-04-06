@@ -85,6 +85,14 @@ function transition(offerId, newStatus, extra = {}) {
 
   console.log(`[exchange-machine] ${offerId.slice(0, 8)}: ${offer.protocol_status} → ${newStatus}`);
 
+  // 交割完成 → 升级 maker 和 taker 的 classification 到 verified_agent（只升不降）
+  if (newStatus === 'completed' && offer.maker && offer.taker) {
+    sqlite.prepare(`
+      UPDATE relation_states SET classification = 'verified_agent'
+      WHERE peer_address IN (?, ?) AND classification != 'verified_agent'
+    `).run(offer.maker, offer.taker);
+  }
+
   return sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offerId);
 }
 
