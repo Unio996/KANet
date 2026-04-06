@@ -350,18 +350,7 @@ async function triggerAutoReply(responder, channelName, senderAddress, content, 
   `).run(id, channelName, responder.address, broadcastText, result.txId, nowIso());
   if (attempts > 0) console.log(`[chat] Broadcast succeeded after ${attempts + 1} attempts (${broadcastText.length} chars)`);
 
-  // ── Bug1 fix: 回填 replies.sent_txid ──
-  if (result.txId) {
-    const cutoff = new Date(Date.now() - 30_000).toISOString();
-    const recentReply = sqlite.prepare(
-      "SELECT id FROM replies WHERE sent_txid IS NULL AND created_at > ? ORDER BY created_at DESC LIMIT 1"
-    ).get(cutoff);
-    if (recentReply) {
-      sqlite.prepare("UPDATE replies SET sent_txid = ?, status = 'sent', updated_at = ? WHERE id = ?")
-        .run(result.txId, nowIso(), recentReply.id);
-      console.log(`[chat] Bug1 fix: reply ${recentReply.id.slice(0, 8)}.sent_txid = ${result.txId.slice(0, 12)}`);
-    }
-  }
+  // replies.sent_txid hack 已删除（2026-04-06）— chain_events 是真相源
 
   // ── Bug2 fix: Agent 外发写入 chain_events ──
   if (result.txId && responder.address) {
