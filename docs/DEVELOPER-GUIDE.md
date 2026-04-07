@@ -419,7 +419,7 @@ shortAddr / copy / relativeTime / **formatTime** / formatKas / statusLabel / sta
 | `/predictions` | predictions.eta | 预测市场 |
 | `/handshakes` | handshakes.eta | 握手报告 |
 | `/story` | story.eta | Episode 视图 |
-| `/exchange` | exchange.eta | 协议级自由市场 |
+| `/exchange` | exchange.eta | 协议级自由市场（Market / My Deals / Arbitrage 三 Tab） |
 
 **保留页面（已调色融合，功能完整）：**
 
@@ -929,10 +929,17 @@ _executeHedge 支持 preferredCex 参数 + HEDGE_CEX_MAP（scanner 显示名→D
 
 31. **HEDGE_CEX_MAP 名称映射。** scanner venue 名是大写显示名（Gate/MEXC/Bybit），exchange_accounts 表存小写 ID（gateio/mexc/bybit）。_executeHedge 必须用 HEDGE_CEX_MAP 转换后查 DB。
 
+32. **_executeHedge 价格源必须从实际对冲交易所取。** 曾硬编码 MEXC ticker，导致对 Gate/Bybit/KuCoin 下 LIMIT 单时价格偏差，可能永远不成交。已修复为 _fetchHedgePrice(account.exchange, side)，从目标交易所取 bid/ask。新增对冲交易所时必须在 TICKER_MAP 补充对应公开 ticker URL。位置：trade-protocol-filter.js:494。
+
+33. **exchange accept 路径不触发对冲。** accept 只把 offer 推到 verifying，此时 Taker 尚未履约。对冲在 completed 后触发（见 #34）。handleExchangeAccept 里只打日志 "hedge deferred to completed"。
+
+34. **Hedge 必须在 completed（交割确认后）触发，不能在 verifying 触发。** verifying 阶段 Taker 尚未履约，此时 CEX 对冲 = 裸空仓。Taker timed_out 则 CEX 侧已成交、KAS 未收到，造成实亏。触发点两处：(a) exchange.js confirm 端点 processManualConfirm 返回 completed 后，(b) exchange-machine.js _verifyAndComplete 验证通过 transition('completed') 后。幂等锁（chain_events WHERE txid=offerId AND event_type LIKE 'hedge%'）保留防重。教训来源：2026-04-07 Live 测试。
+
 ### 待实现
 
 - 信誉系统接入（reputation.js 骨架在，probe_address 未实现）
 - Binance/Kraken exchange_accounts 添加（用户有 API Key，待配置）
+- ✅ Arbitrage Tab 已上线（CEX Overview / Live Spreads / Active Offers / Hedge History）
 
 ---
 
@@ -1212,6 +1219,9 @@ _executeHedge 支持 preferredCex 参数 + HEDGE_CEX_MAP（scanner 显示名→D
 | DELETE | `/api/trade/accounts/:id` | 删除交易所账户 | trading.js |
 | POST | `/api/trade/accounts/:id/default` | 设为默认账户 | trading.js |
 | POST | `/api/trade/accounts/:id/test` | 测试账户连接 | trading.js |
+| GET | `/api/trade/accounts/:id/balance` | 单账户实时余额（KAS+USDT） | trading.js |
+| GET | `/api/trade/balances` | 所有账户余额汇总（30s 缓存） | trading.js |
+| GET | `/api/trade/spreads` | KAS/USDT 六家 CEX 价差矩阵（30s 缓存） | trading.js |
 
 ### 交易 / Trading — 下单与执行
 

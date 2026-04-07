@@ -8,7 +8,7 @@ import { sqlite } from '../db/client.js';
 import { encrypt, decrypt, makeTokenHint } from '../services/crypto.js';
 import { getConfig, setConfig } from '../data/settings/configs.js';
 import { getReply, getTriggerStatus, updateTriggerSettings, triggerProactive, triggerReflection } from '../services/mind-manager.js';
-import { placeOrder as placeExchangeOrder, cancelOrders as cancelExchangeOrders, getOpenOrders as getExchangeOpenOrders } from '../services/exchange-orders.js';
+import { placeOrder as placeExchangeOrder, cancelOrders as cancelExchangeOrders, getOpenOrders as getExchangeOpenOrders, getBalance as getExchangeBalance } from '../services/exchange-orders.js';
 import { verifyIngestRequest } from '../services/ingest-auth.js';
 import { nowIso } from '../lib/time.js';
 import { quickStart, completeExecution, failExecution } from '../services/execution-state.js';
@@ -616,6 +616,151 @@ export async function registerTradingRoutes(fastify) {
     } catch (err) {
       return reply.send({ ok: false, error: err.message });
     }
+  });
+
+  // ── CEX Balance Queries ──────────────────────────────────────────────────
+
+  // GET /api/trade/accounts/:id/balance — single account real-time balance
+  fastify.get('/api/trade/accounts/:id/balance', async (request, reply) => {
+    const row = sqlite.prepare('SELECT * FROM exchange_accounts WHERE id = ?').get(request.params.id);
+    if (!row) return reply.code(404).send({ error: 'Account not found' });
+
+    let apiKey, apiSecret, passphrase;
+    try {
+      apiKey = row.api_key_encrypted ? decrypt(row.api_key_encrypted) : null;
+      apiSecret = row.api_secret_encrypted ? decrypt(row.api_secret_encrypted) : null;
+      const extra = row.extra_encrypted ? JSON.parse(decrypt(row.extra_encrypted)) : {};
+      passphrase = extra.passphrase || null;
+    } catch {
+      return reply.send({ exchange: row.exchange, kas: null, usdt: null, timestamp: new Date().toISOString(), error: 'Failed to decrypt credentials' });
+    }
+
+    const result = await getExchangeBalance({
+      exchange: row.exchange, apiKey, apiSecret, passphrase,
+      baseUrl: row.base_url || undefined,
+    });
+    return reply.send(result);
+  });
+
+  // GET /api/trade/balances — all accounts balance summary (30s cache)
+  const _balanceCache = { data: null, cachedAt: null };
+  fastify.get('/api/trade/balances', async (request, reply) => {
+    // Return cache if fresh (within 30s)
+    if (_balanceCache.data && _balanceCache.cachedAt && (Date.now() - new Date(_balanceCache.cachedAt).getTime()) < 30_000) {
+      return reply.send({ balances: _balanceCache.data, cachedAt: _balanceCache.cachedAt });
+    }
+
+    const rows = sqlite.prepare('SELECT * FROM exchange_accounts ORDER BY is_default DESC, created_at').all();
+    if (!rows.length) {
+      return reply.send({ balances: [], cachedAt: new Date().toISOString() });
+    }
+
+    const results = await Promise.allSettled(rows.map(async (row) => {
+      let apiKey, apiSecret, passphrase;
+      try {
+        apiKey = row.api_key_encrypted ? decrypt(row.api_key_encrypted) : null;
+        apiSecret = row.api_secret_encrypted ? decrypt(row.api_secret_encrypted) : null;
+        const extra = row.extra_encrypted ? JSON.parse(decrypt(row.extra_encrypted)) : {};
+        passphrase = extra.passphrase || null;
+      } catch {
+        return { accountId: row.id, label: row.label, exchange: row.exchange, kas: null, usdt: null, timestamp: new Date().toISOString(), error: 'decrypt failed' };
+      }
+
+      const bal = await getExchangeBalance({
+        exchange: row.exchange, apiKey, apiSecret, passphrase,
+        baseUrl: row.base_url || undefined,
+      });
+      return { accountId: row.id, label: row.label, ...bal };
+    }));
+
+    const balances = results.map(r => r.status === 'fulfilled' ? r.value : { kas: null, usdt: null, error: r.reason?.message || 'unknown error' });
+    const cachedAt = new Date().toISOString();
+    _balanceCache.data = balances;
+    _balanceCache.cachedAt = cachedAt;
+    return reply.send({ balances, cachedAt });
+  });
+
+  // ── Spread Matrix ──────────────────────────────────────────────────────────
+
+  const _spreadsCache = { data: null, cachedAt: null };
+
+  const SPREAD_TICKERS = [
+    { exchange: 'mexc',   url: 'https://api.mexc.com/api/v3/ticker/bookTicker?symbol=KASUSDT',          parse: d => ({ ask: parseFloat(d.askPrice), bid: parseFloat(d.bidPrice) }) },
+    { exchange: 'gateio', url: 'https://api.gateio.ws/api/v4/spot/tickers?currency_pair=KAS_USDT',      parse: d => { const t = Array.isArray(d) ? d[0] : d; return { ask: parseFloat(t.lowest_ask), bid: parseFloat(t.highest_bid) }; } },
+    { exchange: 'bybit',  url: 'https://api.bybit.com/v5/market/tickers?category=spot&symbol=KASUSDT',   parse: d => ({ ask: parseFloat(d.result.list[0].ask1Price), bid: parseFloat(d.result.list[0].bid1Price) }) },
+    { exchange: 'kucoin', url: 'https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=KAS-USDT',  parse: d => ({ ask: parseFloat(d.data.bestAsk), bid: parseFloat(d.data.bestBid) }) },
+    { exchange: 'bitget', url: 'https://api.bitget.com/api/v2/spot/market/tickers?symbol=KASUSDT',       parse: d => ({ ask: parseFloat(d.data[0].askPr), bid: parseFloat(d.data[0].bidPr) }) },
+    { exchange: 'htx',    url: 'https://api.huobi.pro/market/detail/merged?symbol=kasusdt',              parse: d => ({ ask: parseFloat(d.tick.ask[0]), bid: parseFloat(d.tick.bid[0]) }) },
+  ];
+
+  fastify.get('/api/trade/spreads', async (request, reply) => {
+    // Check cache (30s)
+    if (_spreadsCache.data && _spreadsCache.cachedAt && (Date.now() - new Date(_spreadsCache.cachedAt).getTime()) < 30_000) {
+      return reply.send(_spreadsCache.data);
+    }
+
+    // Parallel fetch all tickers
+    const results = await Promise.allSettled(SPREAD_TICKERS.map(async (t) => {
+      const res = await fetch(t.url, { signal: AbortSignal.timeout(3000) });
+      const data = await res.json();
+      const { ask, bid } = t.parse(data);
+      return { exchange: t.exchange, ask, bid, mid: parseFloat(((ask + bid) / 2).toFixed(6)), error: null };
+    }));
+
+    const tickers = results.map((r, i) =>
+      r.status === 'fulfilled' ? r.value : { exchange: SPREAD_TICKERS[i].exchange, ask: null, bid: null, mid: null, error: r.reason?.message || 'fetch failed' }
+    );
+
+    // Determine which exchanges the user has funded accounts on
+    const accountRows = sqlite.prepare('SELECT * FROM exchange_accounts ORDER BY is_default DESC').all();
+    const fundedExchanges = new Set();
+    if (accountRows.length) {
+      const balResults = await Promise.allSettled(accountRows.map(async (row) => {
+        let apiKey, apiSecret, passphrase;
+        try {
+          apiKey = row.api_key_encrypted ? decrypt(row.api_key_encrypted) : null;
+          apiSecret = row.api_secret_encrypted ? decrypt(row.api_secret_encrypted) : null;
+          const extra = row.extra_encrypted ? JSON.parse(decrypt(row.extra_encrypted)) : {};
+          passphrase = extra.passphrase || null;
+        } catch { return null; }
+        return getExchangeBalance({ exchange: row.exchange, apiKey, apiSecret, passphrase, baseUrl: row.base_url || undefined });
+      }));
+      for (const r of balResults) {
+        if (r.status === 'fulfilled' && r.value && !r.value.error) {
+          if ((r.value.kas && r.value.kas > 0) || (r.value.usdt && r.value.usdt > 0)) {
+            fundedExchanges.add(r.value.exchange);
+          }
+        }
+      }
+    }
+
+    // Compute spread matrix (all valid pairs)
+    const threshold_pct = 0.3;
+    const spreads = [];
+    const valid = tickers.filter(t => t.ask !== null && t.bid !== null);
+    for (const buy of valid) {
+      for (const sell of valid) {
+        if (buy.exchange === sell.exchange) continue;
+        const spread_pct = parseFloat((((sell.bid - buy.ask) / buy.ask) * 100).toFixed(4));
+        spreads.push({
+          buy_from: buy.exchange,
+          sell_to: sell.exchange,
+          spread_pct,
+          opportunity: spread_pct >= threshold_pct,
+          actionable: fundedExchanges.has(buy.exchange) && fundedExchanges.has(sell.exchange),
+        });
+      }
+    }
+
+    // Sort: opportunities first, then by spread descending
+    spreads.sort((a, b) => (b.opportunity - a.opportunity) || (b.spread_pct - a.spread_pct));
+
+    const cachedAt = new Date().toISOString();
+    const funded_exchanges = [...fundedExchanges];
+    const payload = { tickers, spreads, threshold_pct, funded_exchanges, cachedAt };
+    _spreadsCache.data = payload;
+    _spreadsCache.cachedAt = cachedAt;
+    return reply.send(payload);
   });
 
   // ── Portfolio (uses DB creds → env fallback) ──────────────────────────────
