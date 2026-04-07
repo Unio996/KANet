@@ -13,6 +13,7 @@
 
 import { sqlite } from '../db/client.js';
 import { getVerifier } from './exchange-verifiers.js';
+import { executeHedge } from './trade-protocol-filter.js';
 import crypto from 'crypto';
 
 // ── Valid Transitions ─────────────────────────────────────────
@@ -358,8 +359,25 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
         'UPDATE exchange_offers SET verification_meta = ?, updated_at = ? WHERE id = ?'
       ).run(JSON.stringify(meta), new Date().toISOString(), offer_id);
 
-      transition(offer_id, 'completed', {});
+      const completedOffer = transition(offer_id, 'completed', {});
       console.log(`[exchange] offer ${offer_id.slice(0,8)} payment verified → completed (${vr.actualAmount} USDT, ${vr.confirmations}/${vr.required} conf)`);
+
+      // Trigger hedge after cross_chain_tx verification → completed
+      if (completedOffer?.maker) {
+        const localAgent = sqlite.prepare('SELECT id, name FROM relay_nodes WHERE address = ?').get(completedOffer.maker);
+        if (localAgent) {
+          const makerGaveKas = completedOffer.give_asset === 'KAS';
+          const hedgeSide = makerGaveKas ? 'BUY' : 'SELL';
+          const hedgeQty = makerGaveKas ? parseFloat(completedOffer.give_amount) : parseFloat(completedOffer.want_amount);
+          if (hedgeQty > 0) {
+            setImmediate(() => {
+              executeHedge(completedOffer.id, localAgent.name, hedgeSide, hedgeQty).catch(err =>
+                console.error(`[exchange-hedge] verify-complete-path trigger error: ${err.message}`)
+              );
+            });
+          }
+        }
+      }
 
     } else if (attempt < MAX_ATTEMPTS) {
       console.log(`[exchange] offer ${offer_id.slice(0,8)} not confirmed yet (attempt ${attempt}/${MAX_ATTEMPTS}): ${vr.error}. Retry in 60s`);

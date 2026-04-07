@@ -23,6 +23,8 @@ import { decrypt } from './crypto.js';
  *
  * @param {object} row - { tx_hash, content, sender_address, channel_name, created_at }
  */
+export { _executeHedge as executeHedge };
+
 export async function onBroadcastWritten(row) {
   if (!row.content || !row.content.startsWith('{"t":"kanet_')) return;
 
@@ -420,22 +422,10 @@ async function handleExchangeAccept(msg) {
     return;
   }
 
-  // verifying（cross_chain_tx / kaspa_tx）：继续走对冲逻辑
-  // Check if maker is a local agent — only local agents can hedge
-  const localAgent = sqlite.prepare('SELECT id, name FROM relay_nodes WHERE address = ?').get(result.maker);
-  if (!localAgent) return; // External maker, no hedge
-
-  // Determine hedge direction: if agent gave KAS → buy KAS on CEX; if agent gave USDT → sell KAS on CEX
-  const agentGaveKas = result.give_asset === 'KAS';
-  const hedgeSide = agentGaveKas ? 'BUY' : 'SELL';
-  const hedgeQty = agentGaveKas ? parseFloat(result.give_amount) : parseFloat(result.want_amount);
-
-  if (!hedgeQty || hedgeQty <= 0) return;
-
-  // Fire-and-forget hedge (async, non-blocking)
-  _executeHedge(result.id, localAgent.name, hedgeSide, hedgeQty).catch(err => {
-    console.log(`[exchange-hedge] FAILED for offer ${result.id.slice(0, 8)}: ${err.message}`);
-  });
+  // verifying（cross_chain_tx / kaspa_tx）：不在此阶段触发对冲
+  // Hedge 必须等 completed（交割确认后）才触发，否则 Taker 不履约 = 裸空仓
+  // 触发点：exchange.js confirm 端点 + exchange-machine.js _verifyAndComplete
+  console.log(`[exchange] offer ${result.id.slice(0,8)} entered verifying — hedge deferred to completed`);
 }
 
 /**
@@ -488,10 +478,62 @@ const HEDGE_CEX_MAP = {
 };
 
 /**
+ * Fetch best bid/ask from the target exchange's public ticker API.
+ * Returns aggressive limit price (BUY → ask*1.002, SELL → bid*0.998) or null on failure.
+ */
+async function _fetchHedgePrice(exchange, side) {
+  const TICKER_MAP = {
+    mexc:    { url: 'https://api.mexc.com/api/v3/ticker/bookTicker?symbol=KASUSDT',                   parse: d => ({ ask: d.askPrice, bid: d.bidPrice }) },
+    gateio:  { url: 'https://api.gateio.ws/api/v4/spot/tickers?currency_pair=KAS_USDT',               parse: d => ({ ask: (Array.isArray(d) ? d[0] : d).lowest_ask, bid: (Array.isArray(d) ? d[0] : d).highest_bid }) },
+    bybit:   { url: 'https://api.bybit.com/v5/market/tickers?category=spot&symbol=KASUSDT',            parse: d => ({ ask: d.result.list[0].ask1Price, bid: d.result.list[0].bid1Price }) },
+    kucoin:  { url: 'https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=KAS-USDT',           parse: d => ({ ask: d.data.bestAsk, bid: d.data.bestBid }) },
+    bitget:  { url: 'https://api.bitget.com/api/v2/spot/market/tickers?symbol=KASUSDT',                parse: d => ({ ask: d.data[0].askPr, bid: d.data[0].bidPr }) },
+    htx:     { url: 'https://api.huobi.pro/market/detail/merged?symbol=kasusdt',                       parse: d => ({ ask: d.tick.ask[0], bid: d.tick.bid[0] }) },
+    binance: { url: 'https://api.binance.com/api/v3/ticker/bookTicker?symbol=KASUSDT',                 parse: d => ({ ask: d.askPrice, bid: d.bidPrice }) },
+  };
+
+  const entry = TICKER_MAP[exchange];
+  if (!entry) {
+    console.log(`[exchange-hedge] No ticker for ${exchange}, fallback to MEXC`);
+    const fb = TICKER_MAP.mexc;
+    try {
+      const data = await fetch(fb.url, { signal: AbortSignal.timeout(3000) }).then(r => r.json());
+      const { ask, bid } = fb.parse(data);
+      const price = side === 'BUY' ? parseFloat(ask) * 1.002 : parseFloat(bid) * 0.998;
+      console.log(`[exchange-hedge] price from mexc (fallback): ask=${ask} bid=${bid}`);
+      return price;
+    } catch {
+      console.log(`[exchange-hedge] Price fetch failed (fallback MEXC) — aborting hedge`);
+      return null;
+    }
+  }
+
+  try {
+    const data = await fetch(entry.url, { signal: AbortSignal.timeout(3000) }).then(r => r.json());
+    const { ask, bid } = entry.parse(data);
+    const price = side === 'BUY' ? parseFloat(ask) * 1.002 : parseFloat(bid) * 0.998;
+    console.log(`[exchange-hedge] price from ${exchange}: ask=${ask} bid=${bid}`);
+    return price;
+  } catch (err) {
+    console.log(`[exchange-hedge] Price fetch failed from ${exchange}: ${err.message} — aborting hedge`);
+    return null;
+  }
+}
+
+/**
  * Execute a hedge order on the best available CEX.
  * If preferredCex specified, try that first; otherwise use default account.
  */
 async function _executeHedge(offerId, agentName, side, qty, preferredCex = null) {
+  // Idempotency guard — prevent double-hedge if both API and chain paths fire
+  const _existingHedge = sqlite.prepare(
+    "SELECT id FROM chain_events WHERE txid = ? AND event_type LIKE 'hedge%' LIMIT 1"
+  ).get(offerId);
+  if (_existingHedge) {
+    console.log(`[exchange-hedge] Duplicate suppressed for offer ${offerId.slice(0, 8)}`);
+    return;
+  }
+
   if (_isHedgeCircuitOpen()) {
     console.log(`[exchange-hedge] CIRCUIT OPEN — ${_hedgeFailures.length} failures in 1h, skipping hedge for ${offerId.slice(0, 8)}`);
     recordChainEvent({
@@ -535,16 +577,13 @@ async function _executeHedge(offerId, agentName, side, qty, preferredCex = null)
     return;
   }
 
-  // Fetch current market price for limit order (aggressive: use best bid/ask)
-  let price;
-  try {
-    const ticker = await fetch(`https://api.mexc.com/api/v3/ticker/bookTicker?symbol=KASUSDT`, { signal: AbortSignal.timeout(3000) }).then(r => r.json());
-    price = side === 'BUY' ? parseFloat(ticker.askPrice) * 1.002 : parseFloat(ticker.bidPrice) * 0.998;
-  } catch {
-    console.log(`[exchange-hedge] Price fetch failed — aborting hedge`);
+  // Fetch current market price from the target exchange (not hardcoded MEXC)
+  const hedgePrice = await _fetchHedgePrice(account.exchange, side);
+  if (!hedgePrice) {
     _hedgeFailures.push(Date.now());
     return;
   }
+  const price = hedgePrice;
 
   console.log(`[exchange-hedge] ${agentName} ${side} ${qty} KAS @ ${price.toFixed(5)} on ${account.exchange} (hedge for offer ${offerId.slice(0, 8)})`);
 

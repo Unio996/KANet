@@ -8,6 +8,7 @@
 
 import { sqlite } from '../db/client.js';
 import { processAccept, processCancel, processManualConfirm, processPaymentSubmit, processDispute, expireStale } from '../services/exchange-machine.js';
+import { executeHedge } from '../services/trade-protocol-filter.js';
 
 export async function registerExchangeRoutes(fastify) {
 
@@ -295,6 +296,23 @@ export async function registerExchangeRoutes(fastify) {
 
     if (!result) {
       return reply.code(400).send({ error: 'Confirm failed' });
+    }
+
+    // Trigger hedge after manual confirm → completed
+    if (result.protocol_status === 'completed' && result.maker) {
+      const localAgent = sqlite.prepare('SELECT id, name FROM relay_nodes WHERE address = ?').get(result.maker);
+      if (localAgent) {
+        const makerGaveKas = result.give_asset === 'KAS';
+        const hedgeSide = makerGaveKas ? 'BUY' : 'SELL';
+        const hedgeQty = makerGaveKas ? parseFloat(result.give_amount) : parseFloat(result.want_amount);
+        if (hedgeQty > 0) {
+          setImmediate(() => {
+            executeHedge(result.id, localAgent.name, hedgeSide, hedgeQty).catch(err =>
+              console.error(`[exchange-hedge] complete-path trigger error: ${err.message}`)
+            );
+          });
+        }
+      }
     }
 
     // Broadcast confirmation to chain

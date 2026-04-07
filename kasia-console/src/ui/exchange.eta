@@ -23,6 +23,11 @@
         class="bg-brand-500 text-white text-[10px] leading-none px-1.5 py-0.5 rounded-full"
         x-text="activeDeals.length"></span>
     </button>
+    <button @click="activeTab = 'arb'; loadArbitrageData()"
+      :class="activeTab === 'arb' ? 'border-brand-500 text-brand-600' : 'border-transparent text-ink-400 hover:text-ink-600'"
+      class="px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors">
+      Arbitrage
+    </button>
     <div class="ml-auto flex items-center gap-2 text-xs pb-1">
       <span class="text-ink-400">Agent:</span>
       <select x-model="form.relayNodeId" @change="onAgentChange()"
@@ -395,6 +400,244 @@
     </div>
   </div>
 
+  <!-- ═══ ARBITRAGE TAB ═══ -->
+  <div x-show="activeTab === 'arb'">
+
+    <!-- ── Area 1: CEX Overview ── -->
+    <div class="mb-6">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-xs font-semibold text-ink-500 uppercase tracking-wider">CEX Overview</h3>
+        <button @click="loadBalances()" class="text-xs text-ink-400 hover:text-brand-500 transition-colors flex items-center gap-1">
+          <span>Refresh</span>
+        </button>
+      </div>
+      <template x-if="arbLoading.balances">
+        <div class="flex gap-3">
+          <template x-for="i in 3" :key="i">
+            <div class="flex-1 bg-warm-100 animate-pulse rounded-lg h-20"></div>
+          </template>
+        </div>
+      </template>
+      <template x-if="!arbLoading.balances">
+        <div class="flex gap-3 flex-wrap">
+          <template x-for="b in cexBalances" :key="b.accountId || b.exchange">
+            <div class="bg-white border border-warm-200 rounded-lg px-4 py-3 min-w-[140px]">
+              <div class="flex items-center gap-1.5 mb-2">
+                <span class="text-sm font-semibold text-ink-700" x-text="b.label || b.exchange.toUpperCase()"></span>
+                <span x-show="b.isDefault" class="text-amber-500 text-xs">&#9733;</span>
+              </div>
+              <template x-if="!b.error">
+                <div class="space-y-0.5">
+                  <div class="text-xs text-ink-500">KAS <span class="font-medium text-ink-700" x-text="b.kas !== null ? Number(b.kas).toLocaleString(undefined, {maximumFractionDigits: 4}) : '--'"></span></div>
+                  <div class="text-xs text-ink-500">USDT <span class="font-medium text-ink-700" x-text="b.usdt !== null ? Number(b.usdt).toLocaleString(undefined, {maximumFractionDigits: 2}) : '--'"></span></div>
+                </div>
+              </template>
+              <template x-if="b.error">
+                <div class="text-xs text-red-500 flex items-center gap-1">
+                  <span>&#9888;</span> <span x-text="b.error"></span>
+                </div>
+              </template>
+            </div>
+          </template>
+          <a href="/trading" class="bg-warm-50 border border-dashed border-warm-300 rounded-lg px-4 py-3 min-w-[140px] flex items-center justify-center text-xs text-ink-400 hover:text-brand-500 hover:border-brand-300 transition-colors">
+            + Add Account
+          </a>
+        </div>
+      </template>
+    </div>
+
+    <!-- ── Area 2: Live Spreads (split: Your Exchanges + Other Markets) ── -->
+    <div class="mb-6">
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-2">
+          <h3 class="text-xs font-semibold text-ink-500 uppercase tracking-wider">Live Spreads</h3>
+          <span x-show="fundedExchanges.length" class="text-[10px] text-ink-400"
+            x-text="'(' + fundedExchanges.map(e => e.toUpperCase()).join(' · ') + ')'"></span>
+          <span x-show="spreadsCachedAt" class="text-[10px] text-ink-300" x-text="'Updated ' + KANet.formatTime(spreadsCachedAt)"></span>
+        </div>
+        <button @click="loadSpreads()" class="text-xs text-ink-400 hover:text-brand-500 transition-colors">Refresh</button>
+      </div>
+      <template x-if="arbLoading.spreads">
+        <div class="bg-warm-100 animate-pulse rounded-lg h-32"></div>
+      </template>
+      <template x-if="!arbLoading.spreads">
+        <div>
+          <template x-if="spreadRows.length === 0">
+            <div class="text-center py-8 text-ink-400 text-sm">No spread data available</div>
+          </template>
+          <template x-if="spreadRows.length > 0">
+            <div>
+              <!-- Your Exchanges (actionable) -->
+              <template x-if="actionableSpreads.length > 0">
+                <div class="bg-white border border-warm-200 rounded-lg overflow-hidden mb-3">
+                  <div class="px-4 py-2 bg-warm-50 border-b border-warm-100 text-xs font-semibold text-ink-600">Your Exchanges</div>
+                  <table class="w-full text-sm">
+                    <thead>
+                      <tr class="border-b border-warm-100 text-xs text-ink-400">
+                        <th class="text-left px-4 py-2 font-medium">Buy From</th>
+                        <th class="text-left px-4 py-2 font-medium">Sell To</th>
+                        <th class="text-right px-4 py-2 font-medium">Spread</th>
+                        <th class="text-right px-4 py-2 font-medium">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-for="s in actionableSpreads" :key="'a_' + s.buy_from + s.sell_to">
+                        <tr class="border-b border-warm-50 last:border-0 transition-colors"
+                          :class="s.opportunity ? 'bg-green-50' : ''">
+                          <td class="px-4 py-2 font-medium text-ink-700" x-text="s.buy_from.toUpperCase()"></td>
+                          <td class="px-4 py-2 font-medium text-ink-700" x-text="s.sell_to.toUpperCase()"></td>
+                          <td class="px-4 py-2 text-right font-mono"
+                            :class="s.spread_pct >= 0.3 ? 'text-green-600 font-semibold' : s.spread_pct >= 0 ? 'text-ink-600' : 'text-ink-300'"
+                            x-text="(s.spread_pct >= 0 ? '+' : '') + s.spread_pct.toFixed(4) + '%'"></td>
+                          <td class="px-4 py-2 text-right">
+                            <span x-show="s.opportunity" class="text-[10px] font-semibold text-green-700 bg-green-100 px-2 py-0.5 rounded-full">OPPORTUNITY</span>
+                            <span x-show="!s.opportunity" class="text-ink-300">&mdash;</span>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </template>
+              <template x-if="actionableSpreads.length === 0">
+                <div class="text-center py-4 text-ink-400 text-xs mb-3 bg-white border border-warm-200 rounded-lg">
+                  No configured exchanges with balance — <a href="/trading" class="text-brand-500 hover:underline">add account</a>
+                </div>
+              </template>
+
+              <!-- Other Markets (collapsed) -->
+              <div>
+                <button @click="showOtherSpreads = !showOtherSpreads"
+                  class="text-xs text-ink-400 hover:text-ink-600 transition-colors flex items-center gap-1 mb-2">
+                  <span x-text="showOtherSpreads ? '&#9660;' : '&#9654;'"></span>
+                  Other Markets (<span x-text="otherSpreads.length"></span>)
+                </button>
+                <div x-show="showOtherSpreads" x-transition class="bg-white border border-warm-200 rounded-lg overflow-hidden opacity-70">
+                  <table class="w-full text-xs">
+                    <thead>
+                      <tr class="border-b border-warm-100 text-ink-400">
+                        <th class="text-left px-3 py-1.5 font-medium">Buy From</th>
+                        <th class="text-left px-3 py-1.5 font-medium">Sell To</th>
+                        <th class="text-right px-3 py-1.5 font-medium">Spread</th>
+                        <th class="text-right px-3 py-1.5 font-medium"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-for="s in otherSpreads" :key="'o_' + s.buy_from + s.sell_to">
+                        <tr class="border-b border-warm-50 last:border-0">
+                          <td class="px-3 py-1.5 text-ink-400" x-text="s.buy_from.toUpperCase()"></td>
+                          <td class="px-3 py-1.5 text-ink-400" x-text="s.sell_to.toUpperCase()"></td>
+                          <td class="px-3 py-1.5 text-right font-mono text-ink-300"
+                            x-text="(s.spread_pct >= 0 ? '+' : '') + s.spread_pct.toFixed(4) + '%'"></td>
+                          <td class="px-3 py-1.5 text-right">
+                            <a href="/trading" class="text-[10px] text-brand-500 hover:underline">+ Add Account</a>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="mt-2 text-[10px] text-ink-400">Source: public APIs, 30s cache</div>
+            </div>
+          </template>
+        </div>
+      </template>
+    </div>
+
+    <!-- ── Area 3: Active Arbitrage Offers ── -->
+    <div class="mb-6">
+      <div class="flex items-center gap-2 mb-3">
+        <h3 class="text-xs font-semibold text-ink-500 uppercase tracking-wider">Active Arbitrage Offers</h3>
+        <span class="text-[10px] text-ink-400" x-text="'(' + arbOffers.length + ')'"></span>
+      </div>
+      <template x-if="arbOffers.length === 0">
+        <div class="text-center py-8 text-ink-400 text-sm bg-white border border-warm-200 rounded-lg">No active arbitrage offers</div>
+      </template>
+      <div class="space-y-3">
+        <template x-for="o in arbOffers" :key="o.id">
+          <div class="bg-white border border-warm-200 rounded-lg p-4">
+            <div class="flex items-center justify-between">
+              <div>
+                <span class="text-sm font-semibold text-ink-700">
+                  <template x-if="o.give_asset === 'KAS'">
+                    <span>SELL <span x-text="o.give_amount"></span> KAS @ <span x-text="o.want_amount && o.give_amount ? (parseFloat(o.want_amount) / parseFloat(o.give_amount)).toFixed(5) : '?'"></span></span>
+                  </template>
+                  <template x-if="o.give_asset !== 'KAS'">
+                    <span>BUY KAS: give <span x-text="o.give_amount + ' ' + o.give_asset"></span></span>
+                  </template>
+                </span>
+              </div>
+              <span class="text-[10px] px-2 py-0.5 rounded-full"
+                :class="o.protocol_status === 'open' ? 'bg-blue-100 text-blue-700' : 'bg-warm-100 text-ink-500'"
+                x-text="o.protocol_status"></span>
+            </div>
+            <div class="mt-2 flex items-center gap-4 text-xs text-ink-400">
+              <span>By: <span class="text-ink-600" x-text="arbAgentName(o.maker)"></span></span>
+              <span x-text="KANet.relativeTime(o.broadcast_at)"></span>
+            </div>
+            <div class="mt-3">
+              <button @click="cancelArbOffer(o)"
+                class="text-xs px-3 py-1.5 border border-red-200 text-red-600 rounded hover:bg-red-50 transition-colors"
+                :disabled="o._cancelling">
+                <span x-show="!o._cancelling">Cancel</span>
+                <span x-show="o._cancelling">Cancelling...</span>
+              </button>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- ── Area 4: Hedge History ── -->
+    <div class="mb-6">
+      <h3 class="text-xs font-semibold text-ink-500 uppercase tracking-wider mb-3">Hedge History</h3>
+      <template x-if="arbLoading.hedges">
+        <div class="bg-warm-100 animate-pulse rounded-lg h-24"></div>
+      </template>
+      <template x-if="!arbLoading.hedges">
+        <div>
+          <template x-if="hedgeHistory.length === 0">
+            <div class="text-center py-8 text-ink-400 text-sm bg-white border border-warm-200 rounded-lg">No hedge history</div>
+          </template>
+          <template x-if="hedgeHistory.length > 0">
+            <div class="bg-white border border-warm-200 rounded-lg overflow-hidden">
+              <table class="w-full text-sm">
+                <thead>
+                  <tr class="border-b border-warm-100 text-xs text-ink-400">
+                    <th class="text-left px-4 py-2 font-medium">Time</th>
+                    <th class="text-left px-4 py-2 font-medium">Side</th>
+                    <th class="text-right px-4 py-2 font-medium">Qty</th>
+                    <th class="text-right px-4 py-2 font-medium">Price</th>
+                    <th class="text-left px-4 py-2 font-medium">Exchange</th>
+                    <th class="text-center px-4 py-2 font-medium">Result</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="h in hedgeHistory" :key="h.id || h.observed_at">
+                    <tr class="border-b border-warm-50 last:border-0">
+                      <td class="px-4 py-2 text-xs text-ink-500" x-text="KANet.formatTime(h.observed_at)"></td>
+                      <td class="px-4 py-2 font-medium" :class="h.side === 'BUY' ? 'text-green-600' : 'text-red-500'" x-text="h.side || '—'"></td>
+                      <td class="px-4 py-2 text-right font-mono text-ink-700" x-text="h.qty ? Number(h.qty).toLocaleString() : '—'"></td>
+                      <td class="px-4 py-2 text-right font-mono text-ink-700" x-text="h.price ? Number(h.price).toFixed(5) : '—'"></td>
+                      <td class="px-4 py-2 text-ink-600" x-text="(h.exchange || '—').toUpperCase()"></td>
+                      <td class="px-4 py-2 text-center">
+                        <template x-if="h.event_type === 'hedge_placed'"><span class="text-green-600">&#10004;</span></template>
+                        <template x-if="h.event_type === 'hedge_failed'"><span class="text-red-500">&#10008; <span class="text-[10px]" x-text="h.error || ''"></span></span></template>
+                        <template x-if="h.event_type === 'hedge_skipped'"><span class="text-amber-500">skipped</span></template>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </template>
+        </div>
+      </template>
+    </div>
+
+  </div>
+
 </div>
 
 <script>
@@ -419,6 +662,17 @@ function exchangeApp() {
       verification: 'manual', expires_minutes: '60',
       relayNodeId: '',
     },
+    // Arbitrage tab state
+    cexBalances: [],
+    spreadRows: [],
+    spreadsCachedAt: null,
+    fundedExchanges: [],
+    showOtherSpreads: false,
+    arbOffers: [],
+    hedgeHistory: [],
+    arbLoading: { balances: false, spreads: false, hedges: false },
+    arbInitialized: false,
+
     // Deal detail
     expandedId: null,
     actionMode: null, // null | 'payment' | 'dispute'
@@ -445,6 +699,12 @@ function exchangeApp() {
       return this.myDeals.filter(o =>
         ['completed', 'disputed', 'timed_out', 'expired', 'cancelled'].includes(o.protocol_status)
       );
+    },
+    get actionableSpreads() {
+      return this.spreadRows.filter(s => s.actionable);
+    },
+    get otherSpreads() {
+      return this.spreadRows.filter(s => !s.actionable);
     },
 
     // ── Init ──
@@ -684,6 +944,99 @@ function exchangeApp() {
         else { this.actionError = data.error || 'Dispute failed'; }
       } catch (e) { this.actionError = e.message; }
       finally { this.actionLoading = false; }
+    },
+
+    // ── Arbitrage Tab Methods ──
+
+    async loadArbitrageData() {
+      if (this.arbInitialized) return;
+      this.arbInitialized = true;
+      await Promise.all([this.loadBalances(), this.loadSpreads(), this.loadArbOffers(), this.loadHedgeHistory()]);
+      // Auto-refresh spreads every 30s while tab is active
+      setInterval(() => { if (this.activeTab === 'arb') this.loadSpreads(); }, 30000);
+    },
+
+    async loadBalances() {
+      this.arbLoading.balances = true;
+      try {
+        const res = await fetch('/api/trade/balances?bust=' + Date.now());
+        const data = await res.json();
+        const accounts = await fetch('/api/trade/accounts').then(r => r.json());
+        const defaultId = (accounts || []).find(a => a.is_default)?.id;
+        this.cexBalances = (data.balances || []).map(b => ({ ...b, isDefault: b.accountId === defaultId }));
+      } catch (e) {
+        this.cexBalances = [{ exchange: 'error', kas: null, usdt: null, error: e.message }];
+      } finally {
+        this.arbLoading.balances = false;
+      }
+    },
+
+    async loadSpreads() {
+      this.arbLoading.spreads = true;
+      try {
+        const res = await fetch('/api/trade/spreads');
+        const data = await res.json();
+        this.spreadRows = data.spreads || [];
+        this.spreadsCachedAt = data.cachedAt || null;
+        this.fundedExchanges = data.funded_exchanges || [];
+      } catch {
+        this.spreadRows = [];
+      } finally {
+        this.arbLoading.spreads = false;
+      }
+    },
+
+    async loadArbOffers() {
+      try {
+        const res = await fetch('/api/exchange/offers?limit=200');
+        const data = await res.json();
+        const allOffers = data.offers || [];
+        this.arbOffers = allOffers.filter(o =>
+          ['open', 'matched', 'verifying'].includes(o.protocol_status) && this.myAddresses.includes(o.maker)
+        );
+      } catch {
+        this.arbOffers = [];
+      }
+    },
+
+    async loadHedgeHistory() {
+      this.arbLoading.hedges = true;
+      try {
+        const res = await fetch('/api/agent/activity-log?limit=200');
+        const data = await res.json();
+        const logs = data.log || data.events || data || [];
+        const hedges = (Array.isArray(logs) ? logs : [])
+          .filter(e => e.event_type && e.event_type.startsWith('hedge'))
+          .slice(0, 20)
+          .map(e => {
+            const p = typeof e.payload === 'string' ? JSON.parse(e.payload || '{}') : (e.payload || {});
+            return { ...e, side: p.side, qty: p.qty, price: p.price, exchange: p.exchange, error: p.error };
+          });
+        this.hedgeHistory = hedges;
+      } catch {
+        this.hedgeHistory = [];
+      } finally {
+        this.arbLoading.hedges = false;
+      }
+    },
+
+    arbAgentName(address) {
+      const r = this.relays.find(r => r.address === address);
+      return r ? r.name : (address ? address.slice(0, 14) + '...' : 'Unknown');
+    },
+
+    async cancelArbOffer(o) {
+      if (!confirm('Cancel this offer?')) return;
+      o._cancelling = true;
+      try {
+        const res = await fetch('/api/exchange/cancel', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relayNodeId: this.form.relayNodeId, offer_id: o.id }),
+        });
+        const data = await res.json();
+        if (data.ok) { await this.loadArbOffers(); await this.loadOffers(); }
+      } catch {}
+      finally { o._cancelling = false; }
     },
   };
 }

@@ -448,3 +448,215 @@ async function cancelHtx({ baseUrl, apiKey, apiSecret, kasPair }) {
   });
   return { ok: true, cancelled: await res.json() };
 }
+
+// ── Balance Query ──────────────────────────────────────────────────────────
+
+/**
+ * Get KAS and USDT balance from any supported exchange.
+ *
+ * @param {object} account
+ * @param {string} account.exchange - exchange id (mexc/gateio/bybit/kucoin/bitget/htx/binance)
+ * @param {string} account.apiKey
+ * @param {string} account.apiSecret
+ * @param {string} [account.passphrase] - for OKX/KuCoin/Bitget
+ * @param {string} [account.baseUrl] - override base URL
+ * @returns {Promise<object>} { exchange, kas, usdt, timestamp, error }
+ */
+export async function getBalance(account) {
+  const { exchange, apiKey, apiSecret, passphrase, baseUrl } = account;
+  const ts = new Date().toISOString();
+
+  try {
+    switch (exchange) {
+      case 'mexc':
+      case 'binance': {
+        const headerName = exchange === 'mexc' ? 'X-MEXC-APIKEY' : 'X-MBX-APIKEY';
+        const url = exchange === 'mexc'
+          ? (baseUrl || 'https://api.mexc.com/api/v3')
+          : (baseUrl || 'https://api.binance.com/api/v3');
+        const qs = `timestamp=${Date.now()}`;
+        const sig = hmac256(apiSecret, qs);
+        const res = await fetch(`${url}/account?${qs}&signature=${sig}`, {
+          headers: { [headerName]: apiKey },
+          signal: AbortSignal.timeout(5000),
+        });
+        const data = await res.json();
+        if (data.code && data.code !== 200 && data.code !== 0) {
+          return { exchange, kas: null, usdt: null, timestamp: ts, error: data.msg || `API error ${data.code}` };
+        }
+        const balances = data.balances || [];
+        const kasB = balances.find(b => b.asset === 'KAS');
+        const usdtB = balances.find(b => b.asset === 'USDT');
+        return {
+          exchange,
+          kas: kasB ? parseFloat(parseFloat(kasB.free).toFixed(4)) : 0,
+          usdt: usdtB ? parseFloat(parseFloat(usdtB.free).toFixed(2)) : 0,
+          timestamp: ts, error: null,
+        };
+      }
+
+      case 'gateio': {
+        const gateBase = baseUrl || 'https://api.gateio.ws/api/v4';
+        const path = '/spot/accounts';
+        const gateTs = Math.floor(Date.now() / 1000).toString();
+        const bodyHash = sha512Hex('');
+        const signStr = `GET\n/api/v4${path}\n\n${bodyHash}\n${gateTs}`;
+        const sig = hmac512Hex(apiSecret, signStr);
+        const res = await fetch(`${gateBase}${path}`, {
+          headers: { 'KEY': apiKey, 'SIGN': sig, 'Timestamp': gateTs },
+          signal: AbortSignal.timeout(5000),
+        });
+        const data = await res.json();
+        if (!Array.isArray(data)) {
+          return { exchange, kas: null, usdt: null, timestamp: ts, error: data?.message || data?.label || 'unexpected response' };
+        }
+        const kasB = data.find(a => a.currency === 'KAS');
+        const usdtB = data.find(a => a.currency === 'USDT');
+        return {
+          exchange,
+          kas: kasB ? parseFloat(parseFloat(kasB.available).toFixed(4)) : 0,
+          usdt: usdtB ? parseFloat(parseFloat(usdtB.available).toFixed(2)) : 0,
+          timestamp: ts, error: null,
+        };
+      }
+
+      case 'bybit': {
+        const bybitBase = baseUrl || 'https://api.bybit.com';
+        const bybitTs = Date.now().toString();
+        const recvWindow = '5000';
+        const preSign = bybitTs + apiKey + recvWindow;
+        const sig = hmac256(apiSecret, preSign);
+        const res = await fetch(`${bybitBase}/v5/account/wallet-balance?accountType=UNIFIED`, {
+          headers: {
+            'X-BAPI-API-KEY': apiKey, 'X-BAPI-SIGN': sig,
+            'X-BAPI-TIMESTAMP': bybitTs, 'X-BAPI-RECV-WINDOW': recvWindow,
+          },
+          signal: AbortSignal.timeout(5000),
+        });
+        const data = await res.json();
+        if (data.retCode !== 0) {
+          return { exchange, kas: null, usdt: null, timestamp: ts, error: data.retMsg || `code ${data.retCode}` };
+        }
+        const coins = data.result?.list?.[0]?.coin || [];
+        const kasC = coins.find(c => c.coin === 'KAS');
+        const usdtC = coins.find(c => c.coin === 'USDT');
+        return {
+          exchange,
+          kas: kasC ? parseFloat(parseFloat(kasC.availableToWithdraw).toFixed(4)) : 0,
+          usdt: usdtC ? parseFloat(parseFloat(usdtC.availableToWithdraw).toFixed(2)) : 0,
+          timestamp: ts, error: null,
+        };
+      }
+
+      case 'kucoin': {
+        const kcBase = baseUrl || 'https://api.kucoin.com';
+        const kcTs = Date.now().toString();
+        const kcPath = '/api/v1/accounts?type=trade';
+        const sig = hmac256Base64(apiSecret, kcTs + 'GET' + kcPath);
+        const passphraseSig = hmac256Base64(apiSecret, passphrase || '');
+        const res = await fetch(`${kcBase}${kcPath}`, {
+          headers: {
+            'KC-API-KEY': apiKey, 'KC-API-SIGN': sig,
+            'KC-API-TIMESTAMP': kcTs, 'KC-API-PASSPHRASE': passphraseSig,
+            'KC-API-KEY-VERSION': '2',
+          },
+          signal: AbortSignal.timeout(5000),
+        });
+        const data = await res.json();
+        if (data.code !== '200000') {
+          return { exchange, kas: null, usdt: null, timestamp: ts, error: data.msg || `code ${data.code}` };
+        }
+        const accounts = data.data || [];
+        const kasA = accounts.find(a => a.currency === 'KAS');
+        const usdtA = accounts.find(a => a.currency === 'USDT');
+        return {
+          exchange,
+          kas: kasA ? parseFloat(parseFloat(kasA.balance).toFixed(4)) : 0,
+          usdt: usdtA ? parseFloat(parseFloat(usdtA.balance).toFixed(2)) : 0,
+          timestamp: ts, error: null,
+        };
+      }
+
+      case 'bitget': {
+        const bgBase = baseUrl || 'https://api.bitget.com';
+        const bgTs = Date.now().toString();
+        const bgPath = '/api/v2/spot/account/assets';
+        const sig = hmac256Base64(apiSecret, bgTs + 'GET' + bgPath);
+        const res = await fetch(`${bgBase}${bgPath}`, {
+          headers: {
+            'ACCESS-KEY': apiKey, 'ACCESS-SIGN': sig,
+            'ACCESS-TIMESTAMP': bgTs, 'ACCESS-PASSPHRASE': passphrase || '',
+          },
+          signal: AbortSignal.timeout(5000),
+        });
+        const data = await res.json();
+        if (data.code !== '00000') {
+          return { exchange, kas: null, usdt: null, timestamp: ts, error: data.msg || `code ${data.code}` };
+        }
+        const assets = data.data || [];
+        const kasA = assets.find(a => a.coin === 'KAS');
+        const usdtA = assets.find(a => a.coin === 'USDT');
+        return {
+          exchange,
+          kas: kasA ? parseFloat(parseFloat(kasA.available).toFixed(4)) : 0,
+          usdt: usdtA ? parseFloat(parseFloat(usdtA.available).toFixed(2)) : 0,
+          timestamp: ts, error: null,
+        };
+      }
+
+      case 'htx': {
+        const htxBase = baseUrl || 'https://api.huobi.pro';
+        // Step 1: get spot accountId
+        const acctTs = new Date().toISOString().split('.')[0];
+        const acctParams = new URLSearchParams({
+          AccessKeyId: apiKey, SignatureMethod: 'HmacSHA256',
+          SignatureVersion: '2', Timestamp: acctTs,
+        });
+        acctParams.sort();
+        const acctSignStr = `GET\napi.huobi.pro\n/v1/account/accounts\n${acctParams.toString()}`;
+        const acctSig = hmac256Base64(apiSecret, acctSignStr);
+        acctParams.set('Signature', acctSig);
+        const acctRes = await fetch(`${htxBase}/v1/account/accounts?${acctParams.toString()}`, {
+          signal: AbortSignal.timeout(5000),
+        });
+        const acctData = await acctRes.json();
+        const accountId = acctData.data?.find(a => a.type === 'spot')?.id;
+        if (!accountId) {
+          return { exchange, kas: null, usdt: null, timestamp: ts, error: 'Could not find HTX spot account' };
+        }
+        // Step 2: get balance
+        const balPath = `/v1/account/accounts/${accountId}/balance`;
+        const balTs = new Date().toISOString().split('.')[0];
+        const balParams = new URLSearchParams({
+          AccessKeyId: apiKey, SignatureMethod: 'HmacSHA256',
+          SignatureVersion: '2', Timestamp: balTs,
+        });
+        balParams.sort();
+        const balSignStr = `GET\napi.huobi.pro\n${balPath}\n${balParams.toString()}`;
+        const balSig = hmac256Base64(apiSecret, balSignStr);
+        balParams.set('Signature', balSig);
+        const balRes = await fetch(`${htxBase}${balPath}?${balParams.toString()}`, {
+          signal: AbortSignal.timeout(5000),
+        });
+        const balData = await balRes.json();
+        if (balData.status !== 'ok') {
+          return { exchange, kas: null, usdt: null, timestamp: ts, error: balData['err-msg'] || `status ${balData.status}` };
+        }
+        const list = balData.data?.list || [];
+        const kasT = list.find(i => i.currency === 'kas' && i.type === 'trade');
+        const usdtT = list.find(i => i.currency === 'usdt' && i.type === 'trade');
+        return {
+          exchange,
+          kas: kasT ? parseFloat(parseFloat(kasT.balance).toFixed(4)) : 0,
+          usdt: usdtT ? parseFloat(parseFloat(usdtT.balance).toFixed(2)) : 0,
+          timestamp: ts, error: null,
+        };
+      }
+
+      default:
+        return { exchange, kas: null, usdt: null, timestamp: ts, error: `unsupported exchange: ${exchange}` };
+    }
+  } catch (err) {
+    return { exchange, kas: null, usdt: null, timestamp: ts, error: err.message };
+  }
+}
