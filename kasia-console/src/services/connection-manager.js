@@ -24,6 +24,14 @@ export function getConnectionByAdapter(adapterNodeId) {
   ).get(adapterNodeId);
 }
 
+export function deleteConnection(id) {
+  sqlite.prepare('DELETE FROM agent_connections WHERE id = ?').run(id);
+}
+
+export function getConnectionsByAdapter(adapterNodeId) {
+  return sqlite.prepare('SELECT * FROM agent_connections WHERE adapter_node_id = ? ORDER BY updated_at DESC').all(adapterNodeId);
+}
+
 export function listConnections() {
   return sqlite.prepare(`
     SELECT c.*, a.name as adapter_name, a.http_port as adapter_port
@@ -218,6 +226,11 @@ function _buildContext(conn, headers) {
 export function ensureConnection(adapterNodeId) {
   const existing = getConnectionByAdapter(adapterNodeId);
   if (existing) return existing.id;
+
+  // Don't create empty api_key if an OAuth connection already exists for this adapter
+  const all = getConnectionsByAdapter(adapterNodeId);
+  const hasOAuth = all.some(c => c.auth_mode === 'oauth');
+  if (hasOAuth) return all.find(c => c.auth_mode === 'oauth').id;
 
   // Read adapter_node to create connection from its current config
   const a = sqlite.prepare('SELECT * FROM adapter_nodes WHERE id = ?').get(adapterNodeId);

@@ -12,7 +12,7 @@
  */
 import { randomBytes, createHash } from 'crypto';
 import http from 'node:http';
-import { updateConnectionOAuth, getConnection, getConnectionByAdapter, createConnection, updateConnectionStatus } from '../services/connection-manager.js';
+import { updateConnectionOAuth, getConnection, getConnectionByAdapter, getConnectionsByAdapter, deleteConnection, createConnection, updateConnectionStatus } from '../services/connection-manager.js';
 import { updateAdapterNode } from '../data/settings/adapter-nodes.js';
 
 // ── OpenAI Codex OAuth config ──────────────────────────────────────────────
@@ -250,6 +250,17 @@ function _startCallbackServer(expectedState) {
 
       // 回填 adapter_nodes 表的 url 和 model（create-adapter 时是空的）
       updateAdapterNode(flow.adapterId, { aiProviderUrl: CODEX_BASE_URL, aiModel: 'gpt-5.4' });
+
+      // Clean up empty api_key connections for the same adapter (ensureConnection creates them before OAuth)
+      try {
+        const all = getConnectionsByAdapter(flow.adapterId);
+        for (const c of all) {
+          if (c.auth_mode === 'api_key' && !c.api_key_enc) {
+            deleteConnection(c.id);
+            console.log(`[oauth] Cleaned up empty api_key connection ${c.id}`);
+          }
+        }
+      } catch {}
 
       console.log(`[oauth] OpenAI OAuth connected for adapter ${flow.adapterId} (expires: ${expiresAt})`);
       res.writeHead(200, { 'Content-Type': 'text/html' });
