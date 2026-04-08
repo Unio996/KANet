@@ -6,7 +6,7 @@ import { randomUUID } from 'crypto';
 export function listAdapterNodes() {
   return sqlite.prepare(`
     SELECT id, name, gateway_ws_url, token_hint, agent_id, session_key, http_port,
-           ai_provider, ai_provider_url, ai_provider_key_hint, ai_model, created_at
+           ai_provider, ai_provider_url, ai_provider_key_hint, ai_model, is_enabled, created_at
     FROM adapter_nodes ORDER BY created_at ASC
   `).all();
 }
@@ -69,6 +69,7 @@ export function getAdapterProviderKey(id) {
 
 export function deleteAdapterNode(id) {
   sqlite.prepare('UPDATE relay_nodes SET adapter_node_id = NULL WHERE adapter_node_id = ?').run(id);
+  sqlite.prepare('DELETE FROM agent_connections WHERE adapter_node_id = ?').run(id);
   sqlite.prepare('DELETE FROM adapter_nodes WHERE id = ?').run(id);
 }
 

@@ -156,9 +156,11 @@ export async function getWorkingRpc() {
   // 2. 配置的 URL
   const configured = await checkConfigured();
   if (configured) {
-    _cache = { url: configured, isLocal: false, ts: Date.now() };
-    console.log('[rpc-health] using configured node:', configured);
-    return { url: configured, isLocal: false };
+    // 局域网节点（私有 IP）视同本地节点 — Scout 可用全量 RPC 模式
+    const isLan = /^wss?:\/\/(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|localhost|127\.)/.test(configured);
+    _cache = { url: configured, isLocal: isLan, ts: Date.now() };
+    console.log(`[rpc-health] using configured node: ${configured}${isLan ? ' (LAN — treated as local)' : ''}`);
+    return { url: configured, isLocal: isLan };
   }
 
   // 3. Resolver 发现

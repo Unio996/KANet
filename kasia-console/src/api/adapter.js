@@ -25,7 +25,7 @@ async function deepCheckAdapter(port) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ peer: '_ping', message: 'hi' }),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(60000),
     });
     const result = { apiOk: res.ok, apiError: null, checkedAt: Date.now() };
     if (!res.ok) result.apiError = (await res.text().catch(() => '')).slice(0, 100);
@@ -50,11 +50,14 @@ export async function registerAdapterRoutes(fastify) {
       const managed = getAdapterStatus(a.id);
       const ping = await pingAdapter(a.http_port);
       const online = managed.running || !!ping;
-      // Use cached deep check (non-blocking), trigger fresh check in background
-      const cached = _apiCheckCache[a.http_port];
-      const apiOk = online ? (cached?.apiOk ?? null) : null;
-      if (online) deepCheckAdapter(a.http_port).catch(() => {}); // refresh cache async
-      return { ...a, online, apiOk, apiError: cached?.apiError || null, managed: managed.running, pid: managed.pid, startedAt: managed.startedAt };
+      // Deep check: use cache if fresh, otherwise await result (blocks up to 15s per adapter)
+      let apiOk = null, apiError = null;
+      if (online) {
+        const check = await deepCheckAdapter(a.http_port);
+        apiOk = check.apiOk;
+        apiError = check.apiError;
+      }
+      return { ...a, online, apiOk, apiError, managed: managed.running, pid: managed.pid, startedAt: managed.startedAt };
     }));
     return reply.view('adapters', { adapters: withStatus, t, lang, dir, langs });
   });
@@ -91,14 +94,14 @@ export async function registerAdapterRoutes(fastify) {
 
   // Start adapter process
   fastify.post('/adapters/:id/start', async (request, reply) => {
-    const result = await startAdapter(request.params.id);
+    const result = await startAdapter(request.params.id, true);  // userIntent=true
     if (!result.ok) console.log('[adapter] start failed:', result.reason);
     return reply.redirect('/adapters');
   });
 
   // Stop adapter process
   fastify.post('/adapters/:id/stop', async (request, reply) => {
-    await stopAdapter(request.params.id);
+    await stopAdapter(request.params.id, true);  // userIntent=true
     return reply.redirect('/adapters');
   });
 

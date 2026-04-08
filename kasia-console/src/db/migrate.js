@@ -1683,5 +1683,14 @@ export function runMigrations() {
     console.log('[migrate] v49: kanet_message_index.reply_to added');
   }
 
+  // v50: adapter_nodes 加 is_enabled — 记住用户手动停止状态，重启后不自动拉起
+  const hasIsEnabled = sqlite.prepare(
+    "SELECT 1 FROM pragma_table_info('adapter_nodes') WHERE name='is_enabled'"
+  ).get();
+  if (!hasIsEnabled) {
+    sqlite.exec("ALTER TABLE adapter_nodes ADD COLUMN is_enabled INTEGER NOT NULL DEFAULT 1");
+    console.log('[migrate] v50: adapter_nodes.is_enabled added');
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
