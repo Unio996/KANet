@@ -1,7 +1,8 @@
 # KANet Developer Guide
 
 > **修改任何代码前必读。** 一个文件，覆盖全系统。唯一权威开发者文档。
-> 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-06。
+> 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-08。
+> 4/8 更新：stock-tracker 四层情报升级（K 线信号+财报感知+新闻 RSS+同行估值+解读指引）。intent-detector 市场场景误分类修复。stocks.eta ACTION 模板注入移除。
 > 4/6 更新：技术债清零（v46/v47 DROP 两张表） + DATABASE.md 数据字典 + exchange 交割全流程（manual/cross_chain_tx/超时/争议/套利链路）。cross-chain-verify.mjs 独立模块。
 > 4/5 更新：pending_actions 意图队列（v44）— 意图与事实分离，修复 catch-up 重复握手双花。陷阱 #24-27。花费账本页 /ledger。IB Gateway 不随启动。
 > 4/4 下午更新：做市三层架构（market-scanner + order-executor + 自动对冲）、activity-log 改读 messages、contacts.eta 时间本地化、PLACE_ORDER free_market 指向 /exchange。
@@ -474,23 +475,37 @@ registry.mjs 自动扫描，单文件和包式并存。
 |---|--------|---------|---------|-----------|
 | 1 | MEXC | `/api/market/crypto` | KAS/BTC/ETH 价格+涨跌 | trade_sense |
 | 2 | Yahoo Finance | `/api/stocks/*` | 自选股行情 + 52周高低 | stock_tracker |
+| 2b | Yahoo Finance v8 | `/api/stocks/klines` | **日 K 线（1 个月 OHLCV）** | **stock_tracker** |
+| 2c | Yahoo Finance | `/api/stocks/fundamentals` | **基本面 + 财报日期 + ROE/FCF/D-E/PEG** | **stock_tracker** |
 | 3 | Polymarket | `/api/predictions/markets` | 1000 个预测市场 | prediction_sense |
 | 4 | Yahoo Finance | `/api/market/commodities` | 黄金/原油/白银 | stock_tracker |
 | 5 | Binance | `/api/market/funding` | BTC 资金费率 | stock_tracker |
 | 6 | Alternative.me | `/api/market/sentiment` | 恐贪指数 | stock_tracker |
 | 7 | **CoinGecko** | `/api/market/crypto-global` | 总市值/BTC市占率/活跃币种 | **stock_tracker** |
 | 8 | **Forex Factory** | `/api/market/calendar` | 经济日历/今日高影响力事件 | **stock_tracker** |
+| 9 | **Yahoo RSS** | 直接 fetch（skill 内） | **自选股前 3 只新闻标题** | **stock_tracker** |
 
-**Agent 怎么看到这些？** stock_tracker.mjs 在 gatherContext 中并行 fetch overview + crypto + crypto-global + calendar，formatForBrain 输出：
-```
-Crypto macro (CoinGecko): Total $2.41T (-0.1%) | BTC dominance 56.2%
-Crypto prices: BTC $68,344 +2.5% | KAS $0.033
+**Agent 怎么看到这些？** stock_tracker.mjs（4/8 升级为四层情报架构）在 gatherContext 中并行 fetch overview + fundamentals + klines + crypto + crypto-global + calendar + Yahoo RSS 新闻。formatForBrain 输出 7 个面板：
 
-TODAY'S HIGH-IMPACT EVENTS (4):
-  08:15 USD ADP Non-Farm Employment Change (exp 41K)
-  08:30 USD Core Retail Sales m/m (exp 0.3%)
-  ...
+1. **WATCHLIST + SIGNALS**：每只股票含技术信号（SMA5/SMA20 趋势、波动率、动量、支撑/阻力）+ 财报日期 + 深度基本面（ROE/D-E/FCF）
+2. **SIGNALS SUMMARY**：跨股票聚合 bullish/bearish + 7 日内财报警告
+3. **STOCK NEWS**：Yahoo RSS 最新 2 条标题/股（相对时间）
+4. **COMPETITOR MAP**：同行价格 + 偏离度 + **相对估值**（FwdPE vs 同行均值 premium/discount）
+5. **PORTFOLIO HEALTH**：板块集中度 + avg beta + 分析师共识 + 高估警告
+6. **MACRO**：异动 + 商品 + 恐贪 + 资金费率 + CoinGecko + 经济日历
+7. **信号解读指引**：5 条规则（仿照 prediction-sense 模式）
+
+示例输出（单股）：
 ```
+AAPL $253.50 -2.1% | Consumer Electronics | FwdPE 27
+  Trend: DOWN (vs SMA5) | Bias: BULLISH (SMA5 vs SMA20)
+  Volatility: LOW (1.3%) | Momentum: +2.8% (5d)
+  Support $245.51 (3.2%) | Resistance $262.16 (3.4%)
+  Earnings: 2026-04-30 (22d) — EPS est $1.94, Rev est 109.27B
+  Analysts: BUY (40) target $295 (16%) | ROE 152.0% | D/E 102.6 | FCF 106.31B
+```
+
+**对比改动前：** 之前只输出 `AAPL $253.50 -2.1% (52w: 170-260)` 一行原始数据。
 
 ### 预测市场（Polymarket）
 
@@ -561,7 +576,7 @@ Agent 决策理由从 execution_states.display_summary 注入。
 | kasia-console/src/services/mind-manager.js | 调度器 + Gate 1 + health loop + proactive/reflect 定时 |
 | kasia-console/src/services/anti-spam.js | 社交防护（per-peer/跨Agent/无回复退避）+ 行为统计 |
 | kasia-console/src/services/order-machine.js | 交易状态机 + auto-advance + 三模式 |
-| kasia-console/src/services/market-data.js | 8 数据源聚合（MEXC/Yahoo/Polymarket/CoinGecko/ForexFactory/Binance/Alternative.me） |
+| kasia-console/src/services/market-data.js | 9 数据源聚合（MEXC/Yahoo×3/Polymarket/CoinGecko/ForexFactory/Binance/Alternative.me）含 K 线 + 财报 |
 | kasia-console/src/services/ingest-service.js | Relay 上报→DB 写入（messages/chain_events/relation_states） |
 | kasia-console/src/services/agent-health.js | 7 项指标 + 红绿灯 |
 | kasia-console/src/services/broker-ibkr.js | 盈透证券适配器（@stoqey/ib TWS API socket） |
@@ -575,7 +590,7 @@ Agent 决策理由从 execution_states.display_summary 注入。
 | agent-mind/src/action-executor.mjs | Gate 3 + sendMessage(去重+fail-closed) + POLYMARKET_ORDER + MAKE_MARKET + CANCEL_OFFERS + 交易 |
 | agent-mind/src/kernels/intent.mjs | 目标 + recordAttempt + cooldown + auto-retire |
 | agent-mind/src/skills/self-awareness.mjs | KAS余额 + 多链钱包 + Polymarket持仓 + broker持仓 + OTC订单 |
-| agent-mind/src/skills/stock-tracker.mjs | 自选股 + 大宗 + CoinGecko大盘 + 经济日历 + 恐贪 → Brain宏观视野 |
+| agent-mind/src/skills/stock-tracker.mjs | 四层情报：K 线信号 + 财报感知 + 新闻 RSS + 同行估值 + 宏观 → Brain 决策（4/8 升级） |
 | agent-mind/src/skills/prediction-sense.mjs | Polymarket 热门事件 → Brain 情绪信号 |
 | agent-mind/src/skills/market-scanner.mjs | 8 CEX + KANet 价差扫描（1h proactive / reactive 关键词）|
 | agent-mind/src/skills/order-executor.mjs | KANet 做市指令生成（MAKE_MARKET ACTION + 对冲参考）|
@@ -1343,7 +1358,8 @@ _executeHedge 支持 preferredCex 参数 + HEDGE_CEX_MAP（scanner 显示名→D
 | GET | `/api/stocks/quotes` | 批量报价 | stocks.js |
 | GET | `/api/stocks/quote/:symbol` | 单股报价 | stocks.js |
 | GET | `/api/stocks/overview` | 股市概览 | stocks.js |
-| GET | `/api/stocks/fundamentals` | 基本面数据 | stocks.js |
+| GET | `/api/stocks/klines` | **日 K 线（1 个月 OHLCV）** | stocks.js |
+| GET | `/api/stocks/fundamentals` | 基本面 + 财报 + ROE/FCF/D-E/PEG | stocks.js |
 
 ### 预测市场 / Predictions
 

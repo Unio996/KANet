@@ -7,7 +7,7 @@
 import { sqlite } from '../db/client.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 import crypto, { randomUUID } from 'crypto';
-import { fetchStockData, fetchYahooQuote, cachedPredictions, cachedCommodities, cachedFunding, cachedSentiment, fetchAllMarkets, cachedCrypto, cachedFundamentals, cachedIndustryPeers, DIVERGENCE_WARN_THRESHOLD } from '../services/market-data.js';
+import { fetchStockData, fetchYahooQuote, cachedPredictions, cachedCommodities, cachedFunding, cachedSentiment, fetchAllMarkets, cachedCrypto, cachedFundamentals, cachedIndustryPeers, cachedStockKlines, DIVERGENCE_WARN_THRESHOLD } from '../services/market-data.js';
 import { getPolygonWallet, getUsdcBalance, createApiKey, getOrderBook, getPositions, placeOrder, cancelOrder, getOpenOrders, checkAllowance, approveUsdc, checkTxStatus } from '../services/polymarket.js';
 import { decrypt } from '../services/crypto.js';
 
@@ -97,6 +97,15 @@ export async function registerStockRoutes(fastify) {
     const quote = await fetchYahooQuote(request.params.symbol.toUpperCase());
     if (!quote) return reply.code(404).send({ error: 'symbol not found' });
     return reply.send(quote);
+  });
+
+  // GET /api/stocks/klines — 自选股日 K 线（1 个月）
+  fastify.get('/api/stocks/klines', async (request, reply) => {
+    const watchlist = sqlite.prepare('SELECT symbol FROM stock_watchlist ORDER BY created_at').all();
+    const symbols = watchlist.map(w => w.symbol);
+    if (symbols.length === 0) return reply.send({ ok: true, data: {} });
+    const result = await cachedStockKlines(symbols);
+    return reply.send(result);
   });
 
   // GET /api/stocks/overview — 股票页面全量数据（自选股 + 指数 + 宏观）

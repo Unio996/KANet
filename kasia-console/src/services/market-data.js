@@ -187,6 +187,55 @@ export async function fetchStockData(symbols) {
 // 导出供自选股单独查询
 export { fetchYahooQuote };
 
+// ─── 2b. 股票 K 线（日线，1 个月） ───────────────────
+
+async function fetchYahooKlines(sym) {
+  try {
+    const res = await fetch(
+      `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?range=1mo&interval=1d`,
+      { signal: AbortSignal.timeout(5000), headers: { 'User-Agent': 'Mozilla/5.0' } },
+    );
+    if (!res.ok) return null;
+    const json = await res.json();
+    const result = json?.chart?.result?.[0];
+    if (!result) return null;
+    const ts = result.timestamp;
+    const q = result.indicators?.quote?.[0];
+    if (!ts || !q) return null;
+    return ts.map((t, i) => ({
+      time: t * 1000,
+      open: q.open?.[i] ?? null,
+      high: q.high?.[i] ?? null,
+      low: q.low?.[i] ?? null,
+      close: q.close?.[i] ?? null,
+      volume: q.volume?.[i] ?? null,
+    })).filter(k => k.close != null);
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchStockKlines(symbols) {
+  if (!symbols?.length) return { source: 'klines', ok: false, error: 'no symbols', data: {} };
+  try {
+    const results = await Promise.all(symbols.map(s => fetchYahooKlines(s).catch(() => null)));
+    const data = {};
+    for (let i = 0; i < symbols.length; i++) {
+      if (results[i]?.length) data[symbols[i]] = results[i];
+    }
+    return {
+      source: 'klines',
+      ok: Object.keys(data).length > 0,
+      data,
+      fetchedAt: new Date().toISOString(),
+    };
+  } catch (e) {
+    return { source: 'klines', ok: false, error: e.message, data: {} };
+  }
+}
+
+export const cachedStockKlines = cached('stock_klines', fetchStockKlines);
+
 // ═══════════════════════════════════════════════════
 //  3. 预测市场 — Polymarket
 // ═══════════════════════════════════════════════════
@@ -452,7 +501,7 @@ export async function fetchStockFundamentals(symbols) {
   try {
     const results = await Promise.all(symbols.map(async (sym) => {
       try {
-        const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(sym)}?modules=assetProfile,financialData,defaultKeyStatistics`;
+        const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(sym)}?modules=assetProfile,financialData,defaultKeyStatistics,calendarEvents`;
         const res = await _yahooFetchWithCrumb(url);
         if (!res.ok) return null;
         const json = await res.json();
@@ -462,6 +511,15 @@ export async function fetchStockFundamentals(symbols) {
         const profile = result.assetProfile || {};
         const fin = result.financialData || {};
         const stats = result.defaultKeyStatistics || {};
+        const cal = result.calendarEvents || {};
+
+        // Earnings date — array of timestamps, take first upcoming
+        const earningsRaw = cal.earnings?.earningsDate;
+        let earningsDate = null;
+        if (Array.isArray(earningsRaw) && earningsRaw.length > 0) {
+          const ts = earningsRaw[0]?.raw;
+          if (ts) earningsDate = new Date(ts * 1000).toISOString().slice(0, 10);
+        }
 
         return {
           symbol: sym,
@@ -481,6 +539,16 @@ export async function fetchStockFundamentals(symbols) {
           shortRatio: stats.shortRatio?.raw || null,
           marketCap: stats.marketCap?.raw || null,
           marketCapFmt: stats.marketCap?.fmt || null,
+          // Phase 1b: 财报 + 估值新字段
+          earningsDate,
+          earningsEPSEstimate: cal.earnings?.earningsAverage?.raw ?? null,
+          earningsRevenueEstimate: cal.earnings?.revenueAverage?.raw ?? null,
+          earningsRevenueFmt: cal.earnings?.revenueAverage?.fmt ?? null,
+          returnOnEquity: fin.returnOnEquity?.raw != null ? +(fin.returnOnEquity.raw * 100).toFixed(2) : null,
+          freeCashflow: fin.freeCashflow?.raw ?? null,
+          freeCashflowFmt: fin.freeCashflow?.fmt ?? null,
+          debtToEquity: fin.debtToEquity?.raw ?? null,
+          pegRatio: stats.pegRatio?.raw ?? null,
         };
       } catch {
         return null; // individual symbol failure — silent
