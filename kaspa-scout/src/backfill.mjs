@@ -17,7 +17,8 @@ import {
   parseBcastPayload,
 } from './rpc-scanner.mjs';
 
-const { RpcClient, Resolver, Encoding } = kaspa;
+const { RpcClient, Encoding } = kaspa;
+const Resolver = kaspa.Resolver || null;
 
 function log(...args) {
   console.log(new Date().toISOString(), '[backfill]', ...args);
@@ -47,7 +48,9 @@ export async function runBackfill(reporter, opts) {
 
   const rpcOpts = rpcUrl
     ? { url: rpcUrl, encoding: Encoding.Borsh, networkId: network }
-    : { resolver: new Resolver(), encoding: Encoding.Borsh, networkId: network };
+    : Resolver
+      ? { resolver: new Resolver(), encoding: Encoding.Borsh, networkId: network }
+      : (() => { throw new Error('No RPC URL configured and Resolver unavailable. Set KASPA_RPC_URL env var.'); })();
 
   const rpc = new RpcClient(rpcOpts);
   log(`Connecting to ${rpcUrl || 'resolver'}...`);

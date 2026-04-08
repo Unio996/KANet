@@ -19,7 +19,7 @@
 
 import * as kaspa from 'kaspa-wasm';
 
-const { RpcClient, Resolver, Encoding } = kaspa;
+const { RpcClient, Encoding } = kaspa;
 
 const KASPA_NETWORK = process.env.KASPA_NETWORK || 'mainnet';
 const SOMPI_PER_KAS = 100_000_000;

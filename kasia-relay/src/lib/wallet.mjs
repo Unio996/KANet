@@ -12,11 +12,25 @@ function getNetworkType(network) {
   }
 }
 
+// Decode base58 string to Buffer (for extracting raw private key from xprv)
+function decodeBase58(str) {
+  const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  let result = 0n;
+  for (const c of str) result = result * 58n + BigInt(ALPHABET.indexOf(c));
+  const hex = result.toString(16).padStart(164, '0');
+  return Buffer.from(hex, 'hex');
+}
+
 function derivedToPrivateKey(derived) {
   if (derived && typeof derived.toPrivateKey === 'function') return derived.toPrivateKey();
   if (PrivateKey && typeof PrivateKey.fromXPrv === 'function') return PrivateKey.fromXPrv(derived);
   if (derived?.privateKey) return derived.privateKey;
-  if (derived && typeof derived.toKeypair === 'function') return derived;
+  // npm kaspa-wasm ^0.13.0: extract 32-byte privkey from base58-encoded xprv
+  if (derived && typeof derived.intoString === 'function') {
+    const raw = decodeBase58(derived.intoString('xprv'));
+    const privKeyHex = raw.slice(46, 78).toString('hex');
+    return new PrivateKey(privKeyHex);
+  }
   const keys = derived ? Object.keys(derived) : [];
   throw new Error(`Cannot convert derived key to PrivateKey. Keys: ${keys.join(', ')}`);
 }

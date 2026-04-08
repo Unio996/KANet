@@ -15,7 +15,15 @@
 
 import * as kaspa from 'kaspa-wasm';
 
-const { RpcClient, Resolver } = kaspa;
+const { RpcClient } = kaspa;
+const Resolver = kaspa.Resolver || null;
+
+function _rpcOpts() {
+  const url = process.env.KASPA_RPC_URL;
+  if (url) return { url, networkId: KASPA_NETWORK };
+  if (Resolver) return { resolver: new Resolver(), networkId: KASPA_NETWORK };
+  throw new Error('No RPC URL configured and Resolver unavailable. Set KASPA_RPC_URL env var.');
+}
 
 const KASPA_NETWORK = process.env.KASPA_NETWORK || 'mainnet';
 const COLLECT_INTERVAL_MS = parseInt(process.env.CHAIN_COLLECT_INTERVAL_MS || '300000'); // 5 min default
@@ -39,10 +47,7 @@ export async function startChainFundamentals(reporter) {
 
   // Connect to local RPC node
   try {
-    _rpc = new RpcClient({
-      resolver: new Resolver(),
-      networkId: KASPA_NETWORK,
-    });
+    _rpc = new RpcClient(_rpcOpts());
     await _rpc.connect();
     console.log(`[chain-fundamentals] connected to Kaspa ${KASPA_NETWORK} node`);
   } catch (err) {
@@ -84,10 +89,7 @@ async function _collectAndReport() {
   try {
     // Reconnect if needed
     if (!_rpc) {
-      _rpc = new RpcClient({
-        resolver: new Resolver(),
-        networkId: KASPA_NETWORK,
-      });
+      _rpc = new RpcClient(_rpcOpts());
       await _rpc.connect();
       console.log('[chain-fundamentals] reconnected to RPC');
     }

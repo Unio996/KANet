@@ -127,7 +127,9 @@ async function main() {
         rpc = new RpcClient(
           localUp
             ? { url: LOCAL_RPC, encoding: Encoding.Borsh, networkId: 'mainnet' }
-            : { resolver: new kaspa.Resolver(), encoding: Encoding.Borsh, networkId: 'mainnet' }
+            : kaspa.Resolver
+              ? { resolver: new kaspa.Resolver(), encoding: Encoding.Borsh, networkId: 'mainnet' }
+              : (() => { throw new Error('No RPC URL and Resolver unavailable. Set KASPA_RPC_URL.'); })()
         );
         await Promise.race([
           rpc.connect({}),
@@ -235,7 +237,9 @@ async function main() {
           rpc2 = new RpcClient(
             localUp
               ? { url: LOCAL_RPC, encoding: Encoding.Borsh, networkId: 'mainnet' }
-              : { resolver: new kaspa.Resolver(), encoding: Encoding.Borsh, networkId: 'mainnet' }
+              : kaspa.Resolver
+              ? { resolver: new kaspa.Resolver(), encoding: Encoding.Borsh, networkId: 'mainnet' }
+              : (() => { throw new Error('No RPC URL and Resolver unavailable. Set KASPA_RPC_URL.'); })()
           );
           await Promise.race([
             rpc2.connect({}),
@@ -293,7 +297,9 @@ async function main() {
         const rpc3 = new RpcClient(
           localUp
             ? { url: LOCAL_RPC, encoding: Encoding.Borsh, networkId: 'mainnet' }
-            : { resolver: new kaspa.Resolver(), encoding: Encoding.Borsh, networkId: 'mainnet' }
+            : kaspa.Resolver
+              ? { resolver: new kaspa.Resolver(), encoding: Encoding.Borsh, networkId: 'mainnet' }
+              : (() => { throw new Error('No RPC URL and Resolver unavailable. Set KASPA_RPC_URL.'); })()
         );
         await Promise.race([
           rpc3.connect({}),

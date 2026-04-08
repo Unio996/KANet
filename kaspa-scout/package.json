@@ -10,6 +10,6 @@
     "test": "node --test src/**/*.test.mjs"
   },
   "dependencies": {
-    "kaspa-wasm": "file:D:/Anthropic/kaspa-mcp/vendor/kaspa-wasm"
+    "kaspa-wasm": "npm:@onetokenfe/kaspa-wasm-node@^1.0.2"
   }
 }

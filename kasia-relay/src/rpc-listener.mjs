@@ -21,7 +21,8 @@ import { routeMessage } from './router.mjs';
 import { loadSeen, saveSeen } from './state.mjs';
 import { ingestMessage, ingestReply, ingestTx, ingestHandshake } from './ingest.mjs';
 
-const { RpcClient, Resolver, Encoding } = kaspa;
+const { RpcClient, Encoding } = kaspa;
+const Resolver = kaspa.Resolver || null;  // npm ^0.13.0 removed Resolver
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
@@ -312,7 +313,9 @@ async function _connect(wallet) {
 
   const rpcOpts = directUrl
     ? { url: directUrl, encoding: Encoding.Borsh, networkId }
-    : { resolver: new Resolver(), encoding: Encoding.Borsh, networkId };
+    : Resolver
+      ? { resolver: new Resolver(), encoding: Encoding.Borsh, networkId }
+      : (() => { throw new Error('No RPC URL configured and Resolver unavailable. Set KASPA_RPC_URL env var.'); })();
 
   _rpc = new RpcClient(rpcOpts);
 

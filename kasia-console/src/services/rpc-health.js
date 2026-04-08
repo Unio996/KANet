@@ -102,7 +102,9 @@ async function checkConfigured() {
 async function discoverNode() {
   try {
     const kaspa = await import('kaspa-wasm');
-    const { Resolver, Encoding } = kaspa;
+    const Resolver = kaspa.Resolver || null;
+    const { Encoding } = kaspa;
+    if (!Resolver) return null;  // npm ^0.13.0 removed Resolver
     // 并发3次 resolve，取最快的
     const promises = Array.from({ length: 3 }, () =>
       Promise.race([

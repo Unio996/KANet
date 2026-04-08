@@ -10,7 +10,8 @@
 import * as kaspa from 'kaspa-wasm';
 import { getWallet } from './wallet.mjs';
 
-const { Generator, RpcClient, Resolver, Encoding, Address, sompiToKaspaString } = kaspa;
+const { Generator, RpcClient, Encoding, Address, sompiToKaspaString } = kaspa;
+const Resolver = kaspa.Resolver || null;
 
 const MIN_BALANCE_FOR_SPLIT = 20_000_000n; // 0.2 KAS
 
@@ -38,7 +39,9 @@ export async function splitUtxosRelay(targetCount = 3) {
   const directUrl = await resolveRpcUrl();
   const rpcOpts = directUrl
     ? { url: directUrl, encoding: Encoding.Borsh, networkId }
-    : { resolver: new Resolver(), encoding: Encoding.Borsh, networkId };
+    : Resolver
+      ? { resolver: new Resolver(), encoding: Encoding.Borsh, networkId }
+      : (() => { throw new Error('No RPC URL configured and Resolver unavailable. Set KASPA_RPC_URL env var.'); })();
 
   const rpc = new RpcClient(rpcOpts);
   try {
