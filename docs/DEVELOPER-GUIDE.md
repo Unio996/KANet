@@ -659,7 +659,15 @@ Agent 决策理由从 execution_states.display_summary 注入。
 | 10 | ~~interaction_records 残留读取~~ | **已解决（v47 DROP TABLE, 2026-04-06，17 处迁移到 chain_events）** |
 | 11 | ~~replies.sent_txid 盲匹配 hack~~ | **已解决（2026-04-06，chain_events 是真相源）** |
 
-> **数据库字典：** 改表前必查 `docs/DATABASE.md`，34 张活跃表全覆盖。migrate.js 当前最新版本 v47。
+> **数据库字典：** 改表前必查 `docs/DATABASE.md`，34 张活跃表全覆盖。migrate.js 当前最新版本 v50。
+>
+> **2026-04-08 新增：**
+> - v50: `adapter_nodes.is_enabled` — 记住用户手动停止状态，重启后不自动拉起
+> - `rpc-health.js`: 局域网私有 IP（10.x/172.16-31.x/192.168.x）视同本地节点，Scout 自动切换全量 RPC 模式
+> - `whale-signal.js`: 价格源从仅 mm_quotes 扩展到 market-data 缓存（getCachedKasPrice）
+> - `kaspa-wasm` 替换为 `npm:@onetokenfe/kaspa-wasm-node@^1.0.2`（RpcClient/Resolver/addressFromScriptPublicKey 恢复）
+> - Adapter UI: 三态状态显示（绿=AI可用/黄=AI错误/灰=离线）+ Ollama 模型自动发现
+> - OAuth 回调自动清理空 api_key 连接
 
 ---
 
