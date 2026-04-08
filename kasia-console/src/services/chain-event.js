@@ -8,10 +8,13 @@
 import { sqlite } from '../db/client.js';
 import { randomUUID } from 'crypto';
 
-const _insertStmt = sqlite.prepare(`
-  INSERT OR IGNORE INTO chain_events (id, txid, from_address, to_address, event_type, payload, observed_by, observed_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-`);
+let _insertStmt;
+function insertStmt() {
+  return _insertStmt ??= sqlite.prepare(`
+    INSERT OR IGNORE INTO chain_events (id, txid, from_address, to_address, event_type, payload, observed_by, observed_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+}
 
 /**
  * 记录一条链上事实。重复 txid+event_type 自动跳过。
@@ -31,7 +34,7 @@ export function recordChainEvent({ txid, eventType, fromAddress = null, toAddres
   const payloadStr = payload ? (typeof payload === 'string' ? payload : JSON.stringify(payload)) : null;
 
   try {
-    _insertStmt.run(
+    insertStmt().run(
       randomUUID(),
       txid,
       fromAddress,
