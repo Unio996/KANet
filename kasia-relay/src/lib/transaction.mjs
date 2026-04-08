@@ -3,7 +3,8 @@ import * as kaspa from 'kaspa-wasm';
 import { getApi } from './api.mjs';
 import { getWallet } from './wallet.mjs';
 
-const { Generator, RpcClient, Resolver, Encoding, sompiToKaspaString, Address } = kaspa;
+const { Generator, RpcClient, Encoding, sompiToKaspaString, Address } = kaspa;
+const Resolver = kaspa.Resolver || null;
 
 const SOMPI_PER_KAS = 100000000n;
 const MAX_DECIMAL_PLACES = 8;
@@ -60,7 +61,9 @@ async function connectRpc(networkId, attempt = 1) {
   const directUrl = await resolveRpcUrl();
   const rpcOpts = directUrl
     ? { url: directUrl, encoding: Encoding.Borsh, networkId }
-    : { resolver: new Resolver(), encoding: Encoding.Borsh, networkId };
+    : Resolver
+      ? { resolver: new Resolver(), encoding: Encoding.Borsh, networkId }
+      : (() => { throw new Error('No RPC URL configured and Resolver unavailable. Set KASPA_RPC_URL env var.'); })();
   const rpc = new RpcClient(rpcOpts);
   try {
     await new Promise((resolve, reject) => {

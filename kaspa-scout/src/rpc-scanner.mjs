@@ -14,7 +14,12 @@ import * as kaspa from 'kaspa-wasm';
 import { classifyPayload, PREFIX, PREFIX_HEX, MIN_PAYLOAD_HEX } from './lib/protocol.mjs';
 import { tryIndex, updateCheckpoint } from './message-indexer.mjs';
 
-const { RpcClient, Resolver, Encoding, addressFromScriptPublicKey, ScriptPublicKey } = kaspa;
+const { RpcClient, Encoding, ScriptPublicKey, Address } = kaspa;
+const Resolver = kaspa.Resolver || null;
+// addressFromScriptPublicKey removed in npm ^0.13.0 — use Address(spk, prefix) instead
+function addressFromScriptPublicKey(spk, networkPrefix) {
+  try { return new Address(spk, networkPrefix); } catch { return null; }
+}
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
@@ -284,7 +289,9 @@ async function _connect(reporter) {
 
   const rpcOpts = directUrl
     ? { url: directUrl, encoding: Encoding.Borsh, networkId: KASPA_NETWORK }
-    : { resolver: new Resolver(), encoding: Encoding.Borsh, networkId: KASPA_NETWORK };
+    : Resolver
+      ? { resolver: new Resolver(), encoding: Encoding.Borsh, networkId: KASPA_NETWORK }
+      : (() => { throw new Error('No RPC URL configured and Resolver unavailable. Set KASPA_RPC_URL env var.'); })();
 
   _rpc = new RpcClient(rpcOpts);
 

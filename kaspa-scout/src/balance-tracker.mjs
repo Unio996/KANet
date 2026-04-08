@@ -16,7 +16,15 @@
 
 import * as kaspa from 'kaspa-wasm';
 
-const { RpcClient, Resolver } = kaspa;
+const { RpcClient } = kaspa;
+const Resolver = kaspa.Resolver || null;
+
+function _rpcOpts() {
+  const url = process.env.KASPA_RPC_URL;
+  if (url) return { url, networkId: KASPA_NETWORK };
+  if (Resolver) return { resolver: new Resolver(), networkId: KASPA_NETWORK };
+  throw new Error('No RPC URL configured and Resolver unavailable. Set KASPA_RPC_URL env var.');
+}
 
 const KASPA_NETWORK = process.env.KASPA_NETWORK || 'mainnet';
 // Balance tracking interval: 10 minutes (more frequent than chain-fundamentals)
@@ -48,10 +56,7 @@ export async function startBalanceTracker(reporter) {
 
   // Connect to RPC
   try {
-    _rpc = new RpcClient({
-      resolver: new Resolver(),
-      networkId: KASPA_NETWORK,
-    });
+    _rpc = new RpcClient(_rpcOpts());
     await _rpc.connect();
     console.log(`[balance-tracker] connected to Kaspa ${KASPA_NETWORK} node`);
   } catch (err) {
@@ -92,10 +97,7 @@ async function _trackCycle() {
   try {
     // Reconnect if needed
     if (!_rpc) {
-      _rpc = new RpcClient({
-        resolver: new Resolver(),
-        networkId: KASPA_NETWORK,
-      });
+      _rpc = new RpcClient(_rpcOpts());
       await _rpc.connect();
     }
 

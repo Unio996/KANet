@@ -20,7 +20,8 @@ import { tryIndex, updateCheckpoint } from './message-indexer.mjs';
 import { extractAddresses, derivePeers, parseCardPayload, parseBcastPayload } from './rpc-scanner.mjs';
 import { resolveRpcUrl as _sharedResolveRpcUrl } from '../../shared/lib/rpc-utils.mjs';
 
-const { RpcClient, Resolver, Encoding } = kaspa;
+const { RpcClient, Encoding } = kaspa;
+const Resolver = kaspa.Resolver || null;
 
 const KASPA_NETWORK = process.env.KASPA_NETWORK || 'mainnet';
 const CONSOLE_URL   = process.env.CONSOLE_URL || '';
@@ -152,7 +153,9 @@ async function _connect() {
   // 但如果环境变量或 Console 配置了 URL，尊重配置
   const rpcOpts = directUrl
     ? { url: directUrl, encoding: Encoding.Borsh, networkId: KASPA_NETWORK }
-    : { resolver: new Resolver(), encoding: Encoding.Borsh, networkId: KASPA_NETWORK };
+    : Resolver
+      ? { resolver: new Resolver(), encoding: Encoding.Borsh, networkId: KASPA_NETWORK }
+      : (() => { throw new Error('No RPC URL configured and Resolver unavailable. Set KASPA_RPC_URL env var.'); })();
 
   _rpc = new RpcClient(rpcOpts);
 
