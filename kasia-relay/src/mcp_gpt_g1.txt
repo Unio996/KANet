@@ -1,0 +1,141 @@
+// src/mcp.mjs (long-lived, safe, race-free)
+
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+
+const KASPA_PATH = "D:/HC/resource/kaspa-mcp-clone/dist/index.js";
+const KASIA_PATH = "D:/HC/resource/kasia-mcp-clone/dist/index.js";
+
+// ✅ 不要默认明文助记词；宁可启动时报错
+const MNEMONIC = process.env.KASPA_MNEMONIC;
+if (!MNEMONIC) {
+  throw new Error("Missing env KASPA_MNEMONIC. Please set it before running.");
+}
+
+const BASE_ENV = {
+  KASPA_NETWORK: "mainnet",
+  KASIA_NETWORK: "mainnet",
+  KASPA_MNEMONIC: MNEMONIC,
+};
+
+// singletons
+let kaspaClient = null;
+let kasiaClient = null;
+
+// init locks (avoid double spawn)
+let kaspaInitPromise = null;
+let kasiaInitPromise = null;
+
+let shutdownHookInstalled = false;
+
+function extractText(res) {
+  return res?.content?.find?.(c => c?.type === "text")?.text ?? null;
+}
+
+function extractJson(res) {
+  const text = extractText(res);
+  if (!text) return res;
+  try { return JSON.parse(text); }
+  catch { return { rawText: text, parseFailed: true }; }
+}
+
+async function createPersistentClient(path, name) {
+  const transport = new StdioClientTransport({
+    command: "node",
+    args: [path],
+    env: { ...process.env, ...BASE_ENV },
+  });
+
+  const client = new Client(
+    { name: `relay-${name}`, version: "0.1.0" },
+    { capabilities: {} }
+  );
+
+  await client.connect(transport);
+  console.log(`✅ ${name} MCP connected (persistent)`);
+
+  // ✅ 只装一次全局退出钩子
+  if (!shutdownHookInstalled) {
+    shutdownHookInstalled = true;
+
+    const handleExit = async (sig) => {
+      try {
+        console.log(`\n🛑 Received ${sig}, closing MCP clients...`);
+        await closeAll();
+      } catch (e) {
+        // best-effort
+      } finally {
+        process.exit(0);
+      }
+    };
+
+    process.on("SIGINT", () => { void handleExit("SIGINT"); });
+    process.on("SIGTERM", () => { void handleExit("SIGTERM"); });
+  }
+
+  return client;
+}
+
+async function getClient(type) {
+  if (type === "kaspa") {
+    if (kaspaClient) return kaspaClient;
+    if (!kaspaInitPromise) {
+      kaspaInitPromise = createPersistentClient(KASPA_PATH, "kaspa")
+        .then(c => (kaspaClient = c))
+        .finally(() => (kaspaInitPromise = null));
+    }
+    return kaspaInitPromise;
+  } else {
+    if (kasiaClient) return kasiaClient;
+    if (!kasiaInitPromise) {
+      kasiaInitPromise = createPersistentClient(KASIA_PATH, "kasia")
+        .then(c => (kasiaClient = c))
+        .finally(() => (kasiaInitPromise = null));
+    }
+    return kasiaInitPromise;
+  }
+}
+
+async function safeClose(client) {
+  if (!client) return;
+  try { await client.close(); } catch {}
+}
+
+async function callTool(type, tool, args = {}) {
+  let client;
+  try {
+    client = await getClient(type);
+    const res = await client.callTool({ name: tool, arguments: args });
+    return extractJson(res);
+  } catch (err) {
+    console.error(`❌ ${type} tool=${tool} failed:`, err?.message ?? err);
+
+    // ✅ best-effort close old client to avoid zombie processes
+    if (type === "kaspa") {
+      await safeClose(kaspaClient);
+      kaspaClient = null;
+    } else {
+      await safeClose(kasiaClient);
+      kasiaClient = null;
+    }
+
+    throw err;
+  }
+}
+
+// external API unchanged
+export async function kaspa(tool, args) {
+  return callTool("kaspa", tool, args);
+}
+
+export async function kasia(tool, args) {
+  return callTool("kasia", tool, args);
+}
+
+export async function closeAll() {
+  await safeClose(kaspaClient);
+  await safeClose(kasiaClient);
+  kaspaClient = null;
+  kasiaClient = null;
+  console.log("✅ MCP clients closed");
+}

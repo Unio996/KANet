@@ -1,0 +1,15 @@
+{
+  "name": "kaspa-scout",
+  "version": "0.2.0",
+  "description": "Kaspa Protocol Observatory — passive on-chain protocol detection and intelligence gathering",
+  "type": "module",
+  "main": "src/index.mjs",
+  "scripts": {
+    "start": "node src/index.mjs",
+    "start:rpc": "SCAN_MODE=rpc node src/index.mjs",
+    "test": "node --test src/**/*.test.mjs"
+  },
+  "dependencies": {
+    "kaspa-wasm": "file:D:/Anthropic/kaspa-mcp/vendor/kaspa-wasm"
+  }
+}

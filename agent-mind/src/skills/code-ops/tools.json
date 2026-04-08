@@ -1,0 +1,76 @@
+{
+  "tools": [
+    {
+      "name": "READ_FILE",
+      "layer": "L3",
+      "confirm": false,
+      "description": "Read contents of a file",
+      "params": {
+        "path": { "type": "string", "required": true, "description": "Absolute or KANET_ROOT-relative path" },
+        "offset": { "type": "number", "required": false, "description": "Start line (0-based)" },
+        "limit": { "type": "number", "required": false, "description": "Max lines to read (default 200)" }
+      }
+    },
+    {
+      "name": "SEARCH_CODE",
+      "layer": "L3",
+      "confirm": false,
+      "description": "Search for pattern in files (grep/glob)",
+      "params": {
+        "pattern": { "type": "string", "required": true, "description": "Regex or text pattern" },
+        "path": { "type": "string", "required": false, "description": "Directory to search (default KANET_ROOT)" },
+        "glob": { "type": "string", "required": false, "description": "File glob filter e.g. *.mjs" }
+      }
+    },
+    {
+      "name": "HTTP_REQUEST",
+      "layer": "L3/L4",
+      "confirm": "POST/PUT/DELETE require confirm, GET auto",
+      "description": "Make HTTP request to external or internal API",
+      "params": {
+        "method": { "type": "string", "required": false, "description": "GET (default) / POST / PUT / DELETE" },
+        "url": { "type": "string", "required": true, "description": "Full URL" },
+        "body": { "type": "string", "required": false, "description": "Request body (JSON string)" },
+        "headers": { "type": "string", "required": false, "description": "Extra headers as JSON" }
+      }
+    },
+    {
+      "name": "WRITE_FILE",
+      "layer": "L4",
+      "confirm": true,
+      "description": "Write or edit a file (shows diff for confirmation)",
+      "params": {
+        "path": { "type": "string", "required": true, "description": "Absolute or KANET_ROOT-relative path" },
+        "content": { "type": "string", "required": false, "description": "Full file content (for create/overwrite)" },
+        "old_string": { "type": "string", "required": false, "description": "Text to replace (for edit mode)" },
+        "new_string": { "type": "string", "required": false, "description": "Replacement text (for edit mode)" }
+      }
+    },
+    {
+      "name": "RUN_COMMAND",
+      "layer": "L4",
+      "confirm": "whitelist auto, otherwise confirm",
+      "description": "Execute a shell command",
+      "params": {
+        "cmd": { "type": "string", "required": true, "description": "Shell command to execute" },
+        "cwd": { "type": "string", "required": false, "description": "Working directory (default KANET_ROOT)" },
+        "timeout": { "type": "number", "required": false, "description": "Timeout in ms (default 30000)" }
+      }
+    }
+  ],
+  "whitelist_commands": [
+    "cat", "head", "tail", "ls", "find", "grep", "wc",
+    "node --check", "npm test",
+    "git status", "git log", "git diff",
+    "systemctl status", "pm2 list", "pm2 restart",
+    "curl", "ping",
+    "tasklist", "wmic", "netstat", "sc query"
+  ],
+  "curl_write_flags": ["-X POST", "-X PUT", "-X DELETE", "-X PATCH", "-d", "--data", "-F", "--form", "--data-raw", "--data-binary"],
+  "blocked_patterns": ["rm -rf", "rm -r /", "git push --force", "git reset --hard", "DROP TABLE", "DROP DATABASE", "mkfs", "dd if=", "> /dev/sd"],
+  "sandbox": {
+    "allowed_roots": ["$KANET_ROOT", "/tmp"],
+    "command_timeout_ms": 30000,
+    "output_max_bytes": 10240
+  }
+}

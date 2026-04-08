@@ -1,0 +1,55 @@
+先把我对 Adapter 的职责和可选接口通道梳理一下，然后对 “直接调 OpenClaw CLI” vs “HTTP REST” vs “WebSocket” 给出对比，便于你拍板：
+
+---
+
+### Adapter 的职责/上下文
+
+1. **接 Kasia-relay 的 `POST /reply`**：payload 至少应该包含 `conversationId / txId / senderAddr / plaintext` 等。Adapter 要负责幂等（比如用 `txId` 做去重）。
+2. **路由到 OpenClaw**：按地址/会话映射成内部 agent（可能是 `main`、`beta` 等）或者某个工具链；附带必要的上下文（最近几条 Kasia 消息、链上 metadata）。
+3. **拿到 AI 回复**：可以是一次性文本，也可能是带步骤的指令集。
+4. **把回复回传给 relay**：relay 继续负责调用 Kasia MCP（send_message + send_kaspa）。
+
+---
+
+### 方案 A：Adapter 直接调用 OpenClaw CLI
+
+| 维度 | 说明 |
+| --- | --- |
+| **实现方式** | Adapter 在本机 `spawn` `openclaw ...` 命令（例如未来若提供 `openclaw agent send --agent main --channel kasia ...`），读取 stdout 作为 AI 回复。 |
+| **优点** | 无额外网络面；只要 Adapter 和 OpenClaw 在同一主机，就能立即复用 CLI 已有登录态/会话。部署简单，不必公开新端口。 |
+| **缺点** | ① 一次请求 = 启动一个 CLI 进程，开销大且难以并发。② 没有流式结果，响应只能在 CLI 退出后拿到。③ 解析日志/错误码复杂，易受 CLI 文本格式变动影响。④ 无法轻松实现健康探测、超时/重试。 |
+| **适用** | 原型阶段、消息量极小（< 每分钟 1～2 条）、对延迟不敏感的场景。 |
+
+> 备注：我尝试直接跑 `openclaw --help` 拿命令列表，但当前沙箱阻止运行（allowlist 未开放）。要走 CLI 通道，后续需要你在宿主机确认可用命令 & 所需参数，再把固定模板给 Adapter。
+
+---
+
+### 方案 B：Adapter 调用 OpenClaw 的 HTTP REST
+
+| 维度 | 说明 |
+| --- | --- |
+| **实现方式** | 运行一个轻量 HTTP 服务（可同机或内网），Adapter 收到 `POST /reply` 后再 `POST /openclaw/invoke`（或现有 Gateway API，如果开放的话），将 `{agentId, conversationKey, message, metadata}` 发给 OpenClaw 网关，由网关返回 AI 回复 JSON。 |
+| **优点** | ① HTTP 请求-响应语义天然适合 relay 的“触发→等待答复”流程。② 容易做幂等、重试、监控（HTTP status + tracing）。③ 如果未来要横向扩展 Adapter，可以把 REST 调用指到统一的 Gateway 入口。④ 可以根据需要加 auth（token/MTLS）。 |
+| **缺点** | 需要确认 OpenClaw 是否已经暴露 REST Hook；如果没有，就得我们自己写一个“Gateway Adapter”服务，把 HTTP 请求转发到 OpenClaw 内部 bus（可能最终还是去调 CLI/SDK）。 |
+| **适用** | 绝大多数 Kasia 消息场景：消息频率中低、需要同步拿到整段回复、不要求 token 级流式输出。 |
+
+---
+
+### 方案 C：Adapter 保持 WebSocket（或 SSE）连接
+
+| 维度 | 说明 |
+| --- | --- |
+| **实现方式** | Adapter 与 OpenClaw 之间保持长连（WS/SSE）。当 relay 有新消息时，通过 WS push 事件；OpenClaw 流式返回 token/步骤。 |
+| **优点** | ① 低延迟 & 流式回传，便于做“typing…”之类体验。② 可以在同一连接里发送多轮指令、推送系统事件。 |
+| **缺点** | ① 需要 OpenClaw 端支持 WebSocket 服务；目前我没看到现成接口。② 连接管理、断线重连、心跳更复杂。③ Kasia 场景其实只要拿最终一句话，stream 的收益有限。 |
+| **适用** | 未来若要把 OpenClaw 的 streaming 答复直接映射到其他实时渠道（比如 Discord/Twitch）。对当前 Kasia relay → reply 模式不是必需。 |
+
+---
+
+### 建议
+
+- **短期落地**：用 REST 最稳（relay 端已经是 HTTP 调用）。如果 OpenClaw 还没公开 REST Hook，就在同一台机器上写个 Adapter 服务：对外暴露 `/reply` 给 relay，对内用 Node/Go 直接调用 OpenClaw 的本地 SDK/CLI。这样 CLI 只在 Adapter 内部使用，外层接口仍然是 REST。
+- **CLI 作为后备**：即便最终方案是 REST/WS，CLI 仍可做应急 fallback（Adapter 如果收不到 HTTP 响应，就临时 `spawn openclaw ...`）。
+- **WebSocket 留作增强**：等确认需要流式/事件驱动，再考虑升级。
+
+如果你需要我先拟一个 Adapter REST API（包括请求体 schema、OpenClaw 调用契约、幂等策略），或者写一个用 CLI 的 PoC，告诉我优先级我就开干。
