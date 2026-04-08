@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>KANet — Create Your Partner</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <link rel="stylesheet" href="/public/welcome.css?v=<%= Date.now() %>" />
+  <style>[x-cloak] { display: none !important; }</style>
 </head>
 <body class="bg-gray-950 text-white min-h-screen flex items-center justify-center">
 
@@ -43,7 +43,7 @@
   </div>
 
   <!-- Step 2: Personality -->
-  <div x-show="step === 2" x-transition>
+  <div x-show="step === 2" x-transition x-cloak>
     <div class="text-center mb-8">
       <h2 class="text-xl font-bold">Personality</h2>
       <p class="text-gray-400 mt-1">A starting point — they'll evolve from here.</p>
@@ -109,7 +109,7 @@
   </div>
 
   <!-- Step 3: AI Brain -->
-  <div x-show="step === 3" x-transition>
+  <div x-show="step === 3" x-transition x-cloak>
     <div class="text-center mb-8">
       <h2 class="text-xl font-bold">Connect AI</h2>
       <p class="text-gray-400 mt-1">Give your partner the ability to think.</p>
@@ -217,7 +217,7 @@
   </div>
 
   <!-- Step 4: Confirm -->
-  <div x-show="step === 4" x-transition>
+  <div x-show="step === 4" x-transition x-cloak>
     <div class="text-center mb-8">
       <h2 class="text-xl font-bold">Ready?</h2>
     </div>
@@ -229,7 +229,7 @@
       </div>
       <div x-show="vision">
         <span class="text-xs text-gray-500 uppercase tracking-wider">Vision</span>
-        <p class="text-sm text-gray-300 mt-0.5 italic" x-text="'\"' + vision + '\"'"></p>
+        <p class="text-sm text-gray-300 mt-0.5 italic" x-text='`"${vision}"`'></p>
       </div>
       <div x-show="personalityLabel">
         <span class="text-xs text-gray-500 uppercase tracking-wider">Personality</span>
@@ -259,7 +259,7 @@
   </div>
 
   <!-- Step 5: Done -->
-  <div x-show="step === 5" x-transition>
+  <div x-show="step === 5" x-transition x-cloak>
     <div class="text-center mb-8">
       <img src="/public/kanet-logo.png" alt="KANet" class="h-16 w-16 mx-auto mb-4 animate-pulse" />
       <h2 class="text-2xl font-bold"><span x-text="name"></span> is alive!</h2>
@@ -447,5 +447,6 @@ function onboardApp() {
   };
 }
 </script>
+<script src="/public/alpine.min.js?v=<%= Date.now() %>"></script>
 </body>
 </html>
