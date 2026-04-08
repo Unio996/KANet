@@ -7,6 +7,7 @@ import { spawn } from 'child_process';
 import { resolve } from 'path';
 import { listAdapterNodes, getAdapterNode, getAdapterToken, getAdapterProviderKey } from '../data/settings/adapter-nodes.js';
 import { getConfig } from '../data/settings/configs.js';
+import { sqlite } from '../db/client.js';
 import { ensureConnection } from './connection-manager.js';
 
 const KANET_ROOT = process.env.KANET_ROOT || 'D:/Anthropic';
@@ -22,8 +23,9 @@ function log(...args) {
 
 /**
  * Start an adapter by its DB id.
+ * @param {boolean} userIntent — true when user explicitly starts via UI (persists is_enabled=1)
  */
-export async function startAdapter(adapterId) {
+export async function startAdapter(adapterId, userIntent = false) {
   if (_instances.has(adapterId) && _instances.get(adapterId).running) {
     return { ok: false, reason: 'already_running' };
   }
@@ -110,6 +112,11 @@ export async function startAdapter(adapterId) {
 
     _instances.set(adapterId, instance);
 
+    // Only persist is_enabled=1 when user explicitly starts (not on system boot)
+    if (userIntent) {
+      try { sqlite.prepare('UPDATE adapter_nodes SET is_enabled = 1 WHERE id = ?').run(adapterId); } catch {}
+    }
+
     log(`started "${node.name}" on port ${node.http_port} (PID ${child.pid})`);
     return { ok: true, pid: child.pid, port: node.http_port };
   } catch (err) {
@@ -139,7 +146,7 @@ async function killByPort(port) {
  * Stop an adapter by its DB id.
  * Works for both Console-managed and externally-started adapters.
  */
-export async function stopAdapter(adapterId) {
+export async function stopAdapter(adapterId, userIntent = false) {
   const instance = _instances.get(adapterId);
 
   // If not managed by us, try to kill by port
@@ -181,6 +188,11 @@ export async function stopAdapter(adapterId) {
   instance.running = false;
   instance.child = null;
   _instances.delete(adapterId);
+
+  // Only persist is_enabled=0 when user explicitly stops (not on restart/shutdown)
+  if (userIntent) {
+    try { sqlite.prepare('UPDATE adapter_nodes SET is_enabled = 0 WHERE id = ?').run(adapterId); } catch {}
+  }
 
   return { ok: true };
 }
@@ -235,6 +247,8 @@ export async function startAllAdapters() {
   let started = 0;
   for (const a of adapters) {
     if (_instances.has(a.id) && _instances.get(a.id).running) continue;
+    // Skip adapters the user manually stopped (is_enabled=0)
+    if (a.is_enabled === 0) { log(`skipped "${a.name}" (disabled)`); continue; }
     const result = await startAdapter(a.id);
     if (result.ok) started++;
   }

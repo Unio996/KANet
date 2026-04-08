@@ -16,6 +16,7 @@
  */
 
 import { sqlite } from '../db/client.js';
+import { getCachedKasPrice } from './market-data.js';
 
 // ── 可调参数（默认值，UI 可改） ──────────────────────────────────
 const DEFAULT_PARAMS = {
@@ -162,11 +163,12 @@ export function setParams(overrides) {
 
 function _getKasPrice() {
   try {
-    // 从 chain_snapshots 或直接从 trade API 缓存获取
-    // 优先用最近的 mm_quotes（实时）
+    // 1. 优先用做市报价（实时）
     const quote = sqlite.prepare('SELECT mexc_price FROM mm_quotes ORDER BY created_at DESC LIMIT 1').get();
     if (quote?.mexc_price) return quote.mexc_price;
-    // 没有 quote，用 0
+    // 2. 回退到 market-data 缓存（MEXC 价格，10 分钟缓存）
+    const p = getCachedKasPrice();
+    if (p > 0) return p;
     return 0;
   } catch {
     return 0;
