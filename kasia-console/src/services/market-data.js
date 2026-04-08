@@ -613,6 +613,15 @@ export const cachedFunding = cached('funding', fetchFundingRates);
 export const cachedSentiment = cached('sentiment', fetchSentiment);
 export const cachedCryptoGlobal = cached('crypto_global', fetchCryptoGlobal);
 export const cachedCalendar = cached('calendar', fetchEconomicCalendar);
+
+/** Synchronous read of cached KAS price. Triggers async fetch if cache empty. */
+export function getCachedKasPrice() {
+  const hit = _cache['crypto'];
+  if (hit?.data?.data?.KAS?.price) return hit.data.data.KAS.price;
+  // Cache miss — trigger background fetch so next call has data
+  cachedCrypto().catch(() => {});
+  return 0;
+}
 export const cachedFundamentals = cached('fundamentals', fetchStockFundamentals, 60 * 60 * 1000); // 1 hour
 export const cachedIndustryPeers = cached('peers', fetchIndustryPeers, 60 * 60 * 1000); // 1 hour
 
