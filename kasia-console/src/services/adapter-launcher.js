@@ -23,8 +23,9 @@ function log(...args) {
 
 /**
  * Start an adapter by its DB id.
+ * @param {boolean} userIntent — true when user explicitly starts via UI (persists is_enabled=1)
  */
-export async function startAdapter(adapterId) {
+export async function startAdapter(adapterId, userIntent = false) {
   if (_instances.has(adapterId) && _instances.get(adapterId).running) {
     return { ok: false, reason: 'already_running' };
   }
@@ -111,8 +112,10 @@ export async function startAdapter(adapterId) {
 
     _instances.set(adapterId, instance);
 
-    // Remember user intent: auto-start on next boot
-    try { sqlite.prepare('UPDATE adapter_nodes SET is_enabled = 1 WHERE id = ?').run(adapterId); } catch {}
+    // Only persist is_enabled=1 when user explicitly starts (not on system boot)
+    if (userIntent) {
+      try { sqlite.prepare('UPDATE adapter_nodes SET is_enabled = 1 WHERE id = ?').run(adapterId); } catch {}
+    }
 
     log(`started "${node.name}" on port ${node.http_port} (PID ${child.pid})`);
     return { ok: true, pid: child.pid, port: node.http_port };
@@ -143,7 +146,7 @@ async function killByPort(port) {
  * Stop an adapter by its DB id.
  * Works for both Console-managed and externally-started adapters.
  */
-export async function stopAdapter(adapterId) {
+export async function stopAdapter(adapterId, userIntent = false) {
   const instance = _instances.get(adapterId);
 
   // If not managed by us, try to kill by port
@@ -186,8 +189,10 @@ export async function stopAdapter(adapterId) {
   instance.child = null;
   _instances.delete(adapterId);
 
-  // Remember user intent: don't auto-start on next boot
-  try { sqlite.prepare('UPDATE adapter_nodes SET is_enabled = 0 WHERE id = ?').run(adapterId); } catch {}
+  // Only persist is_enabled=0 when user explicitly stops (not on restart/shutdown)
+  if (userIntent) {
+    try { sqlite.prepare('UPDATE adapter_nodes SET is_enabled = 0 WHERE id = ?').run(adapterId); } catch {}
+  }
 
   return { ok: true };
 }

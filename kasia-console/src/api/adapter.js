@@ -94,14 +94,14 @@ export async function registerAdapterRoutes(fastify) {
 
   // Start adapter process
   fastify.post('/adapters/:id/start', async (request, reply) => {
-    const result = await startAdapter(request.params.id);
+    const result = await startAdapter(request.params.id, true);  // userIntent=true
     if (!result.ok) console.log('[adapter] start failed:', result.reason);
     return reply.redirect('/adapters');
   });
 
   // Stop adapter process
   fastify.post('/adapters/:id/stop', async (request, reply) => {
-    await stopAdapter(request.params.id);
+    await stopAdapter(request.params.id, true);  // userIntent=true
     return reply.redirect('/adapters');
   });
 
