@@ -3,7 +3,7 @@ import * as kaspa from 'kaspa-wasm';
 import { getApi } from './api.mjs';
 import { getWallet } from './wallet.mjs';
 
-const { Generator, RpcClient, Encoding, sompiToKaspaString, Address } = kaspa;
+const { Generator, RpcClient, Encoding, sompiToKaspaString, Address, PaymentOutput } = kaspa;
 const Resolver = kaspa.Resolver || null;
 
 const SOMPI_PER_KAS = 100000000n;
@@ -99,6 +99,9 @@ async function _sendKaspaInner(to, amountSompi, priorityFee = 0n, payload) {
     const { entries } = await rpc.getUtxosByAddresses([new Address(senderAddress)]);
     if (!entries || entries.length === 0) throw new Error('No UTXOs available');
 
+    // Normalize: new kaspa-wasm returns amount as string, old as BigInt
+    for (const e of entries) { if (typeof e.amount === 'string') e.amount = BigInt(e.amount); }
+
     let selectedEntries = entries;
     let outputAmount = amountSompi;
 
@@ -134,9 +137,9 @@ async function _sendKaspaInner(to, amountSompi, priorityFee = 0n, payload) {
 
     const generator = new Generator({
       entries: selectedEntries,
-      outputs: [{ address: to, amount: outputAmount }],
+      outputs: [new PaymentOutput(new Address(to), outputAmount)],
       priorityFee,
-      changeAddress: senderAddress,
+      changeAddress: new Address(senderAddress),
       networkId: wallet.getNetworkId(),
       ...(payload ? { payload: hexToBytes(payload) } : {}),
     });

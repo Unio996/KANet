@@ -10,7 +10,7 @@
 import * as kaspa from 'kaspa-wasm';
 import { getWallet } from './wallet.mjs';
 
-const { Generator, RpcClient, Encoding, Address, sompiToKaspaString } = kaspa;
+const { Generator, RpcClient, Encoding, Address, sompiToKaspaString, PaymentOutput } = kaspa;
 const Resolver = kaspa.Resolver || null;
 
 const MIN_BALANCE_FOR_SPLIT = 20_000_000n; // 0.2 KAS
@@ -73,14 +73,14 @@ export async function splitUtxosRelay(targetCount = 3) {
     const perOutput = (totalBalance - feeReserve) / BigInt(splitCount);
     const outputs = [];
     for (let i = 0; i < splitCount - 1; i++) {
-      outputs.push({ address, amount: perOutput });
+      outputs.push(new PaymentOutput(new Address(address), perOutput));
     }
 
     const generator = new Generator({
       entries,
       outputs,
       priorityFee: 0n,
-      changeAddress: address,
+      changeAddress: new Address(address),
       networkId,
     });
 
