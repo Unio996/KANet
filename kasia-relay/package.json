@@ -11,6 +11,6 @@
   "description": "",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
-    "kaspa-wasm": "npm:@onetokenfe/kaspa-wasm-node@^1.0.2"
+    "kaspa-wasm": "file:../shared/vendor/kaspa-wasm"
   }
 }

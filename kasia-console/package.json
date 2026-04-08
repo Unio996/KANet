@@ -19,7 +19,7 @@
     "eta": "^3.4.0",
     "ethers": "^6.16.0",
     "fastify": "^4.28.1",
-    "kaspa-wasm": "npm:@onetokenfe/kaspa-wasm-node@^1.0.2",
+    "kaspa-wasm": "file:../shared/vendor/kaspa-wasm",
     "tronweb": "^6.2.2"
   }
 }
