@@ -1,0 +1,78 @@
+{
+  "query_balance": {
+    "keywords": ["余额多少", "balance", "多少钱", "KAS多少", "查余额", "钱包余额", "地址余额", "资产情况"],
+    "category": "query", "dimensions": "multi", "label": "资产余额",
+    "params": []
+  },
+  "query_price": {
+    "keywords": ["KAS价格", "现在价格", "price", "多少钱一个", "行情怎么样", "涨了吗", "跌了吗", "KAS行情"],
+    "category": "query", "dimensions": "single", "label": "KAS 价格",
+    "params": [{ "name": "token", "pattern": "(KAS|USDT|BTC)", "flags": "i" }]
+  },
+  "query_orders": {
+    "keywords": ["挂单情况", "活跃订单", "orders", "持仓情况", "open orders", "我的订单"],
+    "category": "query", "dimensions": "multi", "label": "活跃订单",
+    "params": []
+  },
+  "query_goals": {
+    "keywords": ["我的目标", "goals", "目标列表", "目标进展", "当前任务"],
+    "category": "query", "dimensions": "multi", "label": "目标列表",
+    "params": []
+  },
+  "query_system": {
+    "keywords": ["系统状态", "system status", "系统健康", "系统运行", "服务状态"],
+    "category": "query", "dimensions": "multi", "label": "系统状态",
+    "params": []
+  },
+  "query_tx_history": {
+    "keywords": ["交易记录", "交易历史", "tx history", "最近交易", "花了多少", "消费记录"],
+    "category": "query", "dimensions": "multi", "label": "交易历史",
+    "params": [{ "name": "limit", "pattern": "(\\d+)\\s*(?:条|笔|个)", "flags": "i" }]
+  },
+  "query_contacts": {
+    "keywords": ["通讯录", "联系人列表", "contacts", "谁联系过", "最近联系"],
+    "category": "query", "dimensions": "multi", "label": "联系人动态",
+    "params": []
+  },
+  "query_network": {
+    "keywords": ["网络活动", "活跃地址", "链上活动", "network activity", "网络状态", "链上节点"],
+    "category": "query", "dimensions": "multi", "label": "网络活动",
+    "params": []
+  },
+  "send_kas": {
+    "keywords": ["转账KAS", "转KAS", "发送KAS", "send kas", "打KAS给", "转给kaspa"],
+    "category": "execute", "dimensions": "single", "label": "转账 KAS",
+    "params": [
+      { "name": "amount", "pattern": "(\\d+\\.?\\d*)\\s*KAS", "flags": "i" },
+      { "name": "to", "pattern": "(kaspa:[a-z0-9]+)", "flags": "i" }
+    ]
+  },
+  "publish_order": {
+    "keywords": ["卖KAS", "挂卖单", "sell kas", "publish order", "出售KAS", "发布订单"],
+    "category": "execute", "dimensions": "single", "label": "发布订单",
+    "params": [
+      { "name": "amount", "pattern": "(\\d+\\.?\\d*)\\s*KAS", "flags": "i" },
+      { "name": "price", "pattern": "(\\d+\\.?\\d*)\\s*(?:USDT|U|\\$)", "flags": "i" }
+    ]
+  },
+  "cancel_order": {
+    "keywords": ["取消订单", "撤单", "cancel order", "取消挂单"],
+    "category": "execute", "dimensions": "single", "label": "取消订单",
+    "params": [{ "name": "orderId", "pattern": "([a-f0-9]{6,})", "flags": "i" }]
+  },
+  "trigger_reflect": {
+    "keywords": ["触发反思", "开始反思", "reflect now", "执行反思", "立刻反思"],
+    "category": "trigger", "dimensions": "none", "label": "触发反思",
+    "params": []
+  },
+  "query_reputation": {
+    "keywords": ["地址信誉", "查信誉", "reputation", "地址记录", "完成率", "这人靠谱吗"],
+    "category": "reputation", "dimensions": "single", "label": "地址信誉",
+    "params": [{ "name": "address", "pattern": "(kaspa:[a-z0-9]+)", "flags": "i" }]
+  },
+  "diagnose_system": {
+    "keywords": ["检查系统", "系统诊断", "系统自检", "diagnose system", "修复系统", "repair system", "系统检查"],
+    "category": "execute", "dimensions": "multi", "label": "系统诊断与修复",
+    "params": [{ "name": "fixId", "pattern": "(?:修复|fix|repair)\\s+([a-z_]+)", "flags": "i" }]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "id": "code-ops",
+  "version": "1.0.0",
+  "name": "Code Operations",
+  "description": "Agent behavior layer engine — L1-L4 state machine with tool execution (read/write/run/http/search)",
+  "permissions": [
+    "observe:read_file", "observe:search_code", "observe:http_get",
+    "act:write_file", "act:run_command", "act:http_mutate"
+  ],
+  "tools": "./tools.json",
+  "executor": "./executor.mjs",
+  "layerEngine": "./layer-engine.mjs",
+  "intentDetector": "./intent-detector.mjs"
+}

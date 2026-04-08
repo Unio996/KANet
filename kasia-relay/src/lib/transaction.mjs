@@ -1,0 +1,172 @@
+// Transaction building and submission via kaspa-wasm Generator + RPC
+import * as kaspa from 'kaspa-wasm';
+import { getApi } from './api.mjs';
+import { getWallet } from './wallet.mjs';
+
+const { Generator, RpcClient, Resolver, Encoding, sompiToKaspaString, Address } = kaspa;
+
+const SOMPI_PER_KAS = 100000000n;
+const MAX_DECIMAL_PLACES = 8;
+const KASIA_MIN_AMOUNT = '0.2';
+const FEE_RESERVE_SOMPI = 3000n; // ~0.00003 KAS — covers fee for single-output self-send
+
+// Promise-based mutex to serialize sendKaspa() calls and prevent UTXO double-spend
+let _sendLock = Promise.resolve();
+function withSendLock(fn) {
+  const prev = _sendLock;
+  let resolve;
+  _sendLock = new Promise(r => { resolve = r; });
+  return prev.then(fn).finally(resolve);
+}
+
+function hexToBytes(hex) {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
+  return bytes;
+}
+
+function kasToSompi(amountStr) {
+  const trimmed = amountStr.trim();
+  if (!/^\d+(\.\d+)?$/.test(trimmed)) throw new Error('Amount must be a valid decimal number');
+  const parts = trimmed.split('.');
+  const integerPart = parts[0];
+  let fractionalPart = (parts[1] || '').padEnd(MAX_DECIMAL_PLACES, '0');
+  if (fractionalPart.length > MAX_DECIMAL_PLACES) throw new Error(`Amount cannot have more than ${MAX_DECIMAL_PLACES} decimal places`);
+  const sompi = BigInt(integerPart) * SOMPI_PER_KAS + BigInt(fractionalPart);
+  if (sompi <= 0n) throw new Error('Amount must be greater than zero');
+  return sompi;
+}
+
+export { KASIA_MIN_AMOUNT };
+
+async function resolveRpcUrl() {
+  // Priority: env var > console config > null (use resolver)
+  if (process.env.KASPA_RPC_URL) return process.env.KASPA_RPC_URL;
+
+  const consoleUrl = process.env.CONSOLE_URL;
+  if (consoleUrl) {
+    try {
+      const res = await fetch(`${consoleUrl}/api/config/rpc-url`, { signal: AbortSignal.timeout(3000) });
+      if (res.ok) {
+        const { url } = await res.json();
+        if (url) { console.log(`[RPC] Using node from console: ${url}`); return url; }
+      }
+    } catch {}
+  }
+  return null;
+}
+
+async function connectRpc(networkId, attempt = 1) {
+  const directUrl = await resolveRpcUrl();
+  const rpcOpts = directUrl
+    ? { url: directUrl, encoding: Encoding.Borsh, networkId }
+    : { resolver: new Resolver(), encoding: Encoding.Borsh, networkId };
+  const rpc = new RpcClient(rpcOpts);
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('RPC connection timed out')), 30_000);
+      rpc.connect({}).then(() => { clearTimeout(timer); resolve(); }, (err) => { clearTimeout(timer); reject(err); });
+    });
+    return rpc;
+  } catch (err) {
+    try { await rpc.disconnect(); } catch {}
+    if (attempt < 3) {
+      console.log(`RPC connect retry ${attempt + 1}/3...`);
+      return connectRpc(networkId, attempt + 1);
+    }
+    throw err;
+  }
+}
+
+export function sendKaspa(...args) {
+  return withSendLock(() => _sendKaspaInner(...args));
+}
+
+async function _sendKaspaInner(to, amountSompi, priorityFee = 0n, payload) {
+  const wallet = getWallet();
+  const senderAddress = wallet.getAddress();
+  const api = getApi(wallet.getNetworkId());
+  const rpc = await connectRpc(wallet.getNetworkId());
+
+  const submittedTxIds = [];
+  try {
+    const { isSynced } = await rpc.getServerInfo();
+    if (!isSynced) throw new Error('RPC node is not synced');
+
+    const { entries } = await rpc.getUtxosByAddresses([new Address(senderAddress)]);
+    if (!entries || entries.length === 0) throw new Error('No UTXOs available');
+
+    let selectedEntries = entries;
+    let outputAmount = amountSompi;
+
+    // Full-UTXO self-send mode: pick largest UTXO, send (value - fee) to self.
+    // Single input + single output = zero change = near-zero KIP-9 storage mass.
+    // Used for comm/card/broadcast (self-sends where the payload is what matters).
+    if (amountSompi === 0n && to === senderAddress) {
+      entries.sort((a, b) => (a.amount < b.amount ? 1 : -1)); // descending
+      const best = entries[0];
+      if (best.amount < FEE_RESERVE_SOMPI * 2n) throw new Error('UTXO too small');
+      selectedEntries = [best];
+      outputAmount = BigInt(best.amount) - FEE_RESERVE_SOMPI;
+    } else {
+      // KIP-9 aware UTXO selection:
+      //   storage_mass = C × (Σ(1/output) - Σ(1/input))⁺, C=10¹², limit=100,000
+      //   Generator picks UTXOs in entry order. Small change → high mass → rejected.
+      //   Strategy: ascending sort (preserve large UTXOs), find smallest KIP-9-safe single UTXO.
+      //   If none safe alone, merge all (multiple inputs lower mass).
+      const totalBalance = entries.reduce((sum, e) => sum + e.amount, 0n);
+      if (totalBalance < amountSompi + FEE_RESERVE_SOMPI + priorityFee)
+        throw new Error(`Insufficient balance: have ${sompiToKaspaString(totalBalance)} KAS, need ~${sompiToKaspaString(amountSompi + FEE_RESERVE_SOMPI + priorityFee)} KAS`);
+      // Min safe single UTXO: change must be large enough for KIP-9.
+      // For send S, single input I, change C=I-S: mass = 10¹² × (1/S + 1/C - 1/I)
+      // Safe when change >= ~0.65 × send (empirically: 0.13 KAS for 0.2 KAS send)
+      const minSafeUtxo = amountSompi + amountSompi * 65n / 100n + FEE_RESERVE_SOMPI;
+      entries.sort((a, b) => (a.amount > b.amount ? 1 : -1)); // ascending
+      const safeEntry = entries.find(e => e.amount >= minSafeUtxo);
+      if (safeEntry) {
+        selectedEntries = [safeEntry];
+      }
+      // else: use all entries — multiple inputs reduce mass, Generator handles the rest
+    }
+
+    const generator = new Generator({
+      entries: selectedEntries,
+      outputs: [{ address: to, amount: outputAmount }],
+      priorityFee,
+      changeAddress: senderAddress,
+      networkId: wallet.getNetworkId(),
+      ...(payload ? { payload: hexToBytes(payload) } : {}),
+    });
+
+    let pending, lastTxId = '';
+    while ((pending = await generator.next())) {
+      await pending.sign([wallet.getPrivateKey()]);
+      const txId = await pending.submit(rpc);
+      submittedTxIds.push(txId);
+      lastTxId = txId;
+    }
+
+    if (!lastTxId) throw new Error('Transaction generation failed: no transactions produced');
+    const summary = generator.summary();
+    return { txId: lastTxId, fee: sompiToKaspaString(summary.fees).toString() };
+  } catch (error) {
+    if (submittedTxIds.length > 0) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`Transaction partially completed. ${submittedTxIds.length} tx(s) broadcast: [${submittedTxIds.join(', ')}]. Error: ${detail}`);
+    }
+    throw error;
+  } finally {
+    try { await rpc.disconnect(); } catch {}
+  }
+}
+
+export async function sendKaspaByAmount(params) {
+  if (!params.to) throw new Error('Recipient address (to) is required');
+  if (!params.amount) throw new Error('Amount is required');
+  // amount === 'self-full': full-UTXO self-send mode (zero change, near-zero KIP-9 mass)
+  if (params.amount === 'self-full') {
+    return sendKaspa(params.to, 0n, 0n, params.payload);
+  }
+  const amountSompi = kasToSompi(params.amount);
+  return sendKaspa(params.to, amountSompi, BigInt(params.priorityFee || 0), params.payload);
+}

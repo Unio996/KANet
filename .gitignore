@@ -1,9 +1,14 @@
 # 继承子项目已有规则（kasia-console/.gitignore 等）
 node_modules/
-data/
+/data/
 .env
 *.log
 *.pid
+
+# === 子项目运行时数据（不是源码）===
+kasia-console/data/
+kasia-relay/state/
+kaspa-scout/data/
 
 # === 根目录敏感配置 ===
 kanet.env

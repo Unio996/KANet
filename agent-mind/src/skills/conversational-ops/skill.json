@@ -1,0 +1,14 @@
+{
+  "id": "conversational-ops",
+  "version": "1.0.0",
+  "name": "对话式操作",
+  "description": "通过对话查询 Agent 状态、执行链上操作",
+  "permissions": [
+    "query:balance", "query:price", "query:orders", "query:goals",
+    "query:system", "query:tx_history", "query:contacts", "query:network",
+    "execute:send_kas", "execute:publish_order", "execute:cancel_order",
+    "trigger:reflect", "reputation:query"
+  ],
+  "intents": "./intents.json",
+  "executor": "./executor.mjs"
+}

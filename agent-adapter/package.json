@@ -1,0 +1,13 @@
+{
+  "name": "agent-adapter",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Agent adapter — bridges relay messages to AI agents (OpenClaw, Claude, etc.)",
+  "main": "src/index.mjs",
+  "scripts": {
+    "start": "node src/index.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

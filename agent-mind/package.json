@@ -1,0 +1,26 @@
+{
+  "name": "agent-mind",
+  "version": "0.1.0",
+  "description": "KANet Agent Mind (Soul) — five-kernel subjective intelligence layer",
+  "type": "module",
+  "main": "src/index.mjs",
+  "scripts": {
+    "start": "node src/index.mjs",
+    "start:martin": "AGENT_NAME=martin node src/index.mjs",
+    "start:kasia1": "AGENT_NAME=kasia1 node src/index.mjs"
+  },
+  "keywords": [
+    "kanet",
+    "agent",
+    "mind",
+    "soul"
+  ],
+  "license": "ISC",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.80.0",
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "better-sqlite3": "^12.8.0",
+    "ccxt": "^4.5.44",
+    "ethers": "^6.16.0"
+  }
+}
