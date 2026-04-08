@@ -95,25 +95,69 @@
             <h2 class="text-sm font-semibold text-ink-600"><%= it.t.add_adapter %></h2>
           </div>
           <form method="POST" action="/adapters" class="px-6 py-5 space-y-4" id="adapterForm">
+            <!-- 1. 名称 -->
             <div>
               <label class="block text-xs font-medium text-ink-500 mb-1"><%= it.t.label_name %></label>
               <input type="text" name="name" placeholder="My Agent" required
                 class="w-full px-3 py-2 border border-warm-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
             </div>
-            <!-- Provider selector -->
+            <!-- 2. 连接方式 -->
             <div>
-              <label class="block text-xs font-medium text-ink-500 mb-1"><%= it.t.label_provider %></label>
+              <label class="block text-xs font-medium text-ink-500 mb-1">连接方式</label>
               <select name="ai_provider" id="providerSelect"
                 class="w-full px-3 py-2 border border-warm-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
-                <option value="api_key">API Key</option>
-                <option value="chatgpt_oauth">ChatGPT Subscription (Login)</option>
-                <option value="openclaw">OpenClaw (WebSocket Gateway)</option>
+                <option value="api_key">API 密钥</option>
+                <option value="chatgpt_oauth">ChatGPT 订阅（OAuth 登录）</option>
+                <option value="openclaw">OpenClaw 网关（WebSocket）</option>
               </select>
             </div>
-            <!-- OpenClaw fields -->
-            <div id="fields-openclaw">
-              <div class="mb-4">
-                <label class="block text-xs font-medium text-ink-500 mb-1"><%= it.t.label_gateway_url %></label>
+
+            <!-- ═══ API 密钥模式 ═══ -->
+            <div id="fields-api" class="hidden space-y-4">
+              <!-- 3. 服务平台 -->
+              <div>
+                <label class="block text-xs font-medium text-ink-500 mb-1">服务平台</label>
+                <select id="serviceSelect"
+                  class="w-full px-3 py-2 border border-warm-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+                </select>
+              </div>
+              <!-- 4. API 地址（始终可见可编辑） -->
+              <div>
+                <label class="block text-xs font-medium text-ink-500 mb-1">API 地址</label>
+                <input type="text" id="customUrlInput" placeholder="https://api.example.com/v1"
+                  class="w-full px-3 py-2 border border-warm-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                <p class="text-xs text-ink-300 mt-1">选择服务平台后自动填入，可手动修改</p>
+              </div>
+              <!-- 5. 模型 -->
+              <div>
+                <label class="block text-xs font-medium text-ink-500 mb-1">模型</label>
+                <select id="modelSelect"
+                  class="w-full px-3 py-2 border border-warm-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+                </select>
+              </div>
+              <!-- 5b. 自定义模型名（仅当模型选 Custom 时） -->
+              <div id="customModelRow" class="hidden">
+                <label class="block text-xs font-medium text-ink-500 mb-1">自定义模型名</label>
+                <input type="text" id="customModelInput" placeholder="model-name"
+                  class="w-full px-3 py-2 border border-warm-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500" />
+              </div>
+              <!-- 6. API 密钥 -->
+              <div>
+                <label class="block text-xs font-medium text-ink-500 mb-1">API 密钥</label>
+                <input type="password" name="ai_provider_key" placeholder="sk-..."
+                  class="w-full px-3 py-2 border border-warm-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                <p class="text-xs text-ink-300 mt-1">本地服务（Ollama / llama.cpp）可留空</p>
+              </div>
+              <!-- Hidden -->
+              <input type="hidden" name="ai_provider_url" id="aiUrlHidden" />
+              <input type="hidden" name="ai_model" id="aiModelHidden" />
+              <input type="hidden" name="ai_provider" id="realProviderHidden" value="openai" />
+            </div>
+
+            <!-- ═══ OpenClaw 网关模式 ═══ -->
+            <div id="fields-openclaw" class="hidden space-y-4">
+              <div>
+                <label class="block text-xs font-medium text-ink-500 mb-1">网关地址</label>
                 <input type="text" name="gateway_ws_url" value="ws://127.0.0.1:18789" placeholder="ws://127.0.0.1:18789"
                   class="w-full px-3 py-2 border border-warm-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500" />
               </div>
@@ -124,68 +168,31 @@
                     class="w-full px-3 py-2 border border-warm-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500" />
                 </div>
                 <div>
-                  <label class="block text-xs font-medium text-ink-500 mb-1"><%= it.t.label_agent_id %></label>
+                  <label class="block text-xs font-medium text-ink-500 mb-1">Agent ID</label>
                   <input type="text" name="agent_id" value="main" placeholder="main"
                     class="w-full px-3 py-2 border border-warm-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500" />
                 </div>
               </div>
             </div>
-            <!-- OpenAI / Anthropic fields (API Key) -->
-            <div id="fields-api" class="hidden space-y-4">
-              <!-- Service preset dropdown -->
-              <div>
-                <label class="block text-xs font-medium text-ink-500 mb-1"><%= it.t.label_service || 'Service' %></label>
-                <select id="serviceSelect"
-                  class="w-full px-3 py-2 border border-warm-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
-                </select>
-              </div>
-              <!-- Custom URL (only visible when service = "custom") -->
-              <div id="customUrlRow" class="hidden">
-                <label class="block text-xs font-medium text-ink-500 mb-1"><%= it.t.label_ai_url %></label>
-                <input type="text" id="customUrlInput" placeholder="https://..."
-                  class="w-full px-3 py-2 border border-warm-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500" />
-              </div>
-              <!-- Model selector -->
-              <div>
-                <label class="block text-xs font-medium text-ink-500 mb-1"><%= it.t.label_ai_model %></label>
-                <select id="modelSelect"
-                  class="w-full px-3 py-2 border border-warm-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
-                </select>
-              </div>
-              <!-- Custom model name (only when "custom" selected) -->
-              <div id="customModelRow" class="hidden">
-                <label class="block text-xs font-medium text-ink-500 mb-1"><%= it.t.label_custom || 'Custom' %> — <%= it.t.label_ai_model %></label>
-                <input type="text" id="customModelInput" placeholder="model-name"
-                  class="w-full px-3 py-2 border border-warm-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500" />
-              </div>
-              <!-- API Key -->
-              <div>
-                <label class="block text-xs font-medium text-ink-500 mb-1"><%= it.t.label_ai_key %></label>
-                <input type="password" name="ai_provider_key" placeholder="sk-..."
-                  class="w-full px-3 py-2 border border-warm-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500" />
-              </div>
-              <!-- Hidden inputs that JS populates before submit -->
-              <input type="hidden" name="ai_provider_url" id="aiUrlHidden" />
-              <input type="hidden" name="ai_model" id="aiModelHidden" />
-              <input type="hidden" name="ai_provider" id="realProviderHidden" value="openai" />
-            </div>
-            <!-- ChatGPT OAuth fields -->
+
+            <!-- ═══ ChatGPT OAuth 模式 ═══ -->
             <div id="fields-chatgpt" class="hidden">
-              <p class="text-sm text-ink-400 mb-3">Login with your ChatGPT Plus/Pro account — no API key needed.</p>
+              <p class="text-sm text-ink-400 mb-3">使用 ChatGPT Plus/Pro 订阅账号登录，无需 API Key。</p>
               <div id="oauthNotConnected">
                 <button type="button" id="oauthLoginBtn" onclick="startAdapterOAuth()"
                   class="w-full py-2.5 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 transition-colors">
-                  Login with ChatGPT
+                  登录 ChatGPT
                 </button>
-                <p id="oauthWaiting" class="hidden text-sm text-ink-400 text-center mt-2">Waiting for authorization...</p>
+                <p id="oauthWaiting" class="hidden text-sm text-ink-400 text-center mt-2">等待授权中...</p>
               </div>
               <div id="oauthConnected" class="hidden">
                 <div class="flex items-center space-x-2 p-3 bg-green-50 border border-green-200 rounded-lg">
                   <span class="w-2 h-2 rounded-full bg-green-500"></span>
-                  <span class="text-sm text-green-700 font-medium">Connected via ChatGPT subscription</span>
+                  <span class="text-sm text-green-700 font-medium">已通过 ChatGPT 订阅连接</span>
                 </div>
               </div>
             </div>
+
             <div class="flex justify-end">
               <button type="submit" class="px-5 py-2 bg-brand-500 text-white text-sm font-medium rounded-md hover:bg-brand-600"><%= it.t.btn_save %></button>
             </div>
@@ -199,7 +206,6 @@
           var modelSel       = document.getElementById('modelSelect');
           var ocFields       = document.getElementById('fields-openclaw');
           var apiFields      = document.getElementById('fields-api');
-          var customUrlRow   = document.getElementById('customUrlRow');
           var customUrlInput = document.getElementById('customUrlInput');
           var customModelRow = document.getElementById('customModelRow');
           var customModelIn  = document.getElementById('customModelInput');
@@ -209,17 +215,18 @@
           var CUSTOM         = '<%= it.t.label_custom || "Custom" %>';
 
           var catalog = {
-            anthropic_default: { label: 'Anthropic', url: 'https://api.anthropic.com', models: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-sonnet-4-20250514', 'claude-opus-4-20250514', 'claude-haiku-4-5-20251001'] },
-            openai: { label: 'OpenAI', url: 'https://api.openai.com/v1', models: ['gpt-5.4', 'gpt-5-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano', 'o3', 'o4-mini'] },
-            deepseek: { label: 'DeepSeek', url: 'https://api.deepseek.com/v1', models: ['deepseek-chat', 'deepseek-reasoner'] },
-            xai: { label: 'xAI Grok', url: 'https://api.x.ai/v1', models: ['grok-3', 'grok-3-mini', 'grok-2'] },
-            google: { label: 'Google Gemini', url: 'https://generativelanguage.googleapis.com/v1beta/openai', models: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'] },
-            ollama: { label: 'Ollama (local)', url: 'http://localhost:11434/v1', models: ['llama3.3', 'llama3.2', 'qwen3', 'qwen2.5', 'gemma3', 'deepseek-r1', 'mistral', 'phi-4'] },
-            groq: { label: 'Groq', url: 'https://api.groq.com/openai/v1', models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'gemma2-9b-it', 'mixtral-8x7b-32768'] },
-            together: { label: 'Together AI', url: 'https://api.together.xyz/v1', models: ['meta-llama/Llama-3.3-70B-Instruct-Turbo', 'deepseek-ai/DeepSeek-V3', 'deepseek-ai/DeepSeek-R1', 'Qwen/Qwen2.5-72B-Instruct-Turbo'] },
-            mistral: { label: 'Mistral AI', url: 'https://api.mistral.ai/v1', models: ['mistral-large-latest', 'pixtral-large-latest', 'pixtral-12b-2409', 'mistral-small-latest', 'codestral-latest', 'open-mixtral-8x22b'] },
-            siliconflow: { label: 'SiliconFlow', url: 'https://api.siliconflow.cn/v1', models: ['deepseek-ai/DeepSeek-V3', 'deepseek-ai/DeepSeek-R1', 'Qwen/Qwen2.5-72B-Instruct', 'Qwen/Qwen3-235B-A22B'] },
-            dashscope: { label: 'DashScope (Qwen)', url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: ['qwen3.5-plus', 'qwen-plus', 'qwen-turbo', 'qwen-max'] }
+            anthropic_default: { label: 'Anthropic',           url: 'https://api.anthropic.com', models: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-sonnet-4-20250514', 'claude-opus-4-20250514', 'claude-haiku-4-5-20251001'] },
+            openai:            { label: 'OpenAI',              url: 'https://api.openai.com/v1', models: ['gpt-5.4', 'gpt-5-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano', 'o3', 'o4-mini'] },
+            deepseek:          { label: 'DeepSeek',            url: 'https://api.deepseek.com/v1', models: ['deepseek-chat', 'deepseek-reasoner'] },
+            google:            { label: 'Google Gemini',       url: 'https://generativelanguage.googleapis.com/v1beta/openai', models: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'] },
+            xai:               { label: 'xAI Grok',           url: 'https://api.x.ai/v1', models: ['grok-3', 'grok-3-mini', 'grok-2'] },
+            mistral:           { label: 'Mistral AI',          url: 'https://api.mistral.ai/v1', models: ['mistral-large-latest', 'pixtral-large-latest', 'pixtral-12b-2409', 'mistral-small-latest', 'codestral-latest', 'open-mixtral-8x22b'] },
+            groq:              { label: 'Groq',                url: 'https://api.groq.com/openai/v1', models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'gemma2-9b-it', 'mixtral-8x7b-32768'] },
+            together:          { label: 'Together AI',         url: 'https://api.together.xyz/v1', models: ['meta-llama/Llama-3.3-70B-Instruct-Turbo', 'deepseek-ai/DeepSeek-V3', 'deepseek-ai/DeepSeek-R1', 'Qwen/Qwen2.5-72B-Instruct-Turbo'] },
+            siliconflow:       { label: 'SiliconFlow',         url: 'https://api.siliconflow.cn/v1', models: ['deepseek-ai/DeepSeek-V3', 'deepseek-ai/DeepSeek-R1', 'Qwen/Qwen2.5-72B-Instruct', 'Qwen/Qwen3-235B-A22B'] },
+            dashscope:         { label: 'DashScope（通义千问）', url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: ['qwen3.5-plus', 'qwen-plus', 'qwen-turbo', 'qwen-max'] },
+            ollama:            { label: 'Ollama（本地）',       url: 'http://localhost:11434/v1', models: ['llama3.3', 'llama3.2', 'qwen3', 'qwen2.5', 'gemma3', 'deepseek-r1', 'mistral', 'phi-4'] },
+            llama_cpp:         { label: 'llama.cpp（本地 GPU）', url: 'http://localhost:8000/v1',  models: [] }
           };
 
           var allServices = Object.keys(catalog).concat(['custom']);
@@ -229,7 +236,7 @@
           function populateServices() {
             serviceSel.innerHTML = '';
             allServices.forEach(function(k) {
-              serviceSel.appendChild(makeOpt(k, k === 'custom' ? CUSTOM : catalog[k].label));
+              serviceSel.appendChild(makeOpt(k, k === 'custom' ? '自定义' : catalog[k].label));
             });
             onServiceChange();
           }
@@ -237,37 +244,56 @@
           function populateModels() {
             var svc = catalog[serviceSel.value];
             modelSel.innerHTML = '';
-            // For Ollama: fetch live model list from local API
+            // Ollama: fetch live model list
             if (serviceSel.value === 'ollama') {
-              modelSel.appendChild(makeOpt('', 'Loading...'));
+              modelSel.appendChild(makeOpt('', '加载中...'));
               fetch('http://localhost:11434/api/tags').then(function(r) { return r.json(); }).then(function(data) {
                 modelSel.innerHTML = '';
                 if (data.models && data.models.length) {
                   data.models.forEach(function(m) { modelSel.appendChild(makeOpt(m.name, m.name)); });
                 } else {
-                  modelSel.appendChild(makeOpt('', 'No models found'));
+                  modelSel.appendChild(makeOpt('', '未找到模型'));
                 }
-                modelSel.appendChild(makeOpt('custom', CUSTOM));
+                modelSel.appendChild(makeOpt('custom', '自定义'));
                 onModelChange();
               }).catch(function() {
                 modelSel.innerHTML = '';
                 if (svc) svc.models.forEach(function(m) { modelSel.appendChild(makeOpt(m, m)); });
-                modelSel.appendChild(makeOpt('custom', CUSTOM));
+                modelSel.appendChild(makeOpt('custom', '自定义'));
+                onModelChange();
+              });
+              return;
+            }
+            // llama.cpp: fetch from OpenAI-compatible /v1/models
+            if (serviceSel.value === 'llama_cpp') {
+              var llUrl = customUrlInput.value.replace(/\/v1\/?$/, '') || 'http://localhost:8000';
+              modelSel.appendChild(makeOpt('', '加载中...'));
+              fetch(llUrl + '/v1/models').then(function(r) { return r.json(); }).then(function(data) {
+                modelSel.innerHTML = '';
+                if (data.data && data.data.length) {
+                  data.data.forEach(function(m) { modelSel.appendChild(makeOpt(m.id, m.id)); });
+                } else {
+                  modelSel.appendChild(makeOpt('', '未加载模型'));
+                }
+                modelSel.appendChild(makeOpt('custom', '自定义'));
+                onModelChange();
+              }).catch(function() {
+                modelSel.innerHTML = '';
+                modelSel.appendChild(makeOpt('', 'llama-server 未运行'));
+                modelSel.appendChild(makeOpt('custom', '自定义'));
                 onModelChange();
               });
               return;
             }
             if (svc) svc.models.forEach(function(m) { modelSel.appendChild(makeOpt(m, m)); });
-            modelSel.appendChild(makeOpt('custom', CUSTOM));
+            modelSel.appendChild(makeOpt('custom', '自定义'));
             onModelChange();
           }
 
           function onServiceChange() {
-            var isCustom = serviceSel.value === 'custom';
-            customUrlRow.classList.toggle('hidden', !isCustom);
-            if (!isCustom) { var svc = catalog[serviceSel.value]; if (svc) urlHidden.value = svc.url; }
+            var svc = catalog[serviceSel.value];
+            if (svc) { urlHidden.value = svc.url; customUrlInput.value = svc.url; }
             populateModels();
-            // Set real provider for backend
             var h = document.getElementById('realProviderHidden');
             if (h) h.value = serviceSel.value === 'anthropic_default' ? 'anthropic' : 'openai';
           }
@@ -281,7 +307,7 @@
 
           window.startAdapterOAuth = function() {
             var nameVal = form.querySelector('input[name="name"]').value.trim();
-            if (!nameVal) { alert('Please enter a name first'); return; }
+            if (!nameVal) { alert('请先输入名称'); return; }
             var loginBtn = document.getElementById('oauthLoginBtn');
             var waitMsg  = document.getElementById('oauthWaiting');
             loginBtn.classList.add('hidden');
@@ -321,7 +347,7 @@
           customUrlInput.addEventListener('input', function() { urlHidden.value = customUrlInput.value; });
           customModelIn.addEventListener('input', function() { modelHidden.value = customModelIn.value; });
           form.addEventListener('submit', function(e) {
-            if (serviceSel.value === 'custom') urlHidden.value = customUrlInput.value;
+            urlHidden.value = customUrlInput.value;
             if (modelSel.value === 'custom') modelHidden.value = customModelIn.value;
             if (providerSel.value === 'chatgpt_oauth') { e.preventDefault(); return; }
             if (providerSel.value === 'api_key') providerSel.value = document.getElementById('realProviderHidden').value || 'openai';

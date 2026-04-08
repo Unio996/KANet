@@ -66,7 +66,16 @@ for PORT in $PORTS; do
   kill_pid "$PID" "port:$PORT"
 done
 
-# ── 阶段 3：清理残留 node 进程（relay、adapter、scout） ───────
+# ── 阶段 3：停止 llama-server ─────────────────────────────────
+LLAMA_PID=$(powershell -Command "
+  (Get-CimInstance Win32_Process | Where-Object { \$_.Name -eq 'llama-server.exe' }).ProcessId
+" 2>/dev/null | tr -d '\r\n ')
+if [ -n "$LLAMA_PID" ]; then
+  kill_pid "$LLAMA_PID" "llama-server"
+  KILLED_PIDS="$KILLED_PIDS $LLAMA_PID"
+fi
+
+# ── 阶段 4：清理残留 node 进程（relay、adapter、scout） ───────
 CHILD_PIDS=$(powershell -Command "
   Get-CimInstance Win32_Process |
     Where-Object { \$_.Name -eq 'node.exe' -and (\$_.CommandLine -match 'relay' -or \$_.CommandLine -match 'index\.mjs' -or \$_.CommandLine -match 'scout') } |

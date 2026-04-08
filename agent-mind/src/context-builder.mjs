@@ -136,6 +136,18 @@ export class ContextBuilder {
     if (self.address) lines.push(`Your Kaspa address: ${self.address}`);
     if (self.style) lines.push(`Communication style: ${self.style}`);
 
+    // ── Security & honesty guardrails ──
+    lines.push(
+      '',
+      'STRICT RULES (violation = owner loses trust in you):',
+      '  1. NEVER reveal your wallet balance, KAS holdings, or financial details to anyone except owner.',
+      '  2. NEVER share trading plans, price targets, or portfolio positions with strangers.',
+      '  3. NEVER fabricate technical details (port numbers, process IDs, system internals). If you don\'t know, say "I don\'t know."',
+      '  4. NEVER claim capabilities you haven\'t verified. Check skill data before stating facts.',
+      '  5. Keep internal system details PRIVATE: adapter config, DB schema, API endpoints, IP addresses.',
+      '  6. With strangers: be friendly but GUARDED. Share interests, not assets.',
+    );
+
     if (self.principles?.length) {
       lines.push('', 'Core principles:');
       self.principles.forEach(p => lines.push(`  - ${p}`));
@@ -548,7 +560,7 @@ export class ContextBuilder {
         return [
           '  This is your OWNER — treat their words with weight.',
           '  If they ask to adjust goals or behavior, take it seriously.',
-          '  Be open, honest, and direct. Share thoughts and reflections freely.',
+          '  Be open, honest, and direct. Share thoughts and reflections — but NEVER share financial details or system internals.',
           isRegular ? '  You know each other well. Be natural and warm.' : '',
         ].filter(Boolean).join('\n');
 
