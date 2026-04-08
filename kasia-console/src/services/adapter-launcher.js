@@ -7,6 +7,7 @@ import { spawn } from 'child_process';
 import { resolve } from 'path';
 import { listAdapterNodes, getAdapterNode, getAdapterToken, getAdapterProviderKey } from '../data/settings/adapter-nodes.js';
 import { getConfig } from '../data/settings/configs.js';
+import { sqlite } from '../db/client.js';
 import { ensureConnection } from './connection-manager.js';
 
 const KANET_ROOT = process.env.KANET_ROOT || 'D:/Anthropic';
@@ -110,6 +111,9 @@ export async function startAdapter(adapterId) {
 
     _instances.set(adapterId, instance);
 
+    // Remember user intent: auto-start on next boot
+    try { sqlite.prepare('UPDATE adapter_nodes SET is_enabled = 1 WHERE id = ?').run(adapterId); } catch {}
+
     log(`started "${node.name}" on port ${node.http_port} (PID ${child.pid})`);
     return { ok: true, pid: child.pid, port: node.http_port };
   } catch (err) {
@@ -182,6 +186,9 @@ export async function stopAdapter(adapterId) {
   instance.child = null;
   _instances.delete(adapterId);
 
+  // Remember user intent: don't auto-start on next boot
+  try { sqlite.prepare('UPDATE adapter_nodes SET is_enabled = 0 WHERE id = ?').run(adapterId); } catch {}
+
   return { ok: true };
 }
 
@@ -235,6 +242,8 @@ export async function startAllAdapters() {
   let started = 0;
   for (const a of adapters) {
     if (_instances.has(a.id) && _instances.get(a.id).running) continue;
+    // Skip adapters the user manually stopped (is_enabled=0)
+    if (a.is_enabled === 0) { log(`skipped "${a.name}" (disabled)`); continue; }
     const result = await startAdapter(a.id);
     if (result.ok) started++;
   }
