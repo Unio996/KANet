@@ -654,7 +654,7 @@ Agent 决策理由从 execution_states.display_summary 注入。
 | 5 | 双重 whale alert（scanner + whale-alert.mjs） | 阈值已统一，架构重复 P3 |
 | 6 | Adapter 遗留 <<SKILL:annotate:...>> 系统 | 和 Mind Skill Registry 两套并存 P3 |
 | 7 | protocol.mjs Relay/Scout 各一份 | shared/ 可合并 P3 |
-| 8 | kaspa-scout/package.json 硬编码 file: 路径 | npm 构建时依赖，部署时替换 |
+| 8 | ~~kaspa-scout/package.json 硬编码 file: 路径~~ | **已解决（2026-04-08，kaspa-wasm → npm:@onetokenfe/kaspa-wasm-node@^1.0.2）** |
 | 9 | ~~account_relations 双写~~ | **已解决（v46 DROP TABLE, 2026-04-06）** |
 | 10 | ~~interaction_records 残留读取~~ | **已解决（v47 DROP TABLE, 2026-04-06，17 处迁移到 chain_events）** |
 | 11 | ~~replies.sent_txid 盲匹配 hack~~ | **已解决（2026-04-06，chain_events 是真相源）** |
