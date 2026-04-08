@@ -264,20 +264,26 @@ export async function registerConversationRoutes(fastify) {
       "SELECT COUNT(*) as c FROM broadcast_messages WHERE sender_address = ? AND created_at > ?"
     ).get(addr, since);
 
-    // Actual TX fees from chain (real spend, not estimates)
-    const txFees = sqlite.prepare(`
-      SELECT t.txid, t.fee, t.created_at, m.message_type
-      FROM tx_records t
-      LEFT JOIN messages m ON t.trace_id = m.trace_id
-      WHERE t.direction = 'outbound' AND t.created_at > ?
-        AND t.conversation_id IN (
-          SELECT c.id FROM conversations c
-          JOIN identities i ON c.local_identity_id = i.id WHERE i.address = ?
-        )
-      ORDER BY t.created_at DESC LIMIT 50
-    `).all(since, addr);
+    // Actual spending from chain: amount + fee for ALL outbound tx (messages + handshakes)
+    const txRows = sqlite.prepare(`
+      SELECT t.txid, t.amount, t.fee, t.created_at FROM (
+        SELECT txid, amount, fee, created_at
+        FROM tx_records
+        WHERE direction = 'outbound' AND created_at > ?
+          AND conversation_id IN (
+            SELECT c.id FROM conversations c
+            JOIN identities i ON c.local_identity_id = i.id WHERE i.address = ?
+          )
+        UNION ALL
+        SELECT txid, amount, fee, created_at
+        FROM tx_records
+        WHERE direction = 'outbound' AND created_at > ?
+          AND conversation_id IS NULL
+          AND local_address = ?
+      ) t ORDER BY t.created_at DESC LIMIT 100
+    `).all(since, addr, since, addr);
 
-    const totalFee = txFees.reduce((s, t) => s + (parseFloat(t.fee) || 0), 0);
+    const totalSpent = txRows.reduce((s, t) => s + (parseFloat(t.amount) || 0) + (parseFloat(t.fee) || 0), 0);
 
     return reply.send({
       days: parseInt(days),
@@ -286,9 +292,9 @@ export async function registerConversationRoutes(fastify) {
         messages: { count: comms?.c || 0 },
         broadcasts: { count: bcasts?.c || 0 },
       },
-      total: totalFee,
-      txCount: txFees.length,
-      recentTxs: txFees.slice(0, 20),
+      total: totalSpent,
+      txCount: txRows.length,
+      recentTxs: txRows.slice(0, 20),
     });
   });
 
@@ -334,8 +340,9 @@ export async function registerConversationRoutes(fastify) {
         SELECT t.txid, t.trace_id, t.amount, t.fee, t.created_at,
                'handshake' AS type,
                t.local_address AS agent_address,
-               NULL AS peer_address
+               ce.to_address AS peer_address
         FROM tx_records t
+        LEFT JOIN chain_events ce ON ce.txid = t.txid AND ce.event_type = 'handshake'
         WHERE t.direction = 'outbound'
           AND t.conversation_id IS NULL
           AND (t.trace_id LIKE 'handshake:%' OR t.trace_id LIKE 'handshake-init:%' OR t.trace_id LIKE 'catchup:%')
