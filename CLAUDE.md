@@ -2,30 +2,30 @@
 
 ## 你必须先读这些文档
 
-1. **开发者指南（唯一权威文档）** → `D:\Anthropic\docs\DEVELOPER-GUIDE.md`
+1. **开发者指南（唯一权威文档）** → `docs/DEVELOPER-GUIDE.md`
    - 必须先读完再动任何代码。全系统 15 章：架构、消息管道、Mind、交易、Health、UI、市场(8源)、致命陷阱、API速查表
    - 持续更新（最近：2026-04-06）。有改动就在此文件上更新，不新建 dev-*.md
 
-2. **数据库字典（改表前必查）** → `D:\Anthropic\docs\DATABASE.md`
+2. **数据库字典（改表前必查）** → `docs/DATABASE.md`
    - 34 张活跃表全覆盖：用途、字段、写入方、读取方、陷阱
    - 持续更新（最近：2026-04-06）。改表前必查本文档确认影响范围
 
-3. **Alpha 达标标准** → `D:\Anthropic\docs\ALPHA-CHECKLIST.md`
+3. **Alpha 达标标准** → `docs/ALPHA-CHECKLIST.md`
 
-4. **系统架构（详细版）** → `D:\Anthropic\docs\kanet-system-architecture.md`
+4. **系统架构（详细版）** → `docs/kanet-system-architecture.md`
    - 五大模块职责、25张表读写映射、数据流、已知裂缝、API 清单
 
-5. **数据架构危机** → `C:\Users\Y\.claude\projects\D--Anthropic\memory\kanet-data-architecture-crisis.md`
+5. **数据架构危机** → `（已归档，详见 DEVELOPER-GUIDE 第三章 pending_actions 架构）`
    - Scout/Relay 双写问题、identity 断链路、catch-up 半盲
 
-6. **系统调查方法论（强制）** → `D:\Anthropic\docs\kanet-investigation-methodology.md`
+6. **系统调查方法论（强制）** → `docs/kanet-investigation-methodology.md`
    - 遇到系统异常必须按六层顺序调查，不允许跳步
    - 六层：场景→真实数据→协议→执行逻辑→数据流向→存储表
    - 修复前必须完成前三层输出并得到确认
 
-7. **最新会话总结** → `C:\Users\Y\.claude\projects\D--Anthropic\memory\kanet-session-0325.md`
+7. **最新会话总结** → `（已归档）`
 
-8. **记忆索引** → `C:\Users\Y\.claude\projects\D--Anthropic\memory\MEMORY.md`
+8. **记忆索引** → `（使用当前项目的 .claude 记忆系统）`
 
 ## 核心原则（违反即退回）
 
@@ -53,11 +53,11 @@ DATABASE.md 有改动时（新表/删表/加字段），必须同步更新文档
 
 | 系统 | 路径 | 定位 |
 |------|------|------|
-| kasia-console | `D:\Anthropic\kasia-console` | 数据中枢 + UI (port 3100) |
-| kasia-relay | `D:\Anthropic\kasia-relay` | 链上代理人（私钥、签名、加解密）|
-| kaspa-scout | `D:\Anthropic\kaspa-scout` | 链上观察者（扫链、发现、监控）|
-| agent-mind | `D:\Anthropic\agent-mind` | Agent 灵魂（五核、技能、决策）|
-| agent-adapter | `D:\Anthropic\agent-adapter` | AI 大脑桥接（多 provider）|
+| kasia-console | `kasia-console` | 数据中枢 + UI (port 3100) |
+| kasia-relay | `kasia-relay` | 链上代理人（私钥、签名、加解密）|
+| kaspa-scout | `kaspa-scout` | 链上观察者（扫链、发现、监控）|
+| agent-mind | `agent-mind` | Agent 灵魂（五核、技能、决策）|
+| agent-adapter | `agent-adapter` | AI 大脑桥接（多 provider）|
 
 ## 当前系统状态（2026-04-06 更新）
 
@@ -86,8 +86,8 @@ DATABASE.md 有改动时（新表/删表/加字段），必须同步更新文档
 ## 启动/停止
 
 ```bash
-bash D:/Anthropic/kanet-start.sh
-bash D:/Anthropic/kanet-stop.sh
+bash kanet-start.sh
+bash kanet-stop.sh
 ```
 
 ## 必读：Agent 社交骚扰问题（4/1 已修，认知修复）
@@ -101,17 +101,17 @@ bash D:/Anthropic/kanet-stop.sh
 
 ## 必读：安全审查遗留问题
 
-参考 `D:\A-KANet\日志\需要修改补充的\目前需要优化方面.txt`
+参考 `（已全部修复，见下方清单）`
 
 1. ~~**verifyIngestRequest() async**~~ — **已修**，12 个调用点全部 `await`
 2. ~~**Console 直接碰链**~~ — **已修（3/29）**，card-publisher/bcast-sender 删除，utxo-splitter 改 IPC
 3. ~~**market-maker since vs after**~~ — **已修**，chat.js:28 `const afterTs = after || since`
 4. ~~**OTC 收款无唯一订单绑定**~~ — **已修（4/3）**，UNIQUE 索引堵竞态 + 付款方地址校验 + 审计日志（chain_events + events 表 Brain 可见）
-5. ~~**硬编码绝对路径**~~ — **已修（3/29）**，全部改为 `process.env.KANET_ROOT || 'D:/Anthropic'`
+5. ~~**硬编码绝对路径**~~ — **已修**，全部改为 `process.env.KANET_ROOT`（启动脚本自动设置）
 
 ## 必读：KANet 定位
 
-参考 `D:\Anthropic\docs\KANet-Positioning.md`
+参考 `docs/KANet-Positioning.md`
 
 - KANet 是协议基础设施，不是产品
 - 只提供三个原语：安全通信、身份与发现、价值结算
