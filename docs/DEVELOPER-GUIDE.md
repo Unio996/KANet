@@ -2,7 +2,7 @@
 
 > **修改任何代码前必读。** 一个文件，覆盖全系统。唯一权威开发者文档。
 > 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-08。
-> 4/8 更新：stock-tracker 四层情报升级（K 线信号+财报感知+新闻 RSS+同行估值+解读指引）。intent-detector 市场场景误分类修复。stocks.eta ACTION 模板注入移除。
+> 4/8 更新：stock-tracker 四层情报升级 + llama-server 推理引擎（RTX 5090）+ Spending Ledger 三项修复 + Adapter UI 重构（URL 可编辑+14 平台 catalog）+ Agent 安全护栏（6 条硬规则：禁泄余额/禁编技术细节/系统内部保密）。
 > 4/6 更新：技术债清零（v46/v47 DROP 两张表） + DATABASE.md 数据字典 + exchange 交割全流程（manual/cross_chain_tx/超时/争议/套利链路）。cross-chain-verify.mjs 独立模块。
 > 4/5 更新：pending_actions 意图队列（v44）— 意图与事实分离，修复 catch-up 重复握手双花。陷阱 #24-27。花费账本页 /ledger。IB Gateway 不随启动。
 > 4/4 下午更新：做市三层架构（market-scanner + order-executor + 自动对冲）、activity-log 改读 messages、contacts.eta 时间本地化、PLACE_ORDER free_market 指向 /exchange。
@@ -38,6 +38,22 @@
 - Scout 只读不写（无私钥）
 - Mind 通过 Console API 间接操作
 - Adapter 纯透传，不持久化
+
+**本地推理引擎（4/8 新增）：**
+- llama-server (llama.cpp b8705, CUDA 13.1) 运行在 `localhost:8000`
+- 模型：Qwen3-30B-A3B Q4_K_M (18GB GGUF)，全量上 GPU (RTX 5090 32GB)
+- Flash Attention 启用，4 并行 slot，16K ctx
+- 随 `kanet-start.sh` 自动启动（Console 之前），`kanet-stop.sh` 自动停止
+- Adapter 通过 OpenAI 兼容 API 对接，无需改代码，只改 `agent_connections.base_url`
+- 文件位置：`tools/llama-server/`（二进制）、`models/`（GGUF 模型）
+
+**Agent 安全护栏（4/8 新增，硬编码在 context-builder.mjs）：**
+1. 禁止向非 owner 泄露钱包余额/持仓
+2. 禁止向陌生人暴露交易计划/价格目标
+3. 不知道的技术细节不编造（端口号、进程 ID 等）
+4. 未验证的能力不声称
+5. 系统内部细节保密（adapter 配置、DB、API 地址）
+6. 对陌生人友好但有防备，分享兴趣不分享资产
 
 **环境变量：** `KANET_ROOT` 在 kanet.env 中定义，部署只改这一处。
 

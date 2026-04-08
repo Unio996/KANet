@@ -92,6 +92,44 @@ fi
 
 info "加密密钥: ${CONSOLE_ENCRYPTION_KEY:0:8}..."
 
+# ── llama-server (本地推理引擎) ──────────────────────────────────────────────
+LLAMA_SERVER="$KANET_ROOT/tools/llama-server/llama-server.exe"
+LLAMA_MODEL="$KANET_ROOT/models/qwen3-30b-a3b-q4_k_m.gguf"
+LLAMA_PORT=8000
+LLAMA_LOG="$LOG_DIR/llama-server.log"
+
+if [ -f "$LLAMA_SERVER" ] && [ -f "$LLAMA_MODEL" ]; then
+  echo ""
+  echo -e "${C_BOLD}[0/1] llama-server${C_RESET}  port $LLAMA_PORT"
+  if netstat -an 2>/dev/null | grep -q ":${LLAMA_PORT}.*LISTEN"; then
+    ok "llama-server 已在运行 (port $LLAMA_PORT)"
+  else
+    info "启动 llama-server (Qwen3-30B, RTX 5090)..."
+    > "$LLAMA_LOG"
+    (cd "$KANET_ROOT/tools/llama-server" && ./llama-server.exe \
+      --model "$LLAMA_MODEL" \
+      --host 0.0.0.0 --port $LLAMA_PORT \
+      --n-gpu-layers 99 --ctx-size 16384 --threads 8 \
+      --flash-attn on \
+      >> "$LLAMA_LOG" 2>&1) &
+    LLAMA_PID=$!
+    echo "$LLAMA_PID" > "$PID_DIR/llama-server.pid"
+    info "等待模型加载..."
+    LLAMA_READY=0
+    for i in $(seq 1 60); do
+      if curl -sf http://localhost:$LLAMA_PORT/health 2>/dev/null | grep -q ok; then
+        LLAMA_READY=1; break
+      fi
+      sleep 2
+    done
+    if [ "$LLAMA_READY" -eq 1 ]; then
+      ok "llama-server 就绪  →  http://localhost:$LLAMA_PORT  (PID $LLAMA_PID)"
+    else
+      warn "llama-server 启动超时，Console 仍将启动（adapter 可回退到 Ollama）"
+    fi
+  fi
+fi
+
 # ── 启动 kasia-console ──────────────────────────────────────────────────────
 # Console 启动后自动拉起: Adapter → UTXO 拆分 → Relay → Scanner
 echo ""
@@ -146,6 +184,9 @@ echo -e "${C_BOLD}         KANet 已启动  ✓${C_RESET}"
 echo -e "${C_BOLD}${C_GREEN}  ══════════════════════════════════════${C_RESET}"
 echo ""
 echo -e "  ${C_BOLD}控制面板${C_RESET}  →  ${C_CYAN}http://localhost:$CONSOLE_PORT${C_RESET}"
+if [ -f "$LLAMA_SERVER" ] && [ -f "$LLAMA_MODEL" ]; then
+  echo -e "  ${C_BOLD}推理引擎${C_RESET}  →  ${C_CYAN}http://localhost:$LLAMA_PORT${C_RESET}  (llama-server + RTX 5090)"
+fi
 echo -e "  ${C_DIM}Console 自动管理: Adapter + Relay + Scanner${C_RESET}"
 echo ""
 echo -e "  ${C_DIM}停止:  bash $KANET_ROOT/kanet-stop.sh${C_RESET}"
