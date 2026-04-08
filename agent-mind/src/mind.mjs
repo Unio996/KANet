@@ -94,6 +94,30 @@ export async function createMind(agentName, relayNodeId, callbacks = {}) {
 
   if (!config) throw new Error(`Mind config not found for ${agentName}`);
 
+  // Make adapterUrl dynamic — re-reads from Console DB on each access
+  // so UI adapter switches take effect without restarting Mind
+  if (relayNodeId) {
+    const consoleUrl = process.env.CONSOLE_URL || 'http://localhost:3100';
+    const _configUrl = `${consoleUrl}/api/relay/${relayNodeId}/mind-config`;
+    let _cachedAdapterUrl = config.adapterUrl;
+    let _cacheTs = Date.now();
+    const ADAPTER_CACHE_TTL = 30_000; // 30s
+    Object.defineProperty(config, 'adapterUrl', {
+      get() {
+        // Return cached value synchronously, refresh in background if stale
+        if (Date.now() - _cacheTs > ADAPTER_CACHE_TTL) {
+          fetch(_configUrl, { signal: AbortSignal.timeout(3000) })
+            .then(r => r.json())
+            .then(c => { if (c?.adapterUrl) { _cachedAdapterUrl = c.adapterUrl; _cacheTs = Date.now(); } })
+            .catch(() => {});
+        }
+        return _cachedAdapterUrl;
+      },
+      set(v) { _cachedAdapterUrl = v; _cacheTs = Date.now(); },
+      enumerable: true,
+    });
+  }
+
   // Initialize kernels
   const kernels = {
     self: new SelfKernel(config),
