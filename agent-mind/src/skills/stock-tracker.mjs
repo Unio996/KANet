@@ -1,15 +1,13 @@
 /**
- * Skill: Stock Tracker — 股市追踪 + 宏观关联
+ * Skill: Stock Tracker — 股市情报 + 技术信号 + 财报感知
  *
- * 读取用户自选股实时数据，分析：
- *   - 指数走势（SPY/QQQ → 大盘方向）
- *   - 个股异动（涨跌超3%高亮）
- *   - 大宗商品（黄金避险信号）
- *   - 与 crypto 的关联（NASDAQ↓ 通常 BTC 跟跌）
- *   - 恐贪指数 + 资金费率 → 综合市场情绪
+ * 四层情报架构（对标 trade-sense）：
+ *   L1 — 原始数据：价格、成交量、K 线、基本面
+ *   L2 — 计算信号：趋势、动量、波动率、支撑/阻力
+ *   L3 — 组合视角：行业对比、组合健康、财报日历
+ *   L4 — 宏观关联：指数、商品、情绪、经济事件
  *
- * 不执行交易，只提供宏观视野给 Brain 决策。
- * 用户自己添加股票后，Agent 以此为基线向竞争/供应链扩展。
+ * 不执行交易，只提供情报给 Brain 决策。
  */
 
 import { Skill } from './base.mjs';
@@ -24,13 +22,161 @@ const KEYWORDS = [
   'macro', '宏观', '经济', 'economy',
 ];
 
+// ── Signal Computation (L2) ────────────────────────────────────────────────
+
+function avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
+function stddev(arr) {
+  if (arr.length < 2) return 0;
+  const m = avg(arr);
+  return Math.sqrt(arr.reduce((sum, v) => sum + (v - m) ** 2, 0) / arr.length);
+}
+function round4(n) { return Math.round(n * 10000) / 10000; }
+
+/**
+ * Compute technical signals from daily klines.
+ * Requires >= 5 candles; SMA20 needs >= 20.
+ */
+function computeStockSignals(klines) {
+  if (!klines || klines.length < 5) return null;
+
+  const closes = klines.map(k => k.close);
+  const volumes = klines.map(k => k.volume);
+  const latest = closes[closes.length - 1];
+
+  // Simple Moving Averages (daily)
+  const sma5 = avg(closes.slice(-5));
+  const sma20 = closes.length >= 20 ? avg(closes.slice(-20)) : null;
+
+  // Trend direction
+  const trend = latest > sma5 ? 'UP' : latest < sma5 ? 'DOWN' : 'FLAT';
+  const bias = sma20 !== null
+    ? (sma5 > sma20 ? 'BULLISH' : sma5 < sma20 ? 'BEARISH' : 'NEUTRAL')
+    : null;
+
+  // Volatility (stddev of daily returns)
+  const returns = [];
+  for (let i = 1; i < closes.length; i++) {
+    returns.push((closes[i] - closes[i - 1]) / closes[i - 1]);
+  }
+  const volatility = stddev(returns);
+  const volatilityLevel = volatility > 0.03 ? 'HIGH' : volatility > 0.015 ? 'MEDIUM' : 'LOW';
+
+  // Momentum (5-day Rate of Change)
+  const roc5 = closes.length >= 6
+    ? ((latest - closes[closes.length - 6]) / closes[closes.length - 6]) * 100
+    : null;
+
+  // Volume trend (last 3 days vs prior 3 days)
+  let volTrend = 'unknown';
+  if (volumes.length >= 6) {
+    const recentVol = avg(volumes.slice(-3));
+    const olderVol = avg(volumes.slice(-6, -3));
+    if (olderVol > 0) {
+      volTrend = recentVol > olderVol * 1.5 ? 'SURGING'
+        : recentVol > olderVol * 1.1 ? 'RISING'
+        : recentVol < olderVol * 0.7 ? 'DECLINING'
+        : 'STABLE';
+    }
+  }
+
+  // Support / Resistance (10-day high/low)
+  const window = klines.slice(-10);
+  const resistance = Math.max(...window.map(k => k.high));
+  const support = Math.min(...window.map(k => k.low));
+
+  return {
+    trend,
+    bias,
+    sma5: round4(sma5),
+    sma20: sma20 !== null ? round4(sma20) : null,
+    volatility: round4(volatility * 100),
+    volatilityLevel,
+    momentum: roc5 !== null ? round4(roc5) : null,
+    volTrend,
+    support: round4(support),
+    resistance: round4(resistance),
+    distToResistance: round4(((resistance - latest) / latest) * 100),
+    distToSupport: round4(((latest - support) / latest) * 100),
+  };
+}
+
+// ── Earnings helpers ───────────────────────────────────────────────────────
+
+function daysUntil(dateStr) {
+  if (!dateStr) return null;
+  const diff = (new Date(dateStr).getTime() - Date.now()) / (1000 * 60 * 60 * 24);
+  return Math.ceil(diff);
+}
+
+// ── RSS News helpers ───────────────────────────────────────────────────────
+
+function _extractTag(block, tag) {
+  const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i');
+  const m = block.match(re);
+  return m ? m[1].trim() : null;
+}
+
+function _parseRss(xml) {
+  const items = [];
+  const itemRegex = /<item[\s>]([\s\S]*?)<\/item>/gi;
+  let match;
+  while ((match = itemRegex.exec(xml)) !== null) {
+    const block = match[1];
+    const title = _extractTag(block, 'title');
+    const pubDate = _extractTag(block, 'pubDate');
+    if (title) {
+      items.push({
+        title: title.replace(/<!\[CDATA\[|\]\]>/g, '').trim(),
+        date: pubDate ? new Date(pubDate).getTime() : null,
+      });
+    }
+    if (items.length >= 2) break;
+  }
+  return items;
+}
+
+function relativeTime(ts) {
+  if (!ts) return '';
+  const diff = Date.now() - ts;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+async function fetchStockNews(symbols) {
+  if (!symbols?.length) return {};
+  const top = symbols.slice(0, 3);
+  const results = await Promise.all(top.map(async (sym) => {
+    try {
+      const res = await fetch(`https://finance.yahoo.com/rss/headline?s=${encodeURIComponent(sym)}`, {
+        signal: AbortSignal.timeout(3000),
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+      });
+      if (!res.ok) return { sym, items: [] };
+      const xml = await res.text();
+      return { sym, items: _parseRss(xml) };
+    } catch {
+      return { sym, items: [] };
+    }
+  }));
+  const news = {};
+  for (const r of results) {
+    if (r.items.length > 0) news[r.sym] = r.items;
+  }
+  return news;
+}
+
+// ── Skill Class ────────────────────────────────────────────────────────────
+
 export class StockTrackerSkill extends Skill {
   constructor() {
     super('stock_tracker', 'Track stock markets, indices, commodities — macro context for trading decisions');
   }
 
   canActivate(taskType, context) {
-    if (taskType === 'proactive') return true; // 宏观环境每次都注入
+    if (taskType === 'proactive') return true;
     if (taskType === 'reflect') return true;
     if (taskType !== 'reactive') return false;
     const msg = (context._inputMessage || '').toLowerCase();
@@ -40,15 +186,20 @@ export class StockTrackerSkill extends Skill {
   async gatherContext(kernels, config) {
     const { consoleUrl } = config;
 
-    const [overview, fundamentals, crypto, cryptoGlobal, calendar] = await Promise.all([
+    const [overview, fundamentals, klines, crypto, cryptoGlobal, calendar] = await Promise.all([
       fetchJson(`${consoleUrl}/api/stocks/overview`).catch(() => null),
       fetchJson(`${consoleUrl}/api/stocks/fundamentals`).catch(() => null),
+      fetchJson(`${consoleUrl}/api/stocks/klines`).catch(() => null),
       fetchJson(`${consoleUrl}/api/market/crypto`).catch(() => null),
       fetchJson(`${consoleUrl}/api/market/crypto-global`).catch(() => null),
       fetchJson(`${consoleUrl}/api/market/calendar`).catch(() => null),
     ]);
 
     if (!overview) return { error: 'stock data unavailable' };
+
+    // Fetch stock news in parallel (non-blocking, 3s timeout per symbol)
+    const watchlistSymbols = (overview.watchlist || []).map(w => w.symbol);
+    const stockNews = await fetchStockNews(watchlistSymbols).catch(() => ({}));
 
     const quotes = overview.quotes?.data || {};
     const watchlist = overview.watchlist || [];
@@ -73,10 +224,18 @@ export class StockTrackerSkill extends Skill {
     const calToday = (calendar?.ok ? calendar.data?.today : []) || [];
     const calHigh = calToday.filter(e => e.impact === 'High');
 
-    // Fundamentals — may be null if API is down
+    // Fundamentals
     const stockFundamentals = fundamentals?.stocks || null;
     const industryPeers = fundamentals?.peers || null;
     const health = fundamentals?.health || null;
+
+    // Compute technical signals from klines
+    const stockSignals = {};
+    if (klines?.ok && klines.data) {
+      for (const [sym, klineArr] of Object.entries(klines.data)) {
+        stockSignals[sym] = computeStockSignals(klineArr);
+      }
+    }
 
     return {
       watchlistCount: watchlist.length,
@@ -92,6 +251,8 @@ export class StockTrackerSkill extends Skill {
       stockFundamentals,
       industryPeers,
       health,
+      stockSignals,
+      stockNews,
     };
   }
 
@@ -103,41 +264,114 @@ export class StockTrackerSkill extends Skill {
     const fund = gathered.stockFundamentals;
     const peers = gathered.industryPeers;
     const health = gathered.health;
+    const signals = gathered.stockSignals || {};
     const hasFundamentals = fund && Object.keys(fund).length > 0;
     const fng = gathered.sentiment?.fearGreed;
 
-    // ── Panel 1: WATCHLIST + FUNDAMENTALS ──
+    // Collect signal summaries for aggregation
+    const bullish = [];
+    const bearish = [];
+    const earningsSoon = [];
+
+    // ── Panel 1: WATCHLIST + SIGNALS + FUNDAMENTALS ──
     if (Object.keys(q).length > 0) {
-      sections.push(`\nWATCHLIST + FUNDAMENTALS (${gathered.watchlistCount} stocks):`);
+      sections.push(`\nWATCHLIST (${gathered.watchlistCount} stocks):`);
       for (const [sym, v] of Object.entries(q)) {
         const ch = v.change24h != null ? ` ${v.change24h > 0 ? '+' : ''}${v.change24h.toFixed(1)}%` : '';
         const f = hasFundamentals ? fund[sym] : null;
+        const sig = signals[sym];
+
+        // Line 1: price + industry + valuation
         if (f) {
           const industry = f.industry || 'N/A';
-          const fwdPE = f.forwardPE != null ? `FwdPE ${f.forwardPE.toFixed(0)}` : 'FwdPE N/A';
-          const beta = f.beta != null ? `Beta ${f.beta.toFixed(2)}` : '';
-          sections.push(`  ${sym} $${v.price}${ch} | ${industry} | ${fwdPE}${beta ? ' | ' + beta : ''}`);
-          // Second line: revenue, margin, analyst consensus
-          const rev = f.revenueFmt ? `Revenue ${f.revenueFmt}` : '';
-          const revGrowth = f.revenueGrowth != null ? ` (${f.revenueGrowth > 0 ? '+' : ''}${f.revenueGrowth.toFixed(1)}%)` : '';
-          const margin = f.profitMargin != null ? `Margin ${f.profitMargin.toFixed(1)}%` : '';
+          const fwdPE = f.forwardPE != null ? `FwdPE ${f.forwardPE.toFixed(0)}` : '';
+          const peg = f.pegRatio != null ? `PEG ${f.pegRatio.toFixed(1)}` : '';
+          const valParts = [industry, fwdPE, peg].filter(Boolean).join(' | ');
+          sections.push(`  ${sym} $${v.price}${ch} | ${valParts}`);
+        } else {
+          const range = v.high52w ? ` (52w: ${v.low52w?.toFixed(0)}-${v.high52w?.toFixed(0)})` : '';
+          sections.push(`  ${sym} $${v.price}${ch}${range} — ${v.name || ''}`);
+        }
+
+        // Line 2: technical signals
+        if (sig) {
+          const trendStr = `Trend: ${sig.trend} (vs SMA5)`;
+          const biasStr = sig.bias ? `Bias: ${sig.bias} (SMA5 vs SMA20)` : '';
+          sections.push(`    ${[trendStr, biasStr].filter(Boolean).join(' | ')}`);
+
+          const volStr = `Volatility: ${sig.volatilityLevel} (${sig.volatility.toFixed(1)}%)`;
+          const momStr = sig.momentum != null ? `Momentum: ${sig.momentum > 0 ? '+' : ''}${sig.momentum.toFixed(1)}% (5d)` : '';
+          sections.push(`    ${[volStr, momStr].filter(Boolean).join(' | ')}`);
+
+          const supStr = `Support $${sig.support.toFixed(2)} (${sig.distToSupport.toFixed(1)}%)`;
+          const resStr = `Resistance $${sig.resistance.toFixed(2)} (${sig.distToResistance.toFixed(1)}%)`;
+          sections.push(`    ${supStr} | ${resStr}`);
+
+          // Aggregate for summary
+          if (sig.trend === 'UP' && (sig.bias === 'BULLISH' || sig.bias === null)) {
+            const detail = sig.momentum != null ? `momentum ${sig.momentum > 0 ? '+' : ''}${sig.momentum.toFixed(1)}%` : 'uptrend';
+            bullish.push(`${sym} (${detail})`);
+          } else if (sig.trend === 'DOWN' || sig.bias === 'BEARISH') {
+            const reasons = [];
+            if (sig.bias === 'BEARISH') reasons.push('SMA5 < SMA20');
+            if (sig.volTrend === 'DECLINING') reasons.push('vol declining');
+            if (sig.trend === 'DOWN') reasons.push('downtrend');
+            bearish.push(`${sym} (${reasons.join(', ') || 'bearish'})`);
+          }
+        }
+
+        // Line 3: earnings
+        if (f?.earningsDate) {
+          const days = daysUntil(f.earningsDate);
+          const epsStr = f.earningsEPSEstimate != null ? ` — EPS est $${f.earningsEPSEstimate.toFixed(2)}` : '';
+          const revStr = f.earningsRevenueFmt ? `, Rev est ${f.earningsRevenueFmt}` : '';
+          if (days != null && days > 0) {
+            sections.push(`    Earnings: ${f.earningsDate} (${days}d)${epsStr}${revStr}`);
+            if (days <= 7) earningsSoon.push(`${sym} (${f.earningsDate})`);
+          }
+        }
+
+        // Line 4: analysts + deep fundamentals
+        if (f) {
+          const parts = [];
           const rec = f.recommendationKey ? f.recommendationKey.toUpperCase() : '';
           const analysts = f.numberOfAnalysts ? `(${f.numberOfAnalysts})` : '';
           const target = f.targetMeanPrice != null ? `target $${f.targetMeanPrice.toFixed(0)}` : '';
-          const parts = [rev + revGrowth, margin, rec ? `Analysts: ${rec} ${analysts}${target ? ' ' + target : ''}` : ''].filter(Boolean);
+          if (rec) {
+            const upside = (v.price && f.targetMeanPrice) ? ` (${((f.targetMeanPrice - v.price) / v.price * 100).toFixed(0)}%)` : '';
+            parts.push(`Analysts: ${rec} ${analysts} ${target}${upside}`.trim());
+          }
+          const roe = f.returnOnEquity != null ? `ROE ${f.returnOnEquity.toFixed(1)}%` : '';
+          const de = f.debtToEquity != null ? `D/E ${f.debtToEquity.toFixed(1)}` : '';
+          const fcf = f.freeCashflowFmt ? `FCF ${f.freeCashflowFmt}` : '';
+          const deepParts = [roe, de, fcf].filter(Boolean);
+          if (deepParts.length > 0) parts.push(deepParts.join(' | '));
           if (parts.length > 0) sections.push(`    ${parts.join(' | ')}`);
-        } else {
-          // Fallback: old flat line when fundamentals unavailable
-          const range = v.high52w ? ` (52w: ${v.low52w?.toFixed(0)}-${v.high52w?.toFixed(0)})` : '';
-          sections.push(`  ${sym} $${v.price}${ch}${range} — ${v.name || ''}`);
         }
       }
     }
 
-    // ── Panel 2: COMPETITOR MAP ──
+    // ── Panel 2: SIGNALS SUMMARY ──
+    if (bullish.length > 0 || bearish.length > 0 || earningsSoon.length > 0) {
+      sections.push('\n--- STOCK SIGNALS SUMMARY ---');
+      if (bullish.length > 0) sections.push(`Bullish: ${bullish.join(', ')}`);
+      if (bearish.length > 0) sections.push(`Bearish: ${bearish.join(', ')}`);
+      if (earningsSoon.length > 0) sections.push(`⚠ Earnings within 7d: ${earningsSoon.join(', ')} — expect volatility spike`);
+    }
+
+    // ── Panel 3: STOCK NEWS ──
+    const news = gathered.stockNews || {};
+    if (Object.keys(news).length > 0) {
+      sections.push('\n--- STOCK NEWS (latest) ---');
+      for (const [sym, items] of Object.entries(news)) {
+        const headlineParts = items.map(item => `"${item.title}" (${relativeTime(item.date)})`);
+        sections.push(`${sym}: ${headlineParts.join(' | ')}`);
+      }
+    }
+
+    // ── Panel 4: COMPETITOR MAP ──
     if (hasFundamentals && peers && Object.keys(peers).length > 0) {
       sections.push('\n--- COMPETITOR MAP (auto-discovered) ---');
-      // Group watchlist stocks by industry
       const industryToWatchlist = {};
       for (const [sym, f] of Object.entries(fund)) {
         if (!f.industry) continue;
@@ -147,11 +381,10 @@ export class StockTrackerSkill extends Skill {
 
       for (const [industry, peerList] of Object.entries(peers)) {
         const mySymbols = industryToWatchlist[industry] || [];
-        if (mySymbols.length === 0) continue; // skip industries with no watchlist stock
+        if (mySymbols.length === 0) continue;
 
         sections.push(`${industry} (your: ${mySymbols.join(', ')}):`);
 
-        // Build line: watchlist stocks + peers
         const lineParts = [];
         for (const sym of mySymbols) {
           const v = q[sym];
@@ -166,7 +399,7 @@ export class StockTrackerSkill extends Skill {
         }
         sections.push(`  ${lineParts.join(' | ')}`);
 
-        // Divergence warning per watchlist stock
+        // Divergence warning
         const peerChanges = peerList.map(p => p.change24h).filter(c => c != null);
         if (peerChanges.length > 0) {
           const peerAvg = peerChanges.reduce((a, b) => a + b, 0) / peerChanges.length;
@@ -179,14 +412,27 @@ export class StockTrackerSkill extends Skill {
             }
           }
         }
+
+        // Phase 3: Relative valuation vs peers
+        const peerPEs = peerList.map(p => p.forwardPE).filter(pe => pe != null && pe > 0);
+        if (peerPEs.length >= 2) {
+          const peerAvgPE = peerPEs.reduce((a, b) => a + b, 0) / peerPEs.length;
+          for (const sym of mySymbols) {
+            const f = fund[sym];
+            if (f?.forwardPE != null && f.forwardPE > 0) {
+              const premium = ((f.forwardPE - peerAvgPE) / peerAvgPE * 100).toFixed(0);
+              const label = premium > 0 ? `${premium}% premium` : `${Math.abs(premium)}% discount`;
+              sections.push(`  ${sym} FwdPE ${f.forwardPE.toFixed(0)} vs peers avg ${peerAvgPE.toFixed(0)} → ${label}`);
+            }
+          }
+        }
       }
     }
 
-    // ── Panel 3: PORTFOLIO HEALTH ──
+    // ── Panel 5: PORTFOLIO HEALTH ──
     if (health) {
       sections.push('\n--- PORTFOLIO HEALTH ---');
 
-      // Sector concentration
       if (health.sectorConcentration && Object.keys(health.sectorConcentration).length > 0) {
         const topSectors = Object.entries(health.sectorConcentration)
           .sort((a, b) => b[1] - a[1])
@@ -197,13 +443,11 @@ export class StockTrackerSkill extends Skill {
         sections.push(`Sector concentration: ${sectorLine} — ${riskLabel}`);
       }
 
-      // Avg beta
       if (health.avgBeta != null) {
         const volLabel = health.avgBeta >= 2.0 ? 'HIGH VOLATILITY' : health.avgBeta >= 1.5 ? 'ABOVE AVERAGE' : 'normal';
         sections.push(`Avg beta: ${health.avgBeta.toFixed(2)} — ${volLabel}`);
       }
 
-      // Analyst consensus
       if (health.analystSummary) {
         const a = health.analystSummary;
         const parts = [];
@@ -213,7 +457,6 @@ export class StockTrackerSkill extends Skill {
         if (parts.length > 0) sections.push(`Analyst consensus: ${parts.join(', ')}`);
       }
 
-      // Target price warnings: analyst target < current price
       if (hasFundamentals) {
         for (const [sym, f] of Object.entries(fund)) {
           if (f.targetMeanPrice == null) continue;
@@ -225,10 +468,9 @@ export class StockTrackerSkill extends Skill {
       }
     }
 
-    // ── Panel 4: MACRO (preserved) ──
+    // ── Panel 6: MACRO ──
     sections.push('\n--- MACRO ---');
 
-    // 异动
     if (gathered.movers.length > 0) {
       sections.push('Big movers (>3%):');
       for (const m of gathered.movers) {
@@ -236,21 +478,17 @@ export class StockTrackerSkill extends Skill {
       }
     }
 
-    // 大宗商品
     if (Object.keys(gathered.commodities).length > 0) {
       const parts = Object.entries(gathered.commodities).map(([k, v]) => `${k} $${v.price?.toFixed(0)}`);
       sections.push(`Commodities: ${parts.join(' | ')}`);
     }
 
-    // 市场情绪
     if (fng) sections.push(`Fear & Greed: ${fng.value} (${fng.label})`);
 
-    // 资金费率
     if (gathered.funding?.BTC) {
       sections.push(`Funding Rate: BTC ${(gathered.funding.BTC.rate * 100).toFixed(4)}% (${gathered.funding.BTC.sentiment})`);
     }
 
-    // crypto 关联 + 大盘
     if (gathered.cryptoGlobal) {
       const g = gathered.cryptoGlobal;
       const mcap = g.totalMarketCap > 1e12 ? '$' + (g.totalMarketCap / 1e12).toFixed(2) + 'T' : '$' + (g.totalMarketCap / 1e9).toFixed(0) + 'B';
@@ -260,7 +498,6 @@ export class StockTrackerSkill extends Skill {
       sections.push(`Crypto prices: BTC $${Math.round(gathered.crypto.btcPrice).toLocaleString()} ${gathered.crypto.btcChange > 0 ? '+' : ''}${(gathered.crypto.btcChange * 100)?.toFixed(1)}% | KAS $${gathered.crypto.kasPrice}`);
     }
 
-    // 今日经济事件
     if (gathered.calendarHighImpact?.length > 0) {
       sections.push(`TODAY'S HIGH-IMPACT EVENTS (${gathered.calendarHighImpact.length}):`);
       for (const e of gathered.calendarHighImpact) {
@@ -272,7 +509,7 @@ export class StockTrackerSkill extends Skill {
       sections.push(`Today: ${gathered.calendarToday.length} economic events (none high-impact)`);
     }
 
-    // ── Dynamic risk hints (replace static instructions) ──
+    // ── Risk alerts + Signal interpretation ──
     const hints = [];
     if (health?.avgBeta >= 2.0) hints.push('WARNING: Portfolio avg beta >= 2.0 — high volatility exposure, consider hedging');
     if (health?.maxSectorPct >= 0.8) hints.push('WARNING: >80% in one sector — extreme concentration risk');
@@ -289,10 +526,27 @@ export class StockTrackerSkill extends Skill {
       for (const h of hints) sections.push(`⚠ ${h}`);
     }
 
+    // Signal interpretation guidance (like prediction-sense)
+    sections.push(
+      '\nStock signal interpretation:',
+      '- Price above SMA20 + rising momentum = established uptrend',
+      '- Earnings within 7 days = avoid new positions (vol spike likely)',
+      '- Divergence from peers >3% = stock-specific catalyst, investigate',
+      '- Volume surge + trend reversal = potential breakout/breakdown',
+      '- PEG < 1 with rising momentum = undervalued growth stock',
+    );
+
     return {
       name: this.name,
       description: this.description,
-      data: { watchlistCount: gathered.watchlistCount, movers: gathered.movers.length, fng: fng?.value, hasFundamentals: !!hasFundamentals, hasHealth: !!health },
+      data: {
+        watchlistCount: gathered.watchlistCount,
+        movers: gathered.movers.length,
+        fng: fng?.value,
+        hasFundamentals: !!hasFundamentals,
+        hasHealth: !!health,
+        hasSignals: Object.keys(signals).length > 0,
+      },
       instructions: sections.join('\n'),
     };
   }

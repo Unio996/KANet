@@ -64,8 +64,24 @@ const CONFIRM_PATTERNS = [
  * @returns {{ targetLayer: string, confidence: number, category: string, isConfirmation: boolean }}
  */
 export function detectIntent(message, currentLayer = 'L1', hasPendingConfirm = false) {
-  const trimmed = (message || '').trim();
+  // Strip injected context (ACTION templates, IMPORTANT instructions, stock/broker context)
+  // so we only classify the user's actual intent, not boilerplate keywords like "execute"
+  const cleaned = (message || '')
+    .replace(/\[ACTION:[^\]]*\]/g, '')                        // [ACTION:BROKER_ORDER ...]
+    .replace(/^IMPORTANT:.*$/gm, '')                          // IMPORTANT: ... instructions
+    .replace(/^(Do NOT|Max \d+|Owner has|To execute).*$/gm, '') // template boilerplate
+    .replace(/^股票:.*$/gm, '')                                // stock context header
+    .replace(/^(你的持仓|行业|营收|同行):?.*$/gm, '')              // stock context data
+    .trim();
+  const trimmed = cleaned || (message || '').trim();
   if (!trimmed) return { targetLayer: 'L1', confidence: 0, category: 'empty', isConfirmation: false };
+
+  // Market/financial context → skip code-ops entirely (stay L1, let Brain handle naturally)
+  const isMarketContext = /\b(stock|stocks|股票|股市|美股|forex|crypto|市场|行情|走势|持仓|portfolio|broker|IBKR)\b/i.test(message)
+    || /^(owner:stocks|owner:trading|owner:predictions)\b/.test(message);
+  if (isMarketContext && !hasPendingConfirm) {
+    return { targetLayer: 'L1', confidence: 0.9, category: 'social', isConfirmation: false };
+  }
 
   // Check if this is a confirmation of a pending escalation
   if (hasPendingConfirm) {
