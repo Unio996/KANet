@@ -20,6 +20,7 @@ import { analyzeMarket } from '../services/signal-engine.js';
 import { generateProposal } from '../services/strategy-engine.js';
 import { fetchAllMarkets, fetchCryptoData, fetchStockData, fetchPredictionData, fetchCommodityData, fetchFundingRates, fetchSentiment, fetchCryptoGlobal, fetchEconomicCalendar } from '../services/market-data.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
+import { EXCHANGE_REGISTRY } from '../lib/exchange-registry.js';
 
 /** Trade mode: DB → default DRY-RUN */
 async function getTradeMode() {
@@ -27,58 +28,6 @@ async function getTradeMode() {
   if (db === 'LIVE' || db === 'DRY-RUN') return db;
   return 'DRY-RUN';
 }
-
-// ── Exchange Registry ────────────────────────────────────────────────────────
-const EXCHANGE_REGISTRY = [
-  {
-    id: 'mexc',       name: 'MEXC',         baseUrl: 'https://api.mexc.com/api/v3',
-    fields: ['apiKey', 'apiSecret'],
-    authStyle: 'binance-like', headerName: 'X-MEXC-APIKEY',
-    kasPair: 'KASUSDT',
-  },
-  {
-    id: 'binance',    name: 'Binance',      baseUrl: 'https://api.binance.com/api/v3',
-    fields: ['apiKey', 'apiSecret'],
-    authStyle: 'binance-like', headerName: 'X-MBX-APIKEY',
-    kasPair: 'KASUSDT',
-  },
-  {
-    id: 'okx',        name: 'OKX',          baseUrl: 'https://www.okx.com',
-    fields: ['apiKey', 'apiSecret', 'passphrase'],
-    authStyle: 'okx',
-    kasPair: 'KAS-USDT',
-  },
-  {
-    id: 'bybit',      name: 'Bybit',        baseUrl: 'https://api.bybit.com',
-    fields: ['apiKey', 'apiSecret'],
-    authStyle: 'bybit',
-    kasPair: 'KASUSDT',
-  },
-  {
-    id: 'gateio',     name: 'Gate.io',      baseUrl: 'https://api.gateio.ws/api/v4',
-    fields: ['apiKey', 'apiSecret'],
-    authStyle: 'gateio',
-    kasPair: 'KAS_USDT',
-  },
-  {
-    id: 'kucoin',     name: 'KuCoin',       baseUrl: 'https://api.kucoin.com',
-    fields: ['apiKey', 'apiSecret', 'passphrase'],
-    authStyle: 'kucoin',
-    kasPair: 'KAS-USDT',
-  },
-  {
-    id: 'bitget',     name: 'Bitget',       baseUrl: 'https://api.bitget.com',
-    fields: ['apiKey', 'apiSecret', 'passphrase'],
-    authStyle: 'bitget',
-    kasPair: 'KASUSDT',
-  },
-  {
-    id: 'htx',        name: 'HTX (Huobi)',  baseUrl: 'https://api.huobi.pro',
-    fields: ['apiKey', 'apiSecret'],
-    authStyle: 'htx',
-    kasPair: 'kasusdt',
-  },
-];
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
