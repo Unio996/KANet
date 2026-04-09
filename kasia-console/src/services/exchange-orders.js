@@ -529,16 +529,20 @@ export async function getBalance(account) {
 
       case 'bybit': {
         const bybitBase = baseUrl || 'https://api.bybit.com';
-        const bybitTs = Date.now().toString();
         const recvWindow = '5000';
-        const qs = 'accountType=UNIFIED';
-        const preSign = bybitTs + apiKey + recvWindow + qs;
-        const sig = hmac256(apiSecret, preSign);
-        const res = await fetch(`${bybitBase}/v5/account/wallet-balance?${qs}`, {
-          headers: {
+        const bybitHeaders = (tsStr, queryString) => {
+          const sig = hmac256(apiSecret, tsStr + apiKey + recvWindow + queryString);
+          return {
             'X-BAPI-API-KEY': apiKey, 'X-BAPI-SIGN': sig,
-            'X-BAPI-TIMESTAMP': bybitTs, 'X-BAPI-RECV-WINDOW': recvWindow,
-          },
+            'X-BAPI-TIMESTAMP': tsStr, 'X-BAPI-RECV-WINDOW': recvWindow,
+          };
+        };
+
+        // Bybit UNIFIED 账户（availableToWithdraw 可能是空字符串，用 walletBalance 兜底）
+        const bybitTs = Date.now().toString();
+        const qs = 'accountType=UNIFIED';
+        const res = await fetch(`${bybitBase}/v5/account/wallet-balance?${qs}`, {
+          headers: bybitHeaders(bybitTs, qs),
           signal: AbortSignal.timeout(5000),
         });
         const data = await res.json();
@@ -548,10 +552,11 @@ export async function getBalance(account) {
         const coins = data.result?.list?.[0]?.coin || [];
         const kasC = coins.find(c => c.coin === 'KAS');
         const usdtC = coins.find(c => c.coin === 'USDT');
+        const bybitBal = (c) => parseFloat(c.availableToWithdraw || c.walletBalance || '0') || 0;
         return {
           exchange,
-          kas: kasC ? parseFloat(parseFloat(kasC.availableToWithdraw || '0').toFixed(4)) || 0 : 0,
-          usdt: usdtC ? parseFloat(parseFloat(usdtC.availableToWithdraw || '0').toFixed(2)) || 0 : 0,
+          kas: kasC ? parseFloat(bybitBal(kasC).toFixed(4)) : 0,
+          usdt: usdtC ? parseFloat(bybitBal(usdtC).toFixed(2)) : 0,
           timestamp: ts, error: null,
         };
       }
