@@ -48,25 +48,14 @@ const CEX = [
       return { bid: +(t?.bidPr || t?.buyOne), ask: +(t?.askPr || t?.sellOne) };
     },
   },
-  {
-    id: 'htx', name: 'HTX',
-    url: 'https://api.huobi.pro/market/detail/merged?symbol=kasusdt',
-    parse: (d) => ({ bid: +d.tick?.bid?.[0], ask: +d.tick?.ask?.[0] }),
-  },
+  // HTX 排除：Maker 0.20% / Taker 0.20%，阈值 0.40%，不划算
   {
     id: 'binance_perp', name: 'Binance⚡',
     url: 'https://fapi.binance.com/fapi/v1/ticker/bookTicker?symbol=KASUSDT',
     parse: (d) => ({ bid: +d.bidPrice, ask: +d.askPrice }),
     note: 'perpetual futures — hedge tool with leverage',
   },
-  {
-    id: 'kraken', name: 'Kraken',
-    url: 'https://api.kraken.com/0/public/Ticker?pair=KASUSDT',
-    parse: (d) => {
-      const t = Object.values(d.result || {})[0];
-      return { bid: +(t?.b?.[0]), ask: +(t?.a?.[0]) };
-    },
-  },
+  // Kraken 排除：Maker 0.25% / Taker 0.40%，阈值 0.65%，不划算
 ];
 
 const FETCH_TIMEOUT_MS = 3000;
@@ -86,6 +75,50 @@ let _lastProactiveTime = 0;
 export function getScannerCache() {
   if (!_cache || Date.now() - _cacheTime > 60_000) return null;
   return _cache;
+}
+
+// ── Inventory helpers ────────────────────────────────────────────────────────
+
+function classifyInventory(balances) {
+  return balances.map(b => ({
+    exchange: b.exchange,
+    label:    b.label || b.exchange,
+    kas:      b.kas   ?? 0,
+    usdt:     b.usdt  ?? 0,
+    error:    b.error ?? null,
+    state:    b.error              ? 'ERROR'     :
+              b.kas > 0 && b.usdt >= 10 ? 'DUAL'      :
+              b.kas > 0            ? 'SELL_ONLY'  :
+              b.usdt > 0           ? 'BUY_ONLY'   : 'EMPTY',
+  }));
+}
+
+/** Net price after maker/taker fee. */
+function netPrice(bid, exchange, side = 'sell') {
+  const FEE = {
+    mexc: 0.00, gate: 0.10, gateio: 0.10,
+    bybit: 0.10, kucoin: 0.10, bitget: 0.10,
+  };
+  const feePct = (FEE[exchange] ?? 0.10) / 100;
+  return side === 'sell' ? bid * (1 - feePct) : bid * (1 + feePct);
+}
+
+/**
+ * Calculate safe order quantity based on best-level orderbook depth.
+ * Uses bid1_qty (best bid level only) — we only place orders at best price,
+ * never cross multiple price levels.
+ */
+function calcOrderQty(orderbook, side) {
+  if (!orderbook || orderbook.error) return 0;
+  const levelQty = side === 'sell' ? (orderbook.bid1_qty ?? 0) : (orderbook.ask1_qty ?? 0);
+  const depth30  = Math.floor(levelQty * 0.30);   // 不超过最优一档的 30%
+  const hardMax  = 2000;                           // 单笔硬上限 2000 KAS
+  return Math.max(0, Math.min(depth30, hardMax));
+}
+
+function formatKas(n) {
+  if (n >= 1_000_000) return (n / 1000).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',') + 'K';
+  return n.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
 // ── Skill Class ──────────────────────────────────────────────────────────────
@@ -161,6 +194,18 @@ export class MarketScannerSkill extends Skill {
       kanet.openCount = list.length;
     } catch {}
 
+    // 并行拉取余额、订单簿、日限额
+    const [balancesRes, orderbooksRes, dailyUsageRes] = await Promise.allSettled([
+      fetchJson(`${config.consoleUrl}/api/trade/balances`),
+      fetchJson(`${config.consoleUrl}/api/trade/orderbook?exchanges=mexc,gate,bybit,kucoin,bitget`),
+      fetchJson(`${config.consoleUrl}/api/trade/daily-usage`),
+    ]);
+
+    const balances   = balancesRes.status   === 'fulfilled' ? (balancesRes.value?.balances   ?? balancesRes.value ?? []) : [];
+    const orderbooks = orderbooksRes.status === 'fulfilled' ? (orderbooksRes.value?.orderbooks ?? []) : [];
+    const dailyUsage = dailyUsageRes.status === 'fulfilled' ? dailyUsageRes.value : null;
+    const inventory  = classifyInventory(Array.isArray(balances) ? balances : []);
+
     // 计算
     const live = venues.filter(v => !v.error);
     const spotLive = live.filter(v => !v.id.includes('perp')); // 中间价只用现货
@@ -189,7 +234,7 @@ export class MarketScannerSkill extends Skill {
       midPrice = (spotLive[0].bid + spotLive[0].ask) / 2;
     }
 
-    _cache = { venues, kanet, midPrice, bestSpread, live, ts: new Date().toISOString() };
+    _cache = { venues, kanet, midPrice, bestSpread, live, inventory, orderbooks, dailyUsage, ts: new Date().toISOString() };
     _cacheTime = now;
     return _cache;
   }
@@ -199,9 +244,126 @@ export class MarketScannerSkill extends Skill {
       return { name: this.name, description: this.description, data: '', instructions: '' };
     }
 
-    const { venues, kanet, midPrice, live } = gathered;
-    const THRESHOLD = 0.3; // % — opportunity trigger
+    const { venues, kanet, midPrice, live, inventory, orderbooks, dailyUsage } = gathered;
+    // 阈值分路径：
+    //   MEXC Maker 0% → 对方 Taker 0.10%，盈亏平衡 0.10%，留 0.05% 缓冲
+    //   标准双向（各 0.10% Taker），盈亏平衡 0.20%，留 0.05% 缓冲
+    const THRESHOLDS = { mexc_buyer: 0.15, standard: 0.25 };
+    function getThreshold(buy_from) {
+      return buy_from === 'mexc' ? THRESHOLDS.mexc_buyer : THRESHOLDS.standard;
+    }
     const lines = [];
+
+    // ── 共享变量 ──
+    const inv = inventory || [];
+    const obs = orderbooks || [];
+    const FEE_LABEL = {
+      mexc: 'maker 0% / taker 0.05%',
+      gate: 'maker=taker 0.10%', gateio: 'maker=taker 0.10%',
+      bybit: 'maker=taker 0.10%', kucoin: 'maker=taker 0.10%', bitget: 'maker=taker 0.10%',
+    };
+    const hasDual = inv.some(i => i.state === 'DUAL');
+    const hasSell = inv.some(i => i.state === 'SELL_ONLY');
+
+    // Best sell venues ranked by net price after fee
+    const sellVenues = inv
+      .filter(i => (i.state === 'SELL_ONLY' || i.state === 'DUAL') && !i.error)
+      .map(i => {
+        const exId = i.exchange === 'gateio' ? 'gate' : i.exchange;
+        const ob = obs.find(o => o.exchange === exId || o.exchange === i.exchange);
+        const bid = ob?.bid1 ?? null;
+        const net = bid ? netPrice(bid, i.exchange, 'sell') : null;
+        const fee = FEE_LABEL[i.exchange] || 'maker=taker 0.10%';
+        return { ...i, bid, net, fee };
+      })
+      .filter(i => i.net !== null)
+      .sort((a, b) => b.net - a.net);
+
+    // ── INVENTORY STATE 区块（Brain 优先看库存状态再看价差）──
+    if (inv.length > 0) {
+      lines.push('=== INVENTORY STATE ===');
+      for (const i of inv) {
+        const dn = i.exchange === 'gateio' ? 'Gate' : (i.exchange.charAt(0).toUpperCase() + i.exchange.slice(1));
+        if (i.error) {
+          lines.push(`${dn.padEnd(8)} ERROR: ${i.error}`);
+        } else {
+          const kasStr = ('KAS ' + formatKas(i.kas)).padEnd(16);
+          const usdtStr = 'USDT ' + i.usdt.toFixed(2);
+          lines.push(`${dn.padEnd(8)} ${kasStr} ${usdtStr.padEnd(14)} [${i.state}]`);
+        }
+      }
+
+      const phase = hasDual ? '1b — Dual position active, arbitrage enabled'
+                  : hasSell ? '1a — Building USDT position (sell-only mode)'
+                  : 'unknown — check exchange connections';
+      lines.push('');
+      lines.push(`Current phase: ${phase}`);
+
+      if (sellVenues.length > 0) {
+        lines.push('');
+        lines.push('Best sell venues (by net price after fee):');
+        sellVenues.forEach((v, idx) => {
+          const dispName = v.exchange === 'gateio' ? 'Gate' : (v.exchange.charAt(0).toUpperCase() + v.exchange.slice(1));
+          lines.push(`  ${idx + 1}. ${dispName.padEnd(8)} bid=${v.bid.toFixed(6)}  net=${v.net.toFixed(6)}  (${v.fee})`);
+        });
+      }
+      // Daily sell limit awareness
+      if (dailyUsage?.total) {
+        const t = dailyUsage.total;
+        const usedStr = `${Number(t.sold_kas).toLocaleString()} / ${Number(t.limit_kas).toLocaleString()} KAS used (${t.pct_used}%)`;
+        if (t.pct_used >= 100) {
+          lines.push(`DAILY LIMIT REACHED — ${usedStr} — do not issue SELL_MAKER actions today`);
+        } else if (t.pct_used >= 80) {
+          lines.push(`Daily sell limit: ${usedStr} — ${Number(t.remaining_kas).toLocaleString()} KAS remaining`);
+          lines.push('WARNING: limit 80%+ used — reduce SELL_MAKER frequency');
+        } else {
+          lines.push(`Daily sell limit: ${usedStr} — ${Number(t.remaining_kas).toLocaleString()} KAS remaining`);
+        }
+      }
+
+      lines.push('');
+    }
+
+    // ── ACTIONABLE OPPORTUNITIES 区块 ──
+    if (!hasDual && inv.some(i => i.state === 'SELL_ONLY')) {
+      // Phase 1a: SELL_ONLY 模式
+      lines.push('=== ACTIONABLE OPPORTUNITIES ===');
+      lines.push('Mode: SELL_ONLY — place maker sell orders to build USDT position');
+      lines.push('');
+
+      const topSellVenues = (sellVenues || [])
+        .map(v => {
+          const exId = v.exchange === 'gateio' ? 'gate' : v.exchange;
+          const ob = obs.find(o => o.exchange === exId || o.exchange === v.exchange);
+          const qty = ob ? calcOrderQty(ob, 'sell') : 0;
+          const suggestPrice = v.bid ? +(v.bid * 1.0001).toFixed(6) : null;
+          const dispName = v.exchange === 'gateio' ? 'Gate' : (v.exchange.charAt(0).toUpperCase() + v.exchange.slice(1));
+          return { ...v, qty, suggestPrice, dispName };
+        })
+        .filter(v => v.qty > 0)
+        .slice(0, 3);
+
+      if (topSellVenues.length === 0) {
+        lines.push('No sell opportunities available (check exchange connections)');
+      } else {
+        lines.push('Recommended sell orders (execute independently):');
+        topSellVenues.forEach((v, i) => {
+          const feeLabel = FEE_LABEL[v.exchange] || 'maker=taker 0.10%';
+          lines.push(`  ${i + 1}. ${v.dispName.padEnd(8)} qty=${v.qty} KAS  @bid=${v.bid?.toFixed(6)}  net/KAS=${v.net?.toFixed(6)}  (${feeLabel})`);
+          lines.push(`            [ACTION:SELL_MAKER exchange=${v.exchange} qty=${v.qty} price=${v.suggestPrice}]`);
+        });
+      }
+
+      lines.push('');
+      lines.push('Cross-exchange arbitrage: NOT AVAILABLE — need USDT >= 10 on at least one exchange');
+      lines.push('ARB mode unlocks automatically when dual position established.');
+      lines.push('');
+    } else if (hasDual) {
+      // Phase 1b+: 在现有 ⚡ opportunity 格式前加 Mode 标识
+      lines.push('=== ACTIONABLE OPPORTUNITIES ===');
+      lines.push('Mode: DUAL — arbitrage and market-making enabled');
+      lines.push('');
+    }
 
     // 计算所有正价差对（buy.ask < sell.bid 的组合），按 spread 降序
     const opportunities = [];
@@ -212,8 +374,8 @@ export class MarketScannerSkill extends Skill {
         if (pct > 0) {
           const isBasis = buyer.id.includes('perp') || seller.id.includes('perp');
           opportunities.push({
-            buyAt: buyer.name, buyPrice: buyer.ask,
-            sellAt: seller.name, sellPrice: seller.bid,
+            buyId: buyer.id, buyAt: buyer.name, buyPrice: buyer.ask,
+            sellId: seller.id, sellAt: seller.name, sellPrice: seller.bid,
             pct, isBasis,
           });
         }
@@ -221,7 +383,7 @@ export class MarketScannerSkill extends Skill {
     }
     opportunities.sort((a, b) => b.pct - a.pct);
 
-    const hasOpportunity = opportunities.some(o => o.pct >= THRESHOLD);
+    const hasOpportunity = opportunities.some(o => o.pct >= getThreshold(o.buyId));
     const onlineCount = live.length;
     const totalCount = venues.length;
 
@@ -258,7 +420,7 @@ export class MarketScannerSkill extends Skill {
       lines.push(`KAS mid: ${midPrice ? midPrice.toFixed(5) : '?'} USDT | ${onlineCount}/${totalCount} CEX online`);
       lines.push('');
 
-      const actionable = opportunities.filter(o => o.pct >= THRESHOLD);
+      const actionable = opportunities.filter(o => o.pct >= getThreshold(o.buyId));
       for (const o of actionable) {
         const type = o.isBasis ? 'basis spread (futures vs spot)' : 'CEX spot spread';
         const action = o.isBasis ? 'long futures + short spot' : `buy ${o.buyAt} sell ${o.sellAt}`;

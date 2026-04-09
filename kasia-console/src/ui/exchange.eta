@@ -545,6 +545,95 @@
       </template>
     </div>
 
+    <!-- ── Today's KAS Sales ── -->
+    <div class="mb-6">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-xs font-semibold text-ink-500 uppercase tracking-wider">Today's KAS Sales</h3>
+        <span class="text-[10px] text-ink-400"
+          x-text="new Date().toLocaleDateString(undefined, {month:'short', day:'numeric'})"></span>
+      </div>
+
+      <template x-if="arbLoading.usage">
+        <div class="bg-warm-100 animate-pulse rounded-lg h-32"></div>
+      </template>
+
+      <template x-if="!arbLoading.usage">
+        <div class="bg-white border border-warm-200 rounded-lg p-4">
+
+          <!-- Total progress bar -->
+          <template x-if="dailyTotal">
+            <div class="mb-4">
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="text-sm font-semibold text-ink-700">
+                  <span x-text="Number(dailyTotal.sold_kas).toLocaleString()"></span>
+                  <span class="text-ink-400 font-normal">
+                    / <span x-text="Number(dailyTotal.limit_kas).toLocaleString()"></span> KAS
+                  </span>
+                </span>
+                <span class="text-sm font-mono"
+                  :class="dailyTotal.pct_used >= 80 ? 'text-red-500 font-semibold' :
+                          dailyTotal.pct_used >= 50 ? 'text-amber-500' : 'text-green-600'"
+                  x-text="dailyTotal.pct_used + '%'"></span>
+              </div>
+              <div class="w-full bg-warm-200 rounded-full h-3 overflow-hidden">
+                <div class="h-full rounded-full transition-all duration-500"
+                  :class="dailyTotal.pct_used >= 80 ? 'bg-red-500' :
+                          dailyTotal.pct_used >= 50 ? 'bg-amber-500' : 'bg-green-500'"
+                  :style="'width:' + Math.min(dailyTotal.pct_used, 100) + '%'"></div>
+              </div>
+              <div x-show="dailyTotal.pct_used >= 100"
+                class="mt-2 text-xs text-red-600 font-semibold">
+                Daily limit reached — SELL_MAKER paused until midnight UTC
+              </div>
+              <div x-show="dailyTotal.pct_used >= 80 && dailyTotal.pct_used < 100"
+                class="mt-2 text-xs text-amber-600">
+                80% used — Brain will reduce sell frequency
+              </div>
+            </div>
+          </template>
+
+          <!-- Per-exchange breakdown -->
+          <div class="space-y-1.5 mb-4">
+            <template x-for="u in dailyUsage" :key="u.exchange">
+              <div class="flex items-center gap-3"
+                :class="u.sold_kas === 0 ? 'opacity-50' : ''">
+                <span class="text-xs font-medium text-ink-600 w-14 shrink-0"
+                  x-text="u.label || u.exchange.toUpperCase()"></span>
+                <div class="flex-1 bg-warm-100 rounded-full h-1.5 overflow-hidden">
+                  <div class="h-full rounded-full"
+                    :class="u.pct_used >= 80 ? 'bg-red-400' :
+                            u.pct_used >= 50 ? 'bg-amber-400' : 'bg-green-400'"
+                    :style="'width:' + Math.min(u.pct_used, 100) + '%'"></div>
+                </div>
+                <span class="text-xs text-ink-500 tabular-nums w-28 text-right shrink-0"
+                  x-text="Number(u.sold_kas).toLocaleString() + ' KAS'"></span>
+              </div>
+            </template>
+          </div>
+
+          <!-- Editable limit -->
+          <div class="flex items-center gap-2 pt-3 border-t border-warm-100">
+            <span class="text-xs text-ink-400 shrink-0">Daily limit:</span>
+            <input type="number" min="100" step="1000"
+              x-model.number="dailyLimitInput"
+              class="w-24 text-xs border border-warm-200 rounded px-2 py-1 text-center
+                     focus:outline-none focus:border-brand-400"
+              @keydown.enter="saveDailyLimit()">
+            <span class="text-xs text-ink-400">KAS</span>
+            <button @click="saveDailyLimit()"
+              :disabled="dailyLimitSaving"
+              class="text-xs px-3 py-1 bg-brand-500 text-white rounded hover:bg-brand-600
+                     disabled:opacity-50 transition-colors">
+              <span x-show="!dailyLimitSaving">Save</span>
+              <span x-show="dailyLimitSaving">...</span>
+            </button>
+            <span class="text-[10px] text-ink-400 ml-auto">Resets midnight UTC</span>
+          </div>
+
+        </div>
+      </template>
+    </div>
+
     <!-- ── Area 3: Active Arbitrage Offers ── -->
     <div class="mb-6">
       <div class="flex items-center gap-2 mb-3">
@@ -670,7 +759,11 @@ function exchangeApp() {
     showOtherSpreads: false,
     arbOffers: [],
     hedgeHistory: [],
-    arbLoading: { balances: false, spreads: false, hedges: false },
+    dailyUsage: [],
+    dailyTotal: null,
+    dailyLimitInput: 10000,
+    dailyLimitSaving: false,
+    arbLoading: { balances: false, spreads: false, hedges: false, usage: false },
     arbInitialized: false,
 
     // Deal detail
@@ -951,7 +1044,7 @@ function exchangeApp() {
     async loadArbitrageData() {
       if (this.arbInitialized) return;
       this.arbInitialized = true;
-      await Promise.all([this.loadBalances(), this.loadSpreads(), this.loadArbOffers(), this.loadHedgeHistory()]);
+      await Promise.all([this.loadBalances(), this.loadSpreads(), this.loadArbOffers(), this.loadHedgeHistory(), this.loadDailyUsage()]);
       // Auto-refresh spreads every 30s while tab is active
       setInterval(() => { if (this.activeTab === 'arb') this.loadSpreads(); }, 30000);
     },
@@ -1018,6 +1111,38 @@ function exchangeApp() {
       } finally {
         this.arbLoading.hedges = false;
       }
+    },
+
+    async loadDailyUsage() {
+      this.arbLoading.usage = true;
+      try {
+        const res = await fetch('/api/trade/daily-usage');
+        const data = await res.json();
+        this.dailyUsage = data.exchanges || [];
+        this.dailyTotal = data.total || null;
+        this.dailyLimitInput = data.total?.limit_kas || 10000;
+      } catch {
+        this.dailyUsage = [];
+        this.dailyTotal = null;
+      } finally {
+        this.arbLoading.usage = false;
+      }
+    },
+
+    async saveDailyLimit() {
+      const v = parseInt(this.dailyLimitInput);
+      if (!v || v < 100) return;
+      this.dailyLimitSaving = true;
+      try {
+        const res = await fetch('/api/trade/daily-limit', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ limit_kas: v }),
+        });
+        const data = await res.json();
+        if (data.ok) await this.loadDailyUsage();
+      } catch {}
+      finally { this.dailyLimitSaving = false; }
     },
 
     arbAgentName(address) {

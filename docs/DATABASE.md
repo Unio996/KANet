@@ -591,8 +591,8 @@ SIL 合约系统遗留，目前无任何数据，功能未启用。
 ### trade_executions（149 条）
 CEX 拆单执行记录，trading 页面使用。
 
-### trade_log（2 条）
-交易日志，数据极少。
+### trade_log（12+ 条）
+CEX 交易日志。v51 新增 `exchange` 列记录交易所归属（旧记录为 NULL）。日限额 `GET /api/trade/daily-usage` 从 chain_events 查 `cex_sell_placed` 事件。
 
 ### trade_baselines（9 条）
 持仓基线，用于 PnL 计算。
@@ -613,4 +613,4 @@ CEX 拆单执行记录，trading 页面使用。
 3. 改字段：SQLite 不支持直接改，需建新表→迁移→删旧表
 4. 新表：migrate.js 新版本，加 `IF NOT EXISTS` 保护
 
-**当前最新版本：v45（tx_records 加 local_address）**
+**当前最新版本：v51（trade_log 加 exchange 列）**

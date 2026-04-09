@@ -1,7 +1,8 @@
 # KANet Developer Guide
 
 > **修改任何代码前必读。** 一个文件，覆盖全系统。唯一权威开发者文档。
-> 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-08。
+> 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-09。
+> 4/9 更新：CEX 做市日限额硬校验（总计模式 + 可编辑 + Brain 感知）。MEXC getOrder/cancelOrder symbol 签名修复。_monitorSellMaker 超时变量修复。Gate.io executedQty 算法修复。trade_log.exchange 列（v51）。
 > 4/8 更新：stock-tracker 四层情报升级 + llama-server 推理引擎（RTX 5090）+ Spending Ledger 三项修复 + Adapter UI 重构（URL 可编辑+14 平台 catalog）+ Agent 安全护栏（6 条硬规则：禁泄余额/禁编技术细节/系统内部保密）。
 > 4/6 更新：技术债清零（v46/v47 DROP 两张表） + DATABASE.md 数据字典 + exchange 交割全流程（manual/cross_chain_tx/超时/争议/套利链路）。cross-chain-verify.mjs 独立模块。
 > 4/5 更新：pending_actions 意图队列（v44）— 意图与事实分离，修复 catch-up 重复握手双花。陷阱 #24-27。花费账本页 /ledger。IB Gateway 不随启动。
@@ -640,7 +641,7 @@ Agent 决策理由从 execution_states.display_summary 注入。
 | kasia-console/src/api/exchange.js | 8 API 端点 + /exchange 页面路由 |
 | kasia-console/src/services/exchange-machine.js | 状态机（open→matched→verifying→completed） |
 | kasia-console/src/services/exchange-verifiers.js | 可插拔验证器（manual/cross_chain_tx/kaspa_tx） |
-| kasia-console/src/services/exchange-orders.js | 8 交易所统一下单（placeOrder/cancelOrders/getOpenOrders） |
+| kasia-console/src/services/exchange-orders.js | 8 交易所统一下单（placeOrder/cancelOrder/getOrder/getBalance/getOrderbook） |
 | kasia-console/src/services/trade-protocol-filter.js | 链上协议→本地索引 + matched 自动 CEX 对冲 |
 | kasia-console/src/ui/exchange.eta | 协议级自由市场 UI |
 
@@ -956,6 +957,27 @@ index.js 启动时 + 每 5 分钟：expireStale()（open 过期→expired）+ ti
 handleExchangeAccept 按 verification 分叉：manual → log + return，verifying → _executeHedge。
 _executeHedge 支持 preferredCex 参数 + HEDGE_CEX_MAP（scanner 显示名→DB exchange 字段映射）。
 
+### 日限额（2026-04-09）
+
+**设计**：总限额模式——所有交易所 SELL 量合计不超过阈值，各所明细是诊断工具不是控制工具。
+
+| 配置 | 来源 | 默认 |
+|------|------|------|
+| `daily_kas_sell_limit` | config_entries | 10000 KAS |
+
+**数据源**：`chain_events` 表 `cex_sell_placed` 事件（POST /api/trade/order SELL 时写入）+ `hedge_placed` SELL 事件。重启不丢失。
+
+**三层联动**：
+1. **executeSellMaker 硬校验**：查 `GET /api/trade/daily-usage` 的 `total.remaining_kas`，≤0 拒绝执行。fail-open（API 查询失败不阻塞）。
+2. **Brain 感知**：market-scanner formatForBrain 注入日限额状态。≥80% 警告减频，=100% 明确禁止。
+3. **UI 可编辑**：exchange.eta "Today's KAS Sales" 区块——总进度条 + 各所明细 + Save 按钮写 config_entries。
+
+**API**：
+- `GET /api/trade/daily-usage` — 返回 `{ date, exchanges: [{exchange, label, sold_kas, pct_used}], total: {sold_kas, limit_kas, remaining_kas, pct_used} }`
+- `PUT /api/trade/daily-limit` — `{ limit_kas: number }` → 写 config_entries
+
+**trade_log.exchange 列**（v51 迁移）：每笔 CEX 下单记录交易所归属。旧记录 exchange=NULL。
+
 ### 关键文件（exchange 补充）
 
 | 文件 | 职责 |
@@ -975,6 +997,12 @@ _executeHedge 支持 preferredCex 参数 + HEDGE_CEX_MAP（scanner 显示名→D
 33. **exchange accept 路径不触发对冲。** accept 只把 offer 推到 verifying，此时 Taker 尚未履约。对冲在 completed 后触发（见 #34）。handleExchangeAccept 里只打日志 "hedge deferred to completed"。
 
 34. **Hedge 必须在 completed（交割确认后）触发，不能在 verifying 触发。** verifying 阶段 Taker 尚未履约，此时 CEX 对冲 = 裸空仓。Taker timed_out 则 CEX 侧已成交、KAS 未收到，造成实亏。触发点两处：(a) exchange.js confirm 端点 processManualConfirm 返回 completed 后，(b) exchange-machine.js _verifyAndComplete 验证通过 transition('completed') 后。幂等锁（chain_events WHERE txid=offerId AND event_type LIKE 'hedge%'）保留防重。教训来源：2026-04-07 Live 测试。
+
+35. **MEXC/Binance-like getOrder/cancelOrder symbol 必须清洗。** API 路由传 `KAS/USDT`（含斜杠），MEXC 要求 `KASUSDT`。placeBinanceLike 内部走 registry kasPair 没问题，但 getOrder/cancelOrder 是独立函数直接用传入 symbol。必须 `symbol.replace(/[^A-Za-z0-9]/g, '')`。位置：exchange-orders.js getOrder/cancelOrder 的 mexc 分支。教训来源：2026-04-09 Live 测试。
+
+36. **_monitorSellMaker 超时路径必须用局部可变变量。** 参数 `exchangeOfferId` 是不可变的，但改善单可能中途 cancelled/expired 导致追踪变量清空。超时取消块必须用 `activeExchangeOffer`（局部 let 副本），不能用原始参数 `exchangeOfferId`。位置：action-executor.mjs _monitorSellMaker 超时块。
+
+37. **Gate.io getOrder executedQty 算法。** `filled_total / price` 是 USDT 金额除以价格——部分成交时精度有误差。正确算法：`amount - left`（原始量减剩余量，单位是 KAS）。位置：exchange-orders.js getOrder gateio 分支。
 
 ### 待实现
 
@@ -1286,6 +1314,13 @@ _executeHedge 支持 preferredCex 参数 + HEDGE_CEX_MAP（scanner 显示名→D
 | POST | `/api/trade/trigger/proactive` | 触发 proactive 交易 | trading.js |
 | POST | `/api/trade/trigger/reflection` | 触发交易反思 | trading.js |
 | POST | `/api/trade/preflight` | Proactive 交易预检（三层护栏） | trading.js |
+
+### 交易 / Trading — 日限额
+
+| 方法 | 路径 | 说明 | 文件 |
+|------|------|------|------|
+| GET | `/api/trade/daily-usage` | 今日 SELL 量（总计+各所明细） | trading.js |
+| PUT | `/api/trade/daily-limit` | 修改日限额（写 config_entries） | trading.js |
 
 ### 交易 / Trading — 审批
 
