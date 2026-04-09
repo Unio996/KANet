@@ -59,6 +59,8 @@ const ACTION_REQUIRED_AUTHORITY = {
   SELL_MAKER:           'trade',
   BUY_MAKER:            'trade',
   CANCEL_OFFERS:        'trade',
+  CONFIRM_ESCROW:       'trade',
+  DISPUTE_ESCROW:       'trade',
 
   // Moderate actions — need at least 'suggest' authority
   initiate_handshake:   'suggest',
@@ -241,6 +243,12 @@ export class ActionExecutor {
         return this.executePolymarketOrder(action);
       case 'BROKER_ORDER':
         return this.executeBrokerOrder(action);
+
+      // ── Escrow actions ──
+      case 'CONFIRM_ESCROW':
+        return this.executeEscrowConfirm(action);
+      case 'DISPUTE_ESCROW':
+        return this.executeEscrowDispute(action);
 
       // ── System actions (白名单制) ──
       case 'SYSTEM_DOWNLOAD':
@@ -1236,5 +1244,68 @@ export class ActionExecutor {
 
     console.log(`[code-ops] ${action.type} blocked: ${result.error}`);
     return result;
+  }
+
+  // ── Escrow: confirm delivery (release funds) ──
+
+  async executeEscrowConfirm(action) {
+    const { consoleUrl, relayNodeId } = this.config;
+    const offerId = action.offer_id || action.params?.offer_id;
+    if (!offerId) return { ok: false, reason: 'CONFIRM_ESCROW: missing offer_id' };
+
+    try {
+      // Determine role: if we are maker → confirm as maker, else as taker
+      const offer = await fetchJson(`${consoleUrl}/api/exchange/offers/${encodeURIComponent(offerId)}`).catch(() => null);
+      const myAddress = this.config.address;
+      const role = offer?.maker === myAddress ? 'maker' : 'taker';
+
+      const result = await fetchJson(`${consoleUrl}/api/exchange/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ relayNodeId, offer_id: offerId, role }),
+      });
+
+      if (result.error) {
+        console.log(`[executor] CONFIRM_ESCROW ${offerId.slice(0, 8)} failed: ${result.error}`);
+        return { ok: false, reason: result.error };
+      }
+
+      console.log(`[executor] CONFIRM_ESCROW ${offerId.slice(0, 8)} → ${result.status || 'confirmed'}`);
+      this.memory?.recordEvent({ type: 'escrow_confirmed', offerId, role });
+      return { ok: true, offerId, role, status: result.status };
+    } catch (err) {
+      console.log(`[executor] CONFIRM_ESCROW error: ${err.message}`);
+      return { ok: false, reason: err.message };
+    }
+  }
+
+  // ── Escrow: dispute (flag fraud / non-delivery) ──
+
+  async executeEscrowDispute(action) {
+    const { consoleUrl, relayNodeId } = this.config;
+    const offerId = action.offer_id || action.params?.offer_id;
+    if (!offerId) return { ok: false, reason: 'DISPUTE_ESCROW: missing offer_id' };
+
+    const reason = action.reason || action.params?.reason || 'Agent-initiated dispute';
+
+    try {
+      const result = await fetchJson(`${consoleUrl}/api/exchange/dispute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ relayNodeId, offer_id: offerId, reason }),
+      });
+
+      if (result.error) {
+        console.log(`[executor] DISPUTE_ESCROW ${offerId.slice(0, 8)} failed: ${result.error}`);
+        return { ok: false, reason: result.error };
+      }
+
+      console.log(`[executor] DISPUTE_ESCROW ${offerId.slice(0, 8)} → disputed`);
+      this.memory?.recordEvent({ type: 'escrow_disputed', offerId, reason });
+      return { ok: true, offerId, status: 'disputed' };
+    } catch (err) {
+      console.log(`[executor] DISPUTE_ESCROW error: ${err.message}`);
+      return { ok: false, reason: err.message };
+    }
   }
 }
