@@ -20,7 +20,6 @@ const REACTIVE_KEYWORDS = [
 
 const DEFAULT_SPREAD = 0.003;        // 0.3%
 const MAX_PER_ORDER_KAS = 1000;
-const MAX_DAILY_KAS = 5000;
 const MIN_ORDER_KAS = 50;
 
 export class OrderExecutorSkill extends Skill {
@@ -54,15 +53,18 @@ export class OrderExecutorSkill extends Skill {
       openOffers = res?.offers || res || [];
     } catch {}
 
-    // 今日累计做市量（从 execution_states 查）
-    let dailyVolume = 0;
+    // 今日限额（从用户配置的 daily-usage 读，和 SELL_MAKER 同一数据源）
+    let dailySoldKas = 0;
+    let dailyLimitKas = 10000;
+    let remainingDaily = 10000;
     try {
-      const today = new Date().toISOString().slice(0, 10);
-      const execs = await fetchJson(`${config.consoleUrl}/api/trade/executions?agent=${config.address}&after=${today}`);
-      const list = execs?.executions || execs || [];
-      dailyVolume = list
-        .filter(e => e.action === 'make_market')
-        .reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+      const usage = await fetchJson(`${config.consoleUrl}/api/trade/daily-usage`);
+      const total = usage?.total;
+      if (total) {
+        dailySoldKas = total.sold_kas ?? 0;
+        dailyLimitKas = total.limit_kas ?? 10000;
+        remainingDaily = total.remaining_kas ?? (dailyLimitKas - dailySoldKas);
+      }
     } catch {}
 
     // CEX 对冲资金查询（余额数字可以给 Brain，Key 绝不出现）
@@ -102,16 +104,17 @@ export class OrderExecutorSkill extends Skill {
       scanner,
       kasBalance,
       openOffers,
-      dailyVolume,
+      dailySoldKas,
+      dailyLimitKas,
       bestHedgeBuy,
       bestHedgeSell,
       cexFunds,
-      remainingDaily: MAX_DAILY_KAS - dailyVolume,
+      remainingDaily,
     };
   }
 
   formatForBrain(gathered) {
-    const { scanner, kasBalance, openOffers, dailyVolume, bestHedgeBuy, bestHedgeSell, cexFunds, remainingDaily } = gathered;
+    const { scanner, kasBalance, openOffers, dailySoldKas, dailyLimitKas, bestHedgeBuy, bestHedgeSell, cexFunds, remainingDaily } = gathered;
     const lines = [];
 
     lines.push('=== ORDER EXECUTOR ===');
