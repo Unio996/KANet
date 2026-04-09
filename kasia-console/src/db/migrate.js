@@ -1701,5 +1701,14 @@ export function runMigrations() {
     console.log('[migrate] v51: trade_log.exchange added');
   }
 
+  // v52: relay_nodes.focus — Agent 专注模式（balanced/market_maker/social）
+  const hasFocus = sqlite.prepare(
+    "SELECT 1 FROM pragma_table_info('relay_nodes') WHERE name='focus'"
+  ).get();
+  if (!hasFocus) {
+    sqlite.exec("ALTER TABLE relay_nodes ADD COLUMN focus TEXT DEFAULT 'balanced'");
+    console.log('[migrate] v52: relay_nodes.focus added');
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
