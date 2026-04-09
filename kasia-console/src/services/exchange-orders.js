@@ -12,6 +12,7 @@
  */
 
 import crypto from 'node:crypto';
+import { EXCHANGE_REGISTRY, getExchangeDef } from '../lib/exchange-registry.js';
 
 function hmac256(secret, data) {
   return crypto.createHmac('sha256', secret).update(data).digest('hex');
@@ -873,42 +874,12 @@ export async function cancelOrder(account, orderId, symbol = 'KASUSDT') {
 
 // ── Orderbook Query ───────────────────────────────────────────────────────
 
-const ORDERBOOK_ENDPOINTS = {
-  mexc: {
-    url: (limit) => `https://api.mexc.com/api/v3/depth?symbol=KASUSDT&limit=${limit}`,
-    parse: (d) => ({ asks: d.asks, bids: d.bids }),
-    min_order_usdt: 1,
-  },
-  gate: {
-    url: (limit) => `https://api.gateio.ws/api/v4/spot/order_book?currency_pair=KAS_USDT&limit=${limit}`,
-    parse: (d) => ({ asks: d.asks, bids: d.bids }),
-    min_order_usdt: 1,
-  },
-  gateio: {
-    url: (limit) => `https://api.gateio.ws/api/v4/spot/order_book?currency_pair=KAS_USDT&limit=${limit}`,
-    parse: (d) => ({ asks: d.asks, bids: d.bids }),
-    min_order_usdt: 1,
-  },
-  bybit: {
-    url: (limit) => `https://api.bybit.com/v5/market/orderbook?category=spot&symbol=KASUSDT&limit=${limit}`,
-    parse: (d) => ({ asks: d.result?.a, bids: d.result?.b }),
-    min_order_usdt: 20,
-  },
-  kucoin: {
-    url: (_limit) => `https://api.kucoin.com/api/v1/market/orderbook/level2_20?symbol=KAS-USDT`,
-    parse: (d) => ({ asks: d.data?.asks, bids: d.data?.bids }),
-    min_order_usdt: 0.5,
-  },
-  bitget: {
-    url: (limit) => `https://api.bitget.com/api/v2/spot/market/orderbook?symbol=KASUSDT&limit=${limit}`,
-    parse: (d) => ({ asks: d.data?.asks, bids: d.data?.bids }),
-    min_order_usdt: 1,
-  },
-};
+// 'gate' 别名 → gateio（兼容旧代码）
+const _resolveExchangeId = (id) => id === 'gate' ? 'gateio' : id;
 
 /**
  * Get order book for KAS/USDT from any supported exchange.
- * Returns unified format regardless of exchange-specific response structure.
+ * URL 和解析器从 EXCHANGE_REGISTRY 读取（唯一真相源）。
  *
  * @param {string} exchange - exchange id (mexc/gateio/bybit/kucoin/bitget)
  * @param {number} [limit=5] - depth levels to fetch
@@ -922,13 +893,13 @@ export async function getOrderbook(exchange, limit = 5) {
     timestamp, error,
   });
 
-  const ep = ORDERBOOK_ENDPOINTS[exchange];
-  if (!ep) return fail(`unsupported exchange: ${exchange}`);
+  const def = getExchangeDef(_resolveExchangeId(exchange));
+  if (!def || !def.orderbookUrl) return fail(`unsupported exchange: ${exchange}`);
 
   try {
-    const res = await fetch(ep.url(limit), { signal: AbortSignal.timeout(3000) });
+    const res = await fetch(def.orderbookUrl(limit), { signal: AbortSignal.timeout(3000) });
     const data = await res.json();
-    const raw = ep.parse(data);
+    const raw = def.orderbookParse(data);
 
     if (!Array.isArray(raw.asks) || !Array.isArray(raw.bids)) {
       return fail(data.msg || data.retMsg || data.message || 'unexpected response structure');
@@ -960,7 +931,7 @@ export async function getOrderbook(exchange, limit = 5) {
       bid1_qty: bids[0]?.[1] ?? null,
       ask_depth,
       bid_depth,
-      min_order_usdt: ep.min_order_usdt ?? 1,
+      min_order_usdt: def.min_order_usdt ?? 1,
       timestamp,
       error: null,
     };
