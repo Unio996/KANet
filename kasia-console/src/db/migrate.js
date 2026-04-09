@@ -1692,13 +1692,43 @@ export function runMigrations() {
     console.log('[migrate] v50: adapter_nodes.is_enabled added');
   }
 
-  // v51: trade_log 加 exchange 列 — 日限额按交易所统计
+  // v51a: trade_log 加 exchange 列 — 日限额按交易所统计
   const hasTradeLogExchange = sqlite.prepare(
     "SELECT 1 FROM pragma_table_info('trade_log') WHERE name='exchange'"
   ).get();
   if (!hasTradeLogExchange) {
     sqlite.exec("ALTER TABLE trade_log ADD COLUMN exchange TEXT");
-    console.log('[migrate] v51: trade_log.exchange added');
+    console.log('[migrate] v51a: trade_log.exchange added');
+  }
+
+  // v51b: escrow_states 表 — Silverscript P2SH 合约状态追踪
+  const hasEscrowStates = sqlite.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='escrow_states'"
+  ).get();
+  if (!hasEscrowStates) {
+    sqlite.exec(`
+      CREATE TABLE escrow_states (
+        id                 TEXT PRIMARY KEY,
+        offer_id           TEXT,
+        initiator_relay_id TEXT NOT NULL,
+        buyer_address      TEXT NOT NULL,
+        seller_address     TEXT NOT NULL,
+        arbiter_address    TEXT NOT NULL,
+        p2sh_address       TEXT NOT NULL,
+        redeem_script_hex  TEXT NOT NULL,
+        amount_sompi       TEXT NOT NULL,
+        deadline           INTEGER,
+        status             TEXT NOT NULL DEFAULT 'created',
+        lock_txid          TEXT,
+        unlock_txid        TEXT,
+        created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX idx_escrow_p2sh ON escrow_states(p2sh_address);
+      CREATE INDEX idx_escrow_offer ON escrow_states(offer_id);
+      CREATE INDEX idx_escrow_status ON escrow_states(status);
+    `);
+    console.log('[migrate] v51b: escrow_states table created');
   }
 
   // v52: relay_nodes.focus — Agent 专注模式（balanced/market_maker/social）

@@ -3,16 +3,18 @@ const API_ENDPOINTS = {
   mainnet: 'https://api.kaspa.org',
   'testnet-10': 'https://api-tn10.kaspa.org',
   'testnet-11': 'https://api-tn11.kaspa.org',
+  'testnet-12': null, // TN12 has no public REST API yet — use RPC directly
 };
 
 export class KaspaApi {
   constructor(network = 'mainnet') {
     const endpoint = API_ENDPOINTS[network];
-    if (!endpoint) throw new Error(`Unknown network "${network}". Supported: ${Object.keys(API_ENDPOINTS).join(', ')}`);
-    this.baseUrl = endpoint;
+    if (endpoint === undefined) throw new Error(`Unknown network "${network}". Supported: ${Object.keys(API_ENDPOINTS).join(', ')}`);
+    this.baseUrl = endpoint; // null for networks without REST API
   }
 
   async _fetch(path, options) {
+    if (!this.baseUrl) throw new Error(`REST API not available for this network — use RPC`);
     const url = `${this.baseUrl}${path}`;
     const response = await fetch(url, {
       ...options,

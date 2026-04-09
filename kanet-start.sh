@@ -13,7 +13,7 @@ CONSOLE_DIR="$KANET_ROOT/kasia-console"
 LOG_DIR="$KANET_ROOT/logs"
 PID_DIR="$LOG_DIR/pids"
 ENV_FILE="$KANET_ROOT/kanet.env"
-CONSOLE_PORT=3100
+CONSOLE_PORT=3200
 
 mkdir -p "$LOG_DIR" "$PID_DIR"
 
@@ -77,6 +77,8 @@ if [ -f "$ENV_FILE" ]; then
     case "$k" in
       KANET_ROOT)              KANET_ROOT="$v" ;;
       CONSOLE_ENCRYPTION_KEY)  CONSOLE_ENCRYPTION_KEY="$v" ;;
+      KASPA_RPC_URL)           KASPA_RPC_URL="$v" ;;
+      KASPA_NETWORK)           KASPA_NETWORK="$v" ;;
     esac
   done < "$ENV_FILE"
   ok "已加载配置: $ENV_FILE"
@@ -142,6 +144,8 @@ KANET_ROOT=$KANET_ROOT \
 CONSOLE_ENCRYPTION_KEY=$CONSOLE_ENCRYPTION_KEY \
 PORT=$CONSOLE_PORT \
 DB_PATH="$CONSOLE_DIR/data/console.db" \
+KASPA_RPC_URL="${KASPA_RPC_URL:-}" \
+KASPA_NETWORK="${KASPA_NETWORK:-mainnet}" \
   node "$CONSOLE_DIR/src/index.js" >> "$CONSOLE_LOG" 2>&1 &
 CONSOLE_PID=$!
 echo "$CONSOLE_PID" > "$PID_DIR/console.pid"

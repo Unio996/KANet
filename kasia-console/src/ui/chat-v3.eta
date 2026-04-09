@@ -20,6 +20,13 @@
   polling: null,
   lastTime: '',
 
+  // Escrow panel
+  showEscrow: false,
+  escrowAmount: '2',
+  escrowList: [],
+  escrowBusy: false,
+  escrowCurrent: null,
+
   async init() {
     this.channel = this._agentChannel();
     await this.loadMessages();
@@ -85,6 +92,72 @@
   cardDataEntries(data) { if (!data || typeof data !== 'object') return []; const e = []; const f = (o, p) => { for (const [k,v] of Object.entries(o)) { if (v == null) continue; const key = p ? p+'.'+k : k; if (Array.isArray(v)) e.push([key, v.length+' items']); else if (typeof v === 'object') f(v,key); else e.push([key, String(v)]); } }; f(data,''); return e.slice(0,12); },
   async doConfirm(msg) { const card = this.parseCard(msg.content); if (!card) return; try { const r = await fetch('/api/chat/confirm', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({relayNodeId:this.selectedAccount,token:card.token}) }); const d = await r.json(); msg.content = d.ok ? '已执行: ' + (typeof d.result === 'string' ? d.result : JSON.stringify(d.result)) : '失败: ' + (d.error||'unknown'); } catch(e) { msg.content = '执行失败: ' + e.message; } },
   fmtTime(t) { if (!t) return ''; try { return new Date(t).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}); } catch { return t; } },
+
+  // ── Escrow methods ──
+  _escrowCard(type, data) {
+    const now = new Date().toISOString();
+    const acct = this.accounts.find(a => a.id === this.selectedAccount);
+    this.messages.push({ id: 'escrow-' + Date.now(), sender_address: acct?.address || 'system', content: JSON.stringify({ type: 'query_card', label: type, data, summary: '' }), created_at: now });
+    this.$nextTick(() => this.scrollBottom());
+  },
+  async escrowCreate() {
+    if (this.escrowBusy || !this.selectedAccount) return;
+    this.escrowBusy = true;
+    const acct = this.accounts.find(a => a.id === this.selectedAccount);
+    try {
+      const pubRes = await fetch('/api/relay/' + this.selectedAccount + '/send-command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'get_pubkey' }) });
+      const { pubkey32 } = await pubRes.json();
+      const res = await fetch('/api/escrow/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+        relayNodeId: this.selectedAccount,
+        buyerPk32: pubkey32, sellerPk32: pubkey32, arbiterPk32: pubkey32,
+        buyerAddress: acct.address, sellerAddress: acct.address, arbiterAddress: acct.address,
+        amountKas: this.escrowAmount, deadline: 0,
+      })});
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error);
+      this.escrowCurrent = data;
+      this._escrowCard('Order Placed', { Status: 'Awaiting Payment', 'Contract Address': data.p2shAddress.slice(0,25)+'...', Amount: this.escrowAmount + ' KAS', 'Order ID': data.id.slice(0,8), Note: 'Funds will be held in smart contract until delivery confirmed' });
+      await this.escrowRefreshList();
+    } catch (e) { this.error = e.message; }
+    this.escrowBusy = false;
+  },
+  async escrowLock() {
+    if (this.escrowBusy || !this.escrowCurrent?.id) return;
+    this.escrowBusy = true;
+    try {
+      const res = await fetch('/api/escrow/lock', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ escrowId: this.escrowCurrent.id, relayNodeId: this.selectedAccount }) });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error);
+      this._escrowCard('Payment Secured', { Status: 'Funds Locked On-Chain', 'TX ID': data.txId.slice(0,16)+'...', Amount: this.escrowAmount + ' KAS', Note: 'Seller can see the locked funds. Awaiting delivery...' });
+      this.escrowCurrent.lockTxId = data.txId;
+      await this.escrowRefreshList();
+    } catch (e) { this.error = e.message; }
+    this.escrowBusy = false;
+  },
+  async escrowRelease() {
+    if (this.escrowBusy || !this.escrowCurrent?.id) return;
+    this.escrowBusy = true;
+    const acct = this.accounts.find(a => a.id === this.selectedAccount);
+    try {
+      const res = await fetch('/api/escrow/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ escrowId: this.escrowCurrent.id, relayNodeId: this.selectedAccount, branch: 0, toAddress: acct.address }) });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error);
+      this._escrowCard('Delivery Confirmed', { Status: 'Payment Released to Seller', 'TX ID': data.txId.slice(0,16)+'...', Note: 'Transaction complete. Funds transferred on-chain.' });
+      this.escrowCurrent = null;
+      await this.escrowRefreshList();
+    } catch (e) { this.error = e.message; }
+    this.escrowBusy = false;
+  },
+  async escrowRefreshList() {
+    try {
+      const res = await fetch('/api/escrow/list?limit=10');
+      const data = await res.json();
+      this.escrowList = data.escrows || [];
+    } catch {}
+  },
+  escrowStatusColor(s) {
+    return { created: 'bg-gray-100 text-gray-600', locked: 'bg-yellow-100 text-yellow-700', released: 'bg-green-100 text-green-700', refunded: 'bg-blue-100 text-blue-700', disputed: 'bg-red-100 text-red-700' }[s] || 'bg-gray-100 text-gray-600';
+  },
 }">
 
   <!-- Left: Agent selector + mode -->
@@ -118,6 +191,68 @@
         <button @click="switchChannel()" class="text-xs text-brand-500 hover:text-brand-700 px-2">加入</button>
       </div>
     </div>
+    <!-- Escrow toggle -->
+    <div class="px-3 py-2 border-t border-warm-200">
+      <button @click="showEscrow = !showEscrow; if(showEscrow) escrowRefreshList()"
+        class="w-full text-[11px] py-1.5 rounded font-medium transition-colors"
+        :class="showEscrow ? 'bg-purple-50 text-purple-700' : 'text-ink-400 hover:bg-warm-100'">
+        Silverscript
+      </button>
+    </div>
+
+    <!-- Escrow panel -->
+    <div x-show="showEscrow" x-transition class="px-3 py-2 border-t border-warm-200 space-y-2 overflow-y-auto max-h-[50vh]">
+      <!-- Scenario hint -->
+      <div class="text-[10px] text-purple-500 leading-snug">
+        On-chain escrow powered by Kaspa Silverscript (TN12)
+      </div>
+
+      <!-- Step 1: Place order -->
+      <div class="space-y-1.5">
+        <div class="text-[10px] font-semibold text-purple-600 uppercase tracking-wider">New Order</div>
+        <div class="flex gap-1">
+          <input x-model="escrowAmount" placeholder="Amount" class="flex-1 text-xs border border-warm-200 rounded px-2 py-1 bg-white focus:outline-none focus:border-purple-300 w-16" />
+          <span class="text-[10px] text-ink-300 self-center">KAS</span>
+        </div>
+        <button @click="escrowCreate()" :disabled="escrowBusy"
+          class="w-full text-[11px] py-1.5 rounded font-medium transition-colors"
+          :class="escrowBusy ? 'bg-warm-200 text-ink-300' : 'bg-purple-500 text-white hover:bg-purple-600'">
+          <span x-show="!escrowBusy">Place Order</span>
+          <span x-show="escrowBusy">Processing...</span>
+        </button>
+      </div>
+
+      <!-- Step 2 & 3: Pay + Confirm -->
+      <div x-show="escrowCurrent" class="space-y-1.5 pt-1 border-t border-purple-100">
+        <div class="text-[10px] text-purple-500 font-mono truncate" x-text="'Contract: ...' + (escrowCurrent?.p2shAddress?.slice(-12) || '')"></div>
+        <button @click="escrowLock()" :disabled="escrowBusy"
+          class="w-full text-[11px] py-1.5 rounded font-medium transition-colors"
+          :class="escrowBusy ? 'bg-warm-200 text-ink-300' : 'bg-yellow-500 text-white hover:bg-yellow-600'">
+          <span x-show="!escrowBusy">Pay & Lock Funds</span>
+          <span x-show="escrowBusy">Locking...</span>
+        </button>
+        <button @click="escrowRelease()" :disabled="escrowBusy"
+          class="w-full text-[11px] py-1.5 rounded font-medium transition-colors"
+          :class="escrowBusy ? 'bg-warm-200 text-ink-300' : 'bg-green-500 text-white hover:bg-green-600'">
+          <span x-show="!escrowBusy">Confirm Delivery</span>
+          <span x-show="escrowBusy">Releasing...</span>
+        </button>
+      </div>
+
+      <!-- Order history -->
+      <div x-show="escrowList.length > 0" class="space-y-1 pt-1.5 border-t border-warm-100">
+        <div class="text-[10px] font-semibold text-ink-400">Orders</div>
+        <template x-for="e in escrowList" :key="e.id">
+          <div class="flex items-center justify-between text-[10px] py-0.5">
+            <span class="font-mono text-ink-400" x-text="e.id.slice(0,6)"></span>
+            <span class="px-1.5 py-0.5 rounded-full text-[9px] font-medium"
+              :class="escrowStatusColor(e.status)"
+              x-text="{created:'pending',locked:'paid',released:'completed',refunded:'refunded',disputed:'disputed'}[e.status] || e.status"></span>
+          </div>
+        </template>
+      </div>
+    </div>
+
     <!-- Info -->
     <div class="flex-1"></div>
     <div class="px-3 py-2 text-[10px] text-ink-300">

@@ -355,6 +355,63 @@ if (process.send) {
           sent = splitResult; // for generic result handler
           break;
         }
+
+        // ── Pubkey Query ─────────────────────────────────────────────
+        case 'get_pubkey': {
+          const pk = getWallet().getPrivateKey().toPublicKey().toString();
+          const pk32 = pk.length === 66 ? pk.slice(2) : pk; // strip 02/03 prefix
+          const result = { pubkey32: pk32, address: localAddress };
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result });
+          }
+          sent = result;
+          break;
+        }
+
+        // ── P2SH Escrow (Silverscript) ──────────────────────────────
+        case 'create_escrow': {
+          const { compileEscrow } = await import('./lib/p2sh.mjs');
+          const { redeemScript, p2shAddress } = compileEscrow(
+            cmd.buyerPk32, cmd.sellerPk32, cmd.arbiterPk32, cmd.deadline || 0,
+          );
+          const result = { p2shAddress, redeemScriptHex: Buffer.from(redeemScript).toString('hex') };
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result });
+          }
+          log(`ESCROW CREATE → ${p2shAddress.slice(-12)}`);
+          sent = result;
+          break;
+        }
+
+        case 'lock_escrow': {
+          const { lockToP2SH } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const txId = await lockToP2SH(wallet, cmd.p2shAddress, cmd.amountKas);
+          const result = { txId, ok: true };
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result });
+          }
+          log(`ESCROW LOCK ${cmd.amountKas} KAS → ${cmd.p2shAddress?.slice(-12)} TX: ${txId}`);
+          sent = result;
+          break;
+        }
+
+        case 'execute_escrow': {
+          const { unlockP2SH } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const redeemScript = new Uint8Array(Buffer.from(cmd.redeemScriptHex, 'hex'));
+          const toAddress = cmd.toAddress || localAddress;
+          const lockTime = cmd.lockTime ? BigInt(cmd.lockTime) : 0n;
+          const { txId, amount } = await unlockP2SH(wallet, cmd.p2shAddress, redeemScript, cmd.branch, toAddress, lockTime);
+          const result = { txId, amount: amount.toString(), ok: true };
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result });
+          }
+          const branchNames = ['release', 'refund', 'arbitrate'];
+          log(`ESCROW ${branchNames[cmd.branch] || cmd.branch} → ${toAddress.slice(-12)} TX: ${txId}`);
+          sent = result;
+          break;
+        }
       }
       // 如果有 requestId，回传执行结果给 Console
       if (cmd.requestId && process.send) {

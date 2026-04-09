@@ -2,8 +2,8 @@
 
 > **修改任何代码前必读。** 一个文件，覆盖全系统。唯一权威开发者文档。
 > 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-09。
-> 4/9 更新（下半场）：EXCHANGE_REGISTRY 贯通（共享文件 + getOrder/cancelOrder 迁移）。5 家 CEX 实盘验证全通过。scanner data→instructions 字段修正。Agent Focus Mode（v52，balanced/market_maker/social）。scanner per-agent 冷却。SELL_MAKER directive 修正。**里程碑：Sophie 自主卖出 2000 KAS on Gate.io。** 陷阱 #38-42。
-> 4/9 更新（上半场）：CEX 做市日限额硬校验（总计模式 + 可编辑 + Brain 感知）。MEXC getOrder/cancelOrder symbol 签名修复。_monitorSellMaker 超时变量修复。Gate.io executedQty 算法修复。trade_log.exchange 列（v51）。
+> 4/9 更新（下半场）：EXCHANGE_REGISTRY 贯通 + Focus Mode + 陷阱 #38-42。**Sophie 自主卖出 2000 KAS on Gate.io。** TN12：P2SH 三分支全验证 + P3 escrow-awareness + chat kanet_chat_v1。
+> 4/9 更新（上半场）：CEX 做市日限额硬校验 + MEXC/Gate 签名修复 + trade_log.exchange(v51)。
 > 4/8 更新：stock-tracker 四层情报升级 + llama-server 推理引擎（RTX 5090）+ Spending Ledger 三项修复 + Adapter UI 重构（URL 可编辑+14 平台 catalog）+ Agent 安全护栏（6 条硬规则：禁泄余额/禁编技术细节/系统内部保密）。
 > 4/6 更新：技术债清零（v46/v47 DROP 两张表） + DATABASE.md 数据字典 + exchange 交割全流程（manual/cross_chain_tx/超时/争议/套利链路）。cross-chain-verify.mjs 独立模块。
 > 4/5 更新：pending_actions 意图队列（v44）— 意图与事实分离，修复 catch-up 重复握手双花。陷阱 #24-27。花费账本页 /ledger。IB Gateway 不随启动。
@@ -646,6 +646,13 @@ Agent 决策理由从 execution_states.display_summary 注入。
 | kasia-console/src/services/trade-protocol-filter.js | 链上协议→本地索引 + matched 自动 CEX 对冲 |
 | kasia-console/src/ui/exchange.eta | 协议级自由市场 UI |
 
+### Silverscript P2SH 合约
+
+| 文件 | 职责 |
+|------|------|
+| kasia-relay/src/lib/p2sh.mjs | compileEscrow / lockToP2SH / unlockP2SH 三个工具函数 |
+| kasia-console/src/api/escrow.js | Escrow Console API（4 端点） |
+
 ### 测试与文档
 
 | 文件 | 职责 |
@@ -1044,6 +1051,106 @@ getOrder / cancelOrder 用 `def.authStyle` switch（不是 exchange name），�
 - ✅ Arbitrage Tab 已上线（CEX Overview / Live Spreads / Active Offers / Hedge History）
 - ✅ 5 家 CEX 全链路验证通过（MEXC/Gate/Bybit/KuCoin/Bitget）
 - ✅ SELL_MAKER 全链路自主执行（Sophie Gate.io 2000 KAS 真实成交，2026-04-09）
+
+---
+
+## 十六、Silverscript P2SH 合约系统（TN12）
+
+> 2026-04-09 上线。仅 TN12 测试网有效，主网待 2026 硬分叉后支持。
+
+### 核心能力
+
+- Silverscript AgentEscrow 合约：三方托管（buyer/seller/arbiter），三条解锁路径（release/refund/arbitrate）
+- 完整链路：Console API → Relay IPC → P2SH 合约 → TN12 链上确认
+
+### 关键文件
+
+| 文件 | 职责 |
+|------|------|
+| kasia-relay/src/lib/p2sh.mjs | P2SH 工具函数（compileEscrow/lockToP2SH/unlockP2SH）|
+| kasia-console/src/api/escrow.js | 4 个 Escrow API 端点 |
+| D:/silverscript/kanet-escrow.sil | AgentEscrow 合约源码 |
+| D:/silverscript/target/release/silverc.exe | Silverscript 编译器 |
+
+### 数据库（v51）
+
+```sql
+escrow_states:
+  id, offer_id(nullable), initiator_relay_id
+  buyer_address, seller_address, arbiter_address
+  p2sh_address, redeem_script_hex
+  amount_sompi(TEXT), deadline(INTEGER, DAA score)
+  status: created/locked/released/refunded/disputed
+  lock_txid, unlock_txid, created_at, updated_at
+```
+
+### API 端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/escrow/list` | 合约列表（支持 status/relayNodeId 过滤） |
+| POST | `/api/escrow/create` | 编译合约 + 写 escrow_states（status=created） |
+| POST | `/api/escrow/lock` | 锁币 + 更新 status=locked |
+| POST | `/api/escrow/execute` | 执行 release/refund/arbitrate + 更新 status |
+
+### Relay IPC 命令（四个新增）
+
+| 命令 | payload | 返回 |
+|------|---------|------|
+| `get_pubkey` | (无) | pubkey32(x-only hex), address |
+| `create_escrow` | buyerPk32, sellerPk32, arbiterPk32 | p2shAddress, redeemScriptHex |
+| `lock_escrow` | p2shAddress, amountKas | txId |
+| `execute_escrow` | p2shAddress, redeemScriptHex, branch(0/1/2), toAddress | txId |
+
+### /exchange → escrow 集成
+
+```
+open → matched → escrow_locked → verifying/awaiting_manual_confirm → completed → release
+                                                                   → disputed → arbitrate
+                                                                   → timed_out → refund
+```
+
+- `shouldUseEscrow(offer)`: maker 是本地 Agent 时自动触发
+- `tryCreateAndLockEscrow(offer)`: 非阻塞，失败降级为无 escrow 流程
+- `tryExecuteEscrow(offerId, branch)`: completed→release(0), timed_out→refund(1), disputed→arbitrate(2)
+- 改动文件：`exchange-machine.js`（VALID_TRANSITIONS + 辅助函数 + 4 处 transition hook）
+
+### Chat 页面 Escrow 演示
+
+`chat-v3.eta` 左侧栏 **Silverscript** 面板，三步操作流程：
+
+| 按钮 | 调用 API | 聊天卡片 |
+|------|---------|---------|
+| Place Order | `/api/escrow/create` | Order Placed — Awaiting Payment |
+| Pay & Lock Funds | `/api/escrow/lock` | Payment Secured — Funds Locked On-Chain |
+| Confirm Delivery | `/api/escrow/execute` (branch=0) | Delivery Confirmed — Payment Released |
+
+操作结果以 `query_card` 格式插入聊天流，包含真实链上 txId。
+Orders 历史列表显示状态：pending → paid → completed。
+
+### kaspa-wasm 1.1.0 升级记录
+
+- 版本：0.13.0 → 1.1.0（2026-04-09）
+- 编译源：rusty-kaspa @ tn12 分支（commit 8c8d0366）
+- 产物：shared/vendor/kaspa-wasm/（三包共用）
+- 破坏性变更：**零**
+- 备份：shared/vendor/kaspa-wasm-backup-v013
+
+### 致命陷阱（P2SH scriptSig 构造）
+
+26. **createInputSignature 返回的是已含 push 头的 66 字节，不能再 addData 包装。** 格式：[0x41=OP_DATA_65][64字节 Schnorr 签名][0x01=SighashType.All]。直接 Buffer.concat 拼入 scriptSig，再次 addData 会导致双重嵌套，节点报 `reserved opcode 0x66`。
+
+27. **P2SH scriptSig 正确结构：[sigPushBytes][branchSelector][redeemScriptPush]。** branch selector 是一个字节（0x00=release, 0x01=refund, 0x02=arbitrate），插在签名和 redeemScript 之间。缺少 branch selector 导致 `stack has only 0`。
+
+28. **redeemScript push 用 ScriptBuilder.encodePayToScriptHashSignatureScript，不用 addData。** addData 对长字节码插入保留 opcode（0x65），导致节点拒绝。encodePayToScriptHashSignatureScript 正确生成 OP_PUSHDATA1 格式。
+
+29. **Kaspa Schnorr 公钥必须是 32 字节 x-only（去掉 0x02/0x03 前缀）。** 合约参数传 33 字节压缩公钥会导致 `unsupported public key type`。从私钥派生：`privKey.toPublicKey().toBytes().slice(1)`。
+
+30. **ScriptBuilder 链式调用的终止方法是 drain()，不是 script()。** script() 不存在，调用报 `is not a function`。
+
+31. **payToScriptHashSignatureScript WASM 绑定返回 ASCII-encoded hex string（非 Uint8Array）。** 不要用这个函数，用 encodePayToScriptHashSignatureScript 或手动拼接。
+
+32. **refund 路径的交易 lockTime 必须 >= deadline。** Silverscript `require(tx.time >= deadline)` 检查的是交易本身的 lockTime 字段。unsigned TX 和 signed TX 的 lockTime 必须一致（sighash 包含 lockTime）。同时节点要求当前 DAA >= lockTime 才接受交易（否则报 `transaction input is not finalized`）。escrow.js 的 execute 端点在 branch=1 时从 `escrow.deadline` 取 lockTime 传给 Relay；Console 侧先查 DAA 预检，未到期直接 400 拒绝。位置：`p2sh.mjs:unlockP2SH(lockTime)`、`escrow.js:execute`、`relay.mjs:execute_escrow`、`exchange-machine.js:tryExecuteEscrow`。
 
 ---
 

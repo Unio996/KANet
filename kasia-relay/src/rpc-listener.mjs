@@ -599,7 +599,7 @@ async function processComm(txId, payloadHex, senderAddress) {
       fetch(`${process.env.CONSOLE_URL || 'http://localhost:3100'}/api/identity/annotate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-ingest-secret': process.env.INGEST_SECRET || '' },
-        body: JSON.stringify({ network: 'mainnet', address: senderAddress, tags: 'kbeam_user' }),
+        body: JSON.stringify({ network: KASPA_NETWORK, address: senderAddress, tags: 'kbeam_user' }),
       }).catch(() => {});
     } catch {}
     return; // Don't reply, don't ingest — save resources

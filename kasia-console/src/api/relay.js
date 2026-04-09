@@ -708,7 +708,7 @@ export async function registerRelayRoutes(fastify) {
   fastify.post('/relays/generate-mnemonic', async (request, reply) => {
     const { network } = request.body || {};
     const mnemonic = Mnemonic.random(12).phrase;
-    const address = addressFromMnemonic(mnemonic, network || 'mainnet');
+    const address = addressFromMnemonic(mnemonic, network || process.env.KASPA_NETWORK || 'mainnet');
     return reply.send({ mnemonic, address });
   });
 
@@ -958,7 +958,8 @@ export async function registerRelayRoutes(fastify) {
     try {
       // 1. Generate mnemonic + address
       const mnemonic = Mnemonic.random(12).phrase;
-      const address = addressFromMnemonic(mnemonic, 'mainnet');
+      const network = process.env.KASPA_NETWORK || 'mainnet';
+      const address = addressFromMnemonic(mnemonic, network);
 
       // 2. Resolve adapter based on AI mode
       let adapterId = null;
@@ -974,14 +975,14 @@ export async function registerRelayRoutes(fastify) {
           aiProviderKey: aiProviderKey,
           aiModel: aiModel || null,
         });
-      } else if (aiMode === 'ollama') {
-        // Ollama: create adapter for local model
+      } else if (aiMode === 'openclaw') {
+        // OpenClaw agent protocol
         adapterId = createAdapterNode({
           name: name.trim() + '-brain',
-          aiProvider: 'openai',
-          aiProviderUrl: 'http://localhost:11434/v1',
-          aiProviderKey: 'ollama',
-          aiModel: aiModel || 'llama3.3',
+          aiProvider: 'openclaw',
+          aiProviderUrl: aiProviderUrl || null,
+          aiProviderKey: aiProviderKey || null,
+          aiModel: null,
         });
       } else {
         // Fallback: pick first available adapter
@@ -994,7 +995,7 @@ export async function registerRelayRoutes(fastify) {
         name: name.trim(),
         mnemonic,
         address,
-        network: 'mainnet',
+        network,
         adapterNodeId: adapterId,
         pollMs: 2000,
       });
@@ -1134,10 +1135,10 @@ export async function registerRelayRoutes(fastify) {
 
   // POST /api/relay/:id/send-command — unified command to Relay (Console transmits, Relay executes)
   fastify.post('/api/relay/:id/send-command', async (request, reply) => {
-    const { type, target, message, params, channel, amount } = request.body || {};
-    if (!type) return reply.code(400).send({ error: 'type is required' });
+    const body = request.body || {};
+    if (!body.type) return reply.code(400).send({ error: 'type is required' });
     try {
-      const result = await sendCommandAsync(request.params.id, { type, target, message, params, channel, amount });
+      const result = await sendCommandAsync(request.params.id, body);
       return reply.send({ ok: true, ...result });
     } catch (err) {
       return reply.code(503).send({ ok: false, error: err.message || 'Relay command failed' });

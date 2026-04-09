@@ -58,7 +58,7 @@ async function checkLocal() {
   try {
     const kaspa = await import('kaspa-wasm');
     const { RpcClient, Encoding } = kaspa;
-    const rpc = new RpcClient({ url: LOCAL_RPC, encoding: Encoding.Borsh, networkId: 'mainnet' });
+    const rpc = new RpcClient({ url: LOCAL_RPC, encoding: Encoding.Borsh, networkId: process.env.KASPA_NETWORK || 'mainnet' });
     await Promise.race([
       rpc.connect({}),
       new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000)),

@@ -30,6 +30,7 @@ import { registerBrokerRoutes } from './api/broker.js';
 import { registerAuthRoutes } from './api/auth.js';
 import { registerOAuthRoutes } from './api/oauth.js';
 import { registerExchangeRoutes } from './api/exchange.js';
+import { registerEscrowRoutes } from './api/escrow.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from './i18n/index.js';
 import { autoStartIfEnabled } from './services/scanner.js';
 import { startAllAdapters, stopAllAdapters } from './services/adapter-launcher.js';
@@ -109,6 +110,7 @@ await registerBrokerRoutes(fastify);
 await registerAuthRoutes(fastify);
 await registerOAuthRoutes(fastify);
 await registerExchangeRoutes(fastify);
+await registerEscrowRoutes(fastify);
 
 // Exchange: expire stale offers + timeout stuck verifications (every 5min)
 import { expireStale, timeoutVerifying } from './services/exchange-machine.js';

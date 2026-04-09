@@ -423,7 +423,9 @@
                 <label class="block text-xs font-medium text-ink-500 mb-1"><%= it.t.label_network %></label>
                 <select name="network" class="w-full px-3 py-2 border border-warm-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
                   <option value="mainnet">mainnet</option>
-                  <option value="testnet">testnet</option>
+                  <option value="testnet-10">testnet-10</option>
+                  <option value="testnet-11">testnet-11</option>
+                  <option value="testnet-12">testnet-12</option>
                 </select>
               </div>
             </div>

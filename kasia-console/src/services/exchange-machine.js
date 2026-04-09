@@ -14,13 +14,15 @@
 import { sqlite } from '../db/client.js';
 import { getVerifier } from './exchange-verifiers.js';
 import { executeHedge } from './trade-protocol-filter.js';
+import { sendCommandAsync } from './relay-manager.js';
 import crypto from 'crypto';
 
 // ── Valid Transitions ─────────────────────────────────────────
 
 const VALID_TRANSITIONS = {
   open:                     ['matched', 'cancelled', 'expired'],
-  matched:                  ['verifying', 'awaiting_manual_confirm', 'awaiting_oracle'],
+  matched:                  ['verifying', 'awaiting_manual_confirm', 'awaiting_oracle', 'escrow_locked'],
+  escrow_locked:            ['verifying', 'awaiting_manual_confirm', 'timed_out'],
   verifying:                ['completed', 'disputed', 'timed_out'],
   awaiting_manual_confirm:  ['completed', 'disputed', 'timed_out'],
   awaiting_oracle:          ['completed', 'failed', 'timed_out'],
@@ -97,6 +99,117 @@ function transition(offerId, newStatus, extra = {}) {
   return sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offerId);
 }
 
+// ── Escrow Integration ───────────────────────────────────────
+
+/**
+ * Check if an offer should use P2SH escrow.
+ * Condition: maker is a local Agent (has relay_node entry).
+ */
+function shouldUseEscrow(offer) {
+  if (!offer.maker) return false;
+  const local = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(offer.maker);
+  return !!local;
+}
+
+/**
+ * Get x-only pubkey for a local relay via IPC.
+ */
+async function getLocalPubkey32(address) {
+  const relay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(address);
+  if (!relay) throw new Error(`No relay for address ${address}`);
+  const result = await sendCommandAsync(relay.id, { type: 'get_pubkey' });
+  if (!result.pubkey32) throw new Error('get_pubkey returned no pubkey32');
+  return { pubkey32: result.pubkey32, relayId: relay.id };
+}
+
+/**
+ * Create escrow for a matched offer: compile contract + lock funds.
+ * Non-blocking — failure logs warning but does not throw.
+ */
+async function tryCreateAndLockEscrow(offer) {
+  try {
+    const { pubkey32, relayId } = await getLocalPubkey32(offer.maker);
+    // Initial simplification: all three roles use maker's key
+    // TODO: get taker pubkey from Agent Card, designate independent arbiter
+    const buyerPk32 = pubkey32;
+    const sellerPk32 = pubkey32;
+    const arbiterPk32 = pubkey32;
+
+    // 1. Create escrow contract
+    const createResult = await sendCommandAsync(relayId, {
+      type: 'create_escrow', buyerPk32, sellerPk32, arbiterPk32,
+    });
+    if (createResult.error) throw new Error(createResult.error);
+
+    // 2. Write escrow_states (status=created)
+    const escrowId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    sqlite.prepare(`
+      INSERT INTO escrow_states
+      (id, offer_id, initiator_relay_id, buyer_address, seller_address,
+       arbiter_address, p2sh_address, redeem_script_hex, amount_sompi, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'created', ?, ?)
+    `).run(
+      escrowId, offer.id, relayId,
+      offer.maker, offer.taker || 'pending', offer.maker,
+      createResult.p2shAddress, createResult.redeemScriptHex,
+      offer.give_amount || '0', now, now,
+    );
+
+    // 3. Lock funds into P2SH
+    const amountKas = (Number(offer.give_amount || 0) / 1e8).toString();
+    const lockResult = await sendCommandAsync(relayId, {
+      type: 'lock_escrow', p2shAddress: createResult.p2shAddress, amountKas,
+    });
+    if (lockResult.error) throw new Error(lockResult.error);
+
+    // 4. Update escrow status
+    sqlite.prepare(
+      "UPDATE escrow_states SET status = 'locked', lock_txid = ?, updated_at = ? WHERE id = ?"
+    ).run(lockResult.txId, new Date().toISOString(), escrowId);
+
+    // 5. Transition offer
+    transition(offer.id, 'escrow_locked');
+    console.log(`[escrow] ${offer.id.slice(0, 8)} locked ${amountKas} KAS → ${createResult.p2shAddress.slice(-12)} TX: ${lockResult.txId}`);
+    return true;
+  } catch (e) {
+    console.log(`[escrow] ${offer.id.slice(0, 8)} escrow failed (non-blocking): ${e.message}`);
+    return false;
+  }
+}
+
+/**
+ * Execute escrow on offer completion/dispute/timeout.
+ */
+async function tryExecuteEscrow(offerId, branch) {
+  const escrow = sqlite.prepare(
+    "SELECT * FROM escrow_states WHERE offer_id = ? AND status = 'locked'"
+  ).get(offerId);
+  if (!escrow) return; // no escrow for this offer
+
+  try {
+    const toAddress = branch === 0 ? escrow.seller_address : escrow.buyer_address;
+    const lockTime = (branch === 1 && escrow.deadline) ? escrow.deadline : 0;
+    const result = await sendCommandAsync(escrow.initiator_relay_id, {
+      type: 'execute_escrow',
+      p2shAddress: escrow.p2sh_address,
+      redeemScriptHex: escrow.redeem_script_hex,
+      branch, toAddress, lockTime,
+    });
+    if (result.error) throw new Error(result.error);
+
+    const statusMap = { 0: 'released', 1: 'refunded', 2: 'released' };
+    sqlite.prepare(
+      'UPDATE escrow_states SET status = ?, unlock_txid = ?, updated_at = ? WHERE id = ?'
+    ).run(statusMap[branch], result.txId, new Date().toISOString(), escrow.id);
+
+    const branchNames = ['release', 'refund', 'arbitrate'];
+    console.log(`[escrow] ${offerId.slice(0, 8)} ${branchNames[branch]} → ${toAddress.slice(-12)} TX: ${result.txId}`);
+  } catch (e) {
+    console.log(`[escrow] ${offerId.slice(0, 8)} execute failed: ${e.message}`);
+  }
+}
+
 // ── Accept Logic ──────────────────────────────────────────────
 
 /**
@@ -139,7 +252,22 @@ export function processAccept(msg) {
     accept_commitment: commitment,
   });
 
-  // Route to verification
+  // Try P2SH escrow (non-blocking — failure degrades gracefully)
+  if (shouldUseEscrow(matched)) {
+    tryCreateAndLockEscrow(matched).then(ok => {
+      if (ok) {
+        // escrow_locked → continue to verification
+        const updated = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(matched.id);
+        routeToVerification(updated);
+      } else {
+        // escrow failed, proceed without escrow
+        routeToVerification(matched);
+      }
+    });
+    return matched; // return immediately, escrow runs async
+  }
+
+  // Route to verification (no escrow path)
   return routeToVerification(matched);
 }
 
@@ -230,7 +358,9 @@ export function processManualConfirm(msg) {
   // Re-read and check if both confirmed
   const updated = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer.id);
   if (updated.maker_confirmed_at && updated.taker_confirmed_at) {
-    return transition(offer.id, 'completed');
+    const completed = transition(offer.id, 'completed');
+    tryExecuteEscrow(offer.id, 0); // release → seller
+    return completed;
   }
 
   return updated;
@@ -289,12 +419,13 @@ export function timeoutVerifying() {
   const now = new Date().toISOString();
   const stuck = sqlite.prepare(
     `SELECT id, verification FROM exchange_offers
-     WHERE protocol_status IN ('verifying', 'awaiting_manual_confirm', 'awaiting_oracle')
+     WHERE protocol_status IN ('verifying', 'awaiting_manual_confirm', 'awaiting_oracle', 'escrow_locked')
      AND expires_at IS NOT NULL AND expires_at < ?`
   ).all(now);
 
   for (const { id } of stuck) {
     transition(id, 'timed_out');
+    tryExecuteEscrow(id, 1); // refund → buyer
   }
 
   return stuck.length;
@@ -360,6 +491,7 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
       ).run(JSON.stringify(meta), new Date().toISOString(), offer_id);
 
       const completedOffer = transition(offer_id, 'completed', {});
+      tryExecuteEscrow(offer_id, 0); // release → seller
       console.log(`[exchange] offer ${offer_id.slice(0,8)} payment verified → completed (${vr.actualAmount} USDT, ${vr.confirmations}/${vr.required} conf)`);
 
       // Trigger hedge after cross_chain_tx verification → completed
@@ -427,6 +559,7 @@ export function processDispute({ offer_id, disputer_address, reason }) {
   ).run(JSON.stringify(meta), new Date().toISOString(), offer_id);
 
   transition(offer_id, 'disputed', {});
+  tryExecuteEscrow(offer_id, 2); // arbitrate
   console.log(`[exchange] offer ${offer_id.slice(0,8)} disputed by ${disputer_address.slice(-8)}: ${reason}`);
 
   return { ok: true, status: 'disputed' };

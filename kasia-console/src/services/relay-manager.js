@@ -43,11 +43,12 @@ export async function startRelay(relayNodeId) {
 
   // Ensure this agent's address is registered as 'local' identity
   // Without this, Scout won't recognize handshakes to this agent, and relation_states won't be created
-  const existingId = sqlite.prepare('SELECT id, identity_type FROM identities WHERE address = ? AND network = ?').get(account.address, account.network || 'mainnet');
+  const networkId = account.network || process.env.KASPA_NETWORK || 'mainnet';
+  const existingId = sqlite.prepare('SELECT id, identity_type FROM identities WHERE address = ? AND network = ?').get(account.address, networkId);
   if (!existingId) {
     const { randomUUID } = await import('crypto');
     const now = new Date().toISOString();
-    sqlite.prepare("INSERT INTO identities (id, network, address, display_name, identity_type, created_at, updated_at) VALUES (?, ?, ?, ?, 'local', ?, ?)").run(randomUUID(), account.network || 'mainnet', account.address, account.name, now, now);
+    sqlite.prepare("INSERT INTO identities (id, network, address, display_name, identity_type, created_at, updated_at) VALUES (?, ?, ?, ?, 'local', ?, ?)").run(randomUUID(), networkId, account.address, account.name, now, now);
     console.log(`[relay-manager] Created local identity for ${account.name}`);
   } else if (existingId.identity_type !== 'local') {
     sqlite.prepare("UPDATE identities SET identity_type = 'local' WHERE id = ?").run(existingId.id);
@@ -69,8 +70,8 @@ export async function startRelay(relayNodeId) {
     CONSOLE_URL: `http://localhost:${CONSOLE_PORT}`,
     INGEST_SECRET: ingestSecret,
     RELAY_NODE_ID: relayNodeId,
-    NETWORK: account.network || 'mainnet',
-    KASPA_NETWORK: account.network || 'mainnet',
+    NETWORK: account.network || process.env.KASPA_NETWORK || 'mainnet',
+    KASPA_NETWORK: account.network || process.env.KASPA_NETWORK || 'mainnet',
     KASPA_RPC_URL: rpcUrl,
     RELAY_MODE: relayMode,
     POLL_MS: String(account.poll_ms || 2000),
