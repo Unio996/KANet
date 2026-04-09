@@ -2,7 +2,8 @@
 
 > **修改任何代码前必读。** 一个文件，覆盖全系统。唯一权威开发者文档。
 > 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-09。
-> 4/9 更新：CEX 做市日限额硬校验（总计模式 + 可编辑 + Brain 感知）。MEXC getOrder/cancelOrder symbol 签名修复。_monitorSellMaker 超时变量修复。Gate.io executedQty 算法修复。trade_log.exchange 列（v51）。
+> 4/9 更新（下半场）：EXCHANGE_REGISTRY 贯通（共享文件 + getOrder/cancelOrder 迁移）。5 家 CEX 实盘验证全通过。scanner data→instructions 字段修正。Agent Focus Mode（v52，balanced/market_maker/social）。scanner per-agent 冷却。SELL_MAKER directive 修正。**里程碑：Sophie 自主卖出 2000 KAS on Gate.io。** 陷阱 #38-42。
+> 4/9 更新（上半场）：CEX 做市日限额硬校验（总计模式 + 可编辑 + Brain 感知）。MEXC getOrder/cancelOrder symbol 签名修复。_monitorSellMaker 超时变量修复。Gate.io executedQty 算法修复。trade_log.exchange 列（v51）。
 > 4/8 更新：stock-tracker 四层情报升级 + llama-server 推理引擎（RTX 5090）+ Spending Ledger 三项修复 + Adapter UI 重构（URL 可编辑+14 平台 catalog）+ Agent 安全护栏（6 条硬规则：禁泄余额/禁编技术细节/系统内部保密）。
 > 4/6 更新：技术债清零（v46/v47 DROP 两张表） + DATABASE.md 数据字典 + exchange 交割全流程（manual/cross_chain_tx/超时/争议/套利链路）。cross-chain-verify.mjs 独立模块。
 > 4/5 更新：pending_actions 意图队列（v44）— 意图与事实分离，修复 catch-up 重复握手双花。陷阱 #24-27。花费账本页 /ledger。IB Gateway 不随启动。
@@ -1004,11 +1005,45 @@ _executeHedge 支持 preferredCex 参数 + HEDGE_CEX_MAP（scanner 显示名→D
 
 37. **Gate.io getOrder executedQty 算法。** `filled_total / price` 是 USDT 金额除以价格——部分成交时精度有误差。正确算法：`amount - left`（原始量减剩余量，单位是 KAS）。位置：exchange-orders.js getOrder gateio 分支。
 
+38. **SELL_MAKER 日限额必须 fail-closed。** `/api/trade/daily-usage` 查询失败时拒绝执行，不放行。位置：action-executor.mjs executeSellMaker Step 0。
+
+39. **Bybit availableToWithdraw 可能是空字符串。** 空字符串是 falsy，`|| '0'` 会误判为 0。用 `availableToWithdraw || walletBalance` 兜底。位置：exchange-orders.js getBalance bybit case。
+
+40. **market_scanner 冷却必须 per-agent。** `_lastProactiveByAgent` Map 按 agent address 独立计时。全局共享会导致 Martin 消耗冷却后其他 Agent 全被拦。
+
+41. **scanner formatForBrain 核心数据必须放 instructions 不是 data。** context-builder 只注入 `s.instructions` 到 Brain prompt。`data` 字段是 metadata，不进 prompt。所有技能统一用 instructions。
+
+42. **SELL_ONLY 模式 directive 不是 "observation only"。** `hasOpportunity` 只看跨所价差，不考虑单向卖出。SELL_ONLY 时 directive 必须明确指示 Brain 执行 SELL_MAKER ACTION。
+
+### EXCHANGE_REGISTRY（唯一真相源）
+
+**文件：** `kasia-console/src/lib/exchange-registry.js`
+
+交易所元数据共享文件，trading.js（账户管理）和 exchange-orders.js（执行）共用。
+每个 entry 含：id / name / baseUrl / authStyle / kasPair / fields / min_order_usdt / orderbookUrl / orderbookParse / balanceField / notes。
+
+getOrder / cancelOrder 用 `def.authStyle` switch（不是 exchange name），用 `def.baseUrl` 和 `def.kasPair` 替代硬编码。
+
+### Agent Focus Mode（v52）
+
+**列：** `relay_nodes.focus`（balanced / market_maker / social）
+
+| 模式 | Brain proactive 看到 | 不看 |
+|------|---------------------|------|
+| balanced | 全部（默认） | — |
+| market_maker | SKILL DATA + 经济数据 | connections / outbound / 迟回复 |
+| social | 社交数据 | 做市数据 |
+
+**关键文件：** context-builder.mjs `_buildProactiveUser()` 入口读 `this.config.focus`，按模式跳过社交 sections。
+**UI：** agent-v2.eta Focus Mode 三选一卡片。
+**API：** GET/PUT `/api/relay/:id/mind-config` 含 focus 字段。
+
 ### 待实现
 
 - 信誉系统接入（reputation.js 骨架在，probe_address 未实现）
-- Binance/Kraken exchange_accounts 添加（用户有 API Key，待配置）
 - ✅ Arbitrage Tab 已上线（CEX Overview / Live Spreads / Active Offers / Hedge History）
+- ✅ 5 家 CEX 全链路验证通过（MEXC/Gate/Bybit/KuCoin/Bitget）
+- ✅ SELL_MAKER 全链路自主执行（Sophie Gate.io 2000 KAS 真实成交，2026-04-09）
 
 ---
 
