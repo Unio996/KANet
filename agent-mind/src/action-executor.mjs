@@ -56,6 +56,8 @@ const ACTION_REQUIRED_AUTHORITY = {
   VERIFY_PAYMENT:       'trade',
   POLYMARKET_ORDER:     'trade',
   MAKE_MARKET:          'trade',
+  SELL_MAKER:           'trade',
+  BUY_MAKER:            'trade',
   CANCEL_OFFERS:        'trade',
 
   // Moderate actions — need at least 'suggest' authority
@@ -229,6 +231,10 @@ export class ActionExecutor {
         return this.executeTradeAction({ ...action, type: 'verify_payment' });
       case 'MAKE_MARKET':
         return this.executeMakeMarket(action);
+      case 'SELL_MAKER':
+        return this.executeSellMaker(action);
+      case 'BUY_MAKER':
+        return this.executeSellMaker(action);  // 共用框架，side 由 action 推断（Phase 1b+）
       case 'CANCEL_OFFERS':
         return this.executeCancelOffers(action);
       case 'POLYMARKET_ORDER':
@@ -756,6 +762,225 @@ export class ActionExecutor {
 
     const anyOk = results.some(r => r.ok);
     return { ok: anyOk, results, hedgeCex };
+  }
+
+  /**
+   * Execute a maker sell order on a specified CEX + simultaneous /exchange improvement order.
+   * ACTION format: [ACTION:SELL_MAKER exchange=mexc qty=98 price=0.032124]
+   */
+  async executeSellMaker(action) {
+    const { consoleUrl, relayNodeId } = this.config;
+    const exchange = action.params?.exchange || action.exchange;
+    const suggestedQty = parseInt(action.params?.qty || action.qty) || 2000;
+    const agentName = this.config.agentName || 'unknown';
+
+    if (!exchange) return { ok: false, error: 'SELL_MAKER requires exchange parameter' };
+
+    // Step 0: 日限额硬校验（总限额，不是每所）
+    let remainingKas = Infinity;
+    try {
+      const usageRes = await fetchJson(`${consoleUrl}/api/trade/daily-usage`);
+      const total = usageRes?.total;
+      if (total) {
+        remainingKas = total.remaining_kas ?? Infinity;
+        if (remainingKas <= 0) {
+          console.log(`[SELL_MAKER] Daily limit reached: ${total.sold_kas}/${total.limit_kas} KAS`);
+          return { ok: false, error: `Daily sell limit reached (${total.sold_kas}/${total.limit_kas} KAS). Resets at midnight UTC.` };
+        }
+        if (total.pct_used >= 80) {
+          console.log(`[SELL_MAKER] Daily limit ${total.pct_used}% used — proceeding but Brain should reduce frequency`);
+        }
+      }
+    } catch (e) {
+      console.log(`[SELL_MAKER] daily-usage check failed: ${e.message} — proceeding`);
+    }
+
+    // Step 1: 刷新订单簿（不用 ACTION 里的过期价格）
+    let ob;
+    try {
+      const res = await fetchJson(`${consoleUrl}/api/trade/orderbook?exchange=${exchange}`);
+      ob = res?.orderbook;
+    } catch (e) {
+      return { ok: false, error: `Orderbook fetch failed: ${e.message}` };
+    }
+    if (!ob || ob.error || !ob.bid1) {
+      return { ok: false, error: `No orderbook data for ${exchange}` };
+    }
+
+    // Step 2: 重新计算执行参数
+    const bid1    = ob.bid1;
+    const bid1Qty = ob.bid1_qty ?? 0;
+    const execPrice = parseFloat((bid1 * 1.0001).toFixed(6));
+    const execQty   = Math.min(Math.floor(bid1Qty * 0.30), 2000, suggestedQty, Math.floor(remainingKas));
+
+    if (execQty < 10) {
+      console.log(`[SELL_MAKER] ${exchange} depth too thin (bid1_qty=${bid1Qty}), skip`);
+      return { ok: false, error: `Depth insufficient: bid1_qty=${bid1Qty}, min execQty=10` };
+    }
+
+    // Step 3: CEX 下限价 Maker 卖单
+    let cexOrderId;
+    try {
+      const orderRes = await fetchJson(`${consoleUrl}/api/trade/order`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          exchange,
+          side: 'SELL',
+          symbol: 'KASUSDT',
+          qty: execQty,
+          price: execPrice,
+          relayNodeId,
+        }),
+      });
+      if (!orderRes?.ok) throw new Error(orderRes?.error || 'Order rejected');
+      cexOrderId = orderRes.orderId;
+    } catch (e) {
+      return { ok: false, error: `CEX order failed: ${e.message}` };
+    }
+
+    console.log(`[SELL_MAKER] ${agentName} SELL ${execQty} KAS @${execPrice} on ${exchange}, orderId=${cexOrderId}`);
+
+    // Step 4: /exchange 改善单（比 CEX 价格稍高 0.02%，吸引 Taker 来 /exchange）
+    const improvePrice = parseFloat((execPrice * 1.0002).toFixed(6));
+    const wantUsdt     = parseFloat((execQty * improvePrice).toFixed(4));
+    let exchangeOfferId;
+    try {
+      const exRes = await fetchJson(`${consoleUrl}/api/exchange/publish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          relayNodeId,
+          give_asset: 'KAS', give_amount: String(execQty),
+          want_asset: 'USDT', want_amount: String(wantUsdt),
+          verification: 'manual',
+          expires_minutes: 30,
+        }),
+      });
+      exchangeOfferId = exRes?.offer_id || exRes?.id;
+      console.log(`[SELL_MAKER] /exchange improvement offer=${exchangeOfferId} @${improvePrice}`);
+    } catch (e) {
+      console.log(`[SELL_MAKER] /exchange improvement failed: ${e.message}`);
+    }
+
+    // Step 5: 异步监控（不阻塞返回）
+    this._monitorSellMaker({
+      exchange, cexOrderId, exchangeOfferId,
+      execQty, execPrice, relayNodeId, agentName,
+      startedAt: Date.now(),
+    }).catch(e => console.error(`[SELL_MAKER] monitor error: ${e.message}`));
+
+    this.memory.recordEvent({
+      type: 'sell_maker',
+      summary: `SELL_MAKER: ${execQty} KAS @${execPrice} on ${exchange}, cex=${cexOrderId}, exchange=${exchangeOfferId || 'none'}`,
+    });
+
+    return {
+      ok: true, exchange, cexOrderId,
+      exchangeOfferId: exchangeOfferId || null,
+      execQty, execPrice, status: 'monitoring',
+    };
+  }
+
+  /** Background monitor: poll CEX order status, cancel the other side on fill. */
+  async _monitorSellMaker({ exchange, cexOrderId, exchangeOfferId, execQty, execPrice, relayNodeId, agentName, startedAt }) {
+    const { consoleUrl } = this.config;
+    const POLL_MS  = 10_000;
+    const TIMEOUT  = 30 * 60 * 1000;
+    let activeExchangeOffer = exchangeOfferId; // mutable — cleared if cancelled/expired
+
+    while (Date.now() - startedAt < TIMEOUT) {
+      await new Promise(r => setTimeout(r, POLL_MS));
+
+      // ── Check CEX order status ──
+      let orderStatus;
+      try {
+        const res = await fetchJson(`${consoleUrl}/api/trade/order/${cexOrderId}?exchange=${exchange}`);
+        orderStatus = res?.status;
+      } catch { /* query failed, continue polling */ }
+
+      if (orderStatus === 'filled') {
+        console.log(`[SELL_MAKER] CEX ${cexOrderId} filled — cancelling /exchange`);
+        if (activeExchangeOffer) {
+          try {
+            await fetchJson(`${consoleUrl}/api/exchange/cancel`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ relayNodeId, offer_id: activeExchangeOffer }),
+            });
+          } catch (e) { console.log(`[SELL_MAKER] /exchange cancel failed: ${e.message}`); }
+        }
+        // 跟随单（链上存证）
+        try {
+          const feeRate = exchange === 'mexc' ? 0 : 0.001;
+          const netUsdt = parseFloat((execQty * execPrice * (1 - feeRate)).toFixed(4));
+          await fetchJson(`${consoleUrl}/api/exchange/publish`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              relayNodeId,
+              give_asset: 'KAS', give_amount: String(execQty),
+              want_asset: 'USDT', want_amount: String(netUsdt),
+              verification: 'manual', expires_minutes: 1,
+              metadata: JSON.stringify({
+                type: 'follow_through', sell_exchange: exchange,
+                sell_price: execPrice, maker_fee_pct: exchange === 'mexc' ? 0 : 0.10,
+                net_usdt: netUsdt, cex_order_id: cexOrderId, phase: '1a',
+              }),
+            }),
+          });
+          console.log(`[SELL_MAKER] follow-through posted`);
+        } catch (e) { console.log(`[SELL_MAKER] follow-through failed: ${e.message}`); }
+        return;
+      }
+
+      if (orderStatus === 'cancelled') {
+        console.log(`[SELL_MAKER] CEX ${cexOrderId} cancelled externally`);
+        if (activeExchangeOffer) {
+          try {
+            await fetchJson(`${consoleUrl}/api/exchange/cancel`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ relayNodeId, offer_id: activeExchangeOffer }),
+            });
+          } catch {}
+        }
+        return;
+      }
+
+      // ── Check /exchange offer status (V1 fix: bidirectional monitoring) ──
+      if (activeExchangeOffer) {
+        try {
+          const offerRes = await fetchJson(`${consoleUrl}/api/exchange/offers/${activeExchangeOffer}`);
+          const offerStatus = offerRes?.offer?.protocol_status || offerRes?.protocol_status;
+
+          if (offerStatus === 'completed' || offerStatus === 'matched') {
+            console.log(`[SELL_MAKER] /exchange offer ${activeExchangeOffer} filled — cancelling CEX order`);
+            try {
+              await fetchJson(`${consoleUrl}/api/trade/order/${cexOrderId}?exchange=${exchange}`, { method: 'DELETE' });
+            } catch (e) { console.log(`[SELL_MAKER] CEX cancel failed: ${e.message}`); }
+            return; // /exchange 成交不需要跟随单（它本身就是链上记录）
+          }
+
+          if (offerStatus === 'cancelled' || offerStatus === 'expired') {
+            activeExchangeOffer = null; // 改善单已失效，只继续监控 CEX
+          }
+        } catch { /* /exchange query failed, continue */ }
+      }
+    }
+
+    // 超时：取消两边
+    console.log(`[SELL_MAKER] TIMEOUT — cancelling cex=${cexOrderId} exchange=${activeExchangeOffer}`);
+    try { await fetchJson(`${consoleUrl}/api/trade/order/${cexOrderId}?exchange=${exchange}`, { method: 'DELETE' }); } catch {}
+    if (activeExchangeOffer) {
+      try {
+        await fetchJson(`${consoleUrl}/api/exchange/cancel`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relayNodeId, offer_id: activeExchangeOffer }),
+        });
+      } catch {}
+    }
   }
 
   /**

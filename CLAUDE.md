@@ -45,7 +45,7 @@
 - 确认这张表的用途和当前状态
 - 确认写入方和读取方
 - 确认是否是已删除表（account_relations v46 已删、interaction_records v47 已删）
-- migrate.js 版本号必须接当前最新版本后面（当前最新：v50）
+- migrate.js 版本号必须接当前最新版本后面（当前最新：v51）
 
 DATABASE.md 有改动时（新表/删表/加字段），必须同步更新文档后一起提交。
 

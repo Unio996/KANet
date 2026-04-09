@@ -8,7 +8,7 @@ import { sqlite } from '../db/client.js';
 import { encrypt, decrypt, makeTokenHint } from '../services/crypto.js';
 import { getConfig, setConfig } from '../data/settings/configs.js';
 import { getReply, getTriggerStatus, updateTriggerSettings, triggerProactive, triggerReflection } from '../services/mind-manager.js';
-import { placeOrder as placeExchangeOrder, cancelOrders as cancelExchangeOrders, getOpenOrders as getExchangeOpenOrders, getBalance as getExchangeBalance } from '../services/exchange-orders.js';
+import { placeOrder as placeExchangeOrder, cancelOrders as cancelExchangeOrders, getOpenOrders as getExchangeOpenOrders, getBalance as getExchangeBalance, getOrderbook as getExchangeOrderbook, getOrder as getExchangeOrder, cancelOrder as cancelExchangeOrder } from '../services/exchange-orders.js';
 import { verifyIngestRequest } from '../services/ingest-auth.js';
 import { nowIso } from '../lib/time.js';
 import { quickStart, completeExecution, failExecution } from '../services/execution-state.js';
@@ -543,9 +543,10 @@ export async function registerTradingRoutes(fastify) {
       if (authStyle === 'bybit' && baseUrl) {
         const ts = Date.now().toString();
         const recvWindow = '5000';
-        const preSign = ts + apiKey + recvWindow;
+        const qs = 'accountType=UNIFIED';
+        const preSign = ts + apiKey + recvWindow + qs;
         const sign = crypto.createHmac('sha256', apiSecret).update(preSign).digest('hex');
-        const res = await fetch(`${baseUrl}/v5/account/wallet-balance?accountType=UNIFIED`, {
+        const res = await fetch(`${baseUrl}/v5/account/wallet-balance?${qs}`, {
           headers: { 'X-BAPI-API-KEY': apiKey, 'X-BAPI-SIGN': sign, 'X-BAPI-TIMESTAMP': ts, 'X-BAPI-RECV-WINDOW': recvWindow, 'Content-Type': 'application/json' },
           signal: AbortSignal.timeout(8000),
         });
@@ -692,6 +693,27 @@ export async function registerTradingRoutes(fastify) {
     { exchange: 'bitget', url: 'https://api.bitget.com/api/v2/spot/market/tickers?symbol=KASUSDT',       parse: d => ({ ask: parseFloat(d.data[0].askPr), bid: parseFloat(d.data[0].bidPr) }) },
     { exchange: 'htx',    url: 'https://api.huobi.pro/market/detail/merged?symbol=kasusdt',              parse: d => ({ ask: parseFloat(d.tick.ask[0]), bid: parseFloat(d.tick.bid[0]) }) },
   ];
+
+  // GET /api/trade/orderbook — realtime orderbook (no cache)
+  fastify.get('/api/trade/orderbook', async (request, reply) => {
+    const { exchange, exchanges, limit } = request.query;
+    const depthLimit = Math.min(Math.max(parseInt(limit) || 5, 1), 20);
+
+    // Multi-exchange parallel query
+    if (exchanges) {
+      const ids = exchanges.split(',').map(s => s.trim()).filter(Boolean);
+      const results = await Promise.allSettled(ids.map(id => getExchangeOrderbook(id, depthLimit)));
+      const orderbooks = results.map((r, i) =>
+        r.status === 'fulfilled' ? r.value : { exchange: ids[i], error: r.reason?.message || 'failed' }
+      );
+      return reply.send({ orderbooks });
+    }
+
+    // Single exchange query
+    if (!exchange) return reply.code(400).send({ error: 'exchange or exchanges parameter required' });
+    const orderbook = await getExchangeOrderbook(exchange, depthLimit);
+    return reply.send({ orderbook });
+  });
 
   fastify.get('/api/trade/spreads', async (request, reply) => {
     // Check cache (30s)
@@ -940,17 +962,7 @@ export async function registerTradingRoutes(fastify) {
     }
   });
 
-  // GET /api/trade/orderbook — proxy depth (avoids CORS)
-  fastify.get('/api/trade/orderbook', async (request, reply) => {
-    try {
-      // Always use MEXC for orderbook (most liquid KAS market)
-      const res = await fetch('https://api.mexc.com/api/v3/depth?symbol=KASUSDT&limit=15');
-      const data = await res.json();
-      return reply.send(data);
-    } catch (err) {
-      return reply.code(500).send({ error: err.message });
-    }
-  });
+  // GET /api/trade/orderbook — replaced by unified version above (near /api/trade/spreads)
 
   // ── Agent Trading Config ──────────────────────────────────────────────────
 
@@ -1288,7 +1300,7 @@ export async function registerTradingRoutes(fastify) {
   // POST /api/trade/order — place a single signed order (all exchanges)
   // Enforces trading limits from agent config (hard gate, not just advice)
   fastify.post('/api/trade/order', async (request, reply) => {
-    const { symbol, side, price, qty, relayNodeId } = request.body || {};
+    const { symbol, side, price, qty, relayNodeId, exchange: exchangeParam } = request.body || {};
     if (!symbol || !side || !qty) {
       return reply.code(400).send({ error: 'symbol, side, and qty required' });
     }
@@ -1318,7 +1330,25 @@ export async function registerTradingRoutes(fastify) {
       return reply.send({ ok: true, dryRun: true, message: `DRY-RUN: would ${side} ${qty} ${symbol} @ ${price || 'MARKET'}` });
     }
 
-    const creds = getCredentials();
+    // 按 exchange 查账户（可选），或用默认账户
+    let creds;
+    if (exchangeParam) {
+      const row = sqlite.prepare(
+        'SELECT * FROM exchange_accounts WHERE exchange = ? ORDER BY is_default DESC LIMIT 1'
+      ).get(exchangeParam);
+      if (!row) return reply.code(400).send({ error: `No account configured for exchange: ${exchangeParam}` });
+      try {
+        const apiKey = decrypt(row.api_key_encrypted);
+        const apiSecret = decrypt(row.api_secret_encrypted);
+        const extra = row.extra_encrypted ? JSON.parse(decrypt(row.extra_encrypted)) : {};
+        const def = EXCHANGE_REGISTRY.find(e => e.id === row.exchange);
+        creds = { apiKey, apiSecret, extra, exchange: row.exchange, baseUrl: row.base_url || def?.baseUrl, def, label: row.label, row };
+      } catch {
+        return reply.code(500).send({ error: `Failed to decrypt credentials for ${exchangeParam}` });
+      }
+    } else {
+      creds = getCredentials();
+    }
     if (!creds) return reply.code(400).send({ error: 'No exchange account configured' });
 
     const result = await placeExchangeOrder({
@@ -1335,13 +1365,23 @@ export async function registerTradingRoutes(fastify) {
         ? (sqlite.prepare('SELECT name FROM relay_nodes WHERE id = ?').get(relayNodeId)?.name || 'unknown')
         : 'owner';
       sqlite.prepare(`
-        INSERT INTO trade_log (id, relay_node_id, agent_name, source, side, symbol, qty, price, cost_usdt, order_id, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO trade_log (id, relay_node_id, agent_name, source, side, symbol, qty, price, cost_usdt, order_id, status, exchange, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         randomUUID(), relayNodeId || null, agentName, source,
         side, symbol, qty, price || 0, (qty * (price || 0)),
-        result.orderId || null, 'placed', new Date().toISOString()
+        result.orderId || null, 'placed', creds.exchange || exchangeParam || null,
+        new Date().toISOString()
       );
+      // Record chain_event for daily limit tracking
+      if (side === 'SELL') {
+        recordChainEvent({
+          txid: result.orderId || randomUUID(),
+          eventType: 'cex_sell_placed',
+          observedBy: 'system',
+          payload: { exchange: creds.exchange || exchangeParam, qty, price: price || 0, orderId: result.orderId, source, agentName },
+        });
+      }
     }
 
     return reply.send({ ...result, dryRun: false });
@@ -1519,55 +1559,138 @@ export async function registerTradingRoutes(fastify) {
 
   // ── Atomic operations for Agent (query single order, cancel single order) ──
 
-  // GET /api/trade/order/:orderId — check single order status
+  // GET /api/trade/order/:orderId — check single order status (all exchanges)
   fastify.get('/api/trade/order/:orderId', async (request, reply) => {
     const { orderId } = request.params;
-    const symbol = request.query.symbol || 'KASUSDT';
-    const creds = getCredentials();
-    if (!creds) return reply.code(400).send({ error: 'No exchange account' });
+    const { exchange: exchangeParam } = request.query;
 
-    const params = `symbol=${symbol}&orderId=${orderId}&timestamp=${Date.now()}`;
-    const signature = hmacSign(params, creds.apiSecret);
-    try {
-      const res = await fetch(`${creds.baseUrl || creds.def.baseUrl}/order?${params}&signature=${signature}`, {
-        headers: { [creds.def.headerName]: creds.apiKey },
-      });
-      const data = await res.json();
-      return reply.send({
-        orderId: data.orderId,
-        status: data.status, // NEW, FILLED, PARTIALLY_FILLED, CANCELED
-        side: data.side,
-        price: parseFloat(data.price || 0),
-        origQty: parseFloat(data.origQty || 0),
-        executedQty: parseFloat(data.executedQty || 0),
-        remainingQty: parseFloat(data.origQty || 0) - parseFloat(data.executedQty || 0),
-        filled: data.status === 'FILLED',
-        raw: data,
-      });
-    } catch (err) {
-      return reply.code(500).send({ error: err.message });
+    let creds;
+    if (exchangeParam) {
+      const row = sqlite.prepare('SELECT * FROM exchange_accounts WHERE exchange = ? ORDER BY is_default DESC LIMIT 1').get(exchangeParam);
+      if (!row) return reply.code(400).send({ error: `No account for exchange: ${exchangeParam}` });
+      try {
+        const apiKey = decrypt(row.api_key_encrypted);
+        const apiSecret = decrypt(row.api_secret_encrypted);
+        const extra = row.extra_encrypted ? JSON.parse(decrypt(row.extra_encrypted)) : {};
+        creds = { exchange: row.exchange, apiKey, apiSecret, passphrase: extra.passphrase, baseUrl: row.base_url };
+      } catch { return reply.code(500).send({ error: 'Decrypt failed' }); }
+    } else {
+      const def = getCredentials();
+      if (!def) return reply.code(400).send({ error: 'No exchange account' });
+      creds = { exchange: def.exchange, apiKey: def.apiKey, apiSecret: def.apiSecret, passphrase: def.extra?.passphrase, baseUrl: def.baseUrl || def.def?.baseUrl };
     }
+
+    const result = await getExchangeOrder(creds, orderId);
+    return reply.send(result);
   });
 
-  // DELETE /api/trade/order/:orderId — cancel single order
+  // DELETE /api/trade/order/:orderId — cancel single order (all exchanges)
   fastify.delete('/api/trade/order/:orderId', async (request, reply) => {
     const { orderId } = request.params;
-    const symbol = request.query.symbol || 'KASUSDT';
-    const creds = getCredentials();
-    if (!creds) return reply.code(400).send({ error: 'No exchange account' });
+    const { exchange: exchangeParam, symbol: symbolParam } = request.query;
 
-    const params = `symbol=${symbol}&orderId=${orderId}&timestamp=${Date.now()}`;
-    const signature = hmacSign(params, creds.apiSecret);
-    try {
-      const res = await fetch(`${creds.baseUrl || creds.def.baseUrl}/order?${params}&signature=${signature}`, {
-        method: 'DELETE',
-        headers: { [creds.def.headerName]: creds.apiKey },
-      });
-      const data = await res.json();
-      return reply.send({ ok: true, cancelled: data });
-    } catch (err) {
-      return reply.code(500).send({ ok: false, error: err.message });
+    let creds;
+    if (exchangeParam) {
+      const row = sqlite.prepare('SELECT * FROM exchange_accounts WHERE exchange = ? ORDER BY is_default DESC LIMIT 1').get(exchangeParam);
+      if (!row) return reply.code(400).send({ error: `No account for exchange: ${exchangeParam}` });
+      try {
+        const apiKey = decrypt(row.api_key_encrypted);
+        const apiSecret = decrypt(row.api_secret_encrypted);
+        const extra = row.extra_encrypted ? JSON.parse(decrypt(row.extra_encrypted)) : {};
+        creds = { exchange: row.exchange, apiKey, apiSecret, passphrase: extra.passphrase, baseUrl: row.base_url };
+      } catch { return reply.code(500).send({ error: 'Decrypt failed' }); }
+    } else {
+      const def = getCredentials();
+      if (!def) return reply.code(400).send({ error: 'No exchange account' });
+      creds = { exchange: def.exchange, apiKey: def.apiKey, apiSecret: def.apiSecret, passphrase: def.extra?.passphrase, baseUrl: def.baseUrl || def.def?.baseUrl };
     }
+
+    const result = await cancelExchangeOrder(creds, orderId, symbolParam || 'KAS/USDT');
+    return reply.send(result);
+  });
+
+  // ── Daily Usage & Limits ────────────────────────────────────────────────
+
+  // Initialize default daily limit if not set
+  getConfig('daily_kas_sell_limit').then(v => {
+    if (!v) setConfig('daily_kas_sell_limit', '10000', 'trade_limits');
+  });
+
+  // GET /api/trade/daily-usage — total daily sell volume vs single limit
+  fastify.get('/api/trade/daily-usage', async (request, reply) => {
+    const date = request.query.date || new Date().toISOString().slice(0, 10);
+    const dayStart = `${date}T00:00:00.000Z`;
+    const dayEnd = `${date}T23:59:59.999Z`;
+
+    const limitKas = parseInt(await getConfig('daily_kas_sell_limit') || '10000');
+
+    // Primary source: cex_sell_placed chain_events (written by POST /api/trade/order)
+    const rows = sqlite.prepare(`
+      SELECT json_extract(payload, '$.exchange') as exchange,
+             CAST(json_extract(payload, '$.qty') AS REAL) as qty
+      FROM chain_events
+      WHERE event_type = 'cex_sell_placed'
+        AND observed_at >= ? AND observed_at < ?
+    `).all(dayStart, dayEnd);
+
+    // Supplement: hedge_placed SELL (may bypass /api/trade/order)
+    const hedgeRows = sqlite.prepare(`
+      SELECT json_extract(payload, '$.exchange') as exchange,
+             CAST(json_extract(payload, '$.qty') AS REAL) as qty
+      FROM chain_events
+      WHERE event_type = 'hedge_placed'
+        AND json_extract(payload, '$.side') = 'SELL'
+        AND observed_at >= ? AND observed_at < ?
+    `).all(dayStart, dayEnd);
+
+    // Aggregate by exchange
+    const byExchange = {};
+    for (const r of [...rows, ...hedgeRows]) {
+      if (r.exchange) byExchange[r.exchange] = (byExchange[r.exchange] || 0) + (r.qty || 0);
+    }
+
+    // Per-exchange breakdown (diagnostic, not control)
+    const accounts = sqlite.prepare(
+      'SELECT exchange, label FROM exchange_accounts ORDER BY is_default DESC'
+    ).all();
+    const exchanges = accounts.map(a => {
+      const sold = Math.round(byExchange[a.exchange] || 0);
+      const def = EXCHANGE_REGISTRY.find(e => e.id === a.exchange);
+      return {
+        exchange: a.exchange,
+        label: a.label || def?.name || a.exchange.toUpperCase(),
+        sold_kas: sold,
+      };
+    });
+
+    const totalSold = exchanges.reduce((s, e) => s + e.sold_kas, 0);
+    const pctUsed = limitKas > 0 ? Math.min(100, Math.round((totalSold / limitKas) * 100)) : 0;
+
+    // Per-exchange pct (relative to total limit, for UI bar sizing)
+    for (const e of exchanges) {
+      e.pct_used = limitKas > 0 ? Math.min(100, Math.round((e.sold_kas / limitKas) * 100)) : 0;
+    }
+
+    return reply.send({
+      date,
+      exchanges,
+      total: {
+        sold_kas: totalSold,
+        limit_kas: limitKas,
+        remaining_kas: Math.max(0, limitKas - totalSold),
+        pct_used: pctUsed,
+      },
+    });
+  });
+
+  // PUT /api/trade/daily-limit — edit daily sell limit
+  fastify.put('/api/trade/daily-limit', async (request, reply) => {
+    const { limit_kas } = request.body || {};
+    if (!limit_kas || isNaN(limit_kas) || limit_kas < 100) {
+      return reply.code(400).send({ error: 'limit_kas must be a number >= 100' });
+    }
+    await setConfig('daily_kas_sell_limit', String(Math.floor(limit_kas)), 'trade_limits');
+    return reply.send({ ok: true, limit_kas: Math.floor(limit_kas) });
   });
 
   // ── Trade Log & Performance ───────────────────────────────────────────────

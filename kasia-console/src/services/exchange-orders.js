@@ -105,8 +105,9 @@ export async function getOpenOrders(params) {
 
 // ── Binance-like (MEXC, Binance) ────────────────────────────────────────────
 
-async function placeBinanceLike({ baseUrl, headerName, apiKey, apiSecret, symbol, side, price, qty }) {
-  const qs = `symbol=${symbol}&side=${side}&type=LIMIT&quantity=${qty}&price=${price}&timestamp=${Date.now()}`;
+async function placeBinanceLike({ baseUrl, headerName, apiKey, apiSecret, symbol, kasPair, side, price, qty }) {
+  const pair = kasPair || symbol.replace(/[^A-Za-z0-9]/g, '');
+  const qs = `symbol=${pair}&side=${side}&type=LIMIT&quantity=${qty}&price=${price}&timestamp=${Date.now()}`;
   const sig = hmac256(apiSecret, qs);
   const res = await fetch(`${baseUrl}/order?${qs}&signature=${sig}`, {
     method: 'POST', headers: { [headerName]: apiKey },
@@ -118,8 +119,9 @@ async function placeBinanceLike({ baseUrl, headerName, apiKey, apiSecret, symbol
   return { ok: true, orderId: data.orderId, status: data.status, executedQty: parseFloat(data.executedQty || 0), raw: data };
 }
 
-async function cancelBinanceLike({ baseUrl, headerName, apiKey, apiSecret, symbol }) {
-  const qs = `symbol=${symbol}&timestamp=${Date.now()}`;
+async function cancelBinanceLike({ baseUrl, headerName, apiKey, apiSecret, symbol, kasPair }) {
+  const pair = kasPair || symbol.replace(/[^A-Za-z0-9]/g, '');
+  const qs = `symbol=${pair}&timestamp=${Date.now()}`;
   const sig = hmac256(apiSecret, qs);
   const res = await fetch(`${baseUrl}/openOrders?${qs}&signature=${sig}`, {
     method: 'DELETE', headers: { [headerName]: apiKey },
@@ -127,8 +129,9 @@ async function cancelBinanceLike({ baseUrl, headerName, apiKey, apiSecret, symbo
   return { ok: true, cancelled: await res.json() };
 }
 
-async function openOrdersBinanceLike({ baseUrl, headerName, apiKey, apiSecret, symbol }) {
-  const qs = `symbol=${symbol}&timestamp=${Date.now()}`;
+async function openOrdersBinanceLike({ baseUrl, headerName, apiKey, apiSecret, symbol, kasPair }) {
+  const pair = kasPair || symbol.replace(/[^A-Za-z0-9]/g, '');
+  const qs = `symbol=${pair}&timestamp=${Date.now()}`;
   const sig = hmac256(apiSecret, qs);
   const res = await fetch(`${baseUrl}/openOrders?${qs}&signature=${sig}`, {
     headers: { [headerName]: apiKey },
@@ -524,9 +527,10 @@ export async function getBalance(account) {
         const bybitBase = baseUrl || 'https://api.bybit.com';
         const bybitTs = Date.now().toString();
         const recvWindow = '5000';
-        const preSign = bybitTs + apiKey + recvWindow;
+        const qs = 'accountType=UNIFIED';
+        const preSign = bybitTs + apiKey + recvWindow + qs;
         const sig = hmac256(apiSecret, preSign);
-        const res = await fetch(`${bybitBase}/v5/account/wallet-balance?accountType=UNIFIED`, {
+        const res = await fetch(`${bybitBase}/v5/account/wallet-balance?${qs}`, {
           headers: {
             'X-BAPI-API-KEY': apiKey, 'X-BAPI-SIGN': sig,
             'X-BAPI-TIMESTAMP': bybitTs, 'X-BAPI-RECV-WINDOW': recvWindow,
@@ -542,8 +546,8 @@ export async function getBalance(account) {
         const usdtC = coins.find(c => c.coin === 'USDT');
         return {
           exchange,
-          kas: kasC ? parseFloat(parseFloat(kasC.availableToWithdraw).toFixed(4)) : 0,
-          usdt: usdtC ? parseFloat(parseFloat(usdtC.availableToWithdraw).toFixed(2)) : 0,
+          kas: kasC ? parseFloat(parseFloat(kasC.availableToWithdraw || '0').toFixed(4)) || 0 : 0,
+          usdt: usdtC ? parseFloat(parseFloat(usdtC.availableToWithdraw || '0').toFixed(2)) || 0 : 0,
           timestamp: ts, error: null,
         };
       }
@@ -658,5 +662,293 @@ export async function getBalance(account) {
     }
   } catch (err) {
     return { exchange, kas: null, usdt: null, timestamp: ts, error: err.message };
+  }
+}
+
+// ── Order Status Query ────────────────────────────────────────────────────
+
+/**
+ * Get single order status from any supported exchange.
+ * Returns unified format: { orderId, status, filled, executedQty, error }
+ * status is normalized to: 'new' | 'filled' | 'partial' | 'cancelled' | 'unknown'
+ */
+export async function getOrder(account, orderId, symbol = 'KASUSDT') {
+  const { exchange, apiKey, apiSecret, passphrase, baseUrl } = account;
+  try {
+    switch (exchange) {
+      case 'mexc': {
+        const url = baseUrl || 'https://api.mexc.com/api/v3';
+        const pair = symbol.replace(/[^A-Za-z0-9]/g, '');
+        const qs = `symbol=${pair}&orderId=${orderId}&timestamp=${Date.now()}`;
+        const sig = hmac256(apiSecret, qs);
+        const res = await fetch(`${url}/order?${qs}&signature=${sig}`, {
+          headers: { 'X-MEXC-APIKEY': apiKey }, signal: AbortSignal.timeout(5000),
+        });
+        const d = await res.json();
+        const st = (d.status || '').toUpperCase();
+        return {
+          orderId: d.orderId, executedQty: parseFloat(d.executedQty || 0),
+          status: st === 'FILLED' ? 'filled' : st === 'CANCELED' ? 'cancelled' : st === 'PARTIALLY_FILLED' ? 'partial' : st === 'NEW' ? 'new' : 'unknown',
+          filled: st === 'FILLED', error: null, raw: d,
+        };
+      }
+      case 'bybit': {
+        const url = baseUrl || 'https://api.bybit.com';
+        const ts = Date.now().toString(); const rw = '5000';
+        const qs = `category=spot&orderId=${orderId}`;
+        const sig = hmac256(apiSecret, ts + apiKey + rw + qs);
+        const res = await fetch(`${url}/v5/order/realtime?${qs}`, {
+          headers: { 'X-BAPI-API-KEY': apiKey, 'X-BAPI-SIGN': sig, 'X-BAPI-TIMESTAMP': ts, 'X-BAPI-RECV-WINDOW': rw },
+          signal: AbortSignal.timeout(5000),
+        });
+        const d = await res.json();
+        const o = d.result?.list?.[0];
+        if (!o) return { orderId, status: 'unknown', filled: false, executedQty: 0, error: d.retMsg || 'not found' };
+        const st = (o.orderStatus || '').toLowerCase();
+        return {
+          orderId: o.orderId, executedQty: parseFloat(o.cumExecQty || 0),
+          status: st === 'filled' ? 'filled' : st === 'cancelled' ? 'cancelled' : st === 'partiallyfilled' ? 'partial' : st === 'new' ? 'new' : 'unknown',
+          filled: st === 'filled', error: null, raw: o,
+        };
+      }
+      case 'kucoin': {
+        const url = baseUrl || 'https://api.kucoin.com';
+        const ts = Date.now().toString();
+        const path = `/api/v1/orders/${orderId}`;
+        const sig = hmac256Base64(apiSecret, ts + 'GET' + path);
+        const ppSig = hmac256Base64(apiSecret, passphrase || '');
+        const res = await fetch(`${url}${path}`, {
+          headers: { 'KC-API-KEY': apiKey, 'KC-API-SIGN': sig, 'KC-API-TIMESTAMP': ts, 'KC-API-PASSPHRASE': ppSig, 'KC-API-KEY-VERSION': '2' },
+          signal: AbortSignal.timeout(5000),
+        });
+        const d = await res.json();
+        const o = d.data;
+        if (!o) return { orderId, status: 'unknown', filled: false, executedQty: 0, error: d.msg || 'not found' };
+        const active = o.isActive;
+        const done = parseFloat(o.dealSize || 0);
+        return {
+          orderId: o.id, executedQty: done,
+          status: !active && done > 0 ? 'filled' : !active ? 'cancelled' : 'new',
+          filled: !active && done > 0, error: null, raw: o,
+        };
+      }
+      case 'bitget': {
+        const url = baseUrl || 'https://api.bitget.com';
+        const ts = Date.now().toString();
+        const path = `/api/v2/spot/trade/orderInfo?orderId=${orderId}`;
+        const sig = hmac256Base64(apiSecret, ts + 'GET' + path);
+        const res = await fetch(`${url}${path}`, {
+          headers: { 'ACCESS-KEY': apiKey, 'ACCESS-SIGN': sig, 'ACCESS-TIMESTAMP': ts, 'ACCESS-PASSPHRASE': passphrase || '' },
+          signal: AbortSignal.timeout(5000),
+        });
+        const d = await res.json();
+        const o = Array.isArray(d.data) ? d.data[0] : d.data;
+        if (!o) return { orderId, status: 'unknown', filled: false, executedQty: 0, error: d.msg || 'not found' };
+        const st = (o.status || '').toLowerCase();
+        return {
+          orderId: o.orderId, executedQty: parseFloat(o.baseVolume || 0),
+          status: st === 'filled' || st === 'full_fill' ? 'filled' : st === 'cancelled' || st === 'canceled' ? 'cancelled' : st === 'partial_fill' ? 'partial' : st === 'new' || st === 'live' ? 'new' : 'unknown',
+          filled: st === 'filled' || st === 'full_fill', error: null, raw: o,
+        };
+      }
+      case 'gateio': {
+        const url = baseUrl || 'https://api.gateio.ws/api/v4';
+        const path = `/spot/orders/${orderId}?currency_pair=KAS_USDT`;
+        const ts = Math.floor(Date.now() / 1000).toString();
+        const bodyHash = sha512Hex('');
+        const signStr = `GET\n/api/v4${path.split('?')[0]}\n${path.includes('?') ? path.split('?')[1] : ''}\n${bodyHash}\n${ts}`;
+        const sig = hmac512Hex(apiSecret, signStr);
+        const res = await fetch(`${url.replace('/api/v4','')}${'/api/v4'}${path}`, {
+          headers: { 'KEY': apiKey, 'SIGN': sig, 'Timestamp': ts },
+          signal: AbortSignal.timeout(5000),
+        });
+        const o = await res.json();
+        if (o.message) return { orderId, status: 'unknown', filled: false, executedQty: 0, error: o.message };
+        const st = (o.status || '').toLowerCase();
+        return {
+          orderId: o.id, executedQty: parseFloat(o.amount || 0) - parseFloat(o.left || 0),
+          status: st === 'closed' ? 'filled' : st === 'cancelled' ? 'cancelled' : st === 'open' ? 'new' : 'unknown',
+          filled: st === 'closed', error: null, raw: o,
+        };
+      }
+      default:
+        return { orderId, status: 'unknown', filled: false, executedQty: 0, error: `unsupported: ${exchange}` };
+    }
+  } catch (err) {
+    return { orderId, status: 'unknown', filled: false, executedQty: 0, error: err.message };
+  }
+}
+
+/**
+ * Cancel a single order on any supported exchange.
+ * Returns { ok, error }
+ */
+export async function cancelOrder(account, orderId, symbol = 'KASUSDT') {
+  const { exchange, apiKey, apiSecret, passphrase, baseUrl } = account;
+  try {
+    switch (exchange) {
+      case 'mexc': {
+        const url = baseUrl || 'https://api.mexc.com/api/v3';
+        const pair = symbol.replace(/[^A-Za-z0-9]/g, '');
+        const qs = `symbol=${pair}&orderId=${orderId}&timestamp=${Date.now()}`;
+        const sig = hmac256(apiSecret, qs);
+        const res = await fetch(`${url}/order?${qs}&signature=${sig}`, {
+          method: 'DELETE', headers: { 'X-MEXC-APIKEY': apiKey }, signal: AbortSignal.timeout(5000),
+        });
+        const d = await res.json();
+        return { ok: !d.code || d.code === 200, error: d.msg || null };
+      }
+      case 'bybit': {
+        const url = baseUrl || 'https://api.bybit.com';
+        const ts = Date.now().toString(); const rw = '5000';
+        const body = JSON.stringify({ category: 'spot', orderId });
+        const sig = hmac256(apiSecret, ts + apiKey + rw + body);
+        const res = await fetch(`${url}/v5/order/cancel`, {
+          method: 'POST', body,
+          headers: { 'Content-Type': 'application/json', 'X-BAPI-API-KEY': apiKey, 'X-BAPI-SIGN': sig, 'X-BAPI-TIMESTAMP': ts, 'X-BAPI-RECV-WINDOW': rw },
+          signal: AbortSignal.timeout(5000),
+        });
+        const d = await res.json();
+        return { ok: d.retCode === 0, error: d.retMsg || null };
+      }
+      case 'kucoin': {
+        const url = baseUrl || 'https://api.kucoin.com';
+        const ts = Date.now().toString();
+        const path = `/api/v1/orders/${orderId}`;
+        const sig = hmac256Base64(apiSecret, ts + 'DELETE' + path);
+        const ppSig = hmac256Base64(apiSecret, passphrase || '');
+        const res = await fetch(`${url}${path}`, {
+          method: 'DELETE',
+          headers: { 'KC-API-KEY': apiKey, 'KC-API-SIGN': sig, 'KC-API-TIMESTAMP': ts, 'KC-API-PASSPHRASE': ppSig, 'KC-API-KEY-VERSION': '2' },
+          signal: AbortSignal.timeout(5000),
+        });
+        const d = await res.json();
+        return { ok: d.code === '200000', error: d.msg || null };
+      }
+      case 'bitget': {
+        const url = baseUrl || 'https://api.bitget.com';
+        const ts = Date.now().toString();
+        const path = '/api/v2/spot/trade/cancel-order';
+        const body = JSON.stringify({ orderId, symbol: symbol.replace(/[^A-Z]/g, '') });
+        const sig = hmac256Base64(apiSecret, ts + 'POST' + path + body);
+        const res = await fetch(`${url}${path}`, {
+          method: 'POST', body,
+          headers: { 'Content-Type': 'application/json', 'ACCESS-KEY': apiKey, 'ACCESS-SIGN': sig, 'ACCESS-TIMESTAMP': ts, 'ACCESS-PASSPHRASE': passphrase || '' },
+          signal: AbortSignal.timeout(5000),
+        });
+        const d = await res.json();
+        return { ok: d.code === '00000', error: d.msg || null };
+      }
+      case 'gateio': {
+        const url = baseUrl || 'https://api.gateio.ws/api/v4';
+        const path = `/spot/orders/${orderId}`;
+        const qs = 'currency_pair=KAS_USDT';
+        const ts = Math.floor(Date.now() / 1000).toString();
+        const bodyHash = sha512Hex('');
+        const signStr = `DELETE\n/api/v4${path}\n${qs}\n${bodyHash}\n${ts}`;
+        const sig = hmac512Hex(apiSecret, signStr);
+        const res = await fetch(`${url}${path}?${qs}`, {
+          method: 'DELETE', headers: { 'KEY': apiKey, 'SIGN': sig, 'Timestamp': ts },
+          signal: AbortSignal.timeout(5000),
+        });
+        const d = await res.json();
+        return { ok: !d.message, error: d.message || null };
+      }
+      default:
+        return { ok: false, error: `unsupported: ${exchange}` };
+    }
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+// ── Orderbook Query ───────────────────────────────────────────────────────
+
+const ORDERBOOK_ENDPOINTS = {
+  mexc: {
+    url: (limit) => `https://api.mexc.com/api/v3/depth?symbol=KASUSDT&limit=${limit}`,
+    parse: (d) => ({ asks: d.asks, bids: d.bids }),
+  },
+  gate: {
+    url: (limit) => `https://api.gateio.ws/api/v4/spot/order_book?currency_pair=KAS_USDT&limit=${limit}`,
+    parse: (d) => ({ asks: d.asks, bids: d.bids }),
+  },
+  gateio: {
+    url: (limit) => `https://api.gateio.ws/api/v4/spot/order_book?currency_pair=KAS_USDT&limit=${limit}`,
+    parse: (d) => ({ asks: d.asks, bids: d.bids }),
+  },
+  bybit: {
+    url: (limit) => `https://api.bybit.com/v5/market/orderbook?category=spot&symbol=KASUSDT&limit=${limit}`,
+    parse: (d) => ({ asks: d.result?.a, bids: d.result?.b }),
+  },
+  kucoin: {
+    url: (_limit) => `https://api.kucoin.com/api/v1/market/orderbook/level2_20?symbol=KAS-USDT`,
+    parse: (d) => ({ asks: d.data?.asks, bids: d.data?.bids }),
+  },
+  bitget: {
+    url: (limit) => `https://api.bitget.com/api/v2/spot/market/orderbook?symbol=KASUSDT&limit=${limit}`,
+    parse: (d) => ({ asks: d.data?.asks, bids: d.data?.bids }),
+  },
+};
+
+/**
+ * Get order book for KAS/USDT from any supported exchange.
+ * Returns unified format regardless of exchange-specific response structure.
+ *
+ * @param {string} exchange - exchange id (mexc/gateio/bybit/kucoin/bitget)
+ * @param {number} [limit=5] - depth levels to fetch
+ * @returns {Promise<object>} unified orderbook
+ */
+export async function getOrderbook(exchange, limit = 5) {
+  const timestamp = new Date().toISOString();
+  const fail = (error) => ({
+    exchange, asks: [], bids: [], ask1: null, bid1: null,
+    ask1_qty: null, bid1_qty: null, ask_depth: null, bid_depth: null,
+    timestamp, error,
+  });
+
+  const ep = ORDERBOOK_ENDPOINTS[exchange];
+  if (!ep) return fail(`unsupported exchange: ${exchange}`);
+
+  try {
+    const res = await fetch(ep.url(limit), { signal: AbortSignal.timeout(3000) });
+    const data = await res.json();
+    const raw = ep.parse(data);
+
+    if (!Array.isArray(raw.asks) || !Array.isArray(raw.bids)) {
+      return fail(data.msg || data.retMsg || data.message || 'unexpected response structure');
+    }
+
+    // Parse and convert to numbers: [[price, qty], ...]
+    const asks = raw.asks
+      .slice(0, limit)
+      .map(e => [parseFloat(e[0]), parseFloat(e[1])])
+      .filter(e => !isNaN(e[0]) && !isNaN(e[1]))
+      .sort((a, b) => a[0] - b[0]); // ascending by price
+
+    const bids = raw.bids
+      .slice(0, limit)
+      .map(e => [parseFloat(e[0]), parseFloat(e[1])])
+      .filter(e => !isNaN(e[0]) && !isNaN(e[1]))
+      .sort((a, b) => b[0] - a[0]); // descending by price
+
+    const ask_depth = asks.reduce((sum, e) => sum + e[1], 0);
+    const bid_depth = bids.reduce((sum, e) => sum + e[1], 0);
+
+    return {
+      exchange,
+      asks,
+      bids,
+      ask1: asks[0]?.[0] ?? null,
+      bid1: bids[0]?.[0] ?? null,
+      ask1_qty: asks[0]?.[1] ?? null,
+      bid1_qty: bids[0]?.[1] ?? null,
+      ask_depth,
+      bid_depth,
+      timestamp,
+      error: null,
+    };
+  } catch (err) {
+    return fail(err.message);
   }
 }

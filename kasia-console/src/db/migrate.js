@@ -1692,5 +1692,14 @@ export function runMigrations() {
     console.log('[migrate] v50: adapter_nodes.is_enabled added');
   }
 
+  // v51: trade_log 加 exchange 列 — 日限额按交易所统计
+  const hasTradeLogExchange = sqlite.prepare(
+    "SELECT 1 FROM pragma_table_info('trade_log') WHERE name='exchange'"
+  ).get();
+  if (!hasTradeLogExchange) {
+    sqlite.exec("ALTER TABLE trade_log ADD COLUMN exchange TEXT");
+    console.log('[migrate] v51: trade_log.exchange added');
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
