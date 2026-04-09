@@ -136,6 +136,60 @@
       </div>
 
       <!-- ============================== -->
+      <!-- FOCUS MODE                     -->
+      <!-- ============================== -->
+      <div class="card" x-data="{
+        focusMode: 'balanced',
+        focusLabels: { balanced: 'Balanced', market_maker: 'Market Maker', social: 'Social' },
+        focusDescs: {
+          balanced: 'All context enabled — social + market data',
+          market_maker: 'Market data only — no social context in proactive',
+          social: 'Social only — no market scanner data',
+        },
+        focusIcons: { balanced: '⚖️', market_maker: '📈', social: '💬' },
+        focusColors: { balanced: 'bg-brand-500', market_maker: 'bg-green-500', social: 'bg-purple-500' },
+        focusSaving: false,
+
+        async focusInit() {
+          if (!agent?.id) return;
+          try {
+            const res = await fetch('/api/relay/' + agent.id + '/mind-config');
+            const cfg = await res.json();
+            this.focusMode = cfg.focus || 'balanced';
+          } catch {}
+        },
+
+        async focusSave() {
+          if (!agent?.id) return;
+          this.focusSaving = true;
+          await fetch('/api/relay/' + agent.id + '/mind-config', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ focus: this.focusMode }),
+          });
+          this.focusSaving = false;
+        },
+      }" x-init="$watch('agent', () => focusInit()); focusInit()">
+        <div class="flex items-center gap-2 mb-3">
+          <div class="w-1.5 h-5 rounded-full" :class="focusColors[focusMode]"></div>
+          <h3 class="text-sm font-semibold text-ink-700">Focus Mode</h3>
+          <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-warm-100 text-ink-500"
+            x-text="focusIcons[focusMode] + ' ' + focusLabels[focusMode]"></span>
+        </div>
+        <div class="grid grid-cols-3 gap-2">
+          <template x-for="m in ['balanced', 'market_maker', 'social']" :key="m">
+            <button @click="focusMode = m; focusSave()"
+              class="p-2.5 rounded-lg border text-center transition-all cursor-pointer"
+              :class="focusMode === m ? 'border-brand-400 bg-brand-50 ring-1 ring-brand-200' : 'border-warm-200 hover:border-warm-300'">
+              <div class="text-lg" x-text="focusIcons[m]"></div>
+              <div class="text-xs font-medium text-ink-700 mt-1" x-text="focusLabels[m]"></div>
+              <div class="text-[10px] text-ink-400 mt-0.5" x-text="focusDescs[m]"></div>
+            </button>
+          </template>
+        </div>
+      </div>
+
+      <!-- ============================== -->
       <!-- SOCIAL STYLE                   -->
       <!-- ============================== -->
       <div class="card" x-data="{

@@ -708,12 +708,16 @@ export class ContextBuilder {
   async _buildProactiveUser(memory, perception, skills, eventContext) {
     const sections = [];
 
+    // Focus mode — determines which context sections to include
+    const focus = this.config?.focus || 'balanced';
+    const showSocial = focus !== 'market_maker';
+
     // Recent outbound — Brain must see what it already said (broadcasts + DMs)
     const recentOutbound = (memory.recentEvents || [])
       .filter(e => e.type === 'broadcast' || e.type === 'sent_message' || e.type === 'proactive_action')
       .filter(e => e.summary)
       .slice(-10);
-    if (recentOutbound.length > 0) {
+    if (showSocial && recentOutbound.length > 0) {
       const lines = recentOutbound.map(e => {
         const ago = e.timestamp ? _relativeTime(e.timestamp) : '';
         return `  - ${ago ? `[${ago}] ` : ''}${e.summary}`;
@@ -727,7 +731,7 @@ export class ContextBuilder {
 
     // Recent events
     const events = memory.recentEvents || [];
-    if (events.length) {
+    if (showSocial && events.length) {
       const myAddr = this.config?.address || '';
       sections.push(
         '--- RECENT ACTIVITY ---\n' +
@@ -743,17 +747,20 @@ export class ContextBuilder {
     }
 
     // Current connections — from relation_states (唯一真相源)
-    const allNotes = memory.peerNotes || {};
+    // Skip entirely in market_maker focus mode — Brain doesn't need social context
+    const allNotes = showSocial ? (memory.peerNotes || {}) : {};
     let relations = [];
-    try {
-      const consoleUrl = this.config?.consoleUrl || 'http://localhost:3100';
-      const relayNodeId = this.config?.relayNodeId;
-      if (relayNodeId) {
-        const res = await fetch(`${consoleUrl}/api/discovery/list?accountId=${encodeURIComponent(relayNodeId)}&limit=200`);
-        relations = await res.json();
-        if (!Array.isArray(relations)) relations = [];
-      }
-    } catch {}
+    if (showSocial) {
+      try {
+        const consoleUrl = this.config?.consoleUrl || 'http://localhost:3100';
+        const relayNodeId = this.config?.relayNodeId;
+        if (relayNodeId) {
+          const res = await fetch(`${consoleUrl}/api/discovery/list?accountId=${encodeURIComponent(relayNodeId)}&limit=200`);
+          relations = await res.json();
+          if (!Array.isArray(relations)) relations = [];
+        }
+      } catch {}
+    }
 
     if (relations.length > 0) {
       const byStatus = { active: [], accepted: [], observed: [] };

@@ -720,7 +720,7 @@ export async function registerRelayRoutes(fastify) {
       SELECT r.id, r.name, r.address, r.network,
              r.vision, r.principles_json, r.style,
              r.evolution_interval_hours, r.proactive_interval_minutes,
-             r.social_style, r.social_overrides,
+             r.social_style, r.social_overrides, r.focus,
              a.http_port as adapter_port
       FROM relay_nodes r
       LEFT JOIN adapter_nodes a ON a.id = r.adapter_node_id
@@ -742,6 +742,7 @@ export async function registerRelayRoutes(fastify) {
       proactiveIntervalMinutes: relay.proactive_interval_minutes || 60,
       socialStyle: relay.social_style || 'balanced',
       socialOverrides: relay.social_overrides ? JSON.parse(relay.social_overrides) : null,
+      focus: relay.focus || 'balanced',
     });
   });
 
@@ -750,7 +751,7 @@ export async function registerRelayRoutes(fastify) {
     const relay = getRelayNode(request.params.id);
     if (!relay) return reply.code(404).send({ error: 'Relay not found' });
 
-    const { vision, principles, style, evolutionIntervalHours, proactiveIntervalMinutes, socialStyle, socialOverrides } = request.body || {};
+    const { vision, principles, style, evolutionIntervalHours, proactiveIntervalMinutes, socialStyle, socialOverrides, focus } = request.body || {};
     const now = nowIso();
     const fields = [];
     const vals = [];
@@ -762,6 +763,7 @@ export async function registerRelayRoutes(fastify) {
     if (proactiveIntervalMinutes !== undefined) { fields.push('proactive_interval_minutes = ?'); vals.push(proactiveIntervalMinutes); }
     if (socialStyle !== undefined) { fields.push('social_style = ?'); vals.push(socialStyle); }
     if (socialOverrides !== undefined) { fields.push('social_overrides = ?'); vals.push(socialOverrides ? JSON.stringify(socialOverrides) : null); }
+    if (focus !== undefined) { fields.push('focus = ?'); vals.push(focus); }
 
     if (fields.length === 0) return reply.code(400).send({ error: 'No fields to update' });
 

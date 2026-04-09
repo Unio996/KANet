@@ -69,7 +69,7 @@ const REACTIVE_KEYWORDS = [
 
 let _cache = null;
 let _cacheTime = 0;
-let _lastProactiveTime = 0;
+const _lastProactiveByAgent = {};  // per-agent cooldown
 
 /** Get cached scanner data. Returns null if no data or stale (>60s). */
 export function getScannerCache() {
@@ -130,10 +130,11 @@ export class MarketScannerSkill extends Skill {
 
   canActivate(taskType, context) {
     if (taskType === 'proactive') {
-      // 每小时一次，不是每个 proactive 循环都跑
+      const agentKey = context?.self?.address || context?.config?.address || '_default';
       const now = Date.now();
-      if (now - _lastProactiveTime < PROACTIVE_COOLDOWN_MS) return false;
-      _lastProactiveTime = now;
+      const last = _lastProactiveByAgent[agentKey] || 0;
+      if (now - last < PROACTIVE_COOLDOWN_MS) return false;
+      _lastProactiveByAgent[agentKey] = now;
       return true;
     }
     if (taskType === 'reactive') {
