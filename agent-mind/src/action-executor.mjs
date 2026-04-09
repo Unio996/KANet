@@ -760,8 +760,9 @@ export class ActionExecutor {
       summary: `Market making: sell ${amount} KAS @${sellPrice}, buy @${buyPrice}, hedge=${hedgeCex || 'none'}. ${reason}`,
     });
 
+    const allOk = results.every(r => r.ok);
     const anyOk = results.some(r => r.ok);
-    return { ok: anyOk, results, hedgeCex };
+    return { ok: allOk, partial: anyOk && !allOk, results, hedgeCex };
   }
 
   /**
@@ -792,7 +793,8 @@ export class ActionExecutor {
         }
       }
     } catch (e) {
-      console.log(`[SELL_MAKER] daily-usage check failed: ${e.message} — proceeding`);
+      console.log(`[SELL_MAKER] daily-usage check failed: ${e.message} — blocking (fail-closed)`);
+      return { ok: false, error: `Daily limit check unavailable: ${e.message}. Refusing to proceed.` };
     }
 
     // Step 1: 刷新订单簿（不用 ACTION 里的过期价格）
@@ -811,11 +813,15 @@ export class ActionExecutor {
     const bid1    = ob.bid1;
     const bid1Qty = ob.bid1_qty ?? 0;
     const execPrice = parseFloat((bid1 * 1.0001).toFixed(6));
+
+    const minOrderUsdt = ob.min_order_usdt ?? 1;
+    const minKas       = Math.ceil(minOrderUsdt / bid1);
+
     const execQty   = Math.min(Math.floor(bid1Qty * 0.30), 2000, suggestedQty, Math.floor(remainingKas));
 
-    if (execQty < 10) {
-      console.log(`[SELL_MAKER] ${exchange} depth too thin (bid1_qty=${bid1Qty}), skip`);
-      return { ok: false, error: `Depth insufficient: bid1_qty=${bid1Qty}, min execQty=10` };
+    if (execQty < minKas) {
+      console.log(`[SELL_MAKER] ${exchange} qty ${execQty} < min ${minKas} KAS ($${minOrderUsdt}), skip`);
+      return { ok: false, error: `Order too small: ${execQty} KAS < min ${minKas} KAS ($${minOrderUsdt}) for ${exchange}` };
     }
 
     // Step 3: CEX 下限价 Maker 卖单
