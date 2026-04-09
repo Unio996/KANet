@@ -133,7 +133,11 @@ export class MarketScannerSkill extends Skill {
       const agentKey = context?.self?.address || context?.config?.address || '_default';
       const now = Date.now();
       const last = _lastProactiveByAgent[agentKey] || 0;
-      if (now - last < PROACTIVE_COOLDOWN_MS) return false;
+      // market_maker focus 模式：5 分钟冷却（价格异动时能快速响应）
+      // 其他模式：1 小时冷却（不浪费 AI token）
+      const focus = context?.config?.focus || context?.self?.focus || 'balanced';
+      const cooldown = focus === 'market_maker' ? 5 * 60 * 1000 : PROACTIVE_COOLDOWN_MS;
+      if (now - last < cooldown) return false;
       _lastProactiveByAgent[agentKey] = now;
       return true;
     }

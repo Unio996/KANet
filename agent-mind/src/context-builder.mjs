@@ -1122,6 +1122,7 @@ export class ContextBuilder {
 
     const skills = await this._gatherSkills('proactive', {
       self, memory, perception, intent, evolution,
+      config: this.config,
     });
 
     const { text: system, cacheHit } = this._getSystem('proactive', self, intent, evolution, perception);
