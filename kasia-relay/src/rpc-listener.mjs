@@ -611,6 +611,16 @@ async function processComm(txId, payloadHex, senderAddress) {
     return;
   }
 
+  // 解包 kanet_chat_v1 结构化广播（JSON 包装保护 UTF-8 中文）
+  if (plaintext.startsWith('{"t":"kanet_chat_v1"')) {
+    try {
+      const chatMsg = JSON.parse(plaintext);
+      if (chatMsg.t === 'kanet_chat_v1' && chatMsg.text) {
+        plaintext = chatMsg.text;
+      }
+    } catch (_) { /* fallback 原始内容 */ }
+  }
+
   // senderAddress 确认有效后，才 ingest
   const _msgType = plaintext && /^\s*\{/.test(plaintext) && plaintext.includes('"query_card"') ? 'query_card' : 'text';
   ingestMessage({

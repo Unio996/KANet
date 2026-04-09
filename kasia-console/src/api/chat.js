@@ -69,7 +69,9 @@ export async function registerChatRoutes(fastify) {
     if (!relay) return reply.code(404).send({ error: 'Account not found' });
 
     try {
-      const result = await sendCommandAsync(relayId, { type: 'send_broadcast', channel: channel.trim(), message: message.trim() });
+      // 链上 payload 包成结构化 JSON，保证 UTF-8 中文安全（ASCII-safe via JSON.stringify）
+      const chainPayload = JSON.stringify({ t: 'kanet_chat_v1', ch: channel.trim(), text: message.trim() });
+      const result = await sendCommandAsync(relayId, { type: 'send_broadcast', channel: channel.trim(), message: chainPayload });
       if (!result?.ok) throw new Error(result?.error || 'Broadcast failed');
       result.address = relay.address;
 
@@ -195,9 +197,17 @@ export async function registerChatRoutes(fastify) {
 
   // POST /api/chat/ingest — Scout reports a broadcast message (requires auth)
   fastify.post('/api/chat/ingest', { preHandler: [async (req, rep) => { await verifyIngestRequest(req, rep); }] }, async (request, reply) => {
-    const { channelName, senderAddress, content, txHash } = request.body || {};
+    let { channelName, senderAddress, content, txHash } = request.body || {};
     if (!channelName || !senderAddress || !content || !txHash) {
       return reply.code(400).send({ error: 'channelName, senderAddress, content, txHash required' });
+    }
+
+    // 解包 kanet_chat_v1 结构化广播 → 存原始文本到 DB
+    if (content.startsWith('{"t":"kanet_chat_v1"')) {
+      try {
+        const parsed = JSON.parse(content);
+        if (parsed.t === 'kanet_chat_v1' && parsed.text) content = parsed.text;
+      } catch (_) { /* fallback 原始 content */ }
     }
 
     // Dedup by tx_hash
