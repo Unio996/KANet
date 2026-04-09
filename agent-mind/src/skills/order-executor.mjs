@@ -167,17 +167,19 @@ export class OrderExecutorSkill extends Skill {
       lines.push(`[ACTION:MAKE_MARKET amount=${Math.min(maxAmount, 500).toFixed(0)} sell_price=${sellPrice.toFixed(5)} buy_price=${buyPrice.toFixed(5)} hedge_cex=${hedgeName} reason="market making"]`);
     }
 
+    const directive = [
+      'You can place market-making orders on KANet free market.',
+      'Each MAKE_MARKET creates TWO offers: one sell + one buy.',
+      'After someone takes your offer, the system auto-hedges on CEX.',
+      'Do NOT exceed the max order amount shown above.',
+      'Only place orders when you have a clear reason (spread opportunity, market making duty).',
+    ].join(' ');
+
     return {
       name: this.name,
       description: this.description,
-      data: lines.join('\n'),
-      instructions: [
-        'You can place market-making orders on KANet free market.',
-        'Each MAKE_MARKET creates TWO offers: one sell + one buy.',
-        'After someone takes your offer, the system auto-hedges on CEX.',
-        'Do NOT exceed the max order amount shown above.',
-        'Only place orders when you have a clear reason (spread opportunity, market making duty).',
-      ].join(' '),
+      data: { midPrice: scanner?.midPrice, remainingDaily, maxAmount: Math.min(kasBalance !== null ? kasBalance * 0.5 : MAX_PER_ORDER_KAS, MAX_PER_ORDER_KAS, remainingDaily) },
+      instructions: lines.join('\n') + '\n\n' + directive,
     };
   }
 }
