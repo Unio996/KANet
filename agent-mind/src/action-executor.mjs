@@ -847,9 +847,13 @@ export class ActionExecutor {
 
     console.log(`[SELL_MAKER] ${agentName} SELL ${execQty} KAS @${execPrice} on ${exchange}, orderId=${cexOrderId}`);
 
-    // Step 4: /exchange 改善单（比 CEX 价格稍高 0.02%，吸引 Taker 来 /exchange）
-    const improvePrice = parseFloat((execPrice * 1.0002).toFixed(6));
-    const wantUsdt     = parseFloat((execQty * improvePrice).toFixed(4));
+    // Step 4: /exchange 改善单 — 费率套利：比 CEX ask 便宜，比 CEX bid 贵，三方共赢
+    // Agent 赚: improvePrice - bid (≈0.03%)
+    // 买家省: ask - improvePrice (≈0.2% vs CEX taker)
+    const ask1 = ob.ask1 ?? (bid1 * 1.003);
+    const improvePrice = parseFloat((bid1 * 1.0003).toFixed(6));
+    const buyerSavingPct = ((ask1 - improvePrice) / ask1 * 100).toFixed(2);
+    const wantUsdt = parseFloat((execQty * improvePrice).toFixed(4));
     let exchangeOfferId;
     try {
       const exRes = await fetchJson(`${consoleUrl}/api/exchange/publish`, {
@@ -861,10 +865,14 @@ export class ActionExecutor {
           want_asset: 'USDT', want_amount: String(wantUsdt),
           verification: 'manual',
           expires_minutes: 30,
+          verification_meta: JSON.stringify({
+            type: 'improvement', cex: exchange, cex_bid: bid1, cex_ask: ask1,
+            improve_price: improvePrice, buyer_saving_pct: buyerSavingPct,
+          }),
         }),
       });
       exchangeOfferId = exRes?.offer_id || exRes?.id;
-      console.log(`[SELL_MAKER] /exchange improvement offer=${exchangeOfferId} @${improvePrice}`);
+      console.log(`[SELL_MAKER] /exchange offer=${exchangeOfferId} @${improvePrice} (buyer saves ${buyerSavingPct}% vs CEX ask ${ask1})`);
     } catch (e) {
       console.log(`[SELL_MAKER] /exchange improvement failed: ${e.message}`);
     }
