@@ -45,7 +45,7 @@
 - 确认这张表的用途和当前状态
 - 确认写入方和读取方
 - 确认是否是已删除表（account_relations v46 已删、interaction_records v47 已删）
-- migrate.js 版本号必须接当前最新版本后面（当前最新：v51）
+- migrate.js 版本号必须接当前最新版本后面（当前最新：v52）
 
 DATABASE.md 有改动时（新表/删表/加字段），必须同步更新文档后一起提交。
 
@@ -68,7 +68,7 @@ DATABASE.md 有改动时（新表/删表/加字段），必须同步更新文档
 - `interaction_records` 已删除（v47 DROP TABLE，17 处读取全迁移到 chain_events）
 - `replies.sent_txid` hack 已删除（chain_events 是真相源）
 - 数据库字典 `docs/DATABASE.md` 已建立，34 张活跃表全覆盖
-- 当前 migrate.js 最新版本：v47
+- 当前 migrate.js 最新版本：v52
 
 ### 协议与交易 — 全部已实现
 - `relation_states` + `chain_events` + `execution_states` + `pending_actions` 四张协议状态表
