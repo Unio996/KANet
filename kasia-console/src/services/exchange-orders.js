@@ -126,7 +126,11 @@ async function cancelBinanceLike({ baseUrl, headerName, apiKey, apiSecret, symbo
   const res = await fetch(`${baseUrl}/openOrders?${qs}&signature=${sig}`, {
     method: 'DELETE', headers: { [headerName]: apiKey },
   });
-  return { ok: true, cancelled: await res.json() };
+  const data = await res.json();
+  if (data.code && data.code !== 200 && data.code !== 0) {
+    return { ok: false, error: data.msg || `Cancel failed: code ${data.code}` };
+  }
+  return { ok: true, cancelled: data };
 }
 
 async function openOrdersBinanceLike({ baseUrl, headerName, apiKey, apiSecret, symbol, kasPair }) {
@@ -868,26 +872,32 @@ const ORDERBOOK_ENDPOINTS = {
   mexc: {
     url: (limit) => `https://api.mexc.com/api/v3/depth?symbol=KASUSDT&limit=${limit}`,
     parse: (d) => ({ asks: d.asks, bids: d.bids }),
+    min_order_usdt: 1,
   },
   gate: {
     url: (limit) => `https://api.gateio.ws/api/v4/spot/order_book?currency_pair=KAS_USDT&limit=${limit}`,
     parse: (d) => ({ asks: d.asks, bids: d.bids }),
+    min_order_usdt: 1,
   },
   gateio: {
     url: (limit) => `https://api.gateio.ws/api/v4/spot/order_book?currency_pair=KAS_USDT&limit=${limit}`,
     parse: (d) => ({ asks: d.asks, bids: d.bids }),
+    min_order_usdt: 1,
   },
   bybit: {
     url: (limit) => `https://api.bybit.com/v5/market/orderbook?category=spot&symbol=KASUSDT&limit=${limit}`,
     parse: (d) => ({ asks: d.result?.a, bids: d.result?.b }),
+    min_order_usdt: 20,
   },
   kucoin: {
     url: (_limit) => `https://api.kucoin.com/api/v1/market/orderbook/level2_20?symbol=KAS-USDT`,
     parse: (d) => ({ asks: d.data?.asks, bids: d.data?.bids }),
+    min_order_usdt: 0.5,
   },
   bitget: {
     url: (limit) => `https://api.bitget.com/api/v2/spot/market/orderbook?symbol=KASUSDT&limit=${limit}`,
     parse: (d) => ({ asks: d.data?.asks, bids: d.data?.bids }),
+    min_order_usdt: 1,
   },
 };
 
@@ -945,6 +955,7 @@ export async function getOrderbook(exchange, limit = 5) {
       bid1_qty: bids[0]?.[1] ?? null,
       ask_depth,
       bid_depth,
+      min_order_usdt: ep.min_order_usdt ?? 1,
       timestamp,
       error: null,
     };
