@@ -2,7 +2,7 @@
 
 > **修改任何代码前必读。** 一个文件，覆盖全系统。唯一权威开发者文档。
 > 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-09。
-> 4/9 更新（下半场）：EXCHANGE_REGISTRY 贯通 + Focus Mode + 陷阱 #38-42。**Sophie 自主卖出 2000 KAS on Gate.io。** TN12：P2SH 三分支全验证 + P3 escrow-awareness + chat kanet_chat_v1。
+> 4/9 更新（下半场）：EXCHANGE_REGISTRY 贯通 + Focus Mode + 陷阱 #38-42。**Sophie 自主卖出 2000 KAS on Gate.io。** TN12：P2SH 三分支全验证 + P3 escrow-awareness + chat kanet_chat_v1 + escrow 联动修复（陷阱 #32-34）。
 > 4/9 更新（上半场）：CEX 做市日限额硬校验 + MEXC/Gate 签名修复 + trade_log.exchange(v51)。
 > 4/8 更新：stock-tracker 四层情报升级 + llama-server 推理引擎（RTX 5090）+ Spending Ledger 三项修复 + Adapter UI 重构（URL 可编辑+14 平台 catalog）+ Agent 安全护栏（6 条硬规则：禁泄余额/禁编技术细节/系统内部保密）。
 > 4/6 更新：技术债清零（v46/v47 DROP 两张表） + DATABASE.md 数据字典 + exchange 交割全流程（manual/cross_chain_tx/超时/争议/套利链路）。cross-chain-verify.mjs 独立模块。
@@ -1151,6 +1151,48 @@ Orders 历史列表显示状态：pending → paid → completed。
 31. **payToScriptHashSignatureScript WASM 绑定返回 ASCII-encoded hex string（非 Uint8Array）。** 不要用这个函数，用 encodePayToScriptHashSignatureScript 或手动拼接。
 
 32. **refund 路径的交易 lockTime 必须 >= deadline。** Silverscript `require(tx.time >= deadline)` 检查的是交易本身的 lockTime 字段。unsigned TX 和 signed TX 的 lockTime 必须一致（sighash 包含 lockTime）。同时节点要求当前 DAA >= lockTime 才接受交易（否则报 `transaction input is not finalized`）。escrow.js 的 execute 端点在 branch=1 时从 `escrow.deadline` 取 lockTime 传给 Relay；Console 侧先查 DAA 预检，未到期直接 400 拒绝。位置：`p2sh.mjs:unlockP2SH(lockTime)`、`escrow.js:execute`、`relay.mjs:execute_escrow`、`exchange-machine.js:tryExecuteEscrow`。
+
+33. **exchange-machine tryCreateAndLockEscrow 的 give_amount 是 KAS 不是 sompi。** `exchange_offers.give_amount` 存原始字符串（如 `"3"` 意为 3 KAS）。锁币时直接传给 `lock_escrow`，不要 `/1e8`。`escrow_states.amount_sompi` 需要 `×1e8` 转换。位置：`exchange-machine.js:tryCreateAndLockEscrow`。
+
+34. **routeToVerification 必须接受 escrow_locked 状态。** escrow 锁币后 offer 状态变为 `escrow_locked`（不是 `matched`），`routeToVerification` 和 `processManualConfirm` 都必须允许此状态通过。否则 escrow 锁币后交易卡死，无法确认。
+
+### P3 escrow-awareness 技能（4/9）
+
+**Agent 感知 escrow 合约 + 确认/争议决策。**
+
+| 组件 | 文件 | 说明 |
+|------|------|------|
+| 技能 | `agent-mind/src/skills/escrow-awareness.mjs` | gatherContext 查 Console API，formatForBrain 注入 LOCKED/PENDING/AWAITING 列表 |
+| ACTION | `agent-mind/src/action-executor.mjs` | CONFIRM_ESCROW（调 /api/exchange/confirm）、DISPUTE_ESCROW（调 /api/exchange/dispute） |
+| 权限 | ACTION_REQUIRED_AUTHORITY | 两个 ACTION 均为 `trade` 级别 |
+
+**Brain 看到的格式：**
+```
+--- ESCROW CONTRACTS ---
+LOCKED ESCROWS (1):
+  [fd153394] 3 KAS → offer: c9022fef
+    → [ACTION:CONFIRM_ESCROW offer_id=c9022fef...] to release funds
+    → [ACTION:DISPUTE_ESCROW offer_id=c9022fef... reason=...] if fraud
+```
+
+**设计原则：** 合约是模板（人审），Agent 填参数并执行，人做最终决策。Agent 永远不从零写合约代码。未来扩展为模板库（EscrowV2/TimeLock/MultiSig），Agent 选模板+填参数。
+
+### chat 广播结构化 JSON（kanet_chat_v1，4/9）
+
+**链上 payload 从裸文本改为 JSON，保证 UTF-8 中文安全。**
+
+```
+之前：bcast:kanet-public:裸文本（中文可能丢失）
+之后：bcast:kanet-public:{"t":"kanet_chat_v1","ch":"kanet-public","text":"中文安全"}
+```
+
+| 改动点 | 文件 | 说明 |
+|--------|------|------|
+| 发送端 | `chat.js` /api/chat/send | JSON.stringify 包装后发给 Relay |
+| 接收端（Relay） | `rpc-listener.mjs` processComm | 解密后检测 `kanet_chat_v1` 前缀，解包取 text |
+| 接收端（Console） | `chat.js` /api/chat/ingest | Scout ingest 时解包，DB 存原始文本 |
+
+**兼容性：** 旧消息无 JSON 包装 → 不匹配前缀检测 → 走原路径。`broadcast_messages.content` 始终存原始文本，UI 无需改动。`trade-protocol-filter.js` 不受影响（它按 `{"t":"kanet_` 前缀独立 dispatch）。
 
 ---
 
