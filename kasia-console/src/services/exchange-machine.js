@@ -153,11 +153,12 @@ async function tryCreateAndLockEscrow(offer) {
       escrowId, offer.id, relayId,
       offer.maker, offer.taker || 'pending', offer.maker,
       createResult.p2shAddress, createResult.redeemScriptHex,
-      offer.give_amount || '0', now, now,
+      String(BigInt(Math.round(Number(offer.give_amount || 0) * 1e8))), now, now,
     );
 
     // 3. Lock funds into P2SH
-    const amountKas = (Number(offer.give_amount || 0) / 1e8).toString();
+    // give_amount is stored as-is from the offer (e.g. "3" means 3 KAS, not sompi)
+    const amountKas = String(offer.give_amount || '0');
     const lockResult = await sendCommandAsync(relayId, {
       type: 'lock_escrow', p2shAddress: createResult.p2shAddress, amountKas,
     });
@@ -281,7 +282,7 @@ export function processAccept(msg) {
  * @returns {object} updated offer
  */
 function routeToVerification(offer) {
-  if (offer.protocol_status !== 'matched') return offer;
+  if (offer.protocol_status !== 'matched' && offer.protocol_status !== 'escrow_locked') return offer;
 
   const vType = offer.verification || 'manual';
   const verifier = getVerifier(vType);
@@ -329,7 +330,7 @@ export function processManualConfirm(msg) {
   const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(msg.offer_id);
   if (!offer) return null;
 
-  if (offer.protocol_status !== 'awaiting_manual_confirm') {
+  if (offer.protocol_status !== 'awaiting_manual_confirm' && offer.protocol_status !== 'escrow_locked') {
     console.log(`[exchange-machine] Confirm rejected: offer ${msg.offer_id.slice(0, 8)} is ${offer.protocol_status}`);
     return null;
   }

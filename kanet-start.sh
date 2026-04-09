@@ -111,7 +111,7 @@ if [ -f "$LLAMA_SERVER" ] && [ -f "$LLAMA_MODEL" ]; then
     (cd "$KANET_ROOT/tools/llama-server" && ./llama-server.exe \
       --model "$LLAMA_MODEL" \
       --host 0.0.0.0 --port $LLAMA_PORT \
-      --n-gpu-layers 99 --ctx-size 16384 --threads 8 \
+      --n-gpu-layers 99 --ctx-size 32768 --threads 8 \
       --flash-attn on \
       >> "$LLAMA_LOG" 2>&1) &
     LLAMA_PID=$!
