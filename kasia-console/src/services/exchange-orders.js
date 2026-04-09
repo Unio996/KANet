@@ -684,11 +684,13 @@ export async function getBalance(account) {
  */
 export async function getOrder(account, orderId, symbol = 'KASUSDT') {
   const { exchange, apiKey, apiSecret, passphrase, baseUrl } = account;
+  const def = getExchangeDef(exchange);
+  if (!def) return { orderId, status: 'unknown', filled: false, executedQty: 0, error: `unsupported: ${exchange}` };
   try {
-    switch (exchange) {
-      case 'mexc': {
-        const url = baseUrl || 'https://api.mexc.com/api/v3';
-        const pair = symbol.replace(/[^A-Za-z0-9]/g, '');
+    switch (def.authStyle) {
+      case 'binance-like': {
+        const url = baseUrl || def.baseUrl;
+        const pair = def.kasPair;
         const qs = `symbol=${pair}&orderId=${orderId}&timestamp=${Date.now()}`;
         const sig = hmac256(apiSecret, qs);
         const res = await fetch(`${url}/order?${qs}&signature=${sig}`, {
@@ -703,7 +705,7 @@ export async function getOrder(account, orderId, symbol = 'KASUSDT') {
         };
       }
       case 'bybit': {
-        const url = baseUrl || 'https://api.bybit.com';
+        const url = baseUrl || def.baseUrl;
         const ts = Date.now().toString(); const rw = '5000';
         const qs = `category=spot&orderId=${orderId}`;
         const sig = hmac256(apiSecret, ts + apiKey + rw + qs);
@@ -722,7 +724,7 @@ export async function getOrder(account, orderId, symbol = 'KASUSDT') {
         };
       }
       case 'kucoin': {
-        const url = baseUrl || 'https://api.kucoin.com';
+        const url = baseUrl || def.baseUrl;
         const ts = Date.now().toString();
         const path = `/api/v1/orders/${orderId}`;
         const sig = hmac256Base64(apiSecret, ts + 'GET' + path);
@@ -743,7 +745,7 @@ export async function getOrder(account, orderId, symbol = 'KASUSDT') {
         };
       }
       case 'bitget': {
-        const url = baseUrl || 'https://api.bitget.com';
+        const url = baseUrl || def.baseUrl;
         const ts = Date.now().toString();
         const path = `/api/v2/spot/trade/orderInfo?orderId=${orderId}`;
         const sig = hmac256Base64(apiSecret, ts + 'GET' + path);
@@ -762,8 +764,8 @@ export async function getOrder(account, orderId, symbol = 'KASUSDT') {
         };
       }
       case 'gateio': {
-        const url = baseUrl || 'https://api.gateio.ws/api/v4';
-        const path = `/spot/orders/${orderId}?currency_pair=KAS_USDT`;
+        const url = baseUrl || def.baseUrl;
+        const path = `/spot/orders/${orderId}?currency_pair=${def.kasPair}`;
         const ts = Math.floor(Date.now() / 1000).toString();
         const bodyHash = sha512Hex('');
         const signStr = `GET\n/api/v4${path.split('?')[0]}\n${path.includes('?') ? path.split('?')[1] : ''}\n${bodyHash}\n${ts}`;
@@ -795,11 +797,13 @@ export async function getOrder(account, orderId, symbol = 'KASUSDT') {
  */
 export async function cancelOrder(account, orderId, symbol = 'KASUSDT') {
   const { exchange, apiKey, apiSecret, passphrase, baseUrl } = account;
+  const def = getExchangeDef(exchange);
+  if (!def) return { ok: false, error: `unsupported: ${exchange}` };
   try {
-    switch (exchange) {
-      case 'mexc': {
-        const url = baseUrl || 'https://api.mexc.com/api/v3';
-        const pair = symbol.replace(/[^A-Za-z0-9]/g, '');
+    switch (def.authStyle) {
+      case 'binance-like': {
+        const url = baseUrl || def.baseUrl;
+        const pair = def.kasPair;
         const qs = `symbol=${pair}&orderId=${orderId}&timestamp=${Date.now()}`;
         const sig = hmac256(apiSecret, qs);
         const res = await fetch(`${url}/order?${qs}&signature=${sig}`, {
@@ -809,7 +813,7 @@ export async function cancelOrder(account, orderId, symbol = 'KASUSDT') {
         return { ok: !d.code || d.code === 200, error: d.msg || null };
       }
       case 'bybit': {
-        const url = baseUrl || 'https://api.bybit.com';
+        const url = baseUrl || def.baseUrl;
         const ts = Date.now().toString(); const rw = '5000';
         const body = JSON.stringify({ category: 'spot', orderId });
         const sig = hmac256(apiSecret, ts + apiKey + rw + body);
@@ -822,7 +826,7 @@ export async function cancelOrder(account, orderId, symbol = 'KASUSDT') {
         return { ok: d.retCode === 0, error: d.retMsg || null };
       }
       case 'kucoin': {
-        const url = baseUrl || 'https://api.kucoin.com';
+        const url = baseUrl || def.baseUrl;
         const ts = Date.now().toString();
         const path = `/api/v1/orders/${orderId}`;
         const sig = hmac256Base64(apiSecret, ts + 'DELETE' + path);
@@ -836,10 +840,10 @@ export async function cancelOrder(account, orderId, symbol = 'KASUSDT') {
         return { ok: d.code === '200000', error: d.msg || null };
       }
       case 'bitget': {
-        const url = baseUrl || 'https://api.bitget.com';
+        const url = baseUrl || def.baseUrl;
         const ts = Date.now().toString();
         const path = '/api/v2/spot/trade/cancel-order';
-        const body = JSON.stringify({ orderId, symbol: symbol.replace(/[^A-Z]/g, '') });
+        const body = JSON.stringify({ orderId, symbol: def.kasPair });
         const sig = hmac256Base64(apiSecret, ts + 'POST' + path + body);
         const res = await fetch(`${url}${path}`, {
           method: 'POST', body,
@@ -850,9 +854,9 @@ export async function cancelOrder(account, orderId, symbol = 'KASUSDT') {
         return { ok: d.code === '00000', error: d.msg || null };
       }
       case 'gateio': {
-        const url = baseUrl || 'https://api.gateio.ws/api/v4';
+        const url = baseUrl || def.baseUrl;
         const path = `/spot/orders/${orderId}`;
-        const qs = 'currency_pair=KAS_USDT';
+        const qs = `currency_pair=${def.kasPair}`;
         const ts = Math.floor(Date.now() / 1000).toString();
         const bodyHash = sha512Hex('');
         const signStr = `DELETE\n/api/v4${path}\n${qs}\n${bodyHash}\n${ts}`;
