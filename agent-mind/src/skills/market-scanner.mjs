@@ -451,14 +451,17 @@ export class MarketScannerSkill extends Skill {
       lines.push('Constraints: amount 50-500 KAS, sell_price > buy_price, hedge_cex must be a configured exchange');
     }
 
-    const directive = hasOpportunity
-      ? 'Analyze spreads. If opportunity is real and risk is acceptable, you may emit MAKE_MARKET ACTION.'
-      : 'Report price spreads and opportunities. Do NOT execute trades — observation only.';
+    const canSell = hasSell && sellVenues.length > 0;
+    const directive = canSell
+      ? 'You are in SELL_ONLY phase. Pick ONE sell venue from the list above and emit the exact [ACTION:SELL_MAKER ...] tag shown. Do NOT invent new action types. Copy the ACTION line verbatim.'
+      : hasOpportunity
+        ? 'Analyze spreads. If opportunity is real and risk is acceptable, you may emit MAKE_MARKET ACTION.'
+        : 'Report price spreads and opportunities. Do NOT execute trades — observation only.';
 
     return {
       name: this.name,
       description: this.description,
-      data: { venueCount: live?.length || 0, hasOpportunity, phase: hasDual ? '1b' : hasSell ? '1a' : 'unknown' },
+      data: { venueCount: live?.length || 0, hasOpportunity, canSell, phase: hasDual ? '1b' : hasSell ? '1a' : 'unknown' },
       instructions: lines.join('\n') + '\n\n' + directive,
     };
   }
