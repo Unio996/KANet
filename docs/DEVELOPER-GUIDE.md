@@ -2,6 +2,7 @@
 
 > **修改任何代码前必读。** 一个文件，覆盖全系统。唯一权威开发者文档。
 > 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-10。
+> 4/10 更新（晚间）：**致命 bug 修复：废弃乐观写入。** publish API 改为先广播再写 DB，广播失败不写任何记录。链是唯一事实源，broadcast_tx_id 永远是真实 txId，不再有 `pending_` 垃圾数据。**陷阱 #43：永远不要乐观写入链上数据——先上链拿到 txId，才写本地 DB。没有 TX 就不存在。** 首笔跨节点真实交易完成（139 Agent 付 0.335 USDT → Martin 发 10 KAS）。
 > 4/10 更新：**Exchange 协议 v2.1 — 全自动交割链路完成。** 7 条协议消息（paid/delivered/timeout 新增）。delivering 状态。auto-pay（evm-transfer.js 共享函数，BNB/ETH）。auto-deliver KAS（3 次重试）。matched 30min 超时 reopen。Brain 感知挂单状态（context-builder + self-awareness）。CANCEL_OFFERS 支持单个 offer_id。market-scanner 历史成交参考。**端到端验证通过：Martin 挂单 → Sophie 自动接单付 USDT → 跨链验证 → 自动发 KAS → completed，全程零人工。** Polymarket 赎回（redeemPositions）。Spending Ledger 修复（第三个 UNION ALL 分支）。Seeder expires_at 过滤 + 链白名单。Fund Lock 接入 exchange_offers。Settings 节点状态感知。v54-v55 migration。
 > 4/9 更新（下半场）：EXCHANGE_REGISTRY 贯通（共享文件 + getOrder/cancelOrder 迁移）。5 家 CEX 实盘验证全通过。scanner data→instructions 字段修正。Agent Focus Mode（v52，balanced/market_maker/social）。scanner per-agent 冷却。SELL_MAKER directive 修正。**里程碑：Sophie 自主卖出 2000 KAS on Gate.io。** 陷阱 #38-42。
 > 4/9 更新（上半场）：CEX 做市日限额硬校验（总计模式 + 可编辑 + Brain 感知）。MEXC getOrder/cancelOrder symbol 签名修复。_monitorSellMaker 超时变量修复。Gate.io executedQty 算法修复。trade_log.exchange 列（v51）。
