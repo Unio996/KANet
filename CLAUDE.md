@@ -59,23 +59,37 @@ DATABASE.md 有改动时（新表/删表/加字段），必须同步更新文档
 | agent-mind | `agent-mind` | Agent 灵魂（五核、技能、决策）|
 | agent-adapter | `agent-adapter` | AI 大脑桥接（多 provider）|
 
-## 当前系统状态（2026-04-06 更新）
+## 当前系统状态（2026-04-10 更新）
 
-### 数据架构 — 技术债已清零
-- `relation_states` 是社交关系唯一真相源（196 条）
-- `chain_events` 是链上事件唯一真相源（63230 条）
-- `account_relations` 已删除（v46 DROP TABLE，account-relations.js 同步删除）
-- `interaction_records` 已删除（v47 DROP TABLE，17 处读取全迁移到 chain_events）
-- `replies.sent_txid` hack 已删除（chain_events 是真相源）
-- 数据库字典 `docs/DATABASE.md` 已建立，34 张活跃表全覆盖
-- 当前 migrate.js 最新版本：v52
+### 数据架构
+- `relation_states` 是社交关系唯一真相源
+- `chain_events` 是链上事件唯一真相源
+- 数据库字典 `docs/DATABASE.md` 已建立
+- 当前 migrate.js 最新版本：v55
 
-### 协议与交易 — 全部已实现
+### Exchange 协议 v2.1 — 全自动交割（2026-04-10）
+- 7 条协议消息：publish / accept(含选链) / paid / delivered / timeout / cancel / dispute
+- 状态机：open → matched → verifying → delivering → completed
+- auto-pay：本地 Agent accept 后自动付 USDT（evm-transfer.js，BNB/ETH）
+- auto-deliver：验证通过后自动发 KAS（3 次重试，失败 dispute）
+- 超时机制：matched 30 分钟无 paid → timeout → reopen
+- Brain 感知：context-builder + self-awareness 注入挂单状态
+- 端到端验证通过：挂单 → 接单 → 付款 → 验证 → 发 KAS → completed，全程零人工
+- 设计文档：`docs/superpowers/specs/2026-04-10-exchange-settlement-design.md`
+- Phase 2 待做：SOL/TRON auto-pay、Swap 集成、UI 三层次改进
+
+### 做市管线
+- Market Seeder（market-seeder.js）：5min tick 自动挂单，价格跟随市价 + spread%
+- Seeder 挂单带 accepted_chains（BNB/ETH 收款地址）、verification: cross_chain_tx
+- Fund Lock 接入 exchange_offers（publish 锁 / cancel 释放 / completed 花费）
+- Spending Ledger 修复（broadcast + transfer TX 全覆盖）
+
+### 协议与交易
 - `relation_states` + `chain_events` + `execution_states` + `pending_actions` 四张协议状态表
-- 自由市场 Phase 0-5 全部完成（fund_lock/limits/权限/三模式/dispute）
-- 协议级自由市场 /exchange 上线（报价/接单/取消 + 乐观更新 + 可插拔验证器）
+- OTC 系统（mm_orders）仍在运行，exchange 是其泛化版（任意资产 ↔ 任意资产）
 - 做市管线（market-scanner 8 CEX + order-executor + CEX 自动对冲）
-- 交易协议上链（trade-protocol-filter.js，7 种协议消息）
+- 交易协议上链（trade-protocol-filter.js，OTC 7 条 + Exchange 7 条）
+- evm-transfer.js 共享 ERC20 transfer 函数（trading.js + exchange 共用）
 
 ### Agent 自治 — 5 Agent 全绿
 - Health Monitor + Self-Healing + patrol 脚本持续监控
