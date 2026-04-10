@@ -51,7 +51,7 @@
                 </td>
                 <td class="px-3 py-2 text-ink-400" x-text="d.first ? KANet.formatTime(d.first) : '-'"></td>
                 <td class="px-3 py-2 text-ink-400" x-text="d.last ? KANet.formatTime(d.last) : '-'"></td>
-                <td class="px-3 py-2 text-red-500" x-text="'~' + (d.count * 0.2).toFixed(1)"></td>
+                <td class="px-3 py-2 text-red-500" x-text="d.cost_kas ? (d.cost_kas + ' KAS') : '—'"></td>
               </tr>
             </template>
           </tbody>
@@ -73,7 +73,7 @@ function hsReport() {
         return {
           sent_total: this.report.reduce((a, r) => a + r.sent_total, 0),
           recv_total: this.report.reduce((a, r) => a + r.recv_total, 0),
-          cost_kas: (this.report.reduce((a, r) => a + r.sent_total, 0) * 0.2).toFixed(1),
+          cost_kas: this.report.reduce((a, r) => a + parseFloat(r.cost_kas || 0), 0).toFixed(4),
           no_reply: this.report.reduce((a, r) => a + r.no_reply, 0),
           details: allDetails,
         };

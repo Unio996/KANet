@@ -94,7 +94,7 @@ info "加密密钥: ${CONSOLE_ENCRYPTION_KEY:0:8}..."
 
 # ── llama-server (本地推理引擎) ──────────────────────────────────────────────
 LLAMA_SERVER="$KANET_ROOT/tools/llama-server/llama-server.exe"
-LLAMA_MODEL="$KANET_ROOT/models/qwen3-30b-a3b-q4_k_m.gguf"
+LLAMA_MODEL="D:/models/Qwen_Qwen3.5-35B-A3B-Q4_K_M.gguf"
 LLAMA_PORT=8000
 LLAMA_LOG="$LOG_DIR/llama-server.log"
 
@@ -109,7 +109,7 @@ if [ -f "$LLAMA_SERVER" ] && [ -f "$LLAMA_MODEL" ]; then
     (cd "$KANET_ROOT/tools/llama-server" && ./llama-server.exe \
       --model "$LLAMA_MODEL" \
       --host 0.0.0.0 --port $LLAMA_PORT \
-      --n-gpu-layers 99 --ctx-size 16384 --threads 8 \
+      --n-gpu-layers 99 --ctx-size 32768 --threads 8 \
       --flash-attn on \
       >> "$LLAMA_LOG" 2>&1) &
     LLAMA_PID=$!
