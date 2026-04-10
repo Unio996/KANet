@@ -166,6 +166,23 @@ export async function registerExchangeRoutes(fastify) {
       marketKey, now, now
     );
 
+    // Fund lock: lock KAS if selling KAS (prevent oversell)
+    if (give_asset === 'KAS') {
+      try {
+        const { lockFunds } = await import('../services/fund-lock.js');
+        const balRes = await fetch(`http://127.0.0.1:${process.env.PORT || 3100}/api/relay/${relayNodeId}/balance`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()).catch(() => null);
+        const currentBalance = parseFloat(balRes?.balance || '0');
+        const lockResult = lockFunds(makerAddr, offerId, 'KAS', parseFloat(give_amount), currentBalance);
+        if (!lockResult.ok) {
+          // Rollback optimistic write
+          sqlite.prepare('DELETE FROM exchange_offers WHERE id = ?').run(offerId);
+          return reply.code(400).send({ error: `Insufficient KAS: ${lockResult.error}`, available: lockResult.available });
+        }
+      } catch (err) {
+        console.log(`[exchange] Fund lock skipped (non-critical): ${err.message}`);
+      }
+    }
+
     // Async: broadcast to chain (anchor confirmation, non-blocking)
     let broadcastTx = null;
     try {
@@ -195,7 +212,7 @@ export async function registerExchangeRoutes(fastify) {
 
   // ── POST /api/exchange/accept — 接单 ──────────────────────
   fastify.post('/api/exchange/accept', async (request, reply) => {
-    const { relayNodeId, offer_id, channel = 'kanet-exchange' } = request.body || {};
+    const { relayNodeId, offer_id, selected_chain, channel = 'kanet-exchange' } = request.body || {};
 
     if (!relayNodeId || !offer_id) {
       return reply.code(400).send({ error: 'Missing relayNodeId or offer_id' });
@@ -205,6 +222,23 @@ export async function registerExchangeRoutes(fastify) {
     if (!offer) return reply.code(404).send({ error: 'Offer not found' });
     if (offer.protocol_status !== 'open') {
       return reply.code(400).send({ error: `Offer is ${offer.protocol_status}, cannot accept` });
+    }
+
+    // Cross-chain offers require selected_chain
+    if (offer.verification === 'cross_chain_tx') {
+      if (!selected_chain) {
+        return reply.code(400).send({ error: 'selected_chain is required for cross_chain_tx offers' });
+      }
+      const meta = JSON.parse(offer.verification_meta || '{}');
+      const acceptedChains = meta.accepted_chains || [];
+      const selectedWallet = acceptedChains.find(w => w.chain === selected_chain);
+      if (!selectedWallet) {
+        return reply.code(400).send({ error: `Chain ${selected_chain} not accepted by maker. Available: ${acceptedChains.map(w => w.chain).join(', ')}` });
+      }
+      // Write receive_address into verification_meta (verifier reads this) + taker_chain/taker_payment_address (UI reads these)
+      const updatedMeta = { ...meta, receive_address: selectedWallet.address, receive_chain: selected_chain };
+      sqlite.prepare('UPDATE exchange_offers SET taker_chain = ?, taker_payment_address = ?, verification_meta = ? WHERE id = ?')
+        .run(selected_chain, selectedWallet.address, JSON.stringify(updatedMeta), offer_id);
     }
 
     const relay = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(relayNodeId);
@@ -228,7 +262,11 @@ export async function registerExchangeRoutes(fastify) {
       const res = await sendCommandAsync(relayNodeId, {
         type: 'send_broadcast',
         channel,
-        message: JSON.stringify({ t: 'kanet_exchange_accept_v1', offer_id }),
+        message: JSON.stringify({
+          t: 'kanet_exchange_accept_v1', offer_id, taker: takerAddr,
+          selected_chain: selected_chain || null,
+          receive_address: result.taker_payment_address || null,
+        }),
       });
       acceptTx = res?.txId || null;
       if (acceptTx) {
@@ -237,6 +275,20 @@ export async function registerExchangeRoutes(fastify) {
       }
     } catch (err) {
       console.log(`[exchange] Accept broadcast pending: ${err.message}`);
+    }
+
+    // Trigger auto-pay if taker is a local agent with cross_chain_tx verification
+    if (result.verification === 'cross_chain_tx' && selected_chain && result.taker_payment_address) {
+      const localTaker = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(takerAddr);
+      if (localTaker) {
+        console.log(`[exchange] local taker accept → triggering auto-pay for offer ${offer_id.slice(0,8)}`);
+        import('../services/trade-protocol-filter.js').then(mod => {
+          const latestOffer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer_id);
+          if (latestOffer && ['matched', 'verifying'].includes(latestOffer.protocol_status)) {
+            mod.triggerAutoPay(latestOffer, localTaker.id);
+          }
+        }).catch(err => console.error(`[exchange] auto-pay trigger error: ${err.message}`));
+      }
     }
 
     return reply.send({ ok: true, offer_id, status: result.protocol_status, accept_tx: acceptTx });
@@ -332,7 +384,8 @@ export async function registerExchangeRoutes(fastify) {
     return reply.send({ ok: true, offer_id, status: result.protocol_status });
   });
 
-  // ── POST /api/exchange/submit-payment — taker 提交付款 TX ──
+  // ── POST /api/exchange/submit-payment — DEPRECATED: replaced by kanet_exchange_paid_v1 protocol message ──
+  // Kept for backward compatibility. New flow: auto-pay → broadcast paid_v1 → handler triggers verification.
   fastify.post('/api/exchange/submit-payment', async (request, reply) => {
     const { relayNodeId, offer_id, payment_tx, payment_chain } = request.body || {};
 
@@ -434,15 +487,17 @@ export async function registerExchangeRoutes(fastify) {
 
   // GET /api/exchange/seeder/status — 活跃种子单 + 今日统计
   fastify.get('/api/exchange/seeder/status', async (request, reply) => {
-    // Active seed orders
+    // Active seed orders (exclude expired)
+    const nowISO = new Date().toISOString();
     const activeRows = sqlite.prepare(`
       SELECT id, give_asset, give_amount, want_asset, want_amount,
              protocol_status, expires_at, metadata, maker
       FROM exchange_offers
       WHERE protocol_status = 'open'
         AND metadata LIKE '%"source":"seeder"%'
+        AND (expires_at IS NULL OR expires_at > ?)
       ORDER BY broadcast_at DESC
-    `).all();
+    `).all(nowISO);
 
     const now = Date.now();
     const activeOrders = activeRows.map(o => {

@@ -1004,10 +1004,22 @@ export class ActionExecutor {
   async executeCancelOffers(action) {
     const { consoleUrl, address } = this.config;
     const reason = action.params?.reason || action.reason || 'agent cancelled';
+    const targetId = action.params?.offer_id || action.offer_id || null;
+
     try {
-      const res = await fetchJson(`${consoleUrl}/api/exchange/offers?maker=${encodeURIComponent(address)}&status=open`);
-      const offers = res?.offers || res || [];
-      if (offers.length === 0) return { ok: true, cancelled: 0, reason: 'no open offers' };
+      let offers;
+      if (targetId) {
+        // Single offer cancel — offer_id can be 8-char prefix or full UUID
+        const res = await fetchJson(`${consoleUrl}/api/exchange/offers?maker=${encodeURIComponent(address)}&status=open`);
+        const all = res?.offers || res || [];
+        offers = all.filter(o => o.id.startsWith(targetId));
+        if (offers.length === 0) return { ok: false, reason: `No open offer matching ${targetId}` };
+      } else {
+        // Cancel all open offers
+        const res = await fetchJson(`${consoleUrl}/api/exchange/offers?maker=${encodeURIComponent(address)}&status=open`);
+        offers = res?.offers || res || [];
+        if (offers.length === 0) return { ok: true, cancelled: 0, reason: 'no open offers' };
+      }
 
       let cancelled = 0;
       for (const offer of offers) {
@@ -1015,7 +1027,7 @@ export class ActionExecutor {
           await fetchJson(`${consoleUrl}/api/exchange/cancel`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ offerId: offer.id, relayNodeId: this.config.relayNodeId }),
+            body: JSON.stringify({ offer_id: offer.id, relayNodeId: this.config.relayNodeId }),
           });
           cancelled++;
         } catch {}
@@ -1023,7 +1035,7 @@ export class ActionExecutor {
 
       this.memory.recordEvent({
         type: 'cancel_offers',
-        summary: `Cancelled ${cancelled}/${offers.length} open offers. ${reason}`,
+        summary: `Cancelled ${cancelled}/${offers.length} offer(s). ${reason}`,
       });
 
       return { ok: true, cancelled, total: offers.length };

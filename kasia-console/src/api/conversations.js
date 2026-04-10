@@ -348,9 +348,24 @@ export async function registerConversationRoutes(fastify) {
           AND t.conversation_id IS NULL
           AND (t.trace_id LIKE 'handshake:%' OR t.trace_id LIKE 'handshake-init:%' OR t.trace_id LIKE 'catchup:%')
           ${hsFilter}
+
+        UNION ALL
+
+        SELECT t.txid, t.trace_id, t.amount, t.fee, t.created_at,
+               'other' AS type,
+               t.local_address AS agent_address,
+               NULL AS peer_address
+        FROM tx_records t
+        WHERE t.direction = 'outbound'
+          AND t.conversation_id IS NULL
+          AND t.trace_id NOT LIKE 'handshake:%'
+          AND t.trace_id NOT LIKE 'handshake-init:%'
+          AND t.trace_id NOT LIKE 'catchup:%'
+          AND (CAST(COALESCE(t.amount, '0') AS REAL) + CAST(COALESCE(t.fee, '0') AS REAL)) > 0
+          ${hsFilter}
       )
       ORDER BY CAST(COALESCE(amount, '0') AS REAL) DESC, created_at DESC
-    `).all(...convParams, ...hsParams);
+    `).all(...convParams, ...hsParams, ...hsParams);
 
     const result = rows.map(r => {
       const agentName = r.agent_address ? (agentByAddr[r.agent_address] || r.agent_address.slice(-12)) : null;
@@ -361,6 +376,11 @@ export async function registerConversationRoutes(fastify) {
 
       let type = 'message';
       if (r.type === 'handshake' || (r.trace_id || '').includes('handshake')) type = 'handshake';
+      else if (r.type === 'other') {
+        // Classify non-conv, non-handshake TX
+        if (amt >= 1) type = 'transfer';
+        else type = 'broadcast';
+      }
       else if (amt >= 0.15 && amt <= 0.25) type = 'handshake';
       else if (amt > 0.25 && peerAddr && agentByAddr[peerAddr]) type = 'transfer';
       else if (amt > 0.25) type = 'utxo_split';

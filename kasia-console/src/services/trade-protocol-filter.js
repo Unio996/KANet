@@ -16,6 +16,7 @@ import { recordChainEvent } from './chain-event.js';
 import { checkLimits } from './trade-limits.js';
 import { placeOrder } from './exchange-orders.js';
 import { decrypt } from './crypto.js';
+// exchange-machine imports merged below at line ~352
 
 /**
  * Called after every broadcast_messages INSERT.
@@ -24,6 +25,7 @@ import { decrypt } from './crypto.js';
  * @param {object} row - { tx_hash, content, sender_address, channel_name, created_at }
  */
 export { _executeHedge as executeHedge };
+export { _autoPayExchange as triggerAutoPay };
 
 export async function onBroadcastWritten(row) {
   if (!row.content || !row.content.startsWith('{"t":"kanet_')) return;
@@ -64,6 +66,12 @@ export async function onBroadcastWritten(row) {
         await handleExchangeCancel(msg); break;
       case 'kanet_confirm_v1':
         await handleManualConfirm(msg); break;
+      case EXCHANGE_MSG.PAID:
+        await handleExchangePaid(msg); break;
+      case EXCHANGE_MSG.DELIVERED:
+        await handleExchangeDelivered(msg); break;
+      case EXCHANGE_MSG.TIMEOUT:
+        await handleExchangeTimeout(msg); break;
     }
   } catch (err) {
     console.error(`[trade-filter] Error processing ${msg.t}: ${err.message}`);
@@ -348,7 +356,19 @@ async function tryNextAccept(orderId) {
 // ── Exchange Protocol (v1.1 自由市场) ────────────────────────
 
 import { randomUUID } from 'crypto';
-import { processAccept as machineAccept, processManualConfirm, processCancel as machineCancel } from './exchange-machine.js';
+import { processAccept as machineAccept, processManualConfirm, processCancel as machineCancel, processPaymentSubmit, transition as exchangeTransition } from './exchange-machine.js';
+
+// Exchange protocol v2 message type constants
+const EXCHANGE_MSG = {
+  PUBLISH:   'kanet_exchange_v1',
+  ACCEPT:    'kanet_exchange_accept_v1',
+  CANCEL:    'kanet_exchange_cancel_v1',
+  CONFIRM:   'kanet_confirm_v1',
+  PAID:      'kanet_exchange_paid_v1',
+  DELIVERED: 'kanet_exchange_delivered_v1',
+  TIMEOUT:   'kanet_exchange_timeout_v1',
+  DISPUTE:   'kanet_exchange_dispute_v1',
+};
 
 /**
  * Derive market_key: alphabetical sort ensures KAS|USDT === USDT|KAS
@@ -416,6 +436,21 @@ async function handleExchangeAccept(msg) {
   if (result.protocol_status !== 'awaiting_manual_confirm' &&
       result.protocol_status !== 'verifying') return;
 
+  // Record chain_event for Brain awareness + audit trail
+  recordChainEvent({
+    txid: msg._tx || null,
+    eventType: 'exchange_matched',
+    fromAddress: result.taker,
+    toAddress: result.maker,
+    payload: JSON.stringify({
+      offer_id: result.id,
+      give_asset: result.give_asset, give_amount: result.give_amount,
+      want_asset: result.want_asset, want_amount: result.want_amount,
+      taker: result.taker, taker_chain: result.taker_chain,
+      verification: result.verification,
+    }),
+  });
+
   // manual 验证：等待手动确认，不触发对冲
   if (result.protocol_status === 'awaiting_manual_confirm') {
     console.log(`[exchange] manual confirm pending offer=${result.id.slice(0,8)} maker=${result.maker.slice(-8)} taker=${result.taker?.slice(-8)}`);
@@ -424,7 +459,17 @@ async function handleExchangeAccept(msg) {
 
   // verifying（cross_chain_tx / kaspa_tx）：不在此阶段触发对冲
   // Hedge 必须等 completed（交割确认后）才触发，否则 Taker 不履约 = 裸空仓
-  // 触发点：exchange.js confirm 端点 + exchange-machine.js _verifyAndComplete
+
+  // === Auto-pay: if taker is a local Agent, automatically pay USDT ===
+  if (result.taker && result.taker_chain) {
+    const localRelay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(result.taker);
+    if (localRelay) {
+      console.log(`[exchange] local taker detected, triggering auto-pay for offer ${result.id.slice(0,8)}`);
+      setImmediate(() => _autoPayExchange(result, localRelay.id).catch(e =>
+        console.error(`[exchange] auto-pay error: ${e.message}`)
+      ));
+    }
+  }
   console.log(`[exchange] offer ${result.id.slice(0,8)} entered verifying — hedge deferred to completed`);
 }
 
@@ -612,6 +657,212 @@ async function _executeHedge(offerId, agentName, side, qty, preferredCex = null)
       payload: { exchange: account.exchange, side, qty, price, error: result.error },
     });
   }
+}
+
+// ── Exchange v2 protocol handlers ─────────────────────────────
+
+/**
+ * kanet_exchange_paid_v1 — taker broadcasts payment proof.
+ * Transitions matched → verifying → triggers _verifyAndComplete.
+ */
+async function handleExchangePaid(msg) {
+  if (!msg.offer_id || !msg.payment_tx) return;
+
+  const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(msg.offer_id);
+  if (!offer) { console.log(`[exchange] paid: offer ${msg.offer_id} not found`); return; }
+
+  // Gate 1: payment_tx already set → duplicate, skip
+  if (offer.payment_tx) { console.log(`[exchange] paid: offer ${msg.offer_id.slice(0,8)} already has payment_tx, skip`); return; }
+
+  // Gate 2: must be in matched (transition to verifying will fail otherwise)
+  if (offer.protocol_status !== 'matched') {
+    console.log(`[exchange] paid: offer ${msg.offer_id.slice(0,8)} status=${offer.protocol_status}, expected matched`);
+    return;
+  }
+
+  // Write payment_tx
+  sqlite.prepare('UPDATE exchange_offers SET payment_tx = ? WHERE id = ?').run(msg.payment_tx, msg.offer_id);
+
+  // Transition matched → verifying (Gate 2: transition validates status)
+  const verifyingOffer = exchangeTransition(msg.offer_id, 'verifying', {});
+  if (!verifyingOffer || verifyingOffer.protocol_status !== 'verifying') {
+    console.log(`[exchange] paid: transition to verifying failed for ${msg.offer_id.slice(0,8)}`);
+    return;
+  }
+
+  recordChainEvent({
+    txid: msg._tx || null,
+    eventType: 'exchange_paid',
+    fromAddress: msg.payer || offer.taker,
+    toAddress: offer.maker,
+    payload: JSON.stringify({ offer_id: msg.offer_id, payment_tx: msg.payment_tx, chain: msg.payment_chain }),
+  });
+
+  // Trigger verification via existing processPaymentSubmit (it handles _verifyAndComplete)
+  const chain = offer.taker_chain || msg.payment_chain;
+  processPaymentSubmit({ offer_id: msg.offer_id, payment_tx: msg.payment_tx, payment_chain: chain });
+
+  console.log(`[exchange] paid: offer ${msg.offer_id.slice(0,8)} → verifying, TX=${msg.payment_tx.slice(0,16)}`);
+}
+
+/**
+ * kanet_exchange_delivered_v1 — maker broadcasts KAS delivery proof.
+ * Taker node updates local state to completed.
+ */
+async function handleExchangeDelivered(msg) {
+  if (!msg.offer_id || !msg.delivery_tx) return;
+
+  const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(msg.offer_id);
+  if (!offer) return;
+
+  // Idempotent: already completed/disputed/etc → skip
+  if (['completed', 'disputed', 'cancelled', 'expired'].includes(offer.protocol_status)) return;
+
+  // Accept from any in-progress state (buyer node may be at matched/verifying/delivering depending on timing)
+  // Direct SQL UPDATE — not transition() — because buyer's state may not match seller's state machine sequence
+  sqlite.prepare(`
+    UPDATE exchange_offers SET protocol_status = 'completed', completed_at = datetime('now'), is_fully_observed = 1, updated_at = datetime('now')
+    WHERE id = ? AND protocol_status IN ('matched', 'verifying', 'delivering')
+  `).run(msg.offer_id);
+
+  recordChainEvent({
+    txid: msg.delivery_tx,
+    eventType: 'exchange_delivered',
+    fromAddress: offer.maker,
+    toAddress: offer.taker,
+    payload: JSON.stringify({ offer_id: msg.offer_id, delivery_tx: msg.delivery_tx, amount: msg.delivery_amount }),
+  });
+
+  console.log(`[exchange] delivered: offer ${msg.offer_id.slice(0,8)} → completed (was ${offer.protocol_status})`);
+}
+
+/**
+ * kanet_exchange_timeout_v1 — maker broadcasts payment timeout.
+ * Reverts matched → open, clears taker fields, releases fund lock.
+ * Does NOT use transition() — timeout revert is an exceptional flow.
+ */
+async function handleExchangeTimeout(msg) {
+  if (!msg.offer_id) return;
+
+  const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(msg.offer_id);
+  if (!offer) return;
+  if (offer.protocol_status !== 'matched') return;
+
+  // Direct SQL UPDATE: matched → open, clear taker fields
+  sqlite.prepare(`
+    UPDATE exchange_offers
+    SET protocol_status = 'open',
+        taker = NULL, taker_chain = NULL, taker_payment_address = NULL,
+        payment_tx = NULL, matched_at = NULL,
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(msg.offer_id);
+
+  releaseFunds(msg.offer_id);
+
+  recordChainEvent({
+    txid: msg._tx || null,
+    eventType: 'exchange_timeout',
+    fromAddress: offer.maker,
+    payload: JSON.stringify({ offer_id: msg.offer_id, taker: msg.taker || offer.taker, reason: msg.reason }),
+  });
+
+  console.log(`[exchange] timeout: offer ${msg.offer_id.slice(0,8)} reopened (was matched with ${(offer.taker || '').slice(-8)})`);
+}
+
+// ── Auto-pay for Exchange offers ──────────────────────────────
+
+/**
+ * Local taker auto-pays USDT after accepting an exchange offer.
+ * Mirrors OTC pay_usdt logic but uses shared evm-transfer.js.
+ */
+async function _autoPayExchange(offer, takerRelayNodeId) {
+  const chain = offer.taker_chain;
+  if (!chain) {
+    console.log(`[exchange-autopay] No taker_chain on offer ${offer.id.slice(0,8)}, skip`);
+    return;
+  }
+
+  // Check if chain is supported for auto-pay (Phase 1: BNB/ETH only)
+  const { isEvmChainSupported, transferERC20 } = await import('./evm-transfer.js');
+  if (!isEvmChainSupported(chain)) {
+    console.log(`[exchange-autopay] Chain ${chain} not supported for auto-pay (Phase 1: BNB/ETH only), skip`);
+    return;
+  }
+
+  // Get taker's wallet for this chain
+  const wallet = sqlite.prepare(
+    'SELECT id, address, privkey_encrypted FROM agent_wallets WHERE relay_node_id = ? AND chain = ? AND is_default = 1'
+  ).get(takerRelayNodeId, chain);
+  if (!wallet?.privkey_encrypted) {
+    console.log(`[exchange-autopay] No ${chain} wallet with private key for taker ${takerRelayNodeId.slice(0,8)}, skip`);
+    return;
+  }
+
+  // Receive address = maker's address for the selected chain (from verification_meta or taker_payment_address)
+  const receiveAddress = offer.taker_payment_address;
+  if (!receiveAddress) {
+    console.log(`[exchange-autopay] No receive address on offer ${offer.id.slice(0,8)}, skip`);
+    return;
+  }
+
+  const amount = parseFloat(offer.want_amount);
+  if (!amount || amount <= 0) {
+    console.log(`[exchange-autopay] Invalid amount ${offer.want_amount}, skip`);
+    return;
+  }
+
+  console.log(`[exchange-autopay] Paying ${amount} USDT → ${receiveAddress.slice(0,12)}... on ${chain} for offer ${offer.id.slice(0,8)}`);
+
+  const result = await transferERC20(chain, wallet.privkey_encrypted, receiveAddress, amount);
+  if (!result.ok) {
+    console.error(`[exchange-autopay] Payment failed: ${result.error}`);
+    recordChainEvent({
+      eventType: 'exchange_pay_failed',
+      fromAddress: offer.taker,
+      payload: JSON.stringify({ offer_id: offer.id, chain, error: result.error }),
+    });
+    return;
+  }
+
+  console.log(`[exchange-autopay] Payment TX: ${result.txHash}`);
+
+  // Write payment_tx to offer
+  sqlite.prepare('UPDATE exchange_offers SET payment_tx = ? WHERE id = ?').run(result.txHash, offer.id);
+
+  // Broadcast kanet_exchange_paid_v1
+  try {
+    const { sendCommandAsync } = await import('./relay-manager.js');
+    const paidMsg = JSON.stringify({
+      t: 'kanet_exchange_paid_v1',
+      offer_id: offer.id,
+      payment_tx: result.txHash,
+      payment_chain: chain,
+      payment_asset: offer.want_asset || 'USDT',
+      payment_amount: offer.want_amount,
+      payer: offer.taker,
+    });
+    const bcastResult = await sendCommandAsync(takerRelayNodeId, {
+      type: 'send_broadcast',
+      channel: 'kanet-exchange',
+      message: paidMsg,
+    });
+    console.log(`[exchange-autopay] Broadcast kanet_exchange_paid_v1 TX: ${bcastResult?.txId || '?'}`);
+  } catch (err) {
+    console.error(`[exchange-autopay] Broadcast failed: ${err.message}`);
+  }
+
+  recordChainEvent({
+    txid: result.txHash,
+    eventType: 'exchange_paid',
+    fromAddress: offer.taker,
+    toAddress: offer.maker,
+    payload: JSON.stringify({ offer_id: offer.id, chain, amount, payment_tx: result.txHash }),
+  });
+
+  // Directly trigger verification (don't wait for Scout to scan paid_v1 broadcast)
+  processPaymentSubmit({ offer_id: offer.id, payment_tx: result.txHash, payment_chain: chain });
+  console.log(`[exchange-autopay] verification triggered for offer ${offer.id.slice(0,8)}`);
 }
 
 // ── Helpers ───────────────────────────────────────────────────

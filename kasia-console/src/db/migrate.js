@@ -1745,5 +1745,29 @@ export function runMigrations() {
     console.log('[migrate] v53b: market_seeder_config table created with defaults');
   }
 
+  // v54: exchange_offers 加 taker_chain + taker_payment_address — 买家选链后锁定收款链路
+  const hasTakerChain = sqlite.prepare(
+    "SELECT 1 FROM pragma_table_info('exchange_offers') WHERE name='taker_chain'"
+  ).get();
+  if (!hasTakerChain) {
+    sqlite.exec(`
+      ALTER TABLE exchange_offers ADD COLUMN taker_chain TEXT;
+      ALTER TABLE exchange_offers ADD COLUMN taker_payment_address TEXT;
+    `);
+    console.log('[migrate] v54: exchange_offers taker_chain + taker_payment_address added');
+  }
+
+  // v55: exchange_offers.delivering_at + payment_tx — delivering 状态时间戳 + 付款 TX 记录
+  const hasDeliveringAt = sqlite.prepare(
+    "SELECT 1 FROM pragma_table_info('exchange_offers') WHERE name='delivering_at'"
+  ).get();
+  if (!hasDeliveringAt) {
+    sqlite.exec(`
+      ALTER TABLE exchange_offers ADD COLUMN delivering_at TEXT;
+      ALTER TABLE exchange_offers ADD COLUMN payment_tx TEXT;
+    `);
+    console.log('[migrate] v55: exchange_offers delivering_at + payment_tx added');
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

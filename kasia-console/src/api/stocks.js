@@ -8,7 +8,7 @@ import { sqlite } from '../db/client.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 import crypto, { randomUUID } from 'crypto';
 import { fetchStockData, fetchYahooQuote, cachedPredictions, cachedCommodities, cachedFunding, cachedSentiment, fetchAllMarkets, cachedCrypto, cachedFundamentals, cachedIndustryPeers, cachedStockKlines, DIVERGENCE_WARN_THRESHOLD } from '../services/market-data.js';
-import { getPolygonWallet, getUsdcBalance, createApiKey, getOrderBook, getPositions, placeOrder, cancelOrder, getOpenOrders, checkAllowance, approveUsdc, checkTxStatus } from '../services/polymarket.js';
+import { getPolygonWallet, getUsdcBalance, createApiKey, getOrderBook, getPositions, placeOrder, cancelOrder, getOpenOrders, checkAllowance, approveUsdc, checkTxStatus, redeemPositions } from '../services/polymarket.js';
 import { decrypt } from '../services/crypto.js';
 
 // Agent 综述缓存（15 分钟）
@@ -292,17 +292,28 @@ export async function registerStockRoutes(fastify) {
         if (t.side === 'BUY') { posMap[key].size += sz; posMap[key].totalCost += cost; }
         else { posMap[key].size -= sz; posMap[key].totalCost -= cost; }
       }
-      const positions = Object.values(posMap).filter(p => p.size > 0).map(p => ({
+      const allPositions = Object.values(posMap).filter(p => p.size > 0).map(p => ({
         ...p, avgPrice: p.totalCost / p.size, title: p.market?.slice(0, 16) + '...',
       }));
       // Resolve market questions in parallel
-      await Promise.all(positions.map(async (p) => {
+      await Promise.all(allPositions.map(async (p) => {
         const info = await _resolveMarketQuestion(p.market);
         p.question = info.question;
         p.closed = info.closed;
         p.endDate = info.endDate;
+        // Mark settled: closed market = already redeemed or redeemable
+        if (info.closed) {
+          p.settled = true;
+          p.status = 'settled';
+        } else {
+          p.settled = false;
+          p.status = 'active';
+        }
       }));
-      return reply.send({ positions, trades });
+      // Split: active positions vs settled (history)
+      const positions = allPositions.filter(p => !p.settled);
+      const settled = allPositions.filter(p => p.settled);
+      return reply.send({ positions, settled, trades });
     } catch (e) { return reply.send({ positions: [], error: e.message }); }
   });
 
@@ -416,6 +427,22 @@ export async function registerStockRoutes(fastify) {
     const { txHash } = request.query;
     if (!txHash) return reply.code(400).send({ error: 'txHash required' });
     const result = await checkTxStatus(txHash);
+    return reply.send(result);
+  });
+
+  // POST /api/polymarket/:relay_node_id/redeem — 赎回已结算市场持仓
+  fastify.post('/api/polymarket/:relay_node_id/redeem', async (request, reply) => {
+    const relayNodeId = request.params.relay_node_id;
+    const { conditionId } = request.body || {};
+    if (!conditionId) return reply.code(400).send({ error: 'conditionId required' });
+
+    const wallet = sqlite.prepare(
+      "SELECT address, privkey_encrypted FROM agent_wallets WHERE relay_node_id = ? AND chain = 'polygon' LIMIT 1"
+    ).get(relayNodeId);
+    if (!wallet?.privkey_encrypted) return reply.code(400).send({ error: 'No Polygon wallet with private key' });
+
+    const privateKey = decrypt(wallet.privkey_encrypted);
+    const result = await redeemPositions(privateKey, conditionId);
     return reply.send(result);
   });
 

@@ -29,7 +29,7 @@ export class SelfAwarenessSkill extends Skill {
     const { consoleUrl, relayNodeId, address } = config;
 
     // Parallel fetch: balance, wallets, profile, recent broadcasts, mind config, portfolio
-    const [balance, wallets, profile, broadcasts, mindConfig, polyPositions, brokerAccounts, otcOrders] = await Promise.all([
+    const [balance, wallets, profile, broadcasts, mindConfig, polyPositions, brokerAccounts, otcOrders, exchangeOffers] = await Promise.all([
       fetchJson(`${consoleUrl}/api/relay/${relayNodeId}/balance`).catch(() => null),
       fetchJson(`${consoleUrl}/api/relay/${relayNodeId}/wallets`).catch(() => null),
       fetchJson(`${consoleUrl}/api/agent/profile`).catch(() => null),
@@ -38,6 +38,7 @@ export class SelfAwarenessSkill extends Skill {
       fetchJson(`${consoleUrl}/api/predictions/positions?relay_node_id=${relayNodeId}`).catch(() => null),
       fetchJson(`${consoleUrl}/api/broker/accounts`).catch(() => null),
       fetchJson(`${consoleUrl}/api/trade/mm-orders?status=active`).catch(() => null),
+      fetchJson(`${consoleUrl}/api/exchange/offers?maker=${encodeURIComponent(address)}&limit=20`).catch(() => null),
     ]);
 
     // My profile from agent list
@@ -95,6 +96,15 @@ export class SelfAwarenessSkill extends Skill {
       .filter(o => !['completed', 'cancelled', 'expired'].includes(o.status))
       .map(o => ({ side: o.side, amount: o.amount, price: o.price, status: o.status }));
 
+    // Exchange offers (free market)
+    const allExOffers = exchangeOffers?.offers || [];
+    const activeExchangeOffers = allExOffers
+      .filter(o => ['open', 'matched', 'verifying', 'awaiting_manual_confirm'].includes(o.protocol_status))
+      .map(o => ({
+        id: o.id?.slice(0, 8), give: `${o.give_amount} ${o.give_asset}`, want: `${o.want_amount} ${o.want_asset}`,
+        status: o.protocol_status, taker_chain: o.taker_chain, expires_at: o.expires_at, updated_at: o.updated_at,
+      }));
+
     return {
       balance: balanceKas,
       balanceLow: balanceKas !== null && balanceKas <= 1.0,
@@ -102,6 +112,7 @@ export class SelfAwarenessSkill extends Skill {
       polyPositions: polyPos,
       stockPositions,
       activeOtcOrders: activeOtc,
+      activeExchangeOffers,
       brokerConnected: !!connectedBroker,
       brokerName: connectedBroker?.name || null,
       contacts: contactCount,
@@ -166,6 +177,16 @@ export class SelfAwarenessSkill extends Skill {
         ...gathered.activeOtcOrders.map(o =>
           `  ${o.side.toUpperCase()} ${o.amount} KAS @ $${o.price} — ${o.status}`
         ),
+      ] : []),
+      // ── Exchange Offers (Free Market) ──
+      ...(gathered.activeExchangeOffers?.length > 0 ? [
+        '',
+        `Active Exchange Offers (${gathered.activeExchangeOffers.length}):`,
+        ...gathered.activeExchangeOffers.map(o => {
+          const staleMs = o.status === 'matched' && o.updated_at ? Date.now() - new Date(o.updated_at).getTime() : 0;
+          const staleWarn = staleMs > 30 * 60 * 1000 ? ' ⚠ STALE >30min, no payment' : '';
+          return `  [${o.id}] ${o.give} → ${o.want} | ${o.status}${o.taker_chain ? ' via ' + o.taker_chain.toUpperCase() : ''}${staleWarn}`;
+        }),
       ] : []),
       '',
       `Contacts: ${gathered.contacts} peers | Interactions: ${gathered.interactions} total | Handshakes: ${gathered.handshakes}`,

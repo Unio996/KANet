@@ -2557,35 +2557,14 @@ export async function registerTradingRoutes(fastify) {
       transition(id, 'paying', { force: true });
 
       try {
-        const privateKey = decrypt(wallet.privkey_encrypted);
-        const { ethers } = await import('ethers');
-        const EVM_RPC = { bnb: 'https://bsc-dataseed1.binance.org', eth: 'https://eth.llamarpc.com' };
-        const USDT = {
-          bnb: { address: '0x55d398326f99059fF775485246999027B3197955', decimals: 18 },
-          eth: { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', decimals: 6 },
-        };
-        if (!EVM_RPC[chain] || !USDT[chain]) {
-          failExecution(execId, 'Chain not supported: ' + chain);
-          return reply.code(400).send({ error: 'Chain ' + chain + ' not supported for USDT payment' });
+        const { transferERC20 } = await import('../services/evm-transfer.js');
+        const txResult = await transferERC20(chain, wallet.privkey_encrypted, sellerAddr, usdtAmount);
+        if (!txResult.ok) {
+          failExecution(execId, txResult.error);
+          transition(id, 'accepted', { reason: txResult.error, force: true });
+          return reply.code(400).send({ error: txResult.error });
         }
-
-        const provider = new ethers.JsonRpcProvider(EVM_RPC[chain]);
-        const signer = new ethers.Wallet(privateKey, provider);
-        const contract = new ethers.Contract(USDT[chain].address, [
-          'function balanceOf(address) view returns (uint256)',
-          'function transfer(address to, uint256 amount) returns (bool)',
-        ], signer);
-
-        const balance = await contract.balanceOf(wallet.address);
-        const balanceFloat = parseFloat(ethers.formatUnits(balance, USDT[chain].decimals));
-        if (balanceFloat < usdtAmount) {
-          failExecution(execId, 'USDT insufficient: ' + balanceFloat.toFixed(2));
-          transition(id, 'accepted', { reason: 'USDT insufficient: ' + balanceFloat.toFixed(2), force: true });
-          return reply.code(400).send({ error: 'USDT balance insufficient: have ' + balanceFloat.toFixed(2) + ', need ' + usdtAmount.toFixed(2) });
-        }
-
-        const amountWei = ethers.parseUnits(String(usdtAmount.toFixed(USDT[chain].decimals > 6 ? 6 : USDT[chain].decimals)), USDT[chain].decimals);
-        const tx = await contract.transfer(sellerAddr, amountWei);
+        const tx = { hash: txResult.txHash };
         console.log(`[trade] USDT payment: ${usdtAmount} USDT → ${sellerAddr} on ${chain} TX: ${tx.hash}`);
 
         completeExecution(execId, { outputTxid: tx.hash, summary: `💰 已付款 ${usdtAmount.toFixed(2)} USDT → ${sellerAddr.slice(0,8)}...（${chain.toUpperCase()} 链），等待到账确认` });

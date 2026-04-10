@@ -151,7 +151,7 @@ async function handleActiveConversation(peer) {
         if (!draft?.payload) { log("Draft failed:", draft); break; }
         const sent = await sendKaspa({ to: draft.to, amount: draft.amount, payload: draft.payload });
         log("TX SENT:", sent?.txId || sent);
-        ingestTx({ traceId: msg.txId, txid: sent?.txId, direction: "outbound", fee: sent?.fee, localAddress });
+        ingestTx({ traceId: msg.txId, txid: sent?.txId, direction: "outbound", amount: '0', fee: sent?.fee, localAddress });
         const _txMsgType = text && /^\s*\{/.test(text) && text.includes('"query_card"') ? 'query_card' : 'text';
         ingestMessage({
           traceId: `reply-out:${sent?.txId || msg.txId}`,
@@ -301,7 +301,7 @@ if (process.send) {
           }
           draft = await sendMessage({ address: cmd.target, message: cmd.message });
           sent = await sendKaspa({ to: draft.to, amount: draft.amount, payload: draft.payload });
-          ingestTx({ traceId: sent?.txId, txid: sent?.txId, direction: 'outbound', fee: sent?.fee, localAddress });
+          ingestTx({ traceId: sent?.txId, txid: sent?.txId, direction: 'outbound', amount: '0', fee: sent?.fee, localAddress });
           ingestMessage({
             traceId: `msg-out:${sent?.txId || Date.now()}`,
             direction: 'outbound',
@@ -317,7 +317,7 @@ if (process.send) {
         case 'publish_card':
           draft = await publishCard(cmd.params);
           sent = await sendKaspa({ to: draft.to, amount: draft.amount, payload: draft.payload });
-          ingestTx({ traceId: sent?.txId, txid: sent?.txId, direction: 'outbound', fee: sent?.fee, localAddress });
+          ingestTx({ traceId: sent?.txId, txid: sent?.txId, direction: 'outbound', amount: '0', fee: sent?.fee, localAddress });
           log(`CARD published TX: ${sent?.txId || '?'} fee: ${sent?.fee || '?'}`);
           break;
 
@@ -334,7 +334,7 @@ if (process.send) {
           const { encodeBcastPayload } = await import('./lib/protocol.mjs');
           const bcastPayloadHex = encodeBcastPayload(cmd.channel, cmd.message);
           sent = await sendKaspa({ to: localAddress, amount: 'self-full', payload: bcastPayloadHex });
-          ingestTx({ traceId: sent?.txId, txid: sent?.txId, direction: 'outbound', fee: sent?.fee, localAddress });
+          ingestTx({ traceId: sent?.txId, txid: sent?.txId, direction: 'outbound', amount: '0', fee: sent?.fee, localAddress });
           log(`BROADCAST #${cmd.channel} TX: ${sent?.txId || '?'} fee: ${sent?.fee || '?'}`);
           break;
         }

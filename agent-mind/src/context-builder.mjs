@@ -296,6 +296,7 @@ export class ContextBuilder {
         '  [ACTION:PLACE_ORDER side=buy amount=500 price=0.033 market=free_market]',
         '  [ACTION:PLACE_ORDER side=sell amount=200 price=0.04 market=both]',
         '  [ACTION:CANCEL_ORDER orderId=xxx]',
+        '  [ACTION:CANCEL_OFFERS offer_id=<8-char-id> reason=<price_changed|stale|rebalance>]  — cancel one exchange offer (omit offer_id to cancel ALL)',
         '  [ACTION:SEND_KAS amount=10 to=kaspa:q...]',
         '',
         'MARKET SELECTION for PLACE_ORDER:',
@@ -845,6 +846,28 @@ export class ContextBuilder {
         'RULES: Only initiate_handshake with OBSERVED addresses. For ACTIVE/ACCEPTED, use send_message.',
       );
     }
+
+    // Exchange offers (free market) — Brain needs to see its active offers
+    try {
+      const consoleUrl = this.config?.consoleUrl || 'http://localhost:3100';
+      const addr = this.config?.address;
+      if (addr) {
+        const exRes = await fetch(`${consoleUrl}/api/exchange/offers?maker=${encodeURIComponent(addr)}&limit=10`, { signal: AbortSignal.timeout(3000) });
+        if (exRes.ok) {
+          const exData = await exRes.json();
+          const active = (exData.offers || []).filter(o => ['open', 'matched', 'verifying'].includes(o.protocol_status));
+          if (active.length > 0) {
+            const offerLines = active.map(o => {
+              const staleMs = o.protocol_status === 'matched' && o.updated_at ? Date.now() - new Date(o.updated_at).getTime() : 0;
+              const staleWarn = staleMs > 30 * 60 * 1000 ? ' ⚠ STALE' : '';
+              return `  [${o.id.slice(0,8)}] ${o.give_amount} ${o.give_asset}→${o.want_amount} ${o.want_asset} | ${o.protocol_status}${o.taker_chain ? ' via ' + o.taker_chain.toUpperCase() : ''}${staleWarn}`;
+            });
+            sections.push('--- YOUR EXCHANGE OFFERS ---\n' + offerLines.join('\n') +
+              '\nTo cancel stale offers: [ACTION:CANCEL_OFFERS offer_id=<id> reason=stale]');
+          }
+        }
+      }
+    } catch {}
 
     // Skill data
     if (skills.length) {

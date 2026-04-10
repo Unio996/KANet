@@ -185,17 +185,77 @@
                   class="px-1.5 py-0.5 bg-brand-50 text-brand-600 rounded text-[10px]"
                   x-text="o.verification"></span>
               </div>
+              <!-- Accepted payment chains -->
+              <template x-if="o.verification === 'cross_chain_tx' && o.protocol_status === 'open'">
+                <div class="flex items-center gap-1 mt-2">
+                  <span class="text-xs text-ink-400">Pay via:</span>
+                  <template x-for="w in (JSON.parse(o.verification_meta || '{}').accepted_chains || [])" :key="w.chain">
+                    <span class="px-1.5 py-0.5 bg-warm-100 text-ink-600 rounded text-[10px] font-medium uppercase" x-text="w.chain"></span>
+                  </template>
+                </div>
+              </template>
+              <!-- Matched: show payment instructions -->
+              <template x-if="o.protocol_status === 'matched' && o.taker_payment_address">
+                <div class="mt-3 p-3 bg-amber-50 border border-amber-200 rounded space-y-2">
+                  <div class="text-xs font-medium text-amber-700">Awaiting payment</div>
+                  <div class="text-xs text-ink-500 break-all">
+                    Pay <span class="font-bold text-ink-700" x-text="o.want_amount + ' USDT'"></span>
+                    to <span class="font-mono text-ink-700" x-text="o.taker_payment_address"></span>
+                    (<span class="uppercase" x-text="o.taker_chain"></span>)
+                    <button class="text-brand-500 text-[10px] ml-1" @click="KANet.copy(o.taker_payment_address)">copy</button>
+                  </div>
+                  <template x-if="isTaker(o)">
+                    <div class="flex gap-2 mt-1">
+                      <input type="text" x-model="paymentTxMap[o.id]" placeholder="TX Hash (0x...)"
+                        class="flex-1 px-2 py-1 border border-warm-200 rounded text-xs font-mono focus:ring-1 focus:ring-brand-300" />
+                      <button @click="submitPayment(o.id)" :disabled="!paymentTxMap[o.id]?.trim()"
+                        class="px-3 py-1 bg-brand-500 text-white rounded text-xs font-medium hover:bg-brand-600 disabled:opacity-50">
+                        Submit
+                      </button>
+                    </div>
+                  </template>
+                </div>
+              </template>
+              <!-- Verifying status -->
+              <template x-if="o.protocol_status === 'verifying'">
+                <div class="mt-2 text-xs text-amber-600 font-medium">Verifying payment on-chain...</div>
+              </template>
             </div>
-            <!-- Accept (only open offers that are not mine) -->
-            <button x-show="o.protocol_status === 'open' && !isMine(o)"
-              @click="acceptOffer(o)"
-              class="px-3 py-1.5 bg-green-500 text-white rounded-lg text-xs font-medium hover:bg-green-600 transition-colors">
-              Accept
-            </button>
+            <!-- Accept (only open offers that are not mine) — with chain selection for cross_chain_tx -->
+            <div x-show="o.protocol_status === 'open' && !isMine(o)" class="flex-shrink-0 ml-3">
+              <template x-if="o.verification !== 'cross_chain_tx'">
+                <button @click="acceptOffer(o)"
+                  class="px-3 py-1.5 bg-green-500 text-white rounded-lg text-xs font-medium hover:bg-green-600">Accept</button>
+              </template>
+              <template x-if="o.verification === 'cross_chain_tx'">
+                <div x-data="{ showChains: false, selChain: null, selAddr: null }" class="relative">
+                  <button @click="showChains = !showChains"
+                    class="px-3 py-1.5 bg-green-500 text-white rounded-lg text-xs font-medium hover:bg-green-600">Accept</button>
+                  <div x-show="showChains" @click.away="showChains = false"
+                    class="absolute right-0 top-full mt-1 bg-white border border-warm-200 rounded-lg shadow-lg p-3 z-10 w-56">
+                    <div class="text-xs font-medium text-ink-600 mb-2">Select payment chain</div>
+                    <div class="space-y-1">
+                      <template x-for="w in (JSON.parse(o.verification_meta || '{}').accepted_chains || [])" :key="w.chain">
+                        <button @click="selChain = w.chain; selAddr = w.address"
+                          class="w-full text-left px-2 py-1.5 rounded text-xs flex justify-between items-center"
+                          :class="selChain === w.chain ? 'bg-brand-50 text-brand-700 font-medium' : 'hover:bg-warm-50 text-ink-600'">
+                          <span class="uppercase" x-text="w.chain"></span>
+                          <span class="font-mono text-[10px] text-ink-400" x-text="w.address.slice(0,8) + '...'"></span>
+                        </button>
+                      </template>
+                    </div>
+                    <button x-show="selChain" @click="acceptOfferWithChain(o, selChain); showChains = false"
+                      class="w-full mt-2 px-3 py-1.5 bg-green-500 text-white rounded text-xs font-medium hover:bg-green-600">
+                      Confirm
+                    </button>
+                  </div>
+                </div>
+              </template>
+            </div>
             <!-- Cancel (only open offers that I made) -->
             <button x-show="o.protocol_status === 'open' && isMaker(o)"
               @click="cancelOffer(o)"
-              class="px-3 py-1.5 bg-warm-200 text-ink-600 rounded-lg text-xs font-medium hover:bg-warm-300 transition-colors">
+              class="px-3 py-1.5 bg-warm-200 text-ink-600 rounded-lg text-xs font-medium hover:bg-warm-300 transition-colors ml-3">
               Cancel
             </button>
           </div>
@@ -904,6 +964,9 @@ function exchangeApp() {
       verification: 'manual', expires_minutes: '60',
       relayNodeId: '',
     },
+    // Payment tracking
+    paymentTxMap: {},
+
     // Seed tab state
     seedConfig: { enabled: false, sell_spread_pct: 1.0, buy_spread_pct: 1.0, amount_kas: 100, expires_minutes: 30, sell_agent_id: '', buy_agent_id: '' },
     seedOrders: [],
@@ -1139,6 +1202,34 @@ function exchangeApp() {
         const data = await res.json();
         if (data.ok) { await this.loadOffers(); this.activeTab = 'deals'; }
         else { alert(data.error || 'Accept failed'); }
+      } catch (e) { alert(e.message); }
+    },
+
+    async acceptOfferWithChain(offer, selectedChain) {
+      if (!this.form.relayNodeId && this.relays.length) this.form.relayNodeId = this.relays[0].id;
+      if (!this.form.relayNodeId) { alert('No agent available'); return; }
+      try {
+        const res = await fetch('/api/exchange/accept', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relayNodeId: this.form.relayNodeId, offer_id: offer.id, selected_chain: selectedChain }),
+        });
+        const data = await res.json();
+        if (data.ok) { await this.loadOffers(); this.activeTab = 'deals'; }
+        else { alert(data.error || 'Accept failed'); }
+      } catch (e) { alert(e.message); }
+    },
+
+    async submitPayment(offerId) {
+      const txHash = this.paymentTxMap[offerId]?.trim();
+      if (!txHash) return;
+      try {
+        const res = await fetch('/api/exchange/submit-payment', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relayNodeId: this.form.relayNodeId, offer_id: offerId, payment_tx: txHash, payment_chain: 'auto' }),
+        });
+        const data = await res.json();
+        if (data.ok) { this.paymentTxMap[offerId] = ''; await this.loadOffers(); }
+        else { alert(data.error || 'Submit failed'); }
       } catch (e) { alert(e.message); }
     },
 

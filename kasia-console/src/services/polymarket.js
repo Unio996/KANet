@@ -254,6 +254,69 @@ export async function checkTxStatus(txHash) {
 }
 
 /**
+ * 赎回已结算的预测市场持仓 — 将赢的 outcome tokens 兑换为 USDC
+ *
+ * Polymarket 使用 Gnosis CTF (Conditional Token Framework)。
+ * 赎回调用 CTF Exchange 合约的 redeemPositions。
+ *
+ * @param {string} privateKey — Agent 的 Polygon 钱包私钥
+ * @param {string} conditionId — 市场的 conditionId (0x...)
+ * @returns {{ ok, txHash?, error?, gasUsed? }}
+ */
+export async function redeemPositions(privateKey, conditionId) {
+  // Polymarket uses NegRiskAdapter for most markets, but
+  // the standard CTF redeemPositions works for all settled markets.
+  // CTF contract on Polygon: 0x4D97DCd97eC945f40cF65F87097ACe5EA0476045
+  const CTF_CONTRACT = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
+  const CTF_ABI = [
+    'function redeemPositions(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] indexSets) external',
+    'function balanceOf(address owner, uint256 id) view returns (uint256)',
+    'function getOutcomeSlotCount(bytes32 conditionId) view returns (uint256)',
+    'function payoutDenominator(bytes32 conditionId) view returns (uint256)',
+  ];
+
+  try {
+    const provider = new ethers.JsonRpcProvider(POLYGON_RPC);
+    const wallet = new ethers.Wallet(privateKey, provider);
+    const ctf = new ethers.Contract(CTF_CONTRACT, CTF_ABI, wallet);
+
+    // Check if market is resolved (payoutDenominator > 0)
+    const denom = await ctf.payoutDenominator(conditionId);
+    if (denom === 0n) {
+      return { ok: false, error: 'Market not yet resolved (payoutDenominator=0)' };
+    }
+
+    // For binary markets: indexSets = [1, 2] (Yes=1, No=2)
+    // parentCollectionId = 0x0 (root)
+    const parentCollectionId = ethers.ZeroHash;
+    const indexSets = [1, 2]; // Both outcomes — CTF will only redeem the winning side
+
+    const feeData = await provider.getFeeData();
+    const gasOpts = {
+      maxFeePerGas: (feeData.maxFeePerGas || 50000000000n) * 2n,
+      maxPriorityFeePerGas: (feeData.maxPriorityFeePerGas || 30000000000n) * 2n,
+    };
+
+    console.log(`[polymarket] Redeeming positions for condition ${conditionId.slice(0, 16)}...`);
+    const tx = await ctf.redeemPositions(
+      USDC_POLYGON,          // collateral token (USDC)
+      parentCollectionId,    // parent collection (root)
+      conditionId,           // the market
+      indexSets,             // both outcomes
+      gasOpts,
+    );
+    console.log(`[polymarket] Redeem TX: ${tx.hash}`);
+    const receipt = await tx.wait();
+    console.log(`[polymarket] Redeem confirmed block ${receipt.blockNumber}, gas ${receipt.gasUsed}`);
+
+    return { ok: true, txHash: tx.hash, blockNumber: receipt.blockNumber, gasUsed: receipt.gasUsed?.toString() };
+  } catch (e) {
+    console.error(`[polymarket] Redeem error: ${e.message}`);
+    return { ok: false, error: e.message };
+  }
+}
+
+/**
  * 查活跃订单
  */
 export async function getOpenOrders(apiKey, secret, passphrase) {

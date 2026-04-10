@@ -44,12 +44,14 @@ async function tick() {
   }
 
   // Step 2: check active seed orders
+  const now = new Date().toISOString();
   const activeSells = sqlite.prepare(`
     SELECT id FROM exchange_offers
     WHERE protocol_status = 'open'
       AND metadata LIKE '%"source":"seeder"%'
       AND give_asset = 'KAS'
-  `).all();
+      AND (expires_at IS NULL OR expires_at > ?)
+  `).all(now);
 
   const results = {};
 
@@ -98,6 +100,20 @@ async function publishSeedOrder(config, midPrice, side) {
     wantAmount = String(config.amount_kas);
   }
 
+  // Query maker's multi-chain wallets for receive addresses
+  // Phase 1: only EVM chains with auto-pay support (BNB/ETH). SOL/TRON added in Phase 2.
+  const wallets = sqlite.prepare(`
+    SELECT chain, address FROM agent_wallets
+    WHERE relay_node_id = ? AND is_default = 1 AND chain IN ('bnb', 'eth')
+    ORDER BY CASE chain WHEN 'bnb' THEN 0 WHEN 'eth' THEN 1 ELSE 2 END
+  `).all(agentId);
+
+  // Build verification_meta with accepted chains (for cross_chain_tx verification)
+  const usesCrossChain = wantAsset === 'USDT' && wallets.length > 0;
+  const verificationMeta = usesCrossChain
+    ? { accepted_chains: wallets.map(w => ({ chain: w.chain, address: w.address })), expected_asset: 'USDT' }
+    : {};
+
   try {
     const res = await fetch(`http://127.0.0.1:${PORT}/api/exchange/publish`, {
       method: 'POST',
@@ -108,7 +124,8 @@ async function publishSeedOrder(config, midPrice, side) {
         give_amount: giveAmount,
         want_asset: wantAsset,
         want_amount: wantAmount,
-        verification: 'manual',
+        verification: usesCrossChain ? 'cross_chain_tx' : 'manual',
+        verification_meta: verificationMeta,
         expires_minutes: config.expires_minutes,
         metadata: {
           source: 'seeder',

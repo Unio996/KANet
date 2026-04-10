@@ -14,6 +14,7 @@
 import { sqlite } from '../db/client.js';
 import { getVerifier } from './exchange-verifiers.js';
 import { executeHedge } from './trade-protocol-filter.js';
+import { releaseFunds } from './fund-lock.js';
 import crypto from 'crypto';
 
 // ── Valid Transitions ─────────────────────────────────────────
@@ -21,7 +22,8 @@ import crypto from 'crypto';
 const VALID_TRANSITIONS = {
   open:                     ['matched', 'cancelled', 'expired'],
   matched:                  ['verifying', 'awaiting_manual_confirm', 'awaiting_oracle'],
-  verifying:                ['completed', 'disputed', 'timed_out'],
+  verifying:                ['delivering', 'disputed', 'timed_out'],
+  delivering:               ['completed', 'disputed'],
   awaiting_manual_confirm:  ['completed', 'disputed', 'timed_out'],
   awaiting_oracle:          ['completed', 'failed', 'timed_out'],
 };
@@ -35,7 +37,7 @@ const TERMINAL = new Set(['completed', 'disputed', 'timed_out', 'failed', 'cance
  * Transition an offer to a new protocol_status.
  * Enforces valid transitions. Sets timestamps and is_fully_observed.
  */
-function transition(offerId, newStatus, extra = {}) {
+export function transition(offerId, newStatus, extra = {}) {
   const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offerId);
   if (!offer) throw new Error(`Offer not found: ${offerId}`);
 
@@ -60,6 +62,7 @@ function transition(offerId, newStatus, extra = {}) {
     verifying:               'verifying_started_at',
     awaiting_manual_confirm: 'verifying_started_at',
     awaiting_oracle:         'verifying_started_at',
+    delivering:              'delivering_at',
     completed:               'completed_at',
     disputed:                'disputed_at',
     timed_out:               'timed_out_at',
@@ -70,9 +73,13 @@ function transition(offerId, newStatus, extra = {}) {
     vals.push(now);
   }
 
-  // Terminal states → is_fully_observed = true
+  // Terminal states → is_fully_observed = true + release fund locks
   if (TERMINAL.has(newStatus)) {
     updates.push('is_fully_observed = 1');
+    // Release fund locks on cancel/expire/dispute/timed_out (not completed — completed uses spendFunds after KAS delivery)
+    if (newStatus !== 'completed') {
+      try { releaseFunds(offerId); } catch {}
+    }
   }
 
   // Extra fields (taker, accept_commitment, etc.)
@@ -300,7 +307,62 @@ export function timeoutVerifying() {
   return stuck.length;
 }
 
+// ── Matched Timeout ──────────────────────────────────────────
+
+/**
+ * Check for matched offers that haven't received payment within 30 minutes.
+ * Broadcasts kanet_exchange_timeout_v1 and reopens the offer.
+ * Does NOT use transition() — timeout revert is an exceptional flow.
+ */
+export async function checkMatchedTimeout() {
+  const stale = sqlite.prepare(`
+    SELECT id, maker, taker, taker_chain FROM exchange_offers
+    WHERE protocol_status = 'matched'
+    AND matched_at IS NOT NULL
+    AND datetime(matched_at, '+30 minutes') < datetime('now')
+  `).all();
+
+  for (const offer of stale) {
+    console.log(`[exchange-machine] matched timeout: offer ${offer.id.slice(0,8)} (taker ${(offer.taker || '').slice(-8)})`);
+
+    // Direct SQL UPDATE: matched → open, clear taker fields
+    sqlite.prepare(`
+      UPDATE exchange_offers
+      SET protocol_status = 'open',
+          taker = NULL, taker_chain = NULL, taker_payment_address = NULL,
+          payment_tx = NULL, matched_at = NULL,
+          updated_at = datetime('now')
+      WHERE id = ? AND protocol_status = 'matched'
+    `).run(offer.id);
+
+    releaseFunds(offer.id);
+
+    // Broadcast timeout to chain
+    try {
+      const relay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(offer.maker);
+      if (relay) {
+        const { sendCommandAsync } = await import('./relay-manager.js');
+        const timeoutMsg = JSON.stringify({
+          t: 'kanet_exchange_timeout_v1',
+          offer_id: offer.id,
+          taker: offer.taker,
+          reason: 'payment_timeout',
+          reopen: true,
+        });
+        await sendCommandAsync(relay.id, { type: 'send_broadcast', channel: 'kanet-exchange', message: timeoutMsg }).catch(() => {});
+      }
+    } catch (err) {
+      console.error(`[exchange-machine] timeout broadcast failed: ${err.message}`);
+    }
+  }
+
+  return stale.length;
+}
+
 // ── Payment Submit (cross_chain_tx / kaspa_tx verification) ──
+// NOTE: processPaymentSubmit is still used by kanet_exchange_paid_v1 handler
+// (handleExchangePaid transitions to verifying first, then calls this).
+// The old /api/exchange/submit-payment REST endpoint is deprecated.
 
 /**
  * Taker submits a payment TX hash for on-chain verification.
@@ -312,10 +374,14 @@ export function processPaymentSubmit({ offer_id, payment_tx, payment_chain }) {
   if (offer.protocol_status !== 'verifying') return { error: 'invalid_status', current: offer.protocol_status };
   if (!payment_tx) return { error: 'payment_tx_required' };
 
+  // Security: use taker_chain from offer (set at accept time), fallback to body value for backward compat
+  const verifyChain = offer.taker_chain || payment_chain;
+  if (!verifyChain) return { error: 'no payment chain on record' };
+
   const now = new Date().toISOString();
   const meta = JSON.parse(offer.verification_meta || '{}');
   meta.payment_tx = payment_tx;
-  meta.payment_chain = payment_chain;
+  meta.payment_chain = verifyChain;
   meta.submitted_at = now;
 
   sqlite.prepare(
@@ -323,7 +389,7 @@ export function processPaymentSubmit({ offer_id, payment_tx, payment_chain }) {
   ).run(JSON.stringify(meta), now, offer_id);
 
   // Async verification — does not block API response
-  _verifyAndComplete(offer_id, payment_tx, payment_chain).catch(err =>
+  _verifyAndComplete(offer_id, payment_tx, verifyChain).catch(err =>
     console.error(`[exchange] _verifyAndComplete error offer=${offer_id.slice(0,8)}:`, err.message)
   );
 
@@ -359,19 +425,92 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
         'UPDATE exchange_offers SET verification_meta = ?, updated_at = ? WHERE id = ?'
       ).run(JSON.stringify(meta), new Date().toISOString(), offer_id);
 
-      const completedOffer = transition(offer_id, 'completed', {});
-      console.log(`[exchange] offer ${offer_id.slice(0,8)} payment verified → completed (${vr.actualAmount} USDT, ${vr.confirmations}/${vr.required} conf)`);
+      const deliveringOffer = transition(offer_id, 'delivering', {});
+      console.log(`[exchange] offer ${offer_id.slice(0,8)} payment verified → delivering (${vr.actualAmount} USDT, ${vr.confirmations}/${vr.required} conf)`);
 
-      // Trigger hedge after cross_chain_tx verification → completed
-      if (completedOffer?.maker) {
-        const localAgent = sqlite.prepare('SELECT id, name FROM relay_nodes WHERE address = ?').get(completedOffer.maker);
+      // Auto-deliver asset to taker
+      if (deliveringOffer?.give_asset === 'KAS' && deliveringOffer.taker) {
+        const deliveryAgent = sqlite.prepare('SELECT id, name FROM relay_nodes WHERE address = ?').get(deliveringOffer.maker);
+        if (deliveryAgent) {
+          const MAX_DELIVERY_ATTEMPTS = 3;
+          const DELIVERY_RETRY_MS = 10_000;
+          let deliveryTxId = null;
+
+          for (let attempt = 1; attempt <= MAX_DELIVERY_ATTEMPTS; attempt++) {
+            try {
+              const { sendCommandAsync } = await import('./relay-manager.js');
+              const sendResult = await sendCommandAsync(deliveryAgent.id, {
+                type: 'transfer',
+                target: deliveringOffer.taker,
+                amount: String(deliveringOffer.give_amount),
+              });
+              deliveryTxId = sendResult?.txId;
+              console.log(`[exchange] KAS delivery attempt ${attempt}: ${deliveringOffer.give_amount} KAS → ${deliveringOffer.taker.slice(-12)} TX: ${deliveryTxId || '?'}`);
+              break; // success
+            } catch (err) {
+              console.error(`[exchange] KAS delivery attempt ${attempt}/${MAX_DELIVERY_ATTEMPTS} FAILED: ${err.message}`);
+              if (attempt < MAX_DELIVERY_ATTEMPTS) {
+                await new Promise(r => setTimeout(r, DELIVERY_RETRY_MS));
+              }
+            }
+          }
+
+          if (deliveryTxId) {
+            // delivering → completed
+            const completedOffer = transition(offer_id, 'completed', {});
+            sqlite.prepare(`
+              INSERT INTO chain_events (id, event_type, from_address, to_address, tx_hash, payload, observed_at)
+              VALUES (?, 'kas_delivery', ?, ?, ?, ?, datetime('now'))
+            `).run(crypto.randomUUID(), deliveringOffer.maker, deliveringOffer.taker, deliveryTxId,
+              JSON.stringify({ offer_id: deliveringOffer.id, amount: deliveringOffer.give_amount }));
+            try { const { spendFunds } = await import('./fund-lock.js'); spendFunds(deliveringOffer.id); } catch {}
+            // Broadcast kanet_exchange_delivered_v1 to chain
+            try {
+              const { sendCommandAsync: sendCmd } = await import('./relay-manager.js');
+              const deliveredMsg = JSON.stringify({
+                t: 'kanet_exchange_delivered_v1',
+                offer_id: deliveringOffer.id,
+                delivery_tx: deliveryTxId,
+                delivery_asset: deliveringOffer.give_asset,
+                delivery_amount: deliveringOffer.give_amount,
+                receiver: deliveringOffer.taker,
+              });
+              sendCmd(deliveryAgent.id, { type: 'send_broadcast', channel: 'kanet-exchange', message: deliveredMsg }).catch(() => {});
+            } catch {}
+            sqlite.prepare(`
+              INSERT INTO chain_events (id, event_type, from_address, to_address, payload, observed_at)
+              VALUES (?, 'exchange_completed', ?, ?, ?, datetime('now'))
+            `).run(crypto.randomUUID(), deliveringOffer.maker, deliveringOffer.taker, JSON.stringify({
+              offer_id: deliveringOffer.id, give_asset: deliveringOffer.give_asset, give_amount: deliveringOffer.give_amount,
+              want_asset: deliveringOffer.want_asset, want_amount: deliveringOffer.want_amount, taker_chain: deliveringOffer.taker_chain,
+              price: parseFloat(deliveringOffer.want_amount) / parseFloat(deliveringOffer.give_amount) || 0,
+            }));
+            console.log(`[exchange] offer ${offer_id.slice(0,8)} delivering → completed`);
+          } else {
+            // 3 attempts failed → delivering → disputed
+            transition(offer_id, 'disputed', {});
+            sqlite.prepare(`
+              INSERT INTO chain_events (id, event_type, from_address, payload, observed_at)
+              VALUES (?, 'exchange_disputed', ?, ?, datetime('now'))
+            `).run(crypto.randomUUID(), deliveringOffer.maker, JSON.stringify({
+              offer_id: deliveringOffer.id, reason: 'delivery_failed_3_attempts',
+            }));
+            console.error(`[exchange] offer ${offer_id.slice(0,8)} delivering → disputed (3 delivery failures)`);
+          }
+        }
+      }
+
+      // Trigger hedge after completed (only if delivery succeeded)
+      const finalOffer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer_id);
+      if (finalOffer?.protocol_status === 'completed' && finalOffer.maker) {
+        const localAgent = sqlite.prepare('SELECT id, name FROM relay_nodes WHERE address = ?').get(finalOffer.maker);
         if (localAgent) {
-          const makerGaveKas = completedOffer.give_asset === 'KAS';
+          const makerGaveKas = finalOffer.give_asset === 'KAS';
           const hedgeSide = makerGaveKas ? 'BUY' : 'SELL';
-          const hedgeQty = makerGaveKas ? parseFloat(completedOffer.give_amount) : parseFloat(completedOffer.want_amount);
+          const hedgeQty = makerGaveKas ? parseFloat(finalOffer.give_amount) : parseFloat(finalOffer.want_amount);
           if (hedgeQty > 0) {
             setImmediate(() => {
-              executeHedge(completedOffer.id, localAgent.name, hedgeSide, hedgeQty).catch(err =>
+              executeHedge(finalOffer.id, localAgent.name, hedgeSide, hedgeQty).catch(err =>
                 console.error(`[exchange-hedge] verify-complete-path trigger error: ${err.message}`)
               );
             });
@@ -394,6 +533,13 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
         'UPDATE exchange_offers SET verification_meta = ?, updated_at = ? WHERE id = ?'
       ).run(JSON.stringify(dmeta), new Date().toISOString(), offer_id);
       transition(offer_id, 'disputed', {});
+      // Record exchange_disputed for audit
+      sqlite.prepare(`
+        INSERT INTO chain_events (id, event_type, from_address, payload, observed_at)
+        VALUES (?, 'exchange_disputed', ?, ?, datetime('now'))
+      `).run(crypto.randomUUID(), offer.maker, JSON.stringify({
+        offer_id, reason: dmeta.dispute_reason,
+      }));
     }
   } catch (err) {
     console.error(`[exchange] _verifyAndComplete error:`, err.message);
