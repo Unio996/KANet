@@ -117,7 +117,7 @@
                       <div class="flex items-center gap-2">
                         <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded"
                           :class="stepBadgeColor(step.type)" x-text="stepTypeLabel(step.type)"></span>
-                        <span class="text-sm text-ink-600" :class="!step.done ? 'text-ink-400' : ''" x-text="step.label"></span>
+                        <span class="text-sm text-ink-600" :class="!step.done ? 'text-ink-400' : ''" x-text="step.label || '—'"></span>
                       </div>
                       <template x-if="step.detail">
                         <div class="text-xs text-ink-300 mt-0.5" x-text="step.detail"></div>
@@ -252,7 +252,7 @@
                           'bg-red-50 text-red-700 border border-red-200': ev.status === 'error',
                           'bg-warm-50 text-ink-500 border border-warm-300': ev.status === 'neutral'
                         }"
-                        x-text="ev.description"></div>
+                        x-text="ev.description || '—'"></div>
                     </template>
                     <!-- Normal evidence row -->
                     <template x-if="ev.type !== 'conclusion'">
@@ -262,7 +262,7 @@
                           :class="ev.status === 'confirmed' ? 'text-green-500' : ev.status === 'missing' || ev.status === 'failed' ? 'text-red-500' : 'text-ink-300'"
                           x-text="ev.status === 'confirmed' ? '✓' : ev.status === 'missing' || ev.status === 'failed' ? '✗' : '—'"></span>
                         <!-- Description -->
-                        <span class="flex-1 text-xs text-ink-600" x-text="ev.description"></span>
+                        <span class="flex-1 text-xs text-ink-600" x-text="ev.description || '—'"></span>
                         <!-- TX hash -->
                         <template x-if="ev.txhash">
                           <span class="inline-flex items-center gap-1 text-[11px] font-mono text-ink-300 flex-shrink-0 cursor-pointer hover:text-brand-500 transition-colors"

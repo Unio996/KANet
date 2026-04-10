@@ -3,7 +3,7 @@
 <div class="p-6" x-data="contactsPage()">
   <!-- 顶栏 -->
   <div class="flex items-center gap-3 mb-3">
-    <select x-model="selectedAgent" @change="load()" class="rounded-lg border border-warm-300 px-3 py-2 text-sm bg-white font-medium">
+    <select x-model="selectedAgent" @change="load(); ssInit(); spInit()" class="rounded-lg border border-warm-300 px-3 py-2 text-sm bg-white font-medium">
       <% it.relayNodes.forEach(r => { %>
       <option value="<%= r.id %>"><%= r.name %></option>
       <% }) %>
@@ -36,6 +36,103 @@
     </div>
     <div class="flex justify-end mt-3">
       <button @click="addContact()" class="btn btn-primary btn-sm" :disabled="!addForm.address?.trim()">保存</button>
+    </div>
+  </div>
+
+  <!-- 社交设置（折叠面板） -->
+  <div class="mb-4 border border-warm-200 rounded-xl overflow-hidden bg-white">
+    <button @click="showSocial = !showSocial" class="w-full flex items-center justify-between px-4 py-2.5 hover:bg-warm-50 transition-colors">
+      <div class="flex items-center gap-2">
+        <span class="text-sm font-semibold text-ink-700">社交设置</span>
+        <span class="badge text-[10px]" :class="ssBadges[ssMode]" x-text="ssLabels[ssMode]"></span>
+        <span class="text-[10px] text-ink-300" x-text="principles.length + ' 条原则'"></span>
+      </div>
+      <svg class="w-4 h-4 text-ink-300 transition-transform" :class="showSocial ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+      </svg>
+    </button>
+
+    <div x-show="showSocial" x-transition class="border-t border-warm-200">
+      <!-- 社交风格 -->
+      <div class="px-4 py-3">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <div class="w-1.5 h-5 rounded-full" :class="ssColors[ssMode]"></div>
+            <h3 class="text-sm font-semibold text-ink-700">社交风格</h3>
+          </div>
+          <button @click="ssShowAdv = !ssShowAdv" class="text-[11px] text-ink-400 hover:text-brand-600 transition-colors">
+            <span x-text="ssShowAdv ? '收起' : '高级设置 ›'"></span>
+          </button>
+        </div>
+        <!-- Three mode cards -->
+        <div class="grid grid-cols-3 gap-2 mb-3">
+          <template x-for="m in ['active', 'balanced', 'conservative']" :key="m">
+            <button @click="ssMode = m; ssSave()"
+              class="rounded-lg border px-3 py-2.5 text-left transition-all"
+              :class="ssMode === m ? 'border-brand-400 bg-brand-50/60' : 'border-warm-200 bg-white hover:border-warm-300'">
+              <div class="text-xs font-semibold mb-0.5" :class="ssMode === m ? 'text-ink-700' : 'text-ink-500'" x-text="ssLabels[m]"></div>
+              <div class="text-[10px]" :class="ssMode === m ? 'text-ink-500' : 'text-ink-300'" x-text="ssDescs[m]"></div>
+              <div class="flex gap-1.5 mt-1.5">
+                <span class="text-[9px] text-ink-400 bg-warm-100 px-1 py-0.5 rounded" x-text="'握手 ' + ssPresets[m].maxNewHandshakes + '/天'"></span>
+                <span class="text-[9px] text-ink-400 bg-warm-100 px-1 py-0.5 rounded" x-text="'冷却 ' + ssPresets[m].peerCooldownHours + 'h'"></span>
+              </div>
+            </button>
+          </template>
+        </div>
+        <!-- Effective params -->
+        <div class="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-ink-400">
+          <span>冷却: <strong class="text-ink-600" x-text="ssEffective.peerCooldownHours + 'h'"></strong></span>
+          <span>跨Agent: <strong class="text-ink-600" x-text="ssEffective.crossAgentHours + 'h'"></strong></span>
+          <span>握手: <strong class="text-ink-600" x-text="ssEffective.maxNewHandshakes + '/天'"></strong></span>
+          <span>跟进: <strong class="text-ink-600" x-text="ssEffective.followUpHours ? ssEffective.followUpHours + 'h' : '不跟进'"></strong></span>
+          <span>退避: <strong class="text-ink-600" x-text="ssEffective.unansweredMax + '条/' + ssEffective.unansweredCooldownDays + '天'"></strong></span>
+        </div>
+        <!-- Advanced overrides -->
+        <div x-show="ssShowAdv" x-transition class="mt-3 pt-3 border-t border-warm-200">
+          <div class="text-[10px] text-ink-400 mb-2">微调参数（留空使用预设值）</div>
+          <div class="grid grid-cols-2 gap-x-4 gap-y-2">
+            <template x-for="p in ssParams" :key="p.key">
+              <div class="flex items-center gap-2">
+                <label class="text-[11px] text-ink-500 w-24 flex-shrink-0" x-text="p.label"></label>
+                <input type="number" :placeholder="ssPresets[ssMode][p.key] ?? '-'"
+                  :value="ssOverrides[p.key] ?? ''"
+                  @input="if($event.target.value==='') delete ssOverrides[p.key]; else ssOverrides[p.key]=Number($event.target.value)"
+                  class="w-16 text-[11px] border border-warm-300 rounded px-2 py-1 bg-white text-ink-700 text-right focus:border-brand-400 focus:outline-none" />
+                <span class="text-[10px] text-ink-300" x-text="p.unit"></span>
+              </div>
+            </template>
+          </div>
+          <div class="flex justify-between items-center mt-3">
+            <button x-show="ssHasOverrides" @click="ssOverrides = {}; ssSave()" class="text-[10px] text-ink-400 hover:text-red-500">重置为预设</button>
+            <div></div>
+            <button @click="ssSave()" class="btn btn-primary btn-sm text-[11px]" x-text="ssSaving ? '保存中...' : '保存'"></button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 分隔线 + 社交原则 -->
+      <div class="px-4 py-3 border-t border-warm-200">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-semibold text-ink-700">社交原则</h3>
+          <span class="text-[10px] text-ink-300" x-text="principles.length + ' 条'"></span>
+        </div>
+        <div x-show="spLoading" class="text-xs text-ink-300 py-2">加载中...</div>
+        <div class="space-y-1">
+          <template x-for="(p, i) in principles" :key="i">
+            <div class="flex items-start gap-2 group text-xs">
+              <span class="text-ink-300 w-4 flex-shrink-0 pt-0.5" x-text="(i+1) + '.'"></span>
+              <div class="flex-1 text-ink-600" x-text="p"></div>
+              <button @click="moveUp(i)" x-show="i > 0" class="text-ink-300 hover:text-brand-600 opacity-0 group-hover:opacity-100 text-[10px]">↑</button>
+              <button @click="removeRule(i)" class="text-ink-300 hover:text-red-500 opacity-0 group-hover:opacity-100 text-[10px]">✕</button>
+            </div>
+          </template>
+        </div>
+        <div class="flex items-center gap-2 mt-3 pt-3 border-t border-warm-200">
+          <input x-model="newRule" @keydown.enter.prevent="addRule()" placeholder="添加新原则..."
+            class="flex-1 text-xs border border-warm-300 rounded-lg px-3 py-1.5 bg-white" />
+          <button @click="addRule()" class="btn btn-primary btn-sm text-[10px]" :disabled="!newRule.trim()">添加</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -80,6 +177,9 @@
           </template>
           <template x-if="p.status && !p.is_local">
             <span class="badge text-[8px]" :class="p.status==='active'?'badge-success':p.status==='accepted'?'badge-info':'badge-neutral'" x-text="p.status"></span>
+          </template>
+          <template x-if="!p.status && !p.is_local">
+            <span class="badge badge-neutral text-[8px]">链上交互</span>
           </template>
           <span class="text-xs text-blue-600 w-12 flex-shrink-0" x-text="'↑' + p.out_count"></span>
           <span class="text-xs text-green-600 w-12 flex-shrink-0" x-text="'↓' + p.in_count"></span>
@@ -146,7 +246,7 @@
                         <div class="text-ink-600 whitespace-pre-wrap break-words" x-text="e.content"></div>
                       </template>
                       <template x-if="!e.content && e.type==='handshake' && e.dir==='out'">
-                        <span class="text-green-600">已接受握手</span>
+                        <span class="text-green-600">已发出握手</span>
                       </template>
                       <template x-if="!e.content && e.type==='handshake' && e.dir==='in'">
                         <span class="text-blue-600">收到握手请求</span>
@@ -193,6 +293,105 @@ function contactsPage() {
     showAdd: false,
     addForm: { address: '', display_name: '', trust_level: 'normal' },
 
+    // ── 社交设置 ──
+    showSocial: false,
+    ssMode: 'balanced',
+    ssOverrides: {},
+    ssShowAdv: false,
+    ssSaving: false,
+    ssPresets: {
+      active:       { peerCooldownHours: 24,  crossAgentHours: 6,  maxNewHandshakes: 5, followUpHours: 24,   maxFollowUps: 3, unansweredMax: 5, unansweredCooldownDays: 7  },
+      balanced:     { peerCooldownHours: 48,  crossAgentHours: 12, maxNewHandshakes: 2, followUpHours: 48,   maxFollowUps: 2, unansweredMax: 3, unansweredCooldownDays: 30 },
+      conservative: { peerCooldownHours: 96,  crossAgentHours: 24, maxNewHandshakes: 0, followUpHours: null, maxFollowUps: 0, unansweredMax: 1, unansweredCooldownDays: 90 },
+    },
+    ssLabels: { active: '积极', balanced: '稳健', conservative: '保守' },
+    ssDescs:  { active: '主动出击，适合推广期', balanced: '日常运营，攻守兼备', conservative: '仅回应，低调运行' },
+    ssColors: { active: 'bg-green-500', balanced: 'bg-brand-500', conservative: 'bg-warm-400' },
+    ssBadges: { active: 'badge-success', balanced: 'badge-info', conservative: 'badge-neutral' },
+    ssParams: [
+      { key: 'peerCooldownHours', label: '同一人冷却', unit: '小时' },
+      { key: 'crossAgentHours', label: '跨Agent防重', unit: '小时' },
+      { key: 'maxNewHandshakes', label: '每日新握手', unit: '次/天' },
+      { key: 'followUpHours', label: '跟进间隔', unit: '小时' },
+      { key: 'maxFollowUps', label: '跟进上限', unit: '次' },
+      { key: 'unansweredMax', label: '无回复上限', unit: '条' },
+      { key: 'unansweredCooldownDays', label: '无回复冷却', unit: '天' },
+    ],
+    get ssEffective() {
+      const base = { ...this.ssPresets[this.ssMode] };
+      for (const [k, v] of Object.entries(this.ssOverrides)) { if (v !== null && v !== '' && base[k] !== undefined) base[k] = Number(v); }
+      return base;
+    },
+    get ssHasOverrides() { return Object.values(this.ssOverrides).some(v => v !== null && v !== '' && v !== undefined); },
+
+    // ── 社交原则 ──
+    principles: [],
+    newRule: '',
+    spLoading: false,
+    spSaving: false,
+
+    async ssInit() {
+      if (!this.selectedAgent) return;
+      try {
+        const res = await fetch('/api/relay/' + this.selectedAgent + '/mind-config');
+        const cfg = await res.json();
+        this.ssMode = cfg.socialStyle || 'balanced';
+        this.ssOverrides = cfg.socialOverrides || {};
+      } catch {}
+    },
+
+    async ssSave() {
+      if (!this.selectedAgent) return;
+      this.ssSaving = true;
+      await fetch('/api/relay/' + this.selectedAgent + '/mind-config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ socialStyle: this.ssMode, socialOverrides: this.ssHasOverrides ? this.ssOverrides : null }),
+      });
+      this.ssSaving = false;
+    },
+
+    async spInit() {
+      if (!this.selectedAgent) return;
+      this.spLoading = true;
+      try {
+        const res = await fetch('/api/relay/' + this.selectedAgent + '/mind-config');
+        const cfg = await res.json();
+        this.principles = cfg.principles || [];
+      } catch {}
+      this.spLoading = false;
+    },
+
+    async spSave() {
+      if (!this.selectedAgent) return;
+      this.spSaving = true;
+      await fetch('/api/relay/' + this.selectedAgent + '/mind-config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ principles: this.principles }),
+      });
+      this.spSaving = false;
+    },
+
+    addRule() {
+      if (!this.newRule.trim()) return;
+      this.principles.push(this.newRule.trim());
+      this.newRule = '';
+      this.spSave();
+    },
+
+    removeRule(i) {
+      this.principles.splice(i, 1);
+      this.spSave();
+    },
+
+    moveUp(i) {
+      if (i <= 0) return;
+      [this.principles[i-1], this.principles[i]] = [this.principles[i], this.principles[i-1]];
+      this.spSave();
+    },
+
+    // ── 原有方法 ──
     shortAddr(addr) {
       if (!addr || addr.length < 30) return addr;
       return addr.slice(0, 12) + '...' + addr.slice(-12);
@@ -301,7 +500,11 @@ function contactsPage() {
       await this.load();
     },
 
-    async init() { await this.load(); },
+    async init() {
+      await this.load();
+      await this.ssInit();
+      await this.spInit();
+    },
 
     async load() {
       this.loading = true;

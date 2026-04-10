@@ -365,7 +365,8 @@ export function getMergedContacts(agentAddress) {
   const rsMap = {};
   for (const r of relations) rsMap[r.peer] = r;
 
-  const allPeers = new Set([...Object.keys(ceMap), ...Object.keys(rsMap)]);
+  // Only show peers that have a relation_states entry (real contacts, not just chain interactions)
+  const allPeers = new Set(Object.keys(rsMap));
   const isLocal = (addr) => !!sqlite.prepare('SELECT 1 FROM relay_nodes WHERE address = ?').get(addr);
 
   const merged = [];

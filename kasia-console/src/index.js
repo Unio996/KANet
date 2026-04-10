@@ -198,18 +198,32 @@ fastify.get('/api/agent/handshake-report', async (request, reply) => {
     const details = [];
     const peerSeen = {};
     for (const s of sent) {
-      if (!peerSeen[s.peer]) peerSeen[s.peer] = { count: 0, name: s.peer_name, replied: recvSet.has(s.peer), is_local: agentSet.has(s.peer), first: s.observed_at, last: s.observed_at };
+      if (!peerSeen[s.peer]) peerSeen[s.peer] = { count: 0, txids: [], name: s.peer_name, replied: recvSet.has(s.peer), is_local: agentSet.has(s.peer), first: s.observed_at, last: s.observed_at };
       peerSeen[s.peer].count++;
       peerSeen[s.peer].last = s.observed_at;
+      if (s.txid) peerSeen[s.peer].txids.push(s.txid);
     }
     for (const [peer, info] of Object.entries(peerSeen)) {
-      details.push({ peer, ...info });
+      let peerFee = 0;
+      if (info.txids.length) {
+        const ph = info.txids.map(() => '?').join(',');
+        const f = _sqlite.prepare(`SELECT SUM(CAST(fee AS REAL)) as total FROM tx_records WHERE txid IN (${ph})`).get(...info.txids);
+        peerFee = f?.total || 0;
+      }
+      delete info.txids;
+      details.push({ peer, ...info, cost_kas: peerFee.toFixed(4) });
     }
     details.sort((a, b) => (b.last || '').localeCompare(a.last || ''));
     report.push({
       agent: r.name, agent_id: r.id, address: r.address,
       sent_total: sent.length, recv_total: recv.length,
-      cost_kas: (sent.length * 0.2).toFixed(1),
+      cost_kas: (() => {
+        const txids = sent.map(s => s.txid).filter(Boolean);
+        if (!txids.length) return '0';
+        const placeholders = txids.map(() => '?').join(',');
+        const fees = _sqlite.prepare(`SELECT SUM(CAST(fee AS REAL)) as total FROM tx_records WHERE txid IN (${placeholders})`).get(...txids);
+        return (fees?.total || 0).toFixed(4);
+      })(),
       external_sent: sent.filter(s => !agentSet.has(s.peer)).length,
       no_reply: details.filter(d => !d.replied && !d.is_local).length,
       details,
