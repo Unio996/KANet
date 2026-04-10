@@ -279,6 +279,10 @@ await autoStartIfEnabled();
 import { startRefreshWorker } from './services/connection-manager.js';
 startRefreshWorker();
 
+// Start market seeder (auto seed orders on free market)
+import { startMarketSeeder } from './services/market-seeder.js';
+startMarketSeeder();
+
 // Graceful shutdown — stop all child processes
 async function shutdown() {
   console.log('[kasia-console] shutting down...');

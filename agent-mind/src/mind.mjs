@@ -591,8 +591,20 @@ export async function createMind(agentName, relayNodeId, callbacks = {}) {
           relation: 'owner', authority: ['chat', 'suggest', 'manage_goals', 'manage_self', 'trade'],
         });
 
+        // market_maker focus: hard-filter social actions — maker doesn't chat
+        const SOCIAL_ACTIONS = new Set(['FOLLOW_UP', 'SEND_MESSAGE', 'INITIATE_HANDSHAKE', 'SEND_BROADCAST']);
+        const isMaker = (config.focus || 'balanced') === 'market_maker';
+        const filtered = actions.filter(a => {
+          if (a.type === 'DO_NOTHING') return false;
+          if (isMaker && SOCIAL_ACTIONS.has(a.type)) {
+            console.log(`[mind] ${config.name} market_maker: blocked social action ${a.type}`);
+            return false;
+          }
+          return true;
+        });
+
         // Map ACTION tag types to executor-compatible format
-        const mapped = actions.filter(a => a.type !== 'DO_NOTHING').map(a => ({
+        const mapped = filtered.map(a => ({
           type: a.type === 'FOLLOW_UP' ? 'follow_up'
             : a.type === 'SEND_MESSAGE' ? 'send_message'
             : a.type === 'INITIATE_HANDSHAKE' ? 'initiate_handshake'

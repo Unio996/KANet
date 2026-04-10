@@ -775,6 +775,17 @@ export async function registerRelayRoutes(fastify) {
     return reply.send({ ok: true });
   });
 
+  // PUT /api/relay/:id/focus — 快捷更新 Agent Focus 模式
+  fastify.put('/api/relay/:id/focus', async (request, reply) => {
+    const relay = getRelayNode(request.params.id);
+    if (!relay) return reply.code(404).send({ error: 'Relay not found' });
+    const { focus } = request.body || {};
+    const allowed = ['market_maker', 'social', 'balanced'];
+    if (!allowed.includes(focus)) return reply.code(400).send({ error: 'Invalid focus: must be market_maker, social, or balanced' });
+    sqlite.prepare('UPDATE relay_nodes SET focus = ?, updated_at = ? WHERE id = ?').run(focus, new Date().toISOString(), request.params.id);
+    return reply.send({ ok: true, focus });
+  });
+
   // ── Agent Goals ──────────────────────────────────────────────────
 
   /** Read intent.json for a relay node's agent */

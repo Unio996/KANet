@@ -1710,5 +1710,40 @@ export function runMigrations() {
     console.log('[migrate] v52: relay_nodes.focus added');
   }
 
+  // v53a: exchange_offers.metadata — 通用来源标记（seeder/arb/manual）
+  const hasMetadata = sqlite.prepare(
+    "SELECT 1 FROM pragma_table_info('exchange_offers') WHERE name='metadata'"
+  ).get();
+  if (!hasMetadata) {
+    sqlite.exec("ALTER TABLE exchange_offers ADD COLUMN metadata TEXT DEFAULT '{}'");
+    console.log('[migrate] v53a: exchange_offers.metadata added');
+  }
+
+  // v53b: market_seeder_config — 做市播种器配置
+  const hasSeederConfig = sqlite.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='market_seeder_config'"
+  ).get();
+  if (!hasSeederConfig) {
+    sqlite.exec(`
+      CREATE TABLE market_seeder_config (
+        id              TEXT PRIMARY KEY DEFAULT 'default',
+        enabled         INTEGER NOT NULL DEFAULT 0,
+        sell_spread_pct REAL    NOT NULL DEFAULT 1.0,
+        buy_spread_pct  REAL    NOT NULL DEFAULT 1.0,
+        amount_kas      INTEGER NOT NULL DEFAULT 100,
+        expires_minutes INTEGER NOT NULL DEFAULT 30,
+        sell_agent_id   TEXT,
+        buy_agent_id    TEXT,
+        updated_at      TEXT    NOT NULL
+      )
+    `);
+    sqlite.prepare(`
+      INSERT INTO market_seeder_config
+      (id, enabled, sell_spread_pct, buy_spread_pct, amount_kas, expires_minutes, updated_at)
+      VALUES ('default', 0, 1.0, 1.0, 100, 30, ?)
+    `).run(new Date().toISOString());
+    console.log('[migrate] v53b: market_seeder_config table created with defaults');
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

@@ -111,6 +111,7 @@ export async function registerExchangeRoutes(fastify) {
       expires_minutes = 60,
       verification = 'manual',
       verification_meta = {},
+      metadata = {},
       channel = 'kanet-exchange',
     } = request.body || {};
 
@@ -151,16 +152,17 @@ export async function registerExchangeRoutes(fastify) {
         give_asset, give_amount, give_chain,
         want_asset, want_amount, want_chain,
         maker, broadcast_at, expires_at,
-        verification, verification_meta,
+        verification, verification_meta, metadata,
         protocol_status, is_fully_observed, market_key,
         created_at, updated_at
-      ) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', 0, ?, ?, ?)
+      ) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', 0, ?, ?, ?)
     `).run(
       offerId, 'pending_' + offerId,
       give_asset, String(give_amount), give_chain || null,
       want_asset, String(want_amount), want_chain || null,
       makerAddr, now, expiresAt,
       verification, JSON.stringify(verification_meta),
+      JSON.stringify(metadata),
       marketKey, now, now
     );
 
@@ -169,7 +171,7 @@ export async function registerExchangeRoutes(fastify) {
     try {
       const { sendCommandAsync } = await import('../services/relay-manager.js');
       const result = await sendCommandAsync(relayNodeId, {
-        command: 'send_broadcast',
+        type: 'send_broadcast',
         channel,
         message: JSON.stringify(protocolMsg),
       });
@@ -224,7 +226,7 @@ export async function registerExchangeRoutes(fastify) {
     try {
       const { sendCommandAsync } = await import('../services/relay-manager.js');
       const res = await sendCommandAsync(relayNodeId, {
-        command: 'send_broadcast',
+        type: 'send_broadcast',
         channel,
         message: JSON.stringify({ t: 'kanet_exchange_accept_v1', offer_id }),
       });
@@ -265,7 +267,7 @@ export async function registerExchangeRoutes(fastify) {
     try {
       const { sendCommandAsync } = await import('../services/relay-manager.js');
       const res = await sendCommandAsync(relayNodeId, {
-        command: 'send_broadcast',
+        type: 'send_broadcast',
         channel,
         message: JSON.stringify({ t: 'kanet_exchange_cancel_v1', offer_id }),
       });
@@ -319,7 +321,7 @@ export async function registerExchangeRoutes(fastify) {
     try {
       const { sendCommandAsync } = await import('../services/relay-manager.js');
       await sendCommandAsync(relayNodeId, {
-        command: 'send_broadcast',
+        type: 'send_broadcast',
         channel,
         message: JSON.stringify({ t: 'kanet_confirm_v1', offer_id, role, confirmer_address: addr }),
       });
@@ -374,9 +376,125 @@ export async function registerExchangeRoutes(fastify) {
   // ── GET /api/exchange/agents — 可用 Agent 列表 ───────────
   fastify.get('/api/exchange/agents', async (request, reply) => {
     const agents = sqlite.prepare(
-      'SELECT id, name, address FROM relay_nodes ORDER BY name'
+      'SELECT id, name, address, focus FROM relay_nodes ORDER BY name'
     ).all();
     return reply.send({ agents });
+  });
+
+  // ── Seeder API ─────────────────────────────────────────
+
+  // GET /api/exchange/seeder/config — 读做市播种器配置
+  fastify.get('/api/exchange/seeder/config', async (request, reply) => {
+    const row = sqlite.prepare('SELECT * FROM market_seeder_config WHERE id = ?').get('default');
+    if (!row) return reply.send({ enabled: false, sell_spread_pct: 1.0, buy_spread_pct: 1.0, amount_kas: 100, expires_minutes: 30, sell_agent_id: '', buy_agent_id: '' });
+    return reply.send({
+      enabled: !!row.enabled,
+      sell_spread_pct: row.sell_spread_pct,
+      buy_spread_pct: row.buy_spread_pct,
+      amount_kas: row.amount_kas,
+      expires_minutes: row.expires_minutes,
+      sell_agent_id: row.sell_agent_id || '',
+      buy_agent_id: row.buy_agent_id || '',
+    });
+  });
+
+  // PUT /api/exchange/seeder/config — 写配置（含 enabled 开关）
+  fastify.put('/api/exchange/seeder/config', async (request, reply) => {
+    const { enabled, sell_spread_pct, buy_spread_pct, amount_kas, expires_minutes, sell_agent_id, buy_agent_id } = request.body || {};
+    sqlite.prepare(`
+      UPDATE market_seeder_config SET
+        enabled = ?, sell_spread_pct = ?, buy_spread_pct = ?,
+        amount_kas = ?, expires_minutes = ?,
+        sell_agent_id = ?, buy_agent_id = ?,
+        updated_at = ?
+      WHERE id = 'default'
+    `).run(
+      enabled ? 1 : 0,
+      sell_spread_pct ?? 1.0,
+      buy_spread_pct ?? 1.0,
+      amount_kas ?? 100,
+      expires_minutes ?? 30,
+      sell_agent_id || null,
+      buy_agent_id || null,
+      new Date().toISOString()
+    );
+    return reply.send({ ok: true });
+  });
+
+  // POST /api/exchange/seeder/trigger — 手动触发一次 tick
+  fastify.post('/api/exchange/seeder/trigger', async (request, reply) => {
+    try {
+      const { triggerTick } = await import('../services/market-seeder.js');
+      const result = await triggerTick();
+      return reply.send({ ok: true, result });
+    } catch (err) {
+      return reply.code(500).send({ ok: false, error: err.message });
+    }
+  });
+
+  // GET /api/exchange/seeder/status — 活跃种子单 + 今日统计
+  fastify.get('/api/exchange/seeder/status', async (request, reply) => {
+    // Active seed orders
+    const activeRows = sqlite.prepare(`
+      SELECT id, give_asset, give_amount, want_asset, want_amount,
+             protocol_status, expires_at, metadata, maker
+      FROM exchange_offers
+      WHERE protocol_status = 'open'
+        AND metadata LIKE '%"source":"seeder"%'
+      ORDER BY broadcast_at DESC
+    `).all();
+
+    const now = Date.now();
+    const activeOrders = activeRows.map(o => {
+      const meta = JSON.parse(o.metadata || '{}');
+      const expiresMs = new Date(o.expires_at).getTime();
+      const minutesLeft = Math.max(0, Math.round((expiresMs - now) / 60000));
+      const side = o.give_asset === 'KAS' ? 'sell' : 'buy';
+      const price = side === 'sell'
+        ? parseFloat(o.want_amount) / parseFloat(o.give_amount)
+        : parseFloat(o.give_amount) / parseFloat(o.want_amount);
+      return {
+        id: o.id, side, give_amount: o.give_amount, want_amount: o.want_amount,
+        price, spread_pct: meta.spread_pct || 0,
+        protocol_status: o.protocol_status, expires_at: o.expires_at, minutes_left: minutesLeft,
+        maker: o.maker,
+      };
+    });
+
+    // Today's stats
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const todayISO = todayStart.toISOString();
+
+    const seeded = sqlite.prepare(`
+      SELECT COUNT(*) as cnt FROM exchange_offers
+      WHERE metadata LIKE '%"source":"seeder"%'
+        AND created_at >= ?
+    `).get(todayISO)?.cnt || 0;
+
+    const takenRows = sqlite.prepare(`
+      SELECT give_asset, give_amount, want_amount, metadata FROM exchange_offers
+      WHERE metadata LIKE '%"source":"seeder"%'
+        AND protocol_status = 'completed'
+        AND completed_at >= ?
+    `).all(todayISO);
+
+    let netUsdt = 0;
+    for (const t of takenRows) {
+      const meta = JSON.parse(t.metadata || '{}');
+      const midPrice = meta.mid_price || 0;
+      if (t.give_asset === 'KAS' && midPrice > 0) {
+        const soldPrice = parseFloat(t.want_amount) / parseFloat(t.give_amount);
+        netUsdt += (soldPrice - midPrice) * parseFloat(t.give_amount);
+      } else if (t.give_asset !== 'KAS' && midPrice > 0) {
+        const boughtPrice = parseFloat(t.give_amount) / parseFloat(t.want_amount);
+        netUsdt += (midPrice - boughtPrice) * parseFloat(t.want_amount);
+      }
+    }
+
+    return reply.send({
+      active_orders: activeOrders,
+      today: { seeded, taken: takenRows.length, net_usdt: Math.round(netUsdt * 100) / 100 },
+    });
   });
 
   // ── /exchange 页面路由 ──────────────────────────────────

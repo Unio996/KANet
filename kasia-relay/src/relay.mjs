@@ -330,8 +330,10 @@ if (process.send) {
             }
             break;
           }
-          draft = await sendMessage({ address: localAddress, message: `bcast:${cmd.channel}:${cmd.message}` });
-          sent = await sendKaspa({ to: draft.to, amount: draft.amount, payload: draft.payload });
+          // Broadcast uses bcast prefix (plaintext, discoverable by any Scout)
+          const { encodeBcastPayload } = await import('./lib/protocol.mjs');
+          const bcastPayloadHex = encodeBcastPayload(cmd.channel, cmd.message);
+          sent = await sendKaspa({ to: localAddress, amount: 'self-full', payload: bcastPayloadHex });
           ingestTx({ traceId: sent?.txId, txid: sent?.txId, direction: 'outbound', fee: sent?.fee, localAddress });
           log(`BROADCAST #${cmd.channel} TX: ${sent?.txId || '?'} fee: ${sent?.fee || '?'}`);
           break;

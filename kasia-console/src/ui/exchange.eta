@@ -28,12 +28,19 @@
       class="px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors">
       Arbitrage
     </button>
+    <button @click="activeTab = 'seed'; loadSeedData()"
+      :class="activeTab === 'seed' ? 'border-brand-500 text-brand-600' : 'border-transparent text-ink-400 hover:text-ink-600'"
+      class="px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5">
+      Seed
+      <span x-show="seedConfig.enabled"
+        class="w-1.5 h-1.5 rounded-full bg-green-500 inline-block"></span>
+    </button>
     <div class="ml-auto flex items-center gap-2 text-xs pb-1">
       <span class="text-ink-400">Agent:</span>
       <select x-model="form.relayNodeId" @change="onAgentChange()"
         class="px-2 py-1 border border-warm-200 rounded text-xs bg-white focus:ring-1 focus:ring-brand-300">
         <template x-for="r in relays" :key="r.id">
-          <option :value="r.id" x-text="r.name"></option>
+          <option :value="r.id" x-text="focusTag(r)"></option>
         </template>
       </select>
     </div>
@@ -123,7 +130,7 @@
           <select x-model="form.relayNodeId"
             class="w-full px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300">
             <template x-for="r in relays" :key="r.id">
-              <option :value="r.id" x-text="r.name"></option>
+              <option :value="r.id" x-text="focusTag(r)"></option>
             </template>
           </select>
         </div>
@@ -727,6 +734,150 @@
 
   </div>
 
+  <!-- ═══ SEED TAB ═══ -->
+  <div x-show="activeTab === 'seed'">
+
+    <!-- Control panel -->
+    <div class="bg-white border border-warm-200 rounded-lg p-5 mb-5">
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-3">
+          <h3 class="text-sm font-semibold text-ink-700">Market Seeder</h3>
+          <button @click="toggleSeeder()"
+            class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
+            :class="seedConfig.enabled ? 'bg-green-500' : 'bg-warm-300'">
+            <span class="inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform"
+              :class="seedConfig.enabled ? 'translate-x-4' : 'translate-x-1'"></span>
+          </button>
+          <span class="text-xs" :class="seedConfig.enabled ? 'text-green-600 font-medium' : 'text-ink-400'"
+            x-text="seedConfig.enabled ? 'ON — auto-replenish every 5min' : 'OFF'"></span>
+        </div>
+        <div class="text-xs text-ink-500">
+          KAS mid price:
+          <span class="font-mono font-semibold text-ink-700" x-text="kasPrice ? '$' + kasPrice.toFixed(6) : '—'"></span>
+        </div>
+      </div>
+
+      <!-- Config grid -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+        <div>
+          <label class="text-xs text-ink-500 block mb-1">Sell Spread %</label>
+          <div class="flex items-center gap-2">
+            <input type="number" step="0.1" min="0.1" max="10"
+              x-model.number="seedConfig.sell_spread_pct"
+              class="w-20 text-xs border border-warm-200 rounded px-2 py-1.5 text-center focus:outline-none focus:ring-1 focus:ring-brand-300">
+            <span class="text-xs text-ink-400"
+              x-text="kasPrice ? '= $' + (kasPrice * (1 + seedConfig.sell_spread_pct/100)).toFixed(6) : ''"></span>
+          </div>
+        </div>
+        <div>
+          <label class="text-xs text-ink-500 block mb-1">Amount (KAS)</label>
+          <input type="number" step="10" min="10"
+            x-model.number="seedConfig.amount_kas"
+            class="w-24 text-xs border border-warm-200 rounded px-2 py-1.5 text-center focus:outline-none focus:ring-1 focus:ring-brand-300">
+        </div>
+        <div>
+          <label class="text-xs text-ink-500 block mb-1">Expires (min)</label>
+          <input type="number" step="5" min="5" max="1440"
+            x-model.number="seedConfig.expires_minutes"
+            class="w-20 text-xs border border-warm-200 rounded px-2 py-1.5 text-center focus:outline-none focus:ring-1 focus:ring-brand-300">
+        </div>
+        <div>
+          <label class="text-xs text-ink-500 block mb-1">Sell Agent</label>
+          <select x-model="seedConfig.sell_agent_id"
+            class="text-xs border border-warm-200 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-300 bg-white w-full">
+            <option value="">Auto (first agent)</option>
+            <template x-for="a in relays" :key="a.id">
+              <option :value="a.id" x-text="focusTag(a)" :class="a.focus !== 'market_maker' ? 'text-gray-400' : ''"></option>
+            </template>
+          </select>
+        </div>
+      </div>
+
+      <!-- Phase 1 note -->
+      <div class="text-xs text-ink-400 bg-warm-50 rounded px-3 py-2 mb-4">
+        Phase 1: sell orders only (KAS inventory). Buy orders require USDT balance — coming in Phase 2.
+      </div>
+
+      <!-- Action buttons -->
+      <div class="flex items-center gap-3">
+        <button @click="saveSeedConfig()"
+          :disabled="seedSaving"
+          class="text-xs px-4 py-1.5 bg-brand-500 text-white rounded hover:bg-brand-600 transition-colors disabled:opacity-50">
+          <span x-show="!seedSaving">Save Config</span>
+          <span x-show="seedSaving">Saving...</span>
+        </button>
+        <button @click="triggerSeed()"
+          :disabled="seedTriggering"
+          class="text-xs px-4 py-1.5 border border-brand-300 text-brand-600 rounded hover:bg-brand-50 transition-colors disabled:opacity-50">
+          <span x-show="!seedTriggering">Seed Now</span>
+          <span x-show="seedTriggering">Seeding...</span>
+        </button>
+        <button @click="cancelAllSeedOrders()"
+          x-show="seedOrders.length > 0"
+          class="text-xs px-4 py-1.5 border border-red-200 text-red-600 rounded hover:bg-red-50 transition-colors">
+          Cancel All
+        </button>
+      </div>
+    </div>
+
+    <!-- Active seed orders -->
+    <div class="mb-5">
+      <h3 class="text-xs font-semibold text-ink-500 uppercase tracking-wider mb-3">
+        Active Seed Orders
+        <span class="text-ink-300 font-normal" x-text="'(' + seedOrders.length + ')'"></span>
+      </h3>
+      <template x-if="seedOrders.length === 0">
+        <div class="text-center py-8 text-ink-400 text-sm bg-white border border-warm-200 rounded-lg">
+          No active seed orders — click "Seed Now" to publish one
+        </div>
+      </template>
+      <div class="space-y-2">
+        <template x-for="o in seedOrders" :key="o.id">
+          <div class="bg-white border border-warm-200 rounded-lg px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center gap-4">
+              <span class="text-xs font-bold px-2 py-0.5 rounded"
+                :class="o.side === 'sell' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'"
+                x-text="o.side.toUpperCase()"></span>
+              <span class="text-sm font-mono text-ink-700">
+                <span x-text="Number(o.give_amount).toLocaleString()"></span> KAS
+                @ <span x-text="o.price.toFixed(6)"></span>
+              </span>
+              <span class="text-xs text-ink-400" x-text="'+' + o.spread_pct + '% spread'"></span>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="text-xs" :class="o.minutes_left <= 5 ? 'text-amber-500 font-medium' : 'text-ink-400'"
+                x-text="o.minutes_left + 'm left'"></span>
+              <span class="text-[10px] px-2 py-0.5 rounded-full bg-green-50 text-green-700"
+                x-text="o.protocol_status"></span>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- Today's stats -->
+    <div class="bg-white border border-warm-200 rounded-lg p-4">
+      <h3 class="text-xs font-semibold text-ink-500 uppercase tracking-wider mb-3">Today's Seeding</h3>
+      <div class="grid grid-cols-3 gap-4 text-center">
+        <div>
+          <div class="text-2xl font-semibold text-ink-700" x-text="seedStats.seeded || 0"></div>
+          <div class="text-xs text-ink-400">Published</div>
+        </div>
+        <div>
+          <div class="text-2xl font-semibold text-green-600" x-text="seedStats.taken || 0"></div>
+          <div class="text-xs text-ink-400">Taken</div>
+        </div>
+        <div>
+          <div class="text-2xl font-semibold"
+            :class="(seedStats.net_usdt || 0) >= 0 ? 'text-green-600' : 'text-red-500'"
+            x-text="(seedStats.net_usdt >= 0 ? '+$' : '-$') + Math.abs(seedStats.net_usdt || 0).toFixed(2)"></div>
+          <div class="text-xs text-ink-400">Net P&L</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
 </div>
 
 <script>
@@ -741,6 +892,8 @@ function exchangeApp() {
     filter: '',
     loading: true,
     activeTab: 'market',
+    _focusLabels: { market_maker: '做市', social: '社交', balanced: '通用' },
+    focusTag(r) { return r.name + ' [' + (this._focusLabels[r.focus] || r.focus || '通用') + ']'; },
     showForm: false,
     publishing: false,
     formError: '',
@@ -751,6 +904,14 @@ function exchangeApp() {
       verification: 'manual', expires_minutes: '60',
       relayNodeId: '',
     },
+    // Seed tab state
+    seedConfig: { enabled: false, sell_spread_pct: 1.0, buy_spread_pct: 1.0, amount_kas: 100, expires_minutes: 30, sell_agent_id: '', buy_agent_id: '' },
+    seedOrders: [],
+    seedStats: { seeded: 0, taken: 0, net_usdt: 0 },
+    kasPrice: null,
+    seedTriggering: false,
+    seedSaving: false,
+
     // Arbitrage tab state
     cexBalances: [],
     spreadRows: [],
@@ -1162,6 +1323,73 @@ function exchangeApp() {
         if (data.ok) { await this.loadArbOffers(); await this.loadOffers(); }
       } catch {}
       finally { o._cancelling = false; }
+    },
+
+    // ── Seed Tab Methods ──
+
+    async loadSeedData() {
+      const [cfg, status, priceData] = await Promise.allSettled([
+        fetch('/api/exchange/seeder/config').then(r => r.json()),
+        fetch('/api/exchange/seeder/status').then(r => r.json()),
+        fetch('/api/trade/kas-price').then(r => r.json()),
+      ]);
+      if (cfg.status === 'fulfilled' && cfg.value) Object.assign(this.seedConfig, cfg.value);
+      if (status.status === 'fulfilled' && status.value) {
+        this.seedOrders = status.value.active_orders || [];
+        this.seedStats = status.value.today || {};
+      }
+      if (priceData.status === 'fulfilled') this.kasPrice = priceData.value?.price || null;
+      // Smart default: pick first market_maker agent if no sell_agent configured
+      if (!this.seedConfig.sell_agent_id && this.relays.length) {
+        const maker = this.relays.find(r => r.focus === 'market_maker');
+        if (maker) this.seedConfig.sell_agent_id = maker.id;
+      }
+    },
+
+    async toggleSeeder() {
+      this.seedConfig.enabled = !this.seedConfig.enabled;
+      await this.saveSeedConfig();
+    },
+
+    async saveSeedConfig() {
+      this.seedSaving = true;
+      try {
+        await fetch('/api/exchange/seeder/config', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.seedConfig),
+        });
+      } catch {}
+      finally { this.seedSaving = false; }
+    },
+
+    async triggerSeed() {
+      this.seedTriggering = true;
+      try {
+        const res = await fetch('/api/exchange/seeder/trigger', { method: 'POST' });
+        const data = await res.json();
+        if (!data.ok && data.error) alert('Seed failed: ' + data.error);
+        await new Promise(r => setTimeout(r, 1500));
+        await this.loadSeedData();
+        await this.loadOffers();
+      } catch (e) { alert('Trigger error: ' + e.message); }
+      finally { this.seedTriggering = false; }
+    },
+
+    async cancelAllSeedOrders() {
+      if (!confirm('Cancel all active seed orders?')) return;
+      for (const o of this.seedOrders) {
+        // Find the relay that owns this offer (by maker address)
+        const ownerRelay = this.relays.find(r => r.address === o.maker);
+        const agentId = ownerRelay?.id || this.seedConfig.sell_agent_id || this.form.relayNodeId;
+        await fetch('/api/exchange/cancel', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relayNodeId: agentId, offer_id: o.id }),
+        });
+      }
+      await this.loadSeedData();
+      await this.loadOffers();
     },
   };
 }

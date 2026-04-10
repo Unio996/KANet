@@ -76,6 +76,7 @@ export async function registerConversationRoutes(fastify) {
         id: r.id,
         name: r.name,
         address: r.address,
+        focus: r.focus || 'balanced',
         adapter_node_id: r.adapter_node_id || null,
         adapterName: adapter?.name || null,
         adapterPort: adapter?.http_port || null,
