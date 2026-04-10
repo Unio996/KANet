@@ -145,7 +145,49 @@ export async function registerExchangeRoutes(fastify) {
     const relay = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(relayNodeId);
     const makerAddr = relay?.address || relayNodeId;
 
-    // Optimistic: write to local DB immediately (visible before chain confirms)
+    // Fund lock: lock KAS before broadcast (prevent oversell)
+    if (give_asset === 'KAS') {
+      try {
+        const { lockFunds } = await import('../services/fund-lock.js');
+        const balRes = await fetch(`http://127.0.0.1:${process.env.PORT || 3100}/api/relay/${relayNodeId}/balance`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()).catch(() => null);
+        const currentBalance = parseFloat(balRes?.balance || '0');
+        const lockResult = lockFunds(makerAddr, offerId, 'KAS', parseFloat(give_amount), currentBalance);
+        if (!lockResult.ok) {
+          return reply.code(400).send({ error: `Insufficient KAS: ${lockResult.error}`, available: lockResult.available });
+        }
+      } catch (err) {
+        console.log(`[exchange] Fund lock skipped (non-critical): ${err.message}`);
+      }
+    }
+
+    // Broadcast FIRST — chain is the source of truth. No chain = no offer.
+    let broadcastTx = null;
+    const { sendCommandAsync } = await import('../services/relay-manager.js');
+    const MAX_BROADCAST_ATTEMPTS = 2;
+    for (let attempt = 1; attempt <= MAX_BROADCAST_ATTEMPTS; attempt++) {
+      try {
+        const result = await sendCommandAsync(relayNodeId, {
+          type: 'send_broadcast',
+          channel,
+          message: JSON.stringify(protocolMsg),
+        });
+        broadcastTx = result?.txId || null;
+        if (broadcastTx) break;
+      } catch (err) {
+        console.log(`[exchange] Broadcast attempt ${attempt}/${MAX_BROADCAST_ATTEMPTS} failed: ${err.message}`);
+        if (attempt < MAX_BROADCAST_ATTEMPTS) await new Promise(r => setTimeout(r, 3000));
+      }
+    }
+
+    if (!broadcastTx) {
+      // Release fund lock on broadcast failure
+      if (give_asset === 'KAS') {
+        try { const { releaseFunds } = await import('../services/fund-lock.js'); releaseFunds(offerId); } catch {}
+      }
+      return reply.code(503).send({ error: 'Broadcast failed — offer not created. Relay may be syncing.' });
+    }
+
+    // Chain confirmed — now write to DB
     sqlite.prepare(`
       INSERT OR IGNORE INTO exchange_offers (
         id, broadcast_tx_id, message_index,
@@ -157,7 +199,7 @@ export async function registerExchangeRoutes(fastify) {
         created_at, updated_at
       ) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', 0, ?, ?, ?)
     `).run(
-      offerId, 'pending_' + offerId,
+      offerId, broadcastTx,
       give_asset, String(give_amount), give_chain || null,
       want_asset, String(want_amount), want_chain || null,
       makerAddr, now, expiresAt,
@@ -165,42 +207,6 @@ export async function registerExchangeRoutes(fastify) {
       JSON.stringify(metadata),
       marketKey, now, now
     );
-
-    // Fund lock: lock KAS if selling KAS (prevent oversell)
-    if (give_asset === 'KAS') {
-      try {
-        const { lockFunds } = await import('../services/fund-lock.js');
-        const balRes = await fetch(`http://127.0.0.1:${process.env.PORT || 3100}/api/relay/${relayNodeId}/balance`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()).catch(() => null);
-        const currentBalance = parseFloat(balRes?.balance || '0');
-        const lockResult = lockFunds(makerAddr, offerId, 'KAS', parseFloat(give_amount), currentBalance);
-        if (!lockResult.ok) {
-          // Rollback optimistic write
-          sqlite.prepare('DELETE FROM exchange_offers WHERE id = ?').run(offerId);
-          return reply.code(400).send({ error: `Insufficient KAS: ${lockResult.error}`, available: lockResult.available });
-        }
-      } catch (err) {
-        console.log(`[exchange] Fund lock skipped (non-critical): ${err.message}`);
-      }
-    }
-
-    // Async: broadcast to chain (anchor confirmation, non-blocking)
-    let broadcastTx = null;
-    try {
-      const { sendCommandAsync } = await import('../services/relay-manager.js');
-      const result = await sendCommandAsync(relayNodeId, {
-        type: 'send_broadcast',
-        channel,
-        message: JSON.stringify(protocolMsg),
-      });
-      broadcastTx = result?.txId || null;
-      // Update with real TX hash
-      if (broadcastTx) {
-        sqlite.prepare('UPDATE exchange_offers SET broadcast_tx_id = ? WHERE id = ?')
-          .run(broadcastTx, offerId);
-      }
-    } catch (err) {
-      console.log(`[exchange] Broadcast pending (relay may be syncing): ${err.message}`);
-    }
 
     return reply.send({
       ok: true,

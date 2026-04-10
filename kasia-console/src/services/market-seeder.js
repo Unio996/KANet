@@ -139,6 +139,8 @@ async function publishSeedOrder(config, midPrice, side) {
 
     if (data.ok) {
       console.log(`[seeder] ${side.toUpperCase()} seed published: ${giveAmount} ${giveAsset} → ${wantAmount} ${wantAsset} (spread +${spreadPct}%)`);
+    } else {
+      console.log(`[seeder] ${side.toUpperCase()} seed failed: ${data.error || 'unknown'} — will retry next tick`);
     }
     return data;
   } catch (err) {
