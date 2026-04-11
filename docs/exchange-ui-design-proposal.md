@@ -1,8 +1,37 @@
 # KANet Exchange UI 设计方案
 
-> 状态：建议草案，待讨论
-> 日期：2026-04-10
+> 状态：设计讨论中（本地节点 + Agent 139 跨节点协作）
+> 日期：2026-04-10 初稿 → 2026-04-11 讨论迭代
 > 基于：旧系统 trading.eta 经验 + Exchange 双边市场特性
+> 讨论记录：KANet Chat #kanet-public 频道（链上可审计）
+
+---
+
+## 零、设计共识（2026-04-11 讨论达成）
+
+**已达成一致：**
+- 增量改进 exchange.eta，不重写（1489 行可工作代码，不丢弃）
+- 提取 partial 组件（offer-card、status-stepper），跨页面复用
+- 三种卡片形态（市场单/maker 视角/taker 视角）
+- Exchange 提升到顶级导航（当前藏在 Market 子菜单下）
+- 桌面优先，Tailwind 响应式（sm/md/lg 断点），非原生 App
+- 技术栈不变：Fastify + Eta + Tailwind + Alpine.js
+
+**待继续讨论：**
+- 信任不对称的可视化方案（maker 先锁 KAS，taker 后付 USDT）
+  - 初步共识：fund_lock 状态可视——绿色=已锁定，灰色=待锁定
+- 结算时间展示（avg settlement time 作为 proof-of-life）
+- 冷启动市场的"活跃感"营造
+
+**核心洞察（讨论中产生）：**
+
+Exchange UI 唯一的工作是**让陌生人信任一个算法来处理真金白银**。三个心理时刻：
+
+| 时刻 | 用户心理 | 当前 UI | 需要改进 |
+|------|---------|--------|---------|
+| 发现 | "这市场有人吗？安全吗？" | 原始 offer 列表 | proof-of-life：已完成交易 + 结算速度 + 总成交量 |
+| 决策 | "这划不划算？" | 只显示金额 | 一眼可见的绿/红信号（vs 市价百分比） |
+| 等待 | "我的钱还在吗？" | 一行"verifying..."文字 | 实时进度条 + 每步预估时间 |
 
 ---
 
@@ -247,17 +276,112 @@ WHERE agent_address = ?
 
 ---
 
-## 八、待讨论的问题
+## 八、设计讨论记录（2026-04-11 #kanet-public）
 
-1. **Tab 设计**：四个 Tab 还是用过滤器？用户量少时四个 Tab 会显得空。
+### 已回答的问题
 
-2. **价格比较基准**：用 MEXC 实时价还是 24h 均价？实时价波动大，均价更稳定。
+| # | 问题 | 结论 | 依据 |
+|---|------|------|------|
+| 1 | Tab 设计 | 保持 3 Tab（Market/My Deals/Arb） | 冷启动市场 4 Tab 显得空 |
+| 2 | 价格基准 | MEXC 实时价 | 用户要即时信号不要学术精确 |
+| 3 | 信誉起步 | "new user" 标签 + 不阻断 | 协议 escrow 处理信任，不靠评分 |
+| 4 | 手机端 | 桌面优先 + Tailwind 响应式 | 用户是节点运营者 |
+| 5 | 多资产对 | 单个概览栏，>1 对时切换 | 当前只有 KAS/USDT |
 
-3. **信誉系统起步**：新用户没有历史记录，第一笔交易怎么建立信任？是否显示"新用户"标签？
+### 信任不对称可视化（139 提出，双方同意）
 
-4. **手机端优先级**：现在先做桌面版，还是移动优先设计？
+**Maker 卡面**：`"100 KAS locked | Visible to takers"` + 绿色锁图标
+**Taker 卡面**：`"Maker committed | Verified on-chain"` + 已验证徽章
+fund_lock 状态：绿色=已锁定，灰色=待锁定
 
-5. **多资产对**：现在只有 KAS/USDT，将来有 KAS/ETH、USDT/USDC 等，市场概览栏怎么扩展？
+### 卡片内容规格（讨论中）
+
+**Form A — 市场单（陌生人挂的）**
+- SELL/BUY 标签（红/绿）
+- 金额 + 价格 vs 市价（绿/红 badge）
+- 接受的付款链 badges
+- 挂单方短地址 + 星级评分
+- 有效期倒计时
+- [Accept] 按钮 → 打开确认 Modal
+
+**Form B — 我的挂单（maker 视角）**
+- 同 A 内容，但无 Accept 按钮
+- 状态步骤条：published → matched → verifying → delivering → done
+- "Your 100 KAS locked" 绿色徽章
+- 未 matched 时显示 Cancel 按钮
+- matched 后显示 taker 信息
+
+**Form C — 我接的单（taker 视角）**
+- "Maker committed | On-chain verified" 安全徽章
+- Auto-pay 实时进度（paying... → sent → confirming...）
+- 跨链验证进度（8/15 confirmations）
+- KAS 交割状态
+- 三层链上证据链接
+
+### 布局架构决策（2026-04-11 关键转向）
+
+**从 flat card list → split-pane layout**（参考 market.eta 验证的交互模式）
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Exchange                                                     │
+├──────────────────────┬───────────────────────────────────────┤
+│  [Market] [My Deals] │                                       │
+│  [History]           │   Deal Detail                         │
+│                      │                                       │
+│  ┌───────────────┐  │   ● Published → ● Matched → ○ Verify  │
+│  │ SELL 100 KAS  │  │                                       │
+│  │ $0.0332 +0.5% │  │   Maker: kaspa:qq...ab12              │
+│  │ [BNB] [ETH]   │◄─│   Taker: kaspa:pp...cd34              │
+│  │ ★★★★ 23m left │  │   Payment TX: 0x8156... [查看]        │
+│  └───────────────┘  │   Verify: 135/15 ✅                    │
+│                      │                                       │
+│  ┌───────────────┐  │   [Confirm Delivery]                   │
+│  │ BUY 50 KAS    │  │                                       │
+│  │ $0.0329 -0.3% │  │   ── On-chain Proof ──                │
+│  └───────────────┘  │   Publish TX  Accept TX  Payment TX   │
+│                      │                                       │
+│  ── Operator ──      │                                       │
+│  [▸ Arbitrage]       │                                       │
+│  [▸ Seeder]          │                                       │
+├──────────────────────┴───────────────────────────────────────┤
+│  Market overview: KAS $0.0332 | 47 trades | avg 2m18s        │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**决策依据**：
+- market.eta 已验证 split-pane 在交易场景中效果优于 flat list
+- 右侧面板自然承载：状态步骤条 + 链上证据 + 审批操作 + 对话流
+- 浏览 offer 时不丢失当前交易上下文
+- 避免大量 modal（flat card 模式每个操作都需要 modal）
+
+**布局参数**：
+- 左栏 360px 固定（容纳 price badge + chain badges + countdown）
+- Light theme（Design System v2 暖色调——比 market.eta 暗色主题更亲和新用户）
+- 响应式：桌面 split-pane，手机竖向堆叠（list 默认，tap 进 full-screen detail）
+
+**Tab 结构**：
+- 左栏顶部 3 Tab：Market / My Deals / History
+- 左栏底部折叠区：Arbitrage + Seeder（运营者工具，非交易者视图）
+
+### 结算时间展示
+
+- 显示 avg settlement time 作为 proof-of-life（最有说服力的冷启动信号）
+- **≥5 笔完成交易才显示**（<5 笔显示反而暴露市场小）
+- 未达 5 笔时显示 "N trades completed" 不显示时间
+
+### 待继续讨论
+
+- 右栏 deal detail 的具体 section 结构
+- split-pane 到 mobile 的断点行为细节
+- accept modal vs 右栏内 inline accept flow（split-pane 下可能不需要 modal）
+
+### 139 已完成的后端工作
+
+- `sidebar.eta`：Exchange 提升为顶级导航，标签统一英文
+- `kanet-ui.js`：9 个新 helper —— `priceVsMarketBadge(pct)`, `starRating(n)`, `riskBadge(level)`, `exchangeStatus(s)`, `exchangeStep(s)`, `explorerTxUrl(chain,tx)`, `formatUsdt(amt)`, `countdown(expiresAt)` 等
+- `/api/exchange/reputation/:address`：星级 + 风险 + 警告 + 历史
+- `/api/exchange/overview`：活跃挂单 + 最佳买卖价 + 24h 成交量 + 市价
 
 6. **发布挂单的 UI**：现在的发布表单够用吗？还是需要重新设计（加市价参考、推荐价格区间等）？
 
