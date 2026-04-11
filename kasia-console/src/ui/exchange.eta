@@ -103,9 +103,15 @@
                 </template>
                 <span class="ml-auto text-[10px] text-ink-400 tabular-nums" x-text="KANet.countdown(o.expires_at)"></span>
               </div>
-              <!-- Row 3: maker + role -->
+              <!-- Row 3: maker + reputation + role -->
               <div class="flex items-center gap-2 mt-1">
                 <span class="text-[10px] text-ink-400 font-mono" x-text="KANet.shortAddr(o.maker)"></span>
+                <template x-if="getReputation(o.maker)">
+                  <span class="text-[10px] text-yellow-500" x-text="KANet.starRating(getReputation(o.maker).stars)"></span>
+                </template>
+                <template x-if="getReputation(o.maker)?.totalTrades > 0">
+                  <span class="text-[9px] text-ink-400" x-text="'(' + getReputation(o.maker).completed + '/' + getReputation(o.maker).totalTrades + ')'"></span>
+                </template>
                 <span x-show="isMaker(o)" class="text-[9px] px-1 py-0.5 bg-brand-50 text-brand-600 rounded font-medium">you</span>
               </div>
             </div>
@@ -265,7 +271,11 @@
               <span class="font-medium tabular-nums" :class="priceColor(selectedOffer)"
                 x-text="'$' + priceComparison(selectedOffer).offerPrice.toFixed(5) + '/KAS (' + (priceComparison(selectedOffer).diffPct >= 0 ? '+' : '') + priceComparison(selectedOffer).diffPct + '% vs market)'"></span>
             </template>
-            <span>Maker: <span class="font-mono" x-text="KANet.shortAddr(selectedOffer?.maker || '')"></span></span>
+            <span>Maker: <span class="font-mono" x-text="KANet.shortAddr(selectedOffer?.maker || '')"></span>
+              <template x-if="selectedOffer && getReputation(selectedOffer.maker)">
+                <span class="text-yellow-500 ml-1" x-text="KANet.starRating(getReputation(selectedOffer.maker).stars)"></span>
+              </template>
+            </span>
             <span x-show="selectedOffer?.taker">Taker: <span class="font-mono" x-text="KANet.shortAddr(selectedOffer?.taker || '')"></span></span>
           </div>
         </div>
@@ -583,6 +593,9 @@ function exchangeApp() {
     arbLoading: { balances: false, spreads: false, hedges: false, usage: false },
     arbInitialized: false,
 
+    // Reputation
+    reputationMap: {},
+
     // Polling
     _detailPoll: null,
 
@@ -657,12 +670,27 @@ function exchangeApp() {
           const updated = this.offers.find(o => o.id === this.selectedOffer.id);
           if (updated) this.selectedOffer = updated;
         }
+        // Fetch reputation for visible makers
+        this.loadReputations();
       } catch (e) {
         console.error('Failed to load offers:', e);
       } finally {
         this.loading = false;
       }
     },
+
+    async loadReputations() {
+      const makers = [...new Set(this.offers.map(o => o.maker).filter(Boolean))];
+      const unknown = makers.filter(m => !this.reputationMap[m]);
+      if (!unknown.length) return;
+      try {
+        const res = await fetch('/api/exchange/reputation/batch?addresses=' + unknown.join(',') + (this.currentAddress ? '&my_address=' + this.currentAddress : ''));
+        const data = await res.json();
+        Object.assign(this.reputationMap, data);
+      } catch {}
+    },
+
+    getReputation(addr) { return this.reputationMap[addr] || null; },
 
     // ── Selection ──
     selectOffer(o) {

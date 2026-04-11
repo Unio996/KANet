@@ -21,13 +21,13 @@ export function assessReputation(myAddress, peerAddress) {
 
   // ── 1. 身份信息（链上声明）──
   const identity = sqlite.prepare(
-    'SELECT display_name, identity_type, card_mode, card_entity_type, card_summary, card_timestamp, first_seen_at, last_seen_at, created_at FROM identities WHERE address = ?'
+    'SELECT display_name, identity_type, card_mode, card_entity_type, card_summary, card_timestamp, discovered_at, last_seen_at, created_at FROM identities WHERE address = ?'
   ).get(peerAddress);
 
   const hasCard = !!(identity?.card_mode && identity?.card_entity_type);
   const cardAge = identity?.card_timestamp ? Math.floor((Date.now() - new Date(identity.card_timestamp).getTime()) / 86400000) : null;
-  const addressAge = identity?.first_seen_at
-    ? Math.floor((Date.now() - new Date(identity.first_seen_at).getTime()) / 86400000)
+  const addressAge = identity?.discovered_at
+    ? Math.floor((Date.now() - new Date(identity.discovered_at).getTime()) / 86400000)
     : identity?.created_at
       ? Math.floor((Date.now() - new Date(identity.created_at).getTime()) / 86400000)
       : null;
