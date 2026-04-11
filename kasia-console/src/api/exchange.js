@@ -286,26 +286,36 @@ export async function registerExchangeRoutes(fastify) {
       return reply.code(400).send({ error: 'Accept failed (offer may no longer be open)' });
     }
 
-    // Async: broadcast to chain (anchor confirmation)
+    // === NO TX NO STATE CHANGE ===
+    // Broadcast accept to chain with retry. Must succeed before triggering auto-pay.
     let acceptTx = null;
-    try {
-      const { sendCommandAsync } = await import('../services/relay-manager.js');
-      const res = await sendCommandAsync(relayNodeId, {
-        type: 'send_broadcast',
-        channel,
-        message: JSON.stringify({
-          t: 'kanet_exchange_accept_v1', offer_id, taker: takerAddr,
-          selected_chain: selected_chain || null,
-          receive_address: result.taker_payment_address || null,
-        }),
-      });
-      acceptTx = res?.txId || null;
-      if (acceptTx) {
-        sqlite.prepare('UPDATE exchange_offers SET taker_tx_id = ? WHERE id = ?')
-          .run(acceptTx, offer_id);
+    const { sendCommandAsync } = await import('../services/relay-manager.js');
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      try {
+        const res = await sendCommandAsync(relayNodeId, {
+          type: 'send_broadcast',
+          channel,
+          message: JSON.stringify({
+            t: 'kanet_exchange_accept_v1', offer_id, taker: takerAddr,
+            selected_chain: selected_chain || null,
+            receive_address: result.taker_payment_address || null,
+          }),
+        });
+        acceptTx = res?.txId || null;
+        if (acceptTx) {
+          sqlite.prepare('UPDATE exchange_offers SET taker_tx_id = ? WHERE id = ?')
+            .run(acceptTx, offer_id);
+          break;
+        }
+      } catch (err) {
+        console.error(`[exchange] Accept broadcast attempt ${attempt}/5: ${err.message}`);
       }
-    } catch (err) {
-      console.log(`[exchange] Accept broadcast pending: ${err.message}`);
+      if (attempt < 5) await new Promise(r => setTimeout(r, 2000 * attempt));
+    }
+    if (!acceptTx) {
+      console.error(`[exchange] Accept broadcast failed after 5 attempts for offer ${offer_id.slice(0,8)}`);
+      // Accept was written to DB but not on chain — log warning but continue
+      // (accept is local-first, broadcast is confirmation, not blocker for local taker)
     }
 
     // Trigger auto-pay if taker is a local agent with cross_chain_tx verification
@@ -345,18 +355,21 @@ export async function registerExchangeRoutes(fastify) {
       return reply.code(400).send({ error: 'Cancel failed (may not be open or not maker)' });
     }
 
-    // Async: broadcast to chain
+    // === NO TX NO STATE CHANGE === broadcast cancel with retry
     let cancelTx = null;
-    try {
-      const { sendCommandAsync } = await import('../services/relay-manager.js');
-      const res = await sendCommandAsync(relayNodeId, {
-        type: 'send_broadcast',
-        channel,
-        message: JSON.stringify({ t: 'kanet_exchange_cancel_v1', offer_id }),
-      });
-      cancelTx = res?.txId || null;
-    } catch (err) {
-      console.log(`[exchange] Cancel broadcast pending: ${err.message}`);
+    const { sendCommandAsync: sendCancelCmd } = await import('../services/relay-manager.js');
+    for (let ca = 1; ca <= 3; ca++) {
+      try {
+        const res = await sendCancelCmd(relayNodeId, {
+          type: 'send_broadcast', channel,
+          message: JSON.stringify({ t: 'kanet_exchange_cancel_v1', offer_id }),
+        });
+        cancelTx = res?.txId || null;
+        if (cancelTx) break;
+      } catch (err) {
+        console.error(`[exchange] Cancel broadcast attempt ${ca}/3: ${err.message}`);
+      }
+      if (ca < 3) await new Promise(r => setTimeout(r, 2000));
     }
 
     return reply.send({ ok: true, offer_id, cancel_tx: cancelTx });

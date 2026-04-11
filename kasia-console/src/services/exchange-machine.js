@@ -346,7 +346,7 @@ export async function checkMatchedTimeout() {
 
     releaseFunds(offer.id);
 
-    // Broadcast timeout to chain
+    // Broadcast timeout to chain (best-effort with retry — timeout is local-first)
     try {
       const relay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(offer.maker);
       if (relay) {
@@ -358,7 +358,14 @@ export async function checkMatchedTimeout() {
           reason: 'payment_timeout',
           reopen: true,
         });
-        await sendCommandAsync(relay.id, { type: 'send_broadcast', channel: 'kanet-exchange', message: timeoutMsg }).catch(() => {});
+        for (let ta = 1; ta <= 3; ta++) {
+          try {
+            const tr = await sendCommandAsync(relay.id, { type: 'send_broadcast', channel: 'kanet-exchange', message: timeoutMsg });
+            if (tr?.txId) break;
+          } catch (te) {
+            if (ta < 3) await new Promise(r => setTimeout(r, 2000));
+          }
+        }
       }
     } catch (err) {
       console.error(`[exchange-machine] timeout broadcast failed: ${err.message}`);
@@ -465,36 +472,60 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
           }
 
           if (deliveryTxId) {
-            // delivering → completed
-            const completedOffer = transition(offer_id, 'completed', {});
-            sqlite.prepare(`
-              INSERT INTO chain_events (id, event_type, from_address, to_address, tx_hash, payload, observed_at)
-              VALUES (?, 'kas_delivery', ?, ?, ?, ?, datetime('now'))
-            `).run(crypto.randomUUID(), deliveringOffer.maker, deliveringOffer.taker, deliveryTxId,
-              JSON.stringify({ offer_id: deliveringOffer.id, amount: deliveringOffer.give_amount }));
-            try { const { spendFunds } = await import('./fund-lock.js'); spendFunds(deliveringOffer.id); } catch {}
-            // Broadcast kanet_exchange_delivered_v1 to chain
-            try {
-              const { sendCommandAsync: sendCmd } = await import('./relay-manager.js');
-              const deliveredMsg = JSON.stringify({
-                t: 'kanet_exchange_delivered_v1',
-                offer_id: deliveringOffer.id,
-                delivery_tx: deliveryTxId,
-                delivery_asset: deliveringOffer.give_asset,
-                delivery_amount: deliveringOffer.give_amount,
-                receiver: deliveringOffer.taker,
-              });
-              sendCmd(deliveryAgent.id, { type: 'send_broadcast', channel: 'kanet-exchange', message: deliveredMsg }).catch(() => {});
-            } catch {}
-            sqlite.prepare(`
-              INSERT INTO chain_events (id, event_type, from_address, to_address, payload, observed_at)
-              VALUES (?, 'exchange_completed', ?, ?, ?, datetime('now'))
-            `).run(crypto.randomUUID(), deliveringOffer.maker, deliveringOffer.taker, JSON.stringify({
-              offer_id: deliveringOffer.id, give_asset: deliveringOffer.give_asset, give_amount: deliveringOffer.give_amount,
-              want_asset: deliveringOffer.want_asset, want_amount: deliveringOffer.want_amount, taker_chain: deliveringOffer.taker_chain,
-              price: parseFloat(deliveringOffer.want_amount) / parseFloat(deliveringOffer.give_amount) || 0,
-            }));
-            console.log(`[exchange] offer ${offer_id.slice(0,8)} delivering → completed`);
+            // === NO TX NO STATE CHANGE ===
+            // KAS delivery TX returned from Relay. Now broadcast delivered_v1.
+            // MUST succeed on chain before marking completed.
+            const { sendCommandAsync: sendCmd } = await import('./relay-manager.js');
+            const deliveredMsg = JSON.stringify({
+              t: 'kanet_exchange_delivered_v1',
+              offer_id: deliveringOffer.id,
+              delivery_tx: deliveryTxId,
+              delivery_asset: deliveringOffer.give_asset,
+              delivery_amount: deliveringOffer.give_amount,
+              receiver: deliveringOffer.taker,
+            });
+
+            let deliveredBcastTxId = null;
+            for (let ba = 1; ba <= 5; ba++) {
+              try {
+                const br = await sendCmd(deliveryAgent.id, { type: 'send_broadcast', channel: 'kanet-exchange', message: deliveredMsg });
+                deliveredBcastTxId = br?.txId;
+                if (deliveredBcastTxId) break;
+              } catch (be) {
+                console.error(`[exchange] delivered broadcast attempt ${ba}/5: ${be.message}`);
+              }
+              if (ba < 5) await new Promise(r => setTimeout(r, 2000 * ba));
+            }
+
+            if (!deliveredBcastTxId) {
+              // Delivered broadcast failed — KAS was sent but we can't prove it on chain yet.
+              // Stay in delivering, do NOT mark completed. Operator or next tick can retry.
+              console.error(`[exchange] offer ${offer_id.slice(0,8)} KAS sent (${deliveryTxId}) but delivered broadcast failed. Staying in delivering.`);
+              sqlite.prepare(`
+                INSERT INTO chain_events (id, event_type, from_address, to_address, tx_hash, payload, observed_at)
+                VALUES (?, 'kas_delivery', ?, ?, ?, ?, datetime('now'))
+              `).run(crypto.randomUUID(), deliveringOffer.maker, deliveringOffer.taker, deliveryTxId,
+                JSON.stringify({ offer_id: deliveringOffer.id, amount: deliveringOffer.give_amount, broadcast_failed: true }));
+            } else {
+              // Both KAS delivery AND broadcast succeeded — NOW mark completed
+              transition(offer_id, 'completed', {});
+              sqlite.prepare(`
+                INSERT INTO chain_events (id, event_type, from_address, to_address, tx_hash, payload, observed_at)
+                VALUES (?, 'kas_delivery', ?, ?, ?, ?, datetime('now'))
+              `).run(crypto.randomUUID(), deliveringOffer.maker, deliveringOffer.taker, deliveryTxId,
+                JSON.stringify({ offer_id: deliveringOffer.id, amount: deliveringOffer.give_amount, broadcast_tx: deliveredBcastTxId }));
+              try { const { spendFunds } = await import('./fund-lock.js'); spendFunds(deliveringOffer.id); } catch {}
+              sqlite.prepare(`
+                INSERT INTO chain_events (id, event_type, from_address, to_address, payload, observed_at)
+                VALUES (?, 'exchange_completed', ?, ?, ?, datetime('now'))
+              `).run(crypto.randomUUID(), deliveringOffer.maker, deliveringOffer.taker, JSON.stringify({
+                offer_id: deliveringOffer.id, give_asset: deliveringOffer.give_asset, give_amount: deliveringOffer.give_amount,
+                want_asset: deliveringOffer.want_asset, want_amount: deliveringOffer.want_amount, taker_chain: deliveringOffer.taker_chain,
+                delivery_tx: deliveryTxId, broadcast_tx: deliveredBcastTxId,
+                price: parseFloat(deliveringOffer.want_amount) / parseFloat(deliveringOffer.give_amount) || 0,
+              }));
+              console.log(`[exchange] offer ${offer_id.slice(0,8)} delivering → completed (delivery TX: ${deliveryTxId.slice(0,12)}, broadcast: ${deliveredBcastTxId.slice(0,12)})`);
+            }
           } else {
             // 3 attempts failed → delivering → disputed
             transition(offer_id, 'disputed', {});

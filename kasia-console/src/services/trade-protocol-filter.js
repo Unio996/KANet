@@ -838,40 +838,69 @@ async function _autoPayExchange(offer, takerRelayNodeId) {
 
   console.log(`[exchange-autopay] Payment TX: ${result.txHash}`);
 
-  // Write payment_tx to offer
+  // Write payment_tx to offer (USDT already sent, record the fact)
   sqlite.prepare('UPDATE exchange_offers SET payment_tx = ? WHERE id = ?').run(result.txHash, offer.id);
 
-  // Broadcast kanet_exchange_paid_v1
-  try {
-    const { sendCommandAsync } = await import('./relay-manager.js');
-    const paidMsg = JSON.stringify({
-      t: 'kanet_exchange_paid_v1',
-      offer_id: offer.id,
-      payment_tx: result.txHash,
-      payment_chain: chain,
-      payment_asset: offer.want_asset || 'USDT',
-      payment_amount: offer.want_amount,
-      payer: offer.taker,
-    });
-    const bcastResult = await sendCommandAsync(takerRelayNodeId, {
-      type: 'send_broadcast',
-      channel: 'kanet-exchange',
-      message: paidMsg,
-    });
-    console.log(`[exchange-autopay] Broadcast kanet_exchange_paid_v1 TX: ${bcastResult?.txId || '?'}`);
-  } catch (err) {
-    console.error(`[exchange-autopay] Broadcast failed: ${err.message}`);
+  // === NO TX NO STATE CHANGE ===
+  // Broadcast kanet_exchange_paid_v1 — MUST succeed before advancing state.
+  // If broadcast fails (UTXO conflict etc), retry with backoff.
+  // Only after TX is on chain do we processPaymentSubmit.
+  const { sendCommandAsync } = await import('./relay-manager.js');
+  const paidMsg = JSON.stringify({
+    t: 'kanet_exchange_paid_v1',
+    offer_id: offer.id,
+    payment_tx: result.txHash,
+    payment_chain: chain,
+    payment_asset: offer.want_asset || 'USDT',
+    payment_amount: offer.want_amount,
+    payer: offer.taker,
+  });
+
+  let paidTxId = null;
+  const MAX_BCAST_RETRIES = 5;
+  const BCAST_RETRY_MS = 2000; // wait for UTXO to settle between retries
+  for (let attempt = 1; attempt <= MAX_BCAST_RETRIES; attempt++) {
+    try {
+      const bcastResult = await sendCommandAsync(takerRelayNodeId, {
+        type: 'send_broadcast',
+        channel: 'kanet-exchange',
+        message: paidMsg,
+      });
+      paidTxId = bcastResult?.txId;
+      if (paidTxId) {
+        console.log(`[exchange-autopay] Broadcast kanet_exchange_paid_v1 TX: ${paidTxId} (attempt ${attempt})`);
+        break;
+      }
+    } catch (err) {
+      console.error(`[exchange-autopay] Paid broadcast attempt ${attempt}/${MAX_BCAST_RETRIES} failed: ${err.message}`);
+    }
+    if (attempt < MAX_BCAST_RETRIES) {
+      await new Promise(r => setTimeout(r, BCAST_RETRY_MS * attempt));
+    }
   }
 
+  if (!paidTxId) {
+    // All retries failed — DO NOT advance state. USDT was sent but paid broadcast didn't land.
+    // Record the failure so system can retry later or operator can intervene.
+    console.error(`[exchange-autopay] CRITICAL: paid broadcast failed after ${MAX_BCAST_RETRIES} attempts. Offer ${offer.id.slice(0,8)} stays at current state. USDT TX ${result.txHash} was sent but maker node will not know.`);
+    recordChainEvent({
+      txid: result.txHash,
+      eventType: 'exchange_paid_broadcast_failed',
+      fromAddress: offer.taker,
+      payload: JSON.stringify({ offer_id: offer.id, chain, amount, payment_tx: result.txHash, error: 'broadcast_failed_all_retries' }),
+    });
+    return;
+  }
+
+  // Broadcast succeeded — TX is on chain. NOW advance local state.
   recordChainEvent({
     txid: result.txHash,
     eventType: 'exchange_paid',
     fromAddress: offer.taker,
     toAddress: offer.maker,
-    payload: JSON.stringify({ offer_id: offer.id, chain, amount, payment_tx: result.txHash }),
+    payload: JSON.stringify({ offer_id: offer.id, chain, amount, payment_tx: result.txHash, broadcast_tx: paidTxId }),
   });
 
-  // Directly trigger verification (don't wait for Scout to scan paid_v1 broadcast)
   processPaymentSubmit({ offer_id: offer.id, payment_tx: result.txHash, payment_chain: chain });
   console.log(`[exchange-autopay] verification triggered for offer ${offer.id.slice(0,8)}`);
 }
