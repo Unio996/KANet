@@ -406,7 +406,7 @@ function predictionsPage() {
     walletMsg: '',
     approving: false,
     settingUp: false,
-    showPositions: false,
+    showPositions: true,
     positions: [],
     settled: [],
     orders: [],
