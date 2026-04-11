@@ -139,6 +139,15 @@ export function processAccept(msg) {
     .update(`${msg.offer_id}${msg._from}${Date.now()}`)
     .digest('hex');
 
+  // Write taker_chain + taker_payment_address from accept message (cross-node sync)
+  if (msg.selected_chain || msg.receive_address) {
+    const meta = JSON.parse(offer.verification_meta || '{}');
+    if (msg.selected_chain) meta.receive_chain = msg.selected_chain;
+    if (msg.receive_address) meta.receive_address = msg.receive_address;
+    sqlite.prepare('UPDATE exchange_offers SET taker_chain = ?, taker_payment_address = ?, verification_meta = ? WHERE id = ?')
+      .run(msg.selected_chain || null, msg.receive_address || null, JSON.stringify(meta), offer.id);
+  }
+
   // Transition: open → matched
   const matched = transition(offer.id, 'matched', {
     taker: msg._from,
