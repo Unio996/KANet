@@ -460,24 +460,13 @@ async function handleExchangeAccept(msg) {
   // verifying（cross_chain_tx / kaspa_tx）：不在此阶段触发对冲
   // Hedge 必须等 completed（交割确认后）才触发，否则 Taker 不履约 = 裸空仓
 
-  // === Auto-pay: if taker is a local Agent, automatically pay USDT (cross_chain_tx) ===
-  if (result.taker && result.taker_chain && result.verification === 'cross_chain_tx') {
+  // === Auto-pay: if taker is a local Agent, automatically pay USDT ===
+  if (result.taker && result.taker_chain) {
     const localRelay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(result.taker);
     if (localRelay) {
       console.log(`[exchange] local taker detected, triggering auto-pay for offer ${result.id.slice(0,8)}`);
       setImmediate(() => _autoPayExchange(result, localRelay.id).catch(e =>
         console.error(`[exchange] auto-pay error: ${e.message}`)
-      ));
-    }
-  }
-
-  // === Auto-send-KAS: if taker is a local Agent and offer wants KAS (kaspa_tx) ===
-  if (result.taker && result.verification === 'kaspa_tx' && result.want_asset?.toUpperCase() === 'KAS') {
-    const localRelay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(result.taker);
-    if (localRelay) {
-      console.log(`[exchange] local taker detected, triggering auto-send-KAS for offer ${result.id.slice(0,8)}`);
-      setImmediate(() => _autoSendKas(result, localRelay.id).catch(e =>
-        console.error(`[exchange] auto-send-KAS error: ${e.message}`)
       ));
     }
   }
@@ -685,28 +674,20 @@ async function handleExchangePaid(msg) {
   // Gate 1: payment_tx already set → duplicate, skip
   if (offer.payment_tx) { console.log(`[exchange] paid: offer ${msg.offer_id.slice(0,8)} already has payment_tx, skip`); return; }
 
-  // Gate 2: must be in matched or verifying (cross_chain_tx routes to verifying on accept)
-  if (!['matched', 'verifying'].includes(offer.protocol_status)) {
-    console.log(`[exchange] paid: offer ${msg.offer_id.slice(0,8)} status=${offer.protocol_status}, expected matched/verifying`);
+  // Gate 2: must be in matched (transition to verifying will fail otherwise)
+  if (offer.protocol_status !== 'matched') {
+    console.log(`[exchange] paid: offer ${msg.offer_id.slice(0,8)} status=${offer.protocol_status}, expected matched`);
     return;
   }
 
   // Write payment_tx
   sqlite.prepare('UPDATE exchange_offers SET payment_tx = ? WHERE id = ?').run(msg.payment_tx, msg.offer_id);
-  if (msg.payment_chain && !offer.taker_chain) {
-    sqlite.prepare('UPDATE exchange_offers SET taker_chain = ? WHERE id = ?').run(msg.payment_chain, msg.offer_id);
-  }
 
-  // Transition to verifying if still matched; already verifying = skip transition
-  let verifyingOffer;
-  if (offer.protocol_status === 'matched') {
-    verifyingOffer = exchangeTransition(msg.offer_id, 'verifying', {});
-    if (!verifyingOffer || verifyingOffer.protocol_status !== 'verifying') {
-      console.log(`[exchange] paid: transition to verifying failed for ${msg.offer_id.slice(0,8)}`);
-      return;
-    }
-  } else {
-    verifyingOffer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(msg.offer_id);
+  // Transition matched → verifying (Gate 2: transition validates status)
+  const verifyingOffer = exchangeTransition(msg.offer_id, 'verifying', {});
+  if (!verifyingOffer || verifyingOffer.protocol_status !== 'verifying') {
+    console.log(`[exchange] paid: transition to verifying failed for ${msg.offer_id.slice(0,8)}`);
+    return;
   }
 
   recordChainEvent({
@@ -802,10 +783,10 @@ async function _autoPayExchange(offer, takerRelayNodeId) {
     return;
   }
 
-  // Check if chain is supported for auto-pay (BNB/ETH/SOL/TRON)
-  const { isChainSupported, transferUsdt } = await import('./evm-transfer.js');
-  if (!isChainSupported(chain)) {
-    console.log(`[exchange-autopay] Chain ${chain} not supported for auto-pay, skip`);
+  // Check if chain is supported for auto-pay (Phase 2: BNB/ETH/SOL/TRON)
+  const SUPPORTED_AUTOPAY_CHAINS = ['bnb', 'eth', 'sol', 'tron'];
+  if (!SUPPORTED_AUTOPAY_CHAINS.includes(chain)) {
+    console.log(`[exchange-autopay] Chain ${chain} not supported for auto-pay (supported: ${SUPPORTED_AUTOPAY_CHAINS.join('/')}), skip`);
     return;
   }
 
@@ -833,7 +814,20 @@ async function _autoPayExchange(offer, takerRelayNodeId) {
 
   console.log(`[exchange-autopay] Paying ${amount} USDT → ${receiveAddress.slice(0,12)}... on ${chain} for offer ${offer.id.slice(0,8)}`);
 
-  const result = await transferUsdt(chain, wallet.privkey_encrypted, receiveAddress, amount);
+  // Route to chain-specific transfer function
+  let result;
+  if (['bnb', 'eth'].includes(chain)) {
+    const { transferERC20 } = await import('./evm-transfer.js');
+    result = await transferERC20(chain, wallet.privkey_encrypted, receiveAddress, amount);
+  } else if (chain === 'sol') {
+    const { transferSPL } = await import('./sol-transfer.js');
+    result = await transferSPL(wallet.privkey_encrypted, receiveAddress, amount);
+  } else if (chain === 'tron') {
+    const { transferTRC20 } = await import('./tron-transfer.js');
+    result = await transferTRC20(wallet.privkey_encrypted, receiveAddress, amount);
+  } else {
+    result = { ok: false, error: `No transfer implementation for chain: ${chain}` };
+  }
   if (!result.ok) {
     console.error(`[exchange-autopay] Payment failed: ${result.error}`);
     recordChainEvent({
@@ -846,171 +840,42 @@ async function _autoPayExchange(offer, takerRelayNodeId) {
 
   console.log(`[exchange-autopay] Payment TX: ${result.txHash}`);
 
-  // Write payment_tx to offer (USDT already sent, record the fact)
+  // Write payment_tx to offer
   sqlite.prepare('UPDATE exchange_offers SET payment_tx = ? WHERE id = ?').run(result.txHash, offer.id);
 
-  // === NO TX NO STATE CHANGE ===
-  // Broadcast kanet_exchange_paid_v1 — MUST succeed before advancing state.
-  // If broadcast fails (UTXO conflict etc), retry with backoff.
-  // Only after TX is on chain do we processPaymentSubmit.
-  const { sendCommandAsync } = await import('./relay-manager.js');
-  const paidMsg = JSON.stringify({
-    t: 'kanet_exchange_paid_v1',
-    offer_id: offer.id,
-    payment_tx: result.txHash,
-    payment_chain: chain,
-    payment_asset: offer.want_asset || 'USDT',
-    payment_amount: offer.want_amount,
-    payer: offer.taker,
-  });
-
-  let paidTxId = null;
-  const MAX_BCAST_RETRIES = 5;
-  const BCAST_RETRY_MS = 200; // Kaspa 10 BPS (0.1s blocks) — 200ms between retries is generous
-  for (let attempt = 1; attempt <= MAX_BCAST_RETRIES; attempt++) {
-    try {
-      const bcastResult = await sendCommandAsync(takerRelayNodeId, {
-        type: 'send_broadcast',
-        channel: 'kanet-exchange',
-        message: paidMsg,
-      });
-      if (bcastResult?.error) {
-        // sendCommandAsync resolves with {error} instead of rejecting
-        console.error(`[exchange-autopay] Paid broadcast attempt ${attempt}/${MAX_BCAST_RETRIES}: ${bcastResult.error}`);
-      } else {
-        paidTxId = bcastResult?.txId;
-        if (paidTxId) {
-          console.log(`[exchange-autopay] Broadcast kanet_exchange_paid_v1 TX: ${paidTxId} (attempt ${attempt})`);
-          break;
-        }
-      }
-    } catch (err) {
-      console.error(`[exchange-autopay] Paid broadcast attempt ${attempt}/${MAX_BCAST_RETRIES} failed: ${err.message}`);
-    }
-    if (attempt < MAX_BCAST_RETRIES) {
-      await new Promise(r => setTimeout(r, BCAST_RETRY_MS * attempt));
-    }
-  }
-
-  if (!paidTxId) {
-    // All retries failed — DO NOT advance state. USDT was sent but paid broadcast didn't land.
-    // Record the failure so system can retry later or operator can intervene.
-    console.error(`[exchange-autopay] CRITICAL: paid broadcast failed after ${MAX_BCAST_RETRIES} attempts. Offer ${offer.id.slice(0,8)} stays at current state. USDT TX ${result.txHash} was sent but maker node will not know.`);
-    recordChainEvent({
-      txid: result.txHash,
-      eventType: 'exchange_paid_broadcast_failed',
-      fromAddress: offer.taker,
-      payload: JSON.stringify({ offer_id: offer.id, chain, amount, payment_tx: result.txHash, error: 'broadcast_failed_all_retries' }),
+  // Broadcast kanet_exchange_paid_v1
+  try {
+    const { sendCommandAsync } = await import('./relay-manager.js');
+    const paidMsg = JSON.stringify({
+      t: 'kanet_exchange_paid_v1',
+      offer_id: offer.id,
+      payment_tx: result.txHash,
+      payment_chain: chain,
+      payment_asset: offer.want_asset || 'USDT',
+      payment_amount: offer.want_amount,
+      payer: offer.taker,
     });
-    return;
+    const bcastResult = await sendCommandAsync(takerRelayNodeId, {
+      type: 'send_broadcast',
+      channel: 'kanet-exchange',
+      message: paidMsg,
+    });
+    console.log(`[exchange-autopay] Broadcast kanet_exchange_paid_v1 TX: ${bcastResult?.txId || '?'}`);
+  } catch (err) {
+    console.error(`[exchange-autopay] Broadcast failed: ${err.message}`);
   }
 
-  // Broadcast succeeded — TX is on chain. NOW advance local state.
   recordChainEvent({
     txid: result.txHash,
     eventType: 'exchange_paid',
     fromAddress: offer.taker,
     toAddress: offer.maker,
-    payload: JSON.stringify({ offer_id: offer.id, chain, amount, payment_tx: result.txHash, broadcast_tx: paidTxId }),
+    payload: JSON.stringify({ offer_id: offer.id, chain, amount, payment_tx: result.txHash }),
   });
 
+  // Directly trigger verification (don't wait for Scout to scan paid_v1 broadcast)
   processPaymentSubmit({ offer_id: offer.id, payment_tx: result.txHash, payment_chain: chain });
   console.log(`[exchange-autopay] verification triggered for offer ${offer.id.slice(0,8)}`);
-}
-
-/**
- * Auto-send KAS for kaspa_tx offers where taker is local Agent.
- * Mirror of _autoPayExchange but for KAS instead of USDT.
- * Sends KAS via Relay IPC transfer, then submits TX hash for verification.
- */
-async function _autoSendKas(offer, takerRelayNodeId) {
-  const wantAsset = offer.want_asset?.toUpperCase();
-  if (wantAsset !== 'KAS') {
-    console.log(`[exchange-autosend] Offer ${offer.id.slice(0,8)} wants ${offer.want_asset}, not KAS, skip`);
-    return;
-  }
-
-  const amount = parseFloat(offer.want_amount);
-  if (!amount || amount <= 0) {
-    console.log(`[exchange-autosend] Invalid KAS amount ${offer.want_amount}, skip`);
-    return;
-  }
-
-  // Recipient = maker's expected address from verification_meta
-  const meta = JSON.parse(offer.verification_meta || '{}');
-  const recipientAddress = meta.expected_address || offer.maker;
-  if (!recipientAddress) {
-    console.log(`[exchange-autosend] No recipient address for offer ${offer.id.slice(0,8)}, skip`);
-    return;
-  }
-
-  console.log(`[exchange-autosend] Sending ${amount} KAS → ${recipientAddress.slice(-12)} for offer ${offer.id.slice(0,8)}`);
-
-  try {
-    const { sendCommandAsync } = await import('./relay-manager.js');
-    const sendResult = await sendCommandAsync(takerRelayNodeId, {
-      type: 'transfer',
-      target: recipientAddress,
-      amount: String(amount),
-    });
-
-    const txId = sendResult?.txId;
-    if (!txId) {
-      console.error(`[exchange-autosend] KAS send returned no txId`);
-      recordChainEvent({
-        eventType: 'exchange_kas_send_failed',
-        fromAddress: offer.taker,
-        payload: JSON.stringify({ offer_id: offer.id, error: 'no txId returned' }),
-      });
-      return;
-    }
-
-    console.log(`[exchange-autosend] KAS sent TX: ${txId}`);
-
-    // Write payment_tx to offer
-    sqlite.prepare('UPDATE exchange_offers SET payment_tx = ? WHERE id = ?').run(txId, offer.id);
-
-    // Broadcast kanet_exchange_paid_v1 (KAS payment)
-    try {
-      const paidMsg = JSON.stringify({
-        t: 'kanet_exchange_paid_v1',
-        offer_id: offer.id,
-        payment_tx: txId,
-        payment_chain: 'kaspa',
-        payment_asset: 'KAS',
-        payment_amount: offer.want_amount,
-        payer: offer.taker,
-      });
-      await sendCommandAsync(takerRelayNodeId, {
-        type: 'send_broadcast',
-        channel: 'kanet-exchange',
-        message: paidMsg,
-      });
-      console.log(`[exchange-autosend] Broadcast kanet_exchange_paid_v1 for KAS payment`);
-    } catch (err) {
-      console.error(`[exchange-autosend] Broadcast failed: ${err.message}`);
-    }
-
-    recordChainEvent({
-      txid: txId,
-      eventType: 'exchange_kas_sent',
-      fromAddress: offer.taker,
-      toAddress: offer.maker,
-      payload: JSON.stringify({ offer_id: offer.id, amount, payment_tx: txId }),
-    });
-
-    // Trigger verification with the KAS TX hash
-    processPaymentSubmit({ offer_id: offer.id, payment_tx: txId, payment_chain: 'kaspa' });
-    console.log(`[exchange-autosend] verification triggered for offer ${offer.id.slice(0,8)}`);
-
-  } catch (err) {
-    console.error(`[exchange-autosend] Failed: ${err.message}`);
-    recordChainEvent({
-      eventType: 'exchange_kas_send_failed',
-      fromAddress: offer.taker,
-      payload: JSON.stringify({ offer_id: offer.id, error: err.message }),
-    });
-  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────
