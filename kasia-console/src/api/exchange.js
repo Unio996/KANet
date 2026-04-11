@@ -310,7 +310,7 @@ export async function registerExchangeRoutes(fastify) {
       } catch (err) {
         console.error(`[exchange] Accept broadcast attempt ${attempt}/5: ${err.message}`);
       }
-      if (attempt < 5) await new Promise(r => setTimeout(r, 2000 * attempt));
+      if (attempt < 5) await new Promise(r => setTimeout(r, 200 * attempt));
     }
     if (!acceptTx) {
       console.error(`[exchange] Accept broadcast failed after 5 attempts for offer ${offer_id.slice(0,8)}`);
@@ -369,7 +369,7 @@ export async function registerExchangeRoutes(fastify) {
       } catch (err) {
         console.error(`[exchange] Cancel broadcast attempt ${ca}/3: ${err.message}`);
       }
-      if (ca < 3) await new Promise(r => setTimeout(r, 2000));
+      if (ca < 3) await new Promise(r => setTimeout(r, 200));
     }
 
     return reply.send({ ok: true, offer_id, cancel_tx: cancelTx });

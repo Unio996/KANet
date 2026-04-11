@@ -866,7 +866,7 @@ async function _autoPayExchange(offer, takerRelayNodeId) {
 
   let paidTxId = null;
   const MAX_BCAST_RETRIES = 5;
-  const BCAST_RETRY_MS = 1000; // Kaspa 1s blocks — 1s between retries is sufficient
+  const BCAST_RETRY_MS = 200; // Kaspa 10 BPS (0.1s blocks) — 200ms between retries is generous
   for (let attempt = 1; attempt <= MAX_BCAST_RETRIES; attempt++) {
     try {
       const bcastResult = await sendCommandAsync(takerRelayNodeId, {

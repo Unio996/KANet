@@ -363,7 +363,7 @@ export async function checkMatchedTimeout() {
             const tr = await sendCommandAsync(relay.id, { type: 'send_broadcast', channel: 'kanet-exchange', message: timeoutMsg });
             if (tr?.txId) break;
           } catch (te) {
-            if (ta < 3) await new Promise(r => setTimeout(r, 2000));
+            if (ta < 3) await new Promise(r => setTimeout(r, 200));
           }
         }
       }
@@ -494,7 +494,7 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
               } catch (be) {
                 console.error(`[exchange] delivered broadcast attempt ${ba}/5: ${be.message}`);
               }
-              if (ba < 5) await new Promise(r => setTimeout(r, 2000 * ba));
+              if (ba < 5) await new Promise(r => setTimeout(r, 200 * ba));
             }
 
             if (!deliveredBcastTxId) {
