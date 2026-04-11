@@ -234,66 +234,62 @@ async function _verifyTron({ txHash, expectedAmount, expectedTo, required }) {
 // ── Kaspa ────────────────────────────────────────────────────
 
 async function _verifyKaspa({ txHash, expectedAmount, expectedTo, required }) {
-  // Kaspa TX verification via public REST API
-  // Kaspa is 10 BPS — once a TX is in a block, it's effectively final within seconds
+  // Kaspa TX verification via system's own RPC node (NOT external API)
+  // Uses getWorkingRpc() to get current connected node from DB/health check
+  // Kaspa 10 BPS — TX in block = effectively final
   try {
-    const res = await fetch(`https://api.kaspa.org/transactions/${txHash}`);
-    if (!res.ok) {
-      return { confirmed: false, confirmations: 0, required: 1, actualAmount: 0, recipient: '', sender: '', error: `TX not found (HTTP ${res.status})` };
-    }
-    const tx = await res.json();
-
-    if (!tx || !tx.transaction_id) {
-      return { confirmed: false, confirmations: 0, required: 1, actualAmount: 0, recipient: '', sender: '', error: 'TX not found or still pending' };
+    const { getWorkingRpc } = await import('./rpc-health.js');
+    const { url: rpcUrl } = await getWorkingRpc();
+    if (!rpcUrl) {
+      return { confirmed: false, confirmations: 0, required: 1, actualAmount: 0, recipient: '', sender: '', error: 'No RPC node available' };
     }
 
-    // TX exists in a block = confirmed (Kaspa has no reorgs in practice at 10 BPS)
-    const isAccepted = tx.is_accepted !== false; // api.kaspa.org returns is_accepted
-    if (!isAccepted) {
-      return { confirmed: false, confirmations: 0, required: 1, actualAmount: 0, recipient: '', sender: '', error: 'TX not yet accepted' };
-    }
+    const kaspa = await import('kaspa-wasm');
+    const { RpcClient, Encoding } = kaspa;
+    const networkId = process.env.KASPA_NETWORK || 'mainnet';
+    const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId });
+    await Promise.race([
+      rpc.connect({}),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 5000)),
+    ]);
 
-    // Parse outputs to find recipient and amount
-    const outputs = tx.outputs || [];
-    let actualAmount = 0;
-    let recipient = '';
-    let sender = '';
+    // Query UTXO of recipient to verify they received the amount
+    // This is more reliable than querying TX directly — it checks the RESULT not the intent
+    if (expectedTo) {
+      const { Address } = kaspa;
+      const { entries } = await Promise.race([
+        rpc.getUtxosByAddresses([new Address(expectedTo)]),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('UTXO query timeout')), 5000)),
+      ]);
 
-    // Sender = first input address
-    if (tx.inputs?.length > 0 && tx.inputs[0].previous_outpoint_address) {
-      sender = tx.inputs[0].previous_outpoint_address;
-    }
-
-    // Find the output matching expectedTo (if provided), or the largest non-change output
-    for (const out of outputs) {
-      const addr = out.script_public_key_address || '';
-      const sompi = parseInt(out.amount || '0', 10);
-      const kas = sompi / 1e8; // 1 KAS = 1e8 sompi
-
-      if (expectedTo && addr === expectedTo) {
-        actualAmount = kas;
-        recipient = addr;
-        break;
+      // Check if any UTXO came from our TX
+      let actualAmount = 0;
+      for (const entry of (entries || [])) {
+        const outTxId = entry?.outpoint?.transactionId || entry?.entry?.outpoint?.transactionId;
+        if (outTxId === txHash) {
+          const sompi = Number(entry?.utxoEntry?.amount || entry?.entry?.utxoEntry?.amount || 0);
+          actualAmount += sompi / 1e8;
+        }
       }
-      // If no expectedTo, take the largest output that isn't sender (change)
-      if (!expectedTo && addr !== sender && kas > actualAmount) {
-        actualAmount = kas;
-        recipient = addr;
+
+      await rpc.disconnect();
+
+      if (actualAmount > 0) {
+        const amountOk = !expectedAmount || actualAmount >= expectedAmount * 0.995;
+        if (!amountOk) {
+          return { confirmed: false, confirmations: 1, required: 1, actualAmount, recipient: expectedTo, sender: '', underpayment: true, error: `Underpayment: expected ${expectedAmount} KAS, got ${actualAmount.toFixed(2)}` };
+        }
+        return { confirmed: true, confirmations: 1, required: 1, actualAmount, recipient: expectedTo, sender: '' };
       }
+
+      // TX not found in UTXOs — may have been spent already or TX not yet confirmed
+      return { confirmed: false, confirmations: 0, required: 1, actualAmount: 0, recipient: expectedTo, sender: '', error: 'TX output not found in recipient UTXOs' };
     }
 
-    if (actualAmount === 0) {
-      return { confirmed: false, confirmations: 1, required: 1, actualAmount: 0, recipient: '', sender, error: 'No matching KAS transfer found in TX outputs' };
-    }
-
-    // Amount check (0.5% tolerance)
-    const amountOk = !expectedAmount || actualAmount >= expectedAmount * 0.995;
-    if (!amountOk) {
-      return { confirmed: false, confirmations: 1, required: 1, actualAmount, recipient, sender, underpayment: true, error: `Underpayment: expected ${expectedAmount} KAS, got ${actualAmount.toFixed(2)}` };
-    }
-
-    return { confirmed: true, confirmations: 1, required: 1, actualAmount, recipient, sender };
+    // No expectedTo — cannot verify without knowing recipient
+    await rpc.disconnect();
+    return { confirmed: false, confirmations: 0, required: 1, actualAmount: 0, recipient: '', sender: '', error: 'expectedTo required for Kaspa verification' };
   } catch (err) {
-    return { confirmed: false, confirmations: 0, required: 1, actualAmount: 0, recipient: '', sender: '', error: `Kaspa API error: ${err.message}` };
+    return { confirmed: false, confirmations: 0, required: 1, actualAmount: 0, recipient: '', sender: '', error: `Kaspa RPC error: ${err.message}` };
   }
 }
