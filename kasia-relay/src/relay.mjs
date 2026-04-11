@@ -63,6 +63,11 @@ function _wordSimilarity(a, b) {
 function shouldBlockOutbound(target, message) {
   if (!message || typeof message !== 'string') return null;
 
+  // Protocol messages on kanet-exchange channel are NEVER deduplicated.
+  // These are trade protocol state transitions that MUST reach the chain.
+  // Retries have identical content by design — dedup would block them.
+  if (target === 'bcast:kanet-exchange' && message.startsWith('{"t":"kanet_exchange_')) return null;
+
   // 防线 1: 幻觉模式匹配
   const hallMatch = HALLUCINATION_PATTERNS.find(p => p.test(message));
   if (hallMatch) {
