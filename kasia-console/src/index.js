@@ -85,7 +85,7 @@ await fastify.register(import('@fastify/view'), {
 
 // Error handler
 fastify.setErrorHandler((error, request, reply) => {
-  console.error('[ERROR]', error.message);
+  console.error('[ERROR]', error.message, '| URL:', request.method, request.url, '| STACK:', error.stack?.split('\n').slice(0,3).join(' → '));
   reply.code(error.statusCode || 500).send({ error: error.message });
 });
 

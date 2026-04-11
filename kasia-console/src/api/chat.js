@@ -97,7 +97,8 @@ export async function registerChatRoutes(fastify) {
       const isOwnAgentSend = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(senderAddress);
       // Owner 消息 = sender 是本地 relay 地址 → 只让一个 Agent 回复（不抢答）
       const isOwnerMessage = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(senderAddress);
-      if (channelName !== 'otc-market' && !isOwnAgentSend) {
+      const isProtocolMessage = content.startsWith('{"t":"kanet_');
+      if (channelName !== 'otc-market' && !isOwnAgentSend && !isProtocolMessage) {
         const responders = sqlite.prepare(`
           SELECT r.id as relay_id, r.address, r.network, a.http_port
           FROM relay_nodes r
@@ -221,7 +222,8 @@ export async function registerChatRoutes(fastify) {
     // ── Auto-reply: let agents respond to EXTERNAL messages only ──
     // Skip: otc-market channel, AND skip if sender is one of our own agents (prevents storm)
     const isOwnAgent = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(senderAddress);
-    if (channelName !== 'otc-market' && !isOwnAgent) {
+    const isProtocolMsg = content.startsWith('{"t":"kanet_');
+    if (channelName !== 'otc-market' && !isOwnAgent && !isProtocolMsg) {
     const responders = sqlite.prepare(`
       SELECT r.id as relay_id, r.address, r.network, a.http_port
       FROM relay_nodes r
