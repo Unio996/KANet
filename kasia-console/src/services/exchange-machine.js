@@ -13,6 +13,8 @@
 
 import { sqlite } from '../db/client.js';
 import { getVerifier } from './exchange-verifiers.js';
+import { createExecution, completeExecution } from './execution-state.js';
+import { recordChainEvent } from './chain-event.js';
 import { executeHedge } from './trade-protocol-filter.js';
 import { releaseFunds } from './fund-lock.js';
 import crypto from 'crypto';
@@ -92,6 +94,42 @@ export function transition(offerId, newStatus, extra = {}) {
   sqlite.prepare(`UPDATE exchange_offers SET ${updates.join(', ')} WHERE id = ?`).run(...vals);
 
   console.log(`[exchange-machine] ${offerId.slice(0, 8)}: ${offer.protocol_status} → ${newStatus}`);
+
+  // ── execution_states: 每次状态变更都记录审计追踪 ──
+  try {
+    const agentAddr = offer.maker || offer.taker || 'system';
+    const execType = `exchange_${newStatus}`;
+    const exec = createExecution({
+      orderId: offerId,
+      type: execType,
+      source: 'exchange-machine',
+      agentAddress: agentAddr,
+      displaySummary: `${offer.give_amount} ${offer.give_asset} → ${offer.want_amount} ${offer.want_asset}: ${offer.protocol_status} → ${newStatus}`,
+    });
+    if (exec.isNew && TERMINAL.has(newStatus)) {
+      completeExecution(exec.id, { summary: `Exchange offer ${newStatus}` });
+    }
+  } catch (execErr) {
+    console.warn(`[exchange-machine] execution_state recording failed: ${execErr.message}`);
+  }
+
+  // ── chain_events: 每次状态变更都留链上审计痕迹 ──
+  try {
+    recordChainEvent({
+      txid: extra.txHash || extra.taker_tx_id || null,
+      eventType: `exchange_${newStatus}`,
+      fromAddress: offer.maker,
+      toAddress: offer.taker,
+      payload: JSON.stringify({
+        offer_id: offerId,
+        give_asset: offer.give_asset, give_amount: offer.give_amount,
+        want_asset: offer.want_asset, want_amount: offer.want_amount,
+        from_status: offer.protocol_status, to_status: newStatus,
+      }),
+    });
+  } catch (evtErr) {
+    console.warn(`[exchange-machine] chain_event recording failed: ${evtErr.message}`);
+  }
 
   // 交割完成 → 升级 maker 和 taker 的 classification 到 verified_agent（只升不降）
   if (newStatus === 'completed' && offer.maker && offer.taker) {
