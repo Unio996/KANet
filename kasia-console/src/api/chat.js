@@ -224,7 +224,7 @@ export async function registerChatRoutes(fastify) {
     // Skip: otc-market channel, AND skip if sender is one of our own agents (prevents storm)
     const isOwnAgent = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(senderAddress);
     const isProtocolMsg = content.startsWith('{"t":"kanet_');
-    const isDevChannel = channelName === 'dev-coord';
+    const isDevChannel = channelName === 'dev-coord' || channelName === 'kanet-dev';
     const isDevMsg = content.startsWith('[DEV-COORD]');
     if (channelName !== 'otc-market' && !isOwnAgent && !isProtocolMsg && !isDevChannel && !isDevMsg) {
     const responders = sqlite.prepare(`
