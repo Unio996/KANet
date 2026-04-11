@@ -490,8 +490,9 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
       // BUY path (give_asset=USDT, want_asset=KAS, kaspa_tx): KAS already received.
       // No delivery needed — go straight to completed.
       if (offer.give_asset !== 'KAS' && payment_chain === 'kaspa') {
-        transition(offer_id, 'delivering', {}); // brief pass-through
-        transition(offer_id, 'completed', {});
+        sqlite.prepare('UPDATE exchange_offers SET delivery_tx = ? WHERE id = ?').run(payment_tx, offer_id);
+        transition(offer_id, 'delivering', { txHash: payment_tx }); // brief pass-through
+        transition(offer_id, 'completed', { txHash: payment_tx });
         try { const { spendFunds } = await import('./fund-lock.js'); spendFunds(offer_id); } catch {}
         sqlite.prepare(`
           INSERT INTO chain_events (id, event_type, from_address, to_address, tx_hash, payload, observed_at)
@@ -580,7 +581,8 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
                 JSON.stringify({ offer_id: deliveringOffer.id, amount: deliveringOffer.give_amount, broadcast_failed: true }));
             } else {
               // Both KAS delivery AND broadcast succeeded — NOW mark completed
-              transition(offer_id, 'completed', {});
+              sqlite.prepare('UPDATE exchange_offers SET delivery_tx = ? WHERE id = ?').run(deliveryTxId, offer_id);
+              transition(offer_id, 'completed', { txHash: deliveryTxId });
               sqlite.prepare(`
                 INSERT INTO chain_events (id, event_type, from_address, to_address, tx_hash, payload, observed_at)
                 VALUES (?, 'kas_delivery', ?, ?, ?, ?, datetime('now'))
@@ -615,7 +617,8 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
       // BUY path (kaspa_tx): taker already sent KAS, maker received it.
       // No separate delivery needed — go straight to completed.
       if (payment_chain === 'kaspa' && deliveringOffer?.give_asset !== 'KAS') {
-        const completedOffer = transition(offer_id, 'completed', {});
+        sqlite.prepare('UPDATE exchange_offers SET delivery_tx = ? WHERE id = ?').run(payment_tx, offer_id);
+        const completedOffer = transition(offer_id, 'completed', { txHash: payment_tx });
         sqlite.prepare(`
           INSERT INTO chain_events (id, event_type, from_address, to_address, payload, observed_at)
           VALUES (?, 'exchange_completed', ?, ?, ?, datetime('now'))

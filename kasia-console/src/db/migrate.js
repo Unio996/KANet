@@ -1796,5 +1796,14 @@ export function runMigrations() {
     }
   }
 
+  // v57: exchange_offers 加 delivery_tx — 每笔交易的所有 TX 都可从 offer 记录追溯
+  {
+    const cols = sqlite.prepare('PRAGMA table_info(exchange_offers)').all().map(c => c.name);
+    if (!cols.includes('delivery_tx')) {
+      sqlite.exec('ALTER TABLE exchange_offers ADD COLUMN delivery_tx TEXT');
+      console.log('[migrate] v57: exchange_offers.delivery_tx added');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
