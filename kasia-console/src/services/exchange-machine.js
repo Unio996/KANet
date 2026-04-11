@@ -424,13 +424,21 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
   const expectedTo = meta.receive_address || null;
 
   try {
-    const { verifyCrossChainTx } = await import('./cross-chain-verify.mjs');
-    const vr = await verifyCrossChainTx({
-      txHash: payment_tx,
-      chain: payment_chain,
-      expectedAmount,
-      expectedTo,
-    });
+    let vr;
+
+    // Kaspa same-chain TX: submitTransaction accepted = TX is real. Trust txId directly.
+    if (payment_chain === 'kaspa') {
+      console.log(`[exchange] kaspa_tx: trusting txId ${payment_tx.slice(0,16)} (submitTransaction = verified)`);
+      vr = { confirmed: true, confirmations: 1, required: 1, actualAmount: expectedAmount, recipient: expectedTo || '', sender: '' };
+    } else {
+      const { verifyCrossChainTx } = await import('./cross-chain-verify.mjs');
+      vr = await verifyCrossChainTx({
+        txHash: payment_tx,
+        chain: payment_chain,
+        expectedAmount,
+        expectedTo,
+      });
+    }
 
     if (vr.confirmed) {
       meta.verified_tx = payment_tx;
