@@ -237,7 +237,7 @@ function marketApp() {
               const txShort = ex.output_txid.slice(0, 16) + '...' + ex.output_txid.slice(-6);
               const isKas = !ex.output_txid.startsWith('0x');
               const explorers = { bnb: 'https://bscscan.com/tx/', eth: 'https://etherscan.io/tx/', sol: 'https://solscan.io/tx/', tron: 'https://tronscan.org/#/transaction/' };
-              const url = isKas ? 'https://explorer.kaspa.org/txs/' + ex.output_txid : (explorers[this.deal?.chain] || 'https://bscscan.com/tx/') + ex.output_txid;
+              const url = KANet.explorerTxUrl(isKas ? 'kaspa' : (this.deal?.chain || 'bnb'), ex.output_txid);
               flow.push({ t: 'sys', icon: 'tx', msg: txShort, time, style: 'success', txUrl: url, proof: { 'TX': ex.output_txid, '来源': ex.source, '规则': ex.type, '时间': time }, _o: false });
             }
           } else if (ex.status === 'executing') {
