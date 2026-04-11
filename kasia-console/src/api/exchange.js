@@ -610,6 +610,35 @@ export async function registerExchangeRoutes(fastify) {
     }
   });
 
+  // ── GET /api/exchange/reputation/batch — 批量信誉查询 ──────
+  fastify.get('/api/exchange/reputation/batch', async (request, reply) => {
+    const { addresses, my_address } = request.query;
+    if (!addresses) return reply.code(400).send({ error: 'addresses required (comma-separated)' });
+
+    try {
+      const { assessReputation } = await import('../services/reputation.js');
+      const addrList = [...new Set(addresses.split(',').map(a => a.trim()).filter(Boolean))].slice(0, 50);
+      const result = {};
+
+      for (const addr of addrList) {
+        const rep = assessReputation(my_address || null, addr);
+        let stars = 0;
+        if (rep.completed >= 50) stars = 5;
+        else if (rep.completed >= 21) stars = 4;
+        else if (rep.completed >= 6) stars = 3;
+        else if (rep.completed >= 1) stars = 2;
+        if (rep.totalTrades > 0 && rep.disputed / rep.totalTrades > 0.1) {
+          stars = Math.max(0, stars - 1);
+        }
+        result[addr] = { stars, risk: rep.risk, completed: rep.completed, disputed: rep.disputed, totalTrades: rep.totalTrades, summary: rep.summary };
+      }
+
+      return result;
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
+
   // ── GET /api/exchange/overview — 市场概览数据 ──────────────
   fastify.get('/api/exchange/overview', async (request, reply) => {
     try {
@@ -657,6 +686,22 @@ export async function registerExchangeRoutes(fastify) {
         ORDER BY updated_at DESC LIMIT 1
       `).get();
 
+      // Avg settlement time (matched_at → completed_at), only if >= 5 completed
+      const totalCompleted = sqlite.prepare(
+        "SELECT COUNT(*) as cnt FROM exchange_offers WHERE protocol_status = 'completed' AND matched_at IS NOT NULL AND completed_at IS NOT NULL"
+      ).get();
+
+      let avgSettlementSeconds = null;
+      if (totalCompleted?.cnt >= 5) {
+        const avgResult = sqlite.prepare(`
+          SELECT AVG((julianday(completed_at) - julianday(matched_at)) * 86400) as avg_sec
+          FROM exchange_offers
+          WHERE protocol_status = 'completed'
+            AND matched_at IS NOT NULL AND completed_at IS NOT NULL
+        `).get();
+        avgSettlementSeconds = avgResult?.avg_sec ? Math.round(avgResult.avg_sec) : null;
+      }
+
       // Current KAS market price (from market-data cache)
       let marketPrice = null;
       try {
@@ -670,6 +715,8 @@ export async function registerExchangeRoutes(fastify) {
         best_buy_price: bestBuy?.unit_price || null,
         trades_24h: recent24h?.cnt || 0,
         volume_24h_kas: Math.round(recent24h?.volume_kas || 0),
+        total_completed: totalCompleted?.cnt || 0,
+        avg_settlement_seconds: avgSettlementSeconds,
         last_trade_at: lastTrade?.updated_at || null,
         kas_market_price: marketPrice,
       };
