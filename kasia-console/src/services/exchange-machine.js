@@ -449,10 +449,36 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
         'UPDATE exchange_offers SET verification_meta = ?, updated_at = ? WHERE id = ?'
       ).run(JSON.stringify(meta), new Date().toISOString(), offer_id);
 
+      // BUY path (give_asset=USDT, want_asset=KAS, kaspa_tx): KAS already received.
+      // No delivery needed — go straight to completed.
+      if (offer.give_asset !== 'KAS' && payment_chain === 'kaspa') {
+        transition(offer_id, 'delivering', {}); // brief pass-through
+        transition(offer_id, 'completed', {});
+        try { const { spendFunds } = await import('./fund-lock.js'); spendFunds(offer_id); } catch {}
+        sqlite.prepare(`
+          INSERT INTO chain_events (id, event_type, from_address, to_address, tx_hash, payload, observed_at)
+          VALUES (?, 'exchange_completed', ?, ?, ?, ?, datetime('now'))
+        `).run(crypto.randomUUID(), offer.maker, offer.taker, payment_tx, JSON.stringify({
+          offer_id, give_asset: offer.give_asset, give_amount: offer.give_amount,
+          want_asset: offer.want_asset, want_amount: offer.want_amount,
+          payment_tx, verification: 'kaspa_tx',
+        }));
+        console.log(`[exchange] offer ${offer_id.slice(0,8)} BUY kaspa_tx verified → completed (KAS received, no delivery needed)`);
+        // Trigger hedge
+        const finalOffer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer_id);
+        if (finalOffer?.protocol_status === 'completed' && finalOffer.maker) {
+          const localAgent = sqlite.prepare('SELECT id, name FROM relay_nodes WHERE address = ?').get(finalOffer.maker);
+          if (localAgent) {
+            executeHedge(finalOffer).catch(err => console.error(`[exchange-hedge] error: ${err.message}`));
+          }
+        }
+        return;
+      }
+
       const deliveringOffer = transition(offer_id, 'delivering', {});
       console.log(`[exchange] offer ${offer_id.slice(0,8)} payment verified → delivering (${vr.actualAmount} USDT, ${vr.confirmations}/${vr.required} conf)`);
 
-      // Auto-deliver asset to taker
+      // Auto-deliver asset to taker (SELL path: give_asset=KAS)
       if (deliveringOffer?.give_asset === 'KAS' && deliveringOffer.taker) {
         const deliveryAgent = sqlite.prepare('SELECT id, name FROM relay_nodes WHERE address = ?').get(deliveringOffer.maker);
         if (deliveryAgent) {
