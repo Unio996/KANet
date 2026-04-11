@@ -472,8 +472,6 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
           }
 
           if (deliveryTxId) {
-            // Wait for delivery TX UTXO to settle before broadcasting delivered_v1
-            await new Promise(r => setTimeout(r, 3000));
             // === NO TX NO STATE CHANGE ===
             // KAS delivery TX returned from Relay. Now broadcast delivered_v1.
             // MUST succeed on chain before marking completed.

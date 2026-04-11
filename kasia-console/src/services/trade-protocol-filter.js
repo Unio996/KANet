@@ -461,15 +461,13 @@ async function handleExchangeAccept(msg) {
   // Hedge 必须等 completed（交割确认后）才触发，否则 Taker 不履约 = 裸空仓
 
   // === Auto-pay: if taker is a local Agent, automatically pay USDT (cross_chain_tx) ===
-  // MUST wait for accept TX UTXO to settle before sending paid broadcast.
-  // Kaspa = 1s blocks. 3s delay ensures accept TX is confirmed and fresh UTXO available.
   if (result.taker && result.taker_chain && result.verification === 'cross_chain_tx') {
     const localRelay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(result.taker);
     if (localRelay) {
-      console.log(`[exchange] local taker detected, triggering auto-pay in 3s (UTXO settle) for offer ${result.id.slice(0,8)}`);
-      setTimeout(() => _autoPayExchange(result, localRelay.id).catch(e =>
+      console.log(`[exchange] local taker detected, triggering auto-pay for offer ${result.id.slice(0,8)}`);
+      setImmediate(() => _autoPayExchange(result, localRelay.id).catch(e =>
         console.error(`[exchange] auto-pay error: ${e.message}`)
-      ), 3000);
+      ));
     }
   }
 
