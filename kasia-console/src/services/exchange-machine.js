@@ -25,7 +25,7 @@ const VALID_TRANSITIONS = {
   open:                     ['matched', 'cancelled', 'expired'],
   matched:                  ['verifying', 'awaiting_manual_confirm', 'awaiting_oracle'],
   verifying:                ['delivering', 'disputed', 'timed_out'],
-  delivering:               ['completed', 'disputed'],
+  delivering:               ['completed', 'verified', 'disputed'],  // verified = revert on delivery failure
   awaiting_manual_confirm:  ['completed', 'disputed', 'timed_out'],
   awaiting_oracle:          ['completed', 'failed', 'timed_out'],
 };
@@ -601,15 +601,15 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
               console.log(`[exchange] offer ${offer_id.slice(0,8)} delivering → completed (delivery TX: ${deliveryTxId.slice(0,12)}, broadcast: ${deliveredBcastTxId.slice(0,12)})`);
             }
           } else {
-            // 3 attempts failed → delivering → disputed
-            transition(offer_id, 'disputed', {});
+            // 3 attempts failed → revert to verified (retryable, not dispute)
+            transition(offer_id, 'verified', {});
             sqlite.prepare(`
               INSERT INTO chain_events (id, event_type, from_address, payload, observed_at)
-              VALUES (?, 'exchange_disputed', ?, ?, datetime('now'))
+              VALUES (?, 'exchange_delivery_reverted', ?, ?, datetime('now'))
             `).run(crypto.randomUUID(), deliveringOffer.maker, JSON.stringify({
-              offer_id: deliveringOffer.id, reason: 'delivery_failed_3_attempts',
+              offer_id: deliveringOffer.id, reason: 'delivery_failed_3_attempts_reverted',
             }));
-            console.error(`[exchange] offer ${offer_id.slice(0,8)} delivering → disputed (3 delivery failures)`);
+            console.warn(`[exchange] offer ${offer_id.slice(0,8)} delivering → verified (3 delivery failures, reverted for retry)`);
           }
         }
       }
