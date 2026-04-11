@@ -685,20 +685,28 @@ async function handleExchangePaid(msg) {
   // Gate 1: payment_tx already set → duplicate, skip
   if (offer.payment_tx) { console.log(`[exchange] paid: offer ${msg.offer_id.slice(0,8)} already has payment_tx, skip`); return; }
 
-  // Gate 2: must be in matched (transition to verifying will fail otherwise)
-  if (offer.protocol_status !== 'matched') {
-    console.log(`[exchange] paid: offer ${msg.offer_id.slice(0,8)} status=${offer.protocol_status}, expected matched`);
+  // Gate 2: must be in matched or verifying (cross_chain_tx routes to verifying on accept)
+  if (!['matched', 'verifying'].includes(offer.protocol_status)) {
+    console.log(`[exchange] paid: offer ${msg.offer_id.slice(0,8)} status=${offer.protocol_status}, expected matched/verifying`);
     return;
   }
 
   // Write payment_tx
   sqlite.prepare('UPDATE exchange_offers SET payment_tx = ? WHERE id = ?').run(msg.payment_tx, msg.offer_id);
+  if (msg.payment_chain && !offer.taker_chain) {
+    sqlite.prepare('UPDATE exchange_offers SET taker_chain = ? WHERE id = ?').run(msg.payment_chain, msg.offer_id);
+  }
 
-  // Transition matched → verifying (Gate 2: transition validates status)
-  const verifyingOffer = exchangeTransition(msg.offer_id, 'verifying', {});
-  if (!verifyingOffer || verifyingOffer.protocol_status !== 'verifying') {
-    console.log(`[exchange] paid: transition to verifying failed for ${msg.offer_id.slice(0,8)}`);
-    return;
+  // Transition to verifying if still matched; already verifying = skip transition
+  let verifyingOffer;
+  if (offer.protocol_status === 'matched') {
+    verifyingOffer = exchangeTransition(msg.offer_id, 'verifying', {});
+    if (!verifyingOffer || verifyingOffer.protocol_status !== 'verifying') {
+      console.log(`[exchange] paid: transition to verifying failed for ${msg.offer_id.slice(0,8)}`);
+      return;
+    }
+  } else {
+    verifyingOffer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(msg.offer_id);
   }
 
   recordChainEvent({
