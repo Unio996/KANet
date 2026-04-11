@@ -104,13 +104,15 @@
                 <span class="ml-auto text-[10px] text-ink-400 tabular-nums" x-text="KANet.countdown(o.expires_at)"></span>
               </div>
               <!-- Row 3: maker + reputation + role -->
-              <div class="flex items-center gap-2 mt-1">
+              <div class="flex items-center gap-2 mt-1 flex-wrap">
                 <span class="text-[10px] text-ink-400 font-mono" x-text="KANet.shortAddr(o.maker)"></span>
                 <template x-if="getReputation(o.maker)">
                   <span class="text-[10px] text-yellow-500" x-text="KANet.starRating(getReputation(o.maker).stars)"></span>
                 </template>
-                <template x-if="getReputation(o.maker)?.totalTrades > 0">
-                  <span class="text-[9px] text-ink-400" x-text="'(' + getReputation(o.maker).completed + '/' + getReputation(o.maker).totalTrades + ')'"></span>
+                <template x-if="getReputation(o.maker)">
+                  <span class="text-[9px] px-1.5 py-0.5 rounded-full font-medium"
+                    :class="KANet.riskBadge(getReputation(o.maker).risk).css"
+                    x-text="getReputation(o.maker).totalTrades === 0 ? 'New' : getReputation(o.maker).completed + ' trades'"></span>
                 </template>
                 <span x-show="isMaker(o)" class="text-[9px] px-1 py-0.5 bg-brand-50 text-brand-600 rounded font-medium">you</span>
               </div>
@@ -271,9 +273,15 @@
               <span class="font-medium tabular-nums" :class="priceColor(selectedOffer)"
                 x-text="'$' + priceComparison(selectedOffer).offerPrice.toFixed(5) + '/KAS (' + (priceComparison(selectedOffer).diffPct >= 0 ? '+' : '') + priceComparison(selectedOffer).diffPct + '% vs market)'"></span>
             </template>
-            <span>Maker: <span class="font-mono" x-text="KANet.shortAddr(selectedOffer?.maker || '')"></span>
+            <span class="flex items-center gap-1.5">
+              Maker: <span class="font-mono" x-text="KANet.shortAddr(selectedOffer?.maker || '')"></span>
               <template x-if="selectedOffer && getReputation(selectedOffer.maker)">
-                <span class="text-yellow-500 ml-1" x-text="KANet.starRating(getReputation(selectedOffer.maker).stars)"></span>
+                <span class="text-yellow-500" x-text="KANet.starRating(getReputation(selectedOffer.maker).stars)"></span>
+              </template>
+              <template x-if="selectedOffer && getReputation(selectedOffer.maker)">
+                <span class="px-1.5 py-0.5 rounded-full text-[10px] font-medium"
+                  :class="KANet.riskBadge(getReputation(selectedOffer.maker).risk).css"
+                  x-text="KANet.riskBadge(getReputation(selectedOffer.maker).risk).text"></span>
               </template>
             </span>
             <span x-show="selectedOffer?.taker">Taker: <span class="font-mono" x-text="KANet.shortAddr(selectedOffer?.taker || '')"></span></span>
