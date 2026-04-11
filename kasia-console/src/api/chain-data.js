@@ -481,8 +481,8 @@ export async function registerChainDataRoutes(fastify) {
 
       // Also check local DB for context
       const localEvent = sqlite.prepare(
-        'SELECT event_type, from_address, to_address, payload, observed_at FROM chain_events WHERE txid = ? OR tx_hash = ? LIMIT 1'
-      ).get(txHash, txHash);
+        'SELECT event_type, from_address, to_address, payload, observed_at FROM chain_events WHERE txid = ? LIMIT 1'
+      ).get(txHash);
 
       const localTx = sqlite.prepare(
         'SELECT txid, direction, amount, fee, local_address, status, created_at FROM tx_records WHERE txid = ? LIMIT 1'
