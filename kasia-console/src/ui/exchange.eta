@@ -372,22 +372,38 @@
           </div>
         </div>
 
-        <!-- On-chain proof -->
+        <!-- On-chain proof — every step has TX -->
         <div x-show="selectedOffer?.broadcast_tx_id && !selectedOffer?.broadcast_tx_id?.startsWith('pending_')"
           class="bg-white border border-warm-200 rounded-xl p-5 mb-4">
           <div class="text-[10px] font-semibold text-ink-400 uppercase tracking-wider mb-3">On-chain Proof</div>
-          <div class="space-y-1.5 text-[10px]">
-            <div x-show="selectedOffer?.broadcast_tx_id && !selectedOffer?.broadcast_tx_id?.startsWith('pending_')">
-              <a :href="'https://explorer.kaspa.org/txs/' + selectedOffer?.broadcast_tx_id" target="_blank" rel="noopener"
-                class="text-brand-500 hover:text-brand-700 font-mono">Publish TX <span x-text="selectedOffer?.broadcast_tx_id?.slice(0,12) + '...'"></span></a>
+          <div class="space-y-2 text-[10px]">
+            <!-- Publish TX (Kaspa) -->
+            <div x-show="selectedOffer?.broadcast_tx_id && !selectedOffer?.broadcast_tx_id?.startsWith('pending_')" class="flex items-center gap-2">
+              <span class="text-ink-400 w-16 flex-shrink-0">Publish</span>
+              <a :href="KANet.explorerTxUrl('kaspa', selectedOffer?.broadcast_tx_id)" target="_blank" rel="noopener"
+                class="text-brand-500 hover:text-brand-700 font-mono truncate" x-text="selectedOffer?.broadcast_tx_id"></a>
+              <button @click="KANet.copy(selectedOffer?.broadcast_tx_id)" class="text-ink-300 hover:text-brand-500 flex-shrink-0" title="Copy">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+              </button>
             </div>
-            <div x-show="selectedOffer?.taker_tx_id && !selectedOffer?.taker_tx_id?.startsWith('pending_')">
-              <a :href="'https://explorer.kaspa.org/txs/' + selectedOffer?.taker_tx_id" target="_blank" rel="noopener"
-                class="text-brand-500 hover:text-brand-700 font-mono">Accept TX <span x-text="selectedOffer?.taker_tx_id?.slice(0,12) + '...'"></span></a>
+            <!-- Accept TX (Kaspa) -->
+            <div x-show="selectedOffer?.taker_tx_id && !selectedOffer?.taker_tx_id?.startsWith('pending_')" class="flex items-center gap-2">
+              <span class="text-ink-400 w-16 flex-shrink-0">Accept</span>
+              <a :href="KANet.explorerTxUrl('kaspa', selectedOffer?.taker_tx_id)" target="_blank" rel="noopener"
+                class="text-brand-500 hover:text-brand-700 font-mono truncate" x-text="selectedOffer?.taker_tx_id"></a>
+              <button @click="KANet.copy(selectedOffer?.taker_tx_id)" class="text-ink-300 hover:text-brand-500 flex-shrink-0" title="Copy">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+              </button>
             </div>
-            <div x-show="getPaymentTx(selectedOffer || {})">
-              <a :href="getExplorerUrl(selectedOffer || {})" target="_blank" rel="noopener"
-                class="text-brand-500 hover:text-brand-700 font-mono">Payment TX <span x-text="(getPaymentTx(selectedOffer || {}) || '').slice(0,12) + '...'"></span></a>
+            <!-- Payment TX (cross-chain: BNB/ETH/SOL/TRON) -->
+            <div x-show="getPaymentTx(selectedOffer || {})" class="flex items-center gap-2">
+              <span class="text-ink-400 w-16 flex-shrink-0">Payment</span>
+              <a :href="KANet.explorerTxUrl(selectedOffer?.taker_chain || 'kaspa', getPaymentTx(selectedOffer || {}))" target="_blank" rel="noopener"
+                class="text-brand-500 hover:text-brand-700 font-mono truncate" x-text="getPaymentTx(selectedOffer || {})"></a>
+              <button @click="KANet.copy(getPaymentTx(selectedOffer || {}))" class="text-ink-300 hover:text-brand-500 flex-shrink-0" title="Copy">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+              </button>
+              <span class="text-ink-300 uppercase" x-text="selectedOffer?.taker_chain || ''"></span>
             </div>
           </div>
         </div>
@@ -911,9 +927,11 @@ function exchangeApp() {
     async loadChainBalance(chain) {
       if (!this.form.relayNodeId) return;
       try {
-        const res = await fetch(`/api/trade/wallet-balance?relayNodeId=${this.form.relayNodeId}&chain=${chain}`);
+        // Use wallets API which already has cached balances
+        const res = await fetch(`/api/relay/${this.form.relayNodeId}/wallets`);
         const data = await res.json();
-        const bal = parseFloat(data?.usdt_balance || data?.balance || 0);
+        const wallet = (data?.chains || []).find(w => w.chain === chain && w.isDefault);
+        const bal = parseFloat(wallet?.usdtBalance || 0);
         const needed = parseFloat(this.selectedOffer?.want_amount || 0);
         this.acceptBalance = bal;
         this.acceptBalanceOk = bal >= needed;
