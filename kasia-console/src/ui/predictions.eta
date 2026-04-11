@@ -142,23 +142,15 @@
                 <span class="text-[10px] text-ink-400" x-text="'Cost $' + (pos.totalCost || 0).toFixed(2)"></span>
               </div>
               <div class="flex items-center gap-2 mt-1.5">
-                <template x-if="!pos._redeemed">
-                  <button @click="redeemPosition(pos)" :disabled="pos._redeeming"
-                    class="px-3 py-1 bg-green-500 text-white rounded text-[10px] font-medium hover:bg-green-600 disabled:opacity-50 transition-colors">
-                    <span x-show="!pos._redeeming">Redeem</span>
-                    <span x-show="pos._redeeming">Redeeming...</span>
-                  </button>
-                </template>
-                <template x-if="pos._redeemed">
-                  <span class="text-[10px] text-green-600 font-medium">Redeemed</span>
-                </template>
-                <template x-if="pos._redeemTx">
-                  <a :href="'https://polygonscan.com/tx/' + pos._redeemTx" target="_blank" rel="noopener"
-                    class="text-[10px] text-brand-500 hover:text-brand-700 font-mono" x-text="'TX ' + pos._redeemTx.slice(0,12) + '...'"></a>
-                </template>
-                <template x-if="pos._redeemError">
-                  <span class="text-[10px] text-red-500" x-text="pos._redeemError"></span>
-                </template>
+                <button x-show="!pos._redeemed" @click="redeemPosition(pos)" :disabled="pos._redeeming"
+                  class="px-3 py-1 bg-green-500 text-white rounded text-[10px] font-medium hover:bg-green-600 disabled:opacity-50 transition-colors">
+                  <span x-show="!pos._redeeming">Redeem</span>
+                  <span x-show="pos._redeeming">Redeeming...</span>
+                </button>
+                <span x-show="pos._redeemed" class="text-[10px] text-green-600 font-medium">Redeemed</span>
+                <a x-show="pos._redeemTx" :href="'https://polygonscan.com/tx/' + pos._redeemTx" target="_blank" rel="noopener"
+                  class="text-[10px] text-brand-500 hover:text-brand-700 font-mono" x-text="pos._redeemTx ? 'TX ' + pos._redeemTx.slice(0,12) + '...' : ''"></a>
+                <span x-show="pos._redeemError" class="text-[10px] text-red-500" x-text="pos._redeemError"></span>
               </div>
             </div>
           </template>
