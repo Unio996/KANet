@@ -331,11 +331,32 @@ if (process.send) {
             break;
           }
           // Broadcast uses bcast prefix (plaintext, discoverable by any Scout)
+          // Auto-truncate retry: if payload exceeds storage mass, shrink and retry (same as DM path)
           const { encodeBcastPayload } = await import('./lib/protocol.mjs');
-          const bcastPayloadHex = encodeBcastPayload(cmd.channel, cmd.message);
-          sent = await sendKaspa({ to: localAddress, amount: 'self-full', payload: bcastPayloadHex });
-          ingestTx({ traceId: sent?.txId, txid: sent?.txId, direction: 'outbound', amount: '0', fee: sent?.fee, localAddress });
-          log(`BROADCAST #${cmd.channel} TX: ${sent?.txId || '?'} fee: ${sent?.fee || '?'}`);
+          let bcastMsg = cmd.message;
+          let bcastAttempts = 0;
+          const BCAST_MAX_ATTEMPTS = 4;
+          while (bcastAttempts < BCAST_MAX_ATTEMPTS) {
+            try {
+              const bcastPayloadHex = encodeBcastPayload(cmd.channel, bcastMsg);
+              sent = await sendKaspa({ to: localAddress, amount: 'self-full', payload: bcastPayloadHex });
+              ingestTx({ traceId: sent?.txId, txid: sent?.txId, direction: 'outbound', amount: '0', fee: sent?.fee, localAddress });
+              if (bcastAttempts > 0) log(`BROADCAST #${cmd.channel} sent after ${bcastAttempts + 1} attempts (${bcastMsg.length} chars)`);
+              else log(`BROADCAST #${cmd.channel} TX: ${sent?.txId || '?'} fee: ${sent?.fee || '?'}`);
+              break;
+            } catch (bcastErr) {
+              const bcastErrMsg = bcastErr?.message || bcastErr?.toString?.() || '';
+              if ((bcastErrMsg.includes('Insufficient funds') || bcastErrMsg.includes('Storage mass')) && bcastAttempts < BCAST_MAX_ATTEMPTS - 1) {
+                const target = Math.max(20, Math.floor(bcastMsg.length * 0.6));
+                bcastMsg = bcastMsg.slice(0, target).replace(/\s+\S*$/, '') + '...';
+                bcastAttempts++;
+                log(`BROADCAST #${cmd.channel} storage mass exceeded, retrying with ${bcastMsg.length} chars (attempt ${bcastAttempts + 1})`);
+              } else {
+                log(`BROADCAST #${cmd.channel} send failed: ${bcastErrMsg}`);
+                throw bcastErr;
+              }
+            }
+          }
           break;
         }
 
