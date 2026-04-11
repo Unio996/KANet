@@ -850,11 +850,6 @@ async function _autoPayExchange(offer, takerRelayNodeId) {
   sqlite.prepare('UPDATE exchange_offers SET payment_tx = ? WHERE id = ?').run(result.txHash, offer.id);
 
   // === NO TX NO STATE CHANGE ===
-  // Wait for UTXO to settle before broadcasting paid message.
-  // Accept broadcast just consumed a UTXO — need to wait for it to confirm
-  // so Relay has a fresh UTXO available. Same pattern as market trading.js:2500.
-  await new Promise(r => setTimeout(r, 5000));
-
   // Broadcast kanet_exchange_paid_v1 — MUST succeed before advancing state.
   // If broadcast fails (UTXO conflict etc), retry with backoff.
   // Only after TX is on chain do we processPaymentSubmit.
@@ -871,7 +866,7 @@ async function _autoPayExchange(offer, takerRelayNodeId) {
 
   let paidTxId = null;
   const MAX_BCAST_RETRIES = 5;
-  const BCAST_RETRY_MS = 2000; // wait for UTXO to settle between retries
+  const BCAST_RETRY_MS = 1000; // Kaspa 1s blocks — 1s between retries is sufficient
   for (let attempt = 1; attempt <= MAX_BCAST_RETRIES; attempt++) {
     try {
       const bcastResult = await sendCommandAsync(takerRelayNodeId, {
@@ -974,9 +969,6 @@ async function _autoSendKas(offer, takerRelayNodeId) {
 
     // Write payment_tx to offer
     sqlite.prepare('UPDATE exchange_offers SET payment_tx = ? WHERE id = ?').run(txId, offer.id);
-
-    // Wait for UTXO to settle before broadcasting (same as USDT path)
-    await new Promise(r => setTimeout(r, 5000));
 
     // Broadcast kanet_exchange_paid_v1 (KAS payment)
     try {
