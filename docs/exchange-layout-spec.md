@@ -147,28 +147,38 @@ Trade events rendered as chat-like flow:
 
 Each system card has expandable proof section with TX links.
 
-### 4.6 Accept Modal
+### 4.6 Inline Accept (No Modal)
 
-Triggered by [Accept Offer] button. Overlay modal (not page navigation).
+> Decision: 2026-04-11 03:44 — both nodes agreed. Right pane IS the detail view,
+> modal adds unnecessary layer. Accept flow is inline.
+
+When user views an **open** offer (not yet accepted), right pane shows full detail
+with accept section at bottom:
 
 ```
 +-------------------------------------------+
-|  Accept Offer                             |
+|  [Pipeline stepper]                       |
+|  [Trust info: Seller locked 100 KAS]      |
+|                                           |
+|  ─── Accept This Offer ───                |
 |                                           |
 |  You will buy: 100 KAS                    |
 |  You will pay: 3.32 USDT                  |
 |  Price: $0.0332/KAS  (-0.3% vs market)   |
 |                                           |
 |  Pay with: [BNB] [ETH] [SOL] [TRON]      |
-|  Your balance: 5.21 USDT (BNB)           |
+|  Your balance: 5.21 USDT (BNB)  OK       |
 |                                           |
 |  System will auto-pay from your wallet.   |
 |                                           |
-|  [Cancel]  [Confirm]                      |
+|            [Accept Offer]                 |
 +-------------------------------------------+
 ```
 
-Wallet balance check: if insufficient, disable Confirm + show warning.
+- Chain selector updates balance display in real-time
+- Insufficient balance: disable button + show warning
+- After accept: section transforms into live status stepper
+- **Mobile**: same layout, full-width, scroll to accept section
 
 ## 5. Arb/Seed Section
 
@@ -193,7 +203,7 @@ Only visible to node operator (always visible in Console, but visually separated
 | `offer-list-item.eta` | Left pane | Single offer card with price badge + reputation |
 | `deal-pipeline.eta` | Right pane | Clickable stepper with story cards |
 | `deal-conversation.eta` | Right pane | Chat-like event flow |
-| `accept-modal.eta` | Right pane overlay | Accept confirmation with chain selection |
+| `accept-inline.eta` | Right pane bottom | Inline accept with chain selection + balance check |
 
 ## 8. API Data Contract
 
