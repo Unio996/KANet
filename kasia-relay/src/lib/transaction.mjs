@@ -13,6 +13,26 @@ const FEE_RESERVE_SOMPI = 3000n; // ~0.00003 KAS — covers fee for single-outpu
 
 // Promise-based mutex to serialize sendKaspa() calls and prevent UTXO double-spend
 let _sendLock = Promise.resolve();
+
+// Track recently spent UTXOs — RPC getUtxosByAddresses only returns confirmed UTXOs,
+// so a just-submitted TX's inputs still appear as "available". This set filters them out.
+// Entries auto-expire after 30s (should be mined by then at 10 BPS).
+const _pendingSpentUtxos = new Map(); // key = "txid:index" → expiry timestamp
+function markUtxoSpent(entry) {
+  const key = `${entry.entry?.transactionId || entry.transactionId || ''}:${entry.entry?.index ?? entry.index ?? 0}`;
+  if (key === ':0') return; // safety: no valid outpoint
+  _pendingSpentUtxos.set(key, Date.now() + 30000);
+}
+function filterPendingUtxos(entries) {
+  const now = Date.now();
+  // Clean expired entries
+  for (const [k, exp] of _pendingSpentUtxos) { if (exp < now) _pendingSpentUtxos.delete(k); }
+  if (_pendingSpentUtxos.size === 0) return entries;
+  return entries.filter(e => {
+    const key = `${e.entry?.transactionId || e.transactionId || ''}:${e.entry?.index ?? e.index ?? 0}`;
+    return !_pendingSpentUtxos.has(key);
+  });
+}
 function withSendLock(fn) {
   const prev = _sendLock;
   let resolve;
@@ -96,11 +116,15 @@ async function _sendKaspaInner(to, amountSompi, priorityFee = 0n, payload) {
     const { isSynced } = await rpc.getServerInfo();
     if (!isSynced) throw new Error('RPC node is not synced');
 
-    const { entries } = await rpc.getUtxosByAddresses([new Address(senderAddress)]);
-    if (!entries || entries.length === 0) throw new Error('No UTXOs available');
+    const { entries: rawEntries } = await rpc.getUtxosByAddresses([new Address(senderAddress)]);
+    if (!rawEntries || rawEntries.length === 0) throw new Error('No UTXOs available');
 
     // Normalize: new kaspa-wasm returns amount as string, old as BigInt
-    for (const e of entries) { if (typeof e.amount === 'string') e.amount = BigInt(e.amount); }
+    for (const e of rawEntries) { if (typeof e.amount === 'string') e.amount = BigInt(e.amount); }
+
+    // Filter out UTXOs spent by recent pending TXs (RPC only returns confirmed UTXOs)
+    const entries = filterPendingUtxos(rawEntries);
+    if (entries.length === 0) throw new Error('No UTXOs available (all spent by pending TXs)');
 
     let selectedEntries = entries;
     let outputAmount = amountSompi;
@@ -153,6 +177,10 @@ async function _sendKaspaInner(to, amountSompi, priorityFee = 0n, payload) {
     }
 
     if (!lastTxId) throw new Error('Transaction generation failed: no transactions produced');
+
+    // Mark spent UTXOs so next sendKaspa call won't reuse them before RPC updates
+    for (const e of selectedEntries) markUtxoSpent(e);
+
     const summary = generator.summary();
     return { txId: lastTxId, fee: sompiToKaspaString(summary.fees).toString() };
   } catch (error) {

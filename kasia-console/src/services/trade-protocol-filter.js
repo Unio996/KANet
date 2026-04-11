@@ -849,14 +849,9 @@ async function _autoPayExchange(offer, takerRelayNodeId) {
   // Write payment_tx to offer (USDT already sent, record the fact)
   sqlite.prepare('UPDATE exchange_offers SET payment_tx = ? WHERE id = ?').run(result.txHash, offer.id);
 
-  // === UTXO SETTLE WAIT ===
-  // RPC getUtxosByAddresses returns CONFIRMED UTXOs only, not mempool-aware.
-  // Accept broadcast TX must be mined before Relay can use fresh UTXOs for paid broadcast.
-  // At 10 BPS, 5s = 50 blocks — more than enough for TX confirmation.
-  // DO NOT REMOVE: without this wait, paid broadcast fails with "UTXO already spent".
-  await new Promise(r => setTimeout(r, 5000));
-
   // === NO TX NO STATE CHANGE ===
+  // No delay needed: transaction.mjs now tracks pending spent UTXOs in memory,
+  // so consecutive sendKaspa calls use different UTXOs automatically.
   // Broadcast kanet_exchange_paid_v1 — MUST succeed before advancing state.
   // If broadcast fails (UTXO conflict etc), retry with backoff.
   // Only after TX is on chain do we processPaymentSubmit.
