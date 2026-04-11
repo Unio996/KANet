@@ -122,9 +122,21 @@
             <span class="font-bold" x-text="pos.size + ' shares'"></span>
             <span class="text-ink-400" x-text="'@ $' + (pos.avgPrice || 0).toFixed(3)"></span>
           </div>
-          <div class="flex items-center gap-3 mt-1">
-            <span class="text-[10px] text-ink-400" x-show="pos.totalCost > 0" x-text="'Cost $' + pos.totalCost.toFixed(2) + ' · Value if win $' + (pos.size * 1).toFixed(2)"></span>
+          <!-- Row 2: cost, P&L, end date -->
+          <div class="flex items-center gap-4 mt-1.5">
+            <span class="text-[10px] text-ink-500">Cost <span class="font-medium" x-text="'$' + (pos.totalCost || 0).toFixed(2)"></span></span>
+            <span class="text-[10px] font-medium"
+              :class="(pos.size - pos.totalCost) >= 0 ? 'text-green-600' : 'text-red-500'"
+              x-text="'P&L ' + ((pos.size - pos.totalCost) >= 0 ? '+' : '') + (pos.size - pos.totalCost).toFixed(2) + ' (' + (((pos.size / pos.totalCost - 1) * 100) || 0).toFixed(0) + '%)'"></span>
             <span class="text-[10px] text-ink-400" x-show="pos.endDate" x-text="'Ends ' + KANet.relativeTime(pos.endDate)"></span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded" :class="pos.endDate && new Date(pos.endDate) < new Date() ? 'bg-amber-50 text-amber-600' : 'bg-green-50 text-green-600'"
+              x-text="pos.endDate && new Date(pos.endDate) < new Date() ? 'Expired — pending settlement' : 'Active'"></span>
+          </div>
+          <!-- Row 3: market ID + Polymarket link -->
+          <div class="flex items-center gap-3 mt-1">
+            <span class="text-[10px] text-ink-300 font-mono" x-text="pos.market?.slice(0,16) + '...'" @click="navigator.clipboard.writeText(pos.market)" title="Click to copy conditionId" style="cursor:pointer"></span>
+            <a :href="'https://polymarket.com/event/' + pos.market" target="_blank" rel="noopener"
+              class="text-[10px] text-brand-400 hover:text-brand-600">View on Polymarket</a>
           </div>
         </div>
       </template>
