@@ -49,6 +49,27 @@
   <!-- ═══ MARKET TAB ═══ -->
   <div x-show="activeTab === 'market'">
 
+    <!-- Market overview bar -->
+    <div x-show="kasPrice" class="bg-white border border-warm-200 rounded-lg px-4 py-3 mb-4 flex items-center justify-between text-xs">
+      <div class="flex items-center gap-6">
+        <div>
+          <span class="text-ink-400">KAS/USDT</span>
+          <span class="text-ink-700 font-semibold ml-1.5" x-text="'$' + (kasPrice || 0).toFixed(5)"></span>
+        </div>
+        <div>
+          <span class="text-ink-400">Open</span>
+          <span class="text-ink-700 font-medium ml-1" x-text="offers.filter(o => o.protocol_status === 'open').length"></span>
+        </div>
+        <div>
+          <span class="text-ink-400">Completed</span>
+          <span class="text-green-600 font-medium ml-1" x-text="offers.filter(o => o.protocol_status === 'completed').length"></span>
+        </div>
+      </div>
+      <div class="text-ink-400">
+        <span x-text="'Last: ' + (offers.find(o => o.completed_at) ? KANet.relativeTime(offers.find(o => o.completed_at).completed_at) : 'none')"></span>
+      </div>
+    </div>
+
     <!-- Market groups bar -->
     <div class="flex items-center gap-2 mb-4 flex-wrap">
       <button @click="filter = ''"
@@ -160,10 +181,14 @@
         </div>
       </template>
       <template x-for="o in filtered" :key="o.id">
-        <div class="bg-white border border-warm-200 rounded-lg p-4 hover:border-brand-200 transition-colors">
+        <div class="bg-white border rounded-lg p-4 transition-colors"
+          :class="isMaker(o) ? 'border-brand-200 bg-brand-50/20' : (isTaker(o) ? 'border-green-200 bg-green-50/20' : 'border-warm-200 hover:border-brand-200')">
           <div class="flex items-start justify-between">
             <div class="flex-1">
               <div class="flex items-center gap-3">
+                <span class="text-xs font-bold px-2 py-0.5 rounded"
+                  :class="o.give_asset === 'KAS' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'"
+                  x-text="o.give_asset === 'KAS' ? 'SELL' : 'BUY'"></span>
                 <span class="text-lg font-semibold text-ink-700">
                   <span x-text="o.give_amount"></span>
                   <span x-text="o.give_asset" class="text-brand-600"></span>
@@ -173,17 +198,27 @@
                   <span x-text="o.want_amount"></span>
                   <span x-text="o.want_asset" class="text-brand-600"></span>
                 </span>
+                <!-- Price vs market -->
+                <template x-if="priceComparison(o)">
+                  <span class="text-xs font-medium ml-1" :class="priceColor(o)">
+                    <span x-text="'$' + priceComparison(o).offerPrice.toFixed(5)"></span>
+                    <span x-text="(priceComparison(o).diffPct >= 0 ? '+' : '') + priceComparison(o).diffPct + '%'"></span>
+                  </span>
+                </template>
               </div>
               <div class="flex items-center gap-3 mt-2 text-xs text-ink-400">
+                <!-- Role badge -->
+                <span x-show="isMaker(o)" class="px-1.5 py-0.5 bg-brand-50 text-brand-600 rounded text-[10px] font-medium">my offer</span>
+                <span x-show="isTaker(o)" class="px-1.5 py-0.5 bg-green-50 text-green-700 rounded text-[10px] font-medium">my trade</span>
                 <span x-text="'by ' + KANet.shortAddr(o.maker)"></span>
-                <span x-show="o.give_chain" x-text="o.give_chain + ' &rarr;'"></span>
-                <span x-show="o.want_chain" x-text="o.want_chain"></span>
                 <span class="px-1.5 py-0.5 rounded text-[10px] font-medium" :class="statusBadge(o.protocol_status)"
-                  x-text="o.protocol_status"></span>
+                  x-text="statusLabel(o.protocol_status)"></span>
                 <span x-text="KANet.relativeTime(o.broadcast_at)"></span>
                 <span x-show="o.verification !== 'manual'"
                   class="px-1.5 py-0.5 bg-brand-50 text-brand-600 rounded text-[10px]"
                   x-text="o.verification"></span>
+                <span x-show="o.expires_at && o.protocol_status === 'open'" class="text-[10px] text-ink-400"
+                  x-text="'expires ' + KANet.relativeTime(o.expires_at)"></span>
               </div>
               <!-- Accepted payment chains -->
               <template x-if="o.verification === 'cross_chain_tx' && o.protocol_status === 'open'">
@@ -1072,8 +1107,44 @@ function exchangeApp() {
     // ── Init ──
     async init() {
       await this.loadRelays();
-      await this.loadOffers();
+      await Promise.all([this.loadOffers(), this.loadKasPrice()]);
       setInterval(() => this.loadOffers(), 30000);
+      setInterval(() => this.loadKasPrice(), 60000);
+    },
+
+    async loadKasPrice() {
+      try {
+        const res = await fetch('/api/trade/kas-price');
+        const data = await res.json();
+        this.kasPrice = data?.price || null;
+      } catch {}
+    },
+
+    // Price comparison: how this offer compares to market price
+    priceComparison(o) {
+      if (!this.kasPrice || this.kasPrice <= 0) return null;
+      const giveKas = o.give_asset === 'KAS';
+      const wantKas = o.want_asset === 'KAS';
+      if (!giveKas && !wantKas) return null;
+      // Calculate offer's effective KAS price in USDT
+      const kasAmt = parseFloat(giveKas ? o.give_amount : o.want_amount);
+      const usdtAmt = parseFloat(giveKas ? o.want_amount : o.give_amount);
+      if (!kasAmt || !usdtAmt) return null;
+      const offerPrice = usdtAmt / kasAmt;
+      const diffPct = ((offerPrice - this.kasPrice) / this.kasPrice * 100).toFixed(1);
+      // For a SELL (give KAS): lower price = good for buyer
+      // For a BUY (want KAS): higher price = good for seller
+      return { offerPrice, diffPct: parseFloat(diffPct), isSell: giveKas };
+    },
+    priceColor(o) {
+      const pc = this.priceComparison(o);
+      if (!pc) return '';
+      // Sell offer: negative diff = cheaper than market (green for buyer)
+      // Buy offer: positive diff = paying above market (green for seller)
+      const absDiff = Math.abs(pc.diffPct);
+      if (absDiff < 0.3) return 'text-ink-500'; // within spread, neutral
+      if (pc.isSell) return pc.diffPct < 0 ? 'text-green-600' : (pc.diffPct > 2 ? 'text-red-500' : 'text-amber-500');
+      return pc.diffPct > 0 ? 'text-green-600' : (pc.diffPct < -2 ? 'text-red-500' : 'text-amber-500');
     },
 
     async loadRelays() {
