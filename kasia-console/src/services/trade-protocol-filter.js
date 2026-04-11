@@ -866,10 +866,15 @@ async function _autoPayExchange(offer, takerRelayNodeId) {
         channel: 'kanet-exchange',
         message: paidMsg,
       });
-      paidTxId = bcastResult?.txId;
-      if (paidTxId) {
-        console.log(`[exchange-autopay] Broadcast kanet_exchange_paid_v1 TX: ${paidTxId} (attempt ${attempt})`);
-        break;
+      if (bcastResult?.error) {
+        // sendCommandAsync resolves with {error} instead of rejecting
+        console.error(`[exchange-autopay] Paid broadcast attempt ${attempt}/${MAX_BCAST_RETRIES}: ${bcastResult.error}`);
+      } else {
+        paidTxId = bcastResult?.txId;
+        if (paidTxId) {
+          console.log(`[exchange-autopay] Broadcast kanet_exchange_paid_v1 TX: ${paidTxId} (attempt ${attempt})`);
+          break;
+        }
       }
     } catch (err) {
       console.error(`[exchange-autopay] Paid broadcast attempt ${attempt}/${MAX_BCAST_RETRIES} failed: ${err.message}`);
