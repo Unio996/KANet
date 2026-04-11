@@ -574,6 +574,21 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
         }
       }
 
+      // BUY path (kaspa_tx): taker already sent KAS, maker received it.
+      // No separate delivery needed — go straight to completed.
+      if (payment_chain === 'kaspa' && deliveringOffer?.give_asset !== 'KAS') {
+        const completedOffer = transition(offer_id, 'completed', {});
+        sqlite.prepare(`
+          INSERT INTO chain_events (id, event_type, from_address, to_address, payload, observed_at)
+          VALUES (?, 'exchange_completed', ?, ?, ?, datetime('now'))
+        `).run(crypto.randomUUID(), deliveringOffer.maker, deliveringOffer.taker, JSON.stringify({
+          offer_id: deliveringOffer.id, give_asset: deliveringOffer.give_asset, give_amount: deliveringOffer.give_amount,
+          want_asset: deliveringOffer.want_asset, want_amount: deliveringOffer.want_amount,
+          payment_chain, payment_tx,
+        }));
+        console.log(`[exchange] BUY kaspa_tx offer ${offer_id.slice(0,8)} delivering → completed (KAS already received)`);
+      }
+
       // Trigger hedge after completed (only if delivery succeeded)
       const finalOffer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer_id);
       if (finalOffer?.protocol_status === 'completed' && finalOffer.maker) {
