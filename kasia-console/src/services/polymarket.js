@@ -317,6 +317,52 @@ export async function redeemPositions(privateKey, conditionId) {
 }
 
 /**
+ * Check redeem status for a settled market.
+ * Returns: { resolved, redeemable, balance }
+ * - resolved: market has a result (payoutDenominator > 0)
+ * - redeemable: user holds outcome tokens that can be redeemed
+ * - balance: total outcome token balance
+ */
+export async function checkRedeemStatus(walletAddress, conditionId) {
+  const CTF_CONTRACT = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
+  const CTF_ABI = [
+    'function balanceOf(address owner, uint256 id) view returns (uint256)',
+    'function payoutDenominator(bytes32 conditionId) view returns (uint256)',
+  ];
+  try {
+    const provider = new ethers.JsonRpcProvider(POLYGON_RPC);
+    const ctf = new ethers.Contract(CTF_CONTRACT, CTF_ABI, provider);
+
+    const denom = await ctf.payoutDenominator(conditionId);
+    const resolved = denom > 0n;
+
+    // Check balance for both outcomes (Yes=indexSet 1, No=indexSet 2)
+    // Token ID = uint256(keccak256(abi.encodePacked(collateralToken, parentCollectionId, conditionId, indexSet)))
+    // Simplified: check both outcome slots
+    let totalBalance = 0n;
+    try {
+      const USDC_POLYGON = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
+      for (const indexSet of [1, 2]) {
+        const collectionId = ethers.solidityPackedKeccak256(
+          ['bytes32', 'bytes32', 'uint256'],
+          [ethers.ZeroHash, conditionId, indexSet]
+        );
+        const positionId = ethers.solidityPackedKeccak256(
+          ['address', 'bytes32'],
+          [USDC_POLYGON, collectionId]
+        );
+        const bal = await ctf.balanceOf(walletAddress, positionId);
+        totalBalance += bal;
+      }
+    } catch { /* balance check failed, assume 0 */ }
+
+    return { resolved, redeemable: resolved && totalBalance > 0n, balance: totalBalance.toString() };
+  } catch (e) {
+    return { resolved: false, redeemable: false, balance: '0', error: e.message };
+  }
+}
+
+/**
  * 查活跃订单
  */
 export async function getOpenOrders(apiKey, secret, passphrase) {

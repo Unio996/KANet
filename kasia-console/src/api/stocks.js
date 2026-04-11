@@ -8,7 +8,7 @@ import { sqlite } from '../db/client.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 import crypto, { randomUUID } from 'crypto';
 import { fetchStockData, fetchYahooQuote, cachedPredictions, cachedCommodities, cachedFunding, cachedSentiment, fetchAllMarkets, cachedCrypto, cachedFundamentals, cachedIndustryPeers, cachedStockKlines, DIVERGENCE_WARN_THRESHOLD } from '../services/market-data.js';
-import { getPolygonWallet, getUsdcBalance, createApiKey, getOrderBook, getPositions, placeOrder, cancelOrder, getOpenOrders, checkAllowance, approveUsdc, checkTxStatus, redeemPositions } from '../services/polymarket.js';
+import { getPolygonWallet, getUsdcBalance, createApiKey, getOrderBook, getPositions, placeOrder, cancelOrder, getOpenOrders, checkAllowance, approveUsdc, checkTxStatus, redeemPositions, checkRedeemStatus } from '../services/polymarket.js';
 import { decrypt } from '../services/crypto.js';
 
 // Agent 综述缓存（15 分钟）
@@ -301,16 +301,37 @@ export async function registerStockRoutes(fastify) {
         p.question = info.question;
         p.closed = info.closed;
         p.endDate = info.endDate;
-        // Mark settled: closed market = already redeemed or redeemable
         if (info.closed) {
           p.settled = true;
           p.status = 'settled';
+        } else if (info.endDate && new Date(info.endDate) < new Date()) {
+          p.settled = false;
+          p.status = 'expired_pending'; // expired but Polymarket hasn't resolved yet
         } else {
           p.settled = false;
           p.status = 'active';
         }
       }));
-      // Split: active positions vs settled (history)
+
+      // For settled positions: check if redeemable or already redeemed
+      const settledPositions = allPositions.filter(p => p.settled);
+      if (settledPositions.length > 0) {
+        const polyWallet = getPolygonWallet(relay_node_id);
+        if (polyWallet?.address) {
+          // checkRedeemStatus imported at top
+          await Promise.all(settledPositions.map(async (p) => {
+            try {
+              const rs = await checkRedeemStatus(polyWallet.address, p.market);
+              p.redeemable = rs.redeemable;
+              p.redeemed = rs.resolved && !rs.redeemable;
+            } catch {
+              p.redeemable = false;
+              p.redeemed = false;
+            }
+          }));
+        }
+      }
+
       const positions = allPositions.filter(p => !p.settled);
       const settled = allPositions.filter(p => p.settled);
       return reply.send({ positions, settled, trades });
