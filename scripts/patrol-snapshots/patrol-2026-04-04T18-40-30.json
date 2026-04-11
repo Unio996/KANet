@@ -1,0 +1,120 @@
+{
+  "ts": "2026-04-04T18:40:30.397Z",
+  "agents": {
+    "Martin": {
+      "status": "green",
+      "balance": 168.794,
+      "active2h": 88,
+      "errors2h": 0,
+      "blocks2h": 0,
+      "payFails24h": 0,
+      "lastEvent": "2026-04-04T18:37:05.149Z",
+      "lastProactive": "2026-04-04T18:37:05.149Z",
+      "lastReflection": "2026-04-04T15:52:46.858Z",
+      "activeGoals": 4,
+      "coolingGoals": 4,
+      "noReplyTargets": 2,
+      "indicators": {
+        "adapter": "green",
+        "lastEvent": "green",
+        "proactive": "green",
+        "reflection": "green",
+        "errors": "green",
+        "blocks": "green",
+        "payFails": "green"
+      }
+    },
+    "Kasia_1": {
+      "status": "green",
+      "balance": 1.753,
+      "active2h": 73,
+      "errors2h": 0,
+      "blocks2h": 0,
+      "payFails24h": 0,
+      "lastEvent": "2026-04-04T18:36:47.808Z",
+      "lastProactive": "2026-04-04T18:36:47.808Z",
+      "lastReflection": "2026-04-04T15:53:04.891Z",
+      "activeGoals": 6,
+      "coolingGoals": 2,
+      "noReplyTargets": 0,
+      "indicators": {
+        "adapter": "green",
+        "lastEvent": "green",
+        "proactive": "green",
+        "reflection": "green",
+        "errors": "green",
+        "blocks": "green",
+        "payFails": "green"
+      }
+    },
+    "Sophie": {
+      "status": "green",
+      "balance": 21.28,
+      "active2h": 49,
+      "errors2h": 0,
+      "blocks2h": 0,
+      "payFails24h": 0,
+      "lastEvent": "2026-04-04T18:21:37.299Z",
+      "lastProactive": "2026-04-04T18:21:37.299Z",
+      "lastReflection": "2026-04-04T15:53:26.566Z",
+      "activeGoals": 6,
+      "coolingGoals": 7,
+      "noReplyTargets": 1,
+      "indicators": {
+        "adapter": "green",
+        "lastEvent": "green",
+        "proactive": "green",
+        "reflection": "green",
+        "errors": "green",
+        "blocks": "green",
+        "payFails": "green"
+      }
+    },
+    "Qwen": {
+      "status": "green",
+      "balance": 0.131,
+      "active2h": 50,
+      "errors2h": 0,
+      "blocks2h": 0,
+      "payFails24h": 0,
+      "lastEvent": "2026-04-04T18:21:45.572Z",
+      "lastProactive": "2026-04-04T18:21:45.572Z",
+      "lastReflection": "2026-04-04T15:52:04.392Z",
+      "activeGoals": 10,
+      "coolingGoals": 4,
+      "noReplyTargets": 0,
+      "indicators": {
+        "adapter": "green",
+        "lastEvent": "green",
+        "proactive": "green",
+        "reflection": "green",
+        "errors": "green",
+        "blocks": "green",
+        "payFails": "green"
+      }
+    },
+    "Eric": {
+      "status": "green",
+      "balance": 4.997,
+      "active2h": 51,
+      "errors2h": 0,
+      "blocks2h": 0,
+      "payFails24h": 0,
+      "lastEvent": "2026-04-04T18:21:45.258Z",
+      "lastProactive": "2026-04-04T18:21:45.258Z",
+      "lastReflection": "2026-04-04T15:52:28.186Z",
+      "activeGoals": 8,
+      "coolingGoals": 0,
+      "noReplyTargets": 0,
+      "indicators": {
+        "adapter": "green",
+        "lastEvent": "green",
+        "proactive": "green",
+        "reflection": "green",
+        "errors": "green",
+        "blocks": "green",
+        "payFails": "green"
+      }
+    }
+  }
+}

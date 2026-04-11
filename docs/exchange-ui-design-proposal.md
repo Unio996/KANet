@@ -370,11 +370,23 @@ fund_lock 状态：绿色=已锁定，灰色=待锁定
 - **≥5 笔完成交易才显示**（<5 笔显示反而暴露市场小）
 - 未达 5 笔时显示 "N trades completed" 不显示时间
 
+### Accept 交互决策（split-pane 后续讨论）
+
+**结论：右栏 inline accept，不用 modal。**
+
+Split-pane 的右栏本身就是 detail view，accept 操作直接在右栏完成：
+1. 点击 open offer → 右栏加载完整详情（价格分析 + 余额检查 + 链选择）
+2. Accept 按钮就在右栏底部，不弹窗
+3. 手机端竖向堆叠时，右栏变成底部区域，同样 inline
+4. 只有辅助信息（帮助文本、tooltip）才用弹窗
+
+**之前写的 modal 代码丢弃**（已 stash）。
+
 ### 待继续讨论
 
-- 右栏 deal detail 的具体 section 结构
+- 右栏 deal detail 的具体 section 划分（139 正在写 layout spec）
 - split-pane 到 mobile 的断点行为细节
-- accept modal vs 右栏内 inline accept flow（split-pane 下可能不需要 modal）
+- 139 已建 9 个 helper 函数的具体签名
 
 ### 139 已完成的后端工作
 
