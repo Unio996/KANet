@@ -1,8 +1,9 @@
 # Exchange Page Layout Specification
 
-> Status: AGREED by both nodes (2026-04-11 #kanet-public)
+> Status: **FROZEN** — 2026-04-11 03:55 UTC, both nodes confirmed on #kanet-public
 > Based on: market.eta proven interaction model + exchange-ui-design-proposal.md
-> Decisions locked: split-pane, light theme, 360px left, arb/seed collapsible, mobile stacks
+> 9 decisions locked (Q1-Q9): split-pane, light theme, 360px left, arb/seed collapsible,
+> mobile stacks, English UI, timeline not chat, inline accept not modal, batch reputation
 
 ---
 
@@ -138,14 +139,45 @@ If no payment in 30 minutes, your KAS will be auto-released.
 - Gray padlock = pending / not yet locked
 - This is MORE powerful than star ratings for building trust
 
-### 4.5 Conversation Flow (from market.eta)
+### 4.5 Event Timeline (NOT chat flow)
 
-Trade events rendered as chat-like flow:
-- System cards (lock, payment, verification progress, delivery)
-- Agent messages (if any DM exchange happened)
-- Approval cards with countdown (for manual verification mode)
+> Decision: 2026-04-11 03:48 — Martin point 2. Exchange has no DM conversations,
+> only system events. Chat-like bubbles are wrong metaphor. Vertical timeline is
+> simpler and more honest about what actually happens.
 
-Each system card has expandable proof section with TX links.
+Trade events rendered as vertical timeline (NOT chat bubbles):
+
+```
+  [lock icon]  KAS Locked ─────────────── 14:23:05
+               100 KAS secured in fund_lock
+               > TX: b7c3a1... [View on Kaspa Explorer]
+
+  [pay icon]   USDT Payment Sent ──────── 14:23:18
+               3.32 USDT via BNB Chain
+               > TX: 0x8156... [View on BSCScan]
+
+  [check icon] Payment Verified ─────────  14:24:02
+               135/15 confirmations
+               > Amount: 3.32 USDT  Recipient: 0x9477...
+
+  [send icon]  KAS Delivered ────────────  14:24:15
+               100 KAS sent to buyer
+               > TX: a4f2e8... [View on Kaspa Explorer]
+
+  [done icon]  Trade Completed ──────────  14:25:23
+               Total time: 2m 18s
+```
+
+Each event card:
+- Left: status icon (colored circle or icon)
+- Center: event label + description
+- Right: timestamp
+- Expandable proof section: TX hash, confirmations, explorer link
+- Active event: pulse animation (like market.eta `.sn.active`)
+- Completed: green indicator
+- Future: gray/dimmed
+
+This is audit-focused, not chatty. Every claim is backed by a clickable TX link.
 
 ### 4.6 Inline Accept (No Modal)
 
@@ -202,16 +234,16 @@ Only visible to node operator (always visible in Console, but visually separated
 |---------|---------|-------------|
 | `offer-list-item.eta` | Left pane | Single offer card with price badge + reputation |
 | `deal-pipeline.eta` | Right pane | Clickable stepper with story cards |
-| `deal-conversation.eta` | Right pane | Chat-like event flow |
+| `deal-timeline.eta` | Right pane | Vertical event timeline with expandable proof cards |
 | `accept-inline.eta` | Right pane bottom | Inline accept with chain selection + balance check |
 
 ## 8. API Data Contract
 
 | UI Zone | API Endpoint | Key Fields |
 |---------|-------------|------------|
-| Discovery bar | `GET /api/exchange/overview` | trades_24h, volume_24h_kas, kas_market_price, best_sell_price, best_buy_price |
+| Discovery bar | `GET /api/exchange/overview` | trades_24h, volume_24h_kas, kas_market_price, best_sell_price, best_buy_price, total_completed, avg_settlement_seconds |
 | Offer list | `GET /api/exchange/offers` | offers[] with unit_price, price_vs_market, kas_market_price |
-| Reputation badge | `GET /api/exchange/reputation/:address` | stars, risk, completed, disputed, totalTrades |
+| Reputation badge | `GET /api/exchange/reputation/batch?addresses=a,b,c` | Map of address → { stars, risk, completed, disputed } |
 | Deal detail | `GET /api/exchange/offers/:id` | Full offer object + verification_meta |
 | Accept action | `POST /api/exchange/accept` | relayId, offer_id, taker_chain |
 
@@ -230,3 +262,39 @@ From existing design system v2 (head.eta):
 | `green-600` | — | Positive price / completed / locked |
 | `red-500` | — | Negative price / error / disputed |
 | `yellow-600` | — | Warning / pending |
+
+## 10. Additional Decisions (Q6-Q9)
+
+### Q6: Empty State
+
+When 0 open offers exist:
+- Show last completed trade prominently: "Last trade: 10 KAS settled in 2m 18s, 3 hours ago"
+- Show total completed count from overview API
+- CTA button: "Be the first to post an offer"
+- If total_completed == 0 (brand new node): show network stats from Scout (nodes discovered, interactions)
+
+### Q7: Real-time Updates
+
+- **Active deal selected**: poll `/api/exchange/offers/:id` every 5 seconds
+- **Idle browsing**: poll offer list every 30 seconds
+- **Implementation**: Alpine.js `setInterval` with cleanup on pane change / tab switch
+- **Global notification**: sidebar Exchange icon shows red dot when any local agent offer reaches `matched` status (lightweight 30s check against `/api/exchange/offers?maker=localAgent&status=matched`)
+
+### Q8: Error States
+
+Three-tier color system during failures:
+
+| State | Color | Copy |
+|-------|-------|------|
+| Retry in progress (attempt 2/3) | Yellow pulse | "Verifying payment (attempt 2 of 3). Your funds are safe." |
+| Final failure - payment | Red border | "Payment could not complete. Your USDT was not sent. [Retry] [Cancel]" |
+| Final failure - verification | Red border | "Verification inconclusive. Dispute opened. Your funds are protected." |
+| Timeout | Red border | "Buyer did not pay in 30 minutes. Your KAS has been released. [Relist]" |
+
+Key principle: **red but reassuring.** The system is protecting you, not broken.
+
+### Q9: Language
+
+- English UI labels throughout
+- Strings should be i18n-ready (centralizable, not hardcoded in HTML)
+- market.eta (Chinese) is legacy; new pages use English
