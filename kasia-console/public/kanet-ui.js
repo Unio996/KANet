@@ -150,15 +150,15 @@ const KANet = {
     return steps[status] ?? 0;
   },
 
-  /** Chain → block explorer TX URL */
+  /** Chain → TX viewer URL. Kaspa uses local system RPC, cross-chain uses external */
   explorerTxUrl(chain, txHash) {
     if (!txHash) return null;
+    if (chain === 'kaspa') return `/api/chain/tx/${txHash}`;
     const map = {
       bnb:     `https://bscscan.com/tx/${txHash}`,
       eth:     `https://etherscan.io/tx/${txHash}`,
       sol:     `https://solscan.io/tx/${txHash}`,
       tron:    `https://tronscan.org/#/transaction/${txHash}`,
-      kaspa:   `https://explorer.kaspa.org/txs/${txHash}`,
     };
     return map[chain] || null;
   },

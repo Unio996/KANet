@@ -25,7 +25,7 @@ import { decrypt } from './crypto.js';
  * @param {object} row - { tx_hash, content, sender_address, channel_name, created_at }
  */
 export { _executeHedge as executeHedge };
-export { _autoPayExchange as triggerAutoPay };
+export { _autoPayExchange as triggerAutoPay, _autoSendKas };
 
 export async function onBroadcastWritten(row) {
   if (!row.content || !row.content.startsWith('{"t":"kanet_')) return;
@@ -945,6 +945,9 @@ async function _autoSendKas(offer, takerRelayNodeId) {
   }
 
   console.log(`[exchange-autosend] Sending ${amount} KAS → ${recipientAddress.slice(-12)} for offer ${offer.id.slice(0,8)}`);
+
+  // Wait for UTXO to settle — accept broadcast just consumed a UTXO
+  await new Promise(r => setTimeout(r, 5000));
 
   try {
     const { sendCommandAsync } = await import('./relay-manager.js');

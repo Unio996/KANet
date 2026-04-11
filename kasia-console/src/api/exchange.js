@@ -332,6 +332,20 @@ export async function registerExchangeRoutes(fastify) {
       }
     }
 
+    // Trigger auto-send-KAS if taker is a local agent with kaspa_tx verification
+    if (result.verification === 'kaspa_tx' && result.want_asset?.toUpperCase() === 'KAS') {
+      const localTaker = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(takerAddr);
+      if (localTaker) {
+        console.log(`[exchange] local taker accept → triggering auto-send-KAS for offer ${offer_id.slice(0, 8)}`);
+        import('../services/trade-protocol-filter.js').then(mod => {
+          const latestOffer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer_id);
+          if (latestOffer && ['matched', 'verifying'].includes(latestOffer.protocol_status)) {
+            mod._autoSendKas(latestOffer, localTaker.id);
+          }
+        }).catch(err => console.error(`[exchange] auto-send-KAS trigger error: ${err.message}`));
+      }
+    }
+
     return reply.send({ ok: true, offer_id, status: result.protocol_status, accept_tx: acceptTx });
   });
 

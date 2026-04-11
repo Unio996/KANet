@@ -447,4 +447,56 @@ export async function registerChainDataRoutes(fastify) {
       return reply.code(500).send({ error: err.message });
     }
   });
+
+  // GET /api/chain/tx/:txHash — 本地 TX 查看（通过系统 RPC 节点）
+  fastify.get('/api/chain/tx/:txHash', async (request, reply) => {
+    const { txHash } = request.params;
+    if (!txHash) return reply.code(400).send({ error: 'txHash required' });
+
+    try {
+      const { getWorkingRpc } = await import('../services/rpc-health.js');
+      const { url: rpcUrl } = await getWorkingRpc();
+      if (!rpcUrl) return reply.code(503).send({ error: 'No RPC node available' });
+
+      const kaspa = await import('kaspa-wasm');
+      const { RpcClient, Encoding } = kaspa;
+      const networkId = process.env.KASPA_NETWORK || 'mainnet';
+      const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId });
+      await Promise.race([
+        rpc.connect({}),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 5000)),
+      ]);
+
+      // Query mempool first, then try block acceptance
+      let tx = null;
+      try {
+        const entry = await Promise.race([
+          rpc.getMempoolEntry({ transactionId: txHash, includeOrphanPool: true, filterTransactionPool: false }),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000)),
+        ]);
+        tx = entry?.transaction;
+      } catch {}
+
+      await rpc.disconnect();
+
+      // Also check local DB for context
+      const localEvent = sqlite.prepare(
+        'SELECT event_type, from_address, to_address, payload, observed_at FROM chain_events WHERE txid = ? LIMIT 1'
+      ).get(txHash);
+
+      const localTx = sqlite.prepare(
+        'SELECT txid, direction, amount, fee, local_address, status, created_at FROM tx_records WHERE txid = ? LIMIT 1'
+      ).get(txHash);
+
+      return reply.send({
+        txHash,
+        rpc_node: rpcUrl,
+        mempool: tx ? { found: true, inputs: tx.inputs?.length, outputs: tx.outputs?.length } : { found: false },
+        local_event: localEvent || null,
+        local_tx: localTx || null,
+      });
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
 }
