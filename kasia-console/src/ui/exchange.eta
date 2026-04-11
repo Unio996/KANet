@@ -144,7 +144,7 @@
         <!-- HISTORY tab: terminal state offers -->
         <div x-show="leftTab === 'history' && !loading">
           <div x-show="completedDeals.length === 0" class="p-8 text-center text-ink-400 text-xs">No history yet</div>
-          <template x-for="o in completedDeals" :key="o.id">
+          <template x-for="o in pagedHistory" :key="o.id">
             <div @click="selectOffer(o)" class="px-4 py-3 border-b border-warm-100 cursor-pointer transition-colors"
               :class="selectedOffer?.id === o.id ? 'bg-brand-50 border-l-2 border-l-brand-500' : 'hover:bg-warm-50 border-l-2 border-l-transparent'">
               <div class="flex items-center gap-2">
@@ -155,6 +155,14 @@
               <div class="text-[10px] text-ink-400 mt-1" x-text="KANet.relativeTime(o.completed_at || o.timed_out_at || o.cancelled_at || o.updated_at)"></div>
             </div>
           </template>
+          <!-- Pagination -->
+          <div x-show="historyTotalPages > 1" class="flex items-center justify-center gap-3 py-3 text-xs text-ink-400">
+            <button @click="historyPage = Math.max(1, historyPage - 1)" :disabled="historyPage <= 1"
+              class="px-2 py-1 rounded hover:bg-warm-100 disabled:opacity-30">&larr;</button>
+            <span x-text="historyPage + ' / ' + historyTotalPages"></span>
+            <button @click="historyPage = Math.min(historyTotalPages, historyPage + 1)" :disabled="historyPage >= historyTotalPages"
+              class="px-2 py-1 rounded hover:bg-warm-100 disabled:opacity-30">&rarr;</button>
+          </div>
         </div>
       </div>
 
@@ -632,7 +640,21 @@ function exchangeApp() {
     },
     get completedDeals() {
       return this.myDeals.filter(o =>
-        ['completed', 'disputed', 'timed_out', 'expired', 'cancelled'].includes(o.protocol_status));
+        ['completed', 'disputed', 'timed_out', 'expired', 'cancelled'].includes(o.protocol_status))
+        .sort((a, b) => {
+          const ta = a.completed_at || a.timed_out_at || a.cancelled_at || a.updated_at || '';
+          const tb = b.completed_at || b.timed_out_at || b.cancelled_at || b.updated_at || '';
+          return tb.localeCompare(ta); // descending — newest first
+        });
+    },
+    historyPage: 1,
+    historyPageSize: 10,
+    get pagedHistory() {
+      const start = (this.historyPage - 1) * this.historyPageSize;
+      return this.completedDeals.slice(start, start + this.historyPageSize);
+    },
+    get historyTotalPages() {
+      return Math.max(1, Math.ceil(this.completedDeals.length / this.historyPageSize));
     },
     get lastCompleted() {
       return this.offers.find(o => o.protocol_status === 'completed') || null;
