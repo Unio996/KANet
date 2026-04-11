@@ -322,13 +322,16 @@ export async function registerExchangeRoutes(fastify) {
     if (result.verification === 'cross_chain_tx' && selected_chain && result.taker_payment_address) {
       const localTaker = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(takerAddr);
       if (localTaker) {
-        console.log(`[exchange] local taker accept → triggering auto-pay for offer ${offer_id.slice(0,8)}`);
-        import('../services/trade-protocol-filter.js').then(mod => {
-          const latestOffer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer_id);
-          if (latestOffer && ['matched', 'verifying'].includes(latestOffer.protocol_status)) {
-            mod.triggerAutoPay(latestOffer, localTaker.id);
-          }
-        }).catch(err => console.error(`[exchange] auto-pay trigger error: ${err.message}`));
+        // Wait 3s for accept TX UTXO to settle before auto-pay (prevents UTXO conflict on paid broadcast)
+        console.log(`[exchange] local taker accept → auto-pay in 3s for offer ${offer_id.slice(0,8)}`);
+        setTimeout(() => {
+          import('../services/trade-protocol-filter.js').then(mod => {
+            const latestOffer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer_id);
+            if (latestOffer && ['matched', 'verifying'].includes(latestOffer.protocol_status)) {
+              mod.triggerAutoPay(latestOffer, localTaker.id);
+            }
+          }).catch(err => console.error(`[exchange] auto-pay trigger error: ${err.message}`));
+        }, 3000);
       }
     }
 
