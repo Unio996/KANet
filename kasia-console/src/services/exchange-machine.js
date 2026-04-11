@@ -421,7 +421,7 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
 
   const meta = JSON.parse(offer.verification_meta || '{}');
   const expectedAmount = parseFloat(offer.want_amount) || 0;
-  const expectedTo = meta.receive_address || null;
+  const expectedTo = meta.receive_address || meta.expected_address || null;
 
   try {
     const { verifyCrossChainTx } = await import('./cross-chain-verify.mjs');
