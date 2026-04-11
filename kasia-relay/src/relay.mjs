@@ -332,10 +332,32 @@ if (process.send) {
           }
           // Broadcast uses bcast prefix (plaintext, discoverable by any Scout)
           const { encodeBcastPayload } = await import('./lib/protocol.mjs');
-          const bcastPayloadHex = encodeBcastPayload(cmd.channel, cmd.message);
-          sent = await sendKaspa({ to: localAddress, amount: 'self-full', payload: bcastPayloadHex });
-          ingestTx({ traceId: sent?.txId, txid: sent?.txId, direction: 'outbound', amount: '0', fee: sent?.fee, localAddress });
-          log(`BROADCAST #${cmd.channel} TX: ${sent?.txId || '?'} fee: ${sent?.fee || '?'}`);
+          let bcastText = cmd.message;
+          let bcastAttempts = 0;
+          const BCAST_MAX_ATTEMPTS = 3;
+          while (bcastAttempts < BCAST_MAX_ATTEMPTS) {
+            try {
+              const bcastPayloadHex = encodeBcastPayload(cmd.channel, bcastText);
+              sent = await sendKaspa({ to: localAddress, amount: 'self-full', payload: bcastPayloadHex });
+              ingestTx({ traceId: sent?.txId, txid: sent?.txId, direction: 'outbound', amount: '0', fee: sent?.fee, localAddress });
+              log(`BROADCAST #${cmd.channel} TX: ${sent?.txId || '?'} fee: ${sent?.fee || '?'}${bcastAttempts > 0 ? ' (truncated to ' + bcastText.length + ' chars)' : ''}`);
+              break;
+            } catch (bcastErr) {
+              const bcastErrMsg = bcastErr?.message || '';
+              if ((bcastErrMsg.includes('Insufficient funds') || bcastErrMsg.includes('Storage mass')) && bcastAttempts < BCAST_MAX_ATTEMPTS - 1) {
+                const target = Math.max(20, Math.floor(bcastText.length * 0.7));
+                bcastText = bcastText.slice(0, target).replace(/\s+\S*$/, '') + '...';
+                bcastAttempts++;
+                log(`Broadcast storage mass exceeded, retrying with ${bcastText.length} chars (attempt ${bcastAttempts + 1})`);
+              } else {
+                log(`Broadcast send failed: ${bcastErrMsg}`);
+                if (cmd.requestId && process.send) {
+                  process.send({ requestId: cmd.requestId, result: { error: bcastErrMsg } });
+                }
+                break;
+              }
+            }
+          }
           break;
         }
 
