@@ -460,13 +460,24 @@ async function handleExchangeAccept(msg) {
   // verifying（cross_chain_tx / kaspa_tx）：不在此阶段触发对冲
   // Hedge 必须等 completed（交割确认后）才触发，否则 Taker 不履约 = 裸空仓
 
-  // === Auto-pay: if taker is a local Agent, automatically pay USDT ===
-  if (result.taker && result.taker_chain) {
+  // === Auto-pay: if taker is a local Agent, automatically pay USDT (cross_chain_tx) ===
+  if (result.taker && result.taker_chain && result.verification === 'cross_chain_tx') {
     const localRelay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(result.taker);
     if (localRelay) {
       console.log(`[exchange] local taker detected, triggering auto-pay for offer ${result.id.slice(0,8)}`);
       setImmediate(() => _autoPayExchange(result, localRelay.id).catch(e =>
         console.error(`[exchange] auto-pay error: ${e.message}`)
+      ));
+    }
+  }
+
+  // === Auto-send-KAS: if taker is a local Agent and offer wants KAS (kaspa_tx) ===
+  if (result.taker && result.verification === 'kaspa_tx' && result.want_asset?.toUpperCase() === 'KAS') {
+    const localRelay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(result.taker);
+    if (localRelay) {
+      console.log(`[exchange] local taker detected, triggering auto-send-KAS for offer ${result.id.slice(0,8)}`);
+      setImmediate(() => _autoSendKas(result, localRelay.id).catch(e =>
+        console.error(`[exchange] auto-send-KAS error: ${e.message}`)
       ));
     }
   }
@@ -863,6 +874,101 @@ async function _autoPayExchange(offer, takerRelayNodeId) {
   // Directly trigger verification (don't wait for Scout to scan paid_v1 broadcast)
   processPaymentSubmit({ offer_id: offer.id, payment_tx: result.txHash, payment_chain: chain });
   console.log(`[exchange-autopay] verification triggered for offer ${offer.id.slice(0,8)}`);
+}
+
+/**
+ * Auto-send KAS for kaspa_tx offers where taker is local Agent.
+ * Mirror of _autoPayExchange but for KAS instead of USDT.
+ * Sends KAS via Relay IPC transfer, then submits TX hash for verification.
+ */
+async function _autoSendKas(offer, takerRelayNodeId) {
+  const wantAsset = offer.want_asset?.toUpperCase();
+  if (wantAsset !== 'KAS') {
+    console.log(`[exchange-autosend] Offer ${offer.id.slice(0,8)} wants ${offer.want_asset}, not KAS, skip`);
+    return;
+  }
+
+  const amount = parseFloat(offer.want_amount);
+  if (!amount || amount <= 0) {
+    console.log(`[exchange-autosend] Invalid KAS amount ${offer.want_amount}, skip`);
+    return;
+  }
+
+  // Recipient = maker's expected address from verification_meta
+  const meta = JSON.parse(offer.verification_meta || '{}');
+  const recipientAddress = meta.expected_address || offer.maker;
+  if (!recipientAddress) {
+    console.log(`[exchange-autosend] No recipient address for offer ${offer.id.slice(0,8)}, skip`);
+    return;
+  }
+
+  console.log(`[exchange-autosend] Sending ${amount} KAS → ${recipientAddress.slice(-12)} for offer ${offer.id.slice(0,8)}`);
+
+  try {
+    const { sendCommandAsync } = await import('./relay-manager.js');
+    const sendResult = await sendCommandAsync(takerRelayNodeId, {
+      type: 'transfer',
+      target: recipientAddress,
+      amount: String(amount),
+    });
+
+    const txId = sendResult?.txId;
+    if (!txId) {
+      console.error(`[exchange-autosend] KAS send returned no txId`);
+      recordChainEvent({
+        eventType: 'exchange_kas_send_failed',
+        fromAddress: offer.taker,
+        payload: JSON.stringify({ offer_id: offer.id, error: 'no txId returned' }),
+      });
+      return;
+    }
+
+    console.log(`[exchange-autosend] KAS sent TX: ${txId}`);
+
+    // Write payment_tx to offer
+    sqlite.prepare('UPDATE exchange_offers SET payment_tx = ? WHERE id = ?').run(txId, offer.id);
+
+    // Broadcast kanet_exchange_paid_v1 (KAS payment)
+    try {
+      const paidMsg = JSON.stringify({
+        t: 'kanet_exchange_paid_v1',
+        offer_id: offer.id,
+        payment_tx: txId,
+        payment_chain: 'kaspa',
+        payment_asset: 'KAS',
+        payment_amount: offer.want_amount,
+        payer: offer.taker,
+      });
+      await sendCommandAsync(takerRelayNodeId, {
+        type: 'send_broadcast',
+        channel: 'kanet-exchange',
+        message: paidMsg,
+      });
+      console.log(`[exchange-autosend] Broadcast kanet_exchange_paid_v1 for KAS payment`);
+    } catch (err) {
+      console.error(`[exchange-autosend] Broadcast failed: ${err.message}`);
+    }
+
+    recordChainEvent({
+      txid: txId,
+      eventType: 'exchange_kas_sent',
+      fromAddress: offer.taker,
+      toAddress: offer.maker,
+      payload: JSON.stringify({ offer_id: offer.id, amount, payment_tx: txId }),
+    });
+
+    // Trigger verification with the KAS TX hash
+    processPaymentSubmit({ offer_id: offer.id, payment_tx: txId, payment_chain: 'kaspa' });
+    console.log(`[exchange-autosend] verification triggered for offer ${offer.id.slice(0,8)}`);
+
+  } catch (err) {
+    console.error(`[exchange-autosend] Failed: ${err.message}`);
+    recordChainEvent({
+      eventType: 'exchange_kas_send_failed',
+      fromAddress: offer.taker,
+      payload: JSON.stringify({ offer_id: offer.id, error: err.message }),
+    });
+  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────

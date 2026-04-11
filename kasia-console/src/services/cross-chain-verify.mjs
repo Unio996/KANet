@@ -8,7 +8,7 @@
  * Supported chains: bnb, eth (EVM), sol (Solana), tron (TRC20)
  */
 
-const REQUIRED_CONFIRMATIONS = { bnb: 15, eth: 12, sol: 32, tron: 19 };
+const REQUIRED_CONFIRMATIONS = { bnb: 15, eth: 12, sol: 32, tron: 19, kaspa: 1 };
 
 const EVM_RPC = {
   bnb: 'https://bsc-dataseed1.binance.org',
@@ -57,6 +57,10 @@ export async function verifyCrossChainTx({ txHash, chain, expectedAmount, expect
   }
   if (chain === 'tron') {
     return _verifyTron({ txHash, expectedAmount, expectedTo, required });
+  }
+
+  if (chain === 'kaspa') {
+    return _verifyKaspa({ txHash, expectedAmount, expectedTo, required });
   }
 
   return { confirmed: false, confirmations: 0, required, actualAmount: 0, recipient: '', sender: '', error: `Unsupported chain: ${chain}` };
@@ -225,4 +229,71 @@ async function _verifyTron({ txHash, expectedAmount, expectedTo, required }) {
   }
 
   return { confirmed: true, confirmations, required, actualAmount, recipient, sender };
+}
+
+// ── Kaspa ────────────────────────────────────────────────────
+
+async function _verifyKaspa({ txHash, expectedAmount, expectedTo, required }) {
+  // Kaspa TX verification via public REST API
+  // Kaspa is 10 BPS — once a TX is in a block, it's effectively final within seconds
+  try {
+    const res = await fetch(`https://api.kaspa.org/transactions/${txHash}`);
+    if (!res.ok) {
+      return { confirmed: false, confirmations: 0, required: 1, actualAmount: 0, recipient: '', sender: '', error: `TX not found (HTTP ${res.status})` };
+    }
+    const tx = await res.json();
+
+    if (!tx || !tx.transaction_id) {
+      return { confirmed: false, confirmations: 0, required: 1, actualAmount: 0, recipient: '', sender: '', error: 'TX not found or still pending' };
+    }
+
+    // TX exists in a block = confirmed (Kaspa has no reorgs in practice at 10 BPS)
+    const isAccepted = tx.is_accepted !== false; // api.kaspa.org returns is_accepted
+    if (!isAccepted) {
+      return { confirmed: false, confirmations: 0, required: 1, actualAmount: 0, recipient: '', sender: '', error: 'TX not yet accepted' };
+    }
+
+    // Parse outputs to find recipient and amount
+    const outputs = tx.outputs || [];
+    let actualAmount = 0;
+    let recipient = '';
+    let sender = '';
+
+    // Sender = first input address
+    if (tx.inputs?.length > 0 && tx.inputs[0].previous_outpoint_address) {
+      sender = tx.inputs[0].previous_outpoint_address;
+    }
+
+    // Find the output matching expectedTo (if provided), or the largest non-change output
+    for (const out of outputs) {
+      const addr = out.script_public_key_address || '';
+      const sompi = parseInt(out.amount || '0', 10);
+      const kas = sompi / 1e8; // 1 KAS = 1e8 sompi
+
+      if (expectedTo && addr === expectedTo) {
+        actualAmount = kas;
+        recipient = addr;
+        break;
+      }
+      // If no expectedTo, take the largest output that isn't sender (change)
+      if (!expectedTo && addr !== sender && kas > actualAmount) {
+        actualAmount = kas;
+        recipient = addr;
+      }
+    }
+
+    if (actualAmount === 0) {
+      return { confirmed: false, confirmations: 1, required: 1, actualAmount: 0, recipient: '', sender, error: 'No matching KAS transfer found in TX outputs' };
+    }
+
+    // Amount check (0.5% tolerance)
+    const amountOk = !expectedAmount || actualAmount >= expectedAmount * 0.995;
+    if (!amountOk) {
+      return { confirmed: false, confirmations: 1, required: 1, actualAmount, recipient, sender, underpayment: true, error: `Underpayment: expected ${expectedAmount} KAS, got ${actualAmount.toFixed(2)}` };
+    }
+
+    return { confirmed: true, confirmations: 1, required: 1, actualAmount, recipient, sender };
+  } catch (err) {
+    return { confirmed: false, confirmations: 0, required: 1, actualAmount: 0, recipient: '', sender: '', error: `Kaspa API error: ${err.message}` };
+  }
 }
