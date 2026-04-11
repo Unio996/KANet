@@ -148,7 +148,19 @@ export async function getWorkingRpc() {
 
   // 1. 本地节点优先
   if (await checkLocal()) {
+    const wasLocal = _cache.isLocal && _cache.url === LOCAL_RPC;
     _cache = { url: LOCAL_RPC, isLocal: true, ts: Date.now() };
+    // 如果之前不是本地节点（从 discovered/configured 恢复），回写 DB
+    if (!wasLocal) {
+      try {
+        const { setConfig } = await import('../data/settings/configs.js');
+        await setConfig('rpc_mode', 'local', { category: 'node' });
+        await setConfig('rpc_url', LOCAL_RPC, { category: 'node' });
+        console.log('[rpc-health] local node restored — DB updated');
+      } catch (err) {
+        console.warn('[rpc-health] failed to persist local node to DB:', err.message);
+      }
+    }
     console.log('[rpc-health] using local node');
     return { url: LOCAL_RPC, isLocal: true };
   }
@@ -169,6 +181,14 @@ export async function getWorkingRpc() {
   if (discovered) {
     _cache = { url: discovered, isLocal: false, ts: Date.now() };
     console.log('[rpc-health] discovered node:', discovered);
+    // 同步回写 DB — 保持 config_entries 与实际运行状态一致
+    try {
+      const { setConfig } = await import('../data/settings/configs.js');
+      await setConfig('rpc_mode', 'discovered', { category: 'node' });
+      await setConfig('rpc_url', discovered, { category: 'node' });
+    } catch (err) {
+      console.warn('[rpc-health] failed to persist discovered node to DB:', err.message);
+    }
     return { url: discovered, isLocal: false };
   }
 
