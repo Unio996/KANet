@@ -1053,7 +1053,9 @@ getOrder / cancelOrder 用 `def.authStyle` switch（不是 exchange name），�
 
 ### 致命陷阱（4/11 补充）
 
-44. **timeoutVerifying 必须用 verifying_started_at + 30min。** 旧逻辑用 `expires_at < now` 超时，offer 若在 expires_at 前 3 分钟被接单（matched → verifying），下一轮 5min tick 就会把它 timeout——taker 只有 3 分钟而不是 30 分钟付款窗口。已修复为 `datetime(verifying_started_at, '+30 minutes') < datetime('now')`。对比 `checkMatchedTimeout()` 一直用 `matched_at + 30min` 是正确的。位置：exchange-machine.js:295。
+44. **每一个协议动作必须跟着 TX 走。** 这是 KANet 的根本设计原则。KANet 建在对 Kaspa 链 100% 信任之上。每一步（publish/accept/paid/delivered）必须有真实的链上 TX 才能推进本地状态。没有 TX = 这个动作不存在 = 不推进状态。publish 已遵守此原则（exchange.js:207 广播失败不写 DB）。但 paid 广播（trade-protocol-filter.js:856）违反了此原则——广播失败被 try/catch 吞掉，processPaymentSubmit 照样执行。这导致本地状态与链上事实不同步，对方节点永远收不到 paid 消息，交易永远卡住。修复：所有协议广播必须成功上链后才推进本地状态。UTXO 冲突就等待释放后重发。market（OTC）系统没有这个问题因为每一步都有真实 TX 保证。教训来源：2026-04-11 跨节点测试。
+
+45. **timeoutVerifying 必须用 verifying_started_at + 30min。** 旧逻辑用 `expires_at < now` 超时，offer 若在 expires_at 前 3 分钟被接单（matched → verifying），下一轮 5min tick 就会把它 timeout——taker 只有 3 分钟而不是 30 分钟付款窗口。已修复为 `datetime(verifying_started_at, '+30 minutes') < datetime('now')`。对比 `checkMatchedTimeout()` 一直用 `matched_at + 30min` 是正确的。位置：exchange-machine.js:295。
 
 ---
 
