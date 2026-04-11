@@ -132,7 +132,7 @@
         </div>
       </label>
 
-      <!-- API Key -->
+      <!-- API Key (cloud + local) -->
       <label @click="aiMode = 'api_key'"
         class="block p-4 rounded-lg border cursor-pointer transition-all"
         :class="aiMode === 'api_key' ? 'border-blue-500 bg-blue-500/10' : 'border-gray-700 hover:border-gray-600'">
@@ -140,20 +140,20 @@
           <div class="w-8 h-8 rounded bg-blue-900/50 flex items-center justify-center text-blue-400 text-sm font-bold">K</div>
           <div class="flex-1">
             <div class="font-medium">API Key</div>
-            <div class="text-sm text-gray-400">OpenAI, DeepSeek, xAI Grok, Google Gemini, and more</div>
+            <div class="text-sm text-gray-400">OpenAI, Claude, DeepSeek, Ollama, llama-server, and more</div>
           </div>
         </div>
       </label>
 
-      <!-- Ollama -->
-      <label @click="aiMode = 'ollama'"
+      <!-- OpenClaw Agent Protocol -->
+      <label @click="aiMode = 'openclaw'"
         class="block p-4 rounded-lg border cursor-pointer transition-all"
-        :class="aiMode === 'ollama' ? 'border-blue-500 bg-blue-500/10' : 'border-gray-700 hover:border-gray-600'">
+        :class="aiMode === 'openclaw' ? 'border-blue-500 bg-blue-500/10' : 'border-gray-700 hover:border-gray-600'">
         <div class="flex items-center space-x-3">
-          <div class="w-8 h-8 rounded bg-purple-900/50 flex items-center justify-center text-purple-400 text-sm font-bold">L</div>
+          <div class="w-8 h-8 rounded bg-purple-900/50 flex items-center justify-center text-purple-400 text-sm font-bold">A</div>
           <div class="flex-1">
-            <div class="font-medium">Ollama (Local)</div>
-            <div class="text-sm text-gray-400">Free, runs on your machine — no account needed</div>
+            <div class="font-medium">Agent Protocol</div>
+            <div class="text-sm text-gray-400">OpenClaw and other agent gateways</div>
           </div>
         </div>
       </label>
@@ -180,28 +180,42 @@
       <div>
         <label class="block text-xs text-gray-400 mb-1">Provider</label>
         <select x-model="aiProvider" class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-          <option value="anthropic">Anthropic Claude</option>
-          <option value="openai">OpenAI</option>
-          <option value="deepseek">DeepSeek</option>
-          <option value="xai">xAI Grok</option>
-          <option value="google">Google Gemini</option>
-          <option value="siliconflow">SiliconFlow</option>
-          <option value="groq">Groq</option>
-          <option value="together">Together AI</option>
-          <option value="mistral">Mistral AI</option>
+          <optgroup label="Cloud">
+            <option value="anthropic">Anthropic Claude</option>
+            <option value="openai">OpenAI</option>
+            <option value="deepseek">DeepSeek</option>
+            <option value="xai">xAI Grok</option>
+            <option value="google">Google Gemini</option>
+            <option value="siliconflow">SiliconFlow</option>
+            <option value="groq">Groq</option>
+            <option value="together">Together AI</option>
+            <option value="mistral">Mistral AI</option>
+          </optgroup>
+          <optgroup label="Local">
+            <option value="ollama">Ollama (localhost:11434)</option>
+            <option value="llama-server">llama-server (localhost:8000)</option>
+          </optgroup>
         </select>
       </div>
-      <div>
+      <div x-show="!['ollama','llama-server'].includes(aiProvider)">
         <label class="block text-xs text-gray-400 mb-1">API Key</label>
         <input type="password" x-model="aiKey" placeholder="sk-..."
           class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm font-mono placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
       </div>
+      <div x-show="aiProvider === 'ollama'" class="p-3 bg-blue-900/20 border border-blue-800/50 rounded-lg text-sm text-blue-300">
+        Make sure Ollama is running on <span class="font-mono">localhost:11434</span>
+      </div>
+      <div x-show="aiProvider === 'llama-server'" class="p-3 bg-blue-900/20 border border-blue-800/50 rounded-lg text-sm text-blue-300">
+        Make sure llama-server is running on <span class="font-mono">localhost:8000</span>
+      </div>
     </div>
 
-    <!-- Ollama: just a note -->
-    <div x-show="aiMode === 'ollama'" x-transition class="mt-4">
-      <div class="p-3 bg-purple-900/20 border border-purple-800/50 rounded-lg text-sm text-purple-300">
-        Make sure Ollama is running on <span class="font-mono">localhost:11434</span>
+    <!-- OpenClaw: Gateway URL -->
+    <div x-show="aiMode === 'openclaw'" x-transition class="mt-4 space-y-3">
+      <div>
+        <label class="block text-xs text-gray-400 mb-1">Gateway URL</label>
+        <input type="text" x-model="openclawUrl" placeholder="wss://openclaw.example.com"
+          class="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm font-mono placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
       </div>
     </div>
 
@@ -301,15 +315,17 @@
 
 <script>
 const AI_CATALOG = {
-  openai:      { label: 'OpenAI',           url: 'https://api.openai.com/v1',                            model: 'gpt-5-mini', provider: 'openai' },
-  deepseek:    { label: 'DeepSeek',         url: 'https://api.deepseek.com/v1',                          model: 'deepseek-chat', provider: 'openai' },
-  xai:         { label: 'xAI Grok',         url: 'https://api.x.ai/v1',                                 model: 'grok-3-mini', provider: 'openai' },
-  google:      { label: 'Google Gemini',    url: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.5-flash', provider: 'openai' },
-  anthropic:   { label: 'Anthropic Claude', url: 'https://api.anthropic.com',                            model: 'claude-sonnet-4-20250514', provider: 'anthropic' },
-  siliconflow: { label: 'SiliconFlow',      url: 'https://api.siliconflow.cn/v1',                       model: 'deepseek-ai/DeepSeek-V3', provider: 'openai' },
-  groq:        { label: 'Groq',             url: 'https://api.groq.com/openai/v1',                      model: 'llama-3.3-70b-versatile', provider: 'openai' },
-  together:    { label: 'Together AI',      url: 'https://api.together.xyz/v1',                          model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', provider: 'openai' },
-  mistral:     { label: 'Mistral AI',       url: 'https://api.mistral.ai/v1',                           model: 'mistral-large-latest', provider: 'openai' },
+  openai:          { label: 'OpenAI',           url: 'https://api.openai.com/v1',                            model: 'gpt-5-mini', provider: 'openai' },
+  deepseek:        { label: 'DeepSeek',         url: 'https://api.deepseek.com/v1',                          model: 'deepseek-chat', provider: 'openai' },
+  xai:             { label: 'xAI Grok',         url: 'https://api.x.ai/v1',                                 model: 'grok-3-mini', provider: 'openai' },
+  google:          { label: 'Google Gemini',    url: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.5-flash', provider: 'openai' },
+  anthropic:       { label: 'Anthropic Claude', url: 'https://api.anthropic.com',                            model: 'claude-sonnet-4-20250514', provider: 'anthropic' },
+  siliconflow:     { label: 'SiliconFlow',      url: 'https://api.siliconflow.cn/v1',                       model: 'deepseek-ai/DeepSeek-V3', provider: 'openai' },
+  groq:            { label: 'Groq',             url: 'https://api.groq.com/openai/v1',                      model: 'llama-3.3-70b-versatile', provider: 'openai' },
+  together:        { label: 'Together AI',      url: 'https://api.together.xyz/v1',                          model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', provider: 'openai' },
+  mistral:         { label: 'Mistral AI',       url: 'https://api.mistral.ai/v1',                           model: 'mistral-large-latest', provider: 'openai' },
+  ollama:          { label: 'Ollama',           url: 'http://localhost:11434/v1',                            model: 'llama3.3', provider: 'openai', local: true },
+  'llama-server':  { label: 'llama-server',     url: 'http://localhost:8000/v1',                             model: 'default', provider: 'openai', local: true },
 };
 
 function onboardApp() {
@@ -324,9 +340,10 @@ function onboardApp() {
     result: null,
 
     // AI step
-    aiMode: 'oauth',
+    aiMode: 'api_key',
     aiProvider: 'openai',
     aiKey: '',
+    openclawUrl: '',
     oauthConnected: false,
     oauthAdapterId: null,
     oauthLoading: false,
@@ -342,9 +359,9 @@ function onboardApp() {
 
     get aiSummary() {
       if (this.aiMode === 'oauth') return 'ChatGPT subscription (OAuth)';
-      if (this.aiMode === 'ollama') return 'Ollama (local)';
+      if (this.aiMode === 'openclaw') return 'OpenClaw (' + (this.openclawUrl || 'default') + ')';
       const svc = AI_CATALOG[this.aiProvider];
-      return svc ? svc.label + ' (' + svc.model + ')' : this.aiProvider;
+      return svc ? svc.label + (svc.local ? ' (local)' : '') : this.aiProvider;
     },
 
     async startOAuth() {
@@ -395,9 +412,12 @@ function onboardApp() {
         this.error = 'Please login with your ChatGPT account first';
         return;
       }
-      if (this.aiMode === 'api_key' && !this.aiKey.trim()) {
-        this.error = 'Please enter your API key';
-        return;
+      if (this.aiMode === 'api_key') {
+        const svc = AI_CATALOG[this.aiProvider];
+        if (!svc?.local && !this.aiKey.trim()) {
+          this.error = 'Please enter your API key';
+          return;
+        }
       }
       this.step = 4;
     },
@@ -422,12 +442,10 @@ function onboardApp() {
           body.aiProvider = svc?.provider || 'openai';
           body.aiProviderUrl = svc?.url || null;
           body.aiModel = svc?.model || null;
-          body.aiProviderKey = this.aiKey.trim();
-        } else if (this.aiMode === 'ollama') {
-          body.aiProvider = 'openai';
-          body.aiProviderUrl = 'http://localhost:11434/v1';
-          body.aiModel = 'llama3.3';
-          body.aiProviderKey = 'ollama';
+          body.aiProviderKey = svc?.local ? (this.aiProvider === 'ollama' ? 'ollama' : 'local') : this.aiKey.trim();
+        } else if (this.aiMode === 'openclaw') {
+          body.aiProvider = 'openclaw';
+          body.aiProviderUrl = this.openclawUrl.trim() || null;
         }
 
         const res = await fetch('/api/agent/create', {

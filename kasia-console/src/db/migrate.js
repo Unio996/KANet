@@ -1769,5 +1769,32 @@ export function runMigrations() {
     console.log('[migrate] v55: exchange_offers delivering_at + payment_tx added');
   }
 
+  // v56: Backfill classification — peers with completed handshakes should be responsive_agent
+  //       peers with completed exchange trades should be verified_agent
+  {
+    const backfillResponsive = sqlite.prepare(`
+      UPDATE relation_states SET classification = 'responsive_agent'
+      WHERE classification = 'seen_candidate'
+        AND handshake_accepted_at IS NOT NULL
+    `).run();
+    if (backfillResponsive.changes > 0) {
+      console.log(`[migrate] v56: backfill ${backfillResponsive.changes} peers → responsive_agent (had handshake_accepted_at)`);
+    }
+
+    // Peers involved in completed exchange trades → verified_agent
+    const backfillVerified = sqlite.prepare(`
+      UPDATE relation_states SET classification = 'verified_agent'
+      WHERE classification IN ('seen_candidate', 'declared_candidate', 'responsive_agent')
+        AND peer_address IN (
+          SELECT maker FROM exchange_offers WHERE protocol_status = 'completed'
+          UNION
+          SELECT taker FROM exchange_offers WHERE protocol_status = 'completed' AND taker IS NOT NULL
+        )
+    `).run();
+    if (backfillVerified.changes > 0) {
+      console.log(`[migrate] v56: backfill ${backfillVerified.changes} peers → verified_agent (completed trades)`);
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

@@ -68,10 +68,35 @@ export async function registerExchangeRoutes(fastify) {
       ORDER BY cnt DESC
     `).all();
 
+    // Inject price_vs_market for KAS offers
+    let kasPrice = null;
+    try {
+      const { getCachedKasPrice } = await import('../services/market-data.js');
+      kasPrice = getCachedKasPrice();
+    } catch { /* market-data may not be loaded */ }
+
+    const enriched = rows.map(offer => {
+      if (!kasPrice) return offer;
+      let unitPrice = null;
+      let priceVsMarket = null;
+      // KAS seller: give KAS, want USDT
+      if (offer.give_asset?.toUpperCase() === 'KAS' && parseFloat(offer.give_amount) > 0) {
+        unitPrice = parseFloat(offer.want_amount) / parseFloat(offer.give_amount);
+        priceVsMarket = ((unitPrice - kasPrice) / kasPrice * 100).toFixed(2);
+      }
+      // KAS buyer: want KAS, give USDT
+      if (offer.want_asset?.toUpperCase() === 'KAS' && parseFloat(offer.want_amount) > 0) {
+        unitPrice = parseFloat(offer.give_amount) / parseFloat(offer.want_amount);
+        priceVsMarket = ((unitPrice - kasPrice) / kasPrice * 100).toFixed(2);
+      }
+      return { ...offer, unit_price: unitPrice, price_vs_market: priceVsMarket ? parseFloat(priceVsMarket) : null, kas_market_price: kasPrice };
+    });
+
     return reply.send({
-      offers: rows,
+      offers: enriched,
       total: total.cnt,
       groups,
+      kas_market_price: kasPrice,
       node_info: {
         note: '数据来自本节点索引，非全网完整订单簿',
       },
@@ -556,6 +581,101 @@ export async function registerExchangeRoutes(fastify) {
       active_orders: activeOrders,
       today: { seeded, taken: takenRows.length, net_usdt: Math.round(netUsdt * 100) / 100 },
     });
+  });
+
+  // ── GET /api/exchange/reputation/:address — 对手方信誉评估 ──
+  fastify.get('/api/exchange/reputation/:address', async (request, reply) => {
+    const { address } = request.params;
+    const { my_address } = request.query;
+    if (!address) return reply.code(400).send({ error: 'address required' });
+
+    try {
+      const { assessReputation } = await import('../services/reputation.js');
+      const reputation = assessReputation(my_address || null, address);
+
+      // Star rating for UI (based on design doc)
+      let stars = 0;
+      if (reputation.completed >= 50) stars = 5;
+      else if (reputation.completed >= 21) stars = 4;
+      else if (reputation.completed >= 6) stars = 3;
+      else if (reputation.completed >= 1) stars = 2;
+      // dispute penalty
+      if (reputation.totalTrades > 0 && reputation.disputed / reputation.totalTrades > 0.1) {
+        stars = Math.max(0, stars - 1);
+      }
+
+      return { ...reputation, stars };
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // ── GET /api/exchange/overview — 市场概览数据 ──────────────
+  fastify.get('/api/exchange/overview', async (request, reply) => {
+    try {
+      // Active offers count
+      const activeOffers = sqlite.prepare(
+        "SELECT COUNT(*) as cnt FROM exchange_offers WHERE protocol_status = 'open'"
+      ).get();
+
+      // Best sell (lowest give_amount/want_amount for KAS sellers)
+      const bestSell = sqlite.prepare(`
+        SELECT give_amount, want_amount,
+               CAST(want_amount AS REAL) / CAST(give_amount AS REAL) as unit_price
+        FROM exchange_offers
+        WHERE protocol_status = 'open'
+          AND UPPER(give_asset) = 'KAS'
+          AND CAST(give_amount AS REAL) > 0
+        ORDER BY unit_price ASC LIMIT 1
+      `).get();
+
+      // Best buy (highest want_amount/give_amount for KAS buyers)
+      const bestBuy = sqlite.prepare(`
+        SELECT give_amount, want_amount,
+               CAST(give_amount AS REAL) / CAST(want_amount AS REAL) as unit_price
+        FROM exchange_offers
+        WHERE protocol_status = 'open'
+          AND UPPER(want_asset) = 'KAS'
+          AND CAST(want_amount AS REAL) > 0
+        ORDER BY unit_price DESC LIMIT 1
+      `).get();
+
+      // 24h completed trades
+      const recent24h = sqlite.prepare(`
+        SELECT COUNT(*) as cnt,
+               COALESCE(SUM(CAST(give_amount AS REAL)), 0) as volume_kas
+        FROM exchange_offers
+        WHERE protocol_status = 'completed'
+          AND UPPER(give_asset) = 'KAS'
+          AND updated_at > datetime('now', '-1 day')
+      `).get();
+
+      // Last trade time
+      const lastTrade = sqlite.prepare(`
+        SELECT updated_at FROM exchange_offers
+        WHERE protocol_status = 'completed'
+        ORDER BY updated_at DESC LIMIT 1
+      `).get();
+
+      // Current KAS market price (from market-data cache)
+      let marketPrice = null;
+      try {
+        const { getCachedKasPrice } = await import('../services/market-data.js');
+        marketPrice = getCachedKasPrice();
+      } catch { /* market-data may not be available */ }
+
+      return {
+        active_offers: activeOffers?.cnt || 0,
+        best_sell_price: bestSell?.unit_price || null,
+        best_buy_price: bestBuy?.unit_price || null,
+        trades_24h: recent24h?.cnt || 0,
+        volume_24h_kas: Math.round(recent24h?.volume_kas || 0),
+        last_trade_at: lastTrade?.updated_at || null,
+        kas_market_price: marketPrice,
+      };
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
   });
 
   // ── /exchange 页面路由 ──────────────────────────────────
