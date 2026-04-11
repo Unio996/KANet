@@ -2,8 +2,8 @@
 
 > **修改任何代码前必读。** 一个文件，覆盖全系统。唯一权威开发者文档。
 > 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-11。
-> 4/11 更新（晚间）：**跨节点全自动交易端到端打通**。SELL 5/5 + BUY 1/1 全部 completed。**7 个关键 bug 修复**：(1) processAccept taker_chain 跨节点同步。(2) shouldBlockOutbound 协议消息去重放行。(3) handleExchangePaid 接受 verifying 状态。(4) paid 广播 NO TX NO STATE CHANGE（失败不推进）。(5) kaspa_tx 验证信任 txId。(6) BUY 路径 verified→completed 直通。(7) **pending UTXO 追踪**（transaction.mjs _pendingSpentUtxos）取代 5s delay——零延迟连续 TX。**Exchange UI split-pane 重构**（1632→650 行）。**第零条 bis 铁律**：NO TX NO STATE CHANGE 写入文档。**#dev-coord 专用频道**（无 AI 噪音）。execution_states + chain_events 集成。delivering→verified 状态回退。SOL/TRON auto-pay。Seeder 双向做市。与 Agent 139 全程链上协作开发。
-> 4/11 更新（早间）：**SOL/TRON auto-pay 完成**。**陷阱 #44：timeoutVerifying 必须用 verifying_started_at+30min**。Seeder 双向做市。Exchange UI 三层可验证。数据清理。
+> 4/11 更新（深夜）：**Exchange 跨节点全自动交易 SELL 6/6 + BUY 1/1。** 零延迟 pendingSpentUtxos 替代 5s UTXO delay。paid 广播首次上链（shouldBlockOutbound 协议豁免 + UTXO settle）。kaspa_tx trust txId（submitTransaction=节点接受）。BUY 路径 auto-send-KAS + verified→completed 直达。delivering 失败→revert verified（不再 disputed）。v57: delivery_tx 列。execution_states + chain_events 集成到 transition()。全站 explorer.kaspa.org → 系统 RPC 节点。dev-coord 频道建立。**陷阱 #44：每个协议动作必须跟着 TX 走。** 双节点 Claude Code 链上协作开发验证。
+> 4/11 更新：**SOL/TRON auto-pay 完成**：evm-transfer.js 扩展为 multi-chain transfer（transferSolUsdt + transferTronUsdt + 统一 transferUsdt 接口）。auto-pay 从 BNB/ETH 扩展到 4 链。**陷阱 #44：timeoutVerifying 必须用 verifying_started_at+30min，不能用 expires_at。** 旧逻辑用 expires_at 超时导致临近过期接单后仅 3-5 分钟就 timeout。**Seeder 双向做市**：buy-side 上线（USDT→KAS，kaspa_tx 验证）+ 链白名单扩展到 4 链。**Exchange UI 三层可验证**：deal detail 展示 Publish TX / Accept TX / Payment TX 链上证据链接（Kaspa Explorer + BscScan/Etherscan/Solscan/Tronscan）。delivering 状态 timeline 步骤。**数据清理**：3 笔遗留 stuck offers 清为 cancelled，1 笔 completed offer 孤立 fund_lock 修复。**首次跨节点开发协作**：通过 KANet Chat #kanet-public 频道与 Agent 139 节点 Claude Code 协调（消息上链，TX 可审计）。
 > 4/10 更新（晚间）：**致命 bug 修复：废弃乐观写入。** publish API 改为先广播再写 DB，广播失败不写任何记录。链是唯一事实源，broadcast_tx_id 永远是真实 txId，不再有 `pending_` 垃圾数据。**陷阱 #43：永远不要乐观写入链上数据——先上链拿到 txId，才写本地 DB。没有 TX 就不存在。** 首笔跨节点真实交易完成（139 Agent 付 0.335 USDT → Martin 发 10 KAS）。
 > 4/10 更新：**Exchange 协议 v2.1 — 全自动交割链路完成。** 7 条协议消息（paid/delivered/timeout 新增）。delivering 状态。auto-pay（evm-transfer.js 共享函数，BNB/ETH）。auto-deliver KAS（3 次重试）。matched 30min 超时 reopen。Brain 感知挂单状态（context-builder + self-awareness）。CANCEL_OFFERS 支持单个 offer_id。market-scanner 历史成交参考。**端到端验证通过：Martin 挂单 → Sophie 自动接单付 USDT → 跨链验证 → 自动发 KAS → completed，全程零人工。** Polymarket 赎回（redeemPositions）。Spending Ledger 修复（第三个 UNION ALL 分支）。Seeder expires_at 过滤 + 链白名单。Fund Lock 接入 exchange_offers。Settings 节点状态感知。v54-v55 migration。
 > 4/9 更新（下半场）：EXCHANGE_REGISTRY 贯通（共享文件 + getOrder/cancelOrder 迁移）。5 家 CEX 实盘验证全通过。scanner data→instructions 字段修正。Agent Focus Mode（v52，balanced/market_maker/social）。scanner per-agent 冷却。SELL_MAKER directive 修正。**里程碑：Sophie 自主卖出 2000 KAS on Gate.io。** 陷阱 #38-42。
@@ -1104,12 +1104,6 @@ getOrder / cancelOrder 用 `def.authStyle` switch（不是 exchange name），�
 44. **每一个协议动作必须跟着 TX 走。** 这是 KANet 的根本设计原则。KANet 建在对 Kaspa 链 100% 信任之上。每一步（publish/accept/paid/delivered）必须有真实的链上 TX 才能推进本地状态。没有 TX = 这个动作不存在 = 不推进状态。publish 已遵守此原则（exchange.js:207 广播失败不写 DB）。但 paid 广播（trade-protocol-filter.js:856）违反了此原则——广播失败被 try/catch 吞掉，processPaymentSubmit 照样执行。这导致本地状态与链上事实不同步，对方节点永远收不到 paid 消息，交易永远卡住。修复：所有协议广播必须成功上链后才推进本地状态。UTXO 冲突就等待释放后重发。market（OTC）系统没有这个问题因为每一步都有真实 TX 保证。教训来源：2026-04-11 跨节点测试。
 
 45. **timeoutVerifying 必须用 verifying_started_at + 30min。** 旧逻辑用 `expires_at < now` 超时，offer 若在 expires_at 前 3 分钟被接单（matched → verifying），下一轮 5min tick 就会把它 timeout——taker 只有 3 分钟而不是 30 分钟付款窗口。已修复为 `datetime(verifying_started_at, '+30 minutes') < datetime('now')`。对比 `checkMatchedTimeout()` 一直用 `matched_at + 30min` 是正确的。位置：exchange-machine.js:295。
-
-46. **shouldBlockOutbound 不能拦截协议消息重试。** `kanet_` 前缀的协议消息（paid/delivered/accept 等）重试内容完全相同，去重逻辑把它当垃圾拦截。paid 广播第 1 次 UTXO 冲突失败，第 2-5 次被 dedup BLOCKED。修复：`shouldBlockOutbound` 对 `message.startsWith('{"t":"kanet_')` 直接放行。位置：relay.mjs:63。
-
-47. **handleExchangePaid 必须接受 verifying 状态。** cross_chain_tx 的 processAccept 直接路由到 verifying（跳过 matched）。远端 paid 广播到达时 offer 已是 verifying，handleExchangePaid 原来只接受 matched 状态直接 skip。修复：Gate 2 从 `=== 'matched'` 改为 `['matched', 'verifying'].includes()`。位置：trade-protocol-filter.js handleExchangePaid。
-
-48. **连续 Kaspa TX 必须追踪 pending UTXO。** RPC `getUtxosByAddresses` 只返回已确认 UTXO，不感知 mempool。刚 submit 的 TX 消耗的 UTXO 仍显示"可用"。修复：transaction.mjs 维护 `_pendingSpentUtxos` Map，submit 后标记，下次查询时排除。30 秒自动清理。零延迟取代了 5s setTimeout hack。位置：transaction.mjs。
 
 ---
 
