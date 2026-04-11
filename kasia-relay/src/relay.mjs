@@ -63,6 +63,10 @@ function _wordSimilarity(a, b) {
 function shouldBlockOutbound(target, message) {
   if (!message || typeof message !== 'string') return null;
 
+  // 协议消息不走去重拦截 — 协议重试是有意为之，不是垃圾消息
+  // 陷阱 #44: 每个协议动作必须跟着 TX 走，重试必须放行
+  if (message.startsWith('{"t":"kanet_')) return null;
+
   // 防线 1: 幻觉模式匹配
   const hallMatch = HALLUCINATION_PATTERNS.find(p => p.test(message));
   if (hallMatch) {
