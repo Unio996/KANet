@@ -1,7 +1,7 @@
 /**
  * Market Seeder — automated seed-order publisher for the free market.
  *
- * Phase 1: sell orders only (KAS → USDT).
+ * Dual-side: sell orders (KAS → USDT) + buy orders (USDT → KAS).
  * Reads mid-price from /api/trade/kas-price, applies configured spread,
  * publishes seed orders via /api/exchange/publish.
  * Orders tagged with metadata.source = "seeder" for tracking.
@@ -62,10 +62,23 @@ async function tick() {
     results.sell = { skipped: true, reason: 'active_sell_exists', count: activeSells.length };
   }
 
-  // Phase 2: buy orders (when USDT balance available)
-  // const activeBuys = sqlite.prepare(`...give_asset != 'KAS'...`).all();
+  // Step 4: publish buy order if none active
+  const activeBuys = sqlite.prepare(`
+    SELECT id FROM exchange_offers
+    WHERE protocol_status = 'open'
+      AND metadata LIKE '%"source":"seeder"%'
+      AND want_asset = 'KAS'
+      AND give_asset != 'KAS'
+      AND (expires_at IS NULL OR expires_at > ?)
+  `).all(now);
 
-  console.log(`[seeder] tick complete — mid: ${midPrice.toFixed(6)}, sell: ${JSON.stringify(results.sell)}`);
+  if (activeBuys.length === 0) {
+    results.buy = await publishSeedOrder(config, midPrice, 'buy');
+  } else {
+    results.buy = { skipped: true, reason: 'active_buy_exists', count: activeBuys.length };
+  }
+
+  console.log(`[seeder] tick complete — mid: ${midPrice.toFixed(6)}, sell: ${JSON.stringify(results.sell)}, buy: ${JSON.stringify(results.buy)}`);
   return results;
 }
 
@@ -100,19 +113,33 @@ async function publishSeedOrder(config, midPrice, side) {
     wantAmount = String(config.amount_kas);
   }
 
-  // Query maker's multi-chain wallets for receive addresses
-  // Phase 1: only EVM chains with auto-pay support (BNB/ETH). SOL/TRON added in Phase 2.
-  const wallets = sqlite.prepare(`
-    SELECT chain, address FROM agent_wallets
-    WHERE relay_node_id = ? AND is_default = 1 AND chain IN ('bnb', 'eth')
-    ORDER BY CASE chain WHEN 'bnb' THEN 0 WHEN 'eth' THEN 1 ELSE 2 END
-  `).all(agentId);
+  // Build verification config based on side
+  let verification, verificationMeta;
 
-  // Build verification_meta with accepted chains (for cross_chain_tx verification)
-  const usesCrossChain = wantAsset === 'USDT' && wallets.length > 0;
-  const verificationMeta = usesCrossChain
-    ? { accepted_chains: wallets.map(w => ({ chain: w.chain, address: w.address })), expected_asset: 'USDT' }
-    : {};
+  if (side === 'sell') {
+    // Sell KAS → want USDT: cross_chain_tx verification (taker pays USDT to our EVM wallet)
+    const wallets = sqlite.prepare(`
+      SELECT chain, address FROM agent_wallets
+      WHERE relay_node_id = ? AND is_default = 1 AND chain IN ('bnb', 'eth', 'sol', 'tron')
+      ORDER BY CASE chain WHEN 'bnb' THEN 0 WHEN 'eth' THEN 1 WHEN 'sol' THEN 2 WHEN 'tron' THEN 3 ELSE 4 END
+    `).all(agentId);
+
+    if (wallets.length === 0) {
+      console.log(`[seeder] No EVM wallets for sell order, skip`);
+      return { ok: false, error: 'no_evm_wallets' };
+    }
+    verification = 'cross_chain_tx';
+    verificationMeta = { accepted_chains: wallets.map(w => ({ chain: w.chain, address: w.address })), expected_asset: 'USDT' };
+  } else {
+    // Buy KAS → want KAS: kaspa_tx verification (taker pays KAS to our Kaspa address)
+    const relay = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(agentId);
+    if (!relay?.address) {
+      console.log(`[seeder] No Kaspa address for buy order, skip`);
+      return { ok: false, error: 'no_kaspa_address' };
+    }
+    verification = 'kaspa_tx';
+    verificationMeta = { expected_address: relay.address, expected_asset: 'KAS' };
+  }
 
   try {
     const res = await fetch(`http://127.0.0.1:${PORT}/api/exchange/publish`, {
@@ -124,7 +151,7 @@ async function publishSeedOrder(config, midPrice, side) {
         give_amount: giveAmount,
         want_asset: wantAsset,
         want_amount: wantAmount,
-        verification: usesCrossChain ? 'cross_chain_tx' : 'manual',
+        verification,
         verification_meta: verificationMeta,
         expires_minutes: config.expires_minutes,
         metadata: {

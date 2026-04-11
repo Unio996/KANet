@@ -59,7 +59,7 @@ DATABASE.md 有改动时（新表/删表/加字段），必须同步更新文档
 | agent-mind | `agent-mind` | Agent 灵魂（五核、技能、决策）|
 | agent-adapter | `agent-adapter` | AI 大脑桥接（多 provider）|
 
-## 当前系统状态（2026-04-10 更新）
+## 当前系统状态（2026-04-11 更新）
 
 ### 数据架构
 - `relation_states` 是社交关系唯一真相源
@@ -76,7 +76,10 @@ DATABASE.md 有改动时（新表/删表/加字段），必须同步更新文档
 - Brain 感知：context-builder + self-awareness 注入挂单状态
 - 端到端验证通过：挂单 → 接单 → 付款 → 验证 → 发 KAS → completed，全程零人工
 - 设计文档：`docs/superpowers/specs/2026-04-10-exchange-settlement-design.md`
-- Phase 2 待做：SOL/TRON auto-pay、Swap 集成、UI 三层次改进
+- Phase 2 完成：SOL/TRON auto-pay（4/11）。待做：Swap 集成
+- 4/11 修复：timeoutVerifying 超时逻辑修正（expires_at → verifying_started_at+30min）
+- 4/11 增强：Seeder 双向做市（buy-side USDT→KAS + kaspa_tx 验证）
+- 4/11 增强：Exchange UI 三层可验证证据链接（Kaspa/BSC/ETH/SOL/TRON explorer）
 
 ### 做市管线
 - Market Seeder（market-seeder.js）：5min tick 自动挂单，价格跟随市价 + spread%

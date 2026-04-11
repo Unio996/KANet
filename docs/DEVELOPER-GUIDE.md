@@ -1,7 +1,8 @@
 # KANet Developer Guide
 
 > **修改任何代码前必读。** 一个文件，覆盖全系统。唯一权威开发者文档。
-> 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-10。
+> 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-11。
+> 4/11 更新：**SOL/TRON auto-pay 完成**：evm-transfer.js 扩展为 multi-chain transfer（transferSolUsdt + transferTronUsdt + 统一 transferUsdt 接口）。auto-pay 从 BNB/ETH 扩展到 4 链。**陷阱 #44：timeoutVerifying 必须用 verifying_started_at+30min，不能用 expires_at。** 旧逻辑用 expires_at 超时导致临近过期接单后仅 3-5 分钟就 timeout。**Seeder 双向做市**：buy-side 上线（USDT→KAS，kaspa_tx 验证）+ 链白名单扩展到 4 链。**Exchange UI 三层可验证**：deal detail 展示 Publish TX / Accept TX / Payment TX 链上证据链接（Kaspa Explorer + BscScan/Etherscan/Solscan/Tronscan）。delivering 状态 timeline 步骤。**数据清理**：3 笔遗留 stuck offers 清为 cancelled，1 笔 completed offer 孤立 fund_lock 修复。**首次跨节点开发协作**：通过 KANet Chat #kanet-public 频道与 Agent 139 节点 Claude Code 协调（消息上链，TX 可审计）。
 > 4/10 更新（晚间）：**致命 bug 修复：废弃乐观写入。** publish API 改为先广播再写 DB，广播失败不写任何记录。链是唯一事实源，broadcast_tx_id 永远是真实 txId，不再有 `pending_` 垃圾数据。**陷阱 #43：永远不要乐观写入链上数据——先上链拿到 txId，才写本地 DB。没有 TX 就不存在。** 首笔跨节点真实交易完成（139 Agent 付 0.335 USDT → Martin 发 10 KAS）。
 > 4/10 更新：**Exchange 协议 v2.1 — 全自动交割链路完成。** 7 条协议消息（paid/delivered/timeout 新增）。delivering 状态。auto-pay（evm-transfer.js 共享函数，BNB/ETH）。auto-deliver KAS（3 次重试）。matched 30min 超时 reopen。Brain 感知挂单状态（context-builder + self-awareness）。CANCEL_OFFERS 支持单个 offer_id。market-scanner 历史成交参考。**端到端验证通过：Martin 挂单 → Sophie 自动接单付 USDT → 跨链验证 → 自动发 KAS → completed，全程零人工。** Polymarket 赎回（redeemPositions）。Spending Ledger 修复（第三个 UNION ALL 分支）。Seeder expires_at 过滤 + 链白名单。Fund Lock 接入 exchange_offers。Settings 节点状态感知。v54-v55 migration。
 > 4/9 更新（下半场）：EXCHANGE_REGISTRY 贯通（共享文件 + getOrder/cancelOrder 迁移）。5 家 CEX 实盘验证全通过。scanner data→instructions 字段修正。Agent Focus Mode（v52，balanced/market_maker/social）。scanner per-agent 冷却。SELL_MAKER directive 修正。**里程碑：Sophie 自主卖出 2000 KAS on Gate.io。** 陷阱 #38-42。
@@ -1043,9 +1044,16 @@ getOrder / cancelOrder 用 `def.authStyle` switch（不是 exchange name），�
 ### 待实现
 
 - 信誉系统接入（reputation.js 骨架在，probe_address 未实现）
+- ✅ SOL/TRON auto-pay 发送（4/11，transferSolUsdt + transferTronUsdt + 统一 transferUsdt）
 - ✅ Arbitrage Tab 已上线（CEX Overview / Live Spreads / Active Offers / Hedge History）
 - ✅ 5 家 CEX 全链路验证通过（MEXC/Gate/Bybit/KuCoin/Bitget）
 - ✅ SELL_MAKER 全链路自主执行（Sophie Gate.io 2000 KAS 真实成交，2026-04-09）
+- ✅ Seeder 双向做市（4/11，sell + buy orders，kaspa_tx 验证 buy-side）
+- ✅ Exchange UI 三层可验证（4/11，Publish/Accept/Payment TX 链上证据链接）
+
+### 致命陷阱（4/11 补充）
+
+44. **timeoutVerifying 必须用 verifying_started_at + 30min。** 旧逻辑用 `expires_at < now` 超时，offer 若在 expires_at 前 3 分钟被接单（matched → verifying），下一轮 5min tick 就会把它 timeout——taker 只有 3 分钟而不是 30 分钟付款窗口。已修复为 `datetime(verifying_started_at, '+30 minutes') < datetime('now')`。对比 `checkMatchedTimeout()` 一直用 `matched_at + 30min` 是正确的。位置：exchange-machine.js:295。
 
 ---
 

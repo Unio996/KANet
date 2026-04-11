@@ -783,10 +783,10 @@ async function _autoPayExchange(offer, takerRelayNodeId) {
     return;
   }
 
-  // Check if chain is supported for auto-pay (Phase 1: BNB/ETH only)
-  const { isEvmChainSupported, transferERC20 } = await import('./evm-transfer.js');
-  if (!isEvmChainSupported(chain)) {
-    console.log(`[exchange-autopay] Chain ${chain} not supported for auto-pay (Phase 1: BNB/ETH only), skip`);
+  // Check if chain is supported for auto-pay (BNB/ETH/SOL/TRON)
+  const { isChainSupported, transferUsdt } = await import('./evm-transfer.js');
+  if (!isChainSupported(chain)) {
+    console.log(`[exchange-autopay] Chain ${chain} not supported for auto-pay, skip`);
     return;
   }
 
@@ -814,7 +814,7 @@ async function _autoPayExchange(offer, takerRelayNodeId) {
 
   console.log(`[exchange-autopay] Paying ${amount} USDT → ${receiveAddress.slice(0,12)}... on ${chain} for offer ${offer.id.slice(0,8)}`);
 
-  const result = await transferERC20(chain, wallet.privkey_encrypted, receiveAddress, amount);
+  const result = await transferUsdt(chain, wallet.privkey_encrypted, receiveAddress, amount);
   if (!result.ok) {
     console.error(`[exchange-autopay] Payment failed: ${result.error}`);
     recordChainEvent({

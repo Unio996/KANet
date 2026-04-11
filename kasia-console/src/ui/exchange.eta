@@ -317,6 +317,29 @@
                   <div class="text-ink-500">Published <span class="text-ink-700 ml-1" x-text="KANet.formatTime(o.broadcast_at)"></span></div>
                 </div>
 
+                <!-- Three-layer verifiability -->
+                <div class="px-4 py-2 space-y-1" x-show="o.broadcast_tx_id && !o.broadcast_tx_id.startsWith('pending_')">
+                  <div class="text-[10px] font-semibold text-ink-400 uppercase tracking-wider mb-1">On-chain proof</div>
+                  <div class="flex flex-wrap gap-x-4 gap-y-1 text-[10px]">
+                    <a x-show="o.broadcast_tx_id && !o.broadcast_tx_id.startsWith('pending_')"
+                      :href="'https://explorer.kaspa.org/txs/' + o.broadcast_tx_id" target="_blank" rel="noopener"
+                      class="text-brand-500 hover:text-brand-700 font-mono">
+                      Publish TX <span x-text="o.broadcast_tx_id?.slice(0,10) + '...'"></span>
+                    </a>
+                    <a x-show="o.taker_tx_id && !o.taker_tx_id.startsWith('pending_')"
+                      :href="'https://explorer.kaspa.org/txs/' + o.taker_tx_id" target="_blank" rel="noopener"
+                      class="text-brand-500 hover:text-brand-700 font-mono">
+                      Accept TX <span x-text="o.taker_tx_id?.slice(0,10) + '...'"></span>
+                    </a>
+                    <template x-if="getPaymentTx(o)">
+                      <a :href="getExplorerUrl(o)" target="_blank" rel="noopener"
+                        class="text-brand-500 hover:text-brand-700 font-mono">
+                        Payment TX <span x-text="getPaymentTx(o)?.slice(0,10) + '...'"></span>
+                      </a>
+                    </template>
+                  </div>
+                </div>
+
                 <!-- Timeline -->
                 <div class="px-4 py-3">
                   <template x-for="(step, i) in getTimeline(o)" :key="i">
@@ -436,6 +459,28 @@
                   <div class="text-ink-500">Taker <span class="text-ink-700 font-mono ml-1" x-text="o.taker ? KANet.shortAddr(o.taker) : '—'"></span></div>
                   <div class="text-ink-500">Verification <span class="text-ink-700 ml-1" x-text="o.verification"></span></div>
                   <div class="text-ink-500">Published <span class="text-ink-700 ml-1" x-text="KANet.formatTime(o.broadcast_at)"></span></div>
+                </div>
+                <!-- Three-layer verifiability -->
+                <div class="px-4 py-2 space-y-1" x-show="o.broadcast_tx_id && !o.broadcast_tx_id.startsWith('pending_')">
+                  <div class="text-[10px] font-semibold text-ink-400 uppercase tracking-wider mb-1">On-chain proof</div>
+                  <div class="flex flex-wrap gap-x-4 gap-y-1 text-[10px]">
+                    <a x-show="o.broadcast_tx_id && !o.broadcast_tx_id.startsWith('pending_')"
+                      :href="'https://explorer.kaspa.org/txs/' + o.broadcast_tx_id" target="_blank" rel="noopener"
+                      class="text-brand-500 hover:text-brand-700 font-mono">
+                      Publish TX <span x-text="o.broadcast_tx_id?.slice(0,10) + '...'"></span>
+                    </a>
+                    <a x-show="o.taker_tx_id && !o.taker_tx_id.startsWith('pending_')"
+                      :href="'https://explorer.kaspa.org/txs/' + o.taker_tx_id" target="_blank" rel="noopener"
+                      class="text-brand-500 hover:text-brand-700 font-mono">
+                      Accept TX <span x-text="o.taker_tx_id?.slice(0,10) + '...'"></span>
+                    </a>
+                    <template x-if="getPaymentTx(o)">
+                      <a :href="getExplorerUrl(o)" target="_blank" rel="noopener"
+                        class="text-brand-500 hover:text-brand-700 font-mono">
+                        Payment TX <span x-text="getPaymentTx(o)?.slice(0,10) + '...'"></span>
+                      </a>
+                    </template>
+                  </div>
                 </div>
                 <div class="px-4 py-3">
                   <template x-for="(step, i) in getTimeline(o)" :key="i">
@@ -1131,6 +1176,17 @@ function exchangeApp() {
         });
       }
 
+      // Delivering step (v2.1: auto-deliver KAS after verification)
+      if (o.delivering_at || o.protocol_status === 'delivering') {
+        steps.push({
+          label: 'Delivering',
+          done: !!o.completed_at,
+          active: o.protocol_status === 'delivering',
+          time: o.delivering_at,
+          detail: o.protocol_status === 'delivering' ? 'sending KAS...' : '',
+        });
+      }
+
       // Terminal state
       if (o.completed_at) {
         steps.push({ label: 'Completed', done: true, time: o.completed_at });
@@ -1149,12 +1205,28 @@ function exchangeApp() {
       return steps;
     },
 
+    // ── On-chain proof helpers ──
+    getPaymentTx(o) {
+      if (o.payment_tx) return o.payment_tx;
+      try { const m = JSON.parse(o.verification_meta || '{}'); return m.payment_tx || null; } catch { return null; }
+    },
+    getExplorerUrl(o) {
+      const tx = this.getPaymentTx(o);
+      if (!tx) return '#';
+      const chain = o.taker_chain || '';
+      if (chain === 'bnb') return 'https://bscscan.com/tx/' + tx;
+      if (chain === 'eth') return 'https://etherscan.io/tx/' + tx;
+      if (chain === 'sol') return 'https://solscan.io/tx/' + tx;
+      if (chain === 'tron') return 'https://tronscan.org/#/transaction/' + tx;
+      return '#';
+    },
+
     // ── Status helpers ──
     statusBadge(s) {
       return {
         'bg-green-50 text-green-700': s === 'open',
         'bg-blue-50 text-blue-700': s === 'matched',
-        'bg-amber-50 text-amber-700': s === 'verifying' || s === 'awaiting_manual_confirm',
+        'bg-amber-50 text-amber-700': s === 'verifying' || s === 'awaiting_manual_confirm' || s === 'delivering',
         'bg-green-100 text-green-800': s === 'completed',
         'bg-red-50 text-red-600': s === 'disputed' || s === 'timed_out',
         'bg-warm-100 text-ink-500': s === 'cancelled' || s === 'expired',

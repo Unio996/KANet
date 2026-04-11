@@ -293,12 +293,12 @@ export function expireStale() {
  * @returns {number} count of timed out offers
  */
 export function timeoutVerifying() {
-  const now = new Date().toISOString();
   const stuck = sqlite.prepare(
     `SELECT id, verification FROM exchange_offers
      WHERE protocol_status IN ('verifying', 'awaiting_manual_confirm', 'awaiting_oracle')
-     AND expires_at IS NOT NULL AND expires_at < ?`
-  ).all(now);
+     AND verifying_started_at IS NOT NULL
+     AND datetime(verifying_started_at, '+30 minutes') < datetime('now')`
+  ).all();
 
   for (const { id } of stuck) {
     transition(id, 'timed_out');
