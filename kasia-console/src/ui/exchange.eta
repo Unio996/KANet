@@ -1235,36 +1235,23 @@ function exchangeApp() {
       if (!this.form?.relayNodeId) return;
       try {
         const rid = this.form.relayNodeId;
-        const [wallets, locks] = await Promise.allSettled([
-          fetch(`/api/relay/${rid}/wallets`).then(r => r.json()),
-          fetch(`/api/trade/fund-locks?relay_node_id=${rid}`).then(r => r.json()),
-        ]);
-        if (wallets.status === 'fulfilled' && wallets.value) {
-          const w = wallets.value;
-          // Build locked map from fund locks
+        const data = await fetch(`/api/relay/${rid}/wallets`).then(r => r.json());
+        // Map chain wallets (same pattern as market.eta)
+        const allWallets = (data.chains || []).map(w => ({
+          id: w.id, chain: w.chain, address: w.address, label: w.label || '',
+          isDefault: w.isDefault, hasPrivateKey: w.hasPrivateKey,
+          usdt: w.usdtBalance || 0, usdc: w.usdcBalance || 0, gas: w.nativeBalance || 0, locked: 0,
+        }));
+        // Fund locks
+        try {
+          const locks = await fetch('/api/trade/fund-locks?relay_node_id=' + encodeURIComponent(rid)).then(r => r.json());
+          const lockArr = Array.isArray(locks) ? locks : (locks.locks || []);
           const lockedMap = {};
-          const lockData = locks.status === 'fulfilled' ? locks.value : {};
-          const lockArr = Array.isArray(lockData) ? lockData : (lockData.locks || []);
-          for (const l of lockArr) {
-            if (l.status !== 'locked') continue;
-            lockedMap[l.asset || 'kas'] = (lockedMap[l.asset || 'kas'] || 0) + (l.amount || 0);
-          }
-          // Fetch on-chain balances for each chain wallet
-          const chains = w.chains || [];
-          const balancePromises = chains.map(c =>
-            c.id ? fetch(`/api/relay/${rid}/wallets/${c.id}/balance`).then(r => r.json()).catch(() => ({})) : Promise.resolve({})
-          );
-          const balances = await Promise.all(balancePromises);
-          this.walletData = {
-            kas: { address: w.kaspa?.address, balance: w.kaspa?.balance, locked: lockedMap['kas'] || 0 },
-            chains: chains.map((c, i) => ({
-              ...c,
-              usdt: balances[i]?.usdt ?? c.usdt ?? 0,
-              usdc: balances[i]?.usdc ?? c.usdc ?? 0,
-              gas: balances[i]?.native ?? c.gas ?? 0,
-              locked: lockedMap['usdt_' + c.chain] || 0,
-            })),
-          };
+          for (const l of lockArr) { if (l.status === 'locked') lockedMap[l.asset] = (lockedMap[l.asset] || 0) + l.amount; }
+          for (const w of allWallets) w.locked = lockedMap['usdt_' + w.chain] || 0;
+          this.walletData = { kas: { address: data.kaspa?.address, balance: data.kaspa?.balance || 0, locked: lockedMap['kas'] || 0 }, chains: allWallets };
+        } catch {
+          this.walletData = { kas: { address: data.kaspa?.address, balance: data.kaspa?.balance || 0, locked: 0 }, chains: allWallets };
         }
       } catch {}
     },
