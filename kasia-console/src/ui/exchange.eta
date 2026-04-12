@@ -2,37 +2,101 @@
 
 <div class="h-full flex flex-col" x-data="exchangeApp()">
 
-  <!-- ═══ DISCOVERY BAR ═══ -->
-  <div class="flex-shrink-0 bg-white border-b border-warm-200 px-5 py-2.5 flex items-center gap-6 text-xs overflow-x-auto">
-    <div class="flex items-center gap-1.5">
-      <span class="text-ink-400">KAS</span>
-      <span class="text-ink-700 font-semibold tabular-nums" x-text="kasPrice ? '$' + kasPrice.toFixed(5) : '—'"></span>
+  <!-- ═══ DISCOVERY BAR + WALLET ═══ -->
+  <div class="flex-shrink-0 bg-white border-b border-warm-200 relative">
+    <div class="px-5 py-2.5 flex items-center gap-5 text-xs overflow-x-auto">
+      <!-- Market metrics -->
+      <div class="flex items-center gap-1.5">
+        <span class="text-ink-400">KAS</span>
+        <span class="text-ink-700 font-semibold tabular-nums" x-text="kasPrice ? '$' + kasPrice.toFixed(5) : '—'"></span>
+      </div>
+      <div class="w-px h-4 bg-warm-200"></div>
+      <div class="flex items-center gap-1.5">
+        <span class="text-ink-400">Open</span>
+        <span class="text-ink-600 font-medium tabular-nums" x-text="openOffers.length"></span>
+      </div>
+      <div x-show="overview.totalCompleted >= 5" class="flex items-center gap-1.5">
+        <span class="text-ink-400">Settled</span>
+        <span class="text-green-600 font-medium tabular-nums" x-text="overview.totalCompleted"></span>
+      </div>
+      <!-- Wallet summary (click to expand) -->
+      <div class="w-px h-4 bg-warm-200"></div>
+      <button @click="openWalletPanel('kas')" class="flex items-center gap-1 hover:text-brand-500 transition-colors">
+        <span class="text-ink-400">KAS</span>
+        <span class="font-semibold tabular-nums text-ink-700" x-text="(wallet.kas||0).toFixed(1)"></span>
+        <span x-show="wallet.kasLocked>0" class="text-[10px] text-orange-500 tabular-nums" x-text="'('+(wallet.kasLocked||0).toFixed(1)+' locked)'"></span>
+      </button>
+      <template x-for="c in chainSummary" :key="c.chain">
+        <button @click="openWalletPanel(c.chain)" class="flex items-center gap-1 hover:text-brand-500 transition-colors">
+          <span class="text-ink-400 text-[10px]" x-text="c.name"></span>
+          <span class="tabular-nums text-ink-600" x-text="((c.usdt||0)>0?(c.usdt||0).toFixed(2)+' USDT':'') + ((c.usdc||0)>0?((c.usdt||0)>0?' / ':'')+(c.usdc||0).toFixed(2)+' USDC':'') + ((c.usdt||0)===0&&(c.usdc||0)===0?'0 USDT':'')"></span>
+          <span x-show="c.locked>0" class="text-[10px] text-orange-500 tabular-nums" x-text="'('+(c.locked||0).toFixed(2)+' locked)'"></span>
+        </button>
+      </template>
+      <!-- Agent selector -->
+      <div class="ml-auto flex items-center gap-2">
+        <select x-model="form.relayNodeId" @change="onAgentChange()"
+          class="pl-2 pr-6 py-1 border border-warm-200 rounded text-xs bg-white">
+          <template x-for="r in relays" :key="r.id">
+            <option :value="r.id" x-text="r.name"></option>
+          </template>
+        </select>
+      </div>
     </div>
-    <div class="w-px h-4 bg-warm-200"></div>
-    <div x-show="overview.totalCompleted >= 5" class="flex items-center gap-1.5">
-      <span class="text-ink-400">Settled</span>
-      <span class="text-green-600 font-medium tabular-nums" x-text="overview.totalCompleted"></span>
-    </div>
-    <div x-show="overview.avgSettlement" class="flex items-center gap-1.5">
-      <span class="text-ink-400">Avg</span>
-      <span class="text-ink-600 font-medium tabular-nums" x-text="overview.avgSettlement"></span>
-    </div>
-    <div class="flex items-center gap-1.5">
-      <span class="text-ink-400">Open</span>
-      <span class="text-ink-600 font-medium tabular-nums" x-text="openOffers.length"></span>
-    </div>
-    <div class="flex items-center gap-1.5">
-      <span class="text-ink-400">24h vol</span>
-      <span class="text-ink-600 tabular-nums" x-text="overview.volume24h ? overview.volume24h + ' KAS' : '—'"></span>
-    </div>
-    <div class="ml-auto flex items-center gap-2">
-      <span class="text-ink-400">Agent:</span>
-      <select x-model="form.relayNodeId" @change="onAgentChange()"
-        class="pl-2 pr-6 py-1 border border-warm-200 rounded text-xs bg-white">
-        <template x-for="r in relays" :key="r.id">
-          <option :value="r.id" x-text="r.name"></option>
-        </template>
-      </select>
+
+    <!-- ═══ WALLET POPUP PANEL (below discovery bar) ═══ -->
+    <div x-show="walletPanel" x-transition class="absolute top-full left-0 right-0 z-30 bg-white border-b border-warm-200 shadow-lg p-4 max-h-80 overflow-y-auto">
+      <div class="flex items-center justify-between mb-3">
+        <h4 class="text-sm font-semibold text-ink-700" x-text="walletPanel==='kas'?'Kaspa Wallet':(walletPanel?.toUpperCase()+' Wallets')"></h4>
+        <button @click="walletPanel=null" class="text-ink-400 hover:text-ink-600 text-xs">Close</button>
+      </div>
+
+      <!-- KAS wallet detail -->
+      <template x-if="walletPanel==='kas'">
+        <div class="space-y-2 text-[12px]">
+          <div class="flex items-center justify-between"><span class="text-ink-400">Address</span>
+            <span class="text-[10px] text-brand-500 cursor-pointer tabular-nums" @click="copyAddr(agentAddr)" x-text="agentAddr" title="Click to copy"></span></div>
+          <div class="flex items-center justify-between"><span class="text-ink-400">Balance</span><span class="font-semibold tabular-nums" x-text="(wallet.kas||0).toFixed(2)+' KAS'"></span></div>
+          <div x-show="wallet.kasLocked>0" class="flex items-center justify-between"><span class="text-ink-400">Locked</span><span class="tabular-nums text-orange-600" x-text="(wallet.kasLocked||0).toFixed(2)+' KAS'"></span></div>
+          <div class="flex items-center justify-between"><span class="text-ink-400">Available</span><span class="tabular-nums text-green-600" x-text="((wallet.kas||0)-(wallet.kasLocked||0)).toFixed(2)+' KAS'"></span></div>
+          <div x-data="{showSend:false,sendAddr:'',sendAmt:''}" class="mt-2">
+            <button @click="showSend=!showSend" class="text-[11px] text-brand-500 hover:text-brand-700">Withdraw KAS</button>
+            <div x-show="showSend" class="mt-2 space-y-2">
+              <input x-model="sendAddr" placeholder="Target kaspa:q... address" class="w-full border border-warm-300 rounded px-2 py-1.5 text-[11px] bg-warm-50 focus:border-brand-400 focus:outline-none" />
+              <input x-model.number="sendAmt" placeholder="Amount (KAS)" type="number" class="w-full border border-warm-300 rounded px-2 py-1.5 text-[11px] bg-warm-50 focus:border-brand-400 focus:outline-none" />
+              <button @click="$dispatch('send-kas',{addr:sendAddr,amt:sendAmt})" class="w-full py-1.5 rounded bg-red-50 text-red-600 border border-red-200 text-[11px] font-semibold hover:bg-red-100">Send</button>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- Multi-chain wallet detail -->
+      <template x-if="walletPanel && walletPanel!=='kas'">
+        <div class="space-y-3">
+          <template x-for="w in panelWallets" :key="w.id||w.address">
+            <div class="p-3 rounded-lg border border-warm-200 bg-warm-50">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-[10px] text-brand-500 cursor-pointer tabular-nums" @click="copyAddr(w.address)" x-text="w.address" title="Click to copy"></span>
+                <span x-show="w.isDefault" class="text-[9px] bg-brand-50 text-brand-600 px-1.5 py-0.5 rounded">default</span>
+              </div>
+              <div class="grid grid-cols-4 gap-2 text-[11px]">
+                <div><span class="text-ink-400">USDT</span><div class="font-medium tabular-nums text-ink-700" x-text="(w.usdt||0).toFixed(2)"></div></div>
+                <div><span class="text-ink-400">USDC</span><div class="font-medium tabular-nums text-ink-700" x-text="(w.usdc||0).toFixed(2)"></div></div>
+                <div><span class="text-ink-400" x-text="w.chain==='polygon'?'MATIC':w.chain==='bnb'?'BNB':w.chain==='eth'?'ETH':w.chain==='sol'?'SOL':w.chain==='tron'?'TRX':w.chain?.toUpperCase()"></span><div class="font-medium tabular-nums text-ink-700" x-text="(w.gas||0).toFixed(4)"></div></div>
+                <div x-show="w.locked>0"><span class="text-ink-400">Locked</span><div class="font-medium tabular-nums text-orange-600" x-text="(w.locked||0).toFixed(2)+' USDT'"></div></div>
+              </div>
+              <div class="flex gap-2 mt-2">
+                <button @click="copyAddr(w.address)" class="px-2 py-1 rounded text-[10px] bg-warm-100 text-ink-400 hover:text-ink-700 border border-warm-200">Copy</button>
+                <button @click="withdrawPrompt(w)" class="px-2 py-1 rounded text-[10px] bg-warm-100 text-ink-400 hover:text-red-600 border border-warm-200">Withdraw</button>
+                <button @click="showPrivkeyFor(w)" class="px-2 py-1 rounded text-[10px] bg-warm-100 text-ink-400 hover:text-orange-600 border border-warm-200">Private Key</button>
+              </div>
+            </div>
+          </template>
+          <button @click="createWallet(walletPanel)" class="w-full py-2 rounded-lg border border-dashed border-warm-300 text-[11px] text-ink-400 hover:text-brand-500 hover:border-brand-300 transition-all">
+            + Create new <span x-text="walletPanel?.toUpperCase()"></span> wallet
+          </button>
+        </div>
+      </template>
     </div>
   </div>
 
@@ -507,9 +571,6 @@
     <div x-show="opsOpen" x-transition class="border-t border-warm-100">
       <!-- Arb/Seed sub-tabs -->
       <div class="flex border-b border-warm-200 px-5">
-        <button @click="opsTab = 'wallet'; loadWalletData();"
-          :class="opsTab === 'wallet' ? 'border-brand-500 text-brand-600' : 'border-transparent text-ink-400'"
-          class="px-3 py-2 text-xs border-b-2 -mb-px">Wallet</button>
         <button @click="opsTab = 'arb'"
           :class="opsTab === 'arb' ? 'border-brand-500 text-brand-600' : 'border-transparent text-ink-400'"
           class="px-3 py-2 text-xs border-b-2 -mb-px">Arbitrage</button>
@@ -518,78 +579,6 @@
           class="px-3 py-2 text-xs border-b-2 -mb-px">Seeder</button>
       </div>
       <div class="p-5 max-h-[32rem] overflow-y-auto">
-        <!-- Wallet tab -->
-        <div x-show="opsTab === 'wallet'" class="text-xs text-ink-500 space-y-3">
-          <!-- KAS Wallet -->
-          <div class="bg-warm-50 border border-warm-200 rounded-lg p-3">
-            <div class="flex items-center justify-between mb-2">
-              <span class="font-medium text-ink-600">Kaspa</span>
-              <span class="text-lg font-semibold text-ink-700 tabular-nums" x-text="(walletData.kas?.balance ?? '—') + ' KAS'"></span>
-            </div>
-            <div class="flex items-center gap-2 mb-1.5">
-              <code class="text-[10px] text-ink-400 bg-warm-100 px-1.5 py-0.5 rounded break-all flex-1" x-text="walletData.kas?.address || '—'"></code>
-              <button @click="copyAddr(walletData.kas?.address)" class="text-brand-500 hover:text-brand-700 shrink-0" title="Copy">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
-              </button>
-            </div>
-            <div class="grid grid-cols-3 gap-2 text-[11px]">
-              <div><span class="text-ink-400">Locked:</span> <span class="text-orange-600 font-medium tabular-nums" x-text="Number(walletData.kas?.locked || 0).toFixed(1)"></span></div>
-              <div><span class="text-ink-400">Exposure:</span> <span class="text-ink-600 font-medium tabular-nums" x-text="Number(limitsData.status?.current_exposure_kas || 0).toFixed(1)"></span></div>
-              <div><span class="text-ink-400">Available:</span> <span class="text-green-600 font-medium tabular-nums" x-text="Number((walletData.kas?.balance || 0) - (walletData.kas?.locked || 0)).toFixed(1)"></span></div>
-            </div>
-            <!-- KAS Withdraw -->
-            <div x-show="walletWithdrawChain === 'kas'" class="mt-2 border-t border-warm-200 pt-2">
-              <div class="grid grid-cols-[1fr_auto_auto] gap-2">
-                <input type="text" x-model="walletWithdrawAddr" placeholder="kaspa:q..." class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white text-[11px]" />
-                <input type="number" x-model.number="walletWithdrawAmt" placeholder="KAS" class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-20 text-[11px]" />
-                <button @click="doKasWithdraw()" :disabled="walletWithdrawing" class="px-2 py-1 bg-brand-500 text-white rounded text-[11px] disabled:opacity-50">Send</button>
-              </div>
-            </div>
-            <button @click="walletWithdrawChain = walletWithdrawChain === 'kas' ? null : 'kas'" class="mt-1.5 text-brand-500 hover:text-brand-700 text-[11px]" x-text="walletWithdrawChain === 'kas' ? 'Cancel' : 'Withdraw KAS'"></button>
-          </div>
-
-          <!-- Multi-chain Wallets (matches market.eta layout) -->
-          <template x-for="cw in walletData.chains" :key="cw.id || cw.chain">
-            <div class="bg-warm-50 border border-warm-200 rounded-lg p-3">
-              <div class="flex items-center justify-between mb-2">
-                <div class="flex items-center gap-1.5">
-                  <span class="font-medium text-ink-600" x-text="cw.chain?.toUpperCase()"></span>
-                  <span x-show="cw.isDefault" class="text-[10px] text-brand-500 bg-brand-50 px-1 rounded">default</span>
-                </div>
-              </div>
-              <div class="flex items-center gap-2 mb-2">
-                <code class="text-[10px] text-ink-400 bg-warm-100 px-1.5 py-0.5 rounded break-all flex-1 cursor-pointer" @click="copyAddr(cw.address)" x-text="cw.address || '—'" title="Click to copy"></code>
-              </div>
-              <!-- 4-column balance grid (same as market.eta) -->
-              <div class="grid grid-cols-4 gap-2 text-[11px] mb-2">
-                <div>
-                  <div class="text-ink-400">USDT</div>
-                  <div class="font-medium tabular-nums text-ink-700" x-text="Number(cw.usdt || 0).toFixed(2)"></div>
-                </div>
-                <div>
-                  <div class="text-ink-400">USDC</div>
-                  <div class="font-medium tabular-nums text-ink-700" x-text="Number(cw.usdc || 0).toFixed(2)"></div>
-                </div>
-                <div>
-                  <div class="text-ink-400" x-text="cw.chain === 'polygon' ? 'MATIC' : cw.chain === 'bnb' ? 'BNB' : cw.chain === 'eth' ? 'ETH' : cw.chain === 'sol' ? 'SOL' : cw.chain === 'tron' ? 'TRX' : cw.chain?.toUpperCase()"></div>
-                  <div class="font-medium tabular-nums text-ink-700" x-text="Number(cw.gas || 0).toFixed(4)"></div>
-                </div>
-                <div x-show="cw.locked > 0">
-                  <div class="text-ink-400">Locked</div>
-                  <div class="font-medium tabular-nums text-orange-600" x-text="Number(cw.locked || 0).toFixed(2) + ' USDT'"></div>
-                </div>
-              </div>
-              <!-- Action buttons (same as market.eta) -->
-              <div class="flex gap-2">
-                <button @click="copyAddr(cw.address)" class="px-2 py-1 rounded text-[10px] bg-warm-100 text-ink-400 hover:text-ink-700 border border-warm-200">Copy</button>
-                <button @click="doChainWithdraw(cw)" class="px-2 py-1 rounded text-[10px] bg-warm-100 text-ink-400 hover:text-red-600 border border-warm-200">Withdraw</button>
-                <button @click="showPrivkey(cw)" class="px-2 py-1 rounded text-[10px] bg-warm-100 text-ink-400 hover:text-orange-600 border border-warm-200">Private Key</button>
-              </div>
-            </div>
-          </template>
-          <div x-show="!walletData.chains?.length" class="text-center text-ink-400 py-4">No multi-chain wallets configured. <a href="/relays" class="text-brand-500 hover:underline">Add wallets</a></div>
-        </div>
-
         <!-- Arb content placeholder — preserved from existing -->
         <div x-show="opsTab === 'arb'" class="text-xs text-ink-500">
           <div class="grid grid-cols-3 gap-4 mb-4">
@@ -775,11 +764,9 @@ function exchangeApp() {
     limitsData: { limits: { per_offer_kas: 5000, total_exposure_kas: 20000, price_deviation_pct: 5 }, status: {} },
     limitsForm: { per_offer_kas: 5000, total_exposure_kas: 20000, price_deviation_pct: 5 },
     limitsSaving: false,
-    walletData: { kas: null, chains: [] },
-    walletWithdrawChain: null,
-    walletWithdrawAddr: '',
-    walletWithdrawAmt: null,
-    walletWithdrawing: false,
+    wallet: { kas: 0, kasLocked: 0, chains: [] },
+    walletPanel: null,
+    agentAddr: '',
     seedOrders: [],
     seedStats: { seeded: 0, taken: 0, net_usdt: 0 },
     seedTriggering: false,
@@ -838,8 +825,22 @@ function exchangeApp() {
     async init() {
       await this.loadRelays();
       await Promise.all([this.loadOffers(), this.loadKasPrice()]);
+      this.loadWallet(); // async, don't block
       setInterval(() => this.loadOffers(), 30000);
       setInterval(() => this.loadKasPrice(), 60000);
+      setInterval(() => this.loadWallet(), 15000); // wallet balances refresh
+      // KAS withdraw via send-kas event (from wallet panel inline form)
+      this.$el?.addEventListener('send-kas', async (e) => {
+        const { addr, amt } = e.detail || {};
+        if (!addr || !amt || !this.form?.relayNodeId) return;
+        if (!confirm('Send ' + amt + ' KAS to ' + addr + '?')) return;
+        try {
+          const r = await fetch('/api/relay/' + this.form.relayNodeId + '/transfer', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ target: addr, amount: String(amt) }) });
+          const d = await r.json();
+          if (d.txId) { alert('Sent! TX: ' + d.txId); this.walletPanel = null; await this.loadWallet(); }
+          else alert('Error: ' + (d.error || 'Unknown'));
+        } catch (e) { alert('Error: ' + e.message); }
+      });
     },
 
     async loadKasPrice() {
@@ -865,6 +866,8 @@ function exchangeApp() {
 
     onAgentChange() {
       this.currentAddress = this.relays.find(r => r.id === this.form.relayNodeId)?.address || null;
+      this.walletPanel = null;
+      this.loadWallet();
     },
 
     async loadOffers() {
@@ -1247,29 +1250,49 @@ function exchangeApp() {
       } catch {}
       finally { this.seedTriggering = false; }
     },
-    async loadWalletData() {
+    // ── Wallet (Market pattern) ──
+    async loadWallet() {
       if (!this.form?.relayNodeId) return;
       try {
-        const rid = this.form.relayNodeId;
-        const data = await fetch(`/api/relay/${rid}/wallets`).then(r => r.json());
-        // Map chain wallets (same pattern as market.eta)
+        const data = await fetch('/api/relay/' + this.form.relayNodeId + '/wallets').then(r => r.json());
+        this.agentAddr = data.kaspa?.address || '';
         const allWallets = (data.chains || []).map(w => ({
-          id: w.id, chain: w.chain, address: w.address, label: w.label || '',
-          isDefault: w.isDefault, hasPrivateKey: w.hasPrivateKey,
+          id: w.id, chain: w.chain, name: w.chain === 'polygon' ? 'POLYGON' : w.chain.toUpperCase(),
+          address: w.address, label: w.label || (w.isDefault ? 'default' : ''),
+          isDefault: w.isDefault,
           usdt: w.usdtBalance || 0, usdc: w.usdcBalance || 0, gas: w.nativeBalance || 0, locked: 0,
         }));
-        // Fund locks
         try {
-          const locks = await fetch('/api/trade/fund-locks?relay_node_id=' + encodeURIComponent(rid)).then(r => r.json());
+          const locks = await fetch('/api/trade/fund-locks?relay_node_id=' + encodeURIComponent(this.form.relayNodeId)).then(r => r.json());
           const lockArr = Array.isArray(locks) ? locks : (locks.locks || []);
           const lockedMap = {};
           for (const l of lockArr) { if (l.status === 'locked') lockedMap[l.asset] = (lockedMap[l.asset] || 0) + l.amount; }
           for (const w of allWallets) w.locked = lockedMap['usdt_' + w.chain] || 0;
-          this.walletData = { kas: { address: data.kaspa?.address, balance: data.kaspa?.balance || 0, locked: lockedMap['kas'] || 0 }, chains: allWallets };
+          this.wallet = { kas: data.kaspa?.balance || 0, kasLocked: lockedMap['kas'] || 0, chains: allWallets };
         } catch {
-          this.walletData = { kas: { address: data.kaspa?.address, balance: data.kaspa?.balance || 0, locked: 0 }, chains: allWallets };
+          this.wallet = { kas: data.kaspa?.balance || 0, kasLocked: 0, chains: allWallets };
         }
       } catch {}
+    },
+    get panelWallets() {
+      if (!this.walletPanel || this.walletPanel === 'kas') return [];
+      return this.wallet.chains.filter(w => w.chain === this.walletPanel);
+    },
+    get chainSummary() {
+      const map = {};
+      for (const w of this.wallet.chains) {
+        const key = w.chain;
+        if (!map[key]) map[key] = { name: w.name, chain: key, usdt: 0, usdc: 0, locked: 0, count: 0 };
+        map[key].usdt += w.usdt || 0;
+        map[key].usdc += w.usdc || 0;
+        map[key].locked += w.locked || 0;
+        map[key].count++;
+      }
+      return Object.values(map);
+    },
+    openWalletPanel(chain) {
+      if (this.walletPanel === chain) { this.walletPanel = null; return; }
+      this.walletPanel = chain;
     },
     copyAddr(addr) {
       if (!addr) return;
@@ -1278,48 +1301,45 @@ function exchangeApp() {
         document.body.appendChild(ta); ta.select(); document.execCommand('copy');
         document.body.removeChild(ta);
       }
+      const el = event?.target;
+      if (el) { const prev = el.textContent; el.textContent = 'Copied!'; setTimeout(() => { el.textContent = prev; }, 1500); }
     },
-    async doChainWithdraw(wallet) {
-      if (!wallet?.id || !this.form?.relayNodeId) return;
-      const asset = prompt('Withdraw which asset?\n1 = USDT\n2 = ' + (wallet.chain === 'bnb' ? 'BNB' : wallet.chain === 'eth' ? 'ETH' : wallet.chain === 'sol' ? 'SOL' : wallet.chain === 'tron' ? 'TRX' : wallet.chain?.toUpperCase()));
-      if (!asset) return;
-      const isNative = asset === '2';
-      const addr = prompt('Target address:');
-      if (!addr) return;
-      const amt = prompt('Amount (' + (isNative ? (wallet.chain === 'bnb' ? 'BNB' : wallet.chain?.toUpperCase()) : 'USDT') + '):');
-      if (!amt) return;
-      if (!confirm('Send ' + amt + ' ' + (isNative ? wallet.chain?.toUpperCase() : 'USDT') + ' to ' + addr + '?')) return;
+    withdrawPrompt(wallet) {
+      const chainName = wallet.chain?.toUpperCase();
+      const gasName = wallet.chain === 'polygon' ? 'MATIC' : wallet.chain === 'bnb' ? 'BNB' : wallet.chain === 'eth' ? 'ETH' : wallet.chain === 'sol' ? 'SOL' : wallet.chain === 'tron' ? 'TRX' : chainName;
+      const choice = prompt('Withdraw:\n  1 = USDT (' + (wallet.usdt||0).toFixed(2) + ' available)\n  2 = ' + gasName + ' (' + (wallet.gas||0).toFixed(4) + ' available)\n\nEnter 1 or 2:');
+      if (!choice) return;
+      const asset = choice.trim() === '2' ? 'native' : 'usdt';
+      const assetLabel = asset === 'native' ? gasName : 'USDT';
+      const toAddr = prompt('Target address (' + chainName + '):');
+      if (!toAddr) return;
+      const amt = prompt('Amount (' + assetLabel + '):');
+      if (!amt || isNaN(amt)) return;
+      if (!confirm('Send ' + amt + ' ' + assetLabel + '\nTo: ' + toAddr + '\nChain: ' + chainName)) return;
+      this.doWithdraw(wallet, toAddr, parseFloat(amt), asset);
+    },
+    async doWithdraw(wallet, toAddr, amount, asset = 'usdt') {
       try {
-        const r = await fetch('/api/trade/withdraw', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ walletId: wallet.id, relayNodeId: this.form.relayNodeId, asset: isNative ? 'native' : 'usdt', target: addr, amount: amt }) });
+        const r = await fetch('/api/trade/withdraw', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ walletId: wallet.id, chain: wallet.chain, to: toAddr, amount, asset }) });
         const d = await r.json();
-        if (d.txHash) { alert('Sent! TX: ' + d.txHash); await this.loadWalletData(); }
+        if (d.ok || d.txHash) { alert('Sent! TX: ' + (d.txHash || '').slice(0, 20) + '...'); await this.loadWallet(); }
         else alert('Error: ' + (d.error || 'Unknown'));
       } catch (e) { alert('Error: ' + e.message); }
     },
-    async showPrivkey(wallet) {
-      if (!wallet?.id || !this.form?.relayNodeId) return;
-      if (!confirm('Show private key for ' + wallet.chain?.toUpperCase() + ' wallet?\nThis is sensitive — do not share.')) return;
+    async showPrivkeyFor(wallet) {
+      if (!confirm('Show private key? Keep it safe.')) return;
       try {
-        const r = await fetch('/api/relay/' + this.form.relayNodeId + '/wallets/' + wallet.id + '/privkey');
-        const d = await r.json();
-        if (d.privateKey) prompt('Private key (Ctrl+C to copy):', d.privateKey);
-        else alert('Error: ' + (d.error || 'Could not retrieve'));
-      } catch (e) { alert('Error: ' + e.message); }
+        const r = await fetch('/api/relay/' + this.form.relayNodeId + '/wallets/' + wallet.id + '/privkey').then(r => r.json());
+        if (r.privkey) prompt('Private key (Ctrl+C to copy):', r.privkey);
+        else alert(r.error || 'Could not retrieve');
+      } catch { alert('Failed'); }
     },
-    async doKasWithdraw() {
-      if (!this.walletWithdrawAddr || !this.walletWithdrawAmt || !this.form?.relayNodeId) return;
-      if (!confirm(`Send ${this.walletWithdrawAmt} KAS to ${this.walletWithdrawAddr}?`)) return;
-      this.walletWithdrawing = true;
+    async createWallet(chain) {
       try {
-        const r = await fetch(`/api/relay/${this.form.relayNodeId}/transfer`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ target: this.walletWithdrawAddr, amount: String(this.walletWithdrawAmt) }),
-        });
-        const d = await r.json();
-        if (d.txId) { alert('Sent! TX: ' + d.txId); this.walletWithdrawChain = null; this.walletWithdrawAddr = ''; this.walletWithdrawAmt = null; await this.loadWalletData(); }
-        else alert('Error: ' + (d.error || 'Unknown'));
-      } catch (e) { alert('Error: ' + e.message); }
-      finally { this.walletWithdrawing = false; }
+        await fetch('/api/relay/' + this.form.relayNodeId + '/wallets', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ chain }) });
+        await this.loadWallet();
+        this.openWalletPanel(chain);
+      } catch (e) { alert('Failed: ' + e.message); }
     },
     async loadLimits() {
       try {
