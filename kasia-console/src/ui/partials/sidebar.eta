@@ -94,6 +94,10 @@
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'market' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
           OTC
         </a>
+        <a href="/exchange"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'exchange' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          Exchange
+        </a>
         <a href="/stocks"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'stocks' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
           Stocks
@@ -102,18 +106,17 @@
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'predictions' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
           Predictions
         </a>
-        <div class="border-t border-warm-100 my-1 mx-3"></div>
         <a href="/exchange#hyperliquid"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 text-ink-400 hover:bg-warm-100 hover:text-ink-600">
-          Hyperliquid Perps
+          Hyperliquid
         </a>
         <a href="/exchange#aevo"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 text-ink-400 hover:bg-warm-100 hover:text-ink-600">
-          Aevo Options
+          Aevo
         </a>
         <a href="/exchange#aave"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 text-ink-400 hover:bg-warm-100 hover:text-ink-600">
-          Aave Lending
+          Aave
         </a>
       </div>
     </div>
