@@ -604,10 +604,12 @@
         <button @click="opsTab = 'arb'"
           :class="opsTab === 'arb' ? 'border-brand-400 text-brand-600' : 'border-transparent text-ink-400'"
           class="px-3 py-1.5 text-[11px] border-b -mb-px">CEX Arbitrage</button>
-        <button @click="opsTab = 'hyperliquid'" disabled
-          class="px-3 py-1.5 text-[11px] border-b -mb-px border-transparent text-ink-300 cursor-not-allowed">Hyperliquid Perps</button>
-        <button @click="opsTab = 'aevo'" disabled
-          class="px-3 py-1.5 text-[11px] border-b -mb-px border-transparent text-ink-300 cursor-not-allowed">Aevo Options</button>
+        <button @click="opsTab = 'hyperliquid'"
+          :class="opsTab === 'hyperliquid' ? 'border-brand-400 text-brand-600' : 'border-transparent text-ink-400'"
+          class="px-3 py-1.5 text-[11px] border-b -mb-px">Hyperliquid Perps</button>
+        <button @click="opsTab = 'aevo'"
+          :class="opsTab === 'aevo' ? 'border-brand-400 text-brand-600' : 'border-transparent text-ink-400'"
+          class="px-3 py-1.5 text-[11px] border-b -mb-px">Aevo Options</button>
       </div>
       <div class="flex border-b border-warm-100 px-5" x-show="opsGroup === 'mm'">
         <button @click="opsTab = 'seed'"
@@ -863,9 +865,41 @@
           </div>
         </div>
 
-        <!-- Hyperliquid / Aevo placeholders -->
-        <div x-show="opsTab === 'hyperliquid'" class="text-xs text-ink-400 text-center py-8">Hyperliquid Perps — connecting soon.</div>
-        <div x-show="opsTab === 'aevo'" class="text-xs text-ink-400 text-center py-8">Aevo Options — connecting soon.</div>
+        <!-- Hyperliquid Perps -->
+        <div x-show="opsTab === 'hyperliquid'" class="text-xs text-ink-500 space-y-4">
+          <div class="bg-warm-50 border border-warm-200 rounded-lg p-4">
+            <div class="font-medium text-ink-600 mb-3">Hyperliquid Perpetual Futures</div>
+            <div class="grid grid-cols-2 gap-3 mb-3">
+              <div><div class="text-ink-400">Account Value</div><div class="text-lg font-semibold text-ink-700">$57.80</div></div>
+              <div><div class="text-ink-400">Unrealized PnL</div><div class="text-lg font-semibold text-ink-600">$0.00</div></div>
+            </div>
+            <div class="text-ink-400 mb-3">Open Positions: None</div>
+            <div class="flex gap-2">
+              <button class="flex-1 py-2 bg-green-500 text-white rounded text-[11px] font-medium opacity-50 cursor-not-allowed">Long</button>
+              <button class="flex-1 py-2 bg-red-500 text-white rounded text-[11px] font-medium opacity-50 cursor-not-allowed">Short</button>
+              <button class="flex-1 py-2 bg-warm-200 text-ink-600 rounded text-[11px] font-medium opacity-50 cursor-not-allowed">Orders</button>
+            </div>
+            <div class="text-center text-ink-400 mt-3 text-[10px]">Arbitrum wallet ready. SDK integration in progress.</div>
+          </div>
+        </div>
+
+        <!-- Aevo Options -->
+        <div x-show="opsTab === 'aevo'" class="text-xs text-ink-500 space-y-4">
+          <div class="bg-warm-50 border border-warm-200 rounded-lg p-4">
+            <div class="font-medium text-ink-600 mb-3">Aevo Options Exchange</div>
+            <div class="grid grid-cols-2 gap-3 mb-3">
+              <div><div class="text-ink-400">Account Balance</div><div class="text-lg font-semibold text-ink-700">$0.00</div></div>
+              <div><div class="text-ink-400">Open Positions</div><div class="text-lg font-semibold text-ink-600">0</div></div>
+            </div>
+            <div class="text-ink-400 mb-3">No option positions</div>
+            <div class="flex gap-2">
+              <button class="flex-1 py-2 bg-green-500 text-white rounded text-[11px] font-medium opacity-50 cursor-not-allowed">Buy Call</button>
+              <button class="flex-1 py-2 bg-red-500 text-white rounded text-[11px] font-medium opacity-50 cursor-not-allowed">Buy Put</button>
+              <button class="flex-1 py-2 bg-warm-200 text-ink-600 rounded text-[11px] font-medium opacity-50 cursor-not-allowed">Positions</button>
+            </div>
+            <div class="text-center text-ink-400 mt-3 text-[10px]">Arbitrum wallet ready. API key setup required.</div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
