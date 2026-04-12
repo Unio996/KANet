@@ -33,6 +33,20 @@
           <span x-show="c.locked>0" class="text-[10px] text-orange-500 tabular-nums" x-text="'('+(c.locked||0).toFixed(2)+' locked)'"></span>
         </button>
       </template>
+      <!-- Add wallet -->
+      <div class="relative" x-data="{ addOpen: false }">
+        <button @click="addOpen = !addOpen" class="text-ink-400 hover:text-brand-500 transition-colors text-[11px] flex items-center gap-0.5">
+          <span class="text-sm leading-none">+</span> Wallet
+        </button>
+        <div x-show="addOpen" @click.away="addOpen = false" x-transition
+          class="absolute top-full mt-1 left-0 bg-white border border-warm-200 rounded-lg shadow-lg py-1 z-40 min-w-[120px]">
+          <template x-for="ch in ['bnb','eth','sol','tron','polygon']" :key="ch">
+            <button @click="createWallet(ch); addOpen = false"
+              class="w-full text-left px-3 py-1.5 text-xs text-ink-600 hover:bg-warm-100 hover:text-brand-600"
+              x-text="ch === 'polygon' ? 'Polygon' : ch.toUpperCase()"></button>
+          </template>
+        </div>
+      </div>
       <!-- Agent selector -->
       <div class="ml-auto flex items-center gap-2">
         <select x-model="form.relayNodeId" @change="onAgentChange()"
