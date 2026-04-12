@@ -275,19 +275,8 @@ export async function registerExchangeRoutes(fastify) {
     const relay = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(relayNodeId);
     const takerAddr = relay?.address || relayNodeId;
 
-    // Use state machine: open → matched → verification routing
-    const result = processAccept({
-      offer_id,
-      _from: takerAddr,
-      _tx: 'pending_accept_' + offer_id,
-    });
-
-    if (!result) {
-      return reply.code(400).send({ error: 'Accept failed (offer may no longer be open)' });
-    }
-
-    // === NO TX NO STATE CHANGE ===
-    // Broadcast accept to chain with retry. Must succeed before triggering auto-pay.
+    // === NO TX NO STATE CHANGE (③ consensus) ===
+    // Broadcast FIRST, then processAccept. If broadcast fails, DB stays unchanged.
     let acceptTx = null;
     const { sendCommandAsync } = await import('../services/relay-manager.js');
     for (let attempt = 1; attempt <= 5; attempt++) {
@@ -298,15 +287,10 @@ export async function registerExchangeRoutes(fastify) {
           message: JSON.stringify({
             t: 'kanet_exchange_accept_v1', offer_id, taker: takerAddr,
             selected_chain: selected_chain || null,
-            receive_address: result.taker_payment_address || null,
           }),
         });
         acceptTx = res?.txId || null;
-        if (acceptTx) {
-          sqlite.prepare('UPDATE exchange_offers SET taker_tx_id = ? WHERE id = ?')
-            .run(acceptTx, offer_id);
-          break;
-        }
+        if (acceptTx) break;
       } catch (err) {
         console.error(`[exchange] Accept broadcast attempt ${attempt}/5: ${err.message}`);
       }
@@ -314,9 +298,22 @@ export async function registerExchangeRoutes(fastify) {
     }
     if (!acceptTx) {
       console.error(`[exchange] Accept broadcast failed after 5 attempts for offer ${offer_id.slice(0,8)}`);
-      // Accept was written to DB but not on chain — log warning but continue
-      // (accept is local-first, broadcast is confirmation, not blocker for local taker)
+      return reply.code(500).send({ error: 'Accept broadcast failed — offer unchanged, please retry' });
     }
+
+    // Broadcast succeeded — now safe to advance state
+    const result = processAccept({
+      offer_id,
+      _from: takerAddr,
+      _tx: acceptTx,
+    });
+
+    if (!result) {
+      return reply.code(400).send({ error: 'Accept failed (offer may no longer be open)' });
+    }
+
+    sqlite.prepare('UPDATE exchange_offers SET taker_tx_id = ? WHERE id = ?')
+      .run(acceptTx, offer_id);
 
     // Trigger auto-pay if taker is a local agent with cross_chain_tx verification
     if (result.verification === 'cross_chain_tx' && selected_chain && result.taker_payment_address) {

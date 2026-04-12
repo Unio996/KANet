@@ -408,19 +408,8 @@ export async function checkMatchedTimeout() {
   for (const offer of stale) {
     console.log(`[exchange-machine] matched timeout: offer ${offer.id.slice(0,8)} (taker ${(offer.taker || '').slice(-8)})`);
 
-    // Direct SQL UPDATE: matched → open, clear taker fields
-    sqlite.prepare(`
-      UPDATE exchange_offers
-      SET protocol_status = 'open',
-          taker = NULL, taker_chain = NULL, taker_payment_address = NULL,
-          payment_tx = NULL, matched_at = NULL,
-          updated_at = datetime('now')
-      WHERE id = ? AND protocol_status = 'matched'
-    `).run(offer.id);
-
-    releaseFunds(offer.id);
-
-    // Broadcast timeout to chain (best-effort with retry — timeout is local-first)
+    // ⑤ Broadcast FIRST, then update local state. If broadcast fails, stay matched — next tick retries.
+    let broadcastOk = false;
     try {
       const relay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(offer.maker);
       if (relay) {
@@ -435,15 +424,35 @@ export async function checkMatchedTimeout() {
         for (let ta = 1; ta <= 3; ta++) {
           try {
             const tr = await sendCommandAsync(relay.id, { type: 'send_broadcast', channel: 'kanet-exchange', message: timeoutMsg });
-            if (tr?.txId) break;
+            if (tr?.txId) { broadcastOk = true; break; }
           } catch (te) {
             if (ta < 3) await new Promise(r => setTimeout(r, 200));
           }
         }
+      } else {
+        // Not our offer (no local relay for maker) — local-only transition is fine
+        broadcastOk = true;
       }
     } catch (err) {
       console.error(`[exchange-machine] timeout broadcast failed: ${err.message}`);
     }
+
+    if (!broadcastOk) {
+      console.log(`[exchange-machine] timeout broadcast failed for ${offer.id.slice(0,8)} — staying matched, will retry next tick`);
+      continue;
+    }
+
+    // Broadcast succeeded — now safe to update local state
+    sqlite.prepare(`
+      UPDATE exchange_offers
+      SET protocol_status = 'open',
+          taker = NULL, taker_chain = NULL, taker_payment_address = NULL,
+          payment_tx = NULL, matched_at = NULL,
+          updated_at = datetime('now')
+      WHERE id = ? AND protocol_status = 'matched'
+    `).run(offer.id);
+
+    releaseFunds(offer.id);
   }
 
   return stale.length;
