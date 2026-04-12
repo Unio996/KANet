@@ -10,7 +10,7 @@
 //   node scripts/cc-bridge.mjs [port]       (default: 9100)
 //
 // Adapter config:
-//   AI_PROVIDER=openai  AI_PROVIDER_URL=http://localhost:9100  AI_MODEL=claude-code
+//   AI_PROVIDER=openai  AI_PROVIDER_URL=http://localhost:9100/v1  AI_MODEL=claude-code
 
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';

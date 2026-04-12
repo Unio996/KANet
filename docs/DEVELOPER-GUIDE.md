@@ -108,7 +108,7 @@ processPaymentSubmit({ ... }); // 广播没上链但本地推进了 = 乐观写�
 - 流程：Mind → Adapter → Bridge → 请求队列 → Claude Code poll/respond → 回复
 - 启动：`node scripts/cc-bridge.mjs [port]`（默认 9100）
 - Claude Code 端：`node scripts/cc-poll.mjs`（拉取请求）、`node scripts/cc-respond.mjs <id> "text"`（提交回复）
-- 配置：`adapter_nodes` 设 `ai_provider_url='http://localhost:9100'`, `ai_model='claude-code'`
+- 配置：`adapter_nodes` 设 `ai_provider_url='http://localhost:9100/v1'`, `ai_model='claude-code'`（注意 `/v1` 后缀，openai provider 拼接 `/chat/completions`）
 - 跨节点协作：两个 KANet 节点各自运行 Bridge + Claude Code，Agent 间通过链上消息中转，Claude Code 实例自动协作
 - 回滚：DB 恢复原 provider URL/model，重启 adapter
 
