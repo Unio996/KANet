@@ -517,7 +517,63 @@
           :class="opsTab === 'seed' ? 'border-brand-500 text-brand-600' : 'border-transparent text-ink-400'"
           class="px-3 py-2 text-xs border-b-2 -mb-px">Seeder</button>
       </div>
-      <div class="p-5 max-h-96 overflow-y-auto">
+      <div class="p-5 max-h-[32rem] overflow-y-auto">
+        <!-- Wallet tab -->
+        <div x-show="opsTab === 'wallet'" class="text-xs text-ink-500 space-y-3">
+          <!-- KAS Wallet -->
+          <div class="bg-warm-50 border border-warm-200 rounded-lg p-3">
+            <div class="flex items-center justify-between mb-2">
+              <span class="font-medium text-ink-600">Kaspa</span>
+              <span class="text-lg font-semibold text-ink-700 tabular-nums" x-text="(walletData.kas?.balance ?? '—') + ' KAS'"></span>
+            </div>
+            <div class="flex items-center gap-2 mb-1.5">
+              <code class="text-[10px] text-ink-400 bg-warm-100 px-1.5 py-0.5 rounded break-all flex-1" x-text="walletData.kas?.address || '—'"></code>
+              <button @click="copyAddr(walletData.kas?.address)" class="text-brand-500 hover:text-brand-700 shrink-0" title="Copy">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+              </button>
+            </div>
+            <div class="grid grid-cols-3 gap-2 text-[11px]">
+              <div><span class="text-ink-400">Locked:</span> <span class="text-orange-600 font-medium tabular-nums" x-text="Number(walletData.kas?.locked || 0).toFixed(1)"></span></div>
+              <div><span class="text-ink-400">Exposure:</span> <span class="text-ink-600 font-medium tabular-nums" x-text="Number(limitsData.status?.current_exposure_kas || 0).toFixed(1)"></span></div>
+              <div><span class="text-ink-400">Available:</span> <span class="text-green-600 font-medium tabular-nums" x-text="Number((walletData.kas?.balance || 0) - (walletData.kas?.locked || 0)).toFixed(1)"></span></div>
+            </div>
+            <!-- KAS Withdraw -->
+            <div x-show="walletWithdrawChain === 'kas'" class="mt-2 border-t border-warm-200 pt-2">
+              <div class="grid grid-cols-[1fr_auto_auto] gap-2">
+                <input type="text" x-model="walletWithdrawAddr" placeholder="kaspa:q..." class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white text-[11px]" />
+                <input type="number" x-model.number="walletWithdrawAmt" placeholder="KAS" class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-20 text-[11px]" />
+                <button @click="doKasWithdraw()" :disabled="walletWithdrawing" class="px-2 py-1 bg-brand-500 text-white rounded text-[11px] disabled:opacity-50">Send</button>
+              </div>
+            </div>
+            <button @click="walletWithdrawChain = walletWithdrawChain === 'kas' ? null : 'kas'" class="mt-1.5 text-brand-500 hover:text-brand-700 text-[11px]" x-text="walletWithdrawChain === 'kas' ? 'Cancel' : 'Withdraw KAS'"></button>
+          </div>
+
+          <!-- Multi-chain Wallets -->
+          <template x-for="cw in walletData.chains" :key="cw.id || cw.chain">
+            <div class="bg-warm-50 border border-warm-200 rounded-lg p-3">
+              <div class="flex items-center justify-between mb-1.5">
+                <div class="flex items-center gap-1.5">
+                  <span class="font-medium text-ink-600" x-text="cw.chain?.toUpperCase()"></span>
+                  <span x-show="cw.isDefault" class="text-[10px] text-brand-500 bg-brand-50 px-1 rounded">default</span>
+                </div>
+                <span class="font-semibold text-ink-700 tabular-nums" x-text="Number(cw.usdt || 0).toFixed(2) + ' USDT'"></span>
+              </div>
+              <div class="flex items-center gap-2 mb-1.5">
+                <code class="text-[10px] text-ink-400 bg-warm-100 px-1.5 py-0.5 rounded break-all flex-1" x-text="cw.address || '—'"></code>
+                <button @click="copyAddr(cw.address)" class="text-brand-500 hover:text-brand-700 shrink-0" title="Copy">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                </button>
+              </div>
+              <div class="grid grid-cols-3 gap-2 text-[11px]">
+                <div x-show="cw.usdc"><span class="text-ink-400">USDC:</span> <span class="tabular-nums" x-text="Number(cw.usdc || 0).toFixed(2)"></span></div>
+                <div x-show="cw.gas != null"><span class="text-ink-400" x-text="cw.chain === 'bnb' ? 'BNB' : cw.chain === 'eth' ? 'ETH' : cw.chain?.toUpperCase()"></span>: <span class="tabular-nums" x-text="Number(cw.gas || 0).toFixed(4)"></span></div>
+                <div x-show="cw.locked"><span class="text-ink-400">Locked:</span> <span class="text-orange-600 tabular-nums" x-text="Number(cw.locked || 0).toFixed(2)"></span></div>
+              </div>
+            </div>
+          </template>
+          <div x-show="!walletData.chains?.length" class="text-center text-ink-400 py-4">No multi-chain wallets configured. Add wallets in /relays page.</div>
+        </div>
+
         <!-- Arb content placeholder — preserved from existing -->
         <div x-show="opsTab === 'arb'" class="text-xs text-ink-500">
           <div class="grid grid-cols-3 gap-4 mb-4">
@@ -703,6 +759,11 @@ function exchangeApp() {
     limitsData: { limits: { per_offer_kas: 5000, total_exposure_kas: 20000, price_deviation_pct: 5 }, status: {} },
     limitsForm: { per_offer_kas: 5000, total_exposure_kas: 20000, price_deviation_pct: 5 },
     limitsSaving: false,
+    walletData: { kas: null, chains: [] },
+    walletWithdrawChain: null,
+    walletWithdrawAddr: '',
+    walletWithdrawAmt: null,
+    walletWithdrawing: false,
     seedOrders: [],
     seedStats: { seeded: 0, taken: 0, net_usdt: 0 },
     seedTriggering: false,
@@ -1169,6 +1230,56 @@ function exchangeApp() {
         await this.loadSeedData(); await this.loadOffers();
       } catch {}
       finally { this.seedTriggering = false; }
+    },
+    async loadWalletData() {
+      if (!this.form?.relayNodeId) return;
+      try {
+        const [wallets, locks] = await Promise.allSettled([
+          fetch(`/api/relay/${this.form.relayNodeId}/wallets`).then(r => r.json()),
+          fetch(`/api/trade/fund-locks?relay_node_id=${this.form.relayNodeId}`).then(r => r.json()),
+        ]);
+        if (wallets.status === 'fulfilled' && wallets.value) {
+          const w = wallets.value;
+          // Build locked map from fund locks
+          const lockedMap = {};
+          if (locks.status === 'fulfilled' && Array.isArray(locks.value)) {
+            for (const l of locks.value) {
+              if (l.status !== 'locked') continue;
+              lockedMap[l.asset || 'kas'] = (lockedMap[l.asset || 'kas'] || 0) + (l.amount || 0);
+            }
+          }
+          this.walletData = {
+            kas: { address: w.kaspa?.address, balance: w.kaspa?.balance, locked: lockedMap['kas'] || 0 },
+            chains: (w.chains || []).map(c => ({
+              ...c,
+              locked: lockedMap['usdt_' + c.chain] || 0,
+            })),
+          };
+        }
+      } catch {}
+    },
+    copyAddr(addr) {
+      if (!addr) return;
+      try { navigator.clipboard.writeText(addr); } catch {
+        const ta = document.createElement('textarea'); ta.value = addr;
+        document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+    },
+    async doKasWithdraw() {
+      if (!this.walletWithdrawAddr || !this.walletWithdrawAmt || !this.form?.relayNodeId) return;
+      if (!confirm(`Send ${this.walletWithdrawAmt} KAS to ${this.walletWithdrawAddr}?`)) return;
+      this.walletWithdrawing = true;
+      try {
+        const r = await fetch(`/api/relay/${this.form.relayNodeId}/transfer`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ target: this.walletWithdrawAddr, amount: String(this.walletWithdrawAmt) }),
+        });
+        const d = await r.json();
+        if (d.txId) { alert('Sent! TX: ' + d.txId); this.walletWithdrawChain = null; this.walletWithdrawAddr = ''; this.walletWithdrawAmt = null; await this.loadWalletData(); }
+        else alert('Error: ' + (d.error || 'Unknown'));
+      } catch (e) { alert('Error: ' + e.message); }
+      finally { this.walletWithdrawing = false; }
     },
     async loadLimits() {
       try {
