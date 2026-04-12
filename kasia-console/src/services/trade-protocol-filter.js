@@ -491,7 +491,6 @@ async function _evaluateAutoTake(offerId, msg) {
 
   // 10. Find best local agent (has BNB wallet with most USDT)
   let bestRelay = null;
-  let bestBalance = 0;
   for (const addr of localAddrs) {
     const relay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(addr);
     if (!relay) continue;
@@ -499,12 +498,9 @@ async function _evaluateAutoTake(offerId, msg) {
       "SELECT * FROM agent_wallets WHERE relay_node_id = ? AND chain = 'bnb' AND is_default = 1"
     ).get(relay.id);
     if (!wallet) continue;
-    // Use cached balance if available, otherwise accept any wallet
-    const bal = wallet.cached_balance ? parseFloat(wallet.cached_balance) : 999;
-    if (bal >= wantAmt && bal > bestBalance) {
-      bestRelay = relay.id;
-      bestBalance = bal;
-    }
+    // No cached_balance column — accept first wallet with privkey, actual balance checked at pay time
+    bestRelay = relay.id;
+    break;
   }
   if (!bestRelay) return;
 
