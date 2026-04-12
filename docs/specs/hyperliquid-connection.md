@@ -33,11 +33,15 @@ async function getFundingRate(asset)  // 查资金费率
 ```
 
 **关键实现细节：**
-- 认证：EIP-712 typed data 签名，用 Arbitrum 私钥（和 Aave 同钱包）
-- 存款：先从 Arbitrum 钱包 deposit USDC 到 Hyperliquid（链上 TX）
-- 下单：REST API，签名后提交。市价单/限价单/止损/止盈
-- 持仓：unrealizedPnl 实时计算（markPrice vs entryPrice）
+- 认证：EIP-712 typed data 签名，用 Arbitrum 私钥。支持 agent wallet（委托签名，不暴露主钥）
+- **关键陷阱**：查询持仓/账户时必须用 master 钱包地址，不能用 agent wallet 地址（返回空数据）
+- 存款：Arbitrum USDC → Hyperliquid bridge（链上 TX，1-3 分钟到账，最低 5 USDC）
+- 提款费：1 USDC（固定）
+- 下单：REST POST `/exchange`，EIP-712 签名后提交。市价(IOC)/限价(GTC)/止损止盈(trigger)
+- 持仓：szi 有符号（正=多，负=空），unrealizedPnl 实时算
 - 资金费率：每 8h 结算，正费率空头收钱，负费率多头收钱
+- Node.js 版本：npm `hyperliquid` 需 v22+（原生 WebSocket）
+- Rate limit：1200 weight/min，单请求 1 weight
 
 ### API 层：/api/defi/hyperliquid/*
 
