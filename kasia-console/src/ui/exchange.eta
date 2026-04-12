@@ -587,14 +587,40 @@
       Operator Tools
     </button>
     <div x-show="opsOpen" x-transition class="border-t border-warm-100">
-      <!-- Arb/Seed sub-tabs -->
-      <div class="flex border-b border-warm-200 px-5">
+      <!-- Top-level: Trading / Market Making / DeFi -->
+      <div class="flex border-b border-warm-200 px-5 bg-warm-50">
+        <button @click="opsGroup = 'trading'"
+          :class="opsGroup === 'trading' ? 'border-brand-500 text-brand-700 font-medium' : 'border-transparent text-ink-400'"
+          class="px-4 py-2 text-xs border-b-2 -mb-px">Trading</button>
+        <button @click="opsGroup = 'mm'"
+          :class="opsGroup === 'mm' ? 'border-brand-500 text-brand-700 font-medium' : 'border-transparent text-ink-400'"
+          class="px-4 py-2 text-xs border-b-2 -mb-px">Market Making</button>
+        <button @click="opsGroup = 'defi'; loadAaveStatus()"
+          :class="opsGroup === 'defi' ? 'border-brand-500 text-brand-700 font-medium' : 'border-transparent text-ink-400'"
+          class="px-4 py-2 text-xs border-b-2 -mb-px">DeFi</button>
+      </div>
+      <!-- Sub-tabs per group -->
+      <div class="flex border-b border-warm-100 px-5" x-show="opsGroup === 'trading'">
         <button @click="opsTab = 'arb'"
-          :class="opsTab === 'arb' ? 'border-brand-500 text-brand-600' : 'border-transparent text-ink-400'"
-          class="px-3 py-2 text-xs border-b-2 -mb-px">Arbitrage</button>
+          :class="opsTab === 'arb' ? 'border-brand-400 text-brand-600' : 'border-transparent text-ink-400'"
+          class="px-3 py-1.5 text-[11px] border-b -mb-px">Arbitrage</button>
+      </div>
+      <div class="flex border-b border-warm-100 px-5" x-show="opsGroup === 'mm'">
         <button @click="opsTab = 'seed'"
-          :class="opsTab === 'seed' ? 'border-brand-500 text-brand-600' : 'border-transparent text-ink-400'"
-          class="px-3 py-2 text-xs border-b-2 -mb-px">Seeder</button>
+          :class="opsTab === 'seed' ? 'border-brand-400 text-brand-600' : 'border-transparent text-ink-400'"
+          class="px-3 py-1.5 text-[11px] border-b -mb-px">Seeder</button>
+        <button @click="opsTab = 'autotaker'"
+          :class="opsTab === 'autotaker' ? 'border-brand-400 text-brand-600' : 'border-transparent text-ink-400'"
+          class="px-3 py-1.5 text-[11px] border-b -mb-px">AutoTaker</button>
+      </div>
+      <div class="flex border-b border-warm-100 px-5" x-show="opsGroup === 'defi'">
+        <button @click="opsTab = 'aave'"
+          :class="opsTab === 'aave' ? 'border-brand-400 text-brand-600' : 'border-transparent text-ink-400'"
+          class="px-3 py-1.5 text-[11px] border-b -mb-px">Aave</button>
+        <button @click="opsTab = 'hyperliquid'" disabled
+          class="px-3 py-1.5 text-[11px] border-b -mb-px border-transparent text-ink-300 cursor-not-allowed">Hyperliquid</button>
+        <button @click="opsTab = 'aevo'" disabled
+          class="px-3 py-1.5 text-[11px] border-b -mb-px border-transparent text-ink-300 cursor-not-allowed">Aevo</button>
       </div>
       <div class="p-5 max-h-[32rem] overflow-y-auto">
         <!-- Arb content placeholder — preserved from existing -->
@@ -730,6 +756,117 @@
             </button>
           </div>
         </div>
+
+        <!-- ═══ AutoTaker (Market Making) ═══ -->
+        <div x-show="opsTab === 'autotaker'" class="text-xs text-ink-500 space-y-4">
+          <!-- Proposals -->
+          <div class="bg-warm-50 border border-warm-200 rounded-lg p-3">
+            <div class="font-medium text-ink-600 mb-2">AutoTaker Proposals</div>
+            <div x-show="!autoTakerProposals?.length" class="text-ink-400 text-center py-4">No pending proposals. AutoTaker will generate proposals when profitable offers appear.</div>
+            <template x-for="p in autoTakerProposals" :key="p.id">
+              <div class="flex items-center justify-between py-2 border-b border-warm-100 last:border-0">
+                <div class="flex-1">
+                  <span class="font-semibold text-green-600 tabular-nums" x-text="'-' + (p.discount*100).toFixed(1) + '%'"></span>
+                  <span class="text-ink-600 ml-2" x-text="p.amount + ' KAS @ ' + p.price?.toFixed(6)"></span>
+                  <span class="text-ink-400 ml-2" x-text="'profit ~$' + p.profit?.toFixed(2)"></span>
+                </div>
+                <div class="flex gap-1.5">
+                  <button @click="approveAutoTake(p.id)" class="px-2 py-1 bg-green-500 text-white rounded text-[10px] hover:bg-green-600">Accept</button>
+                  <button @click="rejectAutoTake(p.id)" class="px-2 py-1 bg-warm-200 text-ink-500 rounded text-[10px] hover:bg-warm-300">Reject</button>
+                </div>
+              </div>
+            </template>
+          </div>
+          <!-- Config -->
+          <div class="bg-warm-50 border border-warm-200 rounded-lg p-3">
+            <div class="font-medium text-ink-600 mb-2">AutoTaker Config</div>
+            <div class="grid grid-cols-2 gap-x-4 gap-y-2">
+              <label class="flex items-center gap-2 col-span-2">
+                <input type="checkbox" :checked="autoTakerConfig.enabled" @change="toggleAutoTaker()" class="rounded" />
+                <span>AutoTaker enabled</span>
+                <span class="ml-2 px-1.5 py-0.5 rounded text-[9px]" :class="autoTakerConfig.mode === 'auto' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'" x-text="autoTakerConfig.mode || 'approval'"></span>
+              </label>
+              <label class="flex flex-col gap-0.5">
+                <span class="text-ink-400">Min Discount %</span>
+                <input type="number" step="0.1" min="0" x-model.number="autoTakerConfig.min_discount" class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-full" />
+              </label>
+              <label class="flex flex-col gap-0.5">
+                <span class="text-ink-400">Max Amount (USDT)</span>
+                <input type="number" min="1" x-model.number="autoTakerConfig.max_amount" class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-full" />
+              </label>
+              <label class="flex flex-col gap-0.5">
+                <span class="text-ink-400">Daily Limit</span>
+                <input type="number" min="1" x-model.number="autoTakerConfig.daily_limit" class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-full" />
+              </label>
+              <label class="flex flex-col gap-0.5">
+                <span class="text-ink-400">Cooldown (sec)</span>
+                <input type="number" min="5" x-model.number="autoTakerConfig.cooldown_sec" class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-full" />
+              </label>
+            </div>
+            <button @click="saveAutoTakerConfig()" class="mt-2 px-3 py-1 bg-brand-500 text-white rounded text-xs w-full">Save AutoTaker Config</button>
+          </div>
+          <!-- Stats -->
+          <div class="grid grid-cols-3 gap-3">
+            <div class="bg-white border border-warm-200 rounded-lg p-2.5 text-center">
+              <div class="text-lg font-semibold text-ink-700" x-text="autoTakerStats.today_accepted || 0"></div>
+              <div class="text-ink-400">Accepted Today</div>
+            </div>
+            <div class="bg-white border border-warm-200 rounded-lg p-2.5 text-center">
+              <div class="text-lg font-semibold text-green-600" x-text="'$' + (autoTakerStats.today_profit || 0).toFixed(2)"></div>
+              <div class="text-ink-400">Profit Today</div>
+            </div>
+            <div class="bg-white border border-warm-200 rounded-lg p-2.5 text-center">
+              <div class="text-lg font-semibold text-ink-600" x-text="(autoTakerStats.success_rate || 0).toFixed(0) + '%'"></div>
+              <div class="text-ink-400">Success Rate</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══ Aave (DeFi) ═══ -->
+        <div x-show="opsTab === 'aave'" class="text-xs text-ink-500 space-y-4">
+          <div class="bg-warm-50 border border-warm-200 rounded-lg p-3">
+            <div class="flex items-center justify-between mb-3">
+              <span class="font-medium text-ink-600">Aave V3 (Arbitrum)</span>
+              <button @click="loadAaveStatus()" class="text-brand-500 hover:text-brand-700 text-[10px]">Refresh</button>
+            </div>
+            <div class="grid grid-cols-2 gap-3 mb-3">
+              <div>
+                <div class="text-ink-400">Deposited</div>
+                <div class="text-lg font-semibold text-ink-700 tabular-nums" x-text="'$' + (aaveStatus.account?.totalCollateralUSD || 0).toFixed(2)"></div>
+              </div>
+              <div>
+                <div class="text-ink-400">Borrowed</div>
+                <div class="text-lg font-semibold tabular-nums" :class="(aaveStatus.account?.totalDebtUSD || 0) > 0 ? 'text-red-600' : 'text-ink-700'" x-text="'$' + (aaveStatus.account?.totalDebtUSD || 0).toFixed(2)"></div>
+              </div>
+            </div>
+            <!-- Health Factor bar -->
+            <div class="mb-3">
+              <div class="flex justify-between text-[10px] mb-1">
+                <span class="text-ink-400">Health Factor</span>
+                <span class="font-medium tabular-nums" :class="(aaveStatus.account?.healthFactor || 999) > 2 ? 'text-green-600' : (aaveStatus.account?.healthFactor || 999) > 1.5 ? 'text-yellow-600' : 'text-red-600'" x-text="aaveStatus.account?.healthFactor === null || aaveStatus.account?.healthFactor > 100 ? '∞' : aaveStatus.account?.healthFactor?.toFixed(2)"></span>
+              </div>
+              <div class="h-2 bg-warm-200 rounded-full overflow-hidden">
+                <div class="h-full rounded-full transition-all" :class="(aaveStatus.account?.healthFactor || 999) > 2 ? 'bg-green-500' : (aaveStatus.account?.healthFactor || 999) > 1.5 ? 'bg-yellow-500' : 'bg-red-500'" :style="'width:' + Math.min(100, ((aaveStatus.account?.healthFactor || 0) / 3) * 100) + '%'"></div>
+              </div>
+            </div>
+            <div class="text-[11px] text-ink-400 mb-3">
+              Available to borrow: <span class="text-ink-600 font-medium" x-text="'$' + (aaveStatus.account?.availableBorrowUSD || 0).toFixed(2)"></span>
+              &nbsp;|&nbsp; Wallet: <span class="text-ink-600 font-medium" x-text="(aaveStatus.walletBalance?.usdc || 0).toFixed(2) + ' USDC'"></span>
+            </div>
+            <!-- Action buttons -->
+            <div class="flex gap-2">
+              <button @click="aaveAction('supply')" class="flex-1 py-2 bg-green-500 text-white rounded text-[11px] font-medium hover:bg-green-600">Supply</button>
+              <button @click="aaveAction('withdraw')" class="flex-1 py-2 bg-warm-200 text-ink-600 rounded text-[11px] font-medium hover:bg-warm-300">Withdraw</button>
+              <button @click="aaveAction('borrow')" class="flex-1 py-2 bg-yellow-100 text-yellow-700 rounded text-[11px] font-medium hover:bg-yellow-200">Borrow</button>
+              <button @click="aaveAction('repay')" class="flex-1 py-2 bg-warm-200 text-ink-600 rounded text-[11px] font-medium hover:bg-warm-300">Repay</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Hyperliquid / Aevo placeholders -->
+        <div x-show="opsTab === 'hyperliquid'" class="text-xs text-ink-400 text-center py-8">Hyperliquid integration coming soon.</div>
+        <div x-show="opsTab === 'aevo'" class="text-xs text-ink-400 text-center py-8">Aevo options integration coming soon.</div>
+        </div>
       </div>
     </div>
   </div>
@@ -771,7 +908,12 @@ function exchangeApp() {
     currentAddress: null,
     loading: true,
     leftTab: 'market',
+    opsGroup: 'trading',
     opsTab: 'arb',
+    autoTakerProposals: [],
+    autoTakerConfig: { enabled: false, mode: 'approval', min_discount: 0.5, max_amount: 50, daily_limit: 3, cooldown_sec: 30 },
+    autoTakerStats: { today_accepted: 0, today_profit: 0, success_rate: 0 },
+    aaveStatus: { account: {}, walletBalance: {} },
     selectedOffer: null,
     kasPrice: null,
     overview: { totalCompleted: 0, avgSettlement: null, volume24h: null },
@@ -1386,6 +1528,57 @@ function exchangeApp() {
         await this.loadWallet();
         this.openWalletPanel(chain);
       } catch (e) { alert('Failed: ' + e.message); }
+    },
+    // ── AutoTaker ──
+    async toggleAutoTaker() {
+      this.autoTakerConfig.enabled = !this.autoTakerConfig.enabled;
+      await this.saveAutoTakerConfig();
+    },
+    async saveAutoTakerConfig() {
+      const c = this.autoTakerConfig;
+      await Promise.all([
+        fetch('/api/exchange/limits', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({}) }), // placeholder
+      ]);
+      // TODO: save autotaker config to config_entries when API is ready
+    },
+    async approveAutoTake(id) {
+      try {
+        const r = await fetch('/api/trade/approve-execution/' + id, { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) this.autoTakerProposals = this.autoTakerProposals.filter(p => p.id !== id);
+      } catch {}
+    },
+    async rejectAutoTake(id) {
+      try {
+        const r = await fetch('/api/trade/reject-execution/' + id, { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) this.autoTakerProposals = this.autoTakerProposals.filter(p => p.id !== id);
+      } catch {}
+    },
+    // ── Aave ──
+    async loadAaveStatus() {
+      const arbWallet = this.wallet.chains?.find(w => w.chain === 'arbitrum');
+      if (!arbWallet?.id) return;
+      try {
+        const d = await fetch('/api/defi/aave/status?walletId=' + arbWallet.id).then(r => r.json());
+        if (d.ok) this.aaveStatus = d;
+      } catch {}
+    },
+    async aaveAction(action) {
+      const arbWallet = this.wallet.chains?.find(w => w.chain === 'arbitrum');
+      if (!arbWallet?.id) { alert('No Arbitrum wallet. Create one first.'); return; }
+      const amount = prompt(action.charAt(0).toUpperCase() + action.slice(1) + ' amount (USDC):');
+      if (!amount || isNaN(amount)) return;
+      if (!confirm(action + ' ' + amount + ' USDC on Aave?')) return;
+      try {
+        const r = await fetch('/api/defi/aave/' + action, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ walletId: arbWallet.id, asset: 'usdc', amount }),
+        });
+        const d = await r.json();
+        if (d.ok) { alert('Success! TX: ' + d.txHash); await this.loadAaveStatus(); }
+        else alert('Error: ' + (d.error || 'Unknown'));
+      } catch (e) { alert('Error: ' + e.message); }
     },
     async loadLimits() {
       try {
