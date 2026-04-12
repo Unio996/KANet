@@ -34,19 +34,9 @@
         </button>
       </template>
       <!-- Add wallet -->
-      <div class="relative" x-data="{ addOpen: false }">
-        <button @click="addOpen = !addOpen" class="text-ink-400 hover:text-brand-500 transition-colors text-[11px] flex items-center gap-0.5">
-          <span class="text-sm leading-none">+</span> Wallet
-        </button>
-        <div x-show="addOpen" @click.away="addOpen = false" x-transition
-          class="absolute top-full mt-1 left-0 bg-white border border-warm-200 rounded-lg shadow-lg py-1 z-40 min-w-[120px]">
-          <template x-for="ch in ['bnb','eth','sol','tron','polygon']" :key="ch">
-            <button @click="createWallet(ch); addOpen = false"
-              class="w-full text-left px-3 py-1.5 text-xs text-ink-600 hover:bg-warm-100 hover:text-brand-600"
-              x-text="ch === 'polygon' ? 'Polygon' : ch.toUpperCase()"></button>
-          </template>
-        </div>
-      </div>
+      <button @click="showAddWallet = true" class="text-ink-400 hover:text-brand-500 transition-colors text-[11px] flex items-center gap-0.5">
+        <span class="text-sm leading-none">+</span> Wallet
+      </button>
       <!-- Agent selector -->
       <div class="ml-auto flex items-center gap-2">
         <select x-model="form.relayNodeId" @change="onAgentChange()"
@@ -730,6 +720,30 @@
     </div>
   </div>
 
+  <!-- ═══ ADD WALLET MODAL (full overlay, above everything) ═══ -->
+  <div x-show="showAddWallet" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center bg-black/30" @click.self="showAddWallet = false">
+    <div class="bg-white rounded-xl shadow-2xl p-6 w-80" @click.stop>
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-sm font-semibold text-ink-700">Add Wallet</h3>
+        <button @click="showAddWallet = false" class="text-ink-400 hover:text-ink-600">&times;</button>
+      </div>
+      <p class="text-xs text-ink-400 mb-4">Select a chain to create a new wallet for this Agent.</p>
+      <div class="space-y-2">
+        <template x-for="ch in [{id:'bnb',name:'BNB (BSC)',desc:'USDT/BNB'},{id:'eth',name:'Ethereum',desc:'USDT/ETH'},{id:'sol',name:'Solana',desc:'USDT/SOL'},{id:'tron',name:'TRON',desc:'USDT/TRX'},{id:'polygon',name:'Polygon',desc:'USDC/MATIC'}]" :key="ch.id">
+          <button @click="addingWallet = ch.id; createWallet(ch.id).then(() => { addingWallet = false; showAddWallet = false; })" :disabled="addingWallet"
+            class="w-full flex items-center justify-between px-4 py-3 rounded-lg border border-warm-200 hover:border-brand-400 hover:bg-brand-50 transition-all text-left disabled:opacity-50">
+            <div>
+              <div class="text-sm font-medium text-ink-700" x-text="ch.name"></div>
+              <div class="text-[11px] text-ink-400" x-text="ch.desc"></div>
+            </div>
+            <span x-show="addingWallet === ch.id" class="text-xs text-brand-500">Creating...</span>
+            <span x-show="addingWallet !== ch.id" class="text-ink-300 text-lg">&rarr;</span>
+          </button>
+        </template>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -781,6 +795,8 @@ function exchangeApp() {
     wallet: { kas: 0, kasLocked: 0, chains: [] },
     walletPanel: null,
     agentAddr: '',
+    showAddWallet: false,
+    addingWallet: false,
     seedOrders: [],
     seedStats: { seeded: 0, taken: 0, net_usdt: 0 },
     seedTriggering: false,
