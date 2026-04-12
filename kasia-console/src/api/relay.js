@@ -96,6 +96,14 @@ export async function registerRelayRoutes(fastify) {
   fastify.post('/relays/:id/assign', async (request, reply) => {
     const { adapter_node_id } = request.body;
     updateRelayNode(request.params.id, { adapterNodeId: adapter_node_id || null });
+    // Auto-start relay if adapter assigned and relay has address+mnemonic
+    if (adapter_node_id) {
+      const relay = getRelayNode(request.params.id);
+      if (relay?.address && relay?.mnemonic_encrypted) {
+        const result = await startRelay(request.params.id);
+        if (result.ok) console.log(`[relay-manager] Auto-started ${relay.name} relay after adapter assign`);
+      }
+    }
     return reply.redirect('/relays');
   });
 
@@ -157,9 +165,14 @@ export async function registerRelayRoutes(fastify) {
     const amountKas = parseFloat(amount);
     if (!amountKas || amountKas <= 0) return reply.code(400).send({ error: 'Amount must be > 0' });
 
-    const sent = sendCommand(request.params.id, { type: 'transfer', target: to.trim(), amount: String(amountKas) });
-    if (!sent) return reply.code(503).send({ error: 'Relay not running' });
-    return reply.send({ ok: true });
+    try {
+      const result = await sendCommandAsync(request.params.id, { type: 'transfer', target: to.trim(), amount: String(amountKas) });
+      if (!result) return reply.code(503).send({ error: 'Relay not running' });
+      if (result.error) return reply.code(400).send({ error: result.error });
+      return reply.send({ ok: true, txId: result.txId, fee: result.fee });
+    } catch (err) {
+      return reply.code(500).send({ error: err.message || 'Transfer failed' });
+    }
   });
 
   // Reveal mnemonic (local UI only)
@@ -743,6 +756,7 @@ export async function registerRelayRoutes(fastify) {
       socialStyle: relay.social_style || 'balanced',
       socialOverrides: relay.social_overrides ? JSON.parse(relay.social_overrides) : null,
       focus: relay.focus || 'balanced',
+      autoHandshake: relay.social_overrides ? (JSON.parse(relay.social_overrides)?.autoHandshake === true) : false,
     });
   });
 
@@ -751,7 +765,7 @@ export async function registerRelayRoutes(fastify) {
     const relay = getRelayNode(request.params.id);
     if (!relay) return reply.code(404).send({ error: 'Relay not found' });
 
-    const { vision, principles, style, evolutionIntervalHours, proactiveIntervalMinutes, socialStyle, socialOverrides, focus } = request.body || {};
+    const { vision, principles, style, evolutionIntervalHours, proactiveIntervalMinutes, socialStyle, socialOverrides, focus, autoHandshake } = request.body || {};
     const now = nowIso();
     const fields = [];
     const vals = [];
@@ -764,6 +778,12 @@ export async function registerRelayRoutes(fastify) {
     if (socialStyle !== undefined) { fields.push('social_style = ?'); vals.push(socialStyle); }
     if (socialOverrides !== undefined) { fields.push('social_overrides = ?'); vals.push(socialOverrides ? JSON.stringify(socialOverrides) : null); }
     if (focus !== undefined) { fields.push('focus = ?'); vals.push(focus); }
+    if (autoHandshake !== undefined) {
+      // Merge into social_overrides JSON
+      const existing = relay.social_overrides ? JSON.parse(relay.social_overrides) : {};
+      existing.autoHandshake = !!autoHandshake;
+      fields.push('social_overrides = ?'); vals.push(JSON.stringify(existing));
+    }
 
     if (fields.length === 0) return reply.code(400).send({ error: 'No fields to update' });
 

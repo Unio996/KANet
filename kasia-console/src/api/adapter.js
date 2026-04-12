@@ -2,6 +2,7 @@ import { listAdapterNodes, createAdapterNode, updateAdapterNode, deleteAdapterNo
 import { startAdapter, stopAdapter, restartAdapter, getAdapterStatus } from '../services/adapter-launcher.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 import { getConfig } from '../data/settings/configs.js';
+import { syncConnectionFromAdapter } from '../services/connection-manager.js';
 
 // Fast health check (port only, <2s)
 async function pingAdapter(port) {
@@ -127,6 +128,8 @@ export async function registerAdapterRoutes(fastify) {
       aiProviderKey: ai_provider_key?.trim() || null,
       aiModel: ai_model?.trim() || undefined,
     });
+    // Sync updated model/url to agent_connections table
+    syncConnectionFromAdapter(request.params.id);
     return reply.redirect('/adapters');
   });
 

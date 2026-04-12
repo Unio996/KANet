@@ -189,6 +189,45 @@
         </div>
       </div>
 
+      <!-- ============================== -->
+      <!-- AUTO HANDSHAKE TOGGLE        -->
+      <!-- ============================== -->
+      <div class="card" x-data="{
+        autoHS: false, saving: false,
+        async init() {
+          if (!agent?.id) return;
+          try {
+            const r = await fetch('/api/relay/' + agent.id + '/mind-config');
+            const c = await r.json();
+            this.autoHS = !!c.autoHandshake;
+          } catch {}
+        },
+        async toggle() {
+          if (!agent?.id) return;
+          this.autoHS = !this.autoHS; this.saving = true;
+          await fetch('/api/relay/' + agent.id + '/mind-config', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ autoHandshake: this.autoHS }),
+          });
+          this.saving = false;
+        }
+      }" x-init="$watch('agent', () => init()); init()">
+        <div class="flex items-center justify-between">
+          <div>
+            <h3 class="text-sm font-semibold text-ink-700">Auto Handshake</h3>
+            <p class="text-[10px] text-ink-400 mt-0.5">Allow agent to initiate handshakes with new peers (costs 0.2 KAS each)</p>
+          </div>
+          <button @click="toggle()" class="relative w-10 h-5 rounded-full transition-colors"
+            :class="autoHS ? 'bg-brand-500' : 'bg-warm-300'">
+            <span class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform"
+              :class="autoHS ? 'translate-x-5' : ''"></span>
+          </button>
+        </div>
+        <div x-show="autoHS" class="mt-2 text-[10px] text-orange-600 bg-orange-50 px-2 py-1 rounded">
+          Agent will spend 0.2 KAS per new handshake
+        </div>
+      </div>
+
       <!-- 社交风格和社交原则已迁移到通讯录页面 (contacts.eta) -->
 
       <!-- ============================== -->

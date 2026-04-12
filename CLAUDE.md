@@ -60,13 +60,19 @@ DATABASE.md 有改动时（新表/删表/加字段），必须同步更新文档
 | agent-mind | `agent-mind` | Agent 灵魂（五核、技能、决策）|
 | agent-adapter | `agent-adapter` | AI 大脑桥接（多 provider）|
 
-## 当前系统状态（2026-04-11 更新）
+## 当前系统状态（2026-04-12 更新）
 
 ### 数据架构
 - `relation_states` 是社交关系唯一真相源
 - `chain_events` 是链上事件唯一真相源
 - 数据库字典 `docs/DATABASE.md` 已建立
 - 当前 migrate.js 最新版本：v55
+
+### 4/12 基础修复
+- 提币改 sendCommandAsync — 错误正确回传前端（陷阱 #46）
+- Adapter 更新自动同步 agent_connections（syncConnectionFromAdapter）
+- 分配 adapter 后自动启动 relay（陷阱 #47）
+- **Agent 默认不主动握手** — autoHandshake 开关，UI 在 /agent 页（陷阱 #48）
 
 ### Exchange 协议 v2.1 — 全自动交割（2026-04-10）
 - 7 条协议消息：publish / accept(含选链) / paid / delivered / timeout / cancel / dispute

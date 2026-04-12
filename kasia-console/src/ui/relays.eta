@@ -522,23 +522,29 @@ async function submitTransfer() {
       body: JSON.stringify({ to, amount })
     });
     const data = await res.json();
-    if (data.ok) {
-      let msg = 'Transfer submitted';
-      if (data.txId) msg += '. TX: ' + data.txId.slice(0, 16) + '...';
-      if (data.adjusted) msg = 'Sent ' + data.actualAmount + ' KAS (adjusted due to KIP-9).' + (data.txId ? ' TX: ' + data.txId.slice(0, 16) + '...' : '');
-      else if (data.actualAmount) msg = 'Sent ' + data.actualAmount + ' KAS.' + (data.txId ? ' TX: ' + data.txId.slice(0, 16) + '...' : '');
-      resultEl.textContent = msg;
-      resultEl.className = 'mt-3 text-sm text-green-600';
+    if (res.ok && data.ok) {
+      let msg = 'Sent ' + amount + ' KAS';
+      if (data.txId) msg += '\nTX: ' + data.txId;
+      if (data.fee) msg += '\nFee: ' + data.fee + ' KAS';
+      resultEl.innerHTML = '<div class="p-3 bg-green-50 border border-green-200 rounded-lg">'
+        + '<div class="font-semibold text-green-700 mb-1">Transfer successful</div>'
+        + '<div class="text-green-600 break-all whitespace-pre-line">' + msg + '</div></div>';
+      resultEl.className = 'mt-3 text-sm';
+      btn.disabled = true; btn.textContent = 'Done';
+      document.getElementById('transfer-to').value = '';
+      document.getElementById('transfer-amount').value = '';
     } else {
-      resultEl.textContent = data.error || 'Transfer failed';
-      resultEl.className = 'mt-3 text-sm text-red-600';
+      resultEl.innerHTML = '<div class="p-3 bg-red-50 border border-red-200 rounded-lg text-red-600">'
+        + (data.error || 'Transfer failed (HTTP ' + res.status + ')') + '</div>';
+      resultEl.className = 'mt-3 text-sm';
+      btn.disabled = false; btn.textContent = '<%= it.t.btn_send || "Send" %>';
     }
   } catch (e) {
-    resultEl.textContent = 'Network error: ' + e.message;
-    resultEl.className = 'mt-3 text-sm text-red-600';
+    resultEl.innerHTML = '<div class="p-3 bg-red-50 border border-red-200 rounded-lg text-red-600">Network error: ' + e.message + '</div>';
+    resultEl.className = 'mt-3 text-sm';
+    btn.disabled = false; btn.textContent = '<%= it.t.btn_send || "Send" %>';
   }
   resultEl.classList.remove('hidden');
-  btn.disabled = false; btn.textContent = '<%= it.t.btn_send || "Send" %>';
 }
 </script>
 

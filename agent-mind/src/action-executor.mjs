@@ -532,6 +532,12 @@ export class ActionExecutor {
   async initiateHandshake(action) {
     const { consoleUrl, relayNodeId } = this.config;
 
+    // Default: agents do NOT initiate handshakes unless explicitly enabled
+    if (!this.config.autoHandshake) {
+      console.log(`[agent-mind:executor] INITIATE_HANDSHAKE blocked — autoHandshake disabled (default)`);
+      return { ok: false, reason: 'autoHandshake disabled' };
+    }
+
     // Validate target address format (must be full kaspa:q... address, ≥60 chars)
     if (!action.target || !action.target.startsWith('kaspa:q') || action.target.includes('...') || action.target.length < 60) {
       console.log(`[agent-mind:executor] Invalid target address: ${action.target} (len=${action.target?.length}) — skipped`);
