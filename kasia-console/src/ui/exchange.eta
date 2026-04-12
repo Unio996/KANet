@@ -603,7 +603,11 @@
       <div class="flex border-b border-warm-100 px-5" x-show="opsGroup === 'trading'">
         <button @click="opsTab = 'arb'"
           :class="opsTab === 'arb' ? 'border-brand-400 text-brand-600' : 'border-transparent text-ink-400'"
-          class="px-3 py-1.5 text-[11px] border-b -mb-px">Arbitrage</button>
+          class="px-3 py-1.5 text-[11px] border-b -mb-px">CEX Arbitrage</button>
+        <button @click="opsTab = 'hyperliquid'" disabled
+          class="px-3 py-1.5 text-[11px] border-b -mb-px border-transparent text-ink-300 cursor-not-allowed">Hyperliquid Perps</button>
+        <button @click="opsTab = 'aevo'" disabled
+          class="px-3 py-1.5 text-[11px] border-b -mb-px border-transparent text-ink-300 cursor-not-allowed">Aevo Options</button>
       </div>
       <div class="flex border-b border-warm-100 px-5" x-show="opsGroup === 'mm'">
         <button @click="opsTab = 'seed'"
@@ -617,10 +621,6 @@
         <button @click="opsTab = 'aave'"
           :class="opsTab === 'aave' ? 'border-brand-400 text-brand-600' : 'border-transparent text-ink-400'"
           class="px-3 py-1.5 text-[11px] border-b -mb-px">Aave</button>
-        <button @click="opsTab = 'hyperliquid'" disabled
-          class="px-3 py-1.5 text-[11px] border-b -mb-px border-transparent text-ink-300 cursor-not-allowed">Hyperliquid</button>
-        <button @click="opsTab = 'aevo'" disabled
-          class="px-3 py-1.5 text-[11px] border-b -mb-px border-transparent text-ink-300 cursor-not-allowed">Aevo</button>
       </div>
       <div class="p-5 max-h-[32rem] overflow-y-auto">
         <!-- Arb content placeholder — preserved from existing -->
