@@ -63,11 +63,11 @@ processPaymentSubmit({ ... }); // 广播没上链但本地推进了 = 乐观写�
 | 消息 | 文件 | 行 | 当前状态 |
 |------|------|-----|---------|
 | kanet_exchange_v1 (publish) | exchange.js | ~270 | ✅ 广播失败不写 DB（4/10 修复） |
-| kanet_exchange_accept_v1 | exchange.js | ~293 | ⚠ 广播失败仍写 DB |
-| kanet_exchange_paid_v1 | trade-protocol-filter.js | ~856 | ❌ 广播失败仍 processPaymentSubmit |
-| kanet_exchange_delivered_v1 | exchange-machine.js | ~477 | ❌ sendKaspa 返回即 completed |
-| kanet_exchange_cancel_v1 | exchange.js | ~340 | ⚠ 需检查 |
-| kanet_exchange_timeout_v1 | exchange-machine.js | ~340 | ⚠ 需检查 |
+| kanet_exchange_accept_v1 | exchange.js | ~278 | ✅ 广播成功才 processAccept（4/12 P0-③，陷阱 #51） |
+| kanet_exchange_paid_v1 (_autoSendKas) | trade-protocol-filter.js | ~978 | ✅ 5 次重试+失败不推进（4/12 P1-C，陷阱 #54） |
+| kanet_exchange_delivered_v1 | exchange-machine.js | ~548 | ✅ 广播成功才 completed（4/11 修复） |
+| kanet_exchange_cancel_v1 | exchange.js | ~352 | ✅ local-first 合理（4/12 共识：cancel 只在 open 态，无对手方资金风险） |
+| kanet_exchange_timeout_v1 | exchange-machine.js | ~400 | ✅ 广播成功才 reopen（4/12 P0-⑤，陷阱 #52） |
 
 **教训来源：** 2026-04-11 跨节点测试。taker 节点 auto-pay USDT 成功，paid 广播因 UTXO 冲突失败被静默吞掉，但 processPaymentSubmit 照常推进本地状态。maker 节点永远收不到 paid 消息，永远不知道要 deliver KAS。交易永远卡在 verifying。花了 3 小时才定位到这一行 try-catch。
 
@@ -1123,6 +1123,20 @@ getOrder / cancelOrder 用 `def.authStyle` switch（不是 exchange name），�
 47. **分配 adapter 不等于启动 relay。** `relay-manager.js:startAll()` 只在 Console 启动时跑一次。之后在 UI 上把 adapter 分配给 relay 只更新 DB，不启动 relay 进程。已修复：`/relays/:id/assign` 分配 adapter 后自动调 `startRelay()`。位置：relay.js `/relays/:id/assign`。教训来源：2026-04-12 NWT 分配 adapter 后 relay 始终 not running。
 
 48. **Agent 默认不主动握手。** `action-executor.mjs:initiateHandshake()` 入口检查 `this.config.autoHandshake`，默认 false。Brain proactive 生成的 `INITIATE_HANDSHAKE` ACTION 会被拦截。开关存储在 `relay_nodes.social_overrides` JSON 的 `autoHandshake` 字段。UI 在 `/agent` 页 Focus Mode 下方。**被动接受握手不受影响**（收到别人的握手仍自动接受）。教训来源：2026-04-12 NWT 刚启动就主动花 0.2 KAS 给陌生人握手。
+
+### 致命陷阱（4/12 P0 专项修复）
+
+49. **VALID_TRANSITIONS 必须包含 verified 状态。** delivering 失败 3 次回退到 verified，但 verified 不在 VALID_TRANSITIONS 的 key 里也不在 TERMINAL set 里——交易永久卡死，fund_lock 永不释放。已修复：`verified: ['delivering', 'disputed', 'timed_out']`。**不含 cancelled**——verified 意味着 taker 已付款或 KAS 已发出，maker 不能单方面 cancel。位置：exchange-machine.js:29。
+
+50. **delivering 和 verified 状态必须有超时清理。** `timeoutVerifying()` 只查 verifying/awaiting 状态，delivering 和 verified 无超时 = 永久卡住。已修复：delivering 60min→verified（回退重试），verified 120min 总窗口→timed_out（释放资金）。超时用 `delivering_at`（专用字段），**不用 `updated_at`**（任何字段变化都会刷新 updated_at 导致计时器重置）。位置：exchange-machine.js timeoutVerifying()。
+
+51. **accept 必须广播成功后才调 processAccept。** 旧逻辑先 processAccept（写 matched）再广播，广播失败后 auto-pay 已触发。已修复：广播 5 次重试→失败 return 500 不变 DB→成功才 processAccept 用真实 txId。与 publish 路径一致。位置：exchange.js accept 端点。
+
+52. **timeout 广播必须成功后才 reopen offer。** 旧逻辑先 SQL UPDATE（matched→open）再广播，广播失败后本地已 reopen 但链上没有 timeout TX——其他节点仍看到 matched。已修复：广播先于 SQL UPDATE，失败 continue 保留 matched 下轮 5min tick 重试。非本地 maker（无 relay）走 local-only timeout。位置：exchange-machine.js checkMatchedTimeout()。
+
+53. **processAccept 必须拒绝自我接单。** maker 接自己的 offer 可以触发 auto-pay 给自己，制造虚假成交。已修复：`msg._from === offer.maker` → reject。位置：exchange-machine.js processAccept()。
+
+54. **_autoSendKas paid 广播失败不能推进 processPaymentSubmit。** 铁律不分场景——即使 KAS TX 是本地节点发的，paid 广播失败意味着 maker 节点不知道 taker 已付款。maker 超时 reopen，另一个 taker 接单 = 双重交割。已修复：5 次重试→失败不调 processPaymentSubmit→记 chain_event(exchange_paid_broadcast_failed) 留痕。位置：trade-protocol-filter.js _autoSendKas()。
 
 ---
 
