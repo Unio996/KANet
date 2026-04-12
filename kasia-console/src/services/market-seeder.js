@@ -143,8 +143,8 @@ async function publishSeedOrder(config, midPrice, side) {
   }
 
   // P1-A: Price deviation guard — skip if price deviates >N% from cached market price
-  const deviationPctRow = sqlite.prepare("SELECT value FROM config_entries WHERE key = 'seeder_price_deviation_pct'").get();
-  const maxDeviationPct = parseFloat(deviationPctRow?.value) || 5;
+  const { getConfig } = await import('../data/settings/configs.js');
+  const maxDeviationPct = parseFloat(await getConfig('seeder_price_deviation_pct')) || 5;
   const lastPrice = parseFloat(config.last_published_price) || 0;
 
   if (lastPrice > 0) {
