@@ -266,4 +266,99 @@ export async function registerDefiRoutes(fastify) {
       return reply.code(500).send({ error: err.message });
     }
   });
+
+  // ── Aevo Options ─────────────────────────────────────────────
+
+  // GET /api/defi/aevo/account — account status
+  fastify.get('/api/defi/aevo/account', async (request, reply) => {
+    const { agentId } = request.query;
+    if (!agentId) return reply.code(400).send({ error: 'agentId required' });
+    try {
+      const { loadCredentials, getAccount } = await import('../services/aevo-client.js');
+      const creds = await loadCredentials(agentId);
+      if (!creds) return reply.code(404).send({ error: 'No Aevo credentials configured' });
+      return reply.send(await getAccount(creds));
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // GET /api/defi/aevo/positions — current positions with Greeks
+  fastify.get('/api/defi/aevo/positions', async (request, reply) => {
+    const { agentId } = request.query;
+    if (!agentId) return reply.code(400).send({ error: 'agentId required' });
+    try {
+      const { loadCredentials, getPositions } = await import('../services/aevo-client.js');
+      const creds = await loadCredentials(agentId);
+      if (!creds) return reply.code(404).send({ error: 'No Aevo credentials configured' });
+      return reply.send({ ok: true, positions: await getPositions(creds) });
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // GET /api/defi/aevo/orderbook/:instrument — order book
+  fastify.get('/api/defi/aevo/orderbook/:instrument', async (request, reply) => {
+    const { agentId } = request.query;
+    if (!agentId) return reply.code(400).send({ error: 'agentId required' });
+    try {
+      const { loadCredentials, getOrderbook } = await import('../services/aevo-client.js');
+      const creds = await loadCredentials(agentId);
+      if (!creds) return reply.code(404).send({ error: 'No Aevo credentials configured' });
+      return reply.send(await getOrderbook(creds, request.params.instrument));
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // POST /api/defi/aevo/order — place order (naked short check)
+  fastify.post('/api/defi/aevo/order', async (request, reply) => {
+    const { agentId, walletId, instrument, side, amount, price, orderType = 'limit' } = request.body || {};
+    if (!agentId || !instrument || !side || !amount) return reply.code(400).send({ error: 'agentId, instrument, side, amount required' });
+
+    // Naked short check: selling without existing position needs approval
+    if (side.toLowerCase() === 'sell') {
+      const { getConfig } = await import('../data/settings/configs.js');
+      const nakedMode = await getConfig('aevo_naked_short_mode') || 'forbidden';
+      if (nakedMode === 'forbidden') {
+        return reply.code(403).send({ error: 'Selling options (naked short) is forbidden. Change aevo_naked_short_mode to approval or auto.' });
+      }
+      // approval mode: could create execution_states proposal here (future)
+    }
+
+    try {
+      const { loadCredentials, getSigningKeyFromWallet, createOrder } = await import('../services/aevo-client.js');
+      const creds = await loadCredentials(agentId);
+      if (!creds) return reply.code(404).send({ error: 'No Aevo credentials configured' });
+
+      let signingKey = null;
+      if (walletId) {
+        signingKey = await getSigningKeyFromWallet(walletId);
+      }
+
+      const result = await createOrder(creds, signingKey, { instrument, side, amount: parseFloat(amount), price: price ? parseFloat(price) : undefined, orderType });
+      if (result.ok) {
+        recordChainEvent({ txid: result.orderId || instrument, eventType: 'aevo_order', payload: JSON.stringify({ instrument, side, amount, price }) });
+      }
+      return reply.send(result);
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // DELETE /api/defi/aevo/order/:id — cancel order
+  fastify.delete('/api/defi/aevo/order/:id', async (request, reply) => {
+    const { agentId } = request.query;
+    if (!agentId) return reply.code(400).send({ error: 'agentId required' });
+    try {
+      const { loadCredentials, cancelOrder } = await import('../services/aevo-client.js');
+      const creds = await loadCredentials(agentId);
+      if (!creds) return reply.code(404).send({ error: 'No Aevo credentials configured' });
+      const result = await cancelOrder(creds, request.params.id);
+      if (result) recordChainEvent({ txid: request.params.id, eventType: 'aevo_cancel', payload: '{}' });
+      return reply.send({ ok: result });
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
 }
