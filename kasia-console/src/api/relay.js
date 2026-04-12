@@ -183,7 +183,7 @@ export async function registerRelayRoutes(fastify) {
 
   // ── Multi-chain Wallet Management (agent_wallets table) ─────
 
-  const SUPPORTED_CHAINS = ['bnb', 'eth', 'sol', 'tron', 'polygon'];
+  const SUPPORTED_CHAINS = ['bnb', 'eth', 'sol', 'tron', 'polygon', 'arbitrum', 'optimism', 'avalanche', 'base'];
   const EVM_CHAINS = ['bnb', 'eth', 'polygon', 'arbitrum', 'optimism', 'avalanche', 'base'];
   const EVM_RPC_URLS = {
     bnb: 'https://bsc-dataseed1.binance.org', eth: 'https://eth.llamarpc.com', polygon: 'https://polygon-bor-rpc.publicnode.com',
