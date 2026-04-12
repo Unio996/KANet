@@ -26,6 +26,7 @@ const VALID_TRANSITIONS = {
   matched:                  ['verifying', 'awaiting_manual_confirm', 'awaiting_oracle'],
   verifying:                ['delivering', 'disputed', 'timed_out'],
   delivering:               ['completed', 'verified', 'disputed'],  // verified = revert on delivery failure
+  verified:                 ['delivering', 'disputed', 'timed_out'], // delivery retry or manual intervention
   awaiting_manual_confirm:  ['completed', 'disputed', 'timed_out'],
   awaiting_oracle:          ['completed', 'failed', 'timed_out'],
 };
@@ -163,6 +164,12 @@ export function processAccept(msg) {
   // Only open offers can be accepted
   if (offer.protocol_status !== 'open') {
     console.log(`[exchange-machine] Accept rejected: offer ${msg.offer_id.slice(0, 8)} is ${offer.protocol_status}`);
+    return null;
+  }
+
+  // Self-accept prevention: maker cannot accept own offer
+  if (msg._from && msg._from === offer.maker) {
+    console.log(`[exchange-machine] Accept rejected: self-accept (maker === taker: ${msg._from.slice(-12)})`);
     return null;
   }
 
@@ -340,6 +347,7 @@ export function expireStale() {
  * @returns {number} count of timed out offers
  */
 export function timeoutVerifying() {
+  // Original: verifying/awaiting states → timed_out after 30min
   const stuck = sqlite.prepare(
     `SELECT id, verification FROM exchange_offers
      WHERE protocol_status IN ('verifying', 'awaiting_manual_confirm', 'awaiting_oracle')
@@ -351,7 +359,35 @@ export function timeoutVerifying() {
     transition(id, 'timed_out');
   }
 
-  return stuck.length;
+  // delivering → verified (revert for retry) after 60min
+  // KAS may have been sent but broadcast confirmation slow — revert, don't dispute
+  const stuckDelivering = sqlite.prepare(
+    `SELECT id FROM exchange_offers
+     WHERE protocol_status = 'delivering'
+     AND delivering_at IS NOT NULL
+     AND datetime(delivering_at, '+60 minutes') < datetime('now')`
+  ).all();
+
+  for (const { id } of stuckDelivering) {
+    console.log(`[exchange-machine] delivering timeout 60min → verified (revert for retry): ${id.slice(0,8)}`);
+    transition(id, 'verified', {});
+  }
+
+  // verified → timed_out after 60min (total window 120min from delivering)
+  // All retry attempts exhausted — release funds
+  const stuckVerified = sqlite.prepare(
+    `SELECT id FROM exchange_offers
+     WHERE protocol_status = 'verified'
+     AND delivering_at IS NOT NULL
+     AND datetime(delivering_at, '+120 minutes') < datetime('now')`
+  ).all();
+
+  for (const { id } of stuckVerified) {
+    console.log(`[exchange-machine] verified timeout (120min total) → timed_out: ${id.slice(0,8)}`);
+    transition(id, 'timed_out');
+  }
+
+  return stuck.length + stuckDelivering.length + stuckVerified.length;
 }
 
 // ── Matched Timeout ──────────────────────────────────────────
