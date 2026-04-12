@@ -29,16 +29,17 @@ export async function registerChatRoutes(fastify) {
     if (!channel) return reply.code(400).send({ error: 'channel is required' });
 
     const limit = Math.min(parseInt(rawLimit) || 50, 200);
-    let sql = `SELECT * FROM broadcast_messages WHERE channel_name = ?`;
-    const params = [channel];
+    let sql, params;
 
     if (afterTs) {
-      sql += ' AND created_at > ?';
-      params.push(afterTs);
+      // Incremental: get messages after a timestamp (ascending for chronological order)
+      sql = `SELECT * FROM broadcast_messages WHERE channel_name = ? AND created_at > ? ORDER BY created_at ASC LIMIT ?`;
+      params = [channel, afterTs, limit];
+    } else {
+      // Initial load: get the LATEST messages (subquery to reverse order)
+      sql = `SELECT * FROM (SELECT * FROM broadcast_messages WHERE channel_name = ? ORDER BY created_at DESC LIMIT ?) sub ORDER BY created_at ASC`;
+      params = [channel, limit];
     }
-
-    sql += ' ORDER BY created_at ASC LIMIT ?';
-    params.push(limit);
 
     const messages = sqlite.prepare(sql).all(...params);
     return reply.send({ messages, channel });
