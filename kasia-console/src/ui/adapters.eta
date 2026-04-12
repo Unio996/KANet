@@ -84,6 +84,15 @@
               PID <%= a.pid %> · Port <%= a.http_port %> · <%= a.startedAt ? a.startedAt.slice(11, 19) : '' %>
             </div>
             <% } %>
+            <% if (a.ai_provider_url && a.ai_provider_url.includes('9100')) { %>
+            <div class="mt-3 px-3 py-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-700"
+                 x-data="{ pending: '...', ok: false }" x-init="
+                   fetch('http://localhost:9100/cc/status').then(r=>r.json()).then(d=>{pending=d.pending_count; ok=true}).catch(()=>{ok=false})
+                 ">
+              <span x-show="ok">&#9889; Claude Code Bridge · <span x-text="pending"></span> pending</span>
+              <span x-show="!ok" class="text-red-600">&#9889; Bridge offline — run <code class="font-mono">node scripts/cc-bridge.mjs</code></span>
+            </div>
+            <% } %>
           </div>
           <% }) %>
         </div>
@@ -142,11 +151,23 @@
                   class="w-full px-3 py-2 border border-warm-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500" />
               </div>
               <!-- 6. API 密钥 -->
-              <div>
+              <div id="apiKeyRow">
                 <label class="block text-xs font-medium text-ink-500 mb-1">API 密钥</label>
                 <input type="password" name="ai_provider_key" placeholder="sk-..."
                   class="w-full px-3 py-2 border border-warm-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500" />
-                <p class="text-xs text-ink-300 mt-1">本地服务（Ollama / llama.cpp）可留空</p>
+                <p class="text-xs text-ink-300 mt-1">本地服务（Ollama / llama.cpp / Bridge）可留空</p>
+              </div>
+              <!-- Claude Code Bridge 说明 -->
+              <div id="bridgeInfo" class="hidden">
+                <div class="p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
+                  <div class="flex items-center space-x-2">
+                    <span class="text-blue-600 text-lg">&#9889;</span>
+                    <span class="text-sm font-semibold text-blue-800">Claude Code Bridge</span>
+                  </div>
+                  <p class="text-xs text-blue-700">Let Claude Code become this Agent's AI brain. Run the bridge server first:</p>
+                  <code class="block px-3 py-2 bg-white rounded text-xs font-mono text-ink-600 border border-blue-200">node scripts/cc-bridge.mjs</code>
+                  <p class="text-xs text-blue-600">Then use <code class="font-mono">cc-poll.mjs</code> / <code class="font-mono">cc-respond.mjs</code> to interact. No API key needed.</p>
+                </div>
               </div>
               <!-- Hidden -->
               <input type="hidden" name="ai_provider_url" id="aiUrlHidden" />
@@ -226,7 +247,8 @@
             siliconflow:       { label: 'SiliconFlow',         url: 'https://api.siliconflow.cn/v1', models: ['deepseek-ai/DeepSeek-V3', 'deepseek-ai/DeepSeek-R1', 'Qwen/Qwen2.5-72B-Instruct', 'Qwen/Qwen3-235B-A22B'] },
             dashscope:         { label: 'DashScope（通义千问）', url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: ['qwen3.5-plus', 'qwen-plus', 'qwen-turbo', 'qwen-max'] },
             ollama:            { label: 'Ollama（本地）',       url: 'http://localhost:11434/v1', models: ['llama3.3', 'llama3.2', 'qwen3', 'qwen2.5', 'gemma3', 'deepseek-r1', 'mistral', 'phi-4'] },
-            llama_cpp:         { label: 'llama.cpp（本地 GPU）', url: 'http://localhost:8000/v1',  models: [] }
+            llama_cpp:         { label: 'llama.cpp（本地 GPU）', url: 'http://localhost:8000/v1',  models: [] },
+            claude_code_bridge:{ label: 'Claude Code Bridge',   url: 'http://localhost:9100/v1', models: ['claude-code'] }
           };
 
           var allServices = Object.keys(catalog).concat(['custom']);
@@ -296,6 +318,10 @@
             populateModels();
             var h = document.getElementById('realProviderHidden');
             if (h) h.value = serviceSel.value === 'anthropic_default' ? 'anthropic' : 'openai';
+            // Bridge mode: show info, hide API key
+            var isBridge = serviceSel.value === 'claude_code_bridge';
+            document.getElementById('apiKeyRow').classList.toggle('hidden', isBridge);
+            document.getElementById('bridgeInfo').classList.toggle('hidden', !isBridge);
           }
 
           function onModelChange() {
