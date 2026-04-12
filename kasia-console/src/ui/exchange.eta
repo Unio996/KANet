@@ -507,6 +507,9 @@
     <div x-show="opsOpen" x-transition class="border-t border-warm-100">
       <!-- Arb/Seed sub-tabs -->
       <div class="flex border-b border-warm-200 px-5">
+        <button @click="opsTab = 'wallet'; loadWalletData();"
+          :class="opsTab === 'wallet' ? 'border-brand-500 text-brand-600' : 'border-transparent text-ink-400'"
+          class="px-3 py-2 text-xs border-b-2 -mb-px">Wallet</button>
         <button @click="opsTab = 'arb'"
           :class="opsTab === 'arb' ? 'border-brand-500 text-brand-600' : 'border-transparent text-ink-400'"
           class="px-3 py-2 text-xs border-b-2 -mb-px">Arbitrage</button>

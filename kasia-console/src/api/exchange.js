@@ -172,10 +172,9 @@ export async function registerExchangeRoutes(fastify) {
 
     // P1-B: Exchange exposure limits
     if (give_asset === 'KAS') {
-      const perOfferRow = sqlite.prepare("SELECT value FROM config_entries WHERE key = 'exchange_per_offer_kas_limit'").get();
-      const totalExpRow = sqlite.prepare("SELECT value FROM config_entries WHERE key = 'exchange_total_exposure_kas_limit'").get();
-      const perOfferLimit = parseFloat(perOfferRow?.value) || 5000;
-      const totalExposureLimit = parseFloat(totalExpRow?.value) || 20000;
+      const { getConfig } = await import('../data/settings/configs.js');
+      const perOfferLimit = parseFloat(await getConfig('exchange_per_offer_kas_limit')) || 5000;
+      const totalExposureLimit = parseFloat(await getConfig('exchange_total_exposure_kas_limit')) || 20000;
       const giveAmt = parseFloat(give_amount);
 
       if (giveAmt > perOfferLimit) {
@@ -650,14 +649,11 @@ export async function registerExchangeRoutes(fastify) {
   fastify.get('/api/exchange/limits', async (request, reply) => {
     const { relayNodeId } = request.query;
 
-    // Limits from config_entries
-    const perOfferRow = sqlite.prepare("SELECT value FROM config_entries WHERE key = 'exchange_per_offer_kas_limit'").get();
-    const totalExpRow = sqlite.prepare("SELECT value FROM config_entries WHERE key = 'exchange_total_exposure_kas_limit'").get();
-    const deviationRow = sqlite.prepare("SELECT value FROM config_entries WHERE key = 'seeder_price_deviation_pct'").get();
-
-    const perOfferLimit = parseFloat(perOfferRow?.value) || 5000;
-    const totalExposureLimit = parseFloat(totalExpRow?.value) || 20000;
-    const priceDeviationPct = parseFloat(deviationRow?.value) || 5;
+    // Limits from config_entries (via getConfig helper — handles value_encrypted column)
+    const { getConfig } = await import('../data/settings/configs.js');
+    const perOfferLimit = parseFloat(await getConfig('exchange_per_offer_kas_limit')) || 5000;
+    const totalExposureLimit = parseFloat(await getConfig('exchange_total_exposure_kas_limit')) || 20000;
+    const priceDeviationPct = parseFloat(await getConfig('seeder_price_deviation_pct')) || 5;
 
     // Current exposure: sum of open KAS offers by all local agents
     const localAddresses = sqlite.prepare('SELECT address FROM relay_nodes').all().map(r => r.address);
@@ -704,23 +700,24 @@ export async function registerExchangeRoutes(fastify) {
   fastify.put('/api/exchange/limits', async (request, reply) => {
     const { per_offer_kas, total_exposure_kas, price_deviation_pct } = request.body || {};
 
+    const { setConfig } = await import('../data/settings/configs.js');
     const updates = [];
     if (per_offer_kas !== undefined) {
       const val = parseFloat(per_offer_kas);
       if (isNaN(val) || val < 10) return reply.code(400).send({ error: 'per_offer_kas must be >= 10' });
-      sqlite.prepare("INSERT INTO config_entries (id, key, value, category, updated_at, created_at) VALUES (hex(randomblob(16)), 'exchange_per_offer_kas_limit', ?, 'exchange_limits', datetime('now'), datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = datetime('now')").run(String(val), String(val));
+      await setConfig('exchange_per_offer_kas_limit', String(val), { category: 'exchange_limits' });
       updates.push(`per_offer_kas=${val}`);
     }
     if (total_exposure_kas !== undefined) {
       const val = parseFloat(total_exposure_kas);
       if (isNaN(val) || val < 100) return reply.code(400).send({ error: 'total_exposure_kas must be >= 100' });
-      sqlite.prepare("INSERT INTO config_entries (id, key, value, category, updated_at, created_at) VALUES (hex(randomblob(16)), 'exchange_total_exposure_kas_limit', ?, 'exchange_limits', datetime('now'), datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = datetime('now')").run(String(val), String(val));
+      await setConfig('exchange_total_exposure_kas_limit', String(val), { category: 'exchange_limits' });
       updates.push(`total_exposure_kas=${val}`);
     }
     if (price_deviation_pct !== undefined) {
       const val = parseFloat(price_deviation_pct);
       if (isNaN(val) || val < 1 || val > 50) return reply.code(400).send({ error: 'price_deviation_pct must be 1-50' });
-      sqlite.prepare("INSERT INTO config_entries (id, key, value, category, updated_at, created_at) VALUES (hex(randomblob(16)), 'seeder_price_deviation_pct', ?, 'exchange_limits', datetime('now'), datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = datetime('now')").run(String(val), String(val));
+      await setConfig('seeder_price_deviation_pct', String(val), { category: 'exchange_limits' });
       updates.push(`price_deviation_pct=${val}`);
     }
 
