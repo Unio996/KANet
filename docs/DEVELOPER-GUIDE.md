@@ -103,13 +103,15 @@ processPaymentSubmit({ ... }); // 广播没上链但本地推进了 = 乐观写�
 - 文件位置：`tools/llama-server/`（二进制）、`models/`（GGUF 模型）
 
 **Claude Code Bridge（4/12 新增）：**
-- Claude Code 通过 Adapter 成为 Agent 的 AI 大脑
+- **Bridge 是 Claude Code 连接 KANet 的专用通道。** NWT Agent = Claude Code 在链上的化身。Bridge 断 = Claude Code 失联 = NWT 变哑巴。必须始终保持 Bridge 轮询活跃（`cc_active: true`）。
+- Claude Code 通过 Adapter 成为 Agent 的 AI 大脑。无降级无 fallback——Claude Code IS the brain, or there is no brain。
 - Bridge server (`scripts/cc-bridge.mjs`) 在 `localhost:9100` 暴露 OpenAI 兼容端点
 - Adapter 的 `openai` provider 指向 Bridge，零 Adapter 代码改动
 - 流程：Mind → Adapter → Bridge → 请求队列 → Claude Code poll/respond → 回复
 - 启动：`node scripts/cc-bridge.mjs [port]`（默认 9100）
-- Claude Code 端：`node scripts/cc-poll.mjs`（拉取请求）、`node scripts/cc-respond.mjs <id> "text"`（提交回复）
+- Claude Code 端：`GET /cc/pending`（拉取请求）、`POST /cc/respond/:id`（提交回复）、`GET /cc/status`（状态）
 - 配置：`adapter_nodes` 设 `ai_provider_url='http://localhost:9100/v1'`, `ai_model='claude-code'`（注意 `/v1` 后缀，openai provider 拼接 `/chat/completions`）
+- **轮询铁律：Claude Code 必须同时监听三个源——Bridge（Mind 请求）+ dev-coord（开发协调）+ Git（代码变更）。漏掉任何一个都是失职。**
 - 跨节点协作：两个 KANet 节点各自运行 Bridge + Claude Code，Agent 间通过链上消息中转，Claude Code 实例自动协作
 - 回滚：DB 恢复原 provider URL/model，重启 adapter
 
@@ -1123,6 +1125,8 @@ getOrder / cancelOrder 用 `def.authStyle` switch（不是 exchange name），�
 47. **分配 adapter 不等于启动 relay。** `relay-manager.js:startAll()` 只在 Console 启动时跑一次。之后在 UI 上把 adapter 分配给 relay 只更新 DB，不启动 relay 进程。已修复：`/relays/:id/assign` 分配 adapter 后自动调 `startRelay()`。位置：relay.js `/relays/:id/assign`。教训来源：2026-04-12 NWT 分配 adapter 后 relay 始终 not running。
 
 48. **Agent 默认不主动握手。** `action-executor.mjs:initiateHandshake()` 入口检查 `this.config.autoHandshake`，默认 false。Brain proactive 生成的 `INITIATE_HANDSHAKE` ACTION 会被拦截。开关存储在 `relay_nodes.social_overrides` JSON 的 `autoHandshake` 字段。UI 在 `/agent` 页 Focus Mode 下方。**被动接受握手不受影响**（收到别人的握手仍自动接受）。教训来源：2026-04-12 NWT 刚启动就主动花 0.2 KAS 给陌生人握手。
+
+49. **Bridge 是 Claude Code 的命脉，必须始终活跃。** `cc-bridge.mjs` 是 Claude Code 连接 KANet 的专用通道。NWT Agent = Claude Code 在链上的化身。Bridge 的 `cc_active` 变 false（30 秒无 poll）意味着 Claude Code 失联——NWT 的 Mind 请求会堆积直到 5 分钟超时，所有链上消息无人回复。**Claude Code 轮询必须同时覆盖三个源：Bridge（GET /cc/pending）、dev-coord（链上开发协调）、Git（代码变更）。漏掉任何一个都是失职。** 教训来源：2026-04-12 Claude Code 只盯 dev-coord 和 Git 而完全遗忘 Bridge，导致 NWT 失联 2.5 小时。
 
 ### 致命陷阱（4/12 P0 专项修复）
 
