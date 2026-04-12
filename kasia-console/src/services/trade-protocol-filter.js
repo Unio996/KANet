@@ -481,7 +481,7 @@ async function _evaluateAutoTake(offerId, msg) {
   // 8. Daily limit
   const today = new Date().toISOString().slice(0, 10);
   const dailyCount = sqlite.prepare(
-    "SELECT COUNT(*) as cnt FROM chain_events WHERE event_type = 'autotake_accepted' AND created_at >= ?"
+    "SELECT COUNT(*) as cnt FROM chain_events WHERE event_type = 'autotake_accepted' AND observed_at >= ?"
   ).get(today + 'T00:00:00Z')?.cnt || 0;
   const dailyLimit = parseInt(await getConfig('autotake_daily_limit') || '3');
   if (dailyCount >= dailyLimit) return;
