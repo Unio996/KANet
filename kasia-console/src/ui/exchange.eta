@@ -1234,24 +1234,34 @@ function exchangeApp() {
     async loadWalletData() {
       if (!this.form?.relayNodeId) return;
       try {
+        const rid = this.form.relayNodeId;
         const [wallets, locks] = await Promise.allSettled([
-          fetch(`/api/relay/${this.form.relayNodeId}/wallets`).then(r => r.json()),
-          fetch(`/api/trade/fund-locks?relay_node_id=${this.form.relayNodeId}`).then(r => r.json()),
+          fetch(`/api/relay/${rid}/wallets`).then(r => r.json()),
+          fetch(`/api/trade/fund-locks?relay_node_id=${rid}`).then(r => r.json()),
         ]);
         if (wallets.status === 'fulfilled' && wallets.value) {
           const w = wallets.value;
           // Build locked map from fund locks
           const lockedMap = {};
-          if (locks.status === 'fulfilled' && Array.isArray(locks.value)) {
-            for (const l of locks.value) {
-              if (l.status !== 'locked') continue;
-              lockedMap[l.asset || 'kas'] = (lockedMap[l.asset || 'kas'] || 0) + (l.amount || 0);
-            }
+          const lockData = locks.status === 'fulfilled' ? locks.value : {};
+          const lockArr = Array.isArray(lockData) ? lockData : (lockData.locks || []);
+          for (const l of lockArr) {
+            if (l.status !== 'locked') continue;
+            lockedMap[l.asset || 'kas'] = (lockedMap[l.asset || 'kas'] || 0) + (l.amount || 0);
           }
+          // Fetch on-chain balances for each chain wallet
+          const chains = w.chains || [];
+          const balancePromises = chains.map(c =>
+            c.id ? fetch(`/api/relay/${rid}/wallets/${c.id}/balance`).then(r => r.json()).catch(() => ({})) : Promise.resolve({})
+          );
+          const balances = await Promise.all(balancePromises);
           this.walletData = {
             kas: { address: w.kaspa?.address, balance: w.kaspa?.balance, locked: lockedMap['kas'] || 0 },
-            chains: (w.chains || []).map(c => ({
+            chains: chains.map((c, i) => ({
               ...c,
+              usdt: balances[i]?.usdt ?? c.usdt ?? 0,
+              usdc: balances[i]?.usdc ?? c.usdc ?? 0,
+              gas: balances[i]?.native ?? c.gas ?? 0,
               locked: lockedMap['usdt_' + c.chain] || 0,
             })),
           };
