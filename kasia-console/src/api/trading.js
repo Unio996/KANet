@@ -18,7 +18,7 @@ import { recordChainEvent } from '../services/chain-event.js';
 import { verifyCrossChainTx } from '../services/cross-chain-verify.mjs';
 import { analyzeMarket } from '../services/signal-engine.js';
 import { generateProposal } from '../services/strategy-engine.js';
-import { fetchAllMarkets, fetchCryptoData, fetchStockData, fetchPredictionData, fetchCommodityData, fetchFundingRates, fetchSentiment, fetchCryptoGlobal, fetchEconomicCalendar } from '../services/market-data.js';
+import { fetchAllMarkets, fetchCryptoData, fetchStockData, fetchPredictionData, fetchCommodityData, cachedFunding, cachedSentiment, cachedCryptoGlobal, cachedCalendar } from '../services/market-data.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 import { EXCHANGE_REGISTRY } from '../lib/exchange-registry.js';
 
@@ -953,16 +953,16 @@ export async function registerTradingRoutes(fastify) {
   fastify.get('/api/market/commodities', async (request, reply) => reply.send(await fetchCommodityData()));
 
   // GET /api/market/funding — futures funding rates
-  fastify.get('/api/market/funding', async (request, reply) => reply.send(await fetchFundingRates()));
+  fastify.get('/api/market/funding', async (request, reply) => reply.send(await cachedFunding()));
 
   // GET /api/market/sentiment — fear & greed index
-  fastify.get('/api/market/sentiment', async (request, reply) => reply.send(await fetchSentiment()));
+  fastify.get('/api/market/sentiment', async (request, reply) => reply.send(await cachedSentiment()));
 
   // GET /api/market/crypto-global — CoinGecko total market cap, BTC dominance, volume
-  fastify.get('/api/market/crypto-global', async (request, reply) => reply.send(await fetchCryptoGlobal()));
+  fastify.get('/api/market/crypto-global', async (request, reply) => reply.send(await cachedCryptoGlobal()));
 
   // GET /api/market/calendar — Forex Factory economic calendar (today + this week)
-  fastify.get('/api/market/calendar', async (request, reply) => reply.send(await fetchEconomicCalendar()));
+  fastify.get('/api/market/calendar', async (request, reply) => reply.send(await cachedCalendar()));
 
   // ── Signal & Strategy API (for Mind consumption) ─────────────────────────
 
