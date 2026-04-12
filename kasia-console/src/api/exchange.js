@@ -644,6 +644,90 @@ export async function registerExchangeRoutes(fastify) {
     });
   });
 
+  // ── Exchange Limits & Asset Status ─────────────────────
+
+  // GET /api/exchange/limits — 读取限额配置 + 当前资产状态
+  fastify.get('/api/exchange/limits', async (request, reply) => {
+    const { relayNodeId } = request.query;
+
+    // Limits from config_entries
+    const perOfferRow = sqlite.prepare("SELECT value FROM config_entries WHERE key = 'exchange_per_offer_kas_limit'").get();
+    const totalExpRow = sqlite.prepare("SELECT value FROM config_entries WHERE key = 'exchange_total_exposure_kas_limit'").get();
+    const deviationRow = sqlite.prepare("SELECT value FROM config_entries WHERE key = 'seeder_price_deviation_pct'").get();
+
+    const perOfferLimit = parseFloat(perOfferRow?.value) || 5000;
+    const totalExposureLimit = parseFloat(totalExpRow?.value) || 20000;
+    const priceDeviationPct = parseFloat(deviationRow?.value) || 5;
+
+    // Current exposure: sum of open KAS offers by all local agents
+    const localAddresses = sqlite.prepare('SELECT address FROM relay_nodes').all().map(r => r.address);
+    let currentExposure = 0;
+    if (localAddresses.length > 0) {
+      const placeholders = localAddresses.map(() => '?').join(',');
+      const row = sqlite.prepare(`
+        SELECT COALESCE(SUM(CAST(give_amount AS REAL)), 0) as total
+        FROM exchange_offers
+        WHERE protocol_status IN ('open', 'matched', 'verifying', 'delivering')
+        AND give_asset = 'KAS' AND maker IN (${placeholders})
+      `).get(...localAddresses);
+      currentExposure = row?.total || 0;
+    }
+
+    // Fund locks
+    const lockedRow = sqlite.prepare(`
+      SELECT COALESCE(SUM(amount), 0) as total FROM fund_locks WHERE status = 'locked'
+    `).get();
+    const lockedKas = lockedRow?.total || 0;
+
+    // KAS balance (if relayNodeId provided) — query via internal API
+    let kasBalance = null;
+    if (relayNodeId) {
+      try {
+        const res = await fetch(`http://127.0.0.1:${process.env.PORT || 3100}/api/relay/${relayNodeId}/balance`);
+        const data = await res.json();
+        kasBalance = data?.balance != null ? parseFloat(data.balance) : null;
+      } catch {}
+    }
+
+    return reply.send({
+      limits: { per_offer_kas: perOfferLimit, total_exposure_kas: totalExposureLimit, price_deviation_pct: priceDeviationPct },
+      status: {
+        current_exposure_kas: Math.round(currentExposure * 100) / 100,
+        available_kas: Math.round((totalExposureLimit - currentExposure) * 100) / 100,
+        locked_kas: Math.round(lockedKas * 100) / 100,
+        kas_balance: kasBalance,
+      },
+    });
+  });
+
+  // PUT /api/exchange/limits — 更新限额配置
+  fastify.put('/api/exchange/limits', async (request, reply) => {
+    const { per_offer_kas, total_exposure_kas, price_deviation_pct } = request.body || {};
+
+    const updates = [];
+    if (per_offer_kas !== undefined) {
+      const val = parseFloat(per_offer_kas);
+      if (isNaN(val) || val < 10) return reply.code(400).send({ error: 'per_offer_kas must be >= 10' });
+      sqlite.prepare("INSERT INTO config_entries (id, key, value, category, updated_at, created_at) VALUES (hex(randomblob(16)), 'exchange_per_offer_kas_limit', ?, 'exchange_limits', datetime('now'), datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = datetime('now')").run(String(val), String(val));
+      updates.push(`per_offer_kas=${val}`);
+    }
+    if (total_exposure_kas !== undefined) {
+      const val = parseFloat(total_exposure_kas);
+      if (isNaN(val) || val < 100) return reply.code(400).send({ error: 'total_exposure_kas must be >= 100' });
+      sqlite.prepare("INSERT INTO config_entries (id, key, value, category, updated_at, created_at) VALUES (hex(randomblob(16)), 'exchange_total_exposure_kas_limit', ?, 'exchange_limits', datetime('now'), datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = datetime('now')").run(String(val), String(val));
+      updates.push(`total_exposure_kas=${val}`);
+    }
+    if (price_deviation_pct !== undefined) {
+      const val = parseFloat(price_deviation_pct);
+      if (isNaN(val) || val < 1 || val > 50) return reply.code(400).send({ error: 'price_deviation_pct must be 1-50' });
+      sqlite.prepare("INSERT INTO config_entries (id, key, value, category, updated_at, created_at) VALUES (hex(randomblob(16)), 'seeder_price_deviation_pct', ?, 'exchange_limits', datetime('now'), datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = datetime('now')").run(String(val), String(val));
+      updates.push(`price_deviation_pct=${val}`);
+    }
+
+    if (updates.length === 0) return reply.code(400).send({ error: 'No valid fields provided' });
+    return reply.send({ ok: true, updated: updates });
+  });
+
   // ── GET /api/exchange/reputation/:address — 对手方信誉评估 ──
   fastify.get('/api/exchange/reputation/:address', async (request, reply) => {
     const { address } = request.params;

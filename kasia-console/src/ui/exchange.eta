@@ -499,7 +499,7 @@
 
   <!-- ═══ OPERATOR TOOLS (collapsible) ═══ -->
   <div class="flex-shrink-0 border-t border-warm-200" x-data="{ opsOpen: false }">
-    <button @click="opsOpen = !opsOpen; if (opsOpen && !arbInitialized) loadArbitrageData(); if (opsOpen) loadSeedData();"
+    <button @click="opsOpen = !opsOpen; if (opsOpen && !arbInitialized) loadArbitrageData(); if (opsOpen) { loadSeedData(); loadLimits(); }"
       class="w-full px-5 py-2.5 text-xs text-ink-400 hover:text-ink-600 flex items-center gap-2 transition-colors">
       <span :class="opsOpen && 'rotate-90'" class="transition-transform">&#9654;</span>
       Operator Tools
@@ -528,9 +528,10 @@
           </div>
           <div class="text-ink-400">Full arbitrage dashboard available in /trading page.</div>
         </div>
-        <!-- Seed content placeholder — preserved from existing -->
-        <div x-show="opsTab === 'seed'" class="text-xs text-ink-500">
-          <div class="flex items-center gap-4 mb-4">
+        <!-- Seed + Limits + Asset Status -->
+        <div x-show="opsTab === 'seed'" class="text-xs text-ink-500 space-y-4">
+          <!-- Seeder Controls -->
+          <div class="flex items-center gap-4">
             <label class="flex items-center gap-2 cursor-pointer">
               <input type="checkbox" :checked="seedConfig.enabled" @change="toggleSeeder()" class="rounded" />
               <span>Seeder enabled</span>
@@ -541,20 +542,110 @@
               <span x-show="seedTriggering">Seeding...</span>
             </button>
           </div>
-          <div class="grid grid-cols-3 gap-4">
-            <div class="bg-white border border-warm-200 rounded-lg p-3 text-center">
-              <div class="text-xl font-semibold text-ink-700" x-text="seedStats.seeded || 0"></div>
+
+          <!-- Today Stats -->
+          <div class="grid grid-cols-3 gap-3">
+            <div class="bg-white border border-warm-200 rounded-lg p-2.5 text-center">
+              <div class="text-lg font-semibold text-ink-700" x-text="seedStats.seeded || 0"></div>
               <div class="text-ink-400">Published</div>
             </div>
-            <div class="bg-white border border-warm-200 rounded-lg p-3 text-center">
-              <div class="text-xl font-semibold text-green-600" x-text="seedStats.taken || 0"></div>
+            <div class="bg-white border border-warm-200 rounded-lg p-2.5 text-center">
+              <div class="text-lg font-semibold text-green-600" x-text="seedStats.taken || 0"></div>
               <div class="text-ink-400">Taken</div>
             </div>
-            <div class="bg-white border border-warm-200 rounded-lg p-3 text-center">
-              <div class="text-xl font-semibold" :class="(seedStats.net_usdt || 0) >= 0 ? 'text-green-600' : 'text-red-500'"
+            <div class="bg-white border border-warm-200 rounded-lg p-2.5 text-center">
+              <div class="text-lg font-semibold" :class="(seedStats.net_usdt || 0) >= 0 ? 'text-green-600' : 'text-red-500'"
                 x-text="(seedStats.net_usdt >= 0 ? '+$' : '-$') + Math.abs(seedStats.net_usdt || 0).toFixed(2)"></div>
               <div class="text-ink-400">Net P&L</div>
             </div>
+          </div>
+
+          <!-- Asset Status -->
+          <div class="bg-warm-50 border border-warm-200 rounded-lg p-3">
+            <div class="font-medium text-ink-600 mb-2">Asset Status</div>
+            <div class="grid grid-cols-2 gap-2">
+              <div class="flex justify-between">
+                <span class="text-ink-400">KAS Balance</span>
+                <span class="text-ink-700 tabular-nums font-medium" x-text="limitsData.status?.kas_balance != null ? Number(limitsData.status.kas_balance).toFixed(1) + ' KAS' : '—'"></span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-ink-400">Locked</span>
+                <span class="text-orange-600 tabular-nums font-medium" x-text="Number(limitsData.status?.locked_kas || 0).toFixed(1) + ' KAS'"></span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-ink-400">Open Exposure</span>
+                <span class="text-ink-700 tabular-nums font-medium" x-text="Number(limitsData.status?.current_exposure_kas || 0).toFixed(1) + ' KAS'"></span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-ink-400">Available</span>
+                <span class="text-green-600 tabular-nums font-medium" x-text="Number(limitsData.status?.available_kas || 0).toFixed(1) + ' KAS'"></span>
+              </div>
+            </div>
+            <!-- Exposure bar -->
+            <div class="mt-2 h-2 bg-warm-200 rounded-full overflow-hidden">
+              <div class="h-full bg-brand-500 rounded-full transition-all"
+                :style="'width:' + Math.min(100, (limitsData.status?.current_exposure_kas || 0) / (limitsData.limits?.total_exposure_kas || 20000) * 100) + '%'"></div>
+            </div>
+            <div class="text-right text-ink-400 mt-0.5" x-text="Number(limitsData.status?.current_exposure_kas || 0).toFixed(0) + ' / ' + Number(limitsData.limits?.total_exposure_kas || 20000) + ' KAS'"></div>
+          </div>
+
+          <!-- Seeder Config -->
+          <div class="bg-warm-50 border border-warm-200 rounded-lg p-3">
+            <div class="font-medium text-ink-600 mb-2">Seeder Config</div>
+            <div class="grid grid-cols-2 gap-x-4 gap-y-2">
+              <label class="flex flex-col gap-0.5">
+                <span class="text-ink-400">Sell Spread %</span>
+                <input type="number" step="0.1" min="0" x-model.number="seedConfig.sell_spread_pct"
+                  class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-full" />
+              </label>
+              <label class="flex flex-col gap-0.5">
+                <span class="text-ink-400">Buy Spread %</span>
+                <input type="number" step="0.1" min="0" x-model.number="seedConfig.buy_spread_pct"
+                  class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-full" />
+              </label>
+              <label class="flex flex-col gap-0.5">
+                <span class="text-ink-400">Amount (KAS)</span>
+                <input type="number" min="1" x-model.number="seedConfig.amount_kas"
+                  class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-full" />
+              </label>
+              <label class="flex flex-col gap-0.5">
+                <span class="text-ink-400">Expires (min)</span>
+                <input type="number" min="5" x-model.number="seedConfig.expires_minutes"
+                  class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-full" />
+              </label>
+            </div>
+            <button @click="saveSeedConfig()" :disabled="seedSaving"
+              class="mt-2 px-3 py-1 bg-brand-500 text-white rounded text-xs disabled:opacity-50 w-full">
+              <span x-show="!seedSaving">Save Seeder Config</span>
+              <span x-show="seedSaving">Saving...</span>
+            </button>
+          </div>
+
+          <!-- Exchange Limits -->
+          <div class="bg-warm-50 border border-warm-200 rounded-lg p-3">
+            <div class="font-medium text-ink-600 mb-2">Exchange Limits</div>
+            <div class="grid grid-cols-3 gap-x-3 gap-y-2">
+              <label class="flex flex-col gap-0.5">
+                <span class="text-ink-400">Per Offer (KAS)</span>
+                <input type="number" min="10" x-model.number="limitsForm.per_offer_kas"
+                  class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-full" />
+              </label>
+              <label class="flex flex-col gap-0.5">
+                <span class="text-ink-400">Total Exposure (KAS)</span>
+                <input type="number" min="100" x-model.number="limitsForm.total_exposure_kas"
+                  class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-full" />
+              </label>
+              <label class="flex flex-col gap-0.5">
+                <span class="text-ink-400">Price Guard %</span>
+                <input type="number" min="1" max="50" step="0.5" x-model.number="limitsForm.price_deviation_pct"
+                  class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-full" />
+              </label>
+            </div>
+            <button @click="saveLimits()" :disabled="limitsSaving"
+              class="mt-2 px-3 py-1 bg-brand-500 text-white rounded text-xs disabled:opacity-50 w-full">
+              <span x-show="!limitsSaving">Save Limits</span>
+              <span x-show="limitsSaving">Saving...</span>
+            </button>
           </div>
         </div>
       </div>
@@ -606,6 +697,9 @@ function exchangeApp() {
 
     // Seed state
     seedConfig: { enabled: false, sell_spread_pct: 1.0, buy_spread_pct: 1.0, amount_kas: 100, expires_minutes: 30, sell_agent_id: '', buy_agent_id: '' },
+    limitsData: { limits: { per_offer_kas: 5000, total_exposure_kas: 20000, price_deviation_pct: 5 }, status: {} },
+    limitsForm: { per_offer_kas: 5000, total_exposure_kas: 20000, price_deviation_pct: 5 },
+    limitsSaving: false,
     seedOrders: [],
     seedStats: { seeded: 0, taken: 0, net_usdt: 0 },
     seedTriggering: false,
@@ -1072,6 +1166,26 @@ function exchangeApp() {
         await this.loadSeedData(); await this.loadOffers();
       } catch {}
       finally { this.seedTriggering = false; }
+    },
+    async loadLimits() {
+      try {
+        const qs = this.form?.relayNodeId ? `?relayNodeId=${this.form.relayNodeId}` : '';
+        const data = await fetch('/api/exchange/limits' + qs).then(r => r.json());
+        this.limitsData = data;
+        this.limitsForm = { ...data.limits };
+      } catch {}
+    },
+    async saveLimits() {
+      this.limitsSaving = true;
+      try {
+        const res = await fetch('/api/exchange/limits', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.limitsForm),
+        });
+        const data = await res.json();
+        if (data.ok) await this.loadLimits();
+      } catch {}
+      finally { this.limitsSaving = false; }
     },
   };
 }
