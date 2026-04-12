@@ -975,25 +975,32 @@ async function _autoSendKas(offer, takerRelayNodeId) {
     // Write payment_tx to offer
     sqlite.prepare('UPDATE exchange_offers SET payment_tx = ? WHERE id = ?').run(txId, offer.id);
 
-    // Broadcast kanet_exchange_paid_v1 (KAS payment)
-    try {
-      const paidMsg = JSON.stringify({
-        t: 'kanet_exchange_paid_v1',
-        offer_id: offer.id,
-        payment_tx: txId,
-        payment_chain: 'kaspa',
-        payment_asset: 'KAS',
-        payment_amount: offer.want_amount,
-        payer: offer.taker,
-      });
-      await sendCommandAsync(takerRelayNodeId, {
-        type: 'send_broadcast',
-        channel: 'kanet-exchange',
-        message: paidMsg,
-      });
-      console.log(`[exchange-autosend] Broadcast kanet_exchange_paid_v1 for KAS payment`);
-    } catch (err) {
-      console.error(`[exchange-autosend] Broadcast failed: ${err.message}`);
+    // === NO TX NO STATE CHANGE (P1-C consensus: 铁律不分场景) ===
+    // Broadcast kanet_exchange_paid_v1 — must succeed before processPaymentSubmit.
+    // KAS TX is real (local send), but maker node needs the paid broadcast to know.
+    const paidMsg = JSON.stringify({
+      t: 'kanet_exchange_paid_v1',
+      offer_id: offer.id,
+      payment_tx: txId,
+      payment_chain: 'kaspa',
+      payment_asset: 'KAS',
+      payment_amount: offer.want_amount,
+      payer: offer.taker,
+    });
+
+    let paidBroadcastOk = false;
+    for (let pa = 1; pa <= 5; pa++) {
+      try {
+        const pr = await sendCommandAsync(takerRelayNodeId, {
+          type: 'send_broadcast',
+          channel: 'kanet-exchange',
+          message: paidMsg,
+        });
+        if (pr?.txId) { paidBroadcastOk = true; break; }
+      } catch (err) {
+        console.error(`[exchange-autosend] paid broadcast attempt ${pa}/5: ${err.message}`);
+      }
+      if (pa < 5) await new Promise(r => setTimeout(r, 200 * pa));
     }
 
     recordChainEvent({
@@ -1004,7 +1011,22 @@ async function _autoSendKas(offer, takerRelayNodeId) {
       payload: JSON.stringify({ offer_id: offer.id, amount, payment_tx: txId }),
     });
 
-    // Trigger verification with the KAS TX hash
+    if (!paidBroadcastOk) {
+      // KAS sent but paid broadcast failed — do NOT advance state.
+      // Maker node won't know about payment. Next proactive cycle or manual trigger can retry.
+      console.error(`[exchange-autosend] paid broadcast failed after 5 attempts for offer ${offer.id.slice(0,8)} — state NOT advanced`);
+      recordChainEvent({
+        txid: txId,
+        eventType: 'exchange_paid_broadcast_failed',
+        fromAddress: offer.taker,
+        payload: JSON.stringify({ offer_id: offer.id, payment_tx: txId, reason: 'broadcast_failed_5_attempts' }),
+      });
+      return;
+    }
+
+    console.log(`[exchange-autosend] Broadcast kanet_exchange_paid_v1 for KAS payment`);
+
+    // Broadcast succeeded — NOW safe to trigger verification
     processPaymentSubmit({ offer_id: offer.id, payment_tx: txId, payment_chain: 'kaspa' });
     console.log(`[exchange-autosend] verification triggered for offer ${offer.id.slice(0,8)}`);
 
