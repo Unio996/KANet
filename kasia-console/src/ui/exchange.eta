@@ -864,9 +864,8 @@
         </div>
 
         <!-- Hyperliquid / Aevo placeholders -->
-        <div x-show="opsTab === 'hyperliquid'" class="text-xs text-ink-400 text-center py-8">Hyperliquid integration coming soon.</div>
-        <div x-show="opsTab === 'aevo'" class="text-xs text-ink-400 text-center py-8">Aevo options integration coming soon.</div>
-        </div>
+        <div x-show="opsTab === 'hyperliquid'" class="text-xs text-ink-400 text-center py-8">Hyperliquid Perps — connecting soon.</div>
+        <div x-show="opsTab === 'aevo'" class="text-xs text-ink-400 text-center py-8">Aevo Options — connecting soon.</div>
       </div>
     </div>
   </div>
