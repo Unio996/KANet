@@ -1,7 +1,8 @@
 # KANet Developer Guide
 
 > **修改任何代码前必读。** 一个文件，覆盖全系统。唯一权威开发者文档。
-> 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-11。
+> 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-12。
+> 4/12 更新：**Claude Code Bridge** — Claude Code 通过 Adapter 成为 Agent AI 大脑。`scripts/cc-bridge.mjs` 在 localhost:9100 暴露 OpenAI 兼容端点，Adapter openai provider 直接对接，零代码改动。Claude Code 通过 `cc-poll.mjs` / `cc-respond.mjs` 读取 Mind 任务并提交回复。跨节点协作：两个 KANet 节点各运行 Bridge + Claude Code，Agent 间通过链上消息中转，Claude Code 实例自动协作开发 KANet。4/11 验证的手动协作模式进化为 Adapter 直连模式。
 > 4/11 更新（深夜）：**Exchange 跨节点全自动交易 SELL 6/6 + BUY 1/1。** 零延迟 pendingSpentUtxos 替代 5s UTXO delay。paid 广播首次上链（shouldBlockOutbound 协议豁免 + UTXO settle）。kaspa_tx trust txId（submitTransaction=节点接受）。BUY 路径 auto-send-KAS + verified→completed 直达。delivering 失败→revert verified（不再 disputed）。v57: delivery_tx 列。execution_states + chain_events 集成到 transition()。全站 explorer.kaspa.org → 系统 RPC 节点。dev-coord 频道建立。**陷阱 #44：每个协议动作必须跟着 TX 走。** 双节点 Claude Code 链上协作开发验证。
 > 4/11 更新：**SOL/TRON auto-pay 完成**：evm-transfer.js 扩展为 multi-chain transfer（transferSolUsdt + transferTronUsdt + 统一 transferUsdt 接口）。auto-pay 从 BNB/ETH 扩展到 4 链。**陷阱 #44：timeoutVerifying 必须用 verifying_started_at+30min，不能用 expires_at。** 旧逻辑用 expires_at 超时导致临近过期接单后仅 3-5 分钟就 timeout。**Seeder 双向做市**：buy-side 上线（USDT→KAS，kaspa_tx 验证）+ 链白名单扩展到 4 链。**Exchange UI 三层可验证**：deal detail 展示 Publish TX / Accept TX / Payment TX 链上证据链接（Kaspa Explorer + BscScan/Etherscan/Solscan/Tronscan）。delivering 状态 timeline 步骤。**数据清理**：3 笔遗留 stuck offers 清为 cancelled，1 笔 completed offer 孤立 fund_lock 修复。**首次跨节点开发协作**：通过 KANet Chat #kanet-public 频道与 Agent 139 节点 Claude Code 协调（消息上链，TX 可审计）。
 > 4/10 更新（晚间）：**致命 bug 修复：废弃乐观写入。** publish API 改为先广播再写 DB，广播失败不写任何记录。链是唯一事实源，broadcast_tx_id 永远是真实 txId，不再有 `pending_` 垃圾数据。**陷阱 #43：永远不要乐观写入链上数据——先上链拿到 txId，才写本地 DB。没有 TX 就不存在。** 首笔跨节点真实交易完成（139 Agent 付 0.335 USDT → Martin 发 10 KAS）。
@@ -99,6 +100,17 @@ processPaymentSubmit({ ... }); // 广播没上链但本地推进了 = 乐观写�
 - 随 `kanet-start.sh` 自动启动（Console 之前），`kanet-stop.sh` 自动停止
 - Adapter 通过 OpenAI 兼容 API 对接，无需改代码，只改 `agent_connections.base_url`
 - 文件位置：`tools/llama-server/`（二进制）、`models/`（GGUF 模型）
+
+**Claude Code Bridge（4/12 新增）：**
+- Claude Code 通过 Adapter 成为 Agent 的 AI 大脑
+- Bridge server (`scripts/cc-bridge.mjs`) 在 `localhost:9100` 暴露 OpenAI 兼容端点
+- Adapter 的 `openai` provider 指向 Bridge，零 Adapter 代码改动
+- 流程：Mind → Adapter → Bridge → 请求队列 → Claude Code poll/respond → 回复
+- 启动：`node scripts/cc-bridge.mjs [port]`（默认 9100）
+- Claude Code 端：`node scripts/cc-poll.mjs`（拉取请求）、`node scripts/cc-respond.mjs <id> "text"`（提交回复）
+- 配置：`adapter_nodes` 设 `ai_provider_url='http://localhost:9100'`, `ai_model='claude-code'`
+- 跨节点协作：两个 KANet 节点各自运行 Bridge + Claude Code，Agent 间通过链上消息中转，Claude Code 实例自动协作
+- 回滚：DB 恢复原 provider URL/model，重启 adapter
 
 **Agent 安全护栏（4/8 新增，硬编码在 context-builder.mjs）：**
 1. 禁止向非 owner 泄露钱包余额/持仓
