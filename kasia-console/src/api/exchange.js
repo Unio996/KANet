@@ -170,6 +170,37 @@ export async function registerExchangeRoutes(fastify) {
     const relay = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(relayNodeId);
     const makerAddr = relay?.address || relayNodeId;
 
+    // P1-B: Exchange exposure limits
+    if (give_asset === 'KAS') {
+      const perOfferRow = sqlite.prepare("SELECT value FROM config_entries WHERE key = 'exchange_per_offer_kas_limit'").get();
+      const totalExpRow = sqlite.prepare("SELECT value FROM config_entries WHERE key = 'exchange_total_exposure_kas_limit'").get();
+      const perOfferLimit = parseFloat(perOfferRow?.value) || 5000;
+      const totalExposureLimit = parseFloat(totalExpRow?.value) || 20000;
+      const giveAmt = parseFloat(give_amount);
+
+      if (giveAmt > perOfferLimit) {
+        return reply.code(400).send({
+          error: 'Exceeds per-offer KAS limit',
+          amount: giveAmt, limit: perOfferLimit, exceeded_by: giveAmt - perOfferLimit,
+        });
+      }
+
+      const currentExposure = sqlite.prepare(`
+        SELECT COALESCE(SUM(CAST(give_amount AS REAL)), 0) as total
+        FROM exchange_offers
+        WHERE protocol_status = 'open' AND give_asset = 'KAS' AND maker = ?
+      `).get(makerAddr);
+      const totalAfter = (currentExposure?.total || 0) + giveAmt;
+
+      if (totalAfter > totalExposureLimit) {
+        return reply.code(400).send({
+          error: 'Exceeds total KAS exposure limit',
+          current_exposure: currentExposure?.total || 0, new_amount: giveAmt,
+          total_after: totalAfter, limit: totalExposureLimit, exceeded_by: totalAfter - totalExposureLimit,
+        });
+      }
+    }
+
     // Fund lock: lock KAS before broadcast (prevent oversell)
     if (give_asset === 'KAS') {
       try {

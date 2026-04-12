@@ -8,6 +8,7 @@
  */
 
 import { sqlite } from '../db/client.js';
+import { recordChainEvent } from './chain-event.js';
 
 let _timer = null;
 const TICK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
@@ -141,6 +142,23 @@ async function publishSeedOrder(config, midPrice, side) {
     verificationMeta = { expected_address: relay.address, expected_asset: 'KAS' };
   }
 
+  // P1-A: Price deviation guard — skip if price deviates >N% from cached market price
+  const deviationPctRow = sqlite.prepare("SELECT value FROM config_entries WHERE key = 'seeder_price_deviation_pct'").get();
+  const maxDeviationPct = parseFloat(deviationPctRow?.value) || 5;
+  const lastPrice = parseFloat(config.last_published_price) || 0;
+
+  if (lastPrice > 0) {
+    const deviation = Math.abs(midPrice - lastPrice) / lastPrice * 100;
+    if (deviation > maxDeviationPct) {
+      console.warn(`[seeder] Price deviation ${deviation.toFixed(1)}% exceeds ${maxDeviationPct}% threshold (mid: ${midPrice.toFixed(6)}, last: ${lastPrice.toFixed(6)}) — skipping ${side}`);
+      recordChainEvent({
+        eventType: 'seeder_price_skip',
+        payload: JSON.stringify({ side, mid_price: midPrice, last_price: lastPrice, deviation_pct: deviation.toFixed(1), threshold_pct: maxDeviationPct }),
+      });
+      return { ok: false, error: 'price_deviation', deviation: deviation.toFixed(1), threshold: maxDeviationPct };
+    }
+  }
+
   try {
     const res = await fetch(`http://127.0.0.1:${PORT}/api/exchange/publish`, {
       method: 'POST',
@@ -166,6 +184,8 @@ async function publishSeedOrder(config, midPrice, side) {
 
     if (data.ok) {
       console.log(`[seeder] ${side.toUpperCase()} seed published: ${giveAmount} ${giveAsset} → ${wantAmount} ${wantAsset} (spread +${spreadPct}%)`);
+      // Update last published price for deviation guard
+      sqlite.prepare("UPDATE market_seeder_config SET last_published_price = ? WHERE id = 'default'").run(midPrice);
     } else {
       console.log(`[seeder] ${side.toUpperCase()} seed failed: ${data.error || 'unknown'} — will retry next tick`);
     }
