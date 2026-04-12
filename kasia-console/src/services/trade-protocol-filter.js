@@ -460,6 +460,12 @@ async function _evaluateAutoTake(offerId, msg) {
   // 5. Direction: only BUY (maker gives KAS, wants USDT)
   if (msg.give_asset?.toUpperCase() !== 'KAS' || msg.want_asset?.toUpperCase() !== 'USDT') return;
 
+  // 5b. Check accepted_chains includes a chain we can pay on (bnb default)
+  const meta = msg.verification_meta || {};
+  const acceptedChains = meta.accepted_chains || [];
+  const payChain = acceptedChains.find(c => ['bnb', 'eth', 'sol', 'tron'].includes(c)) || (acceptedChains.length === 0 ? 'bnb' : null);
+  if (!payChain) return;
+
   // 6. Price evaluation
   const { getCachedKasPrice } = await import('./market-data.js');
   const marketPrice = getCachedKasPrice();
@@ -511,7 +517,7 @@ async function _evaluateAutoTake(offerId, msg) {
   if (mode === 'auto') {
     _autoTakeLock = true;
     try {
-      await _executeAutoTake(offerId, bestRelay);
+      await _executeAutoTake(offerId, bestRelay, payChain);
     } finally {
       _autoTakeLock = false;
     }
@@ -534,7 +540,7 @@ async function _evaluateAutoTake(offerId, msg) {
  * Execute auto-take by calling the internal accept API endpoint.
  * Reuses the full exchange.js accept path — broadcast, meta writes, auto-pay trigger.
  */
-async function _executeAutoTake(offerId, relayId) {
+async function _executeAutoTake(offerId, relayId, selectedChain = 'bnb') {
   // Verify offer still open
   const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ? AND protocol_status = ?').get(offerId, 'open');
   if (!offer) {
@@ -547,7 +553,7 @@ async function _executeAutoTake(offerId, relayId) {
   const body = JSON.stringify({
     relayNodeId: relayId,
     offer_id: offerId,
-    selected_chain: 'bnb',
+    selected_chain: selectedChain,
     channel: 'kanet-exchange',
   });
 
