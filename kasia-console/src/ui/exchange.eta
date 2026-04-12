@@ -548,30 +548,46 @@
             <button @click="walletWithdrawChain = walletWithdrawChain === 'kas' ? null : 'kas'" class="mt-1.5 text-brand-500 hover:text-brand-700 text-[11px]" x-text="walletWithdrawChain === 'kas' ? 'Cancel' : 'Withdraw KAS'"></button>
           </div>
 
-          <!-- Multi-chain Wallets -->
+          <!-- Multi-chain Wallets (matches market.eta layout) -->
           <template x-for="cw in walletData.chains" :key="cw.id || cw.chain">
             <div class="bg-warm-50 border border-warm-200 rounded-lg p-3">
-              <div class="flex items-center justify-between mb-1.5">
+              <div class="flex items-center justify-between mb-2">
                 <div class="flex items-center gap-1.5">
                   <span class="font-medium text-ink-600" x-text="cw.chain?.toUpperCase()"></span>
                   <span x-show="cw.isDefault" class="text-[10px] text-brand-500 bg-brand-50 px-1 rounded">default</span>
                 </div>
-                <span class="font-semibold text-ink-700 tabular-nums" x-text="Number(cw.usdt || 0).toFixed(2) + ' USDT'"></span>
               </div>
-              <div class="flex items-center gap-2 mb-1.5">
-                <code class="text-[10px] text-ink-400 bg-warm-100 px-1.5 py-0.5 rounded break-all flex-1" x-text="cw.address || '—'"></code>
-                <button @click="copyAddr(cw.address)" class="text-brand-500 hover:text-brand-700 shrink-0" title="Copy">
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
-                </button>
+              <div class="flex items-center gap-2 mb-2">
+                <code class="text-[10px] text-ink-400 bg-warm-100 px-1.5 py-0.5 rounded break-all flex-1 cursor-pointer" @click="copyAddr(cw.address)" x-text="cw.address || '—'" title="Click to copy"></code>
               </div>
-              <div class="grid grid-cols-3 gap-2 text-[11px]">
-                <div x-show="cw.usdc"><span class="text-ink-400">USDC:</span> <span class="tabular-nums" x-text="Number(cw.usdc || 0).toFixed(2)"></span></div>
-                <div x-show="cw.gas != null"><span class="text-ink-400" x-text="cw.chain === 'bnb' ? 'BNB' : cw.chain === 'eth' ? 'ETH' : cw.chain?.toUpperCase()"></span>: <span class="tabular-nums" x-text="Number(cw.gas || 0).toFixed(4)"></span></div>
-                <div x-show="cw.locked"><span class="text-ink-400">Locked:</span> <span class="text-orange-600 tabular-nums" x-text="Number(cw.locked || 0).toFixed(2)"></span></div>
+              <!-- 4-column balance grid (same as market.eta) -->
+              <div class="grid grid-cols-4 gap-2 text-[11px] mb-2">
+                <div>
+                  <div class="text-ink-400">USDT</div>
+                  <div class="font-medium tabular-nums text-ink-700" x-text="Number(cw.usdt || 0).toFixed(2)"></div>
+                </div>
+                <div>
+                  <div class="text-ink-400">USDC</div>
+                  <div class="font-medium tabular-nums text-ink-700" x-text="Number(cw.usdc || 0).toFixed(2)"></div>
+                </div>
+                <div>
+                  <div class="text-ink-400" x-text="cw.chain === 'polygon' ? 'MATIC' : cw.chain === 'bnb' ? 'BNB' : cw.chain === 'eth' ? 'ETH' : cw.chain === 'sol' ? 'SOL' : cw.chain === 'tron' ? 'TRX' : cw.chain?.toUpperCase()"></div>
+                  <div class="font-medium tabular-nums text-ink-700" x-text="Number(cw.gas || 0).toFixed(4)"></div>
+                </div>
+                <div x-show="cw.locked > 0">
+                  <div class="text-ink-400">Locked</div>
+                  <div class="font-medium tabular-nums text-orange-600" x-text="Number(cw.locked || 0).toFixed(2) + ' USDT'"></div>
+                </div>
+              </div>
+              <!-- Action buttons (same as market.eta) -->
+              <div class="flex gap-2">
+                <button @click="copyAddr(cw.address)" class="px-2 py-1 rounded text-[10px] bg-warm-100 text-ink-400 hover:text-ink-700 border border-warm-200">Copy</button>
+                <button @click="doChainWithdraw(cw)" class="px-2 py-1 rounded text-[10px] bg-warm-100 text-ink-400 hover:text-red-600 border border-warm-200">Withdraw</button>
+                <button @click="showPrivkey(cw)" class="px-2 py-1 rounded text-[10px] bg-warm-100 text-ink-400 hover:text-orange-600 border border-warm-200">Private Key</button>
               </div>
             </div>
           </template>
-          <div x-show="!walletData.chains?.length" class="text-center text-ink-400 py-4">No multi-chain wallets configured. Add wallets in /relays page.</div>
+          <div x-show="!walletData.chains?.length" class="text-center text-ink-400 py-4">No multi-chain wallets configured. <a href="/relays" class="text-brand-500 hover:underline">Add wallets</a></div>
         </div>
 
         <!-- Arb content placeholder — preserved from existing -->
@@ -1262,6 +1278,33 @@ function exchangeApp() {
         document.body.appendChild(ta); ta.select(); document.execCommand('copy');
         document.body.removeChild(ta);
       }
+    },
+    async doChainWithdraw(wallet) {
+      if (!wallet?.id || !this.form?.relayNodeId) return;
+      const asset = prompt('Withdraw which asset?\n1 = USDT\n2 = ' + (wallet.chain === 'bnb' ? 'BNB' : wallet.chain === 'eth' ? 'ETH' : wallet.chain === 'sol' ? 'SOL' : wallet.chain === 'tron' ? 'TRX' : wallet.chain?.toUpperCase()));
+      if (!asset) return;
+      const isNative = asset === '2';
+      const addr = prompt('Target address:');
+      if (!addr) return;
+      const amt = prompt('Amount (' + (isNative ? (wallet.chain === 'bnb' ? 'BNB' : wallet.chain?.toUpperCase()) : 'USDT') + '):');
+      if (!amt) return;
+      if (!confirm('Send ' + amt + ' ' + (isNative ? wallet.chain?.toUpperCase() : 'USDT') + ' to ' + addr + '?')) return;
+      try {
+        const r = await fetch('/api/trade/withdraw', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ walletId: wallet.id, relayNodeId: this.form.relayNodeId, asset: isNative ? 'native' : 'usdt', target: addr, amount: amt }) });
+        const d = await r.json();
+        if (d.txHash) { alert('Sent! TX: ' + d.txHash); await this.loadWalletData(); }
+        else alert('Error: ' + (d.error || 'Unknown'));
+      } catch (e) { alert('Error: ' + e.message); }
+    },
+    async showPrivkey(wallet) {
+      if (!wallet?.id || !this.form?.relayNodeId) return;
+      if (!confirm('Show private key for ' + wallet.chain?.toUpperCase() + ' wallet?\nThis is sensitive — do not share.')) return;
+      try {
+        const r = await fetch('/api/relay/' + this.form.relayNodeId + '/wallets/' + wallet.id + '/privkey');
+        const d = await r.json();
+        if (d.privateKey) prompt('Private key (Ctrl+C to copy):', d.privateKey);
+        else alert('Error: ' + (d.error || 'Could not retrieve'));
+      } catch (e) { alert('Error: ' + e.message); }
     },
     async doKasWithdraw() {
       if (!this.walletWithdrawAddr || !this.walletWithdrawAmt || !this.form?.relayNodeId) return;
