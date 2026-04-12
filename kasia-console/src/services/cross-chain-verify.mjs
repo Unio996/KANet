@@ -126,11 +126,25 @@ export async function verifyCrossChainTx({ txHash, chain, expectedAmount, expect
   return { confirmed: false, confirmations: 0, required, actualAmount: 0, recipient: '', sender: '', error: `Unsupported chain: ${chain}` };
 }
 
+// ── Native coin identifiers (not in EVM_TOKENS = native) ────
+const NATIVE_COINS = new Set(['eth', 'bnb', 'matic', 'avax', 'native']);
+
+function isNativeAsset(asset, chain) {
+  if (NATIVE_COINS.has(asset)) return true;
+  // If asset not in token table for this chain, treat as native
+  return !EVM_TOKENS[chain]?.[asset];
+}
+
 // ── EVM (BNB / ETH) ──────────────────────────────────────────
 
 async function _verifyEvm({ txHash, chain, expectedAmount, expectedTo, expectedFrom, required, asset = 'usdt' }) {
   const { ethers } = await import('ethers');
   const provider = new ethers.JsonRpcProvider(EVM_RPC[chain]);
+
+  // P2b: Native coin verification — check TX value field, no Transfer event parsing
+  if (isNativeAsset(asset, chain)) {
+    return _verifyEvmNative({ txHash, chain, expectedAmount, expectedTo, expectedFrom, required, provider, ethers });
+  }
 
   const receipt = await provider.getTransactionReceipt(txHash);
   if (!receipt) {
@@ -182,6 +196,46 @@ async function _verifyEvm({ txHash, chain, expectedAmount, expectedTo, expectedF
   return { confirmed: true, confirmations, required, actualAmount, recipient, sender, senderMismatch: !senderOk && !!expectedFrom };
 }
 
+// ── P2b: EVM Native Coin Verification ───────────────────────
+// Verifies native coin transfers (ETH/BNB/MATIC/AVAX) by checking TX value field.
+// Simpler than ERC20 — no Transfer event log parsing needed.
+
+async function _verifyEvmNative({ txHash, chain, expectedAmount, expectedTo, expectedFrom, required, provider, ethers }) {
+  const tx = await provider.getTransaction(txHash);
+  if (!tx) {
+    return { confirmed: false, confirmations: 0, required, actualAmount: 0, recipient: '', sender: '', error: 'TX not found or still pending' };
+  }
+
+  const receipt = await provider.getTransactionReceipt(txHash);
+  if (!receipt || receipt.status !== 1) {
+    return { confirmed: false, confirmations: 0, required, actualAmount: 0, recipient: '', sender: '', error: receipt ? 'TX reverted (status=0)' : 'Receipt not available' };
+  }
+
+  const currentBlock = await provider.getBlockNumber();
+  const confirmations = receipt.blockNumber ? (currentBlock - receipt.blockNumber) : 0;
+  if (confirmations < required) {
+    return { confirmed: false, confirmations, required, actualAmount: 0, recipient: '', sender: '', error: `Insufficient confirmations: ${confirmations}/${required}` };
+  }
+
+  // Native coin: amount is in TX value field (wei), always 18 decimals
+  const actualAmount = parseFloat(ethers.formatEther(tx.value));
+  const recipient = tx.to || '';
+  const sender = tx.from || '';
+
+  const amountOk = actualAmount >= (expectedAmount || 0) * 0.995;
+  const recipientOk = !expectedTo || recipient.toLowerCase() === expectedTo.toLowerCase();
+  const senderOk = !expectedFrom || sender.toLowerCase() === expectedFrom.toLowerCase();
+
+  if (!amountOk) {
+    return { confirmed: false, confirmations, required, actualAmount, recipient, sender, underpayment: true, error: `Underpayment: expected ${expectedAmount}, got ${actualAmount.toFixed(6)}` };
+  }
+  if (!recipientOk) {
+    return { confirmed: false, confirmations, required, actualAmount, recipient, sender, error: `Recipient mismatch: expected ${expectedTo}, got ${recipient}` };
+  }
+
+  return { confirmed: true, confirmations, required, actualAmount, recipient, sender, senderMismatch: !senderOk && !!expectedFrom };
+}
+
 // ── Solana ────────────────────────────────────────────────────
 
 async function _verifySolana({ txHash, expectedAmount, expectedTo, required, asset = 'usdt' }) {
@@ -200,6 +254,25 @@ async function _verifySolana({ txHash, expectedAmount, expectedTo, required, ass
   const confirmations = currentSlot - tx.slot;
   if (confirmations < required) {
     return { confirmed: false, confirmations, required, actualAmount: 0, recipient: '', sender: '', error: `Insufficient confirmations: ${confirmations}/${required}` };
+  }
+
+  // P2b: SOL native transfer — check lamport balance delta
+  if (asset === 'sol' || asset === 'native' || !SOL_TOKENS[asset]) {
+    const accountKeys = tx.transaction?.message?.accountKeys || tx.transaction?.message?.staticAccountKeys || [];
+    const pre = tx.meta?.preBalances || [];
+    const post = tx.meta?.postBalances || [];
+    let maxDelta = 0, recipientAddr = '';
+    for (let i = 0; i < post.length; i++) {
+      const delta = (post[i] - pre[i]) / 1e9; // lamports → SOL
+      if (delta > maxDelta) { maxDelta = delta; recipientAddr = accountKeys[i]?.toString() || ''; }
+    }
+    const sender = accountKeys[0]?.toString() || '';
+    const amountOk = maxDelta >= (expectedAmount || 0) * 0.995;
+    const recipientOk = !expectedTo || recipientAddr === expectedTo;
+    if (maxDelta === 0) return { confirmed: false, confirmations, required, actualAmount: 0, recipient: '', sender, error: 'No SOL transfer detected' };
+    if (!amountOk) return { confirmed: false, confirmations, required, actualAmount: maxDelta, recipient: recipientAddr, sender, underpayment: true, error: `Underpayment: expected ${expectedAmount}, got ${maxDelta.toFixed(6)}` };
+    if (!recipientOk) return { confirmed: false, confirmations, required, actualAmount: maxDelta, recipient: recipientAddr, sender, error: `Recipient mismatch: expected ${expectedTo}, got ${recipientAddr}` };
+    return { confirmed: true, confirmations, required, actualAmount: maxDelta, recipient: recipientAddr, sender };
   }
 
   // Resolve SPL token mint from multi-token table
@@ -224,7 +297,7 @@ async function _verifySolana({ txHash, expectedAmount, expectedTo, required, ass
   }
 
   if (actualAmount === 0 || !recipient) {
-    return { confirmed: false, confirmations, required, actualAmount: 0, recipient: '', sender: '', error: 'No USDT transfer detected' };
+    return { confirmed: false, confirmations, required, actualAmount: 0, recipient: '', sender: '', error: `No ${asset.toUpperCase()} transfer detected` };
   }
 
   const amountOk = actualAmount >= (expectedAmount || 0) * 0.995;
@@ -261,6 +334,24 @@ async function _verifyTron({ txHash, expectedAmount, expectedTo, required, asset
   const confirmations = currentBlockNum - txBlock;
   if (confirmations < required) {
     return { confirmed: false, confirmations, required, actualAmount: 0, recipient: '', sender: '', error: `Insufficient confirmations: ${confirmations}/${required}` };
+  }
+
+  // P2b: TRX native transfer — check raw TX contract value
+  if (asset === 'trx' || asset === 'native' || !TRON_TOKENS[asset]) {
+    const rawTx = await tronWeb.trx.getTransaction(txHash);
+    const contract = rawTx?.raw_data?.contract?.[0];
+    if (contract?.type === 'TransferContract') {
+      const val = contract.parameter?.value;
+      const actualAmount = (val?.amount || 0) / 1e6; // sun → TRX
+      const recipient = tronWeb.address.fromHex(val?.to_address || '');
+      const sender = tronWeb.address.fromHex(val?.owner_address || '');
+      const amountOk = actualAmount >= (expectedAmount || 0) * 0.995;
+      const recipientOk = !expectedTo || recipient === expectedTo;
+      if (!amountOk) return { confirmed: false, confirmations, required, actualAmount, recipient, sender, underpayment: true, error: `Underpayment: expected ${expectedAmount}, got ${actualAmount.toFixed(2)}` };
+      if (!recipientOk) return { confirmed: false, confirmations, required, actualAmount, recipient, sender, error: `Recipient mismatch: expected ${expectedTo}, got ${recipient}` };
+      return { confirmed: true, confirmations, required, actualAmount, recipient, sender };
+    }
+    return { confirmed: false, confirmations, required, actualAmount: 0, recipient: '', sender: '', error: 'Not a TRX transfer TX' };
   }
 
   // Resolve TRC20 contract from multi-token table
