@@ -273,7 +273,7 @@ export async function registerExchangeRoutes(fastify) {
 
   // ── POST /api/exchange/accept — 接单 ──────────────────────
   fastify.post('/api/exchange/accept', async (request, reply) => {
-    const { relayNodeId, offer_id, selected_chain, channel = 'kanet-exchange' } = request.body || {};
+    const { relayNodeId, offer_id, selected_chain, payment_asset, channel = 'kanet-exchange' } = request.body || {};
 
     if (!relayNodeId || !offer_id) {
       return reply.code(400).send({ error: 'Missing relayNodeId or offer_id' });
@@ -296,8 +296,9 @@ export async function registerExchangeRoutes(fastify) {
       if (!selectedWallet) {
         return reply.code(400).send({ error: `Chain ${selected_chain} not accepted by maker. Available: ${acceptedChains.map(w => w.chain).join(', ')}` });
       }
-      // Write receive_address into verification_meta (verifier reads this) + taker_chain/taker_payment_address (UI reads these)
+      // Write receive_address + payment_asset into verification_meta (verifier reads these)
       const updatedMeta = { ...meta, receive_address: selectedWallet.address, receive_chain: selected_chain };
+      if (payment_asset) updatedMeta.payment_asset = payment_asset.toLowerCase();
       sqlite.prepare('UPDATE exchange_offers SET taker_chain = ?, taker_payment_address = ?, verification_meta = ? WHERE id = ?')
         .run(selected_chain, selectedWallet.address, JSON.stringify(updatedMeta), offer_id);
     }
@@ -321,6 +322,7 @@ export async function registerExchangeRoutes(fastify) {
             t: 'kanet_exchange_accept_v1', offer_id, taker: takerAddr,
             selected_chain: selected_chain || null,
             receive_address: offerForBcast?.taker_payment_address || null,
+            payment_asset: payment_asset || null,
           }),
         });
         acceptTx = res?.txId || null;

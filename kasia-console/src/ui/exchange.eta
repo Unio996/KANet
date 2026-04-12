@@ -513,11 +513,25 @@
               </div>
             </div>
           </template>
+          <!-- Token selection (P2a: multi-token support) -->
+          <template x-if="getChains(selectedOffer).length > 0 && acceptChain">
+            <div class="mb-4">
+              <label class="block text-[10px] font-medium text-ink-500 uppercase tracking-wider mb-2">Pay with</label>
+              <div class="flex gap-2">
+                <template x-for="tk in ['usdt','usdc','dai']" :key="tk">
+                  <button @click="acceptPaymentAsset = tk"
+                    class="px-3 py-2 rounded-lg border text-xs font-medium uppercase transition-colors"
+                    :class="acceptPaymentAsset === tk ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-warm-200 text-ink-500 hover:border-brand-300'"
+                    x-text="tk"></button>
+                </template>
+              </div>
+            </div>
+          </template>
           <!-- Balance check -->
           <div x-show="acceptBalance !== null" class="mb-4 px-4 py-2.5 rounded-lg text-xs"
             :class="acceptBalanceOk ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'">
             <span x-text="(acceptChain || '').toUpperCase()"></span> wallet:
-            <span class="font-semibold" x-text="acceptBalance?.toFixed(2) + ' USDT'"></span>
+            <span class="font-semibold" x-text="acceptBalance?.toFixed(2) + ' ' + (acceptPaymentAsset || 'USDT').toUpperCase()"></span>
             <span x-text="acceptBalanceOk ? ' — sufficient' : ' — insufficient'"></span>
           </div>
           <div class="text-[10px] text-ink-400 mb-4">System will auto-pay from your wallet after confirmation.</div>
@@ -775,6 +789,7 @@ function exchangeApp() {
 
     // Accept state
     acceptChain: null,
+    acceptPaymentAsset: 'usdt',
     acceptBalance: null,
     acceptBalanceOk: false,
     acceptLoading: false,
@@ -1173,6 +1188,7 @@ function exchangeApp() {
       try {
         const body = { relayNodeId: this.form.relayNodeId, offer_id: this.selectedOffer.id };
         if (this.acceptChain) body.selected_chain = this.acceptChain;
+        if (this.acceptPaymentAsset) body.payment_asset = this.acceptPaymentAsset;
         const res = await fetch('/api/exchange/accept', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
