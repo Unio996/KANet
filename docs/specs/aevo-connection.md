@@ -25,7 +25,12 @@ getAccount() → { equity, available, margin_used, portfolio_greeks }
 getInstrumentGreeks(instrument) → { delta, gamma, theta, vega, iv }
 ```
 
-**认证**：API Key + API Secret（HMAC-SHA256 签名）。存 `agent_connections` 表，走现有 encrypt/decrypt 链路。
+**认证**（双层）：
+- REST API：API Key + API Secret（header 认证）
+- Order 签名：EIP-712 typed data 签名（signing_key，和 Hyperliquid 同模式）
+- 存 `agent_connections` 表（auth_mode=api_key），走现有 encrypt/decrypt 链路。
+
+**后续增强**：WebSocket 实时推送（orderbook + 持仓变动），第一版用 REST 轮询。
 
 **API Base**：`https://api.aevo.xyz`（主网）
 
@@ -79,7 +84,7 @@ INSIGHT: Portfolio is net long delta — bullish bias. High theta decay.
 ## 安全规则
 
 1. 单笔期权成本上限：config_entries `aevo_max_order_usdc`，默认 100 USDC
-2. Portfolio delta 上限：config_entries `aevo_max_portfolio_delta`，默认 5.0
+2. Margin 使用率上限：config_entries `aevo_max_margin_used_pct`，默认 80%（超过禁止新开仓）
 3. 卖期权（naked short）需要 Owner approval（`aevo_naked_short_mode=approval`）
 4. 所有操作记录 chain_event（aevo_order/aevo_cancel）
 5. API Key 加密存储，走现有 encrypt/decrypt
