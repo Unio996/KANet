@@ -102,6 +102,19 @@
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'predictions' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
           Predictions
         </a>
+        <div class="border-t border-warm-100 my-1 mx-3"></div>
+        <a href="/exchange#hyperliquid"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 text-ink-400 hover:bg-warm-100 hover:text-ink-600">
+          Hyperliquid Perps
+        </a>
+        <a href="/exchange#aevo"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 text-ink-400 hover:bg-warm-100 hover:text-ink-600">
+          Aevo Options
+        </a>
+        <a href="/exchange#aave"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 text-ink-400 hover:bg-warm-100 hover:text-ink-600">
+          Aave Lending
+        </a>
       </div>
     </div>
 
