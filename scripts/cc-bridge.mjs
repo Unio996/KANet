@@ -6,6 +6,8 @@
 //   Claude Code               → GET  /cc/pending          → reads queue
 //   Claude Code               → POST /cc/respond/:id      → submits response → unblocks Adapter
 //
+// No fallback. No degradation. Claude Code IS the brain, or there is no brain.
+//
 // Usage:
 //   node scripts/cc-bridge.mjs [port]       (default: 9100)
 //
@@ -18,9 +20,18 @@ import { randomUUID } from 'node:crypto';
 const PORT = parseInt(process.argv[2] || '9100');
 const TIMEOUT_MS = 300_000; // 5 min — Claude Code may need time to think
 
+// ── State ────────────────────────────────────────────────────────────────
+
+let _lastPollAt = 0;   // timestamp of last Claude Code poll
+let _totalServed = 0;  // total requests served by Claude Code
+
+function isClaudeCodeActive() {
+  return (Date.now() - _lastPollAt) < 30_000;  // active if polled in last 30s
+}
+
 // ── Request Queue ────────────────────────────────────────────────────────
 
-const _pending = new Map();  // id → { system, user, model, resolve, reject, createdAt }
+const _pending = new Map();  // id → { system, user, model, resolve, reject, timer, createdAt }
 
 function enqueue(system, user, model) {
   const id = randomUUID().slice(0, 8);
@@ -31,7 +42,8 @@ function enqueue(system, user, model) {
     }, TIMEOUT_MS);
 
     _pending.set(id, { id, system, user, model, resolve, reject, timer, createdAt: Date.now() });
-    log(`queued [${id}] model=${model} sys=${system?.length || 0}c usr=${user?.length || 0}c`);
+    const status = isClaudeCodeActive() ? 'CC online' : 'CC offline — waiting';
+    log(`queued [${id}] ${status} sys=${system?.length || 0}c usr=${user?.length || 0}c`);
   });
 }
 
@@ -41,13 +53,14 @@ function respond(id, text) {
   clearTimeout(entry.timer);
   _pending.delete(id);
   entry.resolve(text);
-  log(`responded [${id}] ${text.length}c`);
+  _totalServed++;
+  log(`responded [${id}] ${text.length}c (${Date.now() - entry.createdAt}ms)`);
   return true;
 }
 
 function getNextPending() {
-  for (const [id, entry] of _pending) {
-    return { id, system: entry.system, user: entry.user, model: entry.model, age_ms: Date.now() - entry.createdAt };
+  for (const [, entry] of _pending) {
+    return { id: entry.id, system: entry.system, user: entry.user, model: entry.model, age_ms: Date.now() - entry.createdAt };
   }
   return null;
 }
@@ -86,7 +99,6 @@ async function handleRequest(req, res) {
 
     try {
       const reply = await enqueue(system, user, model);
-      // Return OpenAI-compatible response
       json(res, 200, {
         id: `chatcmpl-${randomUUID().slice(0, 8)}`,
         object: 'chat.completion',
@@ -102,9 +114,10 @@ async function handleRequest(req, res) {
 
   // ── Claude Code → Bridge: poll for pending request ──
   if (method === 'GET' && url === '/cc/pending') {
+    _lastPollAt = Date.now();
     const next = getNextPending();
     if (!next) {
-      res.writeHead(204).end();  // No pending requests
+      res.writeHead(204).end();
     } else {
       json(res, 200, next);
     }
@@ -126,16 +139,28 @@ async function handleRequest(req, res) {
   // ── Status ──
   if (method === 'GET' && url === '/cc/status') {
     const pending = [];
-    for (const [id, e] of _pending) {
-      pending.push({ id, model: e.model, age_ms: Date.now() - e.createdAt, user_preview: e.user?.slice(0, 100) });
+    for (const [, e] of _pending) {
+      pending.push({ id: e.id, model: e.model, age_ms: Date.now() - e.createdAt, user_preview: e.user?.slice(0, 100) });
     }
-    json(res, 200, { pending_count: _pending.size, pending });
+    json(res, 200, {
+      cc_active: isClaudeCodeActive(),
+      last_poll_ago_ms: _lastPollAt ? Date.now() - _lastPollAt : null,
+      total_served: _totalServed,
+      pending_count: _pending.size,
+      pending,
+    });
     return;
   }
 
-  // ── Health (Adapter checks this) ──
+  // ── Health ──
   if (method === 'GET' && (url === '/health' || url === '/')) {
-    json(res, 200, { ok: true, provider: 'claude-code-bridge', pending: _pending.size });
+    json(res, 200, {
+      ok: true,
+      provider: 'claude-code-bridge',
+      cc_active: isClaudeCodeActive(),
+      total_served: _totalServed,
+      pending: _pending.size,
+    });
     return;
   }
 
@@ -155,9 +180,9 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   log(`Bridge server listening on port ${PORT}`);
-  log(`Adapter config: AI_PROVIDER=openai AI_PROVIDER_URL=http://localhost:${PORT} AI_MODEL=claude-code`);
-  log(`Claude Code:    GET  http://localhost:${PORT}/cc/pending`);
-  log(`                POST http://localhost:${PORT}/cc/respond/:id`);
+  log(`No fallback. Claude Code IS the brain, or there is no brain.`);
+  log(`Claude Code:  GET  http://localhost:${PORT}/cc/pending`);
+  log(`              POST http://localhost:${PORT}/cc/respond/:id`);
   log('');
-  log('Waiting for requests...');
+  log('Waiting for Claude Code...');
 });
