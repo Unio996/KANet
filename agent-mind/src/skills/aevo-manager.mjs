@@ -6,8 +6,9 @@
  */
 
 export default class AevoManager {
-  constructor(name = 'aevo_manager', description = 'Aevo options: positions, Greeks, portfolio risk') {
-    super(name, description);
+  constructor() {
+    this.name = 'aevo_manager';
+    this.description = 'Aevo options: positions, Greeks, portfolio risk';
   }
 
   get category() { return 'defi'; }
