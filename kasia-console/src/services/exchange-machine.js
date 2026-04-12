@@ -408,41 +408,39 @@ export async function checkMatchedTimeout() {
   for (const offer of stale) {
     console.log(`[exchange-machine] matched timeout: offer ${offer.id.slice(0,8)} (taker ${(offer.taker || '').slice(-8)})`);
 
-    // ⑤ Broadcast FIRST, then update local state. If broadcast fails, stay matched — next tick retries.
-    let broadcastOk = false;
-    try {
-      const relay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(offer.maker);
-      if (relay) {
-        const { sendCommandAsync } = await import('./relay-manager.js');
-        const timeoutMsg = JSON.stringify({
-          t: 'kanet_exchange_timeout_v1',
-          offer_id: offer.id,
-          taker: offer.taker,
-          reason: 'payment_timeout',
-          reopen: true,
-        });
-        for (let ta = 1; ta <= 3; ta++) {
-          try {
-            const tr = await sendCommandAsync(relay.id, { type: 'send_broadcast', channel: 'kanet-exchange', message: timeoutMsg });
-            if (tr?.txId) { broadcastOk = true; break; }
-          } catch (te) {
-            if (ta < 3) await new Promise(r => setTimeout(r, 200));
-          }
+    // ⑤ NO TX NO STATE CHANGE — Broadcast timeout FIRST, reopen only after TX is on chain.
+    const relay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(offer.maker);
+
+    if (relay) {
+      const { sendCommandAsync } = await import('./relay-manager.js');
+      const timeoutMsg = JSON.stringify({
+        t: 'kanet_exchange_timeout_v1',
+        offer_id: offer.id,
+        taker: offer.taker,
+        reason: 'payment_timeout',
+        reopen: true,
+      });
+
+      let timeoutTxId = null;
+      for (let ta = 1; ta <= 3; ta++) {
+        try {
+          const tr = await sendCommandAsync(relay.id, { type: 'send_broadcast', channel: 'kanet-exchange', message: timeoutMsg });
+          timeoutTxId = tr?.txId;
+          if (timeoutTxId) break;
+        } catch (te) {
+          console.error(`[exchange-machine] timeout broadcast attempt ${ta}/3: ${te.message}`);
+          if (ta < 3) await new Promise(r => setTimeout(r, 200));
         }
-      } else {
-        // Not our offer (no local relay for maker) — local-only transition is fine
-        broadcastOk = true;
       }
-    } catch (err) {
-      console.error(`[exchange-machine] timeout broadcast failed: ${err.message}`);
-    }
 
-    if (!broadcastOk) {
-      console.log(`[exchange-machine] timeout broadcast failed for ${offer.id.slice(0,8)} — staying matched, will retry next tick`);
-      continue;
+      if (!timeoutTxId) {
+        console.warn(`[exchange-machine] timeout broadcast failed for ${offer.id.slice(0,8)} — staying matched, will retry next tick`);
+        continue;
+      }
     }
+    // Non-local maker (no relay): proceed with local-only timeout
 
-    // Broadcast succeeded — now safe to update local state
+    // Broadcast succeeded (or non-local) → NOW reopen
     sqlite.prepare(`
       UPDATE exchange_offers
       SET protocol_status = 'open',

@@ -275,8 +275,11 @@ export async function registerExchangeRoutes(fastify) {
     const relay = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(relayNodeId);
     const takerAddr = relay?.address || relayNodeId;
 
+    // Re-read offer for broadcast message (taker_payment_address already written above)
+    const offerForBcast = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer_id);
+
     // === NO TX NO STATE CHANGE (③ consensus) ===
-    // Broadcast FIRST, then processAccept. If broadcast fails, DB stays unchanged.
+    // Broadcast accept FIRST. Only advance DB state after TX is on chain.
     let acceptTx = null;
     const { sendCommandAsync } = await import('../services/relay-manager.js');
     for (let attempt = 1; attempt <= 5; attempt++) {
@@ -287,6 +290,7 @@ export async function registerExchangeRoutes(fastify) {
           message: JSON.stringify({
             t: 'kanet_exchange_accept_v1', offer_id, taker: takerAddr,
             selected_chain: selected_chain || null,
+            receive_address: offerForBcast?.taker_payment_address || null,
           }),
         });
         acceptTx = res?.txId || null;
@@ -297,11 +301,12 @@ export async function registerExchangeRoutes(fastify) {
       if (attempt < 5) await new Promise(r => setTimeout(r, 200 * attempt));
     }
     if (!acceptTx) {
+      // Broadcast failed — DB stays untouched, no state change, no auto-pay.
       console.error(`[exchange] Accept broadcast failed after 5 attempts for offer ${offer_id.slice(0,8)}`);
-      return reply.code(500).send({ error: 'Accept broadcast failed — offer unchanged, please retry' });
+      return reply.code(500).send({ error: 'Accept broadcast failed — offer unchanged. Retry later.' });
     }
 
-    // Broadcast succeeded — now safe to advance state
+    // Broadcast on chain — NOW safe to advance local state
     const result = processAccept({
       offer_id,
       _from: takerAddr,
@@ -312,6 +317,7 @@ export async function registerExchangeRoutes(fastify) {
       return reply.code(400).send({ error: 'Accept failed (offer may no longer be open)' });
     }
 
+    // Write the real on-chain txId
     sqlite.prepare('UPDATE exchange_offers SET taker_tx_id = ? WHERE id = ?')
       .run(acceptTx, offer_id);
 
