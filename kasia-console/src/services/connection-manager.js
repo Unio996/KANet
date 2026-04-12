@@ -87,6 +87,24 @@ export function updateConnectionStatus(id, status, errorMsg) {
   `).run(status, errorMsg || null, nowIso(), id);
 }
 
+/**
+ * Sync agent_connections from adapter_nodes after adapter config update.
+ * Updates base_url, model, and bumps credential_version so Adapter cache invalidates.
+ */
+export function syncConnectionFromAdapter(adapterNodeId) {
+  const a = sqlite.prepare('SELECT * FROM adapter_nodes WHERE id = ?').get(adapterNodeId);
+  if (!a) return;
+  const conn = getConnectionByAdapter(adapterNodeId);
+  if (!conn) return;
+  const baseUrl = a.ai_provider_url || conn.base_url;
+  const model = a.ai_model || conn.model;
+  if (baseUrl === conn.base_url && model === conn.model) return; // no change
+  const newVersion = (conn.credential_version || 0) + 1;
+  sqlite.prepare(`
+    UPDATE agent_connections SET base_url = ?, model = ?, credential_version = ?, updated_at = ? WHERE id = ?
+  `).run(baseUrl, model, newVersion, nowIso(), conn.id);
+}
+
 // ── resolveRequestAuth (the architectural divide) ──────────────────────────
 
 /**

@@ -1,7 +1,8 @@
 # KANet Developer Guide
 
 > **修改任何代码前必读。** 一个文件，覆盖全系统。唯一权威开发者文档。
-> 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-11。
+> 初版 2026-03-31（合并 12 个 dev-*.md），最近更新 2026-04-12。
+> 4/12 更新：**四项基础修复。** (1) 提币 fire-and-forget 改 sendCommandAsync — 错误不再被静默吞掉，前端显示真实 txId/error。(2) Adapter 模型同步 — 更新 adapter 配置后自动同步到 agent_connections（新增 syncConnectionFromAdapter）。(3) 分配 adapter 后自动启动 relay — /relays/:id/assign 不再需要重启系统。(4) **Agent 默认不主动握手** — INITIATE_HANDSHAKE 需 autoHandshake=true 才放行，UI 开关在 /agent 页 Focus Mode 下方。**陷阱 #46：sendCommand 是 fire-and-forget，花钱操作必须用 sendCommandAsync 等回执。** **陷阱 #47：分配 adapter 不等于启动 relay，startAll 只在启动时跑一次。**
 > 4/11 更新（深夜）：**Exchange 跨节点全自动交易 SELL 6/6 + BUY 1/1。** 零延迟 pendingSpentUtxos 替代 5s UTXO delay。paid 广播首次上链（shouldBlockOutbound 协议豁免 + UTXO settle）。kaspa_tx trust txId（submitTransaction=节点接受）。BUY 路径 auto-send-KAS + verified→completed 直达。delivering 失败→revert verified（不再 disputed）。v57: delivery_tx 列。execution_states + chain_events 集成到 transition()。全站 explorer.kaspa.org → 系统 RPC 节点。dev-coord 频道建立。**陷阱 #44：每个协议动作必须跟着 TX 走。** 双节点 Claude Code 链上协作开发验证。
 > 4/11 更新：**SOL/TRON auto-pay 完成**：evm-transfer.js 扩展为 multi-chain transfer（transferSolUsdt + transferTronUsdt + 统一 transferUsdt 接口）。auto-pay 从 BNB/ETH 扩展到 4 链。**陷阱 #44：timeoutVerifying 必须用 verifying_started_at+30min，不能用 expires_at。** 旧逻辑用 expires_at 超时导致临近过期接单后仅 3-5 分钟就 timeout。**Seeder 双向做市**：buy-side 上线（USDT→KAS，kaspa_tx 验证）+ 链白名单扩展到 4 链。**Exchange UI 三层可验证**：deal detail 展示 Publish TX / Accept TX / Payment TX 链上证据链接（Kaspa Explorer + BscScan/Etherscan/Solscan/Tronscan）。delivering 状态 timeline 步骤。**数据清理**：3 笔遗留 stuck offers 清为 cancelled，1 笔 completed offer 孤立 fund_lock 修复。**首次跨节点开发协作**：通过 KANet Chat #kanet-public 频道与 Agent 139 节点 Claude Code 协调（消息上链，TX 可审计）。
 > 4/10 更新（晚间）：**致命 bug 修复：废弃乐观写入。** publish API 改为先广播再写 DB，广播失败不写任何记录。链是唯一事实源，broadcast_tx_id 永远是真实 txId，不再有 `pending_` 垃圾数据。**陷阱 #43：永远不要乐观写入链上数据——先上链拿到 txId，才写本地 DB。没有 TX 就不存在。** 首笔跨节点真实交易完成（139 Agent 付 0.335 USDT → Martin 发 10 KAS）。
@@ -1104,6 +1105,12 @@ getOrder / cancelOrder 用 `def.authStyle` switch（不是 exchange name），�
 44. **每一个协议动作必须跟着 TX 走。** 这是 KANet 的根本设计原则。KANet 建在对 Kaspa 链 100% 信任之上。每一步（publish/accept/paid/delivered）必须有真实的链上 TX 才能推进本地状态。没有 TX = 这个动作不存在 = 不推进状态。publish 已遵守此原则（exchange.js:207 广播失败不写 DB）。但 paid 广播（trade-protocol-filter.js:856）违反了此原则——广播失败被 try/catch 吞掉，processPaymentSubmit 照样执行。这导致本地状态与链上事实不同步，对方节点永远收不到 paid 消息，交易永远卡住。修复：所有协议广播必须成功上链后才推进本地状态。UTXO 冲突就等待释放后重发。market（OTC）系统没有这个问题因为每一步都有真实 TX 保证。教训来源：2026-04-11 跨节点测试。
 
 45. **timeoutVerifying 必须用 verifying_started_at + 30min。** 旧逻辑用 `expires_at < now` 超时，offer 若在 expires_at 前 3 分钟被接单（matched → verifying），下一轮 5min tick 就会把它 timeout——taker 只有 3 分钟而不是 30 分钟付款窗口。已修复为 `datetime(verifying_started_at, '+30 minutes') < datetime('now')`。对比 `checkMatchedTimeout()` 一直用 `matched_at + 30min` 是正确的。位置：exchange-machine.js:295。
+
+46. **sendCommand 是 fire-and-forget，花钱操作必须用 sendCommandAsync。** `sendCommand()` 只把命令发给 Relay 子进程，不等回执。如果 Relay 执行失败（地址网络不匹配、UTXO 不足、KIP-9 storage mass 超限），Console 不知道，API 返回 `{ok:true}` 给前端——用户以为成功但钱没动。`sendCommandAsync()` 带 `requestId`，Relay 执行完后 `process.send()` 回传结果，Console 等待后返回真实 txId/error。**所有涉及链上操作的命令（transfer/handshake/split_utxo）都必须用 sendCommandAsync。** 位置：relay.js `/api/relay/:id/transfer`。教训来源：2026-04-12 用户提币三次显示成功但全部失败。
+
+47. **分配 adapter 不等于启动 relay。** `relay-manager.js:startAll()` 只在 Console 启动时跑一次。之后在 UI 上把 adapter 分配给 relay 只更新 DB，不启动 relay 进程。已修复：`/relays/:id/assign` 分配 adapter 后自动调 `startRelay()`。位置：relay.js `/relays/:id/assign`。教训来源：2026-04-12 NWT 分配 adapter 后 relay 始终 not running。
+
+48. **Agent 默认不主动握手。** `action-executor.mjs:initiateHandshake()` 入口检查 `this.config.autoHandshake`，默认 false。Brain proactive 生成的 `INITIATE_HANDSHAKE` ACTION 会被拦截。开关存储在 `relay_nodes.social_overrides` JSON 的 `autoHandshake` 字段。UI 在 `/agent` 页 Focus Mode 下方。**被动接受握手不受影响**（收到别人的握手仍自动接受）。教训来源：2026-04-12 NWT 刚启动就主动花 0.2 KAS 给陌生人握手。
 
 ---
 
