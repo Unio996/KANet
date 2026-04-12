@@ -422,6 +422,177 @@ async function handleExchange(msg) {
   );
 
   console.log(`[exchange] Offer indexed: ${offerId.slice(0, 8)} ${msg.give_amount} ${msg.give_asset} → ${msg.want_amount} ${msg.want_asset} by ${msg._from.slice(-12)}`);
+
+  // AutoTaker: evaluate incoming offer for automatic acceptance
+  setImmediate(() => _evaluateAutoTake(offerId, msg).catch(e =>
+    console.error(`[autoTaker] evaluate error: ${e.message}`)
+  ));
+}
+
+// ── AutoTaker — auto-accept profitable incoming offers ──────────────────
+
+let _lastAutoTakeAt = 0;
+let _autoTakeLock = false;
+
+/**
+ * Evaluate an incoming offer for automatic acceptance.
+ * Single-side first: only accept BUY offers (maker gives KAS, wants USDT → we pay USDT, get KAS).
+ * Default mode is 'approval' — creates a proposal in execution_states for Owner to confirm.
+ */
+async function _evaluateAutoTake(offerId, msg) {
+  if (_autoTakeLock) return;
+
+  // 1. Check enabled
+  const { getConfig } = await import('../data/settings/configs.js');
+  const enabled = await getConfig('autotake_enabled');
+  if (enabled !== 'true') return;
+
+  // 2. Skip own offers (trap #53)
+  const localAddrs = sqlite.prepare('SELECT address FROM relay_nodes').all().map(r => r.address);
+  if (localAddrs.includes(msg._from)) return;
+
+  // 3. Only auto-verifiable offers
+  if (msg.verification === 'manual') return;
+
+  // 4. Skip expired
+  if (msg.expires_at && new Date(msg.expires_at) < new Date()) return;
+
+  // 5. Direction: only BUY (maker gives KAS, wants USDT)
+  if (msg.give_asset?.toUpperCase() !== 'KAS' || msg.want_asset?.toUpperCase() !== 'USDT') return;
+
+  // 6. Price evaluation
+  const { getCachedKasPrice } = await import('./market-data.js');
+  const marketPrice = getCachedKasPrice();
+  if (!marketPrice) return; // price=0 protection — cache expired, skip
+
+  const giveAmt = parseFloat(msg.give_amount);
+  const wantAmt = parseFloat(msg.want_amount);
+  if (!giveAmt || !wantAmt) return;
+
+  const offerPrice = wantAmt / giveAmt; // USDT per KAS
+  const discount = (marketPrice - offerPrice) / marketPrice;
+  const minDiscount = parseFloat(await getConfig('autotake_min_discount_pct') || '0.5') / 100;
+  if (discount < minDiscount) return; // not cheap enough
+
+  // 7. Amount cap
+  const maxUsdt = parseFloat(await getConfig('autotake_max_amount_usdt') || '50');
+  if (wantAmt > maxUsdt) return;
+
+  // 8. Daily limit
+  const today = new Date().toISOString().slice(0, 10);
+  const dailyCount = sqlite.prepare(
+    "SELECT COUNT(*) as cnt FROM chain_events WHERE event_type = 'autotake_accepted' AND created_at >= ?"
+  ).get(today + 'T00:00:00Z')?.cnt || 0;
+  const dailyLimit = parseInt(await getConfig('autotake_daily_limit') || '3');
+  if (dailyCount >= dailyLimit) return;
+
+  // 9. Cooldown 30s (UTXO conflict prevention)
+  if (_lastAutoTakeAt && Date.now() - _lastAutoTakeAt < 30_000) return;
+
+  // 10. Find best local agent (has BNB wallet with most USDT)
+  let bestRelay = null;
+  let bestBalance = 0;
+  for (const addr of localAddrs) {
+    const relay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(addr);
+    if (!relay) continue;
+    const wallet = sqlite.prepare(
+      "SELECT * FROM agent_wallets WHERE relay_node_id = ? AND chain = 'bnb' AND is_default = 1"
+    ).get(relay.id);
+    if (!wallet) continue;
+    // Use cached balance if available, otherwise accept any wallet
+    const bal = wallet.cached_balance ? parseFloat(wallet.cached_balance) : 999;
+    if (bal >= wantAmt && bal > bestBalance) {
+      bestRelay = relay.id;
+      bestBalance = bal;
+    }
+  }
+  if (!bestRelay) return;
+
+  console.log(`[autoTaker] opportunity: ${giveAmt} KAS @ ${offerPrice.toFixed(6)} (${(discount * 100).toFixed(2)}% below market ${marketPrice})`);
+
+  // 11. Mode: approval (default) or auto
+  const mode = await getConfig('autotake_mode') || 'approval';
+  if (mode === 'auto') {
+    _autoTakeLock = true;
+    try {
+      await _executeAutoTake(offerId, bestRelay);
+    } finally {
+      _autoTakeLock = false;
+    }
+  } else {
+    // Approval mode: create proposal in execution_states
+    const { createExecution } = await import('./execution-state.js');
+    createExecution({
+      orderId: offerId,
+      type: 'autotake_proposal',
+      source: 'auto-taker',
+      agentAddress: localAddrs[0],
+      displaySummary: `AutoTake: BUY ${giveAmt} KAS @ ${offerPrice.toFixed(6)} (${(discount * 100).toFixed(2)}% below market $${marketPrice})`,
+      actionDetails: JSON.stringify({ offerId, offerPrice, marketPrice, discount, chain: 'bnb', relayId: bestRelay }),
+    });
+    console.log(`[autoTaker] proposal created for offer ${offerId.slice(0, 8)}`);
+  }
+}
+
+/**
+ * Execute auto-take by calling the internal accept API endpoint.
+ * Reuses the full exchange.js accept path — broadcast, meta writes, auto-pay trigger.
+ */
+async function _executeAutoTake(offerId, relayId) {
+  // Verify offer still open
+  const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ? AND protocol_status = ?').get(offerId, 'open');
+  if (!offer) {
+    console.log(`[autoTaker] offer ${offerId.slice(0, 8)} no longer open, skipping`);
+    return;
+  }
+
+  // Internal HTTP to POST /api/exchange/accept — reuse full validated path (trap #51 compliant)
+  const http = await import('node:http');
+  const body = JSON.stringify({
+    relayNodeId: relayId,
+    offer_id: offerId,
+    selected_chain: 'bnb',
+    channel: 'kanet-exchange',
+  });
+
+  const result = await new Promise((resolve, reject) => {
+    const req = http.request({
+      hostname: 'localhost', port: 3100, path: '/api/exchange/accept', method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+    }, res => {
+      let d = '';
+      res.on('data', c => d += c);
+      res.on('end', () => {
+        try { resolve({ status: res.statusCode, data: JSON.parse(d) }); }
+        catch { resolve({ status: res.statusCode, data: d }); }
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(30_000, () => { req.destroy(); reject(new Error('timeout')); });
+    req.write(body);
+    req.end();
+  });
+
+  if (result.status !== 200) {
+    console.error(`[autoTaker] accept failed for ${offerId.slice(0, 8)}: ${JSON.stringify(result.data)}`);
+    return;
+  }
+
+  // Record chain_event for audit + Brain awareness
+  recordChainEvent({
+    txid: result.data?.txId || offerId,
+    eventType: 'autotake_accepted',
+    fromAddress: sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(relayId)?.address || '',
+    toAddress: offer.maker,
+    payload: JSON.stringify({
+      offer_id: offerId,
+      give: offer.give_amount + ' ' + offer.give_asset,
+      want: offer.want_amount + ' ' + offer.want_asset,
+    }),
+  });
+
+  _lastAutoTakeAt = Date.now();
+  console.log(`[autoTaker] accepted offer ${offerId.slice(0, 8)} — auto-pay will trigger via handleExchangeAccept`);
 }
 
 /**
