@@ -10,6 +10,7 @@
 
 import { sqlite } from '../db/client.js';
 import { decrypt } from '../services/crypto.js';
+import { recordChainEvent } from '../services/chain-event.js';
 
 export async function registerDefiRoutes(fastify) {
 
@@ -54,6 +55,7 @@ export async function registerDefiRoutes(fastify) {
       const privateKey = decrypt(wallet.privkey_encrypted);
       const { supply } = await import('../services/aave-client.js');
       const result = await supply(privateKey, asset, parseFloat(amount));
+      if (result.ok) recordChainEvent({ txid: result.txHash, eventType: 'aave_supply', payload: JSON.stringify({ asset, amount, chain: 'arbitrum' }) });
       return reply.send(result);
     } catch (err) {
       return reply.code(500).send({ error: err.message });
@@ -74,6 +76,7 @@ export async function registerDefiRoutes(fastify) {
       const privateKey = decrypt(wallet.privkey_encrypted);
       const { withdraw } = await import('../services/aave-client.js');
       const result = await withdraw(privateKey, asset, parseFloat(amount));
+      if (result.ok) recordChainEvent({ txid: result.txHash, eventType: 'aave_withdraw', payload: JSON.stringify({ asset, amount, chain: 'arbitrum' }) });
       return reply.send(result);
     } catch (err) {
       return reply.code(500).send({ error: err.message });
@@ -105,6 +108,7 @@ export async function registerDefiRoutes(fastify) {
 
       const privateKey = decrypt(wallet.privkey_encrypted);
       const result = await borrow(privateKey, asset, parseFloat(amount));
+      if (result.ok) recordChainEvent({ txid: result.txHash, eventType: 'aave_borrow', payload: JSON.stringify({ asset, amount, chain: 'arbitrum' }) });
       return reply.send(result);
     } catch (err) {
       return reply.code(500).send({ error: err.message });
@@ -125,6 +129,7 @@ export async function registerDefiRoutes(fastify) {
       const privateKey = decrypt(wallet.privkey_encrypted);
       const { repay } = await import('../services/aave-client.js');
       const result = await repay(privateKey, asset, parseFloat(amount));
+      if (result.ok) recordChainEvent({ txid: result.txHash, eventType: 'aave_repay', payload: JSON.stringify({ asset, amount, chain: 'arbitrum' }) });
       return reply.send(result);
     } catch (err) {
       return reply.code(500).send({ error: err.message });

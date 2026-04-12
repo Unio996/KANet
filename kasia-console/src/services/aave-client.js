@@ -77,10 +77,11 @@ export async function supply(privateKey, assetName, amount) {
 
   const amountWei = ethers.parseUnits(String(amount), asset.decimals);
 
-  // Approve pool to spend tokens
+  // Approve pool to spend tokens (large approval to avoid repeated approve TXs)
   const allowance = await token.allowance(signer.address, POOL_ADDRESS);
   if (allowance < amountWei) {
-    const approveTx = await token.approve(POOL_ADDRESS, amountWei);
+    const approveAmt = ethers.parseUnits('10000', asset.decimals); // approve 10000 at once
+    const approveTx = await token.approve(POOL_ADDRESS, approveAmt > amountWei ? approveAmt : amountWei);
     await approveTx.wait();
   }
 
@@ -157,13 +158,12 @@ export async function repay(privateKey, assetName, amount, rateMode = 2) {
     ? ethers.MaxUint256
     : ethers.parseUnits(String(amount), asset.decimals);
 
-  // Approve pool to pull tokens for repay
-  if (amountWei !== ethers.MaxUint256) {
-    const allowance = await token.allowance(signer.address, POOL_ADDRESS);
-    if (allowance < amountWei) {
-      const approveTx = await token.approve(POOL_ADDRESS, amountWei);
-      await approveTx.wait();
-    }
+  // Approve pool to pull tokens for repay (including max repay)
+  const approveAmount = amountWei === ethers.MaxUint256 ? ethers.MaxUint256 : amountWei;
+  const allowance = await token.allowance(signer.address, POOL_ADDRESS);
+  if (allowance < approveAmount) {
+    const approveTx = await token.approve(POOL_ADDRESS, approveAmount);
+    await approveTx.wait();
   }
 
   const tx = await pool.repay(asset.address, amountWei, rateMode, signer.address);
