@@ -184,8 +184,12 @@ export async function registerRelayRoutes(fastify) {
   // ── Multi-chain Wallet Management (agent_wallets table) ─────
 
   const SUPPORTED_CHAINS = ['bnb', 'eth', 'sol', 'tron', 'polygon'];
-  const EVM_CHAINS = ['bnb', 'eth', 'polygon'];
-  const EVM_RPC_URLS = { bnb: 'https://bsc-dataseed1.binance.org', eth: 'https://eth.llamarpc.com', polygon: 'https://polygon-bor-rpc.publicnode.com' };
+  const EVM_CHAINS = ['bnb', 'eth', 'polygon', 'arbitrum', 'optimism', 'avalanche', 'base'];
+  const EVM_RPC_URLS = {
+    bnb: 'https://bsc-dataseed1.binance.org', eth: 'https://eth.llamarpc.com', polygon: 'https://polygon-bor-rpc.publicnode.com',
+    arbitrum: 'https://arb1.arbitrum.io/rpc', optimism: 'https://mainnet.optimism.io',
+    avalanche: 'https://api.avax.network/ext/bc/C/rpc', base: 'https://mainnet.base.org',
+  };
   const STABLECOINS = {
     bnb: {
       usdt: { address: '0x55d398326f99059fF775485246999027B3197955', decimals: 18 },
@@ -198,6 +202,21 @@ export async function registerRelayRoutes(fastify) {
     polygon: {
       usdt: { address: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F', decimals: 6 },
       usdc: { address: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', decimals: 6 },
+    },
+    arbitrum: {
+      usdt: { address: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', decimals: 6 },
+      usdc: { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 },
+    },
+    optimism: {
+      usdt: { address: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', decimals: 6 },
+      usdc: { address: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85', decimals: 6 },
+    },
+    avalanche: {
+      usdt: { address: '0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7', decimals: 6 },
+      usdc: { address: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E', decimals: 6 },
+    },
+    base: {
+      usdc: { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', decimals: 6 },
     },
   };
   // 向后兼容：旧代码引用 USDT_CONTRACTS 的地方

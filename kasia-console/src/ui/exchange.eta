@@ -743,7 +743,7 @@
       </div>
       <p class="text-xs text-ink-400 mb-4">Select a chain to create a new wallet for this Agent.</p>
       <div class="space-y-2">
-        <template x-for="ch in [{id:'bnb',name:'BNB (BSC)',desc:'USDT/BNB'},{id:'eth',name:'Ethereum',desc:'USDT/ETH'},{id:'sol',name:'Solana',desc:'USDT/SOL'},{id:'tron',name:'TRON',desc:'USDT/TRX'},{id:'polygon',name:'Polygon',desc:'USDC/MATIC'}]" :key="ch.id">
+        <template x-for="ch in [{id:'bnb',name:'BNB (BSC)',desc:'USDT/USDC/BNB'},{id:'eth',name:'Ethereum',desc:'USDT/USDC/ETH'},{id:'arbitrum',name:'Arbitrum',desc:'USDT/USDC/ETH'},{id:'optimism',name:'Optimism',desc:'USDT/USDC/ETH'},{id:'base',name:'Base',desc:'USDC/ETH'},{id:'avalanche',name:'Avalanche',desc:'USDT/USDC/AVAX'},{id:'polygon',name:'Polygon',desc:'USDT/USDC/MATIC'},{id:'sol',name:'Solana',desc:'USDT/USDC/SOL'},{id:'tron',name:'TRON',desc:'USDT/USDC/TRX'}]" :key="ch.id">
           <button @click="addingWallet = ch.id; createWallet(ch.id).then(() => { addingWallet = false; showAddWallet = false; })" :disabled="addingWallet"
             class="w-full flex items-center justify-between px-4 py-3 rounded-lg border border-warm-200 hover:border-brand-400 hover:bg-brand-50 transition-all text-left disabled:opacity-50">
             <div>

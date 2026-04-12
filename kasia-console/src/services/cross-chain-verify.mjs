@@ -9,12 +9,16 @@
  * Supported tokens: USDT, USDC, DAI (per chain)
  */
 
-const REQUIRED_CONFIRMATIONS = { bnb: 15, eth: 12, polygon: 35, sol: 32, tron: 19, kaspa: 1 };
+const REQUIRED_CONFIRMATIONS = { bnb: 15, eth: 12, polygon: 35, arbitrum: 12, optimism: 12, avalanche: 12, base: 12, sol: 32, tron: 19, kaspa: 1 };
 
 const EVM_RPC = {
   bnb: 'https://bsc-dataseed1.binance.org',
   eth: 'https://eth.llamarpc.com',
   polygon: 'https://polygon-bor-rpc.publicnode.com',
+  arbitrum: 'https://arb1.arbitrum.io/rpc',
+  optimism: 'https://mainnet.optimism.io',
+  avalanche: 'https://api.avax.network/ext/bc/C/rpc',
+  base: 'https://mainnet.base.org',
 };
 
 // ── Multi-token address table (5 chains) ─────────────────────
@@ -36,6 +40,26 @@ const EVM_TOKENS = {
     usdt: { address: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F', decimals: 6 },
     usdc: { address: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', decimals: 6 },
     dai:  { address: '0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063', decimals: 18 },
+  },
+  arbitrum: {
+    usdt: { address: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', decimals: 6 },
+    usdc: { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 },
+    dai:  { address: '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1', decimals: 18 },
+  },
+  optimism: {
+    usdt: { address: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', decimals: 6 },
+    usdc: { address: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85', decimals: 6 },
+    dai:  { address: '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1', decimals: 18 },
+  },
+  avalanche: {
+    usdt: { address: '0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7', decimals: 6 },
+    usdc: { address: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E', decimals: 6 },
+    dai:  { address: '0xd586E7F844cEa2F87f50152665BCbc2C279D8d70', decimals: 18 },
+  },
+  base: {
+    usdc: { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', decimals: 6 },
+    dai:  { address: '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb', decimals: 18 },
+    // Note: no official Tether USDT on Base
   },
 };
 
@@ -81,7 +105,7 @@ export async function verifyCrossChainTx({ txHash, chain, expectedAmount, expect
   const required = REQUIRED_CONFIRMATIONS[chain] || 15;
   const asset = (paymentAsset || 'usdt').toLowerCase();
 
-  if (['bnb', 'eth', 'polygon'].includes(chain)) {
+  if (['bnb', 'eth', 'polygon', 'arbitrum', 'optimism', 'avalanche', 'base'].includes(chain)) {
     return _verifyEvm({ txHash, chain, expectedAmount, expectedTo, expectedFrom, required, asset });
   }
   if (chain === 'sol') {
