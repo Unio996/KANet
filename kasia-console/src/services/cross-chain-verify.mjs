@@ -1,40 +1,71 @@
 /**
- * Cross-Chain USDT Payment Verification
+ * Cross-Chain Token Payment Verification
  *
- * Extracted from trading.js (2026-04-06).
+ * Extracted from trading.js (2026-04-06). Extended for multi-token (P2a, 2026-04-12).
  * Pure verification logic — no DB writes, no business state transitions.
  * Caller is responsible for recording chain_events, execution_states, etc.
  *
- * Supported chains: bnb, eth (EVM), sol (Solana), tron (TRC20)
+ * Supported chains: bnb, eth, polygon (EVM), sol (Solana), tron (TRC20)
+ * Supported tokens: USDT, USDC, DAI (per chain)
  */
 
-const REQUIRED_CONFIRMATIONS = { bnb: 15, eth: 12, sol: 32, tron: 19, kaspa: 1 };
+const REQUIRED_CONFIRMATIONS = { bnb: 15, eth: 12, polygon: 35, sol: 32, tron: 19, kaspa: 1 };
 
 const EVM_RPC = {
   bnb: 'https://bsc-dataseed1.binance.org',
   eth: 'https://eth.llamarpc.com',
+  polygon: 'https://polygon-bor-rpc.publicnode.com',
 };
 
-const EVM_USDT = {
-  bnb: { address: '0x55d398326f99059fF775485246999027B3197955', decimals: 18 },
-  eth: { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', decimals: 6 },
+// ── Multi-token address table (5 chains) ─────────────────────
+// P2a: replaces single EVM_USDT. All verified mainnet contract addresses.
+// TRAP: BNB USDT/USDC are 18 decimals, NOT 6. DAI is 18 everywhere.
+
+const EVM_TOKENS = {
+  bnb: {
+    usdt: { address: '0x55d398326f99059fF775485246999027B3197955', decimals: 18 },
+    usdc: { address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', decimals: 18 },
+    dai:  { address: '0x1AF3F329e8BE154074D8769D1FFa4eE058B1DBc3', decimals: 18 },
+  },
+  eth: {
+    usdt: { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', decimals: 6 },
+    usdc: { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', decimals: 6 },
+    dai:  { address: '0x6B175474E89094C44Da98b954EedeAC495271d0F', decimals: 18 },
+  },
+  polygon: {
+    usdt: { address: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F', decimals: 6 },
+    usdc: { address: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', decimals: 6 },
+    dai:  { address: '0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063', decimals: 18 },
+  },
 };
 
 const SOL_RPC = 'https://api.mainnet-beta.solana.com';
-const SOL_USDT_MINT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenEPs';
+const SOL_TOKENS = {
+  usdt: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+  usdc: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+};
 
 const TRON_RPC = 'https://api.trongrid.io';
-const TRON_USDT_ADDR = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+const TRON_TOKENS = {
+  usdt: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+  usdc: 'TEkxiTehnzSmSe2XqrBj4w32RUN966rdz8',
+};
+
+// Backward compat aliases
+const EVM_USDT = Object.fromEntries(Object.entries(EVM_TOKENS).map(([chain, tokens]) => [chain, tokens.usdt]));
+const SOL_USDT_MINT = SOL_TOKENS.usdt;
+const TRON_USDT_ADDR = TRON_TOKENS.usdt;
 
 /**
- * Verify a cross-chain USDT payment TX.
+ * Verify a cross-chain token payment TX.
  *
  * @param {object} params
  * @param {string} params.txHash        - TX hash on the target chain
- * @param {string} params.chain         - bnb/eth/sol/tron
- * @param {number} params.expectedAmount - Expected USDT amount
+ * @param {string} params.chain         - bnb/eth/polygon/sol/tron
+ * @param {number} params.expectedAmount - Expected token amount
  * @param {string} [params.expectedTo]  - Expected recipient address
  * @param {string} [params.expectedFrom] - Expected sender address (optional)
+ * @param {string} [params.paymentAsset='usdt'] - Token to verify: usdt/usdc/dai
  * @returns {Promise<{
  *   confirmed: boolean,
  *   confirmations: number,
@@ -46,17 +77,18 @@ const TRON_USDT_ADDR = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
  *   underpayment?: boolean
  * }>}
  */
-export async function verifyCrossChainTx({ txHash, chain, expectedAmount, expectedTo, expectedFrom }) {
+export async function verifyCrossChainTx({ txHash, chain, expectedAmount, expectedTo, expectedFrom, paymentAsset = 'usdt' }) {
   const required = REQUIRED_CONFIRMATIONS[chain] || 15;
+  const asset = (paymentAsset || 'usdt').toLowerCase();
 
-  if (['bnb', 'eth'].includes(chain)) {
-    return _verifyEvm({ txHash, chain, expectedAmount, expectedTo, expectedFrom, required });
+  if (['bnb', 'eth', 'polygon'].includes(chain)) {
+    return _verifyEvm({ txHash, chain, expectedAmount, expectedTo, expectedFrom, required, asset });
   }
   if (chain === 'sol') {
-    return _verifySolana({ txHash, expectedAmount, expectedTo, required });
+    return _verifySolana({ txHash, expectedAmount, expectedTo, required, asset });
   }
   if (chain === 'tron') {
-    return _verifyTron({ txHash, expectedAmount, expectedTo, required });
+    return _verifyTron({ txHash, expectedAmount, expectedTo, required, asset });
   }
 
   if (chain === 'kaspa') {
@@ -72,7 +104,7 @@ export async function verifyCrossChainTx({ txHash, chain, expectedAmount, expect
 
 // ── EVM (BNB / ETH) ──────────────────────────────────────────
 
-async function _verifyEvm({ txHash, chain, expectedAmount, expectedTo, expectedFrom, required }) {
+async function _verifyEvm({ txHash, chain, expectedAmount, expectedTo, expectedFrom, required, asset = 'usdt' }) {
   const { ethers } = await import('ethers');
   const provider = new ethers.JsonRpcProvider(EVM_RPC[chain]);
 
@@ -90,18 +122,24 @@ async function _verifyEvm({ txHash, chain, expectedAmount, expectedTo, expectedF
     return { confirmed: false, confirmations, required, actualAmount: 0, recipient: '', sender: '', error: `Insufficient confirmations: ${confirmations}/${required}` };
   }
 
-  // Parse USDT Transfer log
+  // Resolve token contract from multi-token table
+  const tokenInfo = EVM_TOKENS[chain]?.[asset] || EVM_TOKENS[chain]?.usdt;
+  if (!tokenInfo) {
+    return { confirmed: false, confirmations, required, actualAmount: 0, recipient: '', sender: '', error: `No token config for ${asset} on ${chain}` };
+  }
+
+  // Parse ERC20 Transfer log (works for USDT, USDC, DAI — all standard ERC20)
   const transferTopic = ethers.id('Transfer(address,address,uint256)');
-  const usdtLower = EVM_USDT[chain].address.toLowerCase();
+  const tokenLower = tokenInfo.address.toLowerCase();
   const transferLog = receipt.logs.find(l =>
-    l.address.toLowerCase() === usdtLower && l.topics[0] === transferTopic
+    l.address.toLowerCase() === tokenLower && l.topics[0] === transferTopic
   );
 
   if (!transferLog) {
-    return { confirmed: false, confirmations, required, actualAmount: 0, recipient: '', sender: '', error: 'No USDT transfer found in TX' };
+    return { confirmed: false, confirmations, required, actualAmount: 0, recipient: '', sender: '', error: `No ${asset.toUpperCase()} transfer found in TX` };
   }
 
-  const actualAmount = parseFloat(ethers.formatUnits(transferLog.data, EVM_USDT[chain].decimals));
+  const actualAmount = parseFloat(ethers.formatUnits(transferLog.data, tokenInfo.decimals));
   const recipient = '0x' + transferLog.topics[2].slice(26);
   const sender = '0x' + transferLog.topics[1].slice(26);
 
@@ -122,7 +160,7 @@ async function _verifyEvm({ txHash, chain, expectedAmount, expectedTo, expectedF
 
 // ── Solana ────────────────────────────────────────────────────
 
-async function _verifySolana({ txHash, expectedAmount, expectedTo, required }) {
+async function _verifySolana({ txHash, expectedAmount, expectedTo, required, asset = 'usdt' }) {
   const { Connection } = await import('@solana/web3.js');
   const connection = new Connection(SOL_RPC, 'finalized');
 
@@ -140,15 +178,18 @@ async function _verifySolana({ txHash, expectedAmount, expectedTo, required }) {
     return { confirmed: false, confirmations, required, actualAmount: 0, recipient: '', sender: '', error: `Insufficient confirmations: ${confirmations}/${required}` };
   }
 
-  // Find USDT transfer in token balance changes
+  // Resolve SPL token mint from multi-token table
+  const tokenMint = SOL_TOKENS[asset] || SOL_TOKENS.usdt;
+
+  // Find token transfer in token balance changes
   const postBalances = tx.meta?.postTokenBalances || [];
   const preBalances = tx.meta?.preTokenBalances || [];
   let actualAmount = 0;
   let recipient = null;
 
   for (const post of postBalances) {
-    if (post.mint !== SOL_USDT_MINT) continue;
-    const pre = preBalances.find(p => p.accountIndex === post.accountIndex && p.mint === SOL_USDT_MINT);
+    if (post.mint !== tokenMint) continue;
+    const pre = preBalances.find(p => p.accountIndex === post.accountIndex && p.mint === tokenMint);
     const postAmt = parseFloat(post.uiTokenAmount?.uiAmountString || '0');
     const preAmt = pre ? parseFloat(pre.uiTokenAmount?.uiAmountString || '0') : 0;
     const delta = postAmt - preAmt;
@@ -177,7 +218,7 @@ async function _verifySolana({ txHash, expectedAmount, expectedTo, required }) {
 
 // ── TRON ──────────────────────────────────────────────────────
 
-async function _verifyTron({ txHash, expectedAmount, expectedTo, required }) {
+async function _verifyTron({ txHash, expectedAmount, expectedTo, required, asset = 'usdt' }) {
   const TronWebModule = await import('tronweb');
   const TronWeb = TronWebModule.default || TronWebModule;
   const tronWeb = new TronWeb({ fullHost: TRON_RPC });
@@ -198,6 +239,9 @@ async function _verifyTron({ txHash, expectedAmount, expectedTo, required }) {
     return { confirmed: false, confirmations, required, actualAmount: 0, recipient: '', sender: '', error: `Insufficient confirmations: ${confirmations}/${required}` };
   }
 
+  // Resolve TRC20 contract from multi-token table
+  const tokenAddr = TRON_TOKENS[asset] || TRON_TOKENS.usdt;
+
   // Parse TRC20 Transfer log
   const transferTopic = 'ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
   let actualAmount = 0;
@@ -206,7 +250,7 @@ async function _verifyTron({ txHash, expectedAmount, expectedTo, required }) {
 
   for (const log of (txInfo.log || [])) {
     const addr = log.address || '';
-    if (addr.toLowerCase() !== tronWeb.address.toHex(TRON_USDT_ADDR).replace(/^41/, '').toLowerCase()) continue;
+    if (addr.toLowerCase() !== tronWeb.address.toHex(tokenAddr).replace(/^41/, '').toLowerCase()) continue;
     if (!log.topics || log.topics[0] !== transferTopic) continue;
 
     senderHex = '41' + log.topics[1].slice(-40);

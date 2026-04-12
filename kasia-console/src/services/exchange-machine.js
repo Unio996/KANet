@@ -518,6 +518,7 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
         chain: payment_chain,
         expectedAmount,
         expectedTo,
+        paymentAsset: meta.payment_asset || 'usdt',
       });
     }
 
