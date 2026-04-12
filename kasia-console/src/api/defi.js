@@ -135,4 +135,135 @@ export async function registerDefiRoutes(fastify) {
       return reply.code(500).send({ error: err.message });
     }
   });
+
+  // ══════════════════════════════════════════════════════════
+  // ── Hyperliquid Perpetual Futures ────────────────────────
+  // ══════════════════════════════════════════════════════════
+
+  function getArbitrumWallet(walletId) {
+    const wallet = sqlite.prepare('SELECT * FROM agent_wallets WHERE id = ?').get(walletId);
+    if (!wallet) return { error: 'Wallet not found', code: 404 };
+    if (wallet.chain !== 'arbitrum') return { error: 'Hyperliquid requires Arbitrum wallet', code: 400 };
+    if (!wallet.privkey_encrypted) return { error: 'No private key', code: 400 };
+    return { wallet };
+  }
+
+  // GET /api/defi/hyperliquid/status — account + positions
+  fastify.get('/api/defi/hyperliquid/status', async (request, reply) => {
+    const { walletId } = request.query;
+    if (!walletId) return reply.code(400).send({ error: 'walletId required' });
+    const { wallet, error, code } = getArbitrumWallet(walletId);
+    if (error) return reply.code(code).send({ error });
+
+    try {
+      const privateKey = decrypt(wallet.privkey_encrypted);
+      const { getAccountInfo, getPositions, getFundingRates } = await import('../services/hyperliquid-client.js');
+      const [account, positions, funding] = await Promise.all([
+        getAccountInfo(privateKey),
+        getPositions(privateKey),
+        getFundingRates(privateKey, ['BTC', 'ETH']),
+      ]);
+      return reply.send({ ok: true, account, positions, funding });
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // GET /api/defi/hyperliquid/positions
+  fastify.get('/api/defi/hyperliquid/positions', async (request, reply) => {
+    const { walletId } = request.query;
+    if (!walletId) return reply.code(400).send({ error: 'walletId required' });
+    const { wallet, error, code } = getArbitrumWallet(walletId);
+    if (error) return reply.code(code).send({ error });
+
+    try {
+      const privateKey = decrypt(wallet.privkey_encrypted);
+      const { getPositions } = await import('../services/hyperliquid-client.js');
+      return reply.send({ ok: true, positions: await getPositions(privateKey) });
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // POST /api/defi/hyperliquid/order — place order (stop_loss mandatory)
+  fastify.post('/api/defi/hyperliquid/order', async (request, reply) => {
+    const { walletId, asset, side, size, price, type = 'market', leverage, stopLoss } = request.body || {};
+    if (!walletId || !asset || !side || !size) return reply.code(400).send({ error: 'walletId, asset, side, size required' });
+    if (!stopLoss) return reply.code(400).send({ error: 'stop_loss is mandatory for all positions' });
+
+    const { wallet, error, code } = getArbitrumWallet(walletId);
+    if (error) return reply.code(code).send({ error });
+
+    // Safety: max leverage check
+    const { getConfig } = await import('../data/settings/configs.js');
+    const maxLev = parseInt(await getConfig('hyper_max_leverage') || '5');
+    if (leverage && leverage > maxLev) return reply.code(400).send({ error: `Leverage ${leverage} exceeds max ${maxLev}` });
+
+    // Safety: max position size
+    const maxPos = parseFloat(await getConfig('hyper_max_position_usdc') || '50');
+    const estimatedValue = parseFloat(size) * (parseFloat(price) || 1);
+    if (estimatedValue > maxPos) return reply.code(400).send({ error: `Position ~$${estimatedValue.toFixed(0)} exceeds max $${maxPos}` });
+
+    try {
+      const privateKey = decrypt(wallet.privkey_encrypted);
+      const { placeOrder } = await import('../services/hyperliquid-client.js');
+      const result = await placeOrder(privateKey, { asset, side, size: parseFloat(size), price: price ? parseFloat(price) : undefined, type, leverage, stopLoss: parseFloat(stopLoss) });
+      if (result.ok) recordChainEvent({ txid: result.orderId || asset, eventType: 'hyper_order', payload: JSON.stringify({ asset, side, size, leverage, stopLoss }) });
+      return reply.send(result);
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // POST /api/defi/hyperliquid/close — close position
+  fastify.post('/api/defi/hyperliquid/close', async (request, reply) => {
+    const { walletId, asset } = request.body || {};
+    if (!walletId || !asset) return reply.code(400).send({ error: 'walletId, asset required' });
+    const { wallet, error, code } = getArbitrumWallet(walletId);
+    if (error) return reply.code(code).send({ error });
+
+    try {
+      const privateKey = decrypt(wallet.privkey_encrypted);
+      const { closePosition } = await import('../services/hyperliquid-client.js');
+      const result = await closePosition(privateKey, asset);
+      if (result.ok) recordChainEvent({ txid: asset, eventType: 'hyper_close', payload: JSON.stringify({ asset, closedSize: result.closedSize }) });
+      return reply.send(result);
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // DELETE /api/defi/hyperliquid/order/:id — cancel order
+  fastify.delete('/api/defi/hyperliquid/order/:id', async (request, reply) => {
+    const { walletId, asset } = request.query;
+    if (!walletId || !asset) return reply.code(400).send({ error: 'walletId, asset required' });
+    const { wallet, error, code } = getArbitrumWallet(walletId);
+    if (error) return reply.code(code).send({ error });
+
+    try {
+      const privateKey = decrypt(wallet.privkey_encrypted);
+      const { cancelOrder } = await import('../services/hyperliquid-client.js');
+      const result = await cancelOrder(privateKey, asset, request.params.id);
+      return reply.send(result);
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // GET /api/defi/hyperliquid/funding
+  fastify.get('/api/defi/hyperliquid/funding', async (request, reply) => {
+    const { walletId, assets } = request.query;
+    if (!walletId) return reply.code(400).send({ error: 'walletId required' });
+    const { wallet, error, code } = getArbitrumWallet(walletId);
+    if (error) return reply.code(code).send({ error });
+
+    try {
+      const privateKey = decrypt(wallet.privkey_encrypted);
+      const { getFundingRates } = await import('../services/hyperliquid-client.js');
+      const assetList = assets ? assets.split(',') : ['BTC', 'ETH'];
+      return reply.send({ ok: true, funding: await getFundingRates(privateKey, assetList) });
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
 }
