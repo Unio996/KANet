@@ -589,13 +589,13 @@
     <div x-show="opsOpen" x-transition class="border-t border-warm-100">
       <!-- Top-level: Trading / Market Making / DeFi -->
       <div class="flex border-b border-warm-200 px-5 bg-warm-50">
-        <button @click="opsGroup = 'trading'"
+        <button @click="opsGroup = 'trading'; opsTab = 'arb'"
           :class="opsGroup === 'trading' ? 'border-brand-500 text-brand-700 font-medium' : 'border-transparent text-ink-400'"
           class="px-4 py-2 text-xs border-b-2 -mb-px">Trading</button>
-        <button @click="opsGroup = 'mm'"
+        <button @click="opsGroup = 'mm'; opsTab = 'seed'"
           :class="opsGroup === 'mm' ? 'border-brand-500 text-brand-700 font-medium' : 'border-transparent text-ink-400'"
           class="px-4 py-2 text-xs border-b-2 -mb-px">Market Making</button>
-        <button @click="opsGroup = 'defi'; loadAaveStatus()"
+        <button @click="opsGroup = 'defi'; opsTab = 'aave'; loadAaveStatus()"
           :class="opsGroup === 'defi' ? 'border-brand-500 text-brand-700 font-medium' : 'border-transparent text-ink-400'"
           class="px-4 py-2 text-xs border-b-2 -mb-px">DeFi</button>
       </div>
