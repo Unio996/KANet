@@ -949,10 +949,14 @@ async function handleExchangeDelivered(msg) {
 
   // Accept from any in-progress state (buyer node may be at matched/verifying/delivering depending on timing)
   // Direct SQL UPDATE — not transition() — because buyer's state may not match seller's state machine sequence
+  // TIMEZONE FIX: bind JS toISOString() instead of SQLite datetime('now') to ensure Z suffix.
+  // SQLite datetime('now') returns "YYYY-MM-DD HH:MM:SS" (naive) which JS Date() parses as LOCAL,
+  // causing "completed 7h ago" bug on P2-01 for Owner in +7 timezone. Phase 2 first finding.
+  const nowIso = new Date().toISOString();
   const result = sqlite.prepare(`
-    UPDATE exchange_offers SET protocol_status = 'completed', completed_at = datetime('now'), is_fully_observed = 1, updated_at = datetime('now')
+    UPDATE exchange_offers SET protocol_status = 'completed', completed_at = ?, is_fully_observed = 1, updated_at = ?
     WHERE id = ? AND protocol_status IN ('matched', 'verifying', 'delivering')
-  `).run(msg.offer_id);
+  `).run(nowIso, nowIso, msg.offer_id);
 
   // FIX: when the direct UPDATE moves offer to completed, fund_lock must also transition locked → spent.
   // Without this, Phase 1 stress test S9 showed fund_locks permanently stuck (leak).
@@ -989,14 +993,16 @@ async function handleExchangeTimeout(msg) {
   if (offer.protocol_status !== 'matched') return;
 
   // Direct SQL UPDATE: matched → open, clear taker fields
+  // TIMEZONE FIX: use JS toISOString() for updated_at (Phase 2 P2-01 finding)
+  const nowIso = new Date().toISOString();
   sqlite.prepare(`
     UPDATE exchange_offers
     SET protocol_status = 'open',
         taker = NULL, taker_chain = NULL, taker_payment_address = NULL,
         payment_tx = NULL, matched_at = NULL,
-        updated_at = datetime('now')
+        updated_at = ?
     WHERE id = ?
-  `).run(msg.offer_id);
+  `).run(nowIso, msg.offer_id);
 
   releaseFunds(msg.offer_id);
 

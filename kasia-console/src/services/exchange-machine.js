@@ -447,14 +447,16 @@ export async function checkMatchedTimeout() {
     // Non-local maker (no relay): proceed with local-only timeout
 
     // Broadcast succeeded (or non-local) → NOW reopen
+    // TIMEZONE FIX: use JS toISOString() for Z suffix consistency
+    const nowIsoR = new Date().toISOString();
     sqlite.prepare(`
       UPDATE exchange_offers
       SET protocol_status = 'open',
           taker = NULL, taker_chain = NULL, taker_payment_address = NULL,
           payment_tx = NULL, matched_at = NULL,
-          updated_at = datetime('now')
+          updated_at = ?
       WHERE id = ? AND protocol_status = 'matched'
-    `).run(offer.id);
+    `).run(nowIsoR, offer.id);
 
     releaseFunds(offer.id);
   }
