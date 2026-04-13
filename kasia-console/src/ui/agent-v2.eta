@@ -309,6 +309,10 @@
               <option value="bnb">BNB (BSC)</option>
               <option value="eth">ETH</option>
               <option value="polygon">Polygon</option>
+              <option value="arbitrum">Arbitrum</option>
+              <option value="optimism">Optimism</option>
+              <option value="base">Base</option>
+              <option value="avalanche">Avalanche</option>
               <option value="sol">SOL</option>
               <option value="tron">TRON</option>
             </select>
@@ -327,6 +331,10 @@
               <option value="bnb">BNB</option>
               <option value="eth">ETH</option>
               <option value="polygon">Polygon</option>
+              <option value="arbitrum">Arbitrum</option>
+              <option value="optimism">Optimism</option>
+              <option value="base">Base</option>
+              <option value="avalanche">Avalanche</option>
               <option value="sol">SOL</option>
               <option value="tron">TRON</option>
             </select>
@@ -390,7 +398,7 @@
                         <span>0 USDT/USDC</span>
                       </template>
                       <span>&middot;</span>
-                      <span x-text="w.nativeBalance != null ? w.nativeBalance.toFixed(4) + ' ' + (w.chain === 'polygon' ? 'MATIC' : w.chain.toUpperCase()) : '--'"></span>
+                      <span x-text="w.nativeBalance != null ? w.nativeBalance.toFixed(4) + ' ' + chainNativeSymbol(w.chain) : '--'"></span>
                     </div>
                   </div>
                   <div class="flex items-center gap-1">
@@ -1240,7 +1248,25 @@ function agentApp() {
       } catch(e) { this.cardError = e.message; } this.cardPublishing = false;
     },
     chainBadgeClass(chain) {
-      return ({ bnb: 'bg-amber-50 text-amber-700 border-amber-100', eth: 'bg-blue-50 text-blue-700 border-blue-100', polygon: 'bg-violet-50 text-violet-700 border-violet-100', sol: 'bg-purple-50 text-purple-700 border-purple-100', tron: 'bg-red-50 text-red-700 border-red-100' })[chain] || 'bg-warm-100 text-ink-500 border-warm-300';
+      return ({
+        bnb:       'bg-amber-50 text-amber-700 border-amber-100',
+        eth:       'bg-blue-50 text-blue-700 border-blue-100',
+        polygon:   'bg-violet-50 text-violet-700 border-violet-100',
+        arbitrum:  'bg-sky-50 text-sky-700 border-sky-100',
+        optimism:  'bg-rose-50 text-rose-700 border-rose-100',
+        base:      'bg-indigo-50 text-indigo-700 border-indigo-100',
+        avalanche: 'bg-red-50 text-red-700 border-red-100',
+        sol:       'bg-purple-50 text-purple-700 border-purple-100',
+        tron:      'bg-orange-50 text-orange-700 border-orange-100',
+      })[chain] || 'bg-warm-100 text-ink-500 border-warm-300';
+    },
+    chainNativeSymbol(chain) {
+      // L2s (arbitrum/optimism/base) settle to ETH. Polygon uses MATIC. Avalanche uses AVAX.
+      return ({
+        bnb: 'BNB', eth: 'ETH', polygon: 'MATIC',
+        arbitrum: 'ETH', optimism: 'ETH', base: 'ETH', avalanche: 'AVAX',
+        sol: 'SOL', tron: 'TRX',
+      })[chain] || chain.toUpperCase();
     }
   };
 }
