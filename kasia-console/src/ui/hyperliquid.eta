@@ -1,0 +1,342 @@
+<%~ include('partials/page-open', { _page: 'hyperliquid', pageTitle: 'Hyperliquid Perps', ...it }) %>
+
+<div class="h-full flex flex-col" x-data="hyperApp()">
+
+  <!-- ═══ HEADER ═══ -->
+  <div class="flex-shrink-0 bg-white border-b border-warm-200 px-5 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center text-white font-bold text-xs">H</div>
+      <div>
+        <div class="text-sm font-semibold text-ink-700">Hyperliquid Perpetuals</div>
+        <div class="text-[10px] text-ink-400">On-chain perps with orderbook — Arbitrum deposits</div>
+      </div>
+    </div>
+    <div class="flex items-center gap-4 text-xs">
+      <div class="flex items-center gap-1.5">
+        <span class="text-ink-400">Agent:</span>
+        <select x-model="selectedWalletId" @change="loadAll()" class="pl-2 pr-6 py-1 border border-warm-200 rounded text-xs bg-white">
+          <template x-for="w in arbWallets" :key="w.id">
+            <option :value="w.id" x-text="w.name + ' — ' + w.address?.slice(0,8) + '...' + w.address?.slice(-4)"></option>
+          </template>
+        </select>
+      </div>
+      <button @click="loadAll()" class="text-brand-500 hover:text-brand-700 flex items-center gap-1">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+        Refresh
+      </button>
+    </div>
+  </div>
+
+  <!-- ═══ MAIN — 3 COLUMNS ═══ -->
+  <div class="flex-1 flex min-h-0 overflow-hidden">
+
+    <!-- ── LEFT: Markets (perps list) ── -->
+    <div class="flex-1 border-r border-warm-200 overflow-y-auto bg-warm-50/30">
+      <div class="p-5">
+        <div class="flex items-center justify-between mb-3">
+          <div>
+            <h2 class="text-sm font-semibold text-ink-700">Perpetual Markets</h2>
+            <p class="text-[10px] text-ink-400">Funding rate pays every 8 hours</p>
+          </div>
+        </div>
+
+        <div class="space-y-2">
+          <template x-for="m in markets" :key="m.asset">
+            <div class="bg-white border border-warm-200 rounded-lg p-4 hover:border-brand-300 transition-colors">
+              <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-2">
+                  <div class="w-7 h-7 rounded-full bg-gradient-to-br from-slate-500 to-slate-700 text-white flex items-center justify-center text-[10px] font-bold" x-text="m.asset.slice(0,3)"></div>
+                  <div>
+                    <div class="font-medium text-ink-700 text-sm" x-text="m.asset + '-PERP'"></div>
+                    <div class="text-[10px] text-ink-400">Max leverage 50x</div>
+                  </div>
+                </div>
+                <div class="text-right">
+                  <div class="text-sm font-semibold text-ink-700 tabular-nums" x-text="'$' + (m.markPrice || 0).toFixed(2)"></div>
+                  <div class="text-[10px] tabular-nums" :class="(m.change24h || 0) >= 0 ? 'text-green-600' : 'text-red-600'" x-text="((m.change24h || 0) >= 0 ? '+' : '') + (m.change24h || 0).toFixed(2) + '%'"></div>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-3 gap-2 text-[11px] mb-3">
+                <div class="bg-warm-50 rounded p-2">
+                  <div class="text-[9px] text-ink-400 uppercase">Funding</div>
+                  <div class="font-semibold tabular-nums" :class="(m.fundingRate || 0) >= 0 ? 'text-green-700' : 'text-red-600'" x-text="((m.fundingRate || 0) * 100).toFixed(4) + '%'"></div>
+                </div>
+                <div class="bg-warm-50 rounded p-2">
+                  <div class="text-[9px] text-ink-400 uppercase">Open Interest</div>
+                  <div class="font-semibold text-ink-700 tabular-nums" x-text="'$' + ((m.openInterest || 0) / 1e6).toFixed(1) + 'M'"></div>
+                </div>
+                <div class="bg-warm-50 rounded p-2">
+                  <div class="text-[9px] text-ink-400 uppercase">24h Vol</div>
+                  <div class="font-semibold text-ink-700 tabular-nums" x-text="'$' + ((m.volume24h || 0) / 1e6).toFixed(0) + 'M'"></div>
+                </div>
+              </div>
+
+              <div class="flex gap-2">
+                <button @click="openTrade('long', m)" class="flex-1 py-1.5 bg-green-500 text-white rounded text-[11px] font-medium hover:bg-green-600">
+                  Long
+                </button>
+                <button @click="openTrade('short', m)" class="flex-1 py-1.5 bg-red-500 text-white rounded text-[11px] font-medium hover:bg-red-600">
+                  Short
+                </button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── CENTER: Account + Positions ── -->
+    <div class="w-[340px] flex-shrink-0 border-r border-warm-200 overflow-y-auto bg-white">
+      <div class="p-5">
+        <h2 class="text-sm font-semibold text-ink-700 mb-3">Your Account</h2>
+
+        <div class="space-y-3 mb-4">
+          <div class="bg-warm-50 rounded-lg p-3">
+            <div class="text-[10px] text-ink-400 uppercase tracking-wider">Account Value</div>
+            <div class="text-xl font-bold text-ink-700 tabular-nums" x-text="'$' + (account.accountValue || 0).toFixed(2)"></div>
+          </div>
+          <div class="bg-warm-50 rounded-lg p-3">
+            <div class="text-[10px] text-ink-400 uppercase tracking-wider">Unrealized PnL</div>
+            <div class="text-xl font-bold tabular-nums" :class="(account.unrealizedPnl || 0) >= 0 ? 'text-green-600' : 'text-red-600'" x-text="((account.unrealizedPnl || 0) >= 0 ? '+$' : '-$') + Math.abs(account.unrealizedPnl || 0).toFixed(2)"></div>
+          </div>
+          <div class="bg-warm-50 rounded-lg p-3">
+            <div class="flex items-center justify-between mb-1">
+              <div class="text-[10px] text-ink-400 uppercase tracking-wider">Margin Usage</div>
+              <span class="text-xs font-bold tabular-nums" :class="(account.marginUsedPct || 0) > 80 ? 'text-red-600' : (account.marginUsedPct || 0) > 60 ? 'text-yellow-600' : 'text-green-600'" x-text="(account.marginUsedPct || 0).toFixed(0) + '%'"></span>
+            </div>
+            <div class="h-2 bg-warm-200 rounded-full overflow-hidden">
+              <div class="h-full rounded-full transition-all" :class="(account.marginUsedPct || 0) > 80 ? 'bg-red-500' : (account.marginUsedPct || 0) > 60 ? 'bg-yellow-500' : 'bg-green-500'" :style="'width:' + Math.min(100, (account.marginUsedPct || 0)) + '%'"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Open Positions -->
+        <div class="mb-3">
+          <div class="text-[10px] text-ink-400 uppercase tracking-wider mb-2">Open Positions (<span x-text="positions.length"></span>)</div>
+          <div x-show="positions.length === 0" class="text-center py-4 text-xs text-ink-400">No open positions</div>
+          <div class="space-y-2">
+            <template x-for="p in positions" :key="p.asset">
+              <div class="bg-white border border-warm-200 rounded-lg p-2.5">
+                <div class="flex items-center justify-between mb-1">
+                  <div class="flex items-center gap-1.5">
+                    <span class="font-medium text-ink-700 text-xs" x-text="p.asset"></span>
+                    <span class="text-[9px] px-1 rounded" :class="p.side === 'long' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'" x-text="p.side?.toUpperCase()"></span>
+                    <span class="text-[9px] text-ink-400" x-text="p.leverage + 'x'"></span>
+                  </div>
+                  <button @click="closePosition(p.asset)" class="text-[9px] text-red-500 hover:text-red-700">Close</button>
+                </div>
+                <div class="grid grid-cols-2 gap-1 text-[10px]">
+                  <div><span class="text-ink-400">Size:</span> <span class="tabular-nums" x-text="p.size"></span></div>
+                  <div><span class="text-ink-400">Entry:</span> <span class="tabular-nums" x-text="'$' + (p.entryPrice || 0).toFixed(2)"></span></div>
+                  <div><span class="text-ink-400">Mark:</span> <span class="tabular-nums" x-text="'$' + (p.markPrice || 0).toFixed(2)"></span></div>
+                  <div><span class="text-ink-400">Liq:</span> <span class="tabular-nums text-orange-600" x-text="'$' + (p.liqPrice || 0).toFixed(2)"></span></div>
+                </div>
+                <div class="mt-1 flex justify-between text-[10px]">
+                  <span class="text-ink-400">PnL</span>
+                  <span class="font-medium tabular-nums" :class="(p.pnl || 0) >= 0 ? 'text-green-600' : 'text-red-600'" x-text="((p.pnl || 0) >= 0 ? '+$' : '-$') + Math.abs(p.pnl || 0).toFixed(2)"></span>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── RIGHT: Funding Rates + History ── -->
+    <div class="w-[280px] flex-shrink-0 overflow-y-auto bg-warm-50/30">
+      <div class="p-5">
+        <h2 class="text-sm font-semibold text-ink-700 mb-3">Funding Rates</h2>
+        <div class="space-y-1.5 mb-5">
+          <template x-for="f in funding" :key="f.asset">
+            <div class="flex items-center justify-between bg-white border border-warm-100 rounded px-2.5 py-1.5">
+              <span class="text-xs font-medium text-ink-700" x-text="f.asset"></span>
+              <div class="text-right">
+                <div class="text-[11px] font-semibold tabular-nums" :class="f.rate >= 0 ? 'text-green-600' : 'text-red-600'" x-text="((f.rate || 0) >= 0 ? '+' : '') + ((f.rate || 0) * 100).toFixed(4) + '%'"></div>
+                <div class="text-[9px] text-ink-400">per 8h</div>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <h2 class="text-sm font-semibold text-ink-700 mb-3">Recent Trades</h2>
+        <div x-show="history.length === 0" class="text-center py-4 text-xs text-ink-400">No trades yet</div>
+        <div class="space-y-2">
+          <template x-for="t in history" :key="t.id">
+            <div class="bg-white border border-warm-200 rounded-lg p-2.5">
+              <div class="flex items-center justify-between mb-0.5">
+                <span class="text-[10px] font-medium uppercase" :class="t.side === 'long' ? 'text-green-600' : 'text-red-600'" x-text="t.side + ' ' + t.asset"></span>
+                <span class="text-[9px] text-ink-400" x-text="t.time"></span>
+              </div>
+              <div class="text-xs text-ink-700 tabular-nums" x-text="t.size + ' @ $' + t.price?.toFixed(2)"></div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══ TRADE MODAL ═══ -->
+  <div x-show="modalOpen" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center bg-black/30" @click.self="modalOpen = false">
+    <div class="bg-white rounded-xl shadow-2xl p-6 w-96" @click.stop>
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-base font-semibold text-ink-700">
+          <span :class="modalSide === 'long' ? 'text-green-600' : 'text-red-600'" x-text="modalSide?.toUpperCase()"></span>
+          <span x-text="modalMarket?.asset + '-PERP'"></span>
+        </h3>
+        <button @click="modalOpen = false" class="text-ink-400 hover:text-ink-600 text-2xl leading-none">&times;</button>
+      </div>
+
+      <div class="bg-warm-50 rounded-lg p-3 mb-4 text-xs space-y-1">
+        <div class="flex justify-between"><span class="text-ink-400">Mark Price:</span> <span class="tabular-nums" x-text="'$' + (modalMarket?.markPrice || 0).toFixed(2)"></span></div>
+        <div class="flex justify-between"><span class="text-ink-400">Funding:</span> <span class="tabular-nums" x-text="((modalMarket?.fundingRate || 0) * 100).toFixed(4) + '%'"></span></div>
+        <div class="flex justify-between"><span class="text-ink-400">Available:</span> <span class="tabular-nums" x-text="'$' + (account.available || 0).toFixed(2)"></span></div>
+      </div>
+
+      <div class="space-y-3">
+        <label class="block">
+          <span class="text-xs text-ink-500">Size</span>
+          <input type="number" x-model="modalSize" step="0.01" placeholder="0.00" class="w-full mt-1 px-3 py-2 border border-warm-300 rounded-lg text-sm bg-white focus:border-brand-400 focus:outline-none" />
+        </label>
+        <label class="block">
+          <span class="text-xs text-ink-500">Leverage (1-5x)</span>
+          <input type="number" x-model="modalLeverage" min="1" max="5" step="1" class="w-full mt-1 px-3 py-2 border border-warm-300 rounded-lg text-sm bg-white focus:border-brand-400 focus:outline-none" />
+        </label>
+        <label class="block">
+          <span class="text-xs text-ink-500">Stop Loss <span class="text-red-500">*</span> (mandatory)</span>
+          <input type="number" x-model="modalStopLoss" step="0.01" placeholder="Price" class="w-full mt-1 px-3 py-2 border border-warm-300 rounded-lg text-sm bg-white focus:border-brand-400 focus:outline-none" />
+        </label>
+      </div>
+
+      <div x-show="modalError" class="mt-2 text-xs text-red-600" x-text="modalError"></div>
+
+      <div class="flex gap-2 mt-4">
+        <button @click="modalOpen = false" class="flex-1 py-2 bg-warm-200 text-ink-600 rounded-lg text-sm font-medium hover:bg-warm-300">Cancel</button>
+        <button @click="confirmTrade()" :disabled="modalLoading || !modalSize || !modalStopLoss"
+          class="flex-1 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+          :class="modalSide === 'long' ? 'bg-green-500 hover:bg-green-600' : 'bg-red-500 hover:bg-red-600'">
+          <span x-show="!modalLoading">Confirm</span>
+          <span x-show="modalLoading">Processing...</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function hyperApp() {
+  return {
+    selectedWalletId: null,
+    arbWallets: [],
+    account: { accountValue: 0, unrealizedPnl: 0, marginUsedPct: 0, available: 0 },
+    positions: [],
+    funding: [],
+    markets: [
+      { asset: 'BTC', markPrice: 0, change24h: 0, fundingRate: 0, openInterest: 0, volume24h: 0 },
+      { asset: 'ETH', markPrice: 0, change24h: 0, fundingRate: 0, openInterest: 0, volume24h: 0 },
+      { asset: 'SOL', markPrice: 0, change24h: 0, fundingRate: 0, openInterest: 0, volume24h: 0 },
+    ],
+    history: [],
+    modalOpen: false,
+    modalSide: 'long',
+    modalMarket: null,
+    modalSize: '',
+    modalLeverage: 3,
+    modalStopLoss: '',
+    modalError: '',
+    modalLoading: false,
+
+    async init() {
+      await this.loadWallets();
+      if (this.selectedWalletId) await this.loadAll();
+    },
+
+    async loadWallets() {
+      try {
+        const relays = await fetch('/api/agent/profile').then(r => r.json());
+        const wallets = [];
+        for (const r of (relays || [])) {
+          try {
+            const w = await fetch('/api/relay/' + r.id + '/wallets').then(rr => rr.json());
+            for (const c of (w.chains || [])) {
+              if (c.chain === 'arbitrum') wallets.push({ id: c.id, name: r.name, address: c.address });
+            }
+          } catch {}
+        }
+        this.arbWallets = wallets;
+        if (wallets.length > 0 && !this.selectedWalletId) this.selectedWalletId = wallets[0].id;
+      } catch {}
+    },
+
+    async loadAll() {
+      if (!this.selectedWalletId) return;
+      try {
+        const d = await fetch('/api/defi/hyperliquid/status?walletId=' + this.selectedWalletId).then(r => r.json());
+        if (d.ok) {
+          this.account = d.account || this.account;
+          this.positions = d.positions || [];
+          this.funding = d.funding || [];
+        }
+      } catch {}
+    },
+
+    openTrade(side, market) {
+      this.modalSide = side;
+      this.modalMarket = market;
+      this.modalSize = '';
+      this.modalStopLoss = '';
+      this.modalError = '';
+      this.modalOpen = true;
+    },
+
+    async confirmTrade() {
+      if (!this.modalSize || !this.modalStopLoss || !this.selectedWalletId) return;
+      this.modalLoading = true;
+      this.modalError = '';
+      try {
+        const r = await fetch('/api/defi/hyperliquid/order', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            walletId: this.selectedWalletId,
+            asset: this.modalMarket.asset,
+            side: this.modalSide,
+            size: this.modalSize,
+            leverage: parseInt(this.modalLeverage),
+            stopLoss: this.modalStopLoss,
+            type: 'market',
+          }),
+        });
+        const d = await r.json();
+        if (d.ok) {
+          alert('Order placed!');
+          this.modalOpen = false;
+          await this.loadAll();
+        } else {
+          this.modalError = d.error || 'Order failed';
+        }
+      } catch (e) {
+        this.modalError = e.message;
+      } finally {
+        this.modalLoading = false;
+      }
+    },
+
+    async closePosition(asset) {
+      if (!confirm('Close ' + asset + ' position?')) return;
+      try {
+        const r = await fetch('/api/defi/hyperliquid/close', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ walletId: this.selectedWalletId, asset }),
+        });
+        const d = await r.json();
+        if (d.ok) { alert('Closed!'); await this.loadAll(); }
+        else alert('Error: ' + (d.error || 'Unknown'));
+      } catch (e) { alert('Error: ' + e.message); }
+    },
+  };
+}
+</script>
+
+<%~ include('partials/page-close', it) %>
