@@ -9,6 +9,7 @@
 import { sqlite } from '../db/client.js';
 import { processAccept, processCancel, processManualConfirm, processPaymentSubmit, processDispute, expireStale } from '../services/exchange-machine.js';
 import { executeHedge } from '../services/trade-protocol-filter.js';
+import { recordChainEvent } from '../services/chain-event.js';
 
 export async function registerExchangeRoutes(fastify) {
 
@@ -200,6 +201,42 @@ export async function registerExchangeRoutes(fastify) {
       }
     }
 
+    // ── 事前余额校验（EVM give assets）──
+    // For KAS, fund-lock below handles it. For USDT/USDC on EVM chains, check we actually have it.
+    if (give_asset !== 'KAS' && give_chain) {
+      try {
+        const walletsRes = await fetch(
+          `http://127.0.0.1:${process.env.PORT || 3100}/api/relay/${relayNodeId}/wallets`,
+          { signal: AbortSignal.timeout(8000) }
+        ).then(r => r.json()).catch(() => null);
+        const chains = walletsRes?.chains || [];
+        const chainWallet = chains.find(c => c.chain === give_chain);
+        if (!chainWallet) {
+          return reply.code(400).send({
+            error: `No ${give_chain} wallet for this agent`,
+            give_asset, give_chain,
+          });
+        }
+        const assetKey = give_asset.toLowerCase();
+        const balanceField = assetKey === 'usdt' ? 'usdtBalance'
+                           : assetKey === 'usdc' ? 'usdcBalance'
+                           : null;
+        if (balanceField) {
+          const have = parseFloat(chainWallet[balanceField] || 0);
+          const need = parseFloat(give_amount);
+          if (have < need) {
+            return reply.code(400).send({
+              error: `余额不足：${give_chain} 钱包只有 ${have.toFixed(4)} ${give_asset.toUpperCase()}，挂单需要 ${need}`,
+              have, need, give_asset, give_chain,
+              address: chainWallet.address,
+            });
+          }
+        }
+      } catch (e) {
+        console.log(`[exchange] pre-publish balance check skipped (non-fatal): ${e.message}`);
+      }
+    }
+
     // Fund lock: lock KAS before broadcast (prevent oversell)
     if (give_asset === 'KAS') {
       try {
@@ -306,6 +343,85 @@ export async function registerExchangeRoutes(fastify) {
     const relay = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(relayNodeId);
     const takerAddr = relay?.address || relayNodeId;
 
+    // ── 事前余额校验（taker pay capacity）──
+    // Taker needs to pay offer.want_asset (amount = offer.want_amount) on the chosen chain.
+    // For cross-chain offers, selected_chain is required (already validated above).
+    // For KAS want_asset, check local kaspa balance.
+    const wantAssetUp = (offer.want_asset || '').toUpperCase();
+    if (wantAssetUp === 'KAS') {
+      try {
+        const balRes = await fetch(
+          `http://127.0.0.1:${process.env.PORT || 3100}/api/relay/${relayNodeId}/balance`,
+          { signal: AbortSignal.timeout(5000) }
+        ).then(r => r.json()).catch(() => null);
+        const kasBal = parseFloat(balRes?.balance || 0);
+        const need = parseFloat(offer.want_amount);
+        if (kasBal < need) {
+          return reply.code(400).send({
+            error: `余额不足：你的 KAS 钱包只有 ${kasBal.toFixed(2)} KAS，接单需支付 ${need} KAS`,
+            have: kasBal, need,
+          });
+        }
+      } catch (e) {
+        console.log(`[exchange] pre-accept KAS balance check skipped (non-fatal): ${e.message}`);
+      }
+    } else if (selected_chain && ['usdt', 'usdc'].includes(wantAssetUp.toLowerCase())) {
+      // EVM / multi-chain want_asset
+      try {
+        const walletsRes = await fetch(
+          `http://127.0.0.1:${process.env.PORT || 3100}/api/relay/${relayNodeId}/wallets`,
+          { signal: AbortSignal.timeout(8000) }
+        ).then(r => r.json()).catch(() => null);
+        const chains = walletsRes?.chains || [];
+        const chainWallet = chains.find(c => c.chain === selected_chain);
+        if (!chainWallet) {
+          return reply.code(400).send({
+            error: `你没有 ${selected_chain} 钱包，无法通过此链支付`,
+            selected_chain,
+          });
+        }
+        const balanceField = wantAssetUp === 'USDT' ? 'usdtBalance' : 'usdcBalance';
+        const have = parseFloat(chainWallet[balanceField] || 0);
+        const need = parseFloat(offer.want_amount);
+        if (have < need) {
+          return reply.code(400).send({
+            error: `余额不足：你的 ${selected_chain} 钱包只有 ${have.toFixed(4)} ${wantAssetUp}，接单需支付 ${need}`,
+            have, need, selected_chain,
+            address: chainWallet.address,
+          });
+        }
+      } catch (e) {
+        console.log(`[exchange] pre-accept EVM balance check skipped (non-fatal): ${e.message}`);
+      }
+    }
+
+    // ── Reputation check on maker (non-blocking for manual accept) ──
+    // Unlike autoTaker which hard-blocks, manual accept proceeds but returns warning.
+    // UI should surface the warning if present.
+    let reputationWarning = null;
+    try {
+      const { assessReputation } = await import('../services/reputation.js');
+      const rep = assessReputation(takerAddr, offer.maker);
+      if (rep.risk === 'high') {
+        reputationWarning = {
+          level: 'high',
+          summary: rep.summary,
+          warnings: rep.warnings,
+          message: `⚠ 高风险对手方：${rep.warnings.join('；')}`,
+        };
+        console.log(`[exchange] manual accept on HIGH-risk maker ${offer.maker.slice(-12)} — ${rep.warnings.join(';')}`);
+      } else if (rep.risk === 'medium') {
+        reputationWarning = {
+          level: 'medium',
+          summary: rep.summary,
+          warnings: rep.warnings,
+          message: `注意：${rep.warnings.join('；')}`,
+        };
+      }
+    } catch (e) {
+      console.error(`[exchange] reputation check error: ${e.message}`);
+    }
+
     // Re-read offer for broadcast message (taker_payment_address already written above)
     const offerForBcast = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer_id);
 
@@ -381,7 +497,21 @@ export async function registerExchangeRoutes(fastify) {
       }
     }
 
-    return reply.send({ ok: true, offer_id, status: result.protocol_status, accept_tx: acceptTx });
+    return reply.send({ ok: true, offer_id, status: result.protocol_status, accept_tx: acceptTx, reputationWarning });
+  });
+
+  // ── GET /api/exchange/peer-reputation?peer=... — 查询对手方信誉（供 UI badge）──
+  fastify.get('/api/exchange/peer-reputation', async (request, reply) => {
+    const { peer, from } = request.query;
+    if (!peer) return reply.code(400).send({ error: 'peer required' });
+    try {
+      const { assessReputation } = await import('../services/reputation.js');
+      // 'from' 是查询者 (my) 地址；可选。没有 from 也能给出基本信誉（只是缺 mutual 历史）
+      const rep = assessReputation(from || null, peer);
+      return reply.send({ ok: true, reputation: rep });
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
   });
 
   // ── POST /api/exchange/cancel — 取消报价 ─────────────────
@@ -517,6 +647,132 @@ export async function registerExchangeRoutes(fastify) {
 
     if (result.error) return reply.code(400).send(result);
     return reply.send(result);
+  });
+
+  // ── POST /api/exchange/resolve — 裁决争议 ─────────────────
+  //
+  // Phase 1 stress test S10 confirmed this endpoint was missing — disputed offers
+  // were stuck forever with no code path back to terminal state. This implementation
+  // is v1: local party (maker or taker) can resolve; future versions may add arbiter.
+  //
+  // Outcome enum:
+  //   - maker_wins  → offer moves to 'completed', fund_lock stays spent (or is marked spent)
+  //   - taker_wins  → offer moves to 'cancelled', fund_lock released back to maker
+  //   - split       → NOT YET SUPPORTED (returns 501)
+  fastify.post('/api/exchange/resolve', async (request, reply) => {
+    const { relayNodeId, offer_id, outcome, reason, channel = 'kanet-exchange' } = request.body || {};
+    if (!offer_id || !outcome) return reply.code(400).send({ error: 'offer_id and outcome required' });
+
+    const VALID_OUTCOMES = ['maker_wins', 'taker_wins'];
+    if (outcome === 'split') return reply.code(501).send({ error: 'split outcome not yet implemented' });
+    if (!VALID_OUTCOMES.includes(outcome)) {
+      return reply.code(400).send({ error: `invalid outcome, must be one of: ${VALID_OUTCOMES.join(', ')}` });
+    }
+
+    const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer_id);
+    if (!offer) return reply.code(404).send({ error: 'Offer not found' });
+    if (offer.protocol_status !== 'disputed') {
+      return reply.code(400).send({ error: `Offer is ${offer.protocol_status}, not disputed (cannot resolve)` });
+    }
+
+    const relay = relayNodeId
+      ? sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(relayNodeId)
+      : null;
+    if (!relay) return reply.code(403).send({ error: 'relayNodeId required' });
+
+    // Permission: only maker or taker can resolve (no third-party arbiter yet)
+    if (relay.address !== offer.maker && relay.address !== offer.taker) {
+      return reply.code(403).send({ error: 'Only offer maker or taker can resolve dispute' });
+    }
+
+    // === NO TX NO STATE CHANGE: broadcast resolve first ===
+    let resolveTx = null;
+    const { sendCommandAsync } = await import('../services/relay-manager.js');
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const res = await sendCommandAsync(relayNodeId, {
+          type: 'send_broadcast',
+          channel,
+          message: JSON.stringify({
+            t: 'kanet_exchange_resolve_v1',
+            offer_id,
+            outcome,
+            resolver: relay.address,
+            reason: reason || null,
+          }),
+        });
+        resolveTx = res?.txId || null;
+        if (resolveTx) break;
+      } catch (err) {
+        console.error(`[exchange] Resolve broadcast attempt ${attempt}/3: ${err.message}`);
+      }
+      if (attempt < 3) await new Promise(r => setTimeout(r, 300 * attempt));
+    }
+    if (!resolveTx) {
+      return reply.code(503).send({ error: 'Resolve broadcast failed — state unchanged' });
+    }
+
+    // Broadcast on chain → advance state locally (other nodes will sync via protocol filter)
+    try {
+      const { transition } = await import('../services/exchange-machine.js');
+      // Need to allow disputed → completed/cancelled. Check VALID_TRANSITIONS in exchange-machine.js.
+      // disputed is terminal per TERMINAL set, so we need direct SQL update + event recording.
+      const now = new Date().toISOString();
+      const newStatus = outcome === 'maker_wins' ? 'completed' : 'cancelled';
+
+      // Direct SQL because disputed is terminal — transition() would refuse.
+      sqlite.prepare(`
+        UPDATE exchange_offers
+        SET protocol_status = ?, updated_at = ?,
+            verification_meta = json_patch(COALESCE(verification_meta, '{}'), ?)
+        WHERE id = ?
+      `).run(newStatus, now, JSON.stringify({
+        resolved_at: now,
+        resolve_outcome: outcome,
+        resolve_reason: reason || null,
+        resolved_by: relay.address,
+        resolve_tx: resolveTx,
+      }), offer_id);
+
+      // Fund lock resolution
+      const { releaseFunds, spendFunds } = await import('../services/fund-lock.js');
+      if (outcome === 'maker_wins') {
+        // Maker delivered (allegedly); mark locked funds as spent
+        try { spendFunds(offer_id); } catch (e) { console.error(`[resolve] spendFunds: ${e.message}`); }
+      } else {
+        // Taker wins — refund maker's locked funds
+        try { releaseFunds(offer_id); } catch (e) { console.error(`[resolve] releaseFunds: ${e.message}`); }
+      }
+
+      // Audit event
+      recordChainEvent({
+        txid: resolveTx,
+        eventType: 'exchange_resolved',
+        fromAddress: relay.address,
+        toAddress: newStatus === 'completed' ? offer.taker : offer.maker,
+        payload: JSON.stringify({
+          offer_id,
+          outcome,
+          from_status: 'disputed',
+          to_status: newStatus,
+          resolver: relay.address,
+          reason: reason || null,
+        }),
+      });
+
+      console.log(`[exchange] offer ${offer_id.slice(0, 8)} disputed → ${newStatus} (outcome=${outcome}, resolver=${relay.address.slice(-12)})`);
+
+      return reply.send({
+        ok: true,
+        offer_id,
+        outcome,
+        new_status: newStatus,
+        resolve_tx: resolveTx,
+      });
+    } catch (err) {
+      console.error(`[exchange] resolve state update error: ${err.message}`);
+      return reply.code(500).send({ error: err.message, resolve_tx: resolveTx });
+    }
   });
 
   // ── GET /api/exchange/agents — 可用 Agent 列表 ───────────

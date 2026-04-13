@@ -1805,5 +1805,71 @@ export function runMigrations() {
     }
   }
 
+  // v58: agent_connections 加 signing_key_enc — 为 EIP-712 订单签名保存 EVM 私钥
+  // aevo-client.js 从 day one 就引用了这个字段但 schema 里从没创建过，
+  // loadCredentials() 一调就报错 "no such column"，因此 createOrder() 实际从没跑过。
+  {
+    const cols = sqlite.prepare('PRAGMA table_info(agent_connections)').all().map(c => c.name);
+    if (!cols.includes('signing_key_enc')) {
+      sqlite.exec('ALTER TABLE agent_connections ADD COLUMN signing_key_enc TEXT');
+      console.log('[migrate] v58: agent_connections.signing_key_enc added (unblocks Aevo credential storage)');
+    }
+  }
+
+  // v59: backfill stuck fund_locks on completed offers
+  // Phase 1 stress test S9 discovered that handleExchangeDelivered used a direct SQL UPDATE
+  // bypassing transition(), which skipped the spendFunds call. Historical completed offers
+  // therefore have fund_locks permanently stuck at status='locked', accumulating 'phantom lock'
+  // that consumes the maker's available balance.
+  // This migration marks those as 'spent' retroactively.
+  {
+    const stuck = sqlite.prepare(`
+      SELECT fl.id, fl.order_id, fl.amount, fl.asset
+      FROM fund_locks fl
+      JOIN exchange_offers o ON o.id = fl.order_id
+      WHERE fl.status = 'locked' AND o.protocol_status = 'completed'
+    `).all();
+    if (stuck.length > 0) {
+      const now = new Date().toISOString();
+      const upd = sqlite.prepare("UPDATE fund_locks SET status = 'spent', released_at = ? WHERE id = ?");
+      let fixed = 0;
+      for (const row of stuck) {
+        upd.run(now, row.id);
+        fixed++;
+      }
+      console.log(`[migrate] v59: backfilled ${fixed} stuck fund_locks (completed + locked → spent)`);
+    }
+  }
+
+  // v60: kaspa_tx_log — 内嵌 Kaspa TX indexer
+  // Phase 1 stress test S10B 暴露: Kaspa RPC 无 getTransaction，UTXO 查询在 output 被 spend 后
+  // 立即失效，导致真实 TX 验证失败 (f8e70ae1 案例: "TX output not found in recipient UTXOs")。
+  // 方案: Relay 订阅 block-added 事件 → 提取 TX → 对 watched addresses 过滤 → 写入本表。
+  // 验证器改为查本表而不是轮询 RPC UTXO。
+  {
+    const hasTable = sqlite.prepare(
+      "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='kaspa_tx_log'"
+    ).get().cnt;
+    if (!hasTable) {
+      sqlite.exec(`
+        CREATE TABLE kaspa_tx_log (
+          tx_id         TEXT PRIMARY KEY,
+          block_hash    TEXT,
+          block_time    INTEGER,          -- unix timestamp seconds
+          from_address  TEXT,             -- best-guess sender (first input address if known)
+          to_address    TEXT,             -- recipient of matched output
+          amount        REAL,             -- KAS amount to recipient (sompi / 1e8)
+          outputs_json  TEXT,             -- raw outputs array for audit / re-verification
+          observed_at   TEXT NOT NULL,    -- when Relay reported this TX to Console
+          network       TEXT              -- mainnet / testnet
+        );
+        CREATE INDEX idx_kaspa_tx_log_to_address ON kaspa_tx_log(to_address);
+        CREATE INDEX idx_kaspa_tx_log_from_address ON kaspa_tx_log(from_address);
+        CREATE INDEX idx_kaspa_tx_log_block_time ON kaspa_tx_log(block_time);
+      `);
+      console.log('[migrate] v60: kaspa_tx_log table created (embedded TX indexer)');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

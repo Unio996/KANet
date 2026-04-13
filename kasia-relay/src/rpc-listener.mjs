@@ -19,7 +19,7 @@ import { acceptHandshake, sendKaspa, sendMessage } from './chain.mjs';
 import { getAIReply } from './ai.mjs';
 import { routeMessage } from './router.mjs';
 import { loadSeen, saveSeen } from './state.mjs';
-import { ingestMessage, ingestReply, ingestTx, ingestHandshake } from './ingest.mjs';
+import { ingestMessage, ingestReply, ingestTx, ingestHandshake, ingestKaspaTx } from './ingest.mjs';
 
 const { RpcClient, Encoding } = kaspa;
 const Resolver = kaspa.Resolver || null;  // npm ^0.13.0 removed Resolver
@@ -32,6 +32,7 @@ const KASPA_NETWORK = process.env.KASPA_NETWORK || 'mainnet';
 const RECONNECT_BASE_MS      = 5000;
 const RECONNECT_MAX_MS       = 60000;
 const BLOCKLIST_INTERVAL_MS  = 30000;
+const WATCHED_REFRESH_MS     = 60000;    // indexer watched addresses refresh
 const SEEN_FLUSH_INTERVAL_MS = 5000;
 
 // Minimum hex length for any Kasia payload (shortest prefix = "ciph_msg:" in hex)
@@ -62,6 +63,15 @@ let _seenDirty = false;
 let _seenTimer = null;
 
 let _blocklist = new Set();
+
+// ── Embedded Kaspa TX indexer state ──
+// Watched addresses that we should persist to kaspa_tx_log on every block observation.
+// Refreshed periodically from Console /api/indexer/watched-addresses.
+let _watchedAddresses = new Set();
+let _watchedRefreshTimer = null;
+// Dedup for indexed TXs (prevents re-posting the same TX seen in multiple block notifications)
+const _indexedTxs = new Set();
+const INDEXED_MAX = 20000;
 
 // ── Logging ─────────────────────────────────────────────────────────────────
 
@@ -127,6 +137,97 @@ async function refreshBlocklist() {
     );
     if (res.ok) _blocklist = new Set(await res.json());
   } catch {}
+}
+
+async function refreshWatchedAddresses() {
+  if (!CONSOLE_URL) return;
+  try {
+    const res = await fetch(
+      `${CONSOLE_URL}/api/indexer/watched-addresses?network=${KASPA_NETWORK}`,
+      { signal: AbortSignal.timeout(5000) },
+    );
+    if (res.ok) {
+      const data = await res.json();
+      _watchedAddresses = new Set(data.addresses || []);
+      // Always watch our own address too (defense in depth)
+      if (_myAddress) _watchedAddresses.add(_myAddress);
+    }
+  } catch {}
+}
+
+// Parse TX outputs, index any that send to a watched address.
+// Runs BEFORE protocol filter so it's independent of Kasia protocol handling.
+function indexBlockTxs(block) {
+  if (_watchedAddresses.size === 0) return;
+
+  const blockHash = block?.verboseData?.hash || block?.header?.hash || null;
+  const blockTime = block?.header?.timestamp
+    ? Math.floor(Number(block.header.timestamp) / 1000)  // ms → s
+    : Math.floor(Date.now() / 1000);
+
+  const txs = block.transactions || block.body?.transactions || [];
+  for (const tx of txs) {
+    const txId = tx?.verboseData?.transactionId || tx?.id;
+    if (!txId) continue;
+
+    // Dedup: skip if we've already reported this TX
+    if (_indexedTxs.has(txId)) continue;
+
+    const outputs = tx?.outputs || [];
+    if (outputs.length === 0) continue;
+
+    // Find outputs to watched addresses
+    let matchedRecipient = null;
+    let matchedAmountSompi = 0;
+    const outputSummary = [];
+
+    for (const out of outputs) {
+      const addr = out?.verboseData?.scriptPublicKeyAddress;
+      const amountSompi = parseInt(out?.value || '0', 10);
+      if (addr) {
+        outputSummary.push({ address: addr, amount_sompi: amountSompi });
+      }
+      if (addr && _watchedAddresses.has(addr)) {
+        // Sum all outputs to same watched recipient (some TXs split outputs)
+        if (!matchedRecipient) matchedRecipient = addr;
+        if (addr === matchedRecipient) matchedAmountSompi += amountSompi;
+      }
+    }
+
+    if (!matchedRecipient) continue;  // No watched address in outputs → skip
+
+    // Extract best-effort sender from first input
+    let fromAddress = null;
+    const inputs = tx?.inputs || [];
+    for (const inp of inputs) {
+      const addr = inp?.verboseData?.scriptPublicKeyAddress;
+      if (addr) { fromAddress = addr; break; }
+    }
+
+    const amountKas = matchedAmountSompi / 1e8;
+
+    // Fire and forget — ingest.mjs handles backoff on Console failures
+    ingestKaspaTx({
+      txId,
+      blockHash,
+      blockTime,
+      fromAddress,
+      toAddress: matchedRecipient,
+      amount: amountKas,
+      outputs: outputSummary,
+    });
+
+    // Mark indexed so we don't re-report
+    _indexedTxs.add(txId);
+    if (_indexedTxs.size > INDEXED_MAX) {
+      // Drop oldest half (simple eviction)
+      let toDrop = _indexedTxs.size - (INDEXED_MAX / 2);
+      for (const id of _indexedTxs) {
+        if (toDrop-- <= 0) break;
+        _indexedTxs.delete(id);
+      }
+    }
+  }
 }
 
 // ── Connection lifecycle ────────────────────────────────────────────────────
@@ -335,6 +436,11 @@ async function _connect(wallet) {
   await refreshBlocklist();
   _blocklistTimer = setInterval(refreshBlocklist, BLOCKLIST_INTERVAL_MS);
 
+  // Embedded indexer: refresh watched addresses
+  await refreshWatchedAddresses();
+  _watchedRefreshTimer = setInterval(refreshWatchedAddresses, WATCHED_REFRESH_MS);
+  log(`indexer: watching ${_watchedAddresses.size} addresses`);
+
   let blockCount = 0;
   _rpc.addEventListener('block-added', async (event) => {
     blockCount++;
@@ -384,6 +490,7 @@ function _scheduleReconnect(wallet) {
 export async function stopRpcListener() {
   _running = false;
   if (_blocklistTimer) { clearInterval(_blocklistTimer); _blocklistTimer = null; }
+  if (_watchedRefreshTimer) { clearInterval(_watchedRefreshTimer); _watchedRefreshTimer = null; }
   if (_seenTimer) { clearInterval(_seenTimer); _seenTimer = null; }
   flushSeen();
   if (_rpc) { try { await _rpc.disconnect(); } catch {} _rpc = null; }
@@ -395,6 +502,15 @@ export async function stopRpcListener() {
 async function handleBlock(event) {
   const block = event?.data?.block;
   if (!block) return;
+
+  // Embedded Kaspa TX indexer: record watched-address TXs BEFORE protocol filtering.
+  // This is independent of protocol payload — we want to track all value transfers
+  // to/from our Agents for later verification, not just Kasia messages.
+  try {
+    indexBlockTxs(block);
+  } catch (err) {
+    log('ERROR in indexBlockTxs:', err?.message || err);
+  }
 
   const transactions = block.transactions || block.body?.transactions || [];
 

@@ -16,7 +16,7 @@ import { getVerifier } from './exchange-verifiers.js';
 import { createExecution, completeExecution } from './execution-state.js';
 import { recordChainEvent } from './chain-event.js';
 import { executeHedge } from './trade-protocol-filter.js';
-import { releaseFunds } from './fund-lock.js';
+import { releaseFunds, spendFunds } from './fund-lock.js';
 import crypto from 'crypto';
 
 // ── Valid Transitions ─────────────────────────────────────────
@@ -76,12 +76,18 @@ export function transition(offerId, newStatus, extra = {}) {
     vals.push(now);
   }
 
-  // Terminal states → is_fully_observed = true + release fund locks
+  // Terminal states → is_fully_observed = true + fund lock resolution
+  // IMPORTANT: both paths must run for ANY terminal transition. handleExchangeDelivered
+  // in trade-protocol-filter.js used to bypass transition() with direct SQL UPDATE,
+  // which caused fund_lock leaks on completed. See Phase 1 stress test S9 finding.
   if (TERMINAL.has(newStatus)) {
     updates.push('is_fully_observed = 1');
-    // Release fund locks on cancel/expire/dispute/timed_out (not completed — completed uses spendFunds after KAS delivery)
-    if (newStatus !== 'completed') {
-      try { releaseFunds(offerId); } catch {}
+    if (newStatus === 'completed') {
+      // Delivery completed → mark funds as spent (idempotent; safe to call twice)
+      try { spendFunds(offerId); } catch (e) { console.error(`[exchange-machine] spendFunds error: ${e.message}`); }
+    } else {
+      // Cancel/expire/dispute/timed_out/failed → release fund locks
+      try { releaseFunds(offerId); } catch (e) { console.error(`[exchange-machine] releaseFunds error: ${e.message}`); }
     }
   }
 

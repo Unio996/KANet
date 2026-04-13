@@ -11,19 +11,84 @@
         <div class="text-[10px] text-ink-400">On-chain options with Greeks & IV analytics</div>
       </div>
     </div>
-    <div class="flex items-center gap-4 text-xs">
-      <div class="flex items-center gap-1.5">
-        <span class="text-ink-400">Agent:</span>
-        <select x-model="selectedAgentId" @change="loadAll()" class="pl-2 pr-6 py-1 border border-warm-200 rounded text-xs bg-white">
-          <template x-for="a in agents" :key="a.id">
-            <option :value="a.id" x-text="a.name"></option>
-          </template>
-        </select>
-      </div>
+    <div class="flex items-center gap-3 text-xs">
+      <button @click="analyze()" :disabled="analyzeLoading"
+              class="px-3 py-1 border border-warm-300 rounded text-[11px] text-ink-600 hover:bg-warm-50 disabled:opacity-40">
+        <span x-show="!analyzeLoading">分析</span>
+        <span x-show="analyzeLoading">分析中...</span>
+      </button>
       <button @click="loadAll()" class="text-brand-500 hover:text-brand-700 flex items-center gap-1">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-        Refresh
+        刷新
       </button>
+    </div>
+  </div>
+
+  <!-- ═══ 连接条 ═══ -->
+  <div class="flex-shrink-0 border-b border-warm-200 px-5 py-2.5"
+       :class="connectionStatus === 'connected' ? 'bg-gradient-to-r from-green-50 to-emerald-50' : 'bg-gradient-to-r from-amber-50 to-orange-50'">
+    <div class="flex items-center justify-between">
+      <!-- 未连接 Aevo API -->
+      <template x-if="connectionStatus !== 'connected'">
+        <div class="flex items-center gap-3">
+          <div class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div>
+          <span class="text-xs font-medium text-amber-800">未配置 Aevo API 凭证</span>
+          <span class="text-[11px] text-amber-600">需要 API Key + API Secret + Signing Key 才能下单</span>
+        </div>
+      </template>
+      <!-- 已连接 -->
+      <template x-if="connectionStatus === 'connected'">
+        <div class="flex items-center gap-4 text-xs">
+          <div class="flex items-center gap-2">
+            <div class="w-2 h-2 rounded-full bg-green-500"></div>
+            <span class="font-semibold text-green-800">已连接 Aevo</span>
+          </div>
+          <div class="text-ink-600">
+            <span x-text="currentAgent?.name"></span>
+            <span class="font-mono text-ink-400" x-text="' · API ' + connectionApiKeyMasked"></span>
+          </div>
+          <div class="flex items-center gap-2 text-[11px]">
+            <div class="bg-white border border-warm-200 rounded px-2 py-0.5">
+              <span class="text-[9px] text-ink-400 uppercase">Equity</span>
+              <span class="ml-1 font-semibold tabular-nums" x-text="'$' + (account.equity || 0).toFixed(2)"></span>
+            </div>
+            <div class="bg-white border border-warm-200 rounded px-2 py-0.5">
+              <span class="text-[9px] text-ink-400 uppercase">Available</span>
+              <span class="ml-1 font-semibold tabular-nums" x-text="'$' + (account.available || 0).toFixed(2)"></span>
+            </div>
+            <div class="bg-white border border-warm-200 rounded px-2 py-0.5">
+              <span class="text-[9px] text-ink-400 uppercase">Margin</span>
+              <span class="ml-1 font-semibold tabular-nums" x-text="(account.marginPct || 0).toFixed(0) + '%'"></span>
+            </div>
+            <div class="bg-white border border-warm-200 rounded px-2 py-0.5">
+              <span class="text-[9px] text-ink-400 uppercase">Δ</span>
+              <span class="ml-1 font-semibold tabular-nums" x-text="(account.portfolioGreeks?.delta || 0).toFixed(2)"></span>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- Agent 选择 + 动作 -->
+      <div class="flex items-center gap-2">
+        <div class="flex items-center gap-1.5">
+          <span class="text-[11px] text-ink-400">Agent:</span>
+          <select x-model="selectedAgentId" @change="onAgentChange()" class="pl-2 pr-6 py-1 border border-warm-200 rounded text-[11px] bg-white">
+            <template x-for="a in agents" :key="a.id">
+              <option :value="a.id" x-text="a.name"></option>
+            </template>
+          </select>
+        </div>
+        <template x-if="connectionStatus !== 'connected'">
+          <button @click="openCredentials()" class="px-3 py-1 bg-green-500 text-white rounded text-[11px] font-medium hover:bg-green-600">
+            🔌 配置凭证
+          </button>
+        </template>
+        <template x-if="connectionStatus === 'connected'">
+          <button @click="disconnect()" class="px-3 py-1 bg-white border border-warm-300 text-ink-600 rounded text-[11px] font-medium hover:bg-warm-50">
+            断开
+          </button>
+        </template>
+      </div>
     </div>
   </div>
 
@@ -222,6 +287,138 @@
     </div>
   </div>
 
+  <!-- ═══ Aevo 凭证配置弹窗 ═══ -->
+  <div x-show="credentialsOpen" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" @click.self="credentialsOpen = false">
+    <div class="bg-white rounded-xl shadow-2xl p-6 w-[480px]" @click.stop>
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-base font-semibold text-ink-700">配置 Aevo 凭证</h3>
+        <button @click="credentialsOpen = false" class="text-ink-400 hover:text-ink-600 text-2xl leading-none">&times;</button>
+      </div>
+
+      <div class="bg-amber-50 border border-amber-200 rounded p-3 mb-4 text-[11px] text-amber-800">
+        ⚠ 凭证会加密存储在本地 KANet 数据库（agent_connections 表）。<br/>
+        获取方法：登录 <a href="https://app.aevo.xyz" target="_blank" class="underline">app.aevo.xyz</a> → Settings → API Keys → Create New Key
+      </div>
+
+      <div class="space-y-3">
+        <label class="block">
+          <span class="text-xs text-ink-500">API Key</span>
+          <input type="text" x-model="credApiKey" placeholder="Aevo API Key"
+                 class="w-full mt-1 px-3 py-2 border border-warm-300 rounded-lg text-sm bg-white focus:border-brand-400 focus:outline-none font-mono" />
+        </label>
+        <label class="block">
+          <span class="text-xs text-ink-500">API Secret</span>
+          <input type="password" x-model="credApiSecret" placeholder="Aevo API Secret"
+                 class="w-full mt-1 px-3 py-2 border border-warm-300 rounded-lg text-sm bg-white focus:border-brand-400 focus:outline-none font-mono" />
+        </label>
+        <label class="block">
+          <span class="text-xs text-ink-500">
+            Signing Key <span class="text-ink-400">（用于 EIP-712 订单签名）</span>
+          </span>
+          <input type="password" x-model="credSigningKey" placeholder="0x... EVM 私钥，必须与 API 注册时同一地址"
+                 class="w-full mt-1 px-3 py-2 border border-warm-300 rounded-lg text-sm bg-white focus:border-brand-400 focus:outline-none font-mono" />
+        </label>
+      </div>
+
+      <div x-show="credError" class="mt-2 text-xs text-red-600" x-text="credError"></div>
+
+      <div class="flex gap-2 mt-4">
+        <button @click="credentialsOpen = false" class="flex-1 py-2 bg-warm-200 text-ink-600 rounded-lg text-sm font-medium hover:bg-warm-300">取消</button>
+        <button @click="saveCredentials()" :disabled="credSaving || !credApiKey || !credApiSecret"
+                class="flex-1 py-2 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600 disabled:opacity-40">
+          <span x-show="!credSaving">保存并连接</span>
+          <span x-show="credSaving">保存中...</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 分析弹窗 ═══ -->
+  <div x-show="analyzeOpen" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" @click.self="analyzeOpen = false">
+    <div class="bg-white rounded-xl shadow-2xl p-6 w-[520px] max-h-[85vh] overflow-y-auto" @click.stop>
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h3 class="text-base font-semibold text-ink-700">
+            <span x-text="underlying"></span> 期权策略分析
+          </h3>
+          <div class="text-[10px] text-ink-400 mt-0.5" x-text="analyzeAgent ? '由 ' + analyzeAgent + ' 本地模型分析' : '准备中…'"></div>
+        </div>
+        <button @click="analyzeOpen = false" class="text-ink-400 hover:text-ink-600 text-2xl leading-none">&times;</button>
+      </div>
+
+      <div x-show="analyzeLoading" class="py-8 text-center">
+        <svg class="animate-spin w-8 h-8 mx-auto mb-3 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="3" opacity="0.3"/><path d="M12 2 A10 10 0 0 1 22 12" stroke-width="3" stroke-linecap="round"/></svg>
+        <div class="text-xs text-ink-500">拉取期权链 + Hyperliquid 跨市场分析...</div>
+      </div>
+
+      <div x-show="!analyzeLoading && analyzeError" class="py-4 text-xs text-red-600" x-text="analyzeError"></div>
+
+      <div x-show="!analyzeLoading && analyzeResult" class="space-y-4">
+        <div class="rounded-lg p-4"
+             :class="analyzeResult?.assessment === 'opportunity' ? 'bg-gradient-to-br from-green-50 to-emerald-100' :
+                     analyzeResult?.assessment === 'neutral' ? 'bg-gradient-to-br from-blue-50 to-cyan-100' :
+                     'bg-gradient-to-br from-amber-50 to-orange-100'">
+          <div class="flex items-center justify-between mb-2">
+            <div>
+              <div class="text-[10px] uppercase tracking-wider opacity-60">评估</div>
+              <div class="text-xl font-bold"
+                   :class="analyzeResult?.assessment === 'opportunity' ? 'text-green-700' :
+                           analyzeResult?.assessment === 'neutral' ? 'text-blue-700' : 'text-amber-700'"
+                   x-text="analyzeResult?.assessment?.toUpperCase() || '—'"></div>
+            </div>
+            <div class="text-right">
+              <div class="text-[10px] uppercase tracking-wider opacity-60">Mark</div>
+              <div class="text-xl font-bold tabular-nums" x-text="'$' + (analyzeIntel?.markPrice || 0).toFixed(2)"></div>
+            </div>
+          </div>
+          <div class="text-xs text-ink-700" x-text="analyzeResult?.summary"></div>
+        </div>
+
+        <div x-show="analyzeResult?.strategy" class="bg-white border border-warm-200 rounded p-3">
+          <div class="text-[10px] text-ink-500 uppercase tracking-wider font-semibold mb-2">建议策略</div>
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-sm font-semibold text-ink-700" x-text="analyzeResult?.strategy?.type?.toUpperCase().replace(/_/g,' ')"></span>
+          </div>
+          <div class="text-[11px] font-mono text-ink-500 mb-1" x-text="analyzeResult?.strategy?.instrument"></div>
+          <div class="text-[11px] text-ink-600" x-text="analyzeResult?.strategy?.reasoning"></div>
+        </div>
+
+        <div x-show="analyzeResult?.greeks" class="bg-warm-50 rounded p-2.5 text-xs text-ink-700">
+          <span class="font-semibold text-ink-500">Greeks 解读: </span>
+          <span x-text="analyzeResult?.greeks"></span>
+        </div>
+
+        <div x-show="analyzeResult?.crossMarketSuggestion" class="bg-indigo-50 border border-indigo-100 rounded p-2.5 text-xs">
+          <span class="font-semibold text-indigo-700">🔗 跨市场联动：</span>
+          <span class="text-ink-700" x-text="analyzeResult?.crossMarketSuggestion"></span>
+        </div>
+
+        <div x-show="analyzeResult?.risks?.length">
+          <div class="text-[10px] text-ink-500 uppercase tracking-wider font-semibold mb-1">⚠ 风险</div>
+          <ul class="space-y-0.5">
+            <template x-for="r in (analyzeResult?.risks || [])">
+              <li class="text-xs text-ink-700 flex gap-1.5"><span class="text-amber-500">•</span><span x-text="r"></span></li>
+            </template>
+          </ul>
+        </div>
+
+        <div x-show="analyzeIntel" class="text-[10px] text-ink-400 bg-warm-50 rounded p-2 space-y-0.5">
+          <div><span class="font-semibold text-ink-500">数据源：</span></div>
+          <div>Aevo 期权: <span x-text="analyzeIntel?.asset"></span>, 最近到期 <span x-text="analyzeIntel?.nearestExpiry || '—'"></span>, 候选 <span x-text="analyzeIntel?.optionsShown"></span> 个</div>
+          <div x-show="analyzeIntel?.hl">
+            HL: 账户 $<span x-text="(analyzeIntel?.hl?.accountValue || 0).toFixed(2)"></span>, 保证金 <span x-text="(analyzeIntel?.hl?.marginPct || 0).toFixed(0)"></span>%,
+            <span x-show="analyzeIntel?.hl?.positionOnAsset">该标的持仓: <span x-text="analyzeIntel?.hl?.positionOnAsset?.side"></span> <span x-text="analyzeIntel?.hl?.positionOnAsset?.size"></span></span>
+            <span x-show="!analyzeIntel?.hl?.positionOnAsset">该标的无 HL 持仓</span>
+          </div>
+        </div>
+
+        <button @click="analyzeOpen = false" class="w-full py-2 bg-warm-200 text-ink-600 rounded-lg text-sm font-medium hover:bg-warm-300">关闭</button>
+      </div>
+
+      <div x-show="!analyzeLoading && !analyzeResult && analyzeRaw" class="bg-warm-50 rounded p-3 text-xs text-ink-700 whitespace-pre-wrap" x-text="analyzeRaw"></div>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -229,6 +426,15 @@ function aevoApp() {
   return {
     selectedAgentId: null,
     agents: [],
+    // Connection state
+    connectionStatus: 'disconnected',  // 'disconnected' | 'connected'
+    connectionApiKeyMasked: '',
+    credentialsOpen: false,
+    credApiKey: '',
+    credApiSecret: '',
+    credSigningKey: '',
+    credSaving: false,
+    credError: '',
     account: { equity: 0, available: 0, marginPct: 0, portfolioGreeks: { delta: 0, gamma: 0, theta: 0, vega: 0 } },
     positions: [],
     underlying: 'ETH',
@@ -245,10 +451,25 @@ function aevoApp() {
     modalPrice: '',
     modalError: '',
     modalLoading: false,
+    // Analyze
+    analyzeOpen: false,
+    analyzeLoading: false,
+    analyzeResult: null,
+    analyzeRaw: '',
+    analyzeError: '',
+    analyzeAgent: '',
+    analyzeIntel: null,
+
+    get currentAgent() {
+      return this.agents.find(a => a.id === this.selectedAgentId) || null;
+    },
 
     async init() {
       await this.loadAgents();
-      if (this.selectedAgentId) await this.loadAll();
+      if (this.selectedAgentId) {
+        await this.checkConnection();
+        if (this.connectionStatus === 'connected') await this.loadAll();
+      }
     },
 
     async loadAgents() {
@@ -259,8 +480,83 @@ function aevoApp() {
       } catch {}
     },
 
-    async loadAll() {
+    async onAgentChange() {
+      // Switching agents — re-check connection for the new agent
+      this.account = { equity: 0, available: 0, marginPct: 0, portfolioGreeks: { delta: 0, gamma: 0, theta: 0, vega: 0 } };
+      this.positions = [];
+      this.connectionStatus = 'disconnected';
+      this.connectionApiKeyMasked = '';
+      await this.checkConnection();
+      if (this.connectionStatus === 'connected') await this.loadAll();
+    },
+
+    async checkConnection() {
       if (!this.selectedAgentId) return;
+      try {
+        const r = await fetch('/api/defi/aevo/connection-status?agentId=' + this.selectedAgentId).then(rr => rr.json());
+        if (r.ok && r.connected) {
+          this.connectionStatus = 'connected';
+          this.connectionApiKeyMasked = r.apiKeyMasked || '';
+        } else {
+          this.connectionStatus = 'disconnected';
+          this.connectionApiKeyMasked = '';
+        }
+      } catch {
+        this.connectionStatus = 'disconnected';
+      }
+    },
+
+    openCredentials() {
+      this.credApiKey = '';
+      this.credApiSecret = '';
+      this.credSigningKey = '';
+      this.credError = '';
+      this.credentialsOpen = true;
+    },
+
+    async saveCredentials() {
+      if (!this.credApiKey || !this.credApiSecret || !this.selectedAgentId) return;
+      this.credSaving = true;
+      this.credError = '';
+      try {
+        const r = await fetch('/api/defi/aevo/save-credentials', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            agentId: this.selectedAgentId,
+            apiKey: this.credApiKey,
+            apiSecret: this.credApiSecret,
+            signingKey: this.credSigningKey || null,
+          }),
+        });
+        const d = await r.json();
+        if (d.ok) {
+          this.credentialsOpen = false;
+          await this.checkConnection();
+          if (this.connectionStatus === 'connected') await this.loadAll();
+        } else {
+          this.credError = d.error || '保存失败';
+        }
+      } catch (e) {
+        this.credError = e.message;
+      } finally {
+        this.credSaving = false;
+      }
+    },
+
+    async disconnect() {
+      if (!this.selectedAgentId) return;
+      if (!confirm('确认断开 Aevo 连接？将删除保存的 API 凭证。')) return;
+      try {
+        await fetch('/api/defi/aevo/credentials?agentId=' + this.selectedAgentId, { method: 'DELETE' });
+        this.connectionStatus = 'disconnected';
+        this.connectionApiKeyMasked = '';
+        this.account = { equity: 0, available: 0, marginPct: 0, portfolioGreeks: { delta: 0, gamma: 0, theta: 0, vega: 0 } };
+        this.positions = [];
+      } catch {}
+    },
+
+    async loadAll() {
+      if (!this.selectedAgentId || this.connectionStatus !== 'connected') return;
       try {
         const [acc, pos] = await Promise.allSettled([
           fetch('/api/defi/aevo/account?agentId=' + this.selectedAgentId).then(r => r.json()),
@@ -286,6 +582,36 @@ function aevoApp() {
       this.modalPrice = optType === 'call' ? (side === 'buy' ? strike.callAsk : strike.callBid) : (side === 'buy' ? strike.putAsk : strike.putBid);
       this.modalError = '';
       this.modalOpen = true;
+    },
+
+    async analyze() {
+      if (!this.selectedAgentId) return;
+      this.analyzeLoading = true;
+      this.analyzeResult = null;
+      this.analyzeRaw = '';
+      this.analyzeError = '';
+      this.analyzeAgent = '';
+      this.analyzeIntel = null;
+      this.analyzeOpen = true;
+      try {
+        const r = await fetch('/api/defi/aevo/analyze', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ agentId: this.selectedAgentId, asset: this.underlying }),
+        });
+        const d = await r.json();
+        if (d.ok) {
+          this.analyzeAgent = d.agent || '';
+          this.analyzeIntel = d.intel || null;
+          if (d.parsed) this.analyzeResult = d.parsed;
+          else this.analyzeRaw = d.raw || 'AI 返回了无法解析的内容';
+        } else {
+          this.analyzeError = d.error || '分析失败';
+        }
+      } catch (e) {
+        this.analyzeError = e.message;
+      } finally {
+        this.analyzeLoading = false;
+      }
     },
 
     async confirmOrder() {

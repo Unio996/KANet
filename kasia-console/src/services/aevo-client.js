@@ -119,6 +119,45 @@ async function signOrder(orderData, privateKey) {
   return signature;
 }
 
+// ── Public (unauthenticated) data ────────────────────────────
+
+/**
+ * Fetch Aevo markets without authentication (public endpoint).
+ * Returns PERPs + OPTION instruments for the given underlying.
+ * @param {string} asset - e.g. 'ETH' | 'BTC' | undefined (all)
+ * @returns {Array} list of market instruments
+ */
+export async function getPublicMarkets(asset = null) {
+  const url = asset
+    ? `${API_BASE}/markets?asset=${encodeURIComponent(asset)}`
+    : `${API_BASE}/markets`;
+  const res = await fetch(url, { method: 'GET', headers: { 'Content-Type': 'application/json' } });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`Aevo public markets ${res.status}: ${text.slice(0, 200)}`);
+  const data = JSON.parse(text);
+  const rows = Array.isArray(data) ? data : [];
+  return rows.map(m => ({
+    instrumentId: m.instrument_id,
+    instrumentName: m.instrument_name,
+    type: m.instrument_type,           // 'PERPETUAL' | 'OPTION'
+    underlying: m.underlying_asset,
+    markPrice: parseFloat(m.mark_price || 0),
+    indexPrice: parseFloat(m.index_price || 0),
+    isActive: !!m.is_active,
+    maxLeverage: parseFloat(m.max_leverage || 0),
+    // Option-specific fields (if present)
+    strike: m.strike ? parseFloat(m.strike) : null,
+    optionType: m.option_type || null,  // 'call' | 'put'
+    expiry: m.expiry || null,            // raw nanosecond timestamp
+    expiryDate: m.expiry ? new Date(Math.floor(Number(m.expiry) / 1e6)).toISOString().slice(0, 10) : null,
+    iv: m.greeks?.iv ? parseFloat(m.greeks.iv) : null,
+    delta: m.greeks?.delta ? parseFloat(m.greeks.delta) : null,
+    gamma: m.greeks?.gamma ? parseFloat(m.greeks.gamma) : null,
+    theta: m.greeks?.theta ? parseFloat(m.greeks.theta) : null,
+    vega: m.greeks?.vega ? parseFloat(m.greeks.vega) : null,
+  }));
+}
+
 // ── Margin Safety ────────────────────────────────────────────
 
 /**

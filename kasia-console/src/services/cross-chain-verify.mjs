@@ -116,11 +116,12 @@ export async function verifyCrossChainTx({ txHash, chain, expectedAmount, expect
   }
 
   if (chain === 'kaspa') {
-    // Kaspa TX verification: submitTransaction is synchronous node acceptance.
-    // If we have a txId from sendKaspa, the TX is already accepted by our local RPC node.
-    // Kaspa RPC has NO getTransaction method, and UTXO queries are unreliable (UTXOs may be spent).
-    // Trust the txId — same principle as陷阱 #44 (TX = fact).
-    return { confirmed: true, confirmations: 1, required: 1, actualAmount: expectedAmount || 0, recipient: expectedTo || '', sender: '' };
+    // Kaspa TX verification — uses embedded indexer (kaspa_tx_log) first,
+    // RPC UTXO query as fallback. Previous version was a hardcoded "trust txId"
+    // stub that bypassed all verification (and orphaned _verifyKaspa as dead code).
+    // With the indexer in place (Relay block-added hook), real verification is
+    // cheap and reliable — no reason to short-circuit.
+    return _verifyKaspa({ txHash, expectedAmount, expectedTo, required: 1 });
   }
 
   return { confirmed: false, confirmations: 0, required, actualAmount: 0, recipient: '', sender: '', error: `Unsupported chain: ${chain}` };
@@ -397,18 +398,63 @@ async function _verifyTron({ txHash, expectedAmount, expectedTo, required, asset
 // ── Kaspa ────────────────────────────────────────────────────
 
 async function _verifyKaspa({ txHash, expectedAmount, expectedTo, required }) {
-  // Kaspa TX verification via system's own RPC node (NOT external API)
-  // Uses getWorkingRpc() to get current connected node from DB/health check
-  // Kaspa 10 BPS — TX in block = effectively final
+  // ── Kaspa TX verification — embedded indexer first, RPC UTXO fallback ──
+  //
+  // PRIMARY: query local kaspa_tx_log (populated by Relay block-added hook)
+  //   - Immune to UTXO being spent after receipt
+  //   - Zero RPC round-trip latency
+  //   - Includes historical TXs seen by Relay
+  //
+  // FALLBACK: RPC getUtxosByAddresses (legacy path, kept for transition period)
+  //   - Fires only if indexer has no record (e.g., TX predates indexer install)
+  //
+  // See Phase 1 stress test S10B — "TX output not found in recipient UTXOs" bug.
+  if (!expectedTo) {
+    return { confirmed: false, confirmations: 0, required: 1, actualAmount: 0, recipient: '', sender: '', error: 'expectedTo required for Kaspa verification' };
+  }
+
+  // ── PRIMARY: local indexer lookup ──
+  try {
+    const { sqlite } = await import('../db/client.js');
+    const row = sqlite.prepare(
+      `SELECT tx_id, to_address, amount, from_address, block_time, observed_at
+       FROM kaspa_tx_log
+       WHERE tx_id = ? AND to_address = ?`
+    ).get(txHash, expectedTo);
+
+    if (row) {
+      const actualAmount = parseFloat(row.amount) || 0;
+      const amountOk = !expectedAmount || actualAmount >= expectedAmount * 0.995;
+      if (!amountOk) {
+        return {
+          confirmed: false, confirmations: 1, required: 1, actualAmount,
+          recipient: expectedTo, sender: row.from_address || '',
+          underpayment: true,
+          error: `Underpayment: expected ${expectedAmount} KAS, got ${actualAmount.toFixed(2)}`,
+          source: 'local_indexer',
+        };
+      }
+      return {
+        confirmed: true, confirmations: 1, required: 1, actualAmount,
+        recipient: expectedTo, sender: row.from_address || '',
+        source: 'local_indexer',
+      };
+    }
+    // Not found in indexer → fall through to RPC fallback
+  } catch (err) {
+    console.error(`[verify-kaspa] indexer lookup error: ${err.message} — falling back to RPC`);
+  }
+
+  // ── FALLBACK: RPC UTXO query (legacy path) ──
   try {
     const { getWorkingRpc } = await import('./rpc-health.js');
     const { url: rpcUrl } = await getWorkingRpc();
     if (!rpcUrl) {
-      return { confirmed: false, confirmations: 0, required: 1, actualAmount: 0, recipient: '', sender: '', error: 'No RPC node available' };
+      return { confirmed: false, confirmations: 0, required: 1, actualAmount: 0, recipient: '', sender: '', error: 'No RPC node available and TX not in local indexer' };
     }
 
     const kaspa = await import('kaspa-wasm');
-    const { RpcClient, Encoding } = kaspa;
+    const { RpcClient, Encoding, Address } = kaspa;
     const networkId = process.env.KASPA_NETWORK || 'mainnet';
     const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId });
     await Promise.race([
@@ -416,42 +462,36 @@ async function _verifyKaspa({ txHash, expectedAmount, expectedTo, required }) {
       new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 5000)),
     ]);
 
-    // Query UTXO of recipient to verify they received the amount
-    // This is more reliable than querying TX directly — it checks the RESULT not the intent
-    if (expectedTo) {
-      const { Address } = kaspa;
-      const { entries } = await Promise.race([
-        rpc.getUtxosByAddresses([new Address(expectedTo)]),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('UTXO query timeout')), 5000)),
-      ]);
+    const { entries } = await Promise.race([
+      rpc.getUtxosByAddresses([new Address(expectedTo)]),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('UTXO query timeout')), 5000)),
+    ]);
 
-      // Check if any UTXO came from our TX
-      let actualAmount = 0;
-      for (const entry of (entries || [])) {
-        const outTxId = entry?.outpoint?.transactionId || entry?.entry?.outpoint?.transactionId;
-        if (outTxId === txHash) {
-          const sompi = Number(entry?.utxoEntry?.amount || entry?.entry?.utxoEntry?.amount || 0);
-          actualAmount += sompi / 1e8;
-        }
+    let actualAmount = 0;
+    for (const entry of (entries || [])) {
+      const outTxId = entry?.outpoint?.transactionId || entry?.entry?.outpoint?.transactionId;
+      if (outTxId === txHash) {
+        const sompi = Number(entry?.utxoEntry?.amount || entry?.entry?.utxoEntry?.amount || 0);
+        actualAmount += sompi / 1e8;
       }
-
-      await rpc.disconnect();
-
-      if (actualAmount > 0) {
-        const amountOk = !expectedAmount || actualAmount >= expectedAmount * 0.995;
-        if (!amountOk) {
-          return { confirmed: false, confirmations: 1, required: 1, actualAmount, recipient: expectedTo, sender: '', underpayment: true, error: `Underpayment: expected ${expectedAmount} KAS, got ${actualAmount.toFixed(2)}` };
-        }
-        return { confirmed: true, confirmations: 1, required: 1, actualAmount, recipient: expectedTo, sender: '' };
-      }
-
-      // TX not found in UTXOs — may have been spent already or TX not yet confirmed
-      return { confirmed: false, confirmations: 0, required: 1, actualAmount: 0, recipient: expectedTo, sender: '', error: 'TX output not found in recipient UTXOs' };
     }
 
-    // No expectedTo — cannot verify without knowing recipient
     await rpc.disconnect();
-    return { confirmed: false, confirmations: 0, required: 1, actualAmount: 0, recipient: '', sender: '', error: 'expectedTo required for Kaspa verification' };
+
+    if (actualAmount > 0) {
+      const amountOk = !expectedAmount || actualAmount >= expectedAmount * 0.995;
+      if (!amountOk) {
+        return { confirmed: false, confirmations: 1, required: 1, actualAmount, recipient: expectedTo, sender: '', underpayment: true, error: `Underpayment: expected ${expectedAmount} KAS, got ${actualAmount.toFixed(2)}`, source: 'rpc_fallback' };
+      }
+      return { confirmed: true, confirmations: 1, required: 1, actualAmount, recipient: expectedTo, sender: '', source: 'rpc_fallback' };
+    }
+
+    return {
+      confirmed: false, confirmations: 0, required: 1, actualAmount: 0,
+      recipient: expectedTo, sender: '',
+      error: 'TX output not found in recipient UTXOs (and not in local indexer)',
+      source: 'rpc_fallback',
+    };
   } catch (err) {
     return { confirmed: false, confirmations: 0, required: 1, actualAmount: 0, recipient: '', sender: '', error: `Kaspa RPC error: ${err.message}` };
   }

@@ -512,6 +512,43 @@ async function _evaluateAutoTake(offerId, msg) {
 
   console.log(`[autoTaker] opportunity: ${giveAmt} KAS @ ${offerPrice.toFixed(6)} (${(discount * 100).toFixed(2)}% below market ${marketPrice})`);
 
+  // 10b. ── Reputation gate ──
+  // Wire existing reputation.js into the autoTaker decision path.
+  // Previously isAutoTradeAllowed() existed but was never called.
+  try {
+    const { assessReputation, isAutoTradeAllowed } = await import('./reputation.js');
+    const myAddr = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(bestRelay)?.address;
+    if (myAddr) {
+      const rep = assessReputation(myAddr, msg._from);
+      const gate = isAutoTradeAllowed(rep);
+      if (!gate.allowed) {
+        console.log(`[autoTaker] REPUTATION BLOCK: ${gate.reason} (peer risk=${rep.risk}) — skipping offer ${offerId.slice(0, 8)}`);
+        // Record a chain event so this decision is audit-visible
+        try {
+          const { recordChainEvent } = await import('./chain-event.js');
+          recordChainEvent({
+            txid: 'autotake_rep_block_' + offerId.slice(0, 12),
+            eventType: 'autotake_reputation_block',
+            payload: JSON.stringify({ offer_id: offerId, peer: msg._from, risk: rep.risk, reason: gate.reason, warnings: rep.warnings }),
+          });
+        } catch {}
+        return;
+      }
+      // Medium risk: halve the effective size cap for this trade
+      if (gate.limitMultiplier && gate.limitMultiplier < 1) {
+        const reducedCap = maxUsdt * gate.limitMultiplier;
+        if (wantAmt > reducedCap) {
+          console.log(`[autoTaker] REPUTATION CAP: peer risk=${rep.risk}, effective cap $${reducedCap.toFixed(2)} < wantAmt $${wantAmt} — skipping`);
+          return;
+        }
+        console.log(`[autoTaker] reputation=${rep.risk} — proceeding with ${(gate.limitMultiplier * 100).toFixed(0)}% limit multiplier`);
+      }
+    }
+  } catch (e) {
+    console.error(`[autoTaker] reputation check failed: ${e.message} — proceeding conservatively (block)`);
+    return;  // fail-closed: if rep check errors, don't auto-trade
+  }
+
   // 11. Mode: approval (default) or auto
   const mode = await getConfig('autotake_mode') || 'approval';
   if (mode === 'auto') {
@@ -912,10 +949,21 @@ async function handleExchangeDelivered(msg) {
 
   // Accept from any in-progress state (buyer node may be at matched/verifying/delivering depending on timing)
   // Direct SQL UPDATE — not transition() — because buyer's state may not match seller's state machine sequence
-  sqlite.prepare(`
+  const result = sqlite.prepare(`
     UPDATE exchange_offers SET protocol_status = 'completed', completed_at = datetime('now'), is_fully_observed = 1, updated_at = datetime('now')
     WHERE id = ? AND protocol_status IN ('matched', 'verifying', 'delivering')
   `).run(msg.offer_id);
+
+  // FIX: when the direct UPDATE moves offer to completed, fund_lock must also transition locked → spent.
+  // Without this, Phase 1 stress test S9 showed fund_locks permanently stuck (leak).
+  if (result.changes > 0) {
+    try {
+      const { spendFunds } = await import('./fund-lock.js');
+      spendFunds(msg.offer_id);
+    } catch (e) {
+      console.error(`[exchange] handleExchangeDelivered spendFunds error: ${e.message}`);
+    }
+  }
 
   recordChainEvent({
     txid: msg.delivery_tx,

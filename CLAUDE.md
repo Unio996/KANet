@@ -107,6 +107,18 @@ DATABASE.md 有改动时（新表/删表/加字段），必须同步更新文档
 - 目标反馈机制（cooldown + auto-retire）
 - pending_actions 意图队列（意图与事实分离）
 
+### 4/13 Week 1-2 密集产出
+- **Hyperliquid 真实集成**：SDK 踩 4 坑后跑通，Intel Panel + AI Analyze + Deposit + 连接条，首笔真实合约交易（HYPE LONG → 主动平仓 -$0.45 学费）
+- **Aave/Aevo 收尾**：两页都加分析按钮（本地 Qwen + 跨市场联动，Aave 会看 HL 保证金给建议）+ 连接条。Aevo 10+ 天静默 bug 修复（signing_key_enc 列 v58 补）
+- **声誉通电**：relation_states.classification 5 态 + reputation.js 176 行已存在但从没被调用过，三处接入：autoTaker 硬门禁 / 手动 accept 软警告 / /api/exchange/peer-reputation endpoint
+- **事前余额校验**：exchange publish/accept 双向校验 EVM+KAS，堵住发空单/接空单
+- **Exchange Phase 1 stress test 12/12 全绿**：发现并修复脆弱点 #4 (dispute resolve 缺失) 和 #5 (fund_lock 泄漏)，意外完成 KANet 第 16 笔 completed real E2E 交易
+- **脆弱点 #4 修复**：新 `POST /api/exchange/resolve/:id` 支持 maker_wins/taker_wins outcome，救活卡 2 天 f8e70ae1 dispute
+- **脆弱点 #5 修复**：transition() completed 分支 + handleExchangeDelivered 快捷路径双重 spendFunds，v59 backfill 回填 2 笔卡单
+- **脆弱点 #3 根治 (Week 2 Day 1)**：嵌入式 Kaspa TX indexer，Relay 订阅 block-added 写入 kaspa_tx_log (v60)，verifier 本地优先 RPC 降级。修复意外发现：之前 kaspa 分支是硬编码 `confirmed: true` stub，相当于关闭 Kaspa 验证。现在真正验证生效。
+- **dispute 历史档案**：首次通过 resolve endpoint 把 f8e70ae1 从 disputed 推进到 cancelled，保留完整 meta
+- **窄门定位校准 (Owner 两次纠正)**：先从"集成 HL/Aave/Aevo"校准到"走协议窄门"，再从"只做协议"校准到"协议+完整集成+Agent 自动化三者有机整合"。KANet 占位 = "用 Kaspa 信任链把 AI Agent 连接到社交/购物/交易所有市场，全自动全可审计全链上履历"
+
 ## 启动/停止
 
 ```bash

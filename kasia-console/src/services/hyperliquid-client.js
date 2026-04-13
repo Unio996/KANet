@@ -121,18 +121,43 @@ export async function getFundingRates(privateKey, assets = ['BTC', 'ETH', 'SOL']
   });
 }
 
+// Manual category table — Hyperliquid core perps grouped by theme.
+// Uncategorized assets fall into 'others'.
+const HL_CATEGORIES = {
+  majors: ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'DOGE', 'TRX'],
+  l1s: ['ATOM', 'AVAX', 'DOT', 'NEAR', 'ADA', 'APT', 'SUI', 'SEI', 'TIA', 'INJ', 'KAS', 'FTM', 'ALGO', 'HBAR', 'ICP', 'FLOW', 'ETC', 'LTC', 'BCH', 'FIL', 'TON'],
+  defi: ['AAVE', 'UNI', 'DYDX', 'CRV', 'COMP', 'MKR', 'SNX', 'LDO', 'PENDLE', 'GMX', 'SUSHI', '1INCH', 'BAL', 'RDNT', 'JUP', 'CAKE', 'ENA', 'ETHFI', 'FXS', 'YFI'],
+  ai: ['FET', 'TAO', 'RNDR', 'AGIX', 'WLD', 'OCEAN', 'AI', 'VIRTUAL', 'AIXBT', 'GRIFFAIN', 'ARKM', 'NMR', 'PAAL'],
+  memes: ['PEPE', 'WIF', 'BONK', 'POPCAT', 'FARTCOIN', 'MOODENG', 'CHILLGUY', 'PNUT', 'GOAT', 'ACT', 'NEIRO', 'SHIB', 'FLOKI', 'MEW', 'BRETT', 'TRUMP', 'MELANIA'],
+  hl: ['HYPE', 'PURR', 'JELLY', 'FRIEND'],
+};
+
+function categorize(asset) {
+  const upper = asset.toUpperCase();
+  for (const [cat, list] of Object.entries(HL_CATEGORIES)) {
+    if (list.includes(upper)) return cat;
+  }
+  return 'others';
+}
+
+export function getCategories() {
+  return Object.keys(HL_CATEGORIES).concat(['others']);
+}
+
 /**
- * Get all available markets with current stats.
+ * Get available markets with current stats.
+ * Pass limit = 0 to get ALL markets (default), otherwise slice to first N.
  */
-export async function getMarkets(limit = 20) {
+export async function getMarkets(limit = 0) {
   const data = await infoPost({ type: 'metaAndAssetCtxs' });
   const meta = data?.[0];
   const ctxs = data?.[1] || [];
 
-  return (meta?.universe || []).slice(0, limit).map((u, i) => {
+  const all = (meta?.universe || []).map((u, i) => {
     const ctx = ctxs[i] || {};
     return {
       asset: u.name,
+      category: categorize(u.name),
       maxLeverage: u.maxLeverage,
       markPrice: parseFloat(ctx.markPx || 0),
       fundingRate: parseFloat(ctx.funding || 0),
@@ -141,6 +166,112 @@ export async function getMarkets(limit = 20) {
       change24h: ctx.prevDayPx ? ((parseFloat(ctx.markPx) - parseFloat(ctx.prevDayPx)) / parseFloat(ctx.prevDayPx) * 100) : 0,
     };
   });
+  return limit > 0 ? all.slice(0, limit) : all;
+}
+
+/**
+ * Get top traders from Hyperliquid stats-data leaderboard.
+ * Public endpoint, no auth. Returns top N by chosen window PnL.
+ * window: 'day' | 'week' | 'month' | 'allTime'
+ */
+export async function getLeaderboard(limit = 10, window = 'week') {
+  try {
+    const testnet = (await getConfig('hyper_testnet')) === 'true';
+    const net = testnet ? 'Testnet' : 'Mainnet';
+    const res = await fetch(`https://stats-data.hyperliquid.xyz/${net}/leaderboard`);
+    if (!res.ok) throw new Error(`leaderboard ${res.status}`);
+    const data = await res.json();
+    const rows = data?.leaderboardRows || [];
+    const keyMap = { day: 'dayPnl', week: 'weekPnl', month: 'monthPnl', allTime: 'allTimePnl' };
+    const pnlKey = keyMap[window] || 'weekPnl';
+    const volKey = { day: 'dayVlm', week: 'weekVlm', month: 'monthVlm', allTime: 'allTimeVlm' }[window] || 'weekVlm';
+    return rows
+      .map(r => {
+        const perf = (r.windowPerformances || []).find(([w]) => w === window)?.[1] || {};
+        return {
+          address: r.ethAddress,
+          accountValue: parseFloat(r.accountValue || 0),
+          pnl: parseFloat(perf.pnl || r[pnlKey] || 0),
+          volume: parseFloat(perf.vlm || r[volKey] || 0),
+          roi: parseFloat(perf.roi || 0) * 100,
+          displayName: r.displayName || null,
+        };
+      })
+      .filter(r => r.pnl > 0)
+      .sort((a, b) => b.pnl - a.pnl)
+      .slice(0, limit);
+  } catch (e) {
+    console.error(`[hyperliquid] leaderboard fetch failed: ${e.message}`);
+    return [];
+  }
+}
+
+/**
+ * Get recent fills for any address (public via info API).
+ * Used for following smart wallets — see what they're trading.
+ */
+export async function getUserFills(address, limit = 20) {
+  const fills = await infoPost({ type: 'userFills', user: address });
+  return (fills || []).slice(0, limit).map(f => ({
+    time: f.time,
+    asset: f.coin,
+    side: f.side === 'B' ? 'long' : 'short',
+    price: parseFloat(f.px || 0),
+    size: parseFloat(f.sz || 0),
+    pnl: parseFloat(f.closedPnl || 0),
+    dir: f.dir,
+  }));
+}
+
+/**
+ * Full intel on any trader (public, no auth).
+ * Returns current positions + recent fills in a single round trip.
+ * For vault/staker addresses fills will be empty — positions is what matters.
+ */
+export async function getTraderIntel(address, fillLimit = 20) {
+  const [state, fillsRaw] = await Promise.all([
+    infoPost({ type: 'clearinghouseState', user: address }),
+    infoPost({ type: 'userFills', user: address }),
+  ]);
+
+  const cs = state?.marginSummary || state?.crossMarginSummary || {};
+  const accountValue = parseFloat(cs.accountValue || 0);
+
+  const positions = (state?.assetPositions || [])
+    .filter(p => parseFloat(p.position?.szi) !== 0)
+    .map(p => {
+      const szi = parseFloat(p.position.szi);
+      const entry = parseFloat(p.position.entryPx || 0);
+      const value = Math.abs(parseFloat(p.position.positionValue || 0));
+      return {
+        asset: p.position.coin,
+        side: szi > 0 ? 'long' : 'short',
+        size: Math.abs(szi),
+        entryPrice: entry,
+        value,
+        pnl: parseFloat(p.position.unrealizedPnl || 0),
+        pnlPct: entry > 0 ? (parseFloat(p.position.unrealizedPnl || 0) / (Math.abs(szi) * entry)) * 100 : 0,
+        leverage: p.position.leverage?.value || 1,
+      };
+    })
+    .sort((a, b) => b.value - a.value);
+
+  const fills = (fillsRaw || []).slice(0, fillLimit).map(f => ({
+    time: f.time,
+    asset: f.coin,
+    side: f.side === 'B' ? 'long' : 'short',
+    price: parseFloat(f.px || 0),
+    size: parseFloat(f.sz || 0),
+    pnl: parseFloat(f.closedPnl || 0),
+    dir: f.dir,
+  }));
+
+  return {
+    accountValue,
+    positions,
+    fills,
+    isVaultLike: positions.length === 0 && fills.length === 0,
+  };
 }
 
 // ── Signed Operations (use SDK for EIP-712) ─────────────────
@@ -159,37 +290,66 @@ async function getSdk(privateKey) {
 }
 
 /**
- * Place an order (requires SDK for EIP-712 signing).
+ * Place an order. Uses SDK helpers that internally handle symbol conversion.
+ *
+ * For market orders: uses sdk.exchange.marketOpen() which:
+ *   - Takes the plain asset name (no -PERP suffix)
+ *   - Internally fetches reference mark price and applies slippage
+ *   - Sends as IoC limit (Hyperliquid has no true "market" type)
+ *
+ * For limit orders: uses raw placeOrder with -PERP suffixed coin field.
  */
 export async function placeOrder(privateKey, params) {
   const sdk = await getSdk(privateKey);
   const { asset, side, size, price, type = 'market', leverage, stopLoss } = params;
 
+  // 1) Leverage update first (best-effort — if it fails, order still goes through)
   if (leverage) {
-    try { await sdk.exchange.updateLeverage({ asset, leverage, isCross: true }); } catch (e) {
+    try {
+      await sdk.exchange.updateLeverage(asset, 'cross', leverage);
+    } catch (e) {
       console.error(`[hyperliquid] leverage update failed: ${e.message}`);
     }
   }
 
   const isBuy = side.toLowerCase() === 'buy' || side.toLowerCase() === 'long';
-  const orderParams = {
-    coin: asset,
-    is_buy: isBuy,
-    sz: size,
-    order_type: type === 'market' ? { market: {} } : { limit: { tif: 'GTC' } },
-    reduce_only: false,
-  };
-  if (type === 'limit' && price) orderParams.limit_px = price;
+  let result;
 
-  const result = await sdk.exchange.placeOrder(orderParams);
+  if (type === 'market') {
+    // marketOpen(coin, is_buy, sz, price?, slippage=0.05, cloid?)
+    // Pass plain asset name — SDK handles -PERP conversion and slippage pricing.
+    result = await sdk.custom.marketOpen(asset, isBuy, size, undefined, 0.02);
+  } else {
+    if (!price) throw new Error('Limit order requires price');
+    result = await sdk.exchange.placeOrder({
+      coin: `${asset}-PERP`,
+      is_buy: isBuy,
+      sz: size,
+      limit_px: price,
+      order_type: { limit: { tif: 'Gtc' } },
+      reduce_only: false,
+    });
+  }
 
-  // Stop-loss trigger
-  if (stopLoss && result?.response?.data?.statuses?.[0]?.filled) {
+  // 2) Extract fill info
+  const statuses = result?.response?.data?.statuses || [];
+  const firstStatus = statuses[0] || {};
+  const filled = firstStatus.filled || null;
+  const resting = firstStatus.resting || null;
+  const errorMsg = firstStatus.error || null;
+
+  if (errorMsg) {
+    throw new Error(`Hyperliquid rejected: ${errorMsg}`);
+  }
+
+  // 3) Stop-loss trigger (only if main order actually filled/rests)
+  if (stopLoss && (filled || resting)) {
     try {
       await sdk.exchange.placeOrder({
-        coin: asset,
+        coin: `${asset}-PERP`,
         is_buy: !isBuy,
         sz: size,
+        limit_px: String(stopLoss), // trigger orders still need a limit_px field per HL schema
         order_type: { trigger: { triggerPx: String(stopLoss), isMarket: true, tpsl: 'sl' } },
         reduce_only: true,
       });
@@ -200,32 +360,25 @@ export async function placeOrder(privateKey, params) {
 
   return {
     ok: true,
-    orderId: result?.response?.data?.statuses?.[0]?.resting?.oid || null,
-    filled: result?.response?.data?.statuses?.[0]?.filled || null,
+    orderId: resting?.oid || filled?.oid || null,
+    filled,
+    resting,
+    avgPx: filled?.avgPx ? parseFloat(filled.avgPx) : null,
+    totalSz: filled?.totalSz ? parseFloat(filled.totalSz) : null,
     asset, side, size,
   };
 }
 
 /**
- * Close a position (market order, reduce-only).
+ * Close a position via SDK's marketClose helper.
  */
 export async function closePosition(privateKey, asset) {
-  const positions = await getPositions(privateKey);
-  const pos = positions.find(p => p.asset === asset);
-  if (!pos) return { ok: false, error: 'No open position for ' + asset };
-
   const sdk = await getSdk(privateKey);
-  const isBuy = pos.side === 'short'; // close short = buy
-
-  await sdk.exchange.placeOrder({
-    coin: asset,
-    is_buy: isBuy,
-    sz: pos.size,
-    order_type: { market: {} },
-    reduce_only: true,
-  });
-
-  return { ok: true, asset, closedSize: pos.size };
+  // marketClose(coin, sz?, px?, slippage=0.05, cloid?) — sz omitted closes full position
+  const result = await sdk.custom.marketClose(asset, undefined, undefined, 0.02);
+  const status = result?.response?.data?.statuses?.[0];
+  if (status?.error) throw new Error(`Hyperliquid close rejected: ${status.error}`);
+  return { ok: true, asset, filled: status?.filled || null };
 }
 
 /**
@@ -233,6 +386,6 @@ export async function closePosition(privateKey, asset) {
  */
 export async function cancelOrder(privateKey, asset, orderId) {
   const sdk = await getSdk(privateKey);
-  await sdk.exchange.cancelOrder({ coin: asset, oid: orderId });
+  await sdk.exchange.cancelOrder({ coin: `${asset}-PERP`, oid: orderId });
   return { ok: true, asset, orderId };
 }

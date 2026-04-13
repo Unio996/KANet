@@ -147,6 +147,34 @@
 
 ---
 
+### kaspa_tx_log（v60，嵌入式 Kaspa TX indexer）
+**嵌入式索引器：Relay 订阅 block-added 事件，把流经的 Kaspa TX 写入本表**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| tx_id | TEXT PK | Kaspa TX hash |
+| block_hash | TEXT | 所在块哈希 |
+| block_time | INTEGER | 块时间戳（unix seconds）|
+| from_address | TEXT | 发送方（best-effort，常为 NULL 因 Kaspa RPC 不返回 input address）|
+| to_address | TEXT NOT NULL | 收款方（过滤 watched_addresses 后的匹配输出地址）|
+| amount | REAL | 收款金额 KAS（sompi / 1e8）|
+| outputs_json | TEXT | 原始 outputs 数组 JSON，留证据 |
+| observed_at | TEXT NOT NULL | Relay 上报 Console 的时间 |
+| network | TEXT | mainnet / testnet |
+
+**索引**：idx_kaspa_tx_log_to_address / from_address / block_time
+
+**写入方**：kasia-relay/src/rpc-listener.mjs:indexBlockTxs() → /ingest/kaspa-tx → ingest.js
+**读取方**：cross-chain-verify.mjs _verifyKaspa()（本地优先）
+
+**背景**：Phase 1 S10B 发现 `chain === 'kaspa'` 分支长期是硬编码 `confirmed: true` stub，绕过所有验证。根因是 Kaspa RPC 无 getTransaction，UTXO 查询在 output 被 spent 后立即失效（f8e70ae1 真实受害案例）。v60 migration 建表，Relay hook block-added 事件过滤 watched addresses 写入本表，verifier 改为本地表查询优先、RPC UTXO fallback。返回值带 `source: 'local_indexer' | 'rpc_fallback'` 方便审计。
+
+**watched 范围**：本地 agents + exchange 对手方 + 近 30 天 identities（通过 /api/indexer/watched-addresses endpoint 返回给 Relay，每 60s refresh）
+
+**陷阱**：from_address 常为 NULL 因 Kaspa RPC input verboseData 不总是填。验证用途不依赖 sender，只用 tx_id + to_address + amount。
+
+---
+
 ### tx_records（15027 条）
 **花费真相源：Agent 的链上交易记录**
 
