@@ -318,12 +318,19 @@ export async function redeemPositions(privateKey, conditionId) {
 
 /**
  * Check redeem status for a settled market.
+ *
+ * Caller must pass the outcome token IDs from CLOB trades (trade.asset_id) —
+ * we do NOT compute positionId locally because Gnosis CTF getCollectionId
+ * uses BN254 curve point hashing, not keccak256. Self-computed IDs are wrong
+ * and produce false balance=0 readings, which used to get misreported as
+ * "already redeemed". Source of truth: the asset_id returned by CLOB trades.
+ *
  * Returns: { resolved, redeemable, balance }
  * - resolved: market has a result (payoutDenominator > 0)
  * - redeemable: user holds outcome tokens that can be redeemed
- * - balance: total outcome token balance
+ * - balance: total outcome token balance across provided asset_ids
  */
-export async function checkRedeemStatus(walletAddress, conditionId) {
+export async function checkRedeemStatus(walletAddress, conditionId, assetIds = []) {
   const CTF_CONTRACT = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
   const CTF_ABI = [
     'function balanceOf(address owner, uint256 id) view returns (uint256)',
@@ -336,25 +343,13 @@ export async function checkRedeemStatus(walletAddress, conditionId) {
     const denom = await ctf.payoutDenominator(conditionId);
     const resolved = denom > 0n;
 
-    // Check balance for both outcomes (Yes=indexSet 1, No=indexSet 2)
-    // Token ID = uint256(keccak256(abi.encodePacked(collateralToken, parentCollectionId, conditionId, indexSet)))
-    // Simplified: check both outcome slots
     let totalBalance = 0n;
-    try {
-      const USDC_POLYGON = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
-      for (const indexSet of [1, 2]) {
-        const collectionId = ethers.solidityPackedKeccak256(
-          ['bytes32', 'bytes32', 'uint256'],
-          [ethers.ZeroHash, conditionId, indexSet]
-        );
-        const positionId = ethers.solidityPackedKeccak256(
-          ['address', 'bytes32'],
-          [USDC_POLYGON, collectionId]
-        );
-        const bal = await ctf.balanceOf(walletAddress, positionId);
+    for (const assetId of assetIds) {
+      try {
+        const bal = await ctf.balanceOf(walletAddress, assetId);
         totalBalance += bal;
-      }
-    } catch { /* balance check failed, assume 0 */ }
+      } catch { /* skip this asset */ }
+    }
 
     return { resolved, redeemable: resolved && totalBalance > 0n, balance: totalBalance.toString() };
   } catch (e) {

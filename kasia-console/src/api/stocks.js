@@ -284,6 +284,10 @@ export async function registerStockRoutes(fastify) {
       const trades = await client.getTrades();
       // 聚合成持仓：按 market+outcome 分组
       const posMap = {};
+      // Collect all asset_ids traded per market (Yes and No outcomes). CLOB's
+      // asset_id is the authoritative ERC-1155 token id — any redeem check
+      // must use this, not a self-computed positionId.
+      const assetIdsByMarket = {};
       for (const t of trades) {
         const key = t.market + ':' + t.outcome;
         if (!posMap[key]) posMap[key] = { market: t.market, outcome: t.outcome, side: t.side, size: 0, totalCost: 0, asset: t.asset_id };
@@ -291,6 +295,10 @@ export async function registerStockRoutes(fastify) {
         const cost = sz * parseFloat(t.price);
         if (t.side === 'BUY') { posMap[key].size += sz; posMap[key].totalCost += cost; }
         else { posMap[key].size -= sz; posMap[key].totalCost -= cost; }
+        if (t.market && t.asset_id) {
+          if (!assetIdsByMarket[t.market]) assetIdsByMarket[t.market] = new Set();
+          assetIdsByMarket[t.market].add(t.asset_id);
+        }
       }
       const allPositions = Object.values(posMap).filter(p => p.size > 0).map(p => ({
         ...p, avgPrice: p.totalCost / p.size, title: p.market?.slice(0, 16) + '...',
@@ -313,17 +321,23 @@ export async function registerStockRoutes(fastify) {
         }
       }));
 
-      // For settled positions: check if redeemable or already redeemed
+      // For settled positions: query real on-chain balance.
+      // NOTE: we no longer infer `redeemed=true` from balance=0. That was a
+      // false-positive that hid recoverable winnings (Sophie BTC>72k 58 shares
+      // left unredeemed). "balance=0" can also mean sold, transferred, or on
+      // a NegRisk adapter — we don't know, so we don't guess. The UI should
+      // only show "Already Redeemed" for actions taken in the current session.
       const settledPositions = allPositions.filter(p => p.settled);
       if (settledPositions.length > 0) {
         const polyWallet = getPolygonWallet(relay_node_id);
         if (polyWallet?.address) {
-          // checkRedeemStatus imported at top
           await Promise.all(settledPositions.map(async (p) => {
             try {
-              const rs = await checkRedeemStatus(polyWallet.address, p.market);
+              const assetIds = Array.from(assetIdsByMarket[p.market] || []);
+              const rs = await checkRedeemStatus(polyWallet.address, p.market, assetIds);
               p.redeemable = rs.redeemable;
-              p.redeemed = rs.resolved && !rs.redeemable;
+              p.onChainBalance = rs.balance;
+              p.redeemed = false;
             } catch {
               p.redeemable = false;
               p.redeemed = false;
