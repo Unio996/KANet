@@ -55,7 +55,9 @@ export async function registerAdapterRoutes(fastify) {
       const cached = _apiCheckCache[a.http_port];
       const apiOk = cached ? cached.apiOk : null;
       const apiError = cached ? cached.apiError : null;
-      return { ...a, online, apiOk, apiError, managed: managed.running, pid: managed.pid, startedAt: managed.startedAt };
+      const _apiSt = !online ? 'offline' : (apiOk === true ? 'green' : (apiOk === false ? 'amber' : 'checking'));
+      const _apiErr = (apiError || '').replace(/'/g, '');
+      return { ...a, online, apiOk, apiError, _apiSt, _apiErr, managed: managed.running, pid: managed.pid, startedAt: managed.startedAt };
     }));
     return reply.view('adapters', { adapters: withStatus, t, lang, dir, langs });
   });

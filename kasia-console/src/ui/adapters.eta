@@ -11,7 +11,7 @@
         <% } else { %>
         <div class="space-y-3">
           <% it.adapters.forEach(function(a) { %>
-          <div class="bg-white rounded-lg border border-warm-200 p-5" x-data="{ renaming: false, newName: '<%= a.name %>', apiStatus: '<%= a.online ? (a.apiOk === true ? 'green' : a.apiOk === false ? 'amber' : 'checking') : 'offline' %>', apiError: '<%= (a.apiError || '').replace(/'/g, '') %>' }"
+          <div class="bg-white rounded-lg border border-warm-200 p-5" x-data="{ renaming: false, newName: '<%= a.name %>', apiStatus: '<%= a._apiSt %>', apiError: '<%= a._apiErr %>' }"
             <% if (a.online && a.apiOk === null) { %>
             x-init="fetch('/api/adapters/check/<%= a.http_port %>').then(r=>r.json()).then(d=>{apiStatus=d.apiOk?'green':'amber'; apiError=d.apiError||''}).catch(()=>{apiStatus='amber'; apiError='check failed'})"
             <% } %>>
