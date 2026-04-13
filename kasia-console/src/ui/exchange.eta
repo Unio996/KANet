@@ -587,29 +587,20 @@
       Operator Tools
     </button>
     <div x-show="opsOpen" x-transition class="border-t border-warm-100">
-      <!-- Top-level: Trading / Market Making / DeFi -->
+      <!-- Top-level: Trading / Market Making (DeFi removed — Aave/Hyper/Aevo moved to independent pages) -->
       <div class="flex border-b border-warm-200 px-5 bg-warm-50">
-        <button @click="opsGroup = 'trading'; opsTab = 'arb'; loadHyperStatus(); loadAevoStatus()"
+        <button @click="opsGroup = 'trading'; opsTab = 'arb'"
           :class="opsGroup === 'trading' ? 'border-brand-500 text-brand-700 font-medium' : 'border-transparent text-ink-400'"
           class="px-4 py-2 text-xs border-b-2 -mb-px">Trading</button>
         <button @click="opsGroup = 'mm'; opsTab = 'seed'"
           :class="opsGroup === 'mm' ? 'border-brand-500 text-brand-700 font-medium' : 'border-transparent text-ink-400'"
           class="px-4 py-2 text-xs border-b-2 -mb-px">Market Making</button>
-        <button @click="opsGroup = 'defi'; opsTab = 'aave'; loadAaveStatus()"
-          :class="opsGroup === 'defi' ? 'border-brand-500 text-brand-700 font-medium' : 'border-transparent text-ink-400'"
-          class="px-4 py-2 text-xs border-b-2 -mb-px">DeFi</button>
       </div>
       <!-- Sub-tabs per group -->
       <div class="flex border-b border-warm-100 px-5" x-show="opsGroup === 'trading'">
         <button @click="opsTab = 'arb'"
           :class="opsTab === 'arb' ? 'border-brand-400 text-brand-600' : 'border-transparent text-ink-400'"
-          class="px-3 py-1.5 text-[11px] border-b -mb-px">CEX Arbitrage</button>
-        <button @click="opsTab = 'hyperliquid'"
-          :class="opsTab === 'hyperliquid' ? 'border-brand-400 text-brand-600' : 'border-transparent text-ink-400'"
-          class="px-3 py-1.5 text-[11px] border-b -mb-px">Hyperliquid Perps</button>
-        <button @click="opsTab = 'aevo'"
-          :class="opsTab === 'aevo' ? 'border-brand-400 text-brand-600' : 'border-transparent text-ink-400'"
-          class="px-3 py-1.5 text-[11px] border-b -mb-px">Aevo Options</button>
+          class="px-3 py-1.5 text-[11px] border-b -mb-px">CEX Arbitrage (hedges Exchange offers)</button>
       </div>
       <div class="flex border-b border-warm-100 px-5" x-show="opsGroup === 'mm'">
         <button @click="opsTab = 'seed'"
@@ -618,11 +609,6 @@
         <button @click="opsTab = 'autotaker'"
           :class="opsTab === 'autotaker' ? 'border-brand-400 text-brand-600' : 'border-transparent text-ink-400'"
           class="px-3 py-1.5 text-[11px] border-b -mb-px">AutoTaker</button>
-      </div>
-      <div class="flex border-b border-warm-100 px-5" x-show="opsGroup === 'defi'">
-        <button @click="opsTab = 'aave'"
-          :class="opsTab === 'aave' ? 'border-brand-400 text-brand-600' : 'border-transparent text-ink-400'"
-          class="px-3 py-1.5 text-[11px] border-b -mb-px">Aave</button>
       </div>
       <div class="p-5 max-h-[32rem] overflow-y-auto">
         <!-- Arb content placeholder — preserved from existing -->
@@ -824,140 +810,6 @@
           </div>
         </div>
 
-        <!-- ═══ Aave (DeFi) ═══ -->
-        <div x-show="opsTab === 'aave'" class="text-xs text-ink-500 space-y-4">
-          <div class="bg-warm-50 border border-warm-200 rounded-lg p-3">
-            <div class="flex items-center justify-between mb-3">
-              <span class="font-medium text-ink-600">Aave V3 (Arbitrum)</span>
-              <button @click="loadAaveStatus()" class="text-brand-500 hover:text-brand-700 text-[10px]">Refresh</button>
-            </div>
-            <div class="grid grid-cols-2 gap-3 mb-3">
-              <div>
-                <div class="text-ink-400">Deposited</div>
-                <div class="text-lg font-semibold text-ink-700 tabular-nums" x-text="'$' + (aaveStatus.account?.totalCollateralUSD || 0).toFixed(2)"></div>
-              </div>
-              <div>
-                <div class="text-ink-400">Borrowed</div>
-                <div class="text-lg font-semibold tabular-nums" :class="(aaveStatus.account?.totalDebtUSD || 0) > 0 ? 'text-red-600' : 'text-ink-700'" x-text="'$' + (aaveStatus.account?.totalDebtUSD || 0).toFixed(2)"></div>
-              </div>
-            </div>
-            <!-- Health Factor bar -->
-            <div class="mb-3">
-              <div class="flex justify-between text-[10px] mb-1">
-                <span class="text-ink-400">Health Factor</span>
-                <span class="font-medium tabular-nums" :class="(aaveStatus.account?.healthFactor || 999) > 2 ? 'text-green-600' : (aaveStatus.account?.healthFactor || 999) > 1.5 ? 'text-yellow-600' : 'text-red-600'" x-text="aaveStatus.account?.healthFactor === null || aaveStatus.account?.healthFactor > 100 ? '∞' : aaveStatus.account?.healthFactor?.toFixed(2)"></span>
-              </div>
-              <div class="h-2 bg-warm-200 rounded-full overflow-hidden">
-                <div class="h-full rounded-full transition-all" :class="(aaveStatus.account?.healthFactor || 999) > 2 ? 'bg-green-500' : (aaveStatus.account?.healthFactor || 999) > 1.5 ? 'bg-yellow-500' : 'bg-red-500'" :style="'width:' + Math.min(100, ((aaveStatus.account?.healthFactor || 0) / 3) * 100) + '%'"></div>
-              </div>
-            </div>
-            <div class="text-[11px] text-ink-400 mb-3">
-              Available to borrow: <span class="text-ink-600 font-medium" x-text="'$' + (aaveStatus.account?.availableBorrowUSD || 0).toFixed(2)"></span>
-              &nbsp;|&nbsp; Wallet: <span class="text-ink-600 font-medium" x-text="(aaveStatus.walletBalance?.usdc || 0).toFixed(2) + ' USDC'"></span>
-            </div>
-            <!-- Action buttons -->
-            <div class="flex gap-2">
-              <button @click="aaveAction('supply')" class="flex-1 py-2 bg-green-500 text-white rounded text-[11px] font-medium hover:bg-green-600">Supply</button>
-              <button @click="aaveAction('withdraw')" class="flex-1 py-2 bg-warm-200 text-ink-600 rounded text-[11px] font-medium hover:bg-warm-300">Withdraw</button>
-              <button @click="aaveAction('borrow')" class="flex-1 py-2 bg-yellow-100 text-yellow-700 rounded text-[11px] font-medium hover:bg-yellow-200">Borrow</button>
-              <button @click="aaveAction('repay')" class="flex-1 py-2 bg-warm-200 text-ink-600 rounded text-[11px] font-medium hover:bg-warm-300">Repay</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Hyperliquid Perps (dynamic) -->
-        <div x-show="opsTab === 'hyperliquid'" class="text-xs text-ink-500 space-y-4">
-          <div class="bg-warm-50 border border-warm-200 rounded-lg p-4">
-            <div class="flex items-center justify-between mb-3">
-              <span class="font-medium text-ink-600">Hyperliquid Perpetual Futures</span>
-              <button @click="loadHyperStatus()" class="text-brand-500 hover:text-brand-700 text-[10px]">Refresh</button>
-            </div>
-            <div class="grid grid-cols-3 gap-3 mb-3">
-              <div><div class="text-ink-400">Account Value</div><div class="text-lg font-semibold text-ink-700 tabular-nums" x-text="'$' + (hyperStatus.account?.accountValue || 0).toFixed(2)"></div></div>
-              <div><div class="text-ink-400">Unrealized PnL</div><div class="text-lg font-semibold tabular-nums" :class="(hyperStatus.account?.unrealizedPnl || 0) >= 0 ? 'text-green-600' : 'text-red-600'" x-text="(hyperStatus.account?.unrealizedPnl >= 0 ? '+$' : '-$') + Math.abs(hyperStatus.account?.unrealizedPnl || 0).toFixed(2)"></div></div>
-              <div><div class="text-ink-400">Margin Used</div><div class="text-lg font-semibold text-ink-600 tabular-nums" x-text="(hyperStatus.account?.marginUsedPct || 0).toFixed(0) + '%'"></div></div>
-            </div>
-            <!-- Positions -->
-            <div x-show="hyperStatus.positions?.length > 0" class="mb-3">
-              <div class="text-ink-400 mb-1">Open Positions:</div>
-              <template x-for="p in (hyperStatus.positions || [])" :key="p.asset">
-                <div class="flex items-center justify-between py-1.5 border-b border-warm-100 last:border-0">
-                  <div>
-                    <span class="font-medium text-ink-600" x-text="p.asset"></span>
-                    <span class="ml-1 px-1 rounded text-[9px]" :class="p.side === 'long' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'" x-text="p.side?.toUpperCase()"></span>
-                    <span class="text-ink-400 ml-1" x-text="p.size + ' @ $' + p.entryPrice?.toFixed(2)"></span>
-                  </div>
-                  <div class="tabular-nums" :class="(p.pnl || 0) >= 0 ? 'text-green-600' : 'text-red-600'" x-text="(p.pnl >= 0 ? '+' : '') + '$' + (p.pnl || 0).toFixed(2)"></div>
-                </div>
-              </template>
-            </div>
-            <div x-show="!hyperStatus.positions?.length" class="text-ink-400 mb-3">No open positions</div>
-            <!-- Funding Rates -->
-            <div x-show="hyperStatus.funding?.length > 0" class="mb-3">
-              <div class="text-ink-400 mb-1">Funding Rates (8h):</div>
-              <div class="flex gap-3">
-                <template x-for="f in (hyperStatus.funding || [])" :key="f.asset">
-                  <span class="tabular-nums"><span class="text-ink-500" x-text="f.asset"></span> <span :class="f.rate >= 0 ? 'text-green-600' : 'text-red-600'" x-text="(f.rate >= 0 ? '+' : '') + (f.rate * 100).toFixed(4) + '%'"></span></span>
-                </template>
-              </div>
-            </div>
-            <!-- Actions -->
-            <div class="flex gap-2">
-              <button @click="hyperAction('long')" class="flex-1 py-2 bg-green-500 text-white rounded text-[11px] font-medium hover:bg-green-600">Long</button>
-              <button @click="hyperAction('short')" class="flex-1 py-2 bg-red-500 text-white rounded text-[11px] font-medium hover:bg-red-600">Short</button>
-              <button @click="hyperAction('close')" class="flex-1 py-2 bg-warm-200 text-ink-600 rounded text-[11px] font-medium hover:bg-warm-300">Close</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Aevo Options (dynamic) -->
-        <div x-show="opsTab === 'aevo'" class="text-xs text-ink-500 space-y-4">
-          <div class="bg-warm-50 border border-warm-200 rounded-lg p-4">
-            <div class="flex items-center justify-between mb-3">
-              <span class="font-medium text-ink-600">Aevo Options Exchange</span>
-              <button @click="loadAevoStatus()" class="text-brand-500 hover:text-brand-700 text-[10px]">Refresh</button>
-            </div>
-            <div class="grid grid-cols-3 gap-3 mb-3">
-              <div><div class="text-ink-400">Equity</div><div class="text-lg font-semibold text-ink-700 tabular-nums" x-text="'$' + (aevoStatus.equity || 0).toFixed(2)"></div></div>
-              <div><div class="text-ink-400">Available</div><div class="text-lg font-semibold text-ink-600 tabular-nums" x-text="'$' + (aevoStatus.available || 0).toFixed(2)"></div></div>
-              <div><div class="text-ink-400">Margin</div><div class="text-lg font-semibold text-ink-600 tabular-nums" x-text="(aevoStatus.marginPct || 0).toFixed(0) + '%'"></div></div>
-            </div>
-            <!-- Portfolio Greeks -->
-            <div x-show="aevoStatus.portfolioGreeks" class="mb-3 bg-white border border-warm-200 rounded p-2">
-              <div class="text-ink-400 mb-1">Portfolio Greeks:</div>
-              <div class="flex gap-4 tabular-nums">
-                <span>Delta <span class="font-medium text-ink-700" x-text="aevoStatus.portfolioGreeks?.delta?.toFixed(2) || '—'"></span></span>
-                <span>Gamma <span class="font-medium text-ink-700" x-text="aevoStatus.portfolioGreeks?.gamma?.toFixed(3) || '—'"></span></span>
-                <span>Theta <span class="font-medium text-ink-700" x-text="'$' + (aevoStatus.portfolioGreeks?.theta?.toFixed(2) || '—')"></span></span>
-                <span>Vega <span class="font-medium text-ink-700" x-text="'$' + (aevoStatus.portfolioGreeks?.vega?.toFixed(2) || '—')"></span></span>
-              </div>
-            </div>
-            <!-- Positions -->
-            <div x-show="aevoStatus.positions?.length > 0" class="mb-3">
-              <div class="text-ink-400 mb-1">Positions:</div>
-              <template x-for="p in (aevoStatus.positions || [])" :key="p.instrument">
-                <div class="flex items-center justify-between py-1.5 border-b border-warm-100 last:border-0">
-                  <div>
-                    <span class="font-medium text-ink-600" x-text="p.instrument"></span>
-                    <span class="text-ink-400 ml-1" x-text="p.side + ' ' + p.amount + ' @ $' + p.avgPrice?.toFixed(2)"></span>
-                  </div>
-                  <div class="text-right">
-                    <div class="tabular-nums" :class="(p.pnl || 0) >= 0 ? 'text-green-600' : 'text-red-600'" x-text="(p.pnl >= 0 ? '+' : '') + '$' + (p.pnl || 0).toFixed(2)"></div>
-                    <div class="text-[9px] text-ink-400 tabular-nums" x-text="'IV ' + ((p.greeks?.iv || 0) * 100).toFixed(0) + '% | Δ ' + (p.greeks?.delta?.toFixed(2) || '—')"></div>
-                  </div>
-                </div>
-              </template>
-            </div>
-            <div x-show="!aevoStatus.positions?.length" class="text-ink-400 mb-3">No option positions</div>
-            <!-- Actions -->
-            <div class="flex gap-2">
-              <button @click="aevoAction('buy_call')" class="flex-1 py-2 bg-green-500 text-white rounded text-[11px] font-medium hover:bg-green-600">Buy Call</button>
-              <button @click="aevoAction('buy_put')" class="flex-1 py-2 bg-red-500 text-white rounded text-[11px] font-medium hover:bg-red-600">Buy Put</button>
-              <button @click="aevoAction('positions')" class="flex-1 py-2 bg-warm-200 text-ink-600 rounded text-[11px] font-medium hover:bg-warm-300">Manage</button>
-            </div>
-            <div x-show="!aevoStatus.equity" class="text-center text-ink-400 mt-2 text-[10px]">Configure Aevo API credentials to connect.</div>
-          </div>
-        </div>
       </div>
     </div>
   </div>
