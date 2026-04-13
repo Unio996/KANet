@@ -539,21 +539,41 @@ function predictionsPage() {
     },
 
     async logoutPolymarket() {
-      if (!confirm('退出 Polymarket？API Key 将被删除，下次使用需重新连接。')) return;
+      const usdc = Number(this.walletStatus?.usdc || 0);
+      const msg = '退出 Polymarket 将执行:\n' +
+        '  1. 取消所有挂单\n' +
+        '  2. 把 ' + usdc.toFixed(2) + ' USDC 扫回你指定的地址\n' +
+        '  3. 删除 CLOB API Key\n' +
+        '  4. 删除 Polygon 钱包和私钥 (不可恢复)\n\n' +
+        '请输入接收 USDC 的 Polygon 地址 (0x...):';
+      const dest = prompt(msg);
+      if (!dest) return;
+      if (!/^0x[a-fA-F0-9]{40}$/.test(dest.trim())) {
+        alert('无效地址。必须是 0x 开头的 40 位十六进制。');
+        return;
+      }
+      if (!confirm('确认退出并转移 ' + usdc.toFixed(2) + ' USDC 到 ' + dest.slice(0, 10) + '...' + dest.slice(-6) + ' ?')) return;
+      this.walletMsg = '退出中...';
       try {
-        await fetch('/api/settings/config', {
+        const res = await fetch('/api/polymarket/' + this.selectedAgent + '/exit', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ key: 'polymarket_api_' + this.selectedAgent, value: null, action: 'delete' }),
+          body: JSON.stringify({ destinationAddress: dest.trim() }),
         });
-      } catch {}
-      this.walletStatus = { hasWallet: true, approved: false, hasClobKey: false, usdc: 0 };
-      this.showPositions = false;
-      this.positions = [];
-      this.orders = [];
-      this.tradeIdx = null;
-      this.walletMsg = '';
-      await this.loadWalletStatus();
+        const data = await res.json();
+        if (!data.ok) {
+          this.walletMsg = '退出失败 (' + (data.step || '?') + '): ' + (data.error || '');
+          return;
+        }
+        this.walletMsg = '退出完成: 转出 ' + data.steps.sweep.amount + ' USDC, TX ' + data.steps.sweep.txHash.slice(0, 12) + '...';
+        this.walletStatus = { hasWallet: false, approved: false, hasClobKey: false, usdc: 0 };
+        this.showPositions = false;
+        this.positions = [];
+        this.orders = [];
+        this.tradeIdx = null;
+      } catch (e) {
+        this.walletMsg = '退出请求失败: ' + e.message;
+      }
     },
 
     async loadWalletStatus() {

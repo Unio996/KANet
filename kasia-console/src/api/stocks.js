@@ -8,7 +8,7 @@ import { sqlite } from '../db/client.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 import crypto, { randomUUID } from 'crypto';
 import { fetchStockData, fetchYahooQuote, cachedPredictions, cachedCommodities, cachedFunding, cachedSentiment, fetchAllMarkets, cachedCrypto, cachedFundamentals, cachedIndustryPeers, cachedStockKlines, DIVERGENCE_WARN_THRESHOLD } from '../services/market-data.js';
-import { getPolygonWallet, getUsdcBalance, createApiKey, getOrderBook, getPositions, placeOrder, cancelOrder, getOpenOrders, checkAllowance, approveUsdc, checkTxStatus, redeemPositions, checkRedeemStatus } from '../services/polymarket.js';
+import { getPolygonWallet, getUsdcBalance, createApiKey, getOrderBook, getPositions, placeOrder, cancelOrder, getOpenOrders, checkAllowance, approveUsdc, checkTxStatus, redeemPositions, checkRedeemStatus, sweepUsdc } from '../services/polymarket.js';
 import { decrypt } from '../services/crypto.js';
 
 // Agent 综述缓存（15 分钟）
@@ -479,6 +479,64 @@ export async function registerStockRoutes(fastify) {
     const privateKey = decrypt(wallet.privkey_encrypted);
     const result = await redeemPositions(privateKey, conditionId);
     return reply.send(result);
+  });
+
+  // POST /api/polymarket/:relay_node_id/exit — 彻底退出 Polymarket
+  // 1. 取消所有挂单  2. 扫 USDC 到用户地址  3. 删 CLOB API Key  4. 删 Polygon 钱包行(含私钥)
+  // Body: { destinationAddress: '0x...', deleteWallet?: true }
+  // 旧 UI 调的 /api/settings/config 端点根本不存在,点退出什么都没做——这个端点是真的退出。
+  fastify.post('/api/polymarket/:relay_node_id/exit', async (request, reply) => {
+    const relayNodeId = request.params.relay_node_id;
+    const { destinationAddress, deleteWallet = true } = request.body || {};
+    if (!destinationAddress) return reply.code(400).send({ error: 'destinationAddress required' });
+
+    const wallet = sqlite.prepare(
+      "SELECT id, address, privkey_encrypted FROM agent_wallets WHERE relay_node_id = ? AND chain = 'polygon' LIMIT 1"
+    ).get(relayNodeId);
+    if (!wallet?.privkey_encrypted) return reply.code(400).send({ error: 'No Polygon wallet with private key' });
+
+    const steps = { cancelledOrders: 0, sweep: null, configDeleted: false, walletDeleted: false };
+
+    // Step 1: cancel any open CLOB orders (best-effort, non-blocking)
+    try {
+      const client = await _makeClobClient(relayNodeId);
+      if (client) {
+        const open = await client.getOpenOrders().catch(() => []);
+        for (const o of (open || [])) {
+          try { await client.cancelOrder({ orderID: o.id }); steps.cancelledOrders++; } catch {}
+        }
+      }
+    } catch { /* no credentials is fine */ }
+
+    // Step 2: sweep USDC to destination — this is the load-bearing step.
+    // If sweep fails, DO NOT delete credentials/wallet. User still has value.
+    const privateKey = decrypt(wallet.privkey_encrypted);
+    const sweep = await sweepUsdc(privateKey, destinationAddress);
+    steps.sweep = sweep;
+    if (!sweep.ok) {
+      return reply.code(500).send({ ok: false, step: 'sweep', steps, error: sweep.error });
+    }
+
+    // Step 3: delete CLOB API credentials from config_entries
+    try {
+      sqlite.prepare("DELETE FROM config_entries WHERE key = ?").run(`polymarket_api_${relayNodeId}`);
+      steps.configDeleted = true;
+    } catch (e) {
+      console.error(`[polymarket exit] config delete failed: ${e.message}`);
+    }
+
+    // Step 4: delete the polygon wallet row (includes private key).
+    // Only after sweep succeeded.
+    if (deleteWallet) {
+      try {
+        sqlite.prepare('DELETE FROM agent_wallets WHERE id = ?').run(wallet.id);
+        steps.walletDeleted = true;
+      } catch (e) {
+        console.error(`[polymarket exit] wallet delete failed: ${e.message}`);
+      }
+    }
+
+    return reply.send({ ok: true, steps });
   });
 
   // Helper: 获取 Agent 的 Polymarket 凭证

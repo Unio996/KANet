@@ -317,6 +317,48 @@ export async function redeemPositions(privateKey, conditionId) {
 }
 
 /**
+ * Sweep USDC from Polymarket wallet to a destination address.
+ * Transfers the FULL USDC balance (no partial — used by logout/exit flow).
+ *
+ * @param {string} privateKey  Polygon wallet private key (raw hex, decrypted)
+ * @param {string} toAddress   Destination EOA (0x...)
+ * @returns {Promise<{ok:true, txHash:string, amount:string} | {ok:false, error:string}>}
+ */
+export async function sweepUsdc(privateKey, toAddress) {
+  try {
+    if (!ethers.isAddress(toAddress)) {
+      return { ok: false, error: `Invalid destination address: ${toAddress}` };
+    }
+    const provider = new ethers.JsonRpcProvider(POLYGON_RPC);
+    const signer = new ethers.Wallet(privateKey, provider);
+    const usdc = new ethers.Contract(USDC_POLYGON, [
+      'function balanceOf(address) view returns (uint256)',
+      'function transfer(address,uint256) returns (bool)',
+    ], signer);
+    const balance = await usdc.balanceOf(signer.address);
+    if (balance === 0n) {
+      return { ok: false, error: 'USDC balance is zero, nothing to sweep' };
+    }
+    const feeData = await provider.getFeeData();
+    const tx = await usdc.transfer(toAddress, balance, {
+      maxFeePerGas: (feeData.maxFeePerGas || 50000000000n) * 2n,
+      maxPriorityFeePerGas: (feeData.maxPriorityFeePerGas || 30000000000n) * 2n,
+    });
+    console.log(`[polymarket] Sweep USDC ${ethers.formatUnits(balance, USDC_DECIMALS)} → ${toAddress.slice(0,10)}... TX: ${tx.hash}`);
+    const receipt = await tx.wait();
+    return {
+      ok: true,
+      txHash: tx.hash,
+      amount: ethers.formatUnits(balance, USDC_DECIMALS),
+      blockNumber: receipt.blockNumber,
+    };
+  } catch (e) {
+    console.error(`[polymarket] sweepUsdc error: ${e.message}`);
+    return { ok: false, error: e.message };
+  }
+}
+
+/**
  * Check redeem status for a settled market.
  *
  * Caller must pass the outcome token IDs from CLOB trades (trade.asset_id) —
