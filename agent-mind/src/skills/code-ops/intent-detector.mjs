@@ -61,9 +61,10 @@ const CONFIRM_PATTERNS = [
  * @param {string} message — user's input message
  * @param {string} currentLayer — current behavior layer
  * @param {boolean} hasPendingConfirm — whether we're waiting for escalation confirmation
+ * @param {string|null} peer — sender peer address (used to detect market-context surfaces)
  * @returns {{ targetLayer: string, confidence: number, category: string, isConfirmation: boolean }}
  */
-export function detectIntent(message, currentLayer = 'L1', hasPendingConfirm = false) {
+export function detectIntent(message, currentLayer = 'L1', hasPendingConfirm = false, peer = null) {
   // Strip injected context (ACTION templates, IMPORTANT instructions, stock/broker context)
   // so we only classify the user's actual intent, not boilerplate keywords like "execute"
   const cleaned = (message || '')
@@ -77,9 +78,22 @@ export function detectIntent(message, currentLayer = 'L1', hasPendingConfirm = f
   if (!trimmed) return { targetLayer: 'L1', confidence: 0, category: 'empty', isConfirmation: false };
 
   // Market/financial context → skip code-ops entirely (stay L1, let Brain handle naturally)
-  const isMarketContext = /\b(stock|stocks|股票|股市|美股|forex|crypto|市场|行情|走势|持仓|portfolio|broker|IBKR)\b/i.test(message)
-    || /^(owner:stocks|owner:trading|owner:predictions)\b/.test(message);
-  if (isMarketContext && !hasPendingConfirm) {
+  //
+  // Bug history (2026-04-13): two guards here both silently failed:
+  //   (a) \b around CJK keywords (市场/股票/…) never matched — JavaScript
+  //       regex word boundaries only work between \w and \W, and CJK chars
+  //       are all \W. CLAUDE.md trap #12: "中文正则不能用 \b".
+  //   (b) The second check tested message.startsWith('owner:predictions'),
+  //       but `message` is user-typed text, never a peer address — dead code.
+  // Result: "分析这个预测市场" was classified as observe→L3, triggering a
+  // diagnostic plan that stuffed system-log content into every prediction
+  // market reply.
+  // Fix: split EN / CN regexes (CN gets no \b), and use `peer` explicitly.
+  const isMarketEn = /\b(stock|stocks|forex|crypto|portfolio|broker|IBKR|polymarket|prediction\s*market|polygon)\b/i.test(message);
+  const isMarketCn = /(股票|股市|美股|市场|行情|走势|持仓|预测市场|预测|加密|币价|盘口)/.test(message);
+  const isMarketPeer = typeof peer === 'string'
+    && /^owner:(stocks|trading|predictions|portfolio|polymarket|exchange|market)\b/.test(peer);
+  if ((isMarketEn || isMarketCn || isMarketPeer) && !hasPendingConfirm) {
     return { targetLayer: 'L1', confidence: 0.9, category: 'social', isConfirmation: false };
   }
 

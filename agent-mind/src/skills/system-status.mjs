@@ -17,11 +17,17 @@ import { Skill } from './base.mjs';
 import { fetchJson } from '../utils.mjs';
 import { execSync } from 'node:child_process';
 
-const STATUS_KEYWORDS = [
-  'status', 'health', 'system', 'running', 'alive', 'up', 'down',
-  'service', 'process', 'port', 'diagnostic', 'monitor',
-  '状态', '健康', '系统', '运行', '服务', '进程', '诊断', '监控',
-];
+// Word-boundary regex for English keywords. Substring matching (the old approach)
+// caused massive false positives — e.g. "setup" contains "up", "support" contains
+// "up", "Supreme Court" contains "up", "transport" contains "port", "Trump" contains
+// "ump", etc. Polymarket questions with words like "Supreme", "support", "process"
+// were silently triggering system_status to inject 8KB of diagnostic data into
+// reactive context, derailing prediction market analysis. Always use \b for English.
+const EN_STATUS_RE = /\b(status|health|system|running|alive|service|process|port|diagnostic|monitor|uptime|down|up)\b/i;
+// Chinese keywords are matched as substrings — Chinese has no word boundaries
+// (\b is a no-op on CJK chars per CLAUDE.md trap #12). These tokens are long
+// enough that false positives are rare.
+const CN_STATUS_KEYWORDS = ['状态', '健康', '系统', '运行', '服务', '进程', '诊断', '监控'];
 
 export class SystemStatusSkill extends Skill {
   constructor() {
@@ -33,8 +39,9 @@ export class SystemStatusSkill extends Skill {
     // Brain would leak ports, service names, hostnames to strangers via SEND_MESSAGE.
     // Only activate on reactive when owner asks about system health.
     if (taskType !== 'reactive') return false;
-    const msg = (context._inputMessage || '').toLowerCase();
-    return STATUS_KEYWORDS.some(k => msg.includes(k));
+    const msg = context._inputMessage || '';
+    if (EN_STATUS_RE.test(msg)) return true;
+    return CN_STATUS_KEYWORDS.some(k => msg.includes(k));
   }
 
   async gatherContext(kernels, config) {

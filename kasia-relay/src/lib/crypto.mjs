@@ -28,6 +28,30 @@ function convertBits(data, fromBits, toBits) {
   return result;
 }
 
+/**
+ * Cheap validity check for a Kaspa address: prefix + bech32-decodable.
+ * Use this before any send/encrypt path that takes an address from external
+ * input (DB rows, ingest endpoints, alias lookups). Returns false instead of
+ * throwing so callers can degrade gracefully instead of dying mid-loop.
+ *
+ * Bug history (2026-04-13): test fixtures with non-bech32 addresses like
+ * `kaspa:qqtrustedintro<ts>aaa` were leaking into Console DB via
+ * introduce.test.mjs hitting the live Console. Catch-up tried to reply to
+ * them, encrypt() crashed inside this module, the relay logged the error
+ * but came back next restart and tried again. Validation here + at the
+ * caller stops the loop.
+ */
+export function isValidKaspaAddress(address) {
+  if (!address || typeof address !== 'string') return false;
+  if (!address.startsWith('kaspa:') && !address.startsWith('kaspatest:')) return false;
+  try {
+    extractXOnlyPubkeyFromAddress(address);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function extractXOnlyPubkeyFromAddress(address) {
   const colonIndex = address.indexOf(':');
   if (colonIndex === -1) throw new Error('Invalid Kaspa address: missing prefix separator');

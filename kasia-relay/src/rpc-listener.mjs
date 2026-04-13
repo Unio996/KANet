@@ -12,7 +12,7 @@
  */
 import * as kaspa from 'kaspa-wasm';
 import { getWallet } from './lib/wallet.mjs';
-import { decrypt } from './lib/crypto.mjs';
+import { decrypt, isValidKaspaAddress } from './lib/crypto.mjs';
 import { deriveAliases } from './lib/alias.mjs';
 import { classifyPayload, PREFIX_HEX, PREFIX } from './lib/protocol.mjs';
 import { acceptHandshake, sendKaspa, sendMessage } from './chain.mjs';
@@ -333,7 +333,14 @@ async function catchUpHistory() {
       const { messages } = await res.json();
       for (const msg of messages) {
         if (!msg.remoteAddress || !msg.message || _blocklist.has(msg.remoteAddress)) continue;
-        if (!msg.remoteAddress.startsWith('kaspa:')) continue; // Skip invalid addresses
+        // Strict bech32 check — the old startsWith('kaspa:') guard let test
+        // fixtures like `kaspa:qqtrustedintro<ts>aaa` through, which then
+        // crashed encrypt() and burned brain inference + RPC every restart.
+        if (!isValidKaspaAddress(msg.remoteAddress)) {
+          log(`catch-up: skip invalid kaspa address ${msg.remoteAddress.slice(0, 30)}…`);
+          if (msg.txid) markSeen(msg.txid); // permanent skip, do not poll again
+          continue;
+        }
         try {
           // Skip if already processed (prevents replay after restart)
           if (msg.txid && _seen.has(msg.txid)) {
@@ -815,6 +822,13 @@ async function processPayment(txId, payloadHex, senderAddress, tx) {
 // ── Shared reply logic ──────────────────────────────────────────────────────
 
 async function replyToMessage(txId, senderAddress, messageText) {
+  // Defense in depth: every send path eventually calls encrypt() which throws
+  // hard on non-bech32 addresses. Validate once at the entry so any caller
+  // (catch-up loop, processComm, processPayment, future ones) is protected.
+  if (!isValidKaspaAddress(senderAddress)) {
+    log(`replyToMessage: skip invalid kaspa address ${(senderAddress || '').slice(0, 30)}…`);
+    return;
+  }
   const { agent } = routeMessage(messageText);
   log('ROUTE →', agent);
 

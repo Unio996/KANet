@@ -363,7 +363,9 @@ export async function registerDiscoveryRoutes(fastify) {
       }
     }
 
-    return reply.send({ ok: true, id, duplicate: false });
+    // v47 leftover: this used to return interaction_records.lastInsertRowid as `id`,
+    // but that table is gone. txHash is the natural identifier in chain_events.
+    return reply.send({ ok: true, id: txHash, duplicate: false });
   });
 
   // GET /api/discovery/stats — discovery funnel metrics

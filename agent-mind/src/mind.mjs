@@ -52,7 +52,7 @@ const MINDS_DIR = path.join(PROJECT_ROOT, 'minds');
 // Each sender address = one conversation channel. Natural isolation via
 // blockchain address uniqueness. No keyword classification needed for routing.
 //
-// Channel 1: console_owner — Owner via Console UI. Never expires.
+// Channel: each peer (incl. owner:* surfaces) has its own. Owner-relation channels never expire.
 // Channel 2+: on-chain address — Each peer gets their own channel.
 
 const CHANNEL_TIMEOUTS = {
@@ -146,11 +146,16 @@ export async function createMind(agentName, relayNodeId, callbacks = {}) {
 
   /**
    * Derive channel key from sender identity.
-   * Owner via Console → 'console_owner' (one channel, never expires)
-   * On-chain peer → their address (one channel per unique address)
+   * Each peer gets its own channel — including each owner:* surface
+   * (owner:predictions / owner:debug / owner:chat / owner:portfolio …).
+   * Owner-relation channels never expire (handled in _getOrCreateChannel via ch.relation).
+   *
+   * Bug history: previously all owner:* peers collapsed to a single 'console_owner'
+   * channel, causing different UI surfaces' conversation history to bleed into each
+   * other. Sophie answered "嗨 Sophie" with a continuation of an earlier BTC
+   * prediction analysis from a different surface. Per-peer channels fix it.
    */
   function _channelKey(sender, senderMeta) {
-    if (senderMeta?.relation === 'owner' || sender?.startsWith('owner:')) return 'console_owner';
     return sender || 'unknown';
   }
 
@@ -163,9 +168,9 @@ export async function createMind(agentName, relayNodeId, callbacks = {}) {
   function _getOrCreateChannel(channelKey, relation) {
     const now = Date.now();
 
-    // Clean expired channels (skip owner — never expires)
+    // Clean expired channels (skip owner-relation channels — never expire)
     for (const [key, ch] of _channels) {
-      if (key === 'console_owner') continue;
+      if (ch.relation === 'owner') continue;
       const timeout = _channelTimeout(ch.relation);
       if (timeout !== Infinity && now - ch.lastActiveAt > timeout) {
         console.log(`[channel] ${config.name}: expired "${key.slice(-12)}" (${ch.history.length} turns, ${Math.round((now - ch.createdAt) / 60000)}min)`);
@@ -177,7 +182,9 @@ export async function createMind(agentName, relayNodeId, callbacks = {}) {
     if (!ch) {
       ch = { relation, history: [], createdAt: now, lastActiveAt: now };
       _channels.set(channelKey, ch);
-      const label = channelKey === 'console_owner' ? 'console_owner (never expires)' : `${channelKey.slice(-12)} (${relation}, ${Math.round(_channelTimeout(relation) / 60000)}min)`;
+      const label = relation === 'owner'
+        ? `owner:${channelKey.split(':')[1] || 'main'} (never expires)`
+        : `${channelKey.slice(-12)} (${relation}, ${Math.round(_channelTimeout(relation) / 60000)}min)`;
       console.log(`[channel] ${config.name}: opened ${label}`);
     }
     ch.lastActiveAt = now;
@@ -223,8 +230,11 @@ export async function createMind(agentName, relayNodeId, callbacks = {}) {
     const ch = _getOrCreateChannel(chKey, relation);
     _recordTurn(ch, 'user', message);
 
-    // Owner channel with active conversation history → skip conv-ops shortcuts
-    const ownerHasHistory = (chKey === 'console_owner' && ch.history.length > 2);
+    // Owner channel with active conversation history → skip conv-ops shortcuts.
+    // Per-peer channels: any owner-relation channel with > 2 turns counts as
+    // "in the middle of a chat", so a keyword like "buy" doesn't get hijacked
+    // by Conversational Ops mid-conversation.
+    const ownerHasHistory = (relation === 'owner' && ch.history.length > 2);
 
     // Sibling agents: skip conv-ops entirely — prevents query_card ping-pong loops.
     // Siblings sending "query_system" / "query_balance" etc. should get a normal Brain reply, not structured query_card.
@@ -341,7 +351,7 @@ export async function createMind(agentName, relayNodeId, callbacks = {}) {
     const sessionId = config.name?.toLowerCase() || 'default';
     const layerState = getState(sessionId);
     const senderPerm = checkSenderPermission(relation, 'L4');
-    const intentResult = detectIntent(message, layerState.currentLayer, layerState._pendingConfirm);
+    const intentResult = detectIntent(message, layerState.currentLayer, layerState._pendingConfirm, sender);
     let codeOpsResultContext = '';  // diagnostic results for Brain (not tool syntax)
     console.log(`[mind] ${config.name} code-ops: layer=${layerState.currentLayer} intent=${intentResult.category}→${intentResult.targetLayer} sender=${relation} perm=${senderPerm.allowed}`);
 
@@ -406,7 +416,11 @@ export async function createMind(agentName, relayNodeId, callbacks = {}) {
     };
     const task = await contextBuilder.buildReactiveTask(input, sender, {
       episodeHistory: ch.history.slice(0, -1), // exclude current message (already in input)
-      episodeIntent: chKey === 'console_owner' ? 'owner' : chKey.slice(-12),
+      // Use peer suffix as topic label so different owner surfaces show distinctly
+      // (e.g. "predictions" / "debug" / "chat") instead of collapsing to "owner".
+      episodeIntent: senderMeta?.relation === 'owner'
+        ? (sender?.split(':')[1] || 'general')
+        : sender?.slice(-12),
     });
 
     // Call Brain via Adapter — send system and user as separate layers

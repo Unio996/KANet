@@ -1,18 +1,44 @@
 // Tests for the introduce skill
-import { describe, it, before } from "node:test";
+//
+// Bug history (2026-04-13): this test used to hit the live Console at
+// localhost:3100 with bech32-invalid fixture addresses (`kaspa:qqtrustedintro…`)
+// and never clean up. Two consequences:
+//   1. The addresses contained 'i' / 'o' / 'b' (not in the bech32 charset),
+//      so every Relay catch-up cycle crashed encrypt() with
+//      "Invalid Kaspa address: invalid character 'i'"
+//   2. By 2026-04-13 the DB had accumulated 3,274 orphan identity rows and
+//      1,404 orphan messages across ~470 test runs since 2026-04-04.
+// Fix: all fixture addresses are now bech32-valid (no b/i/o/1), and an
+// `after()` hook nukes them via better-sqlite3 before exit. TODO: migrate to
+// isolated test DB so tests never touch production Console state at all.
+import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import Database from "better-sqlite3";
+import { resolve } from "node:path";
 
 const CONSOLE_URL   = process.env.CONSOLE_URL   || "http://localhost:3100";
 const INGEST_SECRET = process.env.INGEST_SECRET || "";
+const DB_PATH       = process.env.DB_PATH || resolve("./data/console.db");
 const headers = { "x-ingest-secret": INGEST_SECRET, "Content-Type": "application/json" };
 
-const RUN = Date.now();
-const PEER_TRUSTED  = `kaspa:qqtrustedintro${RUN}aaa`;
-const PEER_NORMAL   = `kaspa:qqnormalintro${RUN}bbb`;
-const PEER_BLOCKED  = `kaspa:qqblockedintro${RUN}ccc`;
-const TARGET_ADDR   = `kaspa:qqtargetintro${RUN}ddd`;
-const TARGET_ADDR2  = `kaspa:qqtarget2intro${RUN}eee`;
+// All fixture addresses share the `qqtester` prefix so cleanup can find them
+// with a single LIKE. Each role uses one distinct bech32 char (t/n/d/g/h/u/s/f)
+// followed by 52 chars of valid bech32 padding. Total payload = 61 chars,
+// matching the format extractXOnlyPubkeyFromAddress() expects (32 pubkey bytes
+// + checksum). No '1', 'b', 'i', 'o' anywhere.
+const FIXTURE_PREFIX = "kaspa:qqtester";
+const _PAD = "zry9x8gf2tvdw0s3jn54khce6mua7lqpzry9x8gf2tvdw0s3jn54";
+const _addr = (roleChar) => `${FIXTURE_PREFIX}${roleChar}${_PAD}`;
+
+const PEER_TRUSTED  = _addr("t");
+const PEER_NORMAL   = _addr("n");
+const PEER_BLOCKED  = _addr("d");
+const TARGET_ADDR   = _addr("g");
+const TARGET_ADDR2  = _addr("h");
+const PEER_LOCAL    = _addr("s");     // local "setup" identity
+const TARGET_REASON = _addr("f");     // used in reason-check test
+const TARGET_IDEM   = _addr("u");     // used in idempotency test
 
 async function executeSkill(skillName, peer, opts = {}) {
   const res = await fetch(`${CONSOLE_URL}/api/skills/execute`, {
@@ -28,7 +54,7 @@ async function setupPeerTrust(peer, trustLevel) {
     method: "POST", headers,
     body: JSON.stringify({
       traceId: randomUUID(), network: "mainnet", direction: "inbound",
-      localAddress: `kaspa:qqlocalsetup${RUN}`, remoteAddress: peer,
+      localAddress: PEER_LOCAL, remoteAddress: peer,
       contentText: "setup",
     }),
   });
@@ -41,11 +67,45 @@ async function setupPeerTrust(peer, trustLevel) {
   });
 }
 
+// Delete everything this test suite wrote. Called from after() so the
+// production DB stays clean even if individual assertions throw.
+function cleanupFixtures() {
+  let db;
+  try {
+    db = new Database(DB_PATH);
+  } catch (e) {
+    console.warn(`[cleanup] cannot open DB at ${DB_PATH}: ${e.message} — skipping`);
+    return;
+  }
+  try {
+    db.pragma("foreign_keys = OFF");
+    const like = `${FIXTURE_PREFIX}%`;
+    const ids = db.prepare("SELECT id FROM identities WHERE address LIKE ?").all(like).map(r => r.id);
+    if (ids.length === 0) { db.close(); return; }
+    const csv = ids.map(i => `'${i}'`).join(",");
+
+    const tx = db.transaction(() => {
+      db.prepare(`DELETE FROM messages WHERE sender_identity_id IN (${csv}) OR receiver_identity_id IN (${csv})`).run();
+      try { db.prepare(`DELETE FROM conversations WHERE local_identity_id IN (${csv}) OR remote_identity_id IN (${csv})`).run(); } catch {}
+      try { db.prepare(`DELETE FROM relation_states WHERE local_address LIKE ? OR peer_address LIKE ?`).run(like, like); } catch {}
+      db.prepare(`DELETE FROM identities WHERE address LIKE ?`).run(like);
+    });
+    tx();
+    console.log(`[cleanup] removed ${ids.length} fixture identity rows and related`);
+  } finally {
+    db.close();
+  }
+}
+
 describe("Introduce Skill", () => {
   before(async () => {
     await setupPeerTrust(PEER_TRUSTED, "recommended");
     await setupPeerTrust(PEER_NORMAL, "normal");
     await setupPeerTrust(PEER_BLOCKED, "blocked");
+  });
+
+  after(() => {
+    cleanupFixtures();
   });
 
   // --- Permission checks ---
@@ -134,7 +194,7 @@ describe("Introduce Skill", () => {
     const longReason = "This peer runs a reliable mining node in the Singapore region";
     await executeSkill("introduce", PEER_TRUSTED, {
       correlationId: cid,
-      params: { target: `kaspa:qqreasoncheck${RUN}fff`, reason: longReason },
+      params: { target: TARGET_REASON, reason: longReason },
     });
     // Check trace events
     const { events } = await (await fetch(`${CONSOLE_URL}/api/events/trace/${cid}`, { headers })).json();
@@ -143,7 +203,7 @@ describe("Introduce Skill", () => {
     const payload = JSON.parse(introEvt.payload_json);
     assert.equal(payload.reason, longReason, "full reason in event payload");
     // Check identity notes — should be brief
-    const ctx = await (await fetch(`${CONSOLE_URL}/api/context/kaspa:qqreasoncheck${RUN}fff`, { headers })).json();
+    const ctx = await (await fetch(`${CONSOLE_URL}/api/context/${TARGET_REASON}`, { headers })).json();
     assert.ok(!ctx.identity.notes.includes(longReason), "notes should NOT contain full reason");
     assert.ok(ctx.identity.notes.includes("Introduced by"), "notes should have brief summary");
   });
@@ -154,12 +214,12 @@ describe("Introduce Skill", () => {
     const cid = randomUUID();
     const r1 = await executeSkill("introduce", PEER_TRUSTED, {
       correlationId: cid,
-      params: { target: `kaspa:qqidemintro${RUN}ggg` },
+      params: { target: TARGET_IDEM },
     });
     assert.equal(r1.executed, true);
     const r2 = await executeSkill("introduce", PEER_TRUSTED, {
       correlationId: cid,
-      params: { target: `kaspa:qqidemintro${RUN}ggg` },
+      params: { target: TARGET_IDEM },
     });
     assert.equal(r2.replayed, true);
     assert.equal(r2.executed, false);
