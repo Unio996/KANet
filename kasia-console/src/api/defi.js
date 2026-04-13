@@ -361,4 +361,20 @@ export async function registerDefiRoutes(fastify) {
       return reply.code(500).send({ error: err.message });
     }
   });
+
+  // ══════════════════════════════════════════════════════════
+  // ── Independent DeFi Pages ───────────────────────────────
+  // ══════════════════════════════════════════════════════════
+
+  fastify.get('/aave', async (request, reply) => {
+    return reply.view('aave.eta', { _page: 'aave', pageTitle: 'Aave Lending — KANet' });
+  });
+
+  fastify.get('/hyperliquid', async (request, reply) => {
+    return reply.view('hyperliquid.eta', { _page: 'hyperliquid', pageTitle: 'Hyperliquid Perps — KANet' });
+  });
+
+  fastify.get('/aevo', async (request, reply) => {
+    return reply.view('aevo.eta', { _page: 'aevo', pageTitle: 'Aevo Options — KANet' });
+  });
 }
