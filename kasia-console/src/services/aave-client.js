@@ -10,6 +10,7 @@
 
 import { ethers } from 'ethers';
 import { getConfig } from '../data/settings/configs.js';
+import { withProvider } from './chains.js';
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -50,10 +51,6 @@ function resolveAsset(assetName) {
   return info;
 }
 
-function getProvider(rpcUrl) {
-  return new ethers.JsonRpcProvider(rpcUrl);
-}
-
 function getSigner(privateKey, provider) {
   return new ethers.Wallet(privateKey, provider);
 }
@@ -70,26 +67,27 @@ function getSigner(privateKey, provider) {
 export async function supply(privateKey, assetName, amount) {
   const rpcUrl = await getRpc();
   const asset = resolveAsset(assetName);
-  const provider = getProvider(rpcUrl);
-  const signer = getSigner(privateKey, provider);
-  const pool = new ethers.Contract(POOL_ADDRESS, POOL_ABI, signer);
-  const token = new ethers.Contract(asset.address, ERC20_ABI, signer);
+  return withProvider(rpcUrl, async (provider) => {
+    const signer = getSigner(privateKey, provider);
+    const pool = new ethers.Contract(POOL_ADDRESS, POOL_ABI, signer);
+    const token = new ethers.Contract(asset.address, ERC20_ABI, signer);
 
-  const amountWei = ethers.parseUnits(String(amount), asset.decimals);
+    const amountWei = ethers.parseUnits(String(amount), asset.decimals);
 
-  // Approve pool to spend tokens (large approval to avoid repeated approve TXs)
-  const allowance = await token.allowance(signer.address, POOL_ADDRESS);
-  if (allowance < amountWei) {
-    const approveAmt = ethers.parseUnits('10000', asset.decimals); // approve 10000 at once
-    const approveTx = await token.approve(POOL_ADDRESS, approveAmt > amountWei ? approveAmt : amountWei);
-    await approveTx.wait();
-  }
+    // Approve pool to spend tokens (large approval to avoid repeated approve TXs)
+    const allowance = await token.allowance(signer.address, POOL_ADDRESS);
+    if (allowance < amountWei) {
+      const approveAmt = ethers.parseUnits('10000', asset.decimals); // approve 10000 at once
+      const approveTx = await token.approve(POOL_ADDRESS, approveAmt > amountWei ? approveAmt : amountWei);
+      await approveTx.wait();
+    }
 
-  // Supply
-  const tx = await pool.supply(asset.address, amountWei, signer.address, 0);
-  const receipt = await tx.wait();
+    // Supply
+    const tx = await pool.supply(asset.address, amountWei, signer.address, 0);
+    const receipt = await tx.wait();
 
-  return { ok: true, txHash: receipt.hash, amount, asset: assetName, block: receipt.blockNumber };
+    return { ok: true, txHash: receipt.hash, amount, asset: assetName, block: receipt.blockNumber };
+  });
 }
 
 /**
@@ -102,18 +100,19 @@ export async function supply(privateKey, assetName, amount) {
 export async function withdraw(privateKey, assetName, amount) {
   const rpcUrl = await getRpc();
   const asset = resolveAsset(assetName);
-  const provider = getProvider(rpcUrl);
-  const signer = getSigner(privateKey, provider);
-  const pool = new ethers.Contract(POOL_ADDRESS, POOL_ABI, signer);
+  return withProvider(rpcUrl, async (provider) => {
+    const signer = getSigner(privateKey, provider);
+    const pool = new ethers.Contract(POOL_ADDRESS, POOL_ABI, signer);
 
-  const amountWei = amount >= 1e15
-    ? ethers.MaxUint256  // withdraw all
-    : ethers.parseUnits(String(amount), asset.decimals);
+    const amountWei = amount >= 1e15
+      ? ethers.MaxUint256  // withdraw all
+      : ethers.parseUnits(String(amount), asset.decimals);
 
-  const tx = await pool.withdraw(asset.address, amountWei, signer.address);
-  const receipt = await tx.wait();
+    const tx = await pool.withdraw(asset.address, amountWei, signer.address);
+    const receipt = await tx.wait();
 
-  return { ok: true, txHash: receipt.hash, amount, asset: assetName, block: receipt.blockNumber };
+    return { ok: true, txHash: receipt.hash, amount, asset: assetName, block: receipt.blockNumber };
+  });
 }
 
 /**
@@ -127,15 +126,16 @@ export async function withdraw(privateKey, assetName, amount) {
 export async function borrow(privateKey, assetName, amount, rateMode = 2) {
   const rpcUrl = await getRpc();
   const asset = resolveAsset(assetName);
-  const provider = getProvider(rpcUrl);
-  const signer = getSigner(privateKey, provider);
-  const pool = new ethers.Contract(POOL_ADDRESS, POOL_ABI, signer);
+  return withProvider(rpcUrl, async (provider) => {
+    const signer = getSigner(privateKey, provider);
+    const pool = new ethers.Contract(POOL_ADDRESS, POOL_ABI, signer);
 
-  const amountWei = ethers.parseUnits(String(amount), asset.decimals);
-  const tx = await pool.borrow(asset.address, amountWei, rateMode, 0, signer.address);
-  const receipt = await tx.wait();
+    const amountWei = ethers.parseUnits(String(amount), asset.decimals);
+    const tx = await pool.borrow(asset.address, amountWei, rateMode, 0, signer.address);
+    const receipt = await tx.wait();
 
-  return { ok: true, txHash: receipt.hash, amount, asset: assetName, block: receipt.blockNumber };
+    return { ok: true, txHash: receipt.hash, amount, asset: assetName, block: receipt.blockNumber };
+  });
 }
 
 /**
@@ -149,27 +149,28 @@ export async function borrow(privateKey, assetName, amount, rateMode = 2) {
 export async function repay(privateKey, assetName, amount, rateMode = 2) {
   const rpcUrl = await getRpc();
   const asset = resolveAsset(assetName);
-  const provider = getProvider(rpcUrl);
-  const signer = getSigner(privateKey, provider);
-  const pool = new ethers.Contract(POOL_ADDRESS, POOL_ABI, signer);
-  const token = new ethers.Contract(asset.address, ERC20_ABI, signer);
+  return withProvider(rpcUrl, async (provider) => {
+    const signer = getSigner(privateKey, provider);
+    const pool = new ethers.Contract(POOL_ADDRESS, POOL_ABI, signer);
+    const token = new ethers.Contract(asset.address, ERC20_ABI, signer);
 
-  const amountWei = amount >= 1e15
-    ? ethers.MaxUint256
-    : ethers.parseUnits(String(amount), asset.decimals);
+    const amountWei = amount >= 1e15
+      ? ethers.MaxUint256
+      : ethers.parseUnits(String(amount), asset.decimals);
 
-  // Approve pool to pull tokens for repay (including max repay)
-  const approveAmount = amountWei === ethers.MaxUint256 ? ethers.MaxUint256 : amountWei;
-  const allowance = await token.allowance(signer.address, POOL_ADDRESS);
-  if (allowance < approveAmount) {
-    const approveTx = await token.approve(POOL_ADDRESS, approveAmount);
-    await approveTx.wait();
-  }
+    // Approve pool to pull tokens for repay (including max repay)
+    const approveAmount = amountWei === ethers.MaxUint256 ? ethers.MaxUint256 : amountWei;
+    const allowance = await token.allowance(signer.address, POOL_ADDRESS);
+    if (allowance < approveAmount) {
+      const approveTx = await token.approve(POOL_ADDRESS, approveAmount);
+      await approveTx.wait();
+    }
 
-  const tx = await pool.repay(asset.address, amountWei, rateMode, signer.address);
-  const receipt = await tx.wait();
+    const tx = await pool.repay(asset.address, amountWei, rateMode, signer.address);
+    const receipt = await tx.wait();
 
-  return { ok: true, txHash: receipt.hash, amount, asset: assetName, block: receipt.blockNumber };
+    return { ok: true, txHash: receipt.hash, amount, asset: assetName, block: receipt.blockNumber };
+  });
 }
 
 // ── Query ───────────────────────────────────────────────────
@@ -181,21 +182,20 @@ export async function repay(privateKey, assetName, amount, rateMode = 2) {
  */
 export async function getAccountData(address) {
   const rpcUrl = await getRpc();
-  const provider = getProvider(rpcUrl);
-  const pool = new ethers.Contract(POOL_ADDRESS, POOL_ABI, provider);
-
-  const data = await pool.getUserAccountData(address);
-
-  return {
-    totalCollateralUSD: parseFloat(ethers.formatUnits(data.totalCollateralBase, 8)),
-    totalDebtUSD: parseFloat(ethers.formatUnits(data.totalDebtBase, 8)),
-    availableBorrowUSD: parseFloat(ethers.formatUnits(data.availableBorrowsBase, 8)),
-    ltv: Number(data.ltv) / 100,  // basis points → percentage
-    liquidationThreshold: Number(data.currentLiquidationThreshold) / 100,
-    healthFactor: data.totalDebtBase > 0n
-      ? parseFloat(ethers.formatUnits(data.healthFactor, 18))
-      : Infinity,
-  };
+  return withProvider(rpcUrl, async (provider) => {
+    const pool = new ethers.Contract(POOL_ADDRESS, POOL_ABI, provider);
+    const data = await pool.getUserAccountData(address);
+    return {
+      totalCollateralUSD: parseFloat(ethers.formatUnits(data.totalCollateralBase, 8)),
+      totalDebtUSD: parseFloat(ethers.formatUnits(data.totalDebtBase, 8)),
+      availableBorrowUSD: parseFloat(ethers.formatUnits(data.availableBorrowsBase, 8)),
+      ltv: Number(data.ltv) / 100,  // basis points → percentage
+      liquidationThreshold: Number(data.currentLiquidationThreshold) / 100,
+      healthFactor: data.totalDebtBase > 0n
+        ? parseFloat(ethers.formatUnits(data.healthFactor, 18))
+        : Infinity,
+    };
+  });
 }
 
 /**
@@ -207,8 +207,9 @@ export async function getAccountData(address) {
 export async function getTokenBalance(address, assetName) {
   const rpcUrl = await getRpc();
   const asset = resolveAsset(assetName);
-  const provider = getProvider(rpcUrl);
-  const token = new ethers.Contract(asset.address, ERC20_ABI, provider);
-  const bal = await token.balanceOf(address);
-  return parseFloat(ethers.formatUnits(bal, asset.decimals));
+  return withProvider(rpcUrl, async (provider) => {
+    const token = new ethers.Contract(asset.address, ERC20_ABI, provider);
+    const bal = await token.balanceOf(address);
+    return parseFloat(ethers.formatUnits(bal, asset.decimals));
+  });
 }

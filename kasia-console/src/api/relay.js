@@ -16,6 +16,18 @@ import { getMind } from '../services/mind-manager.js';
 import { ethers } from 'ethers';
 import { encrypt, decrypt } from '../services/crypto.js';
 import { randomUUID } from 'crypto';
+import {
+  CHAIN_META,
+  EVM_CHAINS as REGISTRY_EVM_CHAINS,
+  SUPPORTED_CHAINS as REGISTRY_SUPPORTED_CHAINS,
+  STABLECOINS as REGISTRY_STABLECOINS,
+  EVM_RPC_URLS as REGISTRY_EVM_RPC_URLS,
+  withFallbackRpc,
+  getExplorerAddressUrl,
+  getExplorerTxUrl,
+  getPublicMeta,
+  isEvmChain,
+} from '../services/chains.js';
 
 const KANET_ROOT = process.env.KANET_ROOT || 'D:/Anthropic';
 const MINDS_DIR = `${KANET_ROOT}/agent-mind/minds`;
@@ -183,45 +195,16 @@ export async function registerRelayRoutes(fastify) {
 
   // ── Multi-chain Wallet Management (agent_wallets table) ─────
 
-  const SUPPORTED_CHAINS = ['bnb', 'eth', 'sol', 'tron', 'polygon', 'arbitrum', 'optimism', 'avalanche', 'base'];
-  const EVM_CHAINS = ['bnb', 'eth', 'polygon', 'arbitrum', 'optimism', 'avalanche', 'base'];
-  const EVM_RPC_URLS = {
-    bnb: 'https://bsc-dataseed1.binance.org', eth: 'https://eth.llamarpc.com', polygon: 'https://polygon-bor-rpc.publicnode.com',
-    arbitrum: 'https://arb1.arbitrum.io/rpc', optimism: 'https://mainnet.optimism.io',
-    avalanche: 'https://api.avax.network/ext/bc/C/rpc', base: 'https://mainnet.base.org',
-  };
-  const STABLECOINS = {
-    bnb: {
-      usdt: { address: '0x55d398326f99059fF775485246999027B3197955', decimals: 18 },
-      usdc: { address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', decimals: 18 },
-    },
-    eth: {
-      usdt: { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', decimals: 6 },
-      usdc: { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', decimals: 6 },
-    },
-    polygon: {
-      usdt: { address: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F', decimals: 6 },
-      usdc: { address: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', decimals: 6 },
-    },
-    arbitrum: {
-      usdt: { address: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', decimals: 6 },
-      usdc: { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 },
-    },
-    optimism: {
-      usdt: { address: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', decimals: 6 },
-      usdc: { address: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85', decimals: 6 },
-    },
-    avalanche: {
-      usdt: { address: '0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7', decimals: 6 },
-      usdc: { address: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E', decimals: 6 },
-    },
-    base: {
-      usdc: { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', decimals: 6 },
-    },
-  };
-  // 向后兼容：旧代码引用 USDT_CONTRACTS 的地方
+  // Chain metadata sourced from central registry (src/services/chains.js).
+  // Add new chains or stablecoin variants there — this file no longer duplicates it.
+  const SUPPORTED_CHAINS = REGISTRY_SUPPORTED_CHAINS;
+  const EVM_CHAINS = REGISTRY_EVM_CHAINS;
+  const EVM_RPC_URLS = REGISTRY_EVM_RPC_URLS; // legacy single-URL map; new code uses withFallbackRpc
+  const STABLECOINS = REGISTRY_STABLECOINS;
   const USDT_CONTRACTS = Object.fromEntries(
-    Object.entries(STABLECOINS).map(([chain, coins]) => [chain, coins.usdt])
+    Object.entries(STABLECOINS)
+      .filter(([, coins]) => coins.usdt)
+      .map(([chain, coins]) => [chain, coins.usdt])
   );
 
   // Generate wallet by chain
@@ -284,22 +267,41 @@ export async function registerRelayRoutes(fastify) {
 
   async function getEvmBalances(chain, address) {
     const coins = STABLECOINS[chain];
-    if (!EVM_RPC_URLS[chain] || !coins) return { usdt: null, usdc: null, native: null };
+    if (!isEvmChain(chain) || !coins) return { usdt: null, usdc: null, native: null };
     try {
-      const provider = new ethers.JsonRpcProvider(EVM_RPC_URLS[chain]);
-      const abi = ['function balanceOf(address) view returns (uint256)'];
-      const usdtContract = new ethers.Contract(coins.usdt.address, abi, provider);
-      const usdcContract = new ethers.Contract(coins.usdc.address, abi, provider);
-      const [usdtBal, usdcBal, nativeBal] = await Promise.race([
-        Promise.all([usdtContract.balanceOf(address), usdcContract.balanceOf(address), provider.getBalance(address)]),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
-      ]);
-      return {
-        usdt: parseFloat(ethers.formatUnits(usdtBal, coins.usdt.decimals)),
-        usdc: parseFloat(ethers.formatUnits(usdcBal, coins.usdc.decimals)),
-        native: parseFloat(ethers.formatEther(nativeBal)),
-      };
-    } catch { return { usdt: null, native: null }; }
+      return await withFallbackRpc(chain, async (provider) => {
+        const abi = ['function balanceOf(address) view returns (uint256)'];
+        const usdtContract = coins.usdt ? new ethers.Contract(coins.usdt.address, abi, provider) : null;
+        const usdcContract = coins.usdc ? new ethers.Contract(coins.usdc.address, abi, provider) : null;
+        const extras = (coins.usdcExtras || []).map(e => ({
+          contract: new ethers.Contract(e.address, abi, provider),
+          decimals: e.decimals,
+        }));
+
+        const [usdtBal, usdcBal, nativeBal, ...extraBals] = await Promise.all([
+          usdtContract ? usdtContract.balanceOf(address) : Promise.resolve(null),
+          usdcContract ? usdcContract.balanceOf(address) : Promise.resolve(null),
+          provider.getBalance(address),
+          ...extras.map(e => e.contract.balanceOf(address)),
+        ]);
+
+        let usdcTotal = 0;
+        if (usdcBal != null && coins.usdc) {
+          usdcTotal += parseFloat(ethers.formatUnits(usdcBal, coins.usdc.decimals));
+        }
+        extraBals.forEach((bal, i) => {
+          if (bal != null) usdcTotal += parseFloat(ethers.formatUnits(bal, extras[i].decimals));
+        });
+
+        return {
+          usdt: usdtBal != null && coins.usdt ? parseFloat(ethers.formatUnits(usdtBal, coins.usdt.decimals)) : 0,
+          usdc: usdcTotal,
+          native: parseFloat(ethers.formatEther(nativeBal)),
+        };
+      }, { timeoutMs: 4000 });
+    } catch {
+      return { usdt: null, usdc: null, native: null };
+    }
   }
 
   async function getKasBalance(relayId) {
@@ -612,6 +614,7 @@ export async function registerRelayRoutes(fastify) {
     const { to, amount } = request.body || {};
     if (!to || !amount) return reply.code(400).send({ error: 'to and amount required' });
 
+    let provider;
     try {
       const privateKey = decrypt(wallet.privkey_encrypted);
 
@@ -620,7 +623,7 @@ export async function registerRelayRoutes(fastify) {
         const usdt = USDT_CONTRACTS[wallet.chain];
         if (!rpcUrl || !usdt) return reply.code(400).send({ error: 'Chain not configured for withdraw' });
 
-        const provider = new ethers.JsonRpcProvider(rpcUrl);
+        provider = new ethers.JsonRpcProvider(rpcUrl);
         const signer = new ethers.Wallet(privateKey, provider);
         const contract = new ethers.Contract(usdt.address, [
           'function transfer(address to, uint256 amount) returns (bool)',
@@ -636,6 +639,111 @@ export async function registerRelayRoutes(fastify) {
       return reply.code(400).send({ error: `${wallet.chain} withdraw not implemented yet` });
     } catch (err) {
       console.error(`[wallet] Withdraw failed: ${err.message}`);
+      return reply.code(500).send({ error: err.message });
+    } finally {
+      try { provider?.destroy?.(); } catch {}
+    }
+  });
+
+  // ── GET /api/chains/meta — public chain registry snapshot for the frontend ──
+  // Frontend fetches this once to know explorer URLs, native symbols, chain IDs,
+  // stablecoin addresses — everything needed to render and operate on wallets.
+  fastify.get('/api/chains/meta', async (_req, reply) => {
+    return reply.send({ ok: true, chains: getPublicMeta() });
+  });
+
+  // ── POST /api/relay/:id/wallets/:walletId/send — generic EVM transfer ──
+  // Supports native / usdt / usdc. Body: { asset: 'native'|'usdt'|'usdc', amount, to }
+  //
+  // Guardrails (money code, fail-closed):
+  //   1. Destination must be a valid checksum EVM address (ethers.getAddress throws on invalid)
+  //   2. Amount must be > 0 and parseable
+  //   3. Pre-check balance before broadcasting — return error on insufficient funds
+  //   4. RPC failure → no state mutation, just error
+  //   5. All TXs logged to console for audit
+  fastify.post('/api/relay/:id/wallets/:walletId/send', async (request, reply) => {
+    const relay = getRelayNode(request.params.id);
+    if (!relay) return reply.code(404).send({ error: 'Relay not found' });
+
+    const wallet = sqlite.prepare(
+      'SELECT id, chain, address, privkey_encrypted FROM agent_wallets WHERE id = ? AND relay_node_id = ?'
+    ).get(request.params.walletId, request.params.id);
+    if (!wallet) return reply.code(404).send({ error: 'Wallet not found' });
+    if (!wallet.privkey_encrypted) return reply.code(400).send({ error: 'No private key — cannot send' });
+    if (!isEvmChain(wallet.chain)) return reply.code(400).send({ error: `Send only supported on EVM chains (got ${wallet.chain})` });
+
+    const { asset, amount, to } = request.body || {};
+    if (!asset || !amount || !to) return reply.code(400).send({ error: 'asset, amount, to required' });
+
+    const assetKey = String(asset).toLowerCase();
+    if (!['native', 'usdt', 'usdc'].includes(assetKey)) {
+      return reply.code(400).send({ error: `asset must be native | usdt | usdc (got ${asset})` });
+    }
+
+    // Guardrail 1: checksum address
+    let toAddr;
+    try { toAddr = ethers.getAddress(String(to).trim()); }
+    catch { return reply.code(400).send({ error: `Invalid destination address: ${to}` }); }
+
+    // Guardrail 2: positive amount
+    const amountNum = parseFloat(amount);
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
+      return reply.code(400).send({ error: 'amount must be a positive number' });
+    }
+
+    const coins = STABLECOINS[wallet.chain] || {};
+    if (assetKey !== 'native' && !coins[assetKey]) {
+      return reply.code(400).send({ error: `${assetKey.toUpperCase()} not configured on ${wallet.chain}` });
+    }
+
+    try {
+      const privateKey = decrypt(wallet.privkey_encrypted);
+
+      const result = await withFallbackRpc(wallet.chain, async (provider) => {
+        const signer = new ethers.Wallet(privateKey, provider);
+
+        if (assetKey === 'native') {
+          // Pre-check native balance (must cover amount + estimated gas)
+          const balance = await provider.getBalance(signer.address);
+          const amountWei = ethers.parseEther(String(amountNum));
+          if (balance < amountWei) {
+            throw new Error(`Insufficient ${CHAIN_META[wallet.chain].nativeSymbol} balance`);
+          }
+          const tx = await signer.sendTransaction({ to: toAddr, value: amountWei });
+          return { txHash: tx.hash };
+        }
+
+        // ERC20 path
+        const token = coins[assetKey];
+        const erc20 = new ethers.Contract(
+          token.address,
+          [
+            'function transfer(address to, uint256 amount) returns (bool)',
+            'function balanceOf(address) view returns (uint256)',
+          ],
+          signer
+        );
+        const amountWei = ethers.parseUnits(String(amountNum), token.decimals);
+        const bal = await erc20.balanceOf(signer.address);
+        if (bal < amountWei) {
+          throw new Error(`Insufficient ${assetKey.toUpperCase()} balance on ${wallet.chain}`);
+        }
+        const tx = await erc20.transfer(toAddr, amountWei);
+        return { txHash: tx.hash };
+      }, { timeoutMs: 10000 });
+
+      console.log(`[wallet/send] ${wallet.chain} ${amountNum} ${assetKey} ${wallet.address} → ${toAddr} TX: ${result.txHash}`);
+      return reply.send({
+        ok: true,
+        txHash: result.txHash,
+        chain: wallet.chain,
+        asset: assetKey,
+        amount: amountNum,
+        to: toAddr,
+        explorerUrl: getExplorerTxUrl(wallet.chain, result.txHash),
+      });
+    } catch (err) {
+      console.error(`[wallet/send] failed: ${err.message}`);
       return reply.code(500).send({ error: err.message });
     }
   });
@@ -687,10 +795,11 @@ export async function registerRelayRoutes(fastify) {
     if (!toAddr) return reply.code(400).send({ error: `Unknown token: ${toToken}. Available: ${Object.keys(tokens).join(', ')}` });
     if (fromAddr === toAddr) return reply.code(400).send({ error: 'Cannot swap same token' });
 
+    let provider;
     try {
       const privateKey = decrypt(wallet.privkey_encrypted);
       const rpcUrl = wallet.chain === 'polygon' ? 'https://polygon.drpc.org' : EVM_RPC_URLS[wallet.chain];
-      const provider = new ethers.JsonRpcProvider(rpcUrl);
+      provider = new ethers.JsonRpcProvider(rpcUrl);
       const signer = new ethers.Wallet(privateKey, provider);
 
       const decimals = 6; // USDC/USDT 都是 6 位（Polygon 原生 USDC 也是 6）
@@ -733,6 +842,8 @@ export async function registerRelayRoutes(fastify) {
     } catch (err) {
       console.error(`[swap] Failed: ${err.message}`);
       return reply.code(500).send({ error: err.message });
+    } finally {
+      try { provider?.destroy?.(); } catch {}
     }
   });
 

@@ -140,61 +140,67 @@ function isNativeAsset(asset, chain) {
 
 async function _verifyEvm({ txHash, chain, expectedAmount, expectedTo, expectedFrom, required, asset = 'usdt' }) {
   const { ethers } = await import('ethers');
-  const provider = new ethers.JsonRpcProvider(EVM_RPC[chain]);
+  let provider;
+  try {
+    provider = new ethers.JsonRpcProvider(EVM_RPC[chain]);
 
-  // P2b: Native coin verification — check TX value field, no Transfer event parsing
-  if (isNativeAsset(asset, chain)) {
-    return _verifyEvmNative({ txHash, chain, expectedAmount, expectedTo, expectedFrom, required, provider, ethers });
+    // P2b: Native coin verification — check TX value field, no Transfer event parsing
+    if (isNativeAsset(asset, chain)) {
+      return await _verifyEvmNative({ txHash, chain, expectedAmount, expectedTo, expectedFrom, required, provider, ethers });
+    }
+
+    const receipt = await provider.getTransactionReceipt(txHash);
+    if (!receipt) {
+      return { confirmed: false, confirmations: 0, required, actualAmount: 0, recipient: '', sender: '', error: 'TX not found or still pending' };
+    }
+    if (receipt.status !== 1) {
+      return { confirmed: false, confirmations: 0, required, actualAmount: 0, recipient: '', sender: '', error: 'TX reverted (status=0)' };
+    }
+
+    const currentBlock = await provider.getBlockNumber();
+    const confirmations = receipt.blockNumber ? (currentBlock - receipt.blockNumber) : 0;
+    if (confirmations < required) {
+      return { confirmed: false, confirmations, required, actualAmount: 0, recipient: '', sender: '', error: `Insufficient confirmations: ${confirmations}/${required}` };
+    }
+
+    // Resolve token contract from multi-token table
+    const tokenInfo = EVM_TOKENS[chain]?.[asset] || EVM_TOKENS[chain]?.usdt;
+    if (!tokenInfo) {
+      return { confirmed: false, confirmations, required, actualAmount: 0, recipient: '', sender: '', error: `No token config for ${asset} on ${chain}` };
+    }
+
+    // Parse ERC20 Transfer log (works for USDT, USDC, DAI — all standard ERC20)
+    const transferTopic = ethers.id('Transfer(address,address,uint256)');
+    const tokenLower = tokenInfo.address.toLowerCase();
+    const transferLog = receipt.logs.find(l =>
+      l.address.toLowerCase() === tokenLower && l.topics[0] === transferTopic
+    );
+
+    if (!transferLog) {
+      return { confirmed: false, confirmations, required, actualAmount: 0, recipient: '', sender: '', error: `No ${asset.toUpperCase()} transfer found in TX` };
+    }
+
+    const actualAmount = parseFloat(ethers.formatUnits(transferLog.data, tokenInfo.decimals));
+    const recipient = '0x' + transferLog.topics[2].slice(26);
+    const sender = '0x' + transferLog.topics[1].slice(26);
+
+    // Amount check (0.5% tolerance)
+    const amountOk = actualAmount >= (expectedAmount || 0) * 0.995;
+    const recipientOk = !expectedTo || recipient.toLowerCase() === expectedTo.toLowerCase();
+    const senderOk = !expectedFrom || sender.toLowerCase() === expectedFrom.toLowerCase();
+
+    if (!amountOk) {
+      return { confirmed: false, confirmations, required, actualAmount, recipient, sender, underpayment: true, error: `Underpayment: expected ${expectedAmount}, got ${actualAmount.toFixed(2)}` };
+    }
+    if (!recipientOk) {
+      return { confirmed: false, confirmations, required, actualAmount, recipient, sender, error: `Recipient mismatch: expected ${expectedTo}, got ${recipient}` };
+    }
+
+    return { confirmed: true, confirmations, required, actualAmount, recipient, sender, senderMismatch: !senderOk && !!expectedFrom };
+  } finally {
+    // Release ethers internal retry loop when provider URL is slow/dead.
+    try { provider?.destroy?.(); } catch {}
   }
-
-  const receipt = await provider.getTransactionReceipt(txHash);
-  if (!receipt) {
-    return { confirmed: false, confirmations: 0, required, actualAmount: 0, recipient: '', sender: '', error: 'TX not found or still pending' };
-  }
-  if (receipt.status !== 1) {
-    return { confirmed: false, confirmations: 0, required, actualAmount: 0, recipient: '', sender: '', error: 'TX reverted (status=0)' };
-  }
-
-  const currentBlock = await provider.getBlockNumber();
-  const confirmations = receipt.blockNumber ? (currentBlock - receipt.blockNumber) : 0;
-  if (confirmations < required) {
-    return { confirmed: false, confirmations, required, actualAmount: 0, recipient: '', sender: '', error: `Insufficient confirmations: ${confirmations}/${required}` };
-  }
-
-  // Resolve token contract from multi-token table
-  const tokenInfo = EVM_TOKENS[chain]?.[asset] || EVM_TOKENS[chain]?.usdt;
-  if (!tokenInfo) {
-    return { confirmed: false, confirmations, required, actualAmount: 0, recipient: '', sender: '', error: `No token config for ${asset} on ${chain}` };
-  }
-
-  // Parse ERC20 Transfer log (works for USDT, USDC, DAI — all standard ERC20)
-  const transferTopic = ethers.id('Transfer(address,address,uint256)');
-  const tokenLower = tokenInfo.address.toLowerCase();
-  const transferLog = receipt.logs.find(l =>
-    l.address.toLowerCase() === tokenLower && l.topics[0] === transferTopic
-  );
-
-  if (!transferLog) {
-    return { confirmed: false, confirmations, required, actualAmount: 0, recipient: '', sender: '', error: `No ${asset.toUpperCase()} transfer found in TX` };
-  }
-
-  const actualAmount = parseFloat(ethers.formatUnits(transferLog.data, tokenInfo.decimals));
-  const recipient = '0x' + transferLog.topics[2].slice(26);
-  const sender = '0x' + transferLog.topics[1].slice(26);
-
-  // Amount check (0.5% tolerance)
-  const amountOk = actualAmount >= (expectedAmount || 0) * 0.995;
-  const recipientOk = !expectedTo || recipient.toLowerCase() === expectedTo.toLowerCase();
-  const senderOk = !expectedFrom || sender.toLowerCase() === expectedFrom.toLowerCase();
-
-  if (!amountOk) {
-    return { confirmed: false, confirmations, required, actualAmount, recipient, sender, underpayment: true, error: `Underpayment: expected ${expectedAmount}, got ${actualAmount.toFixed(2)}` };
-  }
-  if (!recipientOk) {
-    return { confirmed: false, confirmations, required, actualAmount, recipient, sender, error: `Recipient mismatch: expected ${expectedTo}, got ${recipient}` };
-  }
-
-  return { confirmed: true, confirmations, required, actualAmount, recipient, sender, senderMismatch: !senderOk && !!expectedFrom };
 }
 
 // ── P2b: EVM Native Coin Verification ───────────────────────

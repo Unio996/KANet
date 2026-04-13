@@ -39,9 +39,10 @@ export async function transferERC20(chain, privkeyEncrypted, toAddress, amount, 
     return { ok: false, error: `Chain ${chain} not supported for ERC20 transfer (supported: ${Object.keys(EVM_RPC).join(', ')})` };
   }
 
+  let provider;
   try {
     const privateKey = decrypt(privkeyEncrypted);
-    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    provider = new ethers.JsonRpcProvider(rpcUrl);
     const signer = new ethers.Wallet(privateKey, provider);
     const contract = new ethers.Contract(token.address, [
       'function balanceOf(address) view returns (uint256)',
@@ -65,6 +66,8 @@ export async function transferERC20(chain, privkeyEncrypted, toAddress, amount, 
   } catch (err) {
     console.error(`[evm-transfer] Failed: ${err.message}`);
     return { ok: false, error: err.message };
+  } finally {
+    try { provider?.destroy?.(); } catch {}
   }
 }
 

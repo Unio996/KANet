@@ -123,6 +123,7 @@ export async function registerTradingRoutes(fastify) {
     const { chain, address } = request.query;
     if (!chain || !address) return reply.code(400).send({ error: 'chain and address required' });
 
+    let provider;
     try {
       const EVM_CHAINS = ['bnb', 'eth'];
       if (EVM_CHAINS.includes(chain)) {
@@ -134,7 +135,7 @@ export async function registerTradingRoutes(fastify) {
         };
         if (!RPC[chain]) return reply.code(400).send({ error: 'unsupported chain' });
 
-        const provider = new ethers.JsonRpcProvider(RPC[chain]);
+        provider = new ethers.JsonRpcProvider(RPC[chain]);
         const [nativeBal, usdtBal] = await Promise.all([
           provider.getBalance(address),
           new ethers.Contract(USDT[chain].address, ['function balanceOf(address) view returns (uint256)'], provider).balanceOf(address),
@@ -151,6 +152,8 @@ export async function registerTradingRoutes(fastify) {
       return reply.send({ chain, address, native: 0, usdt: 0, note: 'real-time balance not yet implemented for ' + chain });
     } catch (err) {
       return reply.code(500).send({ error: err.message });
+    } finally {
+      try { provider?.destroy?.(); } catch {}
     }
   });
 
@@ -162,6 +165,7 @@ export async function registerTradingRoutes(fastify) {
     const wallet = sqlite.prepare('SELECT * FROM agent_wallets WHERE id = ?').get(walletId);
     if (!wallet?.privkey_encrypted) return reply.code(400).send({ error: 'Wallet not found or no private key' });
 
+    let provider;
     try {
       const privateKey = decrypt(wallet.privkey_encrypted);
       const EVM_CHAINS = ['bnb', 'eth'];
@@ -173,7 +177,7 @@ export async function registerTradingRoutes(fastify) {
           bnb: { address: '0x55d398326f99059fF775485246999027B3197955', decimals: 18 },
           eth: { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', decimals: 6 },
         };
-        const provider = new ethers.JsonRpcProvider(RPC[chain]);
+        provider = new ethers.JsonRpcProvider(RPC[chain]);
         const signer = new ethers.Wallet(privateKey, provider);
 
         if (asset === 'usdt') {
@@ -207,6 +211,8 @@ export async function registerTradingRoutes(fastify) {
     } catch (err) {
       console.error(`[withdraw] failed:`, err.message);
       return reply.code(500).send({ error: '提现失败: ' + err.message });
+    } finally {
+      try { provider?.destroy?.(); } catch {}
     }
   });
 

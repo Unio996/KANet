@@ -238,6 +238,9 @@ export async function registerStockRoutes(fastify) {
   });
 
   // 复用：创建 SDK client
+  // The returned client holds a JsonRpcProvider internally (via the Wallet
+  // signer). Callers MUST pass the client through _releaseClob() in a finally
+  // block to destroy the provider and stop ethers v6's internal retry loop.
   async function _makeClobClient(relay_node_id) {
     const creds = _getPolymarketCreds(relay_node_id);
     if (!creds) return null;
@@ -252,7 +255,15 @@ export async function registerStockRoutes(fastify) {
     const wallet = new ethers.Wallet(pk, provider);
     if (!wallet._signTypedData) wallet._signTypedData = wallet.signTypedData.bind(wallet);
     const sdkCreds = { key: creds.key || creds.apiKey, secret: creds.secret, passphrase: creds.passphrase };
-    return new ClobClient('https://clob.polymarket.com', 137, wallet, sdkCreds);
+    const client = new ClobClient('https://clob.polymarket.com', 137, wallet, sdkCreds);
+    client.__provider = provider; // for _releaseClob cleanup
+    return client;
+  }
+
+  // Release the provider held by a client created via _makeClobClient.
+  // Safe to call with null / already-destroyed clients.
+  function _releaseClob(client) {
+    try { client?.__provider?.destroy?.(); } catch {}
   }
 
   // Market question cache — markets don't change, cache indefinitely
@@ -349,7 +360,11 @@ export async function registerStockRoutes(fastify) {
       const positions = allPositions.filter(p => !p.settled);
       const settled = allPositions.filter(p => p.settled);
       return reply.send({ positions, settled, trades });
-    } catch (e) { return reply.send({ positions: [], error: e.message }); }
+    } catch (e) {
+      return reply.send({ positions: [], error: e.message });
+    } finally {
+      _releaseClob(client);
+    }
   });
 
   // GET /api/predictions/orders — 通过 SDK getOpenOrders
@@ -361,7 +376,11 @@ export async function registerStockRoutes(fastify) {
     try {
       const orders = await client.getOpenOrders();
       return reply.send({ orders: Array.isArray(orders) ? orders : [] });
-    } catch (e) { return reply.send({ orders: [], error: e.message }); }
+    } catch (e) {
+      return reply.send({ orders: [], error: e.message });
+    } finally {
+      _releaseClob(client);
+    }
   });
 
   // GET /api/predictions/book/:tokenId — 订单簿
@@ -379,8 +398,9 @@ export async function registerStockRoutes(fastify) {
     const creds = _getPolymarketCreds(relay_node_id);
     if (!creds) return reply.code(400).send({ error: 'Not set up' });
 
+    let client;
     try {
-      const client = await _makeClobClient(relay_node_id);
+      client = await _makeClobClient(relay_node_id);
       if (!client) return reply.code(400).send({ error: 'Wallet or API key missing' });
       const order = await client.createOrder({
         tokenID: tokenId,
@@ -392,6 +412,8 @@ export async function registerStockRoutes(fastify) {
       return reply.send({ ok: result.success || !result.error, ...result });
     } catch (e) {
       return reply.send({ ok: false, error: e.message });
+    } finally {
+      _releaseClob(client);
     }
   });
 
@@ -404,7 +426,11 @@ export async function registerStockRoutes(fastify) {
     try {
       const result = await client.cancelOrder({ orderID: request.params.orderId });
       return reply.send({ ok: true, ...result });
-    } catch (e) { return reply.send({ ok: false, error: e.message }); }
+    } catch (e) {
+      return reply.send({ ok: false, error: e.message });
+    } finally {
+      _releaseClob(client);
+    }
   });
 
   // ── Polymarket Approval ──
@@ -420,12 +446,17 @@ export async function registerStockRoutes(fastify) {
     // relay.js wallets API 查的是原生 USDC（0x3c49...），不适用
     const usdce = await getUsdcBalance(wallet.address) || 0;
     let matic = 0;
-    try {
+    {
       const { ethers } = await import('ethers');
-      const provider = new ethers.JsonRpcProvider('https://polygon.drpc.org');
-      const bal = await provider.getBalance(wallet.address);
-      matic = parseFloat(ethers.formatEther(bal));
-    } catch {}
+      let provider;
+      try {
+        provider = new ethers.JsonRpcProvider('https://polygon.drpc.org');
+        const bal = await provider.getBalance(wallet.address);
+        matic = parseFloat(ethers.formatEther(bal));
+      } catch {} finally {
+        try { provider?.destroy?.(); } catch {}
+      }
+    }
 
     const [allowanceResult] = await Promise.all([checkAllowance(wallet.address)]);
     const hasClobKey = !!_getPolymarketCreds(relay_node_id);
@@ -498,15 +529,20 @@ export async function registerStockRoutes(fastify) {
     const steps = { cancelledOrders: 0, sweep: null, configDeleted: false, walletDeleted: false };
 
     // Step 1: cancel any open CLOB orders (best-effort, non-blocking)
-    try {
-      const client = await _makeClobClient(relayNodeId);
-      if (client) {
-        const open = await client.getOpenOrders().catch(() => []);
-        for (const o of (open || [])) {
-          try { await client.cancelOrder({ orderID: o.id }); steps.cancelledOrders++; } catch {}
+    {
+      let client;
+      try {
+        client = await _makeClobClient(relayNodeId);
+        if (client) {
+          const open = await client.getOpenOrders().catch(() => []);
+          for (const o of (open || [])) {
+            try { await client.cancelOrder({ orderID: o.id }); steps.cancelledOrders++; } catch {}
+          }
         }
+      } catch { /* no credentials is fine */ } finally {
+        _releaseClob(client);
       }
-    } catch { /* no credentials is fine */ }
+    }
 
     // Step 2: sweep USDC to destination — this is the load-bearing step.
     // If sweep fails, DO NOT delete credentials/wallet. User still has value.

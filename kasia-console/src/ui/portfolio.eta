@@ -2,41 +2,107 @@
 
 <div class="h-full flex flex-col" x-data="portfolioApp()">
 
-  <!-- ═══ HEADER ═══ -->
-  <div class="flex-shrink-0 bg-white border-b border-warm-200 px-5 py-3 flex items-center justify-between">
-    <div class="flex items-center gap-3">
-      <div class="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-xs">💼</div>
-      <div>
-        <div class="text-sm font-semibold text-ink-700">Portfolio 总览</div>
-        <div class="text-[10px] text-ink-400">本机所有 Agent 的资产聚合视图（私钥永不共享，只看自己的）</div>
+  <!-- ═══ HEADER (relative wrapper so wallet panel can slide down from here) ═══ -->
+  <div class="relative flex-shrink-0">
+    <div class="bg-white border-b border-warm-200 px-5 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-xs">💼</div>
+        <div>
+          <div class="text-sm font-semibold text-ink-700">Portfolio 总览</div>
+          <div class="text-[10px] text-ink-400">本机所有 Agent 的资产聚合视图（私钥永不共享，只看自己的）</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-3 text-xs">
+        <!-- 单位切换 -->
+        <div class="flex items-center bg-warm-100 rounded overflow-hidden border border-warm-200">
+          <button @click="unit = 'usd'" class="px-2 py-1 text-[11px] font-medium transition-colors"
+                  :class="unit === 'usd' ? 'bg-brand-500 text-white' : 'text-ink-500 hover:bg-warm-200'">USD</button>
+          <button @click="unit = 'kas'" class="px-2 py-1 text-[11px] font-medium transition-colors"
+                  :class="unit === 'kas' ? 'bg-green-500 text-white' : 'text-ink-500 hover:bg-warm-200'"
+                  :disabled="!kasPriceUsd"
+                  :title="!kasPriceUsd ? 'KAS 价格获取中' : 'KAS 计价'">KAS</button>
+        </div>
+        <span x-show="unit === 'kas' && kasPriceUsd" class="text-[10px] text-ink-400" x-text="'1 KAS = $' + (kasPriceUsd || 0).toFixed(4)"></span>
+        <div class="flex items-center gap-1.5" x-show="agents.length > 1">
+          <span class="text-ink-400">Agent:</span>
+          <select x-model="selectedRelayId" @change="loadAll()" class="pl-2 pr-6 py-1 border border-warm-200 rounded text-xs bg-white">
+            <option value="">全部合并</option>
+            <template x-for="a in agents" :key="a.id">
+              <option :value="a.id" x-text="a.name"></option>
+            </template>
+          </select>
+        </div>
+        <span x-show="lastRefresh" class="text-[10px] text-ink-400" x-text="'更新于 ' + lastRefresh"></span>
+        <button @click="loadAll()" :disabled="loading"
+                class="text-brand-500 hover:text-brand-700 flex items-center gap-1 disabled:opacity-40">
+          <svg class="w-3.5 h-3.5" :class="loading && 'animate-spin'" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+          刷新
+        </button>
       </div>
     </div>
-    <div class="flex items-center gap-3 text-xs">
-      <!-- 单位切换 -->
-      <div class="flex items-center bg-warm-100 rounded overflow-hidden border border-warm-200">
-        <button @click="unit = 'usd'" class="px-2 py-1 text-[11px] font-medium transition-colors"
-                :class="unit === 'usd' ? 'bg-brand-500 text-white' : 'text-ink-500 hover:bg-warm-200'">USD</button>
-        <button @click="unit = 'kas'" class="px-2 py-1 text-[11px] font-medium transition-colors"
-                :class="unit === 'kas' ? 'bg-green-500 text-white' : 'text-ink-500 hover:bg-warm-200'"
-                :disabled="!kasPriceUsd"
-                :title="!kasPriceUsd ? 'KAS 价格获取中' : 'KAS 计价'">KAS</button>
+
+    <!-- ═══ WALLET PANEL — slides down from header (同 exchange.eta 模式) ═══ -->
+    <div x-show="walletPanel.open" x-transition
+         @keydown.escape.window="walletPanel.open = false"
+         class="absolute top-full left-0 right-0 z-30 bg-white border-b border-warm-200 shadow-lg p-4 max-h-96 overflow-y-auto">
+      <div class="flex items-center justify-between mb-3">
+        <h4 class="text-sm font-semibold text-ink-700">
+          <span x-text="(walletPanel.chain || '').toUpperCase()"></span>
+          <span class="text-ink-400 font-normal ml-1 text-[11px]" x-text="'· ' + (walletPanel.agentName || '') + ' · 钱包'"></span>
+        </h4>
+        <button @click="walletPanel.open = false" class="text-ink-400 hover:text-ink-600 text-xs">关闭</button>
       </div>
-      <span x-show="unit === 'kas' && kasPriceUsd" class="text-[10px] text-ink-400" x-text="'1 KAS = $' + (kasPriceUsd || 0).toFixed(4)"></span>
-      <div class="flex items-center gap-1.5" x-show="agents.length > 1">
-        <span class="text-ink-400">Agent:</span>
-        <select x-model="selectedRelayId" @change="loadAll()" class="pl-2 pr-6 py-1 border border-warm-200 rounded text-xs bg-white">
-          <option value="">全部合并</option>
-          <template x-for="a in agents" :key="a.id">
-            <option :value="a.id" x-text="a.name"></option>
-          </template>
-        </select>
+
+      <div class="space-y-3">
+        <template x-for="w in walletPanel.wallets" :key="w.id || w.address">
+          <div class="p-3 rounded-lg border border-warm-200 bg-warm-50">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-[10px] text-brand-500 cursor-pointer tabular-nums font-mono break-all"
+                    @click="copyAddr(w.address, $event)"
+                    x-text="w.address"
+                    title="点击复制"></span>
+              <span x-show="w.isDefault" class="text-[9px] bg-brand-50 text-brand-600 px-1.5 py-0.5 rounded ml-2 flex-shrink-0">default</span>
+            </div>
+            <div class="grid grid-cols-4 gap-2 text-[11px]">
+              <div>
+                <span class="text-ink-400">USDT</span>
+                <div class="font-medium tabular-nums text-ink-700" x-text="(w.usdtBalance || 0).toFixed(2)"></div>
+              </div>
+              <div>
+                <span class="text-ink-400">USDC</span>
+                <div class="font-medium tabular-nums text-ink-700" x-text="(w.usdcBalance || 0).toFixed(2)"></div>
+              </div>
+              <div>
+                <span class="text-ink-400" x-text="nativeSymbol(w.chain)"></span>
+                <div class="font-medium tabular-nums text-ink-700" x-text="fmtNative(w.nativeBalance || 0)"></div>
+              </div>
+              <div>
+                <a :href="explorerAddressUrl(w.chain, w.address)" target="_blank" rel="noopener"
+                   x-show="explorerAddressUrl(w.chain, w.address)"
+                   class="text-[10px] text-brand-500 hover:text-brand-700 underline">浏览器 →</a>
+              </div>
+            </div>
+            <div class="flex gap-2 mt-2 flex-wrap">
+              <button @click="copyAddr(w.address, $event)" class="px-2 py-1 rounded text-[10px] bg-warm-100 text-ink-500 hover:text-ink-800 border border-warm-200">复制</button>
+              <button @click="sendPrompt(w)"
+                      :disabled="!w.hasPrivateKey"
+                      :title="w.hasPrivateKey ? '发送代币' : '此钱包无私钥'"
+                      class="px-2 py-1 rounded text-[10px] bg-warm-100 text-ink-500 hover:text-red-600 border border-warm-200 disabled:opacity-40 disabled:cursor-not-allowed">发送</button>
+              <button @click="showPrivkeyFor(w)"
+                      :disabled="!w.hasPrivateKey"
+                      :title="w.hasPrivateKey ? '查看私钥' : '此钱包无私钥'"
+                      class="px-2 py-1 rounded text-[10px] bg-warm-100 text-ink-500 hover:text-orange-600 border border-warm-200 disabled:opacity-40 disabled:cursor-not-allowed">私钥</button>
+            </div>
+          </div>
+        </template>
+        <div x-show="(walletPanel.wallets || []).length === 0" class="text-center text-[11px] text-ink-400 py-4">该 Agent 在此链下没有钱包</div>
+
+        <!-- + 新建同链钱包 (复用 exchange.eta 模式) -->
+        <button @click="createWalletInPanel()"
+                class="w-full py-2 rounded-lg border border-dashed border-warm-300 text-[11px] text-ink-400 hover:text-brand-500 hover:border-brand-300 transition-all">
+          + 新建 <span x-text="(walletPanel.chain || '').toUpperCase()"></span> 钱包
+        </button>
       </div>
-      <span x-show="lastRefresh" class="text-[10px] text-ink-400" x-text="'更新于 ' + lastRefresh"></span>
-      <button @click="loadAll()" :disabled="loading"
-              class="text-brand-500 hover:text-brand-700 flex items-center gap-1 disabled:opacity-40">
-        <svg class="w-3.5 h-3.5" :class="loading && 'animate-spin'" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-        刷新
-      </button>
     </div>
   </div>
 
@@ -44,7 +110,7 @@
   <div x-show="loading && !data" class="flex-1 flex items-center justify-center text-xs text-ink-400">
     <div class="text-center">
       <svg class="animate-spin w-6 h-6 mx-auto mb-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="3" opacity="0.3"/><path d="M12 2 A10 10 0 0 1 22 12" stroke-width="3" stroke-linecap="round"/></svg>
-      正在聚合 8 个数据源 (Kaspa / 多链钱包 / Aave / Hyperliquid / Aevo)...
+      正在聚合 10 个数据源 (Kaspa / 多链钱包 / Aave / Hyperliquid / Aevo / Polymarket / 交易锁定)...
     </div>
   </div>
   <div x-show="error" class="flex-1 flex items-center justify-center">
@@ -97,7 +163,8 @@
             </div>
             <div class="text-right text-[11px]">
               <div class="text-ink-400">本 Agent 资产</div>
-              <div class="font-semibold tabular-nums text-ink-700" x-text="fmt((agent.stableTotalUsd || 0) + (agent.defiTotalUsd || 0) + (agent.perpEquityUsd || 0))"></div>
+              <div class="font-semibold tabular-nums text-ink-700" x-text="fmtAgentTotal(agent)"></div>
+              <div class="text-[9px] text-ink-400" x-show="(agent.kaspa?.balance || 0) > 0" x-text="(agent.kaspa?.balance || 0).toFixed(2) + ' KAS' + (kasPriceUsd ? ' (≈$' + ((agent.kaspa?.balance || 0) * kasPriceUsd).toFixed(2) + ')' : '')"></div>
             </div>
           </div>
 
@@ -117,20 +184,48 @@
             </div>
 
             <!-- 多链钱包 -->
-            <div class="p-4">
-              <div class="text-[10px] text-ink-400 uppercase tracking-wider mb-2 flex items-center gap-1">
-                <span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-                多链钱包 (<span x-text="(agent.chains || []).length"></span>)
+            <div class="p-4 relative" @click.outside="addChainPickerFor === agent.id && (addChainPickerFor = null)">
+              <div class="text-[10px] text-ink-400 uppercase tracking-wider mb-2 flex items-center justify-between">
+                <div class="flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                  多链钱包 (<span x-text="(agent.chains || []).length"></span>)
+                </div>
+                <button @click.stop="addChainPickerFor = (addChainPickerFor === agent.id ? null : agent.id)"
+                        class="text-ink-400 hover:text-brand-600 text-sm leading-none px-1.5 rounded hover:bg-warm-100"
+                        title="为此 Agent 添加链上钱包">+</button>
               </div>
-              <div x-show="(agent.chains || []).length === 0" class="text-[11px] text-ink-400">无钱包</div>
+
+              <!-- + 新链选择器 (绝对定位下拉) -->
+              <div x-show="addChainPickerFor === agent.id" x-cloak x-transition
+                   class="absolute right-2 top-8 z-20 bg-white border border-warm-300 rounded-lg shadow-lg p-2 w-44">
+                <div class="text-[9px] text-ink-400 uppercase tracking-wider mb-1 px-1">选择新链</div>
+                <template x-for="ch in addableChainsFor(agent)" :key="ch">
+                  <button @click="createWalletForAgent(agent, ch)"
+                          class="w-full text-left px-2 py-1.5 hover:bg-warm-100 rounded text-[11px] flex items-center justify-between">
+                    <span class="font-medium uppercase text-ink-700" x-text="ch"></span>
+                    <span class="text-[9px] text-ink-400" x-text="nativeSymbol(ch)"></span>
+                  </button>
+                </template>
+                <div x-show="addableChainsFor(agent).length === 0" class="text-[10px] text-ink-400 px-2 py-1">所有链都已有钱包</div>
+              </div>
+
+              <div x-show="(agent.chains || []).length === 0" class="text-[11px] text-ink-400">点击 + 新建第一个钱包</div>
               <div class="space-y-1">
                 <template x-for="c in (agent.chains || [])" :key="c.id">
-                  <div class="flex items-center justify-between text-[11px]">
+                  <div class="flex items-center justify-between text-[11px] group">
                     <span class="text-ink-600 font-medium uppercase" x-text="c.chain"></span>
-                    <div class="text-right tabular-nums text-ink-500">
-                      <span x-show="c.usdtBalance > 0" x-text="(c.usdtBalance || 0).toFixed(2) + ' USDT'"></span>
-                      <span x-show="c.usdcBalance > 0" class="ml-1" x-text="(c.usdcBalance || 0).toFixed(2) + ' USDC'"></span>
-                      <span x-show="!c.usdtBalance && !c.usdcBalance" class="text-ink-300">空</span>
+                    <div class="flex items-center gap-1">
+                      <div class="text-right tabular-nums text-ink-500">
+                        <span x-show="c.usdtBalance > 0" x-text="(c.usdtBalance || 0).toFixed(2) + ' USDT'"></span>
+                        <span x-show="c.usdcBalance > 0" class="ml-1" x-text="(c.usdcBalance || 0).toFixed(2) + ' USDC'"></span>
+                        <span x-show="c.nativeBalance > 0" class="ml-1 text-ink-400" x-text="fmtNative(c.nativeBalance) + ' ' + nativeSymbol(c.chain)"></span>
+                        <span x-show="!(c.usdtBalance > 0) && !(c.usdcBalance > 0) && !(c.nativeBalance > 0)" class="text-ink-300">0</span>
+                      </div>
+                      <button @click="openWalletPanel(agent, c.chain)"
+                              class="ml-1 w-5 h-5 rounded hover:bg-warm-200 flex items-center justify-center text-ink-400 hover:text-ink-700 transition-colors"
+                              title="钱包操作">
+                        <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M10 3a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM10 8.5a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM10 14a1.5 1.5 0 110 3 1.5 1.5 0 010-3z"/></svg>
+                      </button>
                     </div>
                   </div>
                 </template>
@@ -199,8 +294,40 @@
                 </div>
               </div>
               <div x-show="!agent.aevo || !agent.aevo.connected" class="text-[10px] text-ink-300">Aevo 未配置凭证</div>
+
+              <!-- Polymarket -->
+              <div x-show="agent.polymarket?.configured" class="mt-2 pt-2 border-t border-warm-100">
+                <div class="flex items-center justify-between text-[11px]">
+                  <a href="/predictions" class="text-ink-600 font-medium hover:text-brand-600">Polymarket</a>
+                  <span class="tabular-nums text-ink-700" x-text="fmt(agent.polymarket?.approxValueUsd || 0)"></span>
+                </div>
+                <div class="flex items-center justify-between text-[10px] text-ink-400 mt-0.5">
+                  <span><span class="tabular-nums" x-text="agent.polymarket?.positionCount || 0"></span> 持仓</span>
+                  <span class="text-ink-300">Polygon USDC.e</span>
+                </div>
+              </div>
+              <div x-show="agent.polymarket && !agent.polymarket.configured" class="mt-2 pt-2 border-t border-warm-100 text-[10px] text-ink-300">Polymarket 未配置 API</div>
             </div>
 
+          </div>
+
+          <!-- 交易锁定 (KANet Exchange fund_locks — 已包含在钱包余额中，只作提醒) -->
+          <div x-show="agent.exchangeLocks?.hasAny" class="px-4 py-2 bg-amber-50/50 border-t border-amber-100">
+            <div class="flex items-center justify-between text-[11px]">
+              <div class="flex items-center gap-2">
+                <span class="text-[9px] px-1.5 py-0.5 rounded bg-amber-200 text-amber-800 font-medium">🔒 交易锁定</span>
+                <span class="text-ink-500"><span x-text="agent.exchangeLocks?.count || 0"></span> 笔挂单占用</span>
+              </div>
+              <div class="text-right tabular-nums text-[11px] text-ink-600">
+                <template x-for="(amt, asset) in (agent.exchangeLocks?.byAsset || {})" :key="asset">
+                  <span class="ml-2">
+                    <span x-text="(amt || 0).toFixed(asset === 'kas' ? 2 : 2)"></span>
+                    <span class="text-ink-400 uppercase" x-text="asset"></span>
+                  </span>
+                </template>
+              </div>
+            </div>
+            <div class="text-[9px] text-ink-400 mt-0.5">(已包含在上方钱包余额中,仅为占用提醒)</div>
           </div>
 
           <!-- 开仓列表 (如果有) -->
@@ -257,7 +384,47 @@ function portfolioApp() {
     loading: false,
     lastRefresh: '',
     unit: localStorage.getItem('portfolio_unit') || 'usd',  // 'usd' | 'kas'
+    chainsMeta: {},  // loaded from /api/chains/meta
+    addChainPickerFor: null,  // agent.id whose "+" picker is open
+    walletPanel: {
+      open: false,
+      relayId: null,
+      agentName: '',
+      chain: '',
+      wallets: [],  // all wallets on this (agent, chain) pair
+    },
     get kasPriceUsd() { return this.data?.kasPriceUsd || null; },
+
+    // Native-token symbol per EVM chain (MATIC for polygon, ETH for L2s, etc.)
+    nativeSymbol(chain) {
+      const map = { polygon: 'MATIC', bnb: 'BNB', eth: 'ETH', avalanche: 'AVAX', arbitrum: 'ETH', optimism: 'ETH', base: 'ETH', sol: 'SOL', tron: 'TRX' };
+      return map[chain] || chain?.toUpperCase() || '';
+    },
+
+    // Compact native-balance display (small values need more decimals)
+    fmtNative(n) {
+      const x = parseFloat(n) || 0;
+      if (x === 0) return '0';
+      if (x < 0.001) return x.toExponential(2);
+      if (x < 1) return x.toFixed(4);
+      if (x < 1000) return x.toFixed(3);
+      return x.toFixed(1);
+    },
+
+    // Per-agent grand total: stables + DeFi + perps + native KAS (folded via price).
+    // Same logic as headline grandTotal() but scoped to one agent.
+    fmtAgentTotal(agent) {
+      const usd = (agent.stableTotalUsd || 0) + (agent.defiTotalUsd || 0) + (agent.perpEquityUsd || 0);
+      const nativeKas = agent.kaspa?.balance || 0;
+      if (this.unit === 'kas' && this.kasPriceUsd && this.kasPriceUsd > 0) {
+        const total = nativeKas + (usd / this.kasPriceUsd);
+        return total >= 10
+          ? Math.round(total).toLocaleString() + ' KAS'
+          : total.toFixed(2) + ' KAS';
+      }
+      const totalUsd = usd + nativeKas * (this.kasPriceUsd || 0);
+      return '$' + totalUsd.toFixed(2);
+    },
 
     // Format any USD amount according to current unit selection
     fmt(usd) {
@@ -287,8 +454,198 @@ function portfolioApp() {
     async init() {
       // Watch unit changes to persist
       this.$watch('unit', v => localStorage.setItem('portfolio_unit', v));
+      // Load chain metadata (explorer URLs, symbols, stablecoin addresses) once
+      try {
+        const r = await fetch('/api/chains/meta').then(r => r.json());
+        if (r?.ok) this.chainsMeta = r.chains || {};
+      } catch {}
       await this.loadAgentList();
       await this.loadAll();
+    },
+
+    // ── Wallet panel (exchange.eta 三层模式) ───────────────────────
+    // Layer 1: ··· button on chain row
+    // Layer 2: slide-down panel listing all wallets for (agent, chain)
+    // Layer 3: inline buttons per wallet — copy / send / private key
+    openWalletPanel(agent, chain) {
+      // Toggle off if same agent+chain already open
+      if (this.walletPanel.open
+          && this.walletPanel.relayId === agent.id
+          && this.walletPanel.chain === chain) {
+        this.walletPanel.open = false;
+        return;
+      }
+      const wallets = (agent.chains || []).filter(c => c.chain === chain);
+      this.walletPanel = {
+        open: true,
+        relayId: agent.id,
+        agentName: agent.name,
+        chain,
+        wallets,
+      };
+    },
+
+    copyAddr(addr, ev) {
+      if (!addr) return;
+      try { navigator.clipboard.writeText(addr); }
+      catch {
+        const ta = document.createElement('textarea');
+        ta.value = addr;
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } catch {}
+        document.body.removeChild(ta);
+      }
+      const el = ev?.target;
+      if (el && el.textContent) {
+        const prev = el.textContent;
+        el.textContent = '已复制';
+        setTimeout(() => { el.textContent = prev; }, 1500);
+      }
+    },
+
+    explorerAddressUrl(chain, addr) {
+      if (!addr) return null;
+      const tmpl = this.chainsMeta?.[chain]?.explorer?.addressTemplate;
+      if (!tmpl) return null;
+      return tmpl.replace('__ADDR__', addr);
+    },
+
+    // Prompt-chain send (native browser prompts, same UX as exchange.eta withdrawPrompt)
+    sendPrompt(wallet) {
+      if (!wallet.hasPrivateKey) { alert('此钱包无私钥,无法发送'); return; }
+      const chainName = (wallet.chain || '').toUpperCase();
+      const nat = this.nativeSymbol(wallet.chain);
+      const usdtAvail = (wallet.usdtBalance || 0).toFixed(2);
+      const usdcAvail = (wallet.usdcBalance || 0).toFixed(2);
+      const natAvail = (wallet.nativeBalance || 0).toFixed(6);
+      const choice = prompt(
+        `发送 (${chainName}):\n` +
+        `  1 = ${nat} (可用 ${natAvail})\n` +
+        `  2 = USDT (可用 ${usdtAvail})\n` +
+        `  3 = USDC (可用 ${usdcAvail})\n\n` +
+        `输入 1 / 2 / 3:`
+      );
+      if (!choice) return;
+      const pick = choice.trim();
+      const asset = pick === '2' ? 'usdt' : pick === '3' ? 'usdc' : pick === '1' ? 'native' : null;
+      if (!asset) return;
+      const assetLabel = asset === 'native' ? nat : asset.toUpperCase();
+
+      const toAddr = prompt(`目的地址 (${chainName}, 0x...):`);
+      if (!toAddr) return;
+      const trimmed = toAddr.trim();
+      if (!/^0x[a-fA-F0-9]{40}$/.test(trimmed)) { alert('地址格式无效'); return; }
+
+      const amtStr = prompt(`数量 (${assetLabel}):`);
+      if (!amtStr) return;
+      const amt = parseFloat(amtStr);
+      if (!(amt > 0)) { alert('金额必须大于 0'); return; }
+
+      if (!confirm(
+        `确认发送:\n` +
+        `  ${amt} ${assetLabel}\n` +
+        `  目的: ${trimmed}\n` +
+        `  链: ${chainName}\n\n` +
+        `此操作不可撤销。`
+      )) return;
+
+      this.doSend(wallet, trimmed, amt, asset);
+    },
+
+    async doSend(wallet, toAddr, amount, asset) {
+      try {
+        const r = await fetch(`/api/relay/${this.walletPanel.relayId}/wallets/${wallet.id}/send`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ asset, amount, to: toAddr }),
+          signal: AbortSignal.timeout(45000),
+        });
+        const d = await r.json();
+        if (r.ok && (d.ok || d.txHash)) {
+          alert('✓ 已广播!\nTX: ' + (d.txHash || '').slice(0, 20) + '...\n\n' + (d.explorerUrl || ''));
+          setTimeout(() => this.loadAll(), 3000);
+        } else {
+          alert('失败: ' + (d.error || 'Unknown'));
+        }
+      } catch (e) {
+        alert('失败: ' + e.message);
+      }
+    },
+
+    // ── Add wallet (new chain or additional wallet on existing chain) ──
+    addableChainsFor(agent) {
+      // EVM-supported chains the agent does NOT yet have a wallet on
+      const supported = ['bnb', 'eth', 'polygon', 'arbitrum', 'optimism', 'avalanche', 'base', 'sol', 'tron'];
+      const owned = new Set((agent.chains || []).map(c => c.chain));
+      return supported.filter(c => !owned.has(c));
+    },
+
+    async createWalletForAgent(agent, chain) {
+      this.addChainPickerFor = null;
+      try {
+        const r = await fetch(`/api/relay/${agent.id}/wallets`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chain }),
+        });
+        const d = await r.json();
+        if (!r.ok || d.error) {
+          alert('创建失败: ' + (d.error || `HTTP ${r.status}`));
+          return;
+        }
+        await this.loadAll();
+        // After reload, find this agent's freshly loaded data and open the wallet panel
+        const freshAgent = (this.data?.agents || []).find(a => a.id === agent.id);
+        if (freshAgent) this.openWalletPanel(freshAgent, chain);
+      } catch (e) {
+        alert('创建失败: ' + e.message);
+      }
+    },
+
+    async createWalletInPanel() {
+      // Create another wallet on the SAME chain as currently open panel
+      const relayId = this.walletPanel.relayId;
+      const chain = this.walletPanel.chain;
+      try {
+        const r = await fetch(`/api/relay/${relayId}/wallets`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chain }),
+        });
+        const d = await r.json();
+        if (!r.ok || d.error) {
+          alert('创建失败: ' + (d.error || `HTTP ${r.status}`));
+          return;
+        }
+        await this.loadAll();
+        // Re-open panel with the refreshed wallet list
+        const freshAgent = (this.data?.agents || []).find(a => a.id === relayId);
+        if (freshAgent) {
+          // openWalletPanel toggles off if already on same agent+chain; force reopen
+          this.walletPanel.open = false;
+          this.openWalletPanel(freshAgent, chain);
+        }
+      } catch (e) {
+        alert('创建失败: ' + e.message);
+      }
+    },
+
+    async showPrivkeyFor(wallet) {
+      if (!wallet.hasPrivateKey) { alert('此钱包无私钥'); return; }
+      if (!confirm('查看私钥?\n\n请确保周围无他人观看。私钥等于账户所有权。')) return;
+      try {
+        const r = await fetch(
+          `/api/relay/${this.walletPanel.relayId}/wallets/${wallet.id}/privkey`
+        ).then(r => r.json());
+        if (r.privateKey) {
+          prompt('私钥 (Ctrl+C 复制,完成后请清空):', r.privateKey);
+        } else {
+          alert(r.error || '无法获取私钥');
+        }
+      } catch (e) {
+        alert('失败: ' + e.message);
+      }
     },
 
     async loadAgentList() {

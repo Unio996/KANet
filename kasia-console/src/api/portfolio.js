@@ -1,18 +1,16 @@
 /**
  * Portfolio Aggregator — Unified view of all assets across chains/platforms.
  *
- * Why: Today's Phase 1 work created separate per-page connection bars but no single
- * place shows "where's all my money" — KANet's own native wallet page was reportedly
- * broken (tab inside /agent?tab=wallet). This endpoint is the backend for a clean
- * dedicated /portfolio page.
- *
  * Data sources (all in parallel, degrade gracefully on failure):
  *   - Kaspa wallet (relay_nodes.address)
  *   - EVM wallets (agent_wallets — BNB/ETH/Polygon/Arbitrum/Optimism/Base/Avalanche)
+ *     · includes native USDC + bridged USDC.e/USDbC variants
  *   - SOL/TRON wallets (if configured)
  *   - Hyperliquid account (if Arbitrum wallet exists)
  *   - Aave V3 position (if Arbitrum wallet exists)
  *   - Aevo account (if credentials configured)
+ *   - KANet Exchange locked funds (fund_locks — display-only, not added to totals)
+ *   - Polymarket open positions (if API credentials configured)
  */
 
 import { sqlite } from '../db/client.js';
@@ -112,6 +110,15 @@ async function _aggregateForRelay(relay, fastify) {
   let defiTotalUsd = 0;
   let perpEquityUsd = 0;
 
+  // 3a) KANet Exchange locked funds — money the agent has committed to pending
+  // trades. The funds are still physically in the EOA (wallet balance already
+  // includes them) so we show as a display-only reservation, NOT summed into totals.
+  const exchangeLocks = _getExchangeLocks(relay.address);
+
+  // 3b) Polymarket open positions — these ARE additional to wallet balance because
+  // shares are held in the Polymarket CTF contract, not the EOA.
+  const polymarket = await _getPolymarketSummary(relay.id);
+
   if (arbWallet?.id) {
     // Aave position (parallel with HL)
     const [aaveRes, hlRes] = await Promise.allSettled([
@@ -168,6 +175,10 @@ async function _aggregateForRelay(relay, fastify) {
     } catch {}
   }
 
+  if (polymarket?.approxValueUsd) {
+    defiTotalUsd += polymarket.approxValueUsd;
+  }
+
   return {
     kaspa,
     chains,
@@ -177,6 +188,64 @@ async function _aggregateForRelay(relay, fastify) {
     aave,
     hyperliquid,
     aevo,
+    exchangeLocks,
+    polymarket,
     openPositions,
   };
+}
+
+// ── KANet Exchange fund locks (display-only) ──
+function _getExchangeLocks(agentAddress) {
+  if (!agentAddress) return { byAsset: {}, count: 0, hasAny: false };
+  try {
+    const rows = sqlite.prepare(
+      "SELECT asset, SUM(amount) AS total, COUNT(*) AS n FROM fund_locks WHERE agent_address = ? AND status = 'locked' GROUP BY asset"
+    ).all(agentAddress);
+    const byAsset = {};
+    let count = 0;
+    for (const r of rows) {
+      const k = (r.asset || 'unknown').toLowerCase();
+      byAsset[k] = r.total;
+      count += r.n;
+    }
+    return { byAsset, count, hasAny: rows.length > 0 };
+  } catch {
+    return { byAsset: {}, count: 0, hasAny: false };
+  }
+}
+
+// ── Polymarket open positions (best-effort) ──
+async function _getPolymarketSummary(relayId) {
+  try {
+    const { getPolygonWallet, getPositions } = await import('../services/polymarket.js');
+    const wallet = getPolygonWallet(relayId);
+    if (!wallet) return null;
+    const credRow = sqlite.prepare(
+      "SELECT value_encrypted FROM config_entries WHERE key = ?"
+    ).get(`polymarket_api_${relayId}`);
+    if (!credRow?.value_encrypted) {
+      return { configured: false, walletAddress: wallet.address, positionCount: 0, approxValueUsd: 0 };
+    }
+    let creds;
+    try { creds = JSON.parse(decrypt(credRow.value_encrypted)); } catch { return { configured: false, walletAddress: wallet.address, positionCount: 0, approxValueUsd: 0 }; }
+    const positions = await Promise.race([
+      getPositions(creds.apiKey, creds.secret, creds.passphrase),
+      new Promise(r => setTimeout(() => r([]), 5000)),
+    ]);
+    const list = Array.isArray(positions) ? positions : [];
+    let approxValueUsd = 0;
+    for (const p of list) {
+      const sz = parseFloat(p.size ?? p.amount ?? 0);
+      const pr = parseFloat(p.curPrice ?? p.avg_price ?? p.price ?? 0);
+      if (sz > 0 && pr > 0) approxValueUsd += sz * pr;
+    }
+    return {
+      configured: true,
+      walletAddress: wallet.address,
+      positionCount: list.length,
+      approxValueUsd,
+    };
+  } catch {
+    return null;
+  }
 }
