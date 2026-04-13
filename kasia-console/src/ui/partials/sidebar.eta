@@ -106,18 +106,28 @@
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'predictions' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
           Predictions
         </a>
-        <a href="/exchange#hyperliquid"
-          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 text-ink-400 hover:bg-warm-100 hover:text-ink-600">
-          Hyperliquid
-        </a>
-        <a href="/exchange#aevo"
-          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 text-ink-400 hover:bg-warm-100 hover:text-ink-600">
-          Aevo
-        </a>
-        <a href="/exchange#aave"
-          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 text-ink-400 hover:bg-warm-100 hover:text-ink-600">
-          Aave
-        </a>
+        <!-- More submenu: external DEX/DeFi protocols -->
+        <div x-data="{ moreOpen: false }">
+          <button @click="moreOpen = !moreOpen"
+            class="flex items-center justify-between w-full px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 text-ink-400 hover:bg-warm-100 hover:text-ink-600">
+            <span>More</span>
+            <span class="text-[9px] transition-transform" :class="moreOpen ? 'rotate-90' : ''">›</span>
+          </button>
+          <div x-show="moreOpen" x-transition class="mt-0.5 space-y-0.5">
+            <a href="/hyperliquid"
+              class="flex items-center px-3 py-1.5 rounded-lg text-[11px] transition-colors pl-9 <%= it._page === 'hyperliquid' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+              Hyperliquid <span class="ml-auto text-[9px] text-ink-300">perps</span>
+            </a>
+            <a href="/aevo"
+              class="flex items-center px-3 py-1.5 rounded-lg text-[11px] transition-colors pl-9 <%= it._page === 'aevo' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+              Aevo <span class="ml-auto text-[9px] text-ink-300">options</span>
+            </a>
+            <a href="/aave"
+              class="flex items-center px-3 py-1.5 rounded-lg text-[11px] transition-colors pl-9 <%= it._page === 'aave' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+              Aave <span class="ml-auto text-[9px] text-ink-300">lending</span>
+            </a>
+          </div>
+        </div>
       </div>
     </div>
 
