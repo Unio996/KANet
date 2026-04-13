@@ -233,11 +233,7 @@ function hyperApp() {
     account: { accountValue: 0, unrealizedPnl: 0, marginUsedPct: 0, available: 0 },
     positions: [],
     funding: [],
-    markets: [
-      { asset: 'BTC', markPrice: 0, change24h: 0, fundingRate: 0, openInterest: 0, volume24h: 0 },
-      { asset: 'ETH', markPrice: 0, change24h: 0, fundingRate: 0, openInterest: 0, volume24h: 0 },
-      { asset: 'SOL', markPrice: 0, change24h: 0, fundingRate: 0, openInterest: 0, volume24h: 0 },
-    ],
+    markets: [],
     history: [],
     modalOpen: false,
     modalSide: 'long',
@@ -249,6 +245,7 @@ function hyperApp() {
     modalLoading: false,
 
     async init() {
+      await this.init2(); // load markets first (public data)
       await this.loadWallets();
       if (this.selectedWalletId) await this.loadAll();
     },
@@ -278,7 +275,15 @@ function hyperApp() {
           this.account = d.account || this.account;
           this.positions = d.positions || [];
           this.funding = d.funding || [];
+          this.markets = d.markets || [];
         }
+      } catch {}
+    },
+    async init2() {
+      // Load markets even without wallet (public data)
+      try {
+        const d = await fetch('/api/defi/hyperliquid/markets?limit=10').then(r => r.json());
+        if (d.ok) this.markets = d.markets || [];
       } catch {}
     },
 

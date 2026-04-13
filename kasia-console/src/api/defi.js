@@ -148,7 +148,7 @@ export async function registerDefiRoutes(fastify) {
     return { wallet };
   }
 
-  // GET /api/defi/hyperliquid/status — account + positions
+  // GET /api/defi/hyperliquid/status — account + positions + markets
   fastify.get('/api/defi/hyperliquid/status', async (request, reply) => {
     const { walletId } = request.query;
     if (!walletId) return reply.code(400).send({ error: 'walletId required' });
@@ -157,13 +157,25 @@ export async function registerDefiRoutes(fastify) {
 
     try {
       const privateKey = decrypt(wallet.privkey_encrypted);
-      const { getAccountInfo, getPositions, getFundingRates } = await import('../services/hyperliquid-client.js');
-      const [account, positions, funding] = await Promise.all([
+      const { getAccountInfo, getPositions, getFundingRates, getMarkets } = await import('../services/hyperliquid-client.js');
+      const [account, positions, funding, markets] = await Promise.all([
         getAccountInfo(privateKey),
         getPositions(privateKey),
-        getFundingRates(privateKey, ['BTC', 'ETH']),
+        getFundingRates(privateKey, ['BTC', 'ETH', 'SOL']),
+        getMarkets(10),
       ]);
-      return reply.send({ ok: true, account, positions, funding });
+      return reply.send({ ok: true, account, positions, funding, markets });
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // GET /api/defi/hyperliquid/markets — no auth needed for market list
+  fastify.get('/api/defi/hyperliquid/markets', async (request, reply) => {
+    try {
+      const { getMarkets } = await import('../services/hyperliquid-client.js');
+      const markets = await getMarkets(parseInt(request.query?.limit) || 20);
+      return reply.send({ ok: true, markets });
     } catch (err) {
       return reply.code(500).send({ error: err.message });
     }
