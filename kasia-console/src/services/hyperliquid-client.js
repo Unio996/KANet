@@ -96,7 +96,7 @@ export async function closePosition(privateKey, asset) {
   const sdk = await getSdk(privateKey);
 
   // Get current position size
-  const state = await sdk.info.perpetuals.getClearinghouseState(sdk.wallet.address);
+  const state = await sdk.info.perpetuals.getClearinghouseState(sdk.walletAddress);
   const pos = state?.assetPositions?.find(p => p.position?.coin === asset);
   if (!pos || parseFloat(pos.position.szi) === 0) {
     return { ok: false, error: 'No open position for ' + asset };
@@ -123,7 +123,7 @@ export async function closePosition(privateKey, asset) {
  */
 export async function getPositions(privateKey) {
   const sdk = await getSdk(privateKey);
-  const state = await sdk.info.perpetuals.getClearinghouseState(sdk.wallet.address);
+  const state = await sdk.info.perpetuals.getClearinghouseState(sdk.walletAddress);
 
   return (state?.assetPositions || [])
     .filter(p => parseFloat(p.position?.szi) !== 0)
@@ -148,7 +148,7 @@ export async function getPositions(privateKey) {
  */
 export async function getAccountInfo(privateKey) {
   const sdk = await getSdk(privateKey);
-  const state = await sdk.info.perpetuals.getClearinghouseState(sdk.wallet.address);
+  const state = await sdk.info.perpetuals.getClearinghouseState(sdk.walletAddress);
 
   const cs = state?.crossMarginSummary || {};
   return {
@@ -198,5 +198,5 @@ export async function cancelOrder(privateKey, asset, orderId) {
  */
 export async function getOpenOrders(privateKey) {
   const sdk = await getSdk(privateKey);
-  return await sdk.info.perpetuals.getOpenOrders(sdk.wallet.address);
+  return await sdk.info.perpetuals.getOpenOrders(sdk.walletAddress);
 }
