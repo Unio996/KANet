@@ -523,6 +523,46 @@ export async function registerDefiRoutes(fastify) {
     }
   });
 
+  // POST /api/defi/hyperliquid/withdraw — withdraw USDC from HL account back to Arbitrum
+  //
+  // HL minimum: 2 USDC. Fixed $1 withdrawal fee. Funds arrive on Arbitrum in ~1 minute.
+  // Destination defaults to the wallet's own Arbitrum address (same derivation).
+  fastify.post('/api/defi/hyperliquid/withdraw', async (request, reply) => {
+    const { walletId, amount, destination } = request.body || {};
+    if (!walletId || amount === undefined) return reply.code(400).send({ error: 'walletId and amount required' });
+    const amt = parseFloat(amount);
+    if (isNaN(amt) || amt < 2) return reply.code(400).send({ error: 'Minimum withdrawal is 2 USDC' });
+    const { wallet, error, code } = getArbitrumWallet(walletId);
+    if (error) return reply.code(code).send({ error });
+
+    try {
+      const privateKey = decrypt(wallet.privkey_encrypted);
+
+      // Safety: check HL account has enough to withdraw
+      const { getAccountInfo, withdrawUsdc } = await import('../services/hyperliquid-client.js');
+      const account = await getAccountInfo(privateKey);
+      if (account.available < amt) {
+        return reply.code(400).send({
+          error: `Insufficient HL available balance: have $${account.available.toFixed(2)}, requested $${amt}`,
+          available: account.available,
+          requested: amt,
+        });
+      }
+
+      const result = await withdrawUsdc(privateKey, amt, destination || null);
+      if (result.ok) {
+        recordChainEvent({
+          txid: 'hyper_withdraw_' + Date.now(),
+          eventType: 'hyper_withdraw',
+          payload: JSON.stringify({ amount: amt, destination: result.destination, chain: 'arbitrum' }),
+        });
+      }
+      return reply.send(result);
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
+
   // POST /api/defi/hyperliquid/deposit — transfer USDC from Arb wallet to HL bridge
   fastify.post('/api/defi/hyperliquid/deposit', async (request, reply) => {
     const { walletId, amount } = request.body || {};

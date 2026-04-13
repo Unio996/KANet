@@ -382,6 +382,43 @@ export async function closePosition(privateKey, asset) {
 }
 
 /**
+ * Withdraw USDC from Hyperliquid account back to Arbitrum.
+ *
+ * HL minimum withdrawal is 2 USDC and there's a fixed $1 withdrawal fee.
+ * The funds arrive on Arbitrum at the `destination` address within ~1 minute.
+ *
+ * SDK signature: sdk.exchange.initiateWithdrawal(destination, amount)
+ * Internally builds withdraw3 action, signs EIP-712, sends to HL exchange API.
+ *
+ * @param {string} privateKey — wallet private key
+ * @param {number} amount — USDC amount to withdraw (includes fee, so user receives amount - 1)
+ * @param {string} [destination] — optional; defaults to the wallet's own Arbitrum address
+ * @returns {{ ok, amount, destination, response }}
+ */
+export async function withdrawUsdc(privateKey, amount, destination) {
+  if (!amount || amount <= 0) throw new Error('Amount must be > 0');
+  if (amount < 2) throw new Error('Hyperliquid minimum withdrawal is 2 USDC');
+
+  const sdk = await getSdk(privateKey);
+  const dest = destination || deriveAddress(privateKey);
+
+  const result = await sdk.exchange.initiateWithdrawal(dest, amount);
+
+  // HL response shape: { status: 'ok', response: {...} } on success
+  if (result?.status && result.status !== 'ok') {
+    throw new Error(`Hyperliquid withdrawal rejected: ${JSON.stringify(result)}`);
+  }
+
+  return {
+    ok: true,
+    amount,
+    destination: dest,
+    response: result,
+    note: `Withdrawal initiated. Funds will arrive at ${dest.slice(0, 10)}... on Arbitrum in ~1 minute. A $1 fee is deducted (you will receive ${(amount - 1).toFixed(2)} USDC).`,
+  };
+}
+
+/**
  * Cancel an open order.
  */
 export async function cancelOrder(privateKey, asset, orderId) {
