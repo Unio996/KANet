@@ -15,6 +15,10 @@
       class="flex items-center px-3 py-2.5 rounded-lg text-sm transition-colors <%= it._page === 'contacts' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
       Contacts
     </a>
+    <a href="/portfolio"
+      class="flex items-center px-3 py-2.5 rounded-lg text-sm transition-colors <%= it._page === 'portfolio' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
+      Portfolio
+    </a>
     <% const _isAgent = ['agent','agent-v2','agent-status','agent-history','story','graph'].includes(it._page); %>
     <% const _inMore = it._page === 'graph' || ['goals','wallet','skills','card'].includes(it._agentTab); %>
     <div x-data="{ open: <%= _isAgent ? 'true' : 'false' %>, more: <%= _inMore ? 'true' : 'false' %> }">

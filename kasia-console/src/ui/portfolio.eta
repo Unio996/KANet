@@ -1,0 +1,326 @@
+<%~ include('partials/page-open', { _page: 'portfolio', pageTitle: 'Portfolio', ...it }) %>
+
+<div class="h-full flex flex-col" x-data="portfolioApp()">
+
+  <!-- ═══ HEADER ═══ -->
+  <div class="flex-shrink-0 bg-white border-b border-warm-200 px-5 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-xs">💼</div>
+      <div>
+        <div class="text-sm font-semibold text-ink-700">Portfolio 总览</div>
+        <div class="text-[10px] text-ink-400">本机所有 Agent 的资产聚合视图（私钥永不共享，只看自己的）</div>
+      </div>
+    </div>
+    <div class="flex items-center gap-3 text-xs">
+      <!-- 单位切换 -->
+      <div class="flex items-center bg-warm-100 rounded overflow-hidden border border-warm-200">
+        <button @click="unit = 'usd'" class="px-2 py-1 text-[11px] font-medium transition-colors"
+                :class="unit === 'usd' ? 'bg-brand-500 text-white' : 'text-ink-500 hover:bg-warm-200'">USD</button>
+        <button @click="unit = 'kas'" class="px-2 py-1 text-[11px] font-medium transition-colors"
+                :class="unit === 'kas' ? 'bg-green-500 text-white' : 'text-ink-500 hover:bg-warm-200'"
+                :disabled="!kasPriceUsd"
+                :title="!kasPriceUsd ? 'KAS 价格获取中' : 'KAS 计价'">KAS</button>
+      </div>
+      <span x-show="unit === 'kas' && kasPriceUsd" class="text-[10px] text-ink-400" x-text="'1 KAS = $' + (kasPriceUsd || 0).toFixed(4)"></span>
+      <div class="flex items-center gap-1.5" x-show="agents.length > 1">
+        <span class="text-ink-400">Agent:</span>
+        <select x-model="selectedRelayId" @change="loadAll()" class="pl-2 pr-6 py-1 border border-warm-200 rounded text-xs bg-white">
+          <option value="">全部合并</option>
+          <template x-for="a in agents" :key="a.id">
+            <option :value="a.id" x-text="a.name"></option>
+          </template>
+        </select>
+      </div>
+      <span x-show="lastRefresh" class="text-[10px] text-ink-400" x-text="'更新于 ' + lastRefresh"></span>
+      <button @click="loadAll()" :disabled="loading"
+              class="text-brand-500 hover:text-brand-700 flex items-center gap-1 disabled:opacity-40">
+        <svg class="w-3.5 h-3.5" :class="loading && 'animate-spin'" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+        刷新
+      </button>
+    </div>
+  </div>
+
+  <!-- ═══ LOADING / ERROR ═══ -->
+  <div x-show="loading && !data" class="flex-1 flex items-center justify-center text-xs text-ink-400">
+    <div class="text-center">
+      <svg class="animate-spin w-6 h-6 mx-auto mb-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="3" opacity="0.3"/><path d="M12 2 A10 10 0 0 1 22 12" stroke-width="3" stroke-linecap="round"/></svg>
+      正在聚合 8 个数据源 (Kaspa / 多链钱包 / Aave / Hyperliquid / Aevo)...
+    </div>
+  </div>
+  <div x-show="error" class="flex-1 flex items-center justify-center">
+    <div class="text-center text-red-600 text-xs" x-text="error"></div>
+  </div>
+
+  <!-- ═══ MAIN CONTENT ═══ -->
+  <div x-show="data && !error" class="flex-1 overflow-y-auto bg-warm-50/30">
+    <div class="max-w-6xl mx-auto p-5 space-y-5">
+
+      <!-- ─── 总览大卡片 ─── -->
+      <div class="grid grid-cols-4 gap-3">
+        <div class="rounded-xl p-4 shadow-sm text-white"
+             :class="unit === 'kas' ? 'bg-gradient-to-br from-green-500 to-emerald-600' : 'bg-gradient-to-br from-indigo-500 to-purple-600'">
+          <div class="text-[10px] uppercase tracking-wider opacity-80">
+            总资产 <span x-text="unit === 'kas' ? '(KAS)' : '(USD)'"></span>
+          </div>
+          <div class="text-2xl font-bold tabular-nums mt-1" x-text="grandTotal()"></div>
+          <div class="text-[10px] opacity-70 mt-1" x-text="unit === 'kas' ? '≈ $' + (data?.totals?.grandTotalUsd || 0).toFixed(2) + ' USD + ' + (data?.totals?.kas || 0).toFixed(2) + ' 原生 KAS' : '稳定币 + DeFi + 永续 + KAS 等值'"></div>
+        </div>
+        <div class="bg-white border border-warm-200 rounded-xl p-4">
+          <div class="text-[10px] text-ink-400 uppercase tracking-wider">KAS 原生</div>
+          <div class="text-xl font-bold text-ink-700 tabular-nums mt-1" x-text="(data?.totals?.kas || 0).toFixed(2) + ' KAS'"></div>
+          <div class="text-[10px] text-ink-400 mt-1" x-text="kasPriceUsd ? '≈ $' + ((data?.totals?.kas || 0) * kasPriceUsd).toFixed(2) : 'Kaspa 钱包'"></div>
+        </div>
+        <div class="bg-white border border-warm-200 rounded-xl p-4">
+          <div class="text-[10px] text-ink-400 uppercase tracking-wider">稳定币</div>
+          <div class="text-xl font-bold text-ink-700 tabular-nums mt-1" x-text="fmt(data?.totals?.stableUsd || 0)"></div>
+          <div class="text-[10px] text-ink-400 mt-1">USDT + USDC 多链</div>
+        </div>
+        <div class="bg-white border border-warm-200 rounded-xl p-4">
+          <div class="text-[10px] text-ink-400 uppercase tracking-wider">开仓数</div>
+          <div class="text-xl font-bold text-ink-700 tabular-nums mt-1" x-text="(data?.totals?.openPositionCount || 0)"></div>
+          <div class="text-[10px] text-ink-400 mt-1">HL + Aevo 合计</div>
+        </div>
+      </div>
+
+      <!-- ─── Per-Agent 详情 ─── -->
+      <template x-for="agent in (data?.agents || [])" :key="agent.id">
+        <div class="bg-white border border-warm-200 rounded-xl overflow-hidden">
+
+          <!-- Agent header -->
+          <div class="bg-gradient-to-r from-warm-50 to-warm-100 px-4 py-3 border-b border-warm-200 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <div class="w-6 h-6 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center text-[10px] font-bold" x-text="agent.name?.slice(0,2)?.toUpperCase() || '?'"></div>
+              <div>
+                <div class="text-sm font-semibold text-ink-700" x-text="agent.name"></div>
+                <div class="text-[10px] font-mono text-ink-400" x-text="agent.address?.slice(0,14) + '...' + agent.address?.slice(-6)"></div>
+              </div>
+            </div>
+            <div class="text-right text-[11px]">
+              <div class="text-ink-400">本 Agent 资产</div>
+              <div class="font-semibold tabular-nums text-ink-700" x-text="fmt((agent.stableTotalUsd || 0) + (agent.defiTotalUsd || 0) + (agent.perpEquityUsd || 0))"></div>
+            </div>
+          </div>
+
+          <!-- 三栏: Kaspa + 多链钱包 + DeFi平台 -->
+          <div class="grid grid-cols-3 gap-0 divide-x divide-warm-100">
+
+            <!-- Kaspa + KAS -->
+            <div class="p-4">
+              <div class="text-[10px] text-ink-400 uppercase tracking-wider mb-2 flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                Kaspa 原生
+              </div>
+              <div class="text-lg font-semibold text-ink-700 tabular-nums" x-text="(agent.kaspa?.balance || 0).toFixed(4) + ' KAS'"></div>
+              <div class="text-[10px] text-ink-400 mt-0.5 font-mono truncate" :title="agent.kaspa?.address" x-text="agent.kaspa?.address?.slice(0,14) + '...'"></div>
+              <div class="text-[10px] text-ink-400 mt-0.5" x-show="agent.kaspa?.hasMnemonic">✓ 助记词已保存</div>
+              <div class="text-[10px] text-orange-500 mt-0.5" x-show="!agent.kaspa?.hasMnemonic">⚠ 无助记词</div>
+            </div>
+
+            <!-- 多链钱包 -->
+            <div class="p-4">
+              <div class="text-[10px] text-ink-400 uppercase tracking-wider mb-2 flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                多链钱包 (<span x-text="(agent.chains || []).length"></span>)
+              </div>
+              <div x-show="(agent.chains || []).length === 0" class="text-[11px] text-ink-400">无钱包</div>
+              <div class="space-y-1">
+                <template x-for="c in (agent.chains || [])" :key="c.id">
+                  <div class="flex items-center justify-between text-[11px]">
+                    <span class="text-ink-600 font-medium uppercase" x-text="c.chain"></span>
+                    <div class="text-right tabular-nums text-ink-500">
+                      <span x-show="c.usdtBalance > 0" x-text="(c.usdtBalance || 0).toFixed(2) + ' USDT'"></span>
+                      <span x-show="c.usdcBalance > 0" class="ml-1" x-text="(c.usdcBalance || 0).toFixed(2) + ' USDC'"></span>
+                      <span x-show="!c.usdtBalance && !c.usdcBalance" class="text-ink-300">空</span>
+                    </div>
+                  </div>
+                </template>
+              </div>
+              <div class="mt-2 pt-2 border-t border-warm-100 text-[11px] font-medium text-ink-700 flex justify-between">
+                <span>小计</span>
+                <span class="tabular-nums" x-text="fmt(agent.stableTotalUsd || 0)"></span>
+              </div>
+            </div>
+
+            <!-- DeFi + Perps -->
+            <div class="p-4">
+              <div class="text-[10px] text-ink-400 uppercase tracking-wider mb-2 flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
+                DeFi + Perps
+              </div>
+
+              <!-- Aave -->
+              <div x-show="agent.aave" class="mb-2">
+                <div class="flex items-center justify-between text-[11px]">
+                  <a href="/aave" class="text-ink-600 font-medium hover:text-brand-600">Aave</a>
+                  <span class="tabular-nums text-ink-700" x-text="fmt(agent.aave?.netUsd || 0)"></span>
+                </div>
+                <div class="flex items-center justify-between text-[10px] text-ink-400 mt-0.5">
+                  <span>抵押 <span class="text-green-600 tabular-nums" x-text="fmt(agent.aave?.collateralUSD || 0)"></span></span>
+                  <span>负债 <span class="text-orange-600 tabular-nums" x-text="fmt(agent.aave?.debtUSD || 0)"></span></span>
+                </div>
+                <div x-show="agent.aave?.healthFactor && agent.aave.healthFactor < 100" class="text-[10px] mt-0.5">
+                  HF <span class="font-semibold tabular-nums"
+                          :class="agent.aave.healthFactor > 2 ? 'text-green-600' : agent.aave.healthFactor > 1.5 ? 'text-yellow-600' : 'text-red-600'"
+                          x-text="agent.aave.healthFactor.toFixed(2)"></span>
+                </div>
+              </div>
+              <div x-show="!agent.aave" class="text-[10px] text-ink-300 mb-2">Aave 未配置</div>
+
+              <!-- Hyperliquid -->
+              <div x-show="agent.hyperliquid" class="mb-2">
+                <div class="flex items-center justify-between text-[11px]">
+                  <a href="/hyperliquid" class="text-ink-600 font-medium hover:text-brand-600">Hyperliquid</a>
+                  <span class="tabular-nums text-ink-700" x-text="fmt(agent.hyperliquid?.accountValue || 0)"></span>
+                </div>
+                <div class="flex items-center justify-between text-[10px] text-ink-400 mt-0.5">
+                  <span>可用 <span class="tabular-nums" x-text="fmt(agent.hyperliquid?.available || 0)"></span></span>
+                  <span>保证金 <span class="tabular-nums"
+                                    :class="(agent.hyperliquid?.marginUsedPct || 0) > 80 ? 'text-red-600' : (agent.hyperliquid?.marginUsedPct || 0) > 60 ? 'text-yellow-600' : ''"
+                                    x-text="(agent.hyperliquid?.marginUsedPct || 0).toFixed(0) + '%'"></span></span>
+                </div>
+                <div x-show="agent.hyperliquid?.positionsCount > 0" class="text-[10px] mt-0.5">
+                  <span x-text="agent.hyperliquid.positionsCount + ' 持仓'"></span>
+                  <span x-show="agent.hyperliquid.unrealizedPnl !== 0"
+                        :class="agent.hyperliquid.unrealizedPnl >= 0 ? 'text-green-600' : 'text-red-600'"
+                        x-text="' · PnL ' + (agent.hyperliquid.unrealizedPnl >= 0 ? '+$' : '-$') + Math.abs(agent.hyperliquid.unrealizedPnl).toFixed(2)"></span>
+                </div>
+              </div>
+              <div x-show="!agent.hyperliquid" class="text-[10px] text-ink-300 mb-2">Hyperliquid 未配置</div>
+
+              <!-- Aevo -->
+              <div x-show="agent.aevo?.connected">
+                <div class="flex items-center justify-between text-[11px]">
+                  <a href="/aevo" class="text-ink-600 font-medium hover:text-brand-600">Aevo</a>
+                  <span class="tabular-nums text-ink-700" x-text="fmt(agent.aevo?.equity || 0)"></span>
+                </div>
+                <div class="flex items-center justify-between text-[10px] text-ink-400 mt-0.5">
+                  <span>可用 <span class="tabular-nums" x-text="fmt(agent.aevo?.available || 0)"></span></span>
+                  <span x-show="agent.aevo?.portfolioGreeks">Δ <span class="tabular-nums" x-text="(agent.aevo.portfolioGreeks?.delta || 0).toFixed(2)"></span></span>
+                </div>
+              </div>
+              <div x-show="!agent.aevo || !agent.aevo.connected" class="text-[10px] text-ink-300">Aevo 未配置凭证</div>
+            </div>
+
+          </div>
+
+          <!-- 开仓列表 (如果有) -->
+          <div x-show="(agent.openPositions || []).length > 0" class="px-4 py-3 bg-warm-50/50 border-t border-warm-100">
+            <div class="text-[10px] text-ink-400 uppercase tracking-wider mb-1">开仓</div>
+            <div class="space-y-1">
+              <template x-for="p in (agent.openPositions || [])" :key="p.platform + ':' + p.asset">
+                <div class="flex items-center justify-between text-[11px]">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[9px] px-1 rounded bg-warm-200 text-ink-500 uppercase" x-text="p.platform"></span>
+                    <span class="font-medium text-ink-700" x-text="p.asset"></span>
+                    <span class="text-[9px] px-1 rounded"
+                          :class="p.side === 'long' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'"
+                          x-text="p.side?.toUpperCase()"></span>
+                    <span class="text-[9px] text-ink-400" x-text="p.leverage + 'x'"></span>
+                  </div>
+                  <div class="text-right tabular-nums">
+                    <span class="text-ink-500 text-[10px]" x-text="'@ $' + (p.entryPrice || 0).toFixed(2)"></span>
+                    <span class="ml-2 font-medium"
+                          :class="(p.pnl || 0) >= 0 ? 'text-green-600' : 'text-red-600'"
+                          x-text="((p.pnl || 0) >= 0 ? '+$' : '-$') + Math.abs(p.pnl || 0).toFixed(2)"></span>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+        </div>
+      </template>
+
+      <!-- ─── 底部提示 ─── -->
+      <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-[11px] text-amber-900">
+        <div class="font-semibold mb-1">📍 关于这个页面</div>
+        <div class="space-y-0.5 text-[10px]">
+          <div>• 本页只显示**这台机器**上的 Agent 钱包。KANet 设计上私钥永远本地加密、永不同步到其他机器</div>
+          <div>• 每个 Agent 的 Kaspa 地址和 EVM 钱包地址**完全独立**</div>
+          <div>• DeFi 数据（Aave/HL/Aevo）是按本地 Arbitrum 钱包地址实时查询的，不是缓存</div>
+          <div>• 任何数据展示问题请先点"刷新"，如果仍异常请检查各子页面（/hyperliquid /aave /aevo）</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<script>
+function portfolioApp() {
+  return {
+    selectedRelayId: '',
+    agents: [],
+    data: null,
+    error: '',
+    loading: false,
+    lastRefresh: '',
+    unit: localStorage.getItem('portfolio_unit') || 'usd',  // 'usd' | 'kas'
+    get kasPriceUsd() { return this.data?.kasPriceUsd || null; },
+
+    // Format any USD amount according to current unit selection
+    fmt(usd) {
+      const n = parseFloat(usd) || 0;
+      if (this.unit === 'kas' && this.kasPriceUsd && this.kasPriceUsd > 0) {
+        const kas = n / this.kasPriceUsd;
+        // KAS amounts are usually large integers — no decimals needed unless < 10
+        return kas >= 10
+          ? Math.round(kas).toLocaleString() + ' KAS'
+          : kas.toFixed(2) + ' KAS';
+      }
+      return '$' + n.toFixed(2);
+    },
+
+    // Big grand-total string (used by headline card)
+    grandTotal() {
+      const usd = this.data?.totals?.grandTotalUsd || 0;
+      const nativeKas = this.data?.totals?.kas || 0;
+      if (this.unit === 'kas' && this.kasPriceUsd && this.kasPriceUsd > 0) {
+        // In KAS mode, grand total = native KAS + (USD equivalent / KAS price)
+        const total = nativeKas + (usd / this.kasPriceUsd);
+        return Math.round(total).toLocaleString() + ' KAS';
+      }
+      return '$' + (usd + nativeKas * (this.kasPriceUsd || 0)).toFixed(2);
+    },
+
+    async init() {
+      // Watch unit changes to persist
+      this.$watch('unit', v => localStorage.setItem('portfolio_unit', v));
+      await this.loadAgentList();
+      await this.loadAll();
+    },
+
+    async loadAgentList() {
+      try {
+        const relays = await fetch('/api/agent/profile').then(r => r.json());
+        this.agents = (relays || []).map(r => ({ id: r.id, name: r.name, address: r.address }));
+      } catch {}
+    },
+
+    async loadAll() {
+      this.loading = true;
+      this.error = '';
+      try {
+        const url = this.selectedRelayId
+          ? '/api/portfolio/unified?relayId=' + this.selectedRelayId
+          : '/api/portfolio/unified';
+        const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
+        const d = await res.json();
+        if (d.ok) {
+          this.data = d;
+          this.lastRefresh = new Date().toLocaleTimeString();
+        } else {
+          this.error = d.error || '加载失败';
+        }
+      } catch (e) {
+        this.error = '请求失败: ' + e.message;
+      } finally {
+        this.loading = false;
+      }
+    },
+  };
+}
+</script>
+
+<%~ include('partials/page-close', it) %>

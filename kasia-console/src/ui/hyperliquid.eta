@@ -80,10 +80,15 @@
             <button @click="openDeposit()" :disabled="(arbBalances.usdc || 0) < 5"
                     class="px-3 py-1 bg-brand-500 text-white rounded text-[11px] font-medium hover:bg-brand-600 disabled:opacity-40"
                     :title="(arbBalances.usdc || 0) < 5 ? 'Need at least 5 USDC in Arb wallet' : 'Deposit USDC to Hyperliquid'">
-              💰 Deposit
+              💰 充值
+            </button>
+            <button @click="openWithdraw()" :disabled="(account.available || 0) < 2"
+                    class="px-3 py-1 bg-white border border-warm-300 text-ink-700 rounded text-[11px] font-medium hover:bg-warm-50 disabled:opacity-40"
+                    :title="(account.available || 0) < 2 ? 'HL 可用余额不足 2 USDC' : '从 HL 提回 Arbitrum'">
+              ↩ 提现
             </button>
             <button @click="disconnect()" class="px-3 py-1 bg-white border border-warm-300 text-ink-600 rounded text-[11px] font-medium hover:bg-warm-50">
-              Disconnect
+              断开
             </button>
           </div>
         </template>
@@ -584,6 +589,99 @@
     </div>
   </div>
 
+  <!-- ═══ WITHDRAW MODAL ═══ -->
+  <div x-show="withdrawOpen" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center bg-black/30" @click.self="withdrawOpen = false">
+    <div class="bg-white rounded-xl shadow-2xl p-5 w-[440px] max-h-[92vh] overflow-y-auto" @click.stop>
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-base font-semibold text-ink-700">↩ 提现到 Arbitrum</h3>
+        <button @click="withdrawOpen = false" class="text-ink-400 hover:text-ink-600 text-2xl leading-none">&times;</button>
+      </div>
+
+      <!-- ⚠ 大字警告 — 最显眼位置 —— -->
+      <div class="bg-amber-50 border border-amber-300 rounded-lg p-3 mb-4 text-xs text-amber-900">
+        <div class="font-semibold mb-1">⚠ 重要说明（请先读）</div>
+        <div class="space-y-0.5 text-[11px]">
+          <div>• <b>固定 $1 USDC 手续费</b>（不是百分比，小额不划算）</div>
+          <div>• <b>你请求的金额 = HL 账户扣除的金额</b>（含手续费）</div>
+          <div>• <b>实收 = 请求金额 - $1</b>（例: 提 5，实收 4）</div>
+          <div>• 提现不可逆，约 1 分钟到 Arbitrum</div>
+          <div>• MAX 按钮已自动预留 $1 手续费 buffer</div>
+        </div>
+      </div>
+
+      <!-- 流向图 -->
+      <div class="bg-gradient-to-r from-emerald-50 to-blue-50 rounded-lg p-3 mb-3 text-[11px]">
+        <div class="flex items-center justify-between">
+          <div class="text-center">
+            <div class="text-[9px] text-ink-400 uppercase">Hyperliquid</div>
+            <div class="font-mono text-[10px] text-ink-600">可用</div>
+            <div class="font-semibold tabular-nums mt-1" x-text="'$' + (account.available || 0).toFixed(2)"></div>
+          </div>
+          <svg class="w-5 h-5 text-ink-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
+          <div class="text-center">
+            <div class="text-[9px] text-ink-400 uppercase">Arbitrum 钱包</div>
+            <div class="font-mono text-[10px] text-ink-600" x-text="connectedWallet?.address?.slice(0,6) + '...' + connectedWallet?.address?.slice(-4)"></div>
+            <div class="font-semibold tabular-nums mt-1" x-text="(arbBalances.usdc || 0).toFixed(2) + ' USDC'"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 金额输入 -->
+      <label class="block mb-3">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-xs text-ink-500">提现金额 (USDC)</span>
+          <span class="text-[10px] text-ink-400">最少 3 USDC（含 $1 费）</span>
+        </div>
+        <div class="relative">
+          <input type="number" x-model="withdrawAmount" step="0.01" min="3" :max="account.available || 0"
+                 placeholder="0.00"
+                 class="w-full px-3 py-2 pr-16 border border-warm-300 rounded-lg text-sm bg-white focus:border-brand-400 focus:outline-none tabular-nums" />
+          <button @click="withdrawAmount = Math.max(0, ((account.available || 0) - 1)).toFixed(2)"
+                  class="absolute right-1 top-1 bottom-1 px-2 bg-warm-100 text-ink-600 rounded text-[10px] font-medium hover:bg-warm-200"
+                  title="预留 $1 手续费 buffer">
+            MAX
+          </button>
+        </div>
+        <!-- 实时收款预览 -->
+        <div class="mt-1.5 flex items-center justify-between text-[11px]" x-show="withdrawAmount && parseFloat(withdrawAmount) >= 2">
+          <span class="text-ink-500">HL 账户扣除:</span>
+          <span class="font-semibold tabular-nums text-ink-700" x-text="'$' + (parseFloat(withdrawAmount) || 0).toFixed(2)"></span>
+        </div>
+        <div class="flex items-center justify-between text-[11px]" x-show="withdrawAmount && parseFloat(withdrawAmount) >= 2">
+          <span class="text-ink-500">- 手续费:</span>
+          <span class="font-semibold tabular-nums text-red-600">-$1.00</span>
+        </div>
+        <div class="mt-0.5 flex items-center justify-between text-xs border-t border-warm-200 pt-1" x-show="withdrawAmount && parseFloat(withdrawAmount) >= 2">
+          <span class="text-ink-600 font-medium">你将收到:</span>
+          <span class="font-bold tabular-nums text-green-700" x-text="'$' + Math.max(0, parseFloat(withdrawAmount) - 1).toFixed(2) + ' USDC'"></span>
+        </div>
+      </label>
+
+      <!-- 快捷百分比 —— 都自动预留 $1 fee -->
+      <div class="flex gap-1 mb-3">
+        <template x-for="pct in [25, 50, 75, 100]" :key="'w'+pct">
+          <button @click="withdrawAmount = Math.max(0, ((account.available || 0) - 1) * pct / 100).toFixed(2)"
+                  class="flex-1 py-1 bg-warm-50 border border-warm-200 rounded text-[10px] text-ink-600 hover:bg-warm-100"
+                  x-text="pct + '%'"
+                  :title="'可提现金额的 ' + pct + '%（已预留 $1 手续费）'"></button>
+        </template>
+      </div>
+
+      <div x-show="withdrawError" class="mb-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2" x-text="withdrawError"></div>
+      <div x-show="withdrawSuccess" class="mb-2 text-xs text-green-700 bg-green-50 border border-green-200 rounded p-2" x-text="withdrawSuccess"></div>
+
+      <div class="flex gap-2">
+        <button @click="withdrawOpen = false" class="flex-1 py-2 bg-warm-200 text-ink-600 rounded-lg text-sm font-medium hover:bg-warm-300">取消</button>
+        <button @click="confirmWithdraw()"
+                :disabled="withdrawLoading || !withdrawAmount || parseFloat(withdrawAmount) < 2 || parseFloat(withdrawAmount) > (account.available || 0)"
+                class="flex-1 py-2 bg-brand-500 text-white rounded-lg text-sm font-medium hover:bg-brand-600 disabled:opacity-40">
+          <span x-show="!withdrawLoading">确认提现</span>
+          <span x-show="withdrawLoading">处理中...</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- ═══ TRADE MODAL ═══ -->
   <div x-show="modalOpen" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center bg-black/30" @click.self="modalOpen = false">
     <div class="bg-white rounded-xl shadow-2xl p-6 w-96" @click.stop>
@@ -651,6 +749,12 @@ function hyperApp() {
     depositError: '',
     depositSuccess: '',
     depositLoading: false,
+    // Withdraw modal
+    withdrawOpen: false,
+    withdrawAmount: '',
+    withdrawError: '',
+    withdrawSuccess: '',
+    withdrawLoading: false,
     // Market filters + pagination
     marketSearch: '',
     marketCategory: 'all',
@@ -814,6 +918,41 @@ function hyperApp() {
       this.depositError = '';
       this.depositSuccess = '';
       this.depositOpen = true;
+    },
+
+    openWithdraw() {
+      this.withdrawAmount = (this.account.available || 0).toFixed(2);
+      this.withdrawError = '';
+      this.withdrawSuccess = '';
+      this.withdrawOpen = true;
+    },
+
+    async confirmWithdraw() {
+      const amt = parseFloat(this.withdrawAmount);
+      if (isNaN(amt) || amt < 2) { this.withdrawError = '最少 2 USDC'; return; }
+      if (amt > (this.account.available || 0)) { this.withdrawError = '超出 HL 可用余额'; return; }
+      this.withdrawLoading = true;
+      this.withdrawError = '';
+      this.withdrawSuccess = '';
+      try {
+        const r = await fetch('/api/defi/hyperliquid/withdraw', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ walletId: this.selectedWalletId, amount: amt }),
+        });
+        const d = await r.json();
+        if (d.ok) {
+          this.withdrawSuccess = '✓ 提现已发起 · ' + (d.note || '约 1 分钟到账');
+          // Refresh — HL 账户立即减少，Arb 余额 ~1min 后增加
+          await this.loadAll();
+          setTimeout(() => this.loadAll(), 75000);
+        } else {
+          this.withdrawError = d.error || '提现失败';
+        }
+      } catch (e) {
+        this.withdrawError = e.message;
+      } finally {
+        this.withdrawLoading = false;
+      }
     },
 
     async confirmDeposit() {
