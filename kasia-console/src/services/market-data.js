@@ -690,6 +690,54 @@ export function getCachedKasPrice() {
   cachedCrypto().catch(() => {});
   return 0;
 }
+
+// ═══════════════════════════════════════════════════
+//  Native chain token prices (BNB / ETH / MATIC / AVAX / SOL / TRX)
+//  Used by /portfolio to USD-value native balances ("其他资产" card).
+//  CoinGecko simple/price — 1 request, 6 tokens, 60s cache.
+// ═══════════════════════════════════════════════════
+const NATIVE_PRICE_IDS = {
+  bnb:       { gecko: 'binancecoin',  symbol: 'BNB' },
+  eth:       { gecko: 'ethereum',     symbol: 'ETH' },
+  arbitrum:  { gecko: 'ethereum',     symbol: 'ETH' },  // ARB native gas = ETH
+  optimism:  { gecko: 'ethereum',     symbol: 'ETH' },
+  base:      { gecko: 'ethereum',     symbol: 'ETH' },
+  polygon:   { gecko: 'matic-network',symbol: 'MATIC' },
+  avalanche: { gecko: 'avalanche-2',  symbol: 'AVAX' },
+  sol:       { gecko: 'solana',       symbol: 'SOL' },
+  tron:      { gecko: 'tron',         symbol: 'TRX' },
+};
+
+export async function fetchNativeTokenPrices() {
+  try {
+    const ids = [...new Set(Object.values(NATIVE_PRICE_IDS).map(x => x.gecko))].join(',');
+    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT) });
+    if (!res.ok) return { source: 'native_prices', ok: false, error: `HTTP ${res.status}`, data: {} };
+    const json = await res.json();
+    // Normalize: map { ethereum: { usd: 2400 } } → { eth: 2400, arbitrum: 2400, ... }
+    const data = {};
+    for (const [chain, meta] of Object.entries(NATIVE_PRICE_IDS)) {
+      const price = json?.[meta.gecko]?.usd;
+      if (typeof price === 'number') data[chain] = price;
+    }
+    return { source: 'native_prices', ok: true, data };
+  } catch (e) {
+    return { source: 'native_prices', ok: false, error: e.message, data: {} };
+  }
+}
+
+// 60s cache — native prices don't change minute-to-minute and CoinGecko is rate-limited
+export const cachedNativeTokenPrices = cached('native_prices', fetchNativeTokenPrices, 60_000);
+
+/** Synchronous read of cached native token price for a chain. Returns 0 if cache miss. */
+export function getCachedNativePrice(chain) {
+  const hit = _cache['native_prices'];
+  if (hit?.data?.data?.[chain]) return hit.data.data[chain];
+  // Cache miss — trigger background fetch
+  cachedNativeTokenPrices().catch(() => {});
+  return 0;
+}
 export const cachedFundamentals = cached('fundamentals', fetchStockFundamentals, 60 * 60 * 1000); // 1 hour
 export const cachedIndustryPeers = cached('peers', fetchIndustryPeers, 60 * 60 * 1000); // 1 hour
 

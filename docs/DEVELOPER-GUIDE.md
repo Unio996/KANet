@@ -1144,6 +1144,18 @@ getOrder / cancelOrder 用 `def.authStyle` switch（不是 exchange name），�
 
 54. **_autoSendKas paid 广播失败不能推进 processPaymentSubmit。** 铁律不分场景——即使 KAS TX 是本地节点发的，paid 广播失败意味着 maker 节点不知道 taker 已付款。maker 超时 reopen，另一个 taker 接单 = 双重交割。已修复：5 次重试→失败不调 processPaymentSubmit→记 chain_event(exchange_paid_broadcast_failed) 留痕。位置：trade-protocol-filter.js _autoSendKas()。
 
+### 致命陷阱（4/13 Portfolio + 钱包统一）
+
+55. **预测请求被错分为 observe → L3 诊断（CJK \b 复发）。** intent-detector.mjs 的 market context guard 用 `\b` word boundary 判断关键词出现位置——CJK 字符无 word boundary，断言永远 false，预测/价格类问题被误判为 observe layer，触发系统诊断 plan，结果被注入用户 prompt（`--- DIAGNOSTIC RESULTS ---`），AI 回答系统状态而不是市场分析。**修复双重根因：**(a) `\b` 改为字符类匹配 + 起止边界；(b) 旧的 `peer === currentSpeaker` 死代码用 message 当 peer 比对，永远 false。**教训**：陷阱 #12 不是孤例，所有 CJK 字符串匹配必须避免 `\b`。**调试方法论**：AI 答非所问时，先 dump 真实 prompt，不要靠症状猜测因果。教训来源：2026-04-13 Sophie 预测 BTC 答系统诊断。
+
+56. **Portfolio 五卡严格遵守单一统计原则。** 任何资产只能进一个 bucket：`KAS / 稳定币 / 其他资产(原生) / DeFi / Perp Equity`。grandTotalUsd = stable + native + defi + perpEquity，不重叠。Aave netUsd（collateral - debt）只进 defiTotalUsd；HL/Aevo accountValue 只进 perpEquityUsd；Polymarket approxValueUsd 只进 defiTotalUsd（CTF 合约持仓不在 EOA）；exchange fund_locks 是显示锁定不进任何总额（KAS 已在钱包里）。原生代币价格走 `getCachedNativePrice(chain)`（market-data.js CoinGecko 60s TTL，9 链全覆盖）。位置：portfolio.js `_aggregateForRelay()`。
+
+57. **`/send` 是钱包出口的唯一端点，三链分发。** 旧 `/api/trade/withdraw` 只支持 BNB/ETH。已统一为 `POST /api/relay/:id/wallets/:walletId/send`，body `{asset, amount, to}`，`asset` 可为 `usdt/usdc/native`。EVM 7 链走 evm-transfer.js（withFallbackRpc）；`chain==='sol'` 分发 transferSPL 或 transferSolNative；`chain==='tron'` 分发 transferTRC20 或 transferTronNative。**目的地址校验必须按链别**：EVM `0x[40 hex]`、SOL base58 32-44、TRON `T[base58 33]`。Portfolio 和 Exchange 两个页面共用此端点，是钱包出口的唯一真相源。位置：relay.js `/wallets/:walletId/send`。
+
+58. **没有原生代币就是废链。** SOL/USDT 转账失败如果 SOL 余额为 0 = 没有 gas 付租金/手续费；TRON 同理需要 TRX 付带宽和 energy。sol-transfer.js 和 tron-transfer.js 必须同时暴露 native 转账（`transferSolNative` 用 SystemProgram.transfer，`transferTronNative` 用 `tronWeb.trx.sendTransaction`）。`/send` 端点 `asset==='native'` 走 native 路径。**Owner 原则**：任何加入 Portfolio 的链都必须支持原生代币转出，否则 USDT/USDC 余额是死锁。教训来源：2026-04-13 Sophie POL 钱包原生 MATIC 不显示。
+
+59. **Add Wallet 多链选择必须用全屏 modal，不能用 dropdown。** Agent 卡片父容器有 `overflow-hidden`（卡片圆角），absolute 定位的 dropdown 会被裁切，9 条链只显示 4 条（被裁掉 5 条）。已改为 `addWalletModal.open` 全屏居中 modal，列出全部 9 条链不做 ownership 过滤（同一链可以加多个钱包，badge 显示 "N existing"）。**SUPPORTED_CHAINS_INFO 在 portfolio.eta 和 exchange.eta 各有一份**，新增链时两边都要改——临时解（待提取共享模块）。位置：portfolio.eta `addWalletModal` + `SUPPORTED_CHAINS_INFO`。
+
 ---
 
 ## 十五、API 速查表
@@ -1270,8 +1282,11 @@ getOrder / cancelOrder 用 `def.authStyle` switch（不是 exchange name），�
 | GET | `/api/relay/:id/wallets/:walletId/balance` | 查询钱包余额 | relay.js |
 | PUT | `/api/relay/:id/wallets/:walletId` | 更新钱包信息 | relay.js |
 | DELETE | `/api/relay/:id/wallets/:walletId` | 删除钱包 | relay.js |
-| POST | `/api/relay/:id/wallets/:walletId/withdraw` | 钱包提现 | relay.js |
+| POST | `/api/relay/:id/wallets/:walletId/withdraw` | 钱包提现（旧，仅 BNB/ETH） | relay.js |
+| POST | `/api/relay/:id/wallets/:walletId/send` | **钱包出口（统一）**：9 链 × {usdt/usdc/native}，Portfolio + Exchange 共用 | relay.js |
 | POST | `/api/relay/:id/wallets/:walletId/swap` | 钱包换币 | relay.js |
+| GET | `/portfolio` | 🖥 资产总览页面（5 卡单一统计） | portfolio.js |
+| GET | `/api/portfolio/unified` | 全 Agent 聚合（KAS/稳定币/原生/DeFi/Perp + 开仓数 HL+Aevo+Polymarket+Aave） | portfolio.js |
 
 ### Mind 配置 / Goals
 

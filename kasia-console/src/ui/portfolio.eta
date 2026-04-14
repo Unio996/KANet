@@ -106,6 +106,40 @@
     </div>
   </div>
 
+  <!-- ═══ ADD WALLET MODAL — full 9 chains, mirrors exchange.eta Add Wallet ═══ -->
+  <div x-show="addWalletModal.open" x-cloak x-transition
+       class="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+       @click.self="addWalletModal.open = false"
+       @keydown.escape.window="addWalletModal.open = false">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-md p-5" @click.stop>
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-sm font-semibold text-ink-700">
+          Add Wallet
+          <span class="text-ink-400 font-normal text-[11px]" x-text="'· ' + (addWalletModal.agentName || '')"></span>
+        </h3>
+        <button @click="addWalletModal.open = false" class="text-ink-400 hover:text-ink-600 text-xl leading-none">&times;</button>
+      </div>
+      <p class="text-xs text-ink-400 mb-4">Select a chain to create a new wallet for this Agent. (Same chain can have multiple wallets.)</p>
+      <div class="space-y-2 max-h-96 overflow-y-auto">
+        <template x-for="ch in SUPPORTED_CHAINS_INFO" :key="ch.id">
+          <button @click="confirmCreateWallet(ch.id)"
+                  :disabled="addWalletModal.creating"
+                  class="w-full flex items-center justify-between px-4 py-3 rounded-lg border border-warm-200 hover:border-brand-400 hover:bg-brand-50 transition-all text-left disabled:opacity-50">
+            <div>
+              <div class="text-sm font-medium text-ink-700" x-text="ch.name"></div>
+              <div class="text-[11px] text-ink-400" x-text="ch.desc"></div>
+            </div>
+            <div class="flex items-center gap-2">
+              <span x-show="walletCountFor(ch.id) > 0" class="text-[10px] bg-warm-100 text-ink-500 px-1.5 py-0.5 rounded" x-text="walletCountFor(ch.id) + ' existing'"></span>
+              <span x-show="addWalletModal.creating === ch.id" class="text-xs text-brand-500">Creating…</span>
+              <span x-show="addWalletModal.creating !== ch.id" class="text-ink-300 text-lg">→</span>
+            </div>
+          </button>
+        </template>
+      </div>
+    </div>
+  </div>
+
   <!-- ═══ LOADING / ERROR ═══ -->
   <div x-show="loading && !data" class="flex-1 flex items-center justify-center text-xs text-ink-400">
     <div class="text-center">
@@ -121,15 +155,15 @@
   <div x-show="data && !error" class="flex-1 overflow-y-auto bg-warm-50/30">
     <div class="max-w-6xl mx-auto p-5 space-y-5">
 
-      <!-- ─── 总览大卡片 ─── -->
-      <div class="grid grid-cols-4 gap-3">
+      <!-- ─── 总览大卡片 (5 cards: Total / KAS / Stable / Other / Open positions) ─── -->
+      <div class="grid grid-cols-5 gap-3">
         <div class="rounded-xl p-4 shadow-sm text-white"
              :class="unit === 'kas' ? 'bg-gradient-to-br from-green-500 to-emerald-600' : 'bg-gradient-to-br from-indigo-500 to-purple-600'">
           <div class="text-[10px] uppercase tracking-wider opacity-80">
             总资产 <span x-text="unit === 'kas' ? '(KAS)' : '(USD)'"></span>
           </div>
           <div class="text-2xl font-bold tabular-nums mt-1" x-text="grandTotal()"></div>
-          <div class="text-[10px] opacity-70 mt-1" x-text="unit === 'kas' ? '≈ $' + (data?.totals?.grandTotalUsd || 0).toFixed(2) + ' USD + ' + (data?.totals?.kas || 0).toFixed(2) + ' 原生 KAS' : '稳定币 + DeFi + 永续 + KAS 等值'"></div>
+          <div class="text-[10px] opacity-70 mt-1" x-text="unit === 'kas' ? '≈ $' + (data?.totals?.grandTotalUsd || 0).toFixed(2) + ' USD + ' + (data?.totals?.kas || 0).toFixed(2) + ' 原生 KAS' : '稳定币 + 其他资产 + DeFi + 永续 + KAS 等值'"></div>
         </div>
         <div class="bg-white border border-warm-200 rounded-xl p-4">
           <div class="text-[10px] text-ink-400 uppercase tracking-wider">KAS 原生</div>
@@ -142,9 +176,14 @@
           <div class="text-[10px] text-ink-400 mt-1">USDT + USDC 多链</div>
         </div>
         <div class="bg-white border border-warm-200 rounded-xl p-4">
+          <div class="text-[10px] text-ink-400 uppercase tracking-wider">其他资产</div>
+          <div class="text-xl font-bold text-ink-700 tabular-nums mt-1" x-text="fmt(data?.totals?.nativeUsd || 0)"></div>
+          <div class="text-[10px] text-ink-400 mt-1">原生代币 (BNB / ETH / MATIC / AVAX / SOL / TRX)</div>
+        </div>
+        <div class="bg-white border border-warm-200 rounded-xl p-4">
           <div class="text-[10px] text-ink-400 uppercase tracking-wider">开仓数</div>
           <div class="text-xl font-bold text-ink-700 tabular-nums mt-1" x-text="(data?.totals?.openPositionCount || 0)"></div>
-          <div class="text-[10px] text-ink-400 mt-1">HL + Aevo 合计</div>
+          <div class="text-[10px] text-ink-400 mt-1">HL + Aevo + Polymarket + Aave</div>
         </div>
       </div>
 
@@ -184,29 +223,15 @@
             </div>
 
             <!-- 多链钱包 -->
-            <div class="p-4 relative" @click.outside="addChainPickerFor === agent.id && (addChainPickerFor = null)">
+            <div class="p-4">
               <div class="text-[10px] text-ink-400 uppercase tracking-wider mb-2 flex items-center justify-between">
                 <div class="flex items-center gap-1">
                   <span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
                   多链钱包 (<span x-text="(agent.chains || []).length"></span>)
                 </div>
-                <button @click.stop="addChainPickerFor = (addChainPickerFor === agent.id ? null : agent.id)"
+                <button @click="openAddWalletModal(agent)"
                         class="text-ink-400 hover:text-brand-600 text-sm leading-none px-1.5 rounded hover:bg-warm-100"
                         title="为此 Agent 添加链上钱包">+</button>
-              </div>
-
-              <!-- + 新链选择器 (绝对定位下拉) -->
-              <div x-show="addChainPickerFor === agent.id" x-cloak x-transition
-                   class="absolute right-2 top-8 z-20 bg-white border border-warm-300 rounded-lg shadow-lg p-2 w-44">
-                <div class="text-[9px] text-ink-400 uppercase tracking-wider mb-1 px-1">选择新链</div>
-                <template x-for="ch in addableChainsFor(agent)" :key="ch">
-                  <button @click="createWalletForAgent(agent, ch)"
-                          class="w-full text-left px-2 py-1.5 hover:bg-warm-100 rounded text-[11px] flex items-center justify-between">
-                    <span class="font-medium uppercase text-ink-700" x-text="ch"></span>
-                    <span class="text-[9px] text-ink-400" x-text="nativeSymbol(ch)"></span>
-                  </button>
-                </template>
-                <div x-show="addableChainsFor(agent).length === 0" class="text-[10px] text-ink-400 px-2 py-1">所有链都已有钱包</div>
               </div>
 
               <div x-show="(agent.chains || []).length === 0" class="text-[11px] text-ink-400">点击 + 新建第一个钱包</div>
@@ -236,11 +261,11 @@
               </div>
             </div>
 
-            <!-- DeFi + Perps -->
+            <!-- DeFi + Perps + Prediction Markets -->
             <div class="p-4">
               <div class="text-[10px] text-ink-400 uppercase tracking-wider mb-2 flex items-center gap-1">
                 <span class="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
-                DeFi + Perps
+                DeFi + Perps + Prediction Markets
               </div>
 
               <!-- Aave -->
@@ -295,18 +320,21 @@
               </div>
               <div x-show="!agent.aevo || !agent.aevo.connected" class="text-[10px] text-ink-300">Aevo 未配置凭证</div>
 
-              <!-- Polymarket -->
-              <div x-show="agent.polymarket?.configured" class="mt-2 pt-2 border-t border-warm-100">
+              <!-- Polymarket — always visible with state (configured / not configured / no Polygon wallet) -->
+              <div class="mt-2 pt-2 border-t border-warm-100">
                 <div class="flex items-center justify-between text-[11px]">
                   <a href="/predictions" class="text-ink-600 font-medium hover:text-brand-600">Polymarket</a>
-                  <span class="tabular-nums text-ink-700" x-text="fmt(agent.polymarket?.approxValueUsd || 0)"></span>
+                  <span x-show="agent.polymarket?.configured" class="tabular-nums text-ink-700" x-text="fmt(agent.polymarket?.approxValueUsd || 0)"></span>
                 </div>
                 <div class="flex items-center justify-between text-[10px] text-ink-400 mt-0.5">
-                  <span><span class="tabular-nums" x-text="agent.polymarket?.positionCount || 0"></span> 持仓</span>
-                  <span class="text-ink-300">Polygon USDC.e</span>
+                  <span x-show="agent.polymarket?.configured">
+                    <span class="tabular-nums" x-text="agent.polymarket?.positionCount || 0"></span> 持仓
+                  </span>
+                  <span x-show="agent.polymarket && !agent.polymarket.configured" class="text-ink-300">未配置 API</span>
+                  <span x-show="!agent.polymarket" class="text-ink-300">无 Polygon 钱包</span>
+                  <span x-show="agent.polymarket?.configured" class="text-ink-300">Polygon USDC.e</span>
                 </div>
               </div>
-              <div x-show="agent.polymarket && !agent.polymarket.configured" class="mt-2 pt-2 border-t border-warm-100 text-[10px] text-ink-300">Polymarket 未配置 API</div>
             </div>
 
           </div>
@@ -385,7 +413,26 @@ function portfolioApp() {
     lastRefresh: '',
     unit: localStorage.getItem('portfolio_unit') || 'usd',  // 'usd' | 'kas'
     chainsMeta: {},  // loaded from /api/chains/meta
-    addChainPickerFor: null,  // agent.id whose "+" picker is open
+    // Hardcoded 9-chain catalog mirroring exchange.eta Add Wallet modal — single
+    // source of truth for "supported chains" across both pages. Same shape as
+    // exchange.eta line 826. If you add a chain, add it BOTH here and there.
+    SUPPORTED_CHAINS_INFO: [
+      { id: 'bnb',       name: 'BNB (BSC)',  desc: 'USDT / USDC / BNB' },
+      { id: 'eth',       name: 'Ethereum',   desc: 'USDT / USDC / ETH' },
+      { id: 'arbitrum',  name: 'Arbitrum',   desc: 'USDT / USDC / ETH' },
+      { id: 'optimism',  name: 'Optimism',   desc: 'USDT / USDC / ETH' },
+      { id: 'base',      name: 'Base',       desc: 'USDC / ETH' },
+      { id: 'avalanche', name: 'Avalanche',  desc: 'USDT / USDC / AVAX' },
+      { id: 'polygon',   name: 'Polygon',    desc: 'USDT / USDC / MATIC' },
+      { id: 'sol',       name: 'Solana',     desc: 'USDT / USDC / SOL' },
+      { id: 'tron',      name: 'TRON',       desc: 'USDT / USDC / TRX' },
+    ],
+    addWalletModal: {
+      open: false,
+      agentId: null,
+      agentName: '',
+      creating: null,  // chain id during create
+    },
     walletPanel: {
       open: false,
       relayId: null,
@@ -511,31 +558,54 @@ function portfolioApp() {
       return tmpl.replace('__ADDR__', addr);
     },
 
-    // Prompt-chain send (native browser prompts, same UX as exchange.eta withdrawPrompt)
+    // Prompt-chain send (native browser prompts, chain-aware address validation)
     sendPrompt(wallet) {
       if (!wallet.hasPrivateKey) { alert('此钱包无私钥,无法发送'); return; }
-      const chainName = (wallet.chain || '').toUpperCase();
-      const nat = this.nativeSymbol(wallet.chain);
+      const chain = wallet.chain;
+      const chainName = (chain || '').toUpperCase();
+      const nat = this.nativeSymbol(chain);
       const usdtAvail = (wallet.usdtBalance || 0).toFixed(2);
       const usdcAvail = (wallet.usdcBalance || 0).toFixed(2);
       const natAvail = (wallet.nativeBalance || 0).toFixed(6);
-      const choice = prompt(
-        `发送 (${chainName}):\n` +
-        `  1 = ${nat} (可用 ${natAvail})\n` +
-        `  2 = USDT (可用 ${usdtAvail})\n` +
-        `  3 = USDC (可用 ${usdcAvail})\n\n` +
-        `输入 1 / 2 / 3:`
-      );
+
+      // Check what stables this chain has from chainsMeta (e.g. base has no USDT)
+      const stables = this.chainsMeta?.[chain]?.stables || {};
+      const hasUsdt = !!stables.usdt;
+      const hasUsdc = !!stables.usdc || !!(stables.usdcExtras?.length);
+      // For SOL/TRON, USDT and USDC always available via SPL/TRC20
+      const isSolOrTron = chain === 'sol' || chain === 'tron';
+      const usdtSupported = hasUsdt || isSolOrTron;
+      const usdcSupported = hasUsdc || isSolOrTron;
+
+      // Build asset menu dynamically
+      const options = [];
+      options.push({ key: 'native', label: `${nat} (可用 ${natAvail})` });
+      if (usdtSupported) options.push({ key: 'usdt', label: `USDT (可用 ${usdtAvail})` });
+      if (usdcSupported) options.push({ key: 'usdc', label: `USDC (可用 ${usdcAvail})` });
+
+      const menuLines = options.map((o, i) => `  ${i + 1} = ${o.label}`).join('\n');
+      const choice = prompt(`发送 (${chainName}):\n${menuLines}\n\n输入 ${options.map((_, i) => i + 1).join(' / ')}:`);
       if (!choice) return;
-      const pick = choice.trim();
-      const asset = pick === '2' ? 'usdt' : pick === '3' ? 'usdc' : pick === '1' ? 'native' : null;
-      if (!asset) return;
+      const idx = parseInt(choice.trim(), 10) - 1;
+      if (!Number.isInteger(idx) || idx < 0 || idx >= options.length) return;
+      const asset = options[idx].key;
       const assetLabel = asset === 'native' ? nat : asset.toUpperCase();
 
-      const toAddr = prompt(`目的地址 (${chainName}, 0x...):`);
+      // Address format hint per chain
+      const addrHint = chain === 'sol' ? 'base58 (~32-44 字符)'
+                     : chain === 'tron' ? 'T... (~34 字符)'
+                     : '0x...';
+      const toAddr = prompt(`目的地址 (${chainName}, ${addrHint}):`);
       if (!toAddr) return;
       const trimmed = toAddr.trim();
-      if (!/^0x[a-fA-F0-9]{40}$/.test(trimmed)) { alert('地址格式无效'); return; }
+
+      // Chain-aware address validation
+      const validators = {
+        sol:  a => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a),
+        tron: a => /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(a),
+      };
+      const validate = validators[chain] || (a => /^0x[a-fA-F0-9]{40}$/.test(a));
+      if (!validate(trimmed)) { alert(`地址格式无效 (${chainName})`); return; }
 
       const amtStr = prompt(`数量 (${assetLabel}):`);
       if (!amtStr) return;
@@ -573,18 +643,33 @@ function portfolioApp() {
       }
     },
 
-    // ── Add wallet (new chain or additional wallet on existing chain) ──
-    addableChainsFor(agent) {
-      // EVM-supported chains the agent does NOT yet have a wallet on
-      const supported = ['bnb', 'eth', 'polygon', 'arbitrum', 'optimism', 'avalanche', 'base', 'sol', 'tron'];
-      const owned = new Set((agent.chains || []).map(c => c.chain));
-      return supported.filter(c => !owned.has(c));
+    // ── Add wallet modal (mirrors exchange.eta Add Wallet) ──
+    openAddWalletModal(agent) {
+      this.addWalletModal = {
+        open: true,
+        agentId: agent.id,
+        agentName: agent.name || '',
+        creating: null,
+      };
     },
 
-    async createWalletForAgent(agent, chain) {
-      this.addChainPickerFor = null;
+    // Count how many wallets the currently-selected agent has on a given chain.
+    // Used by the modal to show "N existing" badge so user knows when they're
+    // creating a duplicate (which is allowed — Martin already has 2 BNB wallets).
+    walletCountFor(chainId) {
+      const agentId = this.addWalletModal.agentId;
+      if (!agentId) return 0;
+      const agent = (this.data?.agents || []).find(a => a.id === agentId);
+      if (!agent) return 0;
+      return (agent.chains || []).filter(c => c.chain === chainId).length;
+    },
+
+    async confirmCreateWallet(chain) {
+      const agentId = this.addWalletModal.agentId;
+      if (!agentId || this.addWalletModal.creating) return;
+      this.addWalletModal.creating = chain;
       try {
-        const r = await fetch(`/api/relay/${agent.id}/wallets`, {
+        const r = await fetch(`/api/relay/${agentId}/wallets`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ chain }),
@@ -592,14 +677,18 @@ function portfolioApp() {
         const d = await r.json();
         if (!r.ok || d.error) {
           alert('创建失败: ' + (d.error || `HTTP ${r.status}`));
+          this.addWalletModal.creating = null;
           return;
         }
+        // Close modal, refresh, open the wallet panel for the new chain
+        this.addWalletModal.open = false;
+        this.addWalletModal.creating = null;
         await this.loadAll();
-        // After reload, find this agent's freshly loaded data and open the wallet panel
-        const freshAgent = (this.data?.agents || []).find(a => a.id === agent.id);
+        const freshAgent = (this.data?.agents || []).find(a => a.id === agentId);
         if (freshAgent) this.openWalletPanel(freshAgent, chain);
       } catch (e) {
         alert('创建失败: ' + e.message);
+        this.addWalletModal.creating = null;
       }
     },
 

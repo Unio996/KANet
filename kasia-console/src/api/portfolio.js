@@ -44,13 +44,21 @@ export async function registerPortfolioRoutes(fastify) {
       return { id: r.id, name: r.name, address: r.address, ...section };
     }));
 
-    // Grand totals
+    // Grand totals — single-counting: every USD belongs to exactly one bucket
     const totalKas = agentSummaries.reduce((s, a) => s + (a.kaspa?.balance || 0), 0);
     const totalUsdStable = agentSummaries.reduce((s, a) => s + (a.stableTotalUsd || 0), 0);
+    const totalNativeUsd = agentSummaries.reduce((s, a) => s + (a.nativeTotalUsd || 0), 0);
     const totalDefiUsd = agentSummaries.reduce((s, a) => s + (a.defiTotalUsd || 0), 0);
     const totalPerpEquityUsd = agentSummaries.reduce((s, a) => s + (a.perpEquityUsd || 0), 0);
-    const grandTotalUsd = totalUsdStable + totalDefiUsd + totalPerpEquityUsd;
-    const openPositionCount = agentSummaries.reduce((s, a) => s + (a.openPositions?.length || 0), 0);
+    const grandTotalUsd = totalUsdStable + totalNativeUsd + totalDefiUsd + totalPerpEquityUsd;
+    // Open positions: HL (openPositions array) + Aevo + Polymarket + Aave
+    const openPositionCount = agentSummaries.reduce((s, a) =>
+      s + (a.openPositions?.length || 0)
+        + (a.aevo?.positionsCount || 0)
+        + (a.polymarket?.positionCount || 0)
+        + (a.aave?.positionsCount || 0),
+      0,
+    );
 
     // KAS price for unit conversion (read from market-data cache, no external call)
     let kasPriceUsd = null;
@@ -70,6 +78,7 @@ export async function registerPortfolioRoutes(fastify) {
       totals: {
         kas: totalKas,
         stableUsd: totalUsdStable,
+        nativeUsd: totalNativeUsd,
         defiUsd: totalDefiUsd,
         perpEquityUsd: totalPerpEquityUsd,
         grandTotalUsd,
@@ -96,11 +105,25 @@ async function _aggregateForRelay(relay, fastify) {
   const kaspa = walletData?.kaspa || { address: relay.address, balance: 0 };
   const chains = walletData?.chains || [];
 
-  // 2) Compute stable token total across all chains (USDT + USDC)
+  // 2a) Compute stable token total across all chains (USDT + USDC)
   let stableTotalUsd = 0;
   for (const c of chains) {
     stableTotalUsd += (c.usdtBalance || 0) + (c.usdcBalance || 0);
   }
+
+  // 2b) Compute native token total in USD ("其他资产" — separate from stables).
+  // Single-counting principle: native belongs HERE, never folded into stableTotalUsd.
+  // Price source: market-data.js cached CoinGecko prices (60s TTL).
+  let nativeTotalUsd = 0;
+  try {
+    const { getCachedNativePrice } = await import('../services/market-data.js');
+    for (const c of chains) {
+      const amount = c.nativeBalance || 0;
+      if (amount <= 0) continue;
+      const price = getCachedNativePrice(c.chain) || 0;
+      nativeTotalUsd += amount * price;
+    }
+  } catch {}
 
   // 3) Find Arbitrum wallet for DeFi lookups
   const arbWallet = chains.find(c => c.chain === 'arbitrum');
@@ -128,12 +151,19 @@ async function _aggregateForRelay(relay, fastify) {
 
     if (aaveRes.status === 'fulfilled' && aaveRes.value?.ok) {
       const a = aaveRes.value.account || {};
+      const collateralUSD = a.totalCollateralUSD || 0;
+      const debtUSD = a.totalDebtUSD || 0;
+      // Aave has no per-asset positions endpoint, only aggregate USD. Treat
+      // "having collateral" and "having debt" as separate open positions —
+      // approximation but correct in spirit (supplying != borrowing).
+      const positionsCount = (collateralUSD > 0 ? 1 : 0) + (debtUSD > 0 ? 1 : 0);
       aave = {
-        collateralUSD: a.totalCollateralUSD || 0,
-        debtUSD: a.totalDebtUSD || 0,
+        collateralUSD,
+        debtUSD,
         availableBorrowUSD: a.availableBorrowUSD || 0,
         healthFactor: a.healthFactor,
-        netUsd: (a.totalCollateralUSD || 0) - (a.totalDebtUSD || 0),
+        netUsd: collateralUSD - debtUSD,
+        positionsCount,
       };
       defiTotalUsd += aave.netUsd;
     }
@@ -166,6 +196,7 @@ async function _aggregateForRelay(relay, fastify) {
             available: acctRes.available || 0,
             marginPct: acctRes.marginPct || 0,
             portfolioGreeks: acctRes.portfolioGreeks || null,
+            positionsCount: acctRes.positionsCount || 0,
           };
           perpEquityUsd += aevo.equity;
         }
@@ -183,6 +214,7 @@ async function _aggregateForRelay(relay, fastify) {
     kaspa,
     chains,
     stableTotalUsd,
+    nativeTotalUsd,
     defiTotalUsd,
     perpEquityUsd,
     aave,

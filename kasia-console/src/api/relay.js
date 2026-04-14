@@ -684,7 +684,6 @@ export async function registerRelayRoutes(fastify) {
     ).get(request.params.walletId, request.params.id);
     if (!wallet) return reply.code(404).send({ error: 'Wallet not found' });
     if (!wallet.privkey_encrypted) return reply.code(400).send({ error: 'No private key — cannot send' });
-    if (!isEvmChain(wallet.chain)) return reply.code(400).send({ error: `Send only supported on EVM chains (got ${wallet.chain})` });
 
     const { asset, amount, to } = request.body || {};
     if (!asset || !amount || !to) return reply.code(400).send({ error: 'asset, amount, to required' });
@@ -694,72 +693,134 @@ export async function registerRelayRoutes(fastify) {
       return reply.code(400).send({ error: `asset must be native | usdt | usdc (got ${asset})` });
     }
 
-    // Guardrail 1: checksum address
-    let toAddr;
-    try { toAddr = ethers.getAddress(String(to).trim()); }
-    catch { return reply.code(400).send({ error: `Invalid destination address: ${to}` }); }
-
-    // Guardrail 2: positive amount
+    // Guardrail 1: positive amount (chain-agnostic)
     const amountNum = parseFloat(amount);
     if (!Number.isFinite(amountNum) || amountNum <= 0) {
       return reply.code(400).send({ error: 'amount must be a positive number' });
     }
 
-    const coins = STABLECOINS[wallet.chain] || {};
-    if (assetKey !== 'native' && !coins[assetKey]) {
-      return reply.code(400).send({ error: `${assetKey.toUpperCase()} not configured on ${wallet.chain}` });
-    }
+    const toRaw = String(to).trim();
 
-    try {
-      const privateKey = decrypt(wallet.privkey_encrypted);
+    // ── EVM chains (bnb/eth/polygon/arbitrum/optimism/avalanche/base) ──
+    if (isEvmChain(wallet.chain)) {
+      // Checksum address
+      let toAddr;
+      try { toAddr = ethers.getAddress(toRaw); }
+      catch { return reply.code(400).send({ error: `Invalid EVM destination address: ${toRaw}` }); }
 
-      const result = await withFallbackRpc(wallet.chain, async (provider) => {
-        const signer = new ethers.Wallet(privateKey, provider);
+      const coins = STABLECOINS[wallet.chain] || {};
+      if (assetKey !== 'native' && !coins[assetKey]) {
+        return reply.code(400).send({ error: `${assetKey.toUpperCase()} not configured on ${wallet.chain}` });
+      }
 
-        if (assetKey === 'native') {
-          // Pre-check native balance (must cover amount + estimated gas)
-          const balance = await provider.getBalance(signer.address);
-          const amountWei = ethers.parseEther(String(amountNum));
-          if (balance < amountWei) {
-            throw new Error(`Insufficient ${CHAIN_META[wallet.chain].nativeSymbol} balance`);
+      try {
+        const privateKey = decrypt(wallet.privkey_encrypted);
+        const result = await withFallbackRpc(wallet.chain, async (provider) => {
+          const signer = new ethers.Wallet(privateKey, provider);
+          if (assetKey === 'native') {
+            const balance = await provider.getBalance(signer.address);
+            const amountWei = ethers.parseEther(String(amountNum));
+            if (balance < amountWei) {
+              throw new Error(`Insufficient ${CHAIN_META[wallet.chain].nativeSymbol} balance`);
+            }
+            const tx = await signer.sendTransaction({ to: toAddr, value: amountWei });
+            return { txHash: tx.hash };
           }
-          const tx = await signer.sendTransaction({ to: toAddr, value: amountWei });
+          const token = coins[assetKey];
+          const erc20 = new ethers.Contract(
+            token.address,
+            ['function transfer(address to, uint256 amount) returns (bool)',
+             'function balanceOf(address) view returns (uint256)'],
+            signer,
+          );
+          const amountWei = ethers.parseUnits(String(amountNum), token.decimals);
+          const bal = await erc20.balanceOf(signer.address);
+          if (bal < amountWei) {
+            throw new Error(`Insufficient ${assetKey.toUpperCase()} balance on ${wallet.chain}`);
+          }
+          const tx = await erc20.transfer(toAddr, amountWei);
           return { txHash: tx.hash };
-        }
+        }, { timeoutMs: 10000 });
 
-        // ERC20 path
-        const token = coins[assetKey];
-        const erc20 = new ethers.Contract(
-          token.address,
-          [
-            'function transfer(address to, uint256 amount) returns (bool)',
-            'function balanceOf(address) view returns (uint256)',
-          ],
-          signer
-        );
-        const amountWei = ethers.parseUnits(String(amountNum), token.decimals);
-        const bal = await erc20.balanceOf(signer.address);
-        if (bal < amountWei) {
-          throw new Error(`Insufficient ${assetKey.toUpperCase()} balance on ${wallet.chain}`);
-        }
-        const tx = await erc20.transfer(toAddr, amountWei);
-        return { txHash: tx.hash };
-      }, { timeoutMs: 10000 });
-
-      console.log(`[wallet/send] ${wallet.chain} ${amountNum} ${assetKey} ${wallet.address} → ${toAddr} TX: ${result.txHash}`);
-      return reply.send({
-        ok: true,
-        txHash: result.txHash,
-        chain: wallet.chain,
-        asset: assetKey,
-        amount: amountNum,
-        to: toAddr,
-        explorerUrl: getExplorerTxUrl(wallet.chain, result.txHash),
-      });
-    } catch (err) {
-      console.error(`[wallet/send] failed: ${err.message}`);
-      return reply.code(500).send({ error: err.message });
+        console.log(`[wallet/send] ${wallet.chain} ${amountNum} ${assetKey} ${wallet.address} → ${toAddr} TX: ${result.txHash}`);
+        return reply.send({
+          ok: true, txHash: result.txHash, chain: wallet.chain, asset: assetKey,
+          amount: amountNum, to: toAddr,
+          explorerUrl: getExplorerTxUrl(wallet.chain, result.txHash),
+        });
+      } catch (err) {
+        console.error(`[wallet/send] EVM failed: ${err.message}`);
+        return reply.code(500).send({ error: err.message });
+      }
     }
+
+    // ── Solana ──
+    if (wallet.chain === 'sol') {
+      // Solana base58 address: 32-44 chars, no 0/O/I/l
+      if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(toRaw)) {
+        return reply.code(400).send({ error: `Invalid Solana destination address: ${toRaw}` });
+      }
+      try {
+        if (assetKey === 'native') {
+          const { transferSolNative } = await import('../services/sol-transfer.js');
+          const result = await transferSolNative(wallet.privkey_encrypted, toRaw, amountNum);
+          if (!result.ok) return reply.code(500).send({ error: result.error });
+          console.log(`[wallet/send] sol ${amountNum} SOL ${wallet.address} → ${toRaw} TX: ${result.txHash}`);
+          return reply.send({
+            ok: true, txHash: result.txHash, chain: 'sol', asset: 'native',
+            amount: amountNum, to: toRaw,
+            explorerUrl: getExplorerTxUrl('sol', result.txHash),
+          });
+        }
+        const { transferSPL } = await import('../services/sol-transfer.js');
+        const result = await transferSPL(wallet.privkey_encrypted, toRaw, amountNum, assetKey.toUpperCase());
+        if (!result.ok) return reply.code(500).send({ error: result.error });
+        console.log(`[wallet/send] sol ${amountNum} ${assetKey} ${wallet.address} → ${toRaw} TX: ${result.txHash}`);
+        return reply.send({
+          ok: true, txHash: result.txHash, chain: 'sol', asset: assetKey,
+          amount: amountNum, to: toRaw,
+          explorerUrl: getExplorerTxUrl('sol', result.txHash),
+        });
+      } catch (err) {
+        console.error(`[wallet/send] sol failed: ${err.message}`);
+        return reply.code(500).send({ error: err.message });
+      }
+    }
+
+    // ── TRON ──
+    if (wallet.chain === 'tron') {
+      // TRON base58check: starts with T, total 34 chars
+      if (!/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(toRaw)) {
+        return reply.code(400).send({ error: `Invalid TRON destination address: ${toRaw}` });
+      }
+      try {
+        if (assetKey === 'native') {
+          const { transferTronNative } = await import('../services/tron-transfer.js');
+          const result = await transferTronNative(wallet.privkey_encrypted, toRaw, amountNum);
+          if (!result.ok) return reply.code(500).send({ error: result.error });
+          console.log(`[wallet/send] tron ${amountNum} TRX ${wallet.address} → ${toRaw} TX: ${result.txHash}`);
+          return reply.send({
+            ok: true, txHash: result.txHash, chain: 'tron', asset: 'native',
+            amount: amountNum, to: toRaw,
+            explorerUrl: getExplorerTxUrl('tron', result.txHash),
+          });
+        }
+        const { transferTRC20 } = await import('../services/tron-transfer.js');
+        const result = await transferTRC20(wallet.privkey_encrypted, toRaw, amountNum, assetKey.toUpperCase());
+        if (!result.ok) return reply.code(500).send({ error: result.error });
+        console.log(`[wallet/send] tron ${amountNum} ${assetKey} ${wallet.address} → ${toRaw} TX: ${result.txHash}`);
+        return reply.send({
+          ok: true, txHash: result.txHash, chain: 'tron', asset: assetKey,
+          amount: amountNum, to: toRaw,
+          explorerUrl: getExplorerTxUrl('tron', result.txHash),
+        });
+      } catch (err) {
+        console.error(`[wallet/send] tron failed: ${err.message}`);
+        return reply.code(500).send({ error: err.message });
+      }
+    }
+
+    return reply.code(400).send({ error: `Send not supported on chain: ${wallet.chain}` });
   });
 
   // POST /api/relay/:id/wallets/:walletId/swap — swap between tokens on same chain (Uniswap V3)

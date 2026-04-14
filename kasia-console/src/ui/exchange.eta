@@ -1516,25 +1516,65 @@ function exchangeApp() {
       if (el) { const prev = el.textContent; el.textContent = 'Copied!'; setTimeout(() => { el.textContent = prev; }, 1500); }
     },
     withdrawPrompt(wallet) {
+      // Native gas symbol per chain — covers all 9 supported chains
+      const NATIVE_SYMBOL = {
+        bnb: 'BNB', eth: 'ETH', polygon: 'MATIC',
+        arbitrum: 'ETH', optimism: 'ETH', base: 'ETH',
+        avalanche: 'AVAX', sol: 'SOL', tron: 'TRX',
+      };
       const chainName = wallet.chain?.toUpperCase();
-      const gasName = wallet.chain === 'polygon' ? 'MATIC' : wallet.chain === 'bnb' ? 'BNB' : wallet.chain === 'eth' ? 'ETH' : wallet.chain === 'sol' ? 'SOL' : wallet.chain === 'tron' ? 'TRX' : chainName;
-      const choice = prompt('Withdraw:\n  1 = USDT (' + (wallet.usdt||0).toFixed(2) + ' available)\n  2 = ' + gasName + ' (' + (wallet.gas||0).toFixed(4) + ' available)\n\nEnter 1 or 2:');
+      const gasName = NATIVE_SYMBOL[wallet.chain] || chainName;
+      // Address format hint per chain
+      const addrHint = wallet.chain === 'sol' ? 'base58 (~32-44 chars)'
+                     : wallet.chain === 'tron' ? 'T... (~34 chars)'
+                     : '0x...';
+      const choice = prompt(
+        'Withdraw (' + chainName + '):\n' +
+        '  1 = USDT (' + (wallet.usdt||0).toFixed(2) + ' available)\n' +
+        '  2 = USDC (' + (wallet.usdc||0).toFixed(2) + ' available)\n' +
+        '  3 = ' + gasName + ' (' + (wallet.gas||0).toFixed(4) + ' available)\n\n' +
+        'Enter 1 / 2 / 3:'
+      );
       if (!choice) return;
-      const asset = choice.trim() === '2' ? 'native' : 'usdt';
-      const assetLabel = asset === 'native' ? gasName : 'USDT';
-      const toAddr = prompt('Target address (' + chainName + '):');
+      const pick = choice.trim();
+      const asset = pick === '2' ? 'usdc' : pick === '3' ? 'native' : pick === '1' ? 'usdt' : null;
+      if (!asset) return;
+      const assetLabel = asset === 'native' ? gasName : asset.toUpperCase();
+      const toAddr = prompt('Target address (' + chainName + ', ' + addrHint + '):');
       if (!toAddr) return;
+      const trimmed = toAddr.trim();
+      // Chain-aware address validation (mirrors portfolio.eta sendPrompt)
+      const validators = {
+        sol:  a => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a),
+        tron: a => /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(a),
+      };
+      const validate = validators[wallet.chain] || (a => /^0x[a-fA-F0-9]{40}$/.test(a));
+      if (!validate(trimmed)) { alert('Invalid address format for ' + chainName); return; }
       const amt = prompt('Amount (' + assetLabel + '):');
       if (!amt || isNaN(amt)) return;
-      if (!confirm('Send ' + amt + ' ' + assetLabel + '\nTo: ' + toAddr + '\nChain: ' + chainName)) return;
-      this.doWithdraw(wallet, toAddr, parseFloat(amt), asset);
+      if (!confirm('Send ' + amt + ' ' + assetLabel + '\nTo: ' + trimmed + '\nChain: ' + chainName + '\n\nThis is irreversible.')) return;
+      this.doWithdraw(wallet, trimmed, parseFloat(amt), asset);
     },
     async doWithdraw(wallet, toAddr, amount, asset = 'usdt') {
+      // Route through /api/relay/:id/wallets/:walletId/send — same backend as
+      // /portfolio. This unifies the two pages: both support 9 chains × 3 assets
+      // (native + USDT + USDC) via a single dispatch path. Old /api/trade/withdraw
+      // (trading.js) was bnb/eth-only and the source of "提现暂不支持" gaps.
+      const relayId = this.form?.relayNodeId;
+      if (!relayId) { alert('Error: no agent selected'); return; }
       try {
-        const r = await fetch('/api/trade/withdraw', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ walletId: wallet.id, chain: wallet.chain, to: toAddr, amount, asset }) });
+        const r = await fetch('/api/relay/' + relayId + '/wallets/' + wallet.id + '/send', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ asset, amount, to: toAddr }),
+        });
         const d = await r.json();
-        if (d.ok || d.txHash) { alert('Sent! TX: ' + (d.txHash || '').slice(0, 20) + '...'); await this.loadWallet(); }
-        else alert('Error: ' + (d.error || 'Unknown'));
+        if (r.ok && (d.ok || d.txHash)) {
+          alert('Sent! TX: ' + (d.txHash || '').slice(0, 20) + '...\n\n' + (d.explorerUrl || ''));
+          await this.loadWallet();
+        } else {
+          alert('Error: ' + (d.error || 'HTTP ' + r.status));
+        }
       } catch (e) { alert('Error: ' + e.message); }
     },
     async showPrivkeyFor(wallet) {

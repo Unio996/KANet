@@ -873,15 +873,21 @@ export async function registerDefiRoutes(fastify) {
     }
   });
 
-  // GET /api/defi/aevo/account — account status
+  // GET /api/defi/aevo/account — account status (includes positionsCount)
   fastify.get('/api/defi/aevo/account', async (request, reply) => {
     const { agentId } = request.query;
     if (!agentId) return reply.code(400).send({ error: 'agentId required' });
     try {
-      const { loadCredentials, getAccount } = await import('../services/aevo-client.js');
+      const { loadCredentials, getAccount, getPositions } = await import('../services/aevo-client.js');
       const creds = await loadCredentials(agentId);
       if (!creds) return reply.code(404).send({ error: 'No Aevo credentials configured' });
-      return reply.send(await getAccount(creds));
+      // Fetch account + positions in parallel; positions is best-effort
+      const [account, positions] = await Promise.all([
+        getAccount(creds),
+        getPositions(creds).catch(() => []),
+      ]);
+      const positionsCount = Array.isArray(positions) ? positions.length : 0;
+      return reply.send({ ...account, positionsCount });
     } catch (err) {
       return reply.code(500).send({ error: err.message });
     }

@@ -94,6 +94,61 @@ export async function transferTRC20(privkeyEncrypted, toAddress, amount, asset =
 }
 
 /**
+ * Transfer native TRX.
+ *
+ * TRX is the gas/coin layer of TRON. Sending it uses the basic system contract,
+ * not a TRC20 contract. Bandwidth/energy fees come from TRX itself, so the
+ * sender needs slightly more TRX than `amount`.
+ *
+ * @param {string} privkeyEncrypted — encrypted hex private key (same as EVM)
+ * @param {string} toAddress — recipient base58check address (starts with T)
+ * @param {number} amount — amount in TRX
+ * @returns {Promise<{ ok: true, txHash: string } | { ok: false, error: string }>}
+ */
+export async function transferTronNative(privkeyEncrypted, toAddress, amount) {
+  try {
+    let privateKey = decrypt(privkeyEncrypted);
+    if (privateKey.startsWith('0x')) privateKey = privateKey.slice(2);
+
+    const TronWebModule = await import('tronweb');
+    const TronWeb = TronWebModule.default || TronWebModule;
+    const tronWeb = new TronWeb({ fullHost: TRON_RPC, privateKey });
+
+    const senderAddress = tronWeb.defaultAddress.base58;
+    if (!senderAddress) {
+      return { ok: false, error: 'Failed to derive TRON address from private key' };
+    }
+
+    // Check balance (TRX is in sun: 1 TRX = 1_000_000 sun)
+    const balanceSun = await tronWeb.trx.getBalance(senderAddress);
+    const balanceTrx = balanceSun / 1e6;
+    // Native TRX transfer needs ~280 bandwidth which is free if account has TRX,
+    // or ~0.28 TRX burned. Reserve 1 TRX for safety.
+    const FEE_RESERVE = 1;
+    if (balanceTrx < amount + FEE_RESERVE) {
+      return { ok: false, error: `TRX insufficient: have ${balanceTrx.toFixed(4)}, need ${(amount + FEE_RESERVE).toFixed(4)} (incl fee reserve)` };
+    }
+
+    const amountSun = Math.round(amount * 1e6);
+    const tx = await tronWeb.trx.sendTransaction(toAddress, amountSun);
+
+    const txHash = tx?.txid || tx?.transaction?.txID || '';
+    if (!txHash) {
+      return { ok: false, error: 'sendTransaction returned no txid' };
+    }
+    if (tx?.result === false) {
+      return { ok: false, error: tx?.message || 'TRON sendTransaction returned result=false' };
+    }
+
+    console.log(`[tron-transfer] ${amount} TRX → ${toAddress.slice(0, 12)}... TX: ${txHash}`);
+    return { ok: true, txHash };
+  } catch (err) {
+    console.error(`[tron-transfer] Native TRX transfer failed: ${err.message}`);
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
  * Check if TRON chain is supported for TRC20 transfer.
  */
 export function isTronChainSupported(chain) {

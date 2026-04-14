@@ -12,6 +12,8 @@ import {
   Keypair,
   PublicKey,
   Transaction,
+  SystemProgram,
+  LAMPORTS_PER_SOL,
   sendAndConfirmTransaction,
 } from '@solana/web3.js';
 import {
@@ -121,6 +123,57 @@ export async function transferSPL(privkeyEncrypted, toAddress, amount, asset = '
     return { ok: true, txHash: signature };
   } catch (err) {
     console.error(`[sol-transfer] Failed: ${err.message}`);
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Transfer native SOL.
+ *
+ * Native SOL is the gas/coin layer of Solana. Sending it does not need an ATA;
+ * use SystemProgram.transfer for a basic lamport move.
+ *
+ * @param {string} privkeyEncrypted — encrypted bs58 secretKey
+ * @param {string} toAddress — recipient base58 address
+ * @param {number} amount — amount in SOL (e.g. 0.5)
+ * @returns {Promise<{ ok: true, txHash: string } | { ok: false, error: string }>}
+ */
+export async function transferSolNative(privkeyEncrypted, toAddress, amount) {
+  try {
+    const privkeyStr = decrypt(privkeyEncrypted);
+    const bs58 = (await import('bs58')).default;
+    const secretKey = bs58.decode(privkeyStr);
+    const payer = Keypair.fromSecretKey(secretKey);
+
+    const connection = new Connection(SOL_RPC, 'confirmed');
+    const recipientPubkey = new PublicKey(toAddress);
+
+    // Check balance (need amount + ~5000 lamports for fee)
+    const balanceLamports = await connection.getBalance(payer.publicKey);
+    const balanceSol = balanceLamports / LAMPORTS_PER_SOL;
+    const FEE_RESERVE_SOL = 0.000005; // ~5000 lamports
+    if (balanceSol < amount + FEE_RESERVE_SOL) {
+      return { ok: false, error: `SOL insufficient: have ${balanceSol.toFixed(6)}, need ${(amount + FEE_RESERVE_SOL).toFixed(6)} (incl fee)` };
+    }
+
+    const lamports = Math.round(amount * LAMPORTS_PER_SOL);
+    const tx = new Transaction().add(
+      SystemProgram.transfer({
+        fromPubkey: payer.publicKey,
+        toPubkey: recipientPubkey,
+        lamports,
+      })
+    );
+
+    const signature = await sendAndConfirmTransaction(connection, tx, [payer], {
+      commitment: 'confirmed',
+      maxRetries: 3,
+    });
+
+    console.log(`[sol-transfer] ${amount} SOL → ${toAddress.slice(0, 12)}... TX: ${signature}`);
+    return { ok: true, txHash: signature };
+  } catch (err) {
+    console.error(`[sol-transfer] Native SOL transfer failed: ${err.message}`);
     return { ok: false, error: err.message };
   }
 }
