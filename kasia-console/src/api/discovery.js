@@ -316,18 +316,31 @@ export async function registerDiscoveryRoutes(fastify) {
           observeHandshake(addressB, addressA, txHash, occurredAt || new Date().toISOString());
 
           // 写入 pending_actions — inbound 握手等待 Relay 接受
+          // Guard (2026-04-14): 已握过手 / 关系已 active 则不再入队,
+          // 避免 /loop 重复花 0.2 KAS 回一次. 同 ingest-service.js:86.
           try {
-            const { randomUUID } = await import('crypto');
-            const now = new Date().toISOString();
-            sqlite.prepare(`
-              INSERT OR IGNORE INTO pending_actions
-                (id, action_type, direction, local_address, target_address, source, idempotent_key, status, trigger_txid, created_at, updated_at)
-              VALUES (?, 'handshake_accept', 'inbound', ?, ?, 'scout', ?, 'pending', ?, ?, ?)
-            `).run(
-              randomUUID(), addressB, addressA,
-              `handshake_accept:${addressB}:${addressA}`,
-              txHash || null, now, now,
-            );
+            const already = sqlite.prepare(`
+              SELECT 1 FROM relation_states
+              WHERE local_address = ? AND peer_address = ?
+                AND (handshake_observed_at IS NOT NULL
+                  OR status IN ('accepted','confirmed','active'))
+              LIMIT 1
+            `).get(addressB, addressA);
+            if (already) {
+              console.log(`[discovery] skip handshake_accept enqueue: already active with ${addressA.slice(-12)}`);
+            } else {
+              const { randomUUID } = await import('crypto');
+              const now = new Date().toISOString();
+              sqlite.prepare(`
+                INSERT OR IGNORE INTO pending_actions
+                  (id, action_type, direction, local_address, target_address, source, idempotent_key, status, trigger_txid, created_at, updated_at)
+                VALUES (?, 'handshake_accept', 'inbound', ?, ?, 'scout', ?, 'pending', ?, ?, ?)
+              `).run(
+                randomUUID(), addressB, addressA,
+                `handshake_accept:${addressB}:${addressA}`,
+                txHash || null, now, now,
+              );
+            }
           } catch (paErr) {
             console.log(`[discovery] pending_actions write failed: ${paErr.message}`);
           }

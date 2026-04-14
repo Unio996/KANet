@@ -85,17 +85,33 @@ export async function handleIngestMessage(payload) {
 
         // 写入 pending_actions 意图队列 — catch-up 从这里消费
         // outbound 不写（由 action-executor 写）
+        //
+        // Guard (2026-04-14 bug fix): 如果我方已经主动 handshake-init 过
+        // 或关系已达 accepted/confirmed/active, 对方回来的握手只是 ACK,
+        // 不要再入队 handshake_accept — 否则 /loop 会再花 0.2 KAS 回一次.
+        // 实测: J2 作为 sender 有 10 组重复握手, 累计浪费 ~2 KAS.
         try {
-          const now = nowIso();
-          sqlite.prepare(`
-            INSERT OR IGNORE INTO pending_actions
-              (id, action_type, direction, local_address, target_address, source, idempotent_key, status, trigger_txid, created_at, updated_at)
-            VALUES (?, 'handshake_accept', 'inbound', ?, ?, 'ingest', ?, 'pending', ?, ?, ?)
-          `).run(
-            randomUUID(), localAddress, remoteAddress,
-            `handshake_accept:${localAddress}:${remoteAddress}`,
-            txid || null, now, now,
-          );
+          const already = sqlite.prepare(`
+            SELECT 1 FROM relation_states
+            WHERE local_address = ? AND peer_address = ?
+              AND (handshake_observed_at IS NOT NULL
+                OR status IN ('accepted','confirmed','active'))
+            LIMIT 1
+          `).get(localAddress, remoteAddress);
+          if (already) {
+            console.log(`[ingest] skip handshake_accept enqueue: already active with ${remoteAddress.slice(-12)}`);
+          } else {
+            const now = nowIso();
+            sqlite.prepare(`
+              INSERT OR IGNORE INTO pending_actions
+                (id, action_type, direction, local_address, target_address, source, idempotent_key, status, trigger_txid, created_at, updated_at)
+              VALUES (?, 'handshake_accept', 'inbound', ?, ?, 'ingest', ?, 'pending', ?, ?, ?)
+            `).run(
+              randomUUID(), localAddress, remoteAddress,
+              `handshake_accept:${localAddress}:${remoteAddress}`,
+              txid || null, now, now,
+            );
+          }
         } catch (paErr) {
           console.log(`[ingest] pending_actions write failed: ${paErr.message}`);
         }
