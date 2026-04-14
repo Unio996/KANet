@@ -37,10 +37,12 @@ export function assessReputation(myAddress, peerAddress) {
   // 原版只查 mm_orders (OTC 遗留表), 不知道 exchange_offers 存在 → 所有 Exchange
   // 模块上的交易对 reputation 层完全失明. Phase 2 P2-02/P2-03 坐实这个 bug.
   // Schema 不同, 用 CASE 表达式把 give/want_asset 映射到统一的 kas_amount/usdt_amount.
+  // had_taker 判断是否进入过交割阶段 (exchange_offers.taker != NULL 说明被接过单)
+  // mm_orders 没有 taker 概念, 传统上都算进入过交割阶段, 用 1 占位
   const trades = sqlite.prepare(`
     SELECT * FROM (
       -- OTC legacy
-      SELECT status, kas_amount, usdt_amount, created_at, completed_at, 'mm' AS source
+      SELECT status, kas_amount, usdt_amount, created_at, completed_at, 'mm' AS source, 1 AS had_taker
       FROM mm_orders
       WHERE peer_address = ? OR agent_address = ?
 
@@ -57,7 +59,8 @@ export function assessReputation(myAddress, peerAddress) {
              ELSE 0 END AS usdt_amount,
         created_at,
         completed_at,
-        'exchange' AS source
+        'exchange' AS source,
+        CASE WHEN taker IS NOT NULL THEN 1 ELSE 0 END AS had_taker
       FROM exchange_offers
       WHERE maker = ? OR taker = ?
     )
@@ -67,8 +70,13 @@ export function assessReputation(myAddress, peerAddress) {
   const completed = trades.filter(t => t.status === 'completed');
   const cancelled = trades.filter(t => t.status === 'cancelled');
   const disputed = trades.filter(t => ['disputed', 'escalated'].includes(t.status));
+  // Phase 2 Finding #9 (2026-04-14 修): expired / 未 matched 的 cancelled 不算违约.
+  // 只有"进入过交割阶段后" (had_taker=1) 的结果才计入完成率分母.
+  // Maker 挂的没接到的单过期不该扣声誉.
+  const matchedCancelled = trades.filter(t => t.status === 'cancelled' && t.had_taker);
   const totalTrades = trades.length;
-  const completionRate = totalTrades > 0 ? completed.length / totalTrades : null;
+  const actionableTotal = completed.length + disputed.length + matchedCancelled.length;
+  const completionRate = actionableTotal > 0 ? completed.length / actionableTotal : null;
   const totalKasVolume = completed.reduce((sum, t) => sum + (t.kas_amount || 0), 0);
   const avgTradeSize = completed.length > 0 ? totalKasVolume / completed.length : 0;
 
@@ -156,9 +164,11 @@ export function assessReputation(myAddress, peerAddress) {
     // 交易历史
     totalTrades,
     completed: completed.length,
-    cancelled: cancelled.length,
+    cancelled: cancelled.length,             // 所有 cancelled (含未 match 过期)
+    matchedCancelled: matchedCancelled.length, // 只算真违约 (had_taker=1)
     disputed: disputed.length,
     completionRate,
+    actionableTotal,                          // 完成率分母: completed+disputed+matchedCancelled
     totalKasVolume: Math.round(totalKasVolume),
     avgTradeSize: Math.round(avgTradeSize),
 

@@ -334,6 +334,36 @@ export function processCancel(msg) {
  * Expire stale offers. Called periodically.
  * @returns {number} count of expired offers
  */
+/**
+ * Check for disputes that have been open too long (72h threshold).
+ *
+ * 2026-04-14 (stub): 暂时只 log 警告, 不自动 resolve.
+ * 下轮需要设计 "原本 outcome" 逻辑:
+ *   - 若 dispute 发生时 status=delivering → 默认 taker_wins (KAS 已发)
+ *   - 若 dispute 发生时 status=verifying/matched → 默认 maker_wins (钱未到)
+ * 需要 verification_meta 里记录 pre_dispute_status, 才能安全地 auto-resolve.
+ * 当前只告警, 避免误判.
+ *
+ * @returns {number} count of aging disputes
+ */
+export function checkStaleDisputes() {
+  const stale = sqlite.prepare(
+    `SELECT id, maker, taker,
+            json_extract(verification_meta, '$.dispute_at') AS dispute_at,
+            json_extract(verification_meta, '$.dispute_by') AS dispute_by
+     FROM exchange_offers
+     WHERE protocol_status = 'disputed'
+       AND json_extract(verification_meta, '$.dispute_at') IS NOT NULL
+       AND datetime(json_extract(verification_meta, '$.dispute_at'), '+72 hours') < datetime('now')
+       AND json_extract(verification_meta, '$.resolved_at') IS NULL`
+  ).all();
+
+  for (const s of stale) {
+    console.warn(`[exchange] ⚠ STALE DISPUTE ${s.id.slice(0, 8)} disputed_at=${s.dispute_at} by=${s.dispute_by?.slice(-8)} — 超过 72h 未 resolve, TODO: auto-resolve (下轮实现)`);
+  }
+  return stale.length;
+}
+
 export function expireStale() {
   const now = new Date().toISOString();
   const stale = sqlite.prepare(

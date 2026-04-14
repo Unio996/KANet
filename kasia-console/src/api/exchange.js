@@ -639,6 +639,43 @@ export async function registerExchangeRoutes(fastify) {
       : null;
     if (!relay) return reply.code(403).send({ error: 'relayNodeId required' });
 
+    const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer_id);
+    if (!offer) return reply.code(404).send({ error: 'offer_not_found' });
+
+    // === NO TX NO STATE CHANGE: 先广播到 #kanet-disputes 再推进本地状态 ===
+    let disputeTx = null;
+    const { sendCommandAsync } = await import('../services/relay-manager.js');
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const res = await sendCommandAsync(relayNodeId, {
+          type: 'send_broadcast',
+          channel: 'kanet-disputes',
+          message: JSON.stringify({
+            t: 'kanet_exchange_dispute_v1',
+            offer_id,
+            maker: offer.maker,
+            taker: offer.taker,
+            give_asset: offer.give_asset,
+            give_amount: offer.give_amount,
+            want_asset: offer.want_asset,
+            want_amount: offer.want_amount,
+            disputer: relay.address,
+            reason: reason || 'no_reason_given',
+            raised_at: new Date().toISOString(),
+          }),
+        });
+        disputeTx = res?.txId || null;
+        if (disputeTx) break;
+      } catch (err) {
+        console.error(`[exchange] Dispute broadcast attempt ${attempt}/3: ${err.message}`);
+      }
+      if (attempt < 3) await new Promise(r => setTimeout(r, 300 * attempt));
+    }
+    if (!disputeTx) {
+      return reply.code(503).send({ error: 'Dispute broadcast failed — state unchanged (NO TX NO STATE CHANGE)' });
+    }
+
+    // 本地推进状态
     const result = processDispute({
       offer_id,
       disputer_address: relay.address,
@@ -646,7 +683,7 @@ export async function registerExchangeRoutes(fastify) {
     });
 
     if (result.error) return reply.code(400).send(result);
-    return reply.send(result);
+    return reply.send({ ...result, dispute_tx: disputeTx });
   });
 
   // ── POST /api/exchange/resolve — 裁决争议 ─────────────────
@@ -660,14 +697,12 @@ export async function registerExchangeRoutes(fastify) {
   //   - taker_wins  → offer moves to 'cancelled', fund_lock released back to maker
   //   - split       → NOT YET SUPPORTED (returns 501)
   fastify.post('/api/exchange/resolve', async (request, reply) => {
-    const { relayNodeId, offer_id, outcome, reason, channel = 'kanet-exchange' } = request.body || {};
-    if (!offer_id || !outcome) return reply.code(400).send({ error: 'offer_id and outcome required' });
-
-    const VALID_OUTCOMES = ['maker_wins', 'taker_wins'];
-    if (outcome === 'split') return reply.code(501).send({ error: 'split outcome not yet implemented' });
-    if (!VALID_OUTCOMES.includes(outcome)) {
-      return reply.code(400).send({ error: `invalid outcome, must be one of: ${VALID_OUTCOMES.join(', ')}` });
-    }
+    // 2026-04-14: concede-only 语义 — 调用方只能"认输", 不能"宣判对方输".
+    // maker 调 resolve → 自动设 taker_wins (maker 认输)
+    // taker 调 resolve → 自动设 maker_wins (taker 认输)
+    // 客户端不再需要传 outcome, 传了也必须和 concede 规则一致.
+    const { relayNodeId, offer_id, outcome: clientOutcome, reason, channel = 'kanet-disputes' } = request.body || {};
+    if (!offer_id) return reply.code(400).send({ error: 'offer_id required' });
 
     const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer_id);
     if (!offer) return reply.code(404).send({ error: 'Offer not found' });
@@ -680,9 +715,20 @@ export async function registerExchangeRoutes(fastify) {
       : null;
     if (!relay) return reply.code(403).send({ error: 'relayNodeId required' });
 
-    // Permission: only maker or taker can resolve (no third-party arbiter yet)
-    if (relay.address !== offer.maker && relay.address !== offer.taker) {
+    // Permission + concede-only 派生 outcome
+    let outcome;
+    if (relay.address === offer.maker) {
+      outcome = 'taker_wins'; // maker concedes
+    } else if (relay.address === offer.taker) {
+      outcome = 'maker_wins'; // taker concedes
+    } else {
       return reply.code(403).send({ error: 'Only offer maker or taker can resolve dispute' });
+    }
+    // 如果客户端传了 outcome, 必须和 concede 规则一致 (防止误传)
+    if (clientOutcome && clientOutcome !== outcome) {
+      return reply.code(400).send({
+        error: `concede-only: as ${relay.address === offer.maker ? 'maker' : 'taker'}, you can only concede (outcome=${outcome}), not declare ${clientOutcome}`,
+      });
     }
 
     // === NO TX NO STATE CHANGE: broadcast resolve first ===
