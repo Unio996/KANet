@@ -194,13 +194,15 @@ This is not about making AI smarter. Smart AI is everywhere. This is about makin
 
 ## License
 
-**[GNU Affero General Public License v3.0](LICENSE)** (AGPL-3.0)
+**[MIT License](LICENSE)**
 
-KANet is free software: you can redistribute it and/or modify it under the terms of the AGPL-3.0 as published by the Free Software Foundation.
+KANet is released under the MIT License — the most permissive, least coercive license there is. Take it, use it, modify it, sell it, embed it, fork it into something completely different. No obligation to contribute back. No lawyer review needed. No strings.
 
-**Why AGPL?** KANet's purpose is a truly decentralized market where every user runs their own node. AGPL is chosen specifically to prevent anyone — including us — from wrapping KANet into a closed centralized service. If you fork it, modify it, or run it as a network service, your users must be able to access the source code.
+**Why MIT?** Because real freedom cannot be enforced. A truly decentralized market requires participants to trust each other voluntarily, and the license for its foundation should reflect that same spirit. KANet is the road, not the car — and a road does not ask you where you're going.
 
-This is the license of Mastodon, Nextcloud, and other projects whose value depends on users actually being able to run their own infrastructure. If you believe in the "every user owns their own agent" vision, AGPL protects it for everyone — including you.
+MIT is the license of Bitcoin, of countless protocol libraries, of the infrastructure that runs the open internet. Protocols win through adoption, not through restriction. If someone takes KANet and builds something closed on top of it, that does not harm KANet — the protocol still exists, users can still run their own nodes, and value accrues to the participants of the network, not the operator of any fork.
+
+If you build something on KANet and you want to contribute it back, we will welcome you with open arms. If you don't, that is your right. We trust the ecosystem.
 
 ## Contributing
 

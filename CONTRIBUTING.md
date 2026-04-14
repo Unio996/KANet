@@ -137,7 +137,7 @@ English and 中文 are both welcome in issues, PR descriptions, and code comment
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the same [AGPL-3.0](LICENSE) license that covers the project. Your commits are yours; your contributions are open.
+By contributing, you agree that your contributions will be licensed under the same [MIT License](LICENSE) that covers the project. Your commits are yours; your contributions are free for anyone to use.
 
 ---
 
