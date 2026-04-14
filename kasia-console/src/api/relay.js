@@ -120,6 +120,20 @@ export async function registerRelayRoutes(fastify) {
   });
 
   // Balance query — auto-selects best available RPC node
+  // GET /api/relay/:id/active-peers — addresses this agent has a live handshake with
+  // Used by Explore page to disable "send handshake" button for already-connected peers.
+  fastify.get('/api/relay/:id/active-peers', async (request, reply) => {
+    const relay = getRelayNode(request.params.id);
+    if (!relay?.address) return reply.send({ peers: [] });
+    const rows = sqlite.prepare(`
+      SELECT DISTINCT peer_address FROM relation_states
+      WHERE local_address = ?
+        AND (handshake_observed_at IS NOT NULL
+          OR status IN ('accepted','confirmed','active'))
+    `).all(relay.address);
+    return reply.send({ peers: rows.map(r => r.peer_address) });
+  });
+
   fastify.get('/api/relay/:id/balance', async (request, reply) => {
     const relay = getRelayNode(request.params.id);
     if (!relay?.address) return reply.send({ balance: null });

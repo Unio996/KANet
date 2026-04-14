@@ -40,7 +40,8 @@ export async function registerDiscoveryRoutes(fastify) {
     const t = getT(lang);
     const dir = isRtl(lang) ? 'rtl' : 'ltr';
     const langs = LANG_NAMES;
-    return reply.viewAsync('explore', { title: 'Explore', t, lang, dir, langs, _page: 'explore' });
+    const relays = sqlite.prepare('SELECT id, name, address FROM relay_nodes WHERE address IS NOT NULL ORDER BY name').all();
+    return reply.viewAsync('explore', { title: 'Explore', t, lang, dir, langs, _page: 'explore', relays });
   });
 
   // GET /network — Kasia Network Activity page
