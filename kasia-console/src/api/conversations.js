@@ -364,7 +364,7 @@ export async function registerConversationRoutes(fastify) {
           AND (CAST(COALESCE(t.amount, '0') AS REAL) + CAST(COALESCE(t.fee, '0') AS REAL)) > 0
           ${hsFilter}
       )
-      ORDER BY CAST(COALESCE(amount, '0') AS REAL) DESC, created_at DESC
+      ORDER BY created_at DESC
     `).all(...convParams, ...hsParams, ...hsParams);
 
     const result = rows.map(r => {
@@ -377,9 +377,9 @@ export async function registerConversationRoutes(fastify) {
       let type = 'message';
       if (r.type === 'handshake' || (r.trace_id || '').includes('handshake')) type = 'handshake';
       else if (r.type === 'other') {
-        // Classify non-conv, non-handshake TX
-        if (amt >= 1) type = 'transfer';
-        else type = 'broadcast';
+        // 只有真·零金额 TX 才是广播（群聊/bcast），有金额一律算 transfer
+        // 即使对方不在 identities 里 (conversation_id=NULL)
+        type = amt === 0 ? 'broadcast' : 'transfer';
       }
       else if (amt >= 0.15 && amt <= 0.25) type = 'handshake';
       else if (amt > 0.25 && peerAddr && agentByAddr[peerAddr]) type = 'transfer';

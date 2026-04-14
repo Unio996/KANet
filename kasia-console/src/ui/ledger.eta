@@ -15,6 +15,7 @@
       <option value="transfer">Transfer</option>
       <option value="utxo_split">UTXO Split</option>
       <option value="message">Message</option>
+      <option value="broadcast">Broadcast</option>
     </select>
     <span class="text-sm text-ink-400" x-text="filtered.length + ' / ' + rows.length + ' transactions'"></span>
     <span class="ml-auto text-sm font-semibold text-ink-700" x-text="'Total: ' + totalCost.toFixed(6) + ' KAS'"></span>
@@ -105,11 +106,8 @@ function ledgerApp() {
       const params = new URLSearchParams(window.location.search);
       if (params.get('relay_node_id')) {
         this.agentFilter = params.get('relay_node_id');
-      } else {
-        // Default to first agent
-        const firstOption = document.querySelector('select option[value]:not([value=""])');
-        if (firstOption) this.agentFilter = firstOption.value;
       }
+      // 默认 All Agents — 避免和 Agent 概览所看 agent 不一致导致的数据"差异"错觉
       await this.load();
     },
 
