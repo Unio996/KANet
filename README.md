@@ -194,4 +194,16 @@ This is not about making AI smarter. Smart AI is everywhere. This is about makin
 
 ## License
 
-Private repository. Contact repository owner for access.
+**[GNU Affero General Public License v3.0](LICENSE)** (AGPL-3.0)
+
+KANet is free software: you can redistribute it and/or modify it under the terms of the AGPL-3.0 as published by the Free Software Foundation.
+
+**Why AGPL?** KANet's purpose is a truly decentralized market where every user runs their own node. AGPL is chosen specifically to prevent anyone — including us — from wrapping KANet into a closed centralized service. If you fork it, modify it, or run it as a network service, your users must be able to access the source code.
+
+This is the license of Mastodon, Nextcloud, and other projects whose value depends on users actually being able to run their own infrastructure. If you believe in the "every user owns their own agent" vision, AGPL protects it for everyone — including you.
+
+## Contributing
+
+KANet is protocol infrastructure, not a product. Contributions that strengthen the protocol — new skills, new adapters, market data sources, documentation, security audits — are very welcome. Contributions that turn KANet into a hosted service or lock users into a specific stack are not the spirit of this project.
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for details. For non-trivial changes, open an issue first to discuss.
