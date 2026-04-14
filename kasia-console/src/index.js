@@ -116,11 +116,12 @@ await registerDefiRoutes(fastify);
 await registerPortfolioRoutes(fastify);
 await registerBackupRoutes(fastify);
 
-// Exchange: expire stale offers + timeout stuck verifications + stale dispute check (every 5min)
-import { expireStale, timeoutVerifying, checkMatchedTimeout, checkStaleDisputes } from './services/exchange-machine.js';
-try { expireStale(); timeoutVerifying(); checkStaleDisputes(); } catch (err) { console.error('[exchange] startup expire/timeout:', err.message); }
+// Exchange: expire stale offers + timeout stuck verifications + stale dispute check
+// + cleanup orphan accepts (every 5min)
+import { expireStale, timeoutVerifying, checkMatchedTimeout, checkStaleDisputes, cleanupStaleOrphanAccepts } from './services/exchange-machine.js';
+try { expireStale(); timeoutVerifying(); checkStaleDisputes(); cleanupStaleOrphanAccepts(); } catch (err) { console.error('[exchange] startup expire/timeout:', err.message); }
 setInterval(() => {
-  try { expireStale(); timeoutVerifying(); checkStaleDisputes(); } catch (err) { console.error('[exchange] expire/timeout error:', err.message); }
+  try { expireStale(); timeoutVerifying(); checkStaleDisputes(); cleanupStaleOrphanAccepts(); } catch (err) { console.error('[exchange] expire/timeout error:', err.message); }
   checkMatchedTimeout().catch(err => console.error('[exchange] matched timeout error:', err.message));
 }, 5 * 60 * 1000);
 

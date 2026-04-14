@@ -1871,5 +1871,58 @@ export function runMigrations() {
     }
   }
 
+  // v61: UNIQUE index on exchange_offers.payment_tx — prevent TX reuse attack
+  // (2026-04-14 audit): 一个 payment_tx 只能绑定到一个 offer, 防止攻击者用同一笔付款
+  // 骗取多个 offer 的交割. 先清理历史 duplicate (实测 0 条), 然后加 partial unique index.
+  {
+    const hasIdx = sqlite.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_exchange_offers_payment_tx_unique'"
+    ).get();
+    if (!hasIdx) {
+      // Check for duplicates first (safety - if any found, clear all but oldest)
+      const dupes = sqlite.prepare(`
+        SELECT payment_tx, COUNT(*) as cnt FROM exchange_offers
+        WHERE payment_tx IS NOT NULL
+        GROUP BY payment_tx HAVING cnt > 1
+      `).all();
+      for (const d of dupes) {
+        const rows = sqlite.prepare(
+          'SELECT id FROM exchange_offers WHERE payment_tx = ? ORDER BY created_at ASC'
+        ).all(d.payment_tx);
+        // Keep first (oldest), clear others
+        for (let i = 1; i < rows.length; i++) {
+          sqlite.prepare('UPDATE exchange_offers SET payment_tx = NULL WHERE id = ?').run(rows[i].id);
+          console.log(`[migrate] v61: cleared duplicate payment_tx on offer ${rows[i].id.slice(0, 8)}`);
+        }
+      }
+      sqlite.exec(
+        `CREATE UNIQUE INDEX idx_exchange_offers_payment_tx_unique ON exchange_offers(payment_tx) WHERE payment_tx IS NOT NULL`
+      );
+      console.log('[migrate] v61: UNIQUE index on exchange_offers.payment_tx (anti-reuse hardening).');
+    }
+  }
+
+  // v62: pending_exchange_accepts — Q5 audit fix, orphan buffer for out-of-order accepts
+  // 场景: Scout 批量扫链时可能先拉到 accept 再拉到 publish (同一 block 内 TX order 不保证).
+  // 旧逻辑 processAccept 直接 silently drop unknown offer 的 accept, 导致 taker 已广播上链
+  // 的 accept 被丢弃, offer 卡在 open. 新表暂存 orphan accepts, publish 到时 replay.
+  {
+    const hasTable = sqlite.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='pending_exchange_accepts'"
+    ).get();
+    if (!hasTable) {
+      sqlite.exec(`
+        CREATE TABLE pending_exchange_accepts (
+          id TEXT PRIMARY KEY,
+          offer_id TEXT NOT NULL,
+          msg_json TEXT NOT NULL,
+          received_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_pending_exchange_accepts_offer ON pending_exchange_accepts(offer_id);
+      `);
+      console.log('[migrate] v62: pending_exchange_accepts table created (orphan buffer).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

@@ -72,6 +72,10 @@ export async function onBroadcastWritten(row) {
         await handleExchangeDelivered(msg); break;
       case EXCHANGE_MSG.TIMEOUT:
         await handleExchangeTimeout(msg); break;
+      case EXCHANGE_MSG.DISPUTE:
+        await handleExchangeDispute(msg); break;
+      case EXCHANGE_MSG.RESOLVE:
+        await handleExchangeResolve(msg); break;
     }
   } catch (err) {
     console.error(`[trade-filter] Error processing ${msg.t}: ${err.message}`);
@@ -368,6 +372,7 @@ const EXCHANGE_MSG = {
   DELIVERED: 'kanet_exchange_delivered_v1',
   TIMEOUT:   'kanet_exchange_timeout_v1',
   DISPUTE:   'kanet_exchange_dispute_v1',
+  RESOLVE:   'kanet_exchange_resolve_v1',
 };
 
 /**
@@ -422,6 +427,22 @@ async function handleExchange(msg) {
   );
 
   console.log(`[exchange] Offer indexed: ${offerId.slice(0, 8)} ${msg.give_amount} ${msg.give_asset} → ${msg.want_amount} ${msg.want_asset} by ${msg._from.slice(-12)}`);
+
+  // 2026-04-14 Q5 audit fix: replay orphan accepts that arrived before publish
+  // (Kaspa DAG 内 block TX order 不保证, accept 可能早于 publish 到达 ingest)
+  const pending = sqlite.prepare(
+    'SELECT id, msg_json FROM pending_exchange_accepts WHERE offer_id = ? ORDER BY received_at ASC'
+  ).all(offerId);
+  for (const p of pending) {
+    try {
+      const pmsg = JSON.parse(p.msg_json);
+      sqlite.prepare('DELETE FROM pending_exchange_accepts WHERE id = ?').run(p.id);
+      console.log(`[exchange] replay orphan accept for offer ${offerId.slice(0,8)} from ${(pmsg._from || '').slice(-8)}`);
+      await handleExchangeAccept(pmsg);
+    } catch (e) {
+      console.error(`[exchange] orphan accept replay failed: ${e.message}`);
+    }
+  }
 
   // AutoTaker: evaluate incoming offer for automatic acceptance
   setImmediate(() => _evaluateAutoTake(offerId, msg).catch(e =>
@@ -895,14 +916,57 @@ async function handleExchangePaid(msg) {
   // Gate 1: payment_tx already set → duplicate, skip
   if (offer.payment_tx) { console.log(`[exchange] paid: offer ${msg.offer_id.slice(0,8)} already has payment_tx, skip`); return; }
 
+  // Gate 1.5 (2026-04-14 Q3 audit fix): payment_tx 已被别的 offer 用过 → reuse 攻击
+  // 防止攻击者拿一笔真实付款的 txHash 去 "兑换" 多个 offer 的交割.
+  // DB 层也有 UNIQUE index 作为 belt-and-suspenders, 但应用层先挡省一次 DB error.
+  if (msg.payment_tx) {
+    const existingUse = sqlite.prepare(
+      'SELECT id, maker, taker FROM exchange_offers WHERE payment_tx = ? AND id != ?'
+    ).get(msg.payment_tx, msg.offer_id);
+    if (existingUse) {
+      console.log(`[exchange] paid: REUSE BLOCKED — ${msg.payment_tx.slice(0,16)} already used by offer ${existingUse.id.slice(0,8)}`);
+      recordChainEvent({
+        txid: msg._tx || null,
+        eventType: 'exchange_paid_reuse_rejected',
+        fromAddress: msg._from || null,
+        toAddress: offer.maker,
+        payload: JSON.stringify({
+          offer_id: msg.offer_id,
+          reused_tx: msg.payment_tx,
+          original_offer: existingUse.id,
+          original_taker: existingUse.taker,
+          attacker: msg._from || null,
+        }),
+      });
+      return;
+    }
+  }
+
   // Gate 2: must be in matched or verifying (cross_chain_tx routes to verifying on accept)
   if (!['matched', 'verifying'].includes(offer.protocol_status)) {
     console.log(`[exchange] paid: offer ${msg.offer_id.slice(0,8)} status=${offer.protocol_status}, expected matched/verifying`);
     return;
   }
 
-  // Write payment_tx
-  sqlite.prepare('UPDATE exchange_offers SET payment_tx = ? WHERE id = ?').run(msg.payment_tx, msg.offer_id);
+  // Write payment_tx (UNIQUE index 作为 fail-safe; 若并发插入冲突此处会抛, try 捕获降级)
+  try {
+    sqlite.prepare('UPDATE exchange_offers SET payment_tx = ? WHERE id = ?').run(msg.payment_tx, msg.offer_id);
+  } catch (dbErr) {
+    // UNIQUE constraint violation — 并发 reuse 从 DB 层被拦
+    console.log(`[exchange] paid: DB UNIQUE conflict on payment_tx ${msg.payment_tx.slice(0,16)} for offer ${msg.offer_id.slice(0,8)}: ${dbErr.message}`);
+    recordChainEvent({
+      txid: msg._tx || null,
+      eventType: 'exchange_paid_reuse_rejected',
+      fromAddress: msg._from || null,
+      toAddress: offer.maker,
+      payload: JSON.stringify({
+        offer_id: msg.offer_id,
+        reused_tx: msg.payment_tx,
+        source: 'db_unique_constraint',
+      }),
+    });
+    return;
+  }
   if (msg.payment_chain && !offer.taker_chain) {
     sqlite.prepare('UPDATE exchange_offers SET taker_chain = ? WHERE id = ?').run(msg.payment_chain, msg.offer_id);
   }
@@ -1014,6 +1078,151 @@ async function handleExchangeTimeout(msg) {
   });
 
   console.log(`[exchange] timeout: offer ${msg.offer_id.slice(0,8)} reopened (was matched with ${(offer.taker || '').slice(-8)})`);
+}
+
+/**
+ * kanet_exchange_dispute_v1 — peer raised a dispute on an offer.
+ *
+ * 2026-04-14 Q4 audit fix: 之前 DISPUTE 消息类型定义了但没 handler, 导致跨节点状态不同步.
+ * 本地节点收到其他节点广播的 dispute, 推进本地 offer 到 disputed 状态.
+ *
+ * 幂等: 重复处理已在 disputed 的消息不会 double-apply.
+ */
+async function handleExchangeDispute(msg) {
+  if (!msg.offer_id) return;
+
+  const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(msg.offer_id);
+  if (!offer) {
+    console.log(`[exchange] dispute: unknown offer ${msg.offer_id.slice(0,8)}, skip`);
+    return;
+  }
+
+  // 幂等: 已是 disputed 或更后的 terminal 状态就跳过
+  if (offer.protocol_status === 'disputed') {
+    console.log(`[exchange] dispute: offer ${msg.offer_id.slice(0,8)} already disputed, idempotent skip`);
+    return;
+  }
+  const TERMINAL_AFTER_DISPUTE = ['completed', 'cancelled', 'timed_out', 'failed', 'expired'];
+  if (TERMINAL_AFTER_DISPUTE.includes(offer.protocol_status)) {
+    console.log(`[exchange] dispute: offer ${msg.offer_id.slice(0,8)} already terminal (${offer.protocol_status}), skip`);
+    return;
+  }
+
+  // Verify disputer is party to the offer (防止随机地址广播假 dispute)
+  const isParty = msg.disputer === offer.maker || msg.disputer === offer.taker;
+  if (!isParty) {
+    console.log(`[exchange] dispute: rejected — ${(msg.disputer || '').slice(-8)} is not maker/taker of offer ${msg.offer_id.slice(0,8)}`);
+    return;
+  }
+
+  // 写入 dispute meta + transition
+  const meta = JSON.parse(offer.verification_meta || '{}');
+  meta.dispute_reason = msg.reason || 'no_reason_given';
+  meta.dispute_by = msg.disputer;
+  meta.dispute_at = msg.raised_at || new Date().toISOString();
+
+  sqlite.prepare(
+    'UPDATE exchange_offers SET verification_meta = ?, updated_at = ? WHERE id = ?'
+  ).run(JSON.stringify(meta), new Date().toISOString(), msg.offer_id);
+
+  exchangeTransition(msg.offer_id, 'disputed', {});
+
+  recordChainEvent({
+    txid: msg._tx || null,
+    eventType: 'exchange_disputed',
+    fromAddress: msg.disputer || null,
+    toAddress: offer.maker === msg.disputer ? offer.taker : offer.maker,
+    payload: JSON.stringify({
+      offer_id: msg.offer_id,
+      disputer: msg.disputer,
+      reason: msg.reason,
+      from_status: offer.protocol_status,
+    }),
+  });
+
+  console.log(`[exchange] dispute: offer ${msg.offer_id.slice(0,8)} → disputed (by ${(msg.disputer || '').slice(-8)}: ${msg.reason || '-'})`);
+}
+
+/**
+ * kanet_exchange_resolve_v1 — dispute resolved (concede-only).
+ *
+ * 2026-04-14 Q4 audit fix: resolve 消息类型之前不存在 handler. 现在支持跨节点同步 resolve 结果.
+ *
+ * Concede-only 语义: maker 调 resolve → outcome=taker_wins (maker 认输);
+ * taker 调 → outcome=maker_wins. 接收端也校验这个约束, 防止伪造"我判对方输".
+ *
+ * 幂等: 已 resolve 过的 offer 不会重复应用.
+ */
+async function handleExchangeResolve(msg) {
+  if (!msg.offer_id || !msg.outcome) return;
+
+  const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(msg.offer_id);
+  if (!offer) {
+    console.log(`[exchange] resolve: unknown offer ${msg.offer_id.slice(0,8)}, skip`);
+    return;
+  }
+
+  // 幂等: 已 resolve 过 (non-disputed terminal) → 跳过
+  if (offer.protocol_status !== 'disputed') {
+    console.log(`[exchange] resolve: offer ${msg.offer_id.slice(0,8)} status=${offer.protocol_status}, not disputed, skip`);
+    return;
+  }
+
+  // Verify resolver is maker or taker
+  const resolver = msg.resolver;
+  if (!resolver || (resolver !== offer.maker && resolver !== offer.taker)) {
+    console.log(`[exchange] resolve: rejected — ${(resolver || '').slice(-8)} is not maker/taker`);
+    return;
+  }
+
+  // Concede-only check: maker only concede → taker_wins; taker only → maker_wins
+  const expectedOutcome = resolver === offer.maker ? 'taker_wins' : 'maker_wins';
+  if (msg.outcome !== expectedOutcome) {
+    console.log(`[exchange] resolve: rejected — concede-only violation: ${resolver === offer.maker ? 'maker' : 'taker'} must concede (${expectedOutcome}), got ${msg.outcome}`);
+    return;
+  }
+
+  const newStatus = msg.outcome === 'maker_wins' ? 'completed' : 'cancelled';
+  const now = new Date().toISOString();
+
+  // 直接 SQL (disputed 是 TERMINAL, transition() 会拒绝)
+  sqlite.prepare(`
+    UPDATE exchange_offers
+    SET protocol_status = ?, updated_at = ?,
+        verification_meta = json_patch(COALESCE(verification_meta, '{}'), ?)
+    WHERE id = ?
+  `).run(newStatus, now, JSON.stringify({
+    resolved_at: now,
+    resolve_outcome: msg.outcome,
+    resolved_by: resolver,
+    resolve_tx: msg._tx || null,
+    resolve_source: 'remote_broadcast',
+  }), msg.offer_id);
+
+  // Fund lock resolution (同 resolve endpoint 的逻辑)
+  const { releaseFunds, spendFunds } = await import('./fund-lock.js');
+  if (msg.outcome === 'maker_wins') {
+    try { spendFunds(msg.offer_id); } catch (e) { console.error(`[resolve-remote] spendFunds: ${e.message}`); }
+  } else {
+    try { releaseFunds(msg.offer_id); } catch (e) { console.error(`[resolve-remote] releaseFunds: ${e.message}`); }
+  }
+
+  recordChainEvent({
+    txid: msg._tx || null,
+    eventType: 'exchange_resolved',
+    fromAddress: resolver,
+    toAddress: resolver === offer.maker ? offer.taker : offer.maker,
+    payload: JSON.stringify({
+      offer_id: msg.offer_id,
+      outcome: msg.outcome,
+      resolver,
+      from_status: 'disputed',
+      to_status: newStatus,
+      source: 'remote_broadcast',
+    }),
+  });
+
+  console.log(`[exchange] resolve: offer ${msg.offer_id.slice(0,8)} disputed → ${newStatus} (${msg.outcome}, resolver=${resolver.slice(-8)})`);
 }
 
 // ── Auto-pay for Exchange offers ──────────────────────────────

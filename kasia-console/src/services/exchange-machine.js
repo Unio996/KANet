@@ -163,7 +163,18 @@ export function processAccept(msg) {
 
   const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(msg.offer_id);
   if (!offer) {
-    console.log(`[exchange-machine] Accept for unknown offer: ${msg.offer_id}`);
+    // 2026-04-14 Q5 audit fix: stash orphan accept for replay when publish arrives later
+    // (Kaspa DAG 不保证同 block TX order, Scout 批量扫链可能 accept 先到 publish 后到)
+    try {
+      const id = msg._tx || crypto.randomUUID();
+      sqlite.prepare(`
+        INSERT OR REPLACE INTO pending_exchange_accepts (id, offer_id, msg_json, received_at)
+        VALUES (?, ?, ?, ?)
+      `).run(id, msg.offer_id, JSON.stringify(msg), new Date().toISOString());
+      console.log(`[exchange-machine] Accept for unknown offer ${msg.offer_id.slice(0,8)} → stashed for replay (orphan buffer)`);
+    } catch (e) {
+      console.log(`[exchange-machine] Accept for unknown offer ${msg.offer_id.slice(0,8)}, orphan stash failed: ${e.message}`);
+    }
     return null;
   }
 
@@ -346,6 +357,19 @@ export function processCancel(msg) {
  *
  * @returns {number} count of aging disputes
  */
+/**
+ * Q5 audit fix: clean up stale orphan accepts (>1h old, publish never arrived)
+ */
+export function cleanupStaleOrphanAccepts() {
+  const result = sqlite.prepare(
+    "DELETE FROM pending_exchange_accepts WHERE received_at < datetime('now', '-1 hour')"
+  ).run();
+  if (result.changes > 0) {
+    console.log(`[exchange-machine] cleaned up ${result.changes} stale orphan accepts (>1h old)`);
+  }
+  return result.changes;
+}
+
 export function checkStaleDisputes() {
   const stale = sqlite.prepare(
     `SELECT id, maker, taker,
@@ -513,15 +537,30 @@ export function processPaymentSubmit({ offer_id, payment_tx, payment_chain }) {
   const verifyChain = offer.taker_chain || payment_chain;
   if (!verifyChain) return { error: 'no payment chain on record' };
 
+  // 2026-04-14 Q3 audit fix: TX reuse 防御 — payment_tx 已被别的 offer 用过就拒绝.
+  const existingUse = sqlite.prepare(
+    'SELECT id FROM exchange_offers WHERE payment_tx = ? AND id != ?'
+  ).get(payment_tx, offer_id);
+  if (existingUse) {
+    console.log(`[exchange] processPaymentSubmit REUSE BLOCKED — ${payment_tx.slice(0,16)} already used by offer ${existingUse.id.slice(0,8)}`);
+    return { error: 'payment_tx_reused', original_offer: existingUse.id };
+  }
+
   const now = new Date().toISOString();
   const meta = JSON.parse(offer.verification_meta || '{}');
   meta.payment_tx = payment_tx;
   meta.payment_chain = verifyChain;
   meta.submitted_at = now;
 
-  sqlite.prepare(
-    'UPDATE exchange_offers SET verification_meta = ?, updated_at = ? WHERE id = ?'
-  ).run(JSON.stringify(meta), now, offer_id);
+  // 同时写入 payment_tx 列 (UNIQUE index 会在并发 reuse 时抛 constraint 错误)
+  try {
+    sqlite.prepare(
+      'UPDATE exchange_offers SET verification_meta = ?, payment_tx = ?, updated_at = ? WHERE id = ?'
+    ).run(JSON.stringify(meta), payment_tx, now, offer_id);
+  } catch (dbErr) {
+    console.log(`[exchange] processPaymentSubmit DB UNIQUE conflict: ${dbErr.message}`);
+    return { error: 'payment_tx_reused_concurrent', db_error: dbErr.message };
+  }
 
   // Async verification — does not block API response
   _verifyAndComplete(offer_id, payment_tx, verifyChain).catch(err =>
