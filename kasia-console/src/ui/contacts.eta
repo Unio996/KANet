@@ -1,58 +1,130 @@
 <%~ include('partials/page-open', { _page: 'contacts', pageTitle: '通讯录', ...it }) %>
 
 <div class="p-6" x-data="contactsPage()">
-  <!-- 顶栏 -->
-  <div class="flex items-center gap-3 mb-3">
+  <!-- 顶栏 — 一行三个互斥切换按钮 -->
+  <div class="flex items-center gap-3 mb-3 flex-wrap">
     <select x-model="selectedAgent" @change="load(); ssInit(); spInit()" class="rounded-lg border border-warm-300 px-3 py-2 text-sm bg-white font-medium">
       <% it.relayNodes.forEach(r => { %>
       <option value="<%= r.id %>"><%= r.name %></option>
       <% }) %>
     </select>
     <span class="text-sm text-ink-700" x-show="!loading" x-text="contacts.length + ' 个联系人'"></span>
-    <button @click="showAdd = !showAdd" class="btn btn-primary btn-sm ml-auto">
-      <span x-text="showAdd ? '收起' : '+ 添加'"></span>
-    </button>
-  </div>
-
-  <!-- 添加联系人（折叠） -->
-  <div x-show="showAdd" x-transition class="card mb-4">
-    <div class="grid grid-cols-3 gap-3">
-      <div>
-        <label class="block text-xs text-ink-400 mb-1">地址 *</label>
-        <input type="text" x-model="addForm.address" placeholder="kaspa:qr..." class="w-full text-sm border border-warm-300 rounded-lg px-3 py-2 font-mono" />
-      </div>
-      <div>
-        <label class="block text-xs text-ink-400 mb-1">名称</label>
-        <input type="text" x-model="addForm.display_name" class="w-full text-sm border border-warm-300 rounded-lg px-3 py-2" />
-      </div>
-      <div>
-        <label class="block text-xs text-ink-400 mb-1">信任等级</label>
-        <select x-model="addForm.trust_level" class="w-full text-sm border border-warm-300 rounded-lg px-3 py-2">
-          <option value="normal">普通</option>
-          <option value="recommended">推荐</option>
-          <option value="blocked">屏蔽</option>
-        </select>
-      </div>
-    </div>
-    <div class="flex justify-end mt-3">
-      <button @click="addContact()" class="btn btn-primary btn-sm" :disabled="!addForm.address?.trim()">保存</button>
+    <div class="ml-auto flex items-center gap-1.5">
+      <button @click="activePanel = activePanel==='add' ? null : 'add'"
+              class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+              :class="activePanel==='add' ? 'bg-brand-500 text-white' : 'bg-white border border-warm-300 text-ink-600 hover:bg-warm-50'">
+        + 添加联系人
+      </button>
+      <button @click="activePanel = activePanel==='social' ? null : 'social'"
+              class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors inline-flex items-center gap-1.5"
+              :class="activePanel==='social' ? 'bg-brand-500 text-white' : 'bg-white border border-warm-300 text-ink-600 hover:bg-warm-50'">
+        社交管理
+        <span class="badge text-[9px]" :class="activePanel==='social' ? 'bg-white/20 text-white' : ssBadges[ssMode]" x-text="ssLabels[ssMode]"></span>
+      </button>
+      <button @click="activePanel = activePanel==='tags' ? null : 'tags'"
+              class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors inline-flex items-center gap-1.5"
+              :class="activePanel==='tags' ? 'bg-brand-500 text-white' : 'bg-white border border-warm-300 text-ink-600 hover:bg-warm-50'">
+        标签管理
+        <span class="text-[9px]" :class="activePanel==='tags' ? 'text-white/80' : 'text-ink-300'" x-text="'(' + knownTags.length + ')'"></span>
+      </button>
+      <button @click="activePanel = activePanel==='backup' ? null : 'backup'"
+              class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+              :class="activePanel==='backup' ? 'bg-brand-500 text-white' : 'bg-white border border-warm-300 text-ink-600 hover:bg-warm-50'"
+              title="导出/导入通讯录和社交配置">
+        备份/恢复
+      </button>
     </div>
   </div>
 
-  <!-- 社交设置（折叠面板） -->
-  <div class="mb-4 border border-warm-200 rounded-xl overflow-hidden bg-white">
-    <button @click="showSocial = !showSocial" class="w-full flex items-center justify-between px-4 py-2.5 hover:bg-warm-50 transition-colors">
-      <div class="flex items-center gap-2">
-        <span class="text-sm font-semibold text-ink-700">社交设置</span>
-        <span class="badge text-[10px]" :class="ssBadges[ssMode]" x-text="ssLabels[ssMode]"></span>
-        <span class="text-[10px] text-ink-300" x-text="principles.length + ' 条原则'"></span>
-      </div>
-      <svg class="w-4 h-4 text-ink-300 transition-transform" :class="showSocial ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-      </svg>
-    </button>
+  <!-- 单一面板区 — 根据 activePanel 显示对应内容 -->
+  <div x-show="activePanel" x-transition class="mb-4 border border-warm-200 rounded-xl overflow-hidden bg-white">
 
-    <div x-show="showSocial" x-transition class="border-t border-warm-200">
+    <!-- 添加联系人面板 -->
+    <div x-show="activePanel==='add'" class="p-4">
+      <div class="grid grid-cols-3 gap-3">
+        <div>
+          <label class="block text-xs text-ink-400 mb-1">地址 *</label>
+          <input type="text" x-model="addForm.address" placeholder="kaspa:qr..." class="w-full text-sm border border-warm-300 rounded-lg px-3 py-2 font-mono" />
+        </div>
+        <div>
+          <label class="block text-xs text-ink-400 mb-1">名称</label>
+          <input type="text" x-model="addForm.display_name" class="w-full text-sm border border-warm-300 rounded-lg px-3 py-2" />
+        </div>
+        <div>
+          <label class="block text-xs text-ink-400 mb-1">信任等级</label>
+          <select x-model="addForm.trust_level" class="w-full text-sm border border-warm-300 rounded-lg px-3 py-2">
+            <option value="normal">普通</option>
+            <option value="recommended">推荐</option>
+            <option value="blocked">屏蔽</option>
+          </select>
+        </div>
+      </div>
+      <div class="flex justify-end mt-3">
+        <button @click="addContact()" class="btn btn-primary btn-sm" :disabled="!addForm.address?.trim()">保存</button>
+      </div>
+    </div>
+
+    <!-- 标签管理面板 -->
+    <div x-show="activePanel==='tags'" class="p-4">
+      <div class="text-[10px] text-ink-400 mb-2">所有已知标签（× 从全部联系人删除此标签）</div>
+      <div x-show="knownTags.length === 0" class="text-xs text-ink-300 py-2">暂无标签</div>
+      <div class="flex flex-wrap gap-1">
+        <template x-for="kt in knownTags" :key="kt.tag">
+          <span class="inline-flex items-center border border-warm-300 rounded overflow-hidden bg-white">
+            <span class="text-[10px] px-2 py-0.5 text-ink-600">
+              <span x-text="kt.tag"></span>
+              <span class="text-ink-300 ml-1" x-text="'(' + kt.count + ')'"></span>
+            </span>
+            <button @click="deleteGlobalTag(kt.tag)"
+              class="text-ink-400 hover:text-red-600 hover:bg-red-50 px-1.5 border-l border-warm-200 text-[10px] leading-none"
+              title="从所有联系人全局删除此标签">×</button>
+          </span>
+        </template>
+      </div>
+    </div>
+
+    <!-- 备份/恢复面板 -->
+    <div x-show="activePanel==='backup'" class="p-4 space-y-4">
+      <div>
+        <div class="text-sm font-semibold text-ink-700 mb-1">📥 导出主观数据</div>
+        <div class="text-[11px] text-ink-400 mb-2">
+          包含: 联系人名字/标签/备注/权限 · 分类 · 社交设置 · Agent 社交原则<br />
+          不含: 私钥/助记词/API key/链上记录 (这些需要另外备份 kanet.env 和链上恢复)
+        </div>
+        <div class="flex items-center gap-2">
+          <a href="/api/backup/export" download class="btn btn-primary btn-sm text-xs">
+            ⬇ 下载 JSON 备份
+          </a>
+          <span class="text-[10px] text-ink-300">文件名: kanet-backup-YYYYMMDD.json</span>
+        </div>
+      </div>
+
+      <div class="border-t border-warm-200 pt-4">
+        <div class="text-sm font-semibold text-ink-700 mb-1">📤 导入恢复</div>
+        <div class="text-[11px] text-ink-400 mb-2">
+          模式: <strong>merge</strong>(默认, 不覆盖已填写字段) · <strong>replace</strong>(全覆盖, 慎用)
+        </div>
+        <div class="flex items-center gap-2 flex-wrap">
+          <input type="file" accept="application/json" @change="backupFile = $event.target.files[0]"
+                 class="text-[11px] text-ink-600" />
+          <select x-model="backupMode" class="text-xs border border-warm-300 rounded px-2 py-1 bg-white">
+            <option value="merge">merge (合并)</option>
+            <option value="replace">replace (覆盖)</option>
+          </select>
+          <button @click="doImport()" :disabled="!backupFile || backupBusy"
+                  class="btn btn-primary btn-sm text-xs">
+            <span x-show="!backupBusy">导入</span>
+            <span x-show="backupBusy">导入中...</span>
+          </button>
+        </div>
+        <div x-show="backupResult" x-transition class="mt-3 text-xs p-2 rounded"
+             :class="backupResult?.ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'"
+             x-html="backupResultMsg"></div>
+      </div>
+    </div>
+
+    <!-- 社交管理面板 -->
+    <div x-show="activePanel==='social'">
       <!-- 社交风格 -->
       <div class="px-4 py-3">
         <div class="flex items-center justify-between mb-3">
@@ -162,10 +234,24 @@
         <!-- 摘要行 -->
         <div class="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-warm-50 transition-colors"
           @click="toggle(p.peer)">
-          <span class="badge text-[9px] w-8 text-center flex-shrink-0" :class="p.is_local ? 'badge-info' : 'badge-warning'" x-text="p.is_local ? '内部' : '外部'"></span>
           <div class="w-40 flex-shrink-0">
             <div class="text-sm font-medium text-ink-700 truncate flex items-center gap-1">
-              <span x-text="p.peer_name || '未命名'"></span>
+              <!-- 点击名字直接 inline 编辑 (stop propagation 避免触发展开) -->
+              <template x-if="editingName !== p.peer">
+                <span @click.stop="editingName = p.peer; editName = p.peer_name || ''"
+                      class="cursor-text hover:underline decoration-dotted decoration-ink-300"
+                      :class="!p.peer_name && 'italic text-ink-300'"
+                      title="点击编辑"
+                      x-text="p.peer_name || '未命名'"></span>
+              </template>
+              <template x-if="editingName === p.peer">
+                <input @click.stop x-model="editName"
+                       @keydown.enter.prevent.stop="saveName(p)"
+                       @keydown.escape="editingName = null"
+                       @blur="saveName(p)"
+                       class="text-sm border border-brand-400 rounded px-1 py-0 bg-white w-28 outline-none"
+                       x-init="$nextTick(() => $el.focus())" />
+              </template>
               <template x-if="p.classification === 'verified_agent'">
                 <span class="text-yellow-500 text-[11px]" title="已验证 — 完成过链上交易">⭐</span>
               </template>
@@ -198,62 +284,61 @@
           <div class="border-t border-warm-200">
             <!-- 信息栏 -->
             <div class="px-4 py-2.5 bg-warm-100/50 border-b border-warm-100 space-y-1.5">
-              <!-- 名字（可编辑）-->
-              <div class="flex items-center gap-1.5">
-                <span class="text-[10px] text-ink-400 w-8">名字:</span>
-                <span class="text-[11px] text-ink-700 font-medium" x-text="p.peer_name || '未命名'" x-show="editingName !== p.peer"></span>
-                <input x-show="editingName === p.peer" x-model="editName" @keydown.enter.prevent="saveName(p)" class="text-[11px] border border-warm-300 rounded px-2 py-0.5 flex-1 bg-white" />
-                <button @click="editingName === p.peer ? saveName(p) : (editingName = p.peer, editName = p.peer_name || '')" class="text-[10px] text-brand-600 hover:text-brand-700 cursor-pointer" x-text="editingName === p.peer ? '保存' : '编辑'"></button>
-              </div>
-              <!-- 权限（trust_level）+ 拉黑快捷 -->
+              <!-- 权限（trust_level）— "屏蔽" 就是拉黑 -->
               <div class="flex items-center gap-1.5 flex-wrap">
                 <span class="text-[10px] text-ink-400 w-8">权限:</span>
                 <select :value="p.trust_level || 'normal'" @change="saveTrust(p, $event.target.value)" class="text-[10px] border border-warm-300 rounded px-1.5 py-0.5 bg-white">
                   <option value="normal">普通</option>
                   <option value="recommended">推荐</option>
                   <option value="owner">主人</option>
-                  <option value="blocked">屏蔽</option>
+                  <option value="blocked">屏蔽（拉黑）</option>
                 </select>
-                <button @click="toggleBlock(p)" class="ml-2 text-[10px] px-2 py-0.5 rounded"
-                  :class="p.trust_level === 'blocked' ? 'bg-red-100 text-red-700' : 'text-ink-400 hover:text-red-600'"
-                  x-text="p.trust_level === 'blocked' ? '已拉黑 · 取消' : '拉黑'"></button>
+                <span x-show="p.trust_level === 'blocked'" class="text-[9px] text-red-600 font-medium">🚫 已屏蔽</span>
               </div>
               <div class="flex items-center gap-2">
                 <span class="text-[10px] text-ink-400 w-8">地址:</span>
                 <span class="text-[10px] text-ink-600 font-mono break-all cursor-copy select-all" @click="navigator.clipboard.writeText(p.peer)" title="点击复制" x-text="p.peer"></span>
               </div>
-              <!-- 标签管理 -->
-              <div class="space-y-1">
-                <div class="flex items-start gap-1.5">
-                  <span class="text-[10px] text-ink-400 w-8 mt-0.5 flex-shrink-0">标签:</span>
-                  <div class="flex-1 flex flex-wrap gap-1 items-center">
-                    <!-- 当前已有 tags (可删除) -->
-                    <template x-for="t in (p.tags||'').split(',').filter(Boolean)" :key="t">
-                      <span class="inline-flex items-center gap-0.5 badge badge-info text-[9px]">
-                        <span x-text="t"></span>
-                        <button @click="removeTag(p, t)" class="text-ink-400 hover:text-red-600 ml-0.5" title="移除">×</button>
-                      </span>
-                    </template>
-                    <!-- 自由输入 -->
-                    <input x-model="editTag" placeholder="+ 添加新标签" @keydown.enter.prevent="addTag(p, editTag); editTag=''"
-                      class="text-[10px] border border-warm-300 rounded px-2 py-0.5 w-24 bg-white" />
-                  </div>
-                </div>
-                <!-- 快捷添加已知标签 -->
-                <div class="flex items-start gap-1.5" x-show="knownTags.length > 0">
-                  <span class="text-[10px] text-ink-400 w-8 mt-0.5 flex-shrink-0">常用:</span>
-                  <div class="flex-1 flex flex-wrap gap-1">
-                    <template x-for="kt in knownTags" :key="kt.tag">
-                      <button @click="addTag(p, kt.tag)"
-                        :disabled="(p.tags||'').split(',').includes(kt.tag)"
-                        class="text-[9px] px-1.5 py-0.5 rounded border transition-colors"
-                        :class="(p.tags||'').split(',').includes(kt.tag)
-                          ? 'border-brand-300 bg-brand-50 text-brand-500 opacity-50 cursor-not-allowed'
-                          : 'border-warm-300 text-ink-500 hover:bg-warm-100 hover:border-brand-300'">
-                        <span x-text="kt.tag"></span>
-                        <span class="text-ink-300 ml-0.5" x-text="'(' + kt.count + ')'"></span>
-                      </button>
-                    </template>
+              <!-- 标签 combobox: 点击弹已有列表, 输入可过滤, 底部可新增 -->
+              <div class="flex items-start gap-1.5">
+                <span class="text-[10px] text-ink-400 w-8 mt-0.5 flex-shrink-0">标签:</span>
+                <div class="flex-1 flex flex-wrap gap-1 items-center">
+                  <template x-for="t in (p.tags||'').split(',').filter(Boolean)" :key="t">
+                    <span class="inline-flex items-center gap-0.5 badge badge-info text-[9px]">
+                      <span x-text="t"></span>
+                      <button @click="removeTag(p, t)" class="text-ink-400 hover:text-red-600 ml-0.5" title="从此联系人移除">×</button>
+                    </span>
+                  </template>
+                  <div class="relative" @click.outside="tagComboOpen = false">
+                    <input x-model="editTag"
+                           @focus="tagComboOpen = true"
+                           @keydown.enter.prevent="if(editTag.trim()){ addTag(p, editTag); editTag=''; tagComboOpen=false; }"
+                           @keydown.escape="tagComboOpen = false; editTag=''"
+                           placeholder="+ 选标签或新增"
+                           class="text-[10px] border border-warm-300 rounded px-2 py-0.5 w-32 bg-white" />
+                    <div x-show="tagComboOpen" x-transition.opacity.duration.100ms
+                         class="absolute top-full left-0 mt-1 w-56 max-h-52 overflow-y-auto bg-white border border-warm-300 rounded-lg shadow-lg z-30">
+                      <!-- 已知标签（过滤 + 扣除已有）-->
+                      <template x-for="kt in tagComboFiltered(p)" :key="kt.tag">
+                        <button @click="addTag(p, kt.tag); editTag=''; tagComboOpen=false"
+                                class="w-full text-left text-[11px] px-3 py-1.5 hover:bg-brand-50 transition-colors">
+                          <span class="text-ink-700" x-text="kt.tag"></span>
+                          <span class="text-ink-300 ml-1" x-text="'(' + kt.count + ')'"></span>
+                        </button>
+                      </template>
+                      <!-- 没有匹配时的空态 -->
+                      <div x-show="tagComboFiltered(p).length === 0 && !editTag.trim()"
+                           class="text-[10px] px-3 py-2 text-ink-300">
+                        无可用标签 — 输入内容新增
+                      </div>
+                      <!-- 新增项（输入文本不匹配任何已知时出现）-->
+                      <template x-if="editTag.trim() && !tagComboIsExistingKnown()">
+                        <button @click="addTag(p, editTag); editTag=''; tagComboOpen=false"
+                                class="w-full text-left text-[11px] px-3 py-1.5 hover:bg-green-50 border-t border-warm-200 text-green-700 transition-colors">
+                          + 新增 "<span x-text="editTag.trim()"></span>"
+                        </button>
+                      </template>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -355,14 +440,19 @@ function contactsPage() {
     editingName: null,
     editName: '',
     knownTags: [],   // [{tag, count}] 按使用频率排
+    tagComboOpen: false,
+    activePanel: null,  // null | 'add' | 'social' | 'tags' | 'backup' — 顶栏互斥切换
+    backupFile: null,
+    backupMode: 'merge',
+    backupBusy: false,
+    backupResult: null,
+    backupResultMsg: '',
     quickMsg: '',
     sending: false,
     sendStatus: '',
-    showAdd: false,
     addForm: { address: '', display_name: '', trust_level: 'normal' },
 
     // ── 社交设置 ──
-    showSocial: false,
     ssMode: 'balanced',
     ssOverrides: {},
     ssShowAdv: false,
@@ -541,9 +631,59 @@ function contactsPage() {
       p.trust_level = level;
     },
 
-    async toggleBlock(p) {
-      const next = p.trust_level === 'blocked' ? 'normal' : 'blocked';
-      await this.saveTrust(p, next);
+    async doImport() {
+      if (!this.backupFile) return;
+      this.backupBusy = true;
+      this.backupResult = null;
+      try {
+        const text = await this.backupFile.text();
+        const snapshot = JSON.parse(text);
+        const res = await fetch('/api/backup/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ snapshot, mode: this.backupMode }),
+        });
+        const data = await res.json();
+        this.backupResult = data;
+        if (data.ok) {
+          this.backupResultMsg = `✓ 导入成功 — identities: ${data.identities}, relations: ${data.relationStates}, agents: ${data.agents}, skipped: ${data.skipped}`;
+          // 刷新页面数据
+          await this.load();
+          await this.loadKnownTags();
+        } else {
+          this.backupResultMsg = '✗ ' + (data.error || '未知错误');
+        }
+      } catch (e) {
+        this.backupResult = { ok: false };
+        this.backupResultMsg = '✗ JSON 解析失败: ' + e.message;
+      }
+      this.backupBusy = false;
+    },
+
+    tagComboFiltered(p) {
+      const current = (p.tags || '').split(',').map(t => t.trim()).filter(Boolean);
+      const q = (this.editTag || '').trim().toLowerCase();
+      return this.knownTags
+        .filter(kt => !current.includes(kt.tag))
+        .filter(kt => !q || kt.tag.toLowerCase().includes(q));
+    },
+
+    tagComboIsExistingKnown() {
+      const q = (this.editTag || '').trim().toLowerCase();
+      if (!q) return true;
+      return this.knownTags.some(kt => kt.tag.toLowerCase() === q);
+    },
+
+    async deleteGlobalTag(tag) {
+      if (!tag) return;
+      if (!confirm(`确认从所有联系人删除标签 "${tag}"？此操作不可撤销。`)) return;
+      await fetch('/api/contacts/tags/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tag }),
+      });
+      await this.loadKnownTags();
+      await this.load();   // 刷新所有联系人（tags 字段会变）
     },
 
     async sendMsg(p) {
@@ -578,7 +718,7 @@ function contactsPage() {
         body: JSON.stringify(this.addForm),
       });
       this.addForm = { address: '', display_name: '', trust_level: 'normal' };
-      this.showAdd = false;
+      this.activePanel = null;
       await this.load();
     },
 

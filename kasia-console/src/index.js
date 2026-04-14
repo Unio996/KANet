@@ -32,6 +32,7 @@ import { registerOAuthRoutes } from './api/oauth.js';
 import { registerExchangeRoutes } from './api/exchange.js';
 import { registerDefiRoutes } from './api/defi.js';
 import { registerPortfolioRoutes } from './api/portfolio.js';
+import { registerBackupRoutes } from './api/backup.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from './i18n/index.js';
 import { autoStartIfEnabled } from './services/scanner.js';
 import { startAllAdapters, stopAllAdapters } from './services/adapter-launcher.js';
@@ -113,6 +114,7 @@ await registerOAuthRoutes(fastify);
 await registerExchangeRoutes(fastify);
 await registerDefiRoutes(fastify);
 await registerPortfolioRoutes(fastify);
+await registerBackupRoutes(fastify);
 
 // Exchange: expire stale offers + timeout stuck verifications (every 5min)
 import { expireStale, timeoutVerifying, checkMatchedTimeout } from './services/exchange-machine.js';
