@@ -52,10 +52,10 @@
         </tr>
       </thead>
       <tbody>
-        <template x-for="(tx, i) in filtered" :key="tx.txid || i">
+        <template x-for="(tx, i) in pagedRows" :key="tx.txid || i">
           <tr class="border-t border-warm-100 hover:bg-warm-50"
               :class="{ 'bg-red-50': tx.amount >= 1, 'bg-amber-50': tx.amount >= 0.15 && tx.amount < 1 }">
-            <td class="px-3 py-1.5 text-ink-400" x-text="i + 1"></td>
+            <td class="px-3 py-1.5 text-ink-400" x-text="(currentPage - 1) * pageSize + i + 1"></td>
             <td class="px-3 py-1.5 text-ink-500 whitespace-nowrap" x-text="tx.date ? tx.date.slice(0,16).replace('T',' ') : '-'"></td>
             <td class="px-3 py-1.5 font-medium" x-text="tx.agent || '(unlinked)'"></td>
             <td class="px-3 py-1.5">
@@ -88,6 +88,27 @@
       </tbody>
     </table>
     <div x-show="filtered.length === 0" class="text-center py-8 text-ink-400">No transactions found</div>
+
+    <!-- Pagination -->
+    <div x-show="filtered.length > 0" class="flex items-center justify-between px-3 py-2 border-t border-warm-100 bg-warm-50 text-sm">
+      <div class="flex items-center gap-2 text-ink-500">
+        <span>每页</span>
+        <select x-model.number="pageSize" @change="currentPage = 1" class="border border-warm-200 rounded px-2 py-0.5 bg-white">
+          <option :value="25">25</option>
+          <option :value="50">50</option>
+          <option :value="100">100</option>
+          <option :value="200">200</option>
+        </select>
+        <span x-text="'显示 ' + ((currentPage - 1) * pageSize + 1) + '–' + Math.min(currentPage * pageSize, filtered.length) + ' / ' + filtered.length + ' 条'"></span>
+      </div>
+      <div class="flex items-center gap-1">
+        <button @click="currentPage = 1" :disabled="currentPage === 1" class="px-2 py-0.5 border border-warm-200 rounded bg-white disabled:opacity-40 hover:bg-warm-100">«</button>
+        <button @click="currentPage--" :disabled="currentPage === 1" class="px-2 py-0.5 border border-warm-200 rounded bg-white disabled:opacity-40 hover:bg-warm-100">‹</button>
+        <span class="px-3 text-ink-600" x-text="currentPage + ' / ' + totalPages"></span>
+        <button @click="currentPage++" :disabled="currentPage >= totalPages" class="px-2 py-0.5 border border-warm-200 rounded bg-white disabled:opacity-40 hover:bg-warm-100">›</button>
+        <button @click="currentPage = totalPages" :disabled="currentPage >= totalPages" class="px-2 py-0.5 border border-warm-200 rounded bg-white disabled:opacity-40 hover:bg-warm-100">»</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -101,6 +122,16 @@ function ledgerApp() {
     agentFilter: '',
     typeFilter: '',
     totalCost: 0,
+    currentPage: 1,
+    pageSize: 50,
+
+    get totalPages() {
+      return Math.max(1, Math.ceil(this.filtered.length / this.pageSize));
+    },
+    get pagedRows() {
+      const start = (this.currentPage - 1) * this.pageSize;
+      return this.filtered.slice(start, start + this.pageSize);
+    },
 
     async init() {
       const params = new URLSearchParams(window.location.search);
@@ -116,7 +147,7 @@ function ledgerApp() {
       try {
         const params = new URLSearchParams();
         if (this.agentFilter) params.set('relay_node_id', this.agentFilter);
-        params.set('limit', '500');
+        params.set('limit', '2000');
         const res = await fetch('/api/agent/ledger?' + params);
         const data = await res.json();
         this.rows = data.transactions || [];
@@ -135,6 +166,7 @@ function ledgerApp() {
       }
       this.filtered = list;
       this.totalCost = list.reduce((s, r) => s + r.total, 0);
+      this.currentPage = 1; // 过滤变化后回第一页
     },
   };
 }
