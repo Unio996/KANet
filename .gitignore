@@ -31,7 +31,25 @@ downloads/
 sophie-debug-*.txt
 sophie-live-*.txt
 tmp-*.html
+tmp-*.json
 *.pid
+nwt-*.json
+bridge-req.json
+test-*.mjs
+test-*.png
+test-alpine*.html
+agent-adapter/debug*.mjs
+kasia-relay/test-openclaw.mjs
+
+# === 大文件 / 本地资产 ===
+models/
+tools/
+$extractDir/
+extractDir/
+
+# === 个人备份脚本（不开源）===
+backup.ps1
+**/backup.ps1
 
 # === IDE / 工具 ===
 .claude/

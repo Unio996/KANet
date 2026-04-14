@@ -69,6 +69,7 @@ done
 # 唯一必须的环境变量：加密密钥
 # 其余配置（RPC 节点、交易所 API Key 等）均在 Console 面板管理，存 DB
 CONSOLE_ENCRYPTION_KEY=""
+OPENCLAW_TOKEN=""
 
 if [ -f "$ENV_FILE" ]; then
   while IFS='=' read -r k v; do
@@ -77,10 +78,14 @@ if [ -f "$ENV_FILE" ]; then
     case "$k" in
       KANET_ROOT)              KANET_ROOT="$v" ;;
       CONSOLE_ENCRYPTION_KEY)  CONSOLE_ENCRYPTION_KEY="$v" ;;
+      OPENCLAW_TOKEN)          OPENCLAW_TOKEN="$v" ;;
     esac
   done < "$ENV_FILE"
   ok "已加载配置: $ENV_FILE"
 fi
+
+# 导出 OPENCLAW_TOKEN 给 Console → Adapter 子进程（可选，本地服务认证）
+[ -n "$OPENCLAW_TOKEN" ] && export OPENCLAW_TOKEN
 
 if [ -z "$CONSOLE_ENCRYPTION_KEY" ]; then
   CONSOLE_ENCRYPTION_KEY=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
@@ -94,7 +99,7 @@ info "加密密钥: ${CONSOLE_ENCRYPTION_KEY:0:8}..."
 
 # ── llama-server (本地推理引擎) ──────────────────────────────────────────────
 LLAMA_SERVER="$KANET_ROOT/tools/llama-server/llama-server.exe"
-LLAMA_MODEL="D:/models/Qwen_Qwen3.5-35B-A3B-Q4_K_M.gguf"
+LLAMA_MODEL="${LLAMA_MODEL_PATH:-$KANET_ROOT/models/Qwen_Qwen3.5-35B-A3B-Q4_K_M.gguf}"
 LLAMA_PORT=8000
 LLAMA_LOG="$LOG_DIR/llama-server.log"
 

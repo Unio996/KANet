@@ -3,7 +3,7 @@
 // Protocol from openclaw source: dist/client-eOXd-Nak.js
 
 const GATEWAY_URL         = process.env.OPENCLAW_GATEWAY_URL  || "ws://127.0.0.1:18789";
-const GATEWAY_TOKEN       = process.env.OPENCLAW_TOKEN        || "88d16c353db3406b89a9dd89818a361b";
+const GATEWAY_TOKEN       = process.env.OPENCLAW_TOKEN        || "";
 const AGENT_ID            = process.env.OPENCLAW_AGENT_ID     || "main";
 const DEFAULT_SESSION_KEY = process.env.OPENCLAW_SESSION_KEY  || "agent:main:main";
 const TIMEOUT_MS          = parseInt(process.env.OPENCLAW_TIMEOUT_MS || "120000");
