@@ -48,7 +48,7 @@ const STOP_KEYWORDS = [
  * 检查是否可以主动联系某个 peer。
  * 返回 { allowed: true } 或 { allowed: false, reason: string }
  */
-export function checkOutboundAllowed(agentAddress, peerAddress) {
+export function checkOutboundAllowed(agentAddress, peerAddress, { messageType = 'text' } = {}) {
   if (!agentAddress || !peerAddress) return { allowed: false, reason: 'missing_address' };
 
   const params = getSocialParams(agentAddress);
@@ -60,6 +60,27 @@ export function checkOutboundAllowed(agentAddress, peerAddress) {
 
   if (identity?.tags?.includes('do_not_contact')) {
     return { allowed: false, reason: 'do_not_contact' };
+  }
+
+  // ── Check 0.5: 协议前置 — text 消息必须先握过手 (2026-04-14 bug fix) ──
+  // 场景: J2 看到链上活跃地址, 决定直接冷 DM, 绕过 SEND_HANDSHAKE.
+  // Kasia 协议要求 handshake 建立信任通道后才能发消息.
+  // 判定条件: chain_events 里存在任一方向的 handshake TX
+  // (兄弟 agent 之间跳过这个检查, 本地互通默认可信)
+  if (messageType === 'text') {
+    const isSibling = sqlite.prepare('SELECT 1 FROM relay_nodes WHERE address = ?').get(peerAddress);
+    if (!isSibling) {
+      const hsExists = sqlite.prepare(`
+        SELECT 1 FROM chain_events
+        WHERE event_type = 'handshake'
+          AND ((from_address = ? AND to_address = ?)
+            OR (from_address = ? AND to_address = ?))
+        LIMIT 1
+      `).get(agentAddress, peerAddress, peerAddress, agentAddress);
+      if (!hsExists) {
+        return { allowed: false, reason: 'no_handshake_yet (must SEND_HANDSHAKE first, text requires established channel)' };
+      }
+    }
   }
 
   // ── Check 1: per-peer 冷却（按社交风格）──
@@ -355,7 +376,7 @@ export function getMergedContacts(agentAddress) {
   for (const s of ceStats) ceMap[s.peer] = s;
 
   const relations = sqlite.prepare(`
-    SELECT rs.peer_address as peer, rs.status, rs.trust_level, rs.handshake_observed_at, rs.handshake_accepted_at, rs.updated_at,
+    SELECT rs.peer_address as peer, rs.status, rs.trust_level, rs.classification, rs.handshake_observed_at, rs.handshake_accepted_at, rs.updated_at,
       i.id as identity_id, i.display_name, i.tags, i.notes, i.card_entity_type, i.card_summary
     FROM relation_states rs
     LEFT JOIN identities i ON i.address = rs.peer_address
@@ -392,6 +413,7 @@ export function getMergedContacts(agentAddress) {
       last_ts: ce.last_ts || rs.updated_at || null,
       status: rs.status || null,
       trust_level: rs.trust_level || 'normal',
+      classification: rs.classification || 'seen_candidate',
       is_local: ce.is_local !== undefined ? ce.is_local : isLocal(peer),
     });
   }

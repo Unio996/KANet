@@ -164,7 +164,12 @@
           @click="toggle(p.peer)">
           <span class="badge text-[9px] w-8 text-center flex-shrink-0" :class="p.is_local ? 'badge-info' : 'badge-warning'" x-text="p.is_local ? '内部' : '外部'"></span>
           <div class="w-40 flex-shrink-0">
-            <div class="text-sm font-medium text-ink-700 truncate" x-text="p.peer_name || '未命名'"></div>
+            <div class="text-sm font-medium text-ink-700 truncate flex items-center gap-1">
+              <span x-text="p.peer_name || '未命名'"></span>
+              <template x-if="p.classification === 'verified_agent'">
+                <span class="text-yellow-500 text-[11px]" title="已验证 — 完成过链上交易">⭐</span>
+              </template>
+            </div>
             <div class="text-[10px] text-ink-300 font-mono" x-text="shortAddr(p.peer)"></div>
           </div>
           <div class="flex gap-0.5 flex-shrink-0 max-w-28 overflow-hidden">
@@ -193,20 +198,67 @@
           <div class="border-t border-warm-200">
             <!-- 信息栏 -->
             <div class="px-4 py-2.5 bg-warm-100/50 border-b border-warm-100 space-y-1.5">
+              <!-- 名字（可编辑）-->
+              <div class="flex items-center gap-1.5">
+                <span class="text-[10px] text-ink-400 w-8">名字:</span>
+                <span class="text-[11px] text-ink-700 font-medium" x-text="p.peer_name || '未命名'" x-show="editingName !== p.peer"></span>
+                <input x-show="editingName === p.peer" x-model="editName" @keydown.enter.prevent="saveName(p)" class="text-[11px] border border-warm-300 rounded px-2 py-0.5 flex-1 bg-white" />
+                <button @click="editingName === p.peer ? saveName(p) : (editingName = p.peer, editName = p.peer_name || '')" class="text-[10px] text-brand-600 hover:text-brand-700 cursor-pointer" x-text="editingName === p.peer ? '保存' : '编辑'"></button>
+              </div>
+              <!-- 权限（trust_level）+ 拉黑快捷 -->
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <span class="text-[10px] text-ink-400 w-8">权限:</span>
+                <select :value="p.trust_level || 'normal'" @change="saveTrust(p, $event.target.value)" class="text-[10px] border border-warm-300 rounded px-1.5 py-0.5 bg-white">
+                  <option value="normal">普通</option>
+                  <option value="recommended">推荐</option>
+                  <option value="owner">主人</option>
+                  <option value="blocked">屏蔽</option>
+                </select>
+                <button @click="toggleBlock(p)" class="ml-2 text-[10px] px-2 py-0.5 rounded"
+                  :class="p.trust_level === 'blocked' ? 'bg-red-100 text-red-700' : 'text-ink-400 hover:text-red-600'"
+                  x-text="p.trust_level === 'blocked' ? '已拉黑 · 取消' : '拉黑'"></button>
+              </div>
               <div class="flex items-center gap-2">
-                <span class="text-[10px] text-ink-400">地址:</span>
+                <span class="text-[10px] text-ink-400 w-8">地址:</span>
                 <span class="text-[10px] text-ink-600 font-mono break-all cursor-copy select-all" @click="navigator.clipboard.writeText(p.peer)" title="点击复制" x-text="p.peer"></span>
               </div>
-              <div class="flex items-center gap-1.5 flex-wrap">
-                <span class="text-[10px] text-ink-400">标签:</span>
-                <template x-for="t in (p.tags||'').split(',').filter(Boolean)" :key="t">
-                  <span class="badge badge-neutral text-[9px]" x-text="t"></span>
-                </template>
-                <input x-model="editTag" placeholder="+ 添加" @keydown.enter.prevent="saveTag(p)" class="text-[10px] border border-warm-300 rounded px-2 py-0.5 w-20 bg-white" />
-                <button @click="saveTag(p)" class="btn btn-primary btn-sm text-[10px] py-0" x-show="editTag.trim()">加</button>
+              <!-- 标签管理 -->
+              <div class="space-y-1">
+                <div class="flex items-start gap-1.5">
+                  <span class="text-[10px] text-ink-400 w-8 mt-0.5 flex-shrink-0">标签:</span>
+                  <div class="flex-1 flex flex-wrap gap-1 items-center">
+                    <!-- 当前已有 tags (可删除) -->
+                    <template x-for="t in (p.tags||'').split(',').filter(Boolean)" :key="t">
+                      <span class="inline-flex items-center gap-0.5 badge badge-info text-[9px]">
+                        <span x-text="t"></span>
+                        <button @click="removeTag(p, t)" class="text-ink-400 hover:text-red-600 ml-0.5" title="移除">×</button>
+                      </span>
+                    </template>
+                    <!-- 自由输入 -->
+                    <input x-model="editTag" placeholder="+ 添加新标签" @keydown.enter.prevent="addTag(p, editTag); editTag=''"
+                      class="text-[10px] border border-warm-300 rounded px-2 py-0.5 w-24 bg-white" />
+                  </div>
+                </div>
+                <!-- 快捷添加已知标签 -->
+                <div class="flex items-start gap-1.5" x-show="knownTags.length > 0">
+                  <span class="text-[10px] text-ink-400 w-8 mt-0.5 flex-shrink-0">常用:</span>
+                  <div class="flex-1 flex flex-wrap gap-1">
+                    <template x-for="kt in knownTags" :key="kt.tag">
+                      <button @click="addTag(p, kt.tag)"
+                        :disabled="(p.tags||'').split(',').includes(kt.tag)"
+                        class="text-[9px] px-1.5 py-0.5 rounded border transition-colors"
+                        :class="(p.tags||'').split(',').includes(kt.tag)
+                          ? 'border-brand-300 bg-brand-50 text-brand-500 opacity-50 cursor-not-allowed'
+                          : 'border-warm-300 text-ink-500 hover:bg-warm-100 hover:border-brand-300'">
+                        <span x-text="kt.tag"></span>
+                        <span class="text-ink-300 ml-0.5" x-text="'(' + kt.count + ')'"></span>
+                      </button>
+                    </template>
+                  </div>
+                </div>
               </div>
               <div class="flex items-center gap-1.5">
-                <span class="text-[10px] text-ink-400">备注:</span>
+                <span class="text-[10px] text-ink-400 w-8">备注:</span>
                 <span class="text-[10px] text-ink-500" x-text="p.notes || '无'" x-show="!editingNote"></span>
                 <input x-show="editingNote" x-model="editNote" @keydown.enter.prevent="saveNote(p)" class="text-[10px] border border-warm-300 rounded px-2 py-0.5 flex-1 bg-white" />
                 <button @click="editingNote ? saveNote(p) : (editingNote=true, editNote=p.notes||'')" class="text-[10px] text-brand-600 hover:text-brand-700 cursor-pointer" x-text="editingNote ? '保存' : '编辑'"></button>
@@ -232,33 +284,46 @@
                 <option value="100">100</option>
               </select>
             </div>
-            <!-- 行为明细 -->
+            <!-- 行为明细 — 文本消息走气泡样式, 其他事件走紧凑日志行 -->
             <div x-show="detailLoading" class="text-center text-ink-300 py-6 text-xs">加载中...</div>
-            <div class="divide-y divide-warm-100 max-h-[500px] overflow-y-auto">
+            <div class="max-h-[500px] overflow-y-auto px-4 py-3 space-y-2">
               <template x-for="(e, i) in detailEvents" :key="i">
-                <div class="px-4 py-2 text-xs" :class="e.dir==='out' ? 'bg-blue-50/30' : ''">
-                  <div class="flex gap-2 items-start">
-                    <span class="w-5 flex-shrink-0 font-bold" :class="e.dir==='out' ? 'text-blue-500' : 'text-green-500'" x-text="e.dir==='out' ? '→' : '←'"></span>
-                    <span class="w-28 flex-shrink-0 text-ink-400 font-mono" x-text="KANet.formatTime(e.ts)"></span>
-                    <span class="badge badge-neutral text-[8px] flex-shrink-0" x-text="e.type"></span>
-                    <div class="flex-1 min-w-0">
-                      <template x-if="e.content">
-                        <div class="text-ink-600 whitespace-pre-wrap break-words" x-text="e.content"></div>
-                      </template>
-                      <template x-if="!e.content && e.type==='handshake' && e.dir==='out'">
+                <div>
+                  <!-- 文本消息 → 气泡 (左白右绿, 一眼分清方向) -->
+                  <template x-if="e.content">
+                    <div class="flex" :class="e.dir==='out' ? 'justify-end' : 'justify-start'">
+                      <div class="max-w-[75%]">
+                        <div class="rounded-xl px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap break-words"
+                             :class="e.dir==='out'
+                               ? 'bg-green-100 text-green-900 rounded-br-sm'
+                               : 'bg-white border border-warm-200 text-ink-700 rounded-bl-sm'"
+                             x-text="e.content"></div>
+                        <div class="text-[9px] text-ink-300 mt-0.5 px-1"
+                             :class="e.dir==='out' ? 'text-right' : ''"
+                             x-text="KANet.formatTime(e.ts)"></div>
+                      </div>
+                    </div>
+                  </template>
+                  <!-- 握手 / 其他非文本事件 → 紧凑日志行 -->
+                  <template x-if="!e.content">
+                    <div class="flex gap-2 items-center text-[10px] text-ink-400 py-0.5">
+                      <span class="w-5 flex-shrink-0 font-bold" :class="e.dir==='out' ? 'text-green-500' : 'text-blue-500'" x-text="e.dir==='out' ? '→' : '←'"></span>
+                      <span class="w-28 flex-shrink-0 font-mono" x-text="KANet.formatTime(e.ts)"></span>
+                      <span class="badge badge-neutral text-[8px] flex-shrink-0" x-text="e.type"></span>
+                      <template x-if="e.type==='handshake' && e.dir==='out'">
                         <span class="text-green-600">已发出握手</span>
                       </template>
-                      <template x-if="!e.content && e.type==='handshake' && e.dir==='in'">
+                      <template x-if="e.type==='handshake' && e.dir==='in'">
                         <span class="text-blue-600">收到握手请求</span>
                       </template>
-                      <template x-if="!e.content && e.type!=='handshake' && e.txid">
-                        <div class="font-mono text-ink-300 break-all text-[10px]" x-text="'tx: ' + e.txid"></div>
+                      <template x-if="e.type!=='handshake' && e.txid">
+                        <span class="font-mono text-ink-300 break-all" x-text="'tx: ' + e.txid.slice(0,16) + '...'"></span>
                       </template>
-                      <template x-if="!e.content && e.type!=='handshake' && !e.txid">
+                      <template x-if="e.type!=='handshake' && !e.txid">
                         <span class="text-ink-300">—</span>
                       </template>
                     </div>
-                  </div>
+                  </template>
                 </div>
               </template>
             </div>
@@ -287,6 +352,9 @@ function contactsPage() {
     editTag: '',
     editNote: '',
     editingNote: false,
+    editingName: null,
+    editName: '',
+    knownTags: [],   // [{tag, count}] 按使用频率排
     quickMsg: '',
     sending: false,
     sendStatus: '',
@@ -441,18 +509,6 @@ function contactsPage() {
       this.detailLoading = false;
     },
 
-    async saveTag(p) {
-      if (!this.editTag.trim() || !p.identity_id) return;
-      const newTags = p.tags ? p.tags + ',' + this.editTag.trim() : this.editTag.trim();
-      await fetch('/api/contacts/update', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: p.identity_id, tags: newTags }),
-      });
-      p.tags = newTags;
-      this.editTag = '';
-    },
-
     async saveNote(p) {
       if (!p.identity_id) return;
       await fetch('/api/contacts/update', {
@@ -462,6 +518,32 @@ function contactsPage() {
       });
       p.notes = this.editNote;
       this.editingNote = false;
+    },
+
+    async saveName(p) {
+      if (!p.identity_id) return;
+      await fetch('/api/contacts/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: p.identity_id, display_name: this.editName }),
+      });
+      p.peer_name = this.editName;
+      this.editingName = null;
+    },
+
+    async saveTrust(p, level) {
+      if (!p.identity_id) return;
+      await fetch('/api/contacts/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: p.identity_id, trust_level: level }),
+      });
+      p.trust_level = level;
+    },
+
+    async toggleBlock(p) {
+      const next = p.trust_level === 'blocked' ? 'normal' : 'blocked';
+      await this.saveTrust(p, next);
     },
 
     async sendMsg(p) {
@@ -502,6 +584,7 @@ function contactsPage() {
 
     async init() {
       await this.load();
+      await this.loadKnownTags();
       await this.ssInit();
       await this.spInit();
     },
@@ -514,6 +597,46 @@ function contactsPage() {
         this.contacts = await res.json();
       } catch { this.contacts = []; }
       this.loading = false;
+    },
+
+    async loadKnownTags() {
+      try {
+        const res = await fetch('/api/contacts/tags');
+        const counts = await res.json();  // { tag: count }
+        this.knownTags = Object.entries(counts)
+          .map(([tag, count]) => ({ tag, count }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 12);
+      } catch { this.knownTags = []; }
+    },
+
+    async addTag(p, rawTag) {
+      if (!p.identity_id) return;
+      const tag = (rawTag || '').trim().toLowerCase().replace(/[^a-z0-9_\u4e00-\u9fff]/g, '');
+      if (!tag) return;
+      const existing = (p.tags || '').split(',').map(t => t.trim()).filter(Boolean);
+      if (existing.includes(tag)) return;
+      const newTags = [...existing, tag].join(',');
+      await fetch('/api/contacts/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: p.identity_id, tags: newTags }),
+      });
+      p.tags = newTags;
+      // refresh known tags to pick up new ones
+      this.loadKnownTags();
+    },
+
+    async removeTag(p, tag) {
+      if (!p.identity_id) return;
+      const existing = (p.tags || '').split(',').map(t => t.trim()).filter(Boolean);
+      const newTags = existing.filter(t => t !== tag).join(',');
+      await fetch('/api/contacts/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: p.identity_id, tags: newTags }),
+      });
+      p.tags = newTags;
     },
   };
 }

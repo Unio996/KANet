@@ -568,9 +568,10 @@ export async function registerConversationRoutes(fastify) {
 
   const TRUST_LEVELS = ['owner', 'recommended', 'normal', 'blocked'];
 
-  // Update contact: display_name, tags, trust_level, notes
+  // Update contact: display_name, tags, trust_level, notes, classification
+  const CLASSIFICATIONS = ['seen_candidate', 'declared_candidate', 'responsive_agent', 'verified_agent', 'blocked_agent'];
   fastify.post('/api/contacts/update', async (request, reply) => {
-    const { id, display_name, tags, trust_level, notes } = request.body || {};
+    const { id, display_name, tags, trust_level, notes, classification } = request.body || {};
     if (!id) return reply.code(400).send({ ok: false, error: 'id required' });
     await updateIdentity(id, {
       displayName: display_name,
@@ -578,12 +579,16 @@ export async function registerConversationRoutes(fastify) {
       tags,
       trustLevel: TRUST_LEVELS.includes(trust_level) ? trust_level : undefined,
     });
-    // Sync trust_level to relation_states (the authoritative source for contacts list)
-    if (TRUST_LEVELS.includes(trust_level)) {
-      const identity = await getIdentityById(id);
-      if (identity?.address) {
+    // Sync trust_level + classification to relation_states (唯一真相源)
+    const identity = await getIdentityById(id);
+    if (identity?.address) {
+      if (TRUST_LEVELS.includes(trust_level)) {
         sqlite.prepare('UPDATE relation_states SET trust_level = ? WHERE peer_address = ?')
           .run(trust_level, identity.address);
+      }
+      if (CLASSIFICATIONS.includes(classification)) {
+        sqlite.prepare('UPDATE relation_states SET classification = ? WHERE peer_address = ?')
+          .run(classification, identity.address);
       }
     }
     return reply.send({ ok: true });

@@ -321,14 +321,15 @@ export class ActionExecutor {
 
   /**
    * Anti-spam gate: check Console before any outbound proactive contact.
+   * messageType: 'text' (strict — requires prior handshake) | 'handshake' (lenient — handshake itself)
    * Returns { allowed: true } or { allowed: false, reason }.
    */
-  async _antiSpamCheck(targetAddress) {
+  async _antiSpamCheck(targetAddress, messageType = 'text') {
     try {
       const { consoleUrl } = this.config;
       const agentAddr = this.config.address;
       const res = await fetchJson(
-        `${consoleUrl}/api/agent/outbound-check?agent_address=${encodeURIComponent(agentAddr)}&peer_address=${encodeURIComponent(targetAddress)}`
+        `${consoleUrl}/api/agent/outbound-check?agent_address=${encodeURIComponent(agentAddr)}&peer_address=${encodeURIComponent(targetAddress)}&message_type=${messageType}`
       );
       if (!res.allowed) {
         console.log(`[agent-mind:executor] ANTI-SPAM BLOCKED → ${targetAddress.slice(-8)}: ${res.reason}`);
@@ -544,8 +545,8 @@ export class ActionExecutor {
       return { ok: false, reason: `invalid address: ${action.target}` };
     }
 
-    // ══ LOCK 0: Anti-spam gate ══
-    const spamCheck = await this._antiSpamCheck(action.target);
+    // ══ LOCK 0: Anti-spam gate (handshake mode — 不走 text gate) ══
+    const spamCheck = await this._antiSpamCheck(action.target, 'handshake');
     if (!spamCheck.allowed) {
       return { ok: false, reason: `anti-spam: ${spamCheck.reason}` };
     }

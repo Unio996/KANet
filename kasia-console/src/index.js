@@ -128,9 +128,9 @@ import { listRelayNodes as _listRelayNodes } from './data/settings/relay-nodes.j
 
 // Agent 外发消息检查 — action-executor 每次发送前调用
 fastify.get('/api/agent/outbound-check', async (request, reply) => {
-  const { agent_address, peer_address } = request.query;
+  const { agent_address, peer_address, message_type } = request.query;
   if (!agent_address || !peer_address) return reply.code(400).send({ allowed: false, reason: 'missing params' });
-  const result = checkOutboundAllowed(agent_address, peer_address);
+  const result = checkOutboundAllowed(agent_address, peer_address, { messageType: message_type || 'text' });
   if (!result.allowed) console.log(`[anti-spam] BLOCKED: ${agent_address.slice(-8)} → ${peer_address.slice(-8)} (${result.reason})`);
   return reply.send(result);
 });
