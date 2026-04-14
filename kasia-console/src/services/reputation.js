@@ -32,13 +32,37 @@ export function assessReputation(myAddress, peerAddress) {
       ? Math.floor((Date.now() - new Date(identity.created_at).getTime()) / 86400000)
       : null;
 
-  // ── 2. 交易历史（mm_orders 记录）──
+  // ── 2. 交易历史（mm_orders + exchange_offers UNION）──
+  //
+  // 原版只查 mm_orders (OTC 遗留表), 不知道 exchange_offers 存在 → 所有 Exchange
+  // 模块上的交易对 reputation 层完全失明. Phase 2 P2-02/P2-03 坐实这个 bug.
+  // Schema 不同, 用 CASE 表达式把 give/want_asset 映射到统一的 kas_amount/usdt_amount.
   const trades = sqlite.prepare(`
-    SELECT status, kas_amount, usdt_amount, created_at, completed_at
-    FROM mm_orders
-    WHERE peer_address = ? OR agent_address = ?
+    SELECT * FROM (
+      -- OTC legacy
+      SELECT status, kas_amount, usdt_amount, created_at, completed_at, 'mm' AS source
+      FROM mm_orders
+      WHERE peer_address = ? OR agent_address = ?
+
+      UNION ALL
+
+      -- Exchange (new since v37)
+      SELECT
+        protocol_status AS status,
+        CASE WHEN UPPER(give_asset) = 'KAS' THEN CAST(give_amount AS REAL)
+             WHEN UPPER(want_asset) = 'KAS' THEN CAST(want_amount AS REAL)
+             ELSE 0 END AS kas_amount,
+        CASE WHEN UPPER(give_asset) LIKE 'USD%' THEN CAST(give_amount AS REAL)
+             WHEN UPPER(want_asset) LIKE 'USD%' THEN CAST(want_amount AS REAL)
+             ELSE 0 END AS usdt_amount,
+        created_at,
+        completed_at,
+        'exchange' AS source
+      FROM exchange_offers
+      WHERE maker = ? OR taker = ?
+    )
     ORDER BY created_at DESC
-  `).all(peerAddress, peerAddress);
+  `).all(peerAddress, peerAddress, peerAddress, peerAddress);
 
   const completed = trades.filter(t => t.status === 'completed');
   const cancelled = trades.filter(t => t.status === 'cancelled');
@@ -53,11 +77,27 @@ export function assessReputation(myAddress, peerAddress) {
     'SELECT status, handshake_observed_at, trust_level FROM relation_states WHERE local_address = ? AND peer_address = ?'
   ).get(myAddress, peerAddress) : null;
 
-  // 我和对手方的历史交易
+  // 我和对手方的历史交易 (mm_orders + exchange_offers UNION)
   const mutualTrades = sqlite.prepare(`
-    SELECT status, kas_amount FROM mm_orders
-    WHERE (agent_address = ? AND peer_address = ?) OR (agent_address = ? AND peer_address = ?)
-  `).all(myAddress, peerAddress, peerAddress, myAddress);
+    SELECT * FROM (
+      SELECT status, kas_amount, 'mm' AS source FROM mm_orders
+      WHERE (agent_address = ? AND peer_address = ?)
+         OR (agent_address = ? AND peer_address = ?)
+
+      UNION ALL
+
+      SELECT
+        protocol_status AS status,
+        CASE WHEN UPPER(give_asset) = 'KAS' THEN CAST(give_amount AS REAL)
+             WHEN UPPER(want_asset) = 'KAS' THEN CAST(want_amount AS REAL)
+             ELSE 0 END AS kas_amount,
+        'exchange' AS source
+      FROM exchange_offers
+      WHERE (maker = ? AND taker = ?)
+         OR (maker = ? AND taker = ?)
+    )
+  `).all(myAddress, peerAddress, peerAddress, myAddress,
+         myAddress, peerAddress, peerAddress, myAddress);
   const mutualCompleted = mutualTrades.filter(t => t.status === 'completed').length;
   const mutualDisputed = mutualTrades.filter(t => ['disputed', 'escalated'].includes(t.status)).length;
 
