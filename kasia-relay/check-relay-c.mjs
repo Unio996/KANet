@@ -2,7 +2,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const KASIA_PATH = `${process.env.KANET_ROOT || 'D:/Anthropic'}/kasia-mcp/dist/index.js`;
-const MNEMONIC_C = "REDACTED_MNEMONIC_B";
+const MNEMONIC_C = process.env.KASPA_MNEMONIC_C || process.env.KASPA_MNEMONIC;
+if (!MNEMONIC_C) throw new Error("KASPA_MNEMONIC_C (or KASPA_MNEMONIC) env var required");
 
 function extractJson(res) {
   const text = res?.content?.find?.(c => c?.type === "text")?.text ?? null;

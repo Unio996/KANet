@@ -14,6 +14,9 @@ kaspa-scout/data/
 kanet.env
 _relay_env.txt
 
+# === 运行时 dump 目录（dump-launch.mjs / 进程日志，含明文密钥）===
+logs/
+
 # === 数据库 ===
 *.db
 *.sqlite

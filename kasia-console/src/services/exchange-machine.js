@@ -92,7 +92,11 @@ export function transition(offerId, newStatus, extra = {}) {
   }
 
   // Extra fields (taker, accept_commitment, etc.)
+  // Skip metadata-only keys consumed by chain_event recording (txHash) — they're
+  // not columns on exchange_offers and would crash the UPDATE.
+  const META_ONLY = new Set(['txHash']);
   for (const [k, v] of Object.entries(extra)) {
+    if (META_ONLY.has(k)) continue;
     updates.push(`${k} = ?`);
     vals.push(v);
   }

@@ -86,9 +86,17 @@ async function tick() {
 // ── Publish Seed Order ────────────────────────────────────
 
 async function publishSeedOrder(config, midPrice, side) {
+  // BUY side temporarily disabled: maker auto-pay-USDT path is not implemented
+  // (exchange-machine.js _verifyAndComplete buy-shortcut marks completed without
+  // delivering USDT to taker). Publishing buy offers traps takers — they send KAS
+  // but never receive USDT. Skip until the gap is filled.
+  if (side === 'buy' && !config.buy_agent_id) {
+    return { ok: false, error: 'buy_disabled_until_maker_auto_pay_usdt_implemented' };
+  }
+
   const agentId = side === 'sell'
     ? (config.sell_agent_id || getDefaultAgentId())
-    : (config.buy_agent_id || getDefaultAgentId());
+    : config.buy_agent_id;
 
   if (!agentId) {
     console.log(`[seeder] No agent configured for ${side} orders`);
