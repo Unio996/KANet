@@ -9,7 +9,20 @@ const Resolver = kaspa.Resolver || null;
 const SOMPI_PER_KAS = 100000000n;
 const MAX_DECIMAL_PLACES = 8;
 const KASIA_MIN_AMOUNT = '0.2';
-const FEE_RESERVE_SOMPI = 3000n; // ~0.00003 KAS — covers fee for single-output self-send
+const FEE_RESERVE_BASE = 3000n;  // base fee for minimal TX (no payload)
+
+// Dynamic fee reserve based on payload size.
+// Kaspa charges ~1 sompi per byte of TX mass. Payload is hex-encoded (2 chars per byte).
+// Empirical: 500-char message → ~500 bytes payload → ~5000 sompi fee.
+// Formula: base + (payloadBytes * 10) with 2x safety margin.
+function estimateFeeReserve(payloadHex) {
+  if (!payloadHex) return FEE_RESERVE_BASE;
+  const payloadBytes = BigInt(Math.ceil(payloadHex.length / 2));
+  // 10 sompi per payload byte (empirical) × 2 safety margin + base
+  const estimated = FEE_RESERVE_BASE + payloadBytes * 20n;
+  // Cap at 1 KAS (100M sompi) — sanity limit
+  return estimated < 100_000_000n ? estimated : 100_000_000n;
+}
 
 // Promise-based mutex to serialize sendKaspa() calls and prevent UTXO double-spend
 let _sendLock = Promise.resolve();
@@ -132,12 +145,14 @@ async function _sendKaspaInner(to, amountSompi, priorityFee = 0n, payload) {
     // Full-UTXO self-send mode: pick largest UTXO, send (value - fee) to self.
     // Single input + single output = zero change = near-zero KIP-9 storage mass.
     // Used for comm/card/broadcast (self-sends where the payload is what matters).
+    // Fee scales with payload size — dynamic reserve prevents truncation.
     if (amountSompi === 0n && to === senderAddress) {
+      const feeReserve = estimateFeeReserve(payload);
       entries.sort((a, b) => (a.amount < b.amount ? 1 : -1)); // descending
       const best = entries[0];
-      if (best.amount < FEE_RESERVE_SOMPI * 2n) throw new Error('UTXO too small');
+      if (best.amount < feeReserve * 2n) throw new Error(`UTXO too small for payload (need ~${sompiToKaspaString(feeReserve * 2n)} KAS, have ${sompiToKaspaString(best.amount)} KAS)`);
       selectedEntries = [best];
-      outputAmount = BigInt(best.amount) - FEE_RESERVE_SOMPI;
+      outputAmount = BigInt(best.amount) - feeReserve;
     } else {
       // KIP-9 aware UTXO selection:
       //   storage_mass = C × (Σ(1/output) - Σ(1/input))⁺, C=10¹², limit=100,000
@@ -145,12 +160,12 @@ async function _sendKaspaInner(to, amountSompi, priorityFee = 0n, payload) {
       //   Strategy: ascending sort (preserve large UTXOs), find smallest KIP-9-safe single UTXO.
       //   If none safe alone, merge all (multiple inputs lower mass).
       const totalBalance = entries.reduce((sum, e) => sum + e.amount, 0n);
-      if (totalBalance < amountSompi + FEE_RESERVE_SOMPI + priorityFee)
-        throw new Error(`Insufficient balance: have ${sompiToKaspaString(totalBalance)} KAS, need ~${sompiToKaspaString(amountSompi + FEE_RESERVE_SOMPI + priorityFee)} KAS`);
+      if (totalBalance < amountSompi + FEE_RESERVE_BASE + priorityFee)
+        throw new Error(`Insufficient balance: have ${sompiToKaspaString(totalBalance)} KAS, need ~${sompiToKaspaString(amountSompi + FEE_RESERVE_BASE + priorityFee)} KAS`);
       // Min safe single UTXO: change must be large enough for KIP-9.
       // For send S, single input I, change C=I-S: mass = 10¹² × (1/S + 1/C - 1/I)
       // Safe when change >= ~0.65 × send (empirically: 0.13 KAS for 0.2 KAS send)
-      const minSafeUtxo = amountSompi + amountSompi * 65n / 100n + FEE_RESERVE_SOMPI;
+      const minSafeUtxo = amountSompi + amountSompi * 65n / 100n + FEE_RESERVE_BASE;
       entries.sort((a, b) => (a.amount > b.amount ? 1 : -1)); // ascending
       const safeEntry = entries.find(e => e.amount >= minSafeUtxo);
       if (safeEntry) {
