@@ -10,6 +10,28 @@ const POLL_MS = parseInt(process.env.POLL_MS || "2000");
 const CONSOLE_URL = process.env.CONSOLE_URL || "";
 const KASPA_NETWORK = process.env.KASPA_NETWORK || "mainnet";
 
+// ── Chain message guardrails ──
+const MAX_MESSAGE_CHARS = 5000;        // hard cap per message — beyond this, truncate
+const DAILY_SEND_LIMIT = 200;          // max chain messages per day per relay
+let _dailySendCount = 0;
+let _dailyResetDate = new Date().toISOString().slice(0, 10);
+
+function checkDailyLimit() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (today !== _dailyResetDate) { _dailySendCount = 0; _dailyResetDate = today; }
+  if (_dailySendCount >= DAILY_SEND_LIMIT) return false;
+  _dailySendCount++;
+  return true;
+}
+
+function capMessage(text) {
+  if (!text || text.length <= MAX_MESSAGE_CHARS) return text;
+  // Truncate at word boundary
+  const capped = text.slice(0, MAX_MESSAGE_CHARS).replace(/\s+\S*$/, '') + ' [...]';
+  log(`Message capped: ${text.length} → ${capped.length} chars (limit ${MAX_MESSAGE_CHARS})`);
+  return capped;
+}
+
 let polling = false;
 const seen = loadSeen();
 const localAddress = getWallet().getAddress();
@@ -143,8 +165,13 @@ async function handleActiveConversation(peer) {
     }
     log("AI →", replyText.slice(0, 80));
 
-    // Send with auto-truncate retry (same as chat broadcast)
-    let text = replyText;
+    // Guardrails: daily limit + max length
+    if (!checkDailyLimit()) {
+      log(`⚠ Daily send limit reached (${DAILY_SEND_LIMIT}), skipping reply`);
+      seen.add(msg.txId); saveSeen(seen);
+      continue;
+    }
+    let text = capMessage(replyText);
     let attempts = 0;
     const MAX_ATTEMPTS = 4;
     let sendOk = false;
@@ -173,10 +200,11 @@ async function handleActiveConversation(peer) {
       } catch (err) {
         const errMsg = err?.message || err?.toString?.() || '';
         if ((errMsg.includes('Insufficient funds') || errMsg.includes('Storage mass')) && attempts < MAX_ATTEMPTS - 1) {
-          const target = Math.max(20, Math.floor(text.length * 0.6));
+          // Dynamic fee should prevent this. If we still hit it, trim conservatively (90% keep)
+          const target = Math.max(20, Math.floor(text.length * 0.9));
           text = text.slice(0, target).replace(/\s+\S*$/, '') + '...';
           attempts++;
-          log(`Storage mass exceeded, retrying with ${text.length} chars (attempt ${attempts + 1})`);
+          log(`⚠ Storage mass fallback (dynamic fee underestimated), retrying with ${text.length} chars (attempt ${attempts + 1}/${MAX_ATTEMPTS})`);
         } else {
           log("Reply send failed:", errMsg);
           break;
@@ -334,10 +362,14 @@ if (process.send) {
             }
             break;
           }
-          // Broadcast uses bcast prefix (plaintext, discoverable by any Scout)
-          // Auto-truncate retry: if payload exceeds storage mass, shrink and retry (same as DM path)
+          // Guardrails: daily limit + max length
+          if (!checkDailyLimit()) {
+            log(`⚠ Daily send limit reached (${DAILY_SEND_LIMIT}), skipping broadcast`);
+            if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { error: `daily limit reached (${DAILY_SEND_LIMIT})` } });
+            break;
+          }
           const { encodeBcastPayload } = await import('./lib/protocol.mjs');
-          let bcastMsg = cmd.message;
+          let bcastMsg = capMessage(cmd.message);
           let bcastAttempts = 0;
           const BCAST_MAX_ATTEMPTS = 4;
           while (bcastAttempts < BCAST_MAX_ATTEMPTS) {
@@ -351,10 +383,10 @@ if (process.send) {
             } catch (bcastErr) {
               const bcastErrMsg = bcastErr?.message || bcastErr?.toString?.() || '';
               if ((bcastErrMsg.includes('Insufficient funds') || bcastErrMsg.includes('Storage mass')) && bcastAttempts < BCAST_MAX_ATTEMPTS - 1) {
-                const target = Math.max(20, Math.floor(bcastMsg.length * 0.6));
+                const target = Math.max(20, Math.floor(bcastMsg.length * 0.9));
                 bcastMsg = bcastMsg.slice(0, target).replace(/\s+\S*$/, '') + '...';
                 bcastAttempts++;
-                log(`BROADCAST #${cmd.channel} storage mass exceeded, retrying with ${bcastMsg.length} chars (attempt ${bcastAttempts + 1})`);
+                log(`⚠ BROADCAST #${cmd.channel} storage mass fallback, retrying with ${bcastMsg.length} chars (attempt ${bcastAttempts + 1})`);
               } else {
                 log(`BROADCAST #${cmd.channel} send failed: ${bcastErrMsg}`);
                 throw bcastErr;

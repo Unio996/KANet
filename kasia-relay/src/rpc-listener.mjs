@@ -844,8 +844,12 @@ async function replyToMessage(txId, senderAddress, messageText) {
   }
   log('AI →', replyText.slice(0, 80));
 
-  // Send with auto-truncate retry (same pattern as chat broadcast)
+  // Guardrail: cap message length (fee + sanity)
   let text = replyText;
+  if (text.length > 5000) {
+    text = text.slice(0, 5000).replace(/\s+\S*$/, '') + ' [...]';
+    log(`Message capped: ${replyText.length} → ${text.length} chars`);
+  }
   let attempts = 0;
   const MAX_ATTEMPTS = 4;
 
@@ -875,10 +879,10 @@ async function replyToMessage(txId, senderAddress, messageText) {
     } catch (err) {
       const errMsg = err?.message || err?.toString?.() || '';
       if ((errMsg.includes('Insufficient funds') || errMsg.includes('Storage mass')) && attempts < MAX_ATTEMPTS - 1) {
-        const target = Math.max(20, Math.floor(text.length * 0.6));
+        const target = Math.max(20, Math.floor(text.length * 0.9));
         text = text.slice(0, target).replace(/\s+\S*$/, '') + '...';
         attempts++;
-        log(`Storage mass exceeded, retrying with ${text.length} chars (attempt ${attempts + 1})`);
+        log(`⚠ Storage mass fallback, retrying with ${text.length} chars (attempt ${attempts + 1}/${MAX_ATTEMPTS})`);
       } else {
         log('Reply send failed:', errMsg);
         return;

@@ -334,11 +334,11 @@ async function triggerAutoReply(responder, channelName, senderAddress, content, 
     } catch (err) {
       const errMsg = err?.message || err?.toString?.() || '';
       if (errMsg.includes('Storage mass') && attempts < MAX_ATTEMPTS - 1) {
-        // Shrink by ~40% each retry
-        const target = Math.max(20, Math.floor(broadcastText.length * 0.6));
+        // Dynamic fee should handle most cases; this is a fallback (keep 90%)
+        const target = Math.max(20, Math.floor(broadcastText.length * 0.9));
         broadcastText = broadcastText.slice(0, target).replace(/\s+\S*$/, '') + '...';
         attempts++;
-        console.log(`[chat] Storage mass exceeded, retrying with ${broadcastText.length} chars (attempt ${attempts + 1})`);
+        console.log(`[chat] ⚠ Storage mass fallback, retrying with ${broadcastText.length} chars (attempt ${attempts + 1})`);
       } else {
         throw err; // not storage mass, or out of retries
       }
