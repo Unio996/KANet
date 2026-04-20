@@ -23,8 +23,19 @@ const GAMMA_BASE = 'https://gamma-api.polymarket.com';
 const POLYGON_RPC = 'https://polygon-bor-rpc.publicnode.com';
 const CHAIN_ID = 137; // Polygon mainnet
 
-// Polymarket CTF Exchange contract (for approvals)
+// Polymarket 三种 exchange 合约 — 下不同市场需要 approve 不同 spender:
+//  - CTF Exchange: binary YES/NO 市场
+//  - Neg Risk CTF Exchange: multi-outcome 互斥市场 exchange
+//  - Neg Risk Adapter: Neg Risk 市场结算路径（下单 spender 经常是这个）
+// 全部 approve 才能覆盖所有市场下单.
 const CTF_EXCHANGE = '0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E';
+const NEG_RISK_CTF_EXCHANGE = '0xC5d563A36AE78145C45a50134d48A1215220f80a';
+const NEG_RISK_ADAPTER = '0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296';
+const POLYMARKET_SPENDERS = [
+  { name: 'CTF Exchange', address: CTF_EXCHANGE },
+  { name: 'Neg Risk CTF Exchange', address: NEG_RISK_CTF_EXCHANGE },
+  { name: 'Neg Risk Adapter', address: NEG_RISK_ADAPTER },
+];
 // USDC on Polygon
 const USDC_POLYGON = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
 const USDC_DECIMALS = 6;
@@ -198,7 +209,9 @@ export async function cancelOrder(apiKey, secret, passphrase, orderId) {
 }
 
 /**
- * 检查 USDC Allowance（CTF Exchange 是否已授权）
+ * 检查 USDC Allowance — 并行查 3 个 Polymarket spender.
+ * 任一 RPC 查询失败视为 0, 不阻塞其他. 总超时 5s 保证 UI 不卡死.
+ * approved=true 仅当 3 个都 >0.
  */
 export async function checkAllowance(address) {
   try {
@@ -206,32 +219,69 @@ export async function checkAllowance(address) {
       const usdc = new ethers.Contract(USDC_POLYGON, [
         'function allowance(address owner, address spender) view returns (uint256)'
       ], provider);
-      const allowance = await usdc.allowance(address, CTF_EXCHANGE);
-      const amount = parseFloat(ethers.formatUnits(allowance, USDC_DECIMALS));
-      return { approved: amount > 0, allowance: amount };
+      const timeout = (p, ms) => Promise.race([p, new Promise((_, r) => setTimeout(() => r(new Error('rpc timeout')), ms))]);
+      const results = await Promise.all(POLYMARKET_SPENDERS.map(async s => {
+        try {
+          const raw = await timeout(usdc.allowance(address, s.address), 5000);
+          return { name: s.name, amount: parseFloat(ethers.formatUnits(raw, USDC_DECIMALS)) };
+        } catch (e) {
+          console.warn(`[polymarket] allowance ${s.name} failed:`, e.message);
+          return { name: s.name, amount: 0, error: e.message };
+        }
+      }));
+      const perSpender = {};
+      let minAmount = Infinity;
+      for (const r of results) {
+        perSpender[r.name] = r.amount;
+        if (r.amount < minAmount) minAmount = r.amount;
+      }
+      return {
+        approved: minAmount > 0,
+        allowance: minAmount,
+        perSpender,
+      };
     });
   } catch (e) {
     console.error('[polymarket] allowance check error:', e.message);
-    return { approved: false, allowance: 0, error: e.message };
+    return { approved: false, allowance: 0, perSpender: {}, error: e.message };
   }
 }
 
 /**
- * Approve USDC 给 CTF Exchange（一次性操作，approve max uint256）
+ * Approve USDC 给所有 Polymarket exchange 合约
+ * (CTF Exchange + Neg Risk CTF Exchange + Neg Risk Adapter).
+ * 覆盖 binary + neg risk 所有市场下单路径.
+ * 幂等: 已 approve 过的 spender 会再次 approve MaxUint, 无副作用只多一点 gas.
+ *
  * @param {string} privateKey — Agent 的 Polygon 钱包私钥
- * @returns {{ ok, txHash, error? }}
+ * @returns {{ ok, txHashes: {spender: txHash}, error? }}
  */
 export async function approveUsdc(privateKey) {
   try {
     return await withProvider(POLYGON_RPC, async (provider) => {
       const wallet = new ethers.Wallet(privateKey, provider);
       const usdc = new ethers.Contract(USDC_POLYGON, [
-        'function approve(address spender, uint256 amount) returns (bool)'
+        'function approve(address spender, uint256 amount) returns (bool)',
+        'function allowance(address owner, address spender) view returns (uint256)'
       ], wallet);
       const maxUint = ethers.MaxUint256;
-      const tx = await usdc.approve(CTF_EXCHANGE, maxUint);
-      console.log(`[polymarket] Approve TX sent: ${tx.hash}`);
-      return { ok: true, txHash: tx.hash };
+      const txHashes = {};
+      const skipped = {};
+      for (const s of POLYMARKET_SPENDERS) {
+        // 已 approve 过就跳过, 省 gas
+        const current = await usdc.allowance(wallet.address, s.address);
+        if (current > 0n) {
+          skipped[s.name] = ethers.formatUnits(current, USDC_DECIMALS);
+          console.log(`[polymarket] approve skip ${s.name} (already ${skipped[s.name]})`);
+          continue;
+        }
+        const tx = await usdc.approve(s.address, maxUint);
+        console.log(`[polymarket] approve ${s.name} TX sent: ${tx.hash}`);
+        txHashes[s.name] = tx.hash;
+      }
+      // 兼容旧返回: 提供 txHash = 第一个新发的 TX (若有)
+      const firstTx = Object.values(txHashes)[0] || null;
+      return { ok: true, txHash: firstTx, txHashes, skipped };
     });
   } catch (e) {
     console.error('[polymarket] Approve error:', e.message);

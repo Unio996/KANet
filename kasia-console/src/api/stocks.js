@@ -442,23 +442,24 @@ export async function registerStockRoutes(fastify) {
     const wallet = getPolygonWallet(relay_node_id);
     if (!wallet) return reply.send({ hasWallet: false, approved: false, hasClobKey: false });
 
-    // Polymarket 用 USDC.e（0x2791...），getUsdcBalance 查的就是这个
-    // relay.js wallets API 查的是原生 USDC（0x3c49...），不适用
-    const usdce = await getUsdcBalance(wallet.address) || 0;
-    let matic = 0;
-    {
-      const { ethers } = await import('ethers');
+    // 并行三个 RPC call + clob creds 本地查 (之前串行 14s, 改并行 ~2-3s)
+    const { ethers } = await import('ethers');
+    const timeout = (p, ms) => Promise.race([p, new Promise((_, r) => setTimeout(() => r(new Error('rpc timeout')), ms))]);
+    const maticPromise = (async () => {
       let provider;
       try {
         provider = new ethers.JsonRpcProvider('https://polygon.drpc.org');
-        const bal = await provider.getBalance(wallet.address);
-        matic = parseFloat(ethers.formatEther(bal));
-      } catch {} finally {
+        const bal = await timeout(provider.getBalance(wallet.address), 5000);
+        return parseFloat(ethers.formatEther(bal));
+      } catch { return 0; } finally {
         try { provider?.destroy?.(); } catch {}
       }
-    }
-
-    const [allowanceResult] = await Promise.all([checkAllowance(wallet.address)]);
+    })();
+    const [usdce, matic, allowanceResult] = await Promise.all([
+      timeout(getUsdcBalance(wallet.address), 5000).catch(() => 0),
+      maticPromise,
+      checkAllowance(wallet.address),
+    ]);
     const hasClobKey = !!_getPolymarketCreds(relay_node_id);
 
     return reply.send({
