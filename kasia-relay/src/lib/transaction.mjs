@@ -2,8 +2,9 @@
 import * as kaspa from 'kaspa-wasm';
 import { getApi } from './api.mjs';
 import { getWallet } from './wallet.mjs';
+import { waitForRpc } from '../rpc-listener.mjs';
 
-const { Generator, RpcClient, Encoding, sompiToKaspaString, Address, PaymentOutput } = kaspa;
+const { Generator, Encoding, sompiToKaspaString, Address, PaymentOutput } = kaspa;
 const Resolver = kaspa.Resolver || null;
 
 const SOMPI_PER_KAS = 100000000n;
@@ -90,30 +91,6 @@ async function resolveRpcUrl() {
   return null;
 }
 
-async function connectRpc(networkId, attempt = 1) {
-  const directUrl = await resolveRpcUrl();
-  const rpcOpts = directUrl
-    ? { url: directUrl, encoding: Encoding.Borsh, networkId }
-    : Resolver
-      ? { resolver: new Resolver(), encoding: Encoding.Borsh, networkId }
-      : (() => { throw new Error('No RPC URL configured and Resolver unavailable. Set KASPA_RPC_URL env var.'); })();
-  const rpc = new RpcClient(rpcOpts);
-  try {
-    await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('RPC connection timed out')), 30_000);
-      rpc.connect({}).then(() => { clearTimeout(timer); resolve(); }, (err) => { clearTimeout(timer); reject(err); });
-    });
-    return rpc;
-  } catch (err) {
-    try { await rpc.disconnect(); } catch {}
-    if (attempt < 3) {
-      console.log(`RPC connect retry ${attempt + 1}/3...`);
-      return connectRpc(networkId, attempt + 1);
-    }
-    throw err;
-  }
-}
-
 export function sendKaspa(...args) {
   return withSendLock(() => _sendKaspaInner(...args));
 }
@@ -122,7 +99,7 @@ async function _sendKaspaInner(to, amountSompi, priorityFee = 0n, payload) {
   const wallet = getWallet();
   const senderAddress = wallet.getAddress();
   const api = getApi(wallet.getNetworkId());
-  const rpc = await connectRpc(wallet.getNetworkId());
+  const rpc = await waitForRpc();
 
   const submittedTxIds = [];
   try {
@@ -205,7 +182,7 @@ async function _sendKaspaInner(to, amountSompi, priorityFee = 0n, payload) {
     }
     throw error;
   } finally {
-    try { await rpc.disconnect(); } catch {}
+    // shared RpcClient managed by rpc-listener — do NOT disconnect from transaction layer
   }
 }
 

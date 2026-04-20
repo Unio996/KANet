@@ -9,8 +9,9 @@
 
 import * as kaspa from 'kaspa-wasm';
 import { getWallet } from './wallet.mjs';
+import { waitForRpc } from '../rpc-listener.mjs';
 
-const { Generator, RpcClient, Encoding, Address, sompiToKaspaString, PaymentOutput } = kaspa;
+const { Generator, Encoding, Address, sompiToKaspaString, PaymentOutput } = kaspa;
 const Resolver = kaspa.Resolver || null;
 
 const MIN_BALANCE_FOR_SPLIT = 20_000_000n; // 0.2 KAS
@@ -36,20 +37,8 @@ export async function splitUtxosRelay(targetCount = 3) {
   const address = wallet.getAddress();
   const networkId = wallet.getNetworkId();
 
-  const directUrl = await resolveRpcUrl();
-  const rpcOpts = directUrl
-    ? { url: directUrl, encoding: Encoding.Borsh, networkId }
-    : Resolver
-      ? { resolver: new Resolver(), encoding: Encoding.Borsh, networkId }
-      : (() => { throw new Error('No RPC URL configured and Resolver unavailable. Set KASPA_RPC_URL env var.'); })();
-
-  const rpc = new RpcClient(rpcOpts);
+  const rpc = await waitForRpc();
   try {
-    await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('RPC timeout')), 15_000);
-      rpc.connect({}).then(() => { clearTimeout(timer); resolve(); }, (err) => { clearTimeout(timer); reject(err); });
-    });
-
     const { entries } = await rpc.getUtxosByAddresses([new Address(address)]);
     if (!entries || entries.length === 0) return { ok: false, reason: 'no_utxos' };
 
@@ -95,6 +84,6 @@ export async function splitUtxosRelay(targetCount = 3) {
 
     return { ok: true, split: true, utxosBefore, utxosAfter: splitCount, txId: lastTxId, fee };
   } finally {
-    try { await rpc.disconnect(); } catch {}
+    // shared RpcClient managed by rpc-listener — do NOT disconnect from transaction layer
   }
 }

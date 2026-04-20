@@ -52,6 +52,28 @@ let _reconnecting = false;
 let _reconnectAttempt = 0;
 let _blocklistTimer = null;
 
+/**
+ * Shared RpcClient accessor — 任何 transaction/broadcast 路径必须用这个,
+ * 不再 new RpcClient. 由 _connect/_scheduleReconnect 统一维护.
+ */
+export function getSharedRpcClient() {
+  if (!_rpc) throw new Error('RpcClient not yet connected — call waitForRpc first');
+  return _rpc;
+}
+
+export function isRpcConnected() {
+  return _rpc !== null;
+}
+
+export async function waitForRpc(timeoutMs = 30000) {
+  const start = Date.now();
+  while (!isRpcConnected() && (Date.now() - start) < timeoutMs) {
+    await new Promise(r => setTimeout(r, 200));
+  }
+  if (!isRpcConnected()) throw new Error(`Shared RpcClient not ready after ${timeoutMs}ms`);
+  return _rpc;
+}
+
 let _myAddress = null;
 let _myPrivateKeyHex = null;
 

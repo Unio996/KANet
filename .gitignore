@@ -67,3 +67,10 @@ opencode.json
 opencode-*.bat
 .opencode-*.md
 sandbox/
+
+# === Qwen 本地工具链产物 ===
+qwen.tar.gz
+qwen.tar
+scripts/code-index.db
+qclaude.bat
+qclaude.sh

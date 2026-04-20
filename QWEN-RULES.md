@@ -1,0 +1,243 @@
+# QWEN-RULES.md — 本地 AI 执行指南
+
+> 本文件由 Claude Opus 审定，给本地 Qwen3.6 模型做开发执行时的硬约束。
+> 每条规则都有 DO / DON'T 代码示例。违反任何一条 = 代码必须退回。
+
+---
+
+## Rule 1: NO TX NO STATE CHANGE
+
+**WHY**: KANet 构建在 Kaspa 链 100% 信任之上。没有链上 TX = 什么都没发生。先写 DB 再广播 = 乐观写入 = 致命 bug。
+
+**DO**:
+```javascript
+const result = await sendCommandAsync(relayId, {
+  type: 'send_broadcast',
+  payload: { t: 'kanet_exchange_v1', ...offerData }
+});
+if (!result?.txId) throw new Error('Broadcast failed — state NOT advanced');
+// TX 上链了，现在才写本地 DB
+db.prepare('INSERT INTO exchange_offers (id, broadcast_tx_id, ...) VALUES (?, ?, ...)')
+  .run(offerId, result.txId, ...);
+```
+
+**DON'T**:
+```javascript
+db.prepare('INSERT INTO exchange_offers ...').run(offerId, 'pending_xxx', ...);
+try { await sendCommandAsync(relayId, { type: 'send_broadcast', ... }); }
+catch (e) { console.error('broadcast failed'); }
+// DB 已写入但 TX 没上链 = 幽灵数据
+```
+
+---
+
+## Rule 2: sendCommandAsync vs sendCommand
+
+**WHY**: `sendCommand()` 是 fire-and-forget，Relay 执行失败 Console 不知道。花钱操作必须用 `sendCommandAsync()` 等回执。
+
+**DO**:
+```javascript
+// 转账、握手、拆分 UTXO — 全部用 Async
+const { txId, error } = await sendCommandAsync(relayId, {
+  type: 'transfer', to: address, amount: sompiAmount
+});
+if (error) return reply.code(500).send({ error });
+return reply.send({ txId });
+```
+
+**DON'T**:
+```javascript
+sendCommand(relayId, { type: 'transfer', to: address, amount: sompiAmount });
+return reply.send({ ok: true }); // 用户以为成功但钱可能没动
+```
+
+---
+
+## Rule 3: Anti-Spam Fail-Closed
+
+**WHY**: Agent 防骚扰的最后一道门。API 不可达时必须拒绝发送，不能放行。
+
+**DO**:
+```javascript
+let allowed = false;
+try {
+  const resp = await fetch(`${consoleUrl}/api/agent/outbound-check?target=${peer}&agent=${agentAddr}`);
+  const data = await resp.json();
+  allowed = data.allowed === true;
+} catch {
+  allowed = false; // fail-closed: API 不可达 = 拒绝
+}
+if (!allowed) return;
+await sendMessage(peer, content);
+```
+
+**DON'T**:
+```javascript
+try {
+  const resp = await fetch(`${consoleUrl}/api/agent/outbound-check?...`);
+  // ...
+} catch {
+  // API 挂了？没事，先发吧
+}
+await sendMessage(peer, content); // 无论检查结果都发 = 骚扰
+```
+
+---
+
+## Rule 4: Eta 模板 x-data 安全
+
+**WHY**: 浏览器把 `>` 当 HTML 标签结束符。x-data 里的 `>` `<` 会导致 JS 泄露为可见文本。
+
+**DO**:
+```html
+<!-- 简单逻辑内联，但不含 > < -->
+<div x-data="{ count: 0, active: true }">...</div>
+
+<!-- 超过 10 行提取到命名函数 -->
+<div x-data="exchangeApp()">...</div>
+<script>
+function exchangeApp() {
+  return {
+    offers: [],
+    async loadOffers() {
+      const r = await fetch('/api/exchange/offers');
+      this.offers = await r.json();
+    }
+  };
+}
+</script>
+```
+
+**DON'T**:
+```html
+<!-- > 直接在 x-data 里 = HTML 解析灾难 -->
+<div x-data="{ filter: items.filter(x => x.amount > 100) }">
+```
+
+---
+
+## Rule 5: chain_events event_type 白名单
+
+**WHY**: anti-spam 查询 `IN ('comm', 'comm_sent', 'text', 'handshake')`。新增发送路径必须用白名单内的 type，否则消息统计失明。
+
+**DO**:
+```javascript
+// 发广播 — 用 comm_sent
+await ingestChainEvent({
+  event_type: 'comm_sent',
+  agent_address: agentAddr,
+  remote_address: null,
+  txid: txId
+});
+```
+
+**DON'T**:
+```javascript
+// 自创 event_type — anti-spam 看不到
+await ingestChainEvent({
+  event_type: 'broadcast_message', // 不在白名单
+  agent_address: agentAddr,
+  txid: txId
+});
+```
+
+---
+
+## Rule 6: 参数化查询 + 事务
+
+**WHY**: SQLite 字符串拼接 = SQL 注入。多表写入无事务 = 中途失败留脏数据。
+
+**DO**:
+```javascript
+const trx = db.transaction(() => {
+  db.prepare('INSERT INTO exchange_offers (id, maker) VALUES (?, ?)').run(id, maker);
+  db.prepare('INSERT INTO fund_locks (offer_id, amount) VALUES (?, ?)').run(id, amount);
+  db.prepare('INSERT INTO chain_events (event_type, txid) VALUES (?, ?)').run('exchange_publish', txId);
+});
+trx();
+```
+
+**DON'T**:
+```javascript
+db.exec(`INSERT INTO exchange_offers (id, maker) VALUES ('${id}', '${maker}')`);
+db.exec(`INSERT INTO fund_locks (offer_id, amount) VALUES ('${id}', ${amount})`);
+// 第二条失败 = fund_lock 没建但 offer 已存在
+```
+
+---
+
+## Rule 7: CJK 文本不用 \b
+
+**WHY**: JavaScript `\b` (word boundary) 对中日韩字符无效，断言永远 false。
+
+**DO**:
+```javascript
+// 字符类边界匹配
+const hasBuy = /(?:^|[\s,;])买|购买|buy(?:[\s,;]|$)/i.test(text);
+```
+
+**DON'T**:
+```javascript
+// \b 对中文永远 false
+const hasBuy = /\b买\b/.test(text);  // 永远不匹配
+```
+
+---
+
+## Rule 8: 时间存储与显示
+
+**WHY**: `datetime('now')` 返回 naive 格式，JS 按本地时区解析会偏移。
+
+**DO**:
+```javascript
+// DB 存储：JS 生成 ISO 字符串
+db.prepare('UPDATE offers SET completed_at = ? WHERE id = ?')
+  .run(new Date().toISOString(), offerId);
+
+// UI 显示：用 KANet.formatTime()
+`<span x-text="KANet.formatTime(offer.completed_at)"></span>`
+```
+
+**DON'T**:
+```javascript
+// SQLite datetime('now') = naive 格式，无时区信息
+db.prepare("UPDATE offers SET completed_at = datetime('now') WHERE id = ?").run(offerId);
+
+// UI 直接截 ISO 字符串
+`<span>${iso.slice(5, 16)}</span>`
+```
+
+---
+
+## Rule 9: 系统 RPC 节点
+
+**WHY**: `api.kaspa.org` 是公共服务，限流且不可靠。KANet 有自己的 RPC 节点。
+
+**DO**:
+```javascript
+const { getWorkingRpc } = require('../lib/rpc-utils');
+const rpcUrl = await getWorkingRpc();
+const client = new RpcClient({ url: rpcUrl });
+```
+
+**DON'T**:
+```javascript
+const client = new RpcClient({ url: 'wss://api.kaspa.org/wrpc/borsh' });
+```
+
+---
+
+## Rule 10: Kaspa 是 10 BPS
+
+**WHY**: Kaspa 每秒出 10 个块（10 blocks per second），不是 1 个。确认时间按此计算。
+
+**DO**:
+```javascript
+const KASPA_BPS = 10;
+const confirmTimeMs = requiredConfirmations / KASPA_BPS * 1000;
+```
+
+**DON'T**:
+```javascript
+const confirmTimeMs = requiredConfirmations * 1000; // 假设 1 BPS = 大错
+```
