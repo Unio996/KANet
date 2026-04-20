@@ -143,7 +143,16 @@
       </template>
       <!-- History (settled + redeemable) -->
       <div x-show="settled.length > 0" class="mt-4 pt-3 border-t border-warm-200">
-          <div class="text-xs font-semibold text-ink-500 uppercase tracking-wider mb-2">History</div>
+          <div class="flex items-center justify-between mb-2">
+            <div class="text-xs font-semibold text-ink-500 uppercase tracking-wider">History</div>
+            <!-- 一键清算全部 redeemable position (绕过单按钮 UI bug 的兜底路径) -->
+            <button x-show="settled.some(p => p.redeemable && !p._redeemed)"
+              @click="redeemAll()" :disabled="redeemingAll"
+              class="px-2 py-0.5 bg-green-600 text-white rounded text-[10px] font-medium hover:bg-green-700 disabled:opacity-50">
+              <span x-show="!redeemingAll" x-text="'一键清算 (' + settled.filter(p => p.redeemable && !p._redeemed).length + ')'"></span>
+              <span x-show="redeemingAll">清算中...</span>
+            </button>
+          </div>
           <template x-for="pos in settled" :key="pos.asset">
             <div class="py-3 border-b border-warm-50 last:border-0 text-xs">
               <div class="flex items-center gap-2">
@@ -424,6 +433,7 @@ function predictionsPage() {
     book: null,
     bookLoading: false,
     creatingWallet: false,
+    redeemingAll: false,
 
     get filtered() {
       let list = this.markets;
@@ -475,16 +485,26 @@ function predictionsPage() {
     },
 
     async init() {
-      // 先查哪个 Agent 有 Polygon 钱包，优先选它
-      for (const opt of document.querySelectorAll('select[x-model="selectedAgent"] option')) {
+      // 优先级: 有 redeemable position 的 agent > 只有钱包的 agent
+      // (避免选错 agent 后钱卡在另一个账户里看不到)
+      const opts = Array.from(document.querySelectorAll('select[x-model="selectedAgent"] option'));
+      let redeemableAgent = null;
+      let walletAgent = null;
+      for (const opt of opts) {
         try {
-          const res = await fetch('/api/predictions/wallet?relay_node_id=' + opt.value);
-          const data = await res.json();
-          if (data.hasWallet) { this.selectedAgent = opt.value; break; }
-        } catch {}
+          const wRes = await fetch('/api/predictions/wallet?relay_node_id=' + opt.value);
+          const wData = await wRes.json();
+          if (!wData.hasWallet) continue;
+          if (!walletAgent) walletAgent = opt.value;
+          const pRes = await fetch('/api/predictions/positions?relay_node_id=' + opt.value);
+          const pData = await pRes.json();
+          const hasRedeemable = (pData.settled || []).some(p => p.redeemable && !p._redeemed);
+          if (hasRedeemable) { redeemableAgent = opt.value; break; }
+        } catch (e) { console.warn('[init] probe failed for', opt.value, e.message); }
       }
+      this.selectedAgent = redeemableAgent || walletAgent || this.selectedAgent;
+      console.log('[init] selectedAgent =', this.selectedAgent, redeemableAgent ? '(has redeemable)' : '(wallet only)');
       await Promise.all([this.loadMarkets(), this.loadWalletStatus()]);
-      // 有 CLOB key 时加载持仓
       if (this.walletStatus.hasClobKey) this.loadPositions();
     },
 
@@ -717,6 +737,15 @@ function predictionsPage() {
     },
 
     async redeemPosition(pos) {
+      console.log('[redeem] clicked', { agent: this.selectedAgent, market: pos.market, redeemable: pos.redeemable });
+      if (!this.selectedAgent) {
+        pos._redeemError = 'No agent selected';
+        return;
+      }
+      if (!pos.market) {
+        pos._redeemError = 'No conditionId (pos.market empty)';
+        return;
+      }
       pos._redeeming = true;
       pos._redeemError = '';
       try {
@@ -726,17 +755,34 @@ function predictionsPage() {
           body: JSON.stringify({ conditionId: pos.market }),
         });
         const data = await res.json();
+        console.log('[redeem] response', data);
         if (data.ok) {
           pos._redeemed = true;
           pos._redeemTx = data.txHash;
           this.loadWalletStatus();
         } else {
           pos._redeemError = data.error || 'Redeem failed';
+          console.error('[redeem] failed', data);
         }
       } catch (e) {
         pos._redeemError = e.message;
+        console.error('[redeem] network error', e);
       } finally {
         pos._redeeming = false;
+      }
+    },
+
+    async redeemAll() {
+      const targets = this.settled.filter(p => p.redeemable && !p._redeemed);
+      console.log('[redeemAll] targets=' + targets.length);
+      if (!targets.length) return;
+      this.redeemingAll = true;
+      try {
+        for (const pos of targets) {
+          await this.redeemPosition(pos);
+        }
+      } finally {
+        this.redeemingAll = false;
       }
     },
 
