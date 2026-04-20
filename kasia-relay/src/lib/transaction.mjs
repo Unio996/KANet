@@ -95,7 +95,7 @@ export function sendKaspa(...args) {
   return withSendLock(() => _sendKaspaInner(...args));
 }
 
-async function _sendKaspaInner(to, amountSompi, priorityFee = 0n, payload) {
+async function _sendKaspaInner(to, amountSompi, priorityFee = 0n, payload, _isRetry = false) {
   const wallet = getWallet();
   const senderAddress = wallet.getAddress();
   const api = getApi(wallet.getNetworkId());
@@ -176,6 +176,16 @@ async function _sendKaspaInner(to, amountSompi, priorityFee = 0n, payload) {
     const summary = generator.summary();
     return { txId: lastTxId, fee: sompiToKaspaString(summary.fees).toString() };
   } catch (error) {
+    // Detect silent WS disconnect — trigger reconnect + retry once
+    if (!submittedTxIds.length && !_isRetry) {
+      const msg = String(error?.message || error || '');
+      if (msg.includes('WebSocket is not connected') || msg.includes('WebSocket -> WebSocket')) {
+        const { triggerReconnect } = await import('../rpc-listener.mjs');
+        triggerReconnect('ws_error_in_sendkaspa');
+        await new Promise(r => setTimeout(r, 2000));
+        return _sendKaspaInner(to, amountSompi, priorityFee, payload, /* _isRetry= */ true);
+      }
+    }
     if (submittedTxIds.length > 0) {
       const detail = error instanceof Error ? error.message : String(error);
       throw new Error(`Transaction partially completed. ${submittedTxIds.length} tx(s) broadcast: [${submittedTxIds.join(', ')}]. Error: ${detail}`);

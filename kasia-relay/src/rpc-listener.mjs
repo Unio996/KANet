@@ -51,6 +51,8 @@ let _running = false;
 let _reconnecting = false;
 let _reconnectAttempt = 0;
 let _blocklistTimer = null;
+let _healthTimer = null;
+let _walletRef = null;
 
 /**
  * Shared RpcClient accessor — 任何 transaction/broadcast 路径必须用这个,
@@ -438,6 +440,7 @@ async function catchUpHistory() {
 }
 
 async function _connect(wallet) {
+  _walletRef = wallet;
   const networkId = wallet.getNetworkId();
   const directUrl = await resolveRpcUrl();
 
@@ -488,12 +491,24 @@ async function _connect(wallet) {
     _scheduleReconnect(wallet);
   });
 
+  // Health check: 每 30s ping getServerInfo, 失败立刻 reconnect (补 SDK 不 emit disconnect 的漏洞)
+  if (_healthTimer) clearInterval(_healthTimer);
+  _healthTimer = setInterval(async () => {
+    try {
+      await _rpc.getServerInfo();
+    } catch (err) {
+      log('health check failed:', err?.message || err, '— triggering reconnect');
+      _scheduleReconnect(wallet);
+    }
+  }, 30_000);
+
   log('listening...');
 }
 
 function _scheduleReconnect(wallet) {
   if (_reconnecting || !_running) return;
   _reconnecting = true;
+  if (_healthTimer) { clearInterval(_healthTimer); _healthTimer = null; }
 
   const delay = Math.min(
     RECONNECT_BASE_MS * Math.pow(2, _reconnectAttempt),
@@ -928,4 +943,13 @@ async function findAddressByAlias(alias) {
     return data?.peerAddress || null;
   } catch {}
   return null;
+}
+
+/**
+ * 外部触发 reconnect — 供 transaction.mjs 在 WS 错误时调用.
+ * 幂等: 正在 reconnecting 会 no-op.
+ */
+export function triggerReconnect(reason = 'external') {
+  log('external reconnect trigger:', reason);
+  if (_walletRef) _scheduleReconnect(_walletRef);
 }
