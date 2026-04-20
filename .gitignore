@@ -57,3 +57,13 @@ backup.ps1
 # === IDE / 工具 ===
 .claude/
 .superpowers/
+
+# === opencode 本地开发工具链（永不入库）===
+AGENTS.md
+AGENTS.*.md
+ONBOARDING.md
+KANET-STATE.md
+opencode.json
+opencode-*.bat
+.opencode-*.md
+sandbox/
