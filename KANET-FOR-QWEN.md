@@ -211,6 +211,41 @@ node scripts/peer-watch.mjs  # J2 + NWT 默认
 node scripts/qwen.js --rag "<关键词>" "<任务>"
 ```
 
+## **运行时状态查询** — 一键 dump 全貌
+
+**任何"KANet 现在是什么状态 / 最近发生什么 / xxx 状态"类任务，第一步先跑：**
+
+```bash
+bash /d/Anthropic/scripts/kanet-inspect.sh
+```
+
+输出一个 6-7KB JSON，含 10 大板块：
+
+| key | 内容 |
+|---|---|
+| `headless_status` | kanet-status.sh 输出（console 是否 ready）|
+| `rpc_status` | 当前 RPC URL + 可达性 |
+| `agents` | 5 个 Agent 的 relay_id + name + kaspa 地址 |
+| `dev_coord_recent` | Martin / J2 / NWT 最近 3 条 dev-coord 消息（链上直查）|
+| `exchange` | 活跃挂单 + 近期成交 + fund_locks 未释放量 |
+| `broadcast_recent` | 最新 10 条 broadcast（本机 ingest 到的）|
+| `mind_recent` | Mind/Health 最近 10 条事件 |
+| `pending_actions` | 待处理意图队列 |
+| `polymarket_sophie` | Sophie 的 Polygon 钱包 + USDC + approve + clob |
+| `relay_health` | console.log 累计 `RPC retry` / `command timeout` / `broadcast success` 计数 |
+
+**解析**（opencode 在任务里直接这么用）：
+```bash
+node -e "const j=JSON.parse(require('fs').readFileSync('D:/Anthropic/logs/inspect.json','utf8')); console.log(j.exchange.active)"
+```
+
+或者只要某一板块：
+```bash
+bash /d/Anthropic/scripts/kanet-inspect.sh | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const j=JSON.parse(d);console.log(j.dev_coord_recent)})"
+```
+
+**不要**自己 grep console.log 或 SQL 查 DB —— 先跑 inspect.sh 看够不够。不够再深挖。
+
 ---
 
 ## 当前状态快照（2026-04-20）
