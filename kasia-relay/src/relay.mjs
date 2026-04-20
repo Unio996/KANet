@@ -331,7 +331,14 @@ if (process.send) {
             }
             break;
           }
-          draft = await sendMessage({ address: cmd.target, message: cmd.message });
+          // Guardrails: daily limit + max length (对齐 send_broadcast / handleActiveConversation)
+          if (!checkDailyLimit()) {
+            log(`⚠ Daily send limit reached (${DAILY_SEND_LIMIT}), skipping message`);
+            if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { error: `daily limit reached (${DAILY_SEND_LIMIT})` } });
+            break;
+          }
+          const cappedMsg = capMessage(cmd.message);
+          draft = await sendMessage({ address: cmd.target, message: cappedMsg });
           sent = await sendKaspa({ to: draft.to, amount: draft.amount, payload: draft.payload });
           ingestTx({ traceId: sent?.txId, txid: sent?.txId, direction: 'outbound', amount: '0', fee: sent?.fee, localAddress });
           ingestMessage({
@@ -340,7 +347,7 @@ if (process.send) {
             localAddress: localAddress,
             remoteAddress: cmd.target,
             txid: sent?.txId,
-            message: cmd.message || '',
+            message: cappedMsg || '',
           });
           log(`MESSAGE → ${cmd.target?.slice(-12)} TX: ${sent?.txId || '?'} fee: ${sent?.fee || '?'}`);
           break;

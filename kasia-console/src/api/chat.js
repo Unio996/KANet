@@ -45,18 +45,61 @@ export async function registerChatRoutes(fastify) {
     return reply.send({ messages, channel });
   });
 
-  // GET /api/chat/channels — list known channels
+  // GET /api/chat/channels — list known channels (from channels table)
+  // Optional: ?after=ISO — returns new_count (messages after that timestamp) per channel
   fastify.get('/api/chat/channels', async (request, reply) => {
+    const { after } = request.query;
     const channels = sqlite.prepare(`
-      SELECT channel_name, COUNT(*) as msg_count,
-        MAX(created_at) as last_message_at
-      FROM broadcast_messages
-      WHERE channel_name NOT GLOB '[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-*'
-        AND sender_address IS NOT NULL AND sender_address != ''
-      GROUP BY channel_name
-      ORDER BY last_message_at DESC
+      SELECT c.name as channel_name, c.description,
+        COUNT(bm.id) as msg_count,
+        MAX(bm.created_at) as last_message_at
+      FROM channels c
+      LEFT JOIN broadcast_messages bm
+        ON bm.channel_name = c.name
+        AND bm.status != 'local'
+        AND bm.sender_address IS NOT NULL AND bm.sender_address != ''
+      GROUP BY c.name
+      ORDER BY last_message_at DESC NULLS LAST
     `).all();
+
+    // If ?after provided, count new messages per channel since that time
+    if (after) {
+      const newCounts = sqlite.prepare(`
+        SELECT channel_name, COUNT(*) as new_count
+        FROM broadcast_messages
+        WHERE created_at > ? AND status != 'local'
+          AND sender_address IS NOT NULL AND sender_address != ''
+        GROUP BY channel_name
+      `).all(after);
+      const countMap = new Map(newCounts.map(r => [r.channel_name, r.new_count]));
+      for (const ch of channels) {
+        ch.new_count = countMap.get(ch.channel_name) || 0;
+      }
+    }
+
     return reply.send({ channels });
+  });
+
+  // POST /api/chat/channels — create or update a channel
+  fastify.post('/api/chat/channels', async (request, reply) => {
+    const { name, description } = request.body || {};
+    if (!name?.trim()) {
+      return reply.code(400).send({ error: 'name is required' });
+    }
+    const channelName = name.trim();
+    const desc = description?.trim?.() || null;
+    sqlite.prepare(`
+      INSERT OR REPLACE INTO channels (name, description, created_by, created_at)
+      VALUES (?, ?, 'owner', datetime('now'))
+    `).run(channelName, desc);
+    return reply.send({ ok: true, name: channelName });
+  });
+
+  // DELETE /api/chat/channels/:name — delete a channel (keeps messages)
+  fastify.delete('/api/chat/channels/:name', async (request, reply) => {
+    const name = request.params.name;
+    sqlite.prepare('DELETE FROM channels WHERE name = ?').run(name);
+    return reply.send({ ok: true, name });
   });
 
   // POST /api/chat/send — send a broadcast message

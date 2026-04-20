@@ -1924,5 +1924,47 @@ export function runMigrations() {
     }
   }
 
+  // v63: channels — 频道是一等公民，channels 表作为频道的唯一真相源
+  {
+    const hasTable = sqlite.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='channels'"
+    ).get();
+    if (!hasTable) {
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS channels (
+          name        TEXT PRIMARY KEY,
+          description TEXT,
+          created_by  TEXT,
+          created_at  TEXT
+        );
+        INSERT OR IGNORE INTO channels (name, description, created_by, created_at) VALUES
+          ('kanet-arch',     'Architect 任务拆解和分发', 'system', datetime('now')),
+          ('kanet-frontend', '前端 Builder 产出和进度', 'system', datetime('now')),
+          ('kanet-backend',  '后端 Builder 产出和进度', 'system', datetime('now')),
+          ('kanet-review',   '代码审查请求和结果', 'system', datetime('now')),
+          ('kanet-test',     '测试任务和测试报告', 'system', datetime('now')),
+          ('kanet-alert',    '异常、阻塞、安全问题', 'system', datetime('now')),
+          ('kanet-status',   '全员进度汇报', 'system', datetime('now'));
+      `);
+      // Backfill: 把 broadcast_messages 里已有消息的频道录入 channels 表
+      const existing = sqlite.prepare(`
+        SELECT DISTINCT channel_name FROM broadcast_messages
+        WHERE status != 'local'
+          AND sender_address IS NOT NULL AND sender_address != ''
+          AND channel_name NOT LIKE '%_local'
+          AND channel_name NOT GLOB '[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-*'
+      `).all();
+      const backfill = sqlite.prepare(
+        "INSERT OR IGNORE INTO channels (name, created_by, created_at) VALUES (?, 'backfill', datetime('now'))"
+      );
+      let backfilled = 0;
+      for (const r of existing) {
+        const result = backfill.run(r.channel_name);
+        if (result.changes > 0) backfilled++;
+      }
+      console.log(`[migrate] v63: channels table created + 7 preset channels + ${backfilled} backfilled.`);
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

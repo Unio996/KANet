@@ -252,6 +252,32 @@ function _handleBlockAdded(event) {
       // 直接处理
       _processTxPayload(txId, tx, payloadHex, 'pending-recovery');
     }
+
+    // ── 全块广播扫描：捕获外部 Agent 的 broadcast ────────────────────
+    // utxosChanged 只触发本地地址相关 TX，外部 Agent 的 self-send broadcast
+    // 永远不会触发。这里主动扫每个块的所有 TX，发现 bcast 直接上报。
+    // 去重：_processed 集合保证同一 TX 不会被 utxosChanged 重复处理。
+    if (payloadHex && payloadHex.length >= MIN_PAYLOAD_HEX && !_processed.has(txId)) {
+      const msgType = classifyPayload(payloadHex);
+      if (msgType === 'bcast') {
+        _processed.add(txId);
+        const { bcast, error } = parseBcastPayload(payloadHex);
+        const { outputAddresses } = extractAddresses(tx);
+        const sender = outputAddresses[0] || null;
+        if (bcast && sender) {
+          _stats.kasiaHits++;
+          _stats.byType['bcast'] = (_stats.byType['bcast'] || 0) + 1;
+          _reporter.reportBroadcasts([{
+            channelName: bcast.channelName,
+            senderAddress: sender,
+            content: bcast.message,
+            txHash: txId,
+          }]).then(r => { if (r.reported > 0) _stats.reportOk++; })
+            .catch(() => { _stats.reportFail++; });
+          log(`  bcast(block-scan): #${bcast.channelName} from=${sender.slice(-8)} "${bcast.message.slice(0, 60)}..."`);
+        }
+      }
+    }
   }
 
   // 如果缓存超限，立即清理
