@@ -10,6 +10,47 @@ import { onBroadcastWritten } from '../services/trade-protocol-filter.js';
 import { recordChainEvent } from '../services/chain-event.js';
 import { checkBudget, recordSpend } from '../services/social-budget.js';
 
+// ── Auto-reply skip rules (T-2026-04-22-02) ──
+// Prevents Mind auto-reply cascade / identity-theft / storm on sensitive channels.
+// All three helpers used in /api/chat/send and /api/chat/ingest trigger paths.
+
+// 1) Known foreign agents (addresses of J1-machine relays) — cross-machine cascade guard
+const KNOWN_FOREIGN_SUFFIXES = [
+  'gc5k09mkzc55',
+  'je4cgx2ktetp',
+  'kzc2tgz4cchh',
+  '7z7uwq2wq200',
+];
+function isKnownForeignAgent(addr) {
+  if (!addr) return false;
+  return KNOWN_FOREIGN_SUFFIXES.some(s => addr.endsWith(s));
+}
+
+// 2) Bot auto-reply content prefix patterns — storm-break rule
+const BOT_PREFIX_PATTERNS = [
+  /^\[[^\]]+\s+auto\]/,        // [NWT auto], [Opus auto], etc.
+  /^\[OPUS[^\]]*\]/,
+  /^\[QCLAUDE[^\]]*\]/,
+  /^\[DONE\]/,
+  /^\[QUESTION\]/,
+  /^\[AUDIT[^\]]*\]/,
+  /^\[SILENT\]/,
+  /^\[→\s*[A-Z]/,              // [→ TARGET] handled by channel-bridge, not Mind
+];
+function isBotAutoReplyContent(content) {
+  if (!content) return false;
+  return BOT_PREFIX_PATTERNS.some(re => re.test(content));
+}
+
+// 3) Channel-level Mind auto-reply disable list (audit + alert channels stay clean)
+const MIND_DISABLED_CHANNELS = new Set([
+  'kanet-review',
+  'kanet-alert',
+]);
+function isAutoReplyDisabledForChannel(channelName) {
+  return MIND_DISABLED_CHANNELS.has(channelName);
+}
+
 export async function registerChatRoutes(fastify) {
 
   // GET /chat — Live Chat page
@@ -163,7 +204,13 @@ export async function registerChatRoutes(fastify) {
       const isOwnerMessage = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(senderAddress);
       const isProtocolMessage = content.startsWith('{"t":"kanet_');
       const isDevCoord = content.startsWith('[DEV-COORD]');
-      if (channelName !== 'otc-market' && !isOwnAgentSend && !isProtocolMessage && !isDevCoord) {
+      const isKnownForeign = isKnownForeignAgent(senderAddress);
+      const isBotReply = isBotAutoReplyContent(content);
+      const isChannelDisabled = isAutoReplyDisabledForChannel(channelName);
+      if (channelName !== 'otc-market'
+          && !isOwnAgentSend && !isKnownForeign
+          && !isProtocolMessage && !isDevCoord
+          && !isBotReply && !isChannelDisabled) {
         const responders = sqlite.prepare(`
           SELECT r.id as relay_id, r.address, r.network, a.http_port
           FROM relay_nodes r
@@ -290,7 +337,13 @@ export async function registerChatRoutes(fastify) {
     const isProtocolMsg = content.startsWith('{"t":"kanet_');
     const isDevChannel = channelName === 'dev-coord' || channelName === 'kanet-dev';
     const isDevMsg = content.startsWith('[DEV-COORD]');
-    if (channelName !== 'otc-market' && !isOwnAgent && !isProtocolMsg && !isDevChannel && !isDevMsg) {
+    const isKnownForeign2 = isKnownForeignAgent(senderAddress);
+    const isBotReply2 = isBotAutoReplyContent(content);
+    const isChannelDisabled2 = isAutoReplyDisabledForChannel(channelName);
+    if (channelName !== 'otc-market'
+        && !isOwnAgent && !isKnownForeign2
+        && !isProtocolMsg && !isDevChannel && !isDevMsg
+        && !isBotReply2 && !isChannelDisabled2) {
     const responders = sqlite.prepare(`
       SELECT r.id as relay_id, r.address, r.network, a.http_port
       FROM relay_nodes r
