@@ -24,6 +24,7 @@ function invalidateApiCheckCache(port) {
 }
 
 // Deep check: call AI API, cache result for 2 minutes
+// 超时放宽到 45s：推理模型（glm4.7 / qwen thinking 系列）首 token 前思考 10-30s 常见
 async function deepCheckAdapter(port) {
   const cached = _apiCheckCache[port];
   if (cached && Date.now() - cached.checkedAt < 120_000) return cached;
@@ -31,8 +32,9 @@ async function deepCheckAdapter(port) {
     const res = await fetch(`http://localhost:${port}/reply`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ peer: '_ping', message: 'hi' }),
-      signal: AbortSignal.timeout(10000),
+      // mindTask=true 走短路径，跳过 getContext/SYSTEM_PROMPT，给 reasoning 模型留空间
+      body: JSON.stringify({ peer: '_ping', message: 'hi', mindTask: true }),
+      signal: AbortSignal.timeout(45000),
     });
     const result = { apiOk: res.ok, apiError: null, checkedAt: Date.now() };
     if (!res.ok) result.apiError = (await res.text().catch(() => '')).slice(0, 100);
