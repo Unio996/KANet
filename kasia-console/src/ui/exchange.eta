@@ -825,6 +825,13 @@
               <label class="flex items-center gap-2 col-span-2">
                 <input type="checkbox" :checked="autoTakerConfig.enabled" @change="toggleAutoTaker()" class="rounded" />
                 <span>AutoTaker enabled</span>
+              </label>
+              <label class="flex items-center gap-2 col-span-2">
+                <span class="text-ink-400">Mode:</span>
+                <select x-model="autoTakerConfig.mode" class="border rounded px-2 py-0.5 text-xs bg-white">
+                  <option value="approval">Approval</option>
+                  <option value="auto">Auto</option>
+                </select>
                 <span class="ml-2 px-1.5 py-0.5 rounded text-[9px]" :class="autoTakerConfig.mode === 'auto' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'" x-text="autoTakerConfig.mode || 'approval'"></span>
               </label>
               <label class="flex flex-col gap-0.5">
@@ -1011,7 +1018,7 @@ function exchangeApp() {
     // ── Init ──
     async init() {
       await this.loadRelays();
-      await Promise.all([this.loadOffers(), this.loadKasPrice()]);
+      await Promise.all([this.loadOffers(), this.loadKasPrice(), this.loadAutoTakerConfig()]);
       this.loadWallet(); // async, don't block
       setInterval(() => this.loadOffers(), 30000);
       setInterval(() => this.loadKasPrice(), 60000);
@@ -1028,6 +1035,20 @@ function exchangeApp() {
           else alert('Error: ' + (d.error || 'Unknown'));
         } catch (e) { alert('Error: ' + e.message); }
       });
+    },
+
+    async loadAutoTakerConfig() {
+      try {
+        const d = await fetch('/api/exchange/autotaker-config').then(r => r.json());
+        this.autoTakerConfig = {
+          enabled:      d.enabled,
+          mode:         d.mode || 'approval',
+          min_discount: d.min_discount,
+          max_amount:   d.max_amount,
+          daily_limit:  d.daily_limit,
+          cooldown_sec: d.cooldown_sec,
+        };
+      } catch {}
     },
 
     async loadKasPrice() {
@@ -1599,10 +1620,24 @@ function exchangeApp() {
     },
     async saveAutoTakerConfig() {
       const c = this.autoTakerConfig;
-      await Promise.all([
-        fetch('/api/exchange/limits', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({}) }), // placeholder
-      ]);
-      // TODO: save autotaker config to config_entries when API is ready
+      try {
+        const r = await fetch('/api/exchange/autotaker-config', {
+          method: 'PUT',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            enabled:      c.enabled,
+            mode:         c.mode,
+            min_discount: c.min_discount,
+            max_amount:   c.max_amount,
+            daily_limit:  c.daily_limit,
+            cooldown_sec: c.cooldown_sec,
+          }),
+        });
+        const d = await r.json();
+        if (!d.ok) alert('Save failed: ' + (d.error || 'unknown'));
+      } catch (e) {
+        alert('Network error: ' + e.message);
+      }
     },
     async approveAutoTake(id) {
       try {

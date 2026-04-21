@@ -1000,6 +1000,66 @@ export async function registerExchangeRoutes(fastify) {
     });
   });
 
+  // ── GET/PUT /api/exchange/autotaker-config — AutoTaker 配置 ──
+  fastify.get('/api/exchange/autotaker-config', async (request, reply) => {
+    const { getConfig } = await import('../data/settings/configs.js');
+    return reply.send({
+      enabled:          (await getConfig('autotake_enabled')) === 'true',
+      mode:             (await getConfig('autotake_mode')) || 'approval',
+      min_discount:     parseFloat(await getConfig('autotake_min_discount_pct') || '0.5'),
+      max_amount:       parseFloat(await getConfig('autotake_max_amount_usdt') || '50'),
+      daily_limit:      parseInt(await getConfig('autotake_daily_limit') || '3'),
+      cooldown_sec:     parseInt(await getConfig('autotake_cooldown_sec') || '30'),
+    });
+  });
+
+  fastify.put('/api/exchange/autotaker-config', async (request, reply) => {
+    const { enabled, mode, min_discount, max_amount, daily_limit, cooldown_sec } = request.body || {};
+    const { setConfig } = await import('../data/settings/configs.js');
+    const cat = { category: 'exchange_autotaker' };
+    const updates = [];
+    if (enabled !== undefined) {
+      await setConfig('autotake_enabled', enabled ? 'true' : 'false', cat);
+      updates.push(`enabled=${enabled}`);
+    }
+    if (mode !== undefined) {
+      if (!['approval', 'auto'].includes(mode))
+        return reply.code(400).send({ error: 'mode must be approval|auto' });
+      await setConfig('autotake_mode', mode, cat);
+      updates.push(`mode=${mode}`);
+    }
+    if (min_discount !== undefined) {
+      const v = parseFloat(min_discount);
+      if (isNaN(v) || v < 0 || v > 50)
+        return reply.code(400).send({ error: 'min_discount must be 0-50' });
+      await setConfig('autotake_min_discount_pct', String(v), cat);
+      updates.push(`min_discount=${v}`);
+    }
+    if (max_amount !== undefined) {
+      const v = parseFloat(max_amount);
+      if (isNaN(v) || v < 1)
+        return reply.code(400).send({ error: 'max_amount must be >= 1' });
+      await setConfig('autotake_max_amount_usdt', String(v), cat);
+      updates.push(`max_amount=${v}`);
+    }
+    if (daily_limit !== undefined) {
+      const v = parseInt(daily_limit);
+      if (isNaN(v) || v < 1 || v > 100)
+        return reply.code(400).send({ error: 'daily_limit must be 1-100' });
+      await setConfig('autotake_daily_limit', String(v), cat);
+      updates.push(`daily_limit=${v}`);
+    }
+    if (cooldown_sec !== undefined) {
+      const v = parseInt(cooldown_sec);
+      if (isNaN(v) || v < 5 || v > 3600)
+        return reply.code(400).send({ error: 'cooldown_sec must be 5-3600' });
+      await setConfig('autotake_cooldown_sec', String(v), cat);
+      updates.push(`cooldown_sec=${v}`);
+    }
+    if (updates.length === 0) return reply.code(400).send({ error: 'No valid fields' });
+    return reply.send({ ok: true, updated: updates });
+  });
+
   // PUT /api/exchange/limits — 更新限额配置
   fastify.put('/api/exchange/limits', async (request, reply) => {
     const { per_offer_kas, total_exposure_kas, price_deviation_pct } = request.body || {};
