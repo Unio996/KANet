@@ -53,6 +53,7 @@ const CFG = loadConfig();
 
 const PROCESSED_FILE = path.join(__dirname, 'channel-bridge.processed.jsonl');
 const processedSet = new Set();
+const inflight = new Set(); // tx_hash currently being processed (prevents dedup race during long bridge waits)
 
 if (fs.existsSync(PROCESSED_FILE)) {
   const lines = fs.readFileSync(PROCESSED_FILE, 'utf8').split('\n').filter(l => l.trim());
@@ -162,6 +163,7 @@ async function fetchNewMessages(channel, afterTs) {
     const data = JSON.parse(body);
     return (data.messages || []).filter(m => {
       if (processedSet.has(m.tx_hash)) return false;
+      if (inflight.has(m.tx_hash)) return false; // NEW: prevent dedup race during bridge wait
       if (afterTs && m.created_at <= afterTs) return false;
       return true;
     });
@@ -173,32 +175,38 @@ async function fetchNewMessages(channel, afterTs) {
 // ── Process single message ──────────────────────────────────────────────
 
 async function processMessage(msg) {
-  const target = extractTarget(msg.content);
-  if (!target) return; // skip non-targeted messages
-
-  const queueName = CFG.queues[target];
-  if (!queueName) {
-    console.log(new Date().toLocaleString(undefined, { hour12: false }), '[ch-bridge]',
-      `WARN: no queue for target ${target}, skipping`);
-    return;
-  }
-
-  console.log(new Date().toLocaleString(undefined, { hour12: false }), '[ch-bridge]',
-    `routing [${msg.tx_hash?.slice(0, 8)}] to queue=${queueName} target=${target} channel=${msg.channel_name}`);
-
+  if (inflight.has(msg.tx_hash)) return; // safety net: already processing same tx
+  inflight.add(msg.tx_hash);
   try {
-    const reply = await bridgeRoute(msg, target, queueName);
-    if (reply) {
-      await sendReply(msg.channel_name, reply);
-      markProcessed(msg.tx_hash);
+    const target = extractTarget(msg.content);
+    if (!target) return; // skip non-targeted messages
+
+    const queueName = CFG.queues[target];
+    if (!queueName) {
+      console.log(new Date().toLocaleString(undefined, { hour12: false }), '[ch-bridge]',
+        `WARN: no queue for target ${target}, skipping`);
+      return;
     }
-  } catch (err) {
-    console.error(new Date().toLocaleString(undefined, { hour12: false }), '[ch-bridge]',
-      `ERROR processing [${msg.tx_hash?.slice(0, 8)}]:`, err.message);
-    if (err.message.includes('timeout')) {
-      await sendReply(msg.channel_name, '(timeout)');
-      markProcessed(msg.tx_hash);
+
+    console.log(new Date().toLocaleString(undefined, { hour12: false }), '[ch-bridge]',
+      `routing [${msg.tx_hash?.slice(0, 8)}] to queue=${queueName} target=${target} channel=${msg.channel_name}`);
+
+    try {
+      const reply = await bridgeRoute(msg, target, queueName);
+      if (reply) {
+        await sendReply(msg.channel_name, reply);
+        markProcessed(msg.tx_hash);
+      }
+    } catch (err) {
+      console.error(new Date().toLocaleString(undefined, { hour12: false }), '[ch-bridge]',
+        `ERROR processing [${msg.tx_hash?.slice(0, 8)}]:`, err.message);
+      if (err.message.includes('timeout')) {
+        await sendReply(msg.channel_name, '(timeout)');
+        markProcessed(msg.tx_hash);
+      }
     }
+  } finally {
+    inflight.delete(msg.tx_hash); // always release; failed ones can retry next poll
   }
 }
 

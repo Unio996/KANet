@@ -168,6 +168,54 @@ fi
 
 ok "Console 就绪  →  http://localhost:$CONSOLE_PORT  (PID $CONSOLE_PID)"
 
+# ── Bridge stack (cc-bridge + qwen-worker + channel-bridge) ────────────────
+# 幂等：已监听端口的不重启；llama-server 不在时跳过 worker（避免 401 风暴）
+BRIDGE_PORT=9100
+echo ""
+echo -e "${C_BOLD}[2/2] Bridge stack${C_RESET}  cc-bridge:$BRIDGE_PORT + qwen-worker + channel-bridge"
+
+# cc-bridge（OpenAI 协议 queue，NWT-Brain 等通过它路由）
+if netstat -an 2>/dev/null | grep -q ":${BRIDGE_PORT}.*LISTEN"; then
+  ok "cc-bridge 已在运行 (port $BRIDGE_PORT)"
+else
+  node "$KANET_ROOT/scripts/cc-bridge.mjs" $BRIDGE_PORT > "$LOG_DIR/cc-bridge.log" 2>&1 &
+  CC_BRIDGE_PID=$!
+  echo "$CC_BRIDGE_PID" > "$PID_DIR/cc-bridge.pid"
+  sleep 1
+  if curl -sf "http://127.0.0.1:$BRIDGE_PORT/health" > /dev/null 2>&1; then
+    ok "cc-bridge 就绪  (PID $CC_BRIDGE_PID)"
+  else
+    warn "cc-bridge 启动失败，日志: $LOG_DIR/cc-bridge.log"
+  fi
+fi
+
+# qwen-bridge-worker — drain default queue（NWT-Brain 等 adapter 走这条）
+# 需要 llama-server 在，否则 Qwen 请求全 fail
+if curl -sf "http://127.0.0.1:$LLAMA_PORT/health" > /dev/null 2>&1; then
+  if pgrep -f "qwen-bridge-worker.js" > /dev/null 2>&1; then
+    ok "qwen-worker 已在运行"
+  elif [ -f "$KANET_ROOT/scripts/qwen-bridge-worker.js" ]; then
+    node "$KANET_ROOT/scripts/qwen-bridge-worker.js" --queue=default > "$LOG_DIR/qwen-worker.log" 2>&1 &
+    QWEN_WORKER_PID=$!
+    echo "$QWEN_WORKER_PID" > "$PID_DIR/qwen-worker.pid"
+    ok "qwen-worker 就绪  (PID $QWEN_WORKER_PID, queue=default)"
+  else
+    info "qwen-bridge-worker.js 不存在，跳过（host-specific，非 llama host 无需）"
+  fi
+else
+  info "llama-server 不在，跳过 qwen-worker（Mind 会用 legacy 路径）"
+fi
+
+# channel-bridge — 订阅 7 频道，dispatch [→ TARGET] 消息到 Bridge queue
+if pgrep -f "channel-bridge.mjs" > /dev/null 2>&1; then
+  ok "channel-bridge 已在运行"
+elif [ -f "$KANET_ROOT/scripts/channel-bridge.mjs" ]; then
+  node "$KANET_ROOT/scripts/channel-bridge.mjs" > "$LOG_DIR/channel-bridge.log" 2>&1 &
+  CH_BRIDGE_PID=$!
+  echo "$CH_BRIDGE_PID" > "$PID_DIR/channel-bridge.pid"
+  ok "channel-bridge 就绪  (PID $CH_BRIDGE_PID, 7 channels)"
+fi
+
 # ── IB Gateway ──────────────────────────────────────────────────────────────
 # 不随 KANet 自动启动。需要时手动运行 IB Gateway。
 
