@@ -154,7 +154,7 @@ publish  →  accept  →  paid  →  delivered
 
 ---
 
-## 十大陷阱（每个必避）
+## 十二大陷阱（每个必避）
 
 1. **陷阱 #43 乐观写入** — 先 DB 再广播 = 幽灵数据。广播失败也推进 = 钱丢。
 2. **陷阱 #46 sendCommand vs sendCommandAsync** — 花钱操作必须 Async 等回执。
@@ -166,6 +166,26 @@ publish  →  accept  →  paid  →  delivered
 8. **ASCII-safe JSON** — Qwen / Deepseek 输出 JSON 可能带 surrogate pair emoji，用 `asciiSafeStringify` 前置（AGENTS.qwen.md Q-4）。
 9. **UTXO 连发冲突** — 两条广播连发（accept + paid）可能因前一条 UTXO 未确认失败。等 1-2s 或 Relay 队列串行。
 10. **Anti-spam fail-closed**（Rule 3）—— API 不可达 → 拒绝发送，不能放行。
+11. **Relay anti-duplicate 60s 窗口** — `relay.mjs:98-118` `_recentOutbound` 内存 cache, 同频道 60s 内相似度 ≥ 阈值的消息 → BLOCKED. **失败后不要立刻重发同内容** — 要么 **等 60s**, 要么**改内容**（至少 30% 不同）. `[relay:X] BROADCAST BLOCKED #ch: duplicate: 100% similar to message sent Ns ago` 就是这条.
+12. **开发频道是 `dev-coord` 不是 `kanet-dev`** — Claude/Opus/NWT/J2 开发协作一律在 `dev-coord`. `kanet-dev` 是 J2 第一次 online 的废弃频道. 发错频道没人看.
+13. **🔥 发中文/emoji 消息必须走文件, 不走 shell 参数** — Windows Bash tool = PowerShell, GBK codepage 把 UTF-8 中文破坏成 `?`, 链上 payload 一旦 ? 不可逆. **禁止** `curl -d '{"message":"中文"}'` / `--inline "中文"`. **必须**: 先 Write 消息到 UTF-8 文件, 再 `node /d/Anthropic/scripts/send-chat.mjs <relayId> <channel> <file>`. 案例: 4/20 Kasia_1 tx `e42cf7e2` 全 ? 永久污染.
+
+---
+
+## 第零条 bis: 不查数据就是瞎答（针对 opencode 新加）
+
+**回答任何"当前 X 是什么状态 / 为什么 Y 发生 / Z 数据什么样"类问题,必须先查实际数据再答.**
+
+- ❌ 反模式: 读代码归纳系统设计 → 编一份"科普答案"递给 Owner
+- ✅ 正确: 先 `bash /d/Anthropic/scripts/kanet-inspect.sh` 或 `PRAGMA table_info(x)` 或 `SELECT` 查到**当前 DB / chain 的实际数据**, 再答
+
+**历史教训 (2026-04-21)**: opencode 被问 "/agent 页 pending 单子是哪个市场" → 只读 publish/accept/seeder 代码 → 答"既有挂单审批也有接单审批" → 其实 DB 10 条全是 `exchange_expired` 系统自动过期, 不是挂单也不是接单. 代码能归纳功能, 数据才是真相.
+
+**强制检查清单** (任何 "当前/为什么" 类问题):
+1. `bash /d/Anthropic/scripts/kanet-inspect.sh` 看全貌
+2. `SELECT ... FROM <相关表> WHERE <条件> LIMIT 10` 看样本
+3. `node scripts/chain-query.mjs <addr>` 看链上事实
+4. 这三步之一都没跑 = **拒绝作答**, 让 Owner 知道你没数据就不能答
 
 ---
 
