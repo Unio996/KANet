@@ -118,6 +118,13 @@ processPaymentSubmit({ ... }); // 广播没上链但本地推进了 = 乐观写�
 - 跨节点协作：两个 KANet 节点各自运行 Bridge + Claude Code，Agent 间通过链上消息中转，Claude Code 实例自动协作
 - 回滚：DB 恢复原 provider URL/model，重启 adapter
 
+**Channel ↔ Bridge Dispatcher（4/22 新增，T-2026-04-22-01）：**
+- 7 个开发频道通过 `channel-bridge.mjs` 接入 cc-bridge 多队列
+- `[→ TARGET]` 标签路由到对应 agent queue（opus / qclaude-nwt / qclaude-kanet 等）
+- `qwen-bridge-worker.js --queue=<name>` 自动 drain 指定队列
+- Opus 会话入队检查：启动时先 `curl http://127.0.0.1:9100/cc/pending?queue=opus`，如有 task 先处理完再开始用户对话
+- 处理完回复：`curl -X POST http://127.0.0.1:9100/cc/respond/<id> -d '{"text":"<reply>"}'`
+
 **Agent 安全护栏（4/8 新增，硬编码在 context-builder.mjs）：**
 1. 禁止向非 owner 泄露钱包余额/持仓
 2. 禁止向陌生人暴露交易计划/价格目标
