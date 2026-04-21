@@ -828,11 +828,10 @@
               </label>
               <label class="flex items-center gap-2 col-span-2">
                 <span class="text-ink-400">Mode:</span>
-                <select x-model="autoTakerConfig.mode" class="border rounded px-2 py-0.5 text-xs bg-white">
-                  <option value="approval">Approval</option>
-                  <option value="auto">Auto</option>
+                <select x-model="autoTakerConfig.mode" :class="autoTakerConfig.mode === 'auto' ? 'bg-green-50 text-green-700 border-green-300' : 'bg-yellow-50 text-yellow-700 border-yellow-300'" class="border rounded px-2 py-0.5 text-xs">
+                  <option value="approval">Approval（生成建议，等你批准）</option>
+                  <option value="auto">Auto（限额内自动执行）</option>
                 </select>
-                <span class="ml-2 px-1.5 py-0.5 rounded text-[9px]" :class="autoTakerConfig.mode === 'auto' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'" x-text="autoTakerConfig.mode || 'approval'"></span>
               </label>
               <label class="flex flex-col gap-0.5">
                 <span class="text-ink-400">Min Discount %</span>
@@ -851,7 +850,14 @@
                 <input type="number" min="5" x-model.number="autoTakerConfig.cooldown_sec" class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-full" />
               </label>
             </div>
-            <button @click="saveAutoTakerConfig()" class="mt-2 px-3 py-1 bg-brand-500 text-white rounded text-xs w-full">Save AutoTaker Config</button>
+            <button @click="saveAutoTakerConfig()" :disabled="autoTakerSaveStatus === 'saving'"
+              :class="autoTakerSaveStatus === 'saved' ? 'bg-green-500' : autoTakerSaveStatus === 'error' ? 'bg-red-500' : 'bg-brand-500'"
+              class="mt-2 px-3 py-1 text-white rounded text-xs w-full transition-colors">
+              <span x-show="!autoTakerSaveStatus">Save AutoTaker Config</span>
+              <span x-show="autoTakerSaveStatus === 'saving'">保存中...</span>
+              <span x-show="autoTakerSaveStatus === 'saved'">✓ 已保存</span>
+              <span x-show="autoTakerSaveStatus === 'error'" x-text="'✗ ' + autoTakerSaveError"></span>
+            </button>
           </div>
           <!-- Stats -->
           <div class="grid grid-cols-3 gap-3">
@@ -915,6 +921,8 @@ function exchangeApp() {
     opsTab: 'arb',
     autoTakerProposals: [],
     autoTakerConfig: { enabled: false, mode: 'approval', min_discount: 0.5, max_amount: 50, daily_limit: 3, cooldown_sec: 30 },
+    autoTakerSaveStatus: '',  // '' | 'saving' | 'saved' | 'error'
+    autoTakerSaveError: '',
     autoTakerStats: { today_accepted: 0, today_profit: 0, success_rate: 0 },
     aaveStatus: { account: {}, walletBalance: {} },
     hyperStatus: { account: {}, positions: [], funding: [] },
@@ -1620,6 +1628,8 @@ function exchangeApp() {
     },
     async saveAutoTakerConfig() {
       const c = this.autoTakerConfig;
+      this.autoTakerSaveStatus = 'saving';
+      this.autoTakerSaveError = '';
       try {
         const r = await fetch('/api/exchange/autotaker-config', {
           method: 'PUT',
@@ -1634,9 +1644,18 @@ function exchangeApp() {
           }),
         });
         const d = await r.json();
-        if (!d.ok) alert('Save failed: ' + (d.error || 'unknown'));
+        if (d.ok) {
+          this.autoTakerSaveStatus = 'saved';
+          setTimeout(() => { this.autoTakerSaveStatus = ''; }, 2000);
+        } else {
+          this.autoTakerSaveStatus = 'error';
+          this.autoTakerSaveError = d.error || 'unknown';
+          setTimeout(() => { this.autoTakerSaveStatus = ''; }, 4000);
+        }
       } catch (e) {
-        alert('Network error: ' + e.message);
+        this.autoTakerSaveStatus = 'error';
+        this.autoTakerSaveError = e.message;
+        setTimeout(() => { this.autoTakerSaveStatus = ''; }, 4000);
       }
     },
     async approveAutoTake(id) {
