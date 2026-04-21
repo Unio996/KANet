@@ -67,6 +67,10 @@
             class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-7 <%= it._agentTab === 'card' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
             Card
           </a>
+          <a href="/approvals"
+            class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-7 <%= it._page === 'approvals' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+            Approvals
+          </a>
         </div>
       </div>
     </div>

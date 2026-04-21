@@ -38,6 +38,15 @@ export async function registerConversationRoutes(fastify) {
     return reply.view('agent', { title: '我的 Agent', t, lang, dir, langs });
   });
 
+  // Page: /approvals — standalone pending approvals page
+  fastify.get('/approvals', async (request, reply) => {
+    const lang = parseLang(request.headers.cookie);
+    const t = getT(lang);
+    const dir = isRtl(lang) ? 'rtl' : 'ltr';
+    const langs = LANG_NAMES;
+    return reply.view('approvals', { title: '审批', t, lang, dir, langs });
+  });
+
   // Agent profile API — returns all relay agents with card/stats
   // v28: reads from relation_states (unified protocol state layer)
   fastify.get('/api/agent/profile', async (request, reply) => {
