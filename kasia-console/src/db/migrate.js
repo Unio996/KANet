@@ -1966,5 +1966,30 @@ export function runMigrations() {
     }
   }
 
+
+  // v64: social_spend_log — 社交 KAS 开销预算记账
+  {
+    const hasTable = sqlite.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='social_spend_log'"
+    ).get();
+    if (!hasTable) {
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS social_spend_log (
+          id TEXT PRIMARY KEY,
+          agent_address TEXT NOT NULL,
+          category TEXT NOT NULL,
+          amount_kas REAL NOT NULL,
+          tx_hash TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_social_spend_agent_time
+          ON social_spend_log(agent_address, created_at);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_social_spend_tx
+          ON social_spend_log(tx_hash) WHERE tx_hash IS NOT NULL;
+      `);
+      console.log('[migrate] v64: social_spend_log table created (KAS budget tracking).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

@@ -8,6 +8,7 @@ import { nowIso } from '../lib/time.js';
 import { getReply } from '../services/mind-manager.js';
 import { onBroadcastWritten } from '../services/trade-protocol-filter.js';
 import { recordChainEvent } from '../services/chain-event.js';
+import { checkBudget, recordSpend } from '../services/social-budget.js';
 
 export async function registerChatRoutes(fastify) {
 
@@ -112,6 +113,19 @@ export async function registerChatRoutes(fastify) {
     const relay = getRelayNode(relayId);
     if (!relay) return reply.code(404).send({ error: 'Account not found' });
 
+    // 事前预算拦截 (fail-closed): 超限直接 403, 不发广播不花 KAS
+    const preCheck = await checkBudget(relayId, 0);
+    if (!preCheck.allowed) {
+      console.warn(`[chat] budget BLOCKED for ${relay.name}: ${preCheck.reason}`);
+      return reply.code(403).send({
+        error: 'social_budget_exceeded',
+        detail: preCheck.reason,
+        spent: preCheck.spent,
+        budget: preCheck.budget,
+        remaining: preCheck.remaining,
+      });
+    }
+
     try {
       const result = await sendCommandAsync(relayId, { type: 'send_broadcast', channel: channel.trim(), message: message.trim() });
       if (!result?.ok) throw new Error(result?.error || 'Broadcast failed');
@@ -127,6 +141,12 @@ export async function registerChatRoutes(fastify) {
         INSERT OR IGNORE INTO broadcast_messages (id, channel_name, sender_address, content, tx_hash, status, created_at)
         VALUES (?, ?, ?, ?, ?, 'confirmed', ?)
       `).run(id, channelName, senderAddress, content, result.txId, now);
+
+      // Record spend in social_spend_log
+      const feeKas = parseFloat(result.fee || 0);
+      if (result.txId && feeKas > 0) {
+        recordSpend({ relayId, txId: result.txId, fee: feeKas, channel: channel.trim(), content });
+      }
 
       // ── Trade protocol filter (new pipeline, does not replace Chat) ──
       try {
@@ -359,6 +379,13 @@ async function triggerAutoReply(responder, channelName, senderAddress, content, 
 
   console.log(`[chat] ${relay?.name || 'agent'} got reply (${aiReply.length} chars), broadcasting...`);
 
+  // 事前预算拦截 (auto-reply 路径): 超限静默跳过, 不打扰用户
+  const autoPreCheck = await checkBudget(responder.relay_id, 0);
+  if (!autoPreCheck.allowed) {
+    console.warn(`[chat] auto-reply BLOCKED for ${relay?.name || 'agent'}: ${autoPreCheck.reason}`);
+    return;
+  }
+
   // Record cooldown
   _autoReplyCooldown.set(cooldownKey, Date.now());
 
@@ -391,6 +418,12 @@ async function triggerAutoReply(responder, channelName, senderAddress, content, 
   if (!result) throw new Error('broadcast failed after max retries');
   console.log(`[chat] ${relay?.name || 'agent'} broadcast OK: tx=${result.txId.slice(0, 16)}`);
 
+  // 事后记账 (auto-reply 广播成功后)
+  const autoFeeKas = parseFloat(result.fee || 0);
+  if (result.txId && autoFeeKas > 0) {
+    recordSpend({ relayId: responder.relay_id, txId: result.txId, fee: autoFeeKas, channel: channelName, content: broadcastText });
+  }
+
   // Store locally (use the text that was actually broadcast)
   const id = randomUUID();
   sqlite.prepare(`
@@ -398,6 +431,11 @@ async function triggerAutoReply(responder, channelName, senderAddress, content, 
     VALUES (?, ?, ?, ?, ?, 'confirmed', ?)
   `).run(id, channelName, responder.address, broadcastText, result.txId, nowIso());
   if (attempts > 0) console.log(`[chat] Broadcast succeeded after ${attempts + 1} attempts (${broadcastText.length} chars)`);
+
+  // Record spend in social_spend_log
+  if (result.txId && autoFeeKas > 0) {
+    recordSpend({ relayId: responder.relay_id, txId: result.txId, fee: autoFeeKas, channel: channelName, content: broadcastText });
+  }
 
   // replies.sent_txid hack 已删除（2026-04-06）— chain_events 是真相源
 
