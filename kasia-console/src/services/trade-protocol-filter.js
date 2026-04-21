@@ -513,8 +513,9 @@ async function _evaluateAutoTake(offerId, msg) {
   const dailyLimit = parseInt(await getConfig('autotake_daily_limit') || '3');
   if (dailyCount >= dailyLimit) return;
 
-  // 9. Cooldown 30s (UTXO conflict prevention)
-  if (_lastAutoTakeAt && Date.now() - _lastAutoTakeAt < 30_000) return;
+  // 9. Cooldown (configurable, default 30s, UTXO conflict prevention)
+  const cooldownMs = (parseInt(await getConfig('autotake_cooldown_sec') || '30')) * 1000;
+  if (_lastAutoTakeAt && Date.now() - _lastAutoTakeAt < cooldownMs) return;
 
   // 10. Find best local agent (has BNB wallet with most USDT)
   let bestRelay = null;
