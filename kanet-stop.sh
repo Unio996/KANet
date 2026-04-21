@@ -78,7 +78,7 @@ fi
 # ── 阶段 4：清理残留 node 进程（relay、adapter、scout） ───────
 CHILD_PIDS=$(powershell -Command "
   Get-CimInstance Win32_Process |
-    Where-Object { \$_.Name -eq 'node.exe' -and (\$_.CommandLine -match 'relay' -or \$_.CommandLine -match 'index\.mjs' -or \$_.CommandLine -match 'scout') } |
+    Where-Object { \$_.Name -eq 'node.exe' -and (\$_.CommandLine -match 'relay' -or \$_.CommandLine -match 'index\.mjs' -or \$_.CommandLine -match 'scout' -or \$_.CommandLine -match 'cc-bridge' -or \$_.CommandLine -match 'qwen-bridge-worker' -or \$_.CommandLine -match 'channel-bridge') } |
     Select-Object -ExpandProperty ProcessId
 " 2>/dev/null | tr -d '\r')
 

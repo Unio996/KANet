@@ -1,4 +1,4 @@
-import { listAdapterNodes, createAdapterNode, updateAdapterNode, deleteAdapterNode, getAdapterToken, getAdapterProviderKey } from '../data/settings/adapter-nodes.js';
+import { listAdapterNodes, getAdapterNode, createAdapterNode, updateAdapterNode, deleteAdapterNode, getAdapterToken, getAdapterProviderKey } from '../data/settings/adapter-nodes.js';
 import { startAdapter, stopAdapter, restartAdapter, getAdapterStatus } from '../services/adapter-launcher.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 import { getConfig } from '../data/settings/configs.js';
@@ -17,7 +17,14 @@ async function pingAdapter(port) {
 // Deep API check cache: port → { apiOk, apiError, checkedAt }
 const _apiCheckCache = {};
 
+// 端口是可复用的：旧 adapter 删了，新建可能复用同一个 port，会继承旧 cache 的 404 状态
+// 因此 create/update/delete 任一改变"port 背后实体"的操作发生时，主动失效该 port 的缓存。
+function invalidateApiCheckCache(port) {
+  if (port != null) delete _apiCheckCache[port];
+}
+
 // Deep check: call AI API, cache result for 2 minutes
+// 超时放宽到 45s：推理模型（glm4.7 / qwen thinking 系列）首 token 前思考 10-30s 常见
 async function deepCheckAdapter(port) {
   const cached = _apiCheckCache[port];
   if (cached && Date.now() - cached.checkedAt < 120_000) return cached;
@@ -25,8 +32,9 @@ async function deepCheckAdapter(port) {
     const res = await fetch(`http://localhost:${port}/reply`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ peer: '_ping', message: 'hi' }),
-      signal: AbortSignal.timeout(10000),
+      // mindTask=true 走短路径，跳过 getContext/SYSTEM_PROMPT，给 reasoning 模型留空间
+      body: JSON.stringify({ peer: '_ping', message: 'hi', mindTask: true }),
+      signal: AbortSignal.timeout(45000),
     });
     const result = { apiOk: res.ok, apiError: null, checkedAt: Date.now() };
     if (!res.ok) result.apiError = (await res.text().catch(() => '')).slice(0, 100);
@@ -74,7 +82,7 @@ export async function registerAdapterRoutes(fastify) {
     const { name, gateway_ws_url, token, agent_id, ai_provider, ai_provider_url, ai_provider_key, ai_model } = request.body;
     if (!name?.trim()) return reply.redirect('/adapters');
     const agentId = agent_id?.trim() || 'main';
-    createAdapterNode({
+    const newId = createAdapterNode({
       name: name.trim(),
       gatewayWsUrl: gateway_ws_url?.trim(),
       token: token?.trim() || null,
@@ -85,6 +93,9 @@ export async function registerAdapterRoutes(fastify) {
       aiProviderKey: ai_provider_key?.trim() || null,
       aiModel: ai_model?.trim() || null,
     });
+    // 清掉此 port 上任何旧 adapter 残留的 deep-check cache（port 复用会继承 404）
+    const created = getAdapterNode(newId);
+    if (created) invalidateApiCheckCache(created.http_port);
     return reply.redirect('/adapters');
   });
 
@@ -137,12 +148,18 @@ export async function registerAdapterRoutes(fastify) {
     });
     // Sync updated model/url to agent_connections table
     syncConnectionFromAdapter(request.params.id);
+    // 改了 model / key / url 之后，旧 apiOk/apiError 立即失效
+    const updated = getAdapterNode(request.params.id);
+    if (updated) invalidateApiCheckCache(updated.http_port);
     return reply.redirect('/adapters');
   });
 
   fastify.post('/adapters/:id/delete', async (request, reply) => {
+    // 删除前先记录 port，用来清 deep-check cache，避免同 port 新 adapter 继承旧错误
+    const before = getAdapterNode(request.params.id);
     await stopAdapter(request.params.id);
     deleteAdapterNode(request.params.id);
+    if (before) invalidateApiCheckCache(before.http_port);
     return reply.redirect('/adapters');
   });
 

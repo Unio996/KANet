@@ -2015,5 +2015,29 @@ export function runMigrations() {
     }
   }
 
+  // v66: Opus relay — Owner-authorized independent identity for Opus AI sessions
+  // mnemonic 留空给 Owner 手动设置 (避免 script 生成私钥)
+  {
+    const existing = sqlite.prepare("SELECT id FROM relay_nodes WHERE name = 'Opus'").get();
+    if (!existing) {
+      const now = new Date().toISOString();
+      sqlite.prepare(`
+        INSERT INTO relay_nodes (id, name, address, mnemonic_encrypted, network, created_at, updated_at)
+        VALUES (?, 'Opus', NULL, NULL, 'mainnet', ?, ?)
+      `).run('0f0f0f0f-0000-0000-0000-0000000000ff', now, now);
+      console.log('[migrate] v66: Opus relay inserted (mnemonic null, Owner sets manually).');
+    }
+  }
+
+  // v67: relay_nodes.is_bot_autoreply column — tag Mind-auto-reply sources for future identity separation
+  {
+    const hasCol = sqlite.prepare("PRAGMA table_info(relay_nodes)").all()
+      .some(c => c.name === 'is_bot_autoreply');
+    if (!hasCol) {
+      sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN is_bot_autoreply INTEGER DEFAULT 0`);
+      console.log('[migrate] v67: relay_nodes.is_bot_autoreply column added.');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

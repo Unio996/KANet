@@ -76,3 +76,8 @@ qclaude.bat
 qclaude.sh
 # host-specific (跑在 llama host 那台, 非该机器不需要)
 scripts/qwen-bridge-worker.js
+
+# === channel-bridge runtime state ===
+scripts/channel-bridge.processed.jsonl
+scripts/channel-bridge.pid
+scripts/channel-bridge.lastts.json

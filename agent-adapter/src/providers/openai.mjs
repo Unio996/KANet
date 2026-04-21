@@ -177,7 +177,9 @@ export async function ask(message, idempotencyKey, options) {
     reply = _parseCodexSSE(sseText);
   } else {
     const data = await res.json();
-    reply = data.choices?.[0]?.message?.content || "";
+    const msg = data.choices?.[0]?.message;
+    // reasoning 模型（glm4.7, qwen-thinking）有时 content 为空, reasoning_content 里才是真输出
+    reply = msg?.content || msg?.reasoning_content || "";
   }
 
   if (!reply) throw new Error("AI returned empty response");

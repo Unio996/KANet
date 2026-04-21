@@ -1,0 +1,13 @@
+{
+  "consoleUrl": "http://127.0.0.1:3100",
+  "bridgeUrl":  "http://127.0.0.1:9100",
+  "relayId":    "5b236c08-03d0-456c-953d-e10001610938",
+  "senderTag":  "[NWT auto]",
+  "pollMs":     4000,
+  "queues": {
+    "QCLAUDE-NWT": "qclaude-nwt",
+    "NWT":         "qclaude-nwt",
+    "OPUS":        "opus"
+  },
+  "channels": ["dev-coord","kanet-dev","kanet-arch","kanet-frontend","kanet-backend","kanet-review","kanet-alert"]
+}

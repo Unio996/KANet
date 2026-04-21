@@ -1,0 +1,22 @@
+# KANet — 行尾统一 LF，避免跨 Windows/Unix 假 diff
+* text=auto eol=lf
+
+# 明确指定文本类型
+*.mjs   text eol=lf
+*.js    text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.sh    text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.eta   text eol=lf
+*.sql   text eol=lf
+
+# 二进制显式声明（防误改）
+*.png   binary
+*.jpg   binary
+*.gif   binary
+*.pdf   binary
+*.bundle binary
+*.tar.gz binary
+*.zip   binary
