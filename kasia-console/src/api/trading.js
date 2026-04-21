@@ -2771,12 +2771,15 @@ export async function registerTradingRoutes(fastify) {
     }
 
     // ── Approval mode: create pending execution ──
+    // NOTE: status 'pending' (not 'pending_approval') — 与 createExecution 统一.
+    // API 查询 + approve/reject endpoint 全部按 'pending' 检查, 之前写
+    // 'pending_approval' 产生 31 条孤岛 10-24 天无人处理 (opencode 发现).
     if (mode === 'approval') {
       const execId = randomUUID();
       const now = nowIso();
       sqlite.prepare(`
         INSERT INTO execution_states (id, agent_address, type, source, status, display_summary, action_details, created_at, updated_at)
-        VALUES (?, ?, ?, 'agent', 'pending_approval', ?, ?, ?, ?)
+        VALUES (?, ?, ?, 'agent', 'pending', ?, ?, ?, ?)
       `).run(execId, agent.address, action, `${action} ${kasAmount} KAS ${side || ''} → ${market || 'exchange'}`, JSON.stringify({ amount: kasAmount, side, market }), now, now);
       return reply.send({ pending: true, executionId: execId, summary: `${action} ${kasAmount} KAS ${side || ''} → ${market || 'exchange'}` });
     }
