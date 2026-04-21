@@ -294,6 +294,37 @@
           </div>
         </template>
 
+        <!-- AI 规则解析面板 -->
+        <div x-data="{ rulesOpen: false, rulesData: null, rulesLoading: false, rulesErr: '' }" class="mt-2">
+          <button @click="rulesOpen = !rulesOpen; if (rulesOpen && !rulesData) loadRulesCache(m.conditionId || m.slug, $data)"
+            class="text-[10px] text-ink-500 hover:text-brand-500">
+            <span x-show="!rulesOpen">📖 规则解析</span>
+            <span x-show="rulesOpen">▼ 规则解析</span>
+          </button>
+          <div x-show="rulesOpen" x-transition class="mt-2 p-3 bg-warm-50 rounded-lg text-[11px] space-y-2">
+            <div x-show="!rulesData && !rulesLoading">
+              <div class="text-ink-400 mb-2">未解析. AI 解析需 10-20s (Qwen 本地 LLM).</div>
+              <button @click="parseRulesNow(m.conditionId || m.slug, $data)"
+                class="px-3 py-1 bg-brand-500 text-white rounded text-[10px]">解析规则</button>
+            </div>
+            <div x-show="rulesLoading" class="text-ink-400">解析中...</div>
+            <div x-show="rulesErr" class="text-red-600" x-text="'✗ ' + rulesErr"></div>
+            <div x-show="rulesData">
+              <div class="mb-1"><strong>数据源:</strong> <span x-text="rulesData?.rules_digest?.data_source || '未知'"></span></div>
+              <div class="mb-1"><strong>时区:</strong> <span x-text="rulesData?.rules_digest?.timezone || '未指定'"></span></div>
+              <div x-show="rulesData?.risks?.length" class="mb-1 text-red-600">
+                <strong>⚠ 风险点:</strong>
+                <ul class="list-disc pl-4 mt-0.5">
+                  <template x-for="(r, ri) in (rulesData?.risks || [])"><li :key="ri" x-text="r"></li></template>
+                </ul>
+              </div>
+              <div class="mb-1"><strong>Yes 赢:</strong> <span x-text="rulesData?.decision_inputs?.yes_conditions || '-'"></span></div>
+              <div><strong>No 赢:</strong> <span x-text="rulesData?.decision_inputs?.no_conditions || '-'"></span></div>
+              <div class="text-[9px] text-ink-300 mt-2" x-text="'cached by ' + (rulesData?.parsed_by || 'qwen') + ', ' + (rulesData?.cached ? 'cache hit' : 'fresh')"></div>
+            </div>
+          </div>
+        </div>
+
         <!-- 分辨规则 -->
         <template x-if="m._showRule">
           <div class="mt-2 text-[11px] text-ink-500 bg-warm-50 rounded-lg p-3 leading-relaxed">
@@ -859,6 +890,31 @@ ${m.description ? '规则: ' + m.description.slice(0, 200) : ''}
       if (m.yes > 30) return '略偏向不发生，但有变数';
       if (m.yes > 10) return '市场认为不太可能发生';
       return '市场几乎确定不会发生（仅 ' + m.yes + '%）';
+    },
+
+    async loadRulesCache(conditionId, scope) {
+      if (!conditionId) return;
+      try {
+        const res = await fetch('/api/predictions/market/' + conditionId + '/rules');
+        if (res.ok) { scope.rulesData = await res.json(); }
+      } catch {}
+    },
+
+    async parseRulesNow(conditionId, scope) {
+      if (!conditionId) { scope.rulesErr = '无 conditionId'; return; }
+      scope.rulesLoading = true;
+      scope.rulesErr = '';
+      try {
+        const res = await fetch('/api/predictions/market/' + conditionId + '/parse-rules', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ backend: 'qwen' }),
+        });
+        const data = await res.json();
+        if (data.ok) { scope.rulesData = data; }
+        else { scope.rulesErr = data.error || '解析失败'; }
+      } catch (e) { scope.rulesErr = e.message; }
+      finally { scope.rulesLoading = false; }
     },
   };
 }

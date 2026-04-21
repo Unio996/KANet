@@ -1991,5 +1991,29 @@ export function runMigrations() {
     }
   }
 
+  // v65: polymarket_rules — AI 解析 Polymarket 市场规则 cache (Phase 1)
+  {
+    const hasTable = sqlite.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='polymarket_rules'"
+    ).get();
+    if (!hasTable) {
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS polymarket_rules (
+          condition_id TEXT PRIMARY KEY,
+          question TEXT NOT NULL,
+          rules_digest TEXT,
+          risks TEXT,
+          decision_inputs TEXT,
+          source_hash TEXT,
+          parsed_by TEXT,
+          parsed_at TEXT NOT NULL,
+          expires_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_polymarket_rules_expires ON polymarket_rules(expires_at);
+      `);
+      console.log('[migrate] v65: polymarket_rules table created.');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

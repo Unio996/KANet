@@ -668,4 +668,20 @@ export async function registerStockRoutes(fastify) {
       return reply.send({ text: '综述生成超时', agent: relay.name, cached: false, error: e.message });
     }
   });
+
+  // AI 规则解析 — on-demand, cache 7d
+  fastify.post('/api/predictions/market/:conditionId/parse-rules', async (request, reply) => {
+    const { parseRules } = await import('../services/market-rules-parser.js');
+    const body = request.body || {};
+    const r = await parseRules(request.params.conditionId, body);
+    return reply.send(r);
+  });
+
+  // 读 cache rules (无 LLM 调用)
+  fastify.get('/api/predictions/market/:conditionId/rules', async (request, reply) => {
+    const { getCached } = await import('../services/market-rules-parser.js');
+    const row = getCached(request.params.conditionId);
+    if (!row) return reply.code(404).send({ cached: false });
+    return reply.send({ cached: true, ...row });
+  });
 }
