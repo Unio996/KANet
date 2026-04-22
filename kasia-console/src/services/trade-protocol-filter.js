@@ -813,6 +813,24 @@ async function _fetchHedgePrice(exchange, side) {
  * If preferredCex specified, try that first; otherwise use default account.
  */
 async function _executeHedge(offerId, agentName, side, qty, preferredCex = null) {
+  // T-22-05 Step G — Opt-in hedge gate（安全门控）
+  // 默认不对冲。只有 offer.meta.hedge_enabled === true 才触发对冲。
+  // 防止 retail-proxy / bounty / auction 等 non-hedgeable offer 类型误触发 CEX 反向下单。
+  // 3 个调用点（api/exchange.js / exchange-machine.js x2）全部自动受保护。
+  const _hedgeGateOffer = sqlite.prepare(
+    "SELECT meta FROM exchange_offers WHERE id = ? LIMIT 1"
+  ).get(offerId);
+  if (!_hedgeGateOffer) {
+    console.log(`[exchange-hedge] offer ${offerId.slice(0, 8)} not found — skip`);
+    return;
+  }
+  let _hedgeGateMeta = {};
+  try { _hedgeGateMeta = JSON.parse(_hedgeGateOffer.meta || '{}'); } catch {}
+  if (_hedgeGateMeta.hedge_enabled !== true) {
+    console.log(`[exchange-hedge] offer ${offerId.slice(0, 8)} hedge_enabled!=true → skip (default opt-in safety)`);
+    return;
+  }
+
   // Idempotency guard — prevent double-hedge if both API and chain paths fire
   const _existingHedge = sqlite.prepare(
     "SELECT id FROM chain_events WHERE txid = ? AND event_type LIKE 'hedge%' LIMIT 1"
