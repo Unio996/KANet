@@ -78,8 +78,7 @@ export function clearHistory(addr) { _conversations.delete(addr); }
 
 // ── 短 System Prompt ───────────────────────────────────────────────────────
 
-const SYSTEM_PROMPT = `/no_think
-你是 KANet Broker. 真专业, 会给建议.
+const SYSTEM_PROMPT = `你是 KANet Broker. 真专业, 会给建议.
 目标: 帮用户完成一笔 KAS↔USDT 零售交易 (零托管 — USDT 直付 Maker, KAS 直到用户 Kasia).
 
 ## 1. 摸清用户需求
@@ -122,9 +121,11 @@ const SYSTEM_PROMPT = `/no_think
 
 // ── Qwen ──────────────────────────────────────────────────────────────────
 
-async function callQwen(messages) {
+export async function callQwen(messages) {
+  // kill switch: chat_template_kwargs 真正关 Qwen3.6 reasoning (/no_think 无效)
   const body = JSON.stringify({
     model: QWEN_MODEL, messages, max_tokens: 2000, temperature: 0.3,
+    chat_template_kwargs: { enable_thinking: false },
   });
   const t0 = Date.now();
   const res = await fetch(`${QWEN_URL}/v1/chat/completions`, {
@@ -147,7 +148,7 @@ async function callQwen(messages) {
   return content;
 }
 
-function extractJson(text) {
+export function extractJson(text) {
   if (!text) return null;
   try { return JSON.parse(text); } catch {}
   const m = text.match(/\{[\s\S]*\}/);
@@ -214,7 +215,7 @@ export function validateOrder(order) {
  */
 export async function interpret(userAddr, userMessage, brokerAddress = null) {
   const history = getHistory(userAddr);
-  // 每轮拉最新市场快照 + 用户画像, 让 LLM 能基于真实数据给建议 + 老客户免重问
+  // 每轮拉最新市场快照 + 用户画像 + 蒸馏记忆, 让 LLM 能基于真实数据给建议 + 老客户免重问
   const snap = await getMarketSnapshot();
   let profileText = '';
   try {
@@ -226,7 +227,33 @@ export async function interpret(userAddr, userMessage, brokerAddress = null) {
     profileText = '[用户画像] 查询失败, 当新客户处理';
   }
 
-  const systemFull = [SYSTEM_PROMPT, profileText, formatSnapshot(snap)].join('\n\n');
+  // 拉蒸馏记忆
+  let memoryText = '';
+  let memoryTriggered = false;
+  try {
+    const { getMemory, distillIfNeeded } = await import('./retail-dex-memory.js');
+    const mem = await getMemory(userAddr);
+    if (mem?.distilled_summary) {
+      const lines = ['[蒸馏记忆]'];
+      lines.push(`- 摘要: ${mem.distilled_summary}`);
+      if (mem.preferred_chain) lines.push(`- 偏好链: ${mem.preferred_chain}`);
+      if (mem.preferred_pay_address) lines.push(`- 偏好地址: ${mem.preferred_pay_address}`);
+      if (mem.tone_preference) lines.push(`- 对话风格: ${mem.tone_preference}`);
+      if (mem.notable_preferences) lines.push(`- 其他偏好: ${typeof mem.notable_preferences === 'string' ? mem.notable_preferences : JSON.stringify(mem.notable_preferences)}`);
+      memoryText = lines.join('\n');
+    }
+    // 蒸馏前置检查 (异步, 不阻塞本轮对话)
+    distillIfNeeded(userAddr, brokerAddress).then(res => {
+      if (res.triggered) {
+        memoryTriggered = true;
+        console.log(`[retail-dex-dialog] memory distill triggered for ${userAddr.slice(0, 10)}...`);
+      }
+    }).catch(() => {});
+  } catch (err) {
+    console.warn(`[retail-dex-dialog] memory lookup err: ${err.message}`);
+  }
+
+  const systemFull = [SYSTEM_PROMPT, profileText, memoryText, formatSnapshot(snap)].filter(Boolean).join('\n\n');
 
   const messages = [
     { role: 'system', content: systemFull },
