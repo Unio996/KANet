@@ -16,11 +16,13 @@ const PAYMENT_POLL_INTERVAL_MS = 20_000;
 const ORDER_TIMEOUT_MS = 30 * 60 * 1000;
 
 // Intent regex patterns
+// 2026-04-23 修: 允许中文量词 (个/枚/只) 和中文后缀 "个 KAS" — 自然中文说法
+// 原: "买50个kas" 不匹配, 只能说 "买50 KAS"
 const INTENT_REGEX = {
-  buy_limit:   [/^(?:买|buy)\s*(\d+(?:\.\d+)?)\s*KAS\s*@\s*(\d+(?:\.\d+)?)\s*USDT?/i],
-  sell_limit:  [/^(?:卖|sell)\s*(\d+(?:\.\d+)?)\s*KAS\s*@\s*(\d+(?:\.\d+)?)\s*USDT?/i],
-  buy_market:  [/^(?:买|buy)\s*(\d+(?:\.\d+)?)\s*KAS\s*$/i],
-  sell_market: [/^(?:卖|sell)\s*(\d+(?:\.\d+)?)\s*KAS\s*$/i],
+  buy_limit:   [/^(?:买|buy)\s*(\d+(?:\.\d+)?)\s*[个枚只]?\s*KAS\s*@\s*(\d+(?:\.\d+)?)\s*USDT?/i],
+  sell_limit:  [/^(?:卖|sell)\s*(\d+(?:\.\d+)?)\s*[个枚只]?\s*KAS\s*@\s*(\d+(?:\.\d+)?)\s*USDT?/i],
+  buy_market:  [/^(?:买|buy)\s*(\d+(?:\.\d+)?)\s*[个枚只]?\s*KAS\s*$/i],
+  sell_market: [/^(?:卖|sell)\s*(\d+(?:\.\d+)?)\s*[个枚只]?\s*KAS\s*$/i],
 };
 const CONFIRM_WORDS = ['YES', 'yes', 'Y', 'y', '确认', '好', '行'];
 const CANCEL_WORDS = ['NO', 'no', 'N', 'n', '取消', '不要', '算了'];
