@@ -570,11 +570,65 @@ async function processExecutingOrder(order) {
   }
 }
 
+/**
+ * TASK 5 Hardening: 超时扫描
+ * 未推进且 expires_at 已过的订单 → expired (或 awaiting_payment 推 refunding + cancel_v1)
+ */
+async function processTimeouts(brokerRelayId) {
+  try {
+    const nowIso = new Date().toISOString();
+    const stale = sqlite.prepare(`
+      SELECT * FROM retail_dex_orders
+      WHERE state IN ('aligning', 'confirming', 'awaiting_payment')
+        AND expires_at IS NOT NULL
+        AND julianday(expires_at) < julianday('now')
+      ORDER BY expires_at ASC
+      LIMIT 20
+    `).all();
+    for (const o of stale) {
+      if (o.state === 'awaiting_payment' && o.exchange_offer_id && brokerRelayId) {
+        // accept 已上链 + offer 锁住. 广播 cancel_v1 释放 (让 offer 回 open 或进 expired)
+        try {
+          const cancelPayload = {
+            t: 'kanet_exchange_cancel_v1',
+            offer_id: o.exchange_offer_id,
+            reason: 'taker_timeout_no_payment',
+          };
+          const send = await _getSendCommandAsync();
+          const res = await send(brokerRelayId, {
+            type: 'send_broadcast',
+            channel: 'kanet-exchange',
+            message: JSON.stringify(cancelPayload),
+          });
+          if (res?.txId) {
+            console.log(`[retail-dex] order ${o.id.slice(0,8)} awaiting_payment 超时, cancel_v1 上链 tx=${res.txId.slice(0,16)}`);
+          } else {
+            console.warn(`[retail-dex] order ${o.id.slice(0,8)} cancel_v1 广播无 txId, 仍推 expired`);
+          }
+        } catch (err) {
+          console.error(`[retail-dex] order ${o.id.slice(0,8)} cancel_v1 err: ${err.message}`);
+        }
+      }
+      try {
+        updateState(o.id, 'expired', { error_reason: `timeout from ${o.state}` });
+      } catch (err) {
+        // 状态机非法转移 (不太可能发生, 但保护)
+        console.warn(`[retail-dex] order ${o.id.slice(0,8)} timeout transition fail: ${err.message}`);
+      }
+    }
+  } catch (err) {
+    console.error(`[retail-dex] processTimeouts err: ${err.message}`);
+  }
+}
+
 async function orderMonitorTick() {
   try {
     // 单 broker 查一次 (MVP)
     const broker = sqlite.prepare("SELECT id FROM relay_nodes WHERE is_dex_broker = 1 LIMIT 1").get();
     const brokerRelayId = broker?.id;
+
+    // Phase 1: 超时扫描 (aligning/confirming/awaiting_payment → expired)
+    await processTimeouts(brokerRelayId);
 
     // Phase 2: paid → executing (广播 paid_v1)
     const paidOrders = sqlite.prepare(`SELECT * FROM retail_dex_orders WHERE state = 'paid' ORDER BY updated_at ASC LIMIT 5`).all();
