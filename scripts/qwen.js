@@ -73,7 +73,7 @@ async function main() {
       const rules = fs.readFileSync(rulesPath, 'utf8');
       system = `You are a KANet senior developer. Follow these rules strictly:\n\n${rules}\n\nOutput clean code. No thinking tags. Be concise.`;
     } else {
-      system = 'You are a senior JavaScript/Node.js developer. Write clean, production-ready code. Be concise. /no_think';
+      system = 'You are a senior JavaScript/Node.js developer. Write clean, production-ready code. Be concise.';
     }
   }
 
@@ -81,11 +81,15 @@ async function main() {
   if (system) messages.push({ role: 'system', content: system });
   messages.push({ role: 'user', content: prompt });
 
+  // Qwen3.6 thinking mode kill switch — /no_think 前缀实测无效，
+  // 唯一有效 kill switch 是 API body 的 chat_template_kwargs.enable_thinking=false
+  // (规则#11，实测 8s → 1s)。DEVELOPER-GUIDE Rule 11.
   const body = JSON.stringify({
     model: 'Qwen3.6-35B-A3B',
     messages,
     max_tokens: maxTokens,
-    temperature
+    temperature,
+    chat_template_kwargs: { enable_thinking: false }
   });
 
   const startMs = Date.now();
