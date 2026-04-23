@@ -74,8 +74,9 @@ qwen.tar
 scripts/code-index.db
 qclaude.bat
 qclaude.sh
-# host-specific (跑在 llama host 那台, 非该机器不需要)
-scripts/qwen-bridge-worker.js
+# scripts/qwen-bridge-worker.js — 2026-04-23 取消 gitignore
+# Rule 11 (QWEN-RULES.md) kill switch 修复需随仓库走, J1 opencode 拉到
+# 非 llama host 机器不用启动它, 但文件可存
 
 # === channel-bridge runtime state ===
 scripts/channel-bridge.processed.jsonl
