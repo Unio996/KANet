@@ -120,10 +120,22 @@ export async function refundWorkerTick() {
 
       sqlite.prepare("UPDATE retail_dex_buy_publications SET state = 'refunded', usdt_refund_tx = ?, updated_at = ? WHERE id = ?").run(txHash, now, pub.id);
       console.log(`[seeder] refund completed for pub ${pub.id.slice(0,8)}`);
+      // T7 push DM
+      try {
+        const refreshedPub = sqlite.prepare("SELECT * FROM retail_dex_buy_publications WHERE id = ?").get(pub.id);
+        const { pushPubTransition } = await import('./retail-dex-pusher.js');
+        pushPubTransition({ pub: refreshedPub, newState: 'refunded', brokerRelayId: pub.broker_relay_id }).catch(e => console.warn(`[seeder] push refunded: ${e.message}`));
+      } catch {}
     } catch (err) {
       const now = new Date().toISOString();
       sqlite.prepare("UPDATE retail_dex_buy_publications SET state = 'failed', error_reason = ? WHERE id = ?").run(err.message, pub.id);
       console.error(`[seeder] refund failed for pub ${pub.id.slice(0,8)}: ${err.message}`);
+      // T7 push DM
+      try {
+        const refreshedPub = sqlite.prepare("SELECT * FROM retail_dex_buy_publications WHERE id = ?").get(pub.id);
+        const { pushPubTransition } = await import('./retail-dex-pusher.js');
+        pushPubTransition({ pub: refreshedPub, newState: 'failed', brokerRelayId: pub.broker_relay_id }).catch(e => console.warn(`[seeder] push failed: ${e.message}`));
+      } catch {}
     }
   }
 }
@@ -147,6 +159,12 @@ export async function depositWatcherTick() {
       // Step 2: mark deposited
       sqlite.prepare("UPDATE retail_dex_buy_publications SET state = 'deposited', updated_at = datetime('now') WHERE id = ?").run(row.id);
       console.log(`[seeder] pub ${row.id.slice(0,8)} → deposited (bal=${r.balance.toFixed(4)} >= ${row.total_usdt})`);
+      // T7 push DM
+      try {
+        const refreshedPub = sqlite.prepare("SELECT * FROM retail_dex_buy_publications WHERE id = ?").get(row.id);
+        const { pushPubTransition } = await import('./retail-dex-pusher.js');
+        pushPubTransition({ pub: refreshedPub, newState: 'deposited', brokerRelayId: row.broker_relay_id }).catch(e => console.warn(`[seeder] push deposited: ${e.message}`));
+      } catch {}
       // Step 3: publish buy offer next tick (handled by main seeder tick)
     }
   }
@@ -172,6 +190,12 @@ export async function depositWatcherTick() {
           "UPDATE retail_dex_buy_publications SET state = 'published', seeder_publish_offer_id = ?, published_at = datetime('now') WHERE id = ?"
         ).run(result?.id || null, row.id);
         console.log(`[seeder] pub ${row.id.slice(0,8)} → published offer=${(result?.id || '').slice(0,8)}`);
+        // T7 push DM
+        try {
+          const refreshedPub = sqlite.prepare("SELECT * FROM retail_dex_buy_publications WHERE id = ?").get(row.id);
+          const { pushPubTransition } = await import('./retail-dex-pusher.js');
+          pushPubTransition({ pub: refreshedPub, newState: 'published', brokerRelayId: row.broker_relay_id }).catch(e => console.warn(`[seeder] push published: ${e.message}`));
+        } catch {}
       } else {
         console.warn(`[seeder] publish buy failed for pub ${row.id.slice(0,8)}: ${result.error || 'unknown'}`);
       }

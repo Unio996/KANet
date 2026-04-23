@@ -172,6 +172,12 @@ export async function _makerAutoPayGive(offer) {
   const result = await transferUsdt(pub.pay_chain, wallet.privkey_encrypted, takerAddr, amount);
   if (!result.ok) {
     sqlite.prepare("UPDATE retail_dex_buy_publications SET state = 'failed', error_reason = ? WHERE id = ?").run(`maker_auto_pay_failed: ${result.error}`, pub.id);
+    // T7 push DM
+    try {
+      const refreshedPub = sqlite.prepare("SELECT * FROM retail_dex_buy_publications WHERE id = ?").get(pub.id);
+      const { pushPubTransition } = await import('./retail-dex-pusher.js');
+      pushPubTransition({ pub: refreshedPub, newState: 'failed', brokerRelayId: pub.broker_relay_id }).catch(e => console.warn(`[em] push failed: ${e.message}`));
+    } catch {}
     throw new Error(`maker_auto_pay_failed: ${result.error}`);
   }
 
@@ -180,6 +186,12 @@ export async function _makerAutoPayGive(offer) {
   // Success: mark pub completed
   const now = new Date().toISOString();
   sqlite.prepare("UPDATE retail_dex_buy_publications SET state = 'completed', filled_at = ?, kas_delivery_tx = ?, updated_at = ? WHERE id = ?").run(result.txHash, result.txHash, now, pub.id);
+  // T7 push DM
+  try {
+    const refreshedPub = sqlite.prepare("SELECT * FROM retail_dex_buy_publications WHERE id = ?").get(pub.id);
+    const { pushPubTransition } = await import('./retail-dex-pusher.js');
+    pushPubTransition({ pub: refreshedPub, newState: 'completed', brokerRelayId: pub.broker_relay_id }).catch(e => console.warn(`[em] push completed: ${e.message}`));
+  } catch {}
 }
 
 // ── Test Injection ───────────────────────────────────────────

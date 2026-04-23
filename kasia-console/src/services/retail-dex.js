@@ -1013,6 +1013,14 @@ async function _triggerBuyPublication({ orderId, userAddr, qty, price, brokerRel
     qty, price, expected_usdt, payChain, expiresAt, now, now
   );
   console.log(`[retail-dex] _triggerBuyPublication ${orderId.slice(0,8)} → awaiting_deposit expected_usdt=${expected_usdt} chain=${payChain} seeder=${seeder_bsc_addr.slice(0,10)}`);
+
+  // T7 push DM — awaiting_deposit
+  try {
+    const pubRow = sqlite.prepare("SELECT * FROM retail_dex_buy_publications WHERE id = ?").get(pubId);
+    const { pushPubTransition } = await import('./retail-dex-pusher.js');
+    pushPubTransition({ pub: pubRow, newState: 'awaiting_deposit', brokerRelayId }).catch(e => console.warn(`[retail-dex] push awaiting_deposit: ${e.message}`));
+  } catch {}
+
   return { pubId, seederAddr: seeder_bsc_addr, expectedUsdt: expected_usdt };
 }
 
