@@ -473,8 +473,9 @@ export async function createMind(agentName, relayNodeId, callbacks = {}) {
           actionLog.push({ round: round + 1, blocked: true, ...actionResults[actionResults.length - 1] });
           continue;
         }
+        let result;
         console.log(`[mind] ${config.name} executing: ${action.type} ${JSON.stringify(action.params).slice(0, 80)}`);
-        const result = await executeTradeAction(action, config);
+        result = await executeTradeAction(action, config);
         actionResults.push({ action: action.type, params: action.params, result });
         actionLog.push({ round: round + 1, ...actionResults[actionResults.length - 1] });
       }
