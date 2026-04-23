@@ -478,128 +478,73 @@ function buildOrderConfirmText(order, preCheckResult) {
 let orderMonitorInterval = null;
 
 /**
- * T8 Phase 2: paid → executing
- * 订单 state=paid: 验证付款 → 选 offer → accept → 转 executing
+ * TASK 2.3 Phase 2 (非托管): paid → executing
+ * state=paid: 只做一件事 — 广播 kanet_exchange_paid_v1(payment_tx=user's tx)
+ * 验证 + Maker 交付 + offer 推进 completed 全部交给 exchange-machine.handleExchangePaid
+ *
+ * NO 验证 (exchange-machine 做)
+ * NO accept 调用 (handleDm confirming YES 时已广播)
+ * NO auto-pay (非托管 Broker 不碰 USDT)
  */
 async function processPaidOrder(order) {
   try {
-    const { verifyCrossChainTx } = await import('./cross-chain-verify.mjs');
-
-    // Step 1: 验证用户付款 (USDT on BSC)
+    if (!order.pay_tx_hash || !order.exchange_offer_id || !order._brokerRelayId) {
+      console.warn(`[retail-dex] paid ${order.id.slice(0,8)}: 字段缺失 (tx_hash/offer_id/broker), skip`);
+      return;
+    }
     const chain = normalizeChain(order.pay_chain);
-    if (!order.pay_tx_hash || !order.pay_address || !order.agent_pay_addr || !order.quoted_usdt) {
-      console.warn(`[retail-dex] paid ${order.id.slice(0,8)}: 字段缺失, skip`);
-      return;
-    }
-    const vr = await verifyCrossChainTx({
-      txHash: order.pay_tx_hash,
-      chain,
-      expectedAmount: order.quoted_usdt,
-      expectedTo: order.agent_pay_addr,
-      expectedFrom: order.pay_address,
-      paymentAsset: 'usdt',
+    const payload = {
+      t: 'kanet_exchange_paid_v1',
+      offer_id: order.exchange_offer_id,
+      payment_tx: order.pay_tx_hash,
+      payment_chain: chain,
+    };
+    const send = await _getSendCommandAsync();
+    const res = await send(order._brokerRelayId, {
+      type: 'send_broadcast',
+      channel: 'kanet-exchange',
+      message: JSON.stringify(payload),
     });
-    if (!vr?.confirmed) {
-      console.warn(`[retail-dex] paid ${order.id.slice(0,8)} verify FAIL: ${vr?.status || 'no result'}`);
-      // 3 次验不过推 refunding
+    if (!res?.txId) {
+      console.warn(`[retail-dex] paid ${order.id.slice(0,8)} paid_v1 broadcast no txId, 保留 paid 下 tick 重试`);
       return;
     }
-    console.log(`[retail-dex] paid ${order.id.slice(0,8)} verified: ${vr.actualAmount} USDT to ${vr.recipient.slice(-10)}`);
-
-    // Step 2: 选最优 sell_kas offer — 精确匹配 qty（T10 partial fill）
-    const isBuy = order.side === 'buy_kas';
-    const exactQty = String(order.qty);
-    // 先找精确匹配（give_amount 与 order.qty 一致）
-    let bestOffer = sqlite.prepare(
-      `SELECT * FROM exchange_offers WHERE protocol_status='open' AND give_asset='KAS' AND want_asset='USDT' AND give_amount = ? AND (expires_at IS NULL OR expires_at > datetime('now')) ORDER BY CAST(want_amount AS REAL)/CAST(give_amount AS REAL) ASC LIMIT 1`
-    ).get(exactQty);
-    // 无精确匹配 → 找 >= qty 的最优 offer（允许部分成交）
-    if (!bestOffer) {
-      bestOffer = sqlite.prepare(
-        `SELECT * FROM exchange_offers WHERE protocol_status='open' AND give_asset='KAS' AND want_asset='USDT' AND CAST(give_amount AS REAL) >= CAST(? AS REAL) AND (expires_at IS NULL OR expires_at > datetime('now')) ORDER BY CAST(want_amount AS REAL)/CAST(give_amount AS REAL) ASC LIMIT 1`
-      ).get(exactQty);
-    }
-    if (!bestOffer) {
-      console.warn(`[retail-dex] paid ${order.id.slice(0,8)}: 市场无现货, 推 refunding`);
-      updateState(order.id, 'refunding', { refund_reason: 'no_matching_offer' });
-      return;
-    }
-
-    // Step 3: POST /api/exchange/accept
-    const consoleUrl = `http://127.0.0.1:${process.env.PORT || 3100}`;
-    const acceptRes = await fetch(`${consoleUrl}/api/exchange/accept`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        relayNodeId: order._brokerRelayId,  // 需要在 paid order 里带 brokerRelayId, 或 fallback 查 is_dex_broker=1
-        offer_id: bestOffer.id,
-        selected_chain: chain,
-        payment_asset: 'usdt',
-      }),
-      signal: AbortSignal.timeout(15000),
-    });
-    const acceptJson = await acceptRes.json().catch(() => ({}));
-    if (!acceptRes.ok) {
-      console.error(`[retail-dex] paid ${order.id.slice(0,8)} accept FAIL: ${acceptJson.error || acceptRes.status}`);
-      return;
-    }
-    updateState(order.id, 'executing', { exchange_offer_id: bestOffer.id });
-    console.log(`[retail-dex] paid ${order.id.slice(0,8)} → executing (offer=${bestOffer.id.slice(0,8)})`);
+    console.log(`[retail-dex] paid ${order.id.slice(0,8)} paid_v1 上链 tx=${res.txId.slice(0,16)} → executing`);
+    updateState(order.id, 'executing');
   } catch (err) {
     console.error(`[retail-dex] processPaidOrder ${order.id.slice(0,8)} error: ${err.message}`);
   }
 }
 
 /**
- * T11: refunding → refunded
- * 订单 state=refunding: 退还 USDT 给用户, 3 次重试, 超时推 failed
+ * TASK 2.3 非托管: refunding → failed (Broker 不持有 USDT, 无法主动退款)
+ *
+ * 非托管路径下, 用户直接把 USDT 付给 Maker, Broker 全程不碰钱.
+ * 如果订单进 refunding (offer cancelled/disputed), Broker 没有能力退款.
+ * 只能标 failed, reason='non_custodial_maker_refund_required'
+ * 用户需走 dispute 协议或找 Maker 直接交涉.
+ *
+ * 原托管版的 evm-transfer.transferUsdt 退款路径已移除.
  */
 async function processRefundingOrder(order) {
   try {
-    if (!order.pay_chain || !order.pay_address || !order.quoted_usdt || !order._brokerRelayId) {
-      console.warn(`[retail-dex] refund ${order.id.slice(0,8)}: 字段缺失, 推 failed`);
-      updateState(order.id, 'failed', { fail_reason: 'refund_fields_missing' });
-      return;
-    }
-    // 获取 broker 的私钥
-    const wallet = sqlite.prepare(
-      "SELECT privkey_encrypted FROM agent_wallets WHERE relay_node_id = ? AND chain = ? ORDER BY is_default DESC LIMIT 1"
-    ).get(order._brokerRelayId, normalizeChain(order.pay_chain));
-    if (!wallet?.privkey_encrypted) {
-      console.warn(`[retail-dex] refund ${order.id.slice(0,8)}: broker 无 ${order.pay_chain} 私钥`);
-      updateState(order.id, 'failed', { fail_reason: 'no_broker_privkey' });
-      return;
-    }
-    const privateKey = decrypt(wallet.privkey_encrypted);
-    const chain = normalizeChain(order.pay_chain);
-    const MAX_RETRIES = 3;
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      console.log(`[retail-dex] refund ${order.id.slice(0,8)} attempt ${attempt}/${MAX_RETRIES}`);
-      try {
-        const result = await transferUsdt(chain, privateKey, order.pay_address, order.quoted_usdt);
-        if (result.ok) {
-          updateState(order.id, 'refunded', { refund_tx_hash: result.txHash });
-          console.log(`[retail-dex] refund ${order.id.slice(0,8)} → refunded: ${result.txHash.slice(0, 16)}`);
-          return;
-        }
-        console.warn(`[retail-dex] refund ${order.id.slice(0,8)} attempt ${attempt} failed: ${result.error}`);
-      } catch (err) {
-        console.warn(`[retail-dex] refund ${order.id.slice(0,8)} attempt ${attempt} error: ${err.message}`);
-      }
-      if (attempt < MAX_RETRIES) await new Promise(r => setTimeout(r, 10_000));
-    }
-    // 超时推 failed
-    updateState(order.id, 'failed', { fail_reason: 'refund_timeout', refund_attempts: MAX_RETRIES });
-    console.error(`[retail-dex] refund ${order.id.slice(0,8)}: ${MAX_RETRIES} attempts exhausted → failed`);
+    console.warn(`[retail-dex] refund ${order.id.slice(0,8)}: 非托管下 Broker 无法退款 → failed (走 dispute)`);
+    updateState(order.id, 'failed', {
+      error_reason: 'non_custodial_maker_refund_required',
+    });
   } catch (err) {
     console.error(`[retail-dex] processRefundingOrder ${order.id.slice(0,8)} error: ${err.message}`);
-    updateState(order.id, 'failed', { fail_reason: err.message });
   }
 }
 
 /**
- * T8 Phase 3: executing → completed
- * 订单 state=executing: 等 exchange_offer completed, 把 KAS 转给用户
+ * TASK 2.3 Phase 3 (非托管): executing → completed
+ * state=executing: 观察 exchange_offers.protocol_status
+ *   = completed → KAS 已由 Maker 直发用户 Kasia (exchange-machine.js:634 receive_address 路由),
+ *     retail_dex_order 推 completed, 记录 delivery_tx (Maker 发出的那笔 Kaspa TX)
+ *   = cancelled/disputed/expired → refunding (但非托管下 refunding 立刻推 failed, 见上)
+ *
+ * Broker 不再 sendKaspa transfer — KAS 根本不经 Broker.
  */
 async function processExecutingOrder(order) {
   try {
@@ -610,24 +555,16 @@ async function processExecutingOrder(order) {
       return;
     }
     if (offer.protocol_status === 'completed') {
-      // KAS 已到 agent 地址 (taker = broker). 转发给用户 Kasia 地址
-      // 注意: 这里直接调 relay transfer, KAS 已在 broker 钱包 (exchange-machine auto-deliver 发到 offer.taker = broker)
-      const { sendCommandAsync } = await import('./relay-manager.js');
-      const sendRes = await sendCommandAsync(order._brokerRelayId, {
-        type: 'transfer',
-        target: order.user_kasia_address,
-        amount: String(order.qty),
+      // Maker 已直发 KAS 给用户 (非托管 delivery 路径), 只推状态 + 记 delivery_tx
+      updateState(order.id, 'completed', {
+        deliver_tx_hash: offer.delivery_tx || null,
       });
-      if (sendRes?.txId) {
-        updateState(order.id, 'completed', { deliver_tx_hash: sendRes.txId });
-        console.log(`[retail-dex] executing ${order.id.slice(0,8)} → completed, KAS delivered: ${sendRes.txId.slice(0,16)}`);
-      } else {
-        console.error(`[retail-dex] executing ${order.id.slice(0,8)} KAS forward FAIL`);
-      }
-    } else if (['cancelled', 'disputed'].includes(offer.protocol_status)) {
+      console.log(`[retail-dex] executing ${order.id.slice(0,8)} → completed, Maker delivery_tx=${(offer.delivery_tx || 'n/a').slice(0,16)}`);
+    } else if (['cancelled', 'disputed', 'expired'].includes(offer.protocol_status)) {
       updateState(order.id, 'refunding');
       console.warn(`[retail-dex] executing ${order.id.slice(0,8)} → refunding (offer ${offer.protocol_status})`);
     }
+    // open/matched/verifying/delivering — 继续等, 不动状态
   } catch (err) {
     console.error(`[retail-dex] processExecutingOrder ${order.id.slice(0,8)} error: ${err.message}`);
   }
@@ -635,30 +572,31 @@ async function processExecutingOrder(order) {
 
 async function orderMonitorTick() {
   try {
-    // Phase 2: paid → executing
+    // 单 broker 查一次 (MVP)
+    const broker = sqlite.prepare("SELECT id FROM relay_nodes WHERE is_dex_broker = 1 LIMIT 1").get();
+    const brokerRelayId = broker?.id;
+
+    // Phase 2: paid → executing (广播 paid_v1)
     const paidOrders = sqlite.prepare(`SELECT * FROM retail_dex_orders WHERE state = 'paid' ORDER BY updated_at ASC LIMIT 5`).all();
     for (const o of paidOrders) {
-      // brokerRelayId 查: relay_nodes.is_dex_broker=1 (MVP 单 broker)
-      const broker = sqlite.prepare("SELECT id FROM relay_nodes WHERE is_dex_broker = 1 LIMIT 1").get();
-      o._brokerRelayId = broker?.id;
+      o._brokerRelayId = brokerRelayId;
       await processPaidOrder(o);
     }
-    // Phase 4: refunding → refunded
-    const refundOrders = sqlite.prepare(`SELECT * FROM retail_dex_orders WHERE state = 'refunding' ORDER BY updated_at ASC LIMIT 5`).all();
-    for (const o of refundOrders) {
-      const broker = sqlite.prepare("SELECT id FROM relay_nodes WHERE is_dex_broker = 1 LIMIT 1").get();
-      o._brokerRelayId = broker?.id;
-      await processRefundingOrder(o);
-    }
-    // Phase 3: executing → completed
+    // Phase 3: executing → completed / 或转 refunding
+    // 先 executing 再 refunding, 让 executing 触发的 refunding 能同 tick 被推 failed
     const execOrders = sqlite.prepare(`SELECT * FROM retail_dex_orders WHERE state = 'executing' ORDER BY updated_at ASC LIMIT 5`).all();
     for (const o of execOrders) {
-      const broker = sqlite.prepare("SELECT id FROM relay_nodes WHERE is_dex_broker = 1 LIMIT 1").get();
-      o._brokerRelayId = broker?.id;
+      o._brokerRelayId = brokerRelayId;
       await processExecutingOrder(o);
     }
+    // Phase 4: refunding → failed (非托管直接 failed)
+    const refundOrders = sqlite.prepare(`SELECT * FROM retail_dex_orders WHERE state = 'refunding' ORDER BY updated_at ASC LIMIT 5`).all();
+    for (const o of refundOrders) {
+      o._brokerRelayId = brokerRelayId;
+      await processRefundingOrder(o);
+    }
     if (paidOrders.length + refundOrders.length + execOrders.length > 0) {
-      console.log(`[retail-dex] tick: ${paidOrders.length} paid / ${refundOrders.length} refunding / ${execOrders.length} executing`);
+      console.log(`[retail-dex] tick: ${paidOrders.length} paid / ${execOrders.length} executing / ${refundOrders.length} refunding`);
     }
   } catch (err) {
     console.error(`[retail-dex] tick error: ${err.message}`);
@@ -880,6 +818,7 @@ export {
   handleDm,
   startOrderMonitor,
   stopOrderMonitor,
+  orderMonitorTick,
   createOrder,
   getActiveOrderForUser,
   getOrderById,
