@@ -317,13 +317,13 @@ export async function registerDiscoveryRoutes(fastify) {
           observeHandshake(addressB, addressA, txHash, occurredAt || new Date().toISOString());
 
           // 写入 pending_actions — inbound 握手等待 Relay 接受
-          // Guard (2026-04-14): 已握过手 / 关系已 active 则不再入队,
-          // 避免 /loop 重复花 0.2 KAS 回一次. 同 ingest-service.js:86.
+          // 2026-04-23 修复: 原 guard 用 handshake_observed_at, 该字段 observeHandshake 刚填过,
+          // 导致 guard 立即命中, inbound 握手永远无法入队触发 accept. 改为 handshake_accepted_at.
           try {
             const already = sqlite.prepare(`
               SELECT 1 FROM relation_states
               WHERE local_address = ? AND peer_address = ?
-                AND (handshake_observed_at IS NOT NULL
+                AND (handshake_accepted_at IS NOT NULL
                   OR status IN ('accepted','confirmed','active'))
               LIMIT 1
             `).get(addressB, addressA);

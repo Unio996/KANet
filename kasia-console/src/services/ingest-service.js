@@ -90,11 +90,15 @@ export async function handleIngestMessage(payload) {
         // 或关系已达 accepted/confirmed/active, 对方回来的握手只是 ACK,
         // 不要再入队 handshake_accept — 否则 /loop 会再花 0.2 KAS 回一次.
         // 实测: J2 作为 sender 有 10 组重复握手, 累计浪费 ~2 KAS.
+        // 2026-04-23 修复: 原 guard 用 handshake_observed_at IS NOT NULL, 但 observeHandshake()
+        // 刚刚在上一行写入了 handshake_observed_at, guard 立即命中 → pending_action 永远不入队 →
+        // accept 动作永远不触发 → Bug: 收到 inbound 握手后系统不回发 0.2 KAS.
+        // 正确语义: 只拦"我已接受过 (handshake_accepted_at)"或"已 active", 不拦首次 observed.
         try {
           const already = sqlite.prepare(`
             SELECT 1 FROM relation_states
             WHERE local_address = ? AND peer_address = ?
-              AND (handshake_observed_at IS NOT NULL
+              AND (handshake_accepted_at IS NOT NULL
                 OR status IN ('accepted','confirmed','active'))
             LIMIT 1
           `).get(localAddress, remoteAddress);

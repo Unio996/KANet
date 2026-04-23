@@ -515,22 +515,34 @@ export async function registerConversationRoutes(fastify) {
   // ── NEW PAGES: contacts / story / graph ──────────────────────────────
 
   // API: contacts with episode summary (merged view)
+  //
+  // 语义: 通讯录 = 已接受握手的对端 (accepted / confirmed / active / stale)
+  //   observed  = 单向收到握手但我方未 accept → 属 pending 请求, 不是联系人
+  //                用 ?include_observed=1 或走 /api/contacts/pending 获取
+  //   blocked   = 主动拉黑 → 默认隐藏, 用 ?include_blocked=1 查看
+  //
+  // Bug 历史: 2026-04-23 修复. 之前 observed 也返回, 造成 "对端没经 accept 就成联系人".
   fastify.get('/api/contacts/list', async (request, reply) => {
-    const { relay_node_id } = request.query;
+    const { relay_node_id, include_observed, include_blocked } = request.query;
     if (!relay_node_id) return reply.code(400).send({ error: 'relay_node_id required' });
 
     const relay = sqlite.prepare('SELECT address, name FROM relay_nodes WHERE id = ?').get(relay_node_id);
     if (!relay) return reply.code(404).send({ error: 'relay not found' });
 
-    // Get relations (message counts from chain_events, not stored in relation_states)
+    const allowedStatuses = ['accepted', 'confirmed', 'active', 'stale'];
+    if (include_observed === '1' || include_observed === 'true') allowedStatuses.push('observed');
+    if (include_blocked === '1' || include_blocked === 'true') allowedStatuses.push('blocked');
+    const placeholders = allowedStatuses.map(() => '?').join(',');
+
     const relations = sqlite.prepare(`
       SELECT rs.peer_address, rs.status, rs.trust_level, rs.handshake_accepted_at, rs.updated_at,
         i.id as identity_id, i.display_name, i.card_entity_type, i.card_summary, i.tags, i.notes
       FROM relation_states rs
       LEFT JOIN identities i ON i.address = rs.peer_address
       WHERE rs.local_address = ?
+        AND rs.status IN (${placeholders})
       ORDER BY rs.updated_at DESC
-    `).all(relay.address);
+    `).all(relay.address, ...allowedStatuses);
 
     // Message counts per peer (from chain_events — from_address/to_address)
     const msgSent = sqlite.prepare(`
