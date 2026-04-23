@@ -759,10 +759,10 @@ async function handleDm(senderAddress, message, brokerRelayId) {
     const id = createOrder({
       user_kasia_address: senderAddress,
       side: dialog.order.side,
-      order_type: 'market',
+      order_type: dialog.order.order_type || 'market',
       qty: dialog.order.qty,
+      price: dialog.order.price || null,
     });
-    // 补其他字段
     setField(id, 'pay_chain', dialog.order.pay_chain);
     setField(id, 'pay_address', dialog.order.pay_address);
 
@@ -771,7 +771,23 @@ async function handleDm(senderAddress, message, brokerRelayId) {
     const offer = selectBestOffer(newOrder);
     if (!offer) {
       updateState(id, 'expired', { error_reason: 'no_matching_offer_at_create' });
-      return `订单 ${id.slice(0,8)} 建了但市场现在没匹配挂单 (链/数量)。稍后再来。`;
+      // 查市场实情给人话回复
+      const market = sqlite.prepare(`
+        SELECT SUM(CAST(give_amount AS REAL)) as total_kas, COUNT(*) as n,
+          MAX(CAST(give_amount AS REAL)) as biggest
+        FROM exchange_offers
+        WHERE protocol_status='open' AND give_asset='KAS' AND want_asset='USDT'
+          AND (expires_at IS NULL OR julianday(expires_at) > julianday('now'))
+      `).get();
+      const qtyF = parseFloat(newOrder.qty);
+      if (!market || !market.n) {
+        return `市场当前没任何 KAS 卖单, Maker 暂时缺货。建议:\n1) 晚点再来 (Maker 每 5 分钟刷新挂单)\n2) 改挂限价单 等卖家主动接 (回复 "挂单 0.034" 这种, 数字是你愿付单价)\n订单 ${id.slice(0,8)} 已取消。`;
+      }
+      if (market.biggest < qtyF) {
+        return `市场目前最大的一笔卖单只有 ${market.biggest.toFixed(2)} KAS, 你要 ${qtyF} KAS 超了当前库存 (总共 ${market.total_kas.toFixed(2)} KAS 分 ${market.n} 笔挂单)。建议:\n1) 分批: 先买 ${market.biggest.toFixed(0)} KAS 试\n2) 降低数量\n3) 挂限价单等货\n订单 ${id.slice(0,8)} 已取消。`;
+      }
+      // 有货但链不匹配
+      return `你指定 ${newOrder.pay_chain} 链, 但现有 ${market.n} 笔卖单都不接这条链。试试改 BSC (最常见)。订单 ${id.slice(0,8)} 已取消。`;
     }
     const quote = computeQuote(newOrder, offer, brokerRelayId);
     if (!quote.ok) {

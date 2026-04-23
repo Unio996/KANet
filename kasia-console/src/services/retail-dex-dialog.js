@@ -16,6 +16,51 @@ const MAX_ORDER_USDT = 100;
 const MIN_KAS = 1;
 const MAX_KAS = 100_000;
 
+// 动态注入: 市场快照 (让 LLM 能基于真实市场给建议)
+async function getMarketSnapshot() {
+  try {
+    const { sqlite } = await import('../db/client.js');
+    const { fetchKasPrice } = await import('./market-seeder.js');
+    const midPrice = await fetchKasPrice();
+    // 最优 sell-KAS 卖单 (用户买方视角 = 最便宜)
+    const bestSell = sqlite.prepare(`
+      SELECT give_amount, want_amount,
+        CAST(want_amount AS REAL) / CAST(give_amount AS REAL) AS unit_price
+      FROM exchange_offers
+      WHERE protocol_status='open' AND give_asset='KAS' AND want_asset='USDT'
+        AND (expires_at IS NULL OR julianday(expires_at) > julianday('now'))
+      ORDER BY unit_price ASC LIMIT 1
+    `).get();
+    // 总可买 KAS 量
+    const totalOpen = sqlite.prepare(`
+      SELECT SUM(CAST(give_amount AS REAL)) AS total_kas, COUNT(*) AS n
+      FROM exchange_offers
+      WHERE protocol_status='open' AND give_asset='KAS' AND want_asset='USDT'
+        AND (expires_at IS NULL OR julianday(expires_at) > julianday('now'))
+    `).get();
+    return {
+      midPrice: midPrice || null,
+      bestSellPrice: bestSell?.unit_price || null,
+      bestSellKas: bestSell?.give_amount || null,
+      totalOpenKas: totalOpen?.total_kas || 0,
+      openOfferCount: totalOpen?.n || 0,
+    };
+  } catch (err) {
+    console.warn(`[retail-dex-dialog] market snapshot err: ${err.message}`);
+    return null;
+  }
+}
+
+function formatSnapshot(snap) {
+  if (!snap) return '[市场快照] 暂无数据';
+  const parts = [];
+  if (snap.midPrice) parts.push(`市价约 ${snap.midPrice.toFixed(6)} USDT/KAS`);
+  if (snap.bestSellPrice) parts.push(`最优卖单 ${snap.bestSellPrice.toFixed(6)} USDT/KAS (${snap.bestSellKas} KAS)`);
+  else parts.push('当前无 KAS 卖单 (市场暂时缺货, 可建议用户限价挂单等)');
+  if (snap.openOfferCount > 0) parts.push(`共 ${snap.openOfferCount} 个开放卖单 / 合计 ${parseFloat(snap.totalOpenKas).toFixed(2)} KAS 可买`);
+  return '[市场快照] ' + parts.join('; ');
+}
+
 // 每用户最近 N 轮对话
 const CONVO_MAX_TURNS = 10;
 const _conversations = new Map();
@@ -34,33 +79,42 @@ export function clearHistory(addr) { _conversations.delete(addr); }
 // ── 短 System Prompt ───────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = `/no_think
-你是 KANet Broker.
+你是 KANet Broker. 真专业, 会给建议.
 目标: 帮用户完成一笔 KAS↔USDT 零售交易 (零托管 — USDT 直付 Maker, KAS 直到用户 Kasia).
 
 ## 1. 摸清用户需求
 - 买 KAS (付 USDT) 还是 卖 KAS (收 USDT)?
 - 要多少 (KAS 数量)?
 
-## 2. 单子 4 要素 (齐备 + 有效 才能下单)
+## 2. 策略选择 (关键!)
+- 市价吃单 (order_type=market): 立刻成交, 按市场最优单价
+- 限价挂单 (order_type=limit): 你出价, 等人接, 需含 price (USDT/KAS)
+- 新手通常市价, 有预期价位才限价. 看市场情况主动建议哪个合适.
+
+## 3. 单子要素 (齐备 + 有效 才能下单)
 - side: buy_kas | sell_kas
+- order_type: market | limit
 - qty: KAS 数量 (${MIN_KAS}~${MAX_KAS})
+- price: USDT/KAS 单价 (仅 limit 必填, 市价单忽略)
 - pay_chain: BSC | ETH | TRON | SOL | Polygon
 - pay_address: 用户 EVM 地址 (0x + 40 hex)
 
-## 3. 下单条件
+## 4. 下单条件
 - 单笔上限 ${MAX_ORDER_USDT} USDT (折算超了拒)
-- 数字 / 地址 / 链必须合法 (系统校验)
+- 数字 / 地址 / 链 / 价格必须合法 (系统校验)
 - 用户说"取消/不要了"立即停
 
 ## 对话规则
-- 首次接触: 简短自我介绍 1 句, 然后问需求
+- 首次接触: 一句自我介绍, 问需求
 - 逐个问缺的, 每轮最多 1 问
+- **利用[市场快照]**主动给建议 (比如"现在市价 X, 我建议市价吃" 或 "你的限价比市价便宜 5%, 可能要等挺久")
 - 用户问价/收费/安全: 简短回, 不编数据
-- 不自己判地址 / 数字合法, 交系统
+- 不自己判地址 / 数字 / 价格合法, 交系统
 
 ## 输出 (纯 JSON, 无 markdown 无 \`\`\`)
 不齐: {"ready":false,"reply":"<中文>"}
-齐备: {"ready":true,"order":{"side":"buy_kas","qty":"50","pay_chain":"BSC","pay_address":"0x..."}}
+齐备 (市价): {"ready":true,"order":{"side":"buy_kas","order_type":"market","qty":"50","pay_chain":"BSC","pay_address":"0x..."}}
+齐备 (限价): {"ready":true,"order":{"side":"buy_kas","order_type":"limit","qty":"50","price":"0.033","pay_chain":"BSC","pay_address":"0x..."}}
 取消: {"ready":false,"reply":"<中文>","cancel":true}`;
 
 // ── Qwen ──────────────────────────────────────────────────────────────────
@@ -115,9 +169,20 @@ function normalizeChain(chain) {
 export function validateOrder(order) {
   if (!order || typeof order !== 'object') return { ok: false, err: '订单结构不对' };
   if (order.side !== 'buy_kas' && order.side !== 'sell_kas') return { ok: false, err: 'side 必须是 buy_kas 或 sell_kas' };
+  const orderType = order.order_type || 'market';
+  if (orderType !== 'market' && orderType !== 'limit') {
+    return { ok: false, err: 'order_type 必须是 market 或 limit' };
+  }
   const qtyNum = parseFloat(order.qty);
   if (!isFinite(qtyNum) || qtyNum < MIN_KAS || qtyNum > MAX_KAS) {
     return { ok: false, err: `数量必须在 ${MIN_KAS} 到 ${MAX_KAS} 之间` };
+  }
+  let priceNum = null;
+  if (orderType === 'limit') {
+    priceNum = parseFloat(order.price);
+    if (!isFinite(priceNum) || priceNum <= 0 || priceNum > 10) {
+      return { ok: false, err: '限价必须在 0 到 10 USDT/KAS 之间' };
+    }
   }
   const chain = normalizeChain(order.pay_chain);
   if (!chain || !SUPPORTED_CHAINS.includes(chain)) {
@@ -130,7 +195,9 @@ export function validateOrder(order) {
     ok: true,
     order: {
       side: order.side,
+      order_type: orderType,
       qty: String(order.qty),
+      price: priceNum !== null ? String(priceNum) : null,
       pay_chain: chain === 'bnb' ? 'BSC' : chain.toUpperCase(),
       pay_address: order.pay_address,
     },
@@ -144,8 +211,12 @@ export function validateOrder(order) {
  */
 export async function interpret(userAddr, userMessage) {
   const history = getHistory(userAddr);
+  // 每轮拉最新市场快照给 LLM (让建议基于真实数据)
+  const snap = await getMarketSnapshot();
+  const systemWithSnapshot = SYSTEM_PROMPT + '\n\n' + formatSnapshot(snap);
+
   const messages = [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: systemWithSnapshot },
     ...history,
     { role: 'user', content: userMessage },
   ];
