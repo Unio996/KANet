@@ -307,6 +307,10 @@ startRefreshWorker();
 import { startMarketSeeder } from './services/market-seeder.js';
 startMarketSeeder();
 
+// T8: Start retail-dex order monitor (paid → executing → completed)
+import { startOrderMonitor as startRetailDexMonitor } from './services/retail-dex.js';
+startRetailDexMonitor();
+
 // Graceful shutdown — stop all child processes
 async function shutdown() {
   console.log('[kasia-console] shutting down...');

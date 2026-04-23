@@ -112,6 +112,23 @@ export async function registerConversationRoutes(fastify) {
     if (!peer || !message) return reply.code(400).send({ error: 'peer and message required' });
 
     const resolved = resolveRelayNodeId(relayNodeId);
+
+    // T7: retail-dex broker 白名单路由 — DEX broker 的 DM (非 broadcast) 绕开 Mind/Brain
+    // 走 retail-dex deterministic 状态机, 零 LLM 成本, 零幻觉
+    if (!channel) {
+      const broker = sqlite.prepare('SELECT is_dex_broker FROM relay_nodes WHERE id = ?').get(resolved);
+      if (broker?.is_dex_broker === 1) {
+        try {
+          const { handleDm } = await import('../services/retail-dex.js');
+          const dexReply = await handleDm(peer, message, resolved);
+          return reply.send({ reply: dexReply || '' });
+        } catch (err) {
+          console.error(`[api/agent/reply] retail-dex error for relay=${resolved?.slice(0,8)}: ${err.message}`);
+          return reply.send({ reply: '' });  // fail-closed, 不降级到 Brain
+        }
+      }
+    }
+
     const aiReply = await getReply(resolved, peer, message, channel);
     return reply.send({ reply: aiReply || '' });
   });

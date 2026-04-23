@@ -2039,5 +2039,59 @@ export function runMigrations() {
     }
   }
 
+  // v68: retail_dex_orders — retail DEX order ledger for retail-proxy skill
+  {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS retail_dex_orders (
+        id TEXT PRIMARY KEY,
+        user_kasia_address TEXT NOT NULL,
+        side TEXT NOT NULL CHECK(side IN ('buy_kas','sell_kas')),
+        order_type TEXT NOT NULL CHECK(order_type IN ('market','limit')),
+        qty TEXT NOT NULL,
+        price TEXT,
+        pay_chain TEXT,
+        pay_address TEXT,
+        receive_address TEXT,
+        quoted_usdt TEXT,
+        state TEXT NOT NULL DEFAULT 'aligning' CHECK(state IN ('aligning','confirming','awaiting_payment','paid','executing','completed','refunding','refunded','failed','expired')),
+        pay_tx_hash TEXT,
+        exchange_offer_id TEXT,
+        deliver_tx_hash TEXT,
+        refund_tx_hash TEXT,
+        error_reason TEXT,
+        expires_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_dex_user ON retail_dex_orders(user_kasia_address, state);
+      CREATE INDEX IF NOT EXISTS idx_retail_dex_state ON retail_dex_orders(state, updated_at);
+    `);
+    console.log('[migrate] v68: retail_dex_orders table created.');
+
+    const hasCol = sqlite.prepare("PRAGMA table_info(relay_nodes)").all()
+      .some(c => c.name === 'is_dex_broker');
+    if (!hasCol) {
+      sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN is_dex_broker INTEGER DEFAULT 0`);
+      console.log('[migrate] v68: relay_nodes.is_dex_broker column added.');
+    }
+  }
+
+  // v69: retail_dex_orders.agent_pay_addr + agent_deliver_addr (T6)
+  // agent 的 USDT 收款地址 (买场景) 或 KAS 交付来源 (卖场景)
+  {
+    const hasCol = sqlite.prepare("PRAGMA table_info(retail_dex_orders)").all()
+      .some(c => c.name === 'agent_pay_addr');
+    if (!hasCol) {
+      sqlite.exec(`ALTER TABLE retail_dex_orders ADD COLUMN agent_pay_addr TEXT`);
+      console.log('[migrate] v69: retail_dex_orders.agent_pay_addr column added.');
+    }
+    const hasCol2 = sqlite.prepare("PRAGMA table_info(retail_dex_orders)").all()
+      .some(c => c.name === 'mid_price_at_quote');
+    if (!hasCol2) {
+      sqlite.exec(`ALTER TABLE retail_dex_orders ADD COLUMN mid_price_at_quote TEXT`);
+      console.log('[migrate] v69: retail_dex_orders.mid_price_at_quote column added.');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
