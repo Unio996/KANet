@@ -369,11 +369,21 @@ export function getOutboundStats(agentAddress) {
 
 /**
  * 合并通讯录：relation_states ∪ chain_events 取并集
+ *
+ * 语义 (2026-04-23 修): 通讯录 = 已接受握手的对端 (accepted/confirmed/active/stale).
+ *   observed (单向收到握手我方未 accept) 不算联系人, 属"待审批请求".
+ *   blocked 默认隐藏.
+ * 参数 {includeObserved, includeBlocked} 开关向前兼容.
  */
-export function getMergedContacts(agentAddress) {
+export function getMergedContacts(agentAddress, { includeObserved = false, includeBlocked = false } = {}) {
   const ceStats = getActivityByPeer(agentAddress);
   const ceMap = {};
   for (const s of ceStats) ceMap[s.peer] = s;
+
+  const allowedStatuses = ['accepted', 'confirmed', 'active', 'stale'];
+  if (includeObserved) allowedStatuses.push('observed');
+  if (includeBlocked) allowedStatuses.push('blocked');
+  const placeholders = allowedStatuses.map(() => '?').join(',');
 
   const relations = sqlite.prepare(`
     SELECT rs.peer_address as peer, rs.status, rs.trust_level, rs.classification, rs.handshake_observed_at, rs.handshake_accepted_at, rs.updated_at,
@@ -381,7 +391,8 @@ export function getMergedContacts(agentAddress) {
     FROM relation_states rs
     LEFT JOIN identities i ON i.address = rs.peer_address
     WHERE rs.local_address = ?
-  `).all(agentAddress);
+      AND rs.status IN (${placeholders})
+  `).all(agentAddress, ...allowedStatuses);
 
   const rsMap = {};
   for (const r of relations) rsMap[r.peer] = r;

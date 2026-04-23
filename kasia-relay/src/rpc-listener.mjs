@@ -32,6 +32,8 @@ const KASPA_NETWORK = process.env.KASPA_NETWORK || 'mainnet';
 const RECONNECT_BASE_MS      = 5000;
 const RECONNECT_MAX_MS       = 60000;
 const BLOCKLIST_INTERVAL_MS  = 30000;
+const CATCHUP_RETRY_INTERVAL_MS = 60000;
+let _catchupTimer = null;
 const WATCHED_REFRESH_MS     = 60000;    // indexer watched addresses refresh
 const SEEN_FLUSH_INTERVAL_MS = 5000;
 
@@ -266,10 +268,22 @@ export async function startRpcListener() {
 
   _seenTimer = setInterval(flushSeen, SEEN_FLUSH_INTERVAL_MS);
 
-  // Catch up on missed transactions before subscribing to new blocks
+  // ── 启动顺序 (2026-04-23 修): 原 catchUpHistory 在 _connect 之前调, 但它内部
+  // 通过 sendKaspa 需要 getSharedRpcClient(), 结果 _rpc 是 null, 所有 pending
+  // handshake_accept 首次尝试都失败 (Shared RpcClient not ready after 30000ms).
+  // 因为 catchUpHistory 只在启动时跑一次, 失败的 pending_action 永远卡死 pending.
+  // 修: 先 _connect 建立 RPC, 再 catchUpHistory, 然后加周期性 retry 兜底. ──
+  await _connect(wallet);
+
+  // Catch up on missed pending_actions after RPC is ready
   await catchUpHistory();
 
-  await _connect(wallet);
+  // Periodic retry: pending_actions 若失败 (如 RPC 抖动) 每 60s 再试,
+  // 直到 retry_count 达 max_retries (默认 3) 才终态 expired
+  if (_catchupTimer) clearInterval(_catchupTimer);
+  _catchupTimer = setInterval(() => {
+    catchUpHistory().catch(err => log('periodic catch-up err:', err?.message || err));
+  }, CATCHUP_RETRY_INTERVAL_MS);
 }
 
 /**
@@ -536,6 +550,7 @@ export async function stopRpcListener() {
   if (_blocklistTimer) { clearInterval(_blocklistTimer); _blocklistTimer = null; }
   if (_watchedRefreshTimer) { clearInterval(_watchedRefreshTimer); _watchedRefreshTimer = null; }
   if (_seenTimer) { clearInterval(_seenTimer); _seenTimer = null; }
+  if (_catchupTimer) { clearInterval(_catchupTimer); _catchupTimer = null; }
   flushSeen();
   if (_rpc) { try { await _rpc.disconnect(); } catch {} _rpc = null; }
   log('stopped');

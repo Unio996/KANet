@@ -134,7 +134,13 @@ export async function ask(message, idempotencyKey, options) {
     const messages = [];
     if (hasSystem) messages.push({ role: "system", content: sanitizeForApi(options.system) });
     messages.push({ role: "user", content: sanitizeForApi(message) });
-    body = asciiSafeStringify({ model, messages });
+    // Qwen3 kill switch (QWEN-RULES.md Rule 11): 关 reasoning, /no_think 无效.
+    // 仅在 model 名含 Qwen 时加, 防止非 Qwen provider 报字段错.
+    const payload = { model, messages };
+    if (/qwen/i.test(model || "")) {
+      payload.chat_template_kwargs = { enable_thinking: false };
+    }
+    body = asciiSafeStringify(payload);
   }
 
   let res = await fetch(url, {

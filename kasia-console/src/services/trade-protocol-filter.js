@@ -693,24 +693,30 @@ async function handleExchangeAccept(msg) {
   // Hedge 必须等 completed（交割确认后）才触发，否则 Taker 不履约 = 裸空仓
 
   // === Auto-pay: if taker is a local Agent, automatically pay USDT (cross_chain_tx) ===
+  // TASK 2.4 非托管门控: is_dex_broker=1 的 relay 只代发广播不碰钱, 跳过 auto-pay
   if (result.taker && result.taker_chain && result.verification === 'cross_chain_tx') {
-    const localRelay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(result.taker);
-    if (localRelay) {
+    const localRelay = sqlite.prepare('SELECT id, is_dex_broker FROM relay_nodes WHERE address = ?').get(result.taker);
+    if (localRelay && !localRelay.is_dex_broker) {
       console.log(`[exchange] local taker detected, triggering auto-pay for offer ${result.id.slice(0,8)}`);
       setImmediate(() => _autoPayExchange(result, localRelay.id).catch(e =>
         console.error(`[exchange] auto-pay error: ${e.message}`)
       ));
+    } else if (localRelay?.is_dex_broker) {
+      console.log(`[exchange] DEX broker taker — skip auto-pay (non-custodial) offer=${result.id.slice(0,8)}`);
     }
   }
 
   // === Auto-send-KAS: if taker is a local Agent and offer wants KAS (kaspa_tx) ===
+  // TASK 2.4 同样门控: DEX broker 也不做 auto-send-KAS
   if (result.taker && result.verification === 'kaspa_tx' && result.want_asset?.toUpperCase() === 'KAS') {
-    const localRelay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(result.taker);
-    if (localRelay) {
+    const localRelay = sqlite.prepare('SELECT id, is_dex_broker FROM relay_nodes WHERE address = ?').get(result.taker);
+    if (localRelay && !localRelay.is_dex_broker) {
       console.log(`[exchange] local taker detected, triggering auto-send-KAS for offer ${result.id.slice(0,8)}`);
       setImmediate(() => _autoSendKas(result, localRelay.id).catch(e =>
         console.error(`[exchange] auto-send-KAS error: ${e.message}`)
       ));
+    } else if (localRelay?.is_dex_broker) {
+      console.log(`[exchange] DEX broker taker — skip auto-send-KAS (non-custodial) offer=${result.id.slice(0,8)}`);
     }
   }
   console.log(`[exchange] offer ${result.id.slice(0,8)} entered verifying — hedge deferred to completed`);
@@ -813,6 +819,24 @@ async function _fetchHedgePrice(exchange, side) {
  * If preferredCex specified, try that first; otherwise use default account.
  */
 async function _executeHedge(offerId, agentName, side, qty, preferredCex = null) {
+  // T-22-05 Step G — Opt-in hedge gate（安全门控）
+  // 默认不对冲。只有 offer.meta.hedge_enabled === true 才触发对冲。
+  // 防止 retail-proxy / bounty / auction 等 non-hedgeable offer 类型误触发 CEX 反向下单。
+  // 3 个调用点（api/exchange.js / exchange-machine.js x2）全部自动受保护。
+  const _hedgeGateOffer = sqlite.prepare(
+    "SELECT meta FROM exchange_offers WHERE id = ? LIMIT 1"
+  ).get(offerId);
+  if (!_hedgeGateOffer) {
+    console.log(`[exchange-hedge] offer ${offerId.slice(0, 8)} not found — skip`);
+    return;
+  }
+  let _hedgeGateMeta = {};
+  try { _hedgeGateMeta = JSON.parse(_hedgeGateOffer.meta || '{}'); } catch {}
+  if (_hedgeGateMeta.hedge_enabled !== true) {
+    console.log(`[exchange-hedge] offer ${offerId.slice(0, 8)} hedge_enabled!=true → skip (default opt-in safety)`);
+    return;
+  }
+
   // Idempotency guard — prevent double-hedge if both API and chain paths fire
   const _existingHedge = sqlite.prepare(
     "SELECT id FROM chain_events WHERE txid = ? AND event_type LIKE 'hedge%' LIMIT 1"

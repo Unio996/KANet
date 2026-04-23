@@ -206,7 +206,7 @@ async function publishSeedOrder(config, midPrice, side) {
 
 // ── Helpers ───────────────────────────────────────────────
 
-async function fetchKasPrice() {
+export async function fetchKasPrice() {
   try {
     const res = await fetch(`http://127.0.0.1:${PORT}/api/trade/kas-price`, { signal: AbortSignal.timeout(5000) });
     const data = await res.json();

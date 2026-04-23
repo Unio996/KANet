@@ -125,13 +125,13 @@ export async function registerIngestRoutes(fastify) {
       const source = reqSource || 'relay';
       const key = `${actionType}:${local_address}:${target_address}`;
 
-      // Guard (2026-04-14): 已握手 / 关系已 active → 拒绝 create_and_claim,
-      // 避免重复花 0.2 KAS. 对 handshake_accept 和 handshake_init 都适用.
+      // 2026-04-23 修复: 原 guard 用 handshake_observed_at 导致 inbound 握手首次也被拦,
+      // accept 动作永远不触发. 改为 handshake_accepted_at 才是"我已接受过"的真实语义.
       if (actionType === 'handshake_accept' || actionType === 'handshake_init') {
         const already = sqlite.prepare(`
           SELECT 1 FROM relation_states
           WHERE local_address = ? AND peer_address = ?
-            AND (handshake_observed_at IS NOT NULL
+            AND (handshake_accepted_at IS NOT NULL
               OR status IN ('accepted','confirmed','active'))
           LIMIT 1
         `).get(local_address, target_address);

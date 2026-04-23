@@ -111,6 +111,8 @@ export class ContextBuilder {
       userMessage: kernelContexts?._inputMessage || '',
       lastMessage: kernelContexts?._inputMessage || '',
       _senderRelation: kernelContexts?._senderRelation || null,
+      _senderAddress: kernelContexts?._senderAddress || null,
+      _inputMessage: kernelContexts?._inputMessage || '',
     };
     return this.skillRegistry.gatherAll(activeSkills, this.kernels, enrichedConfig);
   }
@@ -1055,6 +1057,7 @@ export class ContextBuilder {
     const skills = await this._gatherSkills('reactive', {
       self, memory, perception, intent, evolution,
       _inputMessage: input.message,
+      _senderAddress: peerAddress,
       _senderRelation: senderMeta?.relation || null,
     });
     const { text: system, cacheHit } = this._getSystem('reactive', self, intent, evolution, perception);

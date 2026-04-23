@@ -1,8 +1,9 @@
 # KANet 数据库字典
 
-> 版本：2026-04-06
+> 版本：2026-04-23
 > 数据库：kasia-console/data/console.db（SQLite）
-> 总表数：36 张
+> 总表数：37 张（v68 新增 retail_dex_orders）
+> migrate.js 当前版本：v69
 > 维护原则：改表前必查本文档，确认影响范围
 
 ---
@@ -17,7 +18,7 @@
 | **链上数据** | chain_events, tx_records, kanet_message_index, broadcast_messages | 活跃核心 |
 | **Agent 配置** | relay_nodes, adapter_nodes, agent_connections, agent_wallets | 活跃核心 |
 | **系统运行** | events, replies, execution_states, pending_actions, skills | 活跃核心 |
-| **交易系统** | mm_orders, mm_quotes, fund_locks, exchange_offers, exchange_accounts | 活跃核心 |
+| **交易系统** | mm_orders, mm_quotes, fund_locks, exchange_offers, exchange_accounts, retail_dex_orders | 活跃核心 |
 | **交易辅助** | trade_executions, trade_log, trade_baselines | 活跃辅助 |
 | **市场数据** | chain_snapshots, address_balances, whale_watchlist, stock_watchlist | 活跃辅助 |
 | **配置存储** | config_entries, scout_checkpoint, broker_accounts | 活跃辅助 |
@@ -580,6 +581,48 @@
 
 ---
 
+### retail_dex_orders（v68/v69，活跃）
+**零售 DEX Agent 订单簿：手机 Kasia 用户下单经 Broker 代发协议走非托管成交**
+
+Dex-Agent 的状态机数据源。每笔 DM 下的订单从 `aligning` 开始，经对齐追问 → 报价确认 → 支付 → 执行 → 完成。非托管语义：`agent_pay_addr` 存的是 Maker 的 BSC 地址（不是 Broker 的），Broker 全程不持有用户资金。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | TEXT PK | UUID |
+| user_kasia_address | TEXT NOT NULL | 手机用户 Kasia 地址（主键的查询字段） |
+| side | TEXT NOT NULL | buy_kas / sell_kas（CHECK 约束） |
+| order_type | TEXT NOT NULL | market / limit |
+| qty | TEXT NOT NULL | KAS 数量 |
+| price | TEXT | limit 单价（市价为 null） |
+| pay_chain | TEXT | 用户付款链：BSC/ETH/TRON/SOL（aligning 阶段追问填入） |
+| pay_address | TEXT | 用户付款钱包地址（退款用，非托管下 Broker 不主动退） |
+| receive_address | TEXT | 卖单：用户 USDT 收款地址（sell_kas 场景） |
+| quoted_usdt | TEXT | Maker offer.want_amount 按 qty 比例算出（非托管不加 spread） |
+| agent_pay_addr | TEXT | **v69**: Maker 的 BSC 收款地址（用户直付这里，**不是 Broker**） |
+| mid_price_at_quote | TEXT | **v69**: 报价时的单价（USDT/KAS），写入 Maker offer 算出的 unit price |
+| state | TEXT NOT NULL | 10 态：aligning→confirming→awaiting_payment→paid→executing→completed；分支 refunding/refunded/failed/expired（CHECK 约束） |
+| pay_tx_hash | TEXT | 用户 USDT 付款 TX（用户在 awaiting_payment 回复 txhash） |
+| exchange_offer_id | TEXT | 锁定的 exchange_offers.id（confirming 阶段选中） |
+| deliver_tx_hash | TEXT | Maker 的 KAS delivery TX（从 offer.delivery_tx 复制） |
+| refund_tx_hash | TEXT | 退款 TX（非托管下保留字段，当前不用） |
+| error_reason | TEXT | 失败原因（如 non_custodial_maker_refund_required） |
+| expires_at | TEXT | 订单过期时间（默认 30 min，processTimeouts 扫） |
+| created_at / updated_at | TEXT NOT NULL | ISO 时间戳 |
+
+**索引**：idx_retail_dex_user (user_kasia_address, state)、idx_retail_dex_state (state, updated_at)
+
+**写入方**：retail-dex.js（handleDm createOrder / 状态推进 / orderMonitorTick）
+**读取方**：retail-dex.js 本身；UI 目前未接入
+
+**相关列**：`relay_nodes.is_dex_broker`（v68）标记这个 relay 是 DEX Broker，其 DM 走 retail-dex 流程绕开 Mind；`exchange-machine.js` auto-pay/auto-send-KAS 对 `is_dex_broker=1` 硬门控关闭，保证 Broker 零资金托管。
+
+**陷阱**：
+- `state` 包含 10 个 CHECK 值，加新态必须 migrate.js 改约束
+- `agent_pay_addr` 字段名历史遗留（原托管 v0 时存 Broker 地址），v2 非托管语义改成存 Maker 地址但字段名未改
+- 非托管下 `refunding → refunded` 路径不可达（Broker 不持币），refunding 直接推 failed
+
+---
+
 ### broker_accounts（1 条）
 **券商账户：IBKR/Alpaca 等传统券商接入**
 
@@ -641,4 +684,11 @@ CEX 交易日志。v51 新增 `exchange` 列记录交易所归属（旧记录为
 3. 改字段：SQLite 不支持直接改，需建新表→迁移→删旧表
 4. 新表：migrate.js 新版本，加 `IF NOT EXISTS` 保护
 
-**当前最新版本：v51（trade_log 加 exchange 列）**
+**当前最新版本：v69（retail_dex_orders.agent_pay_addr + mid_price_at_quote）**
+
+## 版本历史（近期）
+
+- v69 (2026-04-22 T6): retail_dex_orders.agent_pay_addr + mid_price_at_quote
+- v68 (2026-04-22 T2): retail_dex_orders 新表 + relay_nodes.is_dex_broker
+- v67: is_bot_autoreply on relay_nodes
+- v64: social_spend_log

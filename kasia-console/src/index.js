@@ -179,13 +179,39 @@ fastify.get('/api/relation/status', async (request, reply) => {
 });
 
 // 合并通讯录 API
+// 2026-04-23 修: 默认只返 accepted/confirmed/active/stale, observed (单向握手未接受)
+// 不再算联系人. ?include_observed=1 可调. /api/contacts/pending 专门返 observed.
 fastify.get('/api/contacts/merged', async (request, reply) => {
+  const { relay_node_id, include_observed, include_blocked } = request.query;
+  if (!relay_node_id) return reply.code(400).send({ error: 'relay_node_id required' });
+  const relayNodes = _listRelayNodes();
+  const node = relayNodes.find(r => r.id === relay_node_id);
+  if (!node?.address) return reply.code(404).send({ error: 'relay not found' });
+  return reply.send(getMergedContacts(node.address, {
+    includeObserved: include_observed === '1' || include_observed === 'true',
+    includeBlocked: include_blocked === '1' || include_blocked === 'true',
+  }));
+});
+
+// 待审批握手请求: observed 状态的对端 (对方发了握手我方未 accept)
+fastify.get('/api/contacts/pending', async (request, reply) => {
   const { relay_node_id } = request.query;
   if (!relay_node_id) return reply.code(400).send({ error: 'relay_node_id required' });
   const relayNodes = _listRelayNodes();
   const node = relayNodes.find(r => r.id === relay_node_id);
   if (!node?.address) return reply.code(404).send({ error: 'relay not found' });
-  return reply.send(getMergedContacts(node.address));
+  const pending = _sqlite.prepare(`
+    SELECT rs.peer_address as peer, rs.status, rs.handshake_observed_at, rs.first_seen_tx, rs.classification,
+      i.id as identity_id, i.display_name, i.card_entity_type, i.card_summary,
+      pa.id as pending_action_id, pa.status as action_status, pa.retry_count, pa.error, pa.created_at as action_created_at
+    FROM relation_states rs
+    LEFT JOIN identities i ON i.address = rs.peer_address
+    LEFT JOIN pending_actions pa ON pa.local_address = rs.local_address AND pa.target_address = rs.peer_address
+      AND pa.action_type = 'handshake_accept' AND pa.status IN ('pending','executing','failed')
+    WHERE rs.local_address = ? AND rs.status = 'observed'
+    ORDER BY rs.handshake_observed_at DESC
+  `).all(node.address);
+  return reply.send(pending);
 });
 
 // 握手报告 API
@@ -306,6 +332,10 @@ startRefreshWorker();
 // Start market seeder (auto seed orders on free market)
 import { startMarketSeeder } from './services/market-seeder.js';
 startMarketSeeder();
+
+// T8: Start retail-dex order monitor (paid → executing → completed)
+import { startOrderMonitor as startRetailDexMonitor } from './services/retail-dex.js';
+startRetailDexMonitor();
 
 // Graceful shutdown — stop all child processes
 async function shutdown() {

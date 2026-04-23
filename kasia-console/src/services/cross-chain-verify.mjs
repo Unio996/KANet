@@ -101,6 +101,8 @@ const TRON_USDT_ADDR = TRON_TOKENS.usdt;
  *   underpayment?: boolean
  * }>}
  */
+export { EVM_RPC, EVM_TOKENS, SOL_RPC, SOL_TOKENS, TRON_RPC, TRON_TOKENS };
+
 export async function verifyCrossChainTx({ txHash, chain, expectedAmount, expectedTo, expectedFrom, paymentAsset = 'usdt' }) {
   const required = REQUIRED_CONFIRMATIONS[chain] || 15;
   const asset = (paymentAsset || 'usdt').toLowerCase();

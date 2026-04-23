@@ -2039,5 +2039,220 @@ export function runMigrations() {
     }
   }
 
+  // v68: retail_dex_orders — retail DEX order ledger for retail-proxy skill
+  {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS retail_dex_orders (
+        id TEXT PRIMARY KEY,
+        user_kasia_address TEXT NOT NULL,
+        side TEXT NOT NULL CHECK(side IN ('buy_kas','sell_kas')),
+        order_type TEXT NOT NULL CHECK(order_type IN ('market','limit')),
+        qty TEXT NOT NULL,
+        price TEXT,
+        pay_chain TEXT,
+        pay_address TEXT,
+        receive_address TEXT,
+        quoted_usdt TEXT,
+        state TEXT NOT NULL DEFAULT 'aligning' CHECK(state IN ('aligning','confirming','awaiting_payment','paid','executing','completed','refunding','refunded','failed','expired')),
+        pay_tx_hash TEXT,
+        exchange_offer_id TEXT,
+        deliver_tx_hash TEXT,
+        refund_tx_hash TEXT,
+        error_reason TEXT,
+        expires_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_dex_user ON retail_dex_orders(user_kasia_address, state);
+      CREATE INDEX IF NOT EXISTS idx_retail_dex_state ON retail_dex_orders(state, updated_at);
+    `);
+    console.log('[migrate] v68: retail_dex_orders table created.');
+
+    const hasCol = sqlite.prepare("PRAGMA table_info(relay_nodes)").all()
+      .some(c => c.name === 'is_dex_broker');
+    if (!hasCol) {
+      sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN is_dex_broker INTEGER DEFAULT 0`);
+      console.log('[migrate] v68: relay_nodes.is_dex_broker column added.');
+    }
+  }
+
+  // v69: retail_dex_orders.agent_pay_addr + agent_deliver_addr (T6)
+  // agent 的 USDT 收款地址 (买场景) 或 KAS 交付来源 (卖场景)
+  {
+    const hasCol = sqlite.prepare("PRAGMA table_info(retail_dex_orders)").all()
+      .some(c => c.name === 'agent_pay_addr');
+    if (!hasCol) {
+      sqlite.exec(`ALTER TABLE retail_dex_orders ADD COLUMN agent_pay_addr TEXT`);
+      console.log('[migrate] v69: retail_dex_orders.agent_pay_addr column added.');
+    }
+    const hasCol2 = sqlite.prepare("PRAGMA table_info(retail_dex_orders)").all()
+      .some(c => c.name === 'mid_price_at_quote');
+    if (!hasCol2) {
+      sqlite.exec(`ALTER TABLE retail_dex_orders ADD COLUMN mid_price_at_quote TEXT`);
+      console.log('[migrate] v69: retail_dex_orders.mid_price_at_quote column added.');
+    }
+  }
+
+  // v70 (2026-04-23): 回填 handshake orphan — status='observed' 但链上已有本地发出的 outbound handshake
+  //
+  // Bug 历史: 2026-04-14 在 3 处加的 pending_action guard 用错字段 (handshake_observed_at 而非
+  // handshake_accepted_at), 导致 inbound 握手 → pending_action 不入队. 同时 ingest-service.js
+  // 的 outbound handshake 分支只 update pending_actions 不调 acceptHandshake, 依赖 scout/discovery.js
+  // 的 relation_states 推进, 但 discovery.js:289 按 chain_events.txid 整段 dedup,
+  // relay 先写 chain_events → scout 来晚被跳过 → acceptHandshake 永远不调 →
+  // relation_states 永远停在 observed, 即使链上双向握手都已完成.
+  //
+  // 本 migrate 一次性回填所有符合"链上已握手成功但状态卡 observed"的行:
+  //   1. status='observed' 且 handshake_accepted_at 为空
+  //   2. chain_events 有 event_type='handshake' from=local_address to=peer_address (本地 Agent 发出过)
+  // 推进为 accepted + 填 handshake_accepted_at (取 outbound chain_events 的 observed_at) +
+  // 升级 classification (seen_candidate/declared_candidate → responsive_agent)
+  {
+    const now = new Date().toISOString();
+    const backfill = sqlite.prepare(`
+      UPDATE relation_states
+      SET status = 'accepted',
+          handshake_accepted_at = (
+            SELECT ce.observed_at FROM chain_events ce
+            WHERE ce.event_type = 'handshake'
+              AND ce.from_address = relation_states.local_address
+              AND ce.to_address = relation_states.peer_address
+            ORDER BY ce.observed_at LIMIT 1
+          ),
+          classification = CASE
+            WHEN classification IN ('seen_candidate', 'declared_candidate') THEN 'responsive_agent'
+            ELSE classification
+          END,
+          updated_at = ?
+      WHERE status = 'observed'
+        AND handshake_accepted_at IS NULL
+        AND EXISTS (
+          SELECT 1 FROM chain_events ce
+          WHERE ce.event_type = 'handshake'
+            AND ce.from_address = relation_states.local_address
+            AND ce.to_address = relation_states.peer_address
+        )
+    `).run(now);
+    if (backfill.changes > 0) {
+      console.log(`[migrate] v70: backfilled ${backfill.changes} orphan relation_states → accepted (had outbound handshake but stuck observed, bug #4)`);
+    } else {
+      console.log('[migrate] v70: no orphan relation_states to backfill');
+    }
+  }
+
+  // v71 (2026-04-23): retail_dex_broker_config — DEX broker 撮合费配置
+  {
+    const hasTable = sqlite.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='retail_dex_broker_config'"
+    ).get();
+    if (!hasTable) {
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS retail_dex_broker_config (
+          broker_relay_id TEXT PRIMARY KEY,
+          fee_kas_per_order TEXT NOT NULL DEFAULT '0.1',
+          fee_display_name TEXT DEFAULT '撮合服务费',
+          public_disclosure INTEGER DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+      `);
+      console.log('[migrate] v71: retail_dex_broker_config table created.');
+    }
+  }
+
+  // v72 (2026-04-23): retail_dex_orders add 4 fields (group_id/broker_fee_kas/net_delivery_kas/expires_user_set)
+  {
+    const existing = sqlite.prepare('PRAGMA table_info(retail_dex_orders)').all();
+    const existingCols = new Set(existing.map(c => c.name));
+
+    const fields = [
+      { name: 'group_id', type: 'TEXT' },
+      { name: 'broker_fee_kas', type: 'TEXT' },
+      { name: 'net_delivery_kas', type: 'TEXT' },
+      { name: 'expires_user_set', type: 'TEXT' },
+    ];
+
+    const altered = [];
+    for (const f of fields) {
+      if (!existingCols.has(f.name)) {
+        sqlite.exec(`ALTER TABLE retail_dex_orders ADD COLUMN ${f.name} ${f.type}`);
+        altered.push(f.name);
+      }
+    }
+    if (altered.length > 0) {
+      console.log(`[migrate] v72: added columns to retail_dex_orders: ${altered.join(', ')}`);
+    }
+  }
+
+  // v73 (2026-04-23): retail_dex_user_memory — 用户偏好记忆蒸馏
+  {
+    const hasTable = sqlite.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='retail_dex_user_memory'"
+    ).get();
+    if (!hasTable) {
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS retail_dex_user_memory (
+          user_kasia_address TEXT PRIMARY KEY,
+          distilled_summary TEXT,
+          preferred_chain TEXT,
+          preferred_pay_address TEXT,
+          tone_preference TEXT,
+          notable_preferences TEXT,
+          last_distilled_at TEXT,
+          message_count_at_distill INTEGER,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+      `);
+      console.log('[migrate] v73: retail_dex_user_memory table created.');
+    }
+  }
+
+  // v74 (2026-04-23): retail_dex_buy_publications — Seeder 代用户挂 BUY offer
+  {
+    const hasTable = sqlite.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='retail_dex_buy_publications'"
+    ).get();
+    if (!hasTable) {
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS retail_dex_buy_publications (
+          id TEXT PRIMARY KEY,
+          user_kasia_address TEXT NOT NULL,
+          broker_relay_id TEXT NOT NULL,
+          seeder_relay_id TEXT NOT NULL,
+          side TEXT NOT NULL CHECK(side = 'buy_kas'),
+          qty TEXT NOT NULL,
+          limit_price TEXT NOT NULL,
+          total_usdt TEXT NOT NULL,
+          pay_chain TEXT NOT NULL,
+          user_usdt_deposit_tx TEXT,
+          seeder_publish_offer_id TEXT,
+          state TEXT NOT NULL CHECK(state IN (
+            'awaiting_deposit',
+            'deposited',
+            'published',
+            'filled',
+            'completed',
+            'refunding',
+            'refunded',
+            'failed'
+          )),
+          expires_at TEXT NOT NULL,
+          filled_at TEXT,
+          kas_delivery_tx TEXT,
+          usdt_refund_tx TEXT,
+          error_reason TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_buy_pub_user
+          ON retail_dex_buy_publications(user_kasia_address, state);
+        CREATE INDEX IF NOT EXISTS idx_buy_pub_state
+          ON retail_dex_buy_publications(state, expires_at);
+      `);
+      console.log('[migrate] v74: retail_dex_buy_publications table created.');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

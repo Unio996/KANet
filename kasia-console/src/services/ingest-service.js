@@ -90,11 +90,15 @@ export async function handleIngestMessage(payload) {
         // 或关系已达 accepted/confirmed/active, 对方回来的握手只是 ACK,
         // 不要再入队 handshake_accept — 否则 /loop 会再花 0.2 KAS 回一次.
         // 实测: J2 作为 sender 有 10 组重复握手, 累计浪费 ~2 KAS.
+        // 2026-04-23 修复: 原 guard 用 handshake_observed_at IS NOT NULL, 但 observeHandshake()
+        // 刚刚在上一行写入了 handshake_observed_at, guard 立即命中 → pending_action 永远不入队 →
+        // accept 动作永远不触发 → Bug: 收到 inbound 握手后系统不回发 0.2 KAS.
+        // 正确语义: 只拦"我已接受过 (handshake_accepted_at)"或"已 active", 不拦首次 observed.
         try {
           const already = sqlite.prepare(`
             SELECT 1 FROM relation_states
             WHERE local_address = ? AND peer_address = ?
-              AND (handshake_observed_at IS NOT NULL
+              AND (handshake_accepted_at IS NOT NULL
                 OR status IN ('accepted','confirmed','active'))
             LIMIT 1
           `).get(localAddress, remoteAddress);
@@ -116,7 +120,17 @@ export async function handleIngestMessage(payload) {
           console.log(`[ingest] pending_actions write failed: ${paErr.message}`);
         }
       }
-      // outbound handshake = Relay 已接受 → 完成 pending_actions
+      // outbound handshake = Relay 已接受/发起 → 完成 pending_actions + 推进 relation_states
+      //
+      // 2026-04-23 修: 原只更新 pending_actions, 忘了调 acceptHandshake() 推进 relation_states.
+      // 后果: status 永远停在 'observed', handshake_accepted_at 永远 null.
+      // 连锁超发风险: Relay 的 doAcceptHandshake 查 API /api/relation/status 返 observed,
+      // 不在 accepted/active/confirmed 白名单, 重启后 _acceptedPeers 内存 Set 清空,
+      // 同一 peer 下次被观察到会再次触发 acceptHandshake → 再发 0.2 KAS.
+      //
+      // 原本依赖 scout/discovery.js 的 acceptHandshake 路径 (line 351), 但 discovery.js:289
+      // 按 chain_events.txid 整段 dedup, relay 先写了 chain_events → scout 来晚被跳过 →
+      // acceptHandshake 永远不调. 这里补上让 outbound ingest 直接推进.
       if (direction === 'outbound') {
         try {
           sqlite.prepare(`
@@ -125,6 +139,12 @@ export async function handleIngestMessage(payload) {
           `).run(txid || null, nowIso(), localAddress, remoteAddress);
         } catch (paErr) {
           console.log(`[ingest] pending_actions complete failed: ${paErr.message}`);
+        }
+        // 推进 relation_states: observed → accepted (关键防超发)
+        try {
+          acceptHandshake(localAddress, remoteAddress);
+        } catch (rsErr) {
+          console.log(`[ingest] acceptHandshake advance failed: ${rsErr.message}`);
         }
       }
     } catch (err) {

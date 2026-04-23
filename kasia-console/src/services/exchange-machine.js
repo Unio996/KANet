@@ -601,7 +601,7 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
         transition(offer_id, 'completed', { txHash: payment_tx });
         try { const { spendFunds } = await import('./fund-lock.js'); spendFunds(offer_id); } catch {}
         sqlite.prepare(`
-          INSERT INTO chain_events (id, event_type, from_address, to_address, tx_hash, payload, observed_at)
+          INSERT INTO chain_events (id, event_type, from_address, to_address, txid, payload, observed_at)
           VALUES (?, 'exchange_completed', ?, ?, ?, ?, datetime('now'))
         `).run(crypto.randomUUID(), offer.maker, offer.taker, payment_tx, JSON.stringify({
           offer_id, give_asset: offer.give_asset, give_amount: offer.give_amount,
@@ -631,16 +631,28 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
           const DELIVERY_RETRY_MS = 10_000;
           let deliveryTxId = null;
 
+          // T-22-05 retail-proxy: accept 可带 verification_meta.receive_address 指定第三方 KAS 收件地址
+          // 未指定 → 默认发给 offer.taker (原 MM 行为保留兼容)
+          let deliveryTarget = deliveringOffer.taker;
+          try {
+            const dmeta = JSON.parse(deliveringOffer.verification_meta || '{}');
+            if (dmeta.receive_address && typeof dmeta.receive_address === 'string'
+                && dmeta.receive_address.startsWith('kaspa:')) {
+              deliveryTarget = dmeta.receive_address;
+              console.log(`[exchange] delivery routed to third-party ${deliveryTarget.slice(-12)} (taker=${deliveringOffer.taker.slice(-12)})`);
+            }
+          } catch {}
+
           for (let attempt = 1; attempt <= MAX_DELIVERY_ATTEMPTS; attempt++) {
             try {
               const { sendCommandAsync } = await import('./relay-manager.js');
               const sendResult = await sendCommandAsync(deliveryAgent.id, {
                 type: 'transfer',
-                target: deliveringOffer.taker,
+                target: deliveryTarget,
                 amount: String(deliveringOffer.give_amount),
               });
               deliveryTxId = sendResult?.txId;
-              console.log(`[exchange] KAS delivery attempt ${attempt}: ${deliveringOffer.give_amount} KAS → ${deliveringOffer.taker.slice(-12)} TX: ${deliveryTxId || '?'}`);
+              console.log(`[exchange] KAS delivery attempt ${attempt}: ${deliveringOffer.give_amount} KAS → ${deliveryTarget.slice(-12)} TX: ${deliveryTxId || '?'}`);
               break; // success
             } catch (err) {
               console.error(`[exchange] KAS delivery attempt ${attempt}/${MAX_DELIVERY_ATTEMPTS} FAILED: ${err.message}`);
@@ -661,7 +673,7 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
               delivery_tx: deliveryTxId,
               delivery_asset: deliveringOffer.give_asset,
               delivery_amount: deliveringOffer.give_amount,
-              receiver: deliveringOffer.taker,
+              receiver: deliveryTarget, // T-22-05: 真实收件人(可能是第三方,见上)
             });
 
             let deliveredBcastTxId = null;
@@ -681,7 +693,7 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
               // Stay in delivering, do NOT mark completed. Operator or next tick can retry.
               console.error(`[exchange] offer ${offer_id.slice(0,8)} KAS sent (${deliveryTxId}) but delivered broadcast failed. Staying in delivering.`);
               sqlite.prepare(`
-                INSERT INTO chain_events (id, event_type, from_address, to_address, tx_hash, payload, observed_at)
+                INSERT INTO chain_events (id, event_type, from_address, to_address, txid, payload, observed_at)
                 VALUES (?, 'kas_delivery', ?, ?, ?, ?, datetime('now'))
               `).run(crypto.randomUUID(), deliveringOffer.maker, deliveringOffer.taker, deliveryTxId,
                 JSON.stringify({ offer_id: deliveringOffer.id, amount: deliveringOffer.give_amount, broadcast_failed: true }));
@@ -690,7 +702,7 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
               sqlite.prepare('UPDATE exchange_offers SET delivery_tx = ? WHERE id = ?').run(deliveryTxId, offer_id);
               transition(offer_id, 'completed', { txHash: deliveryTxId });
               sqlite.prepare(`
-                INSERT INTO chain_events (id, event_type, from_address, to_address, tx_hash, payload, observed_at)
+                INSERT INTO chain_events (id, event_type, from_address, to_address, txid, payload, observed_at)
                 VALUES (?, 'kas_delivery', ?, ?, ?, ?, datetime('now'))
               `).run(crypto.randomUUID(), deliveringOffer.maker, deliveringOffer.taker, deliveryTxId,
                 JSON.stringify({ offer_id: deliveringOffer.id, amount: deliveringOffer.give_amount, broadcast_tx: deliveredBcastTxId }));

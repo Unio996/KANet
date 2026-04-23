@@ -241,3 +241,43 @@ const confirmTimeMs = requiredConfirmations / KASPA_BPS * 1000;
 ```javascript
 const confirmTimeMs = requiredConfirmations * 1000; // 假设 1 BPS = 大错
 ```
+
+---
+
+## Rule 11: Qwen3 reasoning kill switch — 必须传 chat_template_kwargs
+
+**WHY**: Qwen3.6 默认 thinking 模式, 会在 `reasoning_content` 字段吃光 `max_tokens` 几千字符 "Here's a thinking process..." 然后 `content` 空. 后果:
+- 延迟 8 倍 (8s → 1s)
+- content 空 → 回落 reasoning_content → 需额外 extractJson 从英文推理堆里抽 JSON, 易抓错
+- channel-bridge 5 min timeout 概率大
+
+坊间流传的 `/no_think` 前缀在 Qwen3.6-35B-A3B **实测无效** (sys 前缀 / user 前缀都不关 reasoning). 唯一真正的 kill switch 是 API body 加 `chat_template_kwargs: { enable_thinking: false }`.
+
+**DO**:
+```javascript
+const body = {
+  model: 'Qwen3.6-35B-A3B',
+  messages,
+  max_tokens: 1000,
+  temperature: 0.3,
+  chat_template_kwargs: { enable_thinking: false },  // ← 必须
+};
+```
+
+**DON'T**:
+```javascript
+// 假 kill switch — Qwen3.6 根本不看这前缀
+const SYSTEM = `/no_think\n你是摘要助手...`;
+// 或
+messages.push({ role: 'user', content: userMsg + '\n/no_think' });
+```
+
+**实测对比**（同 prompt, Qwen3.6-35B-A3B-Q4_K_M.gguf）:
+| 方法 | content | reasoning | 延迟 |
+|---|---|---|---|
+| 裸 (无 kill switch) | 134c | 1936c 浪费 | 8s |
+| sys /no_think | 116c | 1974c (不生效!) | 8s |
+| user /no_think | **0c ❌** | 2756c | 更糟 |
+| **chat_template_kwargs** | 163c ✓ | **0c ✓** | **1s** |
+
+适用所有 Qwen3.6 API caller: `llm-dispatcher.js` / `retail-dex-dialog.js` / `retail-dex-memory.js` / `scripts/qwen-bridge-worker.js` / `scripts/qwen.js`.
