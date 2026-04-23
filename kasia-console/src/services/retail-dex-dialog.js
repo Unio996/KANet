@@ -297,5 +297,45 @@ export async function interpret(userAddr, userMessage, brokerAddress = null) {
   }
 
   clearHistory(userAddr);
+
+  // TASK 4.2: 余额前置校验 (buy_kas 场景)
+  if (validation.order.side === 'buy_kas') {
+    try {
+      const { getTokenBalance } = await import('./chain-balance.js');
+      const chainCode = _normalizeChainForBalance(validation.order.pay_chain);
+      const r = await getTokenBalance(chainCode, validation.order.pay_address, 'usdt');
+      if (r.error && !r.error.startsWith('no_')) {
+        console.warn(`retail-dex-dialog: balance check failed: ${r.error}`);
+      } else if (r.balance !== undefined) {
+        const midPrice = snap?.midPrice || 0.034;
+        const needed = parseFloat(validation.order.qty) * midPrice;
+        if (r.balance < needed * 0.99) {
+          const addrTail = validation.order.pay_address.slice(2, 8);
+          return {
+            ready: false,
+            reply: `你的 ${validation.order.pay_chain} 地址 0x${addrTail}... 当前 USDT 余额 ${r.balance.toFixed(4)}, 不够付 ${needed.toFixed(2)} USDT (买 ${validation.order.qty} KAS 约需). 建议: 1) 先充值 USDT; 2) 改小数量 "买 X KAS" (X 是你能付的上限).`,
+            validation_error: 'insufficient_balance',
+          };
+        }
+      }
+    } catch (err) {
+      console.warn(`retail-dex-dialog: balance check exception: ${err.message}`);
+      // fail-open, 不拦用户
+    }
+  }
+
   return { ready: true, order: validation.order };
+}
+
+function _normalizeChainForBalance(chain) {
+  if (!chain) return null;
+  const c = String(chain).toUpperCase();
+  if (c === 'BSC' || c === 'BNB' || c === 'BEP20') return 'bnb';
+  if (c === 'ETH' || c === 'ETHEREUM') return 'eth';
+  if (c === 'POLYGON' || c === 'MATIC') return 'polygon';
+  if (c === 'ARBITRUM') return 'arbitrum';
+  if (c === 'OPTIMISM') return 'optimism';
+  if (c === 'AVALANCHE') return 'avalanche';
+  if (c === 'BASE') return 'base';
+  return c.toLowerCase();
 }

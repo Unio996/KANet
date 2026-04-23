@@ -7,6 +7,17 @@ import { fetchKasPrice } from './market-seeder.js';
 import { transferUsdt } from './evm-transfer.js';
 import { decrypt } from './crypto.js';
 
+// ── Broker config helpers ──────────────────────────────────────────────────
+
+const DEFAULT_FEE_KAS = '0.1';
+
+function getFeeKasPerOrder(brokerRelayId) {
+  const row = sqlite.prepare(
+    'SELECT fee_kas_per_order FROM retail_dex_broker_config WHERE broker_relay_id = ?'
+  ).get(brokerRelayId || null);
+  return row?.fee_kas_per_order || DEFAULT_FEE_KAS;
+}
+
 // ── Config ──────────────────────────────────────────────────────────────────
 
 const MAX_ORDER_USDT = 100;
@@ -83,17 +94,21 @@ function isCancel(text) {
 
 // ── Data Access ─────────────────────────────────────────────────────────────
 
-function createOrder({ user_kasia_address, side, order_type, qty, price }) {
+function createOrder({ user_kasia_address, side, order_type, qty, price, brokerRelayId }) {
   const id = randomUUID();
   const now = new Date().toISOString();
   const expiresAt = new Date(Date.now() + ORDER_TIMEOUT_MS).toISOString();
+  const feeKas = getFeeKasPerOrder(brokerRelayId);
+  const qtyNum = parseFloat(qty);
+  const brokerFeeKas = feeKas;
+  const netDeliveryKas = (qtyNum - parseFloat(feeKas)).toFixed(6);
 
   sqlite.prepare(`
     INSERT INTO retail_dex_orders (
       id, user_kasia_address, side, order_type, qty, price,
-      state, expires_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, 'aligning', ?, ?, ?)
-  `).run(id, user_kasia_address, side, order_type, qty, price ?? null, expiresAt, now, now);
+      state, expires_at, created_at, updated_at, broker_fee_kas, net_delivery_kas
+    ) VALUES (?, ?, ?, ?, ?, ?, 'aligning', ?, ?, ?, ?, ?)
+  `).run(id, user_kasia_address, side, order_type, qty, price ?? null, expiresAt, now, now, brokerFeeKas, netDeliveryKas);
 
   return id;
 }
@@ -430,21 +445,26 @@ function buildOrderConfirmText(order, preCheckResult) {
   const isMarket = order.order_type === 'market';
   const chain = (order.pay_chain || order.receive_chain || '').toUpperCase();
   const userKasiaTail = (order.user_kasia_address || '').slice(-16);
+  const feeKas = parseFloat(order.broker_fee_kas || DEFAULT_FEE_KAS);
+  const netDelivery = order.net_delivery_kas
+    ? parseFloat(order.net_delivery_kas)
+    : parseFloat(order.qty) - feeKas;
 
   if (isBuy && isMarket) {
     return [
       `=== 订单确认 ${id8} (非托管) ===`,
       `动作: 买 ${order.qty} KAS (市价)`,
       `汇率: ${parseFloat(order.mid_price_at_quote || 0).toFixed(6)} USDT/KAS`,
-      `你要付: ${order.quoted_usdt} USDT (${chain})`,
-      `收款地址 (Maker 直收): ${order.agent_pay_addr}`,
+      `你付: ${order.quoted_usdt} USDT (${chain}) → Maker 直收`,
+      `扣 ${feeKas} KAS 撮合服务费 (Broker 内部结算, 不用你单独转)`,
+      `实到: ${netDelivery.toFixed(6)} KAS (到你 Kasia 地址 ...${userKasiaTail})`,
       `有效期: 30 分钟`,
       ``,
       `操作:`,
       `1. 回复 YES 确认 — Broker 会上链代你广播 accept`,
       `2. 30 min 内用自己钱包付 ${order.quoted_usdt} USDT 到上方 Maker 地址`,
       `3. 付完把 tx hash 回复给我`,
-      `4. Maker 自动把 ${order.qty} KAS 直发到 ...${userKasiaTail}`,
+      `4. Maker 自动把 KAS 直发到你的 Kasia`,
       ``,
       `说明: 你的 USDT 直接给 Maker, Broker 全程不持有资金, 只代发链上广播。`,
       `争议: Maker 违约可走 dispute 协议由社区仲裁。`,
@@ -722,7 +742,7 @@ async function _broadcastAcceptV1(brokerRelayId, order) {
 
 // ── handleDm — 对齐追问主入口 ──────────────────────────────────────────────
 
-async function handleDm(senderAddress, message, brokerRelayId) {
+async function _handleDmInternal(senderAddress, message, brokerRelayId) {
   // fetchKasPrice is imported at top via market-seeder.js (Opus T5 CORRECTION)
   const active = getActiveOrderForUser(senderAddress);
   if (!active) {
@@ -730,7 +750,7 @@ async function handleDm(senderAddress, message, brokerRelayId) {
     // 直接走 parseIntent 快速路径 (老用户知道格式, 省一次 LLM 调用)
     const fastIntent = parseIntent(message);
     if (fastIntent) {
-      const id = createOrder({ user_kasia_address: senderAddress, ...fastIntent });
+      const id = createOrder({ user_kasia_address: senderAddress, brokerRelayId, ...fastIntent });
       const fullOrder = getOrderById(id);
       const midPrice = await fetchKasPrice();
       const checkResult = preCheck(fullOrder, senderAddress, midPrice);
@@ -747,7 +767,7 @@ async function handleDm(senderAddress, message, brokerRelayId) {
     try {
       const { interpret } = await import('./retail-dex-dialog.js');
       const brokerAddr = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(brokerRelayId)?.address || null;
-      dialog = await interpret(senderAddress, message, brokerAddr);
+      dialog = await interpret(senderAddress, message, brokerAddr, brokerRelayId);
     } catch (err) {
       console.error(`[retail-dex] dialog interpret err: ${err.message}`);
       return '我这边暂时卡了。你可以直接用格式下单: 买 50 KAS';
@@ -759,6 +779,7 @@ async function handleDm(senderAddress, message, brokerRelayId) {
     // 齐备 + 有效 → 建单 (跳过 aligning, 直进 confirming)
     const id = createOrder({
       user_kasia_address: senderAddress,
+      brokerRelayId,
       side: dialog.order.side,
       order_type: dialog.order.order_type || 'market',
       qty: dialog.order.qty,
@@ -920,6 +941,12 @@ async function handleDm(senderAddress, message, brokerRelayId) {
     default:
       return `订单 ${current.id.slice(0, 8)} 状态: ${current.state}。已结束，不可操作。`;
   }
+}
+
+// ── handleDm wrapper (backwards compat) ────────────────────────────────────
+
+async function handleDm(senderAddress, message, brokerRelayId) {
+  return _handleDmInternal(senderAddress, message, brokerRelayId);
 }
 
 // ── Exports ─────────────────────────────────────────────────────────────────
