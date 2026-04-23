@@ -41,8 +41,10 @@ export async function parseRules(conditionId, { backend = 'qwen', force = false 
     }
   }
 
-  // /no_think = Qwen3 chat template 禁用 thinking (Qwen3.6 保留兼容).
-  // 避免 reasoning_content 吃光 token 导致 content 空返空 JSON.
+  // QWEN-RULES.md Rule 11 (2026-04-23): /no_think 前缀实测无效, 真 kill switch 是
+  // body.chat_template_kwargs:{enable_thinking:false}. 本 caller 走 llm-dispatcher.callLlm()
+  // qwen backend 已自动加 kill switch, 以下 prompt 里的 /no_think 是兼容保留 (Qwen3.6 版本下
+  // 不报错但不生效). 留着不清理, 以防某些 llama-server 配置下 /no_think 作为软提示有益.
   const system = `/no_think
 You are a Polymarket rules analyst. Output ONLY valid JSON (no thinking, no prose, no markdown code fence). Your response MUST start with { and end with }. Schema:
 {
