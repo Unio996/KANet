@@ -2140,5 +2140,119 @@ export function runMigrations() {
     }
   }
 
+  // v71 (2026-04-23): retail_dex_broker_config — DEX broker 撮合费配置
+  {
+    const hasTable = sqlite.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='retail_dex_broker_config'"
+    ).get();
+    if (!hasTable) {
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS retail_dex_broker_config (
+          broker_relay_id TEXT PRIMARY KEY,
+          fee_kas_per_order TEXT NOT NULL DEFAULT '0.1',
+          fee_display_name TEXT DEFAULT '撮合服务费',
+          public_disclosure INTEGER DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+      `);
+      console.log('[migrate] v71: retail_dex_broker_config table created.');
+    }
+  }
+
+  // v72 (2026-04-23): retail_dex_orders add 4 fields (group_id/broker_fee_kas/net_delivery_kas/expires_user_set)
+  {
+    const existing = sqlite.prepare('PRAGMA table_info(retail_dex_orders)').all();
+    const existingCols = new Set(existing.map(c => c.name));
+
+    const fields = [
+      { name: 'group_id', type: 'TEXT' },
+      { name: 'broker_fee_kas', type: 'TEXT' },
+      { name: 'net_delivery_kas', type: 'TEXT' },
+      { name: 'expires_user_set', type: 'TEXT' },
+    ];
+
+    const altered = [];
+    for (const f of fields) {
+      if (!existingCols.has(f.name)) {
+        sqlite.exec(`ALTER TABLE retail_dex_orders ADD COLUMN ${f.name} ${f.type}`);
+        altered.push(f.name);
+      }
+    }
+    if (altered.length > 0) {
+      console.log(`[migrate] v72: added columns to retail_dex_orders: ${altered.join(', ')}`);
+    }
+  }
+
+  // v73 (2026-04-23): retail_dex_user_memory — 用户偏好记忆蒸馏
+  {
+    const hasTable = sqlite.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='retail_dex_user_memory'"
+    ).get();
+    if (!hasTable) {
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS retail_dex_user_memory (
+          user_kasia_address TEXT PRIMARY KEY,
+          distilled_summary TEXT,
+          preferred_chain TEXT,
+          preferred_pay_address TEXT,
+          tone_preference TEXT,
+          notable_preferences TEXT,
+          last_distilled_at TEXT,
+          message_count_at_distill INTEGER,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+      `);
+      console.log('[migrate] v73: retail_dex_user_memory table created.');
+    }
+  }
+
+  // v74 (2026-04-23): retail_dex_buy_publications — Seeder 代用户挂 BUY offer
+  {
+    const hasTable = sqlite.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='retail_dex_buy_publications'"
+    ).get();
+    if (!hasTable) {
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS retail_dex_buy_publications (
+          id TEXT PRIMARY KEY,
+          user_kasia_address TEXT NOT NULL,
+          broker_relay_id TEXT NOT NULL,
+          seeder_relay_id TEXT NOT NULL,
+          side TEXT NOT NULL CHECK(side = 'buy_kas'),
+          qty TEXT NOT NULL,
+          limit_price TEXT NOT NULL,
+          total_usdt TEXT NOT NULL,
+          pay_chain TEXT NOT NULL,
+          user_usdt_deposit_tx TEXT,
+          seeder_publish_offer_id TEXT,
+          state TEXT NOT NULL CHECK(state IN (
+            'awaiting_deposit',
+            'deposited',
+            'published',
+            'filled',
+            'completed',
+            'refunding',
+            'refunded',
+            'failed'
+          )),
+          expires_at TEXT NOT NULL,
+          filled_at TEXT,
+          kas_delivery_tx TEXT,
+          usdt_refund_tx TEXT,
+          error_reason TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_buy_pub_user
+          ON retail_dex_buy_publications(user_kasia_address, state);
+        CREATE INDEX IF NOT EXISTS idx_buy_pub_state
+          ON retail_dex_buy_publications(state, expires_at);
+      `);
+      console.log('[migrate] v74: retail_dex_buy_publications table created.');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
