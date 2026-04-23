@@ -601,7 +601,7 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
         transition(offer_id, 'completed', { txHash: payment_tx });
         try { const { spendFunds } = await import('./fund-lock.js'); spendFunds(offer_id); } catch {}
         sqlite.prepare(`
-          INSERT INTO chain_events (id, event_type, from_address, to_address, tx_hash, payload, observed_at)
+          INSERT INTO chain_events (id, event_type, from_address, to_address, txid, payload, observed_at)
           VALUES (?, 'exchange_completed', ?, ?, ?, ?, datetime('now'))
         `).run(crypto.randomUUID(), offer.maker, offer.taker, payment_tx, JSON.stringify({
           offer_id, give_asset: offer.give_asset, give_amount: offer.give_amount,
@@ -693,7 +693,7 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
               // Stay in delivering, do NOT mark completed. Operator or next tick can retry.
               console.error(`[exchange] offer ${offer_id.slice(0,8)} KAS sent (${deliveryTxId}) but delivered broadcast failed. Staying in delivering.`);
               sqlite.prepare(`
-                INSERT INTO chain_events (id, event_type, from_address, to_address, tx_hash, payload, observed_at)
+                INSERT INTO chain_events (id, event_type, from_address, to_address, txid, payload, observed_at)
                 VALUES (?, 'kas_delivery', ?, ?, ?, ?, datetime('now'))
               `).run(crypto.randomUUID(), deliveringOffer.maker, deliveringOffer.taker, deliveryTxId,
                 JSON.stringify({ offer_id: deliveringOffer.id, amount: deliveringOffer.give_amount, broadcast_failed: true }));
@@ -702,7 +702,7 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
               sqlite.prepare('UPDATE exchange_offers SET delivery_tx = ? WHERE id = ?').run(deliveryTxId, offer_id);
               transition(offer_id, 'completed', { txHash: deliveryTxId });
               sqlite.prepare(`
-                INSERT INTO chain_events (id, event_type, from_address, to_address, tx_hash, payload, observed_at)
+                INSERT INTO chain_events (id, event_type, from_address, to_address, txid, payload, observed_at)
                 VALUES (?, 'kas_delivery', ?, ?, ?, ?, datetime('now'))
               `).run(crypto.randomUUID(), deliveringOffer.maker, deliveringOffer.taker, deliveryTxId,
                 JSON.stringify({ offer_id: deliveringOffer.id, amount: deliveringOffer.give_amount, broadcast_tx: deliveredBcastTxId }));
