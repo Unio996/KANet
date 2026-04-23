@@ -431,19 +431,21 @@ function buildOrderConfirmText(order, preCheckResult) {
 
   if (isBuy && isMarket) {
     return [
-      `=== 订单确认 ${id8} ===`,
+      `=== 订单确认 ${id8} (非托管) ===`,
       `动作: 买 ${order.qty} KAS (市价)`,
       `汇率: ${parseFloat(order.mid_price_at_quote || 0).toFixed(6)} USDT/KAS`,
       `你要付: ${order.quoted_usdt} USDT (${chain})`,
-      `收款地址: ${order.agent_pay_addr}`,
+      `收款地址 (Maker 直收): ${order.agent_pay_addr}`,
       `有效期: 30 分钟`,
       ``,
       `操作:`,
-      `1. 回复 YES 确认`,
-      `2. 30 min 内向上方地址转 ${order.quoted_usdt} USDT`,
-      `3. KAS 自动到 ...${userKasiaTail}`,
+      `1. 回复 YES 确认 — Broker 会上链代你广播 accept`,
+      `2. 30 min 内用自己钱包付 ${order.quoted_usdt} USDT 到上方 Maker 地址`,
+      `3. 付完把 tx hash 回复给我`,
+      `4. Maker 自动把 ${order.qty} KAS 直发到 ...${userKasiaTail}`,
       ``,
-      `失败兜底: USDT 原路退回 ${(order.pay_address || '').slice(0, 10)}...`,
+      `说明: 你的 USDT 直接给 Maker, Broker 全程不持有资金, 只代发链上广播。`,
+      `争议: Maker 违约可走 dispute 协议由社区仲裁。`,
     ].join('\n');
   }
   if (!isBuy && isMarket) {
@@ -677,6 +679,51 @@ function stopOrderMonitor() {
   }
 }
 
+// ── Broadcast helpers (module-level, testable) ─────────────────────────────
+
+// sendCommandAsync 默认走 relay-manager, smoke 可注入 mock
+let _sendCommandAsyncImpl = null;
+async function _getSendCommandAsync() {
+  if (_sendCommandAsyncImpl) return _sendCommandAsyncImpl;
+  const m = await import('./relay-manager.js');
+  _sendCommandAsyncImpl = m.sendCommandAsync;
+  return _sendCommandAsyncImpl;
+}
+function _testInjectSendCommand(fn) { _sendCommandAsyncImpl = fn; }
+function _testResetSendCommand() { _sendCommandAsyncImpl = null; }
+
+// fetchKasPrice smoke 覆盖 (preCheck.checkPriceDeviation 用)
+let _midPriceOverride = null;
+function _testInjectMidPrice(val) { _midPriceOverride = val; }
+function _testResetMidPrice() { _midPriceOverride = null; }
+async function _getMidPrice() {
+  if (_midPriceOverride !== null) return _midPriceOverride;
+  return await fetchKasPrice();
+}
+
+async function _broadcastAcceptV1(brokerRelayId, order) {
+  const payload = {
+    t: 'kanet_exchange_accept_v1',
+    offer_id: order.exchange_offer_id,
+    selected_chain: normalizeChain(order.pay_chain),
+    payment_asset: 'usdt',
+    receive_address: order.user_kasia_address,   // Maker delivery 直达用户 Kasia 地址
+  };
+  try {
+    const send = await _getSendCommandAsync();
+    const res = await send(brokerRelayId, {
+      type: 'send_broadcast',
+      channel: 'kanet-exchange',
+      message: JSON.stringify(payload),
+    });
+    if (!res?.txId) return { ok: false, error: 'accept broadcast returned no txId', payload };
+    console.log(`[retail-dex] order ${order.id.slice(0,8)} accept_v1 上链 tx=${res.txId.slice(0,16)} offer=${order.exchange_offer_id?.slice(0,8)}`);
+    return { ok: true, txId: res.txId, payload };
+  } catch (err) {
+    return { ok: false, error: err.message, payload };
+  }
+}
+
 // ── DM Handler ──────────────────────────────────────────────────────────────
 
 // ── handleDm — 对齐追问主入口 ──────────────────────────────────────────────
@@ -720,21 +767,31 @@ async function handleDm(senderAddress, message, brokerRelayId) {
   // Re-fetch current state after transitions (handleDm can be called multiple times in tests)
   function refresh() { current = getOrderById(current.id); }
 
-  // T6: 字段齐 → 算报价 + 预查 + 返订单确认文本 (or 失败提示)
+  // TASK 2.2 非托管: 字段齐 → 选 offer → 算报价 (用 offer 数据) → 预查 → 转 confirming
   async function quoteAndMaybeConfirm(orderId) {
     const order = getOrderById(orderId);
-    const midPrice = await fetchKasPrice();
-    if (!midPrice) return '市场报价暂不可用,稍后再试。';
-    const quote = computeQuote(order, midPrice, brokerRelayId);
+    const offer = selectBestOffer(order);
+    if (!offer) {
+      return '当前无匹配挂单 (链/数量不匹配或无 open 卖单), 请稍后再试或调整数量。订单保留在对齐阶段。';
+    }
+    const quote = computeQuote(order, offer, brokerRelayId);
     if (!quote.ok) return `⚠ ${quote.friendly}`;
     setField(orderId, 'quoted_usdt', quote.quoted_usdt);
-    setField(orderId, 'agent_pay_addr', quote.agent_pay_addr);
-    setField(orderId, 'mid_price_at_quote', String(midPrice));
+    setField(orderId, 'agent_pay_addr', quote.maker_pay_addr);          // 字段名保留, 存 Maker 地址
+    setField(orderId, 'mid_price_at_quote', String(quote.mid_price));
+    setField(orderId, 'exchange_offer_id', offer.id);                   // 锁定这张挂单
     const fullOrder = getOrderById(orderId);
-    const pc = preCheck(fullOrder, senderAddress, midPrice);
+    // preCheck 用真实市场价 (对比 Maker 单价检查偏离), fetchKasPrice 失败降级到 offer mid_price (等同跳过 deviation 检查)
+    const realMid = (await _getMidPrice()) || quote.mid_price;
+    const pc = preCheck(fullOrder, senderAddress, realMid);
     if (!pc.ok) return buildOrderConfirmText(fullOrder, pc);
     updateState(orderId, 'confirming');
     return buildOrderConfirmText(fullOrder);
+  }
+
+  // TASK 2.2: 广播 kanet_exchange_accept_v1 — 用模块级 broadcastAcceptV1 (可测试注入)
+  async function broadcastAcceptV1(order) {
+    return _broadcastAcceptV1(brokerRelayId, order);
   }
 
   switch (current.state) {
@@ -779,9 +836,21 @@ async function handleDm(senderAddress, message, brokerRelayId) {
 
     case 'confirming': {
       if (isConfirm(trimmed)) {
+        // 再验 offer 还在 open 状态 (可能已被他人吃掉)
+        const offerRow = sqlite.prepare("SELECT protocol_status FROM exchange_offers WHERE id = ?").get(current.exchange_offer_id);
+        if (!offerRow || offerRow.protocol_status !== 'open') {
+          updateState(current.id, 'expired');
+          refresh();
+          return '原挂单已失效 (被他人吃单或已过期), 订单取消。请重新 DM 下单。';
+        }
+        // 广播 accept_v1 先上链, 成功再转态 (NO TX NO STATE CHANGE)
+        const bcast = await broadcastAcceptV1(current);
+        if (!bcast.ok) {
+          return `上链失败: ${bcast.error}。订单保留在 confirming, 可回 YES 重试。`;
+        }
         updateState(current.id, 'awaiting_payment');
         refresh();
-        return '已确认。等待支付...';
+        return `已上链挂单 (tx=${bcast.txId.slice(0,12)})。\n请在 30 分钟内向 Maker 地址转 ${current.quoted_usdt} USDT (${current.pay_chain}) 的 BSC 链收款地址, 付完把 tx hash 发回来。\nMaker 直接把 KAS 发到你的 Kasia 地址, Broker 不持有资金。`;
       }
       if (isCancel(trimmed)) {
         updateState(current.id, 'expired');
@@ -832,6 +901,11 @@ export {
   buildOrderConfirmText,
   normalizeChain,
   getAgentWalletAddr,
+  _broadcastAcceptV1,
+  _testInjectSendCommand,
+  _testResetSendCommand,
+  _testInjectMidPrice,
+  _testResetMidPrice,
   TXHASH_REGEX,
   CHAIN_REGEX,
   EVM_ADDR_REGEX,
