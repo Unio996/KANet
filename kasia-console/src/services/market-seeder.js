@@ -30,6 +30,7 @@ export function stopMarketSeeder() {
 // ── TASK 5a: Seeder BUY deposit watcher ───────────────────────────────────
 
 let _depositWatcherTimer = null;
+let _refundWorkerTimer = null;
 
 export function startSeederDepositWatcher() {
   // 每 30s tick: check awaiting_deposit → deposited → published
@@ -43,6 +44,88 @@ export function startSeederDepositWatcher() {
 
 export function stopSeederDepositWatcher() {
   if (_depositWatcherTimer) { clearInterval(_depositWatcherTimer); _depositWatcherTimer = null; }
+}
+
+// ── T5b: Seeder refund worker (timeout refund) ───────────────────────────────────
+
+// Test injection hooks (mirror exchange-machine pattern)
+let _sendCommandOverride = null;
+let _transferUsdtOverride = null;
+export function _testInjectSendCommandAsync(fn) { _sendCommandOverride = fn; }
+export function _testResetSendCommandAsync() { _sendCommandOverride = null; }
+export function _testInjectTransferUsdt(fn) { _transferUsdtOverride = fn; }
+export function _testResetTransferUsdt() { _transferUsdtOverride = null; }
+async function _getSendCommandAsync() {
+  if (_sendCommandOverride) return _sendCommandOverride;
+  const m = await import('./relay-manager.js');
+  return m.sendCommandAsync;
+}
+async function _getTransferUsdt() {
+  if (_transferUsdtOverride) return _transferUsdtOverride;
+  const m = await import('./evm-transfer.js');
+  return m.transferUsdt;
+}
+
+export function startSeederRefundWorker() {
+  _refundWorkerTimer = setInterval(async () => {
+    try { await refundWorkerTick(); } catch (err) {
+      console.error('[seeder] refund worker tick error:', err.message);
+    }
+  }, 30000);
+  console.log('[seeder] seeder refund worker started (30s interval)');
+}
+
+export function stopSeederRefundWorker() {
+  if (_refundWorkerTimer) { clearInterval(_refundWorkerTimer); _refundWorkerTimer = null; }
+}
+
+export async function refundWorkerTick() {
+  const expired = sqlite.prepare(`
+    SELECT * FROM retail_dex_buy_publications
+    WHERE state = 'published'
+      AND expires_at < datetime('now')
+  `).all();
+
+  for (const pub of expired) {
+    try {
+      const offer = sqlite.prepare("SELECT * FROM exchange_offers WHERE id = ?").get(pub.seeder_publish_offer_id);
+      if (!offer || offer.protocol_status !== 'open') continue;
+
+      const now = new Date().toISOString();
+      sqlite.prepare("UPDATE retail_dex_buy_publications SET state = 'refunding', updated_at = ? WHERE id = ?").run(now, pub.id);
+
+      const sendCommandAsync = await _getSendCommandAsync();
+      const cancelRes = await sendCommandAsync(pub.seeder_relay_id, {
+        type: 'send_broadcast',
+        payload: { t: 'kanet_exchange_cancel_v1', offer_id: pub.seeder_publish_offer_id, reason: 'timeout' },
+      });
+      if (cancelRes.error) throw new Error(`cancel_broadcast_failed: ${cancelRes.error}`);
+
+      const order = sqlite.prepare(`
+        SELECT pay_address, pay_chain FROM retail_dex_orders
+        WHERE user_kasia_address = ? AND side = 'buy_kas'
+        ORDER BY created_at DESC LIMIT 1
+      `).get(pub.user_kasia_address);
+      const refundAddr = order?.pay_address;
+      if (!refundAddr) throw new Error('no_taker_refund_address');
+
+      const transferUsdt = await _getTransferUsdt();
+      const wallet = sqlite.prepare(
+        "SELECT privkey_encrypted FROM agent_wallets WHERE relay_node_id = ? AND chain = ? AND is_default = 1 LIMIT 1"
+      ).get(pub.seeder_relay_id, pub.pay_chain);
+      if (!wallet?.privkey_encrypted) throw new Error('no_seeder_privkey');
+
+      const { txHash, error } = await transferUsdt(pub.pay_chain, wallet.privkey_encrypted, refundAddr, parseFloat(pub.total_usdt));
+      if (error) throw new Error(`refund_transfer_failed: ${error}`);
+
+      sqlite.prepare("UPDATE retail_dex_buy_publications SET state = 'refunded', usdt_refund_tx = ?, updated_at = ? WHERE id = ?").run(txHash, now, pub.id);
+      console.log(`[seeder] refund completed for pub ${pub.id.slice(0,8)}`);
+    } catch (err) {
+      const now = new Date().toISOString();
+      sqlite.prepare("UPDATE retail_dex_buy_publications SET state = 'failed', error_reason = ? WHERE id = ?").run(err.message, pub.id);
+      console.error(`[seeder] refund failed for pub ${pub.id.slice(0,8)}: ${err.message}`);
+    }
+  }
 }
 
 export async function depositWatcherTick() {

@@ -131,7 +131,71 @@ export function transition(offerId, newStatus, extra = {}) {
     `).run(offer.maker, offer.taker);
   }
 
+  // T5b: maker auto-pay-give — BUY offer (give=USDT) 完成时自动付 USDT 给 taker
+  // 仅当 pub.state='filled' 时触发（避免 double pay）
+  if (newStatus === 'completed' && offer.give_asset === 'USDT' && offer.give_chain) {
+    try { _makerAutoPayGive(offer).catch(e => console.error(`[exchange-machine] makerAutoPayGive error: ${e.message}`)); }
+    catch {}
+  }
+
   return sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offerId);
+}
+
+// ── Maker Auto-Pay-Give (T5b) ──────────────────────────────────────
+
+/**
+ * T5b: For BUY offers (maker gives USDT), auto-pay USDT to taker when completed.
+ * Only fires when pub.state='filled' (taker already sent KAS).
+ */
+export async function _makerAutoPayGive(offer) {
+  const pub = sqlite.prepare(
+    "SELECT * FROM retail_dex_buy_publications WHERE seeder_publish_offer_id = ? AND state = 'filled'"
+  ).get(offer.id);
+  if (!pub) {
+    // No matching pub or pub not filled — skip (may be a non-seeder BUY offer)
+    return;
+  }
+
+  const transferUsdt = await getTransferUsdt();
+  const wallet = sqlite.prepare(
+    "SELECT privkey_encrypted FROM agent_wallets WHERE relay_node_id = ? AND chain = ? AND is_default = 1 LIMIT 1"
+  ).get(offer.maker, pub.pay_chain);
+  if (!wallet?.privkey_encrypted) {
+    console.warn(`[exchange-machine] maker auto-pay: no seeder wallet for offer ${offer.id.slice(0, 8)}, pub ${pub.id.slice(0, 8)}`);
+    return;
+  }
+
+  const takerAddr = offer.taker_payment_address;
+  const amount = parseFloat(pub.total_usdt);
+
+  console.log(`[exchange-machine] maker auto-pay: sending ${amount} USDT → ${takerAddr?.slice(0, 12)}... on ${pub.pay_chain} for offer ${offer.id.slice(0, 8)}`);
+  const result = await transferUsdt(pub.pay_chain, wallet.privkey_encrypted, takerAddr, amount);
+  if (!result.ok) {
+    sqlite.prepare("UPDATE retail_dex_buy_publications SET state = 'failed', error_reason = ? WHERE id = ?").run(`maker_auto_pay_failed: ${result.error}`, pub.id);
+    throw new Error(`maker_auto_pay_failed: ${result.error}`);
+  }
+
+  console.log(`[exchange-machine] maker auto-pay TX: ${result.txHash} for offer ${offer.id.slice(0, 8)}`);
+
+  // Success: mark pub completed
+  const now = new Date().toISOString();
+  sqlite.prepare("UPDATE retail_dex_buy_publications SET state = 'completed', filled_at = ?, kas_delivery_tx = ?, updated_at = ? WHERE id = ?").run(result.txHash, result.txHash, now, pub.id);
+}
+
+// ── Test Injection ───────────────────────────────────────────
+
+let _transferUsdtOverride = null;
+export function _testInjectTransferUsdt(fn) { _transferUsdtOverride = fn; }
+export function _testResetTransferUsdt() { _transferUsdtOverride = null; }
+
+/**
+ * Internal: get transferUsdt (from override or dynamic import).
+ * Used by _makerAutoPayGive so smoke tests can inject a mock.
+ */
+async function getTransferUsdt() {
+  if (_transferUsdtOverride) return _transferUsdtOverride;
+  const m = await import('./evm-transfer.js');
+  return m.transferUsdt;
 }
 
 // ── Accept Logic ──────────────────────────────────────────────
@@ -734,6 +798,7 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
 
       // BUY path (kaspa_tx): taker already sent KAS, maker received it.
       // No separate delivery needed — go straight to completed.
+      // maker auto-pay-give is triggered by transition() below (completed → _makerAutoPayGive)
       if (payment_chain === 'kaspa' && deliveringOffer?.give_asset !== 'KAS') {
         sqlite.prepare('UPDATE exchange_offers SET delivery_tx = ? WHERE id = ?').run(payment_tx, offer_id);
         const completedOffer = transition(offer_id, 'completed', { txHash: payment_tx });
