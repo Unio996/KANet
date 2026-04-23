@@ -2093,5 +2093,52 @@ export function runMigrations() {
     }
   }
 
+  // v70 (2026-04-23): 回填 handshake orphan — status='observed' 但链上已有本地发出的 outbound handshake
+  //
+  // Bug 历史: 2026-04-14 在 3 处加的 pending_action guard 用错字段 (handshake_observed_at 而非
+  // handshake_accepted_at), 导致 inbound 握手 → pending_action 不入队. 同时 ingest-service.js
+  // 的 outbound handshake 分支只 update pending_actions 不调 acceptHandshake, 依赖 scout/discovery.js
+  // 的 relation_states 推进, 但 discovery.js:289 按 chain_events.txid 整段 dedup,
+  // relay 先写 chain_events → scout 来晚被跳过 → acceptHandshake 永远不调 →
+  // relation_states 永远停在 observed, 即使链上双向握手都已完成.
+  //
+  // 本 migrate 一次性回填所有符合"链上已握手成功但状态卡 observed"的行:
+  //   1. status='observed' 且 handshake_accepted_at 为空
+  //   2. chain_events 有 event_type='handshake' from=local_address to=peer_address (本地 Agent 发出过)
+  // 推进为 accepted + 填 handshake_accepted_at (取 outbound chain_events 的 observed_at) +
+  // 升级 classification (seen_candidate/declared_candidate → responsive_agent)
+  {
+    const now = new Date().toISOString();
+    const backfill = sqlite.prepare(`
+      UPDATE relation_states
+      SET status = 'accepted',
+          handshake_accepted_at = (
+            SELECT ce.observed_at FROM chain_events ce
+            WHERE ce.event_type = 'handshake'
+              AND ce.from_address = relation_states.local_address
+              AND ce.to_address = relation_states.peer_address
+            ORDER BY ce.observed_at LIMIT 1
+          ),
+          classification = CASE
+            WHEN classification IN ('seen_candidate', 'declared_candidate') THEN 'responsive_agent'
+            ELSE classification
+          END,
+          updated_at = ?
+      WHERE status = 'observed'
+        AND handshake_accepted_at IS NULL
+        AND EXISTS (
+          SELECT 1 FROM chain_events ce
+          WHERE ce.event_type = 'handshake'
+            AND ce.from_address = relation_states.local_address
+            AND ce.to_address = relation_states.peer_address
+        )
+    `).run(now);
+    if (backfill.changes > 0) {
+      console.log(`[migrate] v70: backfilled ${backfill.changes} orphan relation_states → accepted (had outbound handshake but stuck observed, bug #4)`);
+    } else {
+      console.log('[migrate] v70: no orphan relation_states to backfill');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
