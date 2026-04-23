@@ -105,9 +105,12 @@ const SYSTEM_PROMPT = `/no_think
 - 用户说"取消/不要了"立即停
 
 ## 对话规则
-- 首次接触: 一句自我介绍, 问需求
-- 逐个问缺的, 每轮最多 1 问
-- **利用[市场快照]**主动给建议 (比如"现在市价 X, 我建议市价吃" 或 "你的限价比市价便宜 5%, 可能要等挺久")
+- **利用[用户画像]** (核心!): 老客户有历史链/地址的, **直接用, 不再问**. 只在用户明确说"换/改"才重问.
+  例: 画像"上次 BSC + 0x1417..." → 老客户说"买 50" → 直接默认 BSC+0x1417, 在 reply 里确认一句
+  "还用老地址 0x1417 付款吗? 回'是'我就下单" 给用户 1 次机会改
+- 新客户才走 "自我介绍 + 4 字段全问" 流程
+- 每轮最多 1 问
+- **利用[市场快照]** 主动给建议 (比如"现在市价 X, 我建议市价吃" 或 "你的限价比市价便宜 5%, 可能要等挺久")
 - 用户问价/收费/安全: 简短回, 不编数据
 - 不自己判地址 / 数字 / 价格合法, 交系统
 
@@ -209,14 +212,24 @@ export function validateOrder(order) {
 /**
  * 返 { ready, reply?, order?, cancel?, error? }
  */
-export async function interpret(userAddr, userMessage) {
+export async function interpret(userAddr, userMessage, brokerAddress = null) {
   const history = getHistory(userAddr);
-  // 每轮拉最新市场快照给 LLM (让建议基于真实数据)
+  // 每轮拉最新市场快照 + 用户画像, 让 LLM 能基于真实数据给建议 + 老客户免重问
   const snap = await getMarketSnapshot();
-  const systemWithSnapshot = SYSTEM_PROMPT + '\n\n' + formatSnapshot(snap);
+  let profileText = '';
+  try {
+    const { getUserProfile, formatProfileForPrompt } = await import('./retail-dex-profile.js');
+    const profile = await getUserProfile(userAddr, brokerAddress);
+    profileText = formatProfileForPrompt(profile);
+  } catch (err) {
+    console.warn(`[retail-dex-dialog] profile lookup err: ${err.message}`);
+    profileText = '[用户画像] 查询失败, 当新客户处理';
+  }
+
+  const systemFull = [SYSTEM_PROMPT, profileText, formatSnapshot(snap)].join('\n\n');
 
   const messages = [
-    { role: 'system', content: systemWithSnapshot },
+    { role: 'system', content: systemFull },
     ...history,
     { role: 'user', content: userMessage },
   ];

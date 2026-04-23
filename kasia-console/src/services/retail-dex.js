@@ -742,11 +742,12 @@ async function handleDm(senderAddress, message, brokerRelayId) {
       return `订单 ${id.slice(0, 8)} 已创建。${missing ? missing.prompt : ''}`;
     }
 
-    // 慢速路径: LLM 对话收集 4 字段 (齐备 + 有效才下单)
+    // 慢速路径: LLM 对话 (含用户画像 + 市场快照) 收集 4 字段
     let dialog;
     try {
       const { interpret } = await import('./retail-dex-dialog.js');
-      dialog = await interpret(senderAddress, message);
+      const brokerAddr = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(brokerRelayId)?.address || null;
+      dialog = await interpret(senderAddress, message, brokerAddr);
     } catch (err) {
       console.error(`[retail-dex] dialog interpret err: ${err.message}`);
       return '我这边暂时卡了。你可以直接用格式下单: 买 50 KAS';
