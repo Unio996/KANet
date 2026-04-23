@@ -281,3 +281,54 @@ messages.push({ role: 'user', content: userMsg + '\n/no_think' });
 | **chat_template_kwargs** | 163c ✓ | **0c ✓** | **1s** |
 
 适用所有 Qwen3.6 API caller: `llm-dispatcher.js` / `retail-dex-dialog.js` / `retail-dex-memory.js` / `scripts/qwen-bridge-worker.js` / `scripts/qwen.js`.
+
+---
+
+## Rule 12: 频道工具 + 阶段汇报 (SOP)
+
+**WHY**: QClaude 是 Claude Code 终端 + Qwen 后端, 收到派单时只看到**当前一条**消息, 前后文蒙圈. 你能跑 Bash/Read/Edit 真动代码, 但常常忘了主动读频道或汇报进度, 导致 Owner 以为你空转实际你在跑.
+
+**DO — 每个派单先读频道上下文**:
+```bash
+# 看 dev-coord 最近 30 分钟, 了解任务来龙去脉
+node scripts/ch-ls.mjs --since 30m
+
+# 看当前派单相关 tx 的完整内容
+node scripts/ch-ls.mjs --since 10m --full
+```
+
+**DO — 按 SOP 5 阶段走 + 每阶段完成发进度**:
+```
+阶段 1 读需求 → 2 查代码 → 3 写 → 4 自测 → 5 汇报 DONE
+```
+
+每完成 1 阶段立即发进度 (防 channel-bridge timeout 误判空转):
+```bash
+# Write tool 写进度内容到文件 (UTF-8 安全)
+# 文件内容例: [QCLAUDE 进度 2/5] 查代码完毕 — retail-dex.js:418 找到 buildOrderConfirmText, 准备改 createOrder 落 broker_fee_kas
+node scripts/send-chat.mjs 5b236c08-03d0-456c-953d-e10001610938 dev-coord /tmp/progress-2.txt
+```
+
+**DO — 声明 DONE 前用 grep 自检**:
+```bash
+# 别只说 "已改", 先证
+grep -n "broker_fee_kas" kasia-console/src/services/retail-dex.js
+node --check kasia-console/src/services/retail-dex.js
+git diff --stat kasia-console/src/services/retail-dex.js
+```
+
+**DON'T**:
+```
+# 闷头写 15 分钟不吭声 → Owner 看到 channel-bridge 报 (timeout) 以为你死机
+# 声明 "Bug #1 已改" 但文件里 grep 零匹配 (trust 声明不作数)
+# 跳过阶段 4 自测直接汇报 DONE
+# 改了 spec 外的文件 (比如顺手改 CRLF 文件)
+```
+
+**Relay IDs 速查** (send-chat 用):
+| 名 | id |
+|---|---|
+| NWT auto (QClaude 发进度用这个) | 5b236c08-03d0-456c-953d-e10001610938 |
+| Martin | 3765cc82-5e20-4e61-bb0a-697277287223 |
+| Kasia_1 | b236f45f-15df-440a-b0b7-991aeef9b1a4 |
+| Qwen | 5dcb8531-5c9b-4729-82cc-dcdccba2dd40 |

@@ -29,10 +29,11 @@ const DEFAULT_CONFIG = {
   pollMs:     4000,
   queues: {
     'QCLAUDE-NWT': 'qclaude-nwt',
+    'QCLAUDE':     'qclaude',
     'NWT':         'qclaude-nwt',
     'OPUS':        'opus',
   },
-  channels: ['dev-coord','kanet-dev','kanet-arch','kanet-frontend','kanet-backend','kanet-review','kanet-alert'],
+  // channels: dynamically fetched from /api/chat/channels (see resolveChannels())
 };
 
 function loadConfig() {
@@ -48,6 +49,31 @@ function loadConfig() {
 }
 
 const CFG = loadConfig();
+
+// ── Dynamic channel discovery ─────────────────────────────────────────────
+
+async function resolveChannels() {
+  if (CFG.channels && Array.isArray(CFG.channels) && CFG.channels.length > 0) {
+    // Config overrides — but only keep channels that actually exist
+    const existing = await listChannels();
+    return CFG.channels.filter(c => existing.includes(c));
+  }
+  // Fall back to API discovery
+  return (await listChannels()).slice(0, 10); // safety cap
+}
+
+async function listChannels() {
+  try {
+    const { status, body } = await httpGet(`${CFG.consoleUrl}/api/chat/channels`, 8000);
+    if (status !== 200) return [];
+    const data = JSON.parse(body);
+    // API returns { channels: [{ channel_name, ... }] } or raw array
+    const list = Array.isArray(data) ? data : (data.channels || []);
+    return list.map(c => typeof c === 'string' ? c : c.channel_name).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
 
 // ── Processed log (anti-loop) ────────────────────────────────────────────
 
@@ -115,13 +141,14 @@ function httpPost(url, body, timeout = 300000) {
 
 // ── Tag parsing ──────────────────────────────────────────────────────────
 
-// 1. [→ TARGET]  (preferred) — handle both real arrow and garbled → ?
-const TAG_PATTERN1 = /\[→?\s*([A-Z][A-Z0-9-]*)\]/;
-// 2. [SENDER → TARGET]  (legacy) — handle both real arrow and garbled
-const TAG_PATTERN2 = /\[[A-Z0-9-]+\s*→?\s*([A-Z][A-Z0-9-]*)\]/;
+// 1. [→ TARGET]  (preferred) — must have arrow, 防误匹配 [OPUS] 一类 sender-only tag
+const TAG_PATTERN1 = /\[→\s*([A-Z][A-Z0-9-]*)\]/;
+// 2. [SENDER → TARGET]  (legacy) — must have arrow separator
+const TAG_PATTERN2 = /\[[A-Z0-9-]+\s+→\s+([A-Z][A-Z0-9-]*)\]/;
 // 3. Fallback: garbled arrow ? (UTF-8 corruption of →)
-const TAG_PATTERN1_GARBLED = /\[\?\s*([A-Z][A-Z0-9-]*)\]/;
-const TAG_PATTERN2_GARBLED = /\[[A-Z0-9-]+\s*\?\s*([A-Z][A-Z0-9-]*)\]/;
+//    Strict: ? must be between ] and space — 防误匹配 [OPUS] 一类 sender-only tag
+const TAG_PATTERN1_GARBLED = /\]\s?\?\s+([A-Z][A-Z0-9-]*)\]/;
+const TAG_PATTERN2_GARBLED = /\[[A-Z0-9-]+\]\s?\?\s+([A-Z][A-Z0-9-]*)\]/;
 
 function extractTarget(message) {
   if (!message) return null;
@@ -210,9 +237,93 @@ async function processMessage(msg) {
   }
 }
 
+// ── System prompt 构造 (给 QClaude SOP + 工具 + 上下文) ──────────────────
+
+async function fetchRecentMessages(channel, excludeTx, count = 5) {
+  try {
+    const url = `${CFG.consoleUrl}/api/chat/messages?channel=${encodeURIComponent(channel)}&limit=${count + 3}`;
+    const { status, body } = await httpGet(url, 8000);
+    if (status !== 200) return [];
+    return (JSON.parse(body).messages || [])
+      .filter(m => m.tx_hash !== excludeTx)
+      .slice(0, count)
+      .reverse();
+  } catch { return []; }
+}
+
+function formatRecentContext(msgs) {
+  if (!msgs.length) return '(暂无历史消息)';
+  return msgs.map(m => {
+    const t = (m.created_at || '').slice(11, 19);
+    const sender = (m.sender_address || 'unknown').slice(-4);
+    const preview = (m.content || '').slice(0, 240).replace(/\n/g, ' ');
+    return `[${t}] [..${sender}] ${preview}`;
+  }).join('\n');
+}
+
+function buildSystemPrompt({ channelName, target, recentCtx, nwtRelayId }) {
+  return [
+    `你是 QClaude, KANet 本地开发工程师 (Claude Code + Qwen3.6 后端). 每轮产出可验证代码变更, 按 SOP 走.`,
+    ``,
+    `## SOP 5 阶段 (硬要求)`,
+    `1. 读需求: 自己话复述要改啥 + 验收标准`,
+    `2. 查代码: grep/read 看现状, 找禁入依赖, 不自创结构`,
+    `3. 写: find-replace 模式 Edit 目标文件`,
+    `4. 自测: 写 smoke script, 真跑真贴输出`,
+    `5. 汇报 DONE: 贴 git diff --stat + 行数 + smoke 证据 + 5 关证据`,
+    ``,
+    `**每完成 1 阶段**, 立即发进度到 dev-coord (让 Owner 看得见, 防 timeout 误判为空转):`,
+    `  Write tool 写 /tmp/progress-N.txt, 内容 "[QCLAUDE 进度 N/5] <本阶段做了什么, 下一步>"`,
+    `  Bash: node scripts/send-chat.mjs ${nwtRelayId} dev-coord /tmp/progress-N.txt`,
+    ``,
+    `## 可用工具 (你是 Claude Code, 全工具链)`,
+    `- Read/Write/Edit/Grep/Glob/Bash`,
+    `- node scripts/ch-ls.mjs --since 30m          # 查 dev-coord 最近 30min 时间线`,
+    `- node scripts/ch-ls.mjs --since 10m --full   # 查完整内容 (需长文时)`,
+    `- node scripts/send-chat.mjs ${nwtRelayId} <channel> <file>   # 主动发消息`,
+    `- grep <key> <file>    # 验证自己改没改 (字符串在不在一眼看)`,
+    `- node --check <file>  # JS 语法静态检查`,
+    `- git diff --stat <file>  # 看改动量`,
+    ``,
+    `## ${channelName} 频道最近上下文 (最近 5 条, 旧→新)`,
+    recentCtx,
+    ``,
+    `## 红线`,
+    `- DONE 之前必须真跑 smoke, 不得造假. grep 验证 > trust 声明.`,
+    `- 禁入依赖: agent-mind / mind-manager / adapter (除非 spec 明确授权)`,
+    `- Qwen caller 必带 chat_template_kwargs:{enable_thinking:false} (Rule 11)`,
+    `- 不改 spec 外的文件`,
+    ``,
+    `## 本次任务 (来自频道 ${channelName} 的 [${target}] 派单)`,
+  ].join('\n');
+}
+
+function computeTimeout(userBytes) {
+  // 短 PING (< 200B) → 60s
+  // 中任务 (< 1500B) → 10 min
+  // 大任务 (< 4000B) → 25 min
+  // 超大 spec (>= 4000B) → 30 min
+  if (userBytes < 200) return 60_000;
+  if (userBytes < 1500) return 600_000;
+  if (userBytes < 4000) return 1_500_000;
+  return 1_800_000;
+}
+
 async function bridgeRoute(msg, target, queueName) {
-  const system = `You are an automated assistant on the KANet Agent Network Layer. Reply concisely to the user's question.`;
+  const recentMsgs = await fetchRecentMessages(msg.channel_name, msg.tx_hash, 5);
+  const recentCtx = formatRecentContext(recentMsgs);
+  const system = buildSystemPrompt({
+    channelName: msg.channel_name,
+    target,
+    recentCtx,
+    nwtRelayId: CFG.relayId,
+  });
   const user = msg.content;
+  const userBytes = Buffer.byteLength(user, 'utf8');
+  const timeoutMs = computeTimeout(userBytes);
+
+  console.log(new Date().toLocaleString(undefined, { hour12: false }), '[ch-bridge]',
+    `build prompt: sys=${system.length}c user=${userBytes}B timeout=${timeoutMs/1000}s ctx=${recentMsgs.length}msgs`);
 
   const url = `${CFG.bridgeUrl}/v1/chat/completions`;
   const payload = JSON.stringify({
@@ -233,7 +344,7 @@ async function bridgeRoute(msg, target, queueName) {
         'Content-Length': Buffer.byteLength(payload),
         'X-Queue': queueName,
       },
-      timeout: 300000,
+      timeout: timeoutMs,
     }, (res) => resolve(res));
     r.on('error', reject);
     r.on('timeout', () => { r.destroy(); reject(new Error('timeout')); });
@@ -246,7 +357,7 @@ async function bridgeRoute(msg, target, queueName) {
   await new Promise((resolve, reject) => {
     req.on('end', resolve);
     req.on('error', reject);
-    req.setTimeout(300000, () => { reject(new Error('timeout')); });
+    req.setTimeout(timeoutMs, () => { reject(new Error('timeout')); });
   });
 
   const parsed = JSON.parse(data);
@@ -283,8 +394,12 @@ async function pollLoop() {
   console.log(new Date().toLocaleString(undefined, { hour12: false }), '[ch-bridge]',
     `starting on ${CFG.channels.length} channels, poll=${CFG.pollMs}ms`);
 
+  const channels = await resolveChannels();
+  console.log(new Date().toLocaleString(undefined, { hour12: false }), '[ch-bridge]',
+    `resolved ${channels.length} channels: ${channels.join(', ')}`);
+
   while (running) {
-    for (const channel of CFG.channels) {
+    for (const channel of channels) {
       if (!running) break;
       const after = lastTsMap[channel] || null;
       const messages = await fetchNewMessages(channel, after);
