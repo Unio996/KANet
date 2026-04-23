@@ -726,32 +726,69 @@ async function handleDm(senderAddress, message, brokerRelayId) {
   // fetchKasPrice is imported at top via market-seeder.js (Opus T5 CORRECTION)
   const active = getActiveOrderForUser(senderAddress);
   if (!active) {
-    const intent = parseIntent(message);
-    if (!intent) {
-      return '想换 KAS？发格式：\n"买 X KAS" 或 "买 X KAS @ Y USDT"\n"卖 X KAS" 或 "卖 X KAS @ Y USDT"';
-    }
-    const id = createOrder({ user_kasia_address: senderAddress, ...intent });
-    const fullOrder = getOrderById(id);
-    const midPrice = await fetchKasPrice();
-    const checkResult = preCheck(fullOrder, senderAddress, midPrice);
-    if (!checkResult.ok) {
-      const reasons = checkResult.fails.map(f => f.friendly).join('；');
-      return `⚠️ 下单前检查不通过：${reasons}。请调整后重试。`;
-    }
-    const missing = nextMissingField(fullOrder);
-    // T10: 下单前 peek offers，告知可买/可卖数量
-    let offerTip = '';
-    if (!missing) {
-      const offers = sqlite.prepare(`SELECT give_amount, give_asset, want_amount FROM exchange_offers WHERE protocol_status='open' AND (expires_at IS NULL OR expires_at > datetime('now'))`).all();
-      const canBuy = offers.filter(o => o.give_asset === 'KAS' && o.want_asset === 'USDT').reduce((sum, o) => sum + parseFloat(o.give_amount), 0);
-      const canSell = offers.filter(o => o.want_asset === 'KAS' && o.give_asset === 'USDT').reduce((sum, o) => sum + parseFloat(o.give_amount), 0);
-      if (intent.side === 'buy_kas' && canBuy > 0) {
-        offerTip = `当前市场可买 ${canBuy.toFixed(2)} KAS。`;
-      } else if (intent.side === 'sell_kas' && canSell > 0) {
-        offerTip = `当前市场可卖 ${canSell.toFixed(2)} KAS。`;
+    // 2026-04-23 新: LLM 对话层优先, 收集齐备有效 4 字段后一次性建单
+    // 直接走 parseIntent 快速路径 (老用户知道格式, 省一次 LLM 调用)
+    const fastIntent = parseIntent(message);
+    if (fastIntent) {
+      const id = createOrder({ user_kasia_address: senderAddress, ...fastIntent });
+      const fullOrder = getOrderById(id);
+      const midPrice = await fetchKasPrice();
+      const checkResult = preCheck(fullOrder, senderAddress, midPrice);
+      if (!checkResult.ok) {
+        const reasons = checkResult.fails.map(f => f.friendly).join('；');
+        return `⚠️ 下单前检查不通过：${reasons}。请调整后重试。`;
       }
+      const missing = nextMissingField(fullOrder);
+      return `订单 ${id.slice(0, 8)} 已创建。${missing ? missing.prompt : ''}`;
     }
-    return `订单 ${id.slice(0, 8)} 已创建。${offerTip}${missing ? missing.prompt : ''}`;
+
+    // 慢速路径: LLM 对话收集 4 字段 (齐备 + 有效才下单)
+    let dialog;
+    try {
+      const { interpret } = await import('./retail-dex-dialog.js');
+      dialog = await interpret(senderAddress, message);
+    } catch (err) {
+      console.error(`[retail-dex] dialog interpret err: ${err.message}`);
+      return '我这边暂时卡了。你可以直接用格式下单: 买 50 KAS';
+    }
+
+    if (dialog.cancel) return dialog.reply;
+    if (!dialog.ready) return dialog.reply;
+
+    // 齐备 + 有效 → 建单 (跳过 aligning, 直进 confirming)
+    const id = createOrder({
+      user_kasia_address: senderAddress,
+      side: dialog.order.side,
+      order_type: 'market',
+      qty: dialog.order.qty,
+    });
+    // 补其他字段
+    setField(id, 'pay_chain', dialog.order.pay_chain);
+    setField(id, 'pay_address', dialog.order.pay_address);
+
+    // 选 offer + 报价 → confirming
+    const newOrder = getOrderById(id);
+    const offer = selectBestOffer(newOrder);
+    if (!offer) {
+      updateState(id, 'expired', { error_reason: 'no_matching_offer_at_create' });
+      return `订单 ${id.slice(0,8)} 建了但市场现在没匹配挂单 (链/数量)。稍后再来。`;
+    }
+    const quote = computeQuote(newOrder, offer, brokerRelayId);
+    if (!quote.ok) {
+      updateState(id, 'expired', { error_reason: quote.error });
+      return `订单 ${id.slice(0,8)} 建了但 ${quote.friendly}`;
+    }
+    setField(id, 'quoted_usdt', quote.quoted_usdt);
+    setField(id, 'agent_pay_addr', quote.maker_pay_addr);
+    setField(id, 'mid_price_at_quote', String(quote.mid_price));
+    setField(id, 'exchange_offer_id', offer.id);
+
+    const midPrice = (await fetchKasPrice()) || quote.mid_price;
+    const fullOrder = getOrderById(id);
+    const pc = preCheck(fullOrder, senderAddress, midPrice);
+    if (!pc.ok) return buildOrderConfirmText(fullOrder, pc);
+    updateState(id, 'confirming');
+    return buildOrderConfirmText(getOrderById(id));
   }
 
   // Has active order — route by state
