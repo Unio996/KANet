@@ -758,6 +758,14 @@ async function _handleDmInternal(senderAddress, message, brokerRelayId) {
         const reasons = checkResult.fails.map(f => f.friendly).join('；');
         return `⚠️ 下单前检查不通过：${reasons}。请调整后重试。`;
       }
+      // M2 limit buy → trigger seeder buy publication
+      if (fastIntent.order_type === 'limit' && fastIntent.side === 'buy_kas') {
+        try {
+          await _triggerBuyPublication({ orderId: id, userAddr: senderAddress, qty: fastIntent.qty, price: fastIntent.price, brokerRelayId });
+        } catch (err) {
+          console.warn(`[retail-dex] _triggerBuyPublication failed: ${err.message}`);
+        }
+      }
       const missing = nextMissingField(fullOrder);
       return `订单 ${id.slice(0, 8)} 已创建。${missing ? missing.prompt : ''}`;
     }
@@ -949,6 +957,34 @@ async function handleDm(senderAddress, message, brokerRelayId) {
   return _handleDmInternal(senderAddress, message, brokerRelayId);
 }
 
+// ── TASK 5a: Trigger BUY publication (M2 limit buy → seeder代挂单) ──────────
+
+async function _triggerBuyPublication({ orderId, userAddr, qty, price, brokerRelayId }) {
+  const expected_usdt = (parseFloat(qty) * parseFloat(price)).toFixed(6);
+  const seeder_bsc_addr = sqlite.prepare(
+    "SELECT address FROM agent_wallets WHERE relay_node_id = ? AND chain = 'bnb' AND is_default = 1 LIMIT 1"
+  ).get(brokerRelayId)?.address;
+  if (!seeder_bsc_addr) throw new Error('seeder_bsc_addr_missing');
+  const now = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1h expiry
+  const pubId = randomUUID();
+  sqlite.prepare(`
+    INSERT INTO retail_dex_buy_publications (
+      id, user_kasia_address, broker_relay_id, seeder_relay_id, side,
+      qty, limit_price, total_usdt, pay_chain, user_usdt_deposit_tx,
+      seeder_publish_offer_id, state, expires_at,
+      filled_at, kas_delivery_tx, usdt_refund_tx, error_reason,
+      created_at, updated_at
+    ) VALUES (?, ?, ?, ?, 'buy_kas', ?, ?, ?, 'BSC', NULL, NULL,
+      'awaiting_deposit', ?, NULL, NULL, NULL, NULL, ?, ?)
+  `).run(
+    pubId, userAddr, brokerRelayId, brokerRelayId,
+    qty, price, expected_usdt, expiresAt, now, now
+  );
+  console.log(`[retail-dex] _triggerBuyPublication ${orderId.slice(0,8)} → awaiting_deposit expected_usdt=${expected_usdt}`);
+  return pubId;
+}
+
 // ── Exports ─────────────────────────────────────────────────────────────────
 
 export {
@@ -982,6 +1018,7 @@ export {
   _testResetSendCommand,
   _testInjectMidPrice,
   _testResetMidPrice,
+  _triggerBuyPublication,
   TXHASH_REGEX,
   CHAIN_REGEX,
   EVM_ADDR_REGEX,

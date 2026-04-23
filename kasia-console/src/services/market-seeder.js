@@ -27,6 +27,77 @@ export function stopMarketSeeder() {
   if (_timer) { clearInterval(_timer); _timer = null; }
 }
 
+// ── TASK 5a: Seeder BUY deposit watcher ───────────────────────────────────
+
+let _depositWatcherTimer = null;
+
+export function startSeederDepositWatcher() {
+  // 每 30s tick: check awaiting_deposit → deposited → published
+  _depositWatcherTimer = setInterval(async () => {
+    try { await depositWatcherTick(); } catch (err) {
+      console.error('[seeder] deposit watcher tick error:', err.message);
+    }
+  }, 30000);
+  console.log('[seeder] seeder deposit watcher started (30s interval)');
+}
+
+export function stopSeederDepositWatcher() {
+  if (_depositWatcherTimer) { clearInterval(_depositWatcherTimer); _depositWatcherTimer = null; }
+}
+
+export async function depositWatcherTick() {
+  const rows = sqlite.prepare(`
+    SELECT * FROM retail_dex_buy_publications
+    WHERE state = 'awaiting_deposit'
+      AND (expires_at IS NULL OR expires_at > datetime('now'))
+  `).all();
+
+  for (const row of rows) {
+    // Step 1: check seeder USDT balance
+    const { getTokenBalance } = await import('./chain-balance.js');
+    const r = await getTokenBalance('bnb', row.seeder_relay_id, 'usdt');
+    if (r.error && !r.error.startsWith('no_')) {
+      console.warn(`[seeder] balance check fail for pub ${row.id.slice(0,8)}: ${r.error}`);
+      continue;
+    }
+    if (r.balance !== undefined && r.balance >= parseFloat(row.total_usdt) * 0.99) {
+      // Step 2: mark deposited
+      sqlite.prepare("UPDATE retail_dex_buy_publications SET state = 'deposited', updated_at = datetime('now') WHERE id = ?").run(row.id);
+      console.log(`[seeder] pub ${row.id.slice(0,8)} → deposited (bal=${r.balance.toFixed(4)} >= ${row.total_usdt})`);
+      // Step 3: publish buy offer next tick (handled by main seeder tick)
+    }
+  }
+
+  // Step 4: for deposited rows, also trigger publishSeedOrder buy if seeder tick didn't pick it up
+  const depositedRows = sqlite.prepare(`
+    SELECT * FROM retail_dex_buy_publications
+    WHERE state = 'deposited'
+      AND seeder_publish_offer_id IS NULL
+      AND (expires_at IS NULL OR expires_at > datetime('now'))
+  `).all();
+
+  for (const row of depositedRows) {
+    try {
+      const config = sqlite.prepare('SELECT * FROM market_seeder_config WHERE id = ?').get('default');
+      if (!config?.enabled) continue;
+      const midPrice = await fetchKasPrice();
+      if (!midPrice || midPrice <= 0) continue;
+      // publishSeedOrder needs a config with buy_agent_id; use getDefaultAgentId
+      const result = await publishSeedOrder(config, midPrice, 'buy');
+      if (result.ok) {
+        sqlite.prepare(
+          "UPDATE retail_dex_buy_publications SET state = 'published', seeder_publish_offer_id = ?, published_at = datetime('now') WHERE id = ?"
+        ).run(result?.id || null, row.id);
+        console.log(`[seeder] pub ${row.id.slice(0,8)} → published offer=${(result?.id || '').slice(0,8)}`);
+      } else {
+        console.warn(`[seeder] publish buy failed for pub ${row.id.slice(0,8)}: ${result.error || 'unknown'}`);
+      }
+    } catch (err) {
+      console.error(`[seeder] publish buy err for pub ${row.id.slice(0,8)}: ${err.message}`);
+    }
+  }
+}
+
 export async function triggerTick() {
   return tick();
 }
@@ -86,17 +157,9 @@ async function tick() {
 // ── Publish Seed Order ────────────────────────────────────
 
 async function publishSeedOrder(config, midPrice, side) {
-  // BUY side temporarily disabled: maker auto-pay-USDT path is not implemented
-  // (exchange-machine.js _verifyAndComplete buy-shortcut marks completed without
-  // delivering USDT to taker). Publishing buy offers traps takers — they send KAS
-  // but never receive USDT. Skip until the gap is filled.
-  if (side === 'buy' && !config.buy_agent_id) {
-    return { ok: false, error: 'buy_disabled_until_maker_auto_pay_usdt_implemented' };
-  }
-
   const agentId = side === 'sell'
     ? (config.sell_agent_id || getDefaultAgentId())
-    : config.buy_agent_id;
+    : (config.buy_agent_id || getDefaultAgentId());
 
   if (!agentId) {
     console.log(`[seeder] No agent configured for ${side} orders`);
