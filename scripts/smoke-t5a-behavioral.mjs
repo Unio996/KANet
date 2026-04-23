@@ -80,13 +80,14 @@ if (!existingWallet) {
 console.log('\n--- Case 2: _triggerBuyPublication → retail_dex_buy_publications row ---');
 const testOrderId2 = `t5a-case2-${randomUUID().slice(0, 8)}`;
 
-const pubId = await _triggerBuyPublication({
+const trigResult = await _triggerBuyPublication({
   orderId: testOrderId2,
   userAddr: 'kaspa1t5a_test_user',
   qty: '100',
   price: '0.034',
   brokerRelayId,
 });
+const pubId = trigResult.pubId || trigResult;  // T6: API 返 {pubId, seederAddr, expectedUsdt}
 
 assertEq(typeof pubId, 'string', '_triggerBuyPublication returns pubId string');
 assert(pubId.length > 10, 'pubId is non-empty');

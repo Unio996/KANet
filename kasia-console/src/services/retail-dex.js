@@ -758,12 +758,22 @@ async function _handleDmInternal(senderAddress, message, brokerRelayId) {
         const reasons = checkResult.fails.map(f => f.friendly).join('；');
         return `⚠️ 下单前检查不通过：${reasons}。请调整后重试。`;
       }
-      // M2 limit buy → trigger seeder buy publication
+      // M2 limit buy → trigger seeder buy publication + 返 deposit 指引
       if (fastIntent.order_type === 'limit' && fastIntent.side === 'buy_kas') {
         try {
-          await _triggerBuyPublication({ orderId: id, userAddr: senderAddress, qty: fastIntent.qty, price: fastIntent.price, brokerRelayId });
+          const pub = await _triggerBuyPublication({
+            orderId: id, userAddr: senderAddress,
+            qty: fastIntent.qty, price: fastIntent.price,
+            brokerRelayId, payChain: 'bnb',
+          });
+          return buildM2DepositPromptText({
+            orderId: id, qty: fastIntent.qty, price: fastIntent.price,
+            payChain: 'bnb', seederAddr: pub.seederAddr, expectedUsdt: pub.expectedUsdt,
+            userKasiaTail: senderAddress.slice(-16),
+          });
         } catch (err) {
-          console.warn(`[retail-dex] _triggerBuyPublication failed: ${err.message}`);
+          console.warn(`[retail-dex] _triggerBuyPublication (fast) failed: ${err.message}`);
+          return `订单 ${id.slice(0, 8)} 建了但 Seeder 挂单失败: ${err.message}。联系管理员。`;
         }
       }
       const missing = nextMissingField(fullOrder);
@@ -795,6 +805,26 @@ async function _handleDmInternal(senderAddress, message, brokerRelayId) {
     });
     setField(id, 'pay_chain', dialog.order.pay_chain);
     setField(id, 'pay_address', dialog.order.pay_address);
+
+    // T6 M2: LLM 路径限价买单 → 走 Seeder 挂单, 返 deposit 指引 (不走 market offer path)
+    if (dialog.order.order_type === 'limit' && dialog.order.side === 'buy_kas') {
+      try {
+        const payChain = normalizeChain(dialog.order.pay_chain) || 'bnb';
+        const pub = await _triggerBuyPublication({
+          orderId: id, userAddr: senderAddress,
+          qty: dialog.order.qty, price: dialog.order.price,
+          brokerRelayId, payChain,
+        });
+        return buildM2DepositPromptText({
+          orderId: id, qty: dialog.order.qty, price: dialog.order.price,
+          payChain, seederAddr: pub.seederAddr, expectedUsdt: pub.expectedUsdt,
+          userKasiaTail: senderAddress.slice(-16),
+        });
+      } catch (err) {
+        console.warn(`[retail-dex] _triggerBuyPublication (LLM) failed: ${err.message}`);
+        return `订单 ${id.slice(0, 8)} 建了但 Seeder 挂单失败: ${err.message}。`;
+      }
+    }
 
     // 选 offer + 报价 → confirming
     const newOrder = getOrderById(id);
@@ -959,11 +989,12 @@ async function handleDm(senderAddress, message, brokerRelayId) {
 
 // ── TASK 5a: Trigger BUY publication (M2 limit buy → seeder代挂单) ──────────
 
-async function _triggerBuyPublication({ orderId, userAddr, qty, price, brokerRelayId }) {
+async function _triggerBuyPublication({ orderId, userAddr, qty, price, brokerRelayId, payChain = 'bnb' }) {
   const expected_usdt = (parseFloat(qty) * parseFloat(price)).toFixed(6);
-  const seeder_bsc_addr = sqlite.prepare(
-    "SELECT address FROM agent_wallets WHERE relay_node_id = ? AND chain = 'bnb' AND is_default = 1 LIMIT 1"
-  ).get(brokerRelayId)?.address;
+  const walletRow = sqlite.prepare(
+    "SELECT address FROM agent_wallets WHERE relay_node_id = ? AND chain = ? AND is_default = 1 LIMIT 1"
+  ).get(brokerRelayId, payChain);
+  const seeder_bsc_addr = walletRow?.address;
   if (!seeder_bsc_addr) throw new Error('seeder_bsc_addr_missing');
   const now = new Date().toISOString();
   const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1h expiry
@@ -975,14 +1006,37 @@ async function _triggerBuyPublication({ orderId, userAddr, qty, price, brokerRel
       seeder_publish_offer_id, state, expires_at,
       filled_at, kas_delivery_tx, usdt_refund_tx, error_reason,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, 'buy_kas', ?, ?, ?, 'BSC', NULL, NULL,
+    ) VALUES (?, ?, ?, ?, 'buy_kas', ?, ?, ?, ?, NULL, NULL,
       'awaiting_deposit', ?, NULL, NULL, NULL, NULL, ?, ?)
   `).run(
     pubId, userAddr, brokerRelayId, brokerRelayId,
-    qty, price, expected_usdt, expiresAt, now, now
+    qty, price, expected_usdt, payChain, expiresAt, now, now
   );
-  console.log(`[retail-dex] _triggerBuyPublication ${orderId.slice(0,8)} → awaiting_deposit expected_usdt=${expected_usdt}`);
-  return pubId;
+  console.log(`[retail-dex] _triggerBuyPublication ${orderId.slice(0,8)} → awaiting_deposit expected_usdt=${expected_usdt} chain=${payChain} seeder=${seeder_bsc_addr.slice(0,10)}`);
+  return { pubId, seederAddr: seeder_bsc_addr, expectedUsdt: expected_usdt };
+}
+
+// ── T6 M2 Deposit 指引文本 ──────────────────────────────────────────────
+
+function buildM2DepositPromptText({ orderId, qty, price, payChain, seederAddr, expectedUsdt, userKasiaTail }) {
+  const id8 = orderId.slice(0, 8);
+  const chain = (payChain || 'bnb').toUpperCase();
+  return [
+    `=== 挂单提交 ${id8} (M2 限价买单) ===`,
+    `你说: 挂单 ${qty} KAS @ ${price} USDT`,
+    `你应付: ${expectedUsdt} USDT (${chain})`,
+    ``,
+    `请把 USDT 发到 Seeder 这个 ${chain} 地址:`,
+    `  ${seederAddr}`,
+    ``,
+    `流程:`,
+    `1. 你发 USDT 到上方 Seeder 地址`,
+    `2. Seeder 检测到账 (约 30 秒) 后自动代你发布链上 BUY 挂单`,
+    `3. 任何卖家 accept 后, 直接发 KAS 到你 Kasia (...${userKasiaTail || ''})`,
+    `4. 60 分钟内无人接单, Seeder 自动退你 USDT`,
+    ``,
+    `订单状态: awaiting_deposit (等你充值 USDT)`,
+  ].join('\n');
 }
 
 // ── Exports ─────────────────────────────────────────────────────────────────
