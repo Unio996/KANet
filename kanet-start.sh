@@ -79,6 +79,8 @@ if [ -f "$ENV_FILE" ]; then
       KANET_ROOT)              KANET_ROOT="$v" ;;
       CONSOLE_ENCRYPTION_KEY)  CONSOLE_ENCRYPTION_KEY="$v" ;;
       OPENCLAW_TOKEN)          OPENCLAW_TOKEN="$v" ;;
+      KASPA_NODE)              KASPA_NODE="$v" ;;
+      KASPA_WS_PROXY_PORT)     KASPA_WS_PROXY_PORT="$v" ;;
     esac
   done < "$ENV_FILE"
   ok "已加载配置: $ENV_FILE"
@@ -96,6 +98,39 @@ if [ -z "$CONSOLE_ENCRYPTION_KEY" ]; then
 fi
 
 info "加密密钥: ${CONSOLE_ENCRYPTION_KEY:0:8}..."
+
+# ── kaspa-ws-proxy (LAN 节点 → 127.0.0.1) ──────────────────────────────────
+# 目的：让 https://kasia.fyi 这类 HTTPS 页面能连本机局域网内的 Kaspa 节点。
+# 浏览器禁止 https:// 页面发起 ws:// 到非 loopback 地址，但对 127.0.0.1 豁免。
+# 所以我们在 127.0.0.1 起一个 TCP 转发，指向真实节点。
+# 不需要证书、不需要反向代理、不需要改浏览器设置。
+#
+# 配置 (kanet.env)：
+#   KASPA_NODE=192.168.1.123           # 节点 LAN IP（默认同此值）
+#   KASPA_WS_PROXY_PORT=17110          # 本机监听端口（默认 17110）
+# kasia.fyi 那边填: ws://127.0.0.1:17110
+WS_PROXY_SCRIPT="$KANET_ROOT/scripts/kaspa-ws-proxy.mjs"
+WS_PROXY_NODE="${KASPA_NODE:-192.168.1.123}"
+WS_PROXY_PORT="${KASPA_WS_PROXY_PORT:-17110}"
+if [ -f "$WS_PROXY_SCRIPT" ]; then
+  echo ""
+  echo -e "${C_BOLD}[0/0] kaspa-ws-proxy${C_RESET}  127.0.0.1:$WS_PROXY_PORT → $WS_PROXY_NODE:$WS_PROXY_PORT"
+  if netstat -an 2>/dev/null | grep -q "127.0.0.1:${WS_PROXY_PORT}.*LISTEN"; then
+    ok "ws-proxy 已在运行 (port $WS_PROXY_PORT)"
+  else
+    KASPA_NODE="$WS_PROXY_NODE" LISTEN_PORT="$WS_PROXY_PORT" TARGET_PORT="$WS_PROXY_PORT" \
+      node "$WS_PROXY_SCRIPT" > "$LOG_DIR/kaspa-ws-proxy.log" 2>&1 &
+    WS_PROXY_PID=$!
+    echo "$WS_PROXY_PID" > "$PID_DIR/kaspa-ws-proxy.pid"
+    sleep 0.5
+    if kill -0 "$WS_PROXY_PID" 2>/dev/null; then
+      ok "ws-proxy 就绪  →  ws://127.0.0.1:$WS_PROXY_PORT  (PID $WS_PROXY_PID)"
+      info "kasia.fyi 节点 URL 填: ws://127.0.0.1:$WS_PROXY_PORT"
+    else
+      warn "ws-proxy 启动失败，日志: $LOG_DIR/kaspa-ws-proxy.log"
+    fi
+  fi
+fi
 
 # ── llama-server (本地推理引擎) ──────────────────────────────────────────────
 LLAMA_SERVER="$KANET_ROOT/tools/llama-server/llama-server.exe"
