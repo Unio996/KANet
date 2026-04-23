@@ -303,44 +303,113 @@ function getAgentWalletAddr(brokerRelayId, chain) {
   return row?.address || null;
 }
 
-// 从 market_seeder_config 读 spread (百分比)
-function getSpread(side) {
-  const cfg = sqlite.prepare("SELECT sell_spread_pct, buy_spread_pct FROM market_seeder_config WHERE id='default'").get();
-  if (!cfg) return 0.01; // 1% fallback
-  return (side === 'buy_kas' ? cfg.sell_spread_pct : cfg.buy_spread_pct) / 100;
+/**
+ * 选最优 offer (非托管: 本函数在 quote 阶段就选好, 不再等 paid 阶段)
+ * buy_kas: 找 give=KAS want=USDT 的 open 卖 KAS 挂单, 价格升序 (买家要最便宜)
+ *   - 先精确 give_amount = qty 匹配
+ *   - 无精确则 fallback give_amount >= qty (允许部分成交)
+ *   - 过滤 accepted_chains 必须含用户指定链
+ *   - 无匹配返 null (不 throw)
+ */
+function selectBestOffer(order) {
+  if (!order || !order.pay_chain || !order.qty) return null;
+  const normalizedChain = normalizeChain(order.pay_chain);
+  if (!normalizedChain) return null;
+  const exactQty = String(order.qty);
+
+  if (order.side === 'buy_kas') {
+    // 精确匹配优先
+    let best = sqlite.prepare(`
+      SELECT * FROM exchange_offers
+      WHERE protocol_status='open'
+        AND give_asset='KAS' AND want_asset='USDT'
+        AND give_amount = ?
+        AND (expires_at IS NULL OR julianday(expires_at) > julianday('now'))
+      ORDER BY CAST(want_amount AS REAL)/CAST(give_amount AS REAL) ASC
+      LIMIT 1
+    `).get(exactQty);
+    if (!best) {
+      best = sqlite.prepare(`
+        SELECT * FROM exchange_offers
+        WHERE protocol_status='open'
+          AND give_asset='KAS' AND want_asset='USDT'
+          AND CAST(give_amount AS REAL) >= CAST(? AS REAL)
+          AND (expires_at IS NULL OR julianday(expires_at) > julianday('now'))
+        ORDER BY CAST(want_amount AS REAL)/CAST(give_amount AS REAL) ASC
+        LIMIT 1
+      `).get(exactQty);
+    }
+    if (!best) return null;
+    // JS 层: accepted_chains 含用户指定链
+    let meta;
+    try { meta = JSON.parse(best.verification_meta || '{}'); } catch { return null; }
+    const chains = Array.isArray(meta.accepted_chains) ? meta.accepted_chains : [];
+    const hasChain = chains.some(c => c && String(c.chain || '').toLowerCase() === normalizedChain);
+    return hasChain ? best : null;
+  }
+
+  // sell_kas 本轮不做 (TASK 4.x)
+  return null;
 }
 
 /**
- * 计算报价: {quoted_usdt, agent_pay_addr}
- * buy_kas: user 花 USDT 买 KAS. agent 要赚 spread → quoted = mid * qty * (1 + spread)
- * sell_kas: user 卖 KAS 收 USDT. agent 压低报价 → quoted = mid * qty * (1 - spread)
+ * 计算非托管报价 — 用户直付 Maker, 不经 Broker
+ *
+ * 输入:
+ *   order — retail_dex_orders 行 (含 pay_chain, qty)
+ *   offer — selectBestOffer 返回的 exchange_offers 行
+ *   brokerRelayId — 保留参数, 本函数当前未使用 (未来 Broker 签名/记账用)
+ *
+ * 返回 (成功):
+ *   {ok:true, quoted_usdt, maker_pay_addr, mid_price, offer_id, give_amount}
+ * 返回 (失败):
+ *   {error: '<code>', friendly: '<中文>'}
+ *
+ * quoted_usdt = offer.want_amount (Maker 的 ask, 非托管不加 spread)
+ * maker_pay_addr 从 offer.verification_meta.accepted_chains 按链匹配
  */
-function computeQuote(order, midPrice, brokerRelayId) {
-  if (!order || !midPrice) return { error: 'no_midprice', friendly: '市场报价暂不可用,稍后再试' };
+function computeQuote(order, offer, _brokerRelayId) {
+  if (!order || !offer) return { error: 'bad_input', friendly: '订单或挂单缺失' };
   const qty = parseFloat(order.qty);
   if (isNaN(qty) || qty <= 0) return { error: 'bad_qty', friendly: '数量无效' };
 
-  const spread = getSpread(order.side);
-  const quoted = order.side === 'buy_kas'
-    ? qty * midPrice * (1 + spread)
-    : qty * midPrice * (1 - spread);
-
-  // agent 钱包地址
-  const chain = order.side === 'buy_kas' ? order.pay_chain : order.receive_chain || order.pay_chain;
+  const chain = order.pay_chain;
   const normalizedChain = normalizeChain(chain);
   if (!normalizedChain) return { error: 'no_chain', friendly: '缺少链信息' };
 
-  const agentAddr = getAgentWalletAddr(brokerRelayId, normalizedChain);
-  if (!agentAddr) {
-    return { error: 'no_wallet', friendly: `经纪人未配置 ${chain} 钱包,暂不支持这条链` };
+  let meta;
+  try {
+    meta = JSON.parse(offer.verification_meta || '{}');
+  } catch {
+    return { error: 'bad_meta', friendly: 'Maker 挂单元数据损坏' };
   }
+  const chains = Array.isArray(meta.accepted_chains) ? meta.accepted_chains : [];
+  const match = chains.find(c => c && String(c.chain || '').toLowerCase() === normalizedChain);
+  if (!match || !match.address) {
+    return { error: 'no_maker_addr', friendly: `Maker 未公开 ${chain} 收款地址` };
+  }
+
+  const want = parseFloat(offer.want_amount);
+  if (!isFinite(want) || want <= 0) {
+    return { error: 'bad_offer_amount', friendly: '挂单金额异常' };
+  }
+  const give = parseFloat(offer.give_amount);
+  if (!isFinite(give) || give <= 0) {
+    return { error: 'bad_offer_amount', friendly: '挂单金额异常' };
+  }
+
+  // 部分成交: 若 give_amount > qty, 按比例算 quoted_usdt
+  // 非托管语义: 用户只付要买的那部分 (按单价 * qty)
+  const unitPrice = want / give;  // USDT per KAS
+  const quoted = unitPrice * qty;
 
   return {
     ok: true,
-    quoted_usdt: quoted.toFixed(4),
-    agent_pay_addr: agentAddr,
-    mid_price: midPrice,
-    spread_pct: (spread * 100).toFixed(2),
+    quoted_usdt: quoted.toFixed(6),
+    maker_pay_addr: match.address,
+    mid_price: unitPrice,           // Maker 实际单价 (非 fetchKasPrice midprice, 但语义等同用于 preCheck.price_deviation)
+    offer_id: offer.id,
+    give_amount: offer.give_amount,
   };
 }
 
@@ -758,6 +827,7 @@ export {
   checkAgentInventory,
   checkMarketDepth,
   checkPriceDeviation,
+  selectBestOffer,
   computeQuote,
   buildOrderConfirmText,
   normalizeChain,
