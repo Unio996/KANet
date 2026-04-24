@@ -16,7 +16,10 @@ import { checkBudget, recordSpend } from '../services/social-budget.js';
 // must not broadcast to them. See docs/ANTI-PATTERNS.md (rule: coordination
 // channels protected from Agent noise) + docs/spec/2026-04-24-...v2 §8.1.8.
 const COORD_CHANNELS = new Set(['dev-coord', 'kanet-arch', 'kanet-review', 'kanet-alert']);
-const OPUS_RELAY_NAMES = new Set(['Martin', 'J2', 'Opus']);
+// Whitelist: three Opus CC instances + reserved names. Each machine's Console
+// checks against its own relay_nodes.name. Names like 'QClaude' kept for the
+// Qwen→CC migration transition so the NWT host doesn't 403-lock itself.
+const OPUS_RELAY_NAMES = new Set(['Martin', 'J2', 'J3', 'NWT', 'Opus', 'QClaude']);
 
 // ── Auto-reply skip rules (T-2026-04-22-02) ──
 // Prevents Mind auto-reply cascade / identity-theft / storm on sensitive channels.
