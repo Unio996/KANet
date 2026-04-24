@@ -5,17 +5,60 @@
 import { sqlite } from '../db/client.js';
 
 const TICK_MS = 60_000;
+const REFUND_TICK_MS = 5 * 60_000;
 const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';  // Trader-B
+const PUBLISH_EXPIRES_MIN = 120;
+const DEFAULT_FEE_KAS = '0.1';
 let _intakeInterval = null;
+let _refundInterval = null;
 let _sendCommandOverride = null;  // test injection
+let _publishOverride = null;      // test injection (POST /api/exchange/publish)
 
 export function _testInjectSendCommand(fn) { _sendCommandOverride = fn; }
 export function _testResetSendCommand() { _sendCommandOverride = null; }
+export function _testInjectPublish(fn) { _publishOverride = fn; }
+export function _testResetPublish() { _publishOverride = null; }
 
 async function _send(relayId, cmd) {
   if (_sendCommandOverride) return _sendCommandOverride(relayId, cmd);
   const { sendCommandAsync } = await import('./relay-manager.js');
   return sendCommandAsync(relayId, cmd);
+}
+
+function _getUserPayAddress(peer) {
+  let row = sqlite.prepare(
+    `SELECT preferred_chain AS chain, preferred_pay_address AS address
+     FROM retail_dex_user_memory WHERE user_kasia_address = ?`
+  ).get(peer);
+  if (row?.chain && row?.address) return row;
+  row = sqlite.prepare(
+    `SELECT pay_chain AS chain, pay_address AS address FROM retail_dex_orders
+     WHERE user_kasia_address = ? AND pay_chain IS NOT NULL AND pay_address IS NOT NULL
+     ORDER BY created_at DESC LIMIT 1`
+  ).get(peer);
+  return (row?.chain && row?.address) ? row : null;
+}
+
+function _getFeeKasPerOrder() {
+  const r = sqlite.prepare(
+    `SELECT fee_kas_per_order FROM retail_dex_broker_config WHERE broker_relay_id = ?`
+  ).get(BROKER_RELAY_ID);
+  return r?.fee_kas_per_order || DEFAULT_FEE_KAS;
+}
+
+async function _fetchKasPrice() {
+  const { fetchKasPrice } = await import('./market-seeder.js');
+  return fetchKasPrice();
+}
+
+async function _publishOffer(body) {
+  if (_publishOverride) return _publishOverride(body);
+  const PORT = process.env.PORT || 3100;
+  const res = await fetch(`http://127.0.0.1:${PORT}/api/exchange/publish`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return res.json();
 }
 
 function findUserIntent(peerAddr) {
@@ -52,8 +95,7 @@ async function handleIntake(event) {
 
   const intent = findUserIntent(peer);
   if (intent?.side === 'sell_kas' && Math.abs(parseFloat(intent.qty) - amount) < 0.5) {
-    await _send(BROKER_RELAY_ID, { type: 'send_message', target: peer, message: `收到你 ${amount} KAS ✓ 开始代卖, 预计 10 分钟完成.` });
-    return markProcessed(event.id, 'custodial_sell');
+    return _publishBrokerSellOffer(peer, amount, event.id);
   }
   if (intent?.side === 'buy_kas') {
     await _send(BROKER_RELAY_ID, { type: 'send_message', target: peer, message: `你是想买 KAS 对吧? 这 ${amount} KAS 我先收着, 要我代卖成 USDT 付你还是退回? 回复 "卖" 或 "退".` });
@@ -61,6 +103,102 @@ async function handleIntake(event) {
   }
   await _send(BROKER_RELAY_ID, { type: 'send_message', target: peer, message: `收到你 ${amount} KAS, 你想做什么? 代卖/继续持有/退回? 12h 无回复自动退.` });
   return markProcessed(event.id, 'unsolicited_wait');
+}
+
+async function _publishBrokerSellOffer(peer, amount, eventId) {
+  const userPay = _getUserPayAddress(peer);
+  if (!userPay) {
+    await _send(BROKER_RELAY_ID, { type: 'send_message', target: peer,
+      message: `收到 ${amount} KAS, 但还没你的 USDT 收款链 + 地址. 回复 "用 bnb 0x..." 之类设置. 12h 无回复自动退.`
+    });
+    return markProcessed(eventId, 'await_pay_addr');
+  }
+  const feeKas = parseFloat(_getFeeKasPerOrder()) || 0.1;
+  const netKas = amount - feeKas;
+  if (netKas <= 0) {
+    await _send(BROKER_RELAY_ID, { type: 'send_kas', target: peer, amount_kas: amount, note: 'amount too small for fee' });
+    return markProcessed(eventId, 'amount_too_small');
+  }
+  let midPrice = 0;
+  try { midPrice = await _fetchKasPrice(); } catch {}
+  if (!midPrice || midPrice <= 0) {
+    await _send(BROKER_RELAY_ID, { type: 'send_kas', target: peer, amount_kas: amount, note: 'no price feed' });
+    return markProcessed(eventId, 'no_price');
+  }
+  const wantUsdt = (netKas * midPrice).toFixed(4);
+
+  let res = null;
+  try {
+    res = await _publishOffer({
+      relayNodeId: BROKER_RELAY_ID,
+      give_asset: 'KAS', give_amount: String(netKas),
+      want_asset: 'USDT', want_amount: wantUsdt,
+      verification: 'cross_chain_tx',
+      verification_meta: {
+        accepted_chains: [{ chain: userPay.chain, address: userPay.address }],
+        expected_asset: 'USDT',
+      },
+      expires_minutes: PUBLISH_EXPIRES_MIN,
+      metadata: { source: 'broker-intake', user_kasia_address: peer, intent_qty: amount,
+        fee_kas: feeKas, net_kas: netKas, mid_price: midPrice },
+    });
+  } catch (err) { res = { ok: false, error: err.message }; }
+
+  if (!res?.ok) {
+    // Q2 保险: publish 失败立即退原 KAS, broker 不持仓
+    await _send(BROKER_RELAY_ID, { type: 'send_kas', target: peer, amount_kas: amount,
+      note: `publish failed: ${res?.error || 'unknown'}` });
+    await _send(BROKER_RELAY_ID, { type: 'send_message', target: peer,
+      message: `挂单失败 (${(res?.error || 'unknown').slice(0,80)}), ${amount} KAS 已退原路.`
+    });
+    return markProcessed(eventId, 'publish_failed');
+  }
+
+  const addrShort = userPay.address.slice(0,10) + '...' + userPay.address.slice(-4);
+  await _send(BROKER_RELAY_ID, { type: 'send_message', target: peer,
+    message: `收到 ${amount} KAS ✓ 已挂 SELL 单 ${netKas} KAS → ${wantUsdt} USDT (fee ${feeKas} KAS)\n` +
+             `订单: ${res.offer_id.slice(0,8)} · 2h 内有人接单 USDT 直付你 ${userPay.chain} ${addrShort}\n` +
+             `广播 tx: ${res.broadcast_tx?.slice(0,16) || '?'}`
+  });
+  return markProcessed(eventId, `sell_published:${res.offer_id}`);
+}
+
+export async function _scanExpiredBrokerOffers() {
+  const trader = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id = ?`).get(BROKER_RELAY_ID);
+  if (!trader) return { handled: 0, scanned: 0, reason: 'no_broker_relay' };
+  const rows = sqlite.prepare(`
+    SELECT id, give_amount, metadata FROM exchange_offers
+    WHERE maker = ?
+    AND protocol_status IN ('expired', 'cancelled', 'timed_out')
+    AND give_asset = 'KAS'
+    AND json_extract(metadata, '$.source') = 'broker-intake'
+    AND NOT EXISTS (
+      SELECT 1 FROM chain_events e
+      WHERE e.event_type = 'broker_kas_refunded'
+      AND e.payload LIKE '%"offer_id":"' || exchange_offers.id || '"%'
+    )
+    LIMIT 10
+  `).all(trader.address);
+  let handled = 0;
+  for (const r of rows) {
+    try {
+      const meta = JSON.parse(r.metadata || '{}');
+      const userKasia = meta.user_kasia_address;
+      if (!userKasia) continue;
+      const refundAmount = parseFloat(meta.intent_qty || r.give_amount);
+      await _send(BROKER_RELAY_ID, { type: 'send_kas', target: userKasia, amount_kas: refundAmount,
+        note: `refund expired offer ${r.id.slice(0,8)}` });
+      sqlite.prepare(`
+        INSERT INTO chain_events (txid, from_address, to_address, event_type, payload, observed_by, observed_at)
+        VALUES (?, NULL, NULL, 'broker_kas_refunded', ?, 'broker-intake-watcher', datetime('now'))
+      `).run(`refund_${r.id}`, JSON.stringify({ offer_id: r.id, user_kasia_address: userKasia, amount: refundAmount }));
+      await _send(BROKER_RELAY_ID, { type: 'send_message', target: userKasia,
+        message: `订单 ${r.id.slice(0,8)} 2h 无人接单, 已退 ${refundAmount} KAS 给你. broker 吃 gas.`
+      });
+      handled++;
+    } catch (err) { console.warn(`[broker-refund] ${r.id} err: ${err.message}`); }
+  }
+  return { handled, scanned: rows.length };
 }
 
 export async function intakeTick() {
@@ -96,9 +234,18 @@ export function startIntakeWatcher() {
       }
     } catch (e) { console.error('[broker-intake]', e.message); }
   }, TICK_MS);
-  console.log(`[broker-intake] watcher started for Trader-B tick=${TICK_MS}ms`);
+  if (!_refundInterval) {
+    _refundInterval = setInterval(async () => {
+      try {
+        const r = await _scanExpiredBrokerOffers();
+        if (r && r.scanned > 0) console.log(`[broker-refund] tick handled=${r.handled||0}/${r.scanned||0}`);
+      } catch (e) { console.error('[broker-refund]', e.message); }
+    }, REFUND_TICK_MS);
+  }
+  console.log(`[broker-intake] watcher started for Trader-B tick=${TICK_MS}ms, refund tick=${REFUND_TICK_MS}ms`);
 }
 
 export function stopIntakeWatcher() {
   if (_intakeInterval) { clearInterval(_intakeInterval); _intakeInterval = null; }
+  if (_refundInterval) { clearInterval(_refundInterval); _refundInterval = null; }
 }
