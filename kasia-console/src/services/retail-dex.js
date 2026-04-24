@@ -126,7 +126,7 @@ function getOrderById(id) {
   return sqlite.prepare('SELECT * FROM retail_dex_orders WHERE id = ?').get(id);
 }
 
-function updateState(id, newState, extraFields = {}) {
+function updateState(id, newState, extraFields = {}, brokerRelayId = null) {
   const fromState = sqlite.prepare('SELECT state FROM retail_dex_orders WHERE id = ?').get(id);
   if (!fromState) throw new Error(`order ${id.slice(0, 8)} not found`);
 
@@ -149,6 +149,21 @@ function updateState(id, newState, extraFields = {}) {
   `).run(...values);
 
   console.log(`[retail-dex] order ${id.slice(0, 8)} ${fromState.state} → ${newState}`);
+
+  // T7/T8 push DM — fire-and-forget, 不阻状态机
+  // brokerRelayId 可选: 若无, 自动查 is_dex_broker=1 的 relay
+  try {
+    const relayId = brokerRelayId || sqlite.prepare(
+      "SELECT id FROM relay_nodes WHERE is_dex_broker = 1 LIMIT 1"
+    ).get()?.id;
+    if (relayId) {
+      const order = sqlite.prepare("SELECT * FROM retail_dex_orders WHERE id = ?").get(id);
+      import('./retail-dex-pusher.js').then(({ pushOrderTransition }) => {
+        pushOrderTransition({ order, newState, brokerRelayId: relayId })
+          .catch(e => console.warn(`[retail-dex] push ${newState} skipped: ${e.message}`));
+      });
+    }
+  } catch {}
 }
 
 function setField(id, field, value) {
@@ -1054,6 +1069,7 @@ export {
   startOrderMonitor,
   stopOrderMonitor,
   orderMonitorTick,
+  processTimeouts,
   createOrder,
   getActiveOrderForUser,
   getOrderById,
