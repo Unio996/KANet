@@ -130,7 +130,13 @@ export class SkillRegistry {
   }
 
   getActiveSkills(taskType, context) {
-    return this.skills.filter(s => s.canActivate(taskType, context));
+    // Two-gate filter: skill's own canActivate() decides baseline eligibility,
+    // and base-class _keywordsMatch() enforces message relevance for reactive
+    // tasks when the skill declared keywords. See Skill.constructor.
+    return this.skills.filter(s =>
+      s.canActivate(taskType, context) &&
+      (typeof s._keywordsMatch !== 'function' || s._keywordsMatch(taskType, context))
+    );
   }
 
   async gatherAll(activeSkills, kernels, config) {

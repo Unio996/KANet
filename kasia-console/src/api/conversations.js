@@ -133,6 +133,56 @@ export async function registerConversationRoutes(fastify) {
     return reply.send({ reply: aiReply || '' });
   });
 
+  // One-shot consult channel — UI "Ask Agent" buttons talk to the Agent's Brain
+  // DIRECTLY, bypassing Mind's reactive pipeline (peer context, memory, skill
+  // mega-dump). Purpose: a user one-off question should not get 94KB of noise
+  // appended. System prompt is kept to the Agent's identity + caller-supplied
+  // topic context; user prompt is the raw question.
+  //
+  // Body: { relayNodeId, topic: string, question: string, systemNote?: string }
+  // Returns: { reply: string }
+  fastify.post('/api/agent/consult', async (request, reply) => {
+    const { relayNodeId, topic, question, systemNote } = request.body || {};
+    if (!question || !question.trim()) return reply.code(400).send({ error: 'question required' });
+    const resolved = resolveRelayNodeId(relayNodeId);
+    if (!resolved) return reply.code(400).send({ error: 'relayNodeId required' });
+
+    const relay = sqlite.prepare(`
+      SELECT r.name as agent_name, r.address as agent_address, a.http_port as adapter_port
+      FROM relay_nodes r
+      LEFT JOIN adapter_nodes a ON a.id = r.adapter_node_id
+      WHERE r.id = ?
+    `).get(resolved);
+    if (!relay?.adapter_port) return reply.code(400).send({ error: 'No adapter for this relay' });
+
+    const agentName = relay.agent_name || 'Agent';
+    const safeTopic = (topic || 'general').toString().slice(0, 40);
+    const mindSystem = [
+      `You are ${agentName}, a local AI Agent. The user (owner) is asking you a one-shot question on the topic: "${safeTopic}".`,
+      `Answer the question directly using only the information they provide in the user message.`,
+      `Do NOT assume prior context from other conversations. Do NOT reference skill data you do not have.`,
+      `Keep the reply focused, concrete, and actionable. No greetings, no meta commentary.`,
+      systemNote ? `\nAdditional guidance from caller:\n${systemNote}` : '',
+    ].filter(Boolean).join('\n');
+
+    try {
+      const r = await fetch(`http://localhost:${relay.adapter_port}/reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          peer: `owner:consult:${safeTopic}`,
+          mindSystem, mindUser: question, mindTask: true,
+        }),
+        signal: AbortSignal.timeout(60_000),
+      });
+      if (!r.ok) return reply.code(502).send({ error: `adapter returned ${r.status}` });
+      const data = await r.json();
+      return reply.send({ reply: data.reply || '' });
+    } catch (e) {
+      return reply.code(500).send({ error: e.message });
+    }
+  });
+
   // Agent Mind skills query — returns active mind skills for a specific account
   fastify.get('/api/agent/mind-skills', async (request, reply) => {
     const { relay_node_id } = request.query;

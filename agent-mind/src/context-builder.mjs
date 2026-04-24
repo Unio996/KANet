@@ -1039,9 +1039,20 @@ export class ContextBuilder {
    * @returns {{ system: string, user: string, senderMeta, skills, meta }}
    */
   async buildReactiveTask(input, peerAddress, episodeOpts) {
+    // Virtual UI channel: `owner:predictions` / `owner:debug` / etc. are NOT real
+    // peer addresses — they're one-shot consult surfaces the UI invented. Skip
+    // peer-related context (profile/notes/stats/history/peerHistory) to stop
+    // those lookups from returning unrelated data that pollutes the prompt.
+    const isVirtualChannel = typeof peerAddress === 'string'
+      && peerAddress.startsWith('owner:')
+      && !peerAddress.match(/^owner:kaspa:q[a-z0-9]+$/i);
+
     const [self, memory, perception, intent, evolution] = await Promise.all([
       this.kernels.self.buildSelfContext(),
-      this.kernels.memory.buildMemoryContext(peerAddress),
+      // For virtual channels, skip memory pipeline (avoids chat-history pollution)
+      isVirtualChannel
+        ? Promise.resolve({ focusedRelationship: null, peerProfile: null, peerInteractionStats: null, conversationHistory: [] })
+        : this.kernels.memory.buildMemoryContext(peerAddress),
       this.kernels.perception.buildPerceptionContext(),
       this.kernels.intent.buildIntentContext(),
       this.kernels.evolution.buildEvolutionContext(),
@@ -1049,8 +1060,9 @@ export class ContextBuilder {
 
     const senderMeta = input.senderMeta || null;
 
-    // Fetch peer trade history (non-blocking, 5s timeout)
-    const peerHistory = (senderMeta?.relation !== 'owner' && peerAddress && !peerAddress.startsWith('owner:'))
+    // Fetch peer trade history (non-blocking, 5s timeout).
+    // Also skip on virtual channels — no real peer = nothing meaningful to fetch.
+    const peerHistory = (senderMeta?.relation !== 'owner' && peerAddress && !peerAddress.startsWith('owner:') && !isVirtualChannel)
       ? await this._fetchMindSummary({ days: 30, peerAddress })
       : null;
 
