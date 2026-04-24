@@ -35,6 +35,7 @@
 | GET | `/welcome` | 🖥 欢迎/创建引导页 | relay.js |
 | GET | `/api/agent/profile` | Agent 列表含 adapter/relay 状态 | conversations.js |
 | POST | `/api/agent/reply` | Mind 统一回复入口 | conversations.js |
+| POST | `/api/agent/consult` | UI 一次性咨询（绕开 Mind，prompt ~0.5KB） | conversations.js |
 | GET | `/api/agent/mind-skills` | 查询 Agent 的 Mind 技能 | conversations.js |
 | GET | `/api/agent/peer-context` | 获取 peer 上下文（给 Mind） | conversations.js |
 | POST | `/api/agent/mind-event` | Mind 事件上报 | conversations.js |
@@ -162,6 +163,7 @@
 | GET | `/api/auth/connections` | 连接列表 | auth.js |
 | GET | `/api/auth/connection/:id` | 单条连接详情 | auth.js |
 | DELETE | `/api/auth/connection/:id` | 删除连接 | auth.js |
+| POST | `/api/auth/retry-refresh/:id` | 手动触发 OAuth token 刷新（救活 expired/refresh_failed） | auth.js |
 | GET | `/api/oauth/openai/start` | 发起 OpenAI OAuth 流程 | oauth.js |
 | POST | `/api/oauth/openai/refresh/:connectionId` | 刷新 OAuth token | oauth.js |
 
@@ -409,7 +411,7 @@
 | GET | `/api/predictions/markets` | 预测市场列表 | stocks.js |
 | GET | `/api/predictions/wallet` | 预测市场钱包 | stocks.js |
 | POST | `/api/predictions/setup` | 设置预测市场 | stocks.js |
-| GET | `/api/predictions/positions` | 持仓列表 | stocks.js |
+| GET | `/api/predictions/positions` | 持仓 + 已结算 + summary（本金/ROI/胜率）+ timeline（资金流事件） | stocks.js |
 | GET | `/api/predictions/orders` | 订单列表 | stocks.js |
 | GET | `/api/predictions/book/:tokenId` | 订单簿 | stocks.js |
 | POST | `/api/predictions/order` | 下单 | stocks.js |

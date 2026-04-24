@@ -61,10 +61,23 @@ Connection Manager               GET /api/auth/resolve-by-adapter/:id
 
 | 文件 | 职责 |
 |------|------|
-| kasia-console/src/services/connection-manager.js | resolveRequestAuth + CRUD + refresh worker |
-| kasia-console/src/api/auth.js | resolve / connections 端点 |
+| kasia-console/src/services/connection-manager.js | resolveRequestAuth + CRUD + refresh worker + retryRefresh |
+| kasia-console/src/api/auth.js | resolve / connections / retry-refresh 端点 |
 | kasia-console/src/api/oauth.js | OAuth start/callback + 临时 1455 端口监听 |
 | agent-adapter/src/providers/resolve-auth.mjs | 共享 auth 缓存 + 401 恢复 |
+
+### Refresh 自救（2026-04-24 修）
+
+ChatGPT Plus OAuth 曾出现过期 21 小时未续的死锁：`resolveRequestAuth()` 同步路径遇到过期只写 `status='expired'` 不 refresh；后台 worker SQL 仅扫 `status IN ('connected','expiring')`，一旦落入 `expired` 就永不再看。修复：
+
+1. **同步路径自救** — `resolveRequestAuth()` 改 async，过期且有 refresh_token 时立即 `await _refreshConnection()`，不再等 60s worker tick。
+2. **Worker 扩扫** — SQL 放宽到 `status IN ('connected','expiring','expired','refresh_failed')` + `refresh_after IS NULL OR refresh_after <= now()`，死状态也能被救活。
+3. **UI 一键重试** — `POST /api/auth/retry-refresh/:id`。`/adapters` 页面为每个 OAuth adapter 卡片暴露"重试刷新"按钮，把卡住的 connection 拉回 `connected`。
+4. **不自愈的情况** — 连续 refresh 失败 3 次升级为 `reauth_required`，worker 停扫，UI 暴露"重新 OAuth"按钮走完整授权。
+
+### 共享 ChatGPT Plus 的配额陷阱
+
+`plan_type='plus'` 的 OAuth adapter 有**订阅级使用上限**（非按量付费）。多个 Agent 的 brain 若路由到同一个 OAuth adapter 会**共享同一份 quota**，并发下 `429 usage_limit_reached` 把 adapter 整体打挂，`resets_in_seconds` 通常 40-60 分钟。架构建议：每个 Agent 用独立的 api_key adapter，OAuth Plus 只给单一重点 Agent 用。
 
 ---
 

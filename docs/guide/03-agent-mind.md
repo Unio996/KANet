@@ -216,5 +216,19 @@ Agent 根据上下文在四个行为层之间切换：
 
 详见设计文档：`docs/code-ops-design.md`
 
+### Skill 相关性门（keywords gate, 2026-04-24）
+
+`Skill` 基类新增可选字段 `this.keywords = [...]` 和默认实现 `_keywordsMatch(taskType, context)`。`skillRegistry.getActiveSkills()` 现在是**双门过滤**：skill 自己的 `canActivate()` 判定基准资格，基类的 keywords gate 在 `taskType === 'reactive'` 且声明了 keywords 时再做一次消息关键词匹配（CJK 安全，用 `includes()` 永不用 `\b`）。
+
+目的：防止 reactive 消息触发全部 skill 的 `gatherContext()`，每个 skill 往 user prompt 塞几 KB instructions 叠成 90KB+ 噪音。opt-in：未声明 keywords 的 skill 保留原行为（默认激活）。
+
+### 虚拟 UI peer 的 context 隔离
+
+`context-builder.buildReactiveTask(input, peerAddress, ...)` 现在识别 `peerAddress` 以 `owner:` 开头但不是真实 `kaspa:q...` 地址的**虚拟 UI channel**（如 `owner:predictions` / `owner:consult:<topic>`）。虚拟 channel 跳过 memory kernel（peer profile / notes / interaction stats / conversation history）和 peerHistory 注入，防止这些字段用无意义 peer address 查到错误对话污染 prompt。
+
+### UI 一次性咨询的旁路通道
+
+`/api/agent/consult` 是专给 UI "问 Agent" 按钮用的短路通道：**完全绕开 Mind pipeline**，Console 直接构造最小 `mindSystem`（身份 + 话题 + caller-supplied systemNote）+ user 原问题，POST 给 adapter。实测 prompt 从 reactive 路径的 ~95KB 降到 ~0.5KB，答复更聚焦。Agent-to-Agent 社交仍走 `/api/agent/reply` 完整 Mind pipeline。
+
 ---
 
