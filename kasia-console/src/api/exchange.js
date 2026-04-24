@@ -1231,6 +1231,83 @@ export async function registerExchangeRoutes(fastify) {
     }
   });
 
+  // ── T9: Broker tab API ─────────────────────────────────
+  fastify.get('/api/broker/stats', async (request, reply) => {
+    try {
+      // 当前 broker agent (is_dex_broker = 1)
+      const broker = sqlite.prepare(
+        "SELECT id, name, address FROM relay_nodes WHERE is_dex_broker = 1 LIMIT 1"
+      ).get() || null;
+
+      // 撮合费率 (从 retail_dex_broker_config, fallback '0.1')
+      let feeKasPerOrder = '0.1';
+      if (broker?.id) {
+        const cfg = sqlite.prepare(
+          "SELECT fee_kas_per_order FROM retail_dex_broker_config WHERE broker_relay_id = ?"
+        ).get(broker.id);
+        if (cfg?.fee_kas_per_order) feeKasPerOrder = cfg.fee_kas_per_order;
+      }
+
+      // 服务中订单 (active state)
+      const activeOrders = sqlite.prepare(`
+        SELECT id, user_kasia_address, side, order_type, qty, price, state, quoted_usdt, updated_at
+        FROM retail_dex_orders
+        WHERE state IN ('aligning', 'confirming', 'awaiting_payment', 'paid', 'executing')
+        ORDER BY updated_at DESC
+        LIMIT 50
+      `).all();
+
+      // 服务中 M2 限价挂单
+      const activePublications = sqlite.prepare(`
+        SELECT id, user_kasia_address, qty, limit_price, total_usdt, pay_chain, state, updated_at
+        FROM retail_dex_buy_publications
+        WHERE state IN ('awaiting_deposit', 'deposited', 'published', 'filled')
+        ORDER BY updated_at DESC
+        LIMIT 50
+      `).all();
+
+      // 累计成交
+      const completed = sqlite.prepare(`
+        SELECT COUNT(*) as cnt,
+               COALESCE(SUM(CAST(qty AS REAL)), 0) as total_kas,
+               COALESCE(SUM(CAST(broker_fee_kas AS REAL)), 0) as total_fee_kas
+        FROM retail_dex_orders
+        WHERE state = 'completed'
+      `).get();
+
+      const completedPubs = sqlite.prepare(`
+        SELECT COUNT(*) as cnt,
+               COALESCE(SUM(CAST(qty AS REAL)), 0) as total_kas_m2
+        FROM retail_dex_buy_publications
+        WHERE state = 'completed'
+      `).get();
+
+      return {
+        broker: broker ? {
+          relay_id: broker.id,
+          name: broker.name,
+          address: broker.address,
+        } : null,
+        fee_kas_per_order: feeKasPerOrder,
+        active_orders: activeOrders,
+        active_publications: activePublications,
+        totals: {
+          completed_orders: completed?.cnt || 0,
+          completed_m2: completedPubs?.cnt || 0,
+          total_kas_settled: Math.round(((completed?.total_kas || 0) + (completedPubs?.total_kas_m2 || 0)) * 100) / 100,
+          total_broker_fee_kas: Math.round((completed?.total_fee_kas || 0) * 1000) / 1000,
+        },
+        policy: {
+          non_custodial: true,
+          timeout_minutes: 10,
+          fee_transparent: true,
+        },
+      };
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
+
   // ── /exchange 页面路由 ──────────────────────────────────
   fastify.get('/exchange', async (request, reply) => {
     return reply.view('exchange.eta', {
