@@ -662,6 +662,9 @@
         <button @click="opsTab = 'autotaker'"
           :class="opsTab === 'autotaker' ? 'border-brand-400 text-brand-600' : 'border-transparent text-ink-400'"
           class="px-3 py-1.5 text-[11px] border-b -mb-px">AutoTaker</button>
+        <button @click="opsTab = 'broker'; loadBrokerStats()"
+          :class="opsTab === 'broker' ? 'border-brand-400 text-brand-600' : 'border-transparent text-ink-400'"
+          class="px-3 py-1.5 text-[11px] border-b -mb-px">Broker (零售代理)</button>
       </div>
       <div class="p-5 max-h-[32rem] overflow-y-auto">
         <!-- Arb content placeholder — preserved from existing -->
@@ -876,6 +879,88 @@
           </div>
         </div>
 
+        <!-- ═══ Broker (零售代理) tab ═══ -->
+        <div x-show="opsTab === 'broker'" class="text-xs text-ink-500 space-y-4">
+          <!-- 当前 Broker -->
+          <div class="bg-white border border-warm-200 rounded-lg p-4">
+            <div class="font-medium text-ink-600 mb-2">当前 Broker Agent</div>
+            <div x-show="!brokerStats?.broker" class="text-ink-400">无 Broker (未设置 is_dex_broker=1)</div>
+            <template x-if="brokerStats?.broker">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="font-semibold text-ink-700" x-text="brokerStats.broker.name || '—'"></span>
+                  <span class="text-[10px] text-brand-500 bg-brand-50 px-1.5 py-0.5 rounded">DEX Broker</span>
+                </div>
+                <div class="text-[11px] text-ink-400 mt-1" x-text="brokerStats.broker.address?.slice(0, 12) + '…'"></div>
+              </div>
+            </template>
+          </div>
+          <!-- 撮合费率 -->
+          <div class="bg-white border border-warm-200 rounded-lg p-4">
+            <div class="font-medium text-ink-600 mb-2">撮合费率</div>
+            <div class="flex items-center gap-2">
+              <span class="text-lg font-bold text-brand-600" x-text="'KAS ' + (brokerStats?.fee_kas_per_order || '—')"></span>
+              <span class="text-ink-400">/ 订单</span>
+            </div>
+            <div class="text-[10px] text-ink-400 mt-1">透明费率，每笔撮合订单收取固定 KAS 手续费</div>
+          </div>
+          <!-- 服务中订单 -->
+          <div class="bg-white border border-warm-200 rounded-lg p-4">
+            <div class="font-medium text-ink-600 mb-2">
+              服务中订单
+              <span class="text-[10px] text-ink-400" x-text="'(' + (brokerStats?.active_orders?.length || 0) + ')'"></span>
+            </div>
+            <div x-show="!brokerStats?.active_orders?.length" class="text-ink-400 text-center py-3">无</div>
+            <template x-for="o in (brokerStats?.active_orders || [])" :key="o.id">
+              <div class="flex items-center justify-between py-1.5 border-b border-warm-100 last:border-0">
+                <div>
+                  <span class="font-mono text-[10px]" :class="o.side === 'buy' ? 'text-green-600' : 'text-red-500'" x-text="o.side?.toUpperCase()"></span>
+                  <span class="ml-1.5 text-ink-600" x-text="(o.qty || 0) + ' KAS'"></span>
+                  <span class="text-[10px] text-ink-400 ml-1" x-text="o.state"></span>
+                </div>
+                <span class="text-[10px] text-ink-400" x-text="'$' + (o.quoted_usdt || 0)"></span>
+              </div>
+            </template>
+          </div>
+          <!-- M2 挂单 -->
+          <div class="bg-white border border-warm-200 rounded-lg p-4">
+            <div class="font-medium text-ink-600 mb-2">
+              M2 零售挂单
+              <span class="text-[10px] text-ink-400" x-text="'(' + (brokerStats?.active_publications?.length || 0) + ')'"></span>
+            </div>
+            <div x-show="!brokerStats?.active_publications?.length" class="text-ink-400 text-center py-3">无</div>
+            <template x-for="p in (brokerStats?.active_publications || [])" :key="p.id">
+              <div class="flex items-center justify-between py-1.5 border-b border-warm-100 last:border-0">
+                <div>
+                  <span class="font-mono text-[10px]" :class="p.side === 'buy_kas' ? 'text-green-600' : 'text-red-500'" x-text="p.side?.toUpperCase()"></span>
+                  <span class="ml-1.5 text-ink-600" x-text="(p.qty || 0) + ' KAS'"></span>
+                  <span class="text-[10px] text-ink-400 ml-1" x-text="p.state"></span>
+                </div>
+                <span class="text-[10px] text-ink-400" x-text="'$' + (p.total_usdt || 0) + ' @ ' + p.limit_price"></span>
+              </div>
+            </template>
+          </div>
+          <!-- 累计成交 -->
+          <div class="grid grid-cols-2 gap-3">
+            <div class="bg-white border border-warm-200 rounded-lg p-3 text-center">
+              <div class="text-lg font-bold text-ink-700" x-text="brokerStats?.totals?.completed_orders || 0"></div>
+              <div class="text-ink-400 text-[10px]">撮合完成订单</div>
+            </div>
+            <div class="bg-white border border-warm-200 rounded-lg p-3 text-center">
+              <div class="text-lg font-bold text-ink-700" x-text="brokerStats?.totals?.completed_m2 || 0"></div>
+              <div class="text-ink-400 text-[10px]">M2 零售成交</div>
+            </div>
+            <div class="bg-white border border-warm-200 rounded-lg p-3 text-center">
+              <div class="text-lg font-bold text-green-600" x-text="(brokerStats?.totals?.total_kas_settled || 0).toFixed(0)"></div>
+              <div class="text-ink-400 text-[10px]">累计 KAS 结算</div>
+            </div>
+            <div class="bg-white border border-warm-200 rounded-lg p-3 text-center">
+              <div class="text-lg font-bold text-brand-600" x-text="(brokerStats?.totals?.total_broker_fee_kas || 0).toFixed(1)"></div>
+              <div class="text-ink-400 text-[10px]">累计 Broker 手续费</div>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
   </div>
@@ -919,6 +1004,7 @@ function exchangeApp() {
     leftTab: 'market',
     opsGroup: 'trading',
     opsTab: 'arb',
+    brokerStats: null,
     autoTakerProposals: [],
     autoTakerConfig: { enabled: false, mode: 'approval', min_discount: 0.5, max_amount: 50, daily_limit: 3, cooldown_sec: 30 },
     autoTakerSaveStatus: '',  // '' | 'saving' | 'saved' | 'error'
@@ -1459,6 +1545,11 @@ function exchangeApp() {
     },
     async loadSpreads() {
       try { const data = await fetch('/api/trade/spreads').then(r => r.json()); this.spreadRows = data.spreads || []; } catch {}
+    },
+
+    // ── Broker ──
+    async loadBrokerStats() {
+      try { const data = await fetch('/api/broker/stats').then(r => r.json()); this.brokerStats = data || {}; } catch {}
     },
 
     // ── Seeder ──
