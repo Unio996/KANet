@@ -10,6 +10,14 @@ import { onBroadcastWritten } from '../services/trade-protocol-filter.js';
 import { recordChainEvent } from '../services/chain-event.js';
 import { checkBudget, recordSpend } from '../services/social-budget.js';
 
+// ── Coordination-channel firewall (2026-04-24 proactive-spam incident) ──
+// dev-coord / kanet-arch / kanet-review / kanet-alert are reserved for
+// Opus J1 + Opus J2 + Owner coordination. Agent Mind auto-reply + proactive
+// must not broadcast to them. See docs/ANTI-PATTERNS.md (rule: coordination
+// channels protected from Agent noise) + docs/spec/2026-04-24-...v2 §8.1.8.
+const COORD_CHANNELS = new Set(['dev-coord', 'kanet-arch', 'kanet-review', 'kanet-alert']);
+const OPUS_RELAY_NAMES = new Set(['Martin', 'J2', 'Opus']);
+
 // ── Auto-reply skip rules (T-2026-04-22-02) ──
 // Prevents Mind auto-reply cascade / identity-theft / storm on sensitive channels.
 // All three helpers used in /api/chat/send and /api/chat/ingest trigger paths.
@@ -154,14 +162,8 @@ export async function registerChatRoutes(fastify) {
     const relay = getRelayNode(relayId);
     if (!relay) return reply.code(404).send({ error: 'Account not found' });
 
-    // 🔒 Coordination-channel firewall (2026-04-24 proactive-spam incident)
-    // dev-coord / kanet-arch / kanet-review / kanet-alert are reserved for
-    // Opus J1 + Opus J2 + Owner coordination. Any Agent Mind proactive cycle
-    // reaching this endpoint with one of those channels gets 403.
-    // Whitelist is by relay.name — the manual Opus/Owner-driven scripts send
-    // as 'Martin', and extensions happen here (not via x-header trust).
-    const COORD_CHANNELS = new Set(['dev-coord', 'kanet-arch', 'kanet-review', 'kanet-alert']);
-    const OPUS_RELAY_NAMES = new Set(['Martin', 'J2', 'Opus']);  // Martin=J1 manual, J2=J2 Opus own relay, Opus=reserved
+    // 🔒 Coordination-channel firewall (shared constants COORD_CHANNELS +
+    //    OPUS_RELAY_NAMES at top of file; same guard applied in triggerAutoReply)
     if (COORD_CHANNELS.has(channel.trim()) && !OPUS_RELAY_NAMES.has(relay.name)) {
       console.warn(`[chat] coord-channel BLOCKED: ${relay.name} → #${channel.trim()} — "${(message||'').slice(0,60)}"`);
       return reply.code(403).send({
@@ -432,14 +434,19 @@ const _autoReplyCooldown = new Map(); // key: `${relayId}:${channel}` → lastRe
 const AUTO_REPLY_COOLDOWN_MS = 60_000; // 60 seconds
 
 async function triggerAutoReply(responder, channelName, senderAddress, content, round = 0) {
+  // 🔒 Coordination-channel firewall — reject before Mind LLM call, save inference cost
+  const relay = sqlite.prepare('SELECT name FROM relay_nodes WHERE id = ?').get(responder.relay_id);
+  if (COORD_CHANNELS.has(channelName) && !OPUS_RELAY_NAMES.has(relay?.name)) {
+    console.log(`[chat] auto-reply BLOCKED (coord channel): ${relay?.name || 'agent'} → #${channelName}`);
+    return;
+  }
+
   // Cooldown check: skip if this agent replied to this channel recently
   const cooldownKey = `${responder.relay_id}:${channelName}`;
   const lastReply = _autoReplyCooldown.get(cooldownKey) || 0;
   if (Date.now() - lastReply < AUTO_REPLY_COOLDOWN_MS) {
     return; // silently skip, no log spam
   }
-
-  const relay = sqlite.prepare('SELECT name FROM relay_nodes WHERE id = ?').get(responder.relay_id);
 
   const aiReply = await getReply(responder.relay_id, senderAddress, content, channelName);
 
