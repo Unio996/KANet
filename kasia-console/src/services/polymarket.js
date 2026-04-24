@@ -277,6 +277,10 @@ export async function approveUsdc(privateKey) {
         }
         const tx = await usdc.approve(s.address, maxUint);
         console.log(`[polymarket] approve ${s.name} TX sent: ${tx.hash}`);
+        // Must wait for confirmation before next approve — otherwise mempool nonce
+        // hasn't incremented and next iteration submits the same nonce → NONCE_EXPIRED.
+        await tx.wait();
+        console.log(`[polymarket] approve ${s.name} confirmed`);
         txHashes[s.name] = tx.hash;
       }
       // 兼容旧返回: 提供 txHash = 第一个新发的 TX (若有)

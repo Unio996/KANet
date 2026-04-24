@@ -66,14 +66,14 @@ for PORT in $PORTS; do
   kill_pid "$PID" "port:$PORT"
 done
 
-# ── 阶段 3：停止 llama-server ─────────────────────────────────
-LLAMA_PID=$(powershell -Command "
-  (Get-CimInstance Win32_Process | Where-Object { \$_.Name -eq 'llama-server.exe' }).ProcessId
-" 2>/dev/null | tr -d '\r\n ')
-if [ -n "$LLAMA_PID" ]; then
-  kill_pid "$LLAMA_PID" "llama-server"
-  KILLED_PIDS="$KILLED_PIDS $LLAMA_PID"
-fi
+# ── 阶段 3：llama-server 不再无差别扫杀 ─────────────────────────────
+# 旧逻辑会用 WMI 按进程名杀所有 llama-server.exe，导致 qclaude.bat 起的
+# 实例被误杀，连带 litellm 断链、qclaude Claude Code 会话阵亡。
+# 现在只相信阶段 1 的 pid 文件：kanet-start.sh 起的自己写 pid 会被停，
+# qclaude.bat 起的不写 pid → 不被误杀。
+#
+# 如果你确实需要一键杀光 llama-server（含 qclaude 的），手工跑：
+#   taskkill //F //IM llama-server.exe
 
 # ── 阶段 4：清理残留 node 进程（relay、adapter、scout） ───────
 CHILD_PIDS=$(powershell -Command "

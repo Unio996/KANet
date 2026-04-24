@@ -28,6 +28,7 @@ import {
   getPublicMeta,
   isEvmChain,
 } from '../services/chains.js';
+import { recordChainEvent } from '../services/chain-event.js';
 
 const KANET_ROOT = process.env.KANET_ROOT || 'D:/Anthropic';
 const MINDS_DIR = `${KANET_ROOT}/agent-mind/minds`;
@@ -919,6 +920,48 @@ export async function registerRelayRoutes(fastify) {
       return reply.code(500).send({ error: err.message });
     } finally {
       try { provider?.destroy?.(); } catch {}
+    }
+  });
+
+  // POST /api/relay/:id/wallets/:walletId/bridge — Across V3 USDC 跨链
+  fastify.post('/api/relay/:id/wallets/:walletId/bridge', async (request, reply) => {
+    const relay = getRelayNode(request.params.id);
+    if (!relay) return reply.code(404).send({ error: 'Relay not found' });
+
+    const wallet = sqlite.prepare(
+      'SELECT id, chain, address, privkey_encrypted FROM agent_wallets WHERE id = ? AND relay_node_id = ?'
+    ).get(request.params.walletId, request.params.id);
+    if (!wallet) return reply.code(404).send({ error: 'Wallet not found' });
+    if (!wallet.privkey_encrypted) return reply.code(400).send({ error: 'No private key' });
+    if (!EVM_CHAINS.includes(wallet.chain)) return reply.code(400).send({ error: 'Bridge only supported on EVM chains' });
+
+    const { toChain, amount, recipient } = request.body || {};
+    const BRIDGE_CHAINS = ['arbitrum','polygon','bnb','eth','base','optimism'];
+    if (!BRIDGE_CHAINS.includes(toChain))
+      return reply.code(400).send({ error: `bridge target chain must be one of: ${BRIDGE_CHAINS.join(',')}` });
+    if (wallet.chain === toChain)
+      return reply.code(400).send({ error: 'fromChain === toChain, use /swap instead' });
+    if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0)
+      return reply.code(400).send({ error: 'amount must be a positive number' });
+
+    try {
+      const { executeBridge } = await import('../services/across-bridge.js');
+      const privateKey = decrypt(wallet.privkey_encrypted);
+      const result = await executeBridge(
+        privateKey, wallet.chain, toChain, parseFloat(amount), recipient || wallet.address
+      );
+      recordChainEvent({
+        txid: result.txHash,
+        eventType: 'bridge_deposit',
+        fromAddress: wallet.address,
+        toAddress: recipient || wallet.address,
+        observedBy: 'relay',
+        payload: JSON.stringify({ fromChain: wallet.chain, toChain, amount: result.inputAmount, fee: result.fee }),
+      });
+      return reply.send(result);
+    } catch (err) {
+      console.error(`[bridge] Failed: ${err.message}`);
+      return reply.code(500).send({ error: err.message });
     }
   });
 
