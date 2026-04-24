@@ -59,6 +59,20 @@ async function broadcastAccept(offerId, peerAddr, payChain) {
   return r?.txId || null;
 }
 
+// T-J2-09 broker_accept_record — completion-watcher 用此查 (offer_id → user) 关联
+function _recordAccept({ offerId, userPeer, qty, quotedUsdt, payChain, acceptTx }) {
+  try {
+    sqlite.prepare(`
+      INSERT INTO chain_events (txid, from_address, to_address, event_type, payload, observed_by, observed_at)
+      VALUES (?, ?, ?, 'broker_accept_record', ?, 'broker-buy-handler', datetime('now'))
+    `).run(
+      `broker_accept_${acceptTx || offerId}`,
+      BROKER_RELAY_ID, userPeer,
+      JSON.stringify({ offer_id: offerId, user_kasia_address: userPeer, qty, quoted_usdt: quotedUsdt, pay_chain: payChain, accept_tx: acceptTx })
+    );
+  } catch (e) { console.warn(`[broker-buy] record err: ${e.message}`); }
+}
+
 export async function handleBuyIntent(peerAddr, message) {
   const trimmed = (message || '').trim();
   const pending = _quotes.get(peerAddr);
@@ -69,6 +83,7 @@ export async function handleBuyIntent(peerAddr, message) {
       const tx = await broadcastAccept(pending.offer_id, peerAddr, pending.pay_chain);
       _quotes.delete(peerAddr);
       if (!tx) return `accept 上链失败, 报价取消, 请重发"买 X KAS".`;
+      _recordAccept({ offerId: pending.offer_id, userPeer: peerAddr, qty: pending.qty, quotedUsdt: pending.quoted_usdt, payChain: pending.pay_chain, acceptTx: tx });
       return `✓ 已上链 tx ${tx.slice(0,12)}.... 请 30min 内付 ${pending.quoted_usdt} USDT 到 ${pending.maker_addr?.slice(0,22)||'?'}... (${pending.pay_chain}). Maker 收 USDT 后直发 ${pending.qty} KAS 到你 Kasia 地址.`;
     }
     if (CANCEL_WORDS.includes(trimmed)) {

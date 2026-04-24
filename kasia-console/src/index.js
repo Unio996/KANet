@@ -343,6 +343,10 @@ startRetailDexMonitor();
 import { startIntakeWatcher } from './services/broker-intake-watcher.js';
 startIntakeWatcher();
 
+// Phase 4 (T-J2-09): broker-buy-completion-watcher — BUY 闭环, broker 代 accept 后 DM user KAS 到账
+import { startCompletionWatcher } from './services/broker-buy-completion-watcher.js';
+startCompletionWatcher();
+
 // Graceful shutdown — stop all child processes
 async function shutdown() {
   console.log('[kasia-console] shutting down...');
