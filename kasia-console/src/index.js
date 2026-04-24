@@ -330,13 +330,18 @@ import { startRefreshWorker } from './services/connection-manager.js';
 startRefreshWorker();
 
 // Start market seeder (auto seed orders on free market)
-import { startMarketSeeder, startSeederDepositWatcher } from './services/market-seeder.js';
+import { startMarketSeeder, startSeederDepositWatcher, startSeederRefundWorker } from './services/market-seeder.js';
 startMarketSeeder();
 startSeederDepositWatcher();
+startSeederRefundWorker();
 
 // T8: Start retail-dex order monitor (paid → executing → completed)
 import { startOrderMonitor as startRetailDexMonitor } from './services/retail-dex.js';
 startRetailDexMonitor();
+
+// Phase 3 (T-J2-06): broker-intake-watcher — 入账 4 场景兜底 (v2.1 §4.2)
+import { startIntakeWatcher } from './services/broker-intake-watcher.js';
+startIntakeWatcher();
 
 // Graceful shutdown — stop all child processes
 async function shutdown() {

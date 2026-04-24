@@ -87,7 +87,15 @@ export async function intakeTick() {
 
 export function startIntakeWatcher() {
   if (_intakeInterval) return;
-  _intakeInterval = setInterval(() => intakeTick().catch(e => console.error('[broker-intake]', e.message)), TICK_MS);
+  _intakeInterval = setInterval(async () => {
+    try {
+      const r = await intakeTick();
+      if (r && r.scanned !== undefined) {
+        // 每次 tick 打存活 + 结果, J1 验收标准"[broker-intake] tick 至少一条"
+        console.log(`[broker-intake] tick handled=${r.handled||0}/${r.scanned||0}`);
+      }
+    } catch (e) { console.error('[broker-intake]', e.message); }
+  }, TICK_MS);
   console.log(`[broker-intake] watcher started for Trader-B tick=${TICK_MS}ms`);
 }
 
