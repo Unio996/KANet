@@ -154,6 +154,24 @@ export async function registerChatRoutes(fastify) {
     const relay = getRelayNode(relayId);
     if (!relay) return reply.code(404).send({ error: 'Account not found' });
 
+    // 🔒 Coordination-channel firewall (2026-04-24 proactive-spam incident)
+    // dev-coord / kanet-arch / kanet-review / kanet-alert are reserved for
+    // Opus J1 + Opus J2 + Owner coordination. Any Agent Mind proactive cycle
+    // reaching this endpoint with one of those channels gets 403.
+    // Whitelist is by relay.name — the manual Opus/Owner-driven scripts send
+    // as 'Martin', and extensions happen here (not via x-header trust).
+    const COORD_CHANNELS = new Set(['dev-coord', 'kanet-arch', 'kanet-review', 'kanet-alert']);
+    const OPUS_RELAY_NAMES = new Set(['Martin']);  // J1 manual; add J2-on-J1-host when needed
+    if (COORD_CHANNELS.has(channel.trim()) && !OPUS_RELAY_NAMES.has(relay.name)) {
+      console.warn(`[chat] coord-channel BLOCKED: ${relay.name} → #${channel.trim()} — "${(message||'').slice(0,60)}"`);
+      return reply.code(403).send({
+        error: 'coordination_channel_restricted',
+        detail: `#${channel.trim()} is reserved for Opus (J1/J2) + Owner coordination; Agent ${relay.name} not permitted`,
+        relay: relay.name,
+        channel: channel.trim(),
+      });
+    }
+
     // 事前预算拦截 (fail-closed): 超限直接 403, 不发广播不花 KAS
     const preCheck = await checkBudget(relayId, 0);
     if (!preCheck.allowed) {
