@@ -450,6 +450,23 @@ export class ActionExecutor {
       return { ok: false, reason: 'empty broadcast message' };
     }
 
+    // 🔒 Coordination channel firewall (2026-04-24 proactive-spam incident)
+    // These channels are for humans + Opus protagonists only. Any Agent Mind
+    // (Sophie / Kasia_1 / Eric / Qwen / broker / seeder) reaching here on its
+    // proactive cycle will create compounding LLM-generated noise that drowns
+    // real coordination. Hard block, with explicit log so the failure is
+    // visible in the skipped-broadcast record.
+    const COORD_CHANNELS = new Set(['dev-coord', 'kanet-arch', 'kanet-review', 'kanet-alert']);
+    const channelName = action.channel || 'general';
+    if (COORD_CHANNELS.has(channelName)) {
+      console.log(`[agent-mind:executor] Broadcast BLOCKED — #${channelName} is a coordination channel reserved for humans + Opus (Agent Mind proactive not permitted)`);
+      this.memory.recordEvent({
+        type: 'broadcast_blocked',
+        summary: `Broadcast BLOCKED to coordination channel #${channelName}: "${action.message?.slice(0, 50)}"`,
+      });
+      return { ok: false, reason: `channel #${channelName} blocked for Agent Mind — reserved for coordination` };
+    }
+
     // Dedup: check recent events for similar broadcasts (prevent spam loops)
     const recentBroadcasts = this.memory.shortTermEvents
       .filter(e => e.type === 'broadcast')
