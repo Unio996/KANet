@@ -1188,7 +1188,7 @@ export async function registerRelayRoutes(fastify) {
     const relay = getRelayNode(request.params.id);
     if (!relay) return reply.code(404).send({ error: 'Relay not found' });
 
-    const { name, entityType, summary, mode } = request.body || {};
+    const { name, entityType, summary, mode, serviceTerms } = request.body || {};
     if (!name?.trim()) return reply.code(400).send({ error: 'Name is required' });
 
     const skills = sqlite.prepare(
@@ -1206,6 +1206,7 @@ export async function registerRelayRoutes(fastify) {
         summary: summary?.trim() || undefined, mode: mode || 'public',
         rootTx: existingCard?.card_root_tx || null,
         parentTx: existingCard?.card_latest_tx || null,
+        serviceTerms: (serviceTerms && typeof serviceTerms === 'object') ? serviceTerms : undefined,
       },
     });
     if (!sent) return reply.code(503).send({ error: 'Relay not running' });
