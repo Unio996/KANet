@@ -2,7 +2,8 @@
 
 > **日期**: 2026-04-24
 > **作者**: Opus J2 (基于 Owner 6 轮纠正形成)
-> **版本**: v2.1 (2026-04-24 迭代自 J1 + QClaude 审校 + Owner 北极星凝练)
+> **版本**: v2.1.1 (2026-04-25 微更新: B 模式只走 exchange_offers 协议, 不接 mm-otc/CEX, KANet 协议层纯姿态)
+> **基础**: v2.1 (2026-04-24 J1 + QClaude 审校 + Owner 北极星凝练)
 > **状态**: 讨论稿 (整合共识, 待 Owner 最终确认后进入 Phase 1)
 > **替代**: `docs/spec/2026-04-23-dex-agent-v1.md` (v1 方向已识别偏离)
 > **审校对象**: Owner (Martin) · J1 Opus · QClaude · NWT · 其他协作 AI
@@ -113,7 +114,7 @@ Owner 2026-04-24 凝练：
 |---|---|---|---|
 | **1. 弄清需求** | 听懂用户说什么（任何语言 / 模糊表达 / 断续对话） | `llm-dispatcher.callLlm` + Mind adapter + `conversational-ops/intents.json` + `memory.mjs` 跨会话上下文 + `address_profiler` 老客户画像 | 对话中不断澄清；缺字段主动追问；用户含糊时给选项 |
 | **2. 形成订单** | 把用户意图翻译成协议层结构（side / asset / amount / chain / price / ...） | `exchange_offers` schema + `validateOrder` + `confirm-store` 30s token | 双方对齐确认（用户点头才落单）；费率明示；资金来源核对 |
-| **3. 传给 seeker / taker** | broker **不自己执行**，只把订单路由到底层 | A 撮合 → `autoTaker` + `exchange_offers`；B 代持 → 收 KAS 后 `market-seeder.publishOffer` 或 `mm-otc` CEX 代卖 | 决策"传给谁"：按市场深度 / 费率 / 用户偏好选 seeker 或 taker 路径 |
+| **3. 传给 seeker / taker** | broker **不自己执行**，只把订单路由到底层 | A 撮合 → `autoTaker` + `exchange_offers`；B 代持 → 收 KAS 后 `market-seeder.publishOffer` 在 exchange_offers 协议上挂 SELL 单 | 决策"传给谁"：按市场深度 / 费率 / 用户偏好选 seeker 或 taker 路径。**只走 exchange_offers 协议，不接外部 CEX** (v2.1.1 校准, KANet 协议层纯姿态) |
 | **4. 跟踪反馈** | 过程中关键节点主动 DM；结果及时同步 | `chain_events` 订阅 + `exchange-machine.transition` + Mind `triggerProactive` + `retail-dex-pusher.js` 模板可迁移 | 决策"何时主动 DM"：不刷屏，只报关键节点（accept / paid / delivered / timeout / fail） |
 
 **四步全部走已有基建**。broker 独有代码 = 四步之间的"粘合判断" + 跨用户意图存储，预估 <210 行。
@@ -215,22 +216,22 @@ broker DM 用户: "好。请把 50 KAS 发到这个 kaspa 地址: kaspa:qrxw...
   ↓
 broker 收到入账 (链事件) → Mind 识别 "有 peer_X intent=sell 50 KAS 的转账"
   ↓
-broker 自主选择代卖路径:
-  · 走 exchange_offers 挂 SELL 单等 autoTaker 接
-  · 或直接调外部 CEX (mm-otc skill 已有 CCXT)
-  · 或调已有 Seeder 的库存做内部结算
+broker 在 exchange_offers 协议上 publish SELL 单 (v2.1.1 校准):
+  · 调 market-seeder.publishOffer (give:KAS, want:USDT, target_chain=用户 pay_chain)
+  · fund-lock 锁 KAS 防超发
+  · 等接单方 (autoTaker 或外部用户) 在协议上 accept
   ↓
-获得 USDT → broker EVM 钱包
+接单方按 kanet-exchange 协议把 USDT 直发用户 pay_address
   ↓
-broker 转 USDT 到用户指定地址 (evm-transfer.js)
+broker 监听 exchange-machine.transition completed → 链上证据齐
   ↓
-broker DM: "✓ USDT 已到你 BSC: [tx]"
+broker DM: "✓ USDT 已到你 [chain]: [tx]"
 ```
 
 **broker 在这条路径上做的事**（对应四步职责链）：
 1. **弄清**：听懂卖 KAS / 多少 / 收款到哪条链哪个地址
 2. **形成订单**：公开挂牌费率（0.5% 或 0.1 KAS/单，取大值），用户 YES 才落单
-3. **传给 seeker**：收到 KAS 入账后，调 `market-seeder.publishOffer` 或 `mm-otc` CEX 路径代卖 — broker 不自己做市，只是路由到 seeker 能力
+3. **传给 seeker**：收到 KAS 入账后，调 `market-seeder.publishOffer` 在 exchange_offers 协议上挂 SELL KAS for USDT 单 — broker 不自己做市不接外部 CEX，只是路由到 KANet 协议层能力 (v2.1.1 校准)
 4. **跟踪反馈**：代卖开始 / 成交 / USDT 转出 / 失败 每一步主动 DM
 
 **费率**：**扣 KAS 不扣 USDT**（QClaude 审校提出）。原因：用户收到的 USDT 数字干净（整数或简单小数），不会出现 "预计 1.700 USDT 实到 1.693 USDT" 这种尾数问题；KAS 这边反正要切割出 fee。
@@ -300,7 +301,7 @@ v1 spec 漏掉这一整块，是它不配称"粘合"的核心原因。
     if intent == 'sell_kas' and amount ≈ intent.qty:
       → 进入代持路径 (模式 B)
       → DM peer: "收到你 {amount} KAS ✓ 开始代卖..."
-      → 继续 mm-otc 或 exchange_offers 挂单
+      → 在 exchange_offers 上 publish SELL 单 (v2.1.1 校准, 不接 mm-otc/CEX)
     
     elif intent == 'buy_kas':
       → 识别为"操作错误" (用户应该付 USDT, 却发了 KAS)
@@ -340,7 +341,7 @@ v1 spec 漏掉这一整块，是它不配称"粘合"的核心原因。
 - **金额不对** → 按实际到账金额处理。发少了 → 按比例代卖；发多了 → 多出部分询问用户。
 - **链路错误** → 用户发 USDT 到 broker EVM 地址（本来应该发 KAS）→ 同一套逻辑迁移到 agent_wallets 入账监听。
 - **垃圾攻击** → 单 peer 同天 > N 次入账视为垃圾，自动退款 + 加速反滥用拉黑。
-- **交易所 suspend** → mm-otc 代卖失败 → 降级到挂 exchange_offers 等 peer 接 → 最终超时 → 退回用户原 KAS。
+- **接单超时 (2h 无 autoTaker / 外部 taker accept)** → 自动退回用户原 KAS (broker 吃 gas) (v2.1.1 校准: 不再 fallback 外部 CEX)。
 
 ### 4.5 兜底不是可选项
 
@@ -366,13 +367,13 @@ v2 spec 明文主张：
 | 信誉评估 | `kasia-console/src/services/reputation.js` (225) | 黑名单 + 风险降额 |
 | Mind 对话 | `kasia-console/src/services/mind-manager.js` + agent-mind/src | 社交闸 + 优先级队列 + 全 skill |
 | 对话意图 | `agent-mind/src/skills/conversational-ops/` (215) | query/execute 14 个意图 |
-| OTC 做市 | `agent-mind/src/skills/mm-otc.mjs` (278) | 代卖路径 |
+| ~~OTC 做市~~ | ~~`agent-mind/src/skills/mm-otc.mjs`~~ | ~~代卖路径~~ — **v2.1.1 废**, broker 只走 exchange_offers 协议, 不接 CEX |
 | 用户画像 | `agent-mind/src/skills/address-profiler.mjs` | 陌生人 vs 熟客 |
 | 自我感知 | `agent-mind/src/skills/self-awareness.mjs` | 库存/连接/状态 |
 | 主动 DM | `mind-manager.triggerProactive` | 进度推送 |
 | 记忆 | `agent-mind/src/kernels/memory.mjs` (203) | per-peer notes + context |
 | 确认 Token | `agent-mind/src/confirm-store.mjs` | YES/NO 30s TTL |
-| CCXT | mm-otc 已集成 | 外部 CEX 代卖 |
+| ~~CCXT~~ | ~~mm-otc 已集成~~ | ~~外部 CEX 代卖~~ — **v2.1.1 废**, broker 不接外部交易所 |
 | EVM 转账 | `kasia-console/src/services/evm-transfer.js` | broker 发 USDT 给用户 |
 
 ### 5.2 新增代码量估算
@@ -381,7 +382,7 @@ v2 spec 明文主张：
 |---|---|---|
 | 入账事件扫描 + 兜底路由 | Mind proactive pipeline (broker 专属扩展点) | ~80 |
 | 跨用户意图池（sell 意图 DM 存储） | memory.addRelationshipNote (用现有) | 0 新增 |
-| 代持代卖触发 | 复用 mm-otc skill + exchange-machine | ~30 |
+| 代持代卖触发 (v2.1.1) | 复用 market-seeder.publishOffer + exchange-machine, 不接 mm-otc | ~30 |
 | 兜底退款函数 | 复用 Relay sendKas | ~20 |
 | 费率公开展示 (Agent Card 字段 or broker_config) | UI 读展示 | ~30 |
 | 意图匹配 (跨用户撮合建议) | Mind proactive 扫 sell intent vs buy intent | ~50 |
@@ -625,7 +626,7 @@ AI 看文档会按训练先验"模型化"。文档说"broker"，AI 脑子里浮�
 
 ### Phase 4 · 双模式对接
 - [ ] 模式 A 撮合：broker 对话 → 引导用户到 exchange_offers 或 autoTaker
-- [ ] 模式 B 代持：入账后自动触发 mm-otc skill 代卖
+- [ ] 模式 B 代持：入账后在 exchange_offers 协议上 publish SELL KAS for USDT 单 (v2.1.1, 不接 mm-otc)
 - [ ] 进度推送走 Mind proactive
 
 ### Phase 5 · v1 残骸清理
