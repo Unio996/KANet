@@ -161,7 +161,7 @@ export async function registerChatRoutes(fastify) {
     // Whitelist is by relay.name — the manual Opus/Owner-driven scripts send
     // as 'Martin', and extensions happen here (not via x-header trust).
     const COORD_CHANNELS = new Set(['dev-coord', 'kanet-arch', 'kanet-review', 'kanet-alert']);
-    const OPUS_RELAY_NAMES = new Set(['Martin']);  // J1 manual; add J2-on-J1-host when needed
+    const OPUS_RELAY_NAMES = new Set(['Martin', 'J2', 'Opus']);  // Martin=J1 manual, J2=J2 Opus own relay, Opus=reserved
     if (COORD_CHANNELS.has(channel.trim()) && !OPUS_RELAY_NAMES.has(relay.name)) {
       console.warn(`[chat] coord-channel BLOCKED: ${relay.name} → #${channel.trim()} — "${(message||'').slice(0,60)}"`);
       return reply.code(403).send({
