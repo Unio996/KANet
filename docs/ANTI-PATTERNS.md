@@ -170,6 +170,72 @@ T1-T9 每个单元 smoke 都 PASS（功能层面代码都能跑），但**测试
 
 ---
 
+## 规则 7 · 共用频道要分层 — 协作频道禁止 Agent 自动发
+
+### 来源
+2026-04-24 下午 proactive spam 事件：J1 往 `kanet-arch` 发 TASK-ALLOC，数秒内 7+ 个 Agent 的 Mind proactive cycle 看到新广播就各自调 Brain 生成 "[SILENT]" / "已看到, 同意" / 英文 proactive 复读并 broadcast 回去。频道 5+ 条/分钟被 LLM 自嗨淹没，真人和 Opus 之间的协作消息被埋。
+
+### Wrong
+- 协作频道（`dev-coord` / `kanet-arch` / `kanet-review` / `kanet-alert`）和 Agent 公共频道（`general` / `kanet-exchange` 等）**不区分**，任何 relay 都能发。
+- Agent proactive 默认往用户最近关注的 channel 回复。
+- Firewall 只在一处（比如 action-executor）拦截 —— 另外的路径（比如 `triggerAutoReply` IPC 或 Mind 直调 `/api/chat/send`）绕过。
+
+### Right
+**分层 + 白名单 + 纵深防御**：
+- 定义一批"协作频道" `COORD_CHANNELS` 常量，Agent Mind 一律不能发。
+- 定义"Opus/Owner relay 白名单" `OPUS_RELAY_NAMES`，只有这些 relay 能往协作频道发。
+- Firewall 挂 **每一个**可能发广播的层（Console endpoint / action-executor / auto-reply IPC），逐层检查，缺一不可。
+- Check 用 `relay.name`（来自 DB），不用 header / LLM 输出 / 用户 payload（都能伪造或幻觉）。
+
+### Why
+协作频道的价值是**低噪高信**：人类 + Opus 就方向问题快速收敛。Agent proactive 是 LLM 生成的"看起来合理"的消息，**对决策无权威但会污染注意力**，且可能**冒名顶替式地"赞同"某个方案**（比如本次事件里一堆 Agent "推荐 option b"，但他们没决策权）。
+
+Agent 的 proactive social outreach 应留给 `general` / `kanet-exchange` 这类 agent-to-agent 活动频道，不踩协作线。
+
+### 工程落地
+- `agent-mind/src/action-executor.mjs sendBroadcast` ← 第一道
+- `kasia-console/src/api/chat.js POST /api/chat/send` ← 第二道（Console 层）
+- `kasia-console/src/api/chat.js triggerAutoReply` ← 第三道（IPC 路径）
+
+**关键**：firewall 数量不是问题，**一漏就全泄**。
+
+---
+
+## 规则 8 · Ready probe 永远用 GET / health，不用 POST
+
+### 来源
+2026-04-24 NWT 完成 T-NWT-04 时诚实报告：她用 `curl POST -d '{"name":"_probe"}' /api/relay/xxx/publish-card` 在 loop 里当作 Relay ready probe，等 `200` 再发真 card。**Relay ready 的那一刻真把 `_probe` 当 card 请求处理了**，上链成一张 name="_probe" 的 Agent Card。Kasia card 是链式结构（root_tx 不可改），`_probe` 永久成了 Trader-B 的首张 root card，真 card 只能做 latest（指向 `_probe` 的 parent）。功能无影响（Scout 看 latest），但审计回溯永远能看到这个污点。
+
+### Wrong
+```bash
+# 用"有副作用的 POST"当 readiness check
+until curl -sf -X POST http://localhost:3100/api/x/publish-card \
+    -H 'Content-Type: application/json' \
+    -d '{"name":"_probe"}' > /dev/null; do
+  sleep 1
+done
+# 目的只是等 endpoint ready, 但每次成功调用都是一次**真请求**
+```
+
+### Right
+```bash
+# health endpoint 或纯读 endpoint, 永远没副作用
+until curl -sf http://localhost:3100/health > /dev/null; do sleep 1; done
+
+# 或用 endpoint 自己的 read path
+until curl -sf http://localhost:3100/api/relay/$ID/card > /dev/null; do sleep 1; done
+```
+
+### Why
+**上链操作不可回滚**。Kasia broadcast / EVM transfer / mm-otc publish — 任何 probe 如果触发真 state change，污点就永久。区块链的"append-only"对正确数据是特性，对 probe 数据是诅咒。
+
+**判断是否 safe probe**：endpoint 名 + HTTP method 就能看出来。`GET /health` 安全；`POST /x/publish` / `POST /x/create` / `POST /x/send` 不安全。不知道就查代码，**永远不拿带副作用的 endpoint 做 ready check**。
+
+### 实例教训
+Trader-B 首张链上 card root_tx = `8663390e8e1fc9c4...` name="_probe" — 这不可改，已作为历史档案留存。NWT 本人把这条记入她自己的 anti-pattern 本，这条规则正式沉淀到团队档案。
+
+---
+
 ## 如何扩充本档案
 
 新陷阱踩过后**立即**追加，格式保持：
