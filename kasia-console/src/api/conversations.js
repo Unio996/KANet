@@ -115,9 +115,19 @@ export async function registerConversationRoutes(fastify) {
 
     // T7: retail-dex broker 白名单路由 — DEX broker 的 DM (非 broadcast) 绕开 Mind/Brain
     // 走 retail-dex deterministic 状态机, 零 LLM 成本, 零幻觉
+    // T-J2-08 (Phase 4 v2.1.1): broker DM 先尝试 broker-buy-handler (A 模式撮合)
+    // 命中 buy 意图直接走 exchange_offers + accept_v1, 不进 retail-dex; 不命中再 fallback
     if (!channel) {
       const broker = sqlite.prepare('SELECT is_dex_broker FROM relay_nodes WHERE id = ?').get(resolved);
       if (broker?.is_dex_broker === 1) {
+        try {
+          const { handleBuyIntent } = await import('../services/broker-buy-handler.js');
+          const buyReply = await handleBuyIntent(peer, message);
+          if (buyReply !== null) return reply.send({ reply: buyReply });
+        } catch (err) {
+          console.warn(`[api/agent/reply] broker-buy-handler err for ${resolved?.slice(0,8)}: ${err.message}`);
+          // fall through to retail-dex
+        }
         try {
           const { handleDm } = await import('../services/retail-dex.js');
           const dexReply = await handleDm(peer, message, resolved);
