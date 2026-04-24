@@ -1,5 +1,9 @@
 // retail-dex-dialog.js — Broker 对话层
 //
+// ⚠ SUPERSEDED BY docs/spec/2026-04-24-dex-broker-v2-glue-layer.md
+// ⚠ DO NOT EXTEND — see docs/ANTI-PATTERNS.md (v1 retail-dex case study)
+// v2 replaces this with Mind + conversational-ops (already exists).
+//
 // 分工死边界:
 //   此层 (LLM): 聊 + 收集 4 字段. 不碰链不碰钱.
 //   协议层 (retail-dex.js): 字段齐备 + 校验通过后接手, 走链上.

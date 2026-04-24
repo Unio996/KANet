@@ -1,5 +1,13 @@
 // retail-dex.js — Retail DEX order service
 // Handles retail-proxy user order lifecycle via state machine + intent parsing.
+//
+// ⚠ SUPERSEDED BY docs/spec/2026-04-24-dex-broker-v2-glue-layer.md
+// ⚠ DO NOT EXTEND — see docs/ANTI-PATTERNS.md (v1 retail-dex case study)
+// This file + retail-dex-{dialog,memory,profile,pusher}.js (total 1990 LOC) are
+// identified in v2 spec as duplicating Mind + exchange-machine + autoTaker +
+// market-seeder basiness that already exist. v2 replaces the whole cluster
+// with "broker-as-glue" on existing infrastructure (<210 LOC new code).
+// Retained read-only for historical trace until Phase 5 cleanup decision.
 
 import { sqlite } from '../db/client.js';
 import { randomUUID } from 'crypto';

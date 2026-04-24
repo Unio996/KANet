@@ -1,5 +1,9 @@
 // retail-dex-pusher.js — T7 M5 状态推送
 // Broker 在状态转换后主动 DM 用户. 模板驱动.
+//
+// ⚠ SUPERSEDED BY docs/spec/2026-04-24-dex-broker-v2-glue-layer.md
+// ⚠ DO NOT EXTEND — see docs/ANTI-PATTERNS.md (v1 retail-dex case study)
+// v2 replaces this with Mind proactive pipeline (mind-manager.triggerProactive).
 
 import { sqlite } from '../db/client.js';
 

@@ -1,5 +1,9 @@
 // retail-dex-profile.js — 用户画像聚合
 //
+// ⚠ SUPERSEDED BY docs/spec/2026-04-24-dex-broker-v2-glue-layer.md
+// ⚠ DO NOT EXTEND — see docs/ANTI-PATTERNS.md (v1 retail-dex case study)
+// v2 replaces this with agent-mind address-profiler skill (already exists).
+//
 // 实验目的: 证明 KANet 的 Agent 能利用 on-chain identity + history 做到
 // "有记忆不重问". 老客户发"买 50 KAS" 一句话直接下单.
 //

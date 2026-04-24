@@ -1,5 +1,9 @@
 // retail-dex-memory.js — 对话记忆蒸馏层
 //
+// ⚠ SUPERSEDED BY docs/spec/2026-04-24-dex-broker-v2-glue-layer.md
+// ⚠ DO NOT EXTEND — see docs/ANTI-PATTERNS.md (v1 retail-dex case study)
+// v2 replaces this with agent-mind/src/kernels/memory.mjs (already exists, 203 LOC).
+//
 // 职责: 周期性把用户-Broker 原始 DM 蒸馏成结构化画像字段
 //
 // 导出:
