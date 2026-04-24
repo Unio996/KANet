@@ -201,6 +201,43 @@ export async function _scanExpiredBrokerOffers() {
   return { handled, scanned: rows.length };
 }
 
+// T-J2-10: 12h stale unsolicited_wait scanner — user 12h 无 ACK 自动退款
+export async function _scanStaleUnsolicited() {
+  const rows = sqlite.prepare(`
+    SELECT p.id, p.payload
+    FROM chain_events p
+    WHERE p.event_type = 'broker_intake_processed'
+      AND p.payload LIKE '%"outcome":"unsolicited_wait"%'
+      AND julianday(p.observed_at) < julianday('now', '-12 hours')
+      AND NOT EXISTS (
+        SELECT 1 FROM chain_events r
+        WHERE r.event_type = 'broker_unsolicited_refunded'
+        AND r.payload LIKE '%"processed_event_id":"' || p.id || '"%'
+      )
+    LIMIT 10
+  `).all();
+  let handled = 0;
+  for (const p of rows) {
+    try {
+      const ppl = JSON.parse(p.payload || '{}');
+      const src = sqlite.prepare(`SELECT from_address, payload FROM chain_events WHERE id = ?`).get(ppl.src_event_id);
+      if (!src?.from_address) continue;
+      const amt = parseFloat(JSON.parse(src.payload || '{}').amount || 0);
+      if (amt <= 0) continue;
+      await _send(BROKER_RELAY_ID, { type: 'send_kas', target: src.from_address, amount_kas: amt,
+        note: `12h unsolicited refund ${p.id.slice(0, 12)}` });
+      sqlite.prepare(`
+        INSERT INTO chain_events (txid, from_address, to_address, event_type, payload, observed_by, observed_at)
+        VALUES (?, NULL, NULL, 'broker_unsolicited_refunded', ?, 'broker-intake-watcher', datetime('now'))
+      `).run(`unsolicited_refund_${p.id.slice(0, 16)}`, JSON.stringify({ processed_event_id: p.id, user_kasia_address: src.from_address, amount: amt }));
+      await _send(BROKER_RELAY_ID, { type: 'send_message', target: src.from_address,
+        message: `12h 无回复, 已退 ${amt} KAS 给你. broker 吃 gas.` });
+      handled++;
+    } catch (err) { console.warn(`[broker-stale] ${p.id?.slice(0,8)} err: ${err.message}`); }
+  }
+  return { handled, scanned: rows.length };
+}
+
 export async function intakeTick() {
   const trader = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id = ?`).get(BROKER_RELAY_ID);
   if (!trader) return { handled: 0, reason: 'no_broker_relay' };
@@ -240,6 +277,11 @@ export function startIntakeWatcher() {
         const r = await _scanExpiredBrokerOffers();
         if (r && r.scanned > 0) console.log(`[broker-refund] tick handled=${r.handled||0}/${r.scanned||0}`);
       } catch (e) { console.error('[broker-refund]', e.message); }
+      // T-J2-10: 同 5min sub-tick 同时扫 12h unsolicited stale
+      try {
+        const s = await _scanStaleUnsolicited();
+        if (s && s.scanned > 0) console.log(`[broker-stale] tick handled=${s.handled||0}/${s.scanned||0}`);
+      } catch (e) { console.error('[broker-stale]', e.message); }
     }, REFUND_TICK_MS);
   }
   console.log(`[broker-intake] watcher started for Trader-B tick=${TICK_MS}ms, refund tick=${REFUND_TICK_MS}ms`);
