@@ -959,6 +959,13 @@
               <div class="text-ink-400 text-[10px]">累计 Broker 手续费</div>
             </div>
           </div>
+          <!-- 公开声明 -->
+          <div class="bg-warm-50 border border-warm-200 rounded-lg p-3 text-[11px] text-ink-600 space-y-1">
+            <div class="font-semibold text-ink-700">公开声明</div>
+            <div>• <span class="font-medium">非托管</span>: USDT 直付 Maker, Broker 全程不持有用户资金</div>
+            <div>• <span class="font-medium">10min 兜底退款</span>: 超时未 fill 自动退款用户原 USDT 地址</div>
+            <div>• <span class="font-medium">费率透明</span>: <span x-text="brokerStats?.fee_kas_per_order || '0.1'"></span> KAS/单, 从 net_delivery 隐形扣, 不单独索取</div>
+          </div>
         </div>
 
       </div>
