@@ -2,7 +2,16 @@
 //
 // ⚠ SUPERSEDED BY docs/spec/2026-04-24-dex-broker-v2-glue-layer.md
 // ⚠ DO NOT EXTEND — see docs/ANTI-PATTERNS.md (v1 retail-dex case study)
-// v2 replaces this with Mind + conversational-ops (already exists).
+//
+// 本文件 390 行 100% 重复 Mind 已有能力, 具体:
+//   · callQwen (~35 LOC)                → 重复 kasia-console/src/services/llm-dispatcher.callLlm (含 Qwen3 kill switch)
+//   · SYSTEM_PROMPT (~60 LOC 硬编码)    → 重复 agent-mind/src/context-builder.mjs 1196 LOC (动态注入)
+//   · _conversations Map + pushHistory  → 重复 agent-mind/src/services/episode-builder.js + memory kernel
+//   · interpret() 意图提取              → 重复 agent-mind/src/skills/conversational-ops/intents.json (14 意图)
+//   · extractJson                        → 重复 llm-dispatcher.extractJson
+//   · validateOrder                      → 重复 agent-mind validation 路径
+//
+// v2 删此文件, broker DM 走 Mind.getReply → conversational-ops skill.
 //
 // 分工死边界:
 //   此层 (LLM): 聊 + 收集 4 字段. 不碰链不碰钱.

@@ -3,7 +3,14 @@
 //
 // ⚠ SUPERSEDED BY docs/spec/2026-04-24-dex-broker-v2-glue-layer.md
 // ⚠ DO NOT EXTEND — see docs/ANTI-PATTERNS.md (v1 retail-dex case study)
-// v2 replaces this with Mind proactive pipeline (mind-manager.triggerProactive).
+//
+// 本文件 90 行 100% 重复 Mind proactive pipeline, 具体:
+//   · ORDER_TEMPLATES (8 状态模板)       → 模板文案可迁移, 执行走 mind-manager.triggerProactive
+//   · PUB_TEMPLATES (8 publication 模板) → 同上
+//   · pushOrderTransition / pushPubTransition → 重复 mind-manager.triggerProactive 路径 (已含社交闸 + priority queue)
+//   · _sendDm (~20 LOC)                   → 重复 sendCommandAsync + type:'send_message' DM 路径 (但 Mind 已包装)
+//
+// v2 保留模板文案迁到 Mind proactive trigger, 删本文件整体.
 
 import { sqlite } from '../db/client.js';
 

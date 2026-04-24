@@ -2,7 +2,14 @@
 //
 // ⚠ SUPERSEDED BY docs/spec/2026-04-24-dex-broker-v2-glue-layer.md
 // ⚠ DO NOT EXTEND — see docs/ANTI-PATTERNS.md (v1 retail-dex case study)
-// v2 replaces this with agent-mind/src/kernels/memory.mjs (already exists, 203 LOC).
+//
+// 本文件 232 行 100% 重复 Mind memory kernel, 具体:
+//   · distillIfNeeded (~60 LOC)            → 重复 agent-mind/src/kernels/memory.mjs (203 LOC) 已有 notes + relationship 蒸馏
+//   · _callQwen (~50 LOC)                  → 重复 llm-dispatcher.callLlm (与 dialog.js 同一重复路径)
+//   · user_memory 表 (v73)                 → 重复 agent-mind relationships{address: {notes[]}}
+//   · applyMemoryToPrompt                  → 重复 context-builder.buildMemoryContext 注入
+//
+// v2 删此文件, memory 走 Mind kernel 唯一真相源.
 //
 // 职责: 周期性把用户-Broker 原始 DM 蒸馏成结构化画像字段
 //

@@ -2,7 +2,14 @@
 //
 // ⚠ SUPERSEDED BY docs/spec/2026-04-24-dex-broker-v2-glue-layer.md
 // ⚠ DO NOT EXTEND — see docs/ANTI-PATTERNS.md (v1 retail-dex case study)
-// v2 replaces this with agent-mind address-profiler skill (already exists).
+//
+// 本文件 155 行 100% 重复 Mind skill 已有能力, 具体:
+//   · loadUserProfile (~40 LOC)       → 重复 agent-mind/src/skills/address-profiler.mjs 行为分类 + 画像
+//   · deriveTraits (~30 LOC)          → 重复 self-awareness skill + chain_sense 已经做过
+//   · formatProfileForBrain           → 重复 context-builder formatForBrain pattern
+//   · 聚合 /api/discovery/activity    → Mind address-profiler 直接 fetch 同一 endpoint
+//
+// v2 删此文件, 画像走 Mind address-profiler + self-awareness 组合.
 //
 // 实验目的: 证明 KANet 的 Agent 能利用 on-chain identity + history 做到
 // "有记忆不重问". 老客户发"买 50 KAS" 一句话直接下单.

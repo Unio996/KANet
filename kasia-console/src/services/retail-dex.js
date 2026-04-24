@@ -3,10 +3,19 @@
 //
 // ⚠ SUPERSEDED BY docs/spec/2026-04-24-dex-broker-v2-glue-layer.md
 // ⚠ DO NOT EXTEND — see docs/ANTI-PATTERNS.md (v1 retail-dex case study)
-// This file + retail-dex-{dialog,memory,profile,pusher}.js (total 1990 LOC) are
-// identified in v2 spec as duplicating Mind + exchange-machine + autoTaker +
-// market-seeder basiness that already exist. v2 replaces the whole cluster
-// with "broker-as-glue" on existing infrastructure (<210 LOC new code).
+//
+// 本文件 1123 行, 约 70% 偷 seeker/taker/exchange-machine 活, 具体:
+//   · L347 selectBestOffer (57 LOC)          → 偷 trade-protocol-filter autoTaker.selectBestOffer (市价+折扣+reputation 门禁)
+//   · L404 computeQuote (48 LOC)              → 偷 autoTaker 报价逻辑 (且部分吃单按全额收, 3x 市价真金 bug)
+//   · L734 _broadcastAcceptV1 (37 LOC)        → 偷 taker, 应走 exchange-machine.handleExchangeAccept
+//   · L790/L1018 _triggerBuyPublication (105) → 偷 seeker, 应走 market-seeder.publishOffer
+//   · L98  createOrder → retail_dex_orders    → 订单应进 exchange_offers 唯一真相源
+//   · L930-1007 switch(state) 状态机 (~120 LOC) → 重复 exchange-machine.transition 已有状态机
+//
+// 剩余 ~30% 是粘合 (parseIntent / isConfirm/Cancel / preCheck / buildOrderConfirmText),
+// 这部分也能迁移到 Mind conversational-ops + mm-otc skill 已有能力.
+//
+// v2 方向: broker = Agent 使用模式, 不是实体. 粘合走 Mind + exchange-machine, <210 LOC 新.
 // Retained read-only for historical trace until Phase 5 cleanup decision.
 
 import { sqlite } from '../db/client.js';
