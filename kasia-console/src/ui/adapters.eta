@@ -83,6 +83,41 @@
             <template x-if="apiStatus==='amber' && apiError">
               <div class="mt-3 px-3 py-2 bg-red-50 border border-red-200 rounded text-xs text-red-700" x-text="'AI Error: ' + apiError"></div>
             </template>
+            <% if (a._oauth) { %>
+            <!-- OAuth token status + recovery buttons -->
+            <div class="mt-3 px-3 py-2 rounded text-xs border flex items-center gap-3 flex-wrap <%=
+              a._oauth.status === 'connected' ? 'bg-green-50 border-green-200 text-green-700' :
+              a._oauth.status === 'expiring' ? 'bg-amber-50 border-amber-200 text-amber-700' :
+              a._oauth.status === 'refreshing' ? 'bg-blue-50 border-blue-200 text-blue-700' :
+              'bg-red-50 border-red-200 text-red-700'
+            %>"
+              x-data="{ retrying: false, retryResult: '' }">
+              <span class="font-semibold">OAuth</span>
+              <span>状态: <%= a._oauth.status %></span>
+              <% if (a._oauth.expiresAt) { %>
+              <span>到期: <%= a._oauth.expiresAt.slice(5, 16).replace('T', ' ') %></span>
+              <% } %>
+              <% if (a._oauth.lastRefreshError) { %>
+              <span class="font-mono">err: <%= a._oauth.lastRefreshError %></span>
+              <% } %>
+              <div class="ml-auto flex items-center gap-2">
+                <% if (a._oauth.status !== 'connected' && a._oauth.canRetry) { %>
+                <button type="button" :disabled="retrying"
+                  @click="retrying=true; retryResult=''; fetch('/api/auth/retry-refresh/<%= a._oauth.connId %>', {method:'POST'}).then(r=>r.json()).then(d=>{ retryResult = d.ok ? '✓ 已刷新' : ('✗ ' + (d.error || d.status)); if(d.ok) setTimeout(()=>location.reload(), 800); }).catch(e=>{retryResult='✗ '+e.message}).finally(()=>retrying=false)"
+                  class="px-2 py-0.5 text-[11px] rounded bg-white border border-current hover:bg-warm-50 disabled:opacity-50">
+                  <span x-show="!retrying">重试刷新</span>
+                  <span x-show="retrying">刷新中...</span>
+                </button>
+                <% } %>
+                <% if (a._oauth.status === 'reauth_required' || a._oauth.status === 'revoked') { %>
+                <button type="button"
+                  onclick="window.open('/api/oauth/openai/start?adapter_id=<%= a.id %>', 'oauth', 'width=500,height=700'); setTimeout(function(){location.reload()}, 15000)"
+                  class="px-2 py-0.5 text-[11px] rounded bg-white border border-current hover:bg-warm-50">重新 OAuth</button>
+                <% } %>
+                <span x-text="retryResult" class="text-[11px] font-mono"></span>
+              </div>
+            </div>
+            <% } %>
             <% if (a.managed && a.pid) { %>
             <div class="mt-3 px-3 py-2 bg-green-50 rounded text-xs text-green-700">
               PID <%= a.pid %> · Port <%= a.http_port %> · <%= a.startedAt ? a.startedAt.slice(11, 19) : '' %>

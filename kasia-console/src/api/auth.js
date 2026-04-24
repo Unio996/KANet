@@ -5,7 +5,7 @@
  * Console returns the current valid auth context (headers, baseUrl, status).
  * Adapter never holds refresh_token or manages OAuth flow.
  */
-import { resolveRequestAuth, getConnection, listConnections, ensureConnection, getConnectionByAdapter, updateConnectionStatus } from '../services/connection-manager.js';
+import { resolveRequestAuth, getConnection, listConnections, ensureConnection, getConnectionByAdapter, updateConnectionStatus, retryRefresh } from '../services/connection-manager.js';
 import { sqlite } from '../db/client.js';
 
 export async function registerAuthRoutes(fastify) {
@@ -23,7 +23,7 @@ export async function registerAuthRoutes(fastify) {
     const { connectionId } = request.params;
     const forceRefresh = request.query.force_refresh === 'true';
 
-    const ctx = resolveRequestAuth(connectionId, forceRefresh);
+    const ctx = await resolveRequestAuth(connectionId, forceRefresh);
     return reply.send(ctx);
   });
 
@@ -46,7 +46,7 @@ export async function registerAuthRoutes(fastify) {
       });
     }
 
-    const ctx = resolveRequestAuth(connectionId, forceRefresh);
+    const ctx = await resolveRequestAuth(connectionId, forceRefresh);
     return reply.send(ctx);
   });
 
@@ -110,5 +110,25 @@ export async function registerAuthRoutes(fastify) {
     if (!conn) return reply.code(404).send({ error: 'Not found' });
     sqlite.prepare('DELETE FROM agent_connections WHERE id = ?').run(request.params.id);
     return reply.send({ ok: true });
+  });
+
+  /**
+   * POST /api/auth/retry-refresh/:id
+   * Manually force a token refresh for an OAuth connection. Used by UI to
+   * revive an `expired` / `refresh_failed` connection without waiting for the
+   * 60s worker tick. Returns updated status + expiresAt.
+   */
+  fastify.post('/api/auth/retry-refresh/:id', async (request, reply) => {
+    try {
+      const updated = await retryRefresh(request.params.id);
+      return reply.send({
+        ok: updated.status === 'connected',
+        status: updated.status,
+        expiresAt: updated.expires_at,
+        error: updated.last_refresh_error,
+      });
+    } catch (e) {
+      return reply.code(400).send({ ok: false, error: e.message });
+    }
   });
 }

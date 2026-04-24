@@ -2,7 +2,7 @@ import { listAdapterNodes, getAdapterNode, createAdapterNode, updateAdapterNode,
 import { startAdapter, stopAdapter, restartAdapter, getAdapterStatus } from '../services/adapter-launcher.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 import { getConfig } from '../data/settings/configs.js';
-import { syncConnectionFromAdapter } from '../services/connection-manager.js';
+import { syncConnectionFromAdapter, getConnectionByAdapter } from '../services/connection-manager.js';
 
 // Fast health check (port only, <2s)
 async function pingAdapter(port) {
@@ -65,7 +65,16 @@ export async function registerAdapterRoutes(fastify) {
       const apiError = cached ? cached.apiError : null;
       const _apiSt = !online ? 'offline' : (apiOk === true ? 'green' : (apiOk === false ? 'amber' : 'checking'));
       const _apiErr = (apiError || '').replace(/'/g, '');
-      return { ...a, online, apiOk, apiError, _apiSt, _apiErr, managed: managed.running, pid: managed.pid, startedAt: managed.startedAt };
+      // OAuth token status (if this adapter has an OAuth connection)
+      const conn = getConnectionByAdapter(a.id);
+      const oauth = conn && conn.auth_mode === 'oauth' ? {
+        connId: conn.id,
+        status: conn.status,
+        expiresAt: conn.expires_at,
+        lastRefreshError: (conn.last_refresh_error || '').replace(/'/g, ''),
+        canRetry: !!conn.refresh_token_enc,
+      } : null;
+      return { ...a, online, apiOk, apiError, _apiSt, _apiErr, managed: managed.running, pid: managed.pid, startedAt: managed.startedAt, _oauth: oauth };
     }));
     return reply.view('adapters', { adapters: withStatus, t, lang, dir, langs });
   });
