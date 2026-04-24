@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto';
 import { fetchKasPrice } from './market-seeder.js';
 import { transferUsdt } from './evm-transfer.js';
 import { decrypt } from './crypto.js';
+import { processAccept } from './exchange-machine.js';
 
 // ── Broker config helpers ──────────────────────────────────────────────────
 
@@ -183,14 +184,14 @@ function nextMissingField(order) {
   const hasReceiveAddress = !!order.receive_address;
 
   if (order.side === 'buy_kas') {
-    if (!hasPayChain) return { field: 'pay_chain', prompt: '用哪条链支付 USDT？(BSC/BNB/BEP20, ETH, TRON, SOL/Solana)' };
-    if (!hasPayAddress) return { field: 'pay_address', prompt: '请发你的 ' + (order.pay_chain.toUpperCase() === 'ETH' ? 'ETH' : order.pay_chain.toUpperCase()) + ' 收款地址 (0x 开头)' };
+    if (!hasPayChain) return { field: 'pay_chain', prompt: '你准备用哪个钱包付 USDT?' };
+    if (!hasPayAddress) return { field: 'pay_address', prompt: '发我你的钱包地址' };
     return null; // all fields filled
   }
 
   // sell_kas: receive_address first, then pay_chain reused (semantic extension)
-  if (!hasReceiveAddress) return { field: 'receive_address', prompt: '请发你的收款地址 (0x 开头 或 Solana 地址)' };
-  if (!order.pay_chain) return { field: 'pay_chain', prompt: '你要收 USDT 的链 (BSC/BNB/BEP20, ETH, TRON, SOL/Solana)?' };
+  if (!hasReceiveAddress) return { field: 'receive_address', prompt: '发我你的收款钱包地址' };
+  if (!order.pay_chain) return { field: 'pay_chain', prompt: '你想收到哪个钱包?' };
   return null;
 }
 
@@ -738,19 +739,29 @@ async function _broadcastAcceptV1(brokerRelayId, order) {
     payment_asset: 'usdt',
     receive_address: order.user_kasia_address,   // Maker delivery 直达用户 Kasia 地址
   };
-  try {
-    const send = await _getSendCommandAsync();
-    const res = await send(brokerRelayId, {
-      type: 'send_broadcast',
-      channel: 'kanet-exchange',
-      message: JSON.stringify(payload),
-    });
-    if (!res?.txId) return { ok: false, error: 'accept broadcast returned no txId', payload };
-    console.log(`[retail-dex] order ${order.id.slice(0,8)} accept_v1 上链 tx=${res.txId.slice(0,16)} offer=${order.exchange_offer_id?.slice(0,8)}`);
-    return { ok: true, txId: res.txId, payload };
-  } catch (err) {
-    return { ok: false, error: err.message, payload };
+  let acceptTx = null;
+  let lastError = null;
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      const send = await _getSendCommandAsync();
+      const res = await send(brokerRelayId, {
+        type: 'send_broadcast',
+        channel: 'kanet-exchange',
+        message: JSON.stringify(payload),
+      });
+      acceptTx = res?.txId || null;
+      if (acceptTx) break;
+    } catch (err) {
+      lastError = err.message;
+      console.error(`[retail-dex] Accept broadcast attempt ${attempt}/5: ${err.message}`);
+    }
+    if (attempt < 5) await new Promise(r => setTimeout(r, 200 * attempt));
   }
+  if (!acceptTx) return { ok: false, error: lastError || 'accept broadcast returned no txId', payload };
+  console.log(`[retail-dex] order ${order.id.slice(0,8)} accept_v1 上链 tx=${acceptTx.slice(0,16)} offer=${order.exchange_offer_id?.slice(0,8)}`);
+  const brokerAddr = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(brokerRelayId)?.address;
+  processAccept({ offer_id: order.exchange_offer_id, _from: order.user_kasia_address, _tx: acceptTx });
+  return { ok: true, txId: acceptTx, payload };
 }
 
 // ── DM Handler ──────────────────────────────────────────────────────────────

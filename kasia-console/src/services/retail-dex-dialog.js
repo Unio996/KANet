@@ -6,9 +6,34 @@
 //
 // 校验用代码, 不信 LLM 判合法性 (LLM 会编地址).
 
-const QWEN_URL    = process.env.QWEN_URL   || 'http://127.0.0.1:8000';
-const QWEN_MODEL  = process.env.QWEN_MODEL || 'Qwen3.6-35B-A3B-Q4_K_M.gguf';
-const QWEN_TIMEOUT_MS = 25_000;
+// Fallback 仅在无 adapter 配置时用 (local dev / smoke)
+const QWEN_FALLBACK_URL    = process.env.QWEN_URL   || 'http://127.0.0.1:8000';
+const QWEN_FALLBACK_MODEL  = process.env.QWEN_MODEL || 'Qwen3.6-35B-A3B-Q4_K_M.gguf';
+const QWEN_TIMEOUT_MS = 60_000;
+
+import { sqlite } from '../db/client.js';
+import { decrypt } from './crypto.js';
+
+// 按 broker relay 读 adapter_node 配置 (不硬编码 URL/model/key)
+function resolveAdapterConfig(brokerRelayId) {
+  if (!brokerRelayId) return null;
+  const relay = sqlite.prepare('SELECT adapter_node_id FROM relay_nodes WHERE id = ?').get(brokerRelayId);
+  if (!relay?.adapter_node_id) return null;
+  const adapter = sqlite.prepare(
+    'SELECT ai_provider_url, ai_model, ai_provider_key_encrypted FROM adapter_nodes WHERE id = ? AND is_enabled = 1'
+  ).get(relay.adapter_node_id);
+  if (!adapter?.ai_provider_url || !adapter?.ai_model) return null;
+  let apiKey = null;
+  if (adapter.ai_provider_key_encrypted) {
+    try {
+      // decrypt() 内部自己 JSON.parse, 直接传 raw string
+      apiKey = decrypt(adapter.ai_provider_key_encrypted);
+    } catch (e) {
+      console.warn(`[retail-dex-dialog] adapter key decrypt failed: ${e.message}`);
+    }
+  }
+  return { url: adapter.ai_provider_url, model: adapter.ai_model, apiKey };
+}
 
 const EVM_ADDR_REGEX  = /^0x[a-fA-F0-9]{40}$/;
 const SUPPORTED_CHAINS = ['bnb', 'eth', 'tron', 'sol', 'polygon'];
@@ -78,59 +103,79 @@ export function clearHistory(addr) { _conversations.delete(addr); }
 
 // ── 短 System Prompt ───────────────────────────────────────────────────────
 
-const SYSTEM_PROMPT = `你是 KANet Broker. 真专业, 会给建议.
-目标: 帮用户完成一笔 KAS↔USDT 零售交易 (零托管 — USDT 直付 Maker, KAS 直到用户 Kasia).
+const SYSTEM_PROMPT = `你是 KANet Broker. 核心使命: **赢得用户信赖** — 透明 + 口语 + 只要必要信息.
 
-## 1. 摸清用户需求
-- 买 KAS (付 USDT) 还是 卖 KAS (收 USDT)?
-- 要多少 (KAS 数量)?
+## 透明 (建立信赖的根基)
+每次涉及价格/交易, 必告诉用户真实数据:
+- 当前市价 (CEX 聚合中间价, 来自 Binance/Kraken 等主流所)
+- 当前市场深度 (最优卖单 / 最优买单 / 总可成交量)
+- 用户这笔预计: 总付 X USDT, 总收 Y KAS, 扣 0.1 KAS 撮合服务费
+- 价格机制主动说: "这是 CEX 聚合中间价, 实际成交按市场最优挂单"
+用户问价/来源/手续费: 照实答, 绝不编数据
 
-## 2. 策略选择 (关键!)
-- 市价吃单 (order_type=market): 立刻成交, 按市场最优单价
-- 限价挂单 (order_type=limit): 你出价, 等人接, 需含 price (USDT/KAS)
-- 新手通常市价, 有预期价位才限价. 看市场情况主动建议哪个合适.
+## 只要 3 个信息 (其他别问)
+1. 买 / 卖 (用户首句一般已说)
+2. 多少 KAS
+3. 心理价 (限价才要, 没说默认市价)
 
-## 3. 单子要素 (齐备 + 有效 才能下单)
+**Broker 自己知道** (不用问用户):
+- 用户 Kasia 地址 = DM 自带
+- 用户 USDT 钱包类型 (币安/独立/手机) — 关你屁事, 不问
+
+**Broker 支持 9 个网络收 USDT** (Seeder 在每条都有地址):
+BSC / 以太坊 / Polygon / Arbitrum / Optimism / Avalanche / Base / Solana / TRON
+- 用户说"我在 X 网络有 USDT" → 给对应网络 Seeder 地址
+- 用户没指定 → 列出所有可选让用户选一个, 或问"你的 USDT 在哪个网络?"
+- **不硬编码任何一条**, 按用户选择动态提供
+
+## 说话方式
+- 简单口语, 跟用户语言走 (中文/英文/粤语/大白话 用户怎么说你怎么说)
+- **绝不问**钱包/链/app/地址类型
+- **绝不说程序员话**: 链 / BSC / 0x / EVM / 合约 / 市价 / 限价
+- 价格/费率/数量用数字, 不用术语
+
+## 核心字段 (内部 schema, 不对用户说)
 - side: buy_kas | sell_kas
 - order_type: market | limit
-- qty: KAS 数量 (${MIN_KAS}~${MAX_KAS})
-- price: USDT/KAS 单价 (仅 limit 必填, 市价单忽略)
-- pay_chain: BSC | ETH | TRON | SOL | Polygon
-- pay_address: 用户 EVM 地址 (0x + 40 hex)
+- qty: ${MIN_KAS}~${MAX_KAS}
+- price: USDT/KAS 单价 (limit 必填)
+- pay_chain: 按用户选择, 不默认. 值: bnb/eth/polygon/arbitrum/optimism/avalanche/base/sol/tron
+- pay_address: 仅卖场景必问 (用户收 USDT 地址)
 
-## 4. 下单条件
-- 单笔上限 ${MAX_ORDER_USDT} USDT (折算超了拒)
-- 数字 / 地址 / 链 / 价格必须合法 (系统校验)
-- 用户说"取消/不要了"立即停
-
-## 对话规则
-- **利用[用户画像]** (核心!): 老客户有历史链/地址的, **直接用, 不再问**. 只在用户明确说"换/改"才重问.
-  例: 画像"上次 BSC + 0x1417..." → 老客户说"买 50" → 直接默认 BSC+0x1417, 在 reply 里确认一句
-  "还用老地址 0x1417 付款吗? 回'是'我就下单" 给用户 1 次机会改
-- 新客户才走 "自我介绍 + 4 字段全问" 流程
-- 每轮最多 1 问
-- **利用[市场快照]** 主动给建议 (比如"现在市价 X, 我建议市价吃" 或 "你的限价比市价便宜 5%, 可能要等挺久")
-- 用户问价/收费/安全: 简短回, 不编数据
-- 不自己判地址 / 数字 / 价格合法, 交系统
+## 红线
+- 单笔上限 ${MAX_ORDER_USDT} USDT
+- 用户"取消"立即停
+- 不自己判地址/价格合法性, 交系统校验
+- 利用 [用户画像] 老客户直接认, 不重新介绍
 
 ## 输出 (纯 JSON, 无 markdown 无 \`\`\`)
-不齐: {"ready":false,"reply":"<中文>"}
-齐备 (市价): {"ready":true,"order":{"side":"buy_kas","order_type":"market","qty":"50","pay_chain":"BSC","pay_address":"0x..."}}
-齐备 (限价): {"ready":true,"order":{"side":"buy_kas","order_type":"limit","qty":"50","price":"0.033","pay_chain":"BSC","pay_address":"0x..."}}
+不齐: {"ready":false,"reply":"<口语中文, 含真实市价>"}
+买齐: {"ready":true,"order":{"side":"buy_kas","order_type":"market","qty":"50","pay_chain":"<用户选的网络>"}}
+买限价齐: {"ready":true,"order":{"side":"buy_kas","order_type":"limit","qty":"50","price":"0.033","pay_chain":"<用户选的网络>"}}
+卖齐: {"ready":true,"order":{"side":"sell_kas","order_type":"market","qty":"50","pay_chain":"<用户收款网络>","pay_address":"0x... 或 T... 或 base58"}}
 取消: {"ready":false,"reply":"<中文>","cancel":true}`;
 
 // ── Qwen ──────────────────────────────────────────────────────────────────
 
-export async function callQwen(messages) {
+export async function callQwen(messages, brokerRelayId = null) {
+  // 按 broker relay 的 adapter 配置动态选 LLM (不硬编码 URL/model/key)
+  const cfg = resolveAdapterConfig(brokerRelayId);
+  const baseUrl = (cfg?.url || QWEN_FALLBACK_URL).replace(/\/+$/, '');
+  const model = cfg?.model || QWEN_FALLBACK_MODEL;
+  const apiKey = cfg?.apiKey;
+
   // kill switch: chat_template_kwargs 真正关 Qwen3.6 reasoning (/no_think 无效)
   const body = JSON.stringify({
-    model: QWEN_MODEL, messages, max_tokens: 2000, temperature: 0.3,
+    model, messages, max_tokens: 2000, temperature: 0.3,
     chat_template_kwargs: { enable_thinking: false },
   });
   const t0 = Date.now();
-  const res = await fetch(`${QWEN_URL}/v1/chat/completions`, {
+  const endpoint = baseUrl.endsWith('/v1') ? `${baseUrl}/chat/completions` : `${baseUrl}/v1/chat/completions`;
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+  const res = await fetch(endpoint, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body,
     signal: AbortSignal.timeout(QWEN_TIMEOUT_MS),
   });
@@ -190,10 +235,14 @@ export function validateOrder(order) {
   }
   const chain = normalizeChain(order.pay_chain);
   if (!chain || !SUPPORTED_CHAINS.includes(chain)) {
-    return { ok: false, err: '付款链必须是 BSC/ETH/TRON/SOL/Polygon' };
+    return { ok: false, err: '你的 USDT 在哪个网络?' };
   }
-  if (!order.pay_address || !EVM_ADDR_REGEX.test(order.pay_address)) {
-    return { ok: false, err: '付款地址必须是 0x 开头 40 位 hex' };
+  // 买场景: pay_address 可选 (broker 把 Maker 地址给用户; 仅用于老客户画像匹配)
+  // 卖场景: pay_address 必填 (用户收 USDT 到这个地址, 同链 = pay_chain)
+  if (order.side === 'sell_kas') {
+    if (!order.pay_address || !EVM_ADDR_REGEX.test(order.pay_address)) {
+      return { ok: false, err: '收 USDT 的地址发我一下' };
+    }
   }
   return {
     ok: true,
@@ -203,7 +252,7 @@ export function validateOrder(order) {
       qty: String(order.qty),
       price: priceNum !== null ? String(priceNum) : null,
       pay_chain: chain === 'bnb' ? 'BSC' : chain.toUpperCase(),
-      pay_address: order.pay_address,
+      pay_address: order.pay_address || null,
     },
   };
 }
@@ -213,7 +262,7 @@ export function validateOrder(order) {
 /**
  * 返 { ready, reply?, order?, cancel?, error? }
  */
-export async function interpret(userAddr, userMessage, brokerAddress = null) {
+export async function interpret(userAddr, userMessage, brokerAddress = null, brokerRelayId = null) {
   const history = getHistory(userAddr);
   // 每轮拉最新市场快照 + 用户画像 + 蒸馏记忆, 让 LLM 能基于真实数据给建议 + 老客户免重问
   const snap = await getMarketSnapshot();
@@ -263,10 +312,10 @@ export async function interpret(userAddr, userMessage, brokerAddress = null) {
 
   let raw;
   try {
-    raw = await callQwen(messages);
+    raw = await callQwen(messages, brokerRelayId);
   } catch (err) {
     return { ready: false, error: 'llm_unavailable',
-      reply: 'Broker 后台暂时忙, 请稍后再发。或直接用格式: 买 50 KAS @ 0.04 USDT' };
+      reply: '我这边刚卡了一下, 你再说一次?' };
   }
 
   const parsed = extractJson(raw);

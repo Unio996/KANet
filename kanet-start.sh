@@ -9,6 +9,7 @@ set -euo pipefail
 # KANET_ROOT: 从 kanet.env 读取或使用默认值（部署时改此一处即可）
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KANET_ROOT="${KANET_ROOT:-$SCRIPT_DIR}"
+export KANET_ROOT  # Console 子进程 (scanner spawn scout 用 cwd=$KANET_ROOT/kaspa-scout) 需要继承
 CONSOLE_DIR="$KANET_ROOT/kasia-console"
 LOG_DIR="$KANET_ROOT/logs"
 PID_DIR="$LOG_DIR/pids"
@@ -134,7 +135,7 @@ fi
 
 # ── llama-server (本地推理引擎) ──────────────────────────────────────────────
 LLAMA_SERVER="$KANET_ROOT/tools/llama-server/llama-server.exe"
-LLAMA_MODEL="${LLAMA_MODEL_PATH:-$KANET_ROOT/models/Qwen_Qwen3.5-35B-A3B-Q4_K_M.gguf}"
+LLAMA_MODEL="${LLAMA_MODEL_PATH:-$KANET_ROOT/models/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf}"
 LLAMA_PORT=8000
 LLAMA_LOG="$LOG_DIR/llama-server.log"
 
@@ -149,7 +150,7 @@ if [ -f "$LLAMA_SERVER" ] && [ -f "$LLAMA_MODEL" ]; then
     (cd "$KANET_ROOT/tools/llama-server" && ./llama-server.exe \
       --model "$LLAMA_MODEL" \
       --host 0.0.0.0 --port $LLAMA_PORT \
-      --n-gpu-layers 99 --ctx-size 32768 --threads 8 \
+      --n-gpu-layers 99 --ctx-size 262144 --threads 8 \
       --flash-attn on \
       >> "$LLAMA_LOG" 2>&1) &
     LLAMA_PID=$!
@@ -224,16 +225,25 @@ else
   fi
 fi
 
-# qwen-bridge-worker — drain default queue（NWT-Brain 等 adapter 走这条）
+# 幂等检查：Git Bash 下 pgrep 不存在，改用 PowerShell
+proc_running() {
+  local match="$1"
+  local n=$(powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { \$_.CommandLine -match '$match' }).Count" 2>/dev/null | tr -d '\r\n ')
+  [ -n "$n" ] && [ "$n" -gt 0 ]
+}
+
+# qwen-bridge-worker — drain qclaude-nwt queue（channel-bridge 路由到这条）
 # 需要 llama-server 在，否则 Qwen 请求全 fail
 if curl -sf "http://127.0.0.1:$LLAMA_PORT/health" > /dev/null 2>&1; then
-  if pgrep -f "qwen-bridge-worker.js" > /dev/null 2>&1; then
+  if proc_running "qwen-bridge-worker\.js"; then
     ok "qwen-worker 已在运行"
   elif [ -f "$KANET_ROOT/scripts/qwen-bridge-worker.js" ]; then
-    node "$KANET_ROOT/scripts/qwen-bridge-worker.js" --queue=default > "$LOG_DIR/qwen-worker.log" 2>&1 &
+    # queue 名来自 kanet.env 的 QWEN_WORKER_QUEUE，默认 qclaude-nwt（channel-bridge 路由目标）
+    QWEN_QUEUE="${QWEN_WORKER_QUEUE:-qclaude-nwt}"
+    node "$KANET_ROOT/scripts/qwen-bridge-worker.js" --queue=$QWEN_QUEUE > "$LOG_DIR/qwen-worker.log" 2>&1 &
     QWEN_WORKER_PID=$!
     echo "$QWEN_WORKER_PID" > "$PID_DIR/qwen-worker.pid"
-    ok "qwen-worker 就绪  (PID $QWEN_WORKER_PID, queue=default)"
+    ok "qwen-worker 就绪  (PID $QWEN_WORKER_PID, queue=$QWEN_QUEUE)"
   else
     info "qwen-bridge-worker.js 不存在，跳过（host-specific，非 llama host 无需）"
   fi
@@ -242,7 +252,7 @@ else
 fi
 
 # channel-bridge — 订阅 7 频道，dispatch [→ TARGET] 消息到 Bridge queue
-if pgrep -f "channel-bridge.mjs" > /dev/null 2>&1; then
+if proc_running "channel-bridge\.mjs"; then
   ok "channel-bridge 已在运行"
 elif [ -f "$KANET_ROOT/scripts/channel-bridge.mjs" ]; then
   node "$KANET_ROOT/scripts/channel-bridge.mjs" > "$LOG_DIR/channel-bridge.log" 2>&1 &
