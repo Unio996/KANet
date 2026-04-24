@@ -141,10 +141,122 @@
           </div>
         </div>
       </template>
+      <!-- 战绩汇总卡 -->
+      <template x-if="summary && summary.capital != null && summary.capital > 0">
+        <div class="mt-4 pt-3 border-t border-warm-200">
+          <div class="text-xs font-semibold text-ink-500 uppercase tracking-wider mb-3">战绩统计</div>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+            <!-- 本金 → 当前 -->
+            <div class="bg-gradient-to-br from-brand-50 to-brand-100 rounded-lg p-3 col-span-2">
+              <div class="text-[10px] text-ink-400 uppercase tracking-wide">本金 → 当前账面</div>
+              <div class="text-lg font-bold text-brand-700 mt-0.5">
+                $<span x-text="summary.capital.toFixed(2)"></span>
+                <span class="text-ink-400 mx-1">→</span>
+                $<span x-text="summary.currentTotal.toFixed(2)"></span>
+              </div>
+              <div class="text-xs mt-0.5" :class="summary.roiTotal >= 0 ? 'text-green-600 font-semibold' : 'text-red-500 font-semibold'">
+                翻 <span x-text="(summary.currentTotal / summary.capital).toFixed(2) + '×'"></span>
+                · ROI <span x-text="(summary.roiTotal >= 0 ? '+' : '') + (summary.roiTotal * 100).toFixed(0) + '%'"></span>
+              </div>
+            </div>
+            <!-- 战绩 -->
+            <div class="bg-warm-50 rounded-lg p-3">
+              <div class="text-[10px] text-ink-400 uppercase tracking-wide">战绩</div>
+              <div class="text-lg font-bold text-ink-700 mt-0.5">
+                <span class="text-green-600" x-text="summary.wins"></span><span class="text-[10px] text-ink-500 mr-1.5">胜</span>
+                <span class="text-red-500" x-text="summary.losses"></span><span class="text-[10px] text-ink-500 mr-1.5">负</span>
+                <template x-if="summary.pending > 0">
+                  <span><span class="text-amber-500" x-text="summary.pending"></span><span class="text-[10px] text-ink-500">待</span></span>
+                </template>
+              </div>
+              <div class="text-xs text-ink-500 mt-0.5">
+                <template x-if="summary.winRate != null">
+                  <span>胜率 <span class="font-semibold" x-text="(summary.winRate * 100).toFixed(0) + '%'"></span></span>
+                </template>
+              </div>
+            </div>
+            <!-- 已实现 -->
+            <div class="bg-warm-50 rounded-lg p-3">
+              <div class="text-[10px] text-ink-400 uppercase tracking-wide">已实现净利</div>
+              <div class="text-lg font-bold mt-0.5" :class="summary.realizedPnl >= 0 ? 'text-green-600' : 'text-red-500'"
+                x-text="(summary.realizedPnl >= 0 ? '+$' : '−$') + Math.abs(summary.realizedPnl).toFixed(2)"></div>
+              <div class="text-xs text-ink-500 mt-0.5">
+                <template x-if="summary.roiRealized != null">
+                  <span x-text="(summary.roiRealized >= 0 ? '+' : '') + (summary.roiRealized * 100).toFixed(0) + '% on 本金'"></span>
+                </template>
+              </div>
+            </div>
+          </div>
+          <!-- 资金效率 + 明细 -->
+          <div class="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ink-500">
+            <span>累计下注 <span class="font-semibold text-ink-700" x-text="'$' + summary.totalStaked.toFixed(2)"></span></span>
+            <template x-if="summary.turnover != null">
+              <span>资金周转 <span class="font-semibold text-ink-700" x-text="summary.turnover.toFixed(1) + '×'"></span></span>
+            </template>
+            <span>USDC <span class="font-semibold text-ink-700" x-text="'$' + summary.currentUsdc.toFixed(2)"></span></span>
+            <span>持仓市值 <span class="font-semibold text-ink-700" x-text="'$' + summary.currentTokenValue.toFixed(2)"></span></span>
+            <template x-if="summary.unrealizedPnl !== 0">
+              <span :class="summary.unrealizedPnl >= 0 ? 'text-amber-600' : 'text-red-500'">
+                浮动 <span class="font-semibold" x-text="(summary.unrealizedPnl >= 0 ? '+$' : '−$') + Math.abs(summary.unrealizedPnl).toFixed(2)"></span>
+              </span>
+            </template>
+          </div>
+        </div>
+      </template>
+      <!-- 资金时间线 -->
+      <template x-if="summary && summary.timeline && summary.timeline.length > 0">
+        <div class="mt-4 pt-3 border-t border-warm-200">
+          <div class="flex items-center justify-between mb-2">
+            <div class="text-xs font-semibold text-ink-500 uppercase tracking-wider">资金时间线</div>
+            <button @click="timelineExpanded = !timelineExpanded" class="text-[10px] text-brand-500 hover:text-brand-700"
+              x-text="timelineExpanded ? '收起明细' : '展开明细'"></button>
+          </div>
+          <!-- Sparkline (USDC 余额曲线) -->
+          <div class="bg-gradient-to-b from-warm-50 to-white rounded-lg p-3 mb-2 relative">
+            <svg :viewBox="'0 0 600 90'" class="w-full h-20" preserveAspectRatio="none">
+              <!-- Area fill under line -->
+              <path :d="sparklineAreaPath()" fill="rgba(59, 130, 246, 0.08)" stroke="none"></path>
+              <!-- Line -->
+              <path :d="sparklinePath()" fill="none" stroke="rgb(59, 130, 246)" stroke-width="1.5" vector-effect="non-scaling-stroke"></path>
+              <!-- Event dots -->
+              <template x-for="(pt, i) in sparklinePoints()" :key="i">
+                <circle :cx="pt.x" :cy="pt.y" r="2.5" vector-effect="non-scaling-stroke"
+                  :fill="pt.action === 'WIN' ? 'rgb(34,197,94)' : pt.action === 'LOSE' ? 'rgb(239,68,68)' : pt.action === 'BUY' ? 'rgb(59,130,246)' : 'rgb(156,163,175)'"></circle>
+              </template>
+            </svg>
+            <!-- Endpoints label -->
+            <div class="flex justify-between text-[10px] text-ink-400 mt-0.5 font-mono">
+              <span>起 $<span x-text="summary.capital.toFixed(2)"></span></span>
+              <span class="text-ink-500">
+                峰 $<span x-text="sparklinePeak().toFixed(2)"></span>
+              </span>
+              <span :class="summary.currentUsdc >= summary.capital ? 'text-green-600' : 'text-ink-400'">
+                现 $<span x-text="summary.currentUsdc.toFixed(2)"></span>
+              </span>
+            </div>
+          </div>
+          <!-- 事件明细 (可折叠) -->
+          <div x-show="timelineExpanded" x-transition>
+            <template x-for="(ev, idx) in summary.timeline" :key="idx">
+              <div class="flex items-center gap-2 py-1.5 border-b border-warm-50 last:border-0 text-[11px]">
+                <span class="text-ink-400 font-mono flex-shrink-0 w-20" x-text="ev.date.slice(5, 16).replace('T', ' ')"></span>
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-bold flex-shrink-0 w-12 text-center"
+                  :class="ev.action === 'WIN' ? 'bg-green-100 text-green-700' : ev.action === 'LOSE' ? 'bg-red-100 text-red-600' : ev.action === 'BUY' ? 'bg-blue-100 text-blue-700' : 'bg-warm-100 text-ink-500'"
+                  x-text="ev.action === 'WIN' ? '✓赢' : ev.action === 'LOSE' ? '✗输' : ev.action === 'BUY' ? '买入' : ev.action"></span>
+                <span class="font-semibold flex-shrink-0 w-16 text-right"
+                  :class="ev.amount > 0 ? 'text-green-600' : ev.amount < 0 ? 'text-ink-600' : 'text-ink-400'"
+                  x-text="(ev.amount >= 0 ? '+$' : '−$') + Math.abs(ev.amount).toFixed(2)"></span>
+                <span class="flex-1 text-ink-600 min-w-0 truncate" x-text="ev.marketTitle || ''"></span>
+                <span class="text-ink-400 flex-shrink-0" x-text="'bal $' + ev.runningUsdc.toFixed(2)"></span>
+              </div>
+            </template>
+          </div>
+        </div>
+      </template>
       <!-- History (settled + redeemable) -->
       <div x-show="settled.length > 0" class="mt-4 pt-3 border-t border-warm-200">
           <div class="flex items-center justify-between mb-2">
-            <div class="text-xs font-semibold text-ink-500 uppercase tracking-wider">History</div>
+            <div class="text-xs font-semibold text-ink-500 uppercase tracking-wider">历史交易</div>
             <!-- 一键清算全部 redeemable position (绕过单按钮 UI bug 的兜底路径) -->
             <button x-show="settled.some(p => p.redeemable && !p._redeemed)"
               @click="redeemAll()" :disabled="redeemingAll"
@@ -156,29 +268,42 @@
           <template x-for="pos in settled" :key="pos.asset">
             <div class="py-3 border-b border-warm-50 last:border-0 text-xs">
               <div class="flex items-center gap-2">
+                <!-- Verdict 徽章 (WIN/LOSE/PENDING) -->
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-bold flex-shrink-0"
+                  :class="pos.verdict === 'WIN' ? 'bg-green-100 text-green-700' : pos.verdict === 'LOSE' ? 'bg-red-100 text-red-600' : 'bg-warm-100 text-ink-500'"
+                  x-text="pos.verdict === 'WIN' ? '✓ 赢' : pos.verdict === 'LOSE' ? '✗ 输' : '⏳'"></span>
+                <!-- 单笔净利 -->
+                <span class="text-[11px] font-semibold flex-shrink-0 w-16"
+                  :class="(pos.realizedPnl || 0) >= 0 ? 'text-green-600' : 'text-red-500'"
+                  x-text="pos.realizedPnl != null ? ((pos.realizedPnl >= 0 ? '+$' : '−$') + Math.abs(pos.realizedPnl).toFixed(2)) : ''"></span>
                 <a :href="'https://polymarket.com/event/' + pos.market" target="_blank" rel="noopener"
-                  class="flex-1 text-ink-600 hover:text-brand-600" x-text="pos.question || pos.market?.slice(0,20) + '...'"></a>
-                <span class="px-1.5 py-0.5 rounded text-[10px]" :class="pos.outcome === 'Yes' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-500'" x-text="pos.outcome"></span>
-                <span x-text="pos.size + ' shares @ $' + (pos.avgPrice || 0).toFixed(3)"></span>
-                <span class="text-[10px] text-ink-400" x-text="'Cost $' + (pos.totalCost || 0).toFixed(2)"></span>
+                  class="flex-1 text-ink-600 hover:text-brand-600 min-w-0 truncate" x-text="pos.question || pos.market?.slice(0,20) + '...'"></a>
+                <span class="px-1.5 py-0.5 rounded text-[10px] flex-shrink-0" :class="pos.outcome === 'Yes' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-500'" x-text="pos.outcome"></span>
+                <span class="text-[10px] text-ink-400 flex-shrink-0" x-text="pos.size + '×$' + (pos.avgPrice || 0).toFixed(3)"></span>
               </div>
-              <div class="flex items-center gap-2 mt-1.5">
+              <div class="flex items-center gap-2 mt-1.5 text-[10px] text-ink-400">
+                <span>成本 $<span x-text="(pos.totalCost || 0).toFixed(2)"></span></span>
+                <template x-if="pos.actualReceived != null && pos.actualReceived > 0">
+                  <span>回款 $<span x-text="pos.actualReceived.toFixed(2)"></span></span>
+                </template>
+                <template x-if="pos.winner">
+                  <span>裁决 <span class="font-mono" x-text="pos.winner"></span></span>
+                </template>
                 <!-- Redeemable: show Redeem button -->
                 <button x-show="pos.redeemable && !pos._redeemed" @click="redeemPosition(pos)" :disabled="pos._redeeming"
-                  class="px-3 py-1 bg-green-500 text-white rounded text-[10px] font-medium hover:bg-green-600 disabled:opacity-50 transition-colors">
+                  class="px-3 py-1 bg-green-500 text-white rounded text-[10px] font-medium hover:bg-green-600 disabled:opacity-50 transition-colors ml-auto">
                   <span x-show="!pos._redeeming">Redeem</span>
                   <span x-show="pos._redeeming">Redeeming...</span>
                 </button>
                 <!-- Already redeemed (from API check or just-redeemed) -->
-                <span x-show="pos.redeemed || pos._redeemed" class="text-[10px] text-green-600 font-medium px-2 py-0.5 bg-green-50 rounded">Already Redeemed</span>
+                <span x-show="pos.redeemed || pos._redeemed" class="text-green-600 font-medium px-2 py-0.5 bg-green-50 rounded">Already Redeemed</span>
                 <!-- TX link after successful redeem -->
                 <a x-show="pos._redeemTx" :href="'https://polygonscan.com/tx/' + pos._redeemTx" target="_blank" rel="noopener"
-                  class="text-[10px] text-brand-500 hover:text-brand-700 font-mono" x-text="pos._redeemTx ? 'TX ' + pos._redeemTx.slice(0,12) + '...' : ''"></a>
-                <span x-show="pos._redeemError" class="text-[10px] text-red-500" x-text="pos._redeemError"></span>
+                  class="text-brand-500 hover:text-brand-700 font-mono" x-text="pos._redeemTx ? 'TX ' + pos._redeemTx.slice(0,12) + '...' : ''"></a>
+                <span x-show="pos._redeemError" class="text-red-500" x-text="pos._redeemError"></span>
               </div>
             </div>
           </template>
-        </div>
       </div>
       <!-- 活跃订单 -->
       <div class="mt-3">
@@ -294,37 +419,6 @@
           </div>
         </template>
 
-        <!-- AI 规则解析面板 -->
-        <div x-data="{ rulesOpen: false, rulesData: null, rulesLoading: false, rulesErr: '' }" class="mt-2">
-          <button @click="rulesOpen = !rulesOpen; if (rulesOpen && !rulesData) loadRulesCache(m.conditionId || m.slug, $data)"
-            class="text-[10px] text-ink-500 hover:text-brand-500">
-            <span x-show="!rulesOpen">📖 规则解析</span>
-            <span x-show="rulesOpen">▼ 规则解析</span>
-          </button>
-          <div x-show="rulesOpen" x-transition class="mt-2 p-3 bg-warm-50 rounded-lg text-[11px] space-y-2">
-            <div x-show="!rulesData && !rulesLoading">
-              <div class="text-ink-400 mb-2">未解析. AI 解析需 10-20s (Qwen 本地 LLM).</div>
-              <button @click="parseRulesNow(m.conditionId || m.slug, $data)"
-                class="px-3 py-1 bg-brand-500 text-white rounded text-[10px]">解析规则</button>
-            </div>
-            <div x-show="rulesLoading" class="text-ink-400">解析中...</div>
-            <div x-show="rulesErr" class="text-red-600" x-text="'✗ ' + rulesErr"></div>
-            <div x-show="rulesData">
-              <div class="mb-1"><strong>数据源:</strong> <span x-text="rulesData?.rules_digest?.data_source || '未知'"></span></div>
-              <div class="mb-1"><strong>时区:</strong> <span x-text="rulesData?.rules_digest?.timezone || '未指定'"></span></div>
-              <div x-show="rulesData?.risks?.length" class="mb-1 text-red-600">
-                <strong>⚠ 风险点:</strong>
-                <ul class="list-disc pl-4 mt-0.5">
-                  <template x-for="(r, ri) in (rulesData?.risks || [])"><li :key="ri" x-text="r"></li></template>
-                </ul>
-              </div>
-              <div class="mb-1"><strong>Yes 赢:</strong> <span x-text="rulesData?.decision_inputs?.yes_conditions || '-'"></span></div>
-              <div><strong>No 赢:</strong> <span x-text="rulesData?.decision_inputs?.no_conditions || '-'"></span></div>
-              <div class="text-[9px] text-ink-300 mt-2" x-text="'cached by ' + (rulesData?.parsed_by || 'qwen') + ', ' + (rulesData?.cached ? 'cache hit' : 'fresh')"></div>
-            </div>
-          </div>
-        </div>
-
         <!-- 分辨规则 -->
         <template x-if="m._showRule">
           <div class="mt-2 text-[11px] text-ink-500 bg-warm-50 rounded-lg p-3 leading-relaxed">
@@ -367,28 +461,32 @@
                     <span x-text="'成本: $' + (tradeForm.price * tradeForm.size).toFixed(2)"></span>
                     <span class="ml-2" x-text="'潜在盈利: $' + ((1 - tradeForm.price) * tradeForm.size).toFixed(2)"></span>
                   </div>
-                  <button @click="submitOrder(m)" :disabled="ordering || !canTrade" class="btn btn-primary w-full text-xs">
-                    <span x-text="ordering ? '提交中...' : '提交订单'"></span>
+                  <!-- Pre-flight 提示：总是说明为什么下不了/能下 -->
+                  <template x-if="checkTrade(m)">
+                    <div class="text-[10px] text-amber-700 bg-amber-50 rounded px-2 py-1.5 leading-snug" x-text="checkTrade(m).msg"></div>
+                  </template>
+                  <button @click="submitOrder(m)" :disabled="ordering || !!checkTrade(m)" class="btn btn-primary w-full text-xs">
+                    <span x-text="ordering ? '提交中...' : (checkTrade(m) ? '无法下单' : '提交订单')"></span>
                   </button>
                   <div x-show="tradeMsg" class="text-[10px]" :class="tradeMsg.includes('成功') ? 'text-green-600' : 'text-red-500'" x-text="tradeMsg"></div>
                 </div>
               </div>
-              <!-- 订单簿 -->
+              <!-- 订单簿 — Polymarket CLOB: bids 低→高，asks 高→低。top-of-book 在末尾 -->
               <div>
-                <div class="text-xs font-medium text-ink-700 mb-2">订单簿</div>
+                <div class="text-xs font-medium text-ink-700 mb-2">订单簿 (顶部最接近成交价)</div>
                 <div x-show="bookLoading" class="text-xs text-ink-300 py-4 text-center">加载中...</div>
                 <template x-if="!bookLoading && book">
                   <div class="text-[10px] space-y-1">
-                    <div class="text-ink-400 font-medium">卖出 (Asks)</div>
-                    <template x-for="ask in (book.asks || []).slice(0,5)" :key="ask.price">
+                    <div class="text-ink-400 font-medium">卖出 (Asks — 你买入需付)</div>
+                    <template x-for="ask in (book.asks || []).slice(-5)" :key="ask.price">
                       <div class="flex justify-between">
                         <span class="text-red-500" x-text="'$' + ask.price"></span>
                         <span class="text-ink-400" x-text="ask.size"></span>
                       </div>
                     </template>
                     <div class="border-t border-warm-200 my-1"></div>
-                    <div class="text-ink-400 font-medium">买入 (Bids)</div>
-                    <template x-for="bid in (book.bids || []).slice(0,5)" :key="bid.price">
+                    <div class="text-ink-400 font-medium">买入 (Bids — 你卖出可得)</div>
+                    <template x-for="bid in (book.bids || []).slice(-5).reverse()" :key="bid.price">
                       <div class="flex justify-between">
                         <span class="text-green-600" x-text="'$' + bid.price"></span>
                         <span class="text-ink-400" x-text="bid.size"></span>
@@ -456,6 +554,8 @@ function predictionsPage() {
     showPositions: true,
     positions: [],
     settled: [],
+    summary: null,
+    timelineExpanded: false,
     orders: [],
     tradeIdx: null,
     tradeForm: { outcome: 'yes', side: 'BUY', price: 0.50, size: 10 },
@@ -510,9 +610,92 @@ function predictionsPage() {
       return this.filtered.slice(start, start + this.pageSize);
     },
 
-    get canTrade() {
-      return this.walletStatus.hasWallet && this.walletStatus.hasClobKey
-        && this.tradeForm.price > 0 && this.tradeForm.price < 1 && this.tradeForm.size > 0;
+    // Sparkline helpers: USDC-balance trajectory from timeline events
+    _sparkValues() {
+      if (!this.summary || !this.summary.timeline) return [];
+      return [this.summary.capital, ...this.summary.timeline.map(t => t.runningUsdc)];
+    },
+    _sparkBounds() {
+      const values = this._sparkValues();
+      if (!values.length) return { min: 0, max: 1, range: 1 };
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      return { min, max, range: (max - min) || 1 };
+    },
+    sparklinePoints() {
+      const values = this._sparkValues();
+      if (values.length < 2) return [];
+      const { min, range } = this._sparkBounds();
+      const w = 600, h = 90, pad = 8;
+      const step = (w - pad * 2) / (values.length - 1);
+      return values.slice(1).map((v, i) => ({
+        x: (pad + (i + 1) * step).toFixed(1),
+        y: (h - pad - ((v - min) / range) * (h - pad * 2)).toFixed(1),
+        action: this.summary.timeline[i].action,
+      }));
+    },
+    sparklinePath() {
+      const values = this._sparkValues();
+      if (values.length < 2) return '';
+      const { min, range } = this._sparkBounds();
+      const w = 600, h = 90, pad = 8;
+      const step = (w - pad * 2) / (values.length - 1);
+      return values.map((v, i) => {
+        const x = pad + i * step;
+        const y = h - pad - ((v - min) / range) * (h - pad * 2);
+        return (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1);
+      }).join(' ');
+    },
+    sparklineAreaPath() {
+      const line = this.sparklinePath();
+      if (!line) return '';
+      const values = this._sparkValues();
+      const w = 600, h = 90, pad = 8;
+      const step = (w - pad * 2) / (values.length - 1);
+      const lastX = pad + (values.length - 1) * step;
+      return line + ' L' + lastX.toFixed(1) + ',' + (h - pad) + ' L' + pad + ',' + (h - pad) + ' Z';
+    },
+    sparklinePeak() {
+      const values = this._sparkValues();
+      return values.length ? Math.max(...values) : 0;
+    },
+
+    // Pre-flight check — returns null if order can submit, or {msg} explaining why not.
+    // Called from template + submitOrder. 让按钮"会说话"而不是静默灰掉。
+    checkTrade(m) {
+      if (!this.walletStatus.hasWallet) return { msg: '先创建 Polygon 钱包（顶部按钮）' };
+      if (!this.walletStatus.approved) return { msg: '先授权 USDC 给 Polymarket（顶部 "授权 USDC" 按钮）' };
+      if (!this.walletStatus.hasClobKey) return { msg: '先设置 CLOB API Key（顶部 "设置 API Key" 按钮）' };
+      const price = Number(this.tradeForm.price);
+      const size = Number(this.tradeForm.size);
+      if (!(price > 0 && price < 1)) return { msg: '价格必须在 $0.01–$0.99 之间，按 0.01 为最小刻度' };
+      if (!(size > 0)) return { msg: '数量必须 > 0' };
+      const cost = price * size;
+      if (cost < 5) {
+        const minSize = Math.ceil(5 / price);
+        return { msg: `Polymarket 最小订单 $5（当前 $${cost.toFixed(2)}）。数量至少填 ${minSize}` };
+      }
+      if (this.tradeForm.side === 'BUY') {
+        const bal = this.walletStatus.usdc || 0;
+        if (cost > bal) {
+          const maxSize = Math.floor(bal / price * 100) / 100;
+          return { msg: `USDC 不够（需 $${cost.toFixed(2)}，余 $${bal.toFixed(2)}）。当前价最多买 ${maxSize} 份` };
+        }
+      } else {
+        // SELL: 必须已持有该 outcome token（CLOB 不支持裸空）
+        const tokenId = this.tradeForm.outcome === 'yes'
+          ? (m?.clobTokenIds?.[0])
+          : (m?.clobTokenIds?.[1]);
+        if (!tokenId) return { msg: '无法解析 Token ID（市场数据缺失）' };
+        const held = (this.positions || []).find(p => String(p.asset) === String(tokenId));
+        const heldSize = held?.size || 0;
+        if (heldSize < size) {
+          const outOther = this.tradeForm.outcome === 'yes' ? 'No' : 'Yes';
+          const mirrorPrice = (1 - price).toFixed(2);
+          return { msg: `你持有 ${heldSize} 份 ${this.tradeForm.outcome.toUpperCase()}，不够卖 ${size}。Polymarket 不支持裸空，想押反方向请改「${outOther} + 买入 @ $${mirrorPrice}」（经济等价）` };
+        }
+      }
+      return null;
     },
 
     async init() {
@@ -712,7 +895,9 @@ function predictionsPage() {
     },
 
     async submitOrder(m) {
-      if (!this.canTrade || this.ordering) return;
+      if (this.ordering) return;
+      const blocker = this.checkTrade(m);
+      if (blocker) { this.tradeMsg = blocker.msg; return; }
       this.ordering = true;
       this.tradeMsg = '';
       // 找 token ID
@@ -755,6 +940,7 @@ function predictionsPage() {
         const ordData = await ordRes.json();
         this.positions = posData.positions || [];
         this.settled = posData.settled || [];
+        this.summary = posData.summary || null;
         this.orders = ordData.orders || [];
       } catch {}
     },
@@ -817,26 +1003,117 @@ function predictionsPage() {
       }
     },
 
+    async _ensureRulesDigest(m) {
+      if (m._rulesDigest) return m._rulesDigest;
+      const id = m.conditionId || m.slug;
+      if (!id) return null;
+      try {
+        const r = await fetch('/api/predictions/market/' + id + '/rules');
+        if (r.ok) {
+          const d = await r.json();
+          if (d?.rules_digest) { m._rulesDigest = d; return d; }
+        }
+      } catch {}
+      m._rulesParsing = true;
+      try {
+        const r = await fetch('/api/predictions/market/' + id + '/parse-rules', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ backend: 'qwen' }),
+        });
+        const d = await r.json();
+        if (d?.ok) { m._rulesDigest = d; return d; }
+      } catch {}
+      finally { m._rulesParsing = false; }
+      return null;
+    },
+
+    async _fetchTopOfBook(tokenId) {
+      try {
+        const res = await fetch('/api/predictions/book/' + tokenId);
+        const d = await res.json();
+        // bids sorted low→high, asks sorted high→low — top of book is LAST element
+        const bids = d.bids || []; const asks = d.asks || [];
+        const bestBid = bids.length ? parseFloat(bids[bids.length-1].price) : null;
+        const bestAsk = asks.length ? parseFloat(asks[asks.length-1].price) : null;
+        return { bestBid, bestAsk };
+      } catch { return { bestBid: null, bestAsk: null }; }
+    },
+
     async askAgent(m) {
       if (m._asking) return;
       m._asking = true;
       m._agentReply = null;
-      const question = `分析这个预测市场并给出你的判断：
-"${m.question}"
-当前概率: Yes ${m.yes}% / No ${m.no}%
-24h成交: $${this.formatVol(m.volume24h || 0)}
-流动性: $${this.formatVol(m.liquidity || 0)}
-截止日期: ${m.endDate || '未知'}
-${m.description ? '规则: ' + m.description.slice(0, 200) : ''}
-请分析：1) 你认为结果会怎样？2) 当前市场定价合理吗？3) 如果要下注，你建议什么方向和仓位？`;
+      m._chatHistory = [{ role: 'agent', text: '读取规则 + 抓盘口...' }];
+
+      // 1) 规则 digest（缓存优先，没缓存就 Qwen 解析 10-20s）
+      const rulesRes = await this._ensureRulesDigest(m);
+      if (m._rulesParsing) m._chatHistory[0].text = '规则解析中 (~15s)...';
+
+      // 2) 实时 top-of-book — Yes / No 两侧
+      const [yesBook, noBook] = await Promise.all([
+        m.clobTokenIds?.[0] ? this._fetchTopOfBook(m.clobTokenIds[0]) : Promise.resolve({}),
+        m.clobTokenIds?.[1] ? this._fetchTopOfBook(m.clobTokenIds[1]) : Promise.resolve({}),
+      ]);
+
+      // 3) 到期倒计时
+      const msLeft = m.endDate ? (new Date(m.endDate).getTime() - Date.now()) : null;
+      const timeLeft = msLeft == null ? '未知' :
+        msLeft < 0 ? '已过期' :
+        msLeft < 3600e3 ? Math.round(msLeft/60e3) + ' 分钟' :
+        msLeft < 86400e3 ? (msLeft/3600e3).toFixed(1) + ' 小时' :
+        (msLeft/86400e3).toFixed(1) + ' 天';
+
+      // 4) 用户余额
+      const balance = (this.walletStatus?.usdc ?? 0).toFixed(2);
+
+      // 5) 规则 digest 结构化字段
+      const rd = rulesRes?.rules_digest || {};
+      const yesCond = rulesRes?.decision_inputs?.yes_conditions || '-';
+      const noCond = rulesRes?.decision_inputs?.no_conditions || '-';
+      const risks = (rulesRes?.risks || []).join('; ') || '(无)';
+
+      const question = `你是 Polymarket 预测市场交易顾问。基于下面的全部信息给一个**可执行**的建议，不要含糊、不要"需更多信息"。
+
+# 市场
+问题: ${m.question}
+截止: ${m.endDate || '未知'} (距今 ${timeLeft})
+
+# 当前定价 (真实 top-of-book)
+市场隐含: Yes ${m.yes ?? '?'}% / No ${m.no ?? '?'}%
+Yes 盘口: 买入需付 $${yesBook.bestAsk ?? '?'} / 卖出可得 $${yesBook.bestBid ?? '?'}
+No  盘口: 买入需付 $${noBook.bestAsk ?? '?'} / 卖出可得 $${noBook.bestBid ?? '?'}
+24h 成交: $${this.formatVol(m.volume24h || 0)} | 流动性: $${this.formatVol(m.liquidity || 0)}
+
+# 规则 digest (Qwen 解析)
+Yes 赢条件: ${yesCond}
+No  赢条件: ${noCond}
+数据源: ${rd.data_source || '未指定'} | 时区: ${rd.timezone || '未指定'}
+⚠ 风险点: ${risks}
+
+# 完整规则原文
+${m.description || '(无)'}
+
+# 用户
+Polymarket USDC 余额: $${balance}
+
+# 必答 (按编号回，给数字)
+1. 你估计真实概率是多少？(给一个具体数字，如 "真实 Yes ≈ 3%")
+2. 对比市场价，哪一边 EV 为正？说明为什么。
+3. 推荐下单: direction (Yes/No) + side (BUY/SELL) + 限价 $ + 仓位 $USDC。仓位要参考用户 $${balance} 余额，不能建议超过 30%。
+4. 止损/退场条件一句话。
+
+不要复读问题。不要说"因不确定所以无法建议"。你有规则、价格、时间、余额，给具体数字。`;
+
       try {
-        const res = await fetch('/api/agent/reply', {
+        const res = await fetch('/api/agent/consult', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             relayNodeId: this.selectedAgent,
-            peer: 'owner:predictions',
-            message: question,
+            topic: 'predictions',
+            question,
+            systemNote: '用户在预测市场面板点击"问 Agent"。给出具体下单建议（方向/限价/仓位/止损）。',
           }),
         });
         const data = await res.json();
@@ -845,6 +1122,7 @@ ${m.description ? '规则: ' + m.description.slice(0, 200) : ''}
         m._chatHistory = [{ role: 'agent', text: reply }];
       } catch (e) {
         m._agentReply = '分析失败: ' + e.message;
+        m._chatHistory = [{ role: 'agent', text: '分析失败: ' + e.message }];
       }
       m._asking = false;
     },
@@ -858,13 +1136,14 @@ ${m.description ? '规则: ' + m.description.slice(0, 200) : ''}
       m._chatHistory.push({ role: 'user', text: msg });
       try {
         const context = `关于预测市场 "${m.question}" (Yes ${m.yes}%/No ${m.no}%)，用户说: ${msg}`;
-        const res = await fetch('/api/agent/reply', {
+        const res = await fetch('/api/agent/consult', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             relayNodeId: this.selectedAgent,
-            peer: 'owner:predictions',
-            message: context,
+            topic: 'predictions',
+            question: context,
+            systemNote: '接续刚才的预测市场问答，继续给具体建议。',
           }),
         });
         const data = await res.json();
@@ -892,30 +1171,6 @@ ${m.description ? '规则: ' + m.description.slice(0, 200) : ''}
       return '市场几乎确定不会发生（仅 ' + m.yes + '%）';
     },
 
-    async loadRulesCache(conditionId, scope) {
-      if (!conditionId) return;
-      try {
-        const res = await fetch('/api/predictions/market/' + conditionId + '/rules');
-        if (res.ok) { scope.rulesData = await res.json(); }
-      } catch {}
-    },
-
-    async parseRulesNow(conditionId, scope) {
-      if (!conditionId) { scope.rulesErr = '无 conditionId'; return; }
-      scope.rulesLoading = true;
-      scope.rulesErr = '';
-      try {
-        const res = await fetch('/api/predictions/market/' + conditionId + '/parse-rules', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ backend: 'qwen' }),
-        });
-        const data = await res.json();
-        if (data.ok) { scope.rulesData = data; }
-        else { scope.rulesErr = data.error || '解析失败'; }
-      } catch (e) { scope.rulesErr = e.message; }
-      finally { scope.rulesLoading = false; }
-    },
   };
 }
 </script>

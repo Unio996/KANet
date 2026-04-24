@@ -316,40 +316,59 @@ export async function checkTxStatus(txHash) {
 /**
  * 赎回已结算的预测市场持仓 — 将赢的 outcome tokens 兑换为 USDC
  *
- * Polymarket 使用 Gnosis CTF (Conditional Token Framework)。
- * 赎回调用 CTF Exchange 合约的 redeemPositions。
+ * Polymarket 有两类市场，赎回路径不同：
+ *   - 标准 binary 市场：走 CTF.redeemPositions(USDC, 0x0, conditionId, [1,2])
+ *   - NegRisk 市场（neg_risk=true）：走 NegRiskAdapter.redeemPositions(conditionId, [yesAmount, noAmount])
+ *     NegRisk 市场的 outcome token_id ≠ CTF 从 (conditionId, indexSet) 派生的 positionId，
+ *     所以调错合约会静默 no-op —— TX 成功但烧 0 token、付 0 USDC、只扣 gas。
+ *
+ * 通过 CLOB API 的 /markets/{conditionId} 的 neg_risk 字段判断类型。
  *
  * @param {string} privateKey — Agent 的 Polygon 钱包私钥
  * @param {string} conditionId — 市场的 conditionId (0x...)
- * @returns {{ ok, txHash?, error?, gasUsed? }}
+ * @returns {{ ok, txHash?, error?, gasUsed?, usdcDelta?, method? }}
  */
 export async function redeemPositions(privateKey, conditionId) {
-  // Polymarket uses NegRiskAdapter for most markets, but
-  // the standard CTF redeemPositions works for all settled markets.
-  // CTF contract on Polygon: 0x4D97DCd97eC945f40cF65F87097ACe5EA0476045
   const CTF_CONTRACT = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
   const CTF_ABI = [
     'function redeemPositions(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] indexSets) external',
     'function balanceOf(address owner, uint256 id) view returns (uint256)',
-    'function getOutcomeSlotCount(bytes32 conditionId) view returns (uint256)',
     'function payoutDenominator(bytes32 conditionId) view returns (uint256)',
+    'function isApprovedForAll(address account, address operator) view returns (bool)',
+    'function setApprovalForAll(address operator, bool approved) external',
   ];
+  const NEG_RISK_ADAPTER_ABI = [
+    'function redeemPositions(bytes32 _conditionId, uint256[] _amounts) external',
+  ];
+  const USDC_ABI = ['function balanceOf(address) view returns (uint256)'];
+
+  // Detect NegRisk + resolve Yes/No token_ids via CLOB API
+  let isNegRisk = false;
+  let yesTokenId = null;
+  let noTokenId = null;
+  try {
+    const mres = await fetch(`${CLOB_BASE}/markets/${conditionId}`, { signal: AbortSignal.timeout(5000) });
+    if (mres.ok) {
+      const md = await mres.json();
+      isNegRisk = !!md.neg_risk;
+      for (const t of (md.tokens || [])) {
+        const o = (t.outcome || '').toLowerCase();
+        if (o === 'yes') yesTokenId = t.token_id;
+        else if (o === 'no') noTokenId = t.token_id;
+      }
+    }
+  } catch (e) {
+    console.warn(`[polymarket] market metadata fetch failed: ${e.message} — assuming standard CTF`);
+  }
 
   try {
     return await withProvider(POLYGON_RPC, async (provider) => {
       const wallet = new ethers.Wallet(privateKey, provider);
       const ctf = new ethers.Contract(CTF_CONTRACT, CTF_ABI, wallet);
+      const usdc = new ethers.Contract(USDC_POLYGON, USDC_ABI, provider);
 
-      // Check if market is resolved (payoutDenominator > 0)
-      const denom = await ctf.payoutDenominator(conditionId);
-      if (denom === 0n) {
-        return { ok: false, error: 'Market not yet resolved (payoutDenominator=0)' };
-      }
-
-      // For binary markets: indexSets = [1, 2] (Yes=1, No=2)
-      // parentCollectionId = 0x0 (root)
-      const parentCollectionId = ethers.ZeroHash;
-      const indexSets = [1, 2]; // Both outcomes — CTF will only redeem the winning side
+      // USDC balance snapshot — verify the redeem actually paid out
+      const usdcBefore = await usdc.balanceOf(wallet.address);
 
       const feeData = await provider.getFeeData();
       const gasOpts = {
@@ -357,19 +376,71 @@ export async function redeemPositions(privateKey, conditionId) {
         maxPriorityFeePerGas: (feeData.maxPriorityFeePerGas || 30000000000n) * 2n,
       };
 
-      console.log(`[polymarket] Redeeming positions for condition ${conditionId.slice(0, 16)}...`);
-      const tx = await ctf.redeemPositions(
-        USDC_POLYGON,          // collateral token (USDC)
-        parentCollectionId,    // parent collection (root)
-        conditionId,           // the market
-        indexSets,             // both outcomes
-        gasOpts,
-      );
-      console.log(`[polymarket] Redeem TX: ${tx.hash}`);
-      const receipt = await tx.wait();
-      console.log(`[polymarket] Redeem confirmed block ${receipt.blockNumber}, gas ${receipt.gasUsed}`);
+      let tx;
+      let method;
+      if (isNegRisk) {
+        method = 'negRiskAdapter';
+        if (!yesTokenId || !noTokenId) {
+          return { ok: false, error: 'NegRisk market: Yes/No token_ids not resolvable from CLOB' };
+        }
+        const [yesBal, noBal] = await Promise.all([
+          ctf.balanceOf(wallet.address, yesTokenId),
+          ctf.balanceOf(wallet.address, noTokenId),
+        ]);
+        if (yesBal === 0n && noBal === 0n) {
+          return { ok: false, error: 'No outcome tokens to redeem (both Yes and No balance are zero)' };
+        }
+        // NegRiskAdapter 要从钱包 safeTransferFrom outcome tokens → 需要 ERC-1155 operator approval
+        // 和 USDC.approve 是两套权限，第一次赎 NegRisk 必须先 setApprovalForAll
+        const approved = await ctf.isApprovedForAll(wallet.address, NEG_RISK_ADAPTER);
+        if (!approved) {
+          console.log(`[polymarket] setApprovalForAll(NegRiskAdapter) — first NegRisk redeem on this wallet`);
+          const approveTx = await ctf.setApprovalForAll(NEG_RISK_ADAPTER, true, gasOpts);
+          await approveTx.wait();
+          console.log(`[polymarket] approval set TX: ${approveTx.hash}`);
+        }
+        const adapter = new ethers.Contract(NEG_RISK_ADAPTER, NEG_RISK_ADAPTER_ABI, wallet);
+        console.log(`[polymarket] NegRisk redeem condition=${conditionId.slice(0,16)}... yes=${yesBal} no=${noBal}`);
+        tx = await adapter.redeemPositions(conditionId, [yesBal, noBal], gasOpts);
+      } else {
+        method = 'ctf';
+        const denom = await ctf.payoutDenominator(conditionId);
+        if (denom === 0n) {
+          return { ok: false, error: 'Market not yet resolved (payoutDenominator=0)' };
+        }
+        console.log(`[polymarket] CTF redeem condition=${conditionId.slice(0,16)}...`);
+        tx = await ctf.redeemPositions(USDC_POLYGON, ethers.ZeroHash, conditionId, [1, 2], gasOpts);
+      }
 
-      return { ok: true, txHash: tx.hash, blockNumber: receipt.blockNumber, gasUsed: receipt.gasUsed?.toString() };
+      console.log(`[polymarket] Redeem TX: ${tx.hash} (${method})`);
+      const receipt = await tx.wait();
+      const usdcAfter = await usdc.balanceOf(wallet.address);
+      const usdcDelta = usdcAfter - usdcBefore;
+      const deltaFmt = ethers.formatUnits(usdcDelta, USDC_DECIMALS);
+      console.log(`[polymarket] Redeem confirmed block=${receipt.blockNumber} gas=${receipt.gasUsed} usdcDelta=${deltaFmt}`);
+
+      // TX 成功但 USDC 没增加 = 合约静默 no-op（之前 NegRisk 走错合约就是这症状）
+      if (usdcDelta === 0n) {
+        return {
+          ok: false,
+          error: `Redeem TX landed but paid 0 USDC — tokens may not be redeemable via ${method} (market type misdetected?)`,
+          txHash: tx.hash,
+          blockNumber: receipt.blockNumber,
+          gasUsed: receipt.gasUsed?.toString(),
+          usdcDelta: '0',
+          method,
+        };
+      }
+
+      return {
+        ok: true,
+        txHash: tx.hash,
+        blockNumber: receipt.blockNumber,
+        gasUsed: receipt.gasUsed?.toString(),
+        usdcDelta: usdcDelta.toString(),
+        usdcDeltaFormatted: deltaFmt,
+        method,
+      };
     });
   } catch (e) {
     console.error(`[polymarket] Redeem error: ${e.message}`);
@@ -459,6 +530,85 @@ export async function checkRedeemStatus(walletAddress, conditionId, assetIds = [
     });
   } catch (e) {
     return { resolved: false, redeemable: false, balance: '0', error: e.message };
+  }
+}
+
+/**
+ * Pull full user activity (TRADE + REDEEM) from Polymarket data-api.
+ * Returns entries in chronological order.
+ */
+export async function fetchUserActivity(walletAddress) {
+  const all = [];
+  for (let offset = 0; offset < 2000; offset += 100) {
+    try {
+      const r = await fetch(
+        `https://data-api.polymarket.com/activity?user=${walletAddress.toLowerCase()}&limit=100&offset=${offset}`,
+        { signal: AbortSignal.timeout(TIMEOUT) }
+      );
+      if (!r.ok) break;
+      const j = await r.json();
+      if (!Array.isArray(j) || j.length === 0) break;
+      all.push(...j);
+      if (j.length < 100) break;
+    } catch { break; }
+  }
+  all.sort((a, b) => a.timestamp - b.timestamp);
+  return all;
+}
+
+/**
+ * Current account value from Polymarket data-api.
+ * This is outcome-token value only (does NOT include idle USDC balance).
+ */
+export async function fetchAccountValue(walletAddress) {
+  try {
+    const r = await fetch(
+      `https://data-api.polymarket.com/value?user=${walletAddress.toLowerCase()}`,
+      { signal: AbortSignal.timeout(TIMEOUT) }
+    );
+    if (!r.ok) return 0;
+    const j = await r.json();
+    return Number(j?.[0]?.value || 0);
+  } catch { return 0; }
+}
+
+/**
+ * Resolve winner for a market via on-chain payoutNumerators.
+ * Uses polymarket_market_results cache — once resolved, result never changes.
+ * Returns { winner: 'Yes'|'No'|null, resolved: boolean } (null winner if unresolved or split).
+ */
+export async function getMarketWinner(conditionId) {
+  const cached = sqlite.prepare(
+    'SELECT winner_outcome FROM polymarket_market_results WHERE condition_id = ?'
+  ).get(conditionId);
+  if (cached?.winner_outcome) {
+    return { winner: cached.winner_outcome, resolved: true, cached: true };
+  }
+
+  const CTF_CONTRACT = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
+  const CTF_ABI = [
+    'function payoutDenominator(bytes32 conditionId) view returns (uint256)',
+    'function payoutNumerators(bytes32 conditionId, uint256 index) view returns (uint256)',
+  ];
+  try {
+    return await withProvider(POLYGON_RPC, async (provider) => {
+      const ctf = new ethers.Contract(CTF_CONTRACT, CTF_ABI, provider);
+      const denom = await ctf.payoutDenominator(conditionId);
+      if (denom === 0n) return { winner: null, resolved: false };
+      const yesPayout = await ctf.payoutNumerators(conditionId, 0);
+      const noPayout = await ctf.payoutNumerators(conditionId, 1);
+      const winner = yesPayout > noPayout ? 'Yes' : noPayout > yesPayout ? 'No' : null;
+      try {
+        sqlite.prepare(`
+          INSERT OR REPLACE INTO polymarket_market_results
+            (condition_id, winner_outcome, payout_numerators, payout_denominator, resolved_at)
+          VALUES (?, ?, ?, ?, datetime('now'))
+        `).run(conditionId, winner, JSON.stringify([yesPayout.toString(), noPayout.toString()]), denom.toString());
+      } catch { /* cache write best-effort */ }
+      return { winner, resolved: true };
+    });
+  } catch (e) {
+    return { winner: null, resolved: false, error: e.message };
   }
 }
 

@@ -2254,5 +2254,24 @@ export function runMigrations() {
     }
   }
 
+  // v75: polymarket_market_results — cache on-chain winner so panel doesn't re-hit RPC
+  {
+    const hasTable = sqlite.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='polymarket_market_results'"
+    ).get();
+    if (!hasTable) {
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS polymarket_market_results (
+          condition_id TEXT PRIMARY KEY,
+          winner_outcome TEXT,
+          payout_numerators TEXT,
+          payout_denominator TEXT,
+          resolved_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+      `);
+      console.log('[migrate] v75: polymarket_market_results table created (winner cache).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

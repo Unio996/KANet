@@ -8,7 +8,7 @@ import { sqlite } from '../db/client.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 import crypto, { randomUUID } from 'crypto';
 import { fetchStockData, fetchYahooQuote, cachedPredictions, cachedCommodities, cachedFunding, cachedSentiment, fetchAllMarkets, cachedCrypto, cachedFundamentals, cachedIndustryPeers, cachedStockKlines, DIVERGENCE_WARN_THRESHOLD } from '../services/market-data.js';
-import { getPolygonWallet, getUsdcBalance, createApiKey, getOrderBook, getPositions, placeOrder, cancelOrder, getOpenOrders, checkAllowance, approveUsdc, checkTxStatus, redeemPositions, checkRedeemStatus, sweepUsdc } from '../services/polymarket.js';
+import { getPolygonWallet, getUsdcBalance, createApiKey, getOrderBook, getPositions, placeOrder, cancelOrder, getOpenOrders, checkAllowance, approveUsdc, checkTxStatus, redeemPositions, checkRedeemStatus, sweepUsdc, fetchUserActivity, fetchAccountValue, getMarketWinner } from '../services/polymarket.js';
 import { decrypt } from '../services/crypto.js';
 
 // Agent 综述缓存（15 分钟）
@@ -359,7 +359,167 @@ export async function registerStockRoutes(fastify) {
 
       const positions = allPositions.filter(p => !p.settled);
       const settled = allPositions.filter(p => p.settled);
-      return reply.send({ positions, settled, trades });
+
+      // ── Summary: cash-flow reconstruction from Polymarket data-api activity ──
+      // Single source of truth: Polymarket's activity log gives exact USDC in/out
+      // per market. Capital is derived by account-balance identity, not guessed.
+      const polyWallet = getPolygonWallet(relay_node_id);
+      const summary = {
+        capital: null, totalStaked: 0, realizedPnl: 0, unrealizedPnl: 0,
+        currentUsdc: 0, currentTokenValue: 0, currentTotal: 0,
+        roiRealized: null, roiTotal: null, turnover: null,
+        wins: 0, losses: 0, pending: 0, winRate: null,
+        source: 'none',
+      };
+      // Per-market cash-flow index: conditionId → { cost, received }
+      const perMarket = {};
+      if (polyWallet?.address) {
+        try {
+          const [activity, tokenValue, usdcBal] = await Promise.all([
+            fetchUserActivity(polyWallet.address),
+            fetchAccountValue(polyWallet.address),
+            getUsdcBalance(polyWallet.address),
+          ]);
+          summary.currentUsdc = Number(usdcBal) || 0;
+          summary.currentTokenValue = tokenValue;
+          summary.currentTotal = summary.currentUsdc + summary.currentTokenValue;
+
+          if (activity.length > 0) {
+            let buySpent = 0, cashIn = 0;
+            for (const a of activity) {
+              const cid = a.conditionId;
+              if (cid && !perMarket[cid]) perMarket[cid] = { cost: 0, received: 0 };
+              if (a.type === 'TRADE' && a.side === 'BUY') {
+                buySpent += a.usdcSize || 0;
+                if (cid) perMarket[cid].cost += a.usdcSize || 0;
+              } else if (a.type === 'TRADE' && a.side === 'SELL') {
+                cashIn += a.usdcSize || 0;
+                if (cid) perMarket[cid].received += a.usdcSize || 0;
+              } else if (a.type === 'REDEEM') {
+                cashIn += a.usdcSize || 0;
+                if (cid) perMarket[cid].received += a.usdcSize || 0;
+              }
+            }
+            // Account-balance identity: currentUsdc = capital + cashIn - buySpent
+            summary.totalStaked = buySpent;
+            summary.capital = summary.currentUsdc + buySpent - cashIn;
+            summary.source = 'data-api';
+          }
+        } catch (e) {
+          console.warn('[predictions] summary build failed:', e.message);
+        }
+      }
+
+      // ── Resolve winners for settled positions via on-chain payoutNumerators ──
+      await Promise.all(settled.map(async (p) => {
+        const r = await getMarketWinner(p.market);
+        if (r.resolved && r.winner) {
+          p.winner = r.winner;
+          p.verdict = (r.winner === p.outcome) ? 'WIN' : 'LOSE';
+          if (p.verdict === 'WIN') summary.wins++; else summary.losses++;
+        } else {
+          p.winner = null; p.verdict = 'PENDING';
+          summary.pending++;
+        }
+        // Precise per-position P&L from activity cash-flow (handles Polymarket fees)
+        const mk = perMarket[p.market];
+        if (mk) {
+          p.realizedPnl = mk.received - mk.cost;
+          p.actualReceived = mk.received;
+        } else {
+          // Fallback if activity missing (e.g. data-api down): estimate from outcome
+          p.realizedPnl = (p.verdict === 'WIN') ? (p.size - p.totalCost) : (-p.totalCost);
+          p.actualReceived = null;
+        }
+      }));
+
+      // Add open-position per-market cash-flow numbers + unrealized P&L so UI
+      // can show the Hormuz row with same shape as settled rows.
+      for (const p of positions) {
+        const mk = perMarket[p.market];
+        if (mk) { p.actualReceived = mk.received; } // usually 0 for open
+        // Unrealized P&L for this single position — Polymarket doesn't split
+        // tokenValue per market cheaply; use current price × size if available.
+        // Left null here; UI shows "pending" and uses summary.unrealizedPnl as total.
+      }
+
+      // Active position unrealized = total token value minus sum(active cost)
+      const activeCost = positions.reduce((s, p) => s + (p.totalCost || 0), 0);
+      summary.unrealizedPnl = summary.currentTokenValue - activeCost;
+
+      // Realized P&L = sum over settled positions (precise via cash-flow match)
+      summary.realizedPnl = settled.reduce((s, p) => s + (p.realizedPnl || 0), 0);
+
+      // expired_pending (past endDate, on-chain not yet resolved) counted as pending
+      summary.pending += positions.filter(p => p.status === 'expired_pending').length;
+
+      const totalSettled = summary.wins + summary.losses;
+      summary.winRate = totalSettled > 0 ? (summary.wins / totalSettled) : null;
+      if (summary.capital && summary.capital > 0) {
+        summary.roiRealized = summary.realizedPnl / summary.capital;
+        summary.roiTotal = (summary.realizedPnl + summary.unrealizedPnl) / summary.capital;
+        summary.turnover = summary.totalStaked / summary.capital;
+      }
+
+      // ── Timeline: chronological event series with running USDC balance ──
+      // Polymarket logs multiple REDEEM attempts per market (incl. $0 reconfirms
+      // after the real redeem). Keep only the one REDEEM that actually moved USDC
+      // per (conditionId); for losing markets keep the first $0 REDEEM as the
+      // settlement marker. Winner comes from on-chain cache.
+      try {
+        if (summary.source === 'data-api' && summary.capital != null) {
+          const actRes = await fetchUserActivity(polyWallet.address);
+          const marketWinner = {};
+          for (const p of settled) {
+            if (p.winner) marketWinner[p.market] = { winner: p.winner, side: p.outcome };
+          }
+          const hasPayRedeem = new Set();
+          for (const a of actRes) {
+            if (a.type === 'REDEEM' && (a.usdcSize || 0) > 0) hasPayRedeem.add(a.conditionId);
+          }
+          const seenZeroForLoser = new Set();
+          const filtered = [];
+          for (const a of actRes) {
+            if (a.type === 'REDEEM') {
+              const usd = a.usdcSize || 0;
+              if (usd === 0) {
+                // Skip $0 if this market already had a real redeem (reconfirm noise)
+                if (hasPayRedeem.has(a.conditionId)) continue;
+                // Otherwise keep only the first $0 as the losing-settlement marker
+                if (seenZeroForLoser.has(a.conditionId)) continue;
+                seenZeroForLoser.add(a.conditionId);
+              }
+            }
+            filtered.push(a);
+          }
+          let running = summary.capital;
+          summary.timeline = filtered.map(a => {
+            let amount = 0, action = 'NEUTRAL';
+            if (a.type === 'TRADE' && a.side === 'BUY') { amount = -(a.usdcSize || 0); action = 'BUY'; }
+            else if (a.type === 'TRADE' && a.side === 'SELL') { amount = (a.usdcSize || 0); action = 'SELL'; }
+            else if (a.type === 'REDEEM') {
+              amount = (a.usdcSize || 0);
+              action = amount > 0 ? 'WIN' : 'LOSE';
+            }
+            running += amount;
+            return {
+              ts: a.timestamp,
+              date: new Date((a.timestamp || 0) * 1000).toISOString(),
+              type: a.type, action, amount,
+              marketTitle: a.title || '',
+              conditionId: a.conditionId,
+              side: a.side || null,
+              size: a.size || null,
+              price: a.price || null,
+              runningUsdc: running,
+            };
+          });
+        }
+      } catch (e) {
+        console.warn('[predictions] timeline build failed:', e.message);
+      }
+
+      return reply.send({ positions, settled, trades, summary });
     } catch (e) {
       return reply.send({ positions: [], error: e.message });
     } finally {
