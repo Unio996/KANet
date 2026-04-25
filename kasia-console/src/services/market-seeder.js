@@ -215,6 +215,19 @@ async function tick() {
   const config = sqlite.prepare('SELECT * FROM market_seeder_config WHERE id = ?').get('default');
   if (!config?.enabled) return { skipped: true, reason: 'disabled' };
 
+  // R5 T-NWT-16: 如果 sell_agent_id 或 buy_agent_id 是 service relay (broker), 跳过 seeder
+  // tick. broker-intake-watcher 自管 publish (broker 收 user KAS 后), 不需要 seeder 也跑.
+  // (migrate v76 ec4367c8: is_dex_broker=1 → is_service=1).
+  for (const fld of ['sell_agent_id', 'buy_agent_id']) {
+    const id = config[fld];
+    if (!id) continue;
+    const r = sqlite.prepare('SELECT is_service, is_dex_broker FROM relay_nodes WHERE id=?').get(id);
+    if (r?.is_service === 1 || r?.is_dex_broker === 1) {
+      console.log(`[seeder] SKIP — ${fld}=${id.slice(0,8)} is service (broker self-manages publish via broker-intake-watcher)`);
+      return { skipped: true, reason: `${fld} is service` };
+    }
+  }
+
   // Step 1: fetch current KAS price
   const midPrice = await fetchKasPrice();
   if (!midPrice || midPrice <= 0) {

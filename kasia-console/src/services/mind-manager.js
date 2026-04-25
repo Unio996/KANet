@@ -170,6 +170,11 @@ function _buildMindCallbacks() {
 export async function getMind(relayNodeId) {
   if (!relayNodeId) return null;
 
+  // R5 T-NWT-16 (defensive): service relay 不挂 Mind. Gate -1 (getReply) 已禁言, getMind
+  // 同步禁防 proactive cycle (mind-manager.triggerProactive) 启 Mind for service.
+  const svc = sqlite.prepare('SELECT is_service, is_dex_broker FROM relay_nodes WHERE id=?').get(relayNodeId);
+  if (svc?.is_service === 1 || svc?.is_dex_broker === 1) return null;
+
   let name = relayToName[relayNodeId];
   if (!name) {
     // Unknown relayNodeId — try to look up
@@ -376,14 +381,15 @@ function _strangerMeta(address) {
  * @returns {Promise<string|null>} reply text, or null if Mind unavailable
  */
 export async function getReply(relayNodeId, peer, message, channel) {
-  // ── Gate -1 (R4 (3) Stage 3, T-NWT-10): broker mute ──
-  // broker (is_dex_broker=1) = deterministic protocol agent. broker-buy-handler /
-  // broker-sell-handler / broker-buy-completion-watcher / broker-intake-watcher 全覆盖 DM
-  // 路径. Mind reactive/proactive 自由发挥会平行 broker-handler 给用户造矛盾文案 (R4 实证
-  // Trader-B Mind 给 Martin 价格质疑覆盖 dm_pay_instr 付款指引). 全禁 Mind 出口.
-  const broker = sqlite.prepare('SELECT is_dex_broker FROM relay_nodes WHERE id=?').get(relayNodeId);
-  if (broker?.is_dex_broker === 1) {
-    console.log(`[mind-manager] BROKER MUTE ${relayNodeId.slice(0,8)} (is_dex_broker=1) — Mind reply skipped`);
+  // ── Gate -1 (R5 T-NWT-16, was R4 (3) Stage 3 T-NWT-10): service mute ──
+  // Service relay (is_service=1, R5 重构后 broker = Service 不是 Agent) = deterministic
+  // 协议执行体. broker-buy-handler / broker-sell-handler / broker-buy-completion-watcher /
+  // broker-intake-watcher 全覆盖 DM 路径. Mind reactive/proactive 自由发挥造矛盾文案
+  // (R4 实证). is_service=1 全禁 Mind 出口.
+  // (migrate v76 ec4367c8 auto-set is_dex_broker=1 → is_service=1, 兼容老 column.)
+  const svc = sqlite.prepare('SELECT is_service, is_dex_broker FROM relay_nodes WHERE id=?').get(relayNodeId);
+  if (svc?.is_service === 1 || svc?.is_dex_broker === 1) {
+    console.log(`[mind-manager] SERVICE MUTE ${relayNodeId.slice(0,8)} (is_service=${svc?.is_service||0}) — Mind reply skipped`);
     return null;
   }
 
