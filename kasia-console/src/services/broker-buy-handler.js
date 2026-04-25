@@ -3,6 +3,7 @@
 // 复用 exchange_offers + exchange-machine, 不自建状态机不自建订单表.
 
 import { sqlite } from '../db/client.js';
+import { randomUUID } from 'crypto';
 
 const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
 const BUY_REGEX = /^\s*(?:买|buy)\s*(\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*KAS\s*$/i;
@@ -97,10 +98,14 @@ function _recordAccept({ offerId, userPeer, qty, quotedUsdt, payChain, acceptTx 
 // handler return '' 让 conversations.js → relay reply 路径变 silent (relay 看 reply='' = no DM).
 // 用户视角: 自己发 "买 X KAS" → 几秒后从队列收到 broker 报价 DM.
 async function _qDm(kind, peerAddr, message) {
-  // T-J2-14 队列位置: snap pre-enqueue queue depth → "前面 N 笔待处理" 嵌 message 末尾
+  // T-J2-14 队列位置: snap pre-enqueue queue depth → "前面 N 笔待处理" 嵌 message 末尾.
+  // T-J2-15 (R4 Bug 9): broker DM 末尾必带 4 字符唯一 tag, 避 relay anti-spam 14min "100% similar"
+  // dedup 拦. 同 offer 同 qty 反复触发会 100% 相似, 加 tag 后内容必不同.
   const { getQueueStats } = await import('./broker-action-queue.js');
   const stats = getQueueStats();
-  const suffix = stats.length > 0 ? `\n\n(前面 ${stats.length} 笔待处理, 排队 ~${Math.ceil(stats.length * 5)}s)` : '';
+  const queuePart = stats.length > 0 ? `(前面 ${stats.length} 笔, ~${Math.ceil(stats.length * 5)}s) ` : '';
+  const tag = `#${randomUUID().slice(0, 4)}`;
+  const suffix = `\n\n${queuePart}${tag}`;
   return _enqueue(kind, peerAddr, { message: message + suffix });
 }
 
