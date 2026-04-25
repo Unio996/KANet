@@ -6,17 +6,23 @@ import { sqlite } from '../db/client.js';
 
 const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
 const BUY_REGEX = /^\s*(?:买|buy)\s*(\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*KAS\s*$/i;
+// T-J2-12 真人 PAID 意图: "我付了 0xabc...", "已付 0x...", "paid 0x...", "pay 0x..."
+const PAID_REGEX = /(?:已付|付了|我付|paid|pay)[\s\S]{0,40}?\b(0x[a-fA-F0-9]{64})\b/i;
 const CONFIRM_WORDS = ['YES', 'yes', 'y', '确认', '好', '行', 'OK', 'ok'];
 const CANCEL_WORDS  = ['NO', 'no', 'n', '取消', '不要', '算了'];
 const QUOTE_TTL_MS = 5 * 60 * 1000;
+const PENDING_ACCEPT_TTL_MS = 30 * 60 * 1000;  // 真人付款窗口 30min
 
 const _quotes = new Map();  // peer → {offer_id, qty, quoted_usdt, pay_chain, maker_addr, expires_at}
+const _pendingAccepts = new Map();  // peer → {offer_id, qty, quoted_usdt, pay_chain, maker_addr, accept_tx, expires_at}
 let _sendOverride = null;
 
 export function _testInjectSendCommand(fn) { _sendOverride = fn; }
 export function _testResetSendCommand() { _sendOverride = null; }
 export function _clearQuotes() { _quotes.clear(); }
 export function _hasQuote(peer) { return _quotes.has(peer); }
+export function _clearPendingAccepts() { _pendingAccepts.clear(); }
+export function _hasPendingAccept(peer) { return _pendingAccepts.has(peer); }
 
 async function _send(relayId, cmd) {
   if (_sendOverride) return _sendOverride(relayId, cmd);
@@ -59,6 +65,20 @@ async function broadcastAccept(offerId, peerAddr, payChain) {
   return r?.txId || null;
 }
 
+// T-J2-12 真人付款后由 broker 代广播 paid_v1 (真人 Kasia 客户端不发协议消息).
+async function broadcastPaid(offerId, paymentTx, payChain) {
+  const payload = {
+    t: 'kanet_exchange_paid_v1',
+    offer_id: offerId,
+    payment_tx: paymentTx,
+    payment_chain: payChain,
+  };
+  const r = await _send(BROKER_RELAY_ID, {
+    type: 'send_broadcast', channel: 'kanet-exchange', message: JSON.stringify(payload),
+  });
+  return r?.txId || null;
+}
+
 // T-J2-09 broker_accept_record — completion-watcher 用此查 (offer_id → user) 关联
 function _recordAccept({ offerId, userPeer, qty, quotedUsdt, payChain, acceptTx }) {
   try {
@@ -92,11 +112,34 @@ export async function handleBuyIntent(peerAddr, message) {
       _quotes.delete(peerAddr);
       if (!tx) return `accept 上链失败, 报价取消, 请重发"买 X KAS".`;
       _recordAccept({ offerId: pending.offer_id, userPeer: peerAddr, qty: pending.qty, quotedUsdt: pending.quoted_usdt, payChain: pending.pay_chain, acceptTx: tx });
-      return `✓ 已上链 tx ${tx.slice(0,12)}.... 请 30min 内付 ${pending.quoted_usdt} USDT 到 ${pending.maker_addr?.slice(0,22)||'?'}... (${pending.pay_chain}). Maker 收 USDT 后直发 ${pending.qty} KAS 到你 Kasia 地址.`;
+      // T-J2-12 真人付款窗口: 存待 paid 状态, 30min 内用户回 "我付了 0xtx" 由 broker 代广播 paid_v1.
+      _pendingAccepts.set(peerAddr, {
+        offer_id: pending.offer_id, qty: pending.qty, quoted_usdt: pending.quoted_usdt,
+        pay_chain: pending.pay_chain, maker_addr: pending.maker_addr, accept_tx: tx,
+        expires_at: Date.now() + PENDING_ACCEPT_TTL_MS,
+      });
+      return `✓ 已上链 tx ${tx.slice(0,12)}.... 请 30min 内付 ${pending.quoted_usdt} USDT 到 ${pending.maker_addr?.slice(0,22)||'?'}... (${pending.pay_chain}). 付完回我 "我付了 0xTX" (TX = BSC 交易哈希), 我自动通知 Maker 发 ${pending.qty} KAS 到你 Kasia.`;
     }
     if (CANCEL_WORDS.includes(trimmed)) {
       _quotes.delete(peerAddr);
       return `已取消报价. 重新下单回"买 X KAS".`;
+    }
+  }
+
+  // T-J2-12 PAID intent: 用户回 "我付了 0xtx..." 触发 broker 代广播 paid_v1.
+  const accept = _pendingAccepts.get(peerAddr);
+  if (accept) {
+    if (Date.now() >= accept.expires_at) {
+      _pendingAccepts.delete(peerAddr);
+    } else {
+      const pm = PAID_REGEX.exec(trimmed);
+      if (pm) {
+        const paymentTx = pm[1];
+        const paidTx = await broadcastPaid(accept.offer_id, paymentTx, accept.pay_chain);
+        if (!paidTx) return `paid_v1 上链失败, 请重发"我付了 ${paymentTx.slice(0,12)}..."重试.`;
+        _pendingAccepts.delete(peerAddr);
+        return `✓ 收到付款 tx ${paymentTx.slice(0,12)}... 已通知 Maker (paid_v1 上链 ${paidTx.slice(0,12)}...). 验证通过后 Maker 自动发 ${accept.qty} KAS 到你 Kasia.`;
+      }
     }
   }
 
