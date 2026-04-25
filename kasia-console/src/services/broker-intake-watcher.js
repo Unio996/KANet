@@ -238,6 +238,25 @@ export async function _scanStaleUnsolicited() {
   return { handled, scanned: rows.length };
 }
 
+// T-NWT-06: 同 5min sub-tick 调 utxo-splitter 给 broker 钱包补零钱, 防 Round 1 一分钟 7 撞 UTXO 风暴.
+// 内置 chain_event 'broker_utxo_split' 防 4min 内重跑 (REFUND_TICK_MS 5min 偏小, 1min 缓冲).
+export async function _ensureBrokerUtxoSplit() {
+  const recent = sqlite.prepare(
+    `SELECT 1 FROM chain_events WHERE event_type='broker_utxo_split'
+     AND datetime(observed_at) > datetime('now','-4 minutes') LIMIT 1`
+  ).get();
+  if (recent) return { skipped: 'recent' };
+  const { splitUtxos } = await import('./utxo-splitter.js');
+  let result;
+  try { result = await splitUtxos(BROKER_RELAY_ID); } catch (e) { return { ok: false, error: e.message }; }
+  sqlite.prepare(
+    `INSERT INTO chain_events (txid, from_address, to_address, event_type, payload, observed_by, observed_at)
+     VALUES (?, NULL, NULL, 'broker_utxo_split', ?, 'broker-intake-watcher', datetime('now'))`
+  ).run(`broker_utxo_split_${Date.now()}`, JSON.stringify({ result: result || null }));
+  if (result?.split) console.log(`[broker-utxo-split] ${result.utxosBefore}→${result.utxosAfter} (fee ${result.fee||'?'} KAS)`);
+  return result || { ok: false };
+}
+
 export async function intakeTick() {
   const trader = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id = ?`).get(BROKER_RELAY_ID);
   if (!trader) return { handled: 0, reason: 'no_broker_relay' };
@@ -282,6 +301,8 @@ export function startIntakeWatcher() {
         const s = await _scanStaleUnsolicited();
         if (s && s.scanned > 0) console.log(`[broker-stale] tick handled=${s.handled||0}/${s.scanned||0}`);
       } catch (e) { console.error('[broker-stale]', e.message); }
+      // T-NWT-06: 同 5min sub-tick 主动 ensure broker 钱包 UTXO 数 (Round 1 UTXO 双花治本)
+      try { await _ensureBrokerUtxoSplit(); } catch (e) { console.error('[broker-utxo-split]', e.message); }
     }, REFUND_TICK_MS);
   }
   console.log(`[broker-intake] watcher started for Trader-B tick=${TICK_MS}ms, refund tick=${REFUND_TICK_MS}ms`);

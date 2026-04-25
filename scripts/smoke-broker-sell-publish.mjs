@@ -8,6 +8,7 @@ const { sqlite } = await import('../kasia-console/src/db/client.js');
 const {
   intakeTick,
   _scanExpiredBrokerOffers,
+  _ensureBrokerUtxoSplit,
   _testInjectSendCommand,
   _testResetSendCommand,
   _testInjectPublish,
@@ -280,6 +281,35 @@ async function case4_no_pay_addr() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Case 5 · _ensureBrokerUtxoSplit idempotent: 4min 内重复调 skip
+// ─────────────────────────────────────────────────────────────────────────────
+async function case5_utxo_split_idempotent() {
+  console.log('\nCase 5 · _ensureBrokerUtxoSplit 防 4min 重跑');
+  // 清现有 broker_utxo_split markers (避免 prior smoke 残留)
+  sqlite.prepare(`DELETE FROM chain_events WHERE event_type='broker_utxo_split' AND txid LIKE 'broker_utxo_split_%'`).run();
+
+  // 插一条最近 (now) 的 marker → 模拟刚 split 完
+  sqlite.prepare(`
+    INSERT INTO chain_events (txid, from_address, to_address, event_type, payload, observed_by, observed_at)
+    VALUES (?, NULL, NULL, 'broker_utxo_split', ?, 'smoke', datetime('now'))
+  `).run('broker_utxo_split_smoke_recent', JSON.stringify({ result: { split: true, utxosBefore: 1, utxosAfter: 8 } }));
+
+  // 调 _ensureBrokerUtxoSplit → 应 skipped 不调 splitUtxos
+  const r = await _ensureBrokerUtxoSplit();
+  assertEq(r?.skipped, 'recent', 'skipped=recent (4min 内重复防止)');
+
+  // 清 marker, 再调 (这次会真调 splitUtxos, 但 smoke 进程没 Relay 连接, 应该 ok=false 或 error)
+  sqlite.prepare(`DELETE FROM chain_events WHERE event_type='broker_utxo_split' AND txid LIKE 'broker_utxo_split_%'`).run();
+  const r2 = await _ensureBrokerUtxoSplit();
+  // 不管 splitUtxos 真返回啥, chain_event 应该被 INSERT (函数后半段总是写)
+  const ev = sqlite.prepare(`SELECT 1 FROM chain_events WHERE event_type='broker_utxo_split' LIMIT 1`).get();
+  assert(ev != null, 'chain_event broker_utxo_split INSERTED after non-skip path');
+
+  // cleanup
+  sqlite.prepare(`DELETE FROM chain_events WHERE event_type='broker_utxo_split' AND txid LIKE 'broker_utxo_split_%'`).run();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Run
 // ─────────────────────────────────────────────────────────────────────────────
 try {
@@ -293,6 +323,7 @@ await case1_main_path();
 await case2_publish_failed();
 await case3_expired_refund();
 await case4_no_pay_addr();
+await case5_utxo_split_idempotent();
 
 cleanup();
 
