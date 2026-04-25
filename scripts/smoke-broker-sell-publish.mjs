@@ -47,25 +47,18 @@ function cleanup() {
   sqlite.prepare(`DELETE FROM retail_dex_orders WHERE user_kasia_address=?`).run(PEER);
   sqlite.prepare(`DELETE FROM retail_dex_user_memory WHERE user_kasia_address=?`).run(PEER);
   sqlite.prepare(`DELETE FROM relation_states WHERE peer_address=?`).run(PEER);
-  // 1) find our tx event ids for PEER, delete corresponding broker_intake_processed markers
-  const txEvs = sqlite.prepare(`SELECT id FROM chain_events WHERE from_address=?`).all(PEER);
-  for (const r of txEvs) {
+  // T-NWT-07: 源表换成 kaspa_tx_log. broker_intake_processed marker 仍 chain_events,
+  // payload src_event_id 现在是 string tx_id (不是 number row id).
+  // 1) 删 我们 PEER (或 anonymous fallback) 在 kaspa_tx_log 的 smoke 行
+  const myTxIds = sqlite.prepare(
+    `SELECT tx_id FROM kaspa_tx_log WHERE (from_address=? OR from_address IS NULL) AND tx_id LIKE 'smoketx_%' AND to_address=?`
+  ).all(PEER, getTraderAddr()).map(r => r.tx_id);
+  for (const tx of myTxIds) {
     sqlite.prepare(`DELETE FROM chain_events WHERE event_type='broker_intake_processed' AND txid=?`)
-      .run(`broker_intake_${r.id}`);
+      .run(`broker_intake_${tx}`);
+    sqlite.prepare(`DELETE FROM kaspa_tx_log WHERE tx_id=?`).run(tx);
   }
-  // 2) delete the tx events themselves
-  sqlite.prepare(`DELETE FROM chain_events WHERE from_address=?`).run(PEER);
-  // 3) nuke ALL orphan broker_intake_processed markers (point to non-existent tx events,
-  //    leftover from prior smoke runs — harmless to delete since they serve no purpose)
-  sqlite.prepare(`
-    DELETE FROM chain_events
-    WHERE event_type='broker_intake_processed'
-    AND txid LIKE 'broker_intake_%'
-    AND CAST(SUBSTR(txid, 16) AS INTEGER) NOT IN (
-      SELECT id FROM chain_events WHERE event_type='tx'
-    )
-  `).run();
-  // 4) refund markers + smoke offers (payload contains PEER)
+  // 2) refund markers + smoke offers (payload contains PEER)
   sqlite.prepare(`DELETE FROM chain_events WHERE event_type='broker_kas_refunded' AND payload LIKE ?`)
     .run(`%${PEER}%`);
   sqlite.prepare(`DELETE FROM exchange_offers WHERE maker=? AND metadata LIKE ?`)
@@ -93,31 +86,29 @@ function seedMemory() {
   `).run(PEER, PEER_PAY_CHAIN, PEER_PAY_ADDR, now, now);
 }
 
-function seedIntakeEvent(amount) {
+function seedIntakeEvent(amount, opts = {}) {
+  // T-NWT-07: intakeTick 现查 kaspa_tx_log (不再 chain_events 'tx').
+  // opts.fromNull=true 模拟 indexer 没解 sender (peer NULL hack fallback case).
   const txid = 'smoketx_' + randomUUID().slice(0, 16);
   const now = new Date().toISOString();
+  const fromAddr = opts.fromNull ? null : PEER;
   sqlite.prepare(`
-    INSERT INTO chain_events (txid, from_address, to_address, event_type, payload, observed_by, observed_at)
-    VALUES (?, ?, ?, 'tx', ?, 'smoke', ?)
-  `).run(txid, PEER, getTraderAddr(), JSON.stringify({ amount: String(amount), direction: 'inbound' }), now);
+    INSERT INTO kaspa_tx_log (tx_id, block_hash, block_time, from_address, to_address, amount, outputs_json, observed_at, network)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'mainnet')
+  `).run(txid, 'smokeblock_' + randomUUID().slice(0,8), Math.floor(Date.now()/1000), fromAddr, getTraderAddr(), parseFloat(amount), '[]', now);
   return txid;
 }
 
 function lastProcessedOutcome() {
-  const r = sqlite.prepare(`
-    SELECT payload FROM chain_events WHERE event_type='broker_intake_processed' AND payload LIKE ?
+  // T-NWT-07: 排除 smoke-mask observed_by (setup 插的 prod-inbound mask 标记不是 case outcome)
+  const r2 = sqlite.prepare(`
+    SELECT payload FROM chain_events
+    WHERE event_type='broker_intake_processed'
+    AND observed_by != 'smoke-mask'
     ORDER BY observed_at DESC LIMIT 1
-  `).get(`%${PEER}%`);
-  if (!r) {
-    // outcome payload references src_event_id (chain_event.id), peer not in payload — fallback: last by time near our event
-    const r2 = sqlite.prepare(`
-      SELECT payload FROM chain_events WHERE event_type='broker_intake_processed'
-      ORDER BY observed_at DESC LIMIT 1
-    `).get();
-    if (!r2) return null;
-    try { return JSON.parse(r2.payload).outcome; } catch { return null; }
-  }
-  try { return JSON.parse(r.payload).outcome; } catch { return null; }
+  `).get();
+  if (!r2) return null;
+  try { return JSON.parse(r2.payload).outcome; } catch { return null; }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -310,6 +301,31 @@ async function case5_utxo_split_idempotent() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Setup once: mask 所有 prod kaspa_tx_log Trader-B inbound as already-processed
+// (smoke 不能 DELETE 真 prod 数据, 但 intakeTick 会扫到. mark 一次防 process.)
+// ─────────────────────────────────────────────────────────────────────────────
+function setupSmokeMask() {
+  const trAddr = getTraderAddr();
+  const prod = sqlite.prepare(`SELECT tx_id FROM kaspa_tx_log WHERE to_address=?`).all(trAddr);
+  const stmt = sqlite.prepare(`
+    INSERT OR IGNORE INTO chain_events
+      (txid, from_address, to_address, event_type, payload, observed_by, observed_at)
+    VALUES (?, NULL, NULL, 'broker_intake_processed', ?, 'smoke-mask', datetime('now'))
+  `);
+  let masked = 0;
+  for (const r of prod) {
+    if (r.tx_id.startsWith('smoketx_')) continue;  // skip smoke 自己将插的
+    const result = stmt.run('broker_intake_' + r.tx_id, JSON.stringify({ src_event_id: r.tx_id, outcome: 'smoke_mask' }));
+    if (result.changes > 0) masked++;
+  }
+  return masked;
+}
+
+function teardownSmokeMask() {
+  return sqlite.prepare(`DELETE FROM chain_events WHERE event_type='broker_intake_processed' AND observed_by='smoke-mask'`).run().changes;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Run
 // ─────────────────────────────────────────────────────────────────────────────
 try {
@@ -319,6 +335,9 @@ try {
   process.exit(2);
 }
 
+const masked = setupSmokeMask();
+console.log(`[setup] masked ${masked} prod kaspa_tx_log Trader-B inbound to prevent smoke contamination`);
+
 await case1_main_path();
 await case2_publish_failed();
 await case3_expired_refund();
@@ -326,6 +345,8 @@ await case4_no_pay_addr();
 await case5_utxo_split_idempotent();
 
 cleanup();
+const unmasked = teardownSmokeMask();
+console.log(`[teardown] unmasked ${unmasked} smoke-mask markers`);
 
 console.log(`\n=== smoke-broker-sell-publish: ${passed}/${passed + failed} pass, ${failed} fail ===`);
 process.exit(failed === 0 ? 0 : 1);

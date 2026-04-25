@@ -83,10 +83,24 @@ function markProcessed(srcEventId, outcome) {
 }
 
 async function handleIntake(event) {
-  const peer = event.from_address;
+  let peer = event.from_address;
   let amount;
   try { amount = parseFloat(JSON.parse(event.payload).amount || 0); } catch { amount = 0; }
-  if (amount <= 0 || !peer) return markProcessed(event.id, 'skip_no_amount');
+  if (amount <= 0) return markProcessed(event.id, 'skip_no_amount');
+  // T-NWT-07 hack fallback: kaspa_tx_log indexer 没解 sender (verboseData 缺) → from_address NULL.
+  // 用 retail_dex_orders.sell_kas + qty 接近 amount + recent + awaiting state, 反查 user_kasia_address.
+  // 长期靠 J2 C 任务修 indexer 补 from_address.
+  if (!peer) {
+    const cand = sqlite.prepare(
+      `SELECT user_kasia_address FROM retail_dex_orders
+       WHERE side='sell_kas' AND state IN ('aligning','confirming','awaiting_payment')
+       AND ABS(CAST(qty AS REAL) - ?) < 0.5
+       AND created_at > datetime('now','-24 hours')
+       ORDER BY created_at DESC LIMIT 1`
+    ).get(amount);
+    if (cand?.user_kasia_address) peer = cand.user_kasia_address;
+  }
+  if (!peer) return markProcessed(event.id, 'skip_no_peer');
 
   if (isBlacklisted(peer)) {
     await _send(BROKER_RELAY_ID, { type: 'send_kas', target: peer, amount_kas: amount, note: 'refund blocked peer' });
@@ -260,14 +274,19 @@ export async function _ensureBrokerUtxoSplit() {
 export async function intakeTick() {
   const trader = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id = ?`).get(BROKER_RELAY_ID);
   if (!trader) return { handled: 0, reason: 'no_broker_relay' };
+  // T-NWT-07: 源表 chain_events 'tx' inbound 永远 0 (那条 path 是 message-bound, 不是 KAS transfer).
+  // 真正的 inbound tx ingest 在 kaspa_tx_log (rpc-listener.mjs 写). 改源表救 broker-intake.
+  // src_event_id 在 marker payload 里现在是 string (tx_id), LIKE 模式带引号.
   const rows = sqlite.prepare(`
-    SELECT id, txid, from_address, payload FROM chain_events
-    WHERE to_address = ? AND event_type = 'tx'
-    AND observed_at > datetime('now','-24 hours')
+    SELECT k.tx_id AS id, k.tx_id AS txid, k.from_address,
+           json_object('amount', CAST(k.amount AS TEXT)) AS payload
+    FROM kaspa_tx_log k
+    WHERE k.to_address = ?
+    AND k.observed_at > datetime('now','-24 hours')
     AND NOT EXISTS (
       SELECT 1 FROM chain_events p
       WHERE p.event_type = 'broker_intake_processed'
-      AND p.payload LIKE '%"src_event_id":' || chain_events.id || ',%'
+      AND p.payload LIKE '%"src_event_id":"' || k.tx_id || '"%'
     )
     LIMIT 20
   `).all(trader.address);
