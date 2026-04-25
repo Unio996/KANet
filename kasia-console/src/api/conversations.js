@@ -126,6 +126,14 @@ export async function registerConversationRoutes(fastify) {
           if (buyReply !== null) return reply.send({ reply: buyReply });
         } catch (err) {
           console.warn(`[api/agent/reply] broker-buy-handler err for ${resolved?.slice(0,8)}: ${err.message}`);
+          // fall through to broker-sell-handler then retail-dex
+        }
+        try {
+          const { handleSellIntent } = await import('../services/broker-sell-handler.js');
+          const sellReply = await handleSellIntent(peer, message);
+          if (sellReply !== null) return reply.send({ reply: sellReply });
+        } catch (err) {
+          console.warn(`[api/agent/reply] broker-sell-handler err for ${resolved?.slice(0,8)}: ${err.message}`);
           // fall through to retail-dex
         }
         try {
