@@ -77,7 +77,11 @@ async function pump() {
       item.attempts++;
       try {
         result = _executeOverride ? await _executeOverride(item) : await executeAction(item);
-        if (result?.ok === false) throw new Error(result.error || 'execute returned ok=false');
+        // R4 Bug 8 (J2 RCA af805fe1): relay-manager.sendCommandAsync resolve(msg.result || {})
+        // 失败时 result = {error: '...'} 不含 ok 字段, 旧 check `result?.ok === false` 通过 throw,
+        // queue 静默吞失败 retry 0. 加 result?.error || !result?.txId 双 check (但 dm_position 等
+        // 不 broadcast 的可能本来就无 txId, 用 .error 优先 + missing txId only on tx-emitting kinds).
+        if (result?.ok === false || result?.error) throw new Error(result?.error || 'execute returned ok=false');
         lastErr = null;
         break;
       } catch (err) {
