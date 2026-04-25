@@ -13,6 +13,8 @@ const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
 const TTL_DEFAULT_MS = 10 * 60 * 1000;
 const RETRY_MAX = 3;
 const RETRY_BACKOFF_MS = 1500;
+// T-NWT-11: tx-producing kinds 必须返 txId 否则当失败 retry. publish_offer 例外 (返 offer_id+broadcast_tx).
+const TX_PRODUCING_KINDS = new Set(['dm_quote', 'dm_pay_instr', 'dm_completion', 'dm_position', 'accept_v1', 'paid_v1', 'sendKas']);
 
 const _queue = [];               // FIFO array, items dequeue from head
 const _userActions = new Map();  // peer → Set(actionId)  (J2 #B 用 getQueuePosition)
@@ -79,9 +81,15 @@ async function pump() {
         result = _executeOverride ? await _executeOverride(item) : await executeAction(item);
         // R4 Bug 8 (J2 RCA af805fe1): relay-manager.sendCommandAsync resolve(msg.result || {})
         // 失败时 result = {error: '...'} 不含 ok 字段, 旧 check `result?.ok === false` 通过 throw,
-        // queue 静默吞失败 retry 0. 加 result?.error || !result?.txId 双 check (但 dm_position 等
-        // 不 broadcast 的可能本来就无 txId, 用 .error 优先 + missing txId only on tx-emitting kinds).
+        // queue 静默吞失败 retry 0. 加 result?.error 检测.
         if (result?.ok === false || result?.error) throw new Error(result?.error || 'execute returned ok=false');
+        // R4 Bug 8 follow-up (T-NWT-11, J1 e78feb2 同模式): result={} 空兜底 — relay-manager
+        // resolve(msg.result || {}) 当 msg.result undefined 走 ||{} 既无 .ok 也无 .error,
+        // 通过上面 throw, queue 当 OK '-' (NWT 17cd5b8d 漏此 case). tx-producing kind 必须有
+        // txId 否则 throw 触发 retry. (publish_offer 例外: 返 {ok, offer_id, broadcast_tx} 不含 txId)
+        if (TX_PRODUCING_KINDS.has(item.kind) && !result?.txId) {
+          throw new Error(result?.error || `no txId from sendCommandAsync (relay returned empty result)`);
+        }
         lastErr = null;
         break;
       } catch (err) {
