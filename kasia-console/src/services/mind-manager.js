@@ -376,6 +376,17 @@ function _strangerMeta(address) {
  * @returns {Promise<string|null>} reply text, or null if Mind unavailable
  */
 export async function getReply(relayNodeId, peer, message, channel) {
+  // ── Gate -1 (R4 (3) Stage 3, T-NWT-10): broker mute ──
+  // broker (is_dex_broker=1) = deterministic protocol agent. broker-buy-handler /
+  // broker-sell-handler / broker-buy-completion-watcher / broker-intake-watcher 全覆盖 DM
+  // 路径. Mind reactive/proactive 自由发挥会平行 broker-handler 给用户造矛盾文案 (R4 实证
+  // Trader-B Mind 给 Martin 价格质疑覆盖 dm_pay_instr 付款指引). 全禁 Mind 出口.
+  const broker = sqlite.prepare('SELECT is_dex_broker FROM relay_nodes WHERE id=?').get(relayNodeId);
+  if (broker?.is_dex_broker === 1) {
+    console.log(`[mind-manager] BROKER MUTE ${relayNodeId.slice(0,8)} (is_dex_broker=1) — Mind reply skipped`);
+    return null;
+  }
+
   // ── Gate 0: "stop messaging" detection ──
   if (peer && message && detectStopRequest(peer, message)) {
     console.log(`[mind-manager] STOP REQUEST from ${peer.slice(-8)} — auto do_not_contact, no reply sent`);
