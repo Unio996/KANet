@@ -9,12 +9,12 @@ const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
 const SYSTEM_PROMPT = `你是 KANet broker, 唯一职责: 帮加密用户 KAS↔USDT 成交.
 
 行动框架 (4 步, 严格遵守):
-1. **方向**: 用户首次 DM 后, 第 1 件事确认买还是卖 KAS. 不混. (例: "你想买 KAS 还是卖 KAS?")
+1. **方向**: 确认买还是卖 KAS. **如果用户消息已含 "买/卖/buy/sell/comprar/vender/購入/売" 等方向词, 跳过此步, 直接进 2**. (例: 用户 "买 50 KAS" → 不要再问 "买还是卖", 直接问数量已知就问链)
 2. **字段补全** (对话引导, 别一次问完):
-   - 买 KAS: 数量 + 付款链 (bnb/polygon/sol/tron 选 1)
-   - 卖 KAS: 数量 + 收款链 (bnb/polygon/sol/tron) + 收款地址 (EVM 0x... 42 位 / SOL / TRON 对应格式)
+   - 买 KAS 需要: 数量 + 付款链 (bnb/polygon/sol/tron 选 1). 用户已知数量则只问链.
+   - 卖 KAS 需要: 数量 + 收款链 + 收款地址 (EVM 0x... 42 位 / SOL / TRON 格式)
 3. **复述确认**: 字段齐时一句话复述用户确认 (例: "你想买 5 KAS, 用 BSC 付 USDT, 对吗?")
-4. **调 tool**: 用户回 YES/对/确认/可以/yes → 立即调 finalize_order tool. 不啰嗦.
+4. **调 tool**: 用户回 YES/对/确认/可以/yes/嗯/是 → 立即调 finalize_order tool. 不啰嗦.
 
 LLM 能力:
 - 听任何说法/任何语言 (中/英/日/西/韩/俄...). 用户什么语言你什么语言回.
@@ -103,13 +103,18 @@ function _loadHistory(peer, limit = 20) {
   if (!trader?.address) return [];
   let rows = [];
   try {
+    // R6 T-J2-21: messages 表用 sender_identity_id/receiver_identity_id (FK identities.id), 不是 address.
+    // JOIN identities 拿到地址 → 跨 user↔broker 双向消息 (inbound user→broker, outbound broker→user)
     rows = sqlite.prepare(`
-      SELECT direction, content_text
-      FROM messages
-      WHERE (sender_address=? AND recipient_address=?) OR (sender_address=? AND recipient_address=?)
-      ORDER BY created_at DESC LIMIT ?
+      SELECT m.direction, m.content_text
+      FROM messages m
+      LEFT JOIN identities si ON si.id = m.sender_identity_id
+      LEFT JOIN identities ri ON ri.id = m.receiver_identity_id
+      WHERE m.message_type = 'text'
+        AND ((si.address = ? AND ri.address = ?) OR (si.address = ? AND ri.address = ?))
+      ORDER BY m.created_at DESC LIMIT ?
     `).all(peer, trader.address, trader.address, peer, limit);
-  } catch { /* messages schema may differ; ignore */ }
+  } catch (e) { console.warn(`[broker-llm] _loadHistory err: ${e.message}`); }
   return rows.reverse().map(r => ({
     role: r.direction === 'inbound' ? 'user' : 'assistant',
     content: (r.content_text || '').slice(0, 500),
