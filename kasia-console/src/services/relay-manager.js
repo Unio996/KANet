@@ -32,7 +32,7 @@ export async function startRelay(relayNodeId) {
 
   // Load account data
   const account = sqlite.prepare(
-    `SELECT r.id, r.name, r.address, r.network, r.poll_ms, a.http_port as adapter_port
+    `SELECT r.id, r.name, r.address, r.network, r.poll_ms, r.is_service, a.http_port as adapter_port
      FROM relay_nodes r
      LEFT JOIN adapter_nodes a ON a.id = r.adapter_node_id
      WHERE r.id = ?`
@@ -74,6 +74,7 @@ export async function startRelay(relayNodeId) {
     KASPA_RPC_URL: rpcUrl,
     RELAY_MODE: relayMode,
     POLL_MS: String(account.poll_ms || 2000),
+    IS_SERVICE: account.is_service ? '1' : '0',  // R5 T-J2-16: Service 模式 relay (broker) 跳 anti-spam dedup
   };
 
   try {

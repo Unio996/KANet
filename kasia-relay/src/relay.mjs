@@ -85,6 +85,11 @@ function _wordSimilarity(a, b) {
 function shouldBlockOutbound(target, message) {
   if (!message || typeof message !== 'string') return null;
 
+  // R5 T-J2-16: Service 模式 relay (broker) 跳 anti-spam dedup. broker DM 内容
+  // deterministic 协议文案 (报价/付款指引/完成通知), 跨 session 高度相似但都是
+  // 必发消息. anti-spam 防 LLM 幻觉是设计前提, broker Service 不挂 LLM, 不需此防线.
+  if (process.env.IS_SERVICE === '1') return null;
+
   // 协议消息不走去重拦截 — 协议重试是有意为之，不是垃圾消息
   // 陷阱 #45: shouldBlockOutbound 拦截了协议消息重试，导致 paid 广播永远上不了链
   if (message.startsWith('{"t":"kanet_')) return null;

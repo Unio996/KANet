@@ -335,9 +335,9 @@ startMarketSeeder();
 startSeederDepositWatcher();
 startSeederRefundWorker();
 
-// T8: Start retail-dex order monitor (paid → executing → completed)
-import { startOrderMonitor as startRetailDexMonitor } from './services/retail-dex.js';
-startRetailDexMonitor();
+// R5 T-J2-16: retail-dex v1 deprecated, deleted. broker is_service Service 模式
+// 直走 broker-buy/sell-handler + broker-action-queue. retail_dex_orders 表保留
+// (broker-intake-watcher / broker-sell-handler 仍用做用户意图绑定).
 
 // Phase 3 (T-J2-06): broker-intake-watcher — 入账 4 场景兜底 (v2.1 §4.2)
 import { startIntakeWatcher } from './services/broker-intake-watcher.js';
