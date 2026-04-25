@@ -113,9 +113,12 @@ export async function registerConversationRoutes(fastify) {
 
     const resolved = resolveRelayNodeId(relayNodeId);
 
-    // R5 T-J2-16: broker = Service. DM 走 broker-buy/sell-handler deterministic 协议.
-    // handler return null = 不命中, silent (不降级 retail-dex, retail-dex v1 已删除).
-    // is_dex_broker 保留 (语义 = is_service 子集), is_service column R5 引入 broader 范围.
+    // R6 (T-J1-18): broker = LLM Bot 上层 + protocol Service 下层. 双层架构.
+    // 现:
+    //   1. 先 broker-buy/sell-handler 看精确 #cmd:* / 命中协议格式 (LLM 触发 hint)
+    //   2. handler null → fall to broker-llm-agent (LLM 销售客服 + role prompt + history)
+    //   3. broker-llm-agent.handle 必返回 reply (含 fallback 友好 DM, 永不 silent)
+    // 修 R5 T-J2-16 silent fallback (Owner 实证: 真人 DM "想买点 KAS" → silent → 没办法用)
     if (!channel) {
       const broker = sqlite.prepare('SELECT is_dex_broker, is_service FROM relay_nodes WHERE id = ?').get(resolved);
       if (broker?.is_service === 1 || broker?.is_dex_broker === 1) {
@@ -133,8 +136,15 @@ export async function registerConversationRoutes(fastify) {
         } catch (err) {
           console.warn(`[api/agent/reply] broker-sell-handler err for ${resolved?.slice(0,8)}: ${err.message}`);
         }
-        // Service 模式不命中 = silent, 不进 LLM/retail-dex
-        return reply.send({ reply: '' });
+        // R6: handler null (regex 不命中) → fall to broker-llm-agent 销售客服 LLM
+        try {
+          const { handleLlmDialog } = await import('../services/broker-llm-agent.js');
+          const llmReply = await handleLlmDialog(peer, message);
+          return reply.send({ reply: llmReply || '我刚走神了, 你想买还是卖 KAS?' });
+        } catch (err) {
+          console.warn(`[api/agent/reply] broker-llm-agent err for ${resolved?.slice(0,8)}: ${err.message}`);
+          return reply.send({ reply: '我这边卡了 1 分钟, 麻烦你再说一次?' });
+        }
       }
     }
 
