@@ -1042,10 +1042,13 @@ async function handleExchangeDelivered(msg) {
   // SQLite datetime('now') returns "YYYY-MM-DD HH:MM:SS" (naive) which JS Date() parses as LOCAL,
   // causing "completed 7h ago" bug on P2-01 for Owner in +7 timezone. Phase 2 first finding.
   const nowIso = new Date().toISOString();
+  // Round 1 真测发现 Bug 5: 漏 UPDATE delivery_tx → 买家端 offer.delivery_tx 永远 null →
+  // broker-buy-completion-watcher fallback 取 taker_tx_id (= accept_v1 broadcast tx) →
+  // DM 给用户的"Maker 发的 tx"引错. msg.delivery_tx 是 maker 真发 KAS 的 tx.
   const result = sqlite.prepare(`
-    UPDATE exchange_offers SET protocol_status = 'completed', completed_at = ?, is_fully_observed = 1, updated_at = ?
+    UPDATE exchange_offers SET delivery_tx = ?, protocol_status = 'completed', completed_at = ?, is_fully_observed = 1, updated_at = ?
     WHERE id = ? AND protocol_status IN ('matched', 'verifying', 'delivering')
-  `).run(nowIso, nowIso, msg.offer_id);
+  `).run(msg.delivery_tx, nowIso, nowIso, msg.offer_id);
 
   // FIX: when the direct UPDATE moves offer to completed, fund_lock must also transition locked → spent.
   // Without this, Phase 1 stress test S9 showed fund_locks permanently stuck (leak).
