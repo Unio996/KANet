@@ -79,6 +79,12 @@ async function pump() {
     let result, lastErr;
     while (item.attempts < RETRY_MAX) {
       item.attempts++;
+      // R4 Bug 9 fix follow-up (T-NWT-14): retry 时 anti-spam 看到同 message (含 broker-buy/sell-handler
+      // 加的唯一 tag) 100% similar 撞自己 (J2 6559c9eb 实测). retry≥2 给 message 加 [r${attempts}]
+      // 后缀让 anti-spam 视为新 message. tag fix (T-NWT-13/T-J2-15) 解跨 session, retry 后缀解同 message retry.
+      if (item.attempts > 1 && item.payload?.message) {
+        item.payload.message = item.payload.message.replace(/\s*\[r\d+\]\s*$/, '') + ` [r${item.attempts}]`;
+      }
       try {
         result = _executeOverride ? await _executeOverride(item) : await executeAction(item);
         // R4 Bug 8 (J2 RCA af805fe1): relay-manager.sendCommandAsync resolve(msg.result || {})
