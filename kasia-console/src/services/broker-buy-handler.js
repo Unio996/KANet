@@ -84,6 +84,30 @@ function _enqueuePaid(offerId, paymentTx, payChain, peerAddr) {
   return _enqueue('paid_v1', peerAddr, { channel: 'kanet-exchange', message: JSON.stringify(payload) });
 }
 
+// R6 T-J2-19: tool function for broker-llm-agent. LLM 收齐 user/qty/payChain 调此,
+// selectBestOffer + enqueue accept_v1 + record. 不走 _quotes/_pendingAccepts 对话状态.
+// LLM 收 ok + offer_id + maker_addr + quoted_usdt 后用自然语言告知 user.
+export async function finalizeBuy({ user_kasia, qty, pay_chain }) {
+  if (!user_kasia || !qty || qty <= 0 || !pay_chain) {
+    return { ok: false, error: 'missing fields (user_kasia/qty/pay_chain)' };
+  }
+  const payChain = String(pay_chain).toLowerCase();
+  const offer = selectBestOffer(qty, payChain);
+  if (!offer) return { ok: false, error: `no ${qty} KAS sell offer on ${payChain.toUpperCase()}` };
+  const unit = parseFloat(offer.want_amount) / parseFloat(offer.give_amount);
+  const quotedUsdt = (unit * qty).toFixed(6);
+  await _enqueueAccept(offer.id, user_kasia, payChain);
+  _recordAccept({ offerId: offer.id, userPeer: user_kasia, qty, quotedUsdt, payChain, acceptTx: null });
+  return {
+    ok: true,
+    offer_id: offer.id,
+    maker_payment_address: offer.maker_addr,
+    quoted_usdt: quotedUsdt,
+    unit_price: unit,
+    pay_chain: payChain,
+  };
+}
+
 // T-J2-09 broker_accept_record — completion-watcher 用此查 (offer_id → user) 关联
 function _recordAccept({ offerId, userPeer, qty, quotedUsdt, payChain, acceptTx }) {
   try {

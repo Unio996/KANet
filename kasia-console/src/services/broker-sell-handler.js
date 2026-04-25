@@ -47,6 +47,22 @@ async function _qDm(peerAddr, message) {
   return enqueue({ kind: 'dm_quote', peer: peerAddr, payload: { message: `${message}\n\n${queuePart}${tag}` } });
 }
 
+// R6 T-J2-19: tool function for broker-llm-agent. LLM 收齐 4 字段调此, 直接 INSERT
+// retail_dex_orders + DM 转 KAS 指引, 跳 _pending 对话状态.
+export async function finalizeSell({ user_kasia, qty, recv_chain, recv_address }) {
+  if (!user_kasia || !qty || qty <= 0 || !recv_chain || !recv_address) {
+    return { ok: false, error: 'missing fields (user_kasia/qty/recv_chain/recv_address)' };
+  }
+  if (qty <= FEE_KAS) return { ok: false, error: `qty too small, min ${FEE_KAS + 0.5} KAS` };
+  if (recv_chain.toLowerCase() === 'bnb' || recv_chain.toLowerCase() === 'bsc' || recv_chain.toLowerCase() === 'polygon' || recv_chain.toLowerCase() === 'eth') {
+    if (!EVM_ADDR_REGEX.test(recv_address)) return { ok: false, error: 'invalid EVM address (expected 0x + 40 hex)' };
+  }
+  // TODO: SOL/TRON 地址 regex 验证 (留 NWT 补)
+  const orderId = _insertSellOrder({ peerAddr: user_kasia, qty, userBnbAddr: recv_address });
+  const traderAddr = _traderBAddr() || '(broker 地址未配置)';
+  return { ok: true, order_id: orderId, broker_kasia: traderAddr, fee_kas: FEE_KAS, net_kas: qty - FEE_KAS };
+}
+
 export async function handleSellIntent(peerAddr, message) {
   const trimmed = (message || '').trim();
   const pending = _pending.get(peerAddr);
