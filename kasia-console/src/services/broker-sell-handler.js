@@ -35,6 +35,14 @@ function _insertSellOrder({ peerAddr, qty, userBnbAddr }) {
   return orderId;
 }
 
+// R4 改造 (T-NWT-09): 走 broker-action-queue 单线 pump 防 UTXO 双花.
+async function _qDm(peerAddr, message) {
+  const { enqueue, getQueueStats } = await import('./broker-action-queue.js');
+  const stats = getQueueStats();
+  const suffix = stats.length > 0 ? `\n\n(前面 ${stats.length} 笔待处理, 排队 ~${Math.ceil(stats.length * 5)}s)` : '';
+  return enqueue({ kind: 'dm_quote', peer: peerAddr, payload: { message: message + suffix } });
+}
+
 export async function handleSellIntent(peerAddr, message) {
   const trimmed = (message || '').trim();
   const pending = _pending.get(peerAddr);
@@ -43,12 +51,14 @@ export async function handleSellIntent(peerAddr, message) {
   if (pending && Date.now() < pending.expires_at) {
     if (CANCEL_WORDS.includes(trimmed)) {
       _pending.delete(peerAddr);
-      return `已取消卖单. 重新下单回"卖 X KAS".`;
+      _qDm(peerAddr, `已取消卖单. 重新下单回"卖 X KAS".`);
+      return '';
     }
     if (pending.ask_state === 'pay_addr') {
       const addrMatch = trimmed.match(EVM_ADDR_REGEX);
       if (!addrMatch) {
-        return `地址格式不对, 应该是 0x 开头 42 位 (BSC/EVM). 重发, 或回 NO 取消.`;
+        _qDm(peerAddr, `地址格式不对, 应该是 0x 开头 42 位 (BSC/EVM). 重发, 或回 NO 取消.`);
+        return '';
       }
       const userBnbAddr = addrMatch[0];
       const qty = pending.qty;
@@ -58,10 +68,12 @@ export async function handleSellIntent(peerAddr, message) {
       const traderAddr = _traderBAddr() || '(broker 地址未配置)';
       const netKas = qty - FEE_KAS;
       const estUsdt = (netKas * MID_PRICE_HINT).toFixed(4);
-      return `✓ 卖单已建. 请转 ${qty} KAS 到 broker:\n${traderAddr}\n\n` +
-             `转完后 broker 自动挂 SELL 单 (${netKas} KAS net, 扣 ${FEE_KAS} KAS fee), ` +
-             `接单后 USDT 直付你 BSC ${userBnbAddr.slice(0,10)}...${userBnbAddr.slice(-4)} (~${estUsdt} USDT).\n` +
-             `2h 内无人接 → broker 自动退原 ${qty} KAS.`;
+      _qDm(peerAddr,
+        `✓ 卖单已建. 请转 ${qty} KAS 到 broker:\n${traderAddr}\n\n` +
+        `转完后 broker 自动挂 SELL 单 (${netKas} KAS net, 扣 ${FEE_KAS} KAS fee), ` +
+        `接单后 USDT 直付你 BSC ${userBnbAddr.slice(0,10)}...${userBnbAddr.slice(-4)} (~${estUsdt} USDT).\n` +
+        `2h 内无人接 → broker 自动退原 ${qty} KAS.`);
+      return '';
     }
   }
 
@@ -71,14 +83,17 @@ export async function handleSellIntent(peerAddr, message) {
   const qty = parseFloat(m[1]);
   if (qty <= 0) return null;
   if (qty <= FEE_KAS) {
-    return `太少了, 至少 ${FEE_KAS + 0.5} KAS (扣 ${FEE_KAS} KAS broker fee 后才有意义).`;
+    _qDm(peerAddr, `太少了, 至少 ${FEE_KAS + 0.5} KAS (扣 ${FEE_KAS} KAS broker fee 后才有意义).`);
+    return '';
   }
 
   _pending.set(peerAddr, { qty, expires_at: Date.now() + PENDING_TTL_MS, ask_state: 'pay_addr' });
 
   const netKas = qty - FEE_KAS;
   const estUsdt = (netKas * MID_PRICE_HINT).toFixed(4);
-  return `📋 卖 ${qty} KAS 申请收到.\n` +
-         `预估 ${netKas} KAS net (扣 ${FEE_KAS} KAS broker fee) → ~${estUsdt} USDT (~${MID_PRICE_HINT} USDT/KAS, 真价由 broker 挂单时锁定).\n\n` +
-         `请回你的 BSC 钱包地址 (0x... 42 位) 接收 USDT. 30min 内回. 或回 NO 取消.`;
+  _qDm(peerAddr,
+    `📋 卖 ${qty} KAS 申请收到.\n` +
+    `预估 ${netKas} KAS net (扣 ${FEE_KAS} KAS broker fee) → ~${estUsdt} USDT (~${MID_PRICE_HINT} USDT/KAS, 真价由 broker 挂单时锁定).\n\n` +
+    `请回你的 BSC 钱包地址 (0x... 42 位) 接收 USDT. 30min 内回. 或回 NO 取消.`);
+  return '';
 }

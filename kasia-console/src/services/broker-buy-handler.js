@@ -51,7 +51,13 @@ function selectBestOffer(qtyKas, payChain) {
   return null;
 }
 
-async function broadcastAccept(offerId, peerAddr, payChain) {
+// R4 改造 (T-NWT-09 broker-action-queue): 不直接 sendCommandAsync, 进队列保 FIFO 单线.
+async function _enqueue(kind, peer, payload) {
+  const { enqueue } = await import('./broker-action-queue.js');
+  return enqueue({ kind, peer, payload });
+}
+
+function _enqueueAccept(offerId, peerAddr, payChain) {
   const payload = {
     t: 'kanet_exchange_accept_v1',
     offer_id: offerId,
@@ -59,24 +65,18 @@ async function broadcastAccept(offerId, peerAddr, payChain) {
     payment_asset: 'usdt',
     receive_address: peerAddr,
   };
-  const r = await _send(BROKER_RELAY_ID, {
-    type: 'send_broadcast', channel: 'kanet-exchange', message: JSON.stringify(payload),
-  });
-  return r?.txId || null;
+  return _enqueue('accept_v1', peerAddr, { channel: 'kanet-exchange', message: JSON.stringify(payload) });
 }
 
 // T-J2-12 真人付款后由 broker 代广播 paid_v1 (真人 Kasia 客户端不发协议消息).
-async function broadcastPaid(offerId, paymentTx, payChain) {
+function _enqueuePaid(offerId, paymentTx, payChain, peerAddr) {
   const payload = {
     t: 'kanet_exchange_paid_v1',
     offer_id: offerId,
     payment_tx: paymentTx,
     payment_chain: payChain,
   };
-  const r = await _send(BROKER_RELAY_ID, {
-    type: 'send_broadcast', channel: 'kanet-exchange', message: JSON.stringify(payload),
-  });
-  return r?.txId || null;
+  return _enqueue('paid_v1', peerAddr, { channel: 'kanet-exchange', message: JSON.stringify(payload) });
 }
 
 // T-J2-09 broker_accept_record — completion-watcher 用此查 (offer_id → user) 关联
@@ -93,40 +93,45 @@ function _recordAccept({ offerId, userPeer, qty, quotedUsdt, payChain, acceptTx 
   } catch (e) { console.warn(`[broker-buy] record err: ${e.message}`); }
 }
 
+// R4 改造: handler 不直接发 reply DM (会撞 UTXO), 而是 enqueue 让 broker-action-queue 单线 pump.
+// handler return '' 让 conversations.js → relay reply 路径变 silent (relay 看 reply='' = no DM).
+// 用户视角: 自己发 "买 X KAS" → 几秒后从队列收到 broker 报价 DM.
+async function _qDm(kind, peerAddr, message) {
+  // T-J2-14 队列位置: snap pre-enqueue queue depth → "前面 N 笔待处理" 嵌 message 末尾
+  const { getQueueStats } = await import('./broker-action-queue.js');
+  const stats = getQueueStats();
+  const suffix = stats.length > 0 ? `\n\n(前面 ${stats.length} 笔待处理, 排队 ~${Math.ceil(stats.length * 5)}s)` : '';
+  return _enqueue(kind, peerAddr, { message: message + suffix });
+}
+
 export async function handleBuyIntent(peerAddr, message) {
   const trimmed = (message || '').trim();
   const pending = _quotes.get(peerAddr);
 
-  // 用户确认 pending quote → 广播 accept
+  // 用户确认 pending quote → 排队 accept_v1 + 紧跟付款指引 DM
   if (pending && Date.now() < pending.expires_at) {
     if (CONFIRM_WORDS.includes(trimmed)) {
-      // T-J2-11 (Bug 3/4 治本): ensure ≥8 UTXOs 防 accept_v1 + DM 紧跟同一 UTXO 双花
-      // (Round 1 实测: accept broadcast 后 +3ms DM tx 被 mempool 拒, 同 output 5a94e22e)
-      try {
-        const { splitUtxos } = await import('./utxo-splitter.js');
-        const sr = await splitUtxos(BROKER_RELAY_ID, 8);
-        if (sr?.split) console.log(`[broker-buy] pre-accept split: ${sr.utxosBefore}→${sr.utxosAfter}`);
-      } catch (err) { console.warn(`[broker-buy] pre-accept split err: ${err.message}`); }
-
-      const tx = await broadcastAccept(pending.offer_id, peerAddr, pending.pay_chain);
       _quotes.delete(peerAddr);
-      if (!tx) return `accept 上链失败, 报价取消, 请重发"买 X KAS".`;
-      _recordAccept({ offerId: pending.offer_id, userPeer: peerAddr, qty: pending.qty, quotedUsdt: pending.quoted_usdt, payChain: pending.pay_chain, acceptTx: tx });
-      // T-J2-12 真人付款窗口: 存待 paid 状态, 30min 内用户回 "我付了 0xtx" 由 broker 代广播 paid_v1.
+      // T-J2-12 真人付款窗口: 存待 paid 状态 (accept_tx 真值由 queue pump 后填, handler 用占位).
       _pendingAccepts.set(peerAddr, {
         offer_id: pending.offer_id, qty: pending.qty, quoted_usdt: pending.quoted_usdt,
-        pay_chain: pending.pay_chain, maker_addr: pending.maker_addr, accept_tx: tx,
+        pay_chain: pending.pay_chain, maker_addr: pending.maker_addr, accept_tx: null,
         expires_at: Date.now() + PENDING_ACCEPT_TTL_MS,
       });
-      return `✓ 已上链 tx ${tx.slice(0,12)}.... 请 30min 内付 ${pending.quoted_usdt} USDT 到 ${pending.maker_addr?.slice(0,22)||'?'}... (${pending.pay_chain}). 付完回我 "我付了 0xTX" (TX = BSC 交易哈希), 我自动通知 Maker 发 ${pending.qty} KAS 到你 Kasia.`;
+      _enqueueAccept(pending.offer_id, peerAddr, pending.pay_chain);
+      _recordAccept({ offerId: pending.offer_id, userPeer: peerAddr, qty: pending.qty, quotedUsdt: pending.quoted_usdt, payChain: pending.pay_chain, acceptTx: null });
+      _qDm('dm_pay_instr', peerAddr,
+        `✓ 已接单. 请 30min 内付 ${pending.quoted_usdt} USDT 到 ${pending.maker_addr?.slice(0,22)||'?'}... (${pending.pay_chain}). 付完回我 "我付了 0xTX" (TX = BSC 交易哈希), 我自动通知 Maker 发 ${pending.qty} KAS 到你 Kasia.`);
+      return '';
     }
     if (CANCEL_WORDS.includes(trimmed)) {
       _quotes.delete(peerAddr);
-      return `已取消报价. 重新下单回"买 X KAS".`;
+      _qDm('dm_quote', peerAddr, `已取消报价. 重新下单回"买 X KAS".`);
+      return '';
     }
   }
 
-  // T-J2-12 PAID intent: 用户回 "我付了 0xtx..." 触发 broker 代广播 paid_v1.
+  // T-J2-12 PAID intent: 用户回 "我付了 0xtx..." 排队 paid_v1 + ack DM.
   const accept = _pendingAccepts.get(peerAddr);
   if (accept) {
     if (Date.now() >= accept.expires_at) {
@@ -135,24 +140,26 @@ export async function handleBuyIntent(peerAddr, message) {
       const pm = PAID_REGEX.exec(trimmed);
       if (pm) {
         const paymentTx = pm[1];
-        const paidTx = await broadcastPaid(accept.offer_id, paymentTx, accept.pay_chain);
-        if (!paidTx) return `paid_v1 上链失败, 请重发"我付了 ${paymentTx.slice(0,12)}..."重试.`;
         _pendingAccepts.delete(peerAddr);
-        return `✓ 收到付款 tx ${paymentTx.slice(0,12)}... 已通知 Maker (paid_v1 上链 ${paidTx.slice(0,12)}...). 验证通过后 Maker 自动发 ${accept.qty} KAS 到你 Kasia.`;
+        _enqueuePaid(accept.offer_id, paymentTx, accept.pay_chain, peerAddr);
+        _qDm('dm_completion', peerAddr,
+          `✓ 收到付款 tx ${paymentTx.slice(0,12)}... 已排队通知 Maker. 验证通过后 Maker 自动发 ${accept.qty} KAS 到你 Kasia.`);
+        return '';
       }
     }
   }
 
-  // 解析买意图
+  // 解析买意图 → 报价 DM 入队
   const m = BUY_REGEX.exec(trimmed);
   if (!m) return null;
   const qty = parseFloat(m[1]);
   if (qty <= 0) return null;
 
-  const payChain = 'bnb';  // 默认 BSC; 后续可加 chain 关键字识别
+  const payChain = 'bnb';
   const offer = selectBestOffer(qty, payChain);
   if (!offer) {
-    return `当前无 ${qty} KAS 卖单 (${payChain.toUpperCase()} 链). 晚点再来或试试别的链.`;
+    _qDm('dm_quote', peerAddr, `当前无 ${qty} KAS 卖单 (${payChain.toUpperCase()} 链). 晚点再来或试试别的链.`);
+    return '';
   }
   const unit = parseFloat(offer.want_amount) / parseFloat(offer.give_amount);
   const quotedUsdt = (unit * qty).toFixed(6);
@@ -160,5 +167,7 @@ export async function handleBuyIntent(peerAddr, message) {
     offer_id: offer.id, qty, quoted_usdt: quotedUsdt, pay_chain: payChain,
     maker_addr: offer.maker_addr, expires_at: Date.now() + QUOTE_TTL_MS,
   });
-  return `📋 买 ${qty} KAS 报价:\n· 单价 ${unit.toFixed(6)} USDT/KAS\n· 你付: ${quotedUsdt} USDT (${payChain.toUpperCase()})\n· Maker 收款 ${offer.maker_addr.slice(0,22)}...\n· Maker 直发 KAS 到你 Kasia 地址\n\n确认回 YES (5min 内). 取消回 NO.`;
+  _qDm('dm_quote', peerAddr,
+    `📋 买 ${qty} KAS 报价:\n· 单价 ${unit.toFixed(6)} USDT/KAS\n· 你付: ${quotedUsdt} USDT (${payChain.toUpperCase()})\n· Maker 收款 ${offer.maker_addr.slice(0,22)}...\n· Maker 直发 KAS 到你 Kasia 地址\n\n确认回 YES (5min 内). 取消回 NO.`);
+  return '';
 }

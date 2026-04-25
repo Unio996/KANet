@@ -15,6 +15,14 @@ export function _testResetSendCommand() { _sendOverride = null; }
 
 async function _send(relayId, cmd) {
   if (_sendOverride) return _sendOverride(relayId, cmd);
+  // R4 (T-NWT-09): broker 出链走 broker-action-queue 单线 pump 防 UTXO 双花.
+  if (relayId === BROKER_RELAY_ID) {
+    const { enqueue } = await import('./broker-action-queue.js');
+    if (cmd.type === 'send_message') {
+      enqueue({ kind: 'dm_completion', peer: cmd.target, payload: { message: cmd.message } });
+      return { ok: true, queued: true };
+    }
+  }
   const { sendCommandAsync } = await import('./relay-manager.js');
   return sendCommandAsync(relayId, cmd);
 }

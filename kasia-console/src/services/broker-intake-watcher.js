@@ -21,6 +21,18 @@ export function _testResetPublish() { _publishOverride = null; }
 
 async function _send(relayId, cmd) {
   if (_sendCommandOverride) return _sendCommandOverride(relayId, cmd);
+  // R4 (T-NWT-09): broker 出链全走 broker-action-queue 单线 pump 防 UTXO 双花.
+  // 其他 relay (e.g. test) 仍直走 sendCommandAsync.
+  if (relayId === BROKER_RELAY_ID) {
+    const { enqueue } = await import('./broker-action-queue.js');
+    let kind, payload;
+    if (cmd.type === 'send_message')   { kind = 'dm_quote'; payload = { message: cmd.message }; }
+    else if (cmd.type === 'send_kas')  { kind = 'sendKas';  payload = { amount_kas: cmd.amount_kas, note: cmd.note }; }
+    else if (cmd.type === 'send_broadcast') { kind = 'accept_v1'; payload = { channel: cmd.channel, message: cmd.message }; }
+    else { kind = 'dm_quote'; payload = cmd; }
+    enqueue({ kind, peer: cmd.target || null, payload });
+    return { ok: true, queued: true };
+  }
   const { sendCommandAsync } = await import('./relay-manager.js');
   return sendCommandAsync(relayId, cmd);
 }
