@@ -98,6 +98,8 @@ export async function handleSellIntent(peerAddr, message) {
   }
 
   // 解析卖意图
+  // R6 T-J2-20: 删 T-NWT-17 onboarding 长文 (Owner 不要 4 关键词文案).
+  // 不命中 SELL_REGEX → return null → conversations.js fork → broker-llm-agent 接管 LLM 自然语言.
   const m = SELL_REGEX.exec(trimmed);
   if (!m) return null;
   const qty = parseFloat(m[1]);

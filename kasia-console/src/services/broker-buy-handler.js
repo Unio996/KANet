@@ -342,18 +342,16 @@ export async function handleBuyIntent(peerAddr, message) {
   if (!m) return null;
   const qty = parseFloat(m[1]);
   if (qty <= 0) return null;
+  // T-J1-19a + T-J2-20 合并: dust qty / 拼单+自挂全失败 → return null 让 broker-llm-agent
+  // 接管 LLM 友好拒. handler 不发静态 DM 避免截胡 LLM.
   if (qty < MIN_QTY_KAS) {
-    _qDm('dm_quote', peerAddr, `📊 ${qty} KAS 太小 (最小 ${MIN_QTY_KAS} KAS, 防 dust 单 + broker fee 吃光本金). 改大点回 "买 N KAS".`);
-    return '';
+    return null;  // LLM 用自然语言告知 dust 限制 (broker fee + 最小 1 KAS)
   }
 
   const payChain = 'bnb';
   const merged = await _aggregateWithFallback(qty, payChain);
   if (!merged.ok) {
-    _qDm('dm_quote', peerAddr,
-      `📊 暂无报价: 你要 ${qty} KAS (${payChain.toUpperCase()}), 现成 maker 拼到 ${merged.available || 0} KAS, broker 自挂也失败 (${merged.error?.slice(0,80) || '?'}).\n` +
-      `选项: 1) 改小一点 (回"买 X KAS"), 2) 等等再来, 3) 试别的链.`);
-    return '';
+    return null;  // LLM 接管: 现 maker 不够 + 自挂也失败, LLM 友好回 "暂无报价, 等等 / 改小 / 别的链"
   }
   const unit = merged.total_usdt / merged.total_kas;
   _quotes.set(peerAddr, {
