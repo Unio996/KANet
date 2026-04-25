@@ -36,11 +36,15 @@ function _insertSellOrder({ peerAddr, qty, userBnbAddr }) {
 }
 
 // R4 改造 (T-NWT-09): 走 broker-action-queue 单线 pump 防 UTXO 双花.
+// R4 Bug 9 fix (T-NWT-13, J2 933dd65e 同模式 broker-buy-handler 45787b86):
+// anti-spam 实测 dedup 窗口 ~14min, 6s backoff 不解. 加 4 字符唯一 tag, 跨 session 100%
+// similar 永不撞.
 async function _qDm(peerAddr, message) {
   const { enqueue, getQueueStats } = await import('./broker-action-queue.js');
   const stats = getQueueStats();
-  const suffix = stats.length > 0 ? `\n\n(前面 ${stats.length} 笔待处理, 排队 ~${Math.ceil(stats.length * 5)}s)` : '';
-  return enqueue({ kind: 'dm_quote', peer: peerAddr, payload: { message: message + suffix } });
+  const queuePart = stats.length > 0 ? `(前面 ${stats.length} 笔待处理, 排队 ~${Math.ceil(stats.length * 5)}s) ` : '';
+  const tag = `#${randomUUID().slice(0,4)}`;
+  return enqueue({ kind: 'dm_quote', peer: peerAddr, payload: { message: `${message}\n\n${queuePart}${tag}` } });
 }
 
 export async function handleSellIntent(peerAddr, message) {
