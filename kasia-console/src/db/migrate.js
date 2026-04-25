@@ -2273,5 +2273,23 @@ export function runMigrations() {
     }
   }
 
+  // v76 (R5): relay_nodes.is_service — Service 范式标识. is_service=1 时:
+  //   - mind-manager.getReply 跳 (无 LLM reply)
+  //   - action-executor 跳 (无 Mind proactive DM)
+  //   - market-seeder skip (Service 不挂 seeder, broker-intake 自管)
+  //   - relay-manager.sendCommandAsync 跳 anti-spam dedup
+  // 让 broker (Trader-B) 100% deterministic, 协议唯一性. 不再混 Agent reactive/proactive 文案.
+  // R4 真测 21+19 笔 e2e 暴露 Trader-B Mind/skill/anti-spam 互撞 6 套行为聚合在一钱包是根. R5 拆.
+  {
+    const hasCol = sqlite.prepare("PRAGMA table_info(relay_nodes)").all()
+      .some(c => c.name === 'is_service');
+    if (!hasCol) {
+      sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN is_service INTEGER DEFAULT 0`);
+      // Trader-B is_dex_broker=1 → 自动 is_service=1 (R5 转 Service 范式).
+      const upd = sqlite.prepare(`UPDATE relay_nodes SET is_service=1 WHERE is_dex_broker=1`).run();
+      console.log(`[migrate] v76: relay_nodes.is_service added; ${upd.changes} broker → service mode.`);
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
