@@ -12,7 +12,9 @@ import { randomUUID } from 'crypto';
 const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
 const TTL_DEFAULT_MS = 10 * 60 * 1000;
 const RETRY_MAX = 3;
-const RETRY_BACKOFF_MS = 1500;
+// R4 Bug 9 (J2 RCA 4e7be515): relay anti-spam fail-closed 5s 内同 message dedup 拒.
+// 旧 backoff 1500 → retry 1.5s/3s 都在 dedup 窗口内, 100% similar 拒. 改 6000ms 跳过 5s 窗口.
+const RETRY_BACKOFF_MS = 6000;
 // T-NWT-11: tx-producing kinds 必须返 txId 否则当失败 retry. publish_offer 例外 (返 offer_id+broadcast_tx).
 const TX_PRODUCING_KINDS = new Set(['dm_quote', 'dm_pay_instr', 'dm_completion', 'dm_position', 'accept_v1', 'paid_v1', 'sendKas']);
 
