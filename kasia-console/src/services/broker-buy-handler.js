@@ -32,16 +32,20 @@ async function _send(relayId, cmd) {
 }
 
 function selectBestOffer(qtyKas, payChain) {
+  // R5 T-J2-17 (Bug 10): broker 不 self-accept, 排除自己 maker 的 offer.
+  const broker = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID);
+  const brokerAddr = broker?.address || '';
   const rows = sqlite.prepare(`
     SELECT id, give_amount, want_amount, verification_meta, maker
     FROM exchange_offers
     WHERE protocol_status = 'open'
       AND give_asset = 'KAS' AND want_asset = 'USDT'
       AND CAST(give_amount AS REAL) >= ?
+      AND maker != ?
       AND (expires_at IS NULL OR julianday(expires_at) > julianday('now'))
     ORDER BY CAST(want_amount AS REAL) / CAST(give_amount AS REAL) ASC
     LIMIT 10
-  `).all(qtyKas);
+  `).all(qtyKas, brokerAddr);
   for (const o of rows) {
     let meta;
     try { meta = JSON.parse(o.verification_meta || '{}'); } catch { continue; }
