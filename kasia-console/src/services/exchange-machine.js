@@ -640,7 +640,22 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
 
   const meta = JSON.parse(offer.verification_meta || '{}');
   const expectedAmount = parseFloat(offer.want_amount) || 0;
-  const expectedTo = meta.receive_address || meta.expected_address || null;
+  // expectedTo depends on payment chain semantics.
+  //   kaspa_tx (BUY path: payer sends KAS to maker) — expected recipient is the
+  //     Kasia delivery address. receive_address holds it; fall back to maker.
+  //   cross_chain_tx (SELL path: payer sends USDT to maker on EVM/SOL/TRON) —
+  //     expected recipient is the maker's payment address from accepted_chains
+  //     keyed by the offer's taker_chain. receive_address here is the KAS
+  //     delivery target on Kasia, NOT the EVM USDT recipient — using it would
+  //     cause "Recipient mismatch" against the actual EVM payee.
+  let expectedTo;
+  if (payment_chain === 'kaspa') {
+    expectedTo = meta.receive_address || meta.expected_address || offer.maker;
+  } else {
+    const acceptedChains = Array.isArray(meta.accepted_chains) ? meta.accepted_chains : [];
+    const match = acceptedChains.find(c => c && String(c.chain).toLowerCase() === String(payment_chain).toLowerCase());
+    expectedTo = match?.address || meta.maker_payment_address || meta.expected_address || null;
+  }
 
   try {
     let vr;
