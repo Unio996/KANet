@@ -80,6 +80,14 @@ export async function handleBuyIntent(peerAddr, message) {
   // 用户确认 pending quote → 广播 accept
   if (pending && Date.now() < pending.expires_at) {
     if (CONFIRM_WORDS.includes(trimmed)) {
+      // T-J2-11 (Bug 3/4 治本): ensure ≥8 UTXOs 防 accept_v1 + DM 紧跟同一 UTXO 双花
+      // (Round 1 实测: accept broadcast 后 +3ms DM tx 被 mempool 拒, 同 output 5a94e22e)
+      try {
+        const { splitUtxos } = await import('./utxo-splitter.js');
+        const sr = await splitUtxos(BROKER_RELAY_ID, 8);
+        if (sr?.split) console.log(`[broker-buy] pre-accept split: ${sr.utxosBefore}→${sr.utxosAfter}`);
+      } catch (err) { console.warn(`[broker-buy] pre-accept split err: ${err.message}`); }
+
       const tx = await broadcastAccept(pending.offer_id, peerAddr, pending.pay_chain);
       _quotes.delete(peerAddr);
       if (!tx) return `accept 上链失败, 报价取消, 请重发"买 X KAS".`;
