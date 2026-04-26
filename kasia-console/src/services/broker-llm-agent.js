@@ -185,14 +185,19 @@ function _detectLang(message) {
 // 主入口: conversations.js fork 调
 export async function handleLlmDialog(peer, message) {
   const history = _loadHistory(peer);
-  // T-J1-19f deterministic 首轮: 首轮 (history 空) + 检测 intent → 跳 LLM 直出.
-  // 后续 turn 走 LLM (history 已有 deterministic reply, 上下文锁住).
-  const isFirstTurn = history.length === 0;
+  // T-J1-19g (NWT 报真 peer history 不空 → isFirstTurn 永 false, deterministic 失效):
+  // 改判定 - 看最后一条 broker outbound (assistant role) 是不是已经 deterministic 过.
+  // 如果没 deterministic 过 (含"哪个链/which chain/cadena para"标记) + 当前 message 检 intent
+  // → 走 deterministic. 防真 peer multi-turn 老 history 把 first-turn-of-intent 误判.
   const intent = _detectIntent(message);
-  if (isFirstTurn && intent) {
-    const qty = _extractQty(message);
-    const lang = _detectLang(message);
-    return _deterministicFirstReply(intent, qty, lang);
+  if (intent) {
+    const lastAssistant = [...history].reverse().find(m => m.role === 'assistant');
+    const alreadyDeterministic = lastAssistant && /哪个链|哪条链|which chain|qué cadena|cadena para/i.test(lastAssistant.content || '');
+    if (!alreadyDeterministic) {
+      const qty = _extractQty(message);
+      const lang = _detectLang(message);
+      return _deterministicFirstReply(intent, qty, lang);
+    }
   }
   history.push({ role: 'user', content: message });
   let llm = await _callLlm(history);

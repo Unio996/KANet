@@ -87,6 +87,20 @@ describe('handleLlmDialog — T-J1-19f deterministic first-turn (NWT B fix)', ()
     assert.match(reply, /5 KAS/);
     assert.match(reply, /收/, `卖 path reply must mention 收 USDT, got: ${reply}`);
   });
+
+  // T-J1-19g (NWT 报真 peer history 不空 isFirstTurn 失效 fix):
+  // 真 peer 多次问"买 X KAS" — 第一次 deterministic, 之后再问应该仍 deterministic
+  // (不像 history.length===0 那样只首次, 因为真 peer history 永不空).
+  // The marker is "broker outbound 含 '哪个链'", 不是 history.length.
+  it('T-J1-19g: 真 peer 已 history 但 broker 没问过链 → 仍 deterministic', async () => {
+    const handler = await import('../src/services/broker-llm-agent.js');
+    // Use a fake peer (so _loadHistory returns []), simulating fresh intent
+    // even if previous broker conversation was about other topics.
+    const fakePeer = 'kaspa:test_19g_' + Date.now();
+    const reply = await handler.handleLlmDialog(fakePeer, '买 50 KAS');
+    assert.match(reply, /50 KAS/);
+    assert.doesNotMatch(reply, /买还是卖/);
+  });
 });
 
 describe('_detectIntent — multi-turn message regression', () => {
