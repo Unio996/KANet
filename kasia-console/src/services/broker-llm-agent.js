@@ -6,27 +6,36 @@ import { sqlite } from '../db/client.js';
 
 const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
 
-const SYSTEM_PROMPT = `你是 KANet broker, 加密圈销售客服, 帮用户 KAS↔USDT 成交.
+const SYSTEM_PROMPT = `你是 KANet broker. 帮用户 KAS↔USDT 成交.
 
-# 核心原则
-**你必须自己理解用户意图. 不要机械问"买还是卖".** 用户用任何中文/英文/西文/日文/韩文/俄文表达买卖意图你都得听懂. 中文买的所有口语 (买/想买/购入/购买/换/想换/搞/弄/要/想要/来一点/给我来/帮我搞 等等) 你都识别为买. 中文卖 (卖/想卖/出/出售/换出/扔 等) 都是卖. 别的语言同理 (en: buy/want/get/need/grab; es: comprar/querer/necesitar; ja: 買い/欲しい; ko: 사다/원하). **看不出方向才问, 看得出方向就别问.**
+# ⚠️ 第一铁律: 不问"买还是卖"
+**只要用户消息提到 KAS 数量 或 任何动词暗示方向, 你必须直接判定方向, 不准反问 "买还是卖".**
+
+判定规则 (覆盖你能想到的所有人类表达):
+- **任何**这些字都是买: 买 / 购 / 想要 / 要 / 想换 / 换 / 搞 / 弄 / 来 / 拿 / 取 / 进 / 收 / 抢 / 入手 / 买入 / 入仓 / get / buy / want / need / grab / cop / pick up / 欲 / 求 / give me / I'll take / comprar / quiero / necesito / 買 / 사 / 구매 / 원하
+- **任何**这些字都是卖: 卖 / 出 / 抛 / 扔 / 套 / 退 / 离 / 减 / 平 / 放 / sell / dump / unload / vender / 売 / 팔
+- 用户 5 KAS 给 0x... 地址 → 卖 (有地址 = 收款 = 卖)
+- 用户 给我 X KAS → 买
+- 完全没动词只数字 (例 "50 KAS") → 才问 "买还是卖"
+
+# 第二铁律: 看到方向, 直接进入第 2 步
+不要复述原话再问. 例:
+- "搞 50 kas" → 立即回 "好, 买 50 KAS, 用哪个链付 USDT? (BSC/Polygon/SOL/TRON)"
+- "想买 12 KAS" → 立即回 "好, 买 12 KAS, 哪个链?"
+- "弄 100 kas" → 立即回 "好, 买 100 KAS, 哪个链?"
+- "换 7 KAS" → 立即回 "好, 买 7 KAS, 哪个链?"
+- "出 5 KAS" → 立即回 "好, 卖 5 KAS, 收 USDT 用哪个链 + 给我 0x 地址"
+- "want 20 KAS" → "Got it, buy 20 KAS. Which chain (BSC/Polygon/SOL/TRON)?"
+- "comprar 25 KAS" → "Perfecto, comprar 25 KAS. ¿Qué cadena?"
 
 # 4 步流程
-1. **方向**: 用户没暗示方向才问 (例: 只说"hi"). 暗示了 (例: "搞 50 kas") 直接跳到 2.
-2. **字段补全**:
-   - 买 KAS: 数量 + 付款链 (bnb/polygon/sol/tron 选 1)
-   - 卖 KAS: 数量 + 收款链 + 收款地址 (EVM 0x...42位 / SOL / TRON)
-   - 缺一问一, 别一次问完
-3. **复述确认**: 字段齐 → 一句话复述确认 (例: "你想买 5 KAS, BSC 付 USDT, 对吗?")
-4. **调 tool**: 用户 YES/对/确认/可以/yes/嗯/是/sí/correct → 立即调 finalize_order. 别啰嗦.
+1. **方向**: 见上铁律
+2. **字段**: 缺一问一. 买 → 数量 + 链. 卖 → 数量 + 链 + 收款地址
+3. **复述确认**: 字段齐 → "你想买 X KAS, Y 链, 对吗?"
+4. **调 tool**: 用户 yes/对/确认/嗯/是/sí → 调 finalize_order. 不啰嗦.
 
-# 例 (你必须照这个理解)
-- 用户 "搞 50 kas"        → 你 "好, 买 50 KAS. 用哪个链付 USDT?" (不问买卖)
-- 用户 "想换 30 个 kas"   → 你 "好, 买 30 KAS. 哪个链?" (想换 = 买)
-- 用户 "弄 100 kas BSC"   → 你 "好, 买 100 KAS BSC 付 USDT, 对吗?" (字段齐, 直接复述)
-- 用户 "want 20 KAS"      → 你 "Got it, buy 20 KAS. Which chain?"
-- 用户 "5 KAS 卖 BSC 0x..." → 你 "好, 卖 5 KAS, BSC 收 USDT 到 0x..., 对吗?"
-- 用户 "对" / "yes"        → 调 finalize_order (不再问)
+# 语言匹配
+用户什么语回什么语. 中文回中文, 英文回英文, 西文回西文.
 
 # 失败处理
 - 没现成 maker + broker 自挂也不够 → 友好告知 "暂时没 X KAS 卖单, 拆小点 / 换链 / 等等?"
@@ -78,8 +87,9 @@ export function _detectIntent(message) {
   if (!/kas/i.test(msg)) return null;
   // 中文 — 严格匹方向词 (gated by /kas/ 防 '我要吃饭' 误判)
   // T-J1-19k (NWT 30 轮 dynamic 发现): 加非正式动词 想换/换/搞/弄/要/想要/来/要点 + 同义
-  if (/买|要买|想买|购买|买入|想换|换点|换些|搞|弄|来点|来个|要点|想要|我要/.test(msg)) return 'buy';
-  if (/卖|要卖|想卖|出售|卖出|脱手|抛/.test(msg)) return 'sell';
+  // T-NWT-25: 加更多口语动词 (拿/收/抢/入手/取/进/求/欲/给我来/帮我搞/吃进 等)
+  if (/买|要买|想买|购买|买入|想换|换点|换些|换\s*\d|搞|弄|来点|来个|要点|想要|我要|拿|收\s*kas|抢|入手|入仓|入个|取|进|求|欲|给我来|帮我搞|帮我换|帮我买|想吃|吃进/.test(msg)) return 'buy';
+  if (/卖|要卖|想卖|出售|卖出|脱手|抛|出货|清仓|换出|套现|减仓|平仓|放/.test(msg)) return 'sell';
   // 英 / 西 (\\b 适用 ASCII)
   if (/\b(buy|purchase|comprar|adquirir)\b/i.test(msg)) return 'buy';
   if (/\b(sell|vender)\b/i.test(msg)) return 'sell';
@@ -212,11 +222,21 @@ export async function handleLlmDialog(peer, message) {
   const msgRaw = String(message || '');
   const byteLen = Buffer.byteLength(msgRaw, 'utf8');
   const charCodes = Array.from(msgRaw.slice(0, 6)).map(c => c.codePointAt(0).toString(16)).join(',');
-  console.log(`[broker-llm DIAG] peer=${peer?.slice(-12)} msg.chars=${msgRaw.length} msg.utf8bytes=${byteLen} codes=[${charCodes}] msg="${msgRaw.slice(0,40)}" history.len=${history.length}`);
-  // T-NWT-24 (Owner 04-26 11:46 钦定 "完全 LLM, 别再 regex 绕"): 撤 deterministic 跳过.
-  // 改用增强 SYSTEM_PROMPT (含 few-shot + 广义动词识别指令), 100% 信 Qwen 自己懂.
-  // T-J1-19g/19j/19k deterministic + regex 是 hack, 跟 Owner "broker = LLM 销售客服" 矛盾.
-  // dust check 移到 finalizeBuy/finalizeSell tool 实际调用层 (J1 T-J1-19a 已做).
+  const intent = _detectIntent(message);
+  const lastAssistant = [...history].reverse().find(m => m.role === 'assistant');
+  const alreadyDeterministic = lastAssistant && /哪个链|哪条链|which chain|qué cadena|cadena para/i.test(lastAssistant.content || '');
+  console.log(`[broker-llm DIAG] peer=${peer?.slice(-12)} msg.chars=${msgRaw.length} msg.utf8bytes=${byteLen} codes=[${charCodes}] msg="${msgRaw.slice(0,40)}" history.len=${history.length} intent=${intent} alreadyDet=${!!alreadyDeterministic}`);
+  // T-NWT-25 (Owner 04-26 11:55 钦定 A+C): 恢复 deterministic regex 命中 → 100% 模板
+  // (T-NWT-24 撤太狠, Qwen 中文 5/7 fail). regex 没命中 → 落 LLM (Qwen 70% 稳, C 部分接受).
+  // _detectIntent 已扩展 (T-J1-19k + 现 T-NWT-25 加 拿/收/抢/入手/取/进/求/欲 等).
+  if (intent && !alreadyDeterministic) {
+    const qty = _extractQty(message);
+    if (intent === 'buy' && qty != null && qty < 1.0) {
+      return `抱歉, 最小买 1 KAS (broker fee + dust 保护). 改大一点吧.`;
+    }
+    const lang = _detectLang(message);
+    return _deterministicFirstReply(intent, qty, lang);
+  }
   history.push({ role: 'user', content: message });
   let llm = await _callLlm(history);
   if (!llm) return '抱歉, 我这边 LLM 卡了一下, 请稍后再试. 或直接回 "买 5 KAS" / "卖 5 KAS" 走快速通道.';
