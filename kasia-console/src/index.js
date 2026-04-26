@@ -93,6 +93,23 @@ fastify.setErrorHandler((error, request, reply) => {
   reply.code(error.statusCode || 500).send({ error: error.message });
 });
 
+// T-J2-23: encoding guard for /api/agent/reply (Owner 编码 RCA)
+// curl -d / PowerShell Invoke-RestMethod 默认非 UTF-8 → message CJK 字节 corrupt → _detectIntent 返 null
+// → 走 LLM → Qwen confused. 这条 hook 在 preHandler 层验 message 字段, 含 U+FFFD / lone surrogate / 全 ASCII
+// 但声明 zh/CJK 上下文 (header X-Test-Lang or query lang=zh) → 友好 400 提示用 --data-binary / Node fetch.
+// 生产 (Kasia client → 链上 → relay ingest) 走严格 UTF-8 不 hit; 仅 dev/测试客户端撞.
+fastify.addHook('preHandler', async (request, reply) => {
+  if (request.method !== 'POST' || !request.url.startsWith('/api/agent/reply')) return;
+  const m = request.body?.message;
+  if (typeof m !== 'string') return;
+  if (/[�]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(m)) {
+    return reply.code(400).send({
+      error: 'message contains invalid UTF-8 (replacement char or lone surrogate). Likely client encoding bug. Use Node fetch / curl --data-binary @file / Python requests json= for testing. PowerShell Invoke-RestMethod default UTF-16 BOM corrupts CJK — use [System.Text.Encoding]::UTF8.GetBytes($body).',
+      hint: 'docs/broker-test-guide.md',
+    });
+  }
+});
+
 // Register routes
 await registerHealthRoutes(fastify);
 await registerIngestRoutes(fastify);
