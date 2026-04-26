@@ -272,6 +272,27 @@ export async function buyPreview({ user_kasia, qty, pay_chain }) {
   }
   const totalUsdt = picks.reduce((s, p) => s + p.take_usdt, 0);
   const unitPrice = totalUsdt / cumKas;
+  // T-J2-V2-realtest-critfix (J1 67903c5b 真测撞 LLM 编 fake 地址 0x1234... bug):
+  // 生成 deterministic preview_text 完整画像字串. LLM 必须**原样转发**, 不让 LLM 自己渲染
+  // 地址 (LLM 会按 SYSTEM_PROMPT 例子编 placeholder = user 真转 USDT 到 fake 地址 = 钱丢).
+  const payLines = picks.map((p, i) => {
+    const tag = p.broker_dynamic ? '(broker 自挂)' : '(maker)';
+    return `  ${i+1}. ${p.take_qty} KAS → 付 ${(+p.take_usdt).toFixed(6)} USDT 到\n     \`${p.maker_addr}\` ${tag}`;
+  }).join('\n');
+  const preview_text = `📋 **订单画像 (确认前)**
+
+* 方向: 买 KAS
+* 数量: ${cumKas} KAS
+* 付款链: ${payChain.toUpperCase()} (USDT)
+* 单价: ${unitPrice.toFixed(6)} USDT/KAS
+* 总额: ${totalUsdt.toFixed(6)} USDT
+${payLines}
+* KAS 收件 (你的 Kasia):
+  \`${user_kasia}\`
+
+⏰ 订单 30 分钟内付款有效 · 跨链验证 1-3 分钟
+
+确认下单回 **YES** · 修改回 '改 3 / 改 polygon / 改地址' · 取消回 **NO**`;
   return {
     ok: true,
     direction: 'buy',
@@ -290,6 +311,7 @@ export async function buyPreview({ user_kasia, qty, pay_chain }) {
     user_kasia_address: user_kasia,
     quote_ttl_minutes: 30,
     verify_window_text: '⏰ 订单 30 分钟内付款有效 · 跨链验证 1-3 分钟',
+    preview_text,  // ← LLM 必须原样转发此字串 (含真 maker_addr + user_kasia 不让 LLM 渲染)
   };
 }
 
