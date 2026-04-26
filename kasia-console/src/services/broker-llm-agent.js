@@ -152,6 +152,11 @@ async function _callLlm(messages) {
         messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages],
         tools: TOOLS,
         tool_choice: 'auto',
+        // QWEN-RULES.md Rule 11 (T-NWT-V2-hotfix2): Qwen3.6 reasoning kill switch.
+        // /no_think 前缀 sys/user 都实测无效. 唯一有效是 body 加 chat_template_kwargs.
+        // 实测 thinking 1974c → 0c, 响应 8s → 1s. broker 业务不需 reasoning.
+        // 同其他 kill 点: agent-adapter/openai.mjs:141 / llm-dispatcher.js:22 / qwen-bridge-worker.js:105.
+        chat_template_kwargs: { enable_thinking: false },
       }),
       signal: AbortSignal.timeout(120_000),  // T-NWT-V2-hotfix: 60s→120s — Qwen3.6 处理 14k tokens prompt (含 SYSTEM_PROMPT + history) 需 60-90s, 60s 60% 触发 abort. Owner 真测连撞.
     });
