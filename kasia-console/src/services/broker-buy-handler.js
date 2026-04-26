@@ -17,6 +17,9 @@ const PAID_REGEX = /(?:已付|付了|我付|paid|pay)[\s\S]{0,40}?\b(0x[a-fA-F0-
 // T-J2-NWT-27c (Owner 真测 04-26 15:30 漏): "已经支付" 漏 → broker 静默 → Owner '请你们自己处理'.
 // 扩 PAID_NO_TX 自然话变体 + 加 (?:了)? 完成态助词后缀 (J1 case 2 v6 '转完了 1/12 timeout' 真因).
 const PAID_NO_TX_REGEX = /^(?:已付|付了|已转|转完|已支付|已转账|已经支付|已经付款|付款了|支付了|支付完成|支付好了|完成|done|paid|sent|finished|转好了|付好了|搞定|ok 付了|已经付了)\s*(?:了)?\s*[!！。.…]*\s*$/i;
+// T-NWT-V2-hotfix (Owner 真测 #3 撞 LLM 60s timeout 多次): 询价 deterministic 短路, 不进 LLM.
+// "现在 KAS 多少钱?" / "什么价?" / "现价" / "报价啊" / "多少钱" — 直接 fetchKasPrice 立刻 DM 价格.
+const PRICE_QUERY_REGEX = /^\s*(?:现在\s*kas\s*多少钱|kas\s*现在\s*多少钱|kas\s*多少钱|什么价|现价|啥价|报价啊?|价格(?:多少|是多少|是)?|多少钱|how much|price\??)\s*[?？!！.…]*\s*$/i;
 const CONFIRM_WORDS = ['YES', 'yes', 'y', '确认', '好', '行', 'OK', 'ok'];
 const CANCEL_WORDS  = ['NO', 'no', 'n', '取消', '不要', '算了'];
 const QUOTE_TTL_MS = 5 * 60 * 1000;
@@ -404,6 +407,24 @@ async function _qDm(kind, peerAddr, message) {
 
 export async function handleBuyIntent(peerAddr, message) {
   const trimmed = (message || '').trim();
+
+  // T-NWT-V2-hotfix (Owner 真测 #3 实战修): 询价 deterministic 短路, 不进 LLM (60s timeout).
+  // 询价是高频 deterministic 场景 — broker 知现价, 不需要 LLM 推理.
+  // 放最前: 即使 user 在 _quotes / _pendingAccepts 状态, 询价也优先回价 (中途想再问也 OK).
+  if (PRICE_QUERY_REGEX.test(trimmed)) {
+    try {
+      const { fetchKasPrice } = await import('./market-seeder.js');
+      const p = await fetchKasPrice();
+      const msg = p && p > 0
+        ? `KAS 现价 $${p.toFixed(6)} USDT/KAS\n· broker 自挂卖价 $${(p * 1.01).toFixed(6)} (含 1% spread)\n· 想买告诉我数量 + 链 (BSC/POL/SOL/TRON), 例: "买 50 KAS"`
+        : `价格暂时拿不到 (上游 8 源全没响应), 稍等 1min 再问. 或直接告诉我数量我帮你查.`;
+      _qDm('dm_price_query', peerAddr, msg);
+    } catch (e) {
+      _qDm('dm_price_query', peerAddr, `价格查询暂时失败 (${e.message?.slice(0, 40)}). 稍等再问.`);
+    }
+    return '';
+  }
+
   const pending = _quotes.get(peerAddr);
 
   // 用户确认 pending quote → 多笔 enqueue accept_v1 + 一条聚合 dm_pay_instr 列出所有 maker 付款指引
@@ -422,14 +443,24 @@ export async function handleBuyIntent(peerAddr, message) {
         await _enqueueAccept(p.id, peerAddr, pending.pay_chain);
         _recordAccept({ offerId: p.id, userPeer: peerAddr, qty: p.take_qty, quotedUsdt: p.take_usdt.toFixed(6), payChain: pending.pay_chain, acceptTx: null });
       }
+      // T-NWT-V2 议 1 (Owner 要求 #1: 起码的订单确认 UX): 拆 2 条 DM —
+      // 第 1 条 dm_order_confirmed 明确告诉 user "订单已确认", 第 2 条 dm_pay_instr 纯付款指引.
+      // 之前一条混 "✓ 已接单. 请付:" user 不知道是 "确认了" 还是 "马上要付". 拆开心里有底.
+      // FIFO 单线 pump 保证 user 先收订单确认, 后收付款指引.
+      const orderId = pending.picks[0].id.slice(0, 8) + (pending.picks.length > 1 ? `+${pending.picks.length - 1}` : '');
+      const orderType = pending.picks.length === 1
+        ? (pending.picks[0].broker_dynamic ? 'broker 自挂' : '单 maker')
+        : `拼 ${pending.picks.length} 笔`;
+      _qDm('dm_order_confirmed', peerAddr,
+        `📋 订单已确认 #${orderId}\n· 买 ${pending.total_kas} KAS / 付 ${pending.total_usdt.toFixed(6)} USDT (${pending.pay_chain.toUpperCase()})\n· ${orderType}\n· 我马上把付款地址发给你, 收到付款自动验证 + 自动发 KAS, 全程不用你查链.`);
       const lines = pending.picks.map((p, i) =>
         `${i+1}. ${p.take_qty} KAS → 付 ${p.take_usdt.toFixed(6)} USDT 到 ${p.maker_addr?.slice(0,22)||'?'}...${p.maker_addr?.slice(-6)||''}`
       ).join('\n');
       const note = pending.picks.length > 1
-        ? `\n\n注意: 共 ${pending.picks.length} 笔 USDT 转账 (拼单聚合). 每笔付完回我 "我付了 0xTX", 一笔一条.`
-        : `\n\n付完回我 "我付了 0xTX" (BSC 交易哈希), 自动通知 Maker.`;
+        ? `\n\n注意: 共 ${pending.picks.length} 笔 USDT 转账 (拼单聚合). 付完不用回复, 我会自动检测; 慢则 1-2min, 快则 30s. 想加速可回 "我付了 0xTX".`
+        : `\n\n付完不用回复, 我会自动检测; 慢则 1-2min, 快则 30s. 想加速可回 "我付了 0xTX".`;
       _qDm('dm_pay_instr', peerAddr,
-        `✓ 已接单. 请 30min 内分笔付:\n${lines}${note}`);
+        `请 30min 内付:\n${lines}${note}`);
       return '';
     }
     if (CANCEL_WORDS.includes(trimmed)) {
