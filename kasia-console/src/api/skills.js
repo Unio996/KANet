@@ -40,7 +40,9 @@ export async function registerSkillRoutes(fastify) {
   // --- API routes (adapter / programmatic access, requires auth) ---
 
   fastify.addHook('preHandler', async (request, reply) => {
-    if (request.url.startsWith('/api/skills')) {
+    // 议 2 (T-J2-V2): /api/skills/role-compat 是 UI 用的 read-only endpoint, 不需要 ingest auth.
+    // 所有其他 /api/skills/* 路径仍然需要 (programmatic access auth).
+    if (request.url.startsWith('/api/skills') && !request.url.startsWith('/api/skills/role-compat')) {
       await verifyIngestRequest(request, reply);
     }
   });
