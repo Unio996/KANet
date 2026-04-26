@@ -19,11 +19,16 @@ const PAID_REGEX = /(?:已付|付了|我付|paid|pay)[\s\S]{0,40}?\b(0x[a-fA-F0-
 const PAID_NO_TX_REGEX = /^(?:已付|付了|已转|转完|已支付|已转账|已经支付|已经付款|付款了|支付了|支付完成|支付好了|完成|done|paid|sent|finished|转好了|付好了|搞定|ok 付了|已经付了)\s*(?:了)?\s*[!！。.…]*\s*$/i;
 // T-NWT-V2-hotfix (Owner 真测 #3 撞 LLM 60s timeout 多次): 询价 deterministic 短路, 不进 LLM.
 // "现在 KAS 多少钱?" / "什么价?" / "现价" / "报价啊" / "多少钱" — 直接 fetchKasPrice 立刻 DM 价格.
-const PRICE_QUERY_REGEX = /^\s*(?:现在\s*kas\s*多少钱|kas\s*现在\s*多少钱|kas\s*多少钱|什么价|现价|啥价|报价啊?|价格(?:多少|是多少|是)?|多少钱|how much|price\??)\s*[?？!！.…]*\s*$/i;
+// T-J2-V2-realtest: 真用户表达扩 — "啥价位" / "什么价位" / "kas 价位" / "kas 行情" / "市价" / 单 "价位" / "行情"
+const PRICE_QUERY_REGEX = /^\s*(?:现在\s*kas\s*多少钱|kas\s*现在\s*多少钱|kas\s*(?:多少钱|价位|价|行情|市价|价格)|(?:什么|啥|多少)\s*(?:价位|价|行情|价钱|价格)|现价|现在价|市价|价位|行情|报报?价啊?|价格(?:多少|是多少|是)?|多少钱|how\s*much|price\??)\s*[?？!！.…]*\s*$/i;
 // T-NWT-2026-04-26 case 6 (J1 76742556 任务面): STOP intent deterministic 短路.
 // user 烦了 / 想退出 → broker 立刻 ack 告别, 不进 LLM 也不啰嗦. _pendingAccepts 不动 (订单生命周期独立).
 // 完整 do_not_contact 跨 system (connection/Mind/relay anti-spam) 留 v1.1, 这里只 broker 层短路.
-const STOP_REGEX = /^\s*(?:烦死了?|烦人|别烦我?|不要再?发了?|别再发|滚开?|走开|别打扰|不想聊|不聊了?|stop|leave me alone|fuck off|go away|bye|再见|结束|不需要了?|算了不要了?)\s*[!！。.…]*\s*$/i;
+// T-J2-V2-realtest (J1 e5aca4c3 review 反对 [\s\S]* 启发式; J2 真测发现 STOP_LED 也撞 false pos
+// "烦死了, 帮帮我"). 最严: 单 anchor STOP_HARD + 完整 keyword 列举 (含 "我" / "再联系我" / "联系我" 等真用户表达).
+// 真 STOP 单短句, 复杂句子求助 fall LLM 判 sentiment.
+const STOP_HARD_REGEX = /^\s*(?:烦死了?|烦人|滚开?|走开|别(?:再)?(?:烦|找|发|联系|打扰|dm)\s*我?\s*了?|不要(?:再)?(?:发|联系|找|dm|打扰)\s*我?\s*了?|不想聊|不聊了?|stop\s*(?:bothering|messag\w*)?(?:\s+me)?|leave\s+me\s+alone|fuck\s*off|go\s*away|don't\s+(?:bother|message|contact)\s*(?:me)?|bye|再见|结束|不需要了?|算了不要了?)\s*[!！。.…,，]*\s*(?:了|啦|啊|呀)?\s*[!！。.…]*\s*$/i;
+function _isStopIntent(s) { return STOP_HARD_REGEX.test(s); }
 const CONFIRM_WORDS = ['YES', 'yes', 'y', '确认', '好', '行', 'OK', 'ok'];
 const CANCEL_WORDS  = ['NO', 'no', 'n', '取消', '不要', '算了'];
 const QUOTE_TTL_MS = 5 * 60 * 1000;
@@ -415,7 +420,7 @@ export async function handleBuyIntent(peerAddr, message) {
   // T-NWT-2026-04-26 case 6 STOP intent deterministic 短路 — user 烦了 / 想退出.
   // broker 立刻 ack 告别 (服务态度: 不啰嗦不命令式), 不进 LLM. 跟 PRICE_QUERY 同模式优先级最前.
   // _pendingAccepts 不动 (订单生命周期独立, 30min TTL 自动过期; user 想退也只是不想聊 broker, 已下单照走).
-  if (STOP_REGEX.test(trimmed)) {
+  if (_isStopIntent(trimmed)) {
     _qDm('dm_stop', peerAddr, '好的, 不打扰你了. 想买卖 KAS 随时回我 "买/卖 X KAS".');
     return '';
   }
