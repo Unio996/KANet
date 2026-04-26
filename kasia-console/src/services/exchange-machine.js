@@ -278,8 +278,11 @@ export function processAccept(msg) {
   }
 
   // Transition: open → matched
+  // T-NWT-2026-04-26 self-accept fix follow-up: taker 字段同 self-accept check 逻辑 —
+  // broker 代发时真 taker 在 receive_address (msg._from = broker 信使).
+  // 普通 client 不 carry receive_address → fallback msg._from.
   const matched = transition(offer.id, 'matched', {
-    taker: msg._from,
+    taker: msg.receive_address || msg._from,
     taker_tx_id: msg._tx,
     accept_commitment: commitment,
   });
