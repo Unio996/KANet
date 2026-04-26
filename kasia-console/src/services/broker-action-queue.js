@@ -69,6 +69,18 @@ export function enqueue({ kind, peer, payload, ttl_ms = TTL_DEFAULT_MS }) {
 
 async function pump() {
   _busy = true;
+  // T-J2-24 (J1 a242bfd5 R5): 防 console-restart relay race —
+  // pump 第一次跑前先 waitForRelay 探活, 60s 上限. 启动期 hold queue (默认 _busy=true 不让其他 pump 重入)
+  // 而非靠 retry backoff (RETRY_BACKOFF_MS * 3 = 36s 可能仍 race). 避免 NWT 报 'Relay not running'
+  // 全 FAIL after 3 attempts.
+  if (!_executeOverride && _queue.length > 0) {
+    try {
+      const { waitForRelay } = await import('./relay-manager.js');
+      await waitForRelay(BROKER_RELAY_ID, 60000);
+    } catch (e) {
+      console.warn(`[broker-queue] waitForRelay timeout: ${e.message} — pump 继续, 单项 retry 兜底`);
+    }
+  }
   while (_queue.length > 0) {
     const item = _queue.shift();
     if (Date.now() > item.ttl_at) {

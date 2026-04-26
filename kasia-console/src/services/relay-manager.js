@@ -224,6 +224,24 @@ export function sendCommand(relayNodeId, command) {
  * @param {number} [timeoutMs=30000] - 超时毫秒
  * @returns {Promise<{txId?, fee?, error?}>}
  */
+/**
+ * Wait until a relay child is running and ready to receive IPC commands.
+ * Polls every 500ms up to timeoutMs. Returns when ready, throws on timeout.
+ * Used by broker-action-queue to hold pump during console-restart relay race
+ * (T-J2-24, J1 a242bfd5 R5: NWT 报 console restart ~10s 内 accept_v1 全 FAIL '
+ * Relay not running' 因 retry 6s/12s/18s 总 36s 仍可能 race).
+ */
+export async function waitForRelay(relayNodeId, timeoutMs = 60000) {
+  const POLL_MS = 500;
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const state = _relays[relayNodeId];
+    if (state?.child?.send) return;
+    await new Promise(r => setTimeout(r, POLL_MS));
+  }
+  throw new Error(`waitForRelay: ${relayNodeId.slice(0, 8)} not ready after ${timeoutMs / 1000}s`);
+}
+
 export function sendCommandAsync(relayNodeId, command, timeoutMs = 30000) {
   const state = _relays[relayNodeId];
   if (!state?.child?.send) return Promise.reject(new Error('Relay not running'));
