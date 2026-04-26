@@ -25,7 +25,7 @@ import { decrypt } from './crypto.js';
  * @param {object} row - { tx_hash, content, sender_address, channel_name, created_at }
  */
 export { _executeHedge as executeHedge };
-export { _autoPayExchange as triggerAutoPay, _autoSendKas };
+export { _autoPayExchange as triggerAutoPay, _autoSettleAsset, _autoSettleAsset as _autoSendKas };
 
 export async function onBroadcastWritten(row) {
   if (!row.content || !row.content.startsWith('{"t":"kanet_')) return;
@@ -712,8 +712,8 @@ async function handleExchangeAccept(msg) {
     const localRelay = sqlite.prepare('SELECT id, is_dex_broker FROM relay_nodes WHERE address = ?').get(result.taker);
     if (localRelay && !localRelay.is_dex_broker) {
       console.log(`[exchange] local taker detected, triggering auto-send-KAS for offer ${result.id.slice(0,8)}`);
-      setImmediate(() => _autoSendKas(result, localRelay.id).catch(e =>
-        console.error(`[exchange] auto-send-KAS error: ${e.message}`)
+      setImmediate(() => _autoSettleAsset(result, localRelay.id).catch(e =>
+        console.error(`[exchange] auto-settle-asset error: ${e.message}`)
       ));
     } else if (localRelay?.is_dex_broker) {
       console.log(`[exchange] DEX broker taker — skip auto-send-KAS (non-custodial) offer=${result.id.slice(0,8)}`);
@@ -1385,20 +1385,38 @@ async function _autoPayExchange(offer, takerRelayNodeId) {
 }
 
 /**
- * Auto-send KAS for kaspa_tx offers where taker is local Agent.
- * Mirror of _autoPayExchange but for KAS instead of USDT.
- * Sends KAS via Relay IPC transfer, then submits TX hash for verification.
+ * Auto-settle asset for offers where taker is local Agent (KAS or any registered asset).
+ * Mirror of _autoPayExchange but for the want_asset side (taker delivers what offer wants).
+ *
+ * T-J1-2026-04-27 v1.1 Phase A 协议层 step 2 (NWT 23:42 + Owner '自决, 赶紧的'):
+ * rename _autoSendKas → _autoSettleAsset, guard 从 KAS-only 改 isSupported (asset-registry),
+ * 调 J1 Phase B settler-router.sendAsset 真路由 (KAS 走 kasia settler / USDT/USDC 走 evm settler).
+ *
+ * 现行为兼容: 现 trigger condition (line 711) 仍 'kaspa_tx + want_asset==KAS', 函数被调时
+ * want_asset 真就是 'KAS', isSupported('KAS', 'kaspa') = true, 调 sendAsset 经 'kasia' settler
+ * 内部走 sendCommandAsync({type:'send_kas', target, amount_kas}) — relay 行为同前.
+ *
+ * v1.1 Phase A step 3 (后续): trigger condition (line 711) 改 isSupported(want_asset, want_chain),
+ * 任意 asset_pair 都触发 _autoSettleAsset. 那时 USDT/USDC offer 真自动 settle.
  */
-async function _autoSendKas(offer, takerRelayNodeId) {
-  const wantAsset = offer.want_asset?.toUpperCase();
-  if (wantAsset !== 'KAS') {
-    console.log(`[exchange-autosend] Offer ${offer.id.slice(0,8)} wants ${offer.want_asset}, not KAS, skip`);
+async function _autoSettleAsset(offer, takerRelayNodeId) {
+  const { isSupported } = await import('./asset-registry.js');
+  const { sendAsset } = await import('./settler-router.js');
+
+  const wantAsset = offer.want_asset;
+  const wantChain = offer.want_chain || (wantAsset?.toUpperCase() === 'KAS' ? 'kaspa' : null);
+  if (!wantAsset || !wantChain) {
+    console.log(`[exchange-autosettle] Offer ${offer.id.slice(0,8)} missing want_asset/chain (${wantAsset}/${wantChain}), skip`);
+    return;
+  }
+  if (!isSupported(wantAsset, wantChain)) {
+    console.log(`[exchange-autosettle] Offer ${offer.id.slice(0,8)} ${wantAsset}/${wantChain} not in asset-registry, skip`);
     return;
   }
 
   const amount = parseFloat(offer.want_amount);
   if (!amount || amount <= 0) {
-    console.log(`[exchange-autosend] Invalid KAS amount ${offer.want_amount}, skip`);
+    console.log(`[exchange-autosettle] Invalid amount ${offer.want_amount} for ${wantAsset}, skip`);
     return;
   }
 
@@ -1406,52 +1424,48 @@ async function _autoSendKas(offer, takerRelayNodeId) {
   const meta = JSON.parse(offer.verification_meta || '{}');
   const recipientAddress = meta.expected_address || offer.maker;
   if (!recipientAddress) {
-    console.log(`[exchange-autosend] No recipient address for offer ${offer.id.slice(0,8)}, skip`);
+    console.log(`[exchange-autosettle] No recipient address for offer ${offer.id.slice(0,8)}, skip`);
     return;
   }
 
-  console.log(`[exchange-autosend] Sending ${amount} KAS → ${recipientAddress.slice(-12)} for offer ${offer.id.slice(0,8)}`);
+  console.log(`[exchange-autosettle] Sending ${amount} ${wantAsset}/${wantChain} → ${recipientAddress.slice(-12)} for offer ${offer.id.slice(0,8)}`);
 
-  // Wait for UTXO to settle — accept broadcast just consumed a UTXO
+  // Wait for UTXO to settle — accept broadcast just consumed a UTXO (Kaspa) or nonce confirm (EVM)
   await new Promise(r => setTimeout(r, 5000));
 
   try {
-    const { sendCommandAsync } = await import('./relay-manager.js');
-    const sendResult = await sendCommandAsync(takerRelayNodeId, {
-      type: 'transfer',
-      target: recipientAddress,
-      amount: String(amount),
+    // 调 J1 Phase B settler-router (commit 6b7b35a) 真路由
+    const sendResult = await sendAsset({
+      asset: wantAsset, chain: wantChain, to: recipientAddress, qty: amount, relayId: takerRelayNodeId,
     });
 
-    const txId = sendResult?.txId;
-    if (!txId) {
-      console.error(`[exchange-autosend] KAS send returned no txId`);
+    const txId = sendResult?.txHash || sendResult?.txId;
+    if (!sendResult?.ok || !txId) {
+      console.error(`[exchange-autosettle] ${wantAsset}/${wantChain} send failed: ${sendResult?.error || 'no txId'}`);
       recordChainEvent({
-        eventType: 'exchange_kas_send_failed',
+        eventType: 'exchange_settle_failed',
         fromAddress: offer.taker,
-        payload: JSON.stringify({ offer_id: offer.id, error: 'no txId returned' }),
+        payload: JSON.stringify({ offer_id: offer.id, asset: wantAsset, chain: wantChain, error: sendResult?.error || 'no txId' }),
       });
       return;
     }
 
-    console.log(`[exchange-autosend] KAS sent TX: ${txId}`);
+    console.log(`[exchange-autosettle] ${wantAsset}/${wantChain} sent TX: ${txId}`);
 
     // Write payment_tx to offer
     sqlite.prepare('UPDATE exchange_offers SET payment_tx = ? WHERE id = ?').run(txId, offer.id);
 
     // === NO TX NO STATE CHANGE (P1-C consensus: 铁律不分场景) ===
     // Broadcast kanet_exchange_paid_v1 — must succeed before processPaymentSubmit.
-    // KAS TX is real (local send), but maker node needs the paid broadcast to know.
-    // T-J1-2026-04-27 v1.1 Phase A 协议层 step 1 (~1 LOC, J2 #3 6 challenge 接受):
-    // payment_asset literal 'KAS' → offer.want_asset (DB 真值). 现行为不变 (offer.want_asset
-    // 现都是 'KAS' 因为 _autoSendKas guard line 1394). v1.1 Phase A step 2 _autoSendKas →
-    // _autoSettleAsset rename + 接 任意 asset 时, payment_asset 真值跟 want_asset 一致.
+    // T-J1-2026-04-27 v1.1 Phase A 协议层 step 2: payment_asset + payment_chain 全 DB 真值
+    // (兼容 KAS path = offer.want_asset='KAS', want_chain='kaspa', 同前; multi-asset 后真带
+    // USDT/USDC + bnb/eth 等真值 from DB).
     const paidMsg = JSON.stringify({
       t: 'kanet_exchange_paid_v1',
       offer_id: offer.id,
       payment_tx: txId,
-      payment_chain: 'kaspa',
-      payment_asset: offer.want_asset || 'KAS',
+      payment_chain: wantChain,
+      payment_asset: wantAsset,
       payment_amount: offer.want_amount,
       payer: offer.taker,
     });
@@ -1492,11 +1506,11 @@ async function _autoSendKas(offer, takerRelayNodeId) {
       return;
     }
 
-    console.log(`[exchange-autosend] Broadcast kanet_exchange_paid_v1 for KAS payment`);
+    console.log(`[exchange-autosettle] Broadcast kanet_exchange_paid_v1 for ${wantAsset}/${wantChain} payment`);
 
     // Broadcast succeeded — NOW safe to trigger verification
-    processPaymentSubmit({ offer_id: offer.id, payment_tx: txId, payment_chain: 'kaspa' });
-    console.log(`[exchange-autosend] verification triggered for offer ${offer.id.slice(0,8)}`);
+    processPaymentSubmit({ offer_id: offer.id, payment_tx: txId, payment_chain: wantChain });
+    console.log(`[exchange-autosettle] verification triggered for offer ${offer.id.slice(0,8)}`);
 
   } catch (err) {
     console.error(`[exchange-autosend] Failed: ${err.message}`);
