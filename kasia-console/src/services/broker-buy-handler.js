@@ -161,8 +161,13 @@ async function _brokerPublishKasOffer(qtyKas, payChain, give_asset = 'KAS') {
       } catch {}
     }
   }
-  const { fetchKasPrice } = await import('./market-seeder.js');
-  const midPrice = await fetchKasPrice();
+  // T-J2-2026-04-27 Bug 5 真定位错 — 之前 fix 在 buyPreview line 271 (preview only),
+  // 真 publish path 在此 (_brokerPublishKasOffer 真 publish 真上链). 真 fix:
+  // fetchKasPrice → fetchPrice(give_asset, 'USDT') generic. KAS=CMC, USDC/USDT=peg 1.0.
+  const { fetchPrice } = await import('./price-oracle.js');
+  const priceResult = await fetchPrice(give_asset, 'USDT');
+  if (!priceResult.ok) return { ok: false, error: priceResult.error };
+  const midPrice = priceResult.price;
   if (!midPrice || midPrice <= 0) return { ok: false, error: 'price_unavailable' };
   const wallet = sqlite.prepare(`
     SELECT chain, address FROM agent_wallets
