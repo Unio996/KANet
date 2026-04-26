@@ -19,7 +19,8 @@ const RETRY_BACKOFF_MS = 6000;
 // T-J2-26b (J1 case 2 8/12 TIMEOUT 真因): dm_paid_no_tx 漏注册导致 'unknown queue kind' FAIL after 3 = 90s 静默.
 // T-NWT-V2: dm_auto_payment_detected — bsc-incoming-watcher 主动 DM user 汇报检测到链上入账.
 // T-J2-V2 议 2: dm_kas_delivered — exchange-machine deliver 后主动 DM user 'KAS 已发' (Owner 痛点 #2).
-const TX_PRODUCING_KINDS = new Set(['dm_quote', 'dm_pay_instr', 'dm_completion', 'dm_position', 'dm_paid_no_tx', 'dm_auto_payment_detected', 'dm_kas_delivered', 'accept_v1', 'paid_v1', 'sendKas']);
+// T-NWT-V2 议 1: dm_order_confirmed — handleBuyIntent YES 路径首发"订单已确认"信号 (Owner 要求 #1).
+const TX_PRODUCING_KINDS = new Set(['dm_quote', 'dm_pay_instr', 'dm_completion', 'dm_position', 'dm_paid_no_tx', 'dm_auto_payment_detected', 'dm_kas_delivered', 'dm_order_confirmed', 'accept_v1', 'paid_v1', 'sendKas']);
 
 const _queue = [];               // FIFO array, items dequeue from head
 const _userActions = new Map();  // peer → Set(actionId)  (J2 #B 用 getQueuePosition)
@@ -158,6 +159,7 @@ async function executeAction(item) {
     case 'dm_paid_no_tx':  // T-J2-26b: PAID_NO_TX_REGEX 引导 reply, 路由跟其他 DM 一致
     case 'dm_auto_payment_detected':  // T-NWT-V2: bsc-incoming-watcher 主动汇报检测到入账
     case 'dm_kas_delivered':  // T-J2-V2 议 2: 主动汇报 KAS 已发 (Owner 痛点 #2)
+    case 'dm_order_confirmed':  // T-NWT-V2 议 1: YES 路径首发订单确认 (Owner 要求 #1)
       return sendCommandAsync(BROKER_RELAY_ID, { type: 'send_message', target: item.peer, message: p.message });
     case 'accept_v1':
       return sendCommandAsync(BROKER_RELAY_ID, { type: 'send_broadcast', channel: p.channel || 'kanet-exchange', message: p.message });

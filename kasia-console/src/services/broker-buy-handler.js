@@ -422,14 +422,24 @@ export async function handleBuyIntent(peerAddr, message) {
         await _enqueueAccept(p.id, peerAddr, pending.pay_chain);
         _recordAccept({ offerId: p.id, userPeer: peerAddr, qty: p.take_qty, quotedUsdt: p.take_usdt.toFixed(6), payChain: pending.pay_chain, acceptTx: null });
       }
+      // T-NWT-V2 议 1 (Owner 要求 #1: 起码的订单确认 UX): 拆 2 条 DM —
+      // 第 1 条 dm_order_confirmed 明确告诉 user "订单已确认", 第 2 条 dm_pay_instr 纯付款指引.
+      // 之前一条混 "✓ 已接单. 请付:" user 不知道是 "确认了" 还是 "马上要付". 拆开心里有底.
+      // FIFO 单线 pump 保证 user 先收订单确认, 后收付款指引.
+      const orderId = pending.picks[0].id.slice(0, 8) + (pending.picks.length > 1 ? `+${pending.picks.length - 1}` : '');
+      const orderType = pending.picks.length === 1
+        ? (pending.picks[0].broker_dynamic ? 'broker 自挂' : '单 maker')
+        : `拼 ${pending.picks.length} 笔`;
+      _qDm('dm_order_confirmed', peerAddr,
+        `📋 订单已确认 #${orderId}\n· 买 ${pending.total_kas} KAS / 付 ${pending.total_usdt.toFixed(6)} USDT (${pending.pay_chain.toUpperCase()})\n· ${orderType}\n· 我马上把付款地址发给你, 收到付款自动验证 + 自动发 KAS, 全程不用你查链.`);
       const lines = pending.picks.map((p, i) =>
         `${i+1}. ${p.take_qty} KAS → 付 ${p.take_usdt.toFixed(6)} USDT 到 ${p.maker_addr?.slice(0,22)||'?'}...${p.maker_addr?.slice(-6)||''}`
       ).join('\n');
       const note = pending.picks.length > 1
-        ? `\n\n注意: 共 ${pending.picks.length} 笔 USDT 转账 (拼单聚合). 每笔付完回我 "我付了 0xTX", 一笔一条.`
-        : `\n\n付完回我 "我付了 0xTX" (BSC 交易哈希), 自动通知 Maker.`;
+        ? `\n\n注意: 共 ${pending.picks.length} 笔 USDT 转账 (拼单聚合). 付完不用回复, 我会自动检测; 慢则 1-2min, 快则 30s. 想加速可回 "我付了 0xTX".`
+        : `\n\n付完不用回复, 我会自动检测; 慢则 1-2min, 快则 30s. 想加速可回 "我付了 0xTX".`;
       _qDm('dm_pay_instr', peerAddr,
-        `✓ 已接单. 请 30min 内分笔付:\n${lines}${note}`);
+        `请 30min 内付:\n${lines}${note}`);
       return '';
     }
     if (CANCEL_WORDS.includes(trimmed)) {
