@@ -229,12 +229,22 @@ function _enqueuePaid(offerId, paymentTx, payChain, peerAddr) {
 //
 // 防 hallucinate "已下单" — LLM 只能用 preview 真数据 (含 user_kasia_address / unit_price /
 // total_usdt / maker_payment_address) 不能编. user reject "NO" 路径无 state cleanup (没 set 任何).
-export async function buyPreview({ user_kasia, qty, pay_chain }) {
+export async function buyPreview({ user_kasia, qty, pay_chain, give_asset = 'KAS' }) {
   if (!user_kasia || !qty || qty <= 0 || !pay_chain) {
     return { ok: false, error: 'missing fields (user_kasia/qty/pay_chain)' };
   }
+  // T-J1-2026-04-27 v1.1 Phase A NWT bug 2 真修 (Owner 22:54 钦定 '不要假, 真刀实枪'):
+  // generic asset 路径前真 validate. unsupported asset (BTC/USDC/etc broker 没库存) 真 reject
+  // 不假 'ok:true' 让 user 真转 USDT 后真 dispute. 调 J1 Phase B asset-registry getAsset.
+  const { getAsset, listAssets } = await import('./asset-registry.js');
+  if (!getAsset(give_asset)) {
+    return {
+      ok: false, error: 'asset_not_supported',
+      message: `broker 真不支持 ${give_asset}. 现 supported: ${listAssets().join(', ')}.`,
+    };
+  }
   if (qty < MIN_QTY_KAS) {
-    return { ok: false, error: `qty_too_small`, message: `最小买 ${MIN_QTY_KAS} KAS (broker fee + dust 保护). 改大点.` };
+    return { ok: false, error: `qty_too_small`, message: `最小买 ${MIN_QTY_KAS} ${give_asset} (broker fee + dust 保护). 改大点.` };
   }
   const existing = _pendingAccepts.get(user_kasia);
   if (existing && Date.now() < existing.expires_at) {
@@ -250,8 +260,13 @@ export async function buyPreview({ user_kasia, qty, pay_chain }) {
   // broker_dynamic_quote 价格 (但不 publish)
   if (cumKas < qty) {
     const deficit = qty - cumKas;
-    const { fetchKasPrice } = await import('./market-seeder.js');
-    const midPrice = await fetchKasPrice();
+    // T-J1-2026-04-27 v1.1 Phase A NWT bug 3 真修: fetchKasPrice → J1 price-oracle.fetchPrice
+    // generic. unsupported pair (BTC/XRP/etc) 真 reject 不 silent 0.0342 假 KAS 价误用.
+    // 现 KAS path: fetchPrice('KAS','USDT') 内部仍调 fetchKasPrice CMC 真值, 行为同前.
+    const { fetchPrice } = await import('./price-oracle.js');
+    const priceResult = await fetchPrice('KAS', 'USDT');
+    if (!priceResult.ok) return { ok: false, error: priceResult.error, message: `价格暂查不到 (${priceResult.error}), 请稍后再试.` };
+    const midPrice = priceResult.price;
     if (!midPrice || midPrice <= 0) return { ok: false, error: 'price_unavailable', message: '价格暂查不到, 请稍后再试.' };
     const wallet = sqlite.prepare(`
       SELECT chain, address FROM agent_wallets
