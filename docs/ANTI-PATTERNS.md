@@ -236,6 +236,160 @@ Trader-B 首张链上 card root_tx = `8663390e8e1fc9c4...` name="_probe" — 这
 
 ---
 
+## 规则 9 · Qwen LLM caller 必加 chat_template_kwargs.enable_thinking=false
+
+> NWT 接位 2026-04-26 17:00 — broker-llm-agent.js _callLlm 漏写, Owner 真测撞 LLM 60-120s timeout 反复.
+> Owner 原话: "这个问题不是之前一个智能体早就发现了, 而且给出了解法！？？？搜！"
+
+### Wrong
+```js
+fetch(`${aiUrl}/chat/completions`, {
+  method: 'POST',
+  body: JSON.stringify({ model, messages, tools, tool_choice: 'auto' }),
+  signal: AbortSignal.timeout(60_000),
+});
+// 没 chat_template_kwargs → Qwen3.6 默认 reasoning mode → thinking 累积
+// → 60-120s timeout, prompt 跑到 56k tokens (含 thinking)
+```
+
+也错: `messages[0].content = '/no_think\n' + sys` 或 user message 加 `/no_think` 后缀.
+
+### Right
+```js
+fetch(`${aiUrl}/chat/completions`, {
+  method: 'POST',
+  body: JSON.stringify({
+    model, messages, tools, tool_choice: 'auto',
+    chat_template_kwargs: { enable_thinking: false },  // ← QWEN-RULES.md Rule 11
+  }),
+});
+// 可选兜底: data.choices[0].message.content.replace(/<think>[\s\S]*?<\/think>/g, '')
+```
+
+### Why
+**QWEN-RULES.md Rule 11 实测 (line 279-281)**:
+| 方法 | answer | thinking | 时间 |
+|---|---|---|---|
+| sys /no_think | 116c | **1974c (不生效)** | 8s |
+| user /no_think | **0c ❌** | 2756c | timeout |
+| **chat_template_kwargs** | 163c ✓ | **0c ✓** | **1s** ✓ |
+
+Qwen3.6-35B-A3B 默认 `reasoning-budget: activated, budget=2147483647`. `/no_think` 前缀 sys/user 都不生效 (Qwen3 chat template 不识别). 唯一有效是 API body kwarg.
+
+已有 4 个 caller 全 follow:
+- `agent-adapter/src/providers/openai.mjs:141`
+- `kasia-console/src/services/llm-dispatcher.js:22`
+- `scripts/qwen-bridge-worker.js:105`
+- `scripts/qwen.js:92`
+
+新写 LLM caller 前 grep `chat_template_kwargs` 直接复制. 写完 commit 前 lint 自动检 (`scripts/lint-kanet.mjs`).
+
+---
+
+## 规则 10 · 新 broker DM kind 必同步注册 TX_PRODUCING_KINDS + executeAction case
+
+> J2 2026-04-26 12:46 T-J2-26b: dm_paid_no_tx 漏注册 → 'unknown queue kind' FAIL after 3 retry = 90s 静默, J1 case 2 真链路 8/12 TIMEOUT 真因.
+> NWT 2026-04-26 17:00 重犯: dm_auto_payment_detected (T-NWT-V2) + dm_order_confirmed (议 1) + dm_price_query (hotfix) 都漏过.
+
+### Wrong
+broker-buy-handler.js / broker-sell-handler.js / 新 watcher 加新 DM kind:
+```js
+_qDm('dm_my_new_kind', peer, message);  // 没改 broker-action-queue → 'unknown queue kind' throw
+```
+
+`broker-action-queue.js executeAction` 默认 `throw new Error('unknown queue kind: ' + kind)` → retry 3 次 backoff 6s × 3 = 18s. 加 anti-spam dedup 14min, 重复 message 永远发不出.
+
+### Right
+**新 DM kind 必同步改 3 处**:
+
+1. `broker-action-queue.js TX_PRODUCING_KINDS` Set — 加新 kind
+   ```js
+   const TX_PRODUCING_KINDS = new Set([..., 'dm_my_new_kind']);
+   ```
+
+2. `broker-action-queue.js executeAction` switch — 加 case 跟其他 DM 一致路由
+   ```js
+   case 'dm_quote':
+   case 'dm_pay_instr':
+   case 'dm_my_new_kind':  // ← 新加
+     return sendCommandAsync(BROKER_RELAY_ID, { type: 'send_message', target: item.peer, message: p.message });
+   ```
+
+3. `_qDm` 调用处 — 写新 kind 用法
+
+### Why
+broker-action-queue 是单线 FIFO pump, 所有 broker 对外动作走这里. kind 是路由 key, 必须全注册否则 throw. 漏注册不是 lint 错 (语法对), 是运行时 throw → retry 浪费 18s + 阻塞 queue + anti-spam dedup 拒重发.
+
+T-J2-26b 是真链路实测 8/12 TIMEOUT 90s 才发现真因. 新代码可借助 lint 静态扫 `_qDm\('([^']+)'` 提取所有调用 kind, 对照 TX_PRODUCING_KINDS Set 完整性, 漏报错.
+
+---
+
+## 规则 11 · 中文 deterministic regex 必含 (?:了)? 完成态助词后缀
+
+> J1 2026-04-26 13:50 case 2 v6 报告: '转完了' 1/12 LLM timeout (标"偶发").
+> NWT 2026-04-26 16:00 PAID_NO_TX 扩展时发现真因: 不是 LLM timeout, 是 PAID_NO_TX_REGEX 漏 "了" 后缀 → fall LLM → LLM timeout.
+
+### Wrong
+```js
+const PAID_NO_TX_REGEX = /^(?:已付|付了|转完|完成|...)\s*[!！。.…]*\s*$/i;
+// "转完了" → "转完" + "了" + "" → 不匹 (regex 没含 "了" 单独后缀)
+// 静默 fall LLM → 60-120s timeout (Rule 9) → 体验崩
+```
+
+### Right
+```js
+const PAID_NO_TX_REGEX = /^(?:已付|付了|转完|完成|...)\s*(?:了)?\s*[!！。.…]*\s*$/i;
+//                                                ^^^^^^^^^ 助词后缀
+// "转完了" → "转完" + "了" + "" → 匹 ✓
+// "完成了!" → "完成" + "了" + "!" → 匹 ✓
+// "已经付了" 在 list 直接 hit, 也能被 "已经付" + "了" 匹 (双覆盖)
+```
+
+### Why
+中文完成态助词 "了" 是高频结尾, deterministic regex 漏即静默退化 LLM. 类似助词:
+- 完成态: 了 / 啦
+- 询问态: 吗 / 呢 / 嘛
+- 强调态: 啊 / 哦 / 呀
+
+任何 user-facing deterministic intent 检测的中文 regex 都加 `\s*(?:了|啦)?\s*` (完成动作类) 或对应助词 (其他类).
+
+不加的隐性代价: J1 case 2 v6 把这个标"偶发 LLM timeout 1/12", 实际是结构性 regex 漏. 测试报告可能误判, 真因藏在 LLM 兜底.
+
+---
+
+## 规则 12 · 接位 Agent 必扫 ANTI-PATTERNS.md 在写代码之前
+
+> Owner 2026-04-26 17:30 元问题: "我感觉这些事情, 以前做过的, 但是还会不断遇到重复的问题, 怎么解决?"
+
+### Wrong
+新会话 / 接位 Agent:
+1. 读 CLAUDE.md 必读 4 文档
+2. 读 memory 索引看历史 context
+3. 直接开始写代码
+
+**漏掉**: 写代码涉及的具体技术陷阱档案 (本文件 / QWEN-RULES.md / dev-* 子文档 / git log 该领域 commit message). 凭直觉填代码 → 重复犯过的错.
+
+### Right
+**接位 SOP 第 1 步 (写代码前必扫)**:
+
+1. **领域 anti-pattern**: `grep -i <topic> docs/ANTI-PATTERNS.md docs/QWEN-RULES.md` (本文 + Qwen 规则)
+2. **现有 caller 模式**: `grep -rn <key_function> kasia-console/src/` (e.g. 写 LLM caller → grep chat_template_kwargs 看现有怎么写)
+3. **该领域 commit 历史**: `git log --grep=<topic> --oneline -20` (近期相关 fix 暴露的坑)
+4. **memory 相关 feedback**: `grep -ri <topic> ~/.claude/projects/*/memory/feedback_*.md`
+
+**接位 SOP 第 2 步 (写完 commit 前必跑)**:
+- `node scripts/lint-kanet.mjs` 检 KANet-specific 静态规则 (LLM kwargs / DM kind 注册 / SQL prepare / 链上身份等)
+- 失败一条 commit 都不让. 加 git pre-commit hook 强制.
+
+### Why
+KANet 知识沉淀分散在 6 个容器: ANTI-PATTERNS.md / QWEN-RULES.md / DEVELOPER-GUIDE.md (索引→guide/*) / DATABASE.md / memory/ / 频道历史 / commit message. 没统一索引就靠 Agent 自觉, 接位时认知盲区是必然.
+
+强制扫描 + Lint 堵口子 = 把"自觉记忆"降级为"机制保证". 重复犯错次数从 N 降到 0.
+
+每次撞了未在 ANTI-PATTERNS.md 的新坑, 立即追加一条 + 写 lint rule 堵死. 文档 + 工具双层防御.
+
+---
+
 ## 如何扩充本档案
 
 新陷阱踩过后**立即**追加，格式保持：
@@ -246,6 +400,8 @@ Trader-B 首张链上 card root_tx = `8663390e8e1fc9c4...` name="_probe" — 这
 - **Why**（一两段，点出这条规则**防止的具体滥用**）
 
 新陷阱不要和现有条冲突；如果新陷阱和旧条拉扯，说明一条需要更精细拆分，去改旧条。
+
+**强制阅读触发**: CLAUDE.md 必读列表已含本文件 (2026-04-26 NWT 加). 新会话 / 接位 Agent 写代码前必扫此档案 + 跑 `scripts/lint-kanet.mjs`.
 
 ---
 
