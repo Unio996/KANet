@@ -7,6 +7,9 @@ import { randomUUID } from 'crypto';
 
 const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
 const BUY_REGEX = /^\s*(?:买|buy)\s*(\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*KAS\s*$/i;
+// T-J1-19a (J2 probe-5a 暴露): broker dust 单接受漏洞 — finalizeBuy / _aggregateWithFallback
+// 必须拒小于 MIN_QTY 的请求, 否则 broker 锁 fund_locks 浪费 broadcast tx + 用户 dust 被 broker fee 吃光.
+const MIN_QTY_KAS = 1.0;
 // T-J2-12 真人 PAID 意图: "我付了 0xabc...", "已付 0x...", "paid 0x...", "pay 0x..."
 const PAID_REGEX = /(?:已付|付了|我付|paid|pay)[\s\S]{0,40}?\b(0x[a-fA-F0-9]{64})\b/i;
 const CONFIRM_WORDS = ['YES', 'yes', 'y', '确认', '好', '行', 'OK', 'ok'];
@@ -171,6 +174,9 @@ export async function finalizeBuy({ user_kasia, qty, pay_chain }) {
   if (!user_kasia || !qty || qty <= 0 || !pay_chain) {
     return { ok: false, error: 'missing fields (user_kasia/qty/pay_chain)' };
   }
+  if (qty < MIN_QTY_KAS) {
+    return { ok: false, error: `qty too small: ${qty} < min ${MIN_QTY_KAS} KAS (broker fee + dust protection)` };
+  }
   const payChain = String(pay_chain).toLowerCase();
   const merged = await _aggregateWithFallback(qty, payChain);
   if (!merged.ok) return { ok: false, error: merged.error, available: merged.available };
@@ -329,6 +335,10 @@ export async function handleBuyIntent(peerAddr, message) {
   if (!m) return null;
   const qty = parseFloat(m[1]);
   if (qty <= 0) return null;
+  if (qty < MIN_QTY_KAS) {
+    _qDm('dm_quote', peerAddr, `📊 ${qty} KAS 太小 (最小 ${MIN_QTY_KAS} KAS, 防 dust 单 + broker fee 吃光本金). 改大点回 "买 N KAS".`);
+    return '';
+  }
 
   const payChain = 'bnb';
   const merged = await _aggregateWithFallback(qty, payChain);

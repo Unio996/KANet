@@ -281,6 +281,26 @@ describe('aggregation logic — pure', () => {
     assert.equal(r.total_kas, 10);  // first offer fully taken, user gets all 10 KAS for 0.5 request (overshoot ok)
   });
 
+  it('case 14 (T-J1-19a, J2 probe-5a regression): dust qty rejected by finalizeBuy', async () => {
+    const { finalizeBuy } = await import('../src/services/broker-buy-handler.js');
+    for (const dustQty of [0.05, 0.1, 0.5, 0.99]) {
+      const r = await finalizeBuy({ user_kasia: 'kaspa:test_user', qty: dustQty, pay_chain: 'bnb' });
+      assert.equal(r.ok, false, `dust qty ${dustQty} should be rejected`);
+      assert.match(r.error, /qty too small|min/, `error must mention qty/min, got: ${r.error}`);
+    }
+  });
+
+  it('case 15 (T-J1-19a): qty >= MIN_QTY passes dust gate (uses unsupported chain to short-circuit downstream)', async () => {
+    const { finalizeBuy } = await import('../src/services/broker-buy-handler.js');
+    // qty=1.0 passes dust gate. We use 'polygon' so _brokerPublishKasOffer fails at the
+    // SELECT agent_wallets check (broker has no polygon wallet on J1 machine), preventing
+    // any real broadcast. Error must NOT mention "qty too small".
+    const r = await finalizeBuy({ user_kasia: 'kaspa:test_user', qty: 1.0, pay_chain: 'polygon' });
+    if (!r.ok) {
+      assert.doesNotMatch(r.error, /qty too small/, `qty=1.0 should pass dust gate, got dust error: ${r.error}`);
+    }
+  });
+
   it('case 13: qty exactly equals single offer (no overshoot)', () => {
     const book = [
       { id: 'a', maker: 'M1', give_asset: 'KAS', give_amount: '50', want_asset: 'USDT', want_amount: '1.7', protocol_status: 'open',
