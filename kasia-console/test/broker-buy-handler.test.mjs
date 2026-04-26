@@ -347,6 +347,81 @@ describe('aggregation logic — pure', () => {
     }
   });
 
+  // ── case 13 (T-J1-19c): TTL expiry edge cases ──
+  it('case 13a: expired quote (5min TTL past) — YES does not trigger accept enqueue', async () => {
+    const handler = await import('../src/services/broker-buy-handler.js');
+    handler._clearQuotes();
+    handler._clearPendingAccepts();
+    const peer = 'kaspa:test_ttl_quote_expired';
+    // Inject quote with expires_at in the past (1ms ago)
+    handler._testSetQuote(peer, {
+      picks: [{ id: 'stale_offer', take_qty: 5, take_usdt: 0.17, maker_addr: '0xSTALE' }],
+      total_kas: 5, total_usdt: 0.17, pay_chain: 'bnb',
+      expires_at: Date.now() - 1,
+    });
+    // 'YES' must NOT enter CONFIRM_WORDS branch (Date.now() >= expires_at), falls through
+    // BUY_REGEX (no match), returns null. No side effects (no _enqueueAccept, no _qDm).
+    let sendCalled = 0;
+    handler._testInjectSendCommand(() => { sendCalled++; return Promise.resolve({ ok: true }); });
+    try {
+      const r = await handler.handleBuyIntent(peer, 'YES');
+      assert.equal(r, null, `expired quote + YES must return null (fall-through), got ${JSON.stringify(r)}`);
+      assert.equal(sendCalled, 0, `expired quote must NOT trigger any send (no enqueue accept)`);
+    } finally {
+      handler._testResetSendCommand();
+      handler._clearQuotes();
+    }
+  });
+
+  it('case 13b: live quote (TTL not yet) — YES enters CONFIRM branch (regression guard)', async () => {
+    const handler = await import('../src/services/broker-buy-handler.js');
+    handler._clearQuotes();
+    handler._clearPendingAccepts();
+    const peer = 'kaspa:test_ttl_quote_live';
+    // Inject quote with expires_at 5min in future
+    handler._testSetQuote(peer, {
+      picks: [{ id: 'fresh_offer', take_qty: 5, take_usdt: 0.17, maker_addr: '0xFRESH' }],
+      total_kas: 5, total_usdt: 0.17, pay_chain: 'bnb',
+      expires_at: Date.now() + 5 * 60 * 1000,
+    });
+    // YES enters CONFIRM branch. Side-effect: enqueue accept_v1 (via broker-action-queue),
+    // we just verify _quotes is cleared after CONFIRM consumption.
+    handler._testInjectSendCommand(() => Promise.resolve({ ok: true }));
+    try {
+      await handler.handleBuyIntent(peer, 'YES');
+      assert.equal(handler._hasQuote(peer), false, 'quote must be consumed after YES');
+    } finally {
+      handler._testResetSendCommand();
+      handler._clearQuotes();
+      handler._clearPendingAccepts();
+    }
+  });
+
+  it('case 13c: expired pendingAccept (30min TTL past) — PAID DM does not enqueue paid_v1', async () => {
+    const handler = await import('../src/services/broker-buy-handler.js');
+    handler._clearQuotes();
+    handler._clearPendingAccepts();
+    const peer = 'kaspa:test_ttl_paid_expired';
+    handler._testSetPendingAccept(peer, {
+      picks: [{ id: 'stale_paid_offer', take_qty: 5, take_usdt: 0.17, maker_addr: '0xSTALEPAID', paid_tx: null }],
+      total_kas: 5, total_usdt: 0.17, pay_chain: 'bnb',
+      expires_at: Date.now() - 1,
+    });
+    // '我付了 0x...' tx — handler sees expired accept, deletes it, falls through to BUY_REGEX (no match), returns null
+    let sendCalled = 0;
+    handler._testInjectSendCommand(() => { sendCalled++; return Promise.resolve({ ok: true }); });
+    try {
+      const fakeTx = '0x' + 'a'.repeat(64);
+      const r = await handler.handleBuyIntent(peer, `我付了 ${fakeTx}`);
+      assert.equal(r, null, `expired accept + PAID must fall through, got ${JSON.stringify(r)}`);
+      assert.equal(sendCalled, 0, `expired accept must NOT trigger paid_v1 enqueue`);
+      assert.equal(handler._hasPendingAccept(peer), false, `expired accept must be cleaned up`);
+    } finally {
+      handler._testResetSendCommand();
+      handler._clearPendingAccepts();
+    }
+  });
+
   it('case 14 (T-J1-19a, J2 probe-5a regression): dust qty rejected by finalizeBuy', async () => {
     const { finalizeBuy } = await import('../src/services/broker-buy-handler.js');
     for (const dustQty of [0.05, 0.1, 0.5, 0.99]) {

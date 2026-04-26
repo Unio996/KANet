@@ -26,6 +26,9 @@ export function _testInjectSendCommand(fn) { _sendOverride = fn; }
 export function _testResetSendCommand() { _sendOverride = null; }
 export function _testInjectPublishOffer(fn) { _publishOverride = fn; }
 export function _testResetPublishOffer() { _publishOverride = null; }
+// T-J1-19c TTL test helpers — inject quote/pendingAccept with arbitrary expires_at.
+export function _testSetQuote(peer, data) { _quotes.set(peer, data); }
+export function _testSetPendingAccept(peer, data) { _pendingAccepts.set(peer, data); }
 export function _clearQuotes() { _quotes.clear(); }
 export function _hasQuote(peer) { return _quotes.has(peer); }
 export function _clearPendingAccepts() { _pendingAccepts.clear(); }
