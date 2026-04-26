@@ -162,7 +162,7 @@ export function detectStopRequest(fromAddress, messageText) {
       const existingTags = identity.tags ? identity.tags.split(',').map(t => t.trim()).filter(Boolean) : [];
       if (!existingTags.includes('do_not_contact')) {
         existingTags.push('do_not_contact');
-        sqlite.prepare('UPDATE identities SET tags = ?, notes = COALESCE(notes, "") || ? WHERE id = ?')
+        sqlite.prepare("UPDATE identities SET tags = ?, notes = COALESCE(notes, '') || ? WHERE id = ?")
           .run(existingTags.join(','), `\n[${new Date().toISOString()}] AUTO: Stop request detected — "${messageText.slice(0, 100)}"`, identity.id);
       }
     }
