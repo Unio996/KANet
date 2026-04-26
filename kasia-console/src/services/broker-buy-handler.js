@@ -161,8 +161,14 @@ async function _brokerPublishKasOffer(qtyKas, payChain, give_asset = 'KAS') {
       } catch {}
     }
   }
-  const { fetchKasPrice } = await import('./market-seeder.js');
-  const midPrice = await fetchKasPrice();
+  // T-J1-2026-04-27 v1.1 Bug 5 真 publish path 真修 (J2 #3 23:34 真测发现 a1107925 fix 错 path):
+  // 真 publish path _brokerPublishKasOffer line 164 仍 fetchKasPrice hardcode → 任意 give_asset
+  // 真 publish use KAS 价 0.0342 = 真 production 灾难 (USDC/USDT 真上链 want=0.0171 = 真 100x 损).
+  // 真改 fetchPrice generic + Bug 6: publish body give_asset literal 'KAS' → 参数化.
+  const { fetchPrice } = await import('./price-oracle.js');
+  const priceResult = await fetchPrice(give_asset, 'USDT');
+  if (!priceResult.ok) return { ok: false, error: priceResult.error };
+  const midPrice = priceResult.price;
   if (!midPrice || midPrice <= 0) return { ok: false, error: 'price_unavailable' };
   const wallet = sqlite.prepare(`
     SELECT chain, address FROM agent_wallets
@@ -179,14 +185,14 @@ async function _brokerPublishKasOffer(qtyKas, payChain, give_asset = 'KAS') {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         relayNodeId: BROKER_RELAY_ID,
-        give_asset: 'KAS',
+        give_asset,  // T-J1 Bug 6 真修: literal 'KAS' → give_asset 参数 (J2 de95f9224 同 fix)
         give_amount: String(qtyKas),
         want_asset: 'USDT',
         want_amount: wantUsdt,
         verification: 'cross_chain_tx',
         verification_meta: { accepted_chains: [{ chain: payChain, address: wallet.address }], expected_asset: 'USDT' },
         expires_minutes: 60,  // R2 (J2 推): 30→60 防 25min 慢付 → broker cancel → 资金事故
-        metadata: { source: 'broker_dynamic_quote', mid_price: midPrice, spread_pct: SPREAD_PCT },
+        metadata: { source: 'broker_dynamic_quote', mid_price: midPrice, spread_pct: SPREAD_PCT, give_asset },
       }),
     });
     const data = await res.json();
