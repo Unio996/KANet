@@ -10,33 +10,34 @@
 
 import { ethers } from 'ethers';
 import { decrypt } from './crypto.js';
-
-const EVM_RPC = {
-  bnb: 'https://bsc-dataseed1.binance.org',
-  eth: 'https://eth.llamarpc.com',
-};
-
-const USDT_CONTRACTS = {
-  bnb:  { address: '0x55d398326f99059fF775485246999027B3197955', decimals: 18 },
-  eth:  { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', decimals: 6 },
-};
+import { STABLECOINS, EVM_RPC_URLS } from './chains.js';
 
 /**
- * Transfer ERC20 (USDT) on an EVM chain.
+ * Transfer ERC20 stablecoin (USDT/USDC) on an EVM chain.
  *
- * @param {string} chain — 'bnb' or 'eth'
+ * T-NWT-2026-04-27 v1.1 (Owner 23:14 钦定 KANet 真 10 chain × multi-stable, J2 #3 a58158f37a):
+ * 真 source of truth = chains.js CHAIN_META (STABLECOINS + EVM_RPC_URLS exports).
+ * 老 hardcoded EVM_RPC / USDT_CONTRACTS 撤 — 真 generic from chains.js, 不 hardcode.
+ * 真支持: 7 EVM chain (bnb/eth/polygon/arbitrum/optimism/avalanche/base) × USDT/USDC/USDC.e.
+ *
+ * @param {string} chain — 'bnb' / 'eth' / 'polygon' / 'arbitrum' / 'optimism' / 'avalanche' / 'base'
  * @param {string} privkeyEncrypted — encrypted private key from agent_wallets
  * @param {string} toAddress — recipient EVM address
  * @param {number} amount — amount in human-readable units (e.g. 3.25)
- * @param {string} [asset='USDT'] — reserved for future multi-asset support
+ * @param {string} [asset='USDT'] — 'USDT' / 'USDC' / 'USDCe' (lowercased to lookup STABLECOINS)
  * @returns {Promise<{ ok: true, txHash: string } | { ok: false, error: string }>}
  */
 export async function transferERC20(chain, privkeyEncrypted, toAddress, amount, asset = 'USDT') {
-  const rpcUrl = EVM_RPC[chain];
-  const token = USDT_CONTRACTS[chain];
+  const rpcUrl = EVM_RPC_URLS[chain];
+  const stables = STABLECOINS[chain];
+  const assetKey = String(asset).toLowerCase();
+  const token = stables?.[assetKey];
 
-  if (!rpcUrl || !token) {
-    return { ok: false, error: `Chain ${chain} not supported for ERC20 transfer (supported: ${Object.keys(EVM_RPC).join(', ')})` };
+  if (!rpcUrl) {
+    return { ok: false, error: `Chain ${chain} not EVM or no RPC (supported: ${Object.keys(EVM_RPC_URLS).join(', ')})` };
+  }
+  if (!token) {
+    return { ok: false, error: `Asset ${asset} not registered on ${chain} (chains.js stables: ${Object.keys(stables || {}).join(', ') || 'none'})` };
   }
 
   let provider;
