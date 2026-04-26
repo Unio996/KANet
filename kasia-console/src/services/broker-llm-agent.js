@@ -95,7 +95,8 @@ const TOOLS = [
         type: 'object',
         properties: {
           direction: { type: 'string', enum: ['buy', 'sell'] },
-          qty: { type: 'number', description: 'KAS 数量, > 1' },
+          give_asset: { type: 'string', description: 'asset symbol user 想买/卖 (KAS / USDT / USDC / 等 supported list 见 SYSTEM_PROMPT). 默认 KAS 真 backward compat.' },
+          qty: { type: 'number', description: 'asset 数量 (>= asset.minQty)' },
           chain: { type: 'string', enum: ['bnb', 'polygon', 'sol', 'tron'] },
           address: { type: 'string', description: '卖路径必填收款地址' },
         },
@@ -112,7 +113,8 @@ const TOOLS = [
         type: 'object',
         properties: {
           direction: { type: 'string', enum: ['buy', 'sell'] },
-          qty: { type: 'number', description: 'KAS 数量, > 0.1' },
+          give_asset: { type: 'string', description: 'asset symbol user 想买/卖. 默认 KAS. 必跟 preview_order 时同 asset.' },
+          qty: { type: 'number', description: 'asset 数量 (>= asset.minQty)' },
           chain: { type: 'string', enum: ['bnb', 'polygon', 'sol', 'tron'], description: '买 = 你付 USDT 的链; 卖 = 你收 USDT 的链' },
           address: { type: 'string', description: '卖路径必填 (你 USDT 收款地址 EVM 0x..42 位 / SOL / TRON 格式). 买路径可省.' },
         },
@@ -202,10 +204,11 @@ async function _callLlm(messages) {
 async function _executeTool(peer, name, args) {
   if (name === 'preview_order') {
     // 议 B (Owner 钦定): 字段齐 preview, 不真 publish. user YES 后才 finalize_order.
-    const { direction, qty, chain, address } = args || {};
+    // T-NWT-2026-04-27 v1.1 Phase E: give_asset propagation (default 'KAS' backward compat).
+    const { direction, qty, chain, address, give_asset = 'KAS' } = args || {};
     if (direction === 'buy') {
       const { buyPreview } = await import('./broker-buy-handler.js');
-      return buyPreview({ user_kasia: peer, qty, pay_chain: chain });
+      return buyPreview({ user_kasia: peer, qty, pay_chain: chain, give_asset });
     }
     if (direction === 'sell') {
       // 卖 preview v1.1 留 (sellPreview 待加). 当前 fallback finalize_order 真路径.
@@ -215,10 +218,11 @@ async function _executeTool(peer, name, args) {
     return { ok: false, error: `unknown direction: ${direction}` };
   }
   if (name === 'finalize_order') {
-    const { direction, qty, chain, address } = args || {};
+    // T-NWT-2026-04-27 v1.1 Phase E: give_asset propagation (default 'KAS' backward compat).
+    const { direction, qty, chain, address, give_asset = 'KAS' } = args || {};
     if (direction === 'buy') {
       const { finalizeBuy } = await import('./broker-buy-handler.js');
-      return finalizeBuy({ user_kasia: peer, qty, pay_chain: chain });
+      return finalizeBuy({ user_kasia: peer, qty, pay_chain: chain, give_asset });
     }
     if (direction === 'sell') {
       if (!address) return { ok: false, error: '卖路径必填 recv_address' };
