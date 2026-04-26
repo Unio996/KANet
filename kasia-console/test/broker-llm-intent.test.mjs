@@ -41,6 +41,54 @@ describe('_detectIntent — false-positive guards', () => {
   it('"今天天气好" (no kas, no direction) → null', () => assert.equal(_detectIntent('今天天气好'), null));
 });
 
+describe('handleLlmDialog — T-J1-19f deterministic first-turn (NWT B fix)', () => {
+  // First turn + Chinese intent → deterministic reply (no LLM call, regression: NWT 6/6 中文 fail)
+  it('first-turn 中文 "买 50 KAS" → deterministic reply含 chain choices, NO LLM call', async () => {
+    const handler = await import('../src/services/broker-llm-agent.js');
+    // Use a fake peer with no history. _loadHistory does real DB query but returns []
+    // for unknown peer. handleLlmDialog detects intent → deterministic path.
+    const fakePeer = 'kaspa:test_first_turn_zh_' + Date.now();
+    const reply = await handler.handleLlmDialog(fakePeer, '买 50 KAS');
+    assert.match(reply, /50 KAS/, `reply must mention qty 50 KAS, got: ${reply}`);
+    assert.match(reply, /BSC|Polygon|SOL|TRON|链/, `reply must offer chain choices, got: ${reply}`);
+    // CRITICAL: must NOT contain "买还是卖" (the symptom of NWT 6/6 fail)
+    assert.doesNotMatch(reply, /买还是卖|想买还是卖|买.*还是.*卖/, `reply must NOT ask direction (NWT regression), got: ${reply}`);
+  });
+
+  it('first-turn 中文 "我要买 50 KAS" → deterministic, no direction question', async () => {
+    const handler = await import('../src/services/broker-llm-agent.js');
+    const fakePeer = 'kaspa:test_first_turn_zh2_' + Date.now();
+    const reply = await handler.handleLlmDialog(fakePeer, '我要买 50 KAS');
+    assert.match(reply, /50 KAS/);
+    assert.doesNotMatch(reply, /买还是卖/);
+  });
+
+  it('first-turn 英 "buy 50 KAS" → deterministic English reply', async () => {
+    const handler = await import('../src/services/broker-llm-agent.js');
+    const fakePeer = 'kaspa:test_first_turn_en_' + Date.now();
+    const reply = await handler.handleLlmDialog(fakePeer, 'buy 50 KAS');
+    assert.match(reply, /50 KAS/);
+    assert.match(reply, /BSC|Polygon|SOL|TRON|chain/i);
+    assert.doesNotMatch(reply, /buy or sell|want to buy or sell/i, `reply must NOT ask direction in English`);
+  });
+
+  it('first-turn 西 "comprar 50 KAS" → deterministic Spanish reply', async () => {
+    const handler = await import('../src/services/broker-llm-agent.js');
+    const fakePeer = 'kaspa:test_first_turn_es_' + Date.now();
+    const reply = await handler.handleLlmDialog(fakePeer, 'comprar 50 KAS');
+    assert.match(reply, /50 KAS/);
+    assert.match(reply, /BSC|Polygon|SOL|TRON|cadena/i);
+  });
+
+  it('first-turn 卖 "卖 5 KAS" → deterministic 卖 path', async () => {
+    const handler = await import('../src/services/broker-llm-agent.js');
+    const fakePeer = 'kaspa:test_first_turn_sell_' + Date.now();
+    const reply = await handler.handleLlmDialog(fakePeer, '卖 5 KAS');
+    assert.match(reply, /5 KAS/);
+    assert.match(reply, /收/, `卖 path reply must mention 收 USDT, got: ${reply}`);
+  });
+});
+
 describe('_detectIntent — multi-turn message regression', () => {
   // After first turn "买 50 KAS" detected as buy, second turn "BSC, 对" should NOT
   // re-trigger intent (intent for second turn is null; LLM relies on history context).

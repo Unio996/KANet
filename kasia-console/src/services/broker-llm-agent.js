@@ -72,27 +72,23 @@ export function _detectIntent(message) {
   return null;
 }
 
-async function _callLlm(messages, intentHint) {
+// T-J1-19f (NWT 验证 INTENT_LOCK 失败转 B): 撤 intent_lock system msg 注入 (Qwen 见
+// 第二条 system msg 退化返空). 改 deterministic 首轮路径在 handleLlmDialog 实现, _callLlm
+// 恢复纯净.
+async function _callLlm(messages) {
   const a = sqlite.prepare(`
     SELECT a.ai_provider_url, a.ai_model FROM relay_nodes r
     JOIN adapter_nodes a ON a.id = r.adapter_node_id
     WHERE r.id = ?
   `).get(BROKER_RELAY_ID);
   if (!a?.ai_provider_url) return null;
-  const systemMessages = [{ role: 'system', content: SYSTEM_PROMPT }];
-  if (intentHint) {
-    systemMessages.push({
-      role: 'system',
-      content: `[INTENT_LOCK_BY_PREPROCESSOR] User direction already detected as: ${intentHint.toUpperCase()}. SKIP step 1 (do NOT ask 买还是卖 / direction question). Go directly to step 2: confirm qty + ask chain (bnb/polygon/sol/tron). This lock is from regex preprocessor analysis of the user message; do not override.`,
-    });
-  }
   try {
     const res = await fetch(`${a.ai_provider_url}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: a.ai_model || 'Qwen3.6-35B-A3B',
-        messages: [...systemMessages, ...messages],
+        messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages],
         tools: TOOLS,
         tool_choice: 'auto',
       }),
@@ -148,13 +144,58 @@ function _loadHistory(peer, limit = 20) {
   })).filter(m => m.content);
 }
 
+// T-J1-19f deterministic 首轮回复 (NWT B 方案 — 跳过 LLM 防 Qwen 中文 confused).
+// 仅当: 首轮 (history 为空) + 检测到 intent (含 'kas' + 方向词).
+// LLM 续 turn (用户回 BSC/yes) 自然走 LLM, 此时 history 已含 deterministic reply.
+function _extractQty(message) {
+  const m = String(message || '').match(/(\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*kas/i);
+  return m ? parseFloat(m[1]) : null;
+}
+
+function _deterministicFirstReply(intent, qty, lang) {
+  // lang 用 message 简单 detect, 这里只支持 zh/en/es 简化版 (其他走 LLM)
+  const verb = intent === 'buy' ? '买' : '卖';
+  const verbEn = intent === 'buy' ? 'buy' : 'sell';
+  const verbEs = intent === 'buy' ? 'comprar' : 'vender';
+  if (lang === 'zh') {
+    return qty
+      ? `好的, ${verb} ${qty} KAS. 用哪个链 ${intent === 'buy' ? '付' : '收'} USDT? (BSC / Polygon / SOL / TRON)`
+      : `好的, ${verb} KAS. 数量多少? 哪个链?`;
+  }
+  if (lang === 'es') {
+    return qty
+      ? `Perfecto, ${verbEs} ${qty} KAS. ¿Qué cadena para ${intent === 'buy' ? 'pagar' : 'recibir'} USDT? (BSC / Polygon / SOL / TRON)`
+      : `Perfecto, ${verbEs} KAS. ¿Cuántos? ¿Qué cadena?`;
+  }
+  // en (default)
+  return qty
+    ? `Got it, ${verbEn} ${qty} KAS. Which chain to ${intent === 'buy' ? 'pay' : 'receive'} USDT? (BSC / Polygon / SOL / TRON)`
+    : `Got it, ${verbEn} KAS. How many? Which chain?`;
+}
+
+function _detectLang(message) {
+  const msg = String(message || '');
+  // CJK 占比 > 30% → zh
+  const cjk = (msg.match(/[一-鿿]/g) || []).length;
+  if (cjk > 0 && cjk / msg.length > 0.1) return 'zh';
+  if (/\b(comprar|vender|hola|sí|qué|cuánto)\b/i.test(msg)) return 'es';
+  return 'en';
+}
+
 // 主入口: conversations.js fork 调
 export async function handleLlmDialog(peer, message) {
   const history = _loadHistory(peer);
+  // T-J1-19f deterministic 首轮: 首轮 (history 空) + 检测 intent → 跳 LLM 直出.
+  // 后续 turn 走 LLM (history 已有 deterministic reply, 上下文锁住).
+  const isFirstTurn = history.length === 0;
+  const intent = _detectIntent(message);
+  if (isFirstTurn && intent) {
+    const qty = _extractQty(message);
+    const lang = _detectLang(message);
+    return _deterministicFirstReply(intent, qty, lang);
+  }
   history.push({ role: 'user', content: message });
-  // T-J1-19d 中文 hard-rule preprocessor: detect intent from current message
-  const intentHint = _detectIntent(message);
-  let llm = await _callLlm(history, intentHint);
+  let llm = await _callLlm(history);
   if (!llm) return '抱歉, 我这边 LLM 卡了一下, 请稍后再试. 或直接回 "买 5 KAS" / "卖 5 KAS" 走快速通道.';
 
   // tool call?
