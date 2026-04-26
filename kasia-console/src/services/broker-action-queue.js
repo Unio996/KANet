@@ -228,9 +228,32 @@ async function executeAction(item) {
     case 'dm_failed':  // T-J2-V2-realtest 议 B1: 订单失败/争议
       return sendCommandAsync(BROKER_RELAY_ID, { type: 'send_message', target: item.peer, message: p.message });
     case 'accept_v1':
-      return sendCommandAsync(BROKER_RELAY_ID, { type: 'send_broadcast', channel: p.channel || 'kanet-exchange', message: p.message });
-    case 'paid_v1':
-      return sendCommandAsync(BROKER_RELAY_ID, { type: 'send_broadcast', channel: p.channel || 'kanet-exchange', message: p.message });
+    case 'paid_v1': {
+      // T-NWT-2026-04-26 wire fix (Owner 真测 a34701fe 5 笔 rescue 真根因):
+      // chat.js POST /api/chat/send 在 sendCommandAsync 后真调 onBroadcastWritten 触发
+      // trade-protocol-filter, 但 broker-action-queue 这条路径只 sendCommandAsync 直发, 不通知
+      // filter → 协议消息真上链了但 trade filter 不知道 → exchange-machine 永不 transition
+      // (offer 留 'open', taker=null) → bsc-watcher 检测 USDT 但 paid event 拒 → KAS 永不
+      // deliver. 5 笔 manual rescue 同根因. 修法: pump 真发后调 onBroadcastWritten 通知, 跟
+      // /api/chat/send 路径对齐. 不动协议, 不新文件, broker 真融入 exchange 完整完成.
+      const result = await sendCommandAsync(BROKER_RELAY_ID, { type: 'send_broadcast', channel: p.channel || 'kanet-exchange', message: p.message });
+      if (result?.ok && result?.txId) {
+        try {
+          const { onBroadcastWritten } = await import('./trade-protocol-filter.js');
+          const broker = sqlite.prepare('SELECT address FROM relay_nodes WHERE id=?').get(BROKER_RELAY_ID);
+          await onBroadcastWritten({
+            tx_hash: result.txId,
+            content: p.message,
+            sender_address: broker?.address,
+            channel_name: p.channel || 'kanet-exchange',
+            created_at: new Date().toISOString(),
+          });
+        } catch (e) {
+          console.warn(`[broker-queue] trade-filter notify err for ${item.kind}: ${e.message}`);
+        }
+      }
+      return result;
+    }
     case 'sendKas':
       return sendCommandAsync(BROKER_RELAY_ID, { type: 'send_kas', target: item.peer, amount_kas: p.amount_kas, note: p.note });
     case 'publish_offer': {
