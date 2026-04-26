@@ -214,9 +214,6 @@ export async function handleLlmDialog(peer, message) {
   const history = _loadHistory(peer);
   // T-J1-19h (诊断 NWT divergence): 加 console.log + reply marker 看真实路径
   // direct call vs API call 都跑同一函数, marker 决定性区分究竟走哪条分支.
-  const intent = _detectIntent(message);
-  const lastAssistant = [...history].reverse().find(m => m.role === 'assistant');
-  const alreadyDeterministic = lastAssistant && /哪个链|哪条链|which chain|qué cadena|cadena para/i.test(lastAssistant.content || '');
   // T-J1-19h+: 字节级诊断 (Owner 提示 "编码问题"). 打 message 长度 / UTF-8 byte 数 /
   // 前 6 字符 charCodeAt (CJK 字符 codePoint > 0x4E00, ASCII < 0x7F. 编码错→显示乱).
   const msgRaw = String(message || '');
