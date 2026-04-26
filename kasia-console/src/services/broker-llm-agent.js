@@ -65,9 +65,10 @@ export function _detectIntent(message) {
   const msg = String(message || '').trim();
   if (!msg) return null;
   if (!/kas/i.test(msg)) return null;
-  // 中文 — 严格匹方向词 (单字 '买'/'卖' 在 CJK 上下文需小心, 但已 gated by /kas/)
-  if (/买|要买|想买|购买|买入/.test(msg)) return 'buy';
-  if (/卖|要卖|想卖|出售|卖出/.test(msg)) return 'sell';
+  // 中文 — 严格匹方向词 (gated by /kas/ 防 '我要吃饭' 误判)
+  // T-J1-19k (NWT 30 轮 dynamic 发现): 加非正式动词 想换/换/搞/弄/要/想要/来/要点 + 同义
+  if (/买|要买|想买|购买|买入|想换|换点|换些|搞|弄|来点|来个|要点|想要|我要/.test(msg)) return 'buy';
+  if (/卖|要卖|想卖|出售|卖出|脱手|抛/.test(msg)) return 'sell';
   // 英 / 西 (\\b 适用 ASCII)
   if (/\b(buy|purchase|comprar|adquirir)\b/i.test(msg)) return 'buy';
   if (/\b(sell|vender)\b/i.test(msg)) return 'sell';

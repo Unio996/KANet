@@ -18,6 +18,16 @@ describe('_detectIntent — Chinese (NWT retest failures)', () => {
   it('"卖 5 KAS" → sell', () => assert.equal(_detectIntent('卖 5 KAS'), 'sell'));
   it('"想卖 10 个 KAS" → sell', () => assert.equal(_detectIntent('想卖 10 个 KAS'), 'sell'));
   it('"出售 KAS 换 USDT" → sell', () => assert.equal(_detectIntent('出售 KAS 换 USDT'), 'sell'));
+
+  // T-J1-19k (NWT 30 轮 dynamic 发现): 中文非正式动词
+  it('"搞 3 KAS" → buy (T-J1-19k 非正式)', () => assert.equal(_detectIntent('搞 3 KAS'), 'buy'));
+  it('"想换 50 KAS" → buy (想换)', () => assert.equal(_detectIntent('想换 50 KAS'), 'buy'));
+  it('"弄 99 KAS" → buy (弄)', () => assert.equal(_detectIntent('弄 99 KAS'), 'buy'));
+  it('"来点 kas" → buy (来点)', () => assert.equal(_detectIntent('来点 kas'), 'buy'));
+  it('"我要 5 KAS" → buy (我要)', () => assert.equal(_detectIntent('我要 5 KAS'), 'buy'));
+  it('"想要 10 KAS" → buy (想要)', () => assert.equal(_detectIntent('想要 10 KAS'), 'buy'));
+  it('"脱手 5 KAS" → sell (脱手)', () => assert.equal(_detectIntent('脱手 5 KAS'), 'sell'));
+  it('"抛 100 KAS" → sell (抛)', () => assert.equal(_detectIntent('抛 100 KAS'), 'sell'));
 });
 
 describe('_detectIntent — English / Spanish / Japanese / Korean', () => {
