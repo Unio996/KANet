@@ -1442,12 +1442,16 @@ async function _autoSendKas(offer, takerRelayNodeId) {
     // === NO TX NO STATE CHANGE (P1-C consensus: 铁律不分场景) ===
     // Broadcast kanet_exchange_paid_v1 — must succeed before processPaymentSubmit.
     // KAS TX is real (local send), but maker node needs the paid broadcast to know.
+    // T-J1-2026-04-27 v1.1 Phase A 协议层 step 1 (~1 LOC, J2 #3 6 challenge 接受):
+    // payment_asset literal 'KAS' → offer.want_asset (DB 真值). 现行为不变 (offer.want_asset
+    // 现都是 'KAS' 因为 _autoSendKas guard line 1394). v1.1 Phase A step 2 _autoSendKas →
+    // _autoSettleAsset rename + 接 任意 asset 时, payment_asset 真值跟 want_asset 一致.
     const paidMsg = JSON.stringify({
       t: 'kanet_exchange_paid_v1',
       offer_id: offer.id,
       payment_tx: txId,
       payment_chain: 'kaspa',
-      payment_asset: 'KAS',
+      payment_asset: offer.want_asset || 'KAS',
       payment_amount: offer.want_amount,
       payer: offer.taker,
     });
