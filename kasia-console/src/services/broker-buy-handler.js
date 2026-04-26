@@ -239,6 +239,15 @@ export async function buyPreview({ user_kasia, qty, pay_chain, give_asset = 'KAS
   if (!user_kasia || !qty || qty <= 0 || !pay_chain) {
     return { ok: false, error: 'missing fields (user_kasia/qty/pay_chain)' };
   }
+  // T-NWT-2026-04-27 v1.1 Phase A step 4: asset validation (Owner 22:54 钦定真发现 bug 2/3 修).
+  // J1 asset-registry getAsset 接口现不一致 (listAssets 返 base / getAsset 接 chain-key), 暂用
+  // hardcoded supported list. v1.2 J1 修接口后改 asset-registry.isSupported(give_asset).
+  // 防 USDC/BTC 等 unsupported asset 真返 ok:true (broker 没真持库存 + fetchKasPrice 价格误用).
+  const SUPPORTED_GIVE_ASSETS_V11 = ['KAS'];
+  if (!SUPPORTED_GIVE_ASSETS_V11.includes(String(give_asset).toUpperCase())) {
+    return { ok: false, error: 'asset_not_supported',
+      message: `broker 暂只支持 ${SUPPORTED_GIVE_ASSETS_V11.join('/')} (v1.1 起步). 你想买 ${give_asset} 暂没库存, 等 v1.2 多 asset 启用.` };
+  }
   if (qty < MIN_QTY_KAS) {
     return { ok: false, error: `qty_too_small`, message: `最小买 ${MIN_QTY_KAS} ${give_asset} (broker fee + dust 保护). 改大点.` };
   }
@@ -334,6 +343,13 @@ export async function finalizeBuy({ user_kasia, qty, pay_chain, give_asset = 'KA
   // T-NWT-2026-04-27 v1.1 Phase A step 1: give_asset 参数化, default 'KAS' 向后兼容.
   if (!user_kasia || !qty || qty <= 0 || !pay_chain) {
     return { ok: false, error: 'missing fields (user_kasia/qty/pay_chain)' };
+  }
+  // T-NWT-2026-04-27 v1.1 Phase A step 4 (cont): asset validation (跟 buyPreview 同 guard).
+  // 防 finalizeBuy 真 publish offer wrong asset (broker 没库存 USDC/BTC).
+  const SUPPORTED_GIVE_ASSETS_V11 = ['KAS'];
+  if (!SUPPORTED_GIVE_ASSETS_V11.includes(String(give_asset).toUpperCase())) {
+    return { ok: false, error: 'asset_not_supported',
+      message: `broker 暂只支持 ${SUPPORTED_GIVE_ASSETS_V11.join('/')} (v1.1 起步). v1.2 多 asset 启用后再买 ${give_asset}.` };
   }
   if (qty < MIN_QTY_KAS) {
     return { ok: false, error: `qty too small: ${qty} < min ${MIN_QTY_KAS} KAS (broker fee + dust protection)` };
