@@ -15,6 +15,27 @@ const TRUST_RANK = { owner: 3, recommended: 2, normal: 1, blocked: 0 };
 const KASPA_ADDR_RE = /^kaspa:[a-z0-9]{10,}$/;
 const REASON_MAX_LEN = 200;
 
+// 议 2 (Owner 17:33 钦定): broker/service relay 不允许 active 这些 category 的 skill.
+// Owner 真测痛点: Trader-B (broker=1, service=1) 装了 social_outreach 等非交易 skill 导致行为不专.
+// 'core' / 'perception' / 'trading' / 'info' / 'dev' / 'self' 允许; 'social' / 'contacts' / 'other' 拒.
+const BROKER_BANNED_CATEGORIES = ['social', 'contacts', 'other'];
+
+function _checkBrokerSkillCompat(skill, newStatus) {
+  if (newStatus !== 'active') return { ok: true };
+  if (!skill || !skill.relay_node_id) return { ok: true };  // global skill, 不限
+  const relay = sqlite.prepare('SELECT is_dex_broker, is_service, name FROM relay_nodes WHERE id=?').get(skill.relay_node_id);
+  if (!relay) return { ok: true };
+  if (!relay.is_dex_broker && !relay.is_service) return { ok: true };  // 非 broker/service, 不限
+  if (BROKER_BANNED_CATEGORIES.includes(skill.category || 'other')) {
+    return {
+      ok: false,
+      reason: 'broker_role_skill_mismatch',
+      message: `'${skill.name}' (category=${skill.category||'other'}) 不允许在 broker/service relay '${relay.name}' 上 active. broker 角色仅允许: core/perception/trading/info/dev/self.`,
+    };
+  }
+  return { ok: true };
+}
+
 export async function registerSkillRoutes(fastify) {
   // --- API routes (adapter / programmatic access, requires auth) ---
 
@@ -203,6 +224,14 @@ export async function registerSkillRoutes(fastify) {
   // Update skill from form
   fastify.post('/skills/:id', async (request, reply) => {
     const { displayName, description, actionType, actionConfigJson, minTrustLevel, status, sideEffectLevel } = request.body || {};
+    // 议 2: broker/service role 拒 active 'social'/'contacts'/'other' category skill (Owner 17:33)
+    if (VALID_STATUS.includes(status)) {
+      const skill = await getSkillById(request.params.id);
+      const compat = _checkBrokerSkillCompat(skill, status);
+      if (!compat.ok) {
+        return reply.code(403).send({ error: compat.reason, message: compat.message });
+      }
+    }
     await updateSkill(request.params.id, {
       displayName, description, actionType, actionConfigJson,
       minTrustLevel: VALID_TRUST.includes(minTrustLevel) ? minTrustLevel : undefined,
@@ -210,6 +239,23 @@ export async function registerSkillRoutes(fastify) {
       status: VALID_STATUS.includes(status) ? status : undefined,
     });
     return reply.redirect('/skills');
+  });
+
+  // 议 2: GET /api/skills/role-compat — UI 用此查 skill 是否允许在某 relay active
+  fastify.get('/api/skills/role-compat', async (request, reply) => {
+    const { relay_node_id } = request.query || {};
+    if (!relay_node_id) return reply.code(400).send({ error: 'relay_node_id required' });
+    const relay = sqlite.prepare('SELECT id, name, is_dex_broker, is_service FROM relay_nodes WHERE id=?').get(relay_node_id);
+    if (!relay) return reply.code(404).send({ error: 'relay_not_found' });
+    const isBrokerRole = !!(relay.is_dex_broker || relay.is_service);
+    return reply.send({
+      relay,
+      is_broker_role: isBrokerRole,
+      banned_categories: isBrokerRole ? BROKER_BANNED_CATEGORIES : [],
+      allowed_categories: isBrokerRole
+        ? ['core', 'perception', 'trading', 'info', 'dev', 'self']
+        : null,  // null = 全允许
+    });
   });
 
   // Delete skill from form
