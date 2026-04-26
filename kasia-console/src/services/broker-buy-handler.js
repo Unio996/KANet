@@ -64,21 +64,22 @@ async function _send(relayId, cmd) {
   return sendCommandAsync(relayId, cmd);
 }
 
-function selectBestOffer(qtyKas, payChain) {
+function selectBestOffer(qtyKas, payChain, give_asset = 'KAS') {
   // R5 T-J2-17 (Bug 10): broker 不 self-accept, 排除自己 maker 的 offer.
+  // T-NWT-2026-04-27 v1.1 Phase A step 2: give_asset 参数化 (default 'KAS' 向后兼容).
   const broker = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID);
   const brokerAddr = broker?.address || '';
   const rows = sqlite.prepare(`
     SELECT id, give_amount, want_amount, verification_meta, maker
     FROM exchange_offers
     WHERE protocol_status = 'open'
-      AND give_asset = 'KAS' AND want_asset = 'USDT'
+      AND give_asset = ? AND want_asset = 'USDT'
       AND CAST(give_amount AS REAL) >= ?
       AND maker != ?
       AND (expires_at IS NULL OR julianday(expires_at) > julianday('now'))
     ORDER BY CAST(want_amount AS REAL) / CAST(give_amount AS REAL) ASC
     LIMIT 10
-  `).all(qtyKas, brokerAddr);
+  `).all(give_asset, qtyKas, brokerAddr);
   for (const o of rows) {
     let meta;
     try { meta = JSON.parse(o.verification_meta || '{}'); } catch { continue; }
@@ -95,19 +96,20 @@ function selectBestOffer(qtyKas, payChain) {
 // **协议含义**: exchange-machine accept_v1 必须 take 整笔 give_amount, 不支持部分成交.
 // 因此最后一笔会"过买" (take 整笔 offer 即使 cum > qty), broker 多收的 KAS 后续退回用户
 // 或下次抵扣. 第一版简化处理: 累加到 cum >= qty 就停, 最后一笔 take 整笔, 用户实收 cum KAS.
-export function selectBestOffers(qtyKas, payChain) {
+export function selectBestOffers(qtyKas, payChain, give_asset = 'KAS') {
+  // T-NWT-2026-04-27 v1.1 Phase A step 2: give_asset 参数化 (default 'KAS' 向后兼容).
   const broker = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID);
   const brokerAddr = broker?.address || '';
   const rows = sqlite.prepare(`
     SELECT id, give_amount, want_amount, verification_meta, maker
     FROM exchange_offers
     WHERE protocol_status = 'open'
-      AND give_asset = 'KAS' AND want_asset = 'USDT'
+      AND give_asset = ? AND want_asset = 'USDT'
       AND maker != ?
       AND (expires_at IS NULL OR julianday(expires_at) > julianday('now'))
     ORDER BY CAST(want_amount AS REAL) / CAST(give_amount AS REAL) ASC
     LIMIT 30
-  `).all(brokerAddr);
+  `).all(give_asset, brokerAddr);
   const picks = [];
   let cum = 0;
   for (const o of rows) {
@@ -133,19 +135,20 @@ export function selectBestOffers(qtyKas, payChain) {
 // T-J1-19n (Owner 真测 Bug B fix): idempotency check — 同 chain + qty 5min 内已挂
 // broker_dynamic_quote → 直接复用现有 offer_id 不重 publish. 防 multi-turn finalize_order
 // 反复触发 publish 创 N 个 open offer (Owner 真测看到 3 个 55 KAS 重复).
-async function _brokerPublishKasOffer(qtyKas, payChain) {
-  // Idempotency: 5min 内同 chain + 同 qty 已挂 broker_dynamic_quote open → 复用
+async function _brokerPublishKasOffer(qtyKas, payChain, give_asset = 'KAS') {
+  // T-NWT-2026-04-27 v1.1 Phase A step 2: give_asset 参数化 (default 'KAS' 向后兼容).
+  // Idempotency: 5min 内同 chain + 同 qty + 同 asset 已挂 broker_dynamic_quote open → 复用
   const broker = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID);
   if (broker?.address) {
     const existing = sqlite.prepare(`
       SELECT id, want_amount, verification_meta, created_at
       FROM exchange_offers
       WHERE maker = ? AND protocol_status = 'open'
-        AND give_asset = 'KAS' AND CAST(give_amount AS REAL) = ?
+        AND give_asset = ? AND CAST(give_amount AS REAL) = ?
         AND json_extract(metadata, '$.source') = 'broker_dynamic_quote'
         AND julianday(created_at) > julianday('now', '-5 minutes')
       ORDER BY created_at DESC LIMIT 1
-    `).get(broker.address, qtyKas);
+    `).get(broker.address, give_asset, qtyKas);
     if (existing) {
       try {
         const meta = JSON.parse(existing.verification_meta || '{}');
@@ -246,7 +249,8 @@ export async function buyPreview({ user_kasia, qty, pay_chain, give_asset = 'KAS
       message: `你已有 ${existing.total_kas} KAS active 订单 (${remaining} 待付). 先完成或等 30min 过期.` };
   }
   const payChain = String(pay_chain).toLowerCase();
-  const sel = selectBestOffers(qty, payChain);
+  // T-NWT-2026-04-27 v1.1 Phase A step 2: give_asset 参数 propagation 到 selectBestOffers.
+  const sel = selectBestOffers(qty, payChain, give_asset);
   let picks = sel.picks ? [...sel.picks] : [];
   let cumKas = picks.reduce((s, p) => s + p.take_qty, 0);
 
@@ -343,7 +347,8 @@ export async function finalizeBuy({ user_kasia, qty, pay_chain, give_asset = 'KA
       message: `Peer already has active order: ${totalKas} KAS, ${remaining} payment(s) pending. Pay first (send "我付了 0x<txhash>"), or wait for it to expire.` };
   }
   const payChain = String(pay_chain).toLowerCase();
-  const merged = await _aggregateWithFallback(qty, payChain);
+  // T-NWT-2026-04-27 v1.1 Phase A step 2: give_asset 参数 propagation 到 _aggregateWithFallback.
+  const merged = await _aggregateWithFallback(qty, payChain, give_asset);
   if (!merged.ok) return { ok: false, error: merged.error, available: merged.available };
 
   for (const p of merged.picks) {
@@ -455,15 +460,16 @@ export async function verifyPaymentForPeer({ peer, chain }) {
 // 三层 fallback 合并器: 拼现成 + broker 自挂补 deficit. 给 finalizeBuy/handleBuyIntent 复用.
 // 返回 { ok, total_kas, total_usdt, picks: [{id, take_qty, take_usdt, maker_addr, broker_dynamic?}] }
 // 单测可用 _testInjectPublishOffer 注入 mock _brokerPublishKasOffer.
-export async function _aggregateWithFallback(qty, payChain) {
-  const sel = selectBestOffers(qty, payChain);
+export async function _aggregateWithFallback(qty, payChain, give_asset = 'KAS') {
+  // T-NWT-2026-04-27 v1.1 Phase A step 2: give_asset 参数化 propagation 到 selectBestOffers + _brokerPublishKasOffer (default 'KAS' 向后兼容).
+  const sel = selectBestOffers(qty, payChain, give_asset);
   let picks = sel.picks ? [...sel.picks] : [];
   let cumKas = picks.reduce((s, p) => s + p.take_qty, 0);
 
   if (cumKas < qty) {
     // 拼现成不够, broker 自挂补 deficit
     const deficit = qty - cumKas;
-    const pub = _publishOverride ? await _publishOverride(deficit, payChain) : await _brokerPublishKasOffer(deficit, payChain);
+    const pub = _publishOverride ? await _publishOverride(deficit, payChain) : await _brokerPublishKasOffer(deficit, payChain, give_asset);
     if (!pub.ok) {
       // 全失败: broker 也无价格 / 无库存 / publish 失败 → 真 fail
       return { ok: false, available: cumKas, picks, error: `aggregation insufficient (${cumKas}/${qty} from makers) + broker self-quote failed: ${pub.error}` };
