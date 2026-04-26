@@ -265,11 +265,11 @@ export async function buyPreview({ user_kasia, qty, pay_chain, give_asset = 'KAS
   // broker_dynamic_quote 价格 (但不 publish)
   if (cumKas < qty) {
     const deficit = qty - cumKas;
-    // T-J1-2026-04-27 v1.1 Phase A NWT bug 3 真修: fetchKasPrice → J1 price-oracle.fetchPrice
-    // generic. unsupported pair (BTC/XRP/etc) 真 reject 不 silent 0.0342 假 KAS 价误用.
-    // 现 KAS path: fetchPrice('KAS','USDT') 内部仍调 fetchKasPrice CMC 真值, 行为同前.
+    // T-J2-2026-04-27 v1.1 Phase A NWT bug 3 + 真 generic asset_pair 真 fix:
+    // J2 真测撞 USDT/USDC 价 = 0.0342 (KAS 价当 stable) — fetchPrice('KAS') hardcode 真错.
+    // 真 fix: fetchPrice(give_asset, 'USDT') generic — KAS=0.0342, USDC=1.0 peg, USDT=1.0.
     const { fetchPrice } = await import('./price-oracle.js');
-    const priceResult = await fetchPrice('KAS', 'USDT');
+    const priceResult = await fetchPrice(give_asset, 'USDT');
     if (!priceResult.ok) return { ok: false, error: priceResult.error, message: `价格暂查不到 (${priceResult.error}), 请稍后再试.` };
     const midPrice = priceResult.price;
     if (!midPrice || midPrice <= 0) return { ok: false, error: 'price_unavailable', message: '价格暂查不到, 请稍后再试.' };
