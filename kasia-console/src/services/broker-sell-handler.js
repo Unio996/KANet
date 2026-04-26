@@ -9,6 +9,9 @@ import { randomUUID } from 'crypto';
 
 const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
 const SELL_REGEX = /^\s*(?:卖|sell)\s*(\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*KAS\s*$/i;
+// T-J1-19l (J1 dynamic e2e v3 撞墙真因): 用户在 sell _pending 状态发 "买 X KAS" 改主意,
+// 之前 broker 顽固要 BSC 地址 → 用户卡住. 入口检测 buy intent override 自动 release pending.
+const BUY_OVERRIDE_REGEX = /^\s*(?:买|buy|想买|要买|购买|想换|搞|弄|来点|想要|我要)\s*\d/i;
 const EVM_ADDR_REGEX = /^0x[a-fA-F0-9]{40}$/;
 const CANCEL_WORDS = ['NO', 'no', 'n', '取消', '不要', '算了'];
 const PENDING_TTL_MS = 30 * 60 * 1000;  // 30min 等用户回 BSC 地址
@@ -66,6 +69,12 @@ export async function finalizeSell({ user_kasia, qty, recv_chain, recv_address }
 export async function handleSellIntent(peerAddr, message) {
   const trimmed = (message || '').trim();
   const pending = _pending.get(peerAddr);
+
+  // T-J1-19l: 用户在 sell pending 中发 buy intent → 自动 release pending, 让 buy-handler 接管
+  if (pending && Date.now() < pending.expires_at && BUY_OVERRIDE_REGEX.test(trimmed)) {
+    _pending.delete(peerAddr);
+    return null;  // null → conversations.js fork 继续 fall to buy handler 或 LLM
+  }
 
   // pending 'pay_addr' state: 等用户 DM BSC 地址
   if (pending && Date.now() < pending.expires_at) {
