@@ -2291,5 +2291,17 @@ export function runMigrations() {
     }
   }
 
+  // v77 (T-J1-19e, J2 RCA): expire_watcher tick 5min→30s, 表已大 (180+ expired offers).
+  // 加 partial index 加速 expireStale SELECT (WHERE protocol_status='open' AND expires_at < ?)
+  // 防 5x tick frequency 拖 query.
+  {
+    sqlite.exec(`
+      CREATE INDEX IF NOT EXISTS idx_offers_open_expires
+      ON exchange_offers(expires_at)
+      WHERE protocol_status = 'open' AND expires_at IS NOT NULL
+    `);
+    console.log('[migrate] v77: idx_offers_open_expires partial index created (expire watcher acceleration).');
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

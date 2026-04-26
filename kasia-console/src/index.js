@@ -119,13 +119,15 @@ await registerBackupRoutes(fastify);
 await registerBudgetRoutes(fastify);
 
 // Exchange: expire stale offers + timeout stuck verifications + stale dispute check
-// + cleanup orphan accepts (every 5min)
+// + cleanup orphan accepts.
+// T-J1-19e (J2 RCA 修案 1): 5min tick → 30s. 缩窄 race 窗口 (offer expired 但仍 'open',
+// user 付款 → 进 verifying → 资金事故). 修案 2 (lazy check) 在 exchange-machine 关键路径补刀.
 import { expireStale, timeoutVerifying, checkMatchedTimeout, checkStaleDisputes, cleanupStaleOrphanAccepts } from './services/exchange-machine.js';
 try { expireStale(); timeoutVerifying(); checkStaleDisputes(); cleanupStaleOrphanAccepts(); } catch (err) { console.error('[exchange] startup expire/timeout:', err.message); }
 setInterval(() => {
   try { expireStale(); timeoutVerifying(); checkStaleDisputes(); cleanupStaleOrphanAccepts(); } catch (err) { console.error('[exchange] expire/timeout error:', err.message); }
   checkMatchedTimeout().catch(err => console.error('[exchange] matched timeout error:', err.message));
-}, 5 * 60 * 1000);
+}, 30 * 1000);
 
 // Anti-spam API endpoints
 import { checkOutboundAllowed, getActivityLog, getActivityByPeer, getOutboundStats, detectStopRequest, getMergedContacts } from './services/anti-spam.js';
