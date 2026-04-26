@@ -14,7 +14,19 @@
 // 沿 broker-buy-completion-watcher / market-seeder 等常驻 worker 范式.
 
 const TICK_MS = 30 * 1000;
-const SUPPORTED_CHAINS = ['bnb', 'eth', 'polygon'];
+// T-J1-2026-04-27 v1.1 (Owner 23:14 钦定 'kanet 钱包真 10 chain × multi-stable, 方向真明确'):
+// 真 source from cross-chain-verify.EVM_RPC (7 EVM chain 已 register: bnb/eth/polygon/
+// arbitrum/optimism/avalanche/base). 老 hardcode ['bnb','eth','polygon'] 真过保守 — 实际
+// scanRecentTransfers 已 generic 7 chain. 真扩 SUPPORTED_CHAINS = EVM_RPC keys.
+let SUPPORTED_CHAINS = ['bnb', 'eth', 'polygon', 'arbitrum', 'optimism', 'avalanche', 'base'];
+async function _loadSupportedChains() {
+  try {
+    const { EVM_RPC } = await import('./cross-chain-verify.mjs');
+    SUPPORTED_CHAINS = Object.keys(EVM_RPC || {});
+  } catch (e) {
+    console.warn(`[bsc-watcher] EVM_RPC import err: ${e.message} — fallback hardcoded list`);
+  }
+}
 
 let _started = false;
 let _interval = null;
@@ -24,6 +36,10 @@ let _matches = 0;
 export function start() {
   if (_started) return { ok: false, reason: 'already_started' };
   _started = true;
+  // 真 load EVM_RPC keys from cross-chain-verify (true source) — 老 hardcode 真 fallback if import fails
+  _loadSupportedChains().then(() => {
+    console.log(`[bsc-watcher] supported chains loaded from cross-chain-verify: ${SUPPORTED_CHAINS.join(',')}`);
+  });
   _interval = setInterval(() => { tick().catch(e => console.warn(`[bsc-watcher] tick err: ${e.message}`)); }, TICK_MS);
   console.log(`[bsc-watcher] started, tick=${TICK_MS / 1000}s, supported=${SUPPORTED_CHAINS.join(',')}`);
   return { ok: true };
