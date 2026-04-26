@@ -114,6 +114,12 @@ async function pump() {
         break;
       } catch (err) {
         lastErr = err;
+        // T-J1-19m (J2 新 monitor 命中): 不可重试错误 fail-fast (Invalid Kaspa address /
+        // payload too short / unknown peer / address parse). retry 3 次只是浪费 + 阻塞 queue.
+        if (/Invalid Kaspa address|payload too short|invalid.*address|address.*invalid|bech32/i.test(err.message || '')) {
+          console.warn(`[broker-queue] ${item.kind} #${item.id.slice(0,8)} FAIL-FAST: ${err.message} (no retry)`);
+          break;
+        }
         if (item.attempts < RETRY_MAX) await new Promise(r => setTimeout(r, RETRY_BACKOFF_MS * item.attempts));
       }
     }
