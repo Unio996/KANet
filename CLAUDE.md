@@ -10,7 +10,16 @@
    - 34 张活跃表全覆盖：用途、字段、写入方、读取方、陷阱
    - 持续更新（最近：2026-04-06）。改表前必查本文档确认影响范围
 
-3. **Alpha 达标标准** → `docs/ALPHA-CHECKLIST.md`
+3. **工程陷阱档案（写代码前必扫）** → `docs/ANTI-PATTERNS.md`
+   - 12 条具体踩坑模式 + Case Study (新建/角色/asset硬编码/单skill/教条/relayId/协作频道/probe副作用/Qwen kill switch/DM kind 注册/中文助词/接位扫描)
+   - **新会话 / 接位 Agent 写代码前必扫** + 跑 `node scripts/lint-kanet.mjs` 静态查
+   - 撞了未在档案的新坑 → 立即追加一条 + 写 lint rule 堵死
+
+4. **Qwen LLM 调用规则** → `QWEN-RULES.md`
+   - Rule 11: Qwen3.6 caller 必加 `chat_template_kwargs.enable_thinking=false`, `/no_think` 实测无效
+   - 写新 LLM caller 前必读. broker-llm-agent.js 漏过这条撞 60-120s timeout 全崩
+
+5. **Alpha 达标标准** → `docs/ALPHA-CHECKLIST.md`
 
 4. **系统架构（详细版）** → `docs/kanet-system-architecture.md`
    - 五大模块职责、25张表读写映射、数据流、已知裂缝、API 清单
@@ -26,6 +35,19 @@
 7. **最新会话总结** → `（已归档）`
 
 8. **记忆索引** → `（使用当前项目的 .claude 记忆系统）`
+
+## 接位 SOP（新会话 / 接替前任 Agent 必跑）
+
+**写代码前 4 步扫描**（漏一步重复犯历史错, 见 ANTI-PATTERNS.md 规则 12）:
+
+1. **领域 anti-pattern**: `grep -i <topic> docs/ANTI-PATTERNS.md docs/QWEN-RULES.md`
+2. **现有 caller 模式**: `grep -rn <key_function> kasia-console/src/` (e.g. 写 LLM caller → `grep chat_template_kwargs` 看 4 个现有 caller)
+3. **该领域 commit 历史**: `git log --grep=<topic> --oneline -20` (近期相关 fix 暴露的坑)
+4. **memory 相关 feedback**: `grep -ri <topic> ~/.claude/projects/*/memory/feedback_*.md`
+
+**写完 commit 前必跑**: `node scripts/lint-kanet.mjs <changed-files>` — 失败一条 commit 都不让 (git pre-commit hook 强制).
+
+跳步 SOP = 重复犯错的根因 (Owner 2026-04-26 元问题). NWT 接位漏 ANTI-PATTERNS.md → 漏 QWEN Rule 11 → broker LLM 60-120s timeout 全崩, 是负面教材.
 
 ## 核心原则（违反即退回）
 
