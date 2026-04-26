@@ -240,13 +240,13 @@ export async function buyPreview({ user_kasia, qty, pay_chain, give_asset = 'KAS
     return { ok: false, error: 'missing fields (user_kasia/qty/pay_chain)' };
   }
   if (qty < MIN_QTY_KAS) {
-    return { ok: false, error: `qty_too_small`, message: `最小买 ${MIN_QTY_KAS} KAS (broker fee + dust 保护). 改大点.` };
+    return { ok: false, error: `qty_too_small`, message: `最小买 ${MIN_QTY_KAS} ${give_asset} (broker fee + dust 保护). 改大点.` };
   }
   const existing = _pendingAccepts.get(user_kasia);
   if (existing && Date.now() < existing.expires_at) {
     const remaining = existing.picks.filter(p => !p.paid_tx).length;
     return { ok: false, error: 'already_in_pending_accept',
-      message: `你已有 ${existing.total_kas} KAS active 订单 (${remaining} 待付). 先完成或等 30min 过期.` };
+      message: `你已有 ${existing.total_kas} ${give_asset} active 订单 (${remaining} 待付). 先完成或等 30min 过期.` };
   }
   const payChain = String(pay_chain).toLowerCase();
   // T-NWT-2026-04-27 v1.1 Phase A step 2: give_asset 参数 propagation 到 selectBestOffers.
@@ -282,19 +282,21 @@ export async function buyPreview({ user_kasia, qty, pay_chain, give_asset = 'KAS
   // T-J2-V2-realtest-critfix (J1 67903c5b 真测撞 LLM 编 fake 地址 0x1234... bug):
   // 生成 deterministic preview_text 完整画像字串. LLM 必须**原样转发**, 不让 LLM 自己渲染
   // 地址 (LLM 会按 SYSTEM_PROMPT 例子编 placeholder = user 真转 USDT 到 fake 地址 = 钱丢).
+  // T-NWT-2026-04-27 v1.1 Phase A step 3: NLG parameterize asset symbol (default 'KAS' 向后兼容).
+  // 'Kasia' 网络名 + receive_address 留 Step 4 真接 J1 asset-registry.asset.network 时改.
   const payLines = picks.map((p, i) => {
     const tag = p.broker_dynamic ? '(broker 自挂)' : '(maker)';
-    return `  ${i+1}. ${p.take_qty} KAS → 付 ${(+p.take_usdt).toFixed(6)} USDT 到\n     \`${p.maker_addr}\` ${tag}`;
+    return `  ${i+1}. ${p.take_qty} ${give_asset} → 付 ${(+p.take_usdt).toFixed(6)} USDT 到\n     \`${p.maker_addr}\` ${tag}`;
   }).join('\n');
   const preview_text = `📋 **订单画像 (确认前)**
 
-* 方向: 买 KAS
-* 数量: ${cumKas} KAS
+* 方向: 买 ${give_asset}
+* 数量: ${cumKas} ${give_asset}
 * 付款链: ${payChain.toUpperCase()} (USDT)
-* 单价: ${unitPrice.toFixed(6)} USDT/KAS
+* 单价: ${unitPrice.toFixed(6)} USDT/${give_asset}
 * 总额: ${totalUsdt.toFixed(6)} USDT
 ${payLines}
-* KAS 收件 (你的 Kasia):
+* ${give_asset} 收件 (你的 Kasia):
   \`${user_kasia}\`
 
 ⏰ 订单 30 分钟内付款有效 · 跨链验证 1-3 分钟
