@@ -201,7 +201,65 @@ export async function registerSkillRoutes(fastify) {
     const skills = await listSkills({
       relayNodeId: selectedAccount || undefined,
     });
-    return reply.view('skills', { skills, relayNodes, selectedAccount, t, dir, lang, langs, VALID_TRUST, VALID_STATUS });
+    // 议 3 (T-J2-V2): 选中 relay 是否 broker/service role → UI 灰显 banned + 显示 role badge
+    let roleCompat = null;
+    if (selectedAccount) {
+      const r = sqlite.prepare('SELECT id, name, is_dex_broker, is_service FROM relay_nodes WHERE id=?').get(selectedAccount);
+      if (r) {
+        const isBrokerRole = !!(r.is_dex_broker || r.is_service);
+        roleCompat = {
+          relay: r,
+          is_broker_role: isBrokerRole,
+          banned_categories: isBrokerRole ? BROKER_BANNED_CATEGORIES : [],
+          allowed_categories: isBrokerRole
+            ? ['core', 'perception', 'trading', 'info', 'dev', 'self']
+            : null,
+        };
+      }
+    }
+    return reply.view('skills', { skills, relayNodes, selectedAccount, roleCompat, t, dir, lang, langs, VALID_TRUST, VALID_STATUS });
+  });
+
+  // 议 3: 一键复位 broker/service relay 推荐 skill 集 — 跟 scripts/reset-trader-skills.mjs 一致.
+  // 公共逻辑封装给 JSON endpoint + form submit endpoint 共用.
+  function _doResetRecommended(relayNodeId) {
+    const r = sqlite.prepare('SELECT id, name, is_dex_broker, is_service FROM relay_nodes WHERE id=?').get(relayNodeId);
+    if (!r) return { ok: false, code: 404, error: 'relay_not_found' };
+    if (!r.is_dex_broker && !r.is_service) {
+      return { ok: false, code: 400, error: 'not_broker_role', message: '只有 broker/service relay 才能用推荐复位' };
+    }
+    const banned = sqlite.prepare(`
+      SELECT id, name, category FROM skills
+      WHERE relay_node_id=? AND status='active'
+        AND category IN (${BROKER_BANNED_CATEGORIES.map(()=>'?').join(',')})
+    `).all(r.id, ...BROKER_BANNED_CATEGORIES);
+    const now = nowIso();
+    const stmt = sqlite.prepare(`UPDATE skills SET status='disabled', updated_at=? WHERE id=?`);
+    let disabled = 0;
+    for (const s of banned) { stmt.run(now, s.id); disabled++; }
+    return {
+      ok: true,
+      relay: r,
+      disabled_count: disabled,
+      disabled_skills: banned.map(s => ({ name: s.name, category: s.category })),
+    };
+  }
+
+  // JSON endpoint (programmatic / Alpine.js etc)
+  fastify.post('/skills/reset-recommended', async (request, reply) => {
+    const { relay_node_id } = request.body || {};
+    if (!relay_node_id) return reply.code(400).send({ error: 'relay_node_id required' });
+    const result = _doResetRecommended(relay_node_id);
+    if (!result.ok) return reply.code(result.code).send(result);
+    return reply.send(result);
+  });
+
+  // Form submit endpoint (Chrome 禁 JS 兼容, 议 3 UI 推荐配置按钮用)
+  fastify.post('/skills/reset-recommended-form', async (request, reply) => {
+    const { relay_node_id } = request.body || {};
+    if (!relay_node_id) return reply.redirect('/skills');
+    _doResetRecommended(relay_node_id);
+    return reply.redirect('/skills?account=' + encodeURIComponent(relay_node_id));
   });
 
   // Create skill from form
