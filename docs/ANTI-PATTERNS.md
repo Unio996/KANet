@@ -631,6 +631,84 @@ lint-kanet R19 静态扫: broker handler / llm-agent 任何 \\\`\\\${anything_ev
 
 ---
 
+## 规则 20 · 安全 invariant 必须覆盖**所有 sink**, 不只是表面路径
+
+**来源**: J1 1bc2132d 真测撞 (2026-04-26 13:25), J2 a47789c29 修 (R19-EXT). NWT + J1 + J2 三方 RCA 收敛后沉淀.
+
+**症状**: 设计了一个 invariant assert (R19: broker → user DM 含的链上地址必属 broker agent_wallets), 在某个路径 (broker-action-queue 入链前) 实现了它. 真测发现 invariant 没生效, 但代码确实在 disk + console 真跑.
+
+**真因**: 同一类危险数据 (broker → user DM 含 EVM 地址) 在系统中有**多条独立通向 chain 的 sink**:
+- 路径 A: broker handler enqueue → broker-action-queue → chain ← R19 在这
+- 路径 B: handleLlmDialog return text → conversations.js reply.send → relay rpc-listener sendMessage → sendKaspa → chain ← R19 看不见
+
+invariant 只在路径 A 生效, 路径 B 完全绕过. LLM 自由 reply 落路径 B → fake 地址真发出来.
+
+**Wrong** (R19 v1 — 只 queue 路径):
+```js
+// broker-action-queue.js
+async function pump() {
+  const item = q.shift();
+  const violation = assertAddressInvariant(item);  // ← 只这里 assert
+  if (violation) { /* 拒发 */ return; }
+  await sendKaspa(...);
+}
+
+// 但 conversations.js 另一条 sink:
+const llmReply = await handleLlmDialog(peer, message);
+return reply.send({ reply: llmReply });  // ← 没 assert, fake 直发
+```
+
+**Right** (R19-EXT — 上游收口 catch all):
+```js
+// broker-action-queue.js + 暴露 plain-text 版
+export function assertReplyAddressInvariant(replyText) {
+  const evmMatches = replyText.match(/0x[a-fA-F0-9]{40}/g) || [];
+  const own = _ownEvmAddrSet();  // 复用 60s cache
+  for (const addr of evmMatches) {
+    if (!own.has(addr.toLowerCase())) return { violated: true, foreign_address: addr };
+  }
+  return null;
+}
+
+// conversations.js — 所有 broker reply 路径 collapse 到一个 _r19Guard
+const _r19Guard = async (replyText, source) => {
+  if (!replyText) return replyText;
+  const v = assertReplyAddressInvariant(replyText);
+  if (v) {
+    console.error(`[R19-EXT] ADDRESS_INVARIANT_VIOLATED source=${source} foreign=${v.foreign_address}`);
+    return '抱歉, broker 检测到地址异常 (内部 R19 拦截), 请稍后重试.';
+  }
+  return replyText;
+};
+if (buyReply !== null) return reply.send({ reply: await _r19Guard(buyReply, 'handleBuyIntent') });
+if (sellReply !== null) return reply.send({ reply: await _r19Guard(sellReply, 'handleSellIntent') });
+return reply.send({ reply: await _r19Guard(llmReply, 'handleLlmDialog') });
+```
+
+**怎么避** (4 步设计 SOP):
+1. **先全 grep 危险数据所有 sink** (`grep -rn "sendKaspa\|sendMessage\|chain DM out"`)
+2. **选最上游收口点**实现 invariant (越上游越能 catch all sinks 一道关)
+3. **加 lint rule** 检查新加的 sink 必经 invariant 函数
+4. **真测端到端覆盖所有路径** (单元 + handler + chain DM + 真 user 真触发场景), 不只 unit test invariant 函数
+
+**Why**: invariant 设计陷阱不是 invariant 本身错, 而是**只看了 happy path 一条 sink, 漏了其他 sink**. 真测时 happy path 跑得过, 但真用户走另一条 sink 把规则全绕过. R19 看着像兜底但只覆盖路径 A, 路径 B 漏了 = 钢线被穿透. 任何"must-be-true-everywhere" 类不变式都吃这个亏.
+
+**适用范围** (J1 4ca58a5c 增强, R20 普适不只 chain-out): 任何 'must-be-true-everywhere' invariant 都适用, 不限 broker, 不限 chain-out:
+- DB write invariant: 多写入点 → 必中心化 trigger / 唯一 ORM hook
+- Auth check: 多 endpoint → 必 middleware 不是 per-route
+- Audit log: 多写入点 → 必 wrap / pre-write hook
+- Spending lock (KANet 范例): 多 spending sink → 必 fund_lock 中心校验, 不是 per-handler
+- Reputation record: 多 trade outcome → 必 trigger
+- 设计任何 invariant 时**先列 sink, 不只看 happy path**.
+
+**lint-kanet checkR20() 简化版** (J1 4ca58a5c 提议, 完美版 v1.1 audit-broker-sinks.mjs):
+- 静态扫所有 \`sendKaspa(\` / \`send_message.*target=\` / \`sendCommandAsync.*type:.*send_message\` 调用点
+- 同 function scope 内 (regex window ~50 行) 必含 \`R19|R20|assertAddressInvariant|assertReplyAddressInvariant\` 关键字
+- 命中无关键字 → 报 'R20: chain-out sink 没 invariant 守, 是否 cross-function 守? 手 review.'
+- best-effort, cross-file 守仍需 manual audit (v1.1 完美版用 audit 工具周扫)
+
+---
+
 ## 如何扩充本档案
 
 新陷阱踩过后**立即**追加，格式保持：

@@ -56,6 +56,23 @@ function assertAddressInvariant(item) {
   return null;
 }
 
+// T-J2-R19-extend (J1 1bc2132d 真测撞 fake 地址 in LLM 自由 reply 路径绕过 queue):
+// broker LLM reply text 不经 broker-action-queue (handleLlmDialog return text → conversations.js reply.send),
+// R19 layer 4 在 queue 内 assert 没覆盖. 加 assertReplyAddressInvariant 给 conversations.js 用,
+// 任何 broker reply text 含 0x{40} 不在 broker wallets → 拒回 + log + 兜底.
+export function assertReplyAddressInvariant(replyText) {
+  if (!replyText || typeof replyText !== 'string') return null;
+  const evmMatches = replyText.match(/0x[a-fA-F0-9]{40}/g) || [];
+  if (evmMatches.length === 0) return null;
+  const own = _ownEvmAddrSet();
+  for (const addr of evmMatches) {
+    if (!own.has(addr.toLowerCase())) {
+      return { violated: true, foreign_address: addr, own_count: own.size };
+    }
+  }
+  return null;
+}
+
 const _queue = [];               // FIFO array, items dequeue from head
 const _userActions = new Map();  // peer → Set(actionId)  (J2 #B 用 getQueuePosition)
 let _busy = false;
@@ -211,9 +228,38 @@ async function executeAction(item) {
     case 'dm_failed':  // T-J2-V2-realtest 议 B1: 订单失败/争议
       return sendCommandAsync(BROKER_RELAY_ID, { type: 'send_message', target: item.peer, message: p.message });
     case 'accept_v1':
-      return sendCommandAsync(BROKER_RELAY_ID, { type: 'send_broadcast', channel: p.channel || 'kanet-exchange', message: p.message });
-    case 'paid_v1':
-      return sendCommandAsync(BROKER_RELAY_ID, { type: 'send_broadcast', channel: p.channel || 'kanet-exchange', message: p.message });
+    case 'paid_v1': {
+      // T-NWT-2026-04-26 wire fix (Owner 真测 a34701fe 5 笔 rescue 真根因):
+      // chat.js POST /api/chat/send 在 sendCommandAsync 后真调 onBroadcastWritten 触发
+      // trade-protocol-filter, 但 broker-action-queue 这条路径只 sendCommandAsync 直发, 不通知
+      // filter → 协议消息真上链了但 trade filter 不知道 → exchange-machine 永不 transition
+      // (offer 留 'open', taker=null) → bsc-watcher 检测 USDT 但 paid event 拒 → KAS 永不
+      // deliver. 5 笔 manual rescue 同根因. 修法: pump 真发后调 onBroadcastWritten 通知, 跟
+      // /api/chat/send 路径对齐. 不动协议, 不新文件, broker 真融入 exchange 完整完成.
+      const result = await sendCommandAsync(BROKER_RELAY_ID, { type: 'send_broadcast', channel: p.channel || 'kanet-exchange', message: p.message });
+      // sendCommandAsync resolves msg.result (relay-manager.js:260) = relay 返回的 { txId, fee },
+      // 没有 ok 字段. 用 txId 判 success (跟 broker-queue 别处 line 175 same convention).
+      if (result?.txId) {
+        try {
+          const { onBroadcastWritten } = await import('./trade-protocol-filter.js');
+          const broker = sqlite.prepare('SELECT address FROM relay_nodes WHERE id=?').get(BROKER_RELAY_ID);
+          // T-NWT-2026-04-26 wire-fix-v3: retry 时 line 152 给 message 加 ` [r2]` 防 anti-spam
+          // dedup, 但 JSON 协议消息加 suffix 后 trade-filter JSON.parse fail silent. strip
+          // suffix 让 onBroadcastWritten 拿到干净 JSON. (DM 路径不经此 wire fix, 不影响.)
+          const cleanContent = (p.message || '').replace(/\s*\[r\d+\]\s*$/, '');
+          await onBroadcastWritten({
+            tx_hash: result.txId,
+            content: cleanContent,
+            sender_address: broker?.address,
+            channel_name: p.channel || 'kanet-exchange',
+            created_at: new Date().toISOString(),
+          });
+        } catch (e) {
+          console.warn(`[broker-queue] trade-filter notify err for ${item.kind}: ${e.message}`);
+        }
+      }
+      return result;
+    }
     case 'sendKas':
       return sendCommandAsync(BROKER_RELAY_ID, { type: 'send_kas', target: item.peer, amount_kas: p.amount_kas, note: p.note });
     case 'publish_offer': {
