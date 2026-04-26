@@ -229,7 +229,10 @@ function _enqueuePaid(offerId, paymentTx, payChain, peerAddr) {
 //
 // 防 hallucinate "已下单" — LLM 只能用 preview 真数据 (含 user_kasia_address / unit_price /
 // total_usdt / maker_payment_address) 不能编. user reject "NO" 路径无 state cleanup (没 set 任何).
-export async function buyPreview({ user_kasia, qty, pay_chain }) {
+export async function buyPreview({ user_kasia, qty, pay_chain, give_asset = 'KAS' }) {
+  // T-NWT-2026-04-27 v1.1 Phase A step 1: give_asset 参数化, default 'KAS' 向后兼容.
+  // Step 1 仅 signature 扩, 内部 SQL/NLG/INSERT 仍 'KAS' literal — Step 2/3 处理.
+  // 现 caller (broker-llm-agent preview_order tool) 不传 asset → default 'KAS' → 行为不变.
   if (!user_kasia || !qty || qty <= 0 || !pay_chain) {
     return { ok: false, error: 'missing fields (user_kasia/qty/pay_chain)' };
   }
@@ -321,7 +324,8 @@ ${payLines}
 //   2. 路径 B (NWT T-NWT-22): 拼不够时 broker 自挂 deficit (用自己 KAS 库存)
 //   3. broker 也无库存/价格 → 真 fail (极端)
 // 返回 picks[] 含每个 maker + 付款金额 + 收款地址 (含 broker_dynamic 标记区分).
-export async function finalizeBuy({ user_kasia, qty, pay_chain }) {
+export async function finalizeBuy({ user_kasia, qty, pay_chain, give_asset = 'KAS' }) {
+  // T-NWT-2026-04-27 v1.1 Phase A step 1: give_asset 参数化, default 'KAS' 向后兼容.
   if (!user_kasia || !qty || qty <= 0 || !pay_chain) {
     return { ok: false, error: 'missing fields (user_kasia/qty/pay_chain)' };
   }
