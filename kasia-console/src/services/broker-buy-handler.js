@@ -56,6 +56,83 @@ function selectBestOffer(qtyKas, payChain) {
   return null;
 }
 
+// R7 路径 C: 拼现成单聚合. selectBestOffer 找不到 single ≥ qty 时, 累加多个小单
+// (从最便宜的起) 直到满足 qty. 返回 [{offer, take_qty, take_usdt, maker_addr}]
+// take_qty 可能 < offer.give_amount (最后一个会"切薄" 用户只买部分).
+// **协议含义**: exchange-machine accept_v1 必须 take 整笔 give_amount, 不支持部分成交.
+// 因此最后一笔会"过买" (take 整笔 offer 即使 cum > qty), broker 多收的 KAS 后续退回用户
+// 或下次抵扣. 第一版简化处理: 累加到 cum >= qty 就停, 最后一笔 take 整笔, 用户实收 cum KAS.
+export function selectBestOffers(qtyKas, payChain) {
+  const broker = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID);
+  const brokerAddr = broker?.address || '';
+  const rows = sqlite.prepare(`
+    SELECT id, give_amount, want_amount, verification_meta, maker
+    FROM exchange_offers
+    WHERE protocol_status = 'open'
+      AND give_asset = 'KAS' AND want_asset = 'USDT'
+      AND maker != ?
+      AND (expires_at IS NULL OR julianday(expires_at) > julianday('now'))
+    ORDER BY CAST(want_amount AS REAL) / CAST(give_amount AS REAL) ASC
+    LIMIT 30
+  `).all(brokerAddr);
+  const picks = [];
+  let cum = 0;
+  for (const o of rows) {
+    let meta;
+    try { meta = JSON.parse(o.verification_meta || '{}'); } catch { continue; }
+    const chains = Array.isArray(meta.accepted_chains) ? meta.accepted_chains : [];
+    const match = chains.find(c => c && String(c.chain).toLowerCase() === payChain);
+    if (!match) continue;
+    const give = parseFloat(o.give_amount);
+    if (!(give > 0)) continue;
+    picks.push({ ...o, maker_addr: match.address, take_qty: give, take_usdt: parseFloat(o.want_amount) });
+    cum += give;
+    if (cum >= qtyKas) break;
+  }
+  if (cum < qtyKas) return { ok: false, available: cum, picks };
+  return { ok: true, total_kas: cum, total_usdt: picks.reduce((s, p) => s + p.take_usdt, 0), picks };
+}
+
+// T-NWT-22 (broker 库存自挂): 没现成 maker / 拼不够 deficit 时, broker 用自己 KAS
+// 库存 + 当前市价 spread 1% 调 /api/exchange/publish 挂 SELL 单. 返回 offer_id +
+// want_usdt + maker_chain_addr, finalizeBuy / handleBuyIntent 用此 build pick 加进 picks[].
+async function _brokerPublishKasOffer(qtyKas, payChain) {
+  const { fetchKasPrice } = await import('./market-seeder.js');
+  const midPrice = await fetchKasPrice();
+  if (!midPrice || midPrice <= 0) return { ok: false, error: 'price_unavailable' };
+  const wallet = sqlite.prepare(`
+    SELECT chain, address FROM agent_wallets
+    WHERE relay_node_id = ? AND chain = ? AND is_default = 1
+  `).get(BROKER_RELAY_ID, payChain);
+  if (!wallet?.address) return { ok: false, error: `broker no ${payChain} wallet` };
+  const SPREAD_PCT = 1;
+  const sellPrice = midPrice * (1 + SPREAD_PCT / 100);
+  const wantUsdt = (qtyKas * sellPrice).toFixed(4);
+  const PORT = process.env.CONSOLE_PORT || 3100;
+  try {
+    const res = await fetch(`http://127.0.0.1:${PORT}/api/exchange/publish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        relayNodeId: BROKER_RELAY_ID,
+        give_asset: 'KAS',
+        give_amount: String(qtyKas),
+        want_asset: 'USDT',
+        want_amount: wantUsdt,
+        verification: 'cross_chain_tx',
+        verification_meta: { accepted_chains: [{ chain: payChain, address: wallet.address }], expected_asset: 'USDT' },
+        expires_minutes: 30,
+        metadata: { source: 'broker_dynamic_quote', mid_price: midPrice, spread_pct: SPREAD_PCT },
+      }),
+    });
+    const data = await res.json();
+    if (!data.ok) return { ok: false, error: `publish: ${data.error || 'http_' + res.status}` };
+    return { ok: true, offer_id: data.offer_id, want_usdt: wantUsdt, maker_chain_addr: wallet.address, mid_price: midPrice, sell_price: sellPrice };
+  } catch (e) {
+    return { ok: false, error: `publish_exc: ${e.message}` };
+  }
+}
+
 // R4 改造 (T-NWT-09 broker-action-queue): 不直接 sendCommandAsync, 进队列保 FIFO 单线.
 async function _enqueue(kind, peer, payload) {
   const { enqueue } = await import('./broker-action-queue.js');
@@ -84,28 +161,71 @@ function _enqueuePaid(offerId, paymentTx, payChain, peerAddr) {
   return _enqueue('paid_v1', peerAddr, { channel: 'kanet-exchange', message: JSON.stringify(payload) });
 }
 
-// R6 T-J2-19: tool function for broker-llm-agent. LLM 收齐 user/qty/payChain 调此,
-// selectBestOffer + enqueue accept_v1 + record. 不走 _quotes/_pendingAccepts 对话状态.
-// LLM 收 ok + offer_id + maker_addr + quoted_usdt 后用自然语言告知 user.
+// R6 T-J2-19: tool function for broker-llm-agent. LLM 收齐 user/qty/payChain 调此.
+// R7 三层 fallback (J1+NWT 合并):
+//   1. 路径 C (J1): selectBestOffers 拼现成 maker (greedy cheapest)
+//   2. 路径 B (NWT T-NWT-22): 拼不够时 broker 自挂 deficit (用自己 KAS 库存)
+//   3. broker 也无库存/价格 → 真 fail (极端)
+// 返回 picks[] 含每个 maker + 付款金额 + 收款地址 (含 broker_dynamic 标记区分).
 export async function finalizeBuy({ user_kasia, qty, pay_chain }) {
   if (!user_kasia || !qty || qty <= 0 || !pay_chain) {
     return { ok: false, error: 'missing fields (user_kasia/qty/pay_chain)' };
   }
   const payChain = String(pay_chain).toLowerCase();
-  const offer = selectBestOffer(qty, payChain);
-  if (!offer) return { ok: false, error: `no ${qty} KAS sell offer on ${payChain.toUpperCase()}` };
-  const unit = parseFloat(offer.want_amount) / parseFloat(offer.give_amount);
-  const quotedUsdt = (unit * qty).toFixed(6);
-  await _enqueueAccept(offer.id, user_kasia, payChain);
-  _recordAccept({ offerId: offer.id, userPeer: user_kasia, qty, quotedUsdt, payChain, acceptTx: null });
+  const merged = await _aggregateWithFallback(qty, payChain);
+  if (!merged.ok) return { ok: false, error: merged.error, available: merged.available };
+
+  for (const p of merged.picks) {
+    await _enqueueAccept(p.id, user_kasia, payChain);
+    _recordAccept({ offerId: p.id, userPeer: user_kasia, qty: p.take_qty, quotedUsdt: p.take_usdt.toFixed(6), payChain, acceptTx: null });
+  }
   return {
     ok: true,
-    offer_id: offer.id,
-    maker_payment_address: offer.maker_addr,
-    quoted_usdt: quotedUsdt,
-    unit_price: unit,
+    picks: merged.picks.map(p => ({
+      offer_id: p.id,
+      qty_kas: p.take_qty,
+      pay_usdt: p.take_usdt.toFixed(6),
+      maker_payment_address: p.maker_addr,
+      broker_dynamic: !!p.broker_dynamic,
+    })),
+    total_kas: merged.total_kas,
+    total_usdt: merged.total_usdt.toFixed(6),
     pay_chain: payChain,
+    n_payments: merged.picks.length,
+    broker_dynamic_quote: merged.picks.some(p => p.broker_dynamic),
+    note: merged.picks.length > 1
+      ? `User must send ${merged.picks.length} separate USDT payments (one per maker, ${merged.picks.filter(p=>p.broker_dynamic).length} of which is broker self-quoted).`
+      : (merged.picks[0]?.broker_dynamic ? 'Broker self-quoted (no maker available, broker uses own KAS inventory).' : 'Single maker, one USDT payment.'),
   };
+}
+
+// 三层 fallback 合并器: 拼现成 + broker 自挂补 deficit. 给 finalizeBuy/handleBuyIntent 复用.
+// 返回 { ok, total_kas, total_usdt, picks: [{id, take_qty, take_usdt, maker_addr, broker_dynamic?}] }
+async function _aggregateWithFallback(qty, payChain) {
+  const sel = selectBestOffers(qty, payChain);
+  let picks = sel.picks ? [...sel.picks] : [];
+  let cumKas = picks.reduce((s, p) => s + p.take_qty, 0);
+
+  if (cumKas < qty) {
+    // 拼现成不够, broker 自挂补 deficit
+    const deficit = qty - cumKas;
+    const pub = await _brokerPublishKasOffer(deficit, payChain);
+    if (!pub.ok) {
+      // 全失败: broker 也无价格 / 无库存 / publish 失败 → 真 fail
+      return { ok: false, available: cumKas, picks, error: `aggregation insufficient (${cumKas}/${qty} from makers) + broker self-quote failed: ${pub.error}` };
+    }
+    picks.push({
+      id: pub.offer_id,
+      take_qty: deficit,
+      take_usdt: parseFloat(pub.want_usdt),
+      maker_addr: pub.maker_chain_addr,
+      broker_dynamic: true,
+    });
+    cumKas += deficit;
+  }
+
+  const totalUsdt = picks.reduce((s, p) => s + p.take_usdt, 0);
+  return { ok: true, total_kas: cumKas, total_usdt: totalUsdt, picks };
 }
 
 // T-J2-09 broker_accept_record — completion-watcher 用此查 (offer_id → user) 关联
@@ -141,20 +261,30 @@ export async function handleBuyIntent(peerAddr, message) {
   const trimmed = (message || '').trim();
   const pending = _quotes.get(peerAddr);
 
-  // 用户确认 pending quote → 排队 accept_v1 + 紧跟付款指引 DM
+  // 用户确认 pending quote → 多笔 enqueue accept_v1 + 一条聚合 dm_pay_instr 列出所有 maker 付款指引
   if (pending && Date.now() < pending.expires_at) {
     if (CONFIRM_WORDS.includes(trimmed)) {
       _quotes.delete(peerAddr);
-      // T-J2-12 真人付款窗口: 存待 paid 状态 (accept_tx 真值由 queue pump 后填, handler 用占位).
+      // R7 路径 C: pending.picks 是数组. 给每个 pick enqueue accept + 跟踪 paid 状态
       _pendingAccepts.set(peerAddr, {
-        offer_id: pending.offer_id, qty: pending.qty, quoted_usdt: pending.quoted_usdt,
-        pay_chain: pending.pay_chain, maker_addr: pending.maker_addr, accept_tx: null,
+        picks: pending.picks.map(p => ({ ...p, paid_tx: null })),
+        total_kas: pending.total_kas,
+        total_usdt: pending.total_usdt,
+        pay_chain: pending.pay_chain,
         expires_at: Date.now() + PENDING_ACCEPT_TTL_MS,
       });
-      _enqueueAccept(pending.offer_id, peerAddr, pending.pay_chain);
-      _recordAccept({ offerId: pending.offer_id, userPeer: peerAddr, qty: pending.qty, quotedUsdt: pending.quoted_usdt, payChain: pending.pay_chain, acceptTx: null });
+      for (const p of pending.picks) {
+        await _enqueueAccept(p.id, peerAddr, pending.pay_chain);
+        _recordAccept({ offerId: p.id, userPeer: peerAddr, qty: p.take_qty, quotedUsdt: p.take_usdt.toFixed(6), payChain: pending.pay_chain, acceptTx: null });
+      }
+      const lines = pending.picks.map((p, i) =>
+        `${i+1}. ${p.take_qty} KAS → 付 ${p.take_usdt.toFixed(6)} USDT 到 ${p.maker_addr?.slice(0,22)||'?'}...${p.maker_addr?.slice(-6)||''}`
+      ).join('\n');
+      const note = pending.picks.length > 1
+        ? `\n\n注意: 共 ${pending.picks.length} 笔 USDT 转账 (拼单聚合). 每笔付完回我 "我付了 0xTX", 一笔一条.`
+        : `\n\n付完回我 "我付了 0xTX" (BSC 交易哈希), 自动通知 Maker.`;
       _qDm('dm_pay_instr', peerAddr,
-        `✓ 已接单. 请 30min 内付 ${pending.quoted_usdt} USDT 到 ${pending.maker_addr?.slice(0,22)||'?'}... (${pending.pay_chain}). 付完回我 "我付了 0xTX" (TX = BSC 交易哈希), 我自动通知 Maker 发 ${pending.qty} KAS 到你 Kasia.`);
+        `✓ 已接单. 请 30min 内分笔付:\n${lines}${note}`);
       return '';
     }
     if (CANCEL_WORDS.includes(trimmed)) {
@@ -164,7 +294,7 @@ export async function handleBuyIntent(peerAddr, message) {
     }
   }
 
-  // T-J2-12 PAID intent: 用户回 "我付了 0xtx..." 排队 paid_v1 + ack DM.
+  // PAID intent: 用户回 "我付了 0xtx..." → 一次匹配一个 unpaid pick (FIFO)
   const accept = _pendingAccepts.get(peerAddr);
   if (accept) {
     if (Date.now() >= accept.expires_at) {
@@ -173,34 +303,57 @@ export async function handleBuyIntent(peerAddr, message) {
       const pm = PAID_REGEX.exec(trimmed);
       if (pm) {
         const paymentTx = pm[1];
-        _pendingAccepts.delete(peerAddr);
-        _enqueuePaid(accept.offer_id, paymentTx, accept.pay_chain, peerAddr);
-        _qDm('dm_completion', peerAddr,
-          `✓ 收到付款 tx ${paymentTx.slice(0,12)}... 已排队通知 Maker. 验证通过后 Maker 自动发 ${accept.qty} KAS 到你 Kasia.`);
+        const nextUnpaid = accept.picks.find(p => !p.paid_tx);
+        if (!nextUnpaid) {
+          _qDm('dm_completion', peerAddr, `所有 ${accept.picks.length} 笔已确认, 无待付项.`);
+          return '';
+        }
+        nextUnpaid.paid_tx = paymentTx;
+        _enqueuePaid(nextUnpaid.id, paymentTx, accept.pay_chain, peerAddr);
+        const remaining = accept.picks.filter(p => !p.paid_tx).length;
+        if (remaining === 0) {
+          _pendingAccepts.delete(peerAddr);
+          _qDm('dm_completion', peerAddr,
+            `✓ 全部 ${accept.picks.length} 笔付款已收 (最后 tx ${paymentTx.slice(0,12)}...). Maker 验证后陆续发 ${accept.total_kas} KAS 到你 Kasia.`);
+        } else {
+          _qDm('dm_completion', peerAddr,
+            `✓ 付款 ${paymentTx.slice(0,12)}... 已确认 (#${accept.picks.findIndex(p => p.paid_tx === paymentTx)+1}/${accept.picks.length}). 还差 ${remaining} 笔.`);
+        }
         return '';
       }
     }
   }
 
-  // 解析买意图 → 报价 DM 入队
+  // 解析买意图 → 拼单 + 报价 DM 入队
   const m = BUY_REGEX.exec(trimmed);
   if (!m) return null;
   const qty = parseFloat(m[1]);
   if (qty <= 0) return null;
 
   const payChain = 'bnb';
-  const offer = selectBestOffer(qty, payChain);
-  if (!offer) {
-    _qDm('dm_quote', peerAddr, `当前无 ${qty} KAS 卖单 (${payChain.toUpperCase()} 链). 晚点再来或试试别的链.`);
+  const merged = await _aggregateWithFallback(qty, payChain);
+  if (!merged.ok) {
+    _qDm('dm_quote', peerAddr,
+      `📊 暂无报价: 你要 ${qty} KAS (${payChain.toUpperCase()}), 现成 maker 拼到 ${merged.available || 0} KAS, broker 自挂也失败 (${merged.error?.slice(0,80) || '?'}).\n` +
+      `选项: 1) 改小一点 (回"买 X KAS"), 2) 等等再来, 3) 试别的链.`);
     return '';
   }
-  const unit = parseFloat(offer.want_amount) / parseFloat(offer.give_amount);
-  const quotedUsdt = (unit * qty).toFixed(6);
+  const unit = merged.total_usdt / merged.total_kas;
   _quotes.set(peerAddr, {
-    offer_id: offer.id, qty, quoted_usdt: quotedUsdt, pay_chain: payChain,
-    maker_addr: offer.maker_addr, expires_at: Date.now() + QUOTE_TTL_MS,
+    picks: merged.picks,
+    total_kas: merged.total_kas,
+    total_usdt: merged.total_usdt,
+    pay_chain: payChain,
+    expires_at: Date.now() + QUOTE_TTL_MS,
   });
+  const dynamicCount = merged.picks.filter(p => p.broker_dynamic).length;
+  const breakdown = merged.picks.length === 1
+    ? (merged.picks[0].broker_dynamic ? `· broker 自挂 (无 maker)` : `· 1 个 maker (单笔)`)
+    : `· 拼 ${merged.picks.length} 笔: ${merged.picks.map(p => `${p.take_qty}${p.broker_dynamic?'(broker)':''}`).join('+')} = ${merged.total_kas} KAS`;
+  const dynNote = dynamicCount > 0
+    ? `\n· 含 broker 自挂 ${dynamicCount} 笔 (市价+1% spread, broker 用自己 KAS 库存)`
+    : '';
   _qDm('dm_quote', peerAddr,
-    `📋 买 ${qty} KAS 报价:\n· 单价 ${unit.toFixed(6)} USDT/KAS\n· 你付: ${quotedUsdt} USDT (${payChain.toUpperCase()})\n· Maker 收款 ${offer.maker_addr.slice(0,22)}...\n· Maker 直发 KAS 到你 Kasia 地址\n\n确认回 YES (5min 内). 取消回 NO.`);
+    `📋 买 ${qty} KAS 报价:\n${breakdown}${dynNote}\n· 实成交: ${merged.total_kas} KAS\n· 平均单价 ${unit.toFixed(6)} USDT/KAS\n· 你付总: ${merged.total_usdt.toFixed(6)} USDT (${payChain.toUpperCase()}, 分 ${merged.picks.length} 笔)\n\n确认回 YES (5min). 取消回 NO.`);
   return '';
 }
