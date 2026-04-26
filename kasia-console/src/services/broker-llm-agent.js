@@ -28,11 +28,18 @@ const SYSTEM_PROMPT = `你是 KANet broker. 帮用户 KAS↔USDT 成交.
 - "want 20 KAS" → "Got it, buy 20 KAS. Which chain (BSC/Polygon/SOL/TRON)?"
 - "comprar 25 KAS" → "Perfecto, comprar 25 KAS. ¿Qué cadena?"
 
-# 4 步流程
+# 4 步流程 (Owner 19:55+ 钦定: 画像后台 + 自然话 + 最后画像确认)
 1. **方向**: 见上铁律
-2. **字段**: 缺一问一. 买 → 数量 + 链. 卖 → 数量 + 链 + 收款地址
-3. **复述确认**: 字段齐 → "你想买 X KAS, Y 链, 对吗?"
-4. **调 tool**: 用户 yes/对/确认/嗯/是/sí → 调 finalize_order. 不啰嗦.
+2. **字段收集**: 缺一问一. 买 → 数量 + 链. 卖 → 数量 + 链 + 收款地址
+3. **画像确认 (议 B)**: 字段齐 → 必调 \`preview_order\` tool (不调 finalize_order).
+   **关键铁律 (J1 67903c5b critical fix): tool 返 \`preview_text\` 字段, 你必须 100% 原样转发,
+   不准改一个字符, 不准缩写地址, 不准编 placeholder 0x1234..., 不准用 markdown 重排版**.
+   LLM 自己渲染地址 = user 真转 USDT 到 fake 地址 = 钱丢 = production 灾难.
+   行为: result.ok === true → reply = result.preview_text (整段, 一字不改).
+   result.ok === false → 用 result.message 自然话回错 (eg 'qty 太小请改大').
+4. **真下单**: 用户 YES/对/确认/嗯/是/sí → 调 \`finalize_order\` 真创订单. 不啰嗦.
+   用户 NO/取消 → 友好回 "已取消, 想买卖 KAS 随时回我" 不动 state.
+   用户改 (例 "改 3 KAS" / "改 ETH" / "改地址") → step 2 重新收集字段, step 3 重新 preview.
 
 # 语言匹配
 用户什么语回什么语. 中文回中文, 英文回英文, 西文回西文.
@@ -76,11 +83,31 @@ verify_payment 返回处理:
 - 非托管, 1-2 min 到账`;
 
 const TOOLS = [
+  // 议 B (Owner 19:55+ 钦定): 字段齐时**必调** preview_order 不调 finalize_order.
+  // broker 算价 + maker 但**不真 publish** 不 set _pendingAccepts. 返完整画像数据 LLM 用真数据
+  // 渲染 DM 让 user 最后 YES 确认. user YES → 才调 finalize_order.
+  {
+    type: 'function',
+    function: {
+      name: 'preview_order',
+      description: '议 B: step 3 字段齐时必调此 (不调 finalize_order). broker 算价 + maker 但不真 publish, 返完整 preview 数据 (单价/总额/maker 地址/user_kasia/TTL) 让你用真数据自然话渲染完整订单画像 DM 让 user 最后 YES 确认. user YES 后才调 finalize_order.',
+      parameters: {
+        type: 'object',
+        properties: {
+          direction: { type: 'string', enum: ['buy', 'sell'] },
+          qty: { type: 'number', description: 'KAS 数量, > 1' },
+          chain: { type: 'string', enum: ['bnb', 'polygon', 'sol', 'tron'] },
+          address: { type: 'string', description: '卖路径必填收款地址' },
+        },
+        required: ['direction', 'qty', 'chain'],
+      },
+    },
+  },
   {
     type: 'function',
     function: {
       name: 'finalize_order',
-      description: '4 字段齐 + 用户已确认 后调用. 触发 broker 协议层真下单. 买路径 broker 帮接最佳 maker (USDT 你直付 maker 不经 broker), 卖路径 broker 收 KAS 后挂卖单 (USDT 直付你收款地址).',
+      description: 'step 4: 用户**已 preview 确认 (YES)** 后才调用. 触发 broker 协议层真下单. 买路径 broker 帮接最佳 maker (USDT 你直付 maker 不经 broker), 卖路径 broker 收 KAS 后挂卖单. **不要在 user YES 之前调此 — 必须先调 preview_order**.',
       parameters: {
         type: 'object',
         properties: {
@@ -173,6 +200,20 @@ async function _callLlm(messages) {
 }
 
 async function _executeTool(peer, name, args) {
+  if (name === 'preview_order') {
+    // 议 B (Owner 钦定): 字段齐 preview, 不真 publish. user YES 后才 finalize_order.
+    const { direction, qty, chain, address } = args || {};
+    if (direction === 'buy') {
+      const { buyPreview } = await import('./broker-buy-handler.js');
+      return buyPreview({ user_kasia: peer, qty, pay_chain: chain });
+    }
+    if (direction === 'sell') {
+      // 卖 preview v1.1 留 (sellPreview 待加). 当前 fallback finalize_order 真路径.
+      if (!address) return { ok: false, error: '卖路径必填 recv_address' };
+      return { ok: false, error: 'sell_preview_v1_1', message: '卖 preview v1.1 加, 当前直接 YES 走真下单. 你确认数量 + 链 + 收款地址后回 YES.' };
+    }
+    return { ok: false, error: `unknown direction: ${direction}` };
+  }
   if (name === 'finalize_order') {
     const { direction, qty, chain, address } = args || {};
     if (direction === 'buy') {

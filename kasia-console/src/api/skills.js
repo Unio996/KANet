@@ -20,6 +20,20 @@ const REASON_MAX_LEN = 200;
 // 'core' / 'perception' / 'trading' / 'info' / 'dev' / 'self' 允许; 'social' / 'contacts' / 'other' 拒.
 const BROKER_BANNED_CATEGORIES = ['social', 'contacts', 'other'];
 
+// Owner 19:18 钦定 (基于 invoke_count 真数据 + Trader-A 30 active 太杂体验): 正向白名单
+// agent 标 broker/service role 那一刻 → 自动只 active 这 10 个推荐 + disable 其他, 不需要
+// owner 一个个看哪些不该装. role-based defaults + auto-apply.
+const TRADER_RECOMMENDED_SKILLS = new Set([
+  // 核心交易 (5)
+  'price_tracker', 'trade_executor', 'market_scanner', 'mm_otc', 'cross_chain_verify',
+  // 情报辅助 (2)
+  'address_profiler', 'kaspa_network_health',
+  // 感知 (1)
+  'trade_sense',
+  // self/core (2)
+  'self_awareness', 'system_status',
+]);
+
 function _checkBrokerSkillCompat(skill, newStatus) {
   if (newStatus !== 'active') return { ok: true };
   if (!skill || !skill.relay_node_id) return { ok: true };  // global skill, 不限
@@ -40,7 +54,9 @@ export async function registerSkillRoutes(fastify) {
   // --- API routes (adapter / programmatic access, requires auth) ---
 
   fastify.addHook('preHandler', async (request, reply) => {
-    if (request.url.startsWith('/api/skills')) {
+    // 议 2 (T-J2-V2): /api/skills/role-compat 是 UI 用的 read-only endpoint, 不需要 ingest auth.
+    // 所有其他 /api/skills/* 路径仍然需要 (programmatic access auth).
+    if (request.url.startsWith('/api/skills') && !request.url.startsWith('/api/skills/role-compat')) {
       await verifyIngestRequest(request, reply);
     }
   });
@@ -199,7 +215,119 @@ export async function registerSkillRoutes(fastify) {
     const skills = await listSkills({
       relayNodeId: selectedAccount || undefined,
     });
-    return reply.view('skills', { skills, relayNodes, selectedAccount, t, dir, lang, langs, VALID_TRUST, VALID_STATUS });
+    // 议 3 (T-J2-V2): 选中 relay 是否 broker/service role → UI 灰显 banned + 显示 role badge
+    let roleCompat = null;
+    if (selectedAccount) {
+      const r = sqlite.prepare('SELECT id, name, is_dex_broker, is_service FROM relay_nodes WHERE id=?').get(selectedAccount);
+      if (r) {
+        const isBrokerRole = !!(r.is_dex_broker || r.is_service);
+        roleCompat = {
+          relay: r,
+          is_broker_role: isBrokerRole,
+          banned_categories: isBrokerRole ? BROKER_BANNED_CATEGORIES : [],
+          allowed_categories: isBrokerRole
+            ? ['core', 'perception', 'trading', 'info', 'dev', 'self']
+            : null,
+        };
+      }
+    }
+    return reply.view('skills', { skills, relayNodes, selectedAccount, roleCompat, t, dir, lang, langs, VALID_TRUST, VALID_STATUS });
+  });
+
+  // 议 3 / Owner 19:18 钦定: 正向白名单 — broker/service relay 一键应用 trader 推荐模板.
+  // 行为: active 推荐 10 个 (TRADER_RECOMMENDED_SKILLS) + disable 其他所有 active.
+  // 不只是清 banned (反向), 是直接钦定白名单 (正向).
+  function _doApplyTraderTemplate(relayNodeId) {
+    const r = sqlite.prepare('SELECT id, name, is_dex_broker, is_service FROM relay_nodes WHERE id=?').get(relayNodeId);
+    if (!r) return { ok: false, code: 404, error: 'relay_not_found' };
+    if (!r.is_dex_broker && !r.is_service) {
+      return { ok: false, code: 400, error: 'not_broker_role', message: '只有 broker/service relay 才能应用 trader 模板' };
+    }
+    const all = sqlite.prepare(`SELECT id, name, status FROM skills WHERE relay_node_id=?`).all(r.id);
+    const now = nowIso();
+    const enableStmt = sqlite.prepare(`UPDATE skills SET status='active', updated_at=? WHERE id=?`);
+    const disableStmt = sqlite.prepare(`UPDATE skills SET status='disabled', updated_at=? WHERE id=?`);
+    let enabled = [], disabled = [];
+    for (const s of all) {
+      const inTemplate = TRADER_RECOMMENDED_SKILLS.has(s.name);
+      if (inTemplate && s.status !== 'active') {
+        enableStmt.run(now, s.id);
+        enabled.push(s.name);
+      } else if (!inTemplate && s.status === 'active') {
+        disableStmt.run(now, s.id);
+        disabled.push(s.name);
+      }
+    }
+    // 验最终: TRADER_RECOMMENDED_SKILLS 中 agent 没有该 skill (skill 不存在) 不报错, 只 log.
+    const missing = [...TRADER_RECOMMENDED_SKILLS].filter(name =>
+      !all.some(s => s.name === name)
+    );
+    return {
+      ok: true,
+      relay: r,
+      enabled,
+      disabled,
+      missing,  // 推荐 set 中此 agent 没装的 skill (skill 表里没此 name)
+      final_active_count: all.filter(s => TRADER_RECOMMENDED_SKILLS.has(s.name)).length,
+    };
+  }
+
+  // 反向 (legacy 议 3): 只 disable banned category. 留作 fallback / 软清理路径.
+  function _doResetRecommended(relayNodeId) {
+    const r = sqlite.prepare('SELECT id, name, is_dex_broker, is_service FROM relay_nodes WHERE id=?').get(relayNodeId);
+    if (!r) return { ok: false, code: 404, error: 'relay_not_found' };
+    if (!r.is_dex_broker && !r.is_service) {
+      return { ok: false, code: 400, error: 'not_broker_role', message: '只有 broker/service relay 才能用推荐复位' };
+    }
+    const banned = sqlite.prepare(`
+      SELECT id, name, category FROM skills
+      WHERE relay_node_id=? AND status='active'
+        AND category IN (${BROKER_BANNED_CATEGORIES.map(()=>'?').join(',')})
+    `).all(r.id, ...BROKER_BANNED_CATEGORIES);
+    const now = nowIso();
+    const stmt = sqlite.prepare(`UPDATE skills SET status='disabled', updated_at=? WHERE id=?`);
+    let disabled = 0;
+    for (const s of banned) { stmt.run(now, s.id); disabled++; }
+    return {
+      ok: true,
+      relay: r,
+      disabled_count: disabled,
+      disabled_skills: banned.map(s => ({ name: s.name, category: s.category })),
+    };
+  }
+
+  // JSON endpoint (programmatic / Alpine.js etc)
+  fastify.post('/skills/reset-recommended', async (request, reply) => {
+    const { relay_node_id } = request.body || {};
+    if (!relay_node_id) return reply.code(400).send({ error: 'relay_node_id required' });
+    const result = _doResetRecommended(relay_node_id);
+    if (!result.ok) return reply.code(result.code).send(result);
+    return reply.send(result);
+  });
+
+  // Form submit endpoint (Chrome 禁 JS 兼容, 议 3 UI 推荐配置按钮用)
+  fastify.post('/skills/reset-recommended-form', async (request, reply) => {
+    const { relay_node_id } = request.body || {};
+    if (!relay_node_id) return reply.redirect('/skills');
+    _doResetRecommended(relay_node_id);
+    return reply.redirect('/skills?account=' + encodeURIComponent(relay_node_id));
+  });
+
+  // Owner 19:18 钦定 — 正向应用 trader 推荐模板 (active 推荐 + disable 其他)
+  // JSON endpoint
+  fastify.post('/skills/apply-trader-template', async (request, reply) => {
+    const { relay_node_id } = request.body || {};
+    if (!relay_node_id) return reply.code(400).send({ error: 'relay_node_id required' });
+    const result = _doApplyTraderTemplate(relay_node_id);
+    if (!result.ok) return reply.code(result.code).send(result);
+    return reply.send(result);
+  });
+  // Form submit endpoint (Chrome 禁 JS 兼容)
+  fastify.post('/skills/apply-trader-template-form', async (request, reply) => {
+    const { relay_node_id } = request.body || {};
+    if (!relay_node_id) return reply.redirect('/skills');
+    _doApplyTraderTemplate(relay_node_id);
+    return reply.redirect('/skills?account=' + encodeURIComponent(relay_node_id));
   });
 
   // Create skill from form

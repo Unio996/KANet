@@ -123,6 +123,35 @@ export function transition(offerId, newStatus, extra = {}) {
     console.warn(`[exchange-machine] chain_event recording failed: ${evtErr.message}`);
   }
 
+  // 议 B1 (Owner 19:55+ 钦定 lifecycle): 关键状态变更主动 DM taker.
+  // 各 transition 点显式反馈 — verifying → delivering (USDT 验证通过) / completed (final)
+  // / timed_out / disputed / failed. user 永不静默, 每节点知道在哪.
+  if (offer.taker && offer.taker.startsWith('kaspa:')) {
+    let _dmKind = null, _dmMsg = null;
+    if (newStatus === 'delivering') {
+      _dmKind = 'dm_payment_verified';
+      _dmMsg = `✅ USDT 验证通过, 正在发 ${offer.give_amount} ${offer.give_asset} 给你, 1-2 分钟到账.`;
+    } else if (newStatus === 'completed') {
+      _dmKind = 'dm_complete';
+      _dmMsg = `🎉 交易完成! ${offer.give_amount} ${offer.give_asset} 已到账. 谢谢使用 KANet broker, 想继续买卖随时回我.`;
+    } else if (newStatus === 'timed_out') {
+      _dmKind = 'dm_timeout';
+      _dmMsg = `⏰ 订单超时 — 30 分钟内没收到付款验证, 已自动取消. 资金如已转出请联系 Owner 处理.`;
+    } else if (newStatus === 'disputed') {
+      _dmKind = 'dm_failed';
+      _dmMsg = `⚠ 订单争议中, broker 已通知 Owner 人工处理. 请等回复.`;
+    } else if (newStatus === 'failed') {
+      _dmKind = 'dm_failed';
+      _dmMsg = `❌ 订单失败 (链上验证或发送出错), Owner 跟进中. 请联系 KANet 客服.`;
+    }
+    if (_dmKind) {
+      // fire-and-forget (transition 是 sync, 不阻塞流程, DM 失败 warn 不抛)
+      import('./broker-action-queue.js').then(m => {
+        m.enqueue({ kind: _dmKind, peer: offer.taker, payload: { message: _dmMsg } });
+      }).catch(e => console.warn(`[exchange-machine] lifecycle DM ${_dmKind} err: ${e.message}`));
+    }
+  }
+
   // 交割完成 → 升级 maker 和 taker 的 classification 到 verified_agent（只升不降）
   if (newStatus === 'completed' && offer.maker && offer.taker) {
     sqlite.prepare(`
@@ -245,9 +274,15 @@ export function processAccept(msg) {
     return null;
   }
 
-  // Self-accept prevention: maker cannot accept own offer
-  if (msg._from && msg._from === offer.maker) {
-    console.log(`[exchange-machine] Accept rejected: self-accept (maker === taker: ${msg._from.slice(-12)})`);
+  // Self-accept prevention: maker cannot accept own offer.
+  // T-NWT-2026-04-26 self-accept fix: broker_dynamic_quote 路径 broker 自挂 maker + broker 代 user
+  // 发 accept_v1 → msg._from = broker = maker 误伤. payload 已 carry receive_address (= user kasia),
+  // 用 receive_address 当真 taker (broker 自挂时), fallback _from (普通 client 不 carry receive_address).
+  // 普通 user 自 accept: receive_address 缺 → fallback _from = user = maker → 仍 reject ✓
+  // broker 代 accept: receive_address = user, _from = broker, maker = broker → taker(user) !== maker(broker) → 通过 ✓
+  const taker = msg.receive_address || msg._from;
+  if (taker && taker === offer.maker) {
+    console.log(`[exchange-machine] Accept rejected: self-accept (maker === taker: ${taker.slice(-12)})`);
     return null;
   }
 
@@ -272,8 +307,11 @@ export function processAccept(msg) {
   }
 
   // Transition: open → matched
+  // T-NWT-2026-04-26 self-accept fix follow-up: taker 字段同 self-accept check 逻辑 —
+  // broker 代发时真 taker 在 receive_address (msg._from = broker 信使).
+  // 普通 client 不 carry receive_address → fallback msg._from.
   const matched = transition(offer.id, 'matched', {
-    taker: msg._from,
+    taker: msg.receive_address || msg._from,
     taker_tx_id: msg._tx,
     accept_commitment: commitment,
   });

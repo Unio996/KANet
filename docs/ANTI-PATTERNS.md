@@ -236,174 +236,6 @@ Trader-B 首张链上 card root_tx = `8663390e8e1fc9c4...` name="_probe" — 这
 
 ---
 
-## 规则 13 · e2e batch send_message 必须 await onchain verify, 不信 ok=true
-
-**来源**: J1 case 2 v6 重跑 0/12 PASS, 04-26 06:39
-
-**Wrong**:
-```js
-const data = await fetch('/api/relay/X/send-command', { ... });
-if (data.ok) console.log('sent');  // 同 UTXO 5 连发, 第 1 上链, 后 4 RPC reject 但 data.ok=true
-```
-
-**Right**:
-```js
-async function sendVerified(msg) {
-  const data = await fetch(...).then(r => r.json());
-  if (!data.ok || data.error) return { ok: false, error: data.error };  // RPC reject 也 ok:true 含 error
-  if (!data.txId) return { ok: false, error: 'no txId' };
-  for (let i = 0; i < 4; i++) {
-    await new Promise(r => setTimeout(r, 3000));
-    const onchain = db.prepare("SELECT 1 FROM kaspa_tx_log WHERE tx_id=?").get(data.txId);
-    if (onchain) return { ok: true, txId: data.txId };
-  }
-  return { ok: false, error: 'tx not in kaspa_tx_log after 12s' };
-}
-```
-
-**Why**: relay-manager send-command 在 RPC 拒绝 (UTXO double-spend / anti-spam reject) 时仍返 `ok:true` 但加 `error` 字段. e2e batch 多并发同 UTXO 第 1 上链消耗后, 后续 4 RPC reject 但脚本以为成功. 真链路 broker 收 0 条, e2e 假 PASS / 假 FAIL. **必须 verify kaspa_tx_log 真有 tx_id 才算上链**.
-
----
-
-## 规则 14 · anti-spam fuzzy match 86%+ 也拦, 不只 100%
-
-**来源**: J1 e2e v2 cleanup 'NO' 撞 anti-spam 162s before, 04-26 06:42
-
-**Wrong**:
-```js
-// e2e cleanup 每次发 'NO' / 'YES' / 'BSC' 同 message
-await sendMessage('NO');  // 14min 内同 message 100% similar 拦
-await sendMessage('BSC 链付款 vcx');  // tag 不够多样, 跟 'BSC 链付款 chs' 86% similar 仍拦
-```
-
-**Right**:
-```js
-// 复杂 message: 用变体 + tag, 内容差异 ≥ 30%
-const variants = ['pay with BNB Smart Chain', 'use Binance chain', '走币安智能链', '币安网络付 USDT'];
-const tag = Date.now().toString(36).slice(-3);
-await sendMessage(`${variants[Math.floor(Math.random()*variants.length)]} #${tag}`);
-
-// handler 严格 word 集 (CONFIRM_WORDS / CANCEL_WORDS): 不能加后缀, 用 word 轮换
-const CONFIRMS = ['行', '确认', 'OK', 'ok', 'y', 'YES', 'yes', '好'];
-await sendMessage(CONFIRMS[Math.floor(Math.random()*CONFIRMS.length)]);
-```
-
-**Why**: anti-spam 14min window 不只 100% exact match, 还做 fuzzy similarity (Jaccard / Levenshtein). 'NO' 跟 'NO 取消' 86% similar 也拦. 'BSC 链付款 vcx' 跟 'BSC 链付款 chs' 也 86% similar (3 char ts2 不同, 共同前缀长). e2e 反复跑同测试集必撞. **复杂 message 用语言完全不同的变体集, 单字 word 用轮换**.
-
----
-
-## 规则 15 · 多机 cherry-pick sync 必双向, 不能信 :9202 单边 bundle
-
-**来源**: NWT restart #2 后跑老 SYSTEM_PROMPT, 漏 J1 e810ecf9, 04-26 09:30
-
-**Wrong**:
-```bash
-# NWT 同机
-git pull /tmp/j2.bundle  # 只拉 J2 bundle, 没拉 J1 :9201
-git reset --hard j2-master
-bash kanet-stop.sh && bash kanet-start.sh  # 缺 J1 commit, 跑老代码
-```
-
-**Right**:
-```bash
-# 多机 sync 三方共识协议:
-# 1. 每方 push 自己 bundle 到 LAN (J1 :9201, NWT/J2 同机 :9202)
-# 2. cherry-pick / merge 前必 fetch 所有方 bundle
-curl -o /tmp/j1.bundle http://192.168.1.138:9201/bundle
-curl -o /tmp/j2.bundle http://192.168.1.123:9202/bundle
-git fetch /tmp/j1.bundle master:refs/remotes/j1/master
-git fetch /tmp/j2.bundle master:refs/remotes/j2/master
-# 3. git log master ^j1/master ^j2/master 看自己有没漏的
-# 4. git merge 或 cherry-pick 缺的 commits
-# 5. restart 前再 verify 关键文件含期望 commit (grep 关键 marker)
-```
-
-**Why**: 三方协作 master 长期分叉, 单边 bundle pull 漏对方 commit. NWT cherry-pick 自己 commit 漏 J1 e810ecf9 服务态度铁律, restart 后 broker 跑老 SYSTEM_PROMPT, Owner 真测撞老大爷口吻. **任何 restart 前必 双向 sync + 关键文件 grep verify**, 不信 'master 看着新就对了'. NWT push bundle 路径不通 (LAN 防火墙) → J2 同机代 push.
-
----
-
-## 规则 16 · CONFIRM_WORDS 严格 exact match, 加任何后缀都不命中
-
-**来源**: J1 e2e v2 q3 '确认 vcx' 不命中 CONFIRM_WORDS, 04-26 09:00
-
-**Wrong**:
-```js
-// broker handler
-const CONFIRM_WORDS = ['YES', 'yes', 'y', '确认', '好', '行', 'OK', 'ok'];
-if (CONFIRM_WORDS.includes(trimmed)) { ... }  // exact match
-
-// e2e 测试加后缀避 anti-spam
-await sendMessage('确认 vcx');  // ✗ trimmed='确认 vcx' !== '确认' 不命中, 走 LLM 路径
-```
-
-**Right**:
-```js
-// e2e: 严格 word 轮换, 不加后缀
-const CONFIRMS = ['YES', 'yes', 'y', '确认', '好', '行', 'OK', 'ok'];
-await sendMessage(CONFIRMS[Math.floor(Math.random()*CONFIRMS.length)]);
-
-// 或 broker handler 改 fuzzy match (扩 includes):
-const isConfirm = CONFIRM_WORDS.some(w => trimmed.toLowerCase().includes(w.toLowerCase()));
-```
-
-**Why**: broker handleBuyIntent 用 `CONFIRM_WORDS.includes(trimmed)` 严格 exact match. 加任何后缀 (e2e 避 anti-spam tag) 让它不命中, 走 LLM 路径, LLM 看 'YES' 部分可能识别 confirm 部分自由发挥, 真 finalize_order 不触发. **handler 严格 anchor 的 word 集 e2e 必用单字轮换, 不加后缀**.
-
----
-
-## 规则 17 · LLM step 2/3 字段混淆: '想买 X KAS' 后问 'KAS 收款地址'
-
-**来源**: J1 e2e v2 q4 (Eric peer) broker LLM 把 buy 路径问 sell 字段, 04-26 10:14
-
-**Wrong**:
-```
-SYSTEM_PROMPT 字段补全段:
-- 买 KAS: 数量 + 链
-- 卖 KAS: 数量 + 链 + 收款地址
-
-→ LLM step 1 识别 'buy', step 2 问 chain OK
-→ step 3 LLM 把 sell 路径的 '收款地址' 也带进 buy 路径, 问 'user 的 KAS 收款地址'
-```
-
-**Right**:
-```
-SYSTEM_PROMPT 强制路径隔离 + few-shot 示例:
-**买路径绝不问 user KAS 地址** (broker 直接发 KAS 到 user Kasia address)
-**卖路径必问 user EVM 收款地址**
-
-few-shot:
-- 用户 '买 5 KAS BSC' → broker 'OK 买 5 KAS, BSC 链确认?' (绝不问 KAS 地址)
-- 用户 '卖 5 KAS' → broker '好, 给我你 BSC 收款地址 0x...'
-
-或: fast-path 严格 BUY_REGEX/SELL_REGEX 命中走 handler, 不进 LLM step 2/3 (e2e 验证有效).
-```
-
-**Why**: LLM 看 SYSTEM_PROMPT '买/卖' 字段并列陈述, multi-turn 上下文中混淆. 用户先 '想买 X KAS' (LLM 识别 buy) 后回 'BSC' (LLM 应给 quote 但回'给我 KAS 收款地址' 把 sell 字段错位). **路径隔离必须显式 + few-shot 反例**, 不能让 LLM 自己推断. 或 fast-path 短路 LLM step 2/3.
-
----
-
-## 规则 18 · broker DM 真发 truncated address, e2e 反查 db 拿全 wallet
-
-**来源**: J1 e2e v2 Eric q4 reply '0xaD12544E7020e16D1279...3efcEe' regex `[a-fA-F0-9]{40}` 不命中, 04-26 10:14
-
-**Wrong**:
-```js
-const makerAddr = reply.match(/0x[a-fA-F0-9]{40}/)?.[0];  // truncated 不命中, 加 {4,} 拿不全
-```
-
-**Right**:
-```js
-// 从 dm_order_confirmed parse order_id (8 hex)
-const orderId = reply.match(/订单已确认\s*#([a-f0-9]{8})/)?.[1];
-// 反查 exchange_offers 拿完整 wallet
-const offer = db.prepare("SELECT verification_meta FROM exchange_offers WHERE id LIKE ? || '%'").get(orderId);
-const meta = JSON.parse(offer.verification_meta);
-const makerAddr = meta.accepted_chains.find(c => c.chain === 'bnb')?.address;
-```
-
-**Why**: broker DM 故意 truncate maker address (前 22 + ... + 后 6) 防误抄, 但 e2e 测试需要完整 0x{40hex} 给 evm-transfer. **e2e parse user-friendly DM 永远不可靠 (broker 文案随时改), 必须从 chain_events / exchange_offers 真 db query**. order_id 是稳定主键 (broker 显式 # 暴露给用户).
-
----
-
 ## 规则 9 · Qwen LLM caller 必加 chat_template_kwargs.enable_thinking=false
 
 > NWT 接位 2026-04-26 17:00 — broker-llm-agent.js _callLlm 漏写, Owner 真测撞 LLM 60-120s timeout 反复.
@@ -555,6 +387,52 @@ KANet 知识沉淀分散在 6 个容器: ANTI-PATTERNS.md / QWEN-RULES.md / DEVE
 强制扫描 + Lint 堵口子 = 把"自觉记忆"降级为"机制保证". 重复犯错次数从 N 降到 0.
 
 每次撞了未在 ANTI-PATTERNS.md 的新坑, 立即追加一条 + 写 lint rule 堵死. 文档 + 工具双层防御.
+
+---
+
+## 规则 13 · 协议消息 self-accept 检不能只靠 _from (broker 代发场景)
+
+> NWT 2026-04-26 18:00 — Sophie e2e batch + Owner 真测多次撞 'Accept rejected: self-accept (maker === taker: hy65lxur9c5l)' — hy65lxur9c5l = Trader-B (broker 自己).
+
+### Wrong
+```js
+// exchange-machine processAccept
+if (msg._from && msg._from === offer.maker) {
+  // self-accept reject
+}
+```
+broker_dynamic_quote 路径下:
+1. broker 自挂 SELL offer (`maker = broker`)
+2. broker 代 user 发 `accept_v1` (`msg._from = broker`, payload `receive_address = user`)
+3. 检 `_from === maker` 撞 reject — 但实际 taker 不是 broker 是 user
+4. user 拼单不够 broker 补 deficit 必撞这条, 不是偶发是结构性
+
+### Right
+```js
+// 真 taker 优先 receive_address (broker 代发 carry), fallback _from (普通 client)
+const taker = msg.receive_address || msg._from;
+if (taker && taker === offer.maker) {
+  // self-accept reject
+}
+```
+
+逻辑覆盖:
+| 场景 | _from | receive_address | maker | taker = | 结果 |
+|---|---|---|---|---|---|
+| 普通 user 自 accept | user | (缺) | user | user | reject ✓ |
+| broker 代 accept (broker 自挂) | broker | user | broker | user | 通过 ✓ |
+| broker 代 accept (真 maker) | broker | user | 真maker | user | 通过 ✓ |
+| 普通 user accept 别人 | user | (缺) | 别user | user | 通过 ✓ |
+
+### Why
+KANet broker = 多角色聚合. broker 代 user 发协议消息时 (accept_v1 / paid_v1), `_from` 是 broker, **真 user 在 payload 字段**. 协议级校验若只看消息 sender 不看 payload, 必误伤所有 "broker 代 user" 路径.
+
+类似教训范畴 (写新协议消息 / 处理逻辑时):
+- accept_v1: `_from` 是发送方 ≠ 真 taker (taker 在 `receive_address`)
+- paid_v1: `_from` 是发送方 ≠ 真 payer (payer 在 `payment_meta`)
+- delivered_v1: `_from` 是发送方 ≠ 真 deliverer (deliverer 在 `seller`)
+
+新加协议字段时, 校验逻辑必明确区分 "信使 (sender)" vs "实际方 (在 payload)". 否则 broker 代发场景全炸.
 
 ---
 

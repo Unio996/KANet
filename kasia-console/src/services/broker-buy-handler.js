@@ -19,7 +19,16 @@ const PAID_REGEX = /(?:已付|付了|我付|paid|pay)[\s\S]{0,40}?\b(0x[a-fA-F0-
 const PAID_NO_TX_REGEX = /^(?:已付|付了|已转|转完|已支付|已转账|已经支付|已经付款|付款了|支付了|支付完成|支付好了|完成|done|paid|sent|finished|转好了|付好了|搞定|ok 付了|已经付了)\s*(?:了)?\s*[!！。.…]*\s*$/i;
 // T-NWT-V2-hotfix (Owner 真测 #3 撞 LLM 60s timeout 多次): 询价 deterministic 短路, 不进 LLM.
 // "现在 KAS 多少钱?" / "什么价?" / "现价" / "报价啊" / "多少钱" — 直接 fetchKasPrice 立刻 DM 价格.
-const PRICE_QUERY_REGEX = /^\s*(?:现在\s*kas\s*多少钱|kas\s*现在\s*多少钱|kas\s*多少钱|什么价|现价|啥价|报价啊?|价格(?:多少|是多少|是)?|多少钱|how much|price\??)\s*[?？!！.…]*\s*$/i;
+// T-J2-V2-realtest: 真用户表达扩 — "啥价位" / "什么价位" / "kas 价位" / "kas 行情" / "市价" / 单 "价位" / "行情"
+const PRICE_QUERY_REGEX = /^\s*(?:现在\s*kas\s*多少钱|kas\s*现在\s*多少钱|kas\s*(?:多少钱|价位|价|行情|市价|价格)|(?:什么|啥|多少)\s*(?:价位|价|行情|价钱|价格)|现价|现在价|市价|价位|行情|报报?价啊?|价格(?:多少|是多少|是)?|多少钱|how\s*much|price\??)\s*[?？!！.…]*\s*$/i;
+// T-NWT-2026-04-26 case 6 (J1 76742556 任务面): STOP intent deterministic 短路.
+// user 烦了 / 想退出 → broker 立刻 ack 告别, 不进 LLM 也不啰嗦. _pendingAccepts 不动 (订单生命周期独立).
+// 完整 do_not_contact 跨 system (connection/Mind/relay anti-spam) 留 v1.1, 这里只 broker 层短路.
+// T-J2-V2-realtest (J1 e5aca4c3 review 反对 [\s\S]* 启发式; J2 真测发现 STOP_LED 也撞 false pos
+// "烦死了, 帮帮我"). 最严: 单 anchor STOP_HARD + 完整 keyword 列举 (含 "我" / "再联系我" / "联系我" 等真用户表达).
+// 真 STOP 单短句, 复杂句子求助 fall LLM 判 sentiment.
+const STOP_HARD_REGEX = /^\s*(?:烦死了?|烦人|滚开?|走开|别(?:再)?(?:烦|找|发|联系|打扰|dm)\s*我?\s*了?|不要(?:再)?(?:发|联系|找|dm|打扰)\s*我?\s*了?|不想聊|不聊了?|stop\s*(?:bothering|messag\w*)?(?:\s+me)?|leave\s+me\s+alone|fuck\s*off|go\s*away|don't\s+(?:bother|message|contact)\s*(?:me)?|bye|再见|结束|不需要了?|算了不要了?)\s*[!！。.…,，]*\s*(?:了|啦|啊|呀)?\s*[!！。.…]*\s*$/i;
+function _isStopIntent(s) { return STOP_HARD_REGEX.test(s); }
 const CONFIRM_WORDS = ['YES', 'yes', 'y', '确认', '好', '行', 'OK', 'ok'];
 const CANCEL_WORDS  = ['NO', 'no', 'n', '取消', '不要', '算了'];
 const QUOTE_TTL_MS = 5 * 60 * 1000;
@@ -211,6 +220,99 @@ function _enqueuePaid(offerId, paymentTx, payChain, peerAddr) {
     payment_chain: payChain,
   };
   return _enqueue('paid_v1', peerAddr, { channel: 'kanet-exchange', message: JSON.stringify(payload) });
+}
+
+// 议 B (Owner 19:55+ 钦定): buyPreview — 字段齐时调, **不真 publish 不 set _pendingAccepts**.
+// 同 _aggregateWithFallback 算 picks/价/maker, broker_dynamic_quote case 算 fetchKasPrice + spread
+// 但不调 /api/exchange/publish (preview only). LLM 拿到 preview 数据自然话渲染完整画像 DM
+// 让 user 最后 YES → 才调 finalizeBuy 真 publish.
+//
+// 防 hallucinate "已下单" — LLM 只能用 preview 真数据 (含 user_kasia_address / unit_price /
+// total_usdt / maker_payment_address) 不能编. user reject "NO" 路径无 state cleanup (没 set 任何).
+export async function buyPreview({ user_kasia, qty, pay_chain }) {
+  if (!user_kasia || !qty || qty <= 0 || !pay_chain) {
+    return { ok: false, error: 'missing fields (user_kasia/qty/pay_chain)' };
+  }
+  if (qty < MIN_QTY_KAS) {
+    return { ok: false, error: `qty_too_small`, message: `最小买 ${MIN_QTY_KAS} KAS (broker fee + dust 保护). 改大点.` };
+  }
+  const existing = _pendingAccepts.get(user_kasia);
+  if (existing && Date.now() < existing.expires_at) {
+    const remaining = existing.picks.filter(p => !p.paid_tx).length;
+    return { ok: false, error: 'already_in_pending_accept',
+      message: `你已有 ${existing.total_kas} KAS active 订单 (${remaining} 待付). 先完成或等 30min 过期.` };
+  }
+  const payChain = String(pay_chain).toLowerCase();
+  const sel = selectBestOffers(qty, payChain);
+  let picks = sel.picks ? [...sel.picks] : [];
+  let cumKas = picks.reduce((s, p) => s + p.take_qty, 0);
+
+  // broker_dynamic_quote 价格 (但不 publish)
+  if (cumKas < qty) {
+    const deficit = qty - cumKas;
+    const { fetchKasPrice } = await import('./market-seeder.js');
+    const midPrice = await fetchKasPrice();
+    if (!midPrice || midPrice <= 0) return { ok: false, error: 'price_unavailable', message: '价格暂查不到, 请稍后再试.' };
+    const wallet = sqlite.prepare(`
+      SELECT chain, address FROM agent_wallets
+      WHERE relay_node_id = ? AND chain = ? AND is_default = 1
+    `).get(BROKER_RELAY_ID, payChain);
+    if (!wallet?.address) return { ok: false, error: 'no_broker_wallet', message: `broker 暂无 ${payChain} 收款钱包, 换链.` };
+    const SPREAD_PCT = 1;
+    const sellPrice = midPrice * (1 + SPREAD_PCT / 100);
+    const wantUsdt = +(deficit * sellPrice).toFixed(4);
+    picks.push({
+      id: 'preview-broker-dynamic',
+      take_qty: deficit,
+      take_usdt: wantUsdt,
+      maker_addr: wallet.address,
+      broker_dynamic: true,
+    });
+    cumKas += deficit;
+  }
+  const totalUsdt = picks.reduce((s, p) => s + p.take_usdt, 0);
+  const unitPrice = totalUsdt / cumKas;
+  // T-J2-V2-realtest-critfix (J1 67903c5b 真测撞 LLM 编 fake 地址 0x1234... bug):
+  // 生成 deterministic preview_text 完整画像字串. LLM 必须**原样转发**, 不让 LLM 自己渲染
+  // 地址 (LLM 会按 SYSTEM_PROMPT 例子编 placeholder = user 真转 USDT 到 fake 地址 = 钱丢).
+  const payLines = picks.map((p, i) => {
+    const tag = p.broker_dynamic ? '(broker 自挂)' : '(maker)';
+    return `  ${i+1}. ${p.take_qty} KAS → 付 ${(+p.take_usdt).toFixed(6)} USDT 到\n     \`${p.maker_addr}\` ${tag}`;
+  }).join('\n');
+  const preview_text = `📋 **订单画像 (确认前)**
+
+* 方向: 买 KAS
+* 数量: ${cumKas} KAS
+* 付款链: ${payChain.toUpperCase()} (USDT)
+* 单价: ${unitPrice.toFixed(6)} USDT/KAS
+* 总额: ${totalUsdt.toFixed(6)} USDT
+${payLines}
+* KAS 收件 (你的 Kasia):
+  \`${user_kasia}\`
+
+⏰ 订单 30 分钟内付款有效 · 跨链验证 1-3 分钟
+
+确认下单回 **YES** · 修改回 '改 3 / 改 polygon / 改地址' · 取消回 **NO**`;
+  return {
+    ok: true,
+    direction: 'buy',
+    qty: cumKas,
+    pay_chain: payChain,
+    payment_currency: 'USDT',
+    unit_price_usdt: +unitPrice.toFixed(6),
+    total_usdt: +totalUsdt.toFixed(6),
+    picks: picks.map(p => ({
+      qty_kas: p.take_qty,
+      pay_usdt: +p.take_usdt.toFixed(6),
+      maker_payment_address: p.maker_addr,
+      broker_dynamic: !!p.broker_dynamic,
+    })),
+    n_payments: picks.length,
+    user_kasia_address: user_kasia,
+    quote_ttl_minutes: 30,
+    verify_window_text: '⏰ 订单 30 分钟内付款有效 · 跨链验证 1-3 分钟',
+    preview_text,  // ← LLM 必须原样转发此字串 (含真 maker_addr + user_kasia 不让 LLM 渲染)
+  };
 }
 
 // R6 T-J2-19: tool function for broker-llm-agent. LLM 收齐 user/qty/payChain 调此.
@@ -407,6 +509,14 @@ async function _qDm(kind, peerAddr, message) {
 
 export async function handleBuyIntent(peerAddr, message) {
   const trimmed = (message || '').trim();
+
+  // T-NWT-2026-04-26 case 6 STOP intent deterministic 短路 — user 烦了 / 想退出.
+  // broker 立刻 ack 告别 (服务态度: 不啰嗦不命令式), 不进 LLM. 跟 PRICE_QUERY 同模式优先级最前.
+  // _pendingAccepts 不动 (订单生命周期独立, 30min TTL 自动过期; user 想退也只是不想聊 broker, 已下单照走).
+  if (_isStopIntent(trimmed)) {
+    _qDm('dm_stop', peerAddr, '好的, 不打扰你了. 想买卖 KAS 随时回我 "买/卖 X KAS".');
+    return '';
+  }
 
   // T-NWT-V2-hotfix (Owner 真测 #3 实战修): 询价 deterministic 短路, 不进 LLM (60s timeout).
   // 询价是高频 deterministic 场景 — broker 知现价, 不需要 LLM 推理.

@@ -2,19 +2,59 @@
 
     <!-- Header -->
     <header class="bg-white border-b border-warm-200 px-6 py-4 flex items-center justify-between flex-shrink-0">
-      <h1 class="text-xl font-semibold text-ink-700"><%= it.t.page_skills %></h1>
-      <form method="GET" action="/skills" class="flex items-center gap-3">
-        <label class="text-sm text-ink-400"><%= it.t.label_account %>:</label>
-        <select name="account" onchange="this.form.submit()"
-          class="border border-warm-300 rounded-lg px-3 py-1.5 text-sm text-ink-600 bg-white focus:ring-2 focus:ring-brand-300 focus:border-brand-400 cursor-pointer min-w-[180px]">
-          <option value="" <%= !it.selectedAccount ? 'selected' : '' %>><%= it.t.filter_all %></option>
-          <% it.relayNodes.forEach(function(rn) { %>
-          <option value="<%= rn.id %>" <%= it.selectedAccount === rn.id ? 'selected' : '' %>>
-            <%= rn.name %> (<%= rn.address ? rn.address.slice(-8) : '...' %>)
-          </option>
-          <% }) %>
-        </select>
-      </form>
+      <div class="flex items-center gap-3">
+        <h1 class="text-xl font-semibold text-ink-700"><%= it.t.page_skills %></h1>
+        <% /* 议 3: broker/service role badge — 一眼看出当前 agent 是不是专业 broker */ %>
+        <% if (it.roleCompat?.is_broker_role) { %>
+        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200" title="此 agent 标记为 broker/service, 严格交易模式 — 不允许 social/contacts/other 类技能">
+          🔒 <%= it.roleCompat.relay.is_dex_broker ? 'broker' : '' %><%= it.roleCompat.relay.is_dex_broker && it.roleCompat.relay.is_service ? ' · ' : '' %><%= it.roleCompat.relay.is_service ? 'service' : '' %> · 严格交易
+        </span>
+        <% } %>
+      </div>
+      <div class="flex items-center gap-3">
+        <% if (it.roleCompat?.is_broker_role) { %>
+        <%
+          /* Owner 19:18 钦定: 正向 trader 模板 — 应用钦定推荐 set, 不依赖 JS (Chrome 禁 JS) */
+          /* 真核心 broker skill set: price_tracker / trade_executor / market_scanner / mm_otc /
+             cross_chain_verify / address_profiler / kaspa_network_health / trade_sense /
+             self_awareness / system_status (10 个) */
+          const TRADER_TEMPLATE = ['price_tracker','trade_executor','market_scanner','mm_otc','cross_chain_verify','address_profiler','kaspa_network_health','trade_sense','self_awareness','system_status'];
+          const perAgentSkills = it.skills.filter(s => s.relay_node_id === it.selectedAccount);
+          const inTemplateActive = perAgentSkills.filter(s => s.status === 'active' && TRADER_TEMPLATE.includes(s.name)).length;
+          const outOfTemplateActive = perAgentSkills.filter(s => s.status === 'active' && !TRADER_TEMPLATE.includes(s.name)).length;
+          const inTemplateNotActive = perAgentSkills.filter(s => s.status !== 'active' && TRADER_TEMPLATE.includes(s.name)).length;
+          const isClean = outOfTemplateActive === 0 && inTemplateNotActive === 0;
+        %>
+        <form method="POST" action="/skills/apply-trader-template-form" class="inline">
+          <input type="hidden" name="relay_node_id" value="<%= it.selectedAccount %>" />
+          <button type="submit"
+            class="text-xs px-3 py-1.5 rounded-lg <%= isClean ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100' %> border transition-colors"
+            title="一键应用 trader 推荐模板 (10 核心交易技能): active 推荐 + disable 其他. 钦定白名单, 不需要逐个调."
+            <%= isClean ? 'disabled style="opacity:0.7;cursor:default"' : '' %>>
+            <% if (isClean) { %>
+              ✓ trader 模板已应用 (10/10)
+            <% } else { %>
+              ⚡ 应用 trader 模板
+              <% if (outOfTemplateActive > 0) { %> (清 <%= outOfTemplateActive %>)<% } %>
+              <% if (inTemplateNotActive > 0) { %> (启 <%= inTemplateNotActive %>)<% } %>
+            <% } %>
+          </button>
+        </form>
+        <% } %>
+        <form method="GET" action="/skills" class="flex items-center gap-3">
+          <label class="text-sm text-ink-400"><%= it.t.label_account %>:</label>
+          <select name="account" onchange="this.form.submit()"
+            class="border border-warm-300 rounded-lg px-3 py-1.5 text-sm text-ink-600 bg-white focus:ring-2 focus:ring-brand-300 focus:border-brand-400 cursor-pointer min-w-[180px]">
+            <option value="" <%= !it.selectedAccount ? 'selected' : '' %>><%= it.t.filter_all %></option>
+            <% it.relayNodes.forEach(function(rn) { %>
+            <option value="<%= rn.id %>" <%= it.selectedAccount === rn.id ? 'selected' : '' %>>
+              <%= rn.name %> (<%= rn.address ? rn.address.slice(-8) : '...' %>)
+            </option>
+            <% }) %>
+          </select>
+          <noscript><button type="submit" class="px-3 py-1 text-xs bg-warm-200 rounded">切换</button></noscript>
+        </form>
+      </div>
     </header>
 
     <div class="p-6 space-y-6">
@@ -169,15 +209,26 @@
                 </tr>
               </thead>
               <tbody class="divide-y divide-warm-200">
-                <% skills.forEach(function(sk) { %>
-                <tr class="hover:bg-warm-50 transition-colors">
+                <% skills.forEach(function(sk) {
+                  /* 议 3: banned 灰显 — broker/service role 不允许的 category. 只对 per-agent skill 标 (global builtin 不灰) */
+                  const isPerAgent = sk.relay_node_id === it.selectedAccount;
+                  const isBanned = isPerAgent && it.roleCompat?.is_broker_role && it.roleCompat.banned_categories.includes(sk.category || 'other');
+                  const rowClass = isBanned ? 'bg-warm-50/50 opacity-60' : '';
+                %>
+                <tr class="hover:bg-warm-100 transition-colors <%= rowClass %>">
                   <!-- Display mode -->
                   <template x-if="editingId !== '<%= sk.id %>'">
                     <td class="px-5 py-3">
                       <div class="flex items-center gap-2">
-                        <span class="font-medium text-ink-700"><%= sk.display_name %></span>
+                        <% if (isBanned) { %>
+                        <span title="broker 严格模式不允许此 category 技能 active. 推荐禁用." class="text-amber-600">🔒</span>
+                        <% } %>
+                        <span class="font-medium <%= isBanned ? 'text-ink-400 line-through' : 'text-ink-700' %>"><%= sk.display_name %></span>
                         <% if (sk.source === 'uploaded') { %>
                         <span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-orange-100 text-orange-600 leading-none">外部</span>
+                        <% } %>
+                        <% if (isBanned && sk.status === 'active') { %>
+                        <span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-700 leading-none" title="此技能在 broker 角色下不应 active, 点击编辑可禁用">⚠ 不兼容</span>
                         <% } %>
                       </div>
                       <div class="text-xs text-ink-300 font-mono mt-0.5"><%= sk.name %></div>
