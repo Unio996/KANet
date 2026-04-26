@@ -41,6 +41,10 @@ export function _clearQuotes() { _quotes.clear(); }
 export function _hasQuote(peer) { return _quotes.has(peer); }
 export function _clearPendingAccepts() { _pendingAccepts.clear(); }
 export function _hasPendingAccept(peer) { return _pendingAccepts.has(peer); }
+// T-NWT-V2: bsc-incoming-watcher 枚举所有 active peer, 对每个调 verifyPaymentForPeer (J2 lazy 路径).
+export function _pendingPeers() { return [..._pendingAccepts.keys()]; }
+// T-NWT-V2: watcher 拿 accept 详情 (DM 主动汇报含 amount/chain). expires_at < now → 跳过.
+export function _getPendingAccept(peer) { return _pendingAccepts.get(peer); }
 
 async function _send(relayId, cmd) {
   if (_sendOverride) return _sendOverride(relayId, cmd);
