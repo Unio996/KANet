@@ -88,13 +88,26 @@ function checkExpect(reply, expect) {
   return fails;
 }
 
-// v5: 每 case 前 cleanup pending state (NO + cancel 残留), 避免 broker 状态机粘性
-async function sendMessage(msg) {
-  return fetch(`${CONSOLE}/api/relay/${SOPHIE_RELAY_ID}/send-command`, {
+// v6 (UTXO double-spend fix): sendMessage 必须真 verify 上链, 防 RPC Rejected 假 ok=true
+async function sendMessage(msg, opts = {}) {
+  const data = await fetch(`${CONSOLE}/api/relay/${SOPHIE_RELAY_ID}/send-command`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json; charset=utf-8' },
     body: JSON.stringify({ type: 'send_message', target: BROKER_KASIA, message: msg }),
   }).then(r => r.json());
+  // RPC Rejected 假 ok 防御: relay-manager 返 ok:true + error 字段时 = 链上 reject
+  if (!data.ok || data.error) {
+    if (!opts.silent) console.warn(`  [send] reject: ${(data.error || 'unknown').slice(0, 80)}`);
+    return { ok: false, error: data.error || 'send_failed', rejected: true };
+  }
+  if (!data.txId) return { ok: false, error: 'no txId' };
+  // wait 12s + verify kaspa_tx_log 真上链 (UTXO 确认 + indexer ingest)
+  for (let i = 0; i < 4; i++) {
+    await new Promise(r => setTimeout(r, 3000));
+    const onchain = db.prepare("SELECT 1 FROM kaspa_tx_log WHERE tx_id=?").get(data.txId);
+    if (onchain) return { ok: true, txId: data.txId };
+  }
+  return { ok: false, error: 'tx not in kaspa_tx_log after 12s', txId: data.txId };
 }
 
 // v5 startup: 全局 NO 清 sell pending (避免 case 间累积)
