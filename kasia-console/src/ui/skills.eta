@@ -15,8 +15,11 @@
         <% if (it.roleCompat?.is_broker_role) { %>
         <%
           /* 议 3: 推荐配置 form submit (memory user_profile: Chrome 禁 JS, 不依赖 JS) */
+          /* 只算 per-agent skill (relay_node_id 等于当前 selectedAccount), 排除 global builtin (relay_node_id NULL) */
           const bannedActiveCount = it.skills.filter(s =>
-            s.status === 'active' && it.roleCompat.banned_categories.includes(s.category || 'other')
+            s.status === 'active'
+            && s.relay_node_id === it.selectedAccount
+            && it.roleCompat.banned_categories.includes(s.category || 'other')
           ).length;
         %>
         <form method="POST" action="/skills/reset-recommended-form" class="inline">
@@ -198,8 +201,9 @@
               </thead>
               <tbody class="divide-y divide-warm-200">
                 <% skills.forEach(function(sk) {
-                  /* 议 3: banned 灰显 — broker/service role 不允许的 category */
-                  const isBanned = it.roleCompat?.is_broker_role && it.roleCompat.banned_categories.includes(sk.category || 'other');
+                  /* 议 3: banned 灰显 — broker/service role 不允许的 category. 只对 per-agent skill 标 (global builtin 不灰) */
+                  const isPerAgent = sk.relay_node_id === it.selectedAccount;
+                  const isBanned = isPerAgent && it.roleCompat?.is_broker_role && it.roleCompat.banned_categories.includes(sk.category || 'other');
                   const rowClass = isBanned ? 'bg-warm-50/50 opacity-60' : '';
                 %>
                 <tr class="hover:bg-warm-100 transition-colors <%= rowClass %>">
