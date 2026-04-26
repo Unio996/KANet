@@ -12,6 +12,9 @@ const BUY_REGEX = /^\s*(?:买|buy)\s*(\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*KAS\s*
 const MIN_QTY_KAS = 1.0;
 // T-J2-12 真人 PAID 意图: "我付了 0xabc...", "已付 0x...", "paid 0x...", "pay 0x..."
 const PAID_REGEX = /(?:已付|付了|我付|paid|pay)[\s\S]{0,40}?\b(0x[a-fA-F0-9]{64})\b/i;
+// T-J2-26 (Owner 真测 04-26 12:18): "已付!" 等支付完成意图 但无 tx hash → broker 必须主动引导发 tx
+// 否则 LLM 误判走 finalize_order 重复下单 (Owner 这单实例: 43c0a4f8 已付后第 3 次 publish).
+const PAID_NO_TX_REGEX = /^(?:已付|付了|已转|转完|已支付|已转账|完成|done|paid|sent|finished|转好了|付好了|搞定|ok 付了|已经付了)\s*[!！。.…]*\s*$/i;
 const CONFIRM_WORDS = ['YES', 'yes', 'y', '确认', '好', '行', 'OK', 'ok'];
 const CANCEL_WORDS  = ['NO', 'no', 'n', '取消', '不要', '算了'];
 const QUOTE_TTL_MS = 5 * 60 * 1000;
@@ -211,6 +214,16 @@ export async function finalizeBuy({ user_kasia, qty, pay_chain }) {
   if (qty < MIN_QTY_KAS) {
     return { ok: false, error: `qty too small: ${qty} < min ${MIN_QTY_KAS} KAS (broker fee + dust protection)` };
   }
+  // T-J2-26 (Owner 真测 04-26 12:18 — bug B 重复 publish 修, 入口层 idempotent):
+  // peer 已有 _pendingAccepts 未过期 → 拒绝重复. LLM 收 error 自然引导 "你已经有单, 请发 tx hash 完成或等过期".
+  // 跟 T-J1-19n (publish 层 5min 同 chain+qty 复用) 互补 belt-and-suspenders.
+  const existing = _pendingAccepts.get(user_kasia);
+  if (existing && Date.now() < existing.expires_at) {
+    const totalKas = existing.total_kas;
+    const remaining = existing.picks.filter(p => !p.paid_tx).length;
+    return { ok: false, error: 'already_in_pending_accept',
+      message: `Peer already has active order: ${totalKas} KAS, ${remaining} payment(s) pending. Pay first (send "我付了 0x<txhash>"), or wait for it to expire.` };
+  }
   const payChain = String(pay_chain).toLowerCase();
   const merged = await _aggregateWithFallback(qty, payChain);
   if (!merged.ok) return { ok: false, error: merged.error, available: merged.available };
@@ -219,6 +232,19 @@ export async function finalizeBuy({ user_kasia, qty, pay_chain }) {
     await _enqueueAccept(p.id, user_kasia, payChain);
     _recordAccept({ offerId: p.id, userPeer: user_kasia, qty: p.take_qty, quotedUsdt: p.take_usdt.toFixed(6), payChain, acceptTx: null });
   }
+  // T-J2-26 (Owner 真测 04-26 12:18 — Bug A 静默根修):
+  // finalize_order tool 路径 (LLM 调) 也必须 set _pendingAccepts. 之前只有 BUY_REGEX → handleBuyIntent →
+  // _quotes → YES → _pendingAccepts 路径会 set, LLM 自然语言 "我想买 X" 走 deterministic + finalize_order
+  // tool 不 set, 导致后续 PAID_REGEX (line 316) 永远匹配不到, broker 自动闭环全断.
+  // Owner 真测 '空不？我想买55个Kas' 撞这条: broker 报价 + 创 offer + 但 _pendingAccepts 没 set,
+  // Owner '已付！' / '我付了 0x...' 都进不了 PAID_REGEX, broker 静默或乱调 finalize_order 又一单.
+  _pendingAccepts.set(user_kasia, {
+    picks: merged.picks.map(p => ({ ...p, paid_tx: null })),
+    total_kas: merged.total_kas,
+    total_usdt: merged.total_usdt,
+    pay_chain: payChain,
+    expires_at: Date.now() + PENDING_ACCEPT_TTL_MS,
+  });
   return {
     ok: true,
     picks: merged.picks.map(p => ({
@@ -341,6 +367,14 @@ export async function handleBuyIntent(peerAddr, message) {
     if (Date.now() >= accept.expires_at) {
       _pendingAccepts.delete(peerAddr);
     } else {
+      // T-J2-26 (Owner 真测 04-26 12:18 — Bug A 引导): "已付!" / "paid" / "搞定" 等无 tx hash 的支付完成信号
+      // → 主动引导发 BSC tx hash, 截胡 LLM 防误判调 finalize_order 重复下单.
+      // 必须放在 PAID_REGEX (含 0x hex) 检测之前 — 但只在 message 不含 0x hex 时触发.
+      if (PAID_NO_TX_REGEX.test(trimmed)) {
+        _qDm('dm_paid_no_tx', peerAddr,
+          `感谢. 请发你的 BSC tx hash (0x 开头 64 位 hex) — 系统自动上链验证 USDT 收款 + 自动发 KAS, 1-2 分钟到账. 格式例: "我付了 0xabc123..."`);
+        return '';
+      }
       const pm = PAID_REGEX.exec(trimmed);
       if (pm) {
         const paymentTx = pm[1];
