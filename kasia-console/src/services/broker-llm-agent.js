@@ -190,7 +190,12 @@ export async function handleLlmDialog(peer, message) {
   const intent = _detectIntent(message);
   const lastAssistant = [...history].reverse().find(m => m.role === 'assistant');
   const alreadyDeterministic = lastAssistant && /哪个链|哪条链|which chain|qué cadena|cadena para/i.test(lastAssistant.content || '');
-  console.log(`[broker-llm DIAG] peer=${peer?.slice(-12)} msg="${(message||'').slice(0,40)}" history.len=${history.length} intent=${intent} alreadyDet=${!!alreadyDeterministic} lastAsstSnippet="${(lastAssistant?.content||'').slice(0,60)}"`);
+  // T-J1-19h+: 字节级诊断 (Owner 提示 "编码问题"). 打 message 长度 / UTF-8 byte 数 /
+  // 前 6 字符 charCodeAt (CJK 字符 codePoint > 0x4E00, ASCII < 0x7F. 编码错→显示乱).
+  const msgRaw = String(message || '');
+  const byteLen = Buffer.byteLength(msgRaw, 'utf8');
+  const charCodes = Array.from(msgRaw.slice(0, 6)).map(c => c.codePointAt(0).toString(16)).join(',');
+  console.log(`[broker-llm DIAG] peer=${peer?.slice(-12)} msg.chars=${msgRaw.length} msg.utf8bytes=${byteLen} codes=[${charCodes}] msg="${msgRaw.slice(0,40)}" history.len=${history.length} intent=${intent} alreadyDet=${!!alreadyDeterministic} lastAsstSnippet="${(lastAssistant?.content||'').slice(0,60)}"`);
   if (intent && !alreadyDeterministic) {
     const qty = _extractQty(message);
     const lang = _detectLang(message);
