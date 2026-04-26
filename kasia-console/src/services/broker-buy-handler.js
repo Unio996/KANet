@@ -222,6 +222,77 @@ function _enqueuePaid(offerId, paymentTx, payChain, peerAddr) {
   return _enqueue('paid_v1', peerAddr, { channel: 'kanet-exchange', message: JSON.stringify(payload) });
 }
 
+// 议 B (Owner 19:55+ 钦定): buyPreview — 字段齐时调, **不真 publish 不 set _pendingAccepts**.
+// 同 _aggregateWithFallback 算 picks/价/maker, broker_dynamic_quote case 算 fetchKasPrice + spread
+// 但不调 /api/exchange/publish (preview only). LLM 拿到 preview 数据自然话渲染完整画像 DM
+// 让 user 最后 YES → 才调 finalizeBuy 真 publish.
+//
+// 防 hallucinate "已下单" — LLM 只能用 preview 真数据 (含 user_kasia_address / unit_price /
+// total_usdt / maker_payment_address) 不能编. user reject "NO" 路径无 state cleanup (没 set 任何).
+export async function buyPreview({ user_kasia, qty, pay_chain }) {
+  if (!user_kasia || !qty || qty <= 0 || !pay_chain) {
+    return { ok: false, error: 'missing fields (user_kasia/qty/pay_chain)' };
+  }
+  if (qty < MIN_QTY_KAS) {
+    return { ok: false, error: `qty_too_small`, message: `最小买 ${MIN_QTY_KAS} KAS (broker fee + dust 保护). 改大点.` };
+  }
+  const existing = _pendingAccepts.get(user_kasia);
+  if (existing && Date.now() < existing.expires_at) {
+    const remaining = existing.picks.filter(p => !p.paid_tx).length;
+    return { ok: false, error: 'already_in_pending_accept',
+      message: `你已有 ${existing.total_kas} KAS active 订单 (${remaining} 待付). 先完成或等 30min 过期.` };
+  }
+  const payChain = String(pay_chain).toLowerCase();
+  const sel = selectBestOffers(qty, payChain);
+  let picks = sel.picks ? [...sel.picks] : [];
+  let cumKas = picks.reduce((s, p) => s + p.take_qty, 0);
+
+  // broker_dynamic_quote 价格 (但不 publish)
+  if (cumKas < qty) {
+    const deficit = qty - cumKas;
+    const { fetchKasPrice } = await import('./market-seeder.js');
+    const midPrice = await fetchKasPrice();
+    if (!midPrice || midPrice <= 0) return { ok: false, error: 'price_unavailable', message: '价格暂查不到, 请稍后再试.' };
+    const wallet = sqlite.prepare(`
+      SELECT chain, address FROM agent_wallets
+      WHERE relay_node_id = ? AND chain = ? AND is_default = 1
+    `).get(BROKER_RELAY_ID, payChain);
+    if (!wallet?.address) return { ok: false, error: 'no_broker_wallet', message: `broker 暂无 ${payChain} 收款钱包, 换链.` };
+    const SPREAD_PCT = 1;
+    const sellPrice = midPrice * (1 + SPREAD_PCT / 100);
+    const wantUsdt = +(deficit * sellPrice).toFixed(4);
+    picks.push({
+      id: 'preview-broker-dynamic',
+      take_qty: deficit,
+      take_usdt: wantUsdt,
+      maker_addr: wallet.address,
+      broker_dynamic: true,
+    });
+    cumKas += deficit;
+  }
+  const totalUsdt = picks.reduce((s, p) => s + p.take_usdt, 0);
+  const unitPrice = totalUsdt / cumKas;
+  return {
+    ok: true,
+    direction: 'buy',
+    qty: cumKas,
+    pay_chain: payChain,
+    payment_currency: 'USDT',
+    unit_price_usdt: +unitPrice.toFixed(6),
+    total_usdt: +totalUsdt.toFixed(6),
+    picks: picks.map(p => ({
+      qty_kas: p.take_qty,
+      pay_usdt: +p.take_usdt.toFixed(6),
+      maker_payment_address: p.maker_addr,
+      broker_dynamic: !!p.broker_dynamic,
+    })),
+    n_payments: picks.length,
+    user_kasia_address: user_kasia,
+    quote_ttl_minutes: 30,
+    verify_window_text: '⏰ 订单 30 分钟内付款有效 · 跨链验证 1-3 分钟',
+  };
+}
+
 // R6 T-J2-19: tool function for broker-llm-agent. LLM 收齐 user/qty/payChain 调此.
 // R7 三层 fallback (J1+NWT 合并):
 //   1. 路径 C (J1): selectBestOffers 拼现成 maker (greedy cheapest)

@@ -123,6 +123,35 @@ export function transition(offerId, newStatus, extra = {}) {
     console.warn(`[exchange-machine] chain_event recording failed: ${evtErr.message}`);
   }
 
+  // 议 B1 (Owner 19:55+ 钦定 lifecycle): 关键状态变更主动 DM taker.
+  // 各 transition 点显式反馈 — verifying → delivering (USDT 验证通过) / completed (final)
+  // / timed_out / disputed / failed. user 永不静默, 每节点知道在哪.
+  if (offer.taker && offer.taker.startsWith('kaspa:')) {
+    let _dmKind = null, _dmMsg = null;
+    if (newStatus === 'delivering') {
+      _dmKind = 'dm_payment_verified';
+      _dmMsg = `✅ USDT 验证通过, 正在发 ${offer.give_amount} ${offer.give_asset} 给你, 1-2 分钟到账.`;
+    } else if (newStatus === 'completed') {
+      _dmKind = 'dm_complete';
+      _dmMsg = `🎉 交易完成! ${offer.give_amount} ${offer.give_asset} 已到账. 谢谢使用 KANet broker, 想继续买卖随时回我.`;
+    } else if (newStatus === 'timed_out') {
+      _dmKind = 'dm_timeout';
+      _dmMsg = `⏰ 订单超时 — 30 分钟内没收到付款验证, 已自动取消. 资金如已转出请联系 Owner 处理.`;
+    } else if (newStatus === 'disputed') {
+      _dmKind = 'dm_failed';
+      _dmMsg = `⚠ 订单争议中, broker 已通知 Owner 人工处理. 请等回复.`;
+    } else if (newStatus === 'failed') {
+      _dmKind = 'dm_failed';
+      _dmMsg = `❌ 订单失败 (链上验证或发送出错), Owner 跟进中. 请联系 KANet 客服.`;
+    }
+    if (_dmKind) {
+      // fire-and-forget (transition 是 sync, 不阻塞流程, DM 失败 warn 不抛)
+      import('./broker-action-queue.js').then(m => {
+        m.enqueue({ kind: _dmKind, peer: offer.taker, payload: { message: _dmMsg } });
+      }).catch(e => console.warn(`[exchange-machine] lifecycle DM ${_dmKind} err: ${e.message}`));
+    }
+  }
+
   // 交割完成 → 升级 maker 和 taker 的 classification 到 verified_agent（只升不降）
   if (newStatus === 'completed' && offer.maker && offer.taker) {
     sqlite.prepare(`

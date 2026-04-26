@@ -22,7 +22,9 @@ const RETRY_BACKOFF_MS = 6000;
 // T-NWT-V2 议 1: dm_order_confirmed — handleBuyIntent YES 路径首发"订单已确认"信号 (Owner 要求 #1).
 // T-NWT-V2-hotfix: dm_price_query — 询价 deterministic 短路 (避 LLM 60s timeout, Owner 真测 #3 撞).
 // T-NWT-2026-04-26 case 6: dm_stop — user 烦了/退出 deterministic 告别 (broker 层 do_not_contact 短路).
-const TX_PRODUCING_KINDS = new Set(['dm_quote', 'dm_pay_instr', 'dm_completion', 'dm_position', 'dm_paid_no_tx', 'dm_auto_payment_detected', 'dm_kas_delivered', 'dm_order_confirmed', 'dm_price_query', 'dm_stop', 'accept_v1', 'paid_v1', 'sendKas']);
+// T-J2-V2-realtest 议 B1 (Owner 19:55+ 钦定 lifecycle): 4 新 kind — dm_payment_verified /
+// dm_complete / dm_timeout / dm_failed (终态显式 + USDT 验证通过节点反馈).
+const TX_PRODUCING_KINDS = new Set(['dm_quote', 'dm_pay_instr', 'dm_completion', 'dm_position', 'dm_paid_no_tx', 'dm_auto_payment_detected', 'dm_kas_delivered', 'dm_order_confirmed', 'dm_price_query', 'dm_stop', 'dm_payment_verified', 'dm_complete', 'dm_timeout', 'dm_failed', 'accept_v1', 'paid_v1', 'sendKas']);
 
 const _queue = [];               // FIFO array, items dequeue from head
 const _userActions = new Map();  // peer → Set(actionId)  (J2 #B 用 getQueuePosition)
@@ -164,6 +166,10 @@ async function executeAction(item) {
     case 'dm_order_confirmed':  // T-NWT-V2 议 1: YES 路径首发订单确认 (Owner 要求 #1)
     case 'dm_price_query':  // T-NWT-V2-hotfix: 询价短路 (避 LLM 60s timeout)
     case 'dm_stop':  // T-NWT-2026-04-26 case 6: STOP intent 告别短路
+    case 'dm_payment_verified':  // T-J2-V2-realtest 议 B1: USDT 验证通过, 准备发 KAS
+    case 'dm_complete':  // T-J2-V2-realtest 议 B1: 交易完成
+    case 'dm_timeout':  // T-J2-V2-realtest 议 B1: 订单超时
+    case 'dm_failed':  // T-J2-V2-realtest 议 B1: 订单失败/争议
       return sendCommandAsync(BROKER_RELAY_ID, { type: 'send_message', target: item.peer, message: p.message });
     case 'accept_v1':
       return sendCommandAsync(BROKER_RELAY_ID, { type: 'send_broadcast', channel: p.channel || 'kanet-exchange', message: p.message });
