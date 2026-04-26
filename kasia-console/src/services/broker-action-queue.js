@@ -26,6 +26,36 @@ const RETRY_BACKOFF_MS = 6000;
 // dm_complete / dm_timeout / dm_failed (终态显式 + USDT 验证通过节点反馈).
 const TX_PRODUCING_KINDS = new Set(['dm_quote', 'dm_pay_instr', 'dm_completion', 'dm_position', 'dm_paid_no_tx', 'dm_auto_payment_detected', 'dm_kas_delivered', 'dm_order_confirmed', 'dm_price_query', 'dm_stop', 'dm_payment_verified', 'dm_complete', 'dm_timeout', 'dm_failed', 'accept_v1', 'paid_v1', 'sendKas']);
 
+// T-J1-2026-04-26 ANTI-PATTERNS R19 (Owner '系统钢线' 钦定): broker → user DM 含的链上地址必须
+// 是 broker 自己 agent_wallets 的真地址. LLM/handler 上层若漏 (Layer 1-3 已防), action-queue 入链
+// 前 final assert. 命中违反 → 拒发 + log + enqueue dm_failed. 真因 J1 67903c5b 真测撞 LLM 编 fake
+// 0x1234567890... placeholder, 真 user 真转 USDT 到 fake 地址 = 钱永久丢 = production 灾难.
+const DM_USER_KINDS = new Set(['dm_quote', 'dm_pay_instr', 'dm_completion', 'dm_position', 'dm_paid_no_tx', 'dm_auto_payment_detected', 'dm_kas_delivered', 'dm_order_confirmed', 'dm_price_query', 'dm_stop', 'dm_payment_verified', 'dm_complete', 'dm_timeout', 'dm_failed']);
+
+let _ownEvmAddrCache = null;
+let _ownEvmAddrCacheAt = 0;
+function _ownEvmAddrSet() {
+  if (_ownEvmAddrCache && Date.now() - _ownEvmAddrCacheAt < 60_000) return _ownEvmAddrCache;
+  const rows = sqlite.prepare(`SELECT LOWER(address) AS addr FROM agent_wallets WHERE relay_node_id = ?`).all(BROKER_RELAY_ID);
+  _ownEvmAddrCache = new Set(rows.map(r => r.addr));
+  _ownEvmAddrCacheAt = Date.now();
+  return _ownEvmAddrCache;
+}
+
+function assertAddressInvariant(item) {
+  if (!DM_USER_KINDS.has(item.kind)) return null;
+  const message = item.payload?.message || '';
+  const evmMatches = message.match(/0x[a-fA-F0-9]{40}/g) || [];
+  if (evmMatches.length === 0) return null;
+  const own = _ownEvmAddrSet();
+  for (const addr of evmMatches) {
+    if (!own.has(addr.toLowerCase())) {
+      return { violated: true, kind: item.kind, foreign_address: addr, own_count: own.size };
+    }
+  }
+  return null;
+}
+
 const _queue = [];               // FIFO array, items dequeue from head
 const _userActions = new Map();  // peer → Set(actionId)  (J2 #B 用 getQueuePosition)
 let _busy = false;
@@ -106,6 +136,15 @@ async function pump() {
         item.payload.message = item.payload.message.replace(/\s*\[r\d+\]\s*$/, '') + ` [r${item.attempts}]`;
       }
       try {
+        // R19 Address Invariant final check — broker 自己 wallet 真地址 vs message 含的 0x... 必须匹配.
+        // Layer 1-3 已 defense (handler fetch / tool 不暴露 / template 固定), 这是入链前最后一道关.
+        const violation = assertAddressInvariant(item);
+        if (violation) {
+          console.error(`[broker-queue] [R19] ADDRESS_INVARIANT_VIOLATED kind=${item.kind} foreign=${violation.foreign_address} — REFUSING send (J1 67903c5b 钢线)`);
+          lastErr = new Error(`R19 violation: ${violation.foreign_address} not in broker wallets`);
+          // 不重试 (assert 类失败重试无意义)
+          break;
+        }
         result = _executeOverride ? await _executeOverride(item) : await executeAction(item);
         // R4 Bug 8 (J2 RCA af805fe1): relay-manager.sendCommandAsync resolve(msg.result || {})
         // 失败时 result = {error: '...'} 不含 ok 字段, 旧 check `result?.ok === false` 通过 throw,

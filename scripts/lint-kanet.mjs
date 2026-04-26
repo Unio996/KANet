@@ -11,6 +11,7 @@
 //   R10 broker DM kind (_qDm / _enqueue 'dm_*') 必在 broker-action-queue TX_PRODUCING_KINDS 里
 //   R11 中文 deterministic regex 含 PAID|FINISH 类完成动作必含 (?:了)? 后缀
 //   R6  send broadcast / chat send 必显式带 relayId (不从 LLM/payload 拿)
+//   R19 broker SYSTEM_PROMPT/template 不准 hardcoded 完整 EVM 地址 (LLM 会 copy = 钱丢, J1 67903c5b)
 //   misc SQL prepare 不准 string interpolation (防 inject)
 //
 // 不是 ESLint 替代, 是 KANet-specific 模式. 跑 1-2s 完.
@@ -148,6 +149,28 @@ function checkR6(filepath, content) {
   }
 }
 
+// ── R19: broker SYSTEM_PROMPT / preview_text 不准含 hardcoded EVM 地址 ──
+// J1 67903c5b 真测撞: SYSTEM_PROMPT example 含 `0xaD12544E...` LLM 直接 copy 当真地址输出.
+// 真 user 真转 USDT 到 LLM 编的 placeholder = 钱永久丢. 防御: SYSTEM_PROMPT 严禁完整 0x{40hex}, 用 '后端注入' 代.
+function checkR19(filepath, content) {
+  // 只检 broker-llm-agent / broker-buy-handler 等 broker 服务文件
+  if (!/broker-(llm-agent|buy-handler|sell-handler|action-queue)\.js$/.test(filepath)) return;
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    // 跳过 // 单行注释 和 doc 注释 (broker 拿真 owner BSC 0xaD12... 注释里讨论 case 不 lint)
+    if (/^\s*\/\//.test(line)) continue;
+    // 跳过 import 语句 / 单纯字符串变量赋值
+    const m = line.match(/0x[a-fA-F0-9]{40}/);
+    if (!m) continue;
+    // 在 string template / 普通 string 字面量里 → 命中 (LLM/template 会 copy)
+    const isInString = /["'`].*0x[a-fA-F0-9]{40}.*["'`]/.test(line);
+    if (isInString) {
+      violate('R19', `[ANTI-PATTERNS R19] broker 服务文件 SYSTEM_PROMPT/template 含 hardcoded EVM 地址 '${m[0]}' — LLM 会 copy 当真地址 (J1 67903c5b 真测撞 fake placeholder bug, 真 user 真转 USDT 钱丢). 改用 \\\${makerWallet.address} 后端真 fetch.`, filepath, i + 1);
+    }
+  }
+}
+
 // ── 跑 ──
 for (const fp of targets) {
   let content;
@@ -155,6 +178,7 @@ for (const fp of targets) {
   checkR9(fp, content);
   checkR11(fp, content);
   checkR6(fp, content);
+  checkR19(fp, content);
 }
 checkR10();
 
