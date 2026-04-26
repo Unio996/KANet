@@ -245,9 +245,15 @@ export function processAccept(msg) {
     return null;
   }
 
-  // Self-accept prevention: maker cannot accept own offer
-  if (msg._from && msg._from === offer.maker) {
-    console.log(`[exchange-machine] Accept rejected: self-accept (maker === taker: ${msg._from.slice(-12)})`);
+  // Self-accept prevention: maker cannot accept own offer.
+  // T-NWT-2026-04-26 self-accept fix: broker_dynamic_quote 路径 broker 自挂 maker + broker 代 user
+  // 发 accept_v1 → msg._from = broker = maker 误伤. payload 已 carry receive_address (= user kasia),
+  // 用 receive_address 当真 taker (broker 自挂时), fallback _from (普通 client 不 carry receive_address).
+  // 普通 user 自 accept: receive_address 缺 → fallback _from = user = maker → 仍 reject ✓
+  // broker 代 accept: receive_address = user, _from = broker, maker = broker → taker(user) !== maker(broker) → 通过 ✓
+  const taker = msg.receive_address || msg._from;
+  if (taker && taker === offer.maker) {
+    console.log(`[exchange-machine] Accept rejected: self-accept (maker === taker: ${taker.slice(-12)})`);
     return null;
   }
 
