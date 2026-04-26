@@ -178,15 +178,17 @@ async function _brokerPublishKasOffer(qtyKas, payChain, give_asset = 'KAS') {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        // T-J2-2026-04-27 Bug 6 真修: give_asset hardcode 'KAS' → 参数 (Bug 5 修了价 oracle, 但 publish body 还 hardcode KAS = generic 化半残)
         relayNodeId: BROKER_RELAY_ID,
-        give_asset: 'KAS',
+        give_asset,
         give_amount: String(qtyKas),
+        give_chain: give_asset === 'KAS' ? 'kaspa' : payChain,  // KAS 在 Kaspa, stable 在 EVM (同 payChain)
         want_asset: 'USDT',
         want_amount: wantUsdt,
         verification: 'cross_chain_tx',
         verification_meta: { accepted_chains: [{ chain: payChain, address: wallet.address }], expected_asset: 'USDT' },
         expires_minutes: 60,  // R2 (J2 推): 30→60 防 25min 慢付 → broker cancel → 资金事故
-        metadata: { source: 'broker_dynamic_quote', mid_price: midPrice, spread_pct: SPREAD_PCT },
+        metadata: { source: 'broker_dynamic_quote', mid_price: midPrice, spread_pct: SPREAD_PCT, give_asset },
       }),
     });
     const data = await res.json();
