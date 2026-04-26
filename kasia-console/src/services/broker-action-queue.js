@@ -56,6 +56,23 @@ function assertAddressInvariant(item) {
   return null;
 }
 
+// T-J2-R19-extend (J1 1bc2132d 真测撞 fake 地址 in LLM 自由 reply 路径绕过 queue):
+// broker LLM reply text 不经 broker-action-queue (handleLlmDialog return text → conversations.js reply.send),
+// R19 layer 4 在 queue 内 assert 没覆盖. 加 assertReplyAddressInvariant 给 conversations.js 用,
+// 任何 broker reply text 含 0x{40} 不在 broker wallets → 拒回 + log + 兜底.
+export function assertReplyAddressInvariant(replyText) {
+  if (!replyText || typeof replyText !== 'string') return null;
+  const evmMatches = replyText.match(/0x[a-fA-F0-9]{40}/g) || [];
+  if (evmMatches.length === 0) return null;
+  const own = _ownEvmAddrSet();
+  for (const addr of evmMatches) {
+    if (!own.has(addr.toLowerCase())) {
+      return { violated: true, foreign_address: addr, own_count: own.size };
+    }
+  }
+  return null;
+}
+
 const _queue = [];               // FIFO array, items dequeue from head
 const _userActions = new Map();  // peer → Set(actionId)  (J2 #B 用 getQueuePosition)
 let _busy = false;

@@ -122,17 +122,31 @@ export async function registerConversationRoutes(fastify) {
     if (!channel) {
       const broker = sqlite.prepare('SELECT is_dex_broker, is_service FROM relay_nodes WHERE id = ?').get(resolved);
       if (broker?.is_service === 1 || broker?.is_dex_broker === 1) {
+        // T-J2-R19-extend (J1 1bc2132d 真测撞): broker reply 含 EVM 地址必经 R19 assert.
+        // LLM 自由路径绕过 broker-action-queue, 这里 final guard. 含 fake 地址 → 拒回兜底.
+        const _r19Guard = async (replyText, source) => {
+          if (!replyText) return replyText;
+          try {
+            const { assertReplyAddressInvariant } = await import('../services/broker-action-queue.js');
+            const v = assertReplyAddressInvariant(replyText);
+            if (v) {
+              console.error(`[api/agent/reply] [R19-EXT] ADDRESS_INVARIANT_VIOLATED source=${source} foreign=${v.foreign_address} — REFUSING reply (J1 1bc2132d 钢线扩, broker LLM 编 fake 地址 production safety)`);
+              return '抱歉, broker 检测到地址异常 (内部 R19 拦截), 请稍后重试 — 直接回 "买 X KAS" 走快速路径, 或回 NO 取消.';
+            }
+          } catch (e) { console.warn(`[api/agent/reply] R19 guard err: ${e.message}`); }
+          return replyText;
+        };
         try {
           const { handleBuyIntent } = await import('../services/broker-buy-handler.js');
           const buyReply = await handleBuyIntent(peer, message);
-          if (buyReply !== null) return reply.send({ reply: buyReply });
+          if (buyReply !== null) return reply.send({ reply: await _r19Guard(buyReply, 'handleBuyIntent') });
         } catch (err) {
           console.warn(`[api/agent/reply] broker-buy-handler err for ${resolved?.slice(0,8)}: ${err.message}`);
         }
         try {
           const { handleSellIntent } = await import('../services/broker-sell-handler.js');
           const sellReply = await handleSellIntent(peer, message);
-          if (sellReply !== null) return reply.send({ reply: sellReply });
+          if (sellReply !== null) return reply.send({ reply: await _r19Guard(sellReply, 'handleSellIntent') });
         } catch (err) {
           console.warn(`[api/agent/reply] broker-sell-handler err for ${resolved?.slice(0,8)}: ${err.message}`);
         }
@@ -140,7 +154,7 @@ export async function registerConversationRoutes(fastify) {
         try {
           const { handleLlmDialog } = await import('../services/broker-llm-agent.js');
           const llmReply = await handleLlmDialog(peer, message);
-          return reply.send({ reply: llmReply || '我刚走神了, 你想买还是卖 KAS?' });
+          return reply.send({ reply: await _r19Guard(llmReply || '我刚走神了, 你想买还是卖 KAS?', 'handleLlmDialog') });
         } catch (err) {
           console.warn(`[api/agent/reply] broker-llm-agent err for ${resolved?.slice(0,8)}: ${err.message}`);
           return reply.send({ reply: '我这边卡了 1 分钟, 麻烦你再说一次?' });
