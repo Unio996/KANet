@@ -203,6 +203,12 @@ export async function handleLlmDialog(peer, message) {
   console.log(`[broker-llm DIAG] peer=${peer?.slice(-12)} msg.chars=${msgRaw.length} msg.utf8bytes=${byteLen} codes=[${charCodes}] msg="${msgRaw.slice(0,40)}" history.len=${history.length} intent=${intent} alreadyDet=${!!alreadyDeterministic} lastAsstSnippet="${(lastAssistant?.content||'').slice(0,60)}"`);
   if (intent && !alreadyDeterministic) {
     const qty = _extractQty(message);
+    // T-J1-19j (J2 100轮 stress 发现): handleLlmDialog deterministic 路径漏 MIN_QTY
+    // check. 跟 handleBuyIntent BUY_REGEX 路径对称, 防 dust 单走通.
+    if (intent === 'buy' && qty != null && qty < 1.0) {
+      console.log(`[broker-llm DIAG] → DET dust reject qty=${qty}`);
+      return `抱歉, 最小买 1 KAS (broker fee + dust 保护). 改大一点吧.`;
+    }
     const lang = _detectLang(message);
     const reply = _deterministicFirstReply(intent, qty, lang);
     console.log(`[broker-llm DIAG] → DET path reply="${reply.slice(0,80)}"`);
