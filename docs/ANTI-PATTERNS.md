@@ -436,6 +436,201 @@ KANet broker = 多角色聚合. broker 代 user 发协议消息时 (accept_v1 / 
 
 ---
 
+## 规则 14 · anti-spam fuzzy match 86%+ 也拦, 不只 100%
+
+**来源**: J1 e2e v2 cleanup 'NO' 撞 anti-spam 162s before, 04-26 06:42
+
+**Wrong**:
+```js
+// e2e cleanup 每次发 'NO' / 'YES' / 'BSC' 同 message
+await sendMessage('NO');  // 14min 内同 message 100% similar 拦
+await sendMessage('BSC 链付款 vcx');  // tag 不够多样, 跟 'BSC 链付款 chs' 86% similar 仍拦
+```
+
+**Right**:
+```js
+// 复杂 message: 用变体 + tag, 内容差异 ≥ 30%
+const variants = ['pay with BNB Smart Chain', 'use Binance chain', '走币安智能链', '币安网络付 USDT'];
+const tag = Date.now().toString(36).slice(-3);
+await sendMessage(`${variants[Math.floor(Math.random()*variants.length)]} #${tag}`);
+
+// handler 严格 word 集 (CONFIRM_WORDS / CANCEL_WORDS): 不能加后缀, 用 word 轮换
+const CONFIRMS = ['行', '确认', 'OK', 'ok', 'y', 'YES', 'yes', '好'];
+await sendMessage(CONFIRMS[Math.floor(Math.random()*CONFIRMS.length)]);
+```
+
+**Why**: anti-spam 14min window 不只 100% exact match, 还做 fuzzy similarity (Jaccard / Levenshtein). 'NO' 跟 'NO 取消' 86% similar 也拦. 'BSC 链付款 vcx' 跟 'BSC 链付款 chs' 也 86% similar (3 char ts2 不同, 共同前缀长). e2e 反复跑同测试集必撞. **复杂 message 用语言完全不同的变体集, 单字 word 用轮换**.
+
+---
+
+## 规则 15 · 多机 cherry-pick sync 必双向, 不能信 :9202 单边 bundle
+
+**来源**: NWT restart #2 后跑老 SYSTEM_PROMPT, 漏 J1 e810ecf9, 04-26 09:30
+
+**Wrong**:
+```bash
+# NWT 同机
+git pull /tmp/j2.bundle  # 只拉 J2 bundle, 没拉 J1 :9201
+git reset --hard j2-master
+bash kanet-stop.sh && bash kanet-start.sh  # 缺 J1 commit, 跑老代码
+```
+
+**Right**:
+```bash
+# 多机 sync 三方共识协议:
+# 1. 每方 push 自己 bundle 到 LAN (J1 :9201, NWT/J2 同机 :9202)
+# 2. cherry-pick / merge 前必 fetch 所有方 bundle
+curl -o /tmp/j1.bundle http://192.168.1.138:9201/bundle
+curl -o /tmp/j2.bundle http://192.168.1.123:9202/bundle
+git fetch /tmp/j1.bundle master:refs/remotes/j1/master
+git fetch /tmp/j2.bundle master:refs/remotes/j2/master
+# 3. git log master ^j1/master ^j2/master 看自己有没漏的
+# 4. git merge 或 cherry-pick 缺的 commits
+# 5. restart 前再 verify 关键文件含期望 commit (grep 关键 marker)
+```
+
+**Why**: 三方协作 master 长期分叉, 单边 bundle pull 漏对方 commit. NWT cherry-pick 自己 commit 漏 J1 e810ecf9 服务态度铁律, restart 后 broker 跑老 SYSTEM_PROMPT, Owner 真测撞老大爷口吻. **任何 restart 前必 双向 sync + 关键文件 grep verify**, 不信 'master 看着新就对了'. NWT push bundle 路径不通 (LAN 防火墙) → J2 同机代 push.
+
+---
+
+## 规则 16 · CONFIRM_WORDS 严格 exact match, 加任何后缀都不命中
+
+**来源**: J1 e2e v2 q3 '确认 vcx' 不命中 CONFIRM_WORDS, 04-26 09:00
+
+**Wrong**:
+```js
+// broker handler
+const CONFIRM_WORDS = ['YES', 'yes', 'y', '确认', '好', '行', 'OK', 'ok'];
+if (CONFIRM_WORDS.includes(trimmed)) { ... }  // exact match
+
+// e2e 测试加后缀避 anti-spam
+await sendMessage('确认 vcx');  // ✗ trimmed='确认 vcx' !== '确认' 不命中, 走 LLM 路径
+```
+
+**Right**:
+```js
+// e2e: 严格 word 轮换, 不加后缀
+const CONFIRMS = ['YES', 'yes', 'y', '确认', '好', '行', 'OK', 'ok'];
+await sendMessage(CONFIRMS[Math.floor(Math.random()*CONFIRMS.length)]);
+
+// 或 broker handler 改 fuzzy match (扩 includes):
+const isConfirm = CONFIRM_WORDS.some(w => trimmed.toLowerCase().includes(w.toLowerCase()));
+```
+
+**Why**: broker handleBuyIntent 用 `CONFIRM_WORDS.includes(trimmed)` 严格 exact match. 加任何后缀 (e2e 避 anti-spam tag) 让它不命中, 走 LLM 路径, LLM 看 'YES' 部分可能识别 confirm 部分自由发挥, 真 finalize_order 不触发. **handler 严格 anchor 的 word 集 e2e 必用单字轮换, 不加后缀**.
+
+---
+
+## 规则 17 · LLM step 2/3 字段混淆: '想买 X KAS' 后问 'KAS 收款地址'
+
+**来源**: J1 e2e v2 q4 (Eric peer) broker LLM 把 buy 路径问 sell 字段, 04-26 10:14
+
+**Wrong**:
+```
+SYSTEM_PROMPT 字段补全段:
+- 买 KAS: 数量 + 链
+- 卖 KAS: 数量 + 链 + 收款地址
+
+→ LLM step 1 识别 'buy', step 2 问 chain OK
+→ step 3 LLM 把 sell 路径的 '收款地址' 也带进 buy 路径, 问 'user 的 KAS 收款地址'
+```
+
+**Right**:
+```
+SYSTEM_PROMPT 强制路径隔离 + few-shot 示例:
+**买路径绝不问 user KAS 地址** (broker 直接发 KAS 到 user Kasia address)
+**卖路径必问 user EVM 收款地址**
+
+few-shot:
+- 用户 '买 5 KAS BSC' → broker 'OK 买 5 KAS, BSC 链确认?' (绝不问 KAS 地址)
+- 用户 '卖 5 KAS' → broker '好, 给我你 BSC 收款地址 0x...'
+
+或: fast-path 严格 BUY_REGEX/SELL_REGEX 命中走 handler, 不进 LLM step 2/3 (e2e 验证有效).
+```
+
+**Why**: LLM 看 SYSTEM_PROMPT '买/卖' 字段并列陈述, multi-turn 上下文中混淆. 用户先 '想买 X KAS' (LLM 识别 buy) 后回 'BSC' (LLM 应给 quote 但回'给我 KAS 收款地址' 把 sell 字段错位). **路径隔离必须显式 + few-shot 反例**, 不能让 LLM 自己推断. 或 fast-path 短路 LLM step 2/3.
+
+---
+
+## 规则 18 · broker DM 真发 truncated address, e2e 反查 db 拿全 wallet
+
+**来源**: J1 e2e v2 Eric q4 reply '0xaD12544E7020e16D1279...3efcEe' regex `[a-fA-F0-9]{40}` 不命中, 04-26 10:14
+
+**Wrong**:
+```js
+const makerAddr = reply.match(/0x[a-fA-F0-9]{40}/)?.[0];  // truncated 不命中, 加 {4,} 拿不全
+```
+
+**Right**:
+```js
+// 从 dm_order_confirmed parse order_id (8 hex)
+const orderId = reply.match(/订单已确认\s*#([a-f0-9]{8})/)?.[1];
+// 反查 exchange_offers 拿完整 wallet
+const offer = db.prepare("SELECT verification_meta FROM exchange_offers WHERE id LIKE ? || '%'").get(orderId);
+const meta = JSON.parse(offer.verification_meta);
+const makerAddr = meta.accepted_chains.find(c => c.chain === 'bnb')?.address;
+```
+
+**Why**: broker DM 故意 truncate maker address (前 22 + ... + 后 6) 防误抄, 但 e2e 测试需要完整 0x{40hex} 给 evm-transfer. **e2e parse user-friendly DM 永远不可靠 (broker 文案随时改), 必须从 chain_events / exchange_offers 真 db query**. order_id 是稳定主键 (broker 显式 # 暴露给用户).
+
+---
+
+## 规则 19 · broker → user DM 含的链上地址必从 db fetch, 不接受 LLM/handler 传值
+
+**来源**: J1 真测 67903c5b broker preview DM 编 fake `0x1234567890123456789012345678901234567890` (Owner '系统钢线' 钦定), 04-26 13:06
+
+**Wrong**:
+```js
+// SYSTEM_PROMPT 给 LLM placeholder 例子:
+// "收款地址 (broker BSC): 0xaD12544E... (完整, 不省略)"
+//                       ^^^^^^^^^^^^^^^^ LLM 看 example 自由生成 placeholder
+// LLM 在 preview DM 渲染:
+// "收款地址 (broker BSC): 0x1234567890123456789012345678901234567890" ← LLM 编的, 不是真地址
+```
+真 user 真转 USDT 到 0x1234... = 钱永久丢 = production 灾难.
+
+**Right** (4 layer defense):
+```js
+// Layer 1: backend 真 fetch (broker-buy-handler.js buyPreview)
+const makerWallet = db.prepare(`
+  SELECT address FROM agent_wallets
+  WHERE relay_node_id = ? AND chain = ? AND is_default = 1
+`).get(BROKER_RELAY_ID, chainKey);
+
+// Layer 2: tool 接口 不接受 address 参数 (LLM 没机会编)
+preview_order: { parameters: { direction, qty, chain } }  // 不要 maker_addr / peer_kasia
+
+// Layer 3: backend 生成 deterministic preview_text 整段, LLM 必须 100% 原样转发
+const preview_text = `📋 订单画像...\n收款 (broker BSC): \`${makerWallet.address}\`\nKAS 收件: \`${peer_kasia}\``;
+return { ok: true, preview_text };  // LLM SYSTEM_PROMPT '一字不改原样转发'
+
+// Layer 4: action-queue 入链前 assert (defensive, broker 自己 wallet 校验)
+const evmMatches = action.message.match(/0x[a-fA-F0-9]{40}/g) || [];
+const validEvm = evmMatches.every(addr => isOurWallet(addr));
+if (!validEvm) {
+  logger.error('ADDRESS_INVARIANT_VIOLATED', { kind: action.kind, evm: evmMatches });
+  return; // 拒发
+}
+```
+
+**Why**: KANet broker 钢线 (Owner 钦定): 任何 broker → user DM 含的链上地址必须**直接从 agent_wallets DB fetch**, 不能让 LLM 自由生成 (LLM 会按 SYSTEM_PROMPT example 编 placeholder), 不能让 handler 上层传值 (信任链断裂). 4 层 defense in depth: backend fetch / tool 不暴露地址参数 / template 固定 / queue 入链前 assert. 任何一层漏一条, 真 user 真转 USDT 风险. **资金安全无侥幸**.
+
+类似教训范畴 (写新 broker DM 时):
+- dm_order_confirmed: broker BSC 真 fetch + offer.verification_meta 真值 (不接受外部 input)
+- dm_pay_instr: maker_addr 从 exchange_offers 真值 (UI truncate 但 DB 真完整)
+- dm_kas_delivered: kas_tx_id 真 onchain 验证后注入 (不让 LLM 编)
+- 任何价格/数量数字: 真 fetchKasPrice + agg picks 真值 (不让 LLM 估)
+
+新加 broker → user DM 协议字段时, 三问:
+1. 这字段是不是钱安全相关 (地址/数量/tx_hash)?
+2. 是不是 broker 100% 已知 (db fetch / payload)?
+3. 有没有可能让 LLM 生成?
+钱安全 + 100%已知 + LLM 风险 → 必走 Layer 1-4 defense.
+
+lint-kanet R19 静态扫: broker handler / llm-agent 任何 \\\`\\\${anything_evm_addr}\\\` template 必伴 db.prepare SELECT agent_wallets fetch (不能 hardcode / 不能 LLM input).
+
+---
+
 ## 如何扩充本档案
 
 新陷阱踩过后**立即**追加，格式保持：
