@@ -103,6 +103,69 @@ const TRON_USDT_ADDR = TRON_TOKENS.usdt;
  */
 export { EVM_RPC, EVM_TOKENS, SOL_RPC, SOL_TOKENS, TRON_RPC, TRON_TOKENS };
 
+// T-J2-V2 (Owner 真测 #2 暴露 — broker 应有链查能力):
+// EVM USDT 入账反向扫描 — 给定 recipient + chain, 扫近 N blocks 找所有 ERC20 Transfer event,
+// 返 [{ tx_hash, from, amount, block }]. 用于:
+//   - bsc-incoming-watcher.js (NWT eager 后台监听)
+//   - broker-llm-agent.js verify_payment tool (J2 lazy 用户查询)
+//
+// 多 RPC fallback 防限速; chunked eth_getLogs (1000 blocks/段) 防 'limit exceeded'.
+const _SCAN_RPC_LIST = {
+  bnb: ['https://bsc-rpc.publicnode.com', 'https://bsc.drpc.org', 'https://1rpc.io/bnb', 'https://bsc-dataseed.bnbchain.org', 'https://binance.llamarpc.com'],
+  eth: ['https://eth.llamarpc.com', 'https://ethereum-rpc.publicnode.com', 'https://1rpc.io/eth'],
+  polygon: ['https://polygon-bor-rpc.publicnode.com', 'https://polygon.drpc.org', 'https://1rpc.io/matic'],
+};
+const _TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+function _topicPad(addr) { const a = addr.replace(/^0x/, '').toLowerCase(); return '0x' + '0'.repeat(64 - a.length) + a; }
+async function _rpcCall(rpcList, method, params) {
+  let lastErr;
+  for (const url of rpcList) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+        signal: AbortSignal.timeout(8000),
+      });
+      const j = await res.json();
+      if (j.error) { lastErr = `${url}: ${j.error.message}`; continue; }
+      return j;
+    } catch (e) { lastErr = `${url}: ${e.message}`; }
+  }
+  return { error: { message: 'all RPC failed: ' + lastErr } };
+}
+
+export async function scanRecentTransfers({ chain, recipient, sender = null, span_blocks = 1500, paymentAsset = 'usdt' }) {
+  const rpcList = _SCAN_RPC_LIST[chain];
+  if (!rpcList) return { ok: false, error: `chain ${chain} not supported for scanRecentTransfers` };
+  const tokenInfo = EVM_TOKENS[chain]?.[paymentAsset];
+  if (!tokenInfo) return { ok: false, error: `no token config: ${paymentAsset} on ${chain}` };
+
+  const head = await _rpcCall(rpcList, 'eth_blockNumber', []);
+  if (head.error) return { ok: false, error: head.error.message };
+  const headNum = parseInt(head.result, 16);
+
+  const topics = [_TRANSFER_TOPIC, sender ? _topicPad(sender) : null, _topicPad(recipient)];
+  const CHUNK = 1000;
+  const events = [];
+  for (let start = Math.max(0, headNum - span_blocks); start < headNum; start += CHUNK) {
+    const end = Math.min(start + CHUNK - 1, headNum);
+    const logs = await _rpcCall(rpcList, 'eth_getLogs', [{
+      address: tokenInfo.address,
+      topics,
+      fromBlock: '0x' + start.toString(16),
+      toBlock: '0x' + end.toString(16),
+    }]);
+    if (logs.error) continue;
+    for (const e of (logs.result || [])) {
+      const fromAddr = '0x' + e.topics[1].slice(-40);
+      const valueWei = BigInt(e.data);
+      const amount = Number(valueWei) / Math.pow(10, tokenInfo.decimals);
+      events.push({ tx_hash: e.transactionHash, from: fromAddr, amount, block: parseInt(e.blockNumber, 16) });
+    }
+  }
+  return { ok: true, events, head_block: headNum, span_blocks, recipient, asset: paymentAsset, chain };
+}
+
 export async function verifyCrossChainTx({ txHash, chain, expectedAmount, expectedTo, expectedFrom, paymentAsset = 'usdt' }) {
   const required = REQUIRED_CONFIRMATIONS[chain] || 15;
   const asset = (paymentAsset || 'usdt').toLowerCase();

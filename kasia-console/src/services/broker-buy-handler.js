@@ -26,6 +26,9 @@ const _quotes = new Map();  // peer → {offer_id, qty, quoted_usdt, pay_chain, 
 const _pendingAccepts = new Map();  // peer → {offer_id, qty, quoted_usdt, pay_chain, maker_addr, accept_tx, expires_at}
 let _sendOverride = null;
 let _publishOverride = null;  // T-J1-19b: unit test inject for _brokerPublishKasOffer
+let _scanOverride = null;     // T-J2-V2: unit test inject for scanRecentTransfers
+export function _testInjectScan(fn) { _scanOverride = fn; }
+export function _testResetScan() { _scanOverride = null; }
 
 export function _testInjectSendCommand(fn) { _sendOverride = fn; }
 export function _testResetSendCommand() { _sendOverride = null; }
@@ -264,6 +267,75 @@ export async function finalizeBuy({ user_kasia, qty, pay_chain }) {
     note: merged.picks.length > 1
       ? `User must send ${merged.picks.length} separate USDT payments (one per maker, ${merged.picks.filter(p=>p.broker_dynamic).length} of which is broker self-quoted).`
       : (merged.picks[0]?.broker_dynamic ? 'Broker self-quoted (no maker available, broker uses own KAS inventory).' : 'Single maker, one USDT payment.'),
+  };
+}
+
+// T-J2-V2 (Owner 真测 #2 退场后立项): broker 主动反查 BSC USDT 入账, 不让 user 手贴 tx hash.
+// LLM tool verify_payment 调此. 兜底/lazy 路径, 主路径是 NWT bsc-incoming-watcher (eager 后台监听).
+//
+// 流程: peer 已 _pendingAccepts → 扫 broker BSC 钱包近 5min 收款 → 匹 amount 任一 unpaid pick ± 1%
+//   tolerance + (若知 taker_payment_address) 匹 from → 找到 → 调 _enqueuePaid 推 paid_v1 协议 →
+//   exchange-machine processPaymentSubmit → cross-chain-verify → 自动 deliver KAS.
+//
+// 找不到 → return ok:false reason='no_match', LLM 拿到自然回 user '没查到, 麻烦发 tx hash 或截图'.
+export async function verifyPaymentForPeer({ peer, chain }) {
+  if (!peer) return { ok: false, reason: 'missing_peer' };
+  const accept = _pendingAccepts.get(peer);
+  if (!accept) return { ok: false, reason: 'no_active_order', user_msg: '没查到 active 订单. 你下过单吗? 先告诉我数量 + 链.' };
+  if (Date.now() >= accept.expires_at) {
+    _pendingAccepts.delete(peer);
+    return { ok: false, reason: 'order_expired', user_msg: '订单已超时 (30min). 重新下单回 "买 X KAS".' };
+  }
+  const payChain = String(chain || accept.pay_chain).toLowerCase();
+  if (!['bnb', 'eth', 'polygon'].includes(payChain)) {
+    return { ok: false, reason: 'unsupported_chain', user_msg: `${payChain} 暂不支持自动反查. 麻烦发 tx hash 或截图.` };
+  }
+  // broker BSC 钱包 (collected_to)
+  const wallet = sqlite.prepare(`SELECT address FROM agent_wallets WHERE relay_node_id=? AND chain=? AND is_default=1`).get(BROKER_RELAY_ID, payChain);
+  if (!wallet?.address) return { ok: false, reason: 'no_broker_wallet', user_msg: `broker 这边没 ${payChain} 收款地址, 等等.` };
+
+  const scanRes = _scanOverride
+    ? await _scanOverride({ chain: payChain, recipient: wallet.address, span_blocks: 1500 })
+    : await (await import('./cross-chain-verify.mjs')).scanRecentTransfers({ chain: payChain, recipient: wallet.address, span_blocks: 1500 });
+  if (!scanRes.ok) return { ok: false, reason: 'scan_failed', error: scanRes.error, user_msg: `链上反查暂时失败 (${scanRes.error}). 麻烦发 tx hash, 我帮核对.` };
+
+  // 找未付 pick 匹 amount ± 1% tolerance
+  const tolerance = 0.01;
+  const matched = [];
+  for (const pick of accept.picks.filter(p => !p.paid_tx)) {
+    const expected = pick.take_usdt;
+    const found = scanRes.events.find(e => {
+      const diff = Math.abs(e.amount - expected) / expected;
+      return diff <= tolerance;
+    });
+    if (found) matched.push({ pick, event: found });
+  }
+  if (matched.length === 0) {
+    return {
+      ok: false, reason: 'no_match',
+      scanned_events: scanRes.events.length,
+      pending_amount_usdt: accept.picks.filter(p => !p.paid_tx).reduce((s, p) => s + p.take_usdt, 0).toFixed(4),
+      user_msg: scanRes.events.length === 0
+        ? `broker BSC 收款地址 ${wallet.address.slice(0,8)}... 近 75min 没看到任何 USDT 入账. 你 tx 可能还没确认 (BSC 通常 ~30s 出块, 满 15 conf 才扫得到, 等 1-2min 再问我?). 或者发 tx hash 0x...`
+        : `近 75min ${scanRes.events.length} 笔 USDT 入账, 但金额都不匹你单子 (期望 ${accept.picks.filter(p=>!p.paid_tx).reduce((s,p)=>s+p.take_usdt,0).toFixed(4)} USDT). 麻烦发 tx hash 我精确核对.`,
+    };
+  }
+  // 找到 → push paid_v1 + 标记 pick paid_tx (走跟 PAID_REGEX 同样的代发协议路径)
+  const results = [];
+  for (const { pick, event } of matched) {
+    pick.paid_tx = event.tx_hash;
+    _enqueuePaid(pick.id, event.tx_hash, payChain, peer);
+    results.push({ offer_id: pick.id, payment_tx: event.tx_hash, amount: event.amount });
+  }
+  const remaining = accept.picks.filter(p => !p.paid_tx).length;
+  if (remaining === 0) _pendingAccepts.delete(peer);
+  return {
+    ok: true,
+    matched: results,
+    remaining_picks: remaining,
+    user_msg: remaining === 0
+      ? `✓ 链上找到你 ${matched.length} 笔 USDT 入账 (tx ${matched[0].event.tx_hash.slice(0,12)}...). 自动验证中, ~30-60s 后我发 KAS 到你 Kasia.`
+      : `✓ 找到 ${matched.length} 笔, 还差 ${remaining} 笔. 已发的会自动确认.`,
   };
 }
 

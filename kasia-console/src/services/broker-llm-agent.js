@@ -41,10 +41,17 @@ const SYSTEM_PROMPT = `你是 KANet broker. 帮用户 KAS↔USDT 成交.
 - 没现成 maker + broker 自挂也不够 → 友好告知 "暂时没 X KAS 卖单, 拆小点 / 换链 / 等等?"
 - broker 暂只支持 BSC 链自挂 → 告诉用户 "v1 仅 BSC, 其他链请用 BSC 或等 v2"
 
-# tx 兜底 (J2 R4)
-- 如果用户消息含 64 位 hex 字符串 (0x[a-fA-F0-9]{64}) 看似交易 hash, 你**必须**回:
-  "看到你提到 0x...哈希. v1 暂未自动验证付款, 请 30min 内继续按 broker DM 指引付款 (如未付完). 已付完但 broker 未自动确认 → 截图发 @KasiaRelay (Owner) 手工退款. v1.1 自动化."
-- 不要假装确认收款, 不要静默, 不要 "好的我看到了 tx" 之类敷衍
+# 支付反馈 (T-J2-V2 重写, Owner 真测 #2 退场后)
+**铁律**: 用户说已付/已经支付/付过了/check my payment/你帮我查/我已经转过了 等表达 (含或不含 tx hash) →
+你必须**先调 verify_payment tool**, 自动反查 BSC. 不要让用户手贴 tx hash, 不要回 "我无法直接查看链上记录".
+
+verify_payment 返回处理:
+- ok=true matched → 自然回 user_msg (含 ✓ 找到 tx + 自动验证中 + ETA 30-60s 发 KAS)
+- ok=false reason='no_match' → 自然回 user_msg (说明扫了多少笔/期望 amount, 引导发 tx hash 或等等)
+- ok=false reason='no_active_order' → 'broker 这边没你的 active 订单, 你下过单吗?'
+- ok=false reason='order_expired' → '订单超时了, 重新下单'
+
+如果用户已经贴了 tx hash (含 0x[a-fA-F0-9]{64}) → broker handler 已自动验证 (PAID_REGEX 路径), 你**不要**重复调 verify_payment 也不要回'手贴' — 自然说 '收到 tx, 验证中, 等 30-60s 发 KAS'.
 
 # 风格
 - 简洁友善, 像老熟人, 不机械
@@ -72,6 +79,22 @@ const TOOLS = [
           address: { type: 'string', description: '卖路径必填 (你 USDT 收款地址 EVM 0x..42 位 / SOL / TRON 格式). 买路径可省.' },
         },
         required: ['direction', 'qty', 'chain'],
+      },
+    },
+  },
+  // T-J2-V2 (Owner 真测 #2 退场后立项): 用户说 "已付/已经支付/付过了/check my payment / 你帮我查"
+  // 但没贴 tx hash → 你必须先调此 tool 自动反查 BSC, 不要让用户手贴 hash.
+  {
+    type: 'function',
+    function: {
+      name: 'verify_payment',
+      description: '用户说已付但没给 tx hash 时调此. broker 反查 BSC 收款地址近 5min 是否有匹用户报价 USDT 的入账. 找到自动推 paid_v1 → 自动验证 + 自动发 KAS, 用户不需要手贴 hash. 找不到才回引导用户发 hash 或截图.',
+      parameters: {
+        type: 'object',
+        properties: {
+          chain: { type: 'string', enum: ['bnb', 'polygon'], description: '用户付款链 (BSC=bnb 主路径)' },
+        },
+        required: ['chain'],
       },
     },
   },
@@ -134,18 +157,25 @@ async function _callLlm(messages) {
 }
 
 async function _executeTool(peer, name, args) {
-  if (name !== 'finalize_order') return { ok: false, error: `unknown tool: ${name}` };
-  const { direction, qty, chain, address } = args || {};
-  if (direction === 'buy') {
-    const { finalizeBuy } = await import('./broker-buy-handler.js');
-    return finalizeBuy({ user_kasia: peer, qty, pay_chain: chain });
+  if (name === 'finalize_order') {
+    const { direction, qty, chain, address } = args || {};
+    if (direction === 'buy') {
+      const { finalizeBuy } = await import('./broker-buy-handler.js');
+      return finalizeBuy({ user_kasia: peer, qty, pay_chain: chain });
+    }
+    if (direction === 'sell') {
+      if (!address) return { ok: false, error: '卖路径必填 recv_address' };
+      const { finalizeSell } = await import('./broker-sell-handler.js');
+      return finalizeSell({ user_kasia: peer, qty, recv_chain: chain, recv_address: address });
+    }
+    return { ok: false, error: `unknown direction: ${direction}` };
   }
-  if (direction === 'sell') {
-    if (!address) return { ok: false, error: '卖路径必填 recv_address' };
-    const { finalizeSell } = await import('./broker-sell-handler.js');
-    return finalizeSell({ user_kasia: peer, qty, recv_chain: chain, recv_address: address });
+  if (name === 'verify_payment') {
+    const { chain } = args || {};
+    const { verifyPaymentForPeer } = await import('./broker-buy-handler.js');
+    return verifyPaymentForPeer({ peer, chain });
   }
-  return { ok: false, error: `unknown direction: ${direction}` };
+  return { ok: false, error: `unknown tool: ${name}` };
 }
 
 function _loadHistory(peer, limit = 20) {
