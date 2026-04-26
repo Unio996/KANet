@@ -239,14 +239,13 @@ export async function buyPreview({ user_kasia, qty, pay_chain, give_asset = 'KAS
   if (!user_kasia || !qty || qty <= 0 || !pay_chain) {
     return { ok: false, error: 'missing fields (user_kasia/qty/pay_chain)' };
   }
-  // T-NWT-2026-04-27 v1.1 Phase A step 4: asset validation (Owner 22:54 钦定真发现 bug 2/3 修).
-  // J1 asset-registry getAsset 接口现不一致 (listAssets 返 base / getAsset 接 chain-key), 暂用
-  // hardcoded supported list. v1.2 J1 修接口后改 asset-registry.isSupported(give_asset).
-  // 防 USDC/BTC 等 unsupported asset 真返 ok:true (broker 没真持库存 + fetchKasPrice 价格误用).
-  const SUPPORTED_GIVE_ASSETS_V11 = ['KAS'];
-  if (!SUPPORTED_GIVE_ASSETS_V11.includes(String(give_asset).toUpperCase())) {
+  // T-NWT-2026-04-27 v1.1 Phase A step 5: asset validation 用 J1 165c9662 asset-registry
+  // (替 step 4 hardcoded SUPPORTED list). asset-registry 加新 entry 时 buyPreview 自动 supported.
+  const { getAsset } = await import('./asset-registry.js');
+  const assetMeta = getAsset(give_asset);
+  if (!assetMeta) {
     return { ok: false, error: 'asset_not_supported',
-      message: `broker 暂只支持 ${SUPPORTED_GIVE_ASSETS_V11.join('/')} (v1.1 起步). 你想买 ${give_asset} 暂没库存, 等 v1.2 多 asset 启用.` };
+      message: `broker 不支持 ${give_asset} (asset-registry 未注册). 现支持 list: 见 listAssets().` };
   }
   if (qty < MIN_QTY_KAS) {
     return { ok: false, error: `qty_too_small`, message: `最小买 ${MIN_QTY_KAS} ${give_asset} (broker fee + dust 保护). 改大点.` };
@@ -291,8 +290,10 @@ export async function buyPreview({ user_kasia, qty, pay_chain, give_asset = 'KAS
   // T-J2-V2-realtest-critfix (J1 67903c5b 真测撞 LLM 编 fake 地址 0x1234... bug):
   // 生成 deterministic preview_text 完整画像字串. LLM 必须**原样转发**, 不让 LLM 自己渲染
   // 地址 (LLM 会按 SYSTEM_PROMPT 例子编 placeholder = user 真转 USDT 到 fake 地址 = 钱丢).
-  // T-NWT-2026-04-27 v1.1 Phase A step 3: NLG parameterize asset symbol (default 'KAS' 向后兼容).
-  // 'Kasia' 网络名 + receive_address 留 Step 4 真接 J1 asset-registry.asset.network 时改.
+  // T-NWT-2026-04-27 v1.1 Phase A step 5: NLG asset.chain 真接 J1 asset-registry (Bug 4 修).
+  // assetMeta.chain = 'kaspa' (KAS) / 'bnb' (USDT-bsc) / 'eth' (USDT-eth).
+  // 真用户收 KAS → Kasia network 地址; 收 USDT-bnb → BSC 地址; 收 BTC → BTC network 地址.
+  const recvNetwork = assetMeta.chain === 'kaspa' ? 'Kasia' : assetMeta.chain.toUpperCase();
   const payLines = picks.map((p, i) => {
     const tag = p.broker_dynamic ? '(broker 自挂)' : '(maker)';
     return `  ${i+1}. ${p.take_qty} ${give_asset} → 付 ${(+p.take_usdt).toFixed(6)} USDT 到\n     \`${p.maker_addr}\` ${tag}`;
@@ -305,7 +306,7 @@ export async function buyPreview({ user_kasia, qty, pay_chain, give_asset = 'KAS
 * 单价: ${unitPrice.toFixed(6)} USDT/${give_asset}
 * 总额: ${totalUsdt.toFixed(6)} USDT
 ${payLines}
-* ${give_asset} 收件 (你的 Kasia):
+* ${give_asset} 收件 (你的 ${recvNetwork}):
   \`${user_kasia}\`
 
 ⏰ 订单 30 分钟内付款有效 · 跨链验证 1-3 分钟
@@ -344,12 +345,12 @@ export async function finalizeBuy({ user_kasia, qty, pay_chain, give_asset = 'KA
   if (!user_kasia || !qty || qty <= 0 || !pay_chain) {
     return { ok: false, error: 'missing fields (user_kasia/qty/pay_chain)' };
   }
-  // T-NWT-2026-04-27 v1.1 Phase A step 4 (cont): asset validation (跟 buyPreview 同 guard).
-  // 防 finalizeBuy 真 publish offer wrong asset (broker 没库存 USDC/BTC).
-  const SUPPORTED_GIVE_ASSETS_V11 = ['KAS'];
-  if (!SUPPORTED_GIVE_ASSETS_V11.includes(String(give_asset).toUpperCase())) {
+  // T-NWT-2026-04-27 v1.1 Phase A step 5 (cont): asset validation 用 asset-registry (跟 buyPreview 同).
+  const { getAsset: getAssetF } = await import('./asset-registry.js');
+  const assetMetaF = getAssetF(give_asset);
+  if (!assetMetaF) {
     return { ok: false, error: 'asset_not_supported',
-      message: `broker 暂只支持 ${SUPPORTED_GIVE_ASSETS_V11.join('/')} (v1.1 起步). v1.2 多 asset 启用后再买 ${give_asset}.` };
+      message: `broker 不支持 ${give_asset} (asset-registry 未注册). v1.2 加 entry 后启用.` };
   }
   if (qty < MIN_QTY_KAS) {
     return { ok: false, error: `qty too small: ${qty} < min ${MIN_QTY_KAS} KAS (broker fee + dust protection)` };
