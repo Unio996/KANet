@@ -14,7 +14,9 @@ const MIN_QTY_KAS = 1.0;
 const PAID_REGEX = /(?:已付|付了|我付|paid|pay)[\s\S]{0,40}?\b(0x[a-fA-F0-9]{64})\b/i;
 // T-J2-26 (Owner 真测 04-26 12:18): "已付!" 等支付完成意图 但无 tx hash → broker 必须主动引导发 tx
 // 否则 LLM 误判走 finalize_order 重复下单 (Owner 这单实例: 43c0a4f8 已付后第 3 次 publish).
-const PAID_NO_TX_REGEX = /^(?:已付|付了|已转|转完|已支付|已转账|完成|done|paid|sent|finished|转好了|付好了|搞定|ok 付了|已经付了)\s*[!！。.…]*\s*$/i;
+// T-J2-NWT-27c (Owner 真测 04-26 15:30 漏): "已经支付" 漏 → broker 静默 → Owner '请你们自己处理'.
+// 扩 PAID_NO_TX 自然话变体 + 加 (?:了)? 完成态助词后缀 (J1 case 2 v6 '转完了 1/12 timeout' 真因).
+const PAID_NO_TX_REGEX = /^(?:已付|付了|已转|转完|已支付|已转账|已经支付|已经付款|付款了|支付了|支付完成|支付好了|完成|done|paid|sent|finished|转好了|付好了|搞定|ok 付了|已经付了)\s*(?:了)?\s*[!！。.…]*\s*$/i;
 const CONFIRM_WORDS = ['YES', 'yes', 'y', '确认', '好', '行', 'OK', 'ok'];
 const CANCEL_WORDS  = ['NO', 'no', 'n', '取消', '不要', '算了'];
 const QUOTE_TTL_MS = 5 * 60 * 1000;
