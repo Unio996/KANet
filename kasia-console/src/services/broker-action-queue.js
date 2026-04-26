@@ -243,9 +243,13 @@ async function executeAction(item) {
         try {
           const { onBroadcastWritten } = await import('./trade-protocol-filter.js');
           const broker = sqlite.prepare('SELECT address FROM relay_nodes WHERE id=?').get(BROKER_RELAY_ID);
+          // T-NWT-2026-04-26 wire-fix-v3: retry 时 line 152 给 message 加 ` [r2]` 防 anti-spam
+          // dedup, 但 JSON 协议消息加 suffix 后 trade-filter JSON.parse fail silent. strip
+          // suffix 让 onBroadcastWritten 拿到干净 JSON. (DM 路径不经此 wire fix, 不影响.)
+          const cleanContent = (p.message || '').replace(/\s*\[r\d+\]\s*$/, '');
           await onBroadcastWritten({
             tx_hash: result.txId,
-            content: p.message,
+            content: cleanContent,
             sender_address: broker?.address,
             channel_name: p.channel || 'kanet-exchange',
             created_at: new Date().toISOString(),
