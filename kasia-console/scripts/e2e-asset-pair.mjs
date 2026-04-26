@@ -46,6 +46,80 @@ async function phase1_kas_regression() {
   }
 }
 
+// ── Phase 1.5: NWT 4 bug regression (J2 #3 接 task) ─────────
+// 真 import 现 codebase asset-registry + buyPreview, 真验 4 bug 真状态 (修了 / 没修)
+async function phase1_5_nwt_4bug_regression() {
+  console.log('\n=== Phase 1.5: NWT 4 bug regression (J2 #3 接) ===');
+  let pass = 0, fail = 0;
+  const { getAsset, listAssets, isSupported } = await import('../src/services/asset-registry.js');
+
+  // Bug 1: asset-registry 接口 — getAsset 单参 (J1 165c96623 真 fix)
+  console.log('\n  Bug 1: getAsset 单参 default chain (J1 165c96623 真 fix)');
+  const t1 = [
+    ['KAS', 'KAS_kaspa'], ['USDT', 'USDT_bnb'],
+    ['USDC', null], ['BTC', null],
+  ];
+  for (const [sym, expectedKey] of t1) {
+    const r = getAsset(sym);
+    const got = r ? `${r.symbol}_${r.chain}` : null;
+    const ok = expectedKey ? got === expectedKey : r === null;
+    console.log(`    getAsset('${sym}') → ${got} ${ok ? '✓' : `✗ expect=${expectedKey}`}`);
+    ok ? pass++ : fail++;
+  }
+  console.log(`    listAssets() → [${listAssets().join(',')}] ✓ base symbols`);
+
+  // Bug 2: buyPreview 必 reject unsupported asset (broker 没 USDC/BTC 库存)
+  console.log('\n  Bug 2: buyPreview unsupported asset 必 reject (NWT 待加 validation)');
+  const { buyPreview } = await import('../src/services/broker-buy-handler.js');
+  const TEST_PEER = 'kaspa:qpjjv2uhj22592mq76kqr3v6kjjyu23qugjmh2f7992nn0ykmje4cgx2ktetp'; // Sophie placeholder
+  for (const asset of ['USDC', 'BTC', 'XRP']) {
+    const r = await buyPreview({ user_kasia: TEST_PEER, qty: 1, pay_chain: 'bnb', give_asset: asset });
+    const correct = r.ok === false && (r.error?.includes('asset_not_supported') || r.error?.includes('unsupported'));
+    console.log(`    buyPreview(${asset}) → ok=${r.ok} ${correct ? '✓ (rejected correctly)' : `✗ STILL BROKEN (${r.error || 'returned ok:true'})`}`);
+    correct ? pass++ : fail++;
+  }
+
+  // Bug 3: BTC 价格不能是 0.0342 (要 >$50k or unsupported error)
+  console.log('\n  Bug 3: BTC 价 (J1 price-oracle.js 13acedba 真 ship)');
+  // Bug 2 validation 已 reject USDC/BTC, 但 Bug 3 真 fix verify 走 price-oracle 直接
+  const { fetchPrice } = await import('../src/services/price-oracle.js');
+  const tBtc = await fetchPrice('BTC', 'USDT');
+  if (tBtc.ok && tBtc.price > 50000) {
+    console.log(`    fetchPrice(BTC,USDT) → ${tBtc.price} ✓ (real CoinGecko, 不是 0.0342 假)`);
+    pass++;
+  } else {
+    console.log(`    fetchPrice(BTC,USDT) → ${JSON.stringify(tBtc)} ✗ STILL BROKEN`);
+    fail++;
+  }
+  const tUsdc = await fetchPrice('USDC', 'USDT');
+  if (tUsdc.ok && tUsdc.price === 1) {
+    console.log(`    fetchPrice(USDC,USDT) → 1 ✓ (peg hardcode)`);
+    pass++;
+  } else { console.log(`    fetchPrice(USDC,USDT) → ${JSON.stringify(tUsdc)} ✗`); fail++; }
+  const tXrp = await fetchPrice('XRP', 'USDT');
+  if (!tXrp.ok && tXrp.error === 'unsupported_pair') {
+    console.log(`    fetchPrice(XRP,USDT) → unsupported ✓ (不 silent default)`);
+    pass++;
+  } else { console.log(`    fetchPrice(XRP,USDT) → ${JSON.stringify(tXrp)} ✗`); fail++; }
+
+  // Bug 4: NLG asset.network — USDC 不能用 'Kasia' 字面
+  console.log('\n  Bug 4: NLG asset.network (NWT Step 4 待修)');
+  const rUsdc = await buyPreview({ user_kasia: TEST_PEER, qty: 1, pay_chain: 'bnb', give_asset: 'USDC' });
+  if (rUsdc.ok === false) {
+    console.log(`    buyPreview(USDC) ok:false ✓ (Bug 4 防 by Bug 2 validation)`);
+    pass++;
+  } else if (rUsdc.preview_text && !rUsdc.preview_text.includes('Kasia')) {
+    console.log(`    buyPreview(USDC) preview 不含 'Kasia' ✓`);
+    pass++;
+  } else {
+    console.log(`    buyPreview(USDC) preview 含 'Kasia' literal ✗ STILL BROKEN (NLG 没 generic)`);
+    fail++;
+  }
+
+  console.log(`\n  Phase 1.5: ${pass}/${pass+fail} PASS — NWT 4 bug 修进度`);
+  return { pass, fail };
+}
+
 // ── Phase 2: USDC 跨 ERC20 真换真测 (v1.1 Phase A ship 后) ────
 async function phase2_usdc_cross_asset() {
   console.log('\n=== Phase 2: USDC 跨 ERC20 真换 (v1.1 Phase A ship 后真跑) ===');
@@ -84,6 +158,7 @@ console.log(`broker = ${BROKER_KASPA}`);
 console.log(`v2 spec a6cb8853d incorporate J2 #3 6 challenge`);
 
 await phase1_kas_regression();
+await phase1_5_nwt_4bug_regression();
 await phase2_usdc_cross_asset();
 await phase3_llm_generic();
 
