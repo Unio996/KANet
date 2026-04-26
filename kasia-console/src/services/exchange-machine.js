@@ -808,6 +808,18 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
                 price: parseFloat(deliveringOffer.want_amount) / parseFloat(deliveringOffer.give_amount) || 0,
               }));
               console.log(`[exchange] offer ${offer_id.slice(0,8)} delivering → completed (delivery TX: ${deliveryTxId.slice(0,12)}, broadcast: ${deliveredBcastTxId.slice(0,12)})`);
+              // T-J2-V2 议 2 (Owner 真测 #2 退场后 NWT 转 Owner #2 痛点 '订单全生命周期 broker 主动 DM'):
+              // KAS 发出 + broadcast 成功 → 主动 DM user 通知 'KAS 已发'. 不让 user 查 explorer.
+              try {
+                const { enqueue } = await import('./broker-action-queue.js');
+                enqueue({
+                  kind: 'dm_kas_delivered',
+                  peer: deliveryTarget,
+                  payload: {
+                    message: `✅ 已发出 ${deliveringOffer.give_amount} KAS 到你 Kasia 钱包, 1-2 分钟到账.\n\nTX: ${deliveryTxId}\n查看: https://explorer.kaspa.org/txs/${deliveryTxId}\n\n感谢使用 KANet broker.`,
+                  },
+                });
+              } catch (e) { console.warn(`[exchange] dm_kas_delivered enqueue err: ${e.message}`); }
             }
           } else {
             // 3 attempts failed → revert to verified (retryable, not dispute)
