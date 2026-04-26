@@ -45,13 +45,26 @@ export const ASSETS = {
 
 /**
  * Lookup asset by symbol + chain.
- * @param {string} symbol
- * @param {string} chain
+ *
+ * T-J1-2026-04-27 v1.1 Phase A 真测撞 (NWT 22:57 _probe-step3-generic-asset.mjs):
+ * 现 broker handler 真调 getAsset(symbol) 单参时撞 null. v1.1 修: chain optional,
+ * 单参 lookup 返 first matching ASSETS entry (default chain for that symbol).
+ *
+ * @param {string} symbol — base symbol (KAS / USDT / USDC)
+ * @param {string} [chain] — chain key (optional). 若缺则返 default chain entry.
  * @returns {AssetMeta | null}
  */
 export function getAsset(symbol, chain) {
-  if (!symbol || !chain) return null;
-  return ASSETS[`${symbol.toUpperCase()}_${chain.toLowerCase()}`] || null;
+  if (!symbol) return null;
+  const upperSymbol = symbol.toUpperCase();
+  if (chain) {
+    return ASSETS[`${upperSymbol}_${chain.toLowerCase()}`] || null;
+  }
+  // chain optional — return first matching entry (default chain for symbol)
+  for (const key in ASSETS) {
+    if (ASSETS[key].symbol === upperSymbol) return ASSETS[key];
+  }
+  return null;
 }
 
 /**
@@ -74,7 +87,7 @@ export function listChainsFor(symbol) {
 /**
  * Check if asset × chain combo is supported.
  * @param {string} symbol
- * @param {string} chain
+ * @param {string} [chain] — optional, 若缺则查 symbol 是否有任何 chain entry
  * @returns {boolean}
  */
 export function isSupported(symbol, chain) {
