@@ -411,8 +411,12 @@ export async function verifyPaymentForPeer({ peer, chain }) {
     return { ok: false, reason: 'order_expired', user_msg: '订单已超时 (30min). 重新下单回 "买 X KAS".' };
   }
   const payChain = String(chain || accept.pay_chain).toLowerCase();
-  if (!['bnb', 'eth', 'polygon'].includes(payChain)) {
-    return { ok: false, reason: 'unsupported_chain', user_msg: `${payChain} 暂不支持自动反查. 麻烦发 tx hash 或截图.` };
+  // T-J1-2026-04-27 v1.1: 真扩 SUPPORTED_EVM_CHAINS from cross-chain-verify.EVM_RPC (7 chain)
+  // 老 hardcode ['bnb','eth','polygon'] 真过保守 — scanRecentTransfers 已 generic.
+  const { EVM_RPC: _EVM_RPC } = await import('./cross-chain-verify.mjs');
+  const supportedEvmChains = Object.keys(_EVM_RPC || {});
+  if (!supportedEvmChains.includes(payChain)) {
+    return { ok: false, reason: 'unsupported_chain', user_msg: `${payChain} 暂不支持自动反查 (现 supported: ${supportedEvmChains.join('/')}). 麻烦发 tx hash 或截图.` };
   }
   // broker BSC 钱包 (collected_to)
   const wallet = sqlite.prepare(`SELECT address FROM agent_wallets WHERE relay_node_id=? AND chain=? AND is_default=1`).get(BROKER_RELAY_ID, payChain);
