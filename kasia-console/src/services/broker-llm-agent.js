@@ -185,20 +185,20 @@ function _detectLang(message) {
 // 主入口: conversations.js fork 调
 export async function handleLlmDialog(peer, message) {
   const history = _loadHistory(peer);
-  // T-J1-19g (NWT 报真 peer history 不空 → isFirstTurn 永 false, deterministic 失效):
-  // 改判定 - 看最后一条 broker outbound (assistant role) 是不是已经 deterministic 过.
-  // 如果没 deterministic 过 (含"哪个链/which chain/cadena para"标记) + 当前 message 检 intent
-  // → 走 deterministic. 防真 peer multi-turn 老 history 把 first-turn-of-intent 误判.
+  // T-J1-19h (诊断 NWT divergence): 加 console.log + reply marker 看真实路径
+  // direct call vs API call 都跑同一函数, marker 决定性区分究竟走哪条分支.
   const intent = _detectIntent(message);
-  if (intent) {
-    const lastAssistant = [...history].reverse().find(m => m.role === 'assistant');
-    const alreadyDeterministic = lastAssistant && /哪个链|哪条链|which chain|qué cadena|cadena para/i.test(lastAssistant.content || '');
-    if (!alreadyDeterministic) {
-      const qty = _extractQty(message);
-      const lang = _detectLang(message);
-      return _deterministicFirstReply(intent, qty, lang);
-    }
+  const lastAssistant = [...history].reverse().find(m => m.role === 'assistant');
+  const alreadyDeterministic = lastAssistant && /哪个链|哪条链|which chain|qué cadena|cadena para/i.test(lastAssistant.content || '');
+  console.log(`[broker-llm DIAG] peer=${peer?.slice(-12)} msg="${(message||'').slice(0,40)}" history.len=${history.length} intent=${intent} alreadyDet=${!!alreadyDeterministic} lastAsstSnippet="${(lastAssistant?.content||'').slice(0,60)}"`);
+  if (intent && !alreadyDeterministic) {
+    const qty = _extractQty(message);
+    const lang = _detectLang(message);
+    const reply = _deterministicFirstReply(intent, qty, lang);
+    console.log(`[broker-llm DIAG] → DET path reply="${reply.slice(0,80)}"`);
+    return `[DET] ${reply}`;  // marker 让 NWT 一眼看出走 deterministic
   }
+  console.log(`[broker-llm DIAG] → LLM path (intent=${intent}, alreadyDet=${!!alreadyDeterministic})`);
   history.push({ role: 'user', content: message });
   let llm = await _callLlm(history);
   if (!llm) return '抱歉, 我这边 LLM 卡了一下, 请稍后再试. 或直接回 "买 5 KAS" / "卖 5 KAS" 走快速通道.';
@@ -219,5 +219,6 @@ export async function handleLlmDialog(peer, message) {
     }
   }
 
-  return llm.content?.trim() || '我在听. 你想买 KAS 还是卖 KAS?';
+  const llmReply = llm.content?.trim() || '我在听. 你想买 KAS 还是卖 KAS?';
+  return `[LLM] ${llmReply}`;
 }
