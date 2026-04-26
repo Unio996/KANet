@@ -14,21 +14,30 @@
       <div class="flex items-center gap-3">
         <% if (it.roleCompat?.is_broker_role) { %>
         <%
-          /* 议 3: 推荐配置 form submit (memory user_profile: Chrome 禁 JS, 不依赖 JS) */
-          /* 只算 per-agent skill (relay_node_id 等于当前 selectedAccount), 排除 global builtin (relay_node_id NULL) */
-          const bannedActiveCount = it.skills.filter(s =>
-            s.status === 'active'
-            && s.relay_node_id === it.selectedAccount
-            && it.roleCompat.banned_categories.includes(s.category || 'other')
-          ).length;
+          /* Owner 19:18 钦定: 正向 trader 模板 — 应用钦定推荐 set, 不依赖 JS (Chrome 禁 JS) */
+          /* 真核心 broker skill set: price_tracker / trade_executor / market_scanner / mm_otc /
+             cross_chain_verify / address_profiler / kaspa_network_health / trade_sense /
+             self_awareness / system_status (10 个) */
+          const TRADER_TEMPLATE = ['price_tracker','trade_executor','market_scanner','mm_otc','cross_chain_verify','address_profiler','kaspa_network_health','trade_sense','self_awareness','system_status'];
+          const perAgentSkills = it.skills.filter(s => s.relay_node_id === it.selectedAccount);
+          const inTemplateActive = perAgentSkills.filter(s => s.status === 'active' && TRADER_TEMPLATE.includes(s.name)).length;
+          const outOfTemplateActive = perAgentSkills.filter(s => s.status === 'active' && !TRADER_TEMPLATE.includes(s.name)).length;
+          const inTemplateNotActive = perAgentSkills.filter(s => s.status !== 'active' && TRADER_TEMPLATE.includes(s.name)).length;
+          const isClean = outOfTemplateActive === 0 && inTemplateNotActive === 0;
         %>
-        <form method="POST" action="/skills/reset-recommended-form" class="inline">
+        <form method="POST" action="/skills/apply-trader-template-form" class="inline">
           <input type="hidden" name="relay_node_id" value="<%= it.selectedAccount %>" />
           <button type="submit"
-            class="text-xs px-3 py-1.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors"
-            title="一键禁用此 broker 当前 active 的 social/contacts/other 类技能"
-            <%= bannedActiveCount === 0 ? 'disabled style="opacity:0.5;cursor:not-allowed"' : '' %>>
-            ↻ 推荐配置<%= bannedActiveCount > 0 ? ` (清 ${bannedActiveCount})` : ' ✓' %>
+            class="text-xs px-3 py-1.5 rounded-lg <%= isClean ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100' %> border transition-colors"
+            title="一键应用 trader 推荐模板 (10 核心交易技能): active 推荐 + disable 其他. 钦定白名单, 不需要逐个调."
+            <%= isClean ? 'disabled style="opacity:0.7;cursor:default"' : '' %>>
+            <% if (isClean) { %>
+              ✓ trader 模板已应用 (10/10)
+            <% } else { %>
+              ⚡ 应用 trader 模板
+              <% if (outOfTemplateActive > 0) { %> (清 <%= outOfTemplateActive %>)<% } %>
+              <% if (inTemplateNotActive > 0) { %> (启 <%= inTemplateNotActive %>)<% } %>
+            <% } %>
           </button>
         </form>
         <% } %>
