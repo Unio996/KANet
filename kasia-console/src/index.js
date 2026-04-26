@@ -366,6 +366,11 @@ startIntakeWatcher();
 import { startCompletionWatcher } from './services/broker-buy-completion-watcher.js';
 startCompletionWatcher();
 
+// T-NWT-V2 (Owner 真测 #2 退场立项): bsc-incoming-watcher — 30s tick 后台扫 broker EVM 收款
+// 地址 USDT 入账, 调 J2 verifyPaymentForPeer 自动反查 + 主动 DM user. 双路径互补 J2 lazy LLM tool.
+import { start as startBscIncomingWatcher } from './services/bsc-incoming-watcher.js';
+startBscIncomingWatcher();
+
 // Graceful shutdown — stop all child processes
 async function shutdown() {
   console.log('[kasia-console] shutting down...');
