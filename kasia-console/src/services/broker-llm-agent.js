@@ -52,20 +52,47 @@ const TOOLS = [
   },
 ];
 
-async function _callLlm(messages) {
+// T-J1-19d (NWT retest 中文 6/6 失败 fix): Qwen3.6 中文 instruction-following 弱.
+// SYSTEM_PROMPT "跳过方向问" 在英/西生效, 中文 6/6 失败. Owner 主要语言中文必撞.
+// 修: 用确定性 regex 预检测 intent, 注入额外 system hint 强制 LLM 跳过 step 1.
+// 仅当 message 同时含 (中文/英/西/日/韩 方向词) + 'kas' 才认 intent, 防误杀闲聊.
+export function _detectIntent(message) {
+  const msg = String(message || '').trim();
+  if (!msg) return null;
+  if (!/kas/i.test(msg)) return null;
+  // 中文 — 严格匹方向词 (单字 '买'/'卖' 在 CJK 上下文需小心, 但已 gated by /kas/)
+  if (/买|要买|想买|购买|买入/.test(msg)) return 'buy';
+  if (/卖|要卖|想卖|出售|卖出/.test(msg)) return 'sell';
+  // 英 / 西 (\\b 适用 ASCII)
+  if (/\b(buy|purchase|comprar|adquirir)\b/i.test(msg)) return 'buy';
+  if (/\b(sell|vender)\b/i.test(msg)) return 'sell';
+  // 日 / 韩 — CJK 关键词不能用 \\b (CLAUDE.md 陷阱 #12)
+  if (/(購入|買う|구매|사다)/.test(msg)) return 'buy';
+  if (/(売る|売却|판매|팔다)/.test(msg)) return 'sell';
+  return null;
+}
+
+async function _callLlm(messages, intentHint) {
   const a = sqlite.prepare(`
     SELECT a.ai_provider_url, a.ai_model FROM relay_nodes r
     JOIN adapter_nodes a ON a.id = r.adapter_node_id
     WHERE r.id = ?
   `).get(BROKER_RELAY_ID);
   if (!a?.ai_provider_url) return null;
+  const systemMessages = [{ role: 'system', content: SYSTEM_PROMPT }];
+  if (intentHint) {
+    systemMessages.push({
+      role: 'system',
+      content: `[INTENT_LOCK_BY_PREPROCESSOR] User direction already detected as: ${intentHint.toUpperCase()}. SKIP step 1 (do NOT ask 买还是卖 / direction question). Go directly to step 2: confirm qty + ask chain (bnb/polygon/sol/tron). This lock is from regex preprocessor analysis of the user message; do not override.`,
+    });
+  }
   try {
     const res = await fetch(`${a.ai_provider_url}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: a.ai_model || 'Qwen3.6-35B-A3B',
-        messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages],
+        messages: [...systemMessages, ...messages],
         tools: TOOLS,
         tool_choice: 'auto',
       }),
@@ -125,8 +152,9 @@ function _loadHistory(peer, limit = 20) {
 export async function handleLlmDialog(peer, message) {
   const history = _loadHistory(peer);
   history.push({ role: 'user', content: message });
-
-  let llm = await _callLlm(history);
+  // T-J1-19d 中文 hard-rule preprocessor: detect intent from current message
+  const intentHint = _detectIntent(message);
+  let llm = await _callLlm(history, intentHint);
   if (!llm) return '抱歉, 我这边 LLM 卡了一下, 请稍后再试. 或直接回 "买 5 KAS" / "卖 5 KAS" 走快速通道.';
 
   // tool call?
