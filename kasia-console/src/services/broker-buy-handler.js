@@ -233,19 +233,19 @@ function _enqueuePaid(offerId, paymentTx, payChain, peerAddr) {
 // 防 hallucinate "已下单" — LLM 只能用 preview 真数据 (含 user_kasia_address / unit_price /
 // total_usdt / maker_payment_address) 不能编. user reject "NO" 路径无 state cleanup (没 set 任何).
 export async function buyPreview({ user_kasia, qty, pay_chain, give_asset = 'KAS' }) {
-  // T-NWT-2026-04-27 v1.1 Phase A step 1: give_asset 参数化, default 'KAS' 向后兼容.
-  // Step 1 仅 signature 扩, 内部 SQL/NLG/INSERT 仍 'KAS' literal — Step 2/3 处理.
-  // 现 caller (broker-llm-agent preview_order tool) 不传 asset → default 'KAS' → 行为不变.
   if (!user_kasia || !qty || qty <= 0 || !pay_chain) {
     return { ok: false, error: 'missing fields (user_kasia/qty/pay_chain)' };
   }
-  // T-NWT-2026-04-27 v1.1 Phase A step 5: asset validation 用 J1 165c9662 asset-registry
-  // (替 step 4 hardcoded SUPPORTED list). asset-registry 加新 entry 时 buyPreview 自动 supported.
-  const { getAsset } = await import('./asset-registry.js');
+  // T-NWT-2026-04-27 + T-J1-2026-04-27 v1.1 Phase A merged (Owner 22:54 钦定 '不要假, 真刀实枪'):
+  // generic asset 路径前真 validate. NWT step 5 saves assetMeta for NLG asset.chain (Bug 4 修),
+  // J1 4184ff75 ship listAssets() in error message. merge both.
+  const { getAsset, listAssets } = await import('./asset-registry.js');
   const assetMeta = getAsset(give_asset);
   if (!assetMeta) {
-    return { ok: false, error: 'asset_not_supported',
-      message: `broker 不支持 ${give_asset} (asset-registry 未注册). 现支持 list: 见 listAssets().` };
+    return {
+      ok: false, error: 'asset_not_supported',
+      message: `broker 真不支持 ${give_asset}. 现 supported: ${listAssets().join(', ')}.`,
+    };
   }
   if (qty < MIN_QTY_KAS) {
     return { ok: false, error: `qty_too_small`, message: `最小买 ${MIN_QTY_KAS} ${give_asset} (broker fee + dust 保护). 改大点.` };
@@ -265,8 +265,13 @@ export async function buyPreview({ user_kasia, qty, pay_chain, give_asset = 'KAS
   // broker_dynamic_quote 价格 (但不 publish)
   if (cumKas < qty) {
     const deficit = qty - cumKas;
-    const { fetchKasPrice } = await import('./market-seeder.js');
-    const midPrice = await fetchKasPrice();
+    // T-J1-2026-04-27 v1.1 Phase A NWT bug 3 真修: fetchKasPrice → J1 price-oracle.fetchPrice
+    // generic. unsupported pair (BTC/XRP/etc) 真 reject 不 silent 0.0342 假 KAS 价误用.
+    // 现 KAS path: fetchPrice('KAS','USDT') 内部仍调 fetchKasPrice CMC 真值, 行为同前.
+    const { fetchPrice } = await import('./price-oracle.js');
+    const priceResult = await fetchPrice('KAS', 'USDT');
+    if (!priceResult.ok) return { ok: false, error: priceResult.error, message: `价格暂查不到 (${priceResult.error}), 请稍后再试.` };
+    const midPrice = priceResult.price;
     if (!midPrice || midPrice <= 0) return { ok: false, error: 'price_unavailable', message: '价格暂查不到, 请稍后再试.' };
     const wallet = sqlite.prepare(`
       SELECT chain, address FROM agent_wallets

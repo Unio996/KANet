@@ -706,17 +706,27 @@ async function handleExchangeAccept(msg) {
     }
   }
 
-  // === Auto-send-KAS: if taker is a local Agent and offer wants KAS (kaspa_tx) ===
-  // TASK 2.4 同样门控: DEX broker 也不做 auto-send-KAS
-  if (result.taker && result.verification === 'kaspa_tx' && result.want_asset?.toUpperCase() === 'KAS') {
-    const localRelay = sqlite.prepare('SELECT id, is_dex_broker FROM relay_nodes WHERE address = ?').get(result.taker);
-    if (localRelay && !localRelay.is_dex_broker) {
-      console.log(`[exchange] local taker detected, triggering auto-send-KAS for offer ${result.id.slice(0,8)}`);
-      setImmediate(() => _autoSettleAsset(result, localRelay.id).catch(e =>
-        console.error(`[exchange] auto-settle-asset error: ${e.message}`)
-      ));
-    } else if (localRelay?.is_dex_broker) {
-      console.log(`[exchange] DEX broker taker — skip auto-send-KAS (non-custodial) offer=${result.id.slice(0,8)}`);
+  // === Auto-settle-asset: if taker is a local Agent and offer wants any registered asset ===
+  // T-J1-2026-04-27 v1.1 Phase A 协议层 step 3 (Owner 23:05 钦定 '全自动推进 真人能用'):
+  // trigger condition KAS-only → 任意 isSupported(want_asset, want_chain). _autoSettleAsset
+  // 内部 isSupported guard 真二次 verify, 不 over-trigger non-asset offer.
+  // TASK 2.4 同样门控: DEX broker 也不做 auto-settle (非托管)
+  // verification 类型分流: 'kaspa_tx' = native chain (KAS) / 'cross_chain_tx' = USDT 已 _autoPayExchange
+  // 处理 — 此处只接 native chain transfer (跟原 _autoSendKas 同语义, 但 generic 任意 native asset).
+  if (result.taker && result.verification === 'kaspa_tx' && result.want_asset && result.want_chain) {
+    const { isSupported } = await import('./asset-registry.js');
+    if (isSupported(result.want_asset, result.want_chain)) {
+      const localRelay = sqlite.prepare('SELECT id, is_dex_broker FROM relay_nodes WHERE address = ?').get(result.taker);
+      if (localRelay && !localRelay.is_dex_broker) {
+        console.log(`[exchange] local taker detected, triggering auto-settle-asset (${result.want_asset}/${result.want_chain}) for offer ${result.id.slice(0,8)}`);
+        setImmediate(() => _autoSettleAsset(result, localRelay.id).catch(e =>
+          console.error(`[exchange] auto-settle-asset error: ${e.message}`)
+        ));
+      } else if (localRelay?.is_dex_broker) {
+        console.log(`[exchange] DEX broker taker — skip auto-settle (non-custodial) offer=${result.id.slice(0,8)}`);
+      }
+    } else {
+      console.log(`[exchange] auto-settle skip: ${result.want_asset}/${result.want_chain} not in asset-registry, offer=${result.id.slice(0,8)}`);
     }
   }
   console.log(`[exchange] offer ${result.id.slice(0,8)} entered verifying — hedge deferred to completed`);
