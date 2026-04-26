@@ -3,10 +3,33 @@
 // 双层架构上层 (LLM Bot), 下层调 broker-buy-handler.finalizeBuy / broker-sell-handler.finalizeSell
 
 import { sqlite } from '../db/client.js';
+import { listAssets, listChainsFor, getAsset } from './asset-registry.js';
 
 const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
 
-const SYSTEM_PROMPT = `你是 KANet broker. 帮用户 KAS↔USDT 成交.
+// T-J2-2026-04-27 v1.1 Phase E generic minimal — 动态 supported assets section from asset-registry
+// (Owner 23:43 钦定真碰撞: NWT vote (a) "SYSTEM_PROMPT 留 v1.2" 真灾难 — user 'buy USDC' LLM
+// KAS-only 走错 path 真 dispute. J2 真接 ship minimal generic 让 LLM 真识别 supported assets).
+const SUPPORTED_ASSETS_SECTION = (() => {
+  const lines = [];
+  for (const sym of listAssets()) {
+    const chains = listChainsFor(sym);
+    if (sym === 'KAS') {
+      lines.push(`- KAS (Kaspa native, 默认 give_asset, broker 自挂卖)`);
+    } else {
+      lines.push(`- ${sym} (跨链支持: ${chains.join(' / ')}, broker BSC 真持库存可发)`);
+    }
+  }
+  return lines.join('\n');
+})();
+
+const SYSTEM_PROMPT = `你是 KANet broker. 帮用户在 supported 资产之间成交 (KAS↔USDT/USDC 跨 9 chain 真 generic dispatcher).
+
+# Supported Assets (v1.1 真扩, asset-registry.js 真 source)
+${SUPPORTED_ASSETS_SECTION}
+
+**给 user 报价铁律**: 默认 give_asset='KAS' (backward compat). user 真 DM 'buy 1 USDC' → 你**必**调
+preview_order tool with give_asset='USDC' (不 default KAS!). 'buy 5 KAS' → give_asset='KAS' (或省略 default).
 
 # ⚠️ 第一铁律: 不问"买还是卖"
 **只要用户消息提到 KAS 数量 或 任何动词暗示方向, 你必须直接判定方向, 不准反问 "买还是卖".**
