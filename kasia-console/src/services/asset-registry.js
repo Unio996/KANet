@@ -41,14 +41,6 @@ export const ASSETS = {
     symbol: 'USDT', chain: 'eth', decimals: 6, contract: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
     settler: 'evm', priceOracle: 'fixed:1.0', minQty: 0.1, displayName: 'USDT (Ethereum)',
   },
-  // T-J1-2026-04-27 v1.1 USDC BSC entry — J2 #3 真烧 swap (8f1a95dd9 + tx 0x76649b9)
-  // 真 unlock broker BSC 1.000263 USDC 库存. 真 verify decimals=18 via eth_call ✓.
-  // priceOracle peg:1.0 (J1 price-oracle USDC↔USDT 真返 1.0, J2 真烧 0.026% slippage 验过).
-  // NWT bug 2 broker validation 现真 accept USDC (getAsset('USDC')!=null) — broker 真持库存真 supported.
-  USDC_bnb: {
-    symbol: 'USDC', chain: 'bnb', decimals: 18, contract: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d',
-    settler: 'evm', priceOracle: 'peg:1.0', minQty: 0.1, displayName: 'USDC (BSC)',
-  },
 };
 
 /**
