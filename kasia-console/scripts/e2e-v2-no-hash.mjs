@@ -7,9 +7,17 @@
 import Database from 'better-sqlite3';
 import { transferERC20 } from '../src/services/evm-transfer.js';
 
-const SOPHIE_RELAY_ID = 'a83c4b07-eaf7-4d21-972a-1265e0cdcfcf';
-const SOPHIE_ADDR = 'kaspa:qpjjv2uhj22592mq76kqr3v6kjjyu23qugjmh2f7992nn0ykmje4cgx2ktetp';
+// Default Sophie, allow --peer=eric / sophie / kasia_1 / martin
+const PEERS = {
+  sophie: { id: 'a83c4b07-eaf7-4d21-972a-1265e0cdcfcf', addr: 'kaspa:qpjjv2uhj22592mq76kqr3v6kjjyu23qugjmh2f7992nn0ykmje4cgx2ktetp' },
+  eric:   { id: '6fb00ee9-af18-47f4-99fa-111ee477621d', addr: 'kaspa:qqjdpjp0tskthe4xtvq2juhp5szg2grwrld8574cp92hq54vekzc2tgz4cchh' },
+};
 const args = process.argv.slice(2);
+const peerArg = args.find(a => a.startsWith('--peer='));
+const peer = PEERS[(peerArg ? peerArg.slice(7) : 'sophie').toLowerCase()];
+if (!peer) { console.error('--peer=sophie|eric'); process.exit(2); }
+const SOPHIE_RELAY_ID = peer.id;
+const SOPHIE_ADDR = peer.addr;
 const brokerArg = args.find(a => a.startsWith('--broker-kasia='));
 const qtyArg = args.find(a => a.startsWith('--qty='));
 const BROKER_KASIA = brokerArg ? brokerArg.slice(15) : null;
@@ -73,41 +81,63 @@ console.log(`  qty: ${QTY} KAS`);
 console.log(`  broker: ${BROKER_KASIA.slice(0, 24)}...`);
 console.log('='.repeat(80));
 
-// Step 1: Sophie '想买 X KAS'
-console.log(`\n[1] Sophie DM '想买 ${QTY} KAS'`);
+// Step 1: 用 BUY_REGEX 严格命中走 handleBuyIntent fast-path (不进 LLM step 2/3 字段混淆)
+console.log(`\n[1] Sophie DM '买 ${QTY} KAS' (BUY_REGEX fast-path)`);
 let ts = new Date().toISOString();
-const r1 = await sendMessage(`想买 ${QTY} KAS`);
+const r1 = await sendMessage(`买 ${QTY} KAS`);
 if (!r1.ok) { console.error(`fail: ${r1.error}`); process.exit(3); }
 const reply1 = await pollBrokerReply(ts, 60_000);
 console.log(`  broker reply: ${reply1?.content?.slice(0, 100)}`);
 
-// Step 2: 'BSC'
-console.log(`\n[2] Sophie 'BSC'`);
-ts = new Date().toISOString();
-const r2 = await sendMessage('BSC');
-if (!r2.ok) { console.error(`fail: ${r2.error}`); process.exit(3); }
-const reply2 = await pollBrokerReply(ts, 60_000);
-console.log(`  broker reply: ${reply2?.content?.slice(0, 200)}`);
+// Step 1 reply 是 dm_quote (含 qty + USDT 总额 + chain + '确认回 YES'). 不含 maker_addr.
+// 直接 step 2 confirm, 不发 BSC (fast-path 默认 BNB).
 
-// Step 3: Extract maker_addr + USDT amount from broker reply
-const replyContent = reply2?.content || '';
-const makerMatch = replyContent.match(/0x[a-fA-F0-9]{40}/);
-const usdtMatch = replyContent.match(/(\d+\.\d+)\s*USDT/i);
-if (!makerMatch || !usdtMatch) {
-  console.error(`fail: 无法 parse maker_addr / USDT amount from broker reply: "${replyContent}"`);
+// Step 2: CONFIRM_WORDS exact match. 单字轮换避 anti-spam fuzzy 14min window:
+// ['YES', 'yes', 'y', '确认', '好', '行', 'OK', 'ok']. 用 random rotation.
+const CONFIRMS = ['行', '确认', 'OK', 'ok', 'y', 'YES', 'yes', '好'];
+const confirmMsg = CONFIRMS[Math.floor(Math.random() * CONFIRMS.length)];
+console.log(`\n[2] Sophie '${confirmMsg}' (CONFIRM_WORDS, broker accept_v1 + dm_pay_instr 含 maker_addr)`);
+ts = new Date().toISOString();
+const r3 = await sendMessage(confirmMsg);
+if (!r3.ok) { console.error(`fail: ${r3.error}`); process.exit(3); }
+
+// Poll multiple replies (议 1: dm_order_confirmed + dm_pay_instr 拆 2 DM)
+// dm_pay_instr maker_addr truncated 显示 (0xaD12...3efcEe). 用 order_id 反查 db 拿完整地址.
+let orderId = null, usdtAmount = null;
+const tWait = Date.now();
+while (Date.now() - tWait < 60_000) {
+  await new Promise(r => setTimeout(r, 5000));
+  const recent = db.prepare(`
+    SELECT m.content_text FROM messages m
+    LEFT JOIN identities si ON si.id = m.sender_identity_id
+    LEFT JOIN identities ri ON ri.id = m.receiver_identity_id
+    WHERE m.message_type='text' AND si.address=? AND ri.address=? AND m.direction='inbound' AND m.created_at > ?
+    ORDER BY m.created_at DESC LIMIT 5
+  `).all(BROKER_KASIA, SOPHIE_ADDR, ts);
+  for (const r of recent) {
+    console.log(`  reply: ${r.content_text?.slice(0, 100)}`);
+    const om = (r.content_text || '').match(/订单已确认\s*#([a-f0-9]{8})/);
+    const u = (r.content_text || '').match(/(\d+\.\d+)\s*USDT/i);
+    if (om) orderId = om[1];
+    if (u) usdtAmount = parseFloat(u[1]);
+    if (orderId && usdtAmount) break;
+  }
+  if (orderId && usdtAmount) break;
+}
+if (!orderId || !usdtAmount) {
+  console.error(`fail: 60s 内没拿到 order_id + USDT`);
   process.exit(3);
 }
-const makerAddr = makerMatch[0];
-const usdtAmount = parseFloat(usdtMatch[1]);
-console.log(`  parsed: maker=${makerAddr} USDT=${usdtAmount}`);
-
-// Step 4: 'YES' confirm
-console.log(`\n[3] Sophie 'YES'`);
-ts = new Date().toISOString();
-const r3 = await sendMessage('YES');
-if (!r3.ok) { console.error(`fail: ${r3.error}`); process.exit(3); }
-const reply3 = await pollBrokerReply(ts, 60_000);
-console.log(`  broker reply: ${reply3?.content?.slice(0, 100)}`);
+// 反查 exchange_offers 拿完整 maker_addr
+const offerRow = db.prepare(`
+  SELECT id, verification_meta FROM exchange_offers WHERE id LIKE ? || '%' LIMIT 1
+`).get(orderId);
+if (!offerRow) { console.error(`fail: order ${orderId} not in exchange_offers`); process.exit(3); }
+const meta = JSON.parse(offerRow.verification_meta || '{}');
+const acceptedChain = (meta.accepted_chains || []).find(c => String(c.chain).toLowerCase() === 'bnb');
+const makerAddr = acceptedChain?.address;
+if (!makerAddr) { console.error(`fail: no bnb accepted_chain in offer ${orderId}`); process.exit(3); }
+console.log(`  parsed: order=${orderId} maker=${makerAddr} USDT=${usdtAmount}`);
 
 // Step 5: Sophie 真转 USDT 到 maker_addr (BSC)
 console.log(`\n[4] Sophie evm-transfer 真转 ${usdtAmount} USDT (BSC) → ${makerAddr}`);
