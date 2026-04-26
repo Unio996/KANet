@@ -390,6 +390,52 @@ KANet 知识沉淀分散在 6 个容器: ANTI-PATTERNS.md / QWEN-RULES.md / DEVE
 
 ---
 
+## 规则 13 · 协议消息 self-accept 检不能只靠 _from (broker 代发场景)
+
+> NWT 2026-04-26 18:00 — Sophie e2e batch + Owner 真测多次撞 'Accept rejected: self-accept (maker === taker: hy65lxur9c5l)' — hy65lxur9c5l = Trader-B (broker 自己).
+
+### Wrong
+```js
+// exchange-machine processAccept
+if (msg._from && msg._from === offer.maker) {
+  // self-accept reject
+}
+```
+broker_dynamic_quote 路径下:
+1. broker 自挂 SELL offer (`maker = broker`)
+2. broker 代 user 发 `accept_v1` (`msg._from = broker`, payload `receive_address = user`)
+3. 检 `_from === maker` 撞 reject — 但实际 taker 不是 broker 是 user
+4. user 拼单不够 broker 补 deficit 必撞这条, 不是偶发是结构性
+
+### Right
+```js
+// 真 taker 优先 receive_address (broker 代发 carry), fallback _from (普通 client)
+const taker = msg.receive_address || msg._from;
+if (taker && taker === offer.maker) {
+  // self-accept reject
+}
+```
+
+逻辑覆盖:
+| 场景 | _from | receive_address | maker | taker = | 结果 |
+|---|---|---|---|---|---|
+| 普通 user 自 accept | user | (缺) | user | user | reject ✓ |
+| broker 代 accept (broker 自挂) | broker | user | broker | user | 通过 ✓ |
+| broker 代 accept (真 maker) | broker | user | 真maker | user | 通过 ✓ |
+| 普通 user accept 别人 | user | (缺) | 别user | user | 通过 ✓ |
+
+### Why
+KANet broker = 多角色聚合. broker 代 user 发协议消息时 (accept_v1 / paid_v1), `_from` 是 broker, **真 user 在 payload 字段**. 协议级校验若只看消息 sender 不看 payload, 必误伤所有 "broker 代 user" 路径.
+
+类似教训范畴 (写新协议消息 / 处理逻辑时):
+- accept_v1: `_from` 是发送方 ≠ 真 taker (taker 在 `receive_address`)
+- paid_v1: `_from` 是发送方 ≠ 真 payer (payer 在 `payment_meta`)
+- delivered_v1: `_from` 是发送方 ≠ 真 deliverer (deliverer 在 `seller`)
+
+新加协议字段时, 校验逻辑必明确区分 "信使 (sender)" vs "实际方 (在 payload)". 否则 broker 代发场景全炸.
+
+---
+
 ## 如何扩充本档案
 
 新陷阱踩过后**立即**追加，格式保持：
