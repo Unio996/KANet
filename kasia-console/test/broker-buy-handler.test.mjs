@@ -281,6 +281,72 @@ describe('aggregation logic — pure', () => {
     assert.equal(r.total_kas, 10);  // first offer fully taken, user gets all 10 KAS for 0.5 request (overshoot ok)
   });
 
+  // ── case 16 (T-J1-19b): _aggregateWithFallback three-branch coverage with mocked publish ──
+  // Note: real SQL book is volatile across runs. Tests assert *behavior contracts*
+  // (publish called only on deficit, broker_dynamic flag set only when fallback used)
+  // rather than absolute book depth.
+  it('case 16a: aggregateWithFallback — when fallback NOT triggered, no broker_dynamic in picks', async () => {
+    const handler = await import('../src/services/broker-buy-handler.js');
+    let publishCalled = 0;
+    handler._testInjectPublishOffer(() => { publishCalled++; return { ok: true, offer_id: 'mock_pub', want_usdt: '0', maker_chain_addr: '0xMOCK' }; });
+    try {
+      // qty=1 — minimum dust-gate-passing qty. With ANY non-empty bnb book that has
+      // at least 1 KAS, fallback should not trigger. With empty bnb book (broker
+      // restart / wiped), fallback WILL trigger — guarded below.
+      const r = await handler._aggregateWithFallback(1, 'bnb');
+      if (r.ok && publishCalled === 0) {
+        // Branch a: book covered — picks must be all real makers, no broker_dynamic
+        assert.ok(!r.picks.some(p => p.broker_dynamic), 'when fallback not triggered, picks must not include broker_dynamic');
+        assert.ok(r.total_kas >= 1);
+      } else if (r.ok && publishCalled > 0) {
+        // Book empty/insufficient at test time → fallback path, broker_dynamic must be set
+        assert.ok(r.picks.some(p => p.broker_dynamic), 'fallback triggered → broker_dynamic must be set');
+      } else {
+        // ok=false: both selectBestOffers AND fallback failed — acceptable in CI
+        assert.match(r.error, /aggregation insufficient|qty too small|broker self-quote/);
+      }
+    } finally {
+      handler._testResetPublishOffer();
+    }
+  });
+
+  it('case 16b: aggregateWithFallback — deficit covered by broker self-quote (mock publish ok)', async () => {
+    const handler = await import('../src/services/broker-buy-handler.js');
+    // qty=10000 → real book << 10000, fallback triggers; mock publish returns ok
+    const calls = [];
+    handler._testInjectPublishOffer((deficit, chain) => {
+      calls.push({ deficit, chain });
+      return { ok: true, offer_id: 'mock_broker_offer', want_usdt: String((deficit * 0.0357).toFixed(6)), maker_chain_addr: '0xBROKER_TEST' };
+    });
+    try {
+      const r = await handler._aggregateWithFallback(10000, 'bnb');
+      assert.equal(r.ok, true, `expected ok=true, got ${JSON.stringify(r)}`);
+      assert.equal(calls.length, 1, '_brokerPublishKasOffer should be called exactly once');
+      assert.ok(calls[0].deficit > 0, `deficit must be positive, got ${calls[0].deficit}`);
+      assert.equal(calls[0].chain, 'bnb');
+      assert.ok(r.picks.some(p => p.broker_dynamic === true), 'must include broker_dynamic pick');
+      assert.equal(r.total_kas, 10000, 'cum should match qty exactly when fallback used');
+    } finally {
+      handler._testResetPublishOffer();
+    }
+  });
+
+  it('case 16c: aggregateWithFallback — broker publish fails (no_price/no_wallet/exc) → ok=false', async () => {
+    const handler = await import('../src/services/broker-buy-handler.js');
+    for (const failReason of ['price_unavailable', 'broker no bnb wallet', 'publish_exc: ECONNREFUSED']) {
+      handler._testInjectPublishOffer(() => ({ ok: false, error: failReason }));
+      try {
+        // qty=10000 forces fallback path
+        const r = await handler._aggregateWithFallback(10000, 'bnb');
+        assert.equal(r.ok, false, `expected ok=false when publish fails (${failReason})`);
+        assert.match(r.error, /aggregation insufficient|broker self-quote/, `error must mention aggregation/self-quote, got: ${r.error}`);
+        assert.match(r.error, new RegExp(failReason.replace(/[.+*?]/g, '.')), `error must include underlying reason ${failReason}`);
+      } finally {
+        handler._testResetPublishOffer();
+      }
+    }
+  });
+
   it('case 14 (T-J1-19a, J2 probe-5a regression): dust qty rejected by finalizeBuy', async () => {
     const { finalizeBuy } = await import('../src/services/broker-buy-handler.js');
     for (const dustQty of [0.05, 0.1, 0.5, 0.99]) {

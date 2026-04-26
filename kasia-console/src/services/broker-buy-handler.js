@@ -20,9 +20,12 @@ const PENDING_ACCEPT_TTL_MS = 30 * 60 * 1000;  // 真人付款窗口 30min
 const _quotes = new Map();  // peer → {offer_id, qty, quoted_usdt, pay_chain, maker_addr, expires_at}
 const _pendingAccepts = new Map();  // peer → {offer_id, qty, quoted_usdt, pay_chain, maker_addr, accept_tx, expires_at}
 let _sendOverride = null;
+let _publishOverride = null;  // T-J1-19b: unit test inject for _brokerPublishKasOffer
 
 export function _testInjectSendCommand(fn) { _sendOverride = fn; }
 export function _testResetSendCommand() { _sendOverride = null; }
+export function _testInjectPublishOffer(fn) { _publishOverride = fn; }
+export function _testResetPublishOffer() { _publishOverride = null; }
 export function _clearQuotes() { _quotes.clear(); }
 export function _hasQuote(peer) { return _quotes.has(peer); }
 export function _clearPendingAccepts() { _pendingAccepts.clear(); }
@@ -207,7 +210,8 @@ export async function finalizeBuy({ user_kasia, qty, pay_chain }) {
 
 // 三层 fallback 合并器: 拼现成 + broker 自挂补 deficit. 给 finalizeBuy/handleBuyIntent 复用.
 // 返回 { ok, total_kas, total_usdt, picks: [{id, take_qty, take_usdt, maker_addr, broker_dynamic?}] }
-async function _aggregateWithFallback(qty, payChain) {
+// 单测可用 _testInjectPublishOffer 注入 mock _brokerPublishKasOffer.
+export async function _aggregateWithFallback(qty, payChain) {
   const sel = selectBestOffers(qty, payChain);
   let picks = sel.picks ? [...sel.picks] : [];
   let cumKas = picks.reduce((s, p) => s + p.take_qty, 0);
@@ -215,7 +219,7 @@ async function _aggregateWithFallback(qty, payChain) {
   if (cumKas < qty) {
     // 拼现成不够, broker 自挂补 deficit
     const deficit = qty - cumKas;
-    const pub = await _brokerPublishKasOffer(deficit, payChain);
+    const pub = _publishOverride ? await _publishOverride(deficit, payChain) : await _brokerPublishKasOffer(deficit, payChain);
     if (!pub.ok) {
       // 全失败: broker 也无价格 / 无库存 / publish 失败 → 真 fail
       return { ok: false, available: cumKas, picks, error: `aggregation insufficient (${cumKas}/${qty} from makers) + broker self-quote failed: ${pub.error}` };
