@@ -237,7 +237,9 @@ async function executeAction(item) {
       // deliver. 5 笔 manual rescue 同根因. 修法: pump 真发后调 onBroadcastWritten 通知, 跟
       // /api/chat/send 路径对齐. 不动协议, 不新文件, broker 真融入 exchange 完整完成.
       const result = await sendCommandAsync(BROKER_RELAY_ID, { type: 'send_broadcast', channel: p.channel || 'kanet-exchange', message: p.message });
-      if (result?.ok && result?.txId) {
+      // sendCommandAsync resolves msg.result (relay-manager.js:260) = relay 返回的 { txId, fee },
+      // 没有 ok 字段. 用 txId 判 success (跟 broker-queue 别处 line 175 same convention).
+      if (result?.txId) {
         try {
           const { onBroadcastWritten } = await import('./trade-protocol-filter.js');
           const broker = sqlite.prepare('SELECT address FROM relay_nodes WHERE id=?').get(BROKER_RELAY_ID);
