@@ -142,7 +142,7 @@ async function _callLlm(messages) {
         tools: TOOLS,
         tool_choice: 'auto',
       }),
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(120_000),  // T-NWT-V2-hotfix: 60s→120s — Qwen3.6 处理 14k tokens prompt (含 SYSTEM_PROMPT + history) 需 60-90s, 60s 60% 触发 abort. Owner 真测连撞.
     });
     if (!res.ok) {
       console.warn(`[broker-llm] LLM HTTP ${res.status}`);
@@ -178,7 +178,7 @@ async function _executeTool(peer, name, args) {
   return { ok: false, error: `unknown tool: ${name}` };
 }
 
-function _loadHistory(peer, limit = 20) {
+function _loadHistory(peer, limit = 8) {  // T-NWT-V2-hotfix: 20→8 — 减 prompt size 防 14k+ tokens 长尾 timeout. 多轮上下文够用.
   const trader = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id=?`).get(BROKER_RELAY_ID);
   if (!trader?.address) return [];
   let rows = [];
