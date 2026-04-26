@@ -130,7 +130,7 @@ async function _brokerPublishKasOffer(qtyKas, payChain) {
         want_amount: wantUsdt,
         verification: 'cross_chain_tx',
         verification_meta: { accepted_chains: [{ chain: payChain, address: wallet.address }], expected_asset: 'USDT' },
-        expires_minutes: 30,
+        expires_minutes: 60,  // R2 (J2 推): 30→60 防 25min 慢付 → broker cancel → 资金事故
         metadata: { source: 'broker_dynamic_quote', mid_price: midPrice, spread_pct: SPREAD_PCT },
       }),
     });
