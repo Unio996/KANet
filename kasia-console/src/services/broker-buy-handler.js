@@ -105,7 +105,35 @@ export function selectBestOffers(qtyKas, payChain) {
 // T-NWT-22 (broker 库存自挂): 没现成 maker / 拼不够 deficit 时, broker 用自己 KAS
 // 库存 + 当前市价 spread 1% 调 /api/exchange/publish 挂 SELL 单. 返回 offer_id +
 // want_usdt + maker_chain_addr, finalizeBuy / handleBuyIntent 用此 build pick 加进 picks[].
+//
+// T-J1-19n (Owner 真测 Bug B fix): idempotency check — 同 chain + qty 5min 内已挂
+// broker_dynamic_quote → 直接复用现有 offer_id 不重 publish. 防 multi-turn finalize_order
+// 反复触发 publish 创 N 个 open offer (Owner 真测看到 3 个 55 KAS 重复).
 async function _brokerPublishKasOffer(qtyKas, payChain) {
+  // Idempotency: 5min 内同 chain + 同 qty 已挂 broker_dynamic_quote open → 复用
+  const broker = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID);
+  if (broker?.address) {
+    const existing = sqlite.prepare(`
+      SELECT id, want_amount, verification_meta, created_at
+      FROM exchange_offers
+      WHERE maker = ? AND protocol_status = 'open'
+        AND give_asset = 'KAS' AND CAST(give_amount AS REAL) = ?
+        AND json_extract(metadata, '$.source') = 'broker_dynamic_quote'
+        AND julianday(created_at) > julianday('now', '-5 minutes')
+      ORDER BY created_at DESC LIMIT 1
+    `).get(broker.address, qtyKas);
+    if (existing) {
+      try {
+        const meta = JSON.parse(existing.verification_meta || '{}');
+        const chains = Array.isArray(meta.accepted_chains) ? meta.accepted_chains : [];
+        const match = chains.find(c => c && String(c.chain).toLowerCase() === payChain);
+        if (match) {
+          console.log(`[broker-buy] T-J1-19n idempotent: reuse open offer ${existing.id.slice(0,8)} (${qtyKas} KAS ${payChain})`);
+          return { ok: true, offer_id: existing.id, want_usdt: existing.want_amount, maker_chain_addr: match.address, reused: true };
+        }
+      } catch {}
+    }
+  }
   const { fetchKasPrice } = await import('./market-seeder.js');
   const midPrice = await fetchKasPrice();
   if (!midPrice || midPrice <= 0) return { ok: false, error: 'price_unavailable' };
