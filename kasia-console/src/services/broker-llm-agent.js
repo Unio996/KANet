@@ -201,7 +201,7 @@ export async function handleLlmDialog(peer, message) {
     const lang = _detectLang(message);
     const reply = _deterministicFirstReply(intent, qty, lang);
     console.log(`[broker-llm DIAG] → DET path reply="${reply.slice(0,80)}"`);
-    return `[DET] ${reply}`;  // marker 让 NWT 一眼看出走 deterministic
+    return reply;  // T-J1-19h+ 撤 marker, 留 console.log 诊断
   }
   console.log(`[broker-llm DIAG] → LLM path (intent=${intent}, alreadyDet=${!!alreadyDeterministic})`);
   history.push({ role: 'user', content: message });
@@ -224,6 +224,5 @@ export async function handleLlmDialog(peer, message) {
     }
   }
 
-  const llmReply = llm.content?.trim() || '我在听. 你想买 KAS 还是卖 KAS?';
-  return `[LLM] ${llmReply}`;
+  return llm.content?.trim() || '我在听. 你想买 KAS 还是卖 KAS?';
 }
