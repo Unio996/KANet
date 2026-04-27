@@ -578,6 +578,28 @@ export async function handleLlmDialog(peer, message) {
   const merged = _mergeFields(prev, fresh);
   console.log(`[broker-llm DIAG] peer=${peer?.slice(-12)} msg.chars=${msgRaw.length} msg.utf8bytes=${byteLen} codes=[${charCodes}] msg="${msgRaw.slice(0,40)}" history.len=${history.length} fresh=${JSON.stringify(fresh)} prev=${JSON.stringify(prev)} merged=${JSON.stringify(merged)}`);
 
+  // R33 b iter5 (NWT 30940d86 Bug-Z13 trace 实证修): setConvoStateLock direction 真**真**真 EARLIEST,
+  // 不**真**等 _allFieldsReady deterministic path OR _executeTool 调成功 — even if LLM fail / preview fail,
+  // T+1 turn fall LLM hallucinate 真**真**被 llmSystemPromptStateLock 真**真**真**system prompt 注入拦.
+  // root cause: T2 user '想买 3 KAS, BSC' → 真**deterministic 应**真**真**hit (line 629 _allFieldsReady),
+  // 但 NWT trace 实证 T2 reply EMPTY 不**真**真**真 fall LLM, 真原因复杂 (LLM HTTP 500 / preview fail / 真**真).
+  // 真**真**真**真**真**真**真**fix: 真 fresh.direction extract 出来真**就**lock, 真**真**不**真等 _allFieldsReady.
+  if (fresh.direction) {
+    try {
+      setConvoStateLock(peer, {
+        direction: fresh.direction,
+        give_asset: merged.give_asset || null,
+        qty: merged.qty || null,
+        pay_chain: merged.chain || null,
+        lifecycle_phase: 'fields_collection',
+      });
+    } catch (e) {
+      if (e.code === 'CONVO_STATE_DIRECTION_LOCK') {
+        return `订单方向已锁定 ${e.locked_direction.toUpperCase()}. 改方向请回 "NO" 取消订单, 重新下单告诉我新方向.`;
+      }
+    }
+  }
+
   // T-J2-2026-04-27 Bug-Z12 fix (NWT 6c980472 真人 UX P0-1 抓): handleLlmDialog 真**真**真**真**
   // fresh 真**真**完全 empty (用户 真发 'YES' / 'maker 是谁' / '钱去哪了') 真**真**真**真**真**真**真**真**
   // 真**真**真 _pendingFields path 真**真**真 re-show preview 复读, 真**真**真**真 fall LLM 真**真**NLG 处理 (问答/confirm/cancel).
