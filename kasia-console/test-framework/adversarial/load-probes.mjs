@@ -36,6 +36,8 @@ const SUPPORTED_ASSERTIONS = new Set([
   'offer_published', 'no_offer_published',
   // R-NWT-2026-04-28 7a-2 phase ε: anti-spam (parallel 2nd send blocked / reason regex)
   'second_send_blocked', 'anti_spam_reason',
+  // R-NWT-2026-04-28 7a-2 phase ζ: peer Mind silence (R26 Gate 1.5 hijack-confirm 防)
+  'peer_mind_must_be_silent',
 ]);
 
 // Aliases — common probe DSL field names → existing runner assertion names

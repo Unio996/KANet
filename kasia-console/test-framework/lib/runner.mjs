@@ -653,6 +653,31 @@ const assertions = {
     return assertions.direction_must_match(step_result, expected, ctx);
   },
 
+  // R-NWT-2026-04-28 7a-2 phase ζ: peer_mind_must_be_silent — user's Mind 不自动回 broker (R26 hijack-confirm 防).
+  // 真**真**真**真 sibling broker / peer Mind hijack scenario test (J1 fdcd1802 R26 Gate 1.5).
+  // 实现: query messages 表, peer addr 在 ctx._test_started_at 之后 outbound 应 = 0 (synthetic peer 自然 silent).
+  // 真 production hijack 检测: peer 真有 Mind, 应**真**真 broker DM 后 silent (R26 装好). 此 assertion catch
+  // 假如 broker 真意外 trigger 了 peer Mind, e.g. 通过某 chain DM 路径意外 routed 进 peer relay.
+  peer_mind_must_be_silent(step_result, _expected, ctx) {
+    try {
+      const db = new Database(DB_PATH);
+      const sinceIso = ctx._test_started_at || new Date(Date.now() - 60_000).toISOString();
+      // count outbound messages from any test peer (rough heuristic — 真**真**真 perfect)
+      const row = db.prepare(`
+        SELECT COUNT(*) AS n FROM messages
+        WHERE direction = 'outbound' AND created_at >= ?
+        AND (sender_identity_id IN (SELECT id FROM identities WHERE address LIKE 'kaspa:%-test-%' OR address LIKE 'kaspa:%mind-%'))
+      `).get(sinceIso);
+      db.close();
+      const count = row?.n || 0;
+      return count === 0
+        ? { pass: true, expected: 'peer Mind silent (0 outbound)', actual: `${count} outbound from test peers since ${sinceIso}` }
+        : { pass: false, expected: 'peer Mind silent (0 outbound)', actual: `${count} outbound from test peers since ${sinceIso}`, msg: `peer Mind auto-replied ${count} times — R26 Gate 1.5 may have leaked` };
+    } catch (e) {
+      return { pass: false, expected: 'peer Mind silent', actual: 'db error', msg: `messages query failed: ${e.message}` };
+    }
+  },
+
   // R-NWT-2026-04-28 7a-2 phase ε: second_send_blocked — parallel 2nd action 真**真**真 blocked (anti-spam).
   // probe schema: 2 send_dm in parallel (rapid duplicate). expect 2nd reply empty / skip_reason set / anti-spam keyword.
   // step_result.results[1] check.
