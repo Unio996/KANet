@@ -81,9 +81,11 @@ export default {
       expect: {
         must: {
           // 不能串 A 的 SELL signals or A 的 EVM addr (cross-peer)
-          // 不能 B 自己 hallucinate 反方向 (same-peer Bug-Z13, R33 b iter5 territory)
+          // 不能 B 自己 hallucinate 反方向 (same-peer Bug-Z13, R33 b iter5b 修透)
+          // NWT 363b53b7 audit: 删 '卖 5 KAS' (broker fallback hint 字面会撞 false pos),
+          // 留 '卖 3 KAS' (peer B own qty 反方向 = 真 hallucinate signal)
           reply_does_not_contain: [
-            '方向: 卖', '卖 5 KAS', '0x94053e04', ADDR_A,
+            '方向: 卖', '0x94053e04', ADDR_A,
             '卖 3 KAS', '你想卖',  // same-peer: peer B 是 BUY flow, broker 任何 SELL 引导 = hallucinate
           ],
           // 强制 BUY direction reflection
