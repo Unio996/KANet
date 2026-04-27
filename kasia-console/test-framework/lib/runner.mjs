@@ -653,6 +653,22 @@ const assertions = {
     return assertions.direction_must_match(step_result, expected, ctx);
   },
 
+  // R-NWT-2026-04-28 7a-2 phase β: reply_should_acknowledge_conditions — broker preview echo user 条件 keywords.
+  // J1 492a68eb 反对 all-must-contain (broker 用自己 trading 术语 e.g. '限价' vs probe '挂单价' = false FAIL).
+  // J1 propose at-least-half (Math.ceil(N/2)) — broker 真 acknowledge 至少一半 keywords = engaged with user conditions.
+  // schema: array of strings (default at-least-half), OR { keywords: [...], min: N } for explicit threshold.
+  reply_should_acknowledge_conditions(step_result, expected, ctx) {
+    const reply = _extractReplyForAssertion(step_result);
+    if (!reply) return { pass: false, expected, actual: '<no reply>', msg: 'no reply to scan conditions' };
+    const keywords = Array.isArray(expected) ? expected : (expected?.keywords || []);
+    if (keywords.length === 0) return { pass: false, expected, actual: '<no keywords>', msg: 'no keywords specified' };
+    const required = (expected && typeof expected.min === 'number') ? expected.min : Math.ceil(keywords.length / 2);
+    const matched = keywords.filter(kw => reply.includes(kw));
+    return matched.length >= required
+      ? { pass: true, expected: `>=${required} of ${keywords.length}`, actual: `${matched.length} matched [${matched.join(',')}]` }
+      : { pass: false, expected: `>=${required} of ${keywords.length}`, actual: `${matched.length} matched [${matched.join(',')}]`, msg: `broker reply 没 acknowledge 至少 ${required} keyword (${keywords.length - matched.length} missing: ${keywords.filter(k => !matched.includes(k)).join(',')})` };
+  },
+
   // R-NWT-2026-04-28 (d) B phase 6 加固 (J1 ca0e79c2 vote): 反 silence-game.
   // parallel result 拿到全空 reply (e.g. 本机 LLM 全 500), 其他 assertion skip null vacuously PASS.
   // 加 parallel_min_replies: N 强制至少 N/total reply 真非空, 否则 FAIL 提醒 environment broken.
