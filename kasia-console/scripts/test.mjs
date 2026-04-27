@@ -69,7 +69,9 @@ async function main() {
 
   let totalPass = 0, totalFail = 0, totalSkipped = 0;
   const summary = [];
-  const isBatch = !caseFile;  // batch = --domain / --all / --tag (multiple files)
+  // J1 phase 7a-1 polish (NWT 7c66dd00 finding): --adversarial 显式 override skip_in_batch
+  // (用户明确要跑 adversarial, 不是 cron batch 默认 — adversarial 自身 manual-only 设计是为了 cron 不污染).
+  const isBatch = !caseFile && adversarial === null;
   // Build unified case list: file-loaded + adapter-loaded adversarial probes
   const casesToRun = [];
   for (const file of files) {
