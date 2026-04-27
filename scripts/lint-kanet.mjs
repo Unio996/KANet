@@ -205,10 +205,10 @@ function checkR33(filepath, content) {
 
   if (replyPaths.length === 0) return;  // no reply generation, no R33 concern
 
-  // Phase 1: warn-only via stderr, don't block commit. Phase 2 (post J2 R33 broker
-  // code ship) → switch to violate() strict.
+  // Phase 2 strict (post J2 R33 broker code ship 371e4ca62): broker handlers WITH
+  // reply paths MUST import broker-state-authority. Otherwise commit blocked.
   if (!hasR33Import && !hasGetConvoState && !hasShouldFire) {
-    process.stderr.write(`[lint-kanet R33 WARN] ${path.relative(ROOT, filepath)}: ${replyPaths.length} reply paths, no broker-state-authority import. Phase 1 warn-only; phase 2 strict after J2 R33 broker code ships.\n`);
+    violate('R33', `[ANTI-PATTERNS R33] broker handler 真 ${replyPaths.length} reply paths 真 ALL 必 consult conversation state authority. Import broker-state-authority.js + 真 prologue 真 getConvoState/shouldDeterministicFire 调用. R33 design: docs/ANTI-PATTERNS.md.`, filepath, replyPaths[0]);
   }
 }
 
