@@ -653,6 +653,17 @@ const assertions = {
     return assertions.direction_must_match(step_result, expected, ctx);
   },
 
+  // R-NWT-2026-04-28 7a-2 phase δ: offer_published / no_offer_published — query exchange_offers DB.
+  // probe schema: `offer_published: true` (expect ≥1 offer this test session) OR `no_offer_published: true` (expect 0).
+  // 范围: ctx._test_started_at 之后 created_at 的 exchange_offers (any maker, 简化 — 同时跑多 case 可能误差).
+  // 准确性 trade-off: 简单 timestamp 窗 vs 加 maker 过滤 (需 alias 解析). 先 timestamp, future iterate.
+  offer_published(step_result, expected, ctx) {
+    return _checkOfferPublished(step_result, expected === true || expected === 'true', ctx, /*shouldExist*/ true);
+  },
+  no_offer_published(step_result, expected, ctx) {
+    return _checkOfferPublished(step_result, expected === true || expected === 'true', ctx, /*shouldExist*/ false);
+  },
+
   // R-NWT-2026-04-28 7a-2 phase β: reply_should_acknowledge_conditions — broker preview echo user 条件 keywords.
   // J1 492a68eb 反对 all-must-contain (broker 用自己 trading 术语 e.g. '限价' vs probe '挂单价' = false FAIL).
   // J1 propose at-least-half (Math.ceil(N/2)) — broker 真 acknowledge 至少一半 keywords = engaged with user conditions.
@@ -721,6 +732,26 @@ function _parseBrokerReply(reply) {
   const qty = qtyMatch ? parseFloat(qtyMatch[1]) : null;
   const orderIdMatch = r.match(/订单\s*[#＃]?([a-f0-9]{4,8})/i) || r.match(/offer[_\s]*id[:\s]+([a-f0-9-]{6,})/i);
   return { direction, qty, asset, order_id: orderIdMatch ? orderIdMatch[1] : null };
+}
+
+// R-NWT-2026-04-28 7a-2 phase δ: query exchange_offers count since test started.
+// 简化 implementation — count any offer created after ctx._test_started_at (test scope timestamp).
+// shouldExist=true → expect count > 0; false → expect count === 0.
+function _checkOfferPublished(step_result, _expected, ctx, shouldExist) {
+  try {
+    const db = new Database(DB_PATH);
+    const sinceIso = ctx._test_started_at || new Date(Date.now() - 60_000).toISOString();
+    const row = db.prepare('SELECT COUNT(*) AS n FROM exchange_offers WHERE created_at >= ?').get(sinceIso);
+    db.close();
+    const count = row?.n || 0;
+    const ok = shouldExist ? count > 0 : count === 0;
+    const expectedStr = shouldExist ? '>= 1 offer' : '0 offers';
+    return ok
+      ? { pass: true, expected: expectedStr, actual: `${count} offers since ${sinceIso}` }
+      : { pass: false, expected: expectedStr, actual: `${count} offers since ${sinceIso}`, msg: shouldExist ? `expected ≥1 offer published, got 0` : `expected 0 offers, got ${count}` };
+  } catch (e) {
+    return { pass: false, expected: shouldExist ? 'offer published' : 'no offer', actual: 'db error', msg: `exchange_offers query failed: ${e.message}` };
+  }
 }
 
 // R-NWT-2026-04-28 7a-2 phase α: extract reply text from any step result shape.
@@ -937,6 +968,7 @@ export async function runCase(testCase) {
   // testCase.aliases = { Sophie: { peer: addr }, broker: { relay_id: id }, ... }
   // step.from_alias / step.to_alias auto-resolve to from_peer / to_relay_id pre-dispatch.
   ctx._aliases = testCase.aliases || {};
+  ctx._test_started_at = result.started_at;  // (d) 7a-2 phase δ: DB query scope to test session
 
   // optional setup
   if (testCase.setup) {

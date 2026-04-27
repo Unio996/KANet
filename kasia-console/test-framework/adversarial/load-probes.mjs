@@ -32,6 +32,8 @@ const SUPPORTED_ASSERTIONS = new Set([
   'last_reply_direction', 'last_reply_qty',
   // R-NWT-2026-04-28 7a-2 phase β: broker preview echo user 条件 (at-least-half semantics, J1 492a68eb)
   'reply_should_acknowledge_conditions',
+  // R-NWT-2026-04-28 7a-2 phase δ: DB query exchange_offers (test session scoped by ctx._test_started_at)
+  'offer_published', 'no_offer_published',
 ]);
 
 // Aliases — common probe DSL field names → existing runner assertion names
