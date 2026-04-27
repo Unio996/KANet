@@ -240,10 +240,13 @@ function _enqueuePaid(offerId, paymentTx, payChain, peerAddr) {
 //
 // 防 hallucinate "已下单" — LLM 只能用 preview 真数据 (含 user_kasia_address / unit_price /
 // total_usdt / maker_payment_address) 不能编. user reject "NO" 路径无 state cleanup (没 set 任何).
-export async function buyPreview({ user_kasia, qty, pay_chain, give_asset = 'KAS' }) {
+export async function buyPreview({ user_kasia, qty, pay_chain, give_asset = 'KAS', receive_address = null }) {
   if (!user_kasia || !qty || qty <= 0 || !pay_chain) {
     return { ok: false, error: 'missing fields (user_kasia/qty/pay_chain)' };
   }
+  // T-NWT-2026-04-27 v1.1 NLG receive_address fix (NWT 真测发现 USDC preview 显 'kaspa:' addr 真错):
+  // KAS 真 receive 用 user_kasia (Kasia network). 非 KAS asset 真 receive 真要 user EVM/Sol/Tron addr.
+  // receive_address 真省 (KAS default) → use user_kasia. 真 stable asset 真传 receive_address.
   // T-NWT-2026-04-27 + T-J1-2026-04-27 v1.1 Phase A merged (Owner 22:54 钦定 '不要假, 真刀实枪'):
   // generic asset 路径前真 validate. NWT step 5 saves assetMeta for NLG asset.chain (Bug 4 修),
   // J1 4184ff75 ship listAssets() in error message. merge both.
@@ -321,7 +324,7 @@ export async function buyPreview({ user_kasia, qty, pay_chain, give_asset = 'KAS
 * 总额: ${totalUsdt.toFixed(6)} USDT
 ${payLines}
 * ${give_asset} 收件 (你的 ${recvNetwork}):
-  \`${user_kasia}\`
+  \`${assetMeta.chain === 'kaspa' ? user_kasia : (receive_address || '⚠ 缺 receive_address — buy stable 真要传 user EVM/Sol/Tron 收款地址')}\`
 
 ⏰ 订单 30 分钟内付款有效 · 跨链验证 1-3 分钟
 
