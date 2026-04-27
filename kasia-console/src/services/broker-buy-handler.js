@@ -161,9 +161,10 @@ async function _brokerPublishKasOffer(qtyKas, payChain, give_asset = 'KAS') {
       } catch {}
     }
   }
-  // T-J2-2026-04-27 Bug 5 真定位错 — 之前 fix 在 buyPreview line 271 (preview only),
-  // 真 publish path 在此 (_brokerPublishKasOffer 真 publish 真上链). 真 fix:
-  // fetchKasPrice → fetchPrice(give_asset, 'USDT') generic. KAS=CMC, USDC/USDT=peg 1.0.
+  // T-J2-2026-04-27 + T-J1-2026-04-27 v1.1 Bug 5+6 真 fix (NWT merge: J2 471c1a505 + J1 cf5e8d4f same fix):
+  // 之前 fix 在 buyPreview line 271 (preview only), 真 publish path _brokerPublishKasOffer 仍 fetchKasPrice
+  // hardcode → 任意 give_asset 真 publish use KAS 价 0.0342 = 真 production 灾难 (USDC/USDT 真上链
+  // want=0.0171 = 真 100x 损). 真改 fetchPrice generic + Bug 6 publish body give_asset literal → 参数化.
   const { fetchPrice } = await import('./price-oracle.js');
   const priceResult = await fetchPrice(give_asset, 'USDT');
   if (!priceResult.ok) return { ok: false, error: priceResult.error };
@@ -185,7 +186,7 @@ async function _brokerPublishKasOffer(qtyKas, payChain, give_asset = 'KAS') {
       body: JSON.stringify({
         // T-J2-2026-04-27 Bug 6 真修: give_asset hardcode 'KAS' → 参数 (Bug 5 修了价 oracle, 但 publish body 还 hardcode KAS = generic 化半残)
         relayNodeId: BROKER_RELAY_ID,
-        give_asset,
+        give_asset,  // T-J2 + T-J1 Bug 6 真修: literal 'KAS' → give_asset 参数
         give_amount: String(qtyKas),
         give_chain: give_asset === 'KAS' ? 'kaspa' : payChain,  // KAS 在 Kaspa, stable 在 EVM (同 payChain)
         want_asset: 'USDT',
@@ -272,9 +273,10 @@ export async function buyPreview({ user_kasia, qty, pay_chain, give_asset = 'KAS
   // broker_dynamic_quote 价格 (但不 publish)
   if (cumKas < qty) {
     const deficit = qty - cumKas;
-    // T-J2-2026-04-27 v1.1 Phase A NWT bug 3 + 真 generic asset_pair 真 fix:
-    // J2 真测撞 USDT/USDC 价 = 0.0342 (KAS 价当 stable) — fetchPrice('KAS') hardcode 真错.
-    // 真 fix: fetchPrice(give_asset, 'USDT') generic — KAS=0.0342, USDC=1.0 peg, USDT=1.0.
+    // T-J2 + T-J1-2026-04-27 v1.1 Bug 3+5 真 fix (NWT merge same fix):
+    // J2 #3 23:26 真测撞 USDT/USDC 价 = 0.0342 (KAS 价当 stable) — fetchPrice('KAS') hardcode 真错.
+    // 老 hardcode → 任意 give_asset 真 query KAS 价 = 真 production 灾难 (user 'buy 1 USDC' 真转
+    // 0.0342 USDT 真便宜 100x). 真 fix: fetchPrice(give_asset, 'USDT') generic.
     const { fetchPrice } = await import('./price-oracle.js');
     const priceResult = await fetchPrice(give_asset, 'USDT');
     if (!priceResult.ok) return { ok: false, error: priceResult.error, message: `价格暂查不到 (${priceResult.error}), 请稍后再试.` };
