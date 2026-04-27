@@ -140,6 +140,9 @@ async function _brokerPublishKasOffer(qtyKas, payChain, give_asset = 'KAS') {
   // Idempotency: 5min 内同 chain + 同 qty + 同 asset 已挂 broker_dynamic_quote open → 复用
   const broker = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID);
   if (broker?.address) {
+    // T-J2-2026-04-27 v1.1 Bug 8 真 fix (J1 24:50 真测撞 老 expired offer 真因连锁):
+    // idempotency reuse 加 expires_at > now check — 防 reuse 真 expired offer (虽然 5min window
+    // 真已 narrow, 但 broker_dynamic_quote 60min expires 真长 — 5min idempotency 内 expired = 真不能 reuse).
     const existing = sqlite.prepare(`
       SELECT id, want_amount, verification_meta, created_at
       FROM exchange_offers
@@ -147,6 +150,7 @@ async function _brokerPublishKasOffer(qtyKas, payChain, give_asset = 'KAS') {
         AND give_asset = ? AND CAST(give_amount AS REAL) = ?
         AND json_extract(metadata, '$.source') = 'broker_dynamic_quote'
         AND julianday(created_at) > julianday('now', '-5 minutes')
+        AND (expires_at IS NULL OR julianday(expires_at) > julianday('now'))
       ORDER BY created_at DESC LIMIT 1
     `).get(broker.address, give_asset, qtyKas);
     if (existing) {
