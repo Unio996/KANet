@@ -279,7 +279,12 @@ function _enqueuePaid(offerId, paymentTx, payChain, peerAddr) {
 //
 // 防 hallucinate "已下单" — LLM 只能用 preview 真数据 (含 user_kasia_address / unit_price /
 // total_usdt / maker_payment_address) 不能编. user reject "NO" 路径无 state cleanup (没 set 任何).
-export async function buyPreview({ user_kasia, qty, pay_chain, give_asset = 'KAS', receive_address = null }) {
+export async function buyPreview({
+  user_kasia, qty, pay_chain, give_asset = 'KAS', receive_address = null,
+  // R33 b iter3 (J1 NWT GAP B 修): user conditions, MUST handle (accept OR explicit reject)
+  limit_price = null,
+  refund_timeout_min = null,
+}) {
   if (!user_kasia || !qty || qty <= 0 || !pay_chain) {
     return { ok: false, error: 'missing fields (user_kasia/qty/pay_chain)' };
   }
@@ -345,8 +350,35 @@ export async function buyPreview({ user_kasia, qty, pay_chain, give_asset = 'KAS
     });
     cumKas += deficit;
   }
-  const totalUsdt = picks.reduce((s, p) => s + p.take_usdt, 0);
-  const unitPrice = totalUsdt / cumKas;
+  let totalUsdt = picks.reduce((s, p) => s + p.take_usdt, 0);
+  let unitPrice = totalUsdt / cumKas;
+
+  // R33 b iter3: user-supplied conditions handling — broker accept (within ±5% oracle) OR 明确 reject
+  let conditionLines = '';
+  if (limit_price !== null && limit_price > 0) {
+    let oracleMid = unitPrice;
+    try {
+      const { fetchPrice } = await import('./price-oracle.js');
+      const pr = await fetchPrice(give_asset, 'USDT');
+      if (pr.ok && pr.price > 0) oracleMid = pr.price;
+    } catch {}
+    const dev = (limit_price - oracleMid) / oracleMid;
+    if (Math.abs(dev) <= 0.05) {
+      // broker accept user limit (BUY: user pays at limit_price, broker uses it for total)
+      unitPrice = limit_price;
+      totalUsdt = +(cumKas * unitPrice).toFixed(6);
+      conditionLines += `\n* 用户限价: **${limit_price} USDT/${give_asset}** ✓ broker 接受 (CEX 中价 ${oracleMid.toFixed(6)}, 偏差 ${(dev*100).toFixed(2)}% 在 ±5% 内)`;
+    } else {
+      conditionLines += `\n* 用户限价: ${limit_price} USDT/${give_asset} ✗ broker **不接受** (CEX 中价 ${oracleMid.toFixed(6)}, 偏差 ${(dev*100).toFixed(2)}% 超 ±5%). 接受按市价 ${unitPrice.toFixed(6)} OR 取消重下.`;
+    }
+  }
+  if (refund_timeout_min !== null && refund_timeout_min > 0) {
+    if (refund_timeout_min < 120) {
+      conditionLines += `\n* 退款时限请求: ${refund_timeout_min} 分钟 ✗ broker **不接受** (broker 退款最少 2h 即 120 分钟, chain confirmation + dispute window 需要). 接受 broker 默认 2h OR 取消重下.`;
+    } else {
+      conditionLines += `\n* 退款时限: ${refund_timeout_min} 分钟 ✓ broker 接受 (覆盖默认 2h)`;
+    }
+  }
   // T-J2-V2-realtest-critfix (J1 67903c5b 真测撞 LLM 编 fake 地址 0x1234... bug):
   // 生成 deterministic preview_text 完整画像字串. LLM 必须**原样转发**, 不让 LLM 自己渲染
   // 地址 (LLM 会按 SYSTEM_PROMPT 例子编 placeholder = user 真转 USDT 到 fake 地址 = 钱丢).
@@ -412,7 +444,7 @@ ${trustCard}
 * 数量: ${cumKas} ${give_asset}
 * 付款链: ${payChain.toUpperCase()} (USDT)
 * 单价: ${unitPrice.toFixed(6)} USDT/${give_asset}${priceCompare}
-* 总额: ${totalUsdt.toFixed(6)} USDT
+* 总额: ${totalUsdt.toFixed(6)} USDT${conditionLines}
 ${payLines}
 * ${give_asset} 收件 (你的 ${recvNetwork}):
   \`${assetMeta.chain === 'kaspa'

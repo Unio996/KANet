@@ -293,7 +293,15 @@ async function _executeToolImpl(peer, name, args) {
   if (name === 'preview_order') {
     // 议 B (Owner 钦定): 字段齐 preview, 不真 publish. user YES 后才 finalize_order.
     // T-NWT-2026-04-27 v1.1 Phase E: give_asset propagation (default 'KAS' backward compat).
-    const { direction, qty, chain, address, give_asset = 'KAS' } = args || {};
+    // R33 b iter3: limit_price + refund_timeout_min 透传到 preview, broker 决策接受/拒绝
+    const { direction, qty, chain, address, give_asset = 'KAS', limit_price = null, refund_timeout_min = null } = args || {};
+    // R33 b iter3: setConvoStateLock conditions field 真 capture (NWT GAP B retention pipeline)
+    if (limit_price !== null || refund_timeout_min !== null) {
+      try {
+        const { setConvoStateLock } = await import('./broker-state-authority.js');
+        setConvoStateLock(peer, { conditions: { limit_price, refund_timeout_min } });
+      } catch (e) { console.warn(`[broker-llm R33b] setConvoStateLock conditions err: ${e.message}`); }
+    }
     if (direction === 'buy') {
       // T-J1-2026-04-27 Bug-Y wire fix (真测发现 broker preview 真显 'kaspa:' addr 真错):
       // 真传 receive_address (LLM args.address) → buyPreview 真 render 真 user EVM 收款 addr.
@@ -301,7 +309,7 @@ async function _executeToolImpl(peer, name, args) {
       // T-NWT-2026-04-27 Bug 7 hotfix (合并 J1+NWT): preview ok 真 set _pendingPreview, 让 'YES' 真
       // deterministic finalize (LLM-driven preview 真不 set _quotes, 真 LLM 'YES' 真 unreliable hallucinate).
       const { buyPreview, _setPendingPreview } = await import('./broker-buy-handler.js');
-      const r = await buyPreview({ user_kasia: peer, qty, pay_chain: chain, give_asset, receive_address: address || null });
+      const r = await buyPreview({ user_kasia: peer, qty, pay_chain: chain, give_asset, receive_address: address || null, limit_price, refund_timeout_min });
       if (r.ok) _setPendingPreview(peer, { qty, pay_chain: chain, give_asset, receive_address: address || null });
       return r;
     }
@@ -315,7 +323,7 @@ async function _executeToolImpl(peer, name, args) {
       }
       const { sellPreview } = await import('./broker-sell-handler.js');
       // T-J2-2026-04-27 sync NWT 5a9db463f generic 化: 透传 give_asset (LLM tool args 已有), recv_asset 默认 USDT (broker 卖路径主路径).
-      const r = await sellPreview({ user_kasia: peer, qty, recv_chain: chain, recv_address: address, give_asset });
+      const r = await sellPreview({ user_kasia: peer, qty, recv_chain: chain, recv_address: address, give_asset, limit_price, refund_timeout_min });
       // 机械兜底: 即使 sellPreview 返 ok:false, 也包成 ok:true + preview_text 让 LLM 100% 转发不自由编.
       if (!r.ok) {
         return { ok: true, preview_text: r.message || `抱歉, 卖单处理失败 (${r.error || 'unknown'}). 请重发或回 NO 取消.` };

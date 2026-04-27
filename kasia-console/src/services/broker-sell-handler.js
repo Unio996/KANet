@@ -63,7 +63,12 @@ async function _qDm(peerAddr, message) {
 // 加 brokerFee 字段后可去掉这个 if-KAS 分支.
 //
 // 4 段补强: (A) broker 身份 (B) 价格对比 (C) 安全说明 (D) 历史链上记录 (跟 buyPreview 对称)
-export async function sellPreview({ user_kasia, qty, recv_address, recv_chain, give_asset = 'KAS', recv_asset = 'USDT' }) {
+export async function sellPreview({
+  user_kasia, qty, recv_address, recv_chain, give_asset = 'KAS', recv_asset = 'USDT',
+  // R33 b iter3 (J1 NWT GAP B 修): user-supplied conditions, MUST handle (accept OR explicit reject), 不准静默丢
+  limit_price = null,
+  refund_timeout_min = null,
+}) {
   if (!user_kasia || !qty || qty <= 0 || !recv_chain || !recv_address) {
     return { ok: false, error: 'missing_fields', message: `缺字段: 数量/收 ${recv_asset} 链/收款地址` };
   }
@@ -163,6 +168,31 @@ export async function sellPreview({ user_kasia, qty, recv_address, recv_chain, g
     ? `· broker fee ${giveFee} ${give_asset} 固定 (无隐藏)`
     : `· broker 利润仅 spread (${recv_asset} 1% 低于市价), 无固定 fee`;
   const recvChainDisplay = recvMeta.displayName;
+
+  // R33 b iter3: user-supplied conditions handling — broker accept (within ±5% oracle) OR 明确 reject
+  // 反静默丢弃: 只要 user 提了 limit_price/refund_timeout, preview_text 必反映 broker 决策
+  let conditionLines = '';
+  let finalUnitPrice = unitPrice;
+  let finalTotalRecv = totalRecv;
+  if (limit_price !== null && limit_price > 0) {
+    const dev = (limit_price - midPrice) / midPrice;
+    if (Math.abs(dev) <= 0.05) {
+      // accept: use user's limit_price (broker spread 调整)
+      finalUnitPrice = limit_price;
+      finalTotalRecv = +(netGive * finalUnitPrice).toFixed(6);
+      conditionLines += `\n* 用户限价: **${limit_price} ${recv_asset}/${give_asset}** ✓ broker 接受 (CEX 中价 ${midPrice.toFixed(6)}, 偏差 ${(dev*100).toFixed(2)}% 在 ±5% 内)`;
+    } else {
+      conditionLines += `\n* 用户限价: ${limit_price} ${recv_asset}/${give_asset} ✗ broker **不接受** (CEX 中价 ${midPrice.toFixed(6)}, 偏差 ${(dev*100).toFixed(2)}% 超 ±5%). 接受按市价 ${unitPrice.toFixed(6)} OR 取消重下.`;
+    }
+  }
+  if (refund_timeout_min !== null && refund_timeout_min > 0) {
+    if (refund_timeout_min < 120) {
+      // broker 最少 2h (chain confirmation + dispute window)
+      conditionLines += `\n* 退款时限请求: ${refund_timeout_min} 分钟 ✗ broker **不接受** (broker 退款最少 2h 即 120 分钟, chain confirmation + dispute window 需要). 接受 broker 默认 2h OR 取消重下.`;
+    } else {
+      conditionLines += `\n* 退款时限: ${refund_timeout_min} 分钟 ✓ broker 接受 (覆盖默认 2h)`;
+    }
+  }
   const preview_text = `📋 **卖单画像 (确认前)**
 
 ${trustCard}
@@ -170,8 +200,8 @@ ${trustCard}
 * 方向: 卖 ${give_asset}
 * 数量: ${feeLine}
 * 收 ${recv_asset} 链: ${recvChainDisplay}
-* 单价: ${unitPrice.toFixed(6)} ${recv_asset}/${give_asset}${priceCompare}
-* 你将收到: ${totalRecv.toFixed(6)} ${recv_asset}
+* 单价: ${finalUnitPrice.toFixed(6)} ${recv_asset}/${give_asset}${priceCompare}
+* 你将收到: ${finalTotalRecv.toFixed(6)} ${recv_asset}${conditionLines}
 * ${recv_asset} 收件 (你的 ${recvChainDisplay}):
   \`${recv_address}\`
 * 你需转: ${qty} ${give_asset} 到 broker (确认后 broker 给你转 ${give_asset} 地址)
