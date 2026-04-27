@@ -637,13 +637,41 @@ export async function handleBuyIntent(peerAddr, message) {
         : `\n\n付完不用回复, 我会自动检测; 慢则 1-2min, 快则 30s. 想加速可回 "我付了 0xTX".`;
       _qDm('dm_pay_instr', peerAddr,
         `请 30min 内付:\n${lines}${note}`);
-      return '';
+      // T-J1-2026-04-27 P0-4 sync ack (NWT 17:34 UX P0): user '好' confirm 真**真不能** silent —
+      // chain queue DM 真 1-3min 真到, sync 真**真**ack 立即. 真 user 真信任 broker 真**真**响应.
+      // 真**真**block sync sync, chain queue 真 dm_order_confirmed + dm_pay_instr 真后续 detail.
+      return `✓ 收到 YES, 订单已建 #${orderId}, 付款指引马上发你 (1-2 分钟到账, 不用刷新).`;
     }
     if (CANCEL_WORDS.includes(trimmed)) {
       _quotes.delete(peerAddr);
       _qDm('dm_quote', peerAddr, `已取消报价. 重新下单回"买 X KAS".`);
-      return '';
+      return '已取消报价. 真不锁资金, 真**真**随时回 "买 X KAS" 真重新下单.';
     }
+  }
+
+  // T-J1-2026-04-27 P0-3 CANCEL after confirm (NWT 17:34 UX P0): user 真**真**confirm 真后想取消 真**真**legitimate.
+  // pre-fix: user '好' → _pendingAccepts.set, 然后 '算了 NO' 真**真**fall LLM → finalize_order 真**真**rejected
+  //   '已有 active 订单, 等 30min 过期' = 真**真**user 真摔门 UX P0.
+  // post-fix: _pendingAccepts active 真 user CANCEL_WORDS → release accept + ack sync.
+  //   真 picks 真**真**有 paid_tx → cannot cancel (已上链), 真 DM user explain.
+  //   真 all picks unpaid → release _pendingAccepts (broker 真**真**没发 KAS, user 真**真**没付 USDT,
+  //   真 zero on-chain action needed).
+  const cancelable = _pendingAccepts.get(peerAddr);
+  if (cancelable && CANCEL_WORDS.includes(trimmed)) {
+    if (Date.now() >= cancelable.expires_at) {
+      _pendingAccepts.delete(peerAddr);
+      return '订单 真**真**已超时 (30min). 真不锁资金, 真**真**重新下单回 "买 X KAS".';
+    }
+    const paidPicks = cancelable.picks.filter(p => p.paid_tx);
+    if (paidPicks.length > 0) {
+      // 已付款笔 真不能取消 (USDT 已上链). DM user explain.
+      const unpaidCount = cancelable.picks.length - paidPicks.length;
+      return `真**真**${paidPicks.length}/${cancelable.picks.length} 笔已付款 真不能取消 (USDT 已上链 broker 真**真**自动 deliver KAS).${unpaidCount > 0 ? ` 未付的 ${unpaidCount} 笔 真**真**等过期自动释放 (30min).` : ''} 真**真**有问题回我.`;
+    }
+    // 全 unpaid → release accept, broker 真**真**没发 KAS, 真**真**zero on-chain action.
+    _pendingAccepts.delete(peerAddr);
+    _qDm('dm_cancel', peerAddr, `✓ 订单已取消 (${cancelable.total_kas} KAS / ${cancelable.total_usdt.toFixed(6)} USDT). 真不锁资金, 真**真**随时回 "买 X KAS" 真重新下单.`);
+    return `✓ 订单已取消 (${cancelable.total_kas} KAS / 全 unpaid). 真不锁资金, 重新下单回 "买 X KAS".`;
   }
 
   // PAID intent: 用户回 "我付了 0xtx..." → 一次匹配一个 unpaid pick (FIFO)
