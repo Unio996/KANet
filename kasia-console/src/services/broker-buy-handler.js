@@ -709,7 +709,11 @@ export async function handleBuyIntent(peerAddr, message) {
   {
     const evmAddrMatch = trimmed.match(/0x[a-fA-F0-9]{40}/);
     const chainInMsgMatch = trimmed.match(/\b(BSC|BNB|Polygon|POL|SOL|Solana|TRON)\b/i);
-    const looksLikeFieldFollowup = (evmAddrMatch || chainInMsgMatch) && !BUY_REGEX.test(trimmed);
+    // T-NWT-2026-04-27 Bug-Z6 fix (J1 6a1a2d306e 真测撞): SELL keyword in current msg → skip Bug-W,
+    // 让 broker-sell-handler 接管. 真 root: Bug-W 拿 broker 历史 BUY 反 fill SELL 请求, 撞 hallucinate
+    // 跟 Bug-Z5 同 class — current msg 优先, SELL 是 explicit 拒绝信号 (绝不当 BUY 处理).
+    const sellKeywordInMsg = /(?:卖|要卖|想卖|出售|抛|sell|dump|unload)/i.test(trimmed);
+    const looksLikeFieldFollowup = (evmAddrMatch || chainInMsgMatch) && !BUY_REGEX.test(trimmed) && !sellKeywordInMsg;
     if (looksLikeFieldFollowup) {
       try {
         // T-NWT-2026-04-27 Bug-Z5 fix: parse current msg 真先 (user explicit asset/qty 真 trumps history)
