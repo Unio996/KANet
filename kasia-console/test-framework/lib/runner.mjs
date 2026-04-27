@@ -33,23 +33,38 @@ const actions = {
    * → returns { reply, latency_ms, raw }
    */
   async send_message(step, ctx) {
-    const t0 = Date.now();
-    const res = await fetch(`${CONSOLE_URL}/api/agent/reply`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        relayNodeId: step.to_relay_id,
-        peer: step.from_peer,
-        message: step.message,
-      }),
-    });
-    const data = await res.json();
-    return {
-      reply: data.reply || '',
-      skip_reason: data.skip_reason || null,
-      latency_ms: Date.now() - t0,
-      raw: data,
+    // R-NWT-2026-04-27 (d) batch retry-on-transient: kasia-rpc backpressure (Relay syncing /
+    // aggregation insufficient) 在 batch run 18+ case 连续 publish 时偶发. 失败 reply 含特征字串 →
+    // sleep 2s + retry 1 次. 真业务 bug retry 仍 FAIL, 不掩盖. 三方 ack: J1 6e9b6bd 钦定 (b).
+    const TRANSIENT_PATTERNS = ['Relay may be syncing', 'aggregation insufficient', 'Broadcast failed', 'LLM 卡了一下', '我这边 LLM'];
+    const _sendOnce = async () => {
+      const t0 = Date.now();
+      const res = await fetch(`${CONSOLE_URL}/api/agent/reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          relayNodeId: step.to_relay_id,
+          peer: step.from_peer,
+          message: step.message,
+        }),
+      });
+      const data = await res.json();
+      return {
+        reply: data.reply || '',
+        skip_reason: data.skip_reason || null,
+        latency_ms: Date.now() - t0,
+        raw: data,
+      };
     };
+    let result = await _sendOnce();
+    if (TRANSIENT_PATTERNS.some(p => result.reply.includes(p))) {
+      await new Promise(r => setTimeout(r, 2000));
+      const retried = await _sendOnce();
+      retried.retried = true;
+      retried.first_attempt_reply = result.reply;
+      result = retried;
+    }
+    return result;
   },
 
   /**
@@ -171,25 +186,42 @@ const actions = {
     if (turn.done || !turn.message) {
       return { message: null, reply: '', latency_ms: 0, persona_state: ctx.vars[stateKey], persona_done: true };
     }
-    const t0 = Date.now();
-    const res = await fetch(`${CONSOLE_URL}/api/agent/reply`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        relayNodeId: step.to_relay_id,
-        peer: step.from_peer,
-        message: turn.message,
-      }),
-    });
-    const data = await res.json();
-    ctx.lastReply = data.reply || '';
+    // R-NWT-2026-04-27 (d) batch retry-on-transient: 同 send_message 模式. 真业务 bug 重试仍 FAIL.
+    const TRANSIENT_PATTERNS = ['Relay may be syncing', 'aggregation insufficient', 'Broadcast failed', 'LLM 卡了一下', '我这边 LLM'];
+    const _personaSendOnce = async () => {
+      const t0 = Date.now();
+      const res = await fetch(`${CONSOLE_URL}/api/agent/reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          relayNodeId: step.to_relay_id,
+          peer: step.from_peer,
+          message: turn.message,
+        }),
+      });
+      const data = await res.json();
+      return { reply: data.reply || '', skip_reason: data.skip_reason || null, latency_ms: Date.now() - t0 };
+    };
+    let pr = await _personaSendOnce();
+    let retried = false;
+    if (TRANSIENT_PATTERNS.some(p => pr.reply.includes(p))) {
+      await new Promise(r => setTimeout(r, 2000));
+      const r2 = await _personaSendOnce();
+      retried = true;
+      const firstReply = pr.reply;
+      pr = r2;
+      pr.first_attempt_reply = firstReply;
+    }
+    ctx.lastReply = pr.reply;
     return {
       message: turn.message,
       reply: ctx.lastReply,
-      skip_reason: data.skip_reason || null,
-      latency_ms: Date.now() - t0,
+      skip_reason: pr.skip_reason,
+      latency_ms: pr.latency_ms,
       persona_state: ctx.vars[stateKey],
       persona_done: false,
+      retried,
+      first_attempt_reply: pr.first_attempt_reply,
     };
   },
 
