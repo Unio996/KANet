@@ -20,18 +20,12 @@ export default {
   domain: 'broker',
   tags: ['ux', 'regression', 'p0', 'owner-trace', 'product-gap', 'follow-up', 'condition-retention'],
   steps: [
-    // setup SELL flow
+    // setup SELL flow — message 含逗号 break SELL_REGEX 让 fall handleLlmDialog (R33 b iter3 sellPreview path)
     {
       action: 'send_message',
       from_peer: peer,
       to_relay_id: relayId('trader-b'),
-      message: '卖88个kas',
-    },
-    {
-      action: 'send_message',
-      from_peer: peer,
-      to_relay_id: relayId('trader-b'),
-      message: 'Bsc',
+      message: '卖88个kas, BSC',
     },
     // T6 杂糅
     {
