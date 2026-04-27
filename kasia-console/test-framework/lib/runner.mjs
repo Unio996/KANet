@@ -198,6 +198,43 @@ const actions = {
     db.close();
     return { cleaned: r.changes };
   },
+
+  /**
+   * Wait for broker to have sent an outbound message to peer (via chain DM).
+   * Polls messages table for outbound row from broker → peer with optional content match.
+   * Use realLocalPeer() (not freshTestPeer) for the peer arg, otherwise broker chain DM
+   * silently fails and this assertion will always timeout (Bug-Z10 dig).
+   *
+   * step: { action: 'wait_for_broker_outbound_msg', broker_addr, peer_addr, content_contains?, since_iso?, timeout_ms?, poll_ms? }
+   * → returns { row, found, polled_for_ms }
+   */
+  async wait_for_broker_outbound_msg(step, ctx) {
+    const timeout = step.timeout_ms || 60_000;
+    const poll = step.poll_ms || 2_000;
+    const since = step.since_iso || new Date(Date.now() - 5 * 60_000).toISOString();
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeout) {
+      const db = new Database(DB_PATH, { readonly: true });
+      const row = db.prepare(`
+        SELECT m.id, m.created_at, m.content_text
+        FROM messages m
+        LEFT JOIN identities si ON si.id = m.sender_identity_id
+        LEFT JOIN identities ri ON ri.id = m.receiver_identity_id
+        WHERE si.address = ? AND ri.address = ?
+          AND m.message_type = 'text'
+          AND m.created_at >= ?
+        ORDER BY m.created_at DESC LIMIT 1
+      `).get(step.broker_addr, step.peer_addr, since);
+      db.close();
+      if (row) {
+        if (!step.content_contains || (row.content_text || '').includes(step.content_contains)) {
+          return { row, found: true, polled_for_ms: Date.now() - t0 };
+        }
+      }
+      await new Promise(r => setTimeout(r, poll));
+    }
+    return { row: null, found: false, polled_for_ms: Date.now() - t0 };
+  },
 };
 
 // ── assertion functions (generic) ────────────────────────────────

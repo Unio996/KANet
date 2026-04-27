@@ -35,12 +35,34 @@ export function relayId(alias) {
 }
 
 /**
- * Generate a fresh anonymous test peer address (valid kaspa: format).
- * For cases that need a clean-history user simulation.
- * Returns a stable address so test can reference it; caller should ensure unique seed.
+ * Generate a fresh anonymous test peer address (valid kaspa: format prefix only).
+ * **LIMITATION (Bug-Z10 dig)**: synthetic peers are NOT in real Kasia network.
+ * - /api/agent/reply works (sync HTTP, no chain hop)
+ * - But broker-action-queue _qDm chain broadcast 真**fails silently** for these peers
+ * - Therefore: cases using freshTestPeer should NOT assert on broker outbound DMs
+ *   that go through chain (e.g. dm_pay_instr / dm_order_confirmed via Kasia)
+ * - Use realLocalPeer() instead when chain DM verification matters
+ *
+ * For cases that need a clean-history user simulation but only check broker reply
+ * via /api/agent/reply (sync), freshTestPeer is fine.
  */
 export function freshTestPeer(seed) {
   // 60 chars after 'kaspa:q' to look like real addr; deterministic from seed
   const suffix = createHash('sha256').update(String(seed)).digest('hex').slice(0, 56);
   return `kaspa:q${suffix.replace(/[^a-z0-9]/g, '0')}`.padEnd(67, '0').slice(0, 67);
+}
+
+/**
+ * Return the address of a REAL local relay that exists in Kasia network.
+ * Use this when test needs to verify broker chain DM delivery (broker DMs this
+ * relay, scout sees it, messages table records inbound).
+ *
+ * Default: NWT relay (5b236c08) — real Kasia identity, alive on this machine.
+ *
+ * Tradeoff vs freshTestPeer: pollutes real relay's history (cleanup_peer can clear it).
+ */
+export function realLocalPeer(alias = 'nwt') {
+  const addr = relayAddr(alias);
+  if (!addr) throw new Error(`realLocalPeer: unknown alias '${alias}'`);
+  return addr;
 }
