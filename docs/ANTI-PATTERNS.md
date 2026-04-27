@@ -952,6 +952,83 @@ return llm.transmit_verbatim(result.message);  // 真 tool-provided error messag
 
 ---
 
+## 规则 30 · Service primitive — broker 真 container of Services, 真 each Service 真 handles 1 asset-pair × 1 chain
+
+**来源**: J1 e450ea19 deep arch re-cognition broadcast + 924e8ca3 Gate 1.5 LIVE PASS sediment (2026-04-27 05:55). 真 6h session 真 5 critical bugs + 1 architectural insight (R29 LLM dumb tools rich) 真 next architectural direction. 真 align Owner 钦定 '正则不可取 Qwen 没用好' + '深刻再认知系统'.
+
+**症状 (current)**: broker 真 monolith 真 hardcode 多 asset-pair × 多 chain 真 wiring:
+- handleBuyIntent 真 KAS-only BUY_REGEX
+- handleSellIntent 真 KAS-only SELL_REGEX
+- _aggregateWithFallback 真 give_asset 参数化 真半残 (J2 #3 Bug 5/6 fix series 真证)
+- _brokerPublishKasOffer 真 wallet lookup 真 chain 真 hardcode 'bnb'
+- accept_v1 协议 真 receive_address 真 kasia/EVM 真 mismatch (J2 ea3cfb350 fix)
+- 真 add 1 asset-pair × 1 chain = 真 wire 4-5 places (regex + handler + aggregate + publish + settle)
+
+**Why current model breaks** (6h session 真 evidence):
+1. broker 真 single LLM 真 process all asset-pairs → multi-turn context bleed (Bug-Z5/Z6)
+2. broker 真 single chain liquidity (BSC USDT/USDC) → user 真 multi-chain need 真 unmet
+3. broker 真 single point of failure → 真 stuck conversation 真 affect all users
+4. broker 真 hardcoded asset-pair routing → 真 add new asset 真 expensive
+
+**Right** (Phase 2 architecture, J1 propose):
+```
+broker 真 = container of Services (stateless 真 functions)
+每 Service 真 handle 1 asset-pair × 1 chain:
+  - KAS-USDT-BSC Service: { preview, finalize, verify_payment, auto_deliver }
+  - KAS-USDT-ETH Service: { preview, finalize, verify_payment, auto_deliver }
+  - KAS-USDC-BSC Service: { preview, finalize, verify_payment, auto_deliver }
+  - USDC-USDT-Polygon Service: { ... }
+
+broker LLM 真 = router + transducer:
+  user DM '买 5 KAS, BSC' → LLM 真 extract intent → 真 dispatch KAS-USDT-BSC.preview()
+  Service 真 returns deterministic preview_text → LLM 真 verbatim transmit (R29)
+
+真 add new asset-pair × new chain = 真 implement new Service (~80 LOC), 真 register
+真 broker container 真 dispatch table. 真 broker code 真 unchanged.
+```
+
+**Phase 3 vision**: 真 decentralized Service network
+```
+真 each Service 真 stateless 真 hostable 真 anywhere. KANet protocol:
+  user '买 5 KAS' → discovery 真 query N brokers 真 host KAS-USDT-BSC Service →
+  best price/speed/reputation routing → atomic execution
+真 reputation primitive 真 broker-level + Service-level
+真 decentralized liquidity 真 not single broker bottleneck
+```
+
+**怎么 implement (Phase 2 sprint plan)**:
+1. **真 extract preview/finalize/verify/deliver 真 stateless Service interface**:
+   ```js
+   interface AssetPairService {
+     id: 'KAS-USDT-BSC' | 'KAS-USDC-BSC' | ...
+     preview({ direction, qty, recv_address }): { ok, preview_text, ... }
+     finalize({ direction, qty, recv_address }): { ok, offer_id, payment_instr, ... }
+     verify_payment({ peer, tx_hash }): { ok, verified, ... }
+     auto_deliver({ offer_id }): { ok, delivery_tx, ... }
+   }
+   ```
+2. **真 broker container 真 register Services 真 dispatch by asset-pair detected** (LLM extracts → router lookup)
+3. **真 SYSTEM_PROMPT 真 list available Services** (asset-registry 真 generic, Service 真 self-describe via card_skills)
+4. **真 idempotency 真 per-Service 真 isolation** (R28 history fallback only fills missing fields per Service context, 真不 cross Service)
+
+**Why R30 generic**: Service primitive 真 not crypto-only. 真 same pattern 真 apply 真 any LLM-mediated transactional service:
+- Legal advice agent 真 host 'contract-review' Service, 'IP-search' Service
+- Medical Q&A agent 真 host 'symptom-triage' Service, 'med-interaction' Service
+- Data analysis agent 真 host 'pandas-query' Service, 'chart-generate' Service
+
+KANet 真 = primitive infrastructure 真 host Services. 真 broker 真 first concrete instance.
+
+**真 align Owner 钦定 '机器原生经济' (KANet manifesto)**: agent-to-agent commerce 真 needs Service primitive 真 base. 真 R30 真 architectural foundation 真 Phase 3+ network economics.
+
+**真 ship plan (J1 propose)**:
+- v1.1 (now-week1): 真 sellPreview ship 真 R30 真 first symmetric Service (NWT 2a74461f9 真 done)
+- v1.2 (week1-2): 真 extract KAS-USDT-BSC Service interface, refactor handleBuyIntent → Service.preview()
+- v1.3 (week2-3): 真 KAS-USDT-ETH Service (multi-chain expansion 真 single asset-pair)
+- v1.4 (week3-4): 真 KAS-USDC-BSC Service (multi-asset expansion 真 single chain)
+- v2.0 (month2): 真 Service marketplace 真 reputation routing 真 decentralized liquidity
+
+---
+
 ## 如何扩充本档案
 
 新陷阱踩过后**立即**追加，格式保持：
