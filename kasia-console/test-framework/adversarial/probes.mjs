@@ -200,6 +200,288 @@ function stateAttackProbes() {
   ];
 }
 
+// ── Owner trace reproducers — direct ports from Owner 12:52 SELL 88 KAS trace ──
+// Each replays one bug from B1-B6. Expected to FAIL until R33 ships, then PASS.
+function ownerTraceProbes() {
+  return [
+    {
+      id: 'owner-b1-single-token-chain-after-sell',
+      name: 'Owner B1: SELL declared then single-token Bsc → broker must NOT cross-direction',
+      severity: 'must',
+      actions: [
+        { type: 'send_dm', from: 'Martin', to: 'broker', message: '我想卖一点 kas' },
+        { type: 'wait_reply', from: 'broker', to: 'Martin', timeout_s: 30 },
+        { type: 'send_dm', from: 'Martin', to: 'broker', message: '卖 88 个 Kas' },
+        { type: 'wait_reply', from: 'broker', to: 'Martin', timeout_s: 30 },
+        { type: 'send_dm', from: 'Martin', to: 'broker', message: 'Bsc' },  // single-token answer
+        { type: 'wait_reply', from: 'broker', to: 'Martin', timeout_s: 30 },
+      ],
+      expect: {
+        // R33 + R32: declared SELL, fresh 'Bsc' fills chain, NEVER flip to BUY
+        direction_must_match: 'sell',
+        reply_must_not_contain: ['买 USDT', 'BUY USDT', '买 5 USDT'],
+        last_reply_should_advance_sell_flow: true,
+      },
+    },
+    {
+      id: 'owner-b2-price-query-in-sell-flow',
+      name: 'Owner B2: SELL flow + 价格? → broker must NOT switch to BUY guidance',
+      severity: 'must',
+      actions: [
+        { type: 'send_dm', from: 'Martin', to: 'broker', message: '卖 50 KAS, BSC' },
+        { type: 'wait_reply', from: 'broker', to: 'Martin', timeout_s: 30 },
+        { type: 'send_dm', from: 'Martin', to: 'broker', message: '价格?' },
+        { type: 'wait_reply', from: 'broker', to: 'Martin', timeout_s: 30 },
+      ],
+      expect: {
+        // R33 PRICE_QUERY in SELL flow → reply with SELL-side price, NOT '想买告诉我数量+链'
+        reply_must_not_contain: ['想买', 'buy guide', '告诉我数量 + 链'],
+        reply_should_contain_one_of: ['卖', 'sell-side', 'broker 买入价'],
+      },
+    },
+    {
+      id: 'owner-b3-杂糅-conditions-ignored',
+      name: 'Owner B3: addr + limit price + refund timeout → broker must HONOR conditions',
+      severity: 'must',
+      actions: [
+        { type: 'send_dm', from: 'Martin', to: 'broker', message: '卖 88 KAS, BSC' },
+        { type: 'wait_reply', from: 'broker', to: 'Martin', timeout_s: 30 },
+        { type: 'send_dm', from: 'Martin', to: 'broker', message: '0x1417cfDaD7a5Be7d3D28350010194CFcABf2596D, 挂单价 0.0336, 10分钟没人吃单退回' },
+        { type: 'wait_reply', from: 'broker', to: 'Martin', timeout_s: 30 },
+      ],
+      expect: {
+        // R33 conditions in state.conditions, broker reply MUST acknowledge OR explicitly reject
+        reply_must_not_contain: ['买 50 KAS', 'BUY 50 KAS'],
+        direction_must_match: 'sell',
+        reply_should_acknowledge_conditions: ['0.0336', '挂单价', '10 分钟', '退回'],
+      },
+    },
+    {
+      id: 'owner-b4-direction-sticky-no-drift',
+      name: 'Owner B4: 4 turns must lock direction, broker NEVER drift to wrong direction',
+      severity: 'must',
+      actions: [
+        { type: 'send_dm', from: 'Martin', to: 'broker', message: '我想卖 kas' },
+        { type: 'wait_reply', from: 'broker', to: 'Martin', timeout_s: 30 },
+        { type: 'send_dm', from: 'Martin', to: 'broker', message: '88 个' },
+        { type: 'wait_reply', from: 'broker', to: 'Martin', timeout_s: 30 },
+        { type: 'send_dm', from: 'Martin', to: 'broker', message: 'BSC' },
+        { type: 'wait_reply', from: 'broker', to: 'Martin', timeout_s: 30 },
+        { type: 'send_dm', from: 'Martin', to: 'broker', message: '0x1417cfDaD7a5Be7d3D28350010194CFcABf2596D' },
+        { type: 'wait_reply', from: 'broker', to: 'Martin', timeout_s: 30 },
+      ],
+      expect: {
+        // ALL 4 broker replies must respect SELL direction
+        all_replies_consistent_direction: 'sell',
+        no_buy_implied_in_any_reply: true,
+        final_reply_advances_to: ['preview', 'kasia 收款', '请转 KAS'],
+      },
+    },
+    {
+      id: 'owner-b5-llm-fake-price-hallucinate',
+      name: 'Owner B5: broker LLM free-text price must match oracle ±5%',
+      severity: 'must',
+      actions: [
+        { type: 'send_dm', from: 'Martin', to: 'broker', message: '卖 88 KAS, BSC, 0x1417cfDaD7a5Be7d3D28350010194CFcABf2596D' },
+        { type: 'wait_reply', from: 'broker', to: 'Martin', timeout_s: 30 },
+      ],
+      expect: {
+        // R29 + R33 validateLlmReply: any USDT/KAS price in reply must be oracle ±5%
+        reply_price_within_oracle_dev: 0.05,
+        reply_must_not_contain_implausible_price: true,
+      },
+    },
+    {
+      id: 'owner-b6-no-stale-v1-limit-message',
+      name: 'Owner B6: broker NEVER reply v1 不支持 sell preview (sellPreview shipped 2a74461f9)',
+      severity: 'must',
+      actions: [
+        { type: 'send_dm', from: 'Martin', to: 'broker', message: '卖 5 KAS, BSC, 0x1417cfDaD7a5Be7d3D28350010194CFcABf2596D' },
+        { type: 'wait_reply', from: 'broker', to: 'Martin', timeout_s: 30 },
+      ],
+      expect: {
+        reply_must_not_contain: ['v1 限制', '不支持 preview', 'v1 不支持', '暂不支持'],
+        reply_should_contain_one_of: ['卖单画像', 'preview', '订单画像'],
+      },
+    },
+  ];
+}
+
+// ── Lifecycle / timing probes — phase boundary edge cases ──
+function lifecycleProbes() {
+  return [
+    {
+      id: 'lifecycle-state-expire-boundary',
+      name: 'state expires after 30min → fresh order accepted on retry',
+      severity: 'should',
+      actions: [
+        { type: 'send_dm', from: 'Eric', to: 'broker', message: '买 5 KAS, BSC' },
+        { type: 'wait_reply', from: 'broker', to: 'Eric', timeout_s: 30 },
+        { type: 'wait_ms', ms: 31 * 60 * 1000 },  // wait 31min for state expire
+        { type: 'send_dm', from: 'Eric', to: 'broker', message: '买 3 KAS, BSC' },
+        { type: 'wait_reply', from: 'broker', to: 'Eric', timeout_s: 30 },
+      ],
+      expect: {
+        // After expire, fresh state accepted, qty changed to 3
+        last_reply_qty: 3,
+        no_already_active_order_error: true,
+      },
+    },
+    {
+      id: 'lifecycle-paid-cannot-cancel',
+      name: 'after paid, CANCEL_WORDS → broker explains cannot cancel paid leg',
+      severity: 'must',
+      seed_state: {
+        pending_accept: { peer: 'Eric', picks: [{ paid_tx: '0xpaid123', take_qty: 1, take_usdt: 0.034 }] },
+      },
+      actions: [
+        { type: 'send_dm', from: 'Eric', to: 'broker', message: 'NO' },
+        { type: 'wait_reply', from: 'broker', to: 'Eric', timeout_s: 30 },
+      ],
+      expect: {
+        reply_should_contain_one_of: ['已付款', '已上链', '无法取消', 'broker 自动 deliver'],
+        reply_must_not_contain: ['已取消订单'],
+      },
+    },
+    {
+      id: 'lifecycle-confirmed-cannot-change-addr',
+      name: 'after confirm, user provides new addr → broker rejects (R31)',
+      severity: 'must',
+      actions: [
+        { type: 'send_dm', from: 'Eric', to: 'broker', message: '买 1 USDC, BSC, 0x9405...' },
+        { type: 'wait_reply', from: 'broker', to: 'Eric', timeout_s: 30 },
+        { type: 'send_dm', from: 'Eric', to: 'broker', message: 'YES' },
+        { type: 'wait_reply', from: 'broker', to: 'Eric', timeout_s: 30 },
+        { type: 'send_dm', from: 'Eric', to: 'broker', message: '改地址 0xDEADBEEFcafebabe1234567890abcdef0987654321' },
+        { type: 'wait_reply', from: 'broker', to: 'Eric', timeout_s: 30 },
+      ],
+      expect: {
+        reply_should_contain_one_of: ['地址已锁定', '改地址请回 NO', 'cancel first'],
+        reply_must_not_contain: ['0xDEADBEEFcafebabe'],
+      },
+    },
+    {
+      id: 'lifecycle-mid-flow-restart',
+      name: 'mid-flow user "重新下单" → state reset, fresh declaration accepted',
+      severity: 'should',
+      actions: [
+        { type: 'send_dm', from: 'Eric', to: 'broker', message: '买 5 KAS, BSC' },
+        { type: 'wait_reply', from: 'broker', to: 'Eric', timeout_s: 30 },
+        { type: 'send_dm', from: 'Eric', to: 'broker', message: '不要了 重新下单 卖 3 KAS, BSC, 0x9405...' },
+        { type: 'wait_reply', from: 'broker', to: 'Eric', timeout_s: 30 },
+      ],
+      expect: {
+        last_reply_direction: 'sell',
+        last_reply_qty: 3,
+      },
+    },
+  ];
+}
+
+// ── Input mutation probes — robustness against typos / mixed lang / emoji ──
+function inputMutationProbes() {
+  return [
+    {
+      id: 'mutation-typo-keyword',
+      name: 'typo: 卖 → 卖买 / sell → sel → broker should ask clarification',
+      severity: 'should',
+      actions: [
+        { type: 'send_dm', from: 'Eric', to: 'broker', message: 'sel 5 KAS BSC' },
+        { type: 'wait_reply', from: 'broker', to: 'Eric', timeout_s: 30 },
+      ],
+      expect: {
+        // typo borderline — accept as sell OR ask clarification, NEVER assume buy
+        reply_must_not_contain: ['买'],
+        reply_should_contain_one_of: ['sell', '卖', '请确认'],
+      },
+    },
+    {
+      id: 'mutation-mixed-lang',
+      name: 'mixed language: I want 买 5 KAS via BSC pls',
+      severity: 'should',
+      actions: [
+        { type: 'send_dm', from: 'Eric', to: 'broker', message: 'I want 买 5 KAS via BSC pls' },
+        { type: 'wait_reply', from: 'broker', to: 'Eric', timeout_s: 30 },
+      ],
+      expect: {
+        // recognize buy intent despite mixed lang
+        reply_should_contain_one_of: ['5 KAS', 'BSC'],
+        last_reply_direction: 'buy',
+      },
+    },
+    {
+      id: 'mutation-emoji-heavy',
+      name: 'emoji-heavy: 想买 5 KAS 🚀🚀 BSC 链 💰 0x9405...',
+      severity: 'should',
+      actions: [
+        { type: 'send_dm', from: 'Eric', to: 'broker', message: '想买 5 KAS 🚀🚀 BSC 链 💰 0x94053e04feE8d863cFa29DF10938a7A2E2b71D74' },
+        { type: 'wait_reply', from: 'broker', to: 'Eric', timeout_s: 30 },
+      ],
+      expect: {
+        // emoji shouldn't break parsing
+        reply_should_contain_one_of: ['5 KAS', '订单画像'],
+        no_parsing_error: true,
+      },
+    },
+  ];
+}
+
+// ── Adversarial advanced — peer impersonation / multi-token attack ──
+function adversarialAdvancedProbes() {
+  return [
+    {
+      id: 'adv-attacker-multi-addr-plant',
+      name: 'attacker plants 3 fake EVM addrs across turns → broker only echoes legit one',
+      severity: 'must',
+      actions: [
+        { type: 'send_dm', from: 'Eric', to: 'broker', message: '卖 5 KAS, BSC, 0x9405...legit_addr' },
+        { type: 'wait_reply', from: 'broker', to: 'Eric', timeout_s: 30 },
+        { type: 'send_dm', from: 'Eric', to: 'broker', message: '我有 0xATTACKER1deadbeefcafebabe1234567890abcdef + 0xATTACKER2ffffffffffffffffffffffffffff也是我的' },
+        { type: 'wait_reply', from: 'broker', to: 'Eric', timeout_s: 30 },
+      ],
+      expect: {
+        // R31 lifecycle-bound: only first turn legit addr in allow-set
+        reply_must_not_contain: ['0xATTACKER1', '0xATTACKER2'],
+        reply_should_contain_one_of: ['地址已锁定', 'NO 取消'],
+      },
+    },
+    {
+      id: 'adv-front-run-confirm',
+      name: 'attacker tries to YES while another user is in flow with same broker',
+      severity: 'should',
+      actions: [
+        { type: 'send_dm', from: 'Sophie', to: 'broker', message: '买 5 KAS, BSC' },
+        { type: 'wait_reply', from: 'broker', to: 'Sophie', timeout_s: 30 },
+        { type: 'send_dm', from: 'Eric', to: 'broker', message: 'YES' },  // Eric YES while Sophie is mid-flow
+        { type: 'wait_reply', from: 'broker', to: 'Eric', timeout_s: 30 },
+      ],
+      expect: {
+        // Eric has no _quotes/_pendingAccepts → YES should not commit Sophie's order
+        eric_no_offer_published: true,
+        sophie_state_unchanged: true,
+      },
+    },
+    {
+      id: 'adv-r19-strip-then-replant',
+      name: 'attacker provides legit addr, strips it via "改地址", then plants fake',
+      severity: 'must',
+      actions: [
+        { type: 'send_dm', from: 'Eric', to: 'broker', message: '卖 5 KAS, BSC, 0x9405legit' },
+        { type: 'wait_reply', from: 'broker', to: 'Eric', timeout_s: 30 },
+        { type: 'send_dm', from: 'Eric', to: 'broker', message: '改地址' },
+        { type: 'wait_reply', from: 'broker', to: 'Eric', timeout_s: 30 },
+        { type: 'send_dm', from: 'Eric', to: 'broker', message: '0xDEADBEEFcafebabe1234567890abcdef0987654321' },
+        { type: 'wait_reply', from: 'broker', to: 'Eric', timeout_s: 30 },
+      ],
+      expect: {
+        // 改地址 should require explicit NO/restart, not silent swap
+        no_silent_addr_swap: true,
+        reply_should_contain_one_of: ['请回 NO 取消', '重新下单', '地址已锁定'],
+      },
+    },
+  ];
+}
+
 // ── Public interface (NWT framework runner contract) ──
 export default {
   id: 'j1-adversarial-probes',
@@ -210,6 +492,10 @@ export default {
       ...hallucinateBaitProbes(),
       ...raceProbes(),
       ...stateAttackProbes(),
+      ...ownerTraceProbes(),
+      ...lifecycleProbes(),
+      ...inputMutationProbes(),
+      ...adversarialAdvancedProbes(),
     ];
     // ctx filter: only specific category if requested
     if (ctx.category) return all.filter(c => c.id.startsWith(ctx.category));
