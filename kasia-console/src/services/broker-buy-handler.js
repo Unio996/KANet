@@ -681,31 +681,35 @@ export async function handleBuyIntent(peerAddr, message) {
   // 询价是高频 deterministic 场景 — broker 知现价, 不需要 LLM 推理.
   // 放最前: 即使 user 在 _quotes / _pendingAccepts 状态, 询价也优先回价 (中途想再问也 OK).
   // R33: SELL flow 中问价不能给 BUY 引导, 给 SELL 视角 (broker 收购价 = mid - spread).
+  // R33 b (NWT 15:06 GAP A 修): sync return msg 不再 silent — _qDm 给 chain DM, 同时 sync 返
+  // 让 chat UI / test framework 立刻看到 broker bid (Owner 真期望: SELL flow 中问价应正面回 broker 收购价).
   if (PRICE_QUERY_REGEX.test(trimmed)) {
     if (!shouldDeterministicFire(peerAddr, 'PRICE_QUERY', trimmed)) {
+      let msg;
       try {
         const { fetchKasPrice } = await import('./market-seeder.js');
         const p = await fetchKasPrice();
-        const msg = p && p > 0
+        msg = p && p > 0
           ? `KAS 现价 $${p.toFixed(6)} USDT/KAS\n· broker 收购价 (你卖) $${(p * 0.99).toFixed(6)} (含 1% spread)\n· 已锁定 SELL flow, 想确认下单回 YES`
           : `价格暂时拿不到 (上游 8 源全没响应), 稍等 1min 再问.`;
-        _qDm('dm_price_query', peerAddr, msg);
       } catch (e) {
-        _qDm('dm_price_query', peerAddr, `价格查询暂时失败 (${e.message?.slice(0, 40)}). 稍等再问.`);
+        msg = `价格查询暂时失败 (${e.message?.slice(0, 40)}). 稍等再问.`;
       }
-      return '';
+      _qDm('dm_price_query', peerAddr, msg);
+      return msg;
     }
+    let msg;
     try {
       const { fetchKasPrice } = await import('./market-seeder.js');
       const p = await fetchKasPrice();
-      const msg = p && p > 0
+      msg = p && p > 0
         ? `KAS 现价 $${p.toFixed(6)} USDT/KAS\n· broker 自挂卖价 $${(p * 1.01).toFixed(6)} (含 1% spread)\n· 想买告诉我数量 + 链 (BSC/POL/SOL/TRON), 例: "买 50 KAS"`
         : `价格暂时拿不到 (上游 8 源全没响应), 稍等 1min 再问. 或直接告诉我数量我帮你查.`;
-      _qDm('dm_price_query', peerAddr, msg);
     } catch (e) {
-      _qDm('dm_price_query', peerAddr, `价格查询暂时失败 (${e.message?.slice(0, 40)}). 稍等再问.`);
+      msg = `价格查询暂时失败 (${e.message?.slice(0, 40)}). 稍等再问.`;
     }
-    return '';
+    _qDm('dm_price_query', peerAddr, msg);
+    return msg;
   }
 
   // T-NWT-2026-04-27 Bug 7 hotfix: 'YES' confirm 真 _pendingPreview deterministic shortcut
