@@ -724,4 +724,105 @@ return reply.send({ reply: await _r19Guard(llmReply, 'handleLlmDialog') });
 
 ---
 
+## 规则 21 · LLM 真不可靠 — hallucinate forbidden replies + deterministic shortcut 必先
+
+**来源**: J1 25:13 真测撞 — Sophie 'YES' 真无 prior preview → broker LLM 真 hallucinate "⚠️ 订单争议中, broker 已通知 Owner 人工处理" (2026-04-27, 累计 3 笔同模式 4-26 22:18 + 4-27 24:44 + 25:13).
+
+**症状**: LLM 真自由发挥 dispute reply, user 真懵 (真无 active dispute, 真无 active order, 真 hallucinate from training).
+
+**真因**: SYSTEM_PROMPT 真 spec 'no_active_order' 真 reply 但 LLM 真没 follow — 真 fall to free generation, hallucinate dispute / 'notify Owner' 等.
+
+**Wrong**:
+```
+broker LLM 真 reply 'YES' 真无 prior → SYSTEM_PROMPT 真 spec verify_payment tool 真处理.
+但 LLM 真没 call tool, 真直接 reply '订单争议中' (training data influence).
+```
+
+**Right**:
+```
+SYSTEM_PROMPT 加 critical 铁律: 绝对禁止 LLM hallucinate "订单争议中"/"dispute"/"通知 Owner".
+真 dispute 真 ONLY by exchange-machine.transition('disputed') → broker handler dm_failed enqueue (broker NLG, 不 LLM).
++ deterministic shortcut: handleBuyIntent _pendingPreview check 真 'YES' confirm 真直 invoke finalizeBuy.
+```
+
+**Why**: LLM 真不可靠 (J1 真 audit 8 真不足 #A). SYSTEM_PROMPT 真 spec 真 ought-to-do, LLM 真 follow 70-90%. 真 critical paths 必 deterministic shortcut (regex / DB state check), LLM fall path 必 forbidden hallucinate spec. 双 belt-and-suspenders.
+
+**适用范围** (J2 #3 累计 4 patterns):
+- 'YES'/'NO' confirm 真 in-memory state check (handleBuyIntent _pendingPreview / _quotes deterministic)
+- '已付/transfer done' regex 真 deterministic + verify_payment tool fall LLM
+- 'sell X KAS' SELL_REGEX 真扩同义词 (broker-sell-handler 63a953de3 + broker-llm-agent cc02e36e6/7bda33c9a)
+- LLM hallucinate forbidden replies 真 SYSTEM_PROMPT explicit (a095a6f73 dispute hallucinate 真根治)
+
+---
+
+## 规则 22 · synthetic baseline ≠ 真验 — 真测必 trace function call chain 全 path
+
+**来源**: J2 23:25 + J1 23:28 真 ship Bug 5 fix 在 buyPreview level (preview only path), 真 publish path _brokerPublishKasOffer line 164 仍 fetchKasPrice hardcode. J2 24:04 真测 _aggregateWithFallback 真 publish 真上链 want_amount=0.0171 (KAS 价 × 0.5 USDC = 真 production 灾难). 真定位错 (commit 471c1a505 真 fix at correct path).
+
+**症状**: smoke 真测 PASS / unit test PASS / dry-run PASS, 但真 production 真上链撞 bug. "I tested 13/13 PASS" — but I tested wrong layer.
+
+**真因**: verify level 错 — 真 unit test 真 narrow (一个 function 单独), 真 production 真 trace call chain 真 dispatch 多 path. 真 fix 在 path A, path B 真没 verify.
+
+**Right**:
+```js
+// J2 471c1a505 真 fix at correct path (_brokerPublishKasOffer 真 publish path):
+_brokerPublishKasOffer() { fetchPrice(give_asset, 'USDT'); }
+
+// 真测 (J2 _j2-test-finalize-usdc.mjs):
+const r = await _aggregateWithFallback(0.5, 'bnb', 'USDC');  // 真 trace call chain
+console.log(r.picks[0].take_usdt);  // 0.505 ✓ — 真 onchain DB query verify
+```
+
+**Why**: function call chain 真 dispatch — buyPreview → _aggregateWithFallback → _brokerPublishKasOffer 真 3 个 fetchPrice 调用点. 真 fix 入口 path 真 unit test PASS, 真 production 真走真 publish path 真上链.
+
+**适用范围**:
+- spec / fix 必 grep 真 100% codebase 真 sink (跟 R20 同范式)
+- 真 fix verify level 必 invoke 真 production path (真 onchain + 真 DB query)
+- 'all tests green' ≠ 真 production-ready, 真 trace 真 user 真 trigger path
+
+---
+
+## 规则 23 · vote 必 align 真测真证据 — 不 echo 别人 vote
+
+**来源**: NWT 23:13 vote (a) "v1.1 SYSTEM_PROMPT 留 v1.2" + NWT 自己 23:30 实证 LLM USDC 真混乱真灾难 = 真 contradict 自己 vote. J1 23:30 同 vote (a) — 真没真 challenge NWT 自己实证. J2 #3 23:43 真碰撞 — 撤 vote (a), 真 ship Phase E (286b45dde).
+
+**症状**: 三方真 frenzy + 互相 ack vote, 但 vote 真没 align 真测真证据.
+
+**真因**: vote 真 social pressure (真 align 别人 vote 真省力), 真 evidence (真测 fail) 真 cognitive dissonance (我 vote 一条 + 真测撞另一条) 真 dismiss.
+
+**Right**:
+- 真 own vote 真 evidence fail → 立刻 retract (不 social pressure 守)
+- 真 echo vote 必 verify 真证据 align (不 echo 真 social ack)
+- 真 challenge 真证据矛盾 vote 必撤
+
+**Why**: vote 真 align Owner 真意 + 真 align 真证据, 不 align 别人 vote. 跟 R20 同范式 — invariant 必 align 真证据, vote 也是.
+
+---
+
+## 规则 24 · 系统已有根治大法必复用 — 不 broadcast script 重犯 mempool/anti-spam
+
+**来源**: J2 #3 25:11 broadcast 真撞 mempool + 99% similar dedup 真重犯 (Owner 25:14 训 "系统之前有根治大法! 我们不要每次犯同样错误").
+
+**症状**: broadcast script 每次手撞 UTXO mempool / anti-spam dedup → retry 18s+ + DM 永不发出.
+
+**真因**: 系统真已 spec 根治大法 (broker-action-queue T-J2-15 unique tag + T-NWT-14 [r2] retry suffix + R14 14min fuzzy), 但 J2 broadcast scripts 真没复用 → 真重犯.
+
+**Right**:
+```js
+// J2 _j2-send.mjs 真 wrap helper (commit 9bc1032fd):
+export async function sendBroadcast(channel, text, opts = {}) {
+  const tag = '#' + crypto.randomUUID().slice(0, 4);
+  const tagged = text + '\n\n' + tag + '@' + new Date().toISOString().slice(11, 19);
+  // retry per error type (mempool: 10s, dedup: 6s + [r${attempt}], unknown: throw fast)
+}
+```
+
+**Why**: 系统真已 spec 根治大法, future-proof 必复用. 真 ad-hoc 真重犯 = J2 真不复用 spec = wasted Owner 训 cost. 跟 R20 同范式 — invariant 必覆盖所有 sink, 根治大法必 propagate 到所有 user.
+
+---
+
+*R21-R24 (J2 #3 2026-04-27 真 frenzy 沉淀): LLM hallucinate forbidden + synthetic baseline ≠ 真验 + vote 必 align 真证据 + 系统根治大法必复用.*
+
+---
+
 *本档案在 v2 spec 第八章元教训基础上独立。spec 聚焦"这次怎么做"，本档案聚焦"下次别再犯"。*
