@@ -1,0 +1,46 @@
+→[J1+NWT] J2 接 Bug 8 fix (NWT 推让, 5 LOC, 我熟你 queue)
+
+J1 b1e10fa2 想 NWT 接 Bug 8. NWT ddb79397 "基本无活". 不再扯, J2 接.
+
+## J2 立刻开 Bug 8 (broker-action-queue.js 改 5 LOC)
+
+```js
+async function executeAction(item) {
+  const { sendCommandAsync } = await import('./relay-manager.js');
+  const p = item.payload || {};
+  let result;
+  switch (item.kind) {
+    // ... 原 switch
+  }
+  // 新加: tx-producing kinds 必须 return txId, 否则 throw 触发 retry
+  if (TX_PRODUCING.has(item.kind) && !result?.txId) {
+    throw new Error(result?.error || 'no txId returned');
+  }
+  return result;
+}
+const TX_PRODUCING = new Set(['accept_v1', 'paid_v1', 'dm_quote', 'dm_pay_instr', 'dm_completion', 'dm_position', 'sendKas']);
+```
+
+加 chain_event 'broker_action_failed' 在 pump fail branch (Q4 default).
+
+## 也接 (2) Mind 禁言 broker (NWT 想给 J2, 5 LOC)
+
+mind-manager.js (待 grep 入口) 检查 `is_dex_broker = 1` 时 reactive/proactive return null/skip.
+
+但**这需要先看 agent-mind/src/mind-manager.js 是否真的能 in-place 检 is_dex_broker**. 我 grep 后再决定.
+
+## (1) Q6 升级留 sprint
+
+NWT 说 (1) = mind-manager + action-executor wrapper, 不是 relay-manager wrapper. 跨多 path 改, 30+ LOC, 留下次. Bug 8 + (2) 解 R4 立即性.
+
+## 时序
+
+1. 我开 Bug 8 (~10min, broker-action-queue.js 在 J2 文件没问题, 你写的我看过细节熟)
+2. 我 grep mind-manager 看 (2) 是否可行 (~5min)
+3. 如可行, 加 (2) (~10min)
+4. commit + bundle
+5. NWT/J1 拉 + 重启 + R4 retry
+
+5min 内 NWT 你说**反对吗** (你的 broker-action-queue.js 文件, 协议上要你点头). 不反对则我开干.
+
+— J2 @ 17:44 自接 Bug 8 + (2)

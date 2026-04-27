@@ -1,0 +1,98 @@
+[
+  {
+    "id": "default-bug",
+    "name": "Bug 报告检测",
+    "enabled": true,
+    "channels": ["dev-coord", "kanet-dev", "kanet-arch", "kanet-frontend", "kanet-backend"],
+    "conditions": {
+      "keyword": "Bug-[A-Z]\\d+|bug|缺陷|漏洞"
+    },
+    "alert_level": "ALERT",
+    "action": "notify",
+    "cooldown_seconds": 300
+  },
+  {
+    "id": "default-commit",
+    "name": "Commit 发布检测",
+    "enabled": true,
+    "channels": ["dev-coord", "kanet-dev"],
+    "conditions": {
+      "keyword": "[a-f0-9]{7,}"
+    },
+    "alert_level": "INFO",
+    "action": "log",
+    "cooldown_seconds": 60
+  },
+  {
+    "id": "default-owner",
+    "name": "Owner 发言",
+    "enabled": true,
+    "channels": ["dev-coord", "kanet-dev"],
+    "conditions": {
+      "sender": ["kaspa:qzd2kt"]
+    },
+    "alert_level": "WARN",
+    "action": "notify",
+    "cooldown_seconds": 60
+  },
+  {
+    "id": "default-long",
+    "name": "长消息检测",
+    "enabled": true,
+    "channels": ["dev-coord", "kanet-dev"],
+    "conditions": {
+      "content_length": 2000
+    },
+    "alert_level": "INFO",
+    "action": "log",
+    "cooldown_seconds": 60
+  },
+  {
+    "id": "default-agent",
+    "name": "Agent 活跃检测",
+    "enabled": true,
+    "channels": ["dev-coord", "kanet-dev", "kanet-arch"],
+    "conditions": {
+      "min_content_len": 100
+    },
+    "alert_level": "INFO",
+    "action": "log",
+    "cooldown_seconds": 30
+  },
+  {
+    "id": "default-e2e",
+    "name": "E2E 测试通过",
+    "enabled": true,
+    "channels": ["dev-coord", "kanet-dev"],
+    "conditions": {
+      "keyword": "e2e.*PASS|真.*e2e.*PASS|e2e.*全绿|全链路通过"
+    },
+    "alert_level": "WARN",
+    "action": "notify",
+    "cooldown_seconds": 300
+  },
+  {
+    "id": "default-stop",
+    "name": "STOP 指令检测",
+    "enabled": true,
+    "channels": ["dev-coord", "kanet-dev"],
+    "conditions": {
+      "keyword": "\\bSTOP\\b|停止|停一下|别干了"
+    },
+    "alert_level": "WARN",
+    "action": "notify",
+    "cooldown_seconds": 120
+  },
+  {
+    "id": "default-critical",
+    "name": "严重事件检测",
+    "enabled": true,
+    "channels": ["dev-coord", "kanet-dev", "kanet-arch", "kanet-alert"],
+    "conditions": {
+      "keyword": "fatal|panic|崩溃|炸了|OOM|OOM|500|数据丢失|泄露|私钥|mnemonic"
+    },
+    "alert_level": "CRITICAL",
+    "action": "notify",
+    "cooldown_seconds": 600
+  }
+]

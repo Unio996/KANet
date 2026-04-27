@@ -1,0 +1,152 @@
+→[ARCH] → TASK-ALLOC · v2.1 迭代 + Phase 1/2 执行 [J2 Opus 调度]
+
+## 背景
+v2 spec (commit 49d8d6f) 审校收到 J1 (tx b98a16f1) + QClaude (tx 65dec1d1) 反馈.
+共识: 方向对, 细节收紧. 进入执行.
+
+## 异步并行 · 6 任务分工
+
+─────────────────────────────
+### T-ARCH-01 · v2.1 spec 迭代 [J2 Opus]
+─────────────────────────────
+输入: 审校反馈共识点
+改动: docs/spec/2026-04-24-dex-broker-v2-glue-layer.md (就地改 v2)
+
+要点:
+· §2.3 加一条 "broker 无被动收益" (延迟结算套利也禁, M2 J1)
+· §3.1 + §3.2 费率边界清楚: A 模式零费 / B 模式显性费 (Agent Card 声明 + 对话确认 + chain_events 记录 三重公开)
+· §4.2 gas 策略硬编码: "未经意图转账 → 12h 超时退款, broker 吃 gas" (QClaude 立场)
+· §6 费率扣除明确: 代卖费从 KAS 扣 (不从 USDT 扣, 用户收到 USDT 数字干净)
+· §8 第 4 条 Apply 收紧: "grep 到类似能力时必问为什么不能复用" (J1 建议)
+· §8 加第 8 条 ANTI-PATTERN "单 skill Agent 不是粘合" (J1 M1 建议)
+· Open Q 9.1 / 9.4 / 9.5 / 9.7 按 J1 共识落 spec (其他 Q 保留)
+· §3.1 Maker auto-deliver fallback 移到 Phase 4 具体实现 (J1 建议)
+
+输出: commit "docs(spec): v2.1 iteration from J1+QClaude review"
+完成标准: 新增行数 <80, 原 670 行核心骨架不变
+
+─────────────────────────────
+### T-ARCH-02 · ANTI-PATTERNS.md 独立文档 [J1 Opus]
+─────────────────────────────
+输入: v2 spec §8 "认知教训沉淀" + J1 M1 观察
+位置: docs/ANTI-PATTERNS.md (新建, 唯一允许的新文档)
+
+第 1 条 case: retail-dex v1 偏离
+· 现象 / 根因 / 具体代码位置 / Owner 原话 / 应用规则
+第 2 条 case: "新建前必 grep 15+ service + skills 全目录" 黄金规则
+第 3 条 case: "单 skill Agent 不是粘合" (Trader-B 30 skill disabled)
+
+你已备骨架, 直接起. 首版不求全, 3 条 case 框架 + retail-dex 详细展开即可.
+
+输出: commit "docs: ANTI-PATTERNS.md with retail-dex v1 first case"
+完成标准: 每条 case 含 现象 / 根因 / 证据 / 规则 四段; v1 case 必含 conversations.js:118 + retail-dex/* 五文件引用
+
+─────────────────────────────
+### T-ARCH-03 · retail-dex/* 五文件头加 ⚠ 警告 [QClaude]
+─────────────────────────────
+输入: QClaude 建议 "标注 reference only 而非归档"
+改动: 5 个文件顶部加注释块
+
+警告内容 (每个文件独立定制):
+kasia-console/src/services/retail-dex.js:
+  // ⚠ DEPRECATED in v2 (docs/spec/2026-04-24-dex-broker-v2-glue-layer.md)
+  // 本文件 1123 行约 70% 偷 autoTaker/market-seeder/exchange-machine 活.
+  // 不扩展不模仿. 新 broker 能力走 Mind + exchange-machine 已有基建.
+  // 粘合层独有代码预算 <210 行, 不放这里.
+
+(其余 4 文件同风格, 各自标注自己的偏离程度)
+
+v1 spec docs/spec/2026-04-23-dex-agent-v1.md 头部加:
+  > ⚠ SUPERSEDED BY v2 — docs/spec/2026-04-24-dex-broker-v2-glue-layer.md
+  > 本 spec 由 J1 Opus 2026-04-23 设计, 方向偏离 (broker 当实体做).
+  > Owner 2026-04-24 7 轮纠正后校准成 v2. 本文件保留作历史档案, 不按它执行任何新任务.
+
+输出: commit "docs(retail-dex): DEPRECATED warnings on 5 files + v1 spec"
+完成标准: 6 个文件头注释插入, git diff 干净 (不改任何逻辑行)
+
+─────────────────────────────
+### T-ARCH-04 · Phase 2 · Trader-B 粘合 skill 激活 [QClaude]
+─────────────────────────────
+改动: 纯数据库 UPDATE, 零代码改
+
+步骤:
+1. 启用 Trader-B 6 个粘合 skill:
+   UPDATE skills SET status='active'
+   WHERE relay_node_id='0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0'
+   AND name IN ('conversational-ops', 'self_awareness', 'address_profiler',
+                'social_outreach', 'price_tracker', 'market_scanner');
+
+2. 关闭 retail-proxy skill (回归 Mind 主路):
+   UPDATE skills SET status='disabled'
+   WHERE relay_node_id='0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0' AND name='retail-proxy';
+
+3. Trader-B adapter 切换 (qwen3-coder-480b → 对话模型):
+   看 adapter_nodes 表, 选 glm4.7 (e357bd23) 或 gpt-5.4 (09999778). 问 Owner 选哪个.
+
+4. 先不动 conversations.js:118 bypass (Q 9.6 J1 建议"保留但 docstring 明确", 留 T-ARCH-06).
+
+输出: dev-coord 贴 SQL 执行结果 + Trader-B skill 新状态 + adapter 切换记录
+完成标准: /api/broker/stats 显示 6 skill active, 1 disabled; Trader-B DM 走 Mind pipeline
+
+⚠ 禁止做的: mm_otc / trade_executor / order_executor / cross_chain_verify 这些交易 skill 不启用. broker 是粘合不是交易.
+
+─────────────────────────────
+### T-ARCH-05 · Phase 2 · Agent Card service_terms 写入 [J2 Opus]
+─────────────────────────────
+改动: 给 Trader-B 的 Agent Card 加 service_terms 字段
+
+内容 (Owner 最终审):
+{
+  "entity_type": "kas_assistant",
+  "service_terms": {
+    "modes": ["matching", "custodial"],
+    "buy_kas": { "mode": "matching", "fee": "free", "note": "撮合免费, 用户 USDT 直付 Maker" },
+    "sell_kas": { "mode": "custodial", "fee_kas": "0.1 or 0.5% take max", "note": "代卖费从 KAS 扣, 实到 USDT 干净数字" },
+    "refund_policy": "12h 未确认自动退款, broker 吃 gas",
+    "capacity_formula": "current_usdt_balance / kas_price / 2"
+  }
+}
+
+输出: Kasia Agent Card 上链 (Trader-B relay 发 card_v1 消息) + dev-coord 贴 tx
+完成标准: Scout 扫 Trader-B Agent Card 能读到 service_terms 结构
+
+─────────────────────────────
+### T-ARCH-06 · v2.1 聚合完成后的冲突处理规划 [J2 Opus]
+─────────────────────────────
+输出: 一条 kanet-arch 分析消息 (不动代码), 覆盖:
+· conversations.js:118 bypass 两条 (J1 baf8fea9 /api/agent/consult + 我 v2 删 /api/agent/reply) 如何共存
+· J1 bundle (81b55547) 和 J2 bundle (49d8d6f7) 该谁先 merge
+· stocks.js working tree M (J2) 和 J1 stocks.js +164 的冲突预查
+· 本机 6 个 M 文件 git diff 审查建议
+
+完成标准: 清晰 merge 顺序 + 冲突回答, 等 Owner 点头再动 git
+
+─────────────────────────────
+
+## 时序
+
+并行可做 (互不依赖):
+· T-ARCH-01 (J2 改 spec)
+· T-ARCH-02 (J1 起 ANTI-PATTERNS)
+· T-ARCH-03 (QClaude 加警告)
+
+T-ARCH-04 依赖: Owner 选 adapter (glm4.7 vs gpt-5.4)
+T-ARCH-05 依赖: T-ARCH-04 完成 (broker 身份稳定后写 Card)
+T-ARCH-06 依赖: T-ARCH-01 完成 (v2.1 定稿后规划 merge)
+
+## 冻结项 (v2.1 定稿前禁动)
+· Phase 3 兜底机制代码
+· Phase 4 双模式对接代码
+· Phase 5 v1 残骸清理
+· TRON / base 链补齐
+· 身份冒用根因调查
+
+## 反馈频道
+· 进度汇报: kanet-arch
+· 代码 review: kanet-review
+· 阻塞问题: kanet-alert
+· 大方向讨论: dev-coord
+
+各自领任务, 开工. 完成一件发 kanet-arch 确认.
+
+— J2 Opus 调度 @ HEAD=49d8d6f7

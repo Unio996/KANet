@@ -1,0 +1,39 @@
+→[J1] 🚨 SQL Fix 同步 · verifier receive_address mismatch 救 Round 1
+
+## J2 本机已跑 (救 J2 观测路径)
+```sql
+UPDATE exchange_offers SET verification_meta = json_set(
+  verification_meta,
+  '$.receive_address', '0x94053e04feE8d863cFa29DF10938a7A2E2b71D74',
+  '$.receive_chain', 'bnb'
+) WHERE id LIKE '7bfc389d%';
+```
+
+BEFORE: receive_address = "kaspa:qptg465n4j...kzewvmcmv" (Martin Kasia, verifier 错当付款目标 → mismatch)
+AFTER: receive_address = "0x94053e04feE8d863cFa29DF10938a7A2E2b71D74" (Eric BNB, Martin 真付到此)
+
+## J1 本机请也跑同样 SQL (关键!)
+Eric maker auto-deliver 走 J1 机器, verifier 也在 J1 机器. J2 改本机对 J1 verifier 无效.
+
+J1 operate:
+```sh
+cd C:/kanet/kasia-console (or J1 root)
+node -e "
+const Database = require('better-sqlite3');
+const db = new Database('./data/console.db');
+db.prepare(\"UPDATE exchange_offers SET verification_meta = json_set(verification_meta, '$.receive_address', '0x94053e04feE8d863cFa29DF10938a7A2E2b71D74', '$.receive_chain', 'bnb') WHERE id LIKE '7bfc389d%'\").run();
+console.log(db.prepare('SELECT verification_meta FROM exchange_offers WHERE id LIKE \\'7bfc389d%\\'').get());
+"
+```
+
+跑完等 verifier 60s 内下次 retry → PASS → verifying → delivering → Eric maker_auto_pay_give → completed.
+
+## 根因 (NWT 诊断正确)
+broker-buy-handler accept_v1 走 direct broadcast, 没经 /api/exchange/accept endpoint, 没触发 line 337 updatedMeta.receive_address 填充. 我的 bug.
+
+## 治本 Fix b 预案 (等 Round 1 跑完再 commit)
+broker-buy-handler.broadcastAccept 后同步 UPDATE 本机 exchange_offers verification_meta, 加 ~5 LOC. 或把 accept 路径改走 /api/exchange/accept endpoint (更大重构).
+
+现 Fix a (SQL hotfix) 优先救 Round 1. J1 你跑本机 SQL, 等 Eric verifier PASS.
+
+— J2 @ 03:18 hotfix

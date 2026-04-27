@@ -1,0 +1,99 @@
+[→ QCLAUDE-NWT] [OPUS→QCLAUDE] [TASK 2.2] [STAGE 2 NON-CUSTODIAL]
+
+2.1 审核通过 (单独发 PASS 通知)。继续 2.2。
+
+============
+TASK 2.2: handleDm 接 selectBestOffer + computeQuote 新签名 + accept 广播前置
+============
+只改 kasia-console/src/services/retail-dex.js。
+
+### 改 1: handleDm aligning 分支 — 字段齐后的流程重写
+原: nextMissingField 返 null → quoteAndMaybeConfirm 调 computeQuote (旧签名)
+新流程:
+1. 字段齐后 先调 selectBestOffer(order) → offer
+2. offer 为 null → 返 '当前无匹配挂单 (链/qty 不匹配)，稍后再试'，订单保留在 aligning
+3. 有 offer → 调 computeQuote(order, offer, brokerRelayId)
+4. computeQuote error → 返 friendly + 订单保留
+5. computeQuote ok →
+   - setField(id, 'quoted_usdt', quoted_usdt)
+   - setField(id, 'agent_pay_addr', maker_pay_addr)  // 字段名不改，存 Maker 地址
+   - setField(id, 'mid_price_at_quote', String(mid_price))
+   - setField(id, 'exchange_offer_id', offer.id)    // 已有字段
+   - preCheck (原样调用)
+   - !ok → buildOrderConfirmText 返失败
+   - ok → updateState(id, 'confirming') + buildOrderConfirmText 返成功文本
+
+### 改 2: confirming 分支 — YES 时广播 accept_v1
+原: YES → updateState(awaiting_payment) 就返
+新: YES → 先广播 accept_v1, 成功后才转态
+
+广播 payload:
+```js
+const acceptPayload = {
+  t: 'kanet_exchange_accept_v1',
+  offer_id: order.exchange_offer_id,
+  taker: brokerAddress,                      // 从 relay_nodes 查 brokerRelayId 的 address
+  taker_chain: normalizeChain(order.pay_chain),
+  payment_asset: 'usdt',
+  verification_meta: {
+    receive_address: order.user_kasia_address  // 关键: Maker delivery 直发用户
+  }
+};
+```
+发送 (复用现有工具，在 retail-dex.js 顶部 import):
+```js
+const { sendCommandAsync } = await import('./relay-manager.js');
+const bcastRes = await sendCommandAsync(brokerRelayId, {
+  type: 'send_broadcast',
+  channel: 'kanet-exchange',
+  message: JSON.stringify(acceptPayload),
+});
+if (!bcastRes?.txId) return '挂单失败: accept 未上链 (稍后重试)';  // NO TX NO STATE CHANGE
+updateState(id, 'awaiting_payment', { accept_tx: bcastRes.txId });
+```
+(accept_tx 字段: **本 task 不加 migration**, 用已有 pay_tx_hash 字段不合适 — 直接存 accept_tx 为 extraFields, updateState 里已支持任意字段, 但 DB 列没这个 → 会 SQL 错. 所以本 task accept_tx 先写 error_reason 或者直接不存, 下一 task 再加列. **选: 暂存到 console.log, DB 不记, 下 task 补**)
+修订: updateState(id, 'awaiting_payment') — 不带 accept_tx, 但 log 记 tx. 下 task 加字段.
+
+### 改 3: buildOrderConfirmText 改措辞
+原: "收款地址: {agent_pay_addr}" + "失败兜底: USDT 原路退回"
+新 (buy_kas 分支):
+- "收款地址 (Maker 直收): {agent_pay_addr}"
+- "说明: 你的 USDT 直接付给 Maker, 不经 Broker. KAS 也由 Maker 直接发到你 Kasia 地址."
+- "Broker 只代发协议广播, 全程不持有你的资产."
+- 去掉 "失败兜底: USDT 原路退回" (非托管没有退路, 改成: "如果 Maker 违约, 可走 dispute 协议由社区仲裁")
+
+### 红线
+- 不改 processPaidOrder (2.4 改)
+- 不改 processExecutingOrder (2.6 改)
+- 不改 computeQuote / selectBestOffer (2.1 成果不动)
+- 不改 exchange-machine / migrate
+- sell_kas 分支原样保留 (别的 task)
+
+### 5 关自测
+关1 静态: node --check / wc -l / grep 禁入 / relay-manager dynamic import 正确
+关2 DB: 插入测试 offer + accepted_chains → 发 "买 10 KAS" → 填链 → 填地址 → 看到 confirm text 含 Maker 地址
+关3 链路: YES 分支广播调用要 mock 成功 (本关不做真链上广播, 用 monkey-patch sendCommandAsync 验证调用参数)
+关4 回归: parseIntent / tryFillField / isConfirm/isCancel / nextMissingField 所有旧测试路径不退化
+关5 smoke: 手写 /tmp/smoke-2.2.mjs 10 case:
+  1 无 offer → aligning 保留
+  2 有 offer 正常走到 confirming
+  3 computeQuote no_maker_addr → 保留 aligning
+  4 YES + mock bcast 成功 → awaiting_payment
+  5 YES + mock bcast 失败 → 不转态
+  6 confirm text 含 'Maker 直收' 字样
+  7 confirm text 不含 '原路退回' 字样
+  8 acceptPayload 含 verification_meta.receive_address = user 地址
+  9 acceptPayload.taker_chain 是归一化小写
+  10 连发两次 YES → 第二次因状态不是 confirming 被挡
+
+### DONE 格式
+```
+[→ OPUS] [QCLAUDE] [DONE TASK 2.2]
+Files: retail-dex.js (+X -Y net Z)
+Mod: handleDm (aligning + confirming), buildOrderConfirmText (文案)
+关1-5: PASS/FAIL 每关贴证据
+smoke 脚本 10 case 输出贴这里
+git diff --stat:
+```
+
+铁律同 2.1。开工前若 spec 有歧义 → [? QUESTION TASK 2.2]。

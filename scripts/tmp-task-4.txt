@@ -1,0 +1,115 @@
+[→ QCLAUDE-NWT] [OPUS] [TASK 4: fee 明示 + 9 链余额前置校验]
+
+kill switch 修了 QClaude 秒回, 接着干. 按 SOP 5 阶段走 (需求 → 查 → 写 → 自测 → 汇报).
+
+## 改动范围
+只改这 2 个文件, 其他不动:
+1. kasia-console/src/services/retail-dex-dialog.js (interpret 函数加 balance check)
+2. kasia-console/src/services/retail-dex.js (handleDm 的 confirming 分支 + buildOrderConfirmText)
+
+依赖 (已有, 读不写):
+- chain-balance.js (T2 已合) — 9 链余额查询
+- retail_dex_broker_config (T1 已建表) — 撮合费配置
+
+## 功能需求
+
+### 4.1 fee 明示 — buildOrderConfirmText + createOrder 落库
+老客户发 "买 50 KAS" 走到报价确认时, 订单文本要明示:
+```
+=== 订单确认 abc12345 ===
+买 50 KAS (市价)
+汇率: 0.034 USDT/KAS
+你付: 1.7 USDT (BSC) → Maker 直收 0x...
+扣 0.1 KAS 撮合服务费 (Broker 内部结算, 不用你单独转)
+实到: 49.9 KAS (到你 Kasia 地址 ...xyz)
+...
+```
+
+createOrder 时读 retail_dex_broker_config.fee_kas_per_order (默认 '0.1'), 计算:
+```js
+broker_fee_kas = fee_kas_per_order  // 默认 '0.1'
+net_delivery_kas = qty - broker_fee_kas  // '49.9'
+```
+setField 两个字段到 retail_dex_orders (T1 已加这俩字段).
+
+第一次用户: broker config 行不存在 → 默认 0.1 KAS. 不自动 INSERT.
+
+### 4.2 余额前置校验 — dialog.js interpret
+LLM 返 ready=true 之后, createOrder 之前:
+
+```js
+const { getTokenBalance } = await import('./chain-balance.js');
+const { order } = validation;  // side/qty/pay_chain/pay_address
+if (order.side === 'buy_kas') {
+  // 查用户 EVM 地址上的 USDT
+  const chainCode = normalizeChain(order.pay_chain);
+  const r = await getTokenBalance(chainCode, order.pay_address, 'usdt');
+  if (r.error && !r.error.startsWith('no_')) {
+    // 查询失败给友好提示, 不拦 (fail-open, 让用户试)
+    console.warn(`[retail-dex-dialog] balance check failed: ${r.error}`);
+  } else {
+    // 算需要的 USDT (qty * midPrice 估算, 没 offer 时用市价)
+    const midPrice = snap?.midPrice || 0.034;
+    const needed = parseFloat(order.qty) * midPrice;
+    if (r.balance !== undefined && r.balance < needed * 0.99) {  // 1% tolerance
+      return {
+        ready: false,
+        reply: `你的 ${order.pay_chain} 地址 0x${order.pay_address.slice(2,8)}... 当前 USDT 余额 ${r.balance.toFixed(4)}, 不够付 ${needed.toFixed(2)} USDT (买 ${order.qty} KAS 约需). 建议: 1) 先充值 USDT; 2) 改小数量 "买 X KAS" (X 是你能付的上限).`,
+        validation_error: 'insufficient_balance',
+      };
+    }
+  }
+}
+// 通过 → 继续返 ready: true
+```
+
+sell_kas 暂不做 (KAS 余额查询走 Kasia RPC, 后续 task).
+
+## 红线
+- 不改其他文件 (retail-dex-profile / retail-dex-memory / migrate / chain-balance)
+- 不碰链/钱包/pending_actions
+- 余额查询失败 **fail-open** (不拦用户), 只在 balance 明确 < needed 时拦
+- 撮合费硬编码 fallback 0.1, 不自动 INSERT broker_config
+
+## SOP 5 阶段
+
+### 阶段 1 读需求 (自己复述)
+简单说这个 task 做什么, 有什么 input/output, 红线在哪.
+
+### 阶段 2 查代码
+grep 'EXPECTED 禁入依赖' (agent-mind / mind-manager / brain) 验空.
+看 handleDm 现有 confirming 分支在哪 (retail-dex.js 约 line 780-820).
+看 buildOrderConfirmText 结构 (retail-dex.js 约 line 418-470).
+看 dialog.js interpret 函数在哪加 balance check (line ~230 返 ready 之前).
+
+### 阶段 3 写代码
+用 find-replace 模式, 不自创结构.
+
+### 阶段 4 自测 (必做)
+写 scripts/smoke-t4-fee-balance.mjs:
+
+Case 1: 余额足 → 订单进 confirming + text 含 "扣 0.1 KAS" + broker_fee_kas + net_delivery_kas 落库
+Case 2: 余额不足 → LLM 返 ready:false + reply 含 "不够付"
+Case 3: 余额查询 RPC 失败 → fail-open 继续 (ready:true)
+Case 4: broker_config 表空 → 用 fallback 0.1 KAS
+Case 5: broker_config 有配置 → 用配置值 (比如 0.2 KAS)
+Case 6: sell_kas 跳过余额查 (目前)
+
+造假数据时用真实已知 EVM 地址验证 balance check (bnb/polygon 之前 smoke 有用到).
+
+### 阶段 5 汇报 DONE
+格式:
+```
+Files: retail-dex-dialog.js (+X -Y), retail-dex.js (+X -Y), smoke-t4-fee-balance.mjs (+Z 新)
+5 关证据:
+关1 静态: node --check PASS / 行数真实 / grep 禁入 返空
+关2 功能: smoke 6/6 pass, 贴真实输出
+关3 边界: 余额查询失败 fail-open / broker_config 缺 fallback / sell_kas 跳过
+关4 集成: 真查 Binance BSC 地址 USDT balance > 0 确认能拦
+关5 回归: 老客户 "买 50" 端到端: 对话层 → balance pass → fee 明示 → confirming (可 mock LLM)
+git diff --stat
+```
+
+不 commit. 我审. 如 AUDIT FAIL 我指 find-replace 级错误.
+
+开工.

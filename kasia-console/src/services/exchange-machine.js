@@ -138,11 +138,24 @@ export function transition(offerId, newStatus, extra = {}) {
       _dmKind = 'dm_timeout';
       _dmMsg = `⏰ 订单超时 — 30 分钟内没收到付款验证, 已自动取消. 资金如已转出请联系 Owner 处理.`;
     } else if (newStatus === 'disputed') {
+      // T-J2-2026-04-27 v1.1: 真 educate user 真 dispute 真因 + 真 actionable (J2 R21 沉淀,
+      // J1 22:14 + 24:42 真测撞 underpayment dispute 真灾难 — 真 actionable explanation 防 user 真懵).
       _dmKind = 'dm_failed';
-      _dmMsg = `⚠ 订单争议中, broker 已通知 Owner 人工处理. 请等回复.`;
+      const meta = JSON.parse(offer.verification_meta || '{}');
+      const reason = meta.dispute_reason || '';
+      if (/Underpayment/i.test(reason)) {
+        const expectedM = reason.match(/expected (\d+\.?\d*)/);
+        const gotM = reason.match(/got (\d+\.?\d*)/);
+        const expected = expectedM ? expectedM[1] : '?';
+        const got = gotM ? gotM[1] : '?';
+        const ratio = expectedM && gotM ? (parseFloat(got)/parseFloat(expected)*100).toFixed(0) : '?';
+        _dmMsg = `⚠ 订单 #${offer.id.slice(0,8)} 进入争议:\n· 你转: ${got} ${offer.want_asset}\n· 期望: ${expected} ${offer.want_asset}\n· 真转 ${ratio}% 真不够 (真容差 99.5%+)\n\nbroker 真按比例 deliver: ${(parseFloat(offer.give_amount) * parseFloat(got||0) / parseFloat(expected||1)).toFixed(6)} ${offer.give_asset} (broker 真不收 fee, 等比例发货 zero-loss).\n请等 ~1min broker 真处理. 大额或紧急可联系 Owner.`;
+      } else {
+        _dmMsg = `⚠ 订单 #${offer.id.slice(0,8)} 进入争议: ${reason || '链上验证未通过'}.\nbroker 真自动 retry 3 次未过 → 真 dispute. broker 真 review 真因后 either 退款 OR 按真转 amount 比例 deliver. 真处理 ~5min, 大额或紧急可联系 Owner.`;
+      }
     } else if (newStatus === 'failed') {
       _dmKind = 'dm_failed';
-      _dmMsg = `❌ 订单失败 (链上验证或发送出错), Owner 跟进中. 请联系 KANet 客服.`;
+      _dmMsg = `❌ 订单 #${offer.id.slice(0,8)} 失败: 链上验证或发送出错. broker 真 review 真因, 真 retry OR 真退款. 大额或紧急可联系 Owner 真客服 (真不会消失你的资金).`;
     }
     if (_dmKind) {
       // fire-and-forget (transition 是 sync, 不阻塞流程, DM 失败 warn 不抛)
@@ -298,10 +311,14 @@ export function processAccept(msg) {
     .digest('hex');
 
   // Write taker_chain + taker_payment_address from accept message (cross-node sync)
-  if (msg.selected_chain || msg.receive_address) {
+  // T-J2-2026-04-27 v1.2 (c): 真存 evm_recv_address 进 verification_meta (USDC delivery 真用).
+  // accept_v1 真 receive_address = user kasia (KAS path), evm_recv_address = user EVM (stable path).
+  // exchange-machine auto-deliver Bug-Z2 fix 真 lookup verification_meta.evm_recv_address (stable) OR taker_payment_address (KAS).
+  if (msg.selected_chain || msg.receive_address || msg.evm_recv_address) {
     const meta = JSON.parse(offer.verification_meta || '{}');
     if (msg.selected_chain) meta.receive_chain = msg.selected_chain;
     if (msg.receive_address) meta.receive_address = msg.receive_address;
+    if (msg.evm_recv_address) meta.evm_recv_address = msg.evm_recv_address;
     sqlite.prepare('UPDATE exchange_offers SET taker_chain = ?, taker_payment_address = ?, verification_meta = ? WHERE id = ?')
       .run(msg.selected_chain || null, msg.receive_address || null, JSON.stringify(meta), offer.id);
   }
@@ -752,39 +769,86 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
       const deliveringOffer = transition(offer_id, 'delivering', {});
       console.log(`[exchange] offer ${offer_id.slice(0,8)} payment verified → delivering (${vr.actualAmount} USDT, ${vr.confirmations}/${vr.required} conf)`);
 
-      // Auto-deliver asset to taker (SELL path: give_asset=KAS)
-      if (deliveringOffer?.give_asset === 'KAS' && deliveringOffer.taker) {
+      // T-NWT-2026-04-27 Bug-Z2 fix (J1 25:24 真发现): auto-deliver 真 generic (USDC/USDT/etc)
+      // 老 hardcode `give_asset === 'KAS'` → USDC maker 真 deliver 真不 trigger = USDC e2e 真断.
+      // 真 fix: condition generic + KAS path 用现 sendCommandAsync transfer (backward compat),
+      // 非 KAS 路径用 J1 settler-router sendAsset generic (USDC/USDT × 7 EVM chain).
+      if (deliveringOffer?.give_asset && deliveringOffer.taker) {
         const deliveryAgent = sqlite.prepare('SELECT id, name FROM relay_nodes WHERE address = ?').get(deliveringOffer.maker);
         if (deliveryAgent) {
+          const give_asset = deliveringOffer.give_asset;
+          const give_chain = deliveringOffer.give_chain || 'kaspa';
           const MAX_DELIVERY_ATTEMPTS = 3;
           const DELIVERY_RETRY_MS = 10_000;
           let deliveryTxId = null;
 
-          // T-22-05 retail-proxy: accept 可带 verification_meta.receive_address 指定第三方 KAS 收件地址
-          // 未指定 → 默认发给 offer.taker (原 MM 行为保留兼容)
-          let deliveryTarget = deliveringOffer.taker;
-          try {
-            const dmeta = JSON.parse(deliveringOffer.verification_meta || '{}');
-            if (dmeta.receive_address && typeof dmeta.receive_address === 'string'
-                && dmeta.receive_address.startsWith('kaspa:')) {
-              deliveryTarget = dmeta.receive_address;
-              console.log(`[exchange] delivery routed to third-party ${deliveryTarget.slice(-12)} (taker=${deliveringOffer.taker.slice(-12)})`);
-            }
-          } catch {}
+          // T-22-05 retail-proxy: accept 可带 verification_meta.receive_address 指定第三方收件地址
+          // KAS path: receive_address 必 kaspa: prefix (KAS 真 native chain).
+          // 非 KAS path: receive_address 真 EVM/Sol/Tron addr (跟 give_chain 匹), 或 fallback taker_payment_address.
+          let deliveryTarget;
+          if (give_asset === 'KAS') {
+            deliveryTarget = deliveringOffer.taker; // default kaspa addr
+            try {
+              const dmeta = JSON.parse(deliveringOffer.verification_meta || '{}');
+              if (dmeta.receive_address && typeof dmeta.receive_address === 'string'
+                  && dmeta.receive_address.startsWith('kaspa:')) {
+                deliveryTarget = dmeta.receive_address;
+                console.log(`[exchange] KAS delivery routed to third-party ${deliveryTarget.slice(-12)} (taker=${deliveringOffer.taker.slice(-12)})`);
+              }
+            } catch {}
+          } else {
+            // 非 KAS (USDC/USDT/etc): 真 user EVM addr.
+            // T-J2-2026-04-27 v1.2 (c) priority lookup:
+            //   1. verification_meta.evm_recv_address (J2 v1.2 (c) 真 fix, stable 真 explicit EVM addr)
+            //   2. taker_payment_address (legacy, 老 path 可能存 kasia 误用)
+            //   3. dmeta.receive_address (老 fallback, 排除 kaspa: prefix)
+            try {
+              const dmeta = JSON.parse(deliveringOffer.verification_meta || '{}');
+              if (dmeta.evm_recv_address && typeof dmeta.evm_recv_address === 'string'
+                  && dmeta.evm_recv_address.startsWith('0x')) {
+                deliveryTarget = dmeta.evm_recv_address;
+              } else if (deliveringOffer.taker_payment_address && deliveringOffer.taker_payment_address.startsWith('0x')) {
+                deliveryTarget = deliveringOffer.taker_payment_address;
+              } else if (dmeta.receive_address && typeof dmeta.receive_address === 'string'
+                  && !dmeta.receive_address.startsWith('kaspa:')) {
+                deliveryTarget = dmeta.receive_address;
+              }
+            } catch {}
+          }
+
+          if (!deliveryTarget) {
+            console.error(`[exchange] Bug-Z2 no deliveryTarget for ${give_asset} offer ${offer_id.slice(0,8)} (taker=${deliveringOffer.taker?.slice(-12)}, taker_pay_addr=${deliveringOffer.taker_payment_address?.slice(-12) || 'null'})`);
+            return;
+          }
 
           for (let attempt = 1; attempt <= MAX_DELIVERY_ATTEMPTS; attempt++) {
             try {
-              const { sendCommandAsync } = await import('./relay-manager.js');
-              const sendResult = await sendCommandAsync(deliveryAgent.id, {
-                type: 'transfer',
-                target: deliveryTarget,
-                amount: String(deliveringOffer.give_amount),
-              });
-              deliveryTxId = sendResult?.txId;
-              console.log(`[exchange] KAS delivery attempt ${attempt}: ${deliveringOffer.give_amount} KAS → ${deliveryTarget.slice(-12)} TX: ${deliveryTxId || '?'}`);
-              break; // success
+              if (give_asset === 'KAS') {
+                // KAS 走现 relay transfer (backward compat 不动)
+                const { sendCommandAsync } = await import('./relay-manager.js');
+                const sendResult = await sendCommandAsync(deliveryAgent.id, {
+                  type: 'transfer',
+                  target: deliveryTarget,
+                  amount: String(deliveringOffer.give_amount),
+                });
+                deliveryTxId = sendResult?.txId;
+              } else {
+                // T-NWT-2026-04-27 Bug-Z2 fix: 非 KAS 走 J1 settler-router sendAsset generic
+                const { sendAsset } = await import('./settler-router.js');
+                const sendResult = await sendAsset({
+                  asset: give_asset,
+                  chain: give_chain,
+                  to: deliveryTarget,
+                  qty: parseFloat(deliveringOffer.give_amount),
+                  relayId: deliveryAgent.id,
+                });
+                deliveryTxId = sendResult?.txHash || sendResult?.txId;
+                if (!deliveryTxId && sendResult?.error) throw new Error(sendResult.error);
+              }
+              console.log(`[exchange] ${give_asset} delivery attempt ${attempt}: ${deliveringOffer.give_amount} ${give_asset} → ${deliveryTarget.slice(-12)} TX: ${deliveryTxId || '?'}`);
+              if (deliveryTxId) break; // success
             } catch (err) {
-              console.error(`[exchange] KAS delivery attempt ${attempt}/${MAX_DELIVERY_ATTEMPTS} FAILED: ${err.message}`);
+              console.error(`[exchange] ${give_asset} delivery attempt ${attempt}/${MAX_DELIVERY_ATTEMPTS} FAILED: ${err.message}`);
               if (attempt < MAX_DELIVERY_ATTEMPTS) {
                 await new Promise(r => setTimeout(r, DELIVERY_RETRY_MS));
               }

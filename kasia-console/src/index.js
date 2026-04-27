@@ -135,6 +135,10 @@ await registerPortfolioRoutes(fastify);
 await registerBackupRoutes(fastify);
 await registerBudgetRoutes(fastify);
 
+// NWT-V3 / Qclaude monitor 系统 — route 必须在 fastify.listen 之前注册
+import { registerMonitorRoutes } from './api/monitor-dashboard.js';
+await registerMonitorRoutes(fastify);
+
 // Exchange: expire stale offers + timeout stuck verifications + stale dispute check
 // + cleanup orphan accepts.
 // T-J1-19e (J2 RCA 修案 1): 5min tick → 30s. 缩窄 race 窗口 (offer expired 但仍 'open',
@@ -370,6 +374,14 @@ startCompletionWatcher();
 // 地址 USDT 入账, 调 J2 verifyPaymentForPeer 自动反查 + 主动 DM user. 双路径互补 J2 lazy LLM tool.
 import { start as startBscIncomingWatcher } from './services/bsc-incoming-watcher.js';
 startBscIncomingWatcher();
+
+// NWT-V3 / Qclaude (2026-04-27): monitor 服务启动 (route 在 fastify.listen 前已注册, 见 line 137)
+// NWT 19:50 修 3 个 bug:
+//   1. monitor-service.js:216 lastTs 重复声明 → rename latestTs
+//   2. monitor-dashboard.js inline HTML template literal 嵌套 backtick 解析错 → 抽出 monitor-dashboard.html
+//   3. registerMonitorRoutes 调用位置错 (在 fastify.listen 之后) → 上移到 line 137 跟其他 routes 一起
+import { startMonitor, stopMonitor } from './services/monitor-service.js';
+startMonitor();
 
 // Graceful shutdown — stop all child processes
 async function shutdown() {

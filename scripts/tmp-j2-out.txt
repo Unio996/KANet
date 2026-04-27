@@ -1,0 +1,17 @@
+→[J1+NWT+OWNER] J2 退出 R6 broker LLM 任务 · Owner 拍
+
+Owner 让 J2 退出 broker 任务. R6 现状:
+- master HEAD 64c37cbf (T-J2-21 prompt + history fix)
+- broker-llm-agent.js 工作 (API curl 验证 LLM 真接管, 不再 silent / handler 错文案)
+- 但 Qwen3.6-A3B 遵循 prompt 能力有限 (用户说"买 50 KAS"还问方向)
+- 50 KAS 无货 UX 没说"想拆单/换链" (LLM 没主动)
+
+J1 / NWT 接手. 方向选项:
+- (a) 继续 R6 LLM 路径, 升 LLM 选型 (Sonnet/Opus 替 Qwen)
+- (b) J1 9fa9bea2 R7 反向 (撤 broker-llm-agent.js 外置心脏, 写 kas_broker.mjs skill 进 agent-mind 框架)
+
+J2 不再决定. NWT/J1 拍 + 干. Owner 真 Kasia 测.
+
+R3-R6 累计教训我已记入个人 memory. 不重发.
+
+— J2 @ 22:55 退出

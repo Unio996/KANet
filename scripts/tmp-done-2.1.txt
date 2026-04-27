@@ -1,0 +1,53 @@
+[OPUS J2] [DONE TASK 2.1] [STAGE 2/6 NON-CUSTODIAL]
+
+架构修正: Qwen 是纯聊天模型无工具, 无法真改代码。Owner 指示"指挥 QClaude" 实际含义 = Opus 亲自动手 + 在 dev-coord 公开进度。TASK 2.1 由我 (Opus J1 本机) 直接实现。
+
+commit feec9f6 @ master
+
+改动 2 文件 +336 -24:
+- kasia-console/src/services/retail-dex.js (+118 -24)
+- scripts/smoke-2.1.mjs (+242 新)
+
+核心变更:
+1. computeQuote(order, offer, _brokerRelayId) — 签名变
+   · 废 agent_wallets 查 Broker 地址, 改读 offer.verification_meta.accepted_chains
+   · quoted_usdt = offer.want_amount (非托管不加 spread)
+   · 部分成交按 unitPrice * qty
+   · 返 {ok, quoted_usdt, maker_pay_addr, mid_price, offer_id, give_amount} | {error, friendly}
+
+2. selectBestOffer(order) — 新导出
+   · buy_kas 按 qty + pay_chain 选 open KAS/USDT 卖单
+   · 精确 give_amount=qty 优先, fallback >=qty 部分成交
+   · JS 层 accepted_chains 链过滤
+   · expires_at 用 julianday 比较 (修了原字符串比 T>空格 导致过期 offer 被误认未过期的 latent bug)
+
+3. 删 getSpread 函数
+
+5关自测:
+关1 静态: node --check PASS / 847 行 / grep 'agent-mind|mind-manager|adapter|brain' 返空 / selectBestOffer 已 export
+关2 DB+逻辑: smoke 12 核心 case 全绿
+关3 边界: null/空/非法JSON/SQL注入 全 PASS
+关4 回归: handleDm 运行时调 computeQuote 走 error 分支 — 预期, TASK 2.2 重写 handleDm 修
+关5 smoke: 17/17 PASS (含 5 bonus 攻击测试)
+
+smoke 输出:
+  [PASS] 1-3. 三链 bnb/eth/polygon offer + maker_pay_addr 对
+  [PASS] 4. accepted_chains 空 → no_maker_addr
+  [PASS] 5. 非法 JSON → bad_meta 不 throw
+  [PASS] 6. BSC/BEP20 归一 → bnb
+  [PASS] 7. 精确 qty 命中
+  [PASS] 8. fallback give>qty 命中
+  [PASS] 9. 无挂单 → null
+  [PASS] 10. 链不匹配 → null
+  [PASS] 11. 过期挂单 → null (julianday 修复)
+  [PASS] 12. status=matched → null
+  [PASS] bonus-A. 两精确 offer 选便宜
+  [PASS] bonus-B. verification_meta=null 不崩
+  [PASS] bonus-C. 部分成交按比例算
+  [PASS] bonus-D. 未知链归一后不崩
+  [PASS] bonus-E. SQL 注入 qty 安全 (表没被 DROP)
+  17 pass / 0 fail
+
+下一步: TASK 2.2 — handleDm aligning→confirming 接新 computeQuote + YES 广播 accept_v1 带 verification_meta.receive_address=user 地址 (让 Maker KAS 直发用户, Broker 不中转)
+
+继续。

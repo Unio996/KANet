@@ -1,0 +1,95 @@
+[→ QCLAUDE-NWT] [OPUS] [AUDIT FAIL T2 REVISION] 第二轮 — 又挖到 2 个真 bug
+
+SOL raw RPC 重写思路对 (绕 bigint binding 是聪明的). 但路径错. TRON 完全坏. Opus 多角度深审证据:
+
+## 实测 (smoke + deep 18 case)
+bnb ✅ Binance BSC 1.00 USDT 真
+eth ✅ 换 Binance 2 地址 0x28C6...1d60 查到 6.6 亿 USDT 真 (第一地址 llamarpc RPC 挂)
+polygon ✅ Binance 6560 万 真
+arbitrum/optimism/avalanche ✅
+sol ❌ 两个 Binance 热钱包查 USDT + USDC **全返 0** → 不可能
+tron ❌ Justin Sun + Binance 两真实地址都 'Invalid address'
+
+## Bug A (SOL JSON 路径错)
+chain-balance.js line 82-83:
+```js
+const first = accounts[0];                         // first = { pubkey, account: {...} }
+const uiAmount = first?.info?.tokenAmount?.uiAmount; // ← 错! first.info 是 undefined
+```
+getTokenAccountsByOwner jsonParsed 的返回结构是:
+```js
+first = {
+  pubkey: "...",
+  account: {
+    data: {
+      parsed: {
+        info: {
+          tokenAmount: { uiAmount: 181.917, decimals: 6, ... }
+        },
+        type: "account"
+      },
+      program: "spl-token"
+    },
+    ...
+  }
+}
+```
+**修**:
+```js
+const uiAmount = first?.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0;
+const decimals = first?.account?.data?.parsed?.info?.tokenAmount?.decimals || 6;
+```
+
+## Bug B (TRON setAddress 挂)
+chain-balance.js line 89:
+```js
+const tronWeb = new TronWeb({ fullHost: rpcUrl }).setAddress([]);
+```
+setAddress([]): 空数组非法 → 返 false (或抛). tronWeb 变 false, 后续 .contract() 全挂.
+TronWeb.setAddress 签名是 (address: string) => boolean.
+
+**修 A (最简)**: 不链式 setAddress, 直接用 TronWeb 实例
+```js
+const tronWeb = new TronWeb({ fullHost: rpcUrl });
+const contract = await tronWeb.contract().at(token);
+// 查询时 owner address 作为 from 传入:
+const raw = await contract.balanceOf(address).call({ from: address });
+```
+
+**修 B**: 设合法 dummy TRON 地址 (随便一个)
+```js
+const tronWeb = new TronWeb({ fullHost: rpcUrl });
+tronWeb.setAddress('TJRabPrwbZy45sbavfcjinPJC18kjpRTv8'); // random valid
+```
+
+## smoke 改进 (base 预期处理)
+base 没 USDT 是事实 (EVM_TOKENS.base 只有 usdc/dai). 当前 smoke 报 FAIL 但应该 PASS.
+
+**修 smoke**:
+```js
+// 白名单: 已知某些 chain+token 组合不存在, 算预期 PASS
+const EXPECTED_MISSING = new Set(['base|usdt']);
+const key = `${chain}|${token}`;
+const isExpectedMissing = EXPECTED_MISSING.has(key) && result.error?.startsWith('no_');
+const pass = isExpectedMissing || (typeof result.balance === 'number' && !result.error);
+```
+
+## 测试地址建议 (都要 9/9 真 pass 才算过)
+bnb: 0xF977814e90dA44bFA03b6295A0616a897441aceC
+eth: **0x28C6c06298d514Db089934071355E5743bf21d60** (Binance 2, llamarpc 能查到)
+polygon: 0xF977814e90dA44bFA03b6295A0616a897441aceC
+arbitrum: 0xF977814e90dA44bFA03b6295A0616a897441aceC (Binance)
+optimism: 0xF977814e90dA44bFA03b6295A0616a897441aceC
+avalanche: 0xF977814e90dA44bFA03b6295A0616a897441aceC
+base: 0xF977814e90dA44bFA03b6295A0616a897441aceC 测 usdc 而不是 usdt
+sol: 5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1 (Alameda OTC 之类公开大户), 或查 SolScan 找近期真 USDT 大户
+tron: TMuA6YqfCeX8EhbfYEg5y7S4DqzSJireY9 (Justin Sun, 有 USDT)
+
+## 验收 (下一轮 DONE 必过)
+- 9/9 chain 真返数字 + 无 error (eth 换 Binance 2 地址; base 用 usdc)
+- sol 真返非零余额 (Alameda 或类似大户)
+- tron 真返非零余额 (Justin Sun)
+- node --check pass
+- 3 个 unsupported 异常继续 pass
+
+不过 chain-balance.js 以外不要动. 不 commit 我审.

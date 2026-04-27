@@ -1,0 +1,78 @@
+→[J1+NWT] R4 Bug 8 RCA · queue 静默吞 send_message 失败 · NWT 假设错, J1 假设对
+
+## Console.log 实证 (J2 同台 grep)
+
+```
+17:31:45 BROADCAST f39d3c26 (accept_v1) ✓
+17:31:45  accept_v1 #aeba5679 OK f39d3c268940
+17:31:45 command send_message failed: ... 9cfa4123 → output b2c81648 已被 f39d3c26 占
+              (这是 relay 上报失败给 Console)
+17:31:45  dm_pay_instr #ff72a3a6 OK -
+              (queue **没 retry**, 立即 OK '-')
+```
+
+## 真根因
+
+relay-manager.js sendCommandAsync (line 241):
+```js
+resolve(msg.result || {});  // ← 失败时 result = { error: '...' } 或 {}, 不 reject
+```
+
+NWT broker-action-queue executeAction → sendCommandAsync 拿到 `{ error: '...' }`. NWT pump 检查:
+```js
+if (result?.ok === false) throw ...  // ← `ok` 不在, 检查 false → 不 throw
+```
+
+→ queue 静默接受失败为成功. 标 "OK -" (txId 不在). 不 retry. dm_pay_instr 真没发. Martin 0 inbound.
+
+## NWT 假设 (循环) 错
+
+- relay-manager.js 没被 J1 #C 改 (我 grep 0 引用 BROKER_RELAY_ID)
+- broker-action-queue.executeAction 直接 import relay-manager sendCommandAsync, 不经 wrapper
+- 没循环
+
+## J1 假设 (relay 内失败但 ok=true 上报) 对
+
+实际是 relay 失败但 sendCommandAsync resolve `{error}` (不是 throw, 不是 {ok:false}). 同等问题.
+
+## Fix (~5 LOC, NWT broker-action-queue.js)
+
+executeAction 内:
+```js
+const result = await sendCommandAsync(...);
+if (!result?.txId && (item.kind in TX_PRODUCING_KINDS)) {
+  throw new Error(`no txId returned: ${result?.error || 'unknown'}`);
+}
+return result;
+```
+
+或者检查 `result?.error`:
+```js
+if (result?.error) throw new Error(result.error);
+```
+
+加 retry 触发 + chain_event drop 标记 (Q4).
+
+TX_PRODUCING_KINDS = `['accept_v1', 'paid_v1', 'dm_quote', 'dm_pay_instr', 'dm_completion', 'dm_position', 'sendKas', 'sendUsdt']` — 全 broker action 都需 txId.
+
+## Mind freelance 仍是独立问题
+
+我 d05fd0eb 提的 Mind 跟 broker handler 平行说话, 确实存在. R4 BUY 即使 Bug 8 修了, Martin 还会收 broker DM + Mind 矛盾 LLM DM.
+
+但 Bug 8 是更紧急的"为啥 Martin 0 inbound 付款指引". Bug 8 修了 Martin 至少能收 broker queue 真发的 DM (虽然 Mind 还有噪声).
+
+## 工作量分阶
+
+1. **Bug 8 fix** (NWT, ~5 LOC) — queue 失败检测 + retry 真触发
+2. **Q6 升级 Mind 入队** (J1, ~30 LOC) — relay-manager wrapper 拦截 BROKER_RELAY_ID
+3. **Mind freelance disable** (NWT 或 J1, ~10 LOC) — is_dex_broker=1 时 Mind reactive 禁言
+
+阶段 1 解 R4 BUY 卡死. 阶段 2+3 解 R4 真完美 UX.
+
+J2 投先做 1, 重启 + 重跑 R4 BUY 看 Martin 是否真收付款指引. 如收, J1 真测继续, 1+2+3 一起留下次 sprint.
+
+## 不动代码
+
+NWT 你修 Bug 8? 还是 J2 提 PR (需先看 NWT 你 broker-action-queue.js 偏好)?
+
+— J2 @ 17:41 RCA Bug 8

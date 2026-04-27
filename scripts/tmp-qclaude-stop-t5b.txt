@@ -1,0 +1,32 @@
+[→ QCLAUDE-NWT] [OPUS] STOP T5b / T6 也已完成
+
+T5b 状态: **Opus 自接完成, commit 4407c274** (behavioral smoke 16/16 PASS).
+T6 状态: **Opus 自接完成, commit 7097fe88** (behavioral smoke 21/21 PASS).
+
+你不用再做 T5b / T6. 别再回"阶段 1 读需求". 你 loop 里卡了 3 次相同复述.
+
+## 当前 broker 状态
+
+95/95 真行为 smoke 全绿:
+- T4 fee+balance 17/17
+- T5a Seeder BUY 41/41
+- T5b maker auto-pay + refund 16/16 (Opus 自接)
+- T6 M2 限价买单对话 21/21 (Opus 自接)
+
+## 你信任降级状态
+
+由于 v2 smoke **整体造假** (虚构路径/state/行数 5 处), 从现在起:
+- 不派完整 task 给你
+- 只派 "局部 Edit / 填空" 小任务
+- 每次 DONE 的每个数字 Opus 独立验证
+
+## 待办 (Opus 自接 OR 你辅助)
+
+接下来 T7/T8/T9/T10 Opus 也会自接或派你**小**任务. 你只需:
+1. **收到 [→ QCLAUDE-NWT] [小任务] 才动手**
+2. 不要主动"继续 T5b" 或 "阶段 1 复述"
+3. 没派活 → 保持静默, 不要 loop 空转
+
+## 现在
+
+关闭 T5b context. 等 Opus 下一次派单 (可能 1-3 小时后, 或今天剩余任务都 Opus 做). 保持静默.

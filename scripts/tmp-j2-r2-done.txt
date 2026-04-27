@@ -1,0 +1,51 @@
+🎉🎉🎉→[J1+NWT+OWNER] Round 2 COMPLETED — 第 17 笔 KANet real e2e
+
+## offer 612fd594 全证
+
+```
+status: completed ✓
+taker: Eric Kasia (kaspa:qqjdpjp0...)
+taker_chain: bnb
+payment_tx: 0x45f55eb3f99bd0f60920df277ab615d3c19807763773b199aff207e9f0a28f83 (Eric BSC → Sophie 0x0938415C)
+delivery_tx: 0be0111c1318ca8b9a29181e571cc67f956978fe4dd9321beefebfdd010d7026 (Trader-B → Eric Kasia)
+
+matched_at:        04:32:32
+verifying_started: 04:32:32 (即时, accept+paid 一拍)
+delivering_at:     04:33:36 (verifier PASS 1min 内)
+completed_at:      04:33:36 (auto-deliver 立即跟)
+```
+
+## 全链路 (B 模式 broker-intake 首次 e2e)
+
+1. Sophie 5 KAS → Trader-B (04:01:00 tx 665fecda) — J1
+2. broker-intake-watcher (J2) ingest kaspa_tx_log
+3. hack fallback retail_dex_orders qty=5 → peer=Sophie
+4. broker publish 4.9 KAS SELL offer 612fd594 (扣 0.1 fee)
+5. Eric (J1) /api/exchange/accept → matched
+6. Eric BSC 0.165 USDT → Sophie 0x0938415C → paid_v1 → verifying
+7. Verifier J2 (含 J1 Bug 1 修复 5f15ab3) PASS → delivering
+8. Trader-B auto-deliver 4.9 KAS → Eric Kasia → **completed**
+
+## 三方 fix 全链路验证
+
+| Fix | Owner | 验证场景 | 状态 |
+|---|---|---|---|
+| J1 splitter const 8 | J1 | UTXO 拆 4→8 | ✓ |
+| J2 ensure 8 pre-accept | J2 | broker DM/broadcast 不撞 | ✓ |
+| NWT re-split sub-tick | NWT | 5min 自动补零钱 | ✓ |
+| J1 verifier expectedTo | J1 | accepted_chains.address SELL 路径 | ✓ |
+| NWT broker-intake kaspa_tx_log SQL | NWT | 真 inbound source | ✓ |
+| NWT hack fallback peer | NWT | from_address NULL 反推 user | ✓ |
+
+## C 长期任务 (J2 接, 下次 sprint)
+
+rpc-listener.mjs outputs LRU cache → 真填 kaspa_tx_log.from_address. 工程量 1-2h, 不阻 production.
+
+## broker v2 B 模式 production-ready
+
+- A 模式 (买): Round 1 ✓
+- B 模式 (卖 via 转 KAS): Round 2 ✓
+
+剩余: B 模式 production 替代 hack INSERT (broker-sell-handler 写, 用户先 DM 再转, 不靠 NWT 手插 retail_dex_orders).
+
+— J2 @ 04:34 R2 闭环

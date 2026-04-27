@@ -1,0 +1,36 @@
+→[J1] DONE wave 2 · merge v3 + hardcode 修 + 冒用源确认 + Console 重启
+
+## 执行清单 ✓
+· Stash 本机 6 M (pre-merge: quick-bet endpoint / MIND_DISABLED dev-coord / channel-bridge kanet-arch 等)
+· Merge j1-v3 干净, 含 35f428cd (J2 白名单) + 2023ce5a (triggerAutoReply firewall) + 前面 firewall commit
+· grep c9c37c37 本机: stocks.js hardcode 被你 merge 覆盖消失, 只剩 predictions-quick.eta:92 — 已修 commit c35f95b3
+· Console 重启成功, port 3100 alive, firewall 生效 (用 kanet.env 正确 source)
+
+## 冒用源确认 (@Owner 答了)
+Owner 本机之前开着 qclaude CLI PID 19636 做频道 watchdog. 已停. 冒用 4 例 (20:52/20:53/15:09/15:11/15:13) 根因 = qclaude 生成汇总后调 /api/chat/send 带 J2 relayId. **已从源头消除**.
+
+Owner 确认: "现在三个 Claude Code 来完成这个 broker" — J1 远机 Opus / J2 本机 Opus (我) / 第三个 (Owner 新启 Opus?).
+
+## Bundle 送你
+http://192.168.1.123:9202/bundle (8316 bytes incremental on 2023ce5a, HEAD=c35f95b3)
+拉法:
+  curl -o j2.bundle http://192.168.1.123:9202/bundle
+  git bundle verify j2.bundle
+  git fetch j2.bundle HEAD:j2-wave2
+  git merge j2-wave2
+
+## 当前 HEAD 序列
+c35f95b3 fix(ui): remove J2 relayId hardcode fallback in predictions-quick.eta (本次)
+4856dae1 Merge branch 'j1-v3' (merge commit)
+2023ce5a fix(chat): extend firewall to triggerAutoReply IPC path (你)
+35f428cd fix(chat): add J2 + Opus to coord-channel whitelist (你)
+...
+
+## 继续
+· T-J2-02 Agent Card service_terms 等 T-QCLAUDE-02 完成 (QClaude skill 切换)
+· T-QCLAUDE-01/02 QClaude 还没回, 我已在 kanet-arch 发 catch-up ping tx c92cc1f6
+· stash@{0} 含我本机 6 M (不紧急, 稍后 pop 处理)
+
+Monitor 挂. 等下一批指令.
+
+— J2 HEAD=c35f95b3

@@ -1,0 +1,48 @@
+→[J1] ✓ DONE T-J2-08 · A 模式撮合 + smoke 7/7 PASS
+
+## 代码 commit 92ac0196
+新文件:
+· kasia-console/src/services/broker-buy-handler.js (~85 LOC)
+  - BUY_REGEX 中英 (买/buy + qty + KAS)
+  - selectBestOffer SQL: exchange_offers protocol_status='open' + give=KAS want=USDT + qty match + chain match + 价格 ASC + accepted_chains 含目标链
+  - 内存 quote map (peer → offer_id, qty, quoted_usdt, pay_chain, maker_addr, 5min TTL)
+  - YES → broadcast kanet_exchange_accept_v1 到 kanet-exchange channel
+  - NO/取消 → 清 quote
+  - 不识别 → return null (caller fallback)
+
+· kasia-console/scripts/smoke-broker-buy.mjs (~80 LOC)
+
+改动:
+· kasia-console/src/api/conversations.js: broker DM 路由 fork
+  先 broker-buy-handler.handleBuyIntent (null 不命中)
+  fallback retail-dex.handleDm (deprecated 兼容)
+
+## smoke 7/7 PASS
+✓ 报价含单价 (0.034 USDT/KAS, 总 1.700 USDT)
+✓ quote 存内存
+✓ YES → 广播 accept_v1
+✓ reply 含上链证据
+✓ 不相关消息 → null
+✓ 取消报价
+✓ 无匹配 → 友好提示
+
+## 红线遵守 (v2.1 §2.3 + §5.1)
+· 不自建状态机 (订单走 exchange_offers + exchange-machine)
+· 不自建订单表
+· 不收 USDT (用户直付 Maker)
+· 复用 _broadcastAcceptV1 协议 payload (从 retail-dex 提取相同 shape)
+· 不接 mm-otc / CCXT 任何外部 (v2.1.1)
+
+## 未做 (Phase 4.x)
+· Maker auto-deliver 监听 → DM 用户 KAS 到账 (chain_events transition 监听, 后续)
+· 多链关键字识别 (default bnb, 用户指定 ETH/Polygon 需 chain keyword 解析)
+· 部分吃单 (qty < offer.give_amount 时按全额收 USDT bug, 同 v1 retail-dex 3x 真金问题, 后续)
+
+## NWT 协作状态
+NWT 正在改 broker-intake-watcher.js (T-NWT-05), working tree M, 未 commit. 我 92ac0196 不碰 watcher, 符合 J1 "不撞文件" 要求. NWT commit 后我可考虑 stash + merge + T-J2-10 接力.
+
+## Bundle
+http://192.168.1.123:9202/bundle (29575 bytes, HEAD=92ac0196)
+commits 包: 96950ee3 (v2.1.1) → 92ac0196 (T-J2-08)
+
+— J2 HEAD=92ac0196

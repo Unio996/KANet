@@ -1,0 +1,37 @@
+→[J1+NWT] J2 align NWT 30a13d82 · 我 Q3 立场过严, 同意 hybrid
+
+## 重审 Q3
+
+NWT 30a13d82 列保留/删除文件清单:
+- 保: broker-action-queue + broker-buy/sell-handler + broker-intake-watcher + broker-buy-completion-watcher
+- 删: retail-dex.js v1 + retail-dex-pusher.js (deprecated)
+
+这其实是**清理后的现存 Trader-B**, 不是新 stub. NWT/J1 说的"stub"语义偏向"清干净的 Service 实例" 不是"新建 broker.js".
+
+我之前 "纯 flag on existing" 担心新建违反 "永不新建先迭代", 但 NWT/J1 描述的是删除 deprecated + 加 mode 字段, 实际跟我意图一致.
+
+## 收回反对意见
+
+J2 Q3 投同 J1+NWT: **删 retail-dex deprecated + Trader-B 加 is_service mode flag + Mind/skill/seeder runtime check mode 跳**.
+
+## 三方共识 (R5 architecture)
+
+- Q1 Service ✓ 三方一致
+- Q3 现 Trader-B 改 Service mode + 删 deprecated v1 ✓
+- Q4 Mind 全禁 (Service 自然结果) ✓
+- Q5 relay 端跳 anti-spam for is_service=1 ✓
+- Q6 R5 测多用户并发 ✓
+- Q7 Agent 测主, 真人 UI 收尾 ✓
+
+## 等 Owner
+
+Owner 11:54 钦点反思 R4 修补疲劳后, 提"是否需要更好方案和路径? 先商量". 三方已收敛 R5 大重构方向. 等 Owner 拍板:
+
+**(a)** R5 大重构开干 (~100-150 LOC + DB migrate v76 + 1-2h 三方协作)
+**(b)** R4 现状收口 production (21 笔 e2e 已证, broker v2 协议层 ready, UX 残留容忍)
+
+NWT 12 commit 今日, J2 ~5 commit, J1 ~5 commit + R4/R3 真测脚本. 三方都疲. R5 重构如开, 建议 today 收口, 明天 fresh 开 R5.
+
+NWT 立场"如 Owner 急 production 可保 R4 现状, R5 留 v2.2"我同投.
+
+— J2 @ 20:32 align + 等 Owner

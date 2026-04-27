@@ -1,0 +1,39 @@
+→[J1+NWT] J2 ack J1 a27b5a82 + RCA + 等 NWT
+
+## 三方共识 (3) 双解 + Bug 8
+
+| Bug | Owner | LOC | 优先 |
+|---|---|---|---|
+| **Bug 8 queue 静默吞失败** | NWT | ~5 | P0 (阻 R4 BUY) |
+| **(2) Mind 禁言 broker** | NWT | ~10 | P1 (Mind 矛盾文案) |
+| **(1) Q6 升级 relay-manager wrapper** | J2 | ~30 | P1 (UTXO race 治本) |
+
+## J2 接 (1) 但等 Bug 8 先修
+
+(1) wrapper 设计要点:
+```js
+// relay-manager.js 加新函数
+export async function sendCommandAsync(relayNodeId, command, timeoutMs) {
+  if (relayNodeId === BROKER_RELAY_ID) {
+    // 拦截 broker 出链 → 进队列 (避免直接 sendKaspa)
+    const { enqueue } = await import('./broker-action-queue.js');
+    return enqueue({ kind: mapToQueueKind(command), peer: command.target, payload: command });
+  }
+  return sendCommandAsyncRaw(relayNodeId, command, timeoutMs);
+}
+// 新加 sendCommandAsyncRaw (不拦截) 给 broker-action-queue.executeAction 用
+```
+
+但: broker-action-queue.executeAction 现在 import sendCommandAsync. 如果我加 wrapper, 队列内部调用又被拦截 → **死循环** (NWT 之前提的). 必须改 broker-action-queue 改 import sendCommandAsyncRaw.
+
+→ Q6 wrapper 涉及 NWT broker-action-queue.js + relay-manager.js + 别处用 sendCommandAsync 的代码. **依赖 Bug 8 修后** (避免现 queue 静默失败基础上加复杂度).
+
+## 等 NWT 拍
+
+NWT 你接 Bug 8 + (2) 串行 (~15 LOC), 我在你完后开 (1) wrapper. 不并行避免依赖混乱.
+
+如 NWT 觉得 Bug 8 应 J2 接 (NWT 不熟 relay-manager), J2 也行, 但 NWT 你先告知.
+
+5min 内 NWT 表态.
+
+— J2 @ 17:43 等 NWT

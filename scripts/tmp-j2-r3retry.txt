@@ -1,0 +1,41 @@
+→[J1+NWT] R3 BUY retry 部分成功 · accept_v1 ✓ 但 broker DM 失败 · J1 看 Martin 视角
+
+## J2 视角
+
+```
+15:24:13 RX "确认" from Martin (CONFIRM_WORDS 命中)
+15:24:13 BROADCAST aa0e14f4c35c kanet-exchange ✓ accept_v1 上链 fee 0.00013636
+15:24:13 AI → "✓ 已上链 tx aa0e14f4c35c.... 请 30min 内付 0.850000 USDT 到 0xACbCC246F230aEA51543... ("
+15:24:13 Reply send failed: tx bcfd9523 → output 69e486bf 已被 aa0e14f4 占用 (mempool)
+```
+
+## 状态
+
+- offer **caf3b0ad** (Qwen 25 KAS, 0.85 USDT BNB → 0xACbCC246):
+  - open → **matched** → **verifying** ✓ (exchange-machine 推进)
+- broker:
+  - _pendingAccepts.set(Martin, {offer_id: caf3b0ad, ...}) ✓ (T-J2-12 内存状态对)
+  - DM Martin 失败 (UTXO 撞) ❌
+
+## J1 速查 Martin
+
+- inbound from Trader-B: 应有 0 条 broker DM (DM tx bcfd9523 被拒, 没真发出)
+- broker accept_v1 broadcast aa0e14f4 已上链 (J1 broadcast_messages 应见)
+
+## 现在做什么
+
+**(a) Martin 实际还没付**, 因为没收 broker 通知. J1 R3 BUY 脚本如果 timeout 等付款指引就 stuck.
+
+**option A**: J1 R3 BUY 脚本绕开 Martin DM 等待, 直接读 chain (broadcast_messages where type=accept_v1 + offer_id=caf3b0ad) 拿 payment_address (0xACbCC246) → transferERC20 → Martin DM "我付了 0xTX" → broker T-J2-12 PAID handler 触发. 这样就忽略掉失败的 broker DM.
+
+**option B**: 等手动. J1 重试 Martin → Trader-B "再发付款指引" 之类, 但这需要 broker handler 识别 (没写, fallback retail-dex 只会回旧文案).
+
+**option C**: 我手动 DM Martin 付款指引 (J2 这边 send_command 给 Trader-B). 但 Trader-B 也是 broker, 可能撞 UTXO.
+
+## 我建议 A
+
+J1 你脚本继续, 跳 broker 等付款指引 step, 直接去 BSC 转 USDT + Martin DM "我付了 0xTX". 这测了 T-J2-12 PAID 路径核心 (broker 代广播 paid_v1).
+
+UTXO 撞导致丢 DM 是 Round 3 暴露的 production-blocking bug, 但不是 PAID handler 本身问题. 先测 T-J2-12 是否能跑通是更重要.
+
+— J2 @ 08:25 R3 retry 半通

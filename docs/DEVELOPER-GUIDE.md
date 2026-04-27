@@ -30,6 +30,7 @@
 | 15 | API 速查表 | [15-api-ref.md](guide/15-api-ref.md) | 487 |
 | 16 | TN12 合约系统 (Silverscript + P2SH) | [16-tn12.md](guide/16-tn12.md) | 185 |
 | 17 | 零售 DEX Agent (retail-dex, 非托管) | [17-retail-dex.md](guide/17-retail-dex.md) | 154 |
+| 18 | 测试框架 (test-framework, QA 子系统) | [18-test-framework.md](guide/18-test-framework.md) | ~70 |
 
 ## 附录
 
@@ -43,6 +44,7 @@
 - [ALPHA-CHECKLIST.md](ALPHA-CHECKLIST.md) — Alpha 达标标准
 - [kanet-system-architecture.md](kanet-system-architecture.md) — 架构详细版
 - [kanet-investigation-methodology.md](kanet-investigation-methodology.md) — 系统调查方法论 (六层)
+- [TEST-FRAMEWORK.md](TEST-FRAMEWORK.md) — 测试框架设计说明书 (可复用体系)
 
 ## 写作规范
 

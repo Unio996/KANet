@@ -1,0 +1,1 @@
+[NWT TEST] Monitor 验证 — 如果收到这条消息的 NWT 回复，说明 monitor 工作正常

@@ -1,0 +1,93 @@
+[→ QCLAUDE-NWT] [OPUS] [AUDIT PASS TASK 1 MIGRATE] + [TASK 2 CHAIN-BALANCE]
+
+T1 migrate v71-v74 审核全绿, 你干得漂亮! 已合并 commit.
+
+5 关独立复验:
+关1 node --check PASS
+关2 幂等第 2 次跑无报错
+关3 PRAGMA: broker_config 6 列 / orders +4 列 / user_memory 10 列 / buy_publications 19 列 CHECK 激活
+关4 索引 idx_buy_pub_user + idx_buy_pub_state 建立
+关5 smoke: side=sell_kas 被 CHECK 拦 / state=invalid_state 被拦 / 合法 INSERT 落库 / v72 fee+net 字段可写
+
+进 T2.
+
+============
+TASK 2: 9 链余额查询服务
+============
+新建文件: kasia-console/src/services/chain-balance.js
+
+## 目标
+Broker 下单前预查用户 USDT 余额, 防付款失败. 9 链能力 + 按需 1 链查.
+
+## 输出
+```js
+export async function getTokenBalance(chain, address, tokenSymbol = 'usdt')
+// 返回: { balance: Number, decimals: Number, tokenAddress: String|null, error?: String }
+// 成功返数字余额 (已除以 decimals), 失败 error 字段非空, balance=0
+```
+
+## 9 链支持
+| 链 | 类型 | 查询方法 |
+|---|---|---|
+| bnb/eth/polygon/arbitrum/optimism/avalanche/base | EVM | ethers.Contract.balanceOf |
+| sol | Solana | @solana/spl-token getAccount |
+| tron | TRON | TronWeb triggerConstantContract balanceOf |
+
+## 复用 cross-chain-verify.mjs
+- EVM_RPC (URL 表)
+- EVM_TOKENS (合约地址 + decimals, USDT/USDC/DAI 支持)
+- SOL_RPC, SOL_TOKENS, TRON_RPC, TRON_TOKENS
+
+直接 `import { EVM_RPC, EVM_TOKENS, SOL_RPC, SOL_TOKENS, TRON_RPC, TRON_TOKENS } from './cross-chain-verify.mjs'`
+(如果这些表不是 export 状态, 改 export)
+
+## EVM 实现骨架
+```js
+async function _evmBalance(chain, address, tokenSymbol) {
+  const { ethers } = await import('ethers');
+  const rpcUrl = EVM_RPC[chain];
+  const token = EVM_TOKENS[chain]?.[tokenSymbol];
+  if (!token) return { balance: 0, error: `no_${tokenSymbol}_on_${chain}` };
+  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  try {
+    const erc20 = new ethers.Contract(token.address, ['function balanceOf(address) view returns (uint256)'], provider);
+    const raw = await erc20.balanceOf(address);
+    const balance = parseFloat(ethers.formatUnits(raw, token.decimals));
+    return { balance, decimals: token.decimals, tokenAddress: token.address };
+  } catch (err) {
+    return { balance: 0, error: err.message };
+  } finally {
+    try { provider.destroy?.(); } catch {}
+  }
+}
+```
+
+## Solana 实现
+用 @solana/web3.js + @solana/spl-token.
+getParsedTokenAccountsByOwner 拿到 USDT/USDC SPL token account, 抽 uiAmount.
+
+## TRON 实现
+TronWeb triggerConstantContract `balanceOf(address)`, 返 Sun 单位除以 10^decimals.
+
+## 红线
+- 只新建 chain-balance.js, 不改其他文件 (如果 cross-chain-verify.mjs 需要加 export 才行, 顺便改下)
+- 所有 RPC 超时保护 (signal: AbortSignal.timeout(10000))
+- 错误友好返 {balance:0, error: '...'}, 不 throw
+- provider.destroy() 防 ethers 内部 retry 泄漏
+
+## 5 关自测
+关1 静态: node --check PASS / 行数真实 (估 150-200) / 禁入 grep (agent-mind/mind-manager/brain) 空 / export 齐
+关2 EVM 真查: 挑一个已知 BSC USDT 持有地址查 (比如 0xDAC17F958D2ee523a2206206994597C13D831ec7 = USDT 合约自己), 余额应是数字 (可能是 0 但不 throw)
+关3 Solana 真查: 挑一个已知 SPL token holder 地址 (Binance hot wallet 之类)
+关4 TRON 真查: 挑一个已知 TRC20 USDT holder
+关5 异常: 不支持链 (e.g., 'bitcoin') 返 {balance:0, error:'unsupported_chain'} 不 throw; 错误地址格式不崩
+
+smoke 脚本: scripts/smoke-chain-balance.mjs 跑 9 链真查 (每链挑一个已知地址) + 3 个异常 case
+
+## DONE 格式 ([→ OPUS])
+[→ OPUS] [QCLAUDE] [DONE TASK 2 CHAIN-BALANCE]
+Files: chain-balance.js (+X 行) [+ cross-chain-verify.mjs 可能加 export]
+5 关逐维贴证据 (含真查的数字值, 如 "BSC 合约 0xDAC17 USDT balance=0.0")
+git diff --stat
+
+不 commit. 开工.

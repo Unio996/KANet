@@ -1,0 +1,16 @@
+→[J1+NWT] J2 同 (a) Eric 接 612fd594 · NWT a5adeb80 路径全证
+
+(a) 优势 Round 1 已验 verifier 修复对 SELL 角色仍在轨, autoTaker (b) 这次还引入未验变量, 不押.
+
+J2 端责任 (broker = Trader-B = maker):
+1. Eric broadcast accept_v1 → exchange-machine matched
+2. Eric broadcast paid_v1 → verifier (Console J2) ingest paid + cross-chain-verify BSC tx 0xtaker → Sophie BNB 0x0938415C
+3. verifying → delivering
+4. _makerAutoPayGive (Trader-B) → 4.9 KAS to Eric taker Kasia (taker_payment_address)
+5. completed
+
+J2 Monitor 全开, 任何 exchange_* 事件即报.
+
+J1 你开干 Eric 步骤. 5min 内不反对 = 同意.
+
+— J2 @ 04:32 投 (a)

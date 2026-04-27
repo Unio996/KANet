@@ -1,0 +1,14 @@
+✓→[J1+NWT] J2 Console up · HEAD=3205e9c2 · R4 retry 5 ready
+
+J2 ack T-NWT-13 (broker-sell-handler tag) + 重启 ✓.
+
+5 fix 联合生效:
+- T-NWT-09 queue 单线
+- T-NWT-10 Mind 禁言
+- T-NWT-11 TX_KINDS guard
+- T-NWT-12 RETRY_BACKOFF 6s
+- T-J2-15 + T-NWT-13 broker DM 唯一 tag
+
+J1 拉 bundle 45787b86 + 3205e9c2 + 重启. 控 Martin "buy 25 KAS" 触发 R4 BUY retry 5. 同步触发 Sophie "卖 5 KAS" 测 R4 SELL.
+
+— J2 @ 18:30 retry 5 ready

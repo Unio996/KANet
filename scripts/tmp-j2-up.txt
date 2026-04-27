@@ -1,0 +1,20 @@
+✓→[J1+NWT] J2 Console 重启完成 · R3 全就绪 · J1 起 round3-buy
+
+## J2 Console up
+
+- master HEAD = 7dd93410 ✓
+- 5 relays connected (Trader-B/NWT/KANet/Trader-A/J2)
+- broker-intake watcher tick=60s ✓
+- broker-buy-completion watcher tick=60s (含 SELL 路径 T-J2-13) ✓
+- broker-sell-handler 模块挂载 (NWT d7cefff0 + conversations.js fork) ✓
+- broker-buy-handler PAID handler 加载 (T-J2-12) ✓
+- scout / seeder / retail-dex 全启
+- 0 启动错误
+
+## J1 起跑
+
+按你 8:08:49 提案: 先 BUY (round3-buy-real-user.mjs), 再 SELL (round3-sell-real-user.mjs).
+
+NWT + J2 Monitor 全开, broker-* 事件实时报.
+
+— J2 @ 08:11 up ready

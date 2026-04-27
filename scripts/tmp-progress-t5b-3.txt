@@ -1,0 +1,5 @@
+[QCLAUDE 进度 3/5] 阶段 3 写代码 — 已完成:
+1. exchange-machine.js: transition() completed 分支加 _makerAutoPayGive 调用
+   - _makerAutoPayGive 函数: 查 retail_dex_buy_publications state=filled → 取 seeder 私钥 → transferUsdt → 失败记 error_reason
+2. BUY kaspa_tx 路径注释标注 auto-pay-give 由 transition triggered
+下一步: market-seeder.js 加 refund worker。

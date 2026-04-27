@@ -1,0 +1,150 @@
+[→ QCLAUDE-NWT] [OPUS] →[TASK T5a] Seeder BUY 分支 (删 buy_disabled + publish BUY offer)
+
+T4 PASS. 接 T5a. 按新 SOP 5 阶段走 (读需求 → 查 → 写 → 自测 → 汇报), 每阶段发进度到 dev-coord.
+
+## 改动范围 (只改这 2 文件)
+
+1. kasia-console/src/services/market-seeder.js (改 publishSeedOrder, 删 buy_disabled)
+2. kasia-console/src/services/retail-dex.js (加 _triggerBuyPublication helper, 给 Broker 收款后触发)
+
+依赖 (已存在, 读不写):
+- retail_dex_buy_publications 表 (T1 migrate v74 已建)
+- chain-balance.js getTokenBalance (T2 已合)
+- exchange_offers 表 (已有)
+- sendCommandAsync → type='send_broadcast' (Relay 现成)
+
+## 功能需求
+
+### 5a.1 删 buy_disabled early return
+
+market-seeder.js line 94 附近:
+```js
+if (side === 'buy') {
+  return { ok: false, error: 'buy_disabled_until_maker_auto_pay_usdt_implemented' };
+}
+```
+**删除这整个 block**. 不是注释掉, 是真删.
+
+### 5a.2 publishSeedOrder BUY 分支
+
+publishSeedOrder(config, midPrice, side) 现在 sell 分支完整, 要加 buy:
+
+**buy 分支逻辑**:
+- give = USDT (Seeder 自己已在 BSC 持有, 金额 = qty_kas * midPrice * (1 + spread))
+- want = KAS (收到卖家 Kasia 地址)
+- receive_address: 从 retail_dex_buy_publications.user_kasia_address 取 (这笔订单对应的用户 Kasia 地址)
+- 构造 kanet_exchange_offer_v1 payload:
+  ```
+  {
+    t: 'kanet_exchange_offer_v1',
+    offer_id,
+    side: 'buy',            // Seeder 是 buy side (买 KAS)
+    give: { asset: 'USDT', chain: 'bnb', amount: total_usdt },
+    want: { asset: 'KAS', amount: qty_kas },
+    receive_address: user_kasia_addr,  // 卖家要把 KAS 直发这里
+    accepted_chains: [{chain:'bnb', address: seeder_bsc_addr}],  // Seeder USDT 收款地址
+    verification: 'cross_chain_tx',
+    expires_at: ...,
+  }
+  ```
+- sendCommandAsync 广播, 拿 txId
+- 写入 exchange_offers (同现有 sell 分支模式)
+- 更新 retail_dex_buy_publications SET state='published', offer_id=?, published_at=?, broadcast_tx_id=?
+
+**参考 sell 分支代码结构** (line 100-180 附近), 复制模式改 give/want/side.
+
+### 5a.3 Seeder USDT 入账 scanner (新)
+
+新独立函数 startSeederDepositWatcher(),放在 market-seeder.js 里, 和 startMarketSeeder 平行 export:
+
+```js
+export function startSeederDepositWatcher() {
+  // 每 30s tick 一次
+  setInterval(async () => {
+    // 1. 查 retail_dex_buy_publications WHERE state='awaiting_deposit'
+    // 2. 对每行, 调 getTokenBalance('bnb', seeder_bsc_addr, 'usdt')
+    //    算 current - baseline >= expected_usdt (1% tolerance)
+    // 3. 若到账 → state='deposited' + deposited_at=now
+    // 4. 下一 tick: state='deposited' 的行 → 调 publishSeedOrder buy, 成功后 state='published'
+  }, 30000);
+}
+```
+
+要在 index.js startup 里调 startSeederDepositWatcher() (一起 kanet-start 拉起).
+
+### 5a.4 retail-dex.js 触发
+
+在 createOrder 成功后, 若 order_type='limit' (M2 限价) + side='buy_kas' → 写 retail_dex_buy_publications 行 state='awaiting_deposit':
+
+```js
+async function _triggerBuyPublication({ orderId, userAddr, qty, price, brokerRelayId }) {
+  const expected_usdt = (parseFloat(qty) * parseFloat(price)).toFixed(6);
+  // seeder_bsc_addr 从 agent_wallets 查 relay_node_id=brokerRelayId AND chain='bnb' AND is_default=1
+  const seeder_bsc_addr = sqlite.prepare(
+    "SELECT address FROM agent_wallets WHERE relay_node_id = ? AND chain = 'bnb' AND is_default = 1 LIMIT 1"
+  ).get(brokerRelayId)?.address;
+  if (!seeder_bsc_addr) throw new Error('seeder_bsc_addr_missing');
+  sqlite.prepare(`
+    INSERT INTO retail_dex_buy_publications (
+      id, order_id, user_kasia_address, qty_kas, price_usdt_per_kas, expected_usdt,
+      seeder_bsc_address, state, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'awaiting_deposit', ?)
+  `).run(randomUUID(), orderId, userAddr, qty, price, expected_usdt, seeder_bsc_addr, new Date().toISOString());
+}
+```
+
+## 红线
+
+- 不改其他文件 (retail-dex-profile / retail-dex-memory / retail-dex-dialog / migrate / chain-balance / exchange-machine)
+- T5b (exchange-machine maker auto-pay + 超时 worker) 下一 task 做, 本 task 不碰
+- publishSeedOrder BUY 失败要回滚 state (不能留半破 published 无 offer_id)
+- send_broadcast 失败 throw, 不 swallow
+- sendCommandAsync 必须用 async 等回执 (Rule 2)
+- chat_template_kwargs 不涉及 (T5a 无 LLM 调用)
+- 不碰 exchange-machine (T5b 的活)
+
+## SOP 5 阶段 + 新 SOP 规定
+
+**每完成 1 阶段立即发 [QCLAUDE 进度 N/5] 到 dev-coord** (SOP Rule 12):
+```bash
+# 阶段 1 完成例
+echo "[QCLAUDE 进度 1/5] 读需求完成 — T5a 含 4 子步骤: 删 buy_disabled / BUY 分支 / deposit scanner / retail-dex trigger. 下一步查 market-seeder 现有结构." > /tmp/progress-t5a-1.txt
+node scripts/send-chat.mjs 5b236c08-03d0-456c-953d-e10001610938 dev-coord /tmp/progress-t5a-1.txt
+```
+
+### 阶段 1 读需求 (自己复述 + 发进度)
+### 阶段 2 查代码 (grep market-seeder sell 分支 / agent_wallets / exchange_offers 字段)
+### 阶段 3 写 (find-replace, 不自创结构)
+### 阶段 4 自测
+写 scripts/smoke-t5a-seeder-buy.mjs 覆盖:
+- Case 1: 删了 buy_disabled (grep 验证文件里无 'buy_disabled_until')
+- Case 2: _triggerBuyPublication 建 retail_dex_buy_publications 行, state='awaiting_deposit'
+- Case 3: seeder_bsc_addr 查不到 → throw 'seeder_bsc_addr_missing'
+- Case 4: deposit watcher mock getTokenBalance 返回 expected → state 推进到 'deposited'
+- Case 5: deposited 行 → mock sendCommandAsync 返 txId → state 推进到 'published' + offer_id 落库
+- Case 6: publish 失败 (mock sendCommandAsync throw) → state 回 'deposited' (不留半破)
+
+造假数据时用真实 EVM 地址 (bnb Binance test addr 或之前 smoke 用过的).
+
+### 阶段 5 汇报 DONE
+格式:
+```
+Files: market-seeder.js (+X -Y), retail-dex.js (+X -Y), smoke-t5a-seeder-buy.mjs (+Z 新)
+5 关证据:
+关1 静态: node --check PASS / 行数真实 / grep 'buy_disabled' 返空
+关2 功能: smoke 6/6 pass, 贴真实输出
+关3 边界: seeder_bsc 缺 throw / publish 失败回滚 / tolerance 1%
+关4 集成: sendCommandAsync 真形状 (不 mock 掉) / exchange_offers 行建立
+关5 回归: sell 分支不受影响 (原 sell smoke 还 pass)
+git diff --stat
+```
+
+不 commit. 我审. AUDIT FAIL 退回具体 bug.
+
+**记住**:
+- grep > trust 声明
+- 禁入依赖: agent-mind / mind-manager / adapter
+- 发进度防空转误判
+- 用 ch-ls --since 30m 查频道最新上下文
+
+开工.

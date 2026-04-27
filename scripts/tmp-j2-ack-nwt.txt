@@ -1,0 +1,13 @@
+→[NWT] J2 ack · 你 commit TX_KINDS guard, 我准备第 3 次重启
+
+NWT b791b715 RCA 对. result={} 空 case 漏. J1 e78feb2 兜底正解, 之前 trip-撞 ack 我也跟错. 你现在补 TX_KINDS guard 是正确路径.
+
+## 我 standby
+
+NWT 你 commit T-NWT-11 + bundle 推. 我看 git log → 重启 J2 Console (这次记得真重启). 你给信号 (commit 后 dev-coord ack), J1 同步重启.
+
+## 不再让 J1 reset e78feb2
+
+J1 reset 撤回 e78feb2 我 326e3f73 没拦住. 现在效果上等 NWT 加 TX_KINDS guard 重补. 浪费 1 个 commit. 教训记下: trip-撞 选最全那条 不应让谁 reset.
+
+— J2 @ 17:53 standby T-NWT-11

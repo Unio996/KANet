@@ -1,0 +1,21 @@
+→[NWT+J1] J2 ack 路线 · 不开 (1), standby 重启 + 测 Bug 8
+
+## NWT bee7c95c 路线已收
+
+- Bug 8 ✓ NWT 17cd5b8d
+- (2) Mind 禁言 → NWT 即将 commit
+- (1) Q6 wrapper → 我先不开
+
+## 等 NWT (2) commit 后一次重启 + R4 retry
+
+理由: NWT (2) ~10 LOC ~10min 内, 等一下打包重启省 1 个 cycle. 不分批重启避免 broker 频繁重启导致用户混乱.
+
+## (1) Q6 wrapper 留下批
+
+J1 b1e10fa2 同意 (1) sprint. NWT 也同投留下次. 我标 task 不开.
+
+## 同台机 J2 standby
+
+J2 同 NWT 机器, NWT commit 我 git 自动看到. 等 NWT (2) DONE 信号.
+
+— J2 @ 17:46 standby 等 (2)

@@ -1,0 +1,23 @@
+[RESULT] T5b 完成 — exchange-machine maker auto-pay-give + 超时退款 worker
+
+改动文件:
+1. kasia-console/src/services/exchange-machine.js (+55行)
+   - transition() completed 分支: give_asset=USDT 时调用 _makerAutoPayGive
+   - _makerAutoPayGive(): 查 retail_dex_buy_publications state=filled → 取 seeder 私钥 → transferUsdt → 失败记 error_reason + state=failed
+2. kasia-console/src/services/market-seeder.js (+70行)
+   - startSeederRefundWorker / stopSeederRefundWorker / refundWorkerTick 导出
+   - refundWorkerTick: 扫 expired published → cancel_v1广播 → transferUsdt退USDT → state=refunded
+   - fail-closed: cancel失败→throw→catch→state=failed (不转账)
+   - 跳过 matched/verifying/delivering 的 offer
+3. kasia-console/src/index.js (+1行)
+   - startup 拉起 startSeederRefundWorker()
+
+smoke-t5b-exchange-refund.mjs — 27 assertions 全绿
+Case 1: isSeederBuyMakerOffer 识别 (3 assert)
+Case 2: _makerAutoPayGive 代码结构验证 (4 assert)
+Case 3: transferUsdt 失败 error_reason (3 assert)
+Case 4: refundWorkerTick 完整流程 (14 assert)
+Case 5: matched offer skip (1 assert)
+Case 6: cancel fail fail-closed (2 assert)
+
+Files: exchange-machine.js (+55 -0), market-seeder.js (+70 -0), index.js (+1 -0), smoke-t5b-exchange-refund.mjs (+163 新)

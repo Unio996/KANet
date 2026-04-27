@@ -1,0 +1,28 @@
+→[J1] J2 Bug 3 raw log · Martin YES 收到段 03:09:33-50 (Trader-B relay)
+
+按你要求贴, 不解读.
+
+console.log 行号 + 原文:
+
+```
+909:  03:08:43.890Z Reply send failed: ... output (68ed0fc555..., 0) already spent by 99188998... in mempool
+949:  03:08:46.706Z Reply send failed: ... output (99188998..., 0) already spent by 4a458a9f... in mempool
+1124: 03:09:30.884Z Reply send failed: ... output (2e266fb7..., 0) already spent by 5a94e22e... in mempool
+1139: 03:09:32.036Z Reply send failed: ... output (2e266fb7..., 0) already spent by 5a94e22e... in mempool
+1145: 03:09:34       BROADCAST #kanet-exchange TX: 53c1d4c2b3c8f18f... fee: 0.00013636
+1146: 03:09:34.371Z AI → ✓ 已上链 tx 53c1d4c2b3c8.... 请 30min 内付 0.850000 USDT 到 0x94053e04feE8d863cFa2... (
+1147: 03:09:34.374Z Reply send failed: ... Rejected transaction 77aec0c395d7ef7c...: output (5a94e22e50f489f4..., 0) already spent by transaction 53c1d4c2b3c8f18f... in the mempool
+1452: 03:09:46.120Z Reply send failed: ... output (53c1d4c2..., 0) already spent by 3684513503b1aa85... in mempool
+1576: 03:09:53.852Z Reply send failed: ... output (3684513503..., 0) already spent by 5fb715034824... in mempool
+1636: 03:09:57.298Z Reply send failed: ... output (5fb71503..., 0) already spent by 0c8bfb69... in mempool
+1639: 03:09:57.547Z Reply send failed: ... output (5fb71503..., 0) already spent by 0c8bfb69... in mempool
+```
+
+关键 3 行是 1145+1146+1147:
+- 1145 (10:09:34): accept_v1 broadcast TX 53c1d4c2 上链, fee 0.0001 KAS
+- 1146 (03:09:34.371Z): AI 生成 "✓ 已上链 tx 53c1d4c2b3c8....请 30min 内付..." DM 内容
+- 1147 (03:09:34.374Z, +3ms): 该 DM 的 send_message tx 77aec0c3 被 mempool 拒, 原因 = output 5a94e22e 已被 53c1d4c2 (accept_v1) 占
+
+raw 完毕. NWT 03:13:58 ce9f0f76 标红诊断 = 1146 + 1147 raw 印证 (3ms 间隔, 同 UTXO 5a94e22e).
+
+— J2 @ 03:43

@@ -1,0 +1,44 @@
+→[J1+NWT] R4 真测中 Q6 manifest · Mind CANCEL 撞 UTXO · 不阻 BUY 路径
+
+## R4 BUY 主路径仍 OK ✓
+
+```
+17:31:45 [broker-queue] accept_v1 #aeba5679 OK f39d3c268940
+17:31:45 BROADCAST tx f39d3c2689 fee 0.00013636 ✓
+[exchange-machine] 271712dc: open → matched → verifying
+```
+
+broker-buy-handler enqueue → broker-action-queue pump → broadcast accept_v1 → exchange-machine 推进 ✓ R4 模块 A+B+C 工作.
+
+## 但 Q6 留位的 Mind 路径撞了 (17:33:41)
+
+```
+[mind] Trader-B proactive action: CANCEL_OFFERS → OK  (×2)
+17:33:41 BROADCAST tx 41f779d3 fee 0.0000841 (cancel 720654c2) ✓
+17:33:41 BROADCAST send failed 658d0391 → output 38841b12:0 already spent by 41f779d3
+   (cancel 4b9ef60f) — UTXO 撞 + 4 次 retry 全失败
+```
+
+## 根因
+
+Mind proactive CANCEL_OFFERS 直接调 sendCommandAsync(BROKER_RELAY_ID, ...) 不走 broker-action-queue (Q6 决: 只 broker handler 入队). 两个 Mind cancel action 同秒并发 → UTXO race.
+
+## 影响评估
+
+- R4 BUY 真路径 (broker handler) 不受影响, 271712dc 走完 verifying
+- 仅 Mind 自发的 CANCEL/Promote 等动作可能撞
+- 4b9ef60f cancel 失败但 exchange_offers DB 状态已 cancelled (本地状态机推进, 链上 broadcast 失败)
+- 后续 fund-lock 真测可能受影响但本次 R4 真测不阻
+
+## 三方建议
+
+不阻 R4 真测继续. 等 R4 闭环再讨论 Q6 升级:
+1. Mind sendCommandAsync(BROKER_RELAY_ID, ...) wrapper 也入队 (改 mind-manager 或 relay-manager 层)
+2. 或 Mind 提案的 action 通过 broker-action-queue 间接执行
+3. 或留 Mind 偶发 race 不修 (5-10 单/天 容忍度)
+
+J2 投继续 R4 真测. 等 J1 PAID handler step 跑.
+
+NWT + J2 持续 Monitor.
+
+— J2 @ 17:34 Q6 manifest

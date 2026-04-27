@@ -1,0 +1,68 @@
+→[J1] → COMMAND HANDOVER · Owner 指示 J1 主导 broker v2 战役, J2 转辅助
+
+## Owner 决定
+今日多轮我 (J2) 在聚焦 / 节奏 / 工具使用上失误 (详见今晚 dev-coord). Owner 判定我智商堪忧, 让你主导这次决定性战役, 我做辅助.
+
+你接指挥. 任务分配 / 节奏 / QClaude 调度 / 何时动代码 全由你定.
+
+## 当前状态快照
+
+### 代码
+· HEAD master = 11741b37 (本机 C:/kanet)
+· v2.1 spec commit 11741b37 (docs/spec/2026-04-24-dex-broker-v2-glue-layer.md, 659 行)
+· j2-to-j1.bundle 18854 bytes, http://192.168.1.123:9202/bundle
+· 你 j1/master 应该是 8805acc (cherry-pick v2 过了), v2.1 还需新拉
+
+### 基础设施
+· llama-server (Qwen3.6-35B) 本机 PID 30140 跑着 (Smart App Control 今天关了才修好)
+· cc-bridge / qwen-bridge-worker / channel-bridge 都跑
+· QClaude 路由目标 queue = qclaude-nwt (channel-bridge 扫 dev-coord/kanet-review/kanet-alert, **没扫 kanet-arch**)
+· Monitor 已开 persistent task b7hwqjz31, 挂 watch-dev-channels 抓 4 频道事件
+
+### 我派的任务状态
+· T-ARCH-01 (v2.1 spec 迭代) ✓ 已完成 commit 11741b37
+· T-ARCH-02 (你 ANTI-PATTERNS.md 骨架) 待你启动
+· T-ARCH-03 (retail-dex/* 文件头警告) 派给 QClaude, 但发错频道 kanet-arch, QClaude 没收到. 未执行.
+· T-ARCH-04 (Trader-B skill 激活 + adapter 切本地 Qwen 47045123) 同上未执行
+· T-ARCH-05 (Agent Card service_terms) 等 T-ARCH-04
+· T-ARCH-06 (bundle merge 冲突规划) 未做
+
+### 审校反馈位置
+· 你的 tx b98a16f1 (20:59) v2 审校 3 处收紧 + 3 Open Q 答 + 2 元观察
+· QClaude tx 65dec1d1 (20:58) 执行者视角审校 + 3 异议
+· 你 Q 9.6 bypass 分析 tx 695dc086 (20:35)
+
+### 冻结项 (你可以解冻)
+· Phase 3 兜底机制代码 (~80 行)
+· Phase 4 双模式对接
+· Phase 5 v1 残骸清理
+· bundle merge (J1↔J2 互 merge)
+· TRON / base 链补齐
+· 身份冒用根因调查 (今晚 20:52-20:53 两条假 J2 tx)
+
+## 我 (J2 辅助) 能做什么
+
+· 本机代码执行 (你派指令我改本地文件)
+· 本机 SQL 操作 (你派 SQL 我跑)
+· 本机服务重启 / 配置调整
+· dev-coord 消息发送 (我有 J2 relay 权限)
+· bundle 生成 + 上架
+· Monitor 实时抓频道事件 (已开)
+· 任何你需要的本机信息 (PID / 端口 / 日志 / DB 查询)
+
+## 我 (J2) 不做什么
+
+· 不再自主派任务 (那是你的活)
+· 不再自主改 spec / 路线图
+· 不再自主决定节奏
+
+## 等你下达第一条指令
+
+建议优先解的 3 件 (供你参考, 不强求):
+1. QClaude 怎么调度 (channel-bridge 加 kanet-arch? 还是 task 全走 dev-coord?)
+2. Phase 1 清理 vs Phase 2 skill 激活 谁先 (QClaude 审校建议直推 Phase 2)
+3. 身份冒用根因要不要现在查 (今晚 20:52-20:53 有 2 条假 J2 tx, 根因在某 daemon 错用 c9c37c37 relayId)
+
+Monitor 已挂. 你发 dev-coord 我 4 秒内收到.
+
+— J2 Opus 辅助 @ HEAD=11741b37

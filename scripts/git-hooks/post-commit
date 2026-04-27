@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# KANet post-commit hook (T-NWT-2026-04-27)
+# commit 完自动跑相关 domain 的 test-framework case, 失败 broadcast dev-coord.
+#
+# 设计原则 (Owner 钦定 '自治测试'):
+# - 异步: 不阻塞 commit, 后台跑
+# - 智能选择: 看 git diff 改了什么, 推测影响哪个 domain
+# - 失败 broadcast: 链上通知三方 + agent (dev-coord channel)
+# - 成功不打扰: PASS 静默, 失败才喧闹
+#
+# Bypass: 本 hook 不阻塞 commit, 跑测失败也不影响 commit. 失败信息 = warning.
+# 完全跳过: 删 hook 文件 OR git config core.hooksPath /dev/null
+
+set +e  # 不阻塞: 跑测失败也不阻 commit (post-commit 已经过了)
+
+KANET_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+LOG_DIR="$KANET_ROOT/logs"
+LOG="$LOG_DIR/post-commit-test.log"
+mkdir -p "$LOG_DIR"
+
+# 取本次 commit 改的文件
+COMMIT_FILES=$(git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null || true)
+
+if [ -z "$COMMIT_FILES" ]; then
+  exit 0
+fi
+
+# domain 推断: file path → domain
+# broker domain triggers:
+#   - kasia-console/src/services/broker-*.js
+#   - kasia-console/src/services/{exchange-machine,asset-registry,chains,price-oracle,evm-transfer}*.js
+#   - kasia-console/src/api/conversations.js
+#   - kasia-console/test-framework/cases/broker/*.test.mjs (case 改自身)
+#   - kasia-console/test-framework/personas/*.mjs (persona 改触发所有 domain)
+#   - kasia-console/test-framework/lib/*.mjs (lib 改触发所有 domain — runner 影响全域)
+# 未来 seeker / exchange domain 加同模式
+infer_domains() {
+  local domains=""
+  if echo "$COMMIT_FILES" | grep -qE 'kasia-console/(src/services/(broker-|exchange-machine|asset-registry|chains|price-oracle|evm-transfer)|src/api/conversations|test-framework/cases/broker)'; then
+    domains="broker"
+  fi
+  # framework 核心改动 → 跑所有 domain (目前只 broker)
+  if echo "$COMMIT_FILES" | grep -qE 'kasia-console/test-framework/(lib|personas|adversarial)'; then
+    [ -z "$domains" ] && domains="broker"
+  fi
+  # dedup
+  echo "$domains" | tr ' ' '\n' | sort -u | tr '\n' ' '
+}
+
+DOMAINS=$(infer_domains)
+
+# 没有相关 domain → 跳
+if [ -z "$DOMAINS" ]; then
+  exit 0
+fi
+
+# 检查 console 是否在跑 (test-framework 用 /api/agent/reply)
+if ! curl -sf http://127.0.0.1:3100/api/chat/channels >/dev/null 2>&1; then
+  echo "[post-commit] console 不在跑, 跳过 framework verify (commit 已提交)" | tee -a "$LOG"
+  exit 0
+fi
+
+COMMIT_HASH=$(git rev-parse --short HEAD)
+COMMIT_MSG=$(git log -1 --pretty=%s | tr -d '\r' | head -c 80)
+
+echo "" >> "$LOG"
+echo "═══ post-commit $COMMIT_HASH $(date '+%H:%M:%S') ═══" >> "$LOG"
+echo "files: $(echo "$COMMIT_FILES" | head -c 200)" >> "$LOG"
+echo "domains: $DOMAINS" >> "$LOG"
+
+# 异步跑: 后台 fork, post-commit 立刻返
+(
+  cd "$KANET_ROOT/kasia-console"
+
+  for DOMAIN in $DOMAINS; do
+    echo "[post-commit] running framework: --domain=$DOMAIN" >> "$LOG"
+    OUTPUT=$(node scripts/test.mjs --domain="$DOMAIN" --quiet 2>&1)
+    EXIT_CODE=$?
+    echo "$OUTPUT" >> "$LOG"
+
+    if [ $EXIT_CODE -ne 0 ]; then
+      # 失败: 抓 summary 行 + fail case
+      SUMMARY=$(echo "$OUTPUT" | grep -E "Summary:|FAIL " | head -10)
+
+      # broadcast dev-coord (best-effort, 失败不重试)
+      BROADCAST_MSG="🚨 [post-commit] $COMMIT_HASH 撞 framework regression
+commit: $COMMIT_MSG
+domain: $DOMAIN
+$SUMMARY
+
+trace: $LOG"
+
+      # 用 NWT relay 广播 (硬编码 NWT relayId, 因 hook 在哪个 agent 名下不一定)
+      # 失败也不重试, hook 是 best-effort 通知
+      curl -sf -X POST http://127.0.0.1:3100/api/chat/send \
+        -H "Content-Type: application/json" \
+        -d "$(node -e "
+          const msg = process.argv[1];
+          process.stdout.write(JSON.stringify({
+            relayId: '5b236c08-03d0-456c-953d-e10001610938',
+            channel: 'dev-coord',
+            message: msg,
+          }));
+        " "$BROADCAST_MSG")" >> "$LOG" 2>&1 || echo "[post-commit] broadcast failed (console maybe down)" >> "$LOG"
+
+      echo "[post-commit] FAIL broadcast attempted for $DOMAIN" >> "$LOG"
+    else
+      echo "[post-commit] $DOMAIN: PASS" >> "$LOG"
+    fi
+  done
+) &
+
+# 不等子进程, post-commit 立刻返
+disown 2>/dev/null || true
+exit 0

@@ -1,0 +1,77 @@
+[→ J1] [J2 OPUS] [ALIGN] 4/23 本 session 代码汇总
+
+HEAD: ff4500a9c6caff254143fe8aab949a96705123d8
+Base: a92556f (Step G — 你应该已有)
+Bundle: http://192.168.1.123:9202/bundle (91834 bytes, 16 commits)
+
+## 拉法
+curl -o j2-latest.bundle http://192.168.1.123:9202/bundle
+git fetch ./j2-latest.bundle master:j2-latest
+git log --oneline a92556f..j2-latest  # 看 16 条
+git merge --no-ff j2-latest  # 或 rebase
+
+## 16 commits 按主题分类
+
+### 托管→非托管改造 (Stage 1-6, 早期)
+25e5aee feat(retail-dex): custodial v0 Dex-Agent — 首笔端到端零售成交 (M1 托管跑通)
+dc8abb1 chore(agent-mind): context-builder 透传 _senderAddress
+feec9f6 feat(retail-dex): TASK 2.1 — computeQuote 改读 Maker 地址
+0b87869 feat(retail-dex): TASK 2.2 — handleDm 非托管 + accept_v1
+3be9fc8 feat(retail-dex): TASK 2.3+2.4+2.6 — orderMonitor 非托管 + auto-pay 门控
+0a98ece fix(exchange-machine): chain_events 列名 tx_hash → txid
+4d375c1 feat(retail-dex): Stage 5 Hardening — 超时扫描 + cancel_v1 释放
+0fde39b docs: Stage 6 — retail-dex 章节 + DATABASE 更新
+
+### 握手 Bug 根治 (4 层 bug + migrate v70 回填 14 条 orphan)
+457ebd5 fix(handshake): guard 字段错 + contacts API 不过滤 observed
+d540a9e fix(handshake): outbound ingest 推进 relation_states + Relay 启动顺序 + v70
+
+### LLM 对话层 (M1 优化)
+38e9583 feat(retail-dex): LLM 对话层 — Broker 能聊天
+72ddcf3 feat(retail-dex): 市价/挂单选择 + 市场快照建议 + 缺货人话提示
+b800b77 feat(retail-dex): Stage A — 用户画像注入 LLM
+c0d00af fix(retail-dex): parseIntent 接受中文量词 个/枚/只
+
+### Dex-Agent v1 spec + 数据表
+0f0f372 docs(spec): Dex-Agent v1 完整实施 spec (M1 + M2 + M5)
+ff4500a feat(migrate): v71-v74 (QClaude T1) — Dex-Agent v1 数据表基座
+
+## Schema 变化 (DB migrate v68~v74)
+v68: retail_dex_orders 主表 + relay_nodes.is_dex_broker
+v69: retail_dex_orders.agent_pay_addr + mid_price_at_quote
+v70: 回填 14 条 orphan observed → accepted (握手 bug 清理)
+v71: retail_dex_broker_config (撮合费配置)
+v72: retail_dex_orders +4 字段 (group_id/broker_fee_kas/net_delivery_kas/expires_user_set)
+v73: retail_dex_user_memory (LLM 蒸馏画像)
+v74: retail_dex_buy_publications (M2 限价买单跟踪)
+
+## 新增文件
+kasia-console/src/services/retail-dex.js (777→944 行)
+kasia-console/src/services/retail-dex-dialog.js (LLM 对话层)
+kasia-console/src/services/retail-dex-profile.js (用户画像)
+scripts/smoke-2.1.mjs ~ smoke-2.5.mjs (非托管 smoke)
+scripts/smoke-handshake-fix.mjs + smoke-outbound-advance.mjs (握手 bug 回归)
+docs/spec/2026-04-23-dex-agent-v1.md (401 行 Dex-Agent v1 完整 spec)
+
+## 进行中 (未 commit)
+T2 chain-balance: AUDIT FAIL 退回 QClaude 修
+  - SPL 解析 offset bug + smoke 假绿 + 测试数据错
+  - QClaude 在本机 debug (sol-debug.mjs) 但 chain-balance.js 本身 mtime 未更新
+  - 等 QClaude 按修法 A 真改文件
+
+## Owner 决策锁定的架构 (spec 第 2 节)
+- Broker + Seeder + Taker 同 Owner 多 relay (内部分账)
+- 一次订单一条链 (9 链能力按需查)
+- 撮合费隐形扣 (Maker 少发 KAS, 0.1 KAS/单)
+- 10 分钟超时系统兜底退款
+
+## 做 / 不做
+做: M1 市价现货 + M2 限价买单 + M5 进度推送
+不做: M3 分批聚合 / M4 独立意愿记录 / 外部 Maker 生态
+
+## 10 Phase 进度
+T1 ✅ migrate v71-v74 (ff4500a)
+T2 ❌ chain-balance (AUDIT FAIL, 修订中)
+T3-T10 未开始
+
+你这边 conflict 预计: scripts/channel-bridge.mjs 可能 CRLF 噪声, 代码无重叠其他文件. 有冲突告诉我.

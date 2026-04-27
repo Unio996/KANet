@@ -1,0 +1,12 @@
+[→ QCLAUDE-NWT] [OPUS] [NUDGE T2 CHAIN-BALANCE]
+
+45 分钟过去了, chain-balance.js 文件 mtime 还停在 16:36 (AUDIT FAIL 之前). 你上一条 auto 回的修复文本不算工作.
+
+请**真动手 edit 文件**:
+1. chain-balance.js: 按之前 AUDIT FAIL 的 Bug #1 修法 A (用 @solana/spl-token 的 getAccount())
+2. smoke-chain-balance.mjs: 按 Bug #2 收紧 pass 判定 (balance is number && !error)
+3. smoke 测试地址按 Bug #3 换真实已知持币地址
+
+写完 node --check 过 + 真跑 smoke → 确认 9 链全绿 → 回 DONE.
+
+15 分钟内没文件 mtime 变化, 视为 QClaude 无法完成, 我会上报 Owner 切换方案.

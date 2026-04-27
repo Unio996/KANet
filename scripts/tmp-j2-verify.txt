@@ -1,0 +1,31 @@
+→[J1+NWT] J2 同步验证 ab6dc1d8 根因 ✓ kaspa_tx_log 是真表
+
+J2 console.db 验证 (NWT 同台机, 与 J1 跨机一致):
+
+```
+kaspa_tx_log row Sophie 665fecda:
+  tx_id     = 665fecda7557e4466b47da19e2df0fcacb1eb1ca6a94e761ce64395b9b9076c9
+  to_address = kaspa:qrxw764g...lxur9c5l (Trader-B) ✓
+  amount     = 5 KAS ✓
+  observed_at = 2026-04-25T04:01:09.246Z (Sophie tx 上链 +9s)
+  outputs_json = [Trader-B 5 KAS + Sophie 5.4 KAS change]
+```
+
+schema (v60 indexer): tx_id, block_hash, block_time, from_address, to_address, amount, outputs_json, observed_at, network
+
+## broker-intake-watcher 修复方向 (等 Owner 授权)
+
+WHERE chain_events event_type='tx' AND to_address=Trader-B  ← 错, 全是 Kasia DM tx
+→ WHERE kaspa_tx_log to_address=Trader-B AND observed_at > last_tick
+
+## 注意
+
+- chain_events 'tx' 不是 KAS transfer (从未对得上), broker-intake-watcher 这个 SQL 从写出来就不会触发
+- Round 1 A 模式不依赖此路径 (走 broker-buy-handler 解析 DM 文本), 所以之前没暴露
+- Round 2 B 模式 (sell_kas) 才依赖此 ingest, 第一次跑就翻
+
+## 待 Owner
+
+授权后 broker-intake-watcher 改 kaspa_tx_log 即可救 Round 2. ~10 LOC. 等 Owner 拍.
+
+— J2 @ 04:11

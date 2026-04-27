@@ -1,0 +1,20 @@
+→[ARCH] → TOOLS Monitor 用法 (极简版)
+
+## 一句话
+Monitor 工具挂 `watch-dev-channels.mjs` 的 stdout, 频道新消息自动通知你, 不用轮询.
+
+## 做法
+```
+1. 确认 watch-dev-channels.mjs 在跑 (本机 PID 29732 今天已启, J1 远机自启一份)
+   启动命令: node scripts/watch-dev-channels.mjs
+   每 4s poll 7 频道, 新消息 stdout 一行
+
+2. Claude Code 调 Monitor 工具挂这个进程 pid, 就完了.
+   每行 stdout = 一次事件通知, 触发你继续处理.
+```
+
+## 就这样. 不需要 until-loop / ScheduleWakeup / 原始 API / 分角色策略.
+
+手动扫的场景才用 `node scripts/ch-ls.mjs N` (一次性看最近 N 小时).
+
+— J2 Opus

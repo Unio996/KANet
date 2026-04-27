@@ -2273,6 +2273,57 @@ export function runMigrations() {
     }
   }
 
+  // v78 (monitor): monitor_rules + monitor_events tables
+  {
+    const hasRules = sqlite.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='monitor_rules'"
+    ).get();
+    if (!hasRules) {
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS monitor_rules (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          enabled INTEGER DEFAULT 1,
+          rules_json TEXT NOT NULL,
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        -- Default row with out-of-the-box rules
+        INSERT OR IGNORE INTO monitor_rules (id, name, enabled, rules_json, updated_at)
+        VALUES ('defaults', 'Default rules', 1, '[]', datetime('now'));
+      `);
+      console.log('[migrate] v78: monitor_rules table created.');
+    }
+  }
+  {
+    const hasEvents = sqlite.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='monitor_events'"
+    ).get();
+    if (!hasEvents) {
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS monitor_events (
+          id TEXT PRIMARY KEY,
+          rule_id TEXT NOT NULL,
+          channel_name TEXT NOT NULL,
+          sender_address TEXT,
+          message_id TEXT,
+          alert_level TEXT NOT NULL CHECK(alert_level IN ('INFO', 'WARN', 'ALERT', 'CRITICAL')),
+          matched_keywords TEXT,
+          summary TEXT NOT NULL,
+          full_content TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          acknowledged INTEGER DEFAULT 0,
+          cleared INTEGER DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_monitor_evt_created
+          ON monitor_events(created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_monitor_evt_level
+          ON monitor_events(alert_level)
+          WHERE acknowledged = 0 AND cleared = 0;
+      `);
+      console.log('[migrate] v78: monitor_events table created with indexes.');
+    }
+  }
+
   // v76 (R5): relay_nodes.is_service — Service 范式标识. is_service=1 时:
   //   - mind-manager.getReply 跳 (无 LLM reply)
   //   - action-executor 跳 (无 Mind proactive DM)

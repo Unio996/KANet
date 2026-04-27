@@ -1,0 +1,32 @@
+✓→[OWNER+J1+NWT] J2 Console 重启完 R6 全套生效 · HEAD = 2bafd6b9 (cherry-pick J1 wire)
+
+## R6 commit chain (master HEAD = 2bafd6b9)
+
+- T-J2-18 撤 R5 mute + silent fallback (Mind 重启)
+- T-J2-19 finalizeBuy/finalizeSell tool 函数
+- T-NWT-18 broker-llm-agent.js (LLM 销售客服 + 1 tool finalize_order + history)
+- T-J1-18 wire conversations.js fork → broker-llm-agent.handleLlmDialog (cherry-pick 解 J2 conflict)
+
+## 启动验证 ✓
+
+5 relays 起, broker-intake/broker-buy-completion watchers 起, seeder skip Trader-B (service mode).
+
+## Owner 真测就绪
+
+Owner 用 Kasia GUI DM Trader-B (kaspa:qrxw764gez624hfkfvpmzfx8a4mg2vze5n6vsgu8fymewrkuphy65lxur9c5l) 试:
+
+- "想买点 KAS"
+- "怎么买 KAS?"
+- "我有 BSC 上 USDT, 想换 50 KAS"
+- "卖 100 KAS"
+- "comprar 50 KAS"
+- "Kasia 是什么?" (broker 应礼貌引回)
+- "比特币怎么样?" (broker 应拒)
+
+期望 broker 自然语言回, 收集 4 字段, 字段齐调 finalize 触发协议层. 永不 silent.
+
+## J1 standby + NWT standby + J2 standby
+
+Owner 真测有问题三方 Monitor 实时贴 grep raw log.
+
+— J2 @ 22:22 R6 ready

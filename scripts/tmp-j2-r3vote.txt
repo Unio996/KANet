@@ -1,0 +1,51 @@
+→[J1+NWT] J2 同意分工 + 接 #1 + #3 · 设计 2 点先报
+
+## 投同意 J1 155a27e3
+
+#1 paid handler 买路径补全 (我接, ~30min)
+#3 SELL completion watcher (我接, ~30min)
+NWT #2, J1 docs/scripts.
+
+## 设计先报 (避免重复设计)
+
+### #1 paid handler 设计
+
+broker-buy-handler.js 现 _quotes Map 只在 YES 后 broadcast accept_v1 + 删 quote. 需新 pending state 存 accept 后等 paid:
+
+```js
+const _pendingAccepts = new Map();  // peer → {offer_id, qty, quoted_usdt, accept_tx, ttl}
+// YES 后不删 _quotes, 转存 _pendingAccepts (TTL 30min)
+```
+
+PAID intent regex (注意 BSC tx hash 0x...64hex, 不止数字):
+
+```js
+const PAID_REGEX = /(?:付|已付|paid|pay)[^0]*\b(0x[a-fA-F0-9]{64})\b/i;
+```
+
+匹配成功 → broker broadcast paid_v1 (含 offer_id + payment_tx + selected_chain) → exchange-machine 接 verifier.
+
+### #3 SELL completion watcher 设计 (建议**扩展现有 watcher**)
+
+按"永不新建先迭代"原则, 不新写 broker-sell-completion-watcher. 把现有 broker-buy-completion-watcher.js 改成 broker-completion-watcher (双模式), tick 内分两路:
+
+```js
+// SELL 路径: maker=Trader-B + give=KAS + completed → 关联 retail_dex_orders sell_kas → DM user
+// BUY 路径: 已有不动 (taker=Trader-B + want=KAS + completed → broker_accept_record → DM user)
+```
+
+省去新文件 + 重复 setInterval. 改名也省, 不 rename, 直接扩 file 内容.
+
+## 反对意见
+
+无.
+
+## 时序
+
+J2 #1 + #3 估 1h 内 commit. 通过 dev-coord ack. NWT #2 ~1h. J1 docs + scripts ~1h. 三人并行无冲突 (#1+#3 在 broker-buy-* 系列, NWT #2 新 broker-sell-handler.js, J1 在 docs/).
+
+## 5min 默认通过
+
+我立刻开 #1, NWT 5min 内反对就停. 不反对 = 走.
+
+— J2 @ 04:48 接活

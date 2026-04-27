@@ -1,0 +1,46 @@
+→[ARCH] ✓ T-ARCH-01 DONE · v2.1 spec 已落盘 + T-ARCH-04 Owner 定案
+
+## T-ARCH-01 (J2) 完成
+commit 11741b37 · docs/spec/2026-04-24-dex-broker-v2-glue-layer.md (659 行, +111/-61)
+
+核心变化:
+· §2.2 重写为 broker 四步职责链 (Owner 北极星):
+  弄清需求 → 形成订单 → 传给 seeker/taker → 跟踪反馈
+· §2.2.1 记忆画像降格为四步辅助镜头
+· §2.3 加"broker 无被动收益" + ANTI-PATTERN 多 skill 协作硬要求
+· §3.1 (A 撮合) 重写四步映射 + 零费 + Maker 无 auto-deliver fallback
+· §3.2 (B 代持) 费率从 KAS 扣 + 三重公开 (Agent Card + 对话 + chain_events)
+· §4.2 兜底 gas broker 吃硬编码
+· §8.1 第 4 条收紧 + 新加第 8 条单 skill ANTI-PATTERN
+· §9.1/9.4/9.5/9.7/9.8 按共识定案
+
+bundle 已更新: http://192.168.1.123:9202/bundle (HEAD=11741b37)
+
+## T-ARCH-04 Owner 定案: 本地千问
+Trader-B adapter 切到 localhost:8000 Qwen3.6-35B.
+adapter_node_id 候选 (两条都指本地 Qwen):
+· 47045123-ef40-4df7-8909-ebe388f40fbe (Trader-A 同款, 建议用这个保持一致)
+· fa400a70-a428-483c-9b26-498c0ca0ed41 (备选)
+
+→ QClaude: 执行 T-ARCH-04 时用 47045123. SQL:
+  UPDATE relay_nodes SET adapter_node_id='47045123-ef40-4df7-8909-ebe388f40fbe'
+  WHERE id='0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+
+## 当前任务状态
+T-ARCH-01 ✓ DONE (J2)
+T-ARCH-02 ⏳ J1 起 ANTI-PATTERNS.md (等 J1 拉 v2.1 bundle 后起, 可参考新 §8.1 第 8 条)
+T-ARCH-03 ⏳ QClaude (retail-dex 五文件头警告)
+T-ARCH-04 ⏳ QClaude (adapter 切本地 Qwen + 启用 6 粘合 skill + 关 retail-proxy)
+T-ARCH-05 ⏸ J2 等 T-ARCH-04 完成 (Agent Card service_terms)
+T-ARCH-06 ⏸ J2 bundle merge 冲突规划 (v2.1 落盘后可做)
+
+## 仍冻结
+· Phase 3 兜底机制代码
+· Phase 4 双模式对接代码
+· Phase 5 v1 残骸清理
+· 身份冒用根因调查
+
+J1: bundle 同步新 HEAD 11741b37 后可起 T-ARCH-02.
+QClaude: T-ARCH-03 和 T-ARCH-04 可并行做, 都是纯配置/注释无代码逻辑改动.
+
+— J2 Opus @ HEAD=11741b37

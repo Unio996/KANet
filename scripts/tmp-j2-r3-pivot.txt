@@ -1,0 +1,52 @@
+🎉 T-J2-12 PAID handler 链上跑通 ✓ + 暴露 2 bug → J1+NWT 看
+
+## ✓ T-J2-12 PAID handler 工作
+
+```
+15:27:23.462Z RX "我付了 tx 0x148d4f779ed7eca..." from Martin (jf0kzewvmcmv)
+15:27:23 BROADCAST e3e1a46b9fa8 kanet-exchange ✓ paid_v1 上链
+15:27:23 AI → "✓ 收到付款 tx 0x148d4f779e... 已通知 Maker (paid_v1 上链 e3e1a46b9fa8...). 验证通过后 Maker 自动..."
+15:27:23 [exchange] paid: offer caf3b0ad → verifying, TX=0x148d4f779ed7ec ✓ 状态机推进
+```
+
+J1 路径 A 走对了: Martin 直接 BSC 转 + DM "我付了 0xtx" → broker T-J2-12 PAID handler → broadcastPaid → exchange-machine paid → verifying.
+
+## Bug A · UTXO race 砸丢 broker DM (R1+R2+R3 都 hit, R3 暴露最严)
+
+```
+15:27:23.470Z Reply send failed: 7aa007d6f723 → output 8f42c771 已被 e3e1a46b9fa8 占
+```
+
+Martin **没收到** "✓ 收到付款 tx... paid_v1 上链 e3e1a46b" 的 broker 回执. broker 状态正确 (_pendingAccepts.delete, paid_v1 上链), 但用户 UX 失明.
+
+Round 3 暴露最严重: aa0e14f4 (accept_v1) DM 失败, e3e1a46b (paid_v1) DM 又失败. 两笔关键节点 Martin 都没收到 broker 回执. 我之前 RCA + 三方 (1) 重跑 = 没解 race.
+
+短期: J1 R3 BUY 脚本忽略 broker DM, 走链上看. 长期: (b) retry handler 或 (a) relay _sendLock.
+
+## Bug B · 又是 Bug 1 (SELL maker via Qwen, 不是 R1 Eric)
+
+```
+15:27:23 [exchange] offer caf3b0ad not confirmed yet (attempt 1/3): Recipient mismatch: expected kaspa:qptg465n4jedfujewj3hfgkxtysq40v2jakxp2w6uuvrhf6sajf0kzewvmcmv, got 0xacbcc246f230aea5154307be946bcb61c93fbaa6.
+```
+
+verifier 期望 = `kaspa:qptg465...` (Martin Kasia receive_address) ❌ 错
+verifier 实际 = `0xacbcc246...` (Qwen BNB receive 地址) ✓ 真 Martin 付款目标
+
+应该期望 Qwen BNB (acceptedChains.find(chain=bnb).address), 但拿成 Martin Kasia (receive_address). 
+
+J1 5f15ab3 fix 在 R1 (Eric maker auto-pay) 路径生效, 这次 Qwen maker 不 auto-pay 路径**没走 5f15ab3 分支**或 fix 没覆盖. expectedTo 装载逻辑漏了 Qwen 这种纯被动 maker 场景.
+
+## R3 BUY 现状
+
+- offer caf3b0ad: matched → verifying (verifier 卡 Recipient mismatch, 60s 后 retry, 3 次后 dispute)
+- broker _pendingAccepts: 已 clear (PAID 成功了)
+- Martin 视角: 没收到任何 broker DM (Bug A)
+- 链上 paid_v1 ✓ + verifier 跑 ❌
+
+**当前 fix 优先级**:
+1. **Bug B (verifier expectedTo)** - 阻 caf3b0ad 完成. J1 5f15ab3 区域 patch, 估 ~20 LOC.
+2. Bug A (UTXO race) - 不阻 R3 完成 (链上协议跑通), 阻 UX. 留下次 sprint.
+
+J1 你看 5f15ab3 patch 是否覆盖 Qwen maker 这条路径? 如果不, 重 patch + restart Console. 60s verifier retry 3 次, ~3min 内不 patch 就 dispute.
+
+— J2 @ 08:28 R3 状态

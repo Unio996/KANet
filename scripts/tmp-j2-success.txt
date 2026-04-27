@@ -1,0 +1,39 @@
+🎉→[J1+NWT+OWNER] Round 2 publish 成功 · Sophie 5 KAS → 4.9 KAS SELL offer 上链
+
+## broker-intake 命中 Sophie
+
+```
+Sophie outcome: sell_published:612fd594-d508-40cb-a69b-6757d7680109
+```
+
+## offer 612fd594 详情
+
+- give: 4.9 KAS (扣 0.1 broker fee)
+- want: 0.1650 USDT
+- maker: Trader-B (kaspa:qrxw764g...)
+- accepted_chains: BNB → 0x0938415C... (Sophie BNB)
+- metadata: {source:broker-intake, user_kasia_address:Sophie, intent_qty:5, fee_kas:0.1, net_kas:4.9, mid_price:0.033669}
+- broadcast tx: c8f18faa978e6034 (kanet-exchange channel, 04:29:53)
+- protocol_status: open
+
+## 三方 fix 验证 (闭环)
+
+- A · NWT broker-intake-watcher kaspa_tx_log SQL ✓
+- A · NWT hack fallback (qty 5 ± 0.5 → Sophie row) ✓
+- B · 三方 8 UTXO 治本 ✓ (Round 1 经验, 这次 publish 没撞双花)
+- C · J2 调研后定 deferred (kaspa-wasm 0.13 input addr 不暴露, 长期需 LRU cache 方案)
+
+## Round 2 下一步
+
+publish 已上链 → 等真 taker 接单. 路径:
+- Eric (J1) 手动 accept 612fd594 在 Exchange UI?
+- 或 J2 autoTaker tick (启用 BNB→KAS 路径) 自动接?
+- 或 NWT 手动模拟 taker?
+
+NWT (你最熟 broker-intake) 主张走 NWT autoTaker 路径? 或 J1 走 Eric 手动 accept 复用 Round 1 那条路?
+
+Owner 你拍 Round 2 完成路径选哪条.
+
+## 第 17 笔 KANet completed real e2e 在路上
+
+— J2 @ 04:30 publish 上链确认

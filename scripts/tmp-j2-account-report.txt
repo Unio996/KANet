@@ -1,0 +1,67 @@
+→[J1] J2 机器账户清单 + 真测建议
+
+## J2 机器 (192.168.1.123) 5 Agents
+
+| Agent | Kasia 尾 | KAS | EVM 钱包 | 角色候选 |
+|---|---|---|---|---|
+| **Trader-B** | hy65lxur9c5l | **104.98** | BNB 0xaD12544E70...3efcEe | **broker (核心)** |
+| J2 | pqqqe78fjev3 | **130.05** | BNB 0x00c41dC0...1eb62f / Arb+Polygon 0x9E13...1a50 | 卖方 (KAS 富, 备 maker) |
+| NWT | z2w7ktl95grm | (没查 KAS) | BNB 0xTestSeederBscAddr... (测试地址, 无真 USDT) | 旁观, 不参测 |
+| KANet | 7y7err0tz9 | (没查) | 无 EVM 钱包 | 旁观 |
+| Trader-A | q3f5a2cr843s | (没查) | 无 EVM 钱包 | 旁观 |
+
+要 KAS 余额我可补查. EVM USDT 余额需调链上 RPC 查 (chain-balance.js T2 已建可 reuse).
+
+## 当前 4 条 open offers
+- c34fa9b8 · ekzc2tgz4cchh (你 Eric) · 25 KAS → 0.852 USDT
+- 09c38198 · ekzc2tgz4cchh (你 Eric) · 0.834 USDT → 25 KAS
+- **e92f3893 · ymewrkuphy65lxur9c5l (Trader-B 自家)** · 50 KAS → 1.717 USDT
+- **7629b823 · ymewrkuphy65lxur9c5l (Trader-B 自家)** · 1.648 USDT → 50 KAS
+
+Trader-B market-seeder 在挂双向 offer (5min tick), 不停滚动. agent=Trader-B (sell + buy 同一 relay), spread 2%, amount=50 KAS.
+
+## autoTaker 状态
+configs 表**不存在**, autotake 配置全靠 getConfig() — 代码 default `autotake_enabled` 不存在 → 当 string 'true' 比对 → 永远 false → autoTaker 不跑.
+
+(trade-protocol-filter.js:468 `const enabled = await getConfig('autotake_enabled'); if (enabled !== 'true') return;`)
+
+## 真测建议 (基于上述资源)
+
+### Round 1 · A 模式买 KAS — 立即可做
+- **User** = Martin (J1, KAS 缺) 手机 Kasia DM Trader-B (J2)
+- **Broker** = Trader-B (J2)
+- **Maker** = Eric (J1) 的 c34fa9b8 (25 KAS @ 0.0341 USDT/KAS, BSC 收款)
+  · 或 Trader-B 自家 e92f3893 (50 KAS, 但 broker 接自家 = 自循环, 不建议测真路径)
+
+流程:
+1. Martin DM Trader-B "买 25 KAS"
+2. broker-buy-handler 选 c34fa9b8 (Eric 的) 报价 → Martin 确认 YES
+3. broker (J2) 广播 accept_v1 到 kanet-exchange
+4. exchange-machine 处理 accept → Eric 收到协议消息
+5. **Eric (J1) 的 maker_auto_pay 自动发 25 KAS 给 Martin Kasia 地址** (这步要 Eric 的 relay 真的接到 broadcast + auto-deliver-give 配置 OK)
+6. broker-buy-completion-watcher 60s tick 扫到 completed → broker DM Martin "KAS 到账"
+
+J1 这边需确认: Eric 的 auto_pay_give 是否启用? Maker auto-deliver 默认 OK 吗?
+
+### Round 2 · B 模式卖 KAS — 阻塞 autoTaker 没开
+- **User** = Sophie (J1, KAS 富) 转 5 KAS 给 Trader-B (J2) Kasia 地址
+- **Broker** = Trader-B (J2): broker-intake-watcher 扫到 → publish 4.9 KAS SELL
+- **Taker** = ??? 要 BNB-USDT + autoTaker
+
+阻塞:
+- autoTaker 当前不 enabled (configs 表都没建)
+- J2 机器没 USDT 富裕的 Agent (J2 / Trader-B 钱包 USDT 余额需查链)
+- Eric (J1) 30 USDT 但 gas 紧
+
+阻塞解法:
+- Owner 手动 enable autoTaker: configs 加表 + 插入 `autotake_enabled='true'`
+- 或 J1 Eric 关掉 auto, 当 manual taker 接 broker SELL
+- 或 J2 这头某 agent (J2/Trader-B 自身有 USDT 的话) 当 taker
+
+## 我的建议
+1. 先 Round 1 A 模式 — 不需要 autoTaker, 走 maker auto-deliver 路径, 阻塞少
+2. Round 1 通了再修 autoTaker (configs 表建 + 启用) 后做 Round 2
+
+J2 Trader-B broker 端**就绪**: 五个 watcher 跑着 (intake / refund / stale / completion + market-seeder), buy-handler 链路通 smoke. 等真测.
+
+— J2 HEAD=193d0c95

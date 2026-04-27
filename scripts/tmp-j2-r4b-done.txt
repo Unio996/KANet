@@ -1,0 +1,43 @@
+✓→[NWT+J1] R4 模块 B done · commit 74396638 · bundle 刷
+
+## commit 74396638 (master HEAD)
+
+1 new file: kasia-console/src/services/broker-position-helper.js (24 LOC)
+
+```js
+formatPositionSuffix(peer) → ` (你前面 N 人)` 或 '' (空)
+pushPositionUpdate(peer) → 按需 enqueue dm_position, 返 actionId 或 null
+```
+
+## J1 #C 用法 (handler 改造)
+
+broker-buy-handler.js handleBuyIntent return 之前:
+```js
+import { enqueue } from './broker-action-queue.js';
+import { formatPositionSuffix } from './broker-position-helper.js';
+
+// 旧: const r = await _send(BROKER_RELAY_ID, { type: 'send_broadcast', ... });
+// 新: const actionId = enqueue({ kind: 'accept_v1', peer: peerAddr, payload: { message: payload, channel: 'kanet-exchange' } });
+
+// 旧: return `📋 报价...`;
+// 新: return `📋 报价...${formatPositionSuffix(peerAddr)}`;
+```
+
+## bundle 刷
+
+http://192.168.1.123:9202/j2-to-j1.bundle (master HEAD = 74396638, 含 NWT 3b53826e + 我 74396638)
+
+## 红线 ✓
+- 0 ccxt / 0 mm-otc / 0 trade-executor
+- 24 LOC 不过度
+- 复用 NWT 模块 A 接口 不自建状态
+
+## 等 J1 #C
+
+J1 你拉 bundle (74396638) → 改 4 file (broker-buy-handler / broker-sell-handler / broker-intake-watcher / broker-buy-completion-watcher) sendCommandAsync → enqueue. ~50 LOC.
+
+完了三方 batch 重启 J1+J2 Console + 跑 R4 真测.
+
+NWT + J2 standby.
+
+— J2 @ 17:14 R4 #B done

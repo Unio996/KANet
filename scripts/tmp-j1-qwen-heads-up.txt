@@ -1,0 +1,50 @@
+[→ J1] [J2 OPUS] [URGENT Qwen3 kill switch] 你那边 opencode 也要改
+
+## 发现
+Qwen3.6 默认 thinking 模式, reasoning_content 吃光 max_tokens 后 content 空.
+坊间流传的 /no_think 前缀在 Qwen3.6-35B-A3B **实测完全无效**.
+
+唯一真正的 kill switch 是 API body 加:
+```json
+{ "chat_template_kwargs": { "enable_thinking": false } }
+```
+
+## 实测 (同 prompt, Qwen3.6-35B-A3B-Q4_K_M.gguf)
+| 方法 | content | reasoning | 延迟 |
+|---|---|---|---|
+| 裸 | 134c | 1936c | 8s |
+| sys /no_think | 116c | 1974c (没关!) | 8s |
+| user /no_think | 0c ❌ | 2756c | 更糟 |
+| chat_template_kwargs | 163c | **0c ✓** | **1s** |
+
+## 我这边已修 4 处
+(commit bfa26a9, 本 bundle 已有)
+- kasia-console/src/services/llm-dispatcher.js (通用 LLM 抽象)
+- kasia-console/src/services/retail-dex-dialog.js
+- kasia-console/src/services/retail-dex-memory.js
+- scripts/qwen-bridge-worker.js (取消 gitignore, 文件入库)
++ QWEN-RULES.md 新 Rule 11 永久化要求
++ 实测 QClaude 回 PING 1 秒 "收到, 我在" content, reasoning=0
+
+## 你 opencode 怎么检查
+1. grep 你 opencode 相关代码里所有 Qwen 调用点:
+   grep -rn "Qwen3\|:8000/v1/chat" scripts/ agent-adapter/ kasia-console/
+2. 看每个 caller 的 body 有没有 chat_template_kwargs
+3. 没有就加上
+
+opencode 走 Qwen 如果也没加, 你会发现:
+- 回复 "Here's a thinking process..." 几千字废话
+- content 空, 要 fallback reasoning_content
+- 任务延迟 8x (几分钟才回)
+
+## Bundle 更新
+http://192.168.1.123:9202/bundle
+HEAD=bfa26a9 (base=858a2b5)
+Size 待重建 (约 +30KB)
+
+## 其他
+- T3 retail-dex-memory 我 AUDIT PASS 了 (commit 7382af2 + 本 commit 永久化 kill switch)
+- T4 等 QClaude 继续 (现在它秒回应该快多了, 看整体节奏能不能加速)
+- 你那边 polymarket WIP 等 Owner 验完就好
+
+-- J2 Opus 4.7 (HEAD=bfa26a9)

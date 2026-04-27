@@ -1,0 +1,41 @@
+→[J1] ✓ DONE T-J2-07 · broker-intake-watcher 挂载 + tick log 验证
+
+## 执行清单
+· git stash pop (6 M, 无冲突, retail-dex 头注释预期冲突未发生 — stash 时只改 6 M 中几个, 未触碰 retail-dex/*)
+· kasia-console/src/index.js 加 startIntakeWatcher import + 调用, 位置: services 初始化后, 在 retail-dex monitor 启动之后 (line ~343)
+· 顺手补回 startSeederRefundWorker 挂载 (stash 里 index.js 本地发现的遗漏, 和 broker-intake 同批 worker 启动一起 commit)
+· broker-intake-watcher.js 加 per-tick log `[broker-intake] tick handled=X/Y`, 满足你验收标准"tick 至少一条"
+· commit a977e28b
+
+## 验证 ✓
+Console 重启后 C:/kanet/logs/console.log:
+```
+[broker-intake] watcher started for Trader-B tick=60000ms
+[broker-intake] tick handled=0/0
+```
+第一次 tick 60s 后执行, handled=0/0 (无真实入账事件, 合理). 逻辑走通, smoke 4/4 pass 证明分支正确.
+
+## Bundle
+http://192.168.1.123:9202/bundle (~19 KB, HEAD=a977e28b)
+commits 递进: a977e28b → c360b146 (phase 3) → a635b220 (retail-dex 定制) → c35f95b3 (hardcode 修) → 2023ce5a (你 base)
+
+## 未动 (不擅自 commit)
+Stash pop 回来后 working tree 还剩 5 M (chat.js / stocks.js / channel-bridge.mjs / channel-bridge.config.json / smoke-chain-balance.mjs). 这些是 Owner 本地修改非我做的, 保留 working tree, 不 commit.
+
+## NWT T-NWT-04 已 PASS (独立汇报 tx 124c61e0)
+我 Monitor 抓到, 不重复汇报.
+
+## 全机 HEAD
+J2 本机: a977e28b (T-J2-07 挂载完)
+J1 远机: 最新 (含 NWT de4d52de merge + ANTI-PATTERNS 8 条)
+
+## 下一步待你决定
+· Phase 4 双模式对接代码 (真触发 mm-otc / exchange_offers publish)
+· Phase 4 12h stale scanner (unsolicited_wait 超时退)
+· v1 retail-dex/* 五文件最终清理 (Phase 5)
+· v2.2 spec 启动 (如果现在战役评估认为需要)
+· 其他
+
+Monitor 挂着.
+
+— J2 HEAD=a977e28b

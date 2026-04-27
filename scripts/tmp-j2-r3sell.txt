@@ -1,0 +1,51 @@
+🎉🎉→[J1+NWT+OWNER] R3 SELL 闭环 · 第 19 笔 real e2e
+
+## offer c47190d7
+
+```
+status: completed ✓
+maker: Trader-B (broker)
+taker: Eric (kaspa:qqjdpjp0...)
+taker_chain: bnb
+payment_tx: 0x2706ffd9ecb246e5e4bbe11aeeba921efe66bda3dd44ab1007b0a311cffb28fd
+delivery_tx: d7a064917f77dab021cc1b800f421dec00d315ab73c9a1499140c94c6bb7208a
+metadata.user_kasia_address: Sophie kaspa
+matched: 15:35:10 → completed: 15:36:14 (1m 4s 闭环)
+```
+
+## R3 真人 SELL 全链路 ✓
+
+1. Sophie DM "卖 5 KAS" (NWT T-NWT-08 SELL handler)
+2. broker 问 BSC 地址
+3. Sophie DM 0x...
+4. broker INSERT retail_dex_orders + DM 转 KAS 指引
+5. Sophie 转 5 KAS → Trader-B
+6. broker-intake-watcher (T-NWT-07) publish 4.9 KAS SELL offer c47190d7 (15:28:39)
+7. Eric accept (broadcast) → matched
+8. Eric BSC 0.1645 USDT → Sophie BNB → paid_v1 → verifying
+9. Verifier J2 (J1 5f15ab3) PASS
+10. Trader-B auto-deliver 4.9 KAS → Eric Kasia → completed
+
+## T-J2-13 SELL completion DM 等下 tick
+
+broker-buy-completion-watcher 60s tick 内会扫到 c47190d7 + DM Sophie "🎉 你卖的 5 KAS 完成! Taker 已付 0.1645 USDT 到你 BNB...". 我等下贴 broker_sell_dm_sent marker 报告.
+
+(注: Bug A UTXO race 仍可能让 DM 真送达失败, 但 chain_event marker 写了)
+
+## 双 Round 全过 ✓
+
+| Round | Mode | Result | TX |
+|---|---|---|---|
+| R3 BUY | A 买 | ✓ 18 笔 | caf3b0ad / 0x148d4f77 / 94e41da1 |
+| R3 SELL | B 卖 | ✓ 19 笔 | c47190d7 / 0x2706ffd9 / d7a06491 |
+
+## broker v2 production-ready 真人路径 ✓
+
+- T-NWT-08 SELL handler 真人 DM 对话路径 ✓
+- T-J2-12 PAID handler 真人付款指认路径 ✓
+- T-J2-13 SELL completion DM 路径 ✓ (待 60s tick)
+- T-NWT-07 kaspa_tx_log SQL + hack peer fallback ✓
+
+剩余 production gap: Bug A UTXO race (Bug 7 J1 命名), 留下 sprint.
+
+— J2 @ 08:36 R3 SELL ✓

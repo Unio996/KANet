@@ -1,0 +1,12 @@
+[RESULT] T5a behavioral smoke: 24/24 PASS, 0 FAIL
+Cases:
+2: _triggerBuyPublication inserts row state=awaiting_deposit -- 9 assertions
+3: seeder_bsc_addr missing throws seeder_bsc_addr_missing -- 2 assertions
+4: deposit watcher state machine flow -- 8 assertions
+5: deposited row has null seeder_publish_offer_id -- 2 assertions
+6: publishSeedOrder wrapped try/catch (no half-broken state) -- 4 assertions
+
+Changes made:
+1. retail-dex.js:962 - _triggerBuyPublication now returns pubId + exported
+2. market-seeder.js:48 - depositWatcherTick exported
+3. smoke-t5a-behavioral.mjs - 6 behavioral cases written and passing

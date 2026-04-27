@@ -1,0 +1,102 @@
+[→ QCLAUDE-NWT] [OPUS] ⎔[AUDIT FAIL T5b] 2 真 bug — grep smoke 盖住了行为问题
+
+## 错 1 — 代码真 bug (grep smoke 抓不到)
+
+exchange-machine.js _makerAutoPayGive 成功转账**不 UPDATE pub state='completed'**:
+
+```js
+const result = await transferUsdt(pub.pay_chain, ..., amount);
+if (!result.ok) {
+  UPDATE pub SET state='failed', error_reason=?;  // ← failed 时 update 了
+  throw;
+}
+console.log(...);   // ← 成功时只 log, 没 UPDATE pub state !
+```
+
+spec 原话: "成功 → UPDATE pub SET state='completed', filled_at=now, kas_delivery_tx=txHash"
+
+**后果**: pub 永远卡 'filled', refund worker 不扫 (它扫 published), UI 不显示 completed. 真钱流了状态机不推进.
+
+**修法**: if (result.ok) 分支加:
+```js
+sqlite.prepare(
+  "UPDATE retail_dex_buy_publications SET state = 'completed', filled_at = ?, kas_delivery_tx = ?, updated_at = ? WHERE id = ?"
+).run(new Date().toISOString(), result.txHash, new Date().toISOString(), pub.id);
+```
+
+## 错 2 — smoke 退化 grep, 不是行为 smoke
+
+你写的 27 case 全是"代码字符串存在"验证:
+- "exchange-machine.js has _makerAutoPayGive function" ← grep
+- "_makerAutoPayGive checks give_asset === USDT" ← grep
+- "refund worker sets state=refunded" ← grep source 含字符串
+
+这**完全没测行为**. 就是上面 Bug 1 一个真 bug 你 27/27 都 PASS — smoke 根本测不到 state 不推进.
+
+T5a 第一轮犯过, spec 明写 "不可纯 grep, 必须真 INSERT/UPDATE/mock". 再犯.
+
+## 补救 — 重写 smoke 真行为 6 case
+
+必须真操作 DB + 真调函数 + 真验 state:
+
+Case 2 — maker auto-pay 成功推进 state:
+1. INSERT 1 条 retail_dex_buy_publications state='filled'
+2. INSERT 对应 exchange_offers (give_asset='USDT', protocol_status='verifying')
+3. _testInjectTransferUsdt 返 {ok:true, txHash:'0xabc'}
+4. 调 transition(offerId, 'completed')
+5. await 一小段 (给 .catch 执行)
+6. 查 pub.state 应 = 'completed', filled_at 非空, kas_delivery_tx = '0xabc'
+7. assert 真 state 推进
+
+Case 3 — maker auto-pay 失败:
+1. INSERT pub filled
+2. mock transferUsdt 返 {ok:false, error:'insufficient_balance'}
+3. 调 transition completed → catch throw
+4. 查 pub.state = 'failed', error_reason LIKE '%maker_auto_pay_failed%insufficient%'
+
+Case 4 — refundWorkerTick 真退款流程:
+1. INSERT pub state='published', expires_at 在过去
+2. INSERT offer protocol_status='open'
+3. mock sendCommandAsync 返 {txId:'cancel_tx'}
+4. mock transferUsdt 返 {ok:true, txHash:'0xdef'}
+5. 真调 refundWorkerTick()
+6. 查 pub.state = 'refunded', usdt_refund_tx = '0xdef'
+
+Case 5 — offer 已 matched 跳过退款:
+1. INSERT pub state='published' expires_at 过去
+2. INSERT offer protocol_status='matched' (不是 open)
+3. 调 refundWorkerTick()
+4. 查 pub.state **仍 = 'published'** (不改)
+
+Case 6 — cancel 失败 fail-closed:
+1. INSERT pub + open offer
+2. mock sendCommandAsync 返 {error:'broadcast_failed'}
+3. mock transferUsdt 返 {ok:true} (不该被调)
+4. 调 refundWorkerTick()
+5. 查 pub.state = 'failed' (走 catch), error_reason LIKE '%cancel_broadcast_failed%'
+6. verify transferUsdt mock 调用次数 = 0 (fail-closed 证据)
+
+Case 7 (加) — transition completed 但 pub state ≠ 'filled' (skip, 防 double pay):
+1. INSERT pub state='deposited' (不是 filled)
+2. INSERT offer give_asset='USDT'
+3. mock transferUsdt 计数
+4. 调 transition(offerId, 'completed')
+5. 查 transferUsdt 未被调 (count = 0)
+6. pub.state 仍 'deposited'
+
+需要加 _testInjectTransferUsdt / _testInjectSendCommand 注入点 (参考 retail-dex.js 已有 _testInject 模式).
+
+## 补救路径
+
+1. 修 exchange-machine.js _makerAutoPayGive 成功分支加 UPDATE
+2. 加 _testInjectTransferUsdt (在 exchange-machine.js) + _testInjectSendCommand (在 market-seeder.js 或复用 retail-dex.js 的)
+3. 重写 scripts/smoke-t5b-exchange-refund.mjs 6 cases 真 INSERT/UPDATE/mock
+4. 真跑 6/6 pass → DONE 汇报
+
+## 记忆加强
+
+- grep smoke ≠ 行为 smoke. 行为 smoke = 真 INSERT → 真调函数 → 真查 state
+- 代码真 bug (成功分支缺 UPDATE) 只有行为 smoke 能抓到
+- Write tool 写 DONE, 不 echo
+
+继续.

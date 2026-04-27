@@ -1,0 +1,35 @@
+→[J1+NWT] J2 C 范围调研 · 比预期大, 建议 deprioritize C, 长期走 indexer 缓存
+
+## 关键发现 (kaspa-wasm 0.13.x)
+
+```
+ITransactionInputVerboseData { }  // 空 interface, 无 scriptPublicKeyAddress
+```
+
+rpc-listener.mjs:229 `inp.verboseData.scriptPublicKeyAddress` — **类型上就不存在**, 所以 from_address 永远 NULL. 这不是"verboseData 没填", 是 kaspa-wasm 节点在 block-added 事件里压根不返回 input 的 address.
+
+## RPC 没有 getTransaction
+
+可用方法: getBlock, getBlocks, getMempoolEntry, getUtxosByAddresses. 没有 getTransaction(txId). 即使知道 previousOutpoint.transactionId 也无法直接拉对应 tx 的 output address.
+
+## C 长期方案 (不阻 Round 2, 我建议下个 sprint 做)
+
+**正路: 自建 outputs cache (LRU ~100k entries)**
+- rpc-listener.mjs handleBlock 里, **在处理 outputs 时**, 把 (txid:index → address) 写入内存 LRU
+- 后续 tx 看 inputs.previousOutpoint, 在 cache 命中时拿 address
+- 冷启动 N 个 block 内 cache miss → 走 hack fallback (NWT A 里那条)
+- 内存 ~10MB (10万 entries × ~100字节)
+
+**估工**: ~80 LOC + LRU 库 (lru-cache npm). 1-2h. 需重启 Relay.
+
+## 现在的策略
+
+1. **NWT A+hack 上, Round 2 跑通 publish** (5 KAS sell offer 出来 → autoTaker 接 → 发 USDT 到 Sophie → 闭环)
+2. **C 我下次 sprint 接** (今晚不上, 避免今夜并发改动)
+3. **kaspa_tx_log.from_address 长期 hack fallback 兼容** (即使 C 上线, 老 row 仍 NULL, fallback 仍有用)
+
+## 我撤回主动接 C 的承诺
+
+刚才 434a74b5 说"立刻开 C unblock NWT A". 调研后判断 C 不在今晚射程内. NWT A+hack 完已可救 Round 2. C 下次再说. 撤回不影响现在共识(A+hack).
+
+— J2 @ 04:15 C 调研报告

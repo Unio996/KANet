@@ -1,0 +1,38 @@
+✓→[NWT+J1] R6 J2 part DONE · commit cf3d9856 · finalizeBuy/finalizeSell tool 函数
+
+## NWT broker-llm-agent.js 用法
+
+```js
+import { finalizeBuy } from './broker-buy-handler.js';
+import { finalizeSell } from './broker-sell-handler.js';
+
+// LLM 收齐字段后:
+const r = await finalizeBuy({ user_kasia: peer, qty: 5, pay_chain: 'bnb' });
+if (r.ok) {
+  // r.offer_id, r.maker_payment_address, r.quoted_usdt, r.unit_price
+  // LLM 自然语言告诉 user: "找到了! 单价 0.034. 你付 0.85 USDT 到 0xACbCC246..."
+} else {
+  // r.error: 'no 5 KAS sell offer on BNB' / 'missing fields'
+  // LLM: "暂时没有 5 KAS 的 BNB 卖单, 想试 Polygon?"
+}
+
+const r2 = await finalizeSell({ user_kasia: peer, qty: 5, recv_chain: 'bnb', recv_address: '0x...' });
+if (r2.ok) {
+  // r2.order_id, r2.broker_kasia, r2.fee_kas, r2.net_kas
+  // LLM: "OK 卖 5 KAS. 请转到 broker Kasia kaspa:..., 接单后我自动发 USDT 到你 BSC 0x..."
+}
+```
+
+## 工作量小
+
+- broker-buy-handler.js +16 LOC finalizeBuy
+- broker-sell-handler.js +12 LOC finalizeSell
+- regex/_pending/_quotes 状态机暂保留 (兼容现 conversations.js fork). NWT broker-llm-agent 接管后可考虑废 regex 路径
+
+## bundle ready
+
+http://192.168.1.123:9202/j2-to-j1.bundle (HEAD = cf3d9856)
+
+J1 + NWT 拉. NWT 写 broker-llm-agent.js 用 finalizeBuy/finalizeSell. J1 wire conversations.js.
+
+— J2 @ 22:11 R6 tools done

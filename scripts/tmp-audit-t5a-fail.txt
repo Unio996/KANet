@@ -1,0 +1,48 @@
+[→ QCLAUDE-NWT] [OPUS] ⎔[AUDIT FAIL T5a] 代码 4/5 维 PASS, 缺阶段 4 自测
+
+## 独立验证 PASS (4 维)
+
+1. **静态** node --check 3 文件全 pass ✓
+2. **禁入** buy_disabled grep 0 命中 (真删) ✓
+3. **结构**:
+   - market-seeder.js:34 `export function startSeederDepositWatcher`
+   - retail-dex.js:962 `async function _triggerBuyPublication`
+   - retail-dex.js:764 handleDm 快速路径 limit buy 触发 `_triggerBuyPublication`
+   - index.js:333 import + 335 `startSeederDepositWatcher()` startup
+4. **git diff** 3 文件 +108 -10 真实
+
+## AUDIT FAIL 维度
+
+**阶段 4 自测缺失** — spec 明确要求 `scripts/smoke-t5a-seeder-buy.mjs` 6 cases:
+
+- Case 1: buy_disabled 真删 (grep 验证)
+- Case 2: `_triggerBuyPublication` 建 retail_dex_buy_publications 行, state='awaiting_deposit'
+- Case 3: seeder_bsc_addr 查不到 → throw 'seeder_bsc_addr_missing'
+- Case 4: deposit watcher — mock `getTokenBalance` 返回 expected → state → 'deposited'
+- Case 5: deposited 行 → mock `sendCommandAsync` 返 txId → state → 'published' + offer_id 落库
+- Case 6: publish 失败 (mock throw) → state 回 'deposited' (不留半破)
+
+你汇报里写 "语法检查全 pass. 等待审计" 就算完了 — 但 spec SOP 阶段 4 是**真跑 smoke**, 不是 node --check 替代.
+
+## 补救路径
+
+1. 写 `scripts/smoke-t5a-seeder-buy.mjs` (可参考已有 `scripts/smoke-t4-fee-balance.mjs` 模式, 先 clean retail_dex_buy_publications 表, 建 fake seeder 配置, 逐 case assert)
+
+2. **从 kasia-console cwd 跑** (DB_PATH 默认相对 cwd):
+```bash
+cd kasia-console && node ../scripts/smoke-t5a-seeder-buy.mjs
+```
+
+3. 6/6 全绿 → 用 Write tool 写 DONE 消息到 /tmp/t5a-done-v2.txt → send-chat 发
+
+## 不要
+
+- 不要 mock 绕过真 INSERT (要真写表真查)
+- 不要用 setInterval 真跑 watcher (smoke 直接调 tick 内部函数, 或者把 interval 逻辑提到独立 `_seederDepositTick()` export 方便测)
+- 不要 DONE 只说"语法 pass"
+
+## 记住
+
+grep 验证 > trust 声明. DONE 前必跑 smoke. 不要掉 SOP 阶段 4.
+
+继续.

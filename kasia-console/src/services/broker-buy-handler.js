@@ -6,7 +6,10 @@ import { sqlite } from '../db/client.js';
 import { randomUUID } from 'crypto';
 
 const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
-const BUY_REGEX = /^\s*(?:买|buy)\s*(\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*KAS\s*$/i;
+// T-J2-2026-04-27 v1.1: 真扩 BUY_REGEX 同 BUY_OVERRIDE_REGEX (broker-sell-handler line 14) 模式
+// + SELL_REGEX 真扩 (63a953de3) 对称真扩同义词 — 真 deterministic fast path 跳 LLM 1-2s
+// 加 '想买/要买/购买/购/想换/搞/弄/来点/想要/我要/want/get/grab/take/need/cop/gimme/quiero'
+const BUY_REGEX = /^\s*(?:买|buy|想买|要买|购买|购|想换|搞|弄|来点|想要|我要|want|get|grab|take|need|cop|gimme|fetch|quiero|necesito)\s*(\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*KAS\s*$/i;
 // T-J1-19a (J2 probe-5a 暴露): broker dust 单接受漏洞 — finalizeBuy / _aggregateWithFallback
 // 必须拒小于 MIN_QTY 的请求, 否则 broker 锁 fund_locks 浪费 broadcast tx + 用户 dust 被 broker fee 吃光.
 const MIN_QTY_KAS = 1.0;
@@ -36,6 +39,18 @@ const PENDING_ACCEPT_TTL_MS = 30 * 60 * 1000;  // 真人付款窗口 30min
 
 const _quotes = new Map();  // peer → {offer_id, qty, quoted_usdt, pay_chain, maker_addr, expires_at}
 const _pendingAccepts = new Map();  // peer → {offer_id, qty, quoted_usdt, pay_chain, maker_addr, accept_tx, expires_at}
+// T-NWT-2026-04-27 Bug 7 hotfix: preview 后 set, 'YES' confirm 真 deterministic finalizeBuy 真 propagate
+// give_asset (LLM tool calling 真不可靠 — 真 USDC/USDT 真 LLM hallucinate "下单成功" 真 0 publish 真灾难).
+// 跟 _quotes (KAS BUY_REGEX path) 同 pattern broker handler in-memory state.
+const _pendingPreview = new Map();  // peer → {qty, pay_chain, give_asset, receive_address, expires_at}
+const PENDING_PREVIEW_TTL_MS = 30 * 60 * 1000;  // 30min, same as _pendingAccepts
+export function _setPendingPreview(peer, data) { _pendingPreview.set(peer, { ...data, expires_at: Date.now() + PENDING_PREVIEW_TTL_MS }); }
+export function _getPendingPreview(peer) {
+  const p = _pendingPreview.get(peer);
+  if (!p || Date.now() >= p.expires_at) { _pendingPreview.delete(peer); return null; }
+  return p;
+}
+export function _clearPendingPreview(peer) { _pendingPreview.delete(peer); }
 let _sendOverride = null;
 let _publishOverride = null;  // T-J1-19b: unit test inject for _brokerPublishKasOffer
 let _scanOverride = null;     // T-J2-V2: unit test inject for scanRecentTransfers
@@ -147,6 +162,9 @@ async function _brokerPublishKasOffer(qtyKas, payChain, give_asset = 'KAS', want
   // Idempotency: 5min 内同 chain + 同 qty + 同 asset 已挂 broker_dynamic_quote open → 复用
   const broker = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID);
   if (broker?.address) {
+    // T-J2-2026-04-27 v1.1 Bug 8 真 fix (J1 24:50 真测撞 老 expired offer 真因连锁):
+    // idempotency reuse 加 expires_at > now check — 防 reuse 真 expired offer (虽然 5min window
+    // 真已 narrow, 但 broker_dynamic_quote 60min expires 真长 — 5min idempotency 内 expired = 真不能 reuse).
     const existing = sqlite.prepare(`
       SELECT id, want_amount, verification_meta, created_at
       FROM exchange_offers
@@ -154,6 +172,7 @@ async function _brokerPublishKasOffer(qtyKas, payChain, give_asset = 'KAS', want
         AND give_asset = ? AND CAST(give_amount AS REAL) = ?
         AND json_extract(metadata, '$.source') = 'broker_dynamic_quote'
         AND julianday(created_at) > julianday('now', '-5 minutes')
+        AND (expires_at IS NULL OR julianday(expires_at) > julianday('now'))
       ORDER BY created_at DESC LIMIT 1
     `).get(broker.address, give_asset, qtyKas);
     if (existing) {
@@ -221,13 +240,17 @@ async function _enqueue(kind, peer, payload) {
   return enqueue({ kind, peer, payload });
 }
 
-function _enqueueAccept(offerId, peerAddr, payChain) {
+function _enqueueAccept(offerId, peerAddr, payChain, evmRecvAddr = null) {
+  // T-J2-2026-04-27 v1.2 (c) — 加 evm_recv_address 字段, 解决 USDC delivery silent fail (J1 12:13 真发现).
+  // 老 receive_address 真 user kasia (KAS path 用), 新 evm_recv_address 真 user EVM (USDC/USDT path 用).
+  // backward compat: 老 client 真没 evm_recv_address 真 KAS path 真 still work.
   const payload = {
     t: 'kanet_exchange_accept_v1',
     offer_id: offerId,
     selected_chain: payChain,
     payment_asset: 'usdt',
     receive_address: peerAddr,
+    evm_recv_address: evmRecvAddr || null,
   };
   return _enqueue('accept_v1', peerAddr, { channel: 'kanet-exchange', message: JSON.stringify(payload) });
 }
@@ -268,8 +291,12 @@ export async function buyPreview({ user_kasia, qty, pay_chain, give_asset = 'KAS
       message: `broker 真不支持 ${give_asset}. 现 supported: ${listAssets().join(', ')}.`,
     };
   }
-  if (qty < MIN_QTY_KAS) {
-    return { ok: false, error: `qty_too_small`, message: `最小买 ${MIN_QTY_KAS} ${give_asset} (broker fee + dust 保护). 改大点.` };
+  // T-NWT-2026-04-27 generic化 (Owner 12:51 钦定 '任何资产能复用'): per-asset minQty 走 registry
+  // 之前 MIN_QTY_KAS = 1.0 hardcoded 对所有 asset 用 → USDC/USDT (registry minQty 0.1) 被错拒
+  // 跟 sellPreview 同范式 (giveMeta.minQty)
+  const minQty = assetMeta.minQty || MIN_QTY_KAS;
+  if (qty < minQty) {
+    return { ok: false, error: `qty_too_small`, message: `最小买 ${minQty} ${give_asset} (broker fee + dust 保护). 改大点.` };
   }
   const existing = _pendingAccepts.get(user_kasia);
   if (existing && Date.now() < existing.expires_at) {
@@ -325,16 +352,73 @@ export async function buyPreview({ user_kasia, qty, pay_chain, give_asset = 'KAS
     const tag = p.broker_dynamic ? '(broker 自挂)' : '(maker)';
     return `  ${i+1}. ${p.take_qty} ${give_asset} → 付 ${(+p.take_usdt).toFixed(6)} USDT 到\n     \`${p.maker_addr}\` ${tag}`;
   }).join('\n');
+
+  // T-NWT-2026-04-27 报价信息丰富化 (Owner 11:08 钦定: 信任+信息双不足是 production blocker)
+  // 4 段补强: (A) broker 身份 (B) 价格对比 (C) 安全说明 (D) 历史链上记录
+  let trustCard = '';
+  try {
+    const brokerRow = sqlite.prepare('SELECT name, created_at FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID);
+    const completedCount = sqlite.prepare(
+      `SELECT COUNT(*) as n FROM exchange_offers WHERE maker = ? AND protocol_status = 'completed'`
+    ).get(brokerRow ? sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID)?.address : '')?.n || 0;
+    const daysActive = brokerRow?.created_at
+      ? Math.floor((Date.now() - new Date(brokerRow.created_at).getTime()) / 86400000)
+      : '?';
+    trustCard = `🏷 **${brokerRow?.name || 'KANet broker'}** · Kasia 注册 ${daysActive} 天 · 累计完成 **${completedCount}** 笔成交`;
+  } catch (e) { trustCard = '🏷 KANet broker'; }
+
+  // (B) 价格对比 — 跟 CEX 中价比 spread%
+  let priceCompare = '';
+  try {
+    const { fetchPrice } = await import('./price-oracle.js');
+    const pr = await fetchPrice(give_asset, 'USDT');
+    if (pr.ok && pr.price > 0) {
+      const spreadPct = ((unitPrice - pr.price) / pr.price * 100);
+      const spreadSign = spreadPct >= 0 ? '+' : '';
+      priceCompare = `\n  (CEX 8 源中价 ${pr.price.toFixed(6)}, 本单 ${spreadSign}${spreadPct.toFixed(2)}% spread)`;
+    }
+  } catch (e) { /* 价格取不到不要紧, 跳过 */ }
+
+  // (D) 历史链上履历 — 最近 3 笔 completed
+  let historyLines = '';
+  try {
+    const brokerAddr = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID)?.address;
+    if (brokerAddr) {
+      const recent = sqlite.prepare(`
+        SELECT broadcast_tx_id, give_amount, give_asset, completed_at
+        FROM exchange_offers
+        WHERE maker = ? AND protocol_status = 'completed' AND broadcast_tx_id IS NOT NULL
+        ORDER BY completed_at DESC LIMIT 3
+      `).all(brokerAddr);
+      if (recent.length > 0) {
+        historyLines = '\n📊 **broker 最近成交** (Kaspa explorer 可验):\n' + recent.map(r =>
+          `  · ${r.give_amount} ${r.give_asset} → tx \`${r.broadcast_tx_id?.slice(0, 10)}...${r.broadcast_tx_id?.slice(-6)}\``
+        ).join('\n');
+      }
+    }
+  } catch (e) { /* 历史取不到不要紧 */ }
+
   const preview_text = `📋 **订单画像 (确认前)**
+
+${trustCard}
 
 * 方向: 买 ${give_asset}
 * 数量: ${cumKas} ${give_asset}
 * 付款链: ${payChain.toUpperCase()} (USDT)
-* 单价: ${unitPrice.toFixed(6)} USDT/${give_asset}
+* 单价: ${unitPrice.toFixed(6)} USDT/${give_asset}${priceCompare}
 * 总额: ${totalUsdt.toFixed(6)} USDT
 ${payLines}
 * ${give_asset} 收件 (你的 ${recvNetwork}):
-  \`${assetMeta.chain === 'kaspa' ? user_kasia : (receive_address || '⚠ 缺 receive_address — buy stable 真要传 user EVM/Sol/Tron 收款地址')}\`
+  \`${assetMeta.chain === 'kaspa'
+      ? user_kasia
+      : (receive_address ? `${receive_address.slice(0, 6)}...${receive_address.slice(-4)} (你提供的 ${recvNetwork} 钱包)` : '⚠ 缺 receive_address — buy stable 真要传 user EVM/Sol/Tron 收款地址')}\`
+
+🛡 **安全说明**
+  · USDT 直付 maker, broker 不托管你的钱
+  · broker fee 0.1 KAS 固定 (无隐藏)
+  · 30min 未付款 → 自动取消, 你 USDT 不动
+  · 跨链验证失败 → 自动 refund + dispute 通道
+${historyLines}
 
 ⏰ 订单 30 分钟内付款有效 · 跨链验证 1-3 分钟
 
@@ -399,8 +483,11 @@ export async function finalizeBuy({ user_kasia, qty, pay_chain, give_asset = 'KA
   const merged = await _aggregateWithFallback(qty, payChain, give_asset);
   if (!merged.ok) return { ok: false, error: merged.error, available: merged.available };
 
+  // T-J2-2026-04-27 v1.2 (c): 真传 EVM addr (买 stable 真 user EVM 收款 addr) 进 accept_v1
+  // 真 receive_address 真 backward compat (= user kasia, KAS path 真用), evm_recv_address 真 stable 真用.
+  const evmRecvForAccept = (give_asset !== 'KAS' && receive_address && !receive_address.startsWith('kaspa:')) ? receive_address : null;
   for (const p of merged.picks) {
-    await _enqueueAccept(p.id, user_kasia, payChain);
+    await _enqueueAccept(p.id, user_kasia, payChain, evmRecvForAccept);
     _recordAccept({ offerId: p.id, userPeer: user_kasia, qty: p.take_qty, quotedUsdt: p.take_usdt.toFixed(6), payChain, acceptTx: null });
   }
   // T-J2-26 (Owner 真测 04-26 12:18 — Bug A 静默根修):
@@ -601,6 +688,133 @@ export async function handleBuyIntent(peerAddr, message) {
     return '';
   }
 
+  // T-NWT-2026-04-27 Bug 7 hotfix: 'YES' confirm 真 _pendingPreview deterministic shortcut
+  // (LLM-driven preview 真不 set _quotes — broker LLM 真 'YES' 真 LLM hallucinate 不调 finalize_order tool).
+  // 真 _pendingPreview 真 set by preview_order tool (broker-llm-agent.js _executeTool). 真 hit 真直 finalizeBuy.
+  const pp = _getPendingPreview(peerAddr);
+  if (pp && CONFIRM_WORDS.includes(trimmed)) {
+    _clearPendingPreview(peerAddr);
+    const r = await finalizeBuy({
+      user_kasia: peerAddr, qty: pp.qty, pay_chain: pp.pay_chain,
+      give_asset: pp.give_asset || 'KAS', receive_address: pp.receive_address || null,
+    });
+    if (r.ok) {
+      const orderId = r.picks?.[0]?.offer_id?.slice(0,8) || randomUUID().slice(0,8);
+      _qDm('dm_order_confirmed', peerAddr,
+        `📋 订单已确认 #${orderId}\n· 买 ${r.total_kas} ${pp.give_asset || 'KAS'} / 付 ${r.total_usdt} USDT (${pp.pay_chain.toUpperCase()})\n· 我马上把付款地址发给你, 收到付款自动验证 + 自动 deliver, 全程不用你查链.`);
+      const lines = r.picks.map((p, i) =>
+        `${i+1}. ${p.qty_kas} ${pp.give_asset || 'KAS'} → 付 ${p.pay_usdt} USDT 到 ${p.maker_payment_address}`
+      ).join('\n');
+      _qDm('dm_pay_instr', peerAddr, `付款指引:\n${lines}\n\n付完不用回复, 自动检测.`);
+      // T-J2-2026-04-27 P0-4 fix (NWT 真人 UX 抓): sync ack 立刻回, 真**真**真 _qDm DM async chain 1-2min 到, sync 空回真**真**真**用户疑神疑鬼.
+      return `✓ 订单已确认 #${orderId} (买 ${r.total_kas} ${pp.give_asset || 'KAS'} / 付 ${r.total_usdt} USDT). 付款指引马上发你, 自动检测付款, 不用刷新.`;
+    }
+    _qDm('dm_failed', peerAddr, `下单失败: ${r.message || r.error}. 重试或回 NO 取消.`);
+    return `❌ 下单失败 (${r.error || 'unknown'}). 请重试或回 "NO" 取消.`;
+  }
+
+  // T-NWT-2026-04-27 Bug-W deterministic preview path (J1 726cee54 + J2 1f51ade29a vote (b) approve)
+  // T-NWT-2026-04-27 Bug-Z5 fix (J1 3c4a02216b 真测撞): parse current msg FIRST, history 真**只**填 missing fields
+  // 真 root: Bug-W v1 真 took asset/qty from stale broker history (Eric 真 prior PASS '买 1 KAS' 真 first match)
+  // → user '想买 0.5 USDC' 真 ignored, broker 真 hallucinate 'buy 1 KAS' (J1 03:56 LIVE 真撞).
+  //
+  // 真 Qwen3.6 LLM 真**永不** call preview_order tool — handler 真 deterministic mitigation.
+  // 真 trigger: user msg 含 EVM addr OR chain word, 真 BUY_REGEX 真 miss.
+  // 真 priority: current msg 真**最权威** (user explicit), 真 history fill ONLY missing fields.
+  {
+    const evmAddrMatch = trimmed.match(/0x[a-fA-F0-9]{40}/);
+    const chainInMsgMatch = trimmed.match(/\b(BSC|BNB|Polygon|POL|SOL|Solana|TRON)\b/i);
+    // T-NWT-2026-04-27 Bug-Z6 fix (J1 6a1a2d306e 真测撞): SELL keyword in current msg → skip Bug-W,
+    // 让 broker-sell-handler 接管. 真 root: Bug-W 拿 broker 历史 BUY 反 fill SELL 请求, 撞 hallucinate
+    // 跟 Bug-Z5 同 class — current msg 优先, SELL 是 explicit 拒绝信号 (绝不当 BUY 处理).
+    const sellKeywordInMsg = /(?:卖|要卖|想卖|出售|抛|sell|dump|unload)/i.test(trimmed);
+    const looksLikeFieldFollowup = (evmAddrMatch || chainInMsgMatch) && !BUY_REGEX.test(trimmed) && !sellKeywordInMsg;
+    if (looksLikeFieldFollowup) {
+      try {
+        // T-NWT-2026-04-27 Bug-Z5 fix: parse current msg 真先 (user explicit asset/qty 真 trumps history)
+        const buyMsgM = trimmed.match(/(?:买|想买|要买|购买|想换|换\s*\d|来点|要点|想要|我要|buy|want|get|grab|need|cop|comprar|quiero)\s*(\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*(KAS|USDT|USDC)\b/i);
+        let direction = null;
+        let qty = null;
+        let asset = null;
+        if (buyMsgM) {
+          direction = 'buy';
+          qty = parseFloat(buyMsgM[1]);
+          asset = buyMsgM[2].toUpperCase();
+        }
+        // History fallback ONLY for fields not in current msg
+        if (!direction || !qty || !asset || !chainInMsgMatch) {
+          const brokerInfo = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID);
+          if (brokerInfo?.address) {
+            const histRows = sqlite.prepare(`
+              SELECT m.direction, m.content_text
+              FROM messages m
+              LEFT JOIN identities si ON si.id = m.sender_identity_id
+              LEFT JOIN identities ri ON ri.id = m.receiver_identity_id
+              WHERE ((si.address = ? AND ri.address = ?) OR (si.address = ? AND ri.address = ?))
+                AND m.message_type = 'text'
+              ORDER BY m.created_at DESC LIMIT 6
+            `).all(brokerInfo.address, peerAddr, peerAddr, brokerInfo.address);
+            const brokerLastBuy = histRows.find(r =>
+              r.direction === 'outbound' && /(?:买|buy)\s*\d+(?:\.\d+)?\s*(?:个|枚|只)?\s*(KAS|USDT|USDC)/i.test(r.content_text || '')
+            );
+            if (brokerLastBuy) {
+              const histQtyM = brokerLastBuy.content_text.match(/(?:买|buy)\s*(\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*(KAS|USDT|USDC)/i);
+              if (!direction) direction = 'buy';
+              if (!qty && histQtyM) qty = parseFloat(histQtyM[1]);
+              if (!asset && histQtyM) asset = histQtyM[2].toUpperCase();
+            }
+          }
+        }
+        // chain: current msg first, history fallback
+        let chainSrc = chainInMsgMatch?.[1];
+        if (!chainSrc) {
+          const brokerInfo2 = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID);
+          if (brokerInfo2?.address) {
+            const recent = sqlite.prepare(`
+              SELECT m.content_text FROM messages m
+              LEFT JOIN identities si ON si.id = m.sender_identity_id
+              LEFT JOIN identities ri ON ri.id = m.receiver_identity_id
+              WHERE si.address = ? AND ri.address = ? AND m.direction='outbound' AND m.message_type='text'
+              ORDER BY m.created_at DESC LIMIT 3
+            `).all(brokerInfo2.address, peerAddr);
+            for (const r of recent) {
+              const m = (r.content_text || '').match(/\b(BSC|BNB|Polygon|POL|SOL|Solana|TRON)\b/i);
+              if (m) { chainSrc = m[1]; break; }
+            }
+          }
+        }
+        const chainNorm = chainSrc
+          ? chainSrc.toUpperCase().replace('BSC', 'BNB').replace('POLYGON', 'POL').replace('SOLANA', 'SOL').toLowerCase()
+          : 'bnb';
+        const recvAddr = evmAddrMatch?.[0] || null;
+        if (direction === 'buy' && qty && qty > 0 && asset) {
+          const previewResult = await buyPreview({
+            user_kasia: peerAddr,
+            qty, pay_chain: chainNorm,
+            give_asset: asset,
+            receive_address: asset === 'KAS' ? null : recvAddr,
+          });
+          if (previewResult.ok) {
+            _setPendingPreview(peerAddr, {
+              qty, pay_chain: chainNorm,
+              give_asset: asset, receive_address: asset === 'KAS' ? null : recvAddr,
+            });
+            _qDm('dm_quote', peerAddr, previewResult.preview_text);
+            console.log(`[broker-buy] det-preview ${peerAddr.slice(-12)}: ${qty} ${asset} ${chainNorm}`);
+            return '';
+          }
+          if (previewResult.message) {
+            _qDm('dm_failed', peerAddr, `抱歉, ${previewResult.message}`);
+            return '';
+          }
+        }
+      } catch (e) {
+        console.warn(`[broker-buy] det-preview err: ${e.message}`);
+      }
+      // fall through to existing flow if det-preview didn't trigger
+    }
+  }
+
   const pending = _quotes.get(peerAddr);
 
   // 用户确认 pending quote → 多笔 enqueue accept_v1 + 一条聚合 dm_pay_instr 列出所有 maker 付款指引
@@ -649,29 +863,27 @@ export async function handleBuyIntent(peerAddr, message) {
     }
   }
 
-  // T-J1-2026-04-27 P0-3 CANCEL after confirm (NWT 17:34 UX P0): user 真**真**confirm 真后想取消 真**真**legitimate.
-  // pre-fix: user '好' → _pendingAccepts.set, 然后 '算了 NO' 真**真**fall LLM → finalize_order 真**真**rejected
-  //   '已有 active 订单, 等 30min 过期' = 真**真**user 真摔门 UX P0.
-  // post-fix: _pendingAccepts active 真 user CANCEL_WORDS → release accept + ack sync.
-  //   真 picks 真**真**有 paid_tx → cannot cancel (已上链), 真 DM user explain.
-  //   真 all picks unpaid → release _pendingAccepts (broker 真**真**没发 KAS, user 真**真**没付 USDT,
-  //   真 zero on-chain action needed).
+  // P0-3 CANCEL after confirm (NWT 17:34 UX 抓): user confirm 后想取消 → 必须能 cancel.
+  // 合并 J1 logic (handle paid picks) + J2 fuzzy match (Owner 真测撞 '算了 NO' multi-token).
+  // pre-fix: user '好' → _pendingAccepts.set, 然后 '算了 NO' fall LLM → finalize 拒 '已有 active 订单' = UX P0.
+  // post-fix: cancel words 检测 (exact 或 fuzzy substring) → 看 paid picks:
+  //   - 已 paid 笔 cannot cancel (USDT 上链), DM user 解释剩余 unpaid 等过期
+  //   - 全 unpaid → release _pendingAccepts (zero on-chain action)
   const cancelable = _pendingAccepts.get(peerAddr);
-  if (cancelable && CANCEL_WORDS.includes(trimmed)) {
+  const cancelHit = CANCEL_WORDS.includes(trimmed) || /\b(NO|no|cancel)\b/i.test(trimmed) || /取消|不要|算了/.test(trimmed);
+  if (cancelable && cancelHit) {
     if (Date.now() >= cancelable.expires_at) {
       _pendingAccepts.delete(peerAddr);
-      return '订单 真**真**已超时 (30min). 真不锁资金, 真**真**重新下单回 "买 X KAS".';
+      return '订单已超时 (30min). 不锁资金, 重新下单回 "买 X KAS".';
     }
     const paidPicks = cancelable.picks.filter(p => p.paid_tx);
     if (paidPicks.length > 0) {
-      // 已付款笔 真不能取消 (USDT 已上链). DM user explain.
       const unpaidCount = cancelable.picks.length - paidPicks.length;
-      return `真**真**${paidPicks.length}/${cancelable.picks.length} 笔已付款 真不能取消 (USDT 已上链 broker 真**真**自动 deliver KAS).${unpaidCount > 0 ? ` 未付的 ${unpaidCount} 笔 真**真**等过期自动释放 (30min).` : ''} 真**真**有问题回我.`;
+      return `${paidPicks.length}/${cancelable.picks.length} 笔已付款不能取消 (USDT 已上链, broker 自动 deliver KAS).${unpaidCount > 0 ? ` 未付的 ${unpaidCount} 笔等过期自动释放 (30min).` : ''} 有问题回我.`;
     }
-    // 全 unpaid → release accept, broker 真**真**没发 KAS, 真**真**zero on-chain action.
     _pendingAccepts.delete(peerAddr);
-    _qDm('dm_cancel', peerAddr, `✓ 订单已取消 (${cancelable.total_kas} KAS / ${cancelable.total_usdt.toFixed(6)} USDT). 真不锁资金, 真**真**随时回 "买 X KAS" 真重新下单.`);
-    return `✓ 订单已取消 (${cancelable.total_kas} KAS / 全 unpaid). 真不锁资金, 重新下单回 "买 X KAS".`;
+    _qDm('dm_quote', peerAddr, `✓ 订单已取消 (${cancelable.total_kas} KAS / ${cancelable.total_usdt.toFixed(6)} USDT). 不锁资金, 重新下单回 "买/卖 X KAS".`);
+    return `✓ 订单已取消 (${cancelable.total_kas} KAS / 全 unpaid). 你 USDT 没动. 重新下单回 "买/卖 X KAS".`;
   }
 
   // PAID intent: 用户回 "我付了 0xtx..." → 一次匹配一个 unpaid pick (FIFO)

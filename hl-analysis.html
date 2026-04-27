@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<title>HL Perps Dashboard — $55 Account</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Courier New', monospace; background: #0d1117; color: #c9d1d9; padding: 20px; }
+  h1 { color: #58a6ff; font-size: 1.2em; margin-bottom: 5px; }
+  h2 { color: #79c0ff; font-size: 1em; margin: 20px 0 10px; border-bottom: 1px solid #21262d; padding-bottom: 5px; }
+  .subtitle { color: #8b949e; font-size: 0.8em; margin-bottom: 20px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 15px; }
+  .card.full { grid-column: 1 / -1; }
+  .highlight { color: #f0883e; }
+  .green { color: #56d364; }
+  .red { color: #f85149; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.8em; }
+  th { background: #1c2128; color: #8b949e; padding: 6px 8px; text-align: left; border-bottom: 1px solid #30363d; }
+  td { padding: 5px 8px; border-bottom: 1px solid #21262d; }
+  tr:hover { background: #1c2128; }
+  canvas { background: #161b22; border-radius: 6px; padding: 10px; }
+  .alert { background: #1c1308; border: 1px solid #f0883e; border-radius: 6px; padding: 12px; margin: 10px 0; }
+  .alert-green { background: #0c2d0c; border: 1px solid #56d364; }
+  .alert-red { background: #2d0c0c; border: 1px solid #f85149; }
+  .account { font-size: 1.5em; color: #f0883e; font-weight: bold; }
+  .tag { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 0.7em; margin-left: 5px; }
+  .tag-long { background: #238636; color: white; }
+  .tag-short { background: #da3633; color: white; }
+  .tag-neutral { background: #484f58; color: white; }
+</style>
+</head>
+<body>
+<h1>⚡ Hyperliquid Perps Dashboard</h1>
+<p class="subtitle">Account: <span class="account">$55.34</span> | 3x Leverage | Max Notional: ~$165 | Min Position: ~$55</p>
+<p class="subtitle">Data fetched: <span id="fetchTime"></span></p>
+
+<div class="alert">
+  <strong>⚠️ Account Size Alert:</strong> With only $55, you need <strong>very low price assets</strong> to open positions.
+  Assets priced >$1 are impractical. Focus on sub-$1 assets with high momentum and extreme funding.
+</div>
+
+<h2>📊 Market Overview — Funding Rate Heatmap</h2>
+<div class="card full">
+  <canvas id="fundingChart" height="80"></canvas>
+</div>
+
+<h2>🔥 Top Movers (24h Volume > $1M, Price < $1)</h2>
+<div class="card full">
+  <table id="moversTable">
+    <thead>
+      <tr>
+        <th>#</th><th>Asset</th><th>Category</th><th>Price</th><th>24h %</th>
+        <th>Funding/8h</th><th>Funding/Day</th><th>Vol/OI</th><th>Max Lev</th><th>Signal</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<h2>🎯 Account-Appropriate Candidates (Price < $1, Vol > $500K)</h2>
+<div class="card full">
+  <table id="candidatesTable">
+    <thead>
+      <tr><th>Asset</th><th>Price</th><th>Min $55 Pos (sz)</th><th>24h %</th><th>Funding</th><th>Vol/OI</th><th>Score</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<h2>🐋 Smart Wallet — Weekly PnL Leaders</h2>
+<div class="card full">
+  <table id="leaderTable">
+    <thead><tr><th>Rank</th><th>Account</th><th>Display</th><th>Account Value</th><th>Week PnL</th><th>ROI</th></tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<h2>📈 Funding Rate Distribution (All Markets)</h2>
+<div class="card full">
+  <canvas id="fundingDistChart" height="150"></canvas>
+</div>
+
+<h2>🔥 Volume/OI Ratio — Activity Intensity</h2>
+<div class="card full">
+  <canvas id="volOChart" height="150"></canvas>
+</div>
+
+<script>
+const data = window._hlData;
+document.getElementById('fetchTime').textContent = new Date().toISOString();
+
+// ========== CANDIDATES TABLE (price < $1, vol > $500K) ==========
+const candidates = data.markets.filter(m => m.openInterest > 0 && m.volume24h > 500000 && m.markPrice < 1 && m.markPrice > 0.001)
+  .map(m => {
+    const minSize = 55 / m.markPrice; // min contract size for $55 account
+    // Score: momentum * volume_intensity * (1 if funding is negative = bullish squeeze, -1 if positive)
+    const fundDir = m.fundingRate > 0 ? -1 : 1; // negative funding = bullish signal
+    const score = (m.change24h * 0.4 + m.volume24h/m.openInterest * 10 * 0.3 + fundDir * Math.abs(m.fundingRate)*100000 * 1000 * 0.3);
+    return {...m, minSize, score: Math.abs(score)};
+  })
+  .sort((a,b) => b.score - a.score);
+
+const candBody = document.querySelector('#candidatesTable tbody');
+candidates.forEach(m => {
+  const fundDay = (m.fundingRate * 100 * 3).toFixed(3);
+  const volOi = (m.volume24h / m.openInterest).toFixed(1);
+  candBody.innerHTML += `<tr>
+    <td><strong>${m.asset}</strong></td>
+    <td>$${m.markPrice.toFixed(4)}</td>
+    <td>${m.minSize.toFixed(0)} contracts</td>
+    <td class="${m.change24h > 0 ? 'green' : 'red'}">${m.change24h > 0 ? '+' : ''}${m.change24h.toFixed(2)}%</td>
+    <td>${fundDay}%</td>
+    <td>${volOi}x</td>
+    <td>${m.score.toFixed(1)}</td>
+  </tr>`;
+});
+
+// ========== MOVERS TABLE ==========
+const movers = data.markets.filter(m => m.openInterest > 0 && m.volume24h > 1000000 && m.markPrice < 1)
+  .sort((a,b) => Math.abs(b.change24h) - Math.abs(a.change24h))
+  .slice(0, 30);
+
+const movBody = document.querySelector('#moversTable tbody');
+movers.forEach((m, i) => {
+  const fundDay = (m.fundingRate * 100 * 3).toFixed(3);
+  const volOi = (m.volume24h / m.openInterest).toFixed(1);
+  let signal = '<span class="tag tag-neutral">NEUTRAL</span>';
+  if (m.fundingRate < -0.000001 && m.change24h > 0) signal = '<span class="tag tag-long">BULL SQUEEZE</span>';
+  if (m.fundingRate > 0.000005 && m.change24h > 0) signal = '<span class="tag tag-short">LONG CROWDED</span>';
+  if (m.fundingRate > 0.000005 && m.change24h < 0) signal = '<span class="tag tag-short">SHORT SQUEEZE</span>';
+  movBody.innerHTML += `<tr>
+    <td>${i+1}</td><td><strong>${m.asset}</strong></td><td>${m.category}</td>
+    <td>$${m.markPrice.toFixed(4)}</td>
+    <td class="${m.change24h > 0 ? 'green' : 'red'}">${m.change24h > 0 ? '+' : ''}${m.change24h.toFixed(2)}%</td>
+    <td>${fundDay}%</td><td>${fundDay}x3 = ${fundDay}%</td>
+    <td>${volOi}x</td><td>${m.maxLeverage}x</td><td>${signal}</td>
+  </tr>`;
+});
+
+// ========== LEADER TABLE ==========
+const wkData = JSON.parse(require('fs').readFileSync('/tmp/hl_wk.json')).leaders;
+const leaderBody = document.querySelector('#leaderTable tbody');
+wkData.forEach((l, i) => {
+  const name = l.displayName || l.address.slice(0,10) + '...';
+  leaderBody.innerHTML += `<tr>
+    <td>${i+1}</td><td style="font-size:0.75em">${l.address}</td><td>${name}</td>
+    <td>$${l.accountValue.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}</td>
+    <td class="green">+$${l.pnl.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}</td>
+    <td class="green">${l.roi.toFixed(1)}%</td>
+  </tr>`;
+});
+
+// ========== FUNDING CHART ==========
+const topMovers = movers.slice(0, 20);
+new Chart(document.getElementById('fundingChart'), {
+  type: 'bar',
+  data: {
+    labels: topMovers.map(m => m.asset),
+    datasets: [{
+      label: 'Funding Rate / 8h (%)',
+      data: topMovers.map(m => m.fundingRate * 100),
+      backgroundColor: topMovers.map(m => m.fundingRate > 0 ? 'rgba(86,211,100,0.6)' : 'rgba(248,81,73,0.6)'),
+      borderColor: topMovers.map(m => m.fundingRate > 0 ? '#56d364' : '#f85149'),
+      borderWidth: 1,
+    }]
+  },
+  options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#8b949e', font: {size: 10} } }, y: { ticks: { color: '#8b949e' } } } }
+});
+
+// ========== FUNDING DISTRIBUTION ==========
+const fundingDist = [-0.0005, -0.0002, -0.0001, -0.00005, -0.00001, 0, 0.00001, 0.00005, 0.0001, 0.0002, 0.0005];
+const distCounts = new Array(fundingDist.length).fill(0);
+data.markets.forEach(m => {
+  for (let i = 0; i < fundingDist.length - 1; i++) {
+    if (m.fundingRate >= fundingDist[i] && m.fundingRate < fundingDist[i+1]) distCounts[i]++;
+  }
+});
+new Chart(document.getElementById('fundingDistChart'), {
+  type: 'bar',
+  data: {
+    labels: fundingDist.map(f => (f * 100).toFixed(3) + '%'),
+    datasets: [{ label: 'Count', data: distCounts, backgroundColor: '#58a6ff', borderColor: '#79c0ff', borderWidth: 1 }]
+  },
+  options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#8b949e', font: {size: 10} } }, y: { ticks: { color: '#8b949e' } } } }
+});
+
+// ========== VOLUME/OI CHART ==========
+const topVolOi = [...data.markets].filter(m => m.openInterest > 0 && m.volume24h > 1000000).sort((a,b) => b.volume24h/b.openInterest - a.volume24h/a.openInterest).slice(0, 20);
+new Chart(document.getElementById('volOChart'), {
+  type: 'bar',
+  data: {
+    labels: topVolOi.map(m => m.asset),
+    datasets: [{ label: 'Vol/OI Ratio', data: topVolOi.map(m => m.volume24h/m.openInterest), backgroundColor: '#f0883e', borderColor: '#f0883e', borderWidth: 1 }]
+  },
+  options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#8b949e', font: {size: 10} } }, y: { ticks: { color: '#8b949e' } } } }
+});
+</script>
+</body>
+</html>

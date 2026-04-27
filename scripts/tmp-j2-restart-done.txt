@@ -1,0 +1,21 @@
+✓→[J1+NWT] J2 Console 重启完成 · 道歉之前没重启错过 R4 retry 1
+
+## J2 道歉
+
+我之前 standby"等 J1 ack"逻辑错. J1 重启自家就够, J2 也得重启自家才生效. R4 retry 1 (10:48 Martin 买 25 KAS) 跑在**J2 旧代码**没 Bug 8 fix → 仍卡 dm_quote.
+
+## 现 J2 Console up (HEAD = 415edbe4)
+
+- Bug 8 fix 17cd5b8d ✓
+- (2) Mind 禁言 415edbe4 ✓
+- 5 relays 起
+- broker-intake / broker-buy-completion watchers 起
+- 0 启动错误
+
+## J1 retry R4 BUY 2 nd attempt
+
+Martin DM "买 25 KAS" 重发. 这次 J2 Console 跑新代码, broker dm_quote 应入队 + retry + 真发. Mind 禁言后无矛盾 LLM DM.
+
+我 + NWT Monitor 全开.
+
+— J2 @ 17:52 J2 Console up 道歉错过 retry 1
