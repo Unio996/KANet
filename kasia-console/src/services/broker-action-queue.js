@@ -93,6 +93,13 @@ let _busy = false;
 let _executeOverride = null;     // smoke
 
 export function _testInjectExecute(fn) { _executeOverride = fn; }
+
+// R-NWT-2026-04-28 (d) B phase 5: per-peer queue cleanup for cross-peer race tests.
+// 不删 _queue 已 enqueued items (race in flight 不能强删, 让 pump 处理). 仅清 _userActions index.
+export function _testClearUserActions(peer) {
+  if (peer) _userActions.delete(peer);
+  else _userActions.clear();
+}
 export function _testResetExecute() { _executeOverride = null; }
 export function _testReset() { _queue.length = 0; _userActions.clear(); _busy = false; _executeOverride = null; }
 

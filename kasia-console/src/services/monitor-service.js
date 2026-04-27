@@ -23,12 +23,15 @@ const DEFAULT_POLL_MS = 10_000;
 const DEFAULT_LIMIT = 30;
 
 function getConfig(key, fallback) {
+  // R-NWT-2026-04-28 hotfix: schema 是 config_entries(key, value_plain_hint), 不是 config_key/config_value.
+  // 之前 497bd4643 ship 写错列名, console 起飞撞 SQLITE_ERROR. monitor-service 静默 try-catch 吞了, 但
+  // tick() L218 同错没 try-catch → console crash. 全文修过来.
   try {
     const row = sqlite.prepare(
-      "SELECT config_value FROM config_entries WHERE config_key = ? AND category = ?"
-    ).get(key, 'monitor');
+      "SELECT value_plain_hint FROM config_entries WHERE key = ? AND category = ?"
+    ).get(`monitor_${key}`, 'monitor');
     if (row) {
-      const val = JSON.parse(row.config_value);
+      const val = JSON.parse(row.value_plain_hint);
       return typeof val === 'number' ? val : fallback;
     }
   } catch {}
@@ -55,7 +58,7 @@ async function httpGet(url, timeout = 15000) {
 
 function getChannels() {
   try {
-    return sqlite.prepare("SELECT channel_name FROM channels WHERE active = 1 ORDER BY channel_name").pluck().all();
+    return sqlite.prepare("SELECT name AS channel_name FROM channels ORDER BY name").pluck().all();
   } catch {
     return [];
   }
@@ -212,15 +215,19 @@ function tick() {
       }
     }
 
-    // Update last timestamp (NWT 19:30 emergency fix: rename to latestTs to avoid duplicate const with line 176 lastTs that broke console startup)
+    // Update last timestamp (NWT 22:43 hotfix: schema column 是 key/value_plain_hint, 不是 config_key/config_value).
     const latestTs = messages[messages.length - 1]?.created_at;
     if (latestTs) {
-      const existing = sqlite.prepare("SELECT id FROM config_entries WHERE config_key = ? AND category = ?").get(`last_ts_${channel}`, 'monitor');
-      const now = new Date().toISOString();
-      if (existing) {
-        sqlite.prepare("UPDATE config_entries SET config_value = ?, updated_at = ? WHERE config_key = ? AND category = ?").run(JSON.stringify(latestTs), now, `last_ts_${channel}`, 'monitor');
-      } else {
-        sqlite.prepare("INSERT OR IGNORE INTO config_entries (id, config_key, config_value, category, updated_at) VALUES (?, ?, ?, ?, ?)").run(randomUUID(), `last_ts_${channel}`, JSON.stringify(latestTs), 'monitor', now);
+      try {
+        const existing = sqlite.prepare("SELECT id FROM config_entries WHERE key = ? AND category = ?").get(`last_ts_${channel}`, 'monitor');
+        const now = new Date().toISOString();
+        if (existing) {
+          sqlite.prepare("UPDATE config_entries SET value_plain_hint = ?, updated_at = ? WHERE key = ? AND category = ?").run(JSON.stringify(latestTs), now, `last_ts_${channel}`, 'monitor');
+        } else {
+          sqlite.prepare("INSERT OR IGNORE INTO config_entries (id, key, value_plain_hint, category, is_sensitive, updated_at, created_at) VALUES (?, ?, ?, ?, 0, ?, ?)").run(randomUUID(), `last_ts_${channel}`, JSON.stringify(latestTs), 'monitor', now, now);
+        }
+      } catch (e) {
+        console.warn(`[monitor] last_ts persist failed: ${e.message}`);
       }
     }
   }

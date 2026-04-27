@@ -56,6 +56,21 @@ export function _getPendingPreview(peer) {
   if (!p || Date.now() >= p.expires_at) { _pendingPreview.delete(peer); return null; }
   return p;
 }
+
+// R-NWT-2026-04-28 (d) B phase 5: test-only — clear ALL per-peer Maps in this handler.
+// 跟 broker-llm-agent.js _testClearPendingFields 同模式. production 不准 import (lint 守).
+// J2 path B cross-peer race tests cleanup_peer_broker_state action 用此.
+export function _testClearPeerState(peer) {
+  if (peer) {
+    _quotes.delete(peer);
+    _pendingAccepts.delete(peer);
+    _pendingPreview.delete(peer);
+  } else {
+    _quotes.clear();
+    _pendingAccepts.clear();
+    _pendingPreview.clear();
+  }
+}
 export function _clearPendingPreview(peer) { _pendingPreview.delete(peer); }
 let _sendOverride = null;
 let _publishOverride = null;  // T-J1-19b: unit test inject for _brokerPublishKasOffer

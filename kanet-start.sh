@@ -10,6 +10,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KANET_ROOT="${KANET_ROOT:-$SCRIPT_DIR}"
 export KANET_ROOT  # Console 子进程 (scanner spawn scout 用 cwd=$KANET_ROOT/kaspa-scout) 需要继承
+# R-NWT-2026-04-28 (d) B phase 4: KANET_TEST_MODE 开 /api/test/reset_peer endpoint (test framework cleanup_peer_broker_state).
+# Production 部署不设此 env, endpoint 不注册. dev 机始终设. test framework 正常用.
+export KANET_TEST_MODE="${KANET_TEST_MODE:-1}"
 CONSOLE_DIR="$KANET_ROOT/kasia-console"
 LOG_DIR="$KANET_ROOT/logs"
 PID_DIR="$LOG_DIR/pids"

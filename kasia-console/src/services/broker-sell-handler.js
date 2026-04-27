@@ -23,7 +23,12 @@ const MID_PRICE_HINT = 0.034;   // 报价提示 (真挂单价由 broker-intake-w
 
 const _pending = new Map();  // peer → {qty, expires_at, ask_state}
 
-export function _testClearPending() { _pending.clear(); }
+export function _testClearPending(peer) {
+  // R-NWT-2026-04-28 (d) B phase 5: per-peer signature 加 (backward-compat: 无 peer arg → clear all).
+  // J2 path B cross-peer race tests 用 per-peer cleanup.
+  if (peer) _pending.delete(peer);
+  else _pending.clear();
+}
 export function _hasPending(peer) { return _pending.has(peer); }
 
 function _traderBAddr() {

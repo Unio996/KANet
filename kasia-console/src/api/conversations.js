@@ -105,6 +105,29 @@ export async function registerConversationRoutes(fastify) {
     return agents;
   });
 
+  // R-NWT-2026-04-28 (d) B phase 4: test-only — clear broker per-peer Map state.
+  // Gated by KANET_TEST_MODE env. Production console (no env) → 404.
+  // Used by test framework cleanup_peer_broker_state action for race-condition tests.
+  if (process.env.KANET_TEST_MODE === '1') {
+    fastify.post('/api/test/reset_peer', async (request, reply) => {
+      const { peers } = request.body || {};
+      if (!Array.isArray(peers) || peers.length === 0) return reply.code(400).send({ error: 'peers array required' });
+      const { resetConvoState } = await import('../services/broker-state-authority.js');
+      const { _testClearPeerState } = await import('../services/broker-buy-handler.js');
+      const { _testClearPending } = await import('../services/broker-sell-handler.js');
+      const { _testClearPendingFields } = await import('../services/broker-llm-agent.js');
+      const { _testClearUserActions } = await import('../services/broker-action-queue.js');
+      for (const peer of peers) {
+        try { resetConvoState(peer, 'test_cleanup'); } catch (e) { /* may not exist */ }
+        _testClearPeerState(peer);
+        _testClearPending(peer);
+        _testClearPendingFields(peer);
+        _testClearUserActions(peer);
+      }
+      return { cleared: peers.length, peers: peers.map(p => p.slice(-12)) };
+    });
+  }
+
   // Agent Mind reply — unified entry point for relay and external callers.
   // All AI replies go through mind-manager. No adapter fallback.
   fastify.post('/api/agent/reply', async (request, reply) => {

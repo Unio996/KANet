@@ -69,6 +69,41 @@ const actions = {
   },
 
   /**
+   * R-NWT-2026-04-28 (d) B phase 4: cleanup_peer_broker_state — clear broker per-peer Map state via console API.
+   * step: { action: 'cleanup_peer_broker_state', peers: [addr1, addr2, ...] }
+   *
+   * Architecture: test framework 跑在 separate process, 不能直接 import broker handlers
+   * (DB path 解析破 + handler state 在 console process memory, test 这边 import 是另一份 Map).
+   * 走 POST /api/test/reset_peer (console 加 endpoint, env-gated by KANET_TEST_MODE).
+   *
+   * Fallback: endpoint 不存在 → 退化为 'NO' DM 触 broker 自身 CANCEL_WORDS 路径软清 (best-effort,
+   * 不全清 _quotes 但清 _pending / _pendingAccepts / _pendingFields / _convoState).
+   *
+   * 注: 跨 case freshTestPeer 已 unique (timestamp), 此 cleanup 主要是 intra-case race test
+   * 同 peer rapid-fire 之间清状态. 跨 case 不 strict 必需.
+   */
+  async cleanup_peer_broker_state(step, ctx) {
+    const peers = step.peers || (step.peer_addr ? [step.peer_addr] : []);
+    if (peers.length === 0) return { cleared: 0, msg: 'no peers specified' };
+    let endpointOk = false;
+    try {
+      const probe = await fetch(`${CONSOLE_URL}/api/test/reset_peer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ peers }) });
+      endpointOk = probe.ok;
+    } catch (e) { /* endpoint missing, fall back */ }
+    if (endpointOk) return { cleared: peers.length, via: 'api', peers: peers.map(p => p.slice(-12)) };
+    // Fallback: send 'NO' DM per peer to trigger broker CANCEL path
+    for (const peer of peers) {
+      try {
+        await fetch(`${CONSOLE_URL}/api/agent/reply`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relayNodeId: step.to_relay_id || 'unknown', peer, message: 'NO' }),
+        });
+      } catch (e) { /* best effort */ }
+    }
+    return { cleared: peers.length, via: 'fallback_no_dm', peers: peers.map(p => p.slice(-12)) };
+  },
+
+  /**
    * R-NWT-2026-04-28 (d) B-phase 1: parallel — concurrent actions for race-condition tests.
    * step: { action: 'parallel', actions: [{ action: 'send_message', from_peer, ... }, ...] }
    * → returns { results: [{status, action, peer, reply, latency_ms, error?}, ...], total_latency_ms }
