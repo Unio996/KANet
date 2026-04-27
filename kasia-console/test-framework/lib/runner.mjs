@@ -608,6 +608,18 @@ const assertions = {
       ? { pass: true, expected, actual: 'no swap', msg: `${results.length} replies scanned` }
       : { pass: false, expected, actual: errors, msg: errors.join('; ') };
   },
+
+  // R-NWT-2026-04-28 (d) B phase 6 加固 (J1 ca0e79c2 vote): 反 silence-game.
+  // parallel result 拿到全空 reply (e.g. 本机 LLM 全 500), 其他 assertion skip null vacuously PASS.
+  // 加 parallel_min_replies: N 强制至少 N/total reply 真非空, 否则 FAIL 提醒 environment broken.
+  parallel_min_replies(step_result, expected, ctx) {
+    const results = step_result.results || [];
+    const real = results.filter(r => r.status === 'fulfilled' && r.reply && String(r.reply).trim().length > 0);
+    const min = typeof expected === 'number' ? expected : (expected?.min ?? 1);
+    return real.length >= min
+      ? { pass: true, expected: `>= ${min} replies`, actual: `${real.length}/${results.length} non-empty` }
+      : { pass: false, expected: `>= ${min} replies`, actual: `${real.length}/${results.length} non-empty`, msg: `parallel returned only ${real.length} non-empty replies (want >= ${min}) — environment may be broken (LLM 500 / async drain miss)` };
+  },
 };
 
 // R-NWT-2026-04-28 (d) B phase 3: alias resolve — Sophie/broker → addr/relay_id pre-dispatch.
