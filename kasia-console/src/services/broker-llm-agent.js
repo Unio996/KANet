@@ -473,12 +473,22 @@ function _extractFieldsFromMsg(msg) {
   const qtyAsset = m.match(/(\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*(kas|usdt|usdc)/i);
   const chainMatch = m.match(/\b(BSC|BNB|Polygon|POL|SOL|Solana|TRON|ETH)\b/i);
   const evmMatch = m.match(/0x[a-fA-F0-9]{40}/);
+  // R33 b iter4 (J2 GAP B 真根因 — _pendingFields deterministic path bypass LLM):
+  // user 自定 limit_price + refund_timeout_min 必须 deterministic regex extract,
+  // 跟 direction/qty/chain 同 path. iter3 LLM tool wire 不够 (T6 走 _pendingFields path).
+  // limit_price: 挂单价 / 挂单价格 / 价格设定 / 限价 / 不低于 / price / limit + 数字
+  const limitMatch = m.match(/(?:挂单价(?:格)?(?:设定)?|限价|不低于|不高于|不超过|价格至少|price\s*at|limit\s*price|限制价格)\s*[:：是为]?\s*(\d+(?:\.\d+)?)/i);
+  // refund_timeout_min: '\d+ 分钟' 配合 refund 语境 ('退/返/refund/return/没人' 任一)
+  const timeoutMatch = m.match(/(\d+)\s*(?:分钟|分|min(?:ute)?s?)/i);
+  const hasRefundCtx = /(?:退|返|refund|return|原路|没人|没成交|没接|没吃)/i.test(m);
   return {
     direction: intent || null,
     qty: qtyAsset ? parseFloat(qtyAsset[1]) : null,
     give_asset: qtyAsset ? qtyAsset[2].toUpperCase() : null,
     chain: chainMatch ? _normalizeChain(chainMatch[1]) : null,
     address: evmMatch ? evmMatch[0] : null,
+    limit_price: limitMatch ? parseFloat(limitMatch[1]) : null,
+    refund_timeout_min: (timeoutMatch && hasRefundCtx) ? parseInt(timeoutMatch[1], 10) : null,
   };
 }
 
@@ -498,6 +508,9 @@ function _mergeFields(prev, fresh) {
     give_asset: fresh.give_asset || prev?.give_asset || null,
     chain: fresh.chain || prev?.chain || null,
     address,
+    // R33 b iter4: conditions (limit_price + refund_timeout_min) — fresh wins, prev fills missing
+    limit_price: fresh.limit_price ?? prev?.limit_price ?? null,
+    refund_timeout_min: fresh.refund_timeout_min ?? prev?.refund_timeout_min ?? null,
     _address_change_attempt: address_change_attempt,
   };
 }
@@ -641,6 +654,9 @@ export async function handleLlmDialog(peer, message) {
         chain: merged.chain,
         give_asset: merged.give_asset || 'KAS',
         address: merged.address || null,
+        // R33 b iter4: pass deterministic extracted conditions to preview_order
+        limit_price: merged.limit_price,
+        refund_timeout_min: merged.refund_timeout_min,
       });
       return toolResult?.preview_text || (toolResult?.ok ? `✓ 订单准备就绪 (${merged.direction} ${merged.qty} ${merged.give_asset})` : '抱歉, 处理订单失败, 请重发或回 NO 取消.');
     }
