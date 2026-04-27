@@ -492,6 +492,35 @@ export async function handleLlmDialog(peer, message) {
   // 真 user 真有新字段时 (true progress) 才走 _pendingFields path 真**真**真 next missing field 反问 / 真齐调 preview tool.
   const freshHasAny = fresh.direction || fresh.qty || fresh.give_asset || fresh.chain || fresh.address;
 
+  // T-J2-2026-04-27 P0-4 + P0-2 fix (NWT 14-case verify gap, J1 5fd86417 handoff):
+  // fresh empty + _pendingFields 已齐 + user 真**真**真 CONFIRM word ('YES'/'好'/'确认'/'OK') →
+  // deterministic finalize_order tool + sync ack. 真**真**真**真**真**真**LLM 真 multi-turn confirm 真不可靠 (Qwen3.6 真 SELL '好' 当 hello 误判).
+  // 真**真**真**真**真**真**真 BUY 路径 真**真**真**真**真**真 conversations.js handleBuyIntent first 真**已**真**真**真 priority hit (CONFIRM_WORDS in broker-buy-handler);
+  // 真**真**真**真**真 SELL 路径 真**真**真**真**真**真**真**真**真**真**真**真 fall to handleLlmDialog, 真 P0-2 cover here.
+  const CONFIRM_WORDS_LOCAL = ['YES', 'yes', 'y', 'OK', 'ok', '确认', '好', '对', '是', '行', 'ya', 'sí', 'si'];
+  const cancelWordsLocal = ['NO', 'no', 'n', '取消', '不要', '算了', 'cancel'];
+  const trimmedMsg = String(message || '').trim();
+  if (!freshHasAny && merged.direction && _allFieldsReady(merged) && CONFIRM_WORDS_LOCAL.includes(trimmedMsg)) {
+    console.log(`[broker-llm P0-4] confirm shortcut: peer=${peer?.slice(-12)} direction=${merged.direction} qty=${merged.qty} asset=${merged.give_asset} chain=${merged.chain}`);
+    _clearPendingFields(peer);
+    const finalizeResult = await _executeTool(peer, 'finalize_order', {
+      direction: merged.direction,
+      qty: merged.qty,
+      chain: merged.chain,
+      give_asset: merged.give_asset || 'KAS',
+      address: merged.address || null,
+    });
+    if (finalizeResult?.ok && finalizeResult.order_id) {
+      const verb = merged.direction === 'sell' ? '卖' : '买';
+      return `✓ ${verb}单已确认 (${merged.qty} ${merged.give_asset}, ${(merged.chain || '').toUpperCase()}). 付款/收款指引马上发你, 1-2 分钟到账, 不用刷新.`;
+    }
+    return finalizeResult?.preview_text || `抱歉, 下单失败, 请重发或回 "NO" 取消重新开始.`;
+  }
+  if (!freshHasAny && merged.direction && cancelWordsLocal.includes(trimmedMsg)) {
+    _clearPendingFields(peer);
+    return `好的, 已取消订单. 重新下单回 "买/卖 X KAS".`;
+  }
+
   if (merged.direction && freshHasAny) {
     // T-J2-2026-04-27 Bug-Z11 fix: deterministic 拒 address change attack.
     // turn 2+ user 真**真**给新 addr 跟 prev 不同 → 真**绝不**让 LLM 自由发挥 echo, deterministic 拒.

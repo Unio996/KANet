@@ -696,10 +696,11 @@ export async function handleBuyIntent(peerAddr, message) {
         `${i+1}. ${p.qty_kas} ${pp.give_asset || 'KAS'} → 付 ${p.pay_usdt} USDT 到 ${p.maker_payment_address}`
       ).join('\n');
       _qDm('dm_pay_instr', peerAddr, `付款指引:\n${lines}\n\n付完不用回复, 自动检测.`);
-      return '';
+      // T-J2-2026-04-27 P0-4 fix (NWT 真人 UX 抓): sync ack 立刻回, 真**真**真 _qDm DM async chain 1-2min 到, sync 空回真**真**真**用户疑神疑鬼.
+      return `✓ 订单已确认 #${orderId} (买 ${r.total_kas} ${pp.give_asset || 'KAS'} / 付 ${r.total_usdt} USDT). 付款指引马上发你, 自动检测付款, 不用刷新.`;
     }
     _qDm('dm_failed', peerAddr, `下单失败: ${r.message || r.error}. 重试或回 NO 取消.`);
-    return '';
+    return `❌ 下单失败 (${r.error || 'unknown'}). 请重试或回 "NO" 取消.`;
   }
 
   // T-NWT-2026-04-27 Bug-W deterministic preview path (J1 726cee54 + J2 1f51ade29a vote (b) approve)
@@ -846,6 +847,19 @@ export async function handleBuyIntent(peerAddr, message) {
       _quotes.delete(peerAddr);
       _qDm('dm_quote', peerAddr, `已取消报价. 重新下单回"买 X KAS".`);
       return '';
+    }
+  }
+
+  // T-J2-2026-04-27 P0-3 fix (NWT 真人 UX 抓): user confirm 后 'NO'/'取消' → 必须能 cancel _pendingAccepts.
+  // 真**真**真**真**真**真**真**真 user 真**真 confirm 后 30min 内**真 cancel 真**真**真**真**真 active order.
+  // 真**真**真**真**真**真**真**真**真 chain accept_v1 真**真**真**真**真 expire (broker side 真 _pendingAccepts cleared, user 真**真**真**真 not 转 USDT 真**真**真**真**真 self-expire).
+  {
+    const acceptForCancel = _pendingAccepts.get(peerAddr);
+    const cancelHit = CANCEL_WORDS.includes(trimmed) || /\b(NO|no|cancel)\b/i.test(trimmed) || /取消|不要|算了/.test(trimmed);
+    if (acceptForCancel && Date.now() < acceptForCancel.expires_at && cancelHit) {
+      _pendingAccepts.delete(peerAddr);
+      _qDm('dm_quote', peerAddr, `✓ 已取消订单. 你 USDT 没动, broker 这边订单作废. 重新下单回 "买/卖 X KAS".`);
+      return `✓ 已取消订单. 你 USDT 没动, broker 这边订单作废. 重新下单回 "买/卖 X KAS".`;
     }
   }
 
