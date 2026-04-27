@@ -709,6 +709,63 @@ return reply.send({ reply: await _r19Guard(llmReply, 'handleLlmDialog') });
 
 ---
 
+## 规则 21 · 多层 wire fix 必从 user input 真 trace 到 leaf, 不止 leaf 真 fix
+
+**来源**: J1 5d2450dc 真 ship (2026-04-27 01:23), Bug-Y NLG receive_address wire 真测发现. c82d05493 真前置 fix template 真 OK 但 wire 上游 4 层真断, 真 ship 后 broker 真 production 真还 hallucinate.
+
+**症状**: 真测撞 leaf (NLG template) 真渲染错值. 真 fix leaf (template) → unit test 真 PASS 但 production 真 user trigger 真还撞同样错. 真 dig 才发现 leaf 真接受参数, 但参数 4 层 wire 真不传 — leaf 永远拿 default null.
+
+**真因**: data flow 真 user input → LLM extract → tool args → executor → leaf function → render output. 真 fix 真只看 leaf signature 真接 param, 真没 trace upstream 真传值. 上游任意一层 drop 参数 → leaf 永远 default → fix 真无效.
+
+**Wrong** (Bug-Y 真演示, c82d05493 v1 fix 真不全):
+```js
+// Layer 5 (leaf, c82d05493 真 fix template):
+function buyPreview({ user_kasia, qty, pay_chain, give_asset, receive_address = null }) {
+  const recv = assetMeta.chain === 'kaspa' ? user_kasia : (receive_address || '⚠ 缺 EVM addr');
+  return preview_text(recv);  // ✓ template 真 OK
+}
+
+// Layer 4 (executor, 真 wire 真断):
+const { direction, qty, chain, address, give_asset } = args;  // address 真存在
+return buyPreview({ user_kasia: peer, qty, pay_chain: chain, give_asset });  // ✗ 真不传 address!
+
+// Layer 3 (tool def): address description '卖路径必填' (没提 buy stable 真要)
+// Layer 2 (SYSTEM_PROMPT): step 2 '买 → 数量 + 链' (没要 EVM addr)
+// Layer 1 (user message): user 真 'buy 1 USDC, BSC, 0xCA89...' 真给了 — 但 SYSTEM_PROMPT 不要 → LLM 真 drop
+```
+
+真 leaf 真 fix template 真 OK, unit test buyPreview({receive_address: '0xCA89...'}) → 真 render 0xCA89. 但 production 永远 receive_address=null → ⚠ fallback path 真 user_kasia → broker DM hallucinate kasia addr.
+
+**Right** (Bug-Y 真根治, 5d2450dc 真 ship 4-layer wire 真覆盖):
+```js
+// Layer 1: SYSTEM_PROMPT 真显示要求收集 EVM addr
+'买 stable (USDC/USDT) → 数量 + 付款链 + EVM 收款地址 0x...42位'
+
+// Layer 2/3: tool def address description 真 clarify
+'买 stable (USDC/USDT) 必填 user EVM 收款地址 (0x...42位); 买 KAS 不填; 卖必填.'
+
+// Layer 4: executor 真传
+return buyPreview({ ..., receive_address: address || null });
+
+// Layer 5: leaf signature 真接 (c82d05493)
+function buyPreview({ ..., receive_address = null }) { ... }
+```
+
+**怎么避** (4 步 wire trace SOP, 写 leaf fix 前必跑):
+1. **真画完整 data flow**: user input → ... → leaf. 列每一层接受 / 传出 param.
+2. **真 grep upstream caller**: `grep -rn 'leafFunction(' .` 看每个调用 site 真传什么参数.
+3. **真 test E2E**, 不止 unit test leaf. 写 e2e 脚本 真 user input → 真 LLM call → 真 production trace, 真观察 leaf 真收什么参数.
+4. **真审 SYSTEM_PROMPT / tool def description**: LLM 真不收集真没 description 真要求的参数. SYSTEM_PROMPT step 2 / tool def description 真隐式 fix point.
+
+**Why**: leaf fix 真 satisfies "代码改对了" 真感, 但 wire 真断 → production 真无效. R21 真 push 真 trace upstream — 真**写 leaf fix 前先 trace 真 user input 真 flow 真到 leaf**, 真 verify 每一层 真传值. 真 fix 多层 wire 一次, 不真留 90% 真 fix + 10% 真 silent drop. 真 generic 案例: API arg 真新加, downstream consumer 真升级, 但 caller 真没改 → 永远 default. R21 真避此 silent drop.
+
+**lint-kanet checkR21() 思路** (v1.1 真扩):
+- 静态扫所有 leaf function 真 signature 真有 default 值的 param (e.g. `receive_address = null`)
+- 真 grep 调用点 — 真不传该 param 真 caller 真 flag (build 真 warn 'R21: caller drops optional param, verify intent')
+- 真 false-positive 高 (default 真 intentional 真常见), 真用 manual audit 真 supplement.
+
+---
+
 ## 如何扩充本档案
 
 新陷阱踩过后**立即**追加，格式保持：

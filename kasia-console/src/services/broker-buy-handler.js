@@ -378,8 +378,10 @@ ${payLines}
 //   2. 路径 B (NWT T-NWT-22): 拼不够时 broker 自挂 deficit (用自己 KAS 库存)
 //   3. broker 也无库存/价格 → 真 fail (极端)
 // 返回 picks[] 含每个 maker + 付款金额 + 收款地址 (含 broker_dynamic 标记区分).
-export async function finalizeBuy({ user_kasia, qty, pay_chain, give_asset = 'KAS' }) {
+export async function finalizeBuy({ user_kasia, qty, pay_chain, give_asset = 'KAS', receive_address = null }) {
   // T-NWT-2026-04-27 v1.1 Phase A step 1: give_asset 参数化, default 'KAS' 向后兼容.
+  // T-J1-2026-04-27 v1.1 Bug-Y wire: 真接 receive_address (买 stable 真 user EVM addr 真存 _pendingAccepts
+  // 后 deliver 层真用; 买 KAS null OK 真 default 用 user_kasia 自动 resolve).
   if (!user_kasia || !qty || qty <= 0 || !pay_chain) {
     return { ok: false, error: 'missing fields (user_kasia/qty/pay_chain)' };
   }
@@ -418,11 +420,15 @@ export async function finalizeBuy({ user_kasia, qty, pay_chain, give_asset = 'KA
   // tool 不 set, 导致后续 PAID_REGEX (line 316) 永远匹配不到, broker 自动闭环全断.
   // Owner 真测 '空不？我想买55个Kas' 撞这条: broker 报价 + 创 offer + 但 _pendingAccepts 没 set,
   // Owner '已付！' / '我付了 0x...' 都进不了 PAID_REGEX, broker 静默或乱调 finalize_order 又一单.
+  // T-J1-2026-04-27 v1.1 Bug-Y wire: 真存 receive_address (deliver 层真用 — 买 stable 真 user EVM addr;
+  // 买 KAS null → deliver 真 default user_kasia auto-resolve, backward compat).
   _pendingAccepts.set(user_kasia, {
     picks: merged.picks.map(p => ({ ...p, paid_tx: null })),
     total_kas: merged.total_kas,
     total_usdt: merged.total_usdt,
     pay_chain: payChain,
+    receive_address,
+    give_asset,
     expires_at: Date.now() + PENDING_ACCEPT_TTL_MS,
   });
   return {
