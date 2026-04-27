@@ -186,10 +186,11 @@ function checkR33(filepath, content) {
   // 只 broker handler 文件
   if (!/broker-(llm-agent|buy-handler|sell-handler)\.js$/.test(filepath)) return;
 
-  // 真 R33 expected imports / API surface
-  const hasR33Import = /from\s+['"`]\.\/broker-state-authority['"`]|require\(\s*['"`]\.\/broker-state-authority['"`]/.test(content);
-  const hasGetConvoState = /\bgetConvoState\s*\(/.test(content);
-  const hasShouldFire = /\bshouldDeterministicFire\s*\(/.test(content);
+  // 真 R33 expected imports / API surface (允 .js 扩展名)
+  const hasR33Import = /from\s+['"`]\.\/broker-state-authority(?:\.js)?['"`]|require\(\s*['"`]\.\/broker-state-authority(?:\.js)?['"`]/.test(content);
+  // 真 R33 API 6 个: getConvoState/setConvoStateLock/resetConvoState/shouldDeterministicFire/llmSystemPromptStateLock/validateLlmReply
+  // broker-llm-agent 用 LLM 专 surface (set+systemPrompt+validate), 不一定 call getConvoState/shouldDeterministicFire 直接
+  const hasR33ApiCall = /\b(?:getConvoState|setConvoStateLock|resetConvoState|shouldDeterministicFire|llmSystemPromptStateLock|validateLlmReply)\s*\(/.test(content);
 
   // count reply-generation sites (heuristic — return string + _qDm + enqueue dm_*)
   const replyPaths = [];
@@ -206,9 +207,9 @@ function checkR33(filepath, content) {
   if (replyPaths.length === 0) return;  // no reply generation, no R33 concern
 
   // Phase 2 strict (post J2 R33 broker code ship 371e4ca62): broker handlers WITH
-  // reply paths MUST import broker-state-authority. Otherwise commit blocked.
-  if (!hasR33Import && !hasGetConvoState && !hasShouldFire) {
-    violate('R33', `[ANTI-PATTERNS R33] broker handler 真 ${replyPaths.length} reply paths 真 ALL 必 consult conversation state authority. Import broker-state-authority.js + 真 prologue 真 getConvoState/shouldDeterministicFire 调用. R33 design: docs/ANTI-PATTERNS.md.`, filepath, replyPaths[0]);
+  // reply paths MUST import broker-state-authority AND call at least 1 R33 API. Otherwise commit blocked.
+  if (!hasR33Import || !hasR33ApiCall) {
+    violate('R33', `[ANTI-PATTERNS R33] broker handler ${replyPaths.length} reply paths 必 consult conversation state authority. Import broker-state-authority.js + 调 R33 API (getConvoState/setConvoStateLock/resetConvoState/shouldDeterministicFire/llmSystemPromptStateLock/validateLlmReply 任一). R33 design: docs/ANTI-PATTERNS.md.`, filepath, replyPaths[0]);
   }
 }
 
