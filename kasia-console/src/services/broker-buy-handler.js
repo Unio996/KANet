@@ -281,8 +281,12 @@ export async function buyPreview({ user_kasia, qty, pay_chain, give_asset = 'KAS
       message: `broker 真不支持 ${give_asset}. 现 supported: ${listAssets().join(', ')}.`,
     };
   }
-  if (qty < MIN_QTY_KAS) {
-    return { ok: false, error: `qty_too_small`, message: `最小买 ${MIN_QTY_KAS} ${give_asset} (broker fee + dust 保护). 改大点.` };
+  // T-NWT-2026-04-27 generic化 (Owner 12:51 钦定 '任何资产能复用'): per-asset minQty 走 registry
+  // 之前 MIN_QTY_KAS = 1.0 hardcoded 对所有 asset 用 → USDC/USDT (registry minQty 0.1) 被错拒
+  // 跟 sellPreview 同范式 (giveMeta.minQty)
+  const minQty = assetMeta.minQty || MIN_QTY_KAS;
+  if (qty < minQty) {
+    return { ok: false, error: `qty_too_small`, message: `最小买 ${minQty} ${give_asset} (broker fee + dust 保护). 改大点.` };
   }
   const existing = _pendingAccepts.get(user_kasia);
   if (existing && Date.now() < existing.expires_at) {

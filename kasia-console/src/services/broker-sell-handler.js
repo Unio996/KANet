@@ -52,45 +52,76 @@ async function _qDm(peerAddr, message) {
   return enqueue({ kind: 'dm_quote', peer: peerAddr, payload: { message: `${message}\n\n${queuePart}${tag}` } });
 }
 
-// T-NWT-2026-04-27 sellPreview() — 议 B SELL 路径 (J2 dc518ac7b1 + NWT 76d79578 收敛根因 + J2 60305722e3 接受分工)
-// J2 8 探针 + NWT 1 探针 殊途同归: tool calling 没问题, 真根因是 sellPreview 没实现 LLM 第二轮没 fallback 指引.
-// 仿 buyPreview 结构: 不真 INSERT retail_dex_orders, 不锁状态, 只算价 + 渲染 preview_text 让 LLM 转发.
-// user YES → LLM 调 finalize_order(direction='sell') → finalizeSell 真 INSERT.
+// T-NWT-2026-04-27 sellPreview() generic 化 (Owner 12:51 钦定 '任何资产能复用, 不仅 KAS')
+//
+// 全 asset-registry 驱动: give_asset/recv_asset/recv_chain 走 getAsset() lookup, addr 验证按
+// recvMeta.settler 分派, 价格 fetchPrice(give, recv) generic, 文案用 displayName.
+//
+// fee 处理: KAS 卖保留 0.1 KAS 固定 fee (链上 gas + UTXO 锁成本, backward compat); 其他 asset
+// 不扣固定 fee, broker 利润靠 spread % (跟 buyPreview 同范式). 真 future asset-registry
+// 加 brokerFee 字段后可去掉这个 if-KAS 分支.
 //
 // 4 段补强: (A) broker 身份 (B) 价格对比 (C) 安全说明 (D) 历史链上记录 (跟 buyPreview 对称)
-export async function sellPreview({ user_kasia, qty, recv_chain, recv_address }) {
+export async function sellPreview({ user_kasia, qty, recv_address, recv_chain, give_asset = 'KAS', recv_asset = 'USDT' }) {
   if (!user_kasia || !qty || qty <= 0 || !recv_chain || !recv_address) {
-    return { ok: false, error: 'missing_fields', message: '缺字段: 数量/收 USDT 链/收款地址' };
+    return { ok: false, error: 'missing_fields', message: `缺字段: 数量/收 ${recv_asset} 链/收款地址` };
   }
-  if (qty <= FEE_KAS) {
-    return { ok: false, error: 'qty_too_small', message: `太少了, 至少 ${FEE_KAS + 0.5} KAS (扣 ${FEE_KAS} KAS broker fee 后才有意义).` };
+  const { getAsset, listAssets } = await import('./asset-registry.js');
+  const giveMeta = getAsset(give_asset);
+  if (!giveMeta) {
+    return { ok: false, error: 'asset_not_supported', message: `broker 真不支持 ${give_asset}. 现 supported: ${listAssets().join(', ')}.` };
   }
-  const chainNorm = String(recv_chain).toLowerCase();
-  // EVM addr 验证 (BSC/POL/ETH 用 0x...42); SOL/TRON 留 finalizeSell 验
-  if (chainNorm === 'bnb' || chainNorm === 'bsc' || chainNorm === 'polygon' || chainNorm === 'pol' || chainNorm === 'eth') {
+  const chainNorm = String(recv_chain).toLowerCase().replace('bsc', 'bnb').replace('polygon', 'polygon').replace('solana', 'sol');
+  const recvMeta = getAsset(recv_asset, chainNorm);
+  if (!recvMeta) {
+    return { ok: false, error: 'recv_asset_chain_unsupported', message: `broker 真不支持 ${recv_asset} on ${chainNorm}. 换链或换 asset.` };
+  }
+  // 资产 minQty 走 registry (KAS=1.0, stable=0.1)
+  const giveFee = give_asset === 'KAS' ? 0.1 : 0;  // KAS 链上 gas backward compat; 其他 spread-only
+  const minPracticalQty = giveFee + giveMeta.minQty;
+  if (qty <= minPracticalQty) {
+    return { ok: false, error: 'qty_too_small', message: `太少了, 至少 ${minPracticalQty} ${give_asset} (扣 ${giveFee || 0} ${give_asset} broker fee 后才有意义).` };
+  }
+  // 收款地址按 recvMeta.settler 验
+  if (recvMeta.settler === 'evm') {
     if (!EVM_ADDR_REGEX.test(recv_address)) {
-      return { ok: false, error: 'invalid_evm_address', message: '收款地址格式不对, 应该是 0x 开头 42 位 (BSC/EVM).' };
+      return { ok: false, error: 'invalid_recv_address', message: `${recvMeta.displayName} 收款地址格式不对, 应该是 0x 开头 42 位 (EVM).` };
+    }
+  } else if (recvMeta.settler === 'kasia') {
+    if (!String(recv_address).startsWith('kaspa:')) {
+      return { ok: false, error: 'invalid_recv_address', message: `${recvMeta.displayName} 收款地址应该是 kaspa: 开头.` };
     }
   }
+  // SOL/TRON addr regex 留 finalizeSell 二次验, preview 不阻断
 
-  // 真价 + spread (broker 买 = user 卖, broker 用 mid * (1 - spread%) 报)
-  let unitPrice = MID_PRICE_HINT;
-  let midPrice = MID_PRICE_HINT;
+  // 真价 + spread (broker 买 give_asset = user 卖, broker 用 mid * (1 - spread%) 报)
+  // price-oracle 直接 pair 不支持时, fallback USDT proxy (USDC ≈ USDT, peg ~1:1, J2 验 0.026% slippage)
+  let unitPrice = null;
+  let midPrice = null;
   let priceCompare = '';
   try {
     const { fetchPrice } = await import('./price-oracle.js');
-    const pr = await fetchPrice('KAS', 'USDT');
+    let pr = await fetchPrice(give_asset, recv_asset);
+    if (!pr.ok && (recv_asset === 'USDC' || recv_asset === 'USDT')) {
+      // fallback: 用 USDT 中价做代理 (KAS→USDC 暂走 KAS→USDT, peg~1:1)
+      const proxy = recv_asset === 'USDT' ? 'USDC' : 'USDT';
+      const fallback = await fetchPrice(give_asset, proxy === 'USDC' ? 'USDT' : 'USDT');
+      if (fallback.ok) pr = { ...fallback, source: `${fallback.source} (USDT proxy ~1:1)` };
+    }
     if (pr.ok && pr.price > 0) {
       midPrice = pr.price;
       const SPREAD_PCT = 1;
       unitPrice = midPrice * (1 - SPREAD_PCT / 100);
       const spreadPct = ((unitPrice - midPrice) / midPrice * 100);
-      priceCompare = `\n  (CEX 8 源中价 ${midPrice.toFixed(6)}, 本单 ${spreadPct.toFixed(2)}% spread, broker 买入价低于市价)`;
+      priceCompare = `\n  (CEX 中价 ${midPrice.toFixed(6)} ${recv_asset}/${give_asset}, 本单 ${spreadPct.toFixed(2)}% spread, broker 买入价低于市价)`;
     }
   } catch (e) { /* 价格取不到不要紧 */ }
+  if (!unitPrice) {
+    return { ok: false, error: 'price_unavailable', message: `${give_asset}/${recv_asset} 价格暂查不到, 请稍后再试.` };
+  }
 
-  const netKas = qty - FEE_KAS;
-  const totalUsdt = +(netKas * unitPrice).toFixed(6);
+  const netGive = +(qty - giveFee).toFixed(8);
+  const totalRecv = +(netGive * unitPrice).toFixed(6);
 
   // (A) broker 身份卡
   let trustCard = '';
@@ -124,24 +155,30 @@ export async function sellPreview({ user_kasia, qty, recv_chain, recv_address })
     }
   } catch (e) { /* 历史取不到不要紧 */ }
 
-  const recvChainDisplay = chainNorm.toUpperCase().replace('BNB', 'BSC');
+  const feeLine = giveFee > 0
+    ? `${qty} ${give_asset} (扣 ${giveFee} ${give_asset} broker fee → 净 ${netGive} ${give_asset})`
+    : `${qty} ${give_asset}`;
+  const safetyFeeLine = giveFee > 0
+    ? `· broker fee ${giveFee} ${give_asset} 固定 (无隐藏)`
+    : `· broker 利润仅 spread (${recv_asset} 1% 低于市价), 无固定 fee`;
+  const recvChainDisplay = recvMeta.displayName;
   const preview_text = `📋 **卖单画像 (确认前)**
 
 ${trustCard}
 
-* 方向: 卖 KAS
-* 数量: ${qty} KAS (扣 ${FEE_KAS} KAS broker fee → 净 ${netKas} KAS)
-* 收 USDT 链: ${recvChainDisplay}
-* 单价: ${unitPrice.toFixed(6)} USDT/KAS${priceCompare}
-* 你将收到: ${totalUsdt.toFixed(6)} USDT
-* USDT 收件 (你的 ${recvChainDisplay}):
+* 方向: 卖 ${give_asset}
+* 数量: ${feeLine}
+* 收 ${recv_asset} 链: ${recvChainDisplay}
+* 单价: ${unitPrice.toFixed(6)} ${recv_asset}/${give_asset}${priceCompare}
+* 你将收到: ${totalRecv.toFixed(6)} ${recv_asset}
+* ${recv_asset} 收件 (你的 ${recvChainDisplay}):
   \`${recv_address}\`
-* 你需转: ${qty} KAS 到 broker (确认后 broker 给你转 KAS 地址)
+* 你需转: ${qty} ${give_asset} 到 broker (确认后 broker 给你转 ${give_asset} 地址)
 
 🛡 **安全说明**
-  · broker 收 KAS 后挂 SELL 单, 接单后 USDT 直付到你 ${recvChainDisplay} 地址
-  · broker fee 0.1 KAS 固定 (无隐藏)
-  · 2h 内无人接 → broker 自动退原 ${qty} KAS 给你
+  · broker 收 ${give_asset} 后挂 SELL 单, 接单后 ${recv_asset} 直付到你 ${recvChainDisplay} 地址
+  ${safetyFeeLine}
+  · 2h 内无人接 → broker 自动退原 ${qty} ${give_asset} 给你
   · 跨链转账失败 → 自动 refund + dispute 通道
 ${historyLines}
 
@@ -152,13 +189,15 @@ ${historyLines}
   return {
     ok: true,
     direction: 'sell',
+    give_asset,
     qty,
-    fee_kas: FEE_KAS,
-    net_kas: netKas,
+    fee: giveFee,
+    net_give: netGive,
+    recv_asset,
     recv_chain: chainNorm,
     recv_address,
-    unit_price_usdt: +unitPrice.toFixed(6),
-    total_usdt: totalUsdt,
+    unit_price: +unitPrice.toFixed(6),
+    total_recv: totalRecv,
     quote_ttl_minutes: 30,
     preview_text,
   };
