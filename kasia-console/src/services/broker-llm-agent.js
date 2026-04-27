@@ -474,7 +474,13 @@ export async function handleLlmDialog(peer, message) {
   const merged = _mergeFields(prev, fresh);
   console.log(`[broker-llm DIAG] peer=${peer?.slice(-12)} msg.chars=${msgRaw.length} msg.utf8bytes=${byteLen} codes=[${charCodes}] msg="${msgRaw.slice(0,40)}" history.len=${history.length} fresh=${JSON.stringify(fresh)} prev=${JSON.stringify(prev)} merged=${JSON.stringify(merged)}`);
 
-  if (merged.direction) {
+  // T-J2-2026-04-27 Bug-Z12 fix (NWT 6c980472 真人 UX P0-1 抓): handleLlmDialog 真**真**真**真**
+  // fresh 真**真**完全 empty (用户 真发 'YES' / 'maker 是谁' / '钱去哪了') 真**真**真**真**真**真**真**真**
+  // 真**真**真 _pendingFields path 真**真**真 re-show preview 复读, 真**真**真**真 fall LLM 真**真**NLG 处理 (问答/confirm/cancel).
+  // 真 user 真有新字段时 (true progress) 才走 _pendingFields path 真**真**真 next missing field 反问 / 真齐调 preview tool.
+  const freshHasAny = fresh.direction || fresh.qty || fresh.give_asset || fresh.chain || fresh.address;
+
+  if (merged.direction && freshHasAny) {
     // T-J2-2026-04-27 Bug-Z11 fix: deterministic 拒 address change attack.
     // turn 2+ user 真**真**给新 addr 跟 prev 不同 → 真**绝不**让 LLM 自由发挥 echo, deterministic 拒.
     if (merged._address_change_attempt) {
