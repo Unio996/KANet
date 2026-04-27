@@ -139,6 +139,54 @@ const actions = {
   },
 
   /**
+   * Drive a persona one turn — generates user message via persona.step(state, prevReply),
+   * sends to broker, captures reply for next turn. Persona state persists in ctx.vars[state_key].
+   * step: { action: 'persona_turn', persona, from_peer, to_relay_id, state_key? }
+   *   persona: imported persona module (default export)
+   *   state_key: ctx.vars key for persisting persona state (default 'persona_state')
+   * → returns { reply, latency_ms, message, persona_state, persona_done }
+   * Assertions like reply_contains, reply_does_not_contain work as usual on this step result.
+   * Cases that want multi-turn just repeat persona_turn until persona_done becomes true.
+   * (T-J2-2026-04-27 personas v1, NWT runner integration via new action — non-breaking add)
+   */
+  async persona_turn(step, ctx) {
+    const persona = step.persona;
+    if (!persona || typeof persona.step !== 'function') {
+      throw new Error('persona_turn requires step.persona module with .step(state, reply) method');
+    }
+    const stateKey = step.state_key || 'persona_state';
+    if (!ctx.vars[stateKey]) {
+      ctx.vars[stateKey] = persona.initialState ? persona.initialState() : {};
+    }
+    const prevReply = ctx.lastReply || null;
+    const turn = persona.step(ctx.vars[stateKey], prevReply);
+    ctx.vars[stateKey] = turn.nextState || ctx.vars[stateKey];
+    if (turn.done || !turn.message) {
+      return { message: null, reply: '', latency_ms: 0, persona_state: ctx.vars[stateKey], persona_done: true };
+    }
+    const t0 = Date.now();
+    const res = await fetch(`${CONSOLE_URL}/api/agent/reply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        relayNodeId: step.to_relay_id,
+        peer: step.from_peer,
+        message: turn.message,
+      }),
+    });
+    const data = await res.json();
+    ctx.lastReply = data.reply || '';
+    return {
+      message: turn.message,
+      reply: ctx.lastReply,
+      skip_reason: data.skip_reason || null,
+      latency_ms: Date.now() - t0,
+      persona_state: ctx.vars[stateKey],
+      persona_done: false,
+    };
+  },
+
+  /**
    * Cleanup injected test peer history (best-effort, by trace_id pattern).
    * step: { action: 'cleanup_peer', peer_addr }
    */

@@ -4,6 +4,7 @@
 import Database from 'better-sqlite3';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 
 const DB_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../data/console.db');
 
@@ -40,6 +41,6 @@ export function relayId(alias) {
  */
 export function freshTestPeer(seed) {
   // 60 chars after 'kaspa:q' to look like real addr; deterministic from seed
-  const suffix = require('node:crypto').createHash('sha256').update(String(seed)).digest('hex').slice(0, 56);
+  const suffix = createHash('sha256').update(String(seed)).digest('hex').slice(0, 56);
   return `kaspa:q${suffix.replace(/[^a-z0-9]/g, '0')}`.padEnd(67, '0').slice(0, 67);
 }
