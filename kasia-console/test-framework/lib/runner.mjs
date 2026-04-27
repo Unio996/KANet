@@ -57,7 +57,8 @@ const actions = {
       };
     };
     let result = await _sendOnce();
-    if (TRANSIENT_PATTERNS.some(p => result.reply.includes(p))) {
+    // R-NWT-2026-04-28 (d) B-phase: parallel mode 设 step._no_retry, retry 会 mask race timing.
+    if (!step._no_retry && TRANSIENT_PATTERNS.some(p => result.reply.includes(p))) {
       await new Promise(r => setTimeout(r, 2000));
       const retried = await _sendOnce();
       retried.retried = true;
@@ -65,6 +66,35 @@ const actions = {
       result = retried;
     }
     return result;
+  },
+
+  /**
+   * R-NWT-2026-04-28 (d) B-phase 1: parallel — concurrent actions for race-condition tests.
+   * step: { action: 'parallel', actions: [{ action: 'send_message', from_peer, ... }, ...] }
+   * → returns { results: [{status, action, peer, reply, latency_ms, error?}, ...], total_latency_ms }
+   *
+   * Promise.allSettled: 一个 sub-action throw 不阻断其他 (race condition might throw).
+   * retry-on-transient OFF inside parallel (会 mask race timing) — sub-actions tagged _no_retry.
+   * spec: docs/test-framework-parallel-spec.md (J1 21bac909 review APPROVE).
+   */
+  async parallel(step, ctx) {
+    if (!Array.isArray(step.actions) || step.actions.length === 0) {
+      throw new Error('parallel requires non-empty actions array');
+    }
+    const t0 = Date.now();
+    const settled = await Promise.allSettled(step.actions.map(async (sub) => {
+      const handler = actions[sub.action];
+      if (!handler) throw new Error(`parallel: unknown sub-action ${sub.action}`);
+      const subT0 = Date.now();
+      const result = await handler({ ...sub, _no_retry: true }, ctx);
+      return { action: sub.action, peer: sub.from_peer || null, sub_latency_ms: Date.now() - subT0, ...result };
+    }));
+    return {
+      results: settled.map(s => s.status === 'fulfilled'
+        ? { status: 'fulfilled', ...s.value }
+        : { status: 'rejected', error: String(s.reason) }),
+      total_latency_ms: Date.now() - t0,
+    };
   },
 
   /**
@@ -204,7 +234,7 @@ const actions = {
     };
     let pr = await _personaSendOnce();
     let retried = false;
-    if (TRANSIENT_PATTERNS.some(p => pr.reply.includes(p))) {
+    if (!step._no_retry && TRANSIENT_PATTERNS.some(p => pr.reply.includes(p))) {
       await new Promise(r => setTimeout(r, 2000));
       const r2 = await _personaSendOnce();
       retried = true;

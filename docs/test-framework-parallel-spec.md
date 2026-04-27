@@ -119,6 +119,23 @@ parallel done = 所有 reply 都拿到. 立即 assert OK. 不需要额外 sleep.
 ### 6. Trace
 parallel result.results 全 dump 到 trace, 含 each peer message + reply + latency. trace 文件名 `<case_id>_parallel_<step_idx>.log` 加分隔.
 
+### 7. Null reply handling (J1 21bac909 nudge #3)
+broker 可能 decide 不 reply (e.g. sibling_broker / anti-spam fail-closed / R33 violation). parallel 拿到 `reply: null` OR empty string. state assertion 应 **skip null** 不算 fail (peer 没收 reply ≠ state 串话 bug). 实现:
+```js
+const validResults = results.filter(r => r.status === 'fulfilled' && r.reply);
+const peerReplyMap = new Map(validResults.map(r => [r.peer, r.reply]));
+// assertions only over peerReplyMap, null replies excluded
+```
+
+### 8. Async _qDm 路径测 (J1 21bac909 nudge #4)
+parallel 不 cover async-queued DM (broker `_qDm` → broker-action-queue → relay sendCommandAsync). race case 如需测 async DM, 用现有 pattern:
+```js
+{ action: 'parallel', actions: [...] },
+{ action: 'sleep', ms: 3000 },                     // 等 queue pump
+{ action: 'query_db', sql: 'SELECT ... FROM messages WHERE ...', expect: { row_count: N } },
+```
+不是 parallel infra 责任, 但 race case 作者参考.
+
 ---
 
 ## Implementation Scope (NWT 估)
@@ -155,13 +172,25 @@ ship 后立刻跑 J1 race-3peer-concurrent-buy probe 验:
 
 ---
 
-## 等 J1 review
+## J1 review verdict (21bac909 23:19): APPROVE
 
-- spec 漏点
-- LOC 估真不真 (J1 经验)
-- alias 解析层是不是 over-engineer (可能直接用 freshTestPeer 就够)
-- broker handler `_resetForPeer` test-only export 是不是合适 (替代: test framework 直接 require + delete Map entry)
+5 nudge applied:
+1. ✓ alias keep — readable for 30 probes
+2. ✓ `_resetForPeer` keep — matches `_testClearPendingFields` pattern
+3. ✓ null reply handling 加 (微妙点 #7)
+4. ✓ async _qDm test pattern note 加 (微妙点 #8)
+5. ✓ implementation order — incremental: parallel ~25 LOC → 1 case test → assertions ~40 LOC → alias + cleanup ~25 LOC
 
-J1 review 通过后 NWT implement. 范围 ~150-200 LOC, 估 1-2h.
+## Implementation Plan (incremental)
 
-— NWT @ 2026-04-28 (UTC+7) B spec draft, 求 J1 review
+| 阶段 | LOC | commit | 验证 |
+|------|-----|--------|------|
+| 1 | ~25 | parallel action 单独 | 跑一个 minimal 2-peer parallel send case |
+| 2 | ~40 | + 4 state assertions | 加 cross-peer assertion case 跑 |
+| 3 | ~15 | + alias 解析 | J1 race-3peer-concurrent-buy probe enable 跑 |
+| 4 | ~10 | + cleanup_peer_broker_state | 多 case 跑不串 |
+| 5 | ~18 | broker handler `_resetForPeer` × 6 | cleanup 真生效 |
+
+每阶段 commit + bundle, J1+J2 增量 review/试用.
+
+— NWT @ 2026-04-28 05:21 (UTC+7) B spec v2 — J1 review APPROVE w/ 5 nudge applied
