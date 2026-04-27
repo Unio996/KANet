@@ -44,7 +44,9 @@ export default {
       from_peer: peer,
       to_relay_id: relayId('trader-b'),
     },
-    // turn 4: '好' → broker finalize → DM Kaspa 收款地址
+    // turn 4: '好' → broker finalize. broker handleBuyIntent confirm path 走 async _qDm DM queue,
+    // sync /api/agent/reply 真返 '' (handle by queue), 不直接含付款指引. 真 broker 真 finalize evidence
+    // 真**真链上 DM** (broker → peer outbound msg 含 maker payment 0x addr) — 查 messages 表 verify.
     {
       action: 'persona_turn',
       persona: cnNewbie,
@@ -52,8 +54,40 @@ export default {
       to_relay_id: relayId('trader-b'),
       expect: {
         must: {
-          // broker reply 含 broker Kaspa 收款地址 (kaspa:q... 格式) 或 转账指引
-          reply_contains_one_of: ['kaspa:q', '请转', 'transfer'],
+          // sync return '' 真**正常** (broker async DM via queue)
+          // 真 broker 没回错误 (e.g. '订单失败' / 'R19 拦截')
+          reply_does_not_contain: ['订单失败', 'R19 拦截', '抱歉', 'error'],
+        },
+      },
+    },
+    // Wait for broker async DM (queue → chain → ingestor → messages 表)
+    {
+      action: 'sleep',
+      ms: 8000,  // broker queue pump ~5s + chain DM ingestion ~3s
+    },
+    // Verify broker 真 finalize 真发了 outbound DM 含付款 EVM addr (真 maker_payment_address 真 0x...)
+    {
+      action: 'query_db',
+      sql: `
+        SELECT m.content_text, m.created_at
+        FROM messages m
+        LEFT JOIN identities si ON si.id = m.sender_identity_id
+        LEFT JOIN identities ri ON ri.id = m.receiver_identity_id
+        WHERE si.address = ?
+          AND ri.address = ?
+          AND m.direction = 'outbound'
+          AND m.created_at > datetime('now', '-30 seconds')
+          AND m.content_text LIKE '%0x%'
+        ORDER BY m.created_at DESC LIMIT 1
+      `,
+      params: [
+        'kaspa:qrxw764gez624hfkfvpmzfx8a4mg2vze5n6vsgu8fymewrkuphy65lxur9c5l',  // trader-b
+        peer,
+      ],
+      expect: {
+        must: {
+          // broker 真**真**发了 outbound DM 含 maker EVM addr → 真 broker 真 finalize 真 success
+          db_row_count: 1,
         },
       },
     },
