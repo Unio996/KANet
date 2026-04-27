@@ -231,7 +231,8 @@ async function _executeToolImpl(peer, name, args) {
         return { ok: true, preview_text: '卖单需要你的 USDT 收款地址 (0x... 42 位 EVM 钱包). 请重发完整: "卖 X KAS, BSC, 0x..."' };
       }
       const { sellPreview } = await import('./broker-sell-handler.js');
-      const r = await sellPreview({ user_kasia: peer, qty, recv_chain: chain, recv_address: address });
+      // T-J2-2026-04-27 sync NWT 5a9db463f generic 化: 透传 give_asset (LLM tool args 已有), recv_asset 默认 USDT (broker 卖路径主路径).
+      const r = await sellPreview({ user_kasia: peer, qty, recv_chain: chain, recv_address: address, give_asset });
       // 机械兜底: 即使 sellPreview 返 ok:false, 也包成 ok:true + preview_text 让 LLM 100% 转发不自由编.
       if (!r.ok) {
         return { ok: true, preview_text: r.message || `抱歉, 卖单处理失败 (${r.error || 'unknown'}). 请重发或回 NO 取消.` };
