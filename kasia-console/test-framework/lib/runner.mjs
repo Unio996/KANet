@@ -371,6 +371,17 @@ const assertions = {
       : { pass: false, expected: { one_of: list }, actual: reply, msg: `reply must contain one of [${list.join(', ')}]` };
   },
 
+  // R-NWT-2026-04-27 反 gaming: reply_does_not_contain trivially passes on '' string.
+  // 任何 case 用 reply_does_not_contain 必须并列 reply_not_empty (或 reply_contains_one_of) 防 silence-game.
+  // Owner 88 KAS T5 verbatim case 撞: broker reply EMPTY → 'reply_does_not_contain ['想买']' PASS by silence.
+  // 真根因是 framework 漏 async-queued DM (broker _qDm 真发, /api/agent/reply sync return ''), drain 选项 follow-up.
+  reply_not_empty(step_result, _arg, ctx) {
+    const reply = String(step_result.reply || '');
+    return reply.trim().length > 0
+      ? { pass: true, expected: 'non-empty reply', actual: `${reply.length} chars` }
+      : { pass: false, expected: 'non-empty reply', actual: '<empty>', msg: 'reply is empty — possible silence-gaming or async-queued DM not drained' };
+  },
+
   reply_response_time_ms_max(step_result, max_ms, ctx) {
     return step_result.latency_ms <= max_ms
       ? { pass: true, expected: `<= ${max_ms}ms`, actual: `${step_result.latency_ms}ms` }
