@@ -234,8 +234,12 @@ async function _executeTool(peer, name, args) {
     // T-NWT-2026-04-27 v1.1 Phase E: give_asset propagation (default 'KAS' backward compat).
     const { direction, qty, chain, address, give_asset = 'KAS' } = args || {};
     if (direction === 'buy') {
-      const { buyPreview } = await import('./broker-buy-handler.js');
-      return buyPreview({ user_kasia: peer, qty, pay_chain: chain, give_asset });
+      const { buyPreview, _setPendingPreview } = await import('./broker-buy-handler.js');
+      const r = await buyPreview({ user_kasia: peer, qty, pay_chain: chain, give_asset, receive_address: address });
+      // T-NWT-2026-04-27 Bug 7 hotfix: preview ok 真 set _pendingPreview, 让 'YES' 真 deterministic finalize
+      // (LLM-driven preview 真不 set _quotes, 真 LLM 'YES' 真 unreliable hallucinate "下单成功" 真 0 publish).
+      if (r.ok) _setPendingPreview(peer, { qty, pay_chain: chain, give_asset, receive_address: address });
+      return r;
     }
     if (direction === 'sell') {
       // 卖 preview v1.1 留 (sellPreview 待加). 当前 fallback finalize_order 真路径.

@@ -36,6 +36,18 @@ const PENDING_ACCEPT_TTL_MS = 30 * 60 * 1000;  // 真人付款窗口 30min
 
 const _quotes = new Map();  // peer → {offer_id, qty, quoted_usdt, pay_chain, maker_addr, expires_at}
 const _pendingAccepts = new Map();  // peer → {offer_id, qty, quoted_usdt, pay_chain, maker_addr, accept_tx, expires_at}
+// T-NWT-2026-04-27 Bug 7 hotfix: preview 后 set, 'YES' confirm 真 deterministic finalizeBuy 真 propagate
+// give_asset (LLM tool calling 真不可靠 — 真 USDC/USDT 真 LLM hallucinate "下单成功" 真 0 publish 真灾难).
+// 跟 _quotes (KAS BUY_REGEX path) 同 pattern broker handler in-memory state.
+const _pendingPreview = new Map();  // peer → {qty, pay_chain, give_asset, receive_address, expires_at}
+const PENDING_PREVIEW_TTL_MS = 30 * 60 * 1000;  // 30min, same as _pendingAccepts
+export function _setPendingPreview(peer, data) { _pendingPreview.set(peer, { ...data, expires_at: Date.now() + PENDING_PREVIEW_TTL_MS }); }
+export function _getPendingPreview(peer) {
+  const p = _pendingPreview.get(peer);
+  if (!p || Date.now() >= p.expires_at) { _pendingPreview.delete(peer); return null; }
+  return p;
+}
+export function _clearPendingPreview(peer) { _pendingPreview.delete(peer); }
 let _sendOverride = null;
 let _publishOverride = null;  // T-J1-19b: unit test inject for _brokerPublishKasOffer
 let _scanOverride = null;     // T-J2-V2: unit test inject for scanRecentTransfers
@@ -328,7 +340,9 @@ export async function buyPreview({ user_kasia, qty, pay_chain, give_asset = 'KAS
 * 总额: ${totalUsdt.toFixed(6)} USDT
 ${payLines}
 * ${give_asset} 收件 (你的 ${recvNetwork}):
-  \`${assetMeta.chain === 'kaspa' ? user_kasia : (receive_address || '⚠ 缺 receive_address — buy stable 真要传 user EVM/Sol/Tron 收款地址')}\`
+  \`${assetMeta.chain === 'kaspa'
+      ? user_kasia
+      : (receive_address ? `${receive_address.slice(0, 6)}...${receive_address.slice(-4)} (你提供的 ${recvNetwork} 钱包)` : '⚠ 缺 receive_address — buy stable 真要传 user EVM/Sol/Tron 收款地址')}\`
 
 ⏰ 订单 30 分钟内付款有效 · 跨链验证 1-3 分钟
 
@@ -586,6 +600,30 @@ export async function handleBuyIntent(peerAddr, message) {
     } catch (e) {
       _qDm('dm_price_query', peerAddr, `价格查询暂时失败 (${e.message?.slice(0, 40)}). 稍等再问.`);
     }
+    return '';
+  }
+
+  // T-NWT-2026-04-27 Bug 7 hotfix: 'YES' confirm 真 _pendingPreview deterministic shortcut
+  // (LLM-driven preview 真不 set _quotes — broker LLM 真 'YES' 真 LLM hallucinate 不调 finalize_order tool).
+  // 真 _pendingPreview 真 set by preview_order tool (broker-llm-agent.js _executeTool). 真 hit 真直 finalizeBuy.
+  const pp = _getPendingPreview(peerAddr);
+  if (pp && CONFIRM_WORDS.includes(trimmed)) {
+    _clearPendingPreview(peerAddr);
+    const r = await finalizeBuy({
+      user_kasia: peerAddr, qty: pp.qty, pay_chain: pp.pay_chain,
+      give_asset: pp.give_asset || 'KAS', receive_address: pp.receive_address || null,
+    });
+    if (r.ok) {
+      const orderId = r.picks?.[0]?.offer_id?.slice(0,8) || randomUUID().slice(0,8);
+      _qDm('dm_order_confirmed', peerAddr,
+        `📋 订单已确认 #${orderId}\n· 买 ${r.total_kas} ${pp.give_asset || 'KAS'} / 付 ${r.total_usdt} USDT (${pp.pay_chain.toUpperCase()})\n· 我马上把付款地址发给你, 收到付款自动验证 + 自动 deliver, 全程不用你查链.`);
+      const lines = r.picks.map((p, i) =>
+        `${i+1}. ${p.qty_kas} ${pp.give_asset || 'KAS'} → 付 ${p.pay_usdt} USDT 到 ${p.maker_payment_address}`
+      ).join('\n');
+      _qDm('dm_pay_instr', peerAddr, `付款指引:\n${lines}\n\n付完不用回复, 自动检测.`);
+      return '';
+    }
+    _qDm('dm_failed', peerAddr, `下单失败: ${r.message || r.error}. 重试或回 NO 取消.`);
     return '';
   }
 
