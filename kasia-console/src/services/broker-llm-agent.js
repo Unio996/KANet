@@ -170,7 +170,9 @@ const TOOLS = [
 export function _detectIntent(message) {
   const msg = String(message || '').trim();
   if (!msg) return null;
-  if (!/kas/i.test(msg)) return null;
+  // T-J2-2026-04-27 v1.1 deterministic 真扩 multi-asset (Owner 24:14 钦定真感受 + J2 真测撞 LLM USDC 真不稳定):
+  // 加 USDT/USDC keyword gate, 跟 KAS 同 fast deterministic path 真稳 ~15ms vs LLM 1-2s 不稳.
+  if (!/kas|usdt|usdc/i.test(msg)) return null;
   // 中文 — 严格匹方向词 (gated by /kas/ 防 '我要吃饭' 误判)
   // T-J1-19k (NWT 30 轮 dynamic 发现): 加非正式动词 想换/换/搞/弄/要/想要/来/要点 + 同义
   // T-NWT-25: 加更多口语动词 (拿/收/抢/入手/取/进/求/欲/给我来/帮我搞/吃进 等)
@@ -289,29 +291,42 @@ function _loadHistory(peer, limit = 8) {  // T-NWT-V2-hotfix: 20→8 — 减 pro
 // 仅当: 首轮 (history 为空) + 检测到 intent (含 'kas' + 方向词).
 // LLM 续 turn (用户回 BSC/yes) 自然走 LLM, 此时 history 已含 deterministic reply.
 function _extractQty(message) {
-  const m = String(message || '').match(/(\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*kas/i);
+  // T-J2-2026-04-27 v1.1 multi-asset extract (KAS / USDT / USDC)
+  const m = String(message || '').match(/(\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*(kas|usdt|usdc)/i);
   return m ? parseFloat(m[1]) : null;
 }
 
-function _deterministicFirstReply(intent, qty, lang) {
+// T-J2-2026-04-27 v1.1: 真 detect asset symbol from message (KAS default, USDT/USDC 真识别)
+function _detectAsset(message) {
+  const msg = String(message || '');
+  if (/usdc/i.test(msg)) return 'USDC';
+  if (/usdt/i.test(msg)) return 'USDT';
+  return 'KAS'; // default
+}
+
+function _deterministicFirstReply(intent, qty, lang, asset = 'KAS') {
+  // T-J2-2026-04-27 v1.1: asset 参数化 (USDT/USDC + KAS), 真 generic 支持 user 'buy 1 USDC' fast path.
   // lang 用 message 简单 detect, 这里只支持 zh/en/es 简化版 (其他走 LLM)
   const verb = intent === 'buy' ? '买' : '卖';
   const verbEn = intent === 'buy' ? 'buy' : 'sell';
   const verbEs = intent === 'buy' ? 'comprar' : 'vender';
+  const payAction = intent === 'buy' ? '付' : '收';
+  // KAS 真用 USDT 付/收 (broker handler default), USDT/USDC 真用对方 stable
+  const settleAsset = asset === 'KAS' ? 'USDT' : (asset === 'USDC' ? 'USDT' : 'USDC');
   if (lang === 'zh') {
     return qty
-      ? `好的, ${verb} ${qty} KAS. 用哪个链 ${intent === 'buy' ? '付' : '收'} USDT? (BSC / Polygon / SOL / TRON)`
-      : `好的, ${verb} KAS. 数量多少? 哪个链?`;
+      ? `好的, ${verb} ${qty} ${asset}. 用哪个链 ${payAction} ${settleAsset}? (BSC / Polygon / SOL / TRON)`
+      : `好的, ${verb} ${asset}. 数量多少? 哪个链?`;
   }
   if (lang === 'es') {
     return qty
-      ? `Perfecto, ${verbEs} ${qty} KAS. ¿Qué cadena para ${intent === 'buy' ? 'pagar' : 'recibir'} USDT? (BSC / Polygon / SOL / TRON)`
-      : `Perfecto, ${verbEs} KAS. ¿Cuántos? ¿Qué cadena?`;
+      ? `Perfecto, ${verbEs} ${qty} ${asset}. ¿Qué cadena para ${intent === 'buy' ? 'pagar' : 'recibir'} ${settleAsset}? (BSC / Polygon / SOL / TRON)`
+      : `Perfecto, ${verbEs} ${asset}. ¿Cuántos? ¿Qué cadena?`;
   }
   // en (default)
   return qty
-    ? `Got it, ${verbEn} ${qty} KAS. Which chain to ${intent === 'buy' ? 'pay' : 'receive'} USDT? (BSC / Polygon / SOL / TRON)`
-    : `Got it, ${verbEn} KAS. How many? Which chain?`;
+    ? `Got it, ${verbEn} ${qty} ${asset}. Which chain to ${intent === 'buy' ? 'pay' : 'receive'} ${settleAsset}? (BSC / Polygon / SOL / TRON)`
+    : `Got it, ${verbEn} ${asset}. How many? Which chain?`;
 }
 
 function _detectLang(message) {
@@ -342,11 +357,14 @@ export async function handleLlmDialog(peer, message) {
   // _detectIntent 已扩展 (T-J1-19k + 现 T-NWT-25 加 拿/收/抢/入手/取/进/求/欲 等).
   if (intent && !alreadyDeterministic) {
     const qty = _extractQty(message);
-    if (intent === 'buy' && qty != null && qty < 1.0) {
-      return `抱歉, 最小买 1 KAS (broker fee + dust 保护). 改大一点吧.`;
+    const asset = _detectAsset(message);
+    // T-J2-2026-04-27 v1.1: per-asset minQty (KAS=1.0, USDT/USDC=0.1 from asset-registry)
+    const minQty = asset === 'KAS' ? 1.0 : 0.1;
+    if (intent === 'buy' && qty != null && qty < minQty) {
+      return `抱歉, 最小买 ${minQty} ${asset} (broker fee + dust 保护). 改大一点吧.`;
     }
     const lang = _detectLang(message);
-    return _deterministicFirstReply(intent, qty, lang);
+    return _deterministicFirstReply(intent, qty, lang, asset);
   }
   history.push({ role: 'user', content: message });
   let llm = await _callLlm(history);
