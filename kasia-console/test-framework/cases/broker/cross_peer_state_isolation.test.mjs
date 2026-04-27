@@ -72,6 +72,7 @@ export default {
       },
     },
     // T4: peer B 给数量补全 → broker 应该出 B 的 BUY preview, 不串 A 的 SELL/0x...
+    // NWT 22:17 audit GAP: 加固 assertion 抓 same-peer direction hallucinate (Bug-Z13 候选)
     {
       action: 'send_message',
       from_peer: peerB,
@@ -79,8 +80,14 @@ export default {
       message: '3 KAS BSC',
       expect: {
         must: {
-          // B 仍在 BUY flow, broker 不能串 A 的 SELL signals or A 的 EVM addr
-          reply_does_not_contain: ['方向: 卖', '卖 5 KAS', '0x94053e04', ADDR_A],
+          // 不能串 A 的 SELL signals or A 的 EVM addr (cross-peer)
+          // 不能 B 自己 hallucinate 反方向 (same-peer Bug-Z13, R33 b iter5 territory)
+          reply_does_not_contain: [
+            '方向: 卖', '卖 5 KAS', '0x94053e04', ADDR_A,
+            '卖 3 KAS', '你想卖',  // same-peer: peer B 是 BUY flow, broker 任何 SELL 引导 = hallucinate
+          ],
+          // 强制 BUY direction reflection
+          reply_contains_one_of: ['买', 'BUY', '想买', '付 USDT', 'pay USDT'],
         },
       },
     },
