@@ -41,6 +41,14 @@ const SYSTEM_PROMPT = `你是 KANet broker, 帮用户买卖 KAS / USDT / USDC. �
 2. **用户回 YES/确认/对 → 必调 finalize_order tool**. 不准自己说 '已下单'.
 3. **用户说 已付/付了/check → 必调 verify_payment tool**. 不准让用户找 tx hash.
 
+# 用户自定条件 (R33 b 铁律 — Owner 真测 B3 反复撞)
+
+用户提**限价**或**退款时限**时**必 capture** 进 preview_order tool args:
+- limit_price: 用户说 "挂单价 0.0336" / "我的限价是 0.034" / "价不低于 X" → 填 limit_price
+- refund_timeout_min: 用户说 "10分钟内没人吃就退" / "30min 没成交退我" → 填 refund_timeout_min
+
+**严禁静默丢 user 条件**. broker preview 必反映用户给的限价 + 退款时限, 或显式说 'broker 暂不支持 X 条件 (默认市价 ±1%, 默认 2h timeout)'. 静默用市价 spread + 默认 timeout = bug.
+
 # 字段收集 (一字段一问, 别一次问全)
 
 缺方向: 直接判定 (买/想买/想要/get/want/buy → buy; 卖/抛/sell/dump → sell). 不问 '买还是卖'.
@@ -93,6 +101,9 @@ const TOOLS = [
           qty: { type: 'number', description: 'asset 数量 (>= asset.minQty)' },
           chain: { type: 'string', enum: ['bnb', 'polygon', 'sol', 'tron'] },
           address: { type: 'string', description: '买 stable (USDC/USDT) 必填 user EVM 收款地址 (0x...42位); 买 KAS 不填 (broker 用 user kasia); 卖必填 user 收 USDT 地址 (EVM/SOL/TRON).' },
+          // R33 b iter2 (J1 NWT GAP B 修): user 自定 conditions 必 capture, 不能静默丢.
+          limit_price: { type: 'number', description: 'OPTIONAL: user 显式指定限价 (USDT/KAS). 用户提 "挂单价 0.0336" / "limit 0.034" / "价不低于 X" 必填此. broker 用此 vs 市价决定接受 OR 拒, 不准静默丢. 不提则按市价 ±1% spread.' },
+          refund_timeout_min: { type: 'number', description: 'OPTIONAL: user 显式指定退款时限 (分钟). 用户提 "10分钟内没人吃单退还" / "30min refund" 必填此. broker 用此覆盖默认 2h timeout, 不准静默丢. 不提则用 broker 默认 120min.' },
         },
         required: ['direction', 'qty', 'chain'],
       },
