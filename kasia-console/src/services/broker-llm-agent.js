@@ -369,6 +369,12 @@ function _clearPendingFields(peer) { _pendingFields.delete(peer); }
 
 export function _testClearPendingFields(peer) { if (peer) _pendingFields.delete(peer); else _pendingFields.clear(); }
 
+// T-J2-2026-04-27 Bug-Z11 fix: R19 _r19Guard 真**真**lookup active locked addr (替 Bug-Z8 history widen).
+export function _getPendingFieldsAddr(peer) {
+  const f = _getPendingFields(peer);
+  return f?.address || null;
+}
+
 // extract structured fields from a single user msg. paired qty+asset (Bug-Z7 sediment).
 function _extractFieldsFromMsg(msg) {
   const m = String(msg || '');
@@ -386,13 +392,22 @@ function _extractFieldsFromMsg(msg) {
 }
 
 // fresh wins over prev (Bug-Z5 sediment 'current msg first'); prev fills missing only.
+// T-J2-2026-04-27 Bug-Z11 fix: receive_address 真**lock** turn 1 set 后, turn 2+ 真不同 addr → 拒攻击.
+// 真 attacker plant new addr in history 真**真**不能 widen allow-set (R31 sediment lifecycle-bound).
 function _mergeFields(prev, fresh) {
+  let address = fresh.address || prev?.address || null;
+  let address_change_attempt = false;
+  if (prev?.address && fresh.address && fresh.address.toLowerCase() !== prev.address.toLowerCase()) {
+    address = prev.address;  // keep locked (反攻击)
+    address_change_attempt = true;
+  }
   return {
     direction: fresh.direction || prev?.direction || null,
     qty: fresh.qty || prev?.qty || null,
     give_asset: fresh.give_asset || prev?.give_asset || null,
     chain: fresh.chain || prev?.chain || null,
-    address: fresh.address || prev?.address || null,
+    address,
+    _address_change_attempt: address_change_attempt,
   };
 }
 
@@ -460,6 +475,12 @@ export async function handleLlmDialog(peer, message) {
   console.log(`[broker-llm DIAG] peer=${peer?.slice(-12)} msg.chars=${msgRaw.length} msg.utf8bytes=${byteLen} codes=[${charCodes}] msg="${msgRaw.slice(0,40)}" history.len=${history.length} fresh=${JSON.stringify(fresh)} prev=${JSON.stringify(prev)} merged=${JSON.stringify(merged)}`);
 
   if (merged.direction) {
+    // T-J2-2026-04-27 Bug-Z11 fix: deterministic 拒 address change attack.
+    // turn 2+ user 真**真**给新 addr 跟 prev 不同 → 真**绝不**让 LLM 自由发挥 echo, deterministic 拒.
+    if (merged._address_change_attempt) {
+      console.warn(`[broker-llm Z11] address change attempt blocked: peer=${peer?.slice(-12)} fresh=${fresh.address?.slice(0,10)} locked=${merged.address?.slice(0,10)}`);
+      return `订单地址已锁定 ${merged.address}. 真**改地址**请回 "NO" 取消订单, 重新下单告诉我新地址.`;
+    }
     const minQty = merged.give_asset === 'KAS' ? 1.0 : 0.1;
     if (merged.qty != null && merged.qty < minQty) {
       _clearPendingFields(peer);
@@ -467,8 +488,10 @@ export async function handleLlmDialog(peer, message) {
     }
     const lang = _detectLang(message);
     if (_allFieldsReady(merged)) {
-      // 字段齐, 直接调 preview_order tool, return preview_text. clear pending fields (后续 'YES'走 LLM finalize).
-      _clearPendingFields(peer);
+      // 字段齐, 调 preview_order tool. T-J2-2026-04-27 Bug-Z11 fix: keep _pendingFields set (NOT clear)
+      // 真 lifecycle-bound lock for R19 lookup + _address_change_attempt detection turn 2+.
+      // 真 expire by TTL 30min OR user 'YES'/'NO' (broker-buy-handler clears _pendingPreview, _pendingFields TTL).
+      _setPendingFields(peer, merged);
       const toolResult = await _executeTool(peer, 'preview_order', {
         direction: merged.direction,
         qty: merged.qty,

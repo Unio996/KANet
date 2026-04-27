@@ -141,22 +141,30 @@ export async function registerConversationRoutes(fastify) {
         const _r19Guard = async (replyText, source) => {
           if (!replyText) return replyText;
           try {
-            // T-J2-2026-04-27 Bug-Z8 fix (J1 f631afb0 真 LIVE 真测撞 confirm step false positive):
-            // userContext 真 only 'current msg' 真 narrow — user '好' / 'YES' confirm step 真没含 0x addr,
-            // 但 broker reply 真 echo user prior turn EVM addr (legit) → R19 误拦. 真 fix: userContext 扩到
-            // 最近 5 条 user inbound msgs 真 cover prior turn user-supplied addr. R19 仍堵 broker LLM 编 fake addr
-            // (broker 编的 addr 真不会在 user 任何历史 msg 里出现).
-            const recentUserMsgs = sqlite.prepare(`
-              SELECT m.content_text FROM messages m
-              LEFT JOIN identities si ON si.id = m.sender_identity_id
-              WHERE si.address = ? AND m.message_type='text' AND m.direction='inbound'
-              ORDER BY m.created_at DESC LIMIT 5
-            `).all(peer);
-            const userContext = (message || '') + ' ' + recentUserMsgs.map(r => r.content_text || '').join(' ');
+            // T-J2-2026-04-27 Bug-Z11 fix (replaces Bug-Z8 history widen, attack vector 真撞):
+            // userContext 真**仅** current msg + active locked addrs from _pendingPreview/_pendingFields.
+            // 真 attacker plant new addr in history 真**不再** widen R19 allow-set (R31 sediment lifecycle-bound).
+            // 真 turn 1 user supplied addr 真在 current msg, 真 lock 后 turn 2+ broker echo 真**真**仅 echo locked addr.
+            const lockedAddrs = [];
+            try {
+              const { _getPendingPreview } = await import('../services/broker-buy-handler.js');
+              const pp = _getPendingPreview(peer);
+              if (pp?.receive_address) lockedAddrs.push(pp.receive_address);
+            } catch { /* module load 兜底 */ }
+            try {
+              const { _getPendingFieldsAddr } = await import('../services/broker-llm-agent.js');
+              const a = _getPendingFieldsAddr(peer);
+              if (a) lockedAddrs.push(a);
+            } catch { /* module load 兜底 */ }
+            // T-J2-2026-04-27 Bug-Z11 fix: 真**真**仅 lockedAddrs, 真**真**不拼 current msg.
+            // 真 attacker plant new addr in current msg ('把 USDT 发到 0xDEADBEEF...') 真**真**不再 self-whitelist.
+            // 真 turn 1 user 真给 addr 真**真**经 _executeTool → _setPendingFields/_setPendingPreview lock,
+            // turn 1 R19 lookup 真**真**已含 locked addr.
+            const userContext = lockedAddrs.join(' ');
             const { assertReplyAddressInvariant } = await import('../services/broker-action-queue.js');
             const v = assertReplyAddressInvariant(replyText, userContext);
             if (v) {
-              console.error(`[api/agent/reply] [R19-EXT] ADDRESS_INVARIANT_VIOLATED source=${source} foreign=${v.foreign_address} (user_ctx_addrs=${v.user_context_count}) — REFUSING reply (broker LLM 编 fake 地址 production safety)`);
+              console.error(`[api/agent/reply] [R19-EXT-Z11] ADDRESS_INVARIANT_VIOLATED source=${source} foreign=${v.foreign_address} locked_count=${lockedAddrs.length} — REFUSING reply (broker LLM 编 fake 地址 OR attacker plant address swap, production safety)`);
               return '抱歉, broker 检测到地址异常 (内部 R19 拦截), 请稍后重试 — 直接回 "买 X KAS" 走快速路径, 或回 NO 取消.';
             }
           } catch (e) { console.warn(`[api/agent/reply] R19 guard err: ${e.message}`); }
