@@ -410,6 +410,32 @@ export async function getReply(relayNodeId, peer, message, channel) {
     return null;
   }
 
+  // ── Gate 1.5 (T-J1-2026-04-27 R26 root治, J1 e450ea19 arch thesis 真 ship B): ──
+  // ── transactional sender suppression — peer Mind 真不 reactive reply broker/service DMs ──
+  //
+  // 真 R26 production case (Sophie 05:18 hijack accept, Eric SELL trigger Bug-Z6 etc):
+  // broker DM → user Mind 真 LLM auto-reply 真 fake order confirmation 真 broker accept 真 hallucinate intent.
+  //
+  // R26 真 generalize to peer-side: NWT edfad42a2 真 sibling-broker filter 真 broker→broker only,
+  // 真**不 cover** user-LAN-Qwen→broker (broker outbound 真 user agents Mind reactive reply).
+  //
+  // 真 fix: 真 inbound from broker/service relay → user Mind 真 silent (transactional, not conversational).
+  // 真 user explicit Kasia client 真 user input layer 真 separate (not Mind reactive).
+  // 真 dual invariant 真 close R26 trust loop:
+  //   own-side mute (Gate -1 above): broker doesn't Mind-reply user DMs
+  //   sender-side mute (Gate 1.5): user doesn't Mind-reply broker DMs
+  // 真 R29 (J1 ANTI-PATTERNS sediment) 真 architectural alignment: broker user-facing content 真 tool-generated,
+  // 真 user Mind 真 conversational layer 真 not 真 hijack-able 真 broker side.
+  if (peer) {
+    const senderRole = sqlite.prepare(
+      'SELECT is_service, is_dex_broker, name FROM relay_nodes WHERE address = ?'
+    ).get(peer);
+    if (senderRole?.is_service === 1 || senderRole?.is_dex_broker === 1) {
+      console.log(`[mind-manager] TRANSACTIONAL SENDER MUTE ${relayNodeId.slice(0,8)} ← ${senderRole.name||'broker'} (R26 J1) — Mind reactive reply skipped`);
+      return null;
+    }
+  }
+
   const mind = await getMind(relayNodeId);
   if (!mind) {
     console.log(`[mind-manager] No Mind for relay ${relayNodeId}, cannot reply`);
