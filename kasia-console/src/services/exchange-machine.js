@@ -138,11 +138,24 @@ export function transition(offerId, newStatus, extra = {}) {
       _dmKind = 'dm_timeout';
       _dmMsg = `⏰ 订单超时 — 30 分钟内没收到付款验证, 已自动取消. 资金如已转出请联系 Owner 处理.`;
     } else if (newStatus === 'disputed') {
+      // T-J2-2026-04-27 v1.1: 真 educate user 真 dispute 真因 + 真 actionable (J2 R21 沉淀,
+      // J1 22:14 + 24:42 真测撞 underpayment dispute 真灾难 — 真 actionable explanation 防 user 真懵).
       _dmKind = 'dm_failed';
-      _dmMsg = `⚠ 订单争议中, broker 已通知 Owner 人工处理. 请等回复.`;
+      const meta = JSON.parse(offer.verification_meta || '{}');
+      const reason = meta.dispute_reason || '';
+      if (/Underpayment/i.test(reason)) {
+        const expectedM = reason.match(/expected (\d+\.?\d*)/);
+        const gotM = reason.match(/got (\d+\.?\d*)/);
+        const expected = expectedM ? expectedM[1] : '?';
+        const got = gotM ? gotM[1] : '?';
+        const ratio = expectedM && gotM ? (parseFloat(got)/parseFloat(expected)*100).toFixed(0) : '?';
+        _dmMsg = `⚠ 订单 #${offer.id.slice(0,8)} 进入争议:\n· 你转: ${got} ${offer.want_asset}\n· 期望: ${expected} ${offer.want_asset}\n· 真转 ${ratio}% 真不够 (真容差 99.5%+)\n\nbroker 真按比例 deliver: ${(parseFloat(offer.give_amount) * parseFloat(got||0) / parseFloat(expected||1)).toFixed(6)} ${offer.give_asset} (broker 真不收 fee, 等比例发货 zero-loss).\n请等 ~1min broker 真处理. 大额或紧急可联系 Owner.`;
+      } else {
+        _dmMsg = `⚠ 订单 #${offer.id.slice(0,8)} 进入争议: ${reason || '链上验证未通过'}.\nbroker 真自动 retry 3 次未过 → 真 dispute. broker 真 review 真因后 either 退款 OR 按真转 amount 比例 deliver. 真处理 ~5min, 大额或紧急可联系 Owner.`;
+      }
     } else if (newStatus === 'failed') {
       _dmKind = 'dm_failed';
-      _dmMsg = `❌ 订单失败 (链上验证或发送出错), Owner 跟进中. 请联系 KANet 客服.`;
+      _dmMsg = `❌ 订单 #${offer.id.slice(0,8)} 失败: 链上验证或发送出错. broker 真 review 真因, 真 retry OR 真退款. 大额或紧急可联系 Owner 真客服 (真不会消失你的资金).`;
     }
     if (_dmKind) {
       // fire-and-forget (transition 是 sync, 不阻塞流程, DM 失败 warn 不抛)
