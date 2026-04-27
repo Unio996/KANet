@@ -637,62 +637,94 @@ export async function handleBuyIntent(peerAddr, message) {
   }
 
   // T-NWT-2026-04-27 Bug-W deterministic preview path (J1 726cee54 + J2 1f51ade29a vote (b) approve)
-  // 真 Qwen3.6 LLM 真**永不** call preview_order tool (NWT 真 grep 整 session console.log = 0 results).
-  // 真 mitigation: handler 真 detect "字段齐" 真 follow-up pattern, 直接 call buyPreview,
-  // set _pendingPreview Map → user 'YES' 真 hit existing shortcut (line 619) → publish offer.
+  // T-NWT-2026-04-27 Bug-Z5 fix (J1 3c4a02216b 真测撞): parse current msg FIRST, history 真**只**填 missing fields
+  // 真 root: Bug-W v1 真 took asset/qty from stale broker history (Eric 真 prior PASS '买 1 KAS' 真 first match)
+  // → user '想买 0.5 USDC' 真 ignored, broker 真 hallucinate 'buy 1 KAS' (J1 03:56 LIVE 真撞).
   //
-  // 真 trigger: user msg 含 EVM addr (0x...40-hex) OR explicit chain word, 真 BUY_REGEX 真 miss.
-  // 真 lookup: broker 最近 outbound 含 "买/buy + qty + asset" + chain → 真 reconstruct fields.
-  // 真 fallback: previewResult.ok=false → friendly DM (vs LLM hallucinate confused state).
+  // 真 Qwen3.6 LLM 真**永不** call preview_order tool — handler 真 deterministic mitigation.
+  // 真 trigger: user msg 含 EVM addr OR chain word, 真 BUY_REGEX 真 miss.
+  // 真 priority: current msg 真**最权威** (user explicit), 真 history fill ONLY missing fields.
   {
     const evmAddrMatch = trimmed.match(/0x[a-fA-F0-9]{40}/);
     const chainInMsgMatch = trimmed.match(/\b(BSC|BNB|Polygon|POL|SOL|Solana|TRON)\b/i);
     const looksLikeFieldFollowup = (evmAddrMatch || chainInMsgMatch) && !BUY_REGEX.test(trimmed);
     if (looksLikeFieldFollowup) {
       try {
-        const brokerInfo = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID);
-        if (brokerInfo?.address) {
-          const histRows = sqlite.prepare(`
-            SELECT m.direction, m.content_text
-            FROM messages m
-            LEFT JOIN identities si ON si.id = m.sender_identity_id
-            LEFT JOIN identities ri ON ri.id = m.receiver_identity_id
-            WHERE ((si.address = ? AND ri.address = ?) OR (si.address = ? AND ri.address = ?))
-              AND m.message_type = 'text'
-            ORDER BY m.created_at DESC LIMIT 6
-          `).all(brokerInfo.address, peerAddr, peerAddr, brokerInfo.address);
-          const brokerLastBuy = histRows.find(r =>
-            r.direction === 'outbound' && /(?:买|buy)\s*\d+(?:\.\d+)?\s*(?:个|枚|只)?\s*(KAS|USDT|USDC)/i.test(r.content_text || '')
-          );
-          if (brokerLastBuy) {
-            const qtyM = brokerLastBuy.content_text.match(/(?:买|buy)\s*(\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*(KAS|USDT|USDC)/i);
-            const chainHistM = brokerLastBuy.content_text.match(/\b(BSC|BNB|Polygon|POL|SOL|Solana|TRON)\b/i);
-            const qty = qtyM ? parseFloat(qtyM[1]) : null;
-            const asset = qtyM ? qtyM[2].toUpperCase() : 'KAS';
-            const chainRaw = (chainInMsgMatch?.[1] || chainHistM?.[1] || 'BSC');
-            const chainNorm = chainRaw.toUpperCase().replace('BSC', 'BNB').replace('POLYGON', 'POL').replace('SOLANA', 'SOL').toLowerCase();
-            const recvAddr = evmAddrMatch?.[0] || null;
-            if (qty && qty > 0) {
-              const previewResult = await buyPreview({
-                user_kasia: peerAddr,
-                qty, pay_chain: chainNorm,
-                give_asset: asset,
-                receive_address: asset === 'KAS' ? null : recvAddr,
-              });
-              if (previewResult.ok) {
-                _setPendingPreview(peerAddr, {
-                  qty, pay_chain: chainNorm,
-                  give_asset: asset, receive_address: asset === 'KAS' ? null : recvAddr,
-                });
-                _qDm('dm_quote', peerAddr, previewResult.preview_text);
-                console.log(`[broker-buy] det-preview ${peerAddr.slice(-12)}: ${qty} ${asset} ${chainNorm}`);
-                return '';
-              }
-              if (previewResult.message) {
-                _qDm('dm_failed', peerAddr, `抱歉, ${previewResult.message}`);
-                return '';
-              }
+        // T-NWT-2026-04-27 Bug-Z5 fix: parse current msg 真先 (user explicit asset/qty 真 trumps history)
+        const buyMsgM = trimmed.match(/(?:买|想买|要买|购买|想换|换\s*\d|来点|要点|想要|我要|buy|want|get|grab|need|cop|comprar|quiero)\s*(\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*(KAS|USDT|USDC)\b/i);
+        let direction = null;
+        let qty = null;
+        let asset = null;
+        if (buyMsgM) {
+          direction = 'buy';
+          qty = parseFloat(buyMsgM[1]);
+          asset = buyMsgM[2].toUpperCase();
+        }
+        // History fallback ONLY for fields not in current msg
+        if (!direction || !qty || !asset || !chainInMsgMatch) {
+          const brokerInfo = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID);
+          if (brokerInfo?.address) {
+            const histRows = sqlite.prepare(`
+              SELECT m.direction, m.content_text
+              FROM messages m
+              LEFT JOIN identities si ON si.id = m.sender_identity_id
+              LEFT JOIN identities ri ON ri.id = m.receiver_identity_id
+              WHERE ((si.address = ? AND ri.address = ?) OR (si.address = ? AND ri.address = ?))
+                AND m.message_type = 'text'
+              ORDER BY m.created_at DESC LIMIT 6
+            `).all(brokerInfo.address, peerAddr, peerAddr, brokerInfo.address);
+            const brokerLastBuy = histRows.find(r =>
+              r.direction === 'outbound' && /(?:买|buy)\s*\d+(?:\.\d+)?\s*(?:个|枚|只)?\s*(KAS|USDT|USDC)/i.test(r.content_text || '')
+            );
+            if (brokerLastBuy) {
+              const histQtyM = brokerLastBuy.content_text.match(/(?:买|buy)\s*(\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*(KAS|USDT|USDC)/i);
+              if (!direction) direction = 'buy';
+              if (!qty && histQtyM) qty = parseFloat(histQtyM[1]);
+              if (!asset && histQtyM) asset = histQtyM[2].toUpperCase();
             }
+          }
+        }
+        // chain: current msg first, history fallback
+        let chainSrc = chainInMsgMatch?.[1];
+        if (!chainSrc) {
+          const brokerInfo2 = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID);
+          if (brokerInfo2?.address) {
+            const recent = sqlite.prepare(`
+              SELECT m.content_text FROM messages m
+              LEFT JOIN identities si ON si.id = m.sender_identity_id
+              LEFT JOIN identities ri ON ri.id = m.receiver_identity_id
+              WHERE si.address = ? AND ri.address = ? AND m.direction='outbound' AND m.message_type='text'
+              ORDER BY m.created_at DESC LIMIT 3
+            `).all(brokerInfo2.address, peerAddr);
+            for (const r of recent) {
+              const m = (r.content_text || '').match(/\b(BSC|BNB|Polygon|POL|SOL|Solana|TRON)\b/i);
+              if (m) { chainSrc = m[1]; break; }
+            }
+          }
+        }
+        const chainNorm = chainSrc
+          ? chainSrc.toUpperCase().replace('BSC', 'BNB').replace('POLYGON', 'POL').replace('SOLANA', 'SOL').toLowerCase()
+          : 'bnb';
+        const recvAddr = evmAddrMatch?.[0] || null;
+        if (direction === 'buy' && qty && qty > 0 && asset) {
+          const previewResult = await buyPreview({
+            user_kasia: peerAddr,
+            qty, pay_chain: chainNorm,
+            give_asset: asset,
+            receive_address: asset === 'KAS' ? null : recvAddr,
+          });
+          if (previewResult.ok) {
+            _setPendingPreview(peerAddr, {
+              qty, pay_chain: chainNorm,
+              give_asset: asset, receive_address: asset === 'KAS' ? null : recvAddr,
+            });
+            _qDm('dm_quote', peerAddr, previewResult.preview_text);
+            console.log(`[broker-buy] det-preview ${peerAddr.slice(-12)}: ${qty} ${asset} ${chainNorm}`);
+            return '';
+          }
+          if (previewResult.message) {
+            _qDm('dm_failed', peerAddr, `抱歉, ${previewResult.message}`);
+            return '';
           }
         }
       } catch (e) {
