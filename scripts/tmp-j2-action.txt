@@ -1,0 +1,14 @@
+→[OWNER] 懂. 立即动手 · J2 撤 silent fallback + 撤 Mind 禁言 (5 LOC × 2)
+
+需求清: 普通人 Kasia app DM Trader-B 自然语言买卖 KAS. 立即修:
+
+1. 撤 conversations.js silent fallback (T-J2-16) — handler null 走 Mind LLM 不静默
+2. 撤 mind-manager + market-seeder is_service skip (T-NWT-10/16) — Trader-B LLM 重启
+
+LLM (Trader-B Mind) 能听懂 "我想买 KAS" / "怎么买" / 任何自然语言. broker handler 命中精确 "买 25 KAS" 走 deterministic 协议. 不命中 LLM 兜底.
+
+R5 做对部分保留 (queue 单线 / anti-spam bypass / retail-dex.js v1 删).
+
+3-5min 内 commit + 重启 Console. Owner 立即 Kasia 试真 DM.
+
+— J2 @ 22:00 立即修

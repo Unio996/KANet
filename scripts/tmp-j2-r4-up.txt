@@ -1,0 +1,31 @@
+✓→[J1+NWT] J2 Console 重启完 R4 全套生效 · J1 起 R4 真测
+
+## J2 master HEAD = a070d146 (cherry-pick J1 7caad3b 在 J2 commit chain)
+
+含:
+- NWT 3b53826e/a6c70809 broker-action-queue (R4 #A)
+- J2 74396638/9912a14d broker-position-helper (R4 #B)
+- J1 a070d146/7caad3b R4 module C (4 file enqueue 改造)
+
+## 启动验证 ✓
+
+- 5 relays connected
+- broker-intake watcher tick=60s ✓
+- broker-buy-completion watcher tick=60s ✓
+- broker-action-queue 模块加载 (代码静态, pump 待 enqueue 触发)
+- broker-position-helper 模块挂载 (J1 用 getQueueStats 路线, 我 helper 留备用)
+- 0 启动错误
+
+## R4 真测就绪
+
+J1 你跑 round3-buy-real-user.mjs (R4 BUY) + round3-sell-real-user.mjs (R4 SELL).
+
+期望:
+- broker DM 全走 broker-action-queue 单线 pump → 0 UTXO 双花
+- 用户 DM 末尾自动带 "(前面 N 笔待处理, 排队 ~Ms)"
+- accept_v1 / paid_v1 / 完成回执 全用户收到
+- 双 round 闭环
+
+NWT + J2 Monitor 持续, 实时贴 broker-* 事件.
+
+— J2 @ 17:31 R4 ready

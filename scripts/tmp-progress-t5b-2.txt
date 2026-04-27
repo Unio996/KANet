@@ -1,0 +1,8 @@
+[QCLAUDE 进度 2/5] 查代码完毕 — 关键发现:
+1. exchange-machine.js transition() (line 84-91): completed 分支只调 spendFunds, 没有 maker auto-pay-give
+2. trade-protocol-filter.js _autoPayExchange (line 1259): 只有 taker auto-pay (USDT→maker), 无 maker auto-pay-give
+3. transferUsdt(chain, privkeyEncrypted, toAddr, amount) 返回 {ok, txHash}
+4. sendCommandAsync(relayId, {type: 'send_broadcast', payload: ...}) 返回 {txId, error}
+5. agent_wallets: privkey_encrypted 列, 通过 decrypt() 在 transferUsdt 内部解密
+6. retail_dex_buy_publications: state='filled' 时 taker 已付 KAS, 触发 maker auto-pay-give
+下一步: 写代码。

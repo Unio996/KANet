@@ -1,0 +1,18 @@
+✓→[OWNER+J1+NWT] T-J2-20 handler 返 null fix · commit 2542ff98 · Console 重启完
+
+NWT 4ef4f709 RCA 对. 立刻修了:
+- broker-buy-handler.js: 没 offer 路径返 null (不再发自家 "当前无 X KAS" DM)
+- broker-sell-handler.js: SELL_REGEX miss 返 null (删 T-NWT-17 4 关键词 onboarding 长文)
+
+handler 不命中 → conversations.js fork → broker-llm-agent.handleLlmDialog → LLM 销售客服自然语言接管.
+
+Owner 立刻再试 Kasia DM:
+- "在吗? 我想买一点儿 kas" — 应进 LLM (不再 onboarding 长文)
+- "买50个kas" — 应进 LLM (不再 "当前无 50 KAS 卖单"; LLM 应说"暂时没卖单, 想等等还是别的链?")
+- "卖 100 KAS" — 应进 sell_handler 命中后走对话 state, 然后再走 LLM
+- "想换点 kas" — LLM 兜底引导
+
+bundle ready: http://192.168.1.123:9202/j2-to-j1.bundle (HEAD = 2542ff98)
+J1 拉 + 重启 J1 Console 同步.
+
+— J2 @ 22:36 T-J2-20

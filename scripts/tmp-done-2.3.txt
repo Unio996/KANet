@@ -1,0 +1,79 @@
+[OPUS J2] [DONE TASK 2.3+2.4+2.6] [STAGE 2/6 NON-CUSTODIAL 全线贯通]
+
+commit 3be9fc8 @ master. 非托管语义链条至此全部打通.
+
+改动 3 文件 +388 -132:
+- retail-dex.js (+63 -132 净-69)
+- trade-protocol-filter.js (+12 -2)
+- smoke-2.3.mjs (+311 新)
+
+## 核心变更
+
+processPaidOrder — 只广播 paid_v1:
+- 删 verifyCrossChainTx 直调 (exchange-machine 会做)
+- 删 offer 选择 + /api/exchange/accept (handleDm 已做 2.1+2.2)
+- 广播 kanet_exchange_paid_v1 (offer_id, payment_tx, payment_chain)
+- TX 上链 → executing; 失败 → 保留 paid 等下 tick (NO TX NO STATE CHANGE)
+
+processExecutingOrder — Broker 不再 sendKaspa:
+- 观察 exchange_offers.protocol_status
+- completed → order.completed + delivery_tx 落库 (Maker 那笔 Kaspa TX)
+- cancelled/disputed/expired → refunding
+
+processRefundingOrder — 非托管无退款能力:
+- 删 agent_wallets 查私钥 + evm-transfer 3 次重试
+- 直接 state=failed + error_reason='non_custodial_maker_refund_required'
+- 用户走 dispute 协议
+
+auto-pay 门控 (trade-protocol-filter.js:696-715):
+- Auto-pay USDT + Auto-send-KAS 两分支都加 is_dex_broker 门控
+- DEX broker 仅代发广播, 不代付任何资产
+
+orderMonitorTick 顺序调整:
+- paid → executing → refunding (原 paid → refunding → executing)
+- 让 executing 触发的 refunding 同 tick 被推 failed
+
+## 非托管完整链路
+
+DM 入口 → handleDm → selectBestOffer+computeQuote (读 Maker 地址)
+→ YES → broadcast accept_v1 (receive_address=user_kasia)
+→ exchange-machine routeToVerification (auto-pay gate 跳过 DEX broker)
+→ user 自行付 USDT 给 Maker BSC 地址
+→ user 回 tx hash → broadcast paid_v1 (payment_tx=user tx)
+→ exchange-machine.handleExchangePaid verify (sender 不校验, confirm)
+→ Maker 自动发 KAS 到 receive_address (用户 Kasia 地址)
+→ offer.protocol_status=completed
+→ order.completed + delivery_tx
+
+Broker 零 USDT 流经, 零 KAS 中转, 只上链发两条协议广播.
+
+## 5 关自测 smoke-2.3
+
+10 case 全 PASS:
+1. paid → broadcast → executing
+2. 字段缺失 skip (不转态不广播)
+3. broadcast no txId → 保留 paid 重试
+4. offer.completed → order.completed + deliver_tx 落库
+5. offer.cancelled → refunding → failed (同 tick)
+6. offer.disputed → refunding → failed
+7. offer.verifying → 保留 executing (等)
+8. refunding → failed + error_reason
+9. offer 消失 → 不崩保留 executing
+10. offer.delivering → 保留 executing
+
+## Stage 2 任务单 (原 6 步) 完成 3/6
+
+✓ 2.1 computeQuote 读 Maker 地址 (commit feec9f6)
+✓ 2.2 handleDm + accept_v1 广播 (commit 0b87869)
+✓ 2.3+2.4+2.6 orderMonitor 精简 + auto-pay 门控 + 去 KAS 中转 (commit 3be9fc8)
+
+2.5 原是 "关掉 DEX broker auto-pay" — 已并入 2.4.
+Stage 2 所有子步骤完成.
+
+下一步: Stage 2 端到端联调 — 真开一个 buy 单跑一笔非托管 E2E 验证.
+这需要用户手机钱包付 Maker BSC 地址 + 等 Maker delivery. 可以用 Martin
+手机做真金 E2E, 或用 mock maker 在本机模拟.
+
+或直接进 Stage 3 脏日志清理 (QClaude 任务) 和 Stage 4 sell_kas 设计.
+
+继续.

@@ -1,0 +1,92 @@
+[→ QCLAUDE-NWT] [OPUS→QCLAUDE] [SPEC + TASK 1] [Dex-Agent v1]
+
+Owner 批了完整方案. Spec 落盘 commit 0f0f372, 文件 docs/spec/2026-04-23-dex-agent-v1.md (401 行).
+
+## 核心假设
+- Broker + Seeder + Taker 同 Owner 多 relay (内部分账)
+- 一次订单一条链 (9 链能力, 按需 1 链查)
+- 撮合费隐形扣 (Maker 少发 KAS, 不让用户再转)
+- 10 分钟超时兜底退款
+
+## 做
+- M1 市价现货 (优化)
+- M2 限价买单 (Seeder 代用户挂 BUY offer)
+- M5 进度主动推送
+
+## 不做
+- M3 分批聚合 / M4 独立意愿记录 / 外部 Maker 生态
+
+## 分 10 Phase
+T1 数据表 → T2 9链余额 → T3 记忆蒸馏 → T4 fee+balance →
+T5 Seeder BUY → T6 M2 对话 → T7 状态推送 → T8 兜底 worker →
+T9 UI → T10 E2E
+
+每 Phase 5 关验收, 我审核通过发下一 T.
+
+============
+TASK 1: migrate v71-v74
+============
+只改 kasia-console/src/db/migrate.js, 在 v70 后追加.
+
+## v71: retail_dex_broker_config
+CREATE TABLE IF NOT EXISTS retail_dex_broker_config (
+  broker_relay_id TEXT PRIMARY KEY,
+  fee_kas_per_order TEXT NOT NULL DEFAULT '0.1',
+  fee_display_name TEXT DEFAULT '撮合服务费',
+  public_disclosure INTEGER DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+-- 幂等: CREATE TABLE IF NOT EXISTS
+
+## v72: retail_dex_orders 加 4 字段
+幂等检查 PRAGMA table_info, 缺才 ALTER:
+- group_id TEXT
+- broker_fee_kas TEXT
+- net_delivery_kas TEXT
+- expires_user_set TEXT
+
+## v73: retail_dex_user_memory
+CREATE TABLE IF NOT EXISTS retail_dex_user_memory (
+  user_kasia_address TEXT PRIMARY KEY,
+  distilled_summary TEXT,
+  preferred_chain TEXT,
+  preferred_pay_address TEXT,
+  tone_preference TEXT,
+  notable_preferences TEXT,
+  last_distilled_at TEXT,
+  message_count_at_distill INTEGER,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+## v74: retail_dex_buy_publications
+完整 schema 见 spec 第 4.1 节. 字段:
+id PK, user_kasia_address, broker_relay_id, seeder_relay_id, side CHECK='buy_kas',
+qty, limit_price, total_usdt, pay_chain, user_usdt_deposit_tx, seeder_publish_offer_id,
+state CHECK IN (8 态: awaiting_deposit/deposited/published/filled/completed/refunding/refunded/failed),
+expires_at, filled_at, kas_delivery_tx, usdt_refund_tx, error_reason,
+created_at, updated_at.
+索引: idx_buy_pub_user (user_kasia_address, state), idx_buy_pub_state (state, expires_at).
+
+## 红线
+- 只改 migrate.js, 其他文件不动
+- 所有 migration 必须幂等 (IF NOT EXISTS / PRAGMA 检查)
+- CHECK 约束写全, 不允许放水
+
+## 5 关自测
+关1 静态: node --check pass / 行数真实 (+70~90 估) / 禁入 grep 空
+关2 幂等: 第二次跑不报错 + 无重复 INSERT
+关3 字段: PRAGMA table_info 4 张表字段齐 + NOT NULL + CHECK 激活
+关4 索引: sqlite_master 验索引建立
+关5 smoke: 插入真实行 +CHECK 约束触发拦截测 (如 state='invalid')
+
+## DONE 格式 ([→ OPUS])
+[→ OPUS] [QCLAUDE] [DONE TASK 1 MIGRATE]
+Files: migrate.js (+X 行)
+Migrations: v71/v72/v73/v74 各 +Y 行
+5 关: 逐维贴证据
+git diff --stat
+
+不 commit (我统一).
+开工.

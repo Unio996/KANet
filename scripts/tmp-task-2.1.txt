@@ -1,0 +1,92 @@
+[→ QCLAUDE-NWT] [OPUS→QCLAUDE] [TASK 2.1] [STAGE 2 NON-CUSTODIAL]
+
+首笔 E2E 是托管路径，Owner 定调改非托管。协议底座全 ready：
+- exchange-machine.js:578 调 verifier 不传 expectedFrom (sender 不检查)
+- exchange-machine.js:634 delivery 读 verification_meta.receive_address 直发第三方
+- market-seeder.js:141 Maker 挂单时已在 verification_meta.accepted_chains 放地址
+
+6 步改造，从 2.1 开始。
+
+============
+TASK 2.1
+============
+只改 kasia-console/src/services/retail-dex.js。其他文件一律不动。
+
+### 改 1: computeQuote 重写
+现: 查 agent_wallets WHERE relay_node_id=broker 返 Broker 自己的 BSC 地址
+改: 从 offer.verification_meta.accepted_chains 读 **Maker 的**地址
+
+新签名: computeQuote(order, offer, brokerRelayId) →
+  {ok:true, quoted_usdt, maker_pay_addr, mid_price, offer_id, give_amount}
+  | {error, friendly}
+
+关键逻辑:
+- offer 由调用方传入 (不再内部查 DB)
+- quoted_usdt = offer.want_amount (非托管: 用户直付 Maker ask，不加 spread)
+- 解析 offer.verification_meta JSON → accepted_chains 数组
+- normalizeChain(order.pay_chain) 后匹配 c.chain (小写对比)
+- 匹配 + 有 address → ok; 否则 error='no_maker_addr'
+- 废弃 spread / 废弃 getAgentWalletAddr 在此函数的调用
+
+### 改 2: 新函数 selectBestOffer(order) 导出
+职责: 按 side=buy_kas + qty + pay_chain 从 exchange_offers 查 open 单选最优价
+
+SQL: WHERE protocol_status='open' AND give_asset='KAS' AND want_asset='USDT'
+     AND (give_amount = qty 精确 OR give_amount >= qty fallback)
+     AND expires_at IS NULL OR expires_at > now
+     ORDER BY want/give ASC LIMIT 1
+再 parse verification_meta.accepted_chains 过滤必须含 normalizeChain(pay_chain)
+匹配失败返 null (不 throw)。sell_kas 本轮不做。
+
+### 改 3: 删 getSpread 函数整体
+调用点只在 computeQuote 里 (本轮一并删)。grep 确认无其他引用。
+
+### 红线 (不碰)
+- handleDm / processPaidOrder / processExecutingOrder / processRefundingOrder
+- 任何 exchange-machine.js / trade-protocol-filter.js / api/
+- agent-mind / migrate / fetchKasPrice import
+
+### 5 关自测 (必跑)
+关1 静态: node --check / wc -l 真实行数 / grep 禁入 (agent-mind mind-manager adapter brain) 返空 / exports 列出
+关2 DB+逻辑: 写 smoke-2.1.mjs 12 case:
+  1-3 合法 bnb/eth/polygon offer → computeQuote ok + maker_pay_addr 对
+  4 accepted_chains 空 → error
+  5 verification_meta 非法 JSON → error 不 throw
+  6 order.pay_chain='BSC' + offer chain='bnb' → 归一匹配
+  7 selectBestOffer 精确 qty=10 命中
+  8 selectBestOffer fallback qty=10 give_amount=50 命中
+  9 无挂单 → null
+  10 chain 不匹配 → null
+  11 offer 过期 → null
+  12 status=matched → null
+关3 边界: null/空/错输入全不 throw
+关4 回归: handleDm 调用处会编译失败 — **这是预期**，2.2 修。DONE 里明说
+关5 独立 smoke: 脚本输出贴 DONE
+
+### DONE 格式 (发 dev-coord 带 [→ OPUS])
+```
+[→ OPUS] [QCLAUDE] [DONE TASK 2.1]
+Files: retail-dex.js (+X -Y net Z)
+Del: getSpread
+New: selectBestOffer
+Mod: computeQuote 签名变
+
+关1 静态 PASS/FAIL
+关2 DB PASS/FAIL
+关3 边界 PASS/FAIL
+关4 回归: handleDm broken 符合预期
+关5 smoke 12/12 输出:
+[贴真实输出]
+
+git diff --stat:
+[贴]
+```
+
+铁律:
+- 行数必须 git diff --stat 真实值
+- smoke 输出必须真跑
+- spec 歧义 → [? QUESTION TASK 2.1]
+- 禁入 grep 证据贴来
+- 不 git commit (我统一 commit)
+
+开工。

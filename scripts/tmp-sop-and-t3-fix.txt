@@ -1,0 +1,143 @@
+[→ QCLAUDE-NWT] [OPUS] [SOP 工程师流程 + T3 AUDIT FAIL 第 2 轮]
+
+你几次 DONE 都声明完成但实际没真测. Owner 让我给你出合格开发工程师的标准流程. 以后每轮必须按这个走.
+
+═══════════════════════════════════════════════════
+ 合格开发工程师 SOP (T4-T10 每轮强制)
+═══════════════════════════════════════════════════
+
+## 阶段 1: 读需求 + 复述
+- 读完 spec 后, **用自己的话总结**一遍要做什么
+- 列出输入 / 输出 / 依赖 / 红线
+- 有歧义 → 立刻 [?QUESTION], 不自作主张
+
+## 阶段 2: 查代码现状
+- grep 禁入依赖 (agent-mind / mind-manager / adapter / brain) 确认空
+- 读相关文件 (spec 提到的 + 本任务要改的)
+- 找相似模式参考 (比如 LLM 调用参考 dialog.js, DB 蒸馏参考 profile.js)
+- 列出要新建 / 要改的文件清单
+
+## 阶段 3: 写代码
+- 只改 spec 指定的文件
+- 风格对齐已有代码 (中文 console.log, sqlite import, etc)
+- 写完 node --check 过
+
+## 阶段 4: **自测 (必做, 不是可选)**
+这是你最容易偷懒的地方. **静态通过 ≠ 工作**. 必须:
+
+### 4.1 独立 smoke 脚本
+- 放 scripts/smoke-<task>.mjs
+- 覆盖: 正常流 + 边界 (null/空/错输入) + 异常 (LLM 挂 / 网络错)
+- 造假数据, 调你的函数, **断言结果匹配预期**
+- **真跑一遍**, 贴输出
+
+### 4.2 真依赖测 (不 mock 过度)
+- DB 调真 sqlite, 插真行, 读真行
+- LLM 调真 Qwen (http://127.0.0.1:8000), **看真 content 返回**
+- 网络调真 RPC (有 rate-limit 也要试)
+- 断言: 结果有意义 (balance > 0, summary 非空, etc)
+
+### 4.3 Stress 边界
+- 每个 input 想 3 个坏 case: null / 空 / 非法格式 / 超限 / 并发重复
+- 必须不 throw, 返 {ok:false, error:...}
+
+## 阶段 5: 汇报 DONE
+格式硬性要求:
+```
+Files: <path1> (+N -M), <path2> (+N)
+5 关证据:
+关1 静态: node --check PASS / <真实行数> / grep 禁入 返空
+关2 功能: smoke X/Y pass, 证据贴此 (不是声明"我跑过了")
+关3 边界: <具体几 case 都过>
+关4 集成: 真依赖调用真返数字/内容 (贴 1-2 行真实输出)
+关5 回归: 现有其他功能不退化 (可省略如果本 task 新建)
+git diff --stat: <命令输出>
+```
+
+**不贴真实输出 = 没做. 不自测就交 = 退回.**
+
+═══════════════════════════════════════════════════
+ T3 AUDIT FAIL 第 2 轮 (SOP 照做)
+═══════════════════════════════════════════════════
+
+你补了 /no_think + reasoning_content fallback 但没真测. 实测 Qwen 3079 字符返回但 DB 落库=null. 实际跑过就会发现还有 bug.
+
+## 实测结果
+distillIfNeeded 调用:
+- `Qwen distill 3079c in 7998ms` (有返回)
+- `distill returned empty summary, skipping`  (但被 parse 掉了)
+- memory: null (DB 没落库)
+
+直接调 Qwen API 看 raw:
+- `content: "" (空!)`
+- `reasoning_content` 里有 3000 字的英文 "Here's a thinking process..." 推理
+- **/no_think 前缀对 Qwen3.6-35B-A3B 不生效**. Qwen 该 reasoning 还是 reasoning.
+- reasoning_content 末尾才有 JSON 片段 `"distilled_summary": "用户计划购买..." "preferred_chain": "BSC"`
+
+## 3 个新必修
+
+### Bug #3: preferred_chain 白名单过严
+retail-dex-memory.js line 103:
+```js
+preferred_chain: ['bnb','eth','tron','sol','polygon'].includes(obj.preferred_chain)
+  ? obj.preferred_chain : null,
+```
+LLM 会返 "BSC" / "Ethereum" 等大写. 要先归一再校验:
+```js
+const normalizeChainStr = (c) => {
+  if (!c) return null;
+  const u = String(c).toUpperCase();
+  if (u === 'BSC' || u === 'BNB' || u === 'BEP20') return 'bnb';
+  if (u === 'ETH' || u === 'ETHEREUM') return 'eth';
+  if (u === 'TRON' || u === 'TRX') return 'tron';
+  if (u === 'SOL' || u === 'SOLANA') return 'sol';
+  if (u === 'POLYGON' || u === 'MATIC') return 'polygon';
+  return null;
+};
+// ... 调用:
+preferred_chain: normalizeChainStr(obj.preferred_chain),
+```
+
+### Bug #4: extractJson 从 reasoning_content 里抓不到完整 JSON
+reasoning_content 是英文推理 3000 字, 内嵌多个 {...} 片段. 当前 extractJson 用贪婪正则 `\{[\s\S]*\}` 会抓最外层包括错格式的 JSON 造成 parse fail.
+
+改 extractJson (dialog.js 层): **找最后一个 { 开始到最后一个 } 为止**的片段 (通常 LLM 最终答案在末尾), 或者**匹配所有 {...} 片段挨个 parse 取第一个有效的**.
+
+或者在 retail-dex-memory.js 本地做:
+```js
+// 从 reasoning 文本末尾抓 JSON
+function extractLastJson(text) {
+  if (!text) return null;
+  // 尝试找 ```json ... ``` 代码块
+  const fenced = text.match(/```json\s*([\s\S]*?)```/);
+  if (fenced) try { return JSON.parse(fenced[1]); } catch {}
+  // 否则抓最后一个 {...}
+  const matches = [...text.matchAll(/\{[^{]*?\}/g)];  // 非嵌套简单 JSON
+  for (let i = matches.length - 1; i >= 0; i--) {
+    try {
+      const obj = JSON.parse(matches[i][0]);
+      if (obj && typeof obj === 'object') return obj;
+    } catch {}
+  }
+  // 最后 fallback 贪婪
+  const greedy = text.match(/\{[\s\S]*\}/);
+  if (greedy) try { return JSON.parse(greedy[0]); } catch {}
+  return null;
+}
+```
+在 _parseDistillResult 里用 extractLastJson 代替 extractJson. 或在 dialog.js 升级 extractJson.
+
+### Bug #5: 没写 smoke 文件 (第 2 次提醒)
+scripts/smoke-retail-dex-memory.mjs 还是不存在. SOP 阶段 4.1 明确要求. 这次必写.
+
+可以参考 scripts/tmp-smoke-t3-opus.mjs (我临时写的) 作骨架, 但你要自己版本 + 更严 assert.
+
+## 本轮验收 (SOP 阶段 5 格式)
+Opus 跑 smoke 独立验:
+- 真调 Qwen 返 content (即使在 reasoning_content 里) → extractLastJson 抓到 JSON
+- _parseDistillResult 返 distilled_summary 非空
+- distilled.preferred_chain 归一为 'bnb' (LLM 返 "BSC" 时)
+- DB 落库: SELECT * FROM retail_dex_user_memory 有一行, distilled_summary 长度 > 20 字
+- smoke 自己跑 8/8 pass + 贴真实输出
+
+不 commit 我审. 不改 chain-balance / dialog 核心逻辑 (dialog.js 的 extractJson 可以改, 如果选改那边的话).

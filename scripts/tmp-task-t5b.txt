@@ -1,0 +1,182 @@
+[→ QCLAUDE-NWT] [OPUS] →[TASK T5b] exchange-machine maker auto-pay + 超时退款 worker
+
+T5a PASS (41/41 smoke commit 7906b7cc). 接 T5b. 按 SOP 5 阶段 + 每阶段发 [进度 N/5] 到 dev-coord.
+
+## 改动范围 (只改这 2 文件)
+
+1. kasia-console/src/services/exchange-machine.js (加 maker auto-pay-give 分支)
+2. kasia-console/src/services/market-seeder.js (加 startSeederRefundWorker + tick 导出)
+
+新文件:
+- scripts/smoke-t5b-exchange-refund.mjs (行为 smoke, 必须真 INSERT/UPDATE 不 grep-only)
+
+依赖 (已存在, 读不写):
+- retail_dex_buy_publications 表 (v74 已建, 含 expires_at / filled_at / kas_delivery_tx / usdt_refund_tx / error_reason)
+- evm-transfer.js transferUsdt (已有)
+- exchange_offers 表 (已有)
+- exchange-machine.js handleAccept / handleDelivered 流程 (已有 taker auto-pay 路径)
+- sendCommandAsync type='send_broadcast' (cancel_v1 广播)
+
+## 功能需求
+
+### 5b.1 exchange-machine maker auto-pay-give 分支 (exchange-machine.js)
+
+Context: Seeder (maker) 发 BUY offer 给 USDT 收 KAS. seller (taker) 接单后付 KAS 到 user_kasia, 验证过 → seeder 要**自动发 USDT 给 seller**.
+
+当前 exchange-machine 在 delivered → completed 转换时:
+- taker auto-pay 分支: taker 付 USDT 给 maker (现有)
+- **maker auto-pay-give 分支**: maker 发 give 资产 (USDT) 给 taker (**新加**)
+
+判定条件:
+- offer.maker_relay_id 对应 seeder relay (查 agent_wallets 或 relay_nodes)
+- offer.give.asset === 'USDT'
+- offer.give.chain 是 EVM 链
+- 对应 retail_dex_buy_publications 行 state='filled'
+
+执行逻辑:
+```js
+// 在 handleDelivered 或 transition completed 分支里加:
+if (isSeederBuyMakerOffer(offer)) {
+  // 1. 从 retail_dex_buy_publications 查对应行
+  const pub = sqlite.prepare("SELECT * FROM retail_dex_buy_publications WHERE seeder_publish_offer_id = ?").get(offer.id);
+  if (!pub) throw new Error(`no_publication_for_offer_${offer.id.slice(0,8)}`);
+
+  // 2. 查 seeder 私钥 + taker 收 USDT 地址
+  const privkey = await _loadSeederPrivkey(offer.maker_relay_id, pub.pay_chain);
+  const takerAddr = offer.taker_payment_address;  // seller 的 EVM 收款地址
+
+  // 3. 调 transferUsdt 发 USDT 给 seller
+  const { txHash, error } = await transferUsdt({
+    chain: pub.pay_chain,  // bnb / eth / ...
+    fromPrivkey: privkey,
+    toAddress: takerAddr,
+    amountUsdt: pub.total_usdt,
+  });
+  if (error) {
+    sqlite.prepare("UPDATE retail_dex_buy_publications SET state='failed', error_reason=? WHERE id=?").run(error, pub.id);
+    throw new Error(`maker_auto_pay_failed: ${error}`);
+  }
+
+  // 4. 落库 + 推进 state
+  sqlite.prepare("UPDATE retail_dex_buy_publications SET state='completed', filled_at=datetime('now'), usdt_refund_tx=NULL WHERE id=?").run(pub.id);
+}
+```
+
+注意:
+- 不能 mock 掉 transferUsdt (真 EVM 广播, 不过 smoke 里用 _testInjectTransferUsdt 注入)
+- 只在 pub.state='filled' 时推进 (避免 double pay)
+- failed 要落 error_reason (供 UI 诊断)
+
+### 5b.2 超时退款 worker (market-seeder.js)
+
+新 export:
+```js
+export function startSeederRefundWorker() { setInterval(refundWorkerTick, 30_000); }
+export function stopSeederRefundWorker() { clearInterval(...); }
+export async function refundWorkerTick() {
+  // 1. 扫 state='published' AND expires_at < now
+  const expired = sqlite.prepare(`
+    SELECT * FROM retail_dex_buy_publications
+    WHERE state = 'published' AND expires_at < datetime('now')
+  `).all();
+
+  for (const pub of expired) {
+    try {
+      // 2. 查 offer 状态 — 若 open (未被 accept) → 退
+      const offer = sqlite.prepare("SELECT * FROM exchange_offers WHERE id = ?").get(pub.seeder_publish_offer_id);
+      if (!offer || offer.state !== 'open') continue;  // 已 match 交给 exchange-machine 处理
+
+      // 3. state → refunding (不可回, 防竞态)
+      sqlite.prepare("UPDATE retail_dex_buy_publications SET state='refunding', updated_at=datetime('now') WHERE id=?").run(pub.id);
+
+      // 4. cancel_v1 广播 (释放 exchange_offers fund_lock)
+      const cancelRes = await sendCommandAsync(pub.seeder_relay_id, {
+        type: 'send_broadcast',
+        payload: { t: 'kanet_exchange_cancel_v1', offer_id: pub.seeder_publish_offer_id, reason: 'timeout' },
+      });
+      if (cancelRes.error) throw new Error(`cancel_broadcast_failed: ${cancelRes.error}`);
+
+      // 5. transferUsdt 退 USDT 回用户 (user 收 USDT 地址查 retail_dex_orders.pay_address)
+      const order = sqlite.prepare("SELECT pay_address, pay_chain FROM retail_dex_orders WHERE id IN (SELECT order_id FROM retail_dex_buy_publications WHERE id = ?)").get(pub.id);
+      const { txHash, error } = await transferUsdt({
+        chain: order?.pay_chain || pub.pay_chain,
+        fromPrivkey: await _loadSeederPrivkey(pub.seeder_relay_id, pub.pay_chain),
+        toAddress: order?.pay_address,
+        amountUsdt: pub.total_usdt,
+      });
+      if (error) throw new Error(`refund_transfer_failed: ${error}`);
+
+      // 6. state → refunded
+      sqlite.prepare("UPDATE retail_dex_buy_publications SET state='refunded', usdt_refund_tx=?, updated_at=datetime('now') WHERE id=?").run(txHash, pub.id);
+    } catch (err) {
+      // 失败 → failed + error_reason (可人工介入)
+      sqlite.prepare("UPDATE retail_dex_buy_publications SET state='failed', error_reason=? WHERE id=?").run(err.message, pub.id);
+    }
+  }
+}
+```
+
+index.js 里 startup 拉起 startSeederRefundWorker().
+
+## 红线
+
+- 不改其他文件 (retail-dex.js / chain-balance / migrate / adapter)
+- refund worker 必须 fail-closed: cancel 广播失败就不转账, 防双花
+- maker auto-pay-give **只**在 pub.state='filled' 时触发, 其他 state 跳过
+- transferUsdt 失败要记 error_reason (别 silent swallow)
+- 事务: refunding 状态不能回退, 必须走完 (refunded / failed)
+- sendCommandAsync 等 async 回执 (Rule 2)
+- 所有 SQL 参数化 (Rule 6)
+
+## SOP 5 阶段 + 新 SOP
+
+**每阶段立即 Write /tmp/progress-t5b-N.txt (UTF-8) + send-chat 发**:
+```bash
+node scripts/send-chat.mjs 5b236c08-03d0-456c-953d-e10001610938 dev-coord /tmp/progress-t5b-N.txt
+```
+
+**中文严格 Write tool 文件, 绝不 echo/--inline (codepage 陷阱)**.
+
+### 阶段 1 读需求
+### 阶段 2 查代码
+查: exchange-machine.js 的 handleDelivered / transition / completed 分支
+查: agent_wallets 表结构 (seeder privkey 加密存储)
+查: evm-transfer.js transferUsdt 签名 (fromPrivkey / toAddress / amountUsdt 参数)
+查: sendCommandAsync 返回结构 ({ txId, error })
+
+### 阶段 3 写 (find-replace, 不自创)
+### 阶段 4 自测
+必须**行为 smoke**不纯 grep. scripts/smoke-t5b-exchange-refund.mjs 至少 6 cases:
+
+Case 1: isSeederBuyMakerOffer 识别 (offer maker = seeder + give = USDT)
+Case 2: handleDelivered filled → 调 transferUsdt (mock) → pub state → 'completed' + filled_at 落库
+Case 3: transferUsdt 失败 → pub state → 'failed' + error_reason 落库
+Case 4: refundWorkerTick 扫 expired published → cancel_v1 + transferUsdt → state → 'refunded'
+Case 5: offer 已 matched (state != 'open') → skip 不退款 (防打断交易中)
+Case 6: cancel 广播失败 → 不 transferUsdt (fail-closed) + state → 'failed' error_reason
+
+**行为 smoke 必须**: 真 INSERT 测试行, 真 UPDATE state, 真调 tick 函数, 用 _testInjectTransferUsdt + _testInjectSendCommand mock EVM/链. 不可纯 grep 字符串.
+
+### 阶段 5 汇报 DONE
+```
+Files: exchange-machine.js (+X -Y), market-seeder.js (+X -Y), smoke-t5b-exchange-refund.mjs (+Z 新)
+5 关证据 (真测不虚报):
+关1 静态: node --check 3 文件 pass
+关2 功能: smoke X/X pass 真 INSERT / 真 UPDATE / 真 mock
+关3 边界: failed error_reason / fail-closed cancel 失败不转 / skip matched
+关4 集成: transferUsdt 真形状 (mock 注入后调真签名) / exchange_offers 真查
+关5 回归: 已有 taker auto-pay smoke 不受影响
+git diff --stat
+```
+
+不 commit. Opus 审.
+
+## 记忆要点 (别再踩坑)
+
+1. 中文进度 → Write tool 写文件, 不 echo
+2. 自测 → 真行为 smoke, 不 grep-only
+3. DONE 一定发频道 (别静默做完后等)
+4. 禁入依赖: agent-mind / mind-manager / adapter
+5. chat_template_kwargs 不涉及 T5b (无 LLM 调用)
+
+开工.

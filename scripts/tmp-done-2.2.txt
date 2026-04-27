@@ -1,0 +1,52 @@
+[OPUS J2] [DONE TASK 2.2] [STAGE 2/6 NON-CUSTODIAL]
+
+commit 0b87869 @ master
+
+改动: kasia-console/src/services/retail-dex.js (+102 -14) + smoke-2.2.mjs (+263)
+
+核心:
+1. quoteAndMaybeConfirm — 接新 computeQuote 签名 + selectBestOffer 前置
+   · 无 offer → 保留 aligning 友好提示, 不硬失败
+   · 字段落库: quoted_usdt/agent_pay_addr(存Maker地址)/mid_price_at_quote/exchange_offer_id
+   · preCheck 用真实 fetchKasPrice 检测 Maker 偏离
+
+2. confirming YES → 上链广播 accept_v1 (NO TX NO STATE CHANGE)
+   · 先验 offer 还 open (被吃掉/过期 → expired, 不浪费广播费)
+   · payload: { t, offer_id, selected_chain(归一化),
+                payment_asset:'usdt',
+                receive_address: user_kasia_address }
+   · receive_address=user → exchange-machine.js:634 delivery 把 KAS 直发用户不经 Broker
+   · 广播 no txId → 保留 confirming 允许重试
+   · 广播 TX 上链 → updateState awaiting_payment
+
+3. buildOrderConfirmText 非托管文案:
+   · "收款地址 (Maker 直收)"
+   · "你的 USDT 直接给 Maker, Broker 全程不持有资金"
+   · 去"原路退回"(Broker 不持钱无路退), 改"Maker 违约走 dispute"
+
+4. 测试钩子 (smoke 用):
+   · _broadcastAcceptV1 提模块级 + export
+   · _testInjectSendCommand/_testInjectMidPrice
+
+5关自测:
+关1 静态: node --check PASS / 908 行 / 禁入 grep 返空
+关2 DB: smoke 12/12 PASS
+关3 边界: 广播 fail 保留 confirming / offer 被吃掉 → expired / 非法 JSON meta / 两次 YES 防重 / SQL 注入
+关4 回归: TASK 2.1+2.2 全链打通, smoke 12 case 证明 aligning → confirming → awaiting_payment 完整跑通
+关5 smoke 输出:
+  [PASS] 1. 无 offer → aligning 不转态
+  [PASS] 2. 有 offer → confirming + text 含 Maker 直收 + 非托管
+  [PASS] 3. YES + 广播成功 → awaiting_payment + payload 正确
+  [PASS] 4. YES + 广播 no txId → 保留 confirming
+  [PASS] 5. offer 失效 → YES → expired (不发广播)
+  [PASS] 6. 第二次 YES → 默认提示
+  [PASS] 7. awaiting_payment + tx hash → paid
+  [PASS] 8. _broadcastAcceptV1 payload 构造
+  [PASS] 9. aligning NO → expired
+  [PASS] 10. confirming NO → expired
+  [PASS] bonus-A. exchange_offer_id 已锁定
+  [PASS] bonus-B. quoted=want_amount
+
+下一步 2.3: processPaidOrder 精简 (删除 verifyCrossChainTx 直调 + 删除 /api/exchange/accept 调用 + 只保留 broadcast paid_v1 + 状态交给 exchange-machine 的 handleExchangePaid).
+
+继续。

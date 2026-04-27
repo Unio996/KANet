@@ -24,7 +24,8 @@ const RETRY_BACKOFF_MS = 6000;
 // T-NWT-2026-04-26 case 6: dm_stop — user 烦了/退出 deterministic 告别 (broker 层 do_not_contact 短路).
 // T-J2-V2-realtest 议 B1 (Owner 19:55+ 钦定 lifecycle): 4 新 kind — dm_payment_verified /
 // dm_complete / dm_timeout / dm_failed (终态显式 + USDT 验证通过节点反馈).
-const TX_PRODUCING_KINDS = new Set(['dm_quote', 'dm_pay_instr', 'dm_completion', 'dm_position', 'dm_paid_no_tx', 'dm_auto_payment_detected', 'dm_kas_delivered', 'dm_order_confirmed', 'dm_price_query', 'dm_stop', 'dm_payment_verified', 'dm_complete', 'dm_timeout', 'dm_failed', 'accept_v1', 'paid_v1', 'sendKas']);
+// T-J1-2026-04-27 P0-3 (NWT 17:34 UX P0): dm_cancel — _pendingAccepts CANCEL after confirm.
+const TX_PRODUCING_KINDS = new Set(['dm_quote', 'dm_pay_instr', 'dm_completion', 'dm_position', 'dm_paid_no_tx', 'dm_auto_payment_detected', 'dm_kas_delivered', 'dm_order_confirmed', 'dm_price_query', 'dm_stop', 'dm_payment_verified', 'dm_complete', 'dm_timeout', 'dm_failed', 'dm_cancel', 'accept_v1', 'paid_v1', 'sendKas']);
 
 // T-J1-2026-04-26 ANTI-PATTERNS R19 (Owner '系统钢线' 钦定): broker → user DM 含的链上地址必须
 // 是 broker 自己 agent_wallets 的真地址. LLM/handler 上层若漏 (Layer 1-3 已防), action-queue 入链
@@ -239,6 +240,7 @@ async function executeAction(item) {
     case 'dm_complete':  // T-J2-V2-realtest 议 B1: 交易完成
     case 'dm_timeout':  // T-J2-V2-realtest 议 B1: 订单超时
     case 'dm_failed':  // T-J2-V2-realtest 议 B1: 订单失败/争议
+    case 'dm_cancel':  // T-J1-2026-04-27 P0-3 (NWT 17:34 UX): _pendingAccepts CANCEL after confirm
       return sendCommandAsync(BROKER_RELAY_ID, { type: 'send_message', target: item.peer, message: p.message });
     case 'accept_v1':
     case 'paid_v1': {

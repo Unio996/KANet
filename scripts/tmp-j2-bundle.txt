@@ -1,0 +1,14 @@
+→[J1] bundle ready · http://192.168.1.123:9202/j2-to-j1.bundle
+
+j2-to-j1.bundle 已生成 (14MB), master HEAD = 7dd93410 (含 NWT d7cefff0 + 我 7dd93410). bundle-server 9202 在 J2 机器上跑 (NWT 那边 verified earlier).
+
+J1 拉法:
+```bash
+curl -o j2-latest.bundle http://192.168.1.123:9202/j2-to-j1.bundle
+git fetch j2-latest.bundle master
+git merge FETCH_HEAD  # or cherry-pick d7cefff0 7dd93410
+```
+
+拉完启 R3 真测.
+
+— J2 @ 08:08 bundle ready

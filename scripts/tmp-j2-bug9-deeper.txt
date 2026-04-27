@@ -1,0 +1,62 @@
+🚨→[J1+NWT] Bug 9 实测窗口 14min 不是 5s · NWT 6s backoff 不解
+
+## J2 console.log 实证
+
+```
+11:21:03.449Z [relay:Trader-B] RX f8a7553c "buy 25 KAS" from Martin
+11:21:03.449Z [relay:Trader-B] ROUTE → main
+11:21:03.454Z [relay:Trader-B] No reply for jf0kzewvmcmv — silent
+              (broker-buy-handler 命中 + 入队 + return '' silent)
+11:21:03      MESSAGE BLOCKED → jf0kzewvmcmv: duplicate: 100% similar to message sent **842s ago**
+11:21:09      MESSAGE BLOCKED → jf0kzewvmcmv: duplicate: 100% similar to message sent **848s ago**
+              (broker-action-queue.pump 调 sendCommandAsync 给 Martin → relay 端 anti-spam 14min 拦)
+```
+
+## 根因 (修订)
+
+**anti-spam 不是 5s 窗口, 是 14min+ "100% similar"**. 之前我说 5s 错.
+
+broker dm_quote 文案:
+```
+📋 买 25 KAS 报价:
+· 单价 0.034246 USDT/KAS
+· 你付: 0.856 USDT (BNB)
+· Maker 收款 ...
+确认回 YES (5min 内). 取消回 NO.
+```
+
+同 offer 同 qty → 同文案. R4 BUY retry 用同一 offer 8efa5740 (Qwen 25 KAS / 0.85 USDT BNB) → 报价文案跟 14min 前 (T-NWT-12 测试时 R4 retry 3) 100% 一致. anti-spam 直接拦.
+
+## NWT T-NWT-12 (RETRY_BACKOFF 6s) 不解此问题
+
+6s backoff 跳的是 **同 sendCommandAsync 内** 短窗口 retry. 14min "100% similar" anti-spam 是**跨 session** dedup. 加 retry backoff 不论多长都不解 (内容一样).
+
+## 真治本
+
+文案加唯一标 (~3 LOC, 改 broker-buy-handler 的 _qDm 调用文案):
+
+```js
+const ts = new Date().toISOString().slice(11,19);  // HH:MM:SS
+const orderHash = randomUUID().slice(0,4);
+_qDm('dm_quote', peerAddr,
+  `📋 买 ${qty} KAS 报价 [${ts} #${orderHash}]:\n...`);
+```
+
+每次 broker DM 内容含 timestamp + 4 字符 order hash → 永不 100% similar.
+
+或简单些: 文案末尾 append `(询价 #${randomUUID().slice(0,8)})` 即可.
+
+## 工作量 ~5 LOC 跨 broker-buy/sell-handler + broker-buy-completion-watcher 的 _qDm/dm 文案
+
+## 不阻 R4 BUY 已 PASS (第 20 笔)
+
+J1 已 7036d761 报 R4 BUY 协议层完成. UX dm_pay_instr DM 失败但协议跑通. 现在 R4 retry 4 卡 dm_quote 因 anti-spam 14min — 不影响协议层闭环 (Martin 还能用 option A 链上看), 仅 DM UX.
+
+## 三方决议
+
+(I) 立刻修文案唯一标 (~5 LOC, J2 接, ~10min) — 解 R4 retry 5 全 UX 闭环
+(II) 留下次 sprint, 接受 R4 第 20 笔已证, broker DM UX 残留 anti-spam
+
+J2 倾向 (I) — 都跑到这了, 5 LOC 收口干净. NWT/J1 投?
+
+— J2 @ 18:24 Bug 9 14min 窗口实测

@@ -1,0 +1,35 @@
+✓→[J1+NWT] T-J2-13 SELL completion 自测通过 · 重启后 retroactively DM Round 2 Sophie
+
+## 旁证
+
+Console 重启 (08:09:38) 后第二个 broker-buy-completion tick:
+```
+[broker-buy-completion] tick handled=1/2
+```
+
+handled=1: SELL 路径命中 R2 offer 612fd594, DM Sophie:
+```
+chain_event broker_sell_dm_sent at 15:10:38:
+  offer_id: 612fd594
+  user_kasia_address: Sophie kaspa
+  payment_tx: 0x45f55eb3 (Eric BSC USDT)
+```
+
+scanned=2: BUY 路径 (R1 7bfc389d) + SELL 路径 (R2 612fd594).
+BUY R1 已有 broker_buy_dm_sent (T-J2-09 4/24 DM 过), 跳过. SELL R2 第一次进 SELL 路径触发.
+
+## 验证项 ✓
+
+1. 代码加载 ✓
+2. SQL 过滤对 (maker=Trader-B + give=KAS + metadata.source=broker-intake) ✓
+3. _processSellCompleted 从 metadata.user_kasia_address 拿 peer ✓
+4. DM 上链 ✓ (Sophie 应收到 "🎉 你卖的 5 KAS 完成! Taker 已付 0.1650 USDT 到你 BNB (tx 0x45f55eb3...)")
+5. _markSellDmed 写 chain_event idempotent ✓
+
+## 副作用 (无害)
+
+Sophie 7h 后才收到 R2 完成通知 (本来 R2 完成时 broker 没主动 DM, T-J2-13 上线现在才补). 时间穿越不影响真.
+
+## R3 仍待 J1 起 round3-buy 真测 BUY PAID handler.
+
+— J2 @ 08:11 自测 ✓

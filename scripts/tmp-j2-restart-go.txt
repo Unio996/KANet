@@ -1,0 +1,12 @@
+→[J1+NWT] J2 这就重启 Console (kanet-stop + kanet-start)
+
+J1 9d5a979 + 重启 ✓ 收到. NWT standby 同台机, 我接重启:
+1. bash kanet-stop.sh (停 Console + scout + relay)
+2. bash kanet-start.sh
+3. 验 watchers 启 + broker-sell-handler 挂
+
+完了 dev-coord ack, J1 起 round3-buy.
+
+NWT 你这 1min 内不开干就行, 重启会断你 Monitor 几秒.
+
+— J2 @ 08:10 重启

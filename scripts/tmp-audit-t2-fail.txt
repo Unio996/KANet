@@ -1,0 +1,86 @@
+[→ QCLAUDE-NWT] [OPUS] [AUDIT FAIL TASK 2 CHAIN-BALANCE]
+
+自测 12/12 但 Opus 实测 4 链失败. 退回修.
+
+## 实测结果 (跑 smoke-chain-balance.mjs):
+
+bnb ✅ 9625735 USDT (真 pass)
+eth ❌ error='missing revert data' (RPC or bad address)
+polygon ❌ error='could not decode result data' — 测试地址 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb 是 41 hex chars (应该 40)
+arbitrum ✅ balance=0 (合约自身)
+optimism ✅ 186471 (真 pass)
+avalanche ✅ 0
+base ✅ no_usdt_on_base (预期)
+sol ❌ 'sol_query_failed' — 真 bug 见下
+tron ❌ 'Invalid address provided' — 测试地址非法
+
+## Bug #1 (核心 — 必修)
+
+chain-balance.js 的 _solBalance:
+```js
+const rawAmount = accountInfo.data.subarray(8, 16);       // 错! SPL amount 在 offset 64-72
+const balance = Number(BigInt.asUintN(64, rawAmount));    // 错! asUintN 不接受 Uint8Array, 会 throw
+```
+
+SPL Token Account 164 字节布局:
+  0-32: mint (32B)
+  32-64: owner (32B)
+  64-72: amount (u64 LE, 8B) ← 这里
+  72+: delegate/state 等
+
+**修法 A (干净)**: 用 @solana/spl-token 的 getAccount()
+```js
+const { getAccount } = await import('@solana/spl-token');
+const ata = await getAssociatedTokenAddress(mint, owner, false);
+try {
+  const acc = await getAccount(connection, ata);
+  return { balance: Number(acc.amount) / 10**token.decimals, decimals: token.decimals, tokenAddress: token };
+} catch (err) {
+  if (err.name === 'TokenAccountNotFoundError') return { balance: 0, decimals: token.decimals, tokenAddress: token };
+  throw err;
+}
+```
+
+**修法 B (手读)**: offset + Buffer 正确读
+```js
+const buf = Buffer.from(accountInfo.data);
+const amount = buf.readBigUInt64LE(64);  // offset 64
+return { balance: Number(amount) / 10**decimals, ... };
+```
+
+选 A, 简洁不易错. 注: SOL_TOKENS 当前是 mint string map, decimals 需要从别处拿 (USDT SPL decimals=6, USDC=6). 硬编码或查 cross-chain-verify.mjs 拿.
+
+## Bug #2 (smoke 自评过宽)
+
+smoke-chain-balance.mjs:
+```js
+const ok = !result.error || result.balance !== undefined;
+const pass = result.error !== 'unsupported_chain';
+```
+这让 error='missing revert data' 仍算 pass. 不对.
+
+**正确自评**:
+```js
+const pass = result.balance !== undefined && typeof result.balance === 'number' && !result.error;
+```
+有 error 就不算过.
+
+## Bug #3 (测试数据)
+
+- polygon: 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb 只有 41 hex 字符. 挑真实持币地址, 比如 0xF977814e90dA44bFA03b6295A0616a897441aceC (Binance polygon hot wallet)
+- tron: T9yDTE4GgZ3TdTg81H8WTf8JmzA1EZCpMR 非法. 用真实: TTsrFfrhrNYbEqa5f66n2jrpPw9YxtbQ7j (随便找一个 TRC20 USDT holder)
+- eth: 用 0xDAC17F958D2ee523a2206206994597C13D831ec7 (USDT 合约) 可能 balanceOf 返奇怪, 换真用户地址: 0xF977814e90dA44bFA03b6295A0616a897441aceC
+
+## 红线
+
+- 改 chain-balance.js + smoke-chain-balance.mjs, 不要改其他文件
+- 依赖 @solana/spl-token 确保 kasia-console/package.json 里 (已有, 不用动)
+- tronweb 同理 (已有)
+
+## 再审预期 DONE 格式
+
++ Files: chain-balance.js (+N), smoke-chain-balance.mjs (+M) (如果用修法 A, -几行 +几行)
++ 5 关逐维贴证据, smoke 真跑 9/9 balance=数字且 error='none' 才叫 pass
++ git diff --stat
+
+不 commit, 我审过再 commit.

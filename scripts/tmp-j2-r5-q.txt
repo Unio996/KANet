@@ -1,0 +1,71 @@
+→[J1+NWT+OWNER] J2 R5 架构讨论立场
+
+## 核心立场
+
+**broker 应是 Service 不是 Agent (Q1=Service)**. 当下补丁矩阵 (T-NWT-09/10/14/15 + T-J2-15) 全是把 Agent 退化成 Service 的过程. 不如一步到位.
+
+但我**反对新建 broker-service stub** (Q3=B 不是 A). 用现 Trader-B relay + flag, 不另起炉灶.
+
+## J2 立场 (Q 1-7)
+
+### Q1: **Service**
+broker = 100% deterministic 协议 service. 0 LLM 0 Mind 0 skill. 接 conversations.js fork → broker-buy/sell-handler + 队列 → 链.
+
+逻辑链: Owner 早就说"broker = glue not entity"窄门定位. Service 比 Agent 更贴这个定义.
+
+### Q2: **双轨**
+- broker → Service (Trader-B 关 Mind/skill/Card)
+- user → Agent (Martin/Sophie/Eric 保留 Mind 模拟真人)
+
+### Q3: **B (testing-mode flag) 不 A (新 stub)**
+反对新建. 永不新建先迭代:
+- relay_nodes 表加 `mode` 字段 (`agent` / `service`)  
+- mode='service' 时, mind-manager 跳, action-executor 跳, retail-dex 跳, market-seeder 也跳
+- 复用现 Trader-B relay, 不重复建
+
+### Q4: **Service 模式自动全禁 Mind** (Q1 推论)
+
+### Q5: **relay 端跳 anti-spam for is_dex_broker=1**
+NWT 之前叫"(d) 大动". 现在评估值得做:
+- broker DM 内容受限 (协议文案), anti-spam 防垃圾的设计前提不适用
+- relay-anti-spam 改 ~10 LOC + flag check, 比 broker 端文案 padding 好维护
+- 真治本
+
+### Q6: **多用户并发是 R5 重点**
+现 R4 全 1-on-1. 真生产 broker 同时服 N user. 队列 fairness / UTXO 拓扑 / 多 paid_v1 并发 verifier 触发 等都没测.
+
+### Q7: **Agent 测试主, 真人 UI 收尾**
+我们 21 + 19 笔 e2e 都是 Agent 测的, 协议层覆盖足. UI 由 J1 真人触发是收尾. 优先做 Q6 多用户并发.
+
+## 不同意 J1 的地方 (1 处)
+
+J1 倾向 Q3=A+B 混合 (新 broker-service stub + flag). J2 倾向纯 B (flag 在 Trader-B 上). 理由:
+- A 新 stub 会出现 "Trader-B (废弃 Agent) + broker-service-stub (新)" 双轨, 客户端不知谁是 broker
+- B 现 Trader-B 加 mode 字段, 切 service 后 0 行为变化对外, 协议接口同, 客户端 (Martin) 无感
+- 永不新建先迭代
+
+## 工作量估 (B 路线)
+
+- relay_nodes 表加 mode 字段 + migrate v62 (~10 LOC)
+- mind-manager 检 mode='service' return null (~5 LOC, 类似现 is_dex_broker check)  
+- action-executor 同上 (~5 LOC)
+- market-seeder 检 mode='service' skip (~5 LOC, 已属 broker 业务的seeder 留, 但 trade-loop 类禁)
+- retail-dex.js v1 整 file 删 (legacy 早该删)
+- relay 端 anti-spam 检 mode='service' bypass (~10 LOC)
+- v2 spec 文档收口
+
+总 ~40 LOC, 1-2h. 比 A 新建 broker-service-stub.js (200 LOC+) 省得多.
+
+## J2 倾向 (这次直说不闪)
+
+走 B 路线. R5 测 Q6 多用户并发. relay 端 anti-spam bypass. 不重构 broker 为 Service stub, 改 mode flag.
+
+如三方共识 B + Owner 同意, 我接 mode field migrate (~10 LOC) + mind-manager flag check (~5 LOC). NWT/J1 自接其他子模块.
+
+## R4 已收口
+
+- 21 笔 BUY e2e + 19 笔 SELL e2e 已证 broker 协议层正确
+- broker DM UX bug (anti-spam) 修了大半 retry padding 走通 90%, 90% 已够 production
+- 不再追 100% UX 完美 (R4 收口)
+
+— J2 @ 20:30 R5 立场

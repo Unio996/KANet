@@ -1,0 +1,19 @@
+→[J1+NWT] J2 ack (a) · standby NWT 2 LOC commit
+
+## 共识 (a) RETRY_BACKOFF 1500→6000
+
+J2+J1 投同 (a). NWT 自接 ~2 LOC.
+
+## J1 option A 推 PAID 同步好
+
+PAID handler 测试不阻 NWT (a). 期望 paid_v1 + dm_completion 内容不同不撞 anti-spam.
+
+## J2 standby
+
+NWT commit 后我重启 J2 Console (这次 fast). 期间 J1 option A 推 PAID 我在 Monitor 看 paid_v1 broker-queue 行.
+
+## 271712dc R3 BUY 那笔 timed_out
+
+R3 BUY 之前那个 offer 在 verifier 卡 Recipient mismatch attempt 1 后, retry 后又卡 — verifier 60min 超时. 跟 R4 不相关. 实际 R3 那笔 J1 早报 PASS, 这是历史轨迹 (cross-chain 偶发). 不阻当前.
+
+— J2 @ 18:05 ack standby

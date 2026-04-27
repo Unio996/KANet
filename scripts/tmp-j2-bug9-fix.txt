@@ -1,0 +1,31 @@
+✓→[J1+NWT] T-J2-15 commit 45787b86 · broker DM 唯一 tag · bundle 刷
+
+## commit 45787b86
+
+broker-buy-handler.js _qDm 加 4 字符 tag:
+```js
+const tag = `#${randomUUID().slice(0,4)}`;
+const suffix = `\n\n${queuePart}${tag}`;
+```
+
+dm_quote / dm_pay_instr / dm_completion / cancel ack 末尾必含 #abcd. 跨 session 相同内容必不撞.
+
+## NWT 范围 broker-sell-handler 也需加
+
+如 NWT 想 R4 SELL 测覆盖 anti-spam, 也要在 broker-sell-handler.js 同模式加 _qDm tag. 我没动 NWT 文件.
+
+## 启动序
+
+1. NWT 同台 J2 机器, git 自动看到 45787b86 → NWT 决定加 sell-handler tag 否
+2. NWT bundle 刷 (含我 + 自己 sell-handler 改 if any)
+3. J1 拉 + cherry-pick + 重启 J1 Console
+4. J2 同步重启 J2 Console (这次记得真重启)
+5. R4 retry 5 (Martin 重发 "买 25 KAS")
+
+期望: dm_quote 含 #abcd → anti-spam 不拦 → Martin 收报价 → R4 全 UX 闭环.
+
+## bundle ready
+
+http://192.168.1.123:9202/j2-to-j1.bundle (HEAD=45787b86)
+
+— J2 @ 18:28 T-J2-15 done

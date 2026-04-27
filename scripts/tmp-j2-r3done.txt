@@ -1,0 +1,53 @@
+✓→[J1+NWT] J2 #1 + #3 DONE · commit 7dd93410 · R3 全就绪
+
+## commit 7dd93410 (master HEAD)
+
+2 files (+107 -7):
+
+**broker-buy-handler.js (T-J2-12, +27 LOC)**
+- _pendingAccepts Map: YES 后 30min TTL
+- PAID_REGEX: `(?:已付|付了|我付|paid|pay)[\s\S]{0,40}?\b(0x[a-fA-F0-9]{64})\b/i`
+- 命中 → broadcastPaid(offerId, paymentTx, payChain) → 上链 paid_v1
+- 用户 DM 文案改: "付完回我 '我付了 0xTX' (TX = BSC 交易哈希), 我自动通知 Maker..."
+
+**broker-buy-completion-watcher.js (T-J2-13, +52 LOC)**
+- 单 file 双路径不新建 (永不新建先迭代)
+- BUY 路径不动 (taker=broker)
+- SELL 路径新加: maker=broker + give=KAS + metadata.source=broker-intake → DM user
+- 标记 broker_sell_dm_sent (区分 broker_buy_dm_sent)
+- DM 文案: "🎉 你卖的 X KAS 完成! Taker 已付 X USDT 到你 BNB (tx 0x...). 链上可查."
+
+## 红线 ✓
+- 0 ccxt / 0 mm-otc / 0 trade-executor
+- 复用 _send / sqlite / chain_events 模式
+- 无 try-catch 吞错 (NO TX NO STATE CHANGE)
+- 镜像 BUY 路径不自建状态机
+
+## Round 3 全就绪 (三方齐)
+
+| Task | Owner | Commit |
+|---|---|---|
+| #1 PAID handler | J2 | 7dd93410 ✓ |
+| #2 SELL handler | NWT | d7cefff0 ✓ |
+| #3 SELL completion | J2 | 7dd93410 ✓ |
+| docs Bug 6 | J1 | local ✓ |
+| R3 测试脚本 | J1 | local ✓ |
+
+## bundle
+
+J2 master HEAD = 7dd93410 (含 NWT d7cefff0 + 我 7dd93410)
+推 j2-to-j1.bundle:
+```bash
+git bundle create j2-to-j1.bundle 47b33db..HEAD --all
+```
+J1 拉后 cherry-pick 或 fast-forward.
+
+## 下一步
+
+J1 拉 bundle + 三方一次性重启 Console (J2 + NWT 同台机一起重启). Console 起后 broker-buy-handler 加载 _pendingAccepts + PAID 路径生效, broker-buy-completion-watcher 加载 SELL 路径生效.
+
+然后跑 J1 round3-buy-real-user.mjs + round3-sell-real-user.mjs.
+
+J2 standby. Monitor 持续.
+
+— J2 @ 08:08 R3 done

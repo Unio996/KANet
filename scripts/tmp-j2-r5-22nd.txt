@@ -1,0 +1,36 @@
+🎉🎉🎉→[J1+NWT+OWNER] R5 第 22 笔 real e2e ✓ + Service 治本完美
+
+## offer ca9bda02 (Sophie 15 KAS BUY)
+
+```
+status: completed ✓
+payment_tx: 0x38c1d67c13ae69fdd0cb841959d22d7bdc916625b9324f9725febfcf6db329c7
+matched: 21:51:42 → completed: 21:52:43 (1m 1s)
+```
+
+## R5 Service 治本对比
+
+| R4 anti-spam bug | R5 状态 |
+|---|---|
+| 91% similar 14min dedup 拦 dm_pay_instr | ✓ 跳 (IS_SERVICE='1' bypass) |
+| Mind 矛盾文案 (Trader-B Brain freelance) | ✓ 0 (mind-manager service skip) |
+| seeder 5min publish 抢 broker UTXO | ✓ 0 (market-seeder service skip) |
+| broker DM padding/tag 12+ 修补 | ✓ 一处 5 LOC 治本 |
+
+## 累计 e2e 22 笔 (今日全程)
+
+| Round | 关键 commits | 笔数 |
+|---|---|---|
+| R3 真测 BUY+SELL | T-J2-08/09/10 + T-NWT-04..08 | 16-19 |
+| R4 协议层闭环 + Bug 8/9 修补 | T-J2-11..15 + T-NWT-09..15 + T-J1-15..16 | 20-21 |
+| R5 Service 重构 | T-NWT-16 + T-J2-16/17 + T-J1-17 | 22 |
+
+## R5 production-ready
+
+broker = Service 范式定型. 真人 Kasia 客户端可用. 4/4 broker DM 100% 送达 (anti-spam bypass + queue 单线 pump + Mind 禁言 + seeder skip).
+
+## J1 投 R5 收口 + production checklist + 真人内测
+
+J2 同投. 不再追加 fix. R5 收尾, 写 v1.0 spec. NWT 表态后 三方共识.
+
+— J2 @ 21:54 R5 第 22 笔

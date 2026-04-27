@@ -1,0 +1,67 @@
+[OPUS J2] [CRITICAL FIX] handshake accept 动作丢失 + 通讯录误显示
+
+commit 457ebd5. 588 案例完整根治.
+
+## Bug 链 (3 层)
+
+#1 (P0 根因): guard 用错字段 - 3 处
+  services/ingest-service.js:97 / api/discovery.js:326 / api/ingest.js:134
+  错: AND handshake_observed_at IS NOT NULL
+  观察: observeHandshake() 刚刚填了这个字段, guard 立刻命中 → pending_action 永不入队
+  正确: AND handshake_accepted_at IS NOT NULL
+
+#2 (P1): contacts API 不过滤 status - 2 处
+  services/anti-spam.js:373 getMergedContacts
+  api/conversations.js:518 /api/contacts/list
+  缺失 WHERE status IN ('accepted','confirmed','active','stale')
+
+#3 (后续): conversations.js:21 upsertConversation status='active' 硬编码 — 本次不动
+
+## 完整业务流程 (修复后)
+
+1. User 588 手机 Kasia 发 handshake TX 到 Trader-B
+2. Scout 观察到 → handleIngestMessage(inbound, handshake)
+3. observeHandshake() 写 relation_states status=observed
+4. NEW guard 检查 handshake_accepted_at IS NULL → 允许入队
+5. pending_actions 插入 handshake_accept:TraderB:588 status=pending
+6. catchup-service.getPendingHandshakes() 返给 Relay
+7. Relay 执行 sendHandshake → 发 0.2 KAS 回 588 上链
+8. outbound handshake ingest → observeHandshake + acceptHandshake
+9. relation_states status: observed → accepted, handshake_accepted_at 填
+10. pending_action status: pending → done
+11. 588 Kasia 收到 Trader-B 回的握手 → 双方 active
+
+## 数据治理
+
+给 588 补一条 pending_action (原 bug 下没入队):
+  id=d0d62bd5-4a50-4c8d-986b-b18bf4f53331
+  status=pending, idempotent_key=handshake_accept:trader-b:588
+
+Console 重启后 catchup 立刻拾取并触发 accept.
+
+## 5 关 smoke (11/11 PASS)
+
+1a. OLD guard 错误命中 (证明 bug)
+1b. NEW guard 正确不命中
+1c. pending_action 正确入队
+2. 已 accept 时 NEW guard 命中 (防 0.2 KAS 重花)
+3. idempotent_key 并发去重
+4a. 默认 contacts 过滤 observed
+4b. ?include_observed=1 兼容
+4c. /api/contacts/pending 专返 observed
+5a/b/c. 588 回溯验证
+
+## 生效
+
+bash kanet-stop.sh && bash kanet-start.sh
+
+重启后:
+- 588 的 pending_action 被 catchup 拾取
+- Trader-B 发 0.2 KAS 给 588 完成握手
+- UI 通讯录不再误显示 observed 状态对端
+- UI 未来可加"待审批握手"入口调 /api/contacts/pending
+
+## 未动 (单独立 task)
+
+- upsertConversation status='active' 硬编码 — 需要 conversation 状态机治理
+- is_dex_broker=1 relay 是否 auto-accept 任何握手 — Dex-Agent UX 决策

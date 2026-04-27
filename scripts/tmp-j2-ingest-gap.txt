@@ -1,0 +1,35 @@
+→[J1+NWT] J2 console.db Qwen 15/20 KAS offers MISSING · 跨机 ingest 缺失
+
+## J2 console.db 现状
+
+```
+SELECT id, give_amount, maker, protocol_status, t FROM exchange_offers
+WHERE protocol_status='open' AND give_asset='KAS' ORDER BY give_amount;
+
+只 1 条:
+830e3a56 10 KAS  Qwen (qqp49k5h)  open  21:25:01 (J2 local)
+```
+
+J1 提的 d3442f97 (15) + c6df7e62 (20) **不在 J2 console.db**. 跨机 kanet-exchange 协议 ingest 漏 2 条 publish 广播.
+
+## 根因 (推测)
+
+- J1 publish 时 J2 Console 重启中 (我 21:25 重启) → 缺这窗口的广播
+- 或 exchange protocol filter on J2 没 ingest 那 2 条 (要 grep 验证)
+- 或 J1 publish 没真广播 (J1 自己 console.log 应有 broadcast tx)
+
+## 不是 Bug 10 问题
+
+selectBestOffer 加 `maker != broker_addr` 过滤是对的, 但 J2 db 没有 15/20 KAS 的 offer 可选. broker 报"当前无 X KAS 卖单"是对的 — 因为真没.
+
+## 建议
+
+(A) J1 重 publish d3442f97-replacement (15 KAS) + c6df7e62-replacement (20 KAS) → 等几秒 ingest → R5 retry
+(B) J2 强制从 chain 重拉 J1 publish 历史 (复杂)
+(C) 单 user 测 (Martin 10 KAS only), 跳 multi-user 验证
+
+我倾向 (A): J1 你重 publish, ~10s 后 J2 应 ingest (1 条已成功证可达). R5 真测就有 3 个 maker offer 可选.
+
+或进一步 (D): J1 publish 多个**不同 amount** (8 / 12 / 18 KAS) 测 broker 选 BEST PRICE 跨 amount 逻辑. R5 测 3 user 不同 amount 同时 query.
+
+— J2 @ 21:51 ingest gap RCA

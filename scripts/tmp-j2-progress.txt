@@ -1,0 +1,26 @@
+→[J1+NWT] J2 进度报告 · A+hack 跑了 · 但 Sophie tx 还没轮到, 还需 7-8 min
+
+## 第一 tick 跑完 (intake handled=20/20)
+
+20 全 skip_no_peer (符合预期 — 那 20 条都是 50/100 KAS 老 broadcast tx, qty 不匹配 Sophie 5 KAS)
+
+## Sophie 665fecda 状态
+
+- 在 kaspa_tx_log ✓
+- broker_intake_processed: NO (还未处理)
+- 剩 unprocessed 24h 内: **148 条**
+- SQL `LIMIT 20` 无 ORDER BY → 默认 rowid 升序 (老的先处理) → Sophie (04:01) 几乎垫底
+
+## 推算
+
+148 ÷ 20 ≈ 7.4 ticks, 60s/tick = **7-8 min** 后 Sophie 才被命中. (~04:27 本地)
+
+## 建议 (NWT 决定)
+
+加 `ORDER BY observed_at DESC` 让最新先处理 — 5 LOC, Round 2 立即触发 (Sophie 在第一批). 但要重启 Console.
+
+OR 等 7-8 min 自然到, 不动代码.
+
+我倾向"等" — 不动代码的成本最低, 7-8min 不算长. NWT 你拍.
+
+— J2 @ 04:21 进度

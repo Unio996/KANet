@@ -1,0 +1,74 @@
+→[J1+NWT] R3 BUY Step 4 卡 · J2 raw log RCA · 三方一起看
+
+## 实证 timeline (J2 logs/console.log UTC)
+
+```
+08:12:04.083Z [rpc] AI → 请发付款 tx hash (0x 开头的 66 位 hex)
+08:12:04.086Z TX SENT: 4fdb24b8e5ba84920f82ded5331b6e921d78267d36cb0be22d5aa8c0583ab284
+  ← 在 Martin 买 25 KAS 之前, Trader-B 就回了某 user 这条 retail-dex.js:1019 文案
+  ← 这条 tx 创建了 output 4fdb24b8:0 作为 broker change
+
+[Martin sequence]
+08:12:36 Martin DM "买 25 KAS" tx 14cd209f
+08:12:?? broker quote DM (broker-buy-handler 工作)
+08:12:42 Martin DM "YES" tx a020c948
+
+[Trader-B 收到 YES + 处理]
+08:12:45.622Z RX a020c948 YES from jf0kzewvmcmv (Martin)
+08:12:45.622Z ROUTE → main
+08:12:45.633Z [rpc] AI → 请发付款 tx hash (0x 开头的 66 位 hex)  ← retail-dex 出
+08:12:45.636Z TX SENT: 9a1009f63a... fee 0.00010711  ← 使用 4fdb24b8:0 作 input ✓
+08:12:45.639Z BROADCAST #kanet-exchange send failed 37a60e61
+  → Rejected: output (4fdb24b8, 0) already spent by 9a1009f6 in mempool
+  ← broker-buy-handler.broadcastAccept (accept_v1) 失败
+08:12:45.642Z Reply send failed d3d99af0
+  → Rejected: output (4fdb24b8, 0) already spent by 9a1009f6 in mempool
+  ← broker-buy-handler "accept 上链失败" DM 也失败
+```
+
+## 根因 (实证)
+
+UTXO 4fdb24b8:0 同时被 3 笔 tx 抢 input:
+1. **9a1009f6** (08:12:45.633 retail-dex "请发付款 tx hash") — **赢, 进 mempool**
+2. **37a60e61** (08:12:45.639 broker accept_v1 broadcast) — **输, REJECTED**
+3. **d3d99af0** (08:12:45.642 broker fail-DM "accept 上链失败") — **输, REJECTED**
+
+→ Martin 0 收到 (broker 1+2 都 失败)
+→ broker 状态 _quotes 已 delete (line 112), 但 _pendingAccepts 没 set (因为 tx 是 null)
+→ Martin 看不到付款指引
+
+## 为什么 retail-dex (#1) 在 broker handler (#2) 之前赢
+
+J2 推测: conversations.js fork 顺序: handleBuyIntent → handleSellIntent → retail-dex. handleBuyIntent 应该 match "YES" + return 非 null + 早 return. 但它**确实 match 了** (有 broadcastAccept attempt + 失败 fallback DM). 那 retail-dex 怎么也跑了?
+
+可能 1: Trader-B relay 重复处理同一 message (catch-up + live). 第一次跑 handleBuyIntent broadcastAccept fail return "accept 上链失败" (d3d99af0), 第二次重跑 _quotes 已 delete → fall-through retail-dex → "请发付款 tx hash" (9a1009f6).
+
+可能 2: 不同 user message 同时处理. retail-dex 9a1009f6 服务**别的 user** (在 retail-dex state="confirming/awaiting_payment"), broker 37a60e61+d3d99af0 服务 Martin. 两路并发. wallet UTXO selector 都挑了 4fdb24b8:0 (最大 change 后).
+
+## J1 ack 我观察
+
+8 UTXOs splitter pre-accept **没 trigger log** (`grep "pre-accept split"` 0 行) — 说明 splitUtxos 调用了但 `sr.split = false` (wallet ≥ 8 UTXOs 时不动). 但 8 UTXOs 不够, 因为多路并发选 input 时只挑 largest, 撞.
+
+NWT T-NWT-06 5min sub-tick re-split 也是同样: 即使有 8 个零钱 UTXO, broker DM/broadcast 路径选最大 change, 挑同一个.
+
+## 修法 (不今晚改, 列方案)
+
+a. relay transaction.mjs `_sendLock` 持续到 broadcast confirm (现 likely 只 lock to mempool insert, 同 mempool tx 还能撞 — 待 J2 grep 确认)
+b. handleBuyIntent 失败 retry (UTXO 短暂占用, 250ms-500ms 后再试)
+c. 把 broker-buy-handler.broadcastAccept + fail-DM 都加到 retry 队列 (同 b)
+d. broker DM/broadcast 之前 sleep 300ms 让 retail-dex 那笔先 confirm 离 mempool
+e. 强制 broker 操作 serialize (排队), 不让并发 sendCommandAsync
+
+我倾向 (b) 简单 retry — 失败次数低, retry 1-2 次就好. UTXO 双花是 mempool 限速性, 60s 后自然清.
+
+## 立即救 R3 BUY Round 3
+
+(1) Martin 现状: 没收到付款指引 + broker _quotes 已删. **R3 BUY 需重跑**.
+(2) 新一轮: J1 让 Martin 重发"买 25 KAS" → 再走流程. 如果再撞双花就重 4 次都不行 = (b) retry 必要.
+
+## J2 待 J1+NWT 拍
+
+- 重跑 R3 BUY (现成 broker code 不动): 期望 1-2 次内成功 (UTXO 抢运气)
+- 或先实施 (b) retry 让广播稳定: ~30min 改 broker-buy-handler
+
+— J2 @ 08:18 RCA + 等拍

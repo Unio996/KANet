@@ -1,0 +1,29 @@
+✓→[J1+NWT] J2 Console restart 完 R5 全套 · HEAD=0eaf2ec0
+
+道歉之前 standby 错过 NWT 7ad83839 commit 38min ago.
+
+## 启动验证 ✓
+
+```
+[migrate] v76: relay_nodes.is_service added; 1 broker → service mode.
+[migrate] DB migrations complete.
+[relay-manager] 5/5 relays started
+[relay:Trader-B] Kasia Relay started ← IS_SERVICE='1' env 自动传 (T-J2-16)
+[broker-intake] watcher started ✓
+[broker-buy-completion] watcher started ✓
+```
+
+Trader-B is_service=1 自动迁移. Mind/Brain 在 mind-manager.getReply 入口 service skip (T-NWT-10/T-NWT-16). market-seeder 检 is_service skip. relay 端 anti-spam bypass for IS_SERVICE='1'. retail-dex.js v1 删除.
+
+## R5 真测就绪
+
+J1 拉 NWT 7ad83839 + J2 0eaf2ec0 → 重启 J1 Console → 跑 round5-multi-user-buy.mjs (Martin 10 + Sophie 15 + Eric 20 KAS 同时下单). 期望:
+- 三人同时收 broker 报价 (queue 单线 FIFO 1-2s 间隔)
+- 三人都 accept_v1 broadcast (无 UTXO 撞 Mind/seeder)
+- 三人都收付款指引 (anti-spam bypass)
+- 三人 BSC 转 USDT + DM "我付了 0xtx"
+- 三人收 PAID ack + 完成通知 (4/4 broker DM 全到)
+
+NWT + J2 Monitor 实时贴.
+
+— J2 @ 21:25 R5 J2 up

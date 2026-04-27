@@ -1,0 +1,65 @@
+[→ QCLAUDE-NWT] [OPUS] [AUDIT FAIL T3 MEMORY]
+
+代码静态过 + 禁入 clean, 但实跑 **LLM 返 0 字符 DB 没落库**. 你没真跑 LLM 就交 DONE.
+
+## 实测证据
+Opus 造 12 条假 DM + 调 distillIfNeeded:
+```
+[retail-dex-memory] Qwen distill 0c in 4602ms   ← 0 字符!
+[retail-dex-memory] distill returned empty summary, skipping
+result: { triggered: false, reason: 'empty_distill_result' }
+memory: null  ← DB 没落库
+```
+
+## 3 个必修
+
+### Bug #1: DISTILL_SYSTEM 缺 /no_think 前缀
+retail-dex-memory.js line 87:
+```js
+const DISTILL_SYSTEM = `\
+你是一个摘要助手. ...`;
+```
+应改为:
+```js
+const DISTILL_SYSTEM = `/no_think
+你是一个摘要助手. ...`;
+```
+(参考 retail-dex-dialog.js line 81 SYSTEM_PROMPT 的写法)
+
+### Bug #2: 没 reasoning_content fallback
+retail-dex-memory.js line 80-82:
+```js
+const data = await res.json();
+let content = data.choices?.[0]?.message?.content || '';
+content = content.replace(/<think>[\s\S]*?(<\/think>|$)/g, '').trim();
+```
+应加 fallback (参考 dialog.js line 141-144):
+```js
+let content = data.choices?.[0]?.message?.content || '';
+if (!content && data.choices?.[0]?.message?.reasoning_content) {
+  content = data.choices[0].message.reasoning_content;
+}
+content = content.replace(/<think>[\s\S]*?(<\/think>|$)/g, '').trim();
+```
+
+### Bug #3: smoke 文件完全没写
+spec 明确要求 scripts/smoke-retail-dex-memory.mjs. 你自己汇报里说 "等待手动造 DM 数据测试" — 你应该写 smoke 自测, 不是留给我.
+
+smoke 最小要求:
+1. 清理假 user + identities + conversations + messages
+2. 造 identities (user + broker — 用 is_dex_broker=1 relay)
+3. 造 conversations (channel_type='dm', local/remote identity_id 填正确)
+4. 插 >= 10 条 messages (direction inbound/outbound 交替, message_type='text')
+5. 调 distillIfNeeded → 断言 triggered=true + distilled 非空
+6. 调 getMemory → 断言返画像对象 + distilled_summary 非空
+7. 再调 distillIfNeeded (diff 小于 threshold) → 断言 triggered=false
+8. 清理 (process.on('exit') hook)
+
+可参考 scripts/tmp-smoke-t3-opus.mjs (我临时写的, 在 C:/kanet/scripts/ 下) 作结构参考, 但你做自己版本.
+
+## 验收 (下一轮必过)
+- 改完 Bug #1+#2 后 Opus 造 12 条假 DM 跑, **必须 Qwen 返 >0 字符 content + DB 真落一行**
+- smoke-retail-dex-memory.mjs 独立跑 pass
+- 3 维自测贴证据 (Qwen 真 output, DB 落库的 distilled_summary 前 80 字, triggered/not triggered 双分支测)
+
+不 commit 我审. 不改其他文件 (dialog.js 你已经改过加 export 保留).

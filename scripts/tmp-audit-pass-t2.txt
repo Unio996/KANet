@@ -1,0 +1,113 @@
+[→ QCLAUDE-NWT] [OPUS] [AUDIT PASS TASK 2 CHAIN-BALANCE] + [TASK 3 MEMORY]
+
+T2 经 3 轮修订过了 — 8 链真金 pass + 3 异常. TRON 延后单独 task (地址 hex 编码和 endpoint 需改).
+
+已合并 commit. smoke 11/12 独立复验:
+- bnb Binance 1.00
+- eth Binance 2 (0x28C6) 6.4 亿
+- polygon Binance 6560 万
+- arbitrum/optimism/avalanche 合约自身
+- base 白名单 (no Tether USDT on Base)
+- sol 正确 path (rate-limited 时 early return, 路径 grep 已验)
+- tron 实现雏形延后
+
+谢谢你接 3 轮 feedback 干完.
+
+=========
+TASK 3: 记忆蒸馏层 retail-dex-memory.js
+=========
+新建: kasia-console/src/services/retail-dex-memory.js
+
+## 目标
+LLM 周期性把用户对话蒸馏成画像关键字段, Broker 记得每一个客户的偏好. 是 KANet 独特价值的体现.
+
+## 表 (T1 已建)
+retail_dex_user_memory (v73):
+- user_kasia_address PK
+- distilled_summary TEXT (LLM 3-5 句摘要)
+- preferred_chain, preferred_pay_address
+- tone_preference ('简短'/'详细'/'技术派')
+- notable_preferences JSON 其他偏好
+- last_distilled_at, message_count_at_distill
+- created_at, updated_at
+
+## 导出接口
+```js
+export async function distillIfNeeded(userAddr, brokerAddr)
+// 判断是否需要蒸馏 (距上次蒸馏消息数差 >= 10), 需要则调 LLM 更新
+
+export async function getMemory(userAddr)
+// 读 retail_dex_user_memory, 返画像对象 (null 如果无记录)
+```
+
+## 数据源
+messages 表 (按 sender/receiver 双向过滤用户-Broker DM):
+```sql
+SELECT id, direction, message_type, content_text, received_at
+FROM messages
+WHERE (sender_identity_id = ? AND receiver_identity_id = ?)
+   OR (sender_identity_id = ? AND receiver_identity_id = ?)
+  AND message_type = 'text'
+ORDER BY received_at DESC
+LIMIT 50
+```
+
+identities.address → identities.id 查映射.
+
+## LLM 蒸馏 (用 retail-dex-dialog 的 callQwen 模式)
+Prompt 骨架 (/no_think, 强 JSON schema):
+```
+你是 KANet 的用户画像蒸馏器. 读下面的 Broker↔用户对话, 提炼出:
+- distilled_summary: 3-5 句人话摘要 (用户是谁, 要干什么, 有什么习惯)
+- preferred_chain: 用户最常用链
+- preferred_pay_address: 用户最常用 EVM 地址
+- tone_preference: 用户偏好对话风格
+- notable_preferences: 其他值得记的
+
+只输出 JSON, 不要 markdown.
+
+对话:
+[user]: ...
+[broker]: ...
+...
+```
+
+解析 JSON, 写入 retail_dex_user_memory (upsert).
+
+## 触发时机 (distillIfNeeded)
+- 查 retail_dex_user_memory.message_count_at_distill 上次蒸馏时消息数
+- 查当前 messages 总数
+- 差 >= 10 → 触发蒸馏
+- 第一次触发条件: 总消息数 >= 5 (避免太早蒸馏单轮对话)
+
+## 整合 retail-dex-dialog.js (仅接口调用, 这块我接)
+interpret 开头拉 profile (已有) + memory (新加) 拼 system prompt.
+**本 task 不改 retail-dex-dialog.js**. 你只写 memory 服务 + smoke. 我接入 dialog 那块我自己来.
+
+## 红线
+- 只新建 retail-dex-memory.js + smoke. 不改 dialog.js.
+- LLM 调 Qwen 用 retail-dex-dialog.js 同款 http://127.0.0.1:8000 (/no_think + max_tokens 2000 + 30s timeout)
+- LLM 失败时返 {error: 'llm_failed'}, 不崩
+- sqlite 来自 '../db/client.js'
+- 禁入 agent-mind/mind-manager/adapter/brain
+
+## 5 关自测
+关1 静态: node --check / 行数真实 (估 200-300) / 禁入 grep / 新增 2 exports
+关2 DB: 真 upsert 一条 retail_dex_user_memory 行, 字段齐
+关3 触发条件: mock 不同 message_count 测 should-distill 逻辑
+关4 LLM mock/real: mock LLM 返假 JSON → 能解析落库; 真调 Qwen 一轮 (Broker ↔ 用户 5 轮对话 fixture) 看能不能出合理摘要
+关5 边界: 无 messages (新用户) → getMemory 返 null; LLM 超时不崩
+
+smoke scripts/smoke-retail-dex-memory.mjs:
+- 插假 messages 行 (5-20 条)
+- 调 distillIfNeeded
+- 检查 retail_dex_user_memory 落库
+- 测空消息和 LLM 失败分支
+
+## DONE 格式 ([→ OPUS])
+Files: retail-dex-memory.js (+X), smoke (+Y)
+5 关逐维贴证据
+node --check, grep 禁入, smoke 输出, 真 Qwen 蒸馏样例
+git diff --stat
+
+不 commit. 开工.

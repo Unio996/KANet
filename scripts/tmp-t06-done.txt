@@ -1,0 +1,44 @@
+→[J1] ✓ DONE T-J2-06 · Phase 3 入账兜底代码 + smoke 4/4 PASS
+
+## 代码
+· kasia-console/src/services/broker-intake-watcher.js (96 LOC, commit c360b146)
+  - 每 60s tick 扫 chain_events (event_type='tx', to_address=Trader-B, 最近 24h, 未 processed)
+  - 4 场景路由:
+    1. 意图一致 (retail_dex_orders side='sell_kas' qty≈amount) → DM "开始代卖"
+    2. 意图反向 (side='buy_kas' 却发 KAS) → DM 询问代卖或退
+    3. 无意图 → DM 询问, 12h 退款 (stale scanner 留 Phase 4)
+    4. 黑名单 (relation_states.is_blocked=1) → send_kas 立退, 不 DM
+  - 处理标记: 新增 chain_events event_type='broker_intake_processed' row (合规不新建表)
+  - Broker 吃 gas (所有退款走 Broker relay, v2.1 §4.2)
+
+· kasia-console/scripts/smoke-broker-intake.mjs (126 LOC)
+  - 造 4 chain_events + 2 orders + 1 blacklist, _testInjectSendCommand 捕获 send
+  - 4/4 PASS 验证: tick { handled:4, scanned:4 } + 4 processed rows
+  - cleanup 自动恢复 DB
+
+## smoke 结果
+  ✓ Case 1 意图一致 sell_kas 50 + 入 50 KAS → "开始代卖"
+  ✓ Case 2 意图反向 buy_kas + 入 10 KAS → "想买 KAS 对吧?"
+  ✓ Case 3 无意图 + 入 100 KAS → "你想做什么?"
+  ✓ Case 4 黑名单 + 入 25 KAS → REFUND (send_kas)
+
+## 未做 (留 Phase 4)
+· 12h 超时未响应自动退款 stale scanner (需要跟踪每条 unsolicited_wait 的 ack 状态, 较重)
+· "意图一致 → 进入代持" 真正触发 mm-otc / exchange_offers publish (目前只 DM 告知, 代卖动作空)
+· Console index.js 启动时 startIntakeWatcher 挂载 (stash@{0} 里有 index.js 本地修改, 需先 pop 再加挂载)
+
+## Bundle
+http://192.168.1.123:9202/bundle (17714 bytes, HEAD=c360b146, 含 a635b220 + c35f95b3 + merge + phase 3)
+
+## 挂载决策说明
+J1 给的选项 "agent-mind/src/skills/broker-fallback/ 包式 skill" vs "Console broker-intake-watcher.js".
+选 Console service 理由:
+1. Mind skill 包需建 skill.json + intents.json + executor.mjs 3 文件, 新建成本高
+2. broker 入账监听不是"用户交互触发", 是后台 polling, 更像 Console service
+3. 代码 96 LOC 单文件 + smoke 独立文件, 查看和维护简单
+4. v2.1 §5.1 复用基建清单没把"Mind skill"定成唯一路径, Console service 走 sqlite + sendCommandAsync 都是已有基建
+
+## 阻塞 (NWT T-NWT-04 无关, 独立汇报)
+无. 等 J1 裁定 Phase 3 方案是否通过 + 派 wave 5.
+
+— J2 HEAD=c360b146

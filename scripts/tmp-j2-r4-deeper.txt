@@ -1,0 +1,66 @@
+→[J1+NWT] R4 BUY 卡 · 比 Q6 race 更深 · Mind 跟 broker-handler 平行说话
+
+## broker-queue 实证工作 ✓ (queue 部分对)
+
+```
+[broker-queue] dm_quote #6b693bbe OK 754af84862b4 ✓ (报价 DM)
+[broker-queue] accept_v1 #aeba5679 OK f39d3c268940 ✓ (accept_v1 broadcast)
+[broker-queue] dm_pay_instr #ff72a3a6 OK -  ← retry 后看似成功但 tx hash 空
+```
+
+## 但 Trader-B Mind/Brain 同时 freelance 给 Martin
+
+console.log 17:32-17:35 Trader-B AI → 给 Martin 一连串 Mind LLM 自由发挥:
+
+```
+17:32:36 AI → "兄弟，这价格不对。现在市价是 0.033686..."  (合约逻辑外的价格质疑)
+17:33:00 AI → "我是 KANet Broker，不是卖家。我只负责..."  (角色 confusion)
+17:33:20 AI → "现在最优卖单只有 50 KAS 在 0.034246..."  (报价跟 broker 报价不一致)
+17:33:53 AI → "兄弟，先别急着转。现在市场没卖单（缺货）..."  (跟 broker 矛盾)
+17:34:16 AI → "兄弟，搞混了。我是帮你买币的 Broker..."  (角色再 confusion)
+17:34:49 AI → "兄弟，刚才说没卖单，现在说有，数据对不上啊..."  (Mind 跟自己矛盾)
+17:35:18 AI → "我没太听明白, 能换个说法吗?"  (broker 装糊涂)
+```
+
+## 根因 (不是 UTXO race)
+
+Trader-B 有两套独立 reply 系统:
+
+1. **broker-buy-handler** (deterministic, 由 `/api/agent/reply` 调) — 报价/接单/付款指引
+2. **Mind reactive** (LLM, 由 mind-manager 自驱动) — 自由发挥 chat
+
+Martin 发 1 条消息 → 两套系统**都看见**:
+- broker-buy-handler 命中 BUY_REGEX/CONFIRM/PAID → 进 queue, OK
+- Mind reactive 也跑 → Brain 拿 message + skills 混合 reply → 自由发挥
+
+后果: broker-buy-handler 文案 ("📋 报价 + 你前面 N 人") 跟 Mind 文案 ("市价不对 / 没卖单 / 别急着转") **同时**发到 Martin. Martin 完全晕.
+
+## 这才是 Bug 7+ 真本质
+
+不是 UTXO race (queue 已解), 是 broker handler ↔ Mind LLM **职责重叠** + **同时发声**.
+
+Q6 升级 (Mind 也入队) 不解此问题: Mind 还是会发自由发挥 DM, 只是不撞 UTXO. Martin 还是收 broker handler + Mind 矛盾文案.
+
+## 真治本
+
+**Trader-B is_dex_broker=1 时禁用 Mind reactive proactive DM** (mind-manager 检 is_dex_broker flag).
+
+或: Trader-B Mind 只允许 reply broker-buy-handler 没 match 的 fallback (handler return null 时才让 Mind 跑). 当下逻辑应该已经这样 (conversations.js 120-152 broker 命中早 return), 但实测 Mind 还在跑 → 说明 Mind 不走 `/api/agent/reply` 路径, 是 mind-manager 独立 schedule.
+
+需查 agent-mind/src/mind-manager.js 看 Trader-B reactive 触发逻辑.
+
+## J2 投票 (Q6 升级 + Mind 禁言)
+
+| 选项 | 内容 | 工程量 |
+|---|---|---|
+| (1) Q6 升级 (Mind 入队) — J1 提案 | 解 UTXO race 100%, 不解 Mind 文案矛盾 | ~30 LOC |
+| (2) Mind reactive 禁言 broker | 解 Mind 矛盾, 不解 Q6 race | ~10 LOC |
+| (3) (1) + (2) 双解 | 治本两路 | ~40 LOC |
+
+J2 投 (3) 双解. 单 (1) 不解 R4 真测 Martin UX, 单 (2) 不解 seeder/Mind cancel race.
+
+## 不动作
+
+等 J1+NWT 投票. 5min 内.
+
+— J2 @ 17:38 R4 真问题 RCA

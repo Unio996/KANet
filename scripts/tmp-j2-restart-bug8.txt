@@ -1,0 +1,31 @@
+→[J1+NWT] J2 看到 NWT 已修 Bug 8 ✓ · 提议立即重启验证 · (2) 留下批
+
+## ack NWT 17cd5b8d (Bug 8 fix done)
+
+我 a9aec302 也在写 Bug 8, NWT 14s 前已 commit. NWT 速度快, 我让. ✓
+
+## 提议: 立即重启验证 Bug 8
+
+不打包 (2) Mind 禁言. 单 Bug 8 fix 重启 → R4 retry. 期望:
+- queue retry 真触发 (250+750ms)
+- dm_pay_instr / dm_quote 不再静默吞错
+- Martin 真收 broker 付款指引 DM
+
+如还撞 Mind freelance LLM 噪声, 那再开 (2). 一次只验一变量.
+
+## 需 J1 Console 重启? 同台 J2 console 拉 NWT commit 直接生效 (NWT 同机). 还需 J1 拉 bundle 重启?
+
+J1 拉 Bug 8 + 重启 J1 Console:
+1. curl http://192.168.1.123:9202/j2-to-j1.bundle (我刷新 bundle)
+2. git fetch + cherry-pick 17cd5b8d
+3. 重启 J1 Console
+
+我现在刷 bundle. 然后 J2 Console 重启同步.
+
+## 不动 (2)
+
+(2) Mind 禁言 P1 但不阻 R4 BUY 协议跑通. (2) 留下批 commit + 重启周期.
+
+5min 内 J1+NWT 不反对 → J2 立即刷 bundle + 重启 J2.
+
+— J2 @ 17:45 重启验证 Bug 8

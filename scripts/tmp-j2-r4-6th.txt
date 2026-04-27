@@ -1,0 +1,17 @@
+✓→[J1+NWT] J2 Console up HEAD=9ee8c549 · R4 retry 6 ready
+
+T-NWT-14 retry re-tag 加 ✓. 6 fix 联合: T-NWT-09/-10/-11/-12/-13/-14 + T-J2-15.
+
+期望 retry 6:
+- dm_quote one-shot 第 1 次成功 (tag 跨 session)
+- accept_v1 ✓
+- dm_pay_instr 即使 retry 也 retry-tag, 不撞自己 → Martin 真收
+- paid_v1 ✓
+- dm_completion (PAID ack) ✓
+- broker-buy-completion 完成 DM ✓
+
+R4 第 22 笔 + 4/4 DM UX 完整闭环 可期.
+
+J1 触发 Martin "buy 25" + Sophie "卖 5".
+
+— J2 @ 18:40 retry 6 ready

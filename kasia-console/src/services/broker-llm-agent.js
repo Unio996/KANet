@@ -163,38 +163,93 @@ export function _detectIntent(message) {
 // T-J1-19f (NWT 验证 INTENT_LOCK 失败转 B): 撤 intent_lock system msg 注入 (Qwen 见
 // 第二条 system msg 退化返空). 改 deterministic 首轮路径在 handleLlmDialog 实现, _callLlm
 // 恢复纯净.
-async function _callLlm(messages) {
+// T-NWT-2026-04-27 (d) v2 GAP 1: append-only jsonl LLM raw I/O log (Owner 钦定 'no llm log no pass')
+// 三方共识 LOCK: NWT 改 _callLlm append jsonl, J2 接受跨域改动 (β option), J1 审 ship 后.
+// lock-free / append-only / 不阻塞 broker reply (J2 14:03 6c57f2d23c 要求).
+import { promises as _fsAsync } from 'node:fs';
+import _path from 'node:path';
+const _LLM_IO_LOG = _path.join(process.env.KANET_ROOT || 'C:/kanet', 'logs', 'broker-llm-io.jsonl');
+function _appendLlmIo(record) {
+  // 异步 fire-and-forget, 永不阻塞调用方. 写失败 console.warn 不 throw.
+  _fsAsync.appendFile(_LLM_IO_LOG, JSON.stringify(record) + '\n', 'utf8')
+    .catch(e => console.warn(`[broker-llm-io] append fail: ${e.message}`));
+}
+
+async function _callLlm(messages, ctx = {}) {
+  // ctx: { peer, turn } — 给 jsonl 关联 test-framework trace 用
   const a = sqlite.prepare(`
     SELECT a.ai_provider_url, a.ai_model FROM relay_nodes r
     JOIN adapter_nodes a ON a.id = r.adapter_node_id
     WHERE r.id = ?
   `).get(BROKER_RELAY_ID);
   if (!a?.ai_provider_url) return null;
+  const requestBody = {
+    model: a.ai_model || 'Qwen3.6-35B-A3B',
+    messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages],
+    tools: TOOLS,
+    tool_choice: 'auto',
+    // QWEN-RULES.md Rule 11 (T-NWT-V2-hotfix2): Qwen3.6 reasoning kill switch.
+    // /no_think 前缀 sys/user 都实测无效. 唯一有效是 body 加 chat_template_kwargs.
+    chat_template_kwargs: { enable_thinking: false },
+  };
+  const t0 = Date.now();
   try {
     const res = await fetch(`${a.ai_provider_url}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: a.ai_model || 'Qwen3.6-35B-A3B',
-        messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages],
-        tools: TOOLS,
-        tool_choice: 'auto',
-        // QWEN-RULES.md Rule 11 (T-NWT-V2-hotfix2): Qwen3.6 reasoning kill switch.
-        // /no_think 前缀 sys/user 都实测无效. 唯一有效是 body 加 chat_template_kwargs.
-        // 实测 thinking 1974c → 0c, 响应 8s → 1s. broker 业务不需 reasoning.
-        // 同其他 kill 点: agent-adapter/openai.mjs:141 / llm-dispatcher.js:22 / qwen-bridge-worker.js:105.
-        chat_template_kwargs: { enable_thinking: false },
-      }),
-      signal: AbortSignal.timeout(120_000),  // T-NWT-V2-hotfix: 60s→120s — Qwen3.6 处理 14k tokens prompt (含 SYSTEM_PROMPT + history) 需 60-90s, 60s 60% 触发 abort. Owner 真测连撞.
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(120_000),
     });
+    const latency_ms = Date.now() - t0;
     if (!res.ok) {
       console.warn(`[broker-llm] LLM HTTP ${res.status}`);
+      // log 失败 turn 给 trace (broker 走 LLM 但 fail, no-llm-log-no-pass 不该误判 INNER 空 = FAIL)
+      _appendLlmIo({
+        ts: new Date().toISOString(),
+        peer: ctx.peer || null,
+        turn: ctx.turn || null,
+        system_prompt: SYSTEM_PROMPT,
+        messages: messages,
+        tools: TOOLS.map(t => t.function.name),
+        latency_ms,
+        http_status: res.status,
+        reply: null,
+        error: `HTTP ${res.status}`,
+      });
       return null;
     }
     const data = await res.json();
-    return data.choices?.[0]?.message;
+    const message = data.choices?.[0]?.message;
+    _appendLlmIo({
+      ts: new Date().toISOString(),
+      peer: ctx.peer || null,
+      turn: ctx.turn || null,
+      system_prompt: SYSTEM_PROMPT,
+      messages: messages,
+      tools: TOOLS.map(t => t.function.name),
+      latency_ms,
+      reply_content: message?.content || null,
+      tool_calls: message?.tool_calls?.map(tc => ({
+        name: tc.function?.name,
+        arguments: tc.function?.arguments,
+      })) || null,
+      finish_reason: data.choices?.[0]?.finish_reason || null,
+    });
+    return message;
   } catch (e) {
+    const latency_ms = Date.now() - t0;
     console.warn(`[broker-llm] LLM err: ${e.message}`);
+    _appendLlmIo({
+      ts: new Date().toISOString(),
+      peer: ctx.peer || null,
+      turn: ctx.turn || null,
+      system_prompt: SYSTEM_PROMPT,
+      messages: messages,
+      tools: TOOLS.map(t => t.function.name),
+      latency_ms,
+      reply: null,
+      error: e.message,
+    });
     return null;
   }
 }
@@ -555,7 +610,7 @@ export async function handleLlmDialog(peer, message) {
 
   // 没 direction (current msg 也没 prev 也没) → fall to LLM (用户 'YES' / 'NO' / 闲聊 / 'maker 是谁?')
   history.push({ role: 'user', content: message });
-  let llm = await _callLlm(history);
+  let llm = await _callLlm(history, { peer, turn: 1 });
   if (!llm) return '抱歉, 我这边 LLM 卡了一下, 请稍后再试. 或直接回 "买 5 KAS" / "卖 5 KAS" 走快速通道.';
 
   // tool call?
@@ -566,7 +621,7 @@ export async function handleLlmDialog(peer, message) {
     const toolResult = await _executeTool(peer, tc.function.name, args);
     history.push({ role: 'assistant', content: llm.content || '', tool_calls: [tc] });
     history.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(toolResult) });
-    llm = await _callLlm(history);
+    llm = await _callLlm(history, { peer, turn: 2 });
     if (!llm) {
       return toolResult.ok
         ? `✓ 订单已建 (${args.direction} ${args.qty} KAS, ${args.chain}). 详情: ${JSON.stringify(toolResult).slice(0, 200)}`

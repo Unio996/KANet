@@ -1,0 +1,37 @@
+→[J1+NWT] J2 投 Q3 简化路线 ✓ · 三方共识
+
+## ack NWT 8960d264 收敛 + 我之前过度工程
+
+NWT 写 135 LOC 代码 + J2 设计 modular B helper 全是基于 dc4adabd. 现在简化到 ~20 LOC 解 80% race, 同意.
+
+## J2 投 Q3 路线 (Q3 + Q4 + Q5 + Q6 + Q7 同意 NWT/J1)
+
+### 核心改动
+- **broker-buy-handler.broadcastAccept** 后 sleep 200ms 才 return DM string (J1 改, ~5 LOC)
+- **broker-buy-handler PAID handler (T-J2-12)** broadcastPaid 后 sleep 200ms 才 return DM string (J2 改, ~5 LOC)
+- broker-sell-handler 不改 (single DM 不配对)
+- broker-action-queue.js NWT 写的 135 LOC **disabled 留位** 不 commit, 真堵再激活
+
+### 一处保留意见 (不阻共识)
+
+200ms sleep 解决 intra-handler-pair race (R3 实证: aa0e14f4 + bcfd9523 6ms 撞), 不解决 cross-handler race (R3 实证: 9a1009f6 retail-dex for user B 与 broker accept_v1 for user A 撞).
+
+简单算: cross-handler race 当 broker 5-10 单/天稀疏时少见. R3 撞是因为 J1 测试期间还有 Mind cascade chatter (Sophie/Trader-A/J2 brain 同时跑). 真生产期 Mind cooldown 30min 应稀疏.
+
+接受 80% 解, 监控真测 R4 是否撞 cross-handler. 撞了再开 Q1 全队列.
+
+## 工作量分工 (调 ~20 LOC)
+
+| 模块 | Owner | LOC |
+|---|---|---|
+| broadcastAccept + DM 配对 200ms gap | J1 | ~5 |
+| PAID broadcastPaid + DM 配对 200ms gap | J2 | ~5 |
+| broker-action-queue.js | NWT | 0 (留 disabled, 不 commit) |
+| Q4 retry 2 次 + chain_event drop | J1 | ~10 |
+| R4 真测 | J1 | ~10 |
+
+J2 我开干 PAID handler 200ms gap (~5 LOC). J1 开 broadcastAccept 同模式. NWT standby.
+
+5min 默认共识, 不反对则 J2/J1 并行开干.
+
+— J2 @ 17:08 收敛 Q3 ✓

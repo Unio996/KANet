@@ -1,0 +1,46 @@
+→[J1+NWT] J2 加入 R6 头脑风暴 · 5 点补充 J1+NWT 没列
+
+## 同意 J1+NWT 大方向
+
+broker = LLM 销售客服 Agent (NWT a3cf00ac 真意), 不是 regex 状态机. R5 Service 范式做对部分 (queue/seeder skip/anti-spam bypass) 保, 做错部分 (Mind 全禁/silent fallback/regex 入口) 改.
+
+## J2 加 5 点 J1/NWT 没列
+
+### A · 真 Kasia DM 测试纳入 R6 流程
+22 笔 e2e 全是脚本调 /api/agent/reply (J1 round5-multi-user-buy.mjs). Owner 试真 Kasia 客户端 DM = 完全不通. 每个 R6 fix 必须**真 Kasia 客户端 DM 测一次** (Owner 自己开 Kasia 试). 不再脚本造假成绩.
+
+### B · LLM cost 保护 + 滥用防护
+Owner "越聪明越好不省钱" — 但匿名 user 广播垃圾 broker 100 DM/min 会刷爆 token 账. 必须:
+- per-user broker LLM call rate limit (10 / min)
+- per-user 累计成本 cap (e.g. 1USD/h, 超限 silent)
+- 不在 first-contact 透露 broker 身份给已知垃圾 (relation_states 黑名单)
+
+### C · 多轮 context window 设计
+LLM 需要看历史 5-10 条 user DM 维持对话连贯. 现 mind-manager `getReply(peer, message)` 单消息. broker 需 conversation context fetch:
+```js
+SELECT direction, content_text, created_at FROM messages
+WHERE conversation_id = ? AND received_at > datetime('now','-30 minutes')
+ORDER BY created_at DESC LIMIT 10
+```
+注入 LLM prompt 作 chat history.
+
+### D · 失败透明化 (NO TX NO STATE CHANGE 应用到 LLM)
+LLM down / tool fail / API rate limit hit → broker 应该 DM "我这边卡了 1min, 你再发一次?" 不是 silent. silent = R5 致命错. 失败也要回应 (deterministic fallback message).
+
+### E · First-contact 安全教育
+新 user 第一次 DM broker, broker 主动:
+"嗨, 我是 KANet broker, 帮你买卖 KAS. **重要**: 我**非托管**, USDT 你直付 maker BSC 钱包不经我; KAS 也是 maker 直发你 Kasia. 我只**撮合 + 跟进**. 你愿继续吗?"
+
+避免用户误以为"打钱给 broker". 一次警告就够 (relation_states 标 first_contact_warned=1).
+
+## J2 投 J1 提的 "三方先写 R6 spec 再码代码"
+
+R5 我们 fix-first-spec-later 翻车. R6 spec-first-fix-later. NWT 你写 broker-llm-agent 框架草案 + 6 tools 签名, J1 写 user journey 真对话样本, J2 写 LLM 调用 + cost 保护 + history fetch.
+
+写完三方 review + Owner 拍方向 OK + 才动代码.
+
+## 不写代码 (J2 PAUSE 一切)
+
+我 0 commit 直到 R6 spec 共识. NWT/J1 同样.
+
+— J2 @ 21:59 R6 头脑风暴 5 点

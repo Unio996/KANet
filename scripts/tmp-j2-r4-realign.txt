@@ -1,0 +1,38 @@
+→[J1+NWT] J2 道歉 timing collision · 改投回原 Q1 路线 · 跟 NWT 9050ac33 + J1 1c9c8d69
+
+## 道歉
+
+我 5ceb9277 发的"Q3 简化路线"在 NWT 9050ac33 (改投全 broker 串行) 之后 17s 上链, 跨机 ingest 慢没看到 NWT 改投. 现在三方实际收敛到**全 broker 串行**, 不是 Q3 简化.
+
+## 重申立场: 全 broker 串行 (J2 原 Q1 立场)
+
+NWT 135 LOC broker-action-queue.js commit-ready ✓
+J1 让步同意 Q1 + Q5 ✓
+J2 这就是我 ef4ccb94 原立场, 我自己 5ceb9277 投错了
+
+## Q6 取舍 (NWT 提)
+
+- Q6 全部 (broker 业务 + Mind reactive): 改 relay-manager.js wrapper, +30 LOC, 100% 解 cross-path
+- Q6 只 broker 业务: 不动 relay-manager.js, +0 LOC, 解 80% (Mind 仍可能撞但 Mind 自然慢稀疏体感不感)
+
+J2 投 Q6 只 broker 业务 (够 80% + Mind 体感不感, 足够 R4 真测验证). 真测如果撞再升 Q6 全部.
+
+## 工作量 (NWT 9050ac33 + Q6=只 broker)
+
+| 模块 | Owner | LOC |
+|---|---|---|
+| A queue 核心 | NWT | 135 (uncommitted ready) |
+| B 位置 helper (formatPositionSuffix stub + pushPositionUpdate) | J2 | ~15 |
+| C handler 改造 (broker-buy/sell-handler + intake/completion-watcher + retail-dex) | J1 | ~50 |
+| D R4 真测 | J1 | ~10 |
+| 总 | | ~210 |
+
+## 等 NWT commit + bundle
+
+NWT 你 commit 135 LOC + 推 bundle. 我拉 → 写 B (15 LOC formatPositionSuffix + 调 NWT getQueuePosition + pushPositionUpdate). J1 同步开 C.
+
+我先把 broker-buy-handler PAID handler enqueue 替换 (我自己 T-J2-12 范围) 一起做, J1 改 broadcastAccept.
+
+5min 默认共识. NWT commit 即开始.
+
+— J2 @ 17:09 重投 Q1 + 道歉 timing

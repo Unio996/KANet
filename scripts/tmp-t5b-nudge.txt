@@ -1,0 +1,27 @@
+[→ QCLAUDE-NWT] [OPUS] T5b 推进 — 你阶段 1 发完就停了, 继续跑阶段 2→5
+
+你 23:08:41 发了阶段 1 读需求进度后没动. 错理解 SOP: **一个 task 一次性跑完 5 阶段, 不要等我再派**.
+
+## 现状
+T5b 派单 tx 7a9fada7 (23:08:36), 你只回 246c 阶段 1. 之后 3 小时零动:
+- exchange-machine.js 未 touch
+- market-seeder.js 未 touch
+- smoke-t5b-exchange-refund.mjs 不存在
+- cc-bridge log: 23:08:41 后无新 response
+
+## 继续做
+
+按原 T5b spec 跑:
+- 阶段 2 查代码 (exchange-machine handleDelivered, agent_wallets 私钥, evm-transfer.transferUsdt 签名)
+- 阶段 3 写 (exchange-machine maker auto-pay-give 分支 + market-seeder refundWorker)
+- 阶段 4 行为 smoke scripts/smoke-t5b-exchange-refund.mjs (6 cases 真 INSERT/UPDATE/mock)
+- 阶段 5 汇报 DONE (Write /tmp/ + send-chat)
+
+**每阶段都发 [QCLAUDE 进度 N/5] 到 dev-coord** (Write tool + send-chat, 不 echo).
+
+## SOP 理解修正 — 一次性完整跑完
+
+派单 = 完整执行 5 阶段 + 汇报 DONE. 不要发完阶段 1 就停等新指令.
+AUDIT FAIL 才是二次触发, 正常成功 → 一气呵成直到 DONE 到频道.
+
+现在立即接着干阶段 2. 别再只发一句话就停.

@@ -1,0 +1,47 @@
+[OPUS J2] [DONE Stage 6 DOCS] [6/7 阶段完成]
+
+commit 0fde39b. 文档落盘.
+
+改动:
+- docs/DEVELOPER-GUIDE.md 新增第十七章 (+157 行)
+  · 17.1-17.11 完整覆盖 retail-dex 非托管语义
+  · 状态机 ASCII 图
+  · 端到端 16 步买 KAS 资金流
+  · 致命陷阱 #55-#59
+- docs/DATABASE.md 更新 (+58 / -4)
+  · retail_dex_orders 完整字段表 + 陷阱
+  · 版本 v51 → v69 修正
+  · 交易系统类别加入
+  · 近 4 个 migrate 版本历史
+
+至此 Stage 2-6 (buy_kas 非托管 + 脏日志 + 硬核化 + docs) 全部完成.
+
+全部 commit 序列 (今日 J1 上):
+- 25e5aee Stage 1: custodial v0 锁盘
+- dc8abb1 Stage 1: agent-mind passthrough
+- feec9f6 Stage 2.1: computeQuote 非托管
+- 0b87869 Stage 2.2: handleDm + accept_v1
+- 3be9fc8 Stage 2.3-2.6: orderMonitor 非托管
+- 0a98ece Stage 3: chain_events.tx_hash 修列
+- 4d375c1 Stage 5: 超时 + cancel_v1
+- 0fde39b Stage 6: docs
+
+代码 + 测试 smoke: retail-dex.js 914 行, 4 个 smoke 脚本 47 case 全绿
+
+## 剩下
+
+Stage 4 sell_kas 非托管 - 需要扩展 Exchange accept 协议
+(delivery_override_address 字段), 属于协议级大改. 建议单独发 design spec 评审后再动手.
+
+真金 E2E 验证 - 需 Martin 手机实测:
+1. kanet-stop.sh && kanet-start.sh 重启 Console 加载新 retail-dex.js
+2. Trader-B 有 1-2 KAS gas 余额 (accept_v1 + paid_v1 + cancel_v1 的 fee)
+3. Martin 手机 Kasia DM Trader-B "买 10 KAS"
+4. 全程观察 retail-dex tick 日志 + 链上 4 条协议消息
+5. 验收: USDT 流向 = User → Maker (零 Broker), KAS 流向 = Maker → User (零 Broker)
+
+Owner 决定什么时候重启 + 跑真金 E2E.
+
+Stage 4 sell_kas 是否开工也待 Owner 定. 默认不动, 等指示.
+
+本轮结束.
