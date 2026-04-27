@@ -334,18 +334,73 @@ export async function buyPreview({ user_kasia, qty, pay_chain, give_asset = 'KAS
     const tag = p.broker_dynamic ? '(broker 自挂)' : '(maker)';
     return `  ${i+1}. ${p.take_qty} ${give_asset} → 付 ${(+p.take_usdt).toFixed(6)} USDT 到\n     \`${p.maker_addr}\` ${tag}`;
   }).join('\n');
+
+  // T-NWT-2026-04-27 报价信息丰富化 (Owner 11:08 钦定: 信任+信息双不足是 production blocker)
+  // 4 段补强: (A) broker 身份 (B) 价格对比 (C) 安全说明 (D) 历史链上记录
+  let trustCard = '';
+  try {
+    const brokerRow = sqlite.prepare('SELECT name, created_at FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID);
+    const completedCount = sqlite.prepare(
+      `SELECT COUNT(*) as n FROM exchange_offers WHERE maker = ? AND protocol_status = 'completed'`
+    ).get(brokerRow ? sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID)?.address : '')?.n || 0;
+    const daysActive = brokerRow?.created_at
+      ? Math.floor((Date.now() - new Date(brokerRow.created_at).getTime()) / 86400000)
+      : '?';
+    trustCard = `🏷 **${brokerRow?.name || 'KANet broker'}** · Kasia 注册 ${daysActive} 天 · 累计完成 **${completedCount}** 笔成交`;
+  } catch (e) { trustCard = '🏷 KANet broker'; }
+
+  // (B) 价格对比 — 跟 CEX 中价比 spread%
+  let priceCompare = '';
+  try {
+    const { fetchPrice } = await import('./price-oracle.js');
+    const pr = await fetchPrice(give_asset, 'USDT');
+    if (pr.ok && pr.price > 0) {
+      const spreadPct = ((unitPrice - pr.price) / pr.price * 100);
+      const spreadSign = spreadPct >= 0 ? '+' : '';
+      priceCompare = `\n  (CEX 8 源中价 ${pr.price.toFixed(6)}, 本单 ${spreadSign}${spreadPct.toFixed(2)}% spread)`;
+    }
+  } catch (e) { /* 价格取不到不要紧, 跳过 */ }
+
+  // (D) 历史链上履历 — 最近 3 笔 completed
+  let historyLines = '';
+  try {
+    const brokerAddr = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID)?.address;
+    if (brokerAddr) {
+      const recent = sqlite.prepare(`
+        SELECT broadcast_tx_id, give_amount, give_asset, completed_at
+        FROM exchange_offers
+        WHERE maker = ? AND protocol_status = 'completed' AND broadcast_tx_id IS NOT NULL
+        ORDER BY completed_at DESC LIMIT 3
+      `).all(brokerAddr);
+      if (recent.length > 0) {
+        historyLines = '\n📊 **broker 最近成交** (Kaspa explorer 可验):\n' + recent.map(r =>
+          `  · ${r.give_amount} ${r.give_asset} → tx \`${r.broadcast_tx_id?.slice(0, 10)}...${r.broadcast_tx_id?.slice(-6)}\``
+        ).join('\n');
+      }
+    }
+  } catch (e) { /* 历史取不到不要紧 */ }
+
   const preview_text = `📋 **订单画像 (确认前)**
+
+${trustCard}
 
 * 方向: 买 ${give_asset}
 * 数量: ${cumKas} ${give_asset}
 * 付款链: ${payChain.toUpperCase()} (USDT)
-* 单价: ${unitPrice.toFixed(6)} USDT/${give_asset}
+* 单价: ${unitPrice.toFixed(6)} USDT/${give_asset}${priceCompare}
 * 总额: ${totalUsdt.toFixed(6)} USDT
 ${payLines}
 * ${give_asset} 收件 (你的 ${recvNetwork}):
   \`${assetMeta.chain === 'kaspa'
       ? user_kasia
       : (receive_address ? `${receive_address.slice(0, 6)}...${receive_address.slice(-4)} (你提供的 ${recvNetwork} 钱包)` : '⚠ 缺 receive_address — buy stable 真要传 user EVM/Sol/Tron 收款地址')}\`
+
+🛡 **安全说明**
+  · USDT 直付 maker, broker 不托管你的钱
+  · broker fee 0.1 KAS 固定 (无隐藏)
+  · 30min 未付款 → 自动取消, 你 USDT 不动
+  · 跨链验证失败 → 自动 refund + dispute 通道
+${historyLines}
 
 ⏰ 订单 30 分钟内付款有效 · 跨链验证 1-3 分钟
 
