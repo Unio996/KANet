@@ -34,6 +34,9 @@ export default {
       ],
       expect: {
         must: {
+          // R-J1-2026-04-28 phase 6 加固 (NWT 67728c4f audit GAP): 反 silence-game.
+          // 3 peer 至少 2 真回, 否则 environment broken (LLM 500 / async drain miss) case 不 valid.
+          parallel_min_replies: 2,
           no_state_corruption: {
             peers: [
               { addr: SOPHIE, want_qty: 5, want_direction: 'buy' },
