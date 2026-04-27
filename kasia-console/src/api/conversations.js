@@ -141,8 +141,20 @@ export async function registerConversationRoutes(fastify) {
         const _r19Guard = async (replyText, source) => {
           if (!replyText) return replyText;
           try {
+            // T-J2-2026-04-27 Bug-Z8 fix (J1 f631afb0 真 LIVE 真测撞 confirm step false positive):
+            // userContext 真 only 'current msg' 真 narrow — user '好' / 'YES' confirm step 真没含 0x addr,
+            // 但 broker reply 真 echo user prior turn EVM addr (legit) → R19 误拦. 真 fix: userContext 扩到
+            // 最近 5 条 user inbound msgs 真 cover prior turn user-supplied addr. R19 仍堵 broker LLM 编 fake addr
+            // (broker 编的 addr 真不会在 user 任何历史 msg 里出现).
+            const recentUserMsgs = sqlite.prepare(`
+              SELECT m.content_text FROM messages m
+              LEFT JOIN identities si ON si.id = m.sender_identity_id
+              WHERE si.address = ? AND m.message_type='text' AND m.direction='inbound'
+              ORDER BY m.created_at DESC LIMIT 5
+            `).all(peer);
+            const userContext = (message || '') + ' ' + recentUserMsgs.map(r => r.content_text || '').join(' ');
             const { assertReplyAddressInvariant } = await import('../services/broker-action-queue.js');
-            const v = assertReplyAddressInvariant(replyText, message);  // 真 pass user message context
+            const v = assertReplyAddressInvariant(replyText, userContext);
             if (v) {
               console.error(`[api/agent/reply] [R19-EXT] ADDRESS_INVARIANT_VIOLATED source=${source} foreign=${v.foreign_address} (user_ctx_addrs=${v.user_context_count}) — REFUSING reply (broker LLM 编 fake 地址 production safety)`);
               return '抱歉, broker 检测到地址异常 (内部 R19 拦截), 请稍后重试 — 直接回 "买 X KAS" 走快速路径, 或回 NO 取消.';
