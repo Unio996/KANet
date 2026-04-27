@@ -42,13 +42,16 @@ async function findCases({ caseFile, domain, all }) {
 async function main() {
   const caseFile = arg('case');
   const domain = arg('domain');
+  const tag = arg('tag');  // 用于 git hook critical 优先 (--tag=critical 跑所有标 critical 的 case)
   const allFlag = args.includes('--all');
-  if (!caseFile && !domain && !allFlag) {
-    console.log('Usage: node scripts/test.mjs --case=<path> | --domain=<broker|seeker|...> | --all');
+  const quietFlag = args.includes('--quiet');  // 只输出 summary, 不 dump 每 case 详情 (post-commit 用)
+  if (!caseFile && !domain && !tag && !allFlag) {
+    console.log('Usage: node scripts/test.mjs --case=<path> | --domain=<broker|seeker|...> | --tag=<critical|security|...> | --all');
+    console.log('       --quiet  仅输出 summary');
     process.exit(1);
   }
 
-  const files = await findCases({ caseFile, domain, all: allFlag });
+  const files = await findCases({ caseFile, domain, all: allFlag || !!tag });
   if (files.length === 0) {
     console.log('No matching test cases found.');
     process.exit(1);
@@ -56,28 +59,40 @@ async function main() {
 
   let totalPass = 0, totalFail = 0, totalSkipped = 0;
   const summary = [];
-  const isBatch = !caseFile;  // batch = --domain or --all (multiple files)
+  const isBatch = !caseFile;  // batch = --domain / --all / --tag (multiple files)
   for (const file of files) {
     const mod = await import(pathToFileURL(file).href);
     const testCase = mod.default;
     if (!testCase?.id) {
-      console.log(`SKIP (no default export): ${file}`);
+      if (!quietFlag) console.log(`SKIP (no default export): ${file}`);
       continue;
     }
+    // tag filter (case 必含此 tag)
+    if (tag && !(testCase.tags || []).includes(tag)) continue;
     if (isBatch && testCase.skip_in_batch) {
-      console.log(`SKIP (manual-only): ${testCase.id}`);
+      if (!quietFlag) console.log(`SKIP (manual-only): ${testCase.id}`);
       totalSkipped++;
       continue;
     }
     const result = await runCase(testCase);
-    console.log(formatResult(result));
-    console.log('');
+    if (!quietFlag) {
+      console.log(formatResult(result));
+      console.log('');
+    } else {
+      console.log(`${result.pass ? '✓' : '✗'} ${result.id}`);
+    }
     if (result.pass) totalPass++; else totalFail++;
-    summary.push({ id: result.id, pass: result.pass });
+    summary.push({ id: result.id, pass: result.pass, failed: result.failed_assertions });
   }
 
   console.log('='.repeat(60));
-  console.log(`Summary: ${totalPass} PASS / ${totalFail} FAIL / ${files.length} total`);
+  console.log(`Summary: ${totalPass} PASS / ${totalFail} FAIL / ${totalPass + totalFail} run`);
+  if (totalFail > 0 && quietFlag) {
+    // 失败时打 fail case 简要给 hook 用
+    for (const s of summary) {
+      if (!s.pass) console.log(`  FAIL ${s.id}: ${s.failed?.map(f => f.key).join(', ')}`);
+    }
+  }
   process.exit(totalFail > 0 ? 1 : 0);
 }
 
