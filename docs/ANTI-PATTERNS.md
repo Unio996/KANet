@@ -1103,6 +1103,173 @@ function _r19Guard(replyText, peer) {
 
 ---
 
+## 规则 32 · flow state (direction/intent/asset/chain) 真 sticky locked 真 lifecycle, explicit reset only
+
+**来源**: Owner 12:52-12:57 真测 SELL 88 KAS 真 4 turns 反复偏移 (NWT 13:15 RFC). R31 lifecycle-bound 真 covers receive_address 真 specific instance, 真**真**未 generalize to entire transactional flow state. Owner 真 真测 reveal R31 真 partial — direction itself 真**真**also need lifecycle lock.
+
+**症状**: user declares transactional intent (SELL 88 KAS BSC) turn 1, broker subsequent turns fresh-interpret each user msg 真 input regex match — 真**真**fail to honor declared direction. Single-token reply ('Bsc' as chain answer) 真 broker LLM 真 mis-interpret as new BUY signal → cross-direction hallucinate.
+
+**Wrong** (current broker handlers, post-Bug-Z9 still incomplete):
+```js
+// handleBuyIntent fresh每轮 turn:
+const intent = _detectIntent(currentMsg);  // ← turn-by-turn fresh, 不 know SELL declared
+if (intent === 'buy' && BUY_REGEX.test(currentMsg)) { ... }  // fires regardless of SELL flow
+
+// LLM fall-through:
+const llm = await _callLlm(history + currentMsg);  // weak Qwen3.6 multi-turn → hallucinate cross-direction
+```
+
+Owner trace evidence (T3 T6):
+- T2 user '卖 88 KAS' → SELL declared
+- T3 user 'Bsc' → broker generates '买 USDT 5 USDT preview' (cross-direction hallucinate)
+- T6 user '0x...596D 挂单价 0.0336 10分钟退款' → broker generates '买 50 KAS preview' (再次 cross-direction)
+
+**Right** (R32 sticky lock):
+```js
+// turn 1 (declared intent):
+const declared = _detectIntent(currentMsg);
+if (declared) _convoState.set(peer, {
+  direction: declared, locked: true, lifecycle_phase: 'fields_collection',
+  started_at: Date.now(), reset_at: Date.now() + 30*60*1000
+});
+
+// turn 2+:
+const state = _convoState.get(peer);
+if (state?.locked) {
+  // fresh fields fill state but 真**真**CANNOT override direction
+  const fresh = _extractFields(currentMsg);
+  if (fresh.direction && fresh.direction !== state.direction) {
+    // 真 user 真 didn't explicitly cancel — 真 reject cross-direction
+    return `订单已锁 ${state.direction}, 真改方向回 NO 取消重新下单.`;
+  }
+  // 真 fresh chain/qty/asset/addr 真 fill state.{chain,qty,asset,address}
+  // direction 真 NEVER override
+}
+
+// reset triggers:
+//   user CANCEL_WORDS → _convoState.delete(peer)
+//   timeout 30min lifecycle expire → auto-delete
+//   explicit '重新下单' → reset
+```
+
+**怎么避** (4 步 SOP):
+1. **真 enumerate transactional state fields** — direction (BUY/SELL), give_asset, give_qty, recv_chain, recv_address, payment_chain, lifecycle_phase
+2. **真 set state authority 真 turn 1 declaration** — first explicit intent commit (BUY_REGEX OR SELL_REGEX OR LLM tool call)
+3. **真 fresh fields ONLY fill missing state, NEVER override declared** — direction/asset 真 immutable post turn 1
+4. **真 explicit reset triggers ONLY** — CANCEL_WORDS, timeout, '重新下单'. 真 NEVER implicit reset.
+
+**Why**: Qwen3.6 multi-turn instruction-following 真 weak (3+ evidence post Bug-Z6/Z7/Z9). 真 LLM fall-through 真 fresh-interpret 真 amplify hallucinate. 真 deterministic state authority 真 broker-side 真 LLM 真 stateless transducer 真 align R29 'LLM dumb tools rich' + R31 'lifecycle-bound' 真 generalize to entire transactional flow.
+
+真 R32 真 R31 sister rule:
+- R31: invariant **allow-set** lifecycle-bound (addr whitelist scope)
+- R32: transactional **flow state** lifecycle-bound (direction/asset/chain sticky)
+
+真 generic 适用 — 真 any LLM-mediated transactional flow with declared intent (legal advice, medical Q&A, customer service):
+- declared_question_type sticky lock — re-classification 真 only on user reset
+- declared_legal_jurisdiction sticky — fresh chat doesn't cross-jurisdiction
+- declared_diagnosis_context sticky — re-pivot 真 explicit only
+
+---
+
+## 规则 33 · broker reply path 真**真 ALL consult conversation state authority** (deterministic + LLM + legacy)
+
+**来源**: Owner 12:52-12:57 trace 真 root cause analysis (J1 050108d6 deep dig 13:20). Bug B1-B6 真**真**真**真**真同一缺陷 — broker reply path 真 6+ fragmented (handleBuyIntent regex × 6 + handleSellIntent + handleLlmDialog), 真 NONE consult conversation state authority. 真 each path turn-fresh-pattern-match 真 fire 真 fail to honor declared SELL.
+
+**症状**: broker 真 multi-path reply system 真**真**:
+1. handleBuyIntent: STOP_HARD_REGEX, PRICE_QUERY_REGEX, BUY_REGEX, PAID_REGEX, CONFIRM_WORDS, CANCEL_WORDS — 6 path
+2. handleSellIntent: SELL_REGEX, CONFIRM_WORDS — 2 path
+3. handleLlmDialog: _detectIntent + _pendingFields + Qwen LLM call — 3 path
+
+真 11+ paths each pattern-match input independently 真 fire OR fall-through. 真 NONE check 'user has declared SELL flow turn 1, all subsequent reply must respect SELL context'.
+
+**Bug evidence**:
+- B1 'Bsc' single-token: matches no deterministic regex → fall LLM → LLM weak multi-turn → cross-direction hallucinate
+- B2 '价格?' SELL flow: PRICE_QUERY_REGEX 真 broker-buy-handler 真 fire 真 BUY-guide 文案 (no SELL context check)
+- B3 杂糅: matches no deterministic → fall LLM → ignore Owner conditions, hallucinate BUY 50 KAS
+- B4 反复偏移: NONE of 11 paths 真 set sticky direction on declared intent
+- B5 LLM editor fake price: LLM free-text 真 R29 'tool-rich' 真 partial enforce only on tool preview, not on free-text reply
+- B6 stale 'v1 not support sell preview' path: legacy reply path 真**真**post sellPreview ship 真**真**未 prune
+
+**Wrong** (current 11+ path bag):
+```js
+// conversations.js fork:
+const buyReply = await handleBuyIntent(peer, msg);  // 6 paths, none state-aware
+if (buyReply) return buyReply;
+const sellReply = await handleSellIntent(peer, msg);  // 2 paths, none state-aware
+if (sellReply) return sellReply;
+const llmReply = await handleLlmDialog(peer, msg);  // weak multi-turn, _pendingFields partial state
+return llmReply;
+```
+
+**Right** (R33 single state authority):
+```js
+// broker-state-authority.js (~80 LOC, J2 own broker code):
+const _convoState = new Map();  // peer → { direction, asset, qty, chain, address, lifecycle_phase, ts, locked }
+
+export function getConvoState(peer) { return _convoState.get(peer); }
+export function setConvoStateLock(peer, fields) {
+  const existing = _convoState.get(peer) || {};
+  _convoState.set(peer, { ...existing, ...fields, locked: true, ts: Date.now() });
+}
+export function shouldDeterministicFire(peer, regexName, msg) {
+  const state = _convoState.get(peer);
+  if (!state || !state.locked || Date.now() - state.ts > 30*60*1000) return true;
+  // R32 + R33: state-aware regex gating
+  if (regexName === 'PRICE_QUERY' && state.direction === 'sell') return false;  // B2 fix
+  if (regexName === 'BUY_REGEX' && state.direction === 'sell') return false;    // B1/B3 fix
+  if (regexName === 'SELL_REGEX' && state.direction === 'buy') return false;
+  return true;  // other regexes 真 unrelated to direction
+}
+
+// handleBuyIntent / handleSellIntent / handleLlmDialog 真 ALL prologue:
+import { getConvoState, shouldDeterministicFire } from './broker-state-authority.js';
+
+export async function handleBuyIntent(peer, message) {
+  if (!shouldDeterministicFire(peer, 'PRICE_QUERY', message)) { /* skip BUY-side PRICE */ }
+  if (!shouldDeterministicFire(peer, 'BUY_REGEX', message)) { /* skip BUY regex */ }
+  // ... existing logic ...
+}
+
+// handleLlmDialog 真 system msg 真 inject state lock:
+const state = getConvoState(peer);
+if (state?.locked) {
+  systemPrompt += `\nCRITICAL CONVERSATION STATE: user 已宣告 ${state.direction.toUpperCase()} flow turn 1. ` +
+    `Fresh fields fill ${state.direction} context only. NEVER hallucinate opposite direction. ` +
+    `Locked fields: direction=${state.direction}, asset=${state.asset||'tbd'}, chain=${state.chain||'tbd'}.`;
+}
+
+// LLM reply post-process: R29 + R33 invariant
+// 真 reply 真 contains price/amount/addr 真**真 must be tool-derived OR user-supplied
+// 真 free-text price 真 reject + retry tool path
+```
+
+**怎么避** (4 步 SOP):
+1. **enumerate ALL reply paths** — deterministic regex + handler short-circuits + LLM tool calls + LLM free-text + legacy stub responses
+2. **single state authority** — broker-state-authority.js single source of truth, all paths consult
+3. **state-aware fire gating** — deterministic regex 真 LLM call 真 BEFORE firing 真 check state
+4. **post-reply invariant** — R29 'tool-rich' enforce on ALL outputs, free-text price/addr/intent 真 reject
+
+**Why**: 真 multi-path reply system 真 organic growth 真 inevitable (handler additions over months 真 cumulative paths). 真**真 single state authority** 真 architectural floor 真 prevent fragmentation reach 11+ paths each blind. R33 真 force ALL future handlers 真 register state lookups 真 lint-checkable.
+
+真 generic 适用 — 真 any agent system with multi-path response generation:
+- chatbot with deterministic intent classifier + LLM fallback + scripted FAQ paths → state authority 真 enforce all consult declared topic/persona
+- voice assistant with NLU + ASR + dialog manager → single state authority 真 prevent fragmented response paths
+
+**lint-kanet checkR33() 思路** (v1.3 真扩):
+- 静态扫 broker handler functions 真 reply paths
+- flag any reply generation (return string, return reply.send) 真 NOT preceded by getConvoState lookup
+- best-effort, 真 high-stakes broker handlers 真 manual audit 必
+
+**真 architectural alignment 真 R29-R32**:
+- R29 'LLM dumb tools rich' — tool generates content
+- R30 'Service primitive' — broker = container of asset-pair Services
+- R31 'allow-set lifecycle-bound + attacker-resistant' — invariant scope discipline
+- R32 'flow state lifecycle-bound' — transactional intent sticky
+- R33 'all reply paths consult state authority' — fragmentation prevention
+→ 真 quintet 真 KANet broker secure transactional flow 真 architectural foundation 真完整.
+
+---
+
 ## 如何扩充本档案
 
 新陷阱踩过后**立即**追加，格式保持：
