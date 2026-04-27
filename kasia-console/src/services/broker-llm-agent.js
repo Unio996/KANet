@@ -709,7 +709,7 @@ export async function handleLlmDialog(peer, message) {
     history.unshift({ role: 'system', content: stateLockAddendum });
   }
   let llm = await _callLlm(history, { peer, turn: 1 });
-  if (!llm) return '抱歉, 我这边 LLM 卡了一下, 请稍后再试. 或直接回 "买 5 KAS" / "卖 5 KAS" 走快速通道.';
+  if (!llm) return '抱歉, 我这边 LLM 卡了一下, 请稍后再试. 或直接回 "买 X KAS" / "卖 X KAS" (X 写数量) 走快速通道.';
 
   // tool call?
   if (llm.tool_calls?.length) {
