@@ -12,10 +12,14 @@
 import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const CONSOLE_URL = process.env.KANET_CONSOLE_URL || 'http://127.0.0.1:3100';
 const DB_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../data/console.db');
+// Owner 钦定 (2026-04-27 13:43): 'no log no pass' — 每个 case 跑测必须留完整 trace,
+// 没生成 trace 文件 → 自动 FAIL, 即使所有 assertion 都过. 保证审计可信.
+const TRACE_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../logs/test-runs');
 
 // ── action handlers (generic, 领域无关) ──────────────────────────
 
@@ -306,6 +310,103 @@ const assertions = {
   },
 };
 
+// ── trace persistence (Owner 13:43 钦定 'no log no pass') ───────────
+
+function _writeTraceFile(result) {
+  // 写完整 trace 到 logs/test-runs/<ts>_<case_id>.log
+  // 含: 元数据 + 每步 user msg / 完整 broker reply (no truncate) / 每条 assertion 判据
+  // 失败容忍: 写失败 throw, 由 runCase 捕到标 trace_write_failed
+  fs.mkdirSync(TRACE_DIR, { recursive: true });
+  const ts = result.started_at.replace(/[:.]/g, '-').slice(0, 19);
+  const filename = `${ts}_${result.id}.log`;
+  const filepath = path.join(TRACE_DIR, filename);
+
+  const lines = [];
+  lines.push('═══════════════════════════════════════════════════════════════');
+  lines.push(`Test Case: ${result.id}`);
+  lines.push(`Domain:    ${result.domain || '?'}`);
+  lines.push(`Started:   ${result.started_at}`);
+  lines.push(`Ended:     ${result.ended_at || '?'}`);
+  lines.push(`Verdict:   ${result.pass ? 'PASS' : 'FAIL'}` +
+             (result.warnings?.length ? ` (${result.warnings.length} warning)` : ''));
+  if (result.description) lines.push(`Description: ${result.description}`);
+  lines.push('═══════════════════════════════════════════════════════════════');
+  lines.push('');
+
+  for (const [i, s] of result.steps.entries()) {
+    lines.push(`──── Step ${i + 1}: ${s.action} (${s.duration_ms || 0}ms) ────`);
+
+    // user/broker message capture (full, no truncation)
+    if (s.result) {
+      // send_message / persona_turn 类有 message + reply
+      if (s.result.message !== undefined) {
+        lines.push(`USER MSG (verbatim):`);
+        lines.push(`> ${String(s.result.message || '').split('\n').join('\n> ')}`);
+        lines.push('');
+      } else if (s.action === 'send_message') {
+        // step input message (来自 step config, 不在 result 里)
+        // → step config 在 testCase.steps[i] 里能拿到 message
+        // 但我们在 result 里没存 step input, 这里 trace 时如果没存 input 就只输 reply
+      }
+      if (s.result.reply !== undefined) {
+        lines.push(`BROKER REPLY (verbatim, full):`);
+        lines.push(`> ${String(s.result.reply || '<empty>').split('\n').join('\n> ')}`);
+        lines.push('');
+        if (s.result.latency_ms !== undefined) {
+          lines.push(`Latency: ${s.result.latency_ms}ms`);
+        }
+        if (s.result.skip_reason) {
+          lines.push(`Skip reason: ${s.result.skip_reason}`);
+        }
+      }
+      // 其他 action 类 (query_db / wait_for_*): dump result fields
+      if (!s.result.reply && !s.result.message) {
+        const dumpable = { ...s.result };
+        delete dumpable.raw;  // raw 通常重复 reply
+        lines.push(`Action result: ${JSON.stringify(dumpable, null, 2)}`);
+        lines.push('');
+      }
+    }
+
+    if (s.error) {
+      lines.push(`ERROR: ${s.error}`);
+      lines.push('');
+    }
+
+    // assertions (每条判据 pass/fail + 失败原因)
+    if (s.assertions?.length) {
+      lines.push(`Assertions:`);
+      for (const a of s.assertions) {
+        const sym = a.pass ? '✓' : (a.severity === 'should' ? '⚠' : '✗');
+        const sev = a.severity === 'should' ? ' (warn)' : '';
+        if (a.pass) lines.push(`  ${sym} ${a.key}${sev}`);
+        else lines.push(`  ${sym} ${a.key}${sev}: ${a.msg}`);
+      }
+      lines.push('');
+    }
+    lines.push('');
+  }
+
+  // failed assertions summary
+  if (result.failed_assertions?.length) {
+    lines.push('═══ Failed assertions ═══');
+    for (const f of result.failed_assertions) {
+      lines.push(`  ${f.step} :: ${f.key}: ${f.msg}`);
+    }
+    lines.push('');
+  }
+  if (result.warnings?.length) {
+    lines.push('═══ Warnings (should-level, not blocking PASS) ═══');
+    for (const w of result.warnings) {
+      lines.push(`  ${w.step} :: ${w.key}: ${w.msg}`);
+    }
+    lines.push('');
+  }
+
+  fs.writeFileSync(filepath, lines.join('\n'), 'utf8');
+  return filepath;
+}
+
 // ── runner main ──────────────────────────────────────────────────
 
 export async function runCase(testCase) {
@@ -392,6 +493,29 @@ export async function runCase(testCase) {
   }
 
   result.ended_at = new Date().toISOString();
+
+  // Capture step input (user message) for trace — pull from testCase.steps[i].message
+  // (step input not in stepLog.result, so backfill here for trace审计 completeness)
+  for (const [i, stepLog] of result.steps.entries()) {
+    const cfg = testCase.steps?.[i] || {};
+    if (cfg.message && stepLog.result && stepLog.result.message === undefined) {
+      stepLog.result.message = cfg.message;
+    }
+  }
+
+  // 'no log no pass' (Owner 13:43 钦定): 写 trace 文件失败 → 强制 FAIL
+  try {
+    result.trace_file = _writeTraceFile(result);
+  } catch (err) {
+    result.pass = false;
+    result.failed_assertions.push({
+      step: '<trace>',
+      key: 'no_log_no_pass',
+      msg: `trace file 写失败 (${err.message}) — case 强制 FAIL 即使 assertion 都过 (Owner '别骗我' 钦定)`,
+    });
+    result.trace_file = null;
+  }
+
   return result;
 }
 
@@ -419,6 +543,12 @@ export function formatResult(result) {
   if (!result.pass) {
     lines.push('');
     lines.push(`  Failed assertions: ${result.failed_assertions.length}`);
+  }
+  // 'no log no pass' (Owner 钦定): trace 文件路径打印, 任何人 cat 即可审计
+  if (result.trace_file) {
+    lines.push(`  📁 trace: ${result.trace_file}`);
+  } else {
+    lines.push(`  📁 trace: <missing — no log no pass triggered>`);
   }
   return lines.join('\n');
 }

@@ -79,18 +79,29 @@ async function main() {
       console.log(formatResult(result));
       console.log('');
     } else {
-      console.log(`${result.pass ? '✓' : '✗'} ${result.id}`);
+      const traceShort = result.trace_file ? result.trace_file.replace(/\\/g, '/').split('/').slice(-1)[0] : 'no-trace';
+      console.log(`${result.pass ? '✓' : '✗'} ${result.id}  [${traceShort}]`);
     }
     if (result.pass) totalPass++; else totalFail++;
-    summary.push({ id: result.id, pass: result.pass, failed: result.failed_assertions });
+    summary.push({ id: result.id, pass: result.pass, failed: result.failed_assertions, trace_file: result.trace_file });
   }
 
   console.log('='.repeat(60));
   console.log(`Summary: ${totalPass} PASS / ${totalFail} FAIL / ${totalPass + totalFail} run`);
   if (totalFail > 0 && quietFlag) {
-    // 失败时打 fail case 简要给 hook 用
+    // 失败时打 fail case 简要给 hook 用 + trace 路径让审计能直接看
     for (const s of summary) {
-      if (!s.pass) console.log(`  FAIL ${s.id}: ${s.failed?.map(f => f.key).join(', ')}`);
+      if (!s.pass) {
+        console.log(`  FAIL ${s.id}: ${s.failed?.map(f => f.key).join(', ')}`);
+        if (s.trace_file) console.log(`        trace: ${s.trace_file}`);
+      }
+    }
+  }
+  // Owner 钦定 'no log no pass' — trace 文件夹 path 在末尾告诉任何人去哪审计
+  if (totalPass + totalFail > 0) {
+    const traceFiles = summary.filter(s => s.trace_file).map(s => s.trace_file);
+    if (traceFiles.length > 0) {
+      console.log(`Trace files: logs/test-runs/ (${traceFiles.length} written)`);
     }
   }
   process.exit(totalFail > 0 ? 1 : 0);
