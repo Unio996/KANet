@@ -575,6 +575,23 @@ const assertions = {
   },
 };
 
+// R-NWT-2026-04-28 (d) B phase 3: alias resolve — Sophie/broker → addr/relay_id pre-dispatch.
+// case 声明 testCase.aliases = { Sophie: { peer: addr }, broker: { relay_id: id }, ... }
+// step.from_alias / to_alias auto-resolve. recursive for parallel.actions[].
+// 不破坏现有 case (无 aliases 字段 → 早 return). J1 30 adversarial probes 用此.
+function _resolveAliases(step, aliases) {
+  if (!step || !aliases || Object.keys(aliases).length === 0) return;
+  if (step.from_alias && aliases[step.from_alias]?.peer) {
+    step.from_peer = aliases[step.from_alias].peer;
+  }
+  if (step.to_alias && aliases[step.to_alias]?.relay_id) {
+    step.to_relay_id = aliases[step.to_alias].relay_id;
+  }
+  if (Array.isArray(step.actions)) {
+    for (const sub of step.actions) _resolveAliases(sub, aliases);
+  }
+}
+
 // R-NWT-2026-04-28 (d) B phase 2: parse broker reply for direction/qty/asset/order_id.
 // 容错: 自然语言 + 'preview' formal format 都覆盖. 抓不到字段返 null (assertion 自决 skip).
 function _parseBrokerReply(reply) {
@@ -789,6 +806,10 @@ export async function runCase(testCase) {
     failed_assertions: [],
   };
   const ctx = { vars: {}, log: (m) => console.log(`  [ctx] ${m}`) };
+  // R-NWT-2026-04-28 (d) B phase 3: alias 解析层 (Sophie/Eric/broker/...) for J1 30 adversarial probes.
+  // testCase.aliases = { Sophie: { peer: addr }, broker: { relay_id: id }, ... }
+  // step.from_alias / step.to_alias auto-resolve to from_peer / to_relay_id pre-dispatch.
+  ctx._aliases = testCase.aliases || {};
 
   // optional setup
   if (testCase.setup) {
@@ -801,6 +822,7 @@ export async function runCase(testCase) {
 
   // steps
   for (const step of (testCase.steps || [])) {
+    _resolveAliases(step, ctx._aliases);  // (d) B phase 3: alias → addr/relay_id pre-dispatch (recursive for parallel.actions)
     const stepLog = {
       action: step.action,
       started_at: Date.now(),
