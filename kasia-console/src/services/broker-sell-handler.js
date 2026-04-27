@@ -6,6 +6,7 @@
 
 import { sqlite } from '../db/client.js';
 import { randomUUID } from 'crypto';
+import { setConvoStateLock, shouldDeterministicFire } from './broker-state-authority.js';
 
 const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
 // T-J2-2026-04-27 v1.1: 真扩 SELL_REGEX 同 BUY_OVERRIDE_REGEX 模式 (Owner 25:21 钦定真扩同义词)
@@ -261,6 +262,10 @@ export async function handleSellIntent(peerAddr, message) {
 
   // 解析卖意图
   // R6 T-J2-20: 删 T-NWT-17 onboarding 长文 (Owner 不要 4 关键词文案).
+  // R33: BUY flow active 时 SELL_REGEX 不 fire (防 cross-direction)
+  if (!shouldDeterministicFire(peerAddr, 'SELL_REGEX', trimmed)) {
+    return null;
+  }
   // 不命中 SELL_REGEX → return null → conversations.js fork → broker-llm-agent 接管 LLM 自然语言.
   const m = SELL_REGEX.exec(trimmed);
   if (!m) return null;
@@ -269,6 +274,20 @@ export async function handleSellIntent(peerAddr, message) {
   if (qty <= FEE_KAS) {
     _qDm(peerAddr, `太少了, 至少 ${FEE_KAS + 0.5} KAS (扣 ${FEE_KAS} KAS broker fee 后才有意义).`);
     return '';
+  }
+
+  // R33: SELL_REGEX hit = first declared SELL intent → set conversation state lock
+  try {
+    setConvoStateLock(peerAddr, {
+      direction: 'sell',
+      give_asset: 'KAS',
+      want_asset: 'USDT',
+      qty,
+      lifecycle_phase: 'fields_collection',
+    });
+  } catch (e) {
+    // R33 violation (e.g. user 在 BUY flow 中 SELL_REGEX hit) — shouldDeterministicFire 应已 gate, 这里兜底
+    console.warn(`[broker-sell] R33 setConvoStateLock blocked: ${e.message}`);
   }
 
   _pending.set(peerAddr, { qty, expires_at: Date.now() + PENDING_TTL_MS, ask_state: 'pay_addr' });

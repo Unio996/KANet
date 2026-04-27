@@ -4,6 +4,12 @@
 
 import { sqlite } from '../db/client.js';
 import { randomUUID } from 'crypto';
+import {
+  getConvoState,
+  setConvoStateLock,
+  resetConvoState,
+  shouldDeterministicFire,
+} from './broker-state-authority.js';
 
 const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
 // T-J2-2026-04-27 v1.1: 真扩 BUY_REGEX 同 BUY_OVERRIDE_REGEX (broker-sell-handler line 14) 模式
@@ -674,7 +680,21 @@ export async function handleBuyIntent(peerAddr, message) {
   // T-NWT-V2-hotfix (Owner 真测 #3 实战修): 询价 deterministic 短路, 不进 LLM (60s timeout).
   // 询价是高频 deterministic 场景 — broker 知现价, 不需要 LLM 推理.
   // 放最前: 即使 user 在 _quotes / _pendingAccepts 状态, 询价也优先回价 (中途想再问也 OK).
+  // R33: SELL flow 中问价不能给 BUY 引导, 给 SELL 视角 (broker 收购价 = mid - spread).
   if (PRICE_QUERY_REGEX.test(trimmed)) {
+    if (!shouldDeterministicFire(peerAddr, 'PRICE_QUERY', trimmed)) {
+      try {
+        const { fetchKasPrice } = await import('./market-seeder.js');
+        const p = await fetchKasPrice();
+        const msg = p && p > 0
+          ? `KAS 现价 $${p.toFixed(6)} USDT/KAS\n· broker 收购价 (你卖) $${(p * 0.99).toFixed(6)} (含 1% spread)\n· 已锁定 SELL flow, 想确认下单回 YES`
+          : `价格暂时拿不到 (上游 8 源全没响应), 稍等 1min 再问.`;
+        _qDm('dm_price_query', peerAddr, msg);
+      } catch (e) {
+        _qDm('dm_price_query', peerAddr, `价格查询暂时失败 (${e.message?.slice(0, 40)}). 稍等再问.`);
+      }
+      return '';
+    }
     try {
       const { fetchKasPrice } = await import('./market-seeder.js');
       const p = await fetchKasPrice();
@@ -858,8 +878,9 @@ export async function handleBuyIntent(peerAddr, message) {
     }
     if (CANCEL_WORDS.includes(trimmed)) {
       _quotes.delete(peerAddr);
-      _qDm('dm_quote', peerAddr, `已取消报价. 重新下单回"买 X KAS".`);
-      return '已取消报价. 真不锁资金, 真**真**随时回 "买 X KAS" 真重新下单.';
+      resetConvoState(peerAddr, 'user_cancel');  // R33
+      _qDm('dm_quote', peerAddr, `已取消报价. 重新下单回"买/卖 X KAS".`);
+      return '已取消报价. 不锁资金, 随时回 "买/卖 X KAS" 重新下单.';
     }
   }
 
@@ -882,6 +903,7 @@ export async function handleBuyIntent(peerAddr, message) {
       return `${paidPicks.length}/${cancelable.picks.length} 笔已付款不能取消 (USDT 已上链, broker 自动 deliver KAS).${unpaidCount > 0 ? ` 未付的 ${unpaidCount} 笔等过期自动释放 (30min).` : ''} 有问题回我.`;
     }
     _pendingAccepts.delete(peerAddr);
+    resetConvoState(peerAddr, 'user_cancel');  // R33
     _qDm('dm_quote', peerAddr, `✓ 订单已取消 (${cancelable.total_kas} KAS / ${cancelable.total_usdt.toFixed(6)} USDT). 不锁资金, 重新下单回 "买/卖 X KAS".`);
     return `✓ 订单已取消 (${cancelable.total_kas} KAS / 全 unpaid). 你 USDT 没动. 重新下单回 "买/卖 X KAS".`;
   }
@@ -922,6 +944,11 @@ export async function handleBuyIntent(peerAddr, message) {
         return '';
       }
     }
+  }
+
+  // R33: SELL flow active 时 BUY_REGEX 不 fire (B1/B3 fix - 防 cross-direction hallucinate)
+  if (!shouldDeterministicFire(peerAddr, 'BUY_REGEX', trimmed)) {
+    return null;  // SELL flow 中, fall to handleSellIntent OR LLM 处理 (LLM 看 state lock 系统 prompt)
   }
 
   // 解析买意图 → 拼单 + 报价 DM 入队

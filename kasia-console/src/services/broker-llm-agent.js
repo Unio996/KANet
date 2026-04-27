@@ -4,6 +4,11 @@
 
 import { sqlite } from '../db/client.js';
 import { listAssets, listChainsFor, getAsset } from './asset-registry.js';
+import {
+  setConvoStateLock,
+  llmSystemPromptStateLock,
+  validateLlmReply,
+} from './broker-state-authority.js';
 
 const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
 
@@ -594,6 +599,23 @@ export async function handleLlmDialog(peer, message) {
       // 真 lifecycle-bound lock for R19 lookup + _address_change_attempt detection turn 2+.
       // 真 expire by TTL 30min OR user 'YES'/'NO' (broker-buy-handler clears _pendingPreview, _pendingFields TTL).
       _setPendingFields(peer, merged);
+      // R33: setConvoStateLock — direction 不可变, fresh.direction 跟 prev 不同 throws
+      try {
+        setConvoStateLock(peer, {
+          direction: merged.direction,
+          give_asset: merged.give_asset || 'KAS',
+          want_asset: merged.direction === 'buy' ? merged.give_asset : 'USDT',
+          qty: merged.qty,
+          pay_chain: merged.chain,
+          recv_address: merged.address,
+          lifecycle_phase: 'fields_collection',
+        });
+      } catch (e) {
+        if (e.code === 'CONVO_STATE_DIRECTION_LOCK') {
+          return `订单方向已锁定 ${e.locked_direction.toUpperCase()}. 改方向请回 "NO" 取消订单, 重新下单告诉我新方向.`;
+        }
+        console.warn(`[broker-llm R33] setConvoStateLock err: ${e.message}`);
+      }
       const toolResult = await _executeTool(peer, 'preview_order', {
         direction: merged.direction,
         qty: merged.qty,
@@ -605,11 +627,30 @@ export async function handleLlmDialog(peer, message) {
     }
     // 字段不齐 → save state + 反问 missing field (deterministic, 不调 LLM)
     _setPendingFields(peer, merged);
+    // R33: 部分字段也 lock (direction 已 declared)
+    try {
+      setConvoStateLock(peer, {
+        direction: merged.direction,
+        give_asset: merged.give_asset || null,
+        qty: merged.qty || null,
+        pay_chain: merged.chain || null,
+        lifecycle_phase: 'fields_collection',
+      });
+    } catch (e) {
+      if (e.code === 'CONVO_STATE_DIRECTION_LOCK') {
+        return `订单方向已锁定 ${e.locked_direction.toUpperCase()}. 改方向请回 "NO" 取消订单, 重新下单告诉我新方向.`;
+      }
+    }
     return _askMissingField(merged, lang);
   }
 
   // 没 direction (current msg 也没 prev 也没) → fall to LLM (用户 'YES' / 'NO' / 闲聊 / 'maker 是谁?')
   history.push({ role: 'user', content: message });
+  // R33: inject conversation state lock into LLM system msg if state active
+  const stateLockAddendum = llmSystemPromptStateLock(peer);
+  if (stateLockAddendum) {
+    history.unshift({ role: 'system', content: stateLockAddendum });
+  }
   let llm = await _callLlm(history, { peer, turn: 1 });
   if (!llm) return '抱歉, 我这边 LLM 卡了一下, 请稍后再试. 或直接回 "买 5 KAS" / "卖 5 KAS" 走快速通道.';
 
@@ -629,5 +670,17 @@ export async function handleLlmDialog(peer, message) {
     }
   }
 
-  return llm.content?.trim() || '我在听. 你想买 KAS 还是卖 KAS?';
+  // R33: validate LLM reply 真**真**真 cross-direction hallucinate / fake price
+  const replyText = llm.content?.trim() || '我在听. 你想买 KAS 还是卖 KAS?';
+  try {
+    const v = await validateLlmReply(peer, replyText);
+    if (!v.ok) {
+      console.error(`[broker-llm R33] LLM reply violations: ${v.violations.join(' | ')}`);
+      // 真 violation 真 fall back 真 deterministic safe message
+      return '抱歉, broker 输出异常 (R33 内部拦截). 请回 NO 取消订单或重新下单告诉我数量+链.';
+    }
+  } catch (e) {
+    console.warn(`[broker-llm R33] validateLlmReply err: ${e.message}`);
+  }
+  return replyText;
 }
