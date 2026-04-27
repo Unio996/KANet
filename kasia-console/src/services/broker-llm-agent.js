@@ -53,7 +53,10 @@ preview_order tool with give_asset='USDC' (不 default KAS!). 'buy 5 KAS' → gi
 
 # 4 步流程 (Owner 19:55+ 钦定: 画像后台 + 自然话 + 最后画像确认)
 1. **方向**: 见上铁律
-2. **字段收集**: 缺一问一. 买 → 数量 + 链. 卖 → 数量 + 链 + 收款地址
+2. **字段收集**: 缺一问一.
+   - **买 KAS** → 数量 + 链 (USDC/USDT 付款链, 收 KAS 用 user kasia 自动)
+   - **买 stable (USDC/USDT)** → 数量 + 付款链 (broker 收 USDT) + **EVM 收款地址 0x... 42 位** (broker 把 stable 发到这地址)
+   - **卖** → 数量 + 链 + 收款地址 (你 USDT 收哪)
 3. **画像确认 (议 B)**: 字段齐 → 必调 \`preview_order\` tool (不调 finalize_order).
    **关键铁律 (J1 67903c5b critical fix): tool 返 \`preview_text\` 字段, 你必须 100% 原样转发,
    不准改一个字符, 不准缩写地址, 不准编 placeholder 0x1234..., 不准用 markdown 重排版**.
@@ -121,7 +124,7 @@ const TOOLS = [
           give_asset: { type: 'string', description: 'asset symbol user 想买/卖 (KAS / USDT / USDC / 等 supported list 见 SYSTEM_PROMPT). 默认 KAS 真 backward compat.' },
           qty: { type: 'number', description: 'asset 数量 (>= asset.minQty)' },
           chain: { type: 'string', enum: ['bnb', 'polygon', 'sol', 'tron'] },
-          address: { type: 'string', description: '卖路径必填收款地址' },
+          address: { type: 'string', description: '买 stable (USDC/USDT) 必填 user EVM 收款地址 (0x...42位); 买 KAS 不填 (broker 用 user kasia); 卖必填 user 收 USDT 地址 (EVM/SOL/TRON).' },
         },
         required: ['direction', 'qty', 'chain'],
       },
@@ -139,7 +142,7 @@ const TOOLS = [
           give_asset: { type: 'string', description: 'asset symbol user 想买/卖. 默认 KAS. 必跟 preview_order 时同 asset.' },
           qty: { type: 'number', description: 'asset 数量 (>= asset.minQty)' },
           chain: { type: 'string', enum: ['bnb', 'polygon', 'sol', 'tron'], description: '买 = 你付 USDT 的链; 卖 = 你收 USDT 的链' },
-          address: { type: 'string', description: '卖路径必填 (你 USDT 收款地址 EVM 0x..42 位 / SOL / TRON 格式). 买路径可省.' },
+          address: { type: 'string', description: '买 stable (USDC/USDT) 必填 user EVM 收款地址 (0x...42位, broker 把 stable 发到这地址); 买 KAS 不填 (broker 用 user kasia); 卖必填 (你 USDT 收哪 EVM/SOL/TRON 格式).' },
         },
         required: ['direction', 'qty', 'chain'],
       },
@@ -230,8 +233,11 @@ async function _executeTool(peer, name, args) {
     // T-NWT-2026-04-27 v1.1 Phase E: give_asset propagation (default 'KAS' backward compat).
     const { direction, qty, chain, address, give_asset = 'KAS' } = args || {};
     if (direction === 'buy') {
+      // T-J1-2026-04-27 v1.1 Bug-Y wire fix (真测发现 broker preview 真显 'kaspa:' addr 真错):
+      // 真传 receive_address (LLM args.address) → buyPreview 真 render 真 user EVM 收款 addr.
+      // 买 KAS receive_address null OK (template 用 user_kasia). 买 stable null → ⚠ 提示传 EVM addr.
       const { buyPreview } = await import('./broker-buy-handler.js');
-      return buyPreview({ user_kasia: peer, qty, pay_chain: chain, give_asset });
+      return buyPreview({ user_kasia: peer, qty, pay_chain: chain, give_asset, receive_address: address || null });
     }
     if (direction === 'sell') {
       // 卖 preview v1.1 留 (sellPreview 待加). 当前 fallback finalize_order 真路径.
@@ -244,8 +250,10 @@ async function _executeTool(peer, name, args) {
     // T-NWT-2026-04-27 v1.1 Phase E: give_asset propagation (default 'KAS' backward compat).
     const { direction, qty, chain, address, give_asset = 'KAS' } = args || {};
     if (direction === 'buy') {
+      // T-J1-2026-04-27 v1.1 Bug-Y wire fix: 真传 receive_address (买 stable USDC/USDT 真要 user EVM addr
+      // → broker 真 deliver 时 send 到此 addr; 买 KAS 真 null → broker 真用 user_kasia auto-resolve).
       const { finalizeBuy } = await import('./broker-buy-handler.js');
-      return finalizeBuy({ user_kasia: peer, qty, pay_chain: chain, give_asset });
+      return finalizeBuy({ user_kasia: peer, qty, pay_chain: chain, give_asset, receive_address: address || null });
     }
     if (direction === 'sell') {
       if (!address) return { ok: false, error: '卖路径必填 recv_address' };
