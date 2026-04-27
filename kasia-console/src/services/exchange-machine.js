@@ -765,39 +765,78 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
       const deliveringOffer = transition(offer_id, 'delivering', {});
       console.log(`[exchange] offer ${offer_id.slice(0,8)} payment verified → delivering (${vr.actualAmount} USDT, ${vr.confirmations}/${vr.required} conf)`);
 
-      // Auto-deliver asset to taker (SELL path: give_asset=KAS)
-      if (deliveringOffer?.give_asset === 'KAS' && deliveringOffer.taker) {
+      // T-NWT-2026-04-27 Bug-Z2 fix (J1 25:24 真发现): auto-deliver 真 generic (USDC/USDT/etc)
+      // 老 hardcode `give_asset === 'KAS'` → USDC maker 真 deliver 真不 trigger = USDC e2e 真断.
+      // 真 fix: condition generic + KAS path 用现 sendCommandAsync transfer (backward compat),
+      // 非 KAS 路径用 J1 settler-router sendAsset generic (USDC/USDT × 7 EVM chain).
+      if (deliveringOffer?.give_asset && deliveringOffer.taker) {
         const deliveryAgent = sqlite.prepare('SELECT id, name FROM relay_nodes WHERE address = ?').get(deliveringOffer.maker);
         if (deliveryAgent) {
+          const give_asset = deliveringOffer.give_asset;
+          const give_chain = deliveringOffer.give_chain || 'kaspa';
           const MAX_DELIVERY_ATTEMPTS = 3;
           const DELIVERY_RETRY_MS = 10_000;
           let deliveryTxId = null;
 
-          // T-22-05 retail-proxy: accept 可带 verification_meta.receive_address 指定第三方 KAS 收件地址
-          // 未指定 → 默认发给 offer.taker (原 MM 行为保留兼容)
-          let deliveryTarget = deliveringOffer.taker;
-          try {
-            const dmeta = JSON.parse(deliveringOffer.verification_meta || '{}');
-            if (dmeta.receive_address && typeof dmeta.receive_address === 'string'
-                && dmeta.receive_address.startsWith('kaspa:')) {
-              deliveryTarget = dmeta.receive_address;
-              console.log(`[exchange] delivery routed to third-party ${deliveryTarget.slice(-12)} (taker=${deliveringOffer.taker.slice(-12)})`);
-            }
-          } catch {}
+          // T-22-05 retail-proxy: accept 可带 verification_meta.receive_address 指定第三方收件地址
+          // KAS path: receive_address 必 kaspa: prefix (KAS 真 native chain).
+          // 非 KAS path: receive_address 真 EVM/Sol/Tron addr (跟 give_chain 匹), 或 fallback taker_payment_address.
+          let deliveryTarget;
+          if (give_asset === 'KAS') {
+            deliveryTarget = deliveringOffer.taker; // default kaspa addr
+            try {
+              const dmeta = JSON.parse(deliveringOffer.verification_meta || '{}');
+              if (dmeta.receive_address && typeof dmeta.receive_address === 'string'
+                  && dmeta.receive_address.startsWith('kaspa:')) {
+                deliveryTarget = dmeta.receive_address;
+                console.log(`[exchange] KAS delivery routed to third-party ${deliveryTarget.slice(-12)} (taker=${deliveringOffer.taker.slice(-12)})`);
+              }
+            } catch {}
+          } else {
+            // 非 KAS (USDC/USDT/etc): 真 user EVM addr — 真 from taker_payment_address (broker accept_v1 真 set 跟 user receive_address)
+            deliveryTarget = deliveringOffer.taker_payment_address;
+            try {
+              const dmeta = JSON.parse(deliveringOffer.verification_meta || '{}');
+              if (dmeta.receive_address && typeof dmeta.receive_address === 'string'
+                  && !dmeta.receive_address.startsWith('kaspa:')) {
+                deliveryTarget = dmeta.receive_address;
+              }
+            } catch {}
+          }
+
+          if (!deliveryTarget) {
+            console.error(`[exchange] Bug-Z2 no deliveryTarget for ${give_asset} offer ${offer_id.slice(0,8)} (taker=${deliveringOffer.taker?.slice(-12)}, taker_pay_addr=${deliveringOffer.taker_payment_address?.slice(-12) || 'null'})`);
+            return;
+          }
 
           for (let attempt = 1; attempt <= MAX_DELIVERY_ATTEMPTS; attempt++) {
             try {
-              const { sendCommandAsync } = await import('./relay-manager.js');
-              const sendResult = await sendCommandAsync(deliveryAgent.id, {
-                type: 'transfer',
-                target: deliveryTarget,
-                amount: String(deliveringOffer.give_amount),
-              });
-              deliveryTxId = sendResult?.txId;
-              console.log(`[exchange] KAS delivery attempt ${attempt}: ${deliveringOffer.give_amount} KAS → ${deliveryTarget.slice(-12)} TX: ${deliveryTxId || '?'}`);
-              break; // success
+              if (give_asset === 'KAS') {
+                // KAS 走现 relay transfer (backward compat 不动)
+                const { sendCommandAsync } = await import('./relay-manager.js');
+                const sendResult = await sendCommandAsync(deliveryAgent.id, {
+                  type: 'transfer',
+                  target: deliveryTarget,
+                  amount: String(deliveringOffer.give_amount),
+                });
+                deliveryTxId = sendResult?.txId;
+              } else {
+                // T-NWT-2026-04-27 Bug-Z2 fix: 非 KAS 走 J1 settler-router sendAsset generic
+                const { sendAsset } = await import('./settler-router.js');
+                const sendResult = await sendAsset({
+                  asset: give_asset,
+                  chain: give_chain,
+                  to: deliveryTarget,
+                  qty: parseFloat(deliveringOffer.give_amount),
+                  relayId: deliveryAgent.id,
+                });
+                deliveryTxId = sendResult?.txHash || sendResult?.txId;
+                if (!deliveryTxId && sendResult?.error) throw new Error(sendResult.error);
+              }
+              console.log(`[exchange] ${give_asset} delivery attempt ${attempt}: ${deliveringOffer.give_amount} ${give_asset} → ${deliveryTarget.slice(-12)} TX: ${deliveryTxId || '?'}`);
+              if (deliveryTxId) break; // success
             } catch (err) {
-              console.error(`[exchange] KAS delivery attempt ${attempt}/${MAX_DELIVERY_ATTEMPTS} FAILED: ${err.message}`);
+              console.error(`[exchange] ${give_asset} delivery attempt ${attempt}/${MAX_DELIVERY_ATTEMPTS} FAILED: ${err.message}`);
               if (attempt < MAX_DELIVERY_ATTEMPTS) {
                 await new Promise(r => setTimeout(r, DELIVERY_RETRY_MS));
               }
