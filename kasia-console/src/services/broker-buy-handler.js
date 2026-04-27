@@ -230,13 +230,17 @@ async function _enqueue(kind, peer, payload) {
   return enqueue({ kind, peer, payload });
 }
 
-function _enqueueAccept(offerId, peerAddr, payChain) {
+function _enqueueAccept(offerId, peerAddr, payChain, evmRecvAddr = null) {
+  // T-J2-2026-04-27 v1.2 (c) — 加 evm_recv_address 字段, 解决 USDC delivery silent fail (J1 12:13 真发现).
+  // 老 receive_address 真 user kasia (KAS path 用), 新 evm_recv_address 真 user EVM (USDC/USDT path 用).
+  // backward compat: 老 client 真没 evm_recv_address 真 KAS path 真 still work.
   const payload = {
     t: 'kanet_exchange_accept_v1',
     offer_id: offerId,
     selected_chain: payChain,
     payment_asset: 'usdt',
     receive_address: peerAddr,
+    evm_recv_address: evmRecvAddr || null,
   };
   return _enqueue('accept_v1', peerAddr, { channel: 'kanet-exchange', message: JSON.stringify(payload) });
 }
@@ -465,8 +469,11 @@ export async function finalizeBuy({ user_kasia, qty, pay_chain, give_asset = 'KA
   const merged = await _aggregateWithFallback(qty, payChain, give_asset);
   if (!merged.ok) return { ok: false, error: merged.error, available: merged.available };
 
+  // T-J2-2026-04-27 v1.2 (c): 真传 EVM addr (买 stable 真 user EVM 收款 addr) 进 accept_v1
+  // 真 receive_address 真 backward compat (= user kasia, KAS path 真用), evm_recv_address 真 stable 真用.
+  const evmRecvForAccept = (give_asset !== 'KAS' && receive_address && !receive_address.startsWith('kaspa:')) ? receive_address : null;
   for (const p of merged.picks) {
-    await _enqueueAccept(p.id, user_kasia, payChain);
+    await _enqueueAccept(p.id, user_kasia, payChain, evmRecvForAccept);
     _recordAccept({ offerId: p.id, userPeer: user_kasia, qty: p.take_qty, quotedUsdt: p.take_usdt.toFixed(6), payChain, acceptTx: null });
   }
   // T-J2-26 (Owner 真测 04-26 12:18 — Bug A 静默根修):

@@ -311,10 +311,14 @@ export function processAccept(msg) {
     .digest('hex');
 
   // Write taker_chain + taker_payment_address from accept message (cross-node sync)
-  if (msg.selected_chain || msg.receive_address) {
+  // T-J2-2026-04-27 v1.2 (c): 真存 evm_recv_address 进 verification_meta (USDC delivery 真用).
+  // accept_v1 真 receive_address = user kasia (KAS path), evm_recv_address = user EVM (stable path).
+  // exchange-machine auto-deliver Bug-Z2 fix 真 lookup verification_meta.evm_recv_address (stable) OR taker_payment_address (KAS).
+  if (msg.selected_chain || msg.receive_address || msg.evm_recv_address) {
     const meta = JSON.parse(offer.verification_meta || '{}');
     if (msg.selected_chain) meta.receive_chain = msg.selected_chain;
     if (msg.receive_address) meta.receive_address = msg.receive_address;
+    if (msg.evm_recv_address) meta.evm_recv_address = msg.evm_recv_address;
     sqlite.prepare('UPDATE exchange_offers SET taker_chain = ?, taker_payment_address = ?, verification_meta = ? WHERE id = ?')
       .run(msg.selected_chain || null, msg.receive_address || null, JSON.stringify(meta), offer.id);
   }
@@ -793,11 +797,19 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
               }
             } catch {}
           } else {
-            // 非 KAS (USDC/USDT/etc): 真 user EVM addr — 真 from taker_payment_address (broker accept_v1 真 set 跟 user receive_address)
-            deliveryTarget = deliveringOffer.taker_payment_address;
+            // 非 KAS (USDC/USDT/etc): 真 user EVM addr.
+            // T-J2-2026-04-27 v1.2 (c) priority lookup:
+            //   1. verification_meta.evm_recv_address (J2 v1.2 (c) 真 fix, stable 真 explicit EVM addr)
+            //   2. taker_payment_address (legacy, 老 path 可能存 kasia 误用)
+            //   3. dmeta.receive_address (老 fallback, 排除 kaspa: prefix)
             try {
               const dmeta = JSON.parse(deliveringOffer.verification_meta || '{}');
-              if (dmeta.receive_address && typeof dmeta.receive_address === 'string'
+              if (dmeta.evm_recv_address && typeof dmeta.evm_recv_address === 'string'
+                  && dmeta.evm_recv_address.startsWith('0x')) {
+                deliveryTarget = dmeta.evm_recv_address;
+              } else if (deliveringOffer.taker_payment_address && deliveringOffer.taker_payment_address.startsWith('0x')) {
+                deliveryTarget = deliveringOffer.taker_payment_address;
+              } else if (dmeta.receive_address && typeof dmeta.receive_address === 'string'
                   && !dmeta.receive_address.startsWith('kaspa:')) {
                 deliveryTarget = dmeta.receive_address;
               }
