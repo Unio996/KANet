@@ -213,6 +213,42 @@ function checkR33(filepath, content) {
   }
 }
 
+// ── R33b: user-supplied conditions retention pipeline (4 step, J1 NWT GAP B + J2 真根因) ──
+// 真 ANTI-PATTERNS.md '规则 33b': user 条件 (limit_price / refund_timeout_min) 必经 4 步 pipeline.
+// (1) regex extract in _extractFieldsFromMsg
+// (2) tool schema 含 optional conditions params
+// (3) 透传 preview function (buyPreview/sellPreview signature 含 conditions)
+// (4) preview_text echo accept/reject (broker 决策可见)
+//
+// 真 lint heuristic: 检查 4 步至少头 3 步在源码可见 (step 4 是 runtime 行为, 不静态可查).
+// 真 J1 6e77cb55 + 226da7ac + 9bc6c3aa 真**真**真已落地 — 此 lint 防 future 扩 SOL/TRON/USDC 时
+// 漏一步重蹈 B3b silent drop 覆辙.
+function checkR33b(filepath, content) {
+  // broker-llm-agent: 真**真**真 _extractFieldsFromMsg 真 contain conditions extract regex
+  if (/broker-llm-agent\.js$/.test(filepath)) {
+    const hasExtractConditions = /limit_price\s*[:?]?\s*(?:limitMatch|fresh\.limit_price|prev\.limit_price)|挂单价|限价/.test(content);
+    const hasToolSchemaConditions = /(?:limit_price|refund_timeout_min)\s*:\s*\{\s*type/.test(content);
+    if (!hasExtractConditions) {
+      violate('R33b', `[ANTI-PATTERNS R33b] broker-llm-agent.js _extractFieldsFromMsg 必 extract user 条件 (limit_price 等). Pipeline step 1 missing — 重蹈 B3b silent drop. 加 regex 匹 '挂单价/限价/不低于' 等. R33b doc: docs/ANTI-PATTERNS.md '规则 33b'.`, filepath, 1);
+    }
+    if (!hasToolSchemaConditions) {
+      violate('R33b', `[ANTI-PATTERNS R33b] broker-llm-agent.js TOOLS preview_order schema 必含 limit_price + refund_timeout_min optional params. Pipeline step 2 missing.`, filepath, 1);
+    }
+  }
+  // broker-buy-handler / broker-sell-handler: preview function signature 真 contain conditions destructured
+  if (/broker-(buy|sell)-handler\.js$/.test(filepath)) {
+    // 真**真**真 export async function buyPreview({...}) 真 destructure 真**真**真 contain 'limit_price'
+    const previewFnRe = /export\s+async\s+function\s+(?:buy|sell)Preview\s*\(\s*\{[\s\S]{0,800}?\}/;
+    const m = previewFnRe.exec(content);
+    if (m) {
+      const sig = m[0];
+      if (!/limit_price/.test(sig) || !/refund_timeout_min/.test(sig)) {
+        violate('R33b', `[ANTI-PATTERNS R33b] ${filepath.match(/broker-(buy|sell)-handler/)[0]}.js preview function signature 必 destructure limit_price + refund_timeout_min (R33b pipeline step 3). 漏 = silent drop. R33b doc: docs/ANTI-PATTERNS.md.`, filepath, 1);
+      }
+    }
+  }
+}
+
 // ── 跑 ──
 for (const fp of targets) {
   let content;
@@ -222,6 +258,7 @@ for (const fp of targets) {
   checkR6(fp, content);
   checkR19(fp, content);
   checkR33(fp, content);
+  checkR33b(fp, content);
 }
 checkR10();
 
