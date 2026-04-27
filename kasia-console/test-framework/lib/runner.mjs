@@ -500,7 +500,97 @@ const assertions = {
     // Simple delta check (not full reconcile) — for advanced use chain_reconcile assertion
     return { pass: true, expected, actual: { pre, post }, msg: 'snapshot captured (use chain_reconcile for full diff)' };
   },
+
+  // R-NWT-2026-04-28 (d) B phase 2: cross-peer state isolation assertions for parallel results.
+  // step_result here is the parallel action result: { results: [{status, peer, reply, ...}], total_latency_ms }
+  // expected = { peers: [{addr, want_qty, want_direction, want_addr_in_reply?}, ...] } per-peer expected fields.
+  // null/empty replies skipped (J1 nudge #3) — no_state_corruption focuses on what broker DID reply.
+  no_state_corruption(step_result, expected, ctx) {
+    const results = step_result.results || [];
+    const peers = expected.peers || [];
+    const errors = [];
+    for (const exp of peers) {
+      const r = results.find(x => x.peer === exp.addr);
+      if (!r || r.status !== 'fulfilled' || !r.reply) continue;  // skip null/rejected per J1 nudge #3
+      const parsed = _parseBrokerReply(r.reply);
+      if (exp.want_qty != null && parsed.qty != null && parsed.qty !== exp.want_qty) {
+        errors.push(`peer ${exp.addr.slice(-12)} got qty ${parsed.qty} (want ${exp.want_qty})`);
+      }
+      if (exp.want_direction && parsed.direction && parsed.direction !== exp.want_direction) {
+        errors.push(`peer ${exp.addr.slice(-12)} got direction '${parsed.direction}' (want '${exp.want_direction}')`);
+      }
+    }
+    return errors.length === 0
+      ? { pass: true, expected, actual: 'no corruption', msg: `${results.length} replies validated` }
+      : { pass: false, expected, actual: results.map(r => ({ peer: r.peer?.slice(-12), reply_head: (r.reply || '').slice(0, 60) })), msg: errors.join('; ') };
+  },
+
+  each_peer_distinct_offer(step_result, _expected, ctx) {
+    const results = (step_result.results || []).filter(r => r.status === 'fulfilled' && r.reply);
+    const orderIds = results.map(r => {
+      const m = (r.reply || '').match(/订单\s*[#＃]?([a-f0-9]{4,8})/i) || (r.reply || '').match(/offer[_\s]*id[:\s]+([a-f0-9-]{6,})/i);
+      return m ? m[1] : null;
+    }).filter(Boolean);
+    const unique = new Set(orderIds);
+    return orderIds.length === 0 || unique.size === orderIds.length
+      ? { pass: true, expected: 'distinct or N/A', actual: { order_ids: orderIds, unique_count: unique.size } }
+      : { pass: false, expected: 'distinct order ids per peer', actual: { order_ids: orderIds, unique_count: unique.size }, msg: `${orderIds.length - unique.size} duplicate order id(s)` };
+  },
+
+  no_amount_swap(step_result, expected, ctx) {
+    // expected.peers = [{addr, own_qty, foreign_qtys: [other_peer_qty, ...]}, ...]
+    const results = step_result.results || [];
+    const errors = [];
+    for (const exp of expected.peers || []) {
+      const r = results.find(x => x.peer === exp.addr);
+      if (!r || r.status !== 'fulfilled' || !r.reply) continue;
+      for (const foreignQty of exp.foreign_qtys || []) {
+        const pat = new RegExp(`(买|卖|sell|buy)\\s*${foreignQty}\\s*(KAS|USDT|USDC)`, 'i');
+        if (pat.test(r.reply)) {
+          errors.push(`peer ${exp.addr.slice(-12)} reply contains foreign qty ${foreignQty} (own qty=${exp.own_qty})`);
+        }
+      }
+    }
+    return errors.length === 0
+      ? { pass: true, expected, actual: 'no swap', msg: `${results.length} replies scanned` }
+      : { pass: false, expected, actual: errors, msg: errors.join('; ') };
+  },
+
+  no_address_swap(step_result, expected, ctx) {
+    // expected.peers = [{addr, foreign_addrs: [other_peer_evm_or_kaspa_addr, ...]}, ...]
+    const results = step_result.results || [];
+    const errors = [];
+    for (const exp of expected.peers || []) {
+      const r = results.find(x => x.peer === exp.addr);
+      if (!r || r.status !== 'fulfilled' || !r.reply) continue;
+      for (const foreignAddr of exp.foreign_addrs || []) {
+        if (foreignAddr && r.reply.includes(foreignAddr)) {
+          errors.push(`peer ${exp.addr.slice(-12)} reply contains foreign addr ${foreignAddr.slice(0, 14)}...`);
+        }
+      }
+    }
+    return errors.length === 0
+      ? { pass: true, expected, actual: 'no swap', msg: `${results.length} replies scanned` }
+      : { pass: false, expected, actual: errors, msg: errors.join('; ') };
+  },
 };
+
+// R-NWT-2026-04-28 (d) B phase 2: parse broker reply for direction/qty/asset/order_id.
+// 容错: 自然语言 + 'preview' formal format 都覆盖. 抓不到字段返 null (assertion 自决 skip).
+function _parseBrokerReply(reply) {
+  const r = String(reply || '');
+  const directionMatch = r.match(/方向[:：]\s*([买卖])|(买|卖|sell|buy)\s*\d+\s*(KAS|USDT|USDC)/i);
+  let direction = null;
+  if (directionMatch) {
+    const d = (directionMatch[1] || directionMatch[2] || '').toLowerCase();
+    if (d === '买' || d === 'buy') direction = 'buy';
+    else if (d === '卖' || d === 'sell') direction = 'sell';
+  }
+  const qtyMatch = r.match(/(?:数量[:：]\s*|[买卖sb][uell]*\s*)(\d+(?:\.\d+)?)\s*(?:KAS|USDT|USDC)/i);
+  const qty = qtyMatch ? parseFloat(qtyMatch[1]) : null;
+  const orderIdMatch = r.match(/订单\s*[#＃]?([a-f0-9]{4,8})/i) || r.match(/offer[_\s]*id[:\s]+([a-f0-9-]{6,})/i);
+  return { direction, qty, order_id: orderIdMatch ? orderIdMatch[1] : null };
+}
 
 // ── trace persistence (Owner 13:43 钦定 'no log no pass') ───────────
 
