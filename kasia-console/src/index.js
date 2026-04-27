@@ -371,6 +371,16 @@ startCompletionWatcher();
 import { start as startBscIncomingWatcher } from './services/bsc-incoming-watcher.js';
 startBscIncomingWatcher();
 
+// NWT-V3 (2026-04-27): monitor — 频道事件监听与告警规则引擎
+// NWT 19:35 emergency disable: monitor-service.js + monitor-dashboard.js 当前 WIP 含语法 bug 阻 console 启
+//   monitor-service.js:216 `lastTs` 重复声明 (我先 hotfix 改 latestTs)
+//   monitor-dashboard.js:240 template literal `class=` 引号问题 (待原作者修)
+// 两 import 暂禁, 等原作者 fix 后恢复. 不修 WIP 代码, 只解阻塞.
+// import { startMonitor, stopMonitor } from './services/monitor-service.js';
+// import { registerMonitorRoutes } from './api/monitor-dashboard.js';
+// registerMonitorRoutes(fastify);
+// startMonitor();
+
 // Graceful shutdown — stop all child processes
 async function shutdown() {
   console.log('[kasia-console] shutting down...');

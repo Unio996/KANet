@@ -261,6 +261,17 @@ elif [ -f "$KANET_ROOT/scripts/channel-bridge.mjs" ]; then
   ok "channel-bridge 就绪  (PID $CH_BRIDGE_PID, 7 channels)"
 fi
 
+# test-cron — 定时跑 test-framework, 失败 broadcast dev-coord (Owner 钦定 4 台阶 #4)
+# 默认 6h 周期, 启动时立即跑一次. 配置通过 env: KANET_TEST_CRON_INTERVAL_MS / KANET_TEST_CRON_NO_BOOT_RUN=1
+if proc_running "test-cron\.mjs"; then
+  ok "test-cron 已在运行"
+elif [ -f "$CONSOLE_DIR/scripts/test-cron.mjs" ]; then
+  (cd "$CONSOLE_DIR" && node scripts/test-cron.mjs > "$LOG_DIR/test-cron.log" 2>&1) &
+  TEST_CRON_PID=$!
+  echo "$TEST_CRON_PID" > "$PID_DIR/test-cron.pid"
+  ok "test-cron 就绪  (PID $TEST_CRON_PID, 6h 周期, boot 跑一次)"
+fi
+
 # ── IB Gateway ──────────────────────────────────────────────────────────────
 # 不随 KANet 自动启动。需要时手动运行 IB Gateway。
 
