@@ -259,6 +259,22 @@ export async function handleSellIntent(peerAddr, message) {
   const trimmed = (message || '').trim();
   const pending = _pending.get(peerAddr);
 
+  // R33 b iter5b (NWT 90b29e39 Bug-Z13 trace 实证): EARLIEST setConvoStateLock for SELL intent.
+  // 跟 handleBuyIntent 同 entry-pattern. _detectIntent='sell' → 真**就 lock**, 不**等** SELL_REGEX hit.
+  if (trimmed) {
+    try {
+      const { _detectIntent } = await import('./broker-llm-agent.js');
+      const intent = _detectIntent(trimmed);
+      if (intent === 'sell') {
+        setConvoStateLock(peerAddr, { direction: 'sell', lifecycle_phase: 'fields_collection' });
+      }
+    } catch (e) {
+      if (e.code === 'CONVO_STATE_DIRECTION_LOCK') {
+        return `订单方向已锁定 ${e.locked_direction.toUpperCase()}. 改方向请回 "NO" 取消订单, 重新下单告诉我新方向.`;
+      }
+    }
+  }
+
   // T-J1-19l: 用户在 sell pending 中发 buy intent → 自动 release pending, 让 buy-handler 接管
   if (pending && Date.now() < pending.expires_at && BUY_OVERRIDE_REGEX.test(trimmed)) {
     _pending.delete(peerAddr);

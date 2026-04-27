@@ -206,12 +206,20 @@ export async function validateLlmReply(peer, replyText) {
   const state = getConvoState(peer);
   const violations = [];
 
-  // Direction sanity
+  // Direction sanity — formal preview AND natural language coverage
+  // R33 b iter5 (NWT 30940d86 Bug-Z13 trace 实证扩): LLM hallucinate 真**真 自然语言 '你想卖' /
+  // '卖出' / '你是要卖' 形式不带 formal '方向:' prefix. 真**真**真 catch 必扩 regex.
   if (state?.locked) {
     const opposite = state.direction === 'buy' ? 'sell' : 'buy';
     const oppositeChinese = state.direction === 'buy' ? '卖' : '买';
-    const re = new RegExp(`方向[:：]\\s*(${opposite}|${oppositeChinese})`, 'i');
-    if (re.test(replyText)) violations.push(`R33-direction: state=${state.direction}, reply implies ${opposite}`);
+    // formal preview
+    const formalRe = new RegExp(`方向[:：]\\s*(${opposite}|${oppositeChinese})`, 'i');
+    // 自然语言 broker hallucinate patterns (Bug-Z13 实证)
+    const naturalChinese = new RegExp(`(?:你想|你是要|你要|想|准备)${oppositeChinese}|${oppositeChinese}(?:出|单|掉)|${oppositeChinese}\\s*\\d+\\s*KAS`, 'i');
+    const naturalEn = new RegExp(`\\b(?:you\\s*(?:want\\s*to|are\\s*going\\s*to|wish\\s*to)\\s*${opposite}|${opposite}\\s*\\d+\\s*KAS)\\b`, 'i');
+    if (formalRe.test(replyText)) violations.push(`R33-direction-formal: state=${state.direction}, reply formal '方向: ${opposite}'`);
+    else if (naturalChinese.test(replyText)) violations.push(`R33-direction-natural-zh: state=${state.direction}, reply contains opposite-direction natural-language phrase`);
+    else if (naturalEn.test(replyText)) violations.push(`R33-direction-natural-en: state=${state.direction}, reply contains opposite-direction English phrase`);
   }
 
   // Price oracle check (R29 + Owner B5 evidence)

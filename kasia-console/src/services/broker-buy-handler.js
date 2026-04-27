@@ -716,6 +716,27 @@ async function _qDm(kind, peerAddr, message) {
 export async function handleBuyIntent(peerAddr, message) {
   const trimmed = (message || '').trim();
 
+  // R33 b iter5b (NWT 90b29e39 Bug-Z13 trace 实证扩): EARLIEST setConvoStateLock 加固.
+  // iter5 加在 handleLlmDialog L580 处, 但 NWT trace 实证 T2 reply EMPTY 231ms 不**真**真**LLM,
+  // 真 deterministic path (handleBuyIntent 路径) 中**真**真**早 return** 没经 handleLlmDialog.
+  // 修: 真 handleBuyIntent 入口先**真**真 detect intent='buy', 真**就 setConvoStateLock**, 不**等** BUY_REGEX
+  // hit (BUY_REGEX 真 strict, '想买 3 KAS, BSC' 真**真**真 not match, 但 _detectIntent 仍**真**真 'buy').
+  if (trimmed) {
+    try {
+      // import 在 fn body 真**真**避免 circular (broker-llm-agent imports broker-buy-handler too)
+      const { _detectIntent } = await import('./broker-llm-agent.js');
+      const intent = _detectIntent(trimmed);
+      if (intent === 'buy') {
+        setConvoStateLock(peerAddr, { direction: 'buy', lifecycle_phase: 'fields_collection' });
+      }
+    } catch (e) {
+      if (e.code === 'CONVO_STATE_DIRECTION_LOCK') {
+        return `订单方向已锁定 ${e.locked_direction.toUpperCase()}. 改方向请回 "NO" 取消订单, 重新下单告诉我新方向.`;
+      }
+      // import 失败 (circular OR module not loaded) 兜底, 不阻塞
+    }
+  }
+
   // T-NWT-2026-04-26 case 6 STOP intent deterministic 短路 — user 烦了 / 想退出.
   // broker 立刻 ack 告别 (服务态度: 不啰嗦不命令式), 不进 LLM. 跟 PRICE_QUERY 同模式优先级最前.
   // _pendingAccepts 不动 (订单生命周期独立, 30min TTL 自动过期; user 想退也只是不想聊 broker, 已下单照走).
