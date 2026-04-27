@@ -64,22 +64,25 @@ async function _send(relayId, cmd) {
   return sendCommandAsync(relayId, cmd);
 }
 
-function selectBestOffer(qtyKas, payChain, give_asset = 'KAS') {
+function selectBestOffer(qtyKas, payChain, give_asset = 'KAS', want_asset = 'USDT') {
   // R5 T-J2-17 (Bug 10): broker 不 self-accept, 排除自己 maker 的 offer.
   // T-NWT-2026-04-27 v1.1 Phase A step 2: give_asset 参数化 (default 'KAS' 向后兼容).
+  // T-J1-2026-04-27 v1.2 R30 Service primitive 真 align (NWT 5a9db463f generic 真 J1 own clean):
+  //   want_asset 参数化 (default 'USDT' 向后兼容) — 真 cover USDC↔USDT pair / cross-stable
+  //   future Service: KAS-USDC-BSC / USDC-USDT-Polygon / etc. 真 single SQL filter 真 generic.
   const broker = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID);
   const brokerAddr = broker?.address || '';
   const rows = sqlite.prepare(`
     SELECT id, give_amount, want_amount, verification_meta, maker
     FROM exchange_offers
     WHERE protocol_status = 'open'
-      AND give_asset = ? AND want_asset = 'USDT'
+      AND give_asset = ? AND want_asset = ?
       AND CAST(give_amount AS REAL) >= ?
       AND maker != ?
       AND (expires_at IS NULL OR julianday(expires_at) > julianday('now'))
     ORDER BY CAST(want_amount AS REAL) / CAST(give_amount AS REAL) ASC
     LIMIT 10
-  `).all(give_asset, qtyKas, brokerAddr);
+  `).all(give_asset, want_asset, qtyKas, brokerAddr);
   for (const o of rows) {
     let meta;
     try { meta = JSON.parse(o.verification_meta || '{}'); } catch { continue; }
@@ -96,20 +99,21 @@ function selectBestOffer(qtyKas, payChain, give_asset = 'KAS') {
 // **协议含义**: exchange-machine accept_v1 必须 take 整笔 give_amount, 不支持部分成交.
 // 因此最后一笔会"过买" (take 整笔 offer 即使 cum > qty), broker 多收的 KAS 后续退回用户
 // 或下次抵扣. 第一版简化处理: 累加到 cum >= qty 就停, 最后一笔 take 整笔, 用户实收 cum KAS.
-export function selectBestOffers(qtyKas, payChain, give_asset = 'KAS') {
+export function selectBestOffers(qtyKas, payChain, give_asset = 'KAS', want_asset = 'USDT') {
   // T-NWT-2026-04-27 v1.1 Phase A step 2: give_asset 参数化 (default 'KAS' 向后兼容).
+  // T-J1-2026-04-27 v1.2 R30 Service primitive align: want_asset 参数化 (default 'USDT').
   const broker = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID);
   const brokerAddr = broker?.address || '';
   const rows = sqlite.prepare(`
     SELECT id, give_amount, want_amount, verification_meta, maker
     FROM exchange_offers
     WHERE protocol_status = 'open'
-      AND give_asset = ? AND want_asset = 'USDT'
+      AND give_asset = ? AND want_asset = ?
       AND maker != ?
       AND (expires_at IS NULL OR julianday(expires_at) > julianday('now'))
     ORDER BY CAST(want_amount AS REAL) / CAST(give_amount AS REAL) ASC
     LIMIT 30
-  `).all(give_asset, brokerAddr);
+  `).all(give_asset, want_asset, brokerAddr);
   const picks = [];
   let cum = 0;
   for (const o of rows) {
@@ -135,8 +139,11 @@ export function selectBestOffers(qtyKas, payChain, give_asset = 'KAS') {
 // T-J1-19n (Owner 真测 Bug B fix): idempotency check — 同 chain + qty 5min 内已挂
 // broker_dynamic_quote → 直接复用现有 offer_id 不重 publish. 防 multi-turn finalize_order
 // 反复触发 publish 创 N 个 open offer (Owner 真测看到 3 个 55 KAS 重复).
-async function _brokerPublishKasOffer(qtyKas, payChain, give_asset = 'KAS') {
+async function _brokerPublishKasOffer(qtyKas, payChain, give_asset = 'KAS', want_asset = 'USDT') {
   // T-NWT-2026-04-27 v1.1 Phase A step 2: give_asset 参数化 (default 'KAS' 向后兼容).
+  // T-J1-2026-04-27 v1.2 R30 Service primitive align (NWT 5a9db463f generic + J1 own clean):
+  //   want_asset 参数化 (default 'USDT'). 真 future Service KAS-USDC-BSC / USDC-USDT-Polygon
+  //   真 publish 真 stable-pair 真 generic. 真 broker accepts user pay 真 want_asset symbol 真 lowercase.
   // Idempotency: 5min 内同 chain + 同 qty + 同 asset 已挂 broker_dynamic_quote open → 复用
   const broker = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID);
   if (broker?.address) {
@@ -166,7 +173,7 @@ async function _brokerPublishKasOffer(qtyKas, payChain, give_asset = 'KAS') {
   // hardcode → 任意 give_asset 真 publish use KAS 价 0.0342 = 真 production 灾难 (USDC/USDT 真上链
   // want=0.0171 = 真 100x 损). 真改 fetchPrice generic + Bug 6 publish body give_asset literal → 参数化.
   const { fetchPrice } = await import('./price-oracle.js');
-  const priceResult = await fetchPrice(give_asset, 'USDT');
+  const priceResult = await fetchPrice(give_asset, want_asset);
   if (!priceResult.ok) return { ok: false, error: priceResult.error };
   const midPrice = priceResult.price;
   if (!midPrice || midPrice <= 0) return { ok: false, error: 'price_unavailable' };
@@ -177,7 +184,7 @@ async function _brokerPublishKasOffer(qtyKas, payChain, give_asset = 'KAS') {
   if (!wallet?.address) return { ok: false, error: `broker no ${payChain} wallet` };
   const SPREAD_PCT = 1;
   const sellPrice = midPrice * (1 + SPREAD_PCT / 100);
-  const wantUsdt = (qtyKas * sellPrice).toFixed(4);
+  const wantAmount = (qtyKas * sellPrice).toFixed(4);
   const PORT = process.env.CONSOLE_PORT || 3100;
   try {
     const res = await fetch(`http://127.0.0.1:${PORT}/api/exchange/publish`, {
@@ -185,21 +192,24 @@ async function _brokerPublishKasOffer(qtyKas, payChain, give_asset = 'KAS') {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         // T-J2-2026-04-27 Bug 6 真修: give_asset hardcode 'KAS' → 参数 (Bug 5 修了价 oracle, 但 publish body 还 hardcode KAS = generic 化半残)
+        // T-J1-2026-04-27 v1.2 R30: want_asset 参数化 (USDT default → 真 USDC/DAI cross-stable expand).
         relayNodeId: BROKER_RELAY_ID,
         give_asset,  // T-J2 + T-J1 Bug 6 真修: literal 'KAS' → give_asset 参数
         give_amount: String(qtyKas),
         give_chain: give_asset === 'KAS' ? 'kaspa' : payChain,  // KAS 在 Kaspa, stable 在 EVM (同 payChain)
-        want_asset: 'USDT',
-        want_amount: wantUsdt,
+        want_asset,  // T-J1-2026-04-27 v1.2 R30: literal 'USDT' → want_asset 参数
+        want_amount: wantAmount,
         verification: 'cross_chain_tx',
-        verification_meta: { accepted_chains: [{ chain: payChain, address: wallet.address }], expected_asset: 'USDT' },
+        verification_meta: { accepted_chains: [{ chain: payChain, address: wallet.address }], expected_asset: want_asset },
         expires_minutes: 60,  // R2 (J2 推): 30→60 防 25min 慢付 → broker cancel → 资金事故
         metadata: { source: 'broker_dynamic_quote', mid_price: midPrice, spread_pct: SPREAD_PCT, give_asset },
       }),
     });
     const data = await res.json();
     if (!data.ok) return { ok: false, error: `publish: ${data.error || 'http_' + res.status}` };
-    return { ok: true, offer_id: data.offer_id, want_usdt: wantUsdt, maker_chain_addr: wallet.address, mid_price: midPrice, sell_price: sellPrice };
+    // T-J1-2026-04-27 v1.2 R30: want_usdt 字段名 retained for caller backward-compat (callers expect want_usdt in result).
+    // 真 callers (line 534 take_usdt: pub.want_usdt) 真 not yet generic 真 deeper refactor — preserve key for compat.
+    return { ok: true, offer_id: data.offer_id, want_usdt: wantAmount, maker_chain_addr: wallet.address, mid_price: midPrice, sell_price: sellPrice };
   } catch (e) {
     return { ok: false, error: `publish_exc: ${e.message}` };
   }
