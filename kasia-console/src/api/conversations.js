@@ -122,6 +122,17 @@ export async function registerConversationRoutes(fastify) {
     if (!channel) {
       const broker = sqlite.prepare('SELECT is_dex_broker, is_service FROM relay_nodes WHERE id = ?').get(resolved);
       if (broker?.is_service === 1 || broker?.is_dex_broker === 1) {
+        // T-NWT-2026-04-27 EMERGENCY broker-broker runaway 真 fix (Owner 09:34+ 真测发现):
+        // sibling broker peer 真**绝不**走 broker handler — 真避免 LLM 真 echo amplify cycle.
+        // 真 trace: Trader-A 02:54:06 unprompted DM Trader-B → broker handler 真 process → cycle 30+ → 真烧 0.03 KAS gas.
+        // exchange protocol DM (handshake/accept/paid etc) 真走 trade-protocol-filter 真不影响.
+        const peerIsBroker = sqlite.prepare(
+          'SELECT 1 FROM relay_nodes WHERE address=? AND (is_dex_broker=1 OR is_service=1) LIMIT 1'
+        ).get(peer);
+        if (peerIsBroker) {
+          console.warn(`[api/agent/reply] sibling broker peer ${peer.slice(-12)} → skip broker handler (anti-runaway)`);
+          return reply.send({ reply: null, skip_reason: 'sibling_broker' });
+        }
         // T-J2-R19-extend (J1 1bc2132d 真测撞): broker reply 含 EVM 地址必经 R19 assert.
         // LLM 自由路径绕过 broker-action-queue, 这里 final guard. 含 fake 地址 → 拒回兜底.
         // T-J2-2026-04-27 v1.1 SELL flow R19 false positive fix (Owner 09:34 真测撞):
