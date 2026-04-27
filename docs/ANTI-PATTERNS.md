@@ -859,6 +859,99 @@ caller 真 pass user message context: `_r19Guard(replyText, userMessage)` → in
 
 ---
 
+## 规则 28 · deterministic mitigation 真 history fallback 真**永远不能**补 direction (SELL/BUY 必须 user 当前消息明确)
+
+**来源**: NWT d44a29691 Bug-Z6 fix sediment (2026-04-27 05:27). NWT Bug-W v1 9a3b3ffce 真 design 真 history-first fallback — 真 stale BUY history 真 hijack new SELL message → 真 broker hallucinate '买 USDC 1 USDC' 真 user 真说 '卖 5 KAS'. NWT 真 own root 真 reflection: 'history fallback 永远不该补 direction'.
+
+**症状**: deterministic 真 multi-turn fallback (e.g. broker LLM tool args 真 missing field 真 fill from history) 真 hijack current user input 真 stale prior context. 真 user 真 explicit 'sell' message 真 override stale BUY context — 真不可 history fallback 真 set direction='buy'.
+
+**Wrong** (Bug-W v1 9a3b3ffce, NWT 真 own root):
+```js
+const buyHistoryMatch = brokerLastBuy.match(/(?:买|buy)\s*\d+\s*(KAS|USDT|USDC)/i);
+const direction = 'buy';  // ← 真 BAD: assume buy direction always
+const asset = buyHistoryMatch ? buyHistoryMatch[1] : 'KAS';
+const qty = buyHistoryMatch[0].match(/\d+/)?.[0] || 1;
+```
+
+User 真 say '卖 5 KAS' 真 ignored, history 真 stale BUY 真 hijack.
+
+**Right** (Bug-Z6 fix d44a29691):
+```js
+const sellKeyword = /^\s*(?:卖|sell|dump|出|抛)\s/i;
+if (sellKeyword.test(currentMsg)) {
+  // SELL keyword 真 explicit → skip Bug-W BUY-only fallback
+  return null;  // broker-sell-handler 接管
+}
+const buyHistoryMatch = brokerLastBuy.match(...);
+// 真 fill ONLY missing fields from history:
+const direction = parseDirection(currentMsg) || 'buy';  // current msg FIRST
+const asset = parseAsset(currentMsg) || (buyHistoryMatch?.[1]) || 'KAS';
+const qty = parseQty(currentMsg) || (buyHistoryMatch?.[0]?.match(/\d+/)?.[0]) || null;
+```
+
+**怎么避** (3 步 SOP):
+1. **direction (sell/buy) 真 ALWAYS current msg 真 explicit** — 真 never inherit from history. 真 user 真 each transaction 真 explicit intent.
+2. **history fallback ONLY 补 qty/asset/chain** — 真 these fields 真 user 真 may省略 'qty' '哪个链' 真 question 多轮收集 OK; direction 真不可 ambiguous.
+3. **current msg parse FIRST, history 真 fill missing only** — 真 NWT 70eb4b888 Bug-Z5 fix 真 priority swap 真同 design.
+
+**Why**: deterministic mitigation 真 design 假设 follow-up 真 same intent (true for missing field collection: '5' '哪个链' 真 single field). 真**multi-turn 真 cross-intent** (Eric 5 KAS BUY USDC 完成后真 SELL 3 KAS) 真**真不应** silently inherit prior intent. 真 catastrophic if user confirm: broker 真 publish wrong-direction offer.
+
+真 generic 真 design pattern: **'inherit only from same intent context'** — 真 history fallback 真 must 真 detect intent boundary 真 before fill.
+
+**沉淀 J2 12:30 + NWT 12:42 真 cross-confirmation**: J2 8 probe + NWT llama-server probe 真证 'Qwen tool calling 真 normal'. 真 R28 真 deeper insight: deterministic fallback 真 design 真 careful 真 priority + scope, 真 align J2 prompt-engineering > regex-expansion 真 architectural direction.
+
+---
+
+## 规则 29 · LLM 真 dumb 真 tool 真 rich — 真 user-facing content 真 100% tool-generated, LLM 真 verbatim transmit
+
+**来源**: J1 e450ea19 broadcast 真 deep arch re-cognition sediment (2026-04-27 05:46). 真 6h session 真 5 critical bugs (Bug-Y/Z5/Z6/sellPreview missing/R26 production) 真**单一 architectural root 真 identification** — 真 ALL hallucinate 真 'LLM 真 produce user-facing content 真 unbacked by tool data'.
+
+**症状**: LLM 真 invocation 真 mixed responsibility — 真 NL understand + tool args extract + tool result transmit + free-text fallback when tool missing/fails. 真 free-text fallback 真 generates user-facing content (addresses, amounts, prices, intent statements) 真 unbacked by tool data → 真 hallucinate cascade.
+
+**Wrong** (Bug-Y/Z5/Z6/sellPreview missing/R26 真同 root):
+```js
+// broker LLM tool call → tool returns ok:false (e.g. sellPreview not impl)
+// SYSTEM_PROMPT 真 silent on what to do → LLM 真 free-text NLG fallback:
+const llmReply = await openai.chat({ messages, tools, ... });
+// LLM 真 fabricates: '好, 卖 5 KAS, 收款 1.9538 USDT (真 hallucinate price)'
+// → user 真 confirm → broker 真 publish offer 真 fake price/asset/addr
+```
+
+**Right** (J2 v1.2 SYSTEM_PROMPT trim + sellPreview impl + 报价丰富化 NWT 758bb38b0):
+```js
+// tool generates ALL user-facing content (preview_text 4 sections, addresses, prices)
+const result = await tool.preview_order({ direction, qty, chain, asset, address });
+// SYSTEM_PROMPT 铁律: result.preview_text 真**100% 原样转发**, 不准改一字符
+return llm.transmit_verbatim(result.preview_text);
+
+// tool ok:false → SYSTEM_PROMPT 真 explicit:
+// 'tool 返 ok:false → 必须 ack tool message 不替换, 不编 preview'
+return llm.transmit_verbatim(result.message);  // 真 tool-provided error message
+```
+
+**Testable invariant**:
+```
+∀ broker LLM reply containing user-facing content (addr/amount/price/intent):
+  reply.bytes ⊆ tool.preview_text ∪ user-input ∪ tool.error.message ∪ tool.ack
+真违反 = bug
+```
+
+**怎么避** (4 步设计 SOP):
+1. **真 tool 真 implement** every user-facing scenario — 真 preview/finalize/verify/error path 真 tool 真 produce content. 真 sellPreview missing 真 hallucinate vector.
+2. **SYSTEM_PROMPT 真 explicit on every tool result branch** — ok:true (transmit preview_text), ok:false (transmit error.message), tool error (acknowledge generic). 真 LLM 真不 free-text fill gaps.
+3. **真 testable invariant** — unit test 真 LLM reply ⊆ tool output. 真 randomized fuzz 真 user input 真 verify no LLM-generated unbacked content.
+4. **真 tool result schema 真 carry intent** — tool returns `{ ok, preview_text, error_message, user_action_required }` 真 LLM 真 deterministic transmit per branch.
+
+**Why**: LLM 真 powerful NL transducer 真 unreliable content generator 真 user-facing critical paths. 真 hallucinate addresses (R19) → 真 user 转 fake addr 钱丢. 真 hallucinate amounts/prices → 真 fake offer 真 protocol mismatch. 真 hallucinate intent (Bug-Z6 SELL→BUY) → 真 catastrophic confirm.
+
+真 architectural principle: **separate transducer (LLM) from content authority (tool)**. 真 tool 真 single source of truth 真 user-facing transactional content. 真 LLM 真 stateless 真 transmit-only 真 user layer.
+
+真 generic 真 适用 — 真不限 broker, 真 any LLM-mediated user-facing transactional system (legal/medical/financial AI agents). 真 align J2 12:30 + NWT 12:42 真 'Qwen tool calling 真 normal' finding — 真 prompt engineering 真 mature direction 真 'make tool rich, prompt directs strict transmit'.
+
+**Owner 钦定 alignment**: '正则不可取 Qwen 没用好' — 真 R29 真 codify 真 'Qwen 用好' 真 architectural definition: tool-rich + LLM-strict-transmit. 真 J2 v1.2 SYSTEM_PROMPT trim 真 first concrete step 真 R29 direction.
+
+---
+
 ## 如何扩充本档案
 
 新陷阱踩过后**立即**追加，格式保持：
