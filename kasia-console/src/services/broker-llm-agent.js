@@ -187,7 +187,26 @@ async function _callLlm(messages) {
   }
 }
 
+// T-J2-2026-04-27 Bug-Z6 deep RCA mechanical fallback wrapper:
+// 任何 tool 返 ok:false → 包成 ok:true + preview_text 让 LLM 100% 转发不自由编.
+// 真根因 (J2 8 探针证): tool 返 ok:false 时 LLM 第二轮没指引就自由编 preview (探针实测编 1.9538 USDT 假报价).
+// 真 mechanical guarantee: tool 永不返 ok:false 给 LLM, LLM 永远只转发 preview_text 不可能编报价.
 async function _executeTool(peer, name, args) {
+  let result;
+  try {
+    result = await _executeToolImpl(peer, name, args);
+  } catch (e) {
+    console.warn(`[broker-llm] _executeTool ${name} threw: ${e.message}`);
+    return { ok: true, preview_text: `抱歉 broker 内部错误处理你的请求 (${name}). 请稍后重试或回 NO 取消.`, _internal_error: e.message };
+  }
+  if (result && !result.ok) {
+    const safeMsg = result.message || result.preview_text || `抱歉, ${name === 'preview_order' ? '生成报价' : name === 'finalize_order' ? '下单' : name === 'verify_payment' ? '查付款' : '处理请求'}失败 (${result.error || 'unknown'}). 请重发或回 NO 取消.`;
+    return { ok: true, preview_text: safeMsg, _underlying_error: result.error };
+  }
+  return result;
+}
+
+async function _executeToolImpl(peer, name, args) {
   if (name === 'preview_order') {
     // 议 B (Owner 钦定): 字段齐 preview, 不真 publish. user YES 后才 finalize_order.
     // T-NWT-2026-04-27 v1.1 Phase E: give_asset propagation (default 'KAS' backward compat).
@@ -204,11 +223,22 @@ async function _executeTool(peer, name, args) {
       return r;
     }
     if (direction === 'sell') {
-      // 卖 preview v1.1 留 (sellPreview 待加). 当前 fallback finalize_order 真路径.
-      if (!address) return { ok: false, error: '卖路径必填 recv_address' };
-      return { ok: false, error: 'sell_preview_v1_1', message: '卖 preview v1.1 加, 当前直接 YES 走真下单. 你确认数量 + 链 + 收款地址后回 YES.' };
+      // T-J2-2026-04-27 Bug-Z6 deep RCA fix: wire NWT sellPreview (commit 2a74461f9).
+      // 真根因 (J2 8 探针 + NWT 1 探针 殊途同归): tool calling 没问题, sell branch 没实现 →
+      // LLM 第二轮拿 ok:false 自由编 preview (探针实测 LLM 编了 1.9538 USDT 假报价).
+      // 真 fix: 真调 sellPreview 返真 preview_text, LLM 100% 转发不再编.
+      if (!address) {
+        return { ok: true, preview_text: '卖单需要你的 USDT 收款地址 (0x... 42 位 EVM 钱包). 请重发完整: "卖 X KAS, BSC, 0x..."' };
+      }
+      const { sellPreview } = await import('./broker-sell-handler.js');
+      const r = await sellPreview({ user_kasia: peer, qty, recv_chain: chain, recv_address: address });
+      // 机械兜底: 即使 sellPreview 返 ok:false, 也包成 ok:true + preview_text 让 LLM 100% 转发不自由编.
+      if (!r.ok) {
+        return { ok: true, preview_text: r.message || `抱歉, 卖单处理失败 (${r.error || 'unknown'}). 请重发或回 NO 取消.` };
+      }
+      return r;
     }
-    return { ok: false, error: `unknown direction: ${direction}` };
+    return { ok: true, preview_text: `抱歉, 未知方向 "${direction}". 请回 "买 X KAS" 或 "卖 X KAS".` };
   }
   if (name === 'finalize_order') {
     // T-NWT-2026-04-27 v1.1 Phase E: give_asset propagation (default 'KAS' backward compat).
