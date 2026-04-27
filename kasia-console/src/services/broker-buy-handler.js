@@ -6,7 +6,10 @@ import { sqlite } from '../db/client.js';
 import { randomUUID } from 'crypto';
 
 const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
-const BUY_REGEX = /^\s*(?:买|buy)\s*(\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*KAS\s*$/i;
+// T-J2-2026-04-27 v1.1: 真扩 BUY_REGEX 同 BUY_OVERRIDE_REGEX (broker-sell-handler line 14) 模式
+// + SELL_REGEX 真扩 (63a953de3) 对称真扩同义词 — 真 deterministic fast path 跳 LLM 1-2s
+// 加 '想买/要买/购买/购/想换/搞/弄/来点/想要/我要/want/get/grab/take/need/cop/gimme/quiero'
+const BUY_REGEX = /^\s*(?:买|buy|想买|要买|购买|购|想换|搞|弄|来点|想要|我要|want|get|grab|take|need|cop|gimme|fetch|quiero|necesito)\s*(\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*KAS\s*$/i;
 // T-J1-19a (J2 probe-5a 暴露): broker dust 单接受漏洞 — finalizeBuy / _aggregateWithFallback
 // 必须拒小于 MIN_QTY 的请求, 否则 broker 锁 fund_locks 浪费 broadcast tx + 用户 dust 被 broker fee 吃光.
 const MIN_QTY_KAS = 1.0;
