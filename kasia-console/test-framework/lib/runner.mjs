@@ -633,6 +633,26 @@ const assertions = {
       : { pass: false, expected, actual: parsed.asset, msg: `asset='${parsed.asset}' (want '${expected}')` };
   },
 
+  // R-NWT-2026-04-28 7a-2 phase γ: last_reply_qty — parse last reply qty, compare numeric.
+  // probe schema 'expect.last_reply_qty: 3' → adapter attach to last step's expect.must.
+  // 跟 direction_must_match 同 _extractReplyForAssertion (parallel: last fulfilled).
+  last_reply_qty(step_result, expected, ctx) {
+    const reply = _extractReplyForAssertion(step_result);
+    if (!reply) return { pass: false, expected, actual: '<no reply>', msg: 'no reply to parse qty from' };
+    const parsed = _parseBrokerReply(reply);
+    if (parsed.qty == null) return { pass: false, expected, actual: 'unparseable', msg: `reply has no parseable qty (want ${expected})` };
+    const want = Number(expected);
+    return parsed.qty === want
+      ? { pass: true, expected: want, actual: parsed.qty }
+      : { pass: false, expected: want, actual: parsed.qty, msg: `qty=${parsed.qty} (want ${want})` };
+  },
+
+  // R-NWT-2026-04-28 7a-2 phase γ: last_reply_direction — alias for direction_must_match
+  // (probe schema 用 'last_reply_direction', semantically identical, both target last reply).
+  last_reply_direction(step_result, expected, ctx) {
+    return assertions.direction_must_match(step_result, expected, ctx);
+  },
+
   // R-NWT-2026-04-28 (d) B phase 6 加固 (J1 ca0e79c2 vote): 反 silence-game.
   // parallel result 拿到全空 reply (e.g. 本机 LLM 全 500), 其他 assertion skip null vacuously PASS.
   // 加 parallel_min_replies: N 强制至少 N/total reply 真非空, 否则 FAIL 提醒 environment broken.

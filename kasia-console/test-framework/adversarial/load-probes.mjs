@@ -28,6 +28,8 @@ const SUPPORTED_ASSERTIONS = new Set([
   'reply_not_empty',
   // R-NWT-2026-04-28 7a-2 phase α: parse-based assertions
   'direction_must_match', 'asset_must_match',
+  // R-NWT-2026-04-28 7a-2 phase γ: last reply state (alias for direction_must_match + qty parse)
+  'last_reply_direction', 'last_reply_qty',
 ]);
 
 // Aliases — common probe DSL field names → existing runner assertion names
