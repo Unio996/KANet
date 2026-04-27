@@ -1270,6 +1270,76 @@ if (state?.locked) {
 
 ---
 
+## 规则 33b · user-supplied conditions retention pipeline (extract → transmit → broker decide → echo)
+
+**来源**: NWT 22:08 audit GAP B + Owner 12:52 真测 B3b (2026-04-27 三方共修 R33 b iter1-4: J1 9bc6c3aa+226da7ac+6e77cb55, NWT GAP found, J2 真根因 dig). user T6 杂糅 '挂单价 0.0336 + 10min 退还' → broker 静默用市价 spread + 默认 2h, 完全丢 user 条件. R33 修透了 cross-direction (B3a) 但没接 conditions retention (B3b).
+
+**Wrong** (静默丢弃 = bug):
+
+```js
+// broker-llm-agent.js _executeTool('preview_order', ...) 只透 5 字段
+const args = { direction, qty, chain, give_asset, address };
+const r = await buyPreview(args);  // user limit_price/refund_timeout 永远没机会进来
+// preview 默认市价 spread + 2h timeout, 不告诉 user 'broker 接受/不接受 你的条件'
+```
+
+**Right** (R33b 4 步 pipeline):
+
+```js
+// Step 1: deterministic regex extract conditions (broker-llm-agent.js _extractFieldsFromMsg)
+const limitMatch = msg.match(/(?:挂单价(?:格)?(?:设定)?|限价|不低于|price\s*at|limit\s*price)\s*[:：是为]?\s*(\d+(?:\.\d+)?)/i);
+const timeoutMatch = msg.match(/(\d+)\s*(?:分钟|分|min(?:ute)?s?)/i);
+const hasRefundCtx = /(?:退|返|refund|return|原路|没人|没成交|没接|没吃)/i.test(msg);
+return {
+  ...prevFields,
+  limit_price: limitMatch ? parseFloat(limitMatch[1]) : null,
+  refund_timeout_min: (timeoutMatch && hasRefundCtx) ? parseInt(timeoutMatch[1], 10) : null,
+};
+
+// Step 2: tool schema 含 optional conditions params (broker-llm-agent.js TOOLS preview_order)
+parameters: {
+  properties: {
+    ...,
+    limit_price: { type: 'number', description: 'OPTIONAL: ...用户提...必填. 不准静默丢.' },
+    refund_timeout_min: { type: 'number', description: 'OPTIONAL: ...用户提...必填. 不准静默丢.' },
+  },
+}
+
+// Step 3: 透传到 broker preview function (broker-{buy,sell}-handler.js)
+export async function buyPreview({ ..., limit_price = null, refund_timeout_min = null }) {
+  ...
+  if (limit_price && Math.abs((limit_price - oracleMid)/oracleMid) <= 0.05) {
+    unitPrice = limit_price;  // accept
+    conditionLines += `* 用户限价: **${limit_price}** ✓ broker 接受 (CEX 中价 ${oracleMid}, 偏差 ${dev*100}% 在 ±5% 内)`;
+  } else if (limit_price) {
+    conditionLines += `* 用户限价: ${limit_price} ✗ broker 不接受 (偏差 ${dev*100}% 超 ±5%). 接受市价 OR 取消重下.`;
+  }
+  if (refund_timeout_min < 120) {
+    conditionLines += `* 退款时限请求: ${refund_timeout_min} 分钟 ✗ broker 不接受 (broker 退款最少 2h, chain confirmation + dispute window 需要).`;
+  }
+}
+
+// Step 4: setConvoStateLock(conditions) 写 R33 ConvoState.conditions field — trace + 多轮一致
+setConvoStateLock(peer, { conditions: { limit_price, refund_timeout_min } });
+```
+
+**Why**: 真 user 自定 conditions 真**可见行为有 3 类**: (a) broker accept + reflect (b) broker reject + 解释 (c) broker silent drop = bug. (c) 是 Owner 真测撞的 grievance — broker 看起来没逻辑没重点, user 不知 broker 接受了没. Pipeline 4 步**强制** (a) 或 (b), **禁止** (c). regex extract 真 deterministic path bypass LLM 仍 capture, schema + propagation 真 LLM path 也 capture, broker decide 真 product policy (oracle ±5% / 2h floor), preview echo 真 user 验证.
+
+**真扩展规则**: 新 condition (e.g. partial fill / preferred maker) 加时, **必同时加** regex pattern + schema field + preview echo + state authority capture. 漏一步 = 重蹈 B3b silent drop 覆辙.
+
+**lint-kanet checkR33b() 思路** (v1.4 propose):
+
+- broker-{buy,sell}-handler.js preview function signature 真**真**真 `limit_price` + `refund_timeout_min` (或将来 conditions field 名) 真 destructured arg.
+- broker-llm-agent.js TOOLS preview_order 真**真**真 contain conditions schema field.
+- broker-llm-agent.js `_extractFieldsFromMsg` return 真**真**真 contain conditions field.
+- 没满足 → warn 'R33b conditions retention pipeline incomplete'.
+
+**真 architectural alignment**: R33b 是 R33 子条 — R33 confirms ALL reply paths consult state authority; R33b confirms ALL conditions inputs retention 经 4 步 pipeline. 共建 broker product trustworthy.
+
+**case 真**: `kasia-console/test-framework/cases/broker/owner_88kas_t6_limit_retention.test.mjs` (J2 a30f96dd ship) 真 sealed regression — broker reply 必含 limit_price echo OR refund_timeout echo OR rejection 关键词.
+
+---
+
 ## 如何扩充本档案
 
 新陷阱踩过后**立即**追加，格式保持：
