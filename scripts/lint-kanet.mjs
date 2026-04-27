@@ -171,6 +171,47 @@ function checkR19(filepath, content) {
   }
 }
 
+// ── R33: broker reply path 真 ALL consult conversation state authority ──
+// 真 ANTI-PATTERNS R33 (J1 sediment 3b6911f3): 真 broker handler reply 真 generate 真 BEFORE
+// 真 must consult getConvoState/shouldDeterministicFire 真 prevent 11+ paths fragmented blind.
+//
+// 真 heuristic: scan broker-buy-handler / broker-sell-handler / broker-llm-agent for reply
+// generation patterns (return string literal / _qDm / _enqueue / reply.send) — flag any
+// reply path 真 NOT preceded (within ~30 line window) by getConvoState OR shouldDeterministicFire
+// import OR call. R33 hasn't shipped yet, so initial state: warn only on broker handler files.
+//
+// 真 phase 1 (current): warn-only — broker handler missing R33 imports
+// 真 phase 2 (post J2 R33 broker code ship): strict — every reply path requires gating call
+function checkR33(filepath, content) {
+  // 只 broker handler 文件
+  if (!/broker-(llm-agent|buy-handler|sell-handler)\.js$/.test(filepath)) return;
+
+  // 真 R33 expected imports / API surface
+  const hasR33Import = /from\s+['"`]\.\/broker-state-authority['"`]|require\(\s*['"`]\.\/broker-state-authority['"`]/.test(content);
+  const hasGetConvoState = /\bgetConvoState\s*\(/.test(content);
+  const hasShouldFire = /\bshouldDeterministicFire\s*\(/.test(content);
+
+  // count reply-generation sites (heuristic — return string + _qDm + enqueue dm_*)
+  const replyPaths = [];
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*\/\//.test(line)) continue;
+    // return literal string OR template literal
+    if (/^\s*return\s+['"`]/.test(line) || /return\s+`[\s\S]*?`/.test(line)) replyPaths.push(i + 1);
+    // _qDm or _enqueue dm_*
+    if (/_qDm\s*\(|_enqueue\s*\(\s*['"`]dm_/.test(line)) replyPaths.push(i + 1);
+  }
+
+  if (replyPaths.length === 0) return;  // no reply generation, no R33 concern
+
+  // Phase 1: warn-only via stderr, don't block commit. Phase 2 (post J2 R33 broker
+  // code ship) → switch to violate() strict.
+  if (!hasR33Import && !hasGetConvoState && !hasShouldFire) {
+    process.stderr.write(`[lint-kanet R33 WARN] ${path.relative(ROOT, filepath)}: ${replyPaths.length} reply paths, no broker-state-authority import. Phase 1 warn-only; phase 2 strict after J2 R33 broker code ships.\n`);
+  }
+}
+
 // ── 跑 ──
 for (const fp of targets) {
   let content;
@@ -179,6 +220,7 @@ for (const fp of targets) {
   checkR11(fp, content);
   checkR6(fp, content);
   checkR19(fp, content);
+  checkR33(fp, content);
 }
 checkR10();
 
