@@ -709,9 +709,9 @@ return reply.send({ reply: await _r19Guard(llmReply, 'handleLlmDialog') });
 
 ---
 
-## 规则 21 · 多层 wire fix 必从 user input 真 trace 到 leaf, 不止 leaf 真 fix
+## 规则 25 · 多层 wire fix 必从 user input 真 trace 到 leaf, 不止 leaf 真 fix
 
-**来源**: J1 5d2450dc 真 ship (2026-04-27 01:23), Bug-Y NLG receive_address wire 真测发现. c82d05493 真前置 fix template 真 OK 但 wire 上游 4 层真断, 真 ship 后 broker 真 production 真还 hallucinate.
+**来源**: J1 5d2450dc 真 ship (2026-04-27 01:23), Bug-Y NLG receive_address wire 真测发现. c82d05493 真前置 fix template 真 OK 但 wire 上游 4 层真断, 真 ship 后 broker 真 production 真还 hallucinate. 真编号 25 (J2 #3 e0d40b372 已占 R21-R24, J1 自决 rename 真避 merge conflict).
 
 **症状**: 真测撞 leaf (NLG template) 真渲染错值. 真 fix leaf (template) → unit test 真 PASS 但 production 真 user trigger 真还撞同样错. 真 dig 才发现 leaf 真接受参数, 但参数 4 层 wire 真不传 — leaf 永远拿 default null.
 
@@ -759,10 +759,47 @@ function buyPreview({ ..., receive_address = null }) { ... }
 
 **Why**: leaf fix 真 satisfies "代码改对了" 真感, 但 wire 真断 → production 真无效. R21 真 push 真 trace upstream — 真**写 leaf fix 前先 trace 真 user input 真 flow 真到 leaf**, 真 verify 每一层 真传值. 真 fix 多层 wire 一次, 不真留 90% 真 fix + 10% 真 silent drop. 真 generic 案例: API arg 真新加, downstream consumer 真升级, 但 caller 真没改 → 永远 default. R21 真避此 silent drop.
 
-**lint-kanet checkR21() 思路** (v1.1 真扩):
+**lint-kanet checkR25() 思路** (v1.1 真扩):
 - 静态扫所有 leaf function 真 signature 真有 default 值的 param (e.g. `receive_address = null`)
-- 真 grep 调用点 — 真不传该 param 真 caller 真 flag (build 真 warn 'R21: caller drops optional param, verify intent')
+- 真 grep 调用点 — 真不传该 param 真 caller 真 flag (build 真 warn 'R25: caller drops optional param, verify intent')
 - 真 false-positive 高 (default 真 intentional 真常见), 真用 manual audit 真 supplement.
+
+---
+
+## 规则 26 · peer LLM 真 echo broker hallucinate 真 propagate (R19 真 generalize 到 peer-side)
+
+**来源**: J1 5d2450dc Bug-Y 真后续真观察 (2026-04-27 01:13:56 真 evidence). Sophie 真 LAN-Qwen3.6 brain 真**直接 echo broker 错地址** 真 reply 'USDC 收款地址：kaspa:qpjjv2...' (kasia 真 USDC 真错). 真 LLM-as-relay 真新 vector — R19 真 broker→user 单向 invariant 真不够, 真 user-side LLM 真无 validation 真 echo broker 真 hallucinate 真 propagate 真 trust chain.
+
+**症状**:
+1. broker LLM 真 hallucinate 错地址 (R19 violation OR 真 wire 断 真 silent drop)
+2. broker DM user 真错地址
+3. user 真 LLM brain 真**未 validate inbound** addr 真 schema, 真 echo back 'OK 我的 USDC 收款地址: kaspa:...' 真 confirm broker 错值
+4. broker 真处理 user 真 echo (R19 invariant 真 user→broker 真不 catch, 真 R19 单向 only) → 真 stuck dispute / 真 wrong asset send
+
+**Wrong** (Sophie 01:13:56 真 evidence):
+```
+broker → Sophie: 'USDC 收件 (你的 BNB): kaspa:qpjjv2...' (broker hallucinate)
+Sophie LLM (LAN-Qwen3.6) → broker: '收。USDC 收款地址: kaspa:qpjjv2...' (echo, no validation)
+→ broker 'YES' 处理 → 真转 USDT 真 stuck (broker 'kaspa:' 真 deliver 真不 USDC 不 BSC)
+```
+
+**Right** (peer-side validation, 4 layer):
+```
+1. peer LLM SYSTEM_PROMPT 真显: '收 inbound DM 含 address 真 invariant validate':
+   - USDC/USDT 真 chain 必 EVM 0x... 42 字符
+   - KAS 真 chain 必 kaspa:... 真 prefix
+   - asset×chain mismatch → 真 reject + 真要 'asset/chain 错, 请 broker 真 verify'
+2. peer-side 真 client 真 schema validator (LLM 真前层 真 deterministic 真 catch hallucinate)
+3. peer 真 'echo' 真 send 必 sanitize 自己 own wallet 真 lookup, 真不 forward broker 真 inbound addr
+4. invariant 真双向 — R19 broker→user + R26 user→broker 真双 catch
+```
+
+**Why**: trust chain 真 LLM 真 propagate 真 silent. broker hallucinate (R19 violation) → peer LLM 真 echo 真 amplify → 真 production 真 dispute. R19 真单向 invariant 真不够, 真 close trust loop 必双向. peer-side 真 LLM 真 'be helpful' 默认 echo 真 overrides safety. R26 真 push peer LLM SYSTEM_PROMPT 真显 schema 真 reject inbound hallucinate 真 break loop. 真适用 generic LLM-relay 场景 (任何 user-as-LLM-proxy 真 echo broker untrusted output 真模式).
+
+**怎么避** (3 步 SOP):
+1. **peer LLM SYSTEM_PROMPT 真加 inbound address validation** (asset×chain schema 真 deterministic 真 reject hallucinate)
+2. **peer-side wallet 真 own lookup 真 forward** (own EVM addr 真 forward 真 broker, 真不 echo broker inbound)
+3. **真 chain-out 真 dual invariant** (broker R19 + peer R26 真双 enforce, 真 close trust loop)
 
 ---
 
