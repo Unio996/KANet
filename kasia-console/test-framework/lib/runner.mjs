@@ -609,6 +609,30 @@ const assertions = {
       : { pass: false, expected, actual: errors, msg: errors.join('; ') };
   },
 
+  // R-NWT-2026-04-28 7a-2 phase α: direction_must_match — parse last reply, compare to expected.
+  // probe schema: `direction_must_match: 'sell'` (or 'buy'). 用 _parseBrokerReply.
+  // 跨 step_result shape (send_message reply / parallel results) 自动 normalize.
+  direction_must_match(step_result, expected, ctx) {
+    const reply = _extractReplyForAssertion(step_result);
+    if (!reply) return { pass: false, expected, actual: '<no reply>', msg: 'no reply to parse direction from' };
+    const parsed = _parseBrokerReply(reply);
+    if (!parsed.direction) return { pass: false, expected, actual: 'unparseable', msg: `reply has no parseable direction (want '${expected}')` };
+    return parsed.direction === String(expected).toLowerCase()
+      ? { pass: true, expected, actual: parsed.direction }
+      : { pass: false, expected, actual: parsed.direction, msg: `direction='${parsed.direction}' (want '${expected}')` };
+  },
+
+  // R-NWT-2026-04-28 7a-2 phase α: asset_must_match — parse last reply, compare asset (KAS/USDT/USDC).
+  asset_must_match(step_result, expected, ctx) {
+    const reply = _extractReplyForAssertion(step_result);
+    if (!reply) return { pass: false, expected, actual: '<no reply>', msg: 'no reply to parse asset from' };
+    const parsed = _parseBrokerReply(reply);
+    if (!parsed.asset) return { pass: false, expected, actual: 'unparseable', msg: `reply has no parseable asset (want '${expected}')` };
+    return parsed.asset === String(expected).toUpperCase()
+      ? { pass: true, expected, actual: parsed.asset }
+      : { pass: false, expected, actual: parsed.asset, msg: `asset='${parsed.asset}' (want '${expected}')` };
+  },
+
   // R-NWT-2026-04-28 (d) B phase 6 加固 (J1 ca0e79c2 vote): 反 silence-game.
   // parallel result 拿到全空 reply (e.g. 本机 LLM 全 500), 其他 assertion skip null vacuously PASS.
   // 加 parallel_min_replies: N 强制至少 N/total reply 真非空, 否则 FAIL 提醒 environment broken.
@@ -641,6 +665,7 @@ function _resolveAliases(step, aliases) {
 
 // R-NWT-2026-04-28 (d) B phase 2: parse broker reply for direction/qty/asset/order_id.
 // 容错: 自然语言 + 'preview' formal format 都覆盖. 抓不到字段返 null (assertion 自决 skip).
+// R-NWT-2026-04-28 7a-2 phase α: asset 字段加 (direction_must_match / asset_must_match 用).
 function _parseBrokerReply(reply) {
   const r = String(reply || '');
   const directionMatch = r.match(/方向[:：]\s*([买卖])|(买|卖|sell|buy)\s*\d+\s*(KAS|USDT|USDC)/i);
@@ -650,10 +675,29 @@ function _parseBrokerReply(reply) {
     if (d === '买' || d === 'buy') direction = 'buy';
     else if (d === '卖' || d === 'sell') direction = 'sell';
   }
+  // asset: capture from directionMatch group 3 (formal '买/卖 N ASSET') OR fallback scan.
+  let asset = directionMatch?.[3]?.toUpperCase() || null;
+  if (!asset) {
+    const assetScan = r.match(/\b(KAS|USDT|USDC)\b/i);
+    asset = assetScan ? assetScan[1].toUpperCase() : null;
+  }
   const qtyMatch = r.match(/(?:数量[:：]\s*|[买卖sb][uell]*\s*)(\d+(?:\.\d+)?)\s*(?:KAS|USDT|USDC)/i);
   const qty = qtyMatch ? parseFloat(qtyMatch[1]) : null;
   const orderIdMatch = r.match(/订单\s*[#＃]?([a-f0-9]{4,8})/i) || r.match(/offer[_\s]*id[:\s]+([a-f0-9-]{6,})/i);
-  return { direction, qty, order_id: orderIdMatch ? orderIdMatch[1] : null };
+  return { direction, qty, asset, order_id: orderIdMatch ? orderIdMatch[1] : null };
+}
+
+// R-NWT-2026-04-28 7a-2 phase α: extract reply text from any step result shape.
+// step_result may be { reply } (send_message/persona_turn) OR { results: [{reply, status}] } (parallel).
+// For parallel, return last fulfilled non-empty reply (probe assertion semantics: 'final state').
+function _extractReplyForAssertion(step_result) {
+  if (!step_result) return '';
+  if (typeof step_result.reply === 'string') return step_result.reply;
+  if (Array.isArray(step_result.results)) {
+    const fulfilled = step_result.results.filter(r => r.status === 'fulfilled' && r.reply);
+    return fulfilled.length > 0 ? fulfilled[fulfilled.length - 1].reply : '';
+  }
+  return '';
 }
 
 // ── trace persistence (Owner 13:43 钦定 'no log no pass') ───────────

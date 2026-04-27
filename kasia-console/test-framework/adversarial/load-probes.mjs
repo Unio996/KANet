@@ -26,6 +26,8 @@ const SUPPORTED_ASSERTIONS = new Set([
   'no_state_corruption', 'each_peer_distinct_offer',
   'no_amount_swap', 'no_address_swap', 'parallel_min_replies',
   'reply_not_empty',
+  // R-NWT-2026-04-28 7a-2 phase α: parse-based assertions
+  'direction_must_match', 'asset_must_match',
 ]);
 
 // Aliases — common probe DSL field names → existing runner assertion names
