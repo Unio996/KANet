@@ -21,7 +21,15 @@
 
 5. **Alpha 达标标准** → `docs/ALPHA-CHECKLIST.md`
 
-4. **系统架构（详细版）** → `docs/kanet-system-architecture.md`
+6. **测试框架（QA 子系统，写/改代码前必读）** → `docs/TEST-FRAMEWORK.md`
+   - 自治测试体系，落地 `kasia-console/test-framework/`，作为 kasia-console QA 子系统
+   - 所有 broker / seeker / agent 业务级测试在这里写
+   - 三层结构：lib/(领域无关) + personas/(用户人格) + cases/<domain>/(业务场景)
+   - 跑：`node scripts/test.mjs --domain=broker` (整 domain) / `--case=...` (单个) / `--all` (全部)
+   - 实操教程 → `kasia-console/test-framework/README.md`
+   - 加新业务必同步加 case；修 bug 必同步加 regression case 守住
+
+7. **系统架构（详细版）** → `docs/kanet-system-architecture.md`
    - 五大模块职责、25张表读写映射、数据流、已知裂缝、API 清单
 
 5. **数据架构危机** → `（已归档，详见 DEVELOPER-GUIDE 第三章 pending_actions 架构）`
@@ -46,6 +54,8 @@
 4. **memory 相关 feedback**: `grep -ri <topic> ~/.claude/projects/*/memory/feedback_*.md`
 
 **写完 commit 前必跑**: `node scripts/lint-kanet.mjs <changed-files>` — 失败一条 commit 都不让 (git pre-commit hook 强制).
+
+**改 broker / agent 业务代码后必跑**: `cd kasia-console && node scripts/test.mjs --domain=<相关 domain>` — framework 一键回归。修 bug 必同步加 regression case 进 `kasia-console/test-framework/cases/<domain>/` 守住，永不退化。详见 `docs/TEST-FRAMEWORK.md`.
 
 跳步 SOP = 重复犯错的根因 (Owner 2026-04-26 元问题). NWT 接位漏 ANTI-PATTERNS.md → 漏 QWEN Rule 11 → broker LLM 60-120s timeout 全崩, 是负面教材.
 
