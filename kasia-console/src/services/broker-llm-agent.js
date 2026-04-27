@@ -298,11 +298,17 @@ function _extractQty(message) {
 }
 
 // T-J2-2026-04-27 v1.1: 真 detect asset symbol from message (KAS default, USDT/USDC 真识别)
+// T-J2-2026-04-27 Bug-Z7 fix (J1 e4f68c7e 真 LIVE 真测撞):
+// 旧 if /usdt/ → USDT 弱 regex 撞 user msg '卖 2 KAS, BSC 链**收 USDT**' (USDT 是 settle 不是 give_asset).
+// 真 fix: extract asset paired with qty (跟 _extractQty 同 pattern), give_asset 是配对的那个.
+// fallback 关键字检测留给无 qty 场景 ('KAS 多少钱' 类问询).
 function _detectAsset(message) {
   const msg = String(message || '');
+  const paired = msg.match(/(\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*(kas|usdt|usdc)/i);
+  if (paired) return paired[2].toUpperCase();
   if (/usdc/i.test(msg)) return 'USDC';
   if (/usdt/i.test(msg)) return 'USDT';
-  return 'KAS'; // default
+  return 'KAS';
 }
 
 function _deterministicFirstReply(intent, qty, lang, asset = 'KAS') {
