@@ -18,6 +18,12 @@ LOG_DIR="$KANET_ROOT/logs"
 LOG="$LOG_DIR/post-commit-test.log"
 mkdir -p "$LOG_DIR"
 
+# Auto-refresh D:/kanet-sync.bundle so :9201 static server serves fresh master HEAD.
+# (NWT :9202 + J2 :9203 走 live regen 每 GET; J1 :9201 是 Owner-owned static service,
+# kill 越界, post-commit hook auto refresh = static 文件每 commit 自动同步, 无 race.)
+# 三方 22:50 align option B (J1 446717a2 propose + NWT dd9991f3 ack).
+git bundle create D:/kanet-sync.bundle master >/dev/null 2>&1 || true
+
 # 取本次 commit 改的文件
 COMMIT_FILES=$(git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null || true)
 
