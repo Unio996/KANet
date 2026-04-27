@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monitor — KANet</title>
+<style>
+  :root { --bg: #0a0e17; --fg: #c9d1d9; --border: #1e2a3a; --accent: #58a6ff;
+    --info: #58a6ff; --warn: #d29922; --alert: #f85149; --critical: #ff0000; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace; background: var(--bg); color: var(--fg); padding: 16px; font-size: 13px; }
+  h1 { font-size: 18px; color: var(--accent); margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 16px 0 8px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+  .tab { padding: 6px 16px; background: #161b22; border: 1px solid var(--border); cursor: pointer; border-radius: 4px; font-size: 12px; }
+  .tab.active { background: var(--accent); color: #fff; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 16px; }
+  .stat-card { background: #161b22; border: 1px solid var(--border); border-radius: 6px; padding: 12px; text-align: center; }
+  .stat-card .val { font-size: 24px; font-weight: bold; }
+  .stat-card .label { font-size: 11px; color: #8b949e; margin-top: 4px; }
+  .level-info { color: var(--info); } .level-warn { color: var(--warn); }
+  .level-alert { color: var(--alert); } .level-critical { color: var(--critical); }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; padding: 6px 8px; background: #161b22; border-bottom: 2px solid var(--border); }
+  td { padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:hover { background: #161b22; }
+  .btn { padding: 3px 8px; font-size: 11px; border: 1px solid var(--border); background: #21262d; color: var(--fg);
+    cursor: pointer; border-radius: 4px; margin-right: 4px; }
+  .btn:hover { border-color: var(--accent); }
+  .btn-danger { border-color: var(--alert); }
+  .btn-success { border-color: var(--warn); }
+  .rule-card { background: #161b22; border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 8px; }
+  .rule-card.disabled { opacity: 0.5; }
+  .rule-name { font-weight: bold; }
+  .rule-level { font-size: 11px; padding: 2px 6px; border-radius: 3px; margin-left: 8px; }
+  .rule-level-INFO { background: #0d419d; } .rule-level-WARN { background: #7d4e00; }
+  .rule-level-ALERT { background: #8b2020; } .rule-level-CRITICAL { background: #ff0000; }
+  .rule-conditions { font-size: 11px; color: #8b949e; margin-top: 4px; }
+  .rule-actions { margin-top: 6px; }
+  #editor { width: 100%; min-height: 200px; background: #0d1117; color: #c9d1d9; border: 1px solid var(--border);
+    border-radius: 6px; padding: 12px; font-family: inherit; font-size: 12px; resize: vertical; }
+  .toast { position: fixed; bottom: 20px; right: 20px; padding: 10px 20px; border-radius: 6px; font-size: 12px; z-index: 999; display: none; }
+  .toast.show { display: block; }
+  .toast-success { background: #238636; color: #fff; }
+  .toast-error { background: #da3633; color: #fff; }
+  .loading { color: #8b949e; font-style: italic; }
+</style>
+</head>
+<body>
+<h1>KANet Monitor</h1>
+<div class="tabs">
+  <div class="tab active" data-panel="stats">概览</div>
+  <div class="tab" data-panel="events">事件</div>
+  <div class="tab" data-panel="rules">规则</div>
+  <div class="tab" data-panel="editor">编辑器</div>
+</div>
+
+<!-- Stats Panel -->
+<div class="panel active" id="panel-stats">
+  <div class="stat-grid" id="stat-grid"></div>
+  <h2>最近未确认告警</h2>
+  <table id="unack-table">
+    <thead><tr><th>时间</th><th>等级</th><th>频道</th><th>规则</th><th>摘要</th><th>操作</th></tr></thead>
+    <tbody id="unack-body"></tbody>
+  </table>
+</div>
+
+<!-- Events Panel -->
+<div class="panel" id="panel-events">
+  <div style="margin-bottom: 8px;">
+    <select id="evt-level" style="background:#21262d;color:var(--fg);border:1px solid var(--border);padding:3px 6px;border-radius:4px;">
+      <option value="">所有等级</option><option value="INFO">INFO</option>
+      <option value="WARN">WARN</option><option value="ALERT">ALERT</option>
+      <option value="CRITICAL">CRITICAL</option>
+    </select>
+    <select id="evt-channel" style="background:#21262d;color:var(--fg);border:1px solid var(--border);padding:3px 6px;border-radius:4px;">
+      <option value="">所有频道</option>
+    </select>
+    <button class="btn" id="evt-refresh">刷新</button>
+    <span class="loading" id="evt-loading"></span>
+  </div>
+  <table id="evt-table">
+    <thead><tr><th>时间</th><th>等级</th><th>频道</th><th>规则</th><th>摘要</th><th>操作</th></tr></thead>
+    <tbody id="evt-body"></tbody>
+  </table>
+  <div style="margin-top: 8px;">
+    <button class="btn" id="evt-prev">上一页</button>
+    <span id="evt-page">1</span>
+    <button class="btn" id="evt-next">下一页</button>
+  </div>
+</div>
+
+<!-- Rules Panel -->
+<div class="panel" id="panel-rules">
+  <div id="rules-list"></div>
+</div>
+
+<!-- Editor Panel -->
+<div class="panel" id="panel-editor">
+  <h2>JSON 编辑器</h2>
+  <textarea id="editor"></textarea>
+  <div style="margin-top: 8px;">
+    <button class="btn btn-success" id="editor-save">保存</button>
+    <button class="btn" id="editor-load">重新加载</button>
+    <button class="btn" id="editor-reset">恢复默认</button>
+  </div>
+  <pre id="editor-result" style="margin-top:8px;font-size:11px;color:#8b949e;"></pre>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = '/api/monitor';
+let currentPage = 1;
+let rulesData = [];
+
+// ── Tabs ──
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.onclick = () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('panel-' + tab.dataset.panel).classList.add('active');
+    if (tab.dataset.panel === 'stats') loadStats();
+    if (tab.dataset.panel === 'rules') loadRules();
+    if (tab.dataset.panel === 'events') loadEvents();
+    if (tab.dataset.panel === 'editor') loadEditor();
+  };
+});
+
+// ── Toast ──
+function toast(msg, ok) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show ' + (ok ? 'toast-success' : 'toast-error');
+  setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+// ── Stats ──
+async function loadStats() {
+  const res = await fetch(API + '/stats');
+  const s = await res.json();
+  const grid = document.getElementById('stat-grid');
+  grid.innerHTML = `
+    <div class="stat-card"><div class="val">${s.ticks || 0}</div><div class="label">轮询次数</div></div>
+    <div class="stat-card"><div class="val">${s.rules_count || 0}</div><div class="label">规则数</div></div>
+    <div class="stat-card"><div class="val" style="color:var(--info)">${s.events_today || 0}</div><div class="label">今日事件</div></div>
+    <div class="stat-card"><div class="val" style="color:var(--alert)">${s.alerts_today || 0}</div><div class="label">今日告警</div></div>
+    <div class="stat-card"><div class="val" style="color:var(--critical)">${s.unacknowledged || 0}</div><div class="label">未确认</div></div>`;
+  // Recent unacknowledged
+  const evtRes = await fetch(API + '/events?unack=1&perPage=20');
+  const evtData = await evtRes.json();
+  const tbody = document.getElementById('unack-body');
+  tbody.innerHTML = evtData.events.map(e => `
+    <tr>
+      <td>${e.created_at?.slice(11,19)}</td>
+      <td class="level-${e.alert_level.toLowerCase()}">${e.alert_level}</td>
+      <td>${e.channel_name}</td>
+      <td>${e.rule_id}</td>
+      <td>${e.summary?.slice(0,80)}</td>
+      <td><button class="btn btn-success" onclick="ackEvt('${e.id}')">确认</button><button class="btn" onclick="clearEvt('${e.id}')">清除</button></td>
+    </tr>`).join('') || '<tr><td colspan="6">暂无未确认事件</td></tr>';
+}
+
+async function ackEvt(id) {
+  await fetch(API + '/events/' + id + '/ack', { method: 'POST' });
+  toast('已确认', true);
+  loadStats();
+}
+async function clearEvt(id) {
+  await fetch(API + '/events/' + id + '/clear', { method: 'POST' });
+  toast('已清除', true);
+  loadStats();
+}
+
+// ── Events ──
+let evtTotalPages = 1;
+async function loadEvents() {
+  const level = document.getElementById('evt-level').value;
+  const channel = document.getElementById('evt-channel').value;
+  let url = API + '/events?page=' + currentPage;
+  if (level) url += '&alert_level=' + level;
+  if (channel) url += '&channel=' + encodeURIComponent(channel);
+  document.getElementById('evt-loading').textContent = '加载中...';
+  const res = await fetch(url);
+  const data = await res.json();
+  document.getElementById('evt-loading').textContent = '';
+  document.getElementById('evt-page').textContent = data.page;
+  document.getElementById('evt-body').innerHTML = data.events.map(e => `
+    <tr>
+      <td>${e.created_at?.slice(11,19)}</td>
+      <td class="level-${e.alert_level.toLowerCase()}">${e.alert_level}</td>
+      <td>${e.channel_name}</td>
+      <td>${e.rule_id}</td>
+      <td>${e.summary?.slice(0,100)}</td>
+      <td><button class="btn btn-success" onclick="ackEvt('${e.id}')">✓</button><button class="btn" onclick="clearEvt('${e.id}')">✗</button></td>
+    </tr>`).join('') || '<tr><td colspan="6" class="loading">暂无事件</td></tr>';
+  evtTotalPages = data.totalPages;
+}
+
+document.getElementById('evt-refresh').onclick = () => loadEvents();
+document.getElementById('evt-prev').onclick = () => { if (currentPage > 1) { currentPage--; loadEvents(); } };
+document.getElementById('evt-next').onclick = () => { if (currentPage < evtTotalPages) { currentPage++; loadEvents(); } };
+
+// ── Rules ──
+async function loadRules() {
+  const res = await fetch(API + '/rules');
+  rulesData = await res.json().then(r => r.rules);
+  document.getElementById('rules-list').innerHTML = rulesData.map(r => `
+    <div class="rule-card ${r.enabled ? '' : 'disabled'}">
+      <span class="rule-name">${r.name}</span>
+      <span class="rule-level rule-level-${r.alert_level}">${r.alert_level}</span>
+      <span style="float:right;font-size:11px;color:#8b949e">${r.enabled ? 'ON' : 'OFF'}</span>
+      <div class="rule-actions">
+        <button class="btn btn-success" onclick="toggleRule('${r.id}')">${r.enabled ? '禁用' : '启用'}</button>
+        <button class="btn btn-danger" onclick="deleteRule('${r.id}')">删除</button>
+      </div>
+    </div>`).join('') || '<p class="loading">暂无规则</p>';
+}
+
+async function toggleRule(id) {
+  await fetch(API + '/rules/' + id + '/toggle', { method: 'POST' });
+  toast('状态已切换', true);
+  loadRules();
+}
+
+async function deleteRule(id) {
+  if (!confirm('确认删除此规则?')) return;
+  await fetch(API + '/rules/' + id + '/delete', { method: 'POST' });
+  toast('已删除', true);
+  loadRules();
+}
+
+// ── Editor ──
+async function loadEditor() {
+  const res = await fetch(API + '/rules');
+  rulesData = await res.json().then(r => r.rules);
+  document.getElementById('editor').value = JSON.stringify(rulesData, null, 2);
+  document.getElementById('editor-result').textContent = '';
+}
+
+document.getElementById('editor-save').onclick = async () => {
+  const text = document.getElementById('editor').value;
+  let rules;
+  try { rules = JSON.parse(text); } catch (error) {
+    document.getElementById('editor-result').textContent = 'JSON 解析错误: ' + error;
+    toast('JSON 错误', false); return;
+  }
+  const res = await fetch(API + '/rules', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ rules }) });
+  const result = await res.json();
+  document.getElementById('editor-result').textContent = JSON.stringify(result, null, 2);
+  toast(result.success ? '保存成功 (' + result.saved + ' 条规则)' : '保存失败', result.success);
+};
+
+document.getElementById('editor-load').onclick = loadEditor;
+
+document.getElementById('editor-reset').onclick = async () => {
+  if (!confirm('确认恢复默认规则?')) return;
+  rulesData = []; // Force re-seed on next load
+  await fetch(API + '/rules');
+  loadEditor();
+  toast('已恢复默认', true);
+};
+
+// ── Init ──
+loadStats();
+// Auto-refresh every 15s
+setInterval(loadStats, 15000);
+</script>
+</body>
+</html>

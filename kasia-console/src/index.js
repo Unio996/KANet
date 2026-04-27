@@ -135,6 +135,10 @@ await registerPortfolioRoutes(fastify);
 await registerBackupRoutes(fastify);
 await registerBudgetRoutes(fastify);
 
+// NWT-V3 / Qclaude monitor 系统 — route 必须在 fastify.listen 之前注册
+import { registerMonitorRoutes } from './api/monitor-dashboard.js';
+await registerMonitorRoutes(fastify);
+
 // Exchange: expire stale offers + timeout stuck verifications + stale dispute check
 // + cleanup orphan accepts.
 // T-J1-19e (J2 RCA 修案 1): 5min tick → 30s. 缩窄 race 窗口 (offer expired 但仍 'open',
@@ -371,15 +375,13 @@ startCompletionWatcher();
 import { start as startBscIncomingWatcher } from './services/bsc-incoming-watcher.js';
 startBscIncomingWatcher();
 
-// NWT-V3 (2026-04-27): monitor — 频道事件监听与告警规则引擎
-// NWT 19:35 emergency disable: monitor-service.js + monitor-dashboard.js 当前 WIP 含语法 bug 阻 console 启
-//   monitor-service.js:216 `lastTs` 重复声明 (我先 hotfix 改 latestTs)
-//   monitor-dashboard.js:240 template literal `class=` 引号问题 (待原作者修)
-// 两 import 暂禁, 等原作者 fix 后恢复. 不修 WIP 代码, 只解阻塞.
-// import { startMonitor, stopMonitor } from './services/monitor-service.js';
-// import { registerMonitorRoutes } from './api/monitor-dashboard.js';
-// registerMonitorRoutes(fastify);
-// startMonitor();
+// NWT-V3 / Qclaude (2026-04-27): monitor 服务启动 (route 在 fastify.listen 前已注册, 见 line 137)
+// NWT 19:50 修 3 个 bug:
+//   1. monitor-service.js:216 lastTs 重复声明 → rename latestTs
+//   2. monitor-dashboard.js inline HTML template literal 嵌套 backtick 解析错 → 抽出 monitor-dashboard.html
+//   3. registerMonitorRoutes 调用位置错 (在 fastify.listen 之后) → 上移到 line 137 跟其他 routes 一起
+import { startMonitor, stopMonitor } from './services/monitor-service.js';
+startMonitor();
 
 // Graceful shutdown — stop all child processes
 async function shutdown() {
