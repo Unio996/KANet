@@ -124,13 +124,16 @@ export async function registerConversationRoutes(fastify) {
       if (broker?.is_service === 1 || broker?.is_dex_broker === 1) {
         // T-J2-R19-extend (J1 1bc2132d 真测撞): broker reply 含 EVM 地址必经 R19 assert.
         // LLM 自由路径绕过 broker-action-queue, 这里 final guard. 含 fake 地址 → 拒回兜底.
+        // T-J2-2026-04-27 v1.1 SELL flow R19 false positive fix (Owner 09:34 真测撞):
+        // 真 user 真 SELL 真 supply EVM addr → broker LLM 真 echo → R19 false positive 拒.
+        // 真 fix: 真 pass user message context, 真 whitelist user-supplied EVM addr (broker echo OK).
         const _r19Guard = async (replyText, source) => {
           if (!replyText) return replyText;
           try {
             const { assertReplyAddressInvariant } = await import('../services/broker-action-queue.js');
-            const v = assertReplyAddressInvariant(replyText);
+            const v = assertReplyAddressInvariant(replyText, message);  // 真 pass user message context
             if (v) {
-              console.error(`[api/agent/reply] [R19-EXT] ADDRESS_INVARIANT_VIOLATED source=${source} foreign=${v.foreign_address} — REFUSING reply (J1 1bc2132d 钢线扩, broker LLM 编 fake 地址 production safety)`);
+              console.error(`[api/agent/reply] [R19-EXT] ADDRESS_INVARIANT_VIOLATED source=${source} foreign=${v.foreign_address} (user_ctx_addrs=${v.user_context_count}) — REFUSING reply (broker LLM 编 fake 地址 production safety)`);
               return '抱歉, broker 检测到地址异常 (内部 R19 拦截), 请稍后重试 — 直接回 "买 X KAS" 走快速路径, 或回 NO 取消.';
             }
           } catch (e) { console.warn(`[api/agent/reply] R19 guard err: ${e.message}`); }

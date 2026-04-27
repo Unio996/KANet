@@ -60,14 +60,27 @@ function assertAddressInvariant(item) {
 // broker LLM reply text 不经 broker-action-queue (handleLlmDialog return text → conversations.js reply.send),
 // R19 layer 4 在 queue 内 assert 没覆盖. 加 assertReplyAddressInvariant 给 conversations.js 用,
 // 任何 broker reply text 含 0x{40} 不在 broker wallets → 拒回 + log + 兜底.
-export function assertReplyAddressInvariant(replyText) {
+//
+// T-J2-2026-04-27 v1.1 SELL flow R19 false positive fix (Owner 真测 09:34 撞):
+// 真 user '卖 99 KAS, BSC, 0x1417...' → broker LLM 真 echo user addr 真 R19 false positive (拒).
+// 真 fix: 真 second arg userContext (string), 真 EVM addr from user msg → 真 whitelist (broker echo 真 OK).
+// 真 user echo own addr 真 user 自伤 (真转回自己 EVM), 真不影响 broker 真 production safety.
+// R19 真 only protect broker hallucinate fake addr (真 user 真转 broker 真 hallucinate 真 lost).
+export function assertReplyAddressInvariant(replyText, userContext = '') {
   if (!replyText || typeof replyText !== 'string') return null;
   const evmMatches = replyText.match(/0x[a-fA-F0-9]{40}/g) || [];
   if (evmMatches.length === 0) return null;
   const own = _ownEvmAddrSet();
+  // 真 whitelist user-supplied addr from message context (SELL flow user 真给 EVM addr 真 echo OK)
+  const userAddrs = new Set();
+  if (typeof userContext === 'string' && userContext) {
+    const userEvm = userContext.match(/0x[a-fA-F0-9]{40}/g) || [];
+    for (const a of userEvm) userAddrs.add(a.toLowerCase());
+  }
   for (const addr of evmMatches) {
-    if (!own.has(addr.toLowerCase())) {
-      return { violated: true, foreign_address: addr, own_count: own.size };
+    const low = addr.toLowerCase();
+    if (!own.has(low) && !userAddrs.has(low)) {
+      return { violated: true, foreign_address: addr, own_count: own.size, user_context_count: userAddrs.size };
     }
   }
   return null;
