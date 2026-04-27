@@ -803,6 +803,62 @@ Sophie LLM (LAN-Qwen3.6) → broker: '收。USDC 收款地址: kaspa:qpjjv2...' 
 
 ---
 
+## 规则 27 · 安全 invariant 必区分 own-set vs allow-set, 真不 over-catch legitimate user input echo
+
+**来源**: Owner 09:34 真测 SELL '我要卖 99 KAS, BSC, 0x1417cfDaD7a5Be7d3D28350010194CFcABf2596D' → broker LLM 真 echo Owner 真 sell addr → R19-EXT 真 single-direction strict (broker reply EVM addr 必 broker BSC own wallet) → **false positive reject** "broker 检测到地址异常". J2 #3 真 fix 真 whitelist user-supplied addr (2026-04-27 09:40 ship).
+
+**症状**: invariant 真 protect 真 hallucinate fake addr (R19 真原意), 但 single strict 'addr ⊆ own_set' 真 over-catch 真 legitimate scenario:
+- user 真 SELL flow 真 provide 真 own recv addr (broker 真 deliver USDT 真 user EVM)
+- broker LLM 真 echo confirmation ('好, 卖 99 KAS, USDT 收 0x1417...' )
+- R19 regex 真 see 0x1417... ∉ broker wallets → reject 真 false positive
+
+**Wrong** (R19-EXT v1, single 'own' strict):
+```js
+export function assertReplyAddressInvariant(replyText) {
+  const evmMatches = replyText.match(/0x[a-fA-F0-9]{40}/g) || [];
+  const own = _ownEvmAddrSet();
+  for (const addr of evmMatches) {
+    if (!own.has(addr.toLowerCase())) return { violated: true, foreign_address: addr };
+  }
+  return null;
+}
+```
+
+真 SELL flow 真 user echo legit → 拒.
+
+**Right** (R19-EXT v2, J2 #3 02:40 真 ship — own ∪ allow_set):
+```js
+export function assertReplyAddressInvariant(replyText, userContext = '') {
+  const evmMatches = replyText.match(/0x[a-fA-F0-9]{40}/g) || [];
+  const own = _ownEvmAddrSet();
+  // user-supplied addrs 真 conversation context 真 whitelist (legitimate echo path)
+  const userAddrs = new Set();
+  if (userContext) {
+    const userEvm = userContext.match(/0x[a-fA-F0-9]{40}/g) || [];
+    for (const a of userEvm) userAddrs.add(a.toLowerCase());
+  }
+  for (const addr of evmMatches) {
+    if (!own.has(addr.toLowerCase()) && !userAddrs.has(addr.toLowerCase())) {
+      return { violated: true, foreign_address: addr };
+    }
+  }
+  return null;
+}
+```
+
+caller 真 pass user message context: `_r19Guard(replyText, userMessage)` → invariant 真 widen.
+
+**Why**: invariant strict-set 真 design 真 trade-off — too strict (own only) → false positive 真 legitimate echo; too loose (任意 addr OK) → 真 hallucinate fake addr 真过. R27 真 push 真**显式 model** 真 'own_set' (broker 自有) + 'allow_set' (per-conversation user-supplied) 真双 set 真 union check. 真原 R19 invariant 真意 (block hallucinate fake) 保留 + 真 legitimate user echo 真 unblock.
+
+**怎么避** (3 步 SOP, 真设计 invariant 时):
+1. **真 enumerate scenarios** — 真 happy path + 真 legitimate alt-path (e.g. SELL flow user echo) 都 list. 真 single-set invariant 真 over-catch 哪 legit case?
+2. **真 model own_set + allow_set 真双 set** — 真 own 真严 (broker self 真 wallet); allow 真 dynamic (per-context, e.g. user msg) 真 widen
+3. **真 test 真双 case** — both legit echo (whitelist) + true hallucinate (catch) 必 covered. 真 unit test 真 case 13a/b 同模式.
+
+**适用范围**: 任何 'addr/value ∈ allowed_set' invariant 真 design — 真 own_set strict 真 hallucinate catch + 真 dynamic allow_set 真 per-context legitimate widen 真 dual-set pattern. 真 generic 反 over-catch.
+
+---
+
 ## 如何扩充本档案
 
 新陷阱踩过后**立即**追加，格式保持：
