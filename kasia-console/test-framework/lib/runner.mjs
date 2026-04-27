@@ -653,6 +653,44 @@ const assertions = {
     return assertions.direction_must_match(step_result, expected, ctx);
   },
 
+  // R-NWT-2026-04-28 7a-2 phase ε: second_send_blocked — parallel 2nd action 真**真**真 blocked (anti-spam).
+  // probe schema: 2 send_dm in parallel (rapid duplicate). expect 2nd reply empty / skip_reason set / anti-spam keyword.
+  // step_result.results[1] check.
+  // 兼容两种 probe pattern: (1) parallel 2 send → step_result.results[1]; (2) sequential 2 send →
+  // expect 挂在 last step, step_result 真是第二 send 自己 (reply/skip_reason).
+  second_send_blocked(step_result, _expected, ctx) {
+    let target;
+    if (Array.isArray(step_result.results) && step_result.results.length >= 2) {
+      target = step_result.results[1];
+    } else if (step_result.reply !== undefined) {
+      target = step_result;  // sequential — last step IS the duplicate send
+    } else {
+      return { pass: false, expected: '2nd send result', actual: 'unknown shape', msg: 'second_send_blocked needs parallel(≥2) or sequential send_message step_result' };
+    }
+    const reply = String(target.reply || '');
+    const blocked = !reply.trim() || !!target.skip_reason || /duplicate|spam|similar|cooldown|rate.?limit|too.rapid|fuzzy/i.test(reply);
+    return blocked
+      ? { pass: true, expected: 'second blocked', actual: `reply='${reply.slice(0, 40)}', skip='${target.skip_reason || ''}'` }
+      : { pass: false, expected: 'second blocked', actual: `reply='${reply.slice(0, 40)}', skip='${target.skip_reason || ''}'`, msg: '2nd send not blocked (got real reply, no anti-spam indicator)' };
+  },
+
+  // R-NWT-2026-04-28 7a-2 phase ε: anti_spam_reason — regex match on 2nd send reason / reply.
+  anti_spam_reason(step_result, expected, ctx) {
+    let target;
+    if (Array.isArray(step_result.results) && step_result.results.length >= 2) {
+      target = step_result.results[1];
+    } else if (step_result.reply !== undefined) {
+      target = step_result;
+    } else {
+      target = {};
+    }
+    const reasonText = String(target.skip_reason || target.reply || '');
+    const re = expected instanceof RegExp ? expected : new RegExp(String(expected), 'i');
+    return re.test(reasonText)
+      ? { pass: true, expected: re.source, actual: reasonText.slice(0, 60) }
+      : { pass: false, expected: re.source, actual: reasonText.slice(0, 60), msg: `anti-spam reason regex did not match (want /${re.source}/)` };
+  },
+
   // R-NWT-2026-04-28 7a-2 phase δ: offer_published / no_offer_published — query exchange_offers DB.
   // probe schema: `offer_published: true` (expect ≥1 offer this test session) OR `no_offer_published: true` (expect 0).
   // 范围: ctx._test_started_at 之后 created_at 的 exchange_offers (any maker, 简化 — 同时跑多 case 可能误差).

@@ -34,6 +34,8 @@ const SUPPORTED_ASSERTIONS = new Set([
   'reply_should_acknowledge_conditions',
   // R-NWT-2026-04-28 7a-2 phase δ: DB query exchange_offers (test session scoped by ctx._test_started_at)
   'offer_published', 'no_offer_published',
+  // R-NWT-2026-04-28 7a-2 phase ε: anti-spam (parallel 2nd send blocked / reason regex)
+  'second_send_blocked', 'anti_spam_reason',
 ]);
 
 // Aliases — common probe DSL field names → existing runner assertion names
