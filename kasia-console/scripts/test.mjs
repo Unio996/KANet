@@ -43,16 +43,26 @@ async function main() {
   const caseFile = arg('case');
   const domain = arg('domain');
   const tag = arg('tag');  // 用于 git hook critical 优先 (--tag=critical 跑所有标 critical 的 case)
+  const adversarial = arg('adversarial', args.includes('--adversarial') ? '' : null);  // J1 phase 7a: load probes.mjs probes
   const allFlag = args.includes('--all');
   const quietFlag = args.includes('--quiet');  // 只输出 summary, 不 dump 每 case 详情 (post-commit 用)
-  if (!caseFile && !domain && !tag && !allFlag) {
+  if (!caseFile && !domain && !tag && !allFlag && adversarial === null) {
     console.log('Usage: node scripts/test.mjs --case=<path> | --domain=<broker|seeker|...> | --tag=<critical|security|...> | --all');
+    console.log('       --adversarial[=<category>]  load probes.mjs adversarial probes (phase 7a, --adversarial=race for race only)');
     console.log('       --quiet  仅输出 summary');
     process.exit(1);
   }
 
-  const files = await findCases({ caseFile, domain, all: allFlag || !!tag });
-  if (files.length === 0) {
+  // J1 phase 7a: load adversarial probes via adapter (probe DSL → testCase objects, not file-based)
+  let adversarialCases = [];
+  if (adversarial !== null) {
+    const { loadAdversarialCases } = await import('../test-framework/adversarial/load-probes.mjs');
+    const opts = adversarial ? { category: adversarial } : {};
+    adversarialCases = await loadAdversarialCases(opts);
+  }
+
+  const files = adversarialCases.length > 0 ? [] : await findCases({ caseFile, domain, all: allFlag || !!tag });
+  if (files.length === 0 && adversarialCases.length === 0) {
     console.log('No matching test cases found.');
     process.exit(1);
   }
@@ -60,13 +70,15 @@ async function main() {
   let totalPass = 0, totalFail = 0, totalSkipped = 0;
   const summary = [];
   const isBatch = !caseFile;  // batch = --domain / --all / --tag (multiple files)
+  // Build unified case list: file-loaded + adapter-loaded adversarial probes
+  const casesToRun = [];
   for (const file of files) {
     const mod = await import(pathToFileURL(file).href);
-    const testCase = mod.default;
-    if (!testCase?.id) {
-      if (!quietFlag) console.log(`SKIP (no default export): ${file}`);
-      continue;
-    }
+    if (mod.default?.id) casesToRun.push(mod.default);
+    else if (!quietFlag) console.log(`SKIP (no default export): ${file}`);
+  }
+  for (const adv of adversarialCases) casesToRun.push(adv);
+  for (const testCase of casesToRun) {
     // tag filter (case 必含此 tag)
     if (tag && !(testCase.tags || []).includes(tag)) continue;
     if (isBatch && testCase.skip_in_batch) {
