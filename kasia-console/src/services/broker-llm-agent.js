@@ -345,6 +345,102 @@ function _detectLang(message) {
   return 'en';
 }
 
+// T-J2-2026-04-27 Bug-Z9 fix (J1 82429088 vote α + cn_newbie persona 真测撞):
+// broker server-side cross-turn _pendingFields tracking. 真 root: handleLlmDialog 旧 path
+// _detectIntent 真 only check current msg, multi-turn 'BSC' single-token 真 lose context.
+// Qwen3.6 multi-turn instruction-following 弱 (Bug-Z6/Z7/Z9 三连证), 不靠 LLM 真 reconstruct
+// state. 真 deterministic transducer: extract from current msg → merge prev state → 字段齐
+// 调 preview tool / 字段缺反问 missing field. LLM 只在 confirm/cancel/闲聊 接管.
+const _pendingFields = new Map();  // peer → { direction, give_asset, qty, chain, address, expires_at }
+const PENDING_FIELDS_TTL_MS = 30 * 60 * 1000;
+
+function _getPendingFields(peer) {
+  const f = _pendingFields.get(peer);
+  if (!f) return null;
+  if (Date.now() > f.expires_at) { _pendingFields.delete(peer); return null; }
+  return f;
+}
+
+function _setPendingFields(peer, data) {
+  _pendingFields.set(peer, { ...data, expires_at: Date.now() + PENDING_FIELDS_TTL_MS });
+}
+
+function _clearPendingFields(peer) { _pendingFields.delete(peer); }
+
+export function _testClearPendingFields(peer) { if (peer) _pendingFields.delete(peer); else _pendingFields.clear(); }
+
+// extract structured fields from a single user msg. paired qty+asset (Bug-Z7 sediment).
+function _extractFieldsFromMsg(msg) {
+  const m = String(msg || '');
+  const intent = _detectIntent(m);
+  const qtyAsset = m.match(/(\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*(kas|usdt|usdc)/i);
+  const chainMatch = m.match(/\b(BSC|BNB|Polygon|POL|SOL|Solana|TRON|ETH)\b/i);
+  const evmMatch = m.match(/0x[a-fA-F0-9]{40}/);
+  return {
+    direction: intent || null,
+    qty: qtyAsset ? parseFloat(qtyAsset[1]) : null,
+    give_asset: qtyAsset ? qtyAsset[2].toUpperCase() : null,
+    chain: chainMatch ? _normalizeChain(chainMatch[1]) : null,
+    address: evmMatch ? evmMatch[0] : null,
+  };
+}
+
+// fresh wins over prev (Bug-Z5 sediment 'current msg first'); prev fills missing only.
+function _mergeFields(prev, fresh) {
+  return {
+    direction: fresh.direction || prev?.direction || null,
+    qty: fresh.qty || prev?.qty || null,
+    give_asset: fresh.give_asset || prev?.give_asset || null,
+    chain: fresh.chain || prev?.chain || null,
+    address: fresh.address || prev?.address || null,
+  };
+}
+
+function _normalizeChain(s) {
+  const u = String(s || '').toUpperCase();
+  if (u === 'BSC' || u === 'BNB') return 'bnb';
+  if (u === 'POLYGON' || u === 'POL') return 'polygon';
+  if (u === 'SOL' || u === 'SOLANA') return 'sol';
+  if (u === 'TRON') return 'tron';
+  if (u === 'ETH') return 'eth';
+  return s.toLowerCase();
+}
+
+// SELL 总要收款地址; BUY KAS 不要 (broker auto 用 user_kasia); BUY stable 要 EVM 收款 addr.
+function _intentNeedsAddr(direction, give_asset) {
+  if (direction === 'sell') return true;
+  if (direction === 'buy' && give_asset && give_asset !== 'KAS') return true;
+  return false;
+}
+
+function _allFieldsReady(f) {
+  if (!f.direction || !f.qty || !f.give_asset || !f.chain) return false;
+  if (_intentNeedsAddr(f.direction, f.give_asset) && !f.address) return false;
+  return true;
+}
+
+function _askMissingField(f, lang) {
+  const verb = f.direction === 'sell' ? '卖' : '买';
+  const verbEn = f.direction === 'sell' ? 'sell' : 'buy';
+  if (!f.qty || !f.give_asset) {
+    return lang === 'zh'
+      ? `好的, 你想${verb}什么 (KAS / USDT / USDC)? 多少?`
+      : `Got it, what do you want to ${verbEn} (KAS / USDT / USDC)? How many?`;
+  }
+  if (!f.chain) {
+    return lang === 'zh'
+      ? `好的, ${verb} ${f.qty} ${f.give_asset}. 用哪个链? (BSC / Polygon / SOL / TRON)`
+      : `Got it, ${verbEn} ${f.qty} ${f.give_asset}. Which chain? (BSC / Polygon / SOL / TRON)`;
+  }
+  if (_intentNeedsAddr(f.direction, f.give_asset) && !f.address) {
+    const hint = f.direction === 'sell' ? '收 USDT 的' : `收 ${f.give_asset} 的`;
+    return lang === 'zh'
+      ? `好的, ${verb} ${f.qty} ${f.give_asset}, ${f.chain.toUpperCase()}. 你${hint} EVM 钱包地址 (0x... 42 位)?`
+      : `Got it, ${verbEn} ${f.qty} ${f.give_asset}, ${f.chain.toUpperCase()}. Your EVM wallet address (0x... 42 chars)?`;
+  }
+  return lang === 'zh' ? '好的, 准备出报价...' : 'Got it, preparing quote...';
+}
+
 // 主入口: conversations.js fork 调
 export async function handleLlmDialog(peer, message) {
   const history = _loadHistory(peer);
@@ -355,24 +451,39 @@ export async function handleLlmDialog(peer, message) {
   const msgRaw = String(message || '');
   const byteLen = Buffer.byteLength(msgRaw, 'utf8');
   const charCodes = Array.from(msgRaw.slice(0, 6)).map(c => c.codePointAt(0).toString(16)).join(',');
-  const intent = _detectIntent(message);
-  const lastAssistant = [...history].reverse().find(m => m.role === 'assistant');
-  const alreadyDeterministic = lastAssistant && /哪个链|哪条链|which chain|qué cadena|cadena para/i.test(lastAssistant.content || '');
-  console.log(`[broker-llm DIAG] peer=${peer?.slice(-12)} msg.chars=${msgRaw.length} msg.utf8bytes=${byteLen} codes=[${charCodes}] msg="${msgRaw.slice(0,40)}" history.len=${history.length} intent=${intent} alreadyDet=${!!alreadyDeterministic}`);
-  // T-NWT-25 (Owner 04-26 11:55 钦定 A+C): 恢复 deterministic regex 命中 → 100% 模板
-  // (T-NWT-24 撤太狠, Qwen 中文 5/7 fail). regex 没命中 → 落 LLM (Qwen 70% 稳, C 部分接受).
-  // _detectIntent 已扩展 (T-J1-19k + 现 T-NWT-25 加 拿/收/抢/入手/取/进/求/欲 等).
-  if (intent && !alreadyDeterministic) {
-    const qty = _extractQty(message);
-    const asset = _detectAsset(message);
-    // T-J2-2026-04-27 v1.1: per-asset minQty (KAS=1.0, USDT/USDC=0.1 from asset-registry)
-    const minQty = asset === 'KAS' ? 1.0 : 0.1;
-    if (intent === 'buy' && qty != null && qty < minQty) {
-      return `抱歉, 最小买 ${minQty} ${asset} (broker fee + dust 保护). 改大一点吧.`;
+
+  // T-J2-2026-04-27 Bug-Z9 fix: deterministic _pendingFields cross-turn transducer.
+  // extract current msg → merge prev state → 字段齐调 preview tool / 缺则反问.
+  const fresh = _extractFieldsFromMsg(message);
+  const prev = _getPendingFields(peer);
+  const merged = _mergeFields(prev, fresh);
+  console.log(`[broker-llm DIAG] peer=${peer?.slice(-12)} msg.chars=${msgRaw.length} msg.utf8bytes=${byteLen} codes=[${charCodes}] msg="${msgRaw.slice(0,40)}" history.len=${history.length} fresh=${JSON.stringify(fresh)} prev=${JSON.stringify(prev)} merged=${JSON.stringify(merged)}`);
+
+  if (merged.direction) {
+    const minQty = merged.give_asset === 'KAS' ? 1.0 : 0.1;
+    if (merged.qty != null && merged.qty < minQty) {
+      _clearPendingFields(peer);
+      return `抱歉, 最小 ${minQty} ${merged.give_asset || 'KAS'} (broker fee + dust 保护). 改大一点吧.`;
     }
     const lang = _detectLang(message);
-    return _deterministicFirstReply(intent, qty, lang, asset);
+    if (_allFieldsReady(merged)) {
+      // 字段齐, 直接调 preview_order tool, return preview_text. clear pending fields (后续 'YES'走 LLM finalize).
+      _clearPendingFields(peer);
+      const toolResult = await _executeTool(peer, 'preview_order', {
+        direction: merged.direction,
+        qty: merged.qty,
+        chain: merged.chain,
+        give_asset: merged.give_asset || 'KAS',
+        address: merged.address || null,
+      });
+      return toolResult?.preview_text || (toolResult?.ok ? `✓ 订单准备就绪 (${merged.direction} ${merged.qty} ${merged.give_asset})` : '抱歉, 处理订单失败, 请重发或回 NO 取消.');
+    }
+    // 字段不齐 → save state + 反问 missing field (deterministic, 不调 LLM)
+    _setPendingFields(peer, merged);
+    return _askMissingField(merged, lang);
   }
+
+  // 没 direction (current msg 也没 prev 也没) → fall to LLM (用户 'YES' / 'NO' / 闲聊 / 'maker 是谁?')
   history.push({ role: 'user', content: message });
   let llm = await _callLlm(history);
   if (!llm) return '抱歉, 我这边 LLM 卡了一下, 请稍后再试. 或直接回 "买 5 KAS" / "卖 5 KAS" 走快速通道.';
