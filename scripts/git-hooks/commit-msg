@@ -19,21 +19,24 @@ if echo "$COMMIT_MSG" | grep -qE "^(Merge |Revert )"; then
   exit 0
 fi
 
-# Bootstrap exception bypass (规 13 docs/COLLAB-REFORM.md Bootstrap 段)
+# Bootstrap exception scope (J2 push back): bypass coord-ack only, still enforce acknowledged for critical 8.
+BOOTSTRAP=0
 if echo "$COMMIT_MSG" | grep -qE "^bootstrap-exception:"; then
-  echo "[commit-msg] bootstrap-exception detected — skip reform enforcement"
-  exit 0
+  BOOTSTRAP=1
+  echo "[commit-msg] bootstrap-exception detected — skip coord-ack check (acknowledged check 仍 enforce)"
 fi
 
 # Check coord-ack: line present (规 13 default OR emergency)
-if ! echo "$COMMIT_MSG" | grep -qE "^coord-ack: ([a-f0-9]+|emergency-Z[a-zA-Z0-9-]+)"; then
-  echo "[commit-msg] FAIL: missing coord-ack: line (规 13 0 容忍)"
-  echo "[commit-msg] Add one of:"
-  echo "  coord-ack: <ack-broadcast-tx-hash>          (default, 规 13 default)"
-  echo "  coord-ack: emergency-Z<bug-id>             (Owner 真测撞 production bug)"
-  echo "  bootstrap-exception: <reason>              (chicken-and-egg, pre-hook ship 前)"
-  echo "[commit-msg] See docs/COLLAB-REFORM.md 规 13"
-  exit 1
+if [ "$BOOTSTRAP" -eq 0 ]; then
+  if ! echo "$COMMIT_MSG" | grep -qE "^coord-ack: ([a-f0-9]+|emergency-Z[a-zA-Z0-9-]+)"; then
+    echo "[commit-msg] FAIL: missing coord-ack: line (规 13 0 容忍)"
+    echo "[commit-msg] Add one of:"
+    echo "  coord-ack: <ack-broadcast-tx-hash>          (default, 规 13 default)"
+    echo "  coord-ack: emergency-Z<bug-id>             (Owner 真测撞 production bug)"
+    echo "  bootstrap-exception: <reason>              (chicken-and-egg, pre-hook ship 前)"
+    echo "[commit-msg] See docs/COLLAB-REFORM.md 规 13"
+    exit 1
+  fi
 fi
 
 # Check critical 8 file: if changed, require acknowledged: line per surfaced anti-pattern (规 10)
@@ -53,7 +56,7 @@ NEED_ACK=0
 for cf in "${CRITICAL_FILES[@]}"; do
   if echo "$CHANGED" | grep -qF "$cf"; then
     if [ -f "$cf" ]; then
-      SURFACED=$(grep -nE 'T-J[12]-|T-NWT-|撤回|灾难|不准|拒绝' "$cf" 2>/dev/null | head -10)
+      SURFACED=$(grep -nE 'T-J[0-9]+-|T-NWT-|Bug-[A-Z][0-9]+|撤回|灾难|不准|拒绝' "$cf" 2>/dev/null | head -10)
       if [ -n "$SURFACED" ]; then
         echo "[commit-msg] Critical file '$cf' has anti-pattern history:"
         echo "$SURFACED" | sed 's/^/    /'

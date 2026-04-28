@@ -30,7 +30,7 @@ for f in $CHANGED; do
     *.md|*.json|*.txt|docs/*|*.yaml|*.yml) continue ;;
   esac
   # Grep T-X-X / 撤回 / 灾难 / 不准 anti-pattern history
-  matches=$(grep -nE 'T-J[12]-[a-zA-Z0-9]+|T-NWT-[a-zA-Z0-9]+|撤回|灾难|不准' "$f" 2>/dev/null | head -5)
+  matches=$(grep -nE 'T-J[0-9]+-[a-zA-Z0-9]+|T-NWT-[a-zA-Z0-9]+|Bug-[A-Z][0-9]+|撤回|灾难|不准' "$f" 2>/dev/null | head -5)
   if [ -n "$matches" ]; then
     if [ "$ADVISORY_HITS" -eq 0 ]; then
       echo ""
