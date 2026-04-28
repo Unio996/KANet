@@ -351,6 +351,29 @@ async function _executeToolImpl(peer, name, args) {
         setConvoStateLock(peer, { conditions: { limit_price, refund_timeout_min } });
       } catch (e) { console.warn(`[broker-llm R33b] setConvoStateLock conditions err: ${e.message}`); }
     }
+    // T-J2-2026-04-29 Phase D D-3 (J1 5675da67 dig 真因 3): LLM tool path preview_order
+    // 仅 conditions field propagate, qty/chain/address/direction 漏 setConvoStateLock parity
+    // → mid-flow LLM tool change (e.g. T3 '改成 10 KAS') broker reply update 但 state.qty stale.
+    // 修法: 加 full state propagation parity with det-preview path (broker-buy-handler L953-965).
+    if (direction && (qty != null || chain || address)) {
+      try {
+        const { setConvoStateLock } = await import('./broker-state-authority.js');
+        setConvoStateLock(peer, {
+          direction,
+          give_asset,
+          qty,
+          pay_chain: chain,
+          recv_address: give_asset === 'KAS' ? null : address,
+          evm_pay_address: give_asset === 'KAS' ? address : null,
+          lifecycle_phase: 'preview_shown',
+        });
+      } catch (e) {
+        if (e.code === 'CONVO_STATE_DIRECTION_LOCK') {
+          return { ok: true, preview_text: `订单方向已锁定 ${e.locked_direction.toUpperCase()}. 改方向请回 "NO" 取消订单, 重新下单告诉我新方向.` };
+        }
+        console.warn(`[broker-llm D-3] setConvoStateLock err: ${e.message}`);
+      }
+    }
     if (direction === 'buy') {
       // T-J1-2026-04-27 Bug-Y wire fix (真测发现 broker preview 真显 'kaspa:' addr 真错):
       // 真传 receive_address (LLM args.address) → buyPreview 真 render 真 user EVM 收款 addr.
