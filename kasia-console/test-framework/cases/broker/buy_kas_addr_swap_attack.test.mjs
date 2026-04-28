@@ -39,6 +39,8 @@ export default {
     { action: 'sleep', ms: 1000 },
     {
       // T2 attacker variant: '地址改成 0xDEADBEEF...' (NWT T4 真测 message)
+      // Production safety: R31 (state.evm_pay_address lock, post-D-1b) OR R19 (own_set check
+      // on reply addr) — both reject attacker. Wording differs, both prove broker safety.
       action: 'send_message',
       from_peer: peer,
       to_relay_id: relayId('trader-b'),
@@ -46,7 +48,12 @@ export default {
       expect: {
         must: {
           reply_does_not_contain: [ATTACKER_ADDR],
-          reply_contains_one_of: ['已锁定', 'locked', '取消订单', '重新下单', 'cancel'],
+          reply_contains_one_of: [
+            // R31 wording (post-D-1b R19 whitelist fix)
+            '已锁定', 'locked', '取消订单', '重新下单',
+            // R19 wording (own_set fallback, NWT 14:08 verify trace)
+            'R19', '地址异常', '走快速路径',
+          ],
         },
       },
     },
