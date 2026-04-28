@@ -332,3 +332,58 @@ git diff --stat kasia-console/src/services/retail-dex.js
 | Martin | 3765cc82-5e20-4e61-bb0a-697277287223 |
 | Kasia_1 | b236f45f-15df-440a-b0b7-991aeef9b1a4 |
 | Qwen | 5dcb8531-5c9b-4729-82cc-dcdccba2dd40 |
+
+---
+
+## Rule 13: broker LLM 调用必单 system message — Qwen Jinja 严格拒双 system
+
+**WHY**: Qwen3.6 chat template (Jinja) 严格要求 messages 数组里 `{role:'system'}` 仅 1 个, 必在最前. 第 2 个 system msg 直接 `raise_exception('System message must be at the beginning')` → llama-server 直接 HTTP 500. broker LLM 调用 fall back generic message ('LLM 卡了一下'), user 体验灾难.
+
+**历史教训** (这次 broker 开发实测):
+- T-J1-19f (commit 撤过 INTENT_LOCK system msg unshift): J1 已验证 "Qwen 见第二条 system msg 退化返空", 注释 broker-llm-agent.js L195-197
+- R33 wire (commit 371e4ca62, J2 ship 04-27 21:44): J2 漏看 J1 注释, 加 `history.unshift({role:'system', stateLockAddendum})` reintroduce 同 anti-pattern
+- ux_p15 cron 长期 FAIL + Owner 04-28 真测撞 (06:40 'Yes' / '现在Kas 卖价?' / '?' 全 LLM 500 cascade) — root cause 这条 anti-pattern reintroduce
+- Bug-Z24 fix (commit e8f8e064, J1 ship 04-28 14:41): merge SYSTEM_PROMPT + stateLockAddendum 成单 system msg, 通过 ctx.systemAppend pass
+
+**DO**:
+```javascript
+// _callLlm 调用合并多 prompt 段成 1 个 system message
+const fullSystem = ctx.systemAppend
+  ? `${SYSTEM_PROMPT}\n\n${ctx.systemAppend}`
+  : SYSTEM_PROMPT;
+const requestBody = {
+  model: 'Qwen3.6-35B-A3B',
+  messages: [{ role: 'system', content: fullSystem }, ...messages],
+  chat_template_kwargs: { enable_thinking: false },  // Rule 11
+};
+```
+
+**DON'T**:
+```javascript
+// caller 注入第 2 个 system msg → Qwen Jinja 100% 500
+const stateLockAddendum = llmSystemPromptStateLock(peer);
+if (stateLockAddendum) {
+  history.unshift({ role: 'system', content: stateLockAddendum });  // ← anti-pattern
+}
+let llm = await _callLlm(history, ...);
+// _callLlm 内部 [{role:'system', SYSTEM_PROMPT}, ...history] → 双 system msg
+```
+
+**实测验证 (Bug-Z24 dig 04-28 14:35)**:
+```
+$ grep "Jinja Exception" /c/kanet/logs/llama-server.log
+"Jinja Exception: System message must be at the beginning"
+```
+broker-llm-io.jsonl 实证: R33 state lock active 时, LLM 调用 100% 触发 (NWT dig, 2075 calls 全 500).
+
+**lint enforce (R37)**: `scripts/lint-kanet.mjs` rule R37 — broker-llm-agent.js `{role: 'system'}` literal 出现次数 ≤ 1, 超过 → pre-commit reject. 物理上无法 reintroduce.
+
+R37 ship: commit `a507aafc9` (NWT 04-28). reviewer 可 `git show a507aafc9` 看 lint 实现 (~25 LOC scripts/lint-kanet.mjs checkR37).
+
+**适用文件** (Qwen3.6 API caller, grep `chat_template_kwargs` 实证):
+- kasia-console/src/services/broker-llm-agent.js
+- kasia-console/src/services/llm-dispatcher.js
+- kasia-console/src/services/market-rules-parser.js
+- scripts/channel-bridge.mjs
+- scripts/qwen-bridge-worker.js
+- scripts/qwen.js
