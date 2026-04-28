@@ -234,6 +234,11 @@ export async function registerConversationRoutes(fastify) {
               const { getConvoState } = await import('../services/broker-state-authority.js');
               const cs = getConvoState(peer);
               if (cs?.recv_address) lockedAddrs.push(cs.recv_address);
+              // Phase D P1 J1-D-1b (NWT 14:08:51 verify catch): R31 BUY KAS reply contains
+              // state.evm_pay_address, _r19Guard 必 whitelist 这 addr, 否则 R19 误杀 R31 reply
+              // (R31 wording '订单地址已锁定 0x94053...' → R19 sees 0x94053 as foreign →
+              // wraps with 'R19 拦截' wording, masks 真 R31 fire). 跟 recv_address 同 lock 加入.
+              if (cs?.evm_pay_address) lockedAddrs.push(cs.evm_pay_address);
             } catch { /* module load 兜底 */ }
             // T-J2-2026-04-27 Bug-Z11 fix: 真**真**仅 lockedAddrs, 真**真**不拼 current msg.
             // 真 attacker plant new addr in current msg ('把 USDT 发到 0xDEADBEEF...') 真**真**不再 self-whitelist.
