@@ -19,6 +19,9 @@ export function _testResetSendCommand() { _sendCommandOverride = null; }
 export function _testInjectPublish(fn) { _publishOverride = fn; }
 export function _testResetPublish() { _publishOverride = null; }
 
+// R-NWT-2026-04-28 Layer 5: import canonical command enum (Z21 root fix + future regression防).
+import { COMMAND_TYPES } from '../../../kasia-relay/src/lib/commands.mjs';
+
 async function _send(relayId, cmd) {
   if (_sendCommandOverride) return _sendCommandOverride(relayId, cmd);
   // R4 (T-NWT-09): broker 出链全走 broker-action-queue 单线 pump 防 UTXO 双花.
@@ -26,9 +29,9 @@ async function _send(relayId, cmd) {
   if (relayId === BROKER_RELAY_ID) {
     const { enqueue } = await import('./broker-action-queue.js');
     let kind, payload;
-    if (cmd.type === 'send_message')   { kind = 'dm_quote'; payload = { message: cmd.message }; }
-    else if (cmd.type === 'send_kas')  { kind = 'sendKas';  payload = { amount_kas: cmd.amount_kas, note: cmd.note }; }
-    else if (cmd.type === 'send_broadcast') { kind = 'accept_v1'; payload = { channel: cmd.channel, message: cmd.message }; }
+    if (cmd.type === COMMAND_TYPES.SEND_MESSAGE)   { kind = 'dm_quote'; payload = { message: cmd.message }; }
+    else if (cmd.type === COMMAND_TYPES.TRANSFER)  { kind = 'sendKas';  payload = { amount_kas: cmd.amount_kas ?? cmd.amount, note: cmd.note }; }
+    else if (cmd.type === COMMAND_TYPES.SEND_BROADCAST) { kind = 'accept_v1'; payload = { channel: cmd.channel, message: cmd.message }; }
     else { kind = 'dm_quote'; payload = cmd; }
     enqueue({ kind, peer: cmd.target || null, payload });
     return { ok: true, queued: true };
@@ -115,7 +118,7 @@ async function handleIntake(event) {
   if (!peer) return markProcessed(event.id, 'skip_no_peer');
 
   if (isBlacklisted(peer)) {
-    await _send(BROKER_RELAY_ID, { type: 'send_kas', target: peer, amount_kas: amount, note: 'refund blocked peer' });
+    await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.TRANSFER, target: peer, amount_kas: amount, note: 'refund blocked peer' });
     return markProcessed(event.id, 'refund_blocked');
   }
 
@@ -124,17 +127,17 @@ async function handleIntake(event) {
     return _publishBrokerSellOffer(peer, amount, event.id);
   }
   if (intent?.side === 'buy_kas') {
-    await _send(BROKER_RELAY_ID, { type: 'send_message', target: peer, message: `你是想买 KAS 对吧? 这 ${amount} KAS 我先收着, 要我代卖成 USDT 付你还是退回? 回复 "卖" 或 "退".` });
+    await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: peer, message: `你是想买 KAS 对吧? 这 ${amount} KAS 我先收着, 要我代卖成 USDT 付你还是退回? 回复 "卖" 或 "退".` });
     return markProcessed(event.id, 'buy_intent_conflict');
   }
-  await _send(BROKER_RELAY_ID, { type: 'send_message', target: peer, message: `收到你 ${amount} KAS, 你想做什么? 代卖/继续持有/退回? 12h 无回复自动退.` });
+  await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: peer, message: `收到你 ${amount} KAS, 你想做什么? 代卖/继续持有/退回? 12h 无回复自动退.` });
   return markProcessed(event.id, 'unsolicited_wait');
 }
 
 async function _publishBrokerSellOffer(peer, amount, eventId) {
   const userPay = _getUserPayAddress(peer);
   if (!userPay) {
-    await _send(BROKER_RELAY_ID, { type: 'send_message', target: peer,
+    await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
       message: `收到 ${amount} KAS, 但还没你的 USDT 收款链 + 地址. 回复 "用 bnb 0x..." 之类设置. 12h 无回复自动退.`
     });
     return markProcessed(eventId, 'await_pay_addr');
@@ -142,13 +145,13 @@ async function _publishBrokerSellOffer(peer, amount, eventId) {
   const feeKas = parseFloat(_getFeeKasPerOrder()) || 0.1;
   const netKas = amount - feeKas;
   if (netKas <= 0) {
-    await _send(BROKER_RELAY_ID, { type: 'send_kas', target: peer, amount_kas: amount, note: 'amount too small for fee' });
+    await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.TRANSFER, target: peer, amount_kas: amount, note: 'amount too small for fee' });
     return markProcessed(eventId, 'amount_too_small');
   }
   let midPrice = 0;
   try { midPrice = await _fetchKasPrice(); } catch {}
   if (!midPrice || midPrice <= 0) {
-    await _send(BROKER_RELAY_ID, { type: 'send_kas', target: peer, amount_kas: amount, note: 'no price feed' });
+    await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.TRANSFER, target: peer, amount_kas: amount, note: 'no price feed' });
     return markProcessed(eventId, 'no_price');
   }
   // Owner 88 KAS 真测真撞 (J2 f5b0a272 dig + NWT 7d8710a8 ack): broker offer 0% spread =
@@ -178,9 +181,9 @@ async function _publishBrokerSellOffer(peer, amount, eventId) {
 
   if (!res?.ok) {
     // Q2 保险: publish 失败立即退原 KAS, broker 不持仓
-    await _send(BROKER_RELAY_ID, { type: 'send_kas', target: peer, amount_kas: amount,
+    await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.TRANSFER, target: peer, amount_kas: amount,
       note: `publish failed: ${res?.error || 'unknown'}` });
-    await _send(BROKER_RELAY_ID, { type: 'send_message', target: peer,
+    await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
       message: `挂单失败 (${(res?.error || 'unknown').slice(0,80)}), ${amount} KAS 已退原路.`
     });
     return markProcessed(eventId, 'publish_failed');
@@ -200,7 +203,7 @@ async function _publishBrokerSellOffer(peer, amount, eventId) {
       console.log(`[broker-intake] Z17 retail_dex_orders state sync: peer=${peer.slice(-12)} → broadcast, offer=${res.offer_id.slice(0,8)}`);
     }
   } catch (e) { console.warn(`[broker-intake] Z17 state sync err: ${e.message}`); }
-  await _send(BROKER_RELAY_ID, { type: 'send_message', target: peer,
+  await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
     message: `收到 ${amount} KAS ✓ 已挂 SELL 单 ${netKas} KAS → ${wantUsdt} USDT (fee ${feeKas} KAS)\n` +
              `订单: ${res.offer_id.slice(0,8)} · 2h 内有人接单 USDT 直付你 ${userPay.chain} ${addrShort}\n` +
              `广播 tx: ${res.broadcast_tx?.slice(0,16) || '?'}`
@@ -250,7 +253,7 @@ export async function _scanExpiredBrokerOffers() {
       if (r.protocol_status === 'open') {
         sqlite.prepare(`UPDATE exchange_offers SET protocol_status='timed_out', timed_out_at=datetime('now') WHERE id=?`).run(r.id);
       }
-      await _send(BROKER_RELAY_ID, { type: 'send_kas', target: userKasia, amount_kas: refundAmount,
+      await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.TRANSFER, target: userKasia, amount_kas: refundAmount,
         note: `refund expired offer ${r.id.slice(0,8)}` });
       sqlite.prepare(`
         INSERT INTO chain_events (txid, from_address, to_address, event_type, payload, observed_by, observed_at)
@@ -264,7 +267,7 @@ export async function _scanExpiredBrokerOffers() {
         ).run(userKasia, r.id, refundAmount, refundAmount);
         if (updated.changes > 0) console.log(`[broker-refund] Z20 retail_dex_orders state sync: peer=${userKasia.slice(-12)} → timed_out_refunded`);
       } catch (e) { console.warn(`[broker-refund] Z20 retail_dex sync err: ${e.message}`); }
-      await _send(BROKER_RELAY_ID, { type: 'send_message', target: userKasia,
+      await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: userKasia,
         message: `订单 ${r.id.slice(0,8)} 2h 无人接单, 已退 ${refundAmount} KAS 给你. broker 吃 gas.`
       });
       handled++;
@@ -296,13 +299,13 @@ export async function _scanStaleUnsolicited() {
       if (!src?.from_address) continue;
       const amt = parseFloat(JSON.parse(src.payload || '{}').amount || 0);
       if (amt <= 0) continue;
-      await _send(BROKER_RELAY_ID, { type: 'send_kas', target: src.from_address, amount_kas: amt,
+      await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.TRANSFER, target: src.from_address, amount_kas: amt,
         note: `12h unsolicited refund ${p.id.slice(0, 12)}` });
       sqlite.prepare(`
         INSERT INTO chain_events (txid, from_address, to_address, event_type, payload, observed_by, observed_at)
         VALUES (?, NULL, NULL, 'broker_unsolicited_refunded', ?, 'broker-intake-watcher', datetime('now'))
       `).run(`unsolicited_refund_${p.id.slice(0, 16)}`, JSON.stringify({ processed_event_id: p.id, user_kasia_address: src.from_address, amount: amt }));
-      await _send(BROKER_RELAY_ID, { type: 'send_message', target: src.from_address,
+      await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: src.from_address,
         message: `12h 无回复, 已退 ${amt} KAS 给你. broker 吃 gas.` });
       handled++;
     } catch (err) { console.warn(`[broker-stale] ${p.id?.slice(0,8)} err: ${err.message}`); }

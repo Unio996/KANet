@@ -249,6 +249,38 @@ function checkR33b(filepath, content) {
   }
 }
 
+// R-NWT-2026-04-28 Layer 5 (Z21 root + future regression防): broker → relay command type
+// must be from canonical enum (kasia-relay/src/lib/commands.mjs). String literals like
+// 'send_kas', 'send_message' in sendCommandAsync calls are forbidden — use COMMAND_TYPES.
+//
+// Z21 真因 = broker enqueue type='send_kas', relay only 'transfer'. silent fall-through.
+// 修法 = enum import + lint catches string literals.
+function checkCommandEnum(filepath, content) {
+  if (!/broker-(?:action-queue|intake-watcher|buy-handler|sell-handler|llm-agent|cancel-refund)\.js$|settler-router\.js$/.test(filepath)) return;
+  const lines = content.split('\n');
+  // Match {type: 'literal'} or {type: "literal"} where literal is one of relay command types.
+  // Allowed: COMMAND_TYPES.X, COMMAND_TYPE_SET, dynamic vars.
+  const RELAY_LITERALS = ['handshake', 'send_message', 'publish_card', 'send_broadcast', 'transfer', 'split_utxo', 'send_kas'];
+  const literalSet = new Set(RELAY_LITERALS);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) continue;  // skip comments
+    const code = line.replace(/\/\/.*$/, '');
+    // capture {type: '...'} pattern
+    const m = code.match(/type:\s*['"]([\w_]+)['"]/);
+    if (m && literalSet.has(m[1])) {
+      // 'send_kas' is the deprecated name — definite violation
+      // others are valid command types but should use COMMAND_TYPES enum
+      violations.push({
+        rule: 'CommandEnum (Z21/Layer 5)',
+        file: filepath,
+        line: i + 1,
+        msg: `relay command type '${m[1]}' as string literal — use COMMAND_TYPES.${m[1].toUpperCase()} from kasia-relay/src/lib/commands.mjs (Z21 防 silent fall-through)`,
+      });
+    }
+  }
+}
+
 // R-NWT-2026-04-28 Bug-Z22 (Owner production 真撞): "真**真**真" stutter pattern leaked from
 // dev-coord agent broadcast style INTO broker user-facing strings. Real users see broker DM
 // replies containing "真**真**真**真 cancel" (Owner screenshot 04:33). Catastrophic UX —
@@ -283,6 +315,7 @@ for (const fp of targets) {
   checkR33(fp, content);
   checkR33b(fp, content);
   checkBrokerStutter(fp, content);
+  checkCommandEnum(fp, content);
 }
 checkR10();
 

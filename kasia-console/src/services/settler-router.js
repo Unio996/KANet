@@ -14,6 +14,8 @@
 
 import { getAsset } from './asset-registry.js';
 import { sqlite } from '../db/client.js';
+// R-NWT-2026-04-28 Layer 5: canonical command enum (Z21 Owner 88 KAS 真根因 fix).
+import { COMMAND_TYPES } from '../../../kasia-relay/src/lib/commands.mjs';
 
 /**
  * Send asset via the right settler.
@@ -41,10 +43,11 @@ export async function sendAsset({ asset, chain, to, qty, relayId }) {
   if (meta.settler === 'kasia') {
     // Native KAS via Kasia relay
     const { sendCommandAsync } = await import('./relay-manager.js');
-    const r = await sendCommandAsync(relayId, { type: 'send_kas', target: to, amount_kas: qty });
+    // Z21 fix: relay only supports 'transfer' (cmd.amount), not 'send_kas' (cmd.amount_kas).
+    const r = await sendCommandAsync(relayId, { type: COMMAND_TYPES.TRANSFER, target: to, amount: qty });
     return r?.txId
       ? { ok: true, txHash: r.txId }
-      : { ok: false, error: r?.error || 'send_kas failed (no txId)' };
+      : { ok: false, error: r?.error || 'transfer failed (no txId)' };
   }
 
   if (meta.settler === 'evm') {

@@ -314,9 +314,19 @@ if (RELAY_MODE === "rpc") {
  */
 if (process.send) {
   const { initiateHandshake, publishCard } = await import('./chain.mjs');
+  // R-NWT-2026-04-28 Layer 5: validate cmd.type against shared enum (Z21 silent-fall-through fix).
+  const { COMMAND_TYPES, isValidCommandType } = await import('./lib/commands.mjs');
 
   process.on('message', async (cmd) => {
     try {
+      // Reject unknown command types loudly instead of silent fall-through.
+      if (!isValidCommandType(cmd.type)) {
+        log(`UNKNOWN COMMAND TYPE: ${cmd.type} (valid: ${Object.values(COMMAND_TYPES).join(', ')})`);
+        if (cmd.requestId && process.send) {
+          process.send({ requestId: cmd.requestId, result: { ok: false, error: `unknown command type: ${cmd.type}` } });
+        }
+        return;
+      }
       let draft, sent;
       switch (cmd.type) {
         case 'handshake':
