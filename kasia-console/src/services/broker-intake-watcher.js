@@ -211,12 +211,20 @@ async function _publishBrokerSellOffer(peer, amount, eventId) {
 export async function _scanExpiredBrokerOffers() {
   const trader = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id = ?`).get(BROKER_RELAY_ID);
   if (!trader) return { handled: 0, scanned: 0, reason: 'no_broker_relay' };
+  // Bug-Z20 fix (NWT 1a77fdd1 Owner 88 KAS 卡 broker 钱包): 真**真**proactive scan —
+  // 真**真**真 broker offer 真**真**真 'open' + expires_at < now 真**真**真**真**真 'expired' 真**真**timed_out',
+  // 都**真**真 trigger refund. 之前真**真**真 'expired'/'cancelled'/'timed_out' status 真**真**真 trigger,
+  // 但**真**真**status 转 'expired' 真**真**真**真**exchange-machine TTL check, 真**真**'open' 长久 stuck 真**真**真**真 refund.
+  // metadata.source 真**真**真 strict filter (老 offer 真**真**真**真**真**真 source 真**真**真**真 strict miss).
   const rows = sqlite.prepare(`
-    SELECT id, give_amount, metadata FROM exchange_offers
+    SELECT id, give_amount, metadata, protocol_status, expires_at FROM exchange_offers
     WHERE maker = ?
-    AND protocol_status IN ('expired', 'cancelled', 'timed_out')
     AND give_asset = 'KAS'
-    AND json_extract(metadata, '$.source') = 'broker-intake'
+    AND taker IS NULL
+    AND (
+      protocol_status IN ('expired', 'cancelled', 'timed_out')
+      OR (protocol_status = 'open' AND expires_at IS NOT NULL AND julianday(expires_at) < julianday('now'))
+    )
     AND NOT EXISTS (
       SELECT 1 FROM chain_events e
       WHERE e.event_type = 'broker_kas_refunded'
@@ -225,23 +233,42 @@ export async function _scanExpiredBrokerOffers() {
     LIMIT 10
   `).all(trader.address);
   let handled = 0;
+  if (rows.length > 0) console.log(`[broker-refund] Z20 scan: ${rows.length} expired/timeout offer(s) to refund`);
   for (const r of rows) {
     try {
       const meta = JSON.parse(r.metadata || '{}');
+      // Z20 broaden: 真**真**真**真 source 'broker-intake' filter, 真**真**真 user_kasia_address 真**真**真**真 process.
+      // 真**真**真 metadata 真**真 user_kasia_address (真 broker-intake 真 metadata 真**真 set), 真**真**真 fallback skip.
       const userKasia = meta.user_kasia_address;
-      if (!userKasia) continue;
+      if (!userKasia) {
+        console.warn(`[broker-refund] Z20 ${r.id.slice(0,8)} skip: no user_kasia_address in metadata`);
+        continue;
+      }
       const refundAmount = parseFloat(meta.intent_qty || r.give_amount);
+      console.log(`[broker-refund] Z20 ${r.id.slice(0,8)} refund ${refundAmount} KAS → ${userKasia.slice(-12)} (status=${r.protocol_status}, expired_at=${r.expires_at})`);
+      // Z20: status transition 'open' → 'timed_out' (proactive sweep set timestamp)
+      if (r.protocol_status === 'open') {
+        sqlite.prepare(`UPDATE exchange_offers SET protocol_status='timed_out', timed_out_at=datetime('now') WHERE id=?`).run(r.id);
+      }
       await _send(BROKER_RELAY_ID, { type: 'send_kas', target: userKasia, amount_kas: refundAmount,
         note: `refund expired offer ${r.id.slice(0,8)}` });
       sqlite.prepare(`
         INSERT INTO chain_events (txid, from_address, to_address, event_type, payload, observed_by, observed_at)
         VALUES (?, NULL, NULL, 'broker_kas_refunded', ?, 'broker-intake-watcher', datetime('now'))
-      `).run(`refund_${r.id}`, JSON.stringify({ offer_id: r.id, user_kasia_address: userKasia, amount: refundAmount }));
+      `).run(`refund_${r.id}`, JSON.stringify({ offer_id: r.id, user_kasia_address: userKasia, amount: refundAmount, reason: 'timeout_auto_refund_z20' }));
+      // Z20: retail_dex_orders state sync (跟 Z17 publish 路径 spirit)
+      try {
+        const updated = sqlite.prepare(
+          `UPDATE retail_dex_orders SET state = 'timed_out_refunded', updated_at = datetime('now')
+           WHERE user_kasia_address = ? AND (exchange_offer_id = ? OR (exchange_offer_id IS NULL AND state IN ('awaiting_payment', 'broadcast') AND CAST(qty AS REAL) >= ? - 0.5 AND CAST(qty AS REAL) <= ? + 0.5))`
+        ).run(userKasia, r.id, refundAmount, refundAmount);
+        if (updated.changes > 0) console.log(`[broker-refund] Z20 retail_dex_orders state sync: peer=${userKasia.slice(-12)} → timed_out_refunded`);
+      } catch (e) { console.warn(`[broker-refund] Z20 retail_dex sync err: ${e.message}`); }
       await _send(BROKER_RELAY_ID, { type: 'send_message', target: userKasia,
         message: `订单 ${r.id.slice(0,8)} 2h 无人接单, 已退 ${refundAmount} KAS 给你. broker 吃 gas.`
       });
       handled++;
-    } catch (err) { console.warn(`[broker-refund] ${r.id} err: ${err.message}`); }
+    } catch (err) { console.warn(`[broker-refund] Z20 ${r.id} err: ${err.message}`); }
   }
   return { handled, scanned: rows.length };
 }
