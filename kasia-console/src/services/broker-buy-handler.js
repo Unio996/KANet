@@ -956,6 +956,11 @@ export async function handleBuyIntent(peerAddr, message) {
                 qty,
                 pay_chain: chainNorm,
                 recv_address: asset === 'KAS' ? null : recvAddr,
+                // Phase D P1 真因 1 (J1-D-1, NWT 8b848a95 catch): BUY KAS 路径 lock user
+                // T1-supplied EVM addr 进 evm_pay_address. broker functionally 不依赖 (broker scan
+                // maker addr for USDT incoming, 不 filter by user-from), 但 R31 lock 提供 attacker
+                // swap detection + user-facing 'addr locked' UX.
+                evm_pay_address: asset === 'KAS' ? recvAddr : null,
                 lifecycle_phase: 'preview_shown',
               });
             } catch (e) { /* lock violation 真**真 EARLIEST 已 handle */ }

@@ -35,7 +35,9 @@ import { sqlite } from '../db/client.js';
 //   qty                number   amount of 真 transactional asset
 //   pay_chain          string   bnb/eth/polygon/sol/tron — chain user pays on
 //   recv_chain         string   chain user receives on (kaspa for BUY, EVM for SELL)
-//   recv_address       string   user EVM addr (SELL) OR kaspa addr (BUY auto-resolved)
+//   recv_address       string   user EVM addr (SELL OR BUY USDT/USDC) — null for BUY KAS
+//   evm_pay_address    string   BUY KAS user T1-supplied EVM addr (Phase D J1-D-1 lock 兜底
+//                                给 R31 attacker swap detect; broker functionally 不依赖)
 //   conditions         object   user 真 special conditions (e.g. limit_price, refund_timeout)
 //   lifecycle_phase    string   'fields_collection' | 'preview_shown' | 'confirmed' | 'awaiting_payment' |
 //                                'paid' | 'verifying' | 'delivering' | 'completed' | 'cancelled' | 'disputed'
@@ -300,16 +302,23 @@ export function detectResetIntent(message) {
 
 export function detectAddrChangeAttempt(peer, message) {
   const state = _convoState.get(peer);
-  if (!state || !state.recv_address) return { attempt: false };
+  if (!state) return { attempt: false };
+  // Phase D P1 真因 1 (NWT 8b848a95 Phase C Path 1 T4 真测): BUY KAS 路径 state.recv_address=null
+  // (asset='KAS' user receives KAS 进 kasia, 不需 EVM recv addr) → R31 short-circuit silent. Attacker
+  // mid-flow '改地址 0xDEADBEEF' 通过. 修补: widen check to recv_address || evm_pay_address.
+  // BUY KAS 路径 user T1 supplied EVM addr 真 lock 进 evm_pay_address (broker functionally 不依赖, 但
+  // R31 lock 提供 user-facing UX 'addr already locked, cancel + restart if you want to change'.
+  const lockedAddr = state.recv_address || state.evm_pay_address;
+  if (!lockedAddr) return { attempt: false };
   const msg = String(message || '');
   if (_ADDR_CHANGE_KEYWORDS.test(msg)) {
-    return { attempt: true, reason: 'change_keyword', locked: state.recv_address };
+    return { attempt: true, reason: 'change_keyword', locked: lockedAddr };
   }
   // 真 0x proposal differs from locked addr (case-insensitive)
   const proposalMatches = msg.match(/0x[a-zA-Z0-9_-]{6,}/g) || [];
   for (const proposal of proposalMatches) {
-    if (proposal.toLowerCase() !== state.recv_address.toLowerCase()) {
-      return { attempt: true, reason: 'differing_addr_proposal', locked: state.recv_address, proposed: proposal };
+    if (proposal.toLowerCase() !== lockedAddr.toLowerCase()) {
+      return { attempt: true, reason: 'differing_addr_proposal', locked: lockedAddr, proposed: proposal };
     }
   }
   return { attempt: false };
