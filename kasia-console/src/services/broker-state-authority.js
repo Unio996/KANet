@@ -239,6 +239,35 @@ export async function validateLlmReply(peer, replyText) {
   return { ok: violations.length === 0, violations };
 }
 
+// ── R31 attacker detection (J1 P1.b 7d031b67 attacker probes) ────
+//
+// 多 addr plant + r19-strip-replant probes 实证: user 真**真 locked addr 后, 真**真**真**真
+// '改地址' literal OR 提 alternative 0x... 真**真 detect 真**真 R31 lifecycle-lock 拒.
+//
+// detectAddrChangeAttempt(peer, message) → {attempt: bool, reason: string}
+//   true: user 真**真 try change locked addr (改地址 keyword OR 0x proposal differs from locked)
+//   false: 真**真**真 addr-change 意图
+
+const _ADDR_CHANGE_KEYWORDS = /改地址|换地址|换\s*收款|改\s*收款|change\s*address|new\s*address|swap\s*address|改\s*0x/i;
+const _ADDR_PROPOSAL_REGEX = /0x[a-zA-Z0-9_-]{6,}/;  // any 0x + 6+ char-ish — catches '0xATTACKER1'/'0x9405legit'/real 40-hex
+
+export function detectAddrChangeAttempt(peer, message) {
+  const state = _convoState.get(peer);
+  if (!state || !state.recv_address) return { attempt: false };
+  const msg = String(message || '');
+  if (_ADDR_CHANGE_KEYWORDS.test(msg)) {
+    return { attempt: true, reason: 'change_keyword', locked: state.recv_address };
+  }
+  // 真 0x proposal differs from locked addr (case-insensitive)
+  const proposalMatches = msg.match(/0x[a-zA-Z0-9_-]{6,}/g) || [];
+  for (const proposal of proposalMatches) {
+    if (proposal.toLowerCase() !== state.recv_address.toLowerCase()) {
+      return { attempt: true, reason: 'differing_addr_proposal', locked: state.recv_address, proposed: proposal };
+    }
+  }
+  return { attempt: false };
+}
+
 // ── Test helpers (J2 unit tests use) ─────────────────────────────
 
 export function _clearAllState() { _convoState.clear(); }
