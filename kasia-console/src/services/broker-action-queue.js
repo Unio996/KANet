@@ -283,7 +283,11 @@ async function executeAction(item) {
       return result;
     }
     case 'sendKas':
-      return sendCommandAsync(BROKER_RELAY_ID, { type: 'send_kas', target: item.peer, amount_kas: p.amount_kas, note: p.note });
+      // Bug-Z21 (Owner 04:33 真测撞): relay.mjs switch(cmd.type) 真**真 implement 'send_kas' case,
+      // 仅 'transfer'. 之前 type='send_kas' fall through default → sent undefined → ok=false → retry 3 fail.
+      // 三方 04:48 align (A) — broker adapt relay canonical name 'transfer' (relay 是 spec source-of-truth).
+      // amount_kas → amount (relay transfer L411 用 cmd.amount).
+      return sendCommandAsync(BROKER_RELAY_ID, { type: 'transfer', target: item.peer, amount: p.amount_kas, note: p.note });
     case 'publish_offer': {
       const PORT = process.env.PORT || 3100;
       const res = await fetch(`http://127.0.0.1:${PORT}/api/exchange/publish`, {

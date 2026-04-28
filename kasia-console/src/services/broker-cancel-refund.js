@@ -43,11 +43,15 @@ function _findRefundableOffers(peerAddr) {
   const brokerAddr = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id=?`).get(BROKER_RELAY_ID)?.address;
   if (!brokerAddr) return [];
 
+  // Bug-Z18+ status 扩 (Owner 04:33 真测撞 expired offer 真**真 catch).
+  // 'open' = 还在挂单 + 'expired'/'timed_out' = TTL 到/超时 (broker 仍持 KAS, J1 Z20 timeout sweep
+  // 5min tick refund, 但 user explicit cancel 立即 catch + 解释 "已挂 timeout sweep, 1 分钟内退").
+  // taker IS NULL 严守 — 真**真 taker 接 → walk dispute (本 helper 不 cover).
   const offers = sqlite.prepare(`
-    SELECT id, give_amount, give_asset, want_amount, want_asset, metadata, broadcast_tx_id, created_at
+    SELECT id, give_amount, give_asset, want_amount, want_asset, metadata, broadcast_tx_id, protocol_status, created_at
     FROM exchange_offers
     WHERE maker = ?
-      AND protocol_status = 'open'
+      AND protocol_status IN ('open', 'expired', 'timed_out')
       AND taker IS NULL
       AND broadcast_at > datetime('now', '-3 hours')
     ORDER BY created_at DESC
@@ -86,13 +90,11 @@ export async function handleCancelAndRefund(peerAddr) {
       console.warn(`[cancel-refund] cancel API err for ${offer.id.slice(0,8)}: ${e.message}`);
     }
 
-    // Step 1.5: re-check protocol_status (NWT 7c5ad929 audit concern 1 — race-safety).
-    // 真 race window: cancel API 调成功但**真**真 cancel_v1 broadcast 真**真 confirm 之前**真**真
-    // taker accept_v1 真**真 race in. cancel API 真**真 processCancel 真**真**真 sync set
-    // protocol_status='cancelled' (state machine), 但**真**真**真**真 trade-protocol-filter 真**真
-    // accept_v1 真**真 race 抢 'matched'. 真**真**真**真**真 'cancelled' 才**真**真 proceed refund.
+    // Step 1.5: re-check race-safety. 唯一关心 = post-cancel 期间 taker accept_v1 race 抢 'matched'.
+    // taker IS NULL 是 sufficient condition (broker 仍持资产, 无 claimant). protocol_status 'cancelled'/
+    // 'expired'/'timed_out' 都安全 (terminal, no taker can attach). 真**真 'matched' AND taker 才**真 race 命中.
     const post = sqlite.prepare(`SELECT protocol_status, taker FROM exchange_offers WHERE id=?`).get(offer.id);
-    if (post?.protocol_status !== 'cancelled' || post?.taker) {
+    if (post?.taker || post?.protocol_status === 'matched' || post?.protocol_status === 'verifying' || post?.protocol_status === 'delivering') {
       console.warn(`[cancel-refund] post-cancel race detect ${offer.id.slice(0,8)}: status=${post?.protocol_status} taker=${post?.taker?.slice(-10)} — abort refund, route dispute`);
       ackParts.push(`订单 ${offer.id.slice(0,8)} 取消时被 taker 抢接 (状态: ${post?.protocol_status}). 不退款, 走 dispute 流程, broker 联系你确认`);
       continue;
