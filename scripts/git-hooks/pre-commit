@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# KANet pre-commit hook (T-J1-2026-04-28 规 8 advisory + lint enforcement)
+#
+# 设计原则 (docs/COLLAB-REFORM.md 规 8 + 规 12):
+# - 阻塞: lint-kanet FAIL → reject (现有 lint rules + R37/R38 等机器 enforce)
+# - Advisory: 改非 critical 8 file 含 T-X-X 注释 → print warn, 不 block (规 8)
+# - 静默通过: 无问题不打扰
+#
+# Bypass: git commit --no-verify (NEVER use unless Owner explicit, 规 13 0 容忍)
+#
+# 跟 commit-msg hook 互补: pre-commit 检 file content, commit-msg 检 msg content.
+
+set +e
+
+KANET_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+
+CHANGED=$(git diff --cached --name-only --diff-filter=ACMRT 2>/dev/null)
+
+# Critical 8 file (commit-msg hook handles hard ack, pre-commit just notes for context)
+CRITICAL_FILES_REGEX='^(kasia-console/src/services/(broker-llm-agent|broker-state-authority|broker-buy-handler|broker-sell-handler|broker-action-queue|broker-cancel-refund|broker-intake-watcher)\.js|kasia-relay/src/lib/transaction\.mjs)$'
+
+# Advisory: anti-pattern T-X-X grep on non-critical changed files (规 8)
+ADVISORY_HITS=0
+for f in $CHANGED; do
+  if [ ! -f "$f" ]; then continue; fi
+  # Skip critical 8 (handled by commit-msg hook)
+  if echo "$f" | grep -qE "$CRITICAL_FILES_REGEX"; then continue; fi
+  # Skip non-source files
+  case "$f" in
+    *.md|*.json|*.txt|docs/*|*.yaml|*.yml) continue ;;
+  esac
+  # Grep T-X-X / 撤回 / 灾难 / 不准 anti-pattern history
+  matches=$(grep -nE 'T-J[12]-[a-zA-Z0-9]+|T-NWT-[a-zA-Z0-9]+|撤回|灾难|不准' "$f" 2>/dev/null | head -5)
+  if [ -n "$matches" ]; then
+    if [ "$ADVISORY_HITS" -eq 0 ]; then
+      echo ""
+      echo "[pre-commit advisory] 改 file 含历史 anti-pattern 注释 (规 8 reviewer 必检 invariant 退化):"
+    fi
+    ADVISORY_HITS=$((ADVISORY_HITS + 1))
+    echo "  --- $f ---"
+    echo "$matches" | sed 's/^/    /'
+  fi
+done
+
+if [ "$ADVISORY_HITS" -gt 0 ]; then
+  echo ""
+  echo "[pre-commit advisory] 改 $ADVISORY_HITS 个 file 含 anti-pattern 注释. 如果 change 不 reintroduce, 直接 commit (no block)."
+  echo "[pre-commit advisory] 如果 reintroduce, 请 review 必要性 (跟 commit-msg hook acknowledged: 互补)"
+fi
+
+# Run lint-kanet on changed JS/MJS files (机器 enforce backbone)
+NODE=$(command -v node 2>/dev/null)
+if [ -n "$NODE" ] && [ -f "$KANET_ROOT/scripts/lint-kanet.mjs" ]; then
+  CHANGED_LINT=$(echo "$CHANGED" | grep -E '\.(mjs|js)$' || true)
+  if [ -n "$CHANGED_LINT" ]; then
+    cd "$KANET_ROOT"
+    "$NODE" scripts/lint-kanet.mjs $CHANGED_LINT
+    LINT_EXIT=$?
+    if [ "$LINT_EXIT" -ne 0 ]; then
+      echo ""
+      echo "[pre-commit] lint-kanet FAIL — fix lint errors before commit (规 12 机器 enforce)"
+      exit 1
+    fi
+  fi
+fi
+
+exit 0

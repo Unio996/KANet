@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# KANet commit-msg hook (T-J1-2026-04-28 R38 +规 13/10 enforcement)
+#
+# 设计原则 (Owner 钦定 '不闷头干', docs/COLLAB-REFORM.md 规 13 + 规 10):
+# - 阻塞: commit msg 缺 coord-ack: line → reject (规 13)
+# - 阻塞: 改 critical 8 file 触发 anti-pattern grep → 必含 acknowledged: T-X-X (规 10)
+# - 例外: bootstrap-exception: line → 跳过 enforcement (chicken-and-egg)
+# - 例外: emergency-Z<id> → coord-ack: emergency-Z<id> 走 emergency SOP
+# - Bypass merge / revert (auto-generated msg)
+#
+# 完全跳过: git commit --no-verify (NEVER use unless Owner explicit, 规 13 0 容忍)
+
+set +e
+COMMIT_MSG_FILE="$1"
+COMMIT_MSG=$(cat "$COMMIT_MSG_FILE")
+
+# Bypass merge commits and reverts (auto-generated msg)
+if echo "$COMMIT_MSG" | grep -qE "^(Merge |Revert )"; then
+  exit 0
+fi
+
+# Bootstrap exception bypass (规 13 docs/COLLAB-REFORM.md Bootstrap 段)
+if echo "$COMMIT_MSG" | grep -qE "^bootstrap-exception:"; then
+  echo "[commit-msg] bootstrap-exception detected — skip reform enforcement"
+  exit 0
+fi
+
+# Check coord-ack: line present (规 13 default OR emergency)
+if ! echo "$COMMIT_MSG" | grep -qE "^coord-ack: ([a-f0-9]+|emergency-Z[a-zA-Z0-9-]+)"; then
+  echo "[commit-msg] FAIL: missing coord-ack: line (规 13 0 容忍)"
+  echo "[commit-msg] Add one of:"
+  echo "  coord-ack: <ack-broadcast-tx-hash>          (default, 规 13 default)"
+  echo "  coord-ack: emergency-Z<bug-id>             (Owner 真测撞 production bug)"
+  echo "  bootstrap-exception: <reason>              (chicken-and-egg, pre-hook ship 前)"
+  echo "[commit-msg] See docs/COLLAB-REFORM.md 规 13"
+  exit 1
+fi
+
+# Check critical 8 file: if changed, require acknowledged: line per surfaced anti-pattern (规 10)
+CRITICAL_FILES=(
+  "kasia-console/src/services/broker-llm-agent.js"
+  "kasia-console/src/services/broker-state-authority.js"
+  "kasia-console/src/services/broker-buy-handler.js"
+  "kasia-console/src/services/broker-sell-handler.js"
+  "kasia-console/src/services/broker-action-queue.js"
+  "kasia-console/src/services/broker-cancel-refund.js"
+  "kasia-console/src/services/broker-intake-watcher.js"
+  "kasia-relay/src/lib/transaction.mjs"
+)
+
+CHANGED=$(git diff --cached --name-only --diff-filter=ACMRT 2>/dev/null)
+NEED_ACK=0
+for cf in "${CRITICAL_FILES[@]}"; do
+  if echo "$CHANGED" | grep -qF "$cf"; then
+    if [ -f "$cf" ]; then
+      SURFACED=$(grep -nE 'T-J[12]-|T-NWT-|撤回|灾难|不准|拒绝' "$cf" 2>/dev/null | head -10)
+      if [ -n "$SURFACED" ]; then
+        echo "[commit-msg] Critical file '$cf' has anti-pattern history:"
+        echo "$SURFACED" | sed 's/^/    /'
+        NEED_ACK=1
+      fi
+    fi
+  fi
+done
+
+if [ "$NEED_ACK" -eq 1 ]; then
+  if ! echo "$COMMIT_MSG" | grep -qE "^acknowledged: "; then
+    echo ""
+    echo "[commit-msg] FAIL: critical file change surfaces anti-pattern history (规 10)"
+    echo "[commit-msg] commit msg 必含 'acknowledged: T-X-X' line per surfaced anti-pattern"
+    echo "[commit-msg] See docs/COLLAB-REFORM.md 规 10 + Critical 8 file 列表"
+    exit 1
+  fi
+fi
+
+echo "[commit-msg] reform checks pass (coord-ack ✓${NEED_ACK:+ acknowledged ✓})"
+exit 0
