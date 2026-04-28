@@ -249,6 +249,24 @@ export async function registerConversationRoutes(fastify) {
           } catch (e) { console.warn(`[api/agent/reply] R19 guard err: ${e.message}`); }
           return replyText;
         };
+        // Layer 8 (Owner 04:55 钦定 phase 3): chain DM payload classifier.
+        // [Payment: X KAS] / [Card: ...] / [Handshake] 等是 Kasia 客户端 chain DM system signal,
+        // 不是 user 自然语言. 早 detect 短路 LLM, 防 broker re-preview / hallucinate.
+        // Owner 02:12 真测: [Payment: 88 KAS] 进 broker 触 SELL re-preview (broker 把 chain DM
+        // payload 当 user 重新下单输入). chain TX 独立由 broker-intake-watcher 处理, broker DM
+        // 仅 ack '收到付款信号, 验证中' 即可, 不再 process.
+        try {
+          const { classifyChainDmPayload, ackChainDmPayload } = await import('../services/broker-chain-dm-classifier.js');
+          const classified = classifyChainDmPayload(message);
+          if (classified) {
+            const ack = ackChainDmPayload(classified);
+            console.log(`[api/agent/reply] [Layer 8] chain DM payload detected: type=${classified.type} ${classified.amount ? classified.amount + ' ' + classified.asset : ''} — ${ack ? 'ack' : 'silent'}`);
+            return reply.send({ reply: ack || '' });
+          }
+        } catch (err) {
+          console.warn(`[api/agent/reply] chain DM classifier err: ${err.message}`);
+        }
+
         try {
           const { handleBuyIntent } = await import('../services/broker-buy-handler.js');
           const buyReply = await handleBuyIntent(peer, message);
