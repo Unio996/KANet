@@ -304,6 +304,34 @@ function checkBrokerStutter(filepath, content) {
   }
 }
 
+// ── R37 (T-J1-19f, Bug-Z24): broker-llm-agent.js 单 system message literal ──
+// 真根因 (Bug-Z24 e8f8e064): R33 wire (commit 371e4ca62) 漏看 T-J1-19f inline comment,
+// reintroduce 第二条 {role:'system'} stateLockAddendum. Qwen Jinja chat template 见
+// 2 个 system message 直接返 500 Bad Request → broker LLM 60-120s timeout 全崩.
+// J1 e8f8e064 修法: 把 stateLockAddendum merge 进单条 system message.
+// 防 reintroduce: lint count {role:'system'} literal, > 1 → block commit.
+// 三方 v2.2 convergence: dev-coord broadcast a874c0d8 (2026-04-28).
+function checkR37(filepath, content) {
+  if (!/broker-llm-agent\.js$/.test(filepath)) return;
+  const lines = content.split('\n');
+  const hits = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) continue;  // skip comments
+    const code = line.replace(/\/\/.*$/, '');
+    const re = /\{\s*role\s*:\s*['"]system['"]/g;
+    while (re.exec(code) !== null) hits.push(i + 1);
+  }
+  if (hits.length > 1) {
+    violations.push({
+      rule: 'R37 (Bug-Z24/T-J1-19f)',
+      file: filepath,
+      line: hits[0],
+      msg: `broker-llm-agent.js 含 ${hits.length} 个 {role:'system'} literal (lines ${hits.join(',')}) — Qwen Jinja 双 system msg → 500 Bad Request (Bug-Z24 真撞 + R33 reintroduce 教训). 必合并成 1 个 system msg (J1 e8f8e064 修法). 见 ANTI-PATTERNS R37 + QWEN-RULES Rule 12.`,
+    });
+  }
+}
+
 // ── 跑 ──
 for (const fp of targets) {
   let content;
@@ -314,6 +342,7 @@ for (const fp of targets) {
   checkR19(fp, content);
   checkR33(fp, content);
   checkR33b(fp, content);
+  checkR37(fp, content);
   checkBrokerStutter(fp, content);
   checkCommandEnum(fp, content);
 }
