@@ -73,8 +73,11 @@ export function getConvoState(peer) {
  */
 export function setConvoStateLock(peer, fields) {
   const existing = _convoState.get(peer);
-  if (!existing) {
-    // First declaration
+  // R33 b iter10 (NWT 556966ea trace 实证): existing 且 locked=false (post resetConvoState 'user_cancel'/'user_restart')
+  // 真**真**直接 treat as fresh — 真**真**真 direction immutable check 误伤 legitimate restart.
+  // resetConvoState sets locked=false 真**真 keep state for 30s audit, 但 setConvoStateLock 真**真**真 reuse stale direction.
+  if (!existing || !existing.locked) {
+    // First declaration OR post-reset (locked=false)
     if (!fields.direction) {
       throw new Error('R33: setConvoStateLock first call must include direction');
     }
