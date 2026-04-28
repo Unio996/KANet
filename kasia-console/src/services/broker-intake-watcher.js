@@ -151,7 +151,13 @@ async function _publishBrokerSellOffer(peer, amount, eventId) {
     await _send(BROKER_RELAY_ID, { type: 'send_kas', target: peer, amount_kas: amount, note: 'no price feed' });
     return markProcessed(eventId, 'no_price');
   }
-  const wantUsdt = (netKas * midPrice).toFixed(4);
+  // Owner 88 KAS 真测真撞 (J2 f5b0a272 dig + NWT 7d8710a8 ack): broker offer 0% spread =
+  // mid price → autoTaker config min_discount_pct=1% SKIP + self-maker exclusion → 真**真**真 taker.
+  // 修 broker SELL offer 加 1.5% spread below mid 真**真 outside taker incentive 接.
+  // 副作用: broker 短期 unhedged KAS 仓位 risk (88 KAS << CEX liquidity, drop 风险 acceptable).
+  // CEX hedge prototype 真**真 separate task R35 候选.
+  const SELL_SPREAD_PCT = 0.015;  // 1.5% offer below mid (broker-intake-watcher hotfix)
+  const wantUsdt = (netKas * midPrice * (1 - SELL_SPREAD_PCT)).toFixed(4);
 
   let res = null;
   try {
@@ -181,6 +187,19 @@ async function _publishBrokerSellOffer(peer, amount, eventId) {
   }
 
   const addrShort = userPay.address.slice(0,10) + '...' + userPay.address.slice(-4);
+  // Bug-Z17 fix (NWT 7d8710a8 dig — Owner 88 KAS UI 卡 'awaiting_payment'):
+  // _publishOffer ok 后**真**真**真**真 update retail_dex_orders.state → 'broadcast' + link exchange_offer_id.
+  // 之前**真**真 update, 真**真**Owner UI 卡 'awaiting_payment' 真**真**真**真**真**真 broker offer 真**真 publish 上链.
+  try {
+    const updated = sqlite.prepare(
+      `UPDATE retail_dex_orders SET state = 'broadcast', exchange_offer_id = ?, updated_at = datetime('now')
+       WHERE user_kasia_address = ? AND side = 'sell_kas' AND state = 'awaiting_payment'
+       AND created_at > datetime('now','-24 hours')`
+    ).run(res.offer_id, peer);
+    if (updated.changes > 0) {
+      console.log(`[broker-intake] Z17 retail_dex_orders state sync: peer=${peer.slice(-12)} → broadcast, offer=${res.offer_id.slice(0,8)}`);
+    }
+  } catch (e) { console.warn(`[broker-intake] Z17 state sync err: ${e.message}`); }
   await _send(BROKER_RELAY_ID, { type: 'send_message', target: peer,
     message: `收到 ${amount} KAS ✓ 已挂 SELL 单 ${netKas} KAS → ${wantUsdt} USDT (fee ${feeKas} KAS)\n` +
              `订单: ${res.offer_id.slice(0,8)} · 2h 内有人接单 USDT 直付你 ${userPay.chain} ${addrShort}\n` +

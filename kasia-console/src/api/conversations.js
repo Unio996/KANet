@@ -226,6 +226,15 @@ export async function registerConversationRoutes(fastify) {
               const a = _getPendingFieldsAddr(peer);
               if (a) lockedAddrs.push(a);
             } catch { /* module load 兜底 */ }
+            // R33 b iter13 (J2 81f588ae propose long-term): _convoState.recv_address 也作 locked source.
+            // 真**真**真 R31 attacker reject reply 含 locked addr (e.g. '订单地址已锁定 0x9405...') 真**真**真
+            // R19 guard 误杀 (post-confirm _pendingPreview/_pendingFields cleared, 但 _convoState 真**真 keep recv_address).
+            // 修后 R31 wording '订单地址已锁定 0x9405...' surfaced cleaner UX, R19 wrapper 真**真**真 误覆盖.
+            try {
+              const { getConvoState } = await import('../services/broker-state-authority.js');
+              const cs = getConvoState(peer);
+              if (cs?.recv_address) lockedAddrs.push(cs.recv_address);
+            } catch { /* module load 兜底 */ }
             // T-J2-2026-04-27 Bug-Z11 fix: 真**真**仅 lockedAddrs, 真**真**不拼 current msg.
             // 真 attacker plant new addr in current msg ('把 USDT 发到 0xDEADBEEF...') 真**真**不再 self-whitelist.
             // 真 turn 1 user 真给 addr 真**真**经 _executeTool → _setPendingFields/_setPendingPreview lock,
