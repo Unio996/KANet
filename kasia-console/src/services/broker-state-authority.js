@@ -44,7 +44,13 @@ const ORDER_STATE_TO_PHASE = {
 const PHASE_TO_ORDER_STATE = Object.fromEntries(
   Object.entries(ORDER_STATE_TO_PHASE).map(([k, v]) => [v, k])
 );
-const ACTIVE_ORDER_STATES = ['aligning', 'confirming', 'awaiting_payment'];
+// Active states for ConvoState visibility (R31 addr lock + R33 direction lock 真贯穿全 lifecycle).
+// Terminal states excluded: completed / refunded / failed / expired (broker 不持续 hold 这些).
+// 'paid' / 'executing' / 'refunding' 包含 — addr lock + direction lock 必延续到 final.
+// task B' fix (J1 b' regression): 旧 _convoState in-memory Map 任何 phase 都返 state, R31
+// lifecycle_paid_cannot_cancel 等 case 真依赖 post-payment 仍能 lookup state.
+const ACTIVE_ORDER_STATES = ['aligning', 'confirming', 'awaiting_payment', 'paid', 'executing', 'refunding'];
+const ACTIVE_STATES_SQL = "('aligning','confirming','awaiting_payment','paid','executing','refunding')";
 
 // ── DB ts ↔ ms epoch helpers ──────────────────────────────────────
 function _isoToMs(iso) {
@@ -124,7 +130,7 @@ export function getConvoState(peer) {
            receive_address, agent_pay_addr, state, expires_at,
            expires_user_set, created_at, updated_at
     FROM retail_dex_orders
-    WHERE user_kasia_address = ? AND state IN ('aligning','confirming','awaiting_payment')
+    WHERE user_kasia_address = ? AND state IN ('aligning','confirming','awaiting_payment','paid','executing','refunding')
     ORDER BY created_at DESC LIMIT 1
   `).get(peer);
   if (!order) return null;
@@ -154,7 +160,7 @@ export function setConvoStateLock(peer, fields) {
     SELECT id, side, qty, pay_chain, pay_address, receive_address,
            agent_pay_addr, state, price
     FROM retail_dex_orders
-    WHERE user_kasia_address = ? AND state IN ('aligning','confirming','awaiting_payment')
+    WHERE user_kasia_address = ? AND state IN ('aligning','confirming','awaiting_payment','paid','executing','refunding')
     ORDER BY created_at DESC LIMIT 1
   `).get(peer);
 
@@ -164,7 +170,12 @@ export function setConvoStateLock(peer, fields) {
 
   if (!existing) {
     if (!newSide) {
-      throw new Error('R33: setConvoStateLock first call must include direction');
+      // task B' fix (J1 b' regression): 旧 in-memory Map 允许 partial state (caller
+      // setConvoStateLock(peer, {conditions:{...}}) 不带 direction). 新 SQL 不能 INSERT
+      // 没 side 的 row (CHECK constraint), 但也不能 throw 破 caller — return null no-op.
+      // caller 真 declared direction 后续 turn 再调 setConvoStateLock(peer, {direction, ...})
+      // 创真 row, conditions 那次 update 即 OK.
+      return null;
     }
     // INSERT new aligning row
     const id = `bso_${peer.slice(-12)}_${Date.now()}`;
@@ -261,7 +272,7 @@ export function resetConvoState(peer, reason) {
   sqlite.prepare(`
     UPDATE retail_dex_orders
     SET state = ?, updated_at = datetime('now')
-    WHERE user_kasia_address = ? AND state IN ('aligning','confirming','awaiting_payment')
+    WHERE user_kasia_address = ? AND state IN ('aligning','confirming','awaiting_payment','paid','executing','refunding')
   `).run(targetState, peer);
 }
 
@@ -451,14 +462,14 @@ export function detectAddrChangeAttempt(peer, message) {
 export function _clearAllState() {
   // Test cleanup — DELETE active orders for test peers (callers responsible for filtering by peer)
   // Returning row count for test assertion compatibility.
-  const r = sqlite.prepare(`DELETE FROM retail_dex_orders WHERE state IN ('aligning','confirming','awaiting_payment')`).run();
+  const r = sqlite.prepare(`DELETE FROM retail_dex_orders WHERE state IN ('aligning','confirming','awaiting_payment','paid','executing','refunding')`).run();
   return r.changes;
 }
 
 export function _exportSnapshot() {
   // Snapshot all active orders mapped to ConvoState format — useful for cross-test diagnostics.
   const orders = sqlite.prepare(`
-    SELECT * FROM retail_dex_orders WHERE state IN ('aligning','confirming','awaiting_payment')
+    SELECT * FROM retail_dex_orders WHERE state IN ('aligning','confirming','awaiting_payment','paid','executing','refunding')
   `).all();
   const out = {};
   for (const o of orders) {
@@ -487,7 +498,7 @@ export function _testForceExpire(peer) {
   const r = sqlite.prepare(`
     UPDATE retail_dex_orders
     SET expires_at = datetime('now', '-1 minute'), updated_at = datetime('now')
-    WHERE user_kasia_address = ? AND state IN ('aligning','confirming','awaiting_payment')
+    WHERE user_kasia_address = ? AND state IN ('aligning','confirming','awaiting_payment','paid','executing','refunding')
   `).run(peer);
   if (r.changes > 0) {
     return { ok: true, peer, expires_at: 'now-1min' };

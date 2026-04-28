@@ -114,6 +114,45 @@ console.log('\n── Test 14: _testForceExpire ──');
 const exp = _testForceExpire(peer);
 check('_testForceExpire ok', exp.ok === true);
 
+console.log('\n── Test 15: B\' regression — setConvoStateLock(peer, {conditions}) without direction (no existing) ──');
+const orphanPeer = 'kaspa:qz_smoke_taskb_orphan_' + Date.now();
+let orphanRes = null;
+let orphanThrew = null;
+try {
+  orphanRes = setConvoStateLock(orphanPeer, { conditions: { limit_price: 0.033 } });
+} catch (e) { orphanThrew = e; }
+check('partial-state first call returns null (not throw)', orphanThrew === null);
+check('return value is null no-op', orphanRes === null);
+
+console.log('\n── Test 16: B\' regression — getConvoState includes paid/executing states (R31 lifecycle full) ──');
+const lifecyclePeer = 'kaspa:qz_smoke_taskb_lc_' + Date.now();
+const sLc = setConvoStateLock(lifecyclePeer, {
+  direction: 'sell', qty: 100, pay_chain: 'bsc',
+  recv_address: '0xCAFEBABE12345678901234567890ABCDEFCAFEBA',
+});
+check('lifecycle peer initial state created', sLc != null);
+// Manually advance state to 'paid'
+sqlite.prepare(`UPDATE retail_dex_orders SET state='paid' WHERE user_kasia_address=?`).run(lifecyclePeer);
+const lcPaid = getConvoState(lifecyclePeer);
+check('getConvoState returns row for state=paid (R31 still locks addr)', lcPaid != null);
+check('paid state still has recv_address (post-payment lock)', lcPaid?.recv_address?.toLowerCase() === '0xcafebabe12345678901234567890abcdefcafeba');
+check('lifecycle_phase = paid', lcPaid?.lifecycle_phase === 'paid');
+// Advance to 'executing'
+sqlite.prepare(`UPDATE retail_dex_orders SET state='executing' WHERE user_kasia_address=?`).run(lifecyclePeer);
+check('getConvoState returns row for state=executing', getConvoState(lifecyclePeer) != null);
+// Advance to 'completed' — should NOT return (terminal state)
+sqlite.prepare(`UPDATE retail_dex_orders SET state='completed' WHERE user_kasia_address=?`).run(lifecyclePeer);
+check('getConvoState returns null for terminal state=completed', getConvoState(lifecyclePeer) === null);
+
+console.log('\n── Test 17: B\' regression — detectAddrChangeAttempt works post-payment ──');
+sqlite.prepare(`UPDATE retail_dex_orders SET state='paid' WHERE user_kasia_address=?`).run(lifecyclePeer);
+const swapAttempt = detectAddrChangeAttempt(lifecyclePeer, '改地址 0xDEADBEEF1234567890ABCDEF1234567890DEADBE');
+check('detectAddrChangeAttempt fires post-payment (R31 lifecycle full)', swapAttempt.attempt === true);
+check('swapAttempt reason = change_keyword', swapAttempt.reason === 'change_keyword');
+
+// Cleanup orphan + lifecycle peers
+sqlite.prepare(`DELETE FROM retail_dex_orders WHERE user_kasia_address LIKE 'kaspa:qz_smoke_taskb_orphan_%' OR user_kasia_address LIKE 'kaspa:qz_smoke_taskb_lc_%'`).run();
+
 console.log('\n── Cleanup ──');
 sqlite.prepare(`DELETE FROM retail_dex_orders WHERE user_kasia_address LIKE 'kaspa:qz_smoke_taskb_%'`).run();
 console.log('  ✓ test rows cleaned');
