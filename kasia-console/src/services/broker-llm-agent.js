@@ -727,27 +727,27 @@ export async function handleLlmDialog(peer, message) {
   // T-J2-2026-04-27 Bug-Z9 fix: deterministic _pendingFields cross-turn transducer.
   // extract current msg → merge prev state → 字段齐调 preview tool / 缺则反问.
   const fresh = _extractFieldsFromMsg(message);
-  const prev = _getPendingFields(peer);
-  let merged = _mergeFields(prev, fresh);
-
-  // T-J2-2026-04-29 Phase E v3 量小修法 (Owner 钦定 broker 不忘 #3 + baseline T3 fail dig):
-  // _pendingFields (in-memory Map per peer) 不 sync state authority (D-3 b9efa9d91 set state.qty
-  // via LLM tool path). T3 'Bsc, 0x...' merged.qty=null → _askMissingField '你想卖什么 多少'.
-  // 修法: merge state authority fields into merged before _askMissingField fallback. 跨 LLM tool
-  // path 跟 deterministic path state retention bridge. forward-compat task B (DB-backed state).
+  // T-J2-2026-04-29 Phase E v3 task D' #1+#2 (NWT 140d399f baseline 仍 FAIL surface):
+  // 之前 prev = _getPendingFields(peer) (in-memory Map L589) — Owner 钦定 source of truth = DB.
+  // _pendingFields 物理废用 (broker-buy/sell-handler 仍用, 但 handleLlmDialog 改读 state authority).
+  // state authority post task B 重写 = SELECT retail_dex_orders + JOIN, 真跨 restart + 跨 process.
+  let prev = null;
   try {
     const stateRow = getConvoState(peer);
     if (stateRow) {
-      if (!merged.direction && stateRow.direction) merged = { ...merged, direction: stateRow.direction };
-      if (merged.qty == null && stateRow.qty != null) merged = { ...merged, qty: stateRow.qty };
-      if (!merged.give_asset && stateRow.give_asset) merged = { ...merged, give_asset: stateRow.give_asset };
-      if (!merged.chain && stateRow.pay_chain) merged = { ...merged, chain: stateRow.pay_chain };
-      if (!merged.address) {
-        const stateAddr = stateRow.recv_address || stateRow.evm_pay_address;
-        if (stateAddr) merged = { ...merged, address: stateAddr };
-      }
+      // Map state row → _pendingFields-shape for _mergeFields compat
+      prev = {
+        direction: stateRow.direction || null,
+        qty: stateRow.qty != null ? stateRow.qty : null,
+        give_asset: stateRow.give_asset || null,
+        chain: stateRow.pay_chain || null,
+        address: stateRow.recv_address || stateRow.evm_pay_address || null,
+      };
     }
-  } catch (e) { console.warn(`[broker-llm Phase E v3 量小修法] state merge err: ${e.message}`); }
+  } catch (e) { console.warn(`[broker-llm task D' state read] err: ${e.message}`); }
+  // Fallback: 如 state 空 (新对话首 turn 前), 仍 read _pendingFields 作 transient cache
+  if (!prev) prev = _getPendingFields(peer);
+  const merged = _mergeFields(prev, fresh);
 
   console.log(`[broker-llm DIAG] peer=${peer?.slice(-12)} msg.chars=${msgRaw.length} msg.utf8bytes=${byteLen} codes=[${charCodes}] msg="${msgRaw.slice(0,40)}" history.len=${history.length} fresh=${JSON.stringify(fresh)} prev=${JSON.stringify(prev)} merged=${JSON.stringify(merged)}`);
 
