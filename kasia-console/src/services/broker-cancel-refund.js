@@ -76,6 +76,18 @@ export async function handleCancelAndRefund(peerAddr) {
       console.warn(`[cancel-refund] cancel API err for ${offer.id.slice(0,8)}: ${e.message}`);
     }
 
+    // Step 1.5: re-check protocol_status (NWT 7c5ad929 audit concern 1 — race-safety).
+    // 真 race window: cancel API 调成功但**真**真 cancel_v1 broadcast 真**真 confirm 之前**真**真
+    // taker accept_v1 真**真 race in. cancel API 真**真 processCancel 真**真**真 sync set
+    // protocol_status='cancelled' (state machine), 但**真**真**真**真 trade-protocol-filter 真**真
+    // accept_v1 真**真 race 抢 'matched'. 真**真**真**真**真 'cancelled' 才**真**真 proceed refund.
+    const post = sqlite.prepare(`SELECT protocol_status, taker FROM exchange_offers WHERE id=?`).get(offer.id);
+    if (post?.protocol_status !== 'cancelled' || post?.taker) {
+      console.warn(`[cancel-refund] post-cancel race detect ${offer.id.slice(0,8)}: status=${post?.protocol_status} taker=${post?.taker?.slice(-10)} — abort refund, route dispute`);
+      ackParts.push(`订单 ${offer.id.slice(0,8)} 取消时被 taker 抢接 (状态: ${post?.protocol_status}). 不退款, 走 dispute 流程, broker 联系你确认`);
+      continue;
+    }
+
     // Step 2: refund 原资产 enqueue (走 broker-action-queue 单线 pump 防 UTXO 双花)
     if (offer.give_asset === 'KAS') {
       // user 卖 KAS → broker 持 KAS → 退 KAS - fee
@@ -88,6 +100,19 @@ export async function handleCancelAndRefund(peerAddr) {
         peer: peerAddr,
         payload: { amount_kas: refundAmt, note: `cancel_refund ${offer.id.slice(0, 8)}` },
       });
+
+      // Step 2.5: update retail_dex_orders state='cancelled_refunded' (NWT 7c5ad929 audit concern 2 — UI consistency).
+      // 真 publish 路径 (J1 Z17) update state='broadcast' + exchange_offer_id. 真**真 cancel 路径
+      // 真**真 update → UI 卡 'broadcast' 真**真**真**真**stale. 真**真 SQL UPDATE 修 stale.
+      try {
+        sqlite.prepare(`
+          UPDATE retail_dex_orders
+          SET state = 'cancelled_refunded', updated_at = ?
+          WHERE user_kasia_address = ?
+            AND (exchange_offer_id = ? OR (exchange_offer_id IS NULL AND state = 'awaiting_payment' AND qty = ?))
+        `).run(new Date().toISOString(), peerAddr, offer.id, String(intentQty));
+      } catch (e) { console.warn(`[cancel-refund] retail_dex_orders UPDATE err: ${e.message}`); }
+
       ackParts.push(`订单 ${offer.id.slice(0, 8)} 已取消, ${refundAmt} KAS 退还中 (扣 ${FEE_KAS} broker fee)`);
     } else {
       // BUY 路径 (give_asset=USDT/USDC etc) — broker 持 stable, 退 stable. P2 — 现 BUY 流程未撞触 (broker 没 hold USDT, USDT 是用户付给 maker 的).
