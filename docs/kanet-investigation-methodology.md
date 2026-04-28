@@ -1,7 +1,72 @@
 # KANet 系统调查方法论
 
-> 遇到系统行为异常，必须按以下六层顺序调查。不允许跳步。
+> 遇到系统行为异常，必须按以下七层顺序调查（第 0 层在最前）。不允许跳步。
 > 跳步的代价：结论正确但论证软，下次同类问题无法复用结论。
+
+> **修订历史**:
+> - 2026-04-28 加第 0 层 (外部 service log) — 六层 KANet 内部之前先看 external service. 来自 J2 04-28 14:00-14:35 1h+ debate broker LLM 500 走偏真案 (Bug-Z24 真根因是 broker R33 wire 双 system msg, llama-server.log 5 行 grep 即可锚定). 跟 docs/COLLAB-REFORM.md 规 9 'bug dig 第一步必 grep upstream service log' 互补 (规 9 = reform enforce, 第 0 层 = methodology 步骤详细).
+
+---
+
+## 第 0 层：外部 service log (六层 KANet 内部之前必看)
+
+**目标**：锚定"异常是不是 external service 引起的，还是 KANet 内部"。
+
+KANet 依赖外部 service：Qwen llama-server / kasia-rpc / kaspa-rpc / Bybit/MEXC/Hyperliquid API / Polymarket API 等。它们 fail 时 KANet code 改不了真根本，进六层内部调查浪费时间。
+
+### 必须执行的操作（按 priority 顺序）
+
+1. **grep llama-server log** — Qwen LLM 调用 error
+   ```bash
+   grep -E "error|exception|500|timeout" /c/kanet/logs/llama-server*.log | tail -20
+   ```
+   典型命中：`Jinja Exception: System message must be at the beginning`（Bug-Z24 真根因）
+
+2. **grep kasia-rpc / kaspa-rpc log** — Kasia chain 调用 error
+   ```bash
+   grep -E "error|backpressure|syncing" /c/kanet/logs/kaspa-ws-proxy.log | tail -20
+   ```
+
+3. **grep CEX API log**（Bybit/MEXC/Hyperliquid）— exchange API rate limit / auth failure
+
+4. **service health check**：
+   ```bash
+   curl -sf http://localhost:8000/health  # llama-server
+   ```
+
+### 判断规则
+
+第 0 层命中（external service log 含 error）→ 看 error 性质二分：
+
+**(a) service 真 unstable**（timeout / network / OOM / down）
+- 修法：重启 / 切 endpoint / 调参 / 等 service 恢复
+- KANet code change 修不了真根本（但可加 retry / fallback / circuit breaker 加固）
+
+**(b) service raise application exception**（e.g. `Jinja Exception: System message must be at the beginning` / `RPC method invalid` / `API rate limit`）
+- 修法：**KANet caller fix**（caller 输入触发了 service exception）
+- Bug-Z24 真案：llama-server raise Jinja exception，root cause = broker R33 wire 双 system msg，修法 = broker merge 单 system msg（commit e8f8e064），不重启 llama-server
+
+第 0 层 clean → 进第一层 KANet 内部六层调查。
+
+### 输出
+
+第 0 层结论：
+- external clean / 哪个 service 撞 / (a) 还是 (b) / 真根因外部位置 OR caller code 位置
+
+### 历史 case
+
+J2 04-28 14:00-14:35 1h+ debate broker LLM 500 走偏（"Qwen 不稳" / "构造词" / "broker memory cornerstone"）— `llama-server.log` 5 行 grep 找到 Jinja exception 真根因（Bug-Z24，T-J1-19f reintroduce）。漏第 0 层 1h+ 浪费。
+
+注：本案是 (b) caller-triggered，修法 broker code（commit e8f8e064），不重启 llama-server。
+
+### 跟规 9 的关系
+
+`docs/COLLAB-REFORM.md` 规 9（J1 ship 63aef524b）"bug dig 第一步必 grep upstream service log" 跟第 0 层 same spirit。区别：
+
+- **规 9** = 协作 reform 规（hard enforce, 不做 → 协作 violation）
+- **第 0 层** = 调查方法论（步骤详细 + actionable bash）
+
+互补不 redundant。规 9 强 enforce reviewer 看 propose 时 require evidence "看了 service log"; 第 0 层是详细方法论给执行人按图索骥。
 
 ---
 
