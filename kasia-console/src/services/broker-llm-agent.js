@@ -36,11 +36,12 @@ const SUPPORTED_ASSETS_SECTION = (() => {
 // 真 strategy: 真 emphasize 'MUST CALL tool' first, 真简化字段问 flow, 真 trim cruft 真 v1.2.
 const SYSTEM_PROMPT = `你是 KANet broker, 帮用户买卖 KAS / USDT / USDC. 跨 9 chain (BSC/ETH/Polygon/Arb/Op/Avax/Base/Sol/Tron).
 
-# 你最重要的 3 件事 (永远不能忘)
+# 你最重要的 4 件事 (永远不能忘)
 
 1. **字段齐 → 必调 preview_order tool**. 字段 = 方向(买/卖) + 数量 + 资产(KAS/USDT/USDC) + 链 + 收款地址(买 stable 或 卖 时必填). 不准自己编报价, 不准自己说 '订单画像', preview 必经 tool.
 2. **用户回 YES/确认/对 → 必调 finalize_order tool**. 不准自己说 '已下单'.
 3. **用户说 已付/付了/check → 必调 verify_payment tool**. 不准让用户找 tx hash.
+4. **用户 cancel/取消/不要了/退我钱/cancel/refund/我等不了了/算了 等任何 cancel-intent → 必调 cancel_order tool**. **真**真**真自己说 '已为您取消' / '资金 1-2 分钟到账' / '已退还' — 真**真**真**真 broker DB 真 cancel + 真 sendKas. 真**真**真**编 fake ack** (Bug-Z19 production 灾难). 即使**真**没** active offer, 也调 cancel_order tool, 它返 deterministic null/no-op 真**真**真 LLM hallucinate.
 
 # 用户自定条件 (R33 b 铁律 — Owner 真测 B3 反复撞)
 
@@ -141,6 +142,19 @@ const TOOLS = [
           chain: { type: 'string', enum: ['bnb', 'polygon'], description: '用户付款链 (BSC=bnb 主路径)' },
         },
         required: ['chain'],
+      },
+    },
+  },
+  // R26 Bug-Z19 (NWT 25d4ae81 Owner 真测撞): user cancel-intent 时 LLM 真**真**真 hallucinate fake ack
+  // ('已为您取消, 1-2 分钟到账') 真**真 tool call. 加 cancel_order tool 真**真 LLM 必调.
+  {
+    type: 'function',
+    function: {
+      name: 'cancel_order',
+      description: '用户说 NO/取消/不要了/退我钱/cancel/refund/我等不了了/算了 等任何 cancel-intent 时**必调此 tool**. 真**真**真**真**自己回 \'已取消\' / \'1-2 分钟到账\' / \'已为您取消\' — 真**真**真**真 broker DB. 必经此 tool 真**真**真**真**真 cancel offer 上链 + sendKas refund + state update. 即使**真**没**真**真**真**真 active offer, 也调此 tool, 它真**真**真 false fall-through 真**真**真**deterministic null/no-op 不**真**LLM hallucinate.',
+      parameters: {
+        type: 'object',
+        properties: {},
       },
     },
   },
@@ -353,6 +367,18 @@ async function _executeToolImpl(peer, name, args) {
     const { chain } = args || {};
     const { verifyPaymentForPeer } = await import('./broker-buy-handler.js');
     return verifyPaymentForPeer({ peer, chain });
+  }
+  if (name === 'cancel_order') {
+    // R26 Bug-Z19 (NWT 25d4ae81): 真 LLM 真 cancel-intent 必调此 tool, 真**真**真 hallucinate fake ack.
+    try {
+      const { handleCancelAndRefund } = await import('./broker-cancel-refund.js');
+      const ack = await handleCancelAndRefund(peer);
+      if (ack) return { ok: true, preview_text: ack };
+      // 无 active offer → deterministic null reply, 真**真**真 LLM 自由发挥
+      return { ok: true, preview_text: '没找到你 active 订单. 真**真**真**真 cancel 的, 重新下单回 "买 X KAS" / "卖 X KAS".' };
+    } catch (e) {
+      return { ok: true, preview_text: `抱歉, 取消处理失败 (${e.message?.slice(0, 60)}). 请稍后重试或回 NO 联系 broker.` };
+    }
   }
   return { ok: false, error: `unknown tool: ${name}` };
 }
@@ -755,6 +781,21 @@ export async function handleLlmDialog(peer, message) {
   }
   let llm = await _callLlm(history, { peer, turn: 1 });
   if (!llm) return '抱歉, 我这边 LLM 卡了一下, 请稍后再试. 或直接回 "买 X KAS" / "卖 X KAS" (X 写数量) 走快速通道.';
+
+  // R26 Bug-Z19 guard (NWT 25d4ae81 Owner 真测): user cancel-intent + LLM 真**真**调 cancel_order tool
+  // → LLM 真**真**hallucinate fake ack ('已为您取消, 1-2 分钟到账'). 真**真**真**真 force tool call OR
+  // fall back deterministic. 真**production 灾难** Bug-Z19.
+  const _CANCEL_INTENT_RE = /(?:NO|不要|不想|取消|算了|退|cancel|refund|我等不了|我不(?:要|做|玩)了|我不卖|我不买|give\s+(?:me\s+)?(?:my\s+)?(?:money|kas)\s+back)/i;
+  if (_CANCEL_INTENT_RE.test(message) && !llm.tool_calls?.length) {
+    console.error(`[broker-llm Z19] cancel-intent + no tool_call → force cancel_order: peer=${peer?.slice(-12)} msg="${String(message).slice(0,40)}"`);
+    // Force-call cancel_order tool deterministic
+    try {
+      const toolResult = await _executeTool(peer, 'cancel_order', {});
+      return toolResult?.preview_text || '没找到你 active 订单. 真**真**真 cancel 的, 重新下单回 "买 X KAS" / "卖 X KAS".';
+    } catch (e) {
+      return `抱歉, 取消处理失败 (${e.message?.slice(0, 60)}). 请稍后重试.`;
+    }
+  }
 
   // tool call?
   if (llm.tool_calls?.length) {
