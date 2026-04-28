@@ -270,6 +270,17 @@ export async function handleSellIntent(peerAddr, message) {
     } catch { /* 兜底 */ }
   }
 
+  // Owner 02:23 钦定 cancel-refund policy (跟 broker-buy-handler 同模式).
+  if (trimmed) {
+    try {
+      const { detectCancelIntent, handleCancelAndRefund } = await import('./broker-cancel-refund.js');
+      if (detectCancelIntent(trimmed)) {
+        const refundReply = await handleCancelAndRefund(peerAddr);
+        if (refundReply) return refundReply;
+      }
+    } catch (e) { console.warn(`[broker-sell] cancel-refund check err: ${e.message}`); }
+  }
+
   // R33 b iter5b (NWT 90b29e39 Bug-Z13 trace 实证): EARLIEST setConvoStateLock for SELL intent.
   // 跟 handleBuyIntent 同 entry-pattern. _detectIntent='sell' → 真**就 lock**, 不**等** SELL_REGEX hit.
   if (trimmed) {

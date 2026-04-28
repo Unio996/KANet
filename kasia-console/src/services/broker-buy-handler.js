@@ -734,6 +734,20 @@ export async function handleBuyIntent(peerAddr, message) {
     } catch { /* import 兜底 */ }
   }
 
+  // Owner 02:23 钦定 cancel-refund policy: user 指示取消 → 检 broker 持的 active offer →
+  // 如 protocol_status=open && taker=null → cancel 上链 + sendKas refund (扣 fee) + DM ack.
+  // 命中 refundable → 返回 ack 立刻 reply (跳过后续 BUY/SELL 路径). 没命中 → null fall through.
+  // matched/verifying/delivering 状态 → handleCancelAndRefund 不动, 走 dispute (不在本 helper).
+  if (trimmed) {
+    try {
+      const { detectCancelIntent, handleCancelAndRefund } = await import('./broker-cancel-refund.js');
+      if (detectCancelIntent(trimmed)) {
+        const refundReply = await handleCancelAndRefund(peerAddr);
+        if (refundReply) return refundReply;
+      }
+    } catch (e) { console.warn(`[broker-buy] cancel-refund check err: ${e.message}`); }
+  }
+
   // R33 b iter5b (NWT 90b29e39 Bug-Z13 trace 实证扩): EARLIEST setConvoStateLock 加固.
   // iter5 加在 handleLlmDialog L580 处, 但 NWT trace 实证 T2 reply EMPTY 231ms 不**真**真**LLM,
   // 真 deterministic path (handleBuyIntent 路径) 中**真**真**早 return** 没经 handleLlmDialog.

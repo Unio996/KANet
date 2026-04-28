@@ -590,6 +590,19 @@ export async function handleLlmDialog(peer, message) {
     }
   }
 
+  // Owner 02:23 钦定 cancel-refund policy (跟 broker-buy/sell-handler 同模式).
+  // user 指示取消 → 检 broker active offer → open 状态: cancel + refund + DM ack.
+  // matched/verifying/delivering → 走 dispute (不在 helper).
+  {
+    try {
+      const { detectCancelIntent, handleCancelAndRefund } = await import('./broker-cancel-refund.js');
+      if (detectCancelIntent(message)) {
+        const refundReply = await handleCancelAndRefund(peer);
+        if (refundReply) return refundReply;
+      }
+    } catch (e) { console.warn(`[broker-llm] cancel-refund check err: ${e.message}`); }
+  }
+
   // R31 P1.b attacker (NWT 33c0fb3a multi-addr-plant + r19-strip-replant): EARLIEST detect.
   // 真**真**deterministic path OR LLM path fall, addr-change attempt 真**真**直接 R31 lifecycle-lock 拒.
   {
