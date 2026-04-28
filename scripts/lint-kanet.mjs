@@ -249,6 +249,29 @@ function checkR33b(filepath, content) {
   }
 }
 
+// R-NWT-2026-04-28 Bug-Z22 (Owner production 真撞): "真**真**真" stutter pattern leaked from
+// dev-coord agent broadcast style INTO broker user-facing strings. Real users see broker DM
+// replies containing "真**真**真**真 cancel" (Owner screenshot 04:33). Catastrophic UX —
+// users who don't accept stutter / repetition fully reject the product.
+// Scope: broker-*.js + conversations.js (broker reply path). Block 真[*]{2,} or [^a-zA-Z0-9]\*\*[^a-zA-Z0-9]
+// inside string literals (return/preview_text/message:/enqueue payload). Allow in comments.
+function checkBrokerStutter(filepath, content) {
+  if (!/broker-(?:buy-handler|sell-handler|llm-agent|cancel-refund|intake-watcher|action-queue)\.js$/.test(filepath)
+      && !/conversations\.js$/.test(filepath)) return;
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    // skip comments
+    if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) continue;
+    // strip inline comments to avoid false positives
+    const code = line.replace(/\/\/.*$/, '');
+    // detect stutter inside string literals (single, double, backtick)
+    if (/['"`][^'"`]*真\*{2,}真[^'"`]*['"`]/.test(code)) {
+      violations.push({ rule: 'BrokerStutter (Z22)', file: filepath, line: i + 1, msg: '真**真 stutter pattern in user-facing string — Owner production 真撞, plain 中文 only' });
+    }
+  }
+}
+
 // ── 跑 ──
 for (const fp of targets) {
   let content;
@@ -259,6 +282,7 @@ for (const fp of targets) {
   checkR19(fp, content);
   checkR33(fp, content);
   checkR33b(fp, content);
+  checkBrokerStutter(fp, content);
 }
 checkR10();
 

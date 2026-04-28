@@ -41,7 +41,7 @@ const SYSTEM_PROMPT = `你是 KANet broker, 帮用户买卖 KAS / USDT / USDC. �
 1. **字段齐 → 必调 preview_order tool**. 字段 = 方向(买/卖) + 数量 + 资产(KAS/USDT/USDC) + 链 + 收款地址(买 stable 或 卖 时必填). 不准自己编报价, 不准自己说 '订单画像', preview 必经 tool.
 2. **用户回 YES/确认/对 → 必调 finalize_order tool**. 不准自己说 '已下单'.
 3. **用户说 已付/付了/check → 必调 verify_payment tool**. 不准让用户找 tx hash.
-4. **用户 cancel/取消/不要了/退我钱/cancel/refund/我等不了了/算了 等任何 cancel-intent → 必调 cancel_order tool**. **真**真**真自己说 '已为您取消' / '资金 1-2 分钟到账' / '已退还' — 真**真**真**真 broker DB 真 cancel + 真 sendKas. 真**真**真**编 fake ack** (Bug-Z19 production 灾难). 即使**真**没** active offer, 也调 cancel_order tool, 它返 deterministic null/no-op 真**真**真 LLM hallucinate.
+4. **用户 cancel/取消/不要了/退我钱/cancel/refund/我等不了了/算了 等任何 cancel-intent → 必调 cancel_order tool**. 不准自己说 '已为您取消' / '资金 1-2 分钟到账' / '已退还' — 这些必须由 cancel_order tool 真正执行 cancel + sendKas refund 后再回. 不准编造 fake ack (Bug-Z19 production 灾难). 即使没有 active offer, 也调 cancel_order tool, 它会返 deterministic null/no-op, 不让 LLM hallucinate.
 
 # 用户自定条件 (R33 b 铁律 — Owner 真测 B3 反复撞)
 
@@ -151,7 +151,7 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'cancel_order',
-      description: '用户说 NO/取消/不要了/退我钱/cancel/refund/我等不了了/算了 等任何 cancel-intent 时**必调此 tool**. 真**真**真**真**自己回 \'已取消\' / \'1-2 分钟到账\' / \'已为您取消\' — 真**真**真**真 broker DB. 必经此 tool 真**真**真**真**真 cancel offer 上链 + sendKas refund + state update. 即使**真**没**真**真**真**真 active offer, 也调此 tool, 它真**真**真 false fall-through 真**真**真**deterministic null/no-op 不**真**LLM hallucinate.',
+      description: '用户说 NO/取消/不要了/退我钱/cancel/refund/我等不了了/算了 等任何 cancel-intent 时必调此 tool. 不准自己回 \'已取消\' / \'1-2 分钟到账\' / \'已为您取消\' — 这些必须由本 tool 真正执行 cancel offer 上链 + sendKas refund + state update 后再说. 即使没有 active offer, 也调此 tool, 它会返 deterministic null/no-op, 防止 LLM hallucinate.',
       parameters: {
         type: 'object',
         properties: {},
@@ -375,7 +375,7 @@ async function _executeToolImpl(peer, name, args) {
       const ack = await handleCancelAndRefund(peer);
       if (ack) return { ok: true, preview_text: ack };
       // 无 active offer → deterministic null reply, 真**真**真 LLM 自由发挥
-      return { ok: true, preview_text: '没找到你 active 订单. 真**真**真**真 cancel 的, 重新下单回 "买 X KAS" / "卖 X KAS".' };
+      return { ok: true, preview_text: '没找到你的 active 订单. 如果想下新单, 回 "买 X KAS" 或 "卖 X KAS".' };
     } catch (e) {
       return { ok: true, preview_text: `抱歉, 取消处理失败 (${e.message?.slice(0, 60)}). 请稍后重试或回 NO 联系 broker.` };
     }
@@ -701,7 +701,7 @@ export async function handleLlmDialog(peer, message) {
     // turn 2+ user 真**真**给新 addr 跟 prev 不同 → 真**绝不**让 LLM 自由发挥 echo, deterministic 拒.
     if (merged._address_change_attempt) {
       console.warn(`[broker-llm Z11] address change attempt blocked: peer=${peer?.slice(-12)} fresh=${fresh.address?.slice(0,10)} locked=${merged.address?.slice(0,10)}`);
-      return `订单地址已锁定 ${merged.address}. 真**改地址**请回 "NO" 取消订单, 重新下单告诉我新地址.`;
+      return `订单地址已锁定 ${merged.address}. 改地址请回 "NO" 取消当前订单, 然后重新下单告诉我新地址.`;
     }
     // R33 b iter6 (NWT c5bda126 fuzz negative trace): 显式 reject negative qty.
     if (merged.qty != null && merged.qty < 0) {
@@ -791,7 +791,7 @@ export async function handleLlmDialog(peer, message) {
     // Force-call cancel_order tool deterministic
     try {
       const toolResult = await _executeTool(peer, 'cancel_order', {});
-      return toolResult?.preview_text || '没找到你 active 订单. 真**真**真 cancel 的, 重新下单回 "买 X KAS" / "卖 X KAS".';
+      return toolResult?.preview_text || '没找到你的 active 订单. 如果想下新单, 回 "买 X KAS" 或 "卖 X KAS".';
     } catch (e) {
       return `抱歉, 取消处理失败 (${e.message?.slice(0, 60)}). 请稍后重试.`;
     }
