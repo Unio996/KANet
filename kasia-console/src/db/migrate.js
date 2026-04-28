@@ -2425,5 +2425,24 @@ export function runMigrations() {
     }
   }
 
+  // v81 (Phase E v2 召会 — Owner 22:xx 钦定 真戳 "系统所有基础设施是全的, 之前抓错了药"):
+  // revert v79+v80 broker_conversations — 100% 冗余 retail_dex_orders 现有字段.
+  // NWT 22:39 实证: retail_dex_orders 153 行 + 字段全 cover (side/qty/pay_chain/pay_address/
+  // receive_*/state/agent_pay_addr/expires_at). retail_dex_user_memory 11 行 + LLM distill cron
+  // 已在跑 (议题 7 broker_user_profile 也冗余).
+  // broker-state-authority.js task B 重写方向: getConvoState 直接 SELECT retail_dex_orders +
+  // JOIN retail_dex_user_memory + relation_states. setConvoStateLock = UPDATE retail_dex_orders
+  // WHERE guard (R31/R33 SQL 表达). 不新建表, 复用现有 pipeline.
+  // 详见 dev-coord NWT 64eef5ef cache reframe + Owner 抓错药戳穿 + J1 #34 ack.
+  {
+    const hasTable = sqlite.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='broker_conversations'"
+    ).get();
+    if (hasTable) {
+      sqlite.exec(`DROP TABLE broker_conversations`);
+      console.log('[migrate] v81: broker_conversations dropped (Owner 抓错药戳穿 — 复用 retail_dex_orders + retail_dex_user_memory + relation_states 现有 pipeline).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
