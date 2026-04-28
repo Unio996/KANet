@@ -35,21 +35,30 @@ export function relayId(alias) {
 }
 
 /**
- * Generate a fresh anonymous test peer address (valid kaspa: format prefix only).
- * **LIMITATION (Bug-Z10 dig)**: synthetic peers are NOT in real Kasia network.
- * - /api/agent/reply works (sync HTTP, no chain hop)
- * - But broker-action-queue _qDm chain broadcast 真**fails silently** for these peers
- * - Therefore: cases using freshTestPeer should NOT assert on broker outbound DMs
- *   that go through chain (e.g. dm_pay_instr / dm_order_confirmed via Kasia)
- * - Use realLocalPeer() instead when chain DM verification matters
+ * Generate a fresh anonymous test peer address (valid kaspa: bech32 format).
  *
- * For cases that need a clean-history user simulation but only check broker reply
- * via /api/agent/reply (sync), freshTestPeer is fine.
+ * **R-NWT-2026-04-28 Kaspa bech32 fix** (J1 3b74f4fe + J2 5bc6645d ack):
+ * 之前用 hex charset (0-9a-f) 含 'b' — Kaspa bech32 charset 'qpzry9x8gf2tvdw0s3jn54khce6mua7l'
+ * 不含 'b' / 'i' / 'o' / '1'. relay sendCommand validate 真**真**真**真**真 reject 'invalid character b'.
+ * 真**真**真**真 broker outbound _qDm 路径 silent fail (state_expire_boundary T1 EMPTY 真因).
+ *
+ * 修: map sha256 bytes to bech32 charset chars (32 chars, 5 bits each).
+ * 真**真**真**valid Kaspa bech32 string (满**真**真**真 character validation).
+ *
+ * **LIMITATION (Bug-Z10 dig, retain)**: synthetic peers are still NOT in real Kasia network.
+ * - /api/agent/reply works (sync HTTP, no chain hop)
+ * - broker-action-queue _qDm chain broadcast 真**真**真**真 deliver (peer addr 真**真 reachable)
+ *   但**真**真**真 fail 在 'reach' 阶段, 不**真**'parse' 阶段 — broker handler sync return path 真生效
+ * - Use realLocalPeer() when chain DM delivery verification matters
  */
+const KASPA_BECH32_CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
 export function freshTestPeer(seed) {
-  // 60 chars after 'kaspa:q' to look like real addr; deterministic from seed
-  const suffix = createHash('sha256').update(String(seed)).digest('hex').slice(0, 56);
-  return `kaspa:q${suffix.replace(/[^a-z0-9]/g, '0')}`.padEnd(67, '0').slice(0, 67);
+  const hashBytes = createHash('sha256').update(String(seed)).digest();
+  let suffix = '';
+  for (let i = 0; i < 60; i++) {
+    suffix += KASPA_BECH32_CHARSET[hashBytes[i % hashBytes.length] % 32];
+  }
+  return `kaspa:q${suffix.slice(0, 60)}`;
 }
 
 /**
