@@ -286,38 +286,83 @@ export function shouldDeterministicFire(peer, regexName, message) {
  *  minimal in-flight state only, profile field present for forward compat.)
  */
 export function llmSystemPromptStateLock(peer) {
+  // T-J2-2026-04-29 Phase E v3 task C (Owner 22:30+22:31+22:32 三连洞察 + NWT ce51d8d1):
+  // 改为 always-load — 即便 no active order, profile + contact 仍 inject (复用 existing
+  // retail_dex_user_memory + relation_states pipeline, broker-intake-watcher pattern).
+  // 三段 systemAppend (USER PROFILE / CONTACT / IN-FLIGHT) 让 LLM 永看 user 长期偏好 + 通讯录 alias + 当前订单 state.
   const state = getConvoState(peer);
-  if (!state) return null;
 
-  const hasAnyField = state.direction || state.qty != null || state.pay_chain ||
-    state.recv_address || state.evm_pay_address || state.give_asset;
-  if (!hasAnyField) return null;
+  // 即便 state=null (no active order), 仍查 profile + contact (新对话第 1 turn 也丝滑)
+  const memory = state?.profile ?? sqlite.prepare(
+    `SELECT distilled_summary, preferred_chain, preferred_pay_address, tone_preference
+     FROM retail_dex_user_memory WHERE user_kasia_address = ?`
+  ).get(peer);
 
-  const fieldLines = [];
-  if (state.direction) fieldLines.push(`direction=${state.direction}`);
-  if (state.give_asset) fieldLines.push(`give_asset=${state.give_asset}`);
-  if (state.qty != null) fieldLines.push(`qty=${state.qty}`);
-  if (state.pay_chain) fieldLines.push(`pay_chain=${state.pay_chain}`);
-  if (state.recv_address) fieldLines.push(`recv_address=${state.recv_address}`);
-  if (state.evm_pay_address) fieldLines.push(`evm_pay_address=${state.evm_pay_address}`);
-  if (state.lifecycle_phase) fieldLines.push(`phase=${state.lifecycle_phase}`);
+  const relation = state?.contact ?? (() => {
+    const r = sqlite.prepare(
+      `SELECT their_alias, classification, trust_level, is_blocked
+       FROM relation_states WHERE peer_address = ?`
+    ).get(peer);
+    return r ? {
+      alias: r.their_alias || null,
+      classification: r.classification || null,
+      trust_level: r.trust_level || null,
+      is_blocked: r.is_blocked === 1,
+    } : null;
+  })();
 
-  const lines = state.locked
-    ? [
-        '\nCRITICAL CONVERSATION STATE (do NOT violate):',
-        `User has DECLARED ${state.direction.toUpperCase()} flow at turn ${Math.floor((Date.now() - state.started_at) / 1000)}s ago.`,
-        `LOCKED fields (cannot change without cancel): ${fieldLines.join(', ')}.`,
-        `Fresh user message fills MISSING fields ONLY. Direction is IMMUTABLE.`,
-        `If user message implies opposite direction, ASK 'cancel order first?' do NOT auto-flip.`,
-        `If user asks question (not field), ANSWER question with state context, do NOT re-show preview.`,
-      ]
-    : [
-        '\nKNOWN USER FIELDS (consult before reply, never hallucinate forget):',
-        `User previously gave: ${fieldLines.join(', ')}.`,
-        `Reply MUST cite these fields when relevant. NEVER ask user for fields already given above.`,
-        `If user message references previous fields, acknowledge them. Do NOT reset context.`,
-      ];
-  return lines.join('\n');
+  const sections = [];
+
+  // ── Section 1: USER PROFILE (retail_dex_user_memory + relation_states JOIN) ──
+  if (memory || relation) {
+    const profileLines = [];
+    if (relation?.alias) profileLines.push(`alias: ${relation.alias}`);
+    if (relation?.classification) profileLines.push(`classification: ${relation.classification}`);
+    if (relation?.trust_level != null) profileLines.push(`trust_level: ${relation.trust_level}`);
+    if (memory?.preferred_chain) profileLines.push(`preferred_chain: ${memory.preferred_chain}`);
+    if (memory?.preferred_pay_address) profileLines.push(`preferred_pay_address: ${memory.preferred_pay_address}`);
+    if (memory?.tone_preference) profileLines.push(`tone: ${memory.tone_preference}`);
+    if (memory?.distilled_summary) profileLines.push(`distilled: ${memory.distilled_summary.slice(0, 200)}`);
+    if (profileLines.length > 0) {
+      sections.push('\nUSER PROFILE (long-term, from relation_states + retail_dex_user_memory):\n' + profileLines.join('\n'));
+    }
+  }
+
+  // ── Section 2: IN-FLIGHT STATE (retail_dex_orders 当前 active row) ──
+  if (state) {
+    const hasAnyField = state.direction || state.qty != null || state.pay_chain ||
+      state.recv_address || state.evm_pay_address || state.give_asset;
+    if (hasAnyField) {
+      const fieldLines = [];
+      if (state.direction) fieldLines.push(`direction=${state.direction}`);
+      if (state.give_asset) fieldLines.push(`give_asset=${state.give_asset}`);
+      if (state.qty != null) fieldLines.push(`qty=${state.qty}`);
+      if (state.pay_chain) fieldLines.push(`pay_chain=${state.pay_chain}`);
+      if (state.recv_address) fieldLines.push(`recv_address=${state.recv_address}`);
+      if (state.evm_pay_address) fieldLines.push(`evm_pay_address=${state.evm_pay_address}`);
+      if (state.lifecycle_phase) fieldLines.push(`phase=${state.lifecycle_phase}`);
+
+      const inFlightLines = state.locked
+        ? [
+            '\nCRITICAL CONVERSATION STATE (do NOT violate):',
+            `User has DECLARED ${state.direction.toUpperCase()} flow at turn ${Math.floor((Date.now() - state.started_at) / 1000)}s ago.`,
+            `LOCKED fields (cannot change without cancel): ${fieldLines.join(', ')}.`,
+            `Fresh user message fills MISSING fields ONLY. Direction is IMMUTABLE.`,
+            `If user message implies opposite direction, ASK 'cancel order first?' do NOT auto-flip.`,
+            `If user asks question (not field), ANSWER question with state context, do NOT re-show preview.`,
+          ]
+        : [
+            '\nKNOWN USER FIELDS (consult before reply, never hallucinate forget):',
+            `User previously gave: ${fieldLines.join(', ')}.`,
+            `Reply MUST cite these fields when relevant. NEVER ask user for fields already given above.`,
+            `If user message references previous fields, acknowledge them. Do NOT reset context.`,
+          ];
+      sections.push(inFlightLines.join('\n'));
+    }
+  }
+
+  if (sections.length === 0) return null;
+  return sections.join('\n');
 }
 
 /**
