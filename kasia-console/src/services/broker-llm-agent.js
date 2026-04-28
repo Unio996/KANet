@@ -470,7 +470,9 @@ export function _getPendingFieldsAddr(peer) {
 function _extractFieldsFromMsg(msg) {
   const m = String(msg || '');
   const intent = _detectIntent(m);
-  const qtyAsset = m.match(/(\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*(kas|usdt|usdc)/i);
+  // R33 b iter6 (NWT c5bda126 fuzz negative trace): sign capture + 后续 reject. 不**真**真 silent
+  // normalize '-5' → '5' (broker preview 真**真**charge 5 USDT 真**真**user typo 真灾难).
+  const qtyAsset = m.match(/(-?\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*(kas|usdt|usdc)/i);
   const chainMatch = m.match(/\b(BSC|BNB|Polygon|POL|SOL|Solana|TRON|ETH)\b/i);
   const evmMatch = m.match(/0x[a-fA-F0-9]{40}/);
   // R33 b iter4 (J2 GAP B 真根因 — _pendingFields deterministic path bypass LLM):
@@ -641,6 +643,11 @@ export async function handleLlmDialog(peer, message) {
     if (merged._address_change_attempt) {
       console.warn(`[broker-llm Z11] address change attempt blocked: peer=${peer?.slice(-12)} fresh=${fresh.address?.slice(0,10)} locked=${merged.address?.slice(0,10)}`);
       return `订单地址已锁定 ${merged.address}. 真**改地址**请回 "NO" 取消订单, 重新下单告诉我新地址.`;
+    }
+    // R33 b iter6 (NWT c5bda126 fuzz negative trace): 显式 reject negative qty.
+    if (merged.qty != null && merged.qty < 0) {
+      _clearPendingFields(peer);
+      return `抱歉, ${merged.qty} 是负数, 不能${merged.direction === 'sell' ? '卖' : '买'}负数. 改正数, 例 "${merged.direction === 'sell' ? '卖' : '买'} 5 KAS".`;
     }
     const minQty = merged.give_asset === 'KAS' ? 1.0 : 0.1;
     if (merged.qty != null && merged.qty < minQty) {

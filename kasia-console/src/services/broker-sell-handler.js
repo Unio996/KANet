@@ -11,7 +11,8 @@ import { setConvoStateLock, shouldDeterministicFire } from './broker-state-autho
 const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
 // T-J2-2026-04-27 v1.1: 真扩 SELL_REGEX 同 BUY_OVERRIDE_REGEX 模式 (Owner 25:21 钦定真扩同义词)
 // 加 '想卖/要卖/出售/抛/想抛/想出/dump/cash out' — 真 deterministic fast path 跳 LLM 1-2s
-const SELL_REGEX = /^\s*(?:卖|sell|想卖|要卖|出售|抛|想抛|想出|dump|cash\s*out|unload|offload)\s*(\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*KAS\s*$/i;
+// R33 b iter6 (NWT c5bda126 fuzz negative trace): regex sign capture, 后续 reject negative.
+const SELL_REGEX = /^\s*(?:卖|sell|想卖|要卖|出售|抛|想抛|想出|dump|cash\s*out|unload|offload)\s*(-?\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*KAS\s*$/i;
 // T-J1-19l (J1 dynamic e2e v3 撞墙真因): 用户在 sell _pending 状态发 "买 X KAS" 改主意,
 // 之前 broker 顽固要 BSC 地址 → 用户卡住. 入口检测 buy intent override 自动 release pending.
 const BUY_OVERRIDE_REGEX = /^\s*(?:买|buy|想买|要买|购买|想换|搞|弄|来点|想要|我要)\s*\d/i;
@@ -321,6 +322,8 @@ export async function handleSellIntent(peerAddr, message) {
   const m = SELL_REGEX.exec(trimmed);
   if (!m) return null;
   const qty = parseFloat(m[1]);
+  // R33 b iter6 (NWT c5bda126 fuzz negative trace): 显式 reject negative.
+  if (qty < 0) return `抱歉, ${m[1]} 是负数, 不能卖负 KAS. 改正数, 例 "卖 5 KAS".`;
   if (qty <= 0) return null;
   if (qty <= FEE_KAS) {
     _qDm(peerAddr, `太少了, 至少 ${FEE_KAS + 0.5} KAS (扣 ${FEE_KAS} KAS broker fee 后才有意义).`);

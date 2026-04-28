@@ -15,7 +15,9 @@ const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
 // T-J2-2026-04-27 v1.1: 真扩 BUY_REGEX 同 BUY_OVERRIDE_REGEX (broker-sell-handler line 14) 模式
 // + SELL_REGEX 真扩 (63a953de3) 对称真扩同义词 — 真 deterministic fast path 跳 LLM 1-2s
 // 加 '想买/要买/购买/购/想换/搞/弄/来点/想要/我要/want/get/grab/take/need/cop/gimme/quiero'
-const BUY_REGEX = /^\s*(?:买|buy|想买|要买|购买|购|想换|搞|弄|来点|想要|我要|want|get|grab|take|need|cop|gimme|fetch|quiero|necesito)\s*(\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*KAS\s*$/i;
+// R33 b iter6 (NWT c5bda126 fuzz negative trace 实证): regex 加 optional sign capture, 后续代码
+// 真**真**真 reject negative — 真**真**真 silent normalize '-5' → '+5' (production typo 真**真**charge mismatch).
+const BUY_REGEX = /^\s*(?:买|buy|想买|要买|购买|购|想换|搞|弄|来点|想要|我要|want|get|grab|take|need|cop|gimme|fetch|quiero|necesito)\s*(-?\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*KAS\s*$/i;
 // T-J1-19a (J2 probe-5a 暴露): broker dust 单接受漏洞 — finalizeBuy / _aggregateWithFallback
 // 必须拒小于 MIN_QTY 的请求, 否则 broker 锁 fund_locks 浪费 broadcast tx + 用户 dust 被 broker fee 吃光.
 const MIN_QTY_KAS = 1.0;
@@ -1022,6 +1024,9 @@ export async function handleBuyIntent(peerAddr, message) {
   const m = BUY_REGEX.exec(trimmed);
   if (!m) return null;
   const qty = parseFloat(m[1]);
+  // R33 b iter6 (NWT c5bda126 fuzz negative trace): 显式 reject negative — 真**真**fall LLM
+  // 真 silent normalize, 用户 typo '-5' broker 真**真**真 charge mismatch.
+  if (qty < 0) return `抱歉, ${m[1]} 是负数, 不能买负 KAS. 改正数, 例 "买 5 KAS".`;
   if (qty <= 0) return null;
   // T-J1-19a + T-J2-20 合并: dust qty / 拼单+自挂全失败 → return null 让 broker-llm-agent
   // 接管 LLM 友好拒. handler 不发静态 DM 避免截胡 LLM.
