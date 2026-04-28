@@ -296,8 +296,27 @@ async function executeAction(item) {
     case 'dm_complete':  // T-J2-V2-realtest 议 B1: 交易完成
     case 'dm_timeout':  // T-J2-V2-realtest 议 B1: 订单超时
     case 'dm_failed':  // T-J2-V2-realtest 议 B1: 订单失败/争议
-    case 'dm_cancel':  // T-J1-2026-04-27 P0-3 (NWT 17:34 UX): _pendingAccepts CANCEL after confirm
+    case 'dm_cancel': {  // T-J1-2026-04-27 P0-3 (NWT 17:34 UX): _pendingAccepts CANCEL after confirm
+      // T-J2-2026-04-28 Phase D P2 (γ NWT 9a547e81 + J1 8513b019): freshness check —
+      // dm_quote (preview) reply 真 fire 前 verify state 还 align tool args. T1 preview reply
+      // pending in queue + T2/T3 user 已变更 qty/addr/chain → state 真 transition → drop stale + fire deterministic notice. user 永看 fresh reply, 不 silent lost (NWT fad19de7 catch).
+      if (item.kind === 'dm_quote' && p.freshness_args) {
+        const { getConvoState } = await import('./broker-state-authority.js');
+        const state = getConvoState(item.peer);
+        const stale = state && (
+          (p.freshness_args.qty != null && state.qty != null && state.qty !== p.freshness_args.qty) ||
+          (p.freshness_args.payChain && state.pay_chain && state.pay_chain !== p.freshness_args.payChain) ||
+          (p.freshness_args.recv_address && state.recv_address && state.recv_address !== p.freshness_args.recv_address) ||
+          (p.freshness_args.evm_pay_address && state.evm_pay_address && state.evm_pay_address !== p.freshness_args.evm_pay_address) ||
+          (p.freshness_args.direction && state.direction && state.direction !== p.freshness_args.direction)
+        );
+        if (stale) {
+          const note = '上一条订单画像内容过时 (你已变更 qty/addr/chain). 我按你最新 input 重新报价中, 上条 skip.';
+          return sendCommandAsync(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: item.peer, message: note });
+        }
+      }
       return sendCommandAsync(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: item.peer, message: p.message });
+    }
     case 'accept_v1':
     case 'paid_v1': {
       // T-NWT-2026-04-26 wire fix (Owner 真测 a34701fe 5 笔 rescue 真根因):

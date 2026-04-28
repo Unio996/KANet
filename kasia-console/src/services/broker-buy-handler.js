@@ -717,16 +717,18 @@ function _recordAccept({ offerId, userPeer, qty, quotedUsdt, payChain, acceptTx 
 // R4 改造: handler 不直接发 reply DM (会撞 UTXO), 而是 enqueue 让 broker-action-queue 单线 pump.
 // handler return '' 让 conversations.js → relay reply 路径变 silent (relay 看 reply='' = no DM).
 // 用户视角: 自己发 "买 X KAS" → 几秒后从队列收到 broker 报价 DM.
-async function _qDm(kind, peerAddr, message) {
+async function _qDm(kind, peerAddr, message, extra = {}) {
   // T-J2-14 队列位置: snap pre-enqueue queue depth → "前面 N 笔待处理" 嵌 message 末尾.
   // T-J2-15 (R4 Bug 9): broker DM 末尾必带 4 字符唯一 tag, 避 relay anti-spam 14min "100% similar"
   // dedup 拦. 同 offer 同 qty 反复触发会 100% 相似, 加 tag 后内容必不同.
+  // T-J2-2026-04-28 Phase D P2 (γ): extra.freshness_args propagates to broker-action-queue
+  // dm_quote handler for state-staleness check before chain DM fire.
   const { getQueueStats } = await import('./broker-action-queue.js');
   const stats = getQueueStats();
   const queuePart = stats.length > 0 ? `(前面 ${stats.length} 笔, ~${Math.ceil(stats.length * 5)}s) ` : '';
   const tag = `#${randomUUID().slice(0, 4)}`;
   const suffix = `\n\n${queuePart}${tag}`;
-  return _enqueue(kind, peerAddr, { message: message + suffix });
+  return _enqueue(kind, peerAddr, { message: message + suffix, ...extra });
 }
 
 export async function handleBuyIntent(peerAddr, message) {
@@ -965,6 +967,17 @@ export async function handleBuyIntent(peerAddr, message) {
               });
             } catch (e) { /* lock violation 真**真 EARLIEST 已 handle */ }
             console.log(`[broker-buy] det-preview ${peerAddr.slice(-12)}: ${qty} ${asset} ${chainNorm}`);
+            // T-J2-2026-04-28 Phase D P2 fix (NWT fad19de7 catch): chain DM mode 下 sync return only
+            // 假设破 — mock peer 真 chain DM 时无 sync caller, preview 真 dropped. 加 _qDm fire
+            // chain DM (sync HTTP path 仍 work, relay anti-spam dedup). freshness_args 让
+            // dm_quote handler verify state 还 align (γ NWT 9a547e81 + J1 8513b019 propose).
+            _qDm('dm_quote', peerAddr, previewResult.preview_text, {
+              freshness_args: {
+                qty, payChain: chainNorm, asset, direction: 'buy',
+                recv_address: asset === 'KAS' ? null : recvAddr,
+                evm_pay_address: asset === 'KAS' ? recvAddr : null,
+              },
+            });
             return previewResult.preview_text;
           }
           if (previewResult.message) {
