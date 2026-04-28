@@ -921,6 +921,19 @@ export async function handleBuyIntent(peerAddr, message) {
               qty, pay_chain: chainNorm,
               give_asset: asset, receive_address: asset === 'KAS' ? null : recvAddr,
             });
+            // R33 b iter12 (J2 dec63bf5 confirmed_addr trace 实证): det-preview path 也要 setConvoStateLock
+            // 真**真 recv_address — 真**真**真 detectAddrChangeAttempt 真**真**真 fire (前 iter5b EARLIEST 真**真
+            // direction lock, 真**真**真 recv_address, 真**真**真 attacker '改地址 0xfake' 真**绕过).
+            try {
+              setConvoStateLock(peerAddr, {
+                direction: 'buy',
+                give_asset: asset,
+                qty,
+                pay_chain: chainNorm,
+                recv_address: asset === 'KAS' ? null : recvAddr,
+                lifecycle_phase: 'preview_shown',
+              });
+            } catch (e) { /* lock violation 真**真 EARLIEST 已 handle */ }
             console.log(`[broker-buy] det-preview ${peerAddr.slice(-12)}: ${qty} ${asset} ${chainNorm}`);
             return previewResult.preview_text;
           }
