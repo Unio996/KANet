@@ -46,6 +46,10 @@ const SUPPORTED_ASSETS_SECTION = (() => {
 // 真 strategy: 真 emphasize 'MUST CALL tool' first, 真简化字段问 flow, 真 trim cruft 真 v1.2.
 const SYSTEM_PROMPT = `你是 KANet broker, 帮用户买卖 KAS / USDT / USDC. 跨 9 chain (BSC/ETH/Polygon/Arb/Op/Avax/Base/Sol/Tron).
 
+# 语言铁律 (Owner 04-29 真测撞)
+
+你的回复**全程中文**. 用户用什么语言无所谓 — 你回复一律中文 (普通话, 简体). 严禁中英文混杂回复, 严禁切换英文 ("Got it" / "what do you want to sell" 等)。Bug-Z26 production: Owner "Bsc,0x..." 中文输入, broker 回 "Got it, what do you want to sell" 英文, Owner 火大. 全程中文 0 例外.
+
 # 你最重要的 5 件事 (永远不能忘)
 
 1. **字段齐 → 必调 preview_order tool**. 字段 = 方向(买/卖) + 数量 + 资产(KAS/USDT/USDC) + 链 + 收款地址(买 stable 或 卖 时必填). 不准自己编报价, 不准自己说 '订单画像', preview 必经 tool.
@@ -902,7 +906,26 @@ export async function handleLlmDialog(peer, message) {
     const v = await validateLlmReply(peer, replyText);
     if (!v.ok) {
       console.error(`[broker-llm R33] LLM reply violations: ${v.violations.join(' | ')}`);
-      // 真 violation 真 fall back 真 deterministic safe message
+      // T-J2-2026-04-29 Bug-Z26 Bug 5 (NWT a380b14e Owner 真测): R33 violation fallback
+      // 加 sticky context recovery — 之前 generic "请重新提供" Owner 火大 (state 全丢假象).
+      // 真 state authority 仍 retain user fields, fallback msg 引用现有 fields 让 Owner 知道
+      // broker 没 forget. graceful "broker 卡了一下, 你给的信息我记得 X/Y/Z, 继续吗?"
+      try {
+        const { getConvoState } = await import('./broker-state-authority.js');
+        const state = getConvoState(peer);
+        if (state && (state.direction || state.qty || state.pay_chain || state.recv_address || state.evm_pay_address)) {
+          const parts = [];
+          if (state.direction) parts.push(`方向: ${state.direction === 'buy' ? '买' : '卖'}`);
+          if (state.qty != null) parts.push(`数量: ${state.qty} ${state.give_asset || 'KAS'}`);
+          if (state.pay_chain) parts.push(`链: ${state.pay_chain.toUpperCase()}`);
+          const addr = state.recv_address || state.evm_pay_address;
+          if (addr) parts.push(`地址: ${addr.slice(0, 10)}...`);
+          if (parts.length > 0) {
+            return `抱歉, 我这边 LLM 卡了一下. 你之前给的信息我记得: ${parts.join(' / ')}. 是继续这单吗? (回 YES 我继续 / 回 NO 取消重来)`;
+          }
+        }
+      } catch (e) { console.warn(`[broker-llm Bug 5] sticky recovery err: ${e.message}`); }
+      // state empty fallback (legacy)
       return '抱歉, broker 输出异常 (R33 内部拦截). 请回 NO 取消订单或重新下单告诉我数量+链.';
     }
   } catch (e) {
