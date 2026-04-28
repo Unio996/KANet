@@ -208,6 +208,8 @@ function _appendLlmIo(record) {
 
 async function _callLlm(messages, ctx = {}) {
   // ctx: { peer, turn } — 给 jsonl 关联 test-framework trace 用
+  // T-J1-2026-04-28 Layer 6 (phase 3 8-layer system fix): LLM 500 retry policy.
+  // 治 Bug-Z14 (LLM cascade fail). 5xx + network err 重试 3 次 (1s/2s backoff), 4xx fail fast.
   const a = sqlite.prepare(`
     SELECT a.ai_provider_url, a.ai_model FROM relay_nodes r
     JOIN adapter_nodes a ON a.id = r.adapter_node_id
@@ -223,66 +225,81 @@ async function _callLlm(messages, ctx = {}) {
     // /no_think 前缀 sys/user 都实测无效. 唯一有效是 body 加 chat_template_kwargs.
     chat_template_kwargs: { enable_thinking: false },
   };
-  const t0 = Date.now();
-  try {
-    const res = await fetch(`${a.ai_provider_url}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
-      signal: AbortSignal.timeout(120_000),
-    });
-    const latency_ms = Date.now() - t0;
-    if (!res.ok) {
-      console.warn(`[broker-llm] LLM HTTP ${res.status}`);
-      // log 失败 turn 给 trace (broker 走 LLM 但 fail, no-llm-log-no-pass 不该误判 INNER 空 = FAIL)
+  const MAX_ATTEMPTS = 3;
+  const BACKOFF_MS = [0, 1000, 2000];
+  let lastStatus = null;
+  let lastErr = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    if (BACKOFF_MS[attempt - 1] > 0) {
+      await new Promise(r => setTimeout(r, BACKOFF_MS[attempt - 1]));
+    }
+    const t0 = Date.now();
+    try {
+      const res = await fetch(`${a.ai_provider_url}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+        signal: AbortSignal.timeout(120_000),
+      });
+      const latency_ms = Date.now() - t0;
+      if (!res.ok) {
+        console.warn(`[broker-llm] LLM HTTP ${res.status} (attempt ${attempt}/${MAX_ATTEMPTS})`);
+        _appendLlmIo({
+          ts: new Date().toISOString(),
+          peer: ctx.peer || null,
+          turn: ctx.turn || null,
+          attempt,
+          system_prompt: SYSTEM_PROMPT,
+          messages: messages,
+          tools: TOOLS.map(t => t.function.name),
+          latency_ms,
+          http_status: res.status,
+          reply: null,
+          error: `HTTP ${res.status}`,
+        });
+        lastStatus = res.status;
+        if (res.status >= 400 && res.status < 500) return null;
+        continue;
+      }
+      const data = await res.json();
+      const message = data.choices?.[0]?.message;
       _appendLlmIo({
         ts: new Date().toISOString(),
         peer: ctx.peer || null,
         turn: ctx.turn || null,
+        attempt,
         system_prompt: SYSTEM_PROMPT,
         messages: messages,
         tools: TOOLS.map(t => t.function.name),
         latency_ms,
-        http_status: res.status,
-        reply: null,
-        error: `HTTP ${res.status}`,
+        reply_content: message?.content || null,
+        tool_calls: message?.tool_calls?.map(tc => ({
+          name: tc.function?.name,
+          arguments: tc.function?.arguments,
+        })) || null,
+        finish_reason: data.choices?.[0]?.finish_reason || null,
       });
-      return null;
+      return message;
+    } catch (e) {
+      const latency_ms = Date.now() - t0;
+      console.warn(`[broker-llm] LLM err (attempt ${attempt}/${MAX_ATTEMPTS}): ${e.message}`);
+      _appendLlmIo({
+        ts: new Date().toISOString(),
+        peer: ctx.peer || null,
+        turn: ctx.turn || null,
+        attempt,
+        system_prompt: SYSTEM_PROMPT,
+        messages: messages,
+        tools: TOOLS.map(t => t.function.name),
+        latency_ms,
+        reply: null,
+        error: e.message,
+      });
+      lastErr = e;
     }
-    const data = await res.json();
-    const message = data.choices?.[0]?.message;
-    _appendLlmIo({
-      ts: new Date().toISOString(),
-      peer: ctx.peer || null,
-      turn: ctx.turn || null,
-      system_prompt: SYSTEM_PROMPT,
-      messages: messages,
-      tools: TOOLS.map(t => t.function.name),
-      latency_ms,
-      reply_content: message?.content || null,
-      tool_calls: message?.tool_calls?.map(tc => ({
-        name: tc.function?.name,
-        arguments: tc.function?.arguments,
-      })) || null,
-      finish_reason: data.choices?.[0]?.finish_reason || null,
-    });
-    return message;
-  } catch (e) {
-    const latency_ms = Date.now() - t0;
-    console.warn(`[broker-llm] LLM err: ${e.message}`);
-    _appendLlmIo({
-      ts: new Date().toISOString(),
-      peer: ctx.peer || null,
-      turn: ctx.turn || null,
-      system_prompt: SYSTEM_PROMPT,
-      messages: messages,
-      tools: TOOLS.map(t => t.function.name),
-      latency_ms,
-      reply: null,
-      error: e.message,
-    });
-    return null;
   }
+  console.warn(`[broker-llm] all ${MAX_ATTEMPTS} attempts failed (last_status=${lastStatus}, last_err=${lastErr?.message || 'n/a'})`);
+  return null;
 }
 
 // T-J2-2026-04-27 Bug-Z6 deep RCA mechanical fallback wrapper:
@@ -325,7 +342,8 @@ async function _executeToolImpl(peer, name, args) {
       // deterministic finalize (LLM-driven preview 真不 set _quotes, 真 LLM 'YES' 真 unreliable hallucinate).
       const { buyPreview, _setPendingPreview } = await import('./broker-buy-handler.js');
       const r = await buyPreview({ user_kasia: peer, qty, pay_chain: chain, give_asset, receive_address: address || null, limit_price, refund_timeout_min });
-      if (r.ok) _setPendingPreview(peer, { qty, pay_chain: chain, give_asset, receive_address: address || null });
+      // T-J1-2026-04-28 Layer 7: tag direction='buy' so handleLlmDialog confirm shortcut routes correctly.
+      if (r.ok) _setPendingPreview(peer, { direction: 'buy', qty, pay_chain: chain, give_asset, receive_address: address || null });
       return r;
     }
     if (direction === 'sell') {
@@ -343,6 +361,12 @@ async function _executeToolImpl(peer, name, args) {
       if (!r.ok) {
         return { ok: true, preview_text: r.message || `抱歉, 卖单处理失败 (${r.error || 'unknown'}). 请重发或回 NO 取消.` };
       }
+      // T-J1-2026-04-28 Layer 7: SELL preview 也 set _pendingPreview tagged 'sell' — 治 LLM tool path
+      // 设了 preview 但 _pendingFields 没填 → user 'YES' fall LLM hallucinate. handleLlmDialog pp shortcut hit.
+      try {
+        const { _setPendingPreview } = await import('./broker-buy-handler.js');
+        _setPendingPreview(peer, { direction: 'sell', qty, pay_chain: chain, give_asset, receive_address: address });
+      } catch (e) { console.warn(`[broker-llm Layer7] sell pendingPreview set fail: ${e.message}`); }
       return r;
     }
     return { ok: true, preview_text: `抱歉, 未知方向 "${direction}". 请回 "买 X KAS" 或 "卖 X KAS".` };
@@ -675,6 +699,27 @@ export async function handleLlmDialog(peer, message) {
   const CONFIRM_WORDS_LOCAL = ['YES', 'yes', 'y', 'OK', 'ok', '确认', '好', '对', '是', '行', 'ya', 'sí', 'si'];
   const cancelWordsLocal = ['NO', 'no', 'n', '取消', '不要', '算了', 'cancel'];
   const trimmedMsg = String(message || '').trim();
+  // T-J1-2026-04-28 Layer 7 (phase 3): _pendingPreview CONFIRM priority over fields_collection / LLM hallucinate.
+  // 治 SELL via LLM tool path: preview_order set _pendingPreview but _pendingFields 没填 →
+  // L682 (后) shortcut 跳掉 → fall LLM 可能 hallucinate 假 ack. fix: pp 真存在 + 纯 CONFIRM → 直 finalize_order tool.
+  if (CONFIRM_WORDS_LOCAL.includes(trimmedMsg)) {
+    const { _getPendingPreview, _clearPendingPreview } = await import('./broker-buy-handler.js');
+    const pp = _getPendingPreview(peer);
+    if (pp) {
+      _clearPendingPreview(peer);
+      _clearPendingFields(peer);
+      const dir = pp.direction || 'buy';
+      const finalizeResult = await _executeTool(peer, 'finalize_order', {
+        direction: dir, qty: pp.qty, chain: pp.pay_chain,
+        give_asset: pp.give_asset || 'KAS', address: pp.receive_address || null,
+      });
+      if (finalizeResult?.ok && finalizeResult.order_id) {
+        const verb = dir === 'sell' ? '卖' : '买';
+        return `✓ ${verb}单已确认 (${pp.qty} ${pp.give_asset || 'KAS'}, ${(pp.pay_chain || '').toUpperCase()}). 付款/收款指引马上发你, 1-2 分钟到账, 不用刷新.`;
+      }
+      return finalizeResult?.preview_text || '抱歉, 下单失败, 请重发或回 "NO" 取消重新开始.';
+    }
+  }
   if (!freshHasAny && merged.direction && _allFieldsReady(merged) && CONFIRM_WORDS_LOCAL.includes(trimmedMsg)) {
     console.log(`[broker-llm P0-4] confirm shortcut: peer=${peer?.slice(-12)} direction=${merged.direction} qty=${merged.qty} asset=${merged.give_asset} chain=${merged.chain}`);
     _clearPendingFields(peer);

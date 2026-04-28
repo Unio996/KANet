@@ -3,6 +3,7 @@
 // 挂在 Console 启动 (index.js) setInterval, 不新建表只新增 event_type='broker_intake_processed' 作处理标记.
 
 import { sqlite } from '../db/client.js';
+import { randomUUID } from 'node:crypto';
 
 const TICK_MS = 60_000;
 const REFUND_TICK_MS = 5 * 60_000;
@@ -359,6 +360,55 @@ export async function intakeTick() {
   return { handled, scanned: rows.length };
 }
 
+// T-J1-2026-04-28 Layer 4 (phase 3 8-layer system fix): chain reconciler 周期 sweep.
+// 治 J2's Defect C 残留 + pre-Layer-1 历史: chain_events 'broker_kas_refunded' 真**真**真 txid 在 kaspa_tx_log 真存在.
+// Z20 旧 INSERT 用 'refund_<offer_id>' 合成 txid (非真链 hash), Layer 1 markOrderRefunded 用真 txId.
+// 本 sweep 抓两类 drift:
+//   A. chain_events broker_kas_refunded.txid 非 64-hex 或不在 kaspa_tx_log → 自欺 INSERT 残留 → DM Owner alert
+//   B. retail_dex_orders state IN ('refunded','cancelled_refunded','timed_out_refunded') AND
+//      没对应 kaspa_tx_log-verified chain_event → 状态造假 → DM Owner alert
+// dedupe: events.event_type='reconcile_drift_alert' + payload.chain_event_id, 不重复 alert 已 flagged 的.
+export async function _reconcileRefundsTick() {
+  let inspected = 0, drift = 0, alerted = 0;
+  try {
+    const rows = sqlite.prepare(`
+      SELECT ce.id, ce.txid, ce.payload, ce.observed_at
+      FROM chain_events ce
+      LEFT JOIN kaspa_tx_log k ON k.tx_id = ce.txid
+      WHERE ce.event_type = 'broker_kas_refunded'
+        AND k.tx_id IS NULL
+        AND julianday(ce.observed_at) > julianday('now', '-24 hours')
+        AND NOT EXISTS (
+          SELECT 1 FROM events e
+          WHERE e.event_type = 'reconcile_drift_alert'
+            AND e.payload_json LIKE '%"chain_event_id":"' || ce.id || '"%'
+        )
+      LIMIT 20
+    `).all();
+    inspected = rows.length;
+    for (const o of rows) {
+      drift++;
+      let p = {};
+      try { p = JSON.parse(o.payload || '{}'); } catch {}
+      const summary = `Refund drift: chain_event ${String(o.id).slice(0,8)} txid=${String(o.txid||'').slice(0,16)} 不在 kaspa_tx_log (offer ${String(p.offer_id||'').slice(0,8)})`;
+      console.error(`[broker-reconciler Layer4] ${summary}`);
+      try {
+        sqlite.prepare(`
+          INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+          VALUES (?, 'broker', 'reconcile_drift_alert', 'broker-reconciler', 'critical', ?, ?, datetime('now'))
+        `).run(
+          randomUUID(), summary,
+          JSON.stringify({ chain_event_id: o.id, txid: o.txid, offer_id: p.offer_id, user_kasia: p.user_kasia_address, amount: p.amount, observed_at: o.observed_at })
+        );
+        alerted++;
+      } catch (e) { console.warn(`[broker-reconciler] alert INSERT err: ${e.message}`); }
+    }
+  } catch (e) {
+    console.error(`[broker-reconciler Layer4] tick err: ${e.message}`);
+  }
+  return { inspected, drift, alerted };
+}
+
 export function startIntakeWatcher() {
   if (_intakeInterval) return;
   _intakeInterval = setInterval(async () => {
@@ -383,6 +433,11 @@ export function startIntakeWatcher() {
       } catch (e) { console.error('[broker-stale]', e.message); }
       // T-NWT-06: 同 5min sub-tick 主动 ensure broker 钱包 UTXO 数 (Round 1 UTXO 双花治本)
       try { await _ensureBrokerUtxoSplit(); } catch (e) { console.error('[broker-utxo-split]', e.message); }
+      // T-J1-2026-04-28 Layer 4 (phase 3): chain reconciler — 抓 chain_events refunded.txid 不在 kaspa_tx_log 的 drift
+      try {
+        const r = await _reconcileRefundsTick();
+        if (r && r.drift > 0) console.warn(`[broker-reconciler] tick drift=${r.drift}/${r.inspected} alerted=${r.alerted}`);
+      } catch (e) { console.error('[broker-reconciler]', e.message); }
     }, REFUND_TICK_MS);
   }
   console.log(`[broker-intake] watcher started for Trader-B tick=${TICK_MS}ms, refund tick=${REFUND_TICK_MS}ms`);
