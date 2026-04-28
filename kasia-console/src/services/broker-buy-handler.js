@@ -743,6 +743,19 @@ export async function handleBuyIntent(peerAddr, message) {
     }
   }
 
+  // R31 P1.b attacker (NWT 33c0fb3a 30 probe FAIL multi-addr-plant + r19-strip-replant):
+  // 真 locked addr 后, 真**真**真 '改地址' literal OR 提 differing 0x... → R31 lifecycle-lock 拒.
+  // 真**真**真 LLM 自由 echo attacker addr OR silent swap.
+  if (trimmed) {
+    try {
+      const { detectAddrChangeAttempt } = await import('./broker-state-authority.js');
+      const attempt = detectAddrChangeAttempt(peerAddr, trimmed);
+      if (attempt.attempt) {
+        return `订单地址已锁定 ${attempt.locked}. 改地址请回 "NO" 取消订单, 重新下单告诉我新地址.`;
+      }
+    } catch { /* import 兜底 */ }
+  }
+
   // T-NWT-2026-04-26 case 6 STOP intent deterministic 短路 — user 烦了 / 想退出.
   // broker 立刻 ack 告别 (服务态度: 不啰嗦不命令式), 不进 LLM. 跟 PRICE_QUERY 同模式优先级最前.
   // _pendingAccepts 不动 (订单生命周期独立, 30min TTL 自动过期; user 想退也只是不想聊 broker, 已下单照走).

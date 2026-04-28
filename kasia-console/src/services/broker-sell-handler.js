@@ -276,6 +276,18 @@ export async function handleSellIntent(peerAddr, message) {
     }
   }
 
+  // R31 P1.b attacker (NWT 33c0fb3a multi-addr-plant + r19-strip-replant): 真 locked addr
+  // 后 detect addr-change attempt, R31 lifecycle-lock 拒.
+  if (trimmed) {
+    try {
+      const { detectAddrChangeAttempt } = await import('./broker-state-authority.js');
+      const attempt = detectAddrChangeAttempt(peerAddr, trimmed);
+      if (attempt.attempt) {
+        return `订单地址已锁定 ${attempt.locked}. 改地址请回 "NO" 取消订单, 重新下单告诉我新地址.`;
+      }
+    } catch { /* import 兜底 */ }
+  }
+
   // T-J1-19l: 用户在 sell pending 中发 buy intent → 自动 release pending, 让 buy-handler 接管
   if (pending && Date.now() < pending.expires_at && BUY_OVERRIDE_REGEX.test(trimmed)) {
     _pending.delete(peerAddr);

@@ -580,6 +580,16 @@ export async function handleLlmDialog(peer, message) {
   const merged = _mergeFields(prev, fresh);
   console.log(`[broker-llm DIAG] peer=${peer?.slice(-12)} msg.chars=${msgRaw.length} msg.utf8bytes=${byteLen} codes=[${charCodes}] msg="${msgRaw.slice(0,40)}" history.len=${history.length} fresh=${JSON.stringify(fresh)} prev=${JSON.stringify(prev)} merged=${JSON.stringify(merged)}`);
 
+  // R31 P1.b attacker (NWT 33c0fb3a multi-addr-plant + r19-strip-replant): EARLIEST detect.
+  // 真**真**deterministic path OR LLM path fall, addr-change attempt 真**真**直接 R31 lifecycle-lock 拒.
+  {
+    const { detectAddrChangeAttempt } = await import('./broker-state-authority.js');
+    const attempt = detectAddrChangeAttempt(peer, message);
+    if (attempt.attempt) {
+      return `订单地址已锁定 ${attempt.locked}. 改地址请回 "NO" 取消订单, 重新下单告诉我新地址.`;
+    }
+  }
+
   // R33 b iter5 (NWT 30940d86 Bug-Z13 trace 实证修): setConvoStateLock direction 真**真**真 EARLIEST,
   // 不**真**等 _allFieldsReady deterministic path OR _executeTool 调成功 — even if LLM fail / preview fail,
   // T+1 turn fall LLM hallucinate 真**真**被 llmSystemPromptStateLock 真**真**真**system prompt 注入拦.
