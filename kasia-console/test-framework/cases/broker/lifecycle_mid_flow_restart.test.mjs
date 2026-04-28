@@ -33,8 +33,8 @@ export default {
       message: `不要了 重新下单 卖 3 KAS, BSC, ${ADDR}`,
       expect: {
         must: {
-          // 不能保留旧 BUY 5 信号
-          reply_does_not_contain: ['买 5 KAS', '5 KAS', '方向: 买', 'buy 5'],
+          // 不能保留旧 BUY 5 信号 (注: 不查 '5 KAS' 字面 — broker SELL preview 含历史成交 '5 KAS → tx...' false-pos, NWT 4fbd24e4 trace 实证)
+          reply_does_not_contain: ['买 5 KAS', '5 KAS 订单', '方向: 买', 'buy 5'],
           // 应该出 SELL 3 preview OR ack reset
           reply_contains_one_of: ['卖 3', '3 KAS', '已取消', 'reset'],
         },
