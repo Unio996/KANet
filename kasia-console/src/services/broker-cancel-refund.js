@@ -15,13 +15,23 @@ import { randomUUID } from 'crypto';
 const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
 const FEE_KAS = 0.1;
 
-// Cancel intent regex: 比 CANCEL_WORDS 宽 (CANCEL_WORDS = NO/取消/不要/算了 用于 _pending preview).
-// 这里 detect "用户指示取消订单 + 退钱" 真意, 命中 → 走 cancel-refund 路径.
-const CANCEL_INTENT_REGEX = /^(?:NO|不要(?:了|啦)?|取消(?:订单)?|算了(?:吧)?|退(?:我|回)?(?:钱|币|币的|KAS|USDT|USDC)?|我不(?:要|做|玩|交易)了?|不卖了?|不买了?|cancel(?:\s+order)?|refund(?:\s+me)?|give\s+(?:me\s+)?(?:my\s+)?(?:money|kas|usdt|usdc)\s+back)\s*[!！。.…]*$/i;
+// Cancel intent detection — 用户**真**真 user-facing cancel-and-refund 表达.
+//
+// HOTFIX (Owner 03:37 真测撞): 之前 regex 用 ^...$ strict 整条匹配, "取消订单！我等不了了"
+// 真**真**复合句**真 fail match → fall LLM → LLM hallucinate 假 ack reply '已取消, 资金退回中'
+// (但**真**真**真 handleCancelAndRefund 真**真 fire, 实际 nothing happened). 严重 production bug.
+//
+// 修: substring 匹配 cancel 关键词 + 排除 negation ("我不想取消" / "别取消").
+// 单字 'NO'/'no' 不**真**真**真 catch (歧义, _pending preview path CANCEL_WORDS 真**真 cover).
+const CANCEL_KEYWORD_REGEX = /(取消(?:订单|单|报价|卖单|买单|交易)?|不卖了|不买了|不想(?:卖|买|交易)了?|不要了|算了(?:吧)?|退我(?:钱|币|KAS|USDT|USDC)?|退回(?:我的)?(?:钱|币|KAS|USDT|USDC)?|我不(?:做|玩|要|交易)了?|cancel(?:\s+(?:order|trade|sell|buy))?|refund(?:\s+me)?|give\s+(?:me\s+)?(?:my\s+)?(?:money|kas|usdt|usdc|funds?)\s+back)/i;
+// negation: "不想取消" / "别取消" / "继续" / "保留" / "don't cancel" — 真**真**否定**真**真**真 cancel intent.
+const CANCEL_NEGATION_REGEX = /(不想(?:取消|退)|别取消|不要(?:取消|退)|继续(?:挂单|交易)|keep\s+(?:order|going)|don'?t\s+(?:cancel|refund))/i;
 
 export function detectCancelIntent(message) {
   if (!message) return false;
-  return CANCEL_INTENT_REGEX.test(message.trim());
+  const trimmed = message.trim();
+  if (CANCEL_NEGATION_REGEX.test(trimmed)) return false;
+  return CANCEL_KEYWORD_REGEX.test(trimmed);
 }
 
 /**
