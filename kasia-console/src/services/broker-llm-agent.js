@@ -951,11 +951,25 @@ export async function handleLlmDialog(peer, message) {
   try {
     const v = await validateLlmReply(peer, replyText);
     if (!v.ok) {
-      console.error(`[broker-llm R33] LLM reply violations: ${v.violations.join(' | ')}`);
-      // T-J2-2026-04-29 Bug-Z26 Bug 5 (NWT a380b14e Owner 真测): R33 violation fallback
-      // 加 sticky context recovery — 之前 generic "请重新提供" Owner 火大 (state 全丢假象).
-      // 真 state authority 仍 retain user fields, fallback msg 引用现有 fields 让 Owner 知道
-      // broker 没 forget. graceful "broker 卡了一下, 你给的信息我记得 X/Y/Z, 继续吗?"
+      console.error(`[broker-llm R33] LLM reply violations: ${v.violations.join(' | ')} — silent retry 1x with state injection`);
+      // T-J2-2026-04-29 Phase E v2 task 3 (NWT cb39d1ca propose, Owner 21:40 钦定 #2 R33 不外显):
+      // 之前 R33 violation → 直接 user-facing fallback msg (Bug 5 c16eca726).
+      // 改: silent log + retry _callLlm 1x with state+history injected (state injection 已 merged
+      // 进 stateLockAddendum task 1+2 230eebd7a). retry 仍 fail → fall to graceful sticky recovery.
+      // 不再 user-facing 'R33 内部拦截' string.
+      let retryReply = null;
+      try {
+        const retryLlm = await _callLlm(history, { peer, turn: 99, systemAppend: stateLockAddendum });
+        if (retryLlm?.content) {
+          const retryV = await validateLlmReply(peer, retryLlm.content.trim());
+          if (retryV.ok) retryReply = retryLlm.content.trim();
+        }
+      } catch (e) { console.warn(`[broker-llm task 3 retry] err: ${e.message}`); }
+      if (retryReply) {
+        console.log(`[broker-llm task 3 retry] R33 violation recovered via retry`);
+        return retryReply;
+      }
+      // retry 仍 fail → fallback graceful sticky recovery (Bug 5 c16eca726)
       try {
         const { getConvoState } = await import('./broker-state-authority.js');
         const state = getConvoState(peer);
@@ -971,8 +985,8 @@ export async function handleLlmDialog(peer, message) {
           }
         }
       } catch (e) { console.warn(`[broker-llm Bug 5] sticky recovery err: ${e.message}`); }
-      // state empty fallback (legacy)
-      return '抱歉, broker 输出异常 (R33 内部拦截). 请回 NO 取消订单或重新下单告诉我数量+链.';
+      // state empty fallback — graceful 中性 reply (Owner 钦定 #2 R33 不外显, drop 'R33 内部拦截' string)
+      return '抱歉, 我这边 LLM 卡了一下, 请稍后再试. 或回 "买 X KAS" / "卖 X KAS" (X 写数量) 走快速通道.';
     }
   } catch (e) {
     console.warn(`[broker-llm R33] validateLlmReply err: ${e.message}`);
