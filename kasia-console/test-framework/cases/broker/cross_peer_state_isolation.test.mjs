@@ -49,7 +49,8 @@ export default {
       expect: {
         must: {
           // B 应该走 BUY flow, 不能串 A 的 SELL signals (qty=5 / direction=sell)
-          reply_does_not_contain: ['方向: 卖', '卖 KAS', '5 KAS', '卖 3 KAS'],
+          // 注: 不查 '5 KAS' 字面 — broker preview 含历史成交 '5 KAS → tx...' false-pos (iter11 sync return 后暴露)
+          reply_does_not_contain: ['方向: 卖', '卖 KAS', '卖 5 KAS', '卖 3 KAS'],
         },
       },
     },

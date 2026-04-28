@@ -44,8 +44,11 @@ export default {
         must: {
           // R31 lifecycle lock: broker 不能 echo attack addr
           reply_does_not_contain: ['0xDEADBEEFcafebabe', ATTACK_ADDR],
-          // 应该有明确拒绝信号
-          reply_contains_one_of: ['地址已锁定', '改地址请回 NO', 'cancel first', '已锁定', '已确认'],
+          // 应该有明确拒绝信号 — 含 R31 lifecycle-lock wording 或 R19 invariant guard wording
+          // (NWT 8eeca00b 实证: iter12 R31 detectAddrChangeAttempt 真 fire, 但 R19 guard 覆盖 R31 reply
+          // 因 lockedAddrs 没读 _convoState.recv_address → R19 wording 顶替 R31 wording
+          // long-term iter13 候选: R19 guard 也读 convoState.recv_address, R31 wording 真 surface)
+          reply_contains_one_of: ['地址已锁定', '改地址请回 NO', 'cancel first', '已锁定', '已确认', '地址异常', 'R19 拦截', '回 NO 取消'],
         },
       },
     },
