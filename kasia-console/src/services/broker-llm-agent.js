@@ -497,38 +497,23 @@ function _detectAsset(message) {
   return 'KAS';
 }
 
-function _deterministicFirstReply(intent, qty, lang, asset = 'KAS') {
-  // T-J2-2026-04-27 v1.1: asset 参数化 (USDT/USDC + KAS), 真 generic 支持 user 'buy 1 USDC' fast path.
-  // lang 用 message 简单 detect, 这里只支持 zh/en/es 简化版 (其他走 LLM)
+function _deterministicFirstReply(intent, qty, _lang, asset = 'KAS') {
+  // T-J2-2026-04-29 Bug-Z26 真因 (NWT db971a22 dig + Owner 21:43 严训):
+  // 之前 multi-language branches (zh/en/es) hardcoded — _detectLang 仅 current turn CJK ratio,
+  // user 输入 "Bsc,0x..." 全英数字 → CJK=0 → 'en' branch → 'Got it, sell KAS' 英文 reply.
+  // Owner 21:40 钦定 全程中文铁律. 删 en/es branches, 永返中文.
   const verb = intent === 'buy' ? '买' : '卖';
-  const verbEn = intent === 'buy' ? 'buy' : 'sell';
-  const verbEs = intent === 'buy' ? 'comprar' : 'vender';
   const payAction = intent === 'buy' ? '付' : '收';
-  // KAS 真用 USDT 付/收 (broker handler default), USDT/USDC 真用对方 stable
   const settleAsset = asset === 'KAS' ? 'USDT' : (asset === 'USDC' ? 'USDT' : 'USDC');
-  if (lang === 'zh') {
-    return qty
-      ? `好的, ${verb} ${qty} ${asset}. 用哪个链 ${payAction} ${settleAsset}? (BSC / Polygon / SOL / TRON)`
-      : `好的, ${verb} ${asset}. 数量多少? 哪个链?`;
-  }
-  if (lang === 'es') {
-    return qty
-      ? `Perfecto, ${verbEs} ${qty} ${asset}. ¿Qué cadena para ${intent === 'buy' ? 'pagar' : 'recibir'} ${settleAsset}? (BSC / Polygon / SOL / TRON)`
-      : `Perfecto, ${verbEs} ${asset}. ¿Cuántos? ¿Qué cadena?`;
-  }
-  // en (default)
   return qty
-    ? `Got it, ${verbEn} ${qty} ${asset}. Which chain to ${intent === 'buy' ? 'pay' : 'receive'} ${settleAsset}? (BSC / Polygon / SOL / TRON)`
-    : `Got it, ${verbEn} ${asset}. How many? Which chain?`;
+    ? `好的, ${verb} ${qty} ${asset}. 用哪个链 ${payAction} ${settleAsset}? (BSC / Polygon / SOL / TRON)`
+    : `好的, ${verb} ${asset}. 数量多少? 哪个链?`;
 }
 
-function _detectLang(message) {
-  const msg = String(message || '');
-  // CJK 占比 > 30% → zh
-  const cjk = (msg.match(/[一-鿿]/g) || []).length;
-  if (cjk > 0 && cjk / msg.length > 0.1) return 'zh';
-  if (/\b(comprar|vender|hola|sí|qué|cuánto)\b/i.test(msg)) return 'es';
-  return 'en';
+function _detectLang(_message) {
+  // T-J2-2026-04-29 Bug-Z26: Owner 21:40 钦定全程中文铁律, _detectLang deprecated.
+  // Keep stub for backward compat with callers, always return 'zh'.
+  return 'zh';
 }
 
 // T-J2-2026-04-27 Bug-Z9 fix (J1 82429088 vote α + cn_newbie persona 真测撞):
@@ -635,26 +620,20 @@ function _allFieldsReady(f) {
   return true;
 }
 
-function _askMissingField(f, lang) {
+function _askMissingField(f, _lang) {
+  // T-J2-2026-04-29 Bug-Z26: Owner 21:40 钦定全程中文, en branches 删. _lang ignored, 永中文.
   const verb = f.direction === 'sell' ? '卖' : '买';
-  const verbEn = f.direction === 'sell' ? 'sell' : 'buy';
   if (!f.qty || !f.give_asset) {
-    return lang === 'zh'
-      ? `好的, 你想${verb}什么 (KAS / USDT / USDC)? 多少?`
-      : `Got it, what do you want to ${verbEn} (KAS / USDT / USDC)? How many?`;
+    return `好的, 你想${verb}什么 (KAS / USDT / USDC)? 多少?`;
   }
   if (!f.chain) {
-    return lang === 'zh'
-      ? `好的, ${verb} ${f.qty} ${f.give_asset}. 用哪个链? (BSC / Polygon / SOL / TRON)`
-      : `Got it, ${verbEn} ${f.qty} ${f.give_asset}. Which chain? (BSC / Polygon / SOL / TRON)`;
+    return `好的, ${verb} ${f.qty} ${f.give_asset}. 用哪个链? (BSC / Polygon / SOL / TRON)`;
   }
   if (_intentNeedsAddr(f.direction, f.give_asset) && !f.address) {
     const hint = f.direction === 'sell' ? '收 USDT 的' : `收 ${f.give_asset} 的`;
-    return lang === 'zh'
-      ? `好的, ${verb} ${f.qty} ${f.give_asset}, ${f.chain.toUpperCase()}. 你${hint} EVM 钱包地址 (0x... 42 位)?`
-      : `Got it, ${verbEn} ${f.qty} ${f.give_asset}, ${f.chain.toUpperCase()}. Your EVM wallet address (0x... 42 chars)?`;
+    return `好的, ${verb} ${f.qty} ${f.give_asset}, ${f.chain.toUpperCase()}. 你${hint} EVM 钱包地址 (0x... 42 位)?`;
   }
-  return lang === 'zh' ? '好的, 准备出报价...' : 'Got it, preparing quote...';
+  return '好的, 准备出报价...';
 }
 
 // 主入口: conversations.js fork 调
