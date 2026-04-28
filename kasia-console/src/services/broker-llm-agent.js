@@ -151,11 +151,7 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'cancel_order',
-<<<<<<< HEAD
-      description: '用户说 NO/取消/不要了/退我钱/cancel/refund/我等不了了/算了 等任何 cancel-intent 时必调此 tool. 不准自己回 \'已取消\' / \'1-2 分钟到账\' / \'已为您取消\' — 这些必须由本 tool 真正执行 cancel offer 上链 + sendKas refund + state update 后再说. 即使没有 active offer, 也调此 tool, 它会返 deterministic null/no-op, 防止 LLM hallucinate.',
-=======
       description: '用户说 NO/取消/不要了/退我钱/cancel/refund/我等不了了/算了 等任何 cancel-intent 时必调此 tool. 不准自己回 "已取消" / "1-2 分钟到账" / "已为您取消" — 这些是 broker DB cancel + sendKas 的真实结果, 必经此 tool. 即使没 active offer 也调此 tool, 它返 deterministic null/no-op, 让 LLM 不要 hallucinate.',
->>>>>>> 15b80f985f3ddb96742e61110b9c14f9ec5a4780
       parameters: {
         type: 'object',
         properties: {},
@@ -378,13 +374,8 @@ async function _executeToolImpl(peer, name, args) {
       const { handleCancelAndRefund } = await import('./broker-cancel-refund.js');
       const ack = await handleCancelAndRefund(peer);
       if (ack) return { ok: true, preview_text: ack };
-<<<<<<< HEAD
-      // 无 active offer → deterministic null reply, 真**真**真 LLM 自由发挥
-      return { ok: true, preview_text: '没找到你的 active 订单. 如果想下新单, 回 "买 X KAS" 或 "卖 X KAS".' };
-=======
       // 无 active offer → deterministic null reply, 防 LLM 自由发挥
       return { ok: true, preview_text: '没找到你的 active 订单. 没有可取消的, 重新下单回 "买 X KAS" / "卖 X KAS".' };
->>>>>>> 15b80f985f3ddb96742e61110b9c14f9ec5a4780
     } catch (e) {
       return { ok: true, preview_text: `抱歉, 取消处理失败 (${e.message?.slice(0, 60)}). 请稍后重试或回 NO 联系 broker.` };
     }
@@ -710,11 +701,7 @@ export async function handleLlmDialog(peer, message) {
     // turn 2+ user 真**真**给新 addr 跟 prev 不同 → 真**绝不**让 LLM 自由发挥 echo, deterministic 拒.
     if (merged._address_change_attempt) {
       console.warn(`[broker-llm Z11] address change attempt blocked: peer=${peer?.slice(-12)} fresh=${fresh.address?.slice(0,10)} locked=${merged.address?.slice(0,10)}`);
-<<<<<<< HEAD
-      return `订单地址已锁定 ${merged.address}. 改地址请回 "NO" 取消当前订单, 然后重新下单告诉我新地址.`;
-=======
       return `订单地址已锁定 ${merged.address}. 改地址请回 "NO" 取消订单, 重新下单告诉我新地址.`;
->>>>>>> 15b80f985f3ddb96742e61110b9c14f9ec5a4780
     }
     // R33 b iter6 (NWT c5bda126 fuzz negative trace): 显式 reject negative qty.
     if (merged.qty != null && merged.qty < 0) {
@@ -804,11 +791,7 @@ export async function handleLlmDialog(peer, message) {
     // Force-call cancel_order tool deterministic
     try {
       const toolResult = await _executeTool(peer, 'cancel_order', {});
-<<<<<<< HEAD
-      return toolResult?.preview_text || '没找到你的 active 订单. 如果想下新单, 回 "买 X KAS" 或 "卖 X KAS".';
-=======
       return toolResult?.preview_text || '没找到你的 active 订单. 没有可取消的, 重新下单回 "买 X KAS" / "卖 X KAS".';
->>>>>>> 15b80f985f3ddb96742e61110b9c14f9ec5a4780
     } catch (e) {
       return `抱歉, 取消处理失败 (${e.message?.slice(0, 60)}). 请稍后重试.`;
     }
