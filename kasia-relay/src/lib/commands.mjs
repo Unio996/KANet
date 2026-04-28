@@ -52,6 +52,8 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.SEND_MESSAGE]: { target: 'string', message: 'string' },
   [COMMAND_TYPES.SEND_BROADCAST]: { channel: 'string', message: 'string' },
   [COMMAND_TYPES.TRANSFER]: { target: 'string', amount: ['string', 'number'] },
+  [COMMAND_TYPES.PUBLISH_CARD]: { params: 'object' },
+  [COMMAND_TYPES.SPLIT_UTXO]: { targetCount: 'number' },
 });
 
 export function validateCommandPayload(cmd) {
@@ -70,7 +72,12 @@ export function validateCommandPayload(cmd) {
   if (fieldTypes) {
     for (const [field, expected] of Object.entries(fieldTypes)) {
       if (cmd[field] === undefined) continue;  // optional field, skip
-      const actual = Array.isArray(cmd[field]) ? 'array' : typeof cmd[field];
+      // null detect (J2 121c9aa observation): typeof null === 'object' JS quirk, must explicit detect
+      const actual = cmd[field] === null
+        ? 'null'
+        : Array.isArray(cmd[field])
+          ? 'array'
+          : typeof cmd[field];
       const allowed = Array.isArray(expected) ? expected : [expected];
       if (!allowed.includes(actual)) {
         return { valid: false, error: `${cmd.type} field '${field}' typeof '${actual}' not in [${allowed.join(',')}]` };
