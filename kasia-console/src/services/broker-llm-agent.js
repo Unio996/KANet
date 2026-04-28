@@ -219,7 +219,13 @@ async function _callLlm(messages, ctx = {}) {
   if (!a?.ai_provider_url) return null;
   const requestBody = {
     model: a.ai_model || 'Qwen3.6-35B-A3B',
-    messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages],
+    // T-J1-2026-04-28 Bug-Z24 (J2 9fa9 dig): merge stateLockAddendum into single system message.
+    // 之前 handleLlmDialog 用 history.unshift 加第 2 个 system message → Qwen Jinja
+    // 'System message must be at the beginning' raise → HTTP 500 cascade (Owner 06:38+ sell flow 撞).
+    messages: [
+      { role: 'system', content: ctx.systemAppend ? `${SYSTEM_PROMPT}\n\n${ctx.systemAppend}` : SYSTEM_PROMPT },
+      ...messages,
+    ],
     tools: TOOLS,
     tool_choice: 'auto',
     // QWEN-RULES.md Rule 11 (T-NWT-V2-hotfix2): Qwen3.6 reasoning kill switch.
@@ -820,12 +826,10 @@ export async function handleLlmDialog(peer, message) {
 
   // 没 direction (current msg 也没 prev 也没) → fall to LLM (用户 'YES' / 'NO' / 闲聊 / 'maker 是谁?')
   history.push({ role: 'user', content: message });
-  // R33: inject conversation state lock into LLM system msg if state active
+  // R33: inject conversation state lock into LLM system msg if state active.
+  // T-J1-2026-04-28 Bug-Z24 (J2 9fa9): pass via ctx.systemAppend (single system msg), 不 unshift 第 2 个 system.
   const stateLockAddendum = llmSystemPromptStateLock(peer);
-  if (stateLockAddendum) {
-    history.unshift({ role: 'system', content: stateLockAddendum });
-  }
-  let llm = await _callLlm(history, { peer, turn: 1 });
+  let llm = await _callLlm(history, { peer, turn: 1, systemAppend: stateLockAddendum });
   if (!llm) return '抱歉, 我这边 LLM 卡了一下, 请稍后再试. 或直接回 "买 X KAS" / "卖 X KAS" (X 写数量) 走快速通道.';
 
   // R26 Bug-Z19 guard (NWT 25d4ae81 Owner 真测): user cancel-intent + LLM 真**真**调 cancel_order tool
@@ -851,7 +855,7 @@ export async function handleLlmDialog(peer, message) {
     const toolResult = await _executeTool(peer, tc.function.name, args);
     history.push({ role: 'assistant', content: llm.content || '', tool_calls: [tc] });
     history.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(toolResult) });
-    llm = await _callLlm(history, { peer, turn: 2 });
+    llm = await _callLlm(history, { peer, turn: 2, systemAppend: stateLockAddendum });
     if (!llm) {
       return toolResult.ok
         ? `✓ 订单已建 (${args.direction} ${args.qty} KAS, ${args.chain}). 详情: ${JSON.stringify(toolResult).slice(0, 200)}`
