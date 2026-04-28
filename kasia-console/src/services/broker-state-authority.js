@@ -191,11 +191,7 @@ export function setConvoStateLock(peer, fields) {
               datetime('now'), datetime('now'), datetime('now', '+30 minutes'))
     `).run(
       id, peer, newSide, 'limit',
-      // T-J2-2026-04-29 NWT b17f9bef WRITE side fix — qty TEXT NOT NULL constraint
-      // 之前 fields.qty=null 时 INSERT 静默 throw → retail_dex_orders row 永不创建 →
-      // baseline T2 SELECT 返 null → broker forget. 修: T1 entry direction-only INSERT 时
-      // qty default '0' (placeholder, T2 user 给 '50 个' UPDATE 真 qty).
-      fields.qty != null ? String(fields.qty) : '0',
+      fields.qty != null ? fields.qty : null,
       fields.conditions?.limit_price ?? null,
       fields.pay_chain || null,
       newPayAddress,
