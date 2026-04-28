@@ -13,6 +13,7 @@ const RELAY_ADDR_BY_ALIAS = {
   'trader-b': 'kaspa:qrxw764gez624hfkfvpmzfx8a4mg2vze5n6vsgu8fymewrkuphy65lxur9c5l',
   'trader-a': 'kaspa:qpsys3gzy4lg8txkuskhfnc4tskzn5r344eyudgyrc43te7vlq3f5a2cr843s',
   // dev relays
+  'martin': 'kaspa:qptg465n4jedfujewj3hfgkxtysq40v2jakxp2w6uuvrhf6sajf0kzewvmcmv',
   'nwt': 'kaspa:qzd2ktu49f4cqwy7f4s2kmd5m4j0l27gfghjenurypaum99qxz2w7ktl95grm',
   'j2': 'kaspa:qr7km875u5hhl42eaz4sjgmlcdnzjan9fnplcct3q7gq4ujdtpqqqe78fjev3',
   'kanet': 'kaspa:qpf2f39dp869lfm3f32z0ujsrafamznjxxknlk792ftc9jhk2cs7y7err0tz9',
@@ -21,6 +22,7 @@ const RELAY_ADDR_BY_ALIAS = {
 const RELAY_ID_BY_ALIAS = {
   'trader-b': '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0',
   'trader-a': 'df8cd0f9-27e7-45c6-bbea-2fa11a1ff1cd',
+  'martin': '3765cc82-5e20-4e61-bb0a-697277287223',
   'nwt': '5b236c08-03d0-456c-953d-e10001610938',
 };
 

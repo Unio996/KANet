@@ -1247,10 +1247,16 @@ export async function runCase(testCase) {
   // (d) v2 GAP 1: 'no llm log no pass' — broker 走 LLM 但没 INNER 记录 → 强制 FAIL
   // 阈值 5000ms: deterministic tool path (buyPreview 调 fetchPrice 8 源) 也可能 500ms+,
   // 但只有真 LLM 调用 (Qwen3.6 35B) 会到 5000ms+. 提阈值避免误判 deterministic.
+  //
+  // J1 #28 fbf7b90d5 mode (ii) cross-host caveat: when step.mode='real_p2p', broker runs
+  // on REMOTE host (e.g. J2 broker host), broker-llm-io.jsonl is on remote disk, not local.
+  // Skip 'no llm log no pass' for real_p2p steps — chain TX hash list (sent_tx + reply_txs)
+  // is the cross-host evidence, not local LLM I/O log. Phase 5 closure cosign uses chain TX.
   for (const s of result.steps) {
     if (!s._peer || !s.result?.latency_ms) continue;
     if (s.result.latency_ms <= 5000) continue;  // <5s 必是 deterministic, 不该有 LLM
     if (s.action !== 'send_message' && s.action !== 'persona_turn') continue;
+    if (s.result?.mode === 'real_p2p') continue;  // mode (ii) cross-host: LLM log not local
     const inner = _readLlmIoForStep(s._peer, s.started_at, s.started_at + s.duration_ms);
     if (inner.length === 0) {
       result.pass = false;
