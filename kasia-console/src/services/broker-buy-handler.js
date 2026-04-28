@@ -912,18 +912,20 @@ export async function handleBuyIntent(peerAddr, message) {
             give_asset: asset,
             receive_address: asset === 'KAS' ? null : recvAddr,
           });
+          // R33 b iter11 (NWT 2504b89f layer 2 dig + 三方 vote A): 跟 PRICE_QUERY iter1 v2 同模式 —
+          // sync return preview_text, drop _qDm. production 路径 = relay getAIReply 用 sync return →
+          // 包 Kasia chain DM (kasia-relay/src/ai.mjs sendMessage wrap, retry MAX_ATTEMPTS=4 保留).
+          // 修 state_expire_boundary T1 sync EMPTY (test framework + production 同时 unblock).
           if (previewResult.ok) {
             _setPendingPreview(peerAddr, {
               qty, pay_chain: chainNorm,
               give_asset: asset, receive_address: asset === 'KAS' ? null : recvAddr,
             });
-            _qDm('dm_quote', peerAddr, previewResult.preview_text);
             console.log(`[broker-buy] det-preview ${peerAddr.slice(-12)}: ${qty} ${asset} ${chainNorm}`);
-            return '';
+            return previewResult.preview_text;
           }
           if (previewResult.message) {
-            _qDm('dm_failed', peerAddr, `抱歉, ${previewResult.message}`);
-            return '';
+            return `抱歉, ${previewResult.message}`;
           }
         }
       } catch (e) {
