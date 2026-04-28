@@ -6,6 +6,7 @@ import { sqlite } from '../db/client.js';
 import { listAssets, listChainsFor, getAsset } from './asset-registry.js';
 import {
   setConvoStateLock,
+  resetConvoState,
   llmSystemPromptStateLock,
   validateLlmReply,
 } from './broker-state-authority.js';
@@ -579,6 +580,15 @@ export async function handleLlmDialog(peer, message) {
   const prev = _getPendingFields(peer);
   const merged = _mergeFields(prev, fresh);
   console.log(`[broker-llm DIAG] peer=${peer?.slice(-12)} msg.chars=${msgRaw.length} msg.utf8bytes=${byteLen} codes=[${charCodes}] msg="${msgRaw.slice(0,40)}" history.len=${history.length} fresh=${JSON.stringify(fresh)} prev=${JSON.stringify(prev)} merged=${JSON.stringify(merged)}`);
+
+  // R33 b iter9 (J2 81f8f1d8 mid_flow_restart): user explicit cancel-and-restart 真**真 reset state.
+  {
+    const { detectResetIntent } = await import('./broker-state-authority.js');
+    if (detectResetIntent(message)) {
+      resetConvoState(peer, 'user_restart');
+      _clearPendingFields(peer);
+    }
+  }
 
   // R31 P1.b attacker (NWT 33c0fb3a multi-addr-plant + r19-strip-replant): EARLIEST detect.
   // 真**真**deterministic path OR LLM path fall, addr-change attempt 真**真**直接 R31 lifecycle-lock 拒.

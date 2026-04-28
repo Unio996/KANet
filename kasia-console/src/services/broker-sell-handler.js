@@ -260,6 +260,16 @@ export async function handleSellIntent(peerAddr, message) {
   const trimmed = (message || '').trim();
   const pending = _pending.get(peerAddr);
 
+  // R33 b iter9 (J2 81f8f1d8 mid_flow_restart): user cancel-and-restart 真**真 reset state first.
+  if (trimmed) {
+    try {
+      const { detectResetIntent, resetConvoState } = await import('./broker-state-authority.js');
+      if (detectResetIntent(trimmed)) {
+        resetConvoState(peerAddr, 'user_restart');
+      }
+    } catch { /* 兜底 */ }
+  }
+
   // R33 b iter5b (NWT 90b29e39 Bug-Z13 trace 实证): EARLIEST setConvoStateLock for SELL intent.
   // 跟 handleBuyIntent 同 entry-pattern. _detectIntent='sell' → 真**就 lock**, 不**等** SELL_REGEX hit.
   if (trimmed) {
