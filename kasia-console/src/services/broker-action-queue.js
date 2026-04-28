@@ -8,6 +8,10 @@
 
 import { sqlite } from '../db/client.js';
 import { randomUUID } from 'crypto';
+// R-NWT-2026-04-28 Layer 5 (Z21 root cause fix + future regression防): shared command enum.
+// Owner 88 KAS Bug-Z21 真因 = broker enqueue 'send_kas', relay only 'transfer'. Now broker
+// imports COMMAND_TYPES from relay's canonical source-of-truth.
+import { COMMAND_TYPES } from '../../../kasia-relay/src/lib/commands.mjs';
 
 const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
 const TTL_DEFAULT_MS = 10 * 60 * 1000;
@@ -143,6 +147,41 @@ export function enqueue({ kind, peer, payload, ttl_ms = TTL_DEFAULT_MS }) {
   return id;
 }
 
+/**
+ * Layer 2 — Owner 04:55 钦定 Promise→Verify→Acknowledge 契约.
+ *
+ * enqueue() 返 actionId 立返, caller fire-and-forget. 这是 INSERT-before-confirm meta defect 真因.
+ * enqueueVerified() 返 Promise<{txId, fee, ...}>, resolve = pump 真**完整 execute 完 + 没 lastErr,
+ * reject = pump 经 RETRY_MAX 仍 lastErr (含 FAIL-FAST). caller await 拿 txId 真**真 chain broadcast 真
+ * confirm (不等 chain index — Layer 4 reconciler 后续 sweep 验 kaspa_tx_log).
+ *
+ * 用法:
+ *   const { txId } = await enqueueVerified({ kind: 'sendKas', peer, payload: { amount_kas: 87.9 } });
+ *   markOrderRefunded(orderId, txId, 'user_cancel');  // Layer 1 wrapper
+ *   ackParts.push(`✓ 已退 87.9 KAS, Kasia TX: ${txId.slice(0,12)}`);
+ *
+ * 失败:
+ *   try { await enqueueVerified(...) }
+ *   catch (err) { ackParts.push(`订单取消失败: ${err.message}, KAS 还在 broker 钱包, broker 联系 Owner 查`) }
+ *
+ * 不再"INSERT-before-confirm" + 不再"DM ack 撒谎".
+ */
+export function enqueueVerified({ kind, peer, payload, ttl_ms = TTL_DEFAULT_MS }) {
+  return new Promise((resolve, reject) => {
+    enqueue({
+      kind, peer,
+      payload: {
+        ...(payload || {}),
+        on_done: ({ ok, result, error }) => {
+          if (ok) resolve(result || {});
+          else reject(new Error(error || 'enqueue execute failed'));
+        },
+      },
+      ttl_ms,
+    });
+  });
+}
+
 async function pump() {
   _busy = true;
   // T-J2-24 (J1 a242bfd5 R5): 防 console-restart relay race —
@@ -248,7 +287,7 @@ async function executeAction(item) {
     case 'dm_timeout':  // T-J2-V2-realtest 议 B1: 订单超时
     case 'dm_failed':  // T-J2-V2-realtest 议 B1: 订单失败/争议
     case 'dm_cancel':  // T-J1-2026-04-27 P0-3 (NWT 17:34 UX): _pendingAccepts CANCEL after confirm
-      return sendCommandAsync(BROKER_RELAY_ID, { type: 'send_message', target: item.peer, message: p.message });
+      return sendCommandAsync(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: item.peer, message: p.message });
     case 'accept_v1':
     case 'paid_v1': {
       // T-NWT-2026-04-26 wire fix (Owner 真测 a34701fe 5 笔 rescue 真根因):
@@ -258,7 +297,7 @@ async function executeAction(item) {
       // (offer 留 'open', taker=null) → bsc-watcher 检测 USDT 但 paid event 拒 → KAS 永不
       // deliver. 5 笔 manual rescue 同根因. 修法: pump 真发后调 onBroadcastWritten 通知, 跟
       // /api/chat/send 路径对齐. 不动协议, 不新文件, broker 真融入 exchange 完整完成.
-      const result = await sendCommandAsync(BROKER_RELAY_ID, { type: 'send_broadcast', channel: p.channel || 'kanet-exchange', message: p.message });
+      const result = await sendCommandAsync(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_BROADCAST, channel: p.channel || 'kanet-exchange', message: p.message });
       // sendCommandAsync resolves msg.result (relay-manager.js:260) = relay 返回的 { txId, fee },
       // 没有 ok 字段. 用 txId 判 success (跟 broker-queue 别处 line 175 same convention).
       if (result?.txId) {
@@ -287,7 +326,7 @@ async function executeAction(item) {
       // 仅 'transfer'. 之前 type='send_kas' fall through default → sent undefined → ok=false → retry 3 fail.
       // 三方 04:48 align (A) — broker adapt relay canonical name 'transfer' (relay 是 spec source-of-truth).
       // amount_kas → amount (relay transfer L411 用 cmd.amount).
-      return sendCommandAsync(BROKER_RELAY_ID, { type: 'transfer', target: item.peer, amount: p.amount_kas, note: p.note });
+      return sendCommandAsync(BROKER_RELAY_ID, { type: COMMAND_TYPES.TRANSFER, target: item.peer, amount: p.amount_kas, note: p.note });
     case 'publish_offer': {
       const PORT = process.env.PORT || 3100;
       const res = await fetch(`http://127.0.0.1:${PORT}/api/exchange/publish`, {
