@@ -686,13 +686,26 @@ function _allFieldsReady(f) {
 
 function _askMissingField(f, _lang) {
   // T-J2-2026-04-29 Bug-Z26: Owner 21:40 钦定全程中文, en branches 删. _lang ignored, 永中文.
+  // T-J2-2026-04-29 Phase E v3 task D' (NWT 2551731a baseline catch + Owner 22:30 钦定 broker 不忘):
+  // _askMissingField 改为 smart wording — reference 已知 fields, 仅 ask 真缺. Owner 火大根源是
+  // broker 重问 user 已给的 (e.g. '50 个' 已给 qty 但 broker 仍问 '多少'). 不再 lump 'qty/asset' 一起.
   const verb = f.direction === 'sell' ? '卖' : '买';
-  if (!f.qty || !f.give_asset) {
-    return `好的, 你想${verb}什么 (KAS / USDT / USDC)? 多少?`;
+  // ── Phase 1: ask qty if truly missing ──
+  if (!f.qty) {
+    if (f.give_asset) {
+      return `好的, ${verb} ${f.give_asset}. 数量多少 (例如 50)?`;
+    }
+    return `好的, ${verb} 什么 (KAS / USDT / USDC), 多少?`;
   }
+  // qty given. ── Phase 2: ask asset if missing ──
+  if (!f.give_asset) {
+    return `好的, 你${verb} ${f.qty} 个. 是哪种资产 (KAS / USDT / USDC)?`;
+  }
+  // qty + asset given. ── Phase 3: ask chain ──
   if (!f.chain) {
-    return `好的, ${verb} ${f.qty} ${f.give_asset}. 用哪个链? (BSC / Polygon / SOL / TRON)`;
+    return `好的, ${verb} ${f.qty} ${f.give_asset}. 用哪个链 (BSC / Polygon / SOL / TRON)?`;
   }
+  // qty + asset + chain. ── Phase 4: ask addr ──
   if (_intentNeedsAddr(f.direction, f.give_asset) && !f.address) {
     const hint = f.direction === 'sell' ? '收 USDT 的' : `收 ${f.give_asset} 的`;
     return `好的, ${verb} ${f.qty} ${f.give_asset}, ${f.chain.toUpperCase()}. 你${hint} EVM 钱包地址 (0x... 42 位)?`;
