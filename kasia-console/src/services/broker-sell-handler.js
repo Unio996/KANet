@@ -1,3 +1,13 @@
+// ════════════════════════════════════════════════════════════════
+// HIGH-RISK FILE (Critical 8 per docs/COLLAB-REFORM.md 规 10/13/15)
+// 改前必跑: grep -nE 'T-J[0-9]+-|T-NWT-|Bug-[A-Z][0-9]+' 本 file
+// 改后 commit msg 必含: acknowledged: T-X-X (per surfaced anti-pattern)
+// 关联 docs: ANTI-PATTERNS R37+ / DEVELOPER-GUIDE ch19
+// 关键历史: Bug-Z6 sell preview (LLM 自由编报价 防御) / R33 b iter11 (det-preview)
+//          / SELL flow 跟 BUY 对称 cornerstone (Layer 7 b52ed8a6)
+// blast radius: SELL flow finalize / sellPreview / state lock
+// ════════════════════════════════════════════════════════════════
+//
 // broker-sell-handler.js — Phase 4 Round 3 SELL 入口 (T-NWT-08)
 // 真人 DM "卖 X KAS" → broker 问 BSC 地址 → 用户 DM 0x... → broker INSERT retail_dex_orders + DM 转 KAS 指引
 // 用户后续转 KAS → broker-intake-watcher (T-NWT-05/07) 自动 publish + 走 exchange protocol

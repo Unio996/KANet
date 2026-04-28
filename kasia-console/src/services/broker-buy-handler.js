@@ -1,3 +1,13 @@
+// ════════════════════════════════════════════════════════════════
+// HIGH-RISK FILE (Critical 8 per docs/COLLAB-REFORM.md 规 10/13/15)
+// 改前必跑: grep -nE 'T-J[0-9]+-|T-NWT-|Bug-[A-Z][0-9]+' 本 file
+// 改后 commit msg 必含: acknowledged: T-X-X (per surfaced anti-pattern)
+// 关联 docs: ANTI-PATTERNS R37+ / DEVELOPER-GUIDE ch19
+// 关键历史: T-J2-26 idempotency (Bug-B 重复 publish 防御) / Bug-Y wire (买 stable EVM addr)
+//          / Bug-Z11 attack (address change attempt) / R33 b iter (multi-turn state)
+// blast radius: BUY flow finalize / fund_lock / _pendingPreview state authority
+// ════════════════════════════════════════════════════════════════
+//
 // broker-buy-handler.js — Phase 4 A 模式撮合 (T-J2-08, v2.1.1)
 // 用户 DM "买 X KAS" → 选 best open offer → 报价 → 用户 YES → 广播 accept_v1
 // 复用 exchange_offers + exchange-machine, 不自建状态机不自建订单表.

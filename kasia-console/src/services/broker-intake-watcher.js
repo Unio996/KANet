@@ -1,3 +1,13 @@
+// ════════════════════════════════════════════════════════════════
+// HIGH-RISK FILE (Critical 8 per docs/COLLAB-REFORM.md 规 10/13/15)
+// 改前必跑: grep -nE 'T-J[0-9]+-|T-NWT-|Bug-[A-Z][0-9]+' 本 file
+// 改后 commit msg 必含: acknowledged: T-X-X (per surfaced anti-pattern)
+// 关联 docs: ANTI-PATTERNS R38+ / DEVELOPER-GUIDE ch19
+// 关键历史: Bug-Z17 retail_dex_orders state sync / Bug-Z20 timeout sweep self-deceive
+//          / Layer 4 chain reconciler J1 2187455a / spread% J1 52545357d
+// blast radius: 5min refund tick / chain DM classify / broker SELL spread / refund chain TX
+// ════════════════════════════════════════════════════════════════
+//
 // broker-intake-watcher.js — Phase 3 兜底机制 (v2.1 §4.2)
 // 每 60s 扫 Trader-B 入账, 4 场景路由 (意图一致/反向/陌生/黑名单). Broker 吃 gas.
 // 挂在 Console 启动 (index.js) setInterval, 不新建表只新增 event_type='broker_intake_processed' 作处理标记.

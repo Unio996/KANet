@@ -1,3 +1,12 @@
+// ════════════════════════════════════════════════════════════════
+// HIGH-RISK FILE (Critical 8 per docs/COLLAB-REFORM.md 规 10/13/15)
+// 改前必跑: grep -nE 'T-J[0-9]+-|T-NWT-|Bug-[A-Z][0-9]+' 本 file
+// 改后 commit msg 必含: acknowledged: T-X-X (per surfaced anti-pattern)
+// 关联 docs: ANTI-PATTERNS R33 / R31 (attacker) / Bug-Z24 (system msg)
+// 关键历史: R33 sticky direction lock / R31 detectAddrChangeAttempt / R33 wire 371e4ca62 reintroduce
+// blast radius: 整个 broker conversation state authority + addr change attack 防御
+// ════════════════════════════════════════════════════════════════
+//
 // broker-state-authority.js — R33 conversation state authority (J1 design skeleton, J2 fills implementation)
 //
 // 设计源: ANTI-PATTERNS.md R33 (J1 sediment 3b6911f3) + Owner 12:52 trace 5 bugs root cause analysis (J1 050108d6).

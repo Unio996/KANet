@@ -1,3 +1,13 @@
+// ════════════════════════════════════════════════════════════════
+// HIGH-RISK FILE (Critical 8 per docs/COLLAB-REFORM.md 规 10/13/15)
+// 改前必跑: grep -nE 'T-J[0-9]+-|T-NWT-|Bug-[A-Z][0-9]+' 本 file
+// 改后 commit msg 必含: acknowledged: T-X-X (per surfaced anti-pattern)
+// 关联 lint: scripts/lint-kanet.mjs R37 (单 system msg literal)
+// 关联 docs: ANTI-PATTERNS R37 / QWEN-RULES Rule 13 / DEVELOPER-GUIDE ch19
+// 关键历史: T-J1-19f (双 system msg 撤回), R33 wire reintroduce, Bug-Z24 修
+// blast radius: LLM call format / SYSTEM_PROMPT / state lock / tool 调用
+// ════════════════════════════════════════════════════════════════
+//
 // broker-llm-agent.js — R6 broker = LLM 销售客服 (T-NWT-18)
 // Owner 钦定 4 步: 方向 → 字段补全 → 复述确认 → 调 finalize_order tool
 // 双层架构上层 (LLM Bot), 下层调 broker-buy-handler.finalizeBuy / broker-sell-handler.finalizeSell

@@ -1,3 +1,13 @@
+// ════════════════════════════════════════════════════════════════
+// HIGH-RISK FILE (Critical 8 per docs/COLLAB-REFORM.md 规 10/13/15)
+// 改前必跑: grep -nE 'T-J[0-9]+-|T-NWT-|Bug-[A-Z][0-9]+' 本 file
+// 改后 commit msg 必含: acknowledged: T-X-X (per surfaced anti-pattern)
+// 关联 docs: ANTI-PATTERNS R38 / DEVELOPER-GUIDE ch19
+// 关键历史: Bug-Z23 (kasToSompi amount type number→string boundary coerce, J1 0ac4a571)
+//          / R38 schema typeof spec (commands.mjs 4c503a9bb + relay.mjs 92bddaf3d)
+// blast radius: kasToSompi boundary / sendKaspa / 跨 process type contract
+// ════════════════════════════════════════════════════════════════
+//
 // Transaction building and submission via kaspa-wasm Generator + RPC
 import * as kaspa from 'kaspa-wasm';
 import { getApi } from './api.mjs';
