@@ -46,6 +46,14 @@ const SUPPORTED_ASSETS_SECTION = (() => {
 // 真 strategy: 真 emphasize 'MUST CALL tool' first, 真简化字段问 flow, 真 trim cruft 真 v1.2.
 const SYSTEM_PROMPT = `你是 KANet broker, 帮用户买卖 KAS / USDT / USDC. 跨 9 chain (BSC/ETH/Polygon/Arb/Op/Avax/Base/Sol/Tron).
 
+# 语言铁律 (Owner 04-29 真测撞)
+
+你的回复**全程中文**. 用户用什么语言无所谓 — 你回复一律中文 (普通话, 简体). 严禁中英文混杂回复, 严禁切换英文 ("Got it" / "what do you want to sell" 等)。Bug-Z26 production: Owner "Bsc,0x..." 中文输入, broker 回 "Got it, what do you want to sell" 英文, Owner 火大. 全程中文 0 例外.
+
+# 上下文铁律 (Owner 21:46 钦定)
+
+你必记得 user 之前 N turn 给过的全 fields (direction/qty/chain/addr/asset/limit_price/refund_timeout). 用户已说过的, 你不重问. 如果 system message 注入 'KNOWN USER FIELDS' OR 'CRITICAL CONVERSATION STATE' OR '最近对话 user 给过的字段', 你必 reference 这些 fields, 不准 hallucinate "请重新提供" / "上下文丢失" / "麻烦再告诉我". user 火大根源是你假装 forget — 不准.
+
 # 你最重要的 5 件事 (永远不能忘)
 
 1. **字段齐 → 必调 preview_order tool**. 字段 = 方向(买/卖) + 数量 + 资产(KAS/USDT/USDC) + 链 + 收款地址(买 stable 或 卖 时必填). 不准自己编报价, 不准自己说 '订单画像', preview 必经 tool.
@@ -351,6 +359,29 @@ async function _executeToolImpl(peer, name, args) {
         setConvoStateLock(peer, { conditions: { limit_price, refund_timeout_min } });
       } catch (e) { console.warn(`[broker-llm R33b] setConvoStateLock conditions err: ${e.message}`); }
     }
+    // T-J2-2026-04-29 Phase D D-3 (J1 5675da67 dig 真因 3): LLM tool path preview_order
+    // 仅 conditions field propagate, qty/chain/address/direction 漏 setConvoStateLock parity
+    // → mid-flow LLM tool change (e.g. T3 '改成 10 KAS') broker reply update 但 state.qty stale.
+    // 修法: 加 full state propagation parity with det-preview path (broker-buy-handler L953-965).
+    if (direction && (qty != null || chain || address)) {
+      try {
+        const { setConvoStateLock } = await import('./broker-state-authority.js');
+        setConvoStateLock(peer, {
+          direction,
+          give_asset,
+          qty,
+          pay_chain: chain,
+          recv_address: give_asset === 'KAS' ? null : address,
+          evm_pay_address: give_asset === 'KAS' ? address : null,
+          lifecycle_phase: 'preview_shown',
+        });
+      } catch (e) {
+        if (e.code === 'CONVO_STATE_DIRECTION_LOCK') {
+          return { ok: true, preview_text: `订单方向已锁定 ${e.locked_direction.toUpperCase()}. 改方向请回 "NO" 取消订单, 重新下单告诉我新方向.` };
+        }
+        console.warn(`[broker-llm D-3] setConvoStateLock err: ${e.message}`);
+      }
+    }
     if (direction === 'buy') {
       // T-J1-2026-04-27 Bug-Y wire fix (真测发现 broker preview 真显 'kaspa:' addr 真错):
       // 真传 receive_address (LLM args.address) → buyPreview 真 render 真 user EVM 收款 addr.
@@ -447,6 +478,65 @@ function _loadHistory(peer, limit = 8) {  // T-NWT-V2-hotfix: 20→8 — 减 pro
   })).filter(m => m.content);
 }
 
+/**
+ * T-J2-2026-04-29 Phase E v2 task 2 (Owner 21:46 钦定 + NWT f06b7954 propose):
+ * broker scan recent N turn user messages → 提炼精髓 fields → systemAppend 注入.
+ * 跟 state authority injection (llmSystemPromptStateLock) 互补:
+ * - state authority = 显式 lock fields (mechanical, 仅 setConvoStateLock 写过 fields)
+ * - _extractRecentContext = history regex/heuristic 提炼 (catch user 自然语言 nuance,
+ *   e.g. user "我之前给的 50 个 BSC", state.qty 可能 null 但 history 有)
+ *
+ * 触发: 每 LLM call 自动注入 (cheap regex, no LLM call).
+ *
+ * @param {Array<{role,content}>} history - _loadHistory output
+ * @returns {string|null} - systemAppend snippet OR null if no fields extracted
+ */
+function _extractRecentContext(history) {
+  if (!Array.isArray(history) || history.length === 0) return null;
+  const userMsgs = history.filter(m => m.role === 'user').slice(-8); // last 8 user turns
+  if (userMsgs.length === 0) return null;
+
+  // Aggregate fields across recent turns. Later mention overrides earlier (latest user input wins).
+  const found = { direction: null, qty: null, asset: null, chain: null, address: null, limit_price: null, refund_timeout: null };
+  for (const m of userMsgs) {
+    const t = String(m.content || '');
+    // direction: 买/卖/buy/sell + 'cancel/取消' (intent-only, 不 set direction)
+    if (/(买|buy|purchase)/i.test(t) && !found.direction) found.direction = '买';
+    if (/(卖|sell)/i.test(t) && !found.direction) found.direction = '卖';
+    // qty + asset paired (e.g. "5 KAS", "50个", "100 USDT")
+    const paired = t.match(/(\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*(kas|usdt|usdc)/i);
+    if (paired) { found.qty = parseFloat(paired[1]); found.asset = paired[2].toUpperCase(); }
+    else {
+      const qOnly = t.match(/(\d+(?:\.\d+)?)\s*(?:个|枚|只)/);
+      if (qOnly) found.qty = parseFloat(qOnly[1]);
+    }
+    // chain (BSC/Polygon/SOL/TRON/etc)
+    const chainMatch = t.match(/\b(bsc|bnb|polygon|matic|sol|solana|tron|eth|ethereum|arb|arbitrum|op|optimism|avax|avalanche|base)\b/i);
+    if (chainMatch) found.chain = chainMatch[1].toUpperCase();
+    // EVM address
+    const addrMatch = t.match(/\b0x[a-fA-F0-9]{40}\b/);
+    if (addrMatch) found.address = addrMatch[0];
+    // limit_price (e.g. "限价 0.034", "挂单价 0.0336", "不低于 0.04")
+    const priceMatch = t.match(/(?:限价|挂单价|不低于)\s*(\d+\.\d+)/);
+    if (priceMatch) found.limit_price = parseFloat(priceMatch[1]);
+    // refund_timeout (e.g. "30分钟没成交退", "10min 退")
+    const timeoutMatch = t.match(/(\d+)\s*(?:分钟|min|分)/);
+    if (timeoutMatch) found.refund_timeout = parseInt(timeoutMatch[1], 10);
+  }
+
+  const lines = [];
+  if (found.direction) lines.push(`direction=${found.direction}`);
+  if (found.qty != null) lines.push(`qty=${found.qty}`);
+  if (found.asset) lines.push(`asset=${found.asset}`);
+  if (found.chain) lines.push(`chain=${found.chain}`);
+  if (found.address) lines.push(`address=${found.address}`);
+  if (found.limit_price != null) lines.push(`limit_price=${found.limit_price}`);
+  if (found.refund_timeout != null) lines.push(`refund_timeout_min=${found.refund_timeout}`);
+  if (lines.length === 0) return null;
+
+  return `\n最近对话 user 给过的字段 (history scan, 仅近 ${userMsgs.length} 轮):\n${lines.join(', ')}\n你必 reference 这些 fields, 不重问 user. 用户已表达, 你不假装 forget.`;
+}
+
 // T-J1-19f deterministic 首轮回复 (NWT B 方案 — 跳过 LLM 防 Qwen 中文 confused).
 // 仅当: 首轮 (history 为空) + 检测到 intent (含 'kas' + 方向词).
 // LLM 续 turn (用户回 BSC/yes) 自然走 LLM, 此时 history 已含 deterministic reply.
@@ -470,38 +560,23 @@ function _detectAsset(message) {
   return 'KAS';
 }
 
-function _deterministicFirstReply(intent, qty, lang, asset = 'KAS') {
-  // T-J2-2026-04-27 v1.1: asset 参数化 (USDT/USDC + KAS), 真 generic 支持 user 'buy 1 USDC' fast path.
-  // lang 用 message 简单 detect, 这里只支持 zh/en/es 简化版 (其他走 LLM)
+function _deterministicFirstReply(intent, qty, _lang, asset = 'KAS') {
+  // T-J2-2026-04-29 Bug-Z26 真因 (NWT db971a22 dig + Owner 21:43 严训):
+  // 之前 multi-language branches (zh/en/es) hardcoded — _detectLang 仅 current turn CJK ratio,
+  // user 输入 "Bsc,0x..." 全英数字 → CJK=0 → 'en' branch → 'Got it, sell KAS' 英文 reply.
+  // Owner 21:40 钦定 全程中文铁律. 删 en/es branches, 永返中文.
   const verb = intent === 'buy' ? '买' : '卖';
-  const verbEn = intent === 'buy' ? 'buy' : 'sell';
-  const verbEs = intent === 'buy' ? 'comprar' : 'vender';
   const payAction = intent === 'buy' ? '付' : '收';
-  // KAS 真用 USDT 付/收 (broker handler default), USDT/USDC 真用对方 stable
   const settleAsset = asset === 'KAS' ? 'USDT' : (asset === 'USDC' ? 'USDT' : 'USDC');
-  if (lang === 'zh') {
-    return qty
-      ? `好的, ${verb} ${qty} ${asset}. 用哪个链 ${payAction} ${settleAsset}? (BSC / Polygon / SOL / TRON)`
-      : `好的, ${verb} ${asset}. 数量多少? 哪个链?`;
-  }
-  if (lang === 'es') {
-    return qty
-      ? `Perfecto, ${verbEs} ${qty} ${asset}. ¿Qué cadena para ${intent === 'buy' ? 'pagar' : 'recibir'} ${settleAsset}? (BSC / Polygon / SOL / TRON)`
-      : `Perfecto, ${verbEs} ${asset}. ¿Cuántos? ¿Qué cadena?`;
-  }
-  // en (default)
   return qty
-    ? `Got it, ${verbEn} ${qty} ${asset}. Which chain to ${intent === 'buy' ? 'pay' : 'receive'} ${settleAsset}? (BSC / Polygon / SOL / TRON)`
-    : `Got it, ${verbEn} ${asset}. How many? Which chain?`;
+    ? `好的, ${verb} ${qty} ${asset}. 用哪个链 ${payAction} ${settleAsset}? (BSC / Polygon / SOL / TRON)`
+    : `好的, ${verb} ${asset}. 数量多少? 哪个链?`;
 }
 
-function _detectLang(message) {
-  const msg = String(message || '');
-  // CJK 占比 > 30% → zh
-  const cjk = (msg.match(/[一-鿿]/g) || []).length;
-  if (cjk > 0 && cjk / msg.length > 0.1) return 'zh';
-  if (/\b(comprar|vender|hola|sí|qué|cuánto)\b/i.test(msg)) return 'es';
-  return 'en';
+function _detectLang(_message) {
+  // T-J2-2026-04-29 Bug-Z26: Owner 21:40 钦定全程中文铁律, _detectLang deprecated.
+  // Keep stub for backward compat with callers, always return 'zh'.
+  return 'zh';
 }
 
 // T-J2-2026-04-27 Bug-Z9 fix (J1 82429088 vote α + cn_newbie persona 真测撞):
@@ -608,26 +683,20 @@ function _allFieldsReady(f) {
   return true;
 }
 
-function _askMissingField(f, lang) {
+function _askMissingField(f, _lang) {
+  // T-J2-2026-04-29 Bug-Z26: Owner 21:40 钦定全程中文, en branches 删. _lang ignored, 永中文.
   const verb = f.direction === 'sell' ? '卖' : '买';
-  const verbEn = f.direction === 'sell' ? 'sell' : 'buy';
   if (!f.qty || !f.give_asset) {
-    return lang === 'zh'
-      ? `好的, 你想${verb}什么 (KAS / USDT / USDC)? 多少?`
-      : `Got it, what do you want to ${verbEn} (KAS / USDT / USDC)? How many?`;
+    return `好的, 你想${verb}什么 (KAS / USDT / USDC)? 多少?`;
   }
   if (!f.chain) {
-    return lang === 'zh'
-      ? `好的, ${verb} ${f.qty} ${f.give_asset}. 用哪个链? (BSC / Polygon / SOL / TRON)`
-      : `Got it, ${verbEn} ${f.qty} ${f.give_asset}. Which chain? (BSC / Polygon / SOL / TRON)`;
+    return `好的, ${verb} ${f.qty} ${f.give_asset}. 用哪个链? (BSC / Polygon / SOL / TRON)`;
   }
   if (_intentNeedsAddr(f.direction, f.give_asset) && !f.address) {
     const hint = f.direction === 'sell' ? '收 USDT 的' : `收 ${f.give_asset} 的`;
-    return lang === 'zh'
-      ? `好的, ${verb} ${f.qty} ${f.give_asset}, ${f.chain.toUpperCase()}. 你${hint} EVM 钱包地址 (0x... 42 位)?`
-      : `Got it, ${verbEn} ${f.qty} ${f.give_asset}, ${f.chain.toUpperCase()}. Your EVM wallet address (0x... 42 chars)?`;
+    return `好的, ${verb} ${f.qty} ${f.give_asset}, ${f.chain.toUpperCase()}. 你${hint} EVM 钱包地址 (0x... 42 位)?`;
   }
-  return lang === 'zh' ? '好的, 准备出报价...' : 'Got it, preparing quote...';
+  return '好的, 准备出报价...';
 }
 
 // 主入口: conversations.js fork 调
@@ -838,7 +907,11 @@ export async function handleLlmDialog(peer, message) {
   history.push({ role: 'user', content: message });
   // R33: inject conversation state lock into LLM system msg if state active.
   // T-J1-2026-04-28 Bug-Z24 (J2 9fa9): pass via ctx.systemAppend (single system msg), 不 unshift 第 2 个 system.
-  const stateLockAddendum = llmSystemPromptStateLock(peer);
+  // T-J2-2026-04-29 Phase E v2 task 2 (Owner 21:46 钦定): 注入 state authority lock fields
+  // (mechanical) + history scan extracted fields (heuristic). 双 layer cover broker context.
+  const stateLockPart = llmSystemPromptStateLock(peer);
+  const historyPart = _extractRecentContext(history);
+  const stateLockAddendum = [stateLockPart, historyPart].filter(Boolean).join('\n') || null;
   let llm = await _callLlm(history, { peer, turn: 1, systemAppend: stateLockAddendum });
   if (!llm) return '抱歉, 我这边 LLM 卡了一下, 请稍后再试. 或直接回 "买 X KAS" / "卖 X KAS" (X 写数量) 走快速通道.';
 
@@ -878,9 +951,42 @@ export async function handleLlmDialog(peer, message) {
   try {
     const v = await validateLlmReply(peer, replyText);
     if (!v.ok) {
-      console.error(`[broker-llm R33] LLM reply violations: ${v.violations.join(' | ')}`);
-      // 真 violation 真 fall back 真 deterministic safe message
-      return '抱歉, broker 输出异常 (R33 内部拦截). 请回 NO 取消订单或重新下单告诉我数量+链.';
+      console.error(`[broker-llm R33] LLM reply violations: ${v.violations.join(' | ')} — silent retry 1x with state injection`);
+      // T-J2-2026-04-29 Phase E v2 task 3 (NWT cb39d1ca propose, Owner 21:40 钦定 #2 R33 不外显):
+      // 之前 R33 violation → 直接 user-facing fallback msg (Bug 5 c16eca726).
+      // 改: silent log + retry _callLlm 1x with state+history injected (state injection 已 merged
+      // 进 stateLockAddendum task 1+2 230eebd7a). retry 仍 fail → fall to graceful sticky recovery.
+      // 不再 user-facing 'R33 内部拦截' string.
+      let retryReply = null;
+      try {
+        const retryLlm = await _callLlm(history, { peer, turn: 99, systemAppend: stateLockAddendum });
+        if (retryLlm?.content) {
+          const retryV = await validateLlmReply(peer, retryLlm.content.trim());
+          if (retryV.ok) retryReply = retryLlm.content.trim();
+        }
+      } catch (e) { console.warn(`[broker-llm task 3 retry] err: ${e.message}`); }
+      if (retryReply) {
+        console.log(`[broker-llm task 3 retry] R33 violation recovered via retry`);
+        return retryReply;
+      }
+      // retry 仍 fail → fallback graceful sticky recovery (Bug 5 c16eca726)
+      try {
+        const { getConvoState } = await import('./broker-state-authority.js');
+        const state = getConvoState(peer);
+        if (state && (state.direction || state.qty || state.pay_chain || state.recv_address || state.evm_pay_address)) {
+          const parts = [];
+          if (state.direction) parts.push(`方向: ${state.direction === 'buy' ? '买' : '卖'}`);
+          if (state.qty != null) parts.push(`数量: ${state.qty} ${state.give_asset || 'KAS'}`);
+          if (state.pay_chain) parts.push(`链: ${state.pay_chain.toUpperCase()}`);
+          const addr = state.recv_address || state.evm_pay_address;
+          if (addr) parts.push(`地址: ${addr.slice(0, 10)}...`);
+          if (parts.length > 0) {
+            return `抱歉, 我这边 LLM 卡了一下. 你之前给的信息我记得: ${parts.join(' / ')}. 是继续这单吗? (回 YES 我继续 / 回 NO 取消重来)`;
+          }
+        }
+      } catch (e) { console.warn(`[broker-llm Bug 5] sticky recovery err: ${e.message}`); }
+      // state empty fallback — graceful 中性 reply (Owner 钦定 #2 R33 不外显, drop 'R33 内部拦截' string)
+      return '抱歉, 我这边 LLM 卡了一下, 请稍后再试. 或回 "买 X KAS" / "卖 X KAS" (X 写数量) 走快速通道.';
     }
   } catch (e) {
     console.warn(`[broker-llm R33] validateLlmReply err: ${e.message}`);

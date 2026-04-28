@@ -186,21 +186,40 @@ export function shouldDeterministicFire(peer, regexName, message) {
  */
 export function llmSystemPromptStateLock(peer) {
   const state = getConvoState(peer);
-  if (!state || !state.locked) return null;
+  if (!state) return null;
 
-  const lines = [
-    '\nCRITICAL CONVERSATION STATE (do NOT violate):',
-    `User has DECLARED ${state.direction.toUpperCase()} flow at turn ${Math.floor((Date.now() - state.started_at) / 1000)}s ago.`,
-    `Locked fields: direction=${state.direction}` +
-      (state.give_asset ? `, give=${state.give_asset}` : '') +
-      (state.qty ? `, qty=${state.qty}` : '') +
-      (state.pay_chain ? `, pay_chain=${state.pay_chain}` : '') +
-      (state.recv_address ? `, recv_addr=${state.recv_address.slice(0, 10)}...` : '') +
-      `, phase=${state.lifecycle_phase}.`,
-    `Fresh user message fills MISSING fields ONLY. Direction is IMMUTABLE.`,
-    `If user message implies opposite direction, ASK 'cancel order first?' do NOT auto-flip.`,
-    `If user asks question (not field), ANSWER question with state context, do NOT re-show preview.`,
-  ];
+  // T-J2-2026-04-29 Phase E v2 第一原则 1 (Owner 21:40 钦定 4 铁律 #3 broker 不忘):
+  // 之前 'if (!state.locked) return null' — state.locked=false (post R33 reset retain mode)
+  // 时 LLM 看不到任何 state, hallucinate forget. 改: ANY field exists → inject 'KNOWN USER FIELDS'.
+  // locked vs unlocked 仅影响 addendum framing (locked=hard rule, unlocked=soft hint).
+  const hasAnyField = state.direction || state.qty != null || state.pay_chain ||
+    state.recv_address || state.evm_pay_address || state.give_asset;
+  if (!hasAnyField) return null;
+
+  const fieldLines = [];
+  if (state.direction) fieldLines.push(`direction=${state.direction}`);
+  if (state.give_asset) fieldLines.push(`give_asset=${state.give_asset}`);
+  if (state.qty != null) fieldLines.push(`qty=${state.qty}`);
+  if (state.pay_chain) fieldLines.push(`pay_chain=${state.pay_chain}`);
+  if (state.recv_address) fieldLines.push(`recv_address=${state.recv_address}`);
+  if (state.evm_pay_address) fieldLines.push(`evm_pay_address=${state.evm_pay_address}`);
+  if (state.lifecycle_phase) fieldLines.push(`phase=${state.lifecycle_phase}`);
+
+  const lines = state.locked
+    ? [
+        '\nCRITICAL CONVERSATION STATE (do NOT violate):',
+        `User has DECLARED ${state.direction.toUpperCase()} flow at turn ${Math.floor((Date.now() - state.started_at) / 1000)}s ago.`,
+        `LOCKED fields (cannot change without cancel): ${fieldLines.join(', ')}.`,
+        `Fresh user message fills MISSING fields ONLY. Direction is IMMUTABLE.`,
+        `If user message implies opposite direction, ASK 'cancel order first?' do NOT auto-flip.`,
+        `If user asks question (not field), ANSWER question with state context, do NOT re-show preview.`,
+      ]
+    : [
+        '\nKNOWN USER FIELDS (consult before reply, never hallucinate forget):',
+        `User previously gave: ${fieldLines.join(', ')}.`,
+        `Reply MUST cite these fields when relevant. NEVER ask user for fields already given above.`,
+        `If user message references previous fields, acknowledge them. Do NOT reset context.`,
+      ];
   return lines.join('\n');
 }
 
