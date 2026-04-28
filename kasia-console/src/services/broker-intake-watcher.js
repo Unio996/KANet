@@ -151,7 +151,13 @@ async function _publishBrokerSellOffer(peer, amount, eventId) {
     await _send(BROKER_RELAY_ID, { type: 'send_kas', target: peer, amount_kas: amount, note: 'no price feed' });
     return markProcessed(eventId, 'no_price');
   }
-  const wantUsdt = (netKas * midPrice).toFixed(4);
+  // Owner 88 KAS 真测真撞 (J2 f5b0a272 dig + NWT 7d8710a8 ack): broker offer 0% spread =
+  // mid price → autoTaker config min_discount_pct=1% SKIP + self-maker exclusion → 真**真**真 taker.
+  // 修 broker SELL offer 加 1.5% spread below mid 真**真 outside taker incentive 接.
+  // 副作用: broker 短期 unhedged KAS 仓位 risk (88 KAS << CEX liquidity, drop 风险 acceptable).
+  // CEX hedge prototype 真**真 separate task R35 候选.
+  const SELL_SPREAD_PCT = 0.015;  // 1.5% offer below mid (broker-intake-watcher hotfix)
+  const wantUsdt = (netKas * midPrice * (1 - SELL_SPREAD_PCT)).toFixed(4);
 
   let res = null;
   try {
