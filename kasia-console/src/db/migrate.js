@@ -2354,5 +2354,95 @@ export function runMigrations() {
     console.log('[migrate] v77: idx_offers_open_expires partial index created (expire watcher acceleration).');
   }
 
+  // v79 (Phase E v2 召会 — Owner 22:00+22:xx 钦定 broker 状态机 + DB 残废重设计):
+  // broker_conversations table — per-peer broker 对话 state, 替 broker-state-authority.js _convoState
+  // in-memory Map. 真 cross-restart + cross-process state retain. 三方 (J1+J2+NWT) converge:
+  //   - 议题 1 字段: NWT base + J2 加补 (intent_history JSON, last_broker_reply_phase, expires_at,
+  //     conditions JSON 单 col) + J1 加补 (last_state_source audit trail)
+  //   - 议题 2 时机: every-turn UPSERT (atomic transaction, 不 phase-advance-only)
+  //   - 议题 4 R31/R33 SQL guard: post-set IMMUTABLE 在 application UPDATE WHERE 表达, 不 column CHECK
+  //   - PRIMARY KEY single peer_address (J1 push back composite — single-active-state per peer)
+  // 详见 dev-coord J1 #31 / NWT 734fb457 / J2 dcf9de48.
+  {
+    const hasTable = sqlite.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='broker_conversations'"
+    ).get();
+    if (!hasTable) {
+      sqlite.exec(`
+        CREATE TABLE broker_conversations (
+          peer_address           TEXT    NOT NULL PRIMARY KEY,
+          direction              TEXT    CHECK (direction IS NULL OR direction IN ('buy', 'sell')),
+          give_asset             TEXT,
+          want_asset             TEXT,
+          qty                    REAL    CHECK (qty IS NULL OR qty > 0),
+          pay_chain              TEXT,
+          recv_chain             TEXT,
+          recv_address           TEXT,
+          evm_pay_address        TEXT,
+          conditions             TEXT,
+          intent_history         TEXT,
+          lifecycle_phase        TEXT    NOT NULL DEFAULT 'fields_collection'
+                                 CHECK (lifecycle_phase IN (
+                                   'fields_collection', 'preview_shown', 'confirmed',
+                                   'awaiting_payment', 'paid', 'verifying', 'delivering',
+                                   'completed', 'cancelled', 'disputed', 'expired'
+                                 )),
+          last_broker_reply_phase TEXT   CHECK (last_broker_reply_phase IS NULL OR last_broker_reply_phase IN (
+                                   'preview', 'finalize', 'cancel', 'payment_pending', 'failed', 'r33_recover'
+                                 )),
+          last_state_source       TEXT   CHECK (last_state_source IS NULL OR last_state_source IN (
+                                   'det_one_shot', 'det_fallback', 'llm_tool', 'extract_recent', 'r33_recover', 'system_reset'
+                                 )),
+          started_at             INTEGER NOT NULL,
+          updated_at             INTEGER NOT NULL,
+          expires_at             INTEGER,
+          locked                 INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX idx_bc_phase_expires
+          ON broker_conversations(lifecycle_phase, expires_at);
+        CREATE INDEX idx_bc_updated
+          ON broker_conversations(updated_at);
+      `);
+      console.log('[migrate] v79: broker_conversations table created (per-peer broker state, J1 #31 ship).');
+    }
+  }
+
+  // v80 (Phase E v2 召会 议题 7 — Owner 22:xx 钦定 broker = 用户长期 profile 收集器):
+  // broker_conversations 加 completed_at INTEGER stub field, Phase 2 (broker_user_profile 表)
+  // cron 扫此字段 sediment per-peer 长期偏好 (preferred_chain / typical_qty / total_completed 等).
+  // Phase 1 写 row 不读 profile, Phase 2 (4-6h post Phase 1 ship) 加 broker_user_profile 表 + load.
+  // 详见 dev-coord NWT bb6a 议题 7 + J1 #33 ack.
+  {
+    const hasCol = sqlite.prepare("PRAGMA table_info(broker_conversations)").all()
+      .some(c => c.name === 'completed_at');
+    if (!hasCol) {
+      sqlite.exec(`ALTER TABLE broker_conversations ADD COLUMN completed_at INTEGER`);
+      // partial index — Phase 2 sediment cron 仅扫 completed_at IS NOT NULL row
+      sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_bc_completed_at
+                   ON broker_conversations(completed_at)
+                   WHERE completed_at IS NOT NULL`);
+      console.log('[migrate] v80: broker_conversations.completed_at column added (Phase 2 profile sediment future-proof).');
+    }
+  }
+
+  // v81 (Phase E v2 召会 — Owner 22:xx 钦定 真戳 "系统所有基础设施是全的, 之前抓错了药"):
+  // revert v79+v80 broker_conversations — 100% 冗余 retail_dex_orders 现有字段.
+  // NWT 22:39 实证: retail_dex_orders 153 行 + 字段全 cover (side/qty/pay_chain/pay_address/
+  // receive_*/state/agent_pay_addr/expires_at). retail_dex_user_memory 11 行 + LLM distill cron
+  // 已在跑 (议题 7 broker_user_profile 也冗余).
+  // broker-state-authority.js task B 重写方向: getConvoState 直接 SELECT retail_dex_orders +
+  // JOIN retail_dex_user_memory + relation_states. setConvoStateLock = UPDATE retail_dex_orders
+  // WHERE guard (R31/R33 SQL 表达). 不新建表, 复用现有 pipeline.
+  // 详见 dev-coord NWT 64eef5ef cache reframe + Owner 抓错药戳穿 + J1 #34 ack.
+  {
+    const hasTable = sqlite.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='broker_conversations'"
+    ).get();
+    if (hasTable) {
+      sqlite.exec(`DROP TABLE broker_conversations`);
+      console.log('[migrate] v81: broker_conversations dropped (Owner 抓错药戳穿 — 复用 retail_dex_orders + retail_dex_user_memory + relation_states 现有 pipeline).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
