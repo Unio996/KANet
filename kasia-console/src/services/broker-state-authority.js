@@ -239,6 +239,28 @@ export async function validateLlmReply(peer, replyText) {
     } catch {}
   }
 
+  // T-J1-2026-04-28 Layer 3 (phase 3 8-layer system fix): chain-truth check.
+  // LLM reply 含 64-hex Kaspa TX hash 必在 kaspa_tx_log 真存在. 治 LLM hallucinate fake tx hash
+  // (e.g. Z19 cancel ack '已退 87.9 KAS, TX abc123...', LLM 编 64-hex 用户没法分辨真假).
+  // \b[a-f0-9]{64}\b 只匹配 bare hex (Kaspa style), 不匹配 EVM '0x...' (word boundary 在 x/a 之间无效).
+  const hashMatches = (replyText.match(/\b[a-f0-9]{64}\b/gi) || []).map(h => h.toLowerCase());
+  if (hashMatches.length) {
+    const fakeHashes = [];
+    for (const h of hashMatches) {
+      try {
+        const found = sqlite.prepare('SELECT 1 FROM kaspa_tx_log WHERE tx_id = ? LIMIT 1').get(h);
+        if (!found) fakeHashes.push(h);
+      } catch (e) {
+        // kaspa_tx_log 不可读 (DB error) → 保守不拦, 避免 false positive 阻塞所有 reply
+        console.warn(`[broker-state-authority Layer3] kaspa_tx_log lookup err: ${e.message}`);
+        break;
+      }
+    }
+    if (fakeHashes.length) {
+      violations.push(`Layer3-chain-truth: reply 含 ${fakeHashes.length} 个 Kaspa TX hash 不在 kaspa_tx_log (LLM 可能编 fake): ${fakeHashes.map(h => h.slice(0, 16) + '...').join(', ')}`);
+    }
+  }
+
   return { ok: violations.length === 0, violations };
 }
 
