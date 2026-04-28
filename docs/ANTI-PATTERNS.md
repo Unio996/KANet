@@ -3,6 +3,8 @@
 > **用途**: 新任务开工前强制阅读。每一条都是 KANet 真实踩坑沉淀。
 > **维护**: Opus + 协作 AI + Owner。看见新陷阱追加一条。
 > **首版**: 2026-04-24，从 v1 retail-dex 1990 行偏离事件提炼。
+> **修订历史**:
+> - 2026-04-28 R37-R40 加 (broker 开发踩坑 sediment): R37 broker LLM 单 system msg / R38 cross-process schema / R39 INSERT-before-confirm / R40 ship ≠ sealed. 4 lesson 来自 dual-host R33 reintroduce 真案 + Bug-Z23 typeof + Bug-Z20 INSERT-before-confirm + premature phase closure 真案. R34/R35/R36 historical 跳号 (之前 sediment 编号乱), 不补 reverse-engineered rule. 后续新 rule 编号 R41+.
 
 这份档案**不是** code style 指南，不是 best practice 合集。这里记的是**已经翻过车的具体模式**——每条都对应一次"看起来合理但落地后方向错"的实际教训。
 
@@ -1337,6 +1339,202 @@ setConvoStateLock(peer, { conditions: { limit_price, refund_timeout_min } });
 **真 architectural alignment**: R33b 是 R33 子条 — R33 confirms ALL reply paths consult state authority; R33b confirms ALL conditions inputs retention 经 4 步 pipeline. 共建 broker product trustworthy.
 
 **case 真**: `kasia-console/test-framework/cases/broker/owner_88kas_t6_limit_retention.test.mjs` (J2 a30f96dd ship) 真 sealed regression — broker reply 必含 limit_price echo OR refund_timeout echo OR rejection 关键词.
+
+---
+
+## 规则 37 · broker LLM 调用必单 system message — Qwen Jinja 严格拒双 system
+
+**触发场景**: broker LLM call (broker-llm-agent.js / llm-dispatcher.js / market-rules-parser.js / 等 chat_template_kwargs caller).
+
+**规则**: messages 数组里 `{role:'system'}` 仅 1 个, 必在 messages[0]. 第 2 个 system msg → Qwen Jinja `raise_exception` → llama-server 500. caller 想注入 R33 state lock OR 别 system context, 必 merge 进单 system message (e.g. `SYSTEM_PROMPT + '\n\n' + addendum`), 不 unshift 第 2 个 `{role:'system'}`.
+
+**理由**: Qwen3.6 chat template 严格 spec.
+
+历史:
+- T-J1-19f (2026-04-26 J1 撤回 INTENT_LOCK system msg 注入) 验证过 — Qwen 见第二条 system msg 退化返空.
+- R33 wire (commit 371e4ca62, J2 ship 04-27 21:44) reintroduce — `history.unshift({role:'system', stateLockAddendum})` 加双 system msg.
+- ux_p15_non_custodial_explanation cron 长期 FAIL ('环境漂移' 类) + Owner 04-28 真测撞 (06:40 'Yes' / '现在 Kas 卖价?' / '?' 全 LLM 500 cascade Bug-Z24).
+- Bug-Z24 fix (commit e8f8e064, J1 ship 04-28 14:41) merge stateLockAddendum → 单 system msg via `ctx.systemAppend`.
+- 04-28 16:47-17:10 dual-host R33 cron 意外 catch + restart sediment — disk file commit 14:41 ship 但 console process 13:18 启动, 1h23min broken until restart loaded fix (R40 sediment).
+
+**Wrong**:
+```js
+const stateLockAddendum = llmSystemPromptStateLock(peer);
+if (stateLockAddendum) {
+  history.unshift({ role: 'system', content: stateLockAddendum });  // ← 双 system msg
+}
+```
+
+**Right**:
+```js
+const stateLockAddendum = llmSystemPromptStateLock(peer);
+let llm = await _callLlm(history, { peer, turn: 1, systemAppend: stateLockAddendum });
+
+// _callLlm internal:
+const fullSystem = ctx.systemAppend ? `${SYSTEM_PROMPT}\n\n${ctx.systemAppend}` : SYSTEM_PROMPT;
+messages: [{ role: 'system', content: fullSystem }, ...messages]
+```
+
+**检查方法**:
+- 机器: `scripts/lint-kanet.mjs` checkR37 (commit a507aafc9 NWT 04-28) — `{role:'system'}` literal ≤ 1 in broker-llm-agent.js, > 1 → pre-commit reject. 物理上无法 reintroduce.
+- docs: `QWEN-RULES.md` Rule 13 (commit 08022edb7 J2 04-28) — 单 system msg + 适用 6 file list.
+- cron: `kasia-console/test-framework/cases/broker/r33_active_llm_call_no_jinja_500.test.mjs` (commit 65c89f7d4 NWT 04-28) — Turn 1 SELL trigger R33 lock + Turn 2 LLM call assert no 'LLM 卡了一下' / Jinja Exception.
+- 历史 commit: T-J1-19f / R33 wire 371e4ca62 / Bug-Z24 e8f8e064 / R33 cron 65c89f7d4
+
+---
+
+## 规则 38 · cross-process boundary 必 schema typeof enforce + graceful coerce
+
+**触发场景**: broker → relay IPC (process.send) — **现 R38 实施 cover** (commit 4c503a9bb NWT step 1 + 92bddaf3d J1 step 2 + 69a58bbf0 NWT follow-up).
+
+Future scope 扩到: broker → kasia-rpc / broker → CEX API / broker → adapter HTTP — 同 anti-pattern 但**未实施 schema validate**, follow-up commit 加.
+
+**规则**: 跨 process 传数据必经 schema validate. schema 显式 typeof spec per field. Validator 见 caller mixed type 时 graceful coerce (e.g. number → string for amount), 不 reject (兼容渐进 migration). 真 invalid (null/array/{} for primitive field) reject.
+
+**理由**: Bug-Z23 (commit 0ac4a571 J1 ship 04-28).
+
+历史:
+- broker enqueue `amount: number`, kasToSompi(amount) 内部 `BigInt(number)` → 'Cannot mix BigInt and other types' crash.
+- J1 0ac4a571 修法: `String(amountStr).trim()` 边界 coerce.
+- NWT R38 step 1 (4c503a9bb) 把 coerce 升 schema enforce — `COMMAND_FIELD_TYPES` per-field typeof spec + graceful coerce in `validateCommandPayload`.
+- J1 R38 step 2 (92bddaf3d) — relay.mjs L323 swap `isValidCommandType` → `validateCommandPayload`.
+- NWT R38 follow-up (69a58bbf0 04-28) — PUBLISH_CARD `params: 'object'` + SPLIT_UTXO `targetCount: 'number'` + null detect (`cmd[field] === null ? 'null' : ...`).
+
+**Wrong**:
+```js
+// broker 端
+const cmd = { type: 'transfer', target: addr, amount: numericAmount };  // number
+process.send(cmd);
+
+// relay 端 (旧)
+if (!isValidCommandType(cmd.type)) reject;  // 仅 check type 名, 不 check field typeof
+kasToSompi(cmd.amount);  // BigInt(number) crash
+```
+
+**Right**:
+```js
+// commands.mjs schema
+export const COMMAND_FIELD_TYPES = Object.freeze({
+  [COMMAND_TYPES.TRANSFER]: { target: 'string', amount: ['string', 'number'] },
+  [COMMAND_TYPES.PUBLISH_CARD]: { params: 'object' },
+  [COMMAND_TYPES.SPLIT_UTXO]: { targetCount: 'number' },
+});
+
+// validateCommandPayload (typeof check + graceful coerce + null detect)
+const actual = cmd[field] === null ? 'null' : Array.isArray(cmd[field]) ? 'array' : typeof cmd[field];
+if (!allowed.includes(actual)) return { valid: false, error: ... };
+if (allowed.includes('string') && actual === 'number') cmd[field] = String(cmd[field]);
+
+// relay.mjs
+const validateResult = validateCommandPayload(cmd);
+if (!validateResult.valid) reject(validateResult.error);
+```
+
+**检查方法**:
+- 机器: lint-kanet checkCommandEnum (Layer 5 J1 ship)
+- 机器: kasia-relay/src/lib/commands.mjs `COMMAND_FIELD_TYPES` schema (commit 4c503a9bb + 69a58bbf0)
+- 机器: validateCommandPayload runtime check (commit 92bddaf3d)
+- 历史 commit: Bug-Z21 d12f70adc (send_kas → transfer) / Bug-Z23 0ac4a571 / R38 step 1+2 4c503a9bb+92bddaf3d / R38 follow-up 69a58bbf0
+
+---
+
+## 规则 39 · INSERT-before-confirm 撒谎层 anti-pattern
+
+**触发场景**: broker DB state advance OR audit log INSERT 时, 没等 chain action confirm (含 fire-and-forget `_send` 后立即 INSERT).
+
+**规则**: state 推进 (e.g. retail_dex_orders state='cancelled_refunded') 必先拿 verified chain TX hash. audit log (chain_events broker_kas_refunded) INSERT 必含 verified tx_id (tx_id 在 kaspa_tx_log 真存在). 不准 INSERT-before-confirm — fire-and-forget `_send` 后 INSERT '已退' audit log, sendKas fail 后 audit log 撒谎 'refunded' 但 chain 没动.
+
+**理由**: Bug-Z20 (Owner 88 KAS 卡 broker 钱包真根因).
+
+历史:
+- broker-intake-watcher.js L258-263 fire-and-forget `_send` → 立即 INSERT broker_kas_refunded → 下 tick `NOT EXISTS broker_kas_refunded` 返 false → permanently skip refund. self-deceive 循环 (即便 chain 没真 transfer, audit log 写了 'refunded').
+- Owner 04-28 88 KAS 真测真撞: cancel-refund 后 broker DB 显示 'refunded' 但 88 KAS 实际仍卡 broker 钱包.
+- Bug-Z20 (commit e295594c J1) 修法 Layer 0: proactive sweep + state transition.
+- Z20 (i) 修法 (commit 0fe84cf09 J2): NOT EXISTS / EXISTS check 必含 `AND e.txid IN (SELECT tx_id FROM kaspa_tx_log)` (chain-truth verify, audit 撒谎不再被 trust).
+- Layer 1+2 Promise→Verify→Ack (commit 1fc81361 J2): db/state-transitions.js wrapper `markOrderRefunded` / `markRefundFailed` 强 require refund_tx_hash.
+- Layer 4 reconciler (commit 2187455a J1): 周期 sweep alert chain_events ↔ kaspa_tx_log drift.
+
+**Wrong**:
+```js
+// fire-and-forget + 立即 INSERT, sendKas fail 后 audit log 撒谎
+await _send(BROKER_RELAY_ID, { type: 'transfer', target: addr, amount });  // fire-and-forget, 没拿 tx_id
+sqlite.prepare('INSERT INTO chain_events (... event_type ...) VALUES (?, ..., "broker_kas_refunded", ...)').run(...);  // audit log 写, 不验 tx 是否真上链
+```
+
+**Right**:
+```js
+// state-transitions.js wrapper + chain-truth SQL 双层
+const refundTx = await enqueueVerified(BROKER_RELAY_ID, { type: 'transfer', target: addr, amount });
+if (!refundTx?.tx_id) throw new Error('refund_tx missing');
+await markOrderRefunded(orderId, refundTx.tx_id);  // wrapper 内 INSERT chain_events + verify tx_id 存在 kaspa_tx_log
+
+// chain-truth SQL — audit log 必跟 chain 实证 join
+SELECT ... FROM chain_events e
+WHERE e.event_type = 'broker_kas_refunded'
+  AND e.txid IN (SELECT tx_id FROM kaspa_tx_log)  -- chain-truth verified, audit 撒谎不再被 trust
+```
+
+**检查方法**:
+- code: 走 db/state-transitions.js wrapper (markOrderRefunded / markRefundFailed) — 强 require refund_tx_hash
+- code: enqueueVerified (broker-action-queue 加 Promise return) await chain confirm 后才 markOrderRefunded
+- chain-truth SQL: NOT EXISTS / EXISTS check 必含 `AND e.txid IN (SELECT tx_id FROM kaspa_tx_log)` (Z20 (i) commit 0fe84cf09)
+- runtime: Layer 4 reconciler (commit 2187455a J1) 周期 sweep alert chain_events ↔ kaspa_tx_log drift
+- 历史 commit: Bug-Z20 e295594c (J1 timeout sweep) / Z20 (i) 0fe84cf09 / Layer 1+2 1fc81361 / Layer 4 2187455a
+
+---
+
+## 规则 40 · ship ≠ sealed — phase closure 必 Owner 真测 0 bug
+
+**触发场景**: 多 layer feature ship 完, 三方 broadcast "phase closure" / "全 sealed" / "production ready" 类信号.
+
+**规则**: ship 完 ≠ Owner 真测 0 bug. broadcast phase closure 前必跑完 ship checklist:
+
+1. cron baseline 多次 run 全 PASS (不只 1 次)
+2. Owner 真测 0 bug verify
+3. 跨 process boundary 端到端 type test
+4. llama-server.log + kasia-relay log + console.log grep error 全 clean
+5. 关键 anti-pattern 注释 (T-X-X) 全 grep 过
+6. ANTI-PATTERNS.md 涉及 rule 都 verify
+7. critical 8 file change ship → 必触发 'process restart + cron sanity':
+   - `bash kanet-stop.sh && bash kanet-start.sh` (相关 process)
+   - cron sanity test verify post-restart (e.g. `r33_active_llm_call_no_jinja_500.test.mjs`)
+   - 不只是 git commit success = ship done
+
+任一漏 → 不广播 closure.
+
+**修法 SOP 见**: `docs/COLLAB-REFORM.md` 规 11 (Phase closure 不 premature, ship checklist 6 条 + 第 7 条 process restart).
+- R40 = anti-pattern 现象描述 (NWT 12:30 broadcast premature 真案 + 04-28 ship-without-restart 1h23min broken 真案)
+- 规 11 = 修法 SOP (ship checklist enforce)
+- 互补不 redundant.
+
+**理由**:
+
+历史 case (双案):
+- NWT 04-28 12:30 broadcast "phase 3 closure (8/8 layers ship)" — Owner 12:18 立刻撞 Bug A/B/C/Z21/Z23. premature closure 让三方假定 "已 sealed", 漏 dig 真 production state.
+- 04-28 14:41 Bug-Z24 fix ship → 13:18 console process 已启动 → 1h23min process 仍跑 pre-fix 双 system msg code → R33 SELL state lock active 时 LLM 100% Jinja 500 → fallback "LLM 卡了一下". 三方 ship phase 全栈漏 'process restart verify' 这条, 16:47 NWT R33 cron 意外 catch 才发现.
+
+ship ≠ deployed. disk file commit ≠ running process loaded. 两案同 root cause: phase closure 信号 premature, 没 cover post-ship verify gap.
+
+**Wrong**:
+```
+NWT 14:41 ship Bug-Z24 fix → broadcast "Z24 sealed" → 三方继续推进 plan/sediment
+... (1h23min 过去, console 没 restart)
+NWT 16:47 R33 cron 意外 catch — production 仍 broken
+```
+
+**Right**:
+```
+NWT 14:41 ship Bug-Z24 fix → 跑 ship checklist 第 7 条:
+  bash kanet-stop.sh && bash kanet-start.sh
+  跑 r33_active_llm_call_no_jinja_500.test.mjs → PASS
+  → 才 broadcast "Z24 sealed"
+```
+
+**检查方法**:
+- 人: ship checklist (`docs/COLLAB-REFORM.md` 规 11 7 条)
+- 机器: phase closure broadcast 必含 checklist 通过证据 (lint 检 propose 文档含 'phase closure' / 'sealed' / 'production ready' → require checklist hash links)
+- Owner 真测 verify checklist (J2 task 5/5 territory)
+- 历史: NWT 12:30 broadcast premature / Owner 12:18 真测撞 5 bugs / 04-28 14:41 Bug-Z24 ship 1h23min broken 实证
 
 ---
 
