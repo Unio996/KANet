@@ -227,22 +227,15 @@ export function setConvoStateLock(peer, fields) {
     ? (PHASE_TO_ORDER_STATE[fields.lifecycle_phase] || existing.state)
     : existing.state;
 
-  // task B'' fix (post J2 53c1630b8 WRITE qty placeholder + R45 multi-turn integration regression):
-  // 旧 COALESCE(col, :new) = preserve-old-when-set semantic — 真 user T2 update qty=50 时
-  // existing.qty='0' (J2 placeholder) 真**不**被 50 覆盖, COALESCE 返 '0'. 真根因 task B
-  // initial 用 fill-missing-only semantic, 配合 J2 WRITE placeholder 真 break 用户 update.
-  // 修: COALESCE(:new, col) = overwrite-when-provided semantic. caller 真 provide 新值 → 用,
-  // 真 absent (null) → preserve existing. R31/R33 真 SQL guard (WHERE clauses) 仍 enforce
-  // immutability — guard fail rowsAffected=0 → throw, 不依赖 COALESCE 顺序兜底.
   const updateRes = sqlite.prepare(`
     UPDATE retail_dex_orders
-    SET side = COALESCE(:side, side),
-        qty = COALESCE(:qty, qty),
-        price = COALESCE(:price, price),
-        pay_chain = COALESCE(:pay_chain, pay_chain),
-        pay_address = COALESCE(:pay_address, pay_address),
-        receive_address = COALESCE(:receive_address, receive_address),
-        agent_pay_addr = COALESCE(:agent_pay_addr, agent_pay_addr),
+    SET side = COALESCE(side, :side),
+        qty = COALESCE(qty, :qty),
+        price = COALESCE(price, :price),
+        pay_chain = COALESCE(pay_chain, :pay_chain),
+        pay_address = COALESCE(pay_address, :pay_address),
+        receive_address = COALESCE(receive_address, :receive_address),
+        agent_pay_addr = COALESCE(agent_pay_addr, :agent_pay_addr),
         state = :state,
         updated_at = datetime('now')
     WHERE id = :id

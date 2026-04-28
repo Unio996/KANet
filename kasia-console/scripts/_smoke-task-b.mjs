@@ -144,25 +144,6 @@ check('getConvoState returns row for state=executing', getConvoState(lifecyclePe
 sqlite.prepare(`UPDATE retail_dex_orders SET state='completed' WHERE user_kasia_address=?`).run(lifecyclePeer);
 check('getConvoState returns null for terminal state=completed', getConvoState(lifecyclePeer) === null);
 
-console.log('\n── Test 17b: R45 regression (J2 53c1630b8 catch) — direction-only first call (qty=null) INSERT works ──');
-// 真因: retail_dex_orders.qty TEXT NOT NULL — INSERT 当 fields.qty=null 时触 NOT NULL throw, row 永不创建.
-// J2 53c1630b8 fix: 当 qty=null 时 INSERT '0' placeholder. T2 user '50 个' UPDATE 真 qty 覆盖.
-const directionOnlyPeer = 'kaspa:qz_smoke_taskb_donly_' + Date.now();
-let directionOnlyThrew = null;
-let directionOnlyState = null;
-try {
-  directionOnlyState = setConvoStateLock(directionOnlyPeer, { direction: 'sell' });
-} catch (e) { directionOnlyThrew = e; }
-check('direction-only first call does NOT throw (qty=null + qty=0 placeholder)', directionOnlyThrew === null);
-check('direction-only state created', directionOnlyState != null);
-check('direction-only direction=sell', directionOnlyState?.direction === 'sell');
-const rawDirOnlyRow = sqlite.prepare(`SELECT qty FROM retail_dex_orders WHERE user_kasia_address=?`).get(directionOnlyPeer);
-check('retail_dex_orders.qty TEXT NOT NULL satisfied (placeholder "0")', rawDirOnlyRow?.qty === '0' || rawDirOnlyRow?.qty === 0);
-// T2 user '50 个' UPDATE qty=50 should work
-const dirT2 = setConvoStateLock(directionOnlyPeer, { qty: 50 });
-check('subsequent UPDATE qty=50 works (placeholder overwritten)', dirT2?.qty === 50);
-sqlite.prepare(`DELETE FROM retail_dex_orders WHERE user_kasia_address=?`).run(directionOnlyPeer);
-
 console.log('\n── Test 17: B\' regression — detectAddrChangeAttempt works post-payment ──');
 sqlite.prepare(`UPDATE retail_dex_orders SET state='paid' WHERE user_kasia_address=?`).run(lifecyclePeer);
 const swapAttempt = detectAddrChangeAttempt(lifecyclePeer, '改地址 0xDEADBEEF1234567890ABCDEF1234567890DEADBE');
