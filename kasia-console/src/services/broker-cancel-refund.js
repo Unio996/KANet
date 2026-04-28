@@ -1,3 +1,13 @@
+// ════════════════════════════════════════════════════════════════
+// HIGH-RISK FILE (Critical 8 per docs/COLLAB-REFORM.md 规 10/13/15)
+// 改前必跑: grep -nE 'T-J[0-9]+-|T-NWT-|Bug-[A-Z][0-9]+' 本 file
+// 改后 commit msg 必含: acknowledged: T-X-X (per surfaced anti-pattern)
+// 关联 docs: ANTI-PATTERNS R38+ / DEVELOPER-GUIDE ch19
+// 关键历史: J2 Defect A/B/C (INSERT-before-confirm 撒谎 防御) / Layer 1+2 Promise→Verify→Ack
+//          / Z18 cancel intent regex / Z19 LLM hallucinate fake ack guard / Bug-Z24 verify ✓
+// blast radius: cancel-refund flow / fund 退还 chain TX / Owner 88 KAS 主路径
+// ════════════════════════════════════════════════════════════════
+//
 // broker-cancel-refund.js — Owner 02:23 钦定 cancel-refund policy.
 //
 // "用户指示取消订单, 返回自己钱, 无论什么资产, 扣手续费后立即退还."

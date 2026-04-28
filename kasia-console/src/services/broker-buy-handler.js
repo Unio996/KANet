@@ -1,3 +1,13 @@
+// ════════════════════════════════════════════════════════════════
+// HIGH-RISK FILE (Critical 8 per docs/COLLAB-REFORM.md 规 10/13/15)
+// 改前必跑: grep -nE 'T-J[0-9]+-|T-NWT-|Bug-[A-Z][0-9]+' 本 file
+// 改后 commit msg 必含: acknowledged: T-X-X (per surfaced anti-pattern)
+// 关联 docs: ANTI-PATTERNS R37+ / DEVELOPER-GUIDE ch19
+// 关键历史: T-J2-26 idempotency (Bug-B 重复 publish 防御) / Bug-Y wire (买 stable EVM addr)
+//          / Bug-Z11 attack (address change attempt) / R33 b iter (multi-turn state)
+// blast radius: BUY flow finalize / fund_lock / _pendingPreview state authority
+// ════════════════════════════════════════════════════════════════
+//
 // broker-buy-handler.js — Phase 4 A 模式撮合 (T-J2-08, v2.1.1)
 // 用户 DM "买 X KAS" → 选 best open offer → 报价 → 用户 YES → 广播 accept_v1
 // 复用 exchange_offers + exchange-machine, 不自建状态机不自建订单表.
@@ -946,6 +956,11 @@ export async function handleBuyIntent(peerAddr, message) {
                 qty,
                 pay_chain: chainNorm,
                 recv_address: asset === 'KAS' ? null : recvAddr,
+                // Phase D P1 真因 1 (J1-D-1, NWT 8b848a95 catch): BUY KAS 路径 lock user
+                // T1-supplied EVM addr 进 evm_pay_address. broker functionally 不依赖 (broker scan
+                // maker addr for USDT incoming, 不 filter by user-from), 但 R31 lock 提供 attacker
+                // swap detection + user-facing 'addr locked' UX.
+                evm_pay_address: asset === 'KAS' ? recvAddr : null,
                 lifecycle_phase: 'preview_shown',
               });
             } catch (e) { /* lock violation 真**真 EARLIEST 已 handle */ }

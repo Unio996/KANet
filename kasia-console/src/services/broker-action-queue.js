@@ -1,3 +1,13 @@
+// ════════════════════════════════════════════════════════════════
+// HIGH-RISK FILE (Critical 8 per docs/COLLAB-REFORM.md 规 10/13/15)
+// 改前必跑: grep -nE 'T-J[0-9]+-|T-NWT-|Bug-[A-Z][0-9]+' 本 file
+// 改后 commit msg 必含: acknowledged: T-X-X (per surfaced anti-pattern)
+// 关联 docs: ANTI-PATTERNS R38 / DEVELOPER-GUIDE ch19
+// 关键历史: T-NWT-09 (UTXO 双花防御 single-thread pump) / Bug-Z21 (send_kas → transfer)
+//          / Bug-Z23 (amount type number→string coerce) / Layer 2 enqueueVerified Promise
+// blast radius: 整个 broker 对外发链动作 / UTXO concurrency / sendCommandAsync gateway
+// ════════════════════════════════════════════════════════════════
+//
 // broker-action-queue.js — Phase 4 Round 4 broker FIFO queue (T-NWT-09)
 // 治本 R3 揭出的 kasia-wasm Generator greedy UTXO selection 多路并发抢 largest 双花.
 // 一切 broker 对外发链动作 (broadcast accept_v1/paid_v1/delivered + DM + sendKas + publish) 进

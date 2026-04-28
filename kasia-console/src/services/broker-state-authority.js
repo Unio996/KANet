@@ -1,3 +1,12 @@
+// ════════════════════════════════════════════════════════════════
+// HIGH-RISK FILE (Critical 8 per docs/COLLAB-REFORM.md 规 10/13/15)
+// 改前必跑: grep -nE 'T-J[0-9]+-|T-NWT-|Bug-[A-Z][0-9]+' 本 file
+// 改后 commit msg 必含: acknowledged: T-X-X (per surfaced anti-pattern)
+// 关联 docs: ANTI-PATTERNS R33 / R31 (attacker) / Bug-Z24 (system msg)
+// 关键历史: R33 sticky direction lock / R31 detectAddrChangeAttempt / R33 wire 371e4ca62 reintroduce
+// blast radius: 整个 broker conversation state authority + addr change attack 防御
+// ════════════════════════════════════════════════════════════════
+//
 // broker-state-authority.js — R33 conversation state authority (J1 design skeleton, J2 fills implementation)
 //
 // 设计源: ANTI-PATTERNS.md R33 (J1 sediment 3b6911f3) + Owner 12:52 trace 5 bugs root cause analysis (J1 050108d6).
@@ -26,7 +35,9 @@ import { sqlite } from '../db/client.js';
 //   qty                number   amount of 真 transactional asset
 //   pay_chain          string   bnb/eth/polygon/sol/tron — chain user pays on
 //   recv_chain         string   chain user receives on (kaspa for BUY, EVM for SELL)
-//   recv_address       string   user EVM addr (SELL) OR kaspa addr (BUY auto-resolved)
+//   recv_address       string   user EVM addr (SELL OR BUY USDT/USDC) — null for BUY KAS
+//   evm_pay_address    string   BUY KAS user T1-supplied EVM addr (Phase D J1-D-1 lock 兜底
+//                                给 R31 attacker swap detect; broker functionally 不依赖)
 //   conditions         object   user 真 special conditions (e.g. limit_price, refund_timeout)
 //   lifecycle_phase    string   'fields_collection' | 'preview_shown' | 'confirmed' | 'awaiting_payment' |
 //                                'paid' | 'verifying' | 'delivering' | 'completed' | 'cancelled' | 'disputed'
@@ -273,7 +284,10 @@ export async function validateLlmReply(peer, replyText) {
 //   true: user 真**真 try change locked addr (改地址 keyword OR 0x proposal differs from locked)
 //   false: 真**真**真 addr-change 意图
 
-const _ADDR_CHANGE_KEYWORDS = /改地址|换地址|换\s*收款|改\s*收款|change\s*address|new\s*address|swap\s*address|改\s*0x/i;
+// Phase D P1 真因 2 (NWT 8b848a95 Phase C Path 1 T4 真测 catch): regex 漏 '地址改成 0x...' word-order variant.
+// 之前 仅 '改地址' literal substring, 不 cover '地址改成?/换成?/改为/改到' (字符顺序倒). attacker mid-flow swap silent 通过.
+// 加补: 地址(改成?/换成?/改为/改到) + change to 0x + 地址.{0,4}0x 兜底 4-char proximity.
+const _ADDR_CHANGE_KEYWORDS = /改地址|地址(?:改成?|换成?|改为|改到)|换地址|换\s*收款|改\s*收款|change\s*address|new\s*address|swap\s*address|change\s*to\s*0x|改\s*0x|地址.{0,4}0x/i;
 const _ADDR_PROPOSAL_REGEX = /0x[a-zA-Z0-9_-]{6,}/;  // any 0x + 6+ char-ish — catches '0xATTACKER1'/'0x9405legit'/real 40-hex
 
 // R33 b iter9 (J2 81f8f1d8 mid_flow_restart 实证): user 真**真 explicit cancel-and-restart
@@ -288,16 +302,23 @@ export function detectResetIntent(message) {
 
 export function detectAddrChangeAttempt(peer, message) {
   const state = _convoState.get(peer);
-  if (!state || !state.recv_address) return { attempt: false };
+  if (!state) return { attempt: false };
+  // Phase D P1 真因 1 (NWT 8b848a95 Phase C Path 1 T4 真测): BUY KAS 路径 state.recv_address=null
+  // (asset='KAS' user receives KAS 进 kasia, 不需 EVM recv addr) → R31 short-circuit silent. Attacker
+  // mid-flow '改地址 0xDEADBEEF' 通过. 修补: widen check to recv_address || evm_pay_address.
+  // BUY KAS 路径 user T1 supplied EVM addr 真 lock 进 evm_pay_address (broker functionally 不依赖, 但
+  // R31 lock 提供 user-facing UX 'addr already locked, cancel + restart if you want to change'.
+  const lockedAddr = state.recv_address || state.evm_pay_address;
+  if (!lockedAddr) return { attempt: false };
   const msg = String(message || '');
   if (_ADDR_CHANGE_KEYWORDS.test(msg)) {
-    return { attempt: true, reason: 'change_keyword', locked: state.recv_address };
+    return { attempt: true, reason: 'change_keyword', locked: lockedAddr };
   }
   // 真 0x proposal differs from locked addr (case-insensitive)
   const proposalMatches = msg.match(/0x[a-zA-Z0-9_-]{6,}/g) || [];
   for (const proposal of proposalMatches) {
-    if (proposal.toLowerCase() !== state.recv_address.toLowerCase()) {
-      return { attempt: true, reason: 'differing_addr_proposal', locked: state.recv_address, proposed: proposal };
+    if (proposal.toLowerCase() !== lockedAddr.toLowerCase()) {
+      return { attempt: true, reason: 'differing_addr_proposal', locked: lockedAddr, proposed: proposal };
     }
   }
   return { attempt: false };

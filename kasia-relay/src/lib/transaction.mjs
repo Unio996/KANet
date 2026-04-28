@@ -1,3 +1,13 @@
+// ════════════════════════════════════════════════════════════════
+// HIGH-RISK FILE (Critical 8 per docs/COLLAB-REFORM.md 规 10/13/15)
+// 改前必跑: grep -nE 'T-J[0-9]+-|T-NWT-|Bug-[A-Z][0-9]+' 本 file
+// 改后 commit msg 必含: acknowledged: T-X-X (per surfaced anti-pattern)
+// 关联 docs: ANTI-PATTERNS R38 / DEVELOPER-GUIDE ch19
+// 关键历史: Bug-Z23 (kasToSompi amount type number→string boundary coerce, J1 0ac4a571)
+//          / R38 schema typeof spec (commands.mjs 4c503a9bb + relay.mjs 92bddaf3d)
+// blast radius: kasToSompi boundary / sendKaspa / 跨 process type contract
+// ════════════════════════════════════════════════════════════════
+//
 // Transaction building and submission via kaspa-wasm Generator + RPC
 import * as kaspa from 'kaspa-wasm';
 import { getApi } from './api.mjs';
@@ -30,12 +40,28 @@ let _sendLock = Promise.resolve();
 
 // Track recently spent UTXOs — RPC getUtxosByAddresses only returns confirmed UTXOs,
 // so a just-submitted TX's inputs still appear as "available". This set filters them out.
-// Entries auto-expire after 30s (should be mined by then at 10 BPS).
+//
+// Phase D J1-D-4 (NWT 8b848a95 Phase C catch + J2 b10692dd RCA): expiry 30s → 60s.
+// 30s 真撞 Kaspa finality race window — mempool eviction 真等 tx 进 accepted chain
+// (~1s block + ~10s confirmation buffer + occasional reorg). 多 broadcast in <30s span
+// (e.g. 4 kanet-test broadcasts in 6s, R40 process restart 后 stale mempool tx) →
+// 30s 提前 expire → reuse → RPC reject 'already spent in mempool'. 60s 给 finality
+// 充分 buffer + cover restart race.
 const _pendingSpentUtxos = new Map(); // key = "txid:index" → expiry timestamp
+const _PENDING_UTXO_TTL_MS = 60_000;  // J1-D-4 extended from 30000
 function markUtxoSpent(entry) {
   const key = `${entry.entry?.transactionId || entry.transactionId || ''}:${entry.entry?.index ?? entry.index ?? 0}`;
   if (key === ':0') return; // safety: no valid outpoint
-  _pendingSpentUtxos.set(key, Date.now() + 30000);
+  _pendingSpentUtxos.set(key, Date.now() + _PENDING_UTXO_TTL_MS);
+}
+
+// J1-D-4: explicit mempool-reject mark — RPC reject 'already spent in mempool' 时 caller 真
+// mark UTXO as pending (reduce RPC's 'reject before mark' race window). 跟 filterPendingUtxos
+// 配合, 真 process restart 后 mempool stale tx 真 immediate dropout.
+export function markUtxoSpentByOutpoint(txid, index) {
+  if (!txid) return;
+  const key = `${txid}:${index ?? 0}`;
+  _pendingSpentUtxos.set(key, Date.now() + _PENDING_UTXO_TTL_MS);
 }
 function filterPendingUtxos(entries) {
   const now = Date.now();
