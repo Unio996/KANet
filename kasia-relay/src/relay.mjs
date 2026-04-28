@@ -315,15 +315,19 @@ if (RELAY_MODE === "rpc") {
 if (process.send) {
   const { initiateHandshake, publishCard } = await import('./chain.mjs');
   // R-NWT-2026-04-28 Layer 5: validate cmd.type against shared enum (Z21 silent-fall-through fix).
-  const { COMMAND_TYPES, isValidCommandType } = await import('./lib/commands.mjs');
+  // T-J1-2026-04-28 R38 step 2: 升级到 validateCommandPayload (typeof spec + graceful coerce, Z23 sediment).
+  // 之前 isValidCommandType 只 check type 名 (cover Z21); validateCommandPayload 加 typeof check
+  // (cover Z23 broker 传 number 给 amount 触 BigInt crash). 双层防御 + kasToSompi boundary coerce.
+  const { COMMAND_TYPES, validateCommandPayload } = await import('./lib/commands.mjs');
 
   process.on('message', async (cmd) => {
     try {
-      // Reject unknown command types loudly instead of silent fall-through.
-      if (!isValidCommandType(cmd.type)) {
-        log(`UNKNOWN COMMAND TYPE: ${cmd.type} (valid: ${Object.values(COMMAND_TYPES).join(', ')})`);
+      // Reject invalid commands loudly (unknown type / missing required field / typeof mismatch).
+      const validateResult = validateCommandPayload(cmd);
+      if (!validateResult.valid) {
+        log(`INVALID COMMAND: ${validateResult.error} (valid types: ${Object.values(COMMAND_TYPES).join(', ')})`);
         if (cmd.requestId && process.send) {
-          process.send({ requestId: cmd.requestId, result: { ok: false, error: `unknown command type: ${cmd.type}` } });
+          process.send({ requestId: cmd.requestId, result: { ok: false, error: `invalid command: ${validateResult.error}` } });
         }
         return;
       }
