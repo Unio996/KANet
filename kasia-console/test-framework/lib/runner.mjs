@@ -460,6 +460,15 @@ const assertions = {
       : { pass: false, expected: { not_contains: list }, actual: reply, msg: `reply must NOT contain: ${found.join(', ')}` };
   },
 
+  // R-NWT-2026-04-28 7a-2 patch: reply_matches — regex test on reply (J1 7a-1 SUPPORTED list mention 但 runner 没 impl, fuzz probes 撞).
+  reply_matches(step_result, expected, ctx) {
+    const reply = String(step_result.reply || '');
+    const re = expected instanceof RegExp ? expected : new RegExp(String(expected), 'i');
+    return re.test(reply)
+      ? { pass: true, expected: re.source, actual: reply.slice(0, 80) }
+      : { pass: false, expected: re.source, actual: reply.slice(0, 80), msg: `reply does not match /${re.source}/` };
+  },
+
   reply_contains_one_of(step_result, list, ctx) {
     const reply = String(step_result.reply || '');
     const hit = list.find(s => reply.includes(s));
