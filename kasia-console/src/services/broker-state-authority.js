@@ -251,6 +251,16 @@ export async function validateLlmReply(peer, replyText) {
 const _ADDR_CHANGE_KEYWORDS = /改地址|换地址|换\s*收款|改\s*收款|change\s*address|new\s*address|swap\s*address|改\s*0x/i;
 const _ADDR_PROPOSAL_REGEX = /0x[a-zA-Z0-9_-]{6,}/;  // any 0x + 6+ char-ish — catches '0xATTACKER1'/'0x9405legit'/real 40-hex
 
+// R33 b iter9 (J2 81f8f1d8 mid_flow_restart 实证): user 真**真 explicit cancel-and-restart
+// (e.g. '不要了 重新下单 卖 X' OR 'cancel and restart' OR '取消重新') 真**真**真 reset state 真**真 fresh
+// fields 处理. cancelWordsLocal 真**真 freshHasAny=false 时 fire (handleLlmDialog L645), 真**真
+// 'cancel + new declaration' 真**真**真 cover. 真 R33 sticky direction lock 真 attack-rejection
+// 误伤 真**legitimate restart**.
+const _RESET_INTENT_KEYWORDS = /不要了|重新下单|取消重新|cancel\s*and\s*restart|restart\s*order|cancel\s*restart/i;
+export function detectResetIntent(message) {
+  return _RESET_INTENT_KEYWORDS.test(String(message || ''));
+}
+
 export function detectAddrChangeAttempt(peer, message) {
   const state = _convoState.get(peer);
   if (!state || !state.recv_address) return { attempt: false };

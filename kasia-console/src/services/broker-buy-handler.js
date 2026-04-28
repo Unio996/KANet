@@ -722,6 +722,18 @@ async function _qDm(kind, peerAddr, message) {
 export async function handleBuyIntent(peerAddr, message) {
   const trimmed = (message || '').trim();
 
+  // R33 b iter9 (J2 81f8f1d8 mid_flow_restart 实证): user explicit cancel-and-restart 真**真 reset state.
+  // 真**真 detectResetIntent 真**真**真**真 fresh fields (含 new direction) 真**真**真 R33 sticky direction
+  // lock 真 attack-rejection 误伤 legitimate restart.
+  if (trimmed) {
+    try {
+      const { detectResetIntent, resetConvoState } = await import('./broker-state-authority.js');
+      if (detectResetIntent(trimmed)) {
+        resetConvoState(peerAddr, 'user_restart');
+      }
+    } catch { /* import 兜底 */ }
+  }
+
   // R33 b iter5b (NWT 90b29e39 Bug-Z13 trace 实证扩): EARLIEST setConvoStateLock 加固.
   // iter5 加在 handleLlmDialog L580 处, 但 NWT trace 实证 T2 reply EMPTY 231ms 不**真**真**LLM,
   // 真 deterministic path (handleBuyIntent 路径) 中**真**真**早 return** 没经 handleLlmDialog.
