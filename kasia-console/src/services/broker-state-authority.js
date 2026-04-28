@@ -248,6 +248,18 @@ export function _restoreSnapshot(snap) {
   for (const [k, v] of Object.entries(snap)) _convoState.set(k, v);
 }
 
+// R-NWT-2026-04-28 (d) lifecycle infra (J2 d6022b59 propose): force state.expires_at backdate
+// for state-expire-boundary case testing. test-only export, env-gated by KANET_TEST_MODE in API.
+export function _testForceExpire(peer) {
+  const state = _convoState.get(peer);
+  if (state) {
+    state.expires_at = Date.now() - 1000;  // 1s past
+    _convoState.set(peer, state);
+    return { ok: true, peer, expires_at: state.expires_at };
+  }
+  return { ok: false, peer, reason: 'no state for peer' };
+}
+
 // ── Lint hook for R33 phase 2 strict mode ────────────────────────
 // J1 lint-kanet checkR33 phase 2 真 strict 真 detect handler files import this module.
 // 真 import { getConvoState } from './broker-state-authority.js' 真 grep-able.

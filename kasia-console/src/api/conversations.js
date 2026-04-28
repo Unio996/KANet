@@ -126,6 +126,25 @@ export async function registerConversationRoutes(fastify) {
       }
       return { cleared: peers.length, peers: peers.map(p => p.slice(-12)) };
     });
+
+    // R-NWT-2026-04-28 (d) lifecycle infra (J2 d6022b59 propose): seed broker _pendingAccepts
+    // for paid-cannot-cancel probe. test-only, env-gated.
+    fastify.post('/api/test/seed_pending_accept', async (request, reply) => {
+      const { peer, data } = request.body || {};
+      if (!peer || !data) return reply.code(400).send({ error: 'peer + data required' });
+      const { _testSetPendingAccept } = await import('../services/broker-buy-handler.js');
+      _testSetPendingAccept(peer, { ...data, expires_at: data.expires_at || (Date.now() + 30 * 60 * 1000) });
+      return { seeded: true, peer: peer.slice(-12) };
+    });
+
+    // R-NWT-2026-04-28 (d) lifecycle infra: force state.expires_at backdate for expire-boundary probe.
+    fastify.post('/api/test/force_state_expire', async (request, reply) => {
+      const { peer } = request.body || {};
+      if (!peer) return reply.code(400).send({ error: 'peer required' });
+      const { _testForceExpire } = await import('../services/broker-state-authority.js');
+      const result = _testForceExpire(peer);
+      return result;
+    });
   }
 
   // R34 (J1 R26 territory, P1 race anti-spam): in-process dedup cache 防 console-direct 入口

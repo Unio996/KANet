@@ -104,6 +104,33 @@ const actions = {
   },
 
   /**
+   * R-NWT-2026-04-28 (d) lifecycle infra (J2 d6022b59 propose): seed broker _pendingAccepts.
+   * step: { action: 'seed_pending_accept', peer, data: {offer_id, qty, quoted_usdt, pay_chain, ...} }
+   * → POST /api/test/seed_pending_accept (env-gated KANET_TEST_MODE=1)
+   */
+  async seed_pending_accept(step, ctx) {
+    const res = await fetch(`${CONSOLE_URL}/api/test/seed_pending_accept`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ peer: step.peer, data: step.data || {} }),
+    });
+    return await res.json();
+  },
+
+  /**
+   * R-NWT-2026-04-28 (d) lifecycle infra: force broker ConvoState expire (set expires_at to past).
+   * step: { action: 'mock_state_ttl_advance', peer }
+   * → POST /api/test/force_state_expire (env-gated KANET_TEST_MODE=1)
+   * 用于 state-expire-boundary probe — 跳过真 31min wait.
+   */
+  async mock_state_ttl_advance(step, ctx) {
+    const res = await fetch(`${CONSOLE_URL}/api/test/force_state_expire`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ peer: step.peer }),
+    });
+    return await res.json();
+  },
+
+  /**
    * R-NWT-2026-04-28 (d) B-phase 1: parallel — concurrent actions for race-condition tests.
    * step: { action: 'parallel', actions: [{ action: 'send_message', from_peer, ... }, ...] }
    * → returns { results: [{status, action, peer, reply, latency_ms, error?}, ...], total_latency_ms }
