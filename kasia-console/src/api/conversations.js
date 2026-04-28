@@ -128,11 +128,39 @@ export async function registerConversationRoutes(fastify) {
     });
   }
 
+  // R34 (J1 R26 territory, P1 race anti-spam): in-process dedup cache 防 console-direct 入口
+  // duplicate spam. Production user typical 走 relay → seen.json txId dedup. console-direct caller
+  // (test framework, direct API call, broken Mind retry) bypass relay 真**真**真 dedup hole.
+  // 5s 窗 exact-match → silent skip + skip_reason='recent_duplicate'. matches probe race-rapid-retry-anti-spam.
+  // Window choice: 5s 跟 broker-action-queue R4 anti-spam 同 (5s rapid duplicate); production user
+  // legitimate retry (network hiccup) typically > 5s 后 retry, 不 false-block.
+  const _inboundDedup = new Map();  // peer → { msg, ts_ms }
+  const INBOUND_DEDUP_WINDOW_MS = 5000;
+  function _checkInboundDedup(peer, msg) {
+    const cached = _inboundDedup.get(peer);
+    if (cached && cached.msg === msg && (Date.now() - cached.ts_ms) < INBOUND_DEDUP_WINDOW_MS) {
+      return { dup: true, age_ms: Date.now() - cached.ts_ms };
+    }
+    _inboundDedup.set(peer, { msg, ts_ms: Date.now() });
+    return { dup: false };
+  }
+
   // Agent Mind reply — unified entry point for relay and external callers.
   // All AI replies go through mind-manager. No adapter fallback.
   fastify.post('/api/agent/reply', async (request, reply) => {
     const { relayNodeId, peer, message, txId, channel } = request.body || {};
     if (!peer || !message) return reply.code(400).send({ error: 'peer and message required' });
+
+    // R34 P1 race anti-spam (J1 territory, NWT 7a-2 ε surveillance dataset 抓的 product gap):
+    // 5s 内同 peer 同 message → silent skip. /api/agent/reply 入口 hook, 跟 broker-action-queue R4 同 5s 窗.
+    // 不 channel-scoped (channel msgs 真**真**真**真 dedup, channel 可 legitimate replay).
+    if (!channel) {
+      const dedup = _checkInboundDedup(peer, message);
+      if (dedup.dup) {
+        console.warn(`[api/agent/reply] R34 recent_duplicate ${peer.slice(-12)} age=${dedup.age_ms}ms → skip`);
+        return reply.send({ reply: null, skip_reason: 'recent_duplicate' });
+      }
+    }
 
     const resolved = resolveRelayNodeId(relayNodeId);
 
