@@ -253,9 +253,12 @@ export async function registerExchangeRoutes(fastify) {
     }
 
     // Broadcast FIRST — chain is the source of truth. No chain = no offer.
+    // T-J2-2026-04-28 Phase D P0 fix: Trader-B mempool UTXO contention reject "already spent" —
+    // 2 attempts × 3s (~6s) too short. Increase to 5 × exp backoff (5/10/15/20s ≈ 50s) to clear mempool.
+    // Real fix is relay UTXO selector mempool-aware (Layer 2, R39 SOP follow-up case J1 territory).
     let broadcastTx = null;
     const { sendCommandAsync } = await import('../services/relay-manager.js');
-    const MAX_BROADCAST_ATTEMPTS = 2;
+    const MAX_BROADCAST_ATTEMPTS = 5;
     for (let attempt = 1; attempt <= MAX_BROADCAST_ATTEMPTS; attempt++) {
       try {
         const result = await sendCommandAsync(relayNodeId, {
@@ -267,7 +270,7 @@ export async function registerExchangeRoutes(fastify) {
         if (broadcastTx) break;
       } catch (err) {
         console.log(`[exchange] Broadcast attempt ${attempt}/${MAX_BROADCAST_ATTEMPTS} failed: ${err.message}`);
-        if (attempt < MAX_BROADCAST_ATTEMPTS) await new Promise(r => setTimeout(r, 3000));
+        if (attempt < MAX_BROADCAST_ATTEMPTS) await new Promise(r => setTimeout(r, attempt * 5000));
       }
     }
 
