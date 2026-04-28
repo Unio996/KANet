@@ -2354,5 +2354,58 @@ export function runMigrations() {
     console.log('[migrate] v77: idx_offers_open_expires partial index created (expire watcher acceleration).');
   }
 
+  // v79 (Phase E v2 召会 — Owner 22:00+22:xx 钦定 broker 状态机 + DB 残废重设计):
+  // broker_conversations table — per-peer broker 对话 state, 替 broker-state-authority.js _convoState
+  // in-memory Map. 真 cross-restart + cross-process state retain. 三方 (J1+J2+NWT) converge:
+  //   - 议题 1 字段: NWT base + J2 加补 (intent_history JSON, last_broker_reply_phase, expires_at,
+  //     conditions JSON 单 col) + J1 加补 (last_state_source audit trail)
+  //   - 议题 2 时机: every-turn UPSERT (atomic transaction, 不 phase-advance-only)
+  //   - 议题 4 R31/R33 SQL guard: post-set IMMUTABLE 在 application UPDATE WHERE 表达, 不 column CHECK
+  //   - PRIMARY KEY single peer_address (J1 push back composite — single-active-state per peer)
+  // 详见 dev-coord J1 #31 / NWT 734fb457 / J2 dcf9de48.
+  {
+    const hasTable = sqlite.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='broker_conversations'"
+    ).get();
+    if (!hasTable) {
+      sqlite.exec(`
+        CREATE TABLE broker_conversations (
+          peer_address           TEXT    NOT NULL PRIMARY KEY,
+          direction              TEXT    CHECK (direction IS NULL OR direction IN ('buy', 'sell')),
+          give_asset             TEXT,
+          want_asset             TEXT,
+          qty                    REAL    CHECK (qty IS NULL OR qty > 0),
+          pay_chain              TEXT,
+          recv_chain             TEXT,
+          recv_address           TEXT,
+          evm_pay_address        TEXT,
+          conditions             TEXT,
+          intent_history         TEXT,
+          lifecycle_phase        TEXT    NOT NULL DEFAULT 'fields_collection'
+                                 CHECK (lifecycle_phase IN (
+                                   'fields_collection', 'preview_shown', 'confirmed',
+                                   'awaiting_payment', 'paid', 'verifying', 'delivering',
+                                   'completed', 'cancelled', 'disputed', 'expired'
+                                 )),
+          last_broker_reply_phase TEXT   CHECK (last_broker_reply_phase IS NULL OR last_broker_reply_phase IN (
+                                   'preview', 'finalize', 'cancel', 'payment_pending', 'failed', 'r33_recover'
+                                 )),
+          last_state_source       TEXT   CHECK (last_state_source IS NULL OR last_state_source IN (
+                                   'det_one_shot', 'det_fallback', 'llm_tool', 'extract_recent', 'r33_recover', 'system_reset'
+                                 )),
+          started_at             INTEGER NOT NULL,
+          updated_at             INTEGER NOT NULL,
+          expires_at             INTEGER,
+          locked                 INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX idx_bc_phase_expires
+          ON broker_conversations(lifecycle_phase, expires_at);
+        CREATE INDEX idx_bc_updated
+          ON broker_conversations(updated_at);
+      `);
+      console.log('[migrate] v79: broker_conversations table created (per-peer broker state, J1 #31 ship).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
