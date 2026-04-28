@@ -372,9 +372,9 @@ export async function handleSellIntent(peerAddr, message) {
 
   const netKas = qty - FEE_KAS;
   const estUsdt = (netKas * MID_PRICE_HINT).toFixed(4);
-  _qDm(peerAddr,
-    `📋 卖 ${qty} KAS 申请收到.\n` +
+  // R33 b iter11 (J2 ea701ee1 sell-handler 同 ship): sync return ack text, drop _qDm.
+  // 跟 broker-buy-handler det-preview iter11 + PRICE_QUERY iter1 v2 完全 align.
+  return `📋 卖 ${qty} KAS 申请收到.\n` +
     `预估 ${netKas} KAS net (扣 ${FEE_KAS} KAS broker fee) → ~${estUsdt} USDT (~${MID_PRICE_HINT} USDT/KAS, 真价由 broker 挂单时锁定).\n\n` +
-    `请回你的 BSC 钱包地址 (0x... 42 位) 接收 USDT. 30min 内回. 或回 NO 取消.`);
-  return '';
+    `请回你的 BSC 钱包地址 (0x... 42 位) 接收 USDT. 30min 内回. 或回 NO 取消.`;
 }
