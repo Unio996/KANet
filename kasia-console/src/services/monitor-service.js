@@ -66,13 +66,15 @@ function getChannels() {
 
 function fetchNewMessages(channel, afterTs, limit) {
   try {
+    // R-NWT-2026-04-28 hotfix: 排除 monitor:system 自己的 broadcast 防 echo loop.
+    // J2 d4776743 实证: monitor broadcast back 进 dev-coord, next tick 又 match 自己, infinite amplification.
     let query;
     let params;
     if (afterTs) {
-      query = `SELECT * FROM broadcast_messages WHERE channel_name = ? AND created_at > ? ORDER BY created_at ASC LIMIT ?`;
+      query = `SELECT * FROM broadcast_messages WHERE channel_name = ? AND created_at > ? AND sender_address != 'monitor:system' ORDER BY created_at ASC LIMIT ?`;
       params = [channel, afterTs, limit];
     } else {
-      query = `SELECT * FROM broadcast_messages WHERE channel_name = ? ORDER BY created_at DESC LIMIT ?`;
+      query = `SELECT * FROM broadcast_messages WHERE channel_name = ? AND sender_address != 'monitor:system' ORDER BY created_at DESC LIMIT ?`;
       params = [channel, limit];
       query = `SELECT * FROM (${query}) ORDER BY created_at ASC`;
     }
