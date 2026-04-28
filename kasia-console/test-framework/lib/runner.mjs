@@ -59,7 +59,7 @@ const actions = {
     let result = await _sendOnce();
     // R-NWT-2026-04-28 (d) B-phase: parallel mode 设 step._no_retry, retry 会 mask race timing.
     if (!step._no_retry && TRANSIENT_PATTERNS.some(p => result.reply.includes(p))) {
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise(r => setTimeout(r, 6000));  // 6s > R34 5s dedup window (J1 eb76c857) — retry 不撞 own dedup
       const retried = await _sendOnce();
       retried.retried = true;
       retried.first_attempt_reply = result.reply;
@@ -297,7 +297,7 @@ const actions = {
     let pr = await _personaSendOnce();
     let retried = false;
     if (!step._no_retry && TRANSIENT_PATTERNS.some(p => pr.reply.includes(p))) {
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise(r => setTimeout(r, 6000));  // 6s > R34 5s dedup window (J1 eb76c857) — retry 不撞 own dedup
       const r2 = await _personaSendOnce();
       retried = true;
       const firstReply = pr.reply;
