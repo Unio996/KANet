@@ -268,6 +268,13 @@ export async function registerExchangeRoutes(fastify) {
         });
         broadcastTx = result?.txId || null;
         if (broadcastTx) break;
+        // T-J2-2026-04-28 Phase D P0 Layer 1 v2 (NWT f8e7221a catch): sendCommandAsync 'already spent' 走 result.error
+        // path (no throw), if 不 trigger break, catch 不 fire — 没 sleep 5 attempts 立即跑 ~400ms 全 fail.
+        // 修: sleep also on 'no txId without throw' branch.
+        if (attempt < MAX_BROADCAST_ATTEMPTS) {
+          console.log(`[exchange] Broadcast attempt ${attempt}/${MAX_BROADCAST_ATTEMPTS} returned no txId (mempool conflict?)`);
+          await new Promise(r => setTimeout(r, attempt * 5000));
+        }
       } catch (err) {
         console.log(`[exchange] Broadcast attempt ${attempt}/${MAX_BROADCAST_ATTEMPTS} failed: ${err.message}`);
         if (attempt < MAX_BROADCAST_ATTEMPTS) await new Promise(r => setTimeout(r, attempt * 5000));
