@@ -19,6 +19,7 @@ import {
   resetConvoState,
   llmSystemPromptStateLock,
   validateLlmReply,
+  getConvoState,
 } from './broker-state-authority.js';
 
 const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
@@ -714,7 +715,27 @@ export async function handleLlmDialog(peer, message) {
   // extract current msg → merge prev state → 字段齐调 preview tool / 缺则反问.
   const fresh = _extractFieldsFromMsg(message);
   const prev = _getPendingFields(peer);
-  const merged = _mergeFields(prev, fresh);
+  let merged = _mergeFields(prev, fresh);
+
+  // T-J2-2026-04-29 Phase E v3 量小修法 (Owner 钦定 broker 不忘 #3 + baseline T3 fail dig):
+  // _pendingFields (in-memory Map per peer) 不 sync state authority (D-3 b9efa9d91 set state.qty
+  // via LLM tool path). T3 'Bsc, 0x...' merged.qty=null → _askMissingField '你想卖什么 多少'.
+  // 修法: merge state authority fields into merged before _askMissingField fallback. 跨 LLM tool
+  // path 跟 deterministic path state retention bridge. forward-compat task B (DB-backed state).
+  try {
+    const stateRow = getConvoState(peer);
+    if (stateRow) {
+      if (!merged.direction && stateRow.direction) merged = { ...merged, direction: stateRow.direction };
+      if (merged.qty == null && stateRow.qty != null) merged = { ...merged, qty: stateRow.qty };
+      if (!merged.give_asset && stateRow.give_asset) merged = { ...merged, give_asset: stateRow.give_asset };
+      if (!merged.chain && stateRow.pay_chain) merged = { ...merged, chain: stateRow.pay_chain };
+      if (!merged.address) {
+        const stateAddr = stateRow.recv_address || stateRow.evm_pay_address;
+        if (stateAddr) merged = { ...merged, address: stateAddr };
+      }
+    }
+  } catch (e) { console.warn(`[broker-llm Phase E v3 量小修法] state merge err: ${e.message}`); }
+
   console.log(`[broker-llm DIAG] peer=${peer?.slice(-12)} msg.chars=${msgRaw.length} msg.utf8bytes=${byteLen} codes=[${charCodes}] msg="${msgRaw.slice(0,40)}" history.len=${history.length} fresh=${JSON.stringify(fresh)} prev=${JSON.stringify(prev)} merged=${JSON.stringify(merged)}`);
 
   // R33 b iter9 (J2 81f8f1d8 mid_flow_restart): user explicit cancel-and-restart 真**真 reset state.
