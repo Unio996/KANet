@@ -62,15 +62,36 @@ async function pollReply(fromAddr, toAddr, sinceIso, expectedSourceTxid) {
   throw new Error(`pollReply timeout ${POLL_TIMEOUT_MS}ms (no inbound from ${fromAddr.slice(-12)} since ${sinceIso})`);
 }
 
-export async function realP2PTurn({ fromRelayId, fromAddr, toAddr, message, label, since }) {
+export async function realP2PTurn({ fromRelayId, fromAddr, toAddr, message, label, since, pollTimeoutMs }) {
   const sendStart = since || new Date().toISOString();
   const send = await sendChainDM(fromRelayId, toAddr, message);
-  const replies = await pollReply(toAddr, fromAddr, sendStart, send.txId);
+  // pollTimeoutMs override per-call (framework runner case-level), else env POLL_TIMEOUT_MS, else default
+  const effectiveTimeout = pollTimeoutMs || POLL_TIMEOUT_MS;
+  const replies = await pollReplyWithTimeout(toAddr, fromAddr, sendStart, send.txId, effectiveTimeout);
   return {
     label: label || 'turn',
     sent: { txId: send.txId, fee: send.fee, ts: send.ts, message },
     replies: replies.map(r => ({ txId: r.source_txid, ts: r.created_at, content: r.content })),
   };
+}
+
+async function pollReplyWithTimeout(fromAddr, toAddr, sinceIso, expectedSourceTxid, timeoutMs) {
+  const db = new Database(DB_PATH, { readonly: true });
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const rows = db.prepare(`
+      SELECT m.id, m.created_at, m.source_txid, substr(m.content_text, 1, 600) as content
+      FROM messages m
+      LEFT JOIN identities si ON si.id = m.sender_identity_id
+      LEFT JOIN identities ri ON ri.id = m.receiver_identity_id
+      WHERE m.created_at > ? AND m.direction = 'inbound' AND si.address = ? AND ri.address = ?
+      ORDER BY m.created_at DESC LIMIT 10
+    `).all(sinceIso, fromAddr, toAddr);
+    if (rows.length) { db.close(); return rows.reverse(); }
+    await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+  }
+  db.close();
+  throw new Error(`pollReply timeout ${timeoutMs}ms (no inbound from ${fromAddr.slice(-12)} since ${sinceIso})`);
 }
 
 // CLI entry — Windows-safe URL compare via pathToFileURL

@@ -13,7 +13,8 @@ import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { relayId as resolveRelayId, relayAddr as resolveRelayAddr } from './peers.mjs';
 
 const CONSOLE_URL = process.env.KANET_CONSOLE_URL || 'http://127.0.0.1:3100';
 const DB_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../data/console.db');
@@ -28,11 +29,22 @@ const LLM_IO_LOG = path.join(path.dirname(fileURLToPath(import.meta.url)), '../.
 
 const actions = {
   /**
-   * Send DM to broker via /api/agent/reply (synchronous reply path).
-   * step: { action: 'send_message', from_peer, to_relay_id, message }
-   * → returns { reply, latency_ms, raw }
+   * Send DM to broker via /api/agent/reply (synchronous reply path) — default mode.
+   * step: { action: 'send_message', from_peer, to_relay_id, message, mode? }
+   *
+   * Phase D follow-up (J1 #22 propose, NWT 41757892 14:36 钦定 'mode (ii) 真 P2P'):
+   * - step.mode = 'sync' (default) → /api/agent/reply sync HTTP, broker logic regression
+   * - step.mode = 'real_p2p' → real Kasia chain DM via /api/relay/<from_peer>/send-command
+   *   + poll messages table for inbound from to_relay_id. transport layer + scout queue +
+   *   broker _qDm + chain encrypted DM round-trip — covers Phase D P2 type bugs sync
+   *   HTTP cron never catches.
+   *
+   * → returns { reply, latency_ms, raw, mode, sent_tx?, reply_txs? }
    */
   async send_message(step, ctx) {
+    if (step.mode === 'real_p2p') {
+      return await _sendRealP2P(step, ctx);
+    }
     // R-NWT-2026-04-27 (d) batch retry-on-transient: kasia-rpc backpressure (Relay syncing /
     // aggregation insufficient) 在 batch run 18+ case 连续 publish 时偶发. 失败 reply 含特征字串 →
     // sleep 2s + retry 1 次. 真业务 bug retry 仍 FAIL, 不掩盖. 三方 ack: J1 6e9b6bd 钦定 (b).
@@ -54,6 +66,7 @@ const actions = {
         skip_reason: data.skip_reason || null,
         latency_ms: Date.now() - t0,
         raw: data,
+        mode: 'sync',
       };
     };
     let result = await _sendOnce();
@@ -66,6 +79,24 @@ const actions = {
       result = retried;
     }
     return result;
+  },
+
+  /**
+   * Phase D follow-up (J1 mode (ii) integration): real Kasia chain DM send + poll inbound.
+   * step: { action: 'real_p2p_send', from_relay_id, from_addr, to_addr, message,
+   *         poll_timeout_ms? (default 30000) }
+   * → returns { sent: { txId, fee, ts, message }, replies: [{ txId, ts, content }],
+   *             latency_ms, mode: 'real_p2p' }
+   *
+   * Wraps _phasec_real_p2p_driver.realP2PTurn helper; cases can also use 'send_message'
+   * with mode='real_p2p' for parity with sync HTTP path (auto-resolves from_peer alias to
+   * relay id + address via lib/peers.mjs).
+   *
+   * ⚠ Real chain DM cost ~0.0001 KAS gas per send. 仅 critical case (e.g. transport layer
+   * verify) 用 real_p2p, regression suite stay on sync mode for cost+speed.
+   */
+  async real_p2p_send(step, ctx) {
+    return await _sendRealP2P(step, ctx);
   },
 
   /**
@@ -465,6 +496,50 @@ const actions = {
     return { row: null, found: false, polled_for_ms: Date.now() - t0 };
   },
 };
+
+/**
+ * Phase D mode (ii) helper — real Kasia P2P chain DM send + poll inbound reply.
+ *
+ * Wraps scripts/_phasec_real_p2p_driver.mjs realP2PTurn for runner integration.
+ * Supports two call shapes:
+ *   { mode: 'real_p2p', from_peer: 'martin', to_relay_id: 'trader-b', message } — alias resolves
+ *   { from_relay_id, from_addr, to_addr, message } — explicit (real_p2p_send action)
+ *
+ * Returns shape compatible with sync send_message ({reply, latency_ms}) plus
+ * mode='real_p2p' + chain TX hash list for trace.
+ */
+async function _sendRealP2P(step, ctx) {
+  const t0 = Date.now();
+  // Resolve aliases (lib/peers.mjs) — accept alias OR raw kaspa: addr OR raw uuid
+  const fromRelayId = step.from_relay_id || resolveRelayId(step.from_peer);
+  const fromAddr = step.from_addr || (step.from_peer && (step.from_peer.startsWith('kaspa:') ? step.from_peer : resolveRelayAddr(step.from_peer)));
+  const toAddr = step.to_addr || (step.to_relay_id && (step.to_relay_id.startsWith('kaspa:') ? step.to_relay_id : resolveRelayAddr(step.to_relay_id)));
+  if (!fromRelayId || !fromAddr || !toAddr) {
+    throw new Error(`real_p2p: cannot resolve from/to (from_peer=${step.from_peer} from_relay_id=${step.from_relay_id} to_relay_id=${step.to_relay_id})`);
+  }
+  // Lazy import driver (avoid require/import cycle in test setups that don't need it).
+  // Windows ESM dynamic import needs file:// URL; pathToFileURL handles platform paths.
+  const driverPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../scripts/_phasec_real_p2p_driver.mjs');
+  const { realP2PTurn } = await import(pathToFileURL(driverPath).href);
+  const turn = await realP2PTurn({
+    fromRelayId, fromAddr, toAddr,
+    message: step.message,
+    label: step.label || 'real_p2p',
+    pollTimeoutMs: step.poll_timeout_ms,
+  });
+  const latency_ms = Date.now() - t0;
+  // First reply content surfaces as `reply` for assertion compatibility (reply_contains etc).
+  const firstReply = turn.replies[0]?.content || '';
+  return {
+    reply: firstReply,
+    skip_reason: null,
+    latency_ms,
+    raw: turn,
+    mode: 'real_p2p',
+    sent_tx: turn.sent.txId,
+    reply_txs: turn.replies.map(r => r.txId),
+  };
+}
 
 // ── assertion functions (generic) ────────────────────────────────
 
