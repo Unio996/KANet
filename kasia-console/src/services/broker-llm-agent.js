@@ -342,7 +342,8 @@ async function _executeToolImpl(peer, name, args) {
       // deterministic finalize (LLM-driven preview 真不 set _quotes, 真 LLM 'YES' 真 unreliable hallucinate).
       const { buyPreview, _setPendingPreview } = await import('./broker-buy-handler.js');
       const r = await buyPreview({ user_kasia: peer, qty, pay_chain: chain, give_asset, receive_address: address || null, limit_price, refund_timeout_min });
-      if (r.ok) _setPendingPreview(peer, { qty, pay_chain: chain, give_asset, receive_address: address || null });
+      // T-J1-2026-04-28 Layer 7: tag direction='buy' so handleLlmDialog confirm shortcut routes correctly.
+      if (r.ok) _setPendingPreview(peer, { direction: 'buy', qty, pay_chain: chain, give_asset, receive_address: address || null });
       return r;
     }
     if (direction === 'sell') {
@@ -360,6 +361,12 @@ async function _executeToolImpl(peer, name, args) {
       if (!r.ok) {
         return { ok: true, preview_text: r.message || `抱歉, 卖单处理失败 (${r.error || 'unknown'}). 请重发或回 NO 取消.` };
       }
+      // T-J1-2026-04-28 Layer 7: SELL preview 也 set _pendingPreview tagged 'sell' — 治 LLM tool path
+      // 设了 preview 但 _pendingFields 没填 → user 'YES' fall LLM hallucinate. handleLlmDialog pp shortcut hit.
+      try {
+        const { _setPendingPreview } = await import('./broker-buy-handler.js');
+        _setPendingPreview(peer, { direction: 'sell', qty, pay_chain: chain, give_asset, receive_address: address });
+      } catch (e) { console.warn(`[broker-llm Layer7] sell pendingPreview set fail: ${e.message}`); }
       return r;
     }
     return { ok: true, preview_text: `抱歉, 未知方向 "${direction}". 请回 "买 X KAS" 或 "卖 X KAS".` };
@@ -679,6 +686,27 @@ export async function handleLlmDialog(peer, message) {
   const CONFIRM_WORDS_LOCAL = ['YES', 'yes', 'y', 'OK', 'ok', '确认', '好', '对', '是', '行', 'ya', 'sí', 'si'];
   const cancelWordsLocal = ['NO', 'no', 'n', '取消', '不要', '算了', 'cancel'];
   const trimmedMsg = String(message || '').trim();
+  // T-J1-2026-04-28 Layer 7 (phase 3): _pendingPreview CONFIRM priority over fields_collection / LLM hallucinate.
+  // 治 SELL via LLM tool path: preview_order set _pendingPreview but _pendingFields 没填 →
+  // L682 (后) shortcut 跳掉 → fall LLM 可能 hallucinate 假 ack. fix: pp 真存在 + 纯 CONFIRM → 直 finalize_order tool.
+  if (CONFIRM_WORDS_LOCAL.includes(trimmedMsg)) {
+    const { _getPendingPreview, _clearPendingPreview } = await import('./broker-buy-handler.js');
+    const pp = _getPendingPreview(peer);
+    if (pp) {
+      _clearPendingPreview(peer);
+      _clearPendingFields(peer);
+      const dir = pp.direction || 'buy';
+      const finalizeResult = await _executeTool(peer, 'finalize_order', {
+        direction: dir, qty: pp.qty, chain: pp.pay_chain,
+        give_asset: pp.give_asset || 'KAS', address: pp.receive_address || null,
+      });
+      if (finalizeResult?.ok && finalizeResult.order_id) {
+        const verb = dir === 'sell' ? '卖' : '买';
+        return `✓ ${verb}单已确认 (${pp.qty} ${pp.give_asset || 'KAS'}, ${(pp.pay_chain || '').toUpperCase()}). 付款/收款指引马上发你, 1-2 分钟到账, 不用刷新.`;
+      }
+      return finalizeResult?.preview_text || '抱歉, 下单失败, 请重发或回 "NO" 取消重新开始.';
+    }
+  }
   if (!freshHasAny && merged.direction && _allFieldsReady(merged) && CONFIRM_WORDS_LOCAL.includes(trimmedMsg)) {
     console.log(`[broker-llm P0-4] confirm shortcut: peer=${peer?.slice(-12)} direction=${merged.direction} qty=${merged.qty} asset=${merged.give_asset} chain=${merged.chain}`);
     _clearPendingFields(peer);

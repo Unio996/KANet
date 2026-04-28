@@ -810,7 +810,8 @@ export async function handleBuyIntent(peerAddr, message) {
   // (LLM-driven preview 真不 set _quotes — broker LLM 真 'YES' 真 LLM hallucinate 不调 finalize_order tool).
   // 真 _pendingPreview 真 set by preview_order tool (broker-llm-agent.js _executeTool). 真 hit 真直 finalizeBuy.
   const pp = _getPendingPreview(peerAddr);
-  if (pp && CONFIRM_WORDS.includes(trimmed)) {
+  // T-J1-2026-04-28 Layer 7: 仅 BUY pp 在此 finalize. SELL pp 让过 → 落 handleLlmDialog 的 pp shortcut → finalize_order tool routes finalizeSell.
+  if (pp && pp.direction !== 'sell' && CONFIRM_WORDS.includes(trimmed)) {
     _clearPendingPreview(peerAddr);
     const r = await finalizeBuy({
       user_kasia: peerAddr, qty: pp.qty, pay_chain: pp.pay_chain,
