@@ -408,7 +408,23 @@ if (process.send) {
               break;
             } catch (bcastErr) {
               const bcastErrMsg = bcastErr?.message || bcastErr?.toString?.() || '';
-              if ((bcastErrMsg.includes('Insufficient funds') || bcastErrMsg.includes('Storage mass')) && bcastAttempts < BCAST_MAX_ATTEMPTS - 1) {
+              // Phase D J1-D-4 (NWT 8b848a95 Phase C catch + J2 b10692dd RCA): mempool reject recoverable.
+              // RPC 'already spent ... in the mempool' = UTXO selector race window — mark explicit + sleep
+              // give mempool time to clear, retry. extracted outpoint from error msg if present, mark via
+              // markUtxoSpentByOutpoint so subsequent filterPendingUtxos excludes it.
+              const isMempoolReject = /already spent.*?in the mempool|already spent by transaction/i.test(bcastErrMsg);
+              if (isMempoolReject && bcastAttempts < BCAST_MAX_ATTEMPTS - 1) {
+                // Best-effort outpoint extraction from RPC msg ('output (txid:index) already spent by ...')
+                const m = bcastErrMsg.match(/\(([a-f0-9]{64}):?(\d*)\)/i);
+                if (m) {
+                  const { markUtxoSpentByOutpoint } = await import('./lib/transaction.mjs');
+                  markUtxoSpentByOutpoint(m[1], m[2] ? Number(m[2]) : 0);
+                }
+                bcastAttempts++;
+                const sleepMs = bcastAttempts * 5000;  // 5/10/15s exp backoff (mempool eviction window)
+                log(`⚠ BROADCAST #${cmd.channel} mempool reject, sleep ${sleepMs}ms before retry (attempt ${bcastAttempts + 1}/${BCAST_MAX_ATTEMPTS})`);
+                await new Promise(r => setTimeout(r, sleepMs));
+              } else if ((bcastErrMsg.includes('Insufficient funds') || bcastErrMsg.includes('Storage mass')) && bcastAttempts < BCAST_MAX_ATTEMPTS - 1) {
                 const target = Math.max(20, Math.floor(bcastMsg.length * 0.9));
                 bcastMsg = bcastMsg.slice(0, target).replace(/\s+\S*$/, '') + '...';
                 bcastAttempts++;
