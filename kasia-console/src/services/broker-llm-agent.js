@@ -649,6 +649,11 @@ export async function handleLlmDialog(peer, message) {
       _clearPendingFields(peer);
       return `抱歉, ${merged.qty} 是负数, 不能${merged.direction === 'sell' ? '卖' : '买'}负数. 改正数, 例 "${merged.direction === 'sell' ? '卖' : '买'} 5 KAS".`;
     }
+    // R33 b iter7 (NWT 309b19af huge_qty trace): upfront 1M cap.
+    if (merged.qty != null && merged.qty > 1_000_000) {
+      _clearPendingFields(peer);
+      return `抱歉, ${merged.qty} ${merged.give_asset || 'KAS'} 超过单笔上限 1000000. 改小 OR 分批下单.`;
+    }
     const minQty = merged.give_asset === 'KAS' ? 1.0 : 0.1;
     if (merged.qty != null && merged.qty < minQty) {
       _clearPendingFields(peer);

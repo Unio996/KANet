@@ -325,6 +325,8 @@ export async function handleSellIntent(peerAddr, message) {
   // R33 b iter6 (NWT c5bda126 fuzz negative trace): 显式 reject negative.
   if (qty < 0) return `抱歉, ${m[1]} 是负数, 不能卖负 KAS. 改正数, 例 "卖 5 KAS".`;
   if (qty <= 0) return null;
+  // R33 b iter7 (NWT 309b19af huge_qty trace): upfront sanity check 1M cap.
+  if (qty > 1_000_000) return `抱歉, ${qty} KAS 超过单笔上限 1000000 KAS. 改小 OR 分批下单, 例 "卖 1000 KAS" 多次.`;
   if (qty <= FEE_KAS) {
     _qDm(peerAddr, `太少了, 至少 ${FEE_KAS + 0.5} KAS (扣 ${FEE_KAS} KAS broker fee 后才有意义).`);
     return '';

@@ -21,6 +21,10 @@ const BUY_REGEX = /^\s*(?:买|buy|想买|要买|购买|购|想换|搞|弄|来点
 // T-J1-19a (J2 probe-5a 暴露): broker dust 单接受漏洞 — finalizeBuy / _aggregateWithFallback
 // 必须拒小于 MIN_QTY 的请求, 否则 broker 锁 fund_locks 浪费 broadcast tx + 用户 dust 被 broker fee 吃光.
 const MIN_QTY_KAS = 1.0;
+// R33 b iter7 (NWT 309b19af huge_qty trace 实证): upfront sanity check 拒 unreasonable qty.
+// 99M / 1B KAS 真**真**unambiguously not real user intent + no maker inventory 真**真**真 publish-time fail.
+// upfront 拒 + suggest 分批 = friendly + 不浪费 broker publish broadcast.
+const MAX_QTY_KAS = 1_000_000;  // 1M KAS soft cap (beyond → upfront reject + suggest split).
 // T-J2-12 真人 PAID 意图: "我付了 0xabc...", "已付 0x...", "paid 0x...", "pay 0x..."
 const PAID_REGEX = /(?:已付|付了|我付|paid|pay)[\s\S]{0,40}?\b(0x[a-fA-F0-9]{64})\b/i;
 // T-J2-26 (Owner 真测 04-26 12:18): "已付!" 等支付完成意图 但无 tx hash → broker 必须主动引导发 tx
@@ -1028,6 +1032,8 @@ export async function handleBuyIntent(peerAddr, message) {
   // 真 silent normalize, 用户 typo '-5' broker 真**真**真 charge mismatch.
   if (qty < 0) return `抱歉, ${m[1]} 是负数, 不能买负 KAS. 改正数, 例 "买 5 KAS".`;
   if (qty <= 0) return null;
+  // R33 b iter7 (NWT 309b19af huge_qty trace): upfront sanity check, 不让 99M/1B publish-time fail.
+  if (qty > MAX_QTY_KAS) return `抱歉, ${qty} KAS 超过单笔上限 ${MAX_QTY_KAS} KAS. 改小 OR 分批下单, 例 "买 100 KAS" 多次.`;
   // T-J1-19a + T-J2-20 合并: dust qty / 拼单+自挂全失败 → return null 让 broker-llm-agent
   // 接管 LLM 友好拒. handler 不发静态 DM 避免截胡 LLM.
   if (qty < MIN_QTY_KAS) {
