@@ -2407,5 +2407,23 @@ export function runMigrations() {
     }
   }
 
+  // v80 (Phase E v2 召会 议题 7 — Owner 22:xx 钦定 broker = 用户长期 profile 收集器):
+  // broker_conversations 加 completed_at INTEGER stub field, Phase 2 (broker_user_profile 表)
+  // cron 扫此字段 sediment per-peer 长期偏好 (preferred_chain / typical_qty / total_completed 等).
+  // Phase 1 写 row 不读 profile, Phase 2 (4-6h post Phase 1 ship) 加 broker_user_profile 表 + load.
+  // 详见 dev-coord NWT bb6a 议题 7 + J1 #33 ack.
+  {
+    const hasCol = sqlite.prepare("PRAGMA table_info(broker_conversations)").all()
+      .some(c => c.name === 'completed_at');
+    if (!hasCol) {
+      sqlite.exec(`ALTER TABLE broker_conversations ADD COLUMN completed_at INTEGER`);
+      // partial index — Phase 2 sediment cron 仅扫 completed_at IS NOT NULL row
+      sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_bc_completed_at
+                   ON broker_conversations(completed_at)
+                   WHERE completed_at IS NOT NULL`);
+      console.log('[migrate] v80: broker_conversations.completed_at column added (Phase 2 profile sediment future-proof).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
