@@ -61,7 +61,11 @@ function hexToBytes(hex) {
 }
 
 function kasToSompi(amountStr) {
-  const trimmed = amountStr.trim();
+  // T-J1-2026-04-28 Bug-Z23 defensive coerce: caller 真传 number (broker-action-queue settler-router
+  // post Layer 5 'transfer' canonical path) → 'amountStr.trim is not a function' TypeError. boundary
+  // normalize cover all relay caller. 后续 regex /^\d+(\.\d+)?$/ 仍验 number→string 后 format
+  // ('87.9' / '0.30000000000000004' float-trap), 不 mask 真错.
+  const trimmed = String(amountStr).trim();
   if (!/^\d+(\.\d+)?$/.test(trimmed)) throw new Error('Amount must be a valid decimal number');
   const parts = trimmed.split('.');
   const integerPart = parts[0];
