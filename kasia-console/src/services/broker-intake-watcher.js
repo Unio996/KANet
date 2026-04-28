@@ -233,6 +233,7 @@ export async function _scanExpiredBrokerOffers() {
       SELECT 1 FROM chain_events e
       WHERE e.event_type = 'broker_kas_refunded'
       AND e.payload LIKE '%"offer_id":"' || exchange_offers.id || '"%'
+      AND e.txid IN (SELECT tx_id FROM kaspa_tx_log)
     )
     LIMIT 10
   `).all(trader.address);
