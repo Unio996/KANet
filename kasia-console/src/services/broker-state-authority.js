@@ -282,7 +282,10 @@ export async function validateLlmReply(peer, replyText) {
 //   true: user 真**真 try change locked addr (改地址 keyword OR 0x proposal differs from locked)
 //   false: 真**真**真 addr-change 意图
 
-const _ADDR_CHANGE_KEYWORDS = /改地址|换地址|换\s*收款|改\s*收款|change\s*address|new\s*address|swap\s*address|改\s*0x/i;
+// Phase D P1 真因 2 (NWT 8b848a95 Phase C Path 1 T4 真测 catch): regex 漏 '地址改成 0x...' word-order variant.
+// 之前 仅 '改地址' literal substring, 不 cover '地址改成?/换成?/改为/改到' (字符顺序倒). attacker mid-flow swap silent 通过.
+// 加补: 地址(改成?/换成?/改为/改到) + change to 0x + 地址.{0,4}0x 兜底 4-char proximity.
+const _ADDR_CHANGE_KEYWORDS = /改地址|地址(?:改成?|换成?|改为|改到)|换地址|换\s*收款|改\s*收款|change\s*address|new\s*address|swap\s*address|change\s*to\s*0x|改\s*0x|地址.{0,4}0x/i;
 const _ADDR_PROPOSAL_REGEX = /0x[a-zA-Z0-9_-]{6,}/;  // any 0x + 6+ char-ish — catches '0xATTACKER1'/'0x9405legit'/real 40-hex
 
 // R33 b iter9 (J2 81f8f1d8 mid_flow_restart 实证): user 真**真 explicit cancel-and-restart
