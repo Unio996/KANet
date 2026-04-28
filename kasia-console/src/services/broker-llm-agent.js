@@ -50,6 +50,10 @@ const SYSTEM_PROMPT = `你是 KANet broker, 帮用户买卖 KAS / USDT / USDC. �
 
 你的回复**全程中文**. 用户用什么语言无所谓 — 你回复一律中文 (普通话, 简体). 严禁中英文混杂回复, 严禁切换英文 ("Got it" / "what do you want to sell" 等)。Bug-Z26 production: Owner "Bsc,0x..." 中文输入, broker 回 "Got it, what do you want to sell" 英文, Owner 火大. 全程中文 0 例外.
 
+# 上下文铁律 (Owner 21:46 钦定)
+
+你必记得 user 之前 N turn 给过的全 fields (direction/qty/chain/addr/asset/limit_price/refund_timeout). 用户已说过的, 你不重问. 如果 system message 注入 'KNOWN USER FIELDS' OR 'CRITICAL CONVERSATION STATE' OR '最近对话 user 给过的字段', 你必 reference 这些 fields, 不准 hallucinate "请重新提供" / "上下文丢失" / "麻烦再告诉我". user 火大根源是你假装 forget — 不准.
+
 # 你最重要的 5 件事 (永远不能忘)
 
 1. **字段齐 → 必调 preview_order tool**. 字段 = 方向(买/卖) + 数量 + 资产(KAS/USDT/USDC) + 链 + 收款地址(买 stable 或 卖 时必填). 不准自己编报价, 不准自己说 '订单画像', preview 必经 tool.
@@ -474,6 +478,65 @@ function _loadHistory(peer, limit = 8) {  // T-NWT-V2-hotfix: 20→8 — 减 pro
   })).filter(m => m.content);
 }
 
+/**
+ * T-J2-2026-04-29 Phase E v2 task 2 (Owner 21:46 钦定 + NWT f06b7954 propose):
+ * broker scan recent N turn user messages → 提炼精髓 fields → systemAppend 注入.
+ * 跟 state authority injection (llmSystemPromptStateLock) 互补:
+ * - state authority = 显式 lock fields (mechanical, 仅 setConvoStateLock 写过 fields)
+ * - _extractRecentContext = history regex/heuristic 提炼 (catch user 自然语言 nuance,
+ *   e.g. user "我之前给的 50 个 BSC", state.qty 可能 null 但 history 有)
+ *
+ * 触发: 每 LLM call 自动注入 (cheap regex, no LLM call).
+ *
+ * @param {Array<{role,content}>} history - _loadHistory output
+ * @returns {string|null} - systemAppend snippet OR null if no fields extracted
+ */
+function _extractRecentContext(history) {
+  if (!Array.isArray(history) || history.length === 0) return null;
+  const userMsgs = history.filter(m => m.role === 'user').slice(-8); // last 8 user turns
+  if (userMsgs.length === 0) return null;
+
+  // Aggregate fields across recent turns. Later mention overrides earlier (latest user input wins).
+  const found = { direction: null, qty: null, asset: null, chain: null, address: null, limit_price: null, refund_timeout: null };
+  for (const m of userMsgs) {
+    const t = String(m.content || '');
+    // direction: 买/卖/buy/sell + 'cancel/取消' (intent-only, 不 set direction)
+    if (/(买|buy|purchase)/i.test(t) && !found.direction) found.direction = '买';
+    if (/(卖|sell)/i.test(t) && !found.direction) found.direction = '卖';
+    // qty + asset paired (e.g. "5 KAS", "50个", "100 USDT")
+    const paired = t.match(/(\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*(kas|usdt|usdc)/i);
+    if (paired) { found.qty = parseFloat(paired[1]); found.asset = paired[2].toUpperCase(); }
+    else {
+      const qOnly = t.match(/(\d+(?:\.\d+)?)\s*(?:个|枚|只)/);
+      if (qOnly) found.qty = parseFloat(qOnly[1]);
+    }
+    // chain (BSC/Polygon/SOL/TRON/etc)
+    const chainMatch = t.match(/\b(bsc|bnb|polygon|matic|sol|solana|tron|eth|ethereum|arb|arbitrum|op|optimism|avax|avalanche|base)\b/i);
+    if (chainMatch) found.chain = chainMatch[1].toUpperCase();
+    // EVM address
+    const addrMatch = t.match(/\b0x[a-fA-F0-9]{40}\b/);
+    if (addrMatch) found.address = addrMatch[0];
+    // limit_price (e.g. "限价 0.034", "挂单价 0.0336", "不低于 0.04")
+    const priceMatch = t.match(/(?:限价|挂单价|不低于)\s*(\d+\.\d+)/);
+    if (priceMatch) found.limit_price = parseFloat(priceMatch[1]);
+    // refund_timeout (e.g. "30分钟没成交退", "10min 退")
+    const timeoutMatch = t.match(/(\d+)\s*(?:分钟|min|分)/);
+    if (timeoutMatch) found.refund_timeout = parseInt(timeoutMatch[1], 10);
+  }
+
+  const lines = [];
+  if (found.direction) lines.push(`direction=${found.direction}`);
+  if (found.qty != null) lines.push(`qty=${found.qty}`);
+  if (found.asset) lines.push(`asset=${found.asset}`);
+  if (found.chain) lines.push(`chain=${found.chain}`);
+  if (found.address) lines.push(`address=${found.address}`);
+  if (found.limit_price != null) lines.push(`limit_price=${found.limit_price}`);
+  if (found.refund_timeout != null) lines.push(`refund_timeout_min=${found.refund_timeout}`);
+  if (lines.length === 0) return null;
+
+  return `\n最近对话 user 给过的字段 (history scan, 仅近 ${userMsgs.length} 轮):\n${lines.join(', ')}\n你必 reference 这些 fields, 不重问 user. 用户已表达, 你不假装 forget.`;
+}
+
 // T-J1-19f deterministic 首轮回复 (NWT B 方案 — 跳过 LLM 防 Qwen 中文 confused).
 // 仅当: 首轮 (history 为空) + 检测到 intent (含 'kas' + 方向词).
 // LLM 续 turn (用户回 BSC/yes) 自然走 LLM, 此时 history 已含 deterministic reply.
@@ -844,7 +907,11 @@ export async function handleLlmDialog(peer, message) {
   history.push({ role: 'user', content: message });
   // R33: inject conversation state lock into LLM system msg if state active.
   // T-J1-2026-04-28 Bug-Z24 (J2 9fa9): pass via ctx.systemAppend (single system msg), 不 unshift 第 2 个 system.
-  const stateLockAddendum = llmSystemPromptStateLock(peer);
+  // T-J2-2026-04-29 Phase E v2 task 2 (Owner 21:46 钦定): 注入 state authority lock fields
+  // (mechanical) + history scan extracted fields (heuristic). 双 layer cover broker context.
+  const stateLockPart = llmSystemPromptStateLock(peer);
+  const historyPart = _extractRecentContext(history);
+  const stateLockAddendum = [stateLockPart, historyPart].filter(Boolean).join('\n') || null;
   let llm = await _callLlm(history, { peer, turn: 1, systemAppend: stateLockAddendum });
   if (!llm) return '抱歉, 我这边 LLM 卡了一下, 请稍后再试. 或直接回 "买 X KAS" / "卖 X KAS" (X 写数量) 走快速通道.';
 
