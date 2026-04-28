@@ -1046,9 +1046,12 @@ export async function handleBuyIntent(peerAddr, message) {
       // → 主动引导发 BSC tx hash, 截胡 LLM 防误判调 finalize_order 重复下单.
       // 必须放在 PAID_REGEX (含 0x hex) 检测之前 — 但只在 message 不含 0x hex 时触发.
       if (PAID_NO_TX_REGEX.test(trimmed)) {
-        _qDm('dm_paid_no_tx', peerAddr,
-          `感谢. 请发你的 BSC tx hash (0x 开头 64 位 hex) — 系统自动上链验证 USDT 收款 + 自动发 KAS, 1-2 分钟到账. 格式例: "我付了 0xabc123..."`);
-        return '';
+        // NWT ad8aafa6 Gap 2 fix (~1 LOC): sync return parity with cancel pattern.
+        // 之前 return '' 让 /api/agent/reply sync 拿不到, 测试框架无法捕获 → 没 regression 守.
+        // sync return + _qDm async 双发对齐 cancel 模式 (handleBuyIntent L1035), 测试可观测.
+        const ack = `感谢. 请发你的 BSC tx hash (0x 开头 64 位 hex) — 系统自动上链验证 USDT 收款 + 自动发 KAS, 1-2 分钟到账. 格式例: "我付了 0xabc123..."`;
+        _qDm('dm_paid_no_tx', peerAddr, ack);
+        return ack;
       }
       const pm = PAID_REGEX.exec(trimmed);
       if (pm) {
