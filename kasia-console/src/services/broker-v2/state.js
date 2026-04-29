@@ -41,12 +41,14 @@ export function getActiveDraft(peer) {
 }
 
 /**
- * 获取 peer 任一非终态 order (含 aligning / awaiting_payment / partially_filled / paid 等).
- * router 在 preview_shown / 已 finalize 后状态也要查 — 给 order-book / cancel-refund 复用.
+ * 获取 peer 任一非终态 order. router/order-book/cancel-refund 复用.
  *
- * TODO (v83 dependency): filled_qty + settle_grace_until + exchange_offer_id col
- *   只在 v83 migrate ship 后存在. 现 col 不存在 SELECT 报 'no such column'.
- *   v83 NWT chain-side 阶段 2 ship (ETA 30min). post-v83 自动 cover.
+ * post NWT b7f32220 v84 决定: state CHECK enum 不扩, partial fill 进度由 filled_qty/qty 比值推:
+ *   - filled_qty > 0 AND filled_qty < qty  → "partially_filled" 概念 (无单独 state enum)
+ *   - settle_grace_until IS NOT NULL       → "ttl_expiring" 概念
+ *
+ * Active state (5 个非终态): aligning / awaiting_payment / paid / executing / refunding
+ * Terminal: completed / refunded / failed / expired
  */
 export function getActiveOrder(peer) {
   if (!peer) return null;
@@ -57,8 +59,7 @@ export function getActiveOrder(peer) {
            created_at, updated_at
     FROM retail_dex_orders
     WHERE user_kasia_address = ?
-      AND state IN ('aligning', 'confirming', 'awaiting_payment',
-                    'partially_filled', 'paid', 'ttl_expiring', 'executing', 'refunding')
+      AND state IN ('aligning', 'awaiting_payment', 'paid', 'executing', 'refunding')
     ORDER BY created_at DESC LIMIT 1
   `).get(peer) || null;
 }

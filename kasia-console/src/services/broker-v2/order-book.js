@@ -129,11 +129,13 @@ export async function publishOrder(peer, draft) {
  */
 export function getOrderStatus(peer) {
   if (!peer) return { ok: false };
+  // post NWT v84: state enum 不扩, partial fill 进度推自 filled_qty/qty 比值.
+  // active state list = aligning / awaiting_payment / paid / executing / refunding (5).
   const order = sqlite.prepare(`
     SELECT id, qty, filled_qty, expires_at, state, exchange_offer_id, settle_grace_until
     FROM retail_dex_orders
     WHERE user_kasia_address = ?
-      AND state IN ('aligning','awaiting_payment','open','partially_filled','paid','ttl_expiring','executing')
+      AND state IN ('aligning', 'awaiting_payment', 'paid', 'executing', 'refunding')
     ORDER BY created_at DESC LIMIT 1
   `).get(peer);
   if (!order) return { ok: false };

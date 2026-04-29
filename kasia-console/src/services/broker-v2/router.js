@@ -53,7 +53,7 @@ export async function handleMessage(peer, msg) {
 
   // 3. cancel / reset 路径
   if (intent === 'cancel' || intent === 'reset') {
-    if (hasPublished && ['open', 'partially_filled', 'awaiting_payment', 'paid'].includes(activeOrder.state)) {
+    if (hasPublished && ['awaiting_payment', 'paid'].includes(activeOrder.state)) {
       // 已 publish 想 cancel — 走 advanceToRefunded refund unfilled portion (复用退款侧)
       try {
         const { handleCancelAndRefund } = await import('../broker-cancel-refund.js');
