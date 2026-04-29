@@ -487,6 +487,39 @@ const actions = {
   },
 
   /**
+   * Inject sendKas mock — fake test peer 真 no relay 接收 chain TX. mock 真 return fake 64-hex txId.
+   * J2 4be97b42 catch — Phase 2 sendKas 'unreachable' on fake peer.
+   * step: { action: 'inject_send_kas_mock' }
+   */
+  async inject_send_kas_mock(step, ctx) {
+    try {
+      const { _testInjectExecute } = await import('../../src/services/broker-action-queue.js');
+      _testInjectExecute(async (action) => {
+        if (action.kind === 'sendKas') {
+          // 真 64-hex fake hash (v83 trigger length=64 PASS)
+          const fakeTxId = Array.from({length: 64}, (_,i) => 'abcdef0123456789'[(i + Date.now() + (action.payload?.amount_kas || 0) * 1000) % 16]).join('');
+          return { ok: true, txId: fakeTxId, fee: '0.001' };
+        }
+        // 别 kind 真**真 default executor (require import original)
+        return { ok: true };
+      });
+      return { ok: true, mocked: true };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  },
+
+  async reset_send_kas_mock(step, ctx) {
+    try {
+      const { _testInjectExecute } = await import('../../src/services/broker-action-queue.js');
+      _testInjectExecute(null);
+      return { ok: true, reset: true };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  },
+
+  /**
    * Trigger broker-intake-watcher refund sweep manually (instead of waiting 5min cron).
    * step: { action: 'trigger_refund_sweep', peer_addr }
    */
