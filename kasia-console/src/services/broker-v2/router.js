@@ -54,8 +54,15 @@ export async function handleMessage(peer, msg) {
 
   // 3. cancel / reset 路径
   if (intent === 'cancel' || intent === 'reset') {
-    if (hasPublished && ['awaiting_payment', 'paid'].includes(activeOrder.state)) {
-      // 已 publish 想 cancel — 走 advanceToRefunded refund unfilled portion (复用退款侧)
+    // bug 4 fix (broker-v2 5 P0): state='paid' 不允 cancel (taker 已 matched/verifying, 反悔 risk taker loss).
+    // broker-cancel-refund._findRefundableOffers 仅 'open'/'expired'/'timed_out' 退. state='paid' offer
+    // protocol_status='matched'+, _findRefundableOffers 返 0 → handleCancelAndRefund 返 null →
+    // 旧 router default '好的, 已取消未成交部分退回' false promise. 修: 直 ack 拒 cancel.
+    if (hasPublished && activeOrder.state === 'paid') {
+      return '订单已收到付款, broker 验证中并准备发 KAS, 不允许取消. 如未按时到账请联系 broker 走 dispute 流程.';
+    }
+    if (hasPublished && activeOrder.state === 'awaiting_payment') {
+      // 已 publish 但未 paid — 走 advanceToRefunded refund unfilled portion (复用退款侧)
       try {
         const { handleCancelAndRefund } = await import('../broker-cancel-refund.js');
         const result = await handleCancelAndRefund(peer);
