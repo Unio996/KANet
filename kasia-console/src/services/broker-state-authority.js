@@ -297,6 +297,188 @@ export function resetConvoState(peer, reason) {
 }
 
 /**
+ * T-J2-2026-04-29 Track B (Owner 钦定 单一状态机, 三方 round 3 design v4 共识 ship).
+ *
+ * advanceToRefunded — 单一 refund entry point. 所有 refund 路径 funnel 入此 (broker-cancel-refund
+ * + broker-intake-watcher._scanExpiredBrokerOffers). 替原 ad-hoc sendKas + chain_events placeholder
+ * INSERT pattern. 真根因: Owner 87.7 KAS 双重退款 (chain TX 已 fire 但 DB drift, dedup 占位符永久失效).
+ *
+ * 3-Phase pattern (NWT 3-Phase round 1 propose, J1+J2+NWT round 3 共识):
+ *   Phase 1 (atomic short, CAS lock): UPDATE state='refunding' WHERE id AND state IN refundable
+ *   Phase 2 (no DB lock): enqueueVerified sendKas → real chain txId (不持 lock 期间 chain broadcast)
+ *   Phase 3 (atomic short): UPDATE order='refunded' + UPDATE offer='refunded' + INSERT chain_events
+ *
+ * Pre-check (Phase 1 前): chain-truth dedup via Track A helper isOfferAlreadyRefunded.
+ *   Owner real-test surface bug: dedup 占位符 'refund_<offerid>' 不在 kaspa_tx_log → 永久失效.
+ *   Track A 39ac2b699 helper 直查 kaspa_tx_log → race-safe + audit-clean.
+ *   alreadyRefunded → DB drift backfill (Phase 3 直接走) OR return 不重复 sendKas.
+ *
+ * Routing per round 3 共识 Q6:
+ *   - aligning/confirming → caller 不调本函数, 走 resetConvoState (clearState only, 无链上钱)
+ *   - awaiting_payment/paid/expired → 调本函数 refund chain
+ *   - executing/completed/refunded/failed → terminal, 不 refund
+ *
+ * @param {object} params
+ * @param {string} params.orderId - retail_dex_orders.id
+ * @param {string} params.reason - 'user_cancel' | 'expired_auto_refund' | 'reconciler_backfill'
+ * @returns {Promise<{
+ *   ok: boolean,
+ *   txId?: string,
+ *   refundAmount?: number,
+ *   userKasiaAddr?: string,
+ *   ackText?: string,
+ *   alreadyRefunded?: boolean,
+ *   priorTxs?: Array,
+ *   skipReason?: 'race_lost' | 'not_refundable' | 'no_offer' | 'no_user_kasia' | 'invalid_amount',
+ *   error?: string
+ * }>}
+ */
+export async function advanceToRefunded({ orderId, reason }) {
+  if (!orderId) return { ok: false, error: 'orderId required' };
+
+  // 0. SELECT order + linked offer
+  const order = sqlite.prepare(`
+    SELECT id, user_kasia_address, exchange_offer_id, qty, state, refund_tx_hash
+    FROM retail_dex_orders WHERE id = ?
+  `).get(orderId);
+  if (!order) return { ok: false, error: `order ${orderId} not found` };
+  if (order.refund_tx_hash) {
+    // already refunded per DB — race-loser path, return success idempotent
+    return { ok: true, alreadyRefunded: true, txId: order.refund_tx_hash, refundAmount: parseFloat(order.qty) };
+  }
+  if (!order.exchange_offer_id) return { ok: false, skipReason: 'no_offer', error: `order ${orderId} no exchange_offer_id linked` };
+
+  const offer = sqlite.prepare(`SELECT * FROM exchange_offers WHERE id = ?`).get(order.exchange_offer_id);
+  if (!offer) return { ok: false, skipReason: 'no_offer', error: `offer ${order.exchange_offer_id} not found` };
+
+  // 1. Race-safety: offer 不能 已被 taker 接 OR 已 terminal (per round 3 共识)
+  if (offer.taker || ['matched', 'verifying', 'delivering', 'completed', 'refunded', 'cancelled'].includes(offer.protocol_status)) {
+    return { ok: false, skipReason: 'not_refundable', error: `offer not refundable: status=${offer.protocol_status} taker=${offer.taker?.slice(-8) || 'null'}` };
+  }
+
+  // 2. Pre-check: chain-truth dedup via Track A helper (broker-refund-dedup.js)
+  //    不查 chain_events placeholder, 只信 kaspa_tx_log 真链 TX.
+  const { isOfferAlreadyRefunded } = await import('./broker-refund-dedup.js');
+  const dedup = isOfferAlreadyRefunded(offer);
+
+  let meta = {};
+  try { meta = JSON.parse(offer.metadata || '{}'); } catch {}
+  const userKasiaAddr = meta.user_kasia_address || order.user_kasia_address;
+  if (!userKasiaAddr) return { ok: false, skipReason: 'no_user_kasia' };
+  const refundAmount = parseFloat(meta.net_kas || offer.give_amount || 0);
+  if (!refundAmount || refundAmount <= 0) return { ok: false, skipReason: 'invalid_amount' };
+
+  if (dedup.alreadyRefunded) {
+    // chain TX 真上链 但 DB drift (process crash / Phase 3 fail / 旧 placeholder pollute).
+    // 直接走 Phase 3 backfill, 不重复 sendKas (broker 真已退过自己的钱了, 见 Owner 87.7 KAS 教训).
+    const realTxId = dedup.priorTxs[0].tx_id;
+    return _backfillRefundedState({ orderId, offerId: offer.id, realTxId, refundAmount, userKasiaAddr, reason: `${reason}_backfill` });
+  }
+
+  // 3. Phase 1 (atomic CAS lock): UPDATE state='refunding'
+  //    refundable states per round 3 共识: awaiting_payment / paid / expired
+  //    rowsAffected=0 → another caller already claimed lock, OR state mismatch → race lost
+  const claim = sqlite.prepare(`
+    UPDATE retail_dex_orders
+    SET state = 'refunding', updated_at = datetime('now')
+    WHERE id = ?
+      AND state IN ('awaiting_payment', 'paid', 'expired')
+      AND refund_tx_hash IS NULL
+  `).run(orderId);
+  if (claim.changes === 0) {
+    // CAS lost — re-SELECT to give caller diagnostic info
+    const post = sqlite.prepare(`SELECT state, refund_tx_hash FROM retail_dex_orders WHERE id=?`).get(orderId);
+    return { ok: false, skipReason: 'race_lost', error: `Phase 1 CAS lost: state=${post?.state} refund_tx_hash=${post?.refund_tx_hash?.slice(0,12) || 'null'}` };
+  }
+
+  // 4. Phase 2 (no DB lock): chain TX broadcast via enqueueVerified
+  let realTxId;
+  try {
+    const { enqueueVerified } = await import('./broker-action-queue.js');
+    const result = await enqueueVerified({
+      kind: 'sendKas',
+      peer: userKasiaAddr,
+      payload: { amount_kas: refundAmount, note: `refund:${reason}:${offer.id.slice(0, 8)}` },
+    });
+    realTxId = result?.txId;
+    if (!realTxId) throw new Error('sendKas resolved without txId');
+  } catch (err) {
+    // Phase 1 rollback: restore order to 'expired' (allow reconciler retry) + log error_reason
+    sqlite.prepare(`
+      UPDATE retail_dex_orders
+      SET state = 'expired', error_reason = ?, updated_at = datetime('now')
+      WHERE id = ? AND state = 'refunding'
+    `).run(`refund_send_failed: ${String(err.message || err).slice(0, 200)}`, orderId);
+    return { ok: false, error: `sendKas failed: ${err.message || err}`, orderId, userKasiaAddr, refundAmount };
+  }
+
+  // 5. Phase 3 (atomic 3-table sync): confirm refunded with real chain txId
+  return _confirmRefundedState({ orderId, offerId: offer.id, realTxId, refundAmount, userKasiaAddr, reason });
+}
+
+// Internal: Phase 3 atomic 3-table sync. Called by main path + dedup-backfill path.
+function _confirmRefundedState({ orderId, offerId, realTxId, refundAmount, userKasiaAddr, reason }) {
+  try {
+    const txn = sqlite.transaction(() => {
+      sqlite.prepare(`
+        UPDATE retail_dex_orders
+        SET state = 'refunded', refund_tx_hash = ?, updated_at = datetime('now')
+        WHERE id = ?
+      `).run(realTxId, orderId);
+      sqlite.prepare(`
+        UPDATE exchange_offers
+        SET protocol_status = 'refunded',
+            cancelled_at = datetime('now'),
+            updated_at = datetime('now')
+        WHERE id = ?
+      `).run(offerId);
+      // INSERT chain_events with REAL chain txId (not placeholder 'refund_<id>').
+      // Post-v83 trigger enforces length=64 hex format for broker_* events; real txId passes.
+      sqlite.prepare(`
+        INSERT INTO chain_events (txid, from_address, to_address, event_type, payload, observed_by, observed_at)
+        VALUES (?, NULL, NULL, 'broker_kas_refunded', ?, 'broker-state-authority.advanceToRefunded', datetime('now'))
+      `).run(realTxId, JSON.stringify({
+        offer_id: offerId,
+        order_id: orderId,
+        user_kasia_address: userKasiaAddr,
+        amount: refundAmount,
+        reason,
+        machine_version: 'v1-2026-04-29',
+      }));
+    });
+    txn();
+  } catch (err) {
+    // Atomic 3-table sync failed POST chain TX. chain TX 已上链, DB drift.
+    // Log + return ok=true with syncWarn (caller still ack user). Reconciler 5min cron 真 backfill.
+    console.error(`[advanceToRefunded] Phase 3 sync failed POST chain TX ${realTxId.slice(0,12)} (DB drift, reconciler 真 backfill): ${err.message}`);
+    return {
+      ok: true,
+      txId: realTxId,
+      refundAmount,
+      userKasiaAddr,
+      orderId,
+      syncWarn: err.message,
+      ackText: `订单 ${offerId.slice(0, 8)} 已退 ${refundAmount} KAS 到你 Kasia 钱包. Kasia TX: ${realTxId.slice(0, 16)}`,
+    };
+  }
+
+  return {
+    ok: true,
+    txId: realTxId,
+    refundAmount,
+    userKasiaAddr,
+    orderId,
+    ackText: `订单 ${offerId.slice(0, 8)} 已退 ${refundAmount} KAS 到你 Kasia 钱包. Kasia TX: ${realTxId.slice(0, 16)}`,
+  };
+}
+
+// Internal: dedup-backfill path. Found prior chain TX, sync DB without re-firing sendKas.
+function _backfillRefundedState({ orderId, offerId, realTxId, refundAmount, userKasiaAddr, reason }) {
+  const result = _confirmRefundedState({ orderId, offerId, realTxId, refundAmount, userKasiaAddr, reason });
+  return { ...result, alreadyRefunded: true };
+}
+
+/**
  * Decide whether a deterministic regex path should fire given conversation state.
  * R33 cross-direction gating preserved.
  */
