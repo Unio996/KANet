@@ -130,12 +130,29 @@ export async function handleMessage(peer, msg) {
 
   // post-seedDraft: 写其他 fields (direction 已 seed 到 side col, 不重写)
   let fieldsWrittenThisTurn = false;
+  let lockRejectReason = null;  // bug 3 fix: R31/R33 SQL guard reject 直接 ack 不 fallthrough LLM
   for (const [pname, pvalue] of Object.entries(fields)) {
     if (pname === 'direction') continue;  // already seeded into 'side' col
     const colName = FIELD_MAP[pname];
     if (!colName) continue;
     const r = state.setField(peer, colName, pvalue);
     if (r?.set) fieldsWrittenThisTurn = true;
+    // bug 3 fix (broker-v2 5 P0): SQL guard reject (LOCKED_FIELDS=['side','pay_address'])
+    // 直接 ack '已锁, 不允许改' 不 fallthrough LLM (LLM 易 hallucinate '已改' OR 空 fallback).
+    if (r?.ok === false && r?.reason && /_locked$/.test(r.reason)) {
+      lockRejectReason = r.reason;
+    }
+  }
+  // bug 3 fix: R31/R33 reject 直接 user-facing ack
+  if (lockRejectReason && draft) {
+    const lockedField = lockRejectReason.replace('_locked', '');
+    const lockedValue = draft[lockedField] || '';
+    const fieldDisplay = lockedField === 'pay_address'
+      ? `付款/收款地址 ${lockedValue}`
+      : lockedField === 'side'
+        ? `方向 ${lockedValue === 'sell_kas' ? '卖' : '买'}`
+        : lockedField;
+    return `订单已锁定 ${fieldDisplay}. 想改请回 "取消" 重新下单.`;
   }
   // direction 也算本 turn 写字段 (seedDraft 触发)
   if (fields.direction) fieldsWrittenThisTurn = true;
