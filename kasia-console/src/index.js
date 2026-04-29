@@ -366,6 +366,12 @@ startSeederRefundWorker();
 import { startIntakeWatcher } from './services/broker-intake-watcher.js';
 startIntakeWatcher();
 
+// J1-3 (Phase E v3 Step 1c, J1 #55 propose + NWT 01:15 ack): _sweepStaleAligning cron 5min
+// — broker-intake-watcher refund tick 仅 process 'awaiting_payment', 'aligning' rows 永不 sweep.
+// J2 Step 1b setConvoStateLock 入口 INSERT 'aligning' row 后必 cleanup pattern.
+import { startStaleAligningSweep } from './services/broker-state-authority.js';
+startStaleAligningSweep();
+
 // Phase 4 (T-J2-09): broker-buy-completion-watcher — BUY 闭环, broker 代 accept 后 DM user KAS 到账
 import { startCompletionWatcher } from './services/broker-buy-completion-watcher.js';
 startCompletionWatcher();

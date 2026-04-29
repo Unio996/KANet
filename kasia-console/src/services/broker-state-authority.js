@@ -458,6 +458,54 @@ export function detectAddrChangeAttempt(peer, message) {
   return { attempt: false };
 }
 
+// ── _sweepStaleAligning cron tick (J1-3 ship, J1 #55 propose, post NWT 01:15 ack J2-3/4 ship plan) ──
+//
+// Why: broker-intake-watcher refund tick 仅 process 'awaiting_payment' state — 'aligning' rows
+// 永不 sweep, 累积 stale draft (user 走神 / abandoned). J2 Step 1b setConvoStateLock 入口 INSERT
+// 'aligning' row 后, no cleanup pattern → DB bloat.
+//
+// Sweep: state='aligning' AND (expires_at < now OR (expires_at IS NULL AND created_at < now-30min))
+//   → state='expired' (CHECK constraint 已含 'expired')
+//
+// Tick: 5min interval, align broker-intake-watcher REFUND_TICK_MS (consistent cron cadence).
+
+const SWEEP_TICK_MS = 5 * 60 * 1000;
+let _sweepTimer = null;
+
+export function startStaleAligningSweep() {
+  if (_sweepTimer) return;
+  _sweepTimer = setInterval(_sweepStaleAligning, SWEEP_TICK_MS);
+  // Run once immediately on startup (catch up post-restart accumulated stale drafts)
+  _sweepStaleAligning();
+  console.log(`[broker-state-authority] stale-aligning sweep started, tick=${SWEEP_TICK_MS}ms`);
+}
+
+export function stopStaleAligningSweep() {
+  if (_sweepTimer) {
+    clearInterval(_sweepTimer);
+    _sweepTimer = null;
+  }
+}
+
+function _sweepStaleAligning() {
+  try {
+    const r = sqlite.prepare(`
+      UPDATE retail_dex_orders
+      SET state = 'expired', updated_at = datetime('now')
+      WHERE state = 'aligning'
+        AND (
+          (expires_at IS NOT NULL AND expires_at < datetime('now'))
+          OR (expires_at IS NULL AND created_at < datetime('now', '-30 minutes'))
+        )
+    `).run();
+    if (r.changes > 0) {
+      console.log(`[broker-state-authority] _sweepStaleAligning: ${r.changes} aligning rows → expired (30min TTL)`);
+    }
+  } catch (e) {
+    console.warn(`[broker-state-authority] _sweepStaleAligning err: ${e.message}`);
+  }
+}
+
 // ── Test helpers — deprecated stubs (state now in retail_dex_orders, persistent) ──
 //
 // 旧 _convoState in-memory Map 删除后, snapshot/restore/clear 概念失效 — DB 已是 source of truth.
