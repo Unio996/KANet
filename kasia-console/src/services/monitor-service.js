@@ -110,14 +110,16 @@ function notifyAction(summary, alertLevel, channelName) {
   } catch {}
 }
 
-function broadcastAction(summary, channelName) {
-  // Broadcast to dev-coord for high-level alerts
-  try {
-    sqlite.prepare(`
-      INSERT INTO broadcast_messages (id, channel_name, sender_address, content, status, created_at)
-      VALUES (?, 'dev-coord', 'monitor:system', ? || ' (auto-generated)', 'confirmed', datetime('now'))
-    `).run(randomUUID(), `🔔 [Monitor] ${summary}`);
-  } catch {}
+function broadcastAction(_summary, _channelName) {
+  // T-J2-2026-04-29 disable monitor → dev-coord auto-broadcast (Owner 23:50 真"不断产生垃圾").
+  // monitor service originally INSERTs back into broadcast_messages with 'monitor:system'
+  // sender → channel pollution + amplification (each match re-broadcasts old events as
+  // auto-generated). Owner 真测 看到 dev-coord 全是 [Monitor] 🔔 spam.
+  // Fix: no-op. notifyAction (events table) still fires for frontend visibility,
+  // monitor record events仍 INSERT 进 monitor_events. 仅 disable channel broadcast leak.
+  // Future: 真 alert escalation use direct DM to Owner OR explicit rule-driven action,
+  // 不 dump 到 dev-coord.
+  return;
 }
 
 function processMessage(msg, rules, recentEvents, cooldownSeconds) {
