@@ -155,19 +155,29 @@ export async function registerConversationRoutes(fastify) {
       return { ok: true, ...result };
     });
 
-    // T-J2-2026-04-29 (J1 #81 e6de8625 fundamental fix): sendKas mock cross-process isolation.
-    // test runner 真 separate node process, console 跑 broker-action-queue 真 separate process.
-    // module-scoped _executeOverride 真 per-process isolated → test process mock 不 affect console.
-    // 修: expose endpoint, runner HTTP POST → console process inject mock (同 process broker-action-queue).
-    fastify.post('/api/test/inject-send-kas-mock', async (_request, _reply) => {
-      const { _testInjectExecute } = await import('../services/broker-action-queue.js');
+    // T-J2-2026-04-29 (J1 #81 e6de8625 fundamental fix + J1 #86 双 vote A1' fail-closed + (a) export _defaultExecute):
+    // sendKas mock cross-process isolation + production user 真 protect.
+    // 真 fail-closed peer registry Set: empty Set OR action.peer ∉ Set → real chain TX (production user 不 mock).
+    // 仅 explicit registered test peer 真 inject 真 fakeTxId fire.
+    const _testPeerSet = new Set();
+
+    fastify.post('/api/test/inject-send-kas-mock', async (request, _reply) => {
+      const { peer_addr } = request.body || {};
+      if (peer_addr) {
+        if (Array.isArray(peer_addr)) peer_addr.forEach(p => _testPeerSet.add(p));
+        else _testPeerSet.add(peer_addr);
+      }
+      const { _testInjectExecute, _defaultExecute } = await import('../services/broker-action-queue.js');
       const { randomUUID } = await import('node:crypto');
       _testInjectExecute(async (action) => {
+        // J1 #86 vote Q1 fail-closed: empty Set OR peer 不 registered → real chain TX (production protect).
+        if (!_testPeerSet.has(action.peer)) {
+          return await _defaultExecute(action);
+        }
         if (action.kind === 'sendKas') {
           // 64-hex fake hash (post-v83 trigger length=64 + hex-only PASS)
           const fakeTxId = (randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '')).slice(0, 64);
           // 同时 INSERT kaspa_tx_log mock row 真 Track A chain-truth dedup query 真 hit
-          // (cover idempotency invariant: 第二 trigger isOfferAlreadyRefunded → kaspa_tx_log 真找到)
           const peer = action.peer;
           const amount = parseFloat(action.payload?.amount_kas || 0);
           if (peer && amount > 0) {
@@ -181,13 +191,15 @@ export async function registerConversationRoutes(fastify) {
           }
           return { ok: true, txId: fakeTxId, fee: '0.001' };
         }
-        return { ok: true };
+        // 别 kind (test peer registered 真 non-sendKas action) → default execute
+        return await _defaultExecute(action);
       });
-      return { ok: true, mocked: true };
+      return { ok: true, mocked: true, registered_peers: [..._testPeerSet] };
     });
 
     fastify.post('/api/test/reset-send-kas-mock', async (_request, _reply) => {
       const { _testResetExecute } = await import('../services/broker-action-queue.js');
+      _testPeerSet.clear();
       _testResetExecute();
       return { ok: true, reset: true };
     });

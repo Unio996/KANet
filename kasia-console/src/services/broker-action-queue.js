@@ -278,6 +278,12 @@ function _removeUserAction(item) {
 }
 
 // 路由
+// T-J2-2026-04-29 (J1 #86 vote (a) export _defaultExecute): A1' peer-filter mock 真
+// fall-through path 真 production user real chain TX. mock callback inject 真 inject endpoint
+// 真 wrap pattern: peer ∉ _testPeerSet → return await _defaultExecute(action).
+// underscore prefix marker: test-API only, not production stable.
+export { executeAction as _defaultExecute };
+
 async function executeAction(item) {
   const { sendCommandAsync } = await import('./relay-manager.js');
   const p = item.payload || {};
