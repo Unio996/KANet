@@ -2683,5 +2683,42 @@ export function runMigrations() {
     }
   }
 
+  // v84 (NWT 2026-04-29 broker-v2 partial fill — Owner 钦定 限价单簿 partial fill abstraction):
+  // 加 partial fill cols, 不动现有 state CHECK enum (用 filled_qty/qty 比值推 partial 进度).
+  // spec: docs/NEW-BROKER-PROPOSAL.md v2 commit ecdd98874 + 三方共识 7e776598dc.
+  //
+  // (a) retail_dex_orders.filled_qty REAL DEFAULT 0 — 累积 chunk fill 量
+  // (b) retail_dex_orders.settle_grace_until INTEGER — TTL 到期后 in-flight chunk 宽限 ms epoch
+  // (c) exchange_offers.price_tolerance REAL DEFAULT 0.01 — 1% phase 1 单 param
+  // (d) exchange_offers.settle_grace_min INTEGER DEFAULT 5 — TTL 后宽限分钟数
+  //
+  // ALTER ADD COLUMN 简单 path, 不 recreate-table (state 'partially_filled'/'ttl_expiring'/'settled'
+  // 暂不加进 CHECK enum — 用 filled_qty 比值 + settle_grace_until 时间推 partial 进度, state 仅
+  // 高层 lifecycle awaiting_payment/paid/completed/refunded).
+  {
+    const cols = sqlite.prepare(`PRAGMA table_info(retail_dex_orders)`).all();
+    const colNames = cols.map(c => c.name);
+    if (!colNames.includes('filled_qty')) {
+      sqlite.exec(`ALTER TABLE retail_dex_orders ADD COLUMN filled_qty REAL DEFAULT 0`);
+      console.log('[migrate] v84(a): retail_dex_orders.filled_qty REAL DEFAULT 0 added.');
+    }
+    if (!colNames.includes('settle_grace_until')) {
+      sqlite.exec(`ALTER TABLE retail_dex_orders ADD COLUMN settle_grace_until INTEGER`);
+      console.log('[migrate] v84(b): retail_dex_orders.settle_grace_until INTEGER added.');
+    }
+  }
+  {
+    const cols = sqlite.prepare(`PRAGMA table_info(exchange_offers)`).all();
+    const colNames = cols.map(c => c.name);
+    if (!colNames.includes('price_tolerance')) {
+      sqlite.exec(`ALTER TABLE exchange_offers ADD COLUMN price_tolerance REAL DEFAULT 0.01`);
+      console.log('[migrate] v84(c): exchange_offers.price_tolerance REAL DEFAULT 0.01 added.');
+    }
+    if (!colNames.includes('settle_grace_min')) {
+      sqlite.exec(`ALTER TABLE exchange_offers ADD COLUMN settle_grace_min INTEGER DEFAULT 5`);
+      console.log('[migrate] v84(d): exchange_offers.settle_grace_min INTEGER DEFAULT 5 added.');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
