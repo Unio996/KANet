@@ -824,6 +824,21 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
       const deliveringOffer = transition(offer_id, 'delivering', {});
       console.log(`[exchange] offer ${offer_id.slice(0,8)} payment verified → delivering (${vr.actualAmount} USDT, ${vr.confirmations}/${vr.required} conf)`);
 
+      // D2 (NWT broker-v2 phase 1 r6): retail_dex_orders.state lifecycle 写 executing.
+      // 单一状态机 — exchange_offers.protocol_status 是 chain 协议状态, retail_dex_orders.state
+      // 是 broker session 状态. paid → executing transition 这里 hook (post payment verified, pre deliver).
+      // link by exchange_offer_id (SELL flow 链) OR user_kasia_address fallback (BUY flow multi-maker).
+      try {
+        const upd = sqlite.prepare(`
+          UPDATE retail_dex_orders SET state = 'executing', updated_at = datetime('now')
+          WHERE (exchange_offer_id = ? OR (exchange_offer_id IS NULL AND user_kasia_address = ? AND created_at > datetime('now','-2 hours')))
+            AND state IN ('paid', 'awaiting_payment')
+        `).run(offer_id, deliveringOffer.taker || '');
+        if (upd.changes > 0) {
+          console.log(`[exchange] D2 retail_dex_orders state lifecycle: ${upd.changes} row → 'executing' (offer ${offer_id.slice(0,8)})`);
+        }
+      } catch (e) { console.warn(`[exchange] D2 executing UPDATE err: ${e.message}`); }
+
       // T-NWT-2026-04-27 Bug-Z2 fix (J1 25:24 真发现): auto-deliver 真 generic (USDC/USDT/etc)
       // 老 hardcode `give_asset === 'KAS'` → USDC maker 真 deliver 真不 trigger = USDC e2e 真断.
       // 真 fix: condition generic + KAS path 用现 sendCommandAsync transfer (backward compat),
@@ -949,6 +964,19 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
               // Both KAS delivery AND broadcast succeeded — NOW mark completed
               sqlite.prepare('UPDATE exchange_offers SET delivery_tx = ? WHERE id = ?').run(deliveryTxId, offer_id);
               transition(offer_id, 'completed', { txHash: deliveryTxId });
+
+              // D2 (NWT broker-v2 phase 1 r6): retail_dex_orders.state lifecycle 写 completed + deliver_tx_hash.
+              // executing → completed transition. 同 link 逻辑 (exchange_offer_id 优先, user_kasia_address fallback).
+              try {
+                const upd = sqlite.prepare(`
+                  UPDATE retail_dex_orders SET state = 'completed', deliver_tx_hash = ?, updated_at = datetime('now')
+                  WHERE (exchange_offer_id = ? OR (exchange_offer_id IS NULL AND user_kasia_address = ? AND created_at > datetime('now','-2 hours')))
+                    AND state IN ('executing', 'paid', 'awaiting_payment')
+                `).run(deliveryTxId, offer_id, deliveringOffer.taker || '');
+                if (upd.changes > 0) {
+                  console.log(`[exchange] D2 retail_dex_orders state lifecycle: ${upd.changes} row → 'completed' (offer ${offer_id.slice(0,8)} tx ${deliveryTxId.slice(0,12)})`);
+                }
+              } catch (e) { console.warn(`[exchange] D2 completed UPDATE err: ${e.message}`); }
               sqlite.prepare(`
                 INSERT INTO chain_events (id, event_type, from_address, to_address, txid, payload, observed_at)
                 VALUES (?, 'kas_delivery', ?, ?, ?, ?, datetime('now'))
