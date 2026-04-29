@@ -62,7 +62,7 @@ export default {
     {
       // chain TX count for this peer should still = 1, not 2
       action: 'query_db',
-      sql: `SELECT COUNT(*) AS n FROM chain_events WHERE event_type = 'tx' AND payload LIKE ? AND payload LIKE '%87.9%'`,
+      sql: `SELECT COUNT(*) AS n FROM chain_events WHERE event_type = 'broker_kas_refunded' AND payload LIKE ?`,
       params: [`%${peer}%`],
       expect: {
         must: {
@@ -81,7 +81,7 @@ export default {
     { action: 'sleep', ms: 3000 },
     {
       action: 'query_db',
-      sql: `SELECT COUNT(*) AS n FROM chain_events WHERE event_type = 'tx' AND payload LIKE ? AND payload LIKE '%87.9%'`,
+      sql: `SELECT COUNT(*) AS n FROM chain_events WHERE event_type = 'broker_kas_refunded' AND payload LIKE ?`,
       params: [`%${peer}%`],
       expect: {
         must: {
