@@ -506,28 +506,24 @@ const actions = {
    * step: { action: 'inject_send_kas_mock' }
    */
   async inject_send_kas_mock(step, ctx) {
+    // J1 #81 e6de8625 fundamental fix: cross-process isolation. test runner 真 separate node process,
+    // console process module-scoped _executeOverride 真 isolated. 真 HTTP endpoint inject same-process console.
+    const PORT = process.env.PORT || 3100;
     try {
-      const { _testInjectExecute } = await import('../../src/services/broker-action-queue.js');
-      _testInjectExecute(async (action) => {
-        if (action.kind === 'sendKas') {
-          // 真 64-hex fake hash (v83 trigger length=64 PASS)
-          const fakeTxId = Array.from({length: 64}, (_,i) => 'abcdef0123456789'[(i + Date.now() + (action.payload?.amount_kas || 0) * 1000) % 16]).join('');
-          return { ok: true, txId: fakeTxId, fee: '0.001' };
-        }
-        // 别 kind 真**真 default executor (require import original)
-        return { ok: true };
-      });
-      return { ok: true, mocked: true };
+      const res = await fetch(`http://127.0.0.1:${PORT}/api/test/inject-send-kas-mock`, { method: 'POST' });
+      if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+      return await res.json();
     } catch (e) {
       return { ok: false, error: e.message };
     }
   },
 
   async reset_send_kas_mock(step, ctx) {
+    const PORT = process.env.PORT || 3100;
     try {
-      const { _testInjectExecute } = await import('../../src/services/broker-action-queue.js');
-      _testInjectExecute(null);
-      return { ok: true, reset: true };
+      const res = await fetch(`http://127.0.0.1:${PORT}/api/test/reset-send-kas-mock`, { method: 'POST' });
+      if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+      return await res.json();
     } catch (e) {
       return { ok: false, error: e.message };
     }
