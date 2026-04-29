@@ -81,6 +81,20 @@ function _findRefundableOffers(peerAddr) {
  * @returns {Promise<string|null>} reply text if refunded, null if no active refundable offer
  */
 export async function handleCancelAndRefund(peerAddr) {
+  // J1 P0 Bug 2 Fix 1 (Owner 02:12 真测撞 87.9 KAS 资产流失 + NWT 02:14 同 root dig):
+  // 真**真**真 早 check current draft state — user cancel pre-payment 'aligning'/'confirming' draft
+  // 真**真 nothing to refund**, return null fall handler clearState path. 防 _findRefundableOffers
+  // 3hr sweep window pick up stale broker_dynamic offer + 误 sendKas broker pool loss.
+  const currentDraft = sqlite.prepare(`
+    SELECT state, pay_tx_hash FROM retail_dex_orders
+    WHERE user_kasia_address = ?
+    ORDER BY created_at DESC LIMIT 1
+  `).get(peerAddr);
+  if (currentDraft && (currentDraft.state === 'aligning' || currentDraft.state === 'confirming') && !currentDraft.pay_tx_hash) {
+    console.log(`[cancel-refund] J1 P0 Bug 2 Fix 1 FIRED — peer ${peerAddr.slice(-12)} current draft state='${currentDraft.state}' pre-payment, NO refund (broker pool 真 protect).`);
+    return null;  // fall to handler's clearState/_pending.delete path, no chain TX
+  }
+
   const refundable = _findRefundableOffers(peerAddr);
   if (refundable.length === 0) return null;
 
@@ -121,6 +135,30 @@ export async function handleCancelAndRefund(peerAddr) {
         AND (exchange_offer_id=? OR (exchange_offer_id IS NULL AND qty=? AND state='awaiting_payment'))
       ORDER BY created_at DESC LIMIT 1
     `).get(peerAddr, offer.id, String(intentQty));
+
+    // J1 P0 Bug 2 fix (Owner 02:12 真测撞 87.9 KAS pool loss):
+    // 旧 logic 真 sendKas refund 仅 check exchange_offers 'open' status, 真**没 verify user 真 paid KAS to broker**.
+    // SELL flow user 'YES' → broker publishes broker_dynamic 'open' offer (broker pool 自挂); user 真**未 send KAS**
+    // → state='awaiting_payment' 真 broker waiting; user cancel 'NO' → 旧 logic 误 sendKas user 87.9 KAS = broker pool LOSS.
+    // 修法: BEFORE sendKas, check retail_dex_orders 真 user-payment evidence (pay_tx_hash NOT NULL OR state in
+    // 'paid'/'executing'/'refunding'). 真 user 真 paid 才 refund. 'aligning'/'confirming'/'awaiting_payment' 真**真**
+    // pre-payment OR waiting-payment state, NO refund execution (仅 cancel offer 上链).
+    const userPaymentEvidence = sqlite.prepare(`
+      SELECT 1 FROM retail_dex_orders
+      WHERE user_kasia_address=?
+        AND (
+          (exchange_offer_id=? AND (pay_tx_hash IS NOT NULL OR state IN ('paid','executing','refunding')))
+          OR (exchange_offer_id IS NULL AND state IN ('paid','executing','refunding') AND pay_tx_hash IS NOT NULL)
+        )
+      LIMIT 1
+    `).get(peerAddr, offer.id);
+
+    if (!userPaymentEvidence) {
+      // broker_dynamic offer pre-payment cancel — broker pool 不 send. 仅 cancel offer 已 fire L96-99.
+      console.log(`[cancel-refund] J1 P0 Bug 2 guard FIRED — offer ${offer.id.slice(0,8)} 真 broker_dynamic, user 真未 paid KAS, skip sendKas refund (broker pool 真 protect).`);
+      ackParts.push(`订单 ${offer.id.slice(0, 8)} 已取消 (你之前未向 broker 付 KAS, 真无需 refund — broker_dynamic 挂单已 cancel 上链)`);
+      continue;
+    }
 
     // Step 2: Layer 2 enqueueVerified — await sendKas execute confirm (拿 txId OR catch error).
     // Layer 1 + 2 (Owner 钦定 Promise→Verify→Acknowledge): 不再 INSERT-before-confirm, 不再 DM ack 撒谎.
