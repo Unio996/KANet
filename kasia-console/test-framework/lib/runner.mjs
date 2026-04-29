@@ -537,6 +537,41 @@ const actions = {
   },
 
   /**
+   * Inject mock LLM message — broker-v2 testing without真 Qwen call.
+   * step: { action: 'inject_llm_mock', mock: { content?: 'text', tool_calls?: [{function:{name,arguments}}] } }
+   * 多次调用按 FIFO queue 排序, 每次 _callLlm 入口 shift 一个返回. 空队列 fall-through 真 Qwen.
+   * 适合 6-turn LLM-driven case: T1-T6 各 inject 1 mock = 6 次 LLM 调用全 mock 控制.
+   */
+  async inject_llm_mock(step, ctx) {
+    const PORT = process.env.PORT || 3100;
+    if (!step.mock || typeof step.mock !== 'object') {
+      return { ok: false, error: 'mock object required, e.g. { content: "..." } or { tool_calls: [...] }' };
+    }
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT}/api/test/inject-llm-mock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mock: step.mock }),
+      });
+      if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+      return await res.json();
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  },
+
+  async reset_llm_mock(step, ctx) {
+    const PORT = process.env.PORT || 3100;
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT}/api/test/reset-llm-mock`, { method: 'POST' });
+      if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+      return await res.json();
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  },
+
+  /**
    * Trigger broker-intake-watcher refund sweep manually (instead of waiting 5min cron).
    * step: { action: 'trigger_refund_sweep', peer_addr }
    */
@@ -709,6 +744,65 @@ const assertions = {
     return step_result.count === expected
       ? { pass: true, expected, actual: step_result.count }
       : { pass: false, expected, actual: step_result.count, msg: `db query returned ${step_result.count} rows (want ${expected})` };
+  },
+
+  /**
+   * NWT 2026-04-29 broker-v2 阶段 2 task 5/7 — query_db ASSERTION (区分上面 query_db ACTION).
+   * 在 expect.must.query_db 内 inline run SQL + 校验 expected_row / expected_row_count.
+   * spec 形态:
+   *   query_db: { sql, params?, expected_row?, expected_row_count? }
+   * 例:
+   *   expect: { must: {
+   *     query_db: {
+   *       sql: 'SELECT side, qty FROM retail_dex_orders WHERE user_kasia_address=? AND state=?',
+   *       params: [peer, 'aligning'],
+   *       expected_row: { side: 'sell_kas', qty: '50' },
+   *     },
+   *   }}
+   * 数字 比较 兼容 ('50' vs 50 vs '50.0' 全 numeric coerce).
+   */
+  query_db(step_result, spec, ctx) {
+    if (!spec || typeof spec !== 'object') {
+      return { pass: false, expected: spec, actual: null, msg: 'query_db assertion: spec must be { sql, params?, expected_row?, expected_row_count? }' };
+    }
+    const sql = spec.sql;
+    const params = spec.params || [];
+    if (!sql) return { pass: false, expected: spec, actual: null, msg: 'query_db assertion: sql missing' };
+
+    let rows;
+    const db = new Database(DB_PATH, { readonly: true });
+    try {
+      rows = db.prepare(sql).all(...params);
+    } catch (e) {
+      db.close();
+      return { pass: false, expected: spec, actual: null, msg: `query_db SQL error: ${e.message}` };
+    }
+    db.close();
+
+    if (spec.expected_row_count !== undefined) {
+      if (rows.length !== spec.expected_row_count) {
+        return { pass: false, expected: spec.expected_row_count, actual: rows.length,
+                 msg: `query_db row count ${rows.length} != ${spec.expected_row_count}` };
+      }
+    }
+
+    if (spec.expected_row) {
+      const row = rows[0];
+      if (!row) return { pass: false, expected: spec.expected_row, actual: null,
+                         msg: 'query_db: expected_row but query returned 0 rows' };
+      for (const [k, expected] of Object.entries(spec.expected_row)) {
+        const actual = row[k];
+        const expNum = typeof expected === 'number' ? expected : parseFloat(expected);
+        const actNum = typeof actual === 'number' ? actual : parseFloat(actual);
+        const numericOk = Number.isFinite(expNum) && Number.isFinite(actNum) && expNum === actNum;
+        if (actual !== expected && !numericOk) {
+          return { pass: false, expected: { [k]: expected }, actual: { [k]: actual },
+                   msg: `query_db.expected_row.${k}: got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)}` };
+        }
+      }
+    }
+
+    return { pass: true, expected: spec, actual: { rows: rows.length, first_row: rows[0] || null } };
   },
 
   found(step_result, expected, ctx) {

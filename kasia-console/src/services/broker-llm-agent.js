@@ -224,9 +224,41 @@ function _appendLlmIo(record) {
     .catch(e => console.warn(`[broker-llm-io] append fail: ${e.message}`));
 }
 
+// NWT 2026-04-29 broker-v2 阶段 2 task 5/7 — LLM mock injection (test framework):
+// FIFO queue. 每次 _callLlm 入口 shift 一个 mock message 返回 (跳过真 HTTP). 空队列回正常 Qwen.
+// 仅 KANET_TEST_MODE=1 时 injection endpoint 暴露 (conversations.js).
+let _llmMockQueue = [];
+export function _testInjectLlmMock(mockMessage) {
+  _llmMockQueue.push(mockMessage);
+  return { ok: true, queued: _llmMockQueue.length };
+}
+export function _testResetLlmMock() {
+  const cleared = _llmMockQueue.length;
+  _llmMockQueue = [];
+  return { ok: true, cleared };
+}
+
 // J2 #4 接位 broker-v2 reuse: opts={systemPrompt, tools} 参数化, 旧 caller 不传不破.
 // (c) 工具提取重组: broker-v2/llm.js 调 _callLlm 传自己的 prompt+tools, 不重写 R11/R37/retry/jsonl.
 export async function _callLlm(messages, ctx = {}, opts = {}) {
+  // ── Test mock 优先 (FIFO queue, 空队列 fall-through Qwen) ──
+  if (_llmMockQueue.length > 0) {
+    const mock = _llmMockQueue.shift();
+    console.log(`[broker-llm-mock] consumed mock (peer=${(ctx.peer || '').slice(-12)}, turn=${ctx.turn || '?'}): ${JSON.stringify(mock).slice(0, 120)}`);
+    _appendLlmIo({
+      ts: new Date().toISOString(),
+      peer: ctx.peer || null,
+      turn: ctx.turn || null,
+      mock: true,
+      reply_content: mock?.content || null,
+      tool_calls: mock?.tool_calls?.map(tc => ({
+        name: tc.function?.name,
+        arguments: tc.function?.arguments,
+      })) || null,
+    });
+    return mock;
+  }
+
   const sysPrompt = opts.systemPrompt ?? SYSTEM_PROMPT;
   const tools = opts.tools ?? TOOLS;
   // ctx: { peer, turn } — 给 jsonl 关联 test-framework trace 用

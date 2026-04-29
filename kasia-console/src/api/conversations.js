@@ -206,6 +206,24 @@ export async function registerConversationRoutes(fastify) {
       _testResetExecute();
       return { ok: true, reset: true };
     });
+
+    // T-NWT-2026-04-29 broker-v2 阶段 2 task 5/7 — LLM mock injection endpoint.
+    // FIFO queue: inject 一次 → 下一次 _callLlm 调入口消费 → 空队列回真 Qwen.
+    // body: { mock: { content?: 'text', tool_calls?: [{ function: { name, arguments } }] } }
+    // 多次 inject 排队按顺序消费. 用于 broker-v2 6-turn case mock LLM tool_calls.
+    fastify.post('/api/test/inject-llm-mock', async (request, _reply) => {
+      const { mock } = request.body || {};
+      if (!mock || typeof mock !== 'object') {
+        return _reply.code(400).send({ error: 'mock object required, e.g. { content: "...", tool_calls: [...] }' });
+      }
+      const { _testInjectLlmMock } = await import('../services/broker-llm-agent.js');
+      return _testInjectLlmMock(mock);
+    });
+
+    fastify.post('/api/test/reset-llm-mock', async (_request, _reply) => {
+      const { _testResetLlmMock } = await import('../services/broker-llm-agent.js');
+      return _testResetLlmMock();
+    });
   }
 
   // R34 (J1 R26 territory, P1 race anti-spam): in-process dedup cache 防 console-direct 入口
