@@ -372,6 +372,12 @@ startIntakeWatcher();
 import { startStaleAligningSweep } from './services/broker-state-authority.js';
 startStaleAligningSweep();
 
+// J1 #72 Wire 2 (vote b — territory clean split per NWT 04:08 propose):
+// broker-state-reconciler 5min cron — chain-truth audit + retry-able 'expired'/'refund_send_failed' detect + Phase 3 backfill via advanceToRefunded(reason='reconciler_retry').
+// NWT territory file (broker-state-reconciler.js), J1 territory startup wire (index.js).
+import { startStateReconciler } from './services/broker-state-reconciler.js';
+startStateReconciler();
+
 // Phase 4 (T-J2-09): broker-buy-completion-watcher — BUY 闭环, broker 代 accept 后 DM user KAS 到账
 import { startCompletionWatcher } from './services/broker-buy-completion-watcher.js';
 startCompletionWatcher();
