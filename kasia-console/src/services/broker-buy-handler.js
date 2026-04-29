@@ -579,7 +579,7 @@ export async function finalizeBuy({ user_kasia, qty, pay_chain, give_asset = 'KA
   // Owner '已付！' / '我付了 0x...' 都进不了 PAID_REGEX, broker 静默或乱调 finalize_order 又一单.
   // T-J1-2026-04-27 v1.1 Bug-Y wire: 真存 receive_address (deliver 层真用 — 买 stable 真 user EVM addr;
   // 买 KAS null → deliver 真 default user_kasia auto-resolve, backward compat).
-  _pendingAccepts.set(user_kasia, {
+  const pendingAccept = {
     picks: merged.picks.map(p => ({ ...p, paid_tx: null })),
     total_kas: merged.total_kas,
     total_usdt: merged.total_usdt,
@@ -587,7 +587,26 @@ export async function finalizeBuy({ user_kasia, qty, pay_chain, give_asset = 'KA
     receive_address,
     give_asset,
     expires_at: Date.now() + PENDING_ACCEPT_TTL_MS,
-  });
+  };
+  _pendingAccepts.set(user_kasia, pendingAccept);
+
+  // A1 (J2 broker-v2 phase 1 r6): 双写 retail_dex_orders.picks_json (cross-process retain).
+  // _pendingAccepts in-memory Map 跨 process restart 丢. broker-v2/router B1 PAID detect 调
+  // verifyPaymentForPeer (broker-v2 a69653c5b ship) 时如 _pendingAccepts 空 → reconstruct from picks_json.
+  // 仅 update broker-v2 'awaiting_payment' active row (broker-v2/router seedDraft 创建).
+  try {
+    const upd = sqlite.prepare(`
+      UPDATE retail_dex_orders SET picks_json = ?, updated_at = datetime('now')
+      WHERE user_kasia_address = ? AND side = 'buy_kas' AND state = 'awaiting_payment'
+        AND created_at > datetime('now', '-2 hours')
+    `).run(JSON.stringify(pendingAccept), user_kasia);
+    if (upd.changes === 0) {
+      // broker-v2 path 应已 advance 'awaiting_payment' (post publishOrder).
+      // 0 changes = broker-v1 旧 path (BROKER_V2_ENABLED unset) OR row 不存 — silent OK (旧 path 不用 picks_json reconstruct).
+    }
+  } catch (e) {
+    console.warn(`[broker-buy A1] picks_json 双写 err for ${user_kasia.slice(-12)}: ${e.message}`);
+  }
   return {
     ok: true,
     picks: merged.picks.map(p => ({
@@ -618,7 +637,30 @@ export async function finalizeBuy({ user_kasia, qty, pay_chain, give_asset = 'KA
 // 找不到 → return ok:false reason='no_match', LLM 拿到自然回 user '没查到, 麻烦发 tx hash 或截图'.
 export async function verifyPaymentForPeer({ peer, chain }) {
   if (!peer) return { ok: false, reason: 'missing_peer' };
-  const accept = _pendingAccepts.get(peer);
+  let accept = _pendingAccepts.get(peer);
+  // A1 (J2 broker-v2 phase 1 r6): cross-process restart 后 _pendingAccepts 空 →
+  // reconstruct from retail_dex_orders.picks_json (finalizeBuy A1 双写).
+  if (!accept) {
+    try {
+      const row = sqlite.prepare(`
+        SELECT picks_json FROM retail_dex_orders
+        WHERE user_kasia_address = ? AND side = 'buy_kas' AND state = 'awaiting_payment'
+          AND picks_json IS NOT NULL
+          AND created_at > datetime('now', '-2 hours')
+        ORDER BY created_at DESC LIMIT 1
+      `).get(peer);
+      if (row?.picks_json) {
+        const parsed = JSON.parse(row.picks_json);
+        if (parsed?.picks && Array.isArray(parsed.picks)) {
+          accept = parsed;
+          _pendingAccepts.set(peer, accept);  // restore in-memory cache for follow-up calls
+          console.log(`[broker-buy A1] verifyPaymentForPeer reconstructed _pendingAccepts from picks_json for ${peer.slice(-12)} (${parsed.picks.length} picks)`);
+        }
+      }
+    } catch (e) {
+      console.warn(`[broker-buy A1] picks_json reconstruct err for ${peer.slice(-12)}: ${e.message}`);
+    }
+  }
   if (!accept) return { ok: false, reason: 'no_active_order', user_msg: '没查到 active 订单. 你下过单吗? 先告诉我数量 + 链.' };
   if (Date.now() >= accept.expires_at) {
     _pendingAccepts.delete(peer);
