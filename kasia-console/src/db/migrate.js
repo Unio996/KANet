@@ -2407,6 +2407,172 @@ export function runMigrations() {
     }
   }
 
+  // v83 (Owner 02:51 钦定 "原子同步表 状态机核心" + design v4 round 3 三方 共识):
+  // 5 invariants schema enforcement + 1129 placeholder cleanup. 真**真** application-layer atomic
+  // 不够, schema 必 hard enforce 防 caller bug 引入 placeholder/dangling/duplicate.
+  //
+  // round 3 共识 lock list:
+  //   (1) Lenient trigger chain_events_txid_format_check (length=64 + hex-only, broker_* all events scope)
+  //   (2) CHECK constraint state='refunded' ↔ refund_tx_hash NOT NULL (recreate-table)
+  //   (3) Partial UNIQUE INDEX refund_tx_hash WHERE NOT NULL (ALTER OK)
+  //   (4) FK retail_dex_orders.exchange_offer_id → exchange_offers.id (recreate-table)
+  //   (5) CHECK enum exchange_offers.protocol_status (recreate-table)
+  //   (6) Backfill DELETE 1129 placeholder (BEFORE trigger fires)
+  //
+  // WHY_NOT_ALTER: SQLite 不支持 ADD CHECK / ADD FK via ALTER. recreate-table 唯一 path.
+  // 详见 dev-coord J1 #65 design v4 + #66 round 3 final ack lenient trigger + J2/NWT round 3 ack.
+  {
+    const has_v83_trigger = sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='chain_events_txid_format_check'").get();
+    if (!has_v83_trigger) {
+      // (6) Backfill DELETE placeholder chain_events FIRST — 真 trigger ship 前 clean up legacy data
+      // 防 trigger fire 真 future INSERT block placeholder, 但**真** historical 1129 placeholder 仍 polluting.
+      const delRes = sqlite.prepare(`
+        DELETE FROM chain_events
+        WHERE event_type LIKE 'broker_%'
+          AND (length(txid) != 64 OR txid GLOB '*[!a-fA-F0-9]*')
+      `).run();
+      console.log(`[migrate] v83: backfill DELETE ${delRes.changes} placeholder chain_events broker_* rows.`);
+
+      // (1) Lenient trigger — block future placeholder INSERT (length=64 hex-only check)
+      // GLOB '[^...]' negation 真 SQLite syntax (NOT '[!...]' — Linux glob 真 SQLite 不支持).
+      sqlite.exec(`
+        CREATE TRIGGER chain_events_txid_format_check
+        BEFORE INSERT ON chain_events
+        WHEN NEW.event_type LIKE 'broker_%'
+        BEGIN
+          SELECT RAISE(ABORT, 'chain_events.txid must be 64-hex chain hash for broker_* events (no placeholder allowed)')
+          WHERE length(NEW.txid) != 64
+             OR NEW.txid GLOB '*[^a-fA-F0-9]*';
+        END;
+      `);
+      console.log('[migrate] v83: trigger chain_events_txid_format_check created (lenient hex-format, race-safe vs indexer lag).');
+
+      // (3) Partial UNIQUE INDEX refund_tx_hash WHERE NOT NULL — ALTER OK
+      sqlite.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_retail_dex_refund_tx_unique
+        ON retail_dex_orders(refund_tx_hash) WHERE refund_tx_hash IS NOT NULL
+      `);
+      console.log('[migrate] v83: idx_retail_dex_refund_tx_unique partial UNIQUE INDEX created.');
+
+      // (2) + (4) Recreate retail_dex_orders 加 CHECK + FK (SQLite 唯一 path)
+      sqlite.exec(`PRAGMA foreign_keys = OFF`);
+      sqlite.exec(`
+        CREATE TABLE retail_dex_orders_v83 (
+          id TEXT PRIMARY KEY,
+          user_kasia_address TEXT NOT NULL,
+          side TEXT NOT NULL CHECK(side IN ('buy_kas','sell_kas')),
+          order_type TEXT NOT NULL CHECK(order_type IN ('market','limit')),
+          qty TEXT,
+          price TEXT,
+          pay_chain TEXT,
+          pay_address TEXT,
+          receive_address TEXT,
+          quoted_usdt TEXT,
+          state TEXT NOT NULL DEFAULT 'aligning' CHECK(state IN ('aligning','confirming','awaiting_payment','paid','executing','completed','refunding','refunded','failed','expired')),
+          pay_tx_hash TEXT,
+          exchange_offer_id TEXT,
+          deliver_tx_hash TEXT,
+          refund_tx_hash TEXT,
+          error_reason TEXT,
+          expires_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          agent_pay_addr TEXT,
+          mid_price_at_quote TEXT,
+          group_id TEXT,
+          broker_fee_kas TEXT,
+          net_delivery_kas TEXT,
+          expires_user_set TEXT,
+          -- v83 (2): state='refunded' ↔ refund_tx_hash NOT NULL
+          CHECK (
+            (state = 'refunded' AND refund_tx_hash IS NOT NULL) OR
+            (state != 'refunded')
+          ),
+          -- v83 (4): FK exchange_offer_id → exchange_offers.id ON DELETE SET NULL
+          FOREIGN KEY (exchange_offer_id) REFERENCES exchange_offers(id) ON DELETE SET NULL
+        );
+      `);
+      const copied = sqlite.prepare(`
+        INSERT INTO retail_dex_orders_v83
+          (id, user_kasia_address, side, order_type, qty, price, pay_chain, pay_address,
+           receive_address, quoted_usdt, state, pay_tx_hash, exchange_offer_id, deliver_tx_hash,
+           refund_tx_hash, error_reason, expires_at, created_at, updated_at, agent_pay_addr,
+           mid_price_at_quote, group_id, broker_fee_kas, net_delivery_kas, expires_user_set)
+        SELECT id, user_kasia_address, side, order_type, qty, price, pay_chain, pay_address,
+               receive_address, quoted_usdt, state, pay_tx_hash, exchange_offer_id, deliver_tx_hash,
+               refund_tx_hash, error_reason, expires_at, created_at, updated_at, agent_pay_addr,
+               mid_price_at_quote, group_id, broker_fee_kas, net_delivery_kas, expires_user_set
+        FROM retail_dex_orders
+      `).run();
+      sqlite.exec(`DROP TABLE retail_dex_orders`);
+      sqlite.exec(`ALTER TABLE retail_dex_orders_v83 RENAME TO retail_dex_orders`);
+      sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_retail_dex_user ON retail_dex_orders(user_kasia_address, state)`);
+      sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_retail_dex_state ON retail_dex_orders(state, updated_at)`);
+      sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_retail_dex_refund_tx_unique ON retail_dex_orders(refund_tx_hash) WHERE refund_tx_hash IS NOT NULL`);
+      console.log(`[migrate] v83: retail_dex_orders recreated with CHECK invariant 2 + FK invariant 4 (${copied.changes} row copied).`);
+
+      // (5) Recreate exchange_offers 加 CHECK enum protocol_status (SQLite 唯一 path)
+      sqlite.exec(`
+        CREATE TABLE exchange_offers_v83 (
+          id                  TEXT PRIMARY KEY,
+          broadcast_tx_id     TEXT NOT NULL,
+          message_index       INTEGER NOT NULL DEFAULT 0,
+          give_asset          TEXT NOT NULL,
+          give_amount         TEXT NOT NULL,
+          give_chain          TEXT,
+          want_asset          TEXT NOT NULL,
+          want_amount         TEXT NOT NULL,
+          want_chain          TEXT,
+          maker               TEXT NOT NULL,
+          broadcast_block     INTEGER,
+          broadcast_at        TEXT,
+          expires_at          TEXT,
+          verification        TEXT NOT NULL DEFAULT 'manual',
+          verification_meta   TEXT DEFAULT '{}',
+          protocol_status     TEXT NOT NULL DEFAULT 'open' CHECK(protocol_status IN ('open','matched','verifying','delivering','completed','refunded','failed','expired','timed_out','cancelled','disputed')),
+          is_fully_observed   INTEGER NOT NULL DEFAULT 0,
+          market_key          TEXT NOT NULL,
+          observed_by_node    TEXT,
+          taker               TEXT,
+          taker_tx_id         TEXT,
+          completed_at        TEXT,
+          created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+          accept_commitment   TEXT,
+          matched_at          TEXT,
+          verifying_started_at TEXT,
+          disputed_at         TEXT,
+          timed_out_at        TEXT,
+          cancelled_at        TEXT,
+          maker_confirmed_at  TEXT,
+          taker_confirmed_at  TEXT,
+          metadata            TEXT DEFAULT '{}',
+          taker_chain         TEXT,
+          taker_payment_address TEXT,
+          delivering_at       TEXT,
+          payment_tx          TEXT,
+          delivery_tx         TEXT,
+          UNIQUE(broadcast_tx_id, message_index)
+        );
+      `);
+      const copiedEO = sqlite.prepare(`
+        INSERT INTO exchange_offers_v83 SELECT * FROM exchange_offers
+      `).run();
+      sqlite.exec(`DROP TABLE exchange_offers`);
+      sqlite.exec(`ALTER TABLE exchange_offers_v83 RENAME TO exchange_offers`);
+      sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_exchange_offers_market_key ON exchange_offers(market_key)`);
+      sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_exchange_offers_status ON exchange_offers(protocol_status)`);
+      sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_exchange_offers_maker ON exchange_offers(maker)`);
+      sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_exchange_offers_broadcast_at ON exchange_offers(broadcast_at)`);
+      sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_exchange_offers_payment_tx_unique ON exchange_offers(payment_tx) WHERE payment_tx IS NOT NULL`);
+      sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_offers_open_expires ON exchange_offers(expires_at) WHERE protocol_status = 'open' AND expires_at IS NOT NULL`);
+      console.log(`[migrate] v83: exchange_offers recreated with CHECK invariant 5 protocol_status enum (${copiedEO.changes} row copied).`);
+
+      sqlite.exec(`PRAGMA foreign_keys = ON`);
+      console.log('[migrate] v83: 5 invariants enforce complete (atomic state machine schema-level).');
+    }
+  }
+
   // v80 (Phase E v2 召会 议题 7 — Owner 22:xx 钦定 broker = 用户长期 profile 收集器):
   // broker_conversations 加 completed_at INTEGER stub field, Phase 2 (broker_user_profile 表)
   // cron 扫此字段 sediment per-peer 长期偏好 (preferred_chain / typical_qty / total_completed 等).
