@@ -2718,6 +2718,12 @@ export function runMigrations() {
       sqlite.exec(`ALTER TABLE exchange_offers ADD COLUMN settle_grace_min INTEGER DEFAULT 5`);
       console.log('[migrate] v84(d): exchange_offers.settle_grace_min INTEGER DEFAULT 5 added.');
     }
+    // (e) filled_qty 累积 chunk fill 量 (matched amount, 区分 give_amount 原 offer 量).
+    // exchange-machine.processAccept 写入 transition('matched') extra. 缺省 0.
+    if (!colNames.includes('filled_qty')) {
+      sqlite.exec(`ALTER TABLE exchange_offers ADD COLUMN filled_qty REAL DEFAULT 0`);
+      console.log('[migrate] v84(e): exchange_offers.filled_qty REAL DEFAULT 0 added.');
+    }
   }
 
   console.log('[migrate] DB migrations complete.');

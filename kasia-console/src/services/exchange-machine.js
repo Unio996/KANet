@@ -305,6 +305,35 @@ export function processAccept(msg) {
     return null;
   }
 
+  // ── Partial fill (NWT 2026-04-29 broker-v2 阶段 2 task 2/7) ──
+  // Owner 钦定 限价单簿 partial fill: accept_v1 可指定 amount (chunk_qty < give_amount).
+  // 缺省 amount = full give_amount (向后兼容). MVP single-chunk-per-offer (multi-taker 由
+  // market-seeder republish 残量实现, multi-chunk-per-offer 留 phase 2).
+  const offerGiveAmount = parseFloat(offer.give_amount);
+  const requestedAmount = msg.amount !== undefined && msg.amount !== null
+    ? parseFloat(msg.amount)
+    : offerGiveAmount;
+  if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
+    console.log(`[exchange-machine] Accept rejected: invalid amount ${msg.amount} (offer ${offer.id.slice(0,8)})`);
+    return null;
+  }
+  if (requestedAmount > offerGiveAmount + 1e-9) {
+    console.log(`[exchange-machine] Accept rejected: amount ${requestedAmount} > give_amount ${offerGiveAmount} (offer ${offer.id.slice(0,8)})`);
+    return null;
+  }
+
+  // 1% price tolerance check (phase 1 single param). 仅当 msg.price 提供时校验.
+  if (msg.price !== undefined && msg.price !== null && offerGiveAmount > 0) {
+    const offerPrice = parseFloat(offer.want_amount) / offerGiveAmount;
+    const requestedPrice = parseFloat(msg.price);
+    const tolerance = offer.price_tolerance != null ? parseFloat(offer.price_tolerance) : 0.01;
+    if (offerPrice > 0 && Number.isFinite(requestedPrice) &&
+        Math.abs(requestedPrice - offerPrice) / offerPrice > tolerance + 1e-9) {
+      console.log(`[exchange-machine] Accept rejected: price ${requestedPrice} exceeds ${(tolerance*100).toFixed(2)}% tolerance vs offer ${offerPrice} (offer ${offer.id.slice(0,8)})`);
+      return null;
+    }
+  }
+
   // Validate accept_commitment (if provided)
   const commitment = msg.accept_commitment || crypto.createHash('sha256')
     .update(`${msg.offer_id}${msg._from}${Date.now()}`)
@@ -323,7 +352,7 @@ export function processAccept(msg) {
       .run(msg.selected_chain || null, msg.receive_address || null, JSON.stringify(meta), offer.id);
   }
 
-  // Transition: open → matched
+  // Transition: open → matched (含 filled_qty 记录 partial fill 量)
   // T-NWT-2026-04-26 self-accept fix follow-up: taker 字段同 self-accept check 逻辑 —
   // broker 代发时真 taker 在 receive_address (msg._from = broker 信使).
   // 普通 client 不 carry receive_address → fallback msg._from.
@@ -331,7 +360,33 @@ export function processAccept(msg) {
     taker: msg.receive_address || msg._from,
     taker_tx_id: msg._tx,
     accept_commitment: commitment,
+    filled_qty: requestedAmount,
   });
+
+  // ── chain_events broker_chunk_filled audit (NWT v84 partial fill spec) ──
+  // Audit trail 给 order-book.getOrderStatus sub_chunks 渲染. txid 必 64 hex (v83 trigger).
+  // msg._tx 来自 accept_v1 chain TX, 应为 64 hex; 不合规 recordChainEvent 自 try/catch 吞.
+  try {
+    if (msg._tx && msg._tx.length === 64) {
+      recordChainEvent({
+        txid: msg._tx,
+        eventType: 'broker_chunk_filled',
+        fromAddress: msg.receive_address || msg._from,
+        toAddress: offer.maker,
+        payload: {
+          order_id: offer.id,
+          chunk_qty: requestedAmount,
+          chunk_price: msg.price !== undefined ? parseFloat(msg.price) : null,
+          taker_addr: msg.receive_address || msg._from,
+          offer_give_amount: offerGiveAmount,
+          offer_want_asset: offer.want_asset,
+          offer_give_asset: offer.give_asset,
+        },
+      });
+    }
+  } catch (auditErr) {
+    console.warn(`[exchange-machine] broker_chunk_filled audit failed: ${auditErr.message}`);
+  }
 
   // Route to verification
   return routeToVerification(matched);
