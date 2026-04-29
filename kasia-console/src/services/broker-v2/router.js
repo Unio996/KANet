@@ -98,12 +98,16 @@ export async function handleMessage(peer, msg) {
   }
 
   // post-seedDraft: 写其他 fields (direction 已 seed 到 side col, 不重写)
+  let fieldsWrittenThisTurn = false;
   for (const [pname, pvalue] of Object.entries(fields)) {
     if (pname === 'direction') continue;  // already seeded into 'side' col
     const colName = FIELD_MAP[pname];
     if (!colName) continue;
-    state.setField(peer, colName, pvalue);
+    const r = state.setField(peer, colName, pvalue);
+    if (r?.set) fieldsWrittenThisTurn = true;
   }
+  // direction 也算本 turn 写字段 (seedDraft 触发)
+  if (fields.direction) fieldsWrittenThisTurn = true;
 
   draft = state.getActiveDraft(peer);
 
@@ -129,8 +133,10 @@ export async function handleMessage(peer, msg) {
     return `还差: ${_listMissing(draft)}. 告诉我后我会展示订单画像让你最后确认.`;
   }
 
-  // 8. complete draft + 'aligning' → render preview (NOT advance state, 留 'aligning' 等下 turn 'YES')
-  if (draft?.complete && draft.state === 'aligning') {
+  // 8. complete draft + 'aligning' + 本 turn 写了字段 → render preview
+  // 仅本 turn 写字段时 re-render (user 改 qty 后 re-quote). 没写字段的 turn (复合 intent 'YES, 价格建议?'
+  // 或者纯 question) 落 step 9 LLM, 防 step 8 拦截 LLM 答 question.
+  if (draft?.complete && draft.state === 'aligning' && fieldsWrittenThisTurn) {
     try {
       const preview = await orderBook.computePreview(peer, draft);
       if (!preview.ok) {
@@ -143,14 +149,16 @@ export async function handleMessage(peer, msg) {
     }
   }
 
-  // 9. draft 不全 → LLM 自然语言问字段
+  // 9. draft 不全 OR 本 turn 没写字段 → LLM render (问字段 OR 答 question / 复合 intent)
+  const completeBeforeLlm = !!draft?.complete;
   const profile = _loadProfile(peer);
   const contact = _loadContact(peer);
   const reply = await llm.render(peer, msg, draft, profile, contact);
 
-  // 10. post-LLM tool_calls 可能写字段 → re-check complete (但不 advance, 等 user 'YES')
+  // 10. post-LLM: 仅 LLM tool_call 补全字段 (pre-LLM 不 complete → post-LLM complete) 时 render preview
+  // 不重 render 已 complete draft (复合 intent 'YES, 价格建议?' LLM 答 question 不破 preview).
   draft = state.getActiveDraft(peer);
-  if (draft?.complete && draft.state === 'aligning') {
+  if (!completeBeforeLlm && draft?.complete && draft.state === 'aligning') {
     try {
       const preview = await orderBook.computePreview(peer, draft);
       if (preview.ok) return preview.preview_text;
