@@ -825,17 +825,18 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
       console.log(`[exchange] offer ${offer_id.slice(0,8)} payment verified → delivering (${vr.actualAmount} USDT, ${vr.confirmations}/${vr.required} conf)`);
 
       // D2 (NWT broker-v2 phase 1 r6): retail_dex_orders.state lifecycle 写 executing.
-      // self-review fix (NWT a333 dig 2 Critical):
-      //   - SELL flow user_kasia_address ≠ offer.taker (broker = maker, taker 是 market taker)
-      //     → 解 verification_meta.user_kasia_address (broker 发 offer 时 set) OR exchange_offer_id 直链
+      // self-review fix v2 (J2 2e5a926a cross review ❌ critical 修):
+      //   - 改读 metadata.user_kasia_address (verification_meta 实际不存此字段)
+      //   - empirical evidence: broker-intake-watcher.js L188 set metadata.user_kasia_address (SELL flow)
+      //   - verification_meta 仅含 accepted_chains/expected_asset 等 verifier hints
       //   - 多 row advance 风险 → SELECT specific row id + UPDATE WHERE id=? (LIMIT 1 等价)
       try {
-        // 1) link 优先: exchange_offer_id (post-finalize 链, 仅 BUY flow 现 set; SELL flow 待 D2.1 修 finalizeSell)
-        // 2) fallback: verification_meta.user_kasia_address (SELL flow broker 发 offer 时存)
+        // 1) link 优先: exchange_offer_id (post-finalize 链)
+        // 2) fallback: metadata.user_kasia_address (SELL flow broker-intake-watcher.js L188 set)
         // 3) fallback: offer.taker (BUY flow user = taker)
         let metaUserAddr = null;
         try {
-          const meta = JSON.parse(deliveringOffer.verification_meta || '{}');
+          const meta = JSON.parse(deliveringOffer.metadata || '{}');
           if (meta.user_kasia_address && typeof meta.user_kasia_address === 'string' && meta.user_kasia_address.startsWith('kaspa:')) {
             metaUserAddr = meta.user_kasia_address;
           }
@@ -986,12 +987,13 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
               transition(offer_id, 'completed', { txHash: deliveryTxId });
 
               // D2 (NWT broker-v2 phase 1 r6): retail_dex_orders.state lifecycle 写 completed + deliver_tx_hash.
-              // self-review fix (NWT a333 dig): 同 'executing' wire — verification_meta.user_kasia_address fallback +
-              // SELECT specific row id 防多 row advance.
+              // self-review fix v2 (J2 2e5a926a cross review ❌ critical 修):
+              //   - 改读 metadata.user_kasia_address (broker-intake-watcher.js L188 set, SELL flow link)
+              //   - SELECT specific row id 防多 row advance
               try {
                 let metaUserAddr2 = null;
                 try {
-                  const meta = JSON.parse(deliveringOffer.verification_meta || '{}');
+                  const meta = JSON.parse(deliveringOffer.metadata || '{}');
                   if (meta.user_kasia_address && typeof meta.user_kasia_address === 'string' && meta.user_kasia_address.startsWith('kaspa:')) {
                     metaUserAddr2 = meta.user_kasia_address;
                   }
