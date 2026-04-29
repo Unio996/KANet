@@ -53,23 +53,6 @@ function _findRefundableOffers(peerAddr) {
   const brokerAddr = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id=?`).get(BROKER_RELAY_ID)?.address;
   if (!brokerAddr) return [];
 
-  // R-NWT-2026-04-29 EMERGENCY P0 (Owner real-test 真测 broker 真**误退 87.9 KAS chain TX 1324bfb6...):
-  // cancel current draft (state='aligning'/'confirming') 真**真**真 broker 真**没收 user payment**, 真**真 nothing to refund.
-  // 旧 logic 真**真**真 sweep 3hr window exchange_offers 真**真 picks up stale awaiting_payment offer**
-  // 真**真 误 fire sendKas refund chain TX → broker pool 资产流失.
-  // Fix: 真**真**真**真 retail_dex_orders.state 'aligning'/'confirming' (pre-payment draft) → 真 return [].
-  // 仅当 retail_dex_orders.state='awaiting_payment' (broker 真**真**已 publish offer 真持 KAS) 真**真 sweep refundable.
-  const currentDraft = sqlite.prepare(`
-    SELECT state FROM retail_dex_orders
-    WHERE user_kasia_address = ? AND state IN ('aligning','confirming','awaiting_payment')
-    ORDER BY created_at DESC LIMIT 1
-  `).get(peerAddr);
-  if (!currentDraft || currentDraft.state === 'aligning' || currentDraft.state === 'confirming') {
-    // user cancel pre-payment draft — 真**真 nothing to refund. fall handler clearState only.
-    console.log(`[cancel-refund] R-NWT-EMERGENCY: peer=${peerAddr.slice(-12)} current state=${currentDraft?.state || 'none'}, no refund TX (pre-payment cancel)`);
-    return [];
-  }
-
   // Bug-Z18+ status 扩 (Owner 04:33 真测撞 expired offer 真**真 catch).
   // 'open' = 还在挂单 + 'expired'/'timed_out' = TTL 到/超时 (broker 仍持 KAS, J1 Z20 timeout sweep
   // 5min tick refund, 但 user explicit cancel 立即 catch + 解释 "已挂 timeout sweep, 1 分钟内退").
