@@ -171,11 +171,12 @@ export async function handleMessage(peer, msg) {
 }
 
 function _listMissing(draft) {
-  if (!draft) return '方向 (买/卖) + 数量 + 资产 + 链 + 收款地址';
+  // post 3ce77b62f: 删 FIELD_MAP['asset'], retail_dex_orders 无 asset col, draft.asset 永 undefined.
+  // phase 1 hardcode KAS only — 不再列 '资产' (NWT 4cbbaf78 critical fix).
+  if (!draft) return '方向 (买/卖) + 数量 + 链 + 收款地址';
   const m = [];
   if (!draft.side) m.push('方向 (买/卖)');
   if (!draft.qty) m.push('数量');
-  if (!draft.asset) m.push('资产 (KAS/USDT/USDC)');
   if (!draft.pay_chain) m.push('链 (BSC/Polygon/SOL/TRON)');
   if (draft.side === 'sell_kas' && !draft.pay_address) m.push('EVM 收款地址 (0x...)');
   return m.join(' / ');
