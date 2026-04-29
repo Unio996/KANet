@@ -154,6 +154,43 @@ export async function registerConversationRoutes(fastify) {
       const result = await _scanExpiredBrokerOffers();
       return { ok: true, ...result };
     });
+
+    // T-J2-2026-04-29 (J1 #81 e6de8625 fundamental fix): sendKas mock cross-process isolation.
+    // test runner 真 separate node process, console 跑 broker-action-queue 真 separate process.
+    // module-scoped _executeOverride 真 per-process isolated → test process mock 不 affect console.
+    // 修: expose endpoint, runner HTTP POST → console process inject mock (同 process broker-action-queue).
+    fastify.post('/api/test/inject-send-kas-mock', async (_request, _reply) => {
+      const { _testInjectExecute } = await import('../services/broker-action-queue.js');
+      const { randomUUID } = await import('node:crypto');
+      _testInjectExecute(async (action) => {
+        if (action.kind === 'sendKas') {
+          // 64-hex fake hash (post-v83 trigger length=64 + hex-only PASS)
+          const fakeTxId = (randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '')).slice(0, 64);
+          // 同时 INSERT kaspa_tx_log mock row 真 Track A chain-truth dedup query 真 hit
+          // (cover idempotency invariant: 第二 trigger isOfferAlreadyRefunded → kaspa_tx_log 真找到)
+          const peer = action.peer;
+          const amount = parseFloat(action.payload?.amount_kas || 0);
+          if (peer && amount > 0) {
+            try {
+              const { sqlite } = await import('../db/client.js');
+              sqlite.prepare(`
+                INSERT OR IGNORE INTO kaspa_tx_log (tx_id, block_time, to_address, amount, observed_at, network)
+                VALUES (?, ?, ?, ?, datetime('now'), 'test')
+              `).run(fakeTxId, Math.floor(Date.now() / 1000), peer, amount);
+            } catch (e) { /* silent fail OK, mock continues */ }
+          }
+          return { ok: true, txId: fakeTxId, fee: '0.001' };
+        }
+        return { ok: true };
+      });
+      return { ok: true, mocked: true };
+    });
+
+    fastify.post('/api/test/reset-send-kas-mock', async (_request, _reply) => {
+      const { _testResetExecute } = await import('../services/broker-action-queue.js');
+      _testResetExecute();
+      return { ok: true, reset: true };
+    });
   }
 
   // R34 (J1 R26 territory, P1 race anti-spam): in-process dedup cache 防 console-direct 入口
