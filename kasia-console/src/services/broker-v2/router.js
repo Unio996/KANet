@@ -128,6 +128,17 @@ export async function handleMessage(peer, msg) {
     }
   }
 
+  // bug 3 R33 cover (J2 db649ba9 cross review catch — R33 direction flip 之前 silent fallthrough):
+  // existing draft + parser fields.direction 跟 draft.side 不同 → user 试 direction flip → 直接 ack lock,
+  // 不 fall through (避 LLM hallucinate '已改' OR fallback empty UX).
+  if (draft && fields.direction) {
+    const requestedSide = fields.direction === 'sell' ? 'sell_kas' : 'buy_kas';
+    if (draft.side !== requestedSide) {
+      const lockedSide = draft.side === 'sell_kas' ? '卖' : '买';
+      return `订单已锁定 方向 ${lockedSide} KAS. 想改请回 "取消" 重新下单.`;
+    }
+  }
+
   // post-seedDraft: 写其他 fields (direction 已 seed 到 side col, 不重写)
   let fieldsWrittenThisTurn = false;
   let lockRejectReason = null;  // bug 3 fix: R31/R33 SQL guard reject 直接 ack 不 fallthrough LLM
