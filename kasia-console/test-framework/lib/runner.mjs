@@ -460,6 +460,51 @@ const actions = {
   },
 
   /**
+   * Simulate user paid 88 KAS to broker — direct INSERT exchange_offer (state='expired') + retail_dex_orders (state='awaiting_payment').
+   * 测试 framework helper for double_refund_idempotency case.
+   * step: { action: 'setup_simulate_paid_offer', peer_addr, offer_id?, qty_kas, give_amount }
+   */
+  async setup_simulate_paid_offer(step, ctx) {
+    const db = new Database(DB_PATH);
+    const offerId = step.offer_id || `test-offer-${Date.now().toString(36).slice(-8)}`;
+    const orderId = `test-order-${Date.now().toString(36).slice(-8)}`;
+    const now = new Date().toISOString();
+    const brokerRelayId = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+    const brokerAddr = db.prepare('SELECT address FROM relay_nodes WHERE id=?').get(brokerRelayId)?.address;
+    if (!brokerAddr) { db.close(); return { ok: false, error: 'broker addr not found' }; }
+    db.prepare(`
+      INSERT INTO exchange_offers (id, maker, give_asset, give_amount, want_asset, want_amount, protocol_status, created_at, broadcast_at, metadata)
+      VALUES (?, ?, 'KAS', ?, 'USDT', ?, 'expired', ?, ?, ?)
+    `).run(offerId, brokerAddr, String(step.give_amount), '0.034', now, now, JSON.stringify({ user_kasia_address: step.peer_addr, intent_qty: step.qty_kas }));
+    db.prepare(`
+      INSERT INTO retail_dex_orders (id, user_kasia_address, side, order_type, qty, pay_chain, pay_address, state, exchange_offer_id, created_at, updated_at)
+      VALUES (?, ?, 'sell_kas', 'limit', ?, 'bnb', ?, 'awaiting_payment', ?, ?, ?)
+    `).run(orderId, step.peer_addr, String(step.qty_kas), '0x' + 'a'.repeat(40), offerId, now, now);
+    db.close();
+    return { ok: true, offer_id: offerId, order_id: orderId };
+  },
+
+  /**
+   * Trigger broker-intake-watcher refund sweep manually (instead of waiting 5min cron).
+   * step: { action: 'trigger_refund_sweep', peer_addr }
+   */
+  async trigger_refund_sweep(step, ctx) {
+    const PORT = process.env.PORT || 3100;
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT}/api/test/trigger-refund-sweep`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ peer_addr: step.peer_addr }),
+      });
+      if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+      return await res.json();
+    } catch (e) {
+      // fallback: SQL-only — set offer to expired+old timestamp 真 broker-intake-watcher next tick will sweep
+      // OR: import broker-intake-watcher._scanExpiredBrokerOffers directly (J2 territory, NWT 不 cross)
+      return { ok: false, error: e.message, note: 'manual refund sweep endpoint not exposed' };
+    }
+  },
+
+  /**
    * Wait for broker to have sent an outbound message to peer (via chain DM).
    * Polls messages table for outbound row from broker → peer with optional content match.
    * Use realLocalPeer() (not freshTestPeer) for the peer arg, otherwise broker chain DM
@@ -624,7 +669,17 @@ const assertions = {
     const row = step_result.row || step_result.rows?.[0];
     if (!row) return { pass: false, expected: spec, actual: null, msg: 'no row to check' };
     for (const [k, expected] of Object.entries(spec || {})) {
-      if (row[k] !== expected) return { pass: false, expected: { [k]: expected }, actual: { [k]: row[k] }, msg: `row.${k}='${row[k]}' (want '${expected}')` };
+      const actual = row[k];
+      // R-NWT-2026-04-29 细节 6: numeric equality — broker stores qty as float string ('50.0')
+      // but assertion may want int string ('50') or number (50). schema retail_dex_orders.qty
+      // is TEXT, so JS comparison 'a == b' fails on '50.0' vs '50'. Use numeric coerce when
+      // both sides parse as finite numbers.
+      const expNum = typeof expected === 'number' ? expected : parseFloat(expected);
+      const actNum = typeof actual === 'number' ? actual : parseFloat(actual);
+      const numericOk = Number.isFinite(expNum) && Number.isFinite(actNum) && expNum === actNum;
+      if (actual !== expected && !numericOk) {
+        return { pass: false, expected: { [k]: expected }, actual: { [k]: actual }, msg: `row.${k}='${actual}' (want '${expected}')` };
+      }
     }
     return { pass: true, expected: spec, actual: row };
   },
