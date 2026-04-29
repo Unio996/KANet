@@ -85,6 +85,10 @@ if [ -f "$ENV_FILE" ]; then
       OPENCLAW_TOKEN)          OPENCLAW_TOKEN="$v" ;;
       KASPA_NODE)              KASPA_NODE="$v" ;;
       KASPA_WS_PROXY_PORT)     KASPA_WS_PROXY_PORT="$v" ;;
+      # NWT 8aef0b5e critical fix — kanet.env 写但 case 未 match key 静默被忽略
+      # BROKER_V2_ENABLED + BROKER_V2_ENABLED_PEERS broker-v2 phase 1 cutover gating 必 export
+      BROKER_V2_ENABLED)       export BROKER_V2_ENABLED="$v" ;;
+      BROKER_V2_ENABLED_PEERS) export BROKER_V2_ENABLED_PEERS="$v" ;;
     esac
   done < "$ENV_FILE"
   ok "已加载配置: $ENV_FILE"
