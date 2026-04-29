@@ -186,12 +186,17 @@ export function setConvoStateLock(peer, fields) {
     const newPayAddress = fields.direction === 'sell' ? (fields.recv_address || null) : null;
     const newReceiveAddress = null;  // SELL/BUY 都 NULL — finalize 真 set (broker addr OR exchange offer)
     const newAgentPayAddr = fields.direction === 'buy' ? (fields.evm_pay_address || null) : null;
+    // Step 2 J1 territory ship (J1 #65 design v4 Sec C): quote-time fields write at preview/state advance.
+    // mid_price_at_quote / broker_fee_kas / net_delivery_kas — NWT critical 发现 #2 prerequisite.
+    // 100% NULL pre-Step-2 (J1 host audit), Step 2 ship 后 INSERT/UPDATE 真 populate.
     sqlite.prepare(`
       INSERT INTO retail_dex_orders
         (id, user_kasia_address, side, order_type, qty, price, pay_chain, pay_address,
          receive_address, agent_pay_addr, state,
+         mid_price_at_quote, broker_fee_kas, net_delivery_kas,
          created_at, updated_at, expires_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'aligning',
+              ?, ?, ?,
               datetime('now'), datetime('now'), datetime('now', '+30 minutes'))
     `).run(
       id, peer, newSide, 'limit',
@@ -201,6 +206,9 @@ export function setConvoStateLock(peer, fields) {
       newPayAddress,
       newReceiveAddress,
       newAgentPayAddr,
+      fields.mid_price_at_quote != null ? String(fields.mid_price_at_quote) : null,
+      fields.broker_fee_kas != null ? String(fields.broker_fee_kas) : null,
+      fields.net_delivery_kas != null ? String(fields.net_delivery_kas) : null,
     );
     return getConvoState(peer);
   }
@@ -227,6 +235,8 @@ export function setConvoStateLock(peer, fields) {
     ? (PHASE_TO_ORDER_STATE[fields.lifecycle_phase] || existing.state)
     : existing.state;
 
+  // Step 2 J1 territory ship (J1 #65 design v4 Sec C): quote-time fields UPDATE at preview/advance.
+  // COALESCE(:new, existing) — overwrite when caller provides new value, else preserve existing.
   const updateRes = sqlite.prepare(`
     UPDATE retail_dex_orders
     SET side = COALESCE(side, :side),
@@ -236,6 +246,9 @@ export function setConvoStateLock(peer, fields) {
         pay_address = COALESCE(pay_address, :pay_address),
         receive_address = COALESCE(receive_address, :receive_address),
         agent_pay_addr = COALESCE(agent_pay_addr, :agent_pay_addr),
+        mid_price_at_quote = COALESCE(:mid_price_at_quote, mid_price_at_quote),
+        broker_fee_kas = COALESCE(:broker_fee_kas, broker_fee_kas),
+        net_delivery_kas = COALESCE(:net_delivery_kas, net_delivery_kas),
         state = :state,
         updated_at = datetime('now')
     WHERE id = :id
@@ -251,6 +264,9 @@ export function setConvoStateLock(peer, fields) {
     pay_address: newPayAddress,
     receive_address: newReceiveAddress,
     agent_pay_addr: newAgentPayAddr,
+    mid_price_at_quote: fields.mid_price_at_quote != null ? String(fields.mid_price_at_quote) : null,
+    broker_fee_kas: fields.broker_fee_kas != null ? String(fields.broker_fee_kas) : null,
+    net_delivery_kas: fields.net_delivery_kas != null ? String(fields.net_delivery_kas) : null,
     state: newOrderState,
   });
 

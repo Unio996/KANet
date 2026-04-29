@@ -414,6 +414,24 @@ async function _executeToolImpl(peer, name, args) {
         const { _setPendingPreview } = await import('./broker-buy-handler.js');
         _setPendingPreview(peer, { direction: 'sell', qty, pay_chain: chain, give_asset, receive_address: address });
       } catch (e) { console.warn(`[broker-llm Layer7] sell pendingPreview set fail: ${e.message}`); }
+
+      // J1 #65 Step 2 (J1 territory ship per J2 02:40 ack): quote-time fields write at preview shown.
+      // SELL: sellPreview returns unit_price/fee/net_give 真**真**真 explicit fields, write retail_dex_orders
+      // mid_price_at_quote / broker_fee_kas / net_delivery_kas. NWT critical 发现 #2 prerequisite.
+      // BUY 路径 multi-pick aggregation 真**真** Step 2b future scope (J1 #65 noted).
+      try {
+        setConvoStateLock(peer, {
+          direction: 'sell',
+          mid_price_at_quote: r.unit_price ?? null,
+          broker_fee_kas: r.fee ?? null,
+          net_delivery_kas: r.net_give ?? null,
+          lifecycle_phase: 'preview_shown',
+        });
+      } catch (e) {
+        if (e.code !== 'CONVO_STATE_DIRECTION_LOCK') {
+          console.warn(`[broker-llm Step 2 SELL] quote-time write err: ${e.message}`);
+        }
+      }
       return r;
     }
     return { ok: true, preview_text: `抱歉, 未知方向 "${direction}". 请回 "买 X KAS" 或 "卖 X KAS".` };
