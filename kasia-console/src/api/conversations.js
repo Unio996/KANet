@@ -170,6 +170,9 @@ export async function registerConversationRoutes(fastify) {
       const { _testInjectExecute, _defaultExecute } = await import('../services/broker-action-queue.js');
       const { randomUUID } = await import('node:crypto');
       _testInjectExecute(async (action) => {
+        // T-J2-2026-04-29 (J1 #91 + NWT bd08e518 propose debug log): trace mock callback invocation
+        // 真 confirm hypothesis 3 peer string mismatch OR _testPeerSet state.
+        console.log(`[mock-debug] kind=${action.kind} peer=${(action.peer || '').slice(-16)} peer.length=${action.peer?.length || 0} setSize=${_testPeerSet.size} has=${_testPeerSet.has(action.peer)}`);
         // J1 #86 vote Q1 fail-closed: empty Set OR peer 不 registered → real chain TX (production protect).
         if (!_testPeerSet.has(action.peer)) {
           return await _defaultExecute(action);

@@ -245,6 +245,7 @@ export async function _scanExpiredBrokerOffers() {
       AND e.payload LIKE '%"offer_id":"' || exchange_offers.id || '"%'
       AND e.txid IN (SELECT tx_id FROM kaspa_tx_log)
     )
+    AND json_extract(metadata, '$.user_kasia_address') IS NOT NULL
     ORDER BY broadcast_at DESC
     LIMIT 10
   `).all(trader.address);
