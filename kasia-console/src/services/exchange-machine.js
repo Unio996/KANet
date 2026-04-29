@@ -825,17 +825,37 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
       console.log(`[exchange] offer ${offer_id.slice(0,8)} payment verified → delivering (${vr.actualAmount} USDT, ${vr.confirmations}/${vr.required} conf)`);
 
       // D2 (NWT broker-v2 phase 1 r6): retail_dex_orders.state lifecycle 写 executing.
-      // 单一状态机 — exchange_offers.protocol_status 是 chain 协议状态, retail_dex_orders.state
-      // 是 broker session 状态. paid → executing transition 这里 hook (post payment verified, pre deliver).
-      // link by exchange_offer_id (SELL flow 链) OR user_kasia_address fallback (BUY flow multi-maker).
+      // self-review fix (NWT a333 dig 2 Critical):
+      //   - SELL flow user_kasia_address ≠ offer.taker (broker = maker, taker 是 market taker)
+      //     → 解 verification_meta.user_kasia_address (broker 发 offer 时 set) OR exchange_offer_id 直链
+      //   - 多 row advance 风险 → SELECT specific row id + UPDATE WHERE id=? (LIMIT 1 等价)
       try {
-        const upd = sqlite.prepare(`
-          UPDATE retail_dex_orders SET state = 'executing', updated_at = datetime('now')
+        // 1) link 优先: exchange_offer_id (post-finalize 链, 仅 BUY flow 现 set; SELL flow 待 D2.1 修 finalizeSell)
+        // 2) fallback: verification_meta.user_kasia_address (SELL flow broker 发 offer 时存)
+        // 3) fallback: offer.taker (BUY flow user = taker)
+        let metaUserAddr = null;
+        try {
+          const meta = JSON.parse(deliveringOffer.verification_meta || '{}');
+          if (meta.user_kasia_address && typeof meta.user_kasia_address === 'string' && meta.user_kasia_address.startsWith('kaspa:')) {
+            metaUserAddr = meta.user_kasia_address;
+          }
+        } catch {}
+        const userAddr = metaUserAddr || deliveringOffer.taker || '';
+        // SELECT specific row 防多 row advance
+        const target = sqlite.prepare(`
+          SELECT id FROM retail_dex_orders
           WHERE (exchange_offer_id = ? OR (exchange_offer_id IS NULL AND user_kasia_address = ? AND created_at > datetime('now','-2 hours')))
             AND state IN ('paid', 'awaiting_payment')
-        `).run(offer_id, deliveringOffer.taker || '');
-        if (upd.changes > 0) {
-          console.log(`[exchange] D2 retail_dex_orders state lifecycle: ${upd.changes} row → 'executing' (offer ${offer_id.slice(0,8)})`);
+          ORDER BY created_at DESC LIMIT 1
+        `).get(offer_id, userAddr);
+        if (target?.id) {
+          const upd = sqlite.prepare(`
+            UPDATE retail_dex_orders SET state = 'executing', updated_at = datetime('now')
+            WHERE id = ? AND state IN ('paid', 'awaiting_payment')
+          `).run(target.id);
+          if (upd.changes > 0) {
+            console.log(`[exchange] D2 retail_dex_orders state lifecycle: ${target.id} → 'executing' (offer ${offer_id.slice(0,8)} userAddr=${userAddr.slice(-12)})`);
+          }
         }
       } catch (e) { console.warn(`[exchange] D2 executing UPDATE err: ${e.message}`); }
 
@@ -966,15 +986,31 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
               transition(offer_id, 'completed', { txHash: deliveryTxId });
 
               // D2 (NWT broker-v2 phase 1 r6): retail_dex_orders.state lifecycle 写 completed + deliver_tx_hash.
-              // executing → completed transition. 同 link 逻辑 (exchange_offer_id 优先, user_kasia_address fallback).
+              // self-review fix (NWT a333 dig): 同 'executing' wire — verification_meta.user_kasia_address fallback +
+              // SELECT specific row id 防多 row advance.
               try {
-                const upd = sqlite.prepare(`
-                  UPDATE retail_dex_orders SET state = 'completed', deliver_tx_hash = ?, updated_at = datetime('now')
+                let metaUserAddr2 = null;
+                try {
+                  const meta = JSON.parse(deliveringOffer.verification_meta || '{}');
+                  if (meta.user_kasia_address && typeof meta.user_kasia_address === 'string' && meta.user_kasia_address.startsWith('kaspa:')) {
+                    metaUserAddr2 = meta.user_kasia_address;
+                  }
+                } catch {}
+                const userAddr2 = metaUserAddr2 || deliveringOffer.taker || '';
+                const target = sqlite.prepare(`
+                  SELECT id FROM retail_dex_orders
                   WHERE (exchange_offer_id = ? OR (exchange_offer_id IS NULL AND user_kasia_address = ? AND created_at > datetime('now','-2 hours')))
                     AND state IN ('executing', 'paid', 'awaiting_payment')
-                `).run(deliveryTxId, offer_id, deliveringOffer.taker || '');
-                if (upd.changes > 0) {
-                  console.log(`[exchange] D2 retail_dex_orders state lifecycle: ${upd.changes} row → 'completed' (offer ${offer_id.slice(0,8)} tx ${deliveryTxId.slice(0,12)})`);
+                  ORDER BY created_at DESC LIMIT 1
+                `).get(offer_id, userAddr2);
+                if (target?.id) {
+                  const upd = sqlite.prepare(`
+                    UPDATE retail_dex_orders SET state = 'completed', deliver_tx_hash = ?, updated_at = datetime('now')
+                    WHERE id = ? AND state IN ('executing', 'paid', 'awaiting_payment')
+                  `).run(deliveryTxId, target.id);
+                  if (upd.changes > 0) {
+                    console.log(`[exchange] D2 retail_dex_orders state lifecycle: ${target.id} → 'completed' (offer ${offer_id.slice(0,8)} tx ${deliveryTxId.slice(0,12)})`);
+                  }
                 }
               } catch (e) { console.warn(`[exchange] D2 completed UPDATE err: ${e.message}`); }
               sqlite.prepare(`
