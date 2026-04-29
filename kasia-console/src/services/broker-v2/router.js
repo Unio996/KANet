@@ -23,11 +23,12 @@ import * as state from './state.js';
 import * as llm from './llm.js';
 import * as orderBook from './order-book.js';
 
-// parser fields → retail_dex_orders col name 映射
+// parser fields → retail_dex_orders col name 映射.
+// Note: 'asset' field 解 但不 setField — phase 1 hardcode KAS (retail_dex_orders 无 asset col).
+// Phase 2 backlog: 加 retail_dex_orders.give_asset col 支持 USDT/USDC 多 asset trade.
 const FIELD_MAP = {
   direction: 'side',          // buy → buy_kas / sell → sell_kas
   qty: 'qty',
-  asset: 'asset',
   chain: 'pay_chain',
   pay_address: 'pay_address',
   price_pref: 'price',
