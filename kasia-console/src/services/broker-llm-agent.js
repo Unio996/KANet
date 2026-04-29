@@ -391,6 +391,27 @@ async function _executeToolImpl(peer, name, args) {
       const r = await buyPreview({ user_kasia: peer, qty, pay_chain: chain, give_asset, receive_address: address || null, limit_price, refund_timeout_min });
       // T-J1-2026-04-28 Layer 7: tag direction='buy' so handleLlmDialog confirm shortcut routes correctly.
       if (r.ok) _setPendingPreview(peer, { direction: 'buy', qty, pay_chain: chain, give_asset, receive_address: address || null });
+
+      // J1 Step 2b BUY (J1 territory ship per J2 02:40 ack, completes Step 2 SELL 57436c7 BUY counterpart):
+      // BUY semantic: user pays USDT, broker delivers KAS (full qty, no KAS-side fee — fee 是 USDT spread).
+      //   mid_price_at_quote = unit_price_usdt (effective USDT/KAS rate)
+      //   broker_fee_kas = 0 (BUY 真 broker 不 take KAS fee)
+      //   net_delivery_kas = qty (user 真 full qty 不扣 KAS)
+      if (r.ok) {
+        try {
+          setConvoStateLock(peer, {
+            direction: 'buy',
+            mid_price_at_quote: r.unit_price_usdt ?? null,
+            broker_fee_kas: '0',  // BUY 真 0 KAS-side fee
+            net_delivery_kas: r.qty != null ? String(r.qty) : null,
+            lifecycle_phase: 'preview_shown',
+          });
+        } catch (e) {
+          if (e.code !== 'CONVO_STATE_DIRECTION_LOCK') {
+            console.warn(`[broker-llm Step 2b BUY] quote-time write err: ${e.message}`);
+          }
+        }
+      }
       return r;
     }
     if (direction === 'sell') {
