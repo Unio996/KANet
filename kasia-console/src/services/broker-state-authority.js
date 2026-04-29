@@ -179,8 +179,12 @@ export function setConvoStateLock(peer, fields) {
     }
     // INSERT new aligning row
     const id = `bso_${peer.slice(-12)}_${Date.now()}`;
-    const newReceiveAddress = fields.direction === 'sell' ? (fields.recv_address || null) : null;
+    // task B''' fix (J1 #53 抠细节 2 真 align broker-sell-handler.finalize convention):
+    // SELL: pay_address = user EVM addr (USDT recv), receive_address = NULL (broker side, set by finalize publish_offer)
+    // BUY: agent_pay_addr = user EVM pay addr, pay_address/receive_address = NULL
+    // 旧错: SELL 路径 newReceiveAddress = fields.recv_address 真**真** 双写 user EVM addr 真**真**真 finalize convention 不一致.
     const newPayAddress = fields.direction === 'sell' ? (fields.recv_address || null) : null;
+    const newReceiveAddress = null;  // SELL/BUY 都 NULL — finalize 真 set (broker addr OR exchange offer)
     const newAgentPayAddr = fields.direction === 'buy' ? (fields.evm_pay_address || null) : null;
     sqlite.prepare(`
       INSERT INTO retail_dex_orders
