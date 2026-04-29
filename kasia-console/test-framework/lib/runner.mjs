@@ -508,9 +508,16 @@ const actions = {
   async inject_send_kas_mock(step, ctx) {
     // J1 #81 e6de8625 fundamental fix: cross-process isolation. test runner 真 separate node process,
     // console process module-scoped _executeOverride 真 isolated. 真 HTTP endpoint inject same-process console.
+    // J1 #86 vote A1' fail-closed: peer_addr param required, mock 仅 registered test peer fire,
+    // production user real chain TX 真 fall-through _defaultExecute (Q2 production protection).
     const PORT = process.env.PORT || 3100;
+    if (!step.peer_addr) return { ok: false, error: 'peer_addr required (production protection: empty Set fail-closed = mock nothing, must register test peer addr)' };
     try {
-      const res = await fetch(`http://127.0.0.1:${PORT}/api/test/inject-send-kas-mock`, { method: 'POST' });
+      const res = await fetch(`http://127.0.0.1:${PORT}/api/test/inject-send-kas-mock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ peer_addr: step.peer_addr }),
+      });
       if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
       return await res.json();
     } catch (e) {
