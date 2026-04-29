@@ -215,9 +215,15 @@ function _listMissing(draft) {
 
 function _formatStatus(status) {
   if (!status || !status.ok) return '没找到你的活跃挂单. 想下新单告诉我.';
-  const { qty, filled_qty, expires_at, state: phase } = status;
+  const { qty, filled_qty, expires_at, state: phase, exchange_offer_id } = status;
   const unfilled = parseFloat(qty || 0) - parseFloat(filled_qty || 0);
-  return `挂单状态:\n- 总量: ${qty} KAS\n- 已成交: ${filled_qty || 0} KAS\n- 未成交: ${unfilled.toFixed(4)} KAS\n- 状态: ${phase}\n- 到期: ${expires_at || '无'}`;
+  // C3 (J2 broker-v2 phase 1 r6): UI infer derived 'published' display from exchange_offer_id NOT NULL.
+  // 缓 broker-intake-watcher.js L209 'broadcast' silent fail bug (schema CHECK 拒) — state 不 advance,
+  // exchange_offer_id 仍 set. UI infer 'published' 不需 schema enum 加. r6 共识 C3 vote.
+  const phaseDisplay = exchange_offer_id
+    ? `${phase} (链上挂单 published, offer ID ${exchange_offer_id.slice(0, 8)})`
+    : phase;
+  return `挂单状态:\n- 总量: ${qty} KAS\n- 已成交: ${filled_qty || 0} KAS\n- 未成交: ${unfilled.toFixed(4)} KAS\n- 状态: ${phaseDisplay}\n- 到期: ${expires_at || '无'}`;
 }
 
 function _loadProfile(peer) {
