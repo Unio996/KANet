@@ -2425,6 +2425,79 @@ export function runMigrations() {
     }
   }
 
+  // v82 (Owner 00:36 钦定 "完善一个核心状态机 不 新建" + J2 4 step migrate Step 1a):
+  // retail_dex_orders.qty TEXT NOT NULL → TEXT NULL (allow draft state='aligning' qty unknown).
+  //
+  // WHY_NOT_ALTER: SQLite 不支持 ALTER COLUMN DROP NOT NULL. SQLite recreate-table 真**唯一**path:
+  //   CREATE retail_dex_orders_new (qty TEXT, 其他 column 同) + INSERT SELECT + DROP + RENAME +
+  //   recreate INDEX. 真**真**真 'WHY_NOT_ALTER' R44 sediment 实证 — schema constraint relax 不可
+  //   ALTER. 153 row 现存 (J1 host 0 row, NWT host 153) survive recreate via INSERT SELECT.
+  //
+  // 真**真**真 5 Map (broker-llm-agent _pendingFields / broker-buy-handler _pendingPreview /
+  // _pendingAccepts / _quotes / retail_dex_orders) 碎片化 真根因, qty NOT NULL 真**真**真**真
+  // draft state INSERT throw → broker-state-authority.setConvoStateLock direction-only entry
+  // silent fail → broker forget context. v82 relax 后 draft INSERT 不 throw, retail_dex_orders
+  // 真**真**真 single source of truth 起点 (J2 task B+C+D 4 step migrate 进 Step 1b: handleLlmDialog
+  // ENTRY 写 retail_dex_orders state='aligning' row).
+  //
+  // 详见 dev-coord Owner 00:36 + J2 5143 + NWT cb84 撤回 NEW BROKER + J1 #49 cosign 4 step.
+  {
+    const hasV82 = sqlite.prepare("PRAGMA table_info(retail_dex_orders)").all()
+      .find(c => c.name === 'qty');
+    // notnull=0 means qty is already NULL-allowed (idempotent: skip if already done)
+    if (hasV82 && hasV82.notnull === 1) {
+      sqlite.exec('PRAGMA foreign_keys=OFF');
+      sqlite.exec(`
+        CREATE TABLE retail_dex_orders_new (
+          id TEXT PRIMARY KEY,
+          user_kasia_address TEXT NOT NULL,
+          side TEXT NOT NULL CHECK(side IN ('buy_kas','sell_kas')),
+          order_type TEXT NOT NULL CHECK(order_type IN ('market','limit')),
+          qty TEXT,
+          price TEXT,
+          pay_chain TEXT,
+          pay_address TEXT,
+          receive_address TEXT,
+          quoted_usdt TEXT,
+          state TEXT NOT NULL DEFAULT 'aligning' CHECK(state IN ('aligning','confirming','awaiting_payment','paid','executing','completed','refunding','refunded','failed','expired')),
+          pay_tx_hash TEXT,
+          exchange_offer_id TEXT,
+          deliver_tx_hash TEXT,
+          refund_tx_hash TEXT,
+          error_reason TEXT,
+          expires_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          agent_pay_addr TEXT,
+          mid_price_at_quote TEXT,
+          group_id TEXT,
+          broker_fee_kas TEXT,
+          net_delivery_kas TEXT,
+          expires_user_set TEXT
+        );
+      `);
+      // Preserve all rows
+      const copied = sqlite.prepare(`
+        INSERT INTO retail_dex_orders_new
+          (id, user_kasia_address, side, order_type, qty, price, pay_chain, pay_address,
+           receive_address, quoted_usdt, state, pay_tx_hash, exchange_offer_id, deliver_tx_hash,
+           refund_tx_hash, error_reason, expires_at, created_at, updated_at, agent_pay_addr,
+           mid_price_at_quote, group_id, broker_fee_kas, net_delivery_kas, expires_user_set)
+        SELECT id, user_kasia_address, side, order_type, qty, price, pay_chain, pay_address,
+               receive_address, quoted_usdt, state, pay_tx_hash, exchange_offer_id, deliver_tx_hash,
+               refund_tx_hash, error_reason, expires_at, created_at, updated_at, agent_pay_addr,
+               mid_price_at_quote, group_id, broker_fee_kas, net_delivery_kas, expires_user_set
+        FROM retail_dex_orders
+      `).run();
+      sqlite.exec(`DROP TABLE retail_dex_orders`);
+      sqlite.exec(`ALTER TABLE retail_dex_orders_new RENAME TO retail_dex_orders`);
+      sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_retail_dex_user ON retail_dex_orders(user_kasia_address, state)`);
+      sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_retail_dex_state ON retail_dex_orders(state, updated_at)`);
+      sqlite.exec('PRAGMA foreign_keys=ON');
+      console.log(`[migrate] v82: retail_dex_orders.qty TEXT NULL relax (recreate-table, ${copied.changes} row copied, indexes recreated).`);
+    }
+  }
+
   // v81 (Phase E v2 召会 — Owner 22:xx 钦定 真戳 "系统所有基础设施是全的, 之前抓错了药"):
   // revert v79+v80 broker_conversations — 100% 冗余 retail_dex_orders 现有字段.
   // NWT 22:39 实证: retail_dex_orders 153 行 + 字段全 cover (side/qty/pay_chain/pay_address/
