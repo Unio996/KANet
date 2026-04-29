@@ -20,7 +20,13 @@ const STUCK_REFUNDING_AGE_MS = 5 * 60 * 1000;
 const STUCK_REFUNDING_ALERT_AGE_MS = 60 * 60 * 1000;
 const STALE_ALIGNING_AGE_MS = 30 * 60 * 1000;
 
-const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+// J1 #78 catch: BROKER_RELAY_ID hardcoded 真 cross-host blocker. 真 host-agnostic dynamic query is_dex_broker=1.
+function _getBrokerRelayId() {
+  try {
+    const r = sqlite.prepare(`SELECT id FROM relay_nodes WHERE is_dex_broker = 1 LIMIT 1`).get();
+    return r?.id || null;
+  } catch { return null; }
+}
 
 let _interval = null;
 let _started = false;
@@ -124,7 +130,9 @@ function _checkRefundCountMismatch() {
   `).get().n;
 
   // kaspa_tx_log 真 broker outbound (broker_relay address 真 from_address) — 真**真 indexer 真 sync
-  const brokerAddr = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id=?`).get(BROKER_RELAY_ID)?.address;
+  const brokerRelayId = _getBrokerRelayId();
+  if (!brokerRelayId) return 0;
+  const brokerAddr = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id=?`).get(brokerRelayId)?.address;
   if (!brokerAddr) return 0;
 
   const ktlCount = sqlite.prepare(`
