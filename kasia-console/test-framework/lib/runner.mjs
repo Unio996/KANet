@@ -800,10 +800,22 @@ async function _sendRealP2P(step, ctx) {
   // Lazy import driver (avoid require/import cycle in test setups that don't need it).
   // Windows ESM dynamic import needs file:// URL; pathToFileURL handles platform paths.
   const driverPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../scripts/_phasec_real_p2p_driver.mjs');
+  // T-J2-2026-04-30 fix: driver 默认 D:/Anthropic 路径在 C drive 不存在. 注入 CONSOLE_DB env
+  // 让 driver use runner's resolved DB_PATH (C:/kanet/kasia-console/data/console.db).
+  if (!process.env.CONSOLE_DB) process.env.CONSOLE_DB = DB_PATH;
   const { realP2PTurn } = await import(pathToFileURL(driverPath).href);
+  // T-J2-2026-04-30 (NWT a0fc7017 vote B): runner-level salt 防 RC test 重跑撞 NWT relay
+  // anti-spam dedup (DEDUP_WINDOW_MS=30min, DEDUP_SIMILARITY=0.85). salt 用 8 lowercase
+  // letters only — broker parser regex (direction/qty/chain/pay_address) 全不 match alpha-only
+  // salt, 不污染 state.
+  const saltChars = 'abcdefghijklmnopqrstuvwxyz';
+  let salt = '[t-';
+  for (let i = 0; i < 8; i++) salt += saltChars[Math.floor(Math.random() * 26)];
+  salt += ']';
+  const saltedMessage = `${step.message}\n${salt}`;
   const turn = await realP2PTurn({
     fromRelayId, fromAddr, toAddr,
-    message: step.message,
+    message: saltedMessage,
     label: step.label || 'real_p2p',
     pollTimeoutMs: step.poll_timeout_ms,
   });
