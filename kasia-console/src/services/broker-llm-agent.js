@@ -187,27 +187,25 @@ const TOOLS = [
 export function _detectIntent(message) {
   const msg = String(message || '').trim();
   if (!msg) return null;
+  // T-J2-2026-04-29 J2-8 negation guard (NWT ded093af 细节 8): '不卖了, 我想买' 当前 SELL regex 匹 '卖' 在 '不卖' 中
+  // 误返 'sell'. user 真意是 BUY. 修法: 先 strip 负向短语 (不卖了 / 不想买 / 不要卖 等), 再 detect 剩文本.
+  // R33 SQL guard 后续 throw direction lock = 期望行为 (broker 拒 silently flip).
+  const negStripped = msg.replace(/不(?:卖|买|要卖|要买|想卖|想买|想要|出售|脱手|购买|买入|抛)了?/g, ' ');
   // T-J2-2026-04-27 v1.1 deterministic 真扩 multi-asset (Owner 24:14 钦定真感受 + J2 真测撞 LLM USDC 真不稳定):
   // 加 USDT/USDC keyword gate, 跟 KAS 同 fast deterministic path 真稳 ~15ms vs LLM 1-2s 不稳.
-  if (!/kas|usdt|usdc/i.test(msg)) return null;
+  if (!/kas|usdt|usdc/i.test(negStripped)) return null;
   // 中文 — 严格匹方向词 (gated by /kas/ 防 '我要吃饭' 误判)
   // T-J1-19k (NWT 30 轮 dynamic 发现): 加非正式动词 想换/换/搞/弄/要/想要/来/要点 + 同义
   // T-NWT-25: 加更多口语动词 (拿/收/抢/入手/取/进/求/欲/给我来/帮我搞/吃进 等)
   // T-NWT-2026-04-27 Bug-Z4: SELL check 真先 (specificity wins).
-  // 之前 BUY 在前 → '我要卖 99 KAS' 真撞 BUY '我要' substring → 误判. SELL 真先 catch '卖' 真对.
-  // J2 vote (a) 真 ack — '我要 5 KAS' (无方向) 真 fall BUY '我要' = buy 真对; '我要买' BUY '买' 真对;
-  // '我要换' BUY '换' 真对; '我要卖' SELL '卖' = sell 真对 (Bug-Z4 真 fix).
-  if (/卖|要卖|想卖|出售|卖出|脱手|抛|出货|清仓|换出|套现|减仓|平仓|放/.test(msg)) return 'sell';
-  if (/买|要买|想买|购买|买入|想换|换点|换些|换\s*\d|搞|弄|来点|来个|要点|想要|我要|拿|收\s*kas|抢|入手|入仓|入个|取|进|求|欲|给我来|帮我搞|帮我换|帮我买|想吃|吃进/.test(msg)) return 'buy';
+  if (/卖|要卖|想卖|出售|卖出|脱手|抛|出货|清仓|换出|套现|减仓|平仓|放/.test(negStripped)) return 'sell';
+  if (/买|要买|想买|购买|买入|想换|换点|换些|换\s*\d|搞|弄|来点|来个|要点|想要|我要|拿|收\s*kas|抢|入手|入仓|入个|取|进|求|欲|给我来|帮我搞|帮我换|帮我买|想吃|吃进/.test(negStripped)) return 'buy';
   // 英 / 西 (\\b 适用 ASCII) — 真同 swap (sell 真先, sell 词 specific)
-  // T-J2-2026-04-27 v1.1: 真扩英文 buy/sell 同义词 (J2 24:45 真测撞 'want 5 USDC' → LLM 1331ms 真不稳).
-  // 真 mitigation: gate 已 narrow 'kas/usdt/usdc' 真 trading context, 加 want/get/grab/take/need/cop/quiero 等
-  // T-NWT-2026-04-27 Bug-Z4: 'I want to sell' 真撞 BUY 'want' first → 误判. SELL 真先 catch 'sell' 真对.
-  if (/\b(sell|dump|unload|offload|cash\s*out|vender)\b/i.test(msg)) return 'sell';
-  if (/\b(buy|purchase|want|get|grab|take|need|cop|gimme|fetch|comprar|adquirir|quiero|necesito)\b/i.test(msg)) return 'buy';
+  if (/\b(sell|dump|unload|offload|cash\s*out|vender)\b/i.test(negStripped)) return 'sell';
+  if (/\b(buy|purchase|want|get|grab|take|need|cop|gimme|fetch|comprar|adquirir|quiero|necesito)\b/i.test(negStripped)) return 'buy';
   // 日 / 韩 — CJK 关键词不能用 \\b (CLAUDE.md 陷阱 #12)
-  if (/(売る|売却|판매|팔다)/.test(msg)) return 'sell';
-  if (/(購入|買う|구매|사다)/.test(msg)) return 'buy';
+  if (/(売る|売却|판매|팔다)/.test(negStripped)) return 'sell';
+  if (/(購入|買う|구매|사다)/.test(negStripped)) return 'buy';
   return null;
 }
 
@@ -756,11 +754,15 @@ export async function handleLlmDialog(peer, message) {
   console.log(`[broker-llm DIAG] peer=${peer?.slice(-12)} msg.chars=${msgRaw.length} msg.utf8bytes=${byteLen} codes=[${charCodes}] msg="${msgRaw.slice(0,40)}" history.len=${history.length} fresh=${JSON.stringify(fresh)} prev=${JSON.stringify(prev)} merged=${JSON.stringify(merged)}`);
 
   // R33 b iter9 (J2 81f8f1d8 mid_flow_restart): user explicit cancel-and-restart 真**真 reset state.
+  // T-J2-2026-04-29 J2-7 fix (NWT ded093af strict test T6 root cause): reset 后必 return early,
+  // 否则 L792 看 merged.direction (reset 前算) 仍 'sell' → setConvoStateLock INSERT 新 'aligning' row,
+  // 老 row 转 'failed' 但新 row 又建. 真根因: merged 计算时机 (L731) 早于 reset (L760).
   {
     const { detectResetIntent } = await import('./broker-state-authority.js');
     if (detectResetIntent(message)) {
       resetConvoState(peer, 'user_restart');
       _clearPendingFields(peer);
+      return '好的, 已取消之前的订单. 重新下单回 "买 X KAS" / "卖 X KAS" 或告诉我新方向.';
     }
   }
 
