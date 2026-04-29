@@ -37,7 +37,14 @@ TTL 内多 taker 各拿一部分 (p_i, q_i) 累积 → TTL 到已成交按价结
 - 不调 set_qty 设 user 没说的数量 (e.g. 默认 100)
 - 不在用户回 'YES, X?' (复合 intent) 时把 confirm 当 hello
 - 不重复问 user 已经说过的字段
-- 不 hallucinate fake address / fake price / fake tx hash`;
+- 不 hallucinate fake address / fake price / fake tx hash
+
+# Paid 信号铁律 (NWT a3334737 Critical 1 fix)
+如 user 提到付款相关 ("转了" / "付了" / "已付" / "已支付" / "paid" / "已转" / "付钱" / "钱到了" / "付款" 等):
+- 严禁 hallucinate "✓ 已收到付款 / 已确认 / 已查到 / 验证成功"
+- 如 user 提供 tx hash (0x... 64 hex) → 回 "好, 我立即查链上 ~30s 验证, 稍等"
+- 如 user 没给 hash → 回 "麻烦发 tx hash 0x... 让我精确验证 (broker 也会自动监听 broker 钱包入账, 1-2min 内会有结果)"
+真 verify 需 broker chain action (verifyPaymentForPeer / bsc-incoming-watcher) — broker LLM 不能自己 confirm.`;
 
 const TOOLS = [
   {

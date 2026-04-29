@@ -87,10 +87,14 @@ export async function handleMessage(peer, msg) {
           const result = await verifyPaymentForPeer({ peer, chain: activeOrder.pay_chain });
           // D1: 全 paid (remaining_picks=0) → transition state='paid'
           if (result?.ok && result.remaining_picks === 0) {
+            // D1 v2 fix (NWT a3334737 Medium 1): 加 created_at 时间窗防 multi row advance.
+            // production grep 实证 retail_dex_orders awaiting_payment=223 rows — 同 user 历史多
+            // 'awaiting_payment' row 不该一次全 advance 'paid'. 仅 advance latest active (2h 内).
             sqlite.prepare(`
               UPDATE retail_dex_orders
               SET state='paid', updated_at=datetime('now')
               WHERE user_kasia_address=? AND side='buy_kas' AND state='awaiting_payment'
+                AND created_at > datetime('now', '-2 hours')
             `).run(peer);
           }
           return result?.user_msg || (result?.ok
