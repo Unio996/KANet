@@ -277,10 +277,15 @@ async function _enqueue(kind, peer, payload) {
   return enqueue({ kind, peer, payload });
 }
 
-function _enqueueAccept(offerId, peerAddr, payChain, evmRecvAddr = null) {
-  // T-J2-2026-04-27 v1.2 (c) — 加 evm_recv_address 字段, 解决 USDC delivery silent fail (J1 12:13 真发现).
-  // 老 receive_address 真 user kasia (KAS path 用), 新 evm_recv_address 真 user EVM (USDC/USDT path 用).
-  // backward compat: 老 client 真没 evm_recv_address 真 KAS path 真 still work.
+function _enqueueAccept(offerId, peerAddr, payChain, evmRecvAddr = null, opts = {}) {
+  // T-J2-2026-04-27 v1.2 (c) — 加 evm_recv_address 字段, 解决 USDC delivery silent fail.
+  // 老 receive_address = user kasia (KAS path 用), 新 evm_recv_address = user EVM (USDC/USDT path 用).
+  // backward compat: 老 client 没 evm_recv_address → KAS path 仍 work.
+  //
+  // NWT 2026-04-29 broker-v2 阶段 2 task 3/7 — 加 amount + price chunk fields:
+  // - amount (chunk_qty): 缺省 null = full give_amount (backward compat)
+  // - price (chunk_price): 缺省 null = no tolerance check (receiver 跳过 1% 校验)
+  // - exchange-machine.processAccept 5efa756a0 receiver 端已支持
   const payload = {
     t: 'kanet_exchange_accept_v1',
     offer_id: offerId,
@@ -289,6 +294,12 @@ function _enqueueAccept(offerId, peerAddr, payChain, evmRecvAddr = null) {
     receive_address: peerAddr,
     evm_recv_address: evmRecvAddr || null,
   };
+  if (opts.amount !== undefined && opts.amount !== null) {
+    payload.amount = opts.amount;
+  }
+  if (opts.price !== undefined && opts.price !== null) {
+    payload.price = opts.price;
+  }
   return _enqueue('accept_v1', peerAddr, { channel: 'kanet-exchange', message: JSON.stringify(payload) });
 }
 
