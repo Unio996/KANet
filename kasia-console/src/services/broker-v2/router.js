@@ -106,16 +106,19 @@ export async function handleMessage(peer, msg) {
 
   draft = state.getActiveDraft(peer);
 
-  // 6. confirm intent + draft complete + 在 'aligning' → publish
-  if (intent === 'confirm' && draft?.complete && draft.state === 'aligning') {
-    state.advance(peer, 'preview_shown');
+  // 6. confirm intent + draft complete (still 'aligning') → publishOrder + advance 'awaiting_payment'
+  // 注: 不用 'preview_shown'/'confirming' intermediate state (schema CHECK 不含 'preview_shown';
+  //   'aligning' state 含 "字段齐等 confirm" + "字段不齐字段收集中" 两情况, 由 draft.complete 区分).
+  if (intent === 'confirm' && draft?.complete) {
     try {
       const result = await orderBook.publishOrder(peer, draft);
+      if (!result.ok) {
+        return `挂单失败 (${result.error || 'unknown'}). 请稍后重试或回 "取消" 取消.`;
+      }
+      state.advance(peer, 'awaiting_payment');  // post-publish, schema CHECK OK
       return result.ack_text || `✓ 订单已挂. ${result.offer_id ? `挂单 ID: ${result.offer_id.slice(0, 8)}` : ''}`;
     } catch (e) {
       console.error(`[broker-v2 router] publishOrder err: ${e.message}`);
-      // rollback advance — 让 user 重试 confirm
-      sqlite.prepare(`UPDATE retail_dex_orders SET state='aligning' WHERE user_kasia_address=? AND state='preview_shown'`).run(peer);
       return `挂单失败 (${e.message}). 请稍后重试或回 "取消" 取消.`;
     }
   }
@@ -125,11 +128,13 @@ export async function handleMessage(peer, msg) {
     return `还差: ${_listMissing(draft)}. 告诉我后我会展示订单画像让你最后确认.`;
   }
 
-  // 8. complete draft + 'aligning' → render preview (no need user YES, auto)
+  // 8. complete draft + 'aligning' → render preview (NOT advance state, 留 'aligning' 等下 turn 'YES')
   if (draft?.complete && draft.state === 'aligning') {
     try {
       const preview = await orderBook.computePreview(peer, draft);
-      state.advance(peer, 'preview_shown');
+      if (!preview.ok) {
+        return `生成报价失败 (${preview.error || 'unknown'}). 请稍后重试或调整字段.`;
+      }
       return preview.preview_text || '订单画像生成中... 请稍等';
     } catch (e) {
       console.warn(`[broker-v2 router] computePreview err: ${e.message}`);
@@ -142,14 +147,13 @@ export async function handleMessage(peer, msg) {
   const contact = _loadContact(peer);
   const reply = await llm.render(peer, msg, draft, profile, contact);
 
-  // 10. post-LLM tool_calls 可能写字段 → re-check complete
+  // 10. post-LLM tool_calls 可能写字段 → re-check complete (但不 advance, 等 user 'YES')
   draft = state.getActiveDraft(peer);
   if (draft?.complete && draft.state === 'aligning') {
     try {
       const preview = await orderBook.computePreview(peer, draft);
-      state.advance(peer, 'preview_shown');
-      return preview.preview_text;
-    } catch (e) {
+      if (preview.ok) return preview.preview_text;
+    } catch {
       // fall through to LLM reply
     }
   }
