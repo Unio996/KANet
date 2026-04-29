@@ -469,9 +469,12 @@ const actions = {
     const offerId = step.offer_id || `test-offer-${Date.now().toString(36).slice(-8)}`;
     const orderId = `test-order-${Date.now().toString(36).slice(-8)}`;
     const now = new Date().toISOString();
-    const brokerRelayId = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
-    const brokerAddr = db.prepare('SELECT address FROM relay_nodes WHERE id=?').get(brokerRelayId)?.address;
-    if (!brokerAddr) { db.close(); return { ok: false, error: 'broker addr not found' }; }
+    // T-J2-2026-04-29 Track B Track E (J1 #79 catch: hardcode 0a8e9723 仅 J2 host 巧合 align,
+    // J1+NWT host fail 'broker addr not found'). 改 host-agnostic SELECT is_dex_broker=1 (J1 #78 vote A 同模式).
+    const broker = db.prepare('SELECT id, address FROM relay_nodes WHERE is_dex_broker = 1 LIMIT 1').get();
+    if (!broker?.id || !broker?.address) { db.close(); return { ok: false, error: 'broker addr not found (no relay_nodes row with is_dex_broker=1)' }; }
+    const brokerRelayId = broker.id;
+    const brokerAddr = broker.address;
     // J2 catch: broadcast_tx_id schema NOT NULL. 真 64-hex fake hash 真 v83 trigger length=64 PASS
     const fakeTxId = Array.from({length: 64}, (_,i) => 'abcdef0123456789'[(i + Date.now()) % 16]).join('');
     db.prepare(`
