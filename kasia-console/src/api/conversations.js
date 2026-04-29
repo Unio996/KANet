@@ -129,11 +129,30 @@ export async function registerConversationRoutes(fastify) {
 
     // R-NWT-2026-04-28 (d) lifecycle infra (J2 d6022b59 propose): seed broker _pendingAccepts
     // for paid-cannot-cancel probe. test-only, env-gated.
+    // bug 8 fix (J2 r25 vote (c) dual-write): broker-v2 SQL state machine 不见 v1 _pendingAccepts
+    // in-memory state. INSERT retail_dex_orders state='paid' 让 broker-v2 router cancel intent path
+    // 进 'state==paid' 拒 cancel 分支 (router L61). 向后兼容 v1 测.
     fastify.post('/api/test/seed_pending_accept', async (request, reply) => {
       const { peer, data } = request.body || {};
       if (!peer || !data) return reply.code(400).send({ error: 'peer + data required' });
       const { _testSetPendingAccept } = await import('../services/broker-buy-handler.js');
       _testSetPendingAccept(peer, { ...data, expires_at: data.expires_at || (Date.now() + 30 * 60 * 1000) });
+      // dual-write retail_dex_orders state='paid' for broker-v2 visibility
+      try {
+        const { sqlite } = await import('../db/client.js');
+        const totalKas = data.total_kas || data.picks?.reduce((s, p) => s + (p.qty_kas || 0), 0) || 0;
+        const id = `bv2_seed_${peer.slice(-12)}_${Date.now()}`;
+        sqlite.prepare(`
+          INSERT INTO retail_dex_orders
+            (id, user_kasia_address, side, state, order_type, qty, pay_chain,
+             created_at, updated_at, expires_at)
+          VALUES (?, ?, 'buy_kas', 'paid', 'limit', ?, ?,
+                  datetime('now'), datetime('now'),
+                  datetime('now', '+30 minutes'))
+        `).run(id, peer, String(totalKas), data.pay_chain || 'bnb');
+      } catch (err) {
+        console.warn(`[seed_pending_accept] dual-write retail_dex_orders failed: ${err.message}`);
+      }
       return { seeded: true, peer: peer.slice(-12) };
     });
 

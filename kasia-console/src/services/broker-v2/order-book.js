@@ -30,6 +30,12 @@ const SETTLE_GRACE_MIN = 5;      // 5min in-flight chunk grace
 export async function computePreview(peer, draft) {
   if (!draft) return { ok: false, error: 'no draft' };
   const { side, qty, pay_chain, pay_address, asset } = draft;
+  // bug 10 fix (J2 r25 follow-up, owner_88kas_t6_limit_retention):
+  // parser captures 'price 设定 0.0336' → state.price='limit:0.0336'. order-book 之前不传给 v1 preview,
+  // user limit price 静默丢弃. 修: parse draft.price 'limit:X' → numeric, pipe to v1 sellPreview/buyPreview
+  // limit_price 参数, v1 已支持 limit price acknowledgment (broker-sell-handler L189-201).
+  const limitPriceMatch = String(draft.price || '').match(/^limit:(\d+\.?\d*)$/);
+  const limitPrice = limitPriceMatch ? parseFloat(limitPriceMatch[1]) : null;
 
   if (side === 'buy_kas') {
     const { buyPreview } = await import('../broker-buy-handler.js');
@@ -39,6 +45,7 @@ export async function computePreview(peer, draft) {
       pay_chain,
       give_asset: asset || 'KAS',
       receive_address: pay_address || null,
+      limit_price: limitPrice,
       // phase 1 lock: tolerance 1% hardcoded (post 1 周 gate phase 2 separate)
     });
     if (!result?.ok) return { ok: false, error: result?.error || 'buyPreview failed', message: result?.message };
@@ -61,6 +68,7 @@ export async function computePreview(peer, draft) {
       qty: parseFloat(qty),
       recv_chain: pay_chain,
       recv_address: pay_address,
+      limit_price: limitPrice,
     });
     if (!result?.ok) return { ok: false, error: result?.error || 'sellPreview failed', message: result?.message };
     return {

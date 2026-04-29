@@ -109,19 +109,33 @@ const TOOLS = [
 export async function render(peer, msg, stateSnapshot, profile, contact) {
   const stateBlock = _formatState(stateSnapshot);
   const profileBlock = _formatProfile(profile, contact);
-  // bug 1 fix: 注入 actual KAS market price 防 LLM hallucinate fake price.
+  // bug 1 v2 fix (NWT 接 J2 r21 092f76b7 propose, J2 r22 router 顺序确认):
+  // 旧 priceBlock 双向暴露 (含 '卖价' + '收购价' + '用户买 KAS' + '用户卖 KAS') → Qwen 透传 '卖' to BUY-context reply
+  // → mind_changer T1 / owner_88kas_verbatim 等 6 case FAIL.
+  // 修: priceBlock 仅注当 turn direction 报价, 严禁 cross-direction 词. side 来自 router post-setField re-fetch
+  // (router L178 draft = state.getActiveDraft post seedDraft+setField, 当 turn 即时 side, 不 lag).
+  // direction 词选: BUY 用 '报价' (无 卖 字) / SELL 用 '收购价' (无 买 字) / 无 direction 用 'mid_price' (中性).
   // fetchKasPrice failure (8 CEX 全 down) → priceBlock empty, LLM 服 SYSTEM_PROMPT '不知道就说不知道'.
   let priceBlock = '';
   try {
     const p = await fetchKasPrice();
     if (p && p > 0) {
-      const sellPrice = (p * 1.01).toFixed(6);  // broker 自挂卖价 +1% spread
-      const buyPrice = (p * 0.99).toFixed(6);   // broker 收购价 -1% spread
-      priceBlock = `# 当前 KAS 市价 (broker 真 fetch, 严禁编造)\n` +
-                   `mid_price = ${p.toFixed(6)} USDT/KAS\n` +
-                   `broker 自挂卖价 = ${sellPrice} USDT/KAS (用户买 KAS 报价)\n` +
-                   `broker 收购价 = ${buyPrice} USDT/KAS (用户卖 KAS 报价)\n` +
-                   `如 user 问价, 仅引用上述 mid/sell/buy, 不编 fake number.`;
+      const sideHint = stateSnapshot?.side;
+      if (sideHint === 'sell_kas') {
+        const buyPrice = (p * 0.99).toFixed(6);
+        priceBlock = `# 当前 broker 收购价 (broker fetch 实时, 严禁编造)\n` +
+                     `broker 收购价 = ${buyPrice} USDT/KAS\n` +
+                     `如 user 问价, 仅引用此报价 (此订单 SELL 方向已锁, 不要 cross-quote 反向行情).`;
+      } else if (sideHint === 'buy_kas') {
+        const sellPrice = (p * 1.01).toFixed(6);
+        priceBlock = `# 当前 broker 报价 (broker fetch 实时, 严禁编造)\n` +
+                     `broker 报价 = ${sellPrice} USDT/KAS\n` +
+                     `如 user 问价, 仅引用此报价 (此订单 BUY 方向已锁, 不要 cross-quote 反向行情).`;
+      } else {
+        priceBlock = `# 当前 KAS 中价 (broker fetch 实时, 严禁编造)\n` +
+                     `mid_price = ${p.toFixed(6)} USDT/KAS\n` +
+                     `用户尚未表态方向, 严禁帮用户决定方向.`;
+      }
     }
   } catch (e) {
     console.warn(`[broker-v2 llm] fetchKasPrice err: ${e.message}`);

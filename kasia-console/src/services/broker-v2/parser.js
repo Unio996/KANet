@@ -35,8 +35,10 @@ const PATTERNS = {
   // 边界 4: cancel intent — explicit cancel only.
   // '不卖了' / '不买了' 移除 — 它们是 direction flip context (e.g. '不卖了, 想买 X')
   // R33 sticky direction lock 应 catch direction flip, parser 不应 clearDraft (case T5 测 此).
-  // 真 cancel: '取消' / '不要了' / '算了' / 'cancel' / 'refund' / 'give me X back'.
-  cancel: /(?:取消(?:订单|单|报价|交易)?|不要了|算了|cancel|stop|refund)/i,
+  // 真 cancel: '取消' / '不要了' / '算了' / 'cancel' / 'refund' / standalone 'NO' / 'N' (broker-v1 CANCEL_WORDS parity).
+  // bug 9 (J2 r25 vote follow-up, lifecycle_paid_cannot_cancel): broker-v1 CANCEL_WORDS 含 'NO' 'no' 'n' — v2 parity.
+  // standalone 'NO'/'N' 用 ^...$ anchor 严, 防 'NOPE' 'I won't say NO' 误中.
+  cancel: /(?:取消(?:订单|单|报价|交易)?|不要了|算了|cancel|stop|refund|^\s*(?:NO|N)\s*[!.！。]?\s*$)/i,
   cancel_negation: /(?:不想(?:取消|退)|别取消|继续(?:挂单|交易)?|don'?t\s+(?:cancel|refund))/i,
   // 边界 5: confirm regex 严格 — 仅 reply 全文是 YES/Y/是/对/确认/好/OK/可以
   // 'YES, 还问 X' 不 match (走 LLM)
@@ -77,6 +79,19 @@ export function extract(msg) {
       scrub = scrub.replace(limM[0], '');
     }
   }
+  // bug 6 fix layer 1 (J2 r25 vote (a) double-layer): strip Chinese price-keyword-prefixed numbers
+  // from scrub (e.g. '价格设定 0.0336' / '价格 0.0336' / '单价 0.0336' / '价 0.0336').
+  // Owner_88kas_t6 user msg: '我想挂单价格设定0.0336。' — price_pref.limit 不匹配 (缺 '限价' keyword),
+  // 旧版 qty regex 抓 '0.0336' 当 qty → 覆盖 prior qty=88 → computePreview qty_too_small.
+  // 修: 任何 价/价格/价格设定/单价 + 紧邻数字 当 limit price (capture into price_pref if not set), 同时 scrub strip.
+  const priceKwM = scrub.match(/(?:价格(?:设定)?|单价|价(?![:：值卡]))\s*[:：]?\s*(\d+\.?\d*)/);
+  if (priceKwM) {
+    if (!fields.price_pref) fields.price_pref = `limit:${priceKwM[1]}`;
+    scrub = scrub.replace(priceKwM[0], '');
+  }
+  // bug 6 fix layer 1b: strip "N 分钟" / "N min" / "N hour" / "N 小时" timeout patterns from scrub
+  // (Owner T6 '10分钟内没人吃单' — '10' must not become qty). future: capture into refund_timeout.
+  scrub = scrub.replace(/\d+\s*(?:分钟|min|分|小时|hour|hr)/gi, '');
 
   // 3. direction (R44 中文助词陷阱) — buy 优先
   if (PATTERNS.buy.test(scrub)) fields.direction = 'buy';

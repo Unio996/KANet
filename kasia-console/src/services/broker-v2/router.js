@@ -59,7 +59,10 @@ export async function handleMessage(peer, msg) {
     // protocol_status='matched'+, _findRefundableOffers 返 0 → handleCancelAndRefund 返 null →
     // 旧 router default '好的, 已取消未成交部分退回' false promise. 修: 直 ack 拒 cancel.
     if (hasPublished && activeOrder.state === 'paid') {
-      return '订单已收到付款, broker 验证中并准备发 KAS, 不允许取消. 如未按时到账请联系 broker 走 dispute 流程.';
+      // bug 4 v2 (J2 r21 cutover regression dig): 旧 wording '不允许取消' 不 match
+      // lifecycle_paid_cannot_cancel test fixture (要求 reply_contains_one_of [已付款/已上链/无法取消/不能取消]).
+      // 改 wording: 显式 '已付款' + '不能取消' (语义同, 测试 fixture pass).
+      return '订单已付款, broker 验证中并准备发 KAS, 不能取消. 如未按时到账请联系 broker 走 dispute 流程.';
     }
     if (hasPublished && activeOrder.state === 'awaiting_payment') {
       // 已 publish 但未 paid — 走 advanceToRefunded refund unfilled portion (复用退款侧)
@@ -187,7 +190,12 @@ export async function handleMessage(peer, msg) {
         return `挂单失败 (${result.error || 'unknown'}). 请稍后重试或回 "取消" 取消.`;
       }
       state.advance(peer, 'awaiting_payment');  // post-publish, schema CHECK OK
-      return result.ack_text || `✓ 订单已挂. ${result.offer_id ? `挂单 ID: ${result.offer_id.slice(0, 8)}` : ''}`;
+      // bug 7 fix (J2 r25 vote (b)): user-facing sync ack 必含关键词 (ux_p04_buy_confirm_sync_ack
+      // 测要 reply 含 '收到'/'已建'/'订单'/'确认'/'付款'/'马上' 任一). prepend sync line, 业务 detail 跟后.
+      // result.ack_text 可能 = "Broker self-quoted (...)." (无 sync 关键词) → 单独 fallback 不够.
+      const syncAck = '✓ 收到, 订单已建. 付款指引马上发你, 自动检测付款.';
+      const detail = result.ack_text || (result.offer_id ? `挂单 ID: ${result.offer_id.slice(0, 8)}` : '');
+      return detail ? `${syncAck}\n\n${detail}` : syncAck;
     } catch (e) {
       console.error(`[broker-v2 router] publishOrder err: ${e.message}`);
       return `挂单失败 (${e.message}). 请稍后重试或回 "取消" 取消.`;

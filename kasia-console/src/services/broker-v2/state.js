@@ -103,6 +103,14 @@ export function setField(peer, name, value) {
   if (!peer) return { ok: false, set: false, reason: 'no peer' };
   if (value === null || value === undefined || value === '') return { ok: true, set: false };
 
+  // bug 6 fix layer 2 (J2 r25 vote (a) double-layer): qty < 1 KAS reject — broker minimum unit guard.
+  // Pairs with parser.js scrub layer 1. Catches anything bypass parser (e.g. tool_call set_qty 0.0336).
+  // 0.99 threshold (not 1.0) — allow user '1 KAS' edge case (parseFloat).
+  if (name === 'qty') {
+    const n = parseFloat(value);
+    if (!Number.isFinite(n) || n < 0.99) return { ok: false, set: false, reason: 'qty_too_small' };
+  }
+
   // R31/R33 SQL guard. col=name 静态 (caller 控制), value 参数化 SQL injection safe.
   const guard = LOCKED_FIELDS.includes(name)
     ? `AND (${name} IS NULL OR ${name} = :value)`
