@@ -62,6 +62,10 @@ export function extract(msg) {
     fields.pay_address = addrM[0];
     scrub = scrub.replace(addrM[0], '');
   }
+  // bug 2 真 root cause fix: addr 短 1 char (39 vs 40) pay_address regex 不 match,
+  // scrub 仍含 '0x...' addr-like pattern, qty regex 抓 '0x' 前缀 '0' → fields.qty=0 覆盖 prior qty.
+  // 修: scrub strip 任 '0x' + hex 长 pattern (≥20 hex chars 假定 addr-like, 不 valid 但避 hijack qty).
+  scrub = scrub.replace(/0x[a-fA-F0-9]{20,}/g, '');
 
   // 2. price_pref 先解 (剥离 limit price 数字防 qty 抢)
   if (PATTERNS.price_pref.market.test(scrub)) {
