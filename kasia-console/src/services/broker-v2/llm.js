@@ -31,7 +31,7 @@ TTL 内多 taker 各拿一部分 (p_i, q_i) 累积 → TTL 到已成交按价结
 - set_qty(qty): user 明确说数量
 - set_chain(chain): user 明确说链 (bsc/polygon/sol/tron)
 - set_address(addr): user 给 EVM 0x 地址
-- set_asset(asset): user 明确说资产 (KAS/USDT/USDC)
+- 资产 phase 1 默认 KAS (不需 set_asset tool)
 
 # 严禁
 - 不调 set_qty 设 user 没说的数量 (e.g. 默认 100)
@@ -76,18 +76,8 @@ const TOOLS = [
       },
     },
   },
-  {
-    type: 'function',
-    function: {
-      name: 'set_asset',
-      description: '当 user 给资产 (KAS/USDT/USDC).',
-      parameters: {
-        type: 'object',
-        properties: { asset: { type: 'string', enum: ['KAS', 'USDT', 'USDC'] } },
-        required: ['asset'],
-      },
-    },
-  },
+  // set_asset tool 删除 — phase 1 hardcode KAS, retail_dex_orders 无 asset col.
+  // phase 2 加 retail_dex_orders.give_asset col 后 re-add tool.
 ];
 
 /**
@@ -122,7 +112,7 @@ export async function render(peer, msg, stateSnapshot, profile, contact) {
       if (name === 'set_qty' && args.qty != null) state.setField(peer, 'qty', args.qty);
       else if (name === 'set_chain' && args.chain) state.setField(peer, 'pay_chain', args.chain);
       else if (name === 'set_address' && args.addr) state.setField(peer, 'pay_address', args.addr);
-      else if (name === 'set_asset' && args.asset) state.setField(peer, 'asset', args.asset);
+      // set_asset 删 — phase 1 hardcode KAS, no asset col
     } catch (e) {
       console.warn(`[broker-v2 llm] tool_call ${name} setField err: ${e.message}`);
     }
@@ -136,7 +126,7 @@ function _formatState(s) {
   const lines = ['# 当前订单 state (user 已给字段)'];
   if (s.side) lines.push(`方向=${s.side === 'sell_kas' ? '卖' : '买'}`);
   if (s.qty != null && s.qty !== 'NULL') lines.push(`qty=${s.qty}`);
-  if (s.asset) lines.push(`asset=${s.asset}`);
+  // s.asset 删 — phase 1 hardcode KAS, no asset col (s.asset 永 undefined dead code)
   if (s.pay_chain) lines.push(`chain=${s.pay_chain}`);
   if (s.pay_address) lines.push(`pay_address=${s.pay_address}`);
   if (s.state) lines.push(`phase=${s.state}`);
