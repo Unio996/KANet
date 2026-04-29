@@ -21,6 +21,7 @@
 
 import { sqlite } from '../db/client.js';
 import { randomUUID } from 'crypto';
+import { isOfferAlreadyRefunded } from './broker-refund-dedup.js';
 
 const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
 const FEE_KAS = 0.1;
@@ -67,11 +68,25 @@ function _findRefundableOffers(peerAddr) {
     ORDER BY created_at DESC
   `).all(brokerAddr);
 
+  // T-J2-2026-04-29 紧急 Track A (Owner 抓双重退款铁证): 不信 broker 自己 chain_events 占位符,
+  // 查 kaspa_tx_log 真链 TX dedup. 同 offer 已有真链 refund TX → 拒 重复退款 (broker 真亏 87.9 KAS 教训).
   return offers.filter(o => {
     try {
       const meta = JSON.parse(o.metadata || '{}');
-      return meta.user_kasia_address === peerAddr;
+      if (meta.user_kasia_address !== peerAddr) return false;
     } catch { return false; }
+    // chain-truth dedup
+    try {
+      const dedup = isOfferAlreadyRefunded(o);
+      if (dedup.alreadyRefunded) {
+        console.warn(`[cancel-refund] DEDUP offer ${o.id.slice(0,8)} skip — kaspa 链已有 ${dedup.priorTxs.length} 笔真 refund TX (${dedup.priorTxs.map(t => t.tx_id.slice(0,12)).join(',')}). 拒重复退款防 broker 资产流失.`);
+        return false;
+      }
+    } catch (e) {
+      console.error(`[cancel-refund] dedup helper err: ${e.message} — fail-closed 拒退款防资产流失`);
+      return false;  // 真 fail-closed: helper 失败也拒退款, 不允许"漏检就退"
+    }
+    return true;
   });
 }
 

@@ -231,7 +231,7 @@ export async function _scanExpiredBrokerOffers() {
   // 但**真**真**status 转 'expired' 真**真**真**真**exchange-machine TTL check, 真**真**'open' 长久 stuck 真**真**真**真 refund.
   // metadata.source 真**真**真 strict filter (老 offer 真**真**真**真**真**真 source 真**真**真**真 strict miss).
   const rows = sqlite.prepare(`
-    SELECT id, give_amount, metadata, protocol_status, expires_at FROM exchange_offers
+    SELECT id, give_amount, metadata, protocol_status, expires_at, broadcast_at FROM exchange_offers
     WHERE maker = ?
     AND give_asset = 'KAS'
     AND taker IS NULL
@@ -249,6 +249,10 @@ export async function _scanExpiredBrokerOffers() {
   `).all(trader.address);
   let handled = 0;
   if (rows.length > 0) console.log(`[broker-refund] Z20 scan: ${rows.length} expired/timeout offer(s) to refund`);
+  // T-J2-2026-04-29 紧急 Track A: chain-truth dedup. 现 dedup SQL `txid IN kaspa_tx_log` 因占位符 txid='refund_xxx'
+  // 永久失效, 同 offer 可重复退款 broker 真亏. 改: 退款前查 kaspa_tx_log 真链有没 broker→user refund TX matching
+  // expected_amount + offer broadcast_at 时间窗. 有则 skip (已退过).
+  const { isOfferAlreadyRefunded } = await import('./broker-refund-dedup.js');
   for (const r of rows) {
     try {
       const meta = JSON.parse(r.metadata || '{}');
@@ -260,6 +264,16 @@ export async function _scanExpiredBrokerOffers() {
         continue;
       }
       const refundAmount = parseFloat(meta.intent_qty || r.give_amount);
+      // T-J2-2026-04-29 chain-truth dedup
+      const dedup = isOfferAlreadyRefunded({ ...r, broadcast_at: r.broadcast_at });
+      if (dedup.alreadyRefunded) {
+        console.warn(`[broker-refund] Z20 DEDUP ${r.id.slice(0,8)} skip — kaspa 链已有 ${dedup.priorTxs.length} 笔真 refund TX. 拒重复退款 (broker 真亏 87.9 KAS 教训, T-J2-2026-04-29).`);
+        // 同时把 offer.protocol_status 转 'refunded' 避免后续每 5min 都被扫到
+        try {
+          sqlite.prepare(`UPDATE exchange_offers SET protocol_status='refunded', updated_at=datetime('now') WHERE id=? AND protocol_status IN ('open','expired','timed_out')`).run(r.id);
+        } catch (e) { console.warn(`[broker-refund] Z20 mark refunded err: ${e.message}`); }
+        continue;
+      }
       console.log(`[broker-refund] Z20 ${r.id.slice(0,8)} refund ${refundAmount} KAS → ${userKasia.slice(-12)} (status=${r.protocol_status}, expired_at=${r.expires_at})`);
       // Z20: status transition 'open' → 'timed_out' (proactive sweep set timestamp)
       if (r.protocol_status === 'open') {
