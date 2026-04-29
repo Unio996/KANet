@@ -117,6 +117,28 @@ async function _send(relayId, cmd) {
   return sendCommandAsync(relayId, cmd);
 }
 
+// T-J2-2026-04-29 Phase 0 (NWT 79ba4015 88 KAS sacred regression dig):
+// PRICE_QUERY 短路 side-aware. broker-v2 retail_dex_orders.side 优先 (broker-v2 SQL 状态机权威),
+// fallback broker-v1 getConvoState(peer).direction (legacy convo lock).
+// 返回 'sell' | 'buy' | null. null = 用户没表态 → 双向并列让 user 选.
+function _resolveSideHint(peerAddr) {
+  try {
+    const row = sqlite.prepare(
+      `SELECT side FROM retail_dex_orders
+       WHERE user_kasia_address = ? AND state IN ('aligning','awaiting_payment','confirming','paid','executing')
+       ORDER BY rowid DESC LIMIT 1`
+    ).get(peerAddr);
+    if (row?.side === 'sell_kas') return 'sell';
+    if (row?.side === 'buy_kas') return 'buy';
+  } catch {}
+  try {
+    const s = getConvoState(peerAddr);
+    if (s?.direction === 'sell') return 'sell';
+    if (s?.direction === 'buy') return 'buy';
+  } catch {}
+  return null;
+}
+
 function selectBestOffer(qtyKas, payChain, give_asset = 'KAS', want_asset = 'USDT') {
   // R5 T-J2-17 (Bug 10): broker 不 self-accept, 排除自己 maker 的 offer.
   // T-NWT-2026-04-27 v1.1 Phase A step 2: give_asset 参数化 (default 'KAS' 向后兼容).
@@ -863,24 +885,25 @@ export async function handleBuyIntent(peerAddr, message) {
   // R33 b iter1 v2 (NWT 15:10 根因纠正后): sync return only, drop _qDm 避免 duplicate DM.
   // production 路径 = relay getAIReply 用 sync return → 包 Kasia chain DM 给 user (kasia-relay/src/ai.mjs).
   // _qDm 之前用是 redundant — 同内容两次 chain DM = 双 TX 双 fee + user 看两遍.
+  // T-J2-2026-04-29 Phase 0 (NWT 79ba4015 88 KAS sacred regression dig):
+  // PRICE_QUERY 短路两 branch 合并 + side-aware. shouldDeterministicFire 仅 lock 后 gate;
+  // SELL 还没 lock 时 (Owner T1 '我想卖' + T2 '卖 88 个 KAS, 卖价多少'),
+  // 之前 fallthrough → BUY 引导文案 ('想买...例 "买 50 KAS"') 撞 owner_88kas_verbatim B1/B2 sacred.
+  // 修: _resolveSideHint 优先查 broker-v2 retail_dex_orders.side fallback broker-v1 convo state direction.
   if (PRICE_QUERY_REGEX.test(trimmed)) {
-    if (!shouldDeterministicFire(peerAddr, 'PRICE_QUERY', trimmed)) {
-      try {
-        const { fetchKasPrice } = await import('./market-seeder.js');
-        const p = await fetchKasPrice();
-        return p && p > 0
-          ? `KAS 现价 $${p.toFixed(6)} USDT/KAS\n· broker 收购价 (你卖) $${(p * 0.99).toFixed(6)} (含 1% spread)\n· 已锁定 SELL flow, 想确认下单回 YES`
-          : `价格暂时拿不到 (上游 8 源全没响应), 稍等 1min 再问.`;
-      } catch (e) {
-        return `价格查询暂时失败 (${e.message?.slice(0, 40)}). 稍等再问.`;
-      }
-    }
     try {
       const { fetchKasPrice } = await import('./market-seeder.js');
       const p = await fetchKasPrice();
-      return p && p > 0
-        ? `KAS 现价 $${p.toFixed(6)} USDT/KAS\n· broker 自挂卖价 $${(p * 1.01).toFixed(6)} (含 1% spread)\n· 想买告诉我数量 + 链 (BSC/POL/SOL/TRON), 例: "买 50 KAS"`
-        : `价格暂时拿不到 (上游 8 源全没响应), 稍等 1min 再问. 或直接告诉我数量我帮你查.`;
+      if (!p || p <= 0) return `价格暂时拿不到 (上游 8 源全没响应), 稍等 1min 再问.`;
+      const sideHint = _resolveSideHint(peerAddr);
+      if (sideHint === 'sell') {
+        return `KAS 现价 $${p.toFixed(6)} USDT/KAS\n· broker 收购价 (你卖) $${(p * 0.99).toFixed(6)} (含 1% spread)\n· 已锁定 SELL flow, 想确认下单回 YES`;
+      }
+      if (sideHint === 'buy') {
+        return `KAS 现价 $${p.toFixed(6)} USDT/KAS\n· broker 自挂卖价 $${(p * 1.01).toFixed(6)} (含 1% spread)\n· 想买告诉我数量 + 链 (BSC/POL/SOL/TRON), 例: "买 50 KAS"`;
+      }
+      // sideHint null — 用户还没表态方向, 双向并列让 user 选 (不强引导任一边)
+      return `KAS 现价 $${p.toFixed(6)} USDT/KAS\n· broker 自挂卖价 (你买) $${(p * 1.01).toFixed(6)}\n· broker 收购价 (你卖) $${(p * 0.99).toFixed(6)}\n· 告诉我 "买 X KAS + 链" 或 "卖 X KAS"`;
     } catch (e) {
       return `价格查询暂时失败 (${e.message?.slice(0, 40)}). 稍等再问.`;
     }

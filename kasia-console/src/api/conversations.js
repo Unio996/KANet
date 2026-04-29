@@ -207,6 +207,37 @@ export async function registerConversationRoutes(fastify) {
       return { ok: true, reset: true };
     });
 
+    // T-J2-2026-04-30 Phase β NWT vote (C) — inject_paid_mock for real-chain RC-01.
+    // 暴露 broker-buy-handler._testInjectScan via HTTP. RC-01 BUY case 模拟 user 真付 USDT
+    // BSC 但不真烧钱 — broker.verifyPaymentForPeer 用此 _scanOverride 返 fake event match
+    // pick.take_usdt → broker fires _enqueuePaid → paid_v1 chain DM 真 broadcast.
+    // 注意: 仅 broker-side payment detection mock. exchange-machine processPaymentSubmit 真链验
+    // 仍走 cross-chain-verify (fake tx hash → fail), 因此此 mock 仅 cover broker-side state
+    // transition, 不 cover full e2e settlement.
+    fastify.post('/api/test/inject-scan-mock', async (request, _reply) => {
+      const { events } = request.body || {};
+      if (!Array.isArray(events)) {
+        return { ok: false, error: 'events must be array of {tx_hash, amount, from?, to}' };
+      }
+      const { _testInjectScan } = await import('../services/broker-buy-handler.js');
+      _testInjectScan(async ({ chain, recipient, span_blocks }) => {
+        return { ok: true, events: events.map(e => ({
+          tx_hash: e.tx_hash || `0x${'a'.repeat(64)}`,
+          amount: parseFloat(e.amount),
+          from: e.from || null,
+          to: e.to || recipient,
+          chain: chain || 'bnb',
+        })) };
+      });
+      return { ok: true, mocked: true, event_count: events.length };
+    });
+
+    fastify.post('/api/test/reset-scan-mock', async (_request, _reply) => {
+      const { _testResetScan } = await import('../services/broker-buy-handler.js');
+      _testResetScan();
+      return { ok: true, reset: true };
+    });
+
     // T-NWT-2026-04-29 broker-v2 阶段 2 task 5/7 — LLM mock injection endpoint.
     // FIFO queue: inject 一次 → 下一次 _callLlm 调入口消费 → 空队列回真 Qwen.
     // body: { mock: { content?: 'text', tool_calls?: [{ function: { name, arguments } }] } }

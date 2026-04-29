@@ -284,6 +284,154 @@ const actions = {
   },
 
   /**
+   * T-J2-2026-04-29 Phase α — real_send_kas: 真 KAS transfer via relay sendCommand type='transfer'.
+   * step: { action: 'real_send_kas', from_relay_id, to_addr, amount_kas, timeout_ms? }
+   * → returns { tx_id, fee, ts, latency_ms, ok }
+   *
+   * relay.mjs:441 case 'transfer' → sendKaspa({to, amount}). 真上链, ~0.0001 KAS gas.
+   * 用于 Phase β real-chain cases (RC-02 sell_kas_real_full: user → broker KAS transfer 触发 broker-intake).
+   */
+  async real_send_kas(step, ctx) {
+    const t0 = Date.now();
+    const res = await fetch(`${CONSOLE_URL}/api/relay/${step.from_relay_id}/send-command`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'transfer', target: step.to_addr, amount: String(step.amount_kas) }),
+      signal: step.timeout_ms ? AbortSignal.timeout(step.timeout_ms) : undefined,
+    });
+    const data = await res.json();
+    return {
+      ok: !!data?.ok || !!data?.txId,
+      tx_id: data?.txId || data?.result?.txId || null,
+      fee: data?.fee || data?.result?.fee || null,
+      latency_ms: Date.now() - t0,
+      raw: data,
+    };
+  },
+
+  /**
+   * T-J2-2026-04-29 Phase α — real_send_evm: 真 EVM ERC20 transfer (USDT/USDC BSC/ETH).
+   * step: { action: 'real_send_evm', from_relay_id, wallet_id, chain, asset, to_addr, amount, timeout_ms? }
+   * → returns { tx_hash, ok, latency_ms }
+   *
+   * relay.js POST /api/relay/:id/wallets/:walletId/send → transferERC20(chain, privkey, addr, amount).
+   * 用于 Phase β RC-01 (BUY user 真付 USDT BSC).
+   */
+  async real_send_evm(step, ctx) {
+    const t0 = Date.now();
+    const res = await fetch(`${CONSOLE_URL}/api/relay/${step.from_relay_id}/wallets/${step.wallet_id}/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chain: step.chain,
+        asset: step.asset || 'USDT',
+        to: step.to_addr,
+        amount: String(step.amount),
+      }),
+      signal: step.timeout_ms ? AbortSignal.timeout(step.timeout_ms) : undefined,
+    });
+    const data = await res.json();
+    return {
+      ok: !!data?.ok || !!data?.tx || !!data?.tx_hash,
+      tx_hash: data?.tx_hash || data?.tx || data?.txHash || null,
+      latency_ms: Date.now() - t0,
+      raw: data,
+    };
+  },
+
+  /**
+   * T-J2-2026-04-29 Phase α — verify_broker_v2_active: 验证 broker-v2 path 实际是否在跑.
+   * step: { action: 'verify_broker_v2_active', test_peer, to_relay_id, expected: 'v1'|'v2'|'auto' }
+   * → returns { active_path: 'v1'|'v2'|'unknown', signals[], match }
+   *
+   * 实施: 跑 1 turn '我想买 KAS' 看 reply 来源 + console.log marker (broker-v2 routes 写
+   * '[api/agent/reply] broker-v2 routed peer=...' 或 broker-v1 buyPreview 路径.
+   * NWT 8aef0b5e 暴露 'production active' 假声明根因 — 此 action 给所有 case author 一个 sanity probe.
+   */
+  async verify_broker_v2_active(step, ctx) {
+    const expected = step.expected || 'auto';
+    const res = await fetch(`${CONSOLE_URL}/api/agent/reply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        relayNodeId: step.to_relay_id,
+        peer: step.test_peer,
+        message: '我想买 KAS',
+      }),
+    });
+    const data = await res.json();
+    const reply = data.reply || '';
+    // signals: broker-v2 LLM render style (含 '限价单簿' / '挂单' / '价格浮动 1%' / '哪个链'+'BSC/Polygon/SOL/TRON')
+    // vs broker-v1 deterministic regex (含 '订单画像' / 'broker fee' / hardcoded 文案)
+    const v2Signals = ['限价单簿', 'TTL', '价格浮动', '挂单'];
+    const v1Signals = ['订单画像', 'broker fee', '想买告诉我', 'BSC/POL/SOL/TRON'];
+    const v2Hits = v2Signals.filter(s => reply.includes(s));
+    const v1Hits = v1Signals.filter(s => reply.includes(s));
+    let active = 'unknown';
+    if (v2Hits.length > v1Hits.length && v2Hits.length > 0) active = 'v2';
+    else if (v1Hits.length > 0) active = 'v1';
+    const match = expected === 'auto' || expected === active;
+    return { active_path: active, signals: { v2: v2Hits, v1: v1Hits }, reply: reply.slice(0, 200), match };
+  },
+
+  /**
+   * T-J2-2026-04-30 Phase β — inject_paid_mock (NWT vote C):
+   * RC-01 BUY 模拟 user 真付 USDT BSC 但不烧钱.
+   * step: { action: 'inject_paid_mock', events: [{tx_hash, amount, from?, to?}] }
+   * → POST /api/test/inject-scan-mock → broker.verifyPaymentForPeer 用 _scanOverride 返 fake event
+   *
+   * 注意: 仅 broker-side mock (broker fire paid_v1). exchange-machine cross-chain-verify 真链验
+   * 仍 fail (fake tx hash). 用于 broker-side state transition cover, 非 full e2e settlement cover.
+   */
+  async inject_paid_mock(step, ctx) {
+    const events = step.events || [{ tx_hash: `0x${'a'.repeat(64)}`, amount: step.amount || 0.85 }];
+    const res = await fetch(`${CONSOLE_URL}/api/test/inject-scan-mock`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ events }),
+    });
+    return await res.json();
+  },
+
+  async reset_paid_mock(step, ctx) {
+    const res = await fetch(`${CONSOLE_URL}/api/test/reset-scan-mock`, { method: 'POST' });
+    return await res.json();
+  },
+
+  /**
+   * T-J2-2026-04-29 Phase α — cleanup_real_artifacts: wipe test peer 真链 artifacts.
+   * step: { action: 'cleanup_real_artifacts', peer_addr }
+   * → returns { rows_removed, tables[] }
+   *
+   * 复用 _4a-cleanup-test-artifacts.mjs (NWT phase 1 cleanup helper).
+   * 删 retail_dex_orders WHERE user_kasia_address=peer (state 不在 'completed' 保留 audit 轨迹) +
+   * messages WHERE peer (含 inbound + outbound, 不动 chain_events / kaspa_tx_log preserve audit).
+   */
+  async cleanup_real_artifacts(step, ctx) {
+    const peer = step.peer_addr;
+    if (!peer) throw new Error('cleanup_real_artifacts requires step.peer_addr');
+    const db = new Database(DB_PATH);
+    const tables = [];
+    let total = 0;
+    try {
+      const r1 = db.prepare(
+        `DELETE FROM retail_dex_orders WHERE user_kasia_address = ? AND state NOT IN ('completed','refunded')`
+      ).run(peer);
+      tables.push({ retail_dex_orders: r1.changes });
+      total += r1.changes;
+      const r2 = db.prepare(
+        `DELETE FROM messages WHERE sender_identity_id IN (SELECT id FROM identities WHERE address = ?)
+            OR receiver_identity_id IN (SELECT id FROM identities WHERE address = ?)`
+      ).run(peer, peer);
+      tables.push({ messages: r2.changes });
+      total += r2.changes;
+    } finally {
+      db.close();
+    }
+    return { rows_removed: total, tables, peer: peer.slice(-12) };
+  },
+
+  /**
    * Drive a persona one turn — generates user message via persona.step(state, prevReply),
    * sends to broker, captures reply for next turn. Persona state persists in ctx.vars[state_key].
    * step: { action: 'persona_turn', persona, from_peer, to_relay_id, state_key? }
