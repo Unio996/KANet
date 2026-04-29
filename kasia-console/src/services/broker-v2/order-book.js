@@ -52,12 +52,15 @@ export async function computePreview(peer, draft) {
   }
 
   if (side === 'sell_kas') {
+    // SELL 路径 schema 命名: retail_dex_orders.pay_chain/pay_address 在 SELL 实际是
+    // user 收 USDT 的 chain + EVM addr. broker 视角 'pay' = broker 付 USDT 到 user.
+    // sellPreview/finalizeSell signature 用 recv_chain/recv_address (user 收 USDT 视角).
     const { sellPreview } = await import('../broker-sell-handler.js');
     const result = await sellPreview({
       user_kasia: peer,
       qty: parseFloat(qty),
-      pay_chain,
-      receive_address: pay_address,
+      recv_chain: pay_chain,
+      recv_address: pay_address,
     });
     if (!result?.ok) return { ok: false, error: result?.error || 'sellPreview failed', message: result?.message };
     return {
@@ -85,6 +88,10 @@ export async function publishOrder(peer, draft) {
   const { side, qty, pay_chain, pay_address, asset } = draft;
 
   if (side === 'buy_kas') {
+    // Phase 1 BUY 路径 = 旧 broker 多 maker 拼 (即买即得, 不 partial fill).
+    // Phase 2 future: BUY 也改 user 挂买单 limit order book 等 taker 来卖 KAS.
+    // finalizeBuy return shape: { ok, picks[], total_kas, total_usdt, pay_chain, n_payments, broker_dynamic_quote, note }.
+    // 无单 offer_id (multi-maker 各自 picks).
     const { finalizeBuy } = await import('../broker-buy-handler.js');
     const result = await finalizeBuy({
       user_kasia: peer,
@@ -94,25 +101,28 @@ export async function publishOrder(peer, draft) {
       receive_address: pay_address || null,
     });
     if (!result?.ok) return { ok: false, error: result?.error || 'finalizeBuy failed' };
+    const ackBase = result.note || `✓ 买 ${qty} ${asset || 'KAS'} 单已建. 共 ${result.n_payments || 1} 笔付款, 总 ${result.total_usdt} USDT (${pay_chain.toUpperCase()}).`;
     return {
       ok: true,
-      offer_id: result.offer_id,
-      ack_text: result.ack_text || `✓ 买单已挂 ${qty} ${asset || 'KAS'}, 等待付款 USDT 后 broker 自动发 KAS.`,
+      offer_id: null,  // phase 1 BUY multi-maker 拼, 无单 offer_id (picks 各 maker offer_id 在 result.picks[])
+      buy_picks: result.picks || [],  // expose picks for advanced UX
+      ack_text: ackBase,
     };
   }
 
   if (side === 'sell_kas') {
+    // SELL 路径同 sellPreview 命名: recv_chain/recv_address (user 收 USDT 视角).
     const { finalizeSell } = await import('../broker-sell-handler.js');
     const result = await finalizeSell({
       user_kasia: peer,
       qty: parseFloat(qty),
-      pay_chain,
-      receive_address: pay_address,
+      recv_chain: pay_chain,
+      recv_address: pay_address,
     });
     if (!result?.ok) return { ok: false, error: result?.error || 'finalizeSell failed' };
     return {
       ok: true,
-      offer_id: result.offer_id,
+      offer_id: result.order_id || result.offer_id,
       ack_text: result.ack_text || `✓ 卖单已挂 ${qty} KAS, 1% 价格浮动, 等 taker 来接 (TTL 内多 taker 累积成交).`,
     };
   }
