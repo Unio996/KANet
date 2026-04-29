@@ -472,10 +472,12 @@ const actions = {
     const brokerRelayId = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
     const brokerAddr = db.prepare('SELECT address FROM relay_nodes WHERE id=?').get(brokerRelayId)?.address;
     if (!brokerAddr) { db.close(); return { ok: false, error: 'broker addr not found' }; }
+    // J2 catch: broadcast_tx_id schema NOT NULL. 真 64-hex fake hash 真 v83 trigger length=64 PASS
+    const fakeTxId = Array.from({length: 64}, (_,i) => 'abcdef0123456789'[(i + Date.now()) % 16]).join('');
     db.prepare(`
-      INSERT INTO exchange_offers (id, maker, give_asset, give_amount, want_asset, want_amount, protocol_status, created_at, broadcast_at, metadata)
-      VALUES (?, ?, 'KAS', ?, 'USDT', ?, 'expired', ?, ?, ?)
-    `).run(offerId, brokerAddr, String(step.give_amount), '0.034', now, now, JSON.stringify({ user_kasia_address: step.peer_addr, intent_qty: step.qty_kas }));
+      INSERT INTO exchange_offers (id, maker, give_asset, give_amount, want_asset, want_amount, protocol_status, created_at, broadcast_at, broadcast_tx_id, metadata)
+      VALUES (?, ?, 'KAS', ?, 'USDT', ?, 'expired', ?, ?, ?, ?)
+    `).run(offerId, brokerAddr, String(step.give_amount), '0.034', now, now, fakeTxId, JSON.stringify({ user_kasia_address: step.peer_addr, intent_qty: step.qty_kas }));
     db.prepare(`
       INSERT INTO retail_dex_orders (id, user_kasia_address, side, order_type, qty, pay_chain, pay_address, state, exchange_offer_id, created_at, updated_at)
       VALUES (?, ?, 'sell_kas', 'limit', ?, 'bnb', ?, 'awaiting_payment', ?, ?, ?)
@@ -679,6 +681,31 @@ const assertions = {
       const numericOk = Number.isFinite(expNum) && Number.isFinite(actNum) && expNum === actNum;
       if (actual !== expected && !numericOk) {
         return { pass: false, expected: { [k]: expected }, actual: { [k]: actual }, msg: `row.${k}='${actual}' (want '${expected}')` };
+      }
+    }
+    return { pass: true, expected: spec, actual: row };
+  },
+
+  // J2 catch (16c2b7170d): row_field_present + row_field_in 漏 implement
+  row_field_present(step_result, fields, ctx) {
+    const row = step_result.row || step_result.rows?.[0];
+    if (!row) return { pass: false, expected: fields, actual: null, msg: 'no row to check' };
+    const missing = [];
+    for (const field of (Array.isArray(fields) ? fields : [fields])) {
+      if (row[field] == null) missing.push(field);
+    }
+    return missing.length === 0
+      ? { pass: true, expected: fields, actual: row }
+      : { pass: false, expected: fields, actual: row, msg: `row_field_present: ${missing.join(', ')} is null/missing` };
+  },
+
+  row_field_in(step_result, spec, ctx) {
+    const row = step_result.row || step_result.rows?.[0];
+    if (!row) return { pass: false, expected: spec, actual: null, msg: 'no row to check' };
+    for (const [field, allowedValues] of Object.entries(spec || {})) {
+      const list = Array.isArray(allowedValues) ? allowedValues : [allowedValues];
+      if (!list.includes(row[field])) {
+        return { pass: false, expected: { [field]: list }, actual: { [field]: row[field] }, msg: `row_field_in: ${field}='${row[field]}' not in [${list.join(', ')}]` };
       }
     }
     return { pass: true, expected: spec, actual: row };
