@@ -386,8 +386,13 @@ export async function advanceToRefunded({ orderId, reason }) {
       AND refund_tx_hash IS NULL
   `).run(orderId);
   if (claim.changes === 0) {
-    // CAS lost — re-SELECT to give caller diagnostic info
+    // CAS lost — re-SELECT to distinguish 'no refund needed' vs 'race lost' (J1 #73 Edge 1 catch).
+    // 'aligning'/'confirming' state = broker 没收 user payment yet → NO refund needed (broker pool 不 owe user).
+    // 'race lost' = 别 caller 真 claim 'refunding' lock OR refund_tx_hash 已 set (Phase 0 应已 catch).
     const post = sqlite.prepare(`SELECT state, refund_tx_hash FROM retail_dex_orders WHERE id=?`).get(orderId);
+    if (post?.state === 'aligning' || post?.state === 'confirming') {
+      return { ok: true, noRefundNeeded: true, skipReason: 'no_refund_needed', orderState: post.state };
+    }
     return { ok: false, skipReason: 'race_lost', error: `Phase 1 CAS lost: state=${post?.state} refund_tx_hash=${post?.refund_tx_hash?.slice(0,12) || 'null'}` };
   }
 

@@ -252,51 +252,63 @@ export async function _scanExpiredBrokerOffers() {
   // T-J2-2026-04-29 紧急 Track A: chain-truth dedup. 现 dedup SQL `txid IN kaspa_tx_log` 因占位符 txid='refund_xxx'
   // 永久失效, 同 offer 可重复退款 broker 真亏. 改: 退款前查 kaspa_tx_log 真链有没 broker→user refund TX matching
   // expected_amount + offer broadcast_at 时间窗. 有则 skip (已退过).
-  const { isOfferAlreadyRefunded } = await import('./broker-refund-dedup.js');
+  // T-J2-2026-04-29 Track B step 5 (Owner 钦定单一状态机, round 3 共识):
+  // 替原 inline sendKas + chain_event placeholder INSERT pattern → call advanceToRefunded.
+  // advanceToRefunded 内部 chain-truth dedup + Phase 1 CAS + Phase 2 sendKas (真 chain hash) + Phase 3 atomic 3-table sync.
+  // chain_events INSERT 真 real txId (post-v83 lenient trigger PASS), 不再占位符 polluting.
+  const { advanceToRefunded } = await import('./broker-state-authority.js');
   for (const r of rows) {
     try {
       const meta = JSON.parse(r.metadata || '{}');
-      // Z20 broaden: 真**真**真**真 source 'broker-intake' filter, 真**真**真 user_kasia_address 真**真**真**真 process.
-      // 真**真**真 metadata 真**真 user_kasia_address (真 broker-intake 真 metadata 真**真 set), 真**真**真 fallback skip.
       const userKasia = meta.user_kasia_address;
       if (!userKasia) {
         console.warn(`[broker-refund] Z20 ${r.id.slice(0,8)} skip: no user_kasia_address in metadata`);
         continue;
       }
       const refundAmount = parseFloat(meta.intent_qty || r.give_amount);
-      // T-J2-2026-04-29 chain-truth dedup
-      const dedup = isOfferAlreadyRefunded({ ...r, broadcast_at: r.broadcast_at });
-      if (dedup.alreadyRefunded) {
-        console.warn(`[broker-refund] Z20 DEDUP ${r.id.slice(0,8)} skip — kaspa 链已有 ${dedup.priorTxs.length} 笔真 refund TX. 拒重复退款 (broker 真亏 87.9 KAS 教训, T-J2-2026-04-29).`);
-        // 同时把 offer.protocol_status 转 'refunded' 避免后续每 5min 都被扫到
-        try {
-          sqlite.prepare(`UPDATE exchange_offers SET protocol_status='refunded', updated_at=datetime('now') WHERE id=? AND protocol_status IN ('open','expired','timed_out')`).run(r.id);
-        } catch (e) { console.warn(`[broker-refund] Z20 mark refunded err: ${e.message}`); }
-        continue;
-      }
-      console.log(`[broker-refund] Z20 ${r.id.slice(0,8)} refund ${refundAmount} KAS → ${userKasia.slice(-12)} (status=${r.protocol_status}, expired_at=${r.expires_at})`);
-      // Z20: status transition 'open' → 'timed_out' (proactive sweep set timestamp)
+
+      // 'open' → 'timed_out' status transition (proactive sweep set timestamp).
+      // advanceToRefunded refundable states: 'awaiting_payment','paid','expired'. 'open'/'timed_out' offer
+      // 真 retail_dex_orders state 真 'awaiting_payment' (broker held KAS) — advanceToRefunded 真 work.
       if (r.protocol_status === 'open') {
         sqlite.prepare(`UPDATE exchange_offers SET protocol_status='timed_out', timed_out_at=datetime('now') WHERE id=?`).run(r.id);
       }
-      await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.TRANSFER, target: userKasia, amount_kas: refundAmount,
-        note: `refund expired offer ${r.id.slice(0,8)}` });
-      sqlite.prepare(`
-        INSERT INTO chain_events (txid, from_address, to_address, event_type, payload, observed_by, observed_at)
-        VALUES (?, NULL, NULL, 'broker_kas_refunded', ?, 'broker-intake-watcher', datetime('now'))
-      `).run(`refund_${r.id}`, JSON.stringify({ offer_id: r.id, user_kasia_address: userKasia, amount: refundAmount, reason: 'timeout_auto_refund_z20' }));
-      // Z20: retail_dex_orders state sync (跟 Z17 publish 路径 spirit)
-      try {
-        const updated = sqlite.prepare(
-          `UPDATE retail_dex_orders SET state = 'timed_out_refunded', updated_at = datetime('now')
-           WHERE user_kasia_address = ? AND (exchange_offer_id = ? OR (exchange_offer_id IS NULL AND state IN ('awaiting_payment', 'broadcast') AND CAST(qty AS REAL) >= ? - 0.5 AND CAST(qty AS REAL) <= ? + 0.5))`
-        ).run(userKasia, r.id, refundAmount, refundAmount);
-        if (updated.changes > 0) console.log(`[broker-refund] Z20 retail_dex_orders state sync: peer=${userKasia.slice(-12)} → timed_out_refunded`);
-      } catch (e) { console.warn(`[broker-refund] Z20 retail_dex sync err: ${e.message}`); }
-      await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: userKasia,
-        message: `订单 ${r.id.slice(0,8)} 2h 无人接单, 已退 ${refundAmount} KAS 给你. broker 吃 gas.`
-      });
-      handled++;
+
+      // Find linked retail_dex_orders.id
+      const order = sqlite.prepare(`
+        SELECT id FROM retail_dex_orders
+        WHERE user_kasia_address=?
+          AND (exchange_offer_id=? OR (exchange_offer_id IS NULL AND CAST(qty AS REAL) >= ? - 0.5 AND CAST(qty AS REAL) <= ? + 0.5 AND state IN ('awaiting_payment','paid','expired')))
+        ORDER BY created_at DESC LIMIT 1
+      `).get(userKasia, r.id, refundAmount, refundAmount);
+
+      if (!order?.id) {
+        console.warn(`[broker-refund] Z20 ${r.id.slice(0,8)} skip — no retail_dex_orders link, advanceToRefunded 真 orderId 必`);
+        continue;
+      }
+
+      const result = await advanceToRefunded({ orderId: order.id, reason: 'expired_auto_refund' });
+
+      if (result.ok) {
+        if (result.noRefundNeeded) {
+          // J1 #73 Edge 1: order.state 'aligning'/'confirming' — broker 没收 user payment, 真 NO refund needed.
+          // 不该 retry 也不 DM user. log 一次 surface unusual case (cron 真 'aligning' 30min 才扫到, 真 abnormal).
+          console.warn(`[broker-refund] Z20 ${r.id.slice(0,8)} no-refund-needed (order state=${result.orderState}, broker 没收 user payment) — skip refund + skip retry`);
+        } else if (result.alreadyRefunded) {
+          console.warn(`[broker-refund] Z20 ${r.id.slice(0,8)} DEDUP — chain 真已退过 (TX: ${result.txId?.slice(0,12)}), DB 已自动 backfill`);
+        } else {
+          console.log(`[broker-refund] Z20 ${r.id.slice(0,8)} ✓ refund ${result.refundAmount} KAS → ${userKasia.slice(-12)} (TX: ${result.txId?.slice(0,12)})`);
+          // DM ack user (advanceToRefunded 不 send DM, caller send per round 3 共识 Q6)
+          await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: userKasia,
+            message: `订单 ${r.id.slice(0,8)} 2h 无人接单, 已退 ${result.refundAmount} KAS 给你. broker 吃 gas. Kasia TX: ${result.txId?.slice(0,16)}`
+          });
+        }
+        handled++;
+      } else if (result.skipReason === 'race_lost') {
+        console.warn(`[broker-refund] Z20 ${r.id.slice(0,8)} race lost (其他 caller 已 claim refunding lock), reconciler 真 backfill`);
+      } else {
+        console.error(`[broker-refund] Z20 ${r.id.slice(0,8)} advanceToRefunded FAIL: ${result.error || result.skipReason}`);
+      }
     } catch (err) { console.warn(`[broker-refund] Z20 ${r.id} err: ${err.message}`); }
   }
   return { handled, scanned: rows.length };

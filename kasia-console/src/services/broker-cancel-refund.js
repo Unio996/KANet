@@ -99,14 +99,16 @@ export async function handleCancelAndRefund(peerAddr) {
   const refundable = _findRefundableOffers(peerAddr);
   if (refundable.length === 0) return null;
 
-  const { enqueueVerified } = await import('./broker-action-queue.js');
-  const { markOrderRefunded, markRefundFailed } = await import('../db/state-transitions.js');
+  // T-J2-2026-04-29 Track B step 5 (Owner 钦定单一状态机, round 3 共识 design v4):
+  // 替原 inline sendKas + markOrderRefunded (双重退款 root cause) → call advanceToRefunded.
+  // advanceToRefunded 内部 Phase 1 CAS lock + Phase 2 sendKas + Phase 3 atomic 3-table sync + chain-truth dedup.
+  const { advanceToRefunded } = await import('./broker-state-authority.js');
   const PORT = process.env.PORT || 3100;
-
   const ackParts = [];
 
   for (const offer of refundable) {
-    // Step 1: cancel offer 上链 (best-effort; UI/Scout 看 protocol_status=cancelled)
+    // Step 1: cancel offer 上链 (best-effort; UI/Scout 看 protocol_status=cancelled).
+    // advanceToRefunded Phase 3 同步 set protocol_status='refunded', 但 chain-side cancel 仍 fire 通知 taker pool.
     try {
       await fetch(`http://127.0.0.1:${PORT}/api/exchange/cancel`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -116,9 +118,8 @@ export async function handleCancelAndRefund(peerAddr) {
       console.warn(`[cancel-refund] cancel API err for ${offer.id.slice(0,8)}: ${e.message}`);
     }
 
-    // Step 1.5: race-safety. 唯一关心 = post-cancel 期间 taker accept_v1 race 抢 'matched'.
-    // taker IS NULL 是 sufficient condition (broker 仍持资产, 无 claimant). 'cancelled'/'expired'/
-    // 'timed_out' 都安全 (terminal, no taker can attach). 仅 'matched' AND taker 才命中 race.
+    // Step 1.5: race-safety post-cancel taker race 抢接 'matched' detection.
+    // advanceToRefunded 内部 Phase 1 也有 race-safety, 但提早 detect 真 user-facing ack 真 explicit.
     const post = sqlite.prepare(`SELECT protocol_status, taker FROM exchange_offers WHERE id=?`).get(offer.id);
     if (post?.taker || post?.protocol_status === 'matched' || post?.protocol_status === 'verifying' || post?.protocol_status === 'delivering') {
       console.warn(`[cancel-refund] post-cancel race detect ${offer.id.slice(0,8)}: status=${post?.protocol_status} taker=${post?.taker?.slice(-10)} — abort refund, route dispute`);
@@ -126,53 +127,52 @@ export async function handleCancelAndRefund(peerAddr) {
       continue;
     }
 
-    // Find linked retail_dex_orders for Layer 1 wrapper. exchange_offer_id 真**真 都 backfill (J1 Z17
-    // 修了 publish 路径, 但 intake-watcher 部分 case 仍**真 sync). fallback: meta.user_kasia + qty match.
+    // BUY 路径 (give_asset=USDT/USDC) — broker 不持 stable, 不进 advanceToRefunded.
+    if (offer.give_asset !== 'KAS') {
+      ackParts.push(`订单 ${offer.id.slice(0, 8)} 已取消 (${offer.give_asset} 流程: USDT 你付 maker, broker 不持. 如 USDT 已 deliver, 走 dispute 流程联系 broker)`);
+      continue;
+    }
+
+    // Find linked retail_dex_orders.id (advanceToRefunded entry 需 orderId).
     const meta = (() => { try { return JSON.parse(offer.metadata || '{}'); } catch { return {}; } })();
     const intentQty = parseFloat(meta.intent_qty) || (parseFloat(offer.give_amount) + FEE_KAS);
     const order = sqlite.prepare(`
       SELECT id FROM retail_dex_orders
       WHERE user_kasia_address=?
-        AND (exchange_offer_id=? OR (exchange_offer_id IS NULL AND qty=? AND state='awaiting_payment'))
+        AND (exchange_offer_id=? OR (exchange_offer_id IS NULL AND qty=? AND state IN ('awaiting_payment','paid','expired')))
       ORDER BY created_at DESC LIMIT 1
     `).get(peerAddr, offer.id, String(intentQty));
 
-    // Step 2: Layer 2 enqueueVerified — await sendKas execute confirm (拿 txId OR catch error).
-    // Layer 1 + 2 (Owner 钦定 Promise→Verify→Acknowledge): 不再 INSERT-before-confirm, 不再 DM ack 撒谎.
-    if (offer.give_asset === 'KAS') {
-      const refundAmt = +(intentQty - FEE_KAS).toFixed(4);
-      try {
-        const result = await enqueueVerified({
-          kind: 'sendKas',
-          peer: peerAddr,
-          payload: { amount_kas: refundAmt, note: `cancel_refund ${offer.id.slice(0, 8)}` },
-        });
-        const txId = result?.txId;
-        if (!txId) throw new Error('sendKas resolved without txId');
+    if (!order?.id) {
+      // J1 #73 Edge 2: legacy offer 无 order link (exchange_offer_id NULL pre-v83 FK enforce). 真 broker
+      // 不知 user 真 paid OR 没. 不轻易 refund (防双重退款), 不轻易 dispute claim. honest ack walk dispute.
+      console.warn(`[cancel-refund] no retail_dex_orders link for offer ${offer.id.slice(0,8)} — advanceToRefunded 真 orderId 必, skip`);
+      ackParts.push(`订单 ${offer.id.slice(0,8)} 已取消 (链上 offer cancel). 找不到 retail_dex_orders 记录 — 如有付款请联系 broker 走 dispute 流程`);
+      continue;
+    }
 
-        // Step 3: Layer 1 wrapper — verified state advance (含 tx_hash, 真 chain broadcast confirmed).
-        if (order?.id) {
-          try {
-            markOrderRefunded(order.id, txId, 'user_cancel');
-          } catch (e) {
-            console.warn(`[cancel-refund] markOrderRefunded err for order ${order.id}: ${e.message}`);
-          }
-        } else {
-          console.warn(`[cancel-refund] no retail_dex_orders link for offer ${offer.id.slice(0,8)} — chain TX 已发 (${txId.slice(0,12)}), 但 DB state 没 advance`);
-        }
+    // Track B 单一状态机 entry: advanceToRefunded 真 3-Phase pattern + Track A dedup + atomic 3-table sync.
+    const result = await advanceToRefunded({ orderId: order.id, reason: 'user_cancel' });
 
-        ackParts.push(`订单 ${offer.id.slice(0, 8)} 已取消, ${refundAmt} KAS 已发到你 Kasia 钱包 (扣 ${FEE_KAS} broker fee). Kasia TX: ${txId.slice(0, 16)}`);
-      } catch (err) {
-        // Layer 1 markRefundFailed — 不撒谎. broker 仍持 KAS, alert events 表, ack 真实.
-        console.error(`[cancel-refund] sendKas FAIL for offer ${offer.id.slice(0,8)}: ${err.message}`);
-        if (order?.id) {
-          try { markRefundFailed(order.id, err.message); } catch { /* fall */ }
-        }
-        ackParts.push(`订单 ${offer.id.slice(0, 8)} 取消请求收到, 但 broker 退款 chain TX 失败 (${err.message?.slice(0, 60)}). KAS 仍在 broker 钱包没动, broker 已 alert Owner 人工处理. 不会丢钱`);
+    if (result.ok) {
+      if (result.noRefundNeeded) {
+        // J1 #73 Edge 1: order.state 'aligning'/'confirming' — broker 没收 user payment yet, 真 NO refund needed.
+        ackParts.push(`订单 ${offer.id.slice(0,8)} 已取消 (设置中没产生付款, 不需 refund)`);
+      } else if (result.alreadyRefunded) {
+        // chain-truth dedup hit: chain 真已退过 (Owner 87.7 KAS 双重退款 防御). DB drift backfill 已自动 fire.
+        ackParts.push(`订单 ${offer.id.slice(0,8)} 之前已退过 (Kasia TX: ${result.txId?.slice(0,16)}), 链上记录已存在, 不重复退款`);
+      } else {
+        ackParts.push(result.ackText || `订单 ${offer.id.slice(0, 8)} 已退 ${result.refundAmount} KAS 到你 Kasia 钱包. Kasia TX: ${result.txId?.slice(0, 16)}`);
       }
+    } else if (result.skipReason === 'race_lost') {
+      // Phase 1 CAS lost — 别 caller 真 claim 'refunding' lock (e.g. cron tick 同时 fire). Reconciler 真 backfill.
+      ackParts.push(`订单 ${offer.id.slice(0,8)} 取消请求收到, 退款进行中 (其他 process 已起手), 1-3 分钟到账`);
+    } else if (result.skipReason === 'not_refundable') {
+      ackParts.push(`订单 ${offer.id.slice(0,8)} 状态 (${result.error?.match(/status=(\w+)/)?.[1] || '未知'}) 不允许退款, 走 dispute 流程`);
     } else {
-      // BUY 路径 (give_asset=USDT/USDC) — broker 不持 stable, USDT 是 user 付给 maker. 不退还流程, 走 dispute.
-      ackParts.push(`订单 ${offer.id.slice(0, 8)} 已取消 (${offer.give_asset} 流程: USDT 你付 maker, broker 不持. 如 USDT 已 deliver, 走 dispute 流程联系 broker)`);
+      // sendKas fail / 其他 error — Phase 1 已 rollback state='expired' + error_reason 记, reconciler 5min 重试.
+      console.error(`[cancel-refund] advanceToRefunded FAIL for order ${order.id}: ${result.error}`);
+      ackParts.push(`订单 ${offer.id.slice(0,8)} 取消请求收到, 但 broker 退款 chain TX 失败 (${result.error?.slice(0, 60)}). KAS 仍在 broker 钱包, reconciler 5 分钟自动重试. 不会丢钱`);
     }
   }
 
