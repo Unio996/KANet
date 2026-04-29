@@ -63,6 +63,30 @@ function _checkStuckRefunding() {
   return stuck.length;
 }
 
+// J1 #69 propose: 'expired' state + error_reason='refund_send_failed' = retry-able
+// (J2 Track B Phase 1 rollback target). reconciler 5min cron retry advanceToRefunded.
+// 'expired' state 真 TTL 自然 expired (broker-intake-watcher REFUND_TICK 已 cover) 真 reconciler skip.
+function _checkRetryableExpiredFailedRefund() {
+  const retryable = sqlite.prepare(`
+    SELECT id, user_kasia_address, qty, exchange_offer_id, state, error_reason, updated_at,
+           (julianday('now') - julianday(updated_at)) * 86400000 AS age_ms
+    FROM retail_dex_orders
+    WHERE state = 'expired'
+      AND refund_tx_hash IS NULL
+      AND error_reason LIKE '%refund_send_failed%'
+      AND updated_at < datetime('now', '-5 minutes')
+    LIMIT 20
+  `).all();
+  for (const order of retryable) {
+    const ageMin = Math.round(order.age_ms / 60000);
+    _alert('warn', `🟡 retry-able expired refund ${ageMin}min: order ${order.id.slice(0,8)} reason=${(order.error_reason || '').slice(0, 80)}`, {
+      order_id: order.id, age_min: ageMin, error_reason: order.error_reason,
+      // wire-ready for advanceToRefunded(reason='reconciler_retry') call post J2 Track B ship
+    });
+  }
+  return retryable.length;
+}
+
 function _checkRefundCountMismatch() {
   // chain_events 真 'broker_kas_refunded' COUNT (post-v83 backfill cleanup, 真**真 chain hash only)
   const ceCount = sqlite.prepare(`
@@ -116,11 +140,12 @@ function tick() {
   const t0 = Date.now();
   try {
     const stuck = _checkStuckRefunding();
+    const retryable = _checkRetryableExpiredFailedRefund();
     const counts = _checkRefundCountMismatch();
     const stale = _checkStaleAligning();
     const elapsed = Date.now() - t0;
     if (elapsed > 1000) {
-      console.log(`[state-reconciler] tick #${_tickCount} ${elapsed}ms stuck=${stuck} stale=${stale} ce=${counts?.ceCount} ktl=${counts?.ktlCount}`);
+      console.log(`[state-reconciler] tick #${_tickCount} ${elapsed}ms stuck=${stuck} retryable=${retryable} stale=${stale} ce=${counts?.ceCount} ktl=${counts?.ktlCount}`);
     }
   } catch (e) {
     console.error(`[state-reconciler] tick #${_tickCount} err: ${e.message}`);
