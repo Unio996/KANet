@@ -2726,5 +2726,19 @@ export function runMigrations() {
     }
   }
 
+  // v85 (NWT 2026-04-29 broker-v2 phase 1 r6 共识 — A1 cross-process retain):
+  // _pendingAccepts in-memory Map 是 BUY 完成 source 唯一, console restart 丢. r6 共识 finalizeBuy
+  // 双写 retail_dex_orders.picks_json TEXT (JSON serialize multi-maker pick array). verifyPaymentForPeer
+  // 调时若 _pendingAccepts.get(peer) 空 → JSON.parse retail_dex_orders.picks_json 重建.
+  //
+  // ALTER ADD COLUMN simple, 不 recreate-table. 跟 v84 a/b/c/d/e 同模式.
+  {
+    const cols = sqlite.prepare(`PRAGMA table_info(retail_dex_orders)`).all();
+    if (!cols.some(c => c.name === 'picks_json')) {
+      sqlite.exec(`ALTER TABLE retail_dex_orders ADD COLUMN picks_json TEXT`);
+      console.log('[migrate] v85: retail_dex_orders.picks_json TEXT added (A1 cross-process retain).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
