@@ -19,8 +19,10 @@ const PATTERNS = {
   sell: /(?:^|[^a-zA-Z])(?:卖|出售|要卖|想卖|想出|要出|出仓|sell|sell\s*off)/i,
   qty: /(\d+(?:\.\d+)?)\s*(?:个|枚|KAS|kas|USDT|usdt|USDC|usdc)?/,
   asset: /\b(KAS|USDT|USDC)\b/i,
+  // chain 输出与旧 broker 一致: 'bnb' 不 'bsc' (broker-sell-handler.js L96 chainNorm 'bsc'→'bnb',
+  // retail_dex_orders.pay_chain 命名 'bnb' 跟现有 production data 一致).
   chain: {
-    bsc: /\b(?:bsc|bnb|binance|币安)\b/i,
+    bnb: /\b(?:bsc|bnb|binance|币安)\b/i,
     polygon: /\b(?:poly|polygon|matic)\b/i,
     sol: /\b(?:sol|solana)\b/i,
     tron: /\b(?:tron|trx|波场)\b/i,
@@ -30,9 +32,11 @@ const PATTERNS = {
     market: /(?:市价|市场价|按市价|market|实时价)/i,
     limit: /限价\s*[:：]?\s*(\d+\.?\d*)|@\s*(\d+\.?\d*)/i,
   },
-  // 边界 4: cancel intent — '取消' / '不要了' / '算了' / 'cancel' / 'refund'.
-  // 明显否定 ('不想取消' / 'don't cancel') 加 negation 防 false fire.
-  cancel: /(?:取消(?:订单|单|报价|交易)?|不要了|算了|不卖了|不买了|cancel|stop|refund)/i,
+  // 边界 4: cancel intent — explicit cancel only.
+  // '不卖了' / '不买了' 移除 — 它们是 direction flip context (e.g. '不卖了, 想买 X')
+  // R33 sticky direction lock 应 catch direction flip, parser 不应 clearDraft (case T5 测 此).
+  // 真 cancel: '取消' / '不要了' / '算了' / 'cancel' / 'refund' / 'give me X back'.
+  cancel: /(?:取消(?:订单|单|报价|交易)?|不要了|算了|cancel|stop|refund)/i,
   cancel_negation: /(?:不想(?:取消|退)|别取消|继续(?:挂单|交易)?|don'?t\s+(?:cancel|refund))/i,
   // 边界 5: confirm regex 严格 — 仅 reply 全文是 YES/Y/是/对/确认/好/OK/可以
   // 'YES, 还问 X' 不 match (走 LLM)
