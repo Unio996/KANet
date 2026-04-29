@@ -14,6 +14,9 @@
 
 import { _callLlm } from '../broker-llm-agent.js';
 import * as state from './state.js';
+// bug 1 fix (J2 r6 standalone test 暴 hallucinate fake price $0.0525 vs $0.032 real):
+// fetchKasPrice 注入 SYSTEM_PROMPT 让 LLM 见 actual market price, 不 hallucinate.
+import { fetchKasPrice } from '../market-seeder.js';
 
 const SYSTEM_PROMPT = `你是 KANet 限价单簿撮合 broker, 帮用户挂买/卖 KAS 单. 全程中文, 简洁友好.
 
@@ -100,7 +103,24 @@ const TOOLS = [
 export async function render(peer, msg, stateSnapshot, profile, contact) {
   const stateBlock = _formatState(stateSnapshot);
   const profileBlock = _formatProfile(profile, contact);
-  const systemAppend = [profileBlock, stateBlock].filter(Boolean).join('\n\n');
+  // bug 1 fix: 注入 actual KAS market price 防 LLM hallucinate fake price.
+  // fetchKasPrice failure (8 CEX 全 down) → priceBlock empty, LLM 服 SYSTEM_PROMPT '不知道就说不知道'.
+  let priceBlock = '';
+  try {
+    const p = await fetchKasPrice();
+    if (p && p > 0) {
+      const sellPrice = (p * 1.01).toFixed(6);  // broker 自挂卖价 +1% spread
+      const buyPrice = (p * 0.99).toFixed(6);   // broker 收购价 -1% spread
+      priceBlock = `# 当前 KAS 市价 (broker 真 fetch, 严禁编造)\n` +
+                   `mid_price = ${p.toFixed(6)} USDT/KAS\n` +
+                   `broker 自挂卖价 = ${sellPrice} USDT/KAS (用户买 KAS 报价)\n` +
+                   `broker 收购价 = ${buyPrice} USDT/KAS (用户卖 KAS 报价)\n` +
+                   `如 user 问价, 仅引用上述 mid/sell/buy, 不编 fake number.`;
+    }
+  } catch (e) {
+    console.warn(`[broker-v2 llm] fetchKasPrice err: ${e.message}`);
+  }
+  const systemAppend = [profileBlock, stateBlock, priceBlock].filter(Boolean).join('\n\n');
 
   const message = await _callLlm(
     [{ role: 'user', content: msg }],
