@@ -20,6 +20,9 @@ export default {
   domain: 'broker',
   tags: ['regression', 'idempotency', 'asset-loss', 'p0', 'owner-04-29'],
   steps: [
+    // J1 #80 catch: inject sendKas mock 真 fake peer Phase 2 unreachable, mock fake 64-hex txId
+    { action: 'inject_send_kas_mock' },
+
     // ── T0 setup: simulate user paid 88 KAS, broker published expired offer ──
     {
       action: 'setup_simulate_paid_offer',
@@ -87,6 +90,7 @@ export default {
       },
     },
 
+    { action: 'reset_send_kas_mock' },
     { action: 'cleanup_peer', peer_addr: peer },
   ],
 };
