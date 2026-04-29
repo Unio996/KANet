@@ -187,27 +187,25 @@ const TOOLS = [
 export function _detectIntent(message) {
   const msg = String(message || '').trim();
   if (!msg) return null;
+  // T-J2-2026-04-29 J2-8 negation guard (NWT ded093af 细节 8): '不卖了, 我想买' 当前 SELL regex 匹 '卖' 在 '不卖' 中
+  // 误返 'sell'. user 真意是 BUY. 修法: 先 strip 负向短语 (不卖了 / 不想买 / 不要卖 等), 再 detect 剩文本.
+  // R33 SQL guard 后续 throw direction lock = 期望行为 (broker 拒 silently flip).
+  const negStripped = msg.replace(/不(?:卖|买|要卖|要买|想卖|想买|想要|出售|脱手|购买|买入|抛)了?/g, ' ');
   // T-J2-2026-04-27 v1.1 deterministic 真扩 multi-asset (Owner 24:14 钦定真感受 + J2 真测撞 LLM USDC 真不稳定):
   // 加 USDT/USDC keyword gate, 跟 KAS 同 fast deterministic path 真稳 ~15ms vs LLM 1-2s 不稳.
-  if (!/kas|usdt|usdc/i.test(msg)) return null;
+  if (!/kas|usdt|usdc/i.test(negStripped)) return null;
   // 中文 — 严格匹方向词 (gated by /kas/ 防 '我要吃饭' 误判)
   // T-J1-19k (NWT 30 轮 dynamic 发现): 加非正式动词 想换/换/搞/弄/要/想要/来/要点 + 同义
   // T-NWT-25: 加更多口语动词 (拿/收/抢/入手/取/进/求/欲/给我来/帮我搞/吃进 等)
   // T-NWT-2026-04-27 Bug-Z4: SELL check 真先 (specificity wins).
-  // 之前 BUY 在前 → '我要卖 99 KAS' 真撞 BUY '我要' substring → 误判. SELL 真先 catch '卖' 真对.
-  // J2 vote (a) 真 ack — '我要 5 KAS' (无方向) 真 fall BUY '我要' = buy 真对; '我要买' BUY '买' 真对;
-  // '我要换' BUY '换' 真对; '我要卖' SELL '卖' = sell 真对 (Bug-Z4 真 fix).
-  if (/卖|要卖|想卖|出售|卖出|脱手|抛|出货|清仓|换出|套现|减仓|平仓|放/.test(msg)) return 'sell';
-  if (/买|要买|想买|购买|买入|想换|换点|换些|换\s*\d|搞|弄|来点|来个|要点|想要|我要|拿|收\s*kas|抢|入手|入仓|入个|取|进|求|欲|给我来|帮我搞|帮我换|帮我买|想吃|吃进/.test(msg)) return 'buy';
+  if (/卖|要卖|想卖|出售|卖出|脱手|抛|出货|清仓|换出|套现|减仓|平仓|放/.test(negStripped)) return 'sell';
+  if (/买|要买|想买|购买|买入|想换|换点|换些|换\s*\d|搞|弄|来点|来个|要点|想要|我要|拿|收\s*kas|抢|入手|入仓|入个|取|进|求|欲|给我来|帮我搞|帮我换|帮我买|想吃|吃进/.test(negStripped)) return 'buy';
   // 英 / 西 (\\b 适用 ASCII) — 真同 swap (sell 真先, sell 词 specific)
-  // T-J2-2026-04-27 v1.1: 真扩英文 buy/sell 同义词 (J2 24:45 真测撞 'want 5 USDC' → LLM 1331ms 真不稳).
-  // 真 mitigation: gate 已 narrow 'kas/usdt/usdc' 真 trading context, 加 want/get/grab/take/need/cop/quiero 等
-  // T-NWT-2026-04-27 Bug-Z4: 'I want to sell' 真撞 BUY 'want' first → 误判. SELL 真先 catch 'sell' 真对.
-  if (/\b(sell|dump|unload|offload|cash\s*out|vender)\b/i.test(msg)) return 'sell';
-  if (/\b(buy|purchase|want|get|grab|take|need|cop|gimme|fetch|comprar|adquirir|quiero|necesito)\b/i.test(msg)) return 'buy';
+  if (/\b(sell|dump|unload|offload|cash\s*out|vender)\b/i.test(negStripped)) return 'sell';
+  if (/\b(buy|purchase|want|get|grab|take|need|cop|gimme|fetch|comprar|adquirir|quiero|necesito)\b/i.test(negStripped)) return 'buy';
   // 日 / 韩 — CJK 关键词不能用 \\b (CLAUDE.md 陷阱 #12)
-  if (/(売る|売却|판매|팔다)/.test(msg)) return 'sell';
-  if (/(購入|買う|구매|사다)/.test(msg)) return 'buy';
+  if (/(売る|売却|판매|팔다)/.test(negStripped)) return 'sell';
+  if (/(購入|買う|구매|사다)/.test(negStripped)) return 'buy';
   return null;
 }
 
@@ -617,6 +615,9 @@ function _extractFieldsFromMsg(msg) {
   // R33 b iter6 (NWT c5bda126 fuzz negative trace): sign capture + 后续 reject. 不**真**真 silent
   // normalize '-5' → '5' (broker preview 真**真**charge 5 USDT 真**真**user typo 真灾难).
   const qtyAsset = m.match(/(-?\d+(?:\.\d+)?)\s*(?:个|枚|只)?\s*(kas|usdt|usdc)/i);
+  // T-J2-2026-04-29 J2-4 fallback (NWT strict test '50 个' 单 turn 无 asset): qty regex 漏.
+  // 主 regex 强制 asset 后缀, T2 user '50 个' 单 turn 抓不到. fallback 抓纯数字+单位, give_asset 由 prev/state 继承.
+  const qtyOnly = !qtyAsset && m.match(/^[\s]*(-?\d+(?:\.\d+)?)\s*(?:个|枚|只|kas|usdt|usdc)?[\s.,!?。！？]*$/i);
   const chainMatch = m.match(/\b(BSC|BNB|Polygon|POL|SOL|Solana|TRON|ETH)\b/i);
   const evmMatch = m.match(/0x[a-fA-F0-9]{40}/);
   // R33 b iter4 (J2 GAP B 真根因 — _pendingFields deterministic path bypass LLM):
@@ -629,7 +630,8 @@ function _extractFieldsFromMsg(msg) {
   const hasRefundCtx = /(?:退|返|refund|return|原路|没人|没成交|没接|没吃)/i.test(m);
   return {
     direction: intent || null,
-    qty: qtyAsset ? parseFloat(qtyAsset[1]) : null,
+    // J2-4 fallback: qtyAsset (主, 含 asset 后缀) 优先 → qtyOnly ('50 个' 单数字, give_asset null 由 caller merge prev)
+    qty: qtyAsset ? parseFloat(qtyAsset[1]) : (qtyOnly ? parseFloat(qtyOnly[1]) : null),
     give_asset: qtyAsset ? qtyAsset[2].toUpperCase() : null,
     chain: chainMatch ? _normalizeChain(chainMatch[1]) : null,
     address: evmMatch ? evmMatch[0] : null,
@@ -752,11 +754,15 @@ export async function handleLlmDialog(peer, message) {
   console.log(`[broker-llm DIAG] peer=${peer?.slice(-12)} msg.chars=${msgRaw.length} msg.utf8bytes=${byteLen} codes=[${charCodes}] msg="${msgRaw.slice(0,40)}" history.len=${history.length} fresh=${JSON.stringify(fresh)} prev=${JSON.stringify(prev)} merged=${JSON.stringify(merged)}`);
 
   // R33 b iter9 (J2 81f8f1d8 mid_flow_restart): user explicit cancel-and-restart 真**真 reset state.
+  // T-J2-2026-04-29 J2-7 fix (NWT ded093af strict test T6 root cause): reset 后必 return early,
+  // 否则 L792 看 merged.direction (reset 前算) 仍 'sell' → setConvoStateLock INSERT 新 'aligning' row,
+  // 老 row 转 'failed' 但新 row 又建. 真根因: merged 计算时机 (L731) 早于 reset (L760).
   {
     const { detectResetIntent } = await import('./broker-state-authority.js');
     if (detectResetIntent(message)) {
       resetConvoState(peer, 'user_restart');
       _clearPendingFields(peer);
+      return '好的, 已取消之前的订单. 重新下单回 "买 X KAS" / "卖 X KAS" 或告诉我新方向.';
     }
   }
 
@@ -789,19 +795,25 @@ export async function handleLlmDialog(peer, message) {
   // root cause: T2 user '想买 3 KAS, BSC' → 真**deterministic 应**真**真**hit (line 629 _allFieldsReady),
   // 但 NWT trace 实证 T2 reply EMPTY 不**真**真**真 fall LLM, 真原因复杂 (LLM HTTP 500 / preview fail / 真**真).
   // 真**真**真**真**真**真**真**fix: 真 fresh.direction extract 出来真**就**lock, 真**真**不**真等 _allFieldsReady.
-  if (fresh.direction) {
+  // T-J2-2026-04-29 J2-3 trigger 扩 (NWT 6e32a735 strict test 8→3 FAIL 实证): 不只 fresh.direction
+  // T2 '50 个' / T3 'BSC, 0x...' 不带 direction, 旧 condition 跳过 → retail_dex_orders 不 UPDATE.
+  // 改 fresh.direction || merged.direction (含 _pendingFields/state recovery) → T2/T3 也 sync.
+  // J2-2 try-catch warn 一致 (跟 L894 相同), 不再静默吞 SQL/NOT NULL 错误.
+  if (fresh.direction || merged.direction) {
     try {
       setConvoStateLock(peer, {
-        direction: fresh.direction,
+        direction: fresh.direction || merged.direction,
         give_asset: merged.give_asset || null,
         qty: merged.qty || null,
         pay_chain: merged.chain || null,
+        recv_address: merged.address || null,
         lifecycle_phase: 'fields_collection',
       });
     } catch (e) {
       if (e.code === 'CONVO_STATE_DIRECTION_LOCK') {
         return `订单方向已锁定 ${e.locked_direction.toUpperCase()}. 改方向请回 "NO" 取消订单, 重新下单告诉我新方向.`;
       }
+      console.warn(`[broker-llm setConvoStateLock] err: ${e.message}`);
     }
   }
 
@@ -927,12 +939,15 @@ export async function handleLlmDialog(peer, message) {
         give_asset: merged.give_asset || null,
         qty: merged.qty || null,
         pay_chain: merged.chain || null,
+        recv_address: merged.address || null,
         lifecycle_phase: 'fields_collection',
       });
     } catch (e) {
       if (e.code === 'CONVO_STATE_DIRECTION_LOCK') {
         return `订单方向已锁定 ${e.locked_direction.toUpperCase()}. 改方向请回 "NO" 取消订单, 重新下单告诉我新方向.`;
       }
+      // J2-2 warn 一致 (跟 L792 + L894 同 pattern), 不再静默吞 SQL/NOT NULL 错误
+      console.warn(`[broker-llm setConvoStateLock partial] err: ${e.message}`);
     }
     return _askMissingField(merged, lang);
   }
