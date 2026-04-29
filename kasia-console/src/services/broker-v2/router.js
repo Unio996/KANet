@@ -70,12 +70,39 @@ export async function handleMessage(peer, msg) {
     return '好的, 已取消. 想下新单的话告诉我.';
   }
 
-  // 4. 已 publish 路径 — query status OR LLM 自然对话
+  // 4. 已 publish 路径 — query status / B1 PAID detect / LLM 自然对话
   if (hasPublished) {
     if (STATUS_QUERY_REGEX.test(msg)) {
       const status = orderBook.getOrderStatus(peer);
       return _formatStatus(status);
     }
+
+    // B1 PAID detect (BUY post-publish): user '我付了 0xtxhash' OR '已付' 兜底
+    // r6 共识: broker-v2 不 cover post-publish PAID 是 critical break (Q1). 加 detect → verifyPaymentForPeer.
+    // D1 ride: remaining_picks=0 时 transition state='paid' (multi-maker partial paid 仍 'awaiting_payment').
+    if (activeOrder.side === 'buy_kas' && ['awaiting_payment', 'paid'].includes(activeOrder.state)) {
+      const { PAID_REGEX, PAID_NO_TX_REGEX, verifyPaymentForPeer } = await import('../broker-buy-handler.js');
+      if (PAID_REGEX.test(msg) || PAID_NO_TX_REGEX.test(msg)) {
+        try {
+          const result = await verifyPaymentForPeer({ peer, chain: activeOrder.pay_chain });
+          // D1: 全 paid (remaining_picks=0) → transition state='paid'
+          if (result?.ok && result.remaining_picks === 0) {
+            sqlite.prepare(`
+              UPDATE retail_dex_orders
+              SET state='paid', updated_at=datetime('now')
+              WHERE user_kasia_address=? AND side='buy_kas' AND state='awaiting_payment'
+            `).run(peer);
+          }
+          return result?.user_msg || (result?.ok
+            ? '✓ 已收到付款验证, broker 准备发 KAS'
+            : `付款验证暂时失败 (${result?.reason || 'unknown'}). 请稍后重试或发 tx hash 0x...`);
+        } catch (err) {
+          console.warn(`[broker-v2 router B1] verifyPaymentForPeer err: ${err.message}`);
+          return '付款验证暂时失败, 请稍后重试或发 tx hash 0x...';
+        }
+      }
+    }
+
     // 复合 intent / question / 自然对话 → LLM (含 state inject 知 phase)
     const reply = await llm.render(peer, msg, activeOrder, _loadProfile(peer), _loadContact(peer));
     return reply || '你的挂单还在跑. 想查状态回 "查单", 想取消回 "取消".';
