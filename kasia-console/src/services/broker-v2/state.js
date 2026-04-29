@@ -43,6 +43,10 @@ export function getActiveDraft(peer) {
 /**
  * 获取 peer 任一非终态 order (含 aligning / awaiting_payment / partially_filled / paid 等).
  * router 在 preview_shown / 已 finalize 后状态也要查 — 给 order-book / cancel-refund 复用.
+ *
+ * TODO (v83 dependency): filled_qty + settle_grace_until + exchange_offer_id col
+ *   只在 v83 migrate ship 后存在. 现 col 不存在 SELECT 报 'no such column'.
+ *   v83 NWT chain-side 阶段 2 ship (ETA 30min). post-v83 自动 cover.
  */
 export function getActiveOrder(peer) {
   if (!peer) return null;
@@ -60,29 +64,45 @@ export function getActiveOrder(peer) {
 }
 
 /**
- * 写字段进当前 active draft. 不 active draft → 自动 INSERT 新 'aligning' row.
+ * Seed 新 draft row. caller (router) 第一次知 user direction 时调.
+ * NOT NULL constraint side → 必须显式 INSERT with side.
+ * (NWT 565bfe4b critical fix vote A: 移除 auto-create, caller 责任 seed.)
+ *
+ * @param {string} peer
+ * @param {'buy_kas'|'sell_kas'} side
+ * @returns {{ ok: boolean, id?: string }}
+ */
+export function seedDraft(peer, side) {
+  if (!peer || !side) return { ok: false };
+  if (side !== 'buy_kas' && side !== 'sell_kas') return { ok: false };
+  // 已有 'aligning' draft → 不重 INSERT (idempotent)
+  const existing = getActiveDraft(peer);
+  if (existing) return { ok: true, id: existing.id, existing: true };
+  const id = `bv2_${peer.slice(-12)}_${Date.now()}`;
+  sqlite.prepare(`
+    INSERT INTO retail_dex_orders
+      (id, user_kasia_address, side, state, order_type, qty,
+       created_at, updated_at, expires_at)
+    VALUES (?, ?, ?, 'aligning', 'limit', NULL,
+            datetime('now'), datetime('now'),
+            datetime('now', '+30 minutes'))
+  `).run(id, peer, side);
+  return { ok: true, id };
+}
+
+/**
+ * 写字段进当前 active draft. 仅 UPDATE existing 'aligning' row, 不 auto-create.
+ * caller 责任先调 seedDraft (避免 INSERT NOT NULL constraint side 触爆).
  * R31/R33 SQL guard: LOCKED_FIELDS UPDATE WHERE col IS NULL OR col = :value.
- * rowsAffected=0 + locked = 拒, 返 {ok:false, reason}. 不外显 (caller log + ignore).
+ * rowsAffected=0:
+ *   - locked field 拒 → {ok:false, reason:'X_locked'}
+ *   - 没 active draft → {ok:true, set:false} (caller 应先 seedDraft)
  */
 export function setField(peer, name, value) {
   if (!peer) return { ok: false, set: false, reason: 'no peer' };
   if (value === null || value === undefined || value === '') return { ok: true, set: false };
 
-  // ensure draft row exists (auto-create 'aligning')
-  const existing = getActiveDraft(peer);
-  if (!existing) {
-    const id = `bv2_${peer.slice(-12)}_${Date.now()}`;
-    sqlite.prepare(`
-      INSERT INTO retail_dex_orders
-        (id, user_kasia_address, state, order_type, qty,
-         created_at, updated_at, expires_at)
-      VALUES (?, ?, 'aligning', 'limit', NULL,
-              datetime('now'), datetime('now'),
-              datetime('now', '+30 minutes'))
-    `).run(id, peer);
-  }
-
-  // R31/R33 SQL guard. col=name 静态, value 参数化, SQL injection safe.
+  // R31/R33 SQL guard. col=name 静态 (caller 控制), value 参数化 SQL injection safe.
   const guard = LOCKED_FIELDS.includes(name)
     ? `AND (${name} IS NULL OR ${name} = :value)`
     : '';
@@ -98,7 +118,7 @@ export function setField(peer, name, value) {
   if (result.changes === 0 && LOCKED_FIELDS.includes(name)) {
     return { ok: false, set: false, reason: `${name}_locked` };
   }
-  return { ok: true, set: true };
+  return { ok: true, set: result.changes > 0 };
 }
 
 /**

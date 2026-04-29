@@ -224,7 +224,11 @@ function _appendLlmIo(record) {
     .catch(e => console.warn(`[broker-llm-io] append fail: ${e.message}`));
 }
 
-async function _callLlm(messages, ctx = {}) {
+// J2 #4 接位 broker-v2 reuse: opts={systemPrompt, tools} 参数化, 旧 caller 不传不破.
+// (c) 工具提取重组: broker-v2/llm.js 调 _callLlm 传自己的 prompt+tools, 不重写 R11/R37/retry/jsonl.
+export async function _callLlm(messages, ctx = {}, opts = {}) {
+  const sysPrompt = opts.systemPrompt ?? SYSTEM_PROMPT;
+  const tools = opts.tools ?? TOOLS;
   // ctx: { peer, turn } — 给 jsonl 关联 test-framework trace 用
   // T-J1-2026-04-28 Layer 6 (phase 3 8-layer system fix): LLM 500 retry policy.
   // 治 Bug-Z14 (LLM cascade fail). 5xx + network err 重试 3 次 (1s/2s backoff), 4xx fail fast.
@@ -240,10 +244,10 @@ async function _callLlm(messages, ctx = {}) {
     // 之前 handleLlmDialog 用 history.unshift 加第 2 个 system message → Qwen Jinja
     // 'System message must be at the beginning' raise → HTTP 500 cascade (Owner 06:38+ sell flow 撞).
     messages: [
-      { role: 'system', content: ctx.systemAppend ? `${SYSTEM_PROMPT}\n\n${ctx.systemAppend}` : SYSTEM_PROMPT },
+      { role: 'system', content: ctx.systemAppend ? `${sysPrompt}\n\n${ctx.systemAppend}` : sysPrompt },
       ...messages,
     ],
-    tools: TOOLS,
+    tools,
     tool_choice: 'auto',
     // QWEN-RULES.md Rule 11 (T-NWT-V2-hotfix2): Qwen3.6 reasoning kill switch.
     // /no_think 前缀 sys/user 都实测无效. 唯一有效是 body 加 chat_template_kwargs.
@@ -273,9 +277,9 @@ async function _callLlm(messages, ctx = {}) {
           peer: ctx.peer || null,
           turn: ctx.turn || null,
           attempt,
-          system_prompt: SYSTEM_PROMPT,
+          system_prompt: sysPrompt,
           messages: messages,
-          tools: TOOLS.map(t => t.function.name),
+          tools: tools.map(t => t.function.name),
           latency_ms,
           http_status: res.status,
           reply: null,
@@ -292,9 +296,9 @@ async function _callLlm(messages, ctx = {}) {
         peer: ctx.peer || null,
         turn: ctx.turn || null,
         attempt,
-        system_prompt: SYSTEM_PROMPT,
+        system_prompt: sysPrompt,
         messages: messages,
-        tools: TOOLS.map(t => t.function.name),
+        tools: tools.map(t => t.function.name),
         latency_ms,
         reply_content: message?.content || null,
         tool_calls: message?.tool_calls?.map(tc => ({
@@ -312,9 +316,9 @@ async function _callLlm(messages, ctx = {}) {
         peer: ctx.peer || null,
         turn: ctx.turn || null,
         attempt,
-        system_prompt: SYSTEM_PROMPT,
+        system_prompt: sysPrompt,
         messages: messages,
-        tools: TOOLS.map(t => t.function.name),
+        tools: tools.map(t => t.function.name),
         latency_ms,
         reply: null,
         error: e.message,
