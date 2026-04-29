@@ -145,6 +145,15 @@ export async function registerConversationRoutes(fastify) {
       const result = _testForceExpire(peer);
       return result;
     });
+
+    // T-J2-2026-04-29 Track B Track E test infra (NWT 8271dc4d ask J2 expose):
+    // double_refund_idempotency.test.mjs trigger_refund_sweep custom action 真 endpoint.
+    // 直接调 broker-intake-watcher._scanExpiredBrokerOffers (cron 5min tick path) sync.
+    fastify.post('/api/test/trigger-refund-sweep', async (_request, _reply) => {
+      const { _scanExpiredBrokerOffers } = await import('../services/broker-intake-watcher.js');
+      const result = await _scanExpiredBrokerOffers();
+      return { ok: true, ...result };
+    });
   }
 
   // R34 (J1 R26 territory, P1 race anti-spam): in-process dedup cache 防 console-direct 入口
