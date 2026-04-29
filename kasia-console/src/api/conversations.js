@@ -351,6 +351,27 @@ export async function registerConversationRoutes(fastify) {
           console.warn(`[api/agent/reply] chain DM classifier err: ${err.message}`);
         }
 
+        // T-NWT-2026-04-29 broker-v2 阶段 2 task 6/7 — BROKER_V2_ENABLED flag wire.
+        // 三方共识 7e776598dc lock + J2 territory ship 6efc6311 ready.
+        // 渐进 rollout:
+        //   - BROKER_V2_ENABLED='1' → all peers 走 v2 (全量, post 1 周 gate 才 set)
+        //   - BROKER_V2_ENABLED_PEERS='kaspa:abc,kaspa:def' → 仅列表 peer 走 v2 (1 user → 5 → 50 渐进)
+        //   - 两 env 全 unset → 老 flow (default 安全)
+        // v2 reply null/empty → 不 fallback 老 flow (v2 bug 直接暴, 不掩盖). _r19Guard 兜空 reply.
+        const _v2Flag = process.env.BROKER_V2_ENABLED === '1';
+        const _v2Peers = (process.env.BROKER_V2_ENABLED_PEERS || '').split(',').map(s => s.trim()).filter(Boolean);
+        if (_v2Flag || _v2Peers.includes(peer)) {
+          try {
+            const { handleMessage } = await import('../services/broker-v2/router.js');
+            const v2Reply = await handleMessage(peer, message);
+            console.log(`[api/agent/reply] broker-v2 routed peer=${peer.slice(-12)} (flag=${_v2Flag}, listed=${_v2Peers.includes(peer)})`);
+            return reply.send({ reply: await _r19Guard(v2Reply || '我刚走神了, 你想买还是卖 KAS?', 'broker-v2.handleMessage') });
+          } catch (err) {
+            console.error(`[api/agent/reply] broker-v2 err for ${resolved?.slice(0,8)}: ${err.message} (NOT falling back to v1, expose v2 bug)`);
+            return reply.send({ reply: '我这边 broker-v2 出问题了, 麻烦你稍后再说一次. (Owner 已通知排查)' });
+          }
+        }
+
         try {
           const { handleBuyIntent } = await import('../services/broker-buy-handler.js');
           const buyReply = await handleBuyIntent(peer, message);
