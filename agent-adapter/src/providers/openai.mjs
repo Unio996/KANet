@@ -112,13 +112,36 @@ const _idempotencyCache = new Map();
 const CACHE_MAX = 1000;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
-async function _cacheKey({ model, system, message, tools, tool_choice }) {
+async function _cacheKey({ model, system, message, messages, tools, tool_choice }) {
   const { createHash } = await import('node:crypto');
   const h = createHash('sha256');
-  // J2 r54 fix: 加 tool_choice — 同 model+system+message+tools, 不同 tool_choice ('auto'/'required'/forced)
-  // 行为不同, 不可 cache hit 错位.
-  h.update(JSON.stringify({ model, system: system || '', message, tools: tools || null, tool_choice: tool_choice || null }));
+  // J2 r54 fix: 加 tool_choice; J2 r58 dimension: 加 messages (multi-turn history) — 同 model+system 不同 messages
+  // 行为不同, 不可 cache hit 错位. messages || single-message fallback 统一形式.
+  const normalizedMessages = messages || (message ? [{ role: 'user', content: message }] : []);
+  h.update(JSON.stringify({ model, system: system || '', messages: normalizedMessages, tools: tools || null, tool_choice: tool_choice || null }));
   return h.digest('hex');
+}
+
+// J2 r58 dimension: messages array sanitize 策略
+// - messages[i].content (user/system/assistant text) — sanitize 必 apply (ASCII safety)
+// - messages[i].tool_calls[j].function.arguments (JSON 字符串) — 不 sanitize (D2 raw passthrough)
+// - messages[i].tool_call_id / name — schema field 不动
+function _sanitizeMessage(m) {
+  if (!m || typeof m !== 'object') return m;
+  if (m.role === 'tool') {
+    // tool response message — content 是 tool execution 结果 JSON, 不 sanitize 防 strip
+    return m;
+  }
+  if (Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
+    // assistant with tool_calls — content sanitize, tool_calls 数组 raw passthrough
+    return {
+      ...m,
+      content: m.content ? sanitizeForApi(m.content) : null,
+      tool_calls: m.tool_calls,
+    };
+  }
+  // user/system/assistant plain text — content sanitize
+  return { ...m, content: sanitizeForApi(m.content || '') };
 }
 
 function _cacheGet(key) {
@@ -174,10 +197,12 @@ export async function ask(message, idempotencyKey, options) {
   const tool_choice = options?.tool_choice;
   const returnAsObject = Array.isArray(tools) && tools.length > 0;
   const traceId = options?.trace_id;  // D7 propagation, 可空
-  log("→", idempotencyKey.slice(0, 16), `[${model}]${isCodex ? ' [codex]' : ''}${returnAsObject ? ' [tools]' : ''}${traceId ? ` [trace=${traceId.slice(0, 8)}]` : ''}`, hasSystem ? `sys=${options.system.length}c` : '', JSON.stringify(message).slice(0, 50));
+  // J2 r58: options.messages 优先 (broker multi-turn path), 否则 fallback single message + options.system (mind brain unchanged)
+  const callerMessages = Array.isArray(options?.messages) ? options.messages : null;
+  log("→", idempotencyKey.slice(0, 16), `[${model}]${isCodex ? ' [codex]' : ''}${returnAsObject ? ' [tools]' : ''}${callerMessages ? ` [msgs=${callerMessages.length}]` : ''}${traceId ? ` [trace=${traceId.slice(0, 8)}]` : ''}`, hasSystem ? `sys=${options.system.length}c` : '', callerMessages ? `(history)` : JSON.stringify(message).slice(0, 50));
 
   // D5 idempotency cache check — pre-fetch
-  const cacheKey = await _cacheKey({ model, system: options?.system, message, tools, tool_choice });
+  const cacheKey = await _cacheKey({ model, system: options?.system, message, messages: callerMessages, tools, tool_choice });
   const cached = _cacheGet(cacheKey);
   if (cached) {
     log("← [cache hit]", typeof cached === 'string' ? cached.slice(0, 80) : JSON.stringify(cached).slice(0, 80));
@@ -188,13 +213,23 @@ export async function ask(message, idempotencyKey, options) {
   let url, body;
   if (isCodex) {
     if (returnAsObject) throw new Error('Codex endpoint does not support tools — use OpenAI-compatible endpoint');
+    if (callerMessages) throw new Error('Codex endpoint does not support raw messages array — use OpenAI-compatible endpoint');
     url = `${baseUrl}/codex/responses`;
     body = _buildCodexBody(model, message, options?.system);
   } else {
     url = `${baseUrl}/chat/completions`;
-    const messages = [];
-    if (hasSystem) messages.push({ role: "system", content: sanitizeForApi(options.system) });
-    messages.push({ role: "user", content: sanitizeForApi(message) });
+    let messages;
+    if (callerMessages) {
+      // J2 r58 broker multi-turn path — caller-supplied messages array, system 仍 prepend
+      messages = [];
+      if (hasSystem) messages.push({ role: "system", content: sanitizeForApi(options.system) });
+      for (const m of callerMessages) messages.push(_sanitizeMessage(m));
+    } else {
+      // legacy single-message path (mind brain unchanged) — D11 0 regression
+      messages = [];
+      if (hasSystem) messages.push({ role: "system", content: sanitizeForApi(options.system) });
+      messages.push({ role: "user", content: sanitizeForApi(message) });
+    }
     // Qwen3 kill switch (QWEN-RULES.md Rule 11): 关 reasoning, /no_think 无效.
     // 仅在 model 名含 Qwen 时加, 防止非 Qwen provider 报字段错.
     const payload = { model, messages };

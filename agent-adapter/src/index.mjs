@@ -43,31 +43,40 @@ async function handleReply(req, res) {
   }
 
   // T-NWT-2026-04-30 RFC 阶段 2 (D3 + D7): /reply optional tools + trace_id propagation.
-  // body 加: tools? / tool_choice? / trace_id?
+  // 阶段 2.fix (J2 r58 vote A scope discovery): body 加 messages 字段 (broker multi-turn path).
+  // body 加: tools? / tool_choice? / trace_id? / messages?
   // returns: { reply: string } 不变 (mind brain backward-compat) OR { reply, tool_calls? } 当 tools 传时.
-  const { peer, message, txId, network = "mainnet", mindTask, mindSystem, mindUser, tools, tool_choice, trace_id } = parsed;
+  const { peer, message, txId, network = "mainnet", mindTask, mindSystem, mindUser, tools, tool_choice, trace_id, messages } = parsed;
 
-  if (!peer || (!message && !mindUser)) {
+  if (!peer || (!message && !mindUser && !Array.isArray(messages))) {
     res.writeHead(400);
-    res.end(JSON.stringify({ error: "peer and message (or mindUser) are required" }));
+    res.end(JSON.stringify({ error: "peer + (message OR mindUser OR messages) are required" }));
     return;
   }
   const correlationId = randomUUID();
   const idempotencyKey = txId || correlationId;
   const hasTools = Array.isArray(tools) && tools.length > 0;
+  const hasMessages = Array.isArray(messages) && messages.length > 0;
+  // 共享 options spread — tools/tool_choice/trace_id 4 path 都可能用
+  const sharedOpts = { ...(hasTools ? { tools, tool_choice } : {}), ...(trace_id ? { trace_id } : {}) };
 
   let rawReply;
   let ctx = null;
 
-  if (mindSystem && mindUser) {
+  if (hasMessages) {
+    // J2 r58 broker multi-turn path — caller 传 messages array (broker-llm-agent.js _callLlm)
+    // mindSystem 仍可与 messages 并存 (system role merged in adapter)
+    log("IN", peer?.slice(-8), `[BROKER:msgs] count=${messages.length}${mindSystem ? ` sys=${mindSystem.length}c` : ''}${hasTools ? ' [tools]' : ''}`);
+    rawReply = await ask('', idempotencyKey, { system: mindSystem, messages, ...sharedOpts });
+  } else if (mindSystem && mindUser) {
     // Layered Mind task — system + user as separate roles for provider caching
     log("IN", peer?.slice(-8), `[MIND:layered] sys=${mindSystem.length}c usr=${mindUser.length}c`);
-    rawReply = await ask(mindUser, idempotencyKey, { system: mindSystem, ...(hasTools ? { tools, tool_choice } : {}), ...(trace_id ? { trace_id } : {}) });
+    rawReply = await ask(mindUser, idempotencyKey, { system: mindSystem, ...sharedOpts });
   } else if (mindTask) {
     // Legacy Mind task — single prompt string (backward compat)
     const prompt = typeof message === 'string' ? message : JSON.stringify(message);
     log("IN", peer?.slice(-8), "[MIND]", JSON.stringify(message).slice(0, 60));
-    rawReply = await ask(prompt, idempotencyKey, { ...(hasTools ? { tools, tool_choice } : {}), ...(trace_id ? { trace_id } : {}) });
+    rawReply = await ask(prompt, idempotencyKey, sharedOpts);
   } else {
     // Regular message — build prompt with adapter's own context
     log("IN", peer?.slice(-8), JSON.stringify(message).slice(0, 60));
@@ -76,7 +85,7 @@ async function handleReply(req, res) {
       log("CTX", peer.slice(-8), `${ctx.history.length} turns`);
     }
     const prompt = buildPrompt(peer, message, ctx, SYSTEM_PROMPT);
-    rawReply = await ask(prompt, idempotencyKey, { ...(hasTools ? { tools, tool_choice } : {}), ...(trace_id ? { trace_id } : {}) });
+    rawReply = await ask(prompt, idempotencyKey, sharedOpts);
   }
 
   // D1 polymorphic: rawReply 是 string (无 tools) OR {content, tool_calls?} (有 tools)
