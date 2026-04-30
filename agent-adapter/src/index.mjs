@@ -44,9 +44,13 @@ async function handleReply(req, res) {
 
   // T-NWT-2026-04-30 RFC 阶段 2 (D3 + D7): /reply optional tools + trace_id propagation.
   // 阶段 2.fix (J2 r58 vote A scope discovery): body 加 messages 字段 (broker multi-turn path).
-  // body 加: tools? / tool_choice? / trace_id? / messages?
+  // 阶段 4 (J2 r66 push back): body 加 system 字段 — dual-name accept (system + mindSystem).
+  //   broker 用 body.system (semantic clean), mind brain 保 body.mindSystem (layered Mind backward-compat).
+  // body 加: tools? / tool_choice? / trace_id? / messages? / system?
   // returns: { reply: string } 不变 (mind brain backward-compat) OR { reply, tool_calls? } 当 tools 传时.
-  const { peer, message, txId, network = "mainnet", mindTask, mindSystem, mindUser, tools, tool_choice, trace_id, messages } = parsed;
+  const { peer, message, txId, network = "mainnet", mindTask, mindSystem, mindUser, tools, tool_choice, trace_id, messages, system } = parsed;
+  // J2 r66 push back: dual-name accept — broker 'system' field 优先, fallback mindSystem (mind brain layered)
+  const systemContent = system || mindSystem;
 
   if (!peer || (!message && !mindUser && !Array.isArray(messages))) {
     res.writeHead(400);
@@ -65,9 +69,9 @@ async function handleReply(req, res) {
 
   if (hasMessages) {
     // J2 r58 broker multi-turn path — caller 传 messages array (broker-llm-agent.js _callLlm)
-    // mindSystem 仍可与 messages 并存 (system role merged in adapter)
-    log("IN", peer?.slice(-8), `[BROKER:msgs] count=${messages.length}${mindSystem ? ` sys=${mindSystem.length}c` : ''}${hasTools ? ' [tools]' : ''}`);
-    rawReply = await ask('', idempotencyKey, { system: mindSystem, messages, ...sharedOpts });
+    // systemContent (body.system 优先, fallback body.mindSystem) 与 messages 并存 (system role merged in adapter)
+    log("IN", peer?.slice(-8), `[BROKER:msgs] count=${messages.length}${systemContent ? ` sys=${systemContent.length}c` : ''}${hasTools ? ' [tools]' : ''}`);
+    rawReply = await ask('', idempotencyKey, { system: systemContent, messages, ...sharedOpts });
   } else if (mindSystem && mindUser) {
     // Layered Mind task — system + user as separate roles for provider caching
     log("IN", peer?.slice(-8), `[MIND:layered] sys=${mindSystem.length}c usr=${mindUser.length}c`);

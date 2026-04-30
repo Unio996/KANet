@@ -269,7 +269,9 @@ export async function _callLlm(messages, ctx = {}, opts = {}) {
   // 走 KANet 框架 adapter HTTP 接口 (Owner 钦定 跳框架=严重错误). 不再直 fetch LLM endpoint.
   // - 删 hardcode chat_template_kwargs (adapter 自管 R11 conditional)
   // - 删 直 fetch ai_provider_url, 改 POST http://127.0.0.1:<adapter_port>/reply
-  // - body: { peer, messages: history (无 role:system), mindSystem: sysPrompt+systemAppend, tools, tool_choice, trace_id, txId }
+  // - body: { peer, messages: history (无 role:system), system: sysPrompt+systemAppend, tools, tool_choice, trace_id, txId }
+  //   (T-J2-2026-04-30 阶段 4 RFC J2 r66 push back: body field 'mindSystem' → 'system' — semantic clean,
+  //    adapter 双 name accept system||mindSystem, mind brain 仍可用 mindSystem layered Mind path)
   // - response: { reply, tool_calls? } → 包成 OpenAI message format {content: reply, tool_calls} 给 13 处 caller (signature 不变)
   // - jsonl audit log 不变
   const a = sqlite.prepare(`
@@ -292,7 +294,7 @@ export async function _callLlm(messages, ctx = {}, opts = {}) {
   const requestBody = {
     peer: ctx.peer || 'broker-internal',
     messages,                          // J2 r58 vote (A) — broker multi-turn history 透传
-    mindSystem: mergedSystem,          // D6 system 单独 layer
+    system: mergedSystem,              // D6 system 单独 layer (J2 r66 阶段 4: body 'system' 替 'mindSystem' naming clean)
     tools,                             // R29 + D2 raw passthrough
     tool_choice: 'auto',
     trace_id: traceId,                 // D7 propagation

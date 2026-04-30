@@ -1,42 +1,58 @@
+// T-J2-2026-04-30 RFC 阶段 4 (Phase Y r49 共识 lock 14/14):
+// LLM call 走框架 adapter (Owner 钦定 跳框架 = 严重错误).
+// 删 hardcoded QWEN_URL / OPUS_BRIDGE_URL / chat_template_kwargs (adapter 自管 R11 conditional).
+// 走 POST {adapter_url}/reply, adapter discovery via adapter_nodes.ai_model match.
+//
+// signature 不变 (D11 caller 0 regression): callLlm({backend, system, user, maxTokens, temperature})
+// max_tokens / temperature 当前 adapter ask() 不接受, phase Z follow-up 加 options 字段 (PZ-LLM-T1).
+//
+// RFC chain ref: NWT r49 f83f8a03 + J2 r58 vote (A) 08690651 + NWT r65 71dc5acb9 (broker swap pattern)
+
 import { sqlite } from '../db/client.js';
 
-const QWEN_URL = 'http://192.168.1.123:8000/v1/chat/completions';
-const OPUS_BRIDGE_URL = 'http://localhost:9100/v1/chat/completions';
-const TIMEOUT_MS = 20000;
+/**
+ * adapter discovery — query adapter_nodes 找 backend 对应 adapter http_port.
+ * 'qwen' → ai_model LIKE '%Qwen%' / 'opus' → ai_model LIKE '%opus%' / '%claude-code%'.
+ */
+function _getAdapterUrl(backend) {
+  const pattern = backend === 'opus' ? '%claude-code%' : '%Qwen%';
+  const a = sqlite.prepare(
+    `SELECT http_port FROM adapter_nodes WHERE ai_model LIKE ? LIMIT 1`
+  ).get(pattern);
+  if (!a?.http_port) {
+    throw new Error(`[llm-dispatcher] no adapter found for backend=${backend} (pattern=${pattern})`);
+  }
+  return `http://127.0.0.1:${a.http_port}/reply`;
+}
 
 /**
- * LLM 调用抽象. Phase 1 默认 qwen 实装, opus 走 cc-bridge 失败 fallback qwen.
+ * LLM 调用抽象. 阶段 4 swap → adapter HTTP. backend qwen/opus 经 adapter discovery 路由.
+ * caller signature 不变 (market-rules-parser 等 0 改动 D11).
  */
 export async function callLlm({ backend = 'qwen', system, user, maxTokens = 2500, temperature = 0.2 }) {
-  const url = backend === 'opus' ? OPUS_BRIDGE_URL : QWEN_URL;
-  const model = backend === 'opus' ? 'claude-code' : 'Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf';
   try {
+    const url = _getAdapterUrl(backend);
+    const traceId = `dispatcher:${backend}:${Date.now()}`;
     const body = {
-      model, max_tokens: maxTokens, temperature,
-      messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+      peer: 'dispatcher-internal',
+      message: user,
+      system,                       // J2 r66 push back: body.system field (adapter dual-name accept)
+      trace_id: traceId,
+      txId: traceId,
+      // note: max_tokens / temperature 当前 adapter ask() 不接收, phase Z PZ-LLM-T1 follow-up 加.
     };
-    // Qwen3.6 kill switch: chat_template_kwargs 关 reasoning, /no_think 无效.
-    // 不加这个 Qwen 会在 reasoning_content 吃光 tokens, content 空, 延迟 8x.
-    // (实测 4/23: reasoning=0c content 163c ↔ reasoning=2756c content 0c).
-    if (backend === 'qwen') {
-      body.chat_template_kwargs = { enable_thinking: false };
-    }
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(60000),
     });
-    if (!res.ok) throw new Error(`LLM HTTP ${res.status}`);
-    const j = await res.json();
-    // content 应该非空 (kill switch 生效后). fallback reasoning_content 仅作保险.
-    const content = j.choices?.[0]?.message?.content || '';
-    const reasoning = j.choices?.[0]?.message?.reasoning_content || '';
-    const text = content || reasoning;
-    return { ok: true, backend, text };
+    if (!res.ok) throw new Error(`adapter HTTP ${res.status}`);
+    const data = await res.json();
+    return { ok: true, backend, text: data.reply || '' };
   } catch (err) {
     if (backend === 'opus') {
-      console.warn(`[llm] opus failed: ${err.message}, falling back to qwen`);
+      console.warn(`[llm-dispatcher] opus failed: ${err.message}, falling back to qwen`);
       return callLlm({ backend: 'qwen', system, user, maxTokens, temperature });
     }
     return { ok: false, backend, error: err.message };
