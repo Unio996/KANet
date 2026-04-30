@@ -111,8 +111,10 @@ export function transition({ orderId, expectedFromState, toState, opts = {}, db 
   if (required === 'paymentTxHash' && !opts.paymentTxHash) {
     throw new Error(`[state-machine] paymentTxHash required for ${toState}`);
   }
-  if (required === 'refundTxHash' && !opts.refundTxHash && !opts.no_escrow) {
-    throw new Error(`[state-machine] refundTxHash (or no_escrow=true) required for ${toState}`);
+  // SA-2.fix (NWT r79 reviewer hat): refunded TX_REQUIRED='refundTxHash' 不允许 no_escrow escape.
+  // 仅 failed (TX_REQUIRED='refundTxHash_or_no_escrow') allowed no_escrow=true.
+  if (required === 'refundTxHash' && !opts.refundTxHash) {
+    throw new Error(`[state-machine] refundTxHash required for ${toState}`);
   }
   if (required === 'refundTxHash_or_no_escrow' && !opts.refundTxHash && !opts.no_escrow) {
     throw new Error(`[state-machine] refundTxHash or no_escrow required for failed`);

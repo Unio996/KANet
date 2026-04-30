@@ -135,7 +135,7 @@ describe('SA-2 transition() — 7 unit tests', () => {
       /paymentTxHash required for paid/
     );
 
-    // refunded 必须 refundTxHash (or no_escrow but refunded 不 allow no_escrow per TX_REQUIRED)
+    // refunded 必须 refundTxHash (no_escrow 仅 failed allowed, refunded 不 allow)
     assert.throws(
       () => transition({
         orderId: 'o2',
@@ -144,7 +144,20 @@ describe('SA-2 transition() — 7 unit tests', () => {
         opts: {},
         db,
       }),
-      /refundTxHash.*required for refunded/
+      /refundTxHash required for refunded/
+    );
+
+    // SA-2.fix (NWT r79 reviewer hat): refunded WITH no_escrow=true 仍 throws.
+    // 验 no_escrow escape 仅 failed allowed (TX_REQUIRED.refunded='refundTxHash' 无 _or_no_escrow).
+    assert.throws(
+      () => transition({
+        orderId: 'o2',
+        expectedFromState: 'awaiting_payment',
+        toState: 'refunded',
+        opts: { no_escrow: true },  // refunded 不 allow no_escrow escape
+        db,
+      }),
+      /refundTxHash required for refunded/
     );
 
     // completed 必须 deliveryTxHash
