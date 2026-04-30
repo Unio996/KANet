@@ -428,5 +428,6 @@ export async function handleSellIntent(peerAddr, message) {
   // 跟 broker-buy-handler det-preview iter11 + PRICE_QUERY iter1 v2 完全 align.
   return `📋 卖 ${qty} KAS 申请收到.\n` +
     `预估 ${netKas} KAS net (扣 ${FEE_KAS} KAS broker fee) → ~${estUsdt} USDT (~${MID_PRICE_HINT} USDT/KAS, 真价由 broker 挂单时锁定).\n\n` +
-    `请回你的 BSC 钱包地址 (0x... 42 位) 接收 USDT. 30min 内回. 或回 NO 取消.`;
+    // T-J2-2026-04-30 L5a UX (Owner 真测 self-deal 撞): 显式 '你自己的' + warn 不给 broker/别人 addr
+    `请回**你自己的** BSC 钱包地址 (0x... 42 位) — 我代发 USDT 到这里. **不要给 broker 或别人的地址** (确保是你自己的钱包). 30min 内回. 或回 NO 取消.`;
 }

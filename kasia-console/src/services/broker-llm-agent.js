@@ -783,9 +783,19 @@ function _askMissingField(f, _lang) {
     return `好的, ${verb} ${f.qty} ${f.give_asset}. 用哪个链 (BSC / Polygon / SOL / TRON)?`;
   }
   // qty + asset + chain. ── Phase 4: ask addr ──
+  // T-J2-2026-04-30 L5a UX fix (Owner 真测撞: '收款地址' 让 BUY context 用户困惑 'Kas 哪里有 EVM?'
+  // + Owner 给了 broker 自己的 BSC addr 误以为是自己的). 显式区分 pay/recv role + 强调 '你自己的'.
+  // BUY: user 付 USDT 给 maker, 收 KAS. 但买 stable (USDC↔USDT) 时 user 也需提供 EVM 收款 addr.
+  // SELL: user 转 KAS 给 broker, 收 USDT. 必须 user 自己的 EVM 收款 addr (R4 self-deal SQL guard 防误用).
   if (_intentNeedsAddr(f.direction, f.give_asset) && !f.address) {
-    const hint = f.direction === 'sell' ? '收 USDT 的' : `收 ${f.give_asset} 的`;
-    return `好的, ${verb} ${f.qty} ${f.give_asset}, ${f.chain.toUpperCase()}. 你${hint} EVM 钱包地址 (0x... 42 位)?`;
+    let askLine;
+    if (f.direction === 'sell') {
+      askLine = `请回**你自己的** ${f.chain.toUpperCase()} EVM 钱包地址 (0x... 42 位) — 我代发 USDT 到这里. **不要给 broker 或任何别人的地址**.`;
+    } else {
+      // BUY stable (USDC/USDT) — user 收 stable 也用 user EVM
+      askLine = `请回**你自己的** ${f.chain.toUpperCase()} EVM 钱包地址 (0x... 42 位) — 收 ${f.give_asset} 到这里. **必须是你自己的**, 不是 maker / broker 的.`;
+    }
+    return `好的, ${verb} ${f.qty} ${f.give_asset}, ${f.chain.toUpperCase()}. ${askLine}`;
   }
   return '好的, 准备出报价...';
 }
