@@ -57,6 +57,24 @@ function _insertSellOrder({ peerAddr, qty, userBnbAddr }) {
   return orderId;
 }
 
+// T-NWT-2026-04-30 L5c v1/v2 routing mutex (Owner 真测撞 SELL 58 KAS 同时 INSERT bv2_ + UUID 双 row):
+// broker-v2 publish 路径 → orderBook.publishOrder → finalizeSell. 旧 finalizeSell 永 _insertSellOrder
+// 创建新 UUID row, 不动已存的 bv2_ 'aligning' row → 同 peer 双 row 同 qty.
+// 修: 接 existing_order_id 参数, v2 caller 传 draft.id, finalizeSell UPDATE 现 row 'aligning'→'awaiting_payment'
+// 不 INSERT 新 row. v1 caller 不传 (legacy 行为), 仍 INSERT.
+function _updateSellOrder({ orderId, recv_chain, recv_address }) {
+  const now = new Date().toISOString();
+  const r = sqlite.prepare(`
+    UPDATE retail_dex_orders
+    SET state = 'awaiting_payment',
+        pay_chain = COALESCE(pay_chain, ?),
+        pay_address = COALESCE(pay_address, ?),
+        updated_at = ?
+    WHERE id = ? AND state = 'aligning'
+  `).run(String(recv_chain || 'bnb').toLowerCase(), recv_address, now, orderId);
+  return r.changes > 0;
+}
+
 // R4 改造 (T-NWT-09): 走 broker-action-queue 单线 pump 防 UTXO 双花.
 // R4 Bug 9 fix (T-NWT-13, J2 933dd65e 同模式 broker-buy-handler 45787b86):
 // anti-spam 实测 dedup 窗口 ~14min, 6s backoff 不解. 加 4 字符唯一 tag, 跨 session 100%
@@ -252,7 +270,7 @@ ${historyLines}
 
 // R6 T-J2-19: tool function for broker-llm-agent. LLM 收齐 4 字段调此, 直接 INSERT
 // retail_dex_orders + DM 转 KAS 指引, 跳 _pending 对话状态.
-export async function finalizeSell({ user_kasia, qty, recv_chain, recv_address }) {
+export async function finalizeSell({ user_kasia, qty, recv_chain, recv_address, existing_order_id = null }) {
   if (!user_kasia || !qty || qty <= 0 || !recv_chain || !recv_address) {
     return { ok: false, error: 'missing fields (user_kasia/qty/recv_chain/recv_address)' };
   }
@@ -261,7 +279,20 @@ export async function finalizeSell({ user_kasia, qty, recv_chain, recv_address }
     if (!EVM_ADDR_REGEX.test(recv_address)) return { ok: false, error: 'invalid EVM address (expected 0x + 40 hex)' };
   }
   // TODO: SOL/TRON 地址 regex 验证 (留 NWT 补)
-  const orderId = _insertSellOrder({ peerAddr: user_kasia, qty, userBnbAddr: recv_address });
+  // L5c v1/v2 mutex: v2 caller 传 existing_order_id (draft.id) → UPDATE; v1 caller 不传 → 旧 INSERT 路径.
+  let orderId;
+  if (existing_order_id) {
+    const updated = _updateSellOrder({ orderId: existing_order_id, recv_chain, recv_address });
+    if (!updated) {
+      // existing row 不在 'aligning' state (已被其他 caller advance OR row 不存) — fallback INSERT 防 silent loss.
+      console.warn(`[broker-sell] L5c finalize fallback INSERT (existing_order_id=${existing_order_id.slice(0,12)} 不在 aligning)`);
+      orderId = _insertSellOrder({ peerAddr: user_kasia, qty, userBnbAddr: recv_address });
+    } else {
+      orderId = existing_order_id;
+    }
+  } else {
+    orderId = _insertSellOrder({ peerAddr: user_kasia, qty, userBnbAddr: recv_address });
+  }
   const traderAddr = _traderBAddr() || '(broker 地址未配置)';
   return { ok: true, order_id: orderId, broker_kasia: traderAddr, fee_kas: FEE_KAS, net_kas: qty - FEE_KAS };
 }

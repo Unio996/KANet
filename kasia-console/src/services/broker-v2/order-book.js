@@ -120,12 +120,15 @@ export async function publishOrder(peer, draft) {
 
   if (side === 'sell_kas') {
     // SELL 路径同 sellPreview 命名: recv_chain/recv_address (user 收 USDT 视角).
+    // T-NWT-2026-04-30 L5c v1/v2 routing mutex: 传 draft.id 给 finalizeSell, UPDATE 现 'aligning' row,
+    // 不再 INSERT 新 UUID row (Owner 真测 SELL 58 KAS 双 row 真因).
     const { finalizeSell } = await import('../broker-sell-handler.js');
     const result = await finalizeSell({
       user_kasia: peer,
       qty: parseFloat(qty),
       recv_chain: pay_chain,
       recv_address: pay_address,
+      existing_order_id: draft.id,
     });
     if (!result?.ok) return { ok: false, error: result?.error || 'finalizeSell failed' };
     return {
