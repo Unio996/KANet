@@ -274,16 +274,88 @@ export function checkBrokerEscrow(peerAddr, qty, orderCreatedAt, db = defaultDb)
 }
 
 /**
- * Cron sweep 找 stale awaiting_payment + 强转 'failed'.
+ * SA-5b — Cron sweep 找 stale awaiting_payment + 强转 'failed' (no_escrow=true).
  *
- * SA-2 合法 stub — 真实施 (含 SA-5a checkBrokerEscrow 调用 + transition() 调用 + cron schedule)
- * 留 SA-5b 扩. 任何 caller (含未来 import) 调 stub 不会崩, 仅得 placeholder.
+ * 替 SA-2 stub. 真实施: 查 DB + 调 checkBrokerEscrow + 调 transition() + (separately) cron schedule.
  *
- * @param {object} [db] - optional (stub 不用)
- * @returns {Promise<{ stale: number, forceFailed: number, _stub: true }>}
+ * 1h startup grace (跳 process_start + 1h 内的 row): 防 5 Agent stagger restart 期 第 1 cycle 误扫
+ *   重启前 historical 'awaiting_payment' row (broker-intake-watcher 还没及处理).
+ *
+ * @param {object} [db] - optional db handle (default sqlite, test 传 testDb)
+ * @returns {Promise<{ stale: number, forceFailed: number }>}
  */
 export async function reconcileStaleOrders(db = defaultDb) {
-  // SA-2 stub — _stub: true flag 让 cross-review 1 眼识别 OR 未来 caller 检.
-  // SA-5b 替为真实施时 (查 DB / 调 transition / setInterval) signature 兼容.
-  return { stale: 0, forceFailed: 0, _stub: true };
+  // 1h startup grace cutoff
+  const graceCutoff = new Date(PROCESS_START_TIME + STARTUP_GRACE_MS).toISOString();
+
+  // 找 awaiting_payment 30min+ 老 + 无 paymentTxHash + 无 broker_workflow_markers paid evidence
+  // grace: 跳 process_start + 1h 内的 row (重启前历史 row 等下次 cycle)
+  const stale = db.prepare(`
+    SELECT id, user_kasia_address, qty, created_at FROM retail_dex_orders
+    WHERE state = 'awaiting_payment'
+      AND julianday('now') - julianday(created_at) > 30.0/1440.0
+      AND id NOT IN (SELECT src_event_id FROM broker_workflow_markers WHERE event_type LIKE '%paid%')
+      AND (datetime('now') > ? OR created_at >= ?)
+    LIMIT 10
+  `).all(graceCutoff, graceCutoff);
+
+  let staleCount = stale.length, forceFailedCount = 0;
+  for (const row of stale) {
+    const escrowed = checkBrokerEscrow(row.user_kasia_address, parseFloat(row.qty), row.created_at, db);
+    if (!escrowed) {
+      const result = transition({
+        orderId: row.id,
+        expectedFromState: 'awaiting_payment',
+        toState: 'failed',
+        opts: {
+          no_escrow: true,
+          reason: 'reconcile_no_escrow',
+          triggeredBy: 'reconcileStaleOrders',
+        },
+        db,
+      });
+      if (result.ok) forceFailedCount++;
+    }
+  }
+  if (staleCount > 0 || forceFailedCount > 0) {
+    console.log(`[broker-reconcile] ${staleCount} stale, ${forceFailedCount} force-failed (grace 1h post-restart)`);
+  }
+  return { stale: staleCount, forceFailed: forceFailedCount };
+}
+
+// SA-5b cron schedule + module-level cronStarted guard 防 setInterval 重注 (5 Agent 共享 console module)
+const PROCESS_START_TIME = Date.now();
+const STARTUP_GRACE_MS = 60 * 60 * 1000;  // 1h
+let cronStarted = false;
+let cronIntervalId = null;
+
+/**
+ * Start reconcileStaleOrders 15min cron tick.
+ * Module-level guard 防多次 import 重复注册. caller 重复调 startReconcileCron() warn + skip.
+ */
+export function startReconcileCron() {
+  if (cronStarted) {
+    console.warn('[broker-reconcile] cron 已 started, skip 重复注册');
+    return;
+  }
+  cronStarted = true;
+  cronIntervalId = setInterval(async () => {
+    try {
+      await reconcileStaleOrders();
+    } catch (e) {
+      console.warn(`[broker-reconcile] tick err: ${e.message}`);
+    }
+  }, 15 * 60 * 1000);  // 15min
+  console.log('[broker-reconcile] cron started, interval=15min, startup_grace=1h');
+}
+
+/**
+ * Stop cron — 单元测试 cleanup; production 不调.
+ */
+export function stopReconcileCron() {
+  if (cronIntervalId) {
+    clearInterval(cronIntervalId);
+    cronIntervalId = null;
+    cronStarted = false;
+  }
 }

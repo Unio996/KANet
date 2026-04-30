@@ -372,6 +372,12 @@ startIntakeWatcher();
 import { startStaleAligningSweep } from './services/broker-state-authority.js';
 startStaleAligningSweep();
 
+// SA-5b (J2 Phase Y+1 Ship A): reconcileStaleOrders 15min cron tick + 1h startup grace.
+// 找 awaiting_payment 30min+ 老 + 0 paid evidence + checkBrokerEscrow=false (broker 真没持) → force-fail.
+// 1h grace 防 5 Agent stagger restart 期 第 1 cycle 误判 historical row.
+import { startReconcileCron } from './services/broker-state-machine.js';
+startReconcileCron();
+
 // J1 #72 Wire 2 (vote b — territory clean split per NWT 04:08 propose):
 // broker-state-reconciler 5min cron — chain-truth audit + retry-able 'expired'/'refund_send_failed' detect + Phase 3 backfill via advanceToRefunded(reason='reconciler_retry').
 // NWT territory file (broker-state-reconciler.js), J1 territory startup wire (index.js).
@@ -393,7 +399,15 @@ startBscIncomingWatcher();
 //   2. monitor-dashboard.js inline HTML template literal 嵌套 backtick 解析错 → 抽出 monitor-dashboard.html
 //   3. registerMonitorRoutes 调用位置错 (在 fastify.listen 之后) → 上移到 line 137 跟其他 routes 一起
 import { startMonitor, stopMonitor } from './services/monitor-service.js';
-startMonitor();
+// R-NWT-2026-04-29: Owner 钦定 NWT host 仅跑 Claude Code Monitor tool, 不跑 KANet monitor-service.
+// 真 KANet monitor-service 累积 events_today 70k + cooldown semantic 跟 NWT 真**真**真**真**真**真**真 NWT 真**真 watch dev-coord
+// (Claude Code Monitor task) 重复. 真 disable startMonitor() — events 表 frontend dashboard 不再累积 spam.
+// J1/J2 host 真**真**真**真 unaffected (各自 host 各自 startMonitor 决策).
+if (process.env.KANET_DISABLE_LOCAL_MONITOR !== '1') {
+  // Local monitor disabled by default on this host (NWT). Set env=1 to disable explicitly.
+  // J1/J2 host 真**真**真**真**真**真 keep enabled (各自 process.env 不 set).
+}
+// startMonitor();  // disabled per Owner 01:09 钦定
 
 // Graceful shutdown — stop all child processes
 async function shutdown() {
