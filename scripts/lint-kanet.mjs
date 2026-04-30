@@ -217,6 +217,53 @@ function checkR_NWT_FRAMEWORK(filepath, content) {
   }
 }
 
+// ── R-NWT-STATE-MACHINE: broker-* 直 UPDATE retail_dex_orders.state 跳状态机 owner ──
+// Owner 2026-04-30 钦定 "每个链上动作对应一个数据状态转换".
+// 必经 broker-state-machine.transition() — 唯一 transition entry.
+// 来源: docs/STATE-MACHINES.md v0.2 + tasks/PZ-STATE-MACHINE-shipA.md SA-3.
+//
+// regex multiline: UPDATE retail_dex_orders ... SET ... state = (跨行 300 char window)
+// 排除: broker-state-machine.js 自身 (canonical entry, transition() 内 SQL UPDATE 是 唯一合法实现)
+// escape hatch: 前 1-3 行 // lint-allow-state-update: <reason ref PZ-STATE-T<N>>
+function checkR_NWT_STATE_MACHINE(filepath, content) {
+  // 排除 canonical entry 自身
+  if (/services[\\/]broker-state-machine\.js$/.test(filepath)) return;
+  // 仅检 services/broker-* + broker-v2/* + exchange-machine.js
+  if (!/services[\\/]broker-[\w-]+\.js$|services[\\/]broker-v2[\\/][\w-]+\.js$|services[\\/]exchange-machine\.js$/.test(filepath)) return;
+
+  const pattern = /UPDATE\s+retail_dex_orders\b[\s\S]{0,300}?\bSET\b[\s\S]{0,300}?\bstate\s*=/gi;
+  const lines = content.split('\n');
+  let m;
+  while ((m = pattern.exec(content)) !== null) {
+    // 计算 match 起 line number
+    const lineNo = content.slice(0, m.index).split('\n').length;
+    // 跳过 // 单行注释 (line 起始)
+    if (/^\s*\/\//.test(lines[lineNo - 1] || '')) continue;
+    // 跳过 JSDoc / 块注释里出现的 SQL (粗略: 前一行 ` * ` 或 ` */ ` 模式)
+    if (/^\s*\*/.test(lines[lineNo - 1] || '')) continue;
+    // multiline SQL: UPDATE retail_dex_orders 在 template literal 内, 真起始 prepare( 调用行.
+    // step 1: 回找 prepare( 调用行 (5 行内)
+    let prepareLineIdx = lineNo - 1;  // 0-indexed default
+    for (let j = lineNo - 2; j >= 0 && j >= lineNo - 6; j--) {
+      if (/\.prepare\s*\(\s*`?/.test(lines[j] || '')) { prepareLineIdx = j; break; }
+    }
+    // step 2: escape hatch 在 prepare( 行前 1-3 行
+    // // lint-allow-state-update: PZ-STATE-T<N> <reason>
+    let allowFound = false;
+    for (let j = prepareLineIdx - 1; j >= 0 && j >= prepareLineIdx - 3; j--) {
+      if (/\/\/\s*lint-allow-state-update:\s*\S/.test(lines[j] || '')) { allowFound = true; break; }
+      // 仅容忍空行 + 注释; 遇业务行停搜
+      if (!/^\s*$/.test(lines[j] || '') && !/^\s*\/\//.test(lines[j] || '')) break;
+    }
+    if (allowFound) continue;
+    violate(
+      'R-NWT-STATE-MACHINE',
+      `[STATE-MACHINES] retail_dex_orders.state 直 SQL UPDATE 跳过状态机 owner. Owner 钦定 "每个链上动作对应一个数据状态转换". 必经 broker-state-machine.transition() — 唯一 transition entry (docs/STATE-MACHINES.md v0.2). 如 legitimate exception (legacy / BUY 路径 phase 2 后置) 加上一行 // lint-allow-state-update: PZ-STATE-T<N> <reason>.`,
+      filepath, lineNo
+    );
+  }
+}
+
 function checkR29(filepath, content) {
   // 仅检 broker-v2/llm.js + broker-llm-agent.js (LLM caller files)
   if (!/broker-v2[\\/]llm\.js$|broker-llm-agent\.js$/.test(filepath)) return;
@@ -437,6 +484,7 @@ for (const fp of targets) {
   checkR33b(fp, content);
   checkR37(fp, content);
   checkR_NWT_FRAMEWORK(fp, content);
+  checkR_NWT_STATE_MACHINE(fp, content);  // SA-3: retail_dex_orders.state 直 UPDATE → hard fail
   checkBrokerStutter(fp, content);
   checkCommandEnum(fp, content);
 }
