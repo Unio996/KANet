@@ -171,6 +171,47 @@ function checkR19(filepath, content) {
   }
 }
 
+// ── R29: LLM dumb tools rich — broker-v2/llm.js SYSTEM_PROMPT 不许含 user-facing directive ──
+// 4-27 J1 e450ea19 钦定 R29 architectural principle (ANTI-PATTERNS L907-955) — user-facing content
+// 100% tool-generated, LLM verbatim transmit. Testable invariant: LLM reply.bytes ⊆ tool output ∪ user-input.
+// 但 R29 自钦定起 4-27 至 4-30 lint 未实施, 5+ commit (NWT bug 1 priceBlock / bug 5 non-custodial / J2 L5a v2)
+// 都把 user-facing directive 直 inject SYSTEM_PROMPT, Qwen 弱遵循 → Owner 真测撞 fake price 0.0525 等.
+// 修法: lint hard 检 broker LLM service file SYSTEM_PROMPT 不许含 directive 词 (请回/严禁 reply/必须如下/...)
+// — 仅允 tool 描述 + 系统语义. 物理消除 prompt-injection violation 可能性, 不靠人记忆.
+function checkR29(filepath, content) {
+  // 仅检 broker-v2/llm.js + broker-llm-agent.js (LLM caller files)
+  if (!/broker-v2[\\/]llm\.js$|broker-llm-agent\.js$/.test(filepath)) return;
+  const lines = content.split('\n');
+  // 定位 SYSTEM_PROMPT block (template literal 或 const SYSTEM_PROMPT = `...`)
+  let inSysPrompt = false;
+  let sysPromptStart = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/const\s+SYSTEM_PROMPT\s*=\s*`/.test(line)) { inSysPrompt = true; sysPromptStart = i; continue; }
+    if (inSysPrompt && /^\s*`\s*;/.test(line)) { inSysPrompt = false; continue; }
+    if (!inSysPrompt) continue;
+    // R29 directive detect: user-facing 对话 instruction 词
+    // user-facing directive 应在 tool 实施 (preview_text/error_message), 不在 SYSTEM_PROMPT
+    // 跳过 // 单行注释 (注释里讨论 case 不 lint)
+    if (/^\s*\/\//.test(line)) continue;
+    const directivePatterns = [
+      { pat: /请回/, label: '请回' },
+      { pat: /严禁\s*reply\s*含/i, label: '严禁 reply 含' },
+      { pat: /必须\s*如下/, label: '必须如下' },
+      { pat: /回应\s*user.*['"`].*['"`]\s*必/, label: '回应 user 必如下' },
+      { pat: /反正方向已锁/, label: '反正方向已锁 (LLM directive)' },
+      { pat: /如\s*user\s*问.*仅引用/, label: '如 user 问 仅引用 (Qwen 弱遵循)' },
+      { pat: /(?:你应该|你需要|你必须)/, label: '你应该/你需要/你必须 (user-facing directive)' },
+    ];
+    for (const { pat, label } of directivePatterns) {
+      if (pat.test(line)) {
+        violate('R29', `[ANTI-PATTERNS R29] broker LLM SYSTEM_PROMPT 含 user-facing directive '${label}' — LLM dumb tools rich 钦定 user-facing content 100% tool-generated, LLM verbatim transmit. Qwen 3.6 弱遵循 prompt directive (实证: Owner 真测撞 fake price 0.0525). 改写 generator tool (e.g. ask_recv_address/get_kas_price/explain_X) 让 LLM 调用 + verbatim transmit.`, filepath, i + 1);
+        break;  // 1 line 1 violation 够
+      }
+    }
+  }
+}
+
 // ── R33: broker reply path 真 ALL consult conversation state authority ──
 // 真 ANTI-PATTERNS R33 (J1 sediment 3b6911f3): 真 broker handler reply 真 generate 真 BEFORE
 // 真 must consult getConvoState/shouldDeterministicFire 真 prevent 11+ paths fragmented blind.
@@ -340,6 +381,7 @@ for (const fp of targets) {
   checkR11(fp, content);
   checkR6(fp, content);
   checkR19(fp, content);
+  checkR29(fp, content);
   checkR33(fp, content);
   checkR33b(fp, content);
   checkR37(fp, content);
