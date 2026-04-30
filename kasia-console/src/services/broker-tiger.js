@@ -41,6 +41,7 @@ export function createTigerAdapter(config) {
     params.sign = _sign(params);
 
     try {
+      // lint-allow-fetch: PZ-ALPACA-T1 broker-tiger → agent-broker-adapter refactor (phase Y+1, 同 broker-alpaca)
       const res = await fetch(TIGER_BASE, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

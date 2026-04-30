@@ -26,6 +26,7 @@ export function createTradierAdapter(config) {
 
   async function _fetch(path, opts = {}) {
     try {
+      // lint-allow-fetch: PZ-ALPACA-T1 broker-tradier → agent-broker-adapter refactor (phase Y+1, 同 broker-alpaca)
       const res = await fetch(`${baseUrl}${path}`, {
         ...opts,
         headers: { ...headers, ...opts.headers },
