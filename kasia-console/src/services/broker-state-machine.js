@@ -227,6 +227,53 @@ export function findActiveOrder(peerAddr, db = defaultDb) {
 }
 
 /**
+ * SA-5a — 检 broker (Trader-B) 钱包是否真持 N KAS 对应某 user 的 escrow.
+ *
+ * 实施: 不查实时 RPC balance (耗时), 用 kaspa_tx_log 历史推算.
+ *   1. 查入金: peer→broker, observed_at>=orderCreatedAt, amount qty±0.5 KAS tolerance
+ *   2. 查出金: broker→peer, observed_at>=orderCreatedAt (含 partial refund)
+ *   3. 余额 = sum(入金) - sum(出金)
+ *   4. 余额 >= qty - 0.5 (含 fee buffer) → escrowed=true
+ *   5. 否则 escrowed=false (broker 真没收 OR 已退)
+ *
+ * **false negative 安全** (kaspa_tx_log.from_address 100% NULL 实证 — T-NWT-07 indexer 漏抓 sender,
+ * outbound 匹配几乎全 miss). false neg (broker 真已退但仍判 escrow → 不 force-fail) 比
+ * false pos (broker 没退但判已退 → force-fail 误退 active row) 安全得多. T-NWT-07 indexer 修后真精准.
+ *
+ * @param {string} peerAddr - user kasia 地址
+ * @param {number} qty - 期望 escrow 数量 KAS (retail_dex_orders.qty)
+ * @param {string} orderCreatedAt - retail_dex_orders.created_at (ISO string), 时间窗起点
+ * @param {object} [db] - optional db handle (default sqlite, test 传 testDb)
+ * @returns {boolean} - true=escrowed / false=no escrow OR 已退
+ */
+const TRADER_B_KAS_ADDR = 'kaspa:qrxw764gez624hfkfvpmzfx8a4mg2vze5n6vsgu8fymewrkuphy65lxur9c5l';
+
+export function checkBrokerEscrow(peerAddr, qty, orderCreatedAt, db = defaultDb) {
+  // 1. 入金: peer→broker, qty±0.5 KAS tolerance, observed_at>=orderCreatedAt
+  const inbound = db.prepare(`
+    SELECT COALESCE(SUM(amount), 0) AS total FROM kaspa_tx_log
+    WHERE to_address = ?
+      AND observed_at >= ?
+      AND amount BETWEEN ? AND ?
+  `).get(TRADER_B_KAS_ADDR, orderCreatedAt, qty - 0.5, qty + 0.5);
+  const inAmt = Number(inbound?.total || 0);
+  if (inAmt === 0) return false;  // 真没入金
+
+  // 2. 出金: broker→peer, observed_at>=orderCreatedAt
+  // 注: kaspa_tx_log.from_address 100% NULL (T-NWT-07 indexer 漏抓), outbound 匹配几乎全 miss.
+  const outbound = db.prepare(`
+    SELECT COALESCE(SUM(amount), 0) AS total FROM kaspa_tx_log
+    WHERE from_address = ?
+      AND to_address = ?
+      AND observed_at >= ?
+  `).get(TRADER_B_KAS_ADDR, peerAddr, orderCreatedAt);
+  const outAmt = Number(outbound?.total || 0);
+
+  // 3. 余额 >= qty - 0.5 (含 fee buffer) → escrowed
+  return (inAmt - outAmt) >= (qty - 0.5);
+}
+
+/**
  * Cron sweep 找 stale awaiting_payment + 强转 'failed'.
  *
  * SA-2 合法 stub — 真实施 (含 SA-5a checkBrokerEscrow 调用 + transition() 调用 + cron schedule)

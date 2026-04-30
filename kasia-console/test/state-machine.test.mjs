@@ -23,6 +23,7 @@ import {
   getOrderState,
   findActiveOrder,
   reconcileStaleOrders,
+  checkBrokerEscrow,
   ALLOWED_TRANSITIONS,
   TX_REQUIRED,
   STATES,
@@ -65,6 +66,17 @@ function setupDB() {
       src_event_id TEXT,
       payload TEXT,
       created_at TEXT
+    );
+    CREATE TABLE kaspa_tx_log (
+      tx_id TEXT PRIMARY KEY,
+      block_hash TEXT,
+      block_time INTEGER,
+      from_address TEXT,
+      to_address TEXT,
+      amount REAL,
+      outputs_json TEXT,
+      observed_at TEXT NOT NULL,
+      network TEXT
     );
   `);
   return db;
@@ -340,5 +352,68 @@ describe('SA-2 transition() — 7 unit tests', () => {
     assert.equal(result._stub, true);
     assert.equal(result.stale, 0);
     assert.equal(result.forceFailed, 0);
+  });
+});
+
+// ── SA-5a — checkBrokerEscrow 4 unit test ──
+const TRADER_B = 'kaspa:qrxw764gez624hfkfvpmzfx8a4mg2vze5n6vsgu8fymewrkuphy65lxur9c5l';
+
+function seedKaspaTx(db, { tx_id, from, to, amount, observed_at }) {
+  db.prepare(`
+    INSERT INTO kaspa_tx_log (tx_id, from_address, to_address, amount, observed_at, network)
+    VALUES (?, ?, ?, ?, ?, 'mainnet')
+  `).run(tx_id, from, to, amount, observed_at);
+}
+
+describe('SA-5a checkBrokerEscrow — 4 unit test', () => {
+  let db;
+  const peer = 'kaspa:qrtest_peer_addr_for_escrow_check';
+  const orderCreatedAt = '2026-04-30T00:00:00Z';
+
+  beforeEach(() => {
+    db = setupDB();
+  });
+
+  // 1. 入金 only (no out) → escrowed=true
+  it('1. 入金 only (in 50, out 0) → escrowed=true', () => {
+    seedKaspaTx(db, { tx_id: 'tx1', from: null, to: TRADER_B, amount: 50, observed_at: '2026-04-30T01:00:00Z' });
+    const result = checkBrokerEscrow(peer, 50, orderCreatedAt, db);
+    assert.equal(result, true);
+  });
+
+  // 2. 入金=出金 (refunded clean) → escrowed=false
+  it('2. 入金=出金 (in 50, out 50) → escrowed=false (已退)', () => {
+    seedKaspaTx(db, { tx_id: 'tx1', from: null, to: TRADER_B, amount: 50, observed_at: '2026-04-30T01:00:00Z' });
+    seedKaspaTx(db, { tx_id: 'tx2', from: TRADER_B, to: peer, amount: 50, observed_at: '2026-04-30T02:00:00Z' });
+    const result = checkBrokerEscrow(peer, 50, orderCreatedAt, db);
+    assert.equal(result, false);
+  });
+
+  // 3. 入金 边界 within tolerance (in 49.6, out 0, threshold qty-0.5=49.5) → escrowed=true
+  it('3. 入金 边界 tolerance (in 49.6 qty=50, threshold 49.5) → escrowed=true', () => {
+    seedKaspaTx(db, { tx_id: 'tx1', from: null, to: TRADER_B, amount: 49.6, observed_at: '2026-04-30T01:00:00Z' });
+    const result = checkBrokerEscrow(peer, 50, orderCreatedAt, db);
+    assert.equal(result, true);
+  });
+
+  // 4. 入金 < threshold (in 49.4, threshold 49.5) → escrowed=false
+  //    AND observed_at < orderCreatedAt → 不计入 (时间窗 enforce)
+  it('4. 入金不在时间窗 OR 入金不足 → escrowed=false', () => {
+    // 4a: observed_at < orderCreatedAt → 时间窗外不计
+    seedKaspaTx(db, { tx_id: 'tx_old', from: null, to: TRADER_B, amount: 50, observed_at: '2026-04-29T23:00:00Z' });
+    let result = checkBrokerEscrow(peer, 50, orderCreatedAt, db);
+    assert.equal(result, false, '时间窗外入金不计');
+
+    // 4b: 入金 49.4 < threshold 49.5 → false (out of -0.5 tolerance)
+    seedKaspaTx(db, { tx_id: 'tx_under', from: null, to: TRADER_B, amount: 49.4, observed_at: '2026-04-30T01:00:00Z' });
+    result = checkBrokerEscrow(peer, 50, orderCreatedAt, db);
+    assert.equal(result, false, '入金 49.4 < threshold 49.5');
+  });
+
+  // 5. amount BETWEEN qty±0.5 — 入金 amount 不在 tolerance → 不计入入金 (qty filter)
+  it('5. 入金 amount 不在 ±0.5 tolerance (e.g. in 30 qty=50) → amount filter 排除 → escrowed=false', () => {
+    seedKaspaTx(db, { tx_id: 'tx1', from: null, to: TRADER_B, amount: 30, observed_at: '2026-04-30T01:00:00Z' });
+    const result = checkBrokerEscrow(peer, 50, orderCreatedAt, db);
+    assert.equal(result, false, '30 不在 [49.5, 50.5] tolerance, amount filter 排除');
   });
 });
