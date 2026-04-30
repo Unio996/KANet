@@ -58,10 +58,16 @@ async function _checkAndReplenish() {
     if (result.ok) {
       console.log(`[broker-inventory] ✓ auto-replenish tx ${result.txHash.slice(0,12)} +${result.usdcReceived.toFixed(6)} USDC`);
       // chain_event audit
+      // T-J2-2026-04-30 Site D fix (RCA Owner 真测 R1 follow-up audit): EVM tx_hash 来自 ethers.js
+      // tx.hash 是 '0x' + 64-hex = 66 chars. v83 trigger chain_events_txid_format_check 强制
+      // length=64 + all hex → ABORT. Kaspa hash 64 chars 无前缀 ✓ pass; EVM hash 必 strip 0x.
+      // 静默副作用: 每次 broker auto-replenish swap 真做了 (USDC 真到 broker 钱包), 但 audit
+      // INSERT 失 → 状态机失明. fix: strip 0x 前缀 keep 64-hex.
       const crypto = await import('crypto');
+      const cleanTxHash = String(result.txHash || '').replace(/^0x/i, '');
       sqlite.prepare(`INSERT INTO chain_events (id, txid, from_address, to_address, event_type, payload, observed_by, observed_at)
         VALUES (?, ?, ?, ?, 'broker_auto_replenish', ?, ?, datetime('now'))`)
-        .run(crypto.randomUUID(), result.txHash, wallet.address, wallet.address,
+        .run(crypto.randomUUID(), cleanTxHash, wallet.address, wallet.address,
           JSON.stringify({ swap_dex: 'pancakeswap_v2', from_balance: balance, swap_amount_usdt: cfg.amount, received_usdc: result.usdcReceived, reason: 'auto_replenish_below_min_reserve' }),
           'broker_inventory_watcher');
     } else {
