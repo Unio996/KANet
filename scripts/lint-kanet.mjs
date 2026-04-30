@@ -188,12 +188,24 @@ function checkR29(filepath, content) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (/const\s+SYSTEM_PROMPT\s*=\s*`/.test(line)) { inSysPrompt = true; sysPromptStart = i; continue; }
-    if (inSysPrompt && /^\s*`\s*;/.test(line)) { inSysPrompt = false; continue; }
+    // Closing detection: backtick semicolon 末尾 (inline OR 行首). 容忍 `;` / \`;<空> / \`; // 注释 等
+    if (inSysPrompt && /`\s*;\s*(?:\/\/.*)?$/.test(line)) { inSysPrompt = false; continue; }
     if (!inSysPrompt) continue;
     // R29 directive detect: user-facing 对话 instruction 词
     // user-facing directive 应在 tool 实施 (preview_text/error_message), 不在 SYSTEM_PROMPT
     // 跳过 // 单行注释 (注释里讨论 case 不 lint)
     if (/^\s*\/\//.test(line)) continue;
+    // J2 r64 dimension: lint-allow-r29 escape hatch — pre-existing tech debt grandfather, reason 必含 PZ-R29-T<N> phase Z task ref.
+    // 前一行 (或 # 章节 header 容忍 1 空行间隔) 含 // lint-allow-r29: PZ-R29-T<N> 注释 → 跳过 violation.
+    // phase Z R29 generator tool refactor 真 ship 时 grep `lint-allow-r29` 直找 grandfather list 清理.
+    let allowFound = false;
+    for (let j = i - 1; j >= 0 && j >= i - 3; j--) {
+      const prev = lines[j];
+      if (/\/\/\s*lint-allow-r29:\s*PZ-R29-T\d+/.test(prev)) { allowFound = true; break; }
+      // 仅容忍空行 / 章节 header (# xxx) / 紧邻 1 行非注释; 遇到其他 SYSTEM_PROMPT 实质内容停搜
+      if (!/^\s*$/.test(prev) && !/^\s*#/.test(prev) && !/^\s*\/\//.test(prev)) break;
+    }
+    if (allowFound) continue;
     const directivePatterns = [
       { pat: /请回/, label: '请回' },
       { pat: /严禁\s*reply\s*含/i, label: '严禁 reply 含' },

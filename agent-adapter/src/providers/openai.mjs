@@ -221,6 +221,11 @@ export async function ask(message, idempotencyKey, options) {
     let messages;
     if (callerMessages) {
       // J2 r58 broker multi-turn path — caller-supplied messages array, system 仍 prepend
+      // J2 r60 dimension defensive guard: callerMessages 不可含 role:system (D6 共识 lock).
+      // assert error 让 caller bug 暴 (loud fail) 防 dual-prepend system → R37 双 sysmsg 撞 Qwen Jinja 拒.
+      if (callerMessages.length > 0 && callerMessages[0]?.role === 'system') {
+        throw new Error('callerMessages 不可含 role:system (D6 共识) — pass via options.system instead');
+      }
       messages = [];
       if (hasSystem) messages.push({ role: "system", content: sanitizeForApi(options.system) });
       for (const m of callerMessages) messages.push(_sanitizeMessage(m));

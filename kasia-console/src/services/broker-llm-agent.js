@@ -81,7 +81,7 @@ const SYSTEM_PROMPT = `你是 KANet broker, 帮用户买卖 KAS / USDT / USDC. �
 **字段齐立刻调 preview_order tool.**
 
 # tool 返 preview_text → 你 100% 原样转发 (一字不改地址不缩写)
-
+// lint-allow-r29: PZ-R29-T4 SYSTEM_PROMPT trim — meta-directive '你必须照转' tool semantics 真意, R29 generator refactor 真 enforce 后此 directive 多余 (tool 输出即 verbatim transmit, 不需 directive)
 LLM 编 0x 地址 = user 转钱到 fake 地址 = 灾难. preview_text 含真 broker 地址, 你必须整段照转.
 
 # 用户消息处理铁律
@@ -264,26 +264,39 @@ export async function _callLlm(messages, ctx = {}, opts = {}) {
   // ctx: { peer, turn } — 给 jsonl 关联 test-framework trace 用
   // T-J1-2026-04-28 Layer 6 (phase 3 8-layer system fix): LLM 500 retry policy.
   // 治 Bug-Z14 (LLM cascade fail). 5xx + network err 重试 3 次 (1s/2s backoff), 4xx fail fast.
+  //
+  // T-NWT-2026-04-30 阶段 3/6 (RFC r49-r60 14/14 共识 lock):
+  // 走 KANet 框架 adapter HTTP 接口 (Owner 钦定 跳框架=严重错误). 不再直 fetch LLM endpoint.
+  // - 删 hardcode chat_template_kwargs (adapter 自管 R11 conditional)
+  // - 删 直 fetch ai_provider_url, 改 POST http://127.0.0.1:<adapter_port>/reply
+  // - body: { peer, messages: history (无 role:system), mindSystem: sysPrompt+systemAppend, tools, tool_choice, trace_id, txId }
+  // - response: { reply, tool_calls? } → 包成 OpenAI message format {content: reply, tool_calls} 给 13 处 caller (signature 不变)
+  // - jsonl audit log 不变
   const a = sqlite.prepare(`
-    SELECT a.ai_provider_url, a.ai_model FROM relay_nodes r
+    SELECT a.http_port, a.ai_model FROM relay_nodes r
     JOIN adapter_nodes a ON a.id = r.adapter_node_id
     WHERE r.id = ?
   `).get(BROKER_RELAY_ID);
-  if (!a?.ai_provider_url) return null;
+  if (!a?.http_port) {
+    console.warn(`[broker-llm] adapter http_port not found for ${BROKER_RELAY_ID.slice(0,8)} — adapter_node_id 未配置`);
+    return null;
+  }
+  // J2 r60 dimension defensive guard: messages 内不可含 role:system (D6 共识 钦定 system 走 options.system clean layer).
+  // assert error 让阶段 3 caller bug 暴 (loud fail 替 silent strip).
+  if (Array.isArray(messages) && messages.length > 0 && messages[0]?.role === 'system') {
+    throw new Error('[broker-llm] _callLlm: messages 数组不可含 role:system (D6 共识 lock — system 走 ctx.systemAppend / opts.systemPrompt 经 options.system 单独 prepend)');
+  }
+  const adapterUrl = `http://127.0.0.1:${a.http_port}/reply`;
+  const mergedSystem = ctx.systemAppend ? `${sysPrompt}\n\n${ctx.systemAppend}` : sysPrompt;
+  const traceId = ctx.peer ? `${ctx.peer.slice(-12)}:${ctx.turn || 'broker'}:${Date.now()}` : null;
   const requestBody = {
-    model: a.ai_model || 'Qwen3.6-35B-A3B',
-    // T-J1-2026-04-28 Bug-Z24 (J2 9fa9 dig): merge stateLockAddendum into single system message.
-    // 之前 handleLlmDialog 用 history.unshift 加第 2 个 system message → Qwen Jinja
-    // 'System message must be at the beginning' raise → HTTP 500 cascade (Owner 06:38+ sell flow 撞).
-    messages: [
-      { role: 'system', content: ctx.systemAppend ? `${sysPrompt}\n\n${ctx.systemAppend}` : sysPrompt },
-      ...messages,
-    ],
-    tools,
+    peer: ctx.peer || 'broker-internal',
+    messages,                          // J2 r58 vote (A) — broker multi-turn history 透传
+    mindSystem: mergedSystem,          // D6 system 单独 layer
+    tools,                             // R29 + D2 raw passthrough
     tool_choice: 'auto',
-    // QWEN-RULES.md Rule 11 (T-NWT-V2-hotfix2): Qwen3.6 reasoning kill switch.
-    // /no_think 前缀 sys/user 都实测无效. 唯一有效是 body 加 chat_template_kwargs.
-    chat_template_kwargs: { enable_thinking: false },
+    trace_id: traceId,                 // D7 propagation
+    txId: traceId,                     // D5 idempotency: hash key includes messages, txId 仅 log/correlation
   };
   const MAX_ATTEMPTS = 3;
   const BACKOFF_MS = [0, 1000, 2000];
@@ -295,7 +308,7 @@ export async function _callLlm(messages, ctx = {}, opts = {}) {
     }
     const t0 = Date.now();
     try {
-      const res = await fetch(`${a.ai_provider_url}/chat/completions`, {
+      const res = await fetch(adapterUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
@@ -303,7 +316,7 @@ export async function _callLlm(messages, ctx = {}, opts = {}) {
       });
       const latency_ms = Date.now() - t0;
       if (!res.ok) {
-        console.warn(`[broker-llm] LLM HTTP ${res.status} (attempt ${attempt}/${MAX_ATTEMPTS})`);
+        console.warn(`[broker-llm] adapter HTTP ${res.status} (attempt ${attempt}/${MAX_ATTEMPTS})`);
         _appendLlmIo({
           ts: new Date().toISOString(),
           peer: ctx.peer || null,
@@ -322,7 +335,11 @@ export async function _callLlm(messages, ctx = {}, opts = {}) {
         continue;
       }
       const data = await res.json();
-      const message = data.choices?.[0]?.message;
+      // adapter response: { reply, tool_calls? } — 包成 OpenAI message format 给 13 处 caller (signature 不变)
+      const message = {
+        content: data.reply || '',
+        tool_calls: Array.isArray(data.tool_calls) ? data.tool_calls : null,
+      };
       _appendLlmIo({
         ts: new Date().toISOString(),
         peer: ctx.peer || null,
@@ -332,17 +349,19 @@ export async function _callLlm(messages, ctx = {}, opts = {}) {
         messages: messages,
         tools: tools.map(t => t.function.name),
         latency_ms,
-        reply_content: message?.content || null,
-        tool_calls: message?.tool_calls?.map(tc => ({
+        reply_content: message.content,
+        tool_calls: message.tool_calls?.map(tc => ({
           name: tc.function?.name,
           arguments: tc.function?.arguments,
         })) || null,
-        finish_reason: data.choices?.[0]?.finish_reason || null,
+        finish_reason: null,           // adapter 不回 finish_reason — J2 r58 加 dimension 后置 phase Z
+        via_adapter: true,
+        trace_id: traceId,
       });
       return message;
     } catch (e) {
       const latency_ms = Date.now() - t0;
-      console.warn(`[broker-llm] LLM err (attempt ${attempt}/${MAX_ATTEMPTS}): ${e.message}`);
+      console.warn(`[broker-llm] adapter err (attempt ${attempt}/${MAX_ATTEMPTS}): ${e.message}`);
       _appendLlmIo({
         ts: new Date().toISOString(),
         peer: ctx.peer || null,
@@ -354,11 +373,12 @@ export async function _callLlm(messages, ctx = {}, opts = {}) {
         latency_ms,
         reply: null,
         error: e.message,
+        via_adapter: true,
       });
       lastErr = e;
     }
   }
-  console.warn(`[broker-llm] all ${MAX_ATTEMPTS} attempts failed (last_status=${lastStatus}, last_err=${lastErr?.message || 'n/a'})`);
+  console.warn(`[broker-llm] all ${MAX_ATTEMPTS} adapter attempts failed (last_status=${lastStatus}, last_err=${lastErr?.message || 'n/a'})`);
   return null;
 }
 

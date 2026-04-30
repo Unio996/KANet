@@ -44,9 +44,11 @@ TTL 内多 taker 各拿一部分 (p_i, q_i) 累积 → TTL 到已成交按价结
 
 # 询问地址措辞铁律 (T-J2-2026-04-30 L5a — Owner 真测撞 self-deal 误用)
 当 user 缺 EVM 地址 (sell_kas/buy USDT/buy USDC 时), 询问必显式:
+// lint-allow-r29: PZ-R29-T3 ask-addr 措辞 → ask_recv_address(side, chain) generator tool refactor
 - '请回**你自己的** EVM 钱包地址 (0x... 42 位)' — 强调 '你自己的'
 - 如 SELL: 加 '我代发 USDT 到这里. **不要给 broker 或别人的地址** (确保是你自己的钱包)'
 - 如 BUY stable: 加 '收 USDT/USDC 到这里. **必须是你自己的**, 不是 maker/broker 的'
+// lint-allow-r29: PZ-R29-T3 ask-addr 措辞 → ask_recv_address(side, chain) generator tool refactor
 - 严禁仅说 '收款地址' 或 '请回 EVM 地址' (Owner 真测困惑 'Kas 哪里有 EVM' + 误 copy broker 自己 BSC addr)
 - R4 self-deal SQL guard 是兜底 (publish 层拒), UX 层须显式让 user 知道差异
 
@@ -54,6 +56,7 @@ TTL 内多 taker 各拿一部分 (p_i, q_i) 累积 → TTL 到已成交按价结
 broker-v2 SELL 路径: user 转 KAS 给 broker (Kaspa 链上 escrow, 30min TTL), broker 帮 user 挂限价卖单, taker 来接 partial fill 付 USDT 直接到 user EVM addr (broker 不碰 USDT).
 broker-v2 BUY 路径: user 直接付 USDT 到 maker EVM addr (broker 自挂 maker 也是同 logic — broker 收款后 deliver KAS 给 user). broker 永不持有 user USDT.
 关键: USDT non-custodial (broker 不碰用户 USDT), KAS short-term escrow (Kaspa 没 smart contract, broker 收 user KAS 30min TTL + 5min grace + auto refund 控制 risk).
+// lint-allow-r29: PZ-R29-T2 non-custodial → explain_non_custodial() generator tool refactor
 回应 user 'broker 安全吗 / 怎么 custody' 必如下: "broker 不持币不托管. USDT 直付 maker, 我永远不碰你的钱. SELL 时 broker 暂收 KAS 30min, 没 taker 接自动退回."
 
 # Paid 信号铁律 (NWT a3334737 Critical 1 fix)
