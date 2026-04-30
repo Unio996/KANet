@@ -1654,4 +1654,48 @@ export async function sendBroadcast(channel, text, opts = {}) {
 
 ---
 
+## 规则 R-NWT-FRAMEWORK · KANet 框架 = adapter+relay+console, 跳框架 = 严重错误
+
+**来源**: Owner ~03:30 钦定 (2026-04-30) + Phase Y RFC r49-r70 14/14 共识 lock (NWT+J2 22 broadcast on-chain audit trail).
+
+**症状**: broker 业务直 fetch 外部 endpoint, 跳 KANet 框架抽象:
+- broker-llm-agent.js _callLlm 直 fetch ai_provider_url/chat/completions (跳 adapter)
+- llm-dispatcher.js callLlm 直 fetch hardcoded QWEN_URL/OPUS_BRIDGE_URL (跳 adapter + 写死 IP)
+- broker-alpaca.js 直 fetch Alpaca brokerage API (跳 adapter abstraction)
+
+**真因**: KANet 框架 3 层抽象 (adapter LLM gateway / relay chain proxy / console data hub + UI) 当 spec doc 处理, 没 lint physical enforce. 业务代码 ad-hoc 直 fetch 当 "performance optimization" OR "新功能 quick patch" → 框架边界腐蚀, 跨 LLM/chain provider 部署立崩.
+
+**Owner 真测撞** (Phase Y 起因):
+- chat_template_kwargs Qwen-specific hardcode 在 broker code → 切 GPT/Claude 立崩 401/400
+- broker-alpaca 直 Alpaca API → 切其他 brokerage 全重写
+- KANet 卖点 LLM-agnostic vendor-lock-in 风险
+
+**Right**:
+- LLM call 必走 `POST {adapter_url}/reply` (HTTP via adapter discovery from adapter_nodes table)
+- chain TX 必 enqueue broker-action-queue → relay command (sendKas/transfer/broadcast)
+- DB 走 console sqlite (loopback `http://127.0.0.1:${PORT}/api/*` 内自调 OK)
+- escape hatch: `// lint-allow-fetch: <reason>` (legitimate test/cron probe/OAuth callback)
+
+**Phase Y RFC r49-r70 实施 commits**:
+- 71dc5acb9 broker-llm-agent stage 3 → adapter HTTP
+- 27541436b llm-dispatcher stage 4 (J2 r68)
+- 852297b61 stage 4.fix (J2 r70 — dig 2 functional bug: dispatcher body shape silently drop system field)
+- adapter ask() native messages array + tools/tool_choice + idempotency cache + trace_id (J2 r58 vote A + r60 dual-prepend guard)
+- broker side + adapter side dual defensive guard (callerMessages[0]?.role === 'system' → throw)
+- lint-kanet R-NWT-FRAMEWORK rule hard fail (非 loopback fetch 在 broker-* file → block commit)
+
+**phase Y+ 后置 task** (post phase Y close):
+- PZ-ALPACA-T1: broker-alpaca → agent-broker-adapter sub-project OR console service abstraction
+- PZ-LLM-T1: D8 adapter ask() options.maxTokens/temperature (dispatcher caller 期值不再 silently drop)
+- PZ-ADAPTER-T1: adapter_nodes is_default_dispatcher flag (多 Qwen adapter 时 dispatcher dedicated)
+- PZ-R29-T1..T4: SYSTEM_PROMPT directive → generator tools refactor (NWT r67 ux_p15 实证 R29 violation, Qwen freestyle 实证)
+
+**Why**: KANet 卖点 = LLM-agnostic + chain-agnostic + multi-tenant deploy. 任何业务代码绕过框架抽象 = vendor lock-in 立崩. lint hard-fail enforcement 是 architectural invariant 不是 stylistic preference. 跟 R20 同范式 — invariant 必 SQL/lint/test cover 所有 sink, 框架边界 invariant 必 lint enforce.
+
+---
+
+*R-NWT-FRAMEWORK (NWT+J2 2026-04-30 Phase Y RFC r49-r70 沉淀, Owner 钦定): KANet 框架 = adapter+relay+console, broker 业务跳框架 = 严重错误, lint hard fail enforce.*
+
+---
+
 *本档案在 v2 spec 第八章元教训基础上独立。spec 聚焦"这次怎么做"，本档案聚焦"下次别再犯"。*

@@ -27,6 +27,7 @@ export function createAlpacaAdapter(config) {
 
   async function _fetch(url, opts = {}) {
     try {
+      // lint-allow-fetch: PZ-ALPACA-T1 broker-alpaca external Alpaca brokerage API → 后置 phase Y+1 agent-broker-adapter abstraction (RFC r49 阶段 5 后置)
       const res = await fetch(url, {
         ...opts,
         headers: { ...headers, ...opts.headers },

@@ -310,6 +310,7 @@ export async function _callLlm(messages, ctx = {}, opts = {}) {
     }
     const t0 = Date.now();
     try {
+      // lint-allow-fetch: adapterUrl 是 http://127.0.0.1:<adapter_port>/reply (KANet 框架 adapter loopback, 阶段 3 swap)
       const res = await fetch(adapterUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

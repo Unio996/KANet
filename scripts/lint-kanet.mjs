@@ -178,6 +178,45 @@ function checkR19(filepath, content) {
 // 都把 user-facing directive 直 inject SYSTEM_PROMPT, Qwen 弱遵循 → Owner 真测撞 fake price 0.0525 等.
 // 修法: lint hard 检 broker LLM service file SYSTEM_PROMPT 不许含 directive 词 (请回/严禁 reply/必须如下/...)
 // — 仅允 tool 描述 + 系统语义. 物理消除 prompt-injection violation 可能性, 不靠人记忆.
+// ── R-NWT-2026-04-30 KANet 框架 enforce — broker-* 业务不许直 fetch 外部 endpoint ──
+// Owner ~03:30 钦定: KANet 框架 = adapter+relay+console; 任何跳框架 = 严重错误.
+// broker 业务必走 adapter (LLM call) / relay (chain TX) / console internal API (loopback OK).
+// Phase Y RFC r49-r70 14/14 共识 lock D9 hard fail (J2 r58 push back NWT r59 服):
+// broker-* file 直 fetch 外部 endpoint → hard fail commit.
+// escape hatch: `// lint-allow-fetch: <reason>` 行注释 (上一行) — legitimate test framework / cron probe / OAuth callback 等
+//
+// loopback 例外: fetch http://127.0.0.1:* OR localhost:* OR `\${PORT}` template 不算违规 (console 内自调).
+function checkR_NWT_FRAMEWORK(filepath, content) {
+  // 仅检 services/broker-*.js OR services/broker-v2/*.js
+  if (!/services[\\/]broker-[\w-]+\.js$|services[\\/]broker-v2[\\/][\w-]+\.js$/.test(filepath)) return;
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    // 跳过 // 单行注释 + /* */ 块注释 (粗略)
+    if (/^\s*\/\//.test(line)) continue;
+    // 检 await fetch( OR fetch( (callable form)
+    if (!/(?:^|\s)(?:await\s+)?fetch\s*\(/.test(line)) continue;
+    // escape hatch: 前 1-3 行内 // lint-allow-fetch: <reason>
+    let allowFound = false;
+    for (let j = i - 1; j >= 0 && j >= i - 3; j--) {
+      if (/\/\/\s*lint-allow-fetch:\s*\S/.test(lines[j])) { allowFound = true; break; }
+      // 仅容忍空行 + 注释; 遇业务行停搜
+      if (!/^\s*$/.test(lines[j]) && !/^\s*\/\//.test(lines[j])) break;
+    }
+    if (allowFound) continue;
+    // loopback 检 — 同行 OR 紧邻 (3 行内) URL pattern 含 127.0.0.1 / localhost / process.env.PORT / `${PORT}`
+    let isLoopback = false;
+    const window = lines.slice(Math.max(0, i - 1), Math.min(lines.length, i + 3)).join(' ');
+    if (/(?:127\.0\.0\.1|localhost):[\d`$]|\$\{(?:PORT|CONSOLE_URL|process\.env\.[A-Z_]+_URL)/.test(window)) isLoopback = true;
+    if (isLoopback) continue;
+    violate(
+      'R-NWT-FRAMEWORK',
+      `[ANTI-PATTERNS R-NWT] broker-* 业务直 fetch 外部 endpoint (跳 KANet 框架). Owner 钦定 跳框架=严重错误. LLM call 必走 adapter HTTP, chain TX 必走 relay, console internal 走 loopback. 修法 Phase Y RFC r49-r70 共识 (broker-llm-agent _callLlm → adapter 阶段 3 已 ship). 此 fetch 如属 legitimate exception (test framework / cron probe / OAuth) 加上一行 \`// lint-allow-fetch: <reason>\`.`,
+      filepath, i + 1
+    );
+  }
+}
+
 function checkR29(filepath, content) {
   // 仅检 broker-v2/llm.js + broker-llm-agent.js (LLM caller files)
   if (!/broker-v2[\\/]llm\.js$|broker-llm-agent\.js$/.test(filepath)) return;
@@ -397,6 +436,7 @@ for (const fp of targets) {
   checkR33(fp, content);
   checkR33b(fp, content);
   checkR37(fp, content);
+  checkR_NWT_FRAMEWORK(fp, content);
   checkBrokerStutter(fp, content);
   checkCommandEnum(fp, content);
 }
