@@ -104,7 +104,51 @@ function _parseCodexSSE(text) {
   return fullText;
 }
 
+// ── Idempotency cache (D5 hash + 5min TTL + max 1000 entries lazy GC) ──
+// T-NWT-2026-04-30 RFC r49-r52 D5: 防 retry 同 content 重复 LLM call.
+// hash key = JSON of {model, system, message, tools} via crypto SHA-256.
+// max 1000 entries防 memory leak; lazy GC sweep 过期 + FIFO 满时 oldest evict.
+const _idempotencyCache = new Map();
+const CACHE_MAX = 1000;
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+async function _cacheKey({ model, system, message, tools }) {
+  const { createHash } = await import('node:crypto');
+  const h = createHash('sha256');
+  h.update(JSON.stringify({ model, system: system || '', message, tools: tools || null }));
+  return h.digest('hex');
+}
+
+function _cacheGet(key) {
+  const e = _idempotencyCache.get(key);
+  if (!e) return null;
+  if (Date.now() > e.expiresAt) { _idempotencyCache.delete(key); return null; }
+  return e.result;
+}
+
+function _cacheSet(key, result) {
+  if (_idempotencyCache.size >= CACHE_MAX) {
+    // lazy GC: sweep expired first
+    for (const [k, v] of _idempotencyCache) {
+      if (Date.now() > v.expiresAt) _idempotencyCache.delete(k);
+      if (_idempotencyCache.size < CACHE_MAX) break;
+    }
+    // 满时 FIFO oldest evict
+    if (_idempotencyCache.size >= CACHE_MAX) {
+      _idempotencyCache.delete(_idempotencyCache.keys().next().value);
+    }
+  }
+  _idempotencyCache.set(key, { result, expiresAt: Date.now() + CACHE_TTL_MS });
+}
+
 // ── Main ask function ───────────────────────────────────────────────────
+//
+// T-NWT-2026-04-30 RFC r49-r52 阶段 1 (D1-D14 共识 lock):
+// - D1 backward-compat: ask() 返 string (mind brain 不变), askWithTools 别名返 {content, tool_calls?}
+// - D2 双向 raw passthrough: tools/tool_calls.arguments 不经 sanitizeForApi
+// - D5 idempotency cache: hash + 5min TTL + max 1000 lazy GC
+// - D6 ask({system}): caller 不感知 OpenAI message format, system + sysPromptAppend merge 单 system role
+// - D7 trace_id propagation: options.trace_id 透传 (broker jsonl audit 用, brain 不用)
 
 export async function ask(message, idempotencyKey, options) {
   // Resolve auth: dynamic (Console) or legacy (env vars)
@@ -122,11 +166,26 @@ export async function ask(message, idempotencyKey, options) {
 
   const isCodex = _isCodexEndpoint(baseUrl);
   const hasSystem = options?.system;
-  log("→", idempotencyKey.slice(0, 16), `[${model}]${isCodex ? ' [codex]' : ''}`, hasSystem ? `sys=${options.system.length}c` : '', JSON.stringify(message).slice(0, 50));
+  // D1 + D2: tools optional; if present, returnAsObject = true (caller receives {content, tool_calls?})
+  // tools/tool_choice 不经 sanitizeForApi (D2 raw passthrough); user message + system text 仍 sanitize.
+  const tools = options?.tools;
+  const tool_choice = options?.tool_choice;
+  const returnAsObject = Array.isArray(tools) && tools.length > 0;
+  const traceId = options?.trace_id;  // D7 propagation, 可空
+  log("→", idempotencyKey.slice(0, 16), `[${model}]${isCodex ? ' [codex]' : ''}${returnAsObject ? ' [tools]' : ''}${traceId ? ` [trace=${traceId.slice(0, 8)}]` : ''}`, hasSystem ? `sys=${options.system.length}c` : '', JSON.stringify(message).slice(0, 50));
+
+  // D5 idempotency cache check — pre-fetch
+  const cacheKey = await _cacheKey({ model, system: options?.system, message, tools });
+  const cached = _cacheGet(cacheKey);
+  if (cached) {
+    log("← [cache hit]", typeof cached === 'string' ? cached.slice(0, 80) : JSON.stringify(cached).slice(0, 80));
+    return cached;
+  }
 
   // Build request based on API format
   let url, body;
   if (isCodex) {
+    if (returnAsObject) throw new Error('Codex endpoint does not support tools — use OpenAI-compatible endpoint');
     url = `${baseUrl}/codex/responses`;
     body = _buildCodexBody(model, message, options?.system);
   } else {
@@ -139,6 +198,11 @@ export async function ask(message, idempotencyKey, options) {
     const payload = { model, messages };
     if (/qwen/i.test(model || "")) {
       payload.chat_template_kwargs = { enable_thinking: false };
+    }
+    // D2 双向 raw passthrough: tools/tool_choice 不 sanitize (JSON schema fragment 完整传)
+    if (returnAsObject) {
+      payload.tools = tools;
+      if (tool_choice) payload.tool_choice = tool_choice;
     }
     body = asciiSafeStringify(payload);
   }
@@ -185,11 +249,35 @@ export async function ask(message, idempotencyKey, options) {
     const data = await res.json();
     const msg = data.choices?.[0]?.message;
     // reasoning 模型（glm4.7, qwen-thinking）有时 content 为空, reasoning_content 里才是真输出
-    reply = msg?.content || msg?.reasoning_content || "";
+    const content = msg?.content || msg?.reasoning_content || "";
+    if (returnAsObject) {
+      // D1 + D2: tools mode 返 {content, tool_calls?}.
+      // tool_calls.arguments 是 JSON 字符串 — 不 sanitize (D2 双向 raw passthrough).
+      const tool_calls = Array.isArray(msg?.tool_calls) ? msg.tool_calls : null;
+      if (!content && !tool_calls) throw new Error("AI returned empty response");
+      reply = { content, ...(tool_calls ? { tool_calls } : {}) };
+    } else {
+      reply = content;
+    }
   }
 
-  if (!reply) throw new Error("AI returned empty response");
+  // Codex / non-tools path 仍要求 reply 非空 string
+  if (!returnAsObject && !reply) throw new Error("AI returned empty response");
 
-  log("←", reply.slice(0, 80));
+  // D5 idempotency cache set
+  _cacheSet(cacheKey, reply);
+
+  log("←", returnAsObject ? `[content=${(reply.content || '').length}c, tool_calls=${reply.tool_calls?.length || 0}]` : reply.slice(0, 80));
   return reply;
+}
+
+// D1 askWithTools 别名 — broker 业务调用入口, 类型契约: 必返 {content, tool_calls?}
+// (即使 caller 没传 tools, 仍包成 object — 保 type-safe contract for broker callers).
+// implementation: 共享 ask() 主体, askWithTools 强制 returnAsObject=true.
+export async function askWithTools(message, idempotencyKey, options = {}) {
+  const result = await ask(message, idempotencyKey, options);
+  // 兼容: 如 caller 没传 tools 但走 askWithTools (e.g. dialog without tool calling),
+  // ask() 返 string → 包成 {content: string} 保契约.
+  if (typeof result === 'string') return { content: result };
+  return result;
 }
