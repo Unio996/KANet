@@ -101,11 +101,13 @@ function isBlacklisted(peerAddr) {
   return r?.is_blocked === 1;
 }
 
+// T-NWT-2026-04-30 R1 (RCA Owner 真测 fatal bug 1): synthetic-id workflow markers 切 broker_workflow_markers
+// 表 (v86 migrate). chain_events trigger 仅守 chain truth (real 64-hex tx_id), 不再撞 markProcessed.
 function markProcessed(srcEventId, outcome) {
   sqlite.prepare(`
-    INSERT INTO chain_events (txid, from_address, to_address, event_type, payload, observed_by, observed_at)
-    VALUES (?, NULL, NULL, 'broker_intake_processed', ?, 'broker-intake-watcher', datetime('now'))
-  `).run(`broker_intake_${srcEventId}`, JSON.stringify({ src_event_id: srcEventId, outcome }));
+    INSERT INTO broker_workflow_markers (id, event_type, src_event_id, payload, created_at)
+    VALUES (?, 'broker_intake_processed', ?, ?, datetime('now'))
+  `).run(`broker_intake_${srcEventId}`, srcEventId, JSON.stringify({ src_event_id: srcEventId, outcome }));
 }
 
 async function handleIntake(event) {
@@ -152,6 +154,26 @@ async function _publishBrokerSellOffer(peer, amount, eventId) {
       message: `收到 ${amount} KAS, 但还没你的 USDT 收款链 + 地址. 回复 "用 bnb 0x..." 之类设置. 12h 无回复自动退.`
     });
     return markProcessed(eventId, 'await_pay_addr');
+  }
+  // T-J2-2026-04-30 R4 self-deal SQL guard (Owner 真测撞: pay_address=0xaD12544E=broker BSC own).
+  // 用户误 copy broker 自己 BSC addr 当 SELL 收 USDT 地址 → publish 上去 maker 付 USDT 流到 broker
+  // (不是 user) → 真钱风险. 检 pay_address 不在 broker_relay 自己的 agent_wallets 任何 chain 中.
+  // 命中 self-deal → ABORT publish + Q2 保险 sendKaspa 退原 KAS + DM 告知用户改地址.
+  try {
+    const selfDealCheck = sqlite.prepare(
+      `SELECT 1 FROM agent_wallets WHERE relay_node_id = ? AND lower(address) = lower(?) LIMIT 1`
+    ).get(BROKER_RELAY_ID, userPay.address);
+    if (selfDealCheck) {
+      console.warn(`[broker-intake R4] self-deal blocked: peer=${peer.slice(-12)} pay_address=${userPay.address.slice(0,12)}... ∈ broker wallets`);
+      await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.TRANSFER, target: peer, amount_kas: amount,
+        note: `self-deal pay_address rejected: ${userPay.address.slice(0,10)}...` });
+      await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
+        message: `挂单失败: 你给的收款地址 ${userPay.address.slice(0,10)}...${userPay.address.slice(-6)} 是 broker 自己的钱包(不是你的). USDT 付到那里就是付给 broker 了. ${amount} KAS 已退回你 Kasia. 重新下单时请用 **你自己的** EVM 钱包地址收 USDT.`
+      });
+      return markProcessed(eventId, 'self_deal_refunded');
+    }
+  } catch (err) {
+    console.warn(`[broker-intake R4] self-deal check err: ${err.message}, skip guard`);
   }
   const feeKas = parseFloat(_getFeeKasPerOrder()) || 0.1;
   const netKas = amount - feeKas;
@@ -317,15 +339,20 @@ export async function _scanExpiredBrokerOffers() {
 }
 
 // T-J2-10: 12h stale unsolicited_wait scanner — user 12h 无 ACK 自动退款
+// T-NWT-2026-04-30 R1: 切 broker_workflow_markers 表. src_event_id 是 kaspa_tx_log.tx_id (post T-NWT-07
+// indexer 改, src 表 chain_events 'tx' inbound 永远 0, 真源在 kaspa_tx_log).
+//
+// Phase Y P1 backlog: kaspa_tx_log.from_address 100% NULL (indexer T-NWT-07 残), 此 12h refund path 当前
+// 实质不能退 (没 from_address sendKaspa 不知 target). post T-NWT-07 indexer 修 from_address 后真生效.
 export async function _scanStaleUnsolicited() {
   const rows = sqlite.prepare(`
-    SELECT p.id, p.payload
-    FROM chain_events p
+    SELECT p.id, p.src_event_id, p.payload
+    FROM broker_workflow_markers p
     WHERE p.event_type = 'broker_intake_processed'
       AND p.payload LIKE '%"outcome":"unsolicited_wait"%'
-      AND julianday(p.observed_at) < julianday('now', '-12 hours')
+      AND julianday(p.created_at) < julianday('now', '-12 hours')
       AND NOT EXISTS (
-        SELECT 1 FROM chain_events r
+        SELECT 1 FROM broker_workflow_markers r
         WHERE r.event_type = 'broker_unsolicited_refunded'
         AND r.payload LIKE '%"processed_event_id":"' || p.id || '"%'
       )
@@ -334,17 +361,16 @@ export async function _scanStaleUnsolicited() {
   let handled = 0;
   for (const p of rows) {
     try {
-      const ppl = JSON.parse(p.payload || '{}');
-      const src = sqlite.prepare(`SELECT from_address, payload FROM chain_events WHERE id = ?`).get(ppl.src_event_id);
-      if (!src?.from_address) continue;
-      const amt = parseFloat(JSON.parse(src.payload || '{}').amount || 0);
+      const src = sqlite.prepare(`SELECT from_address, amount FROM kaspa_tx_log WHERE tx_id = ?`).get(p.src_event_id);
+      if (!src?.from_address) continue;  // indexer 漏抓 sender, 不能盲发
+      const amt = parseFloat(src.amount || 0);
       if (amt <= 0) continue;
       await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.TRANSFER, target: src.from_address, amount_kas: amt,
         note: `12h unsolicited refund ${p.id.slice(0, 12)}` });
       sqlite.prepare(`
-        INSERT INTO chain_events (txid, from_address, to_address, event_type, payload, observed_by, observed_at)
-        VALUES (?, NULL, NULL, 'broker_unsolicited_refunded', ?, 'broker-intake-watcher', datetime('now'))
-      `).run(`unsolicited_refund_${p.id.slice(0, 16)}`, JSON.stringify({ processed_event_id: p.id, user_kasia_address: src.from_address, amount: amt }));
+        INSERT INTO broker_workflow_markers (id, event_type, src_event_id, payload, created_at)
+        VALUES (?, 'broker_unsolicited_refunded', ?, ?, datetime('now'))
+      `).run(`unsolicited_refund_${p.id.slice(0, 16)}`, p.src_event_id, JSON.stringify({ processed_event_id: p.id, user_kasia_address: src.from_address, amount: amt }));
       await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: src.from_address,
         message: `12h 无回复, 已退 ${amt} KAS 给你. broker 吃 gas.` });
       handled++;
@@ -354,19 +380,20 @@ export async function _scanStaleUnsolicited() {
 }
 
 // T-NWT-06: 同 5min sub-tick 调 utxo-splitter 给 broker 钱包补零钱, 防 Round 1 一分钟 7 撞 UTXO 风暴.
-// 内置 chain_event 'broker_utxo_split' 防 4min 内重跑 (REFUND_TICK_MS 5min 偏小, 1min 缓冲).
+// 内置 broker_workflow_markers 'broker_utxo_split' 防 4min 内重跑 (REFUND_TICK_MS 5min 偏小, 1min 缓冲).
+// T-NWT-2026-04-30 R1: 切 broker_workflow_markers 表 (旧 chain_events 路径撞 v83 trigger ABORT).
 export async function _ensureBrokerUtxoSplit() {
   const recent = sqlite.prepare(
-    `SELECT 1 FROM chain_events WHERE event_type='broker_utxo_split'
-     AND datetime(observed_at) > datetime('now','-4 minutes') LIMIT 1`
+    `SELECT 1 FROM broker_workflow_markers WHERE event_type='broker_utxo_split'
+     AND datetime(created_at) > datetime('now','-4 minutes') LIMIT 1`
   ).get();
   if (recent) return { skipped: 'recent' };
   const { splitUtxos } = await import('./utxo-splitter.js');
   let result;
   try { result = await splitUtxos(BROKER_RELAY_ID); } catch (e) { return { ok: false, error: e.message }; }
   sqlite.prepare(
-    `INSERT INTO chain_events (txid, from_address, to_address, event_type, payload, observed_by, observed_at)
-     VALUES (?, NULL, NULL, 'broker_utxo_split', ?, 'broker-intake-watcher', datetime('now'))`
+    `INSERT INTO broker_workflow_markers (id, event_type, src_event_id, payload, created_at)
+     VALUES (?, 'broker_utxo_split', NULL, ?, datetime('now'))`
   ).run(`broker_utxo_split_${Date.now()}`, JSON.stringify({ result: result || null }));
   if (result?.split) console.log(`[broker-utxo-split] ${result.utxosBefore}→${result.utxosAfter} (fee ${result.fee||'?'} KAS)`);
   return result || { ok: false };
@@ -378,19 +405,32 @@ export async function intakeTick() {
   // T-NWT-07: 源表 chain_events 'tx' inbound 永远 0 (那条 path 是 message-bound, 不是 KAS transfer).
   // 真正的 inbound tx ingest 在 kaspa_tx_log (rpc-listener.mjs 写). 改源表救 broker-intake.
   // src_event_id 在 marker payload 里现在是 string (tx_id), LIKE 模式带引号.
+  //
+  // T-J2-2026-04-30 R2+R3 fix v2 (Owner 真测 dig + 数据验证修订):
+  // 实证 last 24h kaspa_tx_log to=Trader-B 3093 rows: 3092 是 >500 KAS (broker UTXO splitter
+  // 自循环 chain, 994.X KAS chunks 序列 .2606→.261→.262 fee 递减), 仅 1 row <100 KAS = 真 user TX (Owner 58).
+  // 旧 R2 'from_address != to_address' 失效 — kaspa_tx_log.from_address 全 NULL (indexer verboseData
+  // 未抓 sender, T-NWT-07 已知 indexer 残). 改用 amount upper bound 启发式过滤:
+  //   real user retail SELL/transfer 一般 < 200 KAS. broker 内部 splitter chunks 一般 > 500 KAS.
+  // 长期修法: rpc-listener.mjs indexer 修 from_address 后回到 self-TX filter (T-NWT-07 sprint backlog).
+  //   R2 v2: AND k.amount < 500  -- 排除 broker UTXO splitter 994 KAS chunks 等
+  //   R3: ORDER BY k.observed_at DESC + LIMIT 提至 50 — 优先处理新 user TX
+  const MAX_USER_TX_KAS = 500;
   const rows = sqlite.prepare(`
     SELECT k.tx_id AS id, k.tx_id AS txid, k.from_address,
            json_object('amount', CAST(k.amount AS TEXT)) AS payload
     FROM kaspa_tx_log k
     WHERE k.to_address = ?
     AND k.observed_at > datetime('now','-24 hours')
+    AND k.amount < ?
     AND NOT EXISTS (
-      SELECT 1 FROM chain_events p
+      SELECT 1 FROM broker_workflow_markers p
       WHERE p.event_type = 'broker_intake_processed'
-      AND p.payload LIKE '%"src_event_id":"' || k.tx_id || '"%'
+      AND p.src_event_id = k.tx_id
     )
-    LIMIT 20
-  `).all(trader.address);
+    ORDER BY k.observed_at DESC
+    LIMIT 50
+  `).all(trader.address, MAX_USER_TX_KAS);
   let handled = 0;
   for (const e of rows) {
     try { await handleIntake(e); handled++; }

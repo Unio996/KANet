@@ -2740,5 +2740,36 @@ export function runMigrations() {
     }
   }
 
+  // v86 (NWT+J2 2026-04-30 RCA Owner 真测 — chain_events 表语义分裂修):
+  // 真根因: chain_events 既存 chain truth (real 64-hex tx_id) 又存 workflow markers (synthetic prefix
+  // 'broker_intake_<id>' 等). v83 trigger chain_events_txid_format_check 强化 chain truth purity 杀
+  // workflow markers 18+ 小时静默断 (broker_intake_processed EVER count=0). Owner 真测 25min 暴露:
+  // 真 user 58 KAS 链入 → markProcessed → trigger ABORT → state 不推进 → 无限重试 + 无退款.
+  //
+  // 修法 (round 4 NWT r34 + J2 r35 共识 lock): broker_workflow_markers 新表分离, 仅放工作流标记
+  // (markProcessed / unsolicited_refund / utxo_split). chain_events 仅放 chain truth (broker_kas_refunded
+  // 真退款 TX 等). 架构清晰 + trigger 不撞.
+  //
+  // dual-source 不需: broker_intake_processed EVER count=0, broker_unsolicited_refunded EVER count
+  // 极少 (cron 不模拟此路径). clean cutover.
+  {
+    const has_bwm = sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='broker_workflow_markers'").get();
+    if (!has_bwm) {
+      sqlite.exec(`
+        CREATE TABLE broker_workflow_markers (
+          id TEXT PRIMARY KEY,
+          event_type TEXT NOT NULL,
+          src_event_id TEXT,
+          payload TEXT,
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_bwm_event_type ON broker_workflow_markers(event_type);
+        CREATE INDEX idx_bwm_src ON broker_workflow_markers(src_event_id);
+        CREATE INDEX idx_bwm_created ON broker_workflow_markers(created_at);
+      `);
+      console.log('[migrate] v86: broker_workflow_markers table created (chain_events 表语义分裂修, RCA Owner 真测 fatal bug 1).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
