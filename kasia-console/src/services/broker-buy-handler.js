@@ -777,14 +777,17 @@ export async function _aggregateWithFallback(qty, payChain, give_asset = 'KAS') 
 }
 
 // T-J2-09 broker_accept_record — completion-watcher 用此查 (offer_id → user) 关联
+// T-NWT-2026-04-30 R1.1: 切 broker_workflow_markers (synthetic-id 撞 v83 trigger 18+h 全瘫,
+// J2 RCA L5b 'BUY 完成 D2 假 completed' 真根因 = _recordAccept silent fail → completion watcher
+// 找不到 _findUserForOffer → DM '🎉 已到' 永不发, exchange_offer 链接断). R1 same migration pattern.
 function _recordAccept({ offerId, userPeer, qty, quotedUsdt, payChain, acceptTx }) {
   try {
     sqlite.prepare(`
-      INSERT INTO chain_events (txid, from_address, to_address, event_type, payload, observed_by, observed_at)
-      VALUES (?, ?, ?, 'broker_accept_record', ?, 'broker-buy-handler', datetime('now'))
+      INSERT INTO broker_workflow_markers (id, event_type, src_event_id, payload, created_at)
+      VALUES (?, 'broker_accept_record', ?, ?, datetime('now'))
     `).run(
       `broker_accept_${acceptTx || offerId}`,
-      BROKER_RELAY_ID, userPeer,
+      offerId,
       JSON.stringify({ offer_id: offerId, user_kasia_address: userPeer, qty, quoted_usdt: quotedUsdt, pay_chain: payChain, accept_tx: acceptTx })
     );
   } catch (e) { console.warn(`[broker-buy] record err: ${e.message}`); }

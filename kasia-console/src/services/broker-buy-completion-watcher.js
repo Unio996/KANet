@@ -27,12 +27,15 @@ async function _send(relayId, cmd) {
   return sendCommandAsync(relayId, cmd);
 }
 
+// T-NWT-2026-04-30 R1.1 (RCA J2 r39 same-pattern site, J2 r40 audit confirm):
+// broker_accept_record / broker_buy_dm_sent / broker_sell_dm_sent 全 synthetic-id 撞 v83 trigger.
+// 切 broker_workflow_markers 表 (R1 same pattern). src_event_id = offerId for idx_bwm_src 加速 lookup.
 function _findUserForOffer(offerId) {
   const row = sqlite.prepare(`
-    SELECT payload FROM chain_events
+    SELECT payload FROM broker_workflow_markers
     WHERE event_type = 'broker_accept_record'
-    AND payload LIKE '%"offer_id":"' || ? || '"%'
-    ORDER BY observed_at DESC LIMIT 1
+    AND src_event_id = ?
+    ORDER BY created_at DESC LIMIT 1
   `).get(offerId);
   if (!row) return null;
   try { return JSON.parse(row.payload); } catch { return null; }
@@ -40,9 +43,9 @@ function _findUserForOffer(offerId) {
 
 function _alreadyDmed(offerId) {
   const row = sqlite.prepare(`
-    SELECT 1 FROM chain_events
+    SELECT 1 FROM broker_workflow_markers
     WHERE event_type = 'broker_buy_dm_sent'
-    AND payload LIKE '%"offer_id":"' || ? || '"%'
+    AND src_event_id = ?
     LIMIT 1
   `).get(offerId);
   return !!row;
@@ -50,11 +53,11 @@ function _alreadyDmed(offerId) {
 
 function _markDmed(offerId, userPeer, deliveryTx) {
   sqlite.prepare(`
-    INSERT INTO chain_events (txid, from_address, to_address, event_type, payload, observed_by, observed_at)
-    VALUES (?, ?, ?, 'broker_buy_dm_sent', ?, 'broker-buy-completion-watcher', datetime('now'))
+    INSERT INTO broker_workflow_markers (id, event_type, src_event_id, payload, created_at)
+    VALUES (?, 'broker_buy_dm_sent', ?, ?, datetime('now'))
   `).run(
     `broker_buy_dm_${offerId.slice(0, 16)}`,
-    BROKER_RELAY_ID, userPeer,
+    offerId,
     JSON.stringify({ offer_id: offerId, user_kasia_address: userPeer, delivery_tx: deliveryTx })
   );
 }
@@ -72,11 +75,12 @@ async function _processCompleted(offer, brokerAddr) {
 }
 
 // T-J2-13 SELL 闭环: broker 帮 user publish 后, completed → DM user.
+// T-NWT-2026-04-30 R1.1: broker_sell_dm_sent 切 broker_workflow_markers (synthetic-id, R1 same pattern).
 function _alreadySellDmed(offerId) {
   const row = sqlite.prepare(`
-    SELECT 1 FROM chain_events
+    SELECT 1 FROM broker_workflow_markers
     WHERE event_type = 'broker_sell_dm_sent'
-    AND payload LIKE '%"offer_id":"' || ? || '"%'
+    AND src_event_id = ?
     LIMIT 1
   `).get(offerId);
   return !!row;
@@ -84,11 +88,11 @@ function _alreadySellDmed(offerId) {
 
 function _markSellDmed(offerId, userPeer, paymentTx) {
   sqlite.prepare(`
-    INSERT INTO chain_events (txid, from_address, to_address, event_type, payload, observed_by, observed_at)
-    VALUES (?, ?, ?, 'broker_sell_dm_sent', ?, 'broker-buy-completion-watcher', datetime('now'))
+    INSERT INTO broker_workflow_markers (id, event_type, src_event_id, payload, created_at)
+    VALUES (?, 'broker_sell_dm_sent', ?, ?, datetime('now'))
   `).run(
     `broker_sell_dm_${offerId.slice(0, 16)}`,
-    BROKER_RELAY_ID, userPeer,
+    offerId,
     JSON.stringify({ offer_id: offerId, user_kasia_address: userPeer, payment_tx: paymentTx })
   );
 }
