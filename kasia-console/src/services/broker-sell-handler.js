@@ -64,27 +64,30 @@ function _insertSellOrder({ peerAddr, qty, userBnbAddr }) {
 // 修: 接 existing_order_id 参数, v2 caller 传 draft.id, finalizeSell UPDATE 现 row 'aligning'→'awaiting_payment'
 // 不 INSERT 新 row. v1 caller 不传 (legacy 行为), 仍 INSERT.
 function _updateSellOrder({ orderId, recv_chain, recv_address }) {
-  // SA-4 (J2 r84) 真 transition migrate: SELL aligning → awaiting_payment 走状态机 owner.
-  // 旧行为: 直 SQL UPDATE multi-column (state + pay_chain + pay_address). 新行为拆 2 步:
-  //   1. transition() 推 state (CAS: aligning → awaiting_payment, 无 chain TX 进 broker_workflow_markers audit)
-  //   2. UPDATE 写 pay_chain/pay_address (column 写, 不动 state — escape hatch grandfather)
+  // SA-4 真 transition migrate + SA-4.fix (NWT r85 reviewer hat) reorder 防 race window:
+  //   step 1: UPDATE pay_chain/pay_address WHERE state='aligning' (aligning CAS 锁 column 写, 防中间 advance)
+  //   step 2: transition() aligning→awaiting_payment (CAS 推 state, 自身 race protection)
+  // 旧 SA-4 顺序 (transition first → column 写 last) race risk: transition 后 另一 caller advance awaiting→paid →
+  //   column 写 WHERE state='awaiting_payment' no-op → pay_chain 永不写.
+  // SA-4.fix 顺序: column 在 aligning 写 (锁 state) → transition 推. atomic 等价旧 1-step UPDATE.
+
+  // lint-allow-state-update: PZ-STATE-T-V2-FIELDSET column 写 (pay_chain/pay_address) 在 aligning state. state 不动, transition() step 2 推. lint regex 因 WHERE state= clause 误抓.
+  const colUpd = sqlite.prepare(`
+    UPDATE retail_dex_orders
+    SET pay_chain = COALESCE(pay_chain, ?),
+        pay_address = COALESCE(pay_address, ?),
+        updated_at = ?
+    WHERE id = ? AND state = 'aligning'
+  `).run(String(recv_chain || 'bnb').toLowerCase(), recv_address, new Date().toISOString(), orderId);
+  if (colUpd.changes === 0) return false;  // row 不存 OR state 已不 aligning (race lost)
+
   const tResult = transition({
     orderId,
     expectedFromState: 'aligning',
     toState: 'awaiting_payment',
     opts: { reason: 'sell_finalize', triggeredBy: 'broker-sell-handler._updateSellOrder' },
   });
-  if (!tResult.ok) return false;
-  // pay_chain / pay_address 写 (column 写, 非 state transition)
-  // lint-allow-state-update: PZ-STATE-T-V2-FIELDSET column 写 (pay_chain/pay_address), state 已经 transition() 推, lint regex 误抓因 WHERE state= clause
-  sqlite.prepare(`
-    UPDATE retail_dex_orders
-    SET pay_chain = COALESCE(pay_chain, ?),
-        pay_address = COALESCE(pay_address, ?),
-        updated_at = ?
-    WHERE id = ? AND state = 'awaiting_payment'
-  `).run(String(recv_chain || 'bnb').toLowerCase(), recv_address, new Date().toISOString(), orderId);
-  return true;
+  return tResult.ok;
 }
 
 // R4 改造 (T-NWT-09): 走 broker-action-queue 单线 pump 防 UTXO 双花.
