@@ -16,8 +16,9 @@ import { sqlite } from '../db/client.js';
  */
 function _getAdapterUrl(backend) {
   const pattern = backend === 'opus' ? '%claude-code%' : '%Qwen%';
+  // J2 r70 阶段 4.fix dig 1 (NWT push back): ORDER BY id 确定 first match (4 个 Qwen adapter 时不随机排序)
   const a = sqlite.prepare(
-    `SELECT http_port FROM adapter_nodes WHERE ai_model LIKE ? LIMIT 1`
+    `SELECT http_port FROM adapter_nodes WHERE ai_model LIKE ? ORDER BY id LIMIT 1`
   ).get(pattern);
   if (!a?.http_port) {
     throw new Error(`[llm-dispatcher] no adapter found for backend=${backend} (pattern=${pattern})`);
@@ -33,10 +34,13 @@ export async function callLlm({ backend = 'qwen', system, user, maxTokens = 2500
   try {
     const url = _getAdapterUrl(backend);
     const traceId = `dispatcher:${backend}:${Date.now()}`;
+    // J2 r70 阶段 4.fix dig 2 (NWT critical bug): body 用 mindSystem/mindUser layered Mind path.
+    // adapter regular branch 走 buildPrompt 用 adapter 自 SYSTEM_PROMPT, body.system silently drop.
+    // mindSystem+mindUser branch honor system: ask(mindUser, ..., { system: mindSystem }).
     const body = {
       peer: 'dispatcher-internal',
-      message: user,
-      system,                       // J2 r66 push back: body.system field (adapter dual-name accept)
+      mindSystem: system,
+      mindUser: user,
       trace_id: traceId,
       txId: traceId,
       // note: max_tokens / temperature 当前 adapter ask() 不接收, phase Z PZ-LLM-T1 follow-up 加.
