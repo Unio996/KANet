@@ -42,7 +42,10 @@ async function handleReply(req, res) {
     return;
   }
 
-  const { peer, message, txId, network = "mainnet", mindTask, mindSystem, mindUser } = parsed;
+  // T-NWT-2026-04-30 RFC 阶段 2 (D3 + D7): /reply optional tools + trace_id propagation.
+  // body 加: tools? / tool_choice? / trace_id?
+  // returns: { reply: string } 不变 (mind brain backward-compat) OR { reply, tool_calls? } 当 tools 传时.
+  const { peer, message, txId, network = "mainnet", mindTask, mindSystem, mindUser, tools, tool_choice, trace_id } = parsed;
 
   if (!peer || (!message && !mindUser)) {
     res.writeHead(400);
@@ -51,6 +54,7 @@ async function handleReply(req, res) {
   }
   const correlationId = randomUUID();
   const idempotencyKey = txId || correlationId;
+  const hasTools = Array.isArray(tools) && tools.length > 0;
 
   let rawReply;
   let ctx = null;
@@ -58,12 +62,12 @@ async function handleReply(req, res) {
   if (mindSystem && mindUser) {
     // Layered Mind task — system + user as separate roles for provider caching
     log("IN", peer?.slice(-8), `[MIND:layered] sys=${mindSystem.length}c usr=${mindUser.length}c`);
-    rawReply = await ask(mindUser, idempotencyKey, { system: mindSystem });
+    rawReply = await ask(mindUser, idempotencyKey, { system: mindSystem, ...(hasTools ? { tools, tool_choice } : {}), ...(trace_id ? { trace_id } : {}) });
   } else if (mindTask) {
     // Legacy Mind task — single prompt string (backward compat)
     const prompt = typeof message === 'string' ? message : JSON.stringify(message);
     log("IN", peer?.slice(-8), "[MIND]", JSON.stringify(message).slice(0, 60));
-    rawReply = await ask(prompt, idempotencyKey);
+    rawReply = await ask(prompt, idempotencyKey, { ...(hasTools ? { tools, tool_choice } : {}), ...(trace_id ? { trace_id } : {}) });
   } else {
     // Regular message — build prompt with adapter's own context
     log("IN", peer?.slice(-8), JSON.stringify(message).slice(0, 60));
@@ -72,11 +76,17 @@ async function handleReply(req, res) {
       log("CTX", peer.slice(-8), `${ctx.history.length} turns`);
     }
     const prompt = buildPrompt(peer, message, ctx, SYSTEM_PROMPT);
-    rawReply = await ask(prompt, idempotencyKey);
+    rawReply = await ask(prompt, idempotencyKey, { ...(hasTools ? { tools, tool_choice } : {}), ...(trace_id ? { trace_id } : {}) });
   }
 
+  // D1 polymorphic: rawReply 是 string (无 tools) OR {content, tool_calls?} (有 tools)
+  const isObject = typeof rawReply === 'object' && rawReply !== null;
+  const replyText = isObject ? (rawReply.content || '') : rawReply;
+  const replyToolCalls = isObject ? rawReply.tool_calls : null;
+
   // Extract and execute skill directives (best-effort, never blocks reply)
-  const { cleanReply, directives } = extractSkills(rawReply);
+  // skills 仅 apply 给 text reply path (mind brain), tool_calls 路径 broker 业务自处理.
+  const { cleanReply, directives } = extractSkills(replyText);
   if (directives.length) {
     log("SKILLS", peer.slice(-8), directives.map(d => d.action).join(","));
     // Fire-and-forget: skill execution must not delay the reply
@@ -86,7 +96,11 @@ async function handleReply(req, res) {
   }
 
   res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ reply: cleanReply }));
+  // D1 response shape: tools 传时返 {reply, tool_calls?}, 不传时返 {reply} (brain backward-compat).
+  const responseBody = replyToolCalls
+    ? { reply: cleanReply, tool_calls: replyToolCalls }
+    : { reply: cleanReply };
+  res.end(JSON.stringify(responseBody));
 }
 
 const server = http.createServer(async (req, res) => {

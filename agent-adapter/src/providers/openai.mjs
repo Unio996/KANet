@@ -112,10 +112,12 @@ const _idempotencyCache = new Map();
 const CACHE_MAX = 1000;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
-async function _cacheKey({ model, system, message, tools }) {
+async function _cacheKey({ model, system, message, tools, tool_choice }) {
   const { createHash } = await import('node:crypto');
   const h = createHash('sha256');
-  h.update(JSON.stringify({ model, system: system || '', message, tools: tools || null }));
+  // J2 r54 fix: 加 tool_choice — 同 model+system+message+tools, 不同 tool_choice ('auto'/'required'/forced)
+  // 行为不同, 不可 cache hit 错位.
+  h.update(JSON.stringify({ model, system: system || '', message, tools: tools || null, tool_choice: tool_choice || null }));
   return h.digest('hex');
 }
 
@@ -175,7 +177,7 @@ export async function ask(message, idempotencyKey, options) {
   log("→", idempotencyKey.slice(0, 16), `[${model}]${isCodex ? ' [codex]' : ''}${returnAsObject ? ' [tools]' : ''}${traceId ? ` [trace=${traceId.slice(0, 8)}]` : ''}`, hasSystem ? `sys=${options.system.length}c` : '', JSON.stringify(message).slice(0, 50));
 
   // D5 idempotency cache check — pre-fetch
-  const cacheKey = await _cacheKey({ model, system: options?.system, message, tools });
+  const cacheKey = await _cacheKey({ model, system: options?.system, message, tools, tool_choice });
   const cached = _cacheGet(cacheKey);
   if (cached) {
     log("← [cache hit]", typeof cached === 'string' ? cached.slice(0, 80) : JSON.stringify(cached).slice(0, 80));
