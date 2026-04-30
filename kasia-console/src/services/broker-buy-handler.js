@@ -617,6 +617,7 @@ export async function finalizeBuy({ user_kasia, qty, pay_chain, give_asset = 'KA
   // verifyPaymentForPeer (broker-v2 a69653c5b ship) 时如 _pendingAccepts 空 → reconstruct from picks_json.
   // 仅 update broker-v2 'awaiting_payment' active row (broker-v2/router seedDraft 创建).
   try {
+    // lint-allow-state-update: PZ-STATE-T-BUY BUY 路径 phase 2 multi-asset 后置 (v0.1 SELL_KAS scope), picks_json 是 BUY 拼单结果非 state transition; lint 因 WHERE state= clause 误抓
     const upd = sqlite.prepare(`
       UPDATE retail_dex_orders SET picks_json = ?, updated_at = datetime('now')
       WHERE user_kasia_address = ? AND side = 'buy_kas' AND state = 'awaiting_payment'

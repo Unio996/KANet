@@ -850,6 +850,7 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
           ORDER BY created_at DESC LIMIT 1
         `).get(offer_id, userAddr);
         if (target?.id) {
+          // lint-allow-state-update: PZ-STATE-T-EXCHANGE exchange-machine 独立状态机 (跟 broker SELL_KAS retail_dex_orders 共表但不同 service). 'executing' state 不在 v0.1 7 state ALLOWED_TRANSITIONS, phase Z exchange 状态机重构后 transition() 共用.
           const upd = sqlite.prepare(`
             UPDATE retail_dex_orders SET state = 'executing', updated_at = datetime('now')
             WHERE id = ? AND state IN ('paid', 'awaiting_payment')
@@ -1006,6 +1007,7 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
                   ORDER BY created_at DESC LIMIT 1
                 `).get(offer_id, userAddr2);
                 if (target?.id) {
+                  // lint-allow-state-update: PZ-STATE-T-EXCHANGE exchange-machine 独立状态机 delivery completed transition. 跨 v0.1 7 state ALLOWED_TRANSITIONS (executing 不在), phase Z exchange 状态机重构 transition() 共用.
                   const upd = sqlite.prepare(`
                     UPDATE retail_dex_orders SET state = 'completed', deliver_tx_hash = ?, updated_at = datetime('now')
                     WHERE id = ? AND state IN ('executing', 'paid', 'awaiting_payment')

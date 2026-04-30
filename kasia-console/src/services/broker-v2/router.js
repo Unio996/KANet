@@ -100,6 +100,7 @@ export async function handleMessage(peer, msg) {
             // D1 v2 fix (NWT a3334737 Medium 1): 加 created_at 时间窗防 multi row advance.
             // production grep 实证 retail_dex_orders awaiting_payment=223 rows — 同 user 历史多
             // 'awaiting_payment' row 不该一次全 advance 'paid'. 仅 advance latest active (2h 内).
+            // lint-allow-state-update: PZ-STATE-T-BUY B1 PAID detect BUY 路径 awaiting_payment→paid (BUY user 付 USDT 给 maker, broker mark BUY 单 paid). v0.1 SELL_KAS scope 不 cover BUY 路径, phase 2 multi-asset 后置 transition() migrate.
             sqlite.prepare(`
               UPDATE retail_dex_orders
               SET state='paid', updated_at=datetime('now')

@@ -116,6 +116,7 @@ export function setField(peer, name, value) {
     ? `AND (${name} IS NULL OR ${name} = :value)`
     : '';
 
+  // lint-allow-state-update: PZ-STATE-T-V2-FIELDSET broker-v2 state.setField 是 column 写 (qty/price/pay_chain/pay_address 等), 非 state transition. lint regex 因 WHERE state='aligning' clause 误抓.
   const result = sqlite.prepare(`
     UPDATE retail_dex_orders
     SET ${name} = :value, updated_at = datetime('now')
@@ -136,6 +137,7 @@ export function setField(peer, name, value) {
  */
 export function advance(peer, newState) {
   if (!peer || !newState) return { ok: false };
+  // lint-allow-state-update: PZ-STATE-T-V2-ADVANCE broker-v2 state.advance() helper multi-row batch (peer 可能多 aligning row 全 advance). transition() 是 single-row CAS, batch SELECT-then-loop ETA 大. phase Z 重构 advance() 内部走 SELECT all + per-row transition.
   const result = sqlite.prepare(`
     UPDATE retail_dex_orders
     SET state = ?, updated_at = datetime('now')

@@ -23,6 +23,7 @@
 // API surface (caller-facing) 不变 — broker-llm-agent + broker-buy/sell-handler 透明.
 
 import { sqlite } from '../db/client.js';
+import { transition } from './broker-state-machine.js';  // SA-4 真 transition migrate (_sweepStaleAligning aligning→expired)
 
 // ── retail_dex_orders 状态映射 ────────────────────────────────────
 // retail_dex_orders.state vs broker ConvoState.lifecycle_phase
@@ -289,6 +290,7 @@ export function resetConvoState(peer, reason) {
   // retail_dex_orders.state CHECK 允许 enum: completed/failed/refunded/expired (no 'cancelled').
   // user_cancel/user_restart/timeout 都映射到 'failed' (broker ConvoState lifecycle 的 cancelled 等价).
   const targetState = (reason === 'completed') ? 'completed' : 'failed';
+  // lint-allow-state-update: PZ-STATE-T-RESET legacy multi-state batch reset (resetConvoState 一次推所有 active row 到 failed/completed). v0.1 7 state 不 cover 'confirming/executing/refunding' 三 schema state, batch UPDATE single-row CAS transition() 不适用. phase Z 状态机重构后 SELECT all + per-row transition.
   sqlite.prepare(`
     UPDATE retail_dex_orders
     SET state = ?, updated_at = datetime('now')
@@ -378,6 +380,7 @@ export async function advanceToRefunded({ orderId, reason }) {
   // 3. Phase 1 (atomic CAS lock): UPDATE state='refunding'
   //    refundable states per round 3 共识: awaiting_payment / paid / expired
   //    rowsAffected=0 → another caller already claimed lock, OR state mismatch → race lost
+  // lint-allow-state-update: PZ-STATE-T-REFUND-PHASE1 advanceToRefunded 3-phase pattern (Phase 1 CAS lock → 'refunding' intermediate). 'refunding' 不在 v0.1 7 state ALLOWED_TRANSITIONS, phase Z 折叠 3-phase 为 single-step transition (awaiting_payment/paid/expired → refunded direct with refundTxHash).
   const claim = sqlite.prepare(`
     UPDATE retail_dex_orders
     SET state = 'refunding', updated_at = datetime('now')
@@ -409,6 +412,7 @@ export async function advanceToRefunded({ orderId, reason }) {
     if (!realTxId) throw new Error('sendKas resolved without txId');
   } catch (err) {
     // Phase 1 rollback: restore order to 'expired' (allow reconciler retry) + log error_reason
+    // lint-allow-state-update: PZ-STATE-T-REFUND-ROLLBACK refunding intermediate state rollback path (sendKas failed → 'expired' allow reconciler retry). 'refunding' 不在 v0.1 7 state ALLOWED_TRANSITIONS.
     sqlite.prepare(`
       UPDATE retail_dex_orders
       SET state = 'expired', error_reason = ?, updated_at = datetime('now')
@@ -425,6 +429,7 @@ export async function advanceToRefunded({ orderId, reason }) {
 function _confirmRefundedState({ orderId, offerId, realTxId, refundAmount, userKasiaAddr, reason }) {
   try {
     const txn = sqlite.transaction(() => {
+      // lint-allow-state-update: PZ-STATE-T-REFUND-PHASE3 _confirmRefundedState 3-phase commit (refunding intermediate → refunded with realTxId). 'refunding' 不在 v0.1 7 state ALLOWED_TRANSITIONS, phase Z 折叠 transition() awaiting_payment→refunded direct.
       sqlite.prepare(`
         UPDATE retail_dex_orders
         SET state = 'refunded', refund_tx_hash = ?, updated_at = datetime('now')
@@ -692,17 +697,29 @@ export function stopStaleAligningSweep() {
 
 function _sweepStaleAligning() {
   try {
-    const r = sqlite.prepare(`
-      UPDATE retail_dex_orders
-      SET state = 'expired', updated_at = datetime('now')
+    // SA-4 (J2 r84) 真 transition migrate: batch UPDATE → SELECT all stale + per-row transition().
+    // aligning → expired 是 v0.1 7 state ALLOWED_TRANSITIONS 合法 (TX_REQUIRED null for aligning→expired).
+    const stale = sqlite.prepare(`
+      SELECT id FROM retail_dex_orders
       WHERE state = 'aligning'
         AND (
           (expires_at IS NOT NULL AND expires_at < datetime('now'))
           OR (expires_at IS NULL AND created_at < datetime('now', '-30 minutes'))
         )
-    `).run();
-    if (r.changes > 0) {
-      console.log(`[broker-state-authority] _sweepStaleAligning: ${r.changes} aligning rows → expired (30min TTL)`);
+    `).all();
+    if (stale.length === 0) return;
+    let expired = 0;
+    for (const row of stale) {
+      const r = transition({
+        orderId: row.id,
+        expectedFromState: 'aligning',
+        toState: 'expired',
+        opts: { reason: 'TTL_30min', triggeredBy: 'broker-state-authority._sweepStaleAligning' },
+      });
+      if (r.ok) expired++;
+    }
+    if (expired > 0) {
+      console.log(`[broker-state-authority] _sweepStaleAligning: ${expired} aligning rows → expired (30min TTL)`);
     }
   } catch (e) {
     console.warn(`[broker-state-authority] _sweepStaleAligning err: ${e.message}`);

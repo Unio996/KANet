@@ -17,6 +17,7 @@
 import { sqlite } from '../db/client.js';
 import { randomUUID } from 'crypto';
 import { setConvoStateLock, shouldDeterministicFire } from './broker-state-authority.js';
+import { transition } from './broker-state-machine.js';  // SA-4 真 transition migrate
 
 const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
 // T-J2-2026-04-27 v1.1: 真扩 SELL_REGEX 同 BUY_OVERRIDE_REGEX 模式 (Owner 25:21 钦定真扩同义词)
@@ -63,16 +64,27 @@ function _insertSellOrder({ peerAddr, qty, userBnbAddr }) {
 // 修: 接 existing_order_id 参数, v2 caller 传 draft.id, finalizeSell UPDATE 现 row 'aligning'→'awaiting_payment'
 // 不 INSERT 新 row. v1 caller 不传 (legacy 行为), 仍 INSERT.
 function _updateSellOrder({ orderId, recv_chain, recv_address }) {
-  const now = new Date().toISOString();
-  const r = sqlite.prepare(`
+  // SA-4 (J2 r84) 真 transition migrate: SELL aligning → awaiting_payment 走状态机 owner.
+  // 旧行为: 直 SQL UPDATE multi-column (state + pay_chain + pay_address). 新行为拆 2 步:
+  //   1. transition() 推 state (CAS: aligning → awaiting_payment, 无 chain TX 进 broker_workflow_markers audit)
+  //   2. UPDATE 写 pay_chain/pay_address (column 写, 不动 state — escape hatch grandfather)
+  const tResult = transition({
+    orderId,
+    expectedFromState: 'aligning',
+    toState: 'awaiting_payment',
+    opts: { reason: 'sell_finalize', triggeredBy: 'broker-sell-handler._updateSellOrder' },
+  });
+  if (!tResult.ok) return false;
+  // pay_chain / pay_address 写 (column 写, 非 state transition)
+  // lint-allow-state-update: PZ-STATE-T-V2-FIELDSET column 写 (pay_chain/pay_address), state 已经 transition() 推, lint regex 误抓因 WHERE state= clause
+  sqlite.prepare(`
     UPDATE retail_dex_orders
-    SET state = 'awaiting_payment',
-        pay_chain = COALESCE(pay_chain, ?),
+    SET pay_chain = COALESCE(pay_chain, ?),
         pay_address = COALESCE(pay_address, ?),
         updated_at = ?
-    WHERE id = ? AND state = 'aligning'
-  `).run(String(recv_chain || 'bnb').toLowerCase(), recv_address, now, orderId);
-  return r.changes > 0;
+    WHERE id = ? AND state = 'awaiting_payment'
+  `).run(String(recv_chain || 'bnb').toLowerCase(), recv_address, new Date().toISOString(), orderId);
+  return true;
 }
 
 // R4 改造 (T-NWT-09): 走 broker-action-queue 单线 pump 防 UTXO 双花.
