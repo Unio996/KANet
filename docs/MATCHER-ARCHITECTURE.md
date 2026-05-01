@@ -170,22 +170,24 @@ matcher Agent (例: Trader-M)
 
 ### 4.1 Skill 文件结构
 
+**KANet API constraint** (J2 r107 grep + NWT r109 verdict):
+- KANet skill 加载 2 路径: class-based Skill (registry.mjs:47-73) vs 包式 (registry.mjs:78-125 + intents.json keyword)
+- 包式是 keyword-based, 不 match matcher LLM-driven free-form 哲学
+- matcher 走 **class-based Skill** 路径, 单 .mjs file, leverage canActivate/gatherContext/formatForBrain
+
+包式扩 (reactive package trigger) 后置 PZ-FRAMEWORK-EXT 任务卡, matcher v0.1 prod usage 后再决 ROI (per r109 verdict).
+
 ```
-agent-mind/src/skills/matcher/
-├── skill.json           # 元数据 (名 / 版本 / category)
-├── intents.json         # 意图注册 (撮合相关 intent)
-├── executor.mjs         # 主执行器 (~400 LOC)
-├── prompts/
-│   ├── persona.txt      # matcher 人格 (撮合官身份, 严谨专业)
-│   ├── intent_extract.txt   # 提炼 user intent 的 prompt
-│   └── pricing.txt      # 定价 prompt (基于 mid_price + spread)
-└── README.md            # skill 文档
+agent-mind/src/skills/matcher.mjs   # 单 file, class Matcher extends Skill
+                                     # ~800 LOC v1.0 总
 ```
+
+prompts 处理 (T1.3 决): 选 (i) inline string in matcher.mjs, OR (ii) `agent-mind/src/skills/matcher-prompts/` dir 含 .txt file (matcher.mjs `readFileSync` at runtime). T1.1 不阻, T1.3 实际 ship extractIntent 时确定.
 
 ### 4.2 核心函数 (audit-2 informed)
 
 ```js
-// executor.mjs 6 个核心函数:
+// agent-mind/src/skills/matcher.mjs 6 个核心函数 (class methods):
 
 async function loadPeerContext(userAddr) {
   // 调 Perception 拿 per-peer context
@@ -541,6 +543,9 @@ matcher Phase 1 (T1) 实施前置:
 这些问题不阻塞 v0.1 spec 完成, 但 Phase 1 实施时必答:
 
 1. **Mind Perception kernel 是否能给 broker skill 喂 per-peer context?** 当前 Brain 看到的是聚合 prompt, 不是结构化 per-peer history. Phase 1 可能需扩 Perception API.
+   - **T1.0 grep 实证 (J2 r107 + NWT r109)**: KANet 现有 reactive free-form 路径 = class-based Skill (registry.mjs:47-73), 通过 `gatherContext(kernels, config)` 调 Perception. 包式 skill (intents.json keyword) 不 match matcher LLM-driven 哲学.
+   - **当前决策**: matcher 走 class-based Skill 单 .mjs, gatherContext 内部 SELECT messages + identities + retail_dex_orders 直接读 KANet 表 (per §4.2 loadPeerContext).
+   - **未决**: Mind Perception kernel 是否需扩出 `getPeerContext(peerAddr, options)` 公开 API, 让多 skill 共用 — 后置 PZ-FRAMEWORK-EXT (matcher v0.1 prod usage 后评 ROI).
 
 2. **Skill 系统支持 stateful business 吗?** matcher 是 stateful (订单生命周期跨数小时). 我倾向无状态 skill + state machine 是状态唯一真相源, 但 Phase 1 验.
 

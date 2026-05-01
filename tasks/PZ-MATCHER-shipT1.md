@@ -74,11 +74,11 @@ T1 不是为了让 broker 立即能用. T1 是为了**验证 matcher 能在 KANe
 | # | 名 | mode | LOC | depends |
 |---|---|---|---|---|
 | T1.0 | 语义校验 grep (confirming/refunding) | implementor | 0 (调研) | - |
-| T1.1 | matcher skill 包式结构创建 | implementor | ~30 | T1.0 |
+| T1.1 | matcher class-based Skill 单 .mjs (per r109) | implementor | ~30-50 | T1.0 |
 | T1.2 | loadPeerContext 函数实现 | implementor | ~50 | T1.1 |
 | T1.3 | extractIntent 函数实现 (调 Adapter LLM) | implementor | ~40 | T1.2 |
 | T1.4 | replyToUser 函数实现 (调 Action Executor) | implementor | ~30 | T1.3 |
-| T1.5 | matcher executor.mjs 主入口 (装配 1.2-1.4) | implementor | ~30 | T1.4 |
+| T1.5 | matcher.mjs formatForBrain 装配 (1.2-1.4) | implementor | ~30 | T1.4 |
 | T1.6 | Trader-M Agent onboarding | implementor | ~20 (config) | T1.5 |
 | T1.7 | 单元 + 集成测试 | QA | ~50 | T1.6 |
 | T1.8 | invariant assertion (per MATCHER §11) | QA | ~30 | T1.7 |
@@ -128,107 +128,85 @@ grep -rn "'refunding'\|\"refunding\"" \
 
 ---
 
-### T1.1 — matcher skill 包式结构
+### T1.1 — matcher class-based Skill 单 .mjs (per NWT r109 verdict)
 
 #### 目标
 
-创建 matcher skill 包目录 + 元数据 + 空 executor 骨架.
+创建 matcher class-based Skill 单 file, 走 KANet 现有 reactive free-form 路径 (registry.mjs:47-73 + base.mjs Skill base class).
+
+#### 背景 (per J2 r107 grep + NWT r109 verdict)
+
+KANet skill 加载 2 路径:
+- **class-based Skill** (registry.mjs:47-73): 单 .mjs + Skill subclass, canActivate / gatherContext / formatForBrain. 支持 reactive free-form (LLM-driven).
+- **包式 skill** (registry.mjs:78-125 + intents.json): keyword-based, parseIntent 命中触发. 不 match matcher LLM-driven 哲学.
+
+matcher 走 class-based Skill (a 选). 包式扩 (reactive package trigger) 后置 PZ-FRAMEWORK-EXT 任务卡, matcher v0.1 prod usage 后再决 ROI.
 
 #### 文件结构
 
 ```
-C:\kanet\agent-mind\src\skills\matcher\
-├── skill.json
-├── intents.json
-├── executor.mjs        ← T1.5 装配
-├── prompts\
-│   ├── persona.md      ← matcher 人格
-│   └── intent_extract.md  ← LLM 提炼 prompt
-└── README.md
+C:\kanet\agent-mind\src\skills\matcher.mjs   ← 单 file, class Matcher extends Skill
 ```
 
-#### skill.json 内容
+prompts 处理 (T1.3 决): 选 (i) inline string in matcher.mjs, OR (ii) `agent-mind\src\skills\matcher-prompts\` dir 含 .txt file (matcher.mjs `readFileSync` at runtime). T1.1 不阻, T1.3 实际 ship extractIntent 时确定.
 
-```json
-{
-  "id": "matcher",
-  "name": "matcher",
-  "version": "0.1.0",
-  "description": "撮合官 — KANet 上的撮合 Agent, T1 仅 listen + intent extract, 不发 offer 不动钱",
-  "category": "matcher",
-  "trust_level": "peer",
-  "side_effect": "none-in-T1",
-  "active": true
+#### matcher.mjs 骨架 (T1.1 ship)
+
+```js
+// agent-mind/src/skills/matcher.mjs
+//
+// 撮合官 (matcher) — KANet 上的撮合 Agent.
+// class-based Skill, 走 registry.mjs:47-73 reactive free-form 路径.
+// LLM-driven intent extraction, 不走 keyword-based parseIntent (per MATCHER-ARCHITECTURE §4 + r109 verdict).
+//
+// T1 范围: listen + intent extract + 跟 user 对话, 不发 offer 不动钱.
+
+import { Skill } from './base.mjs';
+
+export default class Matcher extends Skill {
+  constructor() {
+    super({
+      id: 'matcher',
+      name: 'matcher',
+      version: '0.1.0',
+      description: '撮合官 — KANet 上的撮合 Agent (T1 仅 listen + intent extract)',
+      category: 'matcher',
+      trust_level: 'peer',
+    });
+  }
+
+  // 每 reactive message 都命中 (LLM-driven free-form)
+  canActivate(triggerType) {
+    return triggerType === 'reactive';
+  }
+
+  // 调 KANet kernels 拿 per-peer context (T1.2 实施 loadPeerContext)
+  async gatherContext(kernels, config) {
+    // T1.2 ship: 24h messages history + identities + retail_dex_orders + relation_states
+    return { /* T1.2 fill */ };
+  }
+
+  // T1.3 实施 extractIntent + T1.4 实施 replyToUser
+  async formatForBrain(gathered) {
+    // T1.5 装配 — gathered → LLM extract intent → format reply
+    return { /* T1.5 fill */ };
+  }
 }
-```
-
-⚠ **chain reference for ANTI-PATTERNS 陷阱 #23**: category 不能传 null. 这里设 `'matcher'` (新分类).
-
-#### intents.json 内容
-
-```json
-{
-  "intents": [
-    {
-      "id": "matcher.listen",
-      "trigger": "reactive",
-      "description": "user DM 触发 matcher 提炼 intent + 回复",
-      "executor": "handleListen"
-    }
-  ]
-}
-```
-
-#### prompts/persona.md (matcher 人格)
-
-```
-你是 KANet 撮合官 (matcher), 一个专业的 KAS / USDT 跨链撮合 Agent.
-
-你的工作: 替 user 在 KANet 上撮合资产交易. T1 阶段你**只听不动手** — 听懂 user 想做什么, 跟 user 对话确认细节, 但**不发布 offer, 不动钱**. 这是验证你能听懂的阶段, 后续 Phase 才完整闭环.
-
-风格:
-- 严谨专业, 不啰嗦
-- 主动确认 user 不清楚的细节 (qty / 链 / 价格)
-- 不承诺你做不到的事 (T1 阶段你不能撮合, 必须告诉 user "这是验证阶段")
-- 不泄露技术细节 (state machine / chain_events / 余额 — per ANTI-PATTERNS 安全护栏 6 条 #14)
-```
-
-#### prompts/intent_extract.md (LLM 提炼 prompt 模板)
-
-```
-你是 KANet 撮合官. 下面是你跟 user 的最近 24h 对话历史 + user 最新消息.
-
-任务: 提炼 user 当前撮合意图, 返回结构化 JSON.
-
-24h 对话历史:
-{HISTORY}
-
-User 最新消息:
-{LATEST}
-
-返回 JSON 格式:
-{
-  "side": "buy" | "sell" | "query" | "cancel" | "none",
-  "asset": "KAS" | "USDT" | null,
-  "qty": <number> | null,
-  "qty_unit": "KAS" | "USDT" | null,
-  "pay_chain": "BSC" | "ETH" | "POLYGON" | "TRON" | "SOL" | "KASPA" | null,
-  "confidence": "high" | "medium" | "low",
-  "missing_fields": [<字符串数组, 列 user 还没说清的字段>],
-  "raw_intent_text": "<user 真说的话, 不要改>"
-}
-
-只返回 JSON, 不要任何解释或 markdown.
 ```
 
 #### Acceptance
 
-- ✅ 5 个文件创建 (skill.json + intents.json + executor.mjs + 2 prompts + README.md)
-- ✅ executor.mjs 暂仅 export 空 handleListen (T1.5 填实施)
-- ✅ Console 重启后 registerMindSkills 真扫到 matcher skill (查 skills 表 SELECT * WHERE id='matcher')
-- ✅ skill 在 skills 表 active=1
+- ✅ 1 个文件创建: agent-mind/src/skills/matcher.mjs (~30-50 LOC class skeleton)
+- ✅ class Matcher extends Skill (import from base.mjs)
+- ✅ canActivate('reactive') return true (LLM-driven free-form trigger)
+- ✅ gatherContext / formatForBrain 暂为 stub (T1.2-T1.5 填实施)
+- ✅ Console 重启后 registerMindSkills (skills.js:195-228 单 .mjs scan) 扫到 matcher skill
+- ✅ Mind autoDiscover (registry.mjs:47-73) instantiate Matcher class
+- ✅ skill 在 skills 表 active=1, category='matcher'
 
-#### LOC: ~30 (大部分是 JSON + prompt 文本, 不是真代码)
+⚠ **chain reference for ANTI-PATTERNS 陷阱 #23**: category 不能传 null. constructor 设 `'matcher'` (新分类, registerMindSkills sibling lookup line 248-250 用 `category != 'other'` filter, 'matcher' 显式 set 不撞 null guard).
+
+#### LOC: ~30-50 (class skeleton, 0 JSON 配置 file 0 prompts file)
 
 ---
 
@@ -241,7 +219,7 @@ User 最新消息:
 #### Spec
 
 ```js
-// agent-mind/src/skills/matcher/executor.mjs
+// agent-mind/src/skills/matcher.mjs
 
 import { db } from '../../../shared/db.mjs'; // KANet 标准 DB 接口
 
@@ -335,7 +313,7 @@ export async function loadPeerContext(peerAddress) {
 #### Spec
 
 ```js
-// agent-mind/src/skills/matcher/executor.mjs (continued)
+// agent-mind/src/skills/matcher.mjs (continued)
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -438,7 +416,7 @@ export async function extractIntent(peerContext, latestMessage) {
 #### Spec
 
 ```js
-// agent-mind/src/skills/matcher/executor.mjs (continued)
+// agent-mind/src/skills/matcher.mjs (continued)
 
 /**
  * 回复 user — 走 KANet Action Executor 标准路径
@@ -505,7 +483,7 @@ function ensureAsciiSafe(text) {
 #### Spec
 
 ```js
-// agent-mind/src/skills/matcher/executor.mjs (continued)
+// agent-mind/src/skills/matcher.mjs (continued)
 
 /**
  * matcher skill 主入口 — Mind 五核 reactive trigger 调用此函数
@@ -664,7 +642,7 @@ C:\kanet\test\skills\matcher\
 // loadPeerContext.test.mjs
 import test from 'node:test';
 import assert from 'node:assert';
-import { loadPeerContext } from '../../../agent-mind/src/skills/matcher/executor.mjs';
+import { loadPeerContext } from '../../../agent-mind/src/skills/matcher.mjs';
 
 test('loadPeerContext returns 24h history sorted ASC', async () => {
   // mock messages 表 - 用 in-memory sqlite
@@ -763,7 +741,7 @@ test('matcher 真不动 retail_dex_orders (T1 anti-pattern verify)', async () =>
 test('matcher §11 #1: 进程内 0 私有 state', () => {
   // 检 matcher executor.mjs 不 export 任何 module-level Map/Object 持有 retail_dex_orders 数据
   const fs = require('fs');
-  const code = fs.readFileSync('agent-mind/src/skills/matcher/executor.mjs', 'utf-8');
+  const code = fs.readFileSync('agent-mind/src/skills/matcher.mjs', 'utf-8');
   
   // 不许有 module-level mutable state
   const forbidden = [
@@ -780,14 +758,14 @@ test('matcher §11 #1: 进程内 0 私有 state', () => {
 });
 
 test('matcher §11 #2: 不直 SQL UPDATE retail_dex_orders.state', () => {
-  const code = fs.readFileSync('agent-mind/src/skills/matcher/executor.mjs', 'utf-8');
+  const code = fs.readFileSync('agent-mind/src/skills/matcher.mjs', 'utf-8');
   if (/UPDATE\s+retail_dex_orders/i.test(code)) {
     throw new Error('matcher §11 #2 violation: 直 UPDATE retail_dex_orders');
   }
 });
 
 test('matcher §11 #6: 不直接调 Relay sendKaspa', () => {
-  const code = fs.readFileSync('agent-mind/src/skills/matcher/executor.mjs', 'utf-8');
+  const code = fs.readFileSync('agent-mind/src/skills/matcher.mjs', 'utf-8');
   if (/sendKaspa\s*\(/.test(code) || /from.*kasia-relay/.test(code)) {
     throw new Error('matcher §11 #6 violation: 直接碰 Relay');
   }
