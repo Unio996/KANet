@@ -186,6 +186,13 @@ prompts 处理 (T1.3 决): 选 (i) inline string in matcher.mjs, OR (ii) `agent-
 
 ### 4.2 核心函数 (audit-2 informed)
 
+**KANet skill data access convention** (J2 r109 grep + NWT r112 verdict):
+- skill 全 HTTP fetchJson(consoleUrl + endpoint), 不直 SQL
+- skill convention 实证: 10 现有 skill (mm-otc / trade-sense / chain-sense / address-profiler / market-scanner / 等) 全 fetchJson, 0 import sqlite
+- architectural intent: skill = console API client, console = data owner (audit / authentication / rate limit gate)
+- gatherContext 调 1 个 fetchJson(/api/agent/peer-context) 拿 peer + chatHistory + recentBroadcasts + connectionStatus
+- activeOrders 推 T2 via /api/agent/peer-orders endpoint (后置 PZ-MATCHER-shipT2 同期 ship)
+
 ```js
 // agent-mind/src/skills/matcher.mjs 6 个核心函数 (class methods):
 
@@ -553,7 +560,9 @@ matcher Phase 1 (T1) 实施前置:
 
 4. **matcher Agent (Trader-M) 怎么 onboard?** 钱包初始化 / Agent Card 发布 / skill 加载 / 启动配置 — 第 1 个 matcher 实例要走完整 onboarding 流程.
 
-这 4 题的答案影响 Phase 1 任务卡颗粒度. 但不影响 v0.1 架构 spec 正确性.
+5. **/api/agent/peer-orders endpoint 起手时机** — T2 offer publish ship 时同期起 (matcher v0.2 PZ-MATCHER-shipT2). console-side ~15 LOC SELECT retail_dex_orders WHERE user_kasia_address = peer AND state IN (active 5). T1.0 grep 实证 (J2 r109): /api/agent/peer-context 已 cover peer/chatHistory/connectionStatus, 但 retail_dex_orders per-peer 0 endpoint, T1.2 gatherContext 不依赖 (T1 验收 3 硬标准 = 听懂 + 对话 + reactive trigger 通).
+
+这 5 题的答案影响 Phase 1/2 任务卡颗粒度. 但不影响 v0.1 架构 spec 正确性.
 
 ---
 

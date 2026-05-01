@@ -75,7 +75,7 @@ T1 不是为了让 broker 立即能用. T1 是为了**验证 matcher 能在 KANe
 |---|---|---|---|---|
 | T1.0 | 语义校验 grep (confirming/refunding) | implementor | 0 (调研) | - |
 | T1.1 | matcher class-based Skill 单 .mjs (per r109) | implementor | ~30-50 | T1.0 |
-| T1.2 | loadPeerContext 函数实现 | implementor | ~50 | T1.1 |
+| T1.2 | gatherContext HTTP API 实施 (per r112) | implementor | ~30 | T1.1 |
 | T1.3 | extractIntent 函数实现 (调 Adapter LLM) | implementor | ~40 | T1.2 |
 | T1.4 | replyToUser 函数实现 (调 Action Executor) | implementor | ~30 | T1.3 |
 | T1.5 | matcher.mjs formatForBrain 装配 (1.2-1.4) | implementor | ~30 | T1.4 |
@@ -210,97 +210,90 @@ export default class Matcher extends Skill {
 
 ---
 
-### T1.2 — loadPeerContext 函数
+### T1.2 — gatherContext 实施 (HTTP API, per NWT r112 verdict)
 
 #### 目标
 
-复用 KANet messages 表 + identities 表 + retail_dex_orders 表, 不造新数据结构.
+实施 matcher.mjs gatherContext 走 KANet skill convention HTTP API (fetchJson via consoleUrl), 不直 SQL.
+
+#### 背景 (per J2 r109 grep + NWT r112 verdict)
+
+KANet skill data access convention:
+- 10 现有 skill 全 fetchJson(consoleUrl + endpoint), 0 import sqlite (mm-otc / trade-sense / chain-sense / 等)
+- skill = console API client, console = data owner
+- /api/agent/peer-context (conversations.js:524-598) 已 cover peer + chatHistory + recentBroadcasts + connectionStatus
+
+activeOrders defer T2 (offer publish + state machine integration 时才需). T1 验收 3 硬标准 (听懂 + 对话 + reactive trigger 通) 不依赖 activeOrders.
+
+/api/agent/peer-orders endpoint 后置 PZ-MATCHER-shipT2 任务卡 (matcher v0.2 ship offer publish 同期起, ~15 LOC console-side).
 
 #### Spec
 
 ```js
-// agent-mind/src/skills/matcher.mjs
+// agent-mind/src/skills/matcher.mjs (extends T1.1 skeleton)
 
-import { db } from '../../../shared/db.mjs'; // KANet 标准 DB 接口
+import { Skill } from './base.mjs';
+import { fetchJson } from '../utils/fetch.mjs';  // KANet skill 标准 HTTP client (audit verify path)
 
-/**
- * 加载 peer 上下文 — 24h 对话历史 + 现有 active orders + relation_state
- * @param {string} peerAddress - kasia 地址
- * @returns {Object} { history, activeOrders, relationState }
- */
-export async function loadPeerContext(peerAddress) {
-  // 1. 24h DM 历史 (per audit-2 A3.4: top peer 44 msg = 1056 tokens, 安全 unlimited)
-  const history = db.prepare(`
-    SELECT m.id, m.created_at, m.content, m.message_type,
-           CASE
-             WHEN m.sender_identity_id = (SELECT id FROM identities WHERE kasia_address = ?) THEN 'user'
-             ELSE 'matcher'
-           END AS role
-    FROM messages m
-    WHERE (
-      m.sender_identity_id = (SELECT id FROM identities WHERE kasia_address = ?) 
-      OR m.receiver_identity_id = (SELECT id FROM identities WHERE kasia_address = ?)
-    )
-      AND m.message_type = 'text'
-      AND m.created_at >= datetime('now', '-24 hours')
-    ORDER BY m.created_at ASC
-  `).all(peerAddress, peerAddress, peerAddress);
+export class MatcherSkill extends Skill {
+  // ... constructor + canActivate from T1.1
 
-  // 2. 现有 active orders (per STATE-MACHINES.md v0.3, 5 active state)
-  const activeOrders = db.prepare(`
-    SELECT id, side, qty, state, pay_chain, created_at
-    FROM retail_dex_orders
-    WHERE user_kasia_address = ?
-      AND state IN ('aligning','awaiting_payment','confirming','paid','refunding')
-    ORDER BY created_at DESC
-  `).all(peerAddress);
+  async gatherContext(kernels, config) {
+    const consoleUrl = config.consoleUrl;
+    const myAddr = config.relayAddress;
+    const peerAddr = kernels._inputContext?.peer_address;
 
-  // 3. relation_state + trust
-  const relationState = db.prepare(`
-    SELECT relation_state, trust_level
-    FROM relation_states
-    WHERE peer_address = ?
-  `).get(peerAddress) || { relation_state: 'unknown', trust_level: 0 };
+    if (!peerAddr) return {};  // 无 peer = 不应触发 reactive
 
-  // 4. Safety net: 输入超过 6000 tokens 时降级 (per MATCHER-ARCHITECTURE §4.2 钦定)
-  const totalChars = history.reduce((sum, m) => sum + (m.content || '').length, 0);
-  const estimatedTokens = totalChars / 3;
-  
-  let trimmedHistory = history;
-  if (estimatedTokens > 6000) {
-    trimmedHistory = history.slice(-30); // 保留最近 30 条
-    console.warn(`[matcher] loadPeerContext degraded: peer=${peerAddress}, tokens=${estimatedTokens}, trimmed to last 30 msgs`);
+    // 1 个 HTTP call → response 含 peer + chatHistory + recentBroadcasts + connectionStatus
+    const ctx = await fetchJson(
+      `${consoleUrl}/api/agent/peer-context?my_address=${encodeURIComponent(myAddr)}&peer_address=${encodeURIComponent(peerAddr)}&limit=50`
+    );
+
+    // Safety net: chatHistory > 6000 tokens trim 30 (per audit-2 A3.4 + MATCHER-ARCHITECTURE §4.2)
+    const totalChars = (ctx.chatHistory || []).reduce((sum, m) => sum + (m.content || '').length, 0);
+    const estimatedTokens = Math.floor(totalChars / 3);
+
+    let trimmedHistory = ctx.chatHistory || [];
+    if (estimatedTokens > 6000) {
+      trimmedHistory = trimmedHistory.slice(-30);
+      console.warn(`[matcher] gatherContext degraded: peer=${peerAddr.slice(-12)}, tokens=${estimatedTokens}, trimmed to 30`);
+    }
+
+    return {
+      peer: ctx.peer,
+      history: trimmedHistory,
+      broadcasts: ctx.recentBroadcasts || [],
+      connectionStatus: ctx.connectionStatus,
+      metadata: {
+        historyCount: trimmedHistory.length,
+        degraded: estimatedTokens > 6000,
+        estimatedTokens,
+      },
+    };
   }
 
-  return {
-    history: trimmedHistory,
-    activeOrders,
-    relationState,
-    metadata: {
-      historyCount: trimmedHistory.length,
-      degraded: estimatedTokens > 6000,
-      estimatedTokens
-    }
-  };
+  // formatForBrain stub from T1.1 (T1.5 装配填实施)
 }
 ```
 
 #### Anti-pattern (实施期间不许做)
 
+- ❌ 不许 import sqlite OR 直 SQL (违 KANet skill convention)
 - ❌ 不许 cache 任何结果到 module-level Map (per MATCHER §11 #1)
-- ❌ 不许 INSERT 新表 (matcher 不持有私有 state)
-- ❌ 不许写 retail_dex_orders (T1 严禁, per scope §)
-- ❌ 不许 grep 查 broker_workflow_markers (那是旧 broker 私有, MATCHER §1.1 钦定不复用)
+- ❌ 不许 grep 查 broker_workflow_markers (旧 broker 私有, MATCHER §1.1 钦定不复用)
+- ❌ 不许 SELECT retail_dex_orders 直 (defer T2 via /api/agent/peer-orders endpoint)
 
 #### Acceptance
 
-- ✅ loadPeerContext('kaspa:test_addr') 真返回 { history, activeOrders, relationState, metadata }
-- ✅ history 真按 created_at ASC 排序 (老 → 新)
-- ✅ activeOrders 真只含 5 active state (不含 terminal)
-- ✅ degraded mode 真在 > 6000 tokens 时 trim 到 30 msg + console.warn
-- ✅ 真 0 私有 state (执行函数前后, matcher 进程内存无任何 retail_dex_orders 缓存)
+- ✅ gatherContext({...}, config) 调 fetchJson(/api/agent/peer-context) 1 个 HTTP call
+- ✅ return { peer, history, broadcasts, connectionStatus, metadata }
+- ✅ history 按 created_at ASC 排序 (老 → 新, /api/agent/peer-context 默 ASC)
+- ✅ degraded mode 在 > 6000 tokens 时 trim 到 30 msg + console.warn
+- ✅ 0 私有 state (执行函数前后 matcher 进程内存 0 缓存)
+- ✅ 0 import sqlite (grep self-check)
 
-#### LOC: ~50
+#### LOC: ~30 (from spec sweep, simpler than original 50)
 
 ---
 
