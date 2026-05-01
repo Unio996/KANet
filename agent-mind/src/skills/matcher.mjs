@@ -31,6 +31,8 @@ export class MatcherSkill extends Skill {
   // /api/agent/peer-context (conversations.js:524-598) 已 cover peer + chatHistory + recentBroadcasts + connectionStatus.
   // activeOrders defer T2 PZ-MATCHER-shipT2 (per MATCHER §C #5).
   async gatherContext(kernels, config) {
+    // T1.5 装配 wire: 保存 config 给 formatForBrain 用 (Skill API formatForBrain 只接 gathered, 不接 kernels/config)
+    this._config = config || {};
     if (!this._senderAddress) {
       return { peer: null, history: [], broadcasts: [], connectionStatus: null, metadata: { historyCount: 0, degraded: false } };
     }
@@ -121,13 +123,30 @@ export class MatcherSkill extends Skill {
     return intent;
   }
 
-  // T1.5 装配: gathered → extractIntent (T1.3) → generateReply → replyToUser (T1.4)
-  formatForBrain(gathered) {
+  // T1.5 装配: gathered (T1.2) → extractIntent (T1.3) → generateReply (T1.4) → Brain 输出 baseline.
+  // Skill API 不暴露 actionExecutor 给 formatForBrain (kernels 5 个不含 action, executor 在 runner.mjs:25 单独 owner).
+  // 设计选择: matcher 经 Brain 自然 reply 路径 — formatForBrain 提供 intent + suggestedReply 给 Brain, Brain reactive 输出走 mind.mjs 主流程发 user.
+  // replyToUser standalone export 留 T2/T3 (PZ-MATCHER-shipT2 接 Action Executor wire) OR T1.7 unit test mock.
+  async formatForBrain(gathered) {
+    if (!gathered || !this._senderAddress) {
+      return { name: this.name, description: this.description, data: { skipped: 'no_sender' }, instructions: '' };
+    }
+    const config = this._config || {};
+    const latestMessage = this._inputMessage || '';
+    const intent = await this.extractIntent(gathered, latestMessage, config);
+    const suggestedReply = generateReply(intent);
     return {
       name: this.name,
       description: this.description,
-      data: gathered,
-      instructions: '',
+      data: {
+        peer: gathered.peer,
+        history_count: (gathered.history || []).length,
+        connectionStatus: gathered.connectionStatus,
+        intent,
+        suggestedReply,
+        degraded: gathered.metadata?.degraded || false,
+      },
+      instructions: `撮合官 (matcher) 已分析 user 意图. 用以下建议回复 user, 不要修改语义, 必含 T1 阶段 disclaimer:\n${suggestedReply}`,
     };
   }
 }
