@@ -63,6 +63,64 @@ export class MatcherSkill extends Skill {
     }
   }
 
+  // T1.3 ship: 调 KANet Adapter LLM (POST /reply) 提炼结构化 intent.
+  // adapter pattern 同 mind.mjs:301-310 (mindSystem + mindUser + mindTask + brainCall).
+  // Qwen Rule 11 kill switch 由 agent-adapter/src/providers/openai.mjs:238-242 自动 inject (model 含 'qwen' → chat_template_kwargs.enable_thinking=false), caller 不需手动加.
+  async extractIntent(gathered, latestMessage, config) {
+    const adapterUrl = config?.adapterUrl;
+    if (!adapterUrl) {
+      return _intentFallback(latestMessage, 'adapter_unavailable');
+    }
+
+    const historyText = (gathered.history || [])
+      .map(m => `[${m.ts || ''}] ${m.dir === 'in' ? 'user' : 'matcher'}: ${m.text || ''}`)
+      .join('\n') || '(no history)';
+    const peerName = gathered.peer?.name || gathered.peer?.address?.slice(-12) || 'unknown';
+    const trustLevel = gathered.peer?.trustLevel || 'normal';
+
+    const mindUser = [
+      `Peer: ${peerName} (trust=${trustLevel})`,
+      '',
+      '24h 对话历史:',
+      historyText,
+      '',
+      `User 最新消息: ${latestMessage}`,
+      '',
+      '请提炼意图返回 JSON.',
+    ].join('\n');
+
+    let response;
+    try {
+      response = await fetchJson(`${adapterUrl}/reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ peer: this._senderAddress, mindSystem: MATCHER_INTENT_SYSTEM, mindUser, mindTask: true }),
+        brainCall: true,
+      });
+    } catch (err) {
+      console.warn(`[matcher] extractIntent adapter call failed: ${err.message}`);
+      return _intentFallback(latestMessage, 'adapter_error', err.message);
+    }
+
+    const replyText = response?.reply || '';
+    let intent;
+    try {
+      // Strip markdown fence (LLM 偶尔包 ```json ... ```)
+      const cleaned = replyText.replace(/^```(?:json)?\s*|\s*```\s*$/gs, '').trim();
+      intent = JSON.parse(cleaned);
+    } catch (err) {
+      console.warn(`[matcher] extractIntent JSON parse failed: "${replyText.slice(0, 100)}"`);
+      return _intentFallback(latestMessage, 'intent_unclear', null, true);
+    }
+
+    // side enum validation (per spec acceptance, defensive against LLM hallucination)
+    if (!['buy', 'sell', 'query', 'cancel', 'none'].includes(intent.side)) {
+      intent.side = 'none';
+      intent.confidence = 'low';
+    }
+    return intent;
+  }
+
   // T1.5 装配: gathered → extractIntent (T1.3) → generateReply → replyToUser (T1.4)
   formatForBrain(gathered) {
     return {
@@ -72,4 +130,36 @@ export class MatcherSkill extends Skill {
       instructions: '',
     };
   }
+}
+
+// matcher 撮合官 LLM persona + JSON schema (T1.3 inline prompt, per NWT r114 option i)
+const MATCHER_INTENT_SYSTEM = [
+  '你是 KANet 撮合官 (matcher), KAS / USDT 跨链撮合 Agent.',
+  '',
+  '任务: 从 user 消息提炼撮合意图, 返回严格 JSON. 不要任何 markdown wrapper 或解释文本.',
+  '',
+  'JSON schema:',
+  '{',
+  '  "side": "buy" | "sell" | "query" | "cancel" | "none",',
+  '  "asset": "KAS" | "USDT" | null,',
+  '  "qty": <number> | null,',
+  '  "qty_unit": "KAS" | "USDT" | null,',
+  '  "pay_chain": "BSC" | "ETH" | "POLYGON" | "TRON" | "SOL" | "KASPA" | null,',
+  '  "confidence": "high" | "medium" | "low",',
+  '  "missing_fields": [<string array, 列出 user 还没说清的字段例如 price/qty/pay_chain>],',
+  '  "raw_intent_text": "<user 原话不改>"',
+  '}',
+  '',
+  '只返回 JSON 对象本身, 一个字符不多.',
+].join('\n');
+
+function _intentFallback(latestMessage, missingTag, errMsg, parseError) {
+  const result = {
+    side: 'none', asset: null, qty: null, qty_unit: null, pay_chain: null,
+    confidence: 'low', missing_fields: [missingTag],
+    raw_intent_text: latestMessage,
+  };
+  if (errMsg) result._error = errMsg;
+  if (parseError) result._parse_error = true;
+  return result;
 }
