@@ -208,5 +208,55 @@ test('matcher.mjs source has 0 import kasia-relay (边界铁律: Console 不碰�
   }
 });
 
+// ── T1.8 invariant: MATCHER §11 9 anti-pattern enforce ───────────────────────
+// Source-level grep + import audit. T1.7 已 cover #4 (openai/anthropic) / #5 partial / #6 (kasia-relay) / #9 partial (sqlite).
+// T1.8 加 6 项 supplement: #1 (module-level cache) / #2 (UPDATE SQL string) / #3 (history index) / #5 (kaspa-wasm) / #7 (single-broker) / #8 (schema modification).
+
+async function _matcherSrc() {
+  const fs = await import('node:fs/promises');
+  return fs.readFile(new URL('../src/skills/matcher.mjs', import.meta.url), 'utf-8');
+}
+
+test('§11 #1: 0 module-level Map/Cache holding retail_dex_orders state', async () => {
+  const src = await _matcherSrc();
+  // forbidden: top-level mutable cache for orders state — grep `^(const|let)\s+\w*[Oo]rder\w*\s*=\s*new (Map|Set|WeakMap)`
+  const moduleLevelOrderCache = src.match(/^(const|let)\s+\w*[Oo]rder\w*\s*=\s*new\s+(Map|Set|WeakMap)/m);
+  assert.ok(!moduleLevelOrderCache, `forbidden module-level order cache: ${moduleLevelOrderCache?.[0]}`);
+});
+
+test('§11 #2: 0 direct SQL UPDATE/INSERT retail_dex_orders string in source', async () => {
+  const src = await _matcherSrc();
+  assert.ok(!/UPDATE\s+retail_dex_orders/i.test(src), 'forbidden direct UPDATE retail_dex_orders');
+  assert.ok(!/INSERT\s+INTO\s+retail_dex_orders/i.test(src), 'forbidden direct INSERT retail_dex_orders');
+});
+
+test('§11 #3: 0 self-built conversation history index/cache', async () => {
+  const src = await _matcherSrc();
+  // forbidden parallel index — grep keywords like history_cache / conversation_index / message_map / peer_history_map
+  const forbidden = src.match(/(history|conversation|message)_(cache|index|map)\b|peerHistoryMap|chatHistoryCache/i);
+  assert.ok(!forbidden, `forbidden parallel history index: ${forbidden?.[0]}`);
+});
+
+test('§11 #5: 0 import kaspa-wasm / RPC client (matcher 0 自扫链)', async () => {
+  const src = await _matcherSrc();
+  const importLines = src.split('\n').filter(l => /^\s*import\s/.test(l));
+  for (const line of importLines) {
+    assert.ok(!/kaspa-wasm|RpcClient|getUtxos|ScoutClient/i.test(line), `forbidden chain scan import: ${line}`);
+  }
+});
+
+test('§11 #7: 0 hardcoded single-broker assumption (multi-instance ready)', async () => {
+  const src = await _matcherSrc();
+  // forbidden: hardcode Trader-B / primary_broker / single broker assertion
+  const forbidden = src.match(/Trader-B\b|primary_broker|onlyBroker|isMainBroker|BROKER_ADDRESS|TRADER_B_ADDRESS|MAIN_BROKER/);
+  assert.ok(!forbidden, `forbidden single-broker assumption: ${forbidden?.[0]}`);
+});
+
+test('§11 #8: 0 schema modification (ALTER/CREATE TABLE retail_dex_orders)', async () => {
+  const src = await _matcherSrc();
+  assert.ok(!/ALTER\s+TABLE\s+retail_dex_orders/i.test(src), 'forbidden ALTER TABLE retail_dex_orders');
+  assert.ok(!/CREATE\s+TABLE\s+(?:IF NOT EXISTS\s+)?retail_dex_orders/i.test(src), 'forbidden CREATE TABLE retail_dex_orders');
+});
+
 // Integration test (Trader-M live + LLM extract + Brain reply + retail_dex_orders 0 增) defer T1.9.
 // per NWT r118: T1.6 acceptance live verify defer T1.9 12h 守同期 operator hat --apply trigger.
