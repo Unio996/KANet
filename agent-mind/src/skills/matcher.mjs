@@ -153,6 +153,45 @@ const MATCHER_INTENT_SYSTEM = [
   '只返回 JSON 对象本身, 一个字符不多.',
 ].join('\n');
 
+// T1.4 ship: generateReply 模板化生成 user-friendly reply (per intent state).
+// 每条 reply 必含 "T1 验证阶段, 暂时不能完成实际撮合" disclaimer (per task §T1 verifications, 防 user 误解成交).
+export function generateReply(intent) {
+  const T1_DISCLAIMER = '\n\n(注意: 我目前在 T1 验证阶段, 暂时不能完成实际撮合.)';
+  if (!intent || intent.side === 'none' || intent.confidence === 'low') {
+    return '抱歉, 我没完全听懂你的意图. 能更具体说一下你想做什么交易吗? 例如 "我要用 50 USDT 买 KAS, 用 BNB 链付款".' + T1_DISCLAIMER;
+  }
+  if (intent.missing_fields && intent.missing_fields.length > 0) {
+    const sideText = intent.side === 'buy' ? '购买' : intent.side === 'sell' ? '出售' : '了解';
+    const assetText = intent.asset || '资产';
+    return `我明白你想${sideText} ${assetText}. 还需要确认: ${intent.missing_fields.join(', ')}. 你能补充一下吗?` + T1_DISCLAIMER;
+  }
+  const qty = intent.qty != null ? `${intent.qty} ${intent.qty_unit || ''}` : '';
+  const sideAction = intent.side === 'buy' ? `用 ${qty} 买入 ${intent.asset || ''}` : intent.side === 'sell' ? `卖 ${qty} 换 ${intent.asset || ''}` : `执行 ${intent.side}`;
+  const chainText = intent.pay_chain ? `, 用 ${intent.pay_chain} 链` : '';
+  return `好的, 我看到你想${sideAction}${chainText}. 已记录你的意图.` + T1_DISCLAIMER;
+}
+
+// T1.4 ship: ASCII safety (per ANTI-PATTERNS 陷阱 #3 + LLM 偶尔吐 unpaired surrogate).
+export function ensureAsciiSafe(text) {
+  if (!text) return '';
+  return text.replace(/[\uD800-\uDFFF]/g, '').replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F]/g, '');
+}
+
+// T1.4 ship: 调 KANet ActionExecutor.executeOne 发 DM (不自造 send 路径, 不直碰 Relay).
+// actionExecutor 由 caller (T1.5 handleListen) 注入 — kernels 5 个不含 action, executor 在 runner.mjs:25 instantiate.
+// per spec acceptance "Mind 框架处理后续 (action_executor → relay IPC → 上链)".
+export async function replyToUser(peerAddress, replyText, actionExecutor) {
+  if (!peerAddress || !replyText || !actionExecutor?.executeOne) {
+    return { ok: false, reason: 'replyToUser: missing required arg or actionExecutor lacks executeOne' };
+  }
+  const safeText = ensureAsciiSafe(replyText);
+  return await actionExecutor.executeOne({
+    type: 'send_message',
+    target: peerAddress,
+    message: safeText,
+  });
+}
+
 function _intentFallback(latestMessage, missingTag, errMsg, parseError) {
   const result = {
     side: 'none', asset: null, qty: null, qty_unit: null, pay_chain: null,
