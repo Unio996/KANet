@@ -89,6 +89,7 @@ let _seenDirty = false;
 let _seenTimer = null;
 
 let _blocklist = new Set();
+let _handshakeAccepted = new Set();  // T1-bugfix Step 4: module-level declaration (was implicit auto-create, ESM strict ReferenceError per NWT r135)
 
 // ── Embedded Kaspa TX indexer state ──
 // Watched addresses that we should persist to kaspa_tx_log on every block observation.
@@ -632,7 +633,6 @@ async function processHandshake(txId, payloadHex, senderAddress) {
     }
 
     // DEDUP 1: in-memory check
-    if (!_handshakeAccepted) _handshakeAccepted = new Set();
     if (_handshakeAccepted.has(senderAddress)) {
       log('HANDSHAKE already accepted for', senderAddress.slice(-12), '— skipping (memory dedup)');
       markSeen(txId);
