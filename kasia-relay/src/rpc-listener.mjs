@@ -720,7 +720,9 @@ async function processHandshake(txId, payloadHex, senderAddress) {
   } catch (err) {
     // T1-bugfix-handshake Step 1: log err.message (was silent swallow per NWT r124 architect verdict)
     log(`HANDSHAKE processing failed for ${senderAddress?.slice(-12) || 'unknown'}: ${err?.message || err}`);
-    markSeen(txId);
+    // T1-bugfix-handshake Step 3 (iii) design fix per NWT r130: NOT markSeen on silent throw — catch-up retries next cycle.
+    // Step 2 telemetry will isolate the failing step within 1-2 catch-up cycles.
+    // Risk mitigation: if throw is deterministic, infinite retry — revert + add retry-counter cap if observed.
   }
 }
 
