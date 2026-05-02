@@ -11,7 +11,7 @@ import { Mnemonic } from 'kaspa-wasm';
 import { getWorkingRpc } from '../services/rpc-health.js';
 import { writeFile, readFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { startRelay } from '../services/relay-manager.js';
+import { startRelay, stopRelay } from '../services/relay-manager.js';
 import { getMind } from '../services/mind-manager.js';
 import { ethers } from 'ethers';
 import { encrypt, decrypt } from '../services/crypto.js';
@@ -118,6 +118,22 @@ export async function registerRelayRoutes(fastify) {
       }
     }
     return reply.redirect('/relays');
+  });
+
+  // Restart a single relay process — Bug 1 path C (per Owner 5/2 approve, T1-bugfix-handshake)
+  // Plumb stopRelay + startRelay sequential. Use case: re-process catch-up after rpc-listener.mjs hot-fix.
+  fastify.post('/api/relay/:id/restart', async (request, reply) => {
+    const id = request.params.id;
+    const relay = getRelayNode(id);
+    if (!relay) return reply.code(404).send({ error: 'Relay not found' });
+    const stopResult = await stopRelay(id);
+    // stopResult.ok=false reason='not_running' is OK — proceed to start
+    const startResult = await startRelay(id);
+    if (!startResult.ok) {
+      return reply.code(503).send({ error: 'restart failed', stopResult, startResult });
+    }
+    console.log(`[relay-manager] Restarted ${relay.name} relay (PID ${startResult.pid})`);
+    return reply.send({ ok: true, stopResult, startResult });
   });
 
   // Balance query — auto-selects best available RPC node
