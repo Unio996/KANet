@@ -623,6 +623,7 @@ async function processHandshake(txId, payloadHex, senderAddress) {
 
     // Record the inbound handshake TX (observation only — no status advancement)
     ingestTx({ traceId: txId, txid: txId, direction: 'inbound', localAddress: _myAddress });
+    log('HANDSHAKE step 1 ingestTx ok');
 
     if (_blocklist.has(senderAddress)) {
       log('BLOCKED — handshake ignored');
@@ -637,6 +638,7 @@ async function processHandshake(txId, payloadHex, senderAddress) {
       markSeen(txId);
       return;
     }
+    log('HANDSHAKE step 2 dedup-1 in-memory pass');
     // DEDUP 2: check Console relation_states (persists across restarts)
     if (CONSOLE_URL) {
       try {
@@ -649,6 +651,7 @@ async function processHandshake(txId, payloadHex, senderAddress) {
         }
       } catch {}
     }
+    log('HANDSHAKE step 3 dedup-2 db pass');
 
     // Register inbound handshake in Console → triggers pending_actions queue
     ingestMessage({
@@ -657,6 +660,7 @@ async function processHandshake(txId, payloadHex, senderAddress) {
       txid: txId, messageType: 'handshake', contentText: '',
       theirAlias,
     });
+    log('HANDSHAKE step 4 ingestMessage ok');
 
     // Atomic create + claim: write pending_action and lock it before spending KAS
     // If claim fails, catch-up already took this one — skip sendKaspa
@@ -683,6 +687,7 @@ async function processHandshake(txId, payloadHex, senderAddress) {
         log('HANDSHAKE claim check failed:', claimErr?.message, '— proceeding');
       }
     }
+    log('HANDSHAKE step 5 claim ok');
 
     log('auto-accepting handshake...');
     const draft = await acceptHandshake({ address: senderAddress });
@@ -712,8 +717,9 @@ async function processHandshake(txId, payloadHex, senderAddress) {
     } else {
       log('HANDSHAKE: accept draft failed — will retry on next startup');
     }
-  } catch {
-    // Decrypt failed — not for us, mark seen to avoid retrying
+  } catch (err) {
+    // T1-bugfix-handshake Step 1: log err.message (was silent swallow per NWT r124 architect verdict)
+    log(`HANDSHAKE processing failed for ${senderAddress?.slice(-12) || 'unknown'}: ${err?.message || err}`);
     markSeen(txId);
   }
 }
