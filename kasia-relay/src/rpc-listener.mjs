@@ -89,7 +89,7 @@ let _seenDirty = false;
 let _seenTimer = null;
 
 let _blocklist = new Set();
-let _handshakeAccepted = new Set();  // T1-bugfix Step 4: module-level declaration (was implicit auto-create, ESM strict ReferenceError per NWT r135)
+let _handshakeAccepted = new Set();  // ESM strict mode requires explicit declaration before any assignment
 
 // ── Embedded Kaspa TX indexer state ──
 // Watched addresses that we should persist to kaspa_tx_log on every block observation.
