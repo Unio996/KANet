@@ -278,24 +278,23 @@ test('T2 stripMarkdown 不破 emoji / 中文 / 数字 / 普通 punct', () => {
   assert.equal(m.stripMarkdown(''), '');
 });
 
-test('T2 shouldPublish uses m.dir + m.text (NOT m.role + m.content)', () => {
+test('T3.1 asyncShouldPublish fail-closed when adapter unavailable (KI-22)', async () => {
   const m = new MatcherSkill();
   const intent = { side: 'buy', confidence: 'high', missing_fields: [] };
-  const historyAgree = [{ dir: 'in', text: '好的', ts: '2026-05-03' }];
-  assert.equal(m.shouldPublish(intent, historyAgree), true);
-  const historyNoAgree = [{ dir: 'in', text: '我看看', ts: '2026-05-03' }];
-  assert.equal(m.shouldPublish(intent, historyNoAgree), false);
-  // role/content schema (wrong) should NOT match
-  const historyOldSchema = [{ role: 'user', content: '好的' }];
-  assert.equal(m.shouldPublish(intent, historyOldSchema), false);
+  const okHist = [{ dir: 'in', text: '好的', ts: '2026-05-03' }];
+  // No config.adapterUrl → fail-closed false (per T3.1 spec)
+  assert.equal(await m.asyncShouldPublish(intent, okHist, {}), false);
+  assert.equal(await m.asyncShouldPublish(intent, okHist, null), false);
 });
 
-test('T2 shouldPublish gates: low confidence / missing_fields / non buy-sell', () => {
+test('T3.1 asyncShouldPublish cheap gates: low confidence / missing_fields / non buy-sell', async () => {
   const m = new MatcherSkill();
   const okHist = [{ dir: 'in', text: '好的' }];
-  assert.equal(m.shouldPublish({ side: 'buy', confidence: 'low', missing_fields: [] }, okHist), false);
-  assert.equal(m.shouldPublish({ side: 'buy', confidence: 'high', missing_fields: ['qty'] }, okHist), false);
-  assert.equal(m.shouldPublish({ side: 'query', confidence: 'high', missing_fields: [] }, okHist), false);
+  const config = { adapterUrl: 'http://127.0.0.1:99999' }; // unreachable, but cheap gates short-circuit before fetch
+  // Cheap gates trigger before adapter call → false without LLM round-trip
+  assert.equal(await m.asyncShouldPublish({ side: 'buy', confidence: 'low', missing_fields: [] }, okHist, config), false);
+  assert.equal(await m.asyncShouldPublish({ side: 'buy', confidence: 'high', missing_fields: ['qty'] }, okHist, config), false);
+  assert.equal(await m.asyncShouldPublish({ side: 'query', confidence: 'high', missing_fields: [] }, okHist, config), false);
 });
 
 test('T2 publishOffer uses this._config.relayNodeId (T1.5 sediment)', async () => {

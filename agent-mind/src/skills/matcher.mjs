@@ -66,13 +66,13 @@ export class MatcherSkill extends Skill {
     }
   }
 
-  // T2 wrapper: extractIntent extends T1 helper with publish trigger detection.
-  // Per architect v1.3 Option Y refactor (T1 logic preserved in _extractIntentT1).
+  // T2/T3 wrapper: extractIntent extends T1 helper with publish trigger detection.
+  // T3.1 (KI-19 fix): shouldPublish keyword regex → asyncShouldPublish LLM classify.
   async extractIntent(gathered, latestMessage, config) {
     const intent = await this._extractIntentT1(gathered, latestMessage, config);
 
-    // T2: publish trigger
-    intent.should_publish = this.shouldPublish(intent, gathered.history || []);
+    // T3.1: publish trigger via LLM classify (KI-19 fix replaces keyword regex)
+    intent.should_publish = await this.asyncShouldPublish(intent, gathered.history || [], config);
     if (intent.should_publish) {
       try {
         const offerResult = await this.publishOffer(intent);
@@ -142,15 +142,38 @@ export class MatcherSkill extends Skill {
     return intent;
   }
 
-  // T2: publish trigger judgment (intent 完整 + user 同意 keywords)
-  shouldPublish(intent, peerHistory) {
+  // T3.1 (KI-19 fix): LLM intent classify replaces keyword regex.
+  // Cheap gates first (intent shape) → LLM call only if obvious not-ready filtered.
+  // Fail-closed: adapter unavailable / parse err → return false (per KI-22 sediment).
+  // Implementer authoritative reconciliation: mindTask: true (boolean) per agent-adapter/index.mjs:79
+  // canonical pattern (matcher.mjs:120 + 8 mind.mjs sites), spec line 161 'shouldPublish_classify' string
+  // not adopted (adapter just truthy-checks, but 8 existing sites use boolean).
+  async asyncShouldPublish(intent, peerHistory, config) {
     if (intent.confidence !== 'high') return false;
     if (intent.side !== 'buy' && intent.side !== 'sell') return false;
     if (intent.missing_fields?.length > 0) return false;
-    const recent = (peerHistory || []).slice(-5);
-    // \b doesn't match CJK chars in JS regex — split ASCII (with \b) from CJK (literal)
-    const agreeKw = /\b(ok|OK)\b|好|可以|确认|发吧|来吧|没问题/i;
-    return recent.some(m => m.dir === 'in' && agreeKw.test(m.text || ''));
+    const adapterUrl = config?.adapterUrl;
+    if (!adapterUrl) return false;
+    const recentText = (peerHistory || []).slice(-5).map(m => `${m.dir === 'in' ? 'user' : 'matcher'}: ${m.text || ''}`).join('\n');
+    const userMsg = `intent: ${JSON.stringify(intent)}\nrecent history (last 5):\n${recentText || '(empty)'}`;
+    try {
+      const response = await fetchJson(`${adapterUrl}/reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          peer: this._senderAddress,
+          mindSystem: SHOULD_PUBLISH_SYSTEM,
+          mindUser: userMsg,
+          mindTask: true,
+        }),
+        brainCall: true,
+      });
+      const cleaned = (response?.reply || '').replace(/^```(?:json)?\s*|\s*```\s*$/gs, '').trim();
+      const parsed = JSON.parse(cleaned);
+      return parsed?.ready === true;
+    } catch {
+      return false;
+    }
   }
 
   // T2: 算定价 (T2 简化, T3 加 mid_price 来源 market-data)
@@ -310,6 +333,20 @@ export class MatcherSkill extends Skill {
     return generateReply(intent);
   }
 }
+
+// T3.1 (KI-19 fix): shouldPublish gate LLM classify prompt.
+// 替 T2 keyword regex (CJK \b boundary 问题 + 实战 too strict).
+const SHOULD_PUBLISH_SYSTEM = [
+  '你是 broker 助手, 判断 user 是否准备好提交 offer 上链.',
+  '',
+  '判断标准 (binary):',
+  '- ready=true: user 明确同意 publish (含: 完整意图 + 用户最近消息含 同意/确认/可以/发吧/OK 等),',
+  '  AND user 已提供 evm_address (EVM/BSC 链 buy/sell scenarios required) OR intent.pay_chain=KASPA.',
+  '- ready=false: 缺任一条件',
+  '',
+  '只返 JSON: { "ready": true|false, "reason": "..." }',
+  '不要 markdown wrapper, 不要解释文本.',
+].join('\n');
 
 // matcher 撮合官 LLM persona + JSON schema (T1.3 inline prompt, per NWT r114 option i)
 const MATCHER_INTENT_SYSTEM = [
