@@ -33,7 +33,7 @@
 
 | 层 | role | 真位置 | 性质 |
 |---|---|---|---|
-| **Truth** | 状态变迁的 immutable append-only log | Kaspa chain_events 表 + chain TX | append-only, ordered, multi-instance consensus |
+| **Truth** | 状态变迁的 immutable append-only log | Kaspa chain_events 表 + chain TX | **multi-writer append-only** (7+ writer paths per J2 r128 grep verify), ordered by chain TX, multi-instance consensus |
 | **Projection** | 当前 state cache (优化 query 用) | Console DB column (eg `exchange_offers.lifecycle_state`) | derived, rebuildable from chain replay |
 | **Reactor** | 监听 events → 决策 → emit next event | matcher / broker / settlement skill (process) | **0 own state**, 仅 reactive event handler |
 
@@ -54,9 +54,10 @@
 
 KANet 已 ship 的 infra 真 cover event-sourced 模式 (J2 r127 后 sediment 待 verify):
 
-**Primary primitives**:
-- **chain_events** 表 (id / txid / from_address / to_address / event_type / payload / observed_at) — Kaspa block 观察 → INSERT row, immutable
-- **trade-protocol-filter** (services/trade-protocol-filter.js) — chain_events listener, 7 OTC + 7 Exchange protocol message types subscribe
+**Primary primitives** (per J2 r128 grep verify, 5/3):
+
+- **chain_events** 表 (id / txid / from_address / to_address / event_type / payload / observed_at) — multi-writer append-only INSERT (7+ writer paths verified: state-transitions / broker-inventory-watcher / broker-state-authority / broker-state-machine / exchange-machine 等). Append-only convention 守 — 0 UPDATE, 0 DELETE chain_events row.
+- **trade-protocol-filter** (services/trade-protocol-filter.js, 62656 bytes) — chain_events handler-style switch on `t` field, **15 protocol types verified** (7 OTC: kanet_sell_v1/buy/accept/paid/delivered/cancel/timeout + 8 Exchange: kanet_exchange_v1/_accept/_cancel/_paid/_delivered/_timeout/_dispute/_resolve + 1 misc: kanet_confirm_v1)
 - **broadcast_messages** 表 — broadcast TX 上链 audit trail
 - **kaspa_tx_log** 表 (Week 2 Day 1 ship) — Relay 嵌入 indexer 观察 watched-address TX
 
@@ -142,10 +143,10 @@ published → accepted → paying → paid → verified → delivering → compl
 
 ### 9.6.1 T3 settlement state machine
 - 9-state per 9.4 应用
-- matcher subscribe trade-protocol-filter for: payment_received / payment_verified / delivery_confirmed / dispute_raised / offer_expired
-- matcher emit: payment_verified (post proof check) / delivery_initiated (sendKaspa) / 不 emit terminal events (chain observer 自然 detect)
-- exchange_offers.lifecycle_state column = derived from latest event for offer_id (via replay OR materialized view)
-- Migration v54 候选: lifecycle_state column 加 NOT NULL DEFAULT 'published' + index on (lifecycle_state, broadcast_at)
+- matcher subscribe trade-protocol-filter for: kanet_exchange_paid_v1 / kanet_exchange_delivered_v1 / kanet_exchange_dispute_v1 / kanet_exchange_timeout_v1
+- matcher emit: kanet_exchange_paid_v1 (post EVM proof verify) / kanet_exchange_delivered_v1 (sendKaspa)
+- **column name verified (per J2 r128 grep)**: \`exchange_offers.protocol_status\` (NOT \`lifecycle_state\` — NWT §9 v0 凭印象, J2 grep catch). Schema 现状 (Migration v83 `CHECK(protocol_status IN ('open','matched','verifying','delivering','completed','refunded','failed','expired','timed_out','cancelled','disputed'))` 11 enum values).
+- 现状 9.5 anti-pattern #2 widespread: 8+ direct UPDATE paths to \`exchange_offers.protocol_status\` (api/exchange.js / broker-intake-watcher / broker-state-authority / exchange-machine), 不全经 transition() helper. T3 重构 candidate: 全 UPDATE → emit chain event TX → trade-protocol-filter handler 推 derive projection.
 
 ### 9.6.2 Bug A (cross-agent handshake decrypt fail) state perspective
 - Handshake protocol 当前 implicit state in relation_states (status='accepted') + chain_events handshake type
@@ -155,6 +156,30 @@ published → accepted → paying → paid → verified → delivering → compl
 ### 9.6.3 Future skills
 - 新 skill 接 protocol layer 必 follow event-sourced pattern (NOT 自建 state machine)
 - INVARIANTS §9 = sediment 防止 future skills 重 旧 broker 错误
+
+---
+
+## 9.6.4 §9 draft 自身 实证 — KI-2/3/4/5 防复刻硬纪律 第 5 cycle
+
+per J2 r128 grep verify of NWT §9 v0 draft:
+- §9.2 wording "single observer" → 修 "multi-writer append-only" (7+ writer paths verified)
+- §9.3 protocol type count "7 OTC + 7 Exchange = 14" → 修 "7 + 8 + 1 misc = 15" (kanet_exchange_dispute_v1/resolve_v1 漏 + kanet_confirm_v1)
+- §9.6.1 column name "lifecycle_state" → 修 "protocol_status" (Migration v54 假定不存在, 真 v83 column exists)
+- §9.5 anti-pattern #2/#3 confirm transition() RMW with CAS hybrid (实证 OK)
+- §9.3 sub Skill event subscription standardization confirm 0 hit (实证 OK)
+
+**Meta-invariant**: INVARIANTS sediment 章节本身也 subject to KI-2/3/4/5 防复刻 — architect 起 invariant doc 凭 specific facts (column 名 / type count / writer paths) 时仍可能凭印象。 J2 grep verify infrastructure 必 raise 到**INVARIANTS sediment layer**, NOT 仅 task卡 spec layer。
+
+INVARIANTS v0.2 §1.2 surface area 应扩 cover (per 5 cycle catch trace):
+- API signature (Phase 1 KI-2/3/4/5)
+- Endpoint shape (T2 v1.0)
+- Class lifecycle structure (T2 v1.1)
+- Method signature param count + input shape (T2 v1.2)
+- Helper method existence (T2 v1.2)
+- Method orchestrate flow direction (T2 v1.2)
+- **Schema column names** (T2 v1.2 + §9 draft 5/3 新触发)
+- **Protocol message type count + names** (§9 draft 5/3 新触发)
+- **Multi-writer paths to event/state tables** (§9 draft 5/3 新触发)
 
 ---
 
