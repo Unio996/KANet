@@ -1,15 +1,15 @@
 # Task: PZ-MATCHER-shipT2
 
-**Version**: v1.2 (修 v1.1 4+ 处深层 Skill lifecycle / ctx / schema mismatch, J2 r125 grep + NWT r150 cross-review)
+**Version**: v1.3 (修 v1.2 + 加 stripMarkdown helper, BugFix-Bot audit 5/3 catch markdown leak 28%)
 **Phase**: T2 (matcher publishOffer)
-**Scope**: matcher v0.2 — 发 offer 到 /exchange + 反馈 user (extend formatForBrain + extractIntent, NO run() orchestrator)
+**Scope**: matcher v0.2 — 发 offer 到 /exchange + 反馈 user (extend formatForBrain + extractIntent, NO run() orchestrator) + stripMarkdown
 **Owner**: J2 (implementor) → NWT (reviewer hat) → operator (system self-verify)
 **ETA**: ~2-3 hr ship + 1 hr cross-review + system auto-verify
 **LOC budget**: ~80 LOC (matcher ship) + ~50 LOC (test) + ~30 LOC (telemetry)
 
 ---
 
-## v1.0 → v1.1 → v1.2 修订记录
+## v1.0 → v1.1 → v1.2 → v1.3 修订记录
 
 **v1.0 → v1.1** (J2 r124 grep + NWT r148 verify, 8 处 mismatch):
 - M1-M2 endpoint payload (relayNodeId required, expires_minutes)
@@ -25,7 +25,15 @@
 | A | Skill lifecycle entry | `run(ctx)` orchestrator | NO `run()` — registry.mjs orchestrate `gatherContext + formatForBrain` pair |
 | B | Skill base methods | `run` 是 lifecycle entry | base.mjs 真 lifecycle: `canActivate / gatherContext / formatForBrain` |
 | C | relayNodeId source | `ctx.relayNodeId` | `this._config.relayNodeId` (T1.5 sediment, matcher.mjs:35 `this._config = config \|\| {}`) |
-| D | history shape | `{role, content}` | `{dir, text, ts}` (conversations.js:548+554, 'in' 是 dir, content_text 是 text, received_at 是 ts) |
+| D | history shape | `{role, content}` | `{dir, text, ts}` (conversations.js:548+554) |
+
+**v1.2 → v1.3** (BugFix-Bot audit 5/3 catch + Owner architect verdict):
+
+| # | issue | 来源 | v1.3 修 |
+|---|---|---|---|
+| MD-1 | LLM 输出 `**bold**` markdown 字面透出 user, 7/25 reply 受影响 (28%) | BugFix-Bot audit | 加 stripMarkdown helper + apply formatForBrain 所有分支 |
+
+KI-18 candidate sediment: User-facing output 必 platform-agnostic format (KANet user 通过 Kasia / 手机 app, 不是 KANet UI, 不能假设 markdown 渲染).
 
 **关键 sediment**: v1.0/v1.1 试加 orchestrator entry 偏离 Phase 1 r117 sediment "matcher 经 Brain 自然 reply 路径"。J2 grep verify catch 回正轨。
 
@@ -334,32 +342,54 @@ grep -nB 2 -A 30 "async extractIntent" /c/kanet/agent-mind/src/skills/matcher.mj
 
 ---
 
-### T2.3 — formatForBrain extend (offer feedback)
+### T2.3 — formatForBrain extend (offer feedback + stripMarkdown)
 
 #### 目标
 
 matcher 真告诉 user offer 已发 + 付款指示, 走 registry.mjs:155+160 orchestrate 自然 reply 路径。
+
+**v1.3 加**: stripMarkdown helper apply 所有 user-facing reply (T1 path + T2 offer feedback + T2 error feedback)。
 
 #### Spec
 
 ```js
 export class Matcher extends Skill {
   // T1 ship formatForBrain 已有逻辑 (return intent + history → reply text)
-  // T2 修订: 检 intent._offerResult, 不同分支
+  // T2 修订: 检 intent._offerResult, 不同分支 + stripMarkdown apply
 
   async formatForBrain(intent, peerHistory) {
+    let reply;
+
     // T2 新分支: offer 已发 → return offer feedback
     if (intent._offerResult) {
-      return this.generateOfferFeedback(intent, intent._offerResult);
+      reply = this.generateOfferFeedback(intent, intent._offerResult);
     }
-
     // T2 新分支: publish 失败 → return error feedback
-    if (intent._publishError) {
-      return `抱歉, 发布报价时出错了 (${intent._publishError}). 我会反馈给开发者. 你可以稍后再试.`;
+    else if (intent._publishError) {
+      reply = `抱歉, 发布报价时出错了 (${intent._publishError}). 我会反馈给开发者. 你可以稍后再试.`;
+    }
+    // T1 原路径不变 (intent unclear / 没同意 publish 时)
+    else {
+      reply = await this._formatForBrainT1(intent, peerHistory);  // T1 真 method 名 J2 grep 确认
     }
 
-    // T1 原路径不变 (intent unclear / 没同意 publish 时)
-    return this._formatForBrainT1(intent, peerHistory);  // T1 真 method 名 J2 grep 确认
+    // v1.3: 全 reply path apply stripMarkdown (KI-18 sediment, BugFix-Bot 5/3 audit)
+    return this.stripMarkdown(reply);
+  }
+
+  /**
+   * Strip markdown formatting from LLM output.
+   * KANet user 通过 Kasia / 手机 app 等 multi-client, 不假设 markdown 渲染.
+   * BugFix-Bot 5/3 audit: 7/25 T1 reply leaked **bold** literal to user.
+   */
+  stripMarkdown(text) {
+    if (!text || typeof text !== 'string') return text;
+    return text
+      .replace(/\*\*(.+?)\*\*/g, '$1')      // **bold** → bold
+      .replace(/(?<![\*\w])\*([^\*\n]+?)\*(?![\*\w])/g, '$1')  // *italic* → italic (避免 ** 误伤)
+      .replace(/^#+\s+/gm, '')               // # heading → heading (line start 不动 emoji)
+      .replace(/`([^`\n]+?)`/g, '$1')        // `code` → code
+      .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');  // [text](url) → text
   }
 
   generateOfferFeedback(intent, offerResult) {
@@ -402,20 +432,35 @@ export class Matcher extends Skill {
 #### ⚠ J2 必 spot check
 
 ```bash
-# T1 ship formatForBrain 真 method body — v1.2 spec 是 extend
+# T1 ship formatForBrain 真 method body — v1.3 spec 是 extend
 grep -nB 2 -A 40 "async formatForBrain" /c/kanet/agent-mind/src/skills/matcher.mjs
+
+# T1 是否真分 _formatForBrainT1 helper, 还是 inline logic
+# 如果 T1 直接 return text 不分 helper, J2 实施时:
+#   1. 把 T1 logic 重构成 _formatForBrainT1 helper
+#   2. 新 formatForBrain 走 v1.3 wrapper logic
+#   3. 验 T1 24/24 测试仍 pass
 ```
 
-如果 T1 ship formatForBrain 内部不能 extend OR T1 真不分 _formatForBrainT1 helper → J2 broadcast architect 重审。
+如果 T1 ship formatForBrain 内部不能 extend → J2 broadcast architect 重审。
+
+#### Anti-pattern
+
+- ❌ stripMarkdown 不 apply 在 generateOfferFeedback 单独 (集中 wrapper apply 唯一)
+- ❌ 不在 LLM 调用前 strip (太早, LLM 输出未生成)
+- ❌ stripMarkdown 不破 emoji / 中文 / 数字 / 普通标点
 
 #### Acceptance
 
-- ✅ formatForBrain intent._offerResult 非 null → 返 offer feedback
-- ✅ formatForBrain intent._publishError 非 null → 返 error feedback
-- ✅ formatForBrain 都 null → 走 T1 原路径
-- ✅ 通过 registry.mjs:155+160 orchestrate 自然 reply 路径 (NO run() / handle())
+- ✅ formatForBrain intent._offerResult 非 null → 返 offer feedback (经 stripMarkdown)
+- ✅ formatForBrain intent._publishError 非 null → 返 error feedback (经 stripMarkdown)
+- ✅ formatForBrain 都 null → 走 T1 原路径 (经 stripMarkdown)
+- ✅ stripMarkdown('**报价单**') === '报价单'
+- ✅ stripMarkdown('*   **方向**: BUY') === '   方向: BUY' (双层 strip)
+- ✅ stripMarkdown 真不破 emoji / 中文 / 普通文本
+- ✅ 通过 registry.mjs:155+160 orchestrate 自然 reply 路径
 
-#### LOC: ~30
+#### LOC: ~40 (原 30 + stripMarkdown 10)
 
 ---
 
@@ -424,6 +469,30 @@ grep -nB 2 -A 40 "async formatForBrain" /c/kanet/agent-mind/src/skills/matcher.m
 #### 单元测试
 
 ```js
+test('stripMarkdown 真 strip **bold** 字面 (KI-18, BugFix-Bot 5/3 audit)', () => {
+  const matcher = new Matcher({ relayNodeId: 'x' });
+  assert.equal(matcher.stripMarkdown('**报价单**'), '报价单');
+  assert.equal(matcher.stripMarkdown('*   **方向**: BUY'), '   方向: BUY');
+  assert.equal(matcher.stripMarkdown('# heading'), 'heading');
+  assert.equal(matcher.stripMarkdown('`code`'), 'code');
+  assert.equal(matcher.stripMarkdown('[link](http://x)'), 'link');
+});
+
+test('stripMarkdown 不破 emoji / 中文 / 数字', () => {
+  const matcher = new Matcher({ relayNodeId: 'x' });
+  assert.equal(matcher.stripMarkdown('📋 报价详情'), '📋 报价详情');
+  assert.equal(matcher.stripMarkdown('100 KAS / 3.26 USDT'), '100 KAS / 3.26 USDT');
+  assert.equal(matcher.stripMarkdown('  - 你付: 50 USDT'), '  - 你付: 50 USDT');
+});
+
+test('formatForBrain 全分支真 apply stripMarkdown', async () => {
+  const matcher = new Matcher({ relayNodeId: 'x' });
+  // mock T1 _formatForBrainT1 returning markdown
+  matcher._formatForBrainT1 = async () => '**hello** world';
+  const reply = await matcher.formatForBrain({}, []);
+  assert.equal(reply, 'hello world');  // 真 strip
+});
+
 test('publishOffer 真用 this._config.relayNodeId (T1.5 sediment)', async () => {
   const matcher = new Matcher({ relayNodeId: 'test-uuid' });
   // mock fetch
@@ -546,41 +615,44 @@ WHERE sender_address = (SELECT address FROM relay_nodes WHERE name='Trader-M')
 - ❌ **不加 reportEvent / mind-event 新机制** (T1 ship 0, T2 沿用)
 - ❌ **不读 ctx.relayNodeId** (真 source this._config.relayNodeId)
 - ❌ **不读 history m.role / m.content** (真 m.dir / m.text)
+- ❌ **不让 LLM 输出 markdown 直接到 user** (KI-18, stripMarkdown wrapper apply 全 reply path) ← v1.3 新加
 
 ---
 
 ## RFC ref
 
-Owner 5/3 钦定 + KI-17 + INVARIANTS v0.1 §1.2 (specific facts) + MATCHER-ARCHITECTURE v0.1 §9 + r109 (single .mjs class-based) + r117 (formatForBrain Brain reply 路径) + r124 (T2.0 grep 8 mismatch v1.0→v1.1) + r148 (NWT cross-review v1.1) + r125 (T2.0 spot check 4+ mismatch v1.1→v1.2) + r150 (NWT cross-review v1.2).
+Owner 5/3 钦定 + KI-17 + KI-18 (BugFix-Bot 5/3 audit) + INVARIANTS v0.1 §1.2 + MATCHER-ARCHITECTURE v0.1 §9 + r109 + r117 + r124 + r148 + r125 + r150 + BugFix-Bot audit (docs/audits/2026-05-03-matcher-output-quality.md).
 
 ---
 
-## INVARIANTS §1.2 sediment urgency 二次升级
+## INVARIANTS §1.2 + KI-18 sediment urgency 三次升级
 
 v1.0 → v1.1: 8 处 mismatch (浅层 endpoint/payload/file/import)
 v1.1 → v1.2: 4+ 处 mismatch (深层 Skill lifecycle / ctx 模型 / schema field names)
+v1.2 → v1.3: 1 处 user-facing output 反模式 (markdown 字面透出)
 
-**INVARIANTS §1.2 surface area v0.2 候选扩**:
+**INVARIANTS v0.2 候选扩 surface area**:
 - API signature (v0.1 已含)
-- Class lifecycle structure (v0.2 新加, T2 v1.1 撞)
-- Schema shape / object field names (v0.2 新加, T2 v1.2 撞)
-- Config / state 真 source (v0.2 新加, T2 v1.2 撞 ctx vs this._config)
+- Class lifecycle structure (T2 v1.1 撞)
+- Schema shape / object field names (T2 v1.2 撞)
+- Config / state 真 source (T2 v1.2 撞 ctx vs this._config)
+- **User-facing output platform-agnostic (KI-18, T2 v1.3 撞)** ← 新
 
-**v0.2 触发条件 #2** (任何 KI 复刻 ≥2 次) **真满**:
-- KI-2/3/4/5 → T2 v1.0/v1.1 复刻 = 2 次
-
-INVARIANTS v0.2 起草 trigger 真到 (Phase 1 close + Phase 2 第一 ship 后)。
+**KI-18 candidate**: User-facing output 必 platform-agnostic format.
+KANet user 通过 Kasia / 手机 app, 不假设 markdown / HTML 渲染.
+LLM 输出必 strip markdown wrapper. 文本布局靠 emoji + 缩进 + 换行, 不靠 ** / # / ` 等渲染指令.
 
 ---
 
-## 接位 SOP (J2 接此任务 v1.2)
+## 接位 SOP (J2 接此任务 v1.3)
 
-1. ❌ 不重跑 T2.0 完整 grep (v1.0/v1.1 已跑)
-2. **必** spot check v1.2 spec 真代码 (~5 min):
-   - Skill base.mjs 真 lifecycle methods (canActivate/gatherContext/formatForBrain, NO run)
-   - registry.mjs orchestrate gatherContext+formatForBrain pair
-   - matcher.mjs T1 真 _config / extractIntent / formatForBrain method bodies (能 extend?)
+1. ❌ 不重跑 T2.0 完整 grep (v1.0/v1.1/v1.2 已跑)
+2. **必** spot check v1.3 spec 真代码 (~5 min):
+   - Skill base.mjs lifecycle methods
+   - registry.mjs orchestrate path
+   - matcher.mjs T1 _config / extractIntent / formatForBrain method bodies (能 extend?)
    - history schema (m.dir / m.text)
+   - **T1 formatForBrain 是否真分 _formatForBrainT1 helper** (v1.3 wrapper logic 真依赖)
 3. spot check 撞 unknown → broadcast architect, 不擅自实施
 4. 直接进 T2.1
 5. 每 subtask commit broadcast 触发器 → NWT reviewer hat 审
@@ -592,17 +664,18 @@ INVARIANTS v0.2 起草 trigger 真到 (Phase 1 close + Phase 2 第一 ship 后)�
 
 撞这些立即暂停:
 
-1. T1 ship matcher.mjs 真 lifecycle method 跟 v1.2 spec 任 1 处不一致 → broadcast architect (KI-2/3/4/5 sediment 第 3 轮)
-2. T1 extractIntent / formatForBrain 内部不能 extend (T1 hardcoded 死 logic 不留 hook) → broadcast architect (架构改动大)
-3. registry.mjs:155+160 真 orchestrate path 跟 J2 r125 finding 不一致 → broadcast architect 重审
-4. publishOffer endpoint 真签名仍跟 v1.2 spec 不一致 (rare) → broadcast architect
-5. T1 24/24 测试任 1 fail → revert + 重审 T2 extend 逻辑
-6. 集成测试 exchange_offers 真有 row 但 chain_events 0 → KANet publish endpoint bug, broadcast architect
+1. T1 ship matcher.mjs 真 lifecycle method 跟 v1.3 spec 任 1 处不一致
+2. T1 extractIntent / formatForBrain 内部不能 extend (T1 hardcoded 死 logic 不留 hook)
+3. registry.mjs:155+160 真 orchestrate path 跟 J2 r125 finding 不一致
+4. publishOffer endpoint 真签名仍跟 v1.3 spec 不一致
+5. T1 24/24 测试任 1 fail
+6. 集成测试 exchange_offers 真有 row 但 chain_events 0
+7. **stripMarkdown 真破 emoji / 中文 / 普通文本** (regex 误伤) ← v1.3 新加
 
 ---
 
-*v1.2 — 2026-05-03 Architect mode (claude.ai). 修 v1.1 4+ 处深层 Skill lifecycle / ctx / schema mismatch. 回归 Phase 1 r117 sediment "matcher 经 Brain 自然 reply 路径".*
+*v1.3 — 2026-05-03 Architect mode (claude.ai). v1.2 + stripMarkdown helper (10 LOC, BugFix-Bot 5/3 audit catch markdown leak 28%).*
 
-*v1.0 → v1.1 → v1.2 sediment: KI-2/3/4/5 防复刻硬纪律真起作用 — Phase 1 期间 4 处 mismatch, T2 v1.0 复刻 8 处 (浅层), T2 v1.1 复刻 4+ 处 (深层). INVARIANTS §1.2 v0.2 触发条件 #2 真满, 必扩 surface area: API signature + Class lifecycle structure + Schema shape + Config 真 source.*
+*v1.0 → v1.1 → v1.2 → v1.3 sediment: KI-2/3/4/5 + KI-18 防复刻硬纪律真起作用. Phase 1 4 处, T2 v1.0 8 处, T2 v1.1 4+ 处, T2 v1.2 markdown 1 处. INVARIANTS v0.2 候选 surface area 扩 5 类: API signature + Class lifecycle + Schema shape + Config 真 source + User-facing output platform-agnostic.*
 
 *Owner 5/3 钦定: "干, 唯一的路". J2 ship + NWT cross-review.*
