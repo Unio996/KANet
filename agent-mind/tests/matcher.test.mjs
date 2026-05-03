@@ -297,6 +297,34 @@ test('T3.1 asyncShouldPublish cheap gates: low confidence / missing_fields / non
   assert.equal(await m.asyncShouldPublish({ side: 'query', confidence: 'high', missing_fields: [] }, okHist, config), false);
 });
 
+test('T3.2 reactToChainEvents fail-closed when address/consoleUrl missing', async () => {
+  const m = new MatcherSkill();
+  const r1 = await m.reactToChainEvents('', { consoleUrl: 'http://x' });
+  assert.deepEqual(r1.activeOffers, []);
+  assert.equal(r1.reason, 'no_address_or_console');
+  const r2 = await m.reactToChainEvents('kaspa:abc', null);
+  assert.deepEqual(r2.activeOffers, []);
+  assert.equal(r2.reason, 'no_address_or_console');
+});
+
+test('T3.2 reactToChainEvents fetch err returns activeOffers=[] (NOT throw)', async () => {
+  const m = new MatcherSkill();
+  // unreachable port → fetchJson throws → catch returns {activeOffers:[], error:...}
+  const r = await m.reactToChainEvents('kaspa:abc', { consoleUrl: 'http://127.0.0.1:1' });
+  assert.deepEqual(r.activeOffers, []);
+  assert.ok(r.error, 'error field set on fetch fail');
+});
+
+test('T3.2 source: reactToChainEvents 0 own state (per §9.5 #1)', async () => {
+  const fs = await import('node:fs/promises');
+  const src = await fs.readFile(new URL('../src/skills/matcher.mjs', import.meta.url), 'utf-8');
+  // 0 instance Map/Set holding offer state across cycles (per anti-pattern #1)
+  assert.doesNotMatch(src, /this\._offerStateCache\s*=/);
+  assert.doesNotMatch(src, /this\._reactorMemory\s*=/);
+  // reactToChainEvents must fetch 每 cycle (0 cache)
+  assert.match(src, /\/api\/exchange\/offers\?maker=/);
+});
+
 test('T2 publishOffer uses this._config.relayNodeId (T1.5 sediment)', async () => {
   const m = new MatcherSkill();
   m._config = {}; // missing relayNodeId

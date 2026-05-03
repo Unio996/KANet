@@ -68,8 +68,12 @@ export class MatcherSkill extends Skill {
 
   // T2/T3 wrapper: extractIntent extends T1 helper with publish trigger detection.
   // T3.1 (KI-19 fix): shouldPublish keyword regex → asyncShouldPublish LLM classify.
+  // T3.2 (reactor): reactToChainEvents per-cycle snapshot of Trader-M's in-flight offers.
   async extractIntent(gathered, latestMessage, config) {
     const intent = await this._extractIntentT1(gathered, latestMessage, config);
+
+    // T3.2: chain-event reactor (per-cycle snapshot, 0 own state per §9.5 #1)
+    intent._reactor = await this.reactToChainEvents(config?.address, config);
 
     // T3.1: publish trigger via LLM classify (KI-19 fix replaces keyword regex)
     intent.should_publish = await this.asyncShouldPublish(intent, gathered.history || [], config);
@@ -140,6 +144,39 @@ export class MatcherSkill extends Skill {
       intent.confidence = 'low';
     }
     return intent;
+  }
+
+  // T3.2: matcher reactor for chain-event in-flight offers (path b per task v1.1 §T3.2).
+  // 0 own state (per INVARIANTS §9.5 #1) — fetch fresh snapshot 每 reactive cycle.
+  // Limitation: Skill-instance fires per peer DM, NOT independent timer. trade-protocol-filter
+  // server handlers already do heavy lifting (DB UPDATE / sendKas) — matcher reactor's role 是
+  // user-facing T3.5 反馈 + T3.3 emit hooks per current state snapshot.
+  async reactToChainEvents(myAddress, config) {
+    if (!myAddress || !config?.consoleUrl) return { activeOffers: [], reason: 'no_address_or_console' };
+    const ACTIVE_STATES = ['matched', 'verifying', 'delivering', 'disputed'];
+    try {
+      const url = `${config.consoleUrl}/api/exchange/offers?maker=${encodeURIComponent(myAddress)}&limit=20`;
+      const data = await fetchJson(url);
+      const offers = data?.offers || [];
+      const activeOffers = offers.filter(o => ACTIVE_STATES.includes(o.protocol_status)).map(o => ({
+        offer_id: o.id,
+        protocol_status: o.protocol_status,
+        maker: o.maker,
+        taker: o.taker,
+        give_asset: o.give_asset,
+        give_amount: o.give_amount,
+        want_asset: o.want_asset,
+        want_amount: o.want_amount,
+        taker_chain: o.taker_chain,
+        payment_tx: o.payment_tx,
+        delivery_tx: o.delivery_tx,
+        broadcast_at: o.broadcast_at,
+      }));
+      return { activeOffers, fetchedAt: Date.now() };
+    } catch (err) {
+      console.warn(`[matcher] reactToChainEvents failed: ${err.message}`);
+      return { activeOffers: [], error: err.message };
+    }
   }
 
   // T3.1 (KI-19 fix): LLM intent classify replaces keyword regex.
