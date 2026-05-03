@@ -1,6 +1,6 @@
 # Task: PZ-MATCHER-shipT3
 
-**Version**: v1.0
+**Version**: v1.1 (修 v1.0 per J2 r134 grep verify: 3 决断 + 1 clarify)
 **Phase**: Phase 2 P0 critical (broker 4 stage 真 missing piece)
 **Scope**: matcher v0.3 — Stage 3 KI-19 真修 + Stage 4 settlement state machine event-sourced (per INVARIANTS §9 draft + Owner 5/3 9-state spec)
 **Owner**: J2 (implementor) → NWT (reviewer hat) → operator (system self-verify)
@@ -233,44 +233,75 @@ J2 grep 验真 best path post T3.0。
 
 ---
 
-### T3.3 — Stage 4 emit: matcher emit payment_verified + delivery_initiated
+### T3.3 — Stage 4 emit: matcher emit chain TX via existing Relay infra
+
+#### 🔴 决断 1 修 v1.1 (per J2 r134 grep finding)
+
+v1.0 spec line 260 假定 \`/api/exchange/verify\` POST 不存在。 真 emit path = 用 existing **\`/api/relay/:id/send-command\` + type: 'send_broadcast'** + channel: 'kanet-exchange' + message JSON-encoded protocol payload。 Relay 真 broadcast chain TX, trade-protocol-filter 自动 handler dispatch。
+
+NO 新建 endpoint。 复用 Relay broadcast 既有 pattern (NWT broadcasts 5/3 全 thread 都 走此 path)。
 
 #### 目标
 
-matcher 真 emit 2 chain events (post settlement):
-- payment_verified: post EVM cross-chain proof verify (跨链确认 paid)
-- delivery_initiated: post sendKaspa (KAS 真发 user)
+matcher emit 2 chain events post settlement:
+- **kanet_exchange_paid_v1**: post EVM cross-chain proof verify (跨链确认 paid, matcher 角色 verifier)
+- **kanet_exchange_delivered_v1**: post sendKaspa (KAS 真发 user, matcher 角色 sender)
 
-#### Spec
+#### Spec v1.1
 
 ```js
-// matcher.mjs 加 method
+// matcher.mjs 加 method (extend Skill class)
 
-async emitPaymentVerified(offerId, paymentTx, evmAddress) {
-  // EVM cross-chain proof verify (per existing exchange-machine.js paid handler reference)
-  // emit chain event via /api/exchange/verify (new endpoint OR existing)
-  const payload = {
-    relayNodeId: this._config?.relayNodeId,
-    t: 'kanet_exchange_paid_v1',  // verify event name per T3.0 grep
-    offer_id: offerId,
-    payment_tx: paymentTx,
-    evm_address: evmAddress,
-  };
-  // chain TX emit via Console endpoint (NOT direct sqlite)
-  return await fetchJson(`${this._config?.consoleUrl}/api/exchange/verify`, {
+async emitChainProtocol(eventType, payloadObj) {
+  // emit chain TX via Relay broadcast (existing infra, KI-4 skill HTTP-only 守)
+  const consoleUrl = this._config?.consoleUrl || 'http://127.0.0.1:3100';
+  const relayNodeId = this._config?.relayNodeId;
+  if (!relayNodeId) throw new Error('emitChainProtocol: this._config.relayNodeId missing');
+  
+  const message = JSON.stringify({ t: eventType, ...payloadObj });
+  return await fetchJson(`${consoleUrl}/api/relay/${relayNodeId}/send-command`, {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      type: 'send_broadcast',
+      channel: 'kanet-exchange',
+      message,
+    }),
   });
 }
 
-async emitDeliveryInitiated(offerId, kasAmount, userAddress) {
-  // sendKaspa via existing path (T2 ship reference)
-  // emit kanet_exchange_delivered_v1 chain event
-  // ...
+async emitPaymentVerified(offerId, paymentTx, evmAddress) {
+  // EVM cross-chain proof verify done externally (T3.2 reactor receives kanet_exchange_paid_v1 from taker → matcher verify proof → emit verified event back? Actually:
+  // Wait: kanet_exchange_paid_v1 IS the "paid" event from taker. matcher 不 emit paid. matcher 收 paid → verify → emit kanet_exchange_delivered_v1 (post sendKaspa).
+  // 修 plan: matcher 收 paid_v1 from taker → verify EVM proof OK → trigger sendKaspa → emit delivered_v1
+  // emitPaymentVerified 是 internal helper (verify proof + log), NOT chain emit.
+  console.log(`[matcher] payment verified offer=${offerId} tx=${paymentTx}`);
+  return { verified: true, offerId, paymentTx };
+}
+
+async emitDeliveryInitiated(offerId, kasAmount, userAddress, kasTxId) {
+  // post sendKaspa, emit kanet_exchange_delivered_v1 chain event
+  return await this.emitChainProtocol('kanet_exchange_delivered_v1', {
+    offer_id: offerId,
+    delivery_tx: kasTxId,
+    amount: kasAmount,
+    to: userAddress,
+  });
 }
 ```
 
-具体 endpoint name + payload shape per T3.0 grep result (architect 修 spec post J2 grep)。
+sendKaspa 真 trigger via Relay send-command type='transfer' (T2 ship pattern reference)。 matcher 不直 sendKaspa, 经 Console endpoint。
+
+#### Anti-pattern
+
+- ❌ 不直 SQL UPDATE protocol_status (per INVARIANTS §9.5 #2)
+- ❌ 不直 chain TX from matcher (用 Relay send-command per KI-4 skill HTTP-only)
+- ❌ 不 own offer state in matcher process (per §9.5 #1)
+
+#### Acceptance
+
+- ✅ emitChainProtocol 真发 chain TX (broadcast_messages 真有 row + chain_events 真 observe)
+- ✅ event message JSON.t 真符 trade-protocol-filter dispatch (handleExchangeDelivered 真 pick up)
+- ✅ matcher 0 own state (instance 0 holds offer reference)
 
 #### Anti-pattern
 
@@ -288,60 +319,89 @@ async emitDeliveryInitiated(offerId, kasAmount, userAddress) {
 
 ---
 
-### T3.4 — Stage 4 projection: protocol_status derive from chain_events replay
+### T3.4 — Stage 4 projection: deriveProtocolStatus read-only consistency helper
 
-#### 目标
+#### 🔴 决断 2 修 v1.1 (per J2 r134 grep finding)
 
-exchange_offers.protocol_status 真 derive from chain_events latest event for offer_id, NOT 直 SQL UPDATE。
+v1.0 spec 假定 derive from chain_events replay 全 refactor 6+ writer files。 真现状: 14 places SQL UPDATE protocol_status (broker-intake-watcher / api/exchange / broker-state-authority / exchange-machine / trade-protocol-filter)。 全 refactor 远超 30 LOC budget + 跨 5+ files。
 
-per INVARIANTS §9.2 (Truth = chain_events / Projection = DB cache rebuildable)。
+**架构师 v1.1 决 (c) 中间路径**:
+- 加 \`projection.js\` deriveProtocolStatus() helper (read-only, 0 writer 改)
+- existing 14 SQL UPDATE writers 保留 (Phase 3 refactor 候选)
+- T3.4 真 acceptance 软化为 **consistency invariant** (deriveProtocolStatus(id) 真 returns same state as exchange_offers.protocol_status when both available)
 
-#### Spec
+= 真 honor §9 spec spirit (chain_events truth + projection rebuild capability) without big-bang refactor (KI-23 priority 真定义 P0 critical 守 — broker 跑通优先)。
+
+#### ⚠ clarify 1 修 (event_type naming)
+
+J2 finding: chain_events.event_type local short names ('exchange_completed' / 'kas_delivery'), broadcast_messages.content.t protocol full names ('kanet_exchange_completed_v1')。
+
+**架构师决**: deriveProtocolStatus query **broadcast_messages.content.t** (full protocol names per chain truth, single source). chain_events local observation log 留 internal indexer 用。
+
+#### Spec v1.1
 
 ```js
-// kasia-console/src/services/projection.js (NEW OR extend exchange-machine.js)
+// kasia-console/src/services/projection.js (NEW)
 
-// Rebuild protocol_status from chain_events replay (single offer)
-async function deriveProtocolStatus(offerId) {
-  const events = sqlite.prepare(`
-    SELECT event_type, payload, observed_at
-    FROM chain_events
-    WHERE event_type LIKE 'kanet_exchange_%'
-      AND payload LIKE '%' || ? || '%'
-    ORDER BY observed_at ASC
+// Read-only consistency helper: rebuild protocol_status from broadcast_messages chain replay.
+// Per INVARIANTS §9.2: chain truth = broadcast_messages.content.t (full protocol names).
+// Existing 14 SQL UPDATE writers preserved (Phase 3 refactor 候选).
+
+const STATE_TRANSITIONS = {
+  'kanet_exchange_v1':           'open',       // published
+  'kanet_exchange_accept_v1':    'matched',
+  'kanet_exchange_paid_v1':      'verifying',
+  'kanet_exchange_delivered_v1': 'delivering',
+  'kanet_exchange_completed_v1': 'completed',
+  'kanet_exchange_dispute_v1':   'disputed',
+  'kanet_exchange_cancel_v1':    'cancelled',
+  'kanet_exchange_timeout_v1':   'timed_out',
+  'kanet_exchange_resolve_v1':   'completed',  // dispute resolved
+};
+
+export function deriveProtocolStatus(offerId, db = defaultDb) {
+  // Query chain truth: broadcast_messages.content.t for offer
+  const events = db.prepare(`
+    SELECT content, created_at FROM broadcast_messages
+    WHERE content LIKE '%' || ? || '%'
+      AND content LIKE '%kanet_exchange_%'
+    ORDER BY created_at ASC
   `).all(offerId);
   
-  // State machine: published → matched → paid → verified → delivering → completed
   let state = 'open';
   for (const e of events) {
-    if (e.event_type === 'kanet_exchange_v1') state = 'open';
-    else if (e.event_type === 'kanet_exchange_accept_v1') state = 'matched';
-    else if (e.event_type === 'kanet_exchange_paid_v1') state = 'verifying';
-    else if (e.event_type === 'kanet_exchange_delivered_v1') state = 'delivering';
-    else if (e.event_type === 'kanet_exchange_completed_v1') state = 'completed';
-    else if (e.event_type === 'kanet_exchange_dispute_v1') state = 'disputed';
-    else if (e.event_type === 'kanet_exchange_cancel_v1') state = 'cancelled';
-    else if (e.event_type === 'kanet_exchange_timeout_v1') state = 'timed_out';
+    try {
+      const payload = JSON.parse(e.content);
+      if (payload?.id === offerId || payload?.offer_id === offerId) {
+        const nextState = STATE_TRANSITIONS[payload.t];
+        if (nextState) state = nextState;
+      }
+    } catch {}  // skip non-JSON content
   }
   return state;
 }
-```
 
-J2 implementer authoritative: 真 event_type names per T3.0 grep + state mapping per existing exchange-machine.js logic 比对。
+// Consistency check (T3.4 acceptance): derive == DB cache
+export function verifyProtocolStatusConsistency(offerId, db = defaultDb) {
+  const dbStatus = db.prepare('SELECT protocol_status FROM exchange_offers WHERE id = ?').get(offerId)?.protocol_status;
+  const derivedStatus = deriveProtocolStatus(offerId, db);
+  return { dbStatus, derivedStatus, consistent: dbStatus === derivedStatus };
+}
+```
 
 #### Anti-pattern
 
-- ❌ 不 UPDATE protocol_status 直 (per §9.5 #2)
-- ❌ 不 cache projection in matcher process (per §9.5 #1)
-- ❌ 不 multi-writer to projection (single writer = projection rebuilder)
+- ❌ 不 UPDATE protocol_status 直 from projection.js (read-only helper, 不 writer)
+- ❌ 不 cache projection result in matcher process (recompute as needed)
+- ❌ 不 break existing 14 writers (Phase 3 refactor 候选, NOT T3 scope)
 
-#### Acceptance
+#### Acceptance v1.1 (软化, 不 big-bang refactor)
 
-- ✅ deriveProtocolStatus(offerId) 真 returns state per chain_events replay
-- ✅ exchange_offers.protocol_status 真 == deriveProtocolStatus(offerId) (consistency)
-- ✅ Recovery: matcher process die → restart → state replay 真 重建 (NO process memory dependency)
+- ✅ deriveProtocolStatus(offerId) 真 returns state per broadcast_messages chain truth
+- ✅ verifyProtocolStatusConsistency(offerId) 真 returns { dbStatus, derivedStatus, consistent: true } for healthy offer
+- ✅ Recovery proof of concept: simulate offer lifecycle (publish → accept → paid → delivered → completed) via broadcast TXs, deriveProtocolStatus correctly traces (NOT process memory state)
 
-#### LOC: ~30
+#### LOC v1.1: ~40 (10 over original 30, justified per KI-21 anti-pattern compliance: STATE_TRANSITIONS map + verifyProtocolStatusConsistency helper)
 
 ---
 
@@ -483,6 +543,7 @@ NWT operator hat 跑 真 e2e:
 - Owner 5/3 9-state event-sourced spec
 - INVARIANTS v0.1 §4.1 (alive vs functioning) + §6.3 任务卡颗粒度
 - INVARIANTS v0.2 §9 draft (event-sourced state machine, commit 6c9a195e5)
+- v1.1 修 per J2 r134 grep finding (3 决断 + 1 clarify): T3.3 emit via Relay send-command (NOT new endpoint), T3.4 read-only consistency helper (NOT big-bang refactor), state machine target = exchange-machine.js + trade-protocol-filter.js (NOT broker-state-machine.js retail_dex_orders), event_type naming = broadcast_messages.content.t full protocol names
 - KI-17 broker 三层 (识别 + 对接 + **反馈**)
 - KI-19 CJK regex + shouldPublish gate strict (T3.1 真修)
 - KI-23 NWT 优先级 trap + Phase 2 priority 真定义 (T3 P0 critical)
@@ -519,3 +580,5 @@ NWT operator hat 跑 真 e2e:
 ---
 
 *v1.0 — 2026-05-03 NWT cross-hat architect (per Owner 5/3 全自动 0 干预 authorize + KI-23 priority 真定义 P0 critical). broker 真 ship target = Owner DM → 完整下单 → KAS 真发. Phase 2 第二 ship.*
+
+*v1.1 — 2026-05-03 NWT cross-hat architect 修 per J2 r134 T3.0 grep finding (3 决断 + 1 clarify): T3.3 emit via Relay send-command 复用既有 infra / T3.4 read-only consistency helper 不 big-bang refactor (per KI-23 broker 跑通优先) / state machine target reference 改 exchange-machine.js + trade-protocol-filter.js / event_type naming = broadcast_messages.content.t. KI-2/3/4/5 防复刻 7th cycle 实证 (J2 grep catch 3 处 architect 真 假定).*
