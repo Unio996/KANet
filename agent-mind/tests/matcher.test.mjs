@@ -392,6 +392,54 @@ test('T3.5 notifyTransition stripMarkdown applies (KI-18 platform-agnostic)', as
   assert.match(captured.message, /KAS 已发出.*交易完成/);
 });
 
+// ── T3.6: integration + source-level invariant assertion ───────────────────────
+
+test('T3.6 notifyTransition covers all 8 lifecycle transition keys', async () => {
+  const m = new MatcherSkill();
+  const transitions = [
+    ['open', 'matched'], ['matched', 'verifying'],
+    ['verifying', 'delivering'], ['delivering', 'completed'],
+    ['open', 'timed_out'], ['matched', 'disputed'],
+    ['verifying', 'disputed'], ['matched', 'cancelled'],
+  ];
+  let count = 0;
+  const ae = { executeOne: async () => { count++; return { ok: true }; } };
+  for (const [oldS, newS] of transitions) {
+    const r = await m.notifyTransition('offer-x', 'kaspa:peer', oldS, newS, ae);
+    assert.ok(r, `transition ${oldS}→${newS} must produce message`);
+  }
+  assert.equal(count, 8, 'all 8 transition keys must trigger send');
+});
+
+test('T3.6 source: matcher 0 SQL UPDATE exchange_offers (per §9.5 #2)', async () => {
+  const fs = await import('node:fs/promises');
+  const src = await fs.readFile(new URL('../src/skills/matcher.mjs', import.meta.url), 'utf-8');
+  assert.doesNotMatch(src, /UPDATE\s+exchange_offers/i);
+  assert.doesNotMatch(src, /INSERT\s+INTO\s+exchange_offers/i);
+});
+
+test('T3.6 source: matcher 0 direct sendKaspa / sqlite (skill HTTP-only KI-4)', async () => {
+  const fs = await import('node:fs/promises');
+  const src = await fs.readFile(new URL('../src/skills/matcher.mjs', import.meta.url), 'utf-8');
+  assert.doesNotMatch(src, /\bsendKaspa\s*\(/);
+  assert.doesNotMatch(src, /from\s+['"]better-sqlite3['"]/);
+  assert.doesNotMatch(src, /from\s+['"]\.\.\/db\/client/);
+});
+
+test('T3.6 integration: extractIntent → asyncShouldPublish → reactor wiring (mock)', async () => {
+  const m = new MatcherSkill();
+  // Skip publishOffer (no relayNodeId): reactor still runs, asyncShouldPublish cheap-gates to false
+  m._senderAddress = 'kaspa:peer';
+  const config = { adapterUrl: 'http://127.0.0.1:99999', consoleUrl: 'http://127.0.0.1:99999', address: 'kaspa:trader-m' };
+  const gathered = { peer: null, history: [{ dir: 'in', text: '查询' }], broadcasts: [], metadata: {} };
+  // Adapter unreachable → _extractIntentT1 returns fallback intent.side='none'
+  // asyncShouldPublish cheap gates → false (confidence!=high). reactor → activeOffers=[] (fetch err)
+  const intent = await m.extractIntent(gathered, '查询', config);
+  assert.equal(intent.should_publish, false, 'cheap gates short-circuit');
+  assert.ok(intent._reactor, 'reactor result attached to intent');
+  assert.deepEqual(intent._reactor.activeOffers, [], 'reactor fail-closed empty');
+});
+
 test('T2 publishOffer uses this._config.relayNodeId (T1.5 sediment)', async () => {
   const m = new MatcherSkill();
   m._config = {}; // missing relayNodeId
