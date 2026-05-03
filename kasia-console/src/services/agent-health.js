@@ -87,9 +87,22 @@ function stmts() {
   return _stmts;
 }
 
+// ── LLM upstream status fetch (shared across all agents in one computeAllHealth call) ──
+// per KI-16 sediment: alive vs functioning 区分. Fetched once per computeAllHealth (cached 30s via _cache).
+// Per Anti-pattern #3 cache miss = red (NOT green) — fail-closed when probe unreachable.
+async function _fetchLlmStatus() {
+  try {
+    const res = await fetch('http://127.0.0.1:3100/api/system/llm-health', { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return { overall: 'red' };
+    return await res.json();
+  } catch {
+    return { overall: 'red' };
+  }
+}
+
 // ── Core: single agent health ──────────────────────────────────────────
 
-function computeOne(relay, relayStatuses, adapterStatuses) {
+function computeOne(relay, relayStatuses, adapterStatuses, llmStatus) {
   const { id: relayNodeId, name, address, adapter_node_id, proactive_interval_minutes, evolution_interval_hours } = relay;
 
   // ── Short-circuit: Relay down → RED ──
@@ -145,13 +158,14 @@ function computeOne(relay, relayStatuses, adapterStatuses) {
   const reflIntervalMs = (evolution_interval_hours || 24) * 3600_000;
 
   const indicators = {
-    adapter:    adapterRunning ? 'green' : 'red',
-    lastEvent:  _ageLight(lastEventTs, now, Math.max(T.eventYellow, proIntervalMs), T.eventRed),
-    proactive:  _intervalLight(lastProTs, now, proIntervalMs),
-    reflection: _intervalLight(lastReflectionTs, now, reflIntervalMs),
-    errors:     _countLight(errorCnt, T.errorYellow, T.errorRed),
-    blocks:     _countLight(blockCnt, T.blockYellow, T.blockRed),
-    payFails:   _countLight(payFailCnt, T.payFailYellow, T.payFailRed),
+    adapter:      adapterRunning ? 'green' : 'red',
+    lastEvent:    _ageLight(lastEventTs, now, Math.max(T.eventYellow, proIntervalMs), T.eventRed),
+    proactive:    _intervalLight(lastProTs, now, proIntervalMs),
+    reflection:   _intervalLight(lastReflectionTs, now, reflIntervalMs),
+    errors:       _countLight(errorCnt, T.errorYellow, T.errorRed),
+    blocks:       _countLight(blockCnt, T.blockYellow, T.blockRed),
+    payFails:     _countLight(payFailCnt, T.payFailYellow, T.payFailRed),
+    llm_upstream: llmStatus?.overall || 'red',  // KI-16 sediment: alive vs functioning, fail-closed
   };
 
   // ── Overall status ──
@@ -198,8 +212,9 @@ export async function computeAllHealth() {
 
   const relayStatuses = getRelayStatus();
   const adapterStatuses = getAllAdapterStatus();
+  const llmStatus = await _fetchLlmStatus();  // KI-16 sediment: shared across all agents this cycle
 
-  const agents = relays.map(r => computeOne(r, relayStatuses, adapterStatuses));
+  const agents = relays.map(r => computeOne(r, relayStatuses, adapterStatuses, llmStatus));
 
   const result = {
     ts: new Date().toISOString(),
