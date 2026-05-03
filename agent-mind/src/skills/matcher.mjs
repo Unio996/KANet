@@ -146,6 +146,32 @@ export class MatcherSkill extends Skill {
     return intent;
   }
 
+  // T3.5: 反馈 user 每 transition (KI-17 layer 3 — broker 真 ship Stage 4 missing UX piece).
+  // Maps state transition pairs (oldState→newState) to user-friendly text + sends via actionExecutor.
+  // Implementer authoritative reconciliation: actionExecutor passed as parameter (matching
+  // replyToUser:468 export pattern), NOT this._actionExecutor (Skills don't hold it). spec line
+  // `const msg = messages;` 修 to `messages[key]` per T3.4 same pattern (index access missing).
+  async notifyTransition(offerId, peerAddress, oldState, newState, actionExecutor) {
+    const messages = {
+      'open→matched':         '✓ 已匹配 taker, 等付款 (30 分钟内).',
+      'matched→verifying':    '💰 付款已收到, 验证跨链确认中...',
+      'verifying→delivering': '✓ 付款验证通过, 发 KAS 中...',
+      'delivering→completed': '🎉 KAS 已发出, 交易完成! 请查询钱包确认收款.',
+      'open→timed_out':       '⏰ 30 分钟无 taker, 订单已 timeout. 退款已发.',
+      'matched→disputed':     '⚠ 争议产生, 进入 dispute 流程. 等 resolver.',
+      'verifying→disputed':   '⚠ 跨链验证争议, 进入 dispute 流程. 等 resolver.',
+      'matched→cancelled':    '⊘ 订单已取消.',
+    };
+    const key = `${oldState}→${newState}`;
+    const msg = messages[key];
+    if (!msg || !peerAddress || !actionExecutor?.executeOne) return null;
+    return await actionExecutor.executeOne({
+      type: 'send_message',
+      target: peerAddress,
+      message: this.stripMarkdown(msg),
+    });
+  }
+
   // T3.3: emit chain TX via existing Relay send-command infra (NO new endpoint).
   // 决断 1 v1.1: 复用 /api/relay/:id/send-command + type='send_broadcast' + channel='kanet-exchange'.
   // Relay 真 broadcast chain TX, trade-protocol-filter 自动 handler dispatch.

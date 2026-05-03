@@ -355,6 +355,43 @@ test('T3.3 source: emitChainProtocol uses Relay send-command + kanet-exchange ch
   assert.doesNotMatch(src, /from\s+['"]better-sqlite3['"]/);
 });
 
+test('T3.5 notifyTransition sends user-friendly message for known transition', async () => {
+  const m = new MatcherSkill();
+  let captured = null;
+  const actionExecutor = { executeOne: async (a) => { captured = a; return { ok: true }; } };
+  await m.notifyTransition('offer-1', 'kaspa:peer', 'matched', 'verifying', actionExecutor);
+  assert.ok(captured);
+  assert.equal(captured.target, 'kaspa:peer');
+  assert.equal(captured.type, 'send_message');
+  assert.match(captured.message, /付款已收到.*验证/);
+});
+
+test('T3.5 notifyTransition returns null for unknown transition key', async () => {
+  const m = new MatcherSkill();
+  const actionExecutor = { executeOne: async () => { throw new Error('should not call'); } };
+  const r = await m.notifyTransition('offer-1', 'kaspa:peer', 'open', 'completed', actionExecutor);
+  assert.equal(r, null);
+});
+
+test('T3.5 notifyTransition returns null without peerAddress / actionExecutor', async () => {
+  const m = new MatcherSkill();
+  const actionExecutor = { executeOne: async () => ({ ok: true }) };
+  assert.equal(await m.notifyTransition('offer-1', '', 'matched', 'verifying', actionExecutor), null);
+  assert.equal(await m.notifyTransition('offer-1', 'kaspa:peer', 'matched', 'verifying', null), null);
+  assert.equal(await m.notifyTransition('offer-1', 'kaspa:peer', 'matched', 'verifying', {}), null);
+});
+
+test('T3.5 notifyTransition stripMarkdown applies (KI-18 platform-agnostic)', async () => {
+  const m = new MatcherSkill();
+  let captured = null;
+  const actionExecutor = { executeOne: async (a) => { captured = a; return { ok: true }; } };
+  await m.notifyTransition('offer-1', 'kaspa:peer', 'delivering', 'completed', actionExecutor);
+  // Message must NOT contain raw markdown (** or *)
+  assert.doesNotMatch(captured.message, /\*\*/);
+  // 完成 message check
+  assert.match(captured.message, /KAS 已发出.*交易完成/);
+});
+
 test('T2 publishOffer uses this._config.relayNodeId (T1.5 sediment)', async () => {
   const m = new MatcherSkill();
   m._config = {}; // missing relayNodeId
