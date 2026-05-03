@@ -325,6 +325,36 @@ test('T3.2 source: reactToChainEvents 0 own state (per §9.5 #1)', async () => {
   assert.match(src, /\/api\/exchange\/offers\?maker=/);
 });
 
+test('T3.3 emitChainProtocol throws on missing relayNodeId', async () => {
+  const m = new MatcherSkill();
+  m._config = {}; // missing relayNodeId
+  await assert.rejects(
+    () => m.emitChainProtocol('kanet_exchange_delivered_v1', { offer_id: 'x' }),
+    /relayNodeId missing/,
+  );
+});
+
+test('T3.3 emitDeliveryInitiated wraps emitChainProtocol with delivered_v1 event', async () => {
+  const m = new MatcherSkill();
+  m._config = { relayNodeId: 'test-uuid', consoleUrl: 'http://127.0.0.1:1' };
+  // unreachable consoleUrl → fetchJson throws (validate it gets to the fetch step, NOT relayNodeId guard)
+  await assert.rejects(
+    () => m.emitDeliveryInitiated('offer-1', '0.5', 'kaspa:abc', 'kastx-1'),
+    /fetch failed|ECONNREFUSED|connect ECONNREFUSED|fetch error/i,
+  );
+});
+
+test('T3.3 source: emitChainProtocol uses Relay send-command + kanet-exchange channel (KI-4)', async () => {
+  const fs = await import('node:fs/promises');
+  const src = await fs.readFile(new URL('../src/skills/matcher.mjs', import.meta.url), 'utf-8');
+  // Must use Relay send-command pattern (NOT direct chain TX, NOT new /api/exchange/verify)
+  assert.match(src, /\/api\/relay\/.*send-command/);
+  assert.match(src, /'send_broadcast'/);
+  assert.match(src, /'kanet-exchange'/);
+  // 0 sqlite import (skill HTTP-only KI-4)
+  assert.doesNotMatch(src, /from\s+['"]better-sqlite3['"]/);
+});
+
 test('T2 publishOffer uses this._config.relayNodeId (T1.5 sediment)', async () => {
   const m = new MatcherSkill();
   m._config = {}; // missing relayNodeId

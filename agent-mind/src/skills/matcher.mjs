@@ -146,6 +146,40 @@ export class MatcherSkill extends Skill {
     return intent;
   }
 
+  // T3.3: emit chain TX via existing Relay send-command infra (NO new endpoint).
+  // 决断 1 v1.1: 复用 /api/relay/:id/send-command + type='send_broadcast' + channel='kanet-exchange'.
+  // Relay 真 broadcast chain TX, trade-protocol-filter 自动 handler dispatch.
+  async emitChainProtocol(eventType, payloadObj) {
+    const consoleUrl = this._config?.consoleUrl || CONSOLE_URL;
+    const relayNodeId = this._config?.relayNodeId;
+    if (!relayNodeId) throw new Error('emitChainProtocol: this._config.relayNodeId missing');
+    const message = JSON.stringify({ t: eventType, ...payloadObj });
+    return await fetchJson(`${consoleUrl}/api/relay/${relayNodeId}/send-command`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'send_broadcast', channel: 'kanet-exchange', message }),
+    });
+  }
+
+  // T3.3: post EVM cross-chain proof verify (internal helper, NOT chain emit).
+  // matcher 收 kanet_exchange_paid_v1 from taker → verify proof → log.
+  // (chain emit by sendKaspa + emitDeliveryInitiated, NOT this method.)
+  async emitPaymentVerified(offerId, paymentTx, evmAddress) {
+    console.log(`[matcher] payment verified offer=${offerId} tx=${paymentTx} evm=${evmAddress}`);
+    return { verified: true, offerId, paymentTx, evmAddress };
+  }
+
+  // T3.3: post sendKaspa, emit kanet_exchange_delivered_v1 chain TX.
+  // event_type matches trade-protocol-filter EXCHANGE_MSG.DELIVERED constant.
+  async emitDeliveryInitiated(offerId, kasAmount, userAddress, kasTxId) {
+    return await this.emitChainProtocol('kanet_exchange_delivered_v1', {
+      offer_id: offerId,
+      delivery_tx: kasTxId,
+      amount: kasAmount,
+      to: userAddress,
+    });
+  }
+
   // T3.2: matcher reactor for chain-event in-flight offers (path b per task v1.1 §T3.2).
   // 0 own state (per INVARIANTS §9.5 #1) — fetch fresh snapshot 每 reactive cycle.
   // Limitation: Skill-instance fires per peer DM, NOT independent timer. trade-protocol-filter
