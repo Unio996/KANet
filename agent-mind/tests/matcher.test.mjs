@@ -258,5 +258,124 @@ test('§11 #8: 0 schema modification (ALTER/CREATE TABLE retail_dex_orders)', as
   assert.ok(!/CREATE\s+TABLE\s+(?:IF NOT EXISTS\s+)?retail_dex_orders/i.test(src), 'forbidden CREATE TABLE retail_dex_orders');
 });
 
+// ── T2.4 unit tests: publishOffer + stripMarkdown + offer feedback (per task v1.3 §T2.4) ────────────
+
+test('T2 stripMarkdown strips **bold** + *italic* + # heading + `code` + [link](url)', () => {
+  const m = new MatcherSkill();
+  assert.equal(m.stripMarkdown('**报价单**'), '报价单');
+  assert.equal(m.stripMarkdown('*italic text*'), 'italic text');
+  assert.equal(m.stripMarkdown('# heading'), 'heading');
+  assert.equal(m.stripMarkdown('`code`'), 'code');
+  assert.equal(m.stripMarkdown('[link](http://x)'), 'link');
+});
+
+test('T2 stripMarkdown 不破 emoji / 中文 / 数字 / 普通 punct', () => {
+  const m = new MatcherSkill();
+  assert.equal(m.stripMarkdown('📋 报价详情'), '📋 报价详情');
+  assert.equal(m.stripMarkdown('100 KAS / 3.26 USDT'), '100 KAS / 3.26 USDT');
+  assert.equal(m.stripMarkdown('  - 你付: 50 USDT'), '  - 你付: 50 USDT');
+  assert.equal(m.stripMarkdown(null), null);
+  assert.equal(m.stripMarkdown(''), '');
+});
+
+test('T2 shouldPublish uses m.dir + m.text (NOT m.role + m.content)', () => {
+  const m = new MatcherSkill();
+  const intent = { side: 'buy', confidence: 'high', missing_fields: [] };
+  const historyAgree = [{ dir: 'in', text: '好的', ts: '2026-05-03' }];
+  assert.equal(m.shouldPublish(intent, historyAgree), true);
+  const historyNoAgree = [{ dir: 'in', text: '我看看', ts: '2026-05-03' }];
+  assert.equal(m.shouldPublish(intent, historyNoAgree), false);
+  // role/content schema (wrong) should NOT match
+  const historyOldSchema = [{ role: 'user', content: '好的' }];
+  assert.equal(m.shouldPublish(intent, historyOldSchema), false);
+});
+
+test('T2 shouldPublish gates: low confidence / missing_fields / non buy-sell', () => {
+  const m = new MatcherSkill();
+  const okHist = [{ dir: 'in', text: '好的' }];
+  assert.equal(m.shouldPublish({ side: 'buy', confidence: 'low', missing_fields: [] }, okHist), false);
+  assert.equal(m.shouldPublish({ side: 'buy', confidence: 'high', missing_fields: ['qty'] }, okHist), false);
+  assert.equal(m.shouldPublish({ side: 'query', confidence: 'high', missing_fields: [] }, okHist), false);
+});
+
+test('T2 publishOffer uses this._config.relayNodeId (T1.5 sediment)', async () => {
+  const m = new MatcherSkill();
+  m._config = {}; // missing relayNodeId
+  await assert.rejects(
+    () => m.publishOffer({ side: 'buy', qty: 50, asset: 'KAS', qty_unit: 'USDT' }),
+    /relayNodeId missing/,
+  );
+});
+
+test('T2 publishOffer rejects invalid intent (side / qty / asset)', async () => {
+  const m = new MatcherSkill();
+  m._config = { relayNodeId: 'test-uuid' };
+  await assert.rejects(() => m.publishOffer({ side: 'none', qty: 50, asset: 'KAS' }), /invalid intent\.side/);
+  await assert.rejects(() => m.publishOffer({ side: 'buy', qty: null, asset: 'KAS' }), /missing qty\/asset/);
+});
+
+test('T2 computePricing buy/sell shapes (KAS↔USDT MID 0.04)', () => {
+  const m = new MatcherSkill();
+  const buyP = m.computePricing({ side: 'buy', qty: 100, qty_unit: 'USDT', asset: 'KAS', pay_chain: 'BSC' });
+  assert.equal(buyP.give_asset, 'KAS');
+  assert.equal(buyP.want_asset, 'USDT');
+  assert.equal(buyP.want_amount, '100');
+  assert.equal(parseFloat(buyP.give_amount), 100 / 0.04);
+  const sellP = m.computePricing({ side: 'sell', qty: 100, asset: 'KAS', pay_chain: 'ETH' });
+  assert.equal(sellP.give_asset, 'KAS');
+  assert.equal(sellP.want_asset, 'USDT');
+  assert.equal(parseFloat(sellP.want_amount), 100 * 0.04);
+});
+
+test('T2 generateOfferFeedback contains offer_id + give/want + T2 disclaimer', () => {
+  const m = new MatcherSkill();
+  const offerResult = {
+    offer_id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    payload: { give_asset: 'KAS', give_amount: '2500', give_chain: 'kaspa', want_asset: 'USDT', want_amount: '100', want_chain: 'BSC' },
+  };
+  const buyMsg = m.generateOfferFeedback({ side: 'buy' }, offerResult);
+  assert.match(buyMsg, /eeeeeeee/); // last-8 of offer_id
+  assert.match(buyMsg, /T2 阶段/);
+  assert.match(buyMsg, /BSC/);
+  const sellMsg = m.generateOfferFeedback({ side: 'sell' }, offerResult);
+  assert.match(sellMsg, /T2 阶段/);
+});
+
+test('T2 formatForBrain offerResult set → offer feedback path (stripMarkdown applied)', async () => {
+  const m = new MatcherSkill();
+  m.canActivate('reactive', { _senderAddress: 'kaspa:qtest', _inputMessage: '好的' });
+  m._config = { adapterUrl: null };
+  // Override extractIntent to inject offerResult (avoid live LLM/HTTP)
+  m.extractIntent = async () => ({
+    side: 'buy', asset: 'KAS', qty: 50, qty_unit: 'USDT', pay_chain: 'BSC',
+    confidence: 'high', missing_fields: [],
+    _offerResult: { offer_id: '12345678-aaaa-bbbb-cccc-deadbeef0000', payload: { give_asset: 'KAS', give_amount: '1250', give_chain: 'kaspa', want_asset: 'USDT', want_amount: '50', want_chain: 'BSC' } },
+  });
+  const r = await m.formatForBrain({ peer: null, history: [], metadata: {} });
+  assert.match(r.instructions, /报价/);
+  assert.match(r.instructions, /T2 阶段/);
+  assert.ok(!r.instructions.includes('**'), 'stripMarkdown applied (no ** literal)');
+});
+
+test('T2 formatForBrain publishError set → error feedback path', async () => {
+  const m = new MatcherSkill();
+  m.canActivate('reactive', { _senderAddress: 'kaspa:qtest', _inputMessage: '好的' });
+  m._config = {};
+  m.extractIntent = async () => ({
+    side: 'buy', confidence: 'high', missing_fields: [],
+    _offerResult: null, _publishError: 'KANet endpoint unreachable',
+  });
+  const r = await m.formatForBrain({ peer: null, history: [], metadata: {} });
+  assert.match(r.instructions, /发布报价时出错了/);
+  assert.match(r.instructions, /KANet endpoint unreachable/);
+});
+
+test('T2 source: 0 instance state holding offer (per §11 #1)', async () => {
+  const fs = await import('node:fs/promises');
+  const src = await fs.readFile(new URL('../src/skills/matcher.mjs', import.meta.url), 'utf-8');
+  const forbidden = /this\.(offers|_offers|_lastOffer|_offerCache|offerMap)\b/;
+  assert.ok(!forbidden.test(src), 'matcher instance must NOT hold offer state per §11 #1');
+});
+
 // Integration test (Trader-M live + LLM extract + Brain reply + retail_dex_orders 0 增) defer T1.9.
 // per NWT r118: T1.6 acceptance live verify defer T1.9 12h 守同期 operator hat --apply trigger.

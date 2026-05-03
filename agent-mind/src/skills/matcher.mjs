@@ -5,15 +5,17 @@
 // LLM-driven intent extraction, 不走 keyword-based parseIntent (per MATCHER-ARCHITECTURE §4 + r109 verdict).
 // HTTP API only data access via fetchJson(consoleUrl), 0 import sqlite (per r112 verdict, KANet skill convention 4 轴).
 //
-// T1 范围: listen + intent extract + 跟 user 对话, 不发 offer 不动钱.
-// (T1.2 ship gatherContext / T1.3 extractIntent / T1.4 replyToUser / T1.5 装配)
+// T1 范围 (5/2 ship): listen + intent extract + 跟 user 对话, 不发 offer 不动钱.
+// T2 范围 (5/3 ship): publishOffer to /api/exchange/publish + 反馈 user offer detail + stripMarkdown.
 
 import { Skill } from './base.mjs';
 import { fetchJson } from '../utils.mjs';
 
+const CONSOLE_URL = process.env.KASIA_CONSOLE_URL || 'http://127.0.0.1:3100';
+
 export class MatcherSkill extends Skill {
   constructor() {
-    super('matcher', '撮合官 — KANet 上的 KAS / USDT 跨链撮合 Agent (T1 仅 listen + intent extract, 不发 offer 不动钱)');
+    super('matcher', '撮合官 — KANet 上的 KAS / USDT 跨链撮合 Agent (T2 ship: 听懂 + 发 offer + 反馈关键节点)');
     this._senderAddress = '';
     this._inputMessage = '';
   }
@@ -29,7 +31,6 @@ export class MatcherSkill extends Skill {
 
   // T1.2 ship: KANet skill HTTP API convention (per r112 verdict, fetchJson via consoleUrl).
   // /api/agent/peer-context (conversations.js:524-598) 已 cover peer + chatHistory + recentBroadcasts + connectionStatus.
-  // activeOrders defer T2 PZ-MATCHER-shipT2 (per MATCHER §C #5).
   async gatherContext(kernels, config) {
     // T1.5 装配 wire: 保存 config 给 formatForBrain 用 (Skill API formatForBrain 只接 gathered, 不接 kernels/config)
     this._config = config || {};
@@ -65,10 +66,30 @@ export class MatcherSkill extends Skill {
     }
   }
 
-  // T1.3 ship: 调 KANet Adapter LLM (POST /reply) 提炼结构化 intent.
-  // adapter pattern 同 mind.mjs:301-310 (mindSystem + mindUser + mindTask + brainCall).
-  // Qwen Rule 11 kill switch 由 agent-adapter/src/providers/openai.mjs:238-242 自动 inject (model 含 'qwen' → chat_template_kwargs.enable_thinking=false), caller 不需手动加.
+  // T2 wrapper: extractIntent extends T1 helper with publish trigger detection.
+  // Per architect v1.3 Option Y refactor (T1 logic preserved in _extractIntentT1).
   async extractIntent(gathered, latestMessage, config) {
+    const intent = await this._extractIntentT1(gathered, latestMessage, config);
+
+    // T2: publish trigger
+    intent.should_publish = this.shouldPublish(intent, gathered.history || []);
+    if (intent.should_publish) {
+      try {
+        const offerResult = await this.publishOffer(intent);
+        intent._offerResult = offerResult;
+      } catch (err) {
+        console.error('[matcher] publishOffer failed:', err.message);
+        intent._offerResult = null;
+        intent._publishError = err.message;
+      }
+    }
+    return intent;
+  }
+
+  // T1 logic preserved as helper (per architect v1.3 Option Y refactor).
+  // Adapter pattern 同 mind.mjs:301-310 (mindSystem + mindUser + mindTask + brainCall).
+  // Qwen Rule 11 kill switch 由 agent-adapter/src/providers/openai.mjs:238-242 自动 inject.
+  async _extractIntentT1(gathered, latestMessage, config) {
     const adapterUrl = config?.adapterUrl;
     if (!adapterUrl) {
       return _intentFallback(latestMessage, 'adapter_unavailable');
@@ -107,7 +128,6 @@ export class MatcherSkill extends Skill {
     const replyText = response?.reply || '';
     let intent;
     try {
-      // Strip markdown fence (LLM 偶尔包 ```json ... ```)
       const cleaned = replyText.replace(/^```(?:json)?\s*|\s*```\s*$/gs, '').trim();
       intent = JSON.parse(cleaned);
     } catch (err) {
@@ -115,7 +135,6 @@ export class MatcherSkill extends Skill {
       return _intentFallback(latestMessage, 'intent_unclear', null, true);
     }
 
-    // side enum validation (per spec acceptance, defensive against LLM hallucination)
     if (!['buy', 'sell', 'query', 'cancel', 'none'].includes(intent.side)) {
       intent.side = 'none';
       intent.confidence = 'low';
@@ -123,31 +142,172 @@ export class MatcherSkill extends Skill {
     return intent;
   }
 
-  // T1.5 装配: gathered (T1.2) → extractIntent (T1.3) → generateReply (T1.4) → Brain 输出 baseline.
-  // Skill API 不暴露 actionExecutor 给 formatForBrain (kernels 5 个不含 action, executor 在 runner.mjs:25 单独 owner).
-  // 设计选择: matcher 经 Brain 自然 reply 路径 — formatForBrain 提供 intent + suggestedReply 给 Brain, Brain reactive 输出走 mind.mjs 主流程发 user.
-  // replyToUser standalone export 留 T2/T3 (PZ-MATCHER-shipT2 接 Action Executor wire) OR T1.7 unit test mock.
+  // T2: publish trigger judgment (intent 完整 + user 同意 keywords)
+  shouldPublish(intent, peerHistory) {
+    if (intent.confidence !== 'high') return false;
+    if (intent.side !== 'buy' && intent.side !== 'sell') return false;
+    if (intent.missing_fields?.length > 0) return false;
+    const recent = (peerHistory || []).slice(-5);
+    // \b doesn't match CJK chars in JS regex — split ASCII (with \b) from CJK (literal)
+    const agreeKw = /\b(ok|OK)\b|好|可以|确认|发吧|来吧|没问题/i;
+    return recent.some(m => m.dir === 'in' && agreeKw.test(m.text || ''));
+  }
+
+  // T2: 算定价 (T2 简化, T3 加 mid_price 来源 market-data)
+  computePricing(intent) {
+    const MID = 0.04;
+    if (intent.side === 'buy') {
+      // user 买 KAS, matcher 给 KAS 收 USDT
+      const want_amount = String(intent.qty);
+      const give_amount = String(parseFloat(intent.qty) / MID);
+      return {
+        give_asset: 'KAS', give_amount, give_chain: 'kaspa',
+        want_asset: intent.qty_unit === 'USDT' ? 'USDT' : (intent.asset || 'USDT'),
+        want_amount,
+        want_chain: intent.pay_chain || 'BSC',
+      };
+    }
+    // sell: user 卖 KAS, matcher 收 KAS 给 USDT
+    const give_amount = String(intent.qty);
+    const want_amount = String(parseFloat(intent.qty) * MID);
+    return {
+      give_asset: intent.asset || 'KAS', give_amount, give_chain: 'kaspa',
+      want_asset: 'USDT', want_amount,
+      want_chain: intent.pay_chain || 'BSC',
+    };
+  }
+
+  // T2: publishOffer 调 KANet /api/exchange/publish endpoint.
+  // M1: relayNodeId required (NOT maker, derived server-side).
+  // M2: expires_minutes (NOT expires_in_minutes).
+  // M4: res.ok (NOT res.success). M5: res.broadcast_tx (NOT broadcast_tx_id).
+  async publishOffer(intent) {
+    if (intent.side !== 'buy' && intent.side !== 'sell') {
+      throw new Error('publishOffer: invalid intent.side');
+    }
+    if (!intent.qty || !intent.asset) {
+      throw new Error('publishOffer: missing qty/asset');
+    }
+    const relayNodeId = this._config?.relayNodeId;
+    if (!relayNodeId) {
+      throw new Error('publishOffer: this._config.relayNodeId missing');
+    }
+    const pricing = this.computePricing(intent);
+    const consoleUrl = this._config?.consoleUrl || CONSOLE_URL;
+    const payload = {
+      relayNodeId,
+      ...pricing,
+      verification: 'cross_chain_tx',
+      expires_minutes: 30,
+    };
+    const res = await fetchJson(`${consoleUrl}/api/exchange/publish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res?.ok || !res?.offer_id) {
+      throw new Error(`publishOffer: KANet rejected: ${JSON.stringify(res)}`);
+    }
+    console.log(`[matcher] publishOffer ok offer=${res.offer_id} tx=${res.broadcast_tx}`);
+    return {
+      offer_id: res.offer_id,
+      broadcast_tx: res.broadcast_tx,
+      expires_at: res.expires_at,
+      payload,
+      success: true,
+    };
+  }
+
+  // T2: 反馈 offer detail (KI-17 layer 3 反馈关键节点)
+  generateOfferFeedback(intent, offerResult) {
+    const { offer_id, payload } = offerResult;
+    const offer_short = offer_id.slice(-8);
+    if (intent.side === 'buy') {
+      return [
+        `好的, 我已经为你发布报价 #${offer_short}.`,
+        ``,
+        `📋 报价详情:`,
+        `  - 你付: ${payload.want_amount} ${payload.want_asset} (${payload.want_chain})`,
+        `  - 你收: ${payload.give_amount} ${payload.give_asset}`,
+        `  - 有效期: 30 分钟`,
+        ``,
+        `💸 下一步:`,
+        `  请向 broker 钱包付款 (具体地址 KANet 给出).`,
+        `  付款后 matcher 自动 verify 跨链确认.`,
+        ``,
+        `⚠️ T2 阶段 — offer 已发布上链.`,
+        `  跨链 verify + 发 KAS 是 T3 范围.`,
+      ].join('\n');
+    }
+    return [
+      `好的, 我已经为你发布卖单 #${offer_short}.`,
+      ``,
+      `📋 报价详情:`,
+      `  - 你付: ${payload.give_amount} KAS`,
+      `  - 你收: ${payload.want_amount} ${payload.want_asset} (${payload.want_chain})`,
+      `  - 有效期: 30 分钟`,
+      ``,
+      `⚠️ T2 阶段 — 卖单已上链, 完整交割 T3 范围.`,
+    ].join('\n');
+  }
+
+  // T2: stripMarkdown — KANet user 通过 Kasia / 手机 app, 不假设 markdown 渲染.
+  // BugFix-Bot 5/3 audit catch: T1 LLM reply 7/25 含 **bold** literal 透出 (28%). KI-18 sediment.
+  stripMarkdown(text) {
+    if (!text || typeof text !== 'string') return text;
+    return text
+      .replace(/\*\*(.+?)\*\*/g, '$1')                              // **bold** → bold
+      .replace(/(?<![\*\w])\*([^\*\n]+?)\*(?![\*\w])/g, '$1')        // *italic* → italic
+      .replace(/^#+\s+/gm, '')                                       // # heading → heading (line start)
+      .replace(/`([^`\n]+?)`/g, '$1')                                // `code` → code
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');                      // [text](url) → text
+  }
+
+  // T2 wrapper: formatForBrain 1-arg signature (registry.mjs:160 兼容守, per NWT r153 reconciliation).
+  // Implementer authoritative reconciliation: spec line 360 写 (intent, peerHistory) 2-arg, 但 registry 1-arg call.
+  // Keep 1-arg, internally derive peerHistory + intent. Helper _formatForBrainT1 takes 2-arg per spec.
   async formatForBrain(gathered) {
     if (!gathered || !this._senderAddress) {
       return { name: this.name, description: this.description, data: { skipped: 'no_sender' }, instructions: '' };
     }
     const config = this._config || {};
+    const peerHistory = gathered.history || [];
     const latestMessage = this._inputMessage || '';
     const intent = await this.extractIntent(gathered, latestMessage, config);
-    const suggestedReply = generateReply(intent);
+
+    let reply;
+    if (intent._offerResult) {
+      reply = this.generateOfferFeedback(intent, intent._offerResult);
+    } else if (intent._publishError) {
+      reply = `抱歉, 发布报价时出错了 (${intent._publishError}). 我会反馈给开发者. 你可以稍后再试.`;
+    } else {
+      reply = await this._formatForBrainT1(intent, peerHistory);
+    }
+
+    // v1.3 KI-18 sediment: strip markdown across all reply paths
+    const cleanedReply = this.stripMarkdown(reply);
+
     return {
       name: this.name,
       description: this.description,
       data: {
         peer: gathered.peer,
-        history_count: (gathered.history || []).length,
+        history_count: peerHistory.length,
         connectionStatus: gathered.connectionStatus,
         intent,
-        suggestedReply,
+        suggestedReply: cleanedReply,                      // T1 test compat (data.suggestedReply assertion)
+        offerResult: intent._offerResult || null,
+        publishError: intent._publishError || null,
         degraded: gathered.metadata?.degraded || false,
       },
-      instructions: `撮合官 (matcher) 已分析 user 意图. 用以下建议回复 user, 不要修改语义, 必含 T1 阶段 disclaimer:\n${suggestedReply}`,
+      instructions: cleanedReply,
     };
+  }
+
+  // T1 reply gen logic preserved as helper (per architect v1.3 Option Y refactor).
+  // Receives pre-computed intent + peerHistory (peerHistory currently unused, kept per spec sig for future T3 history-aware reply).
+  async _formatForBrainT1(intent, peerHistory) {
+    return generateReply(intent);
   }
 }
 
@@ -197,8 +357,6 @@ export function ensureAsciiSafe(text) {
 }
 
 // T1.4 ship: 调 KANet ActionExecutor.executeOne 发 DM (不自造 send 路径, 不直碰 Relay).
-// actionExecutor 由 caller (T1.5 handleListen) 注入 — kernels 5 个不含 action, executor 在 runner.mjs:25 instantiate.
-// per spec acceptance "Mind 框架处理后续 (action_executor → relay IPC → 上链)".
 export async function replyToUser(peerAddress, replyText, actionExecutor) {
   if (!peerAddress || !replyText || !actionExecutor?.executeOne) {
     return { ok: false, reason: 'replyToUser: missing required arg or actionExecutor lacks executeOne' };
