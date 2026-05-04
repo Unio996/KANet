@@ -311,7 +311,9 @@ test('M-1: asyncShouldPublish 4 cheap-gate paths 全调 _reportPublishDecision',
   const config = { adapterUrl: 'http://127.0.0.1:99999', consoleUrl: 'http://127.0.0.1:99999' };
   const okHist = [{ dir: 'in', text: '好' }];
 
-  await m.asyncShouldPublish({ side: 'buy', confidence: 'low', missing_fields: [] }, okHist, config);
+  // M-confidence-strict (NWT r190 i 钦定): low+buy+missing=[] 真 upgrade case (NOT cheap_gate fire).
+  // 真 cheap_gate_confidence path 真 trigger 必 missing_fields 非空 防 upgrade.
+  await m.asyncShouldPublish({ side: 'buy', confidence: 'low', missing_fields: ['qty'] }, okHist, config);
   await m.asyncShouldPublish({ side: 'query', confidence: 'high', missing_fields: [] }, okHist, config);
   await m.asyncShouldPublish({ side: 'buy', confidence: 'high', missing_fields: ['evm_address'] }, okHist, config);
   await m.asyncShouldPublish({ side: 'buy', confidence: 'high', missing_fields: [] }, okHist, {}); // no adapterUrl
@@ -681,4 +683,70 @@ test('P0-1a source: VERIFIED_CLASSIFICATIONS set 真 enforce', async () => {
   const src = await fs.readFile(new URL('../src/skills/matcher.mjs', import.meta.url), 'utf-8');
   assert.match(src, /VERIFIED_CLASSIFICATIONS\s*=\s*new Set\(\[['"]responsive_agent['"]\s*,\s*['"]verified_agent['"]/);
   assert.match(src, /COOLDOWN_MS\s*=\s*30\s*\*\s*60\s*\*\s*1000/);
+});
+
+// ── M-confidence-strict (NWT r190 architect γ tweak): 字段齐 → upgrade 'low' to 'medium' ──
+
+test('M-confidence-strict source: upgrade logic 真在 cheap_gate confidence reject 之前', async () => {
+  const fs = await import('node:fs/promises');
+  const src = await fs.readFile(new URL('../src/skills/matcher.mjs', import.meta.url), 'utf-8');
+  const upgradeIdx = src.indexOf("'confidence_upgraded'");
+  const cheapGateIdx = src.indexOf("'cheap_gate_confidence'");
+  assert.ok(upgradeIdx > 0, 'upgrade logic 真存在');
+  assert.ok(cheapGateIdx > 0, 'cheap_gate_confidence 真存在');
+  assert.ok(upgradeIdx < cheapGateIdx, 'upgrade 真在 cheap_gate 之前 (sequence 守)');
+});
+
+test('M-confidence-strict behavioral: confidence=low + side=buy + missing=[] → upgrade medium → cheap_gate pass', async () => {
+  const m = new MatcherSkill();
+  m.canActivate('reactive', { _senderAddress: 'kaspa:qverified', _inputMessage: '我要 5 USDT 买 KAS' });
+  m._senderAddress = 'kaspa:qverified';
+  // mock _reportPublishDecision to capture telemetry
+  const fired = [];
+  m._reportPublishDecision = (_cfg, decision, details) => fired.push({ decision, details });
+  const intent = { confidence: 'low', side: 'buy', qty: 5, asset: 'KAS', missing_fields: [] };
+  // run asyncShouldPublish (no adapterUrl → no_adapter_url after upgrade pass cheap_gate)
+  const result = await m.asyncShouldPublish(intent, [], { adapterUrl: null, consoleUrl: null });
+  // 真 expect: upgrade fire + no_adapter_url fire (NOT cheap_gate_confidence)
+  assert.equal(intent.confidence, 'medium', 'confidence 真 upgrade to medium');
+  assert.ok(fired.some(f => f.decision === 'confidence_upgraded'), 'confidence_upgraded telemetry 真 fire');
+  assert.ok(!fired.some(f => f.decision === 'cheap_gate_confidence'), 'cheap_gate_confidence 真 NOT fire (upgrade 后 pass)');
+  assert.equal(result, false, '真 fall through to no_adapter_url (test config) → return false');
+});
+
+test('M-confidence-strict behavioral: confidence=low + missing=[evm_address] → NOT upgrade → cheap_gate_missing_fields', async () => {
+  const m = new MatcherSkill();
+  const fired = [];
+  m._reportPublishDecision = (_cfg, decision, details) => fired.push({ decision, details });
+  const intent = { confidence: 'low', side: 'buy', qty: 5, asset: 'KAS', missing_fields: ['evm_address'] };
+  const result = await m.asyncShouldPublish(intent, [], { adapterUrl: null, consoleUrl: null });
+  // 真 NOT upgrade (missing_fields 非空), fall through to cheap_gate_confidence reject FIRST
+  assert.equal(intent.confidence, 'low', 'confidence 真未 upgrade (missing_fields 非空)');
+  assert.ok(!fired.some(f => f.decision === 'confidence_upgraded'), 'upgrade 真 NOT fire');
+  assert.ok(fired.some(f => f.decision === 'cheap_gate_confidence'), 'cheap_gate_confidence 真 fire (low confidence)');
+  assert.equal(result, false);
+});
+
+test('M-confidence-strict behavioral: confidence=low + side=none → NOT upgrade → cheap_gate_confidence', async () => {
+  const m = new MatcherSkill();
+  const fired = [];
+  m._reportPublishDecision = (_cfg, decision, details) => fired.push({ decision, details });
+  const intent = { confidence: 'low', side: 'none', qty: null, missing_fields: [] };
+  const result = await m.asyncShouldPublish(intent, [], { adapterUrl: null, consoleUrl: null });
+  assert.equal(intent.confidence, 'low', 'confidence 真未 upgrade (side=none)');
+  assert.ok(!fired.some(f => f.decision === 'confidence_upgraded'), 'upgrade 真 NOT fire');
+  assert.ok(fired.some(f => f.decision === 'cheap_gate_confidence'), 'cheap_gate_confidence 真 fire');
+  assert.equal(result, false);
+});
+
+test('M-confidence-strict behavioral: confidence=medium (already) → unchanged → cheap_gate pass', async () => {
+  const m = new MatcherSkill();
+  const fired = [];
+  m._reportPublishDecision = (_cfg, decision, details) => fired.push({ decision, details });
+  const intent = { confidence: 'medium', side: 'buy', qty: 5, missing_fields: [] };
+  const result = await m.asyncShouldPublish(intent, [], { adapterUrl: null, consoleUrl: null });
+  assert.equal(intent.confidence, 'medium', 'confidence 真 unchanged (已 medium)');
+  assert.ok(!fired.some(f => f.decision === 'confidence_upgraded'), 'upgrade 真 NOT fire (already medium)');
+  assert.ok(!fired.some(f => f.decision === 'cheap_gate_confidence'), 'cheap_gate 真 NOT fire (medium pass)');
+  assert.equal(result, false, '真 fall through to no_adapter_url');
 });

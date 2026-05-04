@@ -316,6 +316,23 @@ export class MatcherSkill extends Skill {
     // 让 LLM SHOULD_PUBLISH_SYSTEM 严判 user explicit confirm 才 ready=true (真 fail-closed 守).
     // 真 evidence: events 表 5/4 06:32:23 'llm_ready_false' 真显示 LLM 严判 user 在 reject
     // 地址不是 confirm publish — SHOULD_PUBLISH 真负责 explicit confirm 检查.
+    // M-confidence-strict (NWT r190 architect hat 钦定 (i), 5/4):
+    // 字段齐 + side ∈ {buy,sell} → upgrade 'low' to 'medium' 强制 pass cheap_gate.
+    // 真因: J2 5/4 12:50-13:34 6 turn + NWT r189 5/4 09:16 Phase A e2e 双 confirm
+    // LLM Qwen3.6 真 conservative 给 'low'/'medium' despite 字段齐. M-confidence-relax
+    // (cheap gate 改 'low' 拦截) 真不够 — LLM 永远给 'low'.
+    // fail-closed safety: asyncShouldPublish 真 LLM 后判 (SHOULD_PUBLISH_SYSTEM) 仍 fire,
+    // 真 layered defense per (γ) 守 — 字段齐 真**不**真 publish, LLM 后判仍判 user explicit confirm.
+    if (
+      intent.confidence === 'low' &&
+      (intent.side === 'buy' || intent.side === 'sell') &&
+      (!intent.missing_fields || intent.missing_fields.length === 0)
+    ) {
+      this._reportPublishDecision(config, 'confidence_upgraded', {
+        original: 'low', upgraded: 'medium', side: intent.side, qty: intent.qty, reason: 'fields_complete',
+      });
+      intent.confidence = 'medium';
+    }
     if (intent.confidence === 'low') {
       this._reportPublishDecision(config, 'cheap_gate_confidence', { confidence: intent.confidence, side: intent.side, qty: intent.qty });
       return false;
