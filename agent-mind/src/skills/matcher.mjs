@@ -308,74 +308,51 @@ export class MatcherSkill extends Skill {
   // 漏洞 M-1 fix (2026-05-04): 4 个早 return false 路径 + LLM success/fail 全加 events 表 telemetry。
   // 否则 publish 决策完全黑盒 — Brain 在 freestyle 演 broker, asyncShouldPublish 0 trace.
   // 跟握手系统漏洞 #3 同款修法 (silent catch → ingestEvent + reason 留痕)。
+  // NWT r192 hybrid (Z + 变种 Y + verify) — Owner 5/4 architectural 钦定:
+  // LLM = NLU only (extractIntent 真 NLU helper), Decision truth 真住 deterministic source.
+  // 真 KANet 哲学一致 (chain_events = truth, deterministic source NOT LLM judgment).
+  //
+  // 真 deprecate (history): cheap_gate_confidence / M-confidence-relax / M-confidence-strict /
+  // SHOULD_PUBLISH_SYSTEM LLM call — 全 LLM judgment 真 unreliable per-cycle non-determinism
+  // (J2 5/4 12:50-13:34 6 turn + NWT r189 Phase A 实证).
+  //
+  // 真 AFTER deterministic gate:
+  //   1. side ∈ {buy, sell} required
+  //   2. missing_fields 真 deterministic derive (asset='KAS' / qty>0 / pay_chain ∈ valid set / evm_address regex)
+  //   3. confirmation keyword grep: latest user message OR last 5 user messages 含 keyword
+  //   4. publishOffer fire iff: side OK + missing_fields=[] + confirmation_keyword detected
+  //
+  // fail-closed safety:
+  //   - LLM extract fail / parse fail → intent.missing_fields 全部 → reject
+  //   - chat history 空 → no confirmation → reject
+  //   - evm_address regex fail → missing_fields includes 'evm_address' → reject
   async asyncShouldPublish(intent, peerHistory, config) {
-    // 漏洞 M-confidence-relax fix (2026-05-04): Qwen3.6 LLM 不 obey M-confidence prompt,
-    // 真 e2e 5/4 12:50-13:34 6 turn 全 hit cheap_gate_confidence: confidence=medium/low.
-    // M-confidence (改 prompt 让 LLM 给 high) 真不 effective — LLM 默认保守 medium.
-    // 修法 (Owner framework b1): cheap gate 改 'low' 拦截 (放宽允许 medium pass),
-    // 让 LLM SHOULD_PUBLISH_SYSTEM 严判 user explicit confirm 才 ready=true (真 fail-closed 守).
-    // 真 evidence: events 表 5/4 06:32:23 'llm_ready_false' 真显示 LLM 严判 user 在 reject
-    // 地址不是 confirm publish — SHOULD_PUBLISH 真负责 explicit confirm 检查.
-    // M-confidence-strict (NWT r190 architect hat 钦定 (i), 5/4):
-    // 字段齐 + side ∈ {buy,sell} → upgrade 'low' to 'medium' 强制 pass cheap_gate.
-    // 真因: J2 5/4 12:50-13:34 6 turn + NWT r189 5/4 09:16 Phase A e2e 双 confirm
-    // LLM Qwen3.6 真 conservative 给 'low'/'medium' despite 字段齐. M-confidence-relax
-    // (cheap gate 改 'low' 拦截) 真不够 — LLM 永远给 'low'.
-    // fail-closed safety: asyncShouldPublish 真 LLM 后判 (SHOULD_PUBLISH_SYSTEM) 仍 fire,
-    // 真 layered defense per (γ) 守 — 字段齐 真**不**真 publish, LLM 后判仍判 user explicit confirm.
-    if (
-      intent.confidence === 'low' &&
-      (intent.side === 'buy' || intent.side === 'sell') &&
-      (!intent.missing_fields || intent.missing_fields.length === 0)
-    ) {
-      this._reportPublishDecision(config, 'confidence_upgraded', {
-        original: 'low', upgraded: 'medium', side: intent.side, qty: intent.qty, reason: 'fields_complete',
-      });
-      intent.confidence = 'medium';
-    }
-    if (intent.confidence === 'low') {
-      this._reportPublishDecision(config, 'cheap_gate_confidence', { confidence: intent.confidence, side: intent.side, qty: intent.qty });
-      return false;
-    }
+    // Gate 1: side check (cheap, deterministic)
     if (intent.side !== 'buy' && intent.side !== 'sell') {
-      this._reportPublishDecision(config, 'cheap_gate_side', { side: intent.side });
+      this._reportPublishDecision(config, 'gate_side', { side: intent.side });
       return false;
     }
+    // Gate 2: missing_fields check (deterministic — NLU helper 真 fill, gate 真 verify)
     if (intent.missing_fields?.length > 0) {
-      this._reportPublishDecision(config, 'cheap_gate_missing_fields', { missing_fields: intent.missing_fields, side: intent.side });
+      this._reportPublishDecision(config, 'gate_missing_fields', { missing_fields: intent.missing_fields, side: intent.side });
       return false;
     }
-    const adapterUrl = config?.adapterUrl;
-    if (!adapterUrl) {
-      this._reportPublishDecision(config, 'no_adapter_url', {});
+    // Gate 3: confirmation keyword grep (deterministic — Owner 5/4 钦定 expandable list)
+    // 真 cycle-independent (NOT LLM judgment), 真 explicit user confirm 才 fire.
+    const CONFIRMATION_KEYWORDS = [
+      'ok', '好', '好的', '确认', '同意', '可以', '行', '发吧', '发布', 'publish', 'go', 'yes', '请发布', '请下单',
+    ];
+    const userMsgs = (peerHistory || []).filter(m => m.dir === 'in').slice(-5).map(m => (m.text || '').toLowerCase());
+    const latestInputLower = (this._inputMessage || '').toLowerCase();
+    const candidates = [latestInputLower, ...userMsgs];
+    const hasConfirmation = candidates.some(text => CONFIRMATION_KEYWORDS.some(kw => text.includes(kw.toLowerCase())));
+    if (!hasConfirmation) {
+      this._reportPublishDecision(config, 'gate_no_confirmation', { side: intent.side, qty: intent.qty, latest_msg_first_60: (this._inputMessage || '').slice(0, 60) });
       return false;
     }
-    const recentText = (peerHistory || []).slice(-5).map(m => `${m.dir === 'in' ? 'user' : 'matcher'}: ${m.text || ''}`).join('\n');
-    const userMsg = `intent: ${JSON.stringify(intent)}\nrecent history (last 5):\n${recentText || '(empty)'}`;
-    try {
-      const response = await fetchJson(`${adapterUrl}/reply`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          peer: this._senderAddress,
-          mindSystem: SHOULD_PUBLISH_SYSTEM,
-          mindUser: userMsg,
-          mindTask: true,
-        }),
-        brainCall: true,
-      });
-      const cleaned = (response?.reply || '').replace(/^```(?:json)?\s*|\s*```\s*$/gs, '').trim();
-      const parsed = JSON.parse(cleaned);
-      if (parsed?.ready === true) {
-        this._reportPublishDecision(config, 'llm_ready_true', { llm_reason: parsed.reason });
-        return true;
-      }
-      this._reportPublishDecision(config, 'llm_ready_false', { llm_reason: parsed?.reason, raw_reply_first_120: cleaned.slice(0, 120) });
-      return false;
-    } catch (err) {
-      this._reportPublishDecision(config, 'llm_call_or_parse_fail', { error: err.message });
-      return false;
-    }
+    // 全 deterministic gate 通过 — publish ready
+    this._reportPublishDecision(config, 'deterministic_gate_pass', { side: intent.side, qty: intent.qty, asset: intent.asset });
+    return true;
   }
 
   // 漏洞 M-1 fix helper: fire-and-forget POST /ingest/event 上报 publish 决策。
