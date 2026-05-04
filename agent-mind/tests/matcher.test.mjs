@@ -323,6 +323,22 @@ test('M-1: asyncShouldPublish 4 cheap-gate paths 全调 _reportPublishDecision',
   assert.equal(calls.length, 4, '4 cheap-gate paths 全 4 次 telemetry');
 });
 
+test('M-wallet-inject: source markers 守 — broker 真钱包真 inject', async () => {
+  const fs = await import('node:fs/promises');
+  const src = await fs.readFile(new URL('../src/skills/matcher.mjs', import.meta.url), 'utf-8');
+  // M-wallet-inject fix marker
+  assert.match(src, /M-wallet-inject fix/, 'M-wallet-inject fix marker 必保留');
+  // gatherContext 真 fetch wallets endpoint
+  assert.match(src, /\/api\/relay\/.*\/wallets/, '必 fetch /api/relay/:id/wallets endpoint');
+  // _fetchBrokerWallets helper 必存在
+  assert.match(src, /async _fetchBrokerWallets/, '_fetchBrokerWallets helper 必定义');
+  // formatForBrain instructions 真 prepend broker wallet
+  assert.match(src, /BROKER 真收款地址/, 'instructions 真含 broker 真收款地址 prefix');
+  assert.match(src, /严禁编造/, '严禁编造 真 prompt 防 hallucinate');
+  // publishOffer payload 真 inject verification_meta.accepted_chains
+  assert.match(src, /accepted_chains/, 'publishOffer payload 真 inject accepted_chains');
+});
+
 test('M-confidence fix: source markers 守', async () => {
   const fs = await import('node:fs/promises');
   const src = await fs.readFile(new URL('../src/skills/matcher.mjs', import.meta.url), 'utf-8');

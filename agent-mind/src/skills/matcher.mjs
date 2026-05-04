@@ -31,9 +31,16 @@ export class MatcherSkill extends Skill {
 
   // T1.2 ship: KANet skill HTTP API convention (per r112 verdict, fetchJson via consoleUrl).
   // /api/agent/peer-context (conversations.js:524-598) 已 cover peer + chatHistory + recentBroadcasts + connectionStatus.
+  //
+  // M-wallet-inject fix (2026-05-04): 加 fetch /api/relay/:id/wallets 拿 broker 真 9 链钱包地址.
+  // 真 e2e 暴露 Brain hallucinate 真 BSC 地址 (5/4 12:51 真截图: Brain 给 0xD8A87c1A4e9F2c3b1a5d6e7f8g9h0i...
+  // 含非 hex 字符 g/h/i/j/k/l/m, 完全 invalid, 真 broker BSC 是 0xD8A87c1AfcFadAd46355c3d59377C9E6edf0da47).
+  // 修法: gatherContext fetch broker 真钱包 + formatForBrain inject Brain prompt + publishOffer payload inject.
   async gatherContext(kernels, config) {
     // T1.5 装配 wire: 保存 config 给 formatForBrain 用 (Skill API formatForBrain 只接 gathered, 不接 kernels/config)
     this._config = config || {};
+    // M-wallet-inject: fetch broker 真 9 链钱包地址 (跟 peer-context 并行 fetch, 不阻).
+    this._walletAddresses = await this._fetchBrokerWallets(config);
     if (!this._senderAddress) {
       return { peer: null, history: [], broadcasts: [], connectionStatus: null, metadata: { historyCount: 0, degraded: false } };
     }
@@ -63,6 +70,26 @@ export class MatcherSkill extends Skill {
     } catch (err) {
       console.warn(`[matcher] gatherContext fetchJson failed: ${err.message}`);
       return { peer: null, history: [], broadcasts: [], connectionStatus: null, metadata: { historyCount: 0, degraded: false, error: err.message } };
+    }
+  }
+
+  // M-wallet-inject helper: fetch broker 真 9 链钱包地址 (BSC/ETH/POLYGON/SOL/TRON 等).
+  // 返 { bnb: '0x...', eth: '0x...', polygon: '0x...', sol: '...', tron: 'T...' } only default wallets.
+  // fail-closed: fetch err → 空 object, formatForBrain instructions 自然 skip wallet section.
+  async _fetchBrokerWallets(config) {
+    const consoleUrl = config?.consoleUrl || 'http://localhost:3100';
+    const relayNodeId = config?.relayNodeId;
+    if (!relayNodeId) return {};
+    try {
+      const res = await fetchJson(`${consoleUrl}/api/relay/${relayNodeId}/wallets`);
+      const out = {};
+      for (const c of (res?.chains || [])) {
+        if (c.address && c.isDefault) out[c.chain] = c.address;
+      }
+      return out;
+    } catch (err) {
+      console.warn(`[matcher] _fetchBrokerWallets failed: ${err.message}`);
+      return {};
     }
   }
 
@@ -370,10 +397,23 @@ export class MatcherSkill extends Skill {
     }
     const pricing = this.computePricing(intent);
     const consoleUrl = this._config?.consoleUrl || CONSOLE_URL;
+    // M-wallet-inject fix (2026-05-04): payload 真 inject verification_meta.accepted_chains.
+    // 真 broker EVM 收款地址从 _walletAddresses (gatherContext fetch) 拿, 真 inject offer.
+    // 不再让 Brain freestyle hallucinate (5/4 12:51 真 evidence: Brain 编 0xD8A87c1A4e9F2c3b1a5d6e7f8g... 含非 hex 字符).
+    const acceptedChains = [];
+    const w = this._walletAddresses || {};
+    for (const chain of ['bnb', 'eth', 'polygon', 'arbitrum', 'optimism', 'avalanche', 'base', 'sol', 'tron']) {
+      if (w[chain]) acceptedChains.push({ chain, address: w[chain] });
+    }
     const payload = {
       relayNodeId,
       ...pricing,
       verification: 'cross_chain_tx',
+      verification_meta: {
+        accepted_chains: acceptedChains,
+        expected_asset: pricing.want_asset || 'USDT',
+        receive_chain: pricing.want_chain || 'BSC',
+      },
       expires_minutes: 30,
     };
     const res = await fetchJson(`${consoleUrl}/api/exchange/publish`, {
@@ -463,6 +503,19 @@ export class MatcherSkill extends Skill {
     // v1.3 KI-18 sediment: strip markdown across all reply paths
     const cleanedReply = this.stripMarkdown(reply);
 
+    // M-wallet-inject fix (2026-05-04): instructions 真 prepend broker 真钱包地址,
+    // Brain 看到真值不再 hallucinate (5/4 12:51 真截图 evidence: Brain 编 fake 地址含非 hex 字符).
+    let walletInstr = '';
+    const w = this._walletAddresses || {};
+    if (Object.keys(w).length > 0) {
+      const wLines = ['🔒 BROKER 真收款地址 (用户问转账地址必引用真值, 严禁编造或截断, 严禁说"出于安全省略"等借口):'];
+      const labels = { bnb: 'BSC (BEP20) USDT', eth: 'ETH (ERC20) USDT', polygon: 'Polygon USDT', arbitrum: 'Arbitrum USDT', optimism: 'Optimism USDT', avalanche: 'Avalanche USDT', base: 'Base USDC', sol: 'Solana USDT', tron: 'TRON (TRC20) USDT' };
+      for (const [chain, addr] of Object.entries(w)) {
+        wLines.push(`- ${labels[chain] || chain}: ${addr}`);
+      }
+      walletInstr = wLines.join('\n') + '\n\n';
+    }
+
     return {
       name: this.name,
       description: this.description,
@@ -475,8 +528,9 @@ export class MatcherSkill extends Skill {
         offerResult: intent._offerResult || null,
         publishError: intent._publishError || null,
         degraded: gathered.metadata?.degraded || false,
+        walletAddresses: w,                                 // M-wallet-inject: 暴露给 data 层 verify
       },
-      instructions: cleanedReply,
+      instructions: walletInstr + cleanedReply,
     };
   }
 
