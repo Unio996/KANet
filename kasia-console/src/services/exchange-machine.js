@@ -577,7 +577,41 @@ export function expireStale() {
  * Check and timeout verification in progress. Called periodically.
  * @returns {number} count of timed out offers
  */
-export function timeoutVerifying() {
+// V5 fix (NWT r186 ack KI-29 复刻第 2 次 + r187 standby): emit timeout_v1 chain TX BEFORE transition('timed_out').
+// 跟 checkMatchedTimeout line 642-665 同款 ⑤ NO TX NO STATE CHANGE 5 attempt retry pattern.
+// reason: timeoutVerifying 真 transition() 内 SET only, 0 emit chain TX → KI-20 violation (跨 node 真 0 sync).
+// post fix: chain-first 严守 (broadcast → transition), trade-protocol-filter handleExchangeTimeout (line 1090) 真 sole writer per chain ingest 真 redundant 但 0 harm (idempotent state guard).
+async function _emitTimeoutAndTransition(id, reason) {
+  const offer = sqlite.prepare('SELECT maker, taker FROM exchange_offers WHERE id = ?').get(id);
+  if (!offer) return false;
+  const relay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(offer.maker);
+  if (relay) {
+    const { sendCommandAsync } = await import('./relay-manager.js');
+    const msg = JSON.stringify({
+      t: 'kanet_exchange_timeout_v1', offer_id: id, taker: offer.taker, reason,
+    });
+    let timeoutTxId = null;
+    for (let ta = 1; ta <= 3; ta++) {
+      try {
+        const tr = await sendCommandAsync(relay.id, { type: 'send_broadcast', channel: 'kanet-exchange', message: msg });
+        timeoutTxId = tr?.txId;
+        if (timeoutTxId) break;
+      } catch (te) {
+        console.error(`[exchange-machine] timeout broadcast attempt ${ta}/3 (${reason}): ${te.message}`);
+        if (ta < 3) await new Promise(r => setTimeout(r, 200));
+      }
+    }
+    if (!timeoutTxId) {
+      console.warn(`[exchange-machine] timeout broadcast failed for ${id.slice(0,8)} (${reason}) — staying in current state, retry next tick`);
+      return false;
+    }
+  }
+  // Non-local maker (no relay) OR broadcast success → NOW transition (chain-after-set).
+  transition(id, 'timed_out');
+  return true;
+}
+
+export async function timeoutVerifying() {
   // Original: verifying/awaiting states → timed_out after 30min
   const stuck = sqlite.prepare(
     `SELECT id, verification FROM exchange_offers
@@ -587,7 +621,7 @@ export function timeoutVerifying() {
   ).all();
 
   for (const { id } of stuck) {
-    transition(id, 'timed_out');
+    await _emitTimeoutAndTransition(id, 'verifying_timeout_30min');
   }
 
   // delivering → verified (revert for retry) after 60min
@@ -615,7 +649,7 @@ export function timeoutVerifying() {
 
   for (const { id } of stuckVerified) {
     console.log(`[exchange-machine] verified timeout (120min total) → timed_out: ${id.slice(0,8)}`);
-    transition(id, 'timed_out');
+    await _emitTimeoutAndTransition(id, 'verified_timeout_120min');
   }
 
   return stuck.length + stuckDelivering.length + stuckVerified.length;

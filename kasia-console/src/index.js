@@ -146,9 +146,13 @@ await registerMonitorRoutes(fastify);
 // T-J1-19e (J2 RCA 修案 1): 5min tick → 30s. 缩窄 race 窗口 (offer expired 但仍 'open',
 // user 付款 → 进 verifying → 资金事故). 修案 2 (lazy check) 在 exchange-machine 关键路径补刀.
 import { expireStale, timeoutVerifying, checkMatchedTimeout, checkStaleDisputes, cleanupStaleOrphanAccepts } from './services/exchange-machine.js';
-try { expireStale(); timeoutVerifying(); checkStaleDisputes(); cleanupStaleOrphanAccepts(); } catch (err) { console.error('[exchange] startup expire/timeout:', err.message); }
+// V5 fix: timeoutVerifying 改 async (emit timeout_v1 chain TX before transition, KI-20 严守).
+// 真 .catch pattern 跟 checkMatchedTimeout 同款 (NOT throw 阻 cron tick).
+try { expireStale(); checkStaleDisputes(); cleanupStaleOrphanAccepts(); } catch (err) { console.error('[exchange] startup expire:', err.message); }
+timeoutVerifying().catch(err => console.error('[exchange] startup timeoutVerifying:', err.message));
 setInterval(() => {
-  try { expireStale(); timeoutVerifying(); checkStaleDisputes(); cleanupStaleOrphanAccepts(); } catch (err) { console.error('[exchange] expire/timeout error:', err.message); }
+  try { expireStale(); checkStaleDisputes(); cleanupStaleOrphanAccepts(); } catch (err) { console.error('[exchange] expire error:', err.message); }
+  timeoutVerifying().catch(err => console.error('[exchange] timeoutVerifying error:', err.message));
   checkMatchedTimeout().catch(err => console.error('[exchange] matched timeout error:', err.message));
 }, 30 * 1000);
 

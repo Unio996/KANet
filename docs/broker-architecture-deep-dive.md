@@ -895,7 +895,7 @@ Projection: exchange_offers (DB cache, rebuildable from chain_events replay)
 | 2 | `api/exchange.js:782` | POST /api/exchange/resolve (admin override maker_wins/taker_wins) | ⚠ **admin 直写, KI-20 violation candidate** — dispute 救生路径, 但应 emit `resolve_v1` chain TX 由 trade-protocol-filter 写 (Step 2 backlog) |
 | 3 | `broker-intake-watcher.js:298` | broker buy 路径 timed_out (无 taker accept) | ⚠ 本地 watcher 直写, 不 emit cancel_v1 chain TX (KI-20 violation, Step 2 backlog) |
 | 4 | `broker-state-authority.js:440` | broker buy refund 后 → refunded | ⚠ refund TX 上链后 SET — 半守 (chain-after-set, 但 SET 真不通过 trade-protocol-filter ingest, Step 2 backlog) |
-| 5 | `exchange-machine.js:679` | reopen (matched → open on accept timeout) | ⚠ 真触发条件: timeoutVerifying 内部, 没 emit timeout_v1 chain TX (本地 SET, Step 2 backlog) |
+| 5 | `exchange-machine.js:590` (FIXED 5/4) | timeoutVerifying transition('timed_out') — 原 transition() 内 SET 0 emit chain TX → V5 KI-20 violation. **5/4 fix**: 加 `_emitTimeoutAndTransition` helper 真 emit timeout_v1 chain TX 5 attempt retry FIRST 真 transition (chain-first 严守, 跟 checkMatchedTimeout line 642-665 同款 pattern). 注: J2 r147 KI-29 复刻第 2 次 — 原 grep 真出 line 679 (checkMatchedTimeout) 真 wrong location (line 642 已 emit chain TX FIRST), 真 violation 真在 timeoutVerifying line 590 | ✓ chain-first 严守 (post 5/4 V5 fix) |
 | 6 | `trade-protocol-filter.js:1102` | handleExchangePublish remote ingest → open | ✓ **chain-first 真守** (chain TX → ingest → SET) |
 | 7 | `trade-protocol-filter.js:1229` | handleExchange{Accept,Paid,Delivered,Timeout,Cancel,Dispute,Resolve} generic transition | ✓ **chain-first 真守** (chain TX → ingest → SET) |
 
