@@ -285,8 +285,15 @@ export async function registerDiscoveryRoutes(fastify) {
       return reply.code(400).send({ error: 'addressA, addressB, txHash are required' });
     }
 
-    // Deduplicate by txHash (v47: check chain_events instead of interaction_records)
-    const dup = sqlite.prepare('SELECT 1 FROM chain_events WHERE txid = ?').get(txHash);
+    // 漏洞 #1 fix (2026-05-04): dup check 必须按 (txid, event_type) 双键。
+    // 历史 bug: Relay processHandshake step 1 调 ingestTx 写 chain_events event_type='tx';
+    // Scout 随后调本 endpoint 报 interactionType='handshake', 旧 dedup 按整 txid 短路 →
+    // 后续 observeHandshake / pending_actions / sendCommandAsync IPC 全部 skip →
+    // 备份救济路径死。 5/1 c382fd2c handshake 漏处理的根因之一。
+    const dedupEventType = interactionType || 'interaction';
+    const dup = sqlite.prepare(
+      'SELECT 1 FROM chain_events WHERE txid = ? AND event_type = ?'
+    ).get(txHash, dedupEventType);
     if (dup) {
       return reply.send({ ok: true, duplicate: true });
     }
@@ -330,17 +337,30 @@ export async function registerDiscoveryRoutes(fastify) {
             if (already) {
               console.log(`[discovery] skip handshake_accept enqueue: already active with ${addressA.slice(-12)}`);
             } else {
+              // 漏洞 #2 fix (2026-05-04): 见 ingest-service.js 同款修法注释。
               const { randomUUID } = await import('crypto');
               const now = new Date().toISOString();
-              sqlite.prepare(`
-                INSERT OR IGNORE INTO pending_actions
-                  (id, action_type, direction, local_address, target_address, source, idempotent_key, status, trigger_txid, created_at, updated_at)
-                VALUES (?, 'handshake_accept', 'inbound', ?, ?, 'scout', ?, 'pending', ?, ?, ?)
-              `).run(
-                randomUUID(), addressB, addressA,
-                `handshake_accept:${addressB}:${addressA}`,
-                txHash || null, now, now,
-              );
+              const idempotentKey = `handshake_accept:${addressB}:${addressA}`;
+              const existing = sqlite.prepare(
+                'SELECT id, status FROM pending_actions WHERE idempotent_key = ?'
+              ).get(idempotentKey);
+              if (existing && (existing.status === 'failed' || existing.status === 'expired')) {
+                sqlite.prepare(`
+                  UPDATE pending_actions
+                  SET status = 'pending', trigger_txid = ?, retry_count = 0, error = NULL, updated_at = ?
+                  WHERE id = ?
+                `).run(txHash || null, now, existing.id);
+                console.log(`[discovery] reset failed/expired pending_action ${existing.id.slice(0,8)} for new trigger`);
+              } else if (!existing) {
+                sqlite.prepare(`
+                  INSERT INTO pending_actions
+                    (id, action_type, direction, local_address, target_address, source, idempotent_key, status, trigger_txid, created_at, updated_at)
+                  VALUES (?, 'handshake_accept', 'inbound', ?, ?, 'scout', ?, 'pending', ?, ?, ?)
+                `).run(
+                  randomUUID(), addressB, addressA, idempotentKey,
+                  txHash || null, now, now,
+                );
+              }
             }
           } catch (paErr) {
             console.log(`[discovery] pending_actions write failed: ${paErr.message}`);

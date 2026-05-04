@@ -105,16 +105,32 @@ export async function handleIngestMessage(payload) {
           if (already) {
             console.log(`[ingest] skip handshake_accept enqueue: already active with ${remoteAddress.slice(-12)}`);
           } else {
+            // 漏洞 #2 fix (2026-05-04): idempotent_key 不含 txid 是 anti-spam 设计 (防恶意发多笔握手就多次入队),
+            // 但旧 INSERT OR IGNORE 让 status='failed'/'expired' 留在表里, 后续真握手永远静默丢弃。
+            // 修法: 现存 row status IN (failed/expired) → UPDATE reset 重新 pending; pending/executing/done → 跳过。
             const now = nowIso();
-            sqlite.prepare(`
-              INSERT OR IGNORE INTO pending_actions
-                (id, action_type, direction, local_address, target_address, source, idempotent_key, status, trigger_txid, created_at, updated_at)
-              VALUES (?, 'handshake_accept', 'inbound', ?, ?, 'ingest', ?, 'pending', ?, ?, ?)
-            `).run(
-              randomUUID(), localAddress, remoteAddress,
-              `handshake_accept:${localAddress}:${remoteAddress}`,
-              txid || null, now, now,
-            );
+            const idempotentKey = `handshake_accept:${localAddress}:${remoteAddress}`;
+            const existing = sqlite.prepare(
+              'SELECT id, status FROM pending_actions WHERE idempotent_key = ?'
+            ).get(idempotentKey);
+            if (existing && (existing.status === 'failed' || existing.status === 'expired')) {
+              sqlite.prepare(`
+                UPDATE pending_actions
+                SET status = 'pending', trigger_txid = ?, retry_count = 0, error = NULL, updated_at = ?
+                WHERE id = ?
+              `).run(txid || null, now, existing.id);
+              console.log(`[ingest] reset failed/expired pending_action ${existing.id.slice(0,8)} for new trigger`);
+            } else if (!existing) {
+              sqlite.prepare(`
+                INSERT INTO pending_actions
+                  (id, action_type, direction, local_address, target_address, source, idempotent_key, status, trigger_txid, created_at, updated_at)
+                VALUES (?, 'handshake_accept', 'inbound', ?, ?, 'ingest', ?, 'pending', ?, ?, ?)
+              `).run(
+                randomUUID(), localAddress, remoteAddress, idempotentKey,
+                txid || null, now, now,
+              );
+            }
+            // else: existing.status IN (pending/executing/done) → 静默跳过 (idempotent 防重复)
           }
         } catch (paErr) {
           console.log(`[ingest] pending_actions write failed: ${paErr.message}`);

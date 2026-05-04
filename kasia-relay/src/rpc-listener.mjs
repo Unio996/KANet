@@ -678,8 +678,11 @@ async function processHandshake(txId, payloadHex, senderAddress) {
         );
         const claimData = await claimRes.json();
         if (!claimData.claimed) {
-          log('HANDSHAKE claim failed for', senderAddress.slice(-12), '— already processing, skipping');
-          markSeen(txId);
+          // 漏洞 #6 fix (2026-05-04): 不 markSeen — 让 catch-up 真有 retry 能力。
+          // 旧逻辑: claim fail → markSeen → 如果其他 worker 之后也 fail (如 sendKaspa throw),
+          // 这笔握手永久死, pending_action 终态 expired 也不会重新唤醒本路径。
+          // step 2/3 (memory + DB dedup) 已防真重复 accept, markSeen 是冗余的。
+          log('HANDSHAKE claim failed for', senderAddress.slice(-12), '— already processing, will recheck next cycle');
           return;
         }
       } catch (claimErr) {
@@ -720,8 +723,25 @@ async function processHandshake(txId, payloadHex, senderAddress) {
   } catch (err) {
     // T1-bugfix-handshake Step 1: log err.message (was silent swallow per NWT r124 architect verdict)
     log(`HANDSHAKE processing failed for ${senderAddress?.slice(-12) || 'unknown'}: ${err?.message || err}`);
+    // 漏洞 #3 fix (2026-05-04): outer catch 同步上报到 Console events 表, 让系统级追踪可见。
+    // 否则只能挖 Relay log 文件, 系统层完全无痕迹。 catch-up retry 机制不变。
+    if (CONSOLE_URL) {
+      fetch(`${CONSOLE_URL}/ingest/event`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-ingest-secret': process.env.INGEST_SECRET || '' },
+        body: JSON.stringify({
+          traceId: `handshake-fail:${txId}`,
+          eventScope: 'relay',
+          eventType: 'handshake_processing_failed',
+          source: 'relay',
+          level: 'error',
+          summary: `processHandshake throw txId=${txId.slice(0,12)} sender=${senderAddress?.slice(-12) || 'unknown'}: ${err?.message || err}`,
+          agentAddress: _myAddress,
+        }),
+        signal: AbortSignal.timeout(3000),
+      }).catch(() => {});
+    }
     // T1-bugfix-handshake Step 3 (iii) design fix per NWT r130: NOT markSeen on silent throw — catch-up retries next cycle.
-    // Step 2 telemetry will isolate the failing step within 1-2 catch-up cycles.
     // Risk mitigation: if throw is deterministic, infinite retry — revert + add retry-counter cap if observed.
   }
 }
