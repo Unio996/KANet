@@ -297,6 +297,47 @@ test('T3.1 asyncShouldPublish cheap gates: low confidence / missing_fields / non
   assert.equal(await m.asyncShouldPublish({ side: 'query', confidence: 'high', missing_fields: [] }, okHist, config), false);
 });
 
+// ── 漏洞 M-1: asyncShouldPublish 早 return false 路径必上报 events 表 telemetry ──
+
+test('M-1: asyncShouldPublish 4 cheap-gate paths 全调 _reportPublishDecision', async () => {
+  const m = new MatcherSkill();
+  const calls = [];
+  m._reportPublishDecision = async (cfg, decision, details) => { calls.push({ decision, details }); };
+  const config = { adapterUrl: 'http://127.0.0.1:99999', consoleUrl: 'http://127.0.0.1:99999' };
+  const okHist = [{ dir: 'in', text: '好' }];
+
+  await m.asyncShouldPublish({ side: 'buy', confidence: 'low', missing_fields: [] }, okHist, config);
+  await m.asyncShouldPublish({ side: 'query', confidence: 'high', missing_fields: [] }, okHist, config);
+  await m.asyncShouldPublish({ side: 'buy', confidence: 'high', missing_fields: ['evm_address'] }, okHist, config);
+  await m.asyncShouldPublish({ side: 'buy', confidence: 'high', missing_fields: [] }, okHist, {}); // no adapterUrl
+
+  const decisions = calls.map(c => c.decision);
+  assert.ok(decisions.includes('cheap_gate_confidence'), 'low confidence path 必上报');
+  assert.ok(decisions.includes('cheap_gate_side'), 'non buy/sell side 必上报');
+  assert.ok(decisions.includes('cheap_gate_missing_fields'), 'missing_fields 路径必上报');
+  assert.ok(decisions.includes('no_adapter_url'), 'no adapter url 路径必上报');
+  assert.equal(calls.length, 4, '4 cheap-gate paths 全 4 次 telemetry');
+});
+
+test('M-1: source — _reportPublishDecision marker 守 (防未来 regression)', async () => {
+  const fs = await import('node:fs/promises');
+  const src = await fs.readFile(new URL('../src/skills/matcher.mjs', import.meta.url), 'utf-8');
+  // 漏洞 M-1 fix marker
+  assert.match(src, /漏洞 M-1 fix/, 'M-1 fix marker 必保留');
+  // helper 函数存在
+  assert.match(src, /async _reportPublishDecision/, '_reportPublishDecision helper 必定义');
+  // event_type 'matcher_publish_decision'
+  assert.match(src, /matcher_publish_decision/, 'eventType matcher_publish_decision 必有');
+  // 4 个 cheap-gate decision name 全在
+  for (const d of ['cheap_gate_confidence', 'cheap_gate_side', 'cheap_gate_missing_fields', 'no_adapter_url', 'llm_ready_true', 'llm_ready_false', 'llm_call_or_parse_fail']) {
+    assert.match(src, new RegExp(`['"]${d}['"]`), `decision '${d}' marker 必有`);
+  }
+  // /ingest/event endpoint
+  assert.match(src, /\/ingest\/event/, '/ingest/event endpoint 必 POST');
+  // x-ingest-secret header
+  assert.match(src, /x-ingest-secret/, 'x-ingest-secret header 必有');
+});
+
 test('T3.2 reactToChainEvents fail-closed when address/consoleUrl missing', async () => {
   const m = new MatcherSkill();
   const r1 = await m.reactToChainEvents('', { consoleUrl: 'http://x' });

@@ -245,12 +245,28 @@ export class MatcherSkill extends Skill {
   // Implementer authoritative reconciliation: mindTask: true (boolean) per agent-adapter/index.mjs:79
   // canonical pattern (matcher.mjs:120 + 8 mind.mjs sites), spec line 161 'shouldPublish_classify' string
   // not adopted (adapter just truthy-checks, but 8 existing sites use boolean).
+  //
+  // 漏洞 M-1 fix (2026-05-04): 4 个早 return false 路径 + LLM success/fail 全加 events 表 telemetry。
+  // 否则 publish 决策完全黑盒 — Brain 在 freestyle 演 broker, asyncShouldPublish 0 trace.
+  // 跟握手系统漏洞 #3 同款修法 (silent catch → ingestEvent + reason 留痕)。
   async asyncShouldPublish(intent, peerHistory, config) {
-    if (intent.confidence !== 'high') return false;
-    if (intent.side !== 'buy' && intent.side !== 'sell') return false;
-    if (intent.missing_fields?.length > 0) return false;
+    if (intent.confidence !== 'high') {
+      this._reportPublishDecision(config, 'cheap_gate_confidence', { confidence: intent.confidence, side: intent.side, qty: intent.qty });
+      return false;
+    }
+    if (intent.side !== 'buy' && intent.side !== 'sell') {
+      this._reportPublishDecision(config, 'cheap_gate_side', { side: intent.side });
+      return false;
+    }
+    if (intent.missing_fields?.length > 0) {
+      this._reportPublishDecision(config, 'cheap_gate_missing_fields', { missing_fields: intent.missing_fields, side: intent.side });
+      return false;
+    }
     const adapterUrl = config?.adapterUrl;
-    if (!adapterUrl) return false;
+    if (!adapterUrl) {
+      this._reportPublishDecision(config, 'no_adapter_url', {});
+      return false;
+    }
     const recentText = (peerHistory || []).slice(-5).map(m => `${m.dir === 'in' ? 'user' : 'matcher'}: ${m.text || ''}`).join('\n');
     const userMsg = `intent: ${JSON.stringify(intent)}\nrecent history (last 5):\n${recentText || '(empty)'}`;
     try {
@@ -267,9 +283,43 @@ export class MatcherSkill extends Skill {
       });
       const cleaned = (response?.reply || '').replace(/^```(?:json)?\s*|\s*```\s*$/gs, '').trim();
       const parsed = JSON.parse(cleaned);
-      return parsed?.ready === true;
-    } catch {
+      if (parsed?.ready === true) {
+        this._reportPublishDecision(config, 'llm_ready_true', { llm_reason: parsed.reason });
+        return true;
+      }
+      this._reportPublishDecision(config, 'llm_ready_false', { llm_reason: parsed?.reason, raw_reply_first_120: cleaned.slice(0, 120) });
       return false;
+    } catch (err) {
+      this._reportPublishDecision(config, 'llm_call_or_parse_fail', { error: err.message });
+      return false;
+    }
+  }
+
+  // 漏洞 M-1 fix helper: fire-and-forget POST /ingest/event 上报 publish 决策。
+  // 不阻塞 publish 主路径 (决策已早 return), 单纯 events 表留痕给运维 trace。
+  // 跟握手 rpc-listener.mjs outer catch ingestEvent 同款 pattern。
+  async _reportPublishDecision(config, decision, details) {
+    const consoleUrl = config?.consoleUrl;
+    if (!consoleUrl) return;
+    try {
+      await fetchJson(`${consoleUrl}/ingest/event`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-ingest-secret': process.env.INGEST_SECRET || '',
+        },
+        body: JSON.stringify({
+          traceId: `matcher-publish:${(this._senderAddress || '').slice(-12)}:${Date.now()}`,
+          eventScope: 'mind',
+          eventType: 'matcher_publish_decision',
+          source: 'matcher',
+          level: decision === 'llm_ready_true' ? 'info' : 'warning',
+          summary: `asyncShouldPublish ${decision}: ${JSON.stringify(details).slice(0, 200)}`,
+          agentAddress: config?.address || null,
+        }),
+      });
+    } catch {
+      // fire-and-forget — telemetry 失败不阻 publish 决策
     }
   }
 
