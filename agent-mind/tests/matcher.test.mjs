@@ -38,32 +38,34 @@ test('canActivate reactive missing context defaults empty string', () => {
   assert.equal(m._inputMessage, '');
 });
 
-// ── generateReply 3 paths + T1 disclaimer ────────────────────────────────────
+// ── generateReply 3 paths (M-2 fix: 删 T1 disclaimer, T3 阶段不该有) ──────────
 
-test('generateReply low-confidence/none returns clarification + T1 disclaimer', () => {
+test('generateReply low-confidence/none returns clarification (M-2: no T1 disclaimer)', () => {
   const r = generateReply({ side: 'none', confidence: 'low' });
   assert.match(r, /没完全听懂/);
-  assert.match(r, /T1 验证阶段/);
+  assert.doesNotMatch(r, /T1 验证阶段/);
 });
 
-test('generateReply missing_fields returns ask + T1 disclaimer', () => {
+test('generateReply missing_fields returns ask (M-2: no T1 disclaimer)', () => {
   const r = generateReply({ side: 'buy', asset: 'KAS', confidence: 'high', missing_fields: ['qty', 'pay_chain'] });
   assert.match(r, /购买 KAS/);
   assert.match(r, /qty.*pay_chain/);
-  assert.match(r, /T1 验证阶段/);
+  assert.doesNotMatch(r, /T1 验证阶段/);
 });
 
-test('generateReply full intent returns confirmation + T1 disclaimer', () => {
+test('generateReply full intent returns confirmation (M-2: no T1 disclaimer, ready-to-publish wording)', () => {
   const r = generateReply({ side: 'buy', asset: 'KAS', qty: 50, qty_unit: 'USDT', pay_chain: 'BSC', confidence: 'high', missing_fields: [] });
   assert.match(r, /50 USDT 买入 KAS/);
   assert.match(r, /BSC/);
-  assert.match(r, /T1 验证阶段/);
+  assert.doesNotMatch(r, /T1 验证阶段/);
+  // M-2: 新文案 "准备出报价" — 给 Brain 真信号 matcher 准备 publish
+  assert.match(r, /准备出报价/);
 });
 
-test('generateReply null intent returns clarification fallback', () => {
+test('generateReply null intent returns clarification fallback (M-2: no T1 disclaimer)', () => {
   const r = generateReply(null);
   assert.match(r, /没完全听懂/);
-  assert.match(r, /T1 验证阶段/);
+  assert.doesNotMatch(r, /T1 验证阶段/);
 });
 
 // ── ensureAsciiSafe ──────────────────────────────────────────────────────────
@@ -174,7 +176,9 @@ test('formatForBrain end-to-end (no adapter): returns intent + suggestedReply wi
   assert.equal(r.name, 'matcher');
   assert.ok(r.data.intent, 'data.intent present');
   assert.equal(r.data.intent.side, 'none'); // adapter unavailable fallback
-  assert.ok(r.data.suggestedReply.includes('T1 验证阶段'), 'suggestedReply has T1 disclaimer');
+  // M-2 fix: T1 disclaimer 已删除, 改 verify clarification 文案
+  assert.ok(r.data.suggestedReply.includes('没完全听懂'), 'suggestedReply has clarification text');
+  assert.ok(!r.data.suggestedReply.includes('T1 验证阶段'), 'M-2: T1 disclaimer 真已删除');
   assert.ok(r.instructions.includes(r.data.suggestedReply), 'instructions includes suggestedReply');
 });
 
@@ -317,6 +321,24 @@ test('M-1: asyncShouldPublish 4 cheap-gate paths 全调 _reportPublishDecision',
   assert.ok(decisions.includes('cheap_gate_missing_fields'), 'missing_fields 路径必上报');
   assert.ok(decisions.includes('no_adapter_url'), 'no adapter url 路径必上报');
   assert.equal(calls.length, 4, '4 cheap-gate paths 全 4 次 telemetry');
+});
+
+test('M-2 + M-3 fix: source markers 守', async () => {
+  const fs = await import('node:fs/promises');
+  const src = await fs.readFile(new URL('../src/skills/matcher.mjs', import.meta.url), 'utf-8');
+  // M-2: T1_DISCLAIMER 必删除
+  assert.match(src, /漏洞 M-2 fix/, 'M-2 fix marker 必保留');
+  assert.doesNotMatch(src, /const T1_DISCLAIMER/, 'M-2: T1_DISCLAIMER const 真已删除');
+  // M-2: generateReply 函数体不能含 disclaimer 文本 (history 注释允许 reference)
+  const generateReplyFn = src.match(/export function generateReply\(intent\)\s*\{([\s\S]*?)^\}/m);
+  assert.ok(generateReplyFn, 'generateReply 函数必存在');
+  assert.doesNotMatch(generateReplyFn[1], /T1 验证阶段/, 'M-2: generateReply 函数体真不再含 T1 disclaimer 文本');
+  assert.doesNotMatch(generateReplyFn[1], /暂时不能完成实际撮合/, 'M-2: generateReply 函数体真不再含 disclaimer 关键句');
+  // M-2: 新文案 "准备出报价" 必有 (替换原 disclaimer 信号)
+  assert.match(src, /准备出报价/, 'M-2: ready-to-publish 文案必在');
+  // M-3: publishOffer fail telemetry
+  assert.match(src, /漏洞 M-3 fix/, 'M-3 fix marker 必保留');
+  assert.match(src, /publish_offer_failed/, 'M-3: publish_offer_failed decision 必有');
 });
 
 test('M-1: source — _reportPublishDecision marker 守 (防未来 regression)', async () => {

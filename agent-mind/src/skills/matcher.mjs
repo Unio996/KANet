@@ -85,6 +85,12 @@ export class MatcherSkill extends Skill {
         console.error('[matcher] publishOffer failed:', err.message);
         intent._offerResult = null;
         intent._publishError = err.message;
+        // 漏洞 M-3 fix (2026-05-04): publishOffer throw 加 events 表 telemetry (复用 M-1 helper).
+        // 否则 publishOffer 失败真因死无对证 (跟 M-1 同款 silent 病根)。
+        this._reportPublishDecision(config, 'publish_offer_failed', {
+          error: err.message,
+          intent_side: intent.side, intent_qty: intent.qty, intent_asset: intent.asset,
+        });
       }
     }
     return intent;
@@ -516,22 +522,23 @@ const MATCHER_INTENT_SYSTEM = [
   '只返回 JSON 对象本身, 一个字符不多.',
 ].join('\n');
 
-// T1.4 ship: generateReply 模板化生成 user-friendly reply (per intent state).
-// 每条 reply 必含 "T1 验证阶段, 暂时不能完成实际撮合" disclaimer (per task §T1 verifications, 防 user 误解成交).
+// 漏洞 M-2 fix (2026-05-04): 删除 T1_DISCLAIMER (T1 阶段遗留, 现已 T3 阶段).
+// 旧 disclaimer "T1 验证阶段, 暂时不能完成实际撮合" 跟 user 真在下单的对话矛盾,
+// Brain 看 instructions 含此 disclaimer → 真信不过 matcher → freestyle 演 broker.
+// 改 fall-through 文案: "缺 X 请补", 不 mock 阶段限制。
 export function generateReply(intent) {
-  const T1_DISCLAIMER = '\n\n(注意: 我目前在 T1 验证阶段, 暂时不能完成实际撮合.)';
   if (!intent || intent.side === 'none' || intent.confidence === 'low') {
-    return '抱歉, 我没完全听懂你的意图. 能更具体说一下你想做什么交易吗? 例如 "我要用 50 USDT 买 KAS, 用 BNB 链付款".' + T1_DISCLAIMER;
+    return '抱歉, 我没完全听懂你的意图. 能更具体说一下你想做什么交易吗? 例如 "我要用 50 USDT 买 KAS, 用 BNB 链付款".';
   }
   if (intent.missing_fields && intent.missing_fields.length > 0) {
     const sideText = intent.side === 'buy' ? '购买' : intent.side === 'sell' ? '出售' : '了解';
     const assetText = intent.asset || '资产';
-    return `我明白你想${sideText} ${assetText}. 还需要确认: ${intent.missing_fields.join(', ')}. 你能补充一下吗?` + T1_DISCLAIMER;
+    return `我明白你想${sideText} ${assetText}. 还需要确认: ${intent.missing_fields.join(', ')}. 你能补充一下吗?`;
   }
   const qty = intent.qty != null ? `${intent.qty} ${intent.qty_unit || ''}` : '';
   const sideAction = intent.side === 'buy' ? `用 ${qty} 买入 ${intent.asset || ''}` : intent.side === 'sell' ? `卖 ${qty} 换 ${intent.asset || ''}` : `执行 ${intent.side}`;
   const chainText = intent.pay_chain ? `, 用 ${intent.pay_chain} 链` : '';
-  return `好的, 我看到你想${sideAction}${chainText}. 已记录你的意图.` + T1_DISCLAIMER;
+  return `好的, 我看到你想${sideAction}${chainText}. 准备出报价, 你确认就发布.`;
 }
 
 // T1.4 ship: ASCII safety (per ANTI-PATTERNS 陷阱 #3 + LLM 偶尔吐 unpaired surrogate).
