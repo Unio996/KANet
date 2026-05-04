@@ -615,3 +615,70 @@ test('T2 source: 0 instance state holding offer (per §11 #1)', async () => {
 
 // Integration test (Trader-M live + LLM extract + Brain reply + retail_dex_orders 0 增) defer T1.9.
 // per NWT r118: T1.6 acceptance live verify defer T1.9 12h 守同期 operator hat --apply trigger.
+
+// ── P0-1a (NWT r185 architect γ): stranger DM gate invariant tests ──────────
+
+test('P0-1a stranger DM (classification null) → formatForBrain skipped stranger_first_reject + 固定 reply', async () => {
+  const m = new MatcherSkill();
+  m.canActivate('reactive', { _senderAddress: 'kaspa:qstranger', _inputMessage: '想买 KAS' });
+  m._config = { consoleUrl: 'http://noop', address: 'kaspa:qbroker' };
+  // simulate gatherContext result with stranger reject decision (classification null, no cooldown)
+  const gathered = {
+    peer: { address: 'kaspa:qstranger', classification: null, lastStrangerRejectAt: null },
+    history: [],
+    broadcasts: [],
+    connectionStatus: null,
+    _strangerReject: { decision: 'reject_with_reply', classification: null },
+    metadata: { historyCount: 0, degraded: false, classification: null, isStranger: true },
+  };
+  const r = await m.formatForBrain(gathered);
+  assert.equal(r.data.skipped, 'stranger_first_reject');
+  assert.match(r.instructions, /handshake/);
+  assert.ok(!r.instructions.includes('**'), 'stripMarkdown applied');
+});
+
+test('P0-1a stranger DM cooldown_skip → formatForBrain empty instructions (silent skip)', async () => {
+  const m = new MatcherSkill();
+  m.canActivate('reactive', { _senderAddress: 'kaspa:qstranger', _inputMessage: '又来问' });
+  m._config = { consoleUrl: 'http://noop', address: 'kaspa:qbroker' };
+  const gathered = {
+    peer: { classification: 'seen_candidate', lastStrangerRejectAt: new Date().toISOString() },
+    history: [],
+    broadcasts: [],
+    connectionStatus: null,
+    _strangerReject: { decision: 'cooldown_skip', classification: 'seen_candidate', lastRejectAt: new Date().toISOString() },
+    metadata: { historyCount: 0, isStranger: true },
+  };
+  const r = await m.formatForBrain(gathered);
+  assert.equal(r.data.skipped, 'stranger_cooldown');
+  assert.equal(r.instructions, '');
+});
+
+test('P0-1a verified peer (classification=responsive_agent) → 走 normal flow extractIntent', async () => {
+  const m = new MatcherSkill();
+  m.canActivate('reactive', { _senderAddress: 'kaspa:qverified', _inputMessage: '买 50 USDT KAS' });
+  m._config = { adapterUrl: null };
+  // override extractIntent to verify it 真 fire (NOT skipped)
+  let extractCalled = false;
+  m.extractIntent = async () => {
+    extractCalled = true;
+    return { side: 'buy', confidence: 'high', missing_fields: [], _offerResult: null, _publishError: null };
+  };
+  const gathered = {
+    peer: { classification: 'responsive_agent' },
+    history: [],
+    broadcasts: [],
+    connectionStatus: 'active',
+    _strangerReject: null,                     // verified peer → no reject signal
+    metadata: { historyCount: 0, classification: 'responsive_agent', isStranger: false },
+  };
+  await m.formatForBrain(gathered);
+  assert.equal(extractCalled, true, 'verified peer 真走 extractIntent normal flow');
+});
+
+test('P0-1a source: VERIFIED_CLASSIFICATIONS set 真 enforce', async () => {
+  const fs = await import('node:fs/promises');
+  const src = await fs.readFile(new URL('../src/skills/matcher.mjs', import.meta.url), 'utf-8');
+  assert.match(src, /VERIFIED_CLASSIFICATIONS\s*=\s*new Set\(\[['"]responsive_agent['"]\s*,\s*['"]verified_agent['"]/);
+  assert.match(src, /COOLDOWN_MS\s*=\s*30\s*\*\s*60\s*\*\s*1000/);
+});

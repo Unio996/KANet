@@ -145,6 +145,31 @@ export async function registerExchangeRoutes(fastify) {
       return reply.code(400).send({ error: 'Missing required fields: relayNodeId, give_asset, give_amount, want_asset, want_amount' });
     }
 
+    // P0-1b (NWT r185 architect γ defense-in-depth): publish endpoint reputation hard-block.
+    // matcher Stage 2 已 stranger 早 reject (P0-1a), 但 endpoint 真 server-side 第二层防御 — 任意 caller path
+    // (script / direct API / future intent skill) 真 enforce reputation gate, 防 broker fund abuse vector.
+    // pattern reference: api/exchange.js:413 accept (warning) + trade-protocol-filter.js:541 autoTaker (hard-block).
+    {
+      const relayForRep = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(relayNodeId);
+      const makerAddrForRep = relayForRep?.address;
+      if (makerAddrForRep && verification_meta?.taker_for_reputation_check) {
+        try {
+          const { assessReputation } = await import('../services/reputation.js');
+          const rep = assessReputation(verification_meta.taker_for_reputation_check, makerAddrForRep);
+          if (rep.risk === 'high') {
+            return reply.code(403).send({
+              error: 'reputation_gate_blocked',
+              risk: rep.risk,
+              reason: rep.warnings?.join('; ') || 'high-risk peer',
+              summary: rep.summary,
+            });
+          }
+        } catch (e) {
+          console.error(`[exchange] publish reputation check err: ${e.message}`);
+        }
+      }
+    }
+
     const { randomUUID } = await import('crypto');
     const offerId = randomUUID();
     const expiresAt = new Date(Date.now() + (expires_minutes * 60000)).toISOString();

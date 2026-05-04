@@ -2771,5 +2771,19 @@ export function runMigrations() {
     }
   }
 
+  // v87: relation_states.last_stranger_reject_at — matcher P0 (γ) stranger DM cooldown store
+  // per NWT r185 architect hat 钦定 (γ) — Owner 5/4 explicit 授权 NWT 切 architect hat per KI-13 v2.
+  // matcher gatherContext 真 detect stranger (classification 不在 verified_agent/verified_human set) →
+  // 第一次 reply 固定 message + record timestamp; 30min 内同 peer 真 cooldown skip (省 LLM + 防 spam).
+  // store 选 relation_states column NOT new table (anti-pattern '永不新建先迭代' + classification 同 cohesion).
+  {
+    const cols87 = sqlite.prepare("PRAGMA table_info(relation_states)").all();
+    const hasStrangerRejectCol = cols87.some(c => c.name === 'last_stranger_reject_at');
+    if (!hasStrangerRejectCol) {
+      sqlite.exec("ALTER TABLE relation_states ADD COLUMN last_stranger_reject_at TEXT");
+      console.log('[migrate] v87: relation_states.last_stranger_reject_at TEXT added (matcher P0 stranger cooldown store, γ 钦定).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

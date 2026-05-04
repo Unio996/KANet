@@ -60,12 +60,38 @@ export class MatcherSkill extends Skill {
         degraded = true;
         console.warn(`[matcher] gatherContext degraded: peer=${this._senderAddress.slice(-12)} tokens=${estimatedTokens.toFixed(0)} trimmed_to=30`);
       }
+      // P0-1a (NWT r185 architect γ): stranger DM gate — early detect + cooldown check.
+      // verified set: 'responsive_agent' (handshake done) / 'verified_agent' (trade completed).
+      // stranger: classification null OR in {seen_candidate, declared_candidate} → record cooldown + 固定 reply OR cooldown_skip.
+      const VERIFIED_CLASSIFICATIONS = new Set(['responsive_agent', 'verified_agent']);
+      const peerClassification = ctx.peer?.classification || null;
+      const isStranger = !peerClassification || !VERIFIED_CLASSIFICATIONS.has(peerClassification);
+      let strangerReject = null;
+      if (isStranger && myAddress) {
+        const lastReject = ctx.peer?.lastStrangerRejectAt || null;
+        const COOLDOWN_MS = 30 * 60 * 1000; // 30 min
+        const inCooldown = lastReject && (Date.now() - new Date(lastReject).getTime() < COOLDOWN_MS);
+        if (inCooldown) {
+          strangerReject = { decision: 'cooldown_skip', classification: peerClassification, lastRejectAt: lastReject };
+          this._reportPublishDecision(config, 'matcher_stranger_cooldown_skipped', { peer: this._senderAddress.slice(-12), classification: peerClassification || 'null' });
+        } else {
+          strangerReject = { decision: 'reject_with_reply', classification: peerClassification };
+          this._reportPublishDecision(config, 'matcher_stranger_rejected', { peer: this._senderAddress.slice(-12), classification: peerClassification || 'null' });
+          // Mark cooldown timestamp (fire-and-forget, 不阻 reply)
+          fetchJson(`${consoleUrl}/api/agent/peer-relation/mark-stranger-cooldown`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ my_address: myAddress, peer_address: this._senderAddress }),
+          }).catch(e => console.warn(`[matcher] mark-stranger-cooldown err: ${e.message}`));
+        }
+      }
       return {
         peer: ctx.peer || null,
         history,
         broadcasts: ctx.recentBroadcasts || [],
         connectionStatus: ctx.peer?.connectionStatus || null,
-        metadata: { historyCount: history.length, degraded, estimatedTokens },
+        _strangerReject: strangerReject,                                  // P0-1a: matcher 真 stranger gate signal
+        metadata: { historyCount: history.length, degraded, estimatedTokens, classification: peerClassification, isStranger },
       };
     } catch (err) {
       console.warn(`[matcher] gatherContext fetchJson failed: ${err.message}`);
@@ -492,6 +518,28 @@ export class MatcherSkill extends Skill {
   async formatForBrain(gathered) {
     if (!gathered || !this._senderAddress) {
       return { name: this.name, description: this.description, data: { skipped: 'no_sender' }, instructions: '' };
+    }
+    // P0-1a (NWT r185 architect γ): stranger DM gate early return — skip extractIntent (省 LLM call).
+    // _strangerReject set by gatherContext when peer.classification 不在 verified set.
+    if (gathered._strangerReject) {
+      const sr = gathered._strangerReject;
+      if (sr.decision === 'cooldown_skip') {
+        // 30min cooldown 内 — 真 silent skip (Brain reply 真空 instructions, 不 fire send)
+        return {
+          name: this.name,
+          description: this.description,
+          data: { skipped: 'stranger_cooldown', classification: sr.classification, lastRejectAt: sr.lastRejectAt },
+          instructions: '',
+        };
+      }
+      // 第一次 stranger DM — 固定 reply (KI-17 layer 3 反馈 + KI-18 NO markdown)
+      const reply = '需要先建立 handshake 才能交易. 请通过 Kasia handshake 流程发送握手 TX 给我, 之后再来询单.';
+      return {
+        name: this.name,
+        description: this.description,
+        data: { skipped: 'stranger_first_reject', classification: sr.classification, suggestedReply: reply },
+        instructions: this.stripMarkdown(reply),
+      };
     }
     const config = this._config || {};
     const peerHistory = gathered.history || [];

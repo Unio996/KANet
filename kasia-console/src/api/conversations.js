@@ -571,12 +571,17 @@ export async function registerConversationRoutes(fastify) {
     `).all(peer_address, my_address || '', Math.min(limit, 10));
 
     // 4. Relation status from relation_states (唯一真相源)
+    // v87 (NWT r185 架构钦定 γ): expose classification + last_stranger_reject_at for matcher stranger gate.
     let connectionStatus = null;
+    let classification = null;
+    let lastStrangerRejectAt = null;
     if (my_address) {
       const rs = sqlite.prepare(
-        'SELECT status FROM relation_states WHERE local_address = ? AND peer_address = ?'
+        'SELECT status, classification, last_stranger_reject_at FROM relation_states WHERE local_address = ? AND peer_address = ?'
       ).get(my_address, peer_address);
       connectionStatus = rs?.status || null;
+      classification = rs?.classification || null;
+      lastStrangerRejectAt = rs?.last_stranger_reject_at || null;
     }
 
     return reply.send({
@@ -591,10 +596,37 @@ export async function registerConversationRoutes(fastify) {
         tags: identity.tags,
         notes: identity.notes,
         connectionStatus,
-      } : { address: peer_address, connectionStatus },
+        classification,
+        lastStrangerRejectAt,
+      } : { address: peer_address, connectionStatus, classification, lastStrangerRejectAt },
       chatHistory,
       recentBroadcasts: broadcasts.reverse(),
     });
+  });
+
+  // P0-1a (NWT r185 γ): mark stranger reject cooldown — matcher 真 detect stranger 真 first reply 后 record timestamp.
+  // 30min cooldown 内同 peer 真 skip reply (matcher gatherContext 早 return 空 — 防 spam + 省 LLM).
+  fastify.post('/api/agent/peer-relation/mark-stranger-cooldown', async (request, reply) => {
+    const { my_address, peer_address } = request.body || {};
+    if (!my_address || !peer_address) return reply.code(400).send({ error: 'my_address + peer_address required' });
+    const now = new Date().toISOString();
+    // UPSERT pattern: INSERT row if not exists, then UPDATE last_stranger_reject_at.
+    // 防 race: relation-state.js:51 INSERT 只 in observeHandshake (chain ingest), 真 stranger 真未 handshake → row 不存在.
+    const existing = sqlite.prepare(
+      'SELECT id FROM relation_states WHERE local_address = ? AND peer_address = ?'
+    ).get(my_address, peer_address);
+    if (existing) {
+      sqlite.prepare(
+        'UPDATE relation_states SET last_stranger_reject_at = ?, updated_at = ? WHERE id = ?'
+      ).run(now, now, existing.id);
+    } else {
+      const { randomUUID } = await import('node:crypto');
+      sqlite.prepare(`
+        INSERT INTO relation_states (id, local_address, peer_address, status, classification, last_stranger_reject_at, updated_at)
+        VALUES (?, ?, ?, 'observed', 'seen_candidate', ?, ?)
+      `).run(randomUUID(), my_address, peer_address, now, now);
+    }
+    return reply.send({ ok: true, peer: peer_address, marked_at: now });
   });
 
   // Agent Mind event reporting — public, no auth (local agent-mind process)
