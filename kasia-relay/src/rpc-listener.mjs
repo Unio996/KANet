@@ -130,6 +130,17 @@ function pruneAttempted() {
 }
 
 function isToUs(tx) {
+  // 漏洞 #9 fix (2026-05-04): 排除自己发的 outbound TX。
+  // 旧逻辑: 只看 outputs 含 _myAddress → 自己发握手时找零 output 含自己 → isToUs=true →
+  // processHandshake → decrypt 失败 (payload 加密给 peer pubkey, 自己 privkey 解不开) →
+  // throw "Unsupported state or unable to authenticate data"。
+  // 真 e2e (5/4 J2→Trader-M TX 3f342dee) 漏洞 #3 telemetry 暴露此 bug, events 表 3 行 throw 留痕。
+  // 修法: inputs 含 _myAddress = 我们是 sender, 直接 return false 不 process 自己 outbound。
+  // 真握手主路径不影响: peer 那边 inputs 不含 _myAddress (sender 是另一方), outputs 含自己 → 仍 return true。
+  const inputs = tx?.inputs || [];
+  for (const inp of inputs) {
+    if (inp?.verboseData?.scriptPublicKeyAddress === _myAddress) return false;
+  }
   const outputs = tx?.outputs || [];
   for (const out of outputs) {
     if (out?.verboseData?.scriptPublicKeyAddress === _myAddress) return true;

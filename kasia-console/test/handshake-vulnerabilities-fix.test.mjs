@@ -96,14 +96,34 @@ test('漏洞 #6: rpc-listener claim 失败时不 markSeen, 让 catch-up 能 retr
 
 // ── Cross-cutting: 4 个修复全 ship ────────────────────────────────────────────
 
-test('All 4 P0 fixes shipped (cross-cutting marker check)', () => {
+test('All P0 fixes shipped (cross-cutting marker check)', () => {
   const discovery = readFileSync(join(REPO_ROOT, 'kasia-console/src/api/discovery.js'), 'utf-8');
   const ingest = readFileSync(join(REPO_ROOT, 'kasia-console/src/services/ingest-service.js'), 'utf-8');
   const relay = readFileSync(join(REPO_ROOT, 'kasia-relay/src/rpc-listener.mjs'), 'utf-8');
-  // 4 fix marker 全在
+  // 5 fix marker 全在
   assert.match(discovery, /漏洞 #1 fix/, '#1 marker missing');
   assert.match(ingest, /漏洞 #2 fix/, '#2 marker missing in ingest-service');
   assert.match(discovery, /漏洞 #2 fix/, '#2 marker missing in discovery');
   assert.match(relay, /漏洞 #3 fix/, '#3 marker missing');
   assert.match(relay, /漏洞 #6 fix/, '#6 marker missing');
+  assert.match(relay, /漏洞 #9 fix/, '#9 marker missing');
+});
+
+// ── 漏洞 #9: isToUs 加 inputs sender check ───────────────────────────────────
+
+test('漏洞 #9: isToUs 必须先检查 inputs 含 _myAddress (排除自己发的 outbound)', () => {
+  const src = readFileSync(join(REPO_ROOT, 'kasia-relay/src/rpc-listener.mjs'), 'utf-8');
+  // isToUs 函数体必须含 inputs check 且 return false 在 outputs check 之前
+  const isToUsMatch = src.match(/function isToUs\(tx\)\s*\{([\s\S]*?)^\}/m);
+  assert.ok(isToUsMatch, 'isToUs 函数必须存在');
+  const body = isToUsMatch[1];
+  // 真 for 循环位置 (避免 comment 里的 'inputs' / 'outputs' substring 干扰)
+  const inputsLoopIdx = body.search(/for\s*\(\s*const\s+\w+\s+of\s+inputs\s*\)/);
+  const outputsLoopIdx = body.search(/for\s*\(\s*const\s+\w+\s+of\s+outputs\s*\)/);
+  assert.ok(inputsLoopIdx >= 0, 'isToUs 必须遍历 inputs');
+  assert.ok(outputsLoopIdx >= 0, 'isToUs 必须遍历 outputs');
+  assert.ok(inputsLoopIdx < outputsLoopIdx, 'inputs loop 必须先于 outputs loop (排除 sender 自己)');
+  // inputs 含 _myAddress 时必须 return false
+  assert.match(body, /inp\?\.verboseData\?\.scriptPublicKeyAddress\s*===\s*_myAddress\s*\)\s*return\s+false/,
+    'inputs 含 _myAddress 时 return false');
 });
