@@ -291,11 +291,12 @@ test('T3.1 asyncShouldPublish fail-closed when adapter unavailable (KI-22)', asy
   assert.equal(await m.asyncShouldPublish(intent, okHist, null), false);
 });
 
-test('T3.1 asyncShouldPublish cheap gates: low confidence / missing_fields / non buy-sell', async () => {
+test('T3.1 asyncShouldPublish cheap gates (M-confidence-relax: low blocks, medium pass)', async () => {
   const m = new MatcherSkill();
   const okHist = [{ dir: 'in', text: '好的' }];
   const config = { adapterUrl: 'http://127.0.0.1:99999' }; // unreachable, but cheap gates short-circuit before fetch
   // Cheap gates trigger before adapter call → false without LLM round-trip
+  // M-confidence-relax: low 仍拦截, medium 真 pass (依赖 SHOULD_PUBLISH LLM 后续严判)
   assert.equal(await m.asyncShouldPublish({ side: 'buy', confidence: 'low', missing_fields: [] }, okHist, config), false);
   assert.equal(await m.asyncShouldPublish({ side: 'buy', confidence: 'high', missing_fields: ['qty'] }, okHist, config), false);
   assert.equal(await m.asyncShouldPublish({ side: 'query', confidence: 'high', missing_fields: [] }, okHist, config), false);

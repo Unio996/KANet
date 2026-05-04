@@ -283,7 +283,14 @@ export class MatcherSkill extends Skill {
   // 否则 publish 决策完全黑盒 — Brain 在 freestyle 演 broker, asyncShouldPublish 0 trace.
   // 跟握手系统漏洞 #3 同款修法 (silent catch → ingestEvent + reason 留痕)。
   async asyncShouldPublish(intent, peerHistory, config) {
-    if (intent.confidence !== 'high') {
+    // 漏洞 M-confidence-relax fix (2026-05-04): Qwen3.6 LLM 不 obey M-confidence prompt,
+    // 真 e2e 5/4 12:50-13:34 6 turn 全 hit cheap_gate_confidence: confidence=medium/low.
+    // M-confidence (改 prompt 让 LLM 给 high) 真不 effective — LLM 默认保守 medium.
+    // 修法 (Owner framework b1): cheap gate 改 'low' 拦截 (放宽允许 medium pass),
+    // 让 LLM SHOULD_PUBLISH_SYSTEM 严判 user explicit confirm 才 ready=true (真 fail-closed 守).
+    // 真 evidence: events 表 5/4 06:32:23 'llm_ready_false' 真显示 LLM 严判 user 在 reject
+    // 地址不是 confirm publish — SHOULD_PUBLISH 真负责 explicit confirm 检查.
+    if (intent.confidence === 'low') {
       this._reportPublishDecision(config, 'cheap_gate_confidence', { confidence: intent.confidence, side: intent.side, qty: intent.qty });
       return false;
     }
