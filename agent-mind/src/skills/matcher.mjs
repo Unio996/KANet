@@ -66,6 +66,16 @@ export class MatcherSkill extends Skill {
       const VERIFIED_CLASSIFICATIONS = new Set(['responsive_agent', 'verified_agent']);
       const peerClassification = ctx.peer?.classification || null;
       const isStranger = !peerClassification || !VERIFIED_CLASSIFICATIONS.has(peerClassification);
+      // NWT r195 Issue #2 telemetry: classification mismatch 真 catch (DB row 真 responsive_agent 但 endpoint 真 return null).
+      // 真 evidence: 5/4 09:56:35 NWT verified peer 真 fire matcher_stranger_rejected with classification=null.
+      // 真 candidate: my_address 真 differs from DB local_address (format/case/encoding mismatch) OR endpoint 真 stale.
+      this._reportPublishDecision(config, 'matcher_classification_check', {
+        my_address_tail: myAddress.slice(-12),
+        peer_address_tail: this._senderAddress.slice(-12),
+        classification: peerClassification,
+        is_stranger: isStranger,
+        peer_obj_present: ctx.peer ? 'yes' : 'no',
+      });
       let strangerReject = null;
       if (isStranger && myAddress) {
         const lastReject = ctx.peer?.lastStrangerRejectAt || null;
@@ -201,6 +211,19 @@ export class MatcherSkill extends Skill {
     if (!['buy', 'sell', 'query', 'cancel', 'none'].includes(intent.side)) {
       intent.side = 'none';
       intent.confidence = 'low';
+    }
+    // NWT r195 Issue #1 fix: NLU LLM 真 hallucinate missing_fields 真 unknown values
+    // ('confirm_intent' / 'receive_address (kaspa)' / 'price' 真 NOT in prompt schema 但 LLM 真 add).
+    // 真 deterministic gate Gate 2 真 reject on missing_fields 非空 → publish 0 fire.
+    // post-process filter: missing_fields 真 keep only valid whitelist (matches prompt schema fields).
+    const VALID_MISSING_FIELDS = new Set(['side', 'asset', 'qty', 'qty_unit', 'pay_chain', 'evm_address']);
+    if (Array.isArray(intent.missing_fields)) {
+      intent.missing_fields = intent.missing_fields.filter(f => {
+        if (typeof f !== 'string') return false;
+        const lower = f.toLowerCase();
+        // exact match OR substring match (handles 'evm_address (BSC)' / 'pay_chain (kaspa)' variants)
+        return [...VALID_MISSING_FIELDS].some(valid => lower === valid || lower.includes(valid));
+      });
     }
     return intent;
   }
