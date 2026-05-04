@@ -323,6 +323,20 @@ test('M-1: asyncShouldPublish 4 cheap-gate paths 全调 _reportPublishDecision',
   assert.equal(calls.length, 4, '4 cheap-gate paths 全 4 次 telemetry');
 });
 
+test('M-confidence fix: source markers 守', async () => {
+  const fs = await import('node:fs/promises');
+  const src = await fs.readFile(new URL('../src/skills/matcher.mjs', import.meta.url), 'utf-8');
+  // M-confidence fix marker
+  assert.match(src, /M-confidence fix/, 'M-confidence fix marker 必保留');
+  // schema 加 evm_address 字段 (允许 LLM surface 进 intent + missing_fields)
+  assert.match(src, /"evm_address":\s*"0x\[40 hex\]"/, 'schema 必含 evm_address 字段');
+  // confidence 判定规则真有
+  assert.match(src, /confidence 必按下面规则判/, 'confidence 判定规则真在 prompt');
+  assert.match(src, /字段齐 \+ user confirm → 必返 "high"/, 'high trigger 真规则真在');
+  // missing_fields example 加 evm_address
+  assert.match(src, /evm_address.*missing_fields|missing_fields.*evm_address/, 'missing_fields example 真含 evm_address');
+});
+
 test('M-2 + M-3 fix: source markers 守', async () => {
   const fs = await import('node:fs/promises');
   const src = await fs.readFile(new URL('../src/skills/matcher.mjs', import.meta.url), 'utf-8');
