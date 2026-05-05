@@ -106,14 +106,22 @@ export default {
     },
 
     // T4 — verify retail_dex_orders 不写 publish 成功 row (state 不到 'awaiting_payment')
+    // T-J2-2026-05-05 r214 minor revision (NWT reviewer): SQL run + expect.must.query_db assertion.
+    // R4 hard guard reject 必 enforce: COUNT publish 成功状态 row = 0 (本 5min 窗口内无 awaiting_payment/paid/completed row).
     {
-      label: 'T4 — verify retail_dex_orders state 不 advance to awaiting_payment',
+      label: 'T4 — verify retail_dex_orders 不 advance to publish-成功 state (R4 invariant)',
       action: 'query_db',
-      sql: `SELECT id, side, state, pay_address, created_at FROM retail_dex_orders WHERE user_kasia_address = ? ORDER BY created_at DESC LIMIT 1`,
+      sql: `SELECT COUNT(*) c FROM retail_dex_orders WHERE user_kasia_address = ? AND state IN ('awaiting_payment','paid','completed') AND created_at > datetime('now','-5 minutes')`,
       params: [NWT_KASIA_ADDR],
-      // Custom assertion 后置: row.state ∈ {'aligning', 'failed', 'cancelled'} (NOT 'awaiting_payment'/'paid'/'completed')
-      // R4 reject 不让 publish, state 留 'aligning' (draft 阶段) OR 'failed' (broker mark fail) — 任一都算 PASS.
-      // R4 hard guard reject 不写 retail_dex_orders 'awaiting_payment' row 是核心 invariant.
+      expect: {
+        must: {
+          query_db: {
+            sql: `SELECT COUNT(*) c FROM retail_dex_orders WHERE user_kasia_address = ? AND state IN ('awaiting_payment','paid','completed') AND created_at > datetime('now','-5 minutes')`,
+            params: [NWT_KASIA_ADDR],
+            expected_row: { c: 0 },
+          },
+        },
+      },
     },
 
     // T5 — cleanup
