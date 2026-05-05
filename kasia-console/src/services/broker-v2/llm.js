@@ -50,7 +50,7 @@ TTL 内多 taker 各拿一部分 (p_i, q_i) 累积 → TTL 到已成交按价结
 - 如 BUY stable: 加 '收 USDT/USDC 到这里. **必须是你自己的**, 不是 maker/broker 的'
 // lint-allow-r29: PZ-R29-T3 ask-addr 措辞 → ask_recv_address(side, chain) generator tool refactor
 - 严禁仅说 '收款地址' 或 '请回 EVM 地址' (Owner 真测困惑 'Kas 哪里有 EVM' + 误 copy broker 自己 BSC addr)
-- R4 self-deal SQL guard 是兜底 (publish 层拒), UX 层须显式让 user 知道差异
+- R4 self-deal SQL guard: SELL path post-publish 兜底 (broker-intake-watcher.js:158-176 KAS 已收后退回) + BUY path pre-publish 早拦 (broker-v2/router.js confirm+publish 之前 reject), 双 path consistent (T-J2-2026-05-05 r211 ship). UX 层 ask 文案显式让 user 知道差异
 
 # KANet broker 非托管说明 (用户问 broker 怎 custody / 安全 / 持币 / 拿钱 等)
 broker-v2 SELL 路径: user 转 KAS 给 broker (Kaspa 链上 escrow, 30min TTL), broker 帮 user 挂限价卖单, taker 来接 partial fill 付 USDT 直接到 user EVM addr (broker 不碰 USDT).

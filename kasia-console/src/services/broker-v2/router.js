@@ -185,6 +185,23 @@ export async function handleMessage(peer, msg) {
   // 注: 不用 'preview_shown'/'confirming' intermediate state (schema CHECK 不含 'preview_shown';
   //   'aligning' state 含 "字段齐等 confirm" + "字段不齐字段收集中" 两情况, 由 draft.complete 区分).
   if (intent === 'confirm' && draft?.complete) {
+    // T-J2-2026-05-05 R4 self-deal pre-publish guard (NWT r211 钦定 BUY/SELL 双 path consistent):
+    // SELL post-publish R4 在 broker-intake-watcher.js:158-176 兜底 (KAS 已转 broker 后退回),
+    // 此处 BUY pre-publish R4 早拦 (publish 前 reject + 显式提示 user 给的是 broker addr).
+    // 双 path 行为一致 — 无论 BUY/SELL, user 给 broker wallet addr 当 pay_address 都 reject.
+    if (draft.pay_address) {
+      try {
+        const selfDeal = sqlite.prepare(
+          `SELECT 1 FROM agent_wallets WHERE relay_node_id = ? AND lower(address) = lower(?) LIMIT 1`
+        ).get('0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0', draft.pay_address);
+        if (selfDeal) {
+          console.warn(`[broker-v2 R4] self-deal pre-publish blocked: peer=${peer.slice(-12)} pay_address=${draft.pay_address.slice(0,12)}... ∈ broker wallets`);
+          return `挂单失败: 你给的地址 ${draft.pay_address.slice(0,10)}...${draft.pay_address.slice(-6)} 是 broker 自己的钱包(不是你的). BUY 流程是 you 付 USDT 到 broker 自挂 maker addr → broker 给 KAS 到 you Kasia. 请回**你自己的** EVM 钱包地址 (你能 send USDT from 这地址) — 不是 broker 或别人的. 想重新下单回 "取消" 后再发.`;
+        }
+      } catch (err) {
+        console.warn(`[broker-v2 R4] self-deal check err: ${err.message}, skip guard`);
+      }
+    }
     try {
       const result = await orderBook.publishOrder(peer, draft);
       if (!result.ok) {
