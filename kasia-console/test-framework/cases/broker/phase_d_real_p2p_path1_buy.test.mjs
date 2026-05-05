@@ -28,8 +28,11 @@ export default {
       label: 'P1-T1-BUY-real-p2p',
       action: 'send_message',
       mode: 'real_p2p',
-      from_peer: 'martin',                    // alias resolves via lib/peers.mjs (Martin J1 relay)
-      from_relay_id: '3765cc82-5e20-4e61-bb0a-697277287223',
+      // T-J2-2026-05-05 stale-ref fix (NWT r205 finding + r209 钦定):
+      // Martin J1 relay (3765cc82) 已退役, db relay_nodes 无此 row → 'Relay not running' false fail.
+      // 改 NWT relay (5b236c08) — Phase A retry (r158) 已 verify NWT chain DM e2e production-ready.
+      from_peer: 'nwt',                       // alias resolves NWT relay
+      from_relay_id: '5b236c08-03d0-456c-953d-e10001610938',
       to_relay_id: relayAddr('trader-b'),     // explicit kaspa: addr
       message: `我要买 1 KAS, BNB 链, ${VICTIM_ADDR}`,
       poll_timeout_ms: 45000,                 // 45s — Kaspa block + scout sync + broker LLM call window

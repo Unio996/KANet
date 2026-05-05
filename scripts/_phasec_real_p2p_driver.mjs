@@ -21,7 +21,9 @@ const require = createRequire(path.join(__dirname, '..', 'kasia-console', 'packa
 const Database = require('better-sqlite3');
 
 const CONSOLE_URL = process.env.CONSOLE_URL || 'http://127.0.0.1:3100';
-const DB_PATH = process.env.CONSOLE_DB || 'D:/Anthropic/kasia-console/data/console.db';
+// T-J2-2026-05-05 cross-platform path fix (NWT r209 钦定 KI-XX 候补 'driver script cross-platform path'):
+// 原 hardcode 'D:/Anthropic/...' C 盘节点跑撞 'no such table'. 改 path.join from script location 跨平台 default.
+const DB_PATH = process.env.CONSOLE_DB || path.join(__dirname, '..', 'kasia-console', 'data', 'console.db');
 const POLL_TIMEOUT_MS = Number(process.env.POLL_TIMEOUT_MS || 30000);
 const POLL_INTERVAL_MS = 1500;
 

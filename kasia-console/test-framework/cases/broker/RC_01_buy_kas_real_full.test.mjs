@@ -22,6 +22,11 @@ const NWT_RELAY_ID = '5b236c08-03d0-456c-953d-e10001610938';
 const NWT_KASIA_ADDR = relayAddr('nwt');
 const TRADER_B_KASIA_ADDR = relayAddr('trader-b');
 const BUY_QTY_KAS = 25;
+// T-J2-2026-05-05 placeholder fill (NWT r209 钦定 T1.1 minimal fix):
+// NWT user-side BSC addr 给 broker '我付 USDT from this addr', RC_03/04 同款 J2 derived BSC.
+// agent_wallets table NWT chain='bnb' is_default=1 是 fake seeder placeholder, 不能 valid checksum;
+// 用 RC_03 已 ship 的 valid hex (跟 RC_03/04 一致, single source of truth).
+const NWT_BSC_RECV = '0x00c41dC0D0d7F4232EFB6ec545F7ad9e031eb62f';
 
 export default {
   id: 'RC_01_buy_kas_real_full',
@@ -40,8 +45,8 @@ export default {
       from_peer: 'nwt',                 // alias resolves NWT relay
       from_relay_id: NWT_RELAY_ID,
       to_relay_id: TRADER_B_KASIA_ADDR,  // chain DM by addr
-      // TODO: replace placeholder with NWT BSC USDT receive addr (agent_wallets WHERE relay_node_id=NWT.id AND chain='bnb')
-      message: `买 ${BUY_QTY_KAS} KAS, BSC, 0x__NWT_BSC_ADDR_TBD__`,
+      // T-J2-2026-05-05 placeholder filled (NWT r209 T1.1 minimal fix): NWT_BSC_RECV constant above.
+      message: `买 ${BUY_QTY_KAS} KAS, BSC, ${NWT_BSC_RECV}`,
       poll_timeout_ms: 60_000,           // 60s for chain DM round-trip + broker LLM
       expect: {
         must: {
