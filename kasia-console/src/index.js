@@ -94,20 +94,42 @@ fastify.setErrorHandler((error, request, reply) => {
   reply.code(error.statusCode || 500).send({ error: error.message });
 });
 
-// T-J2-23: encoding guard for /api/agent/reply (Owner 编码 RCA)
+// T-J2-23: encoding guard for /api/agent/reply (Owner 编码 RCA, 2026-04-26)
+// PZ-BROKER-DM-ENCODING extend (2026-05-05): cover /api/relay/:id/send-command DM 路径
+// (Phase 4 Priority 2, NWT r200 钦定, 4/26 fix scope 扩 — KI-29 复刻第 3 次 sediment).
+//
 // curl -d / PowerShell Invoke-RestMethod 默认非 UTF-8 → message CJK 字节 corrupt → _detectIntent 返 null
-// → 走 LLM → Qwen confused. 这条 hook 在 preHandler 层验 message 字段, 含 U+FFFD / lone surrogate / 全 ASCII
-// 但声明 zh/CJK 上下文 (header X-Test-Lang or query lang=zh) → 友好 400 提示用 --data-binary / Node fetch.
+// → 走 LLM → Qwen confused. 这条 hook 在 preHandler 层验 message 字段, 含 U+FFFD / lone surrogate.
+// 友好 400 提示用 --data-binary / Node fetch.
 // 生产 (Kasia client → 链上 → relay ingest) 走严格 UTF-8 不 hit; 仅 dev/测试客户端撞.
+//
+// send-command body schema { type, target, message, params, channel, amount } —
+// 只有 type='send_message' (DM) 和 type='send_broadcast' (channel 广播) 时 message 是 user-supplied 文本;
+// type='transfer'/'handshake'/'wallet*'/'split*' 等不含 user 中文, skip check.
+const SEND_COMMAND_RE = /^\/api\/relay\/[^\/]+\/send-command$/;
+const ENCODING_BAD_RE = /[�]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+const ENCODING_ERR_BODY = {
+  error: 'message contains invalid UTF-8 (replacement char or lone surrogate). Likely client encoding bug. Use Node fetch / curl --data-binary @file / Python requests json= for testing. PowerShell Invoke-RestMethod default UTF-16 BOM corrupts CJK — use [System.Text.Encoding]::UTF8.GetBytes($body).',
+  hint: 'docs/broker-test-guide.md',
+};
+
 fastify.addHook('preHandler', async (request, reply) => {
-  if (request.method !== 'POST' || !request.url.startsWith('/api/agent/reply')) return;
-  const m = request.body?.message;
+  if (request.method !== 'POST') return;
+  const url = request.url;
+  let m = null;
+  if (url.startsWith('/api/agent/reply')) {
+    m = request.body?.message;
+  } else if (SEND_COMMAND_RE.test(url)) {
+    const t = request.body?.type;
+    if (t === 'send_message' || t === 'send_broadcast') {
+      m = request.body?.message;
+    }
+  } else {
+    return;
+  }
   if (typeof m !== 'string') return;
-  if (/[�]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(m)) {
-    return reply.code(400).send({
-      error: 'message contains invalid UTF-8 (replacement char or lone surrogate). Likely client encoding bug. Use Node fetch / curl --data-binary @file / Python requests json= for testing. PowerShell Invoke-RestMethod default UTF-16 BOM corrupts CJK — use [System.Text.Encoding]::UTF8.GetBytes($body).',
-      hint: 'docs/broker-test-guide.md',
-    });
+  if (ENCODING_BAD_RE.test(m)) {
+    return reply.code(400).send(ENCODING_ERR_BODY);
   }
 });
 
