@@ -23,6 +23,10 @@ export default {
   tags: ['real_p2p', 'phase-d', 'manual-only', 'transport-layer'],
   // Skip in default cron (manual-only test, real KAS gas cost + Mind interference noise)
   skip_in_cron: true,
+  // T-J2-2026-05-05 r162 follow-up (NWT r212 ack): T1.1 修 Martin J1 stale → NWT relay 后,
+  // post-commit batch 不再 'Relay not running' 立 reject — 真上链烧 NWT KAS gas. 加 skip_in_batch
+  // 跟 RC_01-04 同款保护. 防真上链 + state 干扰. Phase 5 v0.3 候补 KI-XX 全 real_chain audit.
+  skip_in_batch: true,
   steps: [
     {
       label: 'P1-T1-BUY-real-p2p',
