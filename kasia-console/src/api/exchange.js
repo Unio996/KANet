@@ -170,6 +170,37 @@ export async function registerExchangeRoutes(fastify) {
       }
     }
 
+    // T-J2-2026-05-06 R4 SELL protocol-layer self-deal guard (NWT v0.5 §2 I-2a).
+    // SELL 路径: broker 替 user publish (give=KAS, want=USDT, accepted_chains=user EVM USDT 收款).
+    // self-deal scenario: accepted_chains[].address ∈ maker (relayNodeId) 自己 wallets → USDT 真流向 broker
+    // 不是 user → 真钱风险. 协议层 enforce 任 caller (broker-v2 / matcher / broker-v3 / 真用户直 curl) 都 guard.
+    // 跟 broker-intake-watcher.js:158-176 SELL R4 同 pattern (那 path 检 userPay.address pre-publish, 此处协议层 enforce).
+    // BUY 路径 R4 (broker-v2/router.js:188 commit 084be7b1a) 保留 — 不同 entity (BUY pay-from vs SELL receive-to).
+    if (give_asset === 'KAS' && verification === 'cross_chain_tx') {
+      const acceptedChains = Array.isArray(verification_meta?.accepted_chains) ? verification_meta.accepted_chains : [];
+      for (const item of acceptedChains) {
+        if (!item?.address) continue;
+        try {
+          const selfDeal = sqlite.prepare(
+            `SELECT 1 FROM agent_wallets WHERE relay_node_id = ? AND lower(address) = lower(?) LIMIT 1`
+          ).get(relayNodeId, item.address);
+          if (selfDeal) {
+            const addrShort = `${item.address.slice(0, 10)}...${item.address.slice(-6)}`;
+            console.warn(`[exchange/publish R4] self-deal blocked: relayNodeId=${relayNodeId.slice(0,8)} chain=${item.chain} addr=${addrShort} ∈ maker wallets`);
+            return reply.code(403).send({
+              error: 'self_deal_rejected',
+              detail: `accepted_chains[${item.chain}].address ${addrShort} ∈ maker (relay ${relayNodeId.slice(0,8)}) 自己 wallets — USDT 真流向 maker 不是 user. 必须 user 自己 EVM 收款 addr.`,
+              maker_relay: relayNodeId,
+              conflicting_chain: item.chain,
+              conflicting_address: item.address,
+            });
+          }
+        } catch (err) {
+          console.warn(`[exchange/publish R4] self-deal check err: ${err.message}, skip guard for ${item.chain}`);
+        }
+      }
+    }
+
     const { randomUUID } = await import('crypto');
     const offerId = randomUUID();
     const expiresAt = new Date(Date.now() + (expires_minutes * 60000)).toISOString();
