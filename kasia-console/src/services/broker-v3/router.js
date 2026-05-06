@@ -69,14 +69,17 @@ export async function handleMessage(peer, msg, opts = {}) {
 }
 
 // 数字 / back / YES / NO / 0x... / offer_id-like → 进路 A. 其他 → 路 B fallback.
+// T-J2-2026-05-06 r230 fix: 取 leading token (split on whitespace), 接受 trailing suffix.
+// production user 单发 '1' 仍 work (subset of leading match), 测试加 salt '1 #v3-xxx' 也识别. 通用 + 测试友好.
 function _isLanguageA(msg) {
   if (!msg) return false;
-  if (/^[1-6]$/.test(msg)) return true;  // menu number
-  if (/^(back|取消|返回|menu|next)$/i.test(msg)) return true;  // 控制 keyword
-  if (/^(yes|y|确认|ok|好|发布|算了|no|n|不)$/i.test(msg)) return true;  // confirm/cancel
-  if (/^0x[a-fA-F0-9]{40}$/.test(msg)) return true;  // EVM addr
-  if (/^[a-f0-9-]{8,}$/i.test(msg)) return true;  // offer_id / uuid
-  if (/^\d+(\.\d+)?$/.test(msg)) return true;  // qty number
+  const head = String(msg).trim().split(/\s+/)[0] || '';
+  if (/^[1-6]$/.test(head)) return true;  // menu number
+  if (/^(back|取消|返回|menu|next)$/i.test(head)) return true;  // 控制 keyword
+  if (/^(yes|y|确认|ok|好|发布|算了|no|n|不)$/i.test(head)) return true;  // confirm/cancel
+  if (/^0x[a-fA-F0-9]{40}$/.test(head)) return true;  // EVM addr
+  if (/^[a-f0-9-]{8,}$/i.test(head)) return true;  // offer_id / uuid
+  if (/^\d+(\.\d+)?$/.test(head)) return true;  // qty number
   return false;
 }
 

@@ -39,11 +39,14 @@ export function _testReset() { _state.clear(); }
  * @returns {Promise<{ reply, nextState? }>}
  */
 export async function processInput(user_id, msg, relayNodeId) {
-  const trimmed = (msg || '').trim();
-  if (!trimmed) return { reply: '没收到消息. 回数字 1-6 选择.' };
+  // T-J2-2026-05-06 r230 fix: 取 leading token (split on whitespace), 接受 trailing suffix.
+  // user '1 #salt-xxx' (避 anti-spam dedup) → head='1', strict regex 仍 match.
+  // production '1' 单发 same (single-token trim → '1').
+  const head = (msg || '').trim().split(/\s+/)[0] || '';
+  if (!head) return { reply: '没收到消息. 回数字 1-6 选择.' };
 
   // 任意 state 'back'/'取消' → MENU_TOP
-  if (/^(back|取消|返回|menu)$/i.test(trimmed)) {
+  if (/^(back|取消|返回|menu)$/i.test(head)) {
     clearFlowState(user_id);
     return { reply: _menuTopText() };
   }
@@ -51,17 +54,17 @@ export async function processInput(user_id, msg, relayNodeId) {
   const cur = getFlowState(user_id);
   // 首次 OR MENU_TOP — show menu
   if (!cur || cur.flow === 'MENU_TOP') {
-    return _handleMenuTop(user_id, trimmed);
+    return _handleMenuTop(user_id, head);
   }
 
   switch (cur.flow) {
-    case 'BUY_FLOW': return _handleTradeFlow(user_id, trimmed, cur, 'buy', relayNodeId);
-    case 'SELL_FLOW': return _handleTradeFlow(user_id, trimmed, cur, 'sell', relayNodeId);
-    case 'BROWSE_MARKET': return await _handleBrowse(user_id, trimmed, cur);
-    case 'ACCEPT_OFFER': return await _handleAccept(user_id, trimmed, cur, relayNodeId);
-    case 'MY_ORDERS': return await _handleMyOrders(user_id, trimmed, cur, relayNodeId);
-    case 'CANCEL_ORDER': return await _handleCancel(user_id, trimmed, cur, relayNodeId);
-    case 'WAIT_PAYMENT': return await _handleWaitPayment(user_id, trimmed, cur, relayNodeId);
+    case 'BUY_FLOW': return _handleTradeFlow(user_id, head, cur, 'buy', relayNodeId);
+    case 'SELL_FLOW': return _handleTradeFlow(user_id, head, cur, 'sell', relayNodeId);
+    case 'BROWSE_MARKET': return await _handleBrowse(user_id, head, cur);
+    case 'ACCEPT_OFFER': return await _handleAccept(user_id, head, cur, relayNodeId);
+    case 'MY_ORDERS': return await _handleMyOrders(user_id, head, cur, relayNodeId);
+    case 'CANCEL_ORDER': return await _handleCancel(user_id, head, cur, relayNodeId);
+    case 'WAIT_PAYMENT': return await _handleWaitPayment(user_id, head, cur, relayNodeId);
     default:
       clearFlowState(user_id);
       return { reply: _menuTopText() };
