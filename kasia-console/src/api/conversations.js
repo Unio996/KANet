@@ -401,6 +401,30 @@ export async function registerConversationRoutes(fastify) {
           console.warn(`[api/agent/reply] chain DM classifier err: ${err.message}`);
         }
 
+        // T-J2-2026-05-06 broker-v3 deterministic 路 A — BROKER_V3_ENABLED flag wire.
+        // per v0.6 spec (NWT r217-r227 architect cross-hat) — 选择题 0 LLM, 真用户 entry, 数字驱动.
+        // dispatch: BROKER_V3_ENABLED='1' OR peer ∈ BROKER_V3_ENABLED_PEERS → broker-v3.handleMessage
+        //   - v3 return string reply → 路 A 命中, return immediately
+        //   - v3 return null → 自然语言 (非数字非 0x), 路 B fallback (matcher 在 mind 但 SERVICE MUTE 拦
+        //     Trader-B is_dex_broker=1, 实际 fall 进 broker-v2/v1 LLM agent stop-gap 应付)
+        //   - v3 throw err → log + fall broker-v2 安全网
+        // broker-v3 跟 broker-v2 共存, 默认 broker-v3 优先 (route 路 A 优先尝试).
+        const _v3Flag = process.env.BROKER_V3_ENABLED === '1';
+        const _v3Peers = (process.env.BROKER_V3_ENABLED_PEERS || '').split(',').map(s => s.trim()).filter(Boolean);
+        if (_v3Flag || _v3Peers.includes(peer)) {
+          try {
+            const { handleMessage: handleV3 } = await import('../services/broker-v3/index.js');
+            const v3Reply = await handleV3(peer, message, { relayNodeId: resolved });
+            if (v3Reply !== null && v3Reply !== undefined) {
+              console.log(`[api/agent/reply] broker-v3 routed peer=${peer.slice(-12)} (flag=${_v3Flag}, listed=${_v3Peers.includes(peer)})`);
+              return reply.send({ reply: await _r19Guard(v3Reply, 'broker-v3.handleMessage') });
+            }
+            console.log(`[api/agent/reply] broker-v3 路 A 不命中 (自然语言), fall to broker-v2/v1 路 B`);
+          } catch (err) {
+            console.error(`[api/agent/reply] broker-v3 err for ${resolved?.slice(0,8)}: ${err.message} — fall to broker-v2/v1`);
+          }
+        }
+
         // T-NWT-2026-04-29 broker-v2 阶段 2 task 6/7 — BROKER_V2_ENABLED flag wire.
         // 三方共识 7e776598dc lock + J2 territory ship 6efc6311 ready.
         // 渐进 rollout:
