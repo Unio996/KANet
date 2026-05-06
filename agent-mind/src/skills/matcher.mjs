@@ -225,6 +225,27 @@ export class MatcherSkill extends Skill {
         return [...VALID_MISSING_FIELDS].some(valid => lower === valid || lower.includes(valid));
       });
     }
+
+    // T-J2-2026-05-06 BUY KAS evm_address skip (HANDOFF Priority 3 真因 fix):
+    // BUY KAS 本来不需 user evm_address — broker 给 maker BSC addr, user 用自己 BSC 钱包付 USDT,
+    // broker 收到 USDT 后给 KAS 到 user Kasia. user 给的 evm_address 是 user-pay-from (不是 user-receive),
+    // broker 不验. 跟 broker-llm-agent.js:812 + broker-v2/state.js:38-39 _listMissing convention 对齐
+    // (sell_kas 必 pay_address; buy_kas 不要 evm_address).
+    //
+    // 5/4 Phase A 4 cycle 0 deterministic_gate_pass 真根因 = LLM 漏识别 user-supplied evm_address →
+    // missing_fields=['evm_address'] → gate_missing_fields fail → publish 0 fire. 5/6 NWT→Trader-M
+    // 实测 0x... full hex 给齐 LLM 仍 missing → 设计上 BUY KAS 就不该 require, fix 在此.
+    //
+    // BUY USDC/USDT (stable swap) 仍 require evm_address (user 真收 stable 到自己 EVM addr) — 跟
+    // broker-llm-agent.js:823 BUY-stable ask 文案 align. matcher 仅 BUY KAS skip.
+    if (intent.side === 'buy' && (intent.asset === 'KAS' || intent.asset === null) &&
+        Array.isArray(intent.missing_fields)) {
+      intent.missing_fields = intent.missing_fields.filter(f => {
+        const lower = (f || '').toLowerCase();
+        return !lower.includes('evm_address') && !lower.includes('evm address');
+      });
+    }
+
     return intent;
   }
 
@@ -407,26 +428,25 @@ export class MatcherSkill extends Skill {
   }
 
   // T2: 算定价 (T2 简化, T3 加 mid_price 来源 market-data)
+  // T-J2-2026-05-06 BUY pricing 真 bug fix: 旧版 give_amount = qty/MID 算反 (user 买 17 KAS → give 425 KAS).
+  // 真逻辑: user 买 X KAS, matcher 给 X KAS 收 X*MID USDT. 跟 SELL 对称.
+  // (qty 单位 = KAS; intent.qty_unit 在 buy/sell 都是 'KAS' 当 user 用 KAS quantity 表达.)
   computePricing(intent) {
     const MID = 0.04;
+    const qty = parseFloat(intent.qty);
     if (intent.side === 'buy') {
-      // user 买 KAS, matcher 给 KAS 收 USDT
-      const want_amount = String(intent.qty);
-      const give_amount = String(parseFloat(intent.qty) / MID);
+      // user 买 X KAS = matcher 卖 X KAS for X*MID USDT
+      // give_amount = X KAS (matcher 给 KAS), want_amount = X*MID USDT (matcher 收 USDT)
       return {
-        give_asset: 'KAS', give_amount, give_chain: 'kaspa',
-        want_asset: intent.qty_unit === 'USDT' ? 'USDT' : (intent.asset || 'USDT'),
-        want_amount,
+        give_asset: 'KAS', give_amount: String(qty), give_chain: 'kaspa',
+        want_asset: 'USDT', want_amount: String((qty * MID).toFixed(4)),
         want_chain: intent.pay_chain || 'BSC',
       };
     }
-    // sell: user 卖 KAS, matcher 收 KAS 给 USDT
-    const give_amount = String(intent.qty);
-    const want_amount = String(parseFloat(intent.qty) * MID);
+    // sell: user 卖 X KAS = matcher 买 X KAS, give X*MID USDT
     return {
-      give_asset: intent.asset || 'KAS', give_amount, give_chain: 'kaspa',
-      want_asset: 'USDT', want_amount,
-      want_chain: intent.pay_chain || 'BSC',
+      give_asset: 'USDT', give_amount: String((qty * MID).toFixed(4)), give_chain: intent.pay_chain || 'BSC',
+      want_asset: 'KAS', want_amount: String(qty), want_chain: 'kaspa',
     };
   }
 
