@@ -133,13 +133,16 @@ function _handleTradeFlow(user_id, msg, cur, side, relayNodeId) {
       return { reply: `${qty} KAS. 请输你自己的 ${draft.pay_chain.toUpperCase()} EVM 钱包 (0x... 42 位) — broker 代发 USDT 到这. 严禁给 broker 或别人 addr.` };
     }
     // BUY KAS skip ADDR_INPUT
-    setFlowState(user_id, { ...cur, step: 'PREVIEW', draft });
+    // T-J2-2026-05-06 r232 fix: step='PREVIEW' → 'CONFIRM' (跟 L145 CONFIRM handler align).
+    // 旧版 step='PREVIEW' 但 L145 check 'CONFIRM' → mismatch fall default 'state 错乱'. NWT operator chain DM 实战暴露.
+    setFlowState(user_id, { ...cur, step: 'CONFIRM', draft });
     return { reply: _previewText(draft, side), triggerPreview: true };
   }
   if (cur.step === 'ADDR_INPUT') {
     if (!EVM_ADDR_REGEX.test(msg)) return { reply: '地址格式不对, 应是 0x 开头 42 位. 重输 OR back.' };
     draft.pay_address = msg;
-    setFlowState(user_id, { ...cur, step: 'PREVIEW', draft });
+    // T-J2-2026-05-06 r232 fix: step='PREVIEW' → 'CONFIRM' (同款 align L145 handler)
+    setFlowState(user_id, { ...cur, step: 'CONFIRM', draft });
     return { reply: _previewText(draft, side), triggerPreview: true };
   }
   if (cur.step === 'CONFIRM') {
