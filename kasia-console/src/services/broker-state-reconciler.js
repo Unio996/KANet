@@ -163,57 +163,47 @@ function _checkRefundCountMismatch() {
 // state='expired' 自然 TTL 后 refund_tx_hash IS NULL = stuck. 调 advanceToRefunded → 走 no_offer fallback path.
 // KI-3 reconciliation 严守: 验 user→broker KAS inflow chain evidence 真存在 防误退 history INSERT 但用户没真转 KAS 的 row.
 async function _checkStuckNoOfferRefund() {
-  const stuck = sqlite.prepare(`
-    SELECT id, user_kasia_address, qty, created_at, updated_at,
-           (julianday('now') - julianday(updated_at)) * 86400000 AS age_ms
-    FROM retail_dex_orders
-    WHERE state = 'expired'
-      AND refund_tx_hash IS NULL
-      AND exchange_offer_id IS NULL
-      AND created_at > datetime('now', '-14 days')
-      AND (error_reason IS NULL OR error_reason NOT LIKE '%invalid_addr%')
-    ORDER BY updated_at ASC
-    LIMIT 5
-  `).all();
-  if (!stuck.length) return { stuck: 0, healed: 0 };
-
+  // T-J2-2026-05-07 r252 T1.3f Phase 1.5 sediment — SQL EXISTS pushdown filter 替 KI-3 inner check.
+  // 真因 (NWT r252 surface post-restart verify): 现 SQL `ORDER BY updated_at ASC LIMIT 5` 卡在 4/25/4/29 oldest
+  // no-inflow batch (12,788 stuck total, 1 inflow-evidence row 真 Owner) → KI-3 inner `continue` 不 bump
+  // updated_at → 永远 cycle 同 5 rows → Owner 5/7 row forever blocked. EXISTS filter 真 push KI-3 进 SQL,
+  // 真 single-source-of-truth + progress invariant 严守 (next tick 真 reach next 5 inflow-having rows).
   const brokerRelayId = _getBrokerRelayId();
-  if (!brokerRelayId) return { stuck: stuck.length, healed: 0 };
+  if (!brokerRelayId) return { stuck: 0, healed: 0 };
   const brokerAddr = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id=?`).get(brokerRelayId)?.address;
-  if (!brokerAddr) return { stuck: stuck.length, healed: 0 };
+  if (!brokerAddr) return { stuck: 0, healed: 0 };
+
+  const stuck = sqlite.prepare(`
+    SELECT rdo.id, rdo.user_kasia_address, rdo.qty, rdo.created_at, rdo.updated_at,
+           (julianday('now') - julianday(rdo.updated_at)) * 86400000 AS age_ms
+    FROM retail_dex_orders rdo
+    WHERE rdo.state = 'expired'
+      AND rdo.refund_tx_hash IS NULL
+      AND rdo.exchange_offer_id IS NULL
+      AND rdo.created_at > datetime('now', '-14 days')
+      AND (rdo.error_reason IS NULL OR rdo.error_reason NOT LIKE '%invalid_addr%')
+      AND EXISTS (
+        SELECT 1 FROM chain_events ce
+        JOIN kaspa_tx_log ktl ON ce.txid = ktl.tx_id
+        WHERE ce.from_address = rdo.user_kasia_address
+          AND ce.to_address = ?
+          AND ce.event_type = 'payment'
+          AND ce.observed_at >= rdo.created_at
+          AND ktl.amount BETWEEN CAST(rdo.qty AS REAL) - 0.5 AND CAST(rdo.qty AS REAL) + 0.5
+      )
+    ORDER BY rdo.updated_at ASC
+    LIMIT 5
+  `).all(brokerAddr);
+  if (!stuck.length) return { stuck: 0, healed: 0 };
 
   let healed = 0;
   for (const order of stuck) {
-    const ageMin = Math.round(order.age_ms / 60000);
-    const qty = parseFloat(order.qty);
-
-    // KI-3 reconciliation: 验 user→broker KAS inflow 真 evidence (防误退 history INSERT 没真转 KAS row)
-    // T-J2-2026-05-07 r248 T1.3c: source-of-truth 改 chain_events.event_type='payment' (37 rows from/to populated)
-    // 替 kaspa_tx_log.from_address (88k rows 100% NULL, mass-indexer 不 populate). JOIN kaspa_tx_log.amount cross-verify.
-    // r247 surface: r248 KI-29 第 8 次复刻 (architect spec 凭印象 'event_type=tx' 错, 36k tx rows 全 NULL). J2 grep 修正.
-    const inflow = sqlite.prepare(`
-      SELECT ce.txid FROM chain_events ce
-      JOIN kaspa_tx_log ktl ON ce.txid = ktl.tx_id
-      WHERE ce.from_address = ?
-        AND ce.to_address = ?
-        AND ce.event_type = 'payment'
-        AND ce.observed_at >= ?
-        AND ktl.amount BETWEEN ? AND ?
-      LIMIT 1
-    `).get(order.user_kasia_address, brokerAddr, order.created_at || order.updated_at, qty - 0.5, qty + 0.5);
-
-    if (!inflow) {
-      _alert('warn', `🟡 stuck no_offer ${ageMin}min order ${order.id.slice(0, 8)} qty=${qty} 真 NO KAS inflow evidence — skip refund`, {
-        order_id: order.id, age_min: ageMin, qty, user_kasia_address: order.user_kasia_address,
-      });
-      continue;
-    }
-
+    // KI-3 已 SQL EXISTS filter 真 single-source-of-truth, inner check redundant 删除.
     try {
       const result = await advanceToRefunded({ orderId: order.id, reason: 'reconciler_self_heal_stuck' });
       if (result?.ok) {
         healed++;
-        console.log(`[reconciler] no_offer self-heal order ${order.id.slice(0, 8)} qty=${qty} txId=${(result.txId || '').slice(0, 12)}`);
+        console.log(`[reconciler] no_offer self-heal order ${order.id.slice(0, 8)} qty=${order.qty} txId=${(result.txId || '').slice(0, 12)}`);
       }
     } catch (e) {
       console.warn(`[reconciler] no_offer advanceToRefunded err ${order.id.slice(0, 8)}: ${e.message}`);
