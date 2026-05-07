@@ -57,9 +57,15 @@ function _getUserPayAddress(peer) {
      FROM retail_dex_user_memory WHERE user_kasia_address = ?`
   ).get(peer);
   if (row?.chain && row?.address) return row;
+  // T-J2-2026-05-07 r241 T1.1 A-fix: SQL filter state NOT IN historical leak states.
+  // 真根因 Owner 5/7 30 KAS stuck Layer A: 4/30 broker self-deal failed 历史 row addr=0xaD12544E
+  // (broker self) leak 进 retail_dex_orders.pay_address, _getUserPayAddress 取最新 row 当 user
+  // current pref 用, R4 SQL false positive trigger self_deal_refunded path. 修法: SQL filter
+  // 排除 'failed','refunded','cancelled' 历史 row, 仅取 *user-supplied current intent* state.
   row = sqlite.prepare(
     `SELECT pay_chain AS chain, pay_address AS address FROM retail_dex_orders
      WHERE user_kasia_address = ? AND pay_chain IS NOT NULL AND pay_address IS NOT NULL
+       AND state NOT IN ('failed', 'refunded', 'cancelled')
      ORDER BY created_at DESC LIMIT 1`
   ).get(peer);
   return (row?.chain && row?.address) ? row : null;
