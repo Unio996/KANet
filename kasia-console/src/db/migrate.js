@@ -2785,5 +2785,31 @@ export function runMigrations() {
     }
   }
 
+  // v88: T-J2-2026-05-07 r259 T2.1a Phase 0 autoTaker enable (Owner 5/7 钦定 broker exchange 闭环 P0 quick win)
+  // NWT r259 spec 真 retail_dex_broker_config 真**真 wrong table (它真 fee config); J2 grep 真 KI-29 第 12 次复刻
+  // 防御 — 真 source = config_entries via getConfig/setConfig (data/settings/configs.js:6-13).
+  // 真 idempotent INSERT OR IGNORE — survive DB rebuild + restart safe.
+  {
+    const seedRows = [
+      { key: 'autotake_enabled', value: 'true' },
+      { key: 'autotake_mode', value: 'auto' },
+      { key: 'autotake_min_discount_pct', value: '0.5' },
+    ];
+    let seeded = 0;
+    for (const { key, value } of seedRows) {
+      const existing = sqlite.prepare('SELECT id FROM config_entries WHERE key=?').get(key);
+      if (!existing) {
+        sqlite.prepare(`
+          INSERT INTO config_entries (id, key, category, value_encrypted, is_sensitive, created_at, updated_at)
+          VALUES (?, ?, 'broker_autotake', ?, 0, datetime('now'), datetime('now'))
+        `).run(randomUUID(), key, value);
+        seeded++;
+      }
+    }
+    if (seeded > 0) {
+      console.log(`[migrate] v88: config_entries seed ${seeded} autoTaker rows (autotake_enabled=true / mode=auto / min_discount_pct=0.5). Layer 1 Match Gap 闭环 fix.`);
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
