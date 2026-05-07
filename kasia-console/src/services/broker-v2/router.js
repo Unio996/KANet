@@ -36,6 +36,12 @@ const FIELD_MAP = {
 
 const STATUS_QUERY_REGEX = /(?:查单|查我的单|订单状态|进度|已成多少|剩多少|什么情况)/i;
 
+// T-J2-2026-05-07 r256 T1.5b: chain-truth grounding retrospective query (Owner 5/7 钦定 broker user-facing
+// 必 deterministic + chain truth + TX evidence + explorer URL, 严禁 LLM hallucinate '已撤销' 假 ack).
+// 此 regex 真 router.js 顶部 fire (在 hasPublished gate 之前), terminal state refunded/completed/expired
+// 真 source-of-truth response, getActiveOrder filter 不返 terminal 真 unreachable issue 修.
+const ORDER_STATUS_QUERY_REGEX = /(退款|退了吗|我钱呢|退回|凭证|证明|tx|查单|查我的单|订单状态|进度|已成多少|剩多少|什么情况|怎么样了)/i;
+
 /**
  * Main entry — broker-v2 单一 user message 处理.
  * @param {string} peer - user kasia 地址
@@ -44,6 +50,35 @@ const STATUS_QUERY_REGEX = /(?:查单|查我的单|订单状态|进度|已成多
  */
 export async function handleMessage(peer, msg) {
   if (!peer || !msg) return '我没收到内容, 你想买还是卖 KAS?';
+
+  // 0. T-J2-2026-05-07 r256 T1.5b: chain-truth retrospective query (顶部 fire 真 bypass hasPublished gate).
+  // user 真发 '退款' / '退了吗' / '我钱呢' / 'TX' 等 → SQL grep 最 recent 1 单 → 模板 deterministic reply.
+  // 真 严禁 LLM inject reply (5/7 08:43 Owner '撤单' → LLM '已撤销' 假 ack 真 trust loss 教训).
+  if (ORDER_STATUS_QUERY_REGEX.test(msg)) {
+    const recent = sqlite.prepare(`
+      SELECT id, side, qty, state, refund_tx_hash, deliver_tx_hash,
+             datetime(created_at, '+7 hours') AS ct_local
+      FROM retail_dex_orders
+      WHERE user_kasia_address = ?
+      ORDER BY created_at DESC LIMIT 1
+    `).get(peer);
+    if (!recent) return '你没有订单记录. 想下新单告诉我.';
+    const sideZh = recent.side === 'sell_kas' ? '卖' : '买';
+    if (recent.state === 'refunded' && recent.refund_tx_hash) {
+      return `✓ ${recent.ct_local} ${sideZh} ${recent.qty} KAS 已退\nTX: ${recent.refund_tx_hash.slice(0, 16)}...\n查看: https://explorer.kaspa.org/txs/${recent.refund_tx_hash}`;
+    }
+    if (recent.state === 'completed' && recent.deliver_tx_hash) {
+      return `✓ ${recent.ct_local} ${sideZh} ${recent.qty} KAS 已成交\nTX: ${recent.deliver_tx_hash.slice(0, 16)}...\n查看: https://explorer.kaspa.org/txs/${recent.deliver_tx_hash}`;
+    }
+    if (recent.state === 'expired') {
+      return `⏳ ${recent.ct_local} ${sideZh} ${recent.qty} KAS 真 TTL 过期, 等 broker 5min cron 自动退款 (chain-truth dedup 严守).`;
+    }
+    if (recent.state === 'cancelled' || recent.state === 'failed') {
+      return `⊘ ${recent.ct_local} ${sideZh} ${recent.qty} KAS 已取消${recent.refund_tx_hash ? ` (退款 TX: ${recent.refund_tx_hash.slice(0, 16)}...)` : ''}`;
+    }
+    // active state — 进行中, 提示用 "查单" 看详情
+    return `🔄 ${recent.ct_local} ${sideZh} ${recent.qty} KAS ${recent.state} 真进行中. 回 "查单" 看详情.`;
+  }
 
   // 1. parser deterministic 提字段 + intent
   const { fields, intent } = extract(msg);

@@ -25,6 +25,35 @@
 import { sqlite } from '../db/client.js';
 import { transition } from './broker-state-machine.js';  // SA-4 真 transition migrate (_sweepStaleAligning aligning→expired)
 
+// T-J2-2026-05-07 r256 T1.5a: 主动 DM chain-truth grounding (Owner 钦定 broker user-facing 必 chain truth + TX evidence)
+const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+
+// fire-and-forget DM 真 user with refund TX evidence + explorer URL. silent fail 真 NOT 阻 refund (T1.5b query path 真 ground 真 chain truth).
+async function _dmRefundUser(userKasiaAddr, refundAmount, realTxId, isBackfill) {
+  try {
+    if (!userKasiaAddr || !realTxId) return;
+    const { enqueueVerified } = await import('./broker-action-queue.js');
+    const lines = isBackfill
+      ? [
+          `✓ 已退 ${refundAmount} KAS (链上早已退, 现补记 DB)`,
+          `TX: ${realTxId.slice(0, 16)}...`,
+          `查看: https://explorer.kaspa.org/txs/${realTxId}`,
+        ]
+      : [
+          `✓ 已退 ${refundAmount} KAS 到你 Kasia 钱包`,
+          `TX: ${realTxId.slice(0, 16)}...`,
+          `查看: https://explorer.kaspa.org/txs/${realTxId}`,
+        ];
+    await enqueueVerified({
+      kind: 'dm_completion',
+      peer: userKasiaAddr,
+      payload: { message: lines.join('\n') },
+    });
+  } catch (e) {
+    console.warn(`[advanceToRefunded] DM fire failed (non-blocking, T1.5b query 真 ground): ${e.message}`);
+  }
+}
+
 // ── retail_dex_orders 状态映射 ────────────────────────────────────
 // retail_dex_orders.state vs broker ConvoState.lifecycle_phase
 // retail_dex_orders.state CHECK 允许: aligning/confirming/awaiting_payment/paid/executing/
@@ -428,7 +457,10 @@ export async function advanceToRefunded({ orderId, reason }) {
   }
 
   // 5. Phase 3 (atomic 3-table sync): confirm refunded with real chain txId
-  return _confirmRefundedState({ orderId, offerId: offer.id, realTxId, refundAmount, userKasiaAddr, reason });
+  const result = _confirmRefundedState({ orderId, offerId: offer.id, realTxId, refundAmount, userKasiaAddr, reason });
+  // T-J2-2026-05-07 r256 T1.5a: fire-and-forget DM 主动汇报 user (chain-truth grounding)
+  if (result.ok) _dmRefundUser(userKasiaAddr, refundAmount, realTxId, false);
+  return result;
 }
 
 // Internal: Phase 3 atomic 3-table sync. Called by main path + dedup-backfill path.
@@ -496,6 +528,8 @@ function _confirmRefundedState({ orderId, offerId, realTxId, refundAmount, userK
 // Internal: dedup-backfill path. Found prior chain TX, sync DB without re-firing sendKas.
 function _backfillRefundedState({ orderId, offerId, realTxId, refundAmount, userKasiaAddr, reason }) {
   const result = _confirmRefundedState({ orderId, offerId, realTxId, refundAmount, userKasiaAddr, reason });
+  // T-J2-2026-05-07 r256 T1.5a: fire-and-forget DM 主动汇报 user (isBackfill=true 真透明 "链上早已退, 现补记 DB")
+  if (result.ok) _dmRefundUser(userKasiaAddr, refundAmount, realTxId, true);
   return { ...result, alreadyRefunded: true };
 }
 
@@ -568,7 +602,10 @@ async function _advanceNoOfferRefund({ orderId, order, reason }) {
   }
 
   // Phase 3 atomic 2-table sync (offerId=null skips exchange_offers UPDATE)
-  return _confirmRefundedState({ orderId, offerId: null, realTxId, refundAmount, userKasiaAddr, reason });
+  const result = _confirmRefundedState({ orderId, offerId: null, realTxId, refundAmount, userKasiaAddr, reason });
+  // T-J2-2026-05-07 r256 T1.5a: fire-and-forget DM 主动汇报 user (chain-truth grounding)
+  if (result.ok) _dmRefundUser(userKasiaAddr, refundAmount, realTxId, false);
+  return result;
 }
 
 /**
