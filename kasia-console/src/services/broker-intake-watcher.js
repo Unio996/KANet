@@ -164,19 +164,58 @@ async function _publishBrokerSellOffer(peer, amount, eventId) {
   // T-J2-2026-04-30 R4 self-deal SQL guard (Owner 真测撞: pay_address=0xaD12544E=broker BSC own).
   // 用户误 copy broker 自己 BSC addr 当 SELL 收 USDT 地址 → publish 上去 maker 付 USDT 流到 broker
   // (不是 user) → 真钱风险. 检 pay_address 不在 broker_relay 自己的 agent_wallets 任何 chain 中.
-  // 命中 self-deal → ABORT publish + Q2 保险 sendKaspa 退原 KAS + DM 告知用户改地址.
+  //
+  // T-J2-2026-05-07 r241 T1.2 B-fix (Owner 5/7 30 KAS stuck 真根因):
+  // 旧版 R4 hit → inline _send TRANSFER (broker-action-queue in-memory FIFO 不持久化) + 立即
+  // markProcessed marker (R39 INSERT-before-confirm anti-pattern). console restart 全清 in-memory
+  // queue → enqueue items 真消失 → marker 撒谎"已退" 但 KAS 真没动 → 跟 88 KAS Bug-Z20 同款复刻.
+  // 修法: 改调 advanceToRefunded ({orderId, reason:'self_deal'}) — Phase 1 CAS lock retail_dex_orders
+  // state='refunding' (持久化) + Phase 2 enqueueVerified sendKas 等真 chain TX + Phase 3 atomic 3-table
+  // sync. broker-state-reconciler 5min cron 自动 retry stuck 'refunding' state. 真根治 R39 复刻.
   try {
     const selfDealCheck = sqlite.prepare(
       `SELECT 1 FROM agent_wallets WHERE relay_node_id = ? AND lower(address) = lower(?) LIMIT 1`
     ).get(BROKER_RELAY_ID, userPay.address);
     if (selfDealCheck) {
       console.warn(`[broker-intake R4] self-deal blocked: peer=${peer.slice(-12)} pay_address=${userPay.address.slice(0,12)}... ∈ broker wallets`);
+      // 找 retail_dex_orders 真 row (broker-intake fire 前 sell_kas row 应已 INSERT 'aligning' OR
+      // 'awaiting_payment'/'paid' state, _publishBrokerSellOffer 期望走过 chat 流程后 row 已存)
+      const orderRow = sqlite.prepare(
+        `SELECT id FROM retail_dex_orders
+         WHERE user_kasia_address = ?
+           AND CAST(qty AS REAL) BETWEEN ? - 0.5 AND ? + 0.5
+           AND state IN ('aligning', 'awaiting_payment', 'paid', 'expired')
+         ORDER BY created_at DESC LIMIT 1`
+      ).get(peer, amount, amount);
+      if (orderRow?.id) {
+        const { advanceToRefunded } = await import('./broker-state-authority.js');
+        const result = await advanceToRefunded({ orderId: orderRow.id, reason: 'self_deal' });
+        if (result.ok) {
+          // 真 chain TX 验证完, DM ack 含真 evidence
+          await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
+            message: `挂单失败: 你给的收款地址 ${userPay.address.slice(0,10)}...${userPay.address.slice(-6)} 是 broker 自己的钱包(不是你的). USDT 付到那里就是付给 broker 了. ${result.refundAmount} KAS 已退 (Kasia tx ${result.txId?.slice(0,16)}). 重新下单时请用 **你自己的** EVM 钱包地址收 USDT.`
+          });
+          return markProcessed(eventId, `self_deal_refunded:${result.txId?.slice(0,12)}`);
+        }
+        if (result.skipReason === 'race_lost') {
+          // Phase 1 CAS lost — 别 caller 已 claim 'refunding' lock (e.g. cron tick 同时 fire). reconciler 真 backfill.
+          console.log(`[broker-intake R4] race_lost order ${orderRow.id.slice(0,8)}, reconciler 真 retry`);
+          // 不 markProcessed — 让 reconciler 5min cron 真处理 (next tick 真 reach Phase 3)
+          return; // skip marker, intake-watcher 60s tick 真 retry (但 broker-state-reconciler 5min 先到)
+        }
+        // 其他 skipReason (not_refundable / sendKas fail) — 不 markProcessed, reconciler 真 retry
+        console.warn(`[broker-intake R4] advanceToRefunded skipped: ${result.skipReason || result.error?.slice(0, 80)}, reconciler 真 retry`);
+        return;
+      }
+      // fallback: retail_dex_orders 没 row (R4 fire 前 INSERT 真 timing 不对, Phase 1.5 sediment 候补)
+      // 仍 fall to old inline _send (degraded behavior, 真 rare race), markProcessed 防 60s tick 真 spam
+      console.warn(`[broker-intake R4] no retail_dex_orders row found (qty=${amount} ± 0.5 peer=${peer.slice(-12)}), fallback inline _send (degraded)`);
       await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.TRANSFER, target: peer, amount_kas: amount,
         note: `self-deal pay_address rejected: ${userPay.address.slice(0,10)}...` });
       await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
-        message: `挂单失败: 你给的收款地址 ${userPay.address.slice(0,10)}...${userPay.address.slice(-6)} 是 broker 自己的钱包(不是你的). USDT 付到那里就是付给 broker 了. ${amount} KAS 已退回你 Kasia. 重新下单时请用 **你自己的** EVM 钱包地址收 USDT.`
+        message: `挂单失败: 你给的收款地址 ${userPay.address.slice(0,10)}...${userPay.address.slice(-6)} 是 broker 自己的钱包(不是你的). ${amount} KAS 已退回你 Kasia. 重新下单时请用 **你自己的** EVM 钱包地址收 USDT.`
       });
-      return markProcessed(eventId, 'self_deal_refunded');
+      return markProcessed(eventId, 'self_deal_refunded_fallback');
     }
   } catch (err) {
     console.warn(`[broker-intake R4] self-deal check err: ${err.message}, skip guard`);
