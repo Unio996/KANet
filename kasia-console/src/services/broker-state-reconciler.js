@@ -158,7 +158,7 @@ function _checkRefundCountMismatch() {
 // KI-3 reconciliation 严守: 验 user→broker KAS inflow chain evidence 真存在 防误退 history INSERT 但用户没真转 KAS 的 row.
 async function _checkStuckNoOfferRefund() {
   const stuck = sqlite.prepare(`
-    SELECT id, user_kasia_address, qty,
+    SELECT id, user_kasia_address, qty, created_at, updated_at,
            (julianday('now') - julianday(updated_at)) * 86400000 AS age_ms
     FROM retail_dex_orders
     WHERE state = 'expired'
@@ -181,13 +181,19 @@ async function _checkStuckNoOfferRefund() {
     const qty = parseFloat(order.qty);
 
     // KI-3 reconciliation: 验 user→broker KAS inflow 真 evidence (防误退 history INSERT 没真转 KAS row)
+    // T-J2-2026-05-07 r248 T1.3c: source-of-truth 改 chain_events.event_type='payment' (37 rows from/to populated)
+    // 替 kaspa_tx_log.from_address (88k rows 100% NULL, mass-indexer 不 populate). JOIN kaspa_tx_log.amount cross-verify.
+    // r247 surface: r248 KI-29 第 8 次复刻 (architect spec 凭印象 'event_type=tx' 错, 36k tx rows 全 NULL). J2 grep 修正.
     const inflow = sqlite.prepare(`
-      SELECT tx_id FROM kaspa_tx_log
-      WHERE from_address = ?
-        AND to_address = ?
-        AND amount BETWEEN ? AND ?
+      SELECT ce.txid FROM chain_events ce
+      JOIN kaspa_tx_log ktl ON ce.txid = ktl.tx_id
+      WHERE ce.from_address = ?
+        AND ce.to_address = ?
+        AND ce.event_type = 'payment'
+        AND ce.observed_at >= ?
+        AND ktl.amount BETWEEN ? AND ?
       LIMIT 1
-    `).get(order.user_kasia_address, brokerAddr, qty - 0.5, qty + 0.5);
+    `).get(order.user_kasia_address, brokerAddr, order.created_at || order.updated_at, qty - 0.5, qty + 0.5);
 
     if (!inflow) {
       _alert('warn', `🟡 stuck no_offer ${ageMin}min order ${order.id.slice(0, 8)} qty=${qty} 真 NO KAS inflow evidence — skip refund`, {
