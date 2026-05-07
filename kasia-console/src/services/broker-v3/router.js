@@ -19,7 +19,10 @@
 import * as stateMachine from './state-machine.js';
 import * as client from './exchange-client.js';
 
-const MID_PRICE = 0.04;  // KAS USDT 中价 hardcode (T-J2 phase 1 占位, post-Phase-2 接入 price-oracle real-time)
+// T-J2-2026-05-07 r259 T2.1b — Layer 2 Price Oracle Gap fix.
+// MID_PRICE 改 dynamic /api/trade/kas-price (跟 market-seeder 同 source) — 替 hardcode 0.04 phase 1 placeholder.
+// FALLBACK_MID_PRICE 真 oracle down 时 graceful 用 (不阻 publish).
+const FALLBACK_MID_PRICE = 0.04;
 
 /**
  * 主入口 — conversations.js BROKER_V3_ENABLED dispatch.
@@ -87,26 +90,33 @@ async function _doPublish(peer, draft, relayNodeId, prevReply) {
   if (!draft) return prevReply + '\n\n(no draft, back 重来)';
   const qty = parseFloat(draft.qty);
   const isBuy = draft.side === 'buy_kas';
+  // T-J2-2026-05-07 r259 T2.1b — fetch live KAS mid price (graceful fallback to 0.04 if oracle down)
+  const livePrice = await client.getKasPrice();
+  const midPrice = livePrice || FALLBACK_MID_PRICE;
+  const wantAmount = String((qty * midPrice).toFixed(4));
+  // T-J2-2026-05-07 r259 T2.1c — Layer 4 Loop Closed: hedge_enabled flag 真 broker offer
+  // hedge-eligible (executeHedge 真 trade-protocol-filter.js:836-848 真 opt-in gate, default skip).
+  // Enable hedge 真 broker 真 fulfill via CEX (post Phase 1 cex-bridge ship).
   const body = isBuy
     ? {
         relayNodeId,
         give_asset: 'KAS', give_amount: String(qty), give_chain: 'kaspa',
-        want_asset: 'USDT', want_amount: String((qty * MID_PRICE).toFixed(4)),
+        want_asset: 'USDT', want_amount: wantAmount,
         want_chain: draft.pay_chain,
         verification: 'cross_chain_tx',
         verification_meta: { expected_asset: 'USDT', receive_chain: draft.pay_chain },
         expires_minutes: 30,
-        metadata: { source: 'broker-v3', user_id: peer, side: 'buy_kas' },
+        metadata: { source: 'broker-v3', user_id: peer, side: 'buy_kas', hedge_enabled: true, mid_price_used: midPrice },
       }
     : {
         relayNodeId,
         give_asset: 'KAS', give_amount: String(qty), give_chain: 'kaspa',
-        want_asset: 'USDT', want_amount: String((qty * MID_PRICE).toFixed(4)),
+        want_asset: 'USDT', want_amount: wantAmount,
         want_chain: draft.pay_chain,
         verification: 'cross_chain_tx',
         verification_meta: { accepted_chains: [{ chain: draft.pay_chain, address: draft.pay_address }], expected_asset: 'USDT' },
         expires_minutes: 30,
-        metadata: { source: 'broker-v3', user_id: peer, side: 'sell_kas' },
+        metadata: { source: 'broker-v3', user_id: peer, side: 'sell_kas', hedge_enabled: true, mid_price_used: midPrice },
       };
   const r = await client.publishOffer(body);
   if (!r.ok) {

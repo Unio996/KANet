@@ -78,6 +78,18 @@ export async function acceptOffer(body) {
 }
 
 /**
+ * GET /api/trade/kas-price — KAS USDT 中价 oracle (live, 跟 market-seeder 同 source).
+ * T-J2-2026-05-07 r259 T2.1b — Layer 2 Price Oracle Gap fix (替 router.js MID_PRICE=0.04 hardcode).
+ * @returns {Promise<number>} mid price in USDT, OR null if oracle down.
+ */
+export async function getKasPrice() {
+  const r = await fetchJson(`${CONSOLE_URL}/api/trade/kas-price`);
+  if (!r.ok) return null;
+  const price = parseFloat(r.data?.price);
+  return (price && price > 0) ? price : null;
+}
+
+/**
  * POST /api/exchange/cancel — maker 取消 offer (CANCEL_ORDER).
  * @param {object} body - { relayNodeId, offer_id }
  */
