@@ -152,6 +152,63 @@ function _checkRefundCountMismatch() {
   return { ceCount, ktlCount };
 }
 
+// T-J2-2026-05-07 r244 (a) — no_offer stuck self-heal scan.
+// broker-intake R4 self_deal 拦截 retail_dex_orders 真 INSERT 但 exchange_offer_id NEVER SET.
+// state='expired' 自然 TTL 后 refund_tx_hash IS NULL = stuck. 调 advanceToRefunded → 走 no_offer fallback path.
+// KI-3 reconciliation 严守: 验 user→broker KAS inflow chain evidence 真存在 防误退 history INSERT 但用户没真转 KAS 的 row.
+async function _checkStuckNoOfferRefund() {
+  const stuck = sqlite.prepare(`
+    SELECT id, user_kasia_address, qty,
+           (julianday('now') - julianday(updated_at)) * 86400000 AS age_ms
+    FROM retail_dex_orders
+    WHERE state = 'expired'
+      AND refund_tx_hash IS NULL
+      AND exchange_offer_id IS NULL
+      AND created_at > datetime('now', '-14 days')
+    ORDER BY updated_at ASC
+    LIMIT 5
+  `).all();
+  if (!stuck.length) return { stuck: 0, healed: 0 };
+
+  const brokerRelayId = _getBrokerRelayId();
+  if (!brokerRelayId) return { stuck: stuck.length, healed: 0 };
+  const brokerAddr = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id=?`).get(brokerRelayId)?.address;
+  if (!brokerAddr) return { stuck: stuck.length, healed: 0 };
+
+  let healed = 0;
+  for (const order of stuck) {
+    const ageMin = Math.round(order.age_ms / 60000);
+    const qty = parseFloat(order.qty);
+
+    // KI-3 reconciliation: 验 user→broker KAS inflow 真 evidence (防误退 history INSERT 没真转 KAS row)
+    const inflow = sqlite.prepare(`
+      SELECT tx_id FROM kaspa_tx_log
+      WHERE from_address = ?
+        AND to_address = ?
+        AND amount BETWEEN ? AND ?
+      LIMIT 1
+    `).get(order.user_kasia_address, brokerAddr, qty - 0.5, qty + 0.5);
+
+    if (!inflow) {
+      _alert('warn', `🟡 stuck no_offer ${ageMin}min order ${order.id.slice(0, 8)} qty=${qty} 真 NO KAS inflow evidence — skip refund`, {
+        order_id: order.id, age_min: ageMin, qty, user_kasia_address: order.user_kasia_address,
+      });
+      continue;
+    }
+
+    try {
+      const result = await advanceToRefunded({ orderId: order.id, reason: 'reconciler_self_heal_stuck' });
+      if (result?.ok) {
+        healed++;
+        console.log(`[reconciler] no_offer self-heal order ${order.id.slice(0, 8)} qty=${qty} txId=${(result.txId || '').slice(0, 12)}`);
+      }
+    } catch (e) {
+      console.warn(`[reconciler] no_offer advanceToRefunded err ${order.id.slice(0, 8)}: ${e.message}`);
+    }
+  }
+  return { stuck: stuck.length, healed };
+}
+
 function _checkStaleAligning() {
   // J1 #56 _sweepStaleAligning cron 已 cover. 真 reconciler double-check.
   const stale = sqlite.prepare(`
@@ -176,11 +233,12 @@ async function tick() {
   try {
     const stuckResult = await _checkStuckRefunding();
     const retryableResult = await _checkRetryableExpiredFailedRefund();
+    const noOfferResult = await _checkStuckNoOfferRefund();
     const counts = _checkRefundCountMismatch();
     const stale = _checkStaleAligning();
     const elapsed = Date.now() - t0;
-    if (elapsed > 1000 || stuckResult.backfilled > 0 || retryableResult.retried > 0) {
-      console.log(`[state-reconciler] tick #${_tickCount} ${elapsed}ms stuck=${stuckResult.stuck} backfilled=${stuckResult.backfilled} retryable=${retryableResult.retryable} retried=${retryableResult.retried} stale=${stale} ce=${counts?.ceCount} ktl=${counts?.ktlCount}`);
+    if (elapsed > 1000 || stuckResult.backfilled > 0 || retryableResult.retried > 0 || noOfferResult.healed > 0) {
+      console.log(`[state-reconciler] tick #${_tickCount} ${elapsed}ms stuck=${stuckResult.stuck} backfilled=${stuckResult.backfilled} retryable=${retryableResult.retryable} retried=${retryableResult.retried} no_offer_stuck=${noOfferResult.stuck} no_offer_healed=${noOfferResult.healed} stale=${stale} ce=${counts?.ceCount} ktl=${counts?.ktlCount}`);
     }
   } catch (e) {
     console.error(`[state-reconciler] tick #${_tickCount} err: ${e.message}`);
