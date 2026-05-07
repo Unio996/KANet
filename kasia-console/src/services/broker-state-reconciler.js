@@ -135,11 +135,17 @@ function _checkRefundCountMismatch() {
   const brokerAddr = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id=?`).get(brokerRelayId)?.address;
   if (!brokerAddr) return 0;
 
+  // T-J2-2026-05-07 r248 T1.3d: 4/29 commit 424af05eb4 pre-existing 2 bug:
+  //   (1) `created_at` 真 kaspa_tx_log 真无此列 (真列 `observed_at`) → throw 'no such column'
+  //   (2) `WHERE from_address = ?` 未 bind 参数 (`.get()` no args) → throw 'Too few parameters'
+  // 双 bug 真 swallow tick #1-#4 throw (NWT r247 surface evidence). 修双 bug. 注: kaspa_tx_log.from_address
+  // 真 100% NULL (88k/88k mass-indexer 不 populate), 此函数仍 production-broken 直到 Phase 1.5
+  // 改 chain_events.event_type='broker_kas_refunded' source-of-truth refactor (候补 sediment).
   const ktlCount = sqlite.prepare(`
     SELECT COUNT(*) AS n FROM kaspa_tx_log
     WHERE from_address = ?
-      AND created_at > datetime('now', '-30 days')
-  `).get().n;
+      AND observed_at > datetime('now', '-30 days')
+  `).get(brokerAddr).n;
 
   // Note: ktlCount include all broker outbound (refund + delivery + fee), not refund-only.
   // 真 refund-only count 真 future enhancement (chain_events JOIN kaspa_tx_log).
