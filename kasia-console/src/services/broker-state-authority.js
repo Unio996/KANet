@@ -348,7 +348,13 @@ export async function advanceToRefunded({ orderId, reason }) {
     // already refunded per DB — race-loser path, return success idempotent
     return { ok: true, alreadyRefunded: true, txId: order.refund_tx_hash, refundAmount: parseFloat(order.qty) };
   }
-  if (!order.exchange_offer_id) return { ok: false, skipReason: 'no_offer', error: `order ${orderId} no exchange_offer_id linked` };
+  // T-J2-2026-05-07 r244 (a): no_offer fallback path. broker-intake R4 self_deal 拦截
+  // retail_dex_orders 真 INSERT 但 exchange_offer_id 永远 NEVER SET (publish 被 R4 阻).
+  // 5/7 stuck 5 row + 4/30 58 + 4/28 88 = 真 production-needed self-heal evidence.
+  // 严守 single-source-of-truth invariant — 所有 broker-side refund 走此 entry, no_offer 是 API gap fix.
+  if (!order.exchange_offer_id) {
+    return _advanceNoOfferRefund({ orderId, order, reason });
+  }
 
   const offer = sqlite.prepare(`SELECT * FROM exchange_offers WHERE id = ?`).get(order.exchange_offer_id);
   if (!offer) return { ok: false, skipReason: 'no_offer', error: `offer ${order.exchange_offer_id} not found` };
@@ -435,13 +441,18 @@ function _confirmRefundedState({ orderId, offerId, realTxId, refundAmount, userK
         SET state = 'refunded', refund_tx_hash = ?, updated_at = datetime('now')
         WHERE id = ?
       `).run(realTxId, orderId);
-      sqlite.prepare(`
-        UPDATE exchange_offers
-        SET protocol_status = 'refunded',
-            cancelled_at = datetime('now'),
-            updated_at = datetime('now')
-        WHERE id = ?
-      `).run(offerId);
+      // T-J2-2026-05-07 r244 (a): offerId null = no_offer fallback path (broker-intake R4 拦截
+      // retail_dex_orders 真 INSERT 但 exchange_offer_id 永远 NEVER SET). 跳 exchange_offers UPDATE,
+      // 仅 retail_dex_orders + chain_events 2-table sync.
+      if (offerId) {
+        sqlite.prepare(`
+          UPDATE exchange_offers
+          SET protocol_status = 'refunded',
+              cancelled_at = datetime('now'),
+              updated_at = datetime('now')
+          WHERE id = ?
+        `).run(offerId);
+      }
       // INSERT chain_events with REAL chain txId (not placeholder 'refund_<id>').
       // Post-v83 trigger enforces length=64 hex format for broker_* events; real txId passes.
       sqlite.prepare(`
@@ -468,7 +479,7 @@ function _confirmRefundedState({ orderId, offerId, realTxId, refundAmount, userK
       userKasiaAddr,
       orderId,
       syncWarn: err.message,
-      ackText: `订单 ${offerId.slice(0, 8)} 已退 ${refundAmount} KAS 到你 Kasia 钱包. Kasia TX: ${realTxId.slice(0, 16)}`,
+      ackText: `订单 ${(offerId || orderId).slice(0, 8)} 已退 ${refundAmount} KAS 到你 Kasia 钱包. Kasia TX: ${realTxId.slice(0, 16)}`,
     };
   }
 
@@ -478,7 +489,7 @@ function _confirmRefundedState({ orderId, offerId, realTxId, refundAmount, userK
     refundAmount,
     userKasiaAddr,
     orderId,
-    ackText: `订单 ${offerId.slice(0, 8)} 已退 ${refundAmount} KAS 到你 Kasia 钱包. Kasia TX: ${realTxId.slice(0, 16)}`,
+    ackText: `订单 ${(offerId || orderId).slice(0, 8)} 已退 ${refundAmount} KAS 到你 Kasia 钱包. Kasia TX: ${realTxId.slice(0, 16)}`,
   };
 }
 
@@ -486,6 +497,65 @@ function _confirmRefundedState({ orderId, offerId, realTxId, refundAmount, userK
 function _backfillRefundedState({ orderId, offerId, realTxId, refundAmount, userKasiaAddr, reason }) {
   const result = _confirmRefundedState({ orderId, offerId, realTxId, refundAmount, userKasiaAddr, reason });
   return { ...result, alreadyRefunded: true };
+}
+
+// T-J2-2026-05-07 r244 (a) — no_offer fallback Phase 1+2+3 (broker-intake R4 拦截 + reconciler self-heal).
+// retail_dex_orders.exchange_offer_id IS NULL 时走此路径, 跳 exchange_offers refundability check + UPDATE.
+// _confirmRefundedState 已 null-safe (offerId null → 仅 retail_dex_orders + chain_events 2-table sync).
+async function _advanceNoOfferRefund({ orderId, order, reason }) {
+  const userKasiaAddr = order.user_kasia_address;
+  if (!userKasiaAddr) return { ok: false, skipReason: 'no_user_kasia' };
+  const refundAmount = parseFloat(order.qty);
+  if (!refundAmount || refundAmount <= 0) return { ok: false, skipReason: 'invalid_amount' };
+
+  // chain-truth dedup (no offer = use order.created_at as time window start)
+  const { findPriorRefundTxs } = await import('./broker-refund-dedup.js');
+  const priorTxs = findPriorRefundTxs(userKasiaAddr, refundAmount, order.created_at);
+  if (priorTxs.length > 0) {
+    return _backfillRefundedState({ orderId, offerId: null, realTxId: priorTxs[0].tx_id, refundAmount, userKasiaAddr, reason: `${reason}_no_offer_backfill` });
+  }
+
+  // Phase 1 CAS lock — refundable states per round 3 共识: awaiting_payment/paid/expired
+  // lint-allow-state-update: PZ-STATE-T-REFUND-PHASE1-NO-OFFER advanceToRefunded no_offer fallback (Phase 1 CAS lock → 'refunding'). 'refunding' 不在 v0.1 7 state ALLOWED_TRANSITIONS, phase Z 折叠.
+  const claim = sqlite.prepare(`
+    UPDATE retail_dex_orders
+    SET state = 'refunding', updated_at = datetime('now')
+    WHERE id = ?
+      AND state IN ('awaiting_payment', 'paid', 'expired')
+      AND refund_tx_hash IS NULL
+      AND exchange_offer_id IS NULL
+  `).run(orderId);
+  if (claim.changes === 0) {
+    const post = sqlite.prepare(`SELECT state, refund_tx_hash FROM retail_dex_orders WHERE id=?`).get(orderId);
+    if (post?.state === 'aligning' || post?.state === 'confirming') {
+      return { ok: true, noRefundNeeded: true, skipReason: 'no_refund_needed', orderState: post.state };
+    }
+    return { ok: false, skipReason: 'race_lost', error: `Phase 1 CAS lost (no_offer): state=${post?.state}` };
+  }
+
+  // Phase 2 enqueueVerified sendKas
+  let realTxId;
+  try {
+    const { enqueueVerified } = await import('./broker-action-queue.js');
+    const result = await enqueueVerified({
+      kind: 'sendKas',
+      peer: userKasiaAddr,
+      payload: { amount_kas: refundAmount, note: `refund:${reason}:no_offer:${orderId.slice(0, 8)}` },
+    });
+    realTxId = result?.txId;
+    if (!realTxId) throw new Error('sendKas resolved without txId');
+  } catch (err) {
+    // lint-allow-state-update: PZ-STATE-T-REFUND-ROLLBACK-NO-OFFER no_offer rollback path (sendKas failed → 'expired' allow reconciler retry).
+    sqlite.prepare(`
+      UPDATE retail_dex_orders
+      SET state = 'expired', error_reason = ?, updated_at = datetime('now')
+      WHERE id = ? AND state = 'refunding'
+    `).run(`refund_send_failed_no_offer: ${String(err.message || err).slice(0, 200)}`, orderId);
+    return { ok: false, error: `sendKas failed (no_offer): ${err.message || err}`, orderId, userKasiaAddr, refundAmount };
+  }
+
+  // Phase 3 atomic 2-table sync (offerId=null skips exchange_offers UPDATE)
+  return _confirmRefundedState({ orderId, offerId: null, realTxId, refundAmount, userKasiaAddr, reason });
 }
 
 /**
