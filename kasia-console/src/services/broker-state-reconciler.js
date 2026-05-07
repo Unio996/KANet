@@ -171,6 +171,7 @@ async function _checkStuckNoOfferRefund() {
       AND refund_tx_hash IS NULL
       AND exchange_offer_id IS NULL
       AND created_at > datetime('now', '-14 days')
+      AND (error_reason IS NULL OR error_reason NOT LIKE '%invalid_addr%')
     ORDER BY updated_at ASC
     LIMIT 5
   `).all();

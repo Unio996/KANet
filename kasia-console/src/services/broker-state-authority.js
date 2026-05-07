@@ -545,13 +545,26 @@ async function _advanceNoOfferRefund({ orderId, order, reason }) {
     realTxId = result?.txId;
     if (!realTxId) throw new Error('sendKas resolved without txId');
   } catch (err) {
-    // lint-allow-state-update: PZ-STATE-T-REFUND-ROLLBACK-NO-OFFER no_offer rollback path (sendKas failed → 'expired' allow reconciler retry).
+    // T-J2-2026-05-07 r248 T1.3e: wasm 'unreachable' / RuntimeError = invalid bytes addr crash.
+    // bogus addr (NWT operator 5/7 早期测试 leak) 真 wasm Address::try_from trap. 真 fail-fast permanent skip
+    // 防 reconciler retry forever loop. error_reason='invalid_addr' marker 真 reconciler SQL filter exclude.
+    const errMsg = String(err.message || err);
+    const isWasmCrash = /unreachable|RuntimeError/.test(errMsg);
+    const errorReason = isWasmCrash
+      ? `refund_skip_invalid_addr_no_send_attempt: ${errMsg.slice(0, 150)}`
+      : `refund_send_failed_no_offer: ${errMsg.slice(0, 200)}`;
+    // lint-allow-state-update: PZ-STATE-T-REFUND-ROLLBACK-NO-OFFER no_offer rollback path (sendKas failed → 'expired' allow reconciler retry, OR invalid_addr permanent skip).
     sqlite.prepare(`
       UPDATE retail_dex_orders
       SET state = 'expired', error_reason = ?, updated_at = datetime('now')
       WHERE id = ? AND state = 'refunding'
-    `).run(`refund_send_failed_no_offer: ${String(err.message || err).slice(0, 200)}`, orderId);
-    return { ok: false, error: `sendKas failed (no_offer): ${err.message || err}`, orderId, userKasiaAddr, refundAmount };
+    `).run(errorReason, orderId);
+    return {
+      ok: false,
+      error: `sendKas failed (no_offer): ${errMsg}`,
+      skipReason: isWasmCrash ? 'invalid_addr' : undefined,
+      orderId, userKasiaAddr, refundAmount,
+    };
   }
 
   // Phase 3 atomic 2-table sync (offerId=null skips exchange_offers UPDATE)
