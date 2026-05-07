@@ -34,7 +34,9 @@ const FEE_KAS = 0.1;
 //
 // 修: substring 匹配 cancel 关键词 + 排除 negation ("我不想取消" / "别取消").
 // 单字 'NO'/'no' 不**真**真**真 catch (歧义, _pending preview path CANCEL_WORDS 真**真 cover).
-const CANCEL_KEYWORD_REGEX = /(取消(?:订单|单|报价|卖单|买单|交易)?|不卖了|不买了|不想(?:卖|买|交易)了?|不要了|算了(?:吧)?|退我(?:钱|币|KAS|USDT|USDC)?|退回(?:我的)?(?:钱|币|KAS|USDT|USDC)?|我不(?:做|玩|要|交易)了?|cancel(?:\s+(?:order|trade|sell|buy))?|refund(?:\s+me)?|give\s+(?:me\s+)?(?:my\s+)?(?:money|kas|usdt|usdc|funds?)\s+back)/i;
+// T-J2-2026-05-07 r244 T1.4 C-patch: 加 '撤单/撤销/撤回/撤消' 中文变体 (Owner 5/7 08:43 真发 "撤单"
+// → 旧 regex 不 match → fall LLM → LLM hallucinate 假 ack '已撤销' UX 误导).
+const CANCEL_KEYWORD_REGEX = /(取消(?:订单|单|报价|卖单|买单|交易)?|撤(?:单|销(?:订单|单|交易|挂单)?|回|消)|不卖了|不买了|不想(?:卖|买|交易)了?|不要了|算了(?:吧)?|退我(?:钱|币|KAS|USDT|USDC)?|退回(?:我的)?(?:钱|币|KAS|USDT|USDC)?|我不(?:做|玩|要|交易)了?|cancel(?:\s+(?:order|trade|sell|buy))?|refund(?:\s+me)?|give\s+(?:me\s+)?(?:my\s+)?(?:money|kas|usdt|usdc|funds?)\s+back)/i;
 // negation: "不想取消" / "别取消" / "继续" / "保留" / "don't cancel" — 真**真**否定**真**真**真 cancel intent.
 const CANCEL_NEGATION_REGEX = /(不想(?:取消|退)|别取消|不要(?:取消|退)|继续(?:挂单|交易)|keep\s+(?:order|going)|don'?t\s+(?:cancel|refund))/i;
 
