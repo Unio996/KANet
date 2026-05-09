@@ -252,27 +252,26 @@ async function _getPolymarketSummary(relayId) {
     const { getPolygonWallet, getPositions } = await import('../services/polymarket.js');
     const wallet = getPolygonWallet(relayId);
     if (!wallet) return null;
-    const credRow = sqlite.prepare(
-      "SELECT value_encrypted FROM config_entries WHERE key = ?"
+    const hasCreds = !!sqlite.prepare(
+      "SELECT 1 FROM config_entries WHERE key = ?"
     ).get(`polymarket_api_${relayId}`);
-    if (!credRow?.value_encrypted) {
-      return { configured: false, walletAddress: wallet.address, positionCount: 0, approxValueUsd: 0 };
-    }
-    let creds;
-    try { creds = JSON.parse(decrypt(credRow.value_encrypted)); } catch { return { configured: false, walletAddress: wallet.address, positionCount: 0, approxValueUsd: 0 }; }
+    // data-api 不需要 creds, 但 'configured' 仍以 CLOB key 是否已设为准.
     const positions = await Promise.race([
-      getPositions(creds.apiKey, creds.secret, creds.passphrase),
+      getPositions(wallet.address),
       new Promise(r => setTimeout(() => r([]), 5000)),
     ]);
     const list = Array.isArray(positions) ? positions : [];
     let approxValueUsd = 0;
     for (const p of list) {
-      const sz = parseFloat(p.size ?? p.amount ?? 0);
-      const pr = parseFloat(p.curPrice ?? p.avg_price ?? p.price ?? 0);
+      // data-api gives currentValue directly (size × curPrice); fall back if missing.
+      const cv = parseFloat(p.currentValue ?? 0);
+      if (cv > 0) { approxValueUsd += cv; continue; }
+      const sz = parseFloat(p.size ?? 0);
+      const pr = parseFloat(p.curPrice ?? p.avgPrice ?? 0);
       if (sz > 0 && pr > 0) approxValueUsd += sz * pr;
     }
     return {
-      configured: true,
+      configured: hasCreds,
       walletAddress: wallet.address,
       positionCount: list.length,
       approxValueUsd,

@@ -13,7 +13,16 @@
     <template x-if="walletStatus.hasWallet">
       <div class="flex items-center gap-3 text-sm">
         <span class="font-mono text-xs text-ink-400 cursor-pointer" @click="navigator.clipboard.writeText(walletStatus.address)" title="点击复制" x-text="walletStatus.address?.slice(0,8) + '...' + walletStatus.address?.slice(-6)"></span>
-        <span class="font-bold" :class="walletStatus.usdc > 0 ? 'text-green-600' : 'text-ink-400'" x-text="(walletStatus.usdc ?? 0).toFixed(2) + ' USDC'"></span>
+        <span class="font-bold" :class="walletStatus.pusd > 0 ? 'text-green-600' : 'text-ink-400'" x-text="(walletStatus.pusd ?? 0).toFixed(2) + ' pUSD'"
+              title="Polymarket V2 抵押 token. 1 pUSD = 1 USDC, 可双向 wrap"></span>
+        <template x-if="walletStatus.usdc > 0">
+          <span class="text-xs"
+                :class="walletStatus.v2Migrated ? 'text-ink-500' : 'text-amber-600'"
+                x-text="walletStatus.usdc.toFixed(2) + ' USDC' + (walletStatus.v2Migrated ? '' : ' 未包装')"
+                :title="walletStatus.v2Migrated
+                  ? 'Polymarket 赎回回款 = USDC（不是 pUSD）。可点 \'包装为 pUSD\' 继续下单，或点 \'退出\' 提现到外部地址。'
+                  : 'Polymarket V2 不直接吃 USDC，点 \'迁移到 V2\' 包成 pUSD'"></span>
+        </template>
         <template x-if="walletStatus.usdt > 0">
           <span class="text-xs text-ink-500" x-text="walletStatus.usdt.toFixed(2) + ' USDT'"></span>
         </template>
@@ -26,6 +35,16 @@
         <template x-if="!walletStatus.approved && walletStatus.hasWallet">
           <button @click="doApprove()" :disabled="approving" class="btn btn-sm btn-warning text-[10px]">
             <span x-text="approving ? '授权中...' : '授权 USDC'"></span>
+          </button>
+        </template>
+        <template x-if="walletStatus.v2Migrated">
+          <span class="badge badge-success text-[9px]" title="pUSD 已 approve V2 exchange">V2 ✓</span>
+        </template>
+        <template x-if="walletStatus.approved && (!walletStatus.v2Migrated || walletStatus.usdc > 0)">
+          <button @click="doMigrateV2()" :disabled="migratingV2"
+                  :class="walletStatus.v2Migrated ? 'btn btn-sm btn-ghost text-[10px] text-ink-500' : 'btn btn-sm btn-warning text-[10px]'"
+                  :title="walletStatus.v2Migrated ? '把这笔 USDC 包成 pUSD 用于继续下单（不想下单可点 \'退出\' 提现）' : 'Polymarket 4/28 切到 V2 抵押 token, 必须迁移才能下单'">
+            <span x-text="migratingV2 ? '迁移中...' : (walletStatus.v2Migrated ? '包装为 pUSD' : '迁移到 V2')"></span>
           </button>
         </template>
         <template x-if="walletStatus.hasClobKey">
@@ -760,6 +779,7 @@ function predictionsPage() {
     walletStatus: { hasWallet: false },
     walletMsg: '',
     approving: false,
+    migratingV2: false,
     settingUp: false,
     showPositions: true,
     positions: [],
@@ -884,6 +904,7 @@ function predictionsPage() {
     checkTrade(m) {
       if (!this.walletStatus.hasWallet) return { msg: '先创建 Polygon 钱包（顶部按钮）' };
       if (!this.walletStatus.approved) return { msg: '先授权 USDC 给 Polymarket（顶部 "授权 USDC" 按钮）' };
+      if (!this.walletStatus.v2Migrated) return { msg: 'Polymarket 4/28 升级到 V2，先迁移到 pUSD（顶部 "迁移到 V2" 按钮）' };
       if (!this.walletStatus.hasClobKey) return { msg: '先设置 CLOB API Key（顶部 "设置 API Key" 按钮）' };
       const price = Number(this.tradeForm.price);
       const size = Number(this.tradeForm.size);
@@ -895,10 +916,13 @@ function predictionsPage() {
         return { msg: `Polymarket 最小订单 $5（当前 $${cost.toFixed(2)}）。数量至少填 ${minSize}` };
       }
       if (this.tradeForm.side === 'BUY') {
-        const bal = this.walletStatus.usdc || 0;
+        // V2: 抵押是 pUSD（USDC 1:1 wrap）。挂单期间 pUSD 不会从 token balance 扣（V2
+        // 用 allowance 锁定模型），但要确保 balance ≥ 已挂单总额 + 当前下单。
+        const bal = this.walletStatus.pusd || 0;
         if (cost > bal) {
           const maxSize = Math.floor(bal / price * 100) / 100;
-          return { msg: `USDC 不够（需 $${cost.toFixed(2)}，余 $${bal.toFixed(2)}）。当前价最多买 ${maxSize} 份` };
+          const wrapBtn = this.walletStatus.v2Migrated ? '"包装为 pUSD"' : '"迁移到 V2"';
+          return { msg: `pUSD 不够（需 $${cost.toFixed(2)}，余 $${bal.toFixed(2)}）。当前价最多买 ${maxSize} 份。USDC 还有 $${(this.walletStatus.usdc||0).toFixed(2)}，可点 ${wrapBtn} 把 USDC 包装成 pUSD。` };
         }
       } else {
         // SELL: 必须已持有该 outcome token（CLOB 不支持裸空）
@@ -1134,6 +1158,24 @@ function predictionsPage() {
         this.walletMsg = '授权失败: ' + e.message;
         this.approving = false;
       }
+    },
+
+    async doMigrateV2() {
+      this.migratingV2 = true;
+      this.walletMsg = '';
+      try {
+        const res = await fetch('/api/polymarket/' + this.selectedAgent + '/migrate-v2', { method: 'POST' });
+        const data = await res.json();
+        if (data.ok) {
+          const sent = Object.keys(data.txHashes || {}).length;
+          this.walletMsg = sent ? `V2 迁移完成: ${sent} 笔 TX, pUSD 余额 ${data.pusdBalance}` : 'V2 已就绪';
+          // 刷新 walletStatus 拉新的 pusd / v2Migrated
+          await this.loadWalletStatus();
+        } else {
+          this.walletMsg = '迁移失败: ' + (data.error || '');
+        }
+      } catch (e) { this.walletMsg = '迁移失败: ' + e.message; }
+      this.migratingV2 = false;
     },
 
     async setupClob() {

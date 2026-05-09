@@ -8,7 +8,7 @@ import { sqlite } from '../db/client.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 import crypto, { randomUUID } from 'crypto';
 import { fetchStockData, fetchYahooQuote, cachedPredictions, cachedCommodities, cachedFunding, cachedSentiment, fetchAllMarkets, cachedCrypto, cachedFundamentals, cachedIndustryPeers, cachedStockKlines, DIVERGENCE_WARN_THRESHOLD } from '../services/market-data.js';
-import { getPolygonWallet, getUsdcBalance, createApiKey, getOrderBook, getPositions, placeOrder, cancelOrder, getOpenOrders, checkAllowance, approveUsdc, checkTxStatus, redeemPositions, checkRedeemStatus, sweepUsdc, fetchUserActivity, fetchAccountValue, getMarketWinner } from '../services/polymarket.js';
+import { getPolygonWallet, getUsdcBalance, createApiKey, getOrderBook, checkAllowance, approveUsdc, checkTxStatus, redeemPositions, checkRedeemStatus, sweepUsdc, fetchUserActivity, fetchAccountValue, getMarketWinner, migrateToV2 } from '../services/polymarket.js';
 import { decrypt } from '../services/crypto.js';
 
 // Agent 综述缓存（15 分钟）
@@ -237,14 +237,14 @@ export async function registerStockRoutes(fastify) {
     return reply.send({ ok: true, message: 'Polymarket API key created' });
   });
 
-  // 复用：创建 SDK client
-  // The returned client holds a JsonRpcProvider internally (via the Wallet
-  // signer). Callers MUST pass the client through _releaseClob() in a finally
-  // block to destroy the provider and stop ethers v6's internal retry loop.
+  // CLOB SDK client (V2 since 2026-04-28). The returned client holds a
+  // JsonRpcProvider via the Wallet signer; callers MUST pass it through
+  // _releaseClob() in a finally block to destroy the provider and stop
+  // ethers v6's internal retry loop.
   async function _makeClobClient(relay_node_id) {
     const creds = _getPolymarketCreds(relay_node_id);
     if (!creds) return null;
-    const { ClobClient } = await import('@polymarket/clob-client');
+    const v2 = await import('@polymarket/clob-client-v2');
     const { ethers } = await import('ethers');
     const walletRow = sqlite.prepare(
       "SELECT privkey_encrypted FROM agent_wallets WHERE relay_node_id = ? AND chain = 'polygon' LIMIT 1"
@@ -255,13 +255,16 @@ export async function registerStockRoutes(fastify) {
     const wallet = new ethers.Wallet(pk, provider);
     if (!wallet._signTypedData) wallet._signTypedData = wallet.signTypedData.bind(wallet);
     const sdkCreds = { key: creds.key || creds.apiKey, secret: creds.secret, passphrase: creds.passphrase };
-    const client = new ClobClient('https://clob.polymarket.com', 137, wallet, sdkCreds);
+    const client = new v2.ClobClient({
+      host: 'https://clob.polymarket.com',
+      chain: 137,
+      signer: wallet,
+      creds: sdkCreds,
+    });
     client.__provider = provider; // for _releaseClob cleanup
     return client;
   }
 
-  // Release the provider held by a client created via _makeClobClient.
-  // Safe to call with null / already-destroyed clients.
   function _releaseClob(client) {
     try { client?.__provider?.destroy?.(); } catch {}
   }
@@ -332,6 +335,62 @@ export async function registerStockRoutes(fastify) {
         }
       }));
 
+      // T-J1-2026-04-28 (Owner UI bug fix): overlay data-api positions on getTrades aggregation.
+      // getTrades aggregation has known issues — NegRisk markets show wrong outcome+3x size
+      // (memory note), and binary markets where Owner traded both directions can show stale
+      // outcome too. data-api /positions is the authoritative truth source (matches Polymarket
+      // UI exactly), so override outcome/size/cost/redeemable from there when available.
+      try {
+        const polyAddrEarly = getPolygonWallet(relay_node_id)?.address;
+        if (polyAddrEarly) {
+          const dapiRes = await fetch(
+            `https://data-api.polymarket.com/positions?user=${polyAddrEarly.toLowerCase()}&limit=200`,
+            { signal: AbortSignal.timeout(10_000) }
+          );
+          if (dapiRes.ok) {
+            const dapi = await dapiRes.json();
+            const dapiByCid = {};
+            for (const dp of (dapi || [])) if (dp?.conditionId) dapiByCid[dp.conditionId] = dp;
+            for (const p of allPositions) {
+              const dp = dapiByCid[p.market];
+              if (!dp) continue;
+              p.outcome = dp.outcome;
+              p.size = dp.size;
+              p.totalCost = dp.initialValue;
+              p.avgPrice = dp.avgPrice;
+              p.asset = dp.asset;
+              p.currentValue = dp.currentValue;
+              p.curPrice = dp.curPrice;
+              p.negativeRisk = dp.negativeRisk;
+              if (dp.redeemable) p.redeemable = true;
+              // curPrice ∈ {0,1} → market resolved → flip to settled even if local CLOB lag
+              if (dp.curPrice === 0 || dp.curPrice === 1) {
+                p.settled = true;
+                p.closed = true;
+                p.status = 'settled';
+              }
+              delete dapiByCid[p.market];
+            }
+            // Append positions data-api shows but local trades missed (e.g. transferred-in)
+            for (const dp of Object.values(dapiByCid)) {
+              if (!(dp.size > 0)) continue;
+              const settled = dp.curPrice === 0 || dp.curPrice === 1;
+              allPositions.push({
+                market: dp.conditionId, outcome: dp.outcome, side: 'BUY',
+                size: dp.size, totalCost: dp.initialValue, avgPrice: dp.avgPrice,
+                asset: dp.asset, currentValue: dp.currentValue, curPrice: dp.curPrice,
+                negativeRisk: dp.negativeRisk, redeemable: !!dp.redeemable,
+                title: dp.title, question: dp.title,
+                endDate: dp.endDate ? `${dp.endDate}T00:00:00Z` : null,
+                closed: settled, settled, status: settled ? 'settled' : 'active',
+              });
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[predictions] data-api overlay failed:', e.message);
+      }
+
       // For settled positions: query real on-chain balance.
       // NOTE: we no longer infer `redeemed=true` from balance=0. That was a
       // false-positive that hid recoverable winnings (Sophie BTC>72k 58 shares
@@ -346,7 +405,9 @@ export async function registerStockRoutes(fastify) {
             try {
               const assetIds = Array.from(assetIdsByMarket[p.market] || []);
               const rs = await checkRedeemStatus(polyWallet.address, p.market, assetIds);
-              p.redeemable = rs.redeemable;
+              // T-J1-2026-04-28 Owner UI bug fix: data-api redeemable=true takes precedence —
+              // tokens may be in proxy/NegRisk adapter (CTF balance=0) but Polymarket认为 redeemable.
+              p.redeemable = p.redeemable || rs.redeemable;
               p.onChainBalance = rs.balance;
               p.redeemed = false;
             } catch {
@@ -388,10 +449,21 @@ export async function registerStockRoutes(fastify) {
             let buySpent = 0, cashIn = 0;
             for (const a of activity) {
               const cid = a.conditionId;
-              if (cid && !perMarket[cid]) perMarket[cid] = { cost: 0, received: 0 };
+              if (cid && !perMarket[cid]) perMarket[cid] = { cost: 0, received: 0, byAsset: {} };
               if (a.type === 'TRADE' && a.side === 'BUY') {
                 buySpent += a.usdcSize || 0;
-                if (cid) perMarket[cid].cost += a.usdcSize || 0;
+                if (cid) {
+                  perMarket[cid].cost += a.usdcSize || 0;
+                  // Track per-outcome buy aggregates so settled positions can
+                  // reconstruct true outcome/size/avgPrice (getTrades aggregation
+                  // shows mirrored maker-side view on NegRisk markets).
+                  const ak = a.asset || a.outcome || 'unknown';
+                  const ag = perMarket[cid].byAsset[ak] = perMarket[cid].byAsset[ak] || {
+                    outcome: a.outcome, asset: a.asset, buyShares: 0, buyCost: 0,
+                  };
+                  ag.buyShares += Number(a.size) || 0;
+                  ag.buyCost += Number(a.usdcSize) || 0;
+                }
               } else if (a.type === 'TRADE' && a.side === 'SELL') {
                 cashIn += a.usdcSize || 0;
                 if (cid) perMarket[cid].received += a.usdcSize || 0;
@@ -413,23 +485,49 @@ export async function registerStockRoutes(fastify) {
       // ── Resolve winners for settled positions via on-chain payoutNumerators ──
       await Promise.all(settled.map(async (p) => {
         const r = await getMarketWinner(p.market);
-        if (r.resolved && r.winner) {
-          p.winner = r.winner;
-          p.verdict = (r.winner === p.outcome) ? 'WIN' : 'LOSE';
-          if (p.verdict === 'WIN') summary.wins++; else summary.losses++;
-        } else {
-          p.winner = null; p.verdict = 'PENDING';
-          summary.pending++;
-        }
-        // Precise per-position P&L from activity cash-flow (handles Polymarket fees)
         const mk = perMarket[p.market];
         if (mk) {
           p.realizedPnl = mk.received - mk.cost;
           p.actualReceived = mk.received;
+          // Reconstruct true position from activity-log BUY records. getTrades
+          // aggregation shows mirrored maker-side view on NegRisk markets, and
+          // the data-api overlay only covers open positions — settled markets
+          // (already redeemed) need this reconstruction to display correct
+          // outcome / size / avgPrice / cost.
+          if (mk.byAsset) {
+            let best = null;
+            for (const ag of Object.values(mk.byAsset)) {
+              if (!best || ag.buyShares > best.buyShares) best = ag;
+            }
+            if (best && best.buyShares > 0) {
+              if (best.outcome) p.outcome = best.outcome;
+              if (best.asset) p.asset = best.asset;
+              p.size = best.buyShares;
+              p.avgPrice = best.buyCost / best.buyShares;
+              p.totalCost = best.buyCost;
+            }
+          }
         } else {
-          // Fallback if activity missing (e.g. data-api down): estimate from outcome
-          p.realizedPnl = (p.verdict === 'WIN') ? (p.size - p.totalCost) : (-p.totalCost);
           p.actualReceived = null;
+        }
+        if (r.resolved && r.winner) {
+          p.winner = r.winner;
+          // Cash-flow is the truth source for verdict. p.outcome from getTrades
+          // is mirrored on NegRisk markets (sell-Yes-low ≡ buy-No-high), and
+          // the data-api overlay can miss fully-redeemed positions, leaving
+          // outcome stale. perMarket cash-flow comes from Polymarket activity
+          // log and reflects real USDC in/out. Fall back to outcome match only
+          // when activity is unavailable.
+          if (mk) {
+            p.verdict = p.realizedPnl > 0 ? 'WIN' : 'LOSE';
+          } else {
+            p.verdict = (r.winner === p.outcome) ? 'WIN' : 'LOSE';
+            p.realizedPnl = (p.verdict === 'WIN') ? (p.size - p.totalCost) : (-p.totalCost);
+          }
+          if (p.verdict === 'WIN') summary.wins++; else summary.losses++;
+        } else {
+          p.winner = null; p.verdict = 'PENDING';
+          summary.pending++;
         }
       }));
 
@@ -562,15 +660,18 @@ export async function registerStockRoutes(fastify) {
     try {
       client = await _makeClobClient(relay_node_id);
       if (!client) return reply.code(400).send({ error: 'Wallet or API key missing' });
-      const order = await client.createOrder({
+      // V2 SDK auto-fetches tickSize/negRisk; V2 UserOrder dropped feeRateBps/nonce
+      // from the signed message (handled by the V2 contract instead).
+      const result = await client.createAndPostOrder({
         tokenID: tokenId,
         price: parseFloat(price),
         size: parseFloat(size),
         side: side.toUpperCase(),
       });
-      const result = await client.postOrder(order);
-      return reply.send({ ok: result.success || !result.error, ...result });
+      console.log(`[predictions] V2 order result: ${JSON.stringify(result).slice(0,300)}`);
+      return reply.send({ ok: result?.success === true || (!!result && !result.error), ...result });
     } catch (e) {
+      console.log(`[predictions] V2 order ERROR: ${e.message}`);
       return reply.send({ ok: false, error: e.message });
     } finally {
       _releaseClob(client);
@@ -615,20 +716,55 @@ export async function registerStockRoutes(fastify) {
         try { provider?.destroy?.(); } catch {}
       }
     })();
-    const [usdce, matic, allowanceResult] = await Promise.all([
+    // V2 collateral (pUSD) + allowance to V2 spenders. Polymarket migrated CLOB
+    // to V2 on 2026-04-28; trades now require pUSD (USDC wrapped 1:1) approved
+    // to CTF Exchange V2 / NegRisk V2 / NegRisk Adapter.
+    const PUSD_ADDR = '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB';
+    const V2_SPENDERS = [
+      '0xE111180000d2663C0091e4f400237545B87B996B', // CTF Exchange V2
+      '0xe2222d279d744050d28e00520010520000310F59', // NegRisk Exchange V2
+      '0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296', // NegRisk Adapter
+    ];
+    const pusdPromise = (async () => {
+      let provider;
+      try {
+        provider = new ethers.JsonRpcProvider('https://polygon-bor-rpc.publicnode.com');
+        const c = new ethers.Contract(PUSD_ADDR, [
+          'function balanceOf(address) view returns (uint256)',
+          'function allowance(address,address) view returns (uint256)',
+        ], provider);
+        const bal = await timeout(c.balanceOf(wallet.address), 5000);
+        const allows = await Promise.all(V2_SPENDERS.map(s => timeout(c.allowance(wallet.address, s), 5000).catch(() => 0n)));
+        const minAllow = allows.reduce((m, a) => a < m ? a : m, allows[0] ?? 0n);
+        return {
+          pusd: parseFloat(ethers.formatUnits(bal, 6)),
+          v2Approved: minAllow > 0n,
+        };
+      } catch { return { pusd: 0, v2Approved: false }; } finally {
+        try { provider?.destroy?.(); } catch {}
+      }
+    })();
+    const [usdce, matic, allowanceResult, pusdInfo] = await Promise.all([
       timeout(getUsdcBalance(wallet.address), 5000).catch(() => 0),
       maticPromise,
       checkAllowance(wallet.address),
+      pusdPromise,
     ]);
     const hasClobKey = !!_getPolymarketCreds(relay_node_id);
+    // Migrated to V2 = pUSD already approved to V2 spenders. (pusd balance can
+    // legitimately be 0 if user spent all of it on positions.)
+    const v2Migrated = pusdInfo.v2Approved;
 
     return reply.send({
       hasWallet: true,
       address: wallet.address,
       usdc: usdce,
+      pusd: pusdInfo.pusd,
       matic,
       approved: allowanceResult.approved,
       allowance: allowanceResult.allowance,
+      v2Approved: pusdInfo.v2Approved,
+      v2Migrated,
       hasClobKey,
     });
   });
@@ -646,6 +782,20 @@ export async function registerStockRoutes(fastify) {
     const privateKey = decrypt(row.privkey_encrypted);
 
     const result = await approveUsdc(privateKey);
+    return reply.send(result);
+  });
+
+  // POST /api/polymarket/:relay_node_id/migrate-v2 — 一次性 V2 迁移：
+  // approve USDC→Onramp + wrap 全部 USDC 到 pUSD + approve pUSD→V2 exchanges.
+  // Polymarket 2026-04-28 把 CLOB 切到 V2，新 collateral 是 pUSD（USDC 1:1 wrap，
+  // 无费），不迁移就下不了单（old USDC approve 对 V2 exchange 无效）.
+  fastify.post('/api/polymarket/:relay_node_id/migrate-v2', async (request, reply) => {
+    const { relay_node_id } = request.params;
+    const w = sqlite.prepare("SELECT id FROM agent_wallets WHERE relay_node_id = ? AND chain = 'polygon' LIMIT 1").get(relay_node_id);
+    if (!w) return reply.code(400).send({ error: '没有 Polygon 钱包' });
+    const row = sqlite.prepare('SELECT privkey_encrypted FROM agent_wallets WHERE id = ?').get(w.id);
+    if (!row?.privkey_encrypted) return reply.code(400).send({ error: '钱包无私钥' });
+    const result = await migrateToV2(decrypt(row.privkey_encrypted));
     return reply.send(result);
   });
 
