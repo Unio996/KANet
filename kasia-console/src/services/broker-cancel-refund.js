@@ -93,13 +93,59 @@ function _findRefundableOffers(peerAddr) {
 }
 
 /**
+ * T-J2-2026-05-09 r219 T2.12 (NWT r286 Option A): Find unlinked retail_dex_orders draft (no linked exchange_offer).
+ * stale draft case: broker-intake handleIntake link broken OR prior cycle race → retail_dex_orders state='aligning'/'awaiting_payment'
+ * with exchange_offer_id IS NULL. handleCancelAndRefund caller fall-through dispatch advanceToRefunded.
+ * Filter 'test-%' (T2.11 同款 hygiene 防 test cron INSERT pollute).
+ */
+function _findRefundableDrafts(peerAddr) {
+  return sqlite.prepare(`
+    SELECT id, side, qty, datetime(created_at) as created_at
+    FROM retail_dex_orders
+    WHERE user_kasia_address = ?
+      AND state IN ('aligning', 'awaiting_payment')
+      AND exchange_offer_id IS NULL
+      AND created_at > datetime('now', '-24 hours')
+      AND id NOT LIKE 'test-%'
+    ORDER BY created_at DESC
+  `).all(peerAddr);
+}
+
+/**
  * Handle user-initiated cancel + refund.
  * @param {string} peerAddr
  * @returns {Promise<string|null>} reply text if refunded, null if no active refundable offer
  */
 export async function handleCancelAndRefund(peerAddr) {
   const refundable = _findRefundableOffers(peerAddr);
-  if (refundable.length === 0) return null;
+  if (refundable.length === 0) {
+    // T-J2-2026-05-09 r219 T2.12 (NWT r286 Option A): fall-through to unlinked drafts.
+    // 5/9 NWT operator Step 1 retry 撞 stale draft `bv2_p9zx9z9xn7rh_*` 真 awaiting_payment + exchange_offer_id NULL.
+    // _findRefundableOffers SQL 仅 cover exchange_offers, 漏 unlinked draft → handleCancelAndRefund return null
+    // → user 真 cancel intent 真 broker default ack 但实际 NOT cancel + NOT refund. T2.12 修.
+    const drafts = _findRefundableDrafts(peerAddr);
+    if (drafts.length === 0) return null;
+    const { advanceToRefunded } = await import('./broker-state-authority.js');
+    const ackParts = [];
+    for (const d of drafts) {
+      const result = await advanceToRefunded({ orderId: d.id, reason: 'user_cancel_unlinked_draft' });
+      if (result.ok) {
+        if (result.noRefundNeeded) {
+          ackParts.push(`订单 ${d.id.slice(-8)} (${d.side}) 已取消 (设置中无付款, 不需 refund)`);
+        } else if (result.alreadyRefunded) {
+          ackParts.push(`订单 ${d.id.slice(-8)} 之前已退过 (Kasia TX: ${result.txId?.slice(0, 16)})`);
+        } else {
+          ackParts.push(result.ackText || `订单 ${d.id.slice(-8)} (${d.side}) 已取消${result.refundAmount ? ` (退 ${result.refundAmount} KAS Kasia TX: ${result.txId?.slice(0, 16)})` : ''}`);
+        }
+      } else if (result.skipReason === 'race_lost') {
+        ackParts.push(`订单 ${d.id.slice(-8)} 取消请求收到, 退款进行中, 1-3 分钟到账`);
+      } else {
+        console.warn(`[cancel-refund T2.12] draft ${d.id.slice(-8)} advanceToRefunded skipped: ${result.error || result.skipReason}`);
+        ackParts.push(`订单 ${d.id.slice(-8)} 取消请求收到, broker 处理中 (${(result.error || result.skipReason || '').slice(0, 60)})`);
+      }
+    }
+    return ackParts.length > 0 ? `✓ ${ackParts.join('. ')}.` : null;
+  }
 
   // T-J2-2026-04-29 Track B step 5 (Owner 钦定单一状态机, round 3 共识 design v4):
   // 替原 inline sendKas + markOrderRefunded (双重退款 root cause) → call advanceToRefunded.
