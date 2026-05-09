@@ -2846,5 +2846,151 @@ export function runMigrations() {
     }
   }
 
+  // v90: bettor_recommendations — Bettor scanner (Phase 3a) Polymarket top-N picks
+  // Owner 5/9 钦定: 6h cron + spike trigger 扫 Polymarket markets, top 10 by score 写表, UI 展示.
+  // Scoring: fraction × edge × (1-σ). Trigger types: cron / price_spike / volume_spike / new_market.
+  // Status: pending → approved/rejected/expired (Phase 3.5 approval flow).
+  {
+    const has90 = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='bettor_recommendations'").get();
+    if (!has90) {
+      sqlite.exec(`
+        CREATE TABLE bettor_recommendations (
+          id TEXT PRIMARY KEY,
+          market_id TEXT NOT NULL,
+          condition_id TEXT,
+          slug TEXT,
+          question TEXT NOT NULL,
+          decision TEXT NOT NULL,
+          fraction REAL NOT NULL,
+          size_usd REAL NOT NULL,
+          edge REAL NOT NULL,
+          p_mid REAL NOT NULL,
+          sigma REAL NOT NULL,
+          info_gap_months REAL NOT NULL DEFAULT 0,
+          yes_price REAL NOT NULL,
+          volume_24h REAL,
+          liquidity REAL,
+          end_date TEXT,
+          score REAL NOT NULL,
+          reasoning_json TEXT,
+          trigger_type TEXT NOT NULL DEFAULT 'cron',
+          llm_tier TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          scanned_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_bettor_recs_score ON bettor_recommendations(score DESC, scanned_at DESC);
+        CREATE INDEX idx_bettor_recs_market ON bettor_recommendations(market_id, scanned_at DESC);
+        CREATE INDEX idx_bettor_recs_status ON bettor_recommendations(status, scanned_at DESC);
+      `);
+      console.log('[migrate] v90: bettor_recommendations 表 + 3 索引 创建 (Phase 3a Bettor scanner output).');
+    }
+  }
+
+  // v91: bettor_recommendations.relay_node_id — 推荐归属到具体 Agent (用谁的 adapter 扫的)
+  // Owner 5/9 钦定: 不写死 GLM4.7, 让登录预测页面的 Agent 用自己的 adapter 扫.
+  {
+    const cols91 = sqlite.prepare("PRAGMA table_info(bettor_recommendations)").all();
+    const hasRelayCol = cols91.some(c => c.name === 'relay_node_id');
+    if (!hasRelayCol) {
+      sqlite.exec(`
+        ALTER TABLE bettor_recommendations ADD COLUMN relay_node_id TEXT;
+        CREATE INDEX idx_bettor_recs_relay ON bettor_recommendations(relay_node_id, scanned_at DESC);
+      `);
+      console.log('[migrate] v91: bettor_recommendations.relay_node_id 列 + 索引 加好 (per-agent scan attribution).');
+    }
+  }
+
+  // v92: bettor_recommendations 战绩追踪列 (Phase 3d, Owner 5/9 钦定)
+  // 1h cron 拉 Polymarket 已结算市场, 更新 outcome / was_correct / brier / pnl_hypothetical
+  {
+    const cols92 = sqlite.prepare("PRAGMA table_info(bettor_recommendations)").all();
+    const hasOutcomeCol = cols92.some(c => c.name === 'outcome');
+    if (!hasOutcomeCol) {
+      sqlite.exec(`
+        ALTER TABLE bettor_recommendations ADD COLUMN outcome TEXT;
+        ALTER TABLE bettor_recommendations ADD COLUMN outcome_resolved_at TEXT;
+        ALTER TABLE bettor_recommendations ADD COLUMN was_correct INTEGER;
+        ALTER TABLE bettor_recommendations ADD COLUMN brier REAL;
+        ALTER TABLE bettor_recommendations ADD COLUMN pnl_hypothetical REAL;
+        CREATE INDEX idx_bettor_recs_status_end ON bettor_recommendations(status, end_date);
+      `);
+      console.log('[migrate] v92: 战绩追踪列 (outcome/was_correct/brier/pnl_hypothetical) + 索引 加好.');
+    }
+  }
+
+  // v93: bettor_sim_positions + bettor_sim_snapshots — 纸面持仓 + 时点轨迹
+  // Owner 5/9 钦定 "记录无意义 if 缺时点数据和仓位": 每条推荐落库即创建 sim_position,
+  // 1h cron snapshot 每个 open position 的当前价 + unrealized_pnl + drift_pp.
+  // 7 天后看回撤分布 → 标定止损阈值 (Phase 3e-1 用真实数据驱动).
+  {
+    const has93 = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='bettor_sim_positions'").get();
+    if (!has93) {
+      sqlite.exec(`
+        CREATE TABLE bettor_sim_positions (
+          id TEXT PRIMARY KEY,
+          recommendation_id TEXT NOT NULL,
+          relay_node_id TEXT,
+          direction TEXT NOT NULL,
+          entry_yes_price REAL NOT NULL,
+          entry_buy_price REAL NOT NULL,
+          size_usd REAL NOT NULL,
+          shares REAL NOT NULL,
+          opened_at TEXT NOT NULL,
+          closed_at TEXT,
+          close_reason TEXT,
+          realized_pnl REAL,
+          max_drawdown_pp REAL,
+          max_unrealized_gain_pp REAL,
+          last_snapshot_at TEXT
+        );
+        CREATE INDEX idx_simpos_rec ON bettor_sim_positions(recommendation_id);
+        CREATE INDEX idx_simpos_open ON bettor_sim_positions(closed_at) WHERE closed_at IS NULL;
+        CREATE INDEX idx_simpos_relay ON bettor_sim_positions(relay_node_id, opened_at DESC);
+
+        CREATE TABLE bettor_sim_snapshots (
+          id TEXT PRIMARY KEY,
+          position_id TEXT NOT NULL,
+          snapshot_at TEXT NOT NULL,
+          current_yes_price REAL NOT NULL,
+          current_buy_price REAL NOT NULL,
+          unrealized_pnl REAL NOT NULL,
+          drift_pp REAL NOT NULL
+        );
+        CREATE INDEX idx_simsnap_pos ON bettor_sim_snapshots(position_id, snapshot_at DESC);
+      `);
+
+      // Backfill: every existing recommendation gets a sim_position
+      // direction='SKIP' rows still get a record but with size=0 / shares=0 (no snapshot)
+      const recs = sqlite.prepare(`
+        SELECT id, relay_node_id, decision, yes_price, size_usd, fraction, scanned_at,
+               status, outcome, pnl_hypothetical
+        FROM bettor_recommendations
+      `).all();
+      const backfillStmt = sqlite.prepare(`
+        INSERT INTO bettor_sim_positions
+          (id, recommendation_id, relay_node_id, direction, entry_yes_price,
+           entry_buy_price, size_usd, shares, opened_at, closed_at, close_reason, realized_pnl)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const tx = sqlite.transaction((rows) => {
+        for (const r of rows) {
+          const dir = r.decision || 'SKIP';
+          const entryBuy = dir === 'YES' ? r.yes_price : (dir === 'NO' ? (1 - r.yes_price) : 0);
+          const shares = entryBuy > 0 ? r.size_usd / entryBuy : 0;
+          // Closed if rec already resolved
+          const closedAt = r.status === 'resolved' ? r.scanned_at : null;
+          const closeReason = r.status === 'resolved' ? 'resolved' : null;
+          backfillStmt.run(
+            randomUUID(), r.id, r.relay_node_id || null, dir,
+            r.yes_price, entryBuy, dir === 'SKIP' ? 0 : (r.size_usd || 0), shares,
+            r.scanned_at, closedAt, closeReason, r.pnl_hypothetical || null
+          );
+        }
+      });
+      tx(recs);
+      console.log(`[migrate] v93: bettor_sim_positions/snapshots 表 + 4 索引创建 + backfill ${recs.length} 条 sim_positions.`);
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

@@ -80,6 +80,8 @@ export const CHAIN_META = {
     nativeSymbol: 'MATIC',
     rpcPool: [
       'https://polygon-bor-rpc.publicnode.com',
+      'https://polygon.drpc.org',
+      'https://1rpc.io/matic',
       'https://polygon-rpc.com',
       'https://rpc.ankr.com/polygon',
       'https://polygon.llamarpc.com',
@@ -90,9 +92,10 @@ export const CHAIN_META = {
     },
     stables: {
       usdt: { address: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F', decimals: 6 },
-      usdc: { address: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', decimals: 6 },
+      // USDC = USDC.e (bridged) for Polymarket compat. Native USDC moved to extras.
+      usdc: { address: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174', decimals: 6 },
       usdcExtras: [
-        { address: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174', decimals: 6, label: 'USDC.e' },
+        { address: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', decimals: 6, label: 'USDC (native)' },
       ],
     },
   },
@@ -244,7 +247,7 @@ export const EVM_RPC_URLS = Object.fromEntries(
  *     return provider.getBalance(addr);
  *   });
  */
-export async function withFallbackRpc(chain, fn, { timeoutMs = 4000 } = {}) {
+export async function withFallbackRpc(chain, fn, { timeoutMs = 15000 } = {}) {
   const meta = CHAIN_META[chain];
   if (!meta?.isEvm) throw new Error(`withFallbackRpc: ${chain} is not EVM`);
   const pool = meta.rpcPool || [];
