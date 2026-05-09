@@ -537,6 +537,123 @@ export async function _reconcileRefundsTick() {
   return { inspected, drift, alerted };
 }
 
+// T-J2-2026-05-09 r204 T2.5c (Reading D step 4 CEX fallback path):
+// 30min+ KANet 无人接 broker SELL offer → broker auto-cancel + cex-bridge 兜底卖 + ledger + DM user.
+// 守 ch14 #44 (cancel_v1 chain TX anchor) + ch17 §17.7 (默认非托管, 仅 fallback 时 broker custody).
+// 跟 _scanExpiredBrokerOffers 区别: 那是过期/timed_out → 退 KAS 给 user (无 fulfillment),
+// 这是 30min 仍 'open' 但 KANet 没 taker → broker 自接 + CEX 卖 → user 拿 USDT 账面 (有 fulfillment).
+// ref: NWT r270 PASS Reading D + J2 r201 evidence (autoTaker self-maker exclusion).
+const FALLBACK_AGE_MIN = 30;
+export async function _scanUntakenOffersFallback() {
+  const trader = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id = ?`).get(BROKER_RELAY_ID);
+  if (!trader) return { handled: 0, scanned: 0, reason: 'no_broker_relay' };
+  const rows = sqlite.prepare(`
+    SELECT id, give_amount, want_amount, metadata, broadcast_at FROM exchange_offers
+    WHERE maker = ?
+      AND give_asset = 'KAS'
+      AND taker IS NULL
+      AND protocol_status = 'open'
+      AND julianday(broadcast_at) < julianday('now', '-${FALLBACK_AGE_MIN} minutes')
+      AND json_extract(metadata, '$.user_kasia_address') IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM chain_events ce
+        WHERE ce.event_type IN ('broker_fallback_fill', 'broker_fallback_cancelled', 'broker_fallback_cancel_failed', 'broker_fallback_pending')
+          AND ce.payload LIKE '%"offer_id":"' || exchange_offers.id || '"%'
+      )
+    ORDER BY broadcast_at DESC
+    LIMIT 5
+  `).all(trader.address);
+  let handled = 0;
+  if (rows.length > 0) console.log(`[broker-fallback] T2.5c scan: ${rows.length} untaken offer(s) > ${FALLBACK_AGE_MIN}min`);
+  const { recordChainEvent } = await import('./chain-event.js');
+  const { placeCexOrder, getCexOrder } = await import('./cex-bridge.js');
+  for (const r of rows) {
+    try {
+      const meta = JSON.parse(r.metadata || '{}');
+      const userKasia = meta.user_kasia_address;
+      const giveAmount = parseFloat(r.give_amount);
+      const midPrice = parseFloat(meta.mid_price || 0);
+      if (!userKasia || !giveAmount || !midPrice) {
+        console.warn(`[broker-fallback] T2.5c offer ${r.id.slice(0,8)} skip: missing meta`);
+        continue;
+      }
+      // Step 1: cancel_v1 broadcast on KANet (守 ch14 #44 chain TX anchor)
+      const PORT = process.env.PORT || 3100;
+      const cancelRes = await fetch(`http://127.0.0.1:${PORT}/api/exchange/cancel`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ relayNodeId: BROKER_RELAY_ID, offer_id: r.id }),
+      }).then(rr => rr.json()).catch(e => ({ ok: false, error: e.message }));
+      if (!cancelRes.ok || !cancelRes.cancel_tx) {
+        console.warn(`[broker-fallback] T2.5c cancel_v1 fail offer ${r.id.slice(0,8)}: ${cancelRes.error || 'no cancel_tx'}`);
+        recordChainEvent({
+          txid: r.id, eventType: 'broker_fallback_cancel_failed',
+          fromAddress: null, toAddress: null, observedBy: 'system',
+          payload: { offer_id: r.id, error: cancelRes.error || 'no cancel_tx' },
+        });
+        continue;
+      }
+      console.log(`[broker-fallback] T2.5c cancel_v1 ok offer=${r.id.slice(0,8)} tx=${String(cancelRes.cancel_tx).slice(0,12)}`);
+      // Step 2: cex-bridge.placeCexOrder sell KAS @ mid
+      const sellRes = await placeCexOrder({ cex: 'gateio', side: 'SELL', qty: giveAmount, price: midPrice });
+      if (!sellRes.ok) {
+        console.warn(`[broker-fallback] T2.5c CEX sell fail offer=${r.id.slice(0,8)}: ${sellRes.error}`);
+        recordChainEvent({
+          txid: r.id, eventType: 'broker_fallback_cancelled',
+          fromAddress: null, toAddress: null, observedBy: 'system',
+          payload: { offer_id: r.id, cancel_tx: cancelRes.cancel_tx, cex_sell_error: sellRes.error },
+        });
+        await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: userKasia,
+          message: `订单 ${r.id.slice(0,8)} 30min 无 KANet 接, broker 已 cancel. CEX 兜底卖暂时失败, 5min 后自动重试.`,
+        });
+        continue;
+      }
+      // Step 3: poll fill (复用 T2.5b 30s inline pattern)
+      const POLL_TIMEOUT_MS = 30_000;
+      const POLL_INTERVAL_MS = 3_000;
+      const start = Date.now();
+      let filled = null;
+      while (Date.now() - start < POLL_TIMEOUT_MS) {
+        const orderState = await getCexOrder({ cex: 'gateio', orderId: sellRes.orderId });
+        if (orderState.filled) { filled = orderState; break; }
+        await new Promise(rr => setTimeout(rr, POLL_INTERVAL_MS));
+      }
+      if (filled) {
+        const proceedsUsdt = parseFloat((filled.executedQty * midPrice).toFixed(4));
+        const cur = sqlite.prepare(
+          `SELECT COALESCE(SUM(balance_change), 0) AS balance FROM user_ledger
+           WHERE user_kasia_address = ? AND asset = 'USDT'`
+        ).get(userKasia);
+        const balanceAfter = parseFloat(((cur?.balance || 0) + proceedsUsdt).toFixed(4));
+        const ledgerId = `ledger_fallback_${r.id.slice(0,12)}_${Date.now()}`;
+        sqlite.prepare(`
+          INSERT INTO user_ledger (id, user_kasia_address, asset, chain, balance_change, balance_after, reason, ref_order_id, ref_tx_hash, created_at)
+          VALUES (?, ?, 'USDT', NULL, ?, ?, ?, ?, NULL, datetime('now'))
+        `).run(ledgerId, userKasia, proceedsUsdt, balanceAfter, `broker_fallback_fill:${sellRes.orderId}`, r.id);
+        recordChainEvent({
+          txid: r.id, eventType: 'broker_fallback_fill',
+          fromAddress: null, toAddress: null, observedBy: 'system',
+          payload: { offer_id: r.id, cancel_tx: cancelRes.cancel_tx, cex_order_id: sellRes.orderId, qty: filled.executedQty, proceeds_usdt: proceedsUsdt, balance_after: balanceAfter },
+        });
+        await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: userKasia,
+          message: `订单 ${r.id.slice(0,8)} 30min 无 KANet 接, broker CEX 兜底卖出成交\n${filled.executedQty} KAS → ${proceedsUsdt} USDT 入账\n账户余额: ${balanceAfter} USDT (broker IOU)\n回 "余额" 查账户 / "提 N USDT TRC20" 提币`,
+        });
+        console.log(`[broker-fallback] T2.5c filled offer=${r.id.slice(0,8)} +${proceedsUsdt} USDT to ${userKasia.slice(-12)}`);
+        handled++;
+      } else {
+        recordChainEvent({
+          txid: r.id, eventType: 'broker_fallback_pending',
+          fromAddress: null, toAddress: null, observedBy: 'system',
+          payload: { offer_id: r.id, cancel_tx: cancelRes.cancel_tx, cex_order_id: sellRes.orderId, polled_ms: POLL_TIMEOUT_MS },
+        });
+        console.log(`[broker-fallback] T2.5c poll timeout offer=${r.id.slice(0,8)} cex_order=${sellRes.orderId}, reconciler retry next tick`);
+      }
+    } catch (err) {
+      console.error(`[broker-fallback] T2.5c offer ${r.id?.slice(0,8)} err: ${err.message}`);
+    }
+  }
+  return { handled, scanned: rows.length };
+}
+
 export function startIntakeWatcher() {
   if (_intakeInterval) return;
   _intakeInterval = setInterval(async () => {
@@ -566,6 +683,11 @@ export function startIntakeWatcher() {
         const r = await _reconcileRefundsTick();
         if (r && r.drift > 0) console.warn(`[broker-reconciler] tick drift=${r.drift}/${r.inspected} alerted=${r.alerted}`);
       } catch (e) { console.error('[broker-reconciler]', e.message); }
+      // T-J2-2026-05-09 T2.5c (Reading D step 4): 30min+ untaken broker SELL offer → CEX fallback
+      try {
+        const r = await _scanUntakenOffersFallback();
+        if (r && r.handled > 0) console.log(`[broker-fallback] T2.5c tick handled=${r.handled}/${r.scanned}`);
+      } catch (e) { console.error('[broker-fallback T2.5c]', e.message); }
     }, REFUND_TICK_MS);
   }
   console.log(`[broker-intake] watcher started for Trader-B tick=${TICK_MS}ms, refund tick=${REFUND_TICK_MS}ms`);
