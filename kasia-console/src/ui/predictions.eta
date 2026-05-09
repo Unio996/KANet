@@ -4,7 +4,7 @@
 
   <!-- 钱包状态栏 -->
   <div class="card card-compact mb-4 flex items-center gap-4 flex-wrap">
-    <select x-model="selectedAgent" @change="loadWalletStatus()" class="rounded-lg border border-warm-300 px-3 py-1.5 text-sm bg-white font-medium">
+    <select x-model="selectedAgent" @change="loadWalletStatus(); loadBettor()" class="rounded-lg border border-warm-300 px-3 py-1.5 text-sm bg-white font-medium">
       <% it.relayNodes.forEach(r => { %>
       <option value="<%= r.id %>"><%= r.name %></option>
       <% }) %>
@@ -50,6 +50,216 @@
     </template>
     <div x-show="walletMsg" class="text-xs ml-2" :class="walletMsg.includes('失败') ? 'text-red-500' : 'text-green-600'" x-text="walletMsg"></div>
   </div>
+
+  <!-- Bettor 入口按钮 (Phase 3a) — 点开弹 modal, 用当前 selectedAgent 的 adapter 扫 -->
+  <div class="mb-4 flex items-center gap-3 flex-wrap">
+    <button @click="bettorModalOpen = true; loadBettor()"
+            class="btn btn-primary text-sm flex items-center gap-2">
+      <span>Bettor 今日推荐</span>
+      <template x-if="bettorRecs && (bettorRecs.recommendations || []).length">
+        <span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-white/25" x-text="bettorRecs.recommendations.length"></span>
+      </template>
+    </button>
+    <template x-if="bettorRecs && bettorRecs.scanned_at">
+      <span class="text-xs text-ink-400" x-text="'此 Agent 上次扫描于 ' + new Date(bettorRecs.scanned_at).toLocaleString()"></span>
+    </template>
+    <template x-if="bettorRecs && !bettorRecs.scanned_at">
+      <span class="text-xs text-ink-400">此 Agent 尚未扫描</span>
+    </template>
+  </div>
+
+  <!-- Bettor 推荐 modal -->
+  <template x-if="bettorModalOpen">
+    <div class="fixed inset-0 z-40 bg-black/50 flex items-start justify-center p-4 overflow-y-auto" @click="bettorModalOpen = false" @keydown.escape.window="bettorModalOpen = false">
+      <div class="card max-w-4xl w-full my-8" @click.stop>
+        <div class="flex items-center justify-between mb-4 pb-3 border-b border-warm-200">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-lg font-medium text-brand-700">Bettor 今日推荐</span>
+            <template x-if="bettorRecs && bettorRecs.scanned_at">
+              <span class="text-xs text-ink-400" x-text="'扫描于 ' + new Date(bettorRecs.scanned_at).toLocaleString()"></span>
+            </template>
+            <template x-if="bettorRecs && (bettorRecs.recommendations || []).length">
+              <span class="text-xs text-ink-500" x-text="'(' + bettorRecs.recommendations.length + ' 个)'"></span>
+            </template>
+          </div>
+          <div class="flex items-center gap-2">
+            <template x-if="bettorTab === 'recs'">
+              <button @click="bettorScan()" :disabled="bettorScanning" class="btn btn-sm btn-secondary text-[11px]">
+                <span x-text="bettorScanning ? '扫描中...' : '立即重扫'"></span>
+              </button>
+            </template>
+            <template x-if="bettorTab === 'record'">
+              <button @click="bettorResolveNow()" :disabled="bettorResolving" class="btn btn-sm btn-secondary text-[11px]">
+                <span x-text="bettorResolving ? '结算中...' : '立即结算'"></span>
+              </button>
+            </template>
+            <button @click="bettorModalOpen = false" class="text-ink-400 hover:text-ink-700 text-xl px-2">✕</button>
+          </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="flex border-b border-warm-200 mb-4">
+          <button @click="bettorTab = 'recs'"
+                  :class="bettorTab === 'recs' ? 'border-b-2 border-brand-500 text-brand-700 font-medium' : 'text-ink-400 hover:text-ink-600'"
+                  class="px-4 py-2 text-sm">今日推荐</button>
+          <button @click="bettorTab = 'record'; loadBettorRecord()"
+                  :class="bettorTab === 'record' ? 'border-b-2 border-brand-500 text-brand-700 font-medium' : 'text-ink-400 hover:text-ink-600'"
+                  class="px-4 py-2 text-sm flex items-center gap-1">
+            战绩
+            <template x-if="bettorRecord && bettorRecord.stats && bettorRecord.stats.resolved > 0">
+              <span class="text-[10px] text-ink-500" x-text="'(' + bettorRecord.stats.hits + '/' + bettorRecord.stats.resolved + ', ' + ((bettorRecord.stats.hit_rate || 0) * 100).toFixed(0) + '%)'"></span>
+            </template>
+          </button>
+        </div>
+
+        <!-- Tab content: 战绩 -->
+        <template x-if="bettorTab === 'record'">
+          <div>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              <div class="card card-compact text-center">
+                <div class="text-[10px] text-ink-400">已结算</div>
+                <div class="text-xl font-bold text-ink-700" x-text="((bettorRecord && bettorRecord.stats && bettorRecord.stats.resolved) || 0)"></div>
+              </div>
+              <div class="card card-compact text-center">
+                <div class="text-[10px] text-ink-400">胜率</div>
+                <div class="text-xl font-bold text-brand-600" x-text="((bettorRecord && bettorRecord.stats && bettorRecord.stats.hit_rate !== null && bettorRecord.stats.hit_rate !== undefined) ? ((bettorRecord.stats.hit_rate * 100).toFixed(1) + '%') : '—')"></div>
+              </div>
+              <div class="card card-compact text-center">
+                <div class="text-[10px] text-ink-400">实战胜率 (排除 SKIP)</div>
+                <div class="text-xl font-bold text-brand-600" x-text="((bettorRecord && bettorRecord.stats && bettorRecord.stats.actionable_hit_rate !== null && bettorRecord.stats.actionable_hit_rate !== undefined) ? ((bettorRecord.stats.actionable_hit_rate * 100).toFixed(1) + '%') : '—')"></div>
+              </div>
+              <div class="card card-compact text-center">
+                <div class="text-[10px] text-ink-400">假想 PnL ($1000 bankroll)</div>
+                <div class="text-xl font-bold" :class="((bettorRecord && bettorRecord.stats && bettorRecord.stats.total_pnl_hypothetical) || 0) >= 0 ? 'text-green-600' : 'text-red-500'" x-text="((bettorRecord && bettorRecord.stats && bettorRecord.stats.total_pnl_hypothetical !== null && bettorRecord.stats.total_pnl_hypothetical !== undefined) ? ('$' + bettorRecord.stats.total_pnl_hypothetical.toFixed(2)) : '$0.00')"></div>
+              </div>
+            </div>
+            <div class="text-xs text-ink-500 mb-3">
+              <span>平均 Brier: <span class="font-medium" x-text="((bettorRecord && bettorRecord.stats && bettorRecord.stats.mean_brier !== null && bettorRecord.stats.mean_brier !== undefined) ? bettorRecord.stats.mean_brier.toFixed(3) : '—')"></span></span>
+              <span class="ml-3">待结算: <span class="font-medium" x-text="(bettorRecord && bettorRecord.stats && bettorRecord.stats.pending) || '0'"></span></span>
+              <span class="ml-3">不可结算: <span class="font-medium" x-text="(bettorRecord && bettorRecord.stats && bettorRecord.stats.unresolvable) || '0'"></span></span>
+            </div>
+            <div class="text-sm font-medium text-ink-700 mb-2">最近 20 笔已结算</div>
+            <template x-if="bettorRecord && (bettorRecord.recent || []).length">
+              <div class="space-y-2">
+                <template x-for="r in bettorRecord.recent" :key="r.id">
+                  <div class="card card-compact" :class="r.was_correct ? 'border-l-4 border-l-green-500' : 'border-l-4 border-l-red-500'">
+                    <div class="flex items-start gap-2 mb-1">
+                      <a :href="'https://polymarket.com/event/' + (r.slug || r.condition_id || '')" target="_blank" rel="noopener"
+                         class="flex-1 text-sm font-medium text-ink-700 hover:text-brand-600" x-text="r.question"></a>
+                      <span class="px-2 py-0.5 rounded text-[10px] font-bold whitespace-nowrap"
+                            :class="r.was_correct ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'"
+                            x-text="r.was_correct ? '✓ HIT' : '✗ MISS'"></span>
+                    </div>
+                    <div class="grid grid-cols-4 gap-2 text-[11px] text-ink-500">
+                      <div>预测 <span class="font-medium text-ink-700" x-text="r.decision"></span></div>
+                      <div>结果 <span class="font-medium text-ink-700" x-text="r.outcome"></span></div>
+                      <div>PnL <span class="font-medium" :class="(r.pnl_hypothetical || 0) >= 0 ? 'text-green-600' : 'text-red-500'" x-text="'$' + (r.pnl_hypothetical || 0).toFixed(2)"></span></div>
+                      <div>Brier <span class="font-medium text-ink-700" x-text="(r.brier !== null && r.brier !== undefined) ? r.brier.toFixed(3) : '—'"></span></div>
+                    </div>
+                    <div class="text-[10px] text-ink-400 mt-1">pMid <span x-text="((r.p_mid || 0) * 100).toFixed(1) + '%'"></span> · 押 <span x-text="'$' + (r.size_usd || 0).toFixed(0)"></span> · 结算于 <span x-text="r.outcome_resolved_at ? new Date(r.outcome_resolved_at).toLocaleString() : '?'"></span></div>
+                  </div>
+                </template>
+              </div>
+            </template>
+            <template x-if="bettorRecord && !(bettorRecord.recent || []).length">
+              <div class="text-center py-8 text-sm text-ink-400">
+                <div>暂无已结算推荐</div>
+                <div class="text-[11px] mt-1">推荐市场到期后, 1h cron 自动拉 Polymarket 真实 outcome 并算战绩</div>
+              </div>
+            </template>
+            <template x-if="!bettorRecord">
+              <div class="text-center py-8 text-sm text-ink-400">载入中...</div>
+            </template>
+          </div>
+        </template>
+
+        <template x-if="bettorTab === 'recs' && bettorRecs && (bettorRecs.recommendations || []).length">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <template x-for="r in bettorRecs.recommendations" :key="r.id">
+              <div class="card card-compact"
+                   :class="r.decision === 'YES' ? 'border-l-4 border-l-green-500' : r.decision === 'NO' ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-gray-400'">
+                <div class="flex items-start gap-2 mb-2">
+                  <a :href="'https://polymarket.com/event/' + (r.slug || r.condition_id || '')"
+                     target="_blank" rel="noopener"
+                     class="flex-1 text-sm font-medium text-ink-700 hover:text-brand-600"
+                     x-text="r.question"></a>
+                  <span class="px-2 py-0.5 rounded text-[10px] font-bold whitespace-nowrap"
+                        :class="r.decision === 'YES' ? 'bg-green-100 text-green-700' : r.decision === 'NO' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'"
+                        x-text="r.decision === 'SKIP' ? 'SKIP' : 'BUY ' + r.decision"></span>
+                </div>
+                <div class="grid grid-cols-3 gap-2 text-[11px]">
+                  <div>
+                    <div class="text-ink-400">edge</div>
+                    <div class="font-bold text-ink-700" x-text="(r.edge * 100).toFixed(1) + 'pp'"></div>
+                  </div>
+                  <div>
+                    <div class="text-ink-400">仓位</div>
+                    <div class="font-bold text-ink-700" x-text="(r.fraction * 100).toFixed(1) + '%'"></div>
+                  </div>
+                  <div>
+                    <div class="text-ink-400">$ size</div>
+                    <div class="font-bold text-ink-700" x-text="'$' + r.size_usd.toFixed(0)"></div>
+                  </div>
+                </div>
+                <div class="flex items-center justify-between mt-2 text-[10px] text-ink-400">
+                  <span x-text="'pMid=' + (r.p_mid * 100).toFixed(1) + '% σ=' + (r.sigma * 100).toFixed(1) + '% gap=' + r.info_gap_months.toFixed(1) + 'mo'"></span>
+                  <span x-show="r.end_date" x-text="'到期 ' + new Date(r.end_date).toLocaleDateString()"></span>
+                </div>
+                <button @click="bettorDetail = r" class="mt-2 w-full text-[10px] text-brand-500 hover:text-brand-700 text-left">查看推理 →</button>
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <template x-if="bettorTab === 'recs' && bettorRecs && !(bettorRecs.recommendations || []).length">
+          <div class="text-center py-12 text-sm text-ink-400">
+            <span x-show="!bettorRecs.scanned_at">尚未扫描 — 点击"立即重扫"</span>
+            <span x-show="bettorRecs.scanned_at">本批次无推荐符合条件 (edge&lt;5pt 或 gap&gt;3 月)</span>
+          </div>
+        </template>
+
+        <template x-if="bettorTab === 'recs' && !bettorRecs">
+          <div class="text-center py-12 text-sm text-ink-400">载入中...</div>
+        </template>
+      </div>
+    </div>
+  </template>
+
+  <!-- Bettor 详情弹窗 -->
+  <template x-if="bettorDetail">
+    <div class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" @click="bettorDetail = null">
+      <div class="card max-w-xl w-full max-h-[80vh] overflow-y-auto" @click.stop>
+        <div class="flex items-start justify-between mb-3">
+          <div class="text-sm font-medium" x-text="bettorDetail.question"></div>
+          <button @click="bettorDetail = null" class="text-ink-400 hover:text-ink-700">✕</button>
+        </div>
+        <div class="text-xs text-ink-500 space-y-2">
+          <div><strong>决策:</strong> <span x-text="bettorDetail.decision === 'SKIP' ? 'SKIP' : 'BUY ' + bettorDetail.decision"></span></div>
+          <div><strong>市场报价:</strong> YES @ <span x-text="(bettorDetail.yes_price * 100).toFixed(1) + '%'"></span></div>
+          <div><strong>我估:</strong> pMid <span x-text="(bettorDetail.p_mid * 100).toFixed(1) + '%'"></span> σ <span x-text="(bettorDetail.sigma * 100).toFixed(1) + '%'"></span></div>
+          <div><strong>edge:</strong> <span x-text="(bettorDetail.edge * 100).toFixed(2) + ' pp'"></span></div>
+          <div><strong>仓位:</strong> <span x-text="(bettorDetail.fraction * 100).toFixed(2) + '% (= $' + bettorDetail.size_usd.toFixed(2) + ' on $1000 bankroll)'"></span></div>
+          <div><strong>info gap:</strong> <span x-text="bettorDetail.info_gap_months.toFixed(1) + ' 月'"></span></div>
+          <div><strong>vol24h:</strong> <span x-text="'$' + (bettorDetail.volume_24h || 0).toLocaleString()"></span></div>
+          <div><strong>到期:</strong> <span x-text="bettorDetail.end_date ? new Date(bettorDetail.end_date).toLocaleString() : '?'"></span></div>
+          <div><strong>LLM tier:</strong> <span x-text="bettorDetail.llm_tier"></span></div>
+          <div><strong>触发:</strong> <span x-text="bettorDetail.trigger_type"></span></div>
+          <div class="border-t border-warm-200 pt-2 mt-2">
+            <div class="font-medium mb-1">LLM 估值理由:</div>
+            <div class="text-ink-600 italic" x-text="(bettorDetail.reasoning && bettorDetail.reasoning.reasoning) || '(无)'"></div>
+          </div>
+          <div>
+            <div class="font-medium mb-1">Kelly 推理 trace:</div>
+            <ul class="text-ink-600 list-disc list-inside text-[11px]">
+              <template x-for="(line, i) in (bettorDetail.reasoning && bettorDetail.reasoning.trace) || []" :key="i">
+                <li x-text="line"></li>
+              </template>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </template>
 
   <!-- 新手引导 -->
   <template x-if="showGuide">
@@ -566,6 +776,15 @@ function predictionsPage() {
     creatingWallet: false,
     redeemingAll: false,
 
+    // Bettor (Phase 3a + 3d)
+    bettorRecs: null,
+    bettorScanning: false,
+    bettorModalOpen: false,
+    bettorDetail: null,
+    bettorTab: 'recs',
+    bettorRecord: null,
+    bettorResolving: false,
+
     get filtered() {
       let list = this.markets;
       // Text search
@@ -718,8 +937,71 @@ function predictionsPage() {
       }
       this.selectedAgent = redeemableAgent || walletAgent || this.selectedAgent;
       console.log('[init] selectedAgent =', this.selectedAgent, redeemableAgent ? '(has redeemable)' : '(wallet only)');
-      await Promise.all([this.loadMarkets(), this.loadWalletStatus()]);
+      await Promise.all([this.loadMarkets(), this.loadWalletStatus(), this.loadBettor()]);
       if (this.walletStatus.hasClobKey) this.loadPositions();
+    },
+
+    // ── Bettor (Phase 3a) — per-agent scan via selectedAgent's adapter ──────
+    async loadBettor() {
+      try {
+        const url = '/api/bettor/recommendations?limit=10' + (this.selectedAgent ? '&relay_node_id=' + this.selectedAgent : '');
+        const r = await fetch(url);
+        this.bettorRecs = await r.json();
+      } catch (e) {
+        console.warn('[bettor] load failed:', e.message);
+        this.bettorRecs = { recommendations: [] };
+      }
+    },
+
+    async bettorScan() {
+      if (this.bettorScanning) return;
+      this.bettorScanning = true;
+      try {
+        const r = await fetch('/api/bettor/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ trigger_type: 'manual', relay_node_id: this.selectedAgent }),
+        });
+        const j = await r.json();
+        if (!j.ok) console.log('[bettor] scan trigger response:', j.reason);
+        for (let i = 0; i < 240; i++) {
+          await new Promise(res => setTimeout(res, 5000));
+          const sRes = await fetch('/api/bettor/scan/status');
+          const sJ = await sRes.json();
+          if (!sJ.running) break;
+        }
+        await this.loadBettor();
+      } catch (e) {
+        console.error('[bettor] scan failed:', e.message);
+      } finally {
+        this.bettorScanning = false;
+      }
+    },
+
+    async loadBettorRecord() {
+      try {
+        const url = '/api/bettor/track-record' + (this.selectedAgent ? '?relay_node_id=' + this.selectedAgent : '');
+        const r = await fetch(url);
+        this.bettorRecord = await r.json();
+      } catch (e) {
+        console.warn('[bettor] track-record load failed:', e.message);
+        this.bettorRecord = { stats: {}, recent: [] };
+      }
+    },
+
+    async bettorResolveNow() {
+      if (this.bettorResolving) return;
+      this.bettorResolving = true;
+      try {
+        await fetch('/api/bettor/resolve-now', { method: 'POST' });
+        // Resolver runs async; wait briefly + reload
+        await new Promise(r => setTimeout(r, 8000));
+        await this.loadBettorRecord();
+      } catch (e) {
+        console.error('[bettor] resolve failed:', e.message);
+      } finally {
+        this.bettorResolving = false;
+      }
     },
 
     async loadMarkets() {
