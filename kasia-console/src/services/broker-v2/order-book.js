@@ -131,10 +131,19 @@ export async function publishOrder(peer, draft) {
       existing_order_id: draft.id,
     });
     if (!result?.ok) return { ok: false, error: result?.error || 'finalizeSell failed' };
+    // T-J2-2026-05-09 r210 T2.9 (NWT r278): ack_text fallback 加 deposit address.
+    // 5/9 12:51 NWT operator Step 1 verify 实证: broker reply 不含 broker_kasia → user 不知往哪转 KAS, 流程 stuck.
+    // 跟 broker-sell-handler.js:392-399 SELL_REGEX path 真 _qDm deposit address DM 同款 wording (multi-entry consistency).
+    // finalizeSell 已 return broker_kasia + fee_kas + net_kas (line 312), 这里之前没用上.
+    const fallbackAck = (
+      `✓ 卖单已建. 请转 ${qty} KAS 到 broker:\n${result.broker_kasia}\n\n` +
+      `转账后 broker 自动 publish offer 上 KANet, 30min 内 taker 接 OR 走 CEX fallback.\n` +
+      `扣 ${result.fee_kas} KAS broker fee, 净 ${result.net_kas} KAS sell. 接单后 USDT 直付你 ${pay_chain.toUpperCase()}.`
+    );
     return {
       ok: true,
       offer_id: result.order_id || result.offer_id,
-      ack_text: result.ack_text || `✓ 卖单已挂 ${qty} KAS, 1% 价格浮动, 等 taker 来接 (TTL 内多 taker 累积成交).`,
+      ack_text: result.ack_text || fallbackAck,
     };
   }
 
