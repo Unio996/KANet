@@ -42,6 +42,27 @@ const STATUS_QUERY_REGEX = /(?:查单|查我的单|订单状态|进度|已成多
 // 真 source-of-truth response, getActiveOrder filter 不返 terminal 真 unreachable issue 修.
 const ORDER_STATUS_QUERY_REGEX = /(退款|退了吗|我钱呢|退回|凭证|证明|tx|查单|查我的单|订单状态|进度|已成多少|剩多少|什么情况|怎么样了)/i;
 
+// T-J2-2026-05-09 T2.6 (Reading D ledger query + user-initiated withdraw):
+// 跟 ORDER_STATUS_QUERY_REGEX 同款 deterministic pattern, 顶部 fire 严禁 LLM hallucinate (Owner 5/7 钦定 user-facing).
+// BALANCE_QUERY: SQL aggregate user_ledger by asset → 模板.
+// WITHDRAW_REQUEST: validate ledger ≥ amount + min ≥ chain threshold → cex-bridge.withdrawCex → ledger -.
+// NWT r266 锁定 user-pay-fee 透明: ledger 扣 gross amount, chain TX 发 net (扣 Gate.io fee).
+// ref: NWT r270 Reading D + cex-bridge T2.3 + user_ledger T2.4.
+const BALANCE_QUERY_REGEX = /(余额|我有多少|账户|balance|查我钱|查账)/i;
+const WITHDRAW_REQUEST_REGEX = /提\s*(\d+(?:\.\d+)?)\s*(USDT|KAS|usdt|kas)\s*(TRC20|BSC|TRX|BNB|ETH|trc|bsc|eth)?/i;
+const CHAIN_MIN_THRESHOLDS = {
+  USDT: { TRX: 10, BSC: 1, ETH: 5 },
+  KAS:  { KASPA: 30 },
+};
+function _normalizeWithdrawChain(c) {
+  if (!c) return null;
+  const u = c.toUpperCase();
+  if (['TRX','TRC20'].includes(u)) return 'TRX';
+  if (['BSC','BNB','BEP20'].includes(u)) return 'BSC';
+  if (['ETH','ERC20'].includes(u)) return 'ETH';
+  return u;
+}
+
 /**
  * Main entry — broker-v2 单一 user message 处理.
  * @param {string} peer - user kasia 地址
@@ -78,6 +99,69 @@ export async function handleMessage(peer, msg) {
     }
     // active state — 进行中, 提示用 "查单" 看详情
     return `🔄 ${recent.ct_local} ${sideZh} ${recent.qty} KAS ${recent.state} 真进行中. 回 "查单" 看详情.`;
+  }
+
+  // 0b. T-J2-2026-05-09 T2.6 BALANCE_QUERY (顶部 fire deterministic, 跟 0a ORDER_STATUS 同款 pattern)
+  if (BALANCE_QUERY_REGEX.test(msg)) {
+    const balances = sqlite.prepare(`
+      SELECT asset, SUM(balance_change) AS balance
+      FROM user_ledger WHERE user_kasia_address = ?
+      GROUP BY asset HAVING balance != 0
+      ORDER BY asset
+    `).all(peer);
+    if (!balances.length) return '你的 broker 账户暂无余额. 卖 KAS 可累积 USDT 余额.';
+    const lines = ['你的 broker 余额:'];
+    for (const b of balances) {
+      const bal = parseFloat(parseFloat(b.balance).toFixed(4));
+      const thresholds = CHAIN_MIN_THRESHOLDS[b.asset] || {};
+      const tHints = Object.entries(thresholds).map(([c, m]) => `${c}≥${m}`).join(', ');
+      lines.push(`  ${b.asset}: ${bal}${tHints ? ` (提币阈值 ${tHints})` : ''}`);
+    }
+    lines.push('', '回 "提 N USDT TRC20" 提币.');
+    return lines.join('\n');
+  }
+
+  // 0c. T-J2-2026-05-09 T2.6 WITHDRAW_REQUEST (用户主动提币, NWT r266 user-pay-fee 锁定)
+  const withdrawMatch = msg.match(WITHDRAW_REQUEST_REGEX);
+  if (withdrawMatch) {
+    const wAmount = parseFloat(withdrawMatch[1]);
+    const wAsset = withdrawMatch[2].toUpperCase();
+    const wChain = _normalizeWithdrawChain(withdrawMatch[3]) || (wAsset === 'USDT' ? 'TRX' : 'KASPA');
+    const cur = sqlite.prepare(
+      `SELECT COALESCE(SUM(balance_change), 0) AS balance FROM user_ledger
+       WHERE user_kasia_address = ? AND asset = ?`
+    ).get(peer, wAsset);
+    const balance = parseFloat(cur?.balance || 0);
+    if (balance < wAmount) return `余额不足: ${wAsset} 现 ${balance.toFixed(4)}, 提 ${wAmount} 不够. 回 "余额" 查账.`;
+    const minT = CHAIN_MIN_THRESHOLDS[wAsset]?.[wChain];
+    if (minT && wAmount < minT) return `${wAsset} ${wChain} 提币最小 ${minT}, 你提 ${wAmount} 太少. fee 不划算, 累积再提.`;
+    const payRow = sqlite.prepare(`
+      SELECT pay_address FROM retail_dex_orders
+      WHERE user_kasia_address = ? AND pay_chain = ? AND pay_address IS NOT NULL
+        AND state NOT IN ('failed','refunded','cancelled')
+      ORDER BY created_at DESC LIMIT 1
+    `).get(peer, wChain.toLowerCase());
+    if (!payRow?.pay_address) return `没记录你的 ${wChain} 收款地址. 先下个 SELL 单告诉我地址, 然后再提.`;
+    const { withdrawCex } = await import('../cex-bridge.js');
+    const wRes = await withdrawCex({ cex: 'gateio', asset: wAsset, amount: wAmount, toAddr: payRow.pay_address, chain: wChain });
+    if (!wRes.ok) return `提币失败: ${(wRes.error || 'unknown').slice(0, 80)}. broker 余额未动, 5min 后可重试.`;
+    const balanceAfter = parseFloat((balance - wAmount).toFixed(4));
+    const ledgerId = `ledger_withdraw_${peer.slice(-8)}_${Date.now()}`;
+    sqlite.prepare(`
+      INSERT INTO user_ledger (id, user_kasia_address, asset, chain, balance_change, balance_after, reason, ref_order_id, ref_tx_hash, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, datetime('now'))
+    `).run(ledgerId, peer, wAsset, wChain, -wAmount, balanceAfter, `withdraw_user_initiated:${wRes.withdraw_id}`, wRes.txid || null);
+    return [
+      `✓ 提币申请已提交`,
+      `  Gate.io id: ${wRes.withdraw_id}`,
+      `  扣账户: ${wAmount} ${wAsset}`,
+      `  到地址: ${payRow.pay_address.slice(0,10)}...${payRow.pay_address.slice(-6)}`,
+      `  链: ${wChain}`,
+      `  账户余额: ${balanceAfter} ${wAsset}`,
+      wRes.txid ? `  chain TX: ${wRes.txid.slice(0,16)}...` : `  chain TX 待 Gate.io 处理 (~5-15min)`,
+      ``,
+      `链上 fee 由你承担, 实收 = ${wAmount} - 链 fee (Gate.io USDT TRC20 ~1, BSC ~0.3).`,
+    ].join('\n');
   }
 
   // 1. parser deterministic 提字段 + intent
