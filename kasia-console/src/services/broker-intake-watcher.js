@@ -125,11 +125,16 @@ async function handleIntake(event) {
   // 用 retail_dex_orders.sell_kas + qty 接近 amount + recent + awaiting state, 反查 user_kasia_address.
   // 长期靠 J2 C 任务修 indexer 补 from_address.
   if (!peer) {
+    // T-J2-2026-05-09 r216 T2.11 (Phase 1.5 sediment, NWT r283 PASS):
+    // test framework cases INSERT 'test-*' prefix retail_dex_orders rows (5 grep hit per r215 evidence).
+    // broker-intake fallback 反查 user_kasia_address 时 hit test rows → use bogus addr → wasm 'unreachable'.
+    // Filter 'test-*' 不动 'bso_*' (broker-state-authority production prefix per broker-state-authority.js:211).
     const cand = sqlite.prepare(
       `SELECT user_kasia_address FROM retail_dex_orders
        WHERE side='sell_kas' AND state IN ('aligning','confirming','awaiting_payment')
        AND ABS(CAST(qty AS REAL) - ?) < 0.5
        AND created_at > datetime('now','-24 hours')
+       AND id NOT LIKE 'test-%'
        ORDER BY created_at DESC LIMIT 1`
     ).get(amount);
     if (cand?.user_kasia_address) peer = cand.user_kasia_address;
