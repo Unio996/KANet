@@ -597,6 +597,38 @@ export async function _scanUntakenOffersFallback() {
       const sellRes = await placeCexOrder({ cex: 'gateio', side: 'SELL', qty: giveAmount, price: midPrice });
       if (!sellRes.ok) {
         console.warn(`[broker-fallback] T2.5c CEX sell fail offer=${r.id.slice(0,8)}: ${sellRes.error}`);
+        // T2.10a (NWT r279): CEX permanent fail detection — size/asset 类不可恢复 → fail-fast advanceToRefunded.
+        // 5/9 13:08 NWT operator Step 3 verify 实证: 5 KAS @ 0.178 USDT < Gate.io min 3 USDT, retry 永远同款 fail.
+        // permanent → 跟 Z20 expired_auto_refund 同款 path: advanceToRefunded refund user KAS chain TX.
+        // transient (网络/暂时) → 现行 5min retry (broker_fallback_cancelled chain_event 留痕).
+        const PERMANENT_FAIL_PATTERN = /too small|minimum is|minimum order|not supported|invalid (asset|symbol|currency)|insufficient/i;
+        const isPermanent = PERMANENT_FAIL_PATTERN.test(sellRes.error || '');
+        if (isPermanent) {
+          const orderRow = sqlite.prepare(
+            `SELECT id FROM retail_dex_orders
+             WHERE user_kasia_address = ? AND state = 'awaiting_payment'
+               AND CAST(qty AS REAL) BETWEEN ? - 0.5 AND ? + 0.5
+             ORDER BY created_at DESC LIMIT 1`
+          ).get(userKasia, giveAmount, giveAmount);
+          if (orderRow?.id) {
+            const { advanceToRefunded } = await import('./broker-state-authority.js');
+            const refundResult = await advanceToRefunded({ orderId: orderRow.id, reason: 'cex_permanent_fail' });
+            if (refundResult?.ok) {
+              recordChainEvent({
+                txid: r.id, eventType: 'broker_fallback_refunded',
+                fromAddress: null, toAddress: null, observedBy: 'system',
+                payload: { offer_id: r.id, cancel_tx: cancelRes.cancel_tx, cex_sell_error: sellRes.error, refund_tx: refundResult.txId, refund_amount: refundResult.refundAmount },
+              });
+              await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: userKasia,
+                message: `订单 ${r.id.slice(0,8)} 30min 无 KANet 接, broker cancel 后 CEX 兜底失败 (${(sellRes.error || '').slice(0,60)}). 已退原 ${refundResult.refundAmount} KAS 给你. Kasia TX: ${refundResult.txId?.slice(0,16)}.`,
+              });
+              console.log(`[broker-fallback] T2.10a permanent fail refund offer=${r.id.slice(0,8)} reason="${(sellRes.error||'').slice(0,40)}" refund_tx=${refundResult.txId?.slice(0,12)}`);
+              continue;
+            }
+          }
+          console.warn(`[broker-fallback] T2.10a permanent fail but advanceToRefunded skipped offer=${r.id.slice(0,8)} (no order row OR race)`);
+        }
+        // transient fail → 5min retry (现行 path)
         recordChainEvent({
           txid: r.id, eventType: 'broker_fallback_cancelled',
           fromAddress: null, toAddress: null, observedBy: 'system',
