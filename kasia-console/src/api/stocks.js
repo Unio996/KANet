@@ -388,10 +388,21 @@ export async function registerStockRoutes(fastify) {
             let buySpent = 0, cashIn = 0;
             for (const a of activity) {
               const cid = a.conditionId;
-              if (cid && !perMarket[cid]) perMarket[cid] = { cost: 0, received: 0 };
+              if (cid && !perMarket[cid]) perMarket[cid] = { cost: 0, received: 0, byAsset: {} };
               if (a.type === 'TRADE' && a.side === 'BUY') {
                 buySpent += a.usdcSize || 0;
-                if (cid) perMarket[cid].cost += a.usdcSize || 0;
+                if (cid) {
+                  perMarket[cid].cost += a.usdcSize || 0;
+                  // Track per-outcome buy aggregates so settled positions can
+                  // reconstruct true outcome/size/avgPrice (getTrades aggregation
+                  // shows mirrored maker-side view on NegRisk markets).
+                  const ak = a.asset || a.outcome || 'unknown';
+                  const ag = perMarket[cid].byAsset[ak] = perMarket[cid].byAsset[ak] || {
+                    outcome: a.outcome, asset: a.asset, buyShares: 0, buyCost: 0,
+                  };
+                  ag.buyShares += Number(a.size) || 0;
+                  ag.buyCost += Number(a.usdcSize) || 0;
+                }
               } else if (a.type === 'TRADE' && a.side === 'SELL') {
                 cashIn += a.usdcSize || 0;
                 if (cid) perMarket[cid].received += a.usdcSize || 0;
@@ -410,26 +421,46 @@ export async function registerStockRoutes(fastify) {
         }
       }
 
-      // ── Resolve winners for settled positions via on-chain payoutNumerators ──
+      // ── Resolve winners + reconstruct settled positions from activity log ──
+      // J1 #98 fix: getTrades aggregation shows mirrored maker-side view on
+      // NegRisk markets, and data-api overlay only covers open positions —
+      // settled markets need byAsset BUY-side reconstruction. Verdict uses
+      // cash-flow truth (realizedPnl > 0) since outcome on NegRisk mirrors.
       await Promise.all(settled.map(async (p) => {
         const r = await getMarketWinner(p.market);
-        if (r.resolved && r.winner) {
-          p.winner = r.winner;
-          p.verdict = (r.winner === p.outcome) ? 'WIN' : 'LOSE';
-          if (p.verdict === 'WIN') summary.wins++; else summary.losses++;
-        } else {
-          p.winner = null; p.verdict = 'PENDING';
-          summary.pending++;
-        }
-        // Precise per-position P&L from activity cash-flow (handles Polymarket fees)
         const mk = perMarket[p.market];
         if (mk) {
           p.realizedPnl = mk.received - mk.cost;
           p.actualReceived = mk.received;
+          if (mk.byAsset) {
+            let best = null;
+            for (const ag of Object.values(mk.byAsset)) {
+              if (!best || ag.buyShares > best.buyShares) best = ag;
+            }
+            if (best && best.buyShares > 0) {
+              if (best.outcome) p.outcome = best.outcome;
+              if (best.asset) p.asset = best.asset;
+              p.size = best.buyShares;
+              p.avgPrice = best.buyCost / best.buyShares;
+              p.totalCost = best.buyCost;
+            }
+          }
         } else {
-          // Fallback if activity missing (e.g. data-api down): estimate from outcome
-          p.realizedPnl = (p.verdict === 'WIN') ? (p.size - p.totalCost) : (-p.totalCost);
           p.actualReceived = null;
+        }
+        if (r.resolved && r.winner) {
+          p.winner = r.winner;
+          // Cash-flow truth source — outcome 在 NegRisk 镜像市场不可信
+          if (mk) {
+            p.verdict = p.realizedPnl > 0 ? 'WIN' : 'LOSE';
+          } else {
+            p.verdict = (r.winner === p.outcome) ? 'WIN' : 'LOSE';
+            p.realizedPnl = (p.verdict === 'WIN') ? (p.size - p.totalCost) : (-p.totalCost);
+          }
+          if (p.verdict === 'WIN') summary.wins++; else summary.losses++;
+        } else {
+          p.winner = null; p.verdict = 'PENDING';
+          summary.pending++;
         }
       }));
 
