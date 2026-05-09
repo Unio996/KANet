@@ -133,9 +133,16 @@ export async function sellPreview({
   }
   // 资产 minQty 走 registry (KAS=1.0, stable=0.1)
   const giveFee = give_asset === 'KAS' ? 0.1 : 0;  // KAS 链上 gas backward compat; 其他 spread-only
-  const minPracticalQty = giveFee + giveMeta.minQty;
+  // T2.10b (NWT r279): KAS sell minQty raise to CEX min order size + safety buffer.
+  // 真因: T2.5c CEX fallback 走 Gate.io spot, min 3 USDT. KAS @ 0.04 mid → 75 KAS = 3 USDT.
+  // 100 KAS @ 0.0356 = 3.56 USDT (safe above CEX 3 USDT min + 5% mid 波动 buffer).
+  // P2P 接单不破 (KANet taker 接 100+ KAS 单 fine), 仅 CEX fallback 路径 align CEX min.
+  // P2 backlog: dynamic minQty = ceiling(CEX_MIN_USDT / live_mid * 1.05) 跟 T2.1b mid_price oracle 联动.
+  const CEX_KAS_MIN_HARDCODE = 100;  // hardcode safe buffer above Gate.io 3 USDT min
+  const giveMinQty = give_asset === 'KAS' ? Math.max(giveMeta.minQty, CEX_KAS_MIN_HARDCODE) : giveMeta.minQty;
+  const minPracticalQty = giveFee + giveMinQty;
   if (qty <= minPracticalQty) {
-    return { ok: false, error: 'qty_too_small', message: `太少了, 至少 ${minPracticalQty} ${give_asset} (扣 ${giveFee || 0} ${give_asset} broker fee 后才有意义).` };
+    return { ok: false, error: 'qty_too_small', message: `太少了, 至少 ${minPracticalQty} ${give_asset} (扣 ${giveFee || 0} ${give_asset} broker fee 后才有意义, broker CEX 兜底 min order 3 USDT 约 ${CEX_KAS_MIN_HARDCODE} KAS).` };
   }
   // 收款地址按 recvMeta.settler 验
   if (recvMeta.settler === 'evm') {
