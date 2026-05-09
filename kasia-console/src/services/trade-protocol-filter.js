@@ -925,6 +925,63 @@ async function _executeHedge(offerId, agentName, side, qty, preferredCex = null)
       fromAddress: null, toAddress: null, observedBy: 'system',
       payload: { exchange: account.exchange, side, qty, price, orderId: result.orderId },
     });
+    // T-J2-2026-05-09 r203 T2.5b (Reading D P2P path): poll fill + user_ledger + DM user.
+    // KANet taker 接 SELL offer + paid + delivered + completed → _executeHedge fire (hedge_placed line 924).
+    // 加: 30s inline poll cex-bridge.getCexOrder until filled OR timeout. filled → ledger entry + DM via
+    // broker-action-queue dm_completion. timeout → chain_event hedge_pending_fill, reconciler 5min retry.
+    // user_kasia_address 来自 metadata (broker-intake-watcher.js:255 + broker-v3/router.js:109/119 写).
+    // ref: NWT r270 PASS Reading D ship sequence.
+    const userKasia = (() => {
+      try { return JSON.parse(_hedgeGateOffer.meta || '{}').user_kasia_address || null; } catch { return null; }
+    })();
+    if (userKasia && typeof userKasia === 'string' && userKasia.startsWith('kaspa:')) {
+      setImmediate(async () => {
+        try {
+          const { getCexOrder } = await import('./cex-bridge.js');
+          const POLL_TIMEOUT_MS = 30_000;
+          const POLL_INTERVAL_MS = 3_000;
+          const start = Date.now();
+          let filled = null;
+          while (Date.now() - start < POLL_TIMEOUT_MS) {
+            const orderState = await getCexOrder({ cex: account.exchange, orderId: result.orderId });
+            if (orderState.filled) { filled = orderState; break; }
+            await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+          }
+          if (filled) {
+            const proceedsUsdt = parseFloat((filled.executedQty * price).toFixed(4));
+            const cur = sqlite.prepare(
+              `SELECT COALESCE(SUM(balance_change), 0) AS balance FROM user_ledger
+               WHERE user_kasia_address = ? AND asset = 'USDT'`
+            ).get(userKasia);
+            const balanceAfter = parseFloat(((cur?.balance || 0) + proceedsUsdt).toFixed(4));
+            const ledgerId = `ledger_hedge_${offerId.slice(0, 12)}_${Date.now()}`;
+            sqlite.prepare(`
+              INSERT INTO user_ledger (id, user_kasia_address, asset, chain, balance_change, balance_after, reason, ref_order_id, ref_tx_hash, created_at)
+              VALUES (?, ?, 'USDT', NULL, ?, ?, ?, ?, NULL, datetime('now'))
+            `).run(ledgerId, userKasia, proceedsUsdt, balanceAfter, `hedge_filled:${result.orderId}`, offerId);
+            recordChainEvent({
+              txid: offerId, eventType: 'hedge_completed',
+              fromAddress: null, toAddress: null, observedBy: 'system',
+              payload: { exchange: account.exchange, side, qty: filled.executedQty, proceeds_usdt: proceedsUsdt, cex_order_id: result.orderId, balance_after: balanceAfter },
+            });
+            const { enqueue } = await import('./broker-action-queue.js');
+            enqueue({ kind: 'dm_completion', peer: userKasia, payload: {
+              message: `KAS 卖出成交 ${filled.executedQty} KAS → ${proceedsUsdt} USDT 入账\n账户余额: ${balanceAfter} USDT (broker IOU)\n回 "余额" 查账户 / "提 N USDT TRC20" 提币`,
+            } });
+            console.log(`[exchange-hedge] T2.5b ledger ${userKasia.slice(-12)} +${proceedsUsdt} USDT (offer ${offerId.slice(0,8)})`);
+          } else {
+            recordChainEvent({
+              txid: offerId, eventType: 'hedge_pending_fill',
+              fromAddress: null, toAddress: null, observedBy: 'system',
+              payload: { exchange: account.exchange, cex_order_id: result.orderId, side, qty, price, polled_ms: POLL_TIMEOUT_MS },
+            });
+            console.log(`[exchange-hedge] T2.5b poll timeout offer=${offerId.slice(0,8)} cex_order=${result.orderId} → reconciler retry`);
+          }
+        } catch (err) {
+          console.error(`[exchange-hedge] T2.5b ledger err: ${err.message}`);
+        }
+      });
+    }
   } else {
     console.log(`[exchange-hedge] FAILED: ${result.error} for offer ${offerId.slice(0, 8)}`);
     _hedgeFailures.push(Date.now());
