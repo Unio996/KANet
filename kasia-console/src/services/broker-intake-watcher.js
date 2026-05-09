@@ -252,8 +252,12 @@ async function _publishBrokerSellOffer(peer, amount, eventId) {
         expected_asset: 'USDT',
       },
       expires_minutes: PUBLISH_EXPIRES_MIN,
+      // T-J2-2026-05-09 r202 T2.5a (Reading D): hedge_enabled=true 修 broker-intake metadata gap.
+      // 5/7 T2.1c 仅 broker-v3 path 加 hedge_enabled, broker-intake path 漏 → _executeHedge 默认 skip.
+      // 加 flag 触 P2P path completed 时 _executeHedge fire (T2.5b body 加 ledger entry + DM user).
+      // ref: NWT r270 PASS Reading D + KI-29 第 17 次复刻防御 sediment.
       metadata: { source: 'broker-intake', user_kasia_address: peer, intent_qty: amount,
-        fee_kas: feeKas, net_kas: netKas, mid_price: midPrice },
+        fee_kas: feeKas, net_kas: netKas, mid_price: midPrice, hedge_enabled: true },
     });
   } catch (err) { res = { ok: false, error: err.message }; }
 
