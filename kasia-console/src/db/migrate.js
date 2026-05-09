@@ -2811,5 +2811,40 @@ export function runMigrations() {
     }
   }
 
+  // v89: T-J2-2026-05-09 r198 Phase 1 T2.4 — user_ledger 表 (broker IOU 账本基础设施)
+  // Owner 5/8 钦定 "实际操作提币摩擦费用较高, 计提记账即可, 积累到一定量再提币" sediment.
+  // Owner 5/9 钦定 "先打通!" Phase 1 ship 启动.
+  // 字段通用 (任何 SELL flow custody reading A/B/C 都需此表):
+  //   user_kasia_address — IOU 余额归属
+  //   asset/chain — USDT-TRC20 / USDT-BSC / KAS-KASPA 等组合
+  //   balance_change — 单笔变动 (+ 入账 / - 出账)
+  //   balance_after — 累计快照 (JS caller compute 入参, 不在 DB trigger)
+  //   reason — audit trail ('sell_kas_filled:{order_id}' / 'withdraw:{tx}' / 'cex_fill:{cex_order_id}' 等)
+  //   ref_order_id / ref_tx_hash — 反查锚点
+  //   created_at — 审计时序
+  // 索引 user+asset 支 BALANCE_QUERY 聚合, created_at 支历史查询.
+  {
+    const has89 = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='user_ledger'").get();
+    if (!has89) {
+      sqlite.exec(`
+        CREATE TABLE user_ledger (
+          id TEXT PRIMARY KEY,
+          user_kasia_address TEXT NOT NULL,
+          asset TEXT NOT NULL,
+          chain TEXT,
+          balance_change REAL NOT NULL,
+          balance_after REAL NOT NULL,
+          reason TEXT NOT NULL,
+          ref_order_id TEXT,
+          ref_tx_hash TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_ledger_user_asset ON user_ledger(user_kasia_address, asset);
+        CREATE INDEX idx_ledger_created_at ON user_ledger(created_at);
+      `);
+      console.log('[migrate] v89: user_ledger 表 + 2 索引 创建 (broker IOU 账本基础设施, Phase 1 T2.4 foundation).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
