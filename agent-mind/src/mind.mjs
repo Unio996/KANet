@@ -17,6 +17,7 @@ import { createConfirmToken } from './confirm-store.mjs';
 import { getState, requestEscalation, confirmEscalation, checkDegradation, recordAction, recordNoToolCall, getAvailableTools } from './skills/code-ops/layer-engine.mjs';
 import { detectIntent, checkSenderPermission } from './skills/code-ops/intent-detector.mjs';
 import { buildDiagnosticPlan, executePlan, formatResultsForBrain } from './skills/code-ops/executor.mjs';
+import { recommendBet } from './skills/bettor/kelly.mjs';
 
 /**
  * Sanitize text before sending to AI providers.
@@ -1077,6 +1078,51 @@ async function executeTradeAction(action, config) {
         const result = await executeTool(type, params || action, layerState.currentLayer, isSelfHealing);
         if (result.ok) recordAction(sessionId);
         return result.result || result;
+      }
+
+      // ── Bettor: deterministic Kelly + Bet Card ──
+      case 'BET_PREDICT': {
+        const inputs = {
+          pMid: Number(params.pMid),
+          sigma: Number(params.sigma) || 0,
+          yesPrice: Number(params.yesPrice),
+          bankroll: Number(params.bankroll) || 1000,
+          infoGapMonths: Number(params.infoGapMonths) || 0,
+          kellyFraction: Number(params.kellyFraction) || 0.25,
+        };
+        if (!Number.isFinite(inputs.pMid) || inputs.pMid < 0 || inputs.pMid > 1) {
+          return { error: `BET_PREDICT: invalid pMid=${params.pMid}` };
+        }
+        if (!Number.isFinite(inputs.yesPrice) || inputs.yesPrice <= 0 || inputs.yesPrice >= 1) {
+          return { error: `BET_PREDICT: invalid yesPrice=${params.yesPrice}` };
+        }
+        const rec = recommendBet(inputs);
+        const market = (params.market || 'unnamed market').toString().slice(0, 80);
+        const pct = (n) => `${(n * 100).toFixed(1)}%`;
+        const usd = (n) => `$${n.toFixed(2)}`;
+        const edge = rec.side === 'YES'
+          ? Math.abs(inputs.pMid - inputs.yesPrice)
+          : rec.side === 'NO'
+            ? Math.abs((1 - inputs.pMid) - (1 - inputs.yesPrice))
+            : 0;
+        const betCard = [
+          `Bet Card — ${market}`,
+          `决策: ${rec.side === 'SKIP' ? 'SKIP' : `BUY ${rec.side}`}`,
+          `edge: ${rec.side === 'SKIP' ? 'N/A' : pct(edge)}`,
+          `仓位: ${pct(rec.fraction)} (${usd(rec.size)})`,
+          `估值: pMid=${pct(inputs.pMid)}, σ=${pct(inputs.sigma)}, info gap=${inputs.infoGapMonths.toFixed(1)} 月`,
+          `规则: 1/${(1 / inputs.kellyFraction).toFixed(0)} Kelly, edge<5pt skip, gap>1月折半, gap>3月跳过`,
+          `推理: ${rec.reasoning.join(' | ')}`,
+        ].join('\n');
+        return {
+          ok: true,
+          decision: rec.side,
+          fraction: rec.fraction,
+          size: rec.size,
+          edge,
+          betCard,
+          instruction: 'reply with betCard verbatim, no commentary',
+        };
       }
 
       default:

@@ -14,6 +14,7 @@
 import { fetchJson } from './utils.mjs';
 import { executeTool, executeConfirmed } from './skills/code-ops/executor.mjs';
 import { getState, recordAction } from './skills/code-ops/layer-engine.mjs';
+import { recommendBet } from './skills/bettor/kelly.mjs';
 
 /**
  * Required authority for each action type.
@@ -55,6 +56,7 @@ const ACTION_REQUIRED_AUTHORITY = {
   SEND_KAS:             'trade',
   VERIFY_PAYMENT:       'trade',
   POLYMARKET_ORDER:     'trade',
+  BET_PREDICT:          'chat',
   MAKE_MARKET:          'trade',
   SELL_MAKER:           'trade',
   BUY_MAKER:            'trade',
@@ -241,6 +243,10 @@ export class ActionExecutor {
         return this.executePolymarketOrder(action);
       case 'BROKER_ORDER':
         return this.executeBrokerOrder(action);
+
+      // ── Bettor: deterministic Kelly + Bet Card reply ──
+      case 'BET_PREDICT':
+        return this.executeBetPredict(action);
 
       // ── System actions (白名单制) ──
       case 'SYSTEM_DOWNLOAD':
@@ -1175,6 +1181,57 @@ export class ActionExecutor {
       console.log(`[agent-mind:executor] BROKER_ORDER failed: ${e.message}`);
       return { ok: false, reason: e.message };
     }
+  }
+
+  /**
+   * Bettor: deterministic Kelly compute + format Bet Card + reply.
+   *
+   * Brain emits [ACTION:BET_PREDICT pMid=.. sigma=.. yesPrice=.. bankroll=..
+   *   infoGapMonths=.. kellyFraction=0.25 market="..."]
+   * We do the math (no LLM in this path) and reply.
+   */
+  async executeBetPredict(action) {
+    const p = action.params || action;
+    const inputs = {
+      pMid: Number(p.pMid),
+      sigma: Number(p.sigma) || 0,
+      yesPrice: Number(p.yesPrice),
+      bankroll: Number(p.bankroll) || 1000,
+      infoGapMonths: Number(p.infoGapMonths) || 0,
+      kellyFraction: Number(p.kellyFraction) || 0.25,
+    };
+
+    if (!Number.isFinite(inputs.pMid) || inputs.pMid < 0 || inputs.pMid > 1) {
+      return { ok: false, reason: `BET_PREDICT: invalid pMid=${p.pMid}` };
+    }
+    if (!Number.isFinite(inputs.yesPrice) || inputs.yesPrice <= 0 || inputs.yesPrice >= 1) {
+      return { ok: false, reason: `BET_PREDICT: invalid yesPrice=${p.yesPrice}` };
+    }
+
+    const rec = recommendBet(inputs);
+
+    const market = (p.market || 'unnamed market').toString().slice(0, 80);
+    const pct = (n) => `${(n * 100).toFixed(1)}%`;
+    const usd = (n) => `$${n.toFixed(2)}`;
+    const edge = rec.side === 'YES'
+      ? Math.abs(inputs.pMid - inputs.yesPrice)
+      : rec.side === 'NO'
+        ? Math.abs((1 - inputs.pMid) - (1 - inputs.yesPrice))
+        : 0;
+
+    const lines = [
+      `Bet Card — ${market}`,
+      `决策: ${rec.side === 'SKIP' ? 'SKIP' : `BUY ${rec.side}`}`,
+      `edge: ${rec.side === 'SKIP' ? 'N/A' : pct(edge)}`,
+      `仓位: ${pct(rec.fraction)} (${usd(rec.size)})`,
+      `估值: pMid=${pct(inputs.pMid)}, σ=${pct(inputs.sigma)}, info gap=${inputs.infoGapMonths.toFixed(1)} 月`,
+      `规则: 1/${(1 / inputs.kellyFraction).toFixed(0)} Kelly, edge<5pt skip, gap>1月折半, gap>3月跳过`,
+      `推理: ${rec.reasoning.join(' | ')}`,
+    ];
+    const text = lines.join('\n');
+
+    console.log(`[agent-mind:executor] BET_PREDICT ${market}: ${rec.side} ${pct(rec.fraction)}`);
+    return this.sendReply({ text });
   }
 
   /**

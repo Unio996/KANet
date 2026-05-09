@@ -1,0 +1,102 @@
+/**
+ * Kelly Criterion for binary prediction markets.
+ *
+ * Pure math — no LLM, no network, no DB.
+ *   f* = (p·b - q) / b
+ *   p = your probability of winning
+ *   q = 1 - p
+ *   b = decimal odds = 1/marketPrice - 1
+ */
+
+const DEFAULT_KELLY_FRACTION = 0.25;
+const MIN_EDGE_POINTS = 0.05;
+const INFO_GAP_TIGHT_MONTHS = 1;
+const INFO_GAP_HARD_MONTHS = 3;
+const MAX_SIGMA_FOR_BET = 0.30;  // σ > 30% 表示 LLM "完全不知道", 强制 SKIP
+
+/** Pure Kelly fraction. Returns 0 if no positive edge. */
+export function kellyFraction({ p, marketPrice }) {
+  if (marketPrice <= 0 || marketPrice >= 1) return 0;
+  if (p <= 0 || p >= 1) return 0;
+  const q = 1 - p;
+  const b = (1 / marketPrice) - 1;
+  const f = (p * b - q) / b;
+  return Math.max(0, f);
+}
+
+/**
+ * Decide direction + position size with sanity gates.
+ *
+ * Gates:
+ *   - infoGapMonths > 3 → SKIP (training data too stale)
+ *   - infoGapMonths > 1 → halve fraction (signal partially stale)
+ *   - sigma > 0.05 → variance-proportional shrink
+ *   - edge < 5pt → SKIP (摩擦不值)
+ *   - no positive Kelly on either side → SKIP
+ *
+ * @returns {{side:'YES'|'NO'|'SKIP', size:number, fraction:number, reasoning:string[]}}
+ */
+export function recommendBet(input) {
+  const {
+    pMid,
+    sigma = 0,
+    infoGapMonths = 0,
+    yesPrice,
+    bankroll,
+    kellyFraction: kf = DEFAULT_KELLY_FRACTION,
+  } = input;
+
+  const reasoning = [];
+
+  if (infoGapMonths > INFO_GAP_HARD_MONTHS) {
+    reasoning.push(`info gap ${infoGapMonths.toFixed(1)} > ${INFO_GAP_HARD_MONTHS} months → SKIP`);
+    return { side: 'SKIP', size: 0, fraction: 0, reasoning };
+  }
+
+  if (sigma > MAX_SIGMA_FOR_BET) {
+    reasoning.push(`sigma ${(sigma * 100).toFixed(1)}% > ${MAX_SIGMA_FOR_BET * 100}% (LLM 不确定) → SKIP`);
+    return { side: 'SKIP', size: 0, fraction: 0, reasoning };
+  }
+
+  const fYes = kellyFraction({ p: pMid, marketPrice: yesPrice });
+  const noPrice = 1 - yesPrice;
+  const fNo = kellyFraction({ p: 1 - pMid, marketPrice: noPrice });
+
+  let side, fullKelly;
+  if (fYes > fNo) {
+    side = 'YES';
+    fullKelly = fYes;
+  } else if (fNo > 0) {
+    side = 'NO';
+    fullKelly = fNo;
+  } else {
+    reasoning.push('no positive Kelly on either side → SKIP');
+    return { side: 'SKIP', size: 0, fraction: 0, reasoning };
+  }
+
+  const edge = side === 'YES' ? Math.abs(pMid - yesPrice) : Math.abs((1 - pMid) - noPrice);
+  if (edge < MIN_EDGE_POINTS) {
+    reasoning.push(`edge ${(edge * 100).toFixed(1)}pt < ${MIN_EDGE_POINTS * 100}pt min → SKIP`);
+    return { side: 'SKIP', size: 0, fraction: 0, reasoning };
+  }
+
+  let appliedFraction = kf;
+  reasoning.push(`base ${kf} Kelly`);
+
+  if (infoGapMonths > INFO_GAP_TIGHT_MONTHS) {
+    appliedFraction *= 0.5;
+    reasoning.push(`info gap ${infoGapMonths.toFixed(1)} months → halve to ${appliedFraction.toFixed(3)}`);
+  }
+
+  if (sigma > 0.05) {
+    const sigPenalty = Math.max(0.5, 1 - sigma * 5);
+    appliedFraction *= sigPenalty;
+    reasoning.push(`sigma ${sigma.toFixed(2)} → penalty ${sigPenalty.toFixed(2)}, fraction ${appliedFraction.toFixed(3)}`);
+  }
+
+  const fraction = fullKelly * appliedFraction;
+  const size = bankroll * fraction;
+  reasoning.push(`fullKelly=${fullKelly.toFixed(3)}, applied=${appliedFraction.toFixed(3)}, size=${size.toFixed(2)}`);
+
+  return { side, size, fraction, reasoning };
+}
