@@ -135,10 +135,12 @@ export async function publishOrder(peer, draft) {
     // 5/9 12:51 NWT operator Step 1 verify 实证: broker reply 不含 broker_kasia → user 不知往哪转 KAS, 流程 stuck.
     // 跟 broker-sell-handler.js:392-399 SELL_REGEX path 真 _qDm deposit address DM 同款 wording (multi-entry consistency).
     // finalizeSell 已 return broker_kasia + fee_kas + net_kas (line 312), 这里之前没用上.
+    // T2.9.1 hotfix: pay_chain guard (mock test 可能不传 pay_chain → crash). 用 String(...||'EVM').
+    const payChainUp = pay_chain ? String(pay_chain).toUpperCase() : 'EVM';
     const fallbackAck = (
-      `✓ 卖单已建. 请转 ${qty} KAS 到 broker:\n${result.broker_kasia}\n\n` +
+      `✓ 卖单已建. 请转 ${qty} KAS 到 broker:\n${result.broker_kasia || '(broker addr 加载中)'}\n\n` +
       `转账后 broker 自动 publish offer 上 KANet, 30min 内 taker 接 OR 走 CEX fallback.\n` +
-      `扣 ${result.fee_kas} KAS broker fee, 净 ${result.net_kas} KAS sell. 接单后 USDT 直付你 ${pay_chain.toUpperCase()}.`
+      `扣 ${result.fee_kas || '0.1'} KAS broker fee, 净 ${result.net_kas || qty} KAS sell. 接单后 USDT 直付你 ${payChainUp}.`
     );
     return {
       ok: true,
