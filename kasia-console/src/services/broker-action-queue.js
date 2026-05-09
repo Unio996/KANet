@@ -356,21 +356,21 @@ async function executeAction(item) {
       }
       return result;
     }
-    case 'sendKas':
-      // Bug-Z21 (Owner 04:33 真测撞): relay.mjs switch(cmd.type) 真**真 implement 'send_kas' case,
-      // 仅 'transfer'. 之前 type='send_kas' fall through default → sent undefined → ok=false → retry 3 fail.
-      // 三方 04:48 align (A) — broker adapt relay canonical name 'transfer' (relay 是 spec source-of-truth).
-      // amount_kas → amount (relay transfer L411 用 cmd.amount).
-      // T2.10c (NWT r280/r281): defensive align /api/relay/transfer:212 (target trim + amount String).
-      // 5/9 13:08 NWT operator Step 3 实证: manual /api/relay/transfer ✓ work, broker-action-queue ❌ unreachable.
-      // 差异: target trim (line 212 to.trim()) + amount String (line 212 String(amountKas)).
-      // kasToSompi:89 已 String() coerce, 但 align upstream 不亏 (defense-in-depth).
+    case 'sendKas': {
+      // Bug-Z21 (Owner 04:33 真测撞): relay.mjs switch(cmd.type) 仅 'transfer' 不 'send_kas'.
+      // 三方 04:48 align (A) — broker adapt relay canonical name 'transfer'. amount_kas → amount.
+      // T2.10c (NWT r280/r281) defensive align /api/relay/transfer:212 (target trim + amount String).
+      // T2.10c.1 hotfix: 仅在 truthy 时 transform (null/undefined 时 pass through 保现行行为, 防 mock test
+      // <exception> regression — String(undefined||'').trim()='' break sendKaspa to-required check).
+      const transferTarget = item.peer ? String(item.peer).trim() : item.peer;
+      const transferAmount = (p.amount_kas != null && p.amount_kas !== '') ? String(p.amount_kas) : p.amount_kas;
       return sendCommandAsync(BROKER_RELAY_ID, {
         type: COMMAND_TYPES.TRANSFER,
-        target: String(item.peer || '').trim(),
-        amount: String(p.amount_kas),
+        target: transferTarget,
+        amount: transferAmount,
         note: p.note,
       });
+    }
     case 'publish_offer': {
       const PORT = process.env.PORT || 3100;
       const res = await fetch(`http://127.0.0.1:${PORT}/api/exchange/publish`, {
