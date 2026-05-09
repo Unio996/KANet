@@ -18,6 +18,7 @@
 
 import * as stateMachine from './state-machine.js';
 import * as client from './exchange-client.js';
+import { sqlite } from '../../db/client.js';
 
 // T-J2-2026-05-07 r259 T2.1b — Layer 2 Price Oracle Gap fix.
 // MID_PRICE 改 dynamic /api/trade/kas-price (跟 market-seeder 同 source) — 替 hardcode 0.04 phase 1 placeholder.
@@ -46,6 +47,26 @@ export async function handleMessage(peer, msg, opts = {}) {
     if (!cur) return null;  // 首发 + 自然语言 → 路 B matcher
     // 已 in flow 但发自然语言 → fall 路 B (broker-v3 user 切自由聊)
     return null;
+  }
+
+  // T-J2-2026-05-09 r209 T2.8 (NWT r277 α PASS): 跨路 confirm fall-through.
+  // 真因: 'YES' match _isLanguageA → state machine 没 prior v3 flow → MENU RESET.
+  // 但 user 可能在 broker-v2 path 已有 'aligning' draft (sell/buy quote 等 confirm).
+  // 修法: 无 active v3 flow + confirm keyword + v2 has aligning draft → return null fall broker-v2 confirm path.
+  // ref: NWT r277 PASS, broker-v2 confirm intent path 已 work (parser.js:45+118 + router.js:306-340).
+  // KI-29 第 19 次复刻防御 sediment (router fork chain intercept point 必 grep verify).
+  const _v3FlowState = stateMachine.getFlowState(peer);
+  if (!_v3FlowState && /^(yes|y|确认|ok|好|可以)$/i.test(trimmed)) {
+    const v2Draft = sqlite.prepare(`
+      SELECT id FROM retail_dex_orders
+      WHERE user_kasia_address = ? AND state = 'aligning'
+        AND (expires_at IS NULL OR expires_at > datetime('now'))
+      LIMIT 1
+    `).get(peer);
+    if (v2Draft) {
+      console.log(`[broker-v3] T2.8 fall-through 'YES' for peer ${peer.slice(-12)} → broker-v2 confirm path (v2 draft ${v2Draft.id.slice(-8)})`);
+      return null;
+    }
   }
 
   const result = await stateMachine.processInput(peer, trimmed, relayNodeId);
