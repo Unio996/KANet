@@ -1231,3 +1231,75 @@ export async function handleBuyIntent(peerAddr, message) {
     `📋 买 ${qty} KAS 报价:\n${breakdown}${dynNote}\n· 实成交: ${merged.total_kas} KAS\n· 平均单价 ${unit.toFixed(6)} USDT/KAS\n· 你付总: ${merged.total_usdt.toFixed(6)} USDT (${payChain.toUpperCase()}, 分 ${merged.picks.length} 笔)\n\n确认回 YES (5min). 取消回 NO.`);
   return '';
 }
+
+// ════════════════════════════════════════════════════════════════
+// T-J2-2026-05-10 r239 T2.22 Phase 2 (β.1) — _proposeBrokerAsBuyMaker
+// broker-as-maker BUY alt path (mirror SELL flow user-pay-broker custody)
+// ════════════════════════════════════════════════════════════════
+// NWT r302 决断: coexist 现行 finalizeBuy multi-maker pick (ch17 §17.7 zero-custody P2P).
+// 真 alt path 真 explicit user choice trigger (Phase 2 β.x defer) OR 真 P2P fallback (no maker offers).
+// 真 dormant export 真 future T2.23 receipt watcher trigger 真 _publishBrokerBuyOffer (T2.21).
+//
+// flow:
+// 1. user DM "buy N KAS via broker" (Phase 2 β.x explicit) OR finalizeBuy fallback (no maker offers)
+// 2. _proposeBrokerAsBuyMaker: quote + INSERT retail_dex_orders state='awaiting_payment' side='buy_kas'
+//    pay_chain='bnb' pay_address=broker_BSC_0xaD12544E user_kasia=peer
+// 3. DM user "请转 N×price USDT 真 broker BSC 0xaD12544E"
+// 4. user 真转 USDT broker BSC → bsc-incoming-watcher extension (T2.23) detect
+// 5. 反查 retail_dex_orders state='awaiting_payment' side='buy_kas' → trigger _publishBrokerBuyOffer (T2.21)
+// 6. broker BUY offer publish → P2P first OR fallback (T2.24)
+
+// R19 hygiene: broker BSC addr 真 dynamic SQL fetch agent_wallets (NOT hardcoded — LLM copy fake risk per ANTI-PATTERNS R19).
+const BROKER_BUY_QUOTE_TTL_MS = 30 * 60 * 1000;  // 30min quote validity
+const BROKER_BUY_SPREAD_PCT = 0.015;  // mirror SELL spread, broker margin
+
+export async function _proposeBrokerAsBuyMaker(peer, qty, pay_chain = 'bnb') {
+  if (!peer || !qty || qty <= 0) return { ok: false, error: 'missing_fields' };
+  const payChain = String(pay_chain).toLowerCase();
+  if (payChain !== 'bnb') return { ok: false, error: `broker-as-maker BUY 真 仅 BSC supported, requested ${payChain}` };
+
+  // R19 hygiene: dynamic load broker BSC addr from agent_wallets
+  const brokerWallet = sqlite.prepare(
+    `SELECT address FROM agent_wallets WHERE relay_node_id = ? AND chain = 'bnb' AND is_default = 1 LIMIT 1`
+  ).get(BROKER_RELAY_ID);
+  if (!brokerWallet?.address) return { ok: false, error: 'broker_bsc_wallet_not_configured' };
+  const brokerBscAddr = brokerWallet.address;
+
+  let midPrice = 0;
+  try {
+    const { fetchKasPrice } = await import('./market-seeder.js');
+    midPrice = await fetchKasPrice();
+  } catch {}
+  if (!midPrice || midPrice <= 0) return { ok: false, error: 'no_price_feed' };
+
+  const expectedUsdt = parseFloat((qty * midPrice * (1 + BROKER_BUY_SPREAD_PCT)).toFixed(4));
+  const orderId = `bbm_${peer.slice(-12)}_${Date.now()}`;
+  const expiresAt = new Date(Date.now() + BROKER_BUY_QUOTE_TTL_MS).toISOString();
+
+  try {
+    sqlite.prepare(`
+      INSERT INTO retail_dex_orders
+        (id, user_kasia_address, side, order_type, qty, price, pay_chain, pay_address,
+         state, expires_at, created_at, updated_at)
+      VALUES (?, ?, 'buy_kas', 'broker_as_maker', ?, ?, ?, ?, 'awaiting_payment', ?, datetime('now'), datetime('now'))
+    `).run(orderId, peer, String(qty), String(midPrice), payChain, brokerBscAddr, expiresAt);
+  } catch (err) {
+    return { ok: false, error: `INSERT retail_dex_orders failed: ${err.message}` };
+  }
+
+  // DM user — quote + deposit instruction (broker BSC addr 真 dynamic, NOT template hardcode)
+  const msg = [
+    `📋 买 ${qty} KAS 报价 (broker-as-maker, alt path):`,
+    `  · 单价: ${midPrice.toFixed(6)} USDT/KAS (live mid + ${(BROKER_BUY_SPREAD_PCT * 100).toFixed(1)}% broker spread)`,
+    `  · 总价: ${expectedUsdt} USDT`,
+    `  · 链: ${payChain.toUpperCase()}`,
+    ``,
+    `请转 ${expectedUsdt} USDT 真 broker BSC:`,
+    `  ${brokerBscAddr}`,
+    ``,
+    `转完后 broker 自动 publish BUY offer 上 KANet, 30min 内 KANet seeker 接 + 直发 KAS 到你 Kasia. 无 seeker 真 broker CEX 兜底直送.`,
+    `订单: ${orderId.slice(-12)} · TTL: 30min`,
+  ].join('\n');
+
+  return { ok: true, order_id: orderId, expected_usdt: expectedUsdt, broker_bsc: brokerBscAddr, mid_price: midPrice, dm_message: msg };
+}
