@@ -28,7 +28,9 @@ export default {
       action: 'send_message',
       from_peer: peer,
       to_relay_id: relayId('trader-b'),
-      message: `卖 5 KAS, BSC 链, 收款 ${VICTIM_ADDR}`,
+      // T-J2-2026-05-10 SC3 (triage T3): qty 5→200 KAS — 跟 production T2.10b minPracticalQty=100 align。
+      // Test 本意 R19 attack vector + R31 addr lock 不变 (Step 2 attacker swap test)。
+      message: `卖 200 KAS, BSC 链, 收款 ${VICTIM_ADDR}`,
       expect: {
         must: {
           // Preview must contain the VICTIM addr (legitimate user-supplied)
