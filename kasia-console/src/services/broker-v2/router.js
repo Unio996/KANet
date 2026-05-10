@@ -49,7 +49,11 @@ const ORDER_STATUS_QUERY_REGEX = /(退款|退了吗|我钱呢|退回|凭证|证�
 // NWT r266 锁定 user-pay-fee 透明: ledger 扣 gross amount, chain TX 发 net (扣 Gate.io fee).
 // ref: NWT r270 Reading D + cex-bridge T2.3 + user_ledger T2.4.
 const BALANCE_QUERY_REGEX = /(余额|我有多少|账户|balance|查我钱|查账)/i;
-const WITHDRAW_REQUEST_REGEX = /提\s*(\d+(?:\.\d+)?)\s*(USDT|KAS|usdt|kas)\s*(TRC20|BSC|TRX|BNB|ETH|trc|bsc|eth)?/i;
+// T-J2-2026-05-10 r227 T2.6.1 hotfix: 加 'withdraw' English alias.
+// KI-29 第 3 次 DM Chinese encoding bug 真 production environment 真 chain DM '提' 字符可能损坏 (curl shell encoding GBK→UTF-8 conversion).
+// 真 user 真 ASCII fallback 'withdraw N USDT BSC' 真 production-grade 真 deterministic match.
+// 真 5/10 Step 7b verify 实证 ASCII 'withdraw 1 USDT BSC' 不 match → broker LLM dialog ask EVM addr fall, 真 cex-bridge.withdrawCex 漏 fire.
+const WITHDRAW_REQUEST_REGEX = /(?:提|withdraw)\s*(\d+(?:\.\d+)?)\s*(USDT|KAS|usdt|kas)\s*(TRC20|BSC|TRX|BNB|ETH|trc|bsc|eth)?/i;
 const CHAIN_MIN_THRESHOLDS = {
   USDT: { TRX: 10, BSC: 1, ETH: 5 },
   KAS:  { KASPA: 30 },
