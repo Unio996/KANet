@@ -956,9 +956,20 @@ export function startIntakeWatcher() {
         const r = await _scanUntakenOffersFallback();
         if (r && r.handled > 0) console.log(`[broker-fallback] T2.5c tick handled=${r.handled}/${r.scanned}`);
       } catch (e) { console.error('[broker-fallback T2.5c]', e.message); }
+      // T-J2-2026-05-10 T2.25 wire (Phase 2 β.1): 30min+ untaken broker BUY offer → CEX fallback (mirror T2.5c)
+      try {
+        const r = await _scanUntakenBuyOffersFallback();
+        if (r && r.handled > 0) console.log(`[broker-buy-fallback] T2.24 tick handled=${r.handled}/${r.scanned}`);
+      } catch (e) { console.error('[broker-buy-fallback T2.24]', e.message); }
     }, REFUND_TICK_MS);
   }
-  console.log(`[broker-intake] watcher started for Trader-B tick=${TICK_MS}ms, refund tick=${REFUND_TICK_MS}ms`);
+  // T-J2-2026-05-10 T2.25 wire: broker-bsc-intake-watcher (Phase 2 β.1 BUY parity prerequisite trigger).
+  // 30s tick poll broker BSC inflow → match retail_dex_orders pending → trigger _publishBrokerBuyOffer.
+  // 真 dormant 真 NO pending row 真 noop 真 safe wire.
+  try {
+    import('./broker-bsc-intake-watcher.js').then(m => m.start && m.start());
+  } catch (e) { console.error('[broker-bsc-intake] start err:', e.message); }
+  console.log(`[broker-intake] watcher started for Trader-B tick=${TICK_MS}ms, refund tick=${REFUND_TICK_MS}ms (incl. T2.24 BUY fallback + T2.25 BSC intake wire)`);
 }
 
 export function stopIntakeWatcher() {
