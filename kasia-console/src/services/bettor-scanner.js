@@ -282,24 +282,41 @@ let _runningScan = null;
 
 /**
  * Run a scan. relayNodeId selects which Agent's adapter to use.
- * Cron defaults to Bettor; manual UI scan passes selectedAgent.
+ * Cron resolution chain: param → config_entries (per-host) → 'Bettor' agent → null
+ * Owner 5/10 钦定单 agent 跑 (Sophie/Bettor/whoever). null 终态 = 跳过 cron 不写脏数据.
  */
 export async function runScan(triggerType = 'cron', relayNodeId = null) {
   if (_runningScan) {
     return { ok: false, reason: 'scan already in progress' };
   }
-  // Resolve adapter URL: from agent if given, else default Bettor (3020)
+  // Resolve relay id: param > config_entries > 'Bettor' agent name > null
   let resolvedRelayId = relayNodeId;
+  let resolutionSource = relayNodeId ? 'param' : null;
   if (!resolvedRelayId) {
-    const bettor = sqlite.prepare(`SELECT id FROM relay_nodes WHERE name = 'Bettor'`).get();
-    resolvedRelayId = bettor?.id || null;
+    const cfg = sqlite.prepare(`SELECT value FROM config_entries WHERE key='bettor_default_agent_relay_id'`).get();
+    if (cfg?.value) { resolvedRelayId = cfg.value; resolutionSource = 'config'; }
   }
+  if (!resolvedRelayId) {
+    const bettor = sqlite.prepare(`SELECT id FROM relay_nodes WHERE name='Bettor'`).get();
+    if (bettor?.id) { resolvedRelayId = bettor.id; resolutionSource = 'name=Bettor'; }
+  }
+
+  // Hard gate: null = skip cron, refuse to write null relay_node_id rows
+  if (!resolvedRelayId) {
+    console.log(`[bettor-scanner] skip ${triggerType} — no default agent configured. Set config_entries.key='bettor_default_agent_relay_id' or create 'Bettor' relay.`);
+    return { ok: false, reason: 'no_default_agent', hint: "set config_entries key='bettor_default_agent_relay_id'" };
+  }
+
   const adapterUrl = getAdapterUrlForAgent(resolvedRelayId);
+  if (!adapterUrl) {
+    console.log(`[bettor-scanner] skip ${triggerType} — relay ${resolvedRelayId.slice(0,8)} has no adapter`);
+    return { ok: false, reason: 'no_adapter', relayNodeId: resolvedRelayId };
+  }
 
   const startedAt = Date.now();
   _runningScan = (async () => {
     try {
-      console.log(`[bettor-scanner] start (trigger=${triggerType}, relay=${resolvedRelayId?.slice(0,8) || 'none'}, adapter=${adapterUrl || 'default'})`);
+      console.log(`[bettor-scanner] start (trigger=${triggerType}, relay=${resolvedRelayId.slice(0,8)} via ${resolutionSource}, adapter=${adapterUrl})`);
       const fetched = await fetchPredictionData();
       if (!fetched.ok) {
         console.log(`[bettor-scanner] fetch failed: ${fetched.error}`);
