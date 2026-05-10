@@ -91,6 +91,12 @@ export async function resolveExpired() {
           SET closed_at=datetime('now'), close_reason='resolved', realized_pnl=?
           WHERE recommendation_id=? AND closed_at IS NULL
         `).run(pnl, r.id);
+        // Auto-dismiss any pending adjustment for this resolved position (truth resolved
+        // → no manual stop-loss decision needed). UI 调仓 tab 自动清.
+        sqlite.prepare(`
+          UPDATE bettor_adjustments SET status='dismissed', decided_at=datetime('now'), decided_by='auto-resolver'
+          WHERE recommendation_id=? AND status='pending'
+        `).run(r.id);
         resolved++;
         console.log(`[bettor-resolver] ${r.id.slice(0,8)} ${r.decision}/${outcome} ${wasCorrect ? '✓' : '✗'} pnl=${pnl.toFixed(2)} brier=${brier.toFixed(3)}`);
       } catch (e) {
