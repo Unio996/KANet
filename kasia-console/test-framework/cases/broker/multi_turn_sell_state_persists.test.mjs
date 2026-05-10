@@ -22,7 +22,9 @@ export default {
       action: 'send_message',
       from_peer: peer,
       to_relay_id: relayId('trader-b'),
-      message: '我要卖 5 KAS, BSC 链',
+      // T-J2-2026-05-10 SC3b (triage T3): qty 5→200 KAS — 跟 production T2.10b minPracticalQty=100 align。
+      // 本意 Bug-Z9 SELL request fields persist 跨 turn (qty 数字非 sacred)。
+      message: '我要卖 200 KAS, BSC 链',
       expect: {
         must: {
           // broker must NOT cross-direction hallucinate
