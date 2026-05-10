@@ -14,6 +14,14 @@ const INFO_GAP_TIGHT_MONTHS = 1;
 const INFO_GAP_HARD_MONTHS = 3;
 const MAX_SIGMA_FOR_BET = 0.30;  // σ > 30% 表示 LLM "完全不知道", 强制 SKIP
 
+// Phase 3e-2 Layer 1 dog/favorite price gates (Sophie 5/10 反事实 +$312.92):
+// - dog: buy_price <= 0.10 = deep dog, 体育市场 informational efficient, LLM 反向押系统性输, SKIP
+// - favorite: buy_price >= 0.85 = heavy favorite, 已 priced-in, σ < 10% 才允许且 size halve
+const DOG_BUY_PRICE_THRESHOLD = 0.10;
+const FAVORITE_BUY_PRICE_THRESHOLD = 0.85;
+const FAVORITE_SIGMA_TOLERANCE = 0.10;
+const FAVORITE_SIZE_PENALTY = 0.5;
+
 /** Pure Kelly fraction. Returns 0 if no positive edge. */
 export function kellyFraction({ p, marketPrice }) {
   if (marketPrice <= 0 || marketPrice >= 1) return 0;
@@ -74,6 +82,22 @@ export function recommendBet(input) {
     return { side: 'SKIP', size: 0, fraction: 0, reasoning };
   }
 
+  // Phase 3e-2 Layer 1: dog/favorite price gates (Sophie 5/10 反事实)
+  const buyPrice = side === 'YES' ? yesPrice : noPrice;
+  if (buyPrice <= DOG_BUY_PRICE_THRESHOLD) {
+    reasoning.push(`buy_price $${buyPrice.toFixed(3)} <= $${DOG_BUY_PRICE_THRESHOLD} (deep dog, 体育市场反向押系统性输) → SKIP`);
+    return { side: 'SKIP', size: 0, fraction: 0, reasoning };
+  }
+  let favoritePenalty = 1;
+  if (buyPrice >= FAVORITE_BUY_PRICE_THRESHOLD) {
+    if (sigma > FAVORITE_SIGMA_TOLERANCE) {
+      reasoning.push(`buy_price $${buyPrice.toFixed(3)} >= $${FAVORITE_BUY_PRICE_THRESHOLD} (heavy favorite) AND sigma ${(sigma * 100).toFixed(1)}% > ${FAVORITE_SIGMA_TOLERANCE * 100}% → SKIP`);
+      return { side: 'SKIP', size: 0, fraction: 0, reasoning };
+    }
+    favoritePenalty = FAVORITE_SIZE_PENALTY;
+    reasoning.push(`heavy favorite buy_price $${buyPrice.toFixed(3)} (sigma ${(sigma * 100).toFixed(1)}% acceptable) → size × ${FAVORITE_SIZE_PENALTY}`);
+  }
+
   const edge = side === 'YES' ? Math.abs(pMid - yesPrice) : Math.abs((1 - pMid) - noPrice);
   if (edge < MIN_EDGE_POINTS) {
     reasoning.push(`edge ${(edge * 100).toFixed(1)}pt < ${MIN_EDGE_POINTS * 100}pt min → SKIP`);
@@ -94,9 +118,9 @@ export function recommendBet(input) {
     reasoning.push(`sigma ${sigma.toFixed(2)} → penalty ${sigPenalty.toFixed(2)}, fraction ${appliedFraction.toFixed(3)}`);
   }
 
-  const fraction = fullKelly * appliedFraction;
+  const fraction = fullKelly * appliedFraction * favoritePenalty;
   const size = bankroll * fraction;
-  reasoning.push(`fullKelly=${fullKelly.toFixed(3)}, applied=${appliedFraction.toFixed(3)}, size=${size.toFixed(2)}`);
+  reasoning.push(`fullKelly=${fullKelly.toFixed(3)}, applied=${appliedFraction.toFixed(3)}${favoritePenalty < 1 ? ', favorite_penalty=' + favoritePenalty : ''}, size=${size.toFixed(2)}`);
 
   return { side, size, fraction, reasoning };
 }

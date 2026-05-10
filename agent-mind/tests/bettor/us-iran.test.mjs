@@ -91,6 +91,27 @@ test('recommendBet: NO with size when YES=$0.15 vs 4% (edge=11pt on NO side)', (
   assert.ok(r.fraction > 0);
 });
 
+test('recommendBet: SKIP dog buy_price <= 0.10 (Layer 1 Sophie 5/10 反事实)', () => {
+  // J1 host 5 笔 MLB dog 都是 yes=$0.01-$0.10, LLM 估 pMid=50% → 全损
+  const r = recommendBet({ pMid: 0.5, sigma: 0.15, yesPrice: 0.01, bankroll: 1000, infoGapMonths: 0 });
+  assert.equal(r.side, 'SKIP');
+  assert.match(r.reasoning.join(' '), /deep dog|系统性输/);
+});
+
+test('recommendBet: SKIP favorite-side BUY when sigma > 10% (Layer 1)', () => {
+  // 押 favorite YES @ $0.88 σ=15%: pMid 高于 yes 才会选 YES + buy_price = 0.88 触 favorite gate
+  const r = recommendBet({ pMid: 0.95, sigma: 0.15, yesPrice: 0.88, bankroll: 1000, infoGapMonths: 0 });
+  assert.equal(r.side, 'SKIP');
+  assert.match(r.reasoning.join(' '), /heavy favorite/);
+});
+
+test('recommendBet: ALLOW favorite-side BUY when sigma <= 10% but penalty halved', () => {
+  // 押 favorite YES @ $0.85 σ=8%: pMid 略高于 yes 选 YES + sigma 低
+  const r = recommendBet({ pMid: 0.92, sigma: 0.08, yesPrice: 0.85, bankroll: 1000, infoGapMonths: 0 });
+  assert.equal(r.side, 'YES');
+  assert.match(r.reasoning.join(' '), /favorite_penalty/);
+});
+
 test('recommendBet: SKIP when sigma > 30% (LLM unsure, hard cutoff)', () => {
   const r = recommendBet({ pMid: 0.5, sigma: 0.5, yesPrice: 0.97, bankroll: 1000, infoGapMonths: 0 });
   assert.equal(r.side, 'SKIP');

@@ -45,6 +45,48 @@ const KELLY_FRACTION = 0.25;
 const INVENTORY_SAFETY_MIN_FRAC = 0.10;     // 即使全仓占满, 仍至少留 10% bankroll 给新单
 const SCAN_TIMEOUT_PER_MARKET_MS = 180_000; // 3 min hard cap per market
 
+// Phase 3e-2 Layer 3 correlation caps (J1 #107 ack, Sophie 5 笔 MLB / 2 笔 Greece Eurovision 实证)
+const SAME_SPORT_CAP_PER_BATCH = 2;     // 单 batch 同 sport 最多 2 笔
+const SAME_EVENT_CAP_PER_BATCH = 1;     // 单 batch 同事件 (e.g. Greece Eurovision) 最多 1 笔
+
+// Sport detection keywords (lowercase substring match)
+const SPORT_KEYWORDS = {
+  mlb: ['mlb ', 'yankees', 'red sox', 'tigers', 'royals', 'cardinals', 'mariners', 'cubs', 'rangers', 'padres', 'brewers', 'dodgers', 'braves', 'white sox'],
+  nba: ['nba ', 'lakers', 'knicks', '76ers', 'thunder', 'celtics', 'warriors', 'heat'],
+  nfl: ['nfl ', 'patriots', 'cowboys', 'giants', 'eagles'],
+  ufc: ['ufc ', 'fight to', 'middleweight', 'lightweight', 'welterweight'],
+  tennis: ['atp ', 'wta ', 'internazionali', 'roland garros', 'wimbledon'],
+  soccer: ['premier league', 'champions league', 'la liga', 'bundesliga'],
+};
+
+function detectSport(question) {
+  const q = (question || '').toLowerCase();
+  for (const [sport, kws] of Object.entries(SPORT_KEYWORDS)) {
+    if (kws.some(k => q.includes(k))) return sport;
+  }
+  return null;
+}
+
+// Event signature: extract key event name (Eurovision / playoffs / specific tournament)
+// Crude but effective for dup detection within one batch.
+function detectEventKey(question) {
+  const q = (question || '').toLowerCase();
+  const patterns = [
+    /eurovision\s*\d{4}/,
+    /world cup\s*\d{4}/,
+    /super bowl\s*[lxiv]+/,
+    /us(?:[-x])iran[^?]*?\d{4}/,
+    /ufc\s*\d{2,4}/,
+    /nba playoffs/,
+    /presidential election\s*\d{4}/,
+  ];
+  for (const re of patterns) {
+    const m = q.match(re);
+    if (m) return m[0].trim();
+  }
+  return null;
+}
+
 // ── prompt for LLM estimator ─────────────────────────────────────────────
 
 function buildEstimatorPrompt(market, parsedRule) {
@@ -232,10 +274,38 @@ async function scanOne(market, adapterUrl, availableBankroll) {
 
 function persist(results, triggerType = 'cron', relayNodeId = null) {
   const now = new Date().toISOString();
-  const valid = results
+
+  // Phase 3e-2 Layer 3: correlation caps. Sort by score desc, walk + drop over caps.
+  const sorted = results
     .filter(r => r && !r.error && r.rec && r.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, TOP_N);
+    .sort((a, b) => b.score - a.score);
+
+  const sportCounts = {};
+  const eventCounts = {};
+  const filtered = [];
+  let droppedSport = 0, droppedEvent = 0;
+  for (const r of sorted) {
+    const q = r.market?.question || '';
+    const sport = detectSport(q);
+    const eventKey = detectEventKey(q);
+
+    if (eventKey) {
+      const c = eventCounts[eventKey] || 0;
+      if (c >= SAME_EVENT_CAP_PER_BATCH) { droppedEvent++; continue; }
+      eventCounts[eventKey] = c + 1;
+    }
+    if (sport) {
+      const c = sportCounts[sport] || 0;
+      if (c >= SAME_SPORT_CAP_PER_BATCH) { droppedSport++; continue; }
+      sportCounts[sport] = c + 1;
+    }
+    filtered.push(r);
+    if (filtered.length >= TOP_N) break;
+  }
+  if (droppedSport || droppedEvent) {
+    console.log(`[bettor-scanner] correlation caps: dropped ${droppedSport} same-sport / ${droppedEvent} same-event (Phase 3e-2 Layer 3)`);
+  }
+  const valid = filtered;
 
   const stmtRec = sqlite.prepare(`
     INSERT INTO bettor_recommendations
