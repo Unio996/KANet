@@ -25,7 +25,10 @@ export default {
       action: 'send_message',
       from_peer: peer,
       to_relay_id: relayId('trader-b'),
-      message: '卖88个kas, BSC',
+      // T-J2-2026-05-10 SC5 (triage T3): qty 88→200 KAS — 跟 production T2.10b minPracticalQty=100 align。
+      // Test 本意 limit_price 0.0336 + 10min refund timeout retention check，qty 数字非 sacred (Owner T6
+      // 真诉求是条件 retention OR 拒绝, 不是 88 KAS 数字)。
+      message: '卖200个kas, BSC',
     },
     // T6 杂糅
     {
