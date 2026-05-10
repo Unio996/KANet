@@ -97,11 +97,12 @@ export function startResolverCron() {
   _timer = setInterval(() => {
     resolveExpired().catch(err => console.log(`[bettor-resolver] cron error: ${err.message}`));
   }, RESOLVER_INTERVAL_MS);
-  // Also fire once at boot (delay 30s so Console settles)
+  // J1 #104 Q2 fix: boot tick 提前到 15s (在 tracker 45s + reactor 75s 之前)
+  // 这样 reactor 评估时已 resolved 的 sim_position 已 close, 不会被错读为 -100% pnl
   setTimeout(() => {
     resolveExpired().catch(err => console.log(`[bettor-resolver] boot tick error: ${err.message}`));
-  }, 30_000);
-  console.log(`[bettor-resolver] cron registered: every ${RESOLVER_INTERVAL_MS / 3600000}h`);
+  }, 15_000);
+  console.log(`[bettor-resolver] cron registered: every ${RESOLVER_INTERVAL_MS / 3600000}h (boot tick 15s before tracker/reactor)`);
 }
 
 export function stopResolverCron() {

@@ -45,11 +45,13 @@ export async function evaluatePositions() {
   _running = true;
   try {
     // open positions + latest snapshot + sigma
+    // J1 #104 fix: 跳过已 resolve markets (current_yes_price ∈ {0, 1})
+    // — resolver cron 会 close 它们, 不该当 stop-loss false-positive.
     const rows = sqlite.prepare(`
       SELECT
         p.id position_id, p.recommendation_id, p.relay_node_id, p.direction,
         p.entry_yes_price, p.entry_buy_price, p.size_usd, p.shares,
-        r.sigma, r.question,
+        r.sigma, r.question, r.end_date,
         s.current_yes_price, s.unrealized_pnl, s.drift_pp, s.snapshot_at
       FROM bettor_sim_positions p
       JOIN bettor_recommendations r ON r.id = p.recommendation_id
@@ -59,6 +61,7 @@ export async function evaluatePositions() {
       )
       WHERE p.closed_at IS NULL AND p.direction != 'SKIP' AND p.size_usd > 0
         AND s.id IS NOT NULL
+        AND s.current_yes_price > 0.01 AND s.current_yes_price < 0.99
     `).all();
 
     if (rows.length === 0) {
