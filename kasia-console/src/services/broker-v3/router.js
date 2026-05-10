@@ -50,21 +50,31 @@ export async function handleMessage(peer, msg, opts = {}) {
   }
 
   // T-J2-2026-05-09 r209 T2.8 (NWT r277 α PASS): 跨路 confirm fall-through.
-  // 真因: 'YES' match _isLanguageA → state machine 没 prior v3 flow → MENU RESET.
-  // 但 user 可能在 broker-v2 path 已有 'aligning' draft (sell/buy quote 等 confirm).
+  // 'YES' match _isLanguageA → state machine 没 prior v3 flow → MENU RESET.
+  // user 可能在 broker-v2 path 已有 'aligning' draft (sell/buy quote 等 confirm).
   // 修法: 无 active v3 flow + confirm keyword + v2 has aligning draft → return null fall broker-v2 confirm path.
   // ref: NWT r277 PASS, broker-v2 confirm intent path 已 work (parser.js:45+118 + router.js:306-340).
-  // KI-29 第 19 次复刻防御 sediment (router fork chain intercept point 必 grep verify).
+  //
+  // T-J2-2026-05-10 T3 SC1 (triage NWT #4 batch fall-through 扩展): T2.8 'YES' fall-through
+  // generalize 到全 _isLanguageA category — 任何 fresh peer (无 v3 flow) + _isLanguageA-positive
+  // (含数字/0x40hex/offer_id/yes/no/算了/back 等) + v2 has aligning OR awaiting_payment
+  // OR paid OR executing 任一 active state → return null fall 路 B broker-v2 接管。
+  // 边界保留 (NWT #4 4 条):
+  //   1. v3 in flow + state=QTY_SELECT/etc → 不变 (此 if 跳, 走 stateMachine.processInput)
+  //   2. fresh peer + v2 NO draft → 保持 v3 menu (fresh user 第一次 input, 避 silent reply)
+  //   3. fresh peer + v2 has draft → return null (路 B 处理 — 含数字/addr/cancel keyword)
+  //   4. 数字 1-6 case 1: v2 NO draft → v3 menu select OK; case 2: v2 has draft → 让 v2 路径处理
+  // 修 11 case (Bucket A 8 + Bucket B 3) — 详 J2 #251 manifest。
   const _v3FlowState = stateMachine.getFlowState(peer);
-  if (!_v3FlowState && /^(yes|y|确认|ok|好|可以)$/i.test(trimmed)) {
+  if (!_v3FlowState) {
     const v2Draft = sqlite.prepare(`
-      SELECT id FROM retail_dex_orders
-      WHERE user_kasia_address = ? AND state = 'aligning'
+      SELECT id, state FROM retail_dex_orders
+      WHERE user_kasia_address = ? AND state IN ('aligning','awaiting_payment','paid','executing','refunding')
         AND (expires_at IS NULL OR expires_at > datetime('now'))
-      LIMIT 1
+      ORDER BY created_at DESC LIMIT 1
     `).get(peer);
     if (v2Draft) {
-      console.log(`[broker-v3] T2.8 fall-through 'YES' for peer ${peer.slice(-12)} → broker-v2 confirm path (v2 draft ${v2Draft.id.slice(-8)})`);
+      console.log(`[broker-v3] T3 SC1 fall-through fresh peer + v2 ${v2Draft.state} draft (${v2Draft.id.slice(-8)}) for peer ${peer.slice(-12)} → 路 B broker-v2 (head '${trimmed.slice(0,20)}')`);
       return null;
     }
   }
