@@ -47,15 +47,15 @@ export default {
       },
     },
     { action: 'sleep', ms: 1500 },
-    // T2: 数量 50
+    // T2: 数量 200 (T-J2-2026-05-10 SC2b: qty 50→200 align T2.10b minPracticalQty=100)
     {
       action: 'send_message',
       from_peer: peer,
       to_relay_id: relayId('trader-b'),
-      message: '50 个',
+      message: '200 个',
       expect: {
         must: {
-          reply_contains_one_of: ['50', 'KAS', '链', '地址'],
+          reply_contains_one_of: ['200', 'KAS', '链', '地址'],
           reply_does_not_contain: ['R33', '内部拦截', 'Got it', 'what do you'],
         },
       },
@@ -69,8 +69,8 @@ export default {
       message: 'Bsc, 0x1417cfDaD7a5Be7d3D28350010194CFcABf2596D',
       expect: {
         must: {
-          // Owner 铁律 #3: broker 不忘 context — reply 必含之前给的 fields (50 / BSC / 地址)
-          reply_contains_one_of: ['50', '卖单画像', 'preview', 'BSC', '画像'],
+          // Owner 铁律 #3: broker 不忘 context — reply 必含之前给的 fields (200 / BSC / 地址)
+          reply_contains_one_of: ['200', '卖单画像', 'preview', 'BSC', '画像'],
           reply_does_not_contain: ['R33', '内部拦截', 'Got it', 'what do you'],
         },
       },
@@ -102,7 +102,7 @@ export default {
         must: {
           // Owner 铁律 #3+4: state retention sticky — 不 reset, 不 wipe context
           reply_does_not_contain: ['R33', '内部拦截', '输出异常', '没有找到您之前的活跃订单', '请重新提供'],
-          reply_contains_one_of: ['preview', '画像', '50', 'YES', '锁单', '确认'],
+          reply_contains_one_of: ['preview', '画像', '200', 'YES', '锁单', '确认'],
         },
       },
     },
