@@ -159,25 +159,38 @@ export async function handleMessage(peer, msg) {
       ORDER BY created_at DESC LIMIT 1
     `).get(peer, dbChain);
     if (!payRow?.pay_address) return `没记录你的 ${wChain} 收款地址. 先下个 SELL 单告诉我地址, 然后再提.`;
-    const { withdrawCex } = await import('../cex-bridge.js');
-    const wRes = await withdrawCex({ cex: 'gateio', asset: wAsset, amount: wAmount, toAddr: payRow.pay_address, chain: wChain });
-    if (!wRes.ok) return `提币失败: ${(wRes.error || 'unknown').slice(0, 80)}. broker 余额未动, 5min 后可重试.`;
+    // T-J2-2026-05-10 r233 T2.19 (NWT r296 ε.2): broker BSC wallet direct transfer (跳 Gate.io withdrawals API + 24h cooldown).
+    // 真因 Bug #15: Gate.io API "only used addresses or verified addresses are allowed" → 24h cooldown 真 deployment-ops policy unavoidable.
+    // 修法 ε.2: broker 真 internal BSC wallet (agent_wallets.privkey_encrypted) → evm-transfer.transferUsdt 真 user pay_address chain TX.
+    // 跳 Gate.io withdrawals API 完全, 真 demand broker BSC USDT inventory funding (Owner production capital pool).
+    // Phase 1 sustain: Owner 一次性 fund broker BSC ~100 USDT. Phase 2 β candidate: broker auto-rebalance Gate.io → BSC.
+    const evmChainMap = { 'BSC': 'bnb', 'ETH': 'eth', 'TRX': 'tron' };
+    const evmChain = evmChainMap[wChain];
+    if (!evmChain) return `${wChain} chain 暂不支持 broker direct transfer (Phase 2 β candidate). 现 BSC/ETH/TRX 真 supported.`;
+    const brokerWallet = sqlite.prepare(
+      `SELECT privkey_encrypted, address FROM agent_wallets WHERE relay_node_id = ? AND chain = ? AND privkey_encrypted IS NOT NULL LIMIT 1`
+    ).get('0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0', evmChain);
+    if (!brokerWallet?.privkey_encrypted) return `broker ${wChain} 钱包未配置, 联系 Owner. 你的余额仍在.`;
+    const { transferUsdt } = await import('../evm-transfer.js');
+    const wRes = await transferUsdt(evmChain, brokerWallet.privkey_encrypted, payRow.pay_address, wAmount);
+    if (!wRes?.ok) return `提币失败: ${(wRes?.error || 'unknown').slice(0, 80)}. broker 余额未动, 5min 后可重试 OR 联系 Owner (broker 钱包 inventory 不足真 likely 真因).`;
     const balanceAfter = parseFloat((balance - wAmount).toFixed(4));
     const ledgerId = `ledger_withdraw_${peer.slice(-8)}_${Date.now()}`;
     sqlite.prepare(`
       INSERT INTO user_ledger (id, user_kasia_address, asset, chain, balance_change, balance_after, reason, ref_order_id, ref_tx_hash, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, datetime('now'))
-    `).run(ledgerId, peer, wAsset, wChain, -wAmount, balanceAfter, `withdraw_user_initiated:${wRes.withdraw_id}`, wRes.txid || null);
+    `).run(ledgerId, peer, wAsset, wChain, -wAmount, balanceAfter, `withdraw_user_initiated:broker_direct:${wRes.txHash?.slice(0, 12)}`, wRes.txHash);
+    const explorerMap = { 'bnb': 'https://bscscan.com/tx/', 'eth': 'https://etherscan.io/tx/', 'tron': 'https://tronscan.org/#/transaction/' };
     return [
-      `✓ 提币申请已提交`,
-      `  Gate.io id: ${wRes.withdraw_id}`,
+      `✓ 提币成功 (broker direct, 跳 Gate.io)`,
       `  扣账户: ${wAmount} ${wAsset}`,
       `  到地址: ${payRow.pay_address.slice(0,10)}...${payRow.pay_address.slice(-6)}`,
       `  链: ${wChain}`,
       `  账户余额: ${balanceAfter} ${wAsset}`,
-      wRes.txid ? `  chain TX: ${wRes.txid.slice(0,16)}...` : `  chain TX 待 Gate.io 处理 (~5-15min)`,
+      `  chain TX: ${wRes.txHash}`,
+      `  查看: ${explorerMap[evmChain] || ''}${wRes.txHash}`,
       ``,
-      `链上 fee 由你承担, 实收 = ${wAmount} - 链 fee (Gate.io USDT TRC20 ~1, BSC ~0.3).`,
+      `链上 fee 由 broker 承担 (~${evmChain === 'bnb' ? '0.5' : evmChain === 'tron' ? '15 (TRX bandwidth/energy)' : '5-20 (ETH gas)'} USD), 你 1:1 收 ${wAmount} ${wAsset}.`,
     ].join('\n');
   }
 
