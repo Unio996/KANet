@@ -29,7 +29,9 @@ export default {
       action: 'send_message',
       from_peer: peer,
       to_relay_id: relayId('trader-b'),
-      message: '我要卖 5 KAS, BSC 链, 0x94053e04feE8d863cFa29DF10938a7A2E2b71D74',
+      // T-J2-2026-05-10 SC4 (triage T3): qty 5→200 KAS — 跟 production T2.10b minPracticalQty=100 align。
+      // Test 本意 R33 jinja 500 防御 (Bug-Z24 reintroduce check)，qty 数字非 sacred。
+      message: '我要卖 200 KAS, BSC 链, 0x94053e04feE8d863cFa29DF10938a7A2E2b71D74',
       expect: {
         must: {
           reply_contains_one_of: ['卖', 'sell', 'SELL', '订单', '画像', '收到', '收 USDT'],
