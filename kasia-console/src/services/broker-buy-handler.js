@@ -174,21 +174,38 @@ function selectBestOffer(qtyKas, payChain, give_asset = 'KAS', want_asset = 'USD
 // **协议含义**: exchange-machine accept_v1 必须 take 整笔 give_amount, 不支持部分成交.
 // 因此最后一笔会"过买" (take 整笔 offer 即使 cum > qty), broker 多收的 KAS 后续退回用户
 // 或下次抵扣. 第一版简化处理: 累加到 cum >= qty 就停, 最后一笔 take 整笔, 用户实收 cum KAS.
-export function selectBestOffers(qtyKas, payChain, give_asset = 'KAS', want_asset = 'USDT') {
+// T-J2-2026-05-10 r245 T2.27 (NWT r306 Bug #17 SMOKING GUN): 加 userKasia param 真 user self-deal filter.
+// 真因: SQL filter 仅 `maker != broker` (R5 broker self-deal 防御), 真 NOT filter `maker != user_kasia` (user self-deal 漏).
+// production 灾难: user 真 own SELL offer 真 hit selectBestOffers → broker quote maker_addr=user 真 own BSC → user 转 USDT 真 self → broker NOT settled → user lose USDT (chain TX 真 self circular NO actual exchange).
+// 实证 5/10 18:16 BUY 5 KAS quote: Trader-M ask buy 5 KAS → broker hit Trader-Ms own offer a2bbeab8 maker=p9zx9z9xn7rh.
+export function selectBestOffers(qtyKas, payChain, give_asset = 'KAS', want_asset = 'USDT', userKasia = null) {
   // T-NWT-2026-04-27 v1.1 Phase A step 2: give_asset 参数化 (default 'KAS' 向后兼容).
   // T-J1-2026-04-27 v1.2 R30 Service primitive align: want_asset 参数化 (default 'USDT').
   const broker = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID);
   const brokerAddr = broker?.address || '';
-  const rows = sqlite.prepare(`
-    SELECT id, give_amount, want_amount, verification_meta, maker
-    FROM exchange_offers
-    WHERE protocol_status = 'open'
-      AND give_asset = ? AND want_asset = ?
-      AND maker != ?
-      AND (expires_at IS NULL OR julianday(expires_at) > julianday('now'))
-    ORDER BY CAST(want_amount AS REAL) / CAST(give_amount AS REAL) ASC
-    LIMIT 30
-  `).all(give_asset, want_asset, brokerAddr);
+  // T2.27 (NWT r306 Bug #17): 加 maker != userKasia user self-deal filter.
+  // 真 userKasia null fall back 现行 (broker-only filter, dormant pre-T2.27 caller).
+  const rows = userKasia
+    ? sqlite.prepare(`
+        SELECT id, give_amount, want_amount, verification_meta, maker
+        FROM exchange_offers
+        WHERE protocol_status = 'open'
+          AND give_asset = ? AND want_asset = ?
+          AND maker != ? AND maker != ?
+          AND (expires_at IS NULL OR julianday(expires_at) > julianday('now'))
+        ORDER BY CAST(want_amount AS REAL) / CAST(give_amount AS REAL) ASC
+        LIMIT 30
+      `).all(give_asset, want_asset, brokerAddr, userKasia)
+    : sqlite.prepare(`
+        SELECT id, give_amount, want_amount, verification_meta, maker
+        FROM exchange_offers
+        WHERE protocol_status = 'open'
+          AND give_asset = ? AND want_asset = ?
+          AND maker != ?
+          AND (expires_at IS NULL OR julianday(expires_at) > julianday('now'))
+        ORDER BY CAST(want_amount AS REAL) / CAST(give_amount AS REAL) ASC
+        LIMIT 30
+      `).all(give_asset, want_asset, brokerAddr);
   const picks = [];
   let cum = 0;
   for (const o of rows) {
@@ -583,7 +600,8 @@ export async function finalizeBuy({ user_kasia, qty, pay_chain, give_asset = 'KA
   }
   const payChain = String(pay_chain).toLowerCase();
   // T-NWT-2026-04-27 v1.1 Phase A step 2: give_asset 参数 propagation 到 _aggregateWithFallback.
-  const merged = await _aggregateWithFallback(qty, payChain, give_asset);
+  // T2.27 (NWT r306 Bug #17): user_kasia propagation 防 user self-deal.
+  const merged = await _aggregateWithFallback(qty, payChain, give_asset, user_kasia);
   if (!merged.ok) {
     // T-J2-2026-05-10 r244 T2.26 (Phase 2 β.1 wire): _aggregateWithFallback fail → fall broker-as-maker custody.
     // ch17 §17.7 BUY zero-custody P2P first 真 守 (merged.ok=true 真 P2P path 真 priority).
@@ -774,9 +792,10 @@ export async function verifyPaymentForPeer({ peer, chain }) {
 // 三层 fallback 合并器: 拼现成 + broker 自挂补 deficit. 给 finalizeBuy/handleBuyIntent 复用.
 // 返回 { ok, total_kas, total_usdt, picks: [{id, take_qty, take_usdt, maker_addr, broker_dynamic?}] }
 // 单测可用 _testInjectPublishOffer 注入 mock _brokerPublishKasOffer.
-export async function _aggregateWithFallback(qty, payChain, give_asset = 'KAS') {
+export async function _aggregateWithFallback(qty, payChain, give_asset = 'KAS', userKasia = null) {
   // T-NWT-2026-04-27 v1.1 Phase A step 2: give_asset 参数化 propagation 到 selectBestOffers + _brokerPublishKasOffer (default 'KAS' 向后兼容).
-  const sel = selectBestOffers(qty, payChain, give_asset);
+  // T2.27 (NWT r306 Bug #17): userKasia 参数 propagation 防 user self-deal.
+  const sel = selectBestOffers(qty, payChain, give_asset, 'USDT', userKasia);
   let picks = sel.picks ? [...sel.picks] : [];
   let cumKas = picks.reduce((s, p) => s + p.take_qty, 0);
 
