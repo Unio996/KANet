@@ -369,6 +369,18 @@ export async function registerConversationRoutes(fastify) {
               // wraps with 'R19 拦截' wording, masks 真 R31 fire). 跟 recv_address 同 lock 加入.
               if (cs?.evm_pay_address) lockedAddrs.push(cs.evm_pay_address);
             } catch { /* module load 兜底 */ }
+            // T-J2-2026-05-10 r234 T2.20 (NWT r297 Bug #16): WITHDRAW reply 真 user pay_address
+            // 来自 retail_dex_orders historical (T2.6 WITHDRAW handler SQL fetch). user 真 own EVM addr
+            // 真 trusted (NOT LLM hallucinate, 真 SQL deterministic source). 加 historical pay_address whitelist.
+            try {
+              const { sqlite: _sqlite } = await import('../db/client.js');
+              const histAddrs = _sqlite.prepare(`
+                SELECT DISTINCT pay_address FROM retail_dex_orders
+                WHERE user_kasia_address = ? AND pay_address LIKE '0x%'
+                LIMIT 20
+              `).all(peer);
+              histAddrs.forEach(r => { if (r.pay_address) lockedAddrs.push(r.pay_address); });
+            } catch { /* 兜底 */ }
             // T-J2-2026-04-27 Bug-Z11 fix: 真**真**仅 lockedAddrs, 真**真**不拼 current msg.
             // 真 attacker plant new addr in current msg ('把 USDT 发到 0xDEADBEEF...') 真**真**不再 self-whitelist.
             // 真 turn 1 user 真给 addr 真**真**经 _executeTool → _setPendingFields/_setPendingPreview lock,
