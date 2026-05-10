@@ -324,15 +324,27 @@
               <div class="mt-2 pt-2 border-t border-warm-100">
                 <div class="flex items-center justify-between text-[11px]">
                   <a href="/predictions" class="text-ink-600 font-medium hover:text-brand-600">Polymarket</a>
-                  <span x-show="agent.polymarket?.configured" class="tabular-nums text-ink-700" x-text="fmt(agent.polymarket?.approxValueUsd || 0)"></span>
+                  <span x-show="agent.polymarket?.configured" class="tabular-nums text-ink-700 font-medium" x-text="fmt(agent.polymarket?.approxValueUsd || 0)" title="持仓价值 + USDC.e + pUSD 合计"></span>
                 </div>
-                <div class="flex items-center justify-between text-[10px] text-ink-400 mt-0.5">
-                  <span x-show="agent.polymarket?.configured">
-                    <span class="tabular-nums" x-text="agent.polymarket?.positionCount || 0"></span> 持仓
-                  </span>
+                <!-- breakdown: 持仓 / pUSD / USDC.e -->
+                <div x-show="agent.polymarket?.configured" class="grid grid-cols-3 gap-1 mt-1 text-[10px] text-ink-400">
+                  <div>
+                    <div class="text-ink-300">持仓</div>
+                    <div class="tabular-nums text-ink-600" x-text="(agent.polymarket?.positionCount || 0) + ' 笔'"></div>
+                    <div class="tabular-nums text-ink-500" x-text="fmt(agent.polymarket?.positionsValueUsd || 0)"></div>
+                  </div>
+                  <div>
+                    <div class="text-ink-300">pUSD (V2 抵押)</div>
+                    <div class="tabular-nums text-ink-600 font-medium" :class="(agent.polymarket?.pusd || 0) > 0 ? 'text-green-600' : 'text-ink-300'" x-text="fmt(agent.polymarket?.pusd || 0)"></div>
+                  </div>
+                  <div>
+                    <div class="text-ink-300">USDC.e (闲置)</div>
+                    <div class="tabular-nums text-ink-600" x-text="fmt(agent.polymarket?.usdc || 0)"></div>
+                  </div>
+                </div>
+                <div class="text-[10px] text-ink-400 mt-0.5">
                   <span x-show="agent.polymarket && !agent.polymarket.configured" class="text-ink-300">未配置 API</span>
                   <span x-show="!agent.polymarket" class="text-ink-300">无 Polygon 钱包</span>
-                  <span x-show="agent.polymarket?.configured" class="text-ink-300">Polygon USDC.e</span>
                 </div>
               </div>
             </div>

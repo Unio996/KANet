@@ -87,6 +87,24 @@ export async function getUsdcBalance(address) {
 }
 
 /**
+ * 获取 Polygon 钱包的 pUSD 余额 (Polymarket V2 抵押 token, 1:1 USDC wrap)
+ */
+export async function getPusdBalance(address) {
+  try {
+    return await withProvider(POLYGON_RPC, async (provider) => {
+      const pusd = new ethers.Contract(PUSD_TOKEN, [
+        'function balanceOf(address) view returns (uint256)'
+      ], provider);
+      const balance = await pusd.balanceOf(address);
+      return parseFloat(ethers.formatUnits(balance, USDC_DECIMALS));
+    });
+  } catch (e) {
+    console.error('[polymarket] pUSD balance error:', e.message);
+    return null;
+  }
+}
+
+/**
  * 创建 CLOB API 密钥（L2 认证）
  * 需要用钱包私钥签名一个注册消息
  */

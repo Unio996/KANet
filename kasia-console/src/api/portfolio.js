@@ -249,31 +249,38 @@ function _getExchangeLocks(agentAddress) {
 // ── Polymarket open positions (best-effort) ──
 async function _getPolymarketSummary(relayId) {
   try {
-    const { getPolygonWallet, getPositions } = await import('../services/polymarket.js');
+    const { getPolygonWallet, getPositions, getUsdcBalance, getPusdBalance } = await import('../services/polymarket.js');
     const wallet = getPolygonWallet(relayId);
     if (!wallet) return null;
     const hasCreds = !!sqlite.prepare(
       "SELECT 1 FROM config_entries WHERE key = ?"
     ).get(`polymarket_api_${relayId}`);
-    // data-api 不需要 creds, 但 'configured' 仍以 CLOB key 是否已设为准.
-    const positions = await Promise.race([
-      getPositions(wallet.address),
-      new Promise(r => setTimeout(() => r([]), 5000)),
+    // 并行拉: positions + USDC.e + pUSD (5s 超时, 部分失败不阻塞)
+    const [positions, usdcBal, pusdBal] = await Promise.all([
+      Promise.race([getPositions(wallet.address), new Promise(r => setTimeout(() => r([]), 5000))]),
+      Promise.race([getUsdcBalance(wallet.address), new Promise(r => setTimeout(() => r(null), 5000))]),
+      Promise.race([getPusdBalance(wallet.address), new Promise(r => setTimeout(() => r(null), 5000))]),
     ]);
     const list = Array.isArray(positions) ? positions : [];
-    let approxValueUsd = 0;
+    let positionsValueUsd = 0;
     for (const p of list) {
-      // data-api gives currentValue directly (size × curPrice); fall back if missing.
       const cv = parseFloat(p.currentValue ?? 0);
-      if (cv > 0) { approxValueUsd += cv; continue; }
+      if (cv > 0) { positionsValueUsd += cv; continue; }
       const sz = parseFloat(p.size ?? 0);
       const pr = parseFloat(p.curPrice ?? p.avgPrice ?? 0);
-      if (sz > 0 && pr > 0) approxValueUsd += sz * pr;
+      if (sz > 0 && pr > 0) positionsValueUsd += sz * pr;
     }
+    const usdc = usdcBal || 0;
+    const pusd = pusdBal || 0;
+    // approxValueUsd 现在是 positions + USDC.e + pUSD 三层合计 (V2 抵押 + 持仓 + 闲置 USDC)
+    const approxValueUsd = positionsValueUsd + usdc + pusd;
     return {
       configured: hasCreds,
       walletAddress: wallet.address,
       positionCount: list.length,
+      positionsValueUsd,
+      usdc,
+      pusd,
       approxValueUsd,
     };
   } catch {
