@@ -298,6 +298,75 @@ async function _publishBrokerSellOffer(peer, amount, eventId) {
   return markProcessed(eventId, `sell_published:${res.offer_id}`);
 }
 
+// ════════════════════════════════════════════════════════════════
+// T-J2-2026-05-10 r237 T2.21 Phase 2 (β.1) — _publishBrokerBuyOffer mirror SELL reverse direction
+// ════════════════════════════════════════════════════════════════
+// Phase 2 (β.1) BUY flow Reading D parity (NWT r300 决断 + Owner 5/10 钦定 ship):
+// - broker (Trader-B) 真 BUY maker, give=USDT want=KAS publish exchange offer
+// - 30min P2P first: KANet seeker take + send KAS direct user kasia (accept_v1 receive_address) → broker pay seeker USDT
+// - 30min fallback (T2.24 后续 sub commit): broker take 自己 + cex-bridge BUY KAS @ Gate.io + send KAS user kasia
+// - hedge: broker SELL KAS hedge post P2P fill (exchange-machine.js:1120 hedgeSide='SELL' for !makerGaveKas dynamic 真 work)
+//
+// caller 真 broker BSC USDT receipt detection (T2.22 后续 sub commit, mirror broker-intake KAS SELL flow).
+// ref: NWT r300 PASS β.1 ship plan, J2 r236 grep evidence broker-buy-handler.js mirror mismatch.
+
+const BUY_SPREAD_PCT = 0.015;  // 1.5% offer above mid for broker BUY (mirror SELL spread, broker margin)
+
+async function _publishBrokerBuyOffer(peer, usdtAmount, eventId) {
+  const feeUsdt = 0.05;  // broker BUY fee (mirror 0.1 KAS SELL fee, ~10x USD value)
+  const netUsdt = usdtAmount - feeUsdt;
+  if (netUsdt <= 0) {
+    await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
+      message: `收到 ${usdtAmount} USDT 但太少了 (扣 ${feeUsdt} USDT broker fee 后不够). 请联系 broker 退款 (走 dispute 流程, broker BSC tx 真已 record).`,
+    });
+    return markProcessed(eventId, 'usdt_amount_too_small');
+  }
+  let midPrice = 0;
+  try { midPrice = await _fetchKasPrice(); } catch {}
+  if (!midPrice || midPrice <= 0) {
+    await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
+      message: `收到 ${usdtAmount} USDT 但无价格 feed, 请稍后重试 OR 走 dispute 退款.`,
+    });
+    return markProcessed(eventId, 'no_price_buy');
+  }
+  // BUY: broker want KAS, 真 spread above mid (broker margin). KAS qty = netUsdt / (mid * (1 + spread))
+  const wantKas = (netUsdt / (midPrice * (1 + BUY_SPREAD_PCT))).toFixed(4);
+
+  let res = null;
+  try {
+    res = await _publishOffer({
+      relayNodeId: BROKER_RELAY_ID,
+      give_asset: 'USDT', give_amount: String(netUsdt),
+      give_chain: 'bnb',
+      want_asset: 'KAS', want_amount: wantKas,
+      verification: 'kaspa_tx',  // BUY: KAS deliver verification 真 Kaspa chain TX
+      verification_meta: {
+        receive_address: peer,  // KAS deliver direct 真 user kasia (zero-custody at delivery, ch17 §17.5 receive_address mechanism)
+        expected_asset: 'KAS',
+      },
+      expires_minutes: PUBLISH_EXPIRES_MIN,
+      metadata: {
+        source: 'broker-intake-buy', user_kasia_address: peer, intent_usdt: usdtAmount,
+        fee_usdt: feeUsdt, net_usdt: netUsdt, mid_price: midPrice, hedge_enabled: true,
+      },
+    });
+  } catch (err) { res = { ok: false, error: err.message }; }
+
+  if (!res?.ok) {
+    await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
+      message: `BUY 挂单失败 (${(res?.error || 'unknown').slice(0,80)}), 联系 broker 退 USDT (走 dispute, broker BSC tx 已 record).`,
+    });
+    return markProcessed(eventId, 'buy_publish_failed');
+  }
+
+  await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
+    message: `收到 ${usdtAmount} USDT ✓ 已挂 BUY 单 ${netUsdt} USDT → ${wantKas} KAS (fee ${feeUsdt} USDT)\n` +
+             `订单: ${res.offer_id.slice(0,8)} · 2h 内有 seeker 接单, KAS 真直发你 Kasia 钱包\n` +
+             `广播 tx: ${res.broadcast_tx?.slice(0,16) || '?'}`,
+  });
+  return markProcessed(eventId, `buy_published:${res.offer_id}`);
+}
+
 export async function _scanExpiredBrokerOffers() {
   const trader = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id = ?`).get(BROKER_RELAY_ID);
   if (!trader) return { handled: 0, scanned: 0, reason: 'no_broker_relay' };
