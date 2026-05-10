@@ -584,7 +584,32 @@ export async function finalizeBuy({ user_kasia, qty, pay_chain, give_asset = 'KA
   const payChain = String(pay_chain).toLowerCase();
   // T-NWT-2026-04-27 v1.1 Phase A step 2: give_asset 参数 propagation 到 _aggregateWithFallback.
   const merged = await _aggregateWithFallback(qty, payChain, give_asset);
-  if (!merged.ok) return { ok: false, error: merged.error, available: merged.available };
+  if (!merged.ok) {
+    // T-J2-2026-05-10 r244 T2.26 (Phase 2 β.1 wire): _aggregateWithFallback fail → fall broker-as-maker custody.
+    // ch17 §17.7 BUY zero-custody P2P first 真 守 (merged.ok=true 真 P2P path 真 priority).
+    // P2P 真 NOT work (no maker offers / insufficient liquidity) → broker-as-maker fallback (Phase 2 β.1).
+    // 真 NWT r302 决断 coexist (真 P2P 优先, broker-as-maker 真 fallback) align.
+    // give_asset='KAS' only (broker BUY parity 真 KAS scope, USDT/USDC BUY 真 NOT supported).
+    if (give_asset === 'KAS' && payChain === 'bnb') {
+      try {
+        const fallback = await _proposeBrokerAsBuyMaker(user_kasia, qty, payChain);
+        if (fallback.ok) {
+          console.log(`[broker-buy T2.26 wire] _aggregateWithFallback fail (${merged.error}) → broker-as-maker fallback order=${fallback.order_id?.slice(-12)} usdt=${fallback.expected_usdt}`);
+          return {
+            ok: true,
+            broker_as_maker: true,
+            offer_id: fallback.order_id,
+            ack_text: fallback.dm_message,
+            broker_dynamic_quote: { qty, total_usdt: fallback.expected_usdt, pay_chain: payChain, note: 'broker-as-maker fallback (P2P 无 maker)' },
+          };
+        }
+        console.warn(`[broker-buy T2.26 wire] broker-as-maker fallback fail: ${fallback.error}`);
+      } catch (e) {
+        console.warn(`[broker-buy T2.26 wire] _proposeBrokerAsBuyMaker err: ${e.message}`);
+      }
+    }
+    return { ok: false, error: merged.error, available: merged.available };
+  }
 
   // T-J2-2026-04-27 v1.2 (c): 真传 EVM addr (买 stable 真 user EVM 收款 addr) 进 accept_v1
   // 真 receive_address 真 backward compat (= user kasia, KAS path 真用), evm_recv_address 真 stable 真用.
