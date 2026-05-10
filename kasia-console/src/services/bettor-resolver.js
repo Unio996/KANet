@@ -18,11 +18,26 @@ export async function resolveExpired() {
   if (_running) return { skipped: 'already running' };
   _running = true;
   try {
+    // J1 #105 fix: scanner 把 end_date 写成赛季结束日不是单场, resolver SQL 太严漏 6 仓.
+    // OR 化: 任一条件命中即拉链上 payoutNumerators (双重确认):
+    //   1. end_date < now (老逻辑, 时间到了)
+    //   2. 最新 snapshot current_yes_price ∈ {0, 1} (Polymarket 价已 binary 化, 实际已 resolve)
     const pendings = sqlite.prepare(`
-      SELECT id, condition_id, decision, p_mid, yes_price, size_usd, fraction
-      FROM bettor_recommendations
-      WHERE status = 'pending' AND outcome IS NULL
-        AND end_date IS NOT NULL AND end_date < datetime('now')
+      SELECT r.id, r.condition_id, r.decision, r.p_mid, r.yes_price, r.size_usd, r.fraction
+      FROM bettor_recommendations r
+      WHERE r.status = 'pending' AND r.outcome IS NULL
+        AND (
+          (r.end_date IS NOT NULL AND r.end_date < datetime('now'))
+          OR EXISTS (
+            SELECT 1 FROM bettor_sim_positions p
+            JOIN bettor_sim_snapshots s ON s.id = (
+              SELECT id FROM bettor_sim_snapshots WHERE position_id = p.id
+              ORDER BY snapshot_at DESC LIMIT 1
+            )
+            WHERE p.recommendation_id = r.id
+              AND (s.current_yes_price <= 0.01 OR s.current_yes_price >= 0.99)
+          )
+        )
       LIMIT 200
     `).all();
 
