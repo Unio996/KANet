@@ -112,13 +112,17 @@ const _idempotencyCache = new Map();
 const CACHE_MAX = 1000;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
-async function _cacheKey({ model, system, message, messages, tools, tool_choice }) {
+async function _cacheKey({ model, system, message, messages, tools, tool_choice, peer }) {
   const { createHash } = await import('node:crypto');
   const h = createHash('sha256');
   // J2 r54 fix: 加 tool_choice; J2 r58 dimension: 加 messages (multi-turn history) — 同 model+system 不同 messages
   // 行为不同, 不可 cache hit 错位. messages || single-message fallback 统一形式.
+  // T-J2-2026-05-10 SC6a (triage T3): 加 peer — 防 cross-peer cache pollution。
+  // baseline trace 实证 5 fresh peer 同 user msg ('我想卖一点 kas') → 同 hash → 5min TTL cache hit
+  // 拿别 peer cached reply → broker dialog reply 错位 (owner_88kas_verbatim Step 1 1ms cache hit signature)。
+  // 加 peer 后 per-peer 隔离, Mind/Brain (per-agent peer 固定) cache hit 不破。
   const normalizedMessages = messages || (message ? [{ role: 'user', content: message }] : []);
-  h.update(JSON.stringify({ model, system: system || '', messages: normalizedMessages, tools: tools || null, tool_choice: tool_choice || null }));
+  h.update(JSON.stringify({ model, system: system || '', messages: normalizedMessages, tools: tools || null, tool_choice: tool_choice || null, peer: peer || null }));
   return h.digest('hex');
 }
 
@@ -202,7 +206,8 @@ export async function ask(message, idempotencyKey, options) {
   log("→", idempotencyKey.slice(0, 16), `[${model}]${isCodex ? ' [codex]' : ''}${returnAsObject ? ' [tools]' : ''}${callerMessages ? ` [msgs=${callerMessages.length}]` : ''}${traceId ? ` [trace=${traceId.slice(0, 8)}]` : ''}`, hasSystem ? `sys=${options.system.length}c` : '', callerMessages ? `(history)` : JSON.stringify(message).slice(0, 50));
 
   // D5 idempotency cache check — pre-fetch
-  const cacheKey = await _cacheKey({ model, system: options?.system, message, messages: callerMessages, tools, tool_choice });
+  // T-J2-2026-05-10 SC6a: peer 透传 _cacheKey (防 cross-peer cache pollution)。
+  const cacheKey = await _cacheKey({ model, system: options?.system, message, messages: callerMessages, tools, tool_choice, peer: options?.peer });
   const cached = _cacheGet(cacheKey);
   if (cached) {
     log("← [cache hit]", typeof cached === 'string' ? cached.slice(0, 80) : JSON.stringify(cached).slice(0, 80));

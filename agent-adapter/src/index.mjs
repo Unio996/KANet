@@ -62,7 +62,8 @@ async function handleReply(req, res) {
   const hasTools = Array.isArray(tools) && tools.length > 0;
   const hasMessages = Array.isArray(messages) && messages.length > 0;
   // 共享 options spread — tools/tool_choice/trace_id 4 path 都可能用
-  const sharedOpts = { ...(hasTools ? { tools, tool_choice } : {}), ...(trace_id ? { trace_id } : {}) };
+  // T-J2-2026-05-10 SC6a (triage T3): peer 透传 ask() options → _cacheKey hash (防 cross-peer cache pollution)。
+  const sharedOpts = { ...(hasTools ? { tools, tool_choice } : {}), ...(trace_id ? { trace_id } : {}), ...(peer ? { peer } : {}) };
 
   let rawReply;
   let ctx = null;
