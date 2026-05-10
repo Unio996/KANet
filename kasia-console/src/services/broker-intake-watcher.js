@@ -561,7 +561,7 @@ export async function _scanUntakenOffersFallback() {
   const trader = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id = ?`).get(BROKER_RELAY_ID);
   if (!trader) return { handled: 0, scanned: 0, reason: 'no_broker_relay' };
   const rows = sqlite.prepare(`
-    SELECT id, give_amount, want_amount, metadata, broadcast_at FROM exchange_offers
+    SELECT id, give_amount, want_amount, metadata, broadcast_at, broadcast_tx_id FROM exchange_offers
     WHERE maker = ?
       AND give_asset = 'KAS'
       AND taker IS NULL
@@ -599,7 +599,7 @@ export async function _scanUntakenOffersFallback() {
       if (!cancelRes.ok || !cancelRes.cancel_tx) {
         console.warn(`[broker-fallback] T2.5c cancel_v1 fail offer ${r.id.slice(0,8)}: ${cancelRes.error || 'no cancel_tx'}`);
         recordChainEvent({
-          txid: r.id, eventType: 'broker_fallback_cancel_failed',
+          txid: r.broadcast_tx_id, eventType: 'broker_fallback_cancel_failed',
           fromAddress: null, toAddress: null, observedBy: 'system',
           payload: { offer_id: r.id, error: cancelRes.error || 'no cancel_tx' },
         });
@@ -615,7 +615,7 @@ export async function _scanUntakenOffersFallback() {
       // ref: NWT r288 evidence + r289 Option A PASS.
       if (sellRes.ok) {
         recordChainEvent({
-          txid: r.id, eventType: 'broker_fallback_claim',
+          txid: cancelRes.cancel_tx, eventType: 'broker_fallback_claim',
           fromAddress: null, toAddress: null, observedBy: 'system',
           payload: { offer_id: r.id, cex_order_id: sellRes.orderId, cancel_tx: cancelRes.cancel_tx, qty: giveAmount, mid_price: midPrice },
         });
@@ -640,7 +640,7 @@ export async function _scanUntakenOffersFallback() {
             const refundResult = await advanceToRefunded({ orderId: orderRow.id, reason: 'cex_permanent_fail' });
             if (refundResult?.ok) {
               recordChainEvent({
-                txid: r.id, eventType: 'broker_fallback_refunded',
+                txid: refundResult.txId, eventType: 'broker_fallback_refunded',
                 fromAddress: null, toAddress: null, observedBy: 'system',
                 payload: { offer_id: r.id, cancel_tx: cancelRes.cancel_tx, cex_sell_error: sellRes.error, refund_tx: refundResult.txId, refund_amount: refundResult.refundAmount },
               });
@@ -655,7 +655,7 @@ export async function _scanUntakenOffersFallback() {
         }
         // transient fail → 5min retry (现行 path)
         recordChainEvent({
-          txid: r.id, eventType: 'broker_fallback_cancelled',
+          txid: cancelRes.cancel_tx, eventType: 'broker_fallback_cancelled',
           fromAddress: null, toAddress: null, observedBy: 'system',
           payload: { offer_id: r.id, cancel_tx: cancelRes.cancel_tx, cex_sell_error: sellRes.error },
         });
@@ -687,7 +687,7 @@ export async function _scanUntakenOffersFallback() {
           VALUES (?, ?, 'USDT', NULL, ?, ?, ?, ?, NULL, datetime('now'))
         `).run(ledgerId, userKasia, proceedsUsdt, balanceAfter, `broker_fallback_fill:${sellRes.orderId}`, r.id);
         recordChainEvent({
-          txid: r.id, eventType: 'broker_fallback_fill',
+          txid: cancelRes.cancel_tx, eventType: 'broker_fallback_fill',
           fromAddress: null, toAddress: null, observedBy: 'system',
           payload: { offer_id: r.id, cancel_tx: cancelRes.cancel_tx, cex_order_id: sellRes.orderId, qty: filled.executedQty, proceeds_usdt: proceedsUsdt, balance_after: balanceAfter },
         });
@@ -698,7 +698,7 @@ export async function _scanUntakenOffersFallback() {
         handled++;
       } else {
         recordChainEvent({
-          txid: r.id, eventType: 'broker_fallback_pending',
+          txid: cancelRes.cancel_tx, eventType: 'broker_fallback_pending',
           fromAddress: null, toAddress: null, observedBy: 'system',
           payload: { offer_id: r.id, cancel_tx: cancelRes.cancel_tx, cex_order_id: sellRes.orderId, polled_ms: POLL_TIMEOUT_MS },
         });
