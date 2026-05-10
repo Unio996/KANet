@@ -321,6 +321,14 @@ export async function _scanExpiredBrokerOffers() {
       AND e.payload LIKE '%"offer_id":"' || exchange_offers.id || '"%'
       AND e.txid IN (SELECT tx_id FROM kaspa_tx_log)
     )
+    -- T-J2-2026-05-10 r223 T2.14 (NWT r289 Option A): 防 Z20 与 T2.5c CEX hedge race double-spend.
+    -- T2.5c placeCexOrder ok 后立即 INSERT broker_fallback_claim → Z20 SQL skip claimed offer.
+    -- 5/10 实证 race: 102 KAS SELL T2.5c CEX sold + Z20 refund 102 KAS = broker 净亏 ~98 KAS.
+    AND NOT EXISTS (
+      SELECT 1 FROM chain_events ce2
+      WHERE ce2.event_type = 'broker_fallback_claim'
+      AND ce2.payload LIKE '%"offer_id":"' || exchange_offers.id || '"%'
+    )
     AND json_extract(metadata, '$.user_kasia_address') IS NOT NULL
     ORDER BY broadcast_at DESC
     LIMIT 10
@@ -600,6 +608,18 @@ export async function _scanUntakenOffersFallback() {
       console.log(`[broker-fallback] T2.5c cancel_v1 ok offer=${r.id.slice(0,8)} tx=${String(cancelRes.cancel_tx).slice(0,12)}`);
       // Step 2: cex-bridge.placeCexOrder sell KAS @ mid
       const sellRes = await placeCexOrder({ cex: 'gateio', side: 'SELL', qty: giveAmount, price: midPrice });
+      // T-J2-2026-05-10 r223 T2.14 (NWT r289 Option A claim lock):
+      // CEX placeOrder ok 后立即 INSERT broker_fallback_claim → Z20 _scanExpiredBrokerOffers SQL filter
+      // NOT EXISTS broker_fallback_claim → 防 race (Z20 在 T2.5c CEX hedge in-flight 时 fire refund → broker 双倍亏 KAS).
+      // 5/10 实证 race: T2.5c CEX sell 102 KAS + Z20 refund 102 KAS chain TX afc63057 → broker 净亏 ~98 KAS.
+      // ref: NWT r288 evidence + r289 Option A PASS.
+      if (sellRes.ok) {
+        recordChainEvent({
+          txid: r.id, eventType: 'broker_fallback_claim',
+          fromAddress: null, toAddress: null, observedBy: 'system',
+          payload: { offer_id: r.id, cex_order_id: sellRes.orderId, cancel_tx: cancelRes.cancel_tx, qty: giveAmount, mid_price: midPrice },
+        });
+      }
       if (!sellRes.ok) {
         console.warn(`[broker-fallback] T2.5c CEX sell fail offer=${r.id.slice(0,8)}: ${sellRes.error}`);
         // T2.10a (NWT r279): CEX permanent fail detection — size/asset 类不可恢复 → fail-fast advanceToRefunded.
