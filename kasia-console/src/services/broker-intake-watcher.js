@@ -312,7 +312,7 @@ async function _publishBrokerSellOffer(peer, amount, eventId) {
 
 const BUY_SPREAD_PCT = 0.015;  // 1.5% offer above mid for broker BUY (mirror SELL spread, broker margin)
 
-async function _publishBrokerBuyOffer(peer, usdtAmount, eventId) {
+export async function _publishBrokerBuyOffer(peer, usdtAmount, eventId) {
   const feeUsdt = 0.05;  // broker BUY fee (mirror 0.1 KAS SELL fee, ~10x USD value)
   const netUsdt = usdtAmount - feeUsdt;
   if (netUsdt <= 0) {
