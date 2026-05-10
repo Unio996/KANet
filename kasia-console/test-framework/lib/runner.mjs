@@ -720,6 +720,47 @@ const actions = {
   },
 
   /**
+   * T-J2-2026-05-10 SC7 (triage T3): wire llm_mock_dialogue action handler.
+   * 委托 test-framework/lib/llm-mock-user.mjs:runMockDialogue。
+   * step: { action: 'llm_mock_dialogue', personaKey, peer_addr, broker_relay_id, max_turns?, stop_on_broker_contains? }
+   * → returns { turns, broker_replies, final_state, total_turns }
+   */
+  async llm_mock_dialogue(step, ctx) {
+    if (!step.personaKey) return { ok: false, error: 'llm_mock_dialogue requires personaKey (normal_seller / fire_user / mind_changer / compound_intent / liar)' };
+    if (!step.peer_addr) return { ok: false, error: 'llm_mock_dialogue requires peer_addr' };
+    if (!step.broker_relay_id) return { ok: false, error: 'llm_mock_dialogue requires broker_relay_id' };
+    const { runMockDialogue } = await import('./llm-mock-user.mjs');
+    const PORT = process.env.PORT || 3100;
+    const stopContains = Array.isArray(step.stop_on_broker_contains) ? step.stop_on_broker_contains : [];
+    try {
+      const result = await runMockDialogue({
+        personaKey: step.personaKey,
+        peer_addr: step.peer_addr,
+        broker_relay_id: step.broker_relay_id,
+        max_turns: step.max_turns || 10,
+        stop_on: (brokerReply) => stopContains.some(s => String(brokerReply || '').includes(s)),
+        send_to_broker: async ({ peer_addr, broker_relay_id, message }) => {
+          const r = await fetch(`http://127.0.0.1:${PORT}/api/agent/reply`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ relayNodeId: broker_relay_id, peer: peer_addr, message }),
+          });
+          const d = await r.json().catch(() => ({}));
+          return d.reply || '';
+        },
+        query_state: async (peer_addr) => {
+          const r = await fetch(`http://127.0.0.1:${PORT}/api/conversations/${encodeURIComponent(peer_addr)}/draft`).catch(() => null);
+          if (!r?.ok) return null;
+          return await r.json().catch(() => null);
+        },
+      });
+      return { ok: true, turns: result.turns, broker_replies: result.broker_replies, final_state: result.final_state, total_turns: result.turns.length };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  },
+
+  /**
    * Trigger broker-intake-watcher refund sweep manually (instead of waiting 5min cron).
    * step: { action: 'trigger_refund_sweep', peer_addr }
    */
