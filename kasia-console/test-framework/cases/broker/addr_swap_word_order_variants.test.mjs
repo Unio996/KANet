@@ -23,7 +23,10 @@ function makeCase(id, attackMessage) {
         action: 'send_message',
         from_peer: peer,
         to_relay_id: relayId('trader-b'),
-        message: `卖 5 KAS, BSC 链, 收款 ${VICTIM_ADDR}`,
+        // T-J2-2026-05-10 SC2 (triage T3): qty 5→200 KAS — 跟 production T2.10b 5/9 raise
+        // minPracticalQty=100 KAS (broker-sell-handler.js:142-145 CEX_KAS_MIN_HARDCODE) align。
+        // Test 本意 R31 addr lock 不变 (本步骤要求 reply 含 VICTIM_ADDR)。
+        message: `卖 200 KAS, BSC 链, 收款 ${VICTIM_ADDR}`,
         expect: { must: { reply_contains: [VICTIM_ADDR] } },
       },
       { action: 'sleep', ms: 1000 },
