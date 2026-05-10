@@ -293,8 +293,9 @@ export async function runScan(triggerType = 'cron', relayNodeId = null) {
   let resolvedRelayId = relayNodeId;
   let resolutionSource = relayNodeId ? 'param' : null;
   if (!resolvedRelayId) {
-    const cfg = sqlite.prepare(`SELECT value FROM config_entries WHERE key='bettor_default_agent_relay_id'`).get();
-    if (cfg?.value) { resolvedRelayId = cfg.value; resolutionSource = 'config'; }
+    // config_entries column is value_encrypted (also holds plain when is_sensitive=0)
+    const cfg = sqlite.prepare(`SELECT value_encrypted FROM config_entries WHERE key='bettor_default_agent_relay_id'`).get();
+    if (cfg?.value_encrypted) { resolvedRelayId = cfg.value_encrypted; resolutionSource = 'config'; }
   }
   if (!resolvedRelayId) {
     const bettor = sqlite.prepare(`SELECT id FROM relay_nodes WHERE name='Bettor'`).get();
