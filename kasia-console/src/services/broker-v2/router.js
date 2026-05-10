@@ -61,10 +61,22 @@ const CHAIN_MIN_THRESHOLDS = {
 function _normalizeWithdrawChain(c) {
   if (!c) return null;
   const u = c.toUpperCase();
-  if (['TRX','TRC20'].includes(u)) return 'TRX';
+  if (['TRX','TRC20','TRON'].includes(u)) return 'TRX';
   if (['BSC','BNB','BEP20'].includes(u)) return 'BSC';
   if (['ETH','ERC20'].includes(u)) return 'ETH';
   return u;
+}
+
+// T-J2-2026-05-10 r230 T2.18 (NWT r294 Bug #14): broker-v2 internal chain → DB pay_chain mapping.
+// 真因: DB retail_dex_orders.pay_chain 真 broker-sell-handler.js:129 真 'bsc'→'bnb' normalize storage.
+// WITHDRAW SQL WHERE pay_chain = LOWER(wChain) 真 'bsc' 真 不 match DB 'bnb'. 修真 dbChain explicit map.
+// CHAIN_MIN_THRESHOLDS keys 真 broker-v2 internal chain ('BSC'/'TRX'/'ETH'), DB schema 真 lowercased ('bnb'/'trx'/'eth').
+// cex-bridge.js withdrawCex 真 接 'BSC' (Gate.io API expects), 真 cex-bridge normalizeChain 真 reuse.
+function _payChainForDb(wChain) {
+  if (wChain === 'BSC') return 'bnb';  // broker-sell-handler 真 bsc→bnb normalize storage
+  if (wChain === 'TRX') return 'trx';   // direct lowercase
+  if (wChain === 'ETH') return 'eth';
+  return String(wChain || '').toLowerCase();
 }
 
 /**
@@ -139,12 +151,13 @@ export async function handleMessage(peer, msg) {
     if (balance < wAmount) return `余额不足: ${wAsset} 现 ${balance.toFixed(4)}, 提 ${wAmount} 不够. 回 "余额" 查账.`;
     const minT = CHAIN_MIN_THRESHOLDS[wAsset]?.[wChain];
     if (minT && wAmount < minT) return `${wAsset} ${wChain} 提币最小 ${minT}, 你提 ${wAmount} 太少. fee 不划算, 累积再提.`;
+    const dbChain = _payChainForDb(wChain);
     const payRow = sqlite.prepare(`
       SELECT pay_address FROM retail_dex_orders
       WHERE user_kasia_address = ? AND pay_chain = ? AND pay_address IS NOT NULL
         AND state NOT IN ('failed','refunded','cancelled')
       ORDER BY created_at DESC LIMIT 1
-    `).get(peer, wChain.toLowerCase());
+    `).get(peer, dbChain);
     if (!payRow?.pay_address) return `没记录你的 ${wChain} 收款地址. 先下个 SELL 单告诉我地址, 然后再提.`;
     const { withdrawCex } = await import('../cex-bridge.js');
     const wRes = await withdrawCex({ cex: 'gateio', asset: wAsset, amount: wAmount, toAddr: payRow.pay_address, chain: wChain });
