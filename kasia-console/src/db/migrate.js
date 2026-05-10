@@ -2992,5 +2992,37 @@ export function runMigrations() {
     }
   }
 
+  // v94: bettor_adjustments — 调仓建议队列 (Phase 3e-1, Owner 5/10 钦定 A + 30pp 止损)
+  // 1h cron 检测 open positions 反向 drift + 浮亏, 写建议. UI 一键审批/拒.
+  // 不自动执行 — Owner 审批后才平仓 (paper trade 阶段安全).
+  {
+    const has94 = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='bettor_adjustments'").get();
+    if (!has94) {
+      sqlite.exec(`
+        CREATE TABLE bettor_adjustments (
+          id TEXT PRIMARY KEY,
+          position_id TEXT NOT NULL,
+          recommendation_id TEXT NOT NULL,
+          relay_node_id TEXT,
+          adj_type TEXT NOT NULL,
+          trigger_reason TEXT NOT NULL,
+          drift_pp REAL,
+          pnl_pct REAL,
+          unrealized_pnl REAL,
+          current_yes_price REAL,
+          severity TEXT NOT NULL DEFAULT 'warning',
+          status TEXT NOT NULL DEFAULT 'pending',
+          decided_at TEXT,
+          decided_by TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_adj_status ON bettor_adjustments(status, created_at DESC);
+        CREATE INDEX idx_adj_position ON bettor_adjustments(position_id, created_at DESC);
+        CREATE INDEX idx_adj_relay ON bettor_adjustments(relay_node_id, status);
+      `);
+      console.log('[migrate] v94: bettor_adjustments 表 + 3 索引 创建 (Phase 3e-1 调仓队列).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

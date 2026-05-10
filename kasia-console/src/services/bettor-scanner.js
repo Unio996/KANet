@@ -42,6 +42,7 @@ const TOP_N = 10;
 const LLM_CONCURRENCY = 3;
 const DEFAULT_BANKROLL = 1000;
 const KELLY_FRACTION = 0.25;
+const INVENTORY_SAFETY_MIN_FRAC = 0.10;     // 即使全仓占满, 仍至少留 10% bankroll 给新单
 const SCAN_TIMEOUT_PER_MARKET_MS = 180_000; // 3 min hard cap per market
 
 // ── prompt for LLM estimator ─────────────────────────────────────────────
@@ -136,6 +137,17 @@ async function pMapLimit(items, limit, fn) {
   return results;
 }
 
+// ── inventory-aware bankroll: 扣已 open 仓位 ───────────────────────────────
+
+function getOpenInventory(relayNodeId) {
+  if (!relayNodeId) return 0;
+  const r = sqlite.prepare(`
+    SELECT COALESCE(SUM(size_usd), 0) total FROM bettor_sim_positions
+    WHERE relay_node_id = ? AND closed_at IS NULL AND size_usd > 0
+  `).get(relayNodeId);
+  return r?.total || 0;
+}
+
 // ── adapter URL lookup per Agent ─────────────────────────────────────────
 
 function getAdapterUrlForAgent(relayNodeId) {
@@ -150,7 +162,7 @@ function getAdapterUrlForAgent(relayNodeId) {
 
 // ── single-market scan ───────────────────────────────────────────────────
 
-async function scanOne(market, adapterUrl) {
+async function scanOne(market, adapterUrl, availableBankroll) {
   await loadLib();
   const yesPrice = market.yes / 100;
 
@@ -182,11 +194,17 @@ async function scanOne(market, adapterUrl) {
     return { market, error: 'LLM JSON parse failed', raw: llmResult.text?.slice(0, 200) };
   }
 
+  // Inventory-aware: bankroll 扣已 open 仓位, 至少留 INVENTORY_SAFETY_MIN_FRAC 防全锁死
+  const effectiveBankroll = Math.max(
+    availableBankroll != null ? availableBankroll : DEFAULT_BANKROLL,
+    DEFAULT_BANKROLL * INVENTORY_SAFETY_MIN_FRAC
+  );
+
   const rec = _recommendBet({
     pMid: est.pMid,
     sigma: est.sigma,
     yesPrice,
-    bankroll: DEFAULT_BANKROLL,
+    bankroll: effectiveBankroll,
     infoGapMonths,
     kellyFraction: KELLY_FRACTION,
   });
@@ -335,7 +353,12 @@ export async function runScan(triggerType = 'cron', relayNodeId = null) {
         return { ok: true, scanned: 0, written: 0, elapsed_ms: Date.now() - startedAt };
       }
 
-      const results = await pMapLimit(eligibleList, LLM_CONCURRENCY, (m) => scanOne(m, adapterUrl));
+      // Inventory-aware: snapshot already-open size for this relay, derive available bankroll
+      const openSize = getOpenInventory(resolvedRelayId);
+      const availableBankroll = Math.max(0, DEFAULT_BANKROLL - openSize);
+      console.log(`[bettor-scanner] inventory: open=$${openSize.toFixed(2)} / bankroll $${DEFAULT_BANKROLL} → available $${availableBankroll.toFixed(2)}`);
+
+      const results = await pMapLimit(eligibleList, LLM_CONCURRENCY, (m) => scanOne(m, adapterUrl, availableBankroll));
       const errors = results.filter(r => r?.error).length;
       const valid = results.filter(r => r && !r.error).length;
       console.log(`[bettor-scanner] LLM done: ${valid} ok, ${errors} errors`);

@@ -2,6 +2,7 @@ import { sqlite } from '../db/client.js';
 import { runScan, isScanRunning } from '../services/bettor-scanner.js';
 import { resolveExpired, isResolverRunning } from '../services/bettor-resolver.js';
 import { snapshotOpenPositions, isTrackerRunning } from '../services/bettor-position-tracker.js';
+import { evaluatePositions, isReactorRunning } from '../services/bettor-reactor.js';
 
 export async function registerBettorRoutes(fastify) {
   // GET /api/bettor/recommendations — top N most-recent batch (optional filter by relay_node_id)
@@ -117,6 +118,64 @@ export async function registerBettorRoutes(fastify) {
     return reply.send({ ok: true, message: 'resolver started' });
   });
 
+  // GET /api/bettor/history — 全部历史推荐 + sim_position drift + latest snapshot
+  // Owner 5/10 钦定: 没历史的智能体没意义. 默认返全部 (不限批次), 按 opened_at 倒序.
+  fastify.get('/api/bettor/history', async (request, reply) => {
+    const relayNodeId = request.query.relay_node_id || null;
+    const limit = Math.min(parseInt(request.query.limit) || 100, 500);
+
+    let where = ['1=1'];
+    const args = [];
+    if (relayNodeId) { where.push('p.relay_node_id = ?'); args.push(relayNodeId); }
+
+    const rows = sqlite.prepare(`
+      SELECT
+        p.id position_id, p.recommendation_id, p.relay_node_id, p.direction,
+        p.entry_yes_price, p.entry_buy_price, p.size_usd, p.shares,
+        p.opened_at, p.closed_at, p.close_reason, p.realized_pnl,
+        p.max_drawdown_pp, p.max_unrealized_gain_pp, p.last_snapshot_at,
+        r.market_id, r.condition_id, r.slug, r.question,
+        r.p_mid, r.sigma, r.edge, r.info_gap_months,
+        r.volume_24h, r.liquidity, r.end_date, r.score, r.trigger_type, r.llm_tier,
+        r.outcome, r.was_correct, r.brier, r.pnl_hypothetical, r.status, r.scanned_at
+      FROM bettor_sim_positions p
+      JOIN bettor_recommendations r ON r.id = p.recommendation_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY p.opened_at DESC
+      LIMIT ?
+    `).all(...args, limit);
+
+    // Attach latest snapshot per position (1 row, drift now)
+    const snapStmt = sqlite.prepare(`
+      SELECT snapshot_at, current_yes_price, current_buy_price, unrealized_pnl, drift_pp
+      FROM bettor_sim_snapshots WHERE position_id = ?
+      ORDER BY snapshot_at DESC LIMIT 1
+    `);
+    for (const r of rows) {
+      r.latest_snapshot = snapStmt.get(r.position_id) || null;
+    }
+
+    // Aggregate by batch (scanned_at) for top-line summary
+    const batches = {};
+    for (const r of rows) {
+      const key = r.scanned_at;
+      if (!batches[key]) batches[key] = { scanned_at: key, n: 0, n_resolved: 0, n_open: 0, total_unrealized_pnl: 0, total_realized_pnl: 0 };
+      batches[key].n++;
+      if (r.closed_at) batches[key].n_resolved++;
+      else batches[key].n_open++;
+      if (r.realized_pnl != null) batches[key].total_realized_pnl += r.realized_pnl;
+      if (r.latest_snapshot && r.latest_snapshot.unrealized_pnl != null) batches[key].total_unrealized_pnl += r.latest_snapshot.unrealized_pnl;
+    }
+    const batchSummary = Object.values(batches).sort((a, b) => b.scanned_at.localeCompare(a.scanned_at));
+
+    return reply.send({
+      ok: true,
+      total: rows.length,
+      batches: batchSummary,
+      positions: rows,
+    });
+  });
+
   // GET /api/bettor/positions — 纸面持仓 + 时点快照
   fastify.get('/api/bettor/positions', async (request, reply) => {
     const relayNodeId = request.query.relay_node_id || null;
@@ -153,6 +212,81 @@ export async function registerBettorRoutes(fastify) {
     }
 
     return reply.send({ ok: true, count: positions.length, positions });
+  });
+
+  // GET /api/bettor/adjustments — 调仓建议队列 (per-agent or global)
+  fastify.get('/api/bettor/adjustments', async (request, reply) => {
+    const relayNodeId = request.query.relay_node_id || null;
+    const status = request.query.status || 'pending';
+    const limit = Math.min(parseInt(request.query.limit) || 50, 200);
+
+    const where = ['a.status = ?'];
+    const args = [status];
+    if (relayNodeId) { where.push('a.relay_node_id = ?'); args.push(relayNodeId); }
+
+    const rows = sqlite.prepare(`
+      SELECT
+        a.id, a.position_id, a.recommendation_id, a.adj_type, a.trigger_reason,
+        a.drift_pp, a.pnl_pct, a.unrealized_pnl, a.current_yes_price,
+        a.severity, a.status, a.created_at, a.decided_at, a.decided_by,
+        r.question, r.slug, r.condition_id, r.end_date,
+        p.direction, p.entry_yes_price, p.size_usd
+      FROM bettor_adjustments a
+      JOIN bettor_recommendations r ON r.id = a.recommendation_id
+      JOIN bettor_sim_positions p ON p.id = a.position_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY
+        CASE a.severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
+        a.created_at DESC
+      LIMIT ?
+    `).all(...args, limit);
+
+    return reply.send({ ok: true, count: rows.length, adjustments: rows });
+  });
+
+  // POST /api/bettor/adjustments/:id/decide — Owner 审批/拒绝
+  fastify.post('/api/bettor/adjustments/:id/decide', async (request, reply) => {
+    const { id } = request.params;
+    const decision = request.body?.decision; // 'approve' | 'reject'
+    const decidedBy = request.body?.decided_by || 'owner';
+
+    if (!['approve', 'reject'].includes(decision)) {
+      return reply.code(400).send({ error: 'decision must be approve or reject' });
+    }
+
+    const adj = sqlite.prepare(`SELECT * FROM bettor_adjustments WHERE id = ?`).get(id);
+    if (!adj) return reply.code(404).send({ error: 'adjustment not found' });
+    if (adj.status !== 'pending') return reply.code(409).send({ error: `already ${adj.status}` });
+
+    const now = new Date().toISOString();
+    sqlite.prepare(`
+      UPDATE bettor_adjustments SET status = ?, decided_at = ?, decided_by = ? WHERE id = ?
+    `).run(decision === 'approve' ? 'approved' : 'rejected', now, decidedBy, id);
+
+    // 'approve' 在 paper trade 阶段标 sim_position 为 close_reason='stop_loss'
+    // (实盘下单 Phase 3e-3 才接 Polymarket SDK)
+    if (decision === 'approve') {
+      const latestSnap = sqlite.prepare(`
+        SELECT unrealized_pnl FROM bettor_sim_snapshots WHERE position_id = ?
+        ORDER BY snapshot_at DESC LIMIT 1
+      `).get(adj.position_id);
+      sqlite.prepare(`
+        UPDATE bettor_sim_positions
+        SET closed_at = ?, close_reason = 'stop_loss', realized_pnl = ?
+        WHERE id = ? AND closed_at IS NULL
+      `).run(now, latestSnap?.unrealized_pnl || 0, adj.position_id);
+    }
+
+    return reply.send({ ok: true, status: decision === 'approve' ? 'approved' : 'rejected' });
+  });
+
+  // POST /api/bettor/evaluate-now — 手动触发 reactor
+  fastify.post('/api/bettor/evaluate-now', async (_request, reply) => {
+    if (isReactorRunning()) {
+      return reply.code(409).send({ ok: false, reason: 'reactor already running' });
+    }
+    evaluatePositions().catch(err => console.log(`[api/bettor] evaluate error: ${err.message}`));
+    return reply.send({ ok: true, message: 'reactor started' });
   });
 
   // POST /api/bettor/snapshot-now — 手动触发持仓快照

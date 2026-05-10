@@ -383,6 +383,10 @@ startBettorResolver();
 import { startTrackerCron as startBettorTracker } from './services/bettor-position-tracker.js';
 startBettorTracker();
 
+// Bettor reactor — Phase 3e-1 (1h cron, 反向 drift / 浮亏 触发调仓建议)
+import { startReactorCron as startBettorReactor } from './services/bettor-reactor.js';
+startBettorReactor();
+
 // Pre-split UTXOs via Relay IPC (after relays are running)
 import { autoSplitAll } from './services/utxo-splitter.js';
 await autoSplitAll();
