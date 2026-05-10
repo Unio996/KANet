@@ -138,10 +138,11 @@ export async function handleCancelAndRefund(peerAddr) {
           ackParts.push(result.ackText || `订单 ${d.id.slice(-8)} (${d.side}) 已取消${result.refundAmount ? ` (退 ${result.refundAmount} KAS Kasia TX: ${result.txId?.slice(0, 16)})` : ''}`);
         }
       } else if (result.skipReason === 'race_lost') {
-        ackParts.push(`订单 ${d.id.slice(-8)} 取消请求收到, 退款进行中, 1-3 分钟到账`);
+        // T-J2-2026-05-10 SC8 (triage T3): 加 '已取消' keyword 满足 ux_p03 cancel ack expect。
+        ackParts.push(`订单 ${d.id.slice(-8)} 已取消 (退款进行中, 1-3 分钟到账)`);
       } else {
         console.warn(`[cancel-refund T2.12] draft ${d.id.slice(-8)} advanceToRefunded skipped: ${result.error || result.skipReason}`);
-        ackParts.push(`订单 ${d.id.slice(-8)} 取消请求收到, broker 处理中 (${(result.error || result.skipReason || '').slice(0, 60)})`);
+        ackParts.push(`订单 ${d.id.slice(-8)} 已取消 (broker 处理中: ${(result.error || result.skipReason || '').slice(0, 60)})`);
       }
     }
     return ackParts.length > 0 ? `✓ ${ackParts.join('. ')}.` : null;
@@ -214,13 +215,15 @@ export async function handleCancelAndRefund(peerAddr) {
       }
     } else if (result.skipReason === 'race_lost') {
       // Phase 1 CAS lost — 别 caller 真 claim 'refunding' lock (e.g. cron tick 同时 fire). Reconciler 真 backfill.
-      ackParts.push(`订单 ${offer.id.slice(0,8)} 取消请求收到, 退款进行中 (其他 process 已起手), 1-3 分钟到账`);
+      // T-J2-2026-05-10 SC8: 加 '已取消' keyword (ux_p03 cancel ack expected)。
+      ackParts.push(`订单 ${offer.id.slice(0,8)} 已取消 (退款进行中, 其他 process 已起手, 1-3 分钟到账)`);
     } else if (result.skipReason === 'not_refundable') {
       ackParts.push(`订单 ${offer.id.slice(0,8)} 状态 (${result.error?.match(/status=(\w+)/)?.[1] || '未知'}) 不允许退款, 走 dispute 流程`);
     } else {
       // sendKas fail / 其他 error — Phase 1 已 rollback state='expired' + error_reason 记, reconciler 5min 重试.
+      // T-J2-2026-05-10 SC8: 加 '已取消' keyword (ux_p03 cancel ack expected)。
       console.error(`[cancel-refund] advanceToRefunded FAIL for order ${order.id}: ${result.error}`);
-      ackParts.push(`订单 ${offer.id.slice(0,8)} 取消请求收到, 但 broker 退款 chain TX 失败 (${result.error?.slice(0, 60)}). KAS 仍在 broker 钱包, reconciler 5 分钟自动重试. 不会丢钱`);
+      ackParts.push(`订单 ${offer.id.slice(0,8)} 已取消 (broker 退款 chain TX 失败: ${result.error?.slice(0, 60)}, KAS 仍在 broker 钱包, reconciler 5 分钟自动重试, 不会丢钱)`);
     }
   }
 
