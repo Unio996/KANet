@@ -20,7 +20,9 @@ export default {
   steps: [
     // setup: 跑到 SELL preview (broker 含 unit price)
     // message 含逗号让 SELL_REGEX miss → fall handleLlmDialog → _pendingFields path → broker reply 真有 preview
-    { action: 'send_message', from_peer: peer, to_relay_id: relayId('trader-b'), message: '卖88个kas, 目前卖价' },
+    // T-J2-2026-05-10 SC4b (triage T3): qty 88→200 KAS — 跟 production T2.10b minPracticalQty=100 align。
+    // 本意 B5 fake price defense (oracle ±5% check)，qty 数字非 sacred (跟 owner_88kas_verbatim 区分)。
+    { action: 'send_message', from_peer: peer, to_relay_id: relayId('trader-b'), message: '卖200个kas, 目前卖价' },
     { action: 'send_message', from_peer: peer, to_relay_id: relayId('trader-b'), message: 'Bsc' },
     {
       action: 'send_message',
