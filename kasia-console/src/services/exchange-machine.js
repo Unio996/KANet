@@ -348,8 +348,15 @@ export function processAccept(msg) {
     if (msg.selected_chain) meta.receive_chain = msg.selected_chain;
     if (msg.receive_address) meta.receive_address = msg.receive_address;
     if (msg.evm_recv_address) meta.evm_recv_address = msg.evm_recv_address;
-    sqlite.prepare('UPDATE exchange_offers SET taker_chain = ?, taker_payment_address = ?, verification_meta = ? WHERE id = ?')
+    // T-J2-2026-05-11 Phase 2 B.1 (NWT #18 ABE audit): 加 protocol_status='open' guard 防 race。
+    // 之前 2 个 concurrent accept 同 offer → 两 UPDATE 都 succeed → 第二 overwrite taker_chain/addr,
+    // 之后 transition() 仅 first 命中 open→matched, 第二 fail revert 但 taker 字段已被 overwrite,
+    // race window 内 stale data 写入。加 status=open guard, 第二 UPDATE 0 row affect, 第一稳赢。
+    const updRes = sqlite.prepare(`UPDATE exchange_offers SET taker_chain = ?, taker_payment_address = ?, verification_meta = ? WHERE id = ? AND protocol_status = 'open'`)
       .run(msg.selected_chain || null, msg.receive_address || null, JSON.stringify(meta), offer.id);
+    if (updRes.changes === 0) {
+      console.warn(`[exchange-machine] B.1 race: accept_v1 offer ${offer.id.slice(0,8)} taker UPDATE 0 rows (status != 'open', 已被前一个 accept 接走)`);
+    }
   }
 
   // Transition: open → matched (含 filled_qty 记录 partial fill 量)
