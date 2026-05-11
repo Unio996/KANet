@@ -149,16 +149,19 @@ export async function registerRelayRoutes(fastify) {
     return reply.send({ relay });
   });
 
+  // T-J2-2026-05-11 Phase 2 η.2 + η.2-fix (J1 #114 catch): predictor skill 实际 names
+  // (Bettor 5/8-5/10 ship): bettor / prediction_sense / onboard_polymarket。
+  // 虚构 'polymarket-trader/sports-tracker' fix per J1 #114 grep verify。
   const VALID_ROLES = ['broker', 'trader', 'predictor', 'general', 'user'];
   const ROLE_SKILL_ALLOWED_LOCAL = {
     broker: ['matcher', 'order-book', 'cex-bridge'],
     trader: ['matcher', 'order-book'],
     user: ['wallet-query'],
-    predictor: ['polymarket-trader', 'sports-tracker'],
+    predictor: ['bettor', 'prediction_sense', 'onboard_polymarket'],
     general: [],
   };
   const TRADING_SKILLS_LOCAL = new Set([
-    'matcher', 'order-book', 'cex-bridge', 'polymarket-trader', 'sports-tracker', 'wallet-query',
+    'matcher', 'order-book', 'cex-bridge', 'bettor', 'prediction_sense', 'onboard_polymarket', 'wallet-query',
   ]);
 
   fastify.post('/api/relay/:id/role', async (request, reply) => {

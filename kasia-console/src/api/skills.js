@@ -50,25 +50,30 @@ function _checkBrokerSkillCompat(skill, newStatus) {
   return { ok: true };
 }
 
-// T-J2-2026-05-11 Phase 2 ζ.4 + η.1 (Owner 5/11 钦定 + NWT #14/16 propose):
+// T-J2-2026-05-11 Phase 2 ζ.4 + η.1 + η.1-fix (Owner 5/11 钦定 + NWT #14/16 propose + J1 #114 catch):
 // 5-role skill whitelist guard。relay_nodes.role column (migrate v95+v96) 驱动 skill bind policy。
 // - broker: matcher / order-book / cex-bridge (active broker — Trader-A/B)
 // - trader: matcher / order-book (alternate broker / maker / taker — Trader-M)
-// - predictor: polymarket-trader / sports-tracker (Bettor)
+// - predictor: bettor / prediction_sense / onboard_polymarket (Bettor + Sophie real skills)
 // - general: [] (通用 agent 禁交易 skill — NWT/J2/KANet/Opus/Qclaude; η.1 rename 'dev' → 'general')
 // - user: wallet-query (真实 Kasia user 不允 matcher 避免 stranger 抢单)
 //
-// ROLE_SKILL_ALLOWED 仅覆 trading 相关 skill — 其他通用 skill (greeting / chat / etc) 不限。
+// J1 #114 5/11 catch — η.1 ship 原用虚构 skill 名 'polymarket-trader/sports-tracker', 实际 grep
+// skills 表 actual names = 'bettor' / 'prediction_sense' / 'onboard_polymarket' (Bettor 5/8-5/10
+// ship 7 commits 用 'bettor')。η.1 ship + push 后 Sophie role=predictor 触发 guard auto-disable
+// bettor → Phase 3 dead。J1 host pull 前必修。memory feedback_grep_code_not_infer sediment 守。
+//
+// ROLE_SKILL_ALLOWED 仅覆 trading/predictor 相关 skill — 其他通用 skill (greeting / chat / etc) 不限。
 // guard 仅当 skill.name ∈ TRADING_SKILLS_SET 时 enforce role check。
 const ROLE_SKILL_ALLOWED = {
   broker: ['matcher', 'order-book', 'cex-bridge'],
   trader: ['matcher', 'order-book'],
   user: ['wallet-query'],
-  predictor: ['polymarket-trader', 'sports-tracker'],
+  predictor: ['bettor', 'prediction_sense', 'onboard_polymarket'],
   general: [],
 };
 const TRADING_SKILLS_SET = new Set([
-  'matcher', 'order-book', 'cex-bridge', 'polymarket-trader', 'sports-tracker', 'wallet-query',
+  'matcher', 'order-book', 'cex-bridge', 'bettor', 'prediction_sense', 'onboard_polymarket', 'wallet-query',
 ]);
 
 function _checkRoleSkillCompat(skill, newStatus) {
