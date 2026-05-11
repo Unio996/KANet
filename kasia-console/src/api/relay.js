@@ -136,6 +136,87 @@ export async function registerRelayRoutes(fastify) {
     return reply.send({ ok: true, stopResult, startResult });
   });
 
+  // T-J2-2026-05-11 Phase 2 η.2 (Owner 5/11 钦定 + NWT #16 propose):
+  // GET /api/relay/:id — relay 详情含 role + is_dex_broker + is_service
+  // POST /api/relay/:id/role — UI 改 role + 同步 legacy field (is_dex_broker/is_service) + ROLE_SKILL_ALLOWED auto-enforce
+  fastify.get('/api/relay/:id', async (request, reply) => {
+    const relay = sqlite.prepare(`
+      SELECT id, name, address, network, role, is_dex_broker, is_service, focus,
+             evolution_interval_hours, proactive_interval_minutes, created_at, updated_at
+      FROM relay_nodes WHERE id = ?
+    `).get(request.params.id);
+    if (!relay) return reply.code(404).send({ error: 'relay_not_found' });
+    return reply.send({ relay });
+  });
+
+  const VALID_ROLES = ['broker', 'trader', 'predictor', 'general', 'user'];
+  const ROLE_SKILL_ALLOWED_LOCAL = {
+    broker: ['matcher', 'order-book', 'cex-bridge'],
+    trader: ['matcher', 'order-book'],
+    user: ['wallet-query'],
+    predictor: ['polymarket-trader', 'sports-tracker'],
+    general: [],
+  };
+  const TRADING_SKILLS_LOCAL = new Set([
+    'matcher', 'order-book', 'cex-bridge', 'polymarket-trader', 'sports-tracker', 'wallet-query',
+  ]);
+
+  fastify.post('/api/relay/:id/role', async (request, reply) => {
+    const { role: newRole } = request.body || {};
+    if (!newRole || !VALID_ROLES.includes(newRole)) {
+      return reply.code(400).send({ error: 'invalid_role', message: `role 必 ∈ [${VALID_ROLES.join(', ')}]` });
+    }
+    const relay = sqlite.prepare(`SELECT id, name, role, is_dex_broker, is_service FROM relay_nodes WHERE id = ?`).get(request.params.id);
+    if (!relay) return reply.code(404).send({ error: 'relay_not_found' });
+
+    const oldRole = relay.role;
+    if (oldRole === newRole) {
+      return reply.send({ ok: true, role: newRole, unchanged: true });
+    }
+
+    // legacy field 同步 (role authoritative, legacy mirror)
+    const newIsDexBroker = newRole === 'broker' ? 1 : 0;
+    const newIsService = newRole === 'broker' ? 1 : 0;
+
+    const now = new Date().toISOString();
+    sqlite.prepare(`
+      UPDATE relay_nodes
+      SET role = ?, is_dex_broker = ?, is_service = ?, updated_at = ?
+      WHERE id = ?
+    `).run(newRole, newIsDexBroker, newIsService, now, request.params.id);
+
+    // ROLE_SKILL_ALLOWED auto-enforce: 不兼容 active trading skill auto-disable
+    const allowed = ROLE_SKILL_ALLOWED_LOCAL[newRole] || [];
+    const allowedSet = new Set(allowed);
+    const activeSkills = sqlite.prepare(`
+      SELECT id, name FROM skills WHERE relay_node_id = ? AND status = 'active'
+    `).all(request.params.id);
+    const disabled_skills = [];
+    const disableStmt = sqlite.prepare(`UPDATE skills SET status='disabled', updated_at=? WHERE id=?`);
+    for (const s of activeSkills) {
+      if (TRADING_SKILLS_LOCAL.has(s.name) && !allowedSet.has(s.name)) {
+        disableStmt.run(now, s.id);
+        disabled_skills.push(s.name);
+      }
+    }
+
+    // suggested skills: ROLE_SKILL_ALLOWED 中此 agent 已 disabled 状态的 skill (UI prompt 一键启用)
+    const disabledMatch = sqlite.prepare(`
+      SELECT name FROM skills WHERE relay_node_id = ? AND status = 'disabled' AND name IN (${allowed.map(() => '?').join(',') || "''"})
+    `).all(request.params.id, ...allowed);
+    const suggested_skills = disabledMatch.map(r => r.name);
+
+    console.log(`[relay role] ${relay.name}: '${oldRole}' → '${newRole}', is_dex_broker=${newIsDexBroker}, disabled=${disabled_skills.length}, suggested=${suggested_skills.length}`);
+
+    return reply.send({
+      ok: true,
+      role: newRole,
+      old_role: oldRole,
+      legacy_sync: { is_dex_broker: newIsDexBroker, is_service: newIsService },
+      side_effects: { disabled_skills, suggested_skills },
+    });
+  });
+
   // Balance query — auto-selects best available RPC node
   // GET /api/relay/:id/active-peers — addresses this agent has a live handshake with
   // Used by Explore page to disable "send handshake" button for already-connected peers.
