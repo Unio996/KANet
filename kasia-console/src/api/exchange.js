@@ -864,6 +864,71 @@ export async function registerExchangeRoutes(fastify) {
     return reply.send({ agents });
   });
 
+  // T-J2-2026-05-11 Phase 2 γ.1 (Owner 5/11 钦定 NWT #17): /api/exchange/deposit-address
+  // user UI 直接下单 SELL flow 需 broker kasia address (user 真转 KAS 来), 现 broker DM 才发, UI 路径缺。
+  // 给 maker_relay_id (broker active broker) 返 kasia address + offer 真 expected give_amount。
+  fastify.get('/api/exchange/deposit-address', async (request, reply) => {
+    const { offer_id, maker_relay_id } = request.query || {};
+    if (!offer_id && !maker_relay_id) {
+      return reply.code(400).send({ error: 'offer_id OR maker_relay_id required' });
+    }
+    let makerAddr = null;
+    let offer = null;
+    if (offer_id) {
+      offer = sqlite.prepare(`
+        SELECT id, maker, give_asset, give_amount, give_chain, want_asset, want_amount, want_chain, protocol_status
+        FROM exchange_offers WHERE id = ?
+      `).get(offer_id);
+      if (!offer) return reply.code(404).send({ error: 'offer_not_found' });
+      makerAddr = offer.maker;
+    } else {
+      const relay = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id = ? AND role IN ('broker','trader')`).get(maker_relay_id);
+      if (!relay) return reply.code(404).send({ error: 'maker_relay_not_found_or_not_trading_role' });
+      makerAddr = relay.address;
+    }
+    return reply.send({
+      ok: true,
+      deposit_address: makerAddr,
+      offer: offer ? {
+        id: offer.id,
+        expected_amount: offer.give_amount,
+        expected_asset: offer.give_asset,
+        expected_chain: offer.give_chain,
+        want_asset: offer.want_asset,
+        want_amount: offer.want_amount,
+        want_chain: offer.want_chain,
+        status: offer.protocol_status,
+      } : null,
+    });
+  });
+
+  // T-J2-2026-05-11 Phase 2 γ.2 (Owner 5/11 钦定 NWT #17): /api/exchange/my-orders
+  // user UI 查看自己的 SELL/BUY 订单 — list retail_dex_orders + exchange_offers JOIN
+  // 支持 status filter (active / completed / refunded / all) + limit
+  fastify.get('/api/exchange/my-orders', async (request, reply) => {
+    const { user_kasia, status = 'active', limit = 20 } = request.query || {};
+    if (!user_kasia) return reply.code(400).send({ error: 'user_kasia required' });
+    const limitN = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
+    const activeStates = ['aligning', 'confirming', 'awaiting_payment', 'paid', 'executing', 'refunding'];
+    const terminalStates = ['completed', 'refunded', 'failed', 'expired'];
+    let whereStates;
+    if (status === 'active') whereStates = activeStates;
+    else if (status === 'completed') whereStates = ['completed'];
+    else if (status === 'refunded') whereStates = ['refunded', 'failed', 'expired'];
+    else whereStates = [...activeStates, ...terminalStates];
+    const placeholders = whereStates.map(() => '?').join(',');
+    const orders = sqlite.prepare(`
+      SELECT id, side, qty, pay_chain, pay_address, agent_pay_addr, receive_address,
+             state, exchange_offer_id, pay_tx_hash, deliver_tx_hash, refund_tx_hash,
+             mid_price_at_quote, broker_fee_kas, net_delivery_kas, error_reason,
+             created_at, updated_at, expires_at
+      FROM retail_dex_orders
+      WHERE user_kasia_address = ? AND state IN (${placeholders})
+      ORDER BY created_at DESC LIMIT ?
+    `).all(user_kasia, ...whereStates, limitN);
+    return reply.send({ ok: true, count: orders.length, orders });
+  });
+
   // ── Seeder API ─────────────────────────────────────────
 
   // GET /api/exchange/seeder/config — 读做市播种器配置
