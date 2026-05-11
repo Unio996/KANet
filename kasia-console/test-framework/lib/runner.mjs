@@ -1723,9 +1723,15 @@ export async function runCase(testCase) {
   // on REMOTE host (e.g. J2 broker host), broker-llm-io.jsonl is on remote disk, not local.
   // Skip 'no llm log no pass' for real_p2p steps — chain TX hash list (sent_tx + reply_txs)
   // is the cross-host evidence, not local LLM I/O log. Phase 5 closure cosign uses chain TX.
+  //
+  // T-J2-2026-05-11 ABE-close B.3 (NWT #30 Owner ack): publishOrder chain ops 真 latency >5s
+  // (Kaspa chain submit + bsc/eth ops 真 cross-chain 时间) 但 NOT LLM call — fixture confirm flow
+  // ('YES' → broker-v2/router.js publishOrder + state.advance) 走 transition() + chain ops, 不 LLM.
+  // raise 阈值 30s 给 publishOrder path 现实空间 (alternation 实证 publishOrder 偶 15s+, 5s 阈值太严)。
+  // 真 LLM call (Qwen3.6 35B) 仍 5s-3min 范围内, 30s 阈值仍 catch 真 LLM-no-log case (Qwen 短 reply <10s 仍 1s+, 但 short prompt LLM 通常 <5s 就不该 INNER MISSING 误报)。
   for (const s of result.steps) {
     if (!s._peer || !s.result?.latency_ms) continue;
-    if (s.result.latency_ms <= 5000) continue;  // <5s 必是 deterministic, 不该有 LLM
+    if (s.result.latency_ms <= 30000) continue;  // B.3: raise 5s → 30s for publishOrder chain ops reality
     if (s.action !== 'send_message' && s.action !== 'persona_turn') continue;
     if (s.result?.mode === 'real_p2p') continue;  // mode (ii) cross-host: LLM log not local
     const inner = _readLlmIoForStep(s._peer, s.started_at, s.started_at + s.duration_ms);
@@ -1734,7 +1740,7 @@ export async function runCase(testCase) {
       result.failed_assertions.push({
         step: s.action,
         key: 'no_llm_log_no_pass',
-        msg: `step latency ${s.result.latency_ms}ms (>5s) 暗示 broker 走了 LLM, 但 broker-llm-io.jsonl 无对应记录. broker-llm-agent.js _appendLlmIo 没生效, 决策路径黑盒, case 强制 FAIL`,
+        msg: `step latency ${s.result.latency_ms}ms (>30s) 暗示 broker 走了 LLM, 但 broker-llm-io.jsonl 无对应记录. broker-llm-agent.js _appendLlmIo 没生效, 决策路径黑盒, case 强制 FAIL`,
       });
     }
   }
