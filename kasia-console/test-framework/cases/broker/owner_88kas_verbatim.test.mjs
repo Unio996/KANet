@@ -21,6 +21,13 @@ export default {
   description: 'Owner 12:52-12:57 88 KAS SELL 真测 8-turn verbatim port (sacred regression)',
   domain: 'broker',
   tags: ['ux', 'regression', 'p0', 'owner-trace', 'sacred'],
+  // T-J2-2026-05-11 ABE-close B.5 (NWT #30 Owner ack): historical reproducer tag
+  // 跟 post-Sophie sediment 冲突 (5/9 T2.10b broker-sell-handler minPracticalQty=100 → qty=88 reject)。
+  // verbatim 不动 (Owner 真测复刻 sacred), runner 不计入 DoD 主统计, divergence_reason 输出说明。
+  // historical: true 跟 known-flaky 不同 — 后者隐藏 alternation, 前者显式 surface 产品演进痕迹。
+  historical: true,
+  divergence_reason: 'post-Sophie sediment 5/9: broker-sell-handler.js minPracticalQty=100 KAS rejects qty=88 as qty_too_small. Verbatim reproducer preserved for incident history, not active assertion. Production accepts qty>=100 KAS, fixture qty=88 is verbatim from Owner 5/x real test trace.',
+  divergence_since: '5/9',
   steps: [
     // T1 — 模糊宣告
     {

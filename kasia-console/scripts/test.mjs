@@ -96,19 +96,32 @@ async function main() {
       const traceShort = result.trace_file ? result.trace_file.replace(/\\/g, '/').split('/').slice(-1)[0] : 'no-trace';
       console.log(`${result.pass ? '✓' : '✗'} ${result.id}  [${traceShort}]`);
     }
-    if (result.pass) totalPass++; else totalFail++;
-    summary.push({ id: result.id, pass: result.pass, failed: result.failed_assertions, trace_file: result.trace_file });
+    // T-J2-2026-05-11 ABE-close B.5 (Owner 5/11 钦定 historical tag spec):
+    // historical reproducer 不计入 DoD 主统计, 单独 section 输出 divergence_reason。
+    if (result.historical === true) {
+      summary.push({ id: result.id, pass: result.pass, failed: result.failed_assertions, trace_file: result.trace_file, historical: true, divergence_reason: result.divergence_reason, divergence_since: result.divergence_since });
+    } else {
+      if (result.pass) totalPass++; else totalFail++;
+      summary.push({ id: result.id, pass: result.pass, failed: result.failed_assertions, trace_file: result.trace_file });
+    }
   }
 
   console.log('='.repeat(60));
   console.log(`Summary: ${totalPass} PASS / ${totalFail} FAIL / ${totalPass + totalFail} run`);
+  const historicalCases = summary.filter(s => s.historical);
+  if (historicalCases.length > 0) {
+    console.log('');
+    console.log(`Historical Reproducers (${historicalCases.length} cases — post-product-evolution expected divergence, not counted in DoD):`);
+    for (const h of historicalCases) {
+      console.log(`  ${h.pass ? '✓' : '✗'} ${h.id} — ${h.divergence_reason} (since ${h.divergence_since})`);
+    }
+  }
   if (totalFail > 0 && quietFlag) {
     // 失败时打 fail case 简要给 hook 用 + trace 路径让审计能直接看
     for (const s of summary) {
-      if (!s.pass) {
-        console.log(`  FAIL ${s.id}: ${s.failed?.map(f => f.key).join(', ')}`);
-        if (s.trace_file) console.log(`        trace: ${s.trace_file}`);
-      }
+      if (s.historical || s.pass) continue;
+      console.log(`  FAIL ${s.id}: ${s.failed?.map(f => f.key).join(', ')}`);
+      if (s.trace_file) console.log(`        trace: ${s.trace_file}`);
     }
   }
   // Owner 钦定 'no log no pass' — trace 文件夹 path 在末尾告诉任何人去哪审计

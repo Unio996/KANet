@@ -1750,6 +1750,16 @@ export async function runCase(testCase) {
     try { result.trace_file = _writeTraceFile(result); } catch { /* trace write err already caught above */ }
   }
 
+  // T-J2-2026-05-11 ABE-close B.5 (Owner 5/11 钦定 historical tag spec):
+  // historical reproducer (e.g. owner_88kas_verbatim post-Sophie sediment 5/9) 不计入 DoD 主统计,
+  // 加 historical + divergence_reason 字段 forward 到 aggregateResults 单独 section 输出。
+  // 设计: fixture 加 historical: true tag → runner 标记 → scripts/test.mjs 分离 PASS/FAIL 主统计 vs historical。
+  if (testCase.historical === true) {
+    result.historical = true;
+    result.divergence_reason = testCase.divergence_reason || null;
+    result.divergence_since = testCase.divergence_since || null;
+  }
+
   return result;
 }
 
