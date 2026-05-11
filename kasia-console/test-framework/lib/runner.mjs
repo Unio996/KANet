@@ -720,6 +720,50 @@ const actions = {
   },
 
   /**
+   * T-J2-2026-05-11 Phase 2 B.2 (NWT #18 ABE audit): generic SQL exec for setup/teardown
+   * (INSERT/UPDATE/DELETE — query_db 仅 SELECT)
+   * step: { action: 'exec_sql', sql, params? } — returns { ok, changes }
+   */
+  async exec_sql(step, ctx) {
+    if (!step.sql) return { ok: false, error: 'sql required' };
+    const db = new Database(DB_PATH);
+    try {
+      const r = db.prepare(step.sql).run(...(step.params || []));
+      db.close();
+      return { ok: true, changes: r.changes, lastInsertRowid: r.lastInsertRowid };
+    } catch (e) {
+      db.close();
+      return { ok: false, error: e.message };
+    }
+  },
+
+  /**
+   * T-J2-2026-05-11 Phase 2 B.2 (NWT #18 ABE audit): generic HTTP POST action.
+   * 适合 race-condition test (2 concurrent fetch) + API endpoint exercise.
+   * step: { action: 'http_post', path, body? } — host 默 127.0.0.1:3100
+   * returns { ok, status, body }
+   */
+  async http_post(step, ctx) {
+    const PORT = process.env.PORT || 3100;
+    if (!step.path) return { ok: false, error: 'path required' };
+    const url = step.path.startsWith('http') ? step.path : `http://127.0.0.1:${PORT}${step.path}`;
+    try {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(step.body || {}),
+        signal: AbortSignal.timeout(step.timeout_ms || 10_000),
+      });
+      const text = await r.text();
+      let json = null;
+      try { json = JSON.parse(text); } catch { /* non-json response OK */ }
+      return { ok: r.ok, status: r.status, body: json || text };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  },
+
+  /**
    * T-J2-2026-05-10 SC7 (triage T3): wire llm_mock_dialogue action handler.
    * 委托 test-framework/lib/llm-mock-user.mjs:runMockDialogue。
    * step: { action: 'llm_mock_dialogue', personaKey, peer_addr, broker_relay_id, max_turns?, stop_on_broker_contains? }
