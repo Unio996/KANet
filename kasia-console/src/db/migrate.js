@@ -3135,5 +3135,17 @@ export function runMigrations() {
     }
   }
 
+  // v98: T-J1-2026-05-11 Phase 3e-6 P0.1 — bettor_sim_positions.market_description column
+  // reactor delta 模型重写 evaluatePositions 时需 parseRule(market.description) 复用 scanner rule.
+  // scanner persist 时 copy market.description (5000 char cap), reactor 直接读 sim_position, 不打 Gamma API.
+  // ref: Bettor r30 Phase 3e-6 propose + r31 architect 决断 Q1 (c) + J1 #119 implementor ack
+  {
+    const cols98 = sqlite.prepare("PRAGMA table_info(bettor_sim_positions)").all();
+    if (!cols98.some(c => c.name === 'market_description')) {
+      sqlite.exec(`ALTER TABLE bettor_sim_positions ADD COLUMN market_description TEXT`);
+      console.log('[migrate] v98: bettor_sim_positions.market_description column 添加 (Phase 3e-6 P0.1 reactor delta 模型 LLM 重估 复用 rule).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

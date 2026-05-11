@@ -265,7 +265,7 @@ function getOpenInventory(relayNodeId) {
 
 // ── adapter URL lookup per Agent ─────────────────────────────────────────
 
-function getAdapterUrlForAgent(relayNodeId) {
+export function getAdapterUrlForAgent(relayNodeId) {
   if (!relayNodeId) return null;
   const row = sqlite.prepare(`
     SELECT a.http_port FROM relay_nodes r
@@ -392,8 +392,8 @@ function persist(results, triggerType = 'cron', relayNodeId = null) {
   const stmtPos = sqlite.prepare(`
     INSERT INTO bettor_sim_positions
       (id, recommendation_id, relay_node_id, direction,
-       entry_yes_price, entry_buy_price, size_usd, shares, opened_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       entry_yes_price, entry_buy_price, size_usd, shares, opened_at, market_description)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const tx = sqlite.transaction((rows) => {
     for (const r of rows) {
@@ -427,10 +427,12 @@ function persist(results, triggerType = 'cron', relayNodeId = null) {
       const dir = r.rec.side;
       const entryBuy = dir === 'YES' ? yesPrice : (dir === 'NO' ? (1 - yesPrice) : 0);
       const shares = entryBuy > 0 ? r.rec.size / entryBuy : 0;
+      // Phase 3e-6 P0.1: cap market description at 5000 chars for reactor LLM 重估 (Q1 c, Bettor r31 决断)
+      const marketDesc = typeof r.market.description === 'string' ? r.market.description.slice(0, 5000) : null;
       stmtPos.run(
         randomUUID(), recId, relayNodeId, dir,
         yesPrice, entryBuy, dir === 'SKIP' ? 0 : r.rec.size, shares,
-        now
+        now, marketDesc
       );
     }
   });
