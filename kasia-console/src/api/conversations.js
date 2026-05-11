@@ -86,6 +86,10 @@ export async function registerConversationRoutes(fastify) {
         name: r.name,
         address: r.address,
         focus: r.focus || 'balanced',
+        // T-J2-2026-05-11 Phase 2 η.3: 加 role 字段 (Owner 5/11 钦定 + NWT #16)
+        role: r.role || null,
+        is_dex_broker: r.is_dex_broker || 0,
+        is_service: r.is_service || 0,
         adapter_node_id: r.adapter_node_id || null,
         adapterName: adapter?.name || null,
         adapterPort: adapter?.http_port || null,

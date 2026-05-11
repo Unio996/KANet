@@ -113,6 +113,50 @@
           <template x-if="agent.card && agent.card.summary">
             <p class="mt-3 text-sm text-ink-500 leading-relaxed" x-text="agent.card.summary"></p>
           </template>
+
+          <!-- T-J2-2026-05-11 Phase 2 η.3: Role select dropdown (Owner 5/11 钦定) -->
+          <div class="mt-3 flex items-center gap-2">
+            <span class="text-xs text-ink-400">角色:</span>
+            <span class="badge badge-neutral" x-text="agent.role || '(未设)'"></span>
+            <button @click="roleEditOpen = true" class="text-xs text-brand-600 hover:text-brand-700 underline">改</button>
+            <template x-if="agent.role === 'broker'">
+              <span class="text-xs text-amber-600">⚠ 撮合 service active</span>
+            </template>
+          </div>
+
+          <!-- Role edit modal -->
+          <div x-show="roleEditOpen" x-cloak class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" @click.self="roleEditOpen = false">
+            <div class="bg-white rounded-lg shadow-xl max-w-md w-full p-6" @click.stop>
+              <h3 class="text-base font-bold text-ink-700 mb-3">改 Agent Role</h3>
+              <p class="text-xs text-ink-400 mb-3">当前角色: <strong x-text="agent.role || '(未设)'"></strong></p>
+              <select x-model="roleEditValue" class="w-full text-sm border border-warm-300 rounded px-3 py-2 bg-white">
+                <option value="broker">broker — 撮合 service (Trader-A/B)</option>
+                <option value="trader">trader — 专业交易 agent (maker/taker)</option>
+                <option value="predictor">predictor — 预测市场 (Polymarket)</option>
+                <option value="general">general — 通用 agent (无交易 skill)</option>
+                <option value="user">user — 真实 Kasia user</option>
+              </select>
+              <template x-if="roleEditValue !== agent.role && (agent.role === 'broker' || roleEditValue === 'broker')">
+                <p class="mt-2 text-xs text-red-600">⚠ 切换 broker role 会同步改 is_dex_broker/is_service, 影响 SERVICE MUTE invariant + 撮合接单。</p>
+              </template>
+              <div class="mt-4 flex justify-end gap-2">
+                <button @click="roleEditOpen = false" class="text-sm px-3 py-1 rounded border border-warm-300">取消</button>
+                <button @click="saveRole()" :disabled="roleEditValue === agent.role" class="text-sm px-3 py-1 rounded bg-brand-600 text-white disabled:opacity-50">保存</button>
+              </div>
+
+              <template x-if="roleSideEffects">
+                <div class="mt-4 p-3 bg-warm-50 rounded text-xs">
+                  <p class="font-bold text-ink-700 mb-1">✓ Role 改为 <span x-text="roleSideEffects.role"></span></p>
+                  <template x-if="roleSideEffects.side_effects.disabled_skills.length > 0">
+                    <p class="text-red-600">禁用 skill: <span x-text="roleSideEffects.side_effects.disabled_skills.join(', ')"></span></p>
+                  </template>
+                  <template x-if="roleSideEffects.side_effects.suggested_skills.length > 0">
+                    <p class="text-brand-600">建议启用 skill: <span x-text="roleSideEffects.side_effects.suggested_skills.join(', ')"></span> <a :href="'/skills?account=' + agent.id" class="underline">→ skill 页面</a></p>
+                  </template>
+                </div>
+              </template>
+            </div>
+          </div>
         </div>
 
         <!-- Stats Row -->
@@ -1116,6 +1160,8 @@ function agentApp() {
     newGoalText: '', editingGoalId: null, editingGoalText: '',
     cardEditing: false, cardPublishing: false, cardPublished: false, cardError: '',
     cardForm: { name: '', entityType: 'agent', summary: '', mode: 'public' },
+    // T-J2-2026-05-11 Phase 2 η.3 (role select)
+    roleEditOpen: false, roleEditValue: 'general', roleSideEffects: null,
     showPrivKey: null, privKeyValue: '',
     swapWallet: null, swapForm: { from: 'usdc', to: 'usdc.e', amount: '' }, swapping: false, swapMsg: '',
     pendingApprovals: [],
@@ -1303,6 +1349,24 @@ function agentApp() {
         const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Failed');
         this.cardPublished = d.txId || true; this.cardEditing = false; this.agent.card = { ...this.agent.card, ...this.cardForm };
       } catch(e) { this.cardError = e.message; } this.cardPublishing = false;
+    },
+    // T-J2-2026-05-11 Phase 2 η.3: role save handler
+    async saveRole() {
+      if (!this.agent || this.roleEditValue === this.agent.role) return;
+      try {
+        const r = await fetch('/api/relay/' + this.agent.id + '/role', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: this.roleEditValue }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || d.message || 'Role 改失败');
+        this.agent.role = d.role;
+        this.roleSideEffects = d;
+        // 不立即关 modal — 让 user 看 side_effects 后手动关
+      } catch (e) {
+        alert('Role 改失败: ' + e.message);
+      }
     },
     chainBadgeClass(chain) {
       return ({
