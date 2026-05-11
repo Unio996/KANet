@@ -69,8 +69,10 @@ export async function evaluatePosition(pos, opts = {}) {
   let parsed;
   try { parsed = _parseRule(pos.market_description); } catch { return null; }
 
+  // Adapter contract requires non-empty user (HTTP 400 if user=''). Pass full prompt as user.
+  // (system optional; scanner pattern: buildEstimatorPrompt returns {system, user}; reactor reuses estimator.fillTemplate → full prompt.)
   const llmCallback = opts.llmCallback || (async (prompt) => {
-    const r = await callLLMWithFallback({ system: prompt, user: '', adapterUrl });
+    const r = await callLLMWithFallback({ system: '', user: prompt, adapterUrl });
     return r.ok ? r.text : null;
   });
 
