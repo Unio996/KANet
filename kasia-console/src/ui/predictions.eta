@@ -1266,7 +1266,9 @@ function predictionsPage() {
 
     // Bettor r46 (B) Step 1: 真盘 active position 出清 (placeOrder sell at market bid - $0.01)
     async sellActivePosition(pos) {
-      if (pos._closing) return;
+      console.log('[出清] click fired, pos=', pos);
+      window.alert('debug: 按钮 click 已触发, 持仓 ' + pos.size + ' shares ' + pos.outcome);
+      if (pos._closing) { console.log('[出清] already closing, skip'); return; }
       // 2 步 confirm (真盘比 sim 严, 防误击)
       const bestBidEst = pos.curPrice || pos.avgPrice || 0.5;
       const estimatedSellPrice = Math.max(0.01, bestBidEst - 0.01);
