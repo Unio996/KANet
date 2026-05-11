@@ -4,7 +4,7 @@
 export default {
   id: 'mind_changer',
   name: '改主意用户',
-  description: 'starts BUY 10 KAS, sees preview, changes mind to SELL 3 KAS — broker must reset cleanly',
+  description: 'starts BUY 10 KAS, sees preview, changes mind to SELL 200 KAS — broker must reset cleanly',
 
   initialState() {
     return { stage: 'first_intent' };
@@ -34,20 +34,20 @@ export default {
         if (/订单画像|preview|10 KAS/.test(r)) {
           // 改主意!
           return {
-            message: '不要了, 我要卖 3 KAS, BSC, 0x94053e04feE8d863cFa29DF10938a7A2E2b71D74',
+            message: '不要了, 我要卖 200 KAS, BSC, 0x94053e04feE8d863cFa29DF10938a7A2E2b71D74',
             nextState: { ...state, stage: 'wait_second_preview' },
             done: false,
           };
         }
         return {
-          message: '不要了, 我要卖 3 KAS, BSC, 0x94053e04feE8d863cFa29DF10938a7A2E2b71D74',
+          message: '不要了, 我要卖 200 KAS, BSC, 0x94053e04feE8d863cFa29DF10938a7A2E2b71D74',
           nextState: { ...state, stage: 'wait_second_preview' },
           done: false,
         };
 
       case 'wait_second_preview':
-        // broker 应该 reset 出 SELL 3 KAS preview
-        if (/卖单画像|sell.*3 KAS/i.test(r) || /3 KAS.*BSC/.test(r)) {
+        // broker 应该 reset 出 SELL 200 KAS preview
+        if (/卖单画像|sell.*200 KAS/i.test(r) || /200 KAS.*BSC/.test(r)) {
           return {
             message: 'YES',
             nextState: { ...state, stage: 'done' },
@@ -56,7 +56,7 @@ export default {
         }
         // broker 仍然在 BUY 10 KAS state — 反复说 cancel
         return {
-          message: 'NO 取消, 改卖 3 KAS BSC 0x94053e04feE8d863cFa29DF10938a7A2E2b71D74',
+          message: 'NO 取消, 改卖 200 KAS BSC 0x94053e04feE8d863cFa29DF10938a7A2E2b71D74',
           nextState: state,
           done: false,
         };

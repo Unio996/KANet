@@ -226,7 +226,17 @@ export async function handleMessage(peer, msg) {
     }
     // draft 阶段 cancel — 直接 clearDraft
     state.clearDraft(peer);
-    return '好的, 已取消. 想下新单的话告诉我.';
+    // T-J2-2026-05-11 ABE-close β fix (NWT #26 dig persona_mind_changer): cancel + new_intent combo 支持。
+    // 旧: cancel intent fire 后 clearDraft + return ack, 丢弃 message 余下新 intent params
+    //     (user '不要了, 卖 3 KAS, BSC, 0x9405' → broker 仅 ack 取消, 后续 SELL 3 KAS 全丢)。
+    // 新: cleardraft 后 message 含 new direction+qty → 不 return, fall through 继续 process 余下逻辑
+    //     (draft seed + field set + preview)。无 new_intent (纯 cancel '不要了') → return ack 老行为。
+    if (fields.direction && fields.qty) {
+      console.log(`[broker-v2 router] cancel+new_intent combo: cleared draft, processing new ${fields.direction} ${fields.qty} (NWT #26 dig fix)`);
+      // 不 return — fall through 进 L232 hasPublished (false post-clear) → L275 draft seed + field set + L380 preview
+    } else {
+      return '好的, 已取消. 想下新单的话告诉我.';
+    }
   }
 
   // 4. 已 publish 路径 — query status / B1 PAID detect / LLM 自然对话

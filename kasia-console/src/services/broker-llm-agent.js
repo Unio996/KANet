@@ -877,12 +877,26 @@ export async function handleLlmDialog(peer, message) {
   // Owner 02:23 钦定 cancel-refund policy (跟 broker-buy/sell-handler 同模式).
   // user 指示取消 → 检 broker active offer → open 状态: cancel + refund + DM ack.
   // matched/verifying/delivering → 走 dispute (不在 helper).
+  //
+  // T-J2-2026-05-11 ABE-close β fix (NWT #26 dig persona_mind_changer): cancel + new_intent combo 支持。
+  // 旧: detectCancelIntent fire 后立即 return refundReply, 丢弃 message 余下新 intent params
+  //     (user '不要了, 卖 3 KAS, BSC, 0x9405' → broker 仅 ack 取消, SELL 3 KAS 全丢)。
+  // 新: cancel fired + message 含 new direction+qty → cancel 完成不 return, fall through 继续 process
+  //     (broker reset state + 立即 process new SELL intent + 出 SELL preview)。
+  // 无 new_intent (纯 cancel '不要了') → return refundReply 老行为。
+  // 配 α test fixture refinement (NWT #27 spec): must assertion 升级后 deterministic PASS。
   {
     try {
       const { detectCancelIntent, handleCancelAndRefund } = await import('./broker-cancel-refund.js');
       if (detectCancelIntent(message)) {
+        const freshIntent = _extractFieldsFromMsg(message);
+        const hasNewIntent = !!(freshIntent.direction && freshIntent.qty);
         const refundReply = await handleCancelAndRefund(peer);
-        if (refundReply) return refundReply;
+        if (refundReply && !hasNewIntent) return refundReply;
+        if (refundReply && hasNewIntent) {
+          console.log(`[broker-llm] cancel+new_intent combo: cancel done, continuing process new ${freshIntent.direction} ${freshIntent.qty} (NWT #26 dig fix)`);
+          // 不 return — fall through 继续 handleLlmDialog 余下逻辑 (setConvoStateLock + preview)
+        }
       }
     } catch (e) { console.warn(`[broker-llm] cancel-refund check err: ${e.message}`); }
   }
