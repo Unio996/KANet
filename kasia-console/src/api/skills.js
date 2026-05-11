@@ -50,6 +50,45 @@ function _checkBrokerSkillCompat(skill, newStatus) {
   return { ok: true };
 }
 
+// T-J2-2026-05-11 Phase 2 ζ.4 (Owner 5/11 钦定 + NWT #14 propose + NWT #15 ack J2 微调):
+// 4-role skill whitelist guard。relay_nodes.role column (migrate v95) 驱动 skill bind policy。
+// - broker: matcher / order-book / cex-bridge (active broker)
+// - trader: matcher / order-book (alternate broker / maker / taker)
+// - predictor: polymarket-trader / sports-tracker (Bettor)
+// - dev: [] (通用 agent 禁交易 skill)
+// - user: wallet-query (真实 Kasia user 不允 matcher 避免 stranger 抢单)
+//
+// ROLE_SKILL_ALLOWED 仅覆 trading 相关 skill — 其他通用 skill (greeting / chat / etc) 不限。
+// guard 仅当 skill.name ∈ TRADING_SKILLS_SET 时 enforce role check。
+const ROLE_SKILL_ALLOWED = {
+  broker: ['matcher', 'order-book', 'cex-bridge'],
+  trader: ['matcher', 'order-book'],
+  user: ['wallet-query'],
+  predictor: ['polymarket-trader', 'sports-tracker'],
+  dev: [],
+};
+const TRADING_SKILLS_SET = new Set([
+  'matcher', 'order-book', 'cex-bridge', 'polymarket-trader', 'sports-tracker', 'wallet-query',
+]);
+
+function _checkRoleSkillCompat(skill, newStatus) {
+  if (newStatus !== 'active') return { ok: true };
+  if (!skill || !skill.relay_node_id) return { ok: true };  // global skill, 不限
+  if (!TRADING_SKILLS_SET.has(skill.name)) return { ok: true };  // 非交易 skill, 不 enforce role check
+  const relay = sqlite.prepare('SELECT role, name FROM relay_nodes WHERE id=?').get(skill.relay_node_id);
+  if (!relay || !relay.role) return { ok: true };  // role column 未 backfill (legacy 数据), 不限
+  const allowed = ROLE_SKILL_ALLOWED[relay.role];
+  if (!allowed) return { ok: true };  // unknown role, 不限 (forward-compat)
+  if (!allowed.includes(skill.name)) {
+    return {
+      ok: false,
+      reason: 'role_skill_mismatch',
+      message: `'${skill.name}' 不允许在 role='${relay.role}' relay '${relay.name}' 上 active. role 允许: [${allowed.join(', ') || '(none)'}].`,
+    };
+  }
+  return { ok: true };
+}
+
 export async function registerSkillRoutes(fastify) {
   // --- API routes (adapter / programmatic access, requires auth) ---
 
@@ -353,11 +392,16 @@ export async function registerSkillRoutes(fastify) {
   fastify.post('/skills/:id', async (request, reply) => {
     const { displayName, description, actionType, actionConfigJson, minTrustLevel, status, sideEffectLevel } = request.body || {};
     // 议 2: broker/service role 拒 active 'social'/'contacts'/'other' category skill (Owner 17:33)
+    // Phase 2 ζ.4 (Owner 5/11 钦定): + 4-role skill whitelist guard (broker/trader/predictor/dev/user)
     if (VALID_STATUS.includes(status)) {
       const skill = await getSkillById(request.params.id);
       const compat = _checkBrokerSkillCompat(skill, status);
       if (!compat.ok) {
         return reply.code(403).send({ error: compat.reason, message: compat.message });
+      }
+      const roleCompat = _checkRoleSkillCompat(skill, status);
+      if (!roleCompat.ok) {
+        return reply.code(403).send({ error: roleCompat.reason, message: roleCompat.message });
       }
     }
     await updateSkill(request.params.id, {
