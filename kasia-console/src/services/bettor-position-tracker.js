@@ -14,8 +14,14 @@
 import { randomUUID } from 'crypto';
 import { sqlite } from '../db/client.js';
 import { fetchPredictionData } from './market-data.js';
+import { evaluatePosition, writeAdjustment } from './bettor-reactor.js';
 
 const SNAPSHOT_INTERVAL_MS = 60 * 60 * 1000; // 1h
+// Phase 3e-6 P1 (Bettor r33/r36): tracker price diff event trigger
+const PRICE_DIFF_TRIGGER_PP = 0.10;          // |latest - prev| > 10pp → trigger reactor immediate
+const TRIGGER_COOLDOWN_MS = 5 * 60 * 1000;   // 同 position 5min 内不重触 (防 snapshot race + concurrent ticks)
+const _recentlyTriggered = new Map();        // position_id → last trigger timestamp (in-memory, restart 清)
+
 let _timer = null;
 let _running = false;
 
@@ -74,6 +80,14 @@ export async function snapshotOpenPositions() {
       WHERE id = ?
     `);
 
+    // Phase 3e-6 P1: prev snapshot lookup for price diff trigger detection
+    const prevSnapStmt = sqlite.prepare(`
+      SELECT current_yes_price FROM bettor_sim_snapshots
+      WHERE position_id = ? ORDER BY snapshot_at DESC LIMIT 1
+    `);
+    // Collect trigger candidates inside tx (snapshot synchronous), dispatch async after tx commit
+    const triggerCandidates = [];
+
     const tx = sqlite.transaction((rows) => {
       for (const p of rows) {
         // Find rec to get cid/mid
@@ -90,15 +104,59 @@ export async function snapshotOpenPositions() {
         // For position P&L tracking: drawdown is the most-negative pnl/size %, gain is most-positive
         const pnlPct = p.size_usd > 0 ? (unrealizedPnl / p.size_usd) * 100 : 0;
 
+        // Phase 3e-6 P1 (Bettor r36 F-J): check prev snapshot price diff BEFORE inserting new
+        const prev = prevSnapStmt.get(p.id);
+        const priceDiff = prev ? Math.abs(currentYes - prev.current_yes_price) : 0;
+        const triggerReactor = prev && priceDiff > PRICE_DIFF_TRIGGER_PP;
+
         insertSnap.run(randomUUID(), p.id, now, currentYes, currentBuy, unrealizedPnl, driftPp);
         updatePos.run(now, pnlPct, pnlPct, pnlPct, pnlPct, p.id);
         snap++;
+
+        if (triggerReactor) {
+          // Cooldown check: same position re-trigger within 5min → skip
+          const lastTrig = _recentlyTriggered.get(p.id);
+          if (lastTrig && (Date.now() - lastTrig) < TRIGGER_COOLDOWN_MS) {
+            continue; // 5min cooldown active, skip
+          }
+          _recentlyTriggered.set(p.id, Date.now());
+          triggerCandidates.push({ position_id: p.id, currentYes, currentBuy, unrealizedPnl, driftPp, priceDiff });
+        }
       }
     });
     tx(positions);
 
     console.log(`[bettor-tracker] snapshotted ${snap}/${positions.length} open positions (${missing} missing market data)`);
-    return { snapshotted: snap, missing, total: positions.length };
+
+    // Phase 3e-6 P1: dispatch event-driven evaluatePosition for triggered positions (async, post-tx)
+    for (const cand of triggerCandidates) {
+      try {
+        // Fetch full positionRow for reactor evaluatePosition (含 market_description + relay)
+        const fullRow = sqlite.prepare(`
+          SELECT p.id position_id, p.recommendation_id, p.relay_node_id, p.direction,
+                 p.entry_yes_price, p.entry_buy_price, p.size_usd, p.shares, p.market_description,
+                 r.sigma, r.question, r.end_date
+          FROM bettor_sim_positions p
+          JOIN bettor_recommendations r ON r.id = p.recommendation_id
+          WHERE p.id = ?
+        `).get(cand.position_id);
+        if (!fullRow) continue;
+        // Inject latest snapshot fields (just-inserted, not yet visible to fresh JOIN here)
+        fullRow.current_yes_price = cand.currentYes;
+        fullRow.unrealized_pnl = cand.unrealizedPnl;
+        fullRow.drift_pp = cand.driftPp;
+
+        console.log(`[bettor-tracker] market ${cand.position_id.slice(0, 8)} moved ${(cand.priceDiff * 100).toFixed(1)}pp → trigger reactor evaluatePosition`);
+        const action = await evaluatePosition(fullRow);
+        if (action) {
+          writeAdjustment(fullRow, action, '[bettor-tracker→reactor]');
+        }
+      } catch (e) {
+        console.log(`[bettor-tracker] P1 trigger fail ${cand.position_id.slice(0, 8)}: ${e.message?.slice(0, 100)}`);
+      }
+    }
+
+    return { snapshotted: snap, missing, total: positions.length, triggered: triggerCandidates.length };
   } finally {
     _running = false;
   }

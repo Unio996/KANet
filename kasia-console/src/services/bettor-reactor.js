@@ -142,6 +142,40 @@ export async function evaluatePosition(pos, opts = {}) {
   return null; // edge case: delta in (-size×0.2, -$5] 区间 hold
 }
 
+// Module-level prepared SQL (shared by batch evaluatePositions + event-driven P1 tracker trigger)
+const _insertAdjStmt = () => sqlite.prepare(`
+  INSERT INTO bettor_adjustments
+    (id, position_id, recommendation_id, relay_node_id, adj_type, trigger_reason,
+     drift_pp, pnl_pct, unrealized_pnl, current_yes_price, severity)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
+const _existsRecentStmt = () => sqlite.prepare(`
+  SELECT id FROM bettor_adjustments
+  WHERE position_id = ? AND adj_type = ? AND status = 'pending'
+    AND created_at > datetime('now', '-24 hours')
+  LIMIT 1
+`);
+
+/**
+ * Write adjustment with 24h dedup (same position + same adj_type pending).
+ * Shared by batch evaluatePositions (reactor 1h cron) + event-driven trigger (tracker P1).
+ * Returns true if written, false if dedup skip.
+ */
+export function writeAdjustment(positionRow, action, logPrefix = '[bettor-reactor]') {
+  const existsRecent = _existsRecentStmt();
+  if (existsRecent.get(positionRow.position_id, action.adj_type)) return false;
+
+  const pnlPct = positionRow.size_usd > 0 ? ((positionRow.unrealized_pnl || 0) / positionRow.size_usd) * 100 : 0;
+  _insertAdjStmt().run(
+    randomUUID(), positionRow.position_id, positionRow.recommendation_id, positionRow.relay_node_id,
+    action.adj_type, action.trigger_reason,
+    positionRow.drift_pp || 0, pnlPct, positionRow.unrealized_pnl || 0,
+    positionRow.current_yes_price, action.severity
+  );
+  console.log(`${logPrefix} ${action.severity.toUpperCase()} ${action.adj_type} ${positionRow.position_id.slice(0, 8)} ${positionRow.direction} target=$${action.target_size.toFixed(2)} delta=$${action.delta.toFixed(2)} — ${action.trigger_reason.slice(0, 150)}`);
+  return true;
+}
+
 export async function evaluatePositions() {
   if (_running) return { skipped: 'already running' };
   _running = true;
@@ -172,37 +206,12 @@ export async function evaluatePositions() {
       return { evaluated: 0, triggered: 0 };
     }
 
-    const insertAdj = sqlite.prepare(`
-      INSERT INTO bettor_adjustments
-        (id, position_id, recommendation_id, relay_node_id, adj_type, trigger_reason,
-         drift_pp, pnl_pct, unrealized_pnl, current_yes_price, severity)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    // dedup 24h: 同 position + 同 adj_type pending 跳 (防 1h cron 重复 ADD 24 次)
-    const existsRecent = sqlite.prepare(`
-      SELECT id FROM bettor_adjustments
-      WHERE position_id = ? AND adj_type = ? AND status = 'pending'
-        AND created_at > datetime('now', '-24 hours')
-      LIMIT 1
-    `);
-
     let triggered = 0;
     for (const r of rows) {
       const action = await evaluatePosition(r);
       if (!action) continue;
-
-      // dedup
-      if (existsRecent.get(r.position_id, action.adj_type)) continue;
-
-      const pnlPct = r.size_usd > 0 ? (r.unrealized_pnl / r.size_usd) * 100 : 0;
-      insertAdj.run(
-        randomUUID(), r.position_id, r.recommendation_id, r.relay_node_id,
-        action.adj_type, action.trigger_reason,
-        r.drift_pp, pnlPct, r.unrealized_pnl, r.current_yes_price, action.severity
-      );
-      triggered++;
-      console.log(`[bettor-reactor] ${action.severity.toUpperCase()} ${action.adj_type} ${r.position_id.slice(0, 8)} ${r.direction} target=$${action.target_size.toFixed(2)} delta=$${action.delta.toFixed(2)} — ${action.trigger_reason.slice(0, 150)}`);
+      const written = writeAdjustment(r, action, '[bettor-reactor]');
+      if (written) triggered++;
     }
 
     console.log(`[bettor-reactor] evaluated ${rows.length} open, triggered ${triggered} adjustments (Kelly delta 模型 Phase 3e-6)`);
