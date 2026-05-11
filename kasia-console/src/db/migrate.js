@@ -3051,6 +3051,33 @@ export function runMigrations() {
     }
   }
 
+  // v97: T-J2-2026-05-11 Phase 2 E.1 (NWT #18 ABE audit E): reputation_summary 表 — 最小可用 reputation accumulation
+  // Owner 5/11 02:48 钦定 "断点 E.reputation: 先把 reputation accumulation 接进 chain_events trigger (最小可用)"
+  // E.2 接 recordChainEvent post-insert hook 真 upsert (exchange_completed/disputed/timed_out events 触发)
+  // E.3 reputation.js _readSummary path + lazy fallback (UNION query) 兼容
+  // E.4 backfill 历史 chain_events 回放 (idempotent)
+  // E.5 accumulation test
+  {
+    const has97 = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='reputation_summary'").get();
+    if (!has97) {
+      sqlite.exec(`
+        CREATE TABLE reputation_summary (
+          address TEXT PRIMARY KEY,
+          completed_count INTEGER NOT NULL DEFAULT 0,
+          disputed_count INTEGER NOT NULL DEFAULT 0,
+          timed_out_count INTEGER NOT NULL DEFAULT 0,
+          total_kas_volume REAL NOT NULL DEFAULT 0,
+          total_usd_volume REAL NOT NULL DEFAULT 0,
+          last_event_at TEXT,
+          last_updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_reputation_summary_volume ON reputation_summary(total_usd_volume DESC);
+        CREATE INDEX idx_reputation_summary_completed ON reputation_summary(completed_count DESC);
+      `);
+      console.log('[migrate] v97: reputation_summary 表 + 2 索引 创建 (Phase 2 E.1 ABE reputation accumulation).');
+    }
+  }
+
   // v96: T-J2-2026-05-11 Phase 2 η.1 — rename role 'dev' → 'general' (Owner 5/11 钦定)
   // 'general' 语义中性 + 包容: 不局限 dev 用途, 任何通用 reactive agent (NWT/J2/KANet/Opus/Qclaude) 都 fit
   // ref: NWT #16 propose + J2 #262 ack
