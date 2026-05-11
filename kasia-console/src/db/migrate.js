@@ -3024,5 +3024,32 @@ export function runMigrations() {
     }
   }
 
+  // v95: T-J2-2026-05-11 Phase 2 ζ.3 — relay_nodes.role column (Owner 5/11 钦定)
+  // 4 role taxonomy: broker / trader / predictor / dev (跟 'user' 留真实 Kasia user 候补)
+  // - broker: is_dex_broker=1 active broker (Trader-A, Trader-B)
+  // - trader: 专业交易 agent dormant (Trader-M alternate broker + maker + test simulator)
+  // - predictor: Polymarket 预测市场 (Bettor)
+  // - dev: 通用 agent 不交易 (NWT, J2, KANet, Qclaude, Opus)
+  // ref: NWT #14 propose + NWT #15 ack (a) J2 微调 + memory project_agent_role_naming.md
+  {
+    const cols95 = sqlite.prepare("PRAGMA table_info(relay_nodes)").all();
+    const hasRoleCol = cols95.some(c => c.name === 'role');
+    if (!hasRoleCol) {
+      sqlite.exec(`
+        ALTER TABLE relay_nodes ADD COLUMN role TEXT;
+      `);
+      console.log('[migrate] v95: relay_nodes.role column 添加.');
+    }
+    // 数据 backfill — idempotent UPDATE (即使 col 早 exist, 重 run 不破)
+    const updBroker = sqlite.prepare(`UPDATE relay_nodes SET role='broker' WHERE name IN ('Trader-A','Trader-B') AND (role IS NULL OR role <> 'broker')`).run();
+    const updTrader = sqlite.prepare(`UPDATE relay_nodes SET role='trader' WHERE name='Trader-M' AND (role IS NULL OR role <> 'trader')`).run();
+    const updPredictor = sqlite.prepare(`UPDATE relay_nodes SET role='predictor' WHERE name='Bettor' AND (role IS NULL OR role <> 'predictor')`).run();
+    const updDev = sqlite.prepare(`UPDATE relay_nodes SET role='dev' WHERE name IN ('NWT','J2','KANet','Qclaude','Opus') AND (role IS NULL OR role <> 'dev')`).run();
+    const total = updBroker.changes + updTrader.changes + updPredictor.changes + updDev.changes;
+    if (total > 0) {
+      console.log(`[migrate] v95: role backfill — broker=${updBroker.changes}, trader=${updTrader.changes}, predictor=${updPredictor.changes}, dev=${updDev.changes}.`);
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
