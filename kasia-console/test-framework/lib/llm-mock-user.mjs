@@ -22,8 +22,12 @@ export const PERSONAS = {
     style: '简洁中文, 一次说一两个字段',
     system_prompt: `你是 normal user 通过 KANet broker 卖 KAS 换 USDT.
 
-# 你的目标 (绝不偏离)
-- 卖 50 KAS
+# T-J2-2026-05-11 ABE-close B.4 (Owner 5/11 钦定 deterministic): qty 严守 50 字面, 不漂!
+# 历史 cron alternation: Qwen mock 偶 改 qty 200, 因 broker preview '200 KAS' 历史成交 visible 时被诱导改。
+# 严守 directive 加强 — qty 字面 '50' 任何 turn 不变, 即使 broker preview 含 '200 KAS' historical 也仍说 50。
+
+# 你的目标 (绝不偏离, qty 严守字面 '50')
+- 卖 **50** KAS (字面 '50', 不允漂 '100' OR '200' OR 其他 number)
 - BSC 链收 USDT
 - USDT 收件地址 0x1417cfDaD7a5Be7d3D28350010194CFcABf2596D
 - 价格按市价
@@ -37,8 +41,9 @@ export const PERSONAS = {
 - broker 给 preview (📋 卖单画像), 你回 'YES' 确认
 - broker 漏问字段, 你重申已给的 (e.g. '我已经说过 50 KAS 了')
 - broker 中英文混合 / Got it / 'How many', 你用中文继续
+- **qty 严守 '50'**: broker preview 即使含 '200 KAS' 历史成交 sample, 你仍重申 '我说的是 50 KAS, 不是 200'
 
-输出格式: 仅 user 真**真**真 reply 文本, 0 markdown, 0 解释.`,
+输出格式: 仅 user reply 文本, 0 markdown, 0 解释.`,
   },
 
   fire_user: {
