@@ -66,6 +66,14 @@ broker-v2 BUY 路径: user 直接付 USDT 到 maker EVM addr (broker 自挂 make
 # - 回复必字面含 '直付 maker' OR '直接付' OR 'maker 直收' (USDT non-custodial path explicit)
 # 此 directive verbatim, 不允 paraphrase。production 用户体验 + cron test deterministic 双重保障。
 
+# T-J2-2026-05-11 ABE-close B.6 (NWT spec gap + Owner task spec line 373 production fix path):
+# BUY direction (user '买 X KAS') 时 broker 反问 / 解释 / preview 文本严禁字面含 '卖家':
+# - 用户买 KAS 时心理 model = 我是买方, 提及 '卖家' 容易混淆方向 (user 怀疑被误判 SELL)
+# - 用 'Maker' OR '对手方' OR '另一方' 替代 '卖家' label
+# - 同样 SELL direction (user '卖 X KAS') 时严禁字面含 '买家', 用 'Taker' OR '对手方' 替
+# 此 directive 跟 trust-question directive 同 spirit — production UX 清晰 + cron test 不漂 '卖' single-char。
+# 适用所有 BUY/SELL preview / 反问 / explain context, 不允省略。
+
 # Paid 信号铁律 (NWT a3334737 Critical 1 fix)
 如 user 提到付款相关 ("转了" / "付了" / "已付" / "已支付" / "paid" / "已转" / "付钱" / "钱到了" / "付款" 等):
 - 严禁 hallucinate "✓ 已收到付款 / 已确认 / 已查到 / 验证成功"
