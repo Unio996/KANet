@@ -10,6 +10,32 @@
 import { sqlite } from '../db/client.js';
 
 /**
+ * T-J2-2026-05-11 Phase 2 E.3 (NWT #18 ABE audit E):
+ * 读 reputation_summary 表 (E.1 schema, E.2 hook 实时 upsert)。fast cached read 路径。
+ * 表未存在 (migrate v97 未跑) OR address 无 row (首次 settlement 前) → return null,
+ * caller 走 lazy UNION fallback (assessReputation 主路径)。
+ *
+ * @param {string} address — 对手方地址
+ * @returns {object|null} — { completed_count, disputed_count, timed_out_count, total_kas_volume, total_usd_volume, last_event_at } OR null
+ */
+export function _readSummary(address) {
+  if (!address) return null;
+  try {
+    return sqlite.prepare(`
+      SELECT completed_count, disputed_count, timed_out_count,
+             total_kas_volume, total_usd_volume, last_event_at, last_updated_at
+      FROM reputation_summary
+      WHERE address = ?
+    `).get(address) || null;
+  } catch (err) {
+    // reputation_summary 表未存在 — migrate v97 未跑 OR fresh install
+    if (err.message.includes('no such table')) return null;
+    console.warn(`[reputation E.3] _readSummary err: ${err.message}`);
+    return null;
+  }
+}
+
+/**
  * 评估一个对手方地址的交易信誉。
  *
  * @param {string} myAddress — 我方 Agent 地址
