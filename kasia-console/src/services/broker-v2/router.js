@@ -267,6 +267,19 @@ export async function handleMessage(peer, msg) {
       }
     }
 
+    // T-J2-2026-05-11 SC9 (triage T3): post-publish addr change attempt deterministic R31 lock。
+    // broker-llm-agent.handleLlmDialog L890-898 R31 check 仅 'aligning' phase fire；
+    // post-publish (awaiting_payment/paid/executing/refunding) 走 broker-v2/router.js 直 llm.render path
+    // 之前漏 R31 deterministic check → LLM 行为 stochastic (echo addr → R19 wrap PASS / smart reject → no wrap → assertion miss)。
+    // lifecycle_confirmed_cannot_change_addr test fixture L48-50 iter12 confess 已记录 production gap。
+    try {
+      const { detectAddrChangeAttempt } = await import('../broker-state-authority.js');
+      const attempt = detectAddrChangeAttempt(peer, msg);
+      if (attempt.attempt) {
+        return `订单地址已锁定 ${attempt.locked}. 改地址请回 "NO" 取消订单, 重新下单告诉我新地址.`;
+      }
+    } catch (e) { console.warn(`[broker-v2 router R31 post-publish] err: ${e.message}`); }
+
     // 复合 intent / question / 自然对话 → LLM (含 state inject 知 phase)
     const reply = await llm.render(peer, msg, activeOrder, _loadProfile(peer), _loadContact(peer));
     return reply || '你的挂单还在跑. 想查状态回 "查单", 想取消回 "取消".';
