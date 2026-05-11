@@ -22,12 +22,13 @@ const FAVORITE_BUY_PRICE_THRESHOLD = 0.85;
 const FAVORITE_SIGMA_TOLERANCE = 0.10;
 const FAVORITE_SIZE_PENALTY = 0.5;
 
-// Phase 3e-2 Layer 4 confidence gates (Owner 5/11 钦定 quality > quantity):
-// - max(pMid, 1-pMid) < 0.65 = LLM 50/50 瞎猜, SKIP (dog YES case 死在这条)
+// Phase 3e-2 Layer 4 confidence gates (Owner 5/11 钦定 "宁缺毋滥不输前提下再考虑赢"):
+// - max(pMid, 1-pMid) < threshold = LLM 自信不足 → SKIP
 // - max(pMid, 1-pMid) >= 0.85 AND sigma > 0.10 = "高自信但 LLM 自己不信", SKIP
-// 起步 0.65 而不是 Owner propose 的 0.95 — 标尺没校准前不押死赌注, 收集真实落地胜率
-// 7-14 天数据 (bin by confidence vs actual win rate) 后再决断提到 0.95
-const CONFIDENCE_MIN = 0.65;
+// J1 #116 propose 0.95 + auto-fallback (反向渐进): 起步 Owner 字面 0.95, 7 天 0 settled 自动降级 0.90/0.85
+// activeThreshold 从 config_entries 'bettor_confidence_threshold' 读, default base
+const CONFIDENCE_MIN_BASE = 0.95;                    // Owner 字面起步
+const CONFIDENCE_FALLBACK_LEVELS = [0.95, 0.90, 0.85]; // 反向降级
 const CONFIDENCE_HIGH = 0.85;
 const HIGH_CONFIDENCE_MAX_SIGMA = 0.10;
 
@@ -62,6 +63,7 @@ export function recommendBet(input) {
     bankroll,
     kellyFraction: kf = DEFAULT_KELLY_FRACTION,
   } = input;
+  // input.confidenceThreshold optional — auto-fallback caller (scanner) passes runtime value
 
   const reasoning = [];
 
@@ -75,10 +77,14 @@ export function recommendBet(input) {
     return { side: 'SKIP', size: 0, fraction: 0, reasoning };
   }
 
-  // Layer 4 闸 A: confidence 下限 (Owner 5/11 钦定 quality > quantity)
+  // Layer 4 闸 A: confidence 下限 (Owner 5/11 钦定 + J1 #116 auto-fallback)
+  // activeThreshold 由 caller 传入 (从 config_entries 读), default 用 base
+  const activeThreshold = (typeof input.confidenceThreshold === 'number')
+    ? input.confidenceThreshold
+    : CONFIDENCE_MIN_BASE;
   const maxConfidence = Math.max(pMid, 1 - pMid);
-  if (maxConfidence < CONFIDENCE_MIN) {
-    reasoning.push(`max(pMid, 1-pMid)=${(maxConfidence * 100).toFixed(1)}% < ${CONFIDENCE_MIN * 100}% (LLM 50/50 瞎猜) → SKIP`);
+  if (maxConfidence < activeThreshold) {
+    reasoning.push(`max(pMid, 1-pMid)=${(maxConfidence * 100).toFixed(1)}% < ${(activeThreshold * 100).toFixed(0)}% (LLM 自信不足) → SKIP`);
     return { side: 'SKIP', size: 0, fraction: 0, reasoning };
   }
 

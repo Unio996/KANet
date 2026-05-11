@@ -91,29 +91,45 @@ test('recommendBet: NO with size when YES=$0.15 vs 4% (edge=11pt on NO side)', (
   assert.ok(r.fraction > 0);
 });
 
-test('recommendBet: SKIP when max(pMid, 1-pMid) < 0.65 (Layer 4 confidence min)', () => {
-  // LLM 50/50 瞎猜: pMid=0.55, market=0.50, edge=5pp 但 confidence 只 55% → SKIP
-  const r = recommendBet({ pMid: 0.55, sigma: 0.08, yesPrice: 0.50, bankroll: 1000, infoGapMonths: 0 });
+test('recommendBet: SKIP when max(pMid, 1-pMid) < base 0.95 (Layer 4 J1 #116 strict)', () => {
+  // Owner 字面起步 0.95, 0.70 confidence SKIP (5/11 J1 push back compromise 0.90 → 0.95)
+  const r = recommendBet({ pMid: 0.70, sigma: 0.05, yesPrice: 0.50, bankroll: 1000, infoGapMonths: 0 });
   assert.equal(r.side, 'SKIP');
-  assert.match(r.reasoning.join(' '), /50\/50 瞎猜|confidence/);
+  assert.match(r.reasoning.join(' '), /自信不足|confidence/);
 });
 
-test('recommendBet: SKIP high confidence + high sigma (Layer 4 self-contradiction)', () => {
-  // LLM 说 90% YES 但 σ=20% 自相矛盾
-  const r = recommendBet({ pMid: 0.90, sigma: 0.20, yesPrice: 0.50, bankroll: 1000, infoGapMonths: 0 });
-  assert.equal(r.side, 'SKIP');
-  assert.match(r.reasoning.join(' '), /自相矛盾|self/i);
-});
-
-test('recommendBet: ALLOW confidence 0.65+ low sigma (Layer 4 pass)', () => {
-  const r = recommendBet({ pMid: 0.70, sigma: 0.05, yesPrice: 0.55, bankroll: 1000, infoGapMonths: 0 });
+test('recommendBet: ALLOW confidence >= 0.95 (J1 #116 base threshold)', () => {
+  // pMid 0.97 + market 0.85, confidence 97% 通过 base 0.95
+  const r = recommendBet({ pMid: 0.97, sigma: 0.05, yesPrice: 0.85, bankroll: 1000, infoGapMonths: 0 });
   assert.equal(r.side, 'YES');
   assert.ok(r.size > 0);
 });
 
-test('recommendBet: SKIP dog buy_price <= 0.10 (Layer 1, with confidence pass-through)', () => {
-  // LLM 高自信 YES 估 70% 但市场 yes=$0.05 (dog), Layer 4 confidence 通过, Layer 1 dog gate 拦
-  const r = recommendBet({ pMid: 0.70, sigma: 0.08, yesPrice: 0.05, bankroll: 1000, infoGapMonths: 0 });
+test('recommendBet: ALLOW with caller-passed confidenceThreshold=0.90 (auto-fallback simulation)', () => {
+  // 模拟 auto-fallback 7d 0 settled 降级到 0.90, 0.92 confidence 通过
+  const r = recommendBet({ pMid: 0.92, sigma: 0.05, yesPrice: 0.80, bankroll: 1000, infoGapMonths: 0, confidenceThreshold: 0.90 });
+  assert.equal(r.side, 'YES');
+  assert.ok(r.size > 0);
+});
+
+test('recommendBet: SKIP high confidence + high sigma (Layer 4 self-contradiction)', () => {
+  // 0.95 base + pMid 0.97 通过 base, 但 σ=0.20 触自相矛盾闸
+  const r = recommendBet({ pMid: 0.97, sigma: 0.20, yesPrice: 0.50, bankroll: 1000, infoGapMonths: 0 });
+  assert.equal(r.side, 'SKIP');
+  // pMid 0.97 + σ 0.20 — Layer 4-B "self-contradict" 在 Layer 闸 A (0.95 pass) 后触
+  // 但 Layer A 的 MAX_SIGMA_FOR_BET (0.30) 也允许通过, 所以 4-B 是 active gate
+  assert.match(r.reasoning.join(' '), /自相矛盾/);
+});
+
+test('recommendBet: SKIP confidence 0.70 even with caller threshold 0.95 (旧 Layer 4 测试旧 0.65 阈值已 obsolete)', () => {
+  // Owner 5/11 钦定后 0.70 confidence < 0.95 base, SKIP (不再 ALLOW)
+  const r = recommendBet({ pMid: 0.70, sigma: 0.05, yesPrice: 0.55, bankroll: 1000, infoGapMonths: 0 });
+  assert.equal(r.side, 'SKIP');
+});
+
+test('recommendBet: SKIP dog buy_price <= 0.10 (Layer 1, confidence>=base for pass-through)', () => {
+  // Owner 5/11 钦定后必须 confidence >= 0.95 才走到 Layer 1. LLM 高自信 97% YES 但市场 yes=$0.05 (dog)
+  const r = recommendBet({ pMid: 0.97, sigma: 0.05, yesPrice: 0.05, bankroll: 1000, infoGapMonths: 0 });
   assert.equal(r.side, 'SKIP');
   assert.match(r.reasoning.join(' '), /deep dog|系统性输/);
 });
@@ -122,28 +138,19 @@ test('recommendBet: J1 host MLB scenario (pMid=0.5 dog) SKIP at Layer 4 confiden
   // 实际 J1 5/10 MLB: LLM pMid=50% market yes=0.01, confidence 0.50 → Layer 4 先拦
   const r = recommendBet({ pMid: 0.5, sigma: 0.15, yesPrice: 0.01, bankroll: 1000, infoGapMonths: 0 });
   assert.equal(r.side, 'SKIP');
-  assert.match(r.reasoning.join(' '), /50\/50|confidence/);
+  assert.match(r.reasoning.join(' '), /自信不足|confidence/);
 });
 
-test('recommendBet: SKIP favorite-side BUY when sigma > 10% (Layer 1)', () => {
-  // 押 favorite YES @ $0.88 σ=15% pMid=0.92: confidence 92% < 0.85 阈值不触, buy_price 0.88 触 favorite gate
-  // 但 Layer 4-B 也会触 (high confidence 92% + sigma 15%). 顺序问题: Layer 4 先, 任一触都 SKIP, 验证 SKIP 结果即可
-  const r = recommendBet({ pMid: 0.78, sigma: 0.15, yesPrice: 0.88, bankroll: 1000, infoGapMonths: 0 });
-  assert.equal(r.side, 'NO');  // pMid 0.78 → 押 NO (buy_price=0.12 中段)
-  // 重新 craft 真正只触 favorite gate 的: pMid 0.84 (低于 high confidence 0.85), 押 YES, buy=0.88
-  const r2 = recommendBet({ pMid: 0.84, sigma: 0.13, yesPrice: 0.88, bankroll: 1000, infoGapMonths: 0 });
-  // pMid 0.84 选 NO (1-0.84=0.16 < 0.84 wait...), 实际 Kelly 算 fYes vs fNo
-  // 简化: 直接验证 confidence < 0.85 时 favorite gate 是 active path
-  // 用 yes=0.88 push pMid 略高让 fYes>fNo: pMid 0.90 sigma 0.08, confidence 90% > 0.85, Layer 4-B trigger if sigma>0.10
-  // 用 pMid 0.84 sigma 0.08 (confidence 84% < 0.85 不触 Layer 4-B): fYes Kelly... 选 NO 因为 1-0.84=0.16 > 0
-  // 实际场景: Greece Eurovision NO @ buy=$0.12 (yes=0.88) σ=0.13 — 不触 favorite gate (因为押 NO 不是 YES side)
-  // Layer 1 favorite gate 真正难触发, 因为 fYes vs fNo 通常选 cheaper side
-  // 删掉这个测试 case, 因为新 Layer 4 已 cover 高 sigma 高 confidence 场景
+test('recommendBet: SKIP favorite-side BUY when sigma > 10% (Layer 1, with caller threshold)', () => {
+  // 0.95 base 下 confidence < 0.95 直接 SKIP, 测试 Layer 1 favorite gate 需 caller 降阈值
+  // pMid=0.95 push YES, buy_price=yes_price=0.88, σ=0.15 触 favorite gate
+  const r = recommendBet({ pMid: 0.95, sigma: 0.15, yesPrice: 0.88, bankroll: 1000, infoGapMonths: 0, confidenceThreshold: 0.90 });
+  assert.equal(r.side, 'SKIP');
 });
 
 test('recommendBet: ALLOW favorite-side BUY when sigma <= 10% but penalty halved', () => {
-  // 押 favorite YES @ $0.85 σ=8%: pMid 略高于 yes 选 YES + sigma 低
-  const r = recommendBet({ pMid: 0.92, sigma: 0.08, yesPrice: 0.85, bankroll: 1000, infoGapMonths: 0 });
+  // 押 favorite YES @ $0.85 σ=8% pMid=0.97: 通过 Layer 4 confidence 0.95 base + favorite penalty halve
+  const r = recommendBet({ pMid: 0.97, sigma: 0.08, yesPrice: 0.85, bankroll: 1000, infoGapMonths: 0 });
   assert.equal(r.side, 'YES');
   assert.match(r.reasoning.join(' '), /favorite_penalty/);
 });

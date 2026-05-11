@@ -45,6 +45,14 @@ const KELLY_FRACTION = 0.25;
 const INVENTORY_SAFETY_MIN_FRAC = 0.10;     // 即使全仓占满, 仍至少留 10% bankroll 给新单
 const SCAN_TIMEOUT_PER_MARKET_MS = 180_000; // 3 min hard cap per market
 
+// Phase 3e-2 Layer 4 auto-fallback (J1 #116 propose, Owner 5/11 钦定 quality>quantity 反向渐进):
+// activeThreshold default 0.95 (Owner 字面起步), 若 7 天 0 settled 自动降级 → 0.90 → 0.85
+// 数据稳定后 Owner 手动改回 (config_entries override).
+const CONFIDENCE_FALLBACK_LEVELS = [0.95, 0.90, 0.85];
+const CONFIDENCE_FALLBACK_REVIEW_DAYS = 7;
+const CONFIDENCE_THRESHOLD_KEY = 'bettor_confidence_threshold';
+const CONFIDENCE_FALLBACK_LOG_KEY = 'bettor_confidence_fallback_log';
+
 // Phase 3e-2 Layer 3 correlation caps (J1 #107 ack, Sophie 5 笔 MLB / 2 笔 Greece Eurovision 实证)
 const SAME_SPORT_CAP_PER_BATCH = 2;     // 单 batch 同 sport 最多 2 笔
 const SAME_EVENT_CAP_PER_BATCH = 1;     // 单 batch 同事件 (e.g. Greece Eurovision) 最多 1 笔
@@ -179,6 +187,71 @@ async function pMapLimit(items, limit, fn) {
   return results;
 }
 
+// ── confidence threshold auto-fallback (J1 #116 propose) ─────────────────
+
+function getActiveConfidenceThreshold() {
+  const row = sqlite.prepare(`SELECT value_encrypted FROM config_entries WHERE key=?`).get(CONFIDENCE_THRESHOLD_KEY);
+  const stored = row?.value_encrypted ? parseFloat(row.value_encrypted) : null;
+  if (stored && CONFIDENCE_FALLBACK_LEVELS.includes(stored)) return stored;
+  return CONFIDENCE_FALLBACK_LEVELS[0]; // default 0.95
+}
+
+function setActiveConfidenceThreshold(newVal, reason) {
+  const now = new Date().toISOString();
+  const id = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2);
+  // Upsert threshold
+  const existing = sqlite.prepare(`SELECT id FROM config_entries WHERE key=?`).get(CONFIDENCE_THRESHOLD_KEY);
+  if (existing) {
+    sqlite.prepare(`UPDATE config_entries SET value_encrypted=?, updated_at=? WHERE key=?`)
+      .run(String(newVal), now, CONFIDENCE_THRESHOLD_KEY);
+  } else {
+    sqlite.prepare(`INSERT INTO config_entries (id, key, category, value_encrypted, is_sensitive, created_at, updated_at) VALUES (?, ?, 'bettor', ?, 0, ?, ?)`)
+      .run(id, CONFIDENCE_THRESHOLD_KEY, String(newVal), now, now);
+  }
+  // Append log
+  const logRow = sqlite.prepare(`SELECT value_encrypted FROM config_entries WHERE key=?`).get(CONFIDENCE_FALLBACK_LOG_KEY);
+  let logArr = [];
+  try { logArr = logRow?.value_encrypted ? JSON.parse(logRow.value_encrypted) : []; } catch { logArr = []; }
+  logArr.push({ at: now, to: newVal, reason });
+  const logStr = JSON.stringify(logArr.slice(-50));
+  if (logRow) {
+    sqlite.prepare(`UPDATE config_entries SET value_encrypted=?, updated_at=? WHERE key=?`)
+      .run(logStr, now, CONFIDENCE_FALLBACK_LOG_KEY);
+  } else {
+    sqlite.prepare(`INSERT INTO config_entries (id, key, category, value_encrypted, is_sensitive, created_at, updated_at) VALUES (?, ?, 'bettor', ?, 0, ?, ?)`)
+      .run(id + '-log', CONFIDENCE_FALLBACK_LOG_KEY, 'bettor', logStr, now, now);
+  }
+  console.log(`[bettor-scanner] confidence threshold → ${newVal} (reason: ${reason})`);
+}
+
+// 检查是否需要 auto-fallback: 7 天内 0 settled recommendation → 降级
+function maybeAutoFallback(relayNodeId) {
+  if (!relayNodeId) return;
+  const cur = getActiveConfidenceThreshold();
+  const curIdx = CONFIDENCE_FALLBACK_LEVELS.indexOf(cur);
+  if (curIdx < 0 || curIdx >= CONFIDENCE_FALLBACK_LEVELS.length - 1) return; // 已最低或异常
+
+  const recent = sqlite.prepare(`
+    SELECT COUNT(*) c FROM bettor_recommendations
+    WHERE relay_node_id=? AND status='resolved'
+      AND scanned_at > datetime('now', '-${CONFIDENCE_FALLBACK_REVIEW_DAYS} days')
+  `).get(relayNodeId);
+  if ((recent?.c || 0) > 0) return; // 7 天内有 settled, 不降级
+
+  // Additional safeguard: 至少 scanned 过 N 次才认 "0 settled" 信号
+  const anyWritten = sqlite.prepare(`
+    SELECT COUNT(*) c FROM bettor_recommendations
+    WHERE relay_node_id=? AND scanned_at > datetime('now', '-${CONFIDENCE_FALLBACK_REVIEW_DAYS} days')
+  `).get(relayNodeId);
+  if ((anyWritten?.c || 0) === 0) {
+    // 7 天没扫过, 不是 "0 confidence pass", 不降级
+    return;
+  }
+
+  const next = CONFIDENCE_FALLBACK_LEVELS[curIdx + 1];
+  setActiveConfidenceThreshold(next, `auto-fallback ${cur}→${next} (7d 0 settled, ${anyWritten?.c || 0} scanned)`);
+}
+
 // ── inventory-aware bankroll: 扣已 open 仓位 ───────────────────────────────
 
 function getOpenInventory(relayNodeId) {
@@ -204,7 +277,7 @@ function getAdapterUrlForAgent(relayNodeId) {
 
 // ── single-market scan ───────────────────────────────────────────────────
 
-async function scanOne(market, adapterUrl, availableBankroll) {
+async function scanOne(market, adapterUrl, availableBankroll, activeConfidenceThreshold) {
   await loadLib();
   const yesPrice = market.yes / 100;
 
@@ -249,6 +322,7 @@ async function scanOne(market, adapterUrl, availableBankroll) {
     bankroll: effectiveBankroll,
     infoGapMonths,
     kellyFraction: KELLY_FRACTION,
+    confidenceThreshold: activeConfidenceThreshold,
   });
 
   const edge = rec.side === 'YES'
@@ -428,7 +502,12 @@ export async function runScan(triggerType = 'cron', relayNodeId = null) {
       const availableBankroll = Math.max(0, DEFAULT_BANKROLL - openSize);
       console.log(`[bettor-scanner] inventory: open=$${openSize.toFixed(2)} / bankroll $${DEFAULT_BANKROLL} → available $${availableBankroll.toFixed(2)}`);
 
-      const results = await pMapLimit(eligibleList, LLM_CONCURRENCY, (m) => scanOne(m, adapterUrl, availableBankroll));
+      // Phase 3e-2 Layer 4 J1 #116: read active confidence threshold + maybe auto-fallback
+      maybeAutoFallback(resolvedRelayId);
+      const activeConfidenceThreshold = getActiveConfidenceThreshold();
+      console.log(`[bettor-scanner] confidence threshold: ${activeConfidenceThreshold} (Layer 4 J1 #116 auto-fallback)`);
+
+      const results = await pMapLimit(eligibleList, LLM_CONCURRENCY, (m) => scanOne(m, adapterUrl, availableBankroll, activeConfidenceThreshold));
       const errors = results.filter(r => r?.error).length;
       const valid = results.filter(r => r && !r.error).length;
       console.log(`[bettor-scanner] LLM done: ${valid} ok, ${errors} errors`);
