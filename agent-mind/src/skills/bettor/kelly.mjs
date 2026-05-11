@@ -22,6 +22,15 @@ const FAVORITE_BUY_PRICE_THRESHOLD = 0.85;
 const FAVORITE_SIGMA_TOLERANCE = 0.10;
 const FAVORITE_SIZE_PENALTY = 0.5;
 
+// Phase 3e-2 Layer 4 confidence gates (Owner 5/11 钦定 quality > quantity):
+// - max(pMid, 1-pMid) < 0.65 = LLM 50/50 瞎猜, SKIP (dog YES case 死在这条)
+// - max(pMid, 1-pMid) >= 0.85 AND sigma > 0.10 = "高自信但 LLM 自己不信", SKIP
+// 起步 0.65 而不是 Owner propose 的 0.95 — 标尺没校准前不押死赌注, 收集真实落地胜率
+// 7-14 天数据 (bin by confidence vs actual win rate) 后再决断提到 0.95
+const CONFIDENCE_MIN = 0.65;
+const CONFIDENCE_HIGH = 0.85;
+const HIGH_CONFIDENCE_MAX_SIGMA = 0.10;
+
 /** Pure Kelly fraction. Returns 0 if no positive edge. */
 export function kellyFraction({ p, marketPrice }) {
   if (marketPrice <= 0 || marketPrice >= 1) return 0;
@@ -63,6 +72,19 @@ export function recommendBet(input) {
 
   if (sigma > MAX_SIGMA_FOR_BET) {
     reasoning.push(`sigma ${(sigma * 100).toFixed(1)}% > ${MAX_SIGMA_FOR_BET * 100}% (LLM 不确定) → SKIP`);
+    return { side: 'SKIP', size: 0, fraction: 0, reasoning };
+  }
+
+  // Layer 4 闸 A: confidence 下限 (Owner 5/11 钦定 quality > quantity)
+  const maxConfidence = Math.max(pMid, 1 - pMid);
+  if (maxConfidence < CONFIDENCE_MIN) {
+    reasoning.push(`max(pMid, 1-pMid)=${(maxConfidence * 100).toFixed(1)}% < ${CONFIDENCE_MIN * 100}% (LLM 50/50 瞎猜) → SKIP`);
+    return { side: 'SKIP', size: 0, fraction: 0, reasoning };
+  }
+
+  // Layer 4 闸 B: 高 confidence + 高 sigma 冲突 (LLM 自相矛盾)
+  if (maxConfidence >= CONFIDENCE_HIGH && sigma > HIGH_CONFIDENCE_MAX_SIGMA) {
+    reasoning.push(`high confidence ${(maxConfidence * 100).toFixed(1)}% but sigma ${(sigma * 100).toFixed(1)}% > ${HIGH_CONFIDENCE_MAX_SIGMA * 100}% (LLM 自相矛盾) → SKIP`);
     return { side: 'SKIP', size: 0, fraction: 0, reasoning };
   }
 
