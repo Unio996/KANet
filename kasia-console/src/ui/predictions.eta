@@ -550,17 +550,20 @@
               :class="pos.status === 'expired_pending' ? 'bg-amber-50 text-amber-600' : 'bg-green-50 text-green-600'"
               x-text="pos.status === 'expired_pending' ? 'Awaiting resolution' : 'Active'"></span>
           </div>
-          <!-- Row 3: market ID + Polymarket link + 出清 button (active 真盘 close, Bettor r46 (B) Step 1) -->
+          <!-- Row 3: market ID + Polymarket link -->
           <div class="flex items-center gap-3 mt-1">
             <span class="text-[10px] text-ink-300 font-mono" x-text="pos.market?.slice(0,16) + '...'" @click="navigator.clipboard.writeText(pos.market)" title="Click to copy conditionId" style="cursor:pointer"></span>
             <a :href="'https://polymarket.com/event/' + pos.market" target="_blank" rel="noopener"
               class="text-[10px] text-brand-400 hover:text-brand-600">View on Polymarket</a>
-            <button x-show="pos.status === 'active'" @click="sellActivePosition(pos)" :disabled="pos._closing"
-              class="ml-auto px-2 py-0.5 bg-amber-500 hover:bg-amber-600 text-white rounded text-[10px] font-medium disabled:opacity-50">
-              <span x-show="!pos._closing">出清</span>
+          </div>
+          <!-- Row 4: 出清 button (Bettor r46 (B) Step 1, 独立显眼一行) -->
+          <div x-show="pos.status === 'active'" class="flex items-center gap-2 mt-2 pt-2 border-t border-warm-100">
+            <button @click="sellActivePosition(pos)" :disabled="pos._closing"
+              class="flex-1 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded font-medium text-xs disabled:opacity-50">
+              <span x-show="!pos._closing">💰 一键出清 (sell @ market)</span>
               <span x-show="pos._closing">出清中...</span>
             </button>
-            <span x-show="pos._closeTx" class="text-[10px] text-green-600">✓ TX <a :href="'https://polygonscan.com/tx/' + pos._closeTx" target="_blank" rel="noopener" class="font-mono underline" x-text="pos._closeTx?.slice(0,12) + '...'"></a></span>
+            <span x-show="pos._closeTx" class="text-[10px] text-green-600 whitespace-nowrap">✓ TX <a :href="'https://polygonscan.com/tx/' + pos._closeTx" target="_blank" rel="noopener" class="font-mono underline" x-text="pos._closeTx?.slice(0,10) + '...'"></a></span>
             <span x-show="pos._closeError" class="text-[10px] text-red-500" x-text="pos._closeError"></span>
           </div>
         </div>
