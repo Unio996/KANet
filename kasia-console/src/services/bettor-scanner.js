@@ -189,7 +189,7 @@ async function pMapLimit(items, limit, fn) {
 
 // ── confidence threshold auto-fallback (J1 #116 propose) ─────────────────
 
-function getActiveConfidenceThreshold() {
+export function getActiveConfidenceThreshold() {
   const row = sqlite.prepare(`SELECT value_encrypted FROM config_entries WHERE key=?`).get(CONFIDENCE_THRESHOLD_KEY);
   const stored = row?.value_encrypted ? parseFloat(row.value_encrypted) : null;
   if (stored && CONFIDENCE_FALLBACK_LEVELS.includes(stored)) return stored;
