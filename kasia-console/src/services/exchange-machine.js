@@ -20,18 +20,24 @@ import crypto from 'crypto';
 
 // ── Valid Transitions ─────────────────────────────────────────
 
+// T-J2-2026-05-11 Phase 2 A.1 (NWT #18 ABE audit): 加 refunded transition + TERMINAL state。
+// 3 direct UPDATE bypass sites (broker-state-authority.js:482 真 refunded; api/exchange.js:48 真 expired;
+// broker-intake-watcher.js:429 真 timed_out) — A.2-A.4 重定向走 transition() 必要 VALID_TRANSITIONS 含 refunded。
+// refunded source states: open/matched/verifying/delivering/verified/awaiting_manual_confirm/awaiting_oracle
+// (broker-state-authority advanceToRefunded 真 cancel-refund 路径, 任 active state 都可走 refund)。
 const VALID_TRANSITIONS = {
-  open:                     ['matched', 'cancelled', 'expired'],
-  matched:                  ['verifying', 'awaiting_manual_confirm', 'awaiting_oracle'],
-  verifying:                ['delivering', 'disputed', 'timed_out'],
-  delivering:               ['completed', 'verified', 'disputed'],  // verified = revert on delivery failure
-  verified:                 ['delivering', 'disputed', 'timed_out'], // delivery retry or manual intervention
-  awaiting_manual_confirm:  ['completed', 'disputed', 'timed_out'],
-  awaiting_oracle:          ['completed', 'failed', 'timed_out'],
+  open:                     ['matched', 'cancelled', 'expired', 'refunded'],
+  matched:                  ['verifying', 'awaiting_manual_confirm', 'awaiting_oracle', 'refunded'],
+  verifying:                ['delivering', 'disputed', 'timed_out', 'refunded'],
+  delivering:               ['completed', 'verified', 'disputed', 'refunded'],  // verified = revert on delivery failure
+  verified:                 ['delivering', 'disputed', 'timed_out', 'refunded'], // delivery retry or manual intervention
+  awaiting_manual_confirm:  ['completed', 'disputed', 'timed_out', 'refunded'],
+  awaiting_oracle:          ['completed', 'failed', 'timed_out', 'refunded'],
 };
 
 // Terminal states — no further transitions allowed
-const TERMINAL = new Set(['completed', 'disputed', 'timed_out', 'failed', 'cancelled', 'expired']);
+// A.1: 加 refunded (broker-state-authority advanceToRefunded 真 terminal sink, 跟 cancelled/expired 同 class)
+const TERMINAL = new Set(['completed', 'disputed', 'timed_out', 'failed', 'cancelled', 'expired', 'refunded']);
 
 // ── State Transitions ─────────────────────────────────────────
 
