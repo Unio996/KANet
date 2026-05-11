@@ -29,8 +29,9 @@ import { getActiveConfidenceThreshold, getAdapterUrlForAgent } from './bettor-sc
 const KANET_ROOT = process.env.KANET_ROOT || 'C:/kanet';
 
 // Lazy load agent-mind lib (跟 scanner 同 pattern, file:// dynamic import)
+// P0.3 export loadLib for test setup (prime _parseRule + _recommendBet before evaluatePosition stub)
 let _parseRule, _estimateP, _recommendBet;
-async function loadLib() {
+export async function loadLib() {
   if (_parseRule) return;
   const rp = await import(`file:///${KANET_ROOT}/agent-mind/src/skills/bettor/rule-parser.mjs`);
   const e = await import(`file:///${KANET_ROOT}/agent-mind/src/skills/bettor/estimator.mjs`);
@@ -53,26 +54,31 @@ let _running = false;
 /**
  * Single position evaluator — Kelly delta 模型 (Phase 3e-6 P0.2 architect spec).
  * Returns: { adj_type, severity, trigger_reason, target_size, delta } OR null (hold/noise).
+ *
+ * P0.3 dependency injection: opts.estimatePFn override estimateP (test stub support).
+ * Default opts={} → 走 module-loaded _estimateP + callLLMWithFallback (production path).
  */
-async function evaluatePosition(pos) {
+export async function evaluatePosition(pos, opts = {}) {
   // Guard: 老 backfill rows market_description=NULL 跳过 (P0.1 ship 前数据)
   if (!pos.market_description) return null;
 
-  const adapterUrl = getAdapterUrlForAgent(pos.relay_node_id);
-  if (!adapterUrl) return null;
+  const adapterUrl = opts.adapterUrl || getAdapterUrlForAgent(pos.relay_node_id);
+  if (!adapterUrl && !opts.estimatePFn) return null;
 
   // 1. parse rule + LLM 重估 pMid/sigma
   let parsed;
   try { parsed = _parseRule(pos.market_description); } catch { return null; }
 
-  const llmCallback = async (prompt) => {
+  const llmCallback = opts.llmCallback || (async (prompt) => {
     const r = await callLLMWithFallback({ system: prompt, user: '', adapterUrl });
     return r.ok ? r.text : null;
-  };
+  });
+
+  const estimatePFn = opts.estimatePFn || _estimateP;
 
   let estimate;
   try {
-    estimate = await _estimateP({
+    estimate = await estimatePFn({
       ruleText: pos.market_description,
       parsed,
       trainingCutoff: TRAINING_CUTOFF,
@@ -84,7 +90,10 @@ async function evaluatePosition(pos) {
   }
 
   // 2. recommendBet (Kelly + Layer 1-4 闸 same as scanner)
-  const activeThreshold = getActiveConfidenceThreshold();
+  // P0.3 opts.confidenceThreshold override for test (避 sqlite config_entries 依赖)
+  const activeThreshold = (typeof opts.confidenceThreshold === 'number')
+    ? opts.confidenceThreshold
+    : getActiveConfidenceThreshold();
   const newRec = _recommendBet({
     pMid: estimate.pMid,
     sigma: estimate.sigma,
