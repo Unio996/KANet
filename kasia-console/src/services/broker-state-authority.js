@@ -24,6 +24,8 @@
 
 import { sqlite } from '../db/client.js';
 import { transition } from './broker-state-machine.js';  // SA-4 真 transition migrate (_sweepStaleAligning aligning→expired)
+// T-J2-2026-05-11 Phase 2 A.4 (NWT #18 ABE audit): exchange-machine transition alias (区分 retail_dex_orders state machine 同名 transition)
+import { transition as exchangeTransition } from './exchange-machine.js';
 
 // T-J2-2026-05-07 r256 T1.5a: 主动 DM chain-truth grounding (Owner 钦定 broker user-facing 必 chain truth + TX evidence)
 const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
@@ -477,13 +479,10 @@ function _confirmRefundedState({ orderId, offerId, realTxId, refundAmount, userK
       // retail_dex_orders 真 INSERT 但 exchange_offer_id 永远 NEVER SET). 跳 exchange_offers UPDATE,
       // 仅 retail_dex_orders + chain_events 2-table sync.
       if (offerId) {
-        sqlite.prepare(`
-          UPDATE exchange_offers
-          SET protocol_status = 'refunded',
-              cancelled_at = datetime('now'),
-              updated_at = datetime('now')
-          WHERE id = ?
-        `).run(offerId);
+        // T-J2-2026-05-11 Phase 2 A.4 (NWT #18 ABE audit): direct UPDATE → exchangeTransition() loop。
+        // 走 exchange-machine.transition() 单一所有权切分, 完整 invariant 守 (VALID_TRANSITIONS check + timestamp + TERMINAL guard)。
+        // A.1 已 add 'refunded' 作 7 source states 任一 target — 任 active offer 可 advance refunded。
+        exchangeTransition(offerId, 'refunded');
       }
       // INSERT chain_events with REAL chain txId (not placeholder 'refund_<id>').
       // Post-v83 trigger enforces length=64 hex format for broker_* events; real txId passes.
