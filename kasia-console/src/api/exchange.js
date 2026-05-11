@@ -42,12 +42,10 @@ export async function registerExchangeRoutes(fastify) {
       params.push(maker);
     }
 
-    // Expire stale offers
-    sqlite.prepare(`
-      UPDATE exchange_offers
-      SET protocol_status = 'expired', updated_at = datetime('now')
-      WHERE protocol_status = 'open' AND expires_at IS NOT NULL AND expires_at < datetime('now')
-    `).run();
+    // T-J2-2026-05-11 Phase 2 A.2 (NWT #18 ABE audit): inline UPDATE → expireStale() transition() loop。
+    // 现 expireStale (exchange-machine.js:575) 真 SELECT stale + transition(id, 'expired') loop, 走 transition() invariant 路径
+    // (timestamp 设 expired_at + audit log)。inline UPDATE bypass transition() 是 A 断点根因。
+    expireStale();
 
     const rows = sqlite.prepare(`
       SELECT * FROM exchange_offers
