@@ -471,6 +471,32 @@ function checkR37(filepath, content) {
   }
 }
 
+// ── ABE-A.6 (T-J2-2026-05-11 Phase 2 NWT #18): UPDATE exchange_offers SET protocol_status owner invariant ──
+// 仅 exchange-machine.js 真 owner. 其他 file 直 UPDATE protocol_status → fail (bypass transition()).
+// Whitelist (per A.5 audit): 注释 marker `lint-allow-protocol-status-direct: ABE-A.5-*` 标 site OK。
+function checkABE_A6_protocol_status_owner(filepath, content) {
+  // 允许 file:
+  if (/[/\\]kasia-console[/\\]src[/\\]services[/\\]exchange-machine\.js$/.test(filepath)) return;
+  if (/[/\\]kasia-console[/\\]src[/\\]db[/\\]migrate\.js$/.test(filepath)) return;  // migration backfill OK
+  // 排除 test files (test fixture exec_sql 直 UPDATE 是 test setup, 不是 production violation)
+  if (/[/\\]test-framework[/\\]/.test(filepath)) return;
+  if (/[/\\]scripts[/\\]_/.test(filepath)) return;  // one-shot scripts/_*.mjs
+  if (/[/\\]scripts[/\\]smoke-/.test(filepath)) return;  // smoke test scripts
+
+  const lines = content.split('\n');
+  // 匹 `UPDATE exchange_offers SET protocol_status` (case-insensitive, 允 whitespace variation)
+  const pattern = /UPDATE\s+exchange_offers\s+SET[^;]*protocol_status\s*=/i;
+  for (let i = 0; i < lines.length; i++) {
+    if (!pattern.test(lines[i])) continue;
+    // whitelist marker: 此行 OR 前 15 行 含 'lint-allow-protocol-status-direct'
+    // (15 行 window 容纳 multi-line audit comment block above SQL prepare statement)
+    const windowStart = Math.max(0, i - 15);
+    const windowText = lines.slice(windowStart, i + 1).join('\n');
+    if (/lint-allow-protocol-status-direct/.test(windowText)) continue;
+    violate('ABE-A.6', `[ABE-A.6] UPDATE exchange_offers SET protocol_status 仅允 exchange-machine.js (NWT #18 A 断点 单一所有权切分). 其他 file 走 transition(id, newStatus). 如确需 terminal escape, 加注释 'lint-allow-protocol-status-direct: <reason>' (前 5 行 OR 同行).`, filepath, i + 1);
+  }
+}
+
 // ── 跑 ──
 for (const fp of targets) {
   let content;
@@ -487,6 +513,7 @@ for (const fp of targets) {
   checkR_NWT_STATE_MACHINE(fp, content);  // SA-3: retail_dex_orders.state 直 UPDATE → hard fail
   checkBrokerStutter(fp, content);
   checkCommandEnum(fp, content);
+  checkABE_A6_protocol_status_owner(fp, content);  // ABE-A.6: protocol_status owner invariant
 }
 checkR10();
 
