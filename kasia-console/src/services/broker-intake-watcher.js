@@ -13,6 +13,7 @@
 // 挂在 Console 启动 (index.js) setInterval, 不新建表只新增 event_type='broker_intake_processed' 作处理标记.
 
 import { sqlite } from '../db/client.js';
+import { transition } from './exchange-machine.js';
 import { randomUUID } from 'node:crypto';
 
 const TICK_MS = 60_000;
@@ -422,11 +423,12 @@ export async function _scanExpiredBrokerOffers() {
       }
       const refundAmount = parseFloat(meta.intent_qty || r.give_amount);
 
-      // 'open' → 'timed_out' status transition (proactive sweep set timestamp).
+      // T-J2-2026-05-11 Phase 2 A.3 (NWT #18 ABE audit): direct UPDATE → transition() loop。
+      // 'open' → 'timed_out' status transition (proactive sweep set timestamp by transition() 内)。
       // advanceToRefunded refundable states: 'awaiting_payment','paid','expired'. 'open'/'timed_out' offer
-      // 真 retail_dex_orders state 真 'awaiting_payment' (broker held KAS) — advanceToRefunded 真 work.
+      // retail_dex_orders state 真 'awaiting_payment' (broker held KAS) — advanceToRefunded 真 work。
       if (r.protocol_status === 'open') {
-        sqlite.prepare(`UPDATE exchange_offers SET protocol_status='timed_out', timed_out_at=datetime('now') WHERE id=?`).run(r.id);
+        transition(r.id, 'timed_out');  // VALID_TRANSITIONS A.1 已加 'open' → 'timed_out'
       }
 
       // Find linked retail_dex_orders.id

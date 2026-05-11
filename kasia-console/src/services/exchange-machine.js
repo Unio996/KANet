@@ -26,7 +26,7 @@ import crypto from 'crypto';
 // refunded source states: open/matched/verifying/delivering/verified/awaiting_manual_confirm/awaiting_oracle
 // (broker-state-authority advanceToRefunded 真 cancel-refund 路径, 任 active state 都可走 refund)。
 const VALID_TRANSITIONS = {
-  open:                     ['matched', 'cancelled', 'expired', 'refunded'],
+  open:                     ['matched', 'cancelled', 'expired', 'refunded', 'timed_out'],
   matched:                  ['verifying', 'awaiting_manual_confirm', 'awaiting_oracle', 'refunded'],
   verifying:                ['delivering', 'disputed', 'timed_out', 'refunded'],
   delivering:               ['completed', 'verified', 'disputed', 'refunded'],  // verified = revert on delivery failure
