@@ -3051,5 +3051,15 @@ export function runMigrations() {
     }
   }
 
+  // v96: T-J2-2026-05-11 Phase 2 η.1 — rename role 'dev' → 'general' (Owner 5/11 钦定)
+  // 'general' 语义中性 + 包容: 不局限 dev 用途, 任何通用 reactive agent (NWT/J2/KANet/Opus/Qclaude) 都 fit
+  // ref: NWT #16 propose + J2 #262 ack
+  {
+    const updGeneral = sqlite.prepare(`UPDATE relay_nodes SET role='general' WHERE role='dev'`).run();
+    if (updGeneral.changes > 0) {
+      console.log(`[migrate] v96: role 'dev' → 'general' rename — ${updGeneral.changes} rows.`);
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

@@ -50,12 +50,12 @@ function _checkBrokerSkillCompat(skill, newStatus) {
   return { ok: true };
 }
 
-// T-J2-2026-05-11 Phase 2 ζ.4 (Owner 5/11 钦定 + NWT #14 propose + NWT #15 ack J2 微调):
-// 4-role skill whitelist guard。relay_nodes.role column (migrate v95) 驱动 skill bind policy。
-// - broker: matcher / order-book / cex-bridge (active broker)
-// - trader: matcher / order-book (alternate broker / maker / taker)
+// T-J2-2026-05-11 Phase 2 ζ.4 + η.1 (Owner 5/11 钦定 + NWT #14/16 propose):
+// 5-role skill whitelist guard。relay_nodes.role column (migrate v95+v96) 驱动 skill bind policy。
+// - broker: matcher / order-book / cex-bridge (active broker — Trader-A/B)
+// - trader: matcher / order-book (alternate broker / maker / taker — Trader-M)
 // - predictor: polymarket-trader / sports-tracker (Bettor)
-// - dev: [] (通用 agent 禁交易 skill)
+// - general: [] (通用 agent 禁交易 skill — NWT/J2/KANet/Opus/Qclaude; η.1 rename 'dev' → 'general')
 // - user: wallet-query (真实 Kasia user 不允 matcher 避免 stranger 抢单)
 //
 // ROLE_SKILL_ALLOWED 仅覆 trading 相关 skill — 其他通用 skill (greeting / chat / etc) 不限。
@@ -65,7 +65,7 @@ const ROLE_SKILL_ALLOWED = {
   trader: ['matcher', 'order-book'],
   user: ['wallet-query'],
   predictor: ['polymarket-trader', 'sports-tracker'],
-  dev: [],
+  general: [],
 };
 const TRADING_SKILLS_SET = new Set([
   'matcher', 'order-book', 'cex-bridge', 'polymarket-trader', 'sports-tracker', 'wallet-query',
