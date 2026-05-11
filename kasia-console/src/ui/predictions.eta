@@ -112,6 +112,14 @@
                 <span x-text="bettorResolving ? '结算中...' : '立即结算'"></span>
               </button>
             </template>
+            <!-- close-all sticky button: 任何 tab 都看到, 仅 OPEN > 0 显示 -->
+            <template x-if="bettorHistory && (bettorHistory.positions || []).some(p => !p.closed_at)">
+              <button @click="closeAllSimPositions()" :disabled="closingAll"
+                      class="btn btn-sm bg-amber-500 hover:bg-amber-600 text-white text-[11px]">
+                <span x-show="!closingAll" x-text="'一键出清 (' + bettorHistory.positions.filter(p => !p.closed_at).length + ' 笔)'"></span>
+                <span x-show="closingAll">出清中...</span>
+              </button>
+            </template>
             <button @click="bettorModalOpen = false" class="text-ink-400 hover:text-ink-700 text-xl px-2">✕</button>
           </div>
         </div>
@@ -1159,6 +1167,8 @@ function predictionsPage() {
         console.warn('[bettor] load failed:', e.message);
         this.bettorRecs = { recommendations: [] };
       }
+      // Always load bettorHistory so close-all button visibility computes (any tab open)
+      this.loadBettorHistory().catch(() => {});
     },
 
     async bettorScan() {
