@@ -1103,8 +1103,12 @@ async function handleExchangeDelivered(msg) {
   // Idempotent: already completed/disputed/etc → skip
   if (['completed', 'disputed', 'cancelled', 'expired'].includes(offer.protocol_status)) return;
 
-  // Accept from any in-progress state (buyer node may be at matched/verifying/delivering depending on timing)
-  // Direct SQL UPDATE — not transition() — because buyer's state may not match seller's state machine sequence
+  // T-J2-2026-05-11 Phase 2 A.5 (NWT #18 ABE audit) — bypass 保留 + comment 更新:
+  // BYPASS reason: buyer node receiving delivery_v1 真 protocol_status 可能 matched/verifying/delivering 任一
+  // (cross-node sync 异步)。VALID_TRANSITIONS 'matched' targets [verifying/awaiting_manual_confirm/awaiting_oracle/refunded] 不含
+  // 'completed' — transition('matched', 'completed') 真 reject。direct UPDATE with status IN (..) guard 是 buyer-state-
+  // agnostic 唯一路径。A.6 lint rule 真 whitelist 此 site (注释 marker 'lint-allow-protocol-status-direct: ABE-A.5')。
+  // lint-allow-protocol-status-direct: ABE-A.5-buyer-state-agnostic-completion
   // TIMEZONE FIX: bind JS toISOString() instead of SQLite datetime('now') to ensure Z suffix.
   // SQLite datetime('now') returns "YYYY-MM-DD HH:MM:SS" (naive) which JS Date() parses as LOCAL,
   // causing "completed 7h ago" bug on P2-01 for Owner in +7 timezone. Phase 2 first finding.
@@ -1280,7 +1284,12 @@ async function handleExchangeResolve(msg) {
   const newStatus = msg.outcome === 'maker_wins' ? 'completed' : 'cancelled';
   const now = new Date().toISOString();
 
-  // 直接 SQL (disputed 是 TERMINAL, transition() 会拒绝)
+  // T-J2-2026-05-11 Phase 2 A.5 (NWT #18 ABE audit) — bypass 保留 + comment verified accurate:
+  // disputed 在 TERMINAL Set (exchange-machine.js:34, A.1 加 refunded 后 ['completed','disputed','timed_out',
+  // 'failed','cancelled','expired','refunded'])。transition() L46-48 真 TERMINAL 时 return offer unchanged
+  // 不 transition — 真 confirmed reject。dispute resolution 真必走 bypass (terminal escape)。
+  // A.6 lint rule 真 whitelist 此 site (注释 marker 'lint-allow-protocol-status-direct: ABE-A.5')。
+  // lint-allow-protocol-status-direct: ABE-A.5-dispute-resolution-terminal-escape
   sqlite.prepare(`
     UPDATE exchange_offers
     SET protocol_status = ?, updated_at = ?,
