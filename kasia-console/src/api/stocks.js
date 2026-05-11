@@ -678,6 +678,43 @@ export async function registerStockRoutes(fastify) {
     }
   });
 
+  // POST /api/predictions/positions/:asset/close — 一键出清 active position (sell at market bid)
+  // Bettor r46 (B) Step 1: alpha 期速度优先, market bid - $0.01 slippage, immediate fill
+  fastify.post('/api/predictions/positions/:asset/close', async (request, reply) => {
+    const { relay_node_id, size } = request.body || {};
+    const { asset } = request.params;
+    if (!relay_node_id || !asset) return reply.code(400).send({ error: 'relay_node_id + asset required' });
+    let client;
+    try {
+      client = await _makeClobClient(relay_node_id);
+      if (!client) return reply.code(400).send({ error: 'Wallet or API key missing' });
+      const book = await client.getOrderBook(asset);
+      const bids = (book?.bids || []).map(b => ({ price: parseFloat(b.price), size: parseFloat(b.size) })).filter(b => b.price > 0);
+      if (bids.length === 0) return reply.code(400).send({ error: 'no bids in book' });
+      const bestBid = Math.max(...bids.map(b => b.price));
+      const sellPrice = Math.max(0.01, bestBid - 0.01);
+      const sellSize = size ? parseFloat(size) : 0;
+      if (!sellSize || sellSize <= 0) return reply.code(400).send({ error: 'size required' });
+      console.log(`[predictions/close] asset=${asset.slice(0,16)} size=${sellSize} bestBid=$${bestBid.toFixed(3)} sellPrice=$${sellPrice.toFixed(3)}`);
+      const result = await client.createAndPostOrder({
+        tokenID: asset, price: sellPrice, size: sellSize, side: 'SELL',
+      });
+      const proceedsUsdc = sellPrice * sellSize;
+      console.log(`[predictions/close] result: ${JSON.stringify(result).slice(0,200)} proceeds=$${proceedsUsdc.toFixed(2)}`);
+      return reply.send({
+        ok: result?.success === true || (!!result && !result.error),
+        sell_price: sellPrice, size: sellSize, best_bid: bestBid,
+        slippage_pct: bestBid > 0 ? ((bestBid - sellPrice) / bestBid * 100) : 0,
+        proceeds_usdc: proceedsUsdc, order_result: result,
+      });
+    } catch (e) {
+      console.log(`[predictions/close] ERROR: ${e.message}`);
+      return reply.send({ ok: false, error: e.message });
+    } finally {
+      _releaseClob(client);
+    }
+  });
+
   // DELETE /api/predictions/order/:orderId — 撤单（SDK）
   fastify.delete('/api/predictions/order/:orderId', async (request, reply) => {
     const { relay_node_id } = request.query;

@@ -550,11 +550,18 @@
               :class="pos.status === 'expired_pending' ? 'bg-amber-50 text-amber-600' : 'bg-green-50 text-green-600'"
               x-text="pos.status === 'expired_pending' ? 'Awaiting resolution' : 'Active'"></span>
           </div>
-          <!-- Row 3: market ID + Polymarket link -->
+          <!-- Row 3: market ID + Polymarket link + 出清 button (active 真盘 close, Bettor r46 (B) Step 1) -->
           <div class="flex items-center gap-3 mt-1">
             <span class="text-[10px] text-ink-300 font-mono" x-text="pos.market?.slice(0,16) + '...'" @click="navigator.clipboard.writeText(pos.market)" title="Click to copy conditionId" style="cursor:pointer"></span>
             <a :href="'https://polymarket.com/event/' + pos.market" target="_blank" rel="noopener"
               class="text-[10px] text-brand-400 hover:text-brand-600">View on Polymarket</a>
+            <button x-show="pos.status === 'active'" @click="sellActivePosition(pos)" :disabled="pos._closing"
+              class="ml-auto px-2 py-0.5 bg-amber-500 hover:bg-amber-600 text-white rounded text-[10px] font-medium disabled:opacity-50">
+              <span x-show="!pos._closing">出清</span>
+              <span x-show="pos._closing">出清中...</span>
+            </button>
+            <span x-show="pos._closeTx" class="text-[10px] text-green-600">✓ TX <a :href="'https://polygonscan.com/tx/' + pos._closeTx" target="_blank" rel="noopener" class="font-mono underline" x-text="pos._closeTx?.slice(0,12) + '...'"></a></span>
+            <span x-show="pos._closeError" class="text-[10px] text-red-500" x-text="pos._closeError"></span>
           </div>
         </div>
       </template>
@@ -1252,6 +1259,43 @@ function predictionsPage() {
         await this.loadBettorAdjustments();
         if (this.bettorTab === 'history') await this.loadBettorHistory();
       } catch (e) { console.error('[bettor] decide failed:', e.message); }
+    },
+
+    // Bettor r46 (B) Step 1: 真盘 active position 出清 (placeOrder sell at market bid - $0.01)
+    async sellActivePosition(pos) {
+      if (pos._closing) return;
+      // 2 步 confirm (真盘比 sim 严, 防误击)
+      const bestBidEst = pos.curPrice || pos.avgPrice || 0.5;
+      const estimatedSellPrice = Math.max(0.01, bestBidEst - 0.01);
+      const estimatedProceeds = estimatedSellPrice * pos.size;
+      const confirmed = confirm(
+        `卖出 ${pos.size} ${pos.outcome} shares\n` +
+        `估卖价: $${estimatedSellPrice.toFixed(3)} (market bid - $0.01 slippage)\n` +
+        `估收回: $${estimatedProceeds.toFixed(2)} USDC\n` +
+        `当前 P&L: ${(pos.size - pos.totalCost >= 0 ? '+' : '')}$${(pos.size - pos.totalCost).toFixed(2)}\n\n` +
+        `此操作不可撤销, 链上 TX. 确认?`
+      );
+      if (!confirmed) return;
+      const sellConfirm = prompt('真盘操作 — 输入 SELL 确认 (防误击):');
+      if (sellConfirm !== 'SELL') { alert('未确认 (需输入 SELL), 已取消'); return; }
+      pos._closing = true;
+      pos._closeError = '';
+      pos._closeTx = '';
+      try {
+        const r = await fetch('/api/predictions/positions/' + pos.asset + '/close', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relay_node_id: this.relayNodeId, size: pos.size }),
+        });
+        const j = await r.json();
+        if (!j.ok) { pos._closeError = j.error || 'unknown'; pos._closing = false; return; }
+        pos._closeTx = j.order_result?.transactionHash || j.order_result?.transactionsHashes?.[0] || j.order_result?.orderID || 'submitted';
+        alert(`✓ 卖单已提交\n卖价 $${j.sell_price?.toFixed(3)}, 估收回 $${j.proceeds_usdc?.toFixed(2)} USDC, slippage ${j.slippage_pct?.toFixed(2)}%`);
+        // refresh positions after a delay
+        setTimeout(() => this.loadPositions(), 5000);
+      } catch (e) {
+        pos._closeError = e.message;
+      }
+      pos._closing = false;
     },
 
     // Bettor r44 architect spec: 一键出清 sim 持仓 (Owner 直接介入, 不走 adjustment 审批)
