@@ -21,8 +21,12 @@ const SNAPSHOT_INTERVAL_MS = 60 * 60 * 1000; // 1h
 const PRICE_DIFF_TRIGGER_PP = 0.10;          // |latest - prev| > 10pp → trigger reactor immediate
 const TRIGGER_COOLDOWN_MS = 5 * 60 * 1000;   // 同 position 5min 内不重触 (防 snapshot race + concurrent ticks)
 const _recentlyTriggered = new Map();        // position_id → last trigger timestamp (in-memory, restart 清)
+// Phase 3e-6 P2 (Bettor r37 K-P): urgent cron <24h to expiry (binary 价格加速期)
+const URGENT_INTERVAL_MS = 15 * 60 * 1000;   // 15min
+const URGENT_WINDOW_HOURS = 24;              // positions ending within 24h
 
 let _timer = null;
+let _urgentTimer = null;
 let _running = false;
 
 function computePnl(direction, entryBuyPrice, currentYesPrice, sizeUsd) {
@@ -33,16 +37,29 @@ function computePnl(direction, entryBuyPrice, currentYesPrice, sizeUsd) {
   return sizeUsd * (currentBuy / entryBuyPrice - 1);
 }
 
-export async function snapshotOpenPositions() {
+export async function snapshotOpenPositions({ urgentOnly = false } = {}) {
   if (_running) return { skipped: 'already running' };
   _running = true;
   try {
-    const positions = sqlite.prepare(`
-      SELECT id, recommendation_id, direction, entry_yes_price, entry_buy_price,
-             size_usd, max_drawdown_pp, max_unrealized_gain_pp
-      FROM bettor_sim_positions
-      WHERE closed_at IS NULL AND direction != 'SKIP' AND size_usd > 0
-    `).all();
+    // Phase 3e-6 P2: urgentOnly filter — 仅扫 endDate < now+24h positions (binary 价格加速期).
+    // JOIN bettor_recommendations 拿 end_date (sim_positions 表无此字段).
+    const positions = urgentOnly
+      ? sqlite.prepare(`
+          SELECT p.id, p.recommendation_id, p.direction, p.entry_yes_price, p.entry_buy_price,
+                 p.size_usd, p.max_drawdown_pp, p.max_unrealized_gain_pp
+          FROM bettor_sim_positions p
+          JOIN bettor_recommendations r ON r.id = p.recommendation_id
+          WHERE p.closed_at IS NULL AND p.direction != 'SKIP' AND p.size_usd > 0
+            AND r.end_date IS NOT NULL
+            AND r.end_date < datetime('now', '+${URGENT_WINDOW_HOURS} hours')
+            AND r.end_date > datetime('now')
+        `).all()
+      : sqlite.prepare(`
+          SELECT id, recommendation_id, direction, entry_yes_price, entry_buy_price,
+                 size_usd, max_drawdown_pp, max_unrealized_gain_pp
+          FROM bettor_sim_positions
+          WHERE closed_at IS NULL AND direction != 'SKIP' AND size_usd > 0
+        `).all();
 
     if (positions.length === 0) {
       return { snapshotted: 0, missing: 0, total: 0 };
@@ -126,7 +143,8 @@ export async function snapshotOpenPositions() {
     });
     tx(positions);
 
-    console.log(`[bettor-tracker] snapshotted ${snap}/${positions.length} open positions (${missing} missing market data)`);
+    const tag = urgentOnly ? 'urgent tick (<24h to expiry)' : 'cron tick';
+    console.log(`[bettor-tracker] ${tag} snapshotted ${snap}/${positions.length} open positions (${missing} missing market data)`);
 
     // Phase 3e-6 P1: dispatch event-driven evaluatePosition for triggered positions (async, post-tx)
     for (const cand of triggerCandidates) {
@@ -174,8 +192,16 @@ export function startTrackerCron() {
     snapshotOpenPositions().catch(err => console.log(`[bettor-tracker] boot tick error: ${err.message}`));
   }, 45_000);
   console.log(`[bettor-tracker] cron registered: every ${SNAPSHOT_INTERVAL_MS / 3600000}h`);
+
+  // Phase 3e-6 P2: urgent cron 15min tick for positions ending <24h (binary 价格加速期)
+  if (_urgentTimer) return;
+  _urgentTimer = setInterval(() => {
+    snapshotOpenPositions({ urgentOnly: true }).catch(err => console.log(`[bettor-tracker] urgent cron error: ${err.message}`));
+  }, URGENT_INTERVAL_MS);
+  console.log(`[bettor-tracker] urgent cron registered: every ${URGENT_INTERVAL_MS / 60000}min (positions <${URGENT_WINDOW_HOURS}h to expiry)`);
 }
 
 export function stopTrackerCron() {
   if (_timer) { clearInterval(_timer); _timer = null; }
+  if (_urgentTimer) { clearInterval(_urgentTimer); _urgentTimer = null; }
 }
