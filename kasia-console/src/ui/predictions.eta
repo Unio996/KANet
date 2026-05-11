@@ -228,6 +228,21 @@
                 </template>
               </div>
             </template>
+            <!-- Bettor r44 architect spec: 一键出清 sim 持仓 button (open positions only) -->
+            <template x-if="bettorHistory && (bettorHistory.positions || []).some(p => !p.closed_at)">
+              <div class="flex items-center justify-between mb-2 px-1 py-1 bg-warm-50 rounded">
+                <span class="text-[10px] text-ink-500">
+                  <span x-text="'OPEN ' + bettorHistory.positions.filter(p => !p.closed_at).length + ' 笔'"></span>
+                  <span class="ml-1" x-text="(() => { const sum = bettorHistory.positions.filter(p => !p.closed_at).reduce((s,p) => s + (p.latest_snapshot?.unrealized_pnl || 0), 0); return '浮动 ' + (sum >= 0 ? '+' : '') + '$' + sum.toFixed(2); })()"
+                        :class="bettorHistory.positions.filter(p => !p.closed_at).reduce((s,p) => s + (p.latest_snapshot?.unrealized_pnl || 0), 0) >= 0 ? 'text-green-600' : 'text-red-500'"></span>
+                </span>
+                <button @click="closeAllSimPositions()" :disabled="closingAll"
+                        class="btn btn-sm btn-warning text-[10px]">
+                  <span x-show="!closingAll" x-text="'一键出清全部 sim 持仓 (' + bettorHistory.positions.filter(p => !p.closed_at).length + ' 笔)'"></span>
+                  <span x-show="closingAll">出清中...</span>
+                </button>
+              </div>
+            </template>
             <template x-if="bettorHistory && (bettorHistory.positions || []).length">
               <div class="space-y-2">
                 <template x-for="p in bettorHistory.positions" :key="p.position_id">
@@ -972,6 +987,7 @@ function predictionsPage() {
     bettorHistory: null,
     bettorAdjustments: null,
     bettorEvaluating: false,
+    closingAll: false,
 
     get filtered() {
       let list = this.markets;
@@ -1226,6 +1242,37 @@ function predictionsPage() {
         await this.loadBettorAdjustments();
         if (this.bettorTab === 'history') await this.loadBettorHistory();
       } catch (e) { console.error('[bettor] decide failed:', e.message); }
+    },
+
+    // Bettor r44 architect spec: 一键出清 sim 持仓 (Owner 直接介入, 不走 adjustment 审批)
+    // confirm modal: 显示 OPEN 数 + 浮动 PnL preview, 1 步 confirm 足够 (sim 0 风险)
+    async closeAllSimPositions() {
+      if (this.closingAll) return;
+      const open = (this.bettorHistory?.positions || []).filter(p => !p.closed_at);
+      if (open.length === 0) { alert('没有 OPEN 持仓可出清'); return; }
+      const sumPnl = open.reduce((s, p) => s + (p.latest_snapshot?.unrealized_pnl || 0), 0);
+      const sign = sumPnl >= 0 ? '+' : '';
+      const ok = confirm(
+        `即将 close ${open.length} 笔 sim 持仓\n` +
+        `预计锁定浮动 PnL: ${sign}$${sumPnl.toFixed(2)} (按最新 snapshot 计)\n` +
+        `此操作不可撤销 (sim 数据 status 同样落记录)\n\n` +
+        `确认 close 全部?`
+      );
+      if (!ok) return;
+      this.closingAll = true;
+      try {
+        const r = await fetch('/api/bettor/positions/close-all', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relay_node_id: this.relayNodeId, decided_by: 'owner-manual-close-all' }),
+        });
+        const j = await r.json();
+        if (!j.ok) { alert('出清失败: ' + (j.error || j.reason)); this.closingAll = false; return; }
+        alert(`✓ 出清完成: ${j.closed_count} 笔 close, 锁定 ${j.total_realized_pnl >= 0 ? '+' : ''}$${j.total_realized_pnl.toFixed(2)}`);
+        await this.loadBettorHistory();
+        if (this.bettorTab === 'record') await this.loadBettorRecord();
+      } catch (e) { console.error('[bettor] close-all failed:', e.message); alert('出清失败: ' + e.message); }
+      this.closingAll = false;
     },
 
     async bettorResolveNow() {

@@ -297,4 +297,48 @@ export async function registerBettorRoutes(fastify) {
     snapshotOpenPositions().catch(err => console.log(`[api/bettor] snapshot error: ${err.message}`));
     return reply.send({ ok: true, message: 'tracker started' });
   });
+
+  // POST /api/bettor/positions/close-all — Owner 直接介入一键出清全 sim 持仓 (Bettor r44 architect spec)
+  // 不走 /decide adjustment 审批 path — close-all 是 Owner 直接操作 vs adjustment 是 reactor 推荐
+  // close_reason='manual_close_all' 跟 reactor-driven close 概念分离 (战绩面板 future 可分流)
+  fastify.post('/api/bettor/positions/close-all', async (request, reply) => {
+    const relayNodeId = request.body?.relay_node_id;
+    const decidedBy = request.body?.decided_by || 'owner-manual-close-all';
+    if (!relayNodeId) return reply.code(400).send({ error: 'relay_node_id required' });
+
+    // 取每 OPEN position 最新 snapshot unrealized_pnl 作 realized_pnl 锁仓
+    const opens = sqlite.prepare(`
+      SELECT p.id, COALESCE(s.unrealized_pnl, 0) upnl
+      FROM bettor_sim_positions p
+      LEFT JOIN (
+        SELECT position_id, unrealized_pnl, ROW_NUMBER() OVER (PARTITION BY position_id ORDER BY snapshot_at DESC) rn
+        FROM bettor_sim_snapshots
+      ) s ON s.position_id = p.id AND s.rn = 1
+      WHERE p.relay_node_id = ? AND p.closed_at IS NULL AND p.direction != 'SKIP' AND p.size_usd > 0
+    `).all(relayNodeId);
+
+    if (opens.length === 0) {
+      return reply.send({ ok: true, closed_count: 0, total_realized_pnl: 0, positions: [] });
+    }
+
+    const now = new Date().toISOString();
+    const update = sqlite.prepare(`
+      UPDATE bettor_sim_positions
+      SET closed_at = ?, close_reason = 'manual_close_all', realized_pnl = ?
+      WHERE id = ?
+    `);
+    const tx = sqlite.transaction((items) => {
+      for (const p of items) update.run(now, p.upnl, p.id);
+    });
+    tx(opens);
+
+    const totalPnl = opens.reduce((s, p) => s + (p.upnl || 0), 0);
+    console.log(`[bettor-api] close-all relay=${relayNodeId.slice(0, 8)} closed=${opens.length} pnl=$${totalPnl.toFixed(2)} by=${decidedBy}`);
+    return reply.send({
+      ok: true,
+      closed_count: opens.length,
+      total_realized_pnl: totalPnl,
+      positions: opens.map(p => ({ id: p.id, realized_pnl: p.upnl })),
+    });
+  });
 }
