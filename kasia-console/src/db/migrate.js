@@ -3076,6 +3076,53 @@ export function runMigrations() {
       `);
       console.log('[migrate] v97: reputation_summary 表 + 2 索引 创建 (Phase 2 E.1 ABE reputation accumulation).');
     }
+    // T-J2-2026-05-11 Phase 2 E.4 (NWT #18 ABE audit E): backfill 历史 chain_events 回放 idempotent
+    // 检测 reputation_summary 真空 (count = 0) OR backfill marker 真未 set → 跑 backfill aggregation。
+    // backfill 完 INSERT marker row (address='__backfill_marker__') 防 重复跑 (subsequent migrate restart skip)。
+    const backfillMarker = sqlite.prepare(`SELECT 1 FROM reputation_summary WHERE address = '__backfill_marker__'`).get();
+    if (!backfillMarker) {
+      const settlementEvents = sqlite.prepare(`
+        SELECT event_type, from_address, to_address, payload, observed_at
+        FROM chain_events
+        WHERE event_type IN ('exchange_completed', 'exchange_disputed', 'exchange_timed_out')
+          AND (from_address IS NOT NULL OR to_address IS NOT NULL)
+      `).all();
+      const summaries = new Map();  // address → { completed, disputed, timed_out, kas_vol, usd_vol, last_event }
+      for (const e of settlementEvents) {
+        let kasVol = 0, usdVol = 0;
+        try {
+          const p = e.payload ? JSON.parse(e.payload) : {};
+          const amt = parseFloat(p.give_amount || p.amount || 0) || 0;
+          const asset = (p.give_asset || p.asset || '').toUpperCase();
+          if (asset === 'KAS') kasVol = amt;
+          else if (['USDT', 'USDC', 'USD'].includes(asset)) usdVol = amt;
+        } catch { /* parse 失败 0 vol OK */ }
+        const counterField = e.event_type === 'exchange_completed' ? 'completed'
+          : e.event_type === 'exchange_disputed' ? 'disputed' : 'timed_out';
+        for (const addr of [e.from_address, e.to_address]) {
+          if (!addr) continue;
+          if (!summaries.has(addr)) summaries.set(addr, { completed: 0, disputed: 0, timed_out: 0, kas: 0, usd: 0, last: null });
+          const s = summaries.get(addr);
+          s[counterField]++;
+          s.kas += kasVol;
+          s.usd += usdVol;
+          if (!s.last || e.observed_at > s.last) s.last = e.observed_at;
+        }
+      }
+      const now = new Date().toISOString();
+      const ins = sqlite.prepare(`
+        INSERT OR REPLACE INTO reputation_summary
+          (address, completed_count, disputed_count, timed_out_count, total_kas_volume, total_usd_volume, last_event_at, last_updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const txn = sqlite.transaction(() => {
+        for (const [addr, s] of summaries) ins.run(addr, s.completed, s.disputed, s.timed_out, s.kas, s.usd, s.last, now);
+        // marker row 防 backfill 重跑
+        ins.run('__backfill_marker__', 0, 0, 0, 0, 0, now, now);
+      });
+      txn();
+      console.log(`[migrate] v97: E.4 backfill — ${summaries.size} addresses aggregated from ${settlementEvents.length} settlement chain_events.`);
+    }
   }
 
   // v96: T-J2-2026-05-11 Phase 2 η.1 — rename role 'dev' → 'general' (Owner 5/11 钦定)
