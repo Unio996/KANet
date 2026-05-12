@@ -3167,5 +3167,40 @@ export function runMigrations() {
     }
   }
 
+  // v100: Phase 3f-1 Sub #1 — event_calendar 表 + bettor_recommendations 加 lifecycle_state + calibrator_confidence
+  // Bettor r55 architect spec, Owner 5/12 钦定 "完善投注策略 系统自动操作". Greece $242→$48 实证暴露 4 漏洞,
+  // Phase 3f-1 修 #1 (LLM Calibrator: confidence damping) + #2 (Lifecycle State Machine: priced-in skip).
+  // ref: Bettor r55 spec + J1 #137 ack + Sub #1 implementor ship.
+  {
+    const has100 = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='event_calendar'").get();
+    if (!has100) {
+      sqlite.exec(`
+        CREATE TABLE event_calendar (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          market_id TEXT NOT NULL,
+          event_type TEXT NOT NULL,
+          event_time_utc TEXT NOT NULL,
+          priority INTEGER NOT NULL DEFAULT 5,
+          source TEXT,
+          notes TEXT,
+          added_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(market_id, event_type)
+        );
+        CREATE INDEX idx_event_calendar_market ON event_calendar(market_id, event_time_utc);
+        CREATE INDEX idx_event_calendar_time ON event_calendar(event_time_utc);
+      `);
+      console.log('[migrate] v100: event_calendar 表 + 2 索引 创建 (Phase 3f-1 Sub #1 Lifecycle SM, Bettor r55 spec).');
+    }
+    const cols100 = sqlite.prepare("PRAGMA table_info(bettor_recommendations)").all();
+    if (!cols100.some(c => c.name === 'lifecycle_state')) {
+      sqlite.exec(`ALTER TABLE bettor_recommendations ADD COLUMN lifecycle_state TEXT DEFAULT 'pre_event_far'`);
+      console.log('[migrate] v100: bettor_recommendations.lifecycle_state column 添加 (Phase 3f-1 Lifecycle SM 状态).');
+    }
+    if (!cols100.some(c => c.name === 'calibrator_confidence')) {
+      sqlite.exec(`ALTER TABLE bettor_recommendations ADD COLUMN calibrator_confidence TEXT`);
+      console.log('[migrate] v100: bettor_recommendations.calibrator_confidence column 添加 (Phase 3f-1 LLM Calibrator band).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
