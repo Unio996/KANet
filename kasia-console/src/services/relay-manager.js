@@ -265,3 +265,18 @@ export function sendCommandAsync(relayNodeId, command, timeoutMs = 30000) {
   });
 }
 
+/**
+ * T-J2-2026-05-12 #3 — getRelayRpcState wrapper (UI 健康检测 P0, NWT spec sub #3/7).
+ * Console UI/API 通过这个 read-only 探针看 relay child 内部 _rpc state (不是 console daemon 自己 RpcClient).
+ * 5s timeout: relay 活时 IPC reply 应 <100ms; 不活 OR 卡 → 5s reject (UI 友好快错).
+ * @returns {Promise<{ok:true, state:{...}}|{ok:false, error:string}>}
+ */
+export async function getRelayRpcState(relayNodeId) {
+  try {
+    const result = await sendCommandAsync(relayNodeId, { type: 'get_rpc_state' }, 5000);
+    return result;  // 期望 {ok:true, state:{connected, reconnecting, attempt, currentUrl, lastConnectedAt, lastError}}
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
