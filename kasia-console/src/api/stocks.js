@@ -8,7 +8,7 @@ import { sqlite } from '../db/client.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 import crypto, { randomUUID } from 'crypto';
 import { fetchStockData, fetchYahooQuote, cachedPredictions, cachedCommodities, cachedFunding, cachedSentiment, fetchAllMarkets, cachedCrypto, cachedFundamentals, cachedIndustryPeers, cachedStockKlines, DIVERGENCE_WARN_THRESHOLD } from '../services/market-data.js';
-import { getPolygonWallet, getUsdcBalance, createApiKey, getOrderBook, checkAllowance, approveUsdc, checkTxStatus, redeemPositions, checkRedeemStatus, sweepUsdc, fetchUserActivity, fetchAccountValue, getMarketWinner, migrateToV2 } from '../services/polymarket.js';
+import { getPolygonWallet, getUsdcBalance, createApiKey, getOrderBook, checkAllowance, approveUsdc, checkTxStatus, redeemPositions, checkRedeemStatus, sweepUsdc, fetchUserActivity, fetchAccountValue, getMarketWinner, migrateToV2, ensureCtfApprovedForV2 } from '../services/polymarket.js';
 import { decrypt } from '../services/crypto.js';
 
 // Agent 综述缓存（15 分钟）
@@ -686,6 +686,14 @@ export async function registerStockRoutes(fastify) {
     if (!relay_node_id || !asset) return reply.code(400).send({ error: 'relay_node_id + asset required' });
     let client;
     try {
+      // Step 0: auto-ensure CTF→V2 operator approve (合二为一, Owner UX 不该懂 1155 operator 原理)
+      const wallet = getPolygonWallet(relay_node_id);
+      if (!wallet) return reply.code(400).send({ error: 'No polygon wallet' });
+      const approveResult = await ensureCtfApprovedForV2(decrypt(wallet.privkey_encrypted));
+      if (approveResult.newlyApproved > 0) {
+        console.log(`[predictions/close] auto-approved ${approveResult.newlyApproved} CTF→V2 spender(s), TX: ${JSON.stringify(approveResult.txHashes)}`);
+      }
+
       client = await _makeClobClient(relay_node_id);
       if (!client) return reply.code(400).send({ error: 'Wallet or API key missing' });
       const book = await client.getOrderBook(asset);
@@ -706,6 +714,7 @@ export async function registerStockRoutes(fastify) {
         sell_price: sellPrice, size: sellSize, best_bid: bestBid,
         slippage_pct: bestBid > 0 ? ((bestBid - sellPrice) / bestBid * 100) : 0,
         proceeds_usdc: proceedsUsdc, order_result: result,
+        auto_approved: approveResult.newlyApproved > 0 ? approveResult : undefined,
       });
     } catch (e) {
       console.log(`[predictions/close] ERROR: ${e.message}`);

@@ -328,6 +328,30 @@ export async function migrateToV2(privateKey, wrapAmount) {
   }
 }
 
+// Ensure CTF (1155) operator approve for V2 exchanges (sell-side).
+// idempotent: isApprovedForAll(true) → skip. Used by close-position auto-approve flow.
+export async function ensureCtfApprovedForV2(privateKey) {
+  return await withProvider(POLYGON_RPC, async (provider) => {
+    const wallet = new ethers.Wallet(privateKey, provider);
+    const CTF_CONTRACT_ADDR = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
+    const ctf = new ethers.Contract(CTF_CONTRACT_ADDR, [
+      'function setApprovalForAll(address operator, bool approved) external',
+      'function isApprovedForAll(address account, address operator) view returns (bool)',
+    ], wallet);
+    const txHashes = {};
+    const skipped = {};
+    for (const s of POLYMARKET_PUSD_SPENDERS) {
+      const approved = await ctf.isApprovedForAll(wallet.address, s.address);
+      if (approved) { skipped[s.name] = 'already approved'; continue; }
+      const tx = await ctf.setApprovalForAll(s.address, true);
+      console.log(`[polymarket] auto setApprovalForAll CTF→${s.name} TX: ${tx.hash}`);
+      await tx.wait();
+      txHashes[s.name] = tx.hash;
+    }
+    return { ok: true, txHashes, skipped, newlyApproved: Object.keys(txHashes).length };
+  });
+}
+
 export async function approveUsdc(privateKey) {
   try {
     return await withProvider(POLYGON_RPC, async (provider) => {
