@@ -186,6 +186,7 @@ export async function evaluatePositions() {
 
     // open positions + latest snapshot + sigma + market_description (P0.1 加 column)
     // J1 #104 fix retained: yes_price ∈ (0.01, 0.99) 跳过已 resolve markets (resolver cron close)
+    // Phase 3f-0 (Owner 5/12 钦定): blacklist filter — Owner 手动管理的 market 不调仓 (NOT IN subquery 末尾)
     const rows = sqlite.prepare(`
       SELECT
         p.id position_id, p.recommendation_id, p.relay_node_id, p.direction,
@@ -202,6 +203,7 @@ export async function evaluatePositions() {
       WHERE p.closed_at IS NULL AND p.direction != 'SKIP' AND p.size_usd > 0
         AND s.id IS NOT NULL
         AND s.current_yes_price > 0.01 AND s.current_yes_price < 0.99
+        AND r.market_id NOT IN (SELECT market_id FROM bettor_market_blacklist)
     `).all();
 
     if (rows.length === 0) {
