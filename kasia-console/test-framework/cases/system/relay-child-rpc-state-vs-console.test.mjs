@@ -67,14 +67,16 @@ test('getRelayRpcState wrap routes via IPC (sendCommandAsync), NOT direct daemon
   assert.ok(!/getServerInfo|getWorkingRpc|new\s+RpcClient/.test(wrapBlock[0]), 'wrap must NOT directly probe RPC (must go through relay child)');
 });
 
-test('settings.eta UI: daemon Node Connection + relay child states are two distinct sections', () => {
-  const SETTINGS_ETA = readFileSync(join(__dirname, '../../../src/ui/settings.eta'), 'utf-8');
-  // 老 section 用 rpc-status (daemon)
-  assert.match(SETTINGS_ETA, /\/api\/config\/rpc-status/, 'settings.eta daemon section (rpc-status endpoint) missing');
-  // 新 section 用 rpc-overview (relay child aggregate)
-  assert.match(SETTINGS_ETA, /\/api\/system\/rpc-overview/, 'settings.eta relay-child section (rpc-overview endpoint) missing');
-  // 两 section 用不同 fetch endpoint, 验证 UI 真分离 (不只 alias)
-  const overviewCount = (SETTINGS_ETA.match(/\/api\/system\/rpc-overview/g) || []).length;
-  const statusCount = (SETTINGS_ETA.match(/\/api\/config\/rpc-status/g) || []).length;
-  assert.ok(overviewCount >= 1 && statusCount >= 1, `both endpoints must appear (overview:${overviewCount}, status:${statusCount})`);
+test('UI: daemon Node Configuration + relay child states are two distinct sections in rendered template', () => {
+  // T-J2-2026-05-12 #9 dead-template fix: per-relay state section mv settings.eta → relays.eta
+  // 真因: /settings → /relays redirect (index.js:339), settings.eta 是 dead template 0 route render.
+  // 现验 relays.eta (真渲染) 含两 distinct sections.
+  const RELAYS_ETA = readFileSync(join(__dirname, '../../../src/ui/relays.eta'), 'utf-8');
+  // daemon section (上方 Node Configuration form 含 rpcUrl/rpcMode, 经 form action /settings/node)
+  assert.match(RELAYS_ETA, /\/settings\/node/, 'relays.eta daemon Node Configuration form action missing');
+  // relay-child section (rpc-overview endpoint, 新 mv from settings.eta)
+  assert.match(RELAYS_ETA, /\/api\/system\/rpc-overview/, 'relays.eta relay-child section (rpc-overview endpoint) missing — 漏 dead-template fix?');
+  // page-open header dot 也 fetch rpc-overview (global indicator), 所以 relays.eta 至少 1 处
+  const overviewCount = (RELAYS_ETA.match(/\/api\/system\/rpc-overview/g) || []).length;
+  assert.ok(overviewCount >= 1, `rpc-overview endpoint must appear in relays.eta (per-relay section, found ${overviewCount})`);
 });
