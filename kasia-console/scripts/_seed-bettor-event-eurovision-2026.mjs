@@ -86,8 +86,10 @@ const main = async () => {
   }
 
   const recList = await fetchJson(`${CONSOLE_URL}/api/bettor/recommendations?limit=10`);
-  console.log(`\n[verify GET recommendations top10] status=${recList.status}`);
-  const greeceRecs = (recList.body?.items || recList.body || []).filter(r => String(r.market_id) === GREECE_MARKET_ID);
+  console.log(`\n[verify GET recommendations top10] status=${recList.status} count=${recList.body?.count}`);
+  // endpoint shape: { ok, scanned_at, count, recommendations: [...] }
+  const recs = Array.isArray(recList.body?.recommendations) ? recList.body.recommendations : [];
+  const greeceRecs = recs.filter(r => String(r.market_id) === GREECE_MARKET_ID);
   if (greeceRecs.length === 0) {
     console.log(`  ⚠ no Greece recommendation row yet (market_id=${GREECE_MARKET_ID}) — scan may still be running OR market filtered out (eligibility/blacklist).`);
   } else {
