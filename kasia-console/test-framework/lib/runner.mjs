@@ -82,6 +82,42 @@ const actions = {
   },
 
   /**
+   * T-J2-2026-05-12 P0.2 #1/9 precondition (NWT spec v0.2 §3) — generic HTTP POST action.
+   * 让 exchange domain cases 直 call /api/exchange/* 不绕 broker DM (cron-friendly, fast).
+   *
+   * step: { action: 'http_post', url: '/api/...' OR full URL, body: {...}, timeout_ms?: 5000 }
+   * → returns { status, body, ok, error, latency_ms, reply (= JSON.stringify(body) for assertion compat) }
+   *
+   * 配 assertion: http_status_equals (新加), reply_contains (重用, 查 body JSON 串), latency_*.
+   */
+  async http_post(step, ctx) {
+    const t0 = Date.now();
+    const url = String(step.url || '').startsWith('http') ? step.url : `${CONSOLE_URL}${step.url}`;
+    let status, body, err;
+    try {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(step.body || {}),
+        signal: AbortSignal.timeout(step.timeout_ms || 5000),
+      });
+      status = r.status;
+      try { body = await r.json(); } catch { body = null; }
+    } catch (e) {
+      err = e?.message || String(e);
+    }
+    return {
+      status,
+      body,
+      ok: !err && status >= 200 && status < 300 && body?.ok !== false,
+      error: err,
+      latency_ms: Date.now() - t0,
+      // body JSON 串作 reply, 让 reply_contains / reply_does_not_contain 兼容
+      reply: body ? JSON.stringify(body).slice(0, 800) : (err || ''),
+    };
+  },
+
+  /**
    * Phase D follow-up (J1 mode (ii) integration): real Kasia chain DM send + poll inbound.
    * step: { action: 'real_p2p_send', from_relay_id, from_addr, to_addr, message,
    *         poll_timeout_ms? (default 30000) }
@@ -989,6 +1025,13 @@ const assertions = {
     return step_result.count === expected
       ? { pass: true, expected, actual: step_result.count }
       : { pass: false, expected, actual: step_result.count, msg: `db query returned ${step_result.count} rows (want ${expected})` };
+  },
+
+  // T-J2-2026-05-12 P0.2 #1/9 — HTTP status code assertion for http_post action (NWT spec v0.2 §3).
+  http_status_equals(step_result, expected, ctx) {
+    return step_result.status === expected
+      ? { pass: true, expected, actual: step_result.status }
+      : { pass: false, expected, actual: step_result.status, msg: `HTTP ${step_result.status} (want ${expected}); error=${step_result.error || 'n/a'}; body=${step_result.reply?.slice(0, 200) || 'n/a'}` };
   },
 
   /**
