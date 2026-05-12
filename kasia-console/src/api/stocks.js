@@ -531,6 +531,35 @@ export async function registerStockRoutes(fastify) {
         }
       }));
 
+      // Sold-out markets — fully closed via SELL (not REDEEM), market may not be on-chain resolved.
+      // getTrades 聚合 net size=0 被 filter 掉 (line 317), data-api positions 也不返已清仓.
+      // Cashflow-only reconstruction: perMarket.cost > 0 + received > 0 + net size 0 + 不在 allPositions.
+      // Owner 5/12 US-Iran sell-out 撞此漏洞 (140 NO @ $0.85 → $119 cost / $137.48 received → +$18.48 WIN 没显示).
+      const knownMarkets = new Set(allPositions.map(p => p.market));
+      const soldOutCids = Object.entries(perMarket).filter(([cid, mk]) =>
+        !knownMarkets.has(cid) && mk.cost > 0 && mk.received > 0
+      );
+      if (soldOutCids.length > 0) {
+        await Promise.all(soldOutCids.map(async ([cid, mk]) => {
+          const info = await _resolveMarketQuestion(cid);
+          const byAssetSorted = Object.values(mk.byAsset || {}).filter(ag => ag.buyShares > 0).sort((a,b) => b.buyShares - a.buyShares);
+          const best = byAssetSorted[0];
+          if (!best) return;
+          const realizedPnl = mk.received - mk.cost;
+          const verdict = realizedPnl > 0 ? 'WIN' : 'LOSE';
+          const synth = {
+            market: cid, outcome: best.outcome, asset: best.asset, side: 'BUY',
+            size: best.buyShares, totalCost: mk.cost, avgPrice: mk.cost / best.buyShares,
+            title: info.question || cid.slice(0,16)+'...', question: info.question,
+            endDate: info.endDate, closed: true, settled: true, status: 'sold_out',
+            actualReceived: mk.received, realizedPnl, verdict,
+            winner: null, redeemable: false, redeemed: false, onChainBalance: '0',
+          };
+          settled.push(synth);
+          if (verdict === 'WIN') summary.wins++; else summary.losses++;
+        }));
+      }
+
       // Add open-position per-market cash-flow numbers + unrealized P&L so UI
       // can show the Hormuz row with same shape as settled rows.
       for (const p of positions) {
