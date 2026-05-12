@@ -20,6 +20,8 @@ export const COMMAND_TYPES = Object.freeze({
   SEND_BROADCAST: 'send_broadcast',
   TRANSFER: 'transfer',
   SPLIT_UTXO: 'split_utxo',
+  // T-J2-2026-05-12 #2 — read-only IPC: console 取 relay child rpc-listener._rpc state snapshot (UI 健康检测 P0 NWT spec).
+  GET_RPC_STATE: 'get_rpc_state',
 });
 
 export const COMMAND_TYPE_SET = new Set(Object.values(COMMAND_TYPES));
@@ -37,6 +39,7 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.SEND_BROADCAST]: ['channel', 'message'],
   [COMMAND_TYPES.TRANSFER]: ['target', 'amount'],
   [COMMAND_TYPES.SPLIT_UTXO]: [],
+  [COMMAND_TYPES.GET_RPC_STATE]: [],  // T-J2-2026-05-12 #2 — read-only, 无 required field
 });
 
 // R38 (Z23 sediment): typeof spec per field. Bug-Z23 真根因 — broker enqueue amount: number,
@@ -54,6 +57,7 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.TRANSFER]: { target: 'string', amount: ['string', 'number'] },
   [COMMAND_TYPES.PUBLISH_CARD]: { params: 'object' },
   [COMMAND_TYPES.SPLIT_UTXO]: { targetCount: 'number' },
+  [COMMAND_TYPES.GET_RPC_STATE]: {},  // T-J2-2026-05-12 #2 — read-only, 无 typeof constraint
 });
 
 export function validateCommandPayload(cmd) {

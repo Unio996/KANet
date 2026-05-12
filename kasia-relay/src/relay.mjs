@@ -456,6 +456,17 @@ if (process.send) {
           sent = splitResult; // for generic result handler
           break;
         }
+
+        case 'get_rpc_state': {
+          // T-J2-2026-05-12 #2 — read-only state probe (UI 健康检测 P0, NWT spec sub #2/7).
+          // 直接 return 短路 generic handler (避双 reply, 跟 split_utxo pattern 类似但 cleaner).
+          const { getRpcState } = await import('./rpc-listener.mjs');
+          const snapshot = getRpcState();
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: { ok: true, state: snapshot } });
+          }
+          return;  // skip generic completion reply
+        }
       }
       // 如果有 requestId，回传执行结果给 Console
       if (cmd.requestId && process.send) {
