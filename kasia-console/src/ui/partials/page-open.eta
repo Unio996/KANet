@@ -10,7 +10,16 @@
     <% if (it.pageTitle) { %>
     <header class="bg-white border-b border-warm-200 px-6 py-4 flex-shrink-0 flex items-center justify-between">
       <h1 class="text-lg font-semibold text-ink-700"><%= it.pageTitle %></h1>
-      <% if (it.headerRight) { %><%~ it.headerRight %><% } %>
+      <div class="flex items-center gap-3">
+        <%# T-J2-2026-05-12 #5 — global RPC overview indicator (UI 健康检测 P0, NWT spec sub #5/7) %>
+        <a href="/settings" class="flex items-center gap-1.5 px-2 py-1 rounded text-xs hover:bg-warm-100"
+           x-data="{ o: null, tip: '...', async load() { try { this.o = await fetch('/api/system/rpc-overview').then(r=>r.json()); const s = this.o.summary; if (!s) { this.tip='no data'; return; } if (s.unreachable>0) this.tip=`${s.unreachable}/${s.total} unreachable`; else if (s.reconnecting>0) this.tip=`${s.reconnecting} reconnecting`; else this.tip=`${s.connected}/${s.total} connected`; } catch { this.tip='probe failed'; } }, get color() { const s = this.o?.summary; if (!s) return 'bg-gray-300'; if (s.unreachable>0) return 'bg-red-500'; if (s.reconnecting>0) return 'bg-yellow-500'; return 'bg-green-500'; } }"
+           x-init="load(); setInterval(load, 15000)" :title="tip">
+          <span class="inline-block w-2 h-2 rounded-full" :class="color"></span>
+          <span class="text-ink-500" x-text="tip"></span>
+        </a>
+        <% if (it.headerRight) { %><%~ it.headerRight %><% } %>
+      </div>
     </header>
     <% } %>
     <main class="flex-1 overflow-y-auto">

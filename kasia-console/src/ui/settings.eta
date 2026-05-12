@@ -252,6 +252,35 @@
           </form>
         </div>
 
+        <!-- T-J2-2026-05-12 #5 — Relay child RPC states (UI 健康检测 P0, NWT spec sub #5/7)
+             跟上面 Node Connection (console daemon 自己 RpcClient) 区分: 这里是每个 relay 子进程内部 _rpc 状态. -->
+        <div class="bg-white shadow rounded-lg p-6"
+             x-data="{ relays: [], loading: true, async load() { this.loading = true; try { const r = await fetch('/api/system/rpc-overview').then(r=>r.json()); this.relays = r.relays || []; } catch {} this.loading = false; }, color(r) { if (!r.ok) return 'text-red-500'; if (r.state?.reconnecting) return 'text-yellow-500'; if (r.state?.connected) return 'text-green-500'; return 'text-gray-400'; }, label(r) { if (!r.ok) return r.error || 'unreachable'; const s = r.state; if (s?.reconnecting) return `reconnecting #${s.attempt} (${s.lastError||''})`.slice(0,80); if (s?.connected) { const age = s.lastConnectedAt ? Math.round((Date.now() - s.lastConnectedAt)/1000) : null; return age!=null ? `connected · ${age}s 前 · ${s.currentUrl||''}` : 'connected'; } return 'disconnected'; } }"
+             x-init="load(); setInterval(load, 15000)">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <h2 class="text-base font-semibold text-gray-900">Relay 子进程 RPC 状态</h2>
+              <p class="text-xs text-gray-500 mt-0.5">每个 relay child 内部 _rpc 连接 (跟上面 console daemon Node Connection 区分, ws-proxy hijack 类 bug 真凶)</p>
+            </div>
+            <button @click="load" class="text-xs text-blue-600 hover:text-blue-700">刷新</button>
+          </div>
+          <template x-if="loading"><div class="text-sm text-gray-400">加载中...</div></template>
+          <template x-if="!loading">
+            <div class="space-y-1">
+              <template x-for="r in relays" :key="r.id">
+                <div class="flex items-center justify-between text-sm py-1.5 border-b border-gray-100 last:border-0">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="text-lg flex-shrink-0" :class="color(r)">●</span>
+                    <span class="font-medium text-gray-800 flex-shrink-0" x-text="r.name"></span>
+                  </div>
+                  <div class="text-xs text-gray-500 text-right truncate ml-3" x-text="label(r)"></div>
+                </div>
+              </template>
+              <template x-if="relays.length === 0"><div class="text-sm text-gray-400">无 active relay</div></template>
+            </div>
+          </template>
+        </div>
+
         <!-- Info card -->
         <div class="bg-blue-50 border border-blue-200 rounded-lg px-5 py-4">
           <div class="flex items-start space-x-3">
