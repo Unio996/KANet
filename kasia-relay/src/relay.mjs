@@ -3,6 +3,7 @@ import { routeMessage } from "./router.mjs";
 import { getAIReply } from "./ai.mjs";
 import { getConversations, getMessages, sendMessage, acceptHandshake, sendKaspa } from "./chain.mjs";
 import { getWallet } from "./lib/wallet.mjs";
+import { isValidKaspaAddress } from "./lib/crypto.mjs";
 import { ingestMessage, ingestReply, ingestTx, ingestHandshake } from "./ingest.mjs";
 
 const RELAY_MODE = process.env.RELAY_MODE || "indexer";
@@ -332,6 +333,18 @@ if (process.send) {
         return;
       }
       let draft, sent;
+      // T-J2-2026-05-12 (NWT spec 13:06 Fix 2): handshake / send_message target 必先 isValidKaspaAddress
+      // (现升级含 secp256k1 曲线 membership), 否则 reject 不进 chain.mjs encrypt path. 防 bad peer
+      // (bech32 valid + 曲线 invalid, 来源 test framework 合成 peer OR malicious user) 让 encrypt() throw,
+      // 减 5/12 Trader-B 1352 次 disconnect cycle 噪音.
+      if ((cmd.type === 'handshake' || cmd.type === 'send_message') && !isValidKaspaAddress(cmd.target)) {
+        const reason = `target not valid Kaspa addr (bech32+secp256k1 curve): ${String(cmd.target).slice(0, 40)}`;
+        log(`${cmd.type.toUpperCase()} REJECTED → ${reason}`);
+        if (cmd.requestId && process.send) {
+          process.send({ requestId: cmd.requestId, result: { error: reason, rejected: true } });
+        }
+        return;  // skip switch + generic completion handler
+      }
       switch (cmd.type) {
         case 'handshake':
           draft = await initiateHandshake({ address: cmd.target });

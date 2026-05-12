@@ -45,7 +45,15 @@ export function isValidKaspaAddress(address) {
   if (!address || typeof address !== 'string') return false;
   if (!address.startsWith('kaspa:') && !address.startsWith('kaspatest:')) return false;
   try {
-    extractXOnlyPubkeyFromAddress(address);
+    const xOnly = extractXOnlyPubkeyFromAddress(address);
+    // T-J2-2026-05-12 (NWT spec 13:06): T-J1-19f bech32 check 不够 — secp256k1 even-y point 必在曲线.
+    // 任意 32 byte ~50% 概率不在曲线, encrypt() L75 内 computeSecret throw → relay 链路异常 (5/12
+    // Trader-B 11:05-13:00 期间 1352 次 disconnect cycle 真因, 跟 broker test framework 合成 peer
+    // 撞 bech32 valid + 曲线 invalid). 加 ECDH dry-run 真验曲线 membership, throw 即 reject.
+    const compressed = Buffer.concat([Buffer.from([0x02]), xOnly]);
+    const test = crypto.createECDH('secp256k1');
+    test.generateKeys();
+    test.computeSecret(compressed);  // throw if not on secp256k1 curve
     return true;
   } catch {
     return false;
