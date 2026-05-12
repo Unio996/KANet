@@ -557,10 +557,12 @@
               class="text-[10px] text-brand-400 hover:text-brand-600">View on Polymarket</a>
           </div>
           <!-- Row 4: 出清 button (Bettor r46 (B) Step 1, 独立显眼一行) -->
-          <div x-show="pos.status === 'active'" class="flex items-center gap-2 mt-2 pt-2 border-t border-warm-100">
-            <button @click="sellActivePosition(pos)" :disabled="pos._closing"
-              class="flex-1 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded font-medium text-xs disabled:opacity-50">
-              <span x-show="!pos._closing">💰 一键出清 (sell @ market)</span>
+          <!-- Owner click 死路 hotfix: 移 x-show 容器 / 显式 cursor / 强制 boolean disabled / 始终渲染 + 内层条件 active 才 click -->
+          <div class="flex items-center gap-2 mt-2 pt-2 border-t-2 border-amber-300 bg-amber-50 rounded p-2">
+            <button type="button" @click.prevent.stop="sellActivePosition(pos)" :disabled="!!pos._closing"
+              style="cursor:pointer"
+              class="flex-1 px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded font-bold text-sm disabled:opacity-50 disabled:cursor-not-allowed shadow-md border-2 border-amber-700">
+              <span x-show="!pos._closing">💰 一键出清 (sell @ market · <span x-text="pos.size"></span> shares)</span>
               <span x-show="pos._closing">出清中...</span>
             </button>
             <span x-show="pos._closeTx" class="text-[10px] text-green-600 whitespace-nowrap">✓ TX <a :href="'https://polygonscan.com/tx/' + pos._closeTx" target="_blank" rel="noopener" class="font-mono underline" x-text="pos._closeTx?.slice(0,10) + '...'"></a></span>
@@ -1267,7 +1269,8 @@ function predictionsPage() {
     // Bettor r46 (B) Step 1: 真盘 active position 出清 (placeOrder sell at market bid - $0.01)
     async sellActivePosition(pos) {
       console.log('[出清] click fired, pos=', pos);
-      window.alert('debug: 按钮 click 已触发, 持仓 ' + pos.size + ' shares ' + pos.outcome);
+      window.alert('debug: 按钮 click 已触发\n持仓: ' + pos.size + ' shares ' + pos.outcome + '\nasset id: ' + (pos.asset || 'MISSING').slice(0, 20) + '...\nstatus: ' + pos.status);
+      if (pos.status !== 'active') { alert('当前持仓 status=' + pos.status + ', 仅 active 可出清'); return; }
       if (pos._closing) { console.log('[出清] already closing, skip'); return; }
       // 2 步 confirm (真盘比 sim 严, 防误击)
       const bestBidEst = pos.curPrice || pos.avgPrice || 0.5;
