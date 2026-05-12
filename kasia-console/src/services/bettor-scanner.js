@@ -490,6 +490,15 @@ export async function runScan(triggerType = 'cron', relayNodeId = null) {
       const all = fetched.data || [];
       const now = Date.now();
       let eligibleList = all.filter(m => eligible(m, now));
+      // Phase 3f-0 (Owner 5/12 钦定): blacklist filter — Owner 手动管理的 market_id 不进 scan
+      const blacklisted = new Set(sqlite.prepare(`SELECT market_id FROM bettor_market_blacklist`).all().map(r => r.market_id));
+      if (blacklisted.size > 0) {
+        const beforeBL = eligibleList.length;
+        eligibleList = eligibleList.filter(m => !blacklisted.has(String(m.id)));
+        if (beforeBL !== eligibleList.length) {
+          console.log(`[bettor-scanner] blacklist filter: ${beforeBL} → ${eligibleList.length} (${blacklisted.size} markets blocked)`);
+        }
+      }
       const beforeCap = eligibleList.length;
       eligibleList.sort((a, b) => (b.volume24h || 0) - (a.volume24h || 0));
       if (eligibleList.length > MAX_SCAN_PER_RUN) eligibleList = eligibleList.slice(0, MAX_SCAN_PER_RUN);
