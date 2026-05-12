@@ -20,6 +20,18 @@ import * as stateMachine from './state-machine.js';
 import * as client from './exchange-client.js';
 import { sqlite } from '../../db/client.js';
 
+// T-J2-2026-05-12 Fix 2 (5/12 sediment §3.2 bsc-vs-bnb naming): chain normalize.
+// BSC family 统一 'bnb' (DB-canonical, align agent_wallets.chain). 跟 api/exchange.js 同款.
+// 复用候选 (future): 移 shared util, 先 duplicate 避新建 file (per feedback_no_new_build_iterate_first).
+function normalizeChainKey(s) {
+  if (!s) return s;
+  const lower = String(s).toLowerCase();
+  if (lower === 'bsc' || lower === 'bep20' || lower === 'binance-smart-chain') return 'bnb';
+  if (lower === 'solana') return 'sol';
+  if (lower === 'ethereum') return 'eth';
+  return lower;
+}
+
 // T-J2-2026-05-07 r259 T2.1b — Layer 2 Price Oracle Gap fix.
 // MID_PRICE 改 dynamic /api/trade/kas-price (跟 market-seeder 同 source) — 替 hardcode 0.04 phase 1 placeholder.
 // FALLBACK_MID_PRICE 真 oracle down 时 graceful 用 (不阻 publish).
@@ -125,6 +137,27 @@ async function _doPublish(peer, draft, relayNodeId, prevReply) {
   const livePrice = await client.getKasPrice();
   const midPrice = livePrice || FALLBACK_MID_PRICE;
   const wantAmount = String((qty * midPrice).toFixed(4));
+
+  // T-J2-2026-05-12 Fix 1 (5/12 sediment §3.1, NWT spec ea519032a §2.1):
+  // BUY 分支也必含 accepted_chains. taker (买 USDT 给 broker 换 KAS 的人) 选链支付 → broker 的 USDT 收款 addr 必在 accepted_chains.
+  // 跟 SELL 分支区别: SELL 的 accepted_chains[0].address = user 的 USDT 收款 addr (broker 发给 user);
+  // BUY 的 accepted_chains[0].address = broker 自己 chain wallet (user 发给 broker).
+  const chainKey = normalizeChainKey(draft.pay_chain);  // 'bsc' → 'bnb' 等, align DB agent_wallets.chain
+  let brokerWalletAddr = null;
+  if (isBuy) {
+    const w = sqlite.prepare(
+      'SELECT address FROM agent_wallets WHERE relay_node_id = ? AND chain = ? AND is_default = 1 LIMIT 1'
+    ).get(relayNodeId, chainKey)
+      || sqlite.prepare(
+        'SELECT address FROM agent_wallets WHERE relay_node_id = ? AND chain = ? LIMIT 1'
+      ).get(relayNodeId, chainKey);
+    if (!w?.address) {
+      stateMachine.clearFlowState(peer);
+      return `挂单失败: broker 还没在 ${draft.pay_chain.toUpperCase()} 链配 USDT 收款地址. 联系管理员加 wallet OR 选别的链.`;
+    }
+    brokerWalletAddr = w.address;
+  }
+
   // T-J2-2026-05-07 r259 T2.1c — Layer 4 Loop Closed: hedge_enabled flag 真 broker offer
   // hedge-eligible (executeHedge 真 trade-protocol-filter.js:836-848 真 opt-in gate, default skip).
   // Enable hedge 真 broker 真 fulfill via CEX (post Phase 1 cex-bridge ship).
@@ -133,9 +166,14 @@ async function _doPublish(peer, draft, relayNodeId, prevReply) {
         relayNodeId,
         give_asset: 'KAS', give_amount: String(qty), give_chain: 'kaspa',
         want_asset: 'USDT', want_amount: wantAmount,
-        want_chain: draft.pay_chain,
+        want_chain: chainKey,
         verification: 'cross_chain_tx',
-        verification_meta: { expected_asset: 'USDT', receive_chain: draft.pay_chain },
+        // Fix 1: accepted_chains 用 broker 自己 wallet addr (user 发 USDT 给 broker)
+        verification_meta: {
+          accepted_chains: [{ chain: chainKey, address: brokerWalletAddr }],
+          expected_asset: 'USDT',
+          receive_chain: chainKey,
+        },
         expires_minutes: 30,
         metadata: { source: 'broker-v3', user_id: peer, side: 'buy_kas', hedge_enabled: true, mid_price_used: midPrice },
       }
@@ -143,9 +181,10 @@ async function _doPublish(peer, draft, relayNodeId, prevReply) {
         relayNodeId,
         give_asset: 'KAS', give_amount: String(qty), give_chain: 'kaspa',
         want_asset: 'USDT', want_amount: wantAmount,
-        want_chain: draft.pay_chain,
+        want_chain: chainKey,
         verification: 'cross_chain_tx',
-        verification_meta: { accepted_chains: [{ chain: draft.pay_chain, address: draft.pay_address }], expected_asset: 'USDT' },
+        // SELL: accepted_chains 用 user 自己的 USDT 收款 addr (broker 发 USDT 给 user). chain normalize align.
+        verification_meta: { accepted_chains: [{ chain: chainKey, address: draft.pay_address }], expected_asset: 'USDT' },
         expires_minutes: 30,
         metadata: { source: 'broker-v3', user_id: peer, side: 'sell_kas', hedge_enabled: true, mid_price_used: midPrice },
       };

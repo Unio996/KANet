@@ -26,22 +26,27 @@ const STATE_MACHINE = readFileSync(join(__dirname, '../../../src/services/broker
 const CROSS_VERIFY = readFileSync(join(__dirname, '../../../src/services/cross-chain-verify.mjs'), 'utf-8');
 const EXCHANGE_API = readFileSync(join(__dirname, '../../../src/api/exchange.js'), 'utf-8');
 
-test('state-machine and cross-chain-verify must use consistent BSC chain naming (regression guard)', () => {
-  // state-machine.js SUPPORTED_CHAINS 用 'bsc' (broker-v3 menu).
+test('chain naming bridged — literal-consistent OR normalize-layer present (regression guard)', () => {
+  // T-J2-2026-05-12 修法 ship 后修订: literal-string 一致 OR normalize layer 存在 都视作 fix.
+  // 5/12 fix 走 normalize layer (api/exchange.js + broker-v3/router.js 加 normalizeChainKey, runtime
+  // 比较前双侧规范化), state-machine.js 仍用 'bsc' 显示 label, _SCAN_RPC_LIST 仍用 'bnb' DB-canonical —
+  // literal 仍 differ 但 runtime 不撞 bug.
   const smHasBsc = /SUPPORTED_CHAINS[\s\S]{0,200}'bsc'/.test(STATE_MACHINE);
   const smHasBnb = /SUPPORTED_CHAINS[\s\S]{0,200}'bnb'/.test(STATE_MACHINE);
-
-  // cross-chain-verify.mjs _SCAN_RPC_LIST 用 'bnb' (DB schema align).
   const cvHasBnb = /_SCAN_RPC_LIST\s*=\s*\{[\s\S]{0,200}bnb\s*:/.test(CROSS_VERIFY);
   const cvHasBsc = /_SCAN_RPC_LIST\s*=\s*\{[\s\S]{0,200}bsc\s*:/.test(CROSS_VERIFY);
+  const literalConsistent = (smHasBsc && cvHasBsc && !smHasBnb && !cvHasBnb)
+                         || (smHasBnb && cvHasBnb && !smHasBsc && !cvHasBsc);
 
-  // 同步要求: 两边 chain key 同 — 要么都 'bsc' 要么都 'bnb', 不混
-  const consistent = (smHasBsc && cvHasBsc && !smHasBnb && !cvHasBnb)
-                  || (smHasBnb && cvHasBnb && !smHasBsc && !cvHasBsc);
+  // normalize layer 探测: api/exchange.js + broker-v3/router.js 都得有 normalizeChainKey()
+  const apiHasNormalize = /normalizeChainKey\s*\(/.test(EXCHANGE_API);
+  const routerJs = readFileSync(join(__dirname, '../../../src/services/broker-v3/router.js'), 'utf-8');
+  const routerHasNormalize = /normalizeChainKey\s*\(/.test(routerJs);
+  const normalizeLayerPresent = apiHasNormalize && routerHasNormalize;
 
   assert.ok(
-    consistent,
-    `chain naming mismatch (bug per 5/12 sediment §3.2): state-machine SUPPORTED_CHAINS uses [${smHasBsc ? "'bsc'" : ''}${smHasBnb ? " 'bnb'" : ''}], _SCAN_RPC_LIST uses [${cvHasBsc ? "'bsc'" : ''}${cvHasBnb ? " 'bnb'" : ''}]. 修法: 统一命名 OR 加 normalize layer (e.g. function normalizeChainKey() 在 api/exchange.js publish/accept handler 内 'bsc' ↔ 'bnb' 双向 alias)`,
+    literalConsistent || normalizeLayerPresent,
+    `chain naming bug §3.2 not bridged: literalConsistent=${literalConsistent}, normalizeLayer(api=${apiHasNormalize}, router=${routerHasNormalize}). 修法选 (a) 统一命名 OR (b) normalize layer 两端都有.`,
   );
 });
 

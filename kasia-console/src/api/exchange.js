@@ -11,6 +11,21 @@ import { processAccept, processCancel, processManualConfirm, processPaymentSubmi
 import { executeHedge } from '../services/trade-protocol-filter.js';
 import { recordChainEvent } from '../services/chain-event.js';
 
+// T-J2-2026-05-12 Fix 2 (NWT spec ea519032a §2.2): chain naming normalize layer.
+// 5/12 sediment §3.2 bug: broker-v3 menu/state-machine 用 'bsc' (matcher M-wallet-inject label),
+// DB schema agent_wallets / cross-chain-verify._SCAN_RPC_LIST 用 'bnb'. Accept handler 严格 ===
+// 比较 → 'bsc' !== 'bnb' → 拒. 加 normalize layer 双 alias 视同.
+//
+// 标准: lowercase, BSC family 统一 'bnb' (DB-canonical), 其他 chain 同名小写.
+function normalizeChainKey(s) {
+  if (!s) return s;
+  const lower = String(s).toLowerCase();
+  if (lower === 'bsc' || lower === 'bep20' || lower === 'binance-smart-chain') return 'bnb';
+  if (lower === 'solana') return 'sol';
+  if (lower === 'ethereum') return 'eth';
+  return lower;
+}
+
 export async function registerExchangeRoutes(fastify) {
 
   // ── GET /api/exchange/offers — 查询报价列表 ──────────────────
@@ -362,15 +377,18 @@ export async function registerExchangeRoutes(fastify) {
       }
       const meta = JSON.parse(offer.verification_meta || '{}');
       const acceptedChains = meta.accepted_chains || [];
-      const selectedWallet = acceptedChains.find(w => w.chain === selected_chain);
+      // T-J2-2026-05-12 Fix 2: normalize 双侧再比较 (5/12 sediment §3.2 bsc-vs-bnb bug 修)
+      const selectedNormalized = normalizeChainKey(selected_chain);
+      const selectedWallet = acceptedChains.find(w => normalizeChainKey(w.chain) === selectedNormalized);
       if (!selectedWallet) {
-        return reply.code(400).send({ error: `Chain ${selected_chain} not accepted by maker. Available: ${acceptedChains.map(w => w.chain).join(', ')}` });
+        return reply.code(400).send({ error: `Chain ${selected_chain} (normalized: ${selectedNormalized}) not accepted by maker. Available: ${acceptedChains.map(w => `${w.chain}→${normalizeChainKey(w.chain)}`).join(', ')}` });
       }
       // Write receive_address + payment_asset into verification_meta (verifier reads these)
-      const updatedMeta = { ...meta, receive_address: selectedWallet.address, receive_chain: selected_chain };
+      // 注: stored chain 写 normalized (DB-canonical), 跟 agent_wallets.chain align
+      const updatedMeta = { ...meta, receive_address: selectedWallet.address, receive_chain: selectedNormalized };
       if (payment_asset) updatedMeta.payment_asset = payment_asset.toLowerCase();
       sqlite.prepare('UPDATE exchange_offers SET taker_chain = ?, taker_payment_address = ?, verification_meta = ? WHERE id = ?')
-        .run(selected_chain, selectedWallet.address, JSON.stringify(updatedMeta), offer_id);
+        .run(selectedNormalized, selectedWallet.address, JSON.stringify(updatedMeta), offer_id);
     }
 
     const relay = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(relayNodeId);
