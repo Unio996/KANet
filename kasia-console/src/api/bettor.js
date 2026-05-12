@@ -341,4 +341,45 @@ export async function registerBettorRoutes(fastify) {
       positions: opens.map(p => ({ id: p.id, realized_pnl: p.upnl })),
     });
   });
+
+  // ── Phase 3f-0 (Owner 5/12 钦定): market blacklist endpoints ────────────────
+  // 让 Owner 把 market_id 标 'Bettor 不要碰' — scanner skip, reactor skip.
+
+  // GET /api/bettor/blacklist — list 所有 blacklisted markets (含 join market question)
+  fastify.get('/api/bettor/blacklist', async (_request, reply) => {
+    const rows = sqlite.prepare(`
+      SELECT bl.market_id, bl.reason, bl.added_at, bl.added_by,
+             (SELECT question FROM bettor_recommendations WHERE market_id = bl.market_id ORDER BY scanned_at DESC LIMIT 1) AS question
+      FROM bettor_market_blacklist bl
+      ORDER BY bl.added_at DESC
+    `).all();
+    return reply.send({ ok: true, count: rows.length, items: rows });
+  });
+
+  // POST /api/bettor/blacklist — add { market_id, reason, added_by }
+  fastify.post('/api/bettor/blacklist', async (request, reply) => {
+    const { market_id, reason, added_by } = request.body || {};
+    if (!market_id || typeof market_id !== 'string') {
+      return reply.code(400).send({ ok: false, error: 'market_id (string) required' });
+    }
+    try {
+      sqlite.prepare(`
+        INSERT INTO bettor_market_blacklist (market_id, reason, added_by, added_at)
+        VALUES (?, ?, ?, datetime('now'))
+        ON CONFLICT(market_id) DO UPDATE SET reason = excluded.reason, added_by = excluded.added_by, added_at = datetime('now')
+      `).run(String(market_id), reason || null, added_by || 'unknown');
+      console.log(`[bettor-api] blacklist add market_id=${market_id} by=${added_by || 'unknown'} reason="${(reason || '').slice(0, 80)}"`);
+      return reply.send({ ok: true, market_id: String(market_id), reason, added_by });
+    } catch (e) {
+      return reply.code(500).send({ ok: false, error: e.message });
+    }
+  });
+
+  // DELETE /api/bettor/blacklist/:market_id — remove
+  fastify.delete('/api/bettor/blacklist/:market_id', async (request, reply) => {
+    const { market_id } = request.params;
+    const r = sqlite.prepare(`DELETE FROM bettor_market_blacklist WHERE market_id = ?`).run(String(market_id));
+    console.log(`[bettor-api] blacklist delete market_id=${market_id} changes=${r.changes}`);
+    return reply.send({ ok: true, market_id: String(market_id), removed: r.changes });
+  });
 }
