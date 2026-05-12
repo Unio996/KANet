@@ -3147,5 +3147,25 @@ export function runMigrations() {
     }
   }
 
+  // v99: Bettor Phase 3f-0 — bettor_market_blacklist 表 (Owner 5/12 钦定 hotfix)
+  // 让 Owner 把特定 market_id 标 "Bettor 不要碰"，scanner skip 不推荐, reactor skip 不评估开仓.
+  // 典型用例: Eurovision/Election 这种"信息差窗口期已过 + alt-data 缺失"的 market, Owner 手动持有不被自动调仓.
+  // 前置: Bettor Phase 3f-1 event-driven reactor 上线后, blacklist 可与 event_calendar 配合 (本周 ship A).
+  {
+    const tbl99 = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='bettor_market_blacklist'").get();
+    if (!tbl99) {
+      sqlite.exec(`
+        CREATE TABLE bettor_market_blacklist (
+          market_id  TEXT PRIMARY KEY,
+          reason     TEXT,
+          added_at   TEXT NOT NULL DEFAULT (datetime('now')),
+          added_by   TEXT
+        );
+      `);
+      sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_bettor_blacklist_added_at ON bettor_market_blacklist(added_at)`);
+      console.log('[migrate] v99: bettor_market_blacklist 表 + 1 索引创建 (Phase 3f-0 manual_override hotfix).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
