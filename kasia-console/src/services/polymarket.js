@@ -282,7 +282,7 @@ export async function migrateToV2(privateKey, wrapAmount) {
         skipped['wrap'] = '0 USDC available';
       }
 
-      // 3) Approve pUSD → V2 exchanges
+      // 3) Approve pUSD → V2 exchanges (collateral side — buy)
       for (const s of POLYMARKET_PUSD_SPENDERS) {
         const cur = await pusd.allowance(wallet.address, s.address);
         if (cur > 0n) {
@@ -293,6 +293,25 @@ export async function migrateToV2(privateKey, wrapAmount) {
         console.log(`[polymarket-v2] approve pUSD→${s.name} TX: ${tx.hash}`);
         await tx.wait();
         txHashes[`pUSD→${s.name}`] = tx.hash;
+      }
+
+      // 4) setApprovalForAll CTF → V2 exchanges (operator side — sell existing 1155 positions)
+      // Without this, SELL orders fail with "allowance: 0, spender: CTF_EXCHANGE_V2"
+      const CTF_CONTRACT_ADDR = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
+      const ctf = new ethers.Contract(CTF_CONTRACT_ADDR, [
+        'function setApprovalForAll(address operator, bool approved) external',
+        'function isApprovedForAll(address account, address operator) view returns (bool)',
+      ], wallet);
+      for (const s of POLYMARKET_PUSD_SPENDERS) {
+        const approved = await ctf.isApprovedForAll(wallet.address, s.address);
+        if (approved) {
+          skipped[`CTF→${s.name}`] = 'already approved';
+          continue;
+        }
+        const tx = await ctf.setApprovalForAll(s.address, true);
+        console.log(`[polymarket-v2] setApprovalForAll CTF→${s.name} TX: ${tx.hash}`);
+        await tx.wait();
+        txHashes[`CTF→${s.name}`] = tx.hash;
       }
 
       const finalPusd = await pusd.balanceOf(wallet.address);
