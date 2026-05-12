@@ -382,4 +382,60 @@ export async function registerBettorRoutes(fastify) {
     console.log(`[bettor-api] blacklist delete market_id=${market_id} changes=${r.changes}`);
     return reply.send({ ok: true, market_id: String(market_id), removed: r.changes });
   });
+
+  // ── Phase 3f-1 Sub #6 (Bettor r55 spec + r63 green-light): event_calendar API ─────
+  // Lifecycle SM 输入数据源 (Sub #4 + Sub #5 接). Owner / system 通过这些 endpoint
+  // 喂入事件时间表 (Eurovision semifinal/final, BTC halving, FOMC meeting 等).
+
+  // GET /api/bettor/event-calendar — list all events (optionally filter by ?market_id=X)
+  fastify.get('/api/bettor/event-calendar', async (request, reply) => {
+    const { market_id } = request.query || {};
+    const where = market_id ? 'WHERE ec.market_id = ?' : '';
+    const params = market_id ? [String(market_id)] : [];
+    const rows = sqlite.prepare(`
+      SELECT ec.id, ec.market_id, ec.event_type, ec.event_time_utc, ec.priority, ec.source, ec.notes, ec.added_at,
+             (SELECT question FROM bettor_recommendations WHERE market_id = ec.market_id ORDER BY scanned_at DESC LIMIT 1) AS question
+      FROM event_calendar ec
+      ${where}
+      ORDER BY ec.event_time_utc ASC
+    `).all(...params);
+    return reply.send({ ok: true, count: rows.length, items: rows });
+  });
+
+  // POST /api/bettor/event-calendar — upsert {market_id, event_type, event_time_utc, priority?, source?, notes?}
+  fastify.post('/api/bettor/event-calendar', async (request, reply) => {
+    const { market_id, event_type, event_time_utc, priority, source, notes } = request.body || {};
+    if (!market_id || typeof market_id !== 'string') return reply.code(400).send({ ok: false, error: 'market_id (string) required' });
+    if (!event_type || typeof event_type !== 'string') return reply.code(400).send({ ok: false, error: 'event_type (string) required' });
+    if (!event_time_utc || typeof event_time_utc !== 'string' || Number.isNaN(new Date(event_time_utc).getTime())) {
+      return reply.code(400).send({ ok: false, error: 'event_time_utc (ISO 8601 string) required' });
+    }
+    const prio = Number.isInteger(priority) ? priority : 5;
+    if (prio < 1 || prio > 10) return reply.code(400).send({ ok: false, error: 'priority must be INT 1-10' });
+    try {
+      sqlite.prepare(`
+        INSERT INTO event_calendar (market_id, event_type, event_time_utc, priority, source, notes)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(market_id, event_type) DO UPDATE SET
+          event_time_utc = excluded.event_time_utc,
+          priority = excluded.priority,
+          source = excluded.source,
+          notes = excluded.notes
+      `).run(String(market_id), String(event_type), String(event_time_utc), prio, source || null, notes || null);
+      console.log(`[bettor-api] event_calendar upsert market_id=${market_id} type=${event_type} at=${event_time_utc} prio=${prio}`);
+      return reply.send({ ok: true, market_id: String(market_id), event_type: String(event_type), event_time_utc, priority: prio });
+    } catch (e) {
+      return reply.code(500).send({ ok: false, error: e.message });
+    }
+  });
+
+  // DELETE /api/bettor/event-calendar/:id — remove by id (AUTOINCREMENT PK per v100)
+  fastify.delete('/api/bettor/event-calendar/:id', async (request, reply) => {
+    const { id } = request.params;
+    const idNum = Number(id);
+    if (!Number.isInteger(idNum) || idNum < 1) return reply.code(400).send({ ok: false, error: 'id (positive integer) required' });
+    const r = sqlite.prepare(`DELETE FROM event_calendar WHERE id = ?`).run(idNum);
+    console.log(`[bettor-api] event_calendar delete id=${idNum} changes=${r.changes}`);
+    return reply.send({ ok: true, id: idNum, removed: r.changes });
+  });
 }
