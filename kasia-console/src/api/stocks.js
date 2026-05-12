@@ -8,7 +8,7 @@ import { sqlite } from '../db/client.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 import crypto, { randomUUID } from 'crypto';
 import { fetchStockData, fetchYahooQuote, cachedPredictions, cachedCommodities, cachedFunding, cachedSentiment, fetchAllMarkets, cachedCrypto, cachedFundamentals, cachedIndustryPeers, cachedStockKlines, DIVERGENCE_WARN_THRESHOLD } from '../services/market-data.js';
-import { getPolygonWallet, getUsdcBalance, createApiKey, getOrderBook, checkAllowance, approveUsdc, checkTxStatus, redeemPositions, checkRedeemStatus, sweepUsdc, fetchUserActivity, fetchAccountValue, getMarketWinner, migrateToV2, ensureCtfApprovedForV2 } from '../services/polymarket.js';
+import { getPolygonWallet, getUsdcBalance, getPusdBalance, createApiKey, getOrderBook, checkAllowance, approveUsdc, checkTxStatus, redeemPositions, checkRedeemStatus, sweepUsdc, fetchUserActivity, fetchAccountValue, getMarketWinner, migrateToV2, ensureCtfApprovedForV2 } from '../services/polymarket.js';
 import { decrypt } from '../services/crypto.js';
 
 // Agent 综述缓存（15 分钟）
@@ -436,12 +436,14 @@ export async function registerStockRoutes(fastify) {
       const perMarket = {};
       if (polyWallet?.address) {
         try {
-          const [activity, tokenValue, usdcBal] = await Promise.all([
+          const [activity, tokenValue, usdcBal, pusdBal] = await Promise.all([
             fetchUserActivity(polyWallet.address),
             fetchAccountValue(polyWallet.address),
             getUsdcBalance(polyWallet.address),
+            getPusdBalance(polyWallet.address),
           ]);
-          summary.currentUsdc = Number(usdcBal) || 0;
+          // currentUsdc 含 pUSD (Polymarket V2 卖出钱在 pUSD, Owner unwrap 前算 USDC 等价)
+          summary.currentUsdc = (Number(usdcBal) || 0) + (Number(pusdBal) || 0);
           summary.currentTokenValue = tokenValue;
           summary.currentTotal = summary.currentUsdc + summary.currentTokenValue;
 
@@ -473,8 +475,13 @@ export async function registerStockRoutes(fastify) {
               }
             }
             // Account-balance identity: currentUsdc = capital + cashIn - buySpent
+            // 即 capital = currentUsdc + buySpent - cashIn (current = USDC + pUSD)
+            // Sweep 走资产后 currentUsdc 偏低 → capital 可能负. fallback: capital ≤ 0 时
+            // 用 totalStaked (累积投入) 替代避免战绩统计整段被 UI gate 掉.
             summary.totalStaked = buySpent;
-            summary.capital = summary.currentUsdc + buySpent - cashIn;
+            const computedCapital = summary.currentUsdc + buySpent - cashIn;
+            summary.capital = computedCapital > 0 ? computedCapital : buySpent;
+            summary.capitalNote = computedCapital > 0 ? null : 'swept'; // UI 可显示标记
             summary.source = 'data-api';
           }
         } catch (e) {
