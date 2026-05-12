@@ -114,22 +114,25 @@ info "加密密钥: ${CONSOLE_ENCRYPTION_KEY:0:8}..."
 # 不需要证书、不需要反向代理、不需要改浏览器设置。
 #
 # 配置 (kanet.env)：
-#   KASPA_NODE=192.168.1.107           # 节点 LAN IP — DHCP, 重启电脑可能变, 必显式写 kanet.env
+#   KASPA_NODE=127.0.0.1               # kaspad 节点 host — host-specific, 必显式写 kanet.env
+#                                      # 例: Bettor host kaspad 本机 = 127.0.0.1
+#                                      # 例: J1 host kaspad 局域网 = 192.168.1.107 (DHCP, 重启可能变)
 #   KASPA_WS_PROXY_PORT=17110          # 本机监听端口（默认 17110）
 # kasia.fyi 那边填: ws://127.0.0.1:17110
 WS_PROXY_SCRIPT="$KANET_ROOT/scripts/kaspa-ws-proxy.mjs"
-WS_PROXY_NODE="${KASPA_NODE:-192.168.1.107}"
+WS_PROXY_NODE="${KASPA_NODE:-127.0.0.1}"
 WS_PROXY_PORT="${KASPA_WS_PROXY_PORT:-17110}"
 if [ -f "$WS_PROXY_SCRIPT" ]; then
   echo ""
   echo -e "${C_BOLD}[0/0] kaspa-ws-proxy${C_RESET}  127.0.0.1:$WS_PROXY_PORT → $WS_PROXY_NODE:$WS_PROXY_PORT"
-  # TCP probe LAN kaspad 上游 — DHCP IP 漂移侦测 (sediment: feedback_lan_ip_dhcp_drift)
+  # TCP probe kaspad 上游 — host-specific config drift 侦测 (sediment: feedback-lan-ip-dhcp-drift)
   if timeout 3 bash -c "echo > /dev/tcp/$WS_PROXY_NODE/$WS_PROXY_PORT" 2>/dev/null; then
-    ok "LAN kaspad reachable $WS_PROXY_NODE:$WS_PROXY_PORT"
+    ok "kaspad reachable $WS_PROXY_NODE:$WS_PROXY_PORT"
   else
-    warn "LAN kaspad $WS_PROXY_NODE:$WS_PROXY_PORT UNREACHABLE — DHCP IP 可能变了"
-    warn "  → 查 ipconfig 找 kaspad 主机当前 LAN IP, 改 kanet.env KASPA_NODE=<new-IP>"
-    warn "  → ws-proxy 仍会启动, 但 relay 上行全堵直到 fix"
+    warn "kaspad $WS_PROXY_NODE:$WS_PROXY_PORT UNREACHABLE"
+    warn "  → 第一步: 看 ipconfig 找 kaspad 主机当前 IP, 改 kanet.env KASPA_NODE=<IP>"
+    warn "  → LAN 节点 DHCP 重启会变, host-local 节点用 127.0.0.1"
+    warn "  → ws-proxy 仍启动, 但 relay 上行全堵直到 fix"
   fi
   if netstat -an 2>/dev/null | grep -q "127.0.0.1:${WS_PROXY_PORT}.*LISTEN"; then
     ok "ws-proxy 已在运行 (port $WS_PROXY_PORT)"
