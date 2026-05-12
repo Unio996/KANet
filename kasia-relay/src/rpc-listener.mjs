@@ -55,6 +55,11 @@ let _reconnectAttempt = 0;
 let _blocklistTimer = null;
 let _healthTimer = null;
 let _walletRef = null;
+// T-J2-2026-05-12 #1 — RPC state observability (UI 健康检测 P0 误导 bug fix)
+// 给 console UI 探针真反映 relay child 内部 _rpc state, 替 console daemon 自己 RpcClient 测的 misleading /api/config/rpc-status.
+let _currentUrl = null;       // 当前 connect 的 URL (directUrl OR resolver-derived)
+let _lastConnectedAt = null;  // 最后一次 connect 成功的 epoch ms
+let _lastError = null;        // 最后一次 disconnect / health check / reconnect fail 的 message
 
 /**
  * Shared RpcClient accessor — 任何 transaction/broadcast 路径必须用这个,
@@ -67,6 +72,19 @@ export function getSharedRpcClient() {
 
 export function isRpcConnected() {
   return _rpc !== null;
+}
+
+// T-J2-2026-05-12 #1 — RPC state observability getter (consumed by relay.mjs IPC 'get_rpc_state', see #2).
+// 返 snapshot, 不 expose RpcClient 本身. lastConnectedAt/lastError 给 UI 显示 "30s 前连上" / 最后一次错原因.
+export function getRpcState() {
+  return {
+    connected: _rpc !== null && !_reconnecting,
+    reconnecting: _reconnecting,
+    attempt: _reconnectAttempt,
+    currentUrl: _currentUrl,
+    lastConnectedAt: _lastConnectedAt,
+    lastError: _lastError,
+  };
 }
 
 export async function waitForRpc(timeoutMs = 30000) {
@@ -477,10 +495,13 @@ async function _connect(wallet) {
       : (() => { throw new Error('No RPC URL configured and Resolver unavailable. Set KASPA_RPC_URL env var.'); })();
 
   _rpc = new RpcClient(rpcOpts);
+  _currentUrl = directUrl || '(resolver)';  // T-J2-2026-05-12 #1 — track URL for getRpcState()
 
   log('connecting to', directUrl || 'resolver...');
   await _rpc.connect({});
   _reconnectAttempt = 0;
+  _lastConnectedAt = Date.now();  // T-J2-2026-05-12 #1
+  _lastError = null;              // T-J2-2026-05-12 #1 — clear on success
 
   const { isSynced } = await _rpc.getServerInfo();
   log(isSynced ? 'node is synced' : 'WARNING: node is not synced');
@@ -514,6 +535,7 @@ async function _connect(wallet) {
 
   _rpc.addEventListener('disconnect', () => {
     log('DISCONNECTED from node');
+    _lastError = 'disconnect event';  // T-J2-2026-05-12 #1
     _scheduleReconnect(wallet);
   });
 
@@ -523,7 +545,9 @@ async function _connect(wallet) {
     try {
       await _rpc.getServerInfo();
     } catch (err) {
-      log('health check failed:', err?.message || err, '— triggering reconnect');
+      const msg = err?.message || String(err);
+      log('health check failed:', msg, '— triggering reconnect');
+      _lastError = `health check: ${msg}`;  // T-J2-2026-05-12 #1
       _scheduleReconnect(wallet);
     }
   }, 30_000);
@@ -551,7 +575,9 @@ function _scheduleReconnect(wallet) {
       await _connect(wallet);
       log('reconnected');
     } catch (err) {
-      log('reconnect failed:', err?.message || err);
+      const msg = err?.message || String(err);
+      log('reconnect failed:', msg);
+      _lastError = `reconnect: ${msg}`;  // T-J2-2026-05-12 #1
       _scheduleReconnect(wallet);
     }
   }, delay);
