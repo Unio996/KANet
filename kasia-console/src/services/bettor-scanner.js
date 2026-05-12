@@ -20,18 +20,25 @@ import { callLLMWithFallback } from './llm-fallback.js';
 const KANET_ROOT = process.env.KANET_ROOT || 'C:/kanet';
 
 // Lazy import Phase 1 lib (lives in agent-mind/)
-let _parseRule, _latestEmbeddedDate, _recommendBet, _classifyConfidence, _applyConfidenceDamping;
+let _parseRule, _latestEmbeddedDate, _recommendBet, _classifyConfidence, _applyConfidenceDamping, _computeLifecycleState;
 async function loadLib() {
   if (_parseRule) return;
   const rp = await import(`file:///${KANET_ROOT}/agent-mind/src/skills/bettor/rule-parser.mjs`);
   const k = await import(`file:///${KANET_ROOT}/agent-mind/src/skills/bettor/kelly.mjs`);
   const c = await import(`file:///${KANET_ROOT}/agent-mind/src/skills/bettor/calibrator.mjs`);
+  const l = await import(`file:///${KANET_ROOT}/agent-mind/src/skills/bettor/lifecycle.mjs`);
   _parseRule = rp.parseRule;
   _latestEmbeddedDate = rp.latestEmbeddedDate;
   _recommendBet = k.recommendBet;
   _classifyConfidence = c.classifyConfidence;
   _applyConfidenceDamping = c.applyConfidenceDamping;
+  _computeLifecycleState = l.computeLifecycleState;
 }
+
+// Phase 3f-1 Sub #5 — Lifecycle state SKIP / observed_only flags
+const LIFECYCLE_SKIP_STATES = new Set(['event_live', 'just_ended', 'priced_in', 'resolved']);
+const LIFECYCLE_OBSERVED_STATES = new Set(['pre_event_near', 'event_imminent']);
+const OBSERVED_SIZE_MULTIPLIER = 0.5;
 
 // ── tunables (Owner 5/9 钦定) ────────────────────────────────────────────
 const TRAINING_CUTOFF = '2026-01-31';
@@ -280,9 +287,23 @@ export function getAdapterUrlForAgent(relayNodeId) {
 
 // ── single-market scan ───────────────────────────────────────────────────
 
-async function scanOne(market, adapterUrl, availableBankroll, activeConfidenceThreshold) {
+async function scanOne(market, adapterUrl, availableBankroll, activeConfidenceThreshold, eventCalendarForMarket = []) {
   await loadLib();
   const yesPrice = market.yes / 100;
+
+  // Phase 3f-1 Sub #5 — Lifecycle state gating (Owner 5/12 钦定 "利好出尽不入场").
+  // SKIP states: event_live/just_ended/priced_in/resolved (LLM 估值波动期不可信 OR edge 已消化).
+  // observed states: pre_event_near/event_imminent (建仓但 size × 0.5 等事件信号).
+  // pre_event_far → 标准流程.
+  const lifecycle = _computeLifecycleState({
+    market: { end_date: market.endDate },
+    eventCalendar: eventCalendarForMarket,
+    nowMs: Date.now(),
+  });
+  if (LIFECYCLE_SKIP_STATES.has(lifecycle.state)) {
+    return { market, lifecycle, skipped: lifecycle.state };
+  }
+  const observedOnly = LIFECYCLE_OBSERVED_STATES.has(lifecycle.state);
 
   let parsed = null;
   try { parsed = _parseRule(market.description || ''); } catch {}
@@ -339,6 +360,8 @@ async function scanOne(market, adapterUrl, availableBankroll, activeConfidenceTh
   // Apply calibrator damping post-recommendBet — preserve side/edge math, scale fraction+size.
   const baseFraction = rec.fraction;
   rec.fraction = _applyConfidenceDamping({ band: cal.band, baseFraction });
+  // Phase 3f-1 Sub #5: pre_event_near / event_imminent → size × 0.5 (建仓等事件信号)
+  if (observedOnly) rec.fraction *= OBSERVED_SIZE_MULTIPLIER;
   rec.size = rec.fraction * effectiveBankroll;
 
   const edge = rec.side === 'YES'
@@ -354,6 +377,7 @@ async function scanOne(market, adapterUrl, availableBankroll, activeConfidenceTh
     estimate: est,
     rec,
     cal,
+    lifecycle,
     edge,
     score,
     infoGapMonths,
@@ -368,7 +392,7 @@ function persist(results, triggerType = 'cron', relayNodeId = null) {
 
   // Phase 3e-2 Layer 3: correlation caps. Sort by score desc, walk + drop over caps.
   const sorted = results
-    .filter(r => r && !r.error && r.rec && r.score > 0)
+    .filter(r => r && !r.error && !r.skipped && r.rec && r.score > 0)
     .sort((a, b) => b.score - a.score);
 
   const sportCounts = {};
@@ -403,8 +427,8 @@ function persist(results, triggerType = 'cron', relayNodeId = null) {
       (id, relay_node_id, market_id, condition_id, slug, question,
        decision, fraction, size_usd, edge, p_mid, sigma, info_gap_months,
        yes_price, volume_24h, liquidity, end_date, score,
-       reasoning_json, trigger_type, llm_tier, status, calibrator_confidence, scanned_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+       reasoning_json, trigger_type, llm_tier, status, calibrator_confidence, lifecycle_state, scanned_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
   `);
   const stmtPos = sqlite.prepare(`
     INSERT INTO bettor_sim_positions
@@ -438,6 +462,7 @@ function persist(results, triggerType = 'cron', relayNodeId = null) {
         triggerType,
         r.llmTier,
         r.cal?.band || null,
+        r.lifecycle?.state || 'pre_event_far',
         now
       );
       // Mirror sim_position: locks entry price/size at decision moment.
@@ -536,7 +561,32 @@ export async function runScan(triggerType = 'cron', relayNodeId = null) {
       const activeConfidenceThreshold = getActiveConfidenceThreshold();
       console.log(`[bettor-scanner] confidence threshold: ${activeConfidenceThreshold} (Layer 4 J1 #116 auto-fallback)`);
 
-      const results = await pMapLimit(eligibleList, LLM_CONCURRENCY, (m) => scanOne(m, adapterUrl, availableBankroll, activeConfidenceThreshold));
+      // Phase 3f-1 Sub #5: bulk-fetch event_calendar for all eligible market_ids (Map by market_id).
+      // 避免每 scanOne hot path 查 DB. SKIP/observed states 早 return 节省 LLM 调用.
+      const marketIds = eligibleList.map(m => String(m.id));
+      const ecRows = marketIds.length > 0
+        ? sqlite.prepare(`SELECT market_id, event_type, event_time_utc, priority FROM event_calendar WHERE market_id IN (${marketIds.map(() => '?').join(',')})`).all(...marketIds)
+        : [];
+      const ecMap = new Map();
+      for (const e of ecRows) {
+        const key = String(e.market_id);
+        if (!ecMap.has(key)) ecMap.set(key, []);
+        ecMap.get(key).push({ event_time_utc: e.event_time_utc, event_type: e.event_type, priority: e.priority });
+      }
+      if (ecMap.size > 0) console.log(`[bettor-scanner] event_calendar: ${ecMap.size} markets with events (Phase 3f-1 Sub #5 lifecycle gating)`);
+
+      const results = await pMapLimit(eligibleList, LLM_CONCURRENCY, (m) =>
+        scanOne(m, adapterUrl, availableBankroll, activeConfidenceThreshold, ecMap.get(String(m.id)) || []));
+
+      // Log lifecycle SKIP / observed_only outcomes
+      const lifecycleCounts = {};
+      for (const r of results) {
+        const s = r?.skipped || r?.lifecycle?.state;
+        if (s) lifecycleCounts[s] = (lifecycleCounts[s] || 0) + 1;
+      }
+      if (Object.keys(lifecycleCounts).length > 0) {
+        console.log(`[bettor-scanner] lifecycle: ${JSON.stringify(lifecycleCounts)}`);
+      }
       const errors = results.filter(r => r?.error).length;
       const valid = results.filter(r => r && !r.error).length;
       console.log(`[bettor-scanner] LLM done: ${valid} ok, ${errors} errors`);

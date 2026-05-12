@@ -30,16 +30,21 @@ const KANET_ROOT = process.env.KANET_ROOT || 'C:/kanet';
 
 // Lazy load agent-mind lib (跟 scanner 同 pattern, file:// dynamic import)
 // P0.3 export loadLib for test setup (prime _parseRule + _recommendBet before evaluatePosition stub)
-let _parseRule, _estimateP, _recommendBet;
+let _parseRule, _estimateP, _recommendBet, _computeLifecycleState;
 export async function loadLib() {
   if (_parseRule) return;
   const rp = await import(`file:///${KANET_ROOT}/agent-mind/src/skills/bettor/rule-parser.mjs`);
   const e = await import(`file:///${KANET_ROOT}/agent-mind/src/skills/bettor/estimator.mjs`);
   const k = await import(`file:///${KANET_ROOT}/agent-mind/src/skills/bettor/kelly.mjs`);
+  const l = await import(`file:///${KANET_ROOT}/agent-mind/src/skills/bettor/lifecycle.mjs`);
   _parseRule = rp.parseRule;
   _estimateP = e.estimateP;
   _recommendBet = k.recommendBet;
+  _computeLifecycleState = l.computeLifecycleState;
 }
+
+// Phase 3f-1 Sub #5 — Reactor 不调仓状态 (LLM Kelly delta 决策抖动期跳过)
+const REACTOR_SKIP_STATES = new Set(['event_live', 'just_ended']);
 
 // Tunables (Phase 3e-6 Bettor r30/r31 决断)
 const DEFAULT_BANKROLL = 1000;
@@ -192,7 +197,7 @@ export async function evaluatePositions() {
         p.id position_id, p.recommendation_id, p.relay_node_id, p.direction,
         p.entry_yes_price, p.entry_buy_price, p.size_usd, p.shares,
         p.market_description,
-        r.sigma, r.question, r.end_date,
+        r.market_id, r.sigma, r.question, r.end_date,
         s.current_yes_price, s.unrealized_pnl, s.drift_pp, s.snapshot_at
       FROM bettor_sim_positions p
       JOIN bettor_recommendations r ON r.id = p.recommendation_id
@@ -210,16 +215,40 @@ export async function evaluatePositions() {
       return { evaluated: 0, triggered: 0 };
     }
 
+    // Phase 3f-1 Sub #5: bulk-fetch event_calendar for all rows' market_ids, JS-filter skip
+    // event_live + just_ended positions (LLM 抖动期不调仓). priced_in 仍 evaluate (Kelly delta
+    // 可信 — edge 消化是 market reality, 不是 LLM 估值波动).
+    const marketIds = [...new Set(rows.map(r => String(r.market_id)).filter(Boolean))];
+    const ecRows = marketIds.length > 0
+      ? sqlite.prepare(`SELECT market_id, event_type, event_time_utc, priority FROM event_calendar WHERE market_id IN (${marketIds.map(() => '?').join(',')})`).all(...marketIds)
+      : [];
+    const ecMap = new Map();
+    for (const e of ecRows) {
+      const key = String(e.market_id);
+      if (!ecMap.has(key)) ecMap.set(key, []);
+      ecMap.get(key).push({ event_time_utc: e.event_time_utc, event_type: e.event_type, priority: e.priority });
+    }
+
     let triggered = 0;
+    let skippedLifecycle = 0;
     for (const r of rows) {
+      const lifecycle = _computeLifecycleState({
+        market: { end_date: r.end_date },
+        eventCalendar: ecMap.get(String(r.market_id)) || [],
+        nowMs: Date.now(),
+      });
+      if (REACTOR_SKIP_STATES.has(lifecycle.state)) {
+        skippedLifecycle++;
+        continue;
+      }
       const action = await evaluatePosition(r);
       if (!action) continue;
       const written = writeAdjustment(r, action, '[bettor-reactor]');
       if (written) triggered++;
     }
 
-    console.log(`[bettor-reactor] evaluated ${rows.length} open, triggered ${triggered} adjustments (Kelly delta 模型 Phase 3e-6)`);
-    return { evaluated: rows.length, triggered };
+    console.log(`[bettor-reactor] evaluated ${rows.length - skippedLifecycle} open (${skippedLifecycle} skipped: event_live/just_ended), triggered ${triggered} adjustments (Phase 3f-1 Sub #5 lifecycle gating)`);
+    return { evaluated: rows.length - skippedLifecycle, triggered, skippedLifecycle };
   } finally {
     _running = false;
   }
