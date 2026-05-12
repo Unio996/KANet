@@ -82,42 +82,6 @@ const actions = {
   },
 
   /**
-   * T-J2-2026-05-12 P0.2 #1/9 precondition (NWT spec v0.2 §3) — generic HTTP POST action.
-   * 让 exchange domain cases 直 call /api/exchange/* 不绕 broker DM (cron-friendly, fast).
-   *
-   * step: { action: 'http_post', url: '/api/...' OR full URL, body: {...}, timeout_ms?: 5000 }
-   * → returns { status, body, ok, error, latency_ms, reply (= JSON.stringify(body) for assertion compat) }
-   *
-   * 配 assertion: http_status_equals (新加), reply_contains (重用, 查 body JSON 串), latency_*.
-   */
-  async http_post(step, ctx) {
-    const t0 = Date.now();
-    const url = String(step.url || '').startsWith('http') ? step.url : `${CONSOLE_URL}${step.url}`;
-    let status, body, err;
-    try {
-      const r = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(step.body || {}),
-        signal: AbortSignal.timeout(step.timeout_ms || 5000),
-      });
-      status = r.status;
-      try { body = await r.json(); } catch { body = null; }
-    } catch (e) {
-      err = e?.message || String(e);
-    }
-    return {
-      status,
-      body,
-      ok: !err && status >= 200 && status < 300 && body?.ok !== false,
-      error: err,
-      latency_ms: Date.now() - t0,
-      // body JSON 串作 reply, 让 reply_contains / reply_does_not_contain 兼容
-      reply: body ? JSON.stringify(body).slice(0, 800) : (err || ''),
-    };
-  },
-
-  /**
    * Phase D follow-up (J1 mode (ii) integration): real Kasia chain DM send + poll inbound.
    * step: { action: 'real_p2p_send', from_relay_id, from_addr, to_addr, message,
    *         poll_timeout_ms? (default 30000) }
@@ -776,13 +740,21 @@ const actions = {
   /**
    * T-J2-2026-05-11 Phase 2 B.2 (NWT #18 ABE audit): generic HTTP POST action.
    * 适合 race-condition test (2 concurrent fetch) + API endpoint exercise.
-   * step: { action: 'http_post', path, body? } — host 默 127.0.0.1:3100
-   * returns { ok, status, body }
+   * step: { action: 'http_post', url: '/api/...' OR full URL, body?, timeout_ms? } — host 默 127.0.0.1:3100
+   * (backward compat: step.path 仍接受, 跟 step.url 等价)
+   *
+   * T-J2-2026-05-12 P0.2 #1/9 extension (NWT spec v0.2 §3): 返 reply 字段 (= JSON.stringify(body) sliced 800)
+   * 让 reply_contains / reply_does_not_contain assertion 兼容 + 加 latency_ms + error 字段.
+   *
+   * returns { ok, status, body, error?, latency_ms, reply }
    */
   async http_post(step, ctx) {
+    const t0 = Date.now();
     const PORT = process.env.PORT || 3100;
-    if (!step.path) return { ok: false, error: 'path required' };
-    const url = step.path.startsWith('http') ? step.path : `http://127.0.0.1:${PORT}${step.path}`;
+    const target = step.url || step.path;  // T-J2-2026-05-12 兼容 url (新) + path (旧)
+    if (!target) return { ok: false, error: 'url/path required', latency_ms: 0, reply: '' };
+    const url = String(target).startsWith('http') ? target : `http://127.0.0.1:${PORT}${target}`;
+    let status, body, err;
     try {
       const r = await fetch(url, {
         method: 'POST',
@@ -790,13 +762,21 @@ const actions = {
         body: JSON.stringify(step.body || {}),
         signal: AbortSignal.timeout(step.timeout_ms || 10_000),
       });
+      status = r.status;
       const text = await r.text();
-      let json = null;
-      try { json = JSON.parse(text); } catch { /* non-json response OK */ }
-      return { ok: r.ok, status: r.status, body: json || text };
+      try { body = JSON.parse(text); } catch { body = text; }
     } catch (e) {
-      return { ok: false, error: e.message };
+      err = e?.message || String(e);
     }
+    return {
+      ok: !err && status >= 200 && status < 300 && (typeof body !== 'object' || body?.ok !== false),
+      status,
+      body,
+      error: err,
+      latency_ms: Date.now() - t0,
+      // body JSON 串作 reply, 让 reply_contains / reply_does_not_contain 兼容
+      reply: body !== undefined && body !== null ? (typeof body === 'string' ? body : JSON.stringify(body)).slice(0, 800) : (err || ''),
+    };
   },
 
   /**
