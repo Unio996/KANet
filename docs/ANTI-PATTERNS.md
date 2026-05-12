@@ -1538,6 +1538,45 @@ NWT 14:41 ship Bug-Z24 fix → 跑 ship checklist 第 7 条:
 
 ---
 
+## 规则 41 · Eta `<%# %>` comment 内嵌 `#` 撞 JS syntax — 用 HTML `<!-- -->` 不撞
+
+**来源**: 2026-05-12 NWT emergency-Z2026-05-12-eta-comment-hijack (commit `1c3fdd740` hotfix, broadcast tx `49a3e913`).
+
+**真因**: Eta v3 template engine 解析 `<%#` 起到 `%>` 之间的内容当 **raw JavaScript** 输出 (不加 `__eta.res +=` 前缀, 当 JS comment 处理). 但 JavaScript 没有 `#` 行注释 (只有 `//` 跟 `/* */`). 内嵌 `#` 字符 (e.g. `<%# T-J2-2026-05-12 #5 — ... %>`) 让编译出的 JS 含 `# T-J2-2026-05-12 #5 — ...` raw line → invalid token → 整 template parse fail → `Bad template syntax` 500.
+
+**Wrong**:
+```eta
+<%# T-J2-2026-05-12 #5 — global RPC overview indicator %>
+<a href="/settings">...</a>
+```
+编译输出含:
+```js
+__eta.res+='        '
+# T-J2-2026-05-12 #5 — global RPC overview indicator
+__eta.res+='        <a href="/settings">...
+```
+JS parser 撞 `#` invalid token → fastify 500 → 全栈共用此 partial 的 page broken.
+
+**Right** (用 HTML comment, Eta 不解析 raw 输出):
+```eta
+<!-- T-J2-2026-05-12 #5 — global RPC overview indicator -->
+<a href="/settings">...</a>
+```
+
+或用纯文字注释不含 `#`:
+```eta
+<%# T-J2-2026-05-12 sub 5 — global RPC overview indicator %>
+```
+
+**Why**: 5/12 真案. commit `a8825b0c4` (J2 UI-P0 #5/7) 加 `page-open.eta:14` 用 `<%# T-J2-2026-05-12 #5 ... %>` (内嵌 `#5/7` 中的 `#`) → page-open.eta 是所有 page 共用 partial → 整全栈 UI 500 broken 40+ min. NWT reviewer audit 5 dimension PASS 但全是 source pattern grep, 0 browser 实测 → 漏网. Owner 真测撞才发现. 见 memory `feedback_audit_ui_browser_required.md`.
+
+**检查方法**:
+- 机器: `scripts/lint-kanet.mjs` 加 eta 规则 — grep `\.eta` 文件 `<%#[^%]*#[^%]*%>` regex 撞 fail (后续 ship)
+- 人: reviewer audit UI/template 改必 5 步全过 (含 dev server up + curl page HTTP 200 + tail console.log grep error clean, 见 `feedback_audit_ui_browser_required.md`)
+- 历史 commit: a8825b0c4 (J2 引入) / 1c3fdd740 (NWT emergency hotfix) / broadcast tx 49a3e913
+
+---
+
 ## 如何扩充本档案
 
 新陷阱踩过后**立即**追加，格式保持：
