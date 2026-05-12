@@ -687,11 +687,16 @@ export async function registerStockRoutes(fastify) {
     let client;
     try {
       // Step 0: auto-ensure CTF→V2 operator approve (合二为一, Owner UX 不该懂 1155 operator 原理)
+      // getPolygonWallet 只返 id/address/chain, 必须单独 query privkey_encrypted (v1 sediment)
       const wallet = getPolygonWallet(relay_node_id);
       if (!wallet) return reply.code(400).send({ error: 'No polygon wallet' });
-      const approveResult = await ensureCtfApprovedForV2(decrypt(wallet.privkey_encrypted));
+      const pkRow = sqlite.prepare('SELECT privkey_encrypted FROM agent_wallets WHERE id = ?').get(wallet.id);
+      if (!pkRow?.privkey_encrypted) return reply.code(400).send({ error: 'Wallet has no private key' });
+      const approveResult = await ensureCtfApprovedForV2(decrypt(pkRow.privkey_encrypted));
       if (approveResult.newlyApproved > 0) {
         console.log(`[predictions/close] auto-approved ${approveResult.newlyApproved} CTF→V2 spender(s), TX: ${JSON.stringify(approveResult.txHashes)}`);
+      } else {
+        console.log(`[predictions/close] CTF→V2 already approved (skip: ${Object.keys(approveResult.skipped).join(',')})`);
       }
 
       client = await _makeClobClient(relay_node_id);
