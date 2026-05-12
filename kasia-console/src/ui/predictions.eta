@@ -47,6 +47,14 @@
             <span x-text="migratingV2 ? '迁移中...' : (walletStatus.v2Migrated ? '包装为 pUSD' : '迁移到 V2')"></span>
           </button>
         </template>
+        <!-- 一次性 CTF→V2 操作员授权 (sell-side, 卡死 SELL allowance=0 时点这里) -->
+        <template x-if="walletStatus.v2Migrated && walletStatus.hasWallet">
+          <button @click="doMigrateV2()" :disabled="migratingV2"
+                  class="btn btn-sm btn-warning text-[10px]"
+                  title="补授权: setApprovalForAll CTF→V2 Exchange (操作员侧). 已授权 click 后秒回. 未授权 ~2 笔 TX gas ≈$0.02.">
+            <span x-text="migratingV2 ? '授权中...' : '🔓 补 CTF 出清授权'"></span>
+          </button>
+        </template>
         <template x-if="walletStatus.hasClobKey">
           <span class="badge badge-info text-[9px]">API 就绪</span>
         </template>
