@@ -1292,7 +1292,7 @@ function predictionsPage() {
       try {
         const r = await fetch('/api/predictions/positions/' + pos.asset + '/close', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ relay_node_id: this.relayNodeId, size: pos.size }),
+          body: JSON.stringify({ relay_node_id: this.selectedAgent, size: pos.size }),
         });
         const j = await r.json();
         if (!j.ok) { pos._closeError = j.error || 'unknown'; pos._closing = false; return; }
@@ -1326,7 +1326,7 @@ function predictionsPage() {
         const r = await fetch('/api/bettor/positions/close-all', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ relay_node_id: this.relayNodeId, decided_by: 'owner-manual-close-all' }),
+          body: JSON.stringify({ relay_node_id: this.selectedAgent, decided_by: 'owner-manual-close-all' }),
         });
         const j = await r.json();
         if (!j.ok) { alert('出清失败: ' + (j.error || j.reason)); this.closingAll = false; return; }
