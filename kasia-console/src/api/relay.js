@@ -5,7 +5,7 @@ import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 import { addressFromMnemonic } from '../services/wallet.js';
 import { nowIso } from '../lib/time.js';
 import { registerMindSkills } from '../data/settings/skills.js';
-import { sendCommand, sendCommandAsync } from '../services/relay-manager.js';
+import { sendCommand, sendCommandAsync, getRelayRpcState } from '../services/relay-manager.js';
 import { sqlite } from '../db/client.js';
 import { Mnemonic } from 'kaspa-wasm';
 import { getWorkingRpc } from '../services/rpc-health.js';
@@ -269,6 +269,34 @@ export async function registerRelayRoutes(fastify) {
       }
     } catch {}
     return reply.send({ balance: null });
+  });
+
+  // T-J2-2026-05-12 #4 — relay child RPC state probe (UI 健康检测 P0, NWT spec sub #4/7).
+  // 跟 /api/config/rpc-status 区别: 该 endpoint 测 console daemon 自己 RpcClient (misleading).
+  // 本 endpoint 走 IPC 拿 relay child 内部 _rpc state (真反映 broker/scout 等子进程 RPC 连接状态).
+  fastify.get('/api/relay/:id/rpc-state', async (request, reply) => {
+    const relay = getRelayNode(request.params.id);
+    if (!relay) return reply.code(404).send({ ok: false, error: 'relay_not_found' });
+    const result = await getRelayRpcState(request.params.id);
+    return reply.send({ relayId: request.params.id, relayName: relay.name, ...result });
+  });
+
+  // T-J2-2026-05-12 #4 — system-wide RPC overview (聚合全 relay state, header indicator + dashboard 用).
+  fastify.get('/api/system/rpc-overview', async (_request, reply) => {
+    const relays = listRelayNodes();
+    const results = await Promise.all(
+      relays.map(async (r) => {
+        const result = await getRelayRpcState(r.id);
+        return { id: r.id, name: r.name, address: r.address, ...result };
+      }),
+    );
+    const summary = {
+      total: results.length,
+      connected: results.filter((r) => r.ok && r.state?.connected).length,
+      reconnecting: results.filter((r) => r.ok && r.state?.reconnecting).length,
+      unreachable: results.filter((r) => !r.ok).length,
+    };
+    return reply.send({ summary, relays: results });
   });
 
   // Split UTXOs for concurrent sends
