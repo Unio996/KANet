@@ -20,14 +20,17 @@ import { callLLMWithFallback } from './llm-fallback.js';
 const KANET_ROOT = process.env.KANET_ROOT || 'C:/kanet';
 
 // Lazy import Phase 1 lib (lives in agent-mind/)
-let _parseRule, _latestEmbeddedDate, _recommendBet;
+let _parseRule, _latestEmbeddedDate, _recommendBet, _classifyConfidence, _applyConfidenceDamping;
 async function loadLib() {
   if (_parseRule) return;
   const rp = await import(`file:///${KANET_ROOT}/agent-mind/src/skills/bettor/rule-parser.mjs`);
   const k = await import(`file:///${KANET_ROOT}/agent-mind/src/skills/bettor/kelly.mjs`);
+  const c = await import(`file:///${KANET_ROOT}/agent-mind/src/skills/bettor/calibrator.mjs`);
   _parseRule = rp.parseRule;
   _latestEmbeddedDate = rp.latestEmbeddedDate;
   _recommendBet = k.recommendBet;
+  _classifyConfidence = c.classifyConfidence;
+  _applyConfidenceDamping = c.applyConfidenceDamping;
 }
 
 // ── tunables (Owner 5/9 钦定) ────────────────────────────────────────────
@@ -309,6 +312,14 @@ async function scanOne(market, adapterUrl, availableBankroll, activeConfidenceTh
     return { market, error: 'LLM JSON parse failed', raw: llmResult.text?.slice(0, 200) };
   }
 
+  // Phase 3f-1 Sub #3 — LLM Calibrator wire: 三分类 confidence band on LLM-vs-market
+  // 偏差 + LLM 自报 sigma, 用 damping 系数压 Kelly fraction. 防 Greece $242 瞎押大仓.
+  const cal = _classifyConfidence({
+    llmPMid: est.pMid,
+    marketYes: yesPrice,
+    sigma: est.sigma,
+  });
+
   // Inventory-aware: bankroll 扣已 open 仓位, 至少留 INVENTORY_SAFETY_MIN_FRAC 防全锁死
   const effectiveBankroll = Math.max(
     availableBankroll != null ? availableBankroll : DEFAULT_BANKROLL,
@@ -325,6 +336,11 @@ async function scanOne(market, adapterUrl, availableBankroll, activeConfidenceTh
     confidenceThreshold: activeConfidenceThreshold,
   });
 
+  // Apply calibrator damping post-recommendBet — preserve side/edge math, scale fraction+size.
+  const baseFraction = rec.fraction;
+  rec.fraction = _applyConfidenceDamping({ band: cal.band, baseFraction });
+  rec.size = rec.fraction * effectiveBankroll;
+
   const edge = rec.side === 'YES'
     ? Math.abs(est.pMid - yesPrice)
     : rec.side === 'NO'
@@ -337,6 +353,7 @@ async function scanOne(market, adapterUrl, availableBankroll, activeConfidenceTh
     parsed,
     estimate: est,
     rec,
+    cal,
     edge,
     score,
     infoGapMonths,
@@ -386,8 +403,8 @@ function persist(results, triggerType = 'cron', relayNodeId = null) {
       (id, relay_node_id, market_id, condition_id, slug, question,
        decision, fraction, size_usd, edge, p_mid, sigma, info_gap_months,
        yes_price, volume_24h, liquidity, end_date, score,
-       reasoning_json, trigger_type, llm_tier, status, scanned_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+       reasoning_json, trigger_type, llm_tier, status, calibrator_confidence, scanned_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
   `);
   const stmtPos = sqlite.prepare(`
     INSERT INTO bettor_sim_positions
@@ -420,6 +437,7 @@ function persist(results, triggerType = 'cron', relayNodeId = null) {
         JSON.stringify({ reasoning: r.estimate.reasoning, trace: r.rec.reasoning }),
         triggerType,
         r.llmTier,
+        r.cal?.band || null,
         now
       );
       // Mirror sim_position: locks entry price/size at decision moment.

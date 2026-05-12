@@ -4,11 +4,15 @@
  * 把 LLM estimateP() 输出 (pMid + sigma) 跟 market price (marketYes) 比较, 三分类
  * confidence band (low/mid/high), 再用对应 damping 系数压 Kelly fraction.
  *
- * Greece $242→$48 实证: LLM pMid=0.008 vs market YES=0.18, 偏差 17pp, 但 sigma=0.03
- * (LLM 自信 5%), Kelly base fraction 24% bankroll, 一把押 $242 输. 接入 calibrator 后
- * gap=17pp ∈ [10,30]pp + sigma=0.03 ≤ 0.05 (其实落入 mid 因为 gap ≥ 0.10 不满足 high
- * tight 条件) → band='mid' → fraction × 0.50 → $121. 实际本应触 rule 1 (Greece 21pp <
- * 30pp 不到 low), 但 mid damping 已经把仓位减半. Eurovision Final 偏差更大时 rule 1 命中.
+ * Greece 实证 (Bettor r60 self-correct): LLM pMid=0.008 vs market YES=0.18, 偏差 17.2pp
+ * (Owner 字面 "差 22x 比值" = 0.18/0.008, 不是 22pp), sigma=0.03. Kelly base fraction
+ * 24% bankroll, 一把押 $242 输. 接入 calibrator:
+ *   - gap=17.2pp ≤ 30pp → rule 1 不触
+ *   - sigma=0.03 ≤ 0.15 → rule 2 不触
+ *   - gap=17.2pp > 10pp → rule 3 (tight) 不触
+ *   - → rule 4 → band='mid' → fraction × 0.50 → $121
+ * 比 raw Kelly $242 减半已修 "Bettor 瞎押大仓" 主病. Eurovision Final 临近 LLM 更激进
+ * (e.g. pMid 0.005 / market drift to 0.40 → gap 39.5pp) → rule 1 命中 → low × 0.20.
  *
  * Pure function — no LLM, no DB, no network. Caller wire 在 scanner.scanOne 调
  * estimateP 后, recommendBet 前, 拿 result.band + result.reason 持久化到
