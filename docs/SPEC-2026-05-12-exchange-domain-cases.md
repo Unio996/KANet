@@ -2,7 +2,7 @@
 
 **版本**: v0.2 · **作者**: NWT (architect cross-hat) · **创建**: 2026-05-12 (v0.1 18:06) · **iterate**: 2026-05-12 (v0.2 18:35)
 **状态**: active spec, J2 P0.1 ship complete (commit 15f1176b6, NWT reviewer PASS green-light), v0.2 含 J2 #314/#315/#316 反馈整合
-**前置**: TEST-FRAMEWORK.md / INVARIANTS-broker-dual-path-v0.4.md / 2026-05-12-broker-multichain-test-sediment.md / NEW-BROKER-PROPOSAL.md
+**前置**: TEST-FRAMEWORK.md / INVARIANTS-broker-dual-path-v0.4.md / 2026-05-12-broker-multichain-test-sediment.md (broker-v2 spec NEW-BROKER-PROPOSAL.md 废品 已 archived)
 
 ---
 
