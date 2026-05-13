@@ -20,14 +20,8 @@ const LOG_FILE = `${KANET_ROOT}/logs/bettor-auto-decider.log`;
 const CONSOLE_URL = 'http://127.0.0.1:3100';
 const TICK_MS = 5 * 60_000;  // 5min
 
-// Confidence band auto-派 by event_type
-const EVENT_TYPE_TO_BAND = {
-  'final': 'high_threshold',         // 95% confidence 严档 (Eurovision-like noise market)
-  'semifinal': 'mid_threshold',       // 85% 中档
-  'staging': 'mid_threshold',
-  'jury_show': 'mid_threshold',
-  'running_order': 'mid_threshold',
-};
+// Sub 5.5 hotfix per r81 surface: EVENT_TYPE_TO_BAND map 删 (0 reference, backfill 用 inline SQL CASE).
+// Effective behavior 由 quality check L65+ 完整覆盖 (event_type → confidence_band 间接通过 backfill).
 
 const MID_DELTA_THRESHOLD = 0.30;  // 30% size delta cap for 'mid' band auto-approve
 
