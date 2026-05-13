@@ -106,6 +106,13 @@ async function main() {
     }
   }
 
+  // Sub #1.a (J2 #335, NWT verdict 72e315db Option A 钦定): post-run cleanup synthetic
+  // test peer (freshTestPeer) active retail_dex_orders rows. SA-6 A1 invariant remains
+  // strict — test framework owns cleanup so prod runtime guarantees stay clean.
+  // freshTestPeer pattern (peers.mjs L57-64): 67-char addr 'kaspa:q' + 60-char suffix
+  // where suffix[0..27] === suffix[32..59] (sha256 byte wrap mod 32 charset).
+  await _cleanupSyntheticActiveRows(quietFlag);
+
   console.log('='.repeat(60));
   console.log(`Summary: ${totalPass} PASS / ${totalFail} FAIL / ${totalPass + totalFail} run`);
   const historicalCases = summary.filter(s => s.historical);
@@ -132,6 +139,42 @@ async function main() {
     }
   }
   process.exit(totalFail > 0 ? 1 : 0);
+}
+
+async function _cleanupSyntheticActiveRows(quietFlag) {
+  try {
+    const Database = (await import('better-sqlite3')).default;
+    const { dirname, join } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const __filename = fileURLToPath(import.meta.url);
+    const DB_PATH = join(dirname(__filename), '..', 'data', 'console.db');
+    const db = new Database(DB_PATH);
+    try {
+      // ACTIVE 67-char kaspa: addr pre-filter at SQL; JS check 28-char repeat (freshTestPeer signature)
+      const rows = db.prepare(`
+        SELECT id, user_kasia_address FROM retail_dex_orders
+        WHERE state IN ('aligning','awaiting_payment','paid')
+          AND LENGTH(user_kasia_address) = 67 AND user_kasia_address LIKE 'kaspa:q%'
+      `).all();
+      const del = db.prepare("DELETE FROM retail_dex_orders WHERE id = ?");
+      let removed = 0;
+      for (const r of rows) {
+        const a = r.user_kasia_address;
+        // freshTestPeer 28-char repeat: addr.slice(7,35) === addr.slice(39,67)
+        if (a.slice(7, 35) === a.slice(39, 67)) {
+          del.run(r.id);
+          removed++;
+        }
+      }
+      if (!quietFlag && removed > 0) {
+        console.log(`[cleanup] removed ${removed} synthetic test peer active rows (Sub #1.a SA-6 A1 hygiene)`);
+      }
+    } finally {
+      db.close();
+    }
+  } catch (err) {
+    console.warn(`[cleanup] synthetic peer sweep failed (non-fatal): ${err.message}`);
+  }
 }
 
 main().catch(err => {
