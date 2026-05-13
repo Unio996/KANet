@@ -745,7 +745,7 @@ export async function checkMatchedTimeout() {
  * Taker submits a payment TX hash for on-chain verification.
  * Writes to verification_meta, kicks off async verification.
  */
-export function processPaymentSubmit({ offer_id, payment_tx, payment_chain }) {
+export function processPaymentSubmit({ offer_id, payment_tx, payment_chain, payment_asset = null }) {
   const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer_id);
   if (!offer) return { error: 'offer_not_found' };
   if (offer.protocol_status !== 'verifying') return { error: 'invalid_status', current: offer.protocol_status };
@@ -769,6 +769,15 @@ export function processPaymentSubmit({ offer_id, payment_tx, payment_chain }) {
   meta.payment_tx = payment_tx;
   meta.payment_chain = verifyChain;
   meta.submitted_at = now;
+  // Sub #4.b hotfix (J2 #333 5/13 base USDC dispute root cause): persist payment_asset
+  // into verification_meta so downstream _verifyAndComplete → verifyCrossChainTx routes
+  // to correct STABLECOINS[chain][asset] lookup. Default fallback 'usdt' is wrong for
+  // base chain (USDC only, no native USDT pool) — caused 4/4 verify "Underpayment 0"
+  // before this fix. payment_asset propagates from broadcast msg.payment_asset (set by
+  // _autoPayExchange L1404 to offer.want_asset) OR derived from offer.want_asset at
+  // caller — defaults preserved for backward compat.
+  const resolvedAsset = payment_asset || offer.want_asset || null;
+  if (resolvedAsset) meta.payment_asset = String(resolvedAsset).toLowerCase();
 
   // 同时写入 payment_tx 列 (UNIQUE index 会在并发 reuse 时抛 constraint 错误)
   try {

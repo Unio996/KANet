@@ -268,14 +268,20 @@ const actions = {
     const timeout = step.timeout_ms || 180_000;
     const poll = step.poll_ms || 3_000;
     const t0 = Date.now();
+    // T-J2-2026-05-13 Sub #4 fix: support optional want_chain filter — without it, query
+    // returns stale 'completed' row from older e2e (e.g. 5/12 BSC J2 #326) and short-circuits
+    // the wait. Pass step.want_chain='polygon' to disambiguate multichain e2e cases.
+    const wantChainClause = step.want_chain ? 'AND want_chain = ?' : '';
+    const sql = `
+      SELECT id, protocol_status, give_asset, give_amount, want_asset, want_chain, taker, completed_at
+      FROM exchange_offers
+      WHERE maker = ? AND protocol_status = ? ${wantChainClause}
+      ORDER BY created_at DESC LIMIT 1
+    `;
+    const params = step.want_chain ? [step.maker, step.status, step.want_chain] : [step.maker, step.status];
     while (Date.now() - t0 < timeout) {
       const db = new Database(DB_PATH, { readonly: true });
-      const row = db.prepare(`
-        SELECT id, protocol_status, give_asset, give_amount, want_asset, taker, completed_at
-        FROM exchange_offers
-        WHERE maker = ? AND protocol_status = ?
-        ORDER BY created_at DESC LIMIT 1
-      `).get(step.maker, step.status);
+      const row = db.prepare(sql).get(...params);
       db.close();
       if (row) return { row, found: true, polled_for_ms: Date.now() - t0 };
       await new Promise(r => setTimeout(r, poll));
@@ -288,16 +294,18 @@ const actions = {
    * Bridges publish → accept without explicit offer_id forward in step.body (framework
    * doesn't support inter-step var substitution; this action does the lookup itself).
    *
-   * step: { action: 'exchange_accept_latest_offer', maker, taker_relay_id, selected_chain }
-   * → returns { http_status, body, offer_id, ok }
+   * step: { action: 'exchange_accept_latest_offer', maker, taker_relay_id, selected_chain, want_chain? }
+   * → returns { status, body, offer_id, ok, reply } — status matches http_post shape so
+   *   http_status_equals assertion works against `step_result.status`.
    */
   async exchange_accept_latest_offer(step, ctx) {
     const db = new Database(DB_PATH, { readonly: true });
-    const offer = db.prepare(
-      "SELECT id FROM exchange_offers WHERE maker = ? AND protocol_status = 'open' ORDER BY created_at DESC LIMIT 1"
-    ).get(step.maker);
+    const chainClause = step.want_chain ? "AND want_chain = ?" : "";
+    const sql = `SELECT id FROM exchange_offers WHERE maker = ? AND protocol_status = 'open' ${chainClause} ORDER BY created_at DESC LIMIT 1`;
+    const params = step.want_chain ? [step.maker, step.want_chain] : [step.maker];
+    const offer = db.prepare(sql).get(...params);
     db.close();
-    if (!offer?.id) return { ok: false, http_status: 0, body: 'no_open_offer_for_maker', offer_id: null };
+    if (!offer?.id) return { ok: false, status: 0, body: 'no_open_offer_for_maker', offer_id: null, reply: 'no_open_offer_for_maker' };
     const res = await fetch(`${CONSOLE_URL}/api/exchange/accept`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -310,7 +318,7 @@ const actions = {
     });
     const text = await res.text();
     let parsed; try { parsed = JSON.parse(text); } catch { parsed = text; }
-    return { ok: res.ok, http_status: res.status, body: parsed, offer_id: offer.id, reply: text };
+    return { ok: res.ok, status: res.status, body: parsed, offer_id: offer.id, reply: text };
   },
 
   /**

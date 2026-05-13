@@ -74,6 +74,7 @@ export default {
       maker: relayAddr('trader-b'),
       taker_relay_id: relayId('trader-a'),
       selected_chain: CHAIN,
+      want_chain: CHAIN,
       expect: { must: { http_status_equals: 200 } },
     },
     {
@@ -81,6 +82,7 @@ export default {
       action: 'wait_for_offer_status',
       maker: relayAddr('trader-b'),
       status: 'completed',
+      want_chain: CHAIN,
       timeout_ms: TIMEOUT_MS,
       expect: { must: { query_db: {
         sql: "SELECT protocol_status FROM exchange_offers WHERE maker = ? AND want_chain = ? ORDER BY created_at DESC LIMIT 1",

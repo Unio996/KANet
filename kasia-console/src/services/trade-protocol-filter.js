@@ -1084,8 +1084,10 @@ async function handleExchangePaid(msg) {
   });
 
   // Trigger verification via existing processPaymentSubmit (it handles _verifyAndComplete)
+  // Sub #4.b hotfix: forward payment_asset so verifyCrossChainTx routes to correct STABLECOINS[chain][asset]
+  // (base chain USDC route, was defaulting to 'usdt' → "Underpayment 0" → auto-dispute).
   const chain = offer.taker_chain || msg.payment_chain;
-  processPaymentSubmit({ offer_id: msg.offer_id, payment_tx: msg.payment_tx, payment_chain: chain });
+  processPaymentSubmit({ offer_id: msg.offer_id, payment_tx: msg.payment_tx, payment_chain: chain, payment_asset: msg.payment_asset });
 
   console.log(`[exchange] paid: offer ${msg.offer_id.slice(0,8)} → verifying, TX=${msg.payment_tx.slice(0,16)}`);
 }
@@ -1456,7 +1458,9 @@ async function _autoPayExchange(offer, takerRelayNodeId) {
     payload: JSON.stringify({ offer_id: offer.id, chain, amount, payment_tx: result.txHash, broadcast_tx: paidTxId }),
   });
 
-  processPaymentSubmit({ offer_id: offer.id, payment_tx: result.txHash, payment_chain: chain });
+  // Sub #4.b hotfix: forward payment_asset (offer.want_asset) to processPaymentSubmit so
+  // verifyCrossChainTx routes to correct STABLECOINS[chain][asset] (base USDC route fix).
+  processPaymentSubmit({ offer_id: offer.id, payment_tx: result.txHash, payment_chain: chain, payment_asset: offer.want_asset });
   console.log(`[exchange-autopay] verification triggered for offer ${offer.id.slice(0,8)}`);
 }
 
