@@ -46,21 +46,32 @@ const WATCH_KEYS = [
   { key: 'console-db',      severityOnFail: 'WARN',     intervalMs: 5 * 60_000,    check: checkConsoleDbLatency },
 ];
 
+// Sub 9.7 hotfix: SQLite datetime('now') 返回 UTC 无时区标志 ("YYYY-MM-DD HH:MM:SS"),
+// Node new Date() 当 LOCAL time parse 导致 J1 host (UTC+7 Bangkok) +7h false offset.
+// 修: 用 julianday('now') - julianday(created_at) 算 ageMs (SQLite 内部 UTC ✓).
 async function checkReactorCron(db) {
-  // reactor 1h cron: 看 bettor_adjustments 最新 row 时间 (cron 跑了就有 adj OR 至少有 evaluatePositions log)
-  const latest = db.prepare("SELECT MAX(created_at) AS t FROM bettor_adjustments").get();
-  if (!latest?.t) return { ok: true, detail: 'no adj rows yet (boot scenario)' };
-  const ageMs = Date.now() - new Date(latest.t).getTime();
-  if (ageMs > 90 * 60_000) return { ok: false, detail: `reactor adj 最新 ${Math.round(ageMs/60000)}min ago > 90min threshold` };
-  return { ok: true, detail: `latest adj ${Math.round(ageMs/60000)}min ago` };
+  const latest = db.prepare(`
+    SELECT created_at, (julianday('now') - julianday(MAX(created_at))) * 86400000 AS age_ms
+    FROM bettor_adjustments
+  `).get();
+  if (!latest?.created_at) return { ok: true, detail: 'no adj rows yet (boot scenario)' };
+  // Also gate by OPEN positions — 0 OPEN = reactor 不该有 adj, 不 alert
+  const openCount = db.prepare("SELECT COUNT(*) c FROM bettor_sim_positions WHERE closed_at IS NULL AND direction != 'SKIP' AND size_usd > 0").get();
+  if ((openCount?.c || 0) === 0) return { ok: true, detail: '0 OPEN positions — reactor idle by design' };
+  const ageMin = Math.round((latest.age_ms || 0) / 60_000);
+  if (ageMin > 90) return { ok: false, detail: `reactor adj 最新 ${ageMin}min ago > 90min threshold (OPEN=${openCount.c})` };
+  return { ok: true, detail: `latest adj ${ageMin}min ago (OPEN=${openCount.c})` };
 }
 
 async function checkScannerCron(db) {
-  const latest = db.prepare("SELECT MAX(scanned_at) AS t FROM bettor_recommendations").get();
+  const latest = db.prepare(`
+    SELECT MAX(scanned_at) AS t, (julianday('now') - julianday(MAX(scanned_at))) * 86400000 AS age_ms
+    FROM bettor_recommendations
+  `).get();
   if (!latest?.t) return { ok: true, detail: 'no rec rows yet' };
-  const ageMs = Date.now() - new Date(latest.t).getTime();
-  if (ageMs > 7 * 60 * 60_000) return { ok: false, detail: `scanner rec 最新 ${Math.round(ageMs/3600000)}h ago > 7h threshold` };
-  return { ok: true, detail: `latest rec ${Math.round(ageMs/3600000)}h ago` };
+  const ageH = (latest.age_ms || 0) / 3_600_000;
+  if (ageH > 7) return { ok: false, detail: `scanner rec 最新 ${ageH.toFixed(1)}h ago > 7h threshold` };
+  return { ok: true, detail: `latest rec ${ageH.toFixed(1)}h ago` };
 }
 
 async function checkLanIpHealth(db) {
@@ -88,9 +99,11 @@ async function checkAdapter3018() {
 }
 
 async function checkConsoleDbLatency(db) {
+  // Sub 9.7 hotfix: 原查 agents 表不存在 (实际 schema 是 agent_wallets/agent_connections).
+  // 改 query sqlite_master (always exists, 测 SQLite engine latency).
   const start = Date.now();
   try {
-    db.prepare("SELECT COUNT(*) FROM agents").get();
+    db.prepare("SELECT COUNT(*) FROM sqlite_master").get();
     const elapsed = Date.now() - start;
     if (elapsed > 500) return { ok: false, detail: `DB query ${elapsed}ms > 500ms threshold` };
     return { ok: true, detail: `${elapsed}ms` };
