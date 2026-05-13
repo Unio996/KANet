@@ -83,12 +83,20 @@ if [ -f "$ENV_FILE" ]; then
       KANET_ROOT)              KANET_ROOT="$v" ;;
       CONSOLE_ENCRYPTION_KEY)  CONSOLE_ENCRYPTION_KEY="$v" ;;
       OPENCLAW_TOKEN)          OPENCLAW_TOKEN="$v" ;;
-      KASPA_NODE)              KASPA_NODE="$v" ;;
-      KASPA_WS_PROXY_PORT)     KASPA_WS_PROXY_PORT="$v" ;;
+      KASPA_NODE)                  KASPA_NODE="$v" ;;
+      KASPA_WS_PROXY_LISTEN_PORT)  KASPA_WS_PROXY_LISTEN_PORT="$v" ;;
+      KASPA_WS_PROXY_TARGET_PORT)  KASPA_WS_PROXY_TARGET_PORT="$v" ;;
+      KASPA_WS_PROXY_PORT)         # legacy alias (pre 5/13), map to TARGET (上游 kaspad port)
+                                   KASPA_WS_PROXY_TARGET_PORT="${KASPA_WS_PROXY_TARGET_PORT:-$v}"
+                                   echo "WARN: KASPA_WS_PROXY_PORT 已 deprecated, 用 KASPA_WS_PROXY_LISTEN_PORT/TARGET_PORT (5/13 Owner A 钦定)" >&2
+                                   ;;
       # NWT 8aef0b5e critical fix — kanet.env 写但 case 未 match key 静默被忽略
       # BROKER_V2_ENABLED + BROKER_V2_ENABLED_PEERS broker-v2 phase 1 cutover gating 必 export
       BROKER_V2_ENABLED)       export BROKER_V2_ENABLED="$v" ;;
       BROKER_V2_ENABLED_PEERS) export BROKER_V2_ENABLED_PEERS="$v" ;;
+      # T-NWT-2026-05-12 — broker-v3 菜单 path gating env, J2 host kanet.env restore post Phase α reset
+      BROKER_V3_ENABLED)       export BROKER_V3_ENABLED="$v" ;;
+      BROKER_V3_ENABLED_PEERS) export BROKER_V3_ENABLED_PEERS="$v" ;;
     esac
   done < "$ENV_FILE"
   ok "已加载配置: $ENV_FILE"
@@ -113,38 +121,50 @@ info "加密密钥: ${CONSOLE_ENCRYPTION_KEY:0:8}..."
 # 所以我们在 127.0.0.1 起一个 TCP 转发，指向真实节点。
 # 不需要证书、不需要反向代理、不需要改浏览器设置。
 #
+# Port 纪律 (5/13 Owner 钦定 A): LISTEN_PORT 永不占 17110.
+# 17110 留给 kaspad 自家 RPC. Windows specific listener (127.0.0.1) 优先
+# wildcard (0.0.0.0), 撞 port = ws-proxy hijack 内部 RPC 流量
+# (Bettor host 4/29 + NWT host 5/12 复发实证). 默认拆: LISTEN=17111 / TARGET=17110.
+#
 # 配置 (kanet.env)：
 #   KASPA_NODE=127.0.0.1               # kaspad 节点 host — host-specific, 必显式写 kanet.env
 #                                      # 例: Bettor host kaspad 本机 = 127.0.0.1
 #                                      # 例: J1 host kaspad 局域网 = 192.168.1.107 (DHCP, 重启可能变)
-#   KASPA_WS_PROXY_PORT=17110          # 本机监听端口（默认 17110）
-# kasia.fyi 那边填: ws://127.0.0.1:17110
+#   KASPA_WS_PROXY_LISTEN_PORT=17111   # 本机监听端口（默认 17111，**不准改 17110** 撞 kaspad）
+#   KASPA_WS_PROXY_TARGET_PORT=17110   # 上游 kaspad 端口（默认 17110）
+# kasia.fyi 那边填: ws://127.0.0.1:17111
 WS_PROXY_SCRIPT="$KANET_ROOT/scripts/kaspa-ws-proxy.mjs"
 WS_PROXY_NODE="${KASPA_NODE:-127.0.0.1}"
-WS_PROXY_PORT="${KASPA_WS_PROXY_PORT:-17110}"
+WS_PROXY_LISTEN_PORT="${KASPA_WS_PROXY_LISTEN_PORT:-17111}"
+WS_PROXY_TARGET_PORT="${KASPA_WS_PROXY_TARGET_PORT:-17110}"
+# Hard guard: LISTEN 撞 17110 (kaspad 自家 port) → 拒启动. 见 ANTI-PATTERNS ws-proxy port hijack.
+if [ "$WS_PROXY_LISTEN_PORT" = "17110" ]; then
+  echo "ERROR: KASPA_WS_PROXY_LISTEN_PORT=17110 撞 kaspad 自家 port. 改 17111 或其它非 17110 值." >&2
+  exit 1
+fi
 if [ -f "$WS_PROXY_SCRIPT" ]; then
   echo ""
-  echo -e "${C_BOLD}[0/0] kaspa-ws-proxy${C_RESET}  127.0.0.1:$WS_PROXY_PORT → $WS_PROXY_NODE:$WS_PROXY_PORT"
+  echo -e "${C_BOLD}[0/0] kaspa-ws-proxy${C_RESET}  127.0.0.1:$WS_PROXY_LISTEN_PORT → $WS_PROXY_NODE:$WS_PROXY_TARGET_PORT"
   # TCP probe kaspad 上游 — host-specific config drift 侦测 (sediment: feedback-lan-ip-dhcp-drift)
-  if timeout 3 bash -c "echo > /dev/tcp/$WS_PROXY_NODE/$WS_PROXY_PORT" 2>/dev/null; then
-    ok "kaspad reachable $WS_PROXY_NODE:$WS_PROXY_PORT"
+  if timeout 3 bash -c "echo > /dev/tcp/$WS_PROXY_NODE/$WS_PROXY_TARGET_PORT" 2>/dev/null; then
+    ok "kaspad reachable $WS_PROXY_NODE:$WS_PROXY_TARGET_PORT"
   else
-    warn "kaspad $WS_PROXY_NODE:$WS_PROXY_PORT UNREACHABLE"
+    warn "kaspad $WS_PROXY_NODE:$WS_PROXY_TARGET_PORT UNREACHABLE"
     warn "  → 第一步: 看 ipconfig 找 kaspad 主机当前 IP, 改 kanet.env KASPA_NODE=<IP>"
     warn "  → LAN 节点 DHCP 重启会变, host-local 节点用 127.0.0.1"
-    warn "  → ws-proxy 仍启动, 但 relay 上行全堵直到 fix"
+    warn "  → ws-proxy 仍启动, 但 kasia.fyi 用户连不通直到 fix"
   fi
-  if netstat -an 2>/dev/null | grep -q "127.0.0.1:${WS_PROXY_PORT}.*LISTEN"; then
-    ok "ws-proxy 已在运行 (port $WS_PROXY_PORT)"
+  if netstat -an 2>/dev/null | grep -q "127.0.0.1:${WS_PROXY_LISTEN_PORT}.*LISTEN"; then
+    ok "ws-proxy 已在运行 (listen $WS_PROXY_LISTEN_PORT)"
   else
-    KASPA_NODE="$WS_PROXY_NODE" LISTEN_PORT="$WS_PROXY_PORT" TARGET_PORT="$WS_PROXY_PORT" \
+    KASPA_NODE="$WS_PROXY_NODE" LISTEN_PORT="$WS_PROXY_LISTEN_PORT" TARGET_PORT="$WS_PROXY_TARGET_PORT" \
       node "$WS_PROXY_SCRIPT" > "$LOG_DIR/kaspa-ws-proxy.log" 2>&1 &
     WS_PROXY_PID=$!
     echo "$WS_PROXY_PID" > "$PID_DIR/kaspa-ws-proxy.pid"
     sleep 0.5
     if kill -0 "$WS_PROXY_PID" 2>/dev/null; then
-      ok "ws-proxy 就绪  →  ws://127.0.0.1:$WS_PROXY_PORT  (PID $WS_PROXY_PID)"
-      info "kasia.fyi 节点 URL 填: ws://127.0.0.1:$WS_PROXY_PORT"
+      ok "ws-proxy 就绪  →  ws://127.0.0.1:$WS_PROXY_LISTEN_PORT  → $WS_PROXY_NODE:$WS_PROXY_TARGET_PORT (PID $WS_PROXY_PID)"
+      info "kasia.fyi 节点 URL 填: ws://127.0.0.1:$WS_PROXY_LISTEN_PORT"
     else
       warn "ws-proxy 启动失败，日志: $LOG_DIR/kaspa-ws-proxy.log"
     fi

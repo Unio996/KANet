@@ -1577,6 +1577,44 @@ JS parser 撞 `#` invalid token → fastify 500 → 全栈共用此 partial 的 
 
 ---
 
+## 规则 42 · ws-proxy LISTEN_PORT 永不占 17110 (kaspad 自家 port)
+
+**来源**: 5/13 Owner 钦定方案 A 永久根治. 复发实证: Bettor host 4/29 (J1 11:04 kill PID 25516) + NWT host 5/12 (RPC 全瘫 40+ min). 见 memory `feedback_ws_proxy_port_hijack`.
+
+**真因**: `scripts/kaspa-ws-proxy.mjs` 是给 `https://kasia.fyi` HTTPS 页面用的 loopback TCP forwarder (绕 Mixed Content 拦). 历史默认 `LISTEN_PORT=17110` = kaspad 自家 RPC port. Windows TCP 栈 specific listener (`127.0.0.1:17110`) **优先于** wildcard (`0.0.0.0:17110`), 两个 socket 同时存在时 OS 把 loopback 流量送给 specific listener (ws-proxy), 不送 kaspad. 结果 = ws-proxy 截 relay/console 内部 RPC, forward 到远端 LAN 节点 (`KASPA_NODE` 默认 `192.168.1.123`, 那台节点可能 down/不响应) → 内部 RPC 全断, broker/exchange/Bettor 全瘫.
+
+**Wrong** (5/13 之前):
+```bash
+# kanet.env
+KASPA_WS_PROXY_PORT=17110          # 撞 kaspad
+# scripts/kaspa-ws-proxy.mjs
+const LISTEN_PORT = Number(process.env.LISTEN_PORT || 17110);  // 撞 kaspad
+```
+
+**Right** (5/13 钦定 A):
+```bash
+# kanet.env (或省略用默认)
+KASPA_WS_PROXY_LISTEN_PORT=17111   # ws-proxy 本机监听
+KASPA_WS_PROXY_TARGET_PORT=17110   # 上游 kaspad port
+# scripts/kaspa-ws-proxy.mjs
+const LISTEN_PORT = Number(process.env.LISTEN_PORT || 17111);  // 不撞
+const TARGET_PORT = Number(process.env.TARGET_PORT || 17110);  // upstream
+```
+
+**Why**: LISTEN 跟 TARGET 拆开后, ws-proxy 只在 17111 接 kasia.fyi HTTPS 用户, 转发到 17110 (本机或远程 kaspad). 内部 relay/console 代码全用 `ws://127.0.0.1:17110` 直连 kaspad 不绕 proxy. 各管各 port 永不撞.
+
+**检查方法**:
+- 机器: `kanet-start.sh` 加 hard guard — `LISTEN_PORT=17110` → exit 1 拒启动
+- 复发监控: `Get-NetTCPConnection -LocalPort 17110` 必只见 1 个 listener (kaspad PID), 见 2 个立刻 alert
+- legacy: `KASPA_WS_PROXY_PORT` 仍 accept, 但 map 到 TARGET + 打 WARN deprecation log
+
+**历史 commit / broadcast**:
+- 5/12 NWT host 复发实证 broadcast: `b5e056fc` (post-hijack sediment) + `8deb6e90` (NWT ack Bettor r54 + monitor 修)
+- 5/12 J1 fallback fix: `33f36a2ed` (ws-proxy fallback to local — 不解决 port 撞)
+- 5/13 永久根治: 本规则 + `kanet-start.sh` LISTEN/TARGET 拆 + ws-proxy.mjs 默认 17111
+
+---
+
 ## 如何扩充本档案
 
 新陷阱踩过后**立即**追加，格式保持：

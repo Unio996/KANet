@@ -10,11 +10,16 @@
 //   node scripts/kaspa-ws-proxy.mjs                # defaults below
 //   KASPA_NODE=192.168.1.123 node scripts/kaspa-ws-proxy.mjs
 //   LISTEN_PORT=17111 TARGET_PORT=17210 node scripts/kaspa-ws-proxy.mjs
+//
+// Port discipline (5/13 钦定): LISTEN_PORT 不占 17110 (kaspad 自家 port).
+// Windows specific listener (127.0.0.1) 优先 wildcard (0.0.0.0), 撞 port =
+// ws-proxy hijack internal RPC traffic (Bettor host 4/29 / NWT host 5/12 复发).
+// 默认 LISTEN 17111 / TARGET 17110, 各管各 port 永不撞.
 
 import net from 'node:net';
 
 const LISTEN_HOST = process.env.LISTEN_HOST || '127.0.0.1';
-const LISTEN_PORT = Number(process.env.LISTEN_PORT || 17110);
+const LISTEN_PORT = Number(process.env.LISTEN_PORT || 17111);
 const TARGET_HOST = process.env.KASPA_NODE || '192.168.1.123';
 const TARGET_PORT = Number(process.env.TARGET_PORT || 17110);
 
