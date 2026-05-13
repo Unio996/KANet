@@ -3262,5 +3262,28 @@ export function runMigrations() {
     }
   }
 
+  // v104: Phase 3g Sub 5 (A) — bettor_action_decisions 表 (A decider 独立 audit)
+  // Bettor r80 architect spec PASS + 3 决断 + 3 加. 分开 bettor_adjustments.decided_by, audit 语义清晰.
+  {
+    const has104 = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='bettor_action_decisions'").get();
+    if (!has104) {
+      sqlite.exec(`
+        CREATE TABLE bettor_action_decisions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          decision_at TEXT NOT NULL DEFAULT (datetime('now')),
+          decided_for_type TEXT NOT NULL,
+          decided_for_id TEXT NOT NULL,
+          action TEXT NOT NULL,
+          reason TEXT,
+          mode TEXT NOT NULL DEFAULT 'sim',
+          confidence_band TEXT,
+          UNIQUE(decided_for_type, decided_for_id, decision_at)
+        );
+        CREATE INDEX idx_decisions_recent ON bettor_action_decisions(decision_at DESC);
+      `);
+      console.log('[migrate] v104: bettor_action_decisions 表 + 1 索引 创建 (Phase 3g A decider audit).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
