@@ -284,6 +284,36 @@ const actions = {
   },
 
   /**
+   * Sub #2 (β path multichain e2e) helper: accept the latest 'open' offer by maker.
+   * Bridges publish → accept without explicit offer_id forward in step.body (framework
+   * doesn't support inter-step var substitution; this action does the lookup itself).
+   *
+   * step: { action: 'exchange_accept_latest_offer', maker, taker_relay_id, selected_chain }
+   * → returns { http_status, body, offer_id, ok }
+   */
+  async exchange_accept_latest_offer(step, ctx) {
+    const db = new Database(DB_PATH, { readonly: true });
+    const offer = db.prepare(
+      "SELECT id FROM exchange_offers WHERE maker = ? AND protocol_status = 'open' ORDER BY created_at DESC LIMIT 1"
+    ).get(step.maker);
+    db.close();
+    if (!offer?.id) return { ok: false, http_status: 0, body: 'no_open_offer_for_maker', offer_id: null };
+    const res = await fetch(`${CONSOLE_URL}/api/exchange/accept`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        relayNodeId: step.taker_relay_id,
+        offer_id: offer.id,
+        selected_chain: step.selected_chain,
+      }),
+      signal: step.timeout_ms ? AbortSignal.timeout(step.timeout_ms) : undefined,
+    });
+    const text = await res.text();
+    let parsed; try { parsed = JSON.parse(text); } catch { parsed = text; }
+    return { ok: res.ok, http_status: res.status, body: parsed, offer_id: offer.id, reply: text };
+  },
+
+  /**
    * T-J2-2026-04-29 Phase α — real_send_kas: 真 KAS transfer via relay sendCommand type='transfer'.
    * step: { action: 'real_send_kas', from_relay_id, to_addr, amount_kas, timeout_ms? }
    * → returns { tx_id, fee, ts, latency_ms, ok }
