@@ -3285,5 +3285,62 @@ export function runMigrations() {
     }
   }
 
+  // v101: Phase 3g Sub 6 (B-1) — bettor_real_config singleton + bettor_real_positions 表
+  // Bettor r78 + r81 architect spec PASS. 6 安全网 (J1 3 + architect 加 3): default OFF /
+  // size_cap $50 / daily $300 + per-market $150 / weekly $1500 / kill-switch. Sophie SDK
+  // auto-order 默认 disabled until Owner explicit flip (Phase 3g target 5/15 22:35 Bangkok).
+  {
+    const has101cfg = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='bettor_real_config'").get();
+    if (!has101cfg) {
+      sqlite.exec(`
+        CREATE TABLE bettor_real_config (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          enabled INTEGER NOT NULL DEFAULT 0,
+          kill_switch_enabled INTEGER NOT NULL DEFAULT 0,
+          max_real_size_usd REAL NOT NULL DEFAULT 50,
+          daily_cap_usd REAL NOT NULL DEFAULT 300,
+          weekly_cap_usd REAL NOT NULL DEFAULT 1500,
+          max_real_size_per_market_usd REAL NOT NULL DEFAULT 150,
+          daily_used_usd REAL NOT NULL DEFAULT 0,
+          weekly_used_usd REAL NOT NULL DEFAULT 0,
+          daily_reset_at TEXT,
+          weekly_reset_at TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO bettor_real_config (id) VALUES (1);
+      `);
+      console.log('[migrate] v101: bettor_real_config 表 + singleton row 创建 (Phase 3g B-1 6 安全网, enabled=0 default OFF).');
+    }
+    const has101pos = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='bettor_real_positions'").get();
+    if (!has101pos) {
+      sqlite.exec(`
+        CREATE TABLE bettor_real_positions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          adjustment_id TEXT,
+          recommendation_id TEXT NOT NULL,
+          market_id TEXT NOT NULL,
+          relay_node_id TEXT NOT NULL,
+          direction TEXT NOT NULL,
+          entry_yes_price REAL NOT NULL,
+          size_usd REAL NOT NULL,
+          shares REAL,
+          tx_hash TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          opened_at TEXT NOT NULL DEFAULT (datetime('now')),
+          closed_at TEXT,
+          close_tx_hash TEXT,
+          realized_pnl REAL,
+          error_msg TEXT
+        );
+        CREATE INDEX idx_real_pos_status ON bettor_real_positions(status, opened_at);
+        CREATE INDEX idx_real_pos_market ON bettor_real_positions(market_id, opened_at);
+        CREATE INDEX idx_real_pos_adj ON bettor_real_positions(adjustment_id);
+        CREATE INDEX idx_real_pos_rec ON bettor_real_positions(recommendation_id);
+      `);
+      console.log('[migrate] v101: bettor_real_positions 表 + 4 索引 创建 (Phase 3g B-1 real-money audit trail, sim 分表独立).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

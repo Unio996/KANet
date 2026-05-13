@@ -74,19 +74,124 @@ function autoApproveQuality(adj, currentSize) {
   return { auto: false, reason: 'low confidence (gap > 30pp) — keep pending for Owner review' };
 }
 
-// ── real path graceful degrade (B-1 sub 6 前 SKIP) ─────────────────────────────
+// ── Phase 3g Sub 6 (B-1) — Real-money bridge: Sophie SDK auto-order + 6 安全网 + idempotency ──
+//
+// Bettor r78 + r81 architect spec PASS. 6 gate check (顺序固定):
+//   1. kill_switch_enabled = 0 (else hard stop)
+//   2. enabled = 1 (else SKIP, default OFF)
+//   3. size <= max_real_size_usd (else cap to max)
+//   4. daily_used + size <= daily_cap_usd
+//   5. weekly_used + size <= weekly_cap_usd
+//   6. market_used + size <= max_real_size_per_market_usd
+//
+// architect 加: cross-host retry 3x backoff + fallthrough sim + idempotency key
+// (bettor_real_positions pre-INSERT before order POST).
+//
+// Sophie wallet 在 J1 host. Bettor host decider → POST cross-LAN J1:3100/api/predictions/order.
 
-function decideRealPath(db, adj) {
-  try {
-    const cfg = db.prepare('SELECT * FROM bettor_real_config WHERE id = 1').get();
-    if (!cfg) return { action: 'skip', reason: 'bettor_real_config row missing (B-1 not seeded)' };
-    if (cfg.kill_switch_enabled) return { action: 'skip', reason: 'kill_switch_enabled=1 hard stop' };
-    if (!cfg.enabled) return { action: 'skip', reason: 'enabled=0 (default OFF until Owner flip)' };
-    // 6 gate check 简化 placeholder — B-1 sub 6 完整实现
-    return { action: 'skip', reason: 'real path B-1 sub 6 完整逻辑待 ship' };
-  } catch (e) {
-    return { action: 'skip', reason: `B-1 not shipped: ${e.message?.slice(0, 50)}` };
+const SOPHIE_HOST = process.env.SOPHIE_HOST || '127.0.0.1';  // J1 host = self, Bettor host override LAN IP
+const SOPHIE_RELAY = process.env.SOPHIE_RELAY || 'a83c4b07-eaf7-4d21-972a-1265e0cdcfcf';  // Sophie wallet relay_node_id
+const RETRY_BACKOFFS_MS = [500, 2000, 5000];
+
+// daily/weekly reset cron (嵌入 tick, 5min check)
+function maybeResetCounters(db) {
+  const cfg = db.prepare('SELECT * FROM bettor_real_config WHERE id = 1').get();
+  if (!cfg) return;
+  const nowMs = Date.now();
+  const dailyResetMs = cfg.daily_reset_at ? new Date(cfg.daily_reset_at).getTime() : 0;
+  const weeklyResetMs = cfg.weekly_reset_at ? new Date(cfg.weekly_reset_at).getTime() : 0;
+  if (nowMs - dailyResetMs >= 24 * 60 * 60_000) {
+    db.prepare(`UPDATE bettor_real_config SET daily_used_usd = 0, daily_reset_at = datetime('now'), updated_at = datetime('now') WHERE id = 1`).run();
+    log(`reset daily_used_usd → 0 (last reset ${cfg.daily_reset_at || 'never'})`);
   }
+  if (nowMs - weeklyResetMs >= 7 * 24 * 60 * 60_000) {
+    db.prepare(`UPDATE bettor_real_config SET weekly_used_usd = 0, weekly_reset_at = datetime('now'), updated_at = datetime('now') WHERE id = 1`).run();
+    log(`reset weekly_used_usd → 0 (last reset ${cfg.weekly_reset_at || 'never'})`);
+  }
+}
+
+// 6-gate check + size cap. Returns { ok, size, reason }.
+function preBetGateCheck(db, adj, requestedSize) {
+  const cfg = db.prepare('SELECT * FROM bettor_real_config WHERE id = 1').get();
+  if (!cfg) return { ok: false, size: 0, reason: 'config row missing' };
+  if (cfg.kill_switch_enabled) return { ok: false, size: 0, reason: 'kill_switch_enabled=1 hard stop' };
+  if (!cfg.enabled) return { ok: false, size: 0, reason: 'enabled=0 (Owner not flipped)' };
+  let size = Math.min(requestedSize, cfg.max_real_size_usd);  // gate 3: cap to max
+  if ((cfg.daily_used_usd || 0) + size > cfg.daily_cap_usd) return { ok: false, size: 0, reason: `daily cap ${cfg.daily_used_usd}+${size}>${cfg.daily_cap_usd}` };
+  if ((cfg.weekly_used_usd || 0) + size > cfg.weekly_cap_usd) return { ok: false, size: 0, reason: `weekly cap ${cfg.weekly_used_usd}+${size}>${cfg.weekly_cap_usd}` };
+  const marketUsed = db.prepare(`SELECT COALESCE(SUM(size_usd), 0) AS u FROM bettor_real_positions WHERE market_id = ? AND status IN ('filled', 'pending')`).get(adj.market_id || '');
+  if ((marketUsed?.u || 0) + size > cfg.max_real_size_per_market_usd) return { ok: false, size: 0, reason: `market cap ${marketUsed.u}+${size}>${cfg.max_real_size_per_market_usd}` };
+  return { ok: true, size, reason: '6-gate pass' };
+}
+
+// Sophie SDK order via Console HTTP API (cross-host or self). Returns { ok, txId, error }.
+async function postSophieOrder(payload) {
+  for (let i = 0; i < RETRY_BACKOFFS_MS.length; i++) {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 15_000);
+      const res = await fetch(`http://${SOPHIE_HOST}:3100/api/predictions/order`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: ctrl.signal,
+      });
+      clearTimeout(t);
+      const j = await res.json().catch(() => ({}));
+      if (res.ok && j.ok !== false) return { ok: true, txId: j.txHash || j.txId || null, raw: j };
+      if (i < RETRY_BACKOFFS_MS.length - 1) await new Promise(r => setTimeout(r, RETRY_BACKOFFS_MS[i]));
+    } catch (e) {
+      if (i < RETRY_BACKOFFS_MS.length - 1) await new Promise(r => setTimeout(r, RETRY_BACKOFFS_MS[i]));
+    }
+  }
+  return { ok: false, error: `Sophie SDK order failed after ${RETRY_BACKOFFS_MS.length} retries` };
+}
+
+async function decideRealPath(db, adj) {
+  // Idempotency: check existing real_position for this adjustment / recommendation
+  const existing = db.prepare(`SELECT id, status FROM bettor_real_positions WHERE adjustment_id = ? OR (recommendation_id = ? AND adjustment_id IS NULL) LIMIT 1`).get(adj.id, adj.recommendation_id);
+  if (existing && existing.status !== 'failed') {
+    return { action: 'skip', reason: `idempotent: existing real_position ${existing.id} status=${existing.status}` };
+  }
+
+  // 6-gate check
+  const requestedSize = Number(adj.target_size || adj.real_size_usd || 0);
+  if (!requestedSize || requestedSize < 1) return { action: 'skip', reason: `size ${requestedSize} invalid` };
+  const gate = preBetGateCheck(db, adj, requestedSize);
+  if (!gate.ok) return { action: 'skip', reason: gate.reason };
+
+  // Get current market price (TODO Phase 3h: 接 Polymarket SDK current price). Stub use entry_yes_price.
+  const yesPrice = Number(adj.current_yes_price || adj.entry_yes_price || 0.5);
+  const tokenSide = adj.direction === 'NO' ? 'SELL' : 'BUY';  // 简化 placeholder, B-2 完善
+  const tokenPrice = adj.direction === 'NO' ? (1 - yesPrice) : yesPrice;
+  const shares = gate.size / tokenPrice;
+
+  // INSERT placeholder bettor_real_positions BEFORE order (idempotency anchor)
+  const realPosResult = db.prepare(`
+    INSERT INTO bettor_real_positions (adjustment_id, recommendation_id, market_id, relay_node_id, direction, entry_yes_price, size_usd, shares, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+  `).run(adj.id, adj.recommendation_id, adj.market_id || '', SOPHIE_RELAY, adj.direction, yesPrice, gate.size, shares);
+  const realPosId = realPosResult.lastInsertRowid;
+
+  // Sophie SDK POST (with retry)
+  const orderResult = await postSophieOrder({
+    relay_node_id: SOPHIE_RELAY,
+    tokenId: adj.token_id || '',  // TODO Phase 3h: lookup from market_id + outcome
+    side: tokenSide,
+    price: tokenPrice,
+    size: shares,
+  });
+
+  if (orderResult.ok) {
+    db.prepare(`UPDATE bettor_real_positions SET status = 'filled', tx_hash = ? WHERE id = ?`).run(orderResult.txId, realPosId);
+    db.prepare(`UPDATE bettor_real_config SET daily_used_usd = daily_used_usd + ?, weekly_used_usd = weekly_used_usd + ?, updated_at = datetime('now') WHERE id = 1`).run(gate.size, gate.size);
+    log(`🎯 [real] FILLED adj=${adj.id?.slice(0, 8)} size=$${gate.size.toFixed(2)} tx=${orderResult.txId?.slice(0, 12) || '?'}`);
+    return { action: 'fill', size: gate.size, txId: orderResult.txId };
+  }
+  // Failed
+  db.prepare(`UPDATE bettor_real_positions SET status = 'failed', error_msg = ? WHERE id = ?`).run(orderResult.error || 'unknown', realPosId);
+  log(`❌ [real] FAIL adj=${adj.id?.slice(0, 8)}: ${orderResult.error}`);
+  return { action: 'fail', reason: orderResult.error };
 }
 
 // ── auto-decide pending adjustments ─────────────────────────────────────────────
@@ -94,11 +199,13 @@ function decideRealPath(db, adj) {
 async function decideAdjustments(db) {
   const pending = db.prepare(`
     SELECT a.id, a.position_id, a.recommendation_id, a.adj_type, a.severity, a.trigger_reason,
-           p.size_usd AS current_size,
-           r.calibrator_confidence
+           p.size_usd AS current_size, p.direction, p.entry_yes_price,
+           r.calibrator_confidence, r.market_id,
+           s.current_yes_price
     FROM bettor_adjustments a
     JOIN bettor_sim_positions p ON p.id = a.position_id
     JOIN bettor_recommendations r ON r.id = a.recommendation_id
+    LEFT JOIN bettor_sim_snapshots s ON s.id = (SELECT id FROM bettor_sim_snapshots WHERE position_id = p.id ORDER BY snapshot_at DESC LIMIT 1)
     WHERE a.status = 'pending'
     ORDER BY a.created_at ASC
     LIMIT 50
@@ -129,12 +236,19 @@ async function decideAdjustments(db) {
         .run('adjustment', adj.id, 'skip', sim.reason, 'sim', adj.calibrator_confidence);
     }
 
-    // real decision (graceful degrade until B-1 ship)
-    const real = decideRealPath(db, adj);
+    // real decision (B-1 Sub 6 完整逻辑 + idempotency + 6-gate + Sophie SDK retry)
+    const real = await decideRealPath(db, adj);
     if (real.action === 'skip') {
       realSkipped++;
-      // Only log first 3 real-skips per tick to avoid noise (B-1 ship 前每 adj 都 skip)
-      if (realSkipped <= 3) log(`[real] SKIP ${adj.id.slice(0, 8)}: ${real.reason}`);
+      if (realSkipped <= 3) log(`[real] SKIP ${adj.id?.slice(0, 8)}: ${real.reason}`);
+      db.prepare(`INSERT INTO bettor_action_decisions (decided_for_type, decided_for_id, action, reason, mode, confidence_band) VALUES (?, ?, ?, ?, ?, ?)`)
+        .run('adjustment', adj.id, 'skip', real.reason, 'real', adj.calibrator_confidence);
+    } else if (real.action === 'fill') {
+      db.prepare(`INSERT INTO bettor_action_decisions (decided_for_type, decided_for_id, action, reason, mode, confidence_band) VALUES (?, ?, ?, ?, ?, ?)`)
+        .run('adjustment', adj.id, 'fill', `size=$${real.size?.toFixed(2)} tx=${real.txId?.slice(0,12)}`, 'real', adj.calibrator_confidence);
+    } else if (real.action === 'fail') {
+      db.prepare(`INSERT INTO bettor_action_decisions (decided_for_type, decided_for_id, action, reason, mode, confidence_band) VALUES (?, ?, ?, ?, ?, ?)`)
+        .run('adjustment', adj.id, 'fail', real.reason, 'real', adj.calibrator_confidence);
     }
   }
 
@@ -146,7 +260,10 @@ async function decideAdjustments(db) {
 
 async function tick() {
   const db = new Database(DB_PATH);
-  try { await decideAdjustments(db); } catch (e) { log(`tick ERR: ${e.message?.slice(0, 80)}`); }
+  try {
+    maybeResetCounters(db);  // B-1 daily/weekly reset cron embedded
+    await decideAdjustments(db);
+  } catch (e) { log(`tick ERR: ${e.message?.slice(0, 80)}`); }
   finally { db.close(); }
 }
 
