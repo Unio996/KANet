@@ -1373,7 +1373,7 @@ async function _autoPayExchange(offer, takerRelayNodeId) {
 
   console.log(`[exchange-autopay] Paying ${amount} USDT → ${receiveAddress.slice(0,12)}... on ${chain} for offer ${offer.id.slice(0,8)}`);
 
-  const result = await transferUsdt(chain, wallet.privkey_encrypted, receiveAddress, amount);
+  const result = await transferUsdt(chain, wallet.privkey_encrypted, receiveAddress, amount, offer.want_asset || 'USDT');
   if (!result.ok) {
     console.error(`[exchange-autopay] Payment failed: ${result.error}`);
     recordChainEvent({

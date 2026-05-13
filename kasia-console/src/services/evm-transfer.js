@@ -10,7 +10,7 @@
 
 import { ethers } from 'ethers';
 import { decrypt } from './crypto.js';
-import { STABLECOINS, EVM_RPC_URLS } from './chains.js';
+import { STABLECOINS, EVM_RPC_URLS, isEvmChain } from './chains.js';
 
 /**
  * Transfer ERC20 stablecoin (USDT/USDC) on an EVM chain.
@@ -176,7 +176,7 @@ export async function transferTronUsdt(privkeyEncrypted, toAddress, amount) {
 
 // ── Unified interface ────────────────────────────────────────
 
-const ALL_SUPPORTED_CHAINS = new Set(['bnb', 'eth', 'sol', 'tron']);
+const ALL_SUPPORTED_CHAINS = new Set([...Object.keys(EVM_RPC_URLS), 'sol', 'tron']);
 
 /**
  * Check if a chain is supported for auto-pay transfer.
@@ -193,16 +193,17 @@ export function isEvmChainSupported(chain) {
 }
 
 /**
- * Transfer USDT on any supported chain.
+ * Transfer stablecoin (USDT/USDC) on any supported chain — 7 EVM + SOL + TRON = 9 chain.
  *
- * @param {string} chain — 'bnb', 'eth', 'sol', 'tron'
+ * @param {string} chain — 7 EVM (bnb/eth/polygon/arbitrum/optimism/avalanche/base) / 'sol' / 'tron'
  * @param {string} privkeyEncrypted — encrypted private key
  * @param {string} toAddress — recipient address
  * @param {number} amount — human-readable amount
+ * @param {string} [asset='USDT'] — 'USDT' / 'USDC' / 'USDCe' (EVM only; SOL/TRON USDT-only)
  * @returns {Promise<{ ok: true, txHash: string } | { ok: false, error: string }>}
  */
-export async function transferUsdt(chain, privkeyEncrypted, toAddress, amount) {
-  if (['bnb', 'eth'].includes(chain)) return transferERC20(chain, privkeyEncrypted, toAddress, amount);
+export async function transferUsdt(chain, privkeyEncrypted, toAddress, amount, asset = 'USDT') {
+  if (isEvmChain(chain)) return transferERC20(chain, privkeyEncrypted, toAddress, amount, asset);
   if (chain === 'sol') return transferSolUsdt(privkeyEncrypted, toAddress, amount);
   if (chain === 'tron') return transferTronUsdt(privkeyEncrypted, toAddress, amount);
   return { ok: false, error: `Unsupported chain: ${chain}` };
