@@ -20,6 +20,8 @@ import {
   resetConvoState,
   shouldDeterministicFire,
 } from './broker-state-authority.js';
+// Sub #1.b: mirror SELL handler — transition() needed for _updateBuyOrder CAS aligning→awaiting_payment.
+import { transition } from './broker-state-machine.js';
 
 const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
 // T-J2-2026-04-27 v1.1: 真扩 BUY_REGEX 同 BUY_OVERRIDE_REGEX (broker-sell-handler line 14) 模式
@@ -571,12 +573,50 @@ ${historyLines}
 //   2. 路径 B (NWT T-NWT-22): 拼不够时 broker 自挂 deficit (用自己 KAS 库存)
 //   3. broker 也无库存/价格 → 真 fail (极端)
 // 返回 picks[] 含每个 maker + 付款金额 + 收款地址 (含 broker_dynamic 标记区分).
-export async function finalizeBuy({ user_kasia, qty, pay_chain, give_asset = 'KAS', receive_address = null }) {
+// Sub #1.b (J2 #336 per NWT spec 55cd7451): mirror broker-sell-handler._updateSellOrder L66
+// 给 BUY 路径加 v1/v2 routing mutex — v2 caller 传 draft.id, finalizeBuy UPDATE 现 row
+// aligning→awaiting_payment 不 INSERT 新 UUID row. v1 legacy caller 不传, 走旧路径.
+//
+// 注: BUY 主路径 (P2P pick aggregation) 不直接 INSERT retail_dex_orders, 而是 _proposeBrokerAsBuyMaker
+// 走 fallback INSERT 时才有 multi-active 风险. existing_order_id 优先 UPDATE 复用 v2 draft.
+function _updateBuyOrder({ orderId, pay_chain, pay_address }) {
+  // 同款 SA-4.fix pattern (mirror broker-sell-handler._updateSellOrder L66):
+  // column 在 aligning 写 (锁 state) → transition CAS aligning→awaiting_payment.
+  // lint-allow-state-update: column 写 pay_chain/pay_address WHERE state='aligning'. transition() 推 state, lint regex 因 WHERE state= clause 误抓.
+  const colUpd = sqlite.prepare(`
+    UPDATE retail_dex_orders
+    SET pay_chain = COALESCE(pay_chain, ?),
+        pay_address = COALESCE(pay_address, ?),
+        updated_at = ?
+    WHERE id = ? AND state = 'aligning'
+  `).run(String(pay_chain || 'bnb').toLowerCase(), pay_address, new Date().toISOString(), orderId);
+  if (colUpd.changes === 0) return false;
+  const tResult = transition({
+    orderId,
+    expectedFromState: 'aligning',
+    toState: 'awaiting_payment',
+    opts: { reason: 'buy_finalize', triggeredBy: 'broker-buy-handler._updateBuyOrder' },
+  });
+  return tResult.ok;
+}
+
+export async function finalizeBuy({ user_kasia, qty, pay_chain, give_asset = 'KAS', receive_address = null, existing_order_id = null }) {
   // T-NWT-2026-04-27 v1.1 Phase A step 1: give_asset 参数化, default 'KAS' 向后兼容.
   // T-J1-2026-04-27 v1.1 Bug-Y wire: 真接 receive_address (买 stable 真 user EVM addr 真存 _pendingAccepts
   // 后 deliver 层真用; 买 KAS null OK 真 default 用 user_kasia 自动 resolve).
   if (!user_kasia || !qty || qty <= 0 || !pay_chain) {
     return { ok: false, error: 'missing fields (user_kasia/qty/pay_chain)' };
+  }
+  // Sub #1.b (J2 #336 per NWT spec 55cd7451) — v1/v2 routing mutex mirror SELL L304:
+  // v2 caller 传 draft.id → UPDATE 现 aligning row → awaiting_payment, 不 INSERT 新 row 防 multi-active.
+  // v1 caller 不传 existing_order_id (legacy 行为), 继续走 P2P pick aggregation 路径.
+  if (existing_order_id) {
+    const updated = _updateBuyOrder({ orderId: existing_order_id, pay_chain, pay_address: null });
+    if (updated) {
+      console.log(`[broker-buy finalizeBuy] Sub #1.b v2 mutex: UPDATE existing_order_id=${existing_order_id.slice(0,12)} aligning→awaiting_payment`);
+      return { ok: true, order_id: existing_order_id, v2_routing: true };
+    }
+    console.warn(`[broker-buy finalizeBuy] Sub #1.b v2 mutex fallback: existing_order_id=${existing_order_id.slice(0,12)} 不在 aligning (race lost), 走 legacy INSERT`);
   }
   // T-NWT-2026-04-27 v1.1 Phase A step 5 (cont): asset validation 用 asset-registry (跟 buyPreview 同).
   const { getAsset: getAssetF } = await import('./asset-registry.js');

@@ -145,15 +145,24 @@ export async function registerConversationRoutes(fastify) {
       try {
         const { sqlite } = await import('../db/client.js');
         const totalKas = data.total_kas || data.picks?.reduce((s, p) => s + (p.qty_kas || 0), 0) || 0;
-        const id = `bv2_seed_${peer.slice(-12)}_${Date.now()}`;
-        sqlite.prepare(`
-          INSERT INTO retail_dex_orders
-            (id, user_kasia_address, side, state, order_type, qty, pay_chain,
-             created_at, updated_at, expires_at)
-          VALUES (?, ?, 'buy_kas', 'paid', 'limit', ?, ?,
-                  datetime('now'), datetime('now'),
-                  datetime('now', '+30 minutes'))
-        `).run(id, peer, String(totalKas), data.pay_chain || 'bnb');
+        // Sub #1.b dedup guard (J2 #336 per NWT spec 55cd7451): skip INSERT 若 peer 已有 v3 active row
+        // (bso_ / UUID — 任何非 bv2_ prefix). 防 v2/v3 coexistence multi-active SA-6 A1 violation.
+        const v3active = sqlite.prepare(
+          `SELECT id FROM retail_dex_orders WHERE user_kasia_address = ? AND state IN ('aligning','awaiting_payment','paid') AND id NOT LIKE 'bv2_%' LIMIT 1`
+        ).get(peer);
+        if (v3active) {
+          console.log(`[seed_pending_accept] Sub #1.b dedup skip — peer ${peer.slice(-12)} 已有 v3 active row ${v3active.id.slice(0,12)}`);
+        } else {
+          const id = `bv2_seed_${peer.slice(-12)}_${Date.now()}`;
+          sqlite.prepare(`
+            INSERT INTO retail_dex_orders
+              (id, user_kasia_address, side, state, order_type, qty, pay_chain,
+               created_at, updated_at, expires_at)
+            VALUES (?, ?, 'buy_kas', 'paid', 'limit', ?, ?,
+                    datetime('now'), datetime('now'),
+                    datetime('now', '+30 minutes'))
+          `).run(id, peer, String(totalKas), data.pay_chain || 'bnb');
+        }
       } catch (err) {
         console.warn(`[seed_pending_accept] dual-write retail_dex_orders failed: ${err.message}`);
       }
