@@ -11,7 +11,13 @@
 
 import { readFileSync, writeFileSync, renameSync, existsSync, unlinkSync } from 'node:fs';
 import { execSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import net from 'node:net';
+
+// better-sqlite3 走 kasia-console node_modules (跟 _backfill-bettor-broadcasts.mjs 同 pattern)
+const kasiaRequire = createRequire(`${process.env.KANET_ROOT || 'D:/Anthropic'}/kasia-console/`);
+let Database;
+try { Database = kasiaRequire('better-sqlite3'); } catch (e) { /* D-2 cascade silently skip DB if module missing */ }
 
 const KANET_ROOT = process.env.KANET_ROOT || 'D:/Anthropic';
 const ENV_FILE = `${KANET_ROOT}/kanet.env`;
@@ -136,12 +142,82 @@ async function checkAndHeal() {
   }
   const newIP = found[0];  // first match wins (typically only 1 kaspad per LAN)
   const ok = atomicUpdateKanetEnv(newIP);
-  log(`self-heal: KASPA_NODE ${current || '(unset)'} → ${newIP} (update=${ok ? 'OK' : 'FAIL'}) — restart ws-proxy + adapter to pick up (D-2 cron)`);
-  return { healthy: ok, ip: newIP, changed: true };
+  log(`self-heal: KASPA_NODE ${current || '(unset)'} → ${newIP} (update=${ok ? 'OK' : 'FAIL'})`);
+  if (ok && current && current !== newIP) {
+    // D-2 cascade trigger (callback per Bettor r77 spec, not poll)
+    await syncAllCaches(current, newIP);
+  }
+  return { healthy: ok, ip: newIP, changed: ok && current !== newIP };
+}
+
+// ── Phase 3g Sub 2 (D-2) — cascade self-heal 3 cache + 2 process restart ──────
+//
+// Trigger: D-1 atomicUpdateKanetEnv 成功 + newIP !== oldIP. Sequence per Bettor r77 spec:
+//   1. UPDATE adapter_nodes.ai_provider_url (REPLACE oldIP → newIP for hosts using LAN)
+//   2. UPDATE agent_connections.base_url (same REPLACE)
+//   3. kill + restart ws-proxy (LISTEN 17111 → forward new IP:17110)
+//   4. kill + restart Qwen LAN adapter (env reload pick new URL)
+//
+// 5/13 02:30-02:48Z 实证手工 6 步, 此 cascade 让 0 步.
+
+async function syncAllCaches(oldIP, newIP) {
+  if (!Database) { log('D-2 cascade SKIP: better-sqlite3 not found in kasia-console node_modules'); return; }
+  const oldPattern = `%${oldIP}%`;
+  log(`D-2 cascade self-heal: ${oldIP} → ${newIP}`);
+
+  // 1+2: DB UPDATE 2 tables (Console hot-reads adapter config on next adapter start)
+  let dbRows = 0;
+  try {
+    const db = new Database(`${KANET_ROOT}/kasia-console/data/console.db`);
+    const r1 = db.prepare(`UPDATE adapter_nodes SET ai_provider_url = REPLACE(ai_provider_url, ?, ?), updated_at = datetime('now') WHERE ai_provider_url LIKE ?`).run(oldIP, newIP, oldPattern);
+    const r2 = db.prepare(`UPDATE agent_connections SET base_url = REPLACE(base_url, ?, ?), updated_at = datetime('now') WHERE base_url LIKE ?`).run(oldIP, newIP, oldPattern);
+    dbRows = r1.changes + r2.changes;
+    log(`D-2 step 1+2: DB rows updated adapter_nodes=${r1.changes} agent_connections=${r2.changes}`);
+    db.close();
+  } catch (e) {
+    log(`D-2 step 1+2 ERR: ${e.message?.slice(0, 100)}`);
+  }
+
+  // 3: ws-proxy restart (kill PID file + nohup spawn with new env)
+  try {
+    const wsProxyPidFile = `${KANET_ROOT}/logs/pids/kaspa-ws-proxy.pid`;
+    if (existsSync(wsProxyPidFile)) {
+      const pid = readFileSync(wsProxyPidFile, 'utf8').trim();
+      if (pid) {
+        execSync(process.platform === 'win32' ? `taskkill /F /PID ${pid}` : `kill ${pid}`, { stdio: 'ignore', timeout: 3000 });
+        log(`D-2 step 3: ws-proxy PID ${pid} killed`);
+      }
+    }
+    // Respawn ws-proxy (background, env reload pick new KASPA_NODE)
+    execSync(
+      `node ${KANET_ROOT}/scripts/kaspa-ws-proxy.mjs > ${KANET_ROOT}/logs/kaspa-ws-proxy.log 2>&1 &`,
+      { stdio: 'ignore', shell: '/bin/bash', env: { ...process.env, KASPA_NODE: newIP }, timeout: 3000 },
+    );
+    log('D-2 step 3: ws-proxy respawned with new KASPA_NODE');
+  } catch (e) {
+    log(`D-2 step 3 ws-proxy restart ERR: ${e.message?.slice(0, 100)}`);
+  }
+
+  // 4: Qwen LAN adapter restart via Console API (POST /adapters/<id>/restart fresh DB read)
+  try {
+    const db = new Database(`${KANET_ROOT}/kasia-console/data/console.db`, { readonly: true });
+    const qwen = db.prepare(`SELECT id FROM adapter_nodes WHERE name LIKE '%LAN%' LIMIT 1`).get();
+    db.close();
+    if (qwen?.id) {
+      const res = await fetch(`http://127.0.0.1:3100/adapters/${qwen.id}/restart`, { method: 'POST', signal: AbortSignal.timeout(5000) });
+      log(`D-2 step 4: adapter ${qwen.id.slice(0, 8)} restart HTTP ${res.status}`);
+    } else {
+      log('D-2 step 4: no Qwen LAN adapter found in DB (skip)');
+    }
+  } catch (e) {
+    log(`D-2 step 4 adapter restart ERR: ${e.message?.slice(0, 100)}`);
+  }
+
+  log(`D-2 cascade complete: 2 DB tables + ws-proxy + Qwen LAN adapter (alert dispatch 留 C-1)`);
 }
 
 // Main loop
-log(`Phase 3g D-1 lan-ip-health starting · port=${KASPAD_PORT} · cron=${PROBE_CRON_MS / 60_000}min`);
+log(`Phase 3g D-1+D-2 lan-ip-health starting · port=${KASPAD_PORT} · cron=${PROBE_CRON_MS / 60_000}min`);
 await checkAndHeal();
 setInterval(async () => {
   try { await checkAndHeal(); } catch (e) { log(`cron err: ${e.message?.slice(0, 80)}`); }
