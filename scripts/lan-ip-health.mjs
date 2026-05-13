@@ -10,7 +10,7 @@
 // 实证根因: 5/12 LAN kaspad .123→.107 + 5/13 .107→.109 二次漂移, 人工 6 步修. 此自愈让 0 步.
 
 import { readFileSync, writeFileSync, renameSync, existsSync, unlinkSync } from 'node:fs';
-import { execSync } from 'node:child_process';
+import { execSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import net from 'node:net';
 
@@ -188,12 +188,15 @@ async function syncAllCaches(oldIP, newIP) {
         log(`D-2 step 3: ws-proxy PID ${pid} killed`);
       }
     }
-    // Respawn ws-proxy (background, env reload pick new KASPA_NODE)
-    execSync(
-      `node ${KANET_ROOT}/scripts/kaspa-ws-proxy.mjs > ${KANET_ROOT}/logs/kaspa-ws-proxy.log 2>&1 &`,
-      { stdio: 'ignore', shell: '/bin/bash', env: { ...process.env, KASPA_NODE: newIP }, timeout: 3000 },
-    );
-    log('D-2 step 3: ws-proxy respawned with new KASPA_NODE');
+    // Sub 2.5 hotfix per Bettor r78: cross-platform detached spawn (POSIX `&` + /bin/bash 不通用).
+    // 原 execSync 走 shell:'/bin/bash' Windows native host 撞 ENOENT, & job control 也撞 syntax.
+    const child = spawn('node', [`${KANET_ROOT}/scripts/kaspa-ws-proxy.mjs`], {
+      detached: true,
+      stdio: 'ignore',
+      env: { ...process.env, KASPA_NODE: newIP },
+    });
+    child.unref();
+    log(`D-2 step 3: ws-proxy respawned PID ${child.pid} (detached spawn cross-platform)`);
   } catch (e) {
     log(`D-2 step 3 ws-proxy restart ERR: ${e.message?.slice(0, 100)}`);
   }
