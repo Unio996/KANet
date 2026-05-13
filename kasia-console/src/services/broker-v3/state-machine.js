@@ -215,12 +215,37 @@ async function _handleAccept(user_id, msg, cur, relayNodeId) {
   return { reply: '状态错乱, back 重来.' };
 }
 
+// Phase B P1 (J2 #339 per NWT spec 4324dccc): MY_ORDERS reply translate protocol_status → readable action.
+const _STATUS_ACTION = {
+  open: '挂单中 (等 taker 接单). 可回 6 取消.',
+  matched: '已被 taker 接单, 等 taker 真链付款.',
+  verifying: 'broker 验证 taker 付款中 (cross-chain TX). 30-60s 完成.',
+  delivering: 'broker 真链交付 KAS 到 taker 中. 30-60s 完成.',
+  completed: '✓ 交易完成. KAS 已交付.',
+  cancelled: '✗ 已取消. fund_lock 已释放.',
+  refunded: '✗ 已退款 (timeout/dispute). fund 已退回.',
+  failed: '✗ 失败 (verify 3 retry 后 fail OR 内部错). 走 dispute 启争议.',
+  expired: '⏱ 已过期 (TTL 30min 无 taker). fund_lock 已释放.',
+  disputed: '⚠ 争议中, 等 arbiter resolve. 联系 Owner.',
+  timed_out: '⏱ verify 超时 (taker 未真付). 已 reopen.',
+};
+
 async function _handleMyOrders(user_id, msg, cur) {
   const num = parseInt(msg, 10);
   if (cur.step === 'LIST') {
     if (Number.isFinite(num) && num >= 1 && num <= 5 && cur.orders?.[num - 1]) {
       const order = cur.orders[num - 1];
-      return { reply: `订单 ${order.id.slice(0, 12)} 详情:\n  状态: ${order.protocol_status}\n  give: ${order.give_amount} ${order.give_asset}\n  want: ${order.want_amount} ${order.want_asset}\n\n回 back 返回菜单.` };
+      const action = _STATUS_ACTION[order.protocol_status] || `protocol_status=${order.protocol_status}`;
+      return {
+        reply: [
+          `订单 ${order.id.slice(0, 12)} 详情:`,
+          `  ${order.give_amount} ${order.give_asset} → ${order.want_amount} ${order.want_asset} (${order.want_chain || '?'})`,
+          `  状态: ${order.protocol_status}`,
+          `  ${action}`,
+          '',
+          '回 back 返回菜单.',
+        ].join('\n'),
+      };
     }
   }
   return { reply: '回 1-5 看详情 / back 返回菜单.' };
@@ -240,6 +265,27 @@ async function _handleCancel(user_id, msg, cur) {
 }
 
 async function _handleWaitPayment(user_id, msg, cur, relayNodeId) {
-  // user 已 accept, 等真付款. 主动查 offer state.
-  return { reply: '正在查订单状态...', triggerOfferStatus: true, draft: cur.draft };
+  // Phase B P1 (J2 #339 per NWT spec 4324dccc): WAIT_PAYMENT 接 user payment tx 报告.
+  // user "我付了 0xabc..." OR pure 0x[40hex] OR pure 0x[64hex] → 提取 tx hash, 调 submit-payment.
+  // "争议" / dispute → triggerDispute.
+  // 数字 OR "状态" / status → 查 offer state.
+  const txMatch = msg.match(/0x[a-fA-F0-9]{40,66}/);
+  if (txMatch) {
+    return { reply: `正在提交付款证明 ${txMatch[0].slice(0, 12)}... 验证中.`, triggerSubmitPayment: true, draft: { ...cur.draft, payment_tx: txMatch[0] } };
+  }
+  if (/^(争议|dispute|纠纷)/i.test(msg)) {
+    return { reply: '发起争议中... (broker 验证 paid tx 失败 OR 卡死 时启)', triggerDispute: true, draft: cur.draft };
+  }
+  if (/^(\d|状态|status|查)/i.test(msg)) {
+    return { reply: '正在查订单状态...', triggerOfferStatus: true, draft: cur.draft };
+  }
+  return {
+    reply: [
+      '订单等待付款中. 你可以:',
+      '  • 回 "我付了 0x<tx>" — 提交付款证明 (broker 自动 verify)',
+      '  • 回 "状态" — 查订单状态',
+      '  • 回 "争议" — 发起争议 (broker 验证 fail 卡死时启)',
+      '  • 回 back — 返回菜单',
+    ].join('\n'),
+  };
 }

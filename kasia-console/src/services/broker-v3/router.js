@@ -75,6 +75,9 @@ export async function handleMessage(peer, msg, opts = {}) {
     else if (result.triggerMyOrders) reply = await _doMyOrders(peer, reply);
     else if (result.triggerOfferLookup) reply = await _doOfferLookup(peer, result.draft, reply);
     else if (result.triggerOfferStatus) reply = await _doOfferStatus(peer, result.draft, reply);
+    // Phase B P1 (J2 #339 per NWT spec 4324dccc): WAIT_PAYMENT dispatch
+    else if (result.triggerSubmitPayment) reply = await _doSubmitPayment(peer, result.draft, relayNodeId, reply);
+    else if (result.triggerDispute) reply = await _doDispute(peer, result.draft, relayNodeId, reply);
   } catch (err) {
     console.error(`[broker-v3] trigger dispatch err: ${err.message}`);
     reply = `操作出错: ${err.message?.slice(0, 80) || 'unknown'}. 回 back 返回菜单.`;
@@ -207,6 +210,47 @@ async function _doAccept(peer, draft, relayNodeId, prevReply) {
     '付完后 broker 自动验证 + 发 KAS 到你 Kasia. 回 5 查订单状态.',
     r.reputationWarning ? `\n⚠ ${r.reputationWarning.message || ''}` : '',
   ].filter(Boolean).join('\n');
+}
+
+// Phase B P1 (J2 #339 per NWT spec 4324dccc): WAIT_PAYMENT user 报告 payment tx → submit-payment
+async function _doSubmitPayment(peer, draft, relayNodeId, prevReply) {
+  if (!draft?.offer_id || !draft?.payment_tx) return prevReply + '\n\n(no draft, back 重来)';
+  const chainKey = normalizeChainKey(draft.selected_chain || 'bnb');
+  const r = await client.submitPayment({
+    relayNodeId, offer_id: draft.offer_id,
+    payment_tx: draft.payment_tx,
+    payment_chain: chainKey,
+  });
+  if (!r.ok) return `提交付款证明失败: ${r.error || 'unknown'}. 检查 tx hash 是否对, 或回 "争议" 启 dispute.`;
+  return [
+    '✓ 付款证明已提交, broker 验证中.',
+    '',
+    `  offer_id: ${draft.offer_id.slice(0, 12)}`,
+    `  payment_tx: ${draft.payment_tx.slice(0, 16)}...`,
+    `  状态: ${r.status || 'verifying'}`,
+    '',
+    'broker cross-chain verify ~30-60s. 完成后自动发 KAS 到你 Kasia.',
+    '回 5 查订单状态 / back 返回菜单.',
+  ].join('\n');
+}
+
+// Phase B P1: WAIT_PAYMENT user 启 dispute (verify fail OR 卡死)
+async function _doDispute(peer, draft, relayNodeId, prevReply) {
+  if (!draft?.offer_id) return prevReply + '\n\n(no draft, back 重来)';
+  const r = await client.disputeOffer({
+    relayNodeId, offer_id: draft.offer_id,
+    reason: 'broker-v3 menu user-initiated dispute',
+  });
+  if (!r.ok) return `发起争议失败: ${r.error || 'unknown'}. 联系 Owner.`;
+  return [
+    '⚠ 争议已发起.',
+    '',
+    `  offer_id: ${draft.offer_id.slice(0, 12)}`,
+    `  状态: ${r.status || 'disputed'}`,
+    '',
+    'Owner / arbiter 会介入 resolve. 等通知.',
+    '回 5 查订单状态 / back 返回菜单.',
+  ].join('\n');
 }
 
 async function _doCancel(peer, draft, relayNodeId, prevReply) {

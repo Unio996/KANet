@@ -102,3 +102,62 @@ export async function cancelOffer(body) {
   if (!r.ok) return { ok: false, error: r.data?.error || `HTTP ${r.status}` };
   return { ok: true, offer_id: r.data.offer_id, cancel_tx: r.data.cancel_tx };
 }
+
+// Phase B P1 fix (J2 #339 per NWT spec 4324dccc): 4 endpoint helper coverage
+// 菜单 user 闭环关键 — accept 后 user 真链转 USDT, 需 DM 报告 submit-payment 给 broker.
+
+/**
+ * POST /api/exchange/submit-payment — taker 报告 payment tx 触发 verify (WAIT_PAYMENT flow).
+ * @param {object} body - { relayNodeId, offer_id, payment_tx, payment_chain }
+ */
+export async function submitPayment(body) {
+  const r = await fetchJson(`${CONSOLE_URL}/api/exchange/submit-payment`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) return { ok: false, error: r.data?.error || `HTTP ${r.status}` };
+  return { ok: true, offer_id: r.data.offer_id, status: r.data.status };
+}
+
+/**
+ * POST /api/exchange/confirm — manual 双方确认 (verify fail 后 fallback path).
+ * @param {object} body - { relayNodeId, offer_id }
+ */
+export async function confirmOffer(body) {
+  const r = await fetchJson(`${CONSOLE_URL}/api/exchange/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) return { ok: false, error: r.data?.error || `HTTP ${r.status}` };
+  return { ok: true, offer_id: r.data.offer_id, status: r.data.status };
+}
+
+/**
+ * POST /api/exchange/dispute — 发起争议 (verifying/delivering 卡死时 user 主动启).
+ * @param {object} body - { relayNodeId, offer_id, reason, evidence? }
+ */
+export async function disputeOffer(body) {
+  const r = await fetchJson(`${CONSOLE_URL}/api/exchange/dispute`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) return { ok: false, error: r.data?.error || `HTTP ${r.status}` };
+  return { ok: true, offer_id: r.data.offer_id, status: r.data.status };
+}
+
+/**
+ * POST /api/exchange/resolve — 仲裁结算 (arbiter / Owner final, dispute 后 close).
+ * @param {object} body - { relayNodeId, offer_id, resolution: 'maker_wins'|'taker_wins'|'split' }
+ */
+export async function resolveOffer(body) {
+  const r = await fetchJson(`${CONSOLE_URL}/api/exchange/resolve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) return { ok: false, error: r.data?.error || `HTTP ${r.status}` };
+  return { ok: true, offer_id: r.data.offer_id, status: r.data.status };
+}
