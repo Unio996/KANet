@@ -79,16 +79,6 @@ export function seedDraft(peer, side) {
   // 已有 'aligning' draft → 不重 INSERT (idempotent)
   const existing = getActiveDraft(peer);
   if (existing) return { ok: true, id: existing.id, existing: true };
-  // Sub #1.b dedup guard (J2 #336 per NWT spec 55cd7451): getActiveDraft 只查 state='aligning',
-  // 漏 v3 caller (broker-state-authority / sell-handler / buy-handler) 在 awaiting_payment/paid 已存 active row.
-  // 加 cross-version 全 active state check 防 v2/v3 coexistence (SA-6 A1 production root cause).
-  const v3activeAdvanced = sqlite.prepare(
-    `SELECT id, state FROM retail_dex_orders WHERE user_kasia_address = ? AND state IN ('awaiting_payment','paid') AND id NOT LIKE 'bv2_%' LIMIT 1`
-  ).get(peer);
-  if (v3activeAdvanced) {
-    console.log(`[broker-v2 seedDraft] Sub #1.b dedup skip — peer ${peer.slice(-12)} 已有 v3 ${v3activeAdvanced.state} row ${v3activeAdvanced.id.slice(0,12)}`);
-    return { ok: true, id: v3activeAdvanced.id, existing: true, v3_active: true };
-  }
   const id = `bv2_${peer.slice(-12)}_${Date.now()}`;
   sqlite.prepare(`
     INSERT INTO retail_dex_orders
