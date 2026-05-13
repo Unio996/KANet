@@ -1615,6 +1615,117 @@ const TARGET_PORT = Number(process.env.TARGET_PORT || 17110);  // upstream
 
 ---
 
+## 规则 43 · architect spec 含 mainnet contract address 必 external docs verify (label "verified against `<source>` on `<date>`")
+
+**来源**: 5/13 KI 第 6 次复刻 — NWT bridge-router v0.1 spec (63e6fb48) §3.1 列 Polygon USDT Stargate V2 pool addr `0xd47bAd7A5cd9F4b6BFEAfBdAE6Cf3B0bD61C0F4e` (错位, memory drift). J2 #330 triple WebFetch verify Stargate V2 gitbook docs 实际 `0xd47b03ee6d86Cf251ee7860FB2ACf9f91B9fD4d7`. Safety impact: 错 addr → 可能 honeypot → loss 60 USDT.
+
+**真因**: NWT spec 写时凭印象/搜索结果首条, 没 verify against canonical source (Stargate V2 gitbook / etherscan / 官方 GitHub). mainnet contract address 是 production money loss vector — typo 等于 burn fund.
+
+**Wrong** (NWT 5/13 之前):
+```markdown
+## §3.1 Stargate V2 mainnet pool addresses
+- polygon USDT: 0xd47bAd7A5cd9F4b6BFEAfBdAE6Cf3B0bD61C0F4e  ← NWT 凭记忆写
+- arbitrum USDT: 0xcE8CcA271Ebc0533920C83d39F417ED6A0abB7D0
+```
+
+**Right** (5/13 钦定):
+```markdown
+## §3.1 Stargate V2 mainnet pool addresses (verified against Stargate gitbook https://... on 2026-05-13)
+- polygon USDT: 0xd47b03ee6d86Cf251ee7860FB2ACf9f91B9fD4d7  [j2-verified 2026-05-13]
+- arbitrum USDT: 0xcE8CcA271Ebc0533920C83d39F417ED6A0abB7D0  [j2-verified 2026-05-13]
+```
+
+**Why**: implementor T0 verify burden 是 last defense. architect spec 错位 + implementor 盲信 = production money loss. 双重 defense (architect verify + implementor T0 verify) 是 KANet 工程文化健康基线.
+
+**检查方法**:
+- architect: spec 含 mainnet addr / chain RPC URL / API endpoint 时, 跑 WebFetch canonical source, 加 verify label
+- implementor: T0 必 WebFetch verify canonical source against spec addr, mismatch 立即 push back (KI 第 6 次复刻 J2 #330 实证 救 60 USDT)
+- 历史 commit: bridge-router.js fcf83c6e0 (含 Polygon docs-verified addr + negative regression guard 防 NWT spec typo reintroduce)
+- 历史 broadcast: NWT 自报错位 8fbe164f + J2 catch 17181fcb
+
+---
+
+## 规则 44 · architect spec 含字节算术/encoding 必 byte-by-byte verify + 写 example bytes
+
+**来源**: 5/13 KI 第 6 次复刻扩展 — NWT bridge-router v0.1.1 spec (868a1925) §2 算 LayerZero V2 OptionsType3 encoding "total bytes: 2 + 22 + 52 = 76 bytes". J2 #332 实证 actual 74B (NWT off-by-2: LZ_RECEIVE option 20B 而非 22B, NWT 把 option_size 字段 2B 算了 2 次).
+
+**真因**: NWT spec 写 byte arithmetic 时凭头脑算, 没逐字段列写 example bytes. encoding spec 错位 = J2 ship code 用 wrong byte layout, LZ 不能 decode 或 decode 错, native drop fail (但 J2 实际 ship 用 ethers.solidityPacked 准确, 跟 spec 文档算术错位无关). minor 但 KI 警示扩展.
+
+**Wrong** (NWT 5/13 之前):
+```markdown
+## §2 LayerZero V2 OptionsType3 encoding
+0x0003                                       // TYPE_3 header
++ 0x01 + 0x0011 + 0x01 + uint128(gas, 16B)  // LZ_RECEIVE
++ ...
+Total bytes: 2 + 22 + 52 = 76 bytes  ← NWT 错位 (LZ_RECEIVE 实际 20B = 1+2+1+16)
+```
+
+**Right** (5/13 钦定):
+```markdown
+## §2 LayerZero V2 OptionsType3 encoding [verified against ExecutorOptions.sol 2026-05-13]
+0x0003                                  (2B header)
++ 0x01                                  (1B worker)
++ 0x0011                                (2B option_size = 0x11 = 17 = 1 type + 16 gas)
++ 0x01                                  (1B option_type LZ_RECEIVE)
++ <uint128(gas, 16B)>                   (16B gas amount)
+                                         ──────────────────
+                                         LZ_RECEIVE total = 1+2+1+16 = 20B
++ ... NATIVE_DROP block (1+2+1+16+32 = 52B)
+                                         ──────────────────
+                                         total when drop > 0 = 2+20+52 = 74B
+example output (gas=200000 + drop=0.05 MATIC to 0x{addr}):
+0x0003 01 0011 01 00000000000000000000000000030d40 01 0031 02 000000000000000000000000b1a2bc2ec50000 000000000000000000000000{addr}
+```
+
+**Why**: encoding bytes 错位 = ship code 跟 docs decoder 对不上, 跨链 message decode fail. 双重 defense (architect example bytes + implementor verify regex):
+- architect 写 example output bytes (含 sample inputs)
+- implementor test 加 byte-layout regex assertion (J2 #332 bridge_router_native_drop.test.mjs guard #2 实证)
+
+**检查方法**:
+- architect: spec 含 byte arithmetic 必 "verified against `<source>`" + 逐字段列 + example bytes 写出
+- implementor: test 加 negative regression regex guard (NWT spec typo reintroduce → source-pattern test 自动 fail)
+- 历史 commit: bridge-router.js b275a9be5 (含 buildLzV2Options helper + ethers.solidityPacked 准确编码)
+- 历史 broadcast: J2 #332 catch 17181fcb + NWT 自报 0df946df
+
+---
+
+## 规则 45 · architect spec 含 asset/chain param 透传必 protocol-wide audit (publish/accept/autoPay/autoSettle/verify/broadcast 6 path)
+
+**来源**: 5/13 KI 第 7 次复刻 — NWT Sub #1 spec (672758bb) 修 `transferUsdt` asset 透传 + 1 caller (trade-protocol-filter L1376), 但 verify side `processPaymentSubmit` 仍 default 'usdt'. J2 #333 5/13 base USDC e2e dispute root cause trace 暴露 — meta.payment_asset 没写入 verification_meta, _verifyEvm STABLECOINS.base['usdt'] = undefined → 0 USDT found → dispute. Sub #4.b hotfix 735372b5f 修了 verify path.
+
+**真因**: NWT Sub #1 spec scope silo 单 path (transferUsdt + 1 direct caller), 漏 protocol-wide audit (publish/accept/autoPay/autoSettle/verify/broadcast 6 path 全 asset/chain param 一致). 同 family bug 留 verify side 隐患.
+
+**Wrong** (NWT 5/13 Sub #1 spec 之前):
+```markdown
+## Sub #1 scope: dispatcher fix asset 透传
+- evm-transfer.js L204 transferUsdt 加 asset 参数
+- trade-protocol-filter.js L1376 caller 透传 asset
+- (其他 caller 保 backward compat 默 'USDT')
+```
+↑ 漏 audit verify path: processPaymentSubmit + meta.payment_asset + _verifyAndComplete + verifyCrossChainTx
+
+**Right** (5/13 Sub #1 spec rule reinforce):
+```markdown
+## Sub #1 scope: dispatcher fix asset 透传 (protocol-wide)
+6-path audit grep:
+1. publish endpoint (api/exchange.js L132): verification_meta.accepted_chains[].asset ✓
+2. accept endpoint (api/exchange.js L347): selected_chain + payment_asset 派生
+3. autoPay (trade-protocol-filter L1376): transferUsdt(chain, ..., asset) ← Sub #1 fix
+4. autoSettle (trade-protocol-filter L1488): settler-router.sendAsset({asset, chain})
+5. verify (exchange-machine L748 processPaymentSubmit): payment_asset → meta.payment_asset ← Sub #4.b family fix
+6. broadcast (trade-protocol-filter L1404): kanet_exchange_paid_v1.payment_asset ✓
+```
+
+**Why**: asset/chain 是 cross-chain protocol 关键 param. silo 单 path 修 = production 留 bug, 暴露 in 新 asset/chain (base USDC trigger). protocol-wide audit 必 6 path 全 grep + 一致 (publish-to-completed lifecycle).
+
+**检查方法**:
+- architect: spec 含 cross-chain param (asset/chain) 必列 6 path audit table, 每 path grep verify
+- implementor: T0 grep 6 path 跟 spec 一致, 不假设 spec 完整
+- 历史 commit: 735372b5f (Sub #4.b hotfix protocol-wide asset 透传 family fix)
+- 历史 broadcast: J2 #333 35f0fc32 (Sub #4 trace + hotfix) + NWT verdict 47a8e4f8
+
+---
+
 ## 如何扩充本档案
 
 新陷阱踩过后**立即**追加，格式保持：
