@@ -9,7 +9,7 @@
 //
 // 实证根因: 5/12 LAN kaspad .123→.107 + 5/13 .107→.109 二次漂移, 人工 6 步修. 此自愈让 0 步.
 
-import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, existsSync, unlinkSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import net from 'node:net';
 
@@ -106,8 +106,12 @@ function atomicUpdateKanetEnv(newIP) {
     log(`atomic update FAIL: ${e.message?.slice(0, 100)}`);
     return false;
   } finally {
+    // Sub 1.5 hotfix per Bettor r77: cross-platform unlinkSync (Windows del + POSIX rm 共业).
+    // 原 fallback `writeFileSync(..., '', { flag: 'w' })` 写空文件**不删**, 下次 wx 撞 EEXIST 死锁.
     if (lockAcquired) {
-      try { execSync(`del "${LOCK_FILE}"`, { stdio: 'ignore' }); } catch { try { writeFileSync(LOCK_FILE, '', { flag: 'w' }); } catch {} }
+      try { unlinkSync(LOCK_FILE); } catch (e) {
+        if (e.code !== 'ENOENT') log(`lockfile cleanup err: ${e.message?.slice(0, 60)}`);
+      }
     }
   }
 }
