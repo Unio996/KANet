@@ -103,22 +103,31 @@ function autoApproveQuality(adj, currentSize) {
 const SOPHIE_HOST = process.env.SOPHIE_HOST || '127.0.0.1';  // J1 host = self, Bettor host override LAN IP
 const RETRY_BACKOFFS_MS = [500, 2000, 5000];
 
-// Sub 9.9 per Bettor r89 真问题 3 + Owner 5/13 "Bettor 资产 10x" implicit signal.
-// 走 each host's own polymarket wallet (J1 host = Sophie, Bettor host = Bettor wallet).
-// graceful auto-detect: query agent_wallets for any 'polygon' chain wallet, use first.
-// env override REAL_RELAY 强制特定 relay (e.g. J1 host force Sophie).
+// Sub 9.10 per Bettor r90 CRITICAL push back: ORDER BY created_at ASC 选 Trader-A (broker
+// line) 不是 Bettor wallet. 修: kanet.env explicit BETTOR_RELAY_NODE_ID 双 host 各自配.
+// Priority:
+//   1. BETTOR_RELAY_NODE_ID env (kanet.env 显式 host config) — 推荐
+//   2. REAL_RELAY env (overrides 1, force specific for testing)
+//   3. agent_wallets WHERE label LIKE '%Polymarket%' AND label NOT LIKE '%Trader%' (label-based filter)
+//   4. fallback Sophie (J1 host default)
 function resolveRealRelay(db) {
+  // Priority 2: REAL_RELAY (highest, testing/force override)
   if (process.env.REAL_RELAY) return process.env.REAL_RELAY;
-  // Auto-detect: first relay_node with polygon wallet
+  // Priority 1: BETTOR_RELAY_NODE_ID (kanet.env host config)
+  if (process.env.BETTOR_RELAY_NODE_ID) return process.env.BETTOR_RELAY_NODE_ID;
+  // Priority 3: label-based filter (exclude Trader-* broker line wallets)
   try {
     const r = db.prepare(`
       SELECT relay_node_id FROM agent_wallets
       WHERE chain = 'polygon' AND is_default = 1
-      ORDER BY created_at ASC LIMIT 1
+        AND (label LIKE '%Polymarket%' OR label LIKE '%polymarket%')
+        AND label NOT LIKE '%Trader%' AND label NOT LIKE '%trader%'
+      ORDER BY created_at DESC LIMIT 1
     `).get();
     if (r?.relay_node_id) return r.relay_node_id;
   } catch (e) { log(`resolveRealRelay query err: ${e.message?.slice(0, 60)}`); }
-  return 'a83c4b07-eaf7-4d21-972a-1265e0cdcfcf';  // fallback Sophie (J1 host default)
+  // Priority 4: fallback Sophie (J1 host default backward compat)
+  return 'a83c4b07-eaf7-4d21-972a-1265e0cdcfcf';
 }
 
 // Sub 6.5 hotfix per r82 CRITICAL 2: token_id lookup chain.
