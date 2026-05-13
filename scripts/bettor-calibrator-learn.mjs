@@ -68,12 +68,13 @@ function clamp(value, band) {
   return Math.max(bounds.min, Math.min(bounds.max, value));
 }
 
+// Sub 9.6 hotfix: predicted = p_mid (LLM forecast) NOT entry_yes_price (market price).
 function brierFor(p) {
   if (p.current_yes_price == null) return null;
   const outcome = p.current_yes_price >= 0.99 ? 1 : (p.current_yes_price <= 0.01 ? 0 : null);
   if (outcome === null) return null;
-  const predicted = p.direction === 'NO' ? (1 - p.entry_yes_price) : p.entry_yes_price;
-  return Math.pow(predicted - outcome, 2);
+  if (p.p_mid == null) return null;
+  return Math.pow(p.p_mid - outcome, 2);
 }
 
 async function learnFromOutcomes() {
@@ -81,7 +82,7 @@ async function learnFromOutcomes() {
   try {
     const sinceIso = new Date(Date.now() - ROLLING_DAYS * 24 * 60 * 60_000).toISOString();
     const settled = db.prepare(`
-      SELECT p.id, p.direction, p.entry_yes_price, p.closed_at, p.realized_pnl,
+      SELECT p.id, p.direction, p.entry_yes_price, p.closed_at, p.realized_pnl, r.p_mid,
              r.calibrator_confidence,
              s.current_yes_price
       FROM bettor_sim_positions p

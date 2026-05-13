@@ -32,15 +32,16 @@ function log(msg) {
   try { writeFileSync(LOG_FILE, line + '\n', { flag: 'a' }); } catch {}
 }
 
-// Brier per settled position: outcome derived from current_yes_price terminal (0 or 1).
-// Predicted = entry_yes_price (NO side flips: pred_outcome=1-entry_yes_price).
+// Brier per settled position: predicted = LLM's p_mid (forecast of yes_outcome).
+// Sub 9.6 hotfix per Bettor r86 + audit实证: 原公式用 entry_yes_price (market price) 错 — Brier 测 LLM
+// forecast accuracy 不是 market accuracy. direction (NO/YES) 是决策不是预测. 改 p_mid.
+// 实证 J1 host: 旧 Brier=0.244 (buggy) → 真 Brier=0.222 (略胜 random 0.25).
 function brierForPosition(pos) {
-  // Outcome: market resolved → current_yes_price ∈ {0, 1}.
-  // (我们的 reactor 看 yes_price < 0.01 OR > 0.99 当 resolved, 这里更严: == 0 OR == 1)
   if (pos.current_yes_price == null) return null;
   const outcome = pos.current_yes_price >= 0.99 ? 1 : (pos.current_yes_price <= 0.01 ? 0 : null);
-  if (outcome === null) return null;  // not yet resolved
-  const predicted = pos.direction === 'NO' ? (1 - pos.entry_yes_price) : pos.entry_yes_price;
+  if (outcome === null) return null;
+  const predicted = pos.p_mid;  // LLM forecast of yes_outcome (不 flip by direction)
+  if (predicted == null) return null;
   return Math.pow(predicted - outcome, 2);
 }
 
@@ -64,7 +65,7 @@ async function runAudit(targetDate) {
 
     // settled positions: closed_at NOT NULL + 30-day rolling window
     const settled = db.prepare(`
-      SELECT p.id, p.direction, p.entry_yes_price, p.size_usd, p.opened_at, p.closed_at, p.realized_pnl,
+      SELECT p.id, p.direction, p.entry_yes_price, p.size_usd, p.opened_at, p.closed_at, p.realized_pnl, r.p_mid,
              r.calibrator_confidence, s.current_yes_price,
              (SELECT event_type FROM event_calendar ec WHERE ec.market_id = r.market_id LIMIT 1) AS event_type
       FROM bettor_sim_positions p
