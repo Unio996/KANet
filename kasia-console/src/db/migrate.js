@@ -3202,5 +3202,41 @@ export function runMigrations() {
     }
   }
 
+  // v102: Phase 3g Sub 3 (C-1) — health monitor: health_alert_log + health_heartbeats 2 表
+  // Bettor r78 architect spec PASS. 5/12-5/13 silent fail 13h 实证根因 = 无 alerting 路径.
+  // 此 migration 建 cooldown 持久化 (重启不丢) + heartbeat 通用 schema.
+  {
+    const has102Alert = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='health_alert_log'").get();
+    if (!has102Alert) {
+      sqlite.exec(`
+        CREATE TABLE health_alert_log (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          alert_key TEXT NOT NULL,
+          severity TEXT NOT NULL,
+          detail_json TEXT,
+          dispatched_to TEXT,
+          broadcast_tx_id TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_health_alert_key_time ON health_alert_log(alert_key, created_at);
+      `);
+      console.log('[migrate] v102: health_alert_log 表 + 1 索引 创建 (Phase 3g C-1 cooldown 持久化).');
+    }
+    const has102HB = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='health_heartbeats'").get();
+    if (!has102HB) {
+      sqlite.exec(`
+        CREATE TABLE health_heartbeats (
+          key TEXT PRIMARY KEY,
+          last_ts TEXT NOT NULL,
+          last_status TEXT NOT NULL,
+          expected_interval_ms INTEGER,
+          consecutive_fails INTEGER NOT NULL DEFAULT 0,
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+      `);
+      console.log('[migrate] v102: health_heartbeats 表 创建 (Phase 3g C-1 heartbeat 通用 schema).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
