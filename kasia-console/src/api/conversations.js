@@ -280,7 +280,7 @@ export async function registerConversationRoutes(fastify) {
           console.error(`[api/agent/reply] broker-v3 err for ${resolved?.slice(0,8)}: ${err.message}`);
         }
         // broker-v3 不命中 (自然语言 OR 异常): canned reply 提醒. matcher (agent-mind, 独立 service) 未来接.
-        return reply.send({ reply: '我是 Trader-B (KAS broker), 走选择题菜单. 回数字 1 (买 KAS) / 2 (卖 KAS) / 3 (看市场) / 4 (接挂单) / 5 (我的订单) / 6 (取消).\n\n(自然语言下单暂未启用 — Owner 钦定 matcher 后续接入.)' });
+        return reply.send({ reply: '我是 Trader-B (KAS broker), 走选择题菜单. 回数字 1 (买 KAS) / 2 (卖 KAS) / 3 (看市场) / 4 (接挂单) / 5 (我的订单) / 6 (取消).' });
       }
     }
 
