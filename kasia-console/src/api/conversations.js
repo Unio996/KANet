@@ -109,55 +109,20 @@ export async function registerConversationRoutes(fastify) {
     return agents;
   });
 
-  // R-NWT-2026-04-28 (d) B phase 4: test-only — clear broker per-peer Map state.
-  // Gated by KANET_TEST_MODE env. Production console (no env) → 404.
-  // Used by test framework cleanup_peer_broker_state action for race-condition tests.
+  // Phase A.2 (J2 #336 per NWT spec ffcd4778, Owner 5/13 钦定纯菜单删 LLM 残留):
+  // test infra endpoints — broker-buy-handler/sell-handler/llm-agent/broker-v2 archived.
+  // 删 reset_peer 中 LLM-only imports + 整删 seed_pending_accept (bv2_ writer dead).
   if (process.env.KANET_TEST_MODE === '1') {
     fastify.post('/api/test/reset_peer', async (request, reply) => {
       const { peers } = request.body || {};
       if (!Array.isArray(peers) || peers.length === 0) return reply.code(400).send({ error: 'peers array required' });
       const { resetConvoState } = await import('../services/broker-state-authority.js');
-      const { _testClearPeerState } = await import('../services/broker-buy-handler.js');
-      const { _testClearPending } = await import('../services/broker-sell-handler.js');
-      const { _testClearPendingFields } = await import('../services/broker-llm-agent.js');
       const { _testClearUserActions } = await import('../services/broker-action-queue.js');
       for (const peer of peers) {
         try { resetConvoState(peer, 'test_cleanup'); } catch (e) { /* may not exist */ }
-        _testClearPeerState(peer);
-        _testClearPending(peer);
-        _testClearPendingFields(peer);
         _testClearUserActions(peer);
       }
       return { cleared: peers.length, peers: peers.map(p => p.slice(-12)) };
-    });
-
-    // R-NWT-2026-04-28 (d) lifecycle infra (J2 d6022b59 propose): seed broker _pendingAccepts
-    // for paid-cannot-cancel probe. test-only, env-gated.
-    // bug 8 fix (J2 r25 vote (c) dual-write): broker-v2 SQL state machine 不见 v1 _pendingAccepts
-    // in-memory state. INSERT retail_dex_orders state='paid' 让 broker-v2 router cancel intent path
-    // 进 'state==paid' 拒 cancel 分支 (router L61). 向后兼容 v1 测.
-    fastify.post('/api/test/seed_pending_accept', async (request, reply) => {
-      const { peer, data } = request.body || {};
-      if (!peer || !data) return reply.code(400).send({ error: 'peer + data required' });
-      const { _testSetPendingAccept } = await import('../services/broker-buy-handler.js');
-      _testSetPendingAccept(peer, { ...data, expires_at: data.expires_at || (Date.now() + 30 * 60 * 1000) });
-      // dual-write retail_dex_orders state='paid' for broker-v2 visibility
-      try {
-        const { sqlite } = await import('../db/client.js');
-        const totalKas = data.total_kas || data.picks?.reduce((s, p) => s + (p.qty_kas || 0), 0) || 0;
-        const id = `bv2_seed_${peer.slice(-12)}_${Date.now()}`;
-        sqlite.prepare(`
-          INSERT INTO retail_dex_orders
-            (id, user_kasia_address, side, state, order_type, qty, pay_chain,
-             created_at, updated_at, expires_at)
-          VALUES (?, ?, 'buy_kas', 'paid', 'limit', ?, ?,
-                  datetime('now'), datetime('now'),
-                  datetime('now', '+30 minutes'))
-        `).run(id, peer, String(totalKas), data.pay_chain || 'bnb');
-      } catch (err) {
-        console.warn(`[seed_pending_accept] dual-write retail_dex_orders failed: ${err.message}`);
-      }
-      return { seeded: true, peer: peer.slice(-12) };
     });
 
     // R-NWT-2026-04-28 (d) lifecycle infra: force state.expires_at backdate for expire-boundary probe.
@@ -230,54 +195,8 @@ export async function registerConversationRoutes(fastify) {
       return { ok: true, reset: true };
     });
 
-    // T-J2-2026-04-30 Phase β NWT vote (C) — inject_paid_mock for real-chain RC-01.
-    // 暴露 broker-buy-handler._testInjectScan via HTTP. RC-01 BUY case 模拟 user 真付 USDT
-    // BSC 但不真烧钱 — broker.verifyPaymentForPeer 用此 _scanOverride 返 fake event match
-    // pick.take_usdt → broker fires _enqueuePaid → paid_v1 chain DM 真 broadcast.
-    // 注意: 仅 broker-side payment detection mock. exchange-machine processPaymentSubmit 真链验
-    // 仍走 cross-chain-verify (fake tx hash → fail), 因此此 mock 仅 cover broker-side state
-    // transition, 不 cover full e2e settlement.
-    fastify.post('/api/test/inject-scan-mock', async (request, _reply) => {
-      const { events } = request.body || {};
-      if (!Array.isArray(events)) {
-        return { ok: false, error: 'events must be array of {tx_hash, amount, from?, to}' };
-      }
-      const { _testInjectScan } = await import('../services/broker-buy-handler.js');
-      _testInjectScan(async ({ chain, recipient, span_blocks }) => {
-        return { ok: true, events: events.map(e => ({
-          tx_hash: e.tx_hash || `0x${'a'.repeat(64)}`,
-          amount: parseFloat(e.amount),
-          from: e.from || null,
-          to: e.to || recipient,
-          chain: chain || 'bnb',
-        })) };
-      });
-      return { ok: true, mocked: true, event_count: events.length };
-    });
-
-    fastify.post('/api/test/reset-scan-mock', async (_request, _reply) => {
-      const { _testResetScan } = await import('../services/broker-buy-handler.js');
-      _testResetScan();
-      return { ok: true, reset: true };
-    });
-
-    // T-NWT-2026-04-29 broker-v2 阶段 2 task 5/7 — LLM mock injection endpoint.
-    // FIFO queue: inject 一次 → 下一次 _callLlm 调入口消费 → 空队列回真 Qwen.
-    // body: { mock: { content?: 'text', tool_calls?: [{ function: { name, arguments } }] } }
-    // 多次 inject 排队按顺序消费. 用于 broker-v2 6-turn case mock LLM tool_calls.
-    fastify.post('/api/test/inject-llm-mock', async (request, _reply) => {
-      const { mock } = request.body || {};
-      if (!mock || typeof mock !== 'object') {
-        return _reply.code(400).send({ error: 'mock object required, e.g. { content: "...", tool_calls: [...] }' });
-      }
-      const { _testInjectLlmMock } = await import('../services/broker-llm-agent.js');
-      return _testInjectLlmMock(mock);
-    });
-
-    fastify.post('/api/test/reset-llm-mock', async (_request, _reply) => {
-      const { _testResetLlmMock } = await import('../services/broker-llm-agent.js');
-      return _testResetLlmMock();
-    });
+    // Phase A.2: inject-scan-mock + inject-llm-mock endpoints removed
+    // (broker-buy-handler + broker-llm-agent archived per NWT spec ffcd4778).
   }
 
   // R34 (J1 R26 territory, P1 race anti-spam): in-process dedup cache 防 console-direct 入口
@@ -316,19 +235,14 @@ export async function registerConversationRoutes(fastify) {
 
     const resolved = resolveRelayNodeId(relayNodeId);
 
-    // R6 (T-J1-18): broker = LLM Bot 上层 + protocol Service 下层. 双层架构.
-    // 现:
-    //   1. 先 broker-buy/sell-handler 看精确 #cmd:* / 命中协议格式 (LLM 触发 hint)
-    //   2. handler null → fall to broker-llm-agent (LLM 销售客服 + role prompt + history)
-    //   3. broker-llm-agent.handle 必返回 reply (含 fallback 友好 DM, 永不 silent)
-    // 修 R5 T-J2-16 silent fallback (Owner 实证: 真人 DM "想买点 KAS" → silent → 没办法用)
+    // Phase A.2 (J2 #336 per NWT spec ffcd4778, Owner 5/13 钦定纯菜单模式 LLM 残留全删):
+    // 历史 dual-layer (broker LLM bot + protocol service) 双路 archive. 现仅 broker-v3 deterministic.
+    // 留: broker-v3 选择题 dispatch + sibling anti-runaway + chain DM classifier.
     if (!channel) {
       const broker = sqlite.prepare('SELECT is_dex_broker, is_service FROM relay_nodes WHERE id = ?').get(resolved);
       if (broker?.is_service === 1 || broker?.is_dex_broker === 1) {
         // T-NWT-2026-04-27 EMERGENCY broker-broker runaway 真 fix (Owner 09:34+ 真测发现):
-        // sibling broker peer 真**绝不**走 broker handler — 真避免 LLM 真 echo amplify cycle.
-        // 真 trace: Trader-A 02:54:06 unprompted DM Trader-B → broker handler 真 process → cycle 30+ → 真烧 0.03 KAS gas.
-        // exchange protocol DM (handshake/accept/paid etc) 真走 trade-protocol-filter 真不影响.
+        // sibling broker peer 绝不走 broker handler — 防 cycle.
         const peerIsBroker = sqlite.prepare(
           'SELECT 1 FROM relay_nodes WHERE address=? AND (is_dex_broker=1 OR is_service=1) LIMIT 1'
         ).get(peer);
@@ -336,75 +250,10 @@ export async function registerConversationRoutes(fastify) {
           console.warn(`[api/agent/reply] sibling broker peer ${peer.slice(-12)} → skip broker handler (anti-runaway)`);
           return reply.send({ reply: null, skip_reason: 'sibling_broker' });
         }
-        // T-J2-R19-extend (J1 1bc2132d 真测撞): broker reply 含 EVM 地址必经 R19 assert.
-        // LLM 自由路径绕过 broker-action-queue, 这里 final guard. 含 fake 地址 → 拒回兜底.
-        // T-J2-2026-04-27 v1.1 SELL flow R19 false positive fix (Owner 09:34 真测撞):
-        // 真 user 真 SELL 真 supply EVM addr → broker LLM 真 echo → R19 false positive 拒.
-        // 真 fix: 真 pass user message context, 真 whitelist user-supplied EVM addr (broker echo OK).
-        const _r19Guard = async (replyText, source) => {
-          if (!replyText) return replyText;
-          try {
-            // T-J2-2026-04-27 Bug-Z11 fix (replaces Bug-Z8 history widen, attack vector 真撞):
-            // userContext 真**仅** current msg + active locked addrs from _pendingPreview/_pendingFields.
-            // 真 attacker plant new addr in history 真**不再** widen R19 allow-set (R31 sediment lifecycle-bound).
-            // 真 turn 1 user supplied addr 真在 current msg, 真 lock 后 turn 2+ broker echo 真**真**仅 echo locked addr.
-            const lockedAddrs = [];
-            try {
-              const { _getPendingPreview } = await import('../services/broker-buy-handler.js');
-              const pp = _getPendingPreview(peer);
-              if (pp?.receive_address) lockedAddrs.push(pp.receive_address);
-            } catch { /* module load 兜底 */ }
-            try {
-              const { _getPendingFieldsAddr } = await import('../services/broker-llm-agent.js');
-              const a = _getPendingFieldsAddr(peer);
-              if (a) lockedAddrs.push(a);
-            } catch { /* module load 兜底 */ }
-            // R33 b iter13 (J2 81f588ae propose long-term): _convoState.recv_address 也作 locked source.
-            // 真**真**真 R31 attacker reject reply 含 locked addr (e.g. '订单地址已锁定 0x9405...') 真**真**真
-            // R19 guard 误杀 (post-confirm _pendingPreview/_pendingFields cleared, 但 _convoState 真**真 keep recv_address).
-            // 修后 R31 wording '订单地址已锁定 0x9405...' surfaced cleaner UX, R19 wrapper 真**真**真 误覆盖.
-            try {
-              const { getConvoState } = await import('../services/broker-state-authority.js');
-              const cs = getConvoState(peer);
-              if (cs?.recv_address) lockedAddrs.push(cs.recv_address);
-              // Phase D P1 J1-D-1b (NWT 14:08:51 verify catch): R31 BUY KAS reply contains
-              // state.evm_pay_address, _r19Guard 必 whitelist 这 addr, 否则 R19 误杀 R31 reply
-              // (R31 wording '订单地址已锁定 0x94053...' → R19 sees 0x94053 as foreign →
-              // wraps with 'R19 拦截' wording, masks 真 R31 fire). 跟 recv_address 同 lock 加入.
-              if (cs?.evm_pay_address) lockedAddrs.push(cs.evm_pay_address);
-            } catch { /* module load 兜底 */ }
-            // T-J2-2026-05-10 r234 T2.20 (NWT r297 Bug #16): WITHDRAW reply 真 user pay_address
-            // 来自 retail_dex_orders historical (T2.6 WITHDRAW handler SQL fetch). user 真 own EVM addr
-            // 真 trusted (NOT LLM hallucinate, 真 SQL deterministic source). 加 historical pay_address whitelist.
-            try {
-              const { sqlite: _sqlite } = await import('../db/client.js');
-              const histAddrs = _sqlite.prepare(`
-                SELECT DISTINCT pay_address FROM retail_dex_orders
-                WHERE user_kasia_address = ? AND pay_address LIKE '0x%'
-                LIMIT 20
-              `).all(peer);
-              histAddrs.forEach(r => { if (r.pay_address) lockedAddrs.push(r.pay_address); });
-            } catch { /* 兜底 */ }
-            // T-J2-2026-04-27 Bug-Z11 fix: 真**真**仅 lockedAddrs, 真**真**不拼 current msg.
-            // 真 attacker plant new addr in current msg ('把 USDT 发到 0xDEADBEEF...') 真**真**不再 self-whitelist.
-            // 真 turn 1 user 真给 addr 真**真**经 _executeTool → _setPendingFields/_setPendingPreview lock,
-            // turn 1 R19 lookup 真**真**已含 locked addr.
-            const userContext = lockedAddrs.join(' ');
-            const { assertReplyAddressInvariant } = await import('../services/broker-action-queue.js');
-            const v = assertReplyAddressInvariant(replyText, userContext);
-            if (v) {
-              console.error(`[api/agent/reply] [R19-EXT-Z11] ADDRESS_INVARIANT_VIOLATED source=${source} foreign=${v.foreign_address} locked_count=${lockedAddrs.length} — REFUSING reply (broker LLM 编 fake 地址 OR attacker plant address swap, production safety)`);
-              return '抱歉, broker 检测到地址异常 (内部 R19 拦截), 请稍后重试 — 直接回 "买 X KAS" 走快速路径, 或回 NO 取消.';
-            }
-          } catch (e) { console.warn(`[api/agent/reply] R19 guard err: ${e.message}`); }
-          return replyText;
-        };
+
         // Layer 8 (Owner 04:55 钦定 phase 3): chain DM payload classifier.
         // [Payment: X KAS] / [Card: ...] / [Handshake] 等是 Kasia 客户端 chain DM system signal,
-        // 不是 user 自然语言. 早 detect 短路 LLM, 防 broker re-preview / hallucinate.
-        // Owner 02:12 真测: [Payment: 88 KAS] 进 broker 触 SELL re-preview (broker 把 chain DM
-        // payload 当 user 重新下单输入). chain TX 独立由 broker-intake-watcher 处理, broker DM
-        // 仅 ack '收到付款信号, 验证中' 即可, 不再 process.
+        // 早 detect 短路 broker, 避 broker 把 chain DM 当 user 重下单.
         try {
           const { classifyChainDmPayload, ackChainDmPayload } = await import('../services/broker-chain-dm-classifier.js');
           const classified = classifyChainDmPayload(message);
@@ -417,74 +266,21 @@ export async function registerConversationRoutes(fastify) {
           console.warn(`[api/agent/reply] chain DM classifier err: ${err.message}`);
         }
 
-        // T-J2-2026-05-06 broker-v3 deterministic 路 A — BROKER_V3_ENABLED flag wire.
-        // per v0.6 spec (NWT r217-r227 architect cross-hat) — 选择题 0 LLM, 真用户 entry, 数字驱动.
-        // dispatch: BROKER_V3_ENABLED='1' OR peer ∈ BROKER_V3_ENABLED_PEERS → broker-v3.handleMessage
-        //   - v3 return string reply → 路 A 命中, return immediately
-        //   - v3 return null → 自然语言 (非数字非 0x), 路 B fallback (matcher 在 mind 但 SERVICE MUTE 拦
-        //     Trader-B is_dex_broker=1, 实际 fall 进 broker-v2/v1 LLM agent stop-gap 应付)
-        //   - v3 throw err → log + fall broker-v2 安全网
-        // broker-v3 跟 broker-v2 共存, 默认 broker-v3 优先 (route 路 A 优先尝试).
-        const _v3Flag = process.env.BROKER_V3_ENABLED === '1';
-        const _v3Peers = (process.env.BROKER_V3_ENABLED_PEERS || '').split(',').map(s => s.trim()).filter(Boolean);
-        if (_v3Flag || _v3Peers.includes(peer)) {
-          try {
-            const { handleMessage: handleV3 } = await import('../services/broker-v3/index.js');
-            const v3Reply = await handleV3(peer, message, { relayNodeId: resolved });
-            if (v3Reply !== null && v3Reply !== undefined) {
-              console.log(`[api/agent/reply] broker-v3 routed peer=${peer.slice(-12)} (flag=${_v3Flag}, listed=${_v3Peers.includes(peer)})`);
-              return reply.send({ reply: await _r19Guard(v3Reply, 'broker-v3.handleMessage') });
-            }
-            console.log(`[api/agent/reply] broker-v3 路 A 不命中 (自然语言), fall to broker-v2/v1 路 B`);
-          } catch (err) {
-            console.error(`[api/agent/reply] broker-v3 err for ${resolved?.slice(0,8)}: ${err.message} — fall to broker-v2/v1`);
+        // broker-v3 deterministic 选择题菜单 (Owner 5/13 钦定纯菜单模式, 0 LLM):
+        // v3 return string reply → 命中, return immediately
+        // v3 return null → 自然语言 OR 不识别 → canned reply 提醒 user 用菜单 OR DM matcher
+        try {
+          const { handleMessage: handleV3 } = await import('../services/broker-v3/index.js');
+          const v3Reply = await handleV3(peer, message, { relayNodeId: resolved });
+          if (v3Reply !== null && v3Reply !== undefined) {
+            console.log(`[api/agent/reply] broker-v3 routed peer=${peer.slice(-12)}`);
+            return reply.send({ reply: v3Reply });
           }
-        }
-
-        // T-NWT-2026-04-29 broker-v2 阶段 2 task 6/7 — BROKER_V2_ENABLED flag wire.
-        // 三方共识 7e776598dc lock + J2 territory ship 6efc6311 ready.
-        // 渐进 rollout:
-        //   - BROKER_V2_ENABLED='1' → all peers 走 v2 (全量, post 1 周 gate 才 set)
-        //   - BROKER_V2_ENABLED_PEERS='kaspa:abc,kaspa:def' → 仅列表 peer 走 v2 (1 user → 5 → 50 渐进)
-        //   - 两 env 全 unset → 老 flow (default 安全)
-        // v2 reply null/empty → 不 fallback 老 flow (v2 bug 直接暴, 不掩盖). _r19Guard 兜空 reply.
-        const _v2Flag = process.env.BROKER_V2_ENABLED === '1';
-        const _v2Peers = (process.env.BROKER_V2_ENABLED_PEERS || '').split(',').map(s => s.trim()).filter(Boolean);
-        if (_v2Flag || _v2Peers.includes(peer)) {
-          try {
-            const { handleMessage } = await import('../services/broker-v2/router.js');
-            const v2Reply = await handleMessage(peer, message);
-            console.log(`[api/agent/reply] broker-v2 routed peer=${peer.slice(-12)} (flag=${_v2Flag}, listed=${_v2Peers.includes(peer)})`);
-            return reply.send({ reply: await _r19Guard(v2Reply || '我刚走神了, 你想买还是卖 KAS?', 'broker-v2.handleMessage') });
-          } catch (err) {
-            console.error(`[api/agent/reply] broker-v2 err for ${resolved?.slice(0,8)}: ${err.message} (NOT falling back to v1, expose v2 bug)`);
-            return reply.send({ reply: '我这边 broker-v2 出问题了, 麻烦你稍后再说一次. (Owner 已通知排查)' });
-          }
-        }
-
-        try {
-          const { handleBuyIntent } = await import('../services/broker-buy-handler.js');
-          const buyReply = await handleBuyIntent(peer, message);
-          if (buyReply !== null) return reply.send({ reply: await _r19Guard(buyReply, 'handleBuyIntent') });
         } catch (err) {
-          console.warn(`[api/agent/reply] broker-buy-handler err for ${resolved?.slice(0,8)}: ${err.message}`);
+          console.error(`[api/agent/reply] broker-v3 err for ${resolved?.slice(0,8)}: ${err.message}`);
         }
-        try {
-          const { handleSellIntent } = await import('../services/broker-sell-handler.js');
-          const sellReply = await handleSellIntent(peer, message);
-          if (sellReply !== null) return reply.send({ reply: await _r19Guard(sellReply, 'handleSellIntent') });
-        } catch (err) {
-          console.warn(`[api/agent/reply] broker-sell-handler err for ${resolved?.slice(0,8)}: ${err.message}`);
-        }
-        // R6: handler null (regex 不命中) → fall to broker-llm-agent 销售客服 LLM
-        try {
-          const { handleLlmDialog } = await import('../services/broker-llm-agent.js');
-          const llmReply = await handleLlmDialog(peer, message);
-          return reply.send({ reply: await _r19Guard(llmReply || '我刚走神了, 你想买还是卖 KAS?', 'handleLlmDialog') });
-        } catch (err) {
-          console.warn(`[api/agent/reply] broker-llm-agent err for ${resolved?.slice(0,8)}: ${err.message}`);
-          return reply.send({ reply: '我这边卡了 1 分钟, 麻烦你再说一次?' });
-        }
+        // broker-v3 不命中 (自然语言 OR 异常): canned reply 提醒. matcher (agent-mind, 独立 service) 未来接.
+        return reply.send({ reply: '我是 Trader-B (KAS broker), 走选择题菜单. 回数字 1 (买 KAS) / 2 (卖 KAS) / 3 (看市场) / 4 (接挂单) / 5 (我的订单) / 6 (取消).\n\n(自然语言下单暂未启用 — Owner 钦定 matcher 后续接入.)' });
       }
     }
 

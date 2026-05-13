@@ -90,11 +90,9 @@ if [ -f "$ENV_FILE" ]; then
                                    KASPA_WS_PROXY_TARGET_PORT="${KASPA_WS_PROXY_TARGET_PORT:-$v}"
                                    echo "WARN: KASPA_WS_PROXY_PORT 已 deprecated, 用 KASPA_WS_PROXY_LISTEN_PORT/TARGET_PORT (5/13 Owner A 钦定)" >&2
                                    ;;
-      # NWT 8aef0b5e critical fix — kanet.env 写但 case 未 match key 静默被忽略
-      # BROKER_V2_ENABLED + BROKER_V2_ENABLED_PEERS broker-v2 phase 1 cutover gating 必 export
-      BROKER_V2_ENABLED)       export BROKER_V2_ENABLED="$v" ;;
-      BROKER_V2_ENABLED_PEERS) export BROKER_V2_ENABLED_PEERS="$v" ;;
-      # T-NWT-2026-05-12 — broker-v3 菜单 path gating env, J2 host kanet.env restore post Phase α reset
+      # Phase A.2 (J2 #336 per NWT spec ffcd4778, Owner 5/13 钦定纯菜单):
+      # BROKER_V2_ENABLED + _PEERS deleted (broker-v2 archived).
+      # broker-v3 菜单 path gating env, J2 host kanet.env restore post Phase α reset
       BROKER_V3_ENABLED)       export BROKER_V3_ENABLED="$v" ;;
       BROKER_V3_ENABLED_PEERS) export BROKER_V3_ENABLED_PEERS="$v" ;;
     esac

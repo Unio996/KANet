@@ -434,10 +434,9 @@ startStateReconciler();
 import { startCompletionWatcher } from './services/broker-buy-completion-watcher.js';
 startCompletionWatcher();
 
-// T-NWT-V2 (Owner 真测 #2 退场立项): bsc-incoming-watcher — 30s tick 后台扫 broker EVM 收款
-// 地址 USDT 入账, 调 J2 verifyPaymentForPeer 自动反查 + 主动 DM user. 双路径互补 J2 lazy LLM tool.
-import { start as startBscIncomingWatcher } from './services/bsc-incoming-watcher.js';
-startBscIncomingWatcher();
+// Phase A.2 (J2 #336 per NWT spec ffcd4778, Owner 5/13 钦定纯菜单模式):
+// bsc-incoming-watcher archived — 跟 broker-buy-handler (in-memory _pendingAccepts) 强耦合,
+// LLM bot 路径死. broker-v3 menu mode 走协议层 cross-chain-verify (Phase 2 β multichain), 不需此 watcher.
 
 // NWT-V3 / Qclaude (2026-04-27): monitor 服务启动 (route 在 fastify.listen 前已注册, 见 line 137)
 // NWT 19:50 修 3 个 bug:
