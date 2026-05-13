@@ -21,6 +21,10 @@
 
 const _state = new Map();  // user_id → { flow, step, draft }
 
+// Phase B P0 fix (J2 #338 per NWT spec 4324dccc): chain menu 6 chain (跟 Phase 2 β prefund align).
+// 5/13 broker BSC + polygon (13.99 USDT + 0.05 MATIC) + arbitrum (13.99 + 0.0005 ETH) +
+// optimism (13.99 + 0.0001 ETH) + base (13.99 USDC + 0.0002 ETH) 全 funded.
+// 老 menu 漏 op + base, user 用不到 prefund. 现 6 chain 全暴露.
 const SUPPORTED_CHAINS = ['bsc', 'eth', 'polygon', 'arbitrum', 'optimism', 'base'];
 const MIN_QTY_KAS = 1;
 const MAX_QTY_KAS = 5000;
@@ -107,7 +111,9 @@ function _chainSelectText(verb) {
     '  2️⃣ ETH (Ethereum, USDT)',
     '  3️⃣ Polygon (USDT)',
     '  4️⃣ Arbitrum (USDT)',
-    '  回数字 1-4 选, back 返回菜单.',
+    '  5️⃣ Optimism (USDT)',
+    '  6️⃣ Base (USDC)',
+    '  回数字 1-6 选, back 返回菜单.',
   ].join('\n');
 }
 
@@ -115,8 +121,8 @@ function _handleTradeFlow(user_id, msg, cur, side, relayNodeId) {
   const draft = cur.draft || { side: side === 'buy' ? 'buy_kas' : 'sell_kas' };
   if (cur.step === 'CHAIN_SELECT') {
     const num = parseInt(msg, 10);
-    const chains = ['bsc', 'eth', 'polygon', 'arbitrum'];
-    if (num < 1 || num > chains.length) return { reply: '数字超范围, 回 1-4 选链.' };
+    const chains = ['bsc', 'eth', 'polygon', 'arbitrum', 'optimism', 'base'];
+    if (num < 1 || num > chains.length) return { reply: '数字超范围, 回 1-6 选链.' };
     draft.pay_chain = chains[num - 1];
     setFlowState(user_id, { ...cur, step: 'QTY_SELECT', draft });
     return { reply: `已选 ${draft.pay_chain.toUpperCase()}. 数量 (KAS, ${MIN_QTY_KAS}-${MAX_QTY_KAS})?` };
