@@ -3238,5 +3238,29 @@ export function runMigrations() {
     }
   }
 
+  // v103: Phase 3g Sub 4 (C-2) — bettor_track_record daily snapshot 表
+  // Bettor r79 architect spec PASS + 3 决断 (Brier=outcome 硬数学 / 30-day rolling / >=5 minimum sample).
+  // architect 加 3 字段: total_unsettled / avg_holding_hours / (accumulating API today endpoint).
+  {
+    const has103 = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='bettor_track_record'").get();
+    if (!has103) {
+      sqlite.exec(`
+        CREATE TABLE bettor_track_record (
+          date_utc TEXT PRIMARY KEY,
+          brier_mean REAL,
+          win_rate REAL,
+          total_settled INTEGER NOT NULL DEFAULT 0,
+          total_unsettled INTEGER NOT NULL DEFAULT 0,
+          total_pnl_usd REAL NOT NULL DEFAULT 0,
+          avg_holding_hours REAL,
+          per_event_type_json TEXT,
+          per_confidence_band_json TEXT,
+          computed_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+      `);
+      console.log('[migrate] v103: bettor_track_record 表 创建 (Phase 3g C-2 战绩 audit daily snapshot).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
