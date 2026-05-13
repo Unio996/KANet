@@ -55,22 +55,33 @@ function backfillConfidenceBand(db) {
 
 // ── quality check (r80 architect 加 2) ─────────────────────────────────────────
 
+// Sub 9.8 per Bettor r89 真问题 1+2: open new path quality (existing 只 cover adj size delta).
+// Owner 5/13 19:11 "应该没有限制了" → flip 前 quality check 必 cover open new (0 → cap) 路径.
 function autoApproveQuality(adj, currentSize) {
   // band = adj.calibrator_confidence (JOIN recommendation), severity = adj.severity
   if (adj.severity === 'critical') {
     return { auto: true, reason: 'critical severity → auto-approve' };
   }
   const band = adj.calibrator_confidence || 'mid';
+  const isOpenNew = (currentSize === 0 || currentSize == null);
   if (band === 'high') {
     return { auto: true, reason: 'high confidence → auto-approve' };
   }
   if (band === 'mid') {
-    // Only auto-approve if size delta < MID_DELTA_THRESHOLD
+    if (isOpenNew) {
+      // Sub 9.8: mid band open new — require strong LLM signal (p_mid extreme ≤ 0.10 OR ≥ 0.90)
+      const pMid = Number(adj.p_mid || 0.5);
+      if (pMid <= 0.10 || pMid >= 0.90) {
+        return { auto: true, reason: `mid + open new + p_mid ${pMid.toFixed(3)} 极值 (LLM strong signal)` };
+      }
+      return { auto: false, reason: `mid + open new + p_mid ${pMid.toFixed(3)} not 极值 — keep pending` };
+    }
+    // existing position size delta path
     const delta = currentSize > 0 ? Math.abs((adj.target_size || 0) - currentSize) / currentSize : 0;
     if (delta < MID_DELTA_THRESHOLD) return { auto: true, reason: `mid + delta ${(delta * 100).toFixed(1)}% < 30%` };
     return { auto: false, reason: `mid + delta ${(delta * 100).toFixed(1)}% ≥ 30% — keep pending` };
   }
-  // band === 'low' → keep pending (高 gap 高不确定)
+  // band === 'low' → keep pending (高 gap 高不确定, open new 也不 auto)
   return { auto: false, reason: 'low confidence (gap > 30pp) — keep pending for Owner review' };
 }
 
@@ -90,8 +101,25 @@ function autoApproveQuality(adj, currentSize) {
 // Sophie wallet 在 J1 host. Bettor host decider → POST cross-LAN J1:3100/api/predictions/order.
 
 const SOPHIE_HOST = process.env.SOPHIE_HOST || '127.0.0.1';  // J1 host = self, Bettor host override LAN IP
-const SOPHIE_RELAY = process.env.SOPHIE_RELAY || 'a83c4b07-eaf7-4d21-972a-1265e0cdcfcf';  // Sophie wallet relay_node_id
 const RETRY_BACKOFFS_MS = [500, 2000, 5000];
+
+// Sub 9.9 per Bettor r89 真问题 3 + Owner 5/13 "Bettor 资产 10x" implicit signal.
+// 走 each host's own polymarket wallet (J1 host = Sophie, Bettor host = Bettor wallet).
+// graceful auto-detect: query agent_wallets for any 'polygon' chain wallet, use first.
+// env override REAL_RELAY 强制特定 relay (e.g. J1 host force Sophie).
+function resolveRealRelay(db) {
+  if (process.env.REAL_RELAY) return process.env.REAL_RELAY;
+  // Auto-detect: first relay_node with polygon wallet
+  try {
+    const r = db.prepare(`
+      SELECT relay_node_id FROM agent_wallets
+      WHERE chain = 'polygon' AND is_default = 1
+      ORDER BY created_at ASC LIMIT 1
+    `).get();
+    if (r?.relay_node_id) return r.relay_node_id;
+  } catch (e) { log(`resolveRealRelay query err: ${e.message?.slice(0, 60)}`); }
+  return 'a83c4b07-eaf7-4d21-972a-1265e0cdcfcf';  // fallback Sophie (J1 host default)
+}
 
 // Sub 6.5 hotfix per r82 CRITICAL 2: token_id lookup chain.
 // market_id → condition_id (stored in bettor_recommendations) → Polymarket CLOB
@@ -225,16 +253,19 @@ async function decideRealPath(db, adj) {
   const tokenId = adj.direction === 'NO' ? tokenIds.noTokenId : tokenIds.yesTokenId;
   const shares = gate.size / tokenPrice;
 
+  // Sub 9.9: resolve per-host wallet relay (auto-detect from agent_wallets OR REAL_RELAY env)
+  const realRelay = resolveRealRelay(db);
+
   // INSERT placeholder bettor_real_positions BEFORE order (idempotency anchor)
   const realPosResult = db.prepare(`
     INSERT INTO bettor_real_positions (adjustment_id, recommendation_id, market_id, relay_node_id, direction, entry_yes_price, size_usd, shares, status)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
-  `).run(adj.id, adj.recommendation_id, adj.market_id || '', SOPHIE_RELAY, adj.direction, yesPrice, gate.size, shares);
+  `).run(adj.id, adj.recommendation_id, adj.market_id || '', realRelay, adj.direction, yesPrice, gate.size, shares);
   const realPosId = realPosResult.lastInsertRowid;
 
-  // Sophie SDK POST (with retry)
+  // Polymarket SDK POST via local Console (with retry)
   const orderResult = await postSophieOrder({
-    relay_node_id: SOPHIE_RELAY,
+    relay_node_id: realRelay,
     tokenId,
     side: tokenSide,
     price: tokenPrice,
@@ -259,7 +290,7 @@ async function decideAdjustments(db) {
   const pending = db.prepare(`
     SELECT a.id, a.position_id, a.recommendation_id, a.adj_type, a.severity, a.trigger_reason,
            p.size_usd AS current_size, p.direction, p.entry_yes_price,
-           r.calibrator_confidence, r.market_id,
+           r.calibrator_confidence, r.market_id, r.p_mid, r.sigma,
            s.current_yes_price
     FROM bettor_adjustments a
     JOIN bettor_sim_positions p ON p.id = a.position_id
