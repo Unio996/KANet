@@ -75,9 +75,16 @@ export async function evaluatePosition(pos, opts = {}) {
   try { parsed = _parseRule(pos.market_description); } catch { return null; }
 
   // Adapter contract requires non-empty user (HTTP 400 if user=''). Pass full prompt as user.
-  // (system optional; scanner pattern: buildEstimatorPrompt returns {system, user}; reactor reuses estimator.fillTemplate → full prompt.)
+  // 2026-05-12 实测: adapter index.mjs:80 mindTask 分支 bug — mindSystem='' 时 fall-through 到
+  // mindTask 路径用 message 字段 (undefined), JSON.stringify(undefined).slice() throw. workaround:
+  // 传非空 system 触发 [MIND:layered] 分支 (line 76 `mindSystem && mindUser`). adapter bug 留 Phase
+  // 3f-后续 sediment fix (broader scope, 影响其他 caller).
   const llmCallback = opts.llmCallback || (async (prompt) => {
-    const r = await callLLMWithFallback({ system: '', user: prompt, adapterUrl });
+    const r = await callLLMWithFallback({
+      system: 'You are a calibrated forecaster re-estimating an open prediction market position.',
+      user: prompt,
+      adapterUrl,
+    });
     return r.ok ? r.text : null;
   });
 
