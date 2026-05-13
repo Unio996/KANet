@@ -1,17 +1,20 @@
 /**
- * bridge-router.js — Phase 2 β Sub #3.b (NWT spec 63e6fb48 v0.1 + 8fbe164f Polygon addr fix)
+ * bridge-router.js — Phase 2 β Sub #3.b + #3.b1
+ * v0.1: NWT spec 63e6fb48 + 8fbe164f Polygon addr fix
+ * v0.1.1: NWT spec 868a1925 LZ V2 extraOptions native gas drop
  *
  * KANet 价值结算原语跨链扩展: agent USDT/USDC bridge via Stargate V2 LayerZero (OFT).
  * 接 sendToken/quoteSend pool API. Taxi mode (oftCmd='0x') — direct transfer, no Bus batching.
  *
- * v0.1 scope (Sub #3.b ship):
+ * scope:
  *   - 5 EVM pool: BSC USDT/USDC + Polygon USDT + Arbitrum USDT + Optimism USDT + Base USDC
- *   - bridgeAsset({fromChain, toChain, asset, amount, recipient, relayId, slippagePct}) 主入口
+ *   - bridgeAsset({fromChain, toChain, asset, amount, recipient, relayId, slippagePct, nativeDropAmount, nativeDropTo, lzReceiveGas})
  *   - quoteBridge(...) 报价不执行
- *   - chain_events 入账 (bridge_initiated TX confirmed source)
+ *   - buildLzV2Options helper — LZ V2 OptionsType3 encoding (LZ_RECEIVE + optional NATIVE_DROP)
+ *   - chain_events 入账 (bridge_initiated TX confirmed source, payload 含 nativeDrop fields)
  *
- * v0.2+ backlog (out of v0.1):
- *   - Squid Router native gas drop / SOL/TRON Wormhole / LayerZero scan webhook listener
+ * v0.2+ backlog:
+ *   - Squid Router cross-asset / SOL/TRON Wormhole / LayerZero scan webhook listener
  *   - Avalanche/Ethereum pool / dest TX surfacing (bridge_completed)
  *
  * NO TX NO STATE CHANGE 铁律: source TX confirmed 才 record bridge_initiated.
@@ -80,6 +83,35 @@ function _getRelayWallet(relayId, chain) {
   ).get(relayId, chain);
 }
 
+/**
+ * Build LayerZero V2 OptionsType3 with LZ_RECEIVE gas + optional NATIVE_DROP.
+ *
+ * Encoding (J2 #332 docs triple-verified against LZ V2 OptionsBuilder.sol + ExecutorOptions.sol):
+ *   0x0003                       — TYPE_3 header (uint16 BE)
+ *   + 0x01 + 0x0011 + 0x01 + uint128(gas, 16 BE)              — LZ_RECEIVE (worker + size + type + payload)
+ *   + 0x01 + 0x0031 + 0x02 + uint128(amount, 16 BE) + bytes32 — NATIVE_DROP (conditional, when amount > 0)
+ *
+ * Note: ExecutorOptions.encodeLzReceiveOption returns 16 bytes when _value=0 (gas only).
+ * Our v0.1.1 doesn't pass _value (recipient receives native gas via NATIVE_DROP, not msg.value),
+ * so LZ_RECEIVE option_size = 0x0011 (type 1B + gas 16B = 17B).
+ *
+ * @param {bigint} lzReceiveGas — gas for lzReceive on dest (Stargate V2 default 200000n)
+ * @param {bigint} [nativeDropAmount=0n] — dest native amount in wei (e.g. 0.05 MATIC = 50000000000000000n)
+ * @param {string} [nativeDropTo=null] — EVM recipient (0x...), required when nativeDropAmount > 0
+ * @returns {string} 0x-prefixed hex
+ */
+export function buildLzV2Options(lzReceiveGas, nativeDropAmount = 0n, nativeDropTo = null) {
+  const gasBytes = ethers.solidityPacked(['uint128'], [lzReceiveGas]);
+  const parts = ['0x0003', '0x01', '0x0011', '0x01', gasBytes];
+  if (nativeDropAmount > 0n) {
+    if (!nativeDropTo) throw new Error('buildLzV2Options: nativeDropTo required when nativeDropAmount > 0');
+    const amountBytes = ethers.solidityPacked(['uint128'], [nativeDropAmount]);
+    const receiverBytes32 = _addrToBytes32(nativeDropTo);
+    parts.push('0x01', '0x0031', '0x02', amountBytes, receiverBytes32);
+  }
+  return ethers.concat(parts);
+}
+
 // ── Public API ─────────────────────────────────────────────────────────────────
 
 /**
@@ -92,9 +124,18 @@ function _getRelayWallet(relayId, chain) {
  * @param {number|string} params.amount — human-readable amount (e.g. 10)
  * @param {string} params.recipient — destination EVM address (will be bytes32-padded)
  * @param {number} [params.slippagePct=0.5] — min amount slippage (e.g. 0.5 = 0.5%)
- * @returns {Promise<{ ok: true, nativeFee, lzTokenFee, amountLD, minAmountLD, dstEid } | { ok: false, error }>}
+ * @param {number|string} [params.nativeDropAmount=0] — dest native gas amount in human-readable decimal (e.g. 0.05 MATIC). Dest native is 18-decimal for all v0.1 chains (BNB/MATIC/ETH).
+ * @param {string} [params.nativeDropTo=null] — EVM recipient of native drop, defaults to `recipient`
+ * @param {number} [params.lzReceiveGas=200000] — gas for lzReceive on dest (Stargate V2 default 200000)
+ * @returns {Promise<{ ok: true, nativeFee, lzTokenFee, amountLD, minAmountLD, dstEid, sendParam } | { ok: false, error }>}
  */
-export async function quoteBridge({ fromChain, toChain, asset, amount, recipient, slippagePct = 0.5 }) {
+export async function quoteBridge({
+  fromChain, toChain, asset, amount, recipient,
+  slippagePct = 0.5,
+  nativeDropAmount = 0,
+  nativeDropTo = null,
+  lzReceiveGas = 200000,
+}) {
   const srcPool = _resolvePool(fromChain, asset);
   if (srcPool.error) return { ok: false, error: srcPool.error };
   const dstPool = _resolvePool(toChain, asset);
@@ -110,12 +151,16 @@ export async function quoteBridge({ fromChain, toChain, asset, amount, recipient
     const pool = new ethers.Contract(srcPool.pool, POOL_ABI, provider);
     const amountLD = ethers.parseUnits(String(amount), srcPool.decimals);
     const minAmountLD = amountLD - (amountLD * BigInt(Math.floor(slippagePct * 100)) / 10000n);
+    const dropWei = Number(nativeDropAmount) > 0
+      ? ethers.parseUnits(String(nativeDropAmount), 18)
+      : 0n;
+    const extraOptions = buildLzV2Options(BigInt(lzReceiveGas), dropWei, nativeDropTo || recipient);
     const sendParam = {
       dstEid,
       to: _addrToBytes32(recipient),
       amountLD,
       minAmountLD,
-      extraOptions: '0x',
+      extraOptions,
       composeMsg: '0x',
       oftCmd: '0x',
     };
@@ -138,14 +183,23 @@ export async function quoteBridge({ fromChain, toChain, asset, amount, recipient
  * @param {string} params.relayId — sender relay UUID (must own agent_wallets[fromChain] default)
  * @returns {Promise<{ ok: true, txHash, nativeFee, amountLD, minAmountLD, dstEid } | { ok: false, error }>}
  */
-export async function bridgeAsset({ fromChain, toChain, asset, amount, recipient, relayId, slippagePct = 0.5 }) {
+export async function bridgeAsset({
+  fromChain, toChain, asset, amount, recipient, relayId,
+  slippagePct = 0.5,
+  nativeDropAmount = 0,
+  nativeDropTo = null,
+  lzReceiveGas = 200000,
+}) {
   if (!relayId) return { ok: false, error: 'relayId required' };
   const srcPool = _resolvePool(fromChain, asset);
   if (srcPool.error) return { ok: false, error: srcPool.error };
   const wallet = _getRelayWallet(relayId, fromChain);
   if (!wallet?.privkey_encrypted) return { ok: false, error: `No ${fromChain} wallet for relay ${relayId.slice(0, 8)}` };
 
-  const quote = await quoteBridge({ fromChain, toChain, asset, amount, recipient, slippagePct });
+  const quote = await quoteBridge({
+    fromChain, toChain, asset, amount, recipient, slippagePct,
+    nativeDropAmount, nativeDropTo, lzReceiveGas,
+  });
   if (!quote.ok) return quote;
 
   const rpcUrl = EVM_RPC_URLS[fromChain];
@@ -201,6 +255,9 @@ export async function bridgeAsset({ fromChain, toChain, asset, amount, recipient
         minAmountLD: String(quote.minAmountLD),
         dstEid: quote.dstEid,
         nativeFee: String(quote.nativeFee),
+        nativeDropAmount: String(nativeDropAmount || 0),
+        nativeDropTo: nativeDropTo || recipient,
+        lzReceiveGas,
         block: receipt?.blockNumber || null,
       },
     });
