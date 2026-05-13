@@ -93,6 +93,33 @@ const SOPHIE_HOST = process.env.SOPHIE_HOST || '127.0.0.1';  // J1 host = self, 
 const SOPHIE_RELAY = process.env.SOPHIE_RELAY || 'a83c4b07-eaf7-4d21-972a-1265e0cdcfcf';  // Sophie wallet relay_node_id
 const RETRY_BACKOFFS_MS = [500, 2000, 5000];
 
+// Sub 6.5 hotfix per r82 CRITICAL 2: token_id lookup chain.
+// market_id → condition_id (stored in bettor_recommendations) → Polymarket CLOB
+// /markets/<conditionId> → tokens[0]=yes_token / tokens[1]=no_token.
+// Cache 30min in-memory (减少 Polymarket API call rate).
+const TOKEN_CACHE = new Map();
+const TOKEN_CACHE_TTL_MS = 30 * 60_000;
+
+async function lookupTokenIds(conditionId) {
+  if (!conditionId) throw new Error('lookupTokenIds: condition_id required');
+  const cached = TOKEN_CACHE.get(conditionId);
+  if (cached && Date.now() - cached.cachedAt < TOKEN_CACHE_TTL_MS) return cached.ids;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 5_000);
+  try {
+    const r = await fetch(`https://clob.polymarket.com/markets/${conditionId}`, { signal: ctrl.signal });
+    if (!r.ok) throw new Error(`Polymarket /markets/${conditionId.slice(0, 12)} HTTP ${r.status}`);
+    const m = await r.json();
+    const ids = {
+      yesTokenId: m.tokens?.[0]?.token_id || m.tokens?.find(t => /yes/i.test(t.outcome))?.token_id,
+      noTokenId:  m.tokens?.[1]?.token_id || m.tokens?.find(t => /no/i.test(t.outcome))?.token_id,
+    };
+    if (!ids.yesTokenId || !ids.noTokenId) throw new Error(`token_id missing in market response: ${JSON.stringify(m.tokens).slice(0, 100)}`);
+    TOKEN_CACHE.set(conditionId, { ids, cachedAt: Date.now() });
+    return ids;
+  } finally { clearTimeout(t); }
+}
+
 // daily/weekly reset cron (嵌入 tick, 5min check)
 function maybeResetCounters(db) {
   const cfg = db.prepare('SELECT * FROM bettor_real_config WHERE id = 1').get();
@@ -160,10 +187,24 @@ async function decideRealPath(db, adj) {
   const gate = preBetGateCheck(db, adj, requestedSize);
   if (!gate.ok) return { action: 'skip', reason: gate.reason };
 
-  // Get current market price (TODO Phase 3h: 接 Polymarket SDK current price). Stub use entry_yes_price.
+  // Get current market price. Stub use entry_yes_price if snapshot missing.
   const yesPrice = Number(adj.current_yes_price || adj.entry_yes_price || 0.5);
-  const tokenSide = adj.direction === 'NO' ? 'SELL' : 'BUY';  // 简化 placeholder, B-2 完善
+  // Sub 6.5 hotfix per r82 CRITICAL 1: Polymarket CLOB open position 总是 'BUY'
+  // (NO position = BUY no_token, NOT SELL yes_token). SELL 只在 close 路径.
+  const tokenSide = 'BUY';
   const tokenPrice = adj.direction === 'NO' ? (1 - yesPrice) : yesPrice;
+
+  // Sub 6.5 hotfix per r82 CRITICAL 2: token_id lookup from recommendation.condition_id
+  // 否则 Polymarket API 必 fail 400. condition_id stored in bettor_recommendations
+  // (scanner persist 已 verify).
+  const rec = db.prepare('SELECT condition_id FROM bettor_recommendations WHERE id = ?').get(adj.recommendation_id);
+  if (!rec?.condition_id) {
+    return { action: 'skip', reason: `recommendation missing condition_id (rec_id=${adj.recommendation_id?.slice(0, 8)})` };
+  }
+  let tokenIds;
+  try { tokenIds = await lookupTokenIds(rec.condition_id); }
+  catch (e) { return { action: 'skip', reason: `lookupTokenIds fail: ${e.message?.slice(0, 80)}` }; }
+  const tokenId = adj.direction === 'NO' ? tokenIds.noTokenId : tokenIds.yesTokenId;
   const shares = gate.size / tokenPrice;
 
   // INSERT placeholder bettor_real_positions BEFORE order (idempotency anchor)
@@ -176,7 +217,7 @@ async function decideRealPath(db, adj) {
   // Sophie SDK POST (with retry)
   const orderResult = await postSophieOrder({
     relay_node_id: SOPHIE_RELAY,
-    tokenId: adj.token_id || '',  // TODO Phase 3h: lookup from market_id + outcome
+    tokenId,
     side: tokenSide,
     price: tokenPrice,
     size: shares,
