@@ -32,7 +32,10 @@ function log(msg) {
   try { writeFileSync(LOG_FILE, line + '\n', { flag: 'a' }); } catch {}
 }
 
-// ── Watch keys + check funcs (5 J1 propose, +2 architect 加 Bettor r78) ─────────
+// ── Watch keys + check funcs (5 J1 propose) ────────────────────────────────────
+// Sub 3.5 hotfix (Bettor r79 audit): 删原误导 "+2 architect 加" 注释 (实际 0 architect 加).
+// TODO Phase 3h dev hardening: eval-success-rate (reactor cross-module instrument) +
+// monitor-subscribe-alive (dev-coord-monitor-local heartbeat write).
 
 const WATCH_KEYS = [
   // key, severity-on-fail, expected_interval_ms, check_fn
