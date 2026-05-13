@@ -182,8 +182,26 @@ async function decideRealPath(db, adj) {
   }
 
   // 6-gate check
-  const requestedSize = Number(adj.target_size || adj.real_size_usd || 0);
+  let requestedSize = Number(adj.target_size || adj.real_size_usd || 0);
   if (!requestedSize || requestedSize < 1) return { action: 'skip', reason: `size ${requestedSize} invalid` };
+
+  // Sub 8 E-1 (降级实施 per r83): LLM stability check via estimator sigma proxy.
+  // Phase 4 sediment: 真 N-sample median + cross-host quorum 留 KANet broker 协议成熟.
+  // 现 estimator.sigma 已 single-call variance estimate (0..1 scale), 直接当 stability proxy:
+  //   sigma > LLM_VARIANCE_SKIP (0.20) → SKIP real (LLM 完全不确定 fall through sim)
+  //   sigma > LLM_VARIANCE_HALF (0.10) → size × 0.5 (high noise, halve)
+  //   sigma ≤ 0.10 → full size
+  const LLM_VARIANCE_SKIP = 0.20;
+  const LLM_VARIANCE_HALF = 0.10;
+  const adjSigma = Number(db.prepare('SELECT sigma FROM bettor_recommendations WHERE id = ?').get(adj.recommendation_id)?.sigma || 0.05);
+  if (adjSigma > LLM_VARIANCE_SKIP) {
+    return { action: 'skip', reason: `E-1 LLM variance sigma=${adjSigma.toFixed(3)} > ${LLM_VARIANCE_SKIP} (fall through sim)` };
+  }
+  if (adjSigma > LLM_VARIANCE_HALF) {
+    requestedSize = requestedSize * 0.5;
+    log(`E-1 high variance sigma=${adjSigma.toFixed(3)} > ${LLM_VARIANCE_HALF} → size × 0.5 = $${requestedSize.toFixed(2)}`);
+  }
+
   const gate = preBetGateCheck(db, adj, requestedSize);
   if (!gate.ok) return { action: 'skip', reason: gate.reason };
 
