@@ -59,7 +59,9 @@ test('Bug H Sub #5.残 — post-publish update escrow status pending_prepay → 
 
 test('Bug H Sub #5.残 — guard: escrow row not found OR wrong status → return early', () => {
   assert.match(ROUTER, /if \(!e\) return \{ ok: false, error:[\s\S]*?escrow row[\s\S]*?not found/, 'guard escrow not found');
-  assert.match(ROUTER, /if \(e\.status !== 'pending_prepay'\) return/, 'guard wrong status');
+  // Bug K fix 5/14: accept both pending_prepay AND active (watcher UPDATE race), idempotency via offer_id
+  assert.match(ROUTER, /\['pending_prepay', 'active'\]\.includes\(e\.status\)/, 'guard accepts both pending_prepay + active states');
+  assert.match(ROUTER, /if \(e\.offer_id\) return \{ ok: false, error: `escrow row already has offer_id/, 'idempotency guard on offer_id');
 });
 
 test('Bug H Sub #5.残 — legacy _doPublish 保留 (ESCROW_MODE=false default 不破)', () => {

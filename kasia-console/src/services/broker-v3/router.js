@@ -309,7 +309,10 @@ async function _doCheckPrepayStatus(peer, draft, prevReply) {
 export async function _doPublishAfterPrepay(escrowRowId, relayNodeId) {
   const e = sqlite.prepare('SELECT * FROM user_escrow_balances WHERE id = ?').get(escrowRowId);
   if (!e) return { ok: false, error: `escrow row ${escrowRowId} not found` };
-  if (e.status !== 'pending_prepay') return { ok: false, error: `escrow row status=${e.status}, expected pending_prepay` };
+  // Bug K 5/14 fix (race ordering): watcher (Sub #2/#3) UPDATEs status to 'active' before calling
+  // _doPublishAfterPrepay, so guard 必 accept 'active' too. 真 idempotency check: gate on offer_id.
+  if (!['pending_prepay', 'active'].includes(e.status)) return { ok: false, error: `escrow row status=${e.status}, expected pending_prepay or active` };
+  if (e.offer_id) return { ok: false, error: `escrow row already has offer_id ${e.offer_id?.slice(0,8)}, skip duplicate publish` };
 
   const isBuy = e.side === 'buy_kas';
   const chainKey = isBuy ? e.chain : e.target_chain;  // EVM chain for both (BUY prepay chain = target taker pay, SELL target chain = USDT receive chain)
