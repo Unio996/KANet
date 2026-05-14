@@ -1,5 +1,6 @@
 import { sqlite } from '../db/client.js';
 import { runScan, isScanRunning } from '../services/bettor-scanner.js';
+import { runScavengerScan, isScavengerRunning } from '../services/bettor-scavenger.js';
 import { resolveExpired, isResolverRunning } from '../services/bettor-resolver.js';
 import { snapshotOpenPositions, isTrackerRunning } from '../services/bettor-position-tracker.js';
 import { evaluatePositions, isReactorRunning } from '../services/bettor-reactor.js';
@@ -65,7 +66,112 @@ export async function registerBettorRoutes(fastify) {
 
   // GET /api/bettor/scan/status
   fastify.get('/api/bettor/scan/status', async (_request, reply) => {
-    return reply.send({ running: isScanRunning() });
+    return reply.send({ running: isScanRunning(), scavenger_running: isScavengerRunning() });
+  });
+
+  // POST /api/bettor/scavenger/scan — Owner 5/14 pivot, 新 scavenger algo (rules+trajectory+流动性)
+  fastify.post('/api/bettor/scavenger/scan', async (request, reply) => {
+    const trigger = request.body?.trigger_type || 'manual';
+    const relayNodeId = request.body?.relay_node_id || null;
+    if (isScavengerRunning()) {
+      return reply.code(409).send({ ok: false, reason: 'scavenger scan already in progress' });
+    }
+    const result = await runScavengerScan(trigger, relayNodeId);
+    return reply.send(result);
+  });
+
+  // POST /api/bettor/recommendation/:id/accept — 一键下单
+  // 拿 recommendation row → fetch market clobTokenIds → call /api/predictions/order
+  // Owner 5/14 钦定: 人工 final gate → ACCEPT 走 J2 wallet 自动下单
+  fastify.post('/api/bettor/recommendation/:id/accept', async (request, reply) => {
+    const recId = request.params.id;
+    const overrideSize = request.body?.size ? parseFloat(request.body.size) : null;
+    const overridePrice = request.body?.price ? parseFloat(request.body.price) : null;
+
+    const rec = sqlite.prepare(`
+      SELECT id, relay_node_id, condition_id, slug, question, decision,
+             size_usd, yes_price, end_date, status
+      FROM bettor_recommendations WHERE id = ?
+    `).get(recId);
+    if (!rec) return reply.code(404).send({ ok: false, error: 'recommendation not found' });
+    if (rec.status !== 'pending') return reply.code(409).send({ ok: false, error: `recommendation status=${rec.status}, not pending` });
+    if (!rec.condition_id) return reply.code(400).send({ ok: false, error: 'recommendation missing condition_id' });
+    if (rec.decision !== 'YES' && rec.decision !== 'NO') return reply.code(400).send({ ok: false, error: `decision=${rec.decision} not tradeable` });
+
+    // Fetch clobTokenIds from gamma
+    let market;
+    try {
+      const https = await import('node:https');
+      market = await new Promise((resolve, rej) => {
+        https.default.get(`https://gamma-api.polymarket.com/markets?condition_ids=${rec.condition_id}`, (res) => {
+          let d = ''; res.on('data', c => d += c);
+          res.on('end', () => { try { resolve(JSON.parse(d)[0]); } catch (e) { rej(e); } });
+        }).on('error', rej);
+      });
+    } catch (e) {
+      return reply.code(500).send({ ok: false, error: `gamma fetch failed: ${e.message}` });
+    }
+    if (!market?.clobTokenIds) return reply.code(500).send({ ok: false, error: 'market missing clobTokenIds' });
+
+    let tokens;
+    try { tokens = JSON.parse(market.clobTokenIds); } catch { return reply.code(500).send({ ok: false, error: 'clobTokenIds parse failed' }); }
+    const yesTokenId = tokens[0];
+    const noTokenId = tokens[1];
+    if (!yesTokenId || !noTokenId) return reply.code(500).send({ ok: false, error: 'missing yes/no token id' });
+    const tokenId = rec.decision === 'YES' ? yesTokenId : noTokenId;
+
+    // Current yes price → derive entry price (slight slip allowance)
+    const yesPriceLive = parseFloat(JSON.parse(market.outcomePrices || '[]')[0] || rec.yes_price);
+    const baseAsk = rec.decision === 'YES' ? yesPriceLive : (1 - yesPriceLive);
+    const entryPrice = overridePrice || Math.min(0.995, baseAsk + 0.005);
+
+    // Auto-cap size to available wallet balance (Owner-mandated bug fix 5/14)
+    let sizeUsd = overrideSize || rec.size_usd;
+    try {
+      const statusRes = await fetch(`http://127.0.0.1:${process.env.CONSOLE_PORT || 3100}/api/polymarket/${rec.relay_node_id}/status`);
+      const status = await statusRes.json();
+      const availablePusd = Number(status.pusd) || 0;
+      // Leave $1 buffer for rounding
+      const maxAffordable = Math.max(0, availablePusd - 1);
+      if (sizeUsd > maxAffordable) {
+        console.log(`[bettor/accept] size cap: requested $${sizeUsd} > available $${availablePusd.toFixed(2)}, capping to $${maxAffordable.toFixed(2)}`);
+        sizeUsd = maxAffordable;
+      }
+    } catch (e) {
+      console.log(`[bettor/accept] balance check failed: ${e.message}, proceeding with requested size`);
+    }
+
+    const sizeShares = Math.floor(sizeUsd / entryPrice);
+    if (sizeShares < 1) return reply.code(400).send({ ok: false, error: `size too small after balance cap: ${sizeShares} shares (available $${sizeUsd.toFixed(2)})` });
+
+    // Call /api/predictions/order internally
+    const orderRes = await fetch(`http://127.0.0.1:${process.env.CONSOLE_PORT || 3100}/api/predictions/order`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        relay_node_id: rec.relay_node_id,
+        tokenId,
+        side: 'BUY',
+        price: entryPrice,
+        size: sizeShares,
+      }),
+    });
+    const orderData = await orderRes.json();
+
+    // Mark rec as accepted/filled/failed
+    if (orderData.ok || orderData.success) {
+      sqlite.prepare(`UPDATE bettor_recommendations SET status='accepted' WHERE id=?`).run(recId);
+      return reply.send({
+        ok: true,
+        recommendation_id: recId,
+        order: orderData,
+        cost_basis_usd: (sizeShares * entryPrice).toFixed(2),
+        entry_price: entryPrice,
+        size_shares: sizeShares,
+      });
+    } else {
+      return reply.code(500).send({ ok: false, error: orderData.error || 'order failed', order: orderData });
+    }
   });
 
   // GET /api/bettor/track-record — 战绩 (per-agent or global)

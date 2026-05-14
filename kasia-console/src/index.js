@@ -372,8 +372,13 @@ import { startAll as startAllRelays, stopAll as stopAllRelays } from './services
 await startAllRelays();
 
 // Bettor scanner cron — Phase 3a (6h cron, top 10 推荐写入 bettor_recommendations)
-import { startCron as startBettorCron } from './services/bettor-scanner.js';
-startBettorCron();
+// 5/14 Owner pivot: 数学 Kelly 路线 deprecated, 新 scavenger 接管. 老 scanner 暂保留留 fallback.
+// import { startCron as startBettorCron } from './services/bettor-scanner.js';
+// startBettorCron();
+
+// Bettor SCAVENGER cron — Owner 5/14 14:50 钦定 (rules+trajectory+流动性 filter, 弃 LLM-pMid+Kelly)
+import { startScavengerCron } from './services/bettor-scavenger.js';
+startScavengerCron();
 
 // Bettor resolver cron — Phase 3d (1h cron, 拉 Polymarket 已结算市场算战绩)
 import { startResolverCron as startBettorResolver } from './services/bettor-resolver.js';

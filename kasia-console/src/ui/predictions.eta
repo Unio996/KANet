@@ -4,7 +4,7 @@
 
   <!-- 钱包状态栏 -->
   <div class="card card-compact mb-4 flex items-center gap-4 flex-wrap">
-    <select x-model="selectedAgent" @change="loadWalletStatus(); loadBettor()" class="rounded-lg border border-warm-300 px-3 py-1.5 text-sm bg-white font-medium">
+    <select x-model="selectedAgent" @change="onAgentChange()" class="rounded-lg border border-warm-300 px-3 py-1.5 text-sm bg-white font-medium">
       <% it.relayNodes.forEach(r => { %>
       <option value="<%= r.id %>"><%= r.name %></option>
       <% }) %>
@@ -394,9 +394,13 @@
                         :class="r.decision === 'YES' ? 'bg-green-100 text-green-700' : r.decision === 'NO' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'"
                         x-text="r.decision === 'SKIP' ? 'SKIP' : 'BUY ' + r.decision"></span>
                 </div>
-                <div class="grid grid-cols-3 gap-2 text-[11px]">
+                <div class="grid grid-cols-4 gap-2 text-[11px]">
                   <div>
-                    <div class="text-ink-400">edge</div>
+                    <div class="text-ink-400">yes 价</div>
+                    <div class="font-bold text-ink-700" x-text="(r.yes_price * 100).toFixed(2) + '%'"></div>
+                  </div>
+                  <div>
+                    <div class="text-ink-400" x-text="r.llm_tier === 'scavenger' ? '锁利' : 'edge'"></div>
                     <div class="font-bold text-ink-700" x-text="(r.edge * 100).toFixed(1) + 'pp'"></div>
                   </div>
                   <div>
@@ -409,10 +413,28 @@
                   </div>
                 </div>
                 <div class="flex items-center justify-between mt-2 text-[10px] text-ink-400">
-                  <span x-text="'pMid=' + (r.p_mid * 100).toFixed(1) + '% σ=' + (r.sigma * 100).toFixed(1) + '% gap=' + r.info_gap_months.toFixed(1) + 'mo'"></span>
+                  <span x-text="r.llm_tier === 'scavenger' ? ('p(NO)=' + (r.p_mid * 100).toFixed(1) + '% tail=' + (r.sigma * 100).toFixed(1) + '%') : ('pMid=' + (r.p_mid * 100).toFixed(1) + '% σ=' + (r.sigma * 100).toFixed(1) + '% gap=' + (r.info_gap_months || 0).toFixed(1) + 'mo')"></span>
                   <span x-show="r.end_date" x-text="'到期 ' + new Date(r.end_date).toLocaleDateString()"></span>
                 </div>
-                <button @click="bettorDetail = r" class="mt-2 w-full text-[10px] text-brand-500 hover:text-brand-700 text-left">查看推理 →</button>
+                <div class="flex gap-2 mt-2">
+                  <button @click="bettorDetail = r" class="flex-1 text-[10px] text-brand-500 hover:text-brand-700 text-left">查看推理 →</button>
+                  <template x-if="r.status === 'pending' && (r.decision === 'YES' || r.decision === 'NO')">
+                    <button @click="acceptBettorRec(r)" :disabled="r._accepting"
+                            class="px-3 py-1 rounded text-[10px] font-bold text-white"
+                            :class="r.decision === 'YES' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'">
+                      <span x-text="r._accepting ? '下单中...' : '✓ ACCEPT 下单'"></span>
+                    </button>
+                  </template>
+                  <template x-if="r.status === 'accepted'">
+                    <span class="px-3 py-1 rounded text-[10px] font-bold bg-gray-200 text-gray-600">已下单</span>
+                  </template>
+                </div>
+                <template x-if="r._acceptError">
+                  <div class="mt-1 text-[10px] text-red-500" x-text="'下单失败: ' + r._acceptError"></div>
+                </template>
+                <template x-if="r._acceptSuccess">
+                  <div class="mt-1 text-[10px] text-green-600" x-text="'✓ 下单成功 ' + r._acceptSuccess"></div>
+                </template>
               </div>
             </template>
           </div>
@@ -1244,6 +1266,36 @@ function predictionsPage() {
       }
     },
 
+    async acceptBettorRec(r) {
+      // 确认 dialog (avoid accidental click)
+      const sizeUsd = (r.size_usd || 0).toFixed(0);
+      const dir = r.decision;
+      if (!confirm(`确认下单 BUY ${dir} $${sizeUsd}?\n${r.question}\n当前 yes 价: ${(r.yes_price*100).toFixed(2)}%`)) return;
+      r._accepting = true;
+      r._acceptError = null;
+      r._acceptSuccess = null;
+      try {
+        const res = await fetch('/api/bettor/recommendation/' + r.id + '/accept', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          r.status = 'accepted';
+          r._acceptSuccess = `cost $${data.cost_basis_usd} (${data.size_shares} shares @ ${data.entry_price})`;
+          // refresh portfolio
+          this.loadPositions();
+        } else {
+          r._acceptError = data.error || 'unknown error';
+        }
+      } catch (e) {
+        r._acceptError = e.message;
+      } finally {
+        r._accepting = false;
+      }
+    },
+
     async bettorEvaluateNow() {
       if (this.bettorEvaluating) return;
       this.bettorEvaluating = true;
@@ -1449,6 +1501,16 @@ function predictionsPage() {
         const res = await fetch('/api/polymarket/' + this.selectedAgent + '/status');
         this.walletStatus = await res.json();
       } catch { this.walletStatus = { hasWallet: false }; }
+    },
+
+    async onAgentChange() {
+      this.positions = [];
+      this.settled = [];
+      this.orders = [];
+      this.summary = null;
+      await this.loadWalletStatus();
+      this.loadBettor();
+      this.loadPositions();
     },
 
     async doApprove() {
