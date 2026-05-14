@@ -21,6 +21,36 @@
 
 const _state = new Map();  // user_id → { flow, step, draft }
 
+// P1 fix 5/14 (J2 + NWT Tier 4 C1.6 双 host UX gap 实证): broker publishes offers with
+// maker = broker_addr (Trader-B addr) per broker-as-maker pattern. user_id 在 metadata.user_id
+// 里. listOffers({ maker: user_addr }) 0 row → user 看不见自己挂的单. 修: state-machine 内
+// 记 user → [offer_id] (in-memory, 30min TTL align offer expiry), MY_ORDERS 走此 list + getOffer
+// 拉详情, 不动 broker-as-maker DB schema, 不破协议层.
+const _publishedByUser = new Map();  // user_id → Map<offer_id, expires_at_ms>
+const _USER_OFFER_TTL_MS = 35 * 60 * 1000;  // 30min offer TTL + 5min reconciliation buffer
+
+export function addUserOffer(user_id, offer_id) {
+  if (!user_id || !offer_id) return;
+  let m = _publishedByUser.get(user_id);
+  if (!m) { m = new Map(); _publishedByUser.set(user_id, m); }
+  m.set(offer_id, Date.now() + _USER_OFFER_TTL_MS);
+  // Prune expired entries (cheap O(N) per call, N ≤ ~50 typical)
+  const now = Date.now();
+  for (const [oid, exp] of m) { if (exp < now) m.delete(oid); }
+}
+export function getUserOffers(user_id) {
+  const m = _publishedByUser.get(user_id);
+  if (!m) return [];
+  const now = Date.now();
+  const live = [];
+  for (const [oid, exp] of m) {
+    if (exp < now) m.delete(oid);
+    else live.push(oid);
+  }
+  return live;
+}
+export function _testResetUserOffers() { _publishedByUser.clear(); }
+
 // Phase B P0 fix (J2 #338 per NWT spec 4324dccc): chain menu 6 chain (跟 Phase 2 β prefund align).
 // 5/13 broker BSC + polygon (13.99 USDT + 0.05 MATIC) + arbitrum (13.99 + 0.0005 ETH) +
 // optimism (13.99 + 0.0001 ETH) + base (13.99 USDC + 0.0002 ETH) 全 funded.

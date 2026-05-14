@@ -165,6 +165,8 @@ async function _doPublish(peer, draft, relayNodeId, prevReply) {
     stateMachine.clearFlowState(peer);
     return `挂单失败: ${r.error || 'unknown'}. 回 back 重来.`;
   }
+  // P1 fix 5/14 (Tier 4 C1.6 UX gap): record offer → user so MY_ORDERS 看得见
+  if (r.offer_id) stateMachine.addUserOffer(peer, r.offer_id);
   // ship 成功 — clear draft, return offer detail
   stateMachine.clearFlowState(peer);
   return [
@@ -288,12 +290,21 @@ function _renderBrowseList(offers) {
 }
 
 async function _doMyOrders(peer, prevReply) {
-  const r = await client.listOffers({ maker: peer, limit: 5, offset: 0 });
-  if (!r.ok || !r.offers?.length) return '你当前没 active 订单. 回 back 返回菜单.';
+  // P1 fix 5/14 (Tier 4 C1.6 UX gap, NWT + J2 双 host reproduce): broker publishes offers
+  // with maker = broker_addr (broker-as-maker pattern). 旧 listOffers({ maker: peer }) → 0 row.
+  // Fix: 走 stateMachine.getUserOffers(peer) (publish 后 record) + getOffer 拉详情.
+  const offerIds = stateMachine.getUserOffers(peer);
+  if (offerIds.length === 0) return '你当前没 active 订单. 回 back 返回菜单.';
+  // Fetch detail in parallel (≤ 50 ids cap by addUserOffer prune)
+  const settled = await Promise.all(offerIds.slice(0, 5).map(id => client.getOffer(id)));
+  const offers = settled.filter(s => s.ok).map(s => s.offer).filter(Boolean);
+  if (offers.length === 0) return '你当前没 active 订单 (full expire). 回 back 返回菜单.';
+  // Sort by created_at DESC (most recent first)
+  offers.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
   const cur = stateMachine.getFlowState(peer) || {};
-  stateMachine.setFlowState(peer, { ...cur, flow: 'MY_ORDERS', step: 'LIST', orders: r.offers });
+  stateMachine.setFlowState(peer, { ...cur, flow: 'MY_ORDERS', step: 'LIST', orders: offers });
   const lines = ['📋 我的订单 (回 1-5 看详情, back 返回菜单):', ''];
-  r.offers.forEach((o, i) => {
+  offers.forEach((o, i) => {
     lines.push(`${i + 1}️⃣ [${o.protocol_status}] ${o.give_amount} ${o.give_asset} → ${o.want_amount} ${o.want_asset}`);
     lines.push(`   id: ${o.id?.slice(0, 12)}`);
   });
