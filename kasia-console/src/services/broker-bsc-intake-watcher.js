@@ -134,11 +134,13 @@ export async function tickEscrow() {
   if (!brokerWallet?.address) return { ok: false, reason: 'no_broker_bsc_wallet' };
   const brokerBscAddr = brokerWallet.address;
 
+  // Bug L 5/14 fix: include both pending_prepay (waiting for prepay TX) + active without offer_id
+  // (prepay detected, publish failed/not-yet-attempted — Bug K race fix follow-up retry path).
   // 查 BUY pending escrow rows (user prepay USDT on BSC, broker_recv_addr=BSC broker addr)
   const pending = sqlite.prepare(`
-    SELECT id, quote_seq, side, user_kasia_addr, amount_quoted, asset, chain, broker_recv_addr, target_amount, expires_at
+    SELECT id, quote_seq, side, user_kasia_addr, amount_quoted, asset, chain, broker_recv_addr, target_amount, expires_at, status, prepayment_tx
     FROM user_escrow_balances
-    WHERE status = 'pending_prepay'
+    WHERE (status = 'pending_prepay' OR (status = 'active' AND offer_id IS NULL))
       AND side = 'buy_kas'
       AND chain = 'bnb'
       AND broker_recv_addr = ?
@@ -155,38 +157,44 @@ export async function tickEscrow() {
 
   let matched = 0;
   for (const e of pending) {
-    const expectedAmount = parseFloat(e.amount_quoted);
-    // FIFO match by amount within ±0.5% tolerance, prefer exact-amount-match (含 quote_seq noise)
-    const tx = scan.events.find(t => Math.abs(t.amount - expectedAmount) / expectedAmount <= ESCROW_AMOUNT_TOLERANCE_PCT);
-    if (!tx) continue;
+    // Bug L 5/14 fix: 2 cases — pending_prepay (need to find prepayment TX) OR active (already detected,
+    // retry publish only).
+    if (e.status === 'pending_prepay') {
+      const expectedAmount = parseFloat(e.amount_quoted);
+      // FIFO match by amount within ±0.5% tolerance, prefer exact-amount-match (含 quote_seq noise)
+      const tx = scan.events.find(t => Math.abs(t.amount - expectedAmount) / expectedAmount <= ESCROW_AMOUNT_TOLERANCE_PCT);
+      if (!tx) continue;
 
-    // anti-replay: prepayment_tx UNIQUE constraint will reject if already used
-    try {
-      sqlite.prepare(`
-        UPDATE user_escrow_balances
-        SET prepayment_tx = ?, amount_received = ?, user_refund_addr = ?, status = 'active', updated_at = datetime('now')
-        WHERE id = ? AND status = 'pending_prepay'
-      `).run(tx.tx_hash, String(tx.amount), tx.sender || tx.from_address || 'unknown', e.id);
-    } catch (err) {
-      if (/UNIQUE constraint failed/.test(err.message)) {
-        console.warn(`[broker-bsc-intake-escrow] prepayment_tx ${tx.tx_hash.slice(0,16)} already used (anti-replay)`);
+      // anti-replay: prepayment_tx UNIQUE constraint will reject if already used
+      try {
+        sqlite.prepare(`
+          UPDATE user_escrow_balances
+          SET prepayment_tx = ?, amount_received = ?, user_refund_addr = ?, status = 'active', updated_at = datetime('now')
+          WHERE id = ? AND status = 'pending_prepay'
+        `).run(tx.tx_hash, String(tx.amount), tx.sender || tx.from_address || 'unknown', e.id);
+      } catch (err) {
+        if (/UNIQUE constraint failed/.test(err.message)) {
+          console.warn(`[broker-bsc-intake-escrow] prepayment_tx ${tx.tx_hash.slice(0,16)} already used (anti-replay)`);
+          continue;
+        }
+        console.error(`[broker-bsc-intake-escrow] UPDATE err for escrow ${e.id.slice(0,8)}: ${err.message}`);
         continue;
       }
-      console.error(`[broker-bsc-intake-escrow] UPDATE err for escrow ${e.id.slice(0,8)}: ${err.message}`);
-      continue;
     }
+    // else: e.status === 'active' AND offer_id IS NULL — Bug L retry path (Bug K race: prepay UPDATE
+    // succeeded but publish failed). Skip TX match step, go straight to publish.
 
-    // call _doPublishAfterPrepay to publish offer backed by escrow
+    // call _doPublishAfterPrepay to publish offer backed by escrow (post Bug K guard relax)
     try {
       const { _doPublishAfterPrepay } = await import('./broker-v3/router.js');
       const r = await _doPublishAfterPrepay(e.id, BROKER_RELAY_ID);
       if (!r.ok) {
         console.error(`[broker-bsc-intake-escrow] _doPublishAfterPrepay fail for escrow ${e.id.slice(0,8)}: ${r.error}`);
-        // Rollback escrow status to pending_prepay for retry? OR mark failed? For now leave 'active' with no offer_id, manual review.
       } else {
         matched++;
         _escrowMatches++;
-        console.log(`[broker-bsc-intake-escrow] escrow ${e.id.slice(0,8)} prepay-detected (tx=${tx.tx_hash.slice(0,16)}, $${tx.amount}) → offer ${r.offer_id?.slice(0,12)} published`);
+        const prepayLabel = e.status === 'active' ? 'retry' : `prepay-detected (tx=${e.prepayment_tx?.slice(0,16)})`;
+        console.log(`[broker-bsc-intake-escrow] escrow ${e.id.slice(0,8)} ${prepayLabel} → offer ${r.offer_id?.slice(0,12)} published`);
       }
     } catch (err) {
       console.error(`[broker-bsc-intake-escrow] _doPublishAfterPrepay err for escrow ${e.id.slice(0,8)}: ${err.message}`);
