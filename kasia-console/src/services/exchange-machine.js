@@ -247,7 +247,7 @@ export async function _makerAutoPayGive(offer) {
 // 不动 existing taker delivery flow (broker → taker via _makerAutoPayGive OR completed handler).
 // 加 second forward: broker → user_target_addr with escrow target_asset/target_chain/target_amount.
 // Idempotent: 检查 escrow row.status='active' (not yet 'settled') before forwarding.
-async function _settleEscrowToUser(escrowId, offerId) {
+export async function _settleEscrowToUser(escrowId, offerId) {
   const e = sqlite.prepare('SELECT * FROM user_escrow_balances WHERE id = ?').get(escrowId);
   if (!e) { console.warn(`[exchange-escrow-settle] escrow row ${escrowId} not found for offer ${offerId.slice(0,8)}`); return; }
   if (e.status !== 'active') {
@@ -1072,6 +1072,19 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
           if (localAgent) {
             executeHedge(finalOffer).catch(err => console.error(`[exchange-hedge] error: ${err.message}`));
           }
+          // Bug R 5/14 fix (J2 #368 Step 3 settle hook 未 fire 真因): BUY kaspa_tx short-circuit
+          // 旁路 RETURNs before L1352 settle hook. 加 same hook here for escrow-backed BUY offers.
+          try {
+            const meta = JSON.parse(finalOffer.verification_meta || '{}');
+            const isEscrow = (finalOffer.metadata || '').includes('broker-v3-escrow') || meta.escrow_id;
+            if (isEscrow && meta.escrow_id && meta.escrow_user_target) {
+              setImmediate(() => {
+                _settleEscrowToUser(meta.escrow_id, finalOffer.id).catch(err =>
+                  console.error(`[exchange-escrow-settle] BUY kaspa_tx path err for offer ${finalOffer.id.slice(0,8)}: ${err.message}`)
+                );
+              });
+            }
+          } catch (e) { console.warn(`[exchange-escrow-settle] BUY kaspa_tx check err: ${e.message}`); }
         }
         return;
       }
