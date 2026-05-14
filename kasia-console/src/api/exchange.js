@@ -572,6 +572,120 @@ export async function registerExchangeRoutes(fastify) {
     return reply.send({ ok: true, offer_id, status: result.protocol_status, accept_tx: acceptTx, reputationWarning });
   });
 
+  // ── GET /api/exchange/custody-pool — broker escrow custody invariant monitor ──
+  // Bug H γ Step 4 (Owner 17:35 钦定 invariant K+U total 不减少 baseline).
+  // /portfolio Exchange Custody section consumes this endpoint.
+  fastify.get('/api/exchange/custody-pool', async (request, reply) => {
+    const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';  // Trader-B
+    try {
+      // broker kasia addr
+      const broker = sqlite.prepare('SELECT name, address FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID);
+      if (!broker) return reply.code(404).send({ error: 'broker not found' });
+
+      // KAS pool: broker kasia balance via /api/relay/:id/balance
+      const balRes = await fetch(`http://127.0.0.1:${process.env.PORT || 3100}/api/relay/${BROKER_RELAY_ID}/balance`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()).catch(() => null);
+      const kaspaBalance = parseFloat(balRes?.balance || '0');
+
+      // KAS fund_locks active sum
+      let kasLocks = 0;
+      try {
+        const r = sqlite.prepare(`SELECT COALESCE(SUM(CAST(amount AS REAL)), 0) as total FROM fund_locks WHERE asset='KAS' AND address = ? AND status = 'locked'`).get(broker.address);
+        kasLocks = r?.total || 0;
+      } catch {}
+
+      // KAS escrow active sum (SELL escrow holding user KAS prepayments — broker custodies)
+      const kasEscrow = sqlite.prepare(`
+        SELECT COALESCE(SUM(CAST(amount_received AS REAL)), 0) as total
+        FROM user_escrow_balances
+        WHERE asset = 'KAS' AND status = 'active'
+      `).get();
+
+      // U pool: broker EVM wallets balance (9 chain) via /api/relay/:id/wallets
+      const walletsRes = await fetch(`http://127.0.0.1:${process.env.PORT || 3100}/api/relay/${BROKER_RELAY_ID}/wallets`, { signal: AbortSignal.timeout(8000) }).then(r => r.json()).catch(() => null);
+      const chains = walletsRes?.chains || [];
+      let uBalance = 0;
+      const chainBreakdown = {};
+      for (const c of chains) {
+        const u = (parseFloat(c.usdtBalance) || 0) + (parseFloat(c.usdcBalance) || 0);
+        uBalance += u;
+        chainBreakdown[c.chain] = { usdt: parseFloat(c.usdtBalance) || 0, usdc: parseFloat(c.usdcBalance) || 0, native: parseFloat(c.nativeBalance) || 0 };
+      }
+
+      // U escrow active sum (BUY escrow holding user USDT prepayments)
+      const uEscrow = sqlite.prepare(`
+        SELECT COALESCE(SUM(CAST(amount_received AS REAL)), 0) as total
+        FROM user_escrow_balances
+        WHERE asset IN ('USDT', 'USDC') AND status = 'active'
+      `).get();
+
+      // Snapshot baseline (latest stored OR fall back to current)
+      let baseline = null;
+      try {
+        const { getConfig } = await import('../data/settings/configs.js');
+        const baselineRaw = await getConfig('exchange_custody_baseline');
+        if (baselineRaw) baseline = JSON.parse(baselineRaw);
+      } catch {}
+
+      const totalK = kaspaBalance + kasLocks + (kasEscrow?.total || 0);
+      const totalU = uBalance + (uEscrow?.total || 0);
+
+      // Invariant check (Owner钦定): K + U 总量 ≥ baseline 不减少
+      let alarm = null;
+      if (baseline) {
+        const baseK = parseFloat(baseline.totalK || 0);
+        const baseU = parseFloat(baseline.totalU || 0);
+        const deltaK = totalK - baseK;
+        const deltaU = totalU - baseU;
+        if (deltaK < -0.01 || deltaU < -0.001) {
+          alarm = {
+            level: 'red',
+            message: `K + U 总量 < baseline. ΔK=${deltaK.toFixed(2)}, ΔU=${deltaU.toFixed(4)}`,
+            deltaK, deltaU,
+          };
+        }
+      }
+
+      return reply.send({
+        ok: true,
+        broker: { id: BROKER_RELAY_ID, name: broker.name, address: broker.address },
+        k_pool: {
+          wallet: kaspaBalance,
+          fund_locks: kasLocks,
+          escrow_active: kasEscrow?.total || 0,
+          total: totalK,
+        },
+        u_pool: {
+          chain_breakdown: chainBreakdown,
+          wallet_total: uBalance,
+          escrow_active: uEscrow?.total || 0,
+          total: totalU,
+        },
+        baseline: baseline ? { totalK: parseFloat(baseline.totalK), totalU: parseFloat(baseline.totalU), captured_at: baseline.captured_at } : null,
+        alarm,
+      });
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // ── POST /api/exchange/custody-pool/snapshot — capture baseline (Owner钦定时机) ──
+  fastify.post('/api/exchange/custody-pool/snapshot', async (request, reply) => {
+    try {
+      const current = await fetch(`http://127.0.0.1:${process.env.PORT || 3100}/api/exchange/custody-pool`, { signal: AbortSignal.timeout(8000) }).then(r => r.json());
+      if (!current.ok) return reply.code(500).send({ error: 'fetch current state failed' });
+      const baseline = {
+        totalK: current.k_pool.total,
+        totalU: current.u_pool.total,
+        captured_at: new Date().toISOString(),
+      };
+      const { setConfig } = await import('../data/settings/configs.js');
+      await setConfig('exchange_custody_baseline', JSON.stringify(baseline));
+      return reply.send({ ok: true, baseline });
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
+
   // ── GET /api/exchange/peer-reputation?peer=... — 查询对手方信誉（供 UI badge）──
   fastify.get('/api/exchange/peer-reputation', async (request, reply) => {
     const { peer, from } = request.query;
