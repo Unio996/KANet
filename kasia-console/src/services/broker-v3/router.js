@@ -191,8 +191,11 @@ async function _doQuote(peer, draft, relayNodeId, prevReply) {
   const userTargetAddr = isBuy ? peer : draft.pay_address;
 
   // Insert pending escrow record (5 min TTL for pending_prepay status)
+  // Bug J P0 fix 5/14 (NWT 16:30 surface): datetime format MUST align SQLite datetime('now') format
+  // ("YYYY-MM-DD HH:MM:SS" space, NOT ISO 8601 "T...Z"). 否则 sweep WHERE expires_at < datetime('now')
+  // 字典序 compare 错 (T=84 > space=32) → expires_at 永远 NOT < now → sweep 永不 trigger.
   const escrowId = randomUUID();
-  const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+  const expiresAt = sqlite.prepare("SELECT datetime('now', '+5 minutes') as t").get().t;
   try {
     sqlite.prepare(`
       INSERT INTO user_escrow_balances (
@@ -388,7 +391,8 @@ export async function _doPublishAfterPrepay(escrowRowId, relayNodeId) {
       UPDATE user_escrow_balances
       SET offer_id = ?, status = 'active', expires_at = ?, updated_at = datetime('now')
       WHERE id = ?
-    `).run(r.offer_id, r.expires_at || new Date(Date.now() + 30 * 60 * 1000).toISOString(), e.id);
+    // Bug J fix 5/14: align SQLite datetime format for sweep comparison consistency
+    `).run(r.offer_id, r.expires_at || sqlite.prepare("SELECT datetime('now', '+30 minutes') as t").get().t, e.id);
     // Also record offer in user's MY_ORDERS reverse index (P1 fix)
     stateMachine.addUserOffer(e.user_kasia_addr, r.offer_id);
   }
