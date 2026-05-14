@@ -65,13 +65,34 @@ function _utxoKey(entry) {
   // Backward-compat fallback: flat shape (older kaspa-wasm or hand-built entries).
   const txid = entry?.entry?.transactionId || entry?.transactionId;
   if (txid) return `${txid}:${entry?.entry?.index ?? entry?.index ?? 0}`;
+  // 防 silent skip regression (J2 5/14 Sub D per NWT canary propose): unrecognized shape →
+  // warn 一次 (rate-limited) 给 future trace clue. 33 天 silent skip 真因之一: 0 warn 0 detect.
+  _warnUnknownShape(entry);
   return null;
+}
+const _warnedShapeSamples = new Set();
+function _warnUnknownShape(entry) {
+  const sig = Object.keys(entry || {}).sort().join(',') || '(empty)';
+  if (_warnedShapeSamples.has(sig)) return;
+  _warnedShapeSamples.add(sig);
+  try { console.warn(`[transaction.mjs] _utxoKey unable to extract outpoint from entry shape (sig=${sig}) — _pendingSpentUtxos will be incomplete, UTXO race possible`); } catch {}
 }
 function markUtxoSpent(entry) {
   const key = _utxoKey(entry);
-  if (!key) return; // shape unknown — fall through, J1-D-4 explicit retry covers
+  if (!key) return; // shape unknown — fall through, J1-D-4 explicit retry covers + canary warn (above)
   _pendingSpentUtxos.set(key, Date.now() + _PENDING_UTXO_TTL_MS);
 }
+
+// J2 5/14 Sub D — test-only exports (NWT canary propose). Tier 2 functional regression
+// 守 markUtxoSpent run-time post-condition (_pendingSpentUtxos.size > 0 after marker called)
+// — Tier 1 source-pattern grep 抓不到 silent skip 类 bug. 仅 test 用, prod path 不消费.
+export const _testInternals = {
+  pendingSpentUtxos: _pendingSpentUtxos,
+  utxoKey: _utxoKey,
+  markUtxoSpent,
+  filterPendingUtxos,
+  warnedShapeSamples: _warnedShapeSamples,
+};
 
 // J1-D-4: explicit mempool-reject mark — RPC reject 'already spent in mempool' 时 caller 真
 // mark UTXO as pending (reduce RPC's 'reject before mark' race window). 跟 filterPendingUtxos
