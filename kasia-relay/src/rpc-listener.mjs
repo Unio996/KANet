@@ -953,13 +953,13 @@ async function replyToMessage(txId, senderAddress, messageText) {
   try {
     replyText = await getAIReply(senderAddress, messageText, txId);
   } catch (e) {
-    log('AI ERROR:', e.message);
+    log('broker ERROR:', e.message);
   }
   if (!replyText) {
     log('No reply for', senderAddress.slice(-12), '— silent');
     return;
   }
-  log('AI →', replyText.slice(0, 80));
+  log('broker →', replyText.slice(0, 80));
 
   // Guardrail: cap message length (fee + sanity)
   let text = replyText;

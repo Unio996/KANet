@@ -163,13 +163,13 @@ async function handleActiveConversation(peer) {
     try {
       replyText = await getAIReply(peer, msg.message, msg.txId);
     } catch (e) {
-      log("AI ERROR:", e.message);
+      log("broker ERROR:", e.message);
     }
     if (!replyText) {
       log("No reply for", peer.slice(-12), "— silent");
       continue;
     }
-    log("AI →", replyText.slice(0, 80));
+    log("broker →", replyText.slice(0, 80));
 
     // Guardrails: daily limit + max length
     if (!checkDailyLimit()) {
