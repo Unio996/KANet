@@ -572,6 +572,96 @@ export async function intakeTick() {
   return { handled, scanned: rows.length };
 }
 
+// Bug H γ Sub #3 (Owner 12:05 钦定 candidate A v2): kaspa watcher hook for SELL prepayment detection.
+// 镜像 broker-bsc-intake-watcher tickEscrow (Sub #2) — polls kaspa_tx_log for incoming KAS to broker
+// Kasia addr matching pending_prepay SELL escrow rows. Match by amount within ±0.5% tolerance (NWT 12:12 Q2 ack).
+// UPDATE escrow row (prepayment_tx + amount_received + user_refund_addr) + status='active' + call _doPublishAfterPrepay.
+// ESCROW_MODE off (default) → 直 return.
+const ESCROW_KAS_TOLERANCE_PCT = 0.005;  // ±0.5%
+let _kaspaEscrowTicks = 0;
+let _kaspaEscrowMatches = 0;
+
+export async function intakeKaspaEscrowTick() {
+  if (process.env.BROKER_V3_ESCROW_MODE !== 'true') return { ok: true, reason: 'escrow_mode_off' };
+  _kaspaEscrowTicks++;
+
+  // broker Kasia addr (relay_nodes.address for Trader-B)
+  const broker = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID);
+  if (!broker?.address) return { ok: false, reason: 'no_broker_kasia_addr' };
+  const brokerKasiaAddr = broker.address;
+
+  // Query SELL pending escrow rows (user prepay KAS on kaspa, broker_recv_addr=broker Kasia addr)
+  const pending = sqlite.prepare(`
+    SELECT id, quote_seq, side, user_kasia_addr, amount_quoted, asset, chain, broker_recv_addr, target_amount, expires_at
+    FROM user_escrow_balances
+    WHERE status = 'pending_prepay'
+      AND side = 'sell_kas'
+      AND chain = 'kaspa'
+      AND broker_recv_addr = ?
+      AND expires_at > datetime('now')
+    ORDER BY created_at ASC
+    LIMIT 10
+  `).all(brokerKasiaAddr);
+  if (!pending.length) return { ok: true, scanned: 0, matched: 0 };
+
+  // Query kaspa_tx_log recent inbound to broker Kasia addr (5 min window for pending TTL)
+  const inboundTxs = sqlite.prepare(`
+    SELECT tx_id, from_address, CAST(amount AS TEXT) AS amount, observed_at
+    FROM kaspa_tx_log
+    WHERE to_address = ?
+      AND observed_at > datetime('now', '-10 minutes')
+    ORDER BY observed_at DESC
+    LIMIT 100
+  `).all(brokerKasiaAddr);
+  if (!inboundTxs.length) return { ok: true, scanned: pending.length, matched: 0 };
+
+  let matched = 0;
+  for (const e of pending) {
+    const expectedAmount = parseFloat(e.amount_quoted);
+    // FIFO match by amount within ±0.5% tolerance (含 quote_seq noise)
+    const tx = inboundTxs.find(t => {
+      const amt = parseFloat(t.amount);
+      return Math.abs(amt - expectedAmount) / expectedAmount <= ESCROW_KAS_TOLERANCE_PCT;
+    });
+    if (!tx) continue;
+
+    // anti-replay: prepayment_tx UNIQUE constraint
+    try {
+      sqlite.prepare(`
+        UPDATE user_escrow_balances
+        SET prepayment_tx = ?, amount_received = ?, user_refund_addr = ?, status = 'active', updated_at = datetime('now')
+        WHERE id = ? AND status = 'pending_prepay'
+      `).run(tx.tx_id, tx.amount, tx.from_address || e.user_kasia_addr, e.id);
+      // 注: kaspa_tx_log.from_address 可能 NULL (indexer T-NWT-07 残). Fallback 用 user_kasia_addr (DM sender = prepay sender 99% case).
+    } catch (err) {
+      if (/UNIQUE constraint failed/.test(err.message)) {
+        console.warn(`[broker-kaspa-intake-escrow] prepayment_tx ${tx.tx_id.slice(0,16)} already used (anti-replay)`);
+        continue;
+      }
+      console.error(`[broker-kaspa-intake-escrow] UPDATE err for escrow ${e.id.slice(0,8)}: ${err.message}`);
+      continue;
+    }
+
+    // call _doPublishAfterPrepay (Sub #5.残)
+    try {
+      const { _doPublishAfterPrepay } = await import('./broker-v3/router.js');
+      const r = await _doPublishAfterPrepay(e.id, BROKER_RELAY_ID);
+      if (!r.ok) {
+        console.error(`[broker-kaspa-intake-escrow] _doPublishAfterPrepay fail for escrow ${e.id.slice(0,8)}: ${r.error}`);
+      } else {
+        matched++;
+        _kaspaEscrowMatches++;
+        console.log(`[broker-kaspa-intake-escrow] escrow ${e.id.slice(0,8)} prepay-detected (tx=${tx.tx_id.slice(0,16)}, ${tx.amount} KAS) → offer ${r.offer_id?.slice(0,12)} published`);
+      }
+    } catch (err) {
+      console.error(`[broker-kaspa-intake-escrow] _doPublishAfterPrepay err for escrow ${e.id.slice(0,8)}: ${err.message}`);
+    }
+  }
+  return { ok: true, scanned: pending.length, matched };
+}
+
+export function getKaspaEscrowStats() { return { ticks: _kaspaEscrowTicks, matches: _kaspaEscrowMatches }; }
+
 // T-J1-2026-04-28 Layer 4 (phase 3 8-layer system fix): chain reconciler 周期 sweep.
 // 治 J2's Defect C 残留 + pre-Layer-1 历史: chain_events 'broker_kas_refunded' 真**真**真 txid 在 kaspa_tx_log 真存在.
 // Z20 旧 INSERT 用 'refund_<offer_id>' 合成 txid (非真链 hash), Layer 1 markOrderRefunded 用真 txId.
@@ -934,6 +1024,12 @@ export function startIntakeWatcher() {
         console.log(`[broker-intake] tick handled=${r.handled||0}/${r.scanned||0}`);
       }
     } catch (e) { console.error('[broker-intake]', e.message); }
+    // Bug H γ Sub #3 (Owner 12:05 钦定 candidate A v2): kaspa escrow detection parallel scan.
+    // ESCROW_MODE off (default) → 直 return inside intakeKaspaEscrowTick().
+    try {
+      const r2 = await intakeKaspaEscrowTick();
+      if (r2 && r2.matched > 0) console.log(`[broker-kaspa-intake-escrow] tick matched=${r2.matched}/${r2.scanned}`);
+    } catch (e) { console.error('[broker-kaspa-intake-escrow]', e.message); }
   }, TICK_MS);
   if (!_refundInterval) {
     _refundInterval = setInterval(async () => {
