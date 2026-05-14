@@ -171,7 +171,10 @@ export async function tickEscrow() {
           UPDATE user_escrow_balances
           SET prepayment_tx = ?, amount_received = ?, user_refund_addr = ?, status = 'active', updated_at = datetime('now')
           WHERE id = ? AND status = 'pending_prepay'
-        `).run(tx.tx_hash, String(tx.amount), tx.sender || tx.from_address || 'unknown', e.id);
+        // Bug M 5/14 fix: scanRecentTransfers event field is `from` (not `sender`/`from_address`).
+        // Fallback fallthrough to user_kasia_addr is wrong (kasia ≠ EVM). If truly missing, leave NULL
+        // (sweep refund will skip refund + log manual review needed; cleaner than corrupt addr).
+        `).run(tx.tx_hash, String(tx.amount), tx.from || null, e.id);
       } catch (err) {
         if (/UNIQUE constraint failed/.test(err.message)) {
           console.warn(`[broker-bsc-intake-escrow] prepayment_tx ${tx.tx_hash.slice(0,16)} already used (anti-replay)`);
