@@ -436,25 +436,25 @@
                     </template>
                   </div>
                 </template>
+                <!-- Bug U1 fix: Alpine <template x-if> 嵌套 <template x-for> reactivity 不稳 -
+                     用 x-show + always-render-in-DOM 替换 conditional render.
+                     Sediment KI-Phase-B-UI-1 (Bettor r122 emergency surface, J1 clean re-ship).
+                     Pre-fix: 嵌套 x-if 在 x-for 内 inner condition 依赖 iteration item field (r.status/decision)
+                     reactive update 漏 → button 不渲染. Recurring pattern: 5+ historical similar fixes
+                     (commit 7c08aa809 Sophie close button + 5b66ef730 Redeem button + ab114db7d Bettor 越界 ship). -->
                 <div class="flex gap-2 mt-2">
                   <button @click="bettorDetail = r" class="flex-1 text-[10px] text-brand-500 hover:text-brand-700 text-left">查看推理 →</button>
-                  <template x-if="r.status === 'pending' && (r.decision === 'YES' || r.decision === 'NO')">
-                    <button @click="acceptBettorRec(r)" :disabled="r._accepting"
-                            class="px-3 py-1 rounded text-[10px] font-bold text-white"
-                            :class="r.decision === 'YES' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'">
-                      <span x-text="r._accepting ? '下单中...' : '✓ ACCEPT 下单'"></span>
-                    </button>
-                  </template>
-                  <template x-if="r.status === 'accepted'">
-                    <span class="px-3 py-1 rounded text-[10px] font-bold bg-gray-200 text-gray-600">已下单</span>
-                  </template>
+                  <button x-show="r.status === 'pending' && (r.decision === 'YES' || r.decision === 'NO')"
+                          @click="acceptBettorRec(r)" :disabled="r._accepting"
+                          class="px-3 py-1 rounded text-[10px] font-bold text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                          :class="r.decision === 'YES' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'">
+                    <span x-text="r._accepting ? '下单中...' : '✓ ACCEPT 下单'"></span>
+                  </button>
+                  <span x-show="r.status === 'accepted'" class="px-3 py-1 rounded text-[10px] font-bold bg-gray-200 text-gray-600">已下单</span>
+                  <span x-show="r.decision === 'SKIP'" class="px-3 py-1 rounded text-[10px] font-bold bg-gray-200 text-gray-500">SKIP (不下)</span>
                 </div>
-                <template x-if="r._acceptError">
-                  <div class="mt-1 text-[10px] text-red-500" x-text="'下单失败: ' + r._acceptError"></div>
-                </template>
-                <template x-if="r._acceptSuccess">
-                  <div class="mt-1 text-[10px] text-green-600" x-text="'✓ 下单成功 ' + r._acceptSuccess"></div>
-                </template>
+                <div x-show="r._acceptError" class="mt-1 text-[10px] text-red-500" x-text="'下单失败: ' + (r._acceptError || '')"></div>
+                <div x-show="r._acceptSuccess" class="mt-1 text-[10px] text-green-600" x-text="'✓ 下单成功 ' + (r._acceptSuccess || '')"></div>
               </div>
             </template>
           </div>
