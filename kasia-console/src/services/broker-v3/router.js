@@ -254,9 +254,109 @@ async function _doCheckPrepayStatus(peer, draft, prevReply) {
   ].join('\n');
 }
 
-// Bug H 5/14 candidate A v2: _doPublish 改成 _doPublishAfterPrepay — 仅 watcher service post-prepay 调.
-// 现 _doPublish 名字保留, 内部仅 internal call. user-facing CONFIRM trigger 走 _doQuote.
-// NOTE: legacy _doPublish 现 dead code (state-machine triggerPublish 不再 fire), 保留 reference 直 watcher hook ship.
+// Bug H 5/14 candidate A v2 Sub #5.残: _doPublishAfterPrepay — escrow watcher service post-prepay-detect 调.
+// 接 escrowRowId (user_escrow_balances pending_prepay row), 真 publish offer with 正确 BUY/SELL semantic:
+// - BUY (user prepay USDT): give=USDT/USDC (escrow), want=KAS (user receives), accepted_chains.address=broker_kaspa_addr
+// - SELL (user prepay KAS): give=KAS (escrow), want=USDT/USDC, accepted_chains.address=broker_evm_addr
+// 不同 legacy _doPublish (broker-as-market-maker, give=KAS want=USDT for BOTH BUY+SELL — Bug H surface 现 mode).
+// 修复后 update escrow status pending_prepay → active + offer_id backfill.
+export async function _doPublishAfterPrepay(escrowRowId, relayNodeId) {
+  const e = sqlite.prepare('SELECT * FROM user_escrow_balances WHERE id = ?').get(escrowRowId);
+  if (!e) return { ok: false, error: `escrow row ${escrowRowId} not found` };
+  if (e.status !== 'pending_prepay') return { ok: false, error: `escrow row status=${e.status}, expected pending_prepay` };
+
+  const isBuy = e.side === 'buy_kas';
+  const chainKey = isBuy ? e.chain : e.target_chain;  // EVM chain for both (BUY prepay chain = target taker pay, SELL target chain = USDT receive chain)
+
+  // broker recv addr for the TAKER (where taker sends payment when accepting):
+  // BUY (broker-as-maker, give USDT want KAS): taker sells KAS, taker sends KAS to broker_kaspa_addr
+  // SELL (broker-as-maker, give KAS want USDT): taker buys KAS, taker sends USDT to broker_evm_addr
+  let takerSendAddr = null;
+  if (isBuy) {
+    // taker delivers KAS to broker Kasia
+    const r = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ? LIMIT 1').get(relayNodeId);
+    takerSendAddr = r?.address;
+  } else {
+    // taker delivers USDT/USDC to broker EVM on chainKey
+    const w = sqlite.prepare(
+      'SELECT address FROM agent_wallets WHERE relay_node_id = ? AND chain = ? AND is_default = 1 LIMIT 1'
+    ).get(relayNodeId, chainKey)
+      || sqlite.prepare(
+        'SELECT address FROM agent_wallets WHERE relay_node_id = ? AND chain = ? LIMIT 1'
+      ).get(relayNodeId, chainKey);
+    takerSendAddr = w?.address;
+  }
+  if (!takerSendAddr) return { ok: false, error: `broker addr lookup fail for chain ${chainKey}` };
+
+  // Build publish body with CORRECT A v2 semantic (反 legacy _doPublish 现 mode):
+  const body = isBuy
+    ? {
+        // BUY semantic: broker holds user USDT (escrow), wants KAS for user
+        relayNodeId,
+        give_asset: e.asset,                          // USDT or USDC (user prepaid)
+        give_amount: String(e.target_amount),         // target qty * mid (USDT escrow amount)
+        give_chain: e.chain,                          // EVM chain where escrow USDT sits
+        want_asset: 'KAS',                            // broker wants KAS for user
+        want_amount: String(e.target_amount),         // qty KAS user wants
+        want_chain: 'kaspa',
+        verification: 'cross_chain_tx',
+        verification_meta: {
+          accepted_chains: [{ chain: 'kaspa', address: takerSendAddr }],  // taker sends KAS here
+          expected_asset: 'KAS',
+          receive_chain: 'kaspa',
+          escrow_id: e.id,
+          escrow_user: e.user_kasia_addr,
+          escrow_user_target: e.user_target_addr,  // user's kasia addr (where broker forwards KAS post-match)
+        },
+        expires_minutes: 30,
+        metadata: { source: 'broker-v3-escrow', user_id: e.user_kasia_addr, side: 'buy_kas', escrow_id: e.id, hedge_enabled: false },
+      }
+    : {
+        // SELL semantic: broker holds user KAS (escrow), wants USDT for user
+        relayNodeId,
+        give_asset: 'KAS',
+        give_amount: String(e.amount_received || e.amount_quoted),  // qty KAS escrow
+        give_chain: 'kaspa',
+        want_asset: e.target_asset,                   // USDT or USDC (user receives)
+        want_amount: String(e.target_amount),         // target USDT amount
+        want_chain: e.target_chain,                   // EVM chain user wants USDT received
+        verification: 'cross_chain_tx',
+        verification_meta: {
+          accepted_chains: [{ chain: chainKey, address: takerSendAddr }],  // taker sends USDT/USDC here
+          expected_asset: e.target_asset,
+          receive_chain: chainKey,
+          escrow_id: e.id,
+          escrow_user: e.user_kasia_addr,
+          escrow_user_target: e.user_target_addr,  // user's EVM addr (where broker forwards USDT post-match)
+        },
+        expires_minutes: 30,
+        metadata: { source: 'broker-v3-escrow', user_id: e.user_kasia_addr, side: 'sell_kas', escrow_id: e.id, hedge_enabled: false },
+      };
+
+  const r = await client.publishOffer(body);
+  if (!r.ok) {
+    console.error(`[broker-v3 _doPublishAfterPrepay] publishOffer fail for escrow ${e.id.slice(0, 8)}: ${r.error}`);
+    return { ok: false, error: r.error || 'publish failed' };
+  }
+
+  // backfill offer_id + update status active
+  if (r.offer_id) {
+    sqlite.prepare(`
+      UPDATE user_escrow_balances
+      SET offer_id = ?, status = 'active', expires_at = ?, updated_at = datetime('now')
+      WHERE id = ?
+    `).run(r.offer_id, r.expires_at || new Date(Date.now() + 30 * 60 * 1000).toISOString(), e.id);
+    // Also record offer in user's MY_ORDERS reverse index (P1 fix)
+    stateMachine.addUserOffer(e.user_kasia_addr, r.offer_id);
+  }
+
+  return { ok: true, offer_id: r.offer_id, broadcast_tx: r.broadcast_tx, expires_at: r.expires_at };
+}
+
+// Bug H 5/14 candidate A v2: _doPublish 仍是 legacy broker-as-market-maker path.
+// 用于 ESCROW_MODE=false (默认) 时 state-machine triggerPublish dispatch.
+// Owner Bug H surface 现 mode 在此 — 但 user 已知不去用直 Owner 翻 flag.
+// 注: Owner ack escrow stable + flag flip 后, 此 legacy _doPublish 可 sweep delete.
 async function _doPublish(peer, draft, relayNodeId, prevReply) {
   if (!draft) return prevReply + '\n\n(no draft, back 重来)';
   const qty = parseFloat(draft.qty);
