@@ -20,12 +20,25 @@
 import { randomUUID } from 'node:crypto';
 import https from 'node:https';
 import { sqlite } from '../db/client.js';
+import { detectDomain } from './bettor-domain-detector.js';
+import { enrichSports } from './bettor-sports-enricher.js';
+import { reasonFundamental } from './bettor-fundamental-reasoner.js';
 
 const PAGE_SIZE = 500;
 const MAX_PAGES = 20;        // 10K markets max
 const DEFAULT_BANKROLL = 1000;
 const MIN_EXPECTED_RETURN_SPREAD = 0.03;  // 3pp Owner-mandated replacement threshold
 const DEADLINE_GRACE_DAYS = 7;             // 允许 deadline 比现持仓略远
+
+// Phase B Sub B1.4 — Fundamental Enricher 集成 (Owner 5/14 14:50 pivot + Bettor r113 §1).
+// 中段 (yes 0.20-0.80) markets 必 fundamental_gap ≥ 15pp 才进 list.
+// 注意成本: detectDomain + enricher + reasoner 每 market 3 LLM calls. 用 hard cap 限 LLM 数;
+// domain detector cache 1h TTL → 二次 scan 复用.
+const FUND_GAP_THRESHOLD = 0.15;          // 中段必 ≥ 15pp gap (spec §B1.4)
+const FUND_DOMAIN_MIN_CONFIDENCE = 0.7;   // domain 检测置信度门槛
+const MIDDLE_LIQUIDITY_MIN = 50000;       // 中段流动性门槛 ($50K, 高于 tail 的 $20K)
+const MIDDLE_VOLUME_MIN = 10000;          // 中段 24h vol 门槛 ($10K, 高于 tail 的 $5K)
+const MAX_MIDDLE_ENRICH_PER_SCAN = 100;   // 每次 scan 最多 enrich 100 中段 markets (LLM cost cap)
 
 // Tail risk 折扣 (rules-based heuristic, Owner pivot framework)
 // rules 严的 → tail 1-2%, rules 弱的 → tail 5-10%
@@ -131,6 +144,85 @@ function scoreMarket(m, nowMs) {
   };
 }
 
+// Phase B Sub B1.4 — async middle-range scorer with fundamental enricher.
+// scoreMarket above stays sync (handles tails). This handles yes ∈ [0.20, 0.80].
+// Returns candidate {..., fundamental_estimate, fundamental_sources, fundamental_confidence, fund_gap, domain} or null.
+async function scoreMarketEnriched(m, nowMs) {
+  if (!m.outcomePrices) return null;
+  let yes;
+  try { yes = parseFloat(JSON.parse(m.outcomePrices)[0]); } catch { return null; }
+  if (!Number.isFinite(yes) || yes <= 0.20 || yes >= 0.80) return null;  // middle only
+  if (!m.endDate) return null;
+  const endMs = new Date(m.endDate).getTime();
+  if (!Number.isFinite(endMs) || endMs <= nowMs) return null;
+  const hoursToDeadline = (endMs - nowMs) / 3600000;
+  if (hoursToDeadline < 1 || hoursToDeadline > 720) return null;
+
+  const vol24 = m.volume24hr || 0;
+  const liq = m.liquidity || 0;
+  // Higher liquidity bar for middle markets — LLM enrichment is expensive, only enrich liquid markets
+  if (vol24 < MIDDLE_VOLUME_MIN || liq < MIDDLE_LIQUIDITY_MIN) return null;
+
+  // Step 1: domain detect (cached per market_id 1h TTL via v109 bettor_domain_cache)
+  const domain = await detectDomain(m.question, m.description, String(m.id));
+  if (!domain || domain.confidence < FUND_DOMAIN_MIN_CONFIDENCE) return null;
+  if (domain.domain === 'other') return null;
+
+  // Step 2: domain-specific enrichment. B2.1/B2.2/B3.1 not yet shipped → only sports for now.
+  let enriched = null;
+  if (domain.domain === 'sports') {
+    enriched = await enrichSports(m.question, m.description);
+  } else {
+    // politics/economic/crypto/legal — defer until B2.x/B3.x ship; middle catch will resume then
+    return null;
+  }
+  if (!enriched?.fundamentals) return null;
+
+  // Step 3: fundamental reasoner — LLM grounded only (Owner invariant 1)
+  const fund = await reasonFundamental(m.question, m.description, enriched);
+  if (fund.estimate === null) return null;
+
+  const fund_gap = Math.abs(fund.estimate - yes);
+  if (fund_gap < FUND_GAP_THRESHOLD) return null;  // 中段必 ≥ 15pp gap
+
+  // Side: market overprices YES → BUY_NO; market underprices YES → BUY_YES
+  const side = fund.estimate > yes ? 'YES' : 'NO';
+  const lockPct = fund_gap;
+  const costBasis = side === 'NO' ? (1 - yes) : yes;
+  const tail = Math.max(0.005, 1 - fund.confidence); // higher confidence → lower tail
+  const expectedPayoff = 1 - tail;
+  const expectedReturn = costBasis > 0 ? (expectedPayoff - costBasis) / costBasis : 0;
+
+  let sizeTier;
+  if (vol24 >= 50000 && liq >= 200000) sizeTier = 'heavy';
+  else if (vol24 >= 10000 && liq >= 50000) sizeTier = 'mid';
+  else sizeTier = 'light';
+  const suggestedSize = sizeTier === 'heavy' ? 500 : sizeTier === 'mid' ? 200 : 50;
+
+  return {
+    market: m,
+    side,
+    yes_price: yes,
+    lockPct,
+    expectedReturn,
+    tail,
+    hoursToDeadline,
+    vol24,
+    liq,
+    sizeTier,
+    suggestedSize,
+    trajectory: { m1: m.oneMonthPriceChange || 0, w1: m.oneWeekPriceChange || 0 },
+    // Phase B fundamental fields
+    fundamental_estimate: fund.estimate,
+    fundamental_sources: fund.sources,
+    fundamental_confidence: fund.confidence,
+    fundamental_reasoning: fund.reasoning,
+    domain: domain.domain,
+    fund_gap,
+    enriched_type: 'fundamental',
+  };
+}
+
 // Get open positions for replacement comparison
 function getOpenPositions(relayNodeId) {
   // bettor_recommendations rows currently 'open' status (per Phase 3a schema)
@@ -156,13 +248,15 @@ function persistCandidates(candidates, relayNodeId, triggerType, openPositions) 
   if (!candidates.length) return 0;
   const now = new Date().toISOString();
 
+  // Phase B Sub B1.4: persist + fundamental_estimate/_sources/_confidence (v109 cols)
   const stmt = sqlite.prepare(`
     INSERT INTO bettor_recommendations
       (id, relay_node_id, market_id, condition_id, slug, question,
        decision, fraction, size_usd, edge, p_mid, sigma, info_gap_months,
        yes_price, volume_24h, liquidity, end_date, score,
-       reasoning_json, trigger_type, llm_tier, status, calibrator_confidence, lifecycle_state, scanned_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+       reasoning_json, trigger_type, llm_tier, status, calibrator_confidence, lifecycle_state, scanned_at,
+       fundamental_estimate, fundamental_sources, fundamental_confidence)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
   `);
 
   const minOpenReturn = openPositions.length > 0
@@ -189,6 +283,11 @@ function persistCandidates(candidates, relayNodeId, triggerType, openPositions) 
         replacement_for: isReplacement
           ? openPositions.filter(p => c.expectedReturn >= p.expectedReturn + MIN_EXPECTED_RETURN_SPREAD).map(p => p.id)
           : [],
+        // Phase B Sub B1.4 — fundamental enricher fields (null for tail candidates, populated for middle)
+        enriched_type: c.enriched_type || 'tail',
+        domain: c.domain || null,
+        fund_gap: c.fund_gap ?? null,
+        fundamental_reasoning: c.fundamental_reasoning || null,
       };
 
       stmt.run(
@@ -212,10 +311,14 @@ function persistCandidates(candidates, relayNodeId, triggerType, openPositions) 
         c.expectedReturn * (1 - c.tail),   // score = expected return × confidence
         JSON.stringify(reasoning),
         triggerType,
-        'scavenger',                       // llm_tier marker
+        c.enriched_type === 'fundamental' ? 'scavenger+enricher' : 'scavenger',  // llm_tier marker
         1 - c.tail,                        // calibrator_confidence = our confidence
         'scavenger',                       // lifecycle_state
-        now
+        now,
+        // Phase B v109 fund cols (null for tail candidates, populated for middle enriched)
+        c.fundamental_estimate ?? null,
+        c.fundamental_sources ? JSON.stringify(c.fundamental_sources) : null,
+        c.fundamental_confidence ?? null
       );
       count++;
     }
@@ -253,14 +356,45 @@ export async function runScavengerScan(triggerType = 'cron', relayNodeId = null)
       const all = await fetchActiveMarkets();
       const nowMs = Date.now();
       const candidates = [];
+
+      // Pass 1: cheap sync scoreMarket — handles tails (yes ≤ 20% OR ≥ 80%)
       for (const m of all) {
         const c = scoreMarket(m, nowMs);
         if (c) candidates.push(c);
       }
+      const tailCount = candidates.length;
+
+      // Pass 2 (Phase B Sub B1.4): async fundamental enricher for middle (yes 20-80%).
+      // Hard cap MAX_MIDDLE_ENRICH_PER_SCAN to bound LLM cost. Pre-sort by liquidity desc.
+      // Domain detector cache 1h TTL → second-scan-within-1h free.
+      const middleRaw = all
+        .filter(m => {
+          if (!m.outcomePrices) return false;
+          try {
+            const yes = parseFloat(JSON.parse(m.outcomePrices)[0]);
+            return Number.isFinite(yes) && yes > 0.20 && yes < 0.80
+              && (m.volume24hr || 0) >= MIDDLE_VOLUME_MIN
+              && (m.liquidity || 0) >= MIDDLE_LIQUIDITY_MIN;
+          } catch { return false; }
+        })
+        .sort((a, b) => (b.liquidity || 0) - (a.liquidity || 0))
+        .slice(0, MAX_MIDDLE_ENRICH_PER_SCAN);
+      console.log(`[scavenger] middle-pass: ${middleRaw.length} candidates (cap ${MAX_MIDDLE_ENRICH_PER_SCAN}), enriching with detectDomain → enricher → reasoner...`);
+      let middleEnriched = 0;
+      for (const m of middleRaw) {
+        try {
+          const c = await scoreMarketEnriched(m, nowMs);
+          if (c) { candidates.push(c); middleEnriched++; }
+        } catch (e) {
+          console.log(`[scavenger] middle enrich fail for ${m.id}: ${e.message?.slice(0,80)}`);
+        }
+      }
+      console.log(`[scavenger] middle-pass result: ${middleEnriched} enriched candidates (out of ${middleRaw.length} liquid middle markets)`);
+
       // Sort by expected_return desc, take top 20
       candidates.sort((a, b) => b.expectedReturn - a.expectedReturn);
       const top = candidates.slice(0, 20);
-      console.log(`[scavenger] fetched ${all.length} → ${candidates.length} qualified → top ${top.length}`);
+      console.log(`[scavenger] fetched ${all.length} → ${tailCount} tail + ${middleEnriched} middle = ${candidates.length} total qualified → top ${top.length}`);
 
       const openPositions = getOpenPositions(resolvedRelayId);
       console.log(`[scavenger] current open positions: ${openPositions.length}, min expected return: ${openPositions.length ? Math.min(...openPositions.map(p => p.expectedReturn)).toFixed(3) : 'n/a'}`);
