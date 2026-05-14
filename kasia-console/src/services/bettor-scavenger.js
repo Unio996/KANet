@@ -24,8 +24,11 @@ import { detectDomain } from './bettor-domain-detector.js';
 import { enrichSports } from './bettor-sports-enricher.js';
 import { reasonFundamental } from './bettor-fundamental-reasoner.js';
 
-const PAGE_SIZE = 500;
-const MAX_PAGES = 20;        // 10K markets max
+// Bettor r118 hotfix 5/14: gamma API hard-capped 100/page today (was 500 earlier).
+// Scavenger PAGE_SIZE=500 fetched first page 100 < 500 → premature break → only 100 markets total.
+// Fix: PAGE_SIZE=100 align gamma reality + MAX_PAGES=100 keeps 10K market upper bound.
+const PAGE_SIZE = 100;
+const MAX_PAGES = 100;       // 10K markets max
 const DEFAULT_BANKROLL = 1000;
 const MIN_EXPECTED_RETURN_SPREAD = 0.03;  // 3pp Owner-mandated replacement threshold
 const DEADLINE_GRACE_DAYS = 7;             // 允许 deadline 比现持仓略远
