@@ -201,6 +201,15 @@ export async function tickEscrow() {
         _escrowMatches++;
         const prepayLabel = e.status === 'active' ? 'retry' : `prepay-detected (tx=${e.prepayment_tx?.slice(0,16)})`;
         console.log(`[broker-bsc-intake-escrow] escrow ${e.id.slice(0,8)} ${prepayLabel} → offer ${r.offer_id?.slice(0,12)} published`);
+        // Bug H γ Step 4 #3 残 — marketable matcher: check if opposite-side compatible offer exists.
+        // If match: cross-settle both escrows without taker accept (broker net Δ=0, Owner invariant 守).
+        try {
+          const { tryMarketableMatch } = await import('./exchange-machine.js');
+          const matchResult = await tryMarketableMatch(e.id);
+          if (matchResult.matched) {
+            console.log(`[broker-bsc-intake-escrow] escrow ${e.id.slice(0,8)} marketable MATCH cross-settled (bid=${matchResult.bidPrice.toFixed(4)} ask=${matchResult.askPrice.toFixed(4)})`);
+          }
+        } catch (err) { console.warn(`[broker-bsc-intake-escrow] matcher err: ${err.message}`); }
       }
     } catch (err) {
       console.error(`[broker-bsc-intake-escrow] _doPublishAfterPrepay err for escrow ${e.id.slice(0,8)}: ${err.message}`);

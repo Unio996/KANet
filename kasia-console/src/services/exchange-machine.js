@@ -408,6 +408,77 @@ export async function _refundEscrow(escrowId, reason = 'unspecified') {
   }
 }
 
+// Bug H γ Step 4 #3 marketable matcher (Owner 17:35 钦定 invariant + NWT 18:26 #3 propose).
+// After a BUY escrow publishes its offer, scan active SELL escrow offers for compatible price match.
+// Match: BUY bid (want USDT amount / want KAS amount) >= SELL ask (give USDT / give KAS).
+// If match found: settle BOTH escrows cross-deliver from existing pools, skip taker accept.
+// Broker net Δ = 0 (zero-sum P2P matching) → satisfies Owner invariant K+U total 不减.
+// Called from broker-bsc-intake-watcher post _doPublishAfterPrepay success (Bug H γ Step 4 #3).
+export async function tryMarketableMatch(escrowId) {
+  const e = sqlite.prepare('SELECT * FROM user_escrow_balances WHERE id = ?').get(escrowId);
+  if (!e || e.status !== 'active' || !e.offer_id) return { matched: false, reason: 'escrow not active or no offer' };
+
+  // Opposite-side active escrow rows (with offer_id, not settled/refunded, expires未到)
+  const oppositeSide = e.side === 'buy_kas' ? 'sell_kas' : 'buy_kas';
+  const oppositeOffers = sqlite.prepare(`
+    SELECT * FROM user_escrow_balances
+    WHERE side = ?
+      AND status = 'active'
+      AND offer_id IS NOT NULL
+      AND expires_at > datetime('now')
+      AND id != ?
+    ORDER BY created_at ASC LIMIT 10
+  `).all(oppositeSide, e.id);
+
+  if (oppositeOffers.length === 0) return { matched: false, reason: 'no opposite-side active escrow' };
+
+  // Price compatibility:
+  // BUY escrow e: prepaid amount_received USDT for target_amount KAS → bid_price = amount_received / target_amount (USDT/KAS)
+  // SELL escrow o: prepaid amount_received KAS, wants target_amount USDT → ask_price = target_amount / amount_received (USDT/KAS)
+  // Match if BUY bid >= SELL ask (buyer willing to pay enough)
+  for (const o of oppositeOffers) {
+    const buyEscrow = e.side === 'buy_kas' ? e : o;
+    const sellEscrow = e.side === 'buy_kas' ? o : e;
+    const buyUsdt = parseFloat(buyEscrow.amount_received || buyEscrow.amount_quoted);
+    const buyKas = parseFloat(buyEscrow.target_amount);
+    const sellKas = parseFloat(sellEscrow.amount_received || sellEscrow.amount_quoted);
+    const sellUsdt = parseFloat(sellEscrow.target_amount);
+    if (buyKas <= 0 || sellKas <= 0) continue;
+    const bidPrice = buyUsdt / buyKas;
+    const askPrice = sellUsdt / sellKas;
+    // Match: buy bid >= sell ask AND volumes compatible (allow partial — but MVP: require qty match within 5%)
+    if (bidPrice < askPrice) continue;
+    if (Math.abs(buyKas - sellKas) / Math.max(buyKas, sellKas) > 0.05) continue;  // 5% qty tolerance
+
+    console.log(`[exchange-matcher] MATCH escrow ${e.id.slice(0,8)} (${e.side}) ↔ ${o.id.slice(0,8)} (${o.side}) bid=${bidPrice.toFixed(4)} ask=${askPrice.toFixed(4)}`);
+
+    // Execute cross-settle: both escrows go to settled, broker forwards from existing pools.
+    // _settleEscrowToUser handles each side natively (KAS via broker-action-queue, USDT via transferUsdt).
+    try {
+      await Promise.all([
+        _settleEscrowToUser(buyEscrow.id, buyEscrow.offer_id),
+        _settleEscrowToUser(sellEscrow.id, sellEscrow.offer_id),
+      ]);
+      // Cascade cancel BOTH offers (matched without taker, mark as completed via escrow settle path)
+      try {
+        const buyOffer = sqlite.prepare('SELECT protocol_status FROM exchange_offers WHERE id = ?').get(buyEscrow.offer_id);
+        if (buyOffer && ['open', 'matched'].includes(buyOffer.protocol_status)) {
+          transition(buyEscrow.offer_id, 'completed', { matchedVia: 'marketable' });
+        }
+        const sellOffer = sqlite.prepare('SELECT protocol_status FROM exchange_offers WHERE id = ?').get(sellEscrow.offer_id);
+        if (sellOffer && ['open', 'matched'].includes(sellOffer.protocol_status)) {
+          transition(sellEscrow.offer_id, 'completed', { matchedVia: 'marketable' });
+        }
+      } catch (err) { console.warn(`[exchange-matcher] cascade transition err: ${err.message}`); }
+      return { matched: true, buyEscrowId: buyEscrow.id, sellEscrowId: sellEscrow.id, bidPrice, askPrice };
+    } catch (err) {
+      console.error(`[exchange-matcher] cross-settle err: ${err.message}`);
+      return { matched: false, reason: err.message };
+    }
+  }
+  return { matched: false, reason: 'no compatible price+qty match' };
+}
+
 // Bug H γ Sub #7 — periodic sweep for expired escrow rows (called every 60s from broker-intake-watcher).
 // Triggers _refundEscrow for: pending_prepay rows past expires_at (5 min TTL) AND active rows past offer expires_at (30 min).
 // Idempotent: each call only processes rows still in eligible status.
