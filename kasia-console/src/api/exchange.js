@@ -26,6 +26,10 @@ function normalizeChainKey(s) {
   return lower;
 }
 
+// J2 5/14 Sub Tier-2 (NWT 11:18 backlog ack): test-only export 供 functional regression
+// parity-test 跟 router.js _testInternalsRouter.normalizeChainKey 同款 (Tier 2 parity guard).
+export const _testInternalsExchange = { normalizeChainKey };
+
 export async function registerExchangeRoutes(fastify) {
 
   // ── GET /api/exchange/offers — 查询报价列表 ──────────────────

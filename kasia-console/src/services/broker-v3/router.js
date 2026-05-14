@@ -32,6 +32,10 @@ function normalizeChainKey(s) {
   return lower;
 }
 
+// J2 5/14 Sub Tier-2 (NWT 11:18 backlog ack): test-only export 供 functional regression
+// 真 call normalizeChainKey + assert alias 行为. 跟 exchange.js 同款 (duplicate, future shared util refactor).
+export const _testInternalsRouter = { normalizeChainKey };
+
 // T-J2-2026-05-07 r259 T2.1b — Layer 2 Price Oracle Gap fix.
 // MID_PRICE 改 dynamic /api/trade/kas-price (跟 market-seeder 同 source) — 替 hardcode 0.04 phase 1 placeholder.
 // FALLBACK_MID_PRICE 真 oracle down 时 graceful 用 (不阻 publish).
