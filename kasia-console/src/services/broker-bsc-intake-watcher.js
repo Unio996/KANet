@@ -169,10 +169,13 @@ export async function tickEscrow() {
       // Bug M 5/14 fix: scanRecentTransfers event field is `from` (NOT `sender`/`from_address`).
       // Fallback fallthrough to user_kasia_addr is wrong (kasia ≠ EVM). If truly missing, leave NULL
       // (sweep refund will skip refund + log manual review needed; cleaner than corrupt addr).
+      // Bug O 5/14 fix: when status pending_prepay → active, extend expires_at from 5min (quote TTL)
+      // to 30min (active offer TTL). 否则 sweep refund 提前 fire 抢 publish retry window.
       try {
         sqlite.prepare(`
           UPDATE user_escrow_balances
-          SET prepayment_tx = ?, amount_received = ?, user_refund_addr = ?, status = 'active', updated_at = datetime('now')
+          SET prepayment_tx = ?, amount_received = ?, user_refund_addr = ?, status = 'active',
+              expires_at = datetime('now', '+30 minutes'), updated_at = datetime('now')
           WHERE id = ? AND status = 'pending_prepay'
         `).run(tx.tx_hash, String(tx.amount), tx.from || null, e.id);
       } catch (err) {
