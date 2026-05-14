@@ -212,8 +212,9 @@ async function _handleTradeFlow(user_id, msg, cur, side, relayNodeId) {
     // Defensive: if ESCROW_MODE off but state somehow reaches WAIT_PREPAY, clear flow.
     if (!ESCROW_MODE) { clearFlowState(user_id); return { reply: '状态错乱 (escrow mode off), 回菜单.\n\n' + _menuTopText() }; }
     if (/^(no|取消|cancel)$/i.test(msg)) {
-      clearFlowState(user_id);
-      return { reply: '已取消报价. 未真链 transfer 你的 fund 没动. 回菜单.\n\n' + _menuTopText() };
+      // Bug H γ Sub #7: cancel 不再 silent clear — trigger _refundEscrow 处理 (pending_prepay 不需链 TX,
+      // active 需 broker 真链 refund). 状态 clear 在 _refundEscrow 后 router dispatch.
+      return { reply: '正在取消报价 + 处理 refund...', triggerCancelEscrow: true, draft: cur.draft };
     }
     if (/^(status|查)$/i.test(msg)) return { reply: '正在查 prepayment status...', triggerCheckPrepayStatus: true, draft: cur.draft };
     return { reply: '等你真链 transfer USDT/KAS 到 broker 地址 (见上一条 quote). 5 min 超时自动取消. 回 cancel 立即放弃报价 / status 查状态.' };

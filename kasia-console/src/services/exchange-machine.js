@@ -311,6 +311,136 @@ async function _settleEscrowToUser(escrowId, offerId) {
   }
 }
 
+// Bug H γ Sub #7 (Owner 12:05 钦定 candidate A v2): cancel/expire 真链 refund TX.
+// Called from: (a) state-machine WAIT_PREPAY 'cancel' via router triggerCancelEscrow,
+// (b) periodic sweep for expired pending_prepay (5 min TTL) OR expired active (30 min offer TTL).
+// Refund target asset depends on side:
+// - BUY escrow (user prepaid USDT/USDC on EVM): broker 真链 transferUsdt back to user_refund_addr
+// - SELL escrow (user prepaid KAS): broker 真链 sendKas back to user_refund_addr (via broker-action-queue R4)
+// Idempotent: status='pending_prepay' → 'refunded' (no chain TX, no money transferred yet);
+//              status='active' → 真链 refund + 'refunded' + refund_tx; status='settled' → reject (已完成);
+//              status='refunded' → idempotent skip.
+export async function _refundEscrow(escrowId, reason = 'unspecified') {
+  const e = sqlite.prepare('SELECT * FROM user_escrow_balances WHERE id = ?').get(escrowId);
+  if (!e) { console.warn(`[exchange-escrow-refund] escrow ${escrowId} not found`); return { ok: false, error: 'not_found' }; }
+  if (e.status === 'refunded') {
+    console.log(`[exchange-escrow-refund] escrow ${escrowId.slice(0,8)} already refunded (idempotent)`);
+    return { ok: true, idempotent: true };
+  }
+  if (e.status === 'settled') {
+    console.warn(`[exchange-escrow-refund] escrow ${escrowId.slice(0,8)} already settled, cannot refund`);
+    return { ok: false, error: 'already_settled' };
+  }
+
+  // Case 1: pending_prepay → no chain TX needed, just mark refunded
+  if (e.status === 'pending_prepay') {
+    sqlite.prepare(`
+      UPDATE user_escrow_balances
+      SET status = 'refunded', updated_at = datetime('now')
+      WHERE id = ? AND status = 'pending_prepay'
+    `).run(escrowId);
+    console.log(`[exchange-escrow-refund] escrow ${escrowId.slice(0,8)} pending_prepay → refunded (reason: ${reason}, no chain TX needed)`);
+    return { ok: true, status: 'refunded', no_chain_tx: true };
+  }
+
+  // Case 2: status='active' — 真链 refund needed
+  if (!e.user_refund_addr) {
+    console.warn(`[exchange-escrow-refund] escrow ${escrowId.slice(0,8)} active 无 user_refund_addr — manual review needed`);
+    return { ok: false, error: 'no_refund_addr' };
+  }
+
+  // Broker relay lookup (escrow.broker_recv_addr == relay_nodes.address for kaspa, or agent_wallets.address for EVM)
+  const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';  // Trader-B (matches broker-bsc-intake-watcher)
+  const refundAmount = e.amount_received || e.amount_quoted;
+  const isKasRefund = e.asset === 'KAS';  // SELL escrow: prepaid KAS, refund KAS
+  let refundTxHash = null;
+
+  try {
+    if (isKasRefund) {
+      // SELL escrow cancel: refund KAS via broker-action-queue (R4 single-pump)
+      const { enqueue } = await import('./broker-action-queue.js');
+      enqueue({
+        kind: 'sendKas', peer: e.user_refund_addr,
+        payload: { amount_kas: refundAmount, note: `escrow refund ${escrowId.slice(0,8)} reason=${reason.slice(0,40)}` },
+      });
+      refundTxHash = `queued:${escrowId.slice(0,8)}`;
+      console.log(`[exchange-escrow-refund] enqueued KAS refund ${refundAmount} → ${e.user_refund_addr?.slice(-12)} for escrow ${escrowId.slice(0,8)} (reason: ${reason})`);
+    } else {
+      // BUY escrow cancel: refund USDT/USDC via transferUsdt
+      const transferUsdt = await getTransferUsdt();
+      const wallet = sqlite.prepare(
+        "SELECT privkey_encrypted FROM agent_wallets WHERE relay_node_id = ? AND chain = ? AND is_default = 1 LIMIT 1"
+      ).get(BROKER_RELAY_ID, e.chain);
+      if (!wallet?.privkey_encrypted) {
+        console.warn(`[exchange-escrow-refund] no broker ${e.chain} wallet for escrow ${escrowId.slice(0,8)}`);
+        return { ok: false, error: `no_broker_wallet_${e.chain}` };
+      }
+      const r = await transferUsdt(e.chain, wallet.privkey_encrypted, e.user_refund_addr, parseFloat(refundAmount), e.asset);
+      if (!r.ok) {
+        console.error(`[exchange-escrow-refund] transferUsdt fail for escrow ${escrowId.slice(0,8)}: ${r.error}`);
+        return { ok: false, error: r.error };
+      }
+      refundTxHash = r.txHash;
+      console.log(`[exchange-escrow-refund] sent ${refundAmount} ${e.asset} on ${e.chain} → ${e.user_refund_addr?.slice(-12)} (TX: ${refundTxHash?.slice(0,16)}) for escrow ${escrowId.slice(0,8)} (reason: ${reason})`);
+    }
+
+    sqlite.prepare(`
+      UPDATE user_escrow_balances
+      SET status = 'refunded', refund_tx = ?, updated_at = datetime('now')
+      WHERE id = ? AND status = 'active'
+    `).run(refundTxHash, escrowId);
+
+    // If associated offer exists + 'open' status → also cancel offer
+    if (e.offer_id) {
+      try {
+        const offer = sqlite.prepare('SELECT protocol_status FROM exchange_offers WHERE id = ?').get(e.offer_id);
+        if (offer && ['open', 'matched'].includes(offer.protocol_status)) {
+          transition(e.offer_id, 'cancelled', { txHash: refundTxHash });
+          console.log(`[exchange-escrow-refund] offer ${e.offer_id.slice(0,8)} cascade-cancelled (escrow refunded)`);
+        }
+      } catch (err) { console.warn(`[exchange-escrow-refund] cascade-cancel offer err: ${err.message}`); }
+    }
+
+    return { ok: true, status: 'refunded', refund_tx: refundTxHash };
+  } catch (err) {
+    console.error(`[exchange-escrow-refund] refund err for escrow ${escrowId.slice(0,8)}: ${err.message}`);
+    return { ok: false, error: err.message };
+  }
+}
+
+// Bug H γ Sub #7 — periodic sweep for expired escrow rows (called every 60s from broker-intake-watcher).
+// Triggers _refundEscrow for: pending_prepay rows past expires_at (5 min TTL) AND active rows past offer expires_at (30 min).
+// Idempotent: each call only processes rows still in eligible status.
+export async function sweepExpiredEscrows() {
+  // Pending_prepay expired (5 min TTL, no prepayment received)
+  const pendingExpired = sqlite.prepare(`
+    SELECT id FROM user_escrow_balances
+    WHERE status = 'pending_prepay' AND expires_at < datetime('now')
+    LIMIT 20
+  `).all();
+  // Active expired (offer expires_at past, no match within 30 min)
+  const activeExpired = sqlite.prepare(`
+    SELECT id FROM user_escrow_balances
+    WHERE status = 'active' AND expires_at < datetime('now')
+    LIMIT 20
+  `).all();
+
+  let refunded = 0;
+  for (const row of pendingExpired) {
+    try {
+      const r = await _refundEscrow(row.id, 'pending_prepay_ttl_expired');
+      if (r.ok) refunded++;
+    } catch (err) { console.warn(`[exchange-escrow-sweep] pending refund err for ${row.id.slice(0,8)}: ${err.message}`); }
+  }
+  for (const row of activeExpired) {
+    try {
+      const r = await _refundEscrow(row.id, 'active_offer_ttl_expired');
+      if (r.ok) refunded++;
+    } catch (err) { console.warn(`[exchange-escrow-sweep] active refund err for ${row.id.slice(0,8)}: ${err.message}`); }
+  }
+  return { ok: true, scanned: pendingExpired.length + activeExpired.length, refunded };
+}
+
 // ── Test Injection ───────────────────────────────────────────
 
 let _transferUsdtOverride = null;

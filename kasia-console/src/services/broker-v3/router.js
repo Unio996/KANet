@@ -80,6 +80,7 @@ export async function handleMessage(peer, msg, opts = {}) {
     if (result.triggerQuote) reply = await _doQuote(peer, result.draft, relayNodeId, reply);
     else if (result.triggerPublish) reply = await _doPublish(peer, result.draft, relayNodeId, reply);
     else if (result.triggerCheckPrepayStatus) reply = await _doCheckPrepayStatus(peer, result.draft, reply);
+    else if (result.triggerCancelEscrow) reply = await _doCancelEscrow(peer, result.draft, reply);
     else if (result.triggerAccept) reply = await _doAccept(peer, result.draft, relayNodeId, reply);
     else if (result.triggerCancel) reply = await _doCancel(peer, result.draft, relayNodeId, reply);
     else if (result.triggerBrowse) reply = await _doBrowse(peer, reply);
@@ -226,6 +227,45 @@ async function _doQuote(peer, draft, relayNodeId, prevReply) {
     '',
     '回 cancel 立即取消 / status 查 prepayment 状态.',
   ].join('\n');
+}
+
+// Bug H γ Sub #7 (Owner 12:05 钦定): cancel escrow trigger handler.
+// Lookup user's latest pending_prepay OR active escrow row, call _refundEscrow from exchange-machine.
+// _refundEscrow handles 3 cases: pending_prepay (no chain TX) / active (真链 refund) / settled (reject already done).
+async function _doCancelEscrow(peer, draft, prevReply) {
+  const rows = sqlite.prepare(`
+    SELECT id, side, amount_quoted, asset, chain, status
+    FROM user_escrow_balances
+    WHERE user_kasia_addr = ? AND status IN ('pending_prepay', 'active')
+    ORDER BY created_at DESC LIMIT 1
+  `).all(peer);
+  if (rows.length === 0) {
+    stateMachine.clearFlowState(peer);
+    return '你当前无 active escrow 报价/订单. 回菜单.';
+  }
+  const e = rows[0];
+  try {
+    const { _refundEscrow } = await import('../exchange-machine.js');
+    const r = await _refundEscrow(e.id, 'user_cancel_via_menu');
+    stateMachine.clearFlowState(peer);
+    if (!r.ok) {
+      return `取消失败: ${r.error || 'unknown'}. 联系 admin (escrow ${e.id.slice(0,8)}).`;
+    }
+    if (r.no_chain_tx) {
+      // pending_prepay → just marked refunded, user 没真链 transfer 过
+      return `✓ 报价已取消 (你还没真链 transfer, 没有 fund 锁定). 回菜单.`;
+    }
+    // active → broker 真链 refund 已发起
+    return [
+      `✓ 取消请求已处理. broker 正真链 refund 你的 ${e.amount_quoted} ${e.asset} on ${e.chain.toUpperCase()}.`,
+      `  refund TX: ${r.refund_tx?.slice(0, 24) || 'queued'}`,
+      '',
+      '到账 ~1-3 min (BSC) OR ~5-10s (Kaspa). 回菜单.',
+    ].join('\n');
+  } catch (err) {
+    console.error(`[broker-v3 _doCancelEscrow] err: ${err.message}`);
+    return `取消处理出错: ${err.message?.slice(0, 80) || 'unknown'}. escrow ${e.id.slice(0,8)} 联系 admin.`;
+  }
 }
 
 async function _doCheckPrepayStatus(peer, draft, prevReply) {

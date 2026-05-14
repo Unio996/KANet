@@ -1030,6 +1030,16 @@ export function startIntakeWatcher() {
       const r2 = await intakeKaspaEscrowTick();
       if (r2 && r2.matched > 0) console.log(`[broker-kaspa-intake-escrow] tick matched=${r2.matched}/${r2.scanned}`);
     } catch (e) { console.error('[broker-kaspa-intake-escrow]', e.message); }
+    // Bug H γ Sub #7 (Owner 12:05 钦定): expired escrow sweep — pending_prepay 5min TTL OR active 30min offer TTL.
+    // ESCROW_MODE off → flag check inside sweepExpiredEscrows() (但 sweep queries by status, 不需 flag check —
+    // 即使 flag off, 表里 应没 escrow row, sweep 无害). For safety + audit clarity, gate by flag.
+    if (process.env.BROKER_V3_ESCROW_MODE === 'true') {
+      try {
+        const { sweepExpiredEscrows } = await import('./exchange-machine.js');
+        const r3 = await sweepExpiredEscrows();
+        if (r3 && r3.refunded > 0) console.log(`[exchange-escrow-sweep] tick refunded=${r3.refunded}/${r3.scanned}`);
+      } catch (e) { console.error('[exchange-escrow-sweep]', e.message); }
+    }
   }, TICK_MS);
   if (!_refundInterval) {
     _refundInterval = setInterval(async () => {
