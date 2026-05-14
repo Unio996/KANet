@@ -130,10 +130,15 @@ async function _doQuote(peer, draft, relayNodeId, prevReply) {
   // T-J2-2026-05-07 r259: live mid price oracle
   const livePrice = await client.getKasPrice();
   const midPrice = livePrice || FALLBACK_MID_PRICE;
+  // Bug H γ Step 4 #3 (Owner 17:35 + NWT 18:26): user 自定价 supported.
+  // draft.user_price set by state-machine PRICE_INPUT step (null = use mid).
+  // BUY user_price = max bid (willing to pay up to X USDT/KAS for KAS)
+  // SELL user_price = min ask (willing to sell down to X USDT/KAS)
+  const effectivePrice = draft.user_price != null ? Number(draft.user_price) : midPrice;
   // Compute quote base amount (USDT for BUY, USDT for SELL since user receives USDT but prepays KAS)
-  // BUY: user prepays USDT, receives KAS → quote_amount_usdt = qty * midPrice
-  // SELL: user prepays KAS (qty itself), receives USDT → quote_amount_usdt (target) = qty * midPrice
-  const baseQuoteUsdt = qty * midPrice;
+  // BUY: user prepays USDT, receives KAS → quote_amount_usdt = qty * effectivePrice
+  // SELL: user prepays KAS (qty itself), receives USDT → quote_amount_usdt (target) = qty * effectivePrice
+  const baseQuoteUsdt = qty * effectivePrice;
 
   // Get broker recv addr:
   // BUY: user prepays USDT → broker addr on selected EVM chain (chainKey)

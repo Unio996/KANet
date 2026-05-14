@@ -176,16 +176,42 @@ async function _handleTradeFlow(user_id, msg, cur, side, relayNodeId) {
       setFlowState(user_id, { ...cur, step: 'ADDR_INPUT', draft });
       return { reply: `${qty} KAS. 请输你自己的 ${draft.pay_chain.toUpperCase()} EVM 钱包 (0x... 42 位) — broker 代发 USDT 到这. 严禁给 broker 或别人 addr.` };
     }
-    // BUY KAS skip ADDR_INPUT
-    // T-J2-2026-05-06 r232 fix: step='PREVIEW' → 'CONFIRM' (跟 L145 CONFIRM handler align).
-    // 旧版 step='PREVIEW' 但 L145 check 'CONFIRM' → mismatch fall default 'state 错乱'. NWT operator chain DM 实战暴露.
+    // BUY KAS skip ADDR_INPUT — but go to PRICE_INPUT if ESCROW_MODE on (Bug H γ Step 4 #3)
+    if (ESCROW_MODE) {
+      setFlowState(user_id, { ...cur, step: 'PRICE_INPUT', draft });
+      return { reply: `${qty} KAS. 出价? 回 'mid' 用 live oracle 中间价 OR 自定 USDT/KAS 价格 (e.g. '0.035').` };
+    }
+    // Legacy non-escrow: skip price input, straight to CONFIRM
     setFlowState(user_id, { ...cur, step: 'CONFIRM', draft });
     return { reply: await _previewText(draft, side), triggerPreview: true };
   }
   if (cur.step === 'ADDR_INPUT') {
     if (!EVM_ADDR_REGEX.test(msg)) return { reply: '地址格式不对, 应是 0x 开头 42 位. 重输 OR back.' };
     draft.pay_address = msg;
-    // T-J2-2026-05-06 r232 fix: step='PREVIEW' → 'CONFIRM' (同款 align L145 handler)
+    // Bug H γ Step 4 #3 (Owner 17:35): ESCROW_MODE SELL flow 加 PRICE_INPUT step
+    if (ESCROW_MODE) {
+      setFlowState(user_id, { ...cur, step: 'PRICE_INPUT', draft });
+      return { reply: `addr ✓. 出价? 回 'mid' 用 live oracle 中间价 OR 自定 USDT/KAS 价格 (e.g. '0.040').` };
+    }
+    // Legacy non-escrow: skip price input
+    setFlowState(user_id, { ...cur, step: 'CONFIRM', draft });
+    return { reply: await _previewText(draft, side), triggerPreview: true };
+  }
+  if (cur.step === 'PRICE_INPUT') {
+    // Bug H γ Step 4 #3 (Owner 17:35 钦定 invariant + NWT 18:26 propose): user 自定价 prompt.
+    // 'mid' OR numeric input. Marketable check (after publish) will use this for limit fill criteria.
+    const txt = (msg || '').trim().toLowerCase();
+    let userPrice = null;
+    if (txt === 'mid' || txt === '') {
+      userPrice = null;  // null → use live oracle mid in _doQuote
+    } else {
+      const p = parseFloat(txt);
+      if (!Number.isFinite(p) || p <= 0 || p > 10) {
+        return { reply: `价格不合理 (合理范围 0-10 USDT/KAS). 重输 OR 回 'mid' 用 oracle.` };
+      }
+      userPrice = p;
+    }
+    draft.user_price = userPrice;
     setFlowState(user_id, { ...cur, step: 'CONFIRM', draft });
     return { reply: await _previewText(draft, side), triggerPreview: true };
   }
@@ -234,14 +260,21 @@ async function _previewText(draft, side) {
     const { getKasPrice } = await import('./exchange-client.js');
     midPrice = await getKasPrice();
   } catch {}
-  const usedPrice = midPrice || FALLBACK_MID_PRICE_PREVIEW;
-  const totalStable = (Number(draft.qty) * usedPrice).toFixed(4);
-  const priceLine = midPrice
-    ? `  KAS 中间价: ${usedPrice} ${stableAsset}/KAS (live)`
-    : `  KAS 中间价: ${usedPrice} ${stableAsset}/KAS (⚠ oracle down, fallback)`;
+  // Bug H γ Step 4 #3: user_price (limit price) overrides mid if set; else use live oracle mid.
+  const effectivePrice = draft.user_price != null ? draft.user_price : (midPrice || FALLBACK_MID_PRICE_PREVIEW);
+  const totalStable = (Number(draft.qty) * effectivePrice).toFixed(4);
+  let priceLine;
+  if (draft.user_price != null) {
+    const midLabel = midPrice ? `${midPrice} live` : `${FALLBACK_MID_PRICE_PREVIEW} fallback`;
+    priceLine = `  你出价: ${effectivePrice} ${stableAsset}/KAS  (mid ${midLabel})`;
+  } else {
+    priceLine = midPrice
+      ? `  KAS 中间价: ${effectivePrice} ${stableAsset}/KAS (live, 你选 mid)`
+      : `  KAS 中间价: ${effectivePrice} ${stableAsset}/KAS (⚠ oracle down, fallback)`;
+  }
   const totalLine = side === 'buy'
-    ? `  你付总额: ${totalStable} ${stableAsset} (${draft.qty} × ${usedPrice})`
-    : `  你收总额: ${totalStable} ${stableAsset} (${draft.qty} × ${usedPrice})`;
+    ? `  你付总额: ${totalStable} ${stableAsset} (${draft.qty} × ${effectivePrice})`
+    : `  你收总额: ${totalStable} ${stableAsset} (${draft.qty} × ${effectivePrice})`;
   const lines = [
     `📋 订单预览 (${verb} ${draft.qty} KAS, ${draft.pay_chain.toUpperCase()})`,
     '',
