@@ -343,7 +343,9 @@ export async function _doPublishAfterPrepay(escrowRowId, relayNodeId) {
         // BUY semantic: broker holds user USDT (escrow), wants KAS for user
         relayNodeId,
         give_asset: e.asset,                          // USDT or USDC (user prepaid)
-        give_amount: String(e.target_amount),         // target qty * mid (USDT escrow amount)
+        // Bug N 5/14 fix: give_amount must match give_asset (USDT escrowed amount), NOT target_amount (KAS).
+        // 之前 e.target_amount 给了 50 (KAS qty), publish 当 50 USDT → broker balance check fail.
+        give_amount: String(e.amount_received || e.amount_quoted),  // 真 USDT escrow amount
         give_chain: e.chain,                          // EVM chain where escrow USDT sits
         want_asset: 'KAS',                            // broker wants KAS for user
         want_amount: String(e.target_amount),         // qty KAS user wants
