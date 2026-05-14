@@ -10,6 +10,18 @@ import { onBroadcastWritten } from '../services/trade-protocol-filter.js';
 import { recordChainEvent } from '../services/chain-event.js';
 import { checkBudget, recordSpend } from '../services/social-budget.js';
 
+// ── Sub 9.15 (KI-13.6) — broadcast chain-content alignment ──
+// kasia-relay/src/relay.mjs:28 capMessage truncates broadcast payloads to MAX_MESSAGE_CHARS=5000
+// chars before writing to the Kaspa chain (suffix ' [...]' on overflow). This helper mirrors
+// that exact logic so sender-host LOCAL DB rows match chain truth (which receiver hosts decode
+// via Scout). Without this alignment, sender's broadcast_messages.content stores pre-cap text,
+// diverging from chain — caused 5/14 J1 ↔ Bettor cross-host attribution loop (J1 #178 §1 retract).
+const MAX_BROADCAST_CHARS = 5000;
+function _computeChainContent(text) {
+  if (!text || text.length <= MAX_BROADCAST_CHARS) return text;
+  return text.slice(0, MAX_BROADCAST_CHARS).replace(/\s+\S*$/, '') + ' [...]';
+}
+
 // ── Coordination-channel firewall (2026-04-24 proactive-spam incident) ──
 // dev-coord / kanet-arch / kanet-review / kanet-alert are reserved for
 // Opus J1 + Opus J2 + Owner coordination. Agent Mind auto-reply + proactive
@@ -195,12 +207,21 @@ export async function registerChatRoutes(fastify) {
       if (!result?.ok) throw new Error(result?.error || 'Broadcast failed');
       result.address = relay.address;
 
-      // Store locally immediately
+      // Store locally immediately.
+      // Sub 9.15 fix: align LOCAL DB with chain truth — kasia-relay's capMessage(5000) truncates
+      // payloads > 5000 chars on chain. If we INSERT pre-cap content here, sender host's LOCAL DB
+      // diverges from receiver hosts (who scout-decode chain truth). Compute the chain content
+      // ourselves using identical logic (matches kasia-relay/src/relay.mjs:28 capMessage).
+      // KI-13.6: broadcast_messages LOCAL semantics ≠ chain truth without this alignment.
       const id = randomUUID();
       const now = nowIso();
       const channelName = channel.trim();
       const senderAddress = result.address;
-      const content = message.trim();
+      const fullMessage = message.trim();
+      const content = _computeChainContent(fullMessage);
+      if (content.length < fullMessage.length) {
+        console.warn(`[chat/send] broadcast capped LOCAL→chain ${fullMessage.length} → ${content.length} chars (mirrors relay capMessage cap=${MAX_BROADCAST_CHARS})`);
+      }
       sqlite.prepare(`
         INSERT OR IGNORE INTO broadcast_messages (id, channel_name, sender_address, content, tx_hash, status, created_at)
         VALUES (?, ?, ?, ?, ?, 'confirmed', ?)
@@ -505,13 +526,17 @@ async function triggerAutoReply(responder, channelName, senderAddress, content, 
     recordSpend({ relayId: responder.relay_id, txId: result.txId, fee: autoFeeKas, channel: channelName, content: broadcastText });
   }
 
-  // Store locally (use the text that was actually broadcast)
+  // Store locally (use the text that was actually broadcast — post chain cap, Sub 9.15)
   const id = randomUUID();
+  const storedContent = _computeChainContent(broadcastText);
+  if (storedContent.length < broadcastText.length) {
+    console.warn(`[chat/auto-reply] broadcast capped LOCAL→chain ${broadcastText.length} → ${storedContent.length} chars (mirrors relay capMessage cap=${MAX_BROADCAST_CHARS})`);
+  }
   sqlite.prepare(`
     INSERT OR IGNORE INTO broadcast_messages (id, channel_name, sender_address, content, tx_hash, status, created_at)
     VALUES (?, ?, ?, ?, ?, 'confirmed', ?)
-  `).run(id, channelName, responder.address, broadcastText, result.txId, nowIso());
-  if (attempts > 0) console.log(`[chat] Broadcast succeeded after ${attempts + 1} attempts (${broadcastText.length} chars)`);
+  `).run(id, channelName, responder.address, storedContent, result.txId, nowIso());
+  if (attempts > 0) console.log(`[chat] Broadcast succeeded after ${attempts + 1} attempts (${broadcastText.length} chars; stored ${storedContent.length} post-cap)`);
 
   // Record spend in social_spend_log
   if (result.txId && autoFeeKas > 0) {
