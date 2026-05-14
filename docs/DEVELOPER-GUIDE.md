@@ -8,6 +8,7 @@
 |---|---|
 | 不猜代码, 查了再写 | [guide/rules/00-no-guess.md](guide/rules/00-no-guess.md) |
 | NO TX NO STATE CHANGE — 链上先上链再写 DB | [guide/rules/00-no-tx-no-state.md](guide/rules/00-no-tx-no-state.md) |
+| **真钱 endpoint 不准 "测试"** — 见 [ANTI-PATTERNS.md R-BETTOR-REAL-MONEY-API](ANTI-PATTERNS.md#规则-r-bettor-real-money-api-2026-05-14-owner-雷霆-钦定-真金白银-api-endpoint-不准-测试-每次-call--真链上-tx) | Owner 2026-05-14 雷霆钦定 — Bettor 一天 3 次越界 trigger `$1280` unauthorized 真链上交易, R-BETTOR-REAL-MONEY-API 列 13+ 黑名单 endpoint + 三段铁律 (诊断必 read-only / Mental check 三问 / explicit ack 必含 size) |
 
 ## 功能章节
 
