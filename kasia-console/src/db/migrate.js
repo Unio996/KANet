@@ -3342,5 +3342,98 @@ export function runMigrations() {
     }
   }
 
+  // v105: Phase 3g Sub 9.12 — bettor_action_decisions UNIQUE 扩 mode (sim/real 同秒同 adj 不撞)
+  // Bettor r95 root cause: v104 UNIQUE(decided_for_type, decided_for_id, decision_at) 不含 mode.
+  // 同 tick 内 sim+real 双 INSERT 同秒 datetime('now') = 同 tuple → 第二个 (real) 撞 UNIQUE.
+  // J1 #169 design + Bettor r96 PASS green-light: 扩 UNIQUE 加 mode → sim+real 双 row audit 保留.
+  {
+    const tableSql = sqlite.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='bettor_action_decisions'").get();
+    if (tableSql && !/UNIQUE\s*\([^)]*\bmode\b[^)]*\)/.test(tableSql.sql || '')) {
+      sqlite.exec(`
+        BEGIN;
+        CREATE TABLE bettor_action_decisions_v105 (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          decision_at TEXT NOT NULL DEFAULT (datetime('now')),
+          decided_for_type TEXT NOT NULL,
+          decided_for_id TEXT NOT NULL,
+          action TEXT NOT NULL,
+          reason TEXT,
+          mode TEXT NOT NULL DEFAULT 'sim',
+          confidence_band TEXT,
+          UNIQUE(decided_for_type, decided_for_id, decision_at, mode)
+        );
+        INSERT INTO bettor_action_decisions_v105
+          (id, decision_at, decided_for_type, decided_for_id, action, reason, mode, confidence_band)
+          SELECT id, decision_at, decided_for_type, decided_for_id, action, reason, mode, confidence_band
+          FROM bettor_action_decisions;
+        DROP TABLE bettor_action_decisions;
+        ALTER TABLE bettor_action_decisions_v105 RENAME TO bettor_action_decisions;
+        DROP INDEX IF EXISTS idx_decisions_recent;
+        CREATE INDEX idx_decisions_recent ON bettor_action_decisions(decision_at DESC);
+        COMMIT;
+      `);
+      console.log('[migrate] v105: bettor_action_decisions UNIQUE 扩 mode (Phase 3g Sub 9.12 sim+real 同秒同 adj 不撞).');
+    }
+  }
+
+  // v106: Phase 3g Sub 9.14 Stage A — agent_wallets.polymarket_funder_address column
+  // Per-wallet opt-in for Polymarket V2 POLY_1271 mode (EOA-import users). NULL → default EOA mode
+  // (Sophie 维持现状, V1 grandfathered). 有值 → POLY_1271 + funder=deposit wallet (Bettor 新路径).
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(agent_wallets)").all().map(c => c.name);
+    if (!cols.includes('polymarket_funder_address')) {
+      sqlite.exec(`ALTER TABLE agent_wallets ADD COLUMN polymarket_funder_address TEXT`);
+      console.log('[migrate] v106: agent_wallets.polymarket_funder_address column 添加 (Phase 3g Sub 9.14 POLY_1271 per-wallet opt-in).');
+    }
+  }
+
+  // v107: Bug H 5/14 — user_escrow_balances 表 (broker-escrow custody model)
+  // Owner 12:05 钦定 candidate A v2: user prepay → broker publish offer backed by escrow →
+  // 成交 broker auto deliver target asset to user → cancel/expire broker 真链 refund to user.
+  // 记 user 真链 prepaid amount per asset per offer. status=active (未 settle/refund) /
+  // settled (成交后 deliver done) / refunded (cancel/expire 后 refund done).
+  {
+    const exists = sqlite.prepare("SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='user_escrow_balances'").get();
+    if (!exists.cnt) {
+      sqlite.exec(`
+        CREATE TABLE user_escrow_balances (
+          id TEXT PRIMARY KEY,
+          quote_seq INTEGER NOT NULL,           -- 单调递增 seq, deterministic noise (NWT 12:12 反 push back)
+          side TEXT NOT NULL,                   -- buy_kas / sell_kas
+          user_kasia_addr TEXT NOT NULL,        -- user kasia addr (broker DM 来源)
+          user_refund_addr TEXT,                -- user 真链 source addr (NULL 当 pending_prepay, prepayment 后 fill 真链 sender)
+          asset TEXT NOT NULL,                  -- USDT / USDC / KAS
+          chain TEXT NOT NULL,                  -- bnb / eth / polygon / kaspa / ...
+          amount_quoted TEXT NOT NULL,          -- broker quote 含 noise 真 6-decimal amount
+          amount_received TEXT,                 -- 真链 received amount (NULL 当 pending, ±0.5% tolerance match)
+          broker_recv_addr TEXT NOT NULL,       -- broker 收款 addr (user prepay 到这)
+          target_amount TEXT NOT NULL,          -- broker 成交后 deliver to user 真 amount (qty KAS for BUY, qty USDT for SELL)
+          target_asset TEXT NOT NULL,           -- KAS for BUY, USDT/USDC for SELL
+          target_chain TEXT NOT NULL,           -- kaspa for BUY, bnb/eth/... for SELL
+          user_target_addr TEXT,                -- user 收 target asset 的 addr (kasia for BUY, EVM for SELL — 后者来 user ADDR_INPUT)
+          prepayment_tx TEXT UNIQUE,            -- 真链 prepay TX hash (NULL 当 pending, anti-replay UNIQUE)
+          offer_id TEXT,                        -- broker publishOffer 后 backfill
+          status TEXT NOT NULL DEFAULT 'pending_prepay',
+            -- pending_prepay: broker quoted, 等 user 真链 prepay (5 min TTL)
+            -- active: prepayment 真链 detected, offer published, 等 taker
+            -- matched: taker accept, 等 broker auto-settle 真链 deliver
+            -- settled: broker 真链 deliver done (success)
+            -- refunded: cancel/expire, broker 真链 refund done
+            -- orphan: user prepay 但 broker 不识别 quote, 24 hr 自动 refund
+          refund_tx TEXT,                       -- cancel/expire refund TX hash
+          settle_tx TEXT,                       -- matched settle TX hash (broker → user)
+          expires_at TEXT NOT NULL,             -- pending_prepay 5 min TTL OR active 30 min TTL
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_escrow_user ON user_escrow_balances(user_kasia_addr);
+        CREATE INDEX idx_escrow_offer ON user_escrow_balances(offer_id);
+        CREATE INDEX idx_escrow_status ON user_escrow_balances(status);
+        CREATE INDEX idx_escrow_amount ON user_escrow_balances(broker_recv_addr, amount_quoted, status);
+      `);
+      console.log('[migrate] v107: user_escrow_balances 表 + 3 索引 创建 (Bug H broker-escrow custody, Owner 5/14 钦定 candidate A v2).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

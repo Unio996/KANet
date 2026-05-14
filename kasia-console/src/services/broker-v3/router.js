@@ -71,7 +71,15 @@ export async function handleMessage(peer, msg, opts = {}) {
 
   // dispatch trigger flag
   try {
-    if (result.triggerPublish) reply = await _doPublish(peer, result.draft, relayNodeId, reply);
+    // Bug H 5/14 candidate A v2 (Owner 12:05 钦定): triggerPublish → triggerQuote
+    // (BUY/SELL CONFIRM 'YES' 改 generate quote, 等 user prepay 后才 publish via watcher hook).
+    // 现 triggerPublish 仅 internal call from watcher post-prepay-detect (router.js 不 surface 给 state-machine).
+    // Bug H 5/14 candidate A v2 (Owner 12:05 钦定): ESCROW_MODE 路径分
+    // triggerQuote (escrow on) → _doQuote (新 quote + INSERT pending escrow row)
+    // triggerPublish (escrow off, legacy) → _doPublish (broker-as-maker 旧 path, Owner Bug H surface 现 mode 但 ship 后 default off)
+    if (result.triggerQuote) reply = await _doQuote(peer, result.draft, relayNodeId, reply);
+    else if (result.triggerPublish) reply = await _doPublish(peer, result.draft, relayNodeId, reply);
+    else if (result.triggerCheckPrepayStatus) reply = await _doCheckPrepayStatus(peer, result.draft, reply);
     else if (result.triggerAccept) reply = await _doAccept(peer, result.draft, relayNodeId, reply);
     else if (result.triggerCancel) reply = await _doCancel(peer, result.draft, relayNodeId, reply);
     else if (result.triggerBrowse) reply = await _doBrowse(peer, reply);
@@ -105,6 +113,150 @@ function _isLanguageA(msg) {
   return false;
 }
 
+// Bug H 5/14 candidate A v2 (Owner 12:05 钦定 broker-escrow custody):
+// _doQuote — replaces _doPublish for BUY/SELL CONFIRM 'YES' trigger.
+// 不直接 publish offer, 而是: (1) compute quote with deterministic noise via quote_seq,
+// (2) lookup broker recv addr (broker BSC for BUY user prepay USDT; broker Kaspa for SELL user prepay KAS),
+// (3) INSERT user_escrow_balances pending_prepay row, (4) reply user with quote + broker addr.
+// Watcher post-prepay-detect → _doPublishAfterPrepay (separate trigger via watcher service).
+import { randomUUID } from 'node:crypto';
+async function _doQuote(peer, draft, relayNodeId, prevReply) {
+  if (!draft) return prevReply + '\n\n(no draft, back 重来)';
+  const qty = parseFloat(draft.qty);
+  const isBuy = draft.side === 'buy_kas';
+  const chainKey = normalizeChainKey(draft.pay_chain);
+
+  // T-J2-2026-05-07 r259: live mid price oracle
+  const livePrice = await client.getKasPrice();
+  const midPrice = livePrice || FALLBACK_MID_PRICE;
+  // Compute quote base amount (USDT for BUY, USDT for SELL since user receives USDT but prepays KAS)
+  // BUY: user prepays USDT, receives KAS → quote_amount_usdt = qty * midPrice
+  // SELL: user prepays KAS (qty itself), receives USDT → quote_amount_usdt (target) = qty * midPrice
+  const baseQuoteUsdt = qty * midPrice;
+
+  // Get broker recv addr:
+  // BUY: user prepays USDT → broker addr on selected EVM chain (chainKey)
+  // SELL: user prepays KAS → broker addr on Kaspa
+  let brokerRecvAddr = null;
+  let prepayAsset = isBuy ? 'USDT' : 'KAS';
+  let prepayChain = isBuy ? chainKey : 'kaspa';
+  // Base chain uses USDC instead of USDT
+  if (isBuy && chainKey === 'base') prepayAsset = 'USDC';
+  if (isBuy) {
+    const w = sqlite.prepare(
+      'SELECT address FROM agent_wallets WHERE relay_node_id = ? AND chain = ? AND is_default = 1 LIMIT 1'
+    ).get(relayNodeId, chainKey)
+      || sqlite.prepare(
+        'SELECT address FROM agent_wallets WHERE relay_node_id = ? AND chain = ? LIMIT 1'
+      ).get(relayNodeId, chainKey);
+    if (!w?.address) {
+      stateMachine.clearFlowState(peer);
+      return `报价失败: broker 还没在 ${chainKey.toUpperCase()} 链配钱包. 联系 admin OR 选别链.`;
+    }
+    brokerRecvAddr = w.address;
+  } else {
+    // SELL: broker recv addr = broker's kaspa addr (relay address)
+    const r = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ? LIMIT 1').get(relayNodeId);
+    if (!r?.address) {
+      stateMachine.clearFlowState(peer);
+      return `报价失败: broker Kasia addr 找不到. 联系 admin.`;
+    }
+    brokerRecvAddr = r.address;
+  }
+
+  // Deterministic noise via quote_seq (NWT 12:12 反 push back J2 Q4: deterministic, NOT random):
+  // amount = base + (seq % 9999) * 1e-6 USDT (1e-6 is BSC USDT smallest unit)
+  // For SELL prepay KAS, noise applies to KAS amount instead.
+  let nextSeq;
+  try {
+    const row = sqlite.prepare('SELECT COALESCE(MAX(quote_seq), 0) + 1 AS next_seq FROM user_escrow_balances').get();
+    nextSeq = row?.next_seq || 1;
+  } catch { nextSeq = Date.now() % 9999 + 1; }  // fallback if table not yet migrated
+  const noiseUnit = isBuy ? 0.000001 : 0.0000001;  // USDT 6-decimal vs KAS 8-decimal
+  const noise = (nextSeq % 9999) * noiseUnit;
+  let amountQuoted;
+  if (isBuy) {
+    amountQuoted = (baseQuoteUsdt + noise).toFixed(6);
+  } else {
+    // SELL: amount = qty KAS + noise
+    amountQuoted = (qty + noise).toFixed(8);
+  }
+
+  // target asset (what user receives after match)
+  const targetAsset = isBuy ? 'KAS' : (chainKey === 'base' ? 'USDC' : 'USDT');
+  const targetChain = isBuy ? 'kaspa' : chainKey;
+  const targetAmount = isBuy ? String(qty) : (baseQuoteUsdt).toFixed(4);
+  // user target addr — BUY: user kasia addr (peer); SELL: user pay_address (broker forwards USDT here)
+  const userTargetAddr = isBuy ? peer : draft.pay_address;
+
+  // Insert pending escrow record (5 min TTL for pending_prepay status)
+  const escrowId = randomUUID();
+  const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+  try {
+    sqlite.prepare(`
+      INSERT INTO user_escrow_balances (
+        id, quote_seq, side, user_kasia_addr, asset, chain, amount_quoted,
+        broker_recv_addr, target_amount, target_asset, target_chain, user_target_addr,
+        status, expires_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_prepay', ?, datetime('now'), datetime('now'))
+    `).run(escrowId, nextSeq, draft.side, peer, prepayAsset, prepayChain, amountQuoted,
+           brokerRecvAddr, targetAmount, targetAsset, targetChain, userTargetAddr, expiresAt);
+  } catch (e) {
+    console.error(`[broker-v3 _doQuote] INSERT user_escrow_balances err: ${e.message}`);
+    stateMachine.clearFlowState(peer);
+    return `报价失败: 内部错误 (${e.message?.slice(0, 50)}). 回 back 重来.`;
+  }
+
+  // Reply text — quote + broker addr + amount + TTL
+  return [
+    `📋 报价 (${isBuy ? '买' : '卖'} ${qty} KAS, ${chainKey.toUpperCase()})`,
+    '',
+    `  KAS 中间价: ${midPrice.toFixed(6)} ${targetAsset}/KAS`,
+    `  ${isBuy ? '你付' : '你收'}总额: ${(isBuy ? baseQuoteUsdt : baseQuoteUsdt).toFixed(4)} ${prepayAsset === 'KAS' ? targetAsset : prepayAsset}`,
+    '',
+    `💸 请真链 transfer 精确 ${amountQuoted} ${prepayAsset} 到 broker:`,
+    `  地址: ${brokerRecvAddr}`,
+    `  链: ${prepayChain.toUpperCase()}`,
+    `  数量: ${amountQuoted} ${prepayAsset} (含 micro-noise ${(noise).toExponential(2)} for quote 匹配)`,
+    '',
+    `⏰ 5 分钟内 transfer 到账, 否则报价自动失效 + 不扣 fee.`,
+    isBuy
+      ? `✓ 到账后 broker 自动挂买单 + 成交后 deliver ${qty} KAS to 你 Kasia (${peer.slice(0, 18)}...).`
+      : `✓ 到账后 broker 自动挂卖单 + 成交后 deliver ${(baseQuoteUsdt).toFixed(4)} ${targetAsset} to 你 (${userTargetAddr?.slice(0, 16) || '?'}...).`,
+    '',
+    '回 cancel 立即取消 / status 查 prepayment 状态.',
+  ].join('\n');
+}
+
+async function _doCheckPrepayStatus(peer, draft, prevReply) {
+  // Bug H 5/14 candidate A v2: query user_escrow_balances WHERE user=peer + status='pending_prepay'
+  const rows = sqlite.prepare(`
+    SELECT id, side, amount_quoted, asset, chain, broker_recv_addr, status, expires_at
+    FROM user_escrow_balances
+    WHERE user_kasia_addr = ? AND status = 'pending_prepay'
+    ORDER BY created_at DESC LIMIT 1
+  `).all(peer);
+  if (rows.length === 0) {
+    stateMachine.clearFlowState(peer);
+    return '你当前无 active 报价. 回菜单重新下单.';
+  }
+  const r = rows[0];
+  const remainingMs = new Date(r.expires_at).getTime() - Date.now();
+  const remainingMin = Math.max(0, Math.round(remainingMs / 60000));
+  return [
+    `📋 报价状态: pending_prepay (等你真链 transfer)`,
+    `  方向: ${r.side === 'buy_kas' ? '买 KAS' : '卖 KAS'}`,
+    `  请 transfer: ${r.amount_quoted} ${r.asset} on ${r.chain.toUpperCase()}`,
+    `  到: ${r.broker_recv_addr}`,
+    `  剩余时间: ${remainingMin} min`,
+    '',
+    '回 cancel 立即取消 OR 等真链 transfer 到账 (5 min 超时自动失效).',
+  ].join('\n');
+}
+
+// Bug H 5/14 candidate A v2: _doPublish 改成 _doPublishAfterPrepay — 仅 watcher service post-prepay 调.
+// 现 _doPublish 名字保留, 内部仅 internal call. user-facing CONFIRM trigger 走 _doQuote.
+// NOTE: legacy _doPublish 现 dead code (state-machine triggerPublish 不再 fire), 保留 reference 直 watcher hook ship.
 async function _doPublish(peer, draft, relayNodeId, prevReply) {
   if (!draft) return prevReply + '\n\n(no draft, back 重来)';
   const qty = parseFloat(draft.qty);

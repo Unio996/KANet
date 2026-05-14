@@ -21,6 +21,12 @@
 
 const _state = new Map();  // user_id → { flow, step, draft }
 
+// Bug H 5/14 candidate A v2 (Owner 12:05 钦定): broker-escrow custody mode.
+// Owner OK γ (env flag) — 默认 false (legacy broker-as-maker behavior, 60/60 regression 不退).
+// 全 escrow ship + 测试 done 后 Owner enable → flip to true → 真启 escrow flow.
+// 不 sweep legacy _doPublish code 直 escrow stable + Owner ack post-Phase-3 真测.
+const ESCROW_MODE = process.env.BROKER_V3_ESCROW_MODE === 'true';
+
 // P1 fix 5/14 (J2 + NWT Tier 4 C1.6 双 host UX gap 实证): broker publishes offers with
 // maker = broker_addr (Trader-B addr) per broker-as-maker pattern. user_id 在 metadata.user_id
 // 里. listOffers({ maker: user_addr }) 0 row → user 看不见自己挂的单. 修: state-machine 内
@@ -92,6 +98,8 @@ export async function processInput(user_id, msg, relayNodeId) {
   }
 
   switch (cur.flow) {
+    // Bug H 5/14 candidate A v2 (Owner 12:05 钦定): BUY/SELL 不再 直 publish, 走 WAIT_PREPAY 中间 state.
+    // _handleTradeFlow 处理 CHAIN_SELECT / QTY_SELECT / ADDR_INPUT / CONFIRM / WAIT_PREPAY 全 sub-step.
     case 'BUY_FLOW': return await _handleTradeFlow(user_id, head, cur, 'buy', relayNodeId);
     case 'SELL_FLOW': return await _handleTradeFlow(user_id, head, cur, 'sell', relayNodeId);
     case 'BROWSE_MARKET': return await _handleBrowse(user_id, head, cur);
@@ -183,7 +191,14 @@ async function _handleTradeFlow(user_id, msg, cur, side, relayNodeId) {
   }
   if (cur.step === 'CONFIRM') {
     if (/^(yes|确认|ok|好|发布)$/i.test(msg)) {
-      // router.js 调 publishOffer + transition state → WAIT_PAYMENT
+      // Bug H 5/14 candidate A v2 (Owner 12:05 钦定 broker-escrow custody):
+      // ESCROW_MODE=true → 转 WAIT_PREPAY + triggerQuote (broker reply quote + user 真链 prepay flow)
+      // ESCROW_MODE=false → legacy triggerPublish (broker-as-maker, 60/60 regression 不退, 直 publish)
+      if (ESCROW_MODE) {
+        setFlowState(user_id, { ...cur, step: 'WAIT_PREPAY', draft });
+        return { reply: '正在生成报价...', triggerQuote: true, draft };
+      }
+      // Legacy path: router.js _doPublish + transition state → WAIT_PAYMENT (Bug H surface 现 mode)
       return { reply: '正在挂单上链...', triggerPublish: true, draft };
     }
     if (/^(no|取消)$/i.test(msg)) {
@@ -191,6 +206,17 @@ async function _handleTradeFlow(user_id, msg, cur, side, relayNodeId) {
       return { reply: '已取消. 回菜单.\n\n' + _menuTopText() };
     }
     return { reply: '回 YES 确认下单 / NO 取消 / back 返回菜单.' };
+  }
+  if (cur.step === 'WAIT_PREPAY') {
+    // Bug H 5/14 escrow mode: user 在 broker quote 等 user 真链 prepay 状态.
+    // Defensive: if ESCROW_MODE off but state somehow reaches WAIT_PREPAY, clear flow.
+    if (!ESCROW_MODE) { clearFlowState(user_id); return { reply: '状态错乱 (escrow mode off), 回菜单.\n\n' + _menuTopText() }; }
+    if (/^(no|取消|cancel)$/i.test(msg)) {
+      clearFlowState(user_id);
+      return { reply: '已取消报价. 未真链 transfer 你的 fund 没动. 回菜单.\n\n' + _menuTopText() };
+    }
+    if (/^(status|查)$/i.test(msg)) return { reply: '正在查 prepayment status...', triggerCheckPrepayStatus: true, draft: cur.draft };
+    return { reply: '等你真链 transfer USDT/KAS 到 broker 地址 (见上一条 quote). 5 min 超时自动取消. 回 cancel 立即放弃报价 / status 查状态.' };
   }
   return { reply: '状态错乱, 回 back 返回菜单重来.' };
 }
