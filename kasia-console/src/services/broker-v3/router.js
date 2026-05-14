@@ -391,12 +391,12 @@ export async function _doPublishAfterPrepay(escrowRowId, relayNodeId) {
   }
 
   // backfill offer_id + update status active
+  // Bug J fix 5/14: align SQLite datetime format for sweep comparison consistency
   if (r.offer_id) {
     sqlite.prepare(`
       UPDATE user_escrow_balances
       SET offer_id = ?, status = 'active', expires_at = ?, updated_at = datetime('now')
       WHERE id = ?
-    // Bug J fix 5/14: align SQLite datetime format for sweep comparison consistency
     `).run(r.offer_id, r.expires_at || sqlite.prepare("SELECT datetime('now', '+30 minutes') as t").get().t, e.id);
     // Also record offer in user's MY_ORDERS reverse index (P1 fix)
     stateMachine.addUserOffer(e.user_kasia_addr, r.offer_id);
