@@ -9,6 +9,7 @@ import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 import crypto, { randomUUID } from 'crypto';
 import { fetchStockData, fetchYahooQuote, cachedPredictions, cachedCommodities, cachedFunding, cachedSentiment, fetchAllMarkets, cachedCrypto, cachedFundamentals, cachedIndustryPeers, cachedStockKlines, DIVERGENCE_WARN_THRESHOLD } from '../services/market-data.js';
 import { getPolygonWallet, getUsdcBalance, getPusdBalance, createApiKey, getOrderBook, checkAllowance, approveUsdc, checkTxStatus, redeemPositions, checkRedeemStatus, sweepUsdc, fetchUserActivity, fetchAccountValue, getMarketWinner, migrateToV2, ensureCtfApprovedForV2 } from '../services/polymarket.js';
+import { predictDepositWallet, deployDepositWallet, transferPusdToDepositWallet, setupDepositWalletAllowances } from '../services/polymarket-deposit-wallet.js';
 import { decrypt } from '../services/crypto.js';
 
 // Agent 综述缓存（15 分钟）
@@ -235,6 +236,59 @@ export async function registerStockRoutes(fastify) {
     ).run(crypto.randomUUID(), `polymarket_api_${relay_node_id}`, encrypt(keyData));
 
     return reply.send({ ok: true, message: 'Polymarket API key created' });
+  });
+
+  // Phase 3g Sub 9.14 — Polymarket V2 deposit wallet setup (POLY_1271 mode).
+  // POST /api/predictions/deposit-wallet/setup { relay_node_id, transferAllPusd?: true } 一键 setup:
+  //   1. predictDepositWallet — CREATE2 counterfactual (factory + impl + bytes32(uint160(EOA)))
+  //   2. deployDepositWallet — factory.deploy() if not on-chain (auto-init owner)
+  //   3. transferPusdToDepositWallet — ERC20.transfer EOA → DW (optional, only if transferAllPusd)
+  //   4. setupDepositWalletAllowances — DW.execute(Batch[approve pUSD V2×3 + setApprovalForAll V2×3], EIP-712 sig)
+  //   5. UPDATE agent_wallets SET polymarket_funder_address = DW
+  // Idempotent. Each step records TX hash. Failure at any step returns partial result for retry.
+  fastify.post('/api/predictions/deposit-wallet/setup', async (request, reply) => {
+    const { relay_node_id, transferAllPusd } = request.body || {};
+    if (!relay_node_id) return reply.code(400).send({ error: 'relay_node_id required' });
+    const wallet = sqlite.prepare(
+      "SELECT id, address, privkey_encrypted, polymarket_funder_address FROM agent_wallets WHERE relay_node_id = ? AND chain = 'polygon' LIMIT 1"
+    ).get(relay_node_id);
+    if (!wallet?.privkey_encrypted) return reply.code(400).send({ error: 'No Polygon wallet w/ privkey' });
+    const privateKey = decrypt(wallet.privkey_encrypted);
+    const out = { eoa: wallet.address, steps: {} };
+
+    // Step 1: predict
+    try {
+      const { depositWallet } = await predictDepositWallet(wallet.address);
+      out.depositWallet = depositWallet;
+      out.steps.predict = { ok: true, depositWallet };
+    } catch (e) { out.steps.predict = { ok: false, error: e.message }; return reply.send({ ok: false, ...out }); }
+
+    // Step 2: deploy (idempotent)
+    const dep = await deployDepositWallet(privateKey);
+    out.steps.deploy = dep;
+    if (!dep.ok) return reply.send({ ok: false, ...out });
+
+    // Step 3: optional pUSD transfer
+    if (transferAllPusd) {
+      const tr = await transferPusdToDepositWallet(privateKey, out.depositWallet, 0n);
+      out.steps.transferPusd = tr;
+      if (!tr.ok) return reply.send({ ok: false, ...out });
+    } else {
+      out.steps.transferPusd = { skipped: true, note: 'pass transferAllPusd:true to move EOA pUSD → DW' };
+    }
+
+    // Step 4: setup allowances via execute(Batch, sig)
+    const al = await setupDepositWalletAllowances(privateKey, out.depositWallet);
+    out.steps.setupAllowances = al;
+    if (!al.ok) return reply.send({ ok: false, ...out });
+
+    // Step 5: persist opt-in (funder_address column)
+    sqlite.prepare(
+      'UPDATE agent_wallets SET polymarket_funder_address = ?, updated_at = datetime(\'now\') WHERE id = ?'
+    ).run(out.depositWallet, wallet.id);
+    out.steps.persistOptIn = { ok: true, funder_address: out.depositWallet };
+
+    return reply.send({ ok: true, ...out });
   });
 
   // CLOB SDK client (V2 since 2026-04-28). The returned client holds a
