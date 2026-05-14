@@ -3427,5 +3427,39 @@ export function runMigrations() {
     }
   }
 
+  // v109: Phase B Fundamental Enricher (B4.2) — bettor_recommendations 加 fundamental 3 列 + bettor_domain_cache 表.
+  // J1 #184 refined + Bettor r113 architect ack: ttl_seconds 列 per-domain TTL (sports 3600 / politics 86400 /
+  // economic 86400 / crypto 300 / legal 21600 / other 7200). Owner 5/14 17:00 hat 切 + 14:50 钦定 "稳一个字".
+  {
+    const recCols = sqlite.prepare("PRAGMA table_info(bettor_recommendations)").all().map(c => c.name);
+    if (!recCols.includes('fundamental_estimate')) {
+      sqlite.exec(`ALTER TABLE bettor_recommendations ADD COLUMN fundamental_estimate REAL`);
+      console.log('[migrate] v109: bettor_recommendations.fundamental_estimate column 添加.');
+    }
+    if (!recCols.includes('fundamental_sources')) {
+      sqlite.exec(`ALTER TABLE bettor_recommendations ADD COLUMN fundamental_sources TEXT`);
+      console.log('[migrate] v109: bettor_recommendations.fundamental_sources column 添加 (JSON array of source URLs).');
+    }
+    if (!recCols.includes('fundamental_confidence')) {
+      sqlite.exec(`ALTER TABLE bettor_recommendations ADD COLUMN fundamental_confidence REAL`);
+      console.log('[migrate] v109: bettor_recommendations.fundamental_confidence column 添加.');
+    }
+    const hasCache = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='bettor_domain_cache'").get();
+    if (!hasCache) {
+      sqlite.exec(`
+        CREATE TABLE bettor_domain_cache (
+          market_id TEXT PRIMARY KEY,
+          domain TEXT,
+          confidence REAL,
+          reasoning TEXT,
+          ttl_seconds INTEGER NOT NULL,
+          cached_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_domain_cache_expire ON bettor_domain_cache(cached_at, ttl_seconds);
+      `);
+      console.log('[migrate] v109: bettor_domain_cache 表 + 1 索引 创建 (Phase B Fundamental Enricher per-domain TTL).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
