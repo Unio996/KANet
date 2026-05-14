@@ -209,10 +209,13 @@ async function _doQuote(peer, draft, relayNodeId, prevReply) {
   }
 
   // Reply text — quote + broker addr + amount + TTL
+  // Bug H γ P1 UX fix (NWT 13:31 surface): unit was "KAS/KAS" for BUY (targetAsset='KAS' both sides).
+  // 真 unit: how many stable (USDT/USDC) per 1 KAS. stableAsset derived from chainKey (base→USDC, else USDT).
+  const stableAssetForUnit = chainKey === 'base' ? 'USDC' : 'USDT';
   return [
     `📋 报价 (${isBuy ? '买' : '卖'} ${qty} KAS, ${chainKey.toUpperCase()})`,
     '',
-    `  KAS 中间价: ${midPrice.toFixed(6)} ${targetAsset}/KAS`,
+    `  KAS 中间价: ${midPrice.toFixed(6)} ${stableAssetForUnit}/KAS`,
     `  ${isBuy ? '你付' : '你收'}总额: ${(isBuy ? baseQuoteUsdt : baseQuoteUsdt).toFixed(4)} ${prepayAsset === 'KAS' ? targetAsset : prepayAsset}`,
     '',
     `💸 请真链 transfer 精确 ${amountQuoted} ${prepayAsset} 到 broker:`,
