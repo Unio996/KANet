@@ -194,7 +194,10 @@ async function _doAccept(peer, draft, relayNodeId, prevReply) {
   // 进 WAIT_PAYMENT, fetch offer 详情看 maker BSC addr
   const offerR = await client.getOffer(draft.offer_id);
   const meta = (() => { try { return JSON.parse(offerR.offer?.verification_meta || '{}'); } catch { return {}; } })();
-  const makerAddr = meta.accepted_chains?.find(c => c.chain === draft.selected_chain)?.address || meta.receive_address || '?';
+  // Bug C 5/14 fix (NWT C4.4 Tier 4 surface): chain === naked compare 漏 normalize, accepted_chains 元素 stored 'bnb'
+  // (publish 已 normalize), draft.selected_chain='bsc' (broker-v3 menu label) → fail fallback receive_address.
+  const selectedChainNormR = normalizeChainKey(draft.selected_chain);
+  const makerAddr = meta.accepted_chains?.find(c => normalizeChainKey(c.chain) === selectedChainNormR)?.address || meta.receive_address || '?';
   const wantAmt = offerR.offer?.want_amount || '?';
   const wantAsset = offerR.offer?.want_asset || 'USDT';
   stateMachine.setFlowState(peer, { flow: 'WAIT_PAYMENT', step: 'PAID', draft: { offer_id: draft.offer_id, selected_chain: draft.selected_chain } });

@@ -1067,6 +1067,7 @@ export async function registerRelayRoutes(fastify) {
     const BRIDGE_CHAINS = ['arbitrum','polygon','bnb','eth','base','optimism'];
     if (!BRIDGE_CHAINS.includes(toChain))
       return reply.code(400).send({ error: `bridge target chain must be one of: ${BRIDGE_CHAINS.join(',')}` });
+    // lint-allow-chain-eq: wallet.chain (DB-canonical from agent_wallets) + toChain (validated against BRIDGE_CHAINS DB-canonical) 都 canonical, 无 UI label drift
     if (wallet.chain === toChain)
       return reply.code(400).send({ error: 'fromChain === toChain, use /swap instead' });
     if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0)

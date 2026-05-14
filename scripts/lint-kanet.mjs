@@ -497,6 +497,27 @@ function checkABE_A6_protocol_status_owner(filepath, content) {
   }
 }
 
+// ── Bug-C-5/14: chain === naked compare 禁 (NWT C4.4 Tier 4 surface) ──
+// `.chain === <var>` 裸 compare 不 normalize → 'bsc' !== 'bnb' DB-canonical drift. 5/12 §3.2 修一处, 漏 3 处.
+// 必走 normalizeChainKey 双 wrap. escape hatch: 注释 // lint-allow-chain-eq: <reason>.
+function checkChainEqNormalize(filepath, content) {
+  if (!/\/api\/|\/services\/.*broker-v3\//.test(filepath.replace(/\\/g, '/'))) return;
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*\/\//.test(line)) continue;
+    // pattern: c.chain === <ident> OR <obj>.chain === <ident>  (排除已 wrap normalizeChainKey)
+    if (/\.chain\s*===\s*[a-zA-Z_]/.test(line) && !/normalizeChainKey\([^)]*\.chain\)/.test(line)) {
+      // check escape hatch: prev 5 lines OR same line含 lint-allow-chain-eq
+      let allowed = false;
+      for (let j = i; j >= Math.max(0, i - 5); j--) {
+        if (/\/\/\s*lint-allow-chain-eq:/.test(lines[j])) { allowed = true; break; }
+      }
+      if (!allowed) violate('Bug-C-chain-eq', `[Bug-C-5/14] '.chain === X' naked compare 漏 normalize, 'bsc' !== 'bnb' DB-canonical drift fail. 必 normalizeChainKey(c.chain) === normalizeChainKey(X) 双 wrap. NWT C4.4 Tier 4 surface 5/14. escape hatch 注释 '// lint-allow-chain-eq: <reason>'.`, filepath, i + 1);
+    }
+  }
+}
+
 // ── 跑 ──
 for (const fp of targets) {
   let content;
@@ -514,6 +535,7 @@ for (const fp of targets) {
   checkBrokerStutter(fp, content);
   checkCommandEnum(fp, content);
   checkABE_A6_protocol_status_owner(fp, content);  // ABE-A.6: protocol_status owner invariant
+  checkChainEqNormalize(fp, content);  // Bug-C-5/14: chain === naked compare normalize
 }
 checkR10();
 

@@ -248,7 +248,10 @@ export async function registerExchangeRoutes(fastify) {
           { signal: AbortSignal.timeout(8000) }
         ).then(r => r.json()).catch(() => null);
         const chains = walletsRes?.chains || [];
-        const chainWallet = chains.find(c => c.chain === give_chain);
+        // Bug C 5/14 fix (NWT C4.4 Tier 4 surface): chain === naked compare 漏 normalize, 'bsc' !== 'bnb' fail
+        // DB-canonical = 'bnb' but UI label = 'bsc' (broker-v3 menu hardcoded). 必走 normalizeChainKey 双 wrap.
+        const giveChainNorm = normalizeChainKey(give_chain);
+        const chainWallet = chains.find(c => normalizeChainKey(c.chain) === giveChainNorm);
         if (!chainWallet) {
           return reply.code(400).send({
             error: `No ${give_chain} wallet for this agent`,
@@ -424,7 +427,9 @@ export async function registerExchangeRoutes(fastify) {
           { signal: AbortSignal.timeout(8000) }
         ).then(r => r.json()).catch(() => null);
         const chains = walletsRes?.chains || [];
-        const chainWallet = chains.find(c => c.chain === selected_chain);
+        // Bug C 5/14 fix (NWT C4.4 Tier 4 surface): chain === naked compare 漏 normalize, 'bsc' !== 'bnb' fail
+        const selectedChainNorm = normalizeChainKey(selected_chain);
+        const chainWallet = chains.find(c => normalizeChainKey(c.chain) === selectedChainNorm);
         if (!chainWallet) {
           return reply.code(400).send({
             error: `你没有 ${selected_chain} 钱包，无法通过此链支付`,
