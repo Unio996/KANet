@@ -246,8 +246,11 @@ export async function registerStockRoutes(fastify) {
     if (!creds) return null;
     const v2 = await import('@polymarket/clob-client-v2');
     const { ethers } = await import('ethers');
+    // Sub 9.14 Stage A: also read polymarket_funder_address (v106 column).
+    // funder NULL → default EOA mode (Sophie / legacy V1 grandfathered wallets).
+    // funder 有值 → POLY_1271 (=3) mode + funderAddress=deposit wallet (Bettor / fresh EOA-import wallets).
     const walletRow = sqlite.prepare(
-      "SELECT privkey_encrypted FROM agent_wallets WHERE relay_node_id = ? AND chain = 'polygon' LIMIT 1"
+      "SELECT privkey_encrypted, polymarket_funder_address FROM agent_wallets WHERE relay_node_id = ? AND chain = 'polygon' LIMIT 1"
     ).get(relay_node_id);
     if (!walletRow?.privkey_encrypted) return null;
     const pk = decrypt(walletRow.privkey_encrypted);
@@ -255,12 +258,18 @@ export async function registerStockRoutes(fastify) {
     const wallet = new ethers.Wallet(pk, provider);
     if (!wallet._signTypedData) wallet._signTypedData = wallet.signTypedData.bind(wallet);
     const sdkCreds = { key: creds.key || creds.apiKey, secret: creds.secret, passphrase: creds.passphrase };
-    const client = new v2.ClobClient({
+    const funder = walletRow.polymarket_funder_address || undefined;
+    const clientOpts = {
       host: 'https://clob.polymarket.com',
       chain: 137,
       signer: wallet,
       creds: sdkCreds,
-    });
+    };
+    if (funder) {
+      clientOpts.signatureType = v2.SignatureTypeV2.POLY_1271;  // = 3
+      clientOpts.funderAddress = funder;
+    }
+    const client = new v2.ClobClient(clientOpts);
     client.__provider = provider; // for _releaseClob cleanup
     return client;
   }

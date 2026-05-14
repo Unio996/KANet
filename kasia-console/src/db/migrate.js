@@ -3376,5 +3376,16 @@ export function runMigrations() {
     }
   }
 
+  // v106: Phase 3g Sub 9.14 Stage A — agent_wallets.polymarket_funder_address column
+  // Per-wallet opt-in for Polymarket V2 POLY_1271 mode (EOA-import users). NULL → default EOA mode
+  // (Sophie 维持现状, V1 grandfathered). 有值 → POLY_1271 + funder=deposit wallet (Bettor 新路径).
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(agent_wallets)").all().map(c => c.name);
+    if (!cols.includes('polymarket_funder_address')) {
+      sqlite.exec(`ALTER TABLE agent_wallets ADD COLUMN polymarket_funder_address TEXT`);
+      console.log('[migrate] v106: agent_wallets.polymarket_funder_address column 添加 (Phase 3g Sub 9.14 POLY_1271 per-wallet opt-in).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
