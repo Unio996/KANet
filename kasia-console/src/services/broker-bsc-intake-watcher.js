@@ -165,15 +165,15 @@ export async function tickEscrow() {
       const tx = scan.events.find(t => Math.abs(t.amount - expectedAmount) / expectedAmount <= ESCROW_AMOUNT_TOLERANCE_PCT);
       if (!tx) continue;
 
-      // anti-replay: prepayment_tx UNIQUE constraint will reject if already used
+      // anti-replay: prepayment_tx UNIQUE constraint will reject if already used.
+      // Bug M 5/14 fix: scanRecentTransfers event field is `from` (NOT `sender`/`from_address`).
+      // Fallback fallthrough to user_kasia_addr is wrong (kasia ≠ EVM). If truly missing, leave NULL
+      // (sweep refund will skip refund + log manual review needed; cleaner than corrupt addr).
       try {
         sqlite.prepare(`
           UPDATE user_escrow_balances
           SET prepayment_tx = ?, amount_received = ?, user_refund_addr = ?, status = 'active', updated_at = datetime('now')
           WHERE id = ? AND status = 'pending_prepay'
-        // Bug M 5/14 fix: scanRecentTransfers event field is `from` (not `sender`/`from_address`).
-        // Fallback fallthrough to user_kasia_addr is wrong (kasia ≠ EVM). If truly missing, leave NULL
-        // (sweep refund will skip refund + log manual review needed; cleaner than corrupt addr).
         `).run(tx.tx_hash, String(tx.amount), tx.from || null, e.id);
       } catch (err) {
         if (/UNIQUE constraint failed/.test(err.message)) {
