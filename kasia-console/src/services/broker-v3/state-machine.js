@@ -88,13 +88,13 @@ export async function processInput(user_id, msg, relayNodeId) {
   // 任意 state 'back'/'取消' → MENU_TOP
   if (/^(back|取消|返回|menu)$/i.test(head)) {
     clearFlowState(user_id);
-    return { reply: _menuTopText() };
+    return { reply: await _menuTopText() };
   }
 
   const cur = getFlowState(user_id);
   // 首次 OR MENU_TOP — show menu
   if (!cur || cur.flow === 'MENU_TOP') {
-    return _handleMenuTop(user_id, head);
+    return await _handleMenuTop(user_id, head);
   }
 
   switch (cur.flow) {
@@ -109,12 +109,27 @@ export async function processInput(user_id, msg, relayNodeId) {
     case 'WAIT_PAYMENT': return await _handleWaitPayment(user_id, head, cur, relayNodeId);
     default:
       clearFlowState(user_id);
-      return { reply: _menuTopText() };
+      return { reply: await _menuTopText() };
   }
 }
 
-function _menuTopText() {
+// Owner 19:30+ UX 严训 (无数次 reiterated): 首屏必带 live KAS 现价, 用户不看 5 步才知道值不值得.
+// mid 即撮合价 (不假 spread, 跟 _previewText 字面一致 — 不欺骗 user). 出价 step user 可自定 limit.
+const FALLBACK_MID_PRICE_MENU = 0.04;
+async function _menuTopText() {
+  let priceLine;
+  try {
+    const { getKasPrice } = await import('./exchange-client.js');
+    const p = await getKasPrice();
+    priceLine = (p && p > 0)
+      ? `📊 KAS 现价 ${p} USDT (live)`
+      : `📊 KAS 现价 ${FALLBACK_MID_PRICE_MENU} USDT (⚠ oracle down, fallback)`;
+  } catch {
+    priceLine = `📊 KAS 现价 ${FALLBACK_MID_PRICE_MENU} USDT (⚠ oracle down, fallback)`;
+  }
   return [
+    priceLine,
+    '',
     '你好! 我是 Trader-B, KAS 撮合 broker.',
     '你想做什么?',
     '',
@@ -129,7 +144,7 @@ function _menuTopText() {
   ].join('\n');
 }
 
-function _handleMenuTop(user_id, msg) {
+async function _handleMenuTop(user_id, msg) {
   const num = parseInt(msg, 10);
   switch (num) {
     case 1: setFlowState(user_id, { flow: 'BUY_FLOW', step: 'CHAIN_SELECT', draft: { side: 'buy_kas' } }); return { reply: _chainSelectText('买') };
@@ -138,7 +153,7 @@ function _handleMenuTop(user_id, msg) {
     case 4: setFlowState(user_id, { flow: 'ACCEPT_OFFER', step: 'OFFER_ID_INPUT' }); return { reply: '请输入要接的 offer_id (来 BROWSE_MARKET 选 OR 直接粘贴 8-32 字符 ID), 或回 back 返回菜单.' };
     case 5: setFlowState(user_id, { flow: 'MY_ORDERS', step: 'LIST' }); return { reply: '正在加载你的订单...', triggerMyOrders: true };
     case 6: setFlowState(user_id, { flow: 'CANCEL_ORDER', step: 'ORDER_ID_INPUT' }); return { reply: '请输入要取消的 offer_id, 或回 back 返回菜单.' };
-    default: return { reply: _menuTopText() };  // unknown → re-show menu
+    default: return { reply: await _menuTopText() };  // unknown (含 'kas'/'价'/'price' 自然语言) → re-show menu with live price
   }
 }
 
@@ -229,14 +244,14 @@ async function _handleTradeFlow(user_id, msg, cur, side, relayNodeId) {
     }
     if (/^(no|取消)$/i.test(msg)) {
       clearFlowState(user_id);
-      return { reply: '已取消. 回菜单.\n\n' + _menuTopText() };
+      return { reply: '已取消. 回菜单.\n\n' + await _menuTopText() };
     }
     return { reply: '回 YES 确认下单 / NO 取消 / back 返回菜单.' };
   }
   if (cur.step === 'WAIT_PREPAY') {
     // Bug H 5/14 escrow mode: user 在 broker quote 等 user 真链 prepay 状态.
     // Defensive: if ESCROW_MODE off but state somehow reaches WAIT_PREPAY, clear flow.
-    if (!ESCROW_MODE) { clearFlowState(user_id); return { reply: '状态错乱 (escrow mode off), 回菜单.\n\n' + _menuTopText() }; }
+    if (!ESCROW_MODE) { clearFlowState(user_id); return { reply: '状态错乱 (escrow mode off), 回菜单.\n\n' + await _menuTopText() }; }
     if (/^(no|取消|cancel)$/i.test(msg)) {
       // Bug H γ Sub #7: cancel 不再 silent clear — trigger _refundEscrow 处理 (pending_prepay 不需链 TX,
       // active 需 broker 真链 refund). 状态 clear 在 _refundEscrow 后 router dispatch.
@@ -323,7 +338,7 @@ async function _handleAccept(user_id, msg, cur, relayNodeId) {
   }
   if (cur.step === 'CONFIRM') {
     if (/^(yes|确认|ok|好)$/i.test(msg)) return { reply: '正在 accept...', triggerAccept: true, draft: cur.draft };
-    if (/^(no|取消)$/i.test(msg)) { clearFlowState(user_id); return { reply: '已取消.\n\n' + _menuTopText() }; }
+    if (/^(no|取消)$/i.test(msg)) { clearFlowState(user_id); return { reply: '已取消.\n\n' + await _menuTopText() }; }
     return { reply: '回 YES / NO / back.' };
   }
   return { reply: '状态错乱, back 重来.' };
@@ -373,7 +388,7 @@ async function _handleCancel(user_id, msg, cur) {
   }
   if (cur.step === 'CONFIRM_CANCEL') {
     if (/^(yes|确认|ok|好)$/i.test(msg)) return { reply: '正在 cancel...', triggerCancel: true, draft: cur.draft };
-    if (/^(no|算了)$/i.test(msg)) { clearFlowState(user_id); return { reply: '不取消. 回菜单.\n\n' + _menuTopText() }; }
+    if (/^(no|算了)$/i.test(msg)) { clearFlowState(user_id); return { reply: '不取消. 回菜单.\n\n' + await _menuTopText() }; }
   }
   return { reply: '回 YES / NO / back.' };
 }
