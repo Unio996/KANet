@@ -253,8 +253,10 @@ async function _handleAccept(user_id, msg, cur, relayNodeId) {
   }
   if (cur.step === 'CHAIN_SELECT') {
     const num = parseInt(msg, 10);
-    const chains = ['bsc', 'eth', 'polygon', 'arbitrum'];
-    if (num < 1 || num > chains.length) return { reply: '回 1-4 选链.' };
+    // Bug D 5/14 fix (NWT 10:43 v3 §C12 surface): ACCEPT flow chain list 旧 4 chain 漏 op + base.
+    // BUY/SELL flow L154 已 6 chain (Phase B P0 6f1626059), ACCEPT flow 漏一片 — align 6 chain.
+    const chains = SUPPORTED_CHAINS;
+    if (num < 1 || num > chains.length) return { reply: '回 1-6 选链.' };
     cur.draft.selected_chain = chains[num - 1];
     setFlowState(user_id, { ...cur, step: 'CONFIRM', draft: cur.draft });
     return { reply: `选 ${chains[num - 1].toUpperCase()} 支付. 回 YES 确认接单 / NO 取消.` };
