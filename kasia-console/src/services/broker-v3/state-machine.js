@@ -62,8 +62,8 @@ export async function processInput(user_id, msg, relayNodeId) {
   }
 
   switch (cur.flow) {
-    case 'BUY_FLOW': return _handleTradeFlow(user_id, head, cur, 'buy', relayNodeId);
-    case 'SELL_FLOW': return _handleTradeFlow(user_id, head, cur, 'sell', relayNodeId);
+    case 'BUY_FLOW': return await _handleTradeFlow(user_id, head, cur, 'buy', relayNodeId);
+    case 'SELL_FLOW': return await _handleTradeFlow(user_id, head, cur, 'sell', relayNodeId);
     case 'BROWSE_MARKET': return await _handleBrowse(user_id, head, cur);
     case 'ACCEPT_OFFER': return await _handleAccept(user_id, head, cur, relayNodeId);
     case 'MY_ORDERS': return await _handleMyOrders(user_id, head, cur, relayNodeId);
@@ -117,7 +117,7 @@ function _chainSelectText(verb) {
   ].join('\n');
 }
 
-function _handleTradeFlow(user_id, msg, cur, side, relayNodeId) {
+async function _handleTradeFlow(user_id, msg, cur, side, relayNodeId) {
   const draft = cur.draft || { side: side === 'buy' ? 'buy_kas' : 'sell_kas' };
   if (cur.step === 'CHAIN_SELECT') {
     const num = parseInt(msg, 10);
@@ -142,14 +142,14 @@ function _handleTradeFlow(user_id, msg, cur, side, relayNodeId) {
     // T-J2-2026-05-06 r232 fix: step='PREVIEW' → 'CONFIRM' (跟 L145 CONFIRM handler align).
     // 旧版 step='PREVIEW' 但 L145 check 'CONFIRM' → mismatch fall default 'state 错乱'. NWT operator chain DM 实战暴露.
     setFlowState(user_id, { ...cur, step: 'CONFIRM', draft });
-    return { reply: _previewText(draft, side), triggerPreview: true };
+    return { reply: await _previewText(draft, side), triggerPreview: true };
   }
   if (cur.step === 'ADDR_INPUT') {
     if (!EVM_ADDR_REGEX.test(msg)) return { reply: '地址格式不对, 应是 0x 开头 42 位. 重输 OR back.' };
     draft.pay_address = msg;
     // T-J2-2026-05-06 r232 fix: step='PREVIEW' → 'CONFIRM' (同款 align L145 handler)
     setFlowState(user_id, { ...cur, step: 'CONFIRM', draft });
-    return { reply: _previewText(draft, side), triggerPreview: true };
+    return { reply: await _previewText(draft, side), triggerPreview: true };
   }
   if (cur.step === 'CONFIRM') {
     if (/^(yes|确认|ok|好|发布)$/i.test(msg)) {
@@ -165,16 +165,38 @@ function _handleTradeFlow(user_id, msg, cur, side, relayNodeId) {
   return { reply: '状态错乱, 回 back 返回菜单重来.' };
 }
 
-function _previewText(draft, side) {
+// Bug B 5/14 fix — preview 加报价 (Owner 8:51 实测: 旧 preview 0 价格 = 盲下单).
+// 数学跟 router.js _doPublish (L109-111) 同 source: live oracle midPrice → want_amount = qty * mid.
+// 不引入 spread (publish 真 want_amount 不含 spread, preview 必跟 publish 字面一致, 不欺骗 user).
+const FALLBACK_MID_PRICE_PREVIEW = 0.04;
+async function _previewText(draft, side) {
   const verb = side === 'buy' ? '买' : '卖';
+  const stableAsset = (draft.pay_chain || '').toLowerCase() === 'base' ? 'USDC' : 'USDT';
+  let midPrice = null;
+  try {
+    const { getKasPrice } = await import('./exchange-client.js');
+    midPrice = await getKasPrice();
+  } catch {}
+  const usedPrice = midPrice || FALLBACK_MID_PRICE_PREVIEW;
+  const totalStable = (Number(draft.qty) * usedPrice).toFixed(4);
+  const priceLine = midPrice
+    ? `  KAS 中间价: ${usedPrice} ${stableAsset}/KAS (live)`
+    : `  KAS 中间价: ${usedPrice} ${stableAsset}/KAS (⚠ oracle down, fallback)`;
+  const totalLine = side === 'buy'
+    ? `  你付总额: ${totalStable} ${stableAsset} (${draft.qty} × ${usedPrice})`
+    : `  你收总额: ${totalStable} ${stableAsset} (${draft.qty} × ${usedPrice})`;
   const lines = [
     `📋 订单预览 (${verb} ${draft.qty} KAS, ${draft.pay_chain.toUpperCase()})`,
     '',
     `  方向: ${verb} KAS`,
     `  数量: ${draft.qty} KAS`,
     `  付款链: ${draft.pay_chain.toUpperCase()}`,
+    '  ───── 报价 ─────',
+    priceLine,
+    totalLine,
+    '  ─────────────────',
   ];
-  if (side === 'sell') lines.push(`  你的 USDT 收款: ${draft.pay_address}`);
+  if (side === 'sell') lines.push(`  你的 ${stableAsset} 收款: ${draft.pay_address}`);
   lines.push('', '回 YES 确认下单 / NO 取消');
   return lines.join('\n');
 }

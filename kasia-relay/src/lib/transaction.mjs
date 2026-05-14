@@ -49,9 +49,27 @@ let _sendLock = Promise.resolve();
 // 充分 buffer + cover restart race.
 const _pendingSpentUtxos = new Map(); // key = "txid:index" → expiry timestamp
 const _PENDING_UTXO_TTL_MS = 60_000;  // J1-D-4 extended from 30000
+
+// kasia-wasm IUtxoEntry shape: { address, outpoint: { transactionId, index }, amount, ... }
+// UtxoEntryReference also exposes top-level `outpoint` getter. Older fallback shapes carry
+// `entry.transactionId` flat. J2 5/14 RCA (Bug A): old probe `entry.entry?.transactionId`
+// missed both UtxoEntry and UtxoEntryReference (real path is `outpoint.transactionId`) →
+// every entry produced key ':0' → silent skip → filterPendingUtxos never filtered → publish
+// broadcast + reply DM 3 ms apart picked same UTXO → RPC reject 'already spent in mempool'.
+function _outpointOf(entry) {
+  return entry?.outpoint || entry?.entry?.outpoint || null;
+}
+function _utxoKey(entry) {
+  const op = _outpointOf(entry);
+  if (op?.transactionId) return `${op.transactionId}:${op.index ?? 0}`;
+  // Backward-compat fallback: flat shape (older kaspa-wasm or hand-built entries).
+  const txid = entry?.entry?.transactionId || entry?.transactionId;
+  if (txid) return `${txid}:${entry?.entry?.index ?? entry?.index ?? 0}`;
+  return null;
+}
 function markUtxoSpent(entry) {
-  const key = `${entry.entry?.transactionId || entry.transactionId || ''}:${entry.entry?.index ?? entry.index ?? 0}`;
-  if (key === ':0') return; // safety: no valid outpoint
+  const key = _utxoKey(entry);
+  if (!key) return; // shape unknown — fall through, J1-D-4 explicit retry covers
   _pendingSpentUtxos.set(key, Date.now() + _PENDING_UTXO_TTL_MS);
 }
 
@@ -69,8 +87,8 @@ function filterPendingUtxos(entries) {
   for (const [k, exp] of _pendingSpentUtxos) { if (exp < now) _pendingSpentUtxos.delete(k); }
   if (_pendingSpentUtxos.size === 0) return entries;
   return entries.filter(e => {
-    const key = `${e.entry?.transactionId || e.transactionId || ''}:${e.entry?.index ?? e.index ?? 0}`;
-    return !_pendingSpentUtxos.has(key);
+    const key = _utxoKey(e);
+    return !key || !_pendingSpentUtxos.has(key);
   });
 }
 function withSendLock(fn) {

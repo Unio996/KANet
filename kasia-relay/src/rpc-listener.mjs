@@ -995,7 +995,22 @@ async function replyToMessage(txId, senderAddress, messageText) {
       return;
     } catch (err) {
       const errMsg = err?.message || err?.toString?.() || '';
-      if ((errMsg.includes('Insufficient funds') || errMsg.includes('Storage mass')) && attempts < MAX_ATTEMPTS - 1) {
+      // Bug A 5/14 RCA — UTXO race recovery on reply path (mirror relay.mjs:428 send_broadcast).
+      // Owner 8:51 实测 BSC menu: broker-v3 publish 广播 + reply DM 3 ms apart 撞同 UTXO →
+      // RPC reject 'already spent ... in the mempool' → 旧 catch 不识别 → 静默 'Reply send failed'
+      // → user 0 reply. 配合 transaction.mjs _utxoKey RCA fix, 此 catch 是 belt-and-suspenders.
+      const isMempoolReject = /already spent.*?in the mempool|already spent by transaction/i.test(errMsg);
+      if (isMempoolReject && attempts < MAX_ATTEMPTS - 1) {
+        const m = errMsg.match(/\(([a-f0-9]{64}):?(\d*)\)/i);
+        if (m) {
+          const { markUtxoSpentByOutpoint } = await import('./lib/transaction.mjs');
+          markUtxoSpentByOutpoint(m[1], m[2] ? Number(m[2]) : 0);
+        }
+        attempts++;
+        const sleepMs = attempts * 2000;  // 2/4/6s backoff (短于 bcast — reply 时效敏感)
+        log(`⚠ Reply mempool reject, sleep ${sleepMs}ms before retry (attempt ${attempts + 1}/${MAX_ATTEMPTS})`);
+        await new Promise(r => setTimeout(r, sleepMs));
+      } else if ((errMsg.includes('Insufficient funds') || errMsg.includes('Storage mass')) && attempts < MAX_ATTEMPTS - 1) {
         const target = Math.max(20, Math.floor(text.length * 0.9));
         text = text.slice(0, target).replace(/\s+\S*$/, '') + '...';
         attempts++;
