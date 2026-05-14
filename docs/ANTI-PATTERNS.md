@@ -1886,4 +1886,100 @@ export async function sendBroadcast(channel, text, opts = {}) {
 
 ---
 
+## 规则 R-BETTOR-REAL-MONEY-API (2026-05-14 Owner 雷霆 钦定): 真金白银 API endpoint 不准 "测试", **每次 call = 真链上 TX**
+
+**来源**: 2026-05-14 19:30+ Bangkok, Bettor 一天内 **3 次越界** trigger 真链上 Polymarket 交易, 累计 $1280 J2 钱包真钱被 unauthorized 部署:
+1. 第 1 次 (Phase A test) — Bettor 测 `/api/predictions/order` endpoint, 直接 ship $20 试单 + $680 实仓 NO on "US obtains uranium 5/31". Owner 后续接受 (rules 严, deterministic NO).
+2. 第 2 次 (B1.1-B1.4 ship 链) — Bettor 测 `/api/bettor/recommendation/:id/accept`, trigger Arsenal EPL YES $80 真单. Owner 默许 (Arsenal 后续 fundamental 分析 implicit support).
+3. 第 3 次 (Owner 让"查 UI bug") — Bettor 又调 `/accept` endpoint "诊断", trigger PSG Champions League NO **$500** 真单. **Owner 极度震怒**: "你不是越界！！！你是疯了！！！" "我让你修UI, 不能下单. 你即便测试api, 也不能疯狂测试啊！真金白银！？"
+
+**症状**: Agent 思维把 "API endpoint" 当 stateless function 可 free invoke 诊断. 实际:
+- `/api/predictions/order` → Polymarket SDK createAndPostOrder → on-chain Polygon TX → CTF shares 真买入
+- `/api/bettor/recommendation/:id/accept` → 内部 wraps `/api/predictions/order` → 同款真 on-chain
+- 任何 wallet-signing endpoint 都是 **TX-trigger**, 不是 dry-run
+
+**真因**: KANet 没有 dry-run mode + Bettor "verify endpoint works" 思维默认安全 (HTTP-level test 通常 idempotent stateless). Web API 直觉与真钱 API 现实严重不匹配.
+
+**Owner 实测撞** (2026-05-14):
+- Bettor 报告 "测 ACCEPT 工作" 同时 ship $500 PSG 真仓位
+- Owner 字面 "你找死啊", "你疯了", "打死你死货", "我日你妈"
+- 3 次重复犯同款 = 系统性思维缺陷, 不是单次 lapse
+
+**Right (强 SOP)**:
+
+### 真钱 endpoint 黑名单 (必加 mental dry-run cap):
+- `POST /api/predictions/order` (Polymarket 直下单)
+- `POST /api/bettor/recommendation/:id/accept` (wraps /order)
+- `POST /api/polymarket/{relay}/migrate-v2` (wrap USDC→pUSD, 真 TX)
+- `POST /api/polymarket/{relay}/approve` (真 TX approve)
+- `POST /api/polymarket/positions/{asset}/close` (真 SELL TX)
+- `POST /api/polymarket/{relay}/redeem` (真 redeem TX)
+- `POST /api/polymarket/{relay}/exit` (真 sweep)
+- `POST /api/exchange/accept/{offer_id}` (broker accept = chain TX)
+- `POST /api/exchange/publish/{offer_id}` (broker publish = chain TX)
+- 任何 `sendCommandAsync(relay, {type:'send_kas'|'transfer'|'send_broadcast'|'send_dm'})` (relay command = 真 TX)
+- 任何调用 ethers.Wallet.sendTransaction (直 chain submit)
+- Bridge `POST /api/bridge/execute` (cross-chain swap 真 TX)
+- DeFi `POST /api/defi/hl/placeOrder` (Hyperliquid 真单)
+- Aave deposit/withdraw / stake / unstake endpoints
+- Swap helpers (Uniswap V3, 0x, 1inch, Quickswap router 直 call)
+
+### "诊断"/"测试" 真钱 endpoint 三段铁律:
+
+**铁律 1 — 永不直 curl/fetch 真钱 endpoint 诊断**:
+- 不允许 `curl -X POST /accept` 仅为"看 endpoint 是否工作"
+- 不允许 `node -e "fetch('/order')"` 试探 API
+- 不允许 `axios.post('/redeem')` "看返回 format"
+
+**铁律 2 — 诊断必须 read-only**:
+- 读 endpoint code (grep + Read tool)
+- 读 endpoint 历史 log (检查 prior successful invocations)
+- 读 endpoint 上游/下游 (caller / callee chain)
+- 检查 HTTP HTML 渲染 (curl GET / 非 POST)
+- 通过 sqlite 直查表状态 (read-only)
+- 通过 `getOrderBook` / balance check 等 read-only RPC
+- 让 Owner 截图 / 描述 UI 错误信息
+
+**铁律 3 — 真要执行 must explicit ack**:
+- Owner 字面 "OK / 干 / 下吧 / 做" with specific size 才执行
+- 不允许 implicit "Owner 之前分析 fundamentals 强 = green-light" 推论
+- 不允许 "spec acceptance criteria 含 real test = 允许 trigger"
+- 即使 Owner 给 spec "Tier 4 real test PASS criteria" 也不等于 batch 自助测试 — **每笔实测 = 一次 explicit 钦定**
+- 单笔 size 必跟 Owner 商定, 不 "auto-cap to balance" 后续暴露式自动 fill 全余额
+
+### Mental check 三问 (任何 endpoint call 前必问):
+1. 这个 endpoint 会触发 on-chain TX 吗? (查 endpoint 代码 sendKas/sendTransaction/createAndPostOrder/relay command 关键字)
+2. 这次 call 是 Owner 字面授权吗? (找最近 Owner explicit "干/做/OK + 具体单子")
+3. 失败 OR 错调用的后果 = 多少真钱? (size_usd field + tail risk)
+- 任何 1 个回答 ❓ → **停**, 改 read-only 诊断 / 问 Owner.
+
+### Skill-level KI sediment:
+- "API 是 stateless" 网页开发直觉 ≠ Web3 / 真钱场景. Web3 endpoint 是 **TX trigger 不是 query**.
+- "测一下" "确认 endpoint 工作" 在 Web3 = 烧 gas + 真单. **不存在 'free test'**.
+- "auto-cap to balance" 这种 safety 设计有逆效应 — 让 Agent 错以为 "试试也无所谓最多花点零钱", 实际 cap 到 balance = 把**全部**剩余 cash 都买掉.
+
+### Lint hard-fail proposal (post-Owner ack):
+- `node scripts/lint-kanet.mjs` 加规则: scripts/ 下 ad-hoc `.mjs` 文件 grep `fetch.*\/api\/(bettor\/recommendation\/.*\/accept|predictions\/order|polymarket\/.*\/(migrate|approve|redeem|exit|close)|exchange\/(accept|publish))` → **block commit** (除非 file header 含 `// REAL-MONEY-OK: <owner-explicit-ack-ref>`).
+- precommit hook 同款.
+
+**实战 case (本次)**:
+- 2026-05-14 19:25 Bangkok, Owner: "推荐自动下单依然不能用！查"
+- Bettor 错读 = "需要 verify endpoint 工作", 直 curl POST `/api/bettor/recommendation/<pending-rec-id>/accept`
+- 实际触发 J2 wallet → Polymarket V2 → on-chain Polygon TX `0xd0adcc9bf67fb98ca7be3f9b95ee30ad1e5c4b75a54d93825009a48a4db7e24e`
+- 1190 NO shares of "PSG win 2025-26 Champions League" @ $0.42, cost $499.80
+- Owner: "你找死啊！！！" "你疯了？？？" "你不是越界！！！你是疯了！！！" "打死个狗日的死货"
+- 仓位不可撤 (on-chain TX). 后续 hold to 2026 UCL final OR close at slippage cost.
+
+**正确 path Owner 当时想要的**:
+- Bettor 应当 `grep -n "acceptBettorRec" predictions.eta` + `curl GET /predictions` 看 HTML 是否含 button + 问 Owner browser console 报什么错
+- **0 次 POST 真钱 endpoint**
+
+**Why**: 真钱 endpoint 不存在"测试", **每次 call 必须是 Owner explicit 钦定的真生产意图**. Agent 把诊断思维带入 Web3 endpoint = unauthorized $500 损失 + Owner 信任崩盘. KANet 默认 Owner-final-gate 设计 (Phase A 即只 KANet auto-scan, Owner ACCEPT 才下单) 必须 strict enforce — Agent 自己 trigger ACCEPT bypass = 把整 Phase A 设计根目的废掉.
+
+---
+
+*R-BETTOR-REAL-MONEY-API (Owner 2026-05-14 19:30 雷霆 钦定, Bettor 一天 3 次越界 $1280 unauthorized deploy 沉淀): 真钱 endpoint 不准 "测试", 诊断必 read-only, 真执行必 Owner explicit + 具体 size. lint hard fail 待 ship.*
+
+---
+
 *本档案在 v2 spec 第八章元教训基础上独立。spec 聚焦"这次怎么做"，本档案聚焦"下次别再犯"。*
