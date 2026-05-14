@@ -3435,5 +3435,41 @@ export function runMigrations() {
     }
   }
 
+  // v108: Bettor Pattern-Match 5/14 — historical_resolutions 表 (Polymarket 历史已 resolve markets corpus)
+  // Owner 5/14 13:13 钦定 "去扫 100%/0% 历史单子 + 条件+规则 发现规律". Corpus = 历史 binary resolved markets
+  // (outcomePrices=["1","0"] or ["0","1"]) 作 LLM supervised learning ground truth. Phase 1 = corpus build,
+  // Phase 2 = LLM pattern induction, Phase 3 = active market scanner.
+  {
+    const exists = sqlite.prepare("SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='historical_resolutions'").get();
+    if (!exists.cnt) {
+      sqlite.exec(`
+        CREATE TABLE historical_resolutions (
+          condition_id TEXT PRIMARY KEY,          -- 0x... hex from gamma
+          gamma_id TEXT,                          -- gamma internal market id
+          slug TEXT,
+          question TEXT NOT NULL,
+          description TEXT,
+          outcomes_json TEXT,                     -- ["Yes","No"] etc
+          start_date TEXT,                        -- ISO (market opened)
+          end_date TEXT,                          -- ISO (resolution time)
+          final_yes REAL NOT NULL,                -- 0 or 1 (canonical binary resolution)
+          final_no REAL NOT NULL,                 -- 0 or 1
+          raw_outcome_prices TEXT,                -- ["1","0"] etc — preserve original
+          total_volume REAL,
+          liquidity_final REAL,
+          one_month_change REAL,                  -- price 1mo change (where available)
+          last_trade_price REAL,
+          category TEXT,                          -- LLM-classified pattern (filled Phase 2: frontrunner/status-quo/long-tail/process-impossibility/etc)
+          confidence REAL,                        -- LLM confidence in category (0-1)
+          ingested_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_hist_res_final ON historical_resolutions(final_yes, final_no);
+        CREATE INDEX idx_hist_res_end ON historical_resolutions(end_date);
+        CREATE INDEX idx_hist_res_cat ON historical_resolutions(category);
+      `);
+      console.log('[migrate] v108: historical_resolutions 表 + 3 索引 创建 (Bettor Pattern-Match corpus, Owner 5/14 13:13 钦定).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
