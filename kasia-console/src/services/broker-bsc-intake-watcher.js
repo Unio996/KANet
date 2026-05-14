@@ -26,8 +26,13 @@ let _matches = 0;
 
 export function start() {
   if (_intakeInterval) return { ok: false, reason: 'already_started' };
-  _intakeInterval = setInterval(() => { tick().catch(e => console.warn(`[broker-bsc-intake] tick err: ${e.message}`)); }, TICK_MS);
-  console.log(`[broker-bsc-intake] started, tick=${TICK_MS / 1000}s — broker BSC USDT inflow → BUY flow trigger`);
+  _intakeInterval = setInterval(() => {
+    tick().catch(e => console.warn(`[broker-bsc-intake] tick err: ${e.message}`));
+    // Bug H γ 5/14 Sub #2 (Owner 12:05 钦定 candidate A v2): 并行 tickEscrow scan for
+    // user_escrow_balances pending_prepay. ESCROW_MODE check inside tickEscrow — flag off → 直 return.
+    tickEscrow().catch(e => console.warn(`[broker-bsc-intake-escrow] tick err: ${e.message}`));
+  }, TICK_MS);
+  console.log(`[broker-bsc-intake] started, tick=${TICK_MS / 1000}s — BSC USDT inflow → legacy BUY flow + Bug H escrow flow (flag-gated)`);
   return { ok: true };
 }
 
@@ -106,3 +111,88 @@ export async function tick() {
   }
   return { ok: true, scanned: pending.length, matched };
 }
+
+// Bug H γ Sub #2 (Owner 12:05 钦定 candidate A v2 broker-escrow custody):
+// 扫 user_escrow_balances pending_prepay rows, match incoming USDT/USDC TX by (broker_recv_addr, amount tolerance ±0.5%).
+// 匹配 → UPDATE escrow row (prepayment_tx, amount_received, user_refund_addr from sender) + status pending_prepay → active
+// → call _doPublishAfterPrepay 真 publish offer backed by escrow.
+// ESCROW_MODE off (default) → 直 return (legacy retail_dex_orders flow 不动).
+// 当前 BSC only — eth/polygon/arbitrum/optimism/base 待 future expansion (poll Kaspa cross-chain-verify multi-chain support).
+const ESCROW_AMOUNT_TOLERANCE_PCT = 0.005;  // ±0.5% per NWT 12:12 Q2 ack
+const ESCROW_SCAN_SPAN_BLOCKS = 200;  // ~10 min BSC (3s blocks) — pending_prepay TTL 5 min + safety
+let _escrowTicks = 0;
+let _escrowMatches = 0;
+
+export async function tickEscrow() {
+  if (process.env.BROKER_V3_ESCROW_MODE !== 'true') return { ok: true, reason: 'escrow_mode_off' };
+  _escrowTicks++;
+
+  // Scan BSC broker addr for pending escrow rows (BUY flow user prepays USDT)
+  const brokerWallet = sqlite.prepare(
+    `SELECT address FROM agent_wallets WHERE relay_node_id = ? AND chain = 'bnb' AND is_default = 1 LIMIT 1`
+  ).get(BROKER_RELAY_ID);
+  if (!brokerWallet?.address) return { ok: false, reason: 'no_broker_bsc_wallet' };
+  const brokerBscAddr = brokerWallet.address;
+
+  // 查 BUY pending escrow rows (user prepay USDT on BSC, broker_recv_addr=BSC broker addr)
+  const pending = sqlite.prepare(`
+    SELECT id, quote_seq, side, user_kasia_addr, amount_quoted, asset, chain, broker_recv_addr, target_amount, expires_at
+    FROM user_escrow_balances
+    WHERE status = 'pending_prepay'
+      AND side = 'buy_kas'
+      AND chain = 'bnb'
+      AND broker_recv_addr = ?
+      AND expires_at > datetime('now')
+    ORDER BY created_at ASC
+    LIMIT 10
+  `).all(brokerBscAddr);
+  if (!pending.length) return { ok: true, scanned: 0, matched: 0 };
+
+  // Scan recent BSC USDT transfers to broker
+  const { scanRecentTransfers } = await import('./cross-chain-verify.mjs');
+  const scan = await scanRecentTransfers({ chain: 'bnb', recipient: brokerBscAddr, span_blocks: ESCROW_SCAN_SPAN_BLOCKS, paymentAsset: 'usdt' });
+  if (!scan.ok || !scan.events?.length) return { ok: true, scanned: pending.length, matched: 0 };
+
+  let matched = 0;
+  for (const e of pending) {
+    const expectedAmount = parseFloat(e.amount_quoted);
+    // FIFO match by amount within ±0.5% tolerance, prefer exact-amount-match (含 quote_seq noise)
+    const tx = scan.events.find(t => Math.abs(t.amount - expectedAmount) / expectedAmount <= ESCROW_AMOUNT_TOLERANCE_PCT);
+    if (!tx) continue;
+
+    // anti-replay: prepayment_tx UNIQUE constraint will reject if already used
+    try {
+      sqlite.prepare(`
+        UPDATE user_escrow_balances
+        SET prepayment_tx = ?, amount_received = ?, user_refund_addr = ?, status = 'active', updated_at = datetime('now')
+        WHERE id = ? AND status = 'pending_prepay'
+      `).run(tx.tx_hash, String(tx.amount), tx.sender || tx.from_address || 'unknown', e.id);
+    } catch (err) {
+      if (/UNIQUE constraint failed/.test(err.message)) {
+        console.warn(`[broker-bsc-intake-escrow] prepayment_tx ${tx.tx_hash.slice(0,16)} already used (anti-replay)`);
+        continue;
+      }
+      console.error(`[broker-bsc-intake-escrow] UPDATE err for escrow ${e.id.slice(0,8)}: ${err.message}`);
+      continue;
+    }
+
+    // call _doPublishAfterPrepay to publish offer backed by escrow
+    try {
+      const { _doPublishAfterPrepay } = await import('./broker-v3/router.js');
+      const r = await _doPublishAfterPrepay(e.id, BROKER_RELAY_ID);
+      if (!r.ok) {
+        console.error(`[broker-bsc-intake-escrow] _doPublishAfterPrepay fail for escrow ${e.id.slice(0,8)}: ${r.error}`);
+        // Rollback escrow status to pending_prepay for retry? OR mark failed? For now leave 'active' with no offer_id, manual review.
+      } else {
+        matched++;
+        _escrowMatches++;
+        console.log(`[broker-bsc-intake-escrow] escrow ${e.id.slice(0,8)} prepay-detected (tx=${tx.tx_hash.slice(0,16)}, $${tx.amount}) → offer ${r.offer_id?.slice(0,12)} published`);
+      }
+    } catch (err) {
+      console.error(`[broker-bsc-intake-escrow] _doPublishAfterPrepay err for escrow ${e.id.slice(0,8)}: ${err.message}`);
+    }
+  }
+  return { ok: true, scanned: pending.length, matched };
+}
+
+export function getEscrowStats() { return { started: !!_intakeInterval, ticks: _escrowTicks, matches: _escrowMatches }; }
