@@ -53,6 +53,30 @@ function backfillConfidenceBand(db) {
   if (r.changes > 0) log(`backfill historical confidence_band: ${r.changes} rows updated`);
 }
 
+// ── Phase 3g Sub 9.12 — adj target size + side derivation ──────────────────────
+// Bettor r95 root cause: `adj.target_size` / `adj.real_size_usd` column 不存在 in
+// `bettor_adjustments` schema. 真值在 `trigger_reason` 字符串 (e.g. "target $244.32 > current $25.43 + $5").
+// Sub 9.12 grep verify confirm + Bettor r96 PASS green-light + J1 #169 design.
+function parseTargetFromTriggerReason(reason) {
+  const m = (reason || '').match(/target\s+\$([\d.]+)/);
+  return m ? parseFloat(m[1]) : 0;
+}
+
+function deriveRealSize(adj) {
+  const currentSize = Number(adj.current_size || 0);
+  if (adj.adj_type === 'CLOSE_ALL' || adj.severity === 'critical') {
+    return { size: currentSize, side: 'SELL' };
+  }
+  const target = parseTargetFromTriggerReason(adj.trigger_reason);
+  if (adj.adj_type === 'REDUCE') {
+    return { size: Math.max(0, currentSize - target), side: 'SELL' };
+  }
+  if (adj.adj_type === 'ADD') {
+    return { size: Math.max(0, target - currentSize), side: 'BUY' };
+  }
+  return { size: 0, side: 'BUY' };
+}
+
 // ── quality check (r80 architect 加 2) ─────────────────────────────────────────
 
 // Sub 9.8 per Bettor r89 真问题 1+2: open new path quality (existing 只 cover adj size delta).
@@ -76,8 +100,9 @@ function autoApproveQuality(adj, currentSize) {
       }
       return { auto: false, reason: `mid + open new + p_mid ${pMid.toFixed(3)} not 极值 — keep pending` };
     }
-    // existing position size delta path
-    const delta = currentSize > 0 ? Math.abs((adj.target_size || 0) - currentSize) / currentSize : 0;
+    // Sub 9.12: existing position delta — parse target from trigger_reason (target_size column 不存在)
+    const target = parseTargetFromTriggerReason(adj.trigger_reason);
+    const delta = currentSize > 0 ? Math.abs(target - currentSize) / currentSize : 0;
     if (delta < MID_DELTA_THRESHOLD) return { auto: true, reason: `mid + delta ${(delta * 100).toFixed(1)}% < 30%` };
     return { auto: false, reason: `mid + delta ${(delta * 100).toFixed(1)}% ≥ 30% — keep pending` };
   }
@@ -218,9 +243,12 @@ async function decideRealPath(db, adj) {
     return { action: 'skip', reason: `idempotent: existing real_position ${existing.id} status=${existing.status}` };
   }
 
-  // 6-gate check
-  let requestedSize = Number(adj.target_size || adj.real_size_usd || 0);
-  if (!requestedSize || requestedSize < 1) return { action: 'skip', reason: `size ${requestedSize} invalid` };
+  // Sub 9.12: target_size column 不存在, derive size + side from adj_type + trigger_reason + current_size
+  const { size: derivedSize, side: derivedSide } = deriveRealSize(adj);
+  let requestedSize = derivedSize;
+  if (!requestedSize || requestedSize < 1) {
+    return { action: 'skip', reason: `size ${requestedSize.toFixed(2)} invalid (adj_type=${adj.adj_type} current=${(adj.current_size||0).toFixed(2)} trigger="${(adj.trigger_reason||'').slice(0,40)}")` };
+  }
 
   // Sub 8 E-1 (降级实施 per r83): LLM stability check via estimator sigma proxy.
   // Phase 4 sediment: 真 N-sample median + cross-host quorum 留 KANet broker 协议成熟.
@@ -244,9 +272,9 @@ async function decideRealPath(db, adj) {
 
   // Get current market price. Stub use entry_yes_price if snapshot missing.
   const yesPrice = Number(adj.current_yes_price || adj.entry_yes_price || 0.5);
-  // Sub 6.5 hotfix per r82 CRITICAL 1: Polymarket CLOB open position 总是 'BUY'
-  // (NO position = BUY no_token, NOT SELL yes_token). SELL 只在 close 路径.
-  const tokenSide = 'BUY';
+  // Sub 9.12: tokenSide derived from adj_type (open new/ADD → BUY, REDUCE/CLOSE_ALL → SELL).
+  // Sub 6.5 注释 "SELL 只在 close 路径" misleading — CLOSE_ALL/REDUCE 就是 close 路径, 必 SELL.
+  const tokenSide = derivedSide;
   const tokenPrice = adj.direction === 'NO' ? (1 - yesPrice) : yesPrice;
 
   // Sub 6.5 hotfix per r82 CRITICAL 2: token_id lookup from recommendation.condition_id
@@ -325,13 +353,13 @@ async function decideAdjustments(db) {
         });
         if (res.ok) {
           simApproved++;
-          db.prepare(`INSERT INTO bettor_action_decisions (decided_for_type, decided_for_id, action, reason, mode, confidence_band) VALUES (?, ?, ?, ?, ?, ?)`)
+          db.prepare(`INSERT OR IGNORE INTO bettor_action_decisions (decided_for_type, decided_for_id, action, reason, mode, confidence_band) VALUES (?, ?, ?, ?, ?, ?)`)
             .run('adjustment', adj.id, 'approve', sim.reason, 'sim', adj.calibrator_confidence);
         } else { log(`sim approve HTTP ${res.status} for ${adj.id.slice(0, 8)}`); }
       } catch (e) { log(`sim approve ERR ${adj.id.slice(0, 8)}: ${e.message?.slice(0, 60)}`); }
     } else {
       simSkipped++;
-      db.prepare(`INSERT INTO bettor_action_decisions (decided_for_type, decided_for_id, action, reason, mode, confidence_band) VALUES (?, ?, ?, ?, ?, ?)`)
+      db.prepare(`INSERT OR IGNORE INTO bettor_action_decisions (decided_for_type, decided_for_id, action, reason, mode, confidence_band) VALUES (?, ?, ?, ?, ?, ?)`)
         .run('adjustment', adj.id, 'skip', sim.reason, 'sim', adj.calibrator_confidence);
     }
 
@@ -340,13 +368,13 @@ async function decideAdjustments(db) {
     if (real.action === 'skip') {
       realSkipped++;
       if (realSkipped <= 3) log(`[real] SKIP ${adj.id?.slice(0, 8)}: ${real.reason}`);
-      db.prepare(`INSERT INTO bettor_action_decisions (decided_for_type, decided_for_id, action, reason, mode, confidence_band) VALUES (?, ?, ?, ?, ?, ?)`)
+      db.prepare(`INSERT OR IGNORE INTO bettor_action_decisions (decided_for_type, decided_for_id, action, reason, mode, confidence_band) VALUES (?, ?, ?, ?, ?, ?)`)
         .run('adjustment', adj.id, 'skip', real.reason, 'real', adj.calibrator_confidence);
     } else if (real.action === 'fill') {
-      db.prepare(`INSERT INTO bettor_action_decisions (decided_for_type, decided_for_id, action, reason, mode, confidence_band) VALUES (?, ?, ?, ?, ?, ?)`)
+      db.prepare(`INSERT OR IGNORE INTO bettor_action_decisions (decided_for_type, decided_for_id, action, reason, mode, confidence_band) VALUES (?, ?, ?, ?, ?, ?)`)
         .run('adjustment', adj.id, 'fill', `size=$${real.size?.toFixed(2)} tx=${real.txId?.slice(0,12)}`, 'real', adj.calibrator_confidence);
     } else if (real.action === 'fail') {
-      db.prepare(`INSERT INTO bettor_action_decisions (decided_for_type, decided_for_id, action, reason, mode, confidence_band) VALUES (?, ?, ?, ?, ?, ?)`)
+      db.prepare(`INSERT OR IGNORE INTO bettor_action_decisions (decided_for_type, decided_for_id, action, reason, mode, confidence_band) VALUES (?, ?, ?, ?, ?, ?)`)
         .run('adjustment', adj.id, 'fail', real.reason, 'real', adj.calibrator_confidence);
     }
   }

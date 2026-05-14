@@ -3342,5 +3342,39 @@ export function runMigrations() {
     }
   }
 
+  // v105: Phase 3g Sub 9.12 — bettor_action_decisions UNIQUE 扩 mode (sim/real 同秒同 adj 不撞)
+  // Bettor r95 root cause: v104 UNIQUE(decided_for_type, decided_for_id, decision_at) 不含 mode.
+  // 同 tick 内 sim+real 双 INSERT 同秒 datetime('now') = 同 tuple → 第二个 (real) 撞 UNIQUE.
+  // J1 #169 design + Bettor r96 PASS green-light: 扩 UNIQUE 加 mode → sim+real 双 row audit 保留.
+  {
+    const tableSql = sqlite.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='bettor_action_decisions'").get();
+    if (tableSql && !/UNIQUE\s*\([^)]*\bmode\b[^)]*\)/.test(tableSql.sql || '')) {
+      sqlite.exec(`
+        BEGIN;
+        CREATE TABLE bettor_action_decisions_v105 (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          decision_at TEXT NOT NULL DEFAULT (datetime('now')),
+          decided_for_type TEXT NOT NULL,
+          decided_for_id TEXT NOT NULL,
+          action TEXT NOT NULL,
+          reason TEXT,
+          mode TEXT NOT NULL DEFAULT 'sim',
+          confidence_band TEXT,
+          UNIQUE(decided_for_type, decided_for_id, decision_at, mode)
+        );
+        INSERT INTO bettor_action_decisions_v105
+          (id, decision_at, decided_for_type, decided_for_id, action, reason, mode, confidence_band)
+          SELECT id, decision_at, decided_for_type, decided_for_id, action, reason, mode, confidence_band
+          FROM bettor_action_decisions;
+        DROP TABLE bettor_action_decisions;
+        ALTER TABLE bettor_action_decisions_v105 RENAME TO bettor_action_decisions;
+        DROP INDEX IF EXISTS idx_decisions_recent;
+        CREATE INDEX idx_decisions_recent ON bettor_action_decisions(decision_at DESC);
+        COMMIT;
+      `);
+      console.log('[migrate] v105: bettor_action_decisions UNIQUE 扩 mode (Phase 3g Sub 9.12 sim+real 同秒同 adj 不撞).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
