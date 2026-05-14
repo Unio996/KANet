@@ -242,6 +242,75 @@ export async function _makerAutoPayGive(offer) {
   } catch {}
 }
 
+// Bug H γ Sub #6 (Owner 12:05 钦定 candidate A v2): post-match settle 真链 forward target asset to USER.
+// Called from _verifyAndComplete post 'completed' transition for escrow-backed offer (meta.escrow_id 存).
+// 不动 existing taker delivery flow (broker → taker via _makerAutoPayGive OR completed handler).
+// 加 second forward: broker → user_target_addr with escrow target_asset/target_chain/target_amount.
+// Idempotent: 检查 escrow row.status='active' (not yet 'settled') before forwarding.
+async function _settleEscrowToUser(escrowId, offerId) {
+  const e = sqlite.prepare('SELECT * FROM user_escrow_balances WHERE id = ?').get(escrowId);
+  if (!e) { console.warn(`[exchange-escrow-settle] escrow row ${escrowId} not found for offer ${offerId.slice(0,8)}`); return; }
+  if (e.status !== 'active') {
+    console.log(`[exchange-escrow-settle] escrow ${escrowId.slice(0,8)} status=${e.status}, skip (idempotent)`);
+    return;
+  }
+  if (!e.user_target_addr) {
+    console.warn(`[exchange-escrow-settle] escrow ${escrowId.slice(0,8)} 无 user_target_addr — manual review needed`);
+    return;
+  }
+
+  const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offerId);
+  if (!offer?.maker) { console.warn(`[exchange-escrow-settle] offer ${offerId.slice(0,8)} not found OR no maker`); return; }
+
+  // Forward target asset to user:
+  // BUY escrow: target_asset='KAS', target_chain='kaspa' → broker 真链 send KAS to user kasia addr
+  // SELL escrow: target_asset='USDT/USDC', target_chain='bnb/eth/...' → broker 真链 transfer USDT to user EVM addr
+  const isKas = e.target_asset === 'KAS';
+  const brokerRelay = sqlite.prepare('SELECT id, name FROM relay_nodes WHERE address = ?').get(offer.maker);
+  if (!brokerRelay) { console.warn(`[exchange-escrow-settle] no broker relay for maker ${offer.maker?.slice(-12)}`); return; }
+
+  let settleTxHash = null;
+  try {
+    if (isKas) {
+      // KAS transfer via broker-action-queue (R4 single-pump UTXO 双花 fix)
+      const { enqueue } = await import('./broker-action-queue.js');
+      enqueue({
+        kind: 'sendKas', peer: e.user_target_addr,
+        payload: { amount_kas: e.target_amount, note: `escrow settle ${escrowId.slice(0,8)}` },
+      });
+      // Note: 真 chain TX hash 通过 queue 异步处理, settle_tx 暂记 'queued:<escrowId>' — 后续 reconciler grep update
+      settleTxHash = `queued:${escrowId.slice(0,8)}`;
+      console.log(`[exchange-escrow-settle] enqueued KAS sendKas ${e.target_amount} → ${e.user_target_addr?.slice(-12)} for escrow ${escrowId.slice(0,8)}`);
+    } else {
+      // USDT/USDC EVM transfer via evm-transfer.transferUsdt
+      const transferUsdt = await getTransferUsdt();
+      const wallet = sqlite.prepare(
+        "SELECT privkey_encrypted FROM agent_wallets WHERE relay_node_id = ? AND chain = ? AND is_default = 1 LIMIT 1"
+      ).get(brokerRelay.id, e.target_chain);
+      if (!wallet?.privkey_encrypted) {
+        console.warn(`[exchange-escrow-settle] no broker ${e.target_chain} wallet for escrow ${escrowId.slice(0,8)}`);
+        return;
+      }
+      const r = await transferUsdt(e.target_chain, wallet.privkey_encrypted, e.user_target_addr, parseFloat(e.target_amount), e.target_asset);
+      if (!r.ok) {
+        console.error(`[exchange-escrow-settle] transferUsdt fail for escrow ${escrowId.slice(0,8)}: ${r.error}`);
+        return;
+      }
+      settleTxHash = r.txHash;
+      console.log(`[exchange-escrow-settle] sent ${e.target_amount} ${e.target_asset} on ${e.target_chain} → ${e.user_target_addr?.slice(-12)} (TX: ${settleTxHash?.slice(0,16)}) for escrow ${escrowId.slice(0,8)}`);
+    }
+
+    // UPDATE escrow row status=settled + settle_tx
+    sqlite.prepare(`
+      UPDATE user_escrow_balances
+      SET status = 'settled', settle_tx = ?, updated_at = datetime('now')
+      WHERE id = ? AND status = 'active'
+    `).run(settleTxHash, escrowId);
+  } catch (err) {
+    console.error(`[exchange-escrow-settle] settle err for escrow ${escrowId.slice(0,8)}: ${err.message}`);
+  }
+}
+
 // ── Test Injection ───────────────────────────────────────────
 
 let _transferUsdtOverride = null;
@@ -1149,6 +1218,23 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
             });
           }
         }
+
+        // Bug H γ Sub #6 (Owner 12:05 钦定 candidate A v2): forward target asset to USER for escrow-backed offer.
+        // 标识 escrow offer: metadata.source='broker-v3-escrow' + verification_meta.escrow_id 存.
+        // 现 path: taker pays broker (via existing flow above), broker collects taker payment.
+        // 新增: broker 真链 transfer escrow target asset (KAS for BUY, USDT for SELL) → user_target_addr.
+        // 不动 existing flow (taker delivery), 加 setImmediate post-completed.
+        try {
+          const meta = JSON.parse(finalOffer.verification_meta || '{}');
+          const isEscrow = (finalOffer.metadata || '').includes('broker-v3-escrow') || meta.escrow_id;
+          if (isEscrow && meta.escrow_id && meta.escrow_user_target) {
+            setImmediate(() => {
+              _settleEscrowToUser(meta.escrow_id, finalOffer.id).catch(err =>
+                console.error(`[exchange-escrow-settle] err for offer ${finalOffer.id.slice(0,8)}: ${err.message}`)
+              );
+            });
+          }
+        } catch (e) { console.warn(`[exchange-escrow-settle] check err: ${e.message}`); }
       }
 
     } else if (attempt < MAX_ATTEMPTS) {
