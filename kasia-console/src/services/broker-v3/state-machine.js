@@ -55,7 +55,7 @@ export function _testResetUserOffers() { _publishedByUser.clear(); }
 // 5/13 broker BSC + polygon (13.99 USDT + 0.05 MATIC) + arbitrum (13.99 + 0.0005 ETH) +
 // optimism (13.99 + 0.0001 ETH) + base (13.99 USDC + 0.0002 ETH) 全 funded.
 // 老 menu 漏 op + base, user 用不到 prefund. 现 6 chain 全暴露.
-const SUPPORTED_CHAINS = ['bsc', 'eth', 'polygon', 'arbitrum', 'optimism', 'base'];
+export const SUPPORTED_CHAINS = ['bsc', 'eth', 'polygon', 'arbitrum', 'optimism', 'base'];
 const MIN_QTY_KAS = 1;
 const MAX_QTY_KAS = 5000;
 const EVM_ADDR_REGEX = /^0x[a-fA-F0-9]{40}$/;
@@ -152,7 +152,7 @@ async function _handleTradeFlow(user_id, msg, cur, side, relayNodeId) {
   if (cur.step === 'CHAIN_SELECT') {
     const num = parseInt(msg, 10);
     const chains = ['bsc', 'eth', 'polygon', 'arbitrum', 'optimism', 'base'];
-    if (num < 1 || num > chains.length) return { reply: '数字超范围, 回 1-6 选链.' };
+    if (num < 1 || num > chains.length) return { reply: `数字超范围, 回 1-${SUPPORTED_CHAINS.length} 选链.` };
     draft.pay_chain = chains[num - 1];
     setFlowState(user_id, { ...cur, step: 'QTY_SELECT', draft });
     return { reply: `已选 ${draft.pay_chain.toUpperCase()}. 数量 (KAS, ${MIN_QTY_KAS}-${MAX_QTY_KAS})?` };
@@ -256,7 +256,7 @@ async function _handleAccept(user_id, msg, cur, relayNodeId) {
     // Bug D 5/14 fix (NWT 10:43 v3 §C12 surface): ACCEPT flow chain list 旧 4 chain 漏 op + base.
     // BUY/SELL flow L154 已 6 chain (Phase B P0 6f1626059), ACCEPT flow 漏一片 — align 6 chain.
     const chains = SUPPORTED_CHAINS;
-    if (num < 1 || num > chains.length) return { reply: '回 1-6 选链.' };
+    if (num < 1 || num > chains.length) return { reply: `回 1-${SUPPORTED_CHAINS.length} 选链.` };
     cur.draft.selected_chain = chains[num - 1];
     setFlowState(user_id, { ...cur, step: 'CONFIRM', draft: cur.draft });
     return { reply: `选 ${chains[num - 1].toUpperCase()} 支付. 回 YES 确认接单 / NO 取消.` };

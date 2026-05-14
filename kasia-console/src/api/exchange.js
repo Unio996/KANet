@@ -397,6 +397,18 @@ export async function registerExchangeRoutes(fastify) {
     const relay = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(relayNodeId);
     const takerAddr = relay?.address || relayNodeId;
 
+    // Bug G 5/14 fix (NWT 11:04 Phase 2a.1 surface): API path 缺 self-deal pre-check.
+    // 之前唯一 self-deal guard 在 exchange-machine.js advance broadcast 层 (post-broadcast),
+    // 导致 self-accept 真 broadcast TX 已发 → 花 fee + 双 path 不一致 (Bug F 真因之一).
+    // 加 early reject — 不走到 broadcast, 不花 fee.
+    if (takerAddr === offer.maker) {
+      return reply.code(400).send({
+        error: 'Cannot accept own offer (self-deal)',
+        maker: offer.maker,
+        taker: takerAddr,
+      });
+    }
+
     // ── 事前余额校验（taker pay capacity）──
     // Taker needs to pay offer.want_asset (amount = offer.want_amount) on the chosen chain.
     // For cross-chain offers, selected_chain is required (already validated above).

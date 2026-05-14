@@ -349,7 +349,10 @@ async function _doOfferLookup(peer, draft, prevReply) {
     `  want: ${r.offer.want_amount} ${r.offer.want_asset} (${r.offer.want_chain || '?'})`,
     `  maker: ...${r.offer.maker?.slice(-12)}`,
     '',
-    r.offer.protocol_status === 'open' ? '回 1-4 选支付链接单, OR back 取消.' : '订单状态非 open, 不可接单. back 返回菜单.',
+    // Bug-D-residual 5/14 fix (NWT 11:04 surface, KI 第 N 次 复刻补丁漏一片):
+    // b6a85af0e 修了 state-machine.js L256 CHAIN_SELECT error msg + chain list, 漏 _doOfferLookup
+    // reply hint 仍 hardcoded "1-4". 改 dynamic ${SUPPORTED_CHAINS.length} 防 future drift.
+    r.offer.protocol_status === 'open' ? `回 1-${stateMachine.SUPPORTED_CHAINS.length} 选支付链接单, OR back 取消.` : '订单状态非 open, 不可接单. back 返回菜单.',
   ].join('\n');
 }
 

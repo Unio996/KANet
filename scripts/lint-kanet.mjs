@@ -497,6 +497,30 @@ function checkABE_A6_protocol_status_owner(filepath, content) {
   }
 }
 
+// ── Bug-D-residual-5/14: broker-v3 reply hint hardcoded chain count 禁 (NWT 11:04 surface) ──
+// "回 1-4 选" / "1-6 选" 等 hardcoded 数字 — chain list 改 6 后忘改 reply hint = KI 复刻 N 次.
+// 必走 template literal ${SUPPORTED_CHAINS.length} 防 future drift.
+// scope: broker-v3 / api/exchange.js / state-machine.js.
+// escape hatch: 注释 // lint-allow-chain-hint: <reason>.
+function checkChainHintDynamic(filepath, content) {
+  const norm = filepath.replace(/\\/g, '/');
+  if (!/\/services\/broker-v3\//.test(norm) && !/\/api\/exchange\.js$/.test(norm)) return;
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*\/\//.test(line)) continue;  // skip comment
+    // pattern: literal '回 1-N 选' / "回 1-N 选" (NOT template literal ${...})
+    // Specifically catch chain-related hints (NOT generic "1-N 选 offer/option")
+    if (/['"][^'"]*回\s*1-\d+\s*选(支付链|链[\.。])/.test(line)) {
+      let allowed = false;
+      for (let j = i; j >= Math.max(0, i - 5); j--) {
+        if (/\/\/\s*lint-allow-chain-hint:/.test(lines[j])) { allowed = true; break; }
+      }
+      if (!allowed) violate('Bug-D-residual-5/14', `[Bug-D-residual-5/14] broker reply hint '回 1-N 选' hardcoded — chain list 改后忘改此 hint 是 5/12 §3.2 + 5/13 6f1626059 + 5/14 b6a85af0e 第 N 次复刻补丁漏一片. 必 template literal '回 1-\${SUPPORTED_CHAINS.length} 选'. escape hatch '// lint-allow-chain-hint: <reason>'.`, filepath, i + 1);
+    }
+  }
+}
+
 // ── Bug-C-5/14: chain === naked compare 禁 (NWT C4.4 Tier 4 surface) ──
 // `.chain === <var>` 裸 compare 不 normalize → 'bsc' !== 'bnb' DB-canonical drift. 5/12 §3.2 修一处, 漏 3 处.
 // 必走 normalizeChainKey 双 wrap. escape hatch: 注释 // lint-allow-chain-eq: <reason>.
@@ -536,6 +560,7 @@ for (const fp of targets) {
   checkCommandEnum(fp, content);
   checkABE_A6_protocol_status_owner(fp, content);  // ABE-A.6: protocol_status owner invariant
   checkChainEqNormalize(fp, content);  // Bug-C-5/14: chain === naked compare normalize
+  checkChainHintDynamic(fp, content);  // Bug-D-residual-5/14: '回 1-N 选' hint hardcoded
 }
 checkR10();
 

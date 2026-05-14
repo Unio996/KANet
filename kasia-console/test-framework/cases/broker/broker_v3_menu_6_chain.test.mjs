@@ -30,7 +30,8 @@ test('_chainSelectText menu lists optimism + base', () => {
 
 test('_handleTradeFlow chains array 6 chain', () => {
   assert.match(STATE_MACHINE, /const\s+chains\s*=\s*\[\s*['"]bsc['"],\s*['"]eth['"],\s*['"]polygon['"],\s*['"]arbitrum['"],\s*['"]optimism['"],\s*['"]base['"]\s*\]/, 'CHAIN_SELECT branch chains array must be 6 chain');
-  assert.match(STATE_MACHINE, /数字超范围,\s*回\s+1-6\s+选链/, 'error message must say 1-6 (not 1-4)');
+  // 5/14 Bug-D-residual: literal "1-6" → template literal `1-${SUPPORTED_CHAINS.length}` for future-proof
+  assert.match(STATE_MACHINE, /数字超范围,\s*回\s+1-(\$\{SUPPORTED_CHAINS\.length\}|6)\s+选链/, 'error message must reference 1-6 (literal OR template)');
 });
 
 test('old 4-chain hardcode 不存 (negative regression guard)', () => {
