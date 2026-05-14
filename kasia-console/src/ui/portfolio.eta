@@ -398,6 +398,64 @@
         </div>
       </template>
 
+      <!-- ─── Exchange Custody (Bug H γ broker-escrow custody invariant monitor, Owner 17:35 钦定) ─── -->
+      <div x-show="custodyPool" class="bg-white border border-warm-200 rounded-lg p-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="text-[10px] px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-medium">Exchange Custody</span>
+            <span class="text-[11px] text-ink-500">broker-escrow invariant: K + U 总量 ≥ baseline</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span x-show="!custodyPool?.alarm" class="text-[10px] px-2 py-0.5 rounded bg-green-100 text-green-700 font-medium">✓ invariant 守</span>
+            <span x-show="custodyPool?.alarm" class="text-[10px] px-2 py-0.5 rounded bg-red-100 text-red-700 font-bold" x-text="'⚠ ' + (custodyPool?.alarm?.message || '')"></span>
+            <button @click="captureBaseline()" class="text-[10px] px-2 py-0.5 rounded bg-warm-200 hover:bg-warm-300 text-ink-700">📸 capture baseline</button>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3 text-[11px]">
+          <!-- K pool -->
+          <div class="border border-warm-200 rounded p-3">
+            <div class="text-[10px] text-ink-400 uppercase tracking-wider mb-2">K Pool (KAS)</div>
+            <div class="space-y-1">
+              <div class="flex justify-between"><span class="text-ink-500">wallet</span><span class="tabular-nums" x-text="(custodyPool?.k_pool?.wallet || 0).toFixed(2)"></span></div>
+              <div class="flex justify-between"><span class="text-ink-500">fund_locks</span><span class="tabular-nums" x-text="(custodyPool?.k_pool?.fund_locks || 0).toFixed(2)"></span></div>
+              <div class="flex justify-between"><span class="text-ink-500">escrow active</span><span class="tabular-nums" x-text="(custodyPool?.k_pool?.escrow_active || 0).toFixed(2)"></span></div>
+              <div class="flex justify-between font-bold border-t border-warm-200 pt-1 mt-1">
+                <span>total</span>
+                <span class="tabular-nums" :class="custodyPool?.alarm?.deltaK < 0 ? 'text-red-700' : 'text-ink-700'" x-text="(custodyPool?.k_pool?.total || 0).toFixed(2) + ' KAS'"></span>
+              </div>
+              <div x-show="custodyPool?.baseline" class="flex justify-between text-[10px] text-ink-400">
+                <span>baseline</span>
+                <span class="tabular-nums">
+                  <span x-text="(custodyPool?.baseline?.totalK || 0).toFixed(2)"></span>
+                  <span x-show="custodyPool?.alarm?.deltaK != null" class="ml-1" :class="custodyPool?.alarm?.deltaK >= 0 ? 'text-green-600' : 'text-red-600'" x-text="'(Δ ' + (custodyPool?.alarm?.deltaK >= 0 ? '+' : '') + (custodyPool?.alarm?.deltaK || 0).toFixed(2) + ')'"></span>
+                </span>
+              </div>
+            </div>
+          </div>
+          <!-- U pool -->
+          <div class="border border-warm-200 rounded p-3">
+            <div class="text-[10px] text-ink-400 uppercase tracking-wider mb-2">U Pool (USDT+USDC)</div>
+            <div class="space-y-1">
+              <div class="flex justify-between"><span class="text-ink-500">wallet (9 chain)</span><span class="tabular-nums" x-text="(custodyPool?.u_pool?.wallet_total || 0).toFixed(4)"></span></div>
+              <div class="flex justify-between"><span class="text-ink-500">escrow active</span><span class="tabular-nums" x-text="(custodyPool?.u_pool?.escrow_active || 0).toFixed(4)"></span></div>
+              <div class="flex justify-between font-bold border-t border-warm-200 pt-1 mt-1">
+                <span>total</span>
+                <span class="tabular-nums" :class="custodyPool?.alarm?.deltaU < 0 ? 'text-red-700' : 'text-ink-700'" x-text="(custodyPool?.u_pool?.total || 0).toFixed(4) + ' U'"></span>
+              </div>
+              <div x-show="custodyPool?.baseline" class="flex justify-between text-[10px] text-ink-400">
+                <span>baseline</span>
+                <span class="tabular-nums">
+                  <span x-text="(custodyPool?.baseline?.totalU || 0).toFixed(4)"></span>
+                  <span x-show="custodyPool?.alarm?.deltaU != null" class="ml-1" :class="custodyPool?.alarm?.deltaU >= 0 ? 'text-green-600' : 'text-red-600'" x-text="'(Δ ' + (custodyPool?.alarm?.deltaU >= 0 ? '+' : '') + (custodyPool?.alarm?.deltaU || 0).toFixed(4) + ')'"></span>
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div x-show="custodyPool?.baseline" class="text-[9px] text-ink-400 mt-2">baseline captured: <span x-text="custodyPool?.baseline?.captured_at"></span></div>
+        <div class="text-[10px] text-amber-700 mt-2">📌 broker 仅做 escrow + 撮合, K+U 总量不应减少 (broker 不 lose money — invariant violate → red alarm)</div>
+      </div>
+
       <!-- ─── 底部提示 ─── -->
       <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-[11px] text-amber-900">
         <div class="font-semibold mb-1">📍 关于这个页面</div>
@@ -771,11 +829,36 @@ function portfolioApp() {
         } else {
           this.error = d.error || '加载失败';
         }
+        // Bug H γ Step 4 #2 (Owner 17:35 钦定 invariant): load broker custody pool snapshot
+        this.loadCustodyPool();
       } catch (e) {
         this.error = '请求失败: ' + e.message;
       } finally {
         this.loading = false;
       }
+    },
+
+    custodyPool: null,
+    async loadCustodyPool() {
+      try {
+        const res = await fetch('/api/exchange/custody-pool', { signal: AbortSignal.timeout(10000) });
+        const d = await res.json();
+        if (d.ok) this.custodyPool = d;
+      } catch (e) { console.warn('custody-pool load err:', e.message); }
+    },
+
+    async captureBaseline() {
+      if (!confirm('Capture current K+U totals as new baseline? (existing baseline overwritten)')) return;
+      try {
+        const res = await fetch('/api/exchange/custody-pool/snapshot', { method: 'POST', signal: AbortSignal.timeout(10000) });
+        const d = await res.json();
+        if (d.ok) {
+          alert('✓ Baseline captured: K=' + d.baseline.totalK.toFixed(2) + ' KAS / U=' + d.baseline.totalU.toFixed(4) + ' USDT');
+          this.loadCustodyPool();  // reload to show new baseline
+        } else {
+          alert('✗ Snapshot failed: ' + (d.error || 'unknown'));
+        }
+      } catch (e) { alert('✗ Request failed: ' + e.message); }
     },
   };
 }
