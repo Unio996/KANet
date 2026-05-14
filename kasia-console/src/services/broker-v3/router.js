@@ -182,8 +182,32 @@ async function _doPublish(peer, draft, relayNodeId, prevReply) {
 
 async function _doAccept(peer, draft, relayNodeId, prevReply) {
   if (!draft?.offer_id || !draft?.selected_chain) return prevReply + '\n\n(no draft, back 重来)';
+  // Bug F 5/14 fix (NWT 10:53 选 A — broker-v3 mediator self-deal false-positive):
+  // peer (user kasia addr) 反查 relay_nodes 得 user's local relay id. server accept API 用 user
+  // relay 当 taker → 不撞 broker self-deal (maker === taker only when broker accepts own offer).
+  // user 不在本节点有 relay 时 fallback: 返 explicit error (broker 无法代签 chain TX).
+  let takerRelayId = null;
+  try {
+    const userRelay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ? LIMIT 1').get(peer);
+    if (userRelay?.id) takerRelayId = userRelay.id;
+  } catch (e) {
+    console.warn(`[broker-v3 _doAccept] relay lookup err for peer ${peer?.slice(-12)}: ${e.message}`);
+  }
+  if (!takerRelayId) {
+    stateMachine.clearFlowState(peer);
+    return [
+      '⚠ 接单失败: 你需在本节点有 relay 才能通过 broker 接单.',
+      '',
+      '解决:',
+      '  1️⃣ 直接 curl POST /api/exchange/accept (用你自己 relay id) 接单 — 跳过 broker mediator',
+      '  2️⃣ 联系 admin 在本节点注册你 relay (Kasia mnemonic)',
+      '',
+      '回 back 返回菜单.',
+    ].join('\n');
+  }
   const r = await client.acceptOffer({
-    relayNodeId, offer_id: draft.offer_id,
+    relayNodeId: takerRelayId,  // user relay (taker), 不是 broker relay
+    offer_id: draft.offer_id,
     selected_chain: draft.selected_chain,
     payment_asset: 'usdt',
   });
