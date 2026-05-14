@@ -23,7 +23,8 @@ export async function registerBettorRoutes(fastify) {
           SELECT id, relay_node_id, market_id, condition_id, slug, question,
                  decision, fraction, size_usd, edge, p_mid, sigma, info_gap_months,
                  yes_price, volume_24h, liquidity, end_date, score,
-                 reasoning_json, trigger_type, llm_tier, status, scanned_at
+                 reasoning_json, trigger_type, llm_tier, status, scanned_at,
+                 fundamental_estimate, fundamental_sources, fundamental_confidence
           FROM bettor_recommendations
           WHERE scanned_at = ? AND relay_node_id = ?
           ORDER BY score DESC LIMIT ?
@@ -32,7 +33,8 @@ export async function registerBettorRoutes(fastify) {
           SELECT id, relay_node_id, market_id, condition_id, slug, question,
                  decision, fraction, size_usd, edge, p_mid, sigma, info_gap_months,
                  yes_price, volume_24h, liquidity, end_date, score,
-                 reasoning_json, trigger_type, llm_tier, status, scanned_at
+                 reasoning_json, trigger_type, llm_tier, status, scanned_at,
+                 fundamental_estimate, fundamental_sources, fundamental_confidence
           FROM bettor_recommendations
           WHERE scanned_at = ?
           ORDER BY score DESC LIMIT ?
