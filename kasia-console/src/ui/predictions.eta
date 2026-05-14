@@ -413,9 +413,29 @@
                   </div>
                 </div>
                 <div class="flex items-center justify-between mt-2 text-[10px] text-ink-400">
-                  <span x-text="r.llm_tier === 'scavenger' ? ('p(NO)=' + (r.p_mid * 100).toFixed(1) + '% tail=' + (r.sigma * 100).toFixed(1) + '%') : ('pMid=' + (r.p_mid * 100).toFixed(1) + '% σ=' + (r.sigma * 100).toFixed(1) + '% gap=' + (r.info_gap_months || 0).toFixed(1) + 'mo')"></span>
+                  <span x-text="r.llm_tier === 'scavenger' ? ('p(NO)=' + (r.p_mid * 100).toFixed(1) + '% tail=' + (r.sigma * 100).toFixed(1) + '%') : (r.llm_tier === 'scavenger+enricher' ? ('p(NO)=' + (r.p_mid * 100).toFixed(1) + '% tail=' + (r.sigma * 100).toFixed(1) + '%') : ('pMid=' + (r.p_mid * 100).toFixed(1) + '% σ=' + (r.sigma * 100).toFixed(1) + '% gap=' + (r.info_gap_months || 0).toFixed(1) + 'mo'))"></span>
                   <span x-show="r.end_date" x-text="'到期 ' + new Date(r.end_date).toLocaleDateString()"></span>
                 </div>
+                <!-- Phase B Sub B4.1: fundamental enricher display for middle-range catches (llm_tier='scavenger+enricher') -->
+                <template x-if="r.llm_tier === 'scavenger+enricher' && r.fundamental_estimate != null">
+                  <div class="mt-2 px-2 py-1 rounded bg-amber-50 border border-amber-200 text-[10px]">
+                    <div class="flex items-center justify-between">
+                      <span class="font-semibold text-amber-700">📊 Fundamental enricher</span>
+                      <span class="text-amber-600">conf <span x-text="(r.fundamental_confidence * 100).toFixed(0) + '%'"></span></span>
+                    </div>
+                    <div class="text-amber-700 mt-0.5">
+                      market <span x-text="(r.yes_price * 100).toFixed(1) + '%'"></span> vs fund
+                      <span class="font-bold" x-text="(r.fundamental_estimate * 100).toFixed(1) + '%'"></span>
+                      · gap
+                      <span class="font-bold" x-text="(Math.abs(r.fundamental_estimate - r.yes_price) * 100).toFixed(1) + 'pp'"></span>
+                    </div>
+                    <template x-if="r.fundamental_sources">
+                      <div class="text-amber-500 mt-0.5 truncate" :title="JSON.parse(r.fundamental_sources || '[]').join('\n')">
+                        sources: <span x-text="JSON.parse(r.fundamental_sources || '[]').length + ' refs'"></span>
+                      </div>
+                    </template>
+                  </div>
+                </template>
                 <div class="flex gap-2 mt-2">
                   <button @click="bettorDetail = r" class="flex-1 text-[10px] text-brand-500 hover:text-brand-700 text-left">查看推理 →</button>
                   <template x-if="r.status === 'pending' && (r.decision === 'YES' || r.decision === 'NO')">
