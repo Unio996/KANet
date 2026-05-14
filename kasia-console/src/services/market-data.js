@@ -242,22 +242,24 @@ export const cachedStockKlines = cached('stock_klines', fetchStockKlines);
 
 export async function fetchPredictionData() {
   try {
-    // Polymarket Gamma API — active markets sorted by 24h volume
-    // Fetch two pages in parallel (Gamma API max 500 per request)
-    const [res1, res2] = await Promise.all([
-      fetch('https://gamma-api.polymarket.com/markets?closed=false&limit=500&offset=0&order=volume24hr&ascending=false', {
+    // Polymarket Gamma API — active markets sorted by 24h volume.
+    // Bug U2 fix (Bettor r120 + Phase B B1.4 hotfix parity): gamma 100/page hard-cap today (5/14 18:17 UTC).
+    // Pre-fix hardcoded limit=500/offset=500 fetched only 200 markets (each page 100 < 500). Bottoms (vol rank ~250)
+    // missed → UI search "Bottoms" empty. Paginate 100/page up to 50 pages = 5000 markets covers all active.
+    const PAGE_SIZE = 100;
+    const MAX_PAGES = 50;
+    const markets = [];
+    for (let off = 0; off < PAGE_SIZE * MAX_PAGES; off += PAGE_SIZE) {
+      const res = await fetch(`https://gamma-api.polymarket.com/markets?closed=false&limit=${PAGE_SIZE}&offset=${off}&order=volume24hr&ascending=false`, {
         signal: AbortSignal.timeout(TIMEOUT), headers: { 'User-Agent': 'KANet/1.0' },
-      }),
-      fetch('https://gamma-api.polymarket.com/markets?closed=false&limit=500&offset=500&order=volume24hr&ascending=false', {
-        signal: AbortSignal.timeout(TIMEOUT), headers: { 'User-Agent': 'KANet/1.0' },
-      }).catch(() => null),
-    ]);
-
-    if (!res1.ok) return { source: 'prediction', ok: false, error: `HTTP ${res1.status}`, data: [] };
-
-    const page1 = await res1.json();
-    const page2 = res2?.ok ? await res2.json() : [];
-    const markets = [...(Array.isArray(page1) ? page1 : []), ...(Array.isArray(page2) ? page2 : [])];
+      }).catch(() => null);
+      if (!res || !res.ok) break;
+      const page = await res.json().catch(() => null);
+      if (!Array.isArray(page) || page.length === 0) break;
+      markets.push(...page);
+      if (page.length < PAGE_SIZE) break;
+    }
+    if (markets.length === 0) return { source: 'prediction', ok: false, error: 'gamma returned no markets', data: [] };
     const data = (Array.isArray(markets) ? markets : []).map(m => {
       // Parse outcome prices: ["0.65", "0.35"] → { yes: 65, no: 35 }
       let yes = null, no = null;

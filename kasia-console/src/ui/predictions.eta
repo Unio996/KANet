@@ -1287,20 +1287,27 @@ function predictionsPage() {
     },
 
     async acceptBettorRec(r) {
-      // 确认 dialog (avoid accidental click)
+      // Bug U1 debug instrumentation (Bettor r120 — narrow click-no-response root cause).
+      // Logs entry/confirm/POST/response so Owner DevTools Console can pinpoint which step fails.
+      console.log('[acceptBettorRec] called rec=', r?.id?.slice(0,8), 'status=', r?.status, 'decision=', r?.decision, '_accepting=', r?._accepting);
       const sizeUsd = (r.size_usd || 0).toFixed(0);
       const dir = r.decision;
-      if (!confirm(`确认下单 BUY ${dir} $${sizeUsd}?\n${r.question}\n当前 yes 价: ${(r.yes_price*100).toFixed(2)}%`)) return;
+      const confirmed = confirm(`确认下单 BUY ${dir} $${sizeUsd}?\n${r.question}\n当前 yes 价: ${(r.yes_price*100).toFixed(2)}%`);
+      console.log('[acceptBettorRec] confirm=', confirmed);
+      if (!confirmed) return;
       r._accepting = true;
       r._acceptError = null;
       r._acceptSuccess = null;
       try {
+        console.log('[acceptBettorRec] POST /api/bettor/recommendation/' + r.id + '/accept');
         const res = await fetch('/api/bettor/recommendation/' + r.id + '/accept', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({}),
         });
+        console.log('[acceptBettorRec] response status=', res.status);
         const data = await res.json();
+        console.log('[acceptBettorRec] response body=', data);
         if (data.ok) {
           r.status = 'accepted';
           r._acceptSuccess = `cost $${data.cost_basis_usd} (${data.size_shares} shares @ ${data.entry_price})`;
@@ -1310,6 +1317,7 @@ function predictionsPage() {
           r._acceptError = data.error || 'unknown error';
         }
       } catch (e) {
+        console.log('[acceptBettorRec] catch error=', e.message);
         r._acceptError = e.message;
       } finally {
         r._accepting = false;
