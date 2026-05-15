@@ -689,13 +689,19 @@ export async function intakeKaspaEscrowTick() {
       // Also exclude TXs that match historical successful prepayments (matched in past tick, prevent re-orphan).
       const recentPrepayTxs = sqlite.prepare(`SELECT prepayment_tx FROM user_escrow_balances WHERE prepayment_tx IS NOT NULL`).all().map(r => r.prepayment_tx);
       for (const pt of recentPrepayTxs) matchedTxIds.add(pt);
+      // Bug W Phase 1 over-detection fix 5/15 (J2 self-grep verify post restart 18: 83 NULL-from-address
+      // chunks detected, all Step A Gate.io withdraw 20000 KAS split inbound, NOT user orphans).
+      // Kaspa indexer T-NWT-07 残 → from_address often NULL on legitimate broker top-ups.
+      // Skip INSERT when from_address NULL — can't refund anyway + most NULL chunks are operational inflows.
+      // Real user prepay-not-via-menu cases (true Bug W target) will have from_address populated via Kasia DM context.
       const orphanInsert = sqlite.prepare(`INSERT OR IGNORE INTO broker_orphan_inflows (id, chain, asset, amount, from_address, to_address, prepayment_tx) VALUES (?, 'kaspa', 'KAS', ?, ?, ?, ?)`);
       for (const t of inboundTxs) {
         if (matchedTxIds.has(t.tx_id)) continue;
+        if (!t.from_address) continue;  // skip unrefundable + likely operational
         const orphanId = randomUUID();
-        const r = orphanInsert.run(orphanId, t.amount, t.from_address || null, brokerKasiaAddr, t.tx_id);
+        const r = orphanInsert.run(orphanId, t.amount, t.from_address, brokerKasiaAddr, t.tx_id);
         if (r.changes > 0) {
-          console.warn(`[broker-kaspa-intake-escrow] 🚨 orphan KAS inflow detected: ${t.amount} KAS from ${t.from_address?.slice(0,16) || 'unknown'} tx=${t.tx_id.slice(0,16)} → orphan_id=${orphanId.slice(0,8)} (24hr sweep refund pending)`);
+          console.warn(`[broker-kaspa-intake-escrow] 🚨 orphan KAS inflow detected: ${t.amount} KAS from ${t.from_address.slice(0,16)} tx=${t.tx_id.slice(0,16)} → orphan_id=${orphanId.slice(0,8)} (24hr sweep refund pending)`);
         }
       }
     } catch (err) {
