@@ -234,6 +234,7 @@ async function scoreMarketEnriched(m, nowMs) {
     fundamental_sources: fund.sources,
     fundamental_confidence: fund.confidence,
     fundamental_reasoning: fund.reasoning,
+    fund_source: fund.fund_source || 'enricher',  // 思路 H J1 #205 — corpus_and / corpus_or / enricher
     domain: domain.domain,
     fund_gap,
     enriched_type: 'fundamental',
@@ -261,21 +262,20 @@ async function scoreMarketTailEnriched(m, nowMs) {
   const liq = m.liquidity || 0;
   if (vol24 < TAIL_ENRICH_VOLUME_MIN || liq < TAIL_ENRICH_LIQUIDITY_MIN) return null;
 
-  // Step 1: domain detect
+  // Step 1: domain detect (advisory — non-blocking for corpus path 思路 H)
   const domain = await detectDomain(m.question, m.description, String(m.id));
-  if (!domain || domain.confidence < FUND_DOMAIN_MIN_CONFIDENCE) return null;
-  if (domain.domain === 'other') return null;
 
-  // Step 2: domain-specific enrich (only sports supported until B2.x/B3.x ship)
+  // Step 2: domain-specific enrich (only sports supported until B2.x/B3.x ship).
+  // 思路 H (J1 #205, Owner 5/15 "干吧!"): regardless of domain classification, fall through
+  // to reasoner — corpus-primary AND-match catches super-tail entities (Australia ∩ Eurovision)
+  // even when detectDomain returns 'other' OR low confidence (Eurovision/cultural events).
   let enriched = null;
-  if (domain.domain === 'sports') {
+  if (domain && domain.confidence >= FUND_DOMAIN_MIN_CONFIDENCE && domain.domain === 'sports') {
     enriched = await enrichSports(m.question, m.description);
-  } else {
-    return null;
   }
-  if (!enriched?.fundamentals) return null;
+  // Non-sports / low-confidence / enricher null: enriched stays null → reasoner corpus path engages.
 
-  // Step 3: fundamental reasoning
+  // Step 3: fundamental reasoning (corpus-primary fallback engages when enricher null)
   const fund = await reasonFundamental(m.question, m.description, enriched);
   if (fund.estimate === null) return null;
 
@@ -316,6 +316,7 @@ async function scoreMarketTailEnriched(m, nowMs) {
     fundamental_sources: fund.sources,
     fundamental_confidence: fund.confidence,
     fundamental_reasoning: fund.reasoning,
+    fund_source: fund.fund_source || 'enricher',  // 思路 H J1 #205 — corpus_and / corpus_or / enricher
     domain: domain.domain,
     fund_gap,
     enriched_type: 'tail_fundamental',
@@ -387,6 +388,7 @@ function persistCandidates(candidates, relayNodeId, triggerType, openPositions) 
         domain: c.domain || null,
         fund_gap: c.fund_gap ?? null,
         fundamental_reasoning: c.fundamental_reasoning || null,
+        fund_source: c.fund_source || null,  // 思路 H J1 #205 transparency — corpus_and / corpus_or / enricher
       };
 
       stmt.run(
