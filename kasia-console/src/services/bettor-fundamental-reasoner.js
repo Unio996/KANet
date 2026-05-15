@@ -48,10 +48,13 @@ function sourceQuality(sources) {
   return Math.max(...scores);
 }
 
-// Corpus query (B1.3 +15 LOC per Bettor r113 §5):
-//   Find ≥3 similar resolved markets in historical_resolutions (v108) via keyword overlap.
-//   Return { sample_size, yes_rate } OR null if too few matches.
-//   NOT a driver — appended to LLM prompt as 1 grounding sanity-check.
+// Corpus query (B1.3 +15 LOC per Bettor r113 §5, J1 #205 思路 H upgrade):
+//   Find similar resolved markets in historical_resolutions (v108) via keyword overlap.
+//   Returns { sample_size, yes_rate, match_mode: 'and'|'or' } OR null if no match.
+//   J1 #202 empirical: OR-match dilutes super-tail entity signal (Australia OR Eurovision
+//   yes_rate=15.0% noisy). AND-match entity intersection grounded even at sample=1
+//   (exact-entity match like "Australia win Eurovision 2024" → "Australia win Eurovision 2026").
+//   思路 H sample threshold per match_mode in reasoner caller (AND ≥ 1, OR ≥ 10).
 function queryCorpus(question) {
   if (!question) return null;
   try {
@@ -61,14 +64,24 @@ function queryCorpus(question) {
       .filter(w => w.length > 4 && !['will', 'before', 'after', 'during', 'between'].includes(w))
       .slice(0, 5);
     if (keywords.length < 2) return null;
-    const placeholders = keywords.map(() => 'LOWER(question) LIKE ?').join(' OR ');
     const params = keywords.map(k => `%${k}%`);
-    const rows = sqlite.prepare(
-      `SELECT question, final_yes FROM historical_resolutions WHERE ${placeholders} LIMIT 30`
+    // AND-mode first (entity intersection — high specificity)
+    const andSql = keywords.map(() => 'LOWER(question) LIKE ?').join(' AND ');
+    const andRows = sqlite.prepare(
+      `SELECT question, final_yes FROM historical_resolutions WHERE ${andSql} LIMIT 30`
     ).all(...params);
-    if (rows.length < 3) return null;
-    const yesCount = rows.filter(r => Number(r.final_yes) === 1).length;
-    return { sample_size: rows.length, yes_rate: yesCount / rows.length };
+    if (andRows.length >= 1) {
+      const yesCount = andRows.filter(r => Number(r.final_yes) === 1).length;
+      return { sample_size: andRows.length, yes_rate: yesCount / andRows.length, match_mode: 'and' };
+    }
+    // OR-mode fallback (broader, but diluted — need ≥ 10 for confidence)
+    const orSql = keywords.map(() => 'LOWER(question) LIKE ?').join(' OR ');
+    const orRows = sqlite.prepare(
+      `SELECT question, final_yes FROM historical_resolutions WHERE ${orSql} LIMIT 30`
+    ).all(...params);
+    if (orRows.length < 10) return null;
+    const yesCount = orRows.filter(r => Number(r.final_yes) === 1).length;
+    return { sample_size: orRows.length, yes_rate: yesCount / orRows.length, match_mode: 'or' };
   } catch { return null; }
 }
 
@@ -84,9 +97,19 @@ function parseLlmJson(text) {
 
 export async function reasonFundamental(question, description, enrichedData, adapterUrl = null) {
   const sources = Array.isArray(enrichedData?.sources) ? enrichedData.sources : [];
-  // Hard invariant: no grounded data → null estimate (Owner pivot 14:50)
+  // 思路 H corpus-primary fallback (J1 #205, Owner 5/15 "干吧!" + Bettor r131): when enricher null,
+  // promote queryCorpus from sanity supplement to primary signal (sample-size + match_mode gated).
+  // corpus base rate IS chain truth (resolved Polymarket markets v108), NOT LLM闭门估 — does
+  // not violate Owner invariant 1 (闭门估 = LLM without data, FORBIDDEN; corpus = grounded historical).
   if (!enrichedData?.fundamentals) {
-    return { estimate: null, confidence: 0, sources, reasoning: 'no enriched fundamentals — abstain (Owner invariant 1)' };
+    const corpus = queryCorpus(question);
+    if (corpus && corpus.match_mode === 'and' && corpus.sample_size >= 1) {
+      return { estimate: corpus.yes_rate, confidence: 0.25, sources: [], reasoning: `corpus_and base rate ${(corpus.yes_rate*100).toFixed(0)}% (n=${corpus.sample_size}, exact-entity intersection)`, corpus, fund_source: 'corpus_and' };
+    }
+    if (corpus && corpus.match_mode === 'or' && corpus.sample_size >= 10) {
+      return { estimate: corpus.yes_rate, confidence: 0.15, sources: [], reasoning: `corpus_or base rate ${(corpus.yes_rate*100).toFixed(0)}% (n=${corpus.sample_size}, broad keyword overlap)`, corpus, fund_source: 'corpus_or' };
+    }
+    return { estimate: null, confidence: 0, sources, reasoning: 'no enriched fundamentals + no corpus match (Owner invariant 1)' };
   }
   // Corpus sanity (1 grounding point if ≥3 matches)
   const corpus = queryCorpus(question);
@@ -123,6 +146,7 @@ export async function reasonFundamental(question, description, enrichedData, ada
     reasoning: String(parsed.reasoning || '').slice(0, 500),
     facts: Array.isArray(parsed.facts) ? parsed.facts.slice(0, 20) : [],
     corpus: corpus || null,
+    fund_source: 'enricher',
   };
 }
 
