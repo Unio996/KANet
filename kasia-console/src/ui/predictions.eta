@@ -1413,6 +1413,14 @@ function predictionsPage() {
         const url = '/api/bettor/recommendations?limit=10' + (this.selectedAgent ? '&relay_node_id=' + this.selectedAgent : '');
         const r = await fetch(url);
         this.bettorRecs = await r.json();
+        // Bug U1 Layer 2 defensive (Bettor r135 越界 ship after Owner 5/15 钦定): Alpine x-for :key="r.id"
+        // 可能复用 stale _accepting=true proxy state across loadBettor refreshes (J1 #208 Hypothesis 9).
+        // Explicit reset prevents 🚫 cursor sticking after prior failed/hung accept attempts.
+        (this.bettorRecs?.recommendations || []).forEach(rec => {
+          rec._accepting = false;
+          rec._acceptError = null;
+          rec._acceptSuccess = null;
+        });
       } catch (e) {
         console.warn('[bettor] load failed:', e.message);
         this.bettorRecs = { recommendations: [] };
