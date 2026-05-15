@@ -370,6 +370,61 @@ export async function registerBettorRoutes(fastify) {
     return reply.send({ ok: true, days, daily: dailyWithRate, cumulative });
   });
 
+  // GET /api/bettor/recommendations/history?days=30&relay_node_id=X&limit=200
+  // Bettor r132 (Owner 5/15 严训 "推荐 history 没保存") + J1 #206 ack: data IS saved in
+  // bettor_recommendations (173 rows on Bettor host, similar on J1), Owner saw 战绩 tab
+  // showing 0 outcome_log rows (legitimate UMA oracle delay 24-48h post deadline) and
+  // assumed not saved. Real gap = no UI tab to browse raw rec rows. This endpoint backs
+  // /predictions "推荐历史" sub-tab — flat table of all recs with outcome join (left, null
+  // for pending).
+  fastify.get('/api/bettor/recommendations/history', async (request, reply) => {
+    const days = Math.min(parseInt(request.query.days) || 30, 365);
+    const relayNodeId = request.query.relay_node_id || null;
+    const limit = Math.min(parseInt(request.query.limit) || 200, 1000);
+    const relayClause = relayNodeId ? `AND r.relay_node_id = ?` : '';
+    const args = relayNodeId ? [days, relayNodeId, limit] : [days, limit];
+
+    const rows = sqlite.prepare(`
+      SELECT r.id, r.relay_node_id, r.market_id, r.condition_id, r.question,
+             r.decision, r.fraction, r.size_usd, r.edge, r.p_mid,
+             r.yes_price, r.volume_24h, r.liquidity, r.end_date, r.score,
+             r.trigger_type, r.llm_tier, r.status, r.scanned_at,
+             r.fundamental_estimate, r.fundamental_confidence,
+             r.outcome AS rec_outcome, r.was_correct AS rec_was_correct,
+             r.pnl_hypothetical AS rec_pnl,
+             r.reasoning_json,
+             o.actual_outcome AS outcome_actual, o.was_correct AS outcome_was_correct,
+             o.actual_pnl_usd AS outcome_pnl, o.resolved_at AS outcome_resolved_at
+      FROM bettor_recommendations r
+      LEFT JOIN bettor_outcome_log o ON o.recommendation_id = r.id
+      WHERE r.scanned_at >= datetime('now', '-' || ? || ' days') ${relayClause}
+      ORDER BY r.scanned_at DESC
+      LIMIT ?
+    `).all(...args);
+
+    const recs = rows.map(r => {
+      let fundSource = null;
+      try {
+        const reasoning = r.reasoning_json ? JSON.parse(r.reasoning_json) : null;
+        fundSource = reasoning?.fund_source || null;
+      } catch {}
+      return {
+        id: r.id, relay_node_id: r.relay_node_id, market_id: r.market_id, condition_id: r.condition_id,
+        question: r.question, decision: r.decision, yes_price: r.yes_price, size_usd: r.size_usd,
+        edge: r.edge, p_mid: r.p_mid, end_date: r.end_date, score: r.score,
+        scanned_at: r.scanned_at, status: r.status, trigger_type: r.trigger_type, llm_tier: r.llm_tier,
+        fund_estimate: r.fundamental_estimate, fund_confidence: r.fundamental_confidence,
+        fund_source: fundSource,  // 思路 H J1 #205 transparency — corpus_and / corpus_or / enricher
+        outcome: r.outcome_actual ?? r.rec_outcome ?? null,
+        was_correct: r.outcome_was_correct ?? r.rec_was_correct ?? null,
+        actual_pnl_usd: r.outcome_pnl ?? r.rec_pnl ?? null,
+        resolved_at: r.outcome_resolved_at ?? null,
+      };
+    });
+
+    return reply.send({ ok: true, days, count: recs.length, recommendations: recs });
+  });
+
   // GET /api/bettor/positions — 纸面持仓 + 时点快照
   fastify.get('/api/bettor/positions', async (request, reply) => {
     const relayNodeId = request.query.relay_node_id || null;
