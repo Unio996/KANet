@@ -3505,5 +3505,57 @@ export function runMigrations() {
     }
   }
 
+  // v110: Phase B 推荐历史 + 胜率时间轨迹 (Owner 5/15 钦定 + Bettor r123 spec hand-off).
+  // 2 新表:
+  //   bettor_market_price_history — 每次 scavenger filter 通过 market 的 yes_price 时间序列 snapshot
+  //   bettor_outcome_log — recommendation resolve 时 actual outcome + P&L log (recommended_outcome vs actual_outcome)
+  // 用途: /api/bettor/history-chart per-market price series + /api/bettor/hit-rate-timeline daily/cumulative.
+  // Owner 字面: "我需要有预测市场推荐历史记录, 对未来策略和算法调整提供依据. 胜率时间变化线更好".
+  {
+    const hasMph = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='bettor_market_price_history'").get();
+    if (!hasMph) {
+      sqlite.exec(`
+        CREATE TABLE bettor_market_price_history (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          market_id TEXT NOT NULL,
+          condition_id TEXT,
+          yes_price REAL NOT NULL,
+          no_price REAL NOT NULL,
+          volume_24h REAL,
+          liquidity REAL,
+          one_week_change REAL,
+          one_month_change REAL,
+          source TEXT NOT NULL,
+          snapshot_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_mph_market ON bettor_market_price_history(market_id, snapshot_at DESC);
+      `);
+      console.log('[migrate] v110: bettor_market_price_history 表 + 1 索引 创建 (Phase B 推荐历史 yes_price time series).');
+    }
+    const hasOl = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='bettor_outcome_log'").get();
+    if (!hasOl) {
+      sqlite.exec(`
+        CREATE TABLE bettor_outcome_log (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          recommendation_id TEXT NOT NULL,
+          market_id TEXT NOT NULL,
+          resolved_at TEXT NOT NULL,
+          actual_outcome TEXT NOT NULL,
+          recommended_outcome TEXT NOT NULL,
+          was_correct INTEGER NOT NULL,
+          predicted_pnl_usd REAL,
+          actual_pnl_usd REAL,
+          closed_at TEXT,
+          close_price REAL,
+          notes TEXT,
+          logged_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_ol_resolved ON bettor_outcome_log(resolved_at DESC);
+        CREATE INDEX idx_ol_rec ON bettor_outcome_log(recommendation_id);
+      `);
+      console.log('[migrate] v110: bettor_outcome_log 表 + 2 索引 创建 (Phase B 胜率轨迹 actual outcome + P&L).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
