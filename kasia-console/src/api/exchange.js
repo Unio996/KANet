@@ -661,6 +661,12 @@ export async function registerExchangeRoutes(fastify) {
           total: totalU,
         },
         baseline: baseline ? { totalK: parseFloat(baseline.totalK), totalU: parseFloat(baseline.totalU), captured_at: baseline.captured_at } : null,
+        // Bug T 5/15 fix (NWT 02:31 architect propose): surface delta for UI real-time display.
+        // alarm 仅 fire 越过 tolerance (-0.01 KAS / -0.001 USDT), 但 UI 需见 in-tolerance delta 才知 broker fee 消耗.
+        delta: baseline ? {
+          k: parseFloat((totalK - parseFloat(baseline.totalK || 0)).toFixed(6)),
+          u: parseFloat((totalU - parseFloat(baseline.totalU || 0)).toFixed(6)),
+        } : null,
         alarm,
       });
     } catch (err) {

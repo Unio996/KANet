@@ -108,6 +108,10 @@ function _isLanguageA(msg) {
   if (/^[1-6]$/.test(head)) return true;  // menu number
   if (/^(back|取消|返回|menu|next)$/i.test(head)) return true;  // 控制 keyword
   if (/^(yes|y|确认|ok|好|发布|算了|no|n|不)$/i.test(head)) return true;  // confirm/cancel
+  // Bug S 5/15 fix (NWT 02:31 architect dig): PRICE_INPUT step accepts 'mid' for live oracle price.
+  // 之前 'mid' 不在 whitelist → _isLanguageA false → handleMessage return null → conversations.js:283
+  // canned 'choose 1-6' reply, escrow 没 INSERT. AT-07 + HP-05 Tier 4 实证 (NWT 01:42 + 01:46).
+  if (/^mid$/i.test(head)) return true;
   if (/^0x[a-fA-F0-9]{40}$/.test(head)) return true;  // EVM addr
   if (/^[a-f0-9-]{8,}$/i.test(head)) return true;  // offer_id / uuid
   if (/^\d+(\.\d+)?$/.test(head)) return true;  // qty number

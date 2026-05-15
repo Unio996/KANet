@@ -421,13 +421,13 @@
               <div class="flex justify-between"><span class="text-ink-500">escrow active</span><span class="tabular-nums" x-text="(custodyPool?.k_pool?.escrow_active || 0).toFixed(2)"></span></div>
               <div class="flex justify-between font-bold border-t border-warm-200 pt-1 mt-1">
                 <span>total</span>
-                <span class="tabular-nums" :class="custodyPool?.alarm?.deltaK < 0 ? 'text-red-700' : 'text-ink-700'" x-text="(custodyPool?.k_pool?.total || 0).toFixed(2) + ' KAS'"></span>
+                <span class="tabular-nums" :class="custodyPool?.delta?.k < 0 ? 'text-red-700' : 'text-ink-700'" x-text="(custodyPool?.k_pool?.total || 0).toFixed(2) + ' KAS'"></span>
               </div>
               <div x-show="custodyPool?.baseline" class="flex justify-between text-[10px] text-ink-400">
                 <span>baseline</span>
                 <span class="tabular-nums">
                   <span x-text="(custodyPool?.baseline?.totalK || 0).toFixed(2)"></span>
-                  <span x-show="custodyPool?.alarm?.deltaK != null" class="ml-1" :class="custodyPool?.alarm?.deltaK >= 0 ? 'text-green-600' : 'text-red-600'" x-text="'(Δ ' + (custodyPool?.alarm?.deltaK >= 0 ? '+' : '') + (custodyPool?.alarm?.deltaK || 0).toFixed(2) + ')'"></span>
+                  <span x-show="custodyPool?.delta?.k != null" class="ml-1" :class="custodyPool?.delta?.k >= 0 ? 'text-green-600' : 'text-red-600'" x-text="'(Δ ' + (custodyPool?.delta?.k >= 0 ? '+' : '') + (custodyPool?.delta?.k || 0).toFixed(4) + ')'"></span>
                 </span>
               </div>
             </div>
@@ -440,13 +440,13 @@
               <div class="flex justify-between"><span class="text-ink-500">escrow active</span><span class="tabular-nums" x-text="(custodyPool?.u_pool?.escrow_active || 0).toFixed(4)"></span></div>
               <div class="flex justify-between font-bold border-t border-warm-200 pt-1 mt-1">
                 <span>total</span>
-                <span class="tabular-nums" :class="custodyPool?.alarm?.deltaU < 0 ? 'text-red-700' : 'text-ink-700'" x-text="(custodyPool?.u_pool?.total || 0).toFixed(4) + ' U'"></span>
+                <span class="tabular-nums" :class="custodyPool?.delta?.u < 0 ? 'text-red-700' : 'text-ink-700'" x-text="(custodyPool?.u_pool?.total || 0).toFixed(4) + ' U'"></span>
               </div>
               <div x-show="custodyPool?.baseline" class="flex justify-between text-[10px] text-ink-400">
                 <span>baseline</span>
                 <span class="tabular-nums">
                   <span x-text="(custodyPool?.baseline?.totalU || 0).toFixed(4)"></span>
-                  <span x-show="custodyPool?.alarm?.deltaU != null" class="ml-1" :class="custodyPool?.alarm?.deltaU >= 0 ? 'text-green-600' : 'text-red-600'" x-text="'(Δ ' + (custodyPool?.alarm?.deltaU >= 0 ? '+' : '') + (custodyPool?.alarm?.deltaU || 0).toFixed(4) + ')'"></span>
+                  <span x-show="custodyPool?.delta?.u != null" class="ml-1" :class="custodyPool?.delta?.u >= 0 ? 'text-green-600' : 'text-red-600'" x-text="'(Δ ' + (custodyPool?.delta?.u >= 0 ? '+' : '') + (custodyPool?.delta?.u || 0).toFixed(4) + ')'"></span>
                 </span>
               </div>
             </div>
