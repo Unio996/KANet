@@ -360,6 +360,34 @@ export async function runScavengerScan(triggerType = 'cron', relayNodeId = null)
       const nowMs = Date.now();
       const candidates = [];
 
+      // Module 2 (Owner 5/15 推荐历史 + 胜率轨迹): snapshot per-market yes_price into v110 bettor_market_price_history.
+      // Snapshot ALL fetched markets each scan tick (not just qualified) — corpus for future analysis.
+      // Volume gated to avoid noise: only markets with vol24h ≥ $1K logged. ~3-5K snapshots per 6h scan.
+      const snapshotStmt = sqlite.prepare(`
+        INSERT INTO bettor_market_price_history (market_id, condition_id, yes_price, no_price, volume_24h, liquidity, one_week_change, one_month_change, source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'scavenger_scan')
+      `);
+      const snapshotTx = sqlite.transaction((markets) => {
+        let n = 0;
+        for (const m of markets) {
+          if (!m.outcomePrices) continue;
+          let yes;
+          try { yes = parseFloat(JSON.parse(m.outcomePrices)[0]); } catch { continue; }
+          if (!Number.isFinite(yes) || yes <= 0 || yes >= 1) continue;
+          if ((m.volume24hr || 0) < 1000) continue;
+          snapshotStmt.run(
+            String(m.id), m.conditionId || null,
+            yes, 1 - yes,
+            m.volume24hr || null, m.liquidity || null,
+            m.oneWeekPriceChange || null, m.oneMonthPriceChange || null
+          );
+          n++;
+        }
+        return n;
+      });
+      const snapshots = snapshotTx(all);
+      console.log(`[scavenger] price history snapshot: ${snapshots} rows written (vol24h ≥ $1K)`);
+
       // Pass 1: cheap sync scoreMarket — handles tails (yes ≤ 20% OR ≥ 80%)
       for (const m of all) {
         const c = scoreMarket(m, nowMs);
