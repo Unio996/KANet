@@ -456,6 +456,73 @@
         <div class="text-[10px] text-amber-700 mt-2">📌 broker 仅做 escrow + 撮合, K+U 总量不应减少 (broker 不 lose money — invariant violate → red alarm)</div>
       </div>
 
+      <!-- ─── MN-01 Broker Metrics Dashboard (Phase 0 v6 真测 5/15 Owner 钦定 + NWT 反 push back chart+heat map 真 spec) ─── -->
+      <div x-show="brokerMetrics" class="bg-white border border-warm-200 rounded-lg p-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="text-[10px] px-2 py-0.5 rounded bg-purple-100 text-purple-700 font-medium">Broker Metrics</span>
+            <span class="text-[10px] text-ink-500">window: <span x-text="brokerMetrics?.window_hours || 168"></span>h · <span x-text="brokerMetrics?.series_len || 0"></span> samples</span>
+          </div>
+          <button @click="loadBrokerMetrics()" class="text-[10px] px-2 py-0.5 rounded bg-warm-100 hover:bg-warm-200 text-ink-700">🔄 刷新</button>
+        </div>
+        <!-- Headline KPI -->
+        <div class="grid grid-cols-4 gap-3 text-[11px] mb-3">
+          <div class="border border-warm-200 rounded p-2">
+            <div class="text-[10px] text-ink-400">prepay 累</div>
+            <div class="font-bold tabular-nums" x-text="brokerMetrics?.totals?.prepay || 0"></div>
+          </div>
+          <div class="border border-warm-200 rounded p-2">
+            <div class="text-[10px] text-ink-400">settle 累</div>
+            <div class="font-bold tabular-nums text-green-700" x-text="brokerMetrics?.totals?.settle || 0"></div>
+          </div>
+          <div class="border border-warm-200 rounded p-2">
+            <div class="text-[10px] text-ink-400">fill ratio</div>
+            <div class="font-bold tabular-nums" x-text="brokerMetrics?.ratios?.fill_ratio != null ? (brokerMetrics.ratios.fill_ratio * 100).toFixed(1) + '%' : '–'"></div>
+          </div>
+          <div class="border border-warm-200 rounded p-2">
+            <div class="text-[10px] text-ink-400">expire ratio</div>
+            <div class="font-bold tabular-nums" :class="brokerMetrics?.ratios?.expire_ratio > 0.3 ? 'text-red-600' : 'text-ink-700'" x-text="brokerMetrics?.ratios?.expire_ratio != null ? (brokerMetrics.ratios.expire_ratio * 100).toFixed(1) + '%' : '–'"></div>
+          </div>
+        </div>
+        <!-- Time-series SVG bar chart: prepay (blue) + settle (green) + expire (amber) stacked per hour bucket -->
+        <div x-show="brokerMetrics?.series?.length > 0" class="mb-3">
+          <div class="text-[10px] text-ink-500 mb-1">📊 Activity time-series (last <span x-text="brokerMetrics?.series?.length || 0"></span> hours · prepay=blue / settle=green / expire=amber)</div>
+          <svg :viewBox="`0 0 ${Math.max(800, (brokerMetrics?.series?.length || 0) * 8)} 80`" class="w-full h-20 bg-warm-50 border border-warm-200 rounded">
+            <template x-for="(p, i) in (brokerMetrics?.series || [])" :key="i">
+              <g>
+                <rect :x="i * 8" :y="80 - ((p.prepay || 0) * 4)" width="6" :height="(p.prepay || 0) * 4" fill="#3b82f6" opacity="0.7"></rect>
+                <rect :x="i * 8 + 1" :y="80 - ((p.prepay || 0) * 4) - ((p.settle || 0) * 4)" width="4" :height="(p.settle || 0) * 4" fill="#10b981" opacity="0.8"></rect>
+                <rect :x="i * 8 + 2" :y="80 - ((p.prepay || 0) * 4) - ((p.settle || 0) * 4) - ((p.expire || 0) * 4)" width="2" :height="(p.expire || 0) * 4" fill="#f59e0b" opacity="0.7"></rect>
+              </g>
+            </template>
+          </svg>
+        </div>
+        <!-- Pool delta line — broker K total vs baseline over time -->
+        <div x-show="brokerMetrics?.series?.length > 0" class="mb-3">
+          <div class="text-[10px] text-ink-500 mb-1">📉 broker K pool ΔK vs baseline (red = below baseline, green = above)</div>
+          <svg :viewBox="`0 0 ${Math.max(800, (brokerMetrics?.series?.length || 0) * 8)} 60`" class="w-full h-16 bg-warm-50 border border-warm-200 rounded">
+            <!-- baseline horizontal line at y=30 (mid) -->
+            <line x1="0" y1="30" :x2="Math.max(800, (brokerMetrics?.series?.length || 0) * 8)" y2="30" stroke="#94a3b8" stroke-width="0.5" stroke-dasharray="2,2"></line>
+            <template x-for="(p, i) in (brokerMetrics?.series || [])" :key="i">
+              <circle :cx="i * 8 + 3" :cy="30 - Math.max(-25, Math.min(25, (p.delta_k || 0) * 250))" r="1.5" :fill="(p.delta_k || 0) < 0 ? '#dc2626' : '#10b981'"></circle>
+            </template>
+          </svg>
+        </div>
+        <!-- Top users heat map (concurrent active escrow count by user) — load with ?heat=true -->
+        <div x-show="brokerMetricsHeat?.length > 0" class="mb-2">
+          <div class="text-[10px] text-ink-500 mb-1">🔥 Top users by active concurrent escrow count (latest hour)</div>
+          <div class="text-[10px] space-y-0.5">
+            <template x-for="(u, i) in (brokerMetricsHeat || [])" :key="i">
+              <div class="flex justify-between border-b border-warm-100 py-0.5">
+                <span class="text-ink-700 truncate" x-text="u.user?.slice(0, 32) + '...'"></span>
+                <span class="tabular-nums font-medium" :class="u.count >= 5 ? 'text-red-600' : (u.count >= 3 ? 'text-amber-600' : 'text-ink-700')" x-text="u.count + ' active'"></span>
+              </div>
+            </template>
+          </div>
+        </div>
+        <div class="text-[10px] text-amber-700 mt-2">📌 1 week data 收集中 (MN-02). Owner data-driven cap 调时机 → MN-04 5/22+.</div>
+      </div>
+
       <!-- ─── 底部提示 ─── -->
       <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-[11px] text-amber-900">
         <div class="font-semibold mb-1">📍 关于这个页面</div>
@@ -831,6 +898,8 @@ function portfolioApp() {
         }
         // Bug H γ Step 4 #2 (Owner 17:35 钦定 invariant): load broker custody pool snapshot
         this.loadCustodyPool();
+        // MN-01 (Phase 0 v6 5/15 Owner 钦定): load broker metrics dashboard (hourly + heat map).
+        this.loadBrokerMetrics();
       } catch (e) {
         this.error = '请求失败: ' + e.message;
       } finally {
@@ -845,6 +914,21 @@ function portfolioApp() {
         const d = await res.json();
         if (d.ok) this.custodyPool = d;
       } catch (e) { console.warn('custody-pool load err:', e.message); }
+    },
+
+    brokerMetrics: null,
+    brokerMetricsHeat: [],
+    async loadBrokerMetrics() {
+      try {
+        const res = await fetch('/api/exchange/metrics?hours=168&heat=true', { signal: AbortSignal.timeout(10000) });
+        const d = await res.json();
+        if (d.ok) {
+          this.brokerMetrics = d;
+          // Extract latest hour's heat map (last series entry's heat array)
+          const last = d.series?.[d.series.length - 1];
+          this.brokerMetricsHeat = last?.heat || [];
+        }
+      } catch (e) { console.warn('broker-metrics load err:', e.message); }
     },
 
     async captureBaseline() {
