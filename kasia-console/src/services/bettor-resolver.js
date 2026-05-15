@@ -97,6 +97,21 @@ export async function resolveExpired() {
           UPDATE bettor_adjustments SET status='dismissed', decided_at=datetime('now'), decided_by='auto-resolver'
           WHERE recommendation_id=? AND status='pending'
         `).run(r.id);
+        // Module 3 (Owner 5/15 推荐历史 + 胜率轨迹): log to bettor_outcome_log (v110 Module 1).
+        // Predicted P&L: same formula as `pnl` above (hypothetical at recommendation size).
+        // Actual P&L: same value (sim mode, no real fill cost basis tracking yet — extend when bettor_real_positions has filled rows).
+        const marketIdRow = sqlite.prepare(`SELECT market_id FROM bettor_recommendations WHERE id=?`).get(r.id);
+        sqlite.prepare(`
+          INSERT INTO bettor_outcome_log
+            (recommendation_id, market_id, resolved_at, actual_outcome, recommended_outcome, was_correct, predicted_pnl_usd, actual_pnl_usd, close_price, notes)
+          VALUES (?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          r.id, String(marketIdRow?.market_id || ''),
+          outcome, r.decision, wasCorrect,
+          pnl, pnl, // sim mode: predicted == actual; will diverge when real wallet fills tracked separately
+          actual, // close_price = settle price (1 if YES wins, 0 if NO wins)
+          `sim resolved at brier=${brier.toFixed(3)}`
+        );
         resolved++;
         console.log(`[bettor-resolver] ${r.id.slice(0,8)} ${r.decision}/${outcome} ${wasCorrect ? '✓' : '✗'} pnl=${pnl.toFixed(2)} brier=${brier.toFixed(3)}`);
       } catch (e) {
