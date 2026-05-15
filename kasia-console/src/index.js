@@ -392,6 +392,10 @@ startBettorTracker();
 import { startReactorCron as startBettorReactor } from './services/bettor-reactor.js';
 startBettorReactor();
 
+// MN-01 broker metrics snapshotter — Phase 0 v6 真测 5/15 Owner 钦定 (1h cron, broker pool + escrow activity hourly snapshot).
+import { startBrokerMetricsCron } from './services/broker-metrics-snapshotter.js';
+startBrokerMetricsCron();
+
 // Pre-split UTXOs via Relay IPC (after relays are running)
 import { autoSplitAll } from './services/utxo-splitter.js';
 await autoSplitAll();

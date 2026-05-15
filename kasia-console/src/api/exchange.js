@@ -692,6 +692,74 @@ export async function registerExchangeRoutes(fastify) {
     }
   });
 
+  // ── GET /api/exchange/metrics — MN-01 dashboard hourly metrics (Phase 0 v6 5/15 Owner 钦定) ──
+  // Returns last N hours of broker_metrics_hourly + current snapshot if not yet bucketed.
+  // ?hours=168 (default 1 week) ?heat=true to include top users JSON
+  fastify.get('/api/exchange/metrics', async (request, reply) => {
+    try {
+      const hours = Math.min(parseInt(request.query.hours || '168', 10), 720);  // cap at 30 days
+      const includeHeat = request.query.heat === 'true' || request.query.heat === '1';
+      const rows = sqlite.prepare(`
+        SELECT hour_bucket, prepay_count, prepay_usdt_total, prepay_kas_total,
+               expire_count, settle_count, cancel_count, active_escrow_end,
+               broker_k_total, broker_u_total, delta_k_vs_baseline, delta_u_vs_baseline
+               ${includeHeat ? ', top_users_heat' : ''}
+        FROM broker_metrics_hourly
+        ORDER BY hour_bucket DESC LIMIT ?
+      `).all(hours);
+      // Reverse to chronological order for chart rendering left→right.
+      const series = rows.reverse().map(r => ({
+        bucket: r.hour_bucket,
+        prepay: r.prepay_count,
+        prepay_usdt: r.prepay_usdt_total,
+        prepay_kas: r.prepay_kas_total,
+        expire: r.expire_count,
+        settle: r.settle_count,
+        cancel: r.cancel_count,
+        active: r.active_escrow_end,
+        broker_k: r.broker_k_total,
+        broker_u: r.broker_u_total,
+        delta_k: r.delta_k_vs_baseline,
+        delta_u: r.delta_u_vs_baseline,
+        ...(includeHeat ? { heat: (() => { try { return JSON.parse(r.top_users_heat || '[]'); } catch { return []; } })() } : {}),
+      }));
+      // Aggregate totals over window
+      const totals = series.reduce((acc, r) => ({
+        prepay: acc.prepay + r.prepay,
+        expire: acc.expire + r.expire,
+        settle: acc.settle + r.settle,
+        cancel: acc.cancel + r.cancel,
+        prepay_usdt: acc.prepay_usdt + (r.prepay_usdt || 0),
+        prepay_kas: acc.prepay_kas + (r.prepay_kas || 0),
+      }), { prepay: 0, expire: 0, settle: 0, cancel: 0, prepay_usdt: 0, prepay_kas: 0 });
+      // Derived ratios
+      const closed = totals.settle + totals.cancel + totals.expire;
+      const fill_ratio = closed ? (totals.settle / closed) : null;       // % of closed that fully filled
+      const expire_ratio = closed ? (totals.expire / closed) : null;     // % of closed that timed out
+      return reply.send({
+        ok: true,
+        window_hours: hours,
+        series_len: series.length,
+        totals,
+        ratios: { fill_ratio, expire_ratio },
+        series,
+      });
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // ── POST /api/exchange/metrics/snapshot — trigger immediate snapshot (admin/test) ──
+  fastify.post('/api/exchange/metrics/snapshot', async (request, reply) => {
+    try {
+      const { snapshotHourlyMetrics } = await import('../services/broker-metrics-snapshotter.js');
+      const r = await snapshotHourlyMetrics();
+      return reply.send(r);
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
+
   // ── GET /api/exchange/peer-reputation?peer=... — 查询对手方信誉（供 UI badge）──
   fastify.get('/api/exchange/peer-reputation', async (request, reply) => {
     const { peer, from } = request.query;

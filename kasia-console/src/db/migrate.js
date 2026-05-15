@@ -3557,5 +3557,36 @@ export function runMigrations() {
     }
   }
 
+
+  // v111: MN-01 metrics dashboard (Phase 0 ship v6 真测 5/15) — broker exchange hourly metrics snapshot.
+  // Owner 11:00+ 钦定 v6 + Owner explicit "每笔上链有记录" + KI-9 数据收 1-2 周 informed 调 cap.
+  // hourly bucket snapshot (168 行 1 week) — prepay count + expire ratio + fill ratio + pool K/U + delta vs baseline.
+  // per-user heat map (concurrent active escrow count per user) JSON column.
+  {
+    const exists = sqlite.prepare("SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='broker_metrics_hourly'").get();
+    if (!exists.cnt) {
+      sqlite.exec(`
+        CREATE TABLE broker_metrics_hourly (
+          hour_bucket TEXT PRIMARY KEY,             -- ISO truncated to hour, e.g. '2026-05-15T10:00:00Z'
+          prepay_count INTEGER NOT NULL DEFAULT 0,  -- escrow rows INSERTed in hour
+          prepay_usdt_total REAL NOT NULL DEFAULT 0,
+          prepay_kas_total REAL NOT NULL DEFAULT 0,
+          expire_count INTEGER NOT NULL DEFAULT 0,  -- escrow expired refund in hour
+          settle_count INTEGER NOT NULL DEFAULT 0,  -- offer completed (full settle) in hour
+          cancel_count INTEGER NOT NULL DEFAULT 0,  -- offer cancelled in hour
+          active_escrow_end INTEGER NOT NULL DEFAULT 0,  -- active escrow count at hour end (snapshot)
+          broker_k_total REAL,                       -- broker pool K balance snapshot at hour end
+          broker_u_total REAL,                       -- broker pool U balance snapshot at hour end
+          delta_k_vs_baseline REAL,                  -- broker_k_total - baseline.totalK (if baseline captured)
+          delta_u_vs_baseline REAL,                  -- broker_u_total - baseline.totalU
+          top_users_heat TEXT,                       -- JSON array [{user_kasia_addr, active_count}] top N by active escrow count
+          snapshot_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_metrics_bucket ON broker_metrics_hourly(hour_bucket DESC);
+      `);
+      console.log('[migrate] v111: broker_metrics_hourly 表 + 1 索引 创建 (MN-01 dashboard hourly snapshot, Owner 5/15 11:00+ 钦定 v6).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
