@@ -1833,4 +1833,75 @@ export async function sendBroadcast(channel, text, opts = {}) {
 
 ---
 
+## R-ALPINE-UI-1 — `<template x-for>` 永禁在 `<svg>` namespace 内
+
+**Owner 2026-05-15 真测 + Bettor r136 sediment (Bug U1 5 attempts 后 真因 surface).**
+
+**Bad**:
+```html
+<svg :viewBox="'0 0 600 90'">
+  <path :d="sparklinePath()" />
+  <template x-for="(pt, i) in sparklinePoints()" :key="i">
+    <circle :cx="pt.x" :cy="pt.y" r="2.5" :fill="pt.color"></circle>
+  </template>
+</svg>
+```
+
+**Why it breaks**: `<template>` element inside SVG namespace is **NOT HTMLTemplateElement**. It's a regular SVG element with no `.content` DocumentFragment property. Alpine init phase walks DOM looking for `template.content.children` — gets `undefined` — throws `TypeError: Cannot read properties of undefined (reading 'children')`. **Alpine directive registration walk INTERRUPTS** at this point, leaving ALL subsequent directives unbound. DOM present but zero event handlers — buttons silently no-op.
+
+**Good (path-only)**:
+```html
+<svg :viewBox="'0 0 600 90'">
+  <path :d="sparklinePath()" />
+  <!-- decorative dots: pre-compute as path string OR use imperative createElementNS -->
+</svg>
+```
+
+**Lint proposal**: `scripts/lint-kanet.mjs` add rule grep `<svg[\s\S]*?<template\s+x-(for|if|show|effect)` in `*.eta` → block commit.
+
+---
+
+## R-ALPINE-UI-2 — Alpine x-for `:key` + ephemeral client-side mutation field = 必 explicit reset on array reassign
+
+**Owner 2026-05-15 真测 + Bettor r136 sediment (Bug U1 Layer 2, J1 #208 Hypothesis 9 实际正确).**
+
+**Bad**:
+```js
+async loadFoo() {
+  const r = await fetch('/api/foo');
+  this.foos = await r.json();  // ⚠️ same id rec retains stale _accepting from prior session
+}
+async acceptFoo(f) {
+  f._accepting = true;
+  try { await fetch(...); }
+  finally { f._accepting = false; }  // ⚠️ if fetch hangs OR page reload mid-flight, never reaches
+}
+```
+
+```html
+<template x-for="f in foos" :key="f.id">
+  <button :disabled="f._accepting" :class="...">...</button>  <!-- stuck disabled -->
+</template>
+```
+
+**Why it breaks**: Alpine `x-for :key="f.id"` preserves DOM element identity AND reactive proxy across array reassign when key matches. Client-side fields added by user interaction (e.g. `_accepting`, `_loading`, `_editing`) **persist on the proxy across `this.foos = await r.json()` refresh**. If a prior accept failed/hung leaving `_accepting=true`, the new payload's same-id rec inherits the stale field → button `:disabled` evaluates truthy → Tailwind `disabled:cursor-not-allowed` activates → 🚫 cursor + click zero-response.
+
+**Good**:
+```js
+async loadFoo() {
+  const r = await fetch('/api/foo');
+  this.foos = await r.json();
+  // Explicit reset ephemeral UI state (Alpine x-for :key may preserve stale proxy fields)
+  (this.foos || []).forEach(f => {
+    f._accepting = false;
+    f._loading = false;
+    f._error = null;
+  });
+}
+```
+
+**Rule of thumb**: any field prefixed `_` (convention for client-side ephemeral) in Alpine x-for'd array — **explicit reset in load fn after each fetch**.
+
+---
+
 *本档案在 v2 spec 第八章元教训基础上独立。spec 聚焦"这次怎么做"，本档案聚焦"下次别再犯"。*
