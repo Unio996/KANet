@@ -1983,3 +1983,100 @@ export async function sendBroadcast(channel, text, opts = {}) {
 ---
 
 *本档案在 v2 spec 第八章元教训基础上独立。spec 聚焦"这次怎么做"，本档案聚焦"下次别再犯"。*
+
+---
+
+## 规则 R-ALPINE-UI-1 · `<template>` 永禁放在 `<svg>` 内 — Alpine init walk 直接崩
+
+(Bettor r134 + J1 #209 2026-05-15 双 layer 诊断 真根因 sediment, KI-Phase-B-UI-3)
+
+### 现象
+- Owner /predictions DevTools Console 红色 fatal:
+  ```
+  Alpine Expression Error: Cannot read properties of undefined (reading 'children')
+    Expression: "sparklinePoints()"
+    <template x-for="(pt, i) in sparklinePoints()" :key="i">
+  Alpine Expression Error: pt is not defined  (× 3, for pt.x, pt.y, pt.action)
+  <circle> attribute cx: Unexpected end of attribute. Expected length, "".
+  Uncaught TypeError: Cannot read properties of undefined (reading 'children')
+  ```
+- /predictions Bettor 今日推荐 ACCEPT button **零响应** (binding 没注册).
+
+### 真因
+`<template>` 在 SVG namespace 不是 HTMLTemplateElement — 没 `.content` DocumentFragment.
+
+Alpine init phase walk DOM 注册 directive 时:
+1. 拿 `template.content.children` → `undefined` → 致命 `Uncaught TypeError`
+2. 内 `<circle>` 被 parse 成 SVG 直接子节点 (template 没 capture), Alpine 看到 `:cx="pt.x"` 等绑定, scope 没 `pt` → "pt is not defined"
+3. **致命 directive walk 中断** → 后续 directive (含 ACCEPT button @click / x-show / :disabled) **注册失败**
+4. button DOM 在但 Alpine 没绑事件 → 点击零响应
+
+### 引入 commit
+- predictions.eta 2026-04-24 b620030826 "feat(predictions): stats card + capital timeline + win/lose verdict" 加 SVG `<template x-for>` 渲染 event dots
+- 触发条件: Owner selectedAgent 切到 Bettor relay (hasClobKey=true) → loadPositions 设 summary={...,timeline:undefined,...} → 触发 sparkline render path → init walk 崩
+- 2026-05-15 Owner DevTools dump empirical 暴露
+
+### 4 次未抓根因 自批 (Bettor r118 → r122 ab114db7d → revert 323a9a7b1 → sparklinePoints defensive guard)
+全在 ACCEPT button DOM 周围转 (x-show condition / pattern 改 / runtime evaluator 防御), **真因在 button 之前几行 SVG `<template>` walk error 中断后续 directive 注册**. 没 grep `Alpine init walk error` 路径.
+
+### Fix (b3096e588 by J1, cherry-pick b9f46239c)
+删除 SVG 内 `<template x-for>` 块. circles 是 decorative, path 已显示 trajectory. 净 -5 / +3 (comment).
+
+### Lint proposal
+`scripts/lint-kanet.mjs` 加: grep `<svg[\s\S]*?<template\s+x-(for|if|show|effect)` in `kasia-console/src/ui/*.eta` → **block commit**.
+
+### Mental rule
+SVG 内只能放 SVG namespace elements + `defs` / `g` / `use`. 任何 Alpine 反应式 SVG 内容用:
+- `<g x-effect="renderXxx($el)">` + imperative `createElementNS('http://www.w3.org/2000/svg', 'circle')`
+- 或 path string interpolation (`<path :d="computedString()">`, 不需 child template)
+
+---
+
+## 规则 R-ALPINE-UI-2 · Alpine x-for `:key` 复用 reactive proxy state across array reassign
+
+(Bettor r135 越界 ship Layer 2 真因, J1 #208 Hypothesis 9 自批 wrong 但实际正确)
+
+### 现象
+- ACCEPT button 显 🚫 (cursor-not-allowed) **即使** Layer 1 SVG fix 已 deploy
+- DOM inspect: button 有 `disabled` 属性
+- `r._accepting` 在 Alpine reactive proxy 真 = true, 即使最新 loadBettor() 返回的 rec object **没 _accepting 字段** (server side 不写此 ephemeral)
+
+### 真因
+predictions.eta x-for 用 `:key="r.id"`:
+```html
+<template x-for="r in bettorRecs.recommendations" :key="r.id">
+```
+
+Alpine v3 `:key` 行为: **iteration 跨 array reassign, 同 key 的 DOM element + reactive proxy state 复用** (优化, 避免重 mount).
+
+scenario:
+1. Owner click ACCEPT → `r._accepting = true` set 在 proxy
+2. 撞 Layer 1 SVG crash OR fetch hang → finally{} 不 reach
+3. Page refresh → `loadBettor()` reassign `this.bettorRecs.recommendations` 全新 array
+4. **同 rec.id 的 new rec object 进 x-for**, Alpine 看 :key 一致 → **复用 prior proxy state including stale `_accepting=true`**
+5. button `:disabled="r._accepting"` evaluate truthy → `disabled` attr set → Tailwind 🚫
+
+### J1 #208 Hypothesis 9 self-批 自批 wrong, 但实际对
+J1 self-批 wrong 基于 Owner DevTools 显 sparkline error (Layer 1). 实际 Layer 1 + Layer 2 **双 bug 并存**, Layer 1 crash 表面上掩盖 Layer 2 stale state. 删 Layer 1 后 stale state 仍粘.
+
+### Fix (Bettor 83071f9ca 越界)
+loadBettor() reassign 后显式 reset ephemeral fields:
+```js
+this.bettorRecs = await r.json();
+(this.bettorRecs?.recommendations || []).forEach(rec => {
+  rec._accepting = false;
+  rec._acceptError = null;
+  rec._acceptSuccess = null;
+});
+```
+
+### Mental rule
+- `x-for :key` 同 + ephemeral client-side mutation field (e.g. `_loading` / `_error` / `_accepting`) = 必 explicit reset on data refresh
+- 或: 避免 ephemeral field set on iteration item, 改用 component-level reactive Map `loadingIds = new Set()` 保 client UI state separately
+
+### Layer 3 (附加 fix) — /predictions no-cache header
+ETA route 加 `Cache-Control: no-store, no-cache, must-revalidate` — Owner Ctrl+Shift+R 也可能 hit stale HTML 浏览器 cache 掩盖 fix. live in stocks.js:36, 待 commit (与 unrelated 65-line hunk 混).
+
+---
+
+*R-ALPINE-UI-1 + R-ALPINE-UI-2 (2026-05-15 Owner 4 次未抓根因 雷霆 + 越界钦定 sediment): UI bug 必先要 browser DevTools empirical, code-only grep 漏 Alpine init phase walk error / reactive proxy state pollution 两类. Bug U1 真因 = Layer 1 SVG template crash + Layer 2 stale proxy reuse 双 bug 并存.*
