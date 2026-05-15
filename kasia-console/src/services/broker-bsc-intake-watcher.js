@@ -138,7 +138,7 @@ export async function tickEscrow() {
   // (prepay detected, publish failed/not-yet-attempted — Bug K race fix follow-up retry path).
   // 查 BUY pending escrow rows (user prepay USDT on BSC, broker_recv_addr=BSC broker addr)
   const pending = sqlite.prepare(`
-    SELECT id, quote_seq, side, user_kasia_addr, amount_quoted, asset, chain, broker_recv_addr, target_amount, expires_at, status, prepayment_tx
+    SELECT id, quote_seq, side, user_kasia_addr, amount_quoted, asset, chain, broker_recv_addr, target_amount, expires_at, status, prepayment_tx, created_at
     FROM user_escrow_balances
     WHERE (status = 'pending_prepay' OR (status = 'active' AND offer_id IS NULL))
       AND side = 'buy_kas'
@@ -166,6 +166,10 @@ export async function tickEscrow() {
     if (e.status === 'pending_prepay') {
       const expectedAmount = parseFloat(e.amount_quoted);
       // Bug Y BSC mirror: compute approx block at escrow.created_at, reject inflows before it.
+      // Bug AB hotfix 5/15 14:23 (J2 self-grep verify Step A USDT escrow refund cascade):
+      // SELECT 之前 漏 created_at → e.created_at undefined → .replace throw → tick crash → 全 BUY
+      // escrow 永不 match → TTL expire → real USDT silent absorb. J2 0.225 USDT 真 loss 同款 Bug Z pattern.
+      if (!e.created_at) { console.warn(`[broker-bsc-intake-escrow] escrow ${e.id.slice(0,8)} missing created_at, skip Bug Y guard`); continue; }
       const escCreatedMs = new Date(e.created_at.replace(' ', 'T') + 'Z').getTime();
       const ageSec = Math.max(0, (nowMs - escCreatedMs) / 1000);
       const escCreatedBlockApprox = headBlock - Math.ceil(ageSec / 3);  // BSC ~3s/block
