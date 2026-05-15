@@ -1091,12 +1091,18 @@ export function startIntakeWatcher() {
         const r3 = await sweepExpiredEscrows();
         if (r3 && r3.refunded > 0) console.log(`[exchange-escrow-sweep] tick refunded=${r3.refunded}/${r3.scanned}`);
       } catch (e) { console.error('[exchange-escrow-sweep]', e.message); }
-      // Bug W Phase 2 5/15 (NWT 13:14 propose + Owner 13:48 钦定 全自动): orphan inflows 24hr auto-refund.
-      try {
-        const { sweepOrphanInflows } = await import('./exchange-machine.js');
-        const r4 = await sweepOrphanInflows();
-        if (r4 && r4.refunded > 0) console.log(`[exchange-orphan-sweep] tick refunded=${r4.refunded}/${r4.scanned}`);
-      } catch (e) { console.error('[exchange-orphan-sweep]', e.message); }
+      // Bug AA emergency 5/15 14:04: Phase 2 sweepOrphanInflows cron DISABLED.
+      // 真因: Bug W Phase 1 over-detection (orphan_inflows INSERT covers Step A capital + matched escrow +
+      // borrow returns — 65000+ KAS false positive risk). Cron 24hr auto-refund 会 误 chain transfer.
+      // 现 88 row 全 manual_review (status filter implicit guard), 但 cron 仍 fires 在 'detected' status —
+      // future BSC orphan (event.from extractable) 触发 cron 仍风险 refund 非 user-error inflow.
+      // Restore cron 后 add proper allow-list (CEX whitelist + relay_nodes exclude + amount threshold).
+      // Manual trigger 仍 work via POST /api/exchange/metrics/snapshot pattern (但 现 endpoint 缺, backlog ship).
+      // try {
+      //   const { sweepOrphanInflows } = await import('./exchange-machine.js');
+      //   const r4 = await sweepOrphanInflows();
+      //   if (r4 && r4.refunded > 0) console.log(`[exchange-orphan-sweep] tick refunded=${r4.refunded}/${r4.scanned}`);
+      // } catch (e) { console.error('[exchange-orphan-sweep]', e.message); }
     }
   }, TICK_MS);
   if (!_refundInterval) {
