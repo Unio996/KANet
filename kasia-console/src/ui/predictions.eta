@@ -880,11 +880,13 @@
               <path :d="sparklineAreaPath()" fill="rgba(59, 130, 246, 0.08)" stroke="none"></path>
               <!-- Line -->
               <path :d="sparklinePath()" fill="none" stroke="rgb(59, 130, 246)" stroke-width="1.5" vector-effect="non-scaling-stroke"></path>
-              <!-- Event dots -->
-              <template x-for="(pt, i) in sparklinePoints()" :key="i">
-                <circle :cx="pt.x" :cy="pt.y" r="2.5" vector-effect="non-scaling-stroke"
-                  :fill="pt.action === 'WIN' ? 'rgb(34,197,94)' : pt.action === 'LOSE' ? 'rgb(239,68,68)' : pt.action === 'BUY' ? 'rgb(59,130,246)' : 'rgb(156,163,175)'"></circle>
-              </template>
+              <!-- Event dot decoration removed (Bettor r134 真根因 + Owner DevTools 5/15):
+                   <template x-for> inside SVG namespace breaks Alpine init walk —
+                   <template> in SVG ≠ HTMLTemplateElement, no .content DocumentFragment.
+                   Alpine "Cannot read properties of undefined (reading 'children')" interrupted
+                   directive registration, leaving ACCEPT button :disabled / @click unbound
+                   (Bug U1 4-attempt sediment — KI-Phase-B-UI-3 — never use <template x-for>
+                   inside SVG; use imperative D3-style render or path-only visualization). -->
             </svg>
             <!-- Endpoints label -->
             <div class="flex justify-between text-[10px] text-ink-400 mt-0.5 font-mono">
