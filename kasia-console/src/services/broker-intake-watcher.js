@@ -592,7 +592,7 @@ export async function intakeKaspaEscrowTick() {
 
   // Query SELL pending escrow rows (user prepay KAS on kaspa, broker_recv_addr=broker Kasia addr)
   const pending = sqlite.prepare(`
-    SELECT id, quote_seq, side, user_kasia_addr, amount_quoted, asset, chain, broker_recv_addr, target_amount, expires_at
+    SELECT id, quote_seq, side, user_kasia_addr, amount_quoted, asset, chain, broker_recv_addr, target_amount, expires_at, created_at
     FROM user_escrow_balances
     WHERE status = 'pending_prepay'
       AND side = 'sell_kas'
@@ -602,18 +602,20 @@ export async function intakeKaspaEscrowTick() {
     ORDER BY created_at ASC
     LIMIT 10
   `).all(brokerKasiaAddr);
-  if (!pending.length) return { ok: true, scanned: 0, matched: 0 };
 
-  // Query kaspa_tx_log recent inbound to broker Kasia addr (5 min window for pending TTL)
+  // Query kaspa_tx_log recent inbound to broker Kasia addr (extended 60min window for orphan detection)
+  // Bug W Phase 1 5/15 fix: was 10min, extended to 60min to catch historical AT-05/AT-02 type orphan TXs.
   const inboundTxs = sqlite.prepare(`
     SELECT tx_id, from_address, CAST(amount AS TEXT) AS amount, observed_at
     FROM kaspa_tx_log
     WHERE to_address = ?
-      AND observed_at > datetime('now', '-10 minutes')
+      AND observed_at > datetime('now', '-60 minutes')
     ORDER BY observed_at DESC
     LIMIT 100
   `).all(brokerKasiaAddr);
-  if (!inboundTxs.length) return { ok: true, scanned: pending.length, matched: 0 };
+  // Bug W Phase 1 5/15 (NWT 13:14 dig): 不 early return on !pending.length — orphan detect path needs inboundTxs
+  // scan even when pending empty (all inflow = orphan in that case). Move orphan detect block out of pending-gated path.
+  if (!inboundTxs.length && !pending.length) return { ok: true, scanned: 0, matched: 0 };
 
   let matched = 0;
   for (const e of pending) {
@@ -668,32 +670,37 @@ export async function intakeKaspaEscrowTick() {
 
   // Bug W 5/15 (NWT 13:14 AT-05 真测 surface): orphan TX detect.
   // 用户真链 send KAS to broker 不通过 menu (no pending_prepay match) → silently 跳过 = 累积无主资金.
-  // Phase 1 (本 commit): 仅 detection + record. Phase 2: sweep + sendKas refund auto.
-  // Bug Y interaction: matchedTxIds 集 必走相同 timestamp guard, 否则 historical inflow re-classified as matched in re-scan.
-  try {
-    const matchedTxIds = new Set();
-    for (const e of pending) {
-      const exp = parseFloat(e.amount_quoted);
-      const escMs = new Date(e.created_at.replace(' ', 'T') + 'Z').getTime();
-      const tx = inboundTxs.find(t => {
-        const txMs = new Date(t.observed_at.replace(' ', 'T') + 'Z').getTime();
-        if (txMs < escMs - 5000) return false;  // Bug Y mirror: skip historical
-        return Math.abs(parseFloat(t.amount) - exp) / exp <= ESCROW_KAS_TOLERANCE_PCT;
-      });
-      if (tx) matchedTxIds.add(tx.tx_id);
-    }
-    const orphanInsert = sqlite.prepare(`INSERT OR IGNORE INTO broker_orphan_inflows (id, chain, asset, amount, from_address, to_address, prepayment_tx) VALUES (?, 'kaspa', 'KAS', ?, ?, ?, ?)`);
-    for (const t of inboundTxs) {
-      if (matchedTxIds.has(t.tx_id)) continue;
-      // Anti-double-detect via UNIQUE(prepayment_tx). INSERT OR IGNORE swallows duplicate.
-      const orphanId = randomUUID();
-      const r = orphanInsert.run(orphanId, t.amount, t.from_address || null, brokerKasiaAddr, t.tx_id);
-      if (r.changes > 0) {
-        console.warn(`[broker-kaspa-intake-escrow] 🚨 orphan KAS inflow detected: ${t.amount} KAS from ${t.from_address?.slice(0,16) || 'unknown'} tx=${t.tx_id.slice(0,16)} → orphan_id=${orphanId.slice(0,8)} (24hr sweep refund pending)`);
+  // Phase 1 detection + Phase 2 auto-refund 24hr (sweepOrphanInflows in exchange-machine.js).
+  // Bug Y interaction: matchedTxIds 集 必走相同 timestamp guard.
+  // Bug W Phase 1 fix 5/15 (本 restart 18): orphan detect 必在 no-pending 场景 also 跑 (no quote = all inflow orphan).
+  if (inboundTxs.length > 0) {
+    try {
+      const matchedTxIds = new Set();
+      for (const e of pending) {
+        const exp = parseFloat(e.amount_quoted);
+        const escMs = new Date(e.created_at.replace(' ', 'T') + 'Z').getTime();
+        const tx = inboundTxs.find(t => {
+          const txMs = new Date(t.observed_at.replace(' ', 'T') + 'Z').getTime();
+          if (txMs < escMs - 5000) return false;  // Bug Y mirror: skip historical
+          return Math.abs(parseFloat(t.amount) - exp) / exp <= ESCROW_KAS_TOLERANCE_PCT;
+        });
+        if (tx) matchedTxIds.add(tx.tx_id);
       }
+      // Also exclude TXs that match historical successful prepayments (matched in past tick, prevent re-orphan).
+      const recentPrepayTxs = sqlite.prepare(`SELECT prepayment_tx FROM user_escrow_balances WHERE prepayment_tx IS NOT NULL`).all().map(r => r.prepayment_tx);
+      for (const pt of recentPrepayTxs) matchedTxIds.add(pt);
+      const orphanInsert = sqlite.prepare(`INSERT OR IGNORE INTO broker_orphan_inflows (id, chain, asset, amount, from_address, to_address, prepayment_tx) VALUES (?, 'kaspa', 'KAS', ?, ?, ?, ?)`);
+      for (const t of inboundTxs) {
+        if (matchedTxIds.has(t.tx_id)) continue;
+        const orphanId = randomUUID();
+        const r = orphanInsert.run(orphanId, t.amount, t.from_address || null, brokerKasiaAddr, t.tx_id);
+        if (r.changes > 0) {
+          console.warn(`[broker-kaspa-intake-escrow] 🚨 orphan KAS inflow detected: ${t.amount} KAS from ${t.from_address?.slice(0,16) || 'unknown'} tx=${t.tx_id.slice(0,16)} → orphan_id=${orphanId.slice(0,8)} (24hr sweep refund pending)`);
+        }
+      }
+    } catch (err) {
+      console.error(`[broker-kaspa-intake-escrow] orphan detect err: ${err.message}`);
     }
-  } catch (err) {
-    console.error(`[broker-kaspa-intake-escrow] orphan detect err: ${err.message}`);
   }
 
   return { ok: true, scanned: pending.length, matched };
