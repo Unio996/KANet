@@ -284,6 +284,92 @@ export async function registerBettorRoutes(fastify) {
     });
   });
 
+  // Module 4 (Owner 5/15 推荐历史 + 胜率轨迹): per-market price history + recommendations + outcome.
+  // GET /api/bettor/history-chart?market_id=X[&condition_id=Y][&limit=500]
+  fastify.get('/api/bettor/history-chart', async (request, reply) => {
+    const marketId = request.query.market_id || null;
+    const conditionId = request.query.condition_id || null;
+    const limit = Math.min(parseInt(request.query.limit) || 500, 2000);
+    if (!marketId && !conditionId) return reply.code(400).send({ error: 'market_id OR condition_id required' });
+    const where = marketId ? 'market_id = ?' : 'condition_id = ?';
+    const arg = marketId || conditionId;
+
+    const priceSeries = sqlite.prepare(`
+      SELECT yes_price, no_price, volume_24h, liquidity, source, snapshot_at
+      FROM bettor_market_price_history WHERE ${where} ORDER BY snapshot_at ASC LIMIT ?
+    `).all(arg, limit);
+
+    const recs = sqlite.prepare(`
+      SELECT id, decision, fraction, size_usd, edge, p_mid, yes_price, score,
+             trigger_type, llm_tier, status, scanned_at,
+             fundamental_estimate, fundamental_confidence, outcome, was_correct, brier, pnl_hypothetical
+      FROM bettor_recommendations WHERE ${where} ORDER BY scanned_at ASC
+    `).all(arg);
+
+    const outcomeRow = sqlite.prepare(`
+      SELECT actual_outcome, recommended_outcome, was_correct, actual_pnl_usd, predicted_pnl_usd, resolved_at, close_price
+      FROM bettor_outcome_log WHERE ${where} ORDER BY resolved_at DESC LIMIT 1
+    `).get(arg);
+
+    // Resolve question text from latest rec OR price_history join
+    const meta = sqlite.prepare(`
+      SELECT question, slug, condition_id, market_id FROM bettor_recommendations WHERE ${where} ORDER BY scanned_at DESC LIMIT 1
+    `).get(arg);
+
+    return reply.send({
+      ok: true,
+      market_id: meta?.market_id || marketId,
+      condition_id: meta?.condition_id || conditionId,
+      question: meta?.question || null,
+      slug: meta?.slug || null,
+      price_series: priceSeries,
+      recommendations: recs,
+      outcome: outcomeRow || null,
+    });
+  });
+
+  // GET /api/bettor/hit-rate-timeline[?days=30][&relay_node_id=X]
+  fastify.get('/api/bettor/hit-rate-timeline', async (request, reply) => {
+    const days = Math.min(parseInt(request.query.days) || 30, 365);
+    const relayNodeId = request.query.relay_node_id || null;
+    const relayClause = relayNodeId ? `AND r.relay_node_id = ?` : '';
+    const args = relayNodeId ? [days, relayNodeId] : [days];
+
+    const daily = sqlite.prepare(`
+      SELECT date(o.resolved_at) AS date,
+             COUNT(*) AS total,
+             SUM(o.was_correct) AS correct,
+             SUM(o.actual_pnl_usd) AS pnl
+      FROM bettor_outcome_log o
+      LEFT JOIN bettor_recommendations r ON r.id = o.recommendation_id
+      WHERE o.resolved_at >= datetime('now', '-' || ? || ' days') ${relayClause}
+      GROUP BY date(o.resolved_at)
+      ORDER BY date(o.resolved_at) ASC
+    `).all(...args);
+
+    const dailyWithRate = daily.map(d => ({
+      ...d,
+      hit_rate: d.total > 0 ? d.correct / d.total : null,
+    }));
+
+    // Cumulative
+    let cumCorrect = 0, cumTotal = 0, cumPnl = 0;
+    const cumulative = dailyWithRate.map(d => {
+      cumCorrect += d.correct || 0;
+      cumTotal += d.total || 0;
+      cumPnl += d.pnl || 0;
+      return {
+        date: d.date,
+        cum_total: cumTotal,
+        cum_correct: cumCorrect,
+        cum_hit_rate: cumTotal > 0 ? cumCorrect / cumTotal : null,
+        cum_pnl: cumPnl,
+      };
+    });
+
+    return reply.send({ ok: true, days, daily: dailyWithRate, cumulative });
+  });
+
   // GET /api/bettor/positions — 纸面持仓 + 时点快照
   fastify.get('/api/bettor/positions', async (request, reply) => {
     const relayNodeId = request.query.relay_node_id || null;
