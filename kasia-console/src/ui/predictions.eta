@@ -153,6 +153,14 @@
               <span class="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-orange-100 text-orange-700" x-text="bettorAdjustments.count"></span>
             </template>
           </button>
+          <button @click="bettorTab = 'winrate'; loadBettorWinrate()"
+                  :class="bettorTab === 'winrate' ? 'border-b-2 border-brand-500 text-brand-700 font-medium' : 'text-ink-400 hover:text-ink-600'"
+                  class="px-4 py-2 text-sm flex items-center gap-1">
+            胜率轨迹
+            <template x-if="bettorWinrate && bettorWinrate.cumulative && bettorWinrate.cumulative.length">
+              <span class="text-[10px] text-ink-500" x-text="'(' + ((bettorWinrate.cumulative[bettorWinrate.cumulative.length-1].cum_hit_rate || 0) * 100).toFixed(0) + '%, $' + (bettorWinrate.cumulative[bettorWinrate.cumulative.length-1].cum_pnl || 0).toFixed(0) + ')'"></span>
+            </template>
+          </button>
         </div>
 
         <!-- Tab content: 调仓建议 (Phase 3e-1 止损队列) -->
@@ -315,6 +323,107 @@
             </template>
             <template x-if="!bettorHistory">
               <div class="text-center py-12 text-sm text-ink-400">载入中...</div>
+            </template>
+          </div>
+        </template>
+
+        <!-- Tab content: 胜率轨迹 (Module 4b — Owner 5/15 钦定 推荐历史 + 胜率时间变化线) -->
+        <template x-if="bettorTab === 'winrate'">
+          <div>
+            <template x-if="!bettorWinrate">
+              <div class="text-center py-12 text-sm text-ink-400">载入中...</div>
+            </template>
+            <template x-if="bettorWinrate && bettorWinrate.daily && bettorWinrate.daily.length === 0">
+              <div class="text-center py-12 text-sm text-ink-400">
+                暂无 outcome 数据 — resolver cron 跑 + 推荐 resolve 后会自动 populate (Module 1 v110 表 bettor_outcome_log)
+              </div>
+            </template>
+            <template x-if="bettorWinrate && bettorWinrate.daily && bettorWinrate.daily.length > 0">
+              <div>
+                <!-- Summary cards (top) -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                  <div class="card card-compact text-center">
+                    <div class="text-[10px] text-ink-400">累计胜率</div>
+                    <div class="text-xl font-bold text-brand-700" x-text="((bettorWinrate.cumulative.at(-1)?.cum_hit_rate || 0) * 100).toFixed(1) + '%'"></div>
+                  </div>
+                  <div class="card card-compact text-center">
+                    <div class="text-[10px] text-ink-400">累计 P&L</div>
+                    <div class="text-xl font-bold" :class="(bettorWinrate.cumulative.at(-1)?.cum_pnl || 0) >= 0 ? 'text-green-600' : 'text-red-600'"
+                         x-text="'$' + (bettorWinrate.cumulative.at(-1)?.cum_pnl || 0).toFixed(2)"></div>
+                  </div>
+                  <div class="card card-compact text-center">
+                    <div class="text-[10px] text-ink-400">已结算</div>
+                    <div class="text-xl font-bold text-ink-700" x-text="bettorWinrate.cumulative.at(-1)?.cum_total || 0"></div>
+                  </div>
+                  <div class="card card-compact text-center">
+                    <div class="text-[10px] text-ink-400">查询窗口</div>
+                    <div class="text-xl font-bold text-ink-700" x-text="bettorWinrate.days + 'd'"></div>
+                  </div>
+                </div>
+
+                <!-- Daily hit rate bar chart (SVG, no external lib dependency) -->
+                <div class="card mb-4">
+                  <div class="text-xs font-semibold text-ink-500 uppercase tracking-wider mb-2">每日命中率 (绿=命中, 红=失败)</div>
+                  <div class="overflow-x-auto">
+                    <svg :viewBox="'0 0 ' + (Math.max(bettorWinrate.daily.length, 1) * 30 + 40) + ' 120'" class="w-full" style="min-height:120px">
+                      <!-- Bars -->
+                      <template x-for="(d, i) in bettorWinrate.daily" :key="d.date">
+                        <g>
+                          <!-- bar -->
+                          <rect :x="20 + i * 30" :y="100 - (d.hit_rate || 0) * 80"
+                                width="22" :height="(d.hit_rate || 0) * 80"
+                                :fill="(d.hit_rate || 0) >= 0.5 ? '#16a34a' : '#dc2626'" />
+                          <!-- date label -->
+                          <text :x="31 + i * 30" y="115" font-size="8" text-anchor="middle" fill="#6b7280"
+                                x-text="d.date ? d.date.slice(5) : ''"></text>
+                          <!-- total label above bar -->
+                          <text :x="31 + i * 30" :y="98 - (d.hit_rate || 0) * 80" font-size="8" text-anchor="middle" fill="#374151"
+                                x-text="(d.correct || 0) + '/' + (d.total || 0)"></text>
+                        </g>
+                      </template>
+                      <!-- 50% line -->
+                      <line x1="20" y1="60" :x2="bettorWinrate.daily.length * 30 + 20" y2="60" stroke="#9ca3af" stroke-dasharray="2,2" stroke-width="0.5" />
+                      <text x="5" y="63" font-size="7" fill="#9ca3af">50%</text>
+                    </svg>
+                  </div>
+                </div>
+
+                <!-- Cumulative P&L + cum hit rate dual-line -->
+                <div class="card">
+                  <div class="text-xs font-semibold text-ink-500 uppercase tracking-wider mb-2">累计 P&L (蓝) + 累计胜率 (橙)</div>
+                  <div class="overflow-x-auto">
+                    <svg :viewBox="'0 0 ' + (Math.max(bettorWinrate.cumulative.length, 1) * 30 + 40) + ' 120'" class="w-full" style="min-height:120px">
+                      <!-- Compute scale once: max abs cum_pnl -->
+                      <template x-if="bettorWinrate.cumulative.length > 0">
+                        <g>
+                          <!-- 0 P&L baseline -->
+                          <line x1="20" y1="60" :x2="bettorWinrate.cumulative.length * 30 + 20" y2="60" stroke="#9ca3af" stroke-dasharray="2,2" stroke-width="0.5" />
+                          <text x="5" y="63" font-size="7" fill="#9ca3af">$0</text>
+                          <!-- P&L polyline -->
+                          <polyline fill="none" stroke="#2563eb" stroke-width="1.5"
+                            :points="bettorWinrate.cumulative.map((c, i) => {
+                              const maxAbs = Math.max(1, ...bettorWinrate.cumulative.map(x => Math.abs(x.cum_pnl || 0)));
+                              const y = 60 - ((c.cum_pnl || 0) / maxAbs) * 50;
+                              return (31 + i * 30) + ',' + y;
+                            }).join(' ')" />
+                          <!-- Hit rate polyline (right axis, 0-100% mapped 100-10) -->
+                          <polyline fill="none" stroke="#f97316" stroke-width="1.5"
+                            :points="bettorWinrate.cumulative.map((c, i) => (31 + i * 30) + ',' + (100 - (c.cum_hit_rate || 0) * 90)).join(' ')" />
+                          <!-- Date labels -->
+                          <template x-for="(c, i) in bettorWinrate.cumulative" :key="'l' + c.date">
+                            <text :x="31 + i * 30" y="115" font-size="8" text-anchor="middle" fill="#6b7280" x-text="c.date ? c.date.slice(5) : ''"></text>
+                          </template>
+                          <!-- Latest values inline -->
+                          <text x="5" y="13" font-size="9" fill="#2563eb" x-text="'P&L $' + (bettorWinrate.cumulative.at(-1)?.cum_pnl || 0).toFixed(0)"></text>
+                          <text x="5" y="25" font-size="9" fill="#f97316" x-text="'win ' + ((bettorWinrate.cumulative.at(-1)?.cum_hit_rate || 0) * 100).toFixed(1) + '%'"></text>
+                        </g>
+                      </template>
+                    </svg>
+                  </div>
+                </div>
+
+                <div class="text-[10px] text-ink-400 mt-2">数据源: bettor_outcome_log (v110 Module 1) · API: /api/bettor/hit-rate-timeline?days=30</div>
+              </div>
             </template>
           </div>
         </template>
@@ -1050,6 +1159,7 @@ function predictionsPage() {
     bettorRecord: null,
     bettorResolving: false,
     bettorHistory: null,
+    bettorWinrate: null,  // Module 4b — 胜率轨迹 timeline data {days, daily, cumulative}
     bettorAdjustments: null,
     bettorEvaluating: false,
     closingAll: false,
@@ -1272,6 +1382,19 @@ function predictionsPage() {
       } catch (e) {
         console.warn('[bettor] history load failed:', e.message);
         this.bettorHistory = { total: 0, batches: [], positions: [] };
+      }
+    },
+
+    async loadBettorWinrate() {
+      // Module 4b (Owner 5/15 推荐历史 + 胜率时间轨迹). Fetches daily + cumulative timeline.
+      try {
+        const days = 30;
+        const url = '/api/bettor/hit-rate-timeline?days=' + days + (this.selectedAgent ? '&relay_node_id=' + this.selectedAgent : '');
+        const r = await fetch(url);
+        this.bettorWinrate = await r.json();
+      } catch (e) {
+        console.warn('[bettor] winrate load failed:', e.message);
+        this.bettorWinrate = { ok: false, days: 30, daily: [], cumulative: [] };
       }
     },
 
