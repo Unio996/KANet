@@ -42,6 +42,13 @@ const FUND_DOMAIN_MIN_CONFIDENCE = 0.7;   // domain 检测置信度门槛
 const MIDDLE_LIQUIDITY_MIN = 50000;       // 中段流动性门槛 ($50K, 高于 tail 的 $20K)
 const MIDDLE_VOLUME_MIN = 10000;          // 中段 24h vol 门槛 ($10K, 高于 tail 的 $5K)
 const MAX_MIDDLE_ENRICH_PER_SCAN = 100;   // 每次 scan 最多 enrich 100 中段 markets (LLM cost cap)
+// 思路 E (Owner 5/15 钦定碰撞质疑 + Bettor r126 PASS): tail enricher-first + trajectory fallback.
+// Australia case 5/15 实战 surface — momentum-confirms-direction 假设跟 contrarian Owner pivot 哲学冲突.
+// tail enricher 拿 fundamentals 直接对 yes 价 → 不依赖 momentum. Phase 2/3 ship 后 trajectory 自然 deprecate (→ 思路 D).
+const TAIL_FUND_GAP_THRESHOLD = 0.05;     // tail 阈值低 (5pp, vs 中段 15pp — tail 价已 extreme, 小 gap 已大 alpha)
+const TAIL_ENRICH_LIQUIDITY_MIN = 30000;  // tail enrich 流动性 (低于 middle $50K — tail markets typically thinner)
+const TAIL_ENRICH_VOLUME_MIN = 10000;     // tail enrich vol $10K
+const MAX_TAIL_ENRICH_PER_SCAN = 50;      // tail 50 cap (vs middle 100, tail count fewer + stakes lower)
 
 // Tail risk 折扣 (rules-based heuristic, Owner pivot framework)
 // rules 严的 → tail 1-2%, rules 弱的 → tail 5-10%
@@ -223,6 +230,88 @@ async function scoreMarketEnriched(m, nowMs) {
     domain: domain.domain,
     fund_gap,
     enriched_type: 'fundamental',
+  };
+}
+
+// 思路 E (Owner 5/15 碰撞质疑 PASS) — tail enricher-first async scorer.
+// Handles yes ∈ (0.005, 0.20) BUY_NO OR (0.80, 0.995) BUY_YES range using fundamental enricher.
+// Trajectory gate is NOT applied here — enricher fund_gap ≥ 0.05 is the gate. Contrarian-aware.
+// Australia Eurovision 5/15 case (yes 17% but 1mo +10.4pp, sports domain) — enricher fund.estimate 3-5% →
+// fund_gap 12-14pp ≥ 5pp threshold → BUY_NO catch (无需 trajectory momentum).
+async function scoreMarketTailEnriched(m, nowMs) {
+  if (!m.outcomePrices) return null;
+  let yes;
+  try { yes = parseFloat(JSON.parse(m.outcomePrices)[0]); } catch { return null; }
+  if (!Number.isFinite(yes) || yes <= 0.005 || yes >= 0.995) return null;
+  // Only tail range (skip middle, that's scoreMarketEnriched)
+  if (yes > 0.20 && yes < 0.80) return null;
+  if (!m.endDate) return null;
+  const endMs = new Date(m.endDate).getTime();
+  if (!Number.isFinite(endMs) || endMs <= nowMs) return null;
+  const hoursToDeadline = (endMs - nowMs) / 3600000;
+  if (hoursToDeadline < 1 || hoursToDeadline > 720) return null;
+  const vol24 = m.volume24hr || 0;
+  const liq = m.liquidity || 0;
+  if (vol24 < TAIL_ENRICH_VOLUME_MIN || liq < TAIL_ENRICH_LIQUIDITY_MIN) return null;
+
+  // Step 1: domain detect
+  const domain = await detectDomain(m.question, m.description, String(m.id));
+  if (!domain || domain.confidence < FUND_DOMAIN_MIN_CONFIDENCE) return null;
+  if (domain.domain === 'other') return null;
+
+  // Step 2: domain-specific enrich (only sports supported until B2.x/B3.x ship)
+  let enriched = null;
+  if (domain.domain === 'sports') {
+    enriched = await enrichSports(m.question, m.description);
+  } else {
+    return null;
+  }
+  if (!enriched?.fundamentals) return null;
+
+  // Step 3: fundamental reasoning
+  const fund = await reasonFundamental(m.question, m.description, enriched);
+  if (fund.estimate === null) return null;
+
+  const fund_gap = Math.abs(fund.estimate - yes);
+  if (fund_gap < TAIL_FUND_GAP_THRESHOLD) return null;  // tail 阈值 5pp
+
+  // Side derivation — fundamental says yes lower than market → market overprices YES → BUY_NO
+  // For tail markets: yes 0.20 typically signals "unlikely event" — if fund estimates LOWER than market (e.g. fund 5% vs market 17%), Owner contrarian thesis → BUY_NO
+  // If yes ≥ 0.80, market says "very likely YES" — if fund higher, BUY_YES; if fund lower (rare for high yes), BUY_NO
+  const side = fund.estimate > yes ? 'YES' : 'NO';
+  const lockPct = fund_gap;
+  const costBasis = side === 'NO' ? (1 - yes) : yes;
+  const tail = Math.max(0.005, 1 - fund.confidence);
+  const expectedPayoff = 1 - tail;
+  const expectedReturn = costBasis > 0 ? (expectedPayoff - costBasis) / costBasis : 0;
+
+  let sizeTier;
+  if (vol24 >= 50000 && liq >= 200000) sizeTier = 'heavy';
+  else if (vol24 >= 10000 && liq >= 50000) sizeTier = 'mid';
+  else sizeTier = 'light';
+  const suggestedSize = sizeTier === 'heavy' ? 500 : sizeTier === 'mid' ? 200 : 50;
+
+  return {
+    market: m,
+    side,
+    yes_price: yes,
+    lockPct,
+    expectedReturn,
+    tail,
+    hoursToDeadline,
+    vol24,
+    liq,
+    sizeTier,
+    suggestedSize,
+    trajectory: { m1: m.oneMonthPriceChange || 0, w1: m.oneWeekPriceChange || 0 },
+    // Phase B fundamental fields
+    fundamental_estimate: fund.estimate,
+    fundamental_sources: fund.sources,
+    fundamental_confidence: fund.confidence,
+    fundamental_reasoning: fund.reasoning,
+    domain: domain.domain,
+    fund_gap,
+    enriched_type: 'tail_fundamental',
   };
 }
 
@@ -422,10 +511,42 @@ export async function runScavengerScan(triggerType = 'cron', relayNodeId = null)
       }
       console.log(`[scavenger] middle-pass result: ${middleEnriched} enriched candidates (out of ${middleRaw.length} liquid middle markets)`);
 
+      // Pass 3 (思路 E, Owner 5/15 碰撞质疑 + Bettor r126 PASS):
+      // Tail enricher-first — for tail markets (yes ≤ 0.20 OR ≥ 0.80) NOT already caught by sync trajectory gate,
+      // try fundamental enricher. Skip if domain='other' OR not sports (until B2.x/B3.x). fund_gap ≥ 5pp threshold.
+      // Australia Eurovision 5/15 type case: yes 17% but +10.4pp momentum (sync trajectory rejects) →
+      // enricher fund.estimate 3-5% → gap 12-14pp ≥ 5pp → BUY_NO catch (无需 trajectory momentum).
+      const tailEnrichTargets = all
+        .filter(m => {
+          if (!m.outcomePrices) return false;
+          // Skip if already caught by Pass 1 sync (would be double-counting)
+          if (candidates.some(c => c.market.id === m.id)) return false;
+          try {
+            const yes = parseFloat(JSON.parse(m.outcomePrices)[0]);
+            const isTail = (yes > 0.005 && yes <= 0.20) || (yes >= 0.80 && yes < 0.995);
+            return Number.isFinite(yes) && isTail
+              && (m.volume24hr || 0) >= TAIL_ENRICH_VOLUME_MIN
+              && (m.liquidity || 0) >= TAIL_ENRICH_LIQUIDITY_MIN;
+          } catch { return false; }
+        })
+        .sort((a, b) => (b.liquidity || 0) - (a.liquidity || 0))
+        .slice(0, MAX_TAIL_ENRICH_PER_SCAN);
+      console.log(`[scavenger] tail-enrich pass: ${tailEnrichTargets.length} candidates (cap ${MAX_TAIL_ENRICH_PER_SCAN}, sync-rejected tail markets), enriching...`);
+      let tailEnriched = 0;
+      for (const m of tailEnrichTargets) {
+        try {
+          const c = await scoreMarketTailEnriched(m, nowMs);
+          if (c) { candidates.push(c); tailEnriched++; }
+        } catch (e) {
+          console.log(`[scavenger] tail enrich fail for ${m.id}: ${e.message?.slice(0,80)}`);
+        }
+      }
+      console.log(`[scavenger] tail-enrich result: ${tailEnriched} catches from ${tailEnrichTargets.length} attempts (思路 E enricher-first contrarian catches)`);
+
       // Sort by expected_return desc, take top 20
       candidates.sort((a, b) => b.expectedReturn - a.expectedReturn);
       const top = candidates.slice(0, 20);
-      console.log(`[scavenger] fetched ${all.length} → ${tailCount} tail + ${middleEnriched} middle = ${candidates.length} total qualified → top ${top.length}`);
+      console.log(`[scavenger] fetched ${all.length} → ${tailCount} tail + ${middleEnriched} middle + ${tailEnriched} tail-enriched (思路 E) = ${candidates.length} total qualified → top ${top.length}`);
 
       const openPositions = getOpenPositions(resolvedRelayId);
       console.log(`[scavenger] current open positions: ${openPositions.length}, min expected return: ${openPositions.length ? Math.min(...openPositions.map(p => p.expectedReturn)).toFixed(3) : 'n/a'}`);
