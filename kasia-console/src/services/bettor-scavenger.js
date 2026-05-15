@@ -101,9 +101,15 @@ function scoreMarket(m, nowMs) {
   else return null;
 
   // Trajectory check: yes ≤ 5% auto pass OR (1mo<-10pp AND 1wk≤0)
+  // 思路 E Layer 1 (Bettor r128 Australia case fix): deadline-decay trajectory.
+  //   Short-deadline (< 168h = 7d) markets: momentum is noise not signal. Skip trajectory gate;
+  //   allow tail by yes 价区间 + 流动性 + tail risk only. Australia Eurovision 24h 1mo +10.4pp
+  //   case 5/15 surface — Eurovision NOT in enrichSports LEAGUE_MAP (8 leagues only) so 思路 E
+  //   tail-enrich path null fallback, but Pass 1 sync trajectory hardgate also rejected. This
+  //   inline deadline-decay 5-LOC fix lets short-deadline tail markets catch via yes range alone.
   const m1 = m.oneMonthPriceChange || 0;
   const w1 = m.oneWeekPriceChange || 0;
-  if (gateYes > 0.05) {
+  if (gateYes > 0.05 && hoursToDeadline > 168) {
     // For BUY_NO: trajectory should be 1mo down ≤ -10pp (yes 跌) AND 1wk no bounce-back
     // For BUY_YES: trajectory should be 1mo up ≥ +10pp AND 1wk no drop
     if (side === 'NO') {
@@ -114,6 +120,7 @@ function scoreMarket(m, nowMs) {
       if (w1 < 0) return null;
     }
   }
+  // else: deadline ≤ 7d → trajectory skipped, momentum unreliable on short-window
 
   const vol24 = m.volume24hr || 0;
   const liq = m.liquidity || 0;
