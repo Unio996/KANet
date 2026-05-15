@@ -14,10 +14,12 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.join(__dirname, '..', 'data', 'console.db');
-const PAGE_SIZE = 500;
+// J1 #201 empirical fix: gamma /markets?closed=true caps response at 100/page (identical scavenger r118 bug).
+// PAGE_SIZE=500 + early-exit `page.length < PAGE_SIZE` → loop terminated after page 1 → 0 rows ingested.
+const PAGE_SIZE = 100;
 const LIMIT_PAGES = (() => {
   const a = process.argv.find(x => x.startsWith('--limit-pages='));
-  return a ? parseInt(a.slice('--limit-pages='.length)) : 100;  // 50K markets default
+  return a ? parseInt(a.slice('--limit-pages='.length)) : 500;  // 50K markets default (500 × 100)
 })();
 const DRY_RUN = process.argv.includes('--dry-run');
 
@@ -105,6 +107,13 @@ async function main() {
       await new Promise(r => setTimeout(r, 5000));
       try { page = await fetchPage(off); }
       catch (e2) { console.error(`[corpus] page off=${off} RETRY FAIL: ${e2.message} — skip`); continue; }
+    }
+    // J1 #202 empirical fix: gamma returns non-array (object {error:...} or null) past offset ~10K.
+    // Pre-fix crashed page 101 with "page is not iterable" TypeError. Defensive: skip non-array.
+    if (!Array.isArray(page)) {
+      console.error(`[corpus] page off=${off} non-array response (likely gamma rate-limit OR offset cap) — skip, continue paginating`);
+      await new Promise(r => setTimeout(r, 3000));
+      continue;
     }
     totalFetched += page.length;
 
