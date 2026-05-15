@@ -165,17 +165,14 @@ export async function tickEscrow() {
     // retry publish only).
     if (e.status === 'pending_prepay') {
       const expectedAmount = parseFloat(e.amount_quoted);
-      // Bug Y BSC mirror: compute approx block at escrow.created_at, reject inflows before it.
-      // Bug AB hotfix 5/15 14:23 (J2 self-grep verify Step A USDT escrow refund cascade):
-      // SELECT 之前 漏 created_at → e.created_at undefined → .replace throw → tick crash → 全 BUY
-      // escrow 永不 match → TTL expire → real USDT silent absorb. J2 0.225 USDT 真 loss 同款 Bug Z pattern.
-      if (!e.created_at) { console.warn(`[broker-bsc-intake-escrow] escrow ${e.id.slice(0,8)} missing created_at, skip Bug Y guard`); continue; }
-      const escCreatedMs = new Date(e.created_at.replace(' ', 'T') + 'Z').getTime();
-      const ageSec = Math.max(0, (nowMs - escCreatedMs) / 1000);
-      const escCreatedBlockApprox = headBlock - Math.ceil(ageSec / 3);  // BSC ~3s/block
-      // FIFO match by amount within ±0.5% tolerance (含 quote_seq noise) AND tx.block >= escrow.created_block - 5 buffer
+      // Bug AC drop 5/15 14:34 (J2 self-grep verify: Bug Y BSC mirror block guard 太严, exact-amount-match
+      // 仍被 reject. 2nd CA-01 trial 0xa6384145 0.225012 EXACT match 716254cc.amount_quoted 但 find() undefined →
+      // J2 0.225 USDT 真 loss 第 2 次. BSC block-time variability + Math.ceil 估算精度 不足 robust.
+      // Bug Y 真正攻击 vector (historical inflow misclassify) 实际 已 由 amount_quoted quote_seq noise + UNIQUE
+      // prepayment_tx 双层 mitigate. Drop block guard, 依 UNIQUE constraint + amount uniqueness.
+      // Kaspa watcher Bug Y guard (kaspa_tx_log.observed_at vs SQLite datetime) 准确 因 same-host time + DB time,
+      // BSC vs Console host time + Math.ceil 3s/block 估算 误差 too large.
       const tx = scan.events.find(t => {
-        if (t.block < escCreatedBlockApprox - 5) return false;  // Bug Y BSC: historical inflow 前于 quote, skip
         return Math.abs(t.amount - expectedAmount) / expectedAmount <= ESCROW_AMOUNT_TOLERANCE_PCT;
       });
       if (!tx) continue;
@@ -232,17 +229,12 @@ export async function tickEscrow() {
   }
 
   // Bug W 5/15 (NWT 13:14 AT-05 真测 surface mirror to BSC): orphan USDT detect.
-  // 用户真链 transfer USDT to broker BSC 不通过 menu → silently 跳过. Phase 1 detect + record.
-  // Bug Y mirror: matchedTxIds re-scan 必同 timestamp guard.
+  // Bug AC drop block guard 5/15 14:34: matchedTxIds re-scan 同款 drop block guard align match loop.
   try {
     const matchedTxIds = new Set();
     for (const e of pending) {
       const exp = parseFloat(e.amount_quoted);
-      const escMs = new Date(e.created_at.replace(' ', 'T') + 'Z').getTime();
-      const ageSec = Math.max(0, (nowMs - escMs) / 1000);
-      const escBlock = headBlock - Math.ceil(ageSec / 3);
       const tx = scan.events.find(t => {
-        if (t.block < escBlock - 5) return false;
         return Math.abs(t.amount - exp) / exp <= ESCROW_AMOUNT_TOLERANCE_PCT;
       });
       if (tx) matchedTxIds.add(tx.tx_hash);
