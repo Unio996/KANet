@@ -155,14 +155,25 @@ export async function tickEscrow() {
   const scan = await scanRecentTransfers({ chain: 'bnb', recipient: brokerBscAddr, span_blocks: ESCROW_SCAN_SPAN_BLOCKS, paymentAsset: 'usdt' });
   if (!scan.ok || !scan.events?.length) return { ok: true, scanned: pending.length, matched: 0 };
 
+  // Bug Y BSC mirror 5/15 (NWT 13:19 cascade surface Kaspa, mirror to BSC):
+  // approximate escrow's creation block (BSC ~3s/block) to reject historical inflows from matching new quote.
+  const headBlock = scan.head_block || 0;
+  const nowMs = Date.now();
   let matched = 0;
   for (const e of pending) {
     // Bug L 5/14 fix: 2 cases — pending_prepay (need to find prepayment TX) OR active (already detected,
     // retry publish only).
     if (e.status === 'pending_prepay') {
       const expectedAmount = parseFloat(e.amount_quoted);
-      // FIFO match by amount within ±0.5% tolerance, prefer exact-amount-match (含 quote_seq noise)
-      const tx = scan.events.find(t => Math.abs(t.amount - expectedAmount) / expectedAmount <= ESCROW_AMOUNT_TOLERANCE_PCT);
+      // Bug Y BSC mirror: compute approx block at escrow.created_at, reject inflows before it.
+      const escCreatedMs = new Date(e.created_at.replace(' ', 'T') + 'Z').getTime();
+      const ageSec = Math.max(0, (nowMs - escCreatedMs) / 1000);
+      const escCreatedBlockApprox = headBlock - Math.ceil(ageSec / 3);  // BSC ~3s/block
+      // FIFO match by amount within ±0.5% tolerance (含 quote_seq noise) AND tx.block >= escrow.created_block - 5 buffer
+      const tx = scan.events.find(t => {
+        if (t.block < escCreatedBlockApprox - 5) return false;  // Bug Y BSC: historical inflow 前于 quote, skip
+        return Math.abs(t.amount - expectedAmount) / expectedAmount <= ESCROW_AMOUNT_TOLERANCE_PCT;
+      });
       if (!tx) continue;
 
       // anti-replay: prepayment_tx UNIQUE constraint will reject if already used.
@@ -215,6 +226,37 @@ export async function tickEscrow() {
       console.error(`[broker-bsc-intake-escrow] _doPublishAfterPrepay err for escrow ${e.id.slice(0,8)}: ${err.message}`);
     }
   }
+
+  // Bug W 5/15 (NWT 13:14 AT-05 真测 surface mirror to BSC): orphan USDT detect.
+  // 用户真链 transfer USDT to broker BSC 不通过 menu → silently 跳过. Phase 1 detect + record.
+  // Bug Y mirror: matchedTxIds re-scan 必同 timestamp guard.
+  try {
+    const matchedTxIds = new Set();
+    for (const e of pending) {
+      const exp = parseFloat(e.amount_quoted);
+      const escMs = new Date(e.created_at.replace(' ', 'T') + 'Z').getTime();
+      const ageSec = Math.max(0, (nowMs - escMs) / 1000);
+      const escBlock = headBlock - Math.ceil(ageSec / 3);
+      const tx = scan.events.find(t => {
+        if (t.block < escBlock - 5) return false;
+        return Math.abs(t.amount - exp) / exp <= ESCROW_AMOUNT_TOLERANCE_PCT;
+      });
+      if (tx) matchedTxIds.add(tx.tx_hash);
+    }
+    const { randomUUID: rnd } = await import('node:crypto');
+    const orphanInsert = sqlite.prepare(`INSERT OR IGNORE INTO broker_orphan_inflows (id, chain, asset, amount, from_address, to_address, prepayment_tx) VALUES (?, 'bnb', 'USDT', ?, ?, ?, ?)`);
+    for (const t of scan.events) {
+      if (matchedTxIds.has(t.tx_hash)) continue;
+      const orphanId = rnd();
+      const r = orphanInsert.run(orphanId, String(t.amount), t.from || null, brokerBscAddr, t.tx_hash);
+      if (r.changes > 0) {
+        console.warn(`[broker-bsc-intake-escrow] 🚨 orphan USDT inflow detected: ${t.amount} USDT from ${t.from?.slice(0,16) || 'unknown'} tx=${t.tx_hash.slice(0,16)} → orphan_id=${orphanId.slice(0,8)} (24hr sweep refund pending)`);
+      }
+    }
+  } catch (err) {
+    console.error(`[broker-bsc-intake-escrow] orphan detect err: ${err.message}`);
+  }
+
   return { ok: true, scanned: pending.length, matched };
 }
 

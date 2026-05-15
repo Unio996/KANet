@@ -3588,5 +3588,31 @@ export function runMigrations() {
     }
   }
 
+  // v112: Bug W 5/15 (NWT 13:14 AT-05 真测 surface) — broker_orphan_inflows table.
+  // Orphan = user 真链 send KAS/USDT 到 broker 不通过 broker menu (no pending_prepay quote match).
+  // 当前 broker watcher silently 跳过, 累积无主资金, user 无 path 取回. Bug W detection + sweep refund 24hr.
+  {
+    const exists = sqlite.prepare("SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='broker_orphan_inflows'").get();
+    if (!exists.cnt) {
+      sqlite.exec(`
+        CREATE TABLE broker_orphan_inflows (
+          id TEXT PRIMARY KEY,                            -- uuid
+          chain TEXT NOT NULL,                            -- 'kaspa' or 'bnb' (BSC USDT)
+          asset TEXT NOT NULL,                            -- 'KAS' / 'USDT' / 'USDC'
+          amount TEXT NOT NULL,                           -- inflow amount
+          from_address TEXT,                              -- sender (may be NULL if indexer T-NWT-07 残)
+          to_address TEXT NOT NULL,                       -- broker recv addr (for verify which broker wallet)
+          prepayment_tx TEXT UNIQUE NOT NULL,             -- TX hash (anti-replay)
+          detected_at TEXT NOT NULL DEFAULT (datetime('now')),
+          status TEXT NOT NULL DEFAULT 'detected',        -- 'detected' / 'refunded' / 'manual_review'
+          refund_tx TEXT,                                 -- on refund success
+          refunded_at TEXT
+        );
+        CREATE INDEX idx_orphan_status_age ON broker_orphan_inflows(status, detected_at);
+      `);
+      console.log('[migrate] v112: broker_orphan_inflows 表 + 1 索引 创建 (Bug W AT-05 真测 surface, NWT 13:14 dig).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

@@ -618,8 +618,16 @@ export async function intakeKaspaEscrowTick() {
   let matched = 0;
   for (const e of pending) {
     const expectedAmount = parseFloat(e.amount_quoted);
-    // FIFO match by amount within ±0.5% tolerance (含 quote_seq noise)
+    // Bug Y 5/15 fix (NWT 13:19 EMERGENCY P0 critical AT-05+AT-02 cascade 真测 surface):
+    // 无 timestamp guard → historical orphan inflow (no quote at time) 后续误 match new quote within tolerance.
+    // 真测 cascade: AT-05 50 KAS @13:12 (no quote) → AT-02 quote 50.0 @13:16 → watcher 13:17 错 match AT-05 历史 inflow
+    // → AT-02 真 49.5 KAS @13:?? silently absorbed (-1% miss), no escrow row created, NWT 49.5 KAS lost.
+    // 修: 限 inflow tx.observed_at >= escrow.created_at (quote 必先于 inflow 才能 match, 5s clock skew tolerance).
+    const escrowCreatedMs = new Date(e.created_at.replace(' ', 'T') + 'Z').getTime();
+    // FIFO match by amount within ±0.5% tolerance (含 quote_seq noise) AND tx.observed_at >= escrow.created_at - 5s skew
     const tx = inboundTxs.find(t => {
+      const txMs = new Date(t.observed_at.replace(' ', 'T') + 'Z').getTime();
+      if (txMs < escrowCreatedMs - 5000) return false;  // Bug Y: historical orphan inflow 前于 quote 创建, skip
       const amt = parseFloat(t.amount);
       return Math.abs(amt - expectedAmount) / expectedAmount <= ESCROW_KAS_TOLERANCE_PCT;
     });
@@ -657,6 +665,37 @@ export async function intakeKaspaEscrowTick() {
       console.error(`[broker-kaspa-intake-escrow] _doPublishAfterPrepay err for escrow ${e.id.slice(0,8)}: ${err.message}`);
     }
   }
+
+  // Bug W 5/15 (NWT 13:14 AT-05 真测 surface): orphan TX detect.
+  // 用户真链 send KAS to broker 不通过 menu (no pending_prepay match) → silently 跳过 = 累积无主资金.
+  // Phase 1 (本 commit): 仅 detection + record. Phase 2: sweep + sendKas refund auto.
+  // Bug Y interaction: matchedTxIds 集 必走相同 timestamp guard, 否则 historical inflow re-classified as matched in re-scan.
+  try {
+    const matchedTxIds = new Set();
+    for (const e of pending) {
+      const exp = parseFloat(e.amount_quoted);
+      const escMs = new Date(e.created_at.replace(' ', 'T') + 'Z').getTime();
+      const tx = inboundTxs.find(t => {
+        const txMs = new Date(t.observed_at.replace(' ', 'T') + 'Z').getTime();
+        if (txMs < escMs - 5000) return false;  // Bug Y mirror: skip historical
+        return Math.abs(parseFloat(t.amount) - exp) / exp <= ESCROW_KAS_TOLERANCE_PCT;
+      });
+      if (tx) matchedTxIds.add(tx.tx_id);
+    }
+    const orphanInsert = sqlite.prepare(`INSERT OR IGNORE INTO broker_orphan_inflows (id, chain, asset, amount, from_address, to_address, prepayment_tx) VALUES (?, 'kaspa', 'KAS', ?, ?, ?, ?)`);
+    for (const t of inboundTxs) {
+      if (matchedTxIds.has(t.tx_id)) continue;
+      // Anti-double-detect via UNIQUE(prepayment_tx). INSERT OR IGNORE swallows duplicate.
+      const orphanId = randomUUID();
+      const r = orphanInsert.run(orphanId, t.amount, t.from_address || null, brokerKasiaAddr, t.tx_id);
+      if (r.changes > 0) {
+        console.warn(`[broker-kaspa-intake-escrow] 🚨 orphan KAS inflow detected: ${t.amount} KAS from ${t.from_address?.slice(0,16) || 'unknown'} tx=${t.tx_id.slice(0,16)} → orphan_id=${orphanId.slice(0,8)} (24hr sweep refund pending)`);
+      }
+    }
+  } catch (err) {
+    console.error(`[broker-kaspa-intake-escrow] orphan detect err: ${err.message}`);
+  }
+
   return { ok: true, scanned: pending.length, matched };
 }
 

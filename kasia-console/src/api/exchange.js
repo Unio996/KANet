@@ -626,8 +626,13 @@ export async function registerExchangeRoutes(fastify) {
         if (baselineRaw) baseline = JSON.parse(baselineRaw);
       } catch {}
 
-      const totalK = kaspaBalance + kasLocks + (kasEscrow?.total || 0);
-      const totalU = uBalance + (uEscrow?.total || 0);
+      // Bug X 5/15 fix (NWT 13:14 真测 dig): kaspaBalance/uBalance (chain wallet raw) 已含 escrow custody.
+      // 旧 totalK = chain + escrow + locks → double-count (escrow KAS sits inside chain wallet).
+      // Owner invariant "K+U 不减 baseline" 真意 = broker 自有 不损. escrow 是 user 临 custody, settle/refund
+      // 链路 chain→user (escrow ↓ + chain ↓ 同步), broker 自有 不变. fee 真损 broker 自有.
+      // 5/14 baseline 1847 当时 escrow=0 → 等价 chain balance = broker_self_owned (兼容).
+      const totalK = kaspaBalance - (kasEscrow?.total || 0) - kasLocks;
+      const totalU = uBalance - (uEscrow?.total || 0);
 
       // Invariant check (Owner钦定): K + U 总量 ≥ baseline 不减少
       let alarm = null;
@@ -744,6 +749,30 @@ export async function registerExchangeRoutes(fastify) {
         ratios: { fill_ratio, expire_ratio },
         series,
       });
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // ── GET /api/exchange/orphan-inflows — Bug W 5/15 (NWT 13:14 AT-05 真测 surface) Owner manual review ──
+  // List orphan TX (user 真链 send 不通过 menu, no quote match). Phase 1 detection only — Phase 2 auto-refund 24hr.
+  fastify.get('/api/exchange/orphan-inflows', async (request, reply) => {
+    try {
+      const status = request.query.status || 'detected';
+      const limit = Math.min(parseInt(request.query.limit || '100', 10), 500);
+      const rows = sqlite.prepare(`
+        SELECT id, chain, asset, amount, from_address, to_address, prepayment_tx,
+               detected_at, status, refund_tx, refunded_at
+        FROM broker_orphan_inflows
+        WHERE status = ?
+        ORDER BY detected_at DESC LIMIT ?
+      `).all(status, limit);
+      const totals = rows.reduce((acc, r) => {
+        const k = `${r.chain}_${r.asset}`;
+        acc[k] = (acc[k] || 0) + parseFloat(r.amount || 0);
+        return acc;
+      }, {});
+      return reply.send({ ok: true, status, count: rows.length, totals, rows });
     } catch (err) {
       return reply.code(500).send({ error: err.message });
     }
