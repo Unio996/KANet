@@ -3614,5 +3614,22 @@ export function runMigrations() {
     }
   }
 
+  // v113: Bug J 漏一片 backfill 5/15 (NWT 13:47 真测 surface) — normalize ISO format expires_at to SQLite.
+  // _doPublishAfterPrepay r.expires_at 来自 publishOffer ISO 返 (T+Z), UPDATE escrow row 时 mixed format.
+  // 字典序 ISO T(0x54)>space(0x20) → expires_at < datetime(now) NEVER matches → sweep 永不 fire.
+  // 历史 stuck active escrow (HP-09 1d448a18 + AT-02 720cc013 等) backfill normalize.
+  {
+    const rows = sqlite.prepare("SELECT id, expires_at FROM user_escrow_balances WHERE expires_at LIKE '%T%Z%' OR expires_at LIKE '%T%'").all();
+    let normalized = 0;
+    for (const r of rows) {
+      const ne = r.expires_at.replace('T', ' ').replace(/\.\d{3}Z?$/, '').replace(/Z$/, '');
+      sqlite.prepare("UPDATE user_escrow_balances SET expires_at = ? WHERE id = ?").run(ne, r.id);
+      normalized++;
+    }
+    if (normalized > 0) {
+      console.log(`[migrate] v113: ${normalized} escrow row expires_at ISO format → SQLite (Bug J 漏一片 backfill, NWT 13:47 sweep stuck 真测 surface).`);
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

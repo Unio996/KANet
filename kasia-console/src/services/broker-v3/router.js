@@ -401,12 +401,19 @@ export async function _doPublishAfterPrepay(escrowRowId, relayNodeId) {
 
   // backfill offer_id + update status active
   // Bug J fix 5/14: align SQLite datetime format for sweep comparison consistency
+  // Bug J 漏一片 fix 5/15 (NWT 13:47 真测 surface HP-09 sweep 永不 fire): r.expires_at from
+  // publishOffer API is ISO (T+Z), SQLite datetime('now') uses space format. 字典序 compare 错
+  // → sweep 永不 fire → user fund 永卡 broker custody. Normalize ISO → SQLite for UPDATE.
   if (r.offer_id) {
+    const rawExpires = r.expires_at || sqlite.prepare("SELECT datetime('now', '+30 minutes') as t").get().t;
+    const normalizedExpires = (typeof rawExpires === 'string' && (rawExpires.includes('T') || rawExpires.endsWith('Z')))
+      ? rawExpires.replace('T', ' ').replace(/\.\d{3}Z?$/, '').replace(/Z$/, '')
+      : rawExpires;
     sqlite.prepare(`
       UPDATE user_escrow_balances
       SET offer_id = ?, status = 'active', expires_at = ?, updated_at = datetime('now')
       WHERE id = ?
-    `).run(r.offer_id, r.expires_at || sqlite.prepare("SELECT datetime('now', '+30 minutes') as t").get().t, e.id);
+    `).run(r.offer_id, normalizedExpires, e.id);
     // Also record offer in user's MY_ORDERS reverse index (P1 fix)
     stateMachine.addUserOffer(e.user_kasia_addr, r.offer_id);
   }

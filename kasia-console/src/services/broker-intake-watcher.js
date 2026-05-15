@@ -1078,6 +1078,12 @@ export function startIntakeWatcher() {
         const r3 = await sweepExpiredEscrows();
         if (r3 && r3.refunded > 0) console.log(`[exchange-escrow-sweep] tick refunded=${r3.refunded}/${r3.scanned}`);
       } catch (e) { console.error('[exchange-escrow-sweep]', e.message); }
+      // Bug W Phase 2 5/15 (NWT 13:14 propose + Owner 13:48 钦定 全自动): orphan inflows 24hr auto-refund.
+      try {
+        const { sweepOrphanInflows } = await import('./exchange-machine.js');
+        const r4 = await sweepOrphanInflows();
+        if (r4 && r4.refunded > 0) console.log(`[exchange-orphan-sweep] tick refunded=${r4.refunded}/${r4.scanned}`);
+      } catch (e) { console.error('[exchange-orphan-sweep]', e.message); }
     }
   }, TICK_MS);
   if (!_refundInterval) {

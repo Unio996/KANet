@@ -512,6 +512,82 @@ export async function sweepExpiredEscrows() {
   return { ok: true, scanned: pendingExpired.length + activeExpired.length, refunded };
 }
 
+/**
+ * Bug W Phase 2 5/15 (NWT 13:14 propose + Owner 13:48 钦定 全自动 + Bug Z auto-recovery path).
+ * Sweep orphan inflows after 24hr: status='detected' AND detected_at < now - 24h → auto-refund.
+ * Kaspa orphan → broker sendKas to from_address via broker-action-queue.
+ * BSC orphan → broker transferUsdt to from_address via evm-transfer.
+ * NULL from_address → mark 'manual_review' (cleaner than corrupt refund).
+ */
+export async function sweepOrphanInflows() {
+  const ORPHAN_AGE_HOURS = 24;
+  const orphans = sqlite.prepare(`
+    SELECT id, chain, asset, amount, from_address, to_address, prepayment_tx
+    FROM broker_orphan_inflows
+    WHERE status = 'detected'
+      AND detected_at < datetime('now', '-${ORPHAN_AGE_HOURS} hours')
+    LIMIT 20
+  `).all();
+  if (!orphans.length) return { ok: true, scanned: 0, refunded: 0 };
+
+  let refunded = 0;
+  for (const o of orphans) {
+    // NULL from_address (kaspa_tx_log indexer T-NWT-07 残 case): mark manual_review, skip auto-refund.
+    if (!o.from_address) {
+      sqlite.prepare(`UPDATE broker_orphan_inflows SET status = 'manual_review' WHERE id = ?`).run(o.id);
+      console.warn(`[exchange-orphan-sweep] orphan ${o.id.slice(0,8)} NULL from_address → manual_review`);
+      continue;
+    }
+
+    try {
+      let refundTx = null;
+      if (o.chain === 'kaspa') {
+        // Kaspa orphan: enqueue sendKas via broker-action-queue (R4 single-pump pattern).
+        const { enqueue } = await import('./broker-action-queue.js');
+        enqueue({
+          kind: 'sendKas', peer: o.from_address,
+          payload: { amount_kas: o.amount, note: `orphan refund ${o.id.slice(0,8)} 24hr stale` },
+        });
+        refundTx = `queued:${o.id.slice(0,8)}`;
+        console.log(`[exchange-orphan-sweep] enqueued KAS ${o.amount} → ${o.from_address?.slice(-12)} for orphan ${o.id.slice(0,8)}`);
+      } else if (o.chain === 'bnb') {
+        // BSC orphan: transferUsdt direct via evm-transfer.
+        const transferUsdt = await getTransferUsdt();
+        const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+        const wallet = sqlite.prepare(
+          "SELECT privkey_encrypted FROM agent_wallets WHERE relay_node_id = ? AND chain = 'bnb' AND is_default = 1 LIMIT 1"
+        ).get(BROKER_RELAY_ID);
+        if (!wallet?.privkey_encrypted) {
+          console.warn(`[exchange-orphan-sweep] no broker bnb wallet for orphan ${o.id.slice(0,8)}`);
+          continue;
+        }
+        const r = await transferUsdt('bnb', wallet.privkey_encrypted, o.from_address, parseFloat(o.amount), o.asset);
+        if (!r.ok) {
+          console.error(`[exchange-orphan-sweep] transferUsdt fail orphan ${o.id.slice(0,8)}: ${r.error}`);
+          continue;
+        }
+        refundTx = r.txHash;
+        console.log(`[exchange-orphan-sweep] sent ${o.amount} ${o.asset} → ${o.from_address?.slice(-12)} TX=${refundTx?.slice(0,16)} for orphan ${o.id.slice(0,8)}`);
+      } else {
+        console.warn(`[exchange-orphan-sweep] unsupported chain ${o.chain} for orphan ${o.id.slice(0,8)}, mark manual_review`);
+        sqlite.prepare(`UPDATE broker_orphan_inflows SET status = 'manual_review' WHERE id = ?`).run(o.id);
+        continue;
+      }
+
+      sqlite.prepare(`
+        UPDATE broker_orphan_inflows
+        SET status = 'refunded', refund_tx = ?, refunded_at = datetime('now')
+        WHERE id = ?
+      `).run(refundTx, o.id);
+      refunded++;
+    } catch (err) {
+      console.error(`[exchange-orphan-sweep] err orphan ${o.id.slice(0,8)}: ${err.message}`);
+    }
+  }
+  console.log(`[exchange-orphan-sweep] done: scanned=${orphans.length} refunded=${refunded}`);
+  return { ok: true, scanned: orphans.length, refunded };
+}
+
 // ── Test Injection ───────────────────────────────────────────
 
 let _transferUsdtOverride = null;
