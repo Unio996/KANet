@@ -161,6 +161,15 @@
               <span class="text-[10px] text-ink-500" x-text="'(' + ((bettorWinrate.cumulative[bettorWinrate.cumulative.length-1].cum_hit_rate || 0) * 100).toFixed(0) + '%, $' + (bettorWinrate.cumulative[bettorWinrate.cumulative.length-1].cum_pnl || 0).toFixed(0) + ')'"></span>
             </template>
           </button>
+          <!-- Owner 5/15 严训 + Bettor r132 spec: browse all 173 recs across all scans -->
+          <button @click="bettorTab = 'history-recs'; loadBettorHistoryRecs()"
+                  :class="bettorTab === 'history-recs' ? 'border-b-2 border-brand-500 text-brand-700 font-medium' : 'text-ink-400 hover:text-ink-600'"
+                  class="px-4 py-2 text-sm flex items-center gap-1">
+            推荐历史
+            <template x-if="bettorHistoryRecs && bettorHistoryRecs.recommendations && bettorHistoryRecs.recommendations.length">
+              <span class="text-[10px] text-ink-500" x-text="'(' + bettorHistoryRecs.recommendations.length + ')'"></span>
+            </template>
+          </button>
         </div>
 
         <!-- Tab content: 调仓建议 (Phase 3e-1 止损队列) -->
@@ -423,6 +432,76 @@
                 </div>
 
                 <div class="text-[10px] text-ink-400 mt-2">数据源: bettor_outcome_log (v110 Module 1) · API: /api/bettor/hit-rate-timeline?days=30</div>
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <!-- Tab content: 推荐历史 (Owner 5/15 严训 + Bettor r132 spec — flat table all recs) -->
+        <template x-if="bettorTab === 'history-recs'">
+          <div>
+            <div class="flex items-center justify-between mb-3">
+              <div class="text-sm text-ink-500">
+                <template x-if="bettorHistoryRecs && bettorHistoryRecs.recommendations">
+                  <span x-text="'共 ' + bettorHistoryRecs.recommendations.length + ' 条推荐 (近 ' + (bettorHistoryRecs.days || 30) + ' 天)'"></span>
+                </template>
+                <template x-if="!bettorHistoryRecs">
+                  <span class="text-ink-300">加载中...</span>
+                </template>
+              </div>
+              <div class="flex gap-2 text-xs">
+                <button @click="bettorHistoryFilter = 'all'; "
+                        :class="bettorHistoryFilter === 'all' ? 'bg-brand-100 text-brand-700' : 'bg-ink-50 text-ink-500'"
+                        class="px-2 py-1 rounded">全部</button>
+                <button @click="bettorHistoryFilter = 'BUY_YES'"
+                        :class="bettorHistoryFilter === 'BUY_YES' ? 'bg-green-100 text-green-700' : 'bg-ink-50 text-ink-500'"
+                        class="px-2 py-1 rounded">BUY_YES</button>
+                <button @click="bettorHistoryFilter = 'BUY_NO'"
+                        :class="bettorHistoryFilter === 'BUY_NO' ? 'bg-red-100 text-red-700' : 'bg-ink-50 text-ink-500'"
+                        class="px-2 py-1 rounded">BUY_NO</button>
+                <button @click="bettorHistoryFilter = 'resolved'"
+                        :class="bettorHistoryFilter === 'resolved' ? 'bg-brand-100 text-brand-700' : 'bg-ink-50 text-ink-500'"
+                        class="px-2 py-1 rounded">已结算</button>
+              </div>
+            </div>
+            <template x-if="bettorHistoryRecs && bettorHistoryRecs.recommendations && bettorHistoryRecs.recommendations.length">
+              <div class="overflow-x-auto">
+                <table class="w-full text-xs">
+                  <thead class="bg-ink-50 text-ink-500">
+                    <tr>
+                      <th class="px-2 py-1 text-left">扫描时间</th>
+                      <th class="px-2 py-1 text-left">问题</th>
+                      <th class="px-2 py-1">决策</th>
+                      <th class="px-2 py-1">yes 价</th>
+                      <th class="px-2 py-1">fund</th>
+                      <th class="px-2 py-1">size</th>
+                      <th class="px-2 py-1">状态</th>
+                      <th class="px-2 py-1">结果</th>
+                      <th class="px-2 py-1">P&L</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <template x-for="r in bettorHistoryRecs.recommendations.filter(x => bettorHistoryFilter === 'all' || (bettorHistoryFilter === 'resolved' ? x.outcome !== null : x.decision === bettorHistoryFilter))" :key="r.id">
+                      <tr class="border-b border-ink-100 hover:bg-ink-50">
+                        <td class="px-2 py-1 text-ink-500 whitespace-nowrap" x-text="(r.scanned_at || '').slice(5,16).replace('T',' ')"></td>
+                        <td class="px-2 py-1 text-ink-700 truncate max-w-xs" :title="r.question" x-text="r.question"></td>
+                        <td class="px-2 py-1 text-center" :class="r.decision === 'BUY_YES' ? 'text-green-600' : r.decision === 'BUY_NO' ? 'text-red-600' : 'text-ink-400'" x-text="r.decision"></td>
+                        <td class="px-2 py-1 text-center text-ink-600" x-text="r.yes_price != null ? (r.yes_price * 100).toFixed(1) + '%' : '-'"></td>
+                        <td class="px-2 py-1 text-center text-ink-500" :title="r.fund_source || ''" x-text="r.fund_estimate != null ? (r.fund_estimate * 100).toFixed(0) + '%' : '-'"></td>
+                        <td class="px-2 py-1 text-center text-ink-600" x-text="r.size_usd != null ? '$' + r.size_usd.toFixed(0) : '-'"></td>
+                        <td class="px-2 py-1 text-center" :class="r.status === 'open' ? 'text-brand-600' : r.status === 'resolved' ? 'text-ink-500' : 'text-ink-400'" x-text="r.status"></td>
+                        <td class="px-2 py-1 text-center" :class="r.was_correct === 1 ? 'text-green-600' : r.was_correct === 0 ? 'text-red-600' : 'text-ink-300'" x-text="r.was_correct === 1 ? '✓' : r.was_correct === 0 ? '✗' : (r.outcome === null ? 'pending' : '-')"></td>
+                        <td class="px-2 py-1 text-center" :class="r.actual_pnl_usd > 0 ? 'text-green-600' : r.actual_pnl_usd < 0 ? 'text-red-600' : 'text-ink-400'" x-text="r.actual_pnl_usd != null ? (r.actual_pnl_usd > 0 ? '+$' : '-$') + Math.abs(r.actual_pnl_usd).toFixed(2) : '-'"></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+            </template>
+            <template x-if="bettorHistoryRecs && bettorHistoryRecs.recommendations && !bettorHistoryRecs.recommendations.length">
+              <div class="card text-center text-ink-400 py-8">
+                <div class="text-sm">暂无推荐历史</div>
+                <div class="text-xs mt-2">扫描启动后 recs 自动 populate</div>
               </div>
             </template>
           </div>
@@ -1160,6 +1239,8 @@ function predictionsPage() {
     bettorResolving: false,
     bettorHistory: null,
     bettorWinrate: null,  // Module 4b — 胜率轨迹 timeline data {days, daily, cumulative}
+    bettorHistoryRecs: null,  // Owner 5/15 + Bettor r132 — 推荐历史 raw rec table
+    bettorHistoryFilter: 'all',
     bettorAdjustments: null,
     bettorEvaluating: false,
     closingAll: false,
@@ -1395,6 +1476,22 @@ function predictionsPage() {
       } catch (e) {
         console.warn('[bettor] winrate load failed:', e.message);
         this.bettorWinrate = { ok: false, days: 30, daily: [], cumulative: [] };
+      }
+    },
+
+    async loadBettorHistoryRecs() {
+      // Owner 5/15 严训 "推荐 history 没保存" + Bettor r132: data IS saved (173 rows on
+      // Bettor host, similar J1), Owner saw 战绩 tab showing 0 outcome_log rows (legitimate
+      // 24-48h oracle delay) and assumed not saved. UI tab to browse raw rec table fills gap.
+      try {
+        const days = 30;
+        const limit = 500;
+        const url = '/api/bettor/recommendations/history?days=' + days + '&limit=' + limit + (this.selectedAgent ? '&relay_node_id=' + this.selectedAgent : '');
+        const r = await fetch(url);
+        this.bettorHistoryRecs = await r.json();
+      } catch (e) {
+        console.warn('[bettor] history recs load failed:', e.message);
+        this.bettorHistoryRecs = { ok: false, days: 30, count: 0, recommendations: [] };
       }
     },
 
