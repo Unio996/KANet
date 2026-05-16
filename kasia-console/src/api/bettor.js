@@ -447,6 +447,14 @@ export async function registerBettorRoutes(fastify) {
     return reply.send({ ok: true, count: rows.length, audit: rows });
   });
 
+  // GET /api/bettor/reactor/last-tick — Phase 2.1c Bettor r152 §2: reactor stale warning data source.
+  // Returns last reactor tick timestamp from bettor_adjustments (latest created_at) — if > 2h, UI shows
+  // amber warning "reactor stale, 调仓建议 not updating". reactor 真因 fix is separate r153 backlog.
+  fastify.get('/api/bettor/reactor/last-tick', async (request, reply) => {
+    const row = sqlite.prepare(`SELECT created_at FROM bettor_adjustments ORDER BY created_at DESC LIMIT 1`).get();
+    return reply.send({ ok: true, last_tick: row?.created_at || null });
+  });
+
   // GET /api/bettor/variant-recommendations?parent_rec_id=X[&relay_node_id=Y]
   // Phase B Variant Expander (Owner 5/16 钦定 "B" + Bettor r141 spec) — list 3 档变种 per parent rec.
   // Phase 2 r146 §3.1: lazy refresh stale (>30s) prices via batch fetch + degrade on fail.
