@@ -765,14 +765,17 @@
                   <span x-text="r.llm_tier === 'scavenger' ? ('p(NO)=' + (r.p_mid * 100).toFixed(1) + '% tail=' + (r.sigma * 100).toFixed(1) + '%') : (r.llm_tier === 'scavenger+enricher' ? ('p(NO)=' + (r.p_mid * 100).toFixed(1) + '% tail=' + (r.sigma * 100).toFixed(1) + '%') : ('pMid=' + (r.p_mid * 100).toFixed(1) + '% σ=' + (r.sigma * 100).toFixed(1) + '% gap=' + (r.info_gap_months || 0).toFixed(1) + 'mo'))"></span>
                   <span x-show="r.end_date" x-text="'到期 ' + new Date(r.end_date).toLocaleDateString()"></span>
                 </div>
-                <!-- Phase B Sub B4.1: fundamental enricher display for middle-range catches (llm_tier='scavenger+enricher') -->
-                <template x-if="r.llm_tier === 'scavenger+enricher' && r.fundamental_estimate != null">
-                  <div class="mt-2 px-2 py-1 rounded bg-amber-50 border border-amber-200 text-[10px]">
+                <!-- Phase B Sub B4.1 + Phase B5.1 r159 (c)(d): fundamental enricher display + warning banner + raw reasoning -->
+                <template x-if="(r.llm_tier === 'scavenger+enricher' || r.reasoning?.enriched_type === 'fundamental_b5') && r.fundamental_estimate != null">
+                  <div class="mt-2 px-2 py-1 rounded border text-[10px]" :class="r.reasoning?.fundamental_warning ? 'bg-red-50 border-red-300' : 'bg-amber-50 border-amber-200'">
                     <div class="flex items-center justify-between">
-                      <span class="font-semibold text-amber-700">📊 Fundamental enricher</span>
-                      <span class="text-amber-600">conf <span x-text="(r.fundamental_confidence * 100).toFixed(0) + '%'"></span></span>
+                      <span class="font-semibold" :class="r.reasoning?.fundamental_warning ? 'text-red-700' : 'text-amber-700'">
+                        📊 Fundamental enricher
+                        <span x-show="r.reasoning?.fundamental_warning" class="text-red-600 font-bold ml-1" x-text="r.reasoning?.fundamental_warning === 'suspicious_high_confidence_gap' ? '⚠ 可能 LLM 错位 (gap > 30pp + conf > 70%)' : ''"></span>
+                      </span>
+                      <span :class="r.reasoning?.fundamental_warning ? 'text-red-600' : 'text-amber-600'">conf <span x-text="(r.fundamental_confidence * 100).toFixed(0) + '%'"></span></span>
                     </div>
-                    <div class="text-amber-700 mt-0.5">
+                    <div class="mt-0.5" :class="r.reasoning?.fundamental_warning ? 'text-red-700' : 'text-amber-700'">
                       market <span x-text="(r.yes_price * 100).toFixed(1) + '%'"></span> vs fund
                       <span class="font-bold" x-text="(r.fundamental_estimate * 100).toFixed(1) + '%'"></span>
                       · gap
@@ -782,6 +785,13 @@
                       <div class="text-amber-500 mt-0.5 truncate" :title="JSON.parse(r.fundamental_sources || '[]').join('\n')">
                         sources: <span x-text="JSON.parse(r.fundamental_sources || '[]').length + ' refs'"></span>
                       </div>
+                    </template>
+                    <!-- Phase B5.1 r159 (d) — LLM reasoning 全文 force-open on warning, collapsed default -->
+                    <template x-if="r.reasoning?.fundamental_raw_reasoning">
+                      <details :open="!!r.reasoning?.fundamental_warning" class="mt-1">
+                        <summary class="text-[10px] text-ink-500 cursor-pointer hover:text-ink-700">▶ LLM reasoning 全文 (展开查 LLM 是否错位)</summary>
+                        <div class="mt-1 p-1 bg-white rounded text-[10px] text-ink-600 font-mono whitespace-pre-wrap" x-text="r.reasoning?.fundamental_raw_reasoning"></div>
+                      </details>
                     </template>
                   </div>
                 </template>

@@ -389,6 +389,9 @@ function persistCandidates(candidates, relayNodeId, triggerType, openPositions) 
         fund_gap: c.fund_gap ?? null,
         fundamental_reasoning: c.fundamental_reasoning || null,
         fund_source: c.fund_source || null,  // 思路 H J1 #205 transparency — corpus_and / corpus_or / enricher
+        // Phase B5.1 r159 (c)(d) — sanity warning + raw LLM reasoning (schema option β: stuffed in reasoning_json, no migration)
+        fundamental_warning: c.fundamental_warning || null,
+        fundamental_raw_reasoning: c.fundamental_raw_reasoning || null,
       };
 
       stmt.run(
@@ -575,6 +578,8 @@ export async function runScavengerScan(triggerType = 'cron', relayNodeId = null)
             cand.fundamental_sources = result.sources;
             cand.fundamental_confidence = result.confidence;
             cand.fundamental_reasoning = result.reasoning;
+            cand.fundamental_warning = result.fundamental_warning || null;  // Phase B5.1 r159 (c)
+            cand.fundamental_raw_reasoning = result.raw_reasoning || null;   // Phase B5.1 r159 (d) — Owner self-check
             cand.enriched_type = 'fundamental_b5';
             enrichedCount++;
           }
