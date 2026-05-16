@@ -1328,10 +1328,35 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
   try {
     let vr;
 
-    // Kaspa same-chain TX: submitTransaction accepted = TX is real. Trust txId directly.
+    // Bug BC 5/16 P0 fix (Owner 9:11 adversarial discussion + J2 #418 #15 surface):
+    // 之前 trust-by-default 'submitTransaction = verified' 完全 bypass on-chain verify, 合成 fake vr
+    // (confirmed=true, amount=expectedAmount echo, recipient=expectedTo echo) — 恶意 taker manual
+    // /api/exchange/submit-payment 提交 fake hash, broker 信 → 转 USDT 净空手套白狼.
+    // 真 verify: 查 kaspa_tx_log (T-NWT-07 indexer 已 populate from block-added) 真 TX 存在 +
+    // to=expectedTo + amount>=expectedAmount. tolerance ±0.5% 跟 Bug AW 一致.
     if (payment_chain === 'kaspa') {
-      console.log(`[exchange] kaspa_tx: trusting txId ${payment_tx.slice(0,16)} (submitTransaction = verified)`);
-      vr = { confirmed: true, confirmations: 1, required: 1, actualAmount: expectedAmount, recipient: expectedTo || '', sender: '' };
+      const txRow = sqlite.prepare(`
+        SELECT tx_id, to_address, CAST(amount AS REAL) AS amount, observed_at
+        FROM kaspa_tx_log WHERE tx_id = ?
+      `).get(payment_tx);
+      if (!txRow) {
+        console.error(`[exchange] kaspa_tx VERIFY FAIL — payment_tx ${payment_tx.slice(0,16)} 不在 kaspa_tx_log (indexer 未 detect, 可能 fake hash OR indexer lag)`);
+        vr = { confirmed: false, confirmations: 0, required: 1, error: 'kaspa_tx_not_indexed' };
+      } else if (expectedTo && txRow.to_address !== expectedTo) {
+        console.error(`[exchange] kaspa_tx VERIFY FAIL — recipient mismatch: tx.to=${txRow.to_address?.slice(-12)} expected=${expectedTo?.slice(-12)}`);
+        vr = { confirmed: false, confirmations: 1, required: 1, error: 'recipient_mismatch', actualRecipient: txRow.to_address, expectedRecipient: expectedTo };
+      } else {
+        const tolerancePct = 0.005;
+        const actualAmount = parseFloat(txRow.amount) || 0;
+        const diff = Math.abs(actualAmount - expectedAmount);
+        if (expectedAmount > 0 && diff / expectedAmount > tolerancePct) {
+          console.error(`[exchange] kaspa_tx VERIFY FAIL — amount mismatch: tx.amount=${actualAmount} expected=${expectedAmount} (tolerance ${tolerancePct*100}%)`);
+          vr = { confirmed: false, confirmations: 1, required: 1, error: 'amount_mismatch', actualAmount, expectedAmount };
+        } else {
+          console.log(`[exchange] kaspa_tx VERIFY PASS — tx ${payment_tx.slice(0,16)} to=${txRow.to_address?.slice(-12)} amount=${actualAmount} (expected ${expectedAmount})`);
+          vr = { confirmed: true, confirmations: 1, required: 1, actualAmount, recipient: txRow.to_address, sender: '' };
+        }
+      }
     } else {
       const { verifyCrossChainTx } = await import('./cross-chain-verify.mjs');
       vr = await verifyCrossChainTx({
