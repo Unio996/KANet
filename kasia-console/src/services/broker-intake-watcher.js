@@ -652,6 +652,20 @@ export async function intakeKaspaEscrowTick() {
       continue;
     }
 
+    // 方向 A 5/16 (Owner 04:53 严训 "跨链到账 DM 反馈"): dead-code dm_auto_payment_detected wire-up.
+    // broker kaspa-watcher detect inflow + UPDATE active → DM user IMMEDIATELY (before publish) so
+    // user sees prepay confirmation. Publish failure 走 Bug AI retry path (separate concern).
+    try {
+      const { enqueue } = await import('./broker-action-queue.js');
+      enqueue({
+        kind: 'dm_auto_payment_detected',
+        peer: e.user_kasia_addr,
+        payload: {
+          message: `✓ 已收到你的 ${tx.amount} ${e.asset} (Kaspa)\nTX: ${tx.tx_id}\n链上可查: https://explorer.kaspa.org/txs/${tx.tx_id}\n下一步: 正在替你挂单, 等成交.`
+        },
+      });
+    } catch (err) { console.warn(`[broker-kaspa-intake-escrow] DM payment detected err for escrow ${e.id.slice(0,8)}: ${err.message}`); }
+
     // call _doPublishAfterPrepay (Sub #5.残)
     try {
       const { _doPublishAfterPrepay } = await import('./broker-v3/router.js');

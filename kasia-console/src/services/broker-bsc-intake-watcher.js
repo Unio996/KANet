@@ -198,6 +198,20 @@ export async function tickEscrow() {
         console.error(`[broker-bsc-intake-escrow] UPDATE err for escrow ${e.id.slice(0,8)}: ${err.message}`);
         continue;
       }
+      // 方向 A 5/16 (Owner 04:53 严训 "跨链到账 DM 反馈"): dead-code dm_auto_payment_detected handler
+      // 已 exist in broker-action-queue.js L296, but 0 callers — broker watcher detect inflow then
+      // silent → user UX dark. Fire DM immediately post UPDATE active so user sees prepay confirmation
+      // before publish (publish failure handled separately via Bug AI retry path).
+      try {
+        const { enqueue } = await import('./broker-action-queue.js');
+        enqueue({
+          kind: 'dm_auto_payment_detected',
+          peer: e.user_kasia_addr,
+          payload: {
+            message: `✓ 已收到你的 ${tx.amount} ${e.asset} (BSC)\nTX: ${tx.tx_hash}\n链上可查: https://bscscan.com/tx/${tx.tx_hash}\n下一步: 正在替你挂单, 等成交.`
+          },
+        });
+      } catch (err) { console.warn(`[broker-bsc-intake-escrow] DM payment detected err for escrow ${e.id.slice(0,8)}: ${err.message}`); }
     }
     // else: e.status === 'active' AND offer_id IS NULL — Bug L retry path (Bug K race: prepay UPDATE
     // succeeded but publish failed). Skip TX match step, go straight to publish.
