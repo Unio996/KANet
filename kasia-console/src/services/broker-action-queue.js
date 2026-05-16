@@ -60,7 +60,7 @@ function _ownEvmAddrSet() {
 function assertAddressInvariant(item) {
   if (!DM_USER_KINDS.has(item.kind)) return null;
   const message = item.payload?.message || '';
-  const evmMatches = message.match(/0x[a-fA-F0-9]{40}/g) || [];
+  const evmMatches = message.match(/0x[a-fA-F0-9]{40}(?![a-fA-F0-9])/g) || [];
   if (evmMatches.length === 0) return null;
   const own = _ownEvmAddrSet();
   for (const addr of evmMatches) {
@@ -83,13 +83,13 @@ function assertAddressInvariant(item) {
 // R19 真 only protect broker hallucinate fake addr (真 user 真转 broker 真 hallucinate 真 lost).
 export function assertReplyAddressInvariant(replyText, userContext = '') {
   if (!replyText || typeof replyText !== 'string') return null;
-  const evmMatches = replyText.match(/0x[a-fA-F0-9]{40}/g) || [];
+  const evmMatches = replyText.match(/0x[a-fA-F0-9]{40}(?![a-fA-F0-9])/g) || [];
   if (evmMatches.length === 0) return null;
   const own = _ownEvmAddrSet();
   // 真 whitelist user-supplied addr from message context (SELL flow user 真给 EVM addr 真 echo OK)
   const userAddrs = new Set();
   if (typeof userContext === 'string' && userContext) {
-    const userEvm = userContext.match(/0x[a-fA-F0-9]{40}/g) || [];
+    const userEvm = userContext.match(/0x[a-fA-F0-9]{40}(?![a-fA-F0-9])/g) || [];
     for (const a of userEvm) userAddrs.add(a.toLowerCase());
   }
   for (const addr of evmMatches) {
