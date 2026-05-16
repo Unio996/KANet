@@ -1656,15 +1656,13 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
               `).run(crypto.randomUUID(), deliveringOffer.maker, deliveringOffer.taker, deliveryTxId,
                 JSON.stringify({ offer_id: deliveringOffer.id, amount: deliveringOffer.give_amount, broadcast_tx: deliveredBcastTxId }));
               try { const { spendFunds } = await import('./fund-lock.js'); spendFunds(deliveringOffer.id); } catch {}
-              sqlite.prepare(`
-                INSERT INTO chain_events (id, event_type, from_address, to_address, txid, payload, observed_by, observed_at)
-                VALUES (?, 'exchange_completed', ?, ?, ?, ?, 'system', datetime('now'))
-              `).run(crypto.randomUUID(), deliveringOffer.maker, deliveringOffer.taker, deliveryTxId, JSON.stringify({
-                offer_id: deliveringOffer.id, give_asset: deliveringOffer.give_asset, give_amount: deliveringOffer.give_amount,
-                want_asset: deliveringOffer.want_asset, want_amount: deliveringOffer.want_amount, taker_chain: deliveringOffer.taker_chain,
-                delivery_tx: deliveryTxId, broadcast_tx: deliveredBcastTxId,
-                price: parseFloat(deliveringOffer.want_amount) / parseFloat(deliveringOffer.give_amount) || 0,
-              }));
+              // Bug AZ Part 2 5/16 fix (KI 复刻 第 N+11 次 + Owner 9:11 SELL smoke surface):
+              // 跟 BUY-kaspa-shortcircuit Bug AZ 同款 duplicate INSERT, SELL path 也漏修.
+              // transition(offer_id, 'completed', { txHash: deliveryTxId }) L1621 已 recordChainEvent
+              // exchange_completed 同 txid+event_type, 此 explicit INSERT duplicate → UNIQUE throw →
+              // _verifyAndComplete 抛 → L1737 _settleEscrowToUser skipped → escrow 卡 active 用户 0 收 USDT.
+              // 真测 evidence: offer 273506fc SELL smoke 'UNIQUE constraint failed chain_events.txid+event_type' →
+              // KAS deliver 到 J2 taker 成功, 但 NWT 真 0 收 USDT settle.
               console.log(`[exchange] offer ${offer_id.slice(0,8)} delivering → completed (delivery TX: ${deliveryTxId.slice(0,12)}, broadcast: ${deliveredBcastTxId.slice(0,12)})`);
               // T-J2-V2 议 2 (Owner 真测 #2 退场后 NWT 转 Owner #2 痛点 '订单全生命周期 broker 主动 DM'):
               // KAS 发出 + broadcast 成功 → 主动 DM user 通知 'KAS 已发'. 不让 user 查 explorer.
