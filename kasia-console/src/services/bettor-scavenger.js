@@ -581,6 +581,21 @@ let _cronTimer = null;
 
 export function startScavengerCron() {
   if (_cronTimer) return;
+  // Phase 2.2 r154-r155 startup catch-up (R-CRON-NO-STARTUP-CATCHUP sediment):
+  // setInterval-based cron 不查 last run, Console restart 重置 6h 倒计时 → cron 永不 fire if restarts <6h.
+  // Today 9 restart 累 23h 没 scan = Owner 5/16 严训 "12h 没新单子" 真因. Fix: query MAX(scanned_at),
+  // if > CRON_INTERVAL_MS ago → fire immediate catch-up (trigger_type='cron_startup_catchup' analytics).
+  try {
+    const last = sqlite.prepare(`SELECT MAX(scanned_at) AS t FROM bettor_recommendations WHERE trigger_type = 'cron' OR trigger_type = 'cron_startup_catchup'`).get();
+    const lastMs = last?.t ? new Date(last.t).getTime() : 0;
+    const ageMs = Date.now() - lastMs;
+    if (ageMs > CRON_INTERVAL_MS) {
+      console.log(`[scavenger] startup catchup: last scan ${(ageMs / 3600000).toFixed(1)}h ago, fire immediate`);
+      runScavengerScan('cron_startup_catchup').catch(err => console.log(`[scavenger] catchup err: ${err.message}`));
+    }
+  } catch (e) {
+    console.log(`[scavenger] startup catchup query err: ${e.message}`);
+  }
   _cronTimer = setInterval(() => {
     runScavengerScan('cron').catch(err => console.log(`[scavenger] cron err: ${err.message}`));
   }, CRON_INTERVAL_MS);

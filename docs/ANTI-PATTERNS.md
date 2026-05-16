@@ -1886,6 +1886,48 @@ const aggressive = pickBest(scored, x => x.payout, { hit: 0.25, depth: 200, ev: 
 
 ---
 
+## R-CRON-NO-STARTUP-CATCHUP — setInterval-based cron 必加 startup catch-up 查 last run
+
+**Owner 2026-05-16 严训 "12h 没新单子" + Bettor r154-r155 sediment.**
+
+**Bad**:
+```js
+const CRON_INTERVAL_MS = 6 * 60 * 60 * 1000;  // 6h
+let _cronTimer = null;
+
+export function startScavengerCron() {
+  if (_cronTimer) return;
+  _cronTimer = setInterval(() => {
+    runScavengerScan('cron').catch(...);
+  }, CRON_INTERVAL_MS);
+}
+```
+
+**Why it breaks**: `setInterval(fn, 6h)` doesn't fire immediately — first tick at T=6h. Console restart resets the timer. If restart happens every <6h (dev iteration / cherry-pick deploy / hotfix), cron **永不 fire**. Today 2026-05-16: 9 Console restart 累 23h 没 scan → Owner 严训 "12h 没新单子" 真因.
+
+**Good**:
+```js
+export function startScavengerCron() {
+  if (_cronTimer) return;
+  // Startup catch-up: query last run from DB, if > interval ago fire immediate
+  try {
+    const last = sqlite.prepare(`SELECT MAX(scanned_at) AS t FROM bettor_recommendations WHERE trigger_type = 'cron' OR trigger_type = 'cron_startup_catchup'`).get();
+    const ageMs = Date.now() - (last?.t ? new Date(last.t).getTime() : 0);
+    if (ageMs > CRON_INTERVAL_MS) {
+      console.log(`[scavenger] startup catchup: ${(ageMs / 3600000).toFixed(1)}h ago, fire immediate`);
+      runScavengerScan('cron_startup_catchup').catch(...);
+    }
+  } catch (e) { /* silent — don't block cron startup */ }
+  _cronTimer = setInterval(() => runScavengerScan('cron').catch(...), CRON_INTERVAL_MS);
+}
+```
+
+**Rule of thumb**: any setInterval-based cron with interval > 1 min in a frequently-restarted process **must** query last run timestamp on startup. trigger_type `'cron_startup_catchup'` distinct from regular `'cron'` for analytics. Silent error swallow on query fail (don't block cron startup).
+
+**Exception**: cron 没 reliable last-run data source (e.g. reactor HOLD doesn't write adj row → MAX(created_at) gives false signal). 那种情况 first add heartbeat/run-log table, then add catch-up. Don't use noisy proxy.
+
+---
+
 ## R-AUTO-TAKE-PROFIT-WASTEFUL — 自动止盈 trigger 在 fixed price/% target 是浪费
 
 **Owner 2026-05-16 钦定 "止盈浪费太大 把止盈线给去掉" + Bettor r148 spec.**
