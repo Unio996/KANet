@@ -58,11 +58,18 @@ export async function handleMessage(peer, msg, opts = {}) {
   // Phase A.2 (J2 #336 per NWT spec ffcd4778, Owner 5/13 钦定纯菜单, LLM 残留全删):
   // broker-v2 archive ✓, fall-through 到 v2 LLM path 全删. broker-v3 不识别 → return null,
   // conversations.js dispatch canned reply 提醒 user 用菜单 (NWT spec 替代 LLM fallback).
-  // 自然语言 (非数字非 0x) + v3 不在 flow → return null fall canned.
+  //
+  // Bug AV P1 fix 5/16 (NWT 07:38 deep audit surface): user 已 in dedicated flow step
+  // (QTY_INPUT / PRICE_INPUT / PRICE_VALUE_INPUT / CONFIRM / WAIT_PREPAY / ADDR_INPUT / CHAIN_SELECT)
+  // 任何 input 应 pass through 让 state-machine 自己 reject + re-prompt (step 内 "❓ 请输 X 或 Y" 字面).
+  // 之前 _isLanguageA gate 早 reject 非数字/负数 → 推回 menu top (Owner "读不懂退还" 意图 broken — should
+  // step 内退还 NOT reset menu). 仅 menu top (无 flow state) 才走 _isLanguageA whitelist gate.
   const trimmed = (msg || '').trim();
-  if (!_isLanguageA(trimmed)) {
-    return null;  // 自然语言 → canned reply (no LLM fallback)
+  const curState = stateMachine.getFlowState(peer);
+  if (!curState && !_isLanguageA(trimmed)) {
+    return null;  // menu top + 自然语言 → canned reply (no LLM fallback)
   }
+  // if curState exists (user in flow) → pass through, state-machine handles strict reject + re-prompt
 
   const result = await stateMachine.processInput(peer, trimmed, relayNodeId);
   if (!result) return null;
