@@ -1886,6 +1886,70 @@ const aggressive = pickBest(scored, x => x.payout, { hit: 0.25, depth: 200, ev: 
 
 ---
 
+## R-LLM-CROSS-STAGE-CONTEXT-CONFUSION — LLM 错位 league standings vs knockout bracket (etc) → stage-specific prompt context
+
+**Owner 2026-05-16 实测 PSG enricher "南辕北辙" 真因 + Bettor r159-r160 sediment.**
+
+**Bad**:
+```js
+const prompt = `分析 Polymarket 单子: ${rec.question}
+当前 YES 价: ${(hit * 100).toFixed(1)}%
+Wikipedia 摘要: ${wikiSummary}
+...
+请输出 estimate / verdict / confidence`;
+```
+
+**Why it breaks**: LLM 看到 "Will PSG win Champions League?" Wikipedia 文章可能含 Ligue 1 standings → 误把 "PSG ranked #2 in Ligue 1" 当 "PSG win CL probability".
+- CL knockout 阶段 → league standings 无关
+- LLM "one match remaining → unlikely" 反直觉 (one match = final, finalist 50/50 not 17%)
+- High confidence (0.90) + 大 gap (40pp) = 错位前提下的自洽 logic — **比 low confidence 更危险**
+
+**Good**: explicit stage context prefix per question type
+```js
+function inferStageContext(question) {
+  if (q.includes('champions league') && q.includes('win the')) {
+    return `这是 CL FINAL (knockout phase, 已过 group + R16 + QF + SF). NOT league standings.`;
+  }
+  if (q.includes('eurovision') && q.includes('win')) {
+    return `Eurovision finale. 计票 jury(50%) + televote(50%). 看出场顺序 + 邻位 + 制作组.`;
+  }
+  // 7 stage default (CL / Eurovision / NBA MVP / EPL / election / NFL-MLB-NHL-playoff / crypto-price-target)
+  // default: '不要把 league standings 当 knockout 概率, 不要把单一民调当全局.'
+}
+const prompt = `... ⚠ 重要上下文:\n${inferStageContext(rec.question)}\n...`;
+```
+
+**Rule of thumb**: any LLM caller doing structured market analysis must add stage-specific context (sport: knockout vs league regular season; election: primary vs general vs electoral college; crypto: price-by-date vs ATH/ATL). Default fallback should explicitly warn LLM about cross-stage confusion. Sanity check (R-LLM-SANITY-THRESHOLDS-MAGIC) catches errors that slip through.
+
+---
+
+## R-LLM-SANITY-THRESHOLDS-MAGIC — LLM 输出 sanity warning thresholds (gap/confidence) 是 magic # V1, Phase 3 backtest retune
+
+**Bettor r159-r160 §3 sediment (Phase B Sub B5.1).**
+
+**Bad**: hardcode thresholds without backtest data:
+```js
+if (gap > 0.30 && confidence > 0.70) {
+  warning = 'suspicious';  // 30pp + 70% — magic numbers no empirical basis
+}
+```
+
+**Why it's V1-acceptable but technical debt**:
+- V1 ship 需 defaults to get UI warning live (PSG-class errors block real money)
+- 30pp + 70% based on Owner intuition + 1 case (PSG) only
+- Real distribution unknown until ≥30 LLM-enriched outcomes 累
+
+**Good (V1)**: ship with sediment, plan Phase 3 backtest retune:
+```js
+// V1 defaults — Phase 3 retune via KI-PHASE-3-VARIANT-RETUNE same trigger (outcome_log ≥ 30 + Owner explicit)
+const GAP_WARN_THRESHOLD = 0.30;
+const CONF_WARN_THRESHOLD = 0.70;
+```
+
+**Rule of thumb**: any LLM downstream consumption with sanity-check thresholds → ship V1 defaults BUT register backtest retune in sediment. Don't pretend the magic # is principled — explicit "V1 default, retune trigger = outcome ≥ 30" comment + sediment entry.
+
+---
+
 ## R-LLM-PROMPT-RESPONSE-FORMAT-JSON — LLM 结构化输出优先 structured JSON, regex 兜底
 
 **Bettor r157 §1 (d) sediment (Phase B Sub B5 enricher).**
