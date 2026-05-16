@@ -1611,22 +1611,19 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
           }
         }
 
-        // Bug H γ Sub #6 (Owner 12:05 钦定 candidate A v2): forward target asset to USER for escrow-backed offer.
-        // 标识 escrow offer: metadata.source='broker-v3-escrow' + verification_meta.escrow_id 存.
-        // 现 path: taker pays broker (via existing flow above), broker collects taker payment.
-        // 新增: broker 真链 transfer escrow target asset (KAS for BUY, USDT for SELL) → user_target_addr.
-        // 不动 existing flow (taker delivery), 加 setImmediate post-completed.
+        // Bug H γ Sub #6 + Bug AQ 5/16 fix (HP-04 SELL real test surface setImmediate hook unreliable
+        // same as BUY-kaspa-shortcircuit pattern Bug AM). Replace setImmediate with explicit await:
         try {
           const meta = JSON.parse(finalOffer.verification_meta || '{}');
           const isEscrow = (finalOffer.metadata || '').includes('broker-v3-escrow') || meta.escrow_id;
           if (isEscrow && meta.escrow_id && meta.escrow_user_target) {
-            setImmediate(() => {
-              _settleEscrowToUser(meta.escrow_id, finalOffer.id).catch(err =>
-                console.error(`[exchange-escrow-settle] err for offer ${finalOffer.id.slice(0,8)}: ${err.message}`)
-              );
-            });
+            try {
+              await _settleEscrowToUser(meta.escrow_id, finalOffer.id);
+            } catch (err) {
+              console.error(`[exchange-escrow-settle] SELL path err for offer ${finalOffer.id.slice(0,8)}: ${err.message}`);
+            }
           }
-        } catch (e) { console.warn(`[exchange-escrow-settle] check err: ${e.message}`); }
+        } catch (e) { console.warn(`[exchange-escrow-settle] SELL path check err: ${e.message}`); }
       }
 
     } else if (attempt < MAX_ATTEMPTS) {
