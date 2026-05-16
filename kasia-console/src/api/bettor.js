@@ -418,6 +418,42 @@ export async function registerBettorRoutes(fastify) {
     return reply.send({ ok: true, count: rows.length, audit: rows });
   });
 
+  // POST /api/bettor/position-protect/rules/:id/ack — Owner UI ACK rule (status pending_owner_ack → active)
+  // 派 HMAC token containing max_price + max_size bounds (Phase 3 daemon firing will verify token in
+  // /api/predictions/order header X-Owner-Ack). Token signed with CONSOLE_ENCRYPTION_KEY-derived secret.
+  // Per Bettor r139 §4 spec: "daemon 不需 Owner 当场 ack — 规则 ack 时已派生 token 覆盖未来 action".
+  fastify.post('/api/bettor/position-protect/rules/:id/ack', async (request, reply) => {
+    const { id } = request.params;
+    const { max_price_override, max_size_override } = request.body || {};
+    const rule = sqlite.prepare(`SELECT * FROM position_protect_rules WHERE id = ?`).get(id);
+    if (!rule) return reply.code(404).send({ error: 'rule not found' });
+    if (rule.status !== 'pending_owner_ack') {
+      return reply.code(400).send({ error: `rule status is '${rule.status}', not 'pending_owner_ack'` });
+    }
+    // Derive HMAC token: payload = {rule_id, relay_node_id, token_id, max_price, max_size, issued_at}.
+    // Phase 3 daemon includes token in fire request; /api/predictions/order verifies HMAC + bounds.
+    const crypto = await import('node:crypto');
+    const secret = process.env.CONSOLE_ENCRYPTION_KEY || 'fallback-no-env-warn';
+    const tokenPayload = {
+      rule_id: rule.id,
+      relay_node_id: rule.relay_node_id,
+      token_id: rule.token_id,
+      max_price: max_price_override ?? Math.min(0.999, rule.entry_avg_price * 1.5),  // max 150% entry as cap
+      max_size: max_size_override ?? rule.current_size,
+      issued_at: new Date().toISOString(),
+    };
+    const tokenJson = JSON.stringify(tokenPayload);
+    const signature = crypto.createHmac('sha256', secret).update(tokenJson).digest('hex');
+    const token = Buffer.from(tokenJson).toString('base64') + '.' + signature;
+
+    sqlite.prepare(`
+      UPDATE position_protect_rules
+      SET status = 'active', owner_ack_token = ?, owner_ack_at = datetime('now')
+      WHERE id = ?
+    `).run(token, id);
+    return reply.send({ ok: true, id, status: 'active', token_payload: tokenPayload });
+  });
+
   // GET /api/bettor/recommendations/history?days=30&relay_node_id=X&limit=200
   // Bettor r132 (Owner 5/15 严训 "推荐 history 没保存") + J1 #206 ack: data IS saved in
   // bettor_recommendations (173 rows on Bettor host, similar on J1), Owner saw 战绩 tab

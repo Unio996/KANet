@@ -170,6 +170,15 @@
               <span class="text-[10px] text-ink-500" x-text="'(' + bettorHistoryRecs.recommendations.length + ')'"></span>
             </template>
           </button>
+          <!-- Owner 5/16 钦定 + Bettor r139 spec: 持仓自动保护 (止损/止盈/时间/redeem) -->
+          <button @click="bettorTab = 'protect'; loadBettorProtectRules()"
+                  :class="bettorTab === 'protect' ? 'border-b-2 border-brand-500 text-brand-700 font-medium' : 'text-ink-400 hover:text-ink-600'"
+                  class="px-4 py-2 text-sm flex items-center gap-1">
+            持仓保护
+            <template x-if="bettorProtectRules && bettorProtectRules.rules">
+              <span class="text-[10px] text-ink-500" x-text="'(' + (bettorProtectRules.rules.filter(r => r.status === 'pending_owner_ack').length) + '⏸ + ' + (bettorProtectRules.rules.filter(r => r.status === 'active').length) + '✓)'"></span>
+            </template>
+          </button>
         </div>
 
         <!-- Tab content: 调仓建议 (Phase 3e-1 止损队列) -->
@@ -432,6 +441,101 @@
                 </div>
 
                 <div class="text-[10px] text-ink-400 mt-2">数据源: bettor_outcome_log (v110 Module 1) · API: /api/bettor/hit-rate-timeline?days=30</div>
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <!-- Tab content: 持仓保护 (Owner 5/16 钦定 "你们先搞" + Bettor r139 spec — 止损/止盈/时间/redeem auto-protection) -->
+        <template x-if="bettorTab === 'protect'">
+          <div>
+            <template x-if="!bettorProtectRules">
+              <div class="card text-center text-ink-400 py-8">载入中...</div>
+            </template>
+            <template x-if="bettorProtectRules && bettorProtectRules.rules">
+              <div class="space-y-4">
+                <!-- Pending Owner Ack -->
+                <div>
+                  <h3 class="text-xs font-bold text-amber-700 mb-2">⏸ Pending Your ACK
+                    <span class="text-ink-400 font-normal" x-text="'(' + bettorProtectRules.rules.filter(r => r.status === 'pending_owner_ack').length + ')'"></span>
+                  </h3>
+                  <template x-for="r in bettorProtectRules.rules.filter(r => r.status === 'pending_owner_ack')" :key="r.id">
+                    <div class="card card-compact mb-2 border-l-4 border-l-amber-400">
+                      <div class="flex items-start justify-between gap-2">
+                        <div class="flex-1">
+                          <div class="text-sm font-medium text-ink-700" x-text="r.market_slug + ' ' + r.side"></div>
+                          <div class="text-xs text-ink-500 mt-1">
+                            entry $<span x-text="r.entry_avg_price?.toFixed(4)"></span> ·
+                            size <span x-text="r.current_size?.toFixed(0)"></span> 股 ·
+                            止损 <span x-text="(r.stop_loss_pct * 100).toFixed(0) + '%'"></span> after
+                            <span x-text="r.cooldown_hours + 'h'"></span> ·
+                            止盈 $<span x-text="r.take_profit_price?.toFixed(4)"></span> ·
+                            时间 <span x-text="r.time_close_days + 'd'"></span>
+                          </div>
+                        </div>
+                        <div class="flex gap-1 flex-shrink-0">
+                          <button @click="ackBettorProtectRule(r)" :disabled="r._acking"
+                                  class="px-3 py-1 rounded text-[10px] font-bold bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-50 disabled:cursor-not-allowed">
+                            <span x-text="r._acking ? '中...' : '✓ ACK 启用'"></span>
+                          </button>
+                          <button @click="deleteBettorProtectRule(r)"
+                                  class="px-2 py-1 rounded text-[10px] text-red-600 hover:bg-red-50">删</button>
+                        </div>
+                      </div>
+                      <div x-show="r._ackError" class="mt-1 text-[10px] text-red-500" x-text="'ACK 失败: ' + (r._ackError || '')"></div>
+                    </div>
+                  </template>
+                  <template x-if="!bettorProtectRules.rules.filter(r => r.status === 'pending_owner_ack').length">
+                    <div class="text-xs text-ink-400 ml-2">无待 ACK 规则</div>
+                  </template>
+                </div>
+
+                <!-- Active -->
+                <div>
+                  <h3 class="text-xs font-bold text-green-700 mb-2">✓ Active
+                    <span class="text-ink-400 font-normal" x-text="'(' + bettorProtectRules.rules.filter(r => r.status === 'active').length + ')'"></span>
+                  </h3>
+                  <template x-for="r in bettorProtectRules.rules.filter(r => r.status === 'active')" :key="r.id">
+                    <div class="card card-compact mb-2 border-l-4 border-l-green-400">
+                      <div class="flex items-start justify-between gap-2">
+                        <div class="flex-1">
+                          <div class="text-sm font-medium text-ink-700" x-text="r.market_slug + ' ' + r.side"></div>
+                          <div class="text-xs text-ink-500 mt-1">
+                            entry $<span x-text="r.entry_avg_price?.toFixed(4)"></span> ·
+                            止损 $<span x-text="((1 + r.stop_loss_pct) * r.entry_avg_price).toFixed(4)"></span> ·
+                            止盈 $<span x-text="r.take_profit_price?.toFixed(4)"></span> ·
+                            ack at <span x-text="(r.owner_ack_at || '').slice(5,16).replace('T',' ')"></span>
+                          </div>
+                        </div>
+                        <button @click="deleteBettorProtectRule(r)"
+                                class="px-2 py-1 rounded text-[10px] text-red-600 hover:bg-red-50">删</button>
+                      </div>
+                    </div>
+                  </template>
+                  <template x-if="!bettorProtectRules.rules.filter(r => r.status === 'active').length">
+                    <div class="text-xs text-ink-400 ml-2">无 active 规则</div>
+                  </template>
+                </div>
+
+                <!-- Triggered History -->
+                <div>
+                  <h3 class="text-xs font-bold text-ink-600 mb-2">⚡ Triggered History
+                    <span class="text-ink-400 font-normal" x-text="'(' + bettorProtectRules.rules.filter(r => r.status?.startsWith('triggered_') || r.status === 'settled').length + ')'"></span>
+                  </h3>
+                  <template x-for="r in bettorProtectRules.rules.filter(r => r.status?.startsWith('triggered_') || r.status === 'settled')" :key="r.id">
+                    <div class="card card-compact mb-2 border-l-4 border-l-ink-300">
+                      <div class="text-sm font-medium text-ink-700" x-text="r.market_slug + ' ' + r.side + ' (' + r.status + ')'"></div>
+                      <div class="text-xs text-ink-500 mt-1">
+                        triggered <span x-text="(r.triggered_at || '').slice(5,16).replace('T',' ')"></span> ·
+                        realized <span :class="r.trigger_realized_pnl > 0 ? 'text-green-600' : 'text-red-600'" x-text="(r.trigger_realized_pnl > 0 ? '+$' : '-$') + Math.abs(r.trigger_realized_pnl || 0).toFixed(2)"></span> ·
+                        TX <span class="font-mono" x-text="r.trigger_action_tx_hash?.slice(0,12) + '...'"></span>
+                      </div>
+                    </div>
+                  </template>
+                  <template x-if="!bettorProtectRules.rules.filter(r => r.status?.startsWith('triggered_') || r.status === 'settled').length">
+                    <div class="text-xs text-ink-400 ml-2">无 trigger 历史</div>
+                  </template>
+                </div>
               </div>
             </template>
           </div>
@@ -1243,6 +1347,7 @@ function predictionsPage() {
     bettorWinrate: null,  // Module 4b — 胜率轨迹 timeline data {days, daily, cumulative}
     bettorHistoryRecs: null,  // Owner 5/15 + Bettor r132 — 推荐历史 raw rec table
     bettorHistoryFilter: 'all',
+    bettorProtectRules: null,  // Owner 5/16 + Bettor r139 — 持仓保护 rules + ack/active/triggered
     bettorAdjustments: null,
     bettorEvaluating: false,
     closingAll: false,
@@ -1502,6 +1607,58 @@ function predictionsPage() {
       } catch (e) {
         console.warn('[bettor] history recs load failed:', e.message);
         this.bettorHistoryRecs = { ok: false, days: 30, count: 0, recommendations: [] };
+      }
+    },
+
+    async loadBettorProtectRules() {
+      // Owner 5/16 钦定 + Bettor r139 — 持仓保护 rules. Returns 3 status groups
+      // (pending_owner_ack / active / triggered_*). UI filters in template.
+      try {
+        const url = '/api/bettor/position-protect/rules' + (this.selectedAgent ? '?relay_node_id=' + this.selectedAgent : '');
+        const r = await fetch(url);
+        const data = await r.json();
+        // Reset client-side ephemeral _acking / _ackError state per Alpine x-for :key
+        // stale proxy KI-Phase-B-UI-4 (Bug U1 Layer 2).
+        (data?.rules || []).forEach(rec => { rec._acking = false; rec._ackError = null; });
+        this.bettorProtectRules = data;
+      } catch (e) {
+        console.warn('[bettor] protect rules load failed:', e.message);
+        this.bettorProtectRules = { ok: false, count: 0, rules: [] };
+      }
+    },
+
+    async ackBettorProtectRule(rule) {
+      // Owner ACK rule → status='active' + 派 HMAC token (Phase 3 daemon firing 用 token verify).
+      console.log('[ackBettorProtectRule] called rule=', rule?.id?.slice(0,8), 'status=', rule?.status);
+      const confirmed = confirm(`启用持仓保护 ${rule.market_slug} ${rule.side}?\n止损 ${(rule.stop_loss_pct * 100).toFixed(0)}% / 止盈 $${rule.take_profit_price?.toFixed(4)} / 时间 ${rule.time_close_days}d`);
+      if (!confirmed) return;
+      rule._acking = true; rule._ackError = null;
+      try {
+        const res = await fetch('/api/bettor/position-protect/rules/' + rule.id + '/ack', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          rule.status = 'active';
+          await this.loadBettorProtectRules();
+        } else {
+          rule._ackError = data.error || 'unknown error';
+        }
+      } catch (e) {
+        rule._ackError = e.message;
+      } finally {
+        rule._acking = false;
+      }
+    },
+
+    async deleteBettorProtectRule(rule) {
+      const confirmed = confirm(`删除持仓保护规则 ${rule.market_slug} ${rule.side}?`);
+      if (!confirmed) return;
+      try {
+        await fetch('/api/bettor/position-protect/rules/' + rule.id, { method: 'DELETE' });
+        await this.loadBettorProtectRules();
+      } catch (e) {
+        console.warn('[bettor] delete protect rule failed:', e.message);
       }
     },
 
