@@ -1408,9 +1408,12 @@ async function _autoPayExchange(offer, takerRelayNodeId) {
     payer: offer.taker,
   });
 
+  // Bug AN 5/16 fix (NWT 02:30 HP-01 surface): 5 retries × 200ms backoff ~2s 太短 for Kaspa
+  // mempool / UTXO contention scenarios. USDT autopay path 同 KAS autosettle 同款 short retry
+  // 不 robust. Increase 15 retries × 1000ms linear + 5s extra every 5 attempts.
   let paidTxId = null;
-  const MAX_BCAST_RETRIES = 5;
-  const BCAST_RETRY_MS = 200; // Kaspa 10 BPS (0.1s blocks) — 200ms between retries is generous
+  const MAX_BCAST_RETRIES = 15;
+  const BCAST_RETRY_MS = 1000;
   for (let attempt = 1; attempt <= MAX_BCAST_RETRIES; attempt++) {
     try {
       const bcastResult = await sendCommandAsync(takerRelayNodeId, {
@@ -1419,7 +1422,6 @@ async function _autoPayExchange(offer, takerRelayNodeId) {
         message: paidMsg,
       });
       if (bcastResult?.error) {
-        // sendCommandAsync resolves with {error} instead of rejecting
         console.error(`[exchange-autopay] Paid broadcast attempt ${attempt}/${MAX_BCAST_RETRIES}: ${bcastResult.error}`);
       } else {
         paidTxId = bcastResult?.txId;
@@ -1432,7 +1434,8 @@ async function _autoPayExchange(offer, takerRelayNodeId) {
       console.error(`[exchange-autopay] Paid broadcast attempt ${attempt}/${MAX_BCAST_RETRIES} failed: ${err.message}`);
     }
     if (attempt < MAX_BCAST_RETRIES) {
-      await new Promise(r => setTimeout(r, BCAST_RETRY_MS * attempt));
+      const extraMs = attempt % 5 === 0 ? 5000 : 0;
+      await new Promise(r => setTimeout(r, BCAST_RETRY_MS + extraMs));
     }
   }
 
@@ -1550,8 +1553,13 @@ async function _autoSettleAsset(offer, takerRelayNodeId) {
       payer: offer.taker,
     });
 
+    // Bug AN 5/16 fix (NWT 02:30 HP-01 retry surface): 5 retries × 200-800ms backoff (~2s total)
+    // 太短 for Kaspa mempool / UTXO contention. NWT 真测 duplicate transfer scenario UTXO 紧, broker
+    // auto-fire + NWT manual fire 同时 → J2 relay broadcast contention. Increase 15 retries × 1000ms ×
+    // linear (15s max wait) + occasional 5s long wait for slow mempool recovery.
     let paidBroadcastOk = false;
-    for (let pa = 1; pa <= 5; pa++) {
+    const MAX_BCAST_RETRIES = 15;
+    for (let pa = 1; pa <= MAX_BCAST_RETRIES; pa++) {
       try {
         const pr = await sendCommandAsync(takerRelayNodeId, {
           type: 'send_broadcast',
@@ -1560,9 +1568,14 @@ async function _autoSettleAsset(offer, takerRelayNodeId) {
         });
         if (pr?.txId) { paidBroadcastOk = true; break; }
       } catch (err) {
-        console.error(`[exchange-autosend] paid broadcast attempt ${pa}/5: ${err.message}`);
+        console.error(`[exchange-autosend] paid broadcast attempt ${pa}/${MAX_BCAST_RETRIES}: ${err.message}`);
       }
-      if (pa < 5) await new Promise(r => setTimeout(r, 200 * pa));
+      if (pa < MAX_BCAST_RETRIES) {
+        // Linear backoff 1s + extra 5s every 5 attempts (UTXO refresh / mempool clear window).
+        const baseMs = 1000;
+        const extraMs = pa % 5 === 0 ? 5000 : 0;
+        await new Promise(r => setTimeout(r, baseMs + extraMs));
+      }
     }
 
     recordChainEvent({
