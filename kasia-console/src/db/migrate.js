@@ -3525,6 +3525,22 @@ export function runMigrations() {
     }
   }
 
+  // v115: Phase B Sub B5 Fundamental Enricher Wikipedia 24h cache (Bettor r157 §2 (f) consensus).
+  //   bettor_wiki_cache (entity PK, summary, fetched_at) — avoid repeated Wikipedia REST API hits.
+  {
+    const exists = sqlite.prepare("SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name='bettor_wiki_cache'").get();
+    if (!exists.cnt) {
+      sqlite.exec(`
+        CREATE TABLE bettor_wiki_cache (
+          entity TEXT PRIMARY KEY,
+          summary TEXT,
+          fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+      console.log('[migrate] v115: bettor_wiki_cache 表 创建 (Phase B Sub B5 enricher Wikipedia 24h cache).');
+    }
+  }
+
   // v114: Phase B Variant Expander Phase 2 reversible supersede (Owner 5/16 + Bettor r146 consensus).
   //   schema 先加 NOW (cheap), UI [恢复] button Phase 2.1 split-out 1-2 周后 ship.
   //   superseded_at: timestamp when sibling variant 被 Owner accept 另一档时
