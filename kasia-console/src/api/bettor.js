@@ -375,6 +375,9 @@ export async function registerBettorRoutes(fastify) {
   // Phase 3 will add /ack endpoint with HMAC token derivation. Phase 2 wires UI consumption.
 
   // GET /api/bettor/position-protect/rules?relay_node_id=X[&status=Y]
+  // Phase 2.1a (Owner 5/16 + Bettor r149 consensus): server-side enrich w/ batchFetchPrices →
+  // per active rule add current_price + unrealized_pnl_usd + unrealized_pnl_pct + captured_pct + remaining_pct.
+  // Phase 2.1b (client polling) backlog defer per r148 §4.
   fastify.get('/api/bettor/position-protect/rules', async (request, reply) => {
     const relayNodeId = request.query.relay_node_id || null;
     const status = request.query.status || null;
@@ -383,6 +386,31 @@ export async function registerBettorRoutes(fastify) {
     if (status) { where.push('status = ?'); args.push(status); }
     const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const rows = sqlite.prepare(`SELECT * FROM position_protect_rules ${whereClause} ORDER BY created_at DESC LIMIT 500`).all(...args);
+    // Phase 2.1a — enrich active rules with live price + P&L (server-side, 30s cache via batchFetchPrices)
+    try {
+      const { batchFetchPrices } = await import('../services/bettor-variant-expander.js');
+      const activeRules = rows.filter(r => r.status === 'active' || r.status === 'pending_owner_ack');
+      if (activeRules.length > 0) {
+        const priceMap = await batchFetchPrices(activeRules.map(r => r.token_id));
+        for (const r of rows) {
+          if (priceMap[r.token_id] != null) {
+            const yesPrice = priceMap[r.token_id];
+            const sidePrice = r.side === 'YES' ? yesPrice : (1 - yesPrice);
+            r.current_price = sidePrice;
+            const entry = r.entry_avg_price || 0;
+            const size = r.current_size || 0;
+            r.unrealized_pnl_usd = (sidePrice - entry) * size;
+            r.unrealized_pnl_pct = entry > 0 ? (sidePrice - entry) / entry : 0;
+            // captured% = (cur - entry) / (1 - entry) — 已 capture 多少上行
+            r.captured_pct = (1 - entry) > 0 ? Math.max(0, (sidePrice - entry)) / (1 - entry) : 0;
+            // remaining% = (1 - cur) / cur — 剩 multi 多少到 settle
+            r.remaining_pct = sidePrice > 0 ? (1 - sidePrice) / sidePrice : 0;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(`[position-protect/rules] enrich fail: ${e.message}`);
+    }
     return reply.send({ ok: true, count: rows.length, rules: rows });
   });
 
