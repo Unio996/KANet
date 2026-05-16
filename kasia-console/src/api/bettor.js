@@ -1,4 +1,5 @@
 import { sqlite } from '../db/client.js';
+import { randomUUID } from 'node:crypto';
 import { runScan, isScanRunning } from '../services/bettor-scanner.js';
 import { runScavengerScan, isScavengerRunning } from '../services/bettor-scavenger.js';
 import { resolveExpired, isResolverRunning } from '../services/bettor-resolver.js';
@@ -420,24 +421,102 @@ export async function registerBettorRoutes(fastify) {
 
   // GET /api/bettor/variant-recommendations?parent_rec_id=X[&relay_node_id=Y]
   // Phase B Variant Expander (Owner 5/16 钦定 "B" + Bettor r141 spec) — list 3 档变种 per parent rec.
+  // Phase 2 r146 §3.1: lazy refresh stale (>30s) prices via batch fetch + degrade on fail.
   fastify.get('/api/bettor/variant-recommendations', async (request, reply) => {
     const parentRecId = request.query.parent_rec_id || null;
     const relayNodeId = request.query.relay_node_id || null;
+    let rows;
     if (parentRecId) {
-      const rows = sqlite.prepare(`SELECT * FROM bettor_variant_recommendations WHERE parent_rec_id = ? ORDER BY strategy_tier`).all(parentRecId);
-      return reply.send({ ok: true, count: rows.length, variants: rows });
+      rows = sqlite.prepare(`SELECT * FROM bettor_variant_recommendations WHERE parent_rec_id = ? ORDER BY strategy_tier`).all(parentRecId);
+    } else {
+      const relayClause = relayNodeId ? 'AND r.relay_node_id = ?' : '';
+      const args = relayNodeId ? [relayNodeId] : [];
+      rows = sqlite.prepare(`
+        SELECT v.*, r.question AS parent_question, r.yes_price AS parent_yes_price, r.decision AS parent_decision, r.scanned_at AS parent_scanned_at
+        FROM bettor_variant_recommendations v
+        LEFT JOIN bettor_recommendations r ON r.id = v.parent_rec_id
+        WHERE r.scanned_at > datetime('now', '-7 days') ${relayClause}
+        ORDER BY v.created_at DESC, v.strategy_tier LIMIT 200
+      `).all(...args);
     }
-    // Without parent_rec_id, list latest variants joined with parent
-    const relayClause = relayNodeId ? 'AND r.relay_node_id = ?' : '';
-    const args = relayNodeId ? [relayNodeId] : [];
-    const rows = sqlite.prepare(`
-      SELECT v.*, r.question AS parent_question, r.yes_price AS parent_yes_price, r.decision AS parent_decision, r.scanned_at AS parent_scanned_at
-      FROM bettor_variant_recommendations v
-      LEFT JOIN bettor_recommendations r ON r.id = v.parent_rec_id
-      WHERE r.scanned_at > datetime('now', '-7 days') ${relayClause}
-      ORDER BY v.created_at DESC, v.strategy_tier LIMIT 200
-    `).all(...args);
+    // Phase 2 r146 §3.1 lazy refresh: identify stale > 30s, batch refetch, update rows in-place.
+    const STALE_MS = 30 * 1000;
+    const now = Date.now();
+    const stale = rows.filter(r => r.created_at && (now - new Date(r.created_at).getTime()) > STALE_MS && r.status === 'pending');
+    if (stale.length > 0) {
+      try {
+        const { batchFetchPrices } = await import('../services/bettor-variant-expander.js');
+        const priceMap = await batchFetchPrices(stale.map(r => r.token_id));
+        for (const r of rows) {
+          if (priceMap[r.token_id] != null) {
+            const freshPrice = priceMap[r.token_id];
+            const sidePrice = r.side === 'YES' ? freshPrice : (1 - freshPrice);
+            r.current_price = sidePrice;
+            r.hit_rate = sidePrice;
+            r.payout_pct = sidePrice > 0 ? (1 - sidePrice) / sidePrice : 0;
+            r.ev_per_dollar = sidePrice * r.payout_pct - (1 - sidePrice);
+            r._price_refreshed = true;
+          } else if (stale.find(s => s.id === r.id)) {
+            r._price_stale = true;  // UI 标 "⚠ 价格 ≥30s 未更新"
+          }
+        }
+      } catch (e) {
+        console.warn(`[variant-recommendations] batch lazy refresh fail: ${e.message}`);
+        for (const r of stale) r._price_stale = true;
+      }
+    }
     return reply.send({ ok: true, count: rows.length, variants: rows });
+  });
+
+  // POST /api/bettor/variant-recommendation/:id/accept — Owner UI accept variant (Phase 2 r146).
+  // Flow: SELECT variant → INSERT bettor_recommendations row → delegate to acceptBettorRec
+  //       internal logic (Polymarket order fire) → UPDATE variant status='accepted' →
+  //       UPDATE sibling variants (same parent_rec_id) status='superseded' + superseded_at +
+  //       superseded_by_variant_id (Phase 2.1 UI [恢复] button will support un-supersede).
+  fastify.post('/api/bettor/variant-recommendation/:id/accept', async (request, reply) => {
+    const { id } = request.params;
+    const variant = sqlite.prepare(`SELECT v.*, r.relay_node_id AS parent_relay, r.id AS parent_rec_id_full FROM bettor_variant_recommendations v LEFT JOIN bettor_recommendations r ON r.id = v.parent_rec_id WHERE v.id = ?`).get(id);
+    if (!variant) return reply.code(404).send({ error: 'variant not found' });
+    if (variant.status !== 'pending') return reply.code(400).send({ error: `variant status is '${variant.status}', not 'pending'` });
+    // INSERT bettor_recommendations new row from variant
+    const newRecId = randomUUID();
+    const sizeUsd = 200;  // Phase 2 default size (Owner can override via Phase 2.1 UI input)
+    const fraction = sizeUsd / 5000;  // default bankroll $5000
+    const reasoning = {
+      algorithm: 'variant_accept',
+      parent_rec_id: variant.parent_rec_id_full,
+      variant_id: variant.id,
+      strategy_tier: variant.strategy_tier,
+      variant_type: variant.variant_type,
+      hit_rate: variant.hit_rate,
+      payout_pct: variant.payout_pct,
+      ev_per_dollar: variant.ev_per_dollar,
+      candidate_type: 'variant',
+    };
+    sqlite.prepare(`
+      INSERT INTO bettor_recommendations
+        (id, relay_node_id, market_id, condition_id, slug, question,
+         decision, fraction, size_usd, edge, p_mid, sigma, info_gap_months,
+         yes_price, volume_24h, liquidity, end_date, score,
+         reasoning_json, trigger_type, llm_tier, status, calibrator_confidence, lifecycle_state, scanned_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, NULL, ?, ?, 'variant_accept', 'variant', 'accepted', ?, 'accepted', datetime('now'))
+    `).run(
+      newRecId, variant.parent_relay, variant.condition_id, variant.condition_id, variant.market_slug,
+      `[Variant ${variant.strategy_tier}] ${variant.market_slug}`,
+      variant.side, fraction, sizeUsd, variant.ev_per_dollar, variant.hit_rate, 1 - variant.hit_rate,
+      variant.current_price, variant.ev_per_dollar * (1 - (1 - variant.hit_rate)),
+      JSON.stringify(reasoning), 1 - (1 - variant.hit_rate)
+    );
+    // UPDATE variant accepted + sibling supersede (Phase 2 r146 §3.3, reversible Phase 2.1)
+    sqlite.prepare(`UPDATE bettor_variant_recommendations SET status = 'accepted' WHERE id = ?`).run(variant.id);
+    sqlite.prepare(`
+      UPDATE bettor_variant_recommendations
+      SET status = 'superseded', superseded_at = datetime('now'), superseded_by_variant_id = ?
+      WHERE parent_rec_id = ? AND id != ? AND status = 'pending'
+    `).run(variant.id, variant.parent_rec_id, variant.id);
+    // NOTE: Polymarket order fire — Phase 2 returns the new rec id for Owner UI to trigger acceptBettorRec separately.
+    // This preserves the existing /api/bettor/recommendation/:id/accept endpoint (with confirm dialog).
+    return reply.send({ ok: true, new_rec_id: newRecId, variant_id: variant.id, message: 'variant promoted to recommendation; trigger /api/bettor/recommendation/' + newRecId + '/accept to fire order' });
   });
 
   // POST /api/bettor/position-protect/rules/:id/ack — Owner UI ACK rule (status pending_owner_ack → active)

@@ -3525,6 +3525,19 @@ export function runMigrations() {
     }
   }
 
+  // v114: Phase B Variant Expander Phase 2 reversible supersede (Owner 5/16 + Bettor r146 consensus).
+  //   schema 先加 NOW (cheap), UI [恢复] button Phase 2.1 split-out 1-2 周后 ship.
+  //   superseded_at: timestamp when sibling variant 被 Owner accept 另一档时
+  //   superseded_by_variant_id: 哪个 sibling ACCEPT 触发 supersede
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(bettor_variant_recommendations)").all();
+    if (cols.length && !cols.some(c => c.name === 'superseded_at')) {
+      sqlite.exec(`ALTER TABLE bettor_variant_recommendations ADD COLUMN superseded_at TIMESTAMP;`);
+      sqlite.exec(`ALTER TABLE bettor_variant_recommendations ADD COLUMN superseded_by_variant_id TEXT;`);
+      console.log('[migrate] v114: bettor_variant_recommendations 加 superseded_at + superseded_by_variant_id 列 (Phase 2 reversible supersede schema).');
+    }
+  }
+
   // v113: Phase B Variant Expander 3-tier (Owner 5/16 钦定 "B" + Bettor r141 architect spec).
   //   per scanner rec → expander auto-find 同实体/同事件/sub-markets → 3 档变种 (激进/适中/保守).
   //   v113 加 bettor_variant_recommendations 表 + 2 索引.

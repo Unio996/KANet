@@ -19,6 +19,11 @@ const PAYOUT_CONSERVATIVE_MIN = 0.03;
 const DEPTH_AGGRESSIVE_MIN = 200;
 const DEPTH_OTHER_MIN = 500;
 const AGGRESSIVE_EV_FLOOR = -0.05;  // Phase 1.5 r143 hotfix — prevent -10% EV "推荐" misleading Owner
+// Phase 2 r146 §3.2 2-tier liquidity: < $50 hard skip / $50-$200 warn-display / ≥$200 normal
+const LIQUIDITY_ABSOLUTE_FLOOR = 50;
+const LIQUIDITY_WARN_THRESHOLD = 200;
+const COMPOSITE_LIQ_NORMALIZE = 5000;  // Phase 3 retune via KI-PHASE-3-VARIANT-RETUNE backlog
+const CROSS_ENTITY_TOP_N = 3;
 
 let timer = null;
 let running = false;
@@ -69,18 +74,28 @@ export async function tick() {
 
 export async function expandVariantsForRec(parentRec) {
   const entity = extractEntity(parentRec.question, parentRec.slug);
-  if (!entity) return [];
+  if (!entity) {
+    console.log(`[variant-expander] skip rec ${parentRec.id?.slice(0, 8)}: extractEntity null (regex + fuzzy both fail)`);
+    return [];
+  }
   const candidates = await fetchRelatedMarkets(entity, parentRec.slug);
   if (!candidates || candidates.length === 0) return [];
 
-  // Score each candidate side (YES + NO)
+  // Score each candidate side (YES + NO). Phase 2 r146 §3.2:
+  //   liquidity < $50 hard skip
+  //   $50-$200 retained with warning flag (UI displays "⚠ 流动性 极低")
+  //   ≥ $200 normal
+  // composite_score = ev × min(1, liquidity / 5000) — magic # Phase 3 retune via KI-PHASE-3-VARIANT-RETUNE
   const scored = [];
+  const parentEntity = entity.toLowerCase();
   for (const m of candidates) {
     try {
       const prices = m.outcomePrices ? JSON.parse(m.outcomePrices) : null;
       if (!Array.isArray(prices) || prices.length < 2) continue;
       const tokens = m.clobTokenIds ? JSON.parse(m.clobTokenIds) : null;
       if (!Array.isArray(tokens) || tokens.length < 2) continue;
+      const liquidity = Number(m.liquidity) || 0;
+      if (liquidity < LIQUIDITY_ABSOLUTE_FLOOR) continue;  // hard skip < $50
       for (const sideIdx of [0, 1]) {
         const side = sideIdx === 0 ? 'YES' : 'NO';
         const price = parseFloat(prices[sideIdx]);
@@ -88,55 +103,75 @@ export async function expandVariantsForRec(parentRec) {
         const hit = price;
         const payout = price > 0 ? (1 - price) / price : 0;
         const ev = hit * payout - (1 - hit);
+        const composite = ev * Math.min(1, liquidity / COMPOSITE_LIQ_NORMALIZE);
+        // Phase 2 r146 §4: same_event_inverse = same conditionId opposite side (Romania top10 YES vs NO same condition);
+        //                 cross_entity_same_event = different conditionId but same event (Romania top10 vs Greece top10).
+        const sameCondition = m.conditionId === parentRec.condition_id;
+        const variantType = sameCondition
+          ? 'same_event_inverse'
+          : (m.slug?.toLowerCase().includes(parentEntity) ? 'same_entity_alt' : 'cross_entity_same_event');
         scored.push({
           marketSlug: m.slug,
           conditionId: m.conditionId,
           tokenId: tokens[sideIdx],
-          side, price, hit, payout, ev,
-          depth: 500,  // Phase 1 stub — assume fillable; Phase 3 will fetch real /book depth
-          liquidity: Number(m.liquidity) || 0,
+          side, price, hit, payout, ev, composite,
+          depth: 500,  // Phase 2 still stub; Phase 3 /book API real depth
+          liquidity,
+          variantType,
+          liquidityWarn: liquidity < LIQUIDITY_WARN_THRESHOLD,
         });
       }
     } catch { /* ignore parse errors */ }
   }
   if (scored.length === 0) return [];
 
-  // 3-tier pickBest per r141 §4 + Phase 1.5 r143 hotfix:
-  //   (f) aggressive tier add ev > -0.05 filter (prevent surfacing -10% EV bets as "推荐")
-  //   ANTI-PATTERNS R-VARIANT-EV-FLOOR sediment
+  // Phase 2 r146 split: same_entity (3 tier) + cross_entity_same_event (top 3 independent)
+  const sameEntityCandidates = scored.filter(s => s.variantType !== 'cross_entity_same_event');
+  const crossEntityCandidates = scored.filter(s => s.variantType === 'cross_entity_same_event');
+
+  const inserted = [];
+
+  // 3-tier pickBest same_entity per r141 §4 + Phase 1.5 r143 (f) ev_floor
   const tiers = [
     { tier: 'aggressive', scoreFn: x => x.payout, filter: { hit: HIT_RATE_AGGRESSIVE_MIN, depth: DEPTH_AGGRESSIVE_MIN, ev: AGGRESSIVE_EV_FLOOR } },
     { tier: 'medium', scoreFn: x => x.ev, filter: { depth: DEPTH_OTHER_MIN } },
     { tier: 'conservative', scoreFn: x => x.hit, filter: { payout: PAYOUT_CONSERVATIVE_MIN, depth: DEPTH_OTHER_MIN } },
   ];
-
-  const inserted = [];
   for (const { tier, scoreFn, filter } of tiers) {
-    const pick = pickBest(scored, scoreFn, filter);
+    const pick = pickBest(sameEntityCandidates, scoreFn, filter);
     if (!pick) continue;
-    // Skip if pick is same as parent (no improvement)
     if (pick.conditionId === parentRec.condition_id && pick.side === (parentRec.decision === 'NO' ? 'NO' : 'YES')) continue;
-    const variantId = randomUUID();
-    try {
-      sqlite.prepare(`
-        INSERT INTO bettor_variant_recommendations
-          (id, parent_rec_id, market_slug, condition_id, token_id, side, current_price,
-           hit_rate, payout_pct, depth_500_avg_price, ev_per_dollar, risk_score,
-           strategy_tier, variant_type, reasoning, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
-      `).run(
-        variantId, parentRec.id, pick.marketSlug, pick.conditionId, pick.tokenId,
-        pick.side, pick.price, pick.hit, pick.payout, pick.price, pick.ev, 1 - pick.hit,
-        tier,
-        pick.conditionId === parentRec.condition_id ? 'same_event_inverse' : 'related_entity',
-        `${tier} pick: hit=${(pick.hit * 100).toFixed(0)}% payout=${(pick.payout * 100).toFixed(0)}% ev=${(pick.ev * 100).toFixed(1)}%`
-      );
-      inserted.push(tier);
-    } catch (e) {
-      console.error(`[variant-expander] INSERT ${tier} fail: ${e.message}`);
-    }
+    insertVariant(parentRec.id, pick, tier);
+    inserted.push(tier);
+  }
+
+  // Phase 2 cross_entity top 3 by composite score (独立 section per r146 R-VARIANT-INSIGHT-BOUNDARY)
+  const topCross = [...crossEntityCandidates].sort((a, b) => b.composite - a.composite).slice(0, CROSS_ENTITY_TOP_N);
+  for (const pick of topCross) {
+    insertVariant(parentRec.id, pick, 'cross_entity');
+    inserted.push('cross_entity');
   }
   return inserted;
+}
+
+function insertVariant(parentRecId, pick, tier) {
+  const variantId = randomUUID();
+  try {
+    sqlite.prepare(`
+      INSERT INTO bettor_variant_recommendations
+        (id, parent_rec_id, market_slug, condition_id, token_id, side, current_price,
+         hit_rate, payout_pct, depth_500_avg_price, ev_per_dollar, risk_score,
+         strategy_tier, variant_type, reasoning, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+    `).run(
+      variantId, parentRecId, pick.marketSlug, pick.conditionId, pick.tokenId,
+      pick.side, pick.price, pick.hit, pick.payout, pick.price, pick.ev, 1 - pick.hit,
+      tier, pick.variantType,
+      `${tier} pick: hit=${(pick.hit * 100).toFixed(0)}% payout=${(pick.payout * 100).toFixed(0)}% ev=${(pick.ev * 100).toFixed(1)}% liq=$${pick.liquidity?.toFixed(0)}${pick.liquidityWarn ? ' ⚠低流动性' : ''}`
+    );
+  } catch (e) {
+    console.error(`[variant-expander] INSERT ${tier} fail: ${e.message}`);
+  }
 }
 
 // Phase 1 simple entity extraction — country/team/event keywords.
@@ -203,4 +238,40 @@ function pickBest(scored, scoreFn, filter) {
     .sort((a, b) => scoreFn(b) - scoreFn(a))[0];
 }
 
-export const __testing = { expandVariantsForRec, extractEntity, fetchRelatedMarkets, pickBest, HIT_RATE_AGGRESSIVE_MIN, PAYOUT_CONSERVATIVE_MIN };
+// Phase 2 r146 §3.1 batch lazy fetch (J1 push back gamma URL limit: 20 tokenIds per call, parallel Promise.all).
+// Public to bettor.js GET endpoint for lazy refresh on stale > 30s.
+// Returns { tokenId → currentYesPrice } map; missing entries = fetch fail (display stale + ⚠).
+export async function batchFetchPrices(tokenIds) {
+  const out = {};
+  if (!Array.isArray(tokenIds) || tokenIds.length === 0) return out;
+  const unique = [...new Set(tokenIds.filter(Boolean))];
+  const BATCH = 20;  // URL safe margin (~25 max, leave headroom)
+  const chunks = [];
+  for (let i = 0; i < unique.length; i += BATCH) chunks.push(unique.slice(i, i + BATCH));
+  const results = await Promise.all(chunks.map(async chunk => {
+    try {
+      const ids = chunk.map(t => `clob_token_ids=${encodeURIComponent(t)}`).join('&');
+      const url = `https://gamma-api.polymarket.com/markets?${ids}&limit=${chunk.length * 2}`;
+      const res = await fetch(url, { headers: { 'User-Agent': 'KANet-bettor-variant/1.0' } });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch { return null; }
+  }));
+  for (const arr of results) {
+    if (!Array.isArray(arr)) continue;
+    for (const m of arr) {
+      try {
+        const tokens = m.clobTokenIds ? JSON.parse(m.clobTokenIds) : null;
+        const prices = m.outcomePrices ? JSON.parse(m.outcomePrices) : null;
+        if (!Array.isArray(tokens) || !Array.isArray(prices)) continue;
+        for (let i = 0; i < tokens.length; i++) {
+          // outcomePrices index i == YES price for token i (Polymarket convention varies per market)
+          out[tokens[i]] = parseFloat(prices[i]);
+        }
+      } catch { /* ignore */ }
+    }
+  }
+  return out;
+}
+
+export const __testing = { expandVariantsForRec, extractEntity, fetchRelatedMarkets, pickBest, batchFetchPrices, HIT_RATE_AGGRESSIVE_MIN, PAYOUT_CONSERVATIVE_MIN, LIQUIDITY_ABSOLUTE_FLOOR, LIQUIDITY_WARN_THRESHOLD };
