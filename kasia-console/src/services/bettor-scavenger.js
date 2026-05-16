@@ -557,6 +557,33 @@ export async function runScavengerScan(triggerType = 'cron', relayNodeId = null)
       const top = candidates.slice(0, 20);
       console.log(`[scavenger] fetched ${all.length} → ${tailCount} tail + ${middleEnriched} middle + ${tailEnriched} tail-enriched (思路 E) = ${candidates.length} total qualified → top ${top.length}`);
 
+      // Phase B Sub B5 — Fundamental Enricher (Owner 5/16 + Bettor r156-r157 consensus 9/9 ACK).
+      // Top candidates middle-tier hit (0.30-0.45 ∪ 0.55-0.70, skip coin-flip ±5pp around 50/50) →
+      // LLM 结构因子分析 → write fundamental_estimate + sources + confidence + reasoning.
+      // async Promise.all max 3 parallel (RTX 5090 VRAM). silent skip + dev-alert on 3 consecutive fails.
+      try {
+        const enricherTargets = top.map(c => ({ yes_price: c.yes_price, question: c.market?.question || '' }));
+        const { enrichBatch } = await import('./bettor-fundamental-enricher.js');
+        const enrichResults = await enrichBatch(enricherTargets);
+        let enrichedCount = 0;
+        for (const { rec: target, result } of enrichResults) {
+          if (result.skipped) continue;
+          // Find matching candidate in top[] by yes_price + question (rough match)
+          const cand = top.find(c => c.yes_price === target.yes_price && (c.market?.question || '') === target.question);
+          if (cand) {
+            cand.fundamental_estimate = result.estimate;
+            cand.fundamental_sources = result.sources;
+            cand.fundamental_confidence = result.confidence;
+            cand.fundamental_reasoning = result.reasoning;
+            cand.enriched_type = 'fundamental_b5';
+            enrichedCount++;
+          }
+        }
+        if (enrichedCount > 0) console.log(`[scavenger] B5 enricher: ${enrichedCount}/${top.length} top recs enriched (middle-tier LLM 结构因子)`);
+      } catch (e) {
+        console.error(`[scavenger] B5 enricher batch fail (silent skip per Bettor r157 §2 (f)): ${e.message}`);
+      }
+
       const openPositions = getOpenPositions(resolvedRelayId);
       console.log(`[scavenger] current open positions: ${openPositions.length}, min expected return: ${openPositions.length ? Math.min(...openPositions.map(p => p.expectedReturn)).toFixed(3) : 'n/a'}`);
 
