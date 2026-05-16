@@ -748,21 +748,63 @@
                 <div x-show="r._acceptError" class="mt-1 text-[10px] text-red-500" x-text="'下单失败: ' + (r._acceptError || '')"></div>
                 <div x-show="r._acceptSuccess" class="mt-1 text-[10px] text-green-600" x-text="'✓ 下单成功 ' + (r._acceptSuccess || '')"></div>
                 <!-- Owner 5/16 钦定 "B" + Bettor r141 spec: 3-tier variant expander (激进/适中/保守) -->
-                <div x-show="bettorVariants && bettorVariants[r.id] && bettorVariants[r.id].length" class="mt-2 border-t border-ink-100 pt-2">
-                  <div class="text-[10px] text-ink-400 mb-1">↳ 自动变种 3 档:</div>
-                  <template x-for="v in (bettorVariants && bettorVariants[r.id]) || []" :key="v.id">
-                    <div class="flex items-center justify-between gap-2 text-[10px] py-0.5">
-                      <span class="font-bold w-12 flex-shrink-0" :class="v.strategy_tier === 'aggressive' ? 'text-red-600' : v.strategy_tier === 'medium' ? 'text-amber-600' : 'text-green-600'" x-text="v.strategy_tier === 'aggressive' ? '🔴 激进' : v.strategy_tier === 'medium' ? '🟡 适中' : '🟢 保守'"></span>
-                      <span class="flex-1 truncate text-ink-600" :title="v.market_slug" x-text="v.market_slug?.replace(/^will-/, '').replace(/-/g, ' ').slice(0, 50)"></span>
-                      <span class="text-ink-500 w-12 text-right" x-text="v.side"></span>
-                      <span class="text-ink-700 font-mono w-14 text-right" x-text="'$' + (v.current_price || 0).toFixed(2)"></span>
-                      <span class="text-ink-500 w-10 text-right" x-text="((v.hit_rate || 0) * 100).toFixed(0) + '%'"></span>
-                      <span class="text-green-600 w-14 text-right" x-text="'+' + ((v.payout_pct || 0) * 100).toFixed(0) + '%'"></span>
-                      <!-- Phase 1.5 r143 §6 — UI display EV per variant for Owner judgement double-check -->
-                      <span class="font-mono w-14 text-right" :class="(v.ev_per_dollar || 0) > 0 ? 'text-green-700' : 'text-red-600'" :title="'EV per $1 = hit*payout - (1-hit)'" x-text="'EV ' + ((v.ev_per_dollar || 0) >= 0 ? '+' : '') + ((v.ev_per_dollar || 0) * 100).toFixed(1) + '%'"></span>
-                    </div>
-                  </template>
-                </div>
+                <!-- Phase 2 r146 — same_entity 3 档 responsive grid + cross_entity_same_event 独立 section -->
+                <template x-if="bettorVariants && bettorVariants[r.id] && bettorVariants[r.id].length">
+                  <div class="mt-3 pt-2 border-t border-ink-100">
+                    <!-- Same-entity 3-tier section -->
+                    <template x-if="(bettorVariants[r.id] || []).filter(v => v.strategy_tier !== 'cross_entity').length">
+                      <div>
+                        <div class="text-[10px] text-ink-500 mb-1 font-semibold">📊 变种 (同 insight 不同力度):</div>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+                          <template x-for="v in (bettorVariants[r.id] || []).filter(x => x.strategy_tier !== 'cross_entity').sort((a,b) => ({aggressive:0,medium:1,conservative:2}[a.strategy_tier] || 9) - ({aggressive:0,medium:1,conservative:2}[b.strategy_tier] || 9))" :key="v.id">
+                            <div class="card card-compact text-[10px]" :class="v.strategy_tier === 'aggressive' ? 'border-l-4 border-l-red-400' : v.strategy_tier === 'medium' ? 'border-l-4 border-l-amber-400' : 'border-l-4 border-l-green-400'">
+                              <div class="flex items-center justify-between mb-1">
+                                <span class="font-bold" :class="v.strategy_tier === 'aggressive' ? 'text-red-600' : v.strategy_tier === 'medium' ? 'text-amber-600' : 'text-green-600'" x-text="v.strategy_tier === 'aggressive' ? '🔴 激进' : v.strategy_tier === 'medium' ? '🟡 适中' : '🟢 保守'"></span>
+                                <span class="text-ink-500" x-text="v.side"></span>
+                              </div>
+                              <div class="text-ink-700 truncate" :title="v.market_slug" x-text="v.market_slug?.replace(/^will-/, '').replace(/-/g, ' ').slice(0, 50)"></div>
+                              <div class="flex gap-2 mt-1 text-ink-500">
+                                <span x-text="'$' + (v.current_price || 0).toFixed(3)"></span>
+                                <span x-text="((v.hit_rate || 0) * 100).toFixed(0) + '% hit'"></span>
+                                <span class="text-green-600" x-text="'+' + ((v.payout_pct || 0) * 100).toFixed(0) + '%'"></span>
+                                <span :class="(v.ev_per_dollar || 0) > 0 ? 'text-green-700' : 'text-red-600'" :title="'EV per $1'" x-text="'EV ' + ((v.ev_per_dollar || 0) >= 0 ? '+' : '') + ((v.ev_per_dollar || 0) * 100).toFixed(1) + '%'"></span>
+                              </div>
+                              <div class="flex items-center justify-between mt-1">
+                                <span class="text-ink-400 text-[9px]" :class="v._price_stale ? 'text-amber-600' : ''" x-text="v._price_stale ? '⚠ 价格 ≥30s 未更新' : (v._price_refreshed ? '✓ 价格已刷新' : '')"></span>
+                                <button @click="acceptBettorVariant(v)" :disabled="v._accepting || v.status !== 'pending'" class="px-2 py-0.5 rounded text-[9px] font-bold text-white disabled:opacity-50 disabled:cursor-not-allowed" :class="v.strategy_tier === 'aggressive' ? 'bg-red-500 hover:bg-red-600' : v.strategy_tier === 'medium' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-green-500 hover:bg-green-600'">
+                                  <span x-text="v._accepting ? '...' : v.status === 'superseded' ? '⏸ superseded' : v.status === 'accepted' ? '✓ accepted' : '✓ ACCEPT'"></span>
+                                </button>
+                              </div>
+                            </div>
+                          </template>
+                        </div>
+                      </div>
+                    </template>
+
+                    <!-- Cross-entity same_event independent section (Bettor r143 §4 insight-boundary) -->
+                    <template x-if="(bettorVariants[r.id] || []).filter(v => v.strategy_tier === 'cross_entity').length">
+                      <div class="mt-2">
+                        <div class="text-[10px] text-ink-500 mb-1 font-semibold">🎯 同事件可关注 (独立 strong recs):</div>
+                        <template x-for="v in (bettorVariants[r.id] || []).filter(x => x.strategy_tier === 'cross_entity')" :key="v.id">
+                          <div class="flex items-center justify-between gap-2 text-[10px] py-0.5 px-2 bg-warm-50 rounded">
+                            <span class="flex-1 truncate text-ink-700" :title="v.market_slug" x-text="v.market_slug?.replace(/^will-/, '').replace(/-/g, ' ').slice(0, 60)"></span>
+                            <span class="text-ink-500 w-10 text-right" x-text="v.side"></span>
+                            <span class="text-ink-700 font-mono w-12 text-right" x-text="'$' + (v.current_price || 0).toFixed(2)"></span>
+                            <span class="text-ink-500 w-10 text-right" x-text="((v.hit_rate || 0) * 100).toFixed(0) + '%'"></span>
+                            <span class="font-mono w-14 text-right" :class="(v.ev_per_dollar || 0) > 0 ? 'text-green-700' : 'text-red-600'" x-text="'EV ' + ((v.ev_per_dollar || 0) >= 0 ? '+' : '') + ((v.ev_per_dollar || 0) * 100).toFixed(1) + '%'"></span>
+                            <button @click="acceptBettorVariant(v)" :disabled="v._accepting || v.status !== 'pending'" class="px-2 py-0.5 rounded text-[9px] font-bold bg-brand-500 hover:bg-brand-600 text-white disabled:opacity-50 disabled:cursor-not-allowed">
+                              <span x-text="v._accepting ? '...' : v.status === 'superseded' ? '⏸' : v.status === 'accepted' ? '✓' : 'ACCEPT'"></span>
+                            </button>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+                <!-- Explicit empty state (Bettor r143 §1 + Phase 2 r146 §2) -->
+                <template x-if="bettorVariants && bettorVariants[r.id] !== undefined && bettorVariants[r.id].length === 0">
+                  <div class="mt-2 text-[10px] text-ink-300 italic">无相关市场 variant (entity 未匹配 gamma active markets)</div>
+                </template>
               </div>
             </template>
           </div>
@@ -1559,17 +1601,45 @@ function predictionsPage() {
         const r = await fetch(url);
         const data = await r.json();
         const byParent = {};
+        // R-ALPINE-UI-2 defensive: reset client-side ephemeral _accepting per Alpine x-for stale proxy
         for (const v of data.variants || []) {
+          v._accepting = false;
+          v._acceptError = null;
           if (!byParent[v.parent_rec_id]) byParent[v.parent_rec_id] = [];
           byParent[v.parent_rec_id].push(v);
         }
-        // Tier order: aggressive / medium / conservative
-        const tierOrder = { aggressive: 0, medium: 1, conservative: 2 };
-        Object.values(byParent).forEach(arr => arr.sort((a, b) => (tierOrder[a.strategy_tier] || 9) - (tierOrder[b.strategy_tier] || 9)));
         this.bettorVariants = byParent;
       } catch (e) {
         console.warn('[bettor] variants load failed:', e.message);
         this.bettorVariants = {};
+      }
+    },
+
+    async acceptBettorVariant(variant) {
+      // Phase 2 r146 — accept variant: POST /variant-recommendation/:id/accept → INSERT new rec + sibling supersede,
+      // then trigger /recommendation/:new_id/accept for Polymarket order fire (confirm dialog appears).
+      console.log('[acceptBettorVariant] variant=', variant?.id?.slice(0,8), 'tier=', variant?.strategy_tier);
+      const sizeUsd = 200;  // default size, Phase 2.1 may allow Owner UI override
+      const confirmed = confirm(`接受变种 ${variant.strategy_tier} ${variant.side}?\n${variant.market_slug?.slice(0, 80)}\nyes ${(variant.current_price * 100).toFixed(1)}% / EV ${((variant.ev_per_dollar || 0) * 100).toFixed(1)}% / $${sizeUsd}\n\n点 OK 创建 rec, 再 ACCEPT 触发 Polymarket order`);
+      if (!confirmed) return;
+      variant._accepting = true; variant._acceptError = null;
+      try {
+        const res = await fetch('/api/bettor/variant-recommendation/' + variant.id + '/accept', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          variant.status = 'accepted';
+          await this.loadBettorVariants();
+          await this.loadBettor();  // refresh primary rec list (new variant_accept rec INSERT)
+          alert(`变种 promoted to recommendation:\nnew_rec_id=${data.new_rec_id?.slice(0,8)}\n现刷新推荐列表, 在新 rec 上点 ACCEPT 触发 Polymarket 下单`);
+        } else {
+          variant._acceptError = data.error || 'unknown error';
+        }
+      } catch (e) {
+        variant._acceptError = e.message;
+      } finally {
+        variant._accepting = false;
       }
     },
 
