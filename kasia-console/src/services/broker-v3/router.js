@@ -363,7 +363,12 @@ export async function _doPublishAfterPrepay(escrowRowId, relayNodeId) {
         want_asset: 'KAS',                            // broker wants KAS for user
         want_amount: String(e.target_amount),         // qty KAS user wants
         want_chain: 'kaspa',
-        verification: 'cross_chain_tx',
+        // Bug AL P0 fix 5/16 (NWT 02:01 architect dig + HP-01 真测 stuck): BUY direction taker delivers KAS
+        // via Kaspa native chain — verification 'cross_chain_tx' WRONG (scans EVM/BSC for USDT) → verifier
+        // stuck "Awaiting cross-chain TX proof" 即使 真 5 KAS TX 已 deliver. Correct verification = 'kaspa_tx'
+        // (align broker-intake-watcher.js L343 + exchange-machine.js L1247 + market-seeder.js L332 等
+        // 同款 KAS direction publish pattern).
+        verification: 'kaspa_tx',
         verification_meta: {
           accepted_chains: [{ chain: 'kaspa', address: takerSendAddr }],  // taker sends KAS here
           expected_asset: 'KAS',
