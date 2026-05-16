@@ -758,6 +758,8 @@
                       <span class="text-ink-700 font-mono w-14 text-right" x-text="'$' + (v.current_price || 0).toFixed(2)"></span>
                       <span class="text-ink-500 w-10 text-right" x-text="((v.hit_rate || 0) * 100).toFixed(0) + '%'"></span>
                       <span class="text-green-600 w-14 text-right" x-text="'+' + ((v.payout_pct || 0) * 100).toFixed(0) + '%'"></span>
+                      <!-- Phase 1.5 r143 §6 — UI display EV per variant for Owner judgement double-check -->
+                      <span class="font-mono w-14 text-right" :class="(v.ev_per_dollar || 0) > 0 ? 'text-green-700' : 'text-red-600'" :title="'EV per $1 = hit*payout - (1-hit)'" x-text="'EV ' + ((v.ev_per_dollar || 0) >= 0 ? '+' : '') + ((v.ev_per_dollar || 0) * 100).toFixed(1) + '%'"></span>
                     </div>
                   </template>
                 </div>

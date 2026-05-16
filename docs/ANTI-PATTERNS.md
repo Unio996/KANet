@@ -1861,6 +1861,62 @@ export async function sendBroadcast(channel, text, opts = {}) {
 
 ---
 
+## R-VARIANT-EV-FLOOR — "激进"档 variant 必 ev > -0.05 (negative-EV "推荐" 误导 Owner)
+
+**Owner 5/16 + Bettor r143 §6 sediment (Phase B Variant Expander Phase 1.5 hotfix).**
+
+**Bad**:
+```js
+// 激进 tier sort by max(payout), filter only hit ≥ 0.25 + depth ≥ 200
+const aggressive = pickBest(scored, x => x.payout, { hit: 0.25, depth: 200 });
+// problem: low-hit high-payout 真负 EV variant 可能 surface
+//   e.g. 5% × 1800% return - 95% × 100% = 0 break-even (acceptable)
+//   e.g. 3% × 2900% return - 97% × 100% = -0.10 (-10% EV, ⚠ Owner loses money)
+```
+
+**Why it breaks**: hit_rate + payout_pct 双 OK 但 ev_per_dollar 可能负. UI 标 "🔴 激进" implies "高赔率高回报", Owner 信任 click → 长期 loss.
+
+**Good**:
+```js
+const aggressive = pickBest(scored, x => x.payout, { hit: 0.25, depth: 200, ev: -0.05 });
+// ev > -0.05 floor — 留 explore margin (low-hit 高 variance acceptable) 但不 frank-negative
+```
+
+**Rule of thumb**: any variant tier marketed as "推荐" / "ACCEPT" 必 ev_per_dollar > frank-negative threshold. UI 同时显 EV 数字 per variant 给 Owner 自判 double-check.
+
+---
+
+## R-VARIANT-INSIGHT-BOUNDARY — variant = "同 insight 不同强度", cross-entity 是独立 rec NOT variant
+
+**Owner 5/16 + Bettor r143 §4 sediment (Phase B Variant Expander Phase 1.5).**
+
+**Bad**:
+```js
+// Romania top 10 YES 的 variants include:
+//   - Romania top 5 YES (同 entity 更激进)
+//   - Greece top 10 YES (cross-entity 同 event) ⚠
+// UI displays:
+//   "↳ variants: Romania top 3 / Greece top 10 / France win NO"
+```
+
+**Why it breaks**: variant 语义 = "同 insight 不同强度". Romania top 10 YES insight = "Romania 表现强". Greece top 10 YES insight = "Greece 表现强" — **独立 insight, 跟 Romania 表现无关**. UI 塞进 "variants" 让 Owner 心智 model 混淆 → "我看好 Romania → 也看好 Greece" 是 false 推论.
+
+**Good**:
+```js
+// variants section: same_entity only (3 tiers aggressive/medium/conservative)
+//   Romania top 5 / top 3 / win NO — 同 entity 强度调整
+// 另开 UI section "Also Strong in This Event"
+//   Greece top 10 / France top 5 — cross-entity 独立 strong recs in same event
+// 视觉分开 → Owner 心智 model 不混淆
+```
+
+**Rule of thumb**: variant_type enum 严守分类:
+- `same_entity` — 同 entity 不同 sub-market (variant proper)
+- `same_event_inverse` — 同 entity inverse side (Romania win NO vs Romania top 10 YES)
+- `cross_entity_same_event` — 独立 rec, NOT variant, separate UI section
+
+---
+
 ## R-ALPINE-UI-2 — Alpine x-for `:key` + ephemeral client-side mutation field = 必 explicit reset on array reassign
 
 **Owner 2026-05-15 真测 + Bettor r136 sediment (Bug U1 Layer 2, J1 #208 Hypothesis 9 实际正确).**

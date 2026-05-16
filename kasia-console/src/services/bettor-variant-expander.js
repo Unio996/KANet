@@ -18,6 +18,7 @@ const HIT_RATE_AGGRESSIVE_MIN = 0.25;
 const PAYOUT_CONSERVATIVE_MIN = 0.03;
 const DEPTH_AGGRESSIVE_MIN = 200;
 const DEPTH_OTHER_MIN = 500;
+const AGGRESSIVE_EV_FLOOR = -0.05;  // Phase 1.5 r143 hotfix — prevent -10% EV "推荐" misleading Owner
 
 let timer = null;
 let running = false;
@@ -69,7 +70,7 @@ export async function tick() {
 export async function expandVariantsForRec(parentRec) {
   const entity = extractEntity(parentRec.question, parentRec.slug);
   if (!entity) return [];
-  const candidates = await fetchRelatedMarkets(entity);
+  const candidates = await fetchRelatedMarkets(entity, parentRec.slug);
   if (!candidates || candidates.length === 0) return [];
 
   // Score each candidate side (YES + NO)
@@ -100,9 +101,11 @@ export async function expandVariantsForRec(parentRec) {
   }
   if (scored.length === 0) return [];
 
-  // 3-tier pickBest per r141 §4
+  // 3-tier pickBest per r141 §4 + Phase 1.5 r143 hotfix:
+  //   (f) aggressive tier add ev > -0.05 filter (prevent surfacing -10% EV bets as "推荐")
+  //   ANTI-PATTERNS R-VARIANT-EV-FLOOR sediment
   const tiers = [
-    { tier: 'aggressive', scoreFn: x => x.payout, filter: { hit: HIT_RATE_AGGRESSIVE_MIN, depth: DEPTH_AGGRESSIVE_MIN } },
+    { tier: 'aggressive', scoreFn: x => x.payout, filter: { hit: HIT_RATE_AGGRESSIVE_MIN, depth: DEPTH_AGGRESSIVE_MIN, ev: AGGRESSIVE_EV_FLOOR } },
     { tier: 'medium', scoreFn: x => x.ev, filter: { depth: DEPTH_OTHER_MIN } },
     { tier: 'conservative', scoreFn: x => x.hit, filter: { payout: PAYOUT_CONSERVATIVE_MIN, depth: DEPTH_OTHER_MIN } },
   ];
@@ -137,7 +140,8 @@ export async function expandVariantsForRec(parentRec) {
 }
 
 // Phase 1 simple entity extraction — country/team/event keywords.
-// Phase 2 may upgrade to NER OR LLM-extracted entity.
+// Phase 1.5 r143 hotfix: regex 失败 fallback to fuzzy LIKE (whole question 提取 keyword) instead of hard null.
+// Phase 3 may upgrade to LLM-extracted entity.
 function extractEntity(question, slug) {
   if (!question) return null;
   const text = String(question).toLowerCase();
@@ -149,19 +153,45 @@ function extractEntity(question, slug) {
   // Common entity patterns: "Will <Entity> win/be in <Event>?"
   const m = text.match(/^will\s+([a-z][a-z\s]+?)\s+(win|be\s+in|top|defeat|finish|reach)/);
   if (m) return m[1].trim();
+  // Phase 1.5 r143 fuzzy LIKE fallback — extract longest non-stopword token (skip "will/the/in/of...").
+  // Returns null only if no usable token (variant-expander will skip rec gracefully).
+  const stopwords = new Set(['will', 'the', 'and', 'or', 'in', 'on', 'of', 'to', 'for', 'with', 'this', 'that', 'be', 'by', 'a', 'an']);
+  const tokens = text.replace(/[^\w\s]/g, ' ').split(/\s+/).filter(t => t.length > 3 && !stopwords.has(t));
+  if (tokens.length > 0) {
+    // Return longest token as fuzzy entity candidate (most likely proper noun)
+    return tokens.sort((a, b) => b.length - a.length)[0];
+  }
   return null;
 }
 
-async function fetchRelatedMarkets(entity) {
+// Phase 1.5 r143 hotfix — eventSlug expansion: parent rec slug 提取 event prefix, 然后 fetch
+// 同 event 全 markets (但 filter same_entity only per r143 §4 — Greece top10 NOT a Romania top10 variant).
+async function fetchRelatedMarkets(entity, parentSlug) {
   if (!entity) return [];
   try {
-    const url = `https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=50`;
+    // Phase 1.5 eventSlug expansion: e.g. "will-romania-be-in-the-top-10-at-eurovision-2026"
+    // → event hint "eurovision-2026". Combine entity LIKE + eventSlug LIKE for broader coverage
+    // BUT filter cross-entity at caller (r143 §4 cross_entity_same_event NOT variant).
+    let eventHint = null;
+    if (parentSlug) {
+      const m = String(parentSlug).toLowerCase().match(/-at-([a-z0-9-]+)$/) || String(parentSlug).toLowerCase().match(/-(eurovision-\d+|epl-?\d+|nba-\d+|nfl-\d+|mlb-\d+|champions-league-\d+)\b/);
+      if (m) eventHint = m[1];
+    }
+    const url = `https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=100`;
     const res = await fetch(url, { headers: { 'User-Agent': 'KANet-bettor-variant/1.0' } });
     if (!res.ok) return [];
     const arr = await res.json();
     if (!Array.isArray(arr)) return [];
     const entityLower = entity.toLowerCase();
-    return arr.filter(m => (m.slug || '').toLowerCase().includes(entityLower) || (m.question || '').toLowerCase().includes(entityLower));
+    return arr.filter(m => {
+      const slug = (m.slug || '').toLowerCase();
+      const question = (m.question || '').toLowerCase();
+      const matchEntity = slug.includes(entityLower) || question.includes(entityLower);
+      const matchEvent = eventHint ? (slug.includes(eventHint) || (m.eventSlug || '').toLowerCase().includes(eventHint)) : false;
+      // r143 §4: variant 只 include same_entity. eventHint match alone (without entity match) = cross-entity
+      // (independent rec, separate UI section). Return only entity-match here.
+      return matchEntity || (matchEvent && matchEntity);
+    });
   } catch {
     return [];
   }
