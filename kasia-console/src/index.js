@@ -396,6 +396,12 @@ startBettorReactor();
 import { startBrokerMetricsCron } from './services/broker-metrics-snapshotter.js';
 startBrokerMetricsCron();
 
+// Phase B 持仓自动保护 (Owner 5/16 钦定 "你们先搞" + Bettor r139 spec) — Phase 1 SKELETON, 1 min cron.
+// detect new accepted positions → INSERT pending_owner_ack rule + audit log per check.
+// Phase 3 will add firing logic (HMAC owner_ack_token verify + fire /api/predictions/order).
+import { startPositionProtectorCron as startBettorPositionProtector } from './services/bettor-position-protector.js';
+startBettorPositionProtector();
+
 // Pre-split UTXOs via Relay IPC (after relays are running)
 import { autoSplitAll } from './services/utxo-splitter.js';
 await autoSplitAll();

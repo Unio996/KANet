@@ -3631,5 +3631,64 @@ export function runMigrations() {
     }
   }
 
+  // v112: Phase B 持仓自动保护 (Owner 5/16 钦定 "你们先搞" + Bettor r139 architect spec).
+  //   - position_protect_rules: per-token rule (止损 pct + cooldown / 止盈 price / 时间 days / settlement redeem)
+  //   - position_protect_audit: per-tick check log (current_price + pnl_pct + trigger_fired + action_taken)
+  //   Owner ACK 派 HMAC token (max_price + max_size 边界), daemon fire 用 token verify.
+  {
+    const exists = sqlite.prepare("SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name='position_protect_rules'").get();
+    if (!exists.cnt) {
+      sqlite.exec(`
+        CREATE TABLE position_protect_rules (
+          id TEXT PRIMARY KEY,
+          relay_node_id TEXT NOT NULL,
+          market_slug TEXT NOT NULL,
+          token_id TEXT NOT NULL,
+          side TEXT NOT NULL,
+          entry_avg_price REAL NOT NULL,
+          current_size REAL NOT NULL,
+          stop_loss_pct REAL,
+          cooldown_hours INTEGER,
+          take_profit_price REAL,
+          take_profit_limit_order_id TEXT,
+          time_close_days INTEGER,
+          time_drift_threshold_pp REAL,
+          status TEXT NOT NULL,
+          owner_ack_token TEXT,
+          owner_ack_at TIMESTAMP,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          triggered_at TIMESTAMP,
+          trigger_action_tx_hash TEXT,
+          trigger_realized_pnl REAL,
+          last_audit_at TIMESTAMP,
+          UNIQUE(relay_node_id, token_id)
+        );
+        CREATE INDEX idx_ppr_relay ON position_protect_rules(relay_node_id);
+        CREATE INDEX idx_ppr_status ON position_protect_rules(status);
+      `);
+      console.log('[migrate] v112: position_protect_rules 表 + 2 索引 创建 (Phase B 持仓自动保护 rule store).');
+    }
+    const exists2 = sqlite.prepare("SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name='position_protect_audit'").get();
+    if (!exists2.cnt) {
+      sqlite.exec(`
+        CREATE TABLE position_protect_audit (
+          id TEXT PRIMARY KEY,
+          rule_id TEXT NOT NULL,
+          check_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          current_price REAL,
+          current_pnl_pct REAL,
+          trigger_fired TEXT,
+          action_taken TEXT,
+          tx_hash TEXT,
+          fill_price REAL,
+          notes TEXT
+        );
+        CREATE INDEX idx_ppa_rule ON position_protect_audit(rule_id);
+        CREATE INDEX idx_ppa_at ON position_protect_audit(check_at);
+      `);
+      console.log('[migrate] v112: position_protect_audit 表 + 2 索引 创建 (Phase B 持仓自动保护 per-tick check log).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
