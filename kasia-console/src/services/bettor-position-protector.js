@@ -53,65 +53,83 @@ export async function tick() {
   }
 }
 
-// Detect new accepted positions (bettor_recommendations status='accepted', outcome=NULL)
-// without an existing rule. INSERT rule status='pending_owner_ack' with default thresholds.
+// Detect new positions from Polymarket data-api (Bettor r140 spec fix — 数据源错位 自批):
+// 真持仓 source of truth = Polymarket gamma /positions API, NOT bettor_recommendations table.
+// Owner 手动买 / Bettor curl 直 fire / scanner accept 全 in same place.
+//
+// Iterate relay_nodes → fetch each polygon wallet address → query positions API → INSERT
+// pending_owner_ack rule per position not yet covered. Also detect settlement (size=0 → settled).
 async function detectNewPositions() {
-  const accepted = sqlite.prepare(`
-    SELECT r.id AS rec_id, r.relay_node_id, r.condition_id, r.slug, r.market_id,
-           r.question, r.decision, r.size_usd, r.yes_price AS entry_yes_price,
-           r.scanned_at AS opened_at
-    FROM bettor_recommendations r
-    LEFT JOIN position_protect_rules p ON p.relay_node_id = r.relay_node_id AND p.token_id = r.condition_id
-    WHERE r.status = 'accepted' AND r.outcome IS NULL AND p.id IS NULL
-      AND r.condition_id IS NOT NULL
+  // Find polygon wallet per relay (proxy address used as Polymarket user)
+  const wallets = sqlite.prepare(`
+    SELECT DISTINCT relay_node_id, address FROM agent_wallets
+    WHERE chain = 'polygon' AND address IS NOT NULL AND address != ''
   `).all();
 
   let inserted = 0;
-  for (const rec of accepted) {
-    if (!rec.relay_node_id || !rec.condition_id) continue;
-    // entry_avg_price = direction-adjusted cost basis
-    // BUY YES at yes_price → cost = yes_price per share
-    // BUY NO at (1 - yes_price) → cost = (1 - yes_price) per share
-    const entryAvgPrice = rec.decision === 'NO'
-      ? Math.max(0.001, 1 - (rec.entry_yes_price || 0.5))
-      : Math.max(0.001, rec.entry_yes_price || 0.5);
-    // take_profit分级 (per r139 §2):
-    //   ≥ 0.90: entry + 0.04 (cap 0.99)
-    //   0.75-0.90: entry + 0.07
-    //   0.50-0.75: entry + 0.12
-    //   < 0.50: entry × 1.50 (cap 0.99)
-    let takeProfitPrice;
-    if (entryAvgPrice >= 0.90) takeProfitPrice = Math.min(0.99, entryAvgPrice + 0.04);
-    else if (entryAvgPrice >= 0.75) takeProfitPrice = Math.min(0.99, entryAvgPrice + 0.07);
-    else if (entryAvgPrice >= 0.50) takeProfitPrice = Math.min(0.99, entryAvgPrice + 0.12);
-    else takeProfitPrice = Math.min(0.99, entryAvgPrice * 1.50);
-
-    const ruleId = randomUUID();
+  for (const w of wallets) {
     try {
-      sqlite.prepare(`
-        INSERT INTO position_protect_rules
-          (id, relay_node_id, market_slug, token_id, side, entry_avg_price, current_size,
-           stop_loss_pct, cooldown_hours, take_profit_price, time_close_days, time_drift_threshold_pp,
-           status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_owner_ack', datetime('now'))
-      `).run(
-        ruleId, rec.relay_node_id, rec.slug || rec.market_id, rec.condition_id,
-        rec.decision === 'NO' ? 'NO' : 'YES',
-        entryAvgPrice,
-        rec.size_usd / entryAvgPrice,  // shares
-        STOP_LOSS_DEFAULT_PCT,
-        COOLDOWN_DEFAULT_HOURS,
-        takeProfitPrice,
-        TIME_CLOSE_DEFAULT_DAYS,
-        TIME_DRIFT_DEFAULT_PP
-      );
-      inserted++;
+      const positions = await fetchPolymarketPositions(w.address);
+      if (!Array.isArray(positions)) continue;
+      for (const pos of positions) {
+        if (!pos.asset || !pos.conditionId) continue;
+        if (!(Number(pos.size) > 0.5)) continue;  // sizeThreshold per r140 §3
+        const existing = sqlite.prepare(`SELECT id, status FROM position_protect_rules WHERE relay_node_id = ? AND token_id = ?`).get(w.relay_node_id, pos.asset);
+        if (existing) continue;  // rule already exists
+
+        const side = (pos.outcome || '').toUpperCase().startsWith('Y') ? 'YES' : 'NO';
+        const entryAvgPrice = Math.max(0.001, Math.min(0.999, Number(pos.avgPrice) || 0.5));
+        // take_profit 4-tier per r139 §2 (cap $0.99)
+        let takeProfitPrice;
+        if (entryAvgPrice >= 0.90) takeProfitPrice = Math.min(0.99, entryAvgPrice + 0.04);
+        else if (entryAvgPrice >= 0.75) takeProfitPrice = Math.min(0.99, entryAvgPrice + 0.07);
+        else if (entryAvgPrice >= 0.50) takeProfitPrice = Math.min(0.99, entryAvgPrice + 0.12);
+        else takeProfitPrice = Math.min(0.99, entryAvgPrice * 1.50);
+
+        const ruleId = randomUUID();
+        try {
+          sqlite.prepare(`
+            INSERT INTO position_protect_rules
+              (id, relay_node_id, market_slug, token_id, side, entry_avg_price, current_size,
+               stop_loss_pct, cooldown_hours, take_profit_price, time_close_days, time_drift_threshold_pp,
+               status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_owner_ack', datetime('now'))
+          `).run(
+            ruleId, w.relay_node_id, pos.slug || pos.title?.slice(0, 80) || pos.conditionId,
+            pos.asset, side, entryAvgPrice, Number(pos.size),
+            STOP_LOSS_DEFAULT_PCT, COOLDOWN_DEFAULT_HOURS, takeProfitPrice,
+            TIME_CLOSE_DEFAULT_DAYS, TIME_DRIFT_DEFAULT_PP
+          );
+          inserted++;
+        } catch (e) {
+          if (!e.message?.includes('UNIQUE')) console.error(`[position-protector] INSERT rule fail relay=${w.relay_node_id?.slice(0,8)} token=${pos.asset?.slice(0,12)}: ${e.message}`);
+        }
+      }
+      // Settlement sync: rules where Polymarket position size=0 → mark settled
+      const ruleSet = new Set(positions.filter(p => Number(p.size) > 0.5).map(p => p.asset));
+      const activeRules = sqlite.prepare(`SELECT id, token_id FROM position_protect_rules WHERE relay_node_id = ? AND status IN ('active', 'pending_owner_ack')`).all(w.relay_node_id);
+      for (const r of activeRules) {
+        if (!ruleSet.has(r.token_id)) {
+          sqlite.prepare(`UPDATE position_protect_rules SET status = 'settled', triggered_at = COALESCE(triggered_at, datetime('now')) WHERE id = ?`).run(r.id);
+        }
+      }
     } catch (e) {
-      // UNIQUE constraint OR other — log + continue
-      if (!e.message?.includes('UNIQUE')) console.error(`[position-protector] INSERT rule fail rec=${rec.rec_id?.slice(0,8)}: ${e.message}`);
+      console.error(`[position-protector] detectNewPositions wallet ${w.address?.slice(0,12)} fail: ${e.message}`);
     }
   }
   return inserted;
+}
+
+async function fetchPolymarketPositions(walletAddress) {
+  if (!walletAddress) return null;
+  try {
+    const url = `https://data-api.polymarket.com/positions?user=${encodeURIComponent(walletAddress)}&sizeThreshold=0.5`;
+    const res = await fetch(url, { headers: { 'User-Agent': 'KANet-bettor-protector/1.0' } });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
 }
 
 // Audit active rules — Phase 3 firing logic (Owner 5/16 钦定 + Bettor r139 §4 spec).
@@ -234,4 +252,4 @@ async function fireMarketSell(rule, currentValue) {
   }
 }
 
-export const __testing = { detectNewPositions, auditActiveRules, fetchPolymarketPrice, fireMarketSell, STOP_LOSS_DEFAULT_PCT, COOLDOWN_DEFAULT_HOURS, TIME_CLOSE_DEFAULT_DAYS };
+export const __testing = { detectNewPositions, auditActiveRules, fetchPolymarketPrice, fetchPolymarketPositions, fireMarketSell, STOP_LOSS_DEFAULT_PCT, COOLDOWN_DEFAULT_HOURS, TIME_CLOSE_DEFAULT_DAYS };
