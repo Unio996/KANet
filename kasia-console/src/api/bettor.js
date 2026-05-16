@@ -370,6 +370,54 @@ export async function registerBettorRoutes(fastify) {
     return reply.send({ ok: true, days, daily: dailyWithRate, cumulative });
   });
 
+  // Phase B 持仓自动保护 (Owner 5/16 钦定 "你们先搞" + Bettor r139 architect spec) — Phase 1 CRUD endpoints.
+  // Phase 3 will add /ack endpoint with HMAC token derivation. Phase 2 wires UI consumption.
+
+  // GET /api/bettor/position-protect/rules?relay_node_id=X[&status=Y]
+  fastify.get('/api/bettor/position-protect/rules', async (request, reply) => {
+    const relayNodeId = request.query.relay_node_id || null;
+    const status = request.query.status || null;
+    const where = []; const args = [];
+    if (relayNodeId) { where.push('relay_node_id = ?'); args.push(relayNodeId); }
+    if (status) { where.push('status = ?'); args.push(status); }
+    const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const rows = sqlite.prepare(`SELECT * FROM position_protect_rules ${whereClause} ORDER BY created_at DESC LIMIT 500`).all(...args);
+    return reply.send({ ok: true, count: rows.length, rules: rows });
+  });
+
+  // PUT /api/bettor/position-protect/rules/:id { stop_loss_pct?, cooldown_hours?, take_profit_price?, time_close_days? }
+  // Owner UI 改 rule 阈值 — Phase 2 will surface this in /predictions sub-tab.
+  fastify.put('/api/bettor/position-protect/rules/:id', async (request, reply) => {
+    const { id } = request.params;
+    const { stop_loss_pct, cooldown_hours, take_profit_price, time_close_days, time_drift_threshold_pp } = request.body || {};
+    const updates = []; const args = [];
+    if (stop_loss_pct != null) { updates.push('stop_loss_pct = ?'); args.push(stop_loss_pct); }
+    if (cooldown_hours != null) { updates.push('cooldown_hours = ?'); args.push(cooldown_hours); }
+    if (take_profit_price != null) { updates.push('take_profit_price = ?'); args.push(take_profit_price); }
+    if (time_close_days != null) { updates.push('time_close_days = ?'); args.push(time_close_days); }
+    if (time_drift_threshold_pp != null) { updates.push('time_drift_threshold_pp = ?'); args.push(time_drift_threshold_pp); }
+    if (!updates.length) return reply.code(400).send({ error: 'no fields to update' });
+    args.push(id);
+    const info = sqlite.prepare(`UPDATE position_protect_rules SET ${updates.join(', ')} WHERE id = ?`).run(...args);
+    return reply.send({ ok: true, changes: info.changes });
+  });
+
+  // DELETE /api/bettor/position-protect/rules/:id — manual 删 rule (Owner UI 删除按钮)
+  fastify.delete('/api/bettor/position-protect/rules/:id', async (request, reply) => {
+    const { id } = request.params;
+    const info = sqlite.prepare(`DELETE FROM position_protect_rules WHERE id = ?`).run(id);
+    return reply.send({ ok: true, changes: info.changes });
+  });
+
+  // GET /api/bettor/position-protect/audit?rule_id=X[&limit=50]
+  fastify.get('/api/bettor/position-protect/audit', async (request, reply) => {
+    const ruleId = request.query.rule_id;
+    if (!ruleId) return reply.code(400).send({ error: 'rule_id required' });
+    const limit = Math.min(parseInt(request.query.limit) || 50, 500);
+    const rows = sqlite.prepare(`SELECT * FROM position_protect_audit WHERE rule_id = ? ORDER BY check_at DESC LIMIT ?`).all(ruleId, limit);
+    return reply.send({ ok: true, count: rows.length, audit: rows });
+  });
+
   // GET /api/bettor/recommendations/history?days=30&relay_node_id=X&limit=200
   // Bettor r132 (Owner 5/15 严训 "推荐 history 没保存") + J1 #206 ack: data IS saved in
   // bettor_recommendations (173 rows on Bettor host, similar on J1), Owner saw 战绩 tab
