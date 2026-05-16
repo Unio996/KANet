@@ -272,15 +272,21 @@ export async function _settleEscrowToUser(escrowId, offerId) {
   let settleTxHash = null;
   try {
     if (isKas) {
-      // KAS transfer via broker-action-queue (R4 single-pump UTXO 双花 fix)
-      const { enqueue } = await import('./broker-action-queue.js');
-      enqueue({
-        kind: 'sendKas', peer: e.user_target_addr,
-        payload: { amount_kas: e.target_amount, note: `escrow settle ${escrowId.slice(0,8)}` },
-      });
-      // Note: 真 chain TX hash 通过 queue 异步处理, settle_tx 暂记 'queued:<escrowId>' — 后续 reconciler grep update
-      settleTxHash = `queued:${escrowId.slice(0,8)}`;
-      console.log(`[exchange-escrow-settle] enqueued KAS sendKas ${e.target_amount} → ${e.user_target_addr?.slice(-12)} for escrow ${escrowId.slice(0,8)}`);
+      // Bug AS P1 fix 5/16 (NWT 04:24 audit completeness gap): replace enqueue (fire-and-forget +
+      // 'queued:' stub) with enqueueVerified (await real txId). DB refund_tx/settle_tx 真 TX hash,
+      // not stub. audit trail complete + user can verify on chain.
+      const { enqueueVerified } = await import('./broker-action-queue.js');
+      try {
+        const r = await enqueueVerified({
+          kind: 'sendKas', peer: e.user_target_addr,
+          payload: { amount_kas: e.target_amount, note: `escrow settle ${escrowId.slice(0,8)}` },
+        });
+        settleTxHash = r?.txId || `queued:${escrowId.slice(0,8)}`;
+        console.log(`[exchange-escrow-settle] KAS sendKas verified ${e.target_amount} → ${e.user_target_addr?.slice(-12)} TX ${settleTxHash?.slice(0,16)} for escrow ${escrowId.slice(0,8)}`);
+      } catch (err) {
+        settleTxHash = `queue-failed:${escrowId.slice(0,8)}`;
+        console.error(`[exchange-escrow-settle] KAS sendKas enqueueVerified fail for escrow ${escrowId.slice(0,8)}: ${err.message}`);
+      }
     } else {
       // USDT/USDC EVM transfer via evm-transfer.transferUsdt
       const transferUsdt = await getTransferUsdt();
@@ -401,14 +407,20 @@ export async function _refundEscrow(escrowId, reason = 'unspecified') {
 
   try {
     if (isKasRefund) {
-      // SELL escrow cancel: refund KAS via broker-action-queue (R4 single-pump)
-      const { enqueue } = await import('./broker-action-queue.js');
-      enqueue({
-        kind: 'sendKas', peer: e.user_refund_addr,
-        payload: { amount_kas: refundAmount, note: `escrow refund ${escrowId.slice(0,8)} reason=${reason.slice(0,40)}` },
-      });
-      refundTxHash = `queued:${escrowId.slice(0,8)}`;
-      console.log(`[exchange-escrow-refund] enqueued KAS refund ${refundAmount} → ${e.user_refund_addr?.slice(-12)} for escrow ${escrowId.slice(0,8)} (reason: ${reason})`);
+      // Bug AS P1 fix 5/16 (NWT 04:24 audit completeness gap): enqueueVerified for real TX hash
+      // (refund_tx populated with real on-chain TX, not 'queued:' stub).
+      const { enqueueVerified } = await import('./broker-action-queue.js');
+      try {
+        const r = await enqueueVerified({
+          kind: 'sendKas', peer: e.user_refund_addr,
+          payload: { amount_kas: refundAmount, note: `escrow refund ${escrowId.slice(0,8)} reason=${reason.slice(0,40)}` },
+        });
+        refundTxHash = r?.txId || `queued:${escrowId.slice(0,8)}`;
+        console.log(`[exchange-escrow-refund] KAS refund verified ${refundAmount} → ${e.user_refund_addr?.slice(-12)} TX ${refundTxHash?.slice(0,16)} (reason: ${reason})`);
+      } catch (err) {
+        refundTxHash = `queue-failed:${escrowId.slice(0,8)}`;
+        console.error(`[exchange-escrow-refund] KAS refund enqueueVerified fail for ${escrowId.slice(0,8)}: ${err.message}`);
+      }
     } else {
       // BUY escrow cancel: refund USDT/USDC via transferUsdt
       const transferUsdt = await getTransferUsdt();
