@@ -616,14 +616,21 @@ export async function sweepOrphanInflows() {
     try {
       let refundTx = null;
       if (o.chain === 'kaspa') {
-        // Kaspa orphan: enqueue sendKas via broker-action-queue (R4 single-pump pattern).
-        const { enqueue } = await import('./broker-action-queue.js');
-        enqueue({
-          kind: 'sendKas', peer: o.from_address,
-          payload: { amount_kas: o.amount, note: `orphan refund ${o.id.slice(0,8)} 24hr stale` },
-        });
-        refundTx = `queued:${o.id.slice(0,8)}`;
-        console.log(`[exchange-orphan-sweep] enqueued KAS ${o.amount} → ${o.from_address?.slice(-12)} for orphan ${o.id.slice(0,8)}`);
+        // Bug AS audit gap fix 5/16 (NWT 04:31 L621 same stub pattern as Phase 1 ship): use
+        // enqueueVerified for real txId. Bug AA Phase 2 cron currently disabled, so no production
+        // impact, but future re-enable would have复刻 same audit gap if left.
+        const { enqueueVerified } = await import('./broker-action-queue.js');
+        try {
+          const r = await enqueueVerified({
+            kind: 'sendKas', peer: o.from_address,
+            payload: { amount_kas: o.amount, note: `orphan refund ${o.id.slice(0,8)} 24hr stale` },
+          });
+          refundTx = r?.txId || `queued:${o.id.slice(0,8)}`;
+          console.log(`[exchange-orphan-sweep] KAS verified ${o.amount} → ${o.from_address?.slice(-12)} TX ${refundTx?.slice(0,16)} for orphan ${o.id.slice(0,8)}`);
+        } catch (err) {
+          refundTx = `queue-failed:${o.id.slice(0,8)}`;
+          console.error(`[exchange-orphan-sweep] KAS enqueueVerified fail for orphan ${o.id.slice(0,8)}: ${err.message}`);
+        }
       } else if (o.chain === 'bnb') {
         // BSC orphan: transferUsdt direct via evm-transfer.
         const transferUsdt = await getTransferUsdt();
