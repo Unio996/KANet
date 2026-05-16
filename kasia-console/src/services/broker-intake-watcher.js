@@ -689,19 +689,38 @@ export async function intakeKaspaEscrowTick() {
       // Also exclude TXs that match historical successful prepayments (matched in past tick, prevent re-orphan).
       const recentPrepayTxs = sqlite.prepare(`SELECT prepayment_tx FROM user_escrow_balances WHERE prepayment_tx IS NOT NULL`).all().map(r => r.prepayment_tx);
       for (const pt of recentPrepayTxs) matchedTxIds.add(pt);
-      // Bug W Phase 1 over-detection fix 5/15 (J2 self-grep verify post restart 18: 83 NULL-from-address
-      // chunks detected, all Step A Gate.io withdraw 20000 KAS split inbound, NOT user orphans).
-      // Kaspa indexer T-NWT-07 残 → from_address often NULL on legitimate broker top-ups.
-      // Skip INSERT when from_address NULL — can't refund anyway + most NULL chunks are operational inflows.
-      // Real user prepay-not-via-menu cases (true Bug W target) will have from_address populated via Kasia DM context.
-      const orphanInsert = sqlite.prepare(`INSERT OR IGNORE INTO broker_orphan_inflows (id, chain, asset, amount, from_address, to_address, prepayment_tx) VALUES (?, 'kaspa', 'KAS', ?, ?, ?, ?)`);
+      // Bug AR P0 fix 5/16 (NWT AT-02 真测 surface: NWT 真发 2.02 KAS, tx_log from_address NULL because
+      // Kaspa indexer T-NWT-07 残, my Bug W Phase 1 over-correction commit 0945506a NULL skip 历史
+      // wrongly treats ALL NULL as operational. AT-02 真 user orphan also NULL → silent absorption.
+      //
+      // Bug AR Option C (NWT propose, defense-in-depth):
+      // 1. Try infer sender from change UTXO (outputs_json non-broker kaspa: addr = likely sender)
+      // 2. If still NULL → INSERT orphan with from_address=NULL + status='manual_review' (preserve audit)
+      //
+      // Owner invariant K不减 baseline 隐性破 if silent absorb未 logged. KI 第 N+16 次 silent skip 复刻.
+      const inferSenderFromChange = (outputs_json, broker_addr) => {
+        try {
+          const outs = JSON.parse(outputs_json || '[]');
+          for (const o of outs) {
+            if (o.address && o.address !== broker_addr && o.address.startsWith('kaspa:')) return o.address;
+          }
+        } catch {}
+        return null;
+      };
+      const orphanInsert = sqlite.prepare(`INSERT OR IGNORE INTO broker_orphan_inflows (id, chain, asset, amount, from_address, to_address, prepayment_tx, status) VALUES (?, 'kaspa', 'KAS', ?, ?, ?, ?, ?)`);
+      const txOutputs = inboundTxs.length > 0 ? sqlite.prepare(`SELECT tx_id, outputs_json FROM kaspa_tx_log WHERE tx_id IN (${inboundTxs.map(() => '?').join(',')})`).all(...inboundTxs.map(t => t.tx_id)) : [];
+      const outputsByTx = Object.fromEntries(txOutputs.map(r => [r.tx_id, r.outputs_json]));
       for (const t of inboundTxs) {
         if (matchedTxIds.has(t.tx_id)) continue;
-        if (!t.from_address) continue;  // skip unrefundable + likely operational
+        // Bug AR Option A: heuristic sender inference from change UTXO
+        let sender = t.from_address;
+        if (!sender) sender = inferSenderFromChange(outputsByTx[t.tx_id], brokerKasiaAddr);
+        // Bug AR Option B: still NULL → INSERT manual_review for audit trail (Owner classify post-incident)
+        const status = sender ? 'detected' : 'manual_review';
         const orphanId = randomUUID();
-        const r = orphanInsert.run(orphanId, t.amount, t.from_address, brokerKasiaAddr, t.tx_id);
+        const r = orphanInsert.run(orphanId, t.amount, sender, brokerKasiaAddr, t.tx_id, status);
         if (r.changes > 0) {
-          console.warn(`[broker-kaspa-intake-escrow] 🚨 orphan KAS inflow detected: ${t.amount} KAS from ${t.from_address.slice(0,16)} tx=${t.tx_id.slice(0,16)} → orphan_id=${orphanId.slice(0,8)} (24hr sweep refund pending)`);
+          console.warn(`[broker-kaspa-intake-escrow] 🚨 orphan KAS inflow detected: ${t.amount} KAS from ${sender?.slice(0,16) || 'NULL-manual_review'} tx=${t.tx_id.slice(0,16)} → orphan_id=${orphanId.slice(0,8)} status=${status}`);
         }
       }
     } catch (err) {
