@@ -194,6 +194,10 @@ async function _handleTradeFlow(user_id, msg, cur, side, relayNodeId) {
     // BUY KAS skip ADDR_INPUT — but go to PRICE_INPUT if ESCROW_MODE on (Bug H γ Step 4 #3)
     if (ESCROW_MODE) {
       setFlowState(user_id, { ...cur, step: 'PRICE_INPUT', draft });
+      // 方向 B Phase 1 5/16 (Owner 04:53 严训 数字严谨 + NWT 05:06 propose): BUY pilot strict 数字 only.
+      if (side === 'buy') {
+        return { reply: `${qty} KAS. 出价方式:\n  1️⃣ 用 live oracle 中间价 (mid)\n  2️⃣ 自定 USDT/KAS 价格\n回 1 或 2.` };
+      }
       return { reply: `${qty} KAS. 出价? 回 'mid' 用 live oracle 中间价 OR 自定 USDT/KAS 价格 (e.g. '0.035').` };
     }
     // Legacy non-escrow: skip price input, straight to CONFIRM
@@ -214,13 +218,29 @@ async function _handleTradeFlow(user_id, msg, cur, side, relayNodeId) {
   }
   if (cur.step === 'PRICE_INPUT') {
     // Bug H γ Step 4 #3 (Owner 17:35 钦定 invariant + NWT 18:26 propose): user 自定价 prompt.
-    // 'mid' OR numeric input. Marketable check (after publish) will use this for limit fill criteria.
-    const txt = (msg || '').trim().toLowerCase();
+    // 方向 B Phase 1 5/16 (Owner 04:53 严训 strict 数字): BUY pilot 数字 only (1=mid / 2=自定 → PRICE_VALUE_INPUT).
+    // SELL flow 保留 legacy 'mid' OR numeric input behavior (NOT in BUY pilot scope).
+    const txt = (msg || '').trim();
+    if (side === 'buy') {
+      // BUY: strict 1 OR 2
+      if (txt === '1') {
+        draft.user_price = null;  // mid live oracle
+        setFlowState(user_id, { ...cur, step: 'CONFIRM', draft });
+        return { reply: await _previewText(draft, side), triggerPreview: true };
+      } else if (txt === '2') {
+        setFlowState(user_id, { ...cur, step: 'PRICE_VALUE_INPUT', draft });
+        return { reply: `请输自定 USDT/KAS 价格 (e.g. 0.035, 合理范围 0-10).` };
+      } else {
+        return { reply: `❓ 请输 1 (mid) 或 2 (自定价格).` };
+      }
+    }
+    // SELL flow legacy behavior (preserved)
+    const txtLower = txt.toLowerCase();
     let userPrice = null;
-    if (txt === 'mid' || txt === '') {
-      userPrice = null;  // null → use live oracle mid in _doQuote
+    if (txtLower === 'mid' || txtLower === '') {
+      userPrice = null;
     } else {
-      const p = parseFloat(txt);
+      const p = parseFloat(txtLower);
       if (!Number.isFinite(p) || p <= 0 || p > 10) {
         return { reply: `价格不合理 (合理范围 0-10 USDT/KAS). 重输 OR 回 'mid' 用 oracle.` };
       }
@@ -230,16 +250,39 @@ async function _handleTradeFlow(user_id, msg, cur, side, relayNodeId) {
     setFlowState(user_id, { ...cur, step: 'CONFIRM', draft });
     return { reply: await _previewText(draft, side), triggerPreview: true };
   }
+  // 方向 B Phase 1 NEW step: BUY 自定价 input value (only reachable from PRICE_INPUT via '2')
+  if (cur.step === 'PRICE_VALUE_INPUT') {
+    const p = parseFloat((msg || '').trim());
+    if (!Number.isFinite(p) || p <= 0 || p > 10) {
+      return { reply: `❓ 价格不合理 (合理范围 0-10 USDT/KAS), 重输 OR 回 back 重新选 mid/自定.` };
+    }
+    draft.user_price = p;
+    setFlowState(user_id, { ...cur, step: 'CONFIRM', draft });
+    return { reply: await _previewText(draft, side), triggerPreview: true };
+  }
   if (cur.step === 'CONFIRM') {
+    // 方向 B Phase 1 5/16 (Owner 04:53 严训 strict 数字): BUY pilot 1=确认 / 2=取消 only.
+    // SELL flow 保留 legacy yes/no behavior.
+    if (side === 'buy') {
+      if (msg === '1') {
+        if (ESCROW_MODE) {
+          setFlowState(user_id, { ...cur, step: 'WAIT_PREPAY', draft });
+          return { reply: '正在生成报价...', triggerQuote: true, draft };
+        }
+        return { reply: '正在挂单上链...', triggerPublish: true, draft };
+      }
+      if (msg === '2') {
+        clearFlowState(user_id);
+        return { reply: '已取消. 回菜单.\n\n' + await _menuTopText() };
+      }
+      return { reply: '❓ 请输 1 (确认下单) 或 2 (取消).' };
+    }
+    // SELL legacy
     if (/^(yes|确认|ok|好|发布)$/i.test(msg)) {
-      // Bug H 5/14 candidate A v2 (Owner 12:05 钦定 broker-escrow custody):
-      // ESCROW_MODE=true → 转 WAIT_PREPAY + triggerQuote (broker reply quote + user 真链 prepay flow)
-      // ESCROW_MODE=false → legacy triggerPublish (broker-as-maker, 60/60 regression 不退, 直 publish)
       if (ESCROW_MODE) {
         setFlowState(user_id, { ...cur, step: 'WAIT_PREPAY', draft });
         return { reply: '正在生成报价...', triggerQuote: true, draft };
       }
-      // Legacy path: router.js _doPublish + transition state → WAIT_PAYMENT (Bug H surface 现 mode)
       return { reply: '正在挂单上链...', triggerPublish: true, draft };
     }
     if (/^(no|取消)$/i.test(msg)) {
@@ -250,11 +293,19 @@ async function _handleTradeFlow(user_id, msg, cur, side, relayNodeId) {
   }
   if (cur.step === 'WAIT_PREPAY') {
     // Bug H 5/14 escrow mode: user 在 broker quote 等 user 真链 prepay 状态.
-    // Defensive: if ESCROW_MODE off but state somehow reaches WAIT_PREPAY, clear flow.
     if (!ESCROW_MODE) { clearFlowState(user_id); return { reply: '状态错乱 (escrow mode off), 回菜单.\n\n' + await _menuTopText() }; }
+    // 方向 B Phase 1 5/16: BUY pilot 1=取消 / 2=查询 only. SELL legacy.
+    if (side === 'buy') {
+      if (msg === '1') {
+        return { reply: '正在取消报价 + 处理 refund...', triggerCancelEscrow: true, draft: cur.draft };
+      }
+      if (msg === '2') {
+        return { reply: '正在查 prepayment status...', triggerCheckPrepayStatus: true, draft: cur.draft };
+      }
+      return { reply: '等你真链 transfer USDT/KAS 到 broker 地址 (见上一条 quote). 5 min 超时自动取消.\n  1️⃣ 取消 prepayment\n  2️⃣ 查询 prepayment 状态\n回 1 或 2.' };
+    }
+    // SELL legacy
     if (/^(no|取消|cancel)$/i.test(msg)) {
-      // Bug H γ Sub #7: cancel 不再 silent clear — trigger _refundEscrow 处理 (pending_prepay 不需链 TX,
-      // active 需 broker 真链 refund). 状态 clear 在 _refundEscrow 后 router dispatch.
       return { reply: '正在取消报价 + 处理 refund...', triggerCancelEscrow: true, draft: cur.draft };
     }
     if (/^(status|查)$/i.test(msg)) return { reply: '正在查 prepayment status...', triggerCheckPrepayStatus: true, draft: cur.draft };
