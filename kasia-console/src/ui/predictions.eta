@@ -87,6 +87,41 @@
     </template>
   </div>
 
+  <!-- Phase 2.1c Bettor r151 §3.C — Protect rule edit modal (4-field form) -->
+  <template x-if="protectEditModal">
+    <div class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" @click="closeProtectEditModal()" @keydown.escape.window="closeProtectEditModal()">
+      <div class="card max-w-md w-full" @click.stop>
+        <div class="flex items-center justify-between mb-3 pb-2 border-b border-warm-200">
+          <div class="text-sm font-bold">✏️ 改 保护规则阈值</div>
+          <button @click="closeProtectEditModal()" class="text-ink-400 hover:text-ink-700 text-xl">✕</button>
+        </div>
+        <div class="text-[10px] text-ink-500 mb-3" x-text="protectEditModal?.market_slug"></div>
+        <div class="space-y-3 text-xs">
+          <div>
+            <label class="block text-ink-500 mb-1">止损 % (负数, 默认 -30%)</label>
+            <input type="number" step="0.05" min="-1" max="0" x-model.number="protectEditForm.stop_loss_pct" class="w-full px-2 py-1 border border-warm-300 rounded">
+          </div>
+          <div>
+            <label class="block text-ink-500 mb-1">Cooldown 小时 (默认 12h, 触发止损前最小持仓时间)</label>
+            <input type="number" step="1" min="0" x-model.number="protectEditForm.cooldown_hours" class="w-full px-2 py-1 border border-warm-300 rounded">
+          </div>
+          <div>
+            <label class="block text-ink-500 mb-1">时间天数 (默认 60d, 超过自动 close)</label>
+            <input type="number" step="1" min="1" x-model.number="protectEditForm.time_close_days" class="w-full px-2 py-1 border border-warm-300 rounded">
+          </div>
+          <div>
+            <label class="block text-ink-500 mb-1">止盈价 (📋 ref only, 待 Phase 3 swap-suggester reactivate)</label>
+            <input type="number" step="0.01" min="0" max="1" x-model.number="protectEditForm.take_profit_price" class="w-full px-2 py-1 border border-warm-300 rounded text-ink-400">
+          </div>
+        </div>
+        <div class="flex gap-2 mt-4">
+          <button @click="saveProtectEditModal()" class="flex-1 px-3 py-1.5 bg-brand-500 hover:bg-brand-600 text-white rounded text-xs font-bold">💾 保存 (改后需重新 ACK)</button>
+          <button @click="closeProtectEditModal()" class="px-3 py-1.5 bg-warm-200 hover:bg-warm-300 text-ink-700 rounded text-xs">取消</button>
+        </div>
+      </div>
+    </div>
+  </template>
+
   <!-- Bettor 推荐 modal -->
   <template x-if="bettorModalOpen">
     <div class="fixed inset-0 z-40 bg-black/50 flex items-start justify-center p-4 overflow-y-auto" @click="bettorModalOpen = false" @keydown.escape.window="bettorModalOpen = false">
@@ -939,30 +974,103 @@
     </div>
   </div>
 
-  <!-- 持仓面板 -->
+  <!-- 持仓面板 — Phase 2.1c (Owner 5/16 严训 "盈亏茫然" + Bettor r151-r152 consensus 7/7 ACK):
+       (A) P&L 公式 fix (cur × size - cost, not shares - dollar) + max@settle dim 副数
+       (B) Aggregate header (total cost / 现值 / P&L sum, client-side computed)
+       (C) Inline expandable per-card 4 模块 (保护规则 + 调仓建议 + 出清 + 历史)
+       (D) 调仓建议 hide-if-0
+       (E) Bettor modal sub-tab → 活跃持仓 scrollIntoView
+       (F) Reactor stale warning amber if > 2h since last tick -->
   <template x-if="showPositions">
-    <div class="card mb-5">
-      <div class="text-sm font-medium text-ink-700 mb-3">活跃持仓</div>
+    <div class="card mb-5 active-positions-section">
+      <div class="flex items-center justify-between mb-3">
+        <div class="text-sm font-medium text-ink-700">活跃持仓
+          <span x-show="positions && positions.length" class="text-xs text-ink-400 font-normal" x-text="'(' + positions.length + ' 笔)'"></span>
+        </div>
+      </div>
+      <!-- (F) Reactor stale warning (Bettor r152 §2) -->
+      <div x-show="reactorStaleHours > 2" class="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded mb-2">
+        ⚠ 调仓 reactor 上次 tick <span x-text="reactorStaleHours?.toFixed(1)"></span> 小时前 — 可能 cron 失效, 调仓建议不更新 (r153 backlog dig 真因)
+      </div>
+      <!-- (B) Aggregate header (client-side computed) -->
+      <template x-if="positions && positions.length">
+        <div class="bg-warm-50 rounded p-2 mb-3 text-xs">
+          <div class="flex items-center gap-4 flex-wrap">
+            <span class="text-ink-500">总成本 <span class="font-bold text-ink-700" x-text="'$' + portfolioAggregate.totalCost.toFixed(2)"></span></span>
+            <span class="text-ink-500">现值 <span class="font-bold text-ink-700" x-text="'$' + portfolioAggregate.currentValue.toFixed(2)"></span></span>
+            <span class="font-bold" :class="portfolioAggregate.pnl >= 0 ? 'text-green-600' : 'text-red-500'"
+                  x-text="'P&L ' + (portfolioAggregate.pnl >= 0 ? '+$' : '-$') + Math.abs(portfolioAggregate.pnl).toFixed(2) + ' (' + (portfolioAggregate.pnlPct >= 0 ? '+' : '') + (portfolioAggregate.pnlPct * 100).toFixed(1) + '%)'"></span>
+            <span class="text-ink-300 text-[10px]">max @ settle <span x-text="(portfolioAggregate.maxAtSettle >= 0 ? '+$' : '-$') + Math.abs(portfolioAggregate.maxAtSettle).toFixed(2)"></span></span>
+          </div>
+        </div>
+      </template>
       <div x-show="!positions.length" class="text-xs text-ink-400 py-4 text-center">暂无活跃持仓</div>
       <template x-for="pos in positions" :key="pos.asset">
         <div class="py-3 border-b border-warm-100 last:border-0 text-xs">
-          <div class="flex items-center gap-2">
-            <a :href="'https://polymarket.com/event/' + pos.market" target="_blank" rel="noopener"
+          <!-- Header row clickable to expand (C) -->
+          <div class="flex items-center gap-2 cursor-pointer hover:bg-warm-50 -mx-2 px-2 rounded" @click="pos._expanded = !pos._expanded">
+            <span class="text-ink-400 text-[10px] w-3" x-text="pos._expanded ? '▼' : '▶'"></span>
+            <a :href="'https://polymarket.com/event/' + pos.market" target="_blank" rel="noopener" @click.stop
               class="font-medium text-brand-600 hover:text-brand-800 flex-1" x-text="pos.question || pos.market?.slice(0,20) + '...'"></a>
             <span class="px-1.5 py-0.5 rounded text-[10px] font-medium" :class="pos.outcome === 'Yes' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'" x-text="pos.outcome"></span>
             <span class="font-bold" x-text="pos.size + ' shares'"></span>
             <span class="text-ink-400" x-text="'@ $' + (pos.avgPrice || 0).toFixed(3)"></span>
           </div>
-          <!-- Row 2: cost, P&L, end date -->
-          <div class="flex items-center gap-4 mt-1.5">
+          <!-- Row 2: cost, P&L (FIXED FORMULA), max@settle dim, end date -->
+          <div class="flex items-center gap-4 mt-1.5 flex-wrap">
             <span class="text-[10px] text-ink-500">Cost <span class="font-medium" x-text="'$' + (pos.totalCost || 0).toFixed(2)"></span></span>
-            <span class="text-[10px] font-medium"
-              :class="(pos.size - pos.totalCost) >= 0 ? 'text-green-600' : 'text-red-500'"
-              x-text="'P&L ' + ((pos.size - pos.totalCost) >= 0 ? '+' : '') + (pos.size - pos.totalCost).toFixed(2) + ' (' + (((pos.size / pos.totalCost - 1) * 100) || 0).toFixed(0) + '%)'"></span>
+            <!-- Phase 2.1c (A) FIX: P&L = (size × curPrice) - totalCost. Previous bug混 shares 数 - dollar cost. -->
+            <span class="text-[10px] font-bold"
+              :class="((pos.size * (pos.curPrice || pos.avgPrice)) - pos.totalCost) >= 0 ? 'text-green-600' : 'text-red-500'"
+              x-text="'P&L ' + (((pos.size * (pos.curPrice || pos.avgPrice)) - pos.totalCost) >= 0 ? '+$' : '-$') + Math.abs((pos.size * (pos.curPrice || pos.avgPrice)) - pos.totalCost).toFixed(2) + ' (' + (pos.totalCost > 0 ? (((pos.size * (pos.curPrice || pos.avgPrice)) - pos.totalCost) / pos.totalCost * 100).toFixed(1) : '0') + '%)'"></span>
+            <span class="text-[10px] text-ink-300" :title="'赢极限 if YES settles to $1'" x-text="'max@settle ' + ((pos.size - pos.totalCost) >= 0 ? '+$' : '-$') + Math.abs(pos.size - pos.totalCost).toFixed(2)"></span>
             <span class="text-[10px] text-ink-400" x-show="pos.endDate" x-text="'Ends ' + KANet.relativeTime(pos.endDate)"></span>
             <span class="text-[10px] px-1.5 py-0.5 rounded"
               :class="pos.status === 'expired_pending' ? 'bg-amber-50 text-amber-600' : 'bg-green-50 text-green-600'"
               x-text="pos.status === 'expired_pending' ? 'Awaiting resolution' : 'Active'"></span>
+          </div>
+          <!-- (C) Expandable inline 4 modules: 保护规则 / 调仓建议 / 出清 / 历史 -->
+          <div x-show="pos._expanded" x-collapse class="mt-3 space-y-2">
+            <!-- 保护规则 inline -->
+            <div class="bg-warm-50 rounded p-2 text-[10px]">
+              <div class="flex items-center justify-between mb-1">
+                <span class="font-bold text-ink-600">🛡 保护规则</span>
+                <template x-if="getProtectRuleFor(pos)">
+                  <div class="flex gap-1">
+                    <button @click.stop="openProtectEditModal(getProtectRuleFor(pos))" class="px-2 py-0.5 rounded bg-ink-100 hover:bg-ink-200 text-ink-700">✏️ 改</button>
+                    <button @click.stop="ackBettorProtectRule(getProtectRuleFor(pos))" x-show="getProtectRuleFor(pos)?.status === 'pending_owner_ack'" :disabled="getProtectRuleFor(pos)?._acking" class="px-2 py-0.5 rounded bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-50">✓ ACK 启用</button>
+                    <span x-show="getProtectRuleFor(pos)?.status === 'active'" class="px-2 py-0.5 rounded bg-green-100 text-green-700 font-bold">✓ Active</span>
+                  </div>
+                </template>
+              </div>
+              <template x-if="getProtectRuleFor(pos)">
+                <div class="text-ink-500">
+                  止损 <span x-text="(getProtectRuleFor(pos).stop_loss_pct * 100).toFixed(0) + '%'"></span> after
+                  <span x-text="getProtectRuleFor(pos).cooldown_hours + 'h'"></span> ·
+                  时间 <span x-text="getProtectRuleFor(pos).time_close_days + 'd'"></span> ·
+                  <span class="text-ink-300 italic" :title="'📋 reference only, 待 Phase 3 swap-suggester'">止盈 $<span x-text="getProtectRuleFor(pos).take_profit_price?.toFixed(4)"></span> (ref)</span>
+                </div>
+              </template>
+              <template x-if="!getProtectRuleFor(pos)">
+                <div class="text-ink-400">保护规则待生成 (cron 1 min 内 INSERT)</div>
+              </template>
+            </div>
+            <!-- 调仓建议 hide if 0 -->
+            <template x-if="getAdjustmentFor(pos)">
+              <div class="bg-amber-50 rounded p-2 text-[10px]">
+                <div class="flex items-center justify-between mb-1">
+                  <span class="font-bold text-amber-700">💡 调仓建议</span>
+                  <div class="flex gap-1">
+                    <button @click.stop="bettorDecideAdjustment(getAdjustmentFor(pos).id, 'approve')" class="px-2 py-0.5 rounded bg-red-500 hover:bg-red-600 text-white">✓ 确认止损 (paper)</button>
+                    <button @click.stop="bettorDecideAdjustment(getAdjustmentFor(pos).id, 'reject')" class="px-2 py-0.5 rounded bg-ink-200 hover:bg-ink-300 text-ink-700">✗ 保留</button>
+                  </div>
+                </div>
+                <div class="text-ink-600">
+                  <span x-text="getAdjustmentFor(pos).trigger_reason"></span> · 触发于
+                  <span x-text="new Date(getAdjustmentFor(pos).created_at).toLocaleString().slice(5)"></span>
+                </div>
+              </div>
+            </template>
           </div>
           <!-- Row 3: market ID + Polymarket link -->
           <div class="flex items-center gap-3 mt-1">
@@ -1429,6 +1537,9 @@ function predictionsPage() {
     bettorHistoryFilter: 'all',
     bettorProtectRules: null,  // Owner 5/16 + Bettor r139 — 持仓保护 rules + ack/active/triggered
     bettorVariants: null,      // Owner 5/16 + Bettor r141 — Variant Expander 3-tier (per parent rec id keyed map)
+    reactorStaleHours: 0,      // Phase 2.1c Bettor r152 — reactor stale warning (UI banner if > 2h)
+    protectEditModal: null,    // Phase 2.1c Bettor r151 (b) — modal edit form for protect rule thresholds
+    protectEditForm: { stop_loss_pct: -0.30, cooldown_hours: 12, take_profit_price: 0.95, time_close_days: 60 },
     bettorAdjustments: null,
     bettorEvaluating: false,
     closingAll: false,
@@ -1590,7 +1701,7 @@ function predictionsPage() {
       this.selectedAgent = redeemableAgent || walletAgent || this.selectedAgent;
       console.log('[init] selectedAgent =', this.selectedAgent, redeemableAgent ? '(has redeemable)' : '(wallet only)');
       await Promise.all([this.loadMarkets(), this.loadWalletStatus(), this.loadBettor()]);
-      if (this.walletStatus.hasClobKey) this.loadPositions();
+      if (this.walletStatus.hasClobKey) this.loadPositionsAll();
     },
 
     // ── Bettor (Phase 3a) — per-agent scan via selectedAgent's adapter ──────
@@ -1617,6 +1728,63 @@ function predictionsPage() {
       this.loadBettorHistory().catch(() => {});
       // Owner 5/16 + Bettor r141 — load variant 3-tier expander per rec (group by parent_rec_id)
       this.loadBettorVariants().catch(() => {});
+    },
+
+    // Phase 2.1c — Bettor r151 §3.B aggregate header (client-side computed)
+    get portfolioAggregate() {
+      const totalCost = (this.positions || []).reduce((s, p) => s + (p.totalCost || 0), 0);
+      const currentValue = (this.positions || []).reduce((s, p) => s + (p.size || 0) * (p.curPrice || p.avgPrice || 0), 0);
+      const pnl = currentValue - totalCost;
+      const pnlPct = totalCost > 0 ? pnl / totalCost : 0;
+      const maxAtSettle = (this.positions || []).reduce((s, p) => s + ((p.size || 0) - (p.totalCost || 0)), 0);
+      return { totalCost, currentValue, pnl, pnlPct, maxAtSettle };
+    },
+
+    // Phase 2.1c — Bettor r151 §3.C: join protect rule by token_id == position.asset
+    getProtectRuleFor(pos) {
+      if (!this.bettorProtectRules?.rules) return null;
+      return this.bettorProtectRules.rules.find(r => r.token_id === pos.asset && (r.status === 'pending_owner_ack' || r.status === 'active'));
+    },
+    // Phase 2.1c — Bettor r151 §3.D: join adjustment by condition_id; hide if none
+    getAdjustmentFor(pos) {
+      if (!this.bettorAdjustments?.adjustments) return null;
+      return this.bettorAdjustments.adjustments.find(a => a.condition_id === pos.market || a.market === pos.market);
+    },
+    // Phase 2.1c — Bettor r151 §3.C: modal edit form for protect rule thresholds
+    openProtectEditModal(rule) {
+      if (!rule) return;
+      this.protectEditModal = rule;
+      this.protectEditForm = {
+        stop_loss_pct: rule.stop_loss_pct ?? -0.30,
+        cooldown_hours: rule.cooldown_hours ?? 12,
+        take_profit_price: rule.take_profit_price ?? 0.95,
+        time_close_days: rule.time_close_days ?? 60,
+      };
+    },
+    closeProtectEditModal() { this.protectEditModal = null; },
+    async saveProtectEditModal() {
+      if (!this.protectEditModal) return;
+      try {
+        await fetch('/api/bettor/position-protect/rules/' + this.protectEditModal.id, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.protectEditForm),
+        });
+        await this.loadBettorProtectRules();
+        this.closeProtectEditModal();
+      } catch (e) {
+        console.warn('[bettor] save protect edit failed:', e.message);
+      }
+    },
+    // Phase 2.1c — Bettor r152 §2: reactor stale watcher (warning amber if > 2h)
+    async loadReactorStale() {
+      try {
+        const r = await fetch('/api/bettor/reactor/last-tick');
+        const j = await r.json();
+        if (j.last_tick) {
+          const ms = Date.now() - new Date(j.last_tick).getTime();
+          this.reactorStaleHours = ms / 3600000;
+        } else this.reactorStaleHours = 0;
+      } catch { this.reactorStaleHours = 0; }
     },
 
     async loadBettorVariants() {
@@ -2188,6 +2356,16 @@ function predictionsPage() {
         }
       } catch (e) { this.tradeMsg = '下单失败: ' + e.message; }
       this.ordering = false;
+    },
+
+    async loadPositionsAll() {
+      // Phase 2.1c — bundle positions + protect rules + adjustments + reactor stale for inline display
+      await this.loadPositions();
+      await Promise.all([
+        this.loadBettorProtectRules().catch(() => {}),
+        this.loadBettorAdjustments().catch(() => {}),
+        this.loadReactorStale().catch(() => {}),
+      ]);
     },
 
     async loadPositions() {
