@@ -1886,6 +1886,55 @@ const aggressive = pickBest(scored, x => x.payout, { hit: 0.25, depth: 200, ev: 
 
 ---
 
+## R-AUTO-TAKE-PROFIT-WASTEFUL — 自动止盈 trigger 在 fixed price/% target 是浪费
+
+**Owner 2026-05-16 钦定 "止盈浪费太大 把止盈线给去掉" + Bettor r148 spec.**
+
+**Bad**:
+```js
+// 持仓保护 daemon — 4 trigger 监控:
+// 1. 止损 → market sell ✓
+// 2. 止盈 (current_price ≥ take_profit_price) → market sell ⚠️ wasteful
+// 3. 时间 → market sell ✓
+// 4. settlement redeem → CTF redeem ✓
+```
+
+**Why it breaks**: 自动止盈 trigger 在 fixed price/% target → 仓位 +5-8% pnl 时锁 vs hold to settle +10-15% pnl, 让 5-10pp expected gain 给市场. 5/16 7 仓位实查:
+- Bottoms YES @ $0.91, take_profit $0.98 (7pp gain target)
+- Settle to $1.00 (9pp gain). 自动 trigger 在 $0.98 浪费 2pp.
+
+**Two valid take-profit conditions** (algorithmic detect 当前数据不足):
+- (a) 风险完全可控 (e.g. settlement < 24h + already trading near $1) — needs oracle proximity signal
+- (b) 有更好替代品 (swap to higher-EV variant) — needs swap-suggester (Phase 3)
+
+**Good**: 不自动 trigger 止盈. take_profit_price 字段保留 schema + 算法 (作 reference / Phase 3 input).
+```js
+// 持仓保护 daemon — 3 trigger:
+// 1. 止损 ✓
+// 2. (removed — Phase 3 swap-suggester replace)
+// 3. 时间 ✓
+// 4. settlement redeem ✓
+```
+
+UI 显 take_profit_price dim + tooltip "📋 reference only, 待 Phase 3 swap-suggester".
+
+---
+
+## KI-PHASE-3-SWAP-SUGGESTER-TRIGGER — Phase 3 swap-suggester 启动条件 (concrete trigger, not vague timeline)
+
+**Owner 2026-05-16 + Bettor r148-r149 consensus.**
+
+**Trigger condition** (both required, not OR):
+- `bettor_outcome_log` row count ≥ 30 (sufficient statistical signal for backtest tune)
+- Owner explicit 钦定 (sign-off after seeing accumulated outcome data)
+
+**Current state** (5/16): outcome_log 0 rows. ETA: 7 仓 settle (Eurovision 5/17-19 + Bottoms 5/19 + Iran 5/31 + Arsenal trophy) → ~5-7 outcomes by mid-June → ~30 outcomes ETA ~3-4 周.
+
+**Anti-pattern (avoid)**: "Phase 3 1 月后启动" (vague timeline drift — drops off the radar).
+**Pattern (use)**: "Phase 3 = outcome_log ≥ 30 + Owner explicit" (concrete + Owner-gated).
+
+---
+
 ## KI-PHASE-B-PROCESS-1 — 对抗 review 真 work (positive process sediment)
 
 **Owner 2026-05-16 钦定 "J1 首先要对抗性和你讨论方案实质内容" + Bettor r147 §7.**

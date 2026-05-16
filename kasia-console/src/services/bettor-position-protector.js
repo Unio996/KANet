@@ -1,17 +1,17 @@
 // Phase B 持仓自动保护 (Owner 5/16 钦定 "你们先搞" + Bettor r139 architect spec hand-off J1).
 // Phase 1 SKELETON — 1 min cron, scan accepted positions, INSERT pending_owner_ack rules,
-// audit log per check. NO firing logic in Phase 1 (Phase 3 will engage /api/predictions/order
-// with HMAC owner_ack_token verify).
+// audit log per check.
 //
-// Trigger types per Bettor r139 §2 (Owner default):
-//   止损: pnl_pct ≤ stop_loss_pct (-0.30) AND opened > cooldown_hours (12h)
-//   止盈: 分级 entry_avg_price 区间 → take_profit_price 触发 (limit sell 挂)
-//   时间: opened > time_close_days (60d) AND |drift_pp| < time_drift_threshold_pp (10pp) 30d
-//   settlement redeem: settled + redeemable
-//   settlement stuck alert: settled + verdict=PENDING + end_date < now-7d (dev-alert only)
+// Trigger types (post Phase 2.1a Owner 5/16 + Bettor r148):
+//   止损: pnl_pct ≤ stop_loss_pct (-0.30) AND opened > cooldown_hours (12h) → market sell ✓
+//   止盈: @deprecated — Owner 5/16 钦定 去自动止盈 (浪费 5-10pp expected gain vs hold settle).
+//          take_profit_price 字段保留 schema + 算法 (Phase 3 swap-suggester reactivate ref).
+//          ANTI-PATTERNS R-AUTO-TAKE-PROFIT-WASTEFUL sediment.
+//   时间: opened > time_close_days (60d) AND |drift_pp| < time_drift_threshold_pp (10pp) → market sell ✓
+//   settlement redeem: settled + redeemable → CTF redeem (Phase 3.1 backlog)
 //
-// Phase 1 scope (本): only DETECT + INSERT pending_owner_ack rule + audit log.
-// NO fire any /api/predictions/order — Phase 3 engages firing.
+// Phase 2.1a scope: 止盈 fire branch removed (was never engaged in J1 ship, comment update).
+// Phase 3 swap-suggester trigger = outcome_log ≥ 30 + Owner explicit (KI-PHASE-3-SWAP-SUGGESTER-TRIGGER).
 
 import { sqlite } from '../db/client.js';
 import { randomUUID } from 'node:crypto';

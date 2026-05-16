@@ -500,11 +500,33 @@
                       <div class="flex items-start justify-between gap-2">
                         <div class="flex-1">
                           <div class="text-sm font-medium text-ink-700" x-text="r.market_slug + ' ' + r.side"></div>
-                          <div class="text-xs text-ink-500 mt-1">
-                            entry $<span x-text="r.entry_avg_price?.toFixed(4)"></span> ·
+                          <!-- Phase 2.1a Owner 5/16 + Bettor r149 — P&L 列 (server-side enrich) -->
+                          <div class="text-xs mt-1 flex gap-3 flex-wrap">
+                            <span class="text-ink-500">entry $<span x-text="r.entry_avg_price?.toFixed(4)"></span></span>
+                            <template x-if="r.current_price != null">
+                              <span class="text-ink-500">现 $<span x-text="r.current_price?.toFixed(4)"></span></span>
+                            </template>
+                            <template x-if="r.unrealized_pnl_usd != null">
+                              <span class="font-bold" :class="(r.unrealized_pnl_usd || 0) >= 0 ? 'text-green-600' : 'text-red-600'">
+                                P&L <span x-text="(r.unrealized_pnl_usd >= 0 ? '+$' : '-$') + Math.abs(r.unrealized_pnl_usd).toFixed(2)"></span>
+                                (<span x-text="((r.unrealized_pnl_pct || 0) * 100).toFixed(1) + '%'"></span>)
+                              </span>
+                            </template>
+                            <template x-if="r.captured_pct != null">
+                              <span class="text-ink-400 font-mono text-[10px]">
+                                captured <span x-text="((r.captured_pct || 0) * 100).toFixed(0) + '%'"></span> /
+                                remaining +<span x-text="((r.remaining_pct || 0) * 100).toFixed(0) + '%'"></span>
+                              </span>
+                            </template>
+                          </div>
+                          <!-- Phase 2.1a Owner 5/16 — 止盈 dim (📋 reference only, deprecated per Bettor r148) -->
+                          <div class="text-xs text-ink-400 mt-1">
                             止损 $<span x-text="((1 + r.stop_loss_pct) * r.entry_avg_price).toFixed(4)"></span> ·
-                            止盈 $<span x-text="r.take_profit_price?.toFixed(4)"></span> ·
-                            ack at <span x-text="(r.owner_ack_at || '').slice(5,16).replace('T',' ')"></span>
+                            <span class="text-ink-300 italic" :title="'📋 reference only, Owner 5/16 钦定 — 待 Phase 3 swap-suggester'">
+                              止盈 $<span x-text="r.take_profit_price?.toFixed(4)"></span> (ref)
+                            </span> ·
+                            时间 <span x-text="r.time_close_days + 'd'"></span> ·
+                            ack <span x-text="(r.owner_ack_at || '').slice(5,16).replace('T',' ')"></span>
                           </div>
                         </div>
                         <button @click="deleteBettorProtectRule(r)"
