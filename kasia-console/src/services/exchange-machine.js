@@ -365,6 +365,28 @@ export async function _refundEscrow(escrowId, reason = 'unspecified') {
     return { ok: true, status: 'refunded', no_chain_tx: true };
   }
 
+  // Bug AP P0 fix 5/16 (NWT 02:47 HP-03 sweep race surface): active escrow 但 linked offer 已 completed
+  // 说明 settle 应该 fire 但 Bug AO threw (chain_events INSERT 漏 observed_by) → settle bypassed.
+  // 若 sweep blindly refund, broker double-loss: 已 delivered to taker + 又 refund to user_refund_addr.
+  // K invariant 真破 — broker 真 net -10 KAS / case.
+  // Guard: 检查 escrow 是否 linked completed offer, 若是 → 改 fire settle 不 refund.
+  if (e.offer_id) {
+    const linkedOffer = sqlite.prepare(
+      "SELECT id, protocol_status FROM exchange_offers WHERE id = ? AND protocol_status = 'completed' LIMIT 1"
+    ).get(e.offer_id);
+    if (linkedOffer) {
+      console.warn(`[exchange-escrow-refund] Bug AP guard: escrow ${escrowId.slice(0,8)} active but linked offer ${linkedOffer.id.slice(0,8)} already completed → fire settle not refund`);
+      try {
+        await _settleEscrowToUser(escrowId, linkedOffer.id);
+        return { ok: true, settled_via_guard: true, reason: 'AP_guard_completed_offer' };
+      } catch (err) {
+        console.error(`[exchange-escrow-refund] AP guard settle err for ${escrowId.slice(0,8)}: ${err.message}`);
+        // Don't fall through to refund (risk double-loss). Mark for manual review.
+        return { ok: false, error: 'AP_guard_settle_failed', detail: err.message };
+      }
+    }
+  }
+
   // Case 2: status='active' — 真链 refund needed
   if (!e.user_refund_addr) {
     console.warn(`[exchange-escrow-refund] escrow ${escrowId.slice(0,8)} active 无 user_refund_addr — manual review needed`);
@@ -525,9 +547,14 @@ export async function sweepExpiredEscrows() {
     LIMIT 20
   `).all();
   // Active expired (offer expires_at past, no match within 30 min)
+  // Bug AP P0 fix 5/16 (NWT 02:47): JOIN exchange_offers EXCLUDE rows linked to completed offer
+  // (settle should have fired — refund would double-loss). Belt+suspenders with _refundEscrow Case 2 guard.
   const activeExpired = sqlite.prepare(`
-    SELECT id FROM user_escrow_balances
-    WHERE status = 'active' AND expires_at < datetime('now')
+    SELECT ueb.id FROM user_escrow_balances ueb
+    LEFT JOIN exchange_offers eo ON eo.id = ueb.offer_id
+    WHERE ueb.status = 'active'
+      AND ueb.expires_at < datetime('now')
+      AND (eo.id IS NULL OR eo.protocol_status NOT IN ('completed', 'settled'))
     LIMIT 20
   `).all();
 
@@ -1540,9 +1567,9 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
             // 3 attempts failed → revert to verified (retryable, not dispute)
             transition(offer_id, 'verified', {});
             sqlite.prepare(`
-              INSERT INTO chain_events (id, event_type, from_address, payload, observed_at)
-              VALUES (?, 'exchange_delivery_reverted', ?, ?, datetime('now'))
-            `).run(crypto.randomUUID(), deliveringOffer.maker, JSON.stringify({
+              INSERT INTO chain_events (id, txid, event_type, from_address, payload, observed_by, observed_at)
+              VALUES (?, ?, 'exchange_delivery_reverted', ?, ?, 'system', datetime('now'))
+            `).run(crypto.randomUUID(), `revert-${deliveringOffer.id.slice(0,16)}`, deliveringOffer.maker, JSON.stringify({
               offer_id: deliveringOffer.id, reason: 'delivery_failed_3_attempts_reverted',
             }));
             console.warn(`[exchange] offer ${offer_id.slice(0,8)} delivering → verified (3 delivery failures, reverted for retry)`);
@@ -1557,9 +1584,9 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
         sqlite.prepare('UPDATE exchange_offers SET delivery_tx = ? WHERE id = ?').run(payment_tx, offer_id);
         const completedOffer = transition(offer_id, 'completed', { txHash: payment_tx });
         sqlite.prepare(`
-          INSERT INTO chain_events (id, event_type, from_address, to_address, payload, observed_at)
-          VALUES (?, 'exchange_completed', ?, ?, ?, datetime('now'))
-        `).run(crypto.randomUUID(), deliveringOffer.maker, deliveringOffer.taker, JSON.stringify({
+          INSERT INTO chain_events (id, event_type, from_address, to_address, txid, payload, observed_by, observed_at)
+          VALUES (?, 'exchange_completed', ?, ?, ?, ?, 'system', datetime('now'))
+        `).run(crypto.randomUUID(), deliveringOffer.maker, deliveringOffer.taker, payment_tx, JSON.stringify({
           offer_id: deliveringOffer.id, give_asset: deliveringOffer.give_asset, give_amount: deliveringOffer.give_amount,
           want_asset: deliveringOffer.want_asset, want_amount: deliveringOffer.want_amount,
           payment_chain, payment_tx,
@@ -1619,9 +1646,9 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
       transition(offer_id, 'disputed', {});
       // Record exchange_disputed for audit
       sqlite.prepare(`
-        INSERT INTO chain_events (id, event_type, from_address, payload, observed_at)
-        VALUES (?, 'exchange_disputed', ?, ?, datetime('now'))
-      `).run(crypto.randomUUID(), offer.maker, JSON.stringify({
+        INSERT INTO chain_events (id, txid, event_type, from_address, payload, observed_by, observed_at)
+        VALUES (?, ?, 'exchange_disputed', ?, ?, 'system', datetime('now'))
+      `).run(crypto.randomUUID(), `dispute-${offer_id.slice(0,16)}`, offer.maker, JSON.stringify({
         offer_id, reason: dmeta.dispute_reason,
       }));
     }
