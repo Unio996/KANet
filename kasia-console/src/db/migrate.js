@@ -3513,5 +3513,17 @@ export function runMigrations() {
     }
   }
 
+  // v111: Phase B auto-valve 兜底救命 (Owner 5/16 钦定 "万一我忘记了" + Bettor r137 spec hand-off).
+  // 加 closed_by TEXT 列 to bettor_sim_positions 记录关仓原因:
+  //   manual / auto_valve_a (redeem) / auto_valve_b (sim resolved verdict) /
+  //   auto_valve_c (-30% pnl 12h cooldown) / auto_valve_d (90d zombie).
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(bettor_sim_positions)").all();
+    if (cols.length && !cols.some(c => c.name === 'closed_by')) {
+      sqlite.exec(`ALTER TABLE bettor_sim_positions ADD COLUMN closed_by TEXT;`);
+      console.log('[migrate] v111: bettor_sim_positions 加 closed_by TEXT 列 (auto-valve 关仓原因 manual/auto_valve_a-d).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

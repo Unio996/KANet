@@ -392,6 +392,11 @@ startBettorTracker();
 import { startReactorCron as startBettorReactor } from './services/bettor-reactor.js';
 startBettorReactor();
 
+// Phase B auto-valve 兜底救命 (Owner 5/16 钦定 "万一我忘记了" + Bettor r137 spec) — 1h cron.
+// 4 valves: A redeem / B sim resolved verdict / C -30%pnl 12h / D 90d zombie.
+import { startAutoValveCron as startBettorAutoValve } from './services/bettor-auto-valve.js';
+startBettorAutoValve();
+
 // Pre-split UTXOs via Relay IPC (after relays are running)
 import { autoSplitAll } from './services/utxo-splitter.js';
 await autoSplitAll();
