@@ -418,6 +418,28 @@ export async function registerBettorRoutes(fastify) {
     return reply.send({ ok: true, count: rows.length, audit: rows });
   });
 
+  // GET /api/bettor/variant-recommendations?parent_rec_id=X[&relay_node_id=Y]
+  // Phase B Variant Expander (Owner 5/16 钦定 "B" + Bettor r141 spec) — list 3 档变种 per parent rec.
+  fastify.get('/api/bettor/variant-recommendations', async (request, reply) => {
+    const parentRecId = request.query.parent_rec_id || null;
+    const relayNodeId = request.query.relay_node_id || null;
+    if (parentRecId) {
+      const rows = sqlite.prepare(`SELECT * FROM bettor_variant_recommendations WHERE parent_rec_id = ? ORDER BY strategy_tier`).all(parentRecId);
+      return reply.send({ ok: true, count: rows.length, variants: rows });
+    }
+    // Without parent_rec_id, list latest variants joined with parent
+    const relayClause = relayNodeId ? 'AND r.relay_node_id = ?' : '';
+    const args = relayNodeId ? [relayNodeId] : [];
+    const rows = sqlite.prepare(`
+      SELECT v.*, r.question AS parent_question, r.yes_price AS parent_yes_price, r.decision AS parent_decision, r.scanned_at AS parent_scanned_at
+      FROM bettor_variant_recommendations v
+      LEFT JOIN bettor_recommendations r ON r.id = v.parent_rec_id
+      WHERE r.scanned_at > datetime('now', '-7 days') ${relayClause}
+      ORDER BY v.created_at DESC, v.strategy_tier LIMIT 200
+    `).all(...args);
+    return reply.send({ ok: true, count: rows.length, variants: rows });
+  });
+
   // POST /api/bettor/position-protect/rules/:id/ack — Owner UI ACK rule (status pending_owner_ack → active)
   // 派 HMAC token containing max_price + max_size bounds (Phase 3 daemon firing will verify token in
   // /api/predictions/order header X-Owner-Ack). Token signed with CONSOLE_ENCRYPTION_KEY-derived secret.

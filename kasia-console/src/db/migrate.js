@@ -3525,6 +3525,39 @@ export function runMigrations() {
     }
   }
 
+  // v113: Phase B Variant Expander 3-tier (Owner 5/16 钦定 "B" + Bettor r141 architect spec).
+  //   per scanner rec → expander auto-find 同实体/同事件/sub-markets → 3 档变种 (激进/适中/保守).
+  //   v113 加 bettor_variant_recommendations 表 + 2 索引.
+  {
+    const exists = sqlite.prepare("SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name='bettor_variant_recommendations'").get();
+    if (!exists.cnt) {
+      sqlite.exec(`
+        CREATE TABLE bettor_variant_recommendations (
+          id TEXT PRIMARY KEY,
+          parent_rec_id TEXT NOT NULL,
+          market_slug TEXT NOT NULL,
+          condition_id TEXT NOT NULL,
+          token_id TEXT NOT NULL,
+          side TEXT NOT NULL,
+          current_price REAL,
+          hit_rate REAL,
+          payout_pct REAL,
+          depth_500_avg_price REAL,
+          ev_per_dollar REAL,
+          risk_score REAL,
+          strategy_tier TEXT NOT NULL,
+          variant_type TEXT,
+          reasoning TEXT,
+          status TEXT DEFAULT 'pending',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX idx_variant_parent ON bettor_variant_recommendations(parent_rec_id);
+        CREATE INDEX idx_variant_tier ON bettor_variant_recommendations(strategy_tier);
+      `);
+      console.log('[migrate] v113: bettor_variant_recommendations 表 + 2 索引 创建 (Phase B Variant Expander 3-tier).');
+    }
+  }
+
   // v112: Phase B 持仓自动保护 (Owner 5/16 钦定 "你们先搞" + Bettor r139 architect spec).
   //   - position_protect_rules: per-token rule (止损 pct + cooldown / 止盈 price / 时间 days / settlement redeem)
   //   - position_protect_audit: per-tick check log (current_price + pnl_pct + trigger_fired + action_taken)

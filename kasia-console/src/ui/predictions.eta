@@ -747,6 +747,20 @@
                 </div>
                 <div x-show="r._acceptError" class="mt-1 text-[10px] text-red-500" x-text="'下单失败: ' + (r._acceptError || '')"></div>
                 <div x-show="r._acceptSuccess" class="mt-1 text-[10px] text-green-600" x-text="'✓ 下单成功 ' + (r._acceptSuccess || '')"></div>
+                <!-- Owner 5/16 钦定 "B" + Bettor r141 spec: 3-tier variant expander (激进/适中/保守) -->
+                <div x-show="bettorVariants && bettorVariants[r.id] && bettorVariants[r.id].length" class="mt-2 border-t border-ink-100 pt-2">
+                  <div class="text-[10px] text-ink-400 mb-1">↳ 自动变种 3 档:</div>
+                  <template x-for="v in (bettorVariants && bettorVariants[r.id]) || []" :key="v.id">
+                    <div class="flex items-center justify-between gap-2 text-[10px] py-0.5">
+                      <span class="font-bold w-12 flex-shrink-0" :class="v.strategy_tier === 'aggressive' ? 'text-red-600' : v.strategy_tier === 'medium' ? 'text-amber-600' : 'text-green-600'" x-text="v.strategy_tier === 'aggressive' ? '🔴 激进' : v.strategy_tier === 'medium' ? '🟡 适中' : '🟢 保守'"></span>
+                      <span class="flex-1 truncate text-ink-600" :title="v.market_slug" x-text="v.market_slug?.replace(/^will-/, '').replace(/-/g, ' ').slice(0, 50)"></span>
+                      <span class="text-ink-500 w-12 text-right" x-text="v.side"></span>
+                      <span class="text-ink-700 font-mono w-14 text-right" x-text="'$' + (v.current_price || 0).toFixed(2)"></span>
+                      <span class="text-ink-500 w-10 text-right" x-text="((v.hit_rate || 0) * 100).toFixed(0) + '%'"></span>
+                      <span class="text-green-600 w-14 text-right" x-text="'+' + ((v.payout_pct || 0) * 100).toFixed(0) + '%'"></span>
+                    </div>
+                  </template>
+                </div>
               </div>
             </template>
           </div>
@@ -1348,6 +1362,7 @@ function predictionsPage() {
     bettorHistoryRecs: null,  // Owner 5/15 + Bettor r132 — 推荐历史 raw rec table
     bettorHistoryFilter: 'all',
     bettorProtectRules: null,  // Owner 5/16 + Bettor r139 — 持仓保护 rules + ack/active/triggered
+    bettorVariants: null,      // Owner 5/16 + Bettor r141 — Variant Expander 3-tier (per parent rec id keyed map)
     bettorAdjustments: null,
     bettorEvaluating: false,
     closingAll: false,
@@ -1534,6 +1549,28 @@ function predictionsPage() {
       }
       // Always load bettorHistory so close-all button visibility computes (any tab open)
       this.loadBettorHistory().catch(() => {});
+      // Owner 5/16 + Bettor r141 — load variant 3-tier expander per rec (group by parent_rec_id)
+      this.loadBettorVariants().catch(() => {});
+    },
+
+    async loadBettorVariants() {
+      try {
+        const url = '/api/bettor/variant-recommendations' + (this.selectedAgent ? '?relay_node_id=' + this.selectedAgent : '');
+        const r = await fetch(url);
+        const data = await r.json();
+        const byParent = {};
+        for (const v of data.variants || []) {
+          if (!byParent[v.parent_rec_id]) byParent[v.parent_rec_id] = [];
+          byParent[v.parent_rec_id].push(v);
+        }
+        // Tier order: aggressive / medium / conservative
+        const tierOrder = { aggressive: 0, medium: 1, conservative: 2 };
+        Object.values(byParent).forEach(arr => arr.sort((a, b) => (tierOrder[a.strategy_tier] || 9) - (tierOrder[b.strategy_tier] || 9)));
+        this.bettorVariants = byParent;
+      } catch (e) {
+        console.warn('[bettor] variants load failed:', e.message);
+        this.bettorVariants = {};
+      }
     },
 
     async bettorScan() {

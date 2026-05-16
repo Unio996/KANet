@@ -403,6 +403,12 @@ startBettorAutoValve();
 import { startPositionProtectorCron as startBettorPositionProtector } from './services/bettor-position-protector.js';
 startBettorPositionProtector();
 
+// Phase B Variant Expander 3-tier (Owner 5/16 钦定 "B" + Bettor r141 spec) — 30 min cron.
+// per scanner rec → auto-find related markets → 3 档 variant (激进/适中/保守) INSERT.
+// Phase 1 skeleton + UI surface, Phase 2 will integrate depth-500 /book API real-time.
+import { startVariantExpanderCron as startBettorVariantExpander } from './services/bettor-variant-expander.js';
+startBettorVariantExpander();
+
 // Pre-split UTXOs via Relay IPC (after relays are running)
 import { autoSplitAll } from './services/utxo-splitter.js';
 await autoSplitAll();
