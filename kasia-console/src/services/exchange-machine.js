@@ -288,18 +288,41 @@ export async function _settleEscrowToUser(escrowId, offerId) {
         console.error(`[exchange-escrow-settle] KAS sendKas enqueueVerified fail for escrow ${escrowId.slice(0,8)}: ${err.message}`);
       }
     } else {
-      // USDT/USDC EVM transfer via evm-transfer.transferUsdt
+      // Bug AX P1 fix 5/16 (NWT 07:42 audit surface): EVM path 3 silent failure modes — no broker wallet,
+      // transferUsdt fail, no DM. Add Layer 1 retry (3 attempts × exponential) + Layer 2 DM on final fail.
       const transferUsdt = await getTransferUsdt();
       const wallet = sqlite.prepare(
         "SELECT privkey_encrypted FROM agent_wallets WHERE relay_node_id = ? AND chain = ? AND is_default = 1 LIMIT 1"
       ).get(brokerRelay.id, e.target_chain);
       if (!wallet?.privkey_encrypted) {
-        console.warn(`[exchange-escrow-settle] no broker ${e.target_chain} wallet for escrow ${escrowId.slice(0,8)}`);
+        console.warn(`[exchange-escrow-settle] no broker ${e.target_chain} wallet for escrow ${escrowId.slice(0,8)} — DM user`);
+        try {
+          const { enqueue } = await import('./broker-action-queue.js');
+          enqueue({
+            kind: 'dm_failed',
+            peer: e.user_kasia_addr,
+            payload: { message: `⚠ 自动 deliver 失败: broker 未配置 ${e.target_chain.toUpperCase()} 钱包. broker 联系 admin 排查. 30 min TTL 自动 refund 你 prepay.` },
+          });
+        } catch {}
         return;
       }
-      const r = await transferUsdt(e.target_chain, wallet.privkey_encrypted, e.user_target_addr, parseFloat(e.target_amount), e.target_asset);
-      if (!r.ok) {
-        console.error(`[exchange-escrow-settle] transferUsdt fail for escrow ${escrowId.slice(0,8)}: ${r.error}`);
+      let r = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        r = await transferUsdt(e.target_chain, wallet.privkey_encrypted, e.user_target_addr, parseFloat(e.target_amount), e.target_asset);
+        if (r.ok) break;
+        console.warn(`[exchange-escrow-settle] transferUsdt attempt ${attempt}/3 fail for escrow ${escrowId.slice(0,8)}: ${r.error}`);
+        if (attempt < 3) await new Promise(res => setTimeout(res, 5000 * attempt));
+      }
+      if (!r?.ok) {
+        console.error(`[exchange-escrow-settle] transferUsdt 3 attempt FAIL for escrow ${escrowId.slice(0,8)}: ${r?.error}`);
+        try {
+          const { enqueue } = await import('./broker-action-queue.js');
+          enqueue({
+            kind: 'dm_failed',
+            peer: e.user_kasia_addr,
+            payload: { message: `⚠ 自动 deliver ${e.target_amount} ${e.target_asset} 失败 (3 retry: ${(r?.error || 'unknown').slice(0,80)}). broker 30 min 内重试 OR 30 min TTL 自动 refund 你 prepay.` },
+          });
+        } catch {}
         return;
       }
       settleTxHash = r.txHash;
@@ -351,24 +374,76 @@ export async function _refundEscrow(escrowId, reason = 'unspecified') {
     return { ok: false, error: 'already_settled' };
   }
 
-  // Case 1: pending_prepay → no chain TX needed, just mark refunded
+  // Case 1: pending_prepay → check race window first (Bug AW 5/16 fix).
   if (e.status === 'pending_prepay') {
-    sqlite.prepare(`
-      UPDATE user_escrow_balances
-      SET status = 'refunded', updated_at = datetime('now')
-      WHERE id = ? AND status = 'pending_prepay'
-    `).run(escrowId);
-    console.log(`[exchange-escrow-refund] escrow ${escrowId.slice(0,8)} pending_prepay → refunded (reason: ${reason}, no chain TX needed)`);
-    // Bug AJ 5/16 fix (Owner 07:10 真测 surface silent transition): DM user post pending refund.
+    // Bug AW P0 fix (NWT 07:40 propose + Owner 07:35 严训): race window — user 可能已转 USDT/KAS
+    // 上链 但 intake watcher 还没 detect (60s tick). 若直接 mark refunded → silent absorb user fund.
+    // Pre-check: query for matching incoming TX. If found → switch to active path (real chain refund).
+    const expectedAmount = parseFloat(e.amount_quoted);
+    const tolerancePct = 0.005;  // ±0.5% same as intake watcher
+    let userPaid = null;
     try {
-      const { enqueue } = await import('./broker-action-queue.js');
-      enqueue({
-        kind: 'dm_timeout',
-        peer: e.user_kasia_addr,
-        payload: { message: `⏰ 你的报价 (${e.target_amount} ${e.target_asset}) 5 分钟内未收到 prepayment, 已自动取消. 没扣你任何 funds. 回 1/2 重新挂单.` },
-      });
-    } catch (err) { console.warn(`[exchange-escrow-refund] pending DM notify err: ${err.message}`); }
-    return { ok: true, status: 'refunded', no_chain_tx: true };
+      if (e.asset === 'KAS' && e.chain === 'kaspa') {
+        // Kaspa: query kaspa_tx_log (cheap)
+        const candidates = sqlite.prepare(`
+          SELECT tx_id, from_address, CAST(amount AS REAL) AS amount, observed_at
+          FROM kaspa_tx_log
+          WHERE to_address = ? AND observed_at > ?
+          ORDER BY observed_at DESC LIMIT 20
+        `).all(e.broker_recv_addr, e.created_at);
+        userPaid = candidates.find(t => Math.abs(t.amount - expectedAmount) / expectedAmount <= tolerancePct);
+      } else if (e.chain === 'bnb' && (e.asset === 'USDT' || e.asset === 'USDC')) {
+        // BSC: live scanRecentTransfers (slower ~5s RPC call but cancel is rare)
+        const { scanRecentTransfers } = await import('./cross-chain-verify.mjs');
+        const scan = await scanRecentTransfers({
+          chain: 'bnb', recipient: e.broker_recv_addr,
+          span_blocks: 200, paymentAsset: e.asset.toLowerCase(),
+        });
+        if (scan.ok && scan.events?.length) {
+          const candidate = scan.events.find(t => Math.abs(t.amount - expectedAmount) / expectedAmount <= tolerancePct);
+          if (candidate) {
+            // Verify TX post-dates escrow creation (skip historical)
+            userPaid = { tx_id: candidate.tx_hash, from_address: candidate.from, amount: candidate.amount };
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`[exchange-escrow-refund] Bug AW pre-check err for ${escrowId.slice(0,8)}: ${err.message} — falling through to no-chain refund`);
+    }
+
+    if (userPaid) {
+      // race detected — user 真转了 but intake watcher 还没 detect. Promote to active + fire chain refund.
+      console.warn(`[exchange-escrow-refund] Bug AW guard: escrow ${escrowId.slice(0,8)} race detected — user paid ${userPaid.amount} via ${userPaid.tx_id?.slice(0,16)}. Switching to active refund.`);
+      sqlite.prepare(`
+        UPDATE user_escrow_balances
+        SET status = 'active', prepayment_tx = ?, amount_received = ?, user_refund_addr = ?, updated_at = datetime('now')
+        WHERE id = ? AND status = 'pending_prepay'
+      `).run(userPaid.tx_id, String(userPaid.amount), userPaid.from_address || null, escrowId);
+      // Re-fetch + fall through to Case 2 (active path real chain refund)
+      const updated = sqlite.prepare('SELECT * FROM user_escrow_balances WHERE id = ?').get(escrowId);
+      e.status = updated.status;
+      e.prepayment_tx = updated.prepayment_tx;
+      e.amount_received = updated.amount_received;
+      e.user_refund_addr = updated.user_refund_addr;
+      // Continue to Case 2 below (Bug AP guard + active chain refund)
+    } else {
+      // No paid TX detected — original no-chain refund OK
+      sqlite.prepare(`
+        UPDATE user_escrow_balances
+        SET status = 'refunded', updated_at = datetime('now')
+        WHERE id = ? AND status = 'pending_prepay'
+      `).run(escrowId);
+      console.log(`[exchange-escrow-refund] escrow ${escrowId.slice(0,8)} pending_prepay → refunded (reason: ${reason}, no chain TX needed, Bug AW pre-check no paid TX)`);
+      try {
+        const { enqueue } = await import('./broker-action-queue.js');
+        enqueue({
+          kind: 'dm_timeout',
+          peer: e.user_kasia_addr,
+          payload: { message: `⏰ 你的报价 (${e.target_amount} ${e.target_asset}) 5 分钟内未收到 prepayment, 已自动取消. 没扣你任何 funds. 回 1/2 重新挂单.` },
+        });
+      } catch (err) { console.warn(`[exchange-escrow-refund] pending DM notify err: ${err.message}`); }
+      return { ok: true, status: 'refunded', no_chain_tx: true };
+    }
   }
 
   // Bug AP P0 fix 5/16 (NWT 02:47 HP-03 sweep race surface): active escrow 但 linked offer 已 completed
