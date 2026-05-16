@@ -1238,9 +1238,11 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
         transition(offer_id, 'delivering', { txHash: payment_tx }); // brief pass-through
         transition(offer_id, 'completed', { txHash: payment_tx });
         try { const { spendFunds } = await import('./fund-lock.js'); spendFunds(offer_id); } catch {}
+        // Bug AO 5/16 fix (HP-01 retry surface): chain_events.observed_by NOT NULL constraint,
+        // missing in 5 INSERT path → _verifyAndComplete throws → Bug AM code never reaches.
         sqlite.prepare(`
-          INSERT INTO chain_events (id, event_type, from_address, to_address, txid, payload, observed_at)
-          VALUES (?, 'exchange_completed', ?, ?, ?, ?, datetime('now'))
+          INSERT INTO chain_events (id, event_type, from_address, to_address, txid, payload, observed_by, observed_at)
+          VALUES (?, 'exchange_completed', ?, ?, ?, ?, 'system', datetime('now'))
         `).run(crypto.randomUUID(), offer.maker, offer.taker, payment_tx, JSON.stringify({
           offer_id, give_asset: offer.give_asset, give_amount: offer.give_amount,
           want_asset: offer.want_asset, want_amount: offer.want_amount,
@@ -1287,7 +1289,7 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
                     const r = await transferUsdt(finalOffer.give_chain, brokerWallet.privkey_encrypted, takerEvm.address, parseFloat(finalOffer.give_amount), finalOffer.give_asset);
                     if (r.ok) {
                       console.log(`[exchange-buy-kaspa-autopay] broker → taker ${finalOffer.give_amount} ${finalOffer.give_asset} on ${finalOffer.give_chain} TX ${r.txHash?.slice(0,16)}`);
-                      sqlite.prepare(`INSERT INTO chain_events (id, event_type, from_address, to_address, txid, payload, observed_at) VALUES (?, 'exchange_paid', ?, ?, ?, ?, datetime('now'))`).run(
+                      sqlite.prepare(`INSERT INTO chain_events (id, event_type, from_address, to_address, txid, payload, observed_by, observed_at) VALUES (?, 'exchange_paid', ?, ?, ?, ?, 'system', datetime('now'))`).run(
                         crypto.randomUUID(), finalOffer.maker, takerEvm.address, r.txHash,
                         JSON.stringify({ offer_id: finalOffer.id, asset: finalOffer.give_asset, amount: finalOffer.give_amount, chain: finalOffer.give_chain, direction: 'broker→taker auto-pay (escrow BUY)' })
                       );
@@ -1466,8 +1468,8 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
               // Stay in delivering, do NOT mark completed. Operator or next tick can retry.
               console.error(`[exchange] offer ${offer_id.slice(0,8)} KAS sent (${deliveryTxId}) but delivered broadcast failed. Staying in delivering.`);
               sqlite.prepare(`
-                INSERT INTO chain_events (id, event_type, from_address, to_address, txid, payload, observed_at)
-                VALUES (?, 'kas_delivery', ?, ?, ?, ?, datetime('now'))
+                INSERT INTO chain_events (id, event_type, from_address, to_address, txid, payload, observed_by, observed_at)
+                VALUES (?, 'kas_delivery', ?, ?, ?, ?, 'system', datetime('now'))
               `).run(crypto.randomUUID(), deliveringOffer.maker, deliveringOffer.taker, deliveryTxId,
                 JSON.stringify({ offer_id: deliveringOffer.id, amount: deliveringOffer.give_amount, broadcast_failed: true }));
             } else {
@@ -1506,15 +1508,15 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
                 }
               } catch (e) { console.warn(`[exchange] D2 completed UPDATE err: ${e.message}`); }
               sqlite.prepare(`
-                INSERT INTO chain_events (id, event_type, from_address, to_address, txid, payload, observed_at)
-                VALUES (?, 'kas_delivery', ?, ?, ?, ?, datetime('now'))
+                INSERT INTO chain_events (id, event_type, from_address, to_address, txid, payload, observed_by, observed_at)
+                VALUES (?, 'kas_delivery', ?, ?, ?, ?, 'system', datetime('now'))
               `).run(crypto.randomUUID(), deliveringOffer.maker, deliveringOffer.taker, deliveryTxId,
                 JSON.stringify({ offer_id: deliveringOffer.id, amount: deliveringOffer.give_amount, broadcast_tx: deliveredBcastTxId }));
               try { const { spendFunds } = await import('./fund-lock.js'); spendFunds(deliveringOffer.id); } catch {}
               sqlite.prepare(`
-                INSERT INTO chain_events (id, event_type, from_address, to_address, payload, observed_at)
-                VALUES (?, 'exchange_completed', ?, ?, ?, datetime('now'))
-              `).run(crypto.randomUUID(), deliveringOffer.maker, deliveringOffer.taker, JSON.stringify({
+                INSERT INTO chain_events (id, event_type, from_address, to_address, txid, payload, observed_by, observed_at)
+                VALUES (?, 'exchange_completed', ?, ?, ?, ?, 'system', datetime('now'))
+              `).run(crypto.randomUUID(), deliveringOffer.maker, deliveringOffer.taker, deliveryTxId, JSON.stringify({
                 offer_id: deliveringOffer.id, give_asset: deliveringOffer.give_asset, give_amount: deliveringOffer.give_amount,
                 want_asset: deliveringOffer.want_asset, want_amount: deliveringOffer.want_amount, taker_chain: deliveringOffer.taker_chain,
                 delivery_tx: deliveryTxId, broadcast_tx: deliveredBcastTxId,
