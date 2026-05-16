@@ -1485,6 +1485,10 @@ async function _autoPayExchange(offer, takerRelayNodeId) {
 async function _autoSettleAsset(offer, takerRelayNodeId) {
   const { isSupported } = await import('./asset-registry.js');
   const { sendAsset } = await import('./settler-router.js');
+  // Bug BA 5/16 fix (Phase 1 re-test surface): sendCommandAsync 在 _autoPayExchange L1400 imported
+  // 但 _autoSettleAsset 不同 function scope, L1566 paid_v1 broadcast 用时 'sendCommandAsync is not
+  // defined' 抛 30/30 retry — Bug AY 加 retry width 治标不治本, 真因 = JS scope 漏 import.
+  const { sendCommandAsync } = await import('./relay-manager.js');
 
   const wantAsset = offer.want_asset;
   const wantChain = offer.want_chain || (wantAsset?.toUpperCase() === 'KAS' ? 'kaspa' : null);
