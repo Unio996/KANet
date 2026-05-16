@@ -1577,155 +1577,6 @@ JS parser 撞 `#` invalid token → fastify 500 → 全栈共用此 partial 的 
 
 ---
 
-## 规则 42 · ws-proxy LISTEN_PORT 永不占 17110 (kaspad 自家 port)
-
-**来源**: 5/13 Owner 钦定方案 A 永久根治. 复发实证: Bettor host 4/29 (J1 11:04 kill PID 25516) + NWT host 5/12 (RPC 全瘫 40+ min). 见 memory `feedback_ws_proxy_port_hijack`.
-
-**真因**: `scripts/kaspa-ws-proxy.mjs` 是给 `https://kasia.fyi` HTTPS 页面用的 loopback TCP forwarder (绕 Mixed Content 拦). 历史默认 `LISTEN_PORT=17110` = kaspad 自家 RPC port. Windows TCP 栈 specific listener (`127.0.0.1:17110`) **优先于** wildcard (`0.0.0.0:17110`), 两个 socket 同时存在时 OS 把 loopback 流量送给 specific listener (ws-proxy), 不送 kaspad. 结果 = ws-proxy 截 relay/console 内部 RPC, forward 到远端 LAN 节点 (`KASPA_NODE` 默认 `192.168.1.123`, 那台节点可能 down/不响应) → 内部 RPC 全断, broker/exchange/Bettor 全瘫.
-
-**Wrong** (5/13 之前):
-```bash
-# kanet.env
-KASPA_WS_PROXY_PORT=17110          # 撞 kaspad
-# scripts/kaspa-ws-proxy.mjs
-const LISTEN_PORT = Number(process.env.LISTEN_PORT || 17110);  // 撞 kaspad
-```
-
-**Right** (5/13 钦定 A):
-```bash
-# kanet.env (或省略用默认)
-KASPA_WS_PROXY_LISTEN_PORT=17111   # ws-proxy 本机监听
-KASPA_WS_PROXY_TARGET_PORT=17110   # 上游 kaspad port
-# scripts/kaspa-ws-proxy.mjs
-const LISTEN_PORT = Number(process.env.LISTEN_PORT || 17111);  // 不撞
-const TARGET_PORT = Number(process.env.TARGET_PORT || 17110);  // upstream
-```
-
-**Why**: LISTEN 跟 TARGET 拆开后, ws-proxy 只在 17111 接 kasia.fyi HTTPS 用户, 转发到 17110 (本机或远程 kaspad). 内部 relay/console 代码全用 `ws://127.0.0.1:17110` 直连 kaspad 不绕 proxy. 各管各 port 永不撞.
-
-**检查方法**:
-- 机器: `kanet-start.sh` 加 hard guard — `LISTEN_PORT=17110` → exit 1 拒启动
-- 复发监控: `Get-NetTCPConnection -LocalPort 17110` 必只见 1 个 listener (kaspad PID), 见 2 个立刻 alert
-- legacy: `KASPA_WS_PROXY_PORT` 仍 accept, 但 map 到 TARGET + 打 WARN deprecation log
-
-**历史 commit / broadcast**:
-- 5/12 NWT host 复发实证 broadcast: `b5e056fc` (post-hijack sediment) + `8deb6e90` (NWT ack Bettor r54 + monitor 修)
-- 5/12 J1 fallback fix: `33f36a2ed` (ws-proxy fallback to local — 不解决 port 撞)
-- 5/13 永久根治: 本规则 + `kanet-start.sh` LISTEN/TARGET 拆 + ws-proxy.mjs 默认 17111
-
----
-
-## 规则 43 · architect spec 含 mainnet contract address 必 external docs verify (label "verified against `<source>` on `<date>`")
-
-**来源**: 5/13 KI 第 6 次复刻 — NWT bridge-router v0.1 spec (63e6fb48) §3.1 列 Polygon USDT Stargate V2 pool addr `0xd47bAd7A5cd9F4b6BFEAfBdAE6Cf3B0bD61C0F4e` (错位, memory drift). J2 #330 triple WebFetch verify Stargate V2 gitbook docs 实际 `0xd47b03ee6d86Cf251ee7860FB2ACf9f91B9fD4d7`. Safety impact: 错 addr → 可能 honeypot → loss 60 USDT.
-
-**真因**: NWT spec 写时凭印象/搜索结果首条, 没 verify against canonical source (Stargate V2 gitbook / etherscan / 官方 GitHub). mainnet contract address 是 production money loss vector — typo 等于 burn fund.
-
-**Wrong** (NWT 5/13 之前):
-```markdown
-## §3.1 Stargate V2 mainnet pool addresses
-- polygon USDT: 0xd47bAd7A5cd9F4b6BFEAfBdAE6Cf3B0bD61C0F4e  ← NWT 凭记忆写
-- arbitrum USDT: 0xcE8CcA271Ebc0533920C83d39F417ED6A0abB7D0
-```
-
-**Right** (5/13 钦定):
-```markdown
-## §3.1 Stargate V2 mainnet pool addresses (verified against Stargate gitbook https://... on 2026-05-13)
-- polygon USDT: 0xd47b03ee6d86Cf251ee7860FB2ACf9f91B9fD4d7  [j2-verified 2026-05-13]
-- arbitrum USDT: 0xcE8CcA271Ebc0533920C83d39F417ED6A0abB7D0  [j2-verified 2026-05-13]
-```
-
-**Why**: implementor T0 verify burden 是 last defense. architect spec 错位 + implementor 盲信 = production money loss. 双重 defense (architect verify + implementor T0 verify) 是 KANet 工程文化健康基线.
-
-**检查方法**:
-- architect: spec 含 mainnet addr / chain RPC URL / API endpoint 时, 跑 WebFetch canonical source, 加 verify label
-- implementor: T0 必 WebFetch verify canonical source against spec addr, mismatch 立即 push back (KI 第 6 次复刻 J2 #330 实证 救 60 USDT)
-- 历史 commit: bridge-router.js fcf83c6e0 (含 Polygon docs-verified addr + negative regression guard 防 NWT spec typo reintroduce)
-- 历史 broadcast: NWT 自报错位 8fbe164f + J2 catch 17181fcb
-
----
-
-## 规则 44 · architect spec 含字节算术/encoding 必 byte-by-byte verify + 写 example bytes
-
-**来源**: 5/13 KI 第 6 次复刻扩展 — NWT bridge-router v0.1.1 spec (868a1925) §2 算 LayerZero V2 OptionsType3 encoding "total bytes: 2 + 22 + 52 = 76 bytes". J2 #332 实证 actual 74B (NWT off-by-2: LZ_RECEIVE option 20B 而非 22B, NWT 把 option_size 字段 2B 算了 2 次).
-
-**真因**: NWT spec 写 byte arithmetic 时凭头脑算, 没逐字段列写 example bytes. encoding spec 错位 = J2 ship code 用 wrong byte layout, LZ 不能 decode 或 decode 错, native drop fail (但 J2 实际 ship 用 ethers.solidityPacked 准确, 跟 spec 文档算术错位无关). minor 但 KI 警示扩展.
-
-**Wrong** (NWT 5/13 之前):
-```markdown
-## §2 LayerZero V2 OptionsType3 encoding
-0x0003                                       // TYPE_3 header
-+ 0x01 + 0x0011 + 0x01 + uint128(gas, 16B)  // LZ_RECEIVE
-+ ...
-Total bytes: 2 + 22 + 52 = 76 bytes  ← NWT 错位 (LZ_RECEIVE 实际 20B = 1+2+1+16)
-```
-
-**Right** (5/13 钦定):
-```markdown
-## §2 LayerZero V2 OptionsType3 encoding [verified against ExecutorOptions.sol 2026-05-13]
-0x0003                                  (2B header)
-+ 0x01                                  (1B worker)
-+ 0x0011                                (2B option_size = 0x11 = 17 = 1 type + 16 gas)
-+ 0x01                                  (1B option_type LZ_RECEIVE)
-+ <uint128(gas, 16B)>                   (16B gas amount)
-                                         ──────────────────
-                                         LZ_RECEIVE total = 1+2+1+16 = 20B
-+ ... NATIVE_DROP block (1+2+1+16+32 = 52B)
-                                         ──────────────────
-                                         total when drop > 0 = 2+20+52 = 74B
-example output (gas=200000 + drop=0.05 MATIC to 0x{addr}):
-0x0003 01 0011 01 00000000000000000000000000030d40 01 0031 02 000000000000000000000000b1a2bc2ec50000 000000000000000000000000{addr}
-```
-
-**Why**: encoding bytes 错位 = ship code 跟 docs decoder 对不上, 跨链 message decode fail. 双重 defense (architect example bytes + implementor verify regex):
-- architect 写 example output bytes (含 sample inputs)
-- implementor test 加 byte-layout regex assertion (J2 #332 bridge_router_native_drop.test.mjs guard #2 实证)
-
-**检查方法**:
-- architect: spec 含 byte arithmetic 必 "verified against `<source>`" + 逐字段列 + example bytes 写出
-- implementor: test 加 negative regression regex guard (NWT spec typo reintroduce → source-pattern test 自动 fail)
-- 历史 commit: bridge-router.js b275a9be5 (含 buildLzV2Options helper + ethers.solidityPacked 准确编码)
-- 历史 broadcast: J2 #332 catch 17181fcb + NWT 自报 0df946df
-
----
-
-## 规则 45 · architect spec 含 asset/chain param 透传必 protocol-wide audit (publish/accept/autoPay/autoSettle/verify/broadcast 6 path)
-
-**来源**: 5/13 KI 第 7 次复刻 — NWT Sub #1 spec (672758bb) 修 `transferUsdt` asset 透传 + 1 caller (trade-protocol-filter L1376), 但 verify side `processPaymentSubmit` 仍 default 'usdt'. J2 #333 5/13 base USDC e2e dispute root cause trace 暴露 — meta.payment_asset 没写入 verification_meta, _verifyEvm STABLECOINS.base['usdt'] = undefined → 0 USDT found → dispute. Sub #4.b hotfix 735372b5f 修了 verify path.
-
-**真因**: NWT Sub #1 spec scope silo 单 path (transferUsdt + 1 direct caller), 漏 protocol-wide audit (publish/accept/autoPay/autoSettle/verify/broadcast 6 path 全 asset/chain param 一致). 同 family bug 留 verify side 隐患.
-
-**Wrong** (NWT 5/13 Sub #1 spec 之前):
-```markdown
-## Sub #1 scope: dispatcher fix asset 透传
-- evm-transfer.js L204 transferUsdt 加 asset 参数
-- trade-protocol-filter.js L1376 caller 透传 asset
-- (其他 caller 保 backward compat 默 'USDT')
-```
-↑ 漏 audit verify path: processPaymentSubmit + meta.payment_asset + _verifyAndComplete + verifyCrossChainTx
-
-**Right** (5/13 Sub #1 spec rule reinforce):
-```markdown
-## Sub #1 scope: dispatcher fix asset 透传 (protocol-wide)
-6-path audit grep:
-1. publish endpoint (api/exchange.js L132): verification_meta.accepted_chains[].asset ✓
-2. accept endpoint (api/exchange.js L347): selected_chain + payment_asset 派生
-3. autoPay (trade-protocol-filter L1376): transferUsdt(chain, ..., asset) ← Sub #1 fix
-4. autoSettle (trade-protocol-filter L1488): settler-router.sendAsset({asset, chain})
-5. verify (exchange-machine L748 processPaymentSubmit): payment_asset → meta.payment_asset ← Sub #4.b family fix
-6. broadcast (trade-protocol-filter L1404): kanet_exchange_paid_v1.payment_asset ✓
-```
-
-**Why**: asset/chain 是 cross-chain protocol 关键 param. silo 单 path 修 = production 留 bug, 暴露 in 新 asset/chain (base USDC trigger). protocol-wide audit 必 6 path 全 grep + 一致 (publish-to-completed lifecycle).
-
-**检查方法**:
-- architect: spec 含 cross-chain param (asset/chain) 必列 6 path audit table, 每 path grep verify
-- implementor: T0 grep 6 path 跟 spec 一致, 不假设 spec 完整
-- 历史 commit: 735372b5f (Sub #4.b hotfix protocol-wide asset 透传 family fix)
-- 历史 broadcast: J2 #333 35f0fc32 (Sub #4 trace + hotfix) + NWT verdict 47a8e4f8
-
----
-
 ## 如何扩充本档案
 
 新陷阱踩过后**立即**追加，格式保持：
@@ -1982,101 +1833,131 @@ export async function sendBroadcast(channel, text, opts = {}) {
 
 ---
 
-*本档案在 v2 spec 第八章元教训基础上独立。spec 聚焦"这次怎么做"，本档案聚焦"下次别再犯"。*
+## R-ALPINE-UI-1 — `<template x-for>` 永禁在 `<svg>` namespace 内
 
----
+**Owner 2026-05-15 真测 + Bettor r136 sediment (Bug U1 5 attempts 后 真因 surface).**
 
-## 规则 R-ALPINE-UI-1 · `<template>` 永禁放在 `<svg>` 内 — Alpine init walk 直接崩
-
-(Bettor r134 + J1 #209 2026-05-15 双 layer 诊断 真根因 sediment, KI-Phase-B-UI-3)
-
-### 现象
-- Owner /predictions DevTools Console 红色 fatal:
-  ```
-  Alpine Expression Error: Cannot read properties of undefined (reading 'children')
-    Expression: "sparklinePoints()"
-    <template x-for="(pt, i) in sparklinePoints()" :key="i">
-  Alpine Expression Error: pt is not defined  (× 3, for pt.x, pt.y, pt.action)
-  <circle> attribute cx: Unexpected end of attribute. Expected length, "".
-  Uncaught TypeError: Cannot read properties of undefined (reading 'children')
-  ```
-- /predictions Bettor 今日推荐 ACCEPT button **零响应** (binding 没注册).
-
-### 真因
-`<template>` 在 SVG namespace 不是 HTMLTemplateElement — 没 `.content` DocumentFragment.
-
-Alpine init phase walk DOM 注册 directive 时:
-1. 拿 `template.content.children` → `undefined` → 致命 `Uncaught TypeError`
-2. 内 `<circle>` 被 parse 成 SVG 直接子节点 (template 没 capture), Alpine 看到 `:cx="pt.x"` 等绑定, scope 没 `pt` → "pt is not defined"
-3. **致命 directive walk 中断** → 后续 directive (含 ACCEPT button @click / x-show / :disabled) **注册失败**
-4. button DOM 在但 Alpine 没绑事件 → 点击零响应
-
-### 引入 commit
-- predictions.eta 2026-04-24 b620030826 "feat(predictions): stats card + capital timeline + win/lose verdict" 加 SVG `<template x-for>` 渲染 event dots
-- 触发条件: Owner selectedAgent 切到 Bettor relay (hasClobKey=true) → loadPositions 设 summary={...,timeline:undefined,...} → 触发 sparkline render path → init walk 崩
-- 2026-05-15 Owner DevTools dump empirical 暴露
-
-### 4 次未抓根因 自批 (Bettor r118 → r122 ab114db7d → revert 323a9a7b1 → sparklinePoints defensive guard)
-全在 ACCEPT button DOM 周围转 (x-show condition / pattern 改 / runtime evaluator 防御), **真因在 button 之前几行 SVG `<template>` walk error 中断后续 directive 注册**. 没 grep `Alpine init walk error` 路径.
-
-### Fix (b3096e588 by J1, cherry-pick b9f46239c)
-删除 SVG 内 `<template x-for>` 块. circles 是 decorative, path 已显示 trajectory. 净 -5 / +3 (comment).
-
-### Lint proposal
-`scripts/lint-kanet.mjs` 加: grep `<svg[\s\S]*?<template\s+x-(for|if|show|effect)` in `kasia-console/src/ui/*.eta` → **block commit**.
-
-### Mental rule
-SVG 内只能放 SVG namespace elements + `defs` / `g` / `use`. 任何 Alpine 反应式 SVG 内容用:
-- `<g x-effect="renderXxx($el)">` + imperative `createElementNS('http://www.w3.org/2000/svg', 'circle')`
-- 或 path string interpolation (`<path :d="computedString()">`, 不需 child template)
-
----
-
-## 规则 R-ALPINE-UI-2 · Alpine x-for `:key` 复用 reactive proxy state across array reassign
-
-(Bettor r135 越界 ship Layer 2 真因, J1 #208 Hypothesis 9 自批 wrong 但实际正确)
-
-### 现象
-- ACCEPT button 显 🚫 (cursor-not-allowed) **即使** Layer 1 SVG fix 已 deploy
-- DOM inspect: button 有 `disabled` 属性
-- `r._accepting` 在 Alpine reactive proxy 真 = true, 即使最新 loadBettor() 返回的 rec object **没 _accepting 字段** (server side 不写此 ephemeral)
-
-### 真因
-predictions.eta x-for 用 `:key="r.id"`:
+**Bad**:
 ```html
-<template x-for="r in bettorRecs.recommendations" :key="r.id">
+<svg :viewBox="'0 0 600 90'">
+  <path :d="sparklinePath()" />
+  <template x-for="(pt, i) in sparklinePoints()" :key="i">
+    <circle :cx="pt.x" :cy="pt.y" r="2.5" :fill="pt.color"></circle>
+  </template>
+</svg>
 ```
 
-Alpine v3 `:key` 行为: **iteration 跨 array reassign, 同 key 的 DOM element + reactive proxy state 复用** (优化, 避免重 mount).
+**Why it breaks**: `<template>` element inside SVG namespace is **NOT HTMLTemplateElement**. It's a regular SVG element with no `.content` DocumentFragment property. Alpine init phase walks DOM looking for `template.content.children` — gets `undefined` — throws `TypeError: Cannot read properties of undefined (reading 'children')`. **Alpine directive registration walk INTERRUPTS** at this point, leaving ALL subsequent directives unbound. DOM present but zero event handlers — buttons silently no-op.
 
-scenario:
-1. Owner click ACCEPT → `r._accepting = true` set 在 proxy
-2. 撞 Layer 1 SVG crash OR fetch hang → finally{} 不 reach
-3. Page refresh → `loadBettor()` reassign `this.bettorRecs.recommendations` 全新 array
-4. **同 rec.id 的 new rec object 进 x-for**, Alpine 看 :key 一致 → **复用 prior proxy state including stale `_accepting=true`**
-5. button `:disabled="r._accepting"` evaluate truthy → `disabled` attr set → Tailwind 🚫
-
-### J1 #208 Hypothesis 9 self-批 自批 wrong, 但实际对
-J1 self-批 wrong 基于 Owner DevTools 显 sparkline error (Layer 1). 实际 Layer 1 + Layer 2 **双 bug 并存**, Layer 1 crash 表面上掩盖 Layer 2 stale state. 删 Layer 1 后 stale state 仍粘.
-
-### Fix (Bettor 83071f9ca 越界)
-loadBettor() reassign 后显式 reset ephemeral fields:
-```js
-this.bettorRecs = await r.json();
-(this.bettorRecs?.recommendations || []).forEach(rec => {
-  rec._accepting = false;
-  rec._acceptError = null;
-  rec._acceptSuccess = null;
-});
+**Good (path-only)**:
+```html
+<svg :viewBox="'0 0 600 90'">
+  <path :d="sparklinePath()" />
+  <!-- decorative dots: pre-compute as path string OR use imperative createElementNS -->
+</svg>
 ```
 
-### Mental rule
-- `x-for :key` 同 + ephemeral client-side mutation field (e.g. `_loading` / `_error` / `_accepting`) = 必 explicit reset on data refresh
-- 或: 避免 ephemeral field set on iteration item, 改用 component-level reactive Map `loadingIds = new Set()` 保 client UI state separately
-
-### Layer 3 (附加 fix) — /predictions no-cache header
-ETA route 加 `Cache-Control: no-store, no-cache, must-revalidate` — Owner Ctrl+Shift+R 也可能 hit stale HTML 浏览器 cache 掩盖 fix. live in stocks.js:36, 待 commit (与 unrelated 65-line hunk 混).
+**Lint proposal**: `scripts/lint-kanet.mjs` add rule grep `<svg[\s\S]*?<template\s+x-(for|if|show|effect)` in `*.eta` → block commit.
 
 ---
 
-*R-ALPINE-UI-1 + R-ALPINE-UI-2 (2026-05-15 Owner 4 次未抓根因 雷霆 + 越界钦定 sediment): UI bug 必先要 browser DevTools empirical, code-only grep 漏 Alpine init phase walk error / reactive proxy state pollution 两类. Bug U1 真因 = Layer 1 SVG template crash + Layer 2 stale proxy reuse 双 bug 并存.*
+## R-VARIANT-EV-FLOOR — "激进"档 variant 必 ev > -0.05 (negative-EV "推荐" 误导 Owner)
+
+**Owner 5/16 + Bettor r143 §6 sediment (Phase B Variant Expander Phase 1.5 hotfix).**
+
+**Bad**:
+```js
+// 激进 tier sort by max(payout), filter only hit ≥ 0.25 + depth ≥ 200
+const aggressive = pickBest(scored, x => x.payout, { hit: 0.25, depth: 200 });
+// problem: low-hit high-payout 真负 EV variant 可能 surface
+//   e.g. 5% × 1800% return - 95% × 100% = 0 break-even (acceptable)
+//   e.g. 3% × 2900% return - 97% × 100% = -0.10 (-10% EV, ⚠ Owner loses money)
+```
+
+**Why it breaks**: hit_rate + payout_pct 双 OK 但 ev_per_dollar 可能负. UI 标 "🔴 激进" implies "高赔率高回报", Owner 信任 click → 长期 loss.
+
+**Good**:
+```js
+const aggressive = pickBest(scored, x => x.payout, { hit: 0.25, depth: 200, ev: -0.05 });
+// ev > -0.05 floor — 留 explore margin (low-hit 高 variance acceptable) 但不 frank-negative
+```
+
+**Rule of thumb**: any variant tier marketed as "推荐" / "ACCEPT" 必 ev_per_dollar > frank-negative threshold. UI 同时显 EV 数字 per variant 给 Owner 自判 double-check.
+
+---
+
+## R-VARIANT-INSIGHT-BOUNDARY — variant = "同 insight 不同强度", cross-entity 是独立 rec NOT variant
+
+**Owner 5/16 + Bettor r143 §4 sediment (Phase B Variant Expander Phase 1.5).**
+
+**Bad**:
+```js
+// Romania top 10 YES 的 variants include:
+//   - Romania top 5 YES (同 entity 更激进)
+//   - Greece top 10 YES (cross-entity 同 event) ⚠
+// UI displays:
+//   "↳ variants: Romania top 3 / Greece top 10 / France win NO"
+```
+
+**Why it breaks**: variant 语义 = "同 insight 不同强度". Romania top 10 YES insight = "Romania 表现强". Greece top 10 YES insight = "Greece 表现强" — **独立 insight, 跟 Romania 表现无关**. UI 塞进 "variants" 让 Owner 心智 model 混淆 → "我看好 Romania → 也看好 Greece" 是 false 推论.
+
+**Good**:
+```js
+// variants section: same_entity only (3 tiers aggressive/medium/conservative)
+//   Romania top 5 / top 3 / win NO — 同 entity 强度调整
+// 另开 UI section "Also Strong in This Event"
+//   Greece top 10 / France top 5 — cross-entity 独立 strong recs in same event
+// 视觉分开 → Owner 心智 model 不混淆
+```
+
+**Rule of thumb**: variant_type enum 严守分类:
+- `same_entity` — 同 entity 不同 sub-market (variant proper)
+- `same_event_inverse` — 同 entity inverse side (Romania win NO vs Romania top 10 YES)
+- `cross_entity_same_event` — 独立 rec, NOT variant, separate UI section
+
+---
+
+## R-ALPINE-UI-2 — Alpine x-for `:key` + ephemeral client-side mutation field = 必 explicit reset on array reassign
+
+**Owner 2026-05-15 真测 + Bettor r136 sediment (Bug U1 Layer 2, J1 #208 Hypothesis 9 实际正确).**
+
+**Bad**:
+```js
+async loadFoo() {
+  const r = await fetch('/api/foo');
+  this.foos = await r.json();  // ⚠️ same id rec retains stale _accepting from prior session
+}
+async acceptFoo(f) {
+  f._accepting = true;
+  try { await fetch(...); }
+  finally { f._accepting = false; }  // ⚠️ if fetch hangs OR page reload mid-flight, never reaches
+}
+```
+
+```html
+<template x-for="f in foos" :key="f.id">
+  <button :disabled="f._accepting" :class="...">...</button>  <!-- stuck disabled -->
+</template>
+```
+
+**Why it breaks**: Alpine `x-for :key="f.id"` preserves DOM element identity AND reactive proxy across array reassign when key matches. Client-side fields added by user interaction (e.g. `_accepting`, `_loading`, `_editing`) **persist on the proxy across `this.foos = await r.json()` refresh**. If a prior accept failed/hung leaving `_accepting=true`, the new payload's same-id rec inherits the stale field → button `:disabled` evaluates truthy → Tailwind `disabled:cursor-not-allowed` activates → 🚫 cursor + click zero-response.
+
+**Good**:
+```js
+async loadFoo() {
+  const r = await fetch('/api/foo');
+  this.foos = await r.json();
+  // Explicit reset ephemeral UI state (Alpine x-for :key may preserve stale proxy fields)
+  (this.foos || []).forEach(f => {
+    f._accepting = false;
+    f._loading = false;
+    f._error = null;
+  });
+}
+```
+
+**Rule of thumb**: any field prefixed `_` (convention for client-side ephemeral) in Alpine x-for'd array — **explicit reset in load fn after each fetch**.
+
+---
+
+*本档案在 v2 spec 第八章元教训基础上独立。spec 聚焦"这次怎么做"，本档案聚焦"下次别再犯"。*
