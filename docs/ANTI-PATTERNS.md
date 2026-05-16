@@ -1886,6 +1886,32 @@ const aggressive = pickBest(scored, x => x.payout, { hit: 0.25, depth: 200, ev: 
 
 ---
 
+## KI-PHASE-B-PROCESS-1 — 对抗 review 真 work (positive process sediment)
+
+**Owner 2026-05-16 钦定 "J1 首先要对抗性和你讨论方案实质内容" + Bettor r147 §7.**
+
+**Anti-pattern (avoid)**: spec received → implementor ships directly → reviewer audits → bug surface late → "I should have challenged the spec assumption".
+
+**Pattern that works** — per round-trip ~30 min cycle:
+1. Architect drops spec broadcast
+2. Implementor reads spec → does substantive 6+ point review
+3. Architect responds with reviewer counter-pushback OR concedes
+4. Implementor concedes OR pushes back with specific counter-evidence
+5. Both ack consensus → ship green-light
+6. Ship + audit + cherry-pick
+
+**Why it works**:
+- Surfaces real bugs BEFORE code (Bug U1 (d) cross_entity boundary, (f) negative EV trap, gamma URL limit)
+- Both sides update mental model from substantive counter-evidence (not 互捧)
+- Self-批 caught reverse 错位 patterns (ship-without-review vs ask-permission)
+
+**Concrete example** (r141 Variant Expander, 2026-05-16):
+r141 spec → J1 #219 ship直接 (错位) → r142 call-out → J1 #220 6 substantive points → r143 反向 4 ack + (d) push back → J1 #221 (d) retract + 4 ack → r144 Phase 1.5 PASS → r145 Phase 2 spec → J1 #223 6 pre-challenge → r146 3 ack → J1 #225 ship → r147 PASS. 4 round-trip / ~30 min discussion / ~30 min ship / 2 substantive design bugs caught + fixed pre-ship.
+
+**Antidote**: When Owner钦定 "你们先搞" feels like green-light to skip review, **don't**. The "先搞" lifts the "ask permission" wait, NOT the "对抗 review" gate. Both 顺利 = both shipped quickly. Process is the architecture.
+
+---
+
 ## R-VARIANT-INSIGHT-BOUNDARY — variant = "同 insight 不同强度", cross-entity 是独立 rec NOT variant
 
 **Owner 5/16 + Bettor r143 §4 sediment (Phase B Variant Expander Phase 1.5).**
