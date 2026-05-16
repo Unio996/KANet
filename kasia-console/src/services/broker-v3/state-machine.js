@@ -353,7 +353,9 @@ async function _previewText(draft, side) {
     '  ─────────────────',
   ];
   if (side === 'sell') lines.push(`  你的 ${stableAsset} 收款: ${draft.pay_address}`);
-  lines.push('', '回 YES 确认下单 / NO 取消');
+  // Bug AU 5/16 fix (NWT 07:28 Tier 4 surface): prompt 文本同步 strict 数字 for BUY pilot.
+  // SELL flow preserve legacy YES/NO 字面 (per "先跑通一个" pilot scope).
+  lines.push('', side === 'buy' ? '回 1 确认下单 / 2 取消' : '回 YES 确认下单 / NO 取消');
   return lines.join('\n');
 }
 

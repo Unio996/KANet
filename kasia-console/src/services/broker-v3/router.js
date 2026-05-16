@@ -244,7 +244,10 @@ async function _doQuote(peer, draft, relayNodeId, prevReply) {
       ? `✓ 到账后 broker 自动挂买单 + 成交后 deliver ${qty} KAS to 你 Kasia (${peer.slice(0, 18)}...).`
       : `✓ 到账后 broker 自动挂卖单 + 成交后 deliver ${(baseQuoteUsdt).toFixed(4)} ${targetAsset} to 你 (${userTargetAddr?.slice(0, 16) || '?'}...).`,
     '',
-    '回 cancel 立即取消 / status 查 prepayment 状态.',
+    // Bug AU 5/16 fix (NWT 07:28 Tier 4 surface): prompt sync strict 数字 BUY pilot.
+    isBuy
+      ? '回 1 取消 prepayment / 2 查询 prepayment 状态.'
+      : '回 cancel 立即取消 / status 查 prepayment 状态.',
   ].join('\n');
 }
 
@@ -302,14 +305,18 @@ async function _doCheckPrepayStatus(peer, draft, prevReply) {
   const r = rows[0];
   const remainingMs = new Date(r.expires_at).getTime() - Date.now();
   const remainingMin = Math.max(0, Math.round(remainingMs / 60000));
+  // Bug AU 5/16 fix: status query prompt sync strict 数字 BUY pilot.
+  const isBuy = r.side === 'buy_kas';
   return [
     `📋 报价状态: pending_prepay (等你真链 transfer)`,
-    `  方向: ${r.side === 'buy_kas' ? '买 KAS' : '卖 KAS'}`,
+    `  方向: ${isBuy ? '买 KAS' : '卖 KAS'}`,
     `  请 transfer: ${r.amount_quoted} ${r.asset} on ${r.chain.toUpperCase()}`,
     `  到: ${r.broker_recv_addr}`,
     `  剩余时间: ${remainingMin} min`,
     '',
-    '回 cancel 立即取消 OR 等真链 transfer 到账 (5 min 超时自动失效).',
+    isBuy
+      ? '回 1 取消 OR 等真链 transfer 到账 (5 min 超时自动失效).'
+      : '回 cancel 立即取消 OR 等真链 transfer 到账 (5 min 超时自动失效).',
   ].join('\n');
 }
 
