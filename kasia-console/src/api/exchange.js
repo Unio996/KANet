@@ -247,10 +247,18 @@ export async function registerExchangeRoutes(fastify) {
     // For KAS, fund-lock below handles it. For USDT/USDC on EVM chains, check we actually have it.
     if (give_asset !== 'KAS' && give_chain) {
       try {
-        const walletsRes = await fetch(
+        // Bug AI 5/16 fix (Owner 07:10 真测 surface): first attempt "No bnb wallet" race (8s timeout
+        // too tight 在 cold start / high tick load). Retry once with longer timeout on null/empty chains.
+        // Retry path masks issue 之前 (NWT 14:01 alarm log evidence: First attempt FAIL + Retry SUCCESS).
+        const fetchWallets = (timeoutMs) => fetch(
           `http://127.0.0.1:${process.env.PORT || 3100}/api/relay/${relayNodeId}/wallets`,
-          { signal: AbortSignal.timeout(8000) }
+          { signal: AbortSignal.timeout(timeoutMs) }
         ).then(r => r.json()).catch(() => null);
+        let walletsRes = await fetchWallets(8000);
+        if (!walletsRes?.chains?.length) {
+          await new Promise(r => setTimeout(r, 500));
+          walletsRes = await fetchWallets(15000);
+        }
         const chains = walletsRes?.chains || [];
         // Bug C 5/14 fix (NWT C4.4 Tier 4 surface): chain === naked compare 漏 normalize, 'bsc' !== 'bnb' fail
         // DB-canonical = 'bnb' but UI label = 'bsc' (broker-v3 menu hardcoded). 必走 normalizeChainKey 双 wrap.

@@ -306,6 +306,19 @@ export async function _settleEscrowToUser(escrowId, offerId) {
       SET status = 'settled', settle_tx = ?, updated_at = datetime('now')
       WHERE id = ? AND status = 'active'
     `).run(settleTxHash, escrowId);
+
+    // Bug AJ 5/16 fix (Owner 07:10 真测 surface silent transition): DM user post settle.
+    try {
+      const { enqueue } = await import('./broker-action-queue.js');
+      const settleTxShort = String(settleTxHash || '').slice(0, 16);
+      const chainLabel = isKas ? 'Kasia' : e.target_chain.toUpperCase();
+      const userAddrShort = e.user_target_addr.slice(0, 20) + '...';
+      enqueue({
+        kind: 'dm_completion',
+        peer: e.user_kasia_addr,
+        payload: { message: `✓ 成交! 已 deliver ${e.target_amount} ${e.target_asset} 到你 ${chainLabel} ${userAddrShort}. settle TX: ${settleTxShort}... 链上可查.` },
+      });
+    } catch (err) { console.warn(`[exchange-escrow-settle] DM notify err: ${err.message}`); }
   } catch (err) {
     console.error(`[exchange-escrow-settle] settle err for escrow ${escrowId.slice(0,8)}: ${err.message}`);
   }
@@ -340,6 +353,15 @@ export async function _refundEscrow(escrowId, reason = 'unspecified') {
       WHERE id = ? AND status = 'pending_prepay'
     `).run(escrowId);
     console.log(`[exchange-escrow-refund] escrow ${escrowId.slice(0,8)} pending_prepay → refunded (reason: ${reason}, no chain TX needed)`);
+    // Bug AJ 5/16 fix (Owner 07:10 真测 surface silent transition): DM user post pending refund.
+    try {
+      const { enqueue } = await import('./broker-action-queue.js');
+      enqueue({
+        kind: 'dm_timeout',
+        peer: e.user_kasia_addr,
+        payload: { message: `⏰ 你的报价 (${e.target_amount} ${e.target_asset}) 5 分钟内未收到 prepayment, 已自动取消. 没扣你任何 funds. 回 1/2 重新挂单.` },
+      });
+    } catch (err) { console.warn(`[exchange-escrow-refund] pending DM notify err: ${err.message}`); }
     return { ok: true, status: 'refunded', no_chain_tx: true };
   }
 
@@ -400,6 +422,19 @@ export async function _refundEscrow(escrowId, reason = 'unspecified') {
         }
       } catch (err) { console.warn(`[exchange-escrow-refund] cascade-cancel offer err: ${err.message}`); }
     }
+
+    // Bug AJ 5/16 fix (Owner 07:10 真测 surface): DM user post active 真链 refund.
+    try {
+      const { enqueue } = await import('./broker-action-queue.js');
+      const refundTxShort = String(refundTxHash || '').slice(0, 16);
+      const chainLabel = isKasRefund ? 'Kasia' : e.chain.toUpperCase();
+      const refundAddrShort = e.user_refund_addr.slice(0, 20) + '...';
+      enqueue({
+        kind: 'dm_timeout',
+        peer: e.user_kasia_addr,
+        payload: { message: `⏰ 你的报价 (${e.target_amount} ${e.target_asset}) 30 分钟无 taker 接单, 已退款 ${refundAmount} ${e.asset} 到你 ${chainLabel} ${refundAddrShort}. refund TX: ${refundTxShort}... 链上可查.` },
+      });
+    } catch (err) { console.warn(`[exchange-escrow-refund] active DM notify err: ${err.message}`); }
 
     return { ok: true, status: 'refunded', refund_tx: refundTxHash };
   } catch (err) {

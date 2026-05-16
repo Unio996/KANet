@@ -107,7 +107,11 @@ function _isLanguageA(msg) {
   const head = String(msg).trim().split(/\s+/)[0] || '';
   if (/^[1-6]$/.test(head)) return true;  // menu number
   if (/^(back|取消|返回|menu|next)$/i.test(head)) return true;  // 控制 keyword
-  if (/^(yes|y|确认|ok|好|发布|算了|no|n|不)$/i.test(head)) return true;  // confirm/cancel
+  if (/^(yes|y|确认|ok|好|发布|算了|no|n|不|cancel|status)$/i.test(head)) return true;  // confirm/cancel/WAIT_PREPAY status query
+  // Bug AH 5/16 fix (Owner 07:10 Bangkok 真测 surface): broker prompt L261 字面 写 'cancel'/'status'
+  // 作为 user 操作 keyword, 但 _isLanguageA whitelist 漏 → Owner DM cancel/status → fall through canned menu →
+  // Owner UX dark, escrow refund 实际 fire 但 user 不知. Add cancel + status to whitelist regex.
+  // KI 复刻 第 N+8 次 (prompt text vs whitelist parity drift — Bug C/D/D-residual/S 同款 pattern).
   // Bug S 5/15 fix (NWT 02:31 architect dig): PRICE_INPUT step accepts 'mid' for live oracle price.
   // 之前 'mid' 不在 whitelist → _isLanguageA false → handleMessage return null → conversations.js:283
   // canned 'choose 1-6' reply, escrow 没 INSERT. AT-07 + HP-05 Tier 4 实证 (NWT 01:42 + 01:46).
