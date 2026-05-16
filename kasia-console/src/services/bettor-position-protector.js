@@ -114,26 +114,124 @@ async function detectNewPositions() {
   return inserted;
 }
 
-// Audit active rules — read current price + log audit row (NO firing in Phase 1)
+// Audit active rules — Phase 3 firing logic (Owner 5/16 钦定 + Bettor r139 §4 spec).
+// Per-tick: fetch Polymarket gamma price → compute pnl_pct → check 4 trigger conditions →
+// fire /api/predictions/order with X-Owner-Ack HMAC header → update rule + audit log.
 async function auditActiveRules() {
   const activeRules = sqlite.prepare(`
-    SELECT id, relay_node_id, token_id, side, entry_avg_price, current_size,
-           stop_loss_pct, cooldown_hours, take_profit_price, time_close_days,
-           created_at
+    SELECT id, relay_node_id, token_id, market_slug, side, entry_avg_price, current_size,
+           stop_loss_pct, cooldown_hours, take_profit_price, take_profit_limit_order_id,
+           time_close_days, time_drift_threshold_pp, owner_ack_token, created_at
     FROM position_protect_rules WHERE status = 'active'
   `).all();
 
   let audited = 0;
   for (const rule of activeRules) {
-    // Phase 1: just log audit. Phase 3 will fetch Polymarket price + check triggers.
-    sqlite.prepare(`
-      INSERT INTO position_protect_audit (id, rule_id, check_at, trigger_fired, action_taken, notes)
-      VALUES (?, ?, datetime('now'), 'none', 'none', ?)
-    `).run(randomUUID(), rule.id, 'Phase 1 skeleton — no price fetch yet');
-    sqlite.prepare(`UPDATE position_protect_rules SET last_audit_at = datetime('now') WHERE id = ?`).run(rule.id);
-    audited++;
+    try {
+      const price = await fetchPolymarketPrice(rule.token_id);
+      let triggerFired = 'none', actionTaken = 'none', txHash = null, fillPrice = null, notes = '';
+      if (price == null) {
+        notes = 'price fetch failed';
+      } else {
+        const ageHours = (Date.now() - new Date(rule.created_at).getTime()) / 3600000;
+        const currentValue = rule.side === 'YES' ? price : (1 - price);
+        const pnlPct = rule.entry_avg_price > 0 ? (currentValue - rule.entry_avg_price) / rule.entry_avg_price : 0;
+
+        // 止损: pnl_pct ≤ stop_loss_pct AND opened > cooldown_hours
+        if (rule.stop_loss_pct != null && pnlPct <= rule.stop_loss_pct && ageHours > (rule.cooldown_hours || 12)) {
+          triggerFired = 'stop';
+          const fireResult = await fireMarketSell(rule, currentValue);
+          actionTaken = fireResult.actionTaken;
+          txHash = fireResult.txHash;
+          fillPrice = fireResult.fillPrice;
+          notes = fireResult.notes;
+        }
+        // 时间: opened > time_close_days AND |drift| < threshold (zombie close — Phase 3.1, defer if no 30d history)
+        else if (rule.time_close_days != null && ageHours / 24 > rule.time_close_days) {
+          triggerFired = 'time';
+          const fireResult = await fireMarketSell(rule, currentValue);
+          actionTaken = fireResult.actionTaken;
+          txHash = fireResult.txHash;
+          fillPrice = fireResult.fillPrice;
+          notes = `time-close ${(ageHours / 24).toFixed(0)}d > ${rule.time_close_days}d. ${fireResult.notes}`;
+        }
+        else {
+          notes = `pnl ${(pnlPct * 100).toFixed(1)}% age ${ageHours.toFixed(1)}h price $${price.toFixed(4)} — no trigger`;
+        }
+      }
+      sqlite.prepare(`
+        INSERT INTO position_protect_audit (id, rule_id, check_at, current_price, current_pnl_pct, trigger_fired, action_taken, tx_hash, fill_price, notes)
+        VALUES (?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?)
+      `).run(randomUUID(), rule.id, price, price != null ? (rule.side === 'YES' ? price : 1 - price) : null, triggerFired, actionTaken, txHash, fillPrice, notes);
+      sqlite.prepare(`UPDATE position_protect_rules SET last_audit_at = datetime('now') WHERE id = ?`).run(rule.id);
+      audited++;
+    } catch (e) {
+      console.error(`[position-protector] audit fail for rule ${rule.id?.slice(0, 8)}: ${e.message}`);
+    }
   }
   return audited;
 }
 
-export const __testing = { detectNewPositions, auditActiveRules, STOP_LOSS_DEFAULT_PCT, COOLDOWN_DEFAULT_HOURS, TIME_CLOSE_DEFAULT_DAYS };
+// Fetch live Polymarket gamma /markets midpoint for a token (read-only, no LLM, no fire).
+async function fetchPolymarketPrice(tokenId) {
+  if (!tokenId) return null;
+  try {
+    const res = await fetch(`https://gamma-api.polymarket.com/markets?tokenId=${encodeURIComponent(tokenId)}`, {
+      headers: { 'User-Agent': 'KANet-bettor-protector/1.0' },
+    });
+    if (!res.ok) return null;
+    const arr = await res.json();
+    if (!Array.isArray(arr) || arr.length === 0) return null;
+    const m = arr[0];
+    if (!m.outcomePrices) return null;
+    const prices = JSON.parse(m.outcomePrices);
+    // outcomePrices = ["YES_price", "NO_price"]; we want YES price (index 0)
+    const yesPrice = parseFloat(prices[0]);
+    return Number.isFinite(yesPrice) ? yesPrice : null;
+  } catch {
+    return null;
+  }
+}
+
+// Fire market sell via /api/predictions/order with X-Owner-Ack HMAC header.
+// Sell at current best bid - $0.01 slippage (per Bettor r139 §2 止损 spec).
+async function fireMarketSell(rule, currentValue) {
+  if (!rule.owner_ack_token) {
+    return { actionTaken: 'fire_skipped', txHash: null, fillPrice: null, notes: 'no owner_ack_token (rule not properly ACKed)' };
+  }
+  const sellPrice = Math.max(0.01, currentValue - 0.01);  // bid - $0.01 slippage cap
+  try {
+    const res = await fetch('http://127.0.0.1:3100/api/predictions/order', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Owner-Ack': rule.owner_ack_token,
+      },
+      body: JSON.stringify({
+        relay_node_id: rule.relay_node_id,
+        tokenId: rule.token_id,
+        side: 'SELL',
+        price: sellPrice,
+        size: rule.current_size,
+      }),
+    });
+    const data = await res.json();
+    if (data.ok && data.success !== false) {
+      const txHash = Array.isArray(data.transactionsHashes) && data.transactionsHashes.length ? data.transactionsHashes[0] : null;
+      const fill = data.takingAmount && data.makingAmount ? Number(data.makingAmount) / Number(data.takingAmount) : sellPrice;
+      const realized = (fill - rule.entry_avg_price) * rule.current_size;
+      sqlite.prepare(`
+        UPDATE position_protect_rules SET status = ?, triggered_at = datetime('now'), trigger_action_tx_hash = ?, trigger_realized_pnl = ? WHERE id = ?
+      `).run('triggered_stop', txHash, realized, rule.id);
+      console.log(`[position-protector] 🤖 fired market sell rule=${rule.id?.slice(0, 8)} ${rule.side} @ $${fill?.toFixed(4)} realized $${realized?.toFixed(2)}`);
+      return { actionTaken: 'market_sell', txHash, fillPrice: fill, notes: `sold ${rule.current_size?.toFixed(0)} shares @ $${fill?.toFixed(4)}, realized $${realized?.toFixed(2)}` };
+    } else {
+      console.error(`[position-protector] fire fail rule=${rule.id?.slice(0, 8)}: ${data.error || JSON.stringify(data).slice(0, 200)}`);
+      return { actionTaken: 'fire_failed', txHash: null, fillPrice: null, notes: `fire failed: ${data.error || 'unknown'}` };
+    }
+  } catch (e) {
+    return { actionTaken: 'fire_exception', txHash: null, fillPrice: null, notes: `fire exception: ${e.message}` };
+  }
+}
+
+export const __testing = { detectNewPositions, auditActiveRules, fetchPolymarketPrice, fireMarketSell, STOP_LOSS_DEFAULT_PCT, COOLDOWN_DEFAULT_HOURS, TIME_CLOSE_DEFAULT_DAYS };

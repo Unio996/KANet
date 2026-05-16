@@ -747,11 +747,37 @@ export async function registerStockRoutes(fastify) {
   });
 
   // POST /api/predictions/order — 下单（通过 SDK）
+  // Phase B 持仓自动保护 Phase 3 (Owner 5/16 钦定 + Bettor r139 spec):
+  //   X-Owner-Ack header optional but if present → HMAC verify against position_protect_rules
+  //   token + check max_price/max_size bounds. If header present + invalid → reject. If header
+  //   absent → traditional Owner UI ACCEPT path (per stage explicit Owner trigger).
   fastify.post('/api/predictions/order', async (request, reply) => {
     const { relay_node_id, tokenId, side, price, size } = request.body || {};
     if (!relay_node_id || !tokenId || !side || !price || !size) {
       return reply.code(400).send({ error: 'relay_node_id, tokenId, side (BUY/SELL), price, size required' });
     }
+
+    // Phase 3 HMAC token verify (X-Owner-Ack header) — applied when daemon fires
+    const ackHeader = request.headers['x-owner-ack'];
+    if (ackHeader) {
+      try {
+        const crypto = await import('node:crypto');
+        const [b64, sig] = String(ackHeader).split('.');
+        if (!b64 || !sig) return reply.code(401).send({ error: 'X-Owner-Ack malformed (expected base64.signature)' });
+        const tokenJson = Buffer.from(b64, 'base64').toString('utf8');
+        const expected = crypto.createHmac('sha256', process.env.CONSOLE_ENCRYPTION_KEY || 'fallback-no-env-warn').update(tokenJson).digest('hex');
+        if (sig !== expected) return reply.code(401).send({ error: 'X-Owner-Ack signature mismatch' });
+        const payload = JSON.parse(tokenJson);
+        if (payload.relay_node_id !== relay_node_id) return reply.code(401).send({ error: 'X-Owner-Ack relay_node_id mismatch' });
+        if (payload.token_id !== tokenId) return reply.code(401).send({ error: 'X-Owner-Ack token_id mismatch' });
+        if (parseFloat(price) > payload.max_price + 0.001) return reply.code(401).send({ error: `X-Owner-Ack price ${price} exceeds max ${payload.max_price}` });
+        if (parseFloat(size) > payload.max_size + 0.001) return reply.code(401).send({ error: `X-Owner-Ack size ${size} exceeds max ${payload.max_size}` });
+        console.log(`[predictions] X-Owner-Ack verified for rule ${payload.rule_id?.slice(0,8)}`);
+      } catch (e) {
+        return reply.code(401).send({ error: `X-Owner-Ack verify fail: ${e.message}` });
+      }
+    }
+
     const creds = _getPolymarketCreds(relay_node_id);
     if (!creds) return reply.code(400).send({ error: 'Not set up' });
 
