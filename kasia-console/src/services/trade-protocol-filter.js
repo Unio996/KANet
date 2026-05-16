@@ -1553,12 +1553,14 @@ async function _autoSettleAsset(offer, takerRelayNodeId) {
       payer: offer.taker,
     });
 
-    // Bug AN 5/16 fix (NWT 02:30 HP-01 retry surface): 5 retries × 200-800ms backoff (~2s total)
-    // 太短 for Kaspa mempool / UTXO contention. NWT 真测 duplicate transfer scenario UTXO 紧, broker
-    // auto-fire + NWT manual fire 同时 → J2 relay broadcast contention. Increase 15 retries × 1000ms ×
-    // linear (15s max wait) + occasional 5s long wait for slow mempool recovery.
+    // Bug AY 5/16 fix (NWT Phase 1 env 9 真测 surface, KI 第 N+10 次 retry-window-too-tight):
+    // 15 retries × 1000ms (~30s) still too tight when J2 just spent UTXOs for KAS payment AND needs
+    // fresh UTXO for paid_v1 broadcast (Kaspa coinbase maturity ~10s + propagation + mempool clear).
+    // 真测 evidence: offer fec93476 sendKas 08:03:28 → paid_v1 broadcast 08:03:33 start →
+    // 08:03:50 fail 15 attempts → offer stuck verifying. J2 UTXOs not mature within 15s window.
+    // Fix: 30 retries × 2000ms base + 5s extra every 3rd = ~90s total (3x Kaspa maturity + buffer).
     let paidBroadcastOk = false;
-    const MAX_BCAST_RETRIES = 15;
+    const MAX_BCAST_RETRIES = 30;
     for (let pa = 1; pa <= MAX_BCAST_RETRIES; pa++) {
       try {
         const pr = await sendCommandAsync(takerRelayNodeId, {
@@ -1571,9 +1573,8 @@ async function _autoSettleAsset(offer, takerRelayNodeId) {
         console.error(`[exchange-autosend] paid broadcast attempt ${pa}/${MAX_BCAST_RETRIES}: ${err.message}`);
       }
       if (pa < MAX_BCAST_RETRIES) {
-        // Linear backoff 1s + extra 5s every 5 attempts (UTXO refresh / mempool clear window).
-        const baseMs = 1000;
-        const extraMs = pa % 5 === 0 ? 5000 : 0;
+        const baseMs = 2000;
+        const extraMs = pa % 3 === 0 ? 5000 : 0;
         await new Promise(r => setTimeout(r, baseMs + extraMs));
       }
     }

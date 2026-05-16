@@ -1359,16 +1359,13 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
         transition(offer_id, 'delivering', { txHash: payment_tx }); // brief pass-through
         transition(offer_id, 'completed', { txHash: payment_tx });
         try { const { spendFunds } = await import('./fund-lock.js'); spendFunds(offer_id); } catch {}
-        // Bug AO 5/16 fix (HP-01 retry surface): chain_events.observed_by NOT NULL constraint,
-        // missing in 5 INSERT path → _verifyAndComplete throws → Bug AM code never reaches.
-        sqlite.prepare(`
-          INSERT INTO chain_events (id, event_type, from_address, to_address, txid, payload, observed_by, observed_at)
-          VALUES (?, 'exchange_completed', ?, ?, ?, ?, 'system', datetime('now'))
-        `).run(crypto.randomUUID(), offer.maker, offer.taker, payment_tx, JSON.stringify({
-          offer_id, give_asset: offer.give_asset, give_amount: offer.give_amount,
-          want_asset: offer.want_asset, want_amount: offer.want_amount,
-          payment_tx, verification: 'kaspa_tx',
-        }));
+        // Bug AZ 5/16 fix (NWT Phase 1 env 9-13 真测 surface, KI 第 N+11 次 duplicate INSERT):
+        // 之前 explicit INSERT chain_events 'exchange_completed' (L1364-1371) UNIQUE-conflict 跟
+        // transition() L116-127 内嵌 recordChainEvent — duplicate same txid+event_type 抛 UNIQUE
+        // constraint → _verifyAndComplete 抛 → L1372 console + L1391 _settleEscrowToUser + L1399
+        // broker→taker autopay 全 skipped → escrow 卡 active + 用户 0 收 KAS + taker 0 收 USDT.
+        // 真测 evidence: fec93476 'UNIQUE constraint failed: chain_events.txid, chain_events.event_type'.
+        // Fix: 删 explicit INSERT (transition() 已 cover). Bug AO defense moved to transition() error guard.
         console.log(`[exchange] offer ${offer_id.slice(0,8)} BUY kaspa_tx verified → completed (KAS received, no delivery needed)`);
         // Trigger hedge
         const finalOffer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer_id);
