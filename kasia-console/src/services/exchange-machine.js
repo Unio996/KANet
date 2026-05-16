@@ -1254,17 +1254,55 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
           if (localAgent) {
             executeHedge(finalOffer).catch(err => console.error(`[exchange-hedge] error: ${err.message}`));
           }
-          // Bug R 5/14 fix (J2 #368 Step 3 settle hook 未 fire 真因): BUY kaspa_tx short-circuit
-          // 旁路 RETURNs before L1352 settle hook. 加 same hook here for escrow-backed BUY offers.
+          // Bug R 5/14 fix + Bug AM 5/16 fix (HP-01 真测 surface setImmediate 真测 unreliable):
+          // BUY kaspa_tx short-circuit RETURNs before L1352 settle hook. Add explicit AWAIT sequence:
+          //   1. _settleEscrowToUser — broker forward target_asset (KAS) to escrow user (NWT)
+          //   2. broker → taker give_asset (USDT) — escrow BUY does NOT have seeder pub row so
+          //      _makerAutoPayGive (L184-202 requires retail_dex_buy_publications.state='filled')
+          //      不 cover escrow BUY case. Explicit transferUsdt to taker's EVM wallet here.
           try {
             const meta = JSON.parse(finalOffer.verification_meta || '{}');
             const isEscrow = (finalOffer.metadata || '').includes('broker-v3-escrow') || meta.escrow_id;
             if (isEscrow && meta.escrow_id && meta.escrow_user_target) {
-              setImmediate(() => {
-                _settleEscrowToUser(meta.escrow_id, finalOffer.id).catch(err =>
-                  console.error(`[exchange-escrow-settle] BUY kaspa_tx path err for offer ${finalOffer.id.slice(0,8)}: ${err.message}`)
-                );
-              });
+              try {
+                await _settleEscrowToUser(meta.escrow_id, finalOffer.id);
+              } catch (err) {
+                console.error(`[exchange-escrow-settle] BUY kaspa_tx path err for offer ${finalOffer.id.slice(0,8)}: ${err.message}`);
+              }
+            }
+            // Bug AM 5/16: explicit broker → taker give_asset transfer (escrow BUY case missed by
+            // _makerAutoPayGive seeder-pub gate).
+            if (isEscrow && finalOffer.give_asset && finalOffer.give_asset !== 'KAS' && finalOffer.taker && finalOffer.give_chain) {
+              try {
+                const takerRelay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(finalOffer.taker);
+                if (takerRelay) {
+                  const takerEvm = sqlite.prepare(
+                    "SELECT address FROM agent_wallets WHERE relay_node_id = ? AND chain = ? AND is_default = 1 LIMIT 1"
+                  ).get(takerRelay.id, finalOffer.give_chain);
+                  const brokerWallet = sqlite.prepare(
+                    "SELECT privkey_encrypted FROM agent_wallets WHERE relay_node_id = ? AND chain = ? AND is_default = 1 LIMIT 1"
+                  ).get(localAgent.id, finalOffer.give_chain);
+                  if (takerEvm?.address && brokerWallet?.privkey_encrypted) {
+                    const transferUsdt = await getTransferUsdt();
+                    const r = await transferUsdt(finalOffer.give_chain, brokerWallet.privkey_encrypted, takerEvm.address, parseFloat(finalOffer.give_amount), finalOffer.give_asset);
+                    if (r.ok) {
+                      console.log(`[exchange-buy-kaspa-autopay] broker → taker ${finalOffer.give_amount} ${finalOffer.give_asset} on ${finalOffer.give_chain} TX ${r.txHash?.slice(0,16)}`);
+                      sqlite.prepare(`INSERT INTO chain_events (id, event_type, from_address, to_address, txid, payload, observed_at) VALUES (?, 'exchange_paid', ?, ?, ?, ?, datetime('now'))`).run(
+                        crypto.randomUUID(), finalOffer.maker, takerEvm.address, r.txHash,
+                        JSON.stringify({ offer_id: finalOffer.id, asset: finalOffer.give_asset, amount: finalOffer.give_amount, chain: finalOffer.give_chain, direction: 'broker→taker auto-pay (escrow BUY)' })
+                      );
+                    } else {
+                      console.error(`[exchange-buy-kaspa-autopay] transferUsdt fail offer ${finalOffer.id.slice(0,8)}: ${r.error}`);
+                    }
+                  } else {
+                    console.warn(`[exchange-buy-kaspa-autopay] offer ${finalOffer.id.slice(0,8)} taker has no ${finalOffer.give_chain} wallet OR broker no wallet — manual settle needed`);
+                  }
+                } else {
+                  console.warn(`[exchange-buy-kaspa-autopay] offer ${finalOffer.id.slice(0,8)} taker ${finalOffer.taker?.slice(-12)} not registered relay — manual settle needed`);
+                }
+              } catch (err) {
+                console.error(`[exchange-buy-kaspa-autopay] err for offer ${finalOffer.id.slice(0,8)}: ${err.message}`);
+              }
             }
           } catch (e) { console.warn(`[exchange-escrow-settle] BUY kaspa_tx check err: ${e.message}`); }
         }
