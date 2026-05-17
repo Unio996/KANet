@@ -488,9 +488,19 @@ async function _evaluateAutoTake(offerId, msg) {
   if (!payChain) return;
 
   // 6. Price evaluation
+  // Bug NWT-13:30 A1 fix (Owner production autoTaker 真测 silent disabled):
+  // getCachedKasPrice 单 source 返 0 当 cache cold/idle/TTL 超 → autoTaker silent dead.
+  // broker quote 用 exchange-client.getKasPrice() (live oracle), autoTaker 应同源.
+  // 修法: try cache first (fast path), fallback live oracle (cold cache 也能 evaluate).
   const { getCachedKasPrice } = await import('./market-data.js');
-  const marketPrice = getCachedKasPrice();
-  if (!marketPrice) return; // price=0 protection — cache expired, skip
+  let marketPrice = getCachedKasPrice();
+  if (!marketPrice) {
+    try {
+      const { getKasPrice } = await import('./broker-v3/exchange-client.js');
+      marketPrice = await getKasPrice();
+    } catch (err) { console.warn(`[autoTaker] getKasPrice fallback err: ${err.message}`); }
+  }
+  if (!marketPrice) return; // 真 oracle down → skip (not silent disable)
 
   const giveAmt = parseFloat(msg.give_amount);
   const wantAmt = parseFloat(msg.want_amount);
