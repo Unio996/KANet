@@ -445,12 +445,42 @@ export async function _refundEscrow(escrowId, reason = 'unspecified') {
         const { clearFlowState } = await import('./broker-v3/state-machine.js');
         clearFlowState(e.user_kasia_addr);
       } catch {}
+
+      // Bug B1 supp 5/17 fix (NWT 03:59 CRITICAL P0 propose #3):
+      // 旧 DM hardcoded "没扣你任何 funds" — 但 user 可能 multi-sent (orphan path).
+      // Cross-check broker_orphan_inflows by user's EVM addr. 若 orphan 存在 → DM swap 真实状况.
+      let dmMessage = `⏰ 你的报价 (${e.target_amount} ${e.target_asset}) 5 分钟内未收到 prepayment, 已自动取消. 没扣你任何 funds. 回 1/2 重新挂单.`;
+      try {
+        // Derive user EVM addresses (BSC, ETH, etc) — orphan from_address 可能 match
+        const userRelay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(e.user_kasia_addr);
+        if (userRelay) {
+          const userEvms = sqlite.prepare('SELECT address FROM agent_wallets WHERE relay_node_id = ? AND chain IN (\'bnb\',\'eth\',\'polygon\',\'arbitrum\',\'optimism\',\'base\')').all(userRelay.id);
+          if (userEvms.length > 0) {
+            const placeholders = userEvms.map(() => '?').join(',');
+            const orphans = sqlite.prepare(
+              `SELECT id, amount, asset, chain, status, refund_tx FROM broker_orphan_inflows
+               WHERE from_address IN (${placeholders})
+                 AND datetime(detected_at) > datetime('now','-15 minutes')
+               ORDER BY detected_at DESC LIMIT 3`
+            ).all(...userEvms.map(w => w.address));
+            if (orphans.length > 0) {
+              const o = orphans[0];
+              if (o.status === 'refunded' && o.refund_tx) {
+                dmMessage = `⏰ 你的报价 (${e.target_amount} ${e.target_asset}) 5 分钟内未收到 prepayment, 已自动取消.\n\n注: broker 收到你的 ${o.amount} ${o.asset} (${o.chain.toUpperCase()}) 但跟下单金额不匹配, 已 100% 全额退还. refund TX: ${String(o.refund_tx).slice(0,16)}.\n\n回 1/2 重新挂单.`;
+              } else {
+                dmMessage = `⏰ 你的报价 (${e.target_amount} ${e.target_asset}) 5 分钟内未收到 prepayment, 已自动取消.\n\n注: broker 收到你 ${o.amount} ${o.asset} (${o.chain.toUpperCase()}) 但跟下单金额不匹配, 退款处理中, watch DM 更新.\n\n回 1/2 重新挂单.`;
+              }
+            }
+          }
+        }
+      } catch (err) { console.warn(`[exchange-escrow-refund] orphan cross-check err: ${err.message}`); }
+
       try {
         const { enqueue } = await import('./broker-action-queue.js');
         enqueue({
           kind: 'dm_timeout',
           peer: e.user_kasia_addr,
-          payload: { message: `⏰ 你的报价 (${e.target_amount} ${e.target_asset}) 5 分钟内未收到 prepayment, 已自动取消. 没扣你任何 funds. 回 1/2 重新挂单.` },
+          payload: { message: dmMessage },
         });
       } catch (err) { console.warn(`[exchange-escrow-refund] pending DM notify err: ${err.message}`); }
       return { ok: true, status: 'refunded', no_chain_tx: true };
