@@ -142,6 +142,19 @@ function _isLanguageA(msg) {
 import { randomUUID } from 'node:crypto';
 async function _doQuote(peer, draft, relayNodeId, prevReply) {
   if (!draft) return prevReply + '\n\n(no draft, back 重来)';
+  // Bug NWT-13:21 Layer 2 fix (Owner 19:58 真测 surface):
+  // 旧逻辑无 draft validation → race condition (back/multi-input) 后 pay_chain undefined → SQL NOT NULL constraint
+  // → 50-char truncated error leak schema 给 user.
+  // 新逻辑: fail-loud explicit reject 不 leak schema, 不 crash.
+  if (!draft.side || !draft.pay_chain || !Number.isFinite(parseFloat(draft.qty)) || parseFloat(draft.qty) <= 0) {
+    stateMachine.clearFlowState(peer);
+    return '❌ 状态丢失 (race / multi-client / back 中断). 已 reset, 回菜单重新走 1 (买) 或 2 (卖).';
+  }
+  // SELL 必有 pay_address (EVM 收款 addr)
+  if (draft.side === 'sell_kas' && (!draft.pay_address || !/^0x[a-fA-F0-9]{40}$/.test(draft.pay_address))) {
+    stateMachine.clearFlowState(peer);
+    return '❌ SELL 路径 EVM 收款地址丢失. 回菜单重新走.';
+  }
   const qty = parseFloat(draft.qty);
   const isBuy = draft.side === 'buy_kas';
   const chainKey = normalizeChainKey(draft.pay_chain);
@@ -230,9 +243,11 @@ async function _doQuote(peer, draft, relayNodeId, prevReply) {
     `).run(escrowId, nextSeq, draft.side, peer, prepayAsset, prepayChain, amountQuoted,
            brokerRecvAddr, targetAmount, targetAsset, targetChain, userTargetAddr, expiresAt);
   } catch (e) {
-    console.error(`[broker-v3 _doQuote] INSERT user_escrow_balances err: ${e.message}`);
+    // Bug NWT-13:21 Layer 1 fix (Owner 19:58 真测 surface): 旧 50-char truncate "user_escrow_balances.t" leak schema,
+    // user 完全不知道发生啥. 改 console.error 完整 log + user-facing friendly message 不 leak SQL/schema.
+    console.error(`[broker-v3 _doQuote] INSERT user_escrow_balances FULL ERR for peer=${peer?.slice(-12)} draft=${JSON.stringify(draft)}: ${e.message}\n${e.stack}`);
     stateMachine.clearFlowState(peer);
-    return `报价失败: 内部错误 (${e.message?.slice(0, 50)}). 回 back 重来.`;
+    return '❌ 报价失败 (broker 内部错误已记录). 回菜单重新走. 多次撞此请联系 Owner.';
   }
 
   // Reply text — quote + broker addr + amount + TTL
