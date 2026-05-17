@@ -3763,5 +3763,57 @@ export function runMigrations() {
     }
   }
 
+  // v117: position_watch_rules (Owner 5/17 钦定 mode 1+2 组合 + UI 可设置)
+  //   - alert-on-threshold + 等 Owner ACK 再 fire (符合 R-DAEMON-MUST-HAVE-DRY-RUN-MODE)
+  //   - thresholds_json 弹性存 4+ 级 (strong_yes / mild_yes / mild_no / strong_no)
+  {
+    const exists = sqlite.prepare("SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name='position_watch_rules'").get();
+    if (!exists.cnt) {
+      sqlite.exec(`
+        CREATE TABLE position_watch_rules (
+          id TEXT PRIMARY KEY,
+          relay_node_id TEXT NOT NULL,
+          market_slug TEXT,
+          market_title TEXT NOT NULL,
+          condition_id TEXT,
+          token_id TEXT NOT NULL,
+          outcome TEXT NOT NULL,
+          current_size REAL NOT NULL,
+          entry_avg_price REAL NOT NULL,
+          thresholds_json TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'active',
+          last_check_at TIMESTAMP,
+          last_check_price REAL,
+          last_alert_label TEXT,
+          last_alert_at TIMESTAMP,
+          notes TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(relay_node_id, token_id)
+        );
+        CREATE INDEX idx_pwr_relay ON position_watch_rules(relay_node_id);
+        CREATE INDEX idx_pwr_status ON position_watch_rules(status);
+      `);
+      console.log('[migrate] v117: position_watch_rules 表 + 2 索引 创建 (Owner 5/17 mode 1+2 watcher).');
+    }
+    const exists2 = sqlite.prepare("SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name='position_watch_audit'").get();
+    if (!exists2.cnt) {
+      sqlite.exec(`
+        CREATE TABLE position_watch_audit (
+          id TEXT PRIMARY KEY,
+          rule_id TEXT NOT NULL,
+          check_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          price REAL,
+          triggered_label TEXT,
+          action_proposed TEXT,
+          alerted INTEGER DEFAULT 0,
+          notes TEXT
+        );
+        CREATE INDEX idx_pwa_rule ON position_watch_audit(rule_id);
+        CREATE INDEX idx_pwa_at ON position_watch_audit(check_at);
+      `);
+      console.log('[migrate] v117: position_watch_audit 表 + 2 索引 创建 (per-tick check log + alert state).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

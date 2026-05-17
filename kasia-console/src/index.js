@@ -402,6 +402,12 @@ startBrokerMetricsCron();
 import { startPositionProtectorCron as startBettorPositionProtector } from './services/bettor-position-protector.js';
 startBettorPositionProtector();
 
+// Position Watcher (Owner 5/17 钦定 mode 1+2 组合 + UI 可设置) — 30 min cron, alert-only.
+// Reads position_watch_rules, fetches Polymarket book midpoint, broadcasts threshold alerts to dev-coord.
+// R-DAEMON-DRY-RUN守: NO auto-fire, Owner ACK 才动手.
+import { startPositionWatcherCron } from './services/bettor-position-watcher.js';
+startPositionWatcherCron();
+
 // Phase B Variant Expander 3-tier (Owner 5/16 钦定 "B" + Bettor r141 spec) — 30 min cron.
 // per scanner rec → auto-find related markets → 3 档 variant (激进/适中/保守) INSERT.
 // Phase 1 skeleton + UI surface, Phase 2 will integrate depth-500 /book API real-time.
