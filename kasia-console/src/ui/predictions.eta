@@ -1282,16 +1282,35 @@
             </div>
           </template>
       </div>
-      <!-- 活跃订单 -->
-      <div class="mt-3">
-        <div class="text-xs font-medium text-ink-500 mb-2">活跃订单</div>
-        <div x-show="!orders.length" class="text-xs text-ink-300 text-center py-2">无活跃订单</div>
+      <!-- 活跃订单 (LIVE limit orders 未成交) — Owner 5/17 04:44 钦定 UI 显示让 user 手动操作 -->
+      <div class="mt-3 pt-3 border-t border-warm-200">
+        <div class="text-sm font-semibold text-ink-700 mb-2">📋 挂单 (未成交)
+          <span x-show="orders && orders.length" class="text-xs text-ink-400 font-normal" x-text="'(' + orders.length + ')'"></span>
+        </div>
+        <div x-show="!orders.length" class="text-xs text-ink-400 text-center py-2">无挂单</div>
         <template x-for="ord in orders" :key="ord.id">
-          <div class="flex items-center gap-2 py-1.5 border-b border-warm-50 last:border-0 text-xs">
-            <span class="badge text-[8px]" :class="ord.side==='BUY'?'badge-success':'badge-error'" x-text="ord.side"></span>
-            <span class="text-ink-600" x-text="'$' + (ord.price || 0)"></span>
-            <span class="text-ink-400" x-text="ord.original_size + ' 份'"></span>
-            <button @click="cancelOrd(ord.id)" class="ml-auto text-red-400 hover:text-red-600 text-[10px]">撤单</button>
+          <div class="py-2 border-b border-warm-100 last:border-0 text-xs">
+            <div class="flex items-center gap-2 mb-1">
+              <a :href="'https://polymarket.com/event/' + (ord.slug || ord.market || '')" target="_blank" rel="noopener"
+                 class="flex-1 font-medium text-ink-700 hover:text-brand-600 truncate"
+                 :title="ord.question || ord.market"
+                 x-text="ord.question || ('condition ' + (ord.market?.slice(0,12) + '...'))"></a>
+              <span class="px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap" :class="ord.side==='BUY'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'" x-text="ord.side + ' ' + (ord.outcome || '')"></span>
+            </div>
+            <div class="flex items-center gap-3 text-[11px] text-ink-500">
+              <span>挂价 <span class="font-bold text-ink-700" x-text="'$' + (ord.price || 0)"></span></span>
+              <template x-if="ord.current_price != null">
+                <span :class="ord.current_price > parseFloat(ord.price) ? 'text-red-500' : 'text-green-600'"
+                      :title="ord.current_price > parseFloat(ord.price) ? '挂价低于市场, 不会 fill — 改高重挂' : '挂价 ≥ 市场, 应即时 fill'"
+                      x-text="'现价 $' + ord.current_price.toFixed(4) + (ord.current_price > parseFloat(ord.price) ? ' ⚠ 低于市场' : ' ✓')"></span>
+              </template>
+              <span class="text-ink-400" x-text="ord.original_size + ' 份'"></span>
+              <span class="text-ink-400" x-text="'fill ' + (Number(ord.size_matched || 0)).toFixed(0) + '/' + ord.original_size"></span>
+              <template x-if="ord.endDate">
+                <span class="text-ink-400" x-text="'到期 ' + new Date(ord.endDate).toLocaleDateString()"></span>
+              </template>
+              <button @click="cancelOrd(ord.id)" class="ml-auto px-2 py-1 rounded bg-red-50 text-red-600 hover:bg-red-100 text-[10px] font-medium">✗ 撤单</button>
+            </div>
           </div>
         </template>
       </div>

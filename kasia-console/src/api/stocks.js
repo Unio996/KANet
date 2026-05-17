@@ -725,6 +725,8 @@ export async function registerStockRoutes(fastify) {
   });
 
   // GET /api/predictions/orders — 通过 SDK getOpenOrders
+  // Owner 5/17 04:44 严训 UI 显示挂单 — enrich w/ market question + slug via gamma batch fetch
+  // (Owner sees "BUY NO $0.84 100 份" without market name 不知 which market 卡死).
   fastify.get('/api/predictions/orders', async (request, reply) => {
     const { relay_node_id } = request.query;
     if (!relay_node_id) return reply.code(400).send({ error: 'relay_node_id required' });
@@ -732,7 +734,34 @@ export async function registerStockRoutes(fastify) {
     if (!client) return reply.send({ orders: [], error: 'Not set up' });
     try {
       const orders = await client.getOpenOrders();
-      return reply.send({ orders: Array.isArray(orders) ? orders : [] });
+      const arr = Array.isArray(orders) ? orders : [];
+      // Enrich: gamma batch fetch market metadata by condition_id (uniq) for question + slug + endDate
+      if (arr.length > 0) {
+        const uniqConditionIds = [...new Set(arr.map(o => o.market).filter(Boolean))];
+        const marketMeta = {};
+        await Promise.all(uniqConditionIds.map(async cid => {
+          try {
+            const r = await fetch(`https://gamma-api.polymarket.com/markets?condition_ids=${encodeURIComponent(cid)}`);
+            if (!r.ok) return;
+            const m = (await r.json())[0];
+            if (m) marketMeta[cid] = { question: m.question, slug: m.slug, endDate: m.endDate, outcomePrices: m.outcomePrices };
+          } catch {}
+        }));
+        for (const o of arr) {
+          const meta = marketMeta[o.market];
+          if (meta) {
+            o.question = meta.question;
+            o.slug = meta.slug;
+            o.endDate = meta.endDate;
+            // current_price on the side Owner bid (YES uses idx 0, NO uses idx 1)
+            try {
+              const prices = JSON.parse(meta.outcomePrices || '["0","0"]');
+              o.current_price = parseFloat(o.outcome === 'Yes' ? prices[0] : prices[1]);
+            } catch {}
+          }
+        }
+      }
+      return reply.send({ orders: arr });
     } catch (e) {
       return reply.send({ orders: [], error: e.message });
     } finally {
