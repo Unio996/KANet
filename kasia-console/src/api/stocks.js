@@ -1199,4 +1199,82 @@ export async function registerStockRoutes(fastify) {
     if (!row) return reply.code(404).send({ cached: false });
     return reply.send({ cached: true, ...row });
   });
+
+  // ── Position Watcher rules (Owner 5/17 mode 1+2 UI 可设置) ──
+  fastify.get('/api/predictions/watch-rules', async (request, reply) => {
+    const { relay_node_id } = request.query;
+    const where = relay_node_id ? 'WHERE relay_node_id = ?' : '';
+    const params = relay_node_id ? [relay_node_id] : [];
+    const rows = sqlite.prepare(`SELECT * FROM position_watch_rules ${where} ORDER BY created_at DESC`).all(...params);
+    return reply.send({ ok: true, rules: rows.map(r => ({ ...r, thresholds: safeParseJSON(r.thresholds_json) })) });
+  });
+
+  fastify.post('/api/predictions/watch-rules', async (request, reply) => {
+    const b = request.body || {};
+    const required = ['relay_node_id', 'token_id', 'market_title', 'outcome', 'current_size', 'entry_avg_price', 'thresholds'];
+    for (const k of required) {
+      if (b[k] === undefined || b[k] === null || b[k] === '') return reply.code(400).send({ error: `missing field: ${k}` });
+    }
+    if (!Array.isArray(b.thresholds) || b.thresholds.length === 0) return reply.code(400).send({ error: 'thresholds must be non-empty array' });
+    for (const t of b.thresholds) {
+      if (!t.label || !t.op || typeof t.price !== 'number') return reply.code(400).send({ error: 'each threshold needs {label, op:"gte"|"lte", price, sell_pct?, action?}' });
+      if (t.op !== 'gte' && t.op !== 'lte') return reply.code(400).send({ error: `threshold op must be gte or lte, got ${t.op}` });
+    }
+    const id = (await import('node:crypto')).randomUUID();
+    try {
+      sqlite.prepare(`INSERT INTO position_watch_rules (id, relay_node_id, market_slug, market_title, condition_id, token_id, outcome, current_size, entry_avg_price, thresholds_json, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(id, b.relay_node_id, b.market_slug || null, b.market_title, b.condition_id || null, b.token_id, b.outcome, b.current_size, b.entry_avg_price, JSON.stringify(b.thresholds), b.status || 'active', b.notes || null);
+    } catch (e) {
+      if (String(e.message).includes('UNIQUE')) return reply.code(409).send({ error: 'rule for this relay+token already exists' });
+      return reply.code(500).send({ error: e.message });
+    }
+    return reply.send({ ok: true, id });
+  });
+
+  fastify.patch('/api/predictions/watch-rules/:id', async (request, reply) => {
+    const id = request.params.id;
+    const b = request.body || {};
+    const allowed = ['current_size', 'entry_avg_price', 'thresholds', 'status', 'notes'];
+    const sets = [];
+    const params = [];
+    for (const k of allowed) {
+      if (b[k] === undefined) continue;
+      if (k === 'thresholds') {
+        if (!Array.isArray(b.thresholds)) return reply.code(400).send({ error: 'thresholds must be array' });
+        sets.push('thresholds_json = ?');
+        params.push(JSON.stringify(b.thresholds));
+      } else {
+        sets.push(`${k} = ?`);
+        params.push(b[k]);
+      }
+    }
+    if (sets.length === 0) return reply.code(400).send({ error: 'no fields to update' });
+    params.push(id);
+    const r = sqlite.prepare(`UPDATE position_watch_rules SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+    if (r.changes === 0) return reply.code(404).send({ error: 'rule not found' });
+    return reply.send({ ok: true });
+  });
+
+  fastify.delete('/api/predictions/watch-rules/:id', async (request, reply) => {
+    const r = sqlite.prepare('DELETE FROM position_watch_rules WHERE id = ?').run(request.params.id);
+    if (r.changes === 0) return reply.code(404).send({ error: 'rule not found' });
+    return reply.send({ ok: true });
+  });
+
+  // GET last 20 audit rows for a rule (debug + UI history)
+  fastify.get('/api/predictions/watch-rules/:id/audit', async (request, reply) => {
+    const rows = sqlite.prepare('SELECT * FROM position_watch_audit WHERE rule_id = ? ORDER BY check_at DESC LIMIT 20').all(request.params.id);
+    return reply.send({ ok: true, audit: rows });
+  });
+
+  // Manual tick (debug — useful for "fire now without waiting 30 min")
+  fastify.post('/api/predictions/watch-rules/tick', async (request, reply) => {
+    const { tick } = await import('../services/bettor-position-watcher.js');
+    const r = await tick();
+    return reply.send(r);
+  });
+}
+
+function safeParseJSON(s) {
+  try { return JSON.parse(s); } catch { return null; }
 }

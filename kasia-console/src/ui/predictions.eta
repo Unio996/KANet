@@ -214,6 +214,15 @@
               <span class="text-[10px] text-ink-500" x-text="'(' + (bettorProtectRules.rules.filter(r => r.status === 'pending_owner_ack').length) + '⏸ + ' + (bettorProtectRules.rules.filter(r => r.status === 'active').length) + '✓)'"></span>
             </template>
           </button>
+          <!-- Owner 5/17 钦定 mode 1+2 组合: 阈值 watcher (alert only, ACK 才 fire) -->
+          <button @click="bettorTab = 'watcher'; loadWatchRules()"
+                  :class="bettorTab === 'watcher' ? 'border-b-2 border-amber-500 text-amber-700 font-medium' : 'text-ink-400 hover:text-ink-600'"
+                  class="px-4 py-2 text-sm flex items-center gap-1">
+            阈值 Watcher
+            <template x-if="watchRules && watchRules.length">
+              <span class="text-[10px] text-ink-500" x-text="'(' + watchRules.filter(r => r.status === 'active').length + ' 守)'"></span>
+            </template>
+          </button>
         </div>
 
         <!-- Tab content: 调仓建议 (Phase 3e-1 止损队列) -->
@@ -725,6 +734,141 @@
             </template>
             <template x-if="!bettorRecord">
               <div class="text-center py-8 text-sm text-ink-400">载入中...</div>
+            </template>
+          </div>
+        </template>
+
+        <!-- Tab content: 阈值 Watcher (Owner 5/17 钦定 mode 1+2 + UI 可设置 — alert only, ACK 才 fire) -->
+        <template x-if="bettorTab === 'watcher'">
+          <div>
+            <div class="flex items-center justify-between mb-3">
+              <div class="text-xs text-ink-500">
+                30 min cron 守阈值; 触发 → broadcast dev-coord; Owner ACK 才 fire (R-DAEMON-DRY-RUN)
+              </div>
+              <div class="flex items-center gap-2">
+                <button @click="watcherTickNow()" :disabled="watcherTicking" class="btn btn-sm btn-secondary text-[11px]">
+                  <span x-text="watcherTicking ? '查中...' : '立即 tick'"></span>
+                </button>
+                <button @click="watchAdd.show = true" class="btn btn-sm btn-primary text-[11px]">+ 新建 rule</button>
+              </div>
+            </div>
+
+            <!-- Add form (collapsed by default) -->
+            <template x-if="watchAdd && watchAdd.show">
+              <div class="card mb-3 border-l-4 border-l-amber-400">
+                <h3 class="text-sm font-bold mb-2">新建 watcher rule</h3>
+                <div class="space-y-2 text-[11px]">
+                  <div class="grid grid-cols-2 gap-2">
+                    <div>
+                      <label class="block text-ink-500 mb-1">Relay (agent)</label>
+                      <select x-model="watchAdd.relay_node_id" class="input input-xs w-full">
+                        <option value="">— 选 agent —</option>
+                        <template x-for="a in (allAgents || [])" :key="a.id"><option :value="a.id" x-text="a.name + ' (' + a.id.slice(0,8) + ')'"></option></template>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-ink-500 mb-1">Outcome</label>
+                      <select x-model="watchAdd.outcome" class="input input-xs w-full">
+                        <option value="Yes">Yes</option>
+                        <option value="No">No</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label class="block text-ink-500 mb-1">Token ID (Polymarket CLOB)</label>
+                    <input type="text" x-model="watchAdd.token_id" class="input input-xs w-full" placeholder="59804740893116830082655722678282357324530422193334657680222344987920273408829">
+                  </div>
+                  <div>
+                    <label class="block text-ink-500 mb-1">Market title (人读)</label>
+                    <input type="text" x-model="watchAdd.market_title" class="input input-xs w-full" placeholder="Starmer out by May 31, 2026?">
+                  </div>
+                  <div class="grid grid-cols-2 gap-2">
+                    <div>
+                      <label class="block text-ink-500 mb-1">Current size (sh)</label>
+                      <input type="number" step="any" x-model.number="watchAdd.current_size" class="input input-xs w-full">
+                    </div>
+                    <div>
+                      <label class="block text-ink-500 mb-1">Entry avg price</label>
+                      <input type="number" step="0.001" x-model.number="watchAdd.entry_avg_price" class="input input-xs w-full">
+                    </div>
+                  </div>
+                  <div class="border-t pt-2 mt-2">
+                    <div class="flex items-center justify-between mb-1">
+                      <label class="block text-ink-500">阈值 (按触发顺序排, 任意条数)</label>
+                      <button @click="watchAdd.thresholds.push({label:'',op:'gte',price:0.5,sell_pct:30,action:''})" class="btn btn-xs btn-ghost text-[10px]">+ 加一行</button>
+                    </div>
+                    <template x-for="(t, idx) in watchAdd.thresholds" :key="idx">
+                      <div class="grid grid-cols-12 gap-1 mb-1 items-center">
+                        <input type="text" x-model="t.label" class="input input-xs col-span-3" placeholder="strong_yes">
+                        <select x-model="t.op" class="input input-xs col-span-2">
+                          <option value="gte">价 ≥</option>
+                          <option value="lte">价 ≤</option>
+                        </select>
+                        <input type="number" step="0.001" x-model.number="t.price" class="input input-xs col-span-2">
+                        <input type="number" step="1" x-model.number="t.sell_pct" class="input input-xs col-span-2" placeholder="sell%">
+                        <input type="text" x-model="t.action" class="input input-xs col-span-2" placeholder="action note">
+                        <button @click="watchAdd.thresholds.splice(idx, 1)" class="text-red-500 text-xs col-span-1">✗</button>
+                      </div>
+                    </template>
+                  </div>
+                  <div class="flex gap-2 pt-2">
+                    <button @click="watchSubmit()" :disabled="watchSubmitting" class="btn btn-sm btn-primary text-[11px]">
+                      <span x-text="watchSubmitting ? '保存中...' : '✓ 保存'"></span>
+                    </button>
+                    <button @click="watchAdd.show = false" class="btn btn-sm btn-ghost text-[11px]">取消</button>
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <!-- Rules list -->
+            <template x-if="!watchRules">
+              <div class="card text-center text-ink-400 py-8">载入中...</div>
+            </template>
+            <template x-if="watchRules && watchRules.length === 0">
+              <div class="card text-center text-ink-400 py-8">
+                <div>暂无 watcher rule</div>
+                <div class="text-[11px] mt-1">点 + 新建 rule 设阈值守某持仓</div>
+              </div>
+            </template>
+            <template x-if="watchRules && watchRules.length > 0">
+              <div class="space-y-2">
+                <template x-for="r in watchRules" :key="r.id">
+                  <div class="card card-compact" :class="r.last_alert_label ? 'border-l-4 border-l-red-500' : (r.status === 'active' ? 'border-l-4 border-l-amber-400' : 'opacity-60')">
+                    <div class="flex items-start justify-between gap-2 mb-1">
+                      <div class="flex-1 min-w-0">
+                        <div class="text-sm font-medium text-ink-700 truncate" x-text="r.market_title"></div>
+                        <div class="text-[11px] text-ink-500">
+                          <span x-text="r.outcome"></span> ·
+                          <span x-text="r.current_size + ' sh'"></span> ·
+                          entry $<span x-text="r.entry_avg_price.toFixed(3)"></span> ·
+                          last $<span x-text="(r.last_check_price ?? 0).toFixed(3)"></span>
+                          <span x-show="r.last_check_at" class="ml-1 text-ink-400">@<span x-text="new Date(r.last_check_at).toLocaleTimeString()"></span></span>
+                        </div>
+                      </div>
+                      <div class="flex items-center gap-1">
+                        <span class="text-[10px] px-1.5 py-0.5 rounded" :class="r.status === 'active' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'" x-text="r.status"></span>
+                        <button @click="watchToggleStatus(r)" class="btn btn-xs btn-ghost text-[10px]" x-text="r.status === 'active' ? '暂停' : '激活'"></button>
+                        <button @click="watchDelete(r.id)" class="btn btn-xs btn-ghost text-red-500 text-[10px]">✗</button>
+                      </div>
+                    </div>
+                    <div class="grid gap-1 text-[10px] mt-1" :style="'grid-template-columns:repeat(' + Math.min(r.thresholds.length, 4) + ',1fr)'">
+                      <template x-for="t in r.thresholds" :key="t.label">
+                        <div class="bg-warm-50 px-2 py-1 rounded" :class="r.last_alert_label === t.label ? 'ring-2 ring-red-400' : ''">
+                          <div class="font-medium text-ink-700" x-text="t.label"></div>
+                          <div class="text-ink-500">
+                            <span x-text="t.op === 'gte' ? '≥' : '≤'"></span> $<span x-text="t.price.toFixed(3)"></span>
+                            <span x-show="t.sell_pct"> → sell <span x-text="t.sell_pct"></span>%</span>
+                          </div>
+                        </div>
+                      </template>
+                    </div>
+                    <div x-show="r.last_alert_label" class="mt-1 text-[10px] text-red-600">
+                      🚨 last alert: <span x-text="r.last_alert_label"></span> @ <span x-text="r.last_alert_at ? new Date(r.last_alert_at).toLocaleString() : '-'"></span>
+                    </div>
+                  </div>
+                </template>
+              </div>
             </template>
           </div>
         </template>
@@ -1585,6 +1729,17 @@ function predictionsPage() {
     bettorEvaluating: false,
     closingAll: false,
 
+    // Owner 5/17 钦定 mode 1+2 — 阈值 Watcher
+    watchRules: null,
+    watcherTicking: false,
+    watchSubmitting: false,
+    watchAdd: { show: false, relay_node_id: '', token_id: '', market_title: '', outcome: 'Yes', current_size: 0, entry_avg_price: 0, thresholds: [
+      { label: 'strong_yes', op: 'gte', price: 0.55, sell_pct: 60, action: 'sell 60% lock profit' },
+      { label: 'mild_yes',   op: 'gte', price: 0.45, sell_pct: 30, action: 'sell 30% partial' },
+      { label: 'mild_no',    op: 'lte', price: 0.25, sell_pct: 50, action: 'sell 50% cut loss' },
+      { label: 'strong_no',  op: 'lte', price: 0.18, sell_pct: 100, action: 'full exit 认输' },
+    ] },
+
     get filtered() {
       let list = this.markets;
       // Text search
@@ -2007,6 +2162,80 @@ function predictionsPage() {
       } finally {
         rule._acking = false;
       }
+    },
+
+    async loadWatchRules() {
+      try {
+        const url = '/api/predictions/watch-rules' + (this.selectedAgent ? '?relay_node_id=' + this.selectedAgent : '');
+        const r = await fetch(url);
+        const data = await r.json();
+        this.watchRules = (data?.rules || []).map(rec => ({ ...rec, thresholds: rec.thresholds || [] }));
+      } catch (e) {
+        console.warn('[watcher] load rules fail:', e.message);
+        this.watchRules = [];
+      }
+    },
+
+    async watcherTickNow() {
+      this.watcherTicking = true;
+      try {
+        await fetch('/api/predictions/watch-rules/tick', { method: 'POST' });
+        await this.loadWatchRules();
+      } catch (e) {
+        alert('tick fail: ' + e.message);
+      } finally {
+        this.watcherTicking = false;
+      }
+    },
+
+    async watchSubmit() {
+      const f = this.watchAdd;
+      if (!f.relay_node_id || !f.token_id || !f.market_title || !f.current_size || !f.entry_avg_price) {
+        alert('relay_node_id / token_id / market_title / current_size / entry_avg_price 必填');
+        return;
+      }
+      if (!Array.isArray(f.thresholds) || f.thresholds.length === 0) {
+        alert('至少一个阈值');
+        return;
+      }
+      this.watchSubmitting = true;
+      try {
+        const res = await fetch('/api/predictions/watch-rules', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            relay_node_id: f.relay_node_id, token_id: f.token_id, market_title: f.market_title,
+            outcome: f.outcome, current_size: f.current_size, entry_avg_price: f.entry_avg_price,
+            thresholds: f.thresholds,
+          }),
+        });
+        const data = await res.json();
+        if (!data.ok) { alert('保存失败: ' + (data.error || 'unknown')); return; }
+        this.watchAdd.show = false;
+        await this.loadWatchRules();
+      } catch (e) {
+        alert('保存 fail: ' + e.message);
+      } finally {
+        this.watchSubmitting = false;
+      }
+    },
+
+    async watchToggleStatus(rule) {
+      const newStatus = rule.status === 'active' ? 'paused' : 'active';
+      try {
+        await fetch('/api/predictions/watch-rules/' + rule.id, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: newStatus }),
+        });
+        await this.loadWatchRules();
+      } catch (e) { console.warn('[watcher] toggle fail:', e.message); }
+    },
+
+    async watchDelete(id) {
+      if (!confirm('删除该 watcher rule?')) return;
+      try {
+        await fetch('/api/predictions/watch-rules/' + id, { method: 'DELETE' });
+        await this.loadWatchRules();
+      } catch (e) { console.warn('[watcher] delete fail:', e.message); }
     },
 
     async deleteBettorProtectRule(rule) {
