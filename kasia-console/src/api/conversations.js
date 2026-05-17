@@ -279,8 +279,15 @@ export async function registerConversationRoutes(fastify) {
         } catch (err) {
           console.error(`[api/agent/reply] broker-v3 err for ${resolved?.slice(0,8)}: ${err.message}`);
         }
-        // broker-v3 不命中 (自然语言 OR 异常): canned reply 提醒. matcher (agent-mind, 独立 service) 未来接.
-        return reply.send({ reply: '我是 Trader-B (KAS broker), 走选择题菜单. 回数字 1 (买 KAS) / 2 (卖 KAS) / 3 (看市场) / 4 (接挂单) / 5 (我的订单) / 6 (取消).' });
+        // Bug BE 5/17 fix (Owner UAT 真测 "买kas" 自然语言 撞 canned 无 KAS price):
+        // 旧 canned reply 无 priceline, 跟 _menuTopText() 不一致. 改 await menu text 同 source.
+        try {
+          const { getMenuTopText } = await import('../services/broker-v3/state-machine.js');
+          return reply.send({ reply: await getMenuTopText() });
+        } catch (err) {
+          console.warn(`[api/agent/reply] menuTopText fetch err: ${err.message}`);
+          return reply.send({ reply: '我是 Trader-B (KAS broker), 走选择题菜单. 回数字 1 (买 KAS) / 2 (卖 KAS) / 3 (看市场) / 4 (接挂单) / 5 (我的订单) / 6 (取消).' });
+        }
       }
     }
 

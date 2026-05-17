@@ -91,6 +91,14 @@ export async function processInput(user_id, msg, relayNodeId) {
     return { reply: await _menuTopText() };
   }
 
+  // Bug BJ 5/17 fix (Owner UAT 真测 "status" 撞 fall to MENU_TOP):
+  // 任意 state 'status'/'查询'/'我的订单'/'orders' → 直接走 MY_ORDERS query.
+  // 不 reset flow_state (preserve current sub-step), 只 read 当前订单 status.
+  if (/^(status|查询|我的订单|订单|orders?)$/i.test(head)) {
+    setFlowState(user_id, { flow: 'MY_ORDERS', step: 'LIST' });
+    return { reply: '正在加载你的订单...', triggerMyOrders: true };
+  }
+
   const cur = getFlowState(user_id);
   // 首次 OR MENU_TOP — show menu
   if (!cur || cur.flow === 'MENU_TOP') {
@@ -116,6 +124,9 @@ export async function processInput(user_id, msg, relayNodeId) {
 // Owner 19:30+ UX 严训 (无数次 reiterated): 首屏必带 live KAS 现价, 用户不看 5 步才知道值不值得.
 // mid 即撮合价 (不假 spread, 跟 _previewText 字面一致 — 不欺骗 user). 出价 step user 可自定 limit.
 const FALLBACK_MID_PRICE_MENU = 0.04;
+// Bug BE 5/17 fix: exported so conversations.js fallback canned reply 也能用 priceline,
+// 避免 broker fallback message 跟 menu 价格信息不一致 (Owner UAT 真测 "买kas" 自然语言 fallback 撞此).
+export async function getMenuTopText() { return await _menuTopText(); }
 async function _menuTopText() {
   let priceLine;
   try {
