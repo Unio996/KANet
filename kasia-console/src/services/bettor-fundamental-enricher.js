@@ -98,9 +98,10 @@ function inferStageContext(question) {
 }
 
 // Phase 2.3 r161-r162 — extract top-N number from question (e.g. "top 5" / "top5" / "top-5")
+// J1 #239 post-ship empirical fix: original `/top\s*(\d+)/` 漏 hyphen variant. Fix `[\s-]*`.
 export function extractTopN(question) {
   if (!question) return null;
-  const m = String(question).toLowerCase().match(/top\s*(\d+)/);
+  const m = String(question).toLowerCase().match(/top[\s-]*(\d+)/);
   return m ? parseInt(m[1], 10) : null;
 }
 

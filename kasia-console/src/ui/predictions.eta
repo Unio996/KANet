@@ -1818,7 +1818,7 @@ function predictionsPage() {
       const daysToSettle = endDate ? (new Date(endDate).getTime() - Date.now()) / 86400000 : 999;
       if (daysToSettle <= 7 && decision === 'NO' && noPrice >= 0.80) return 'scavenger_carrion';
       if (/(election|primary|governor|president|senate|congress)/.test(q) && (yesPrice > 0.90 || yesPrice < 0.10)) return 'scavenger_election_locked';
-      if (/top\s*\d+/.test(q)) return 'scavenger_topN_rank';
+      if (/top[\s-]*\d+/.test(q)) return 'scavenger_topN_rank';
       if (/(win the|champion|winner|mvp|trophy)/.test(q) && yesPrice >= 0.20 && yesPrice <= 0.80) return 'scavenger_competitive';
       return 'scavenger_main';
     },
