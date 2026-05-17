@@ -446,30 +446,51 @@ export async function _refundEscrow(escrowId, reason = 'unspecified') {
         clearFlowState(e.user_kasia_addr);
       } catch {}
 
-      // Bug B1 supp 5/17 fix (NWT 03:59 CRITICAL P0 propose #3):
+      // Bug B1 supp 5/17 fix (NWT 03:59 CRITICAL P0 propose #3) + B5 KAS extension (NWT 04:57):
       // 旧 DM hardcoded "没扣你任何 funds" — 但 user 可能 multi-sent (orphan path).
-      // Cross-check broker_orphan_inflows by user's EVM addr. 若 orphan 存在 → DM swap 真实状况.
+      // Cross-check broker_orphan_inflows by user's EVM addr (BSC etc) + user_kasia_addr (Kaspa SELL).
+      // 若 orphan 存在 → DM swap + 触发 Kaspa refund (Option C — 复用 user_kasia_addr trusted source, 避开
+      // Kaspa watcher Bug AA over-detect 风险).
       let dmMessage = `⏰ 你的报价 (${e.target_amount} ${e.target_asset}) 5 分钟内未收到 prepayment, 已自动取消. 没扣你任何 funds. 回 1/2 重新挂单.`;
       try {
-        // Derive user EVM addresses (BSC, ETH, etc) — orphan from_address 可能 match
         const userRelay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(e.user_kasia_addr);
+        const matchAddrs = [e.user_kasia_addr]; // Kaspa: user_kasia_addr trusted source
         if (userRelay) {
           const userEvms = sqlite.prepare('SELECT address FROM agent_wallets WHERE relay_node_id = ? AND chain IN (\'bnb\',\'eth\',\'polygon\',\'arbitrum\',\'optimism\',\'base\')').all(userRelay.id);
-          if (userEvms.length > 0) {
-            const placeholders = userEvms.map(() => '?').join(',');
-            const orphans = sqlite.prepare(
-              `SELECT id, amount, asset, chain, status, refund_tx FROM broker_orphan_inflows
-               WHERE from_address IN (${placeholders})
-                 AND datetime(detected_at) > datetime('now','-15 minutes')
-               ORDER BY detected_at DESC LIMIT 3`
-            ).all(...userEvms.map(w => w.address));
-            if (orphans.length > 0) {
-              const o = orphans[0];
-              if (o.status === 'refunded' && o.refund_tx) {
-                dmMessage = `⏰ 你的报价 (${e.target_amount} ${e.target_asset}) 5 分钟内未收到 prepayment, 已自动取消.\n\n注: broker 收到你的 ${o.amount} ${o.asset} (${o.chain.toUpperCase()}) 但跟下单金额不匹配, 已 100% 全额退还. refund TX: ${String(o.refund_tx).slice(0,16)}.\n\n回 1/2 重新挂单.`;
-              } else {
-                dmMessage = `⏰ 你的报价 (${e.target_amount} ${e.target_asset}) 5 分钟内未收到 prepayment, 已自动取消.\n\n注: broker 收到你 ${o.amount} ${o.asset} (${o.chain.toUpperCase()}) 但跟下单金额不匹配, 退款处理中, watch DM 更新.\n\n回 1/2 重新挂单.`;
-              }
+          for (const w of userEvms) matchAddrs.push(w.address);
+        }
+        if (matchAddrs.length > 0) {
+          const placeholders = matchAddrs.map(() => '?').join(',');
+          const orphans = sqlite.prepare(
+            `SELECT id, amount, asset, chain, from_address, status, refund_tx FROM broker_orphan_inflows
+             WHERE from_address IN (${placeholders}) COLLATE NOCASE
+               AND datetime(detected_at) > datetime('now','-15 minutes')
+             ORDER BY detected_at DESC LIMIT 3`
+          ).all(...matchAddrs);
+          if (orphans.length > 0) {
+            const o = orphans[0];
+            // B5 KAS extension: 若 orphan chain='kaspa' status='detected' → 触发 inline refund (broker → user_kasia)
+            // BSC orphans already auto-refund via broker-bsc-intake-watcher inline path.
+            if (o.chain === 'kaspa' && o.status === 'detected') {
+              try {
+                const { enqueueVerified } = await import('./broker-action-queue.js');
+                const refundResult = await enqueueVerified({
+                  kind: 'sendKas',
+                  peer: e.user_kasia_addr,
+                  payload: { amount_kas: o.amount, note: `orphan refund ${o.id.slice(0,8)} B5 KAS multi/under` },
+                });
+                if (refundResult?.txId) {
+                  sqlite.prepare(`UPDATE broker_orphan_inflows SET status='refunded', refund_tx=?, refunded_at=datetime('now') WHERE id=?`).run(refundResult.txId, o.id);
+                  console.log(`[exchange-escrow-refund] Kaspa orphan ${o.id.slice(0,8)} inline refund TX ${refundResult.txId.slice(0,16)}`);
+                  o.status = 'refunded';
+                  o.refund_tx = refundResult.txId;
+                }
+              } catch (err) { console.error(`[exchange-escrow-refund] Kaspa orphan refund err for ${o.id.slice(0,8)}: ${err.message}`); }
+            }
+            if (o.status === 'refunded' && o.refund_tx) {
+              dmMessage = `⏰ 你的报价 (${e.target_amount} ${e.target_asset}) 5 分钟内未收到 prepayment, 已自动取消.\n\n注: broker 收到你的 ${o.amount} ${o.asset} (${o.chain.toUpperCase()}) 但跟下单金额不匹配, 已 100% 全额退还. refund TX: ${String(o.refund_tx).slice(0,16)}.\n\n回 1/2 重新挂单.`;
+            } else {
+              dmMessage = `⏰ 你的报价 (${e.target_amount} ${e.target_asset}) 5 分钟内未收到 prepayment, 已自动取消.\n\n注: broker 收到你 ${o.amount} ${o.asset} (${o.chain.toUpperCase()}) 但跟下单金额不匹配, 退款处理中, watch DM 更新.\n\n回 1/2 重新挂单.`;
             }
           }
         }
