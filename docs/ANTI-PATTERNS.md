@@ -2064,6 +2064,44 @@ const prompt = `分析市场: ${sanitizeForPrompt(rec.question)}`;
 
 ---
 
+## R-DAEMON-MUST-HAVE-DRY-RUN-MODE — daemon first-time activation 必有 dry-run mode (audit log 但不 fire)
+
+**Owner 2026-05-17 ACK 7 rules → position-protector daemon false sold 3 winning positions within 2 min + Bettor r169 自批.**
+
+**Bad**:
+```js
+// Owner UI clicks [ACK 启用] on 7 rules → status='active' + HMAC token derived
+// Daemon next tick (1 min later): for each active rule, fetch price + compute pnl_pct
+// Trigger fires → POST /api/predictions/order SELL (real money)
+// 结果: 3/4 trigger 是 FALSE (algorithm bug 在 fetchPolymarketPrice gamma param 错位)
+// Loss: $90 expected EV 永久 (chain TX 不可逆)
+```
+
+**Why it breaks**: daemon-fire architectures (auto-stop / auto-tp / auto-redeem) have **catastrophic blast radius** on first activation. Bugs in price fetch / threshold compute / trigger logic = real money loss instantly. No reversibility.
+
+**Good**:
+```js
+// Architecture pattern: every daemon-fire feature 必有 3-stage:
+// 1. Dry-run mode (default after ACK): audit log only, NO fire
+//    - daemon computes "would trigger if armed" + writes audit row
+//    - Owner reviews audit log for N hours/days: expected triggers match daemon behavior?
+//    - false positive rate < 5% threshold before promote
+// 2. Owner explicit "arm fire mode" (separate UI click + separate confirm dialog)
+// 3. Fire mode: actual trigger
+//
+// position_protect_rules 加 column:
+//   audit_mode TEXT DEFAULT 'dry_run' -- 'dry_run' | 'armed'
+// Owner UI:
+//   [ACK 启用 dry-run audit only] — default after rule create
+//   [ACK 启用 fire mode] — separate button, requires "I verified audit log" checkbox
+```
+
+**Rule of thumb**: any daemon that fires real-money actions (chain TX / order endpoint / settlement) **must default to dry-run on first activation**. Owner explicit 2-stage arm — first ACK = audit only, second ACK = fire enable. Single ACK that immediately enables fire = catastrophic anti-pattern.
+
+**Concrete loss case** (2026-05-17): Bettor r139 持仓保护 daemon shipped without dry-run mode. Owner 5/17 02:39 first ACK on 7 rules. Daemon next tick fetchPolymarketPrice had `tokenId` param bug (gamma rejected → wrong market data) → 3/4 trigger false → 3 winning positions sold within 2 min → $90 expected EV loss. Dry-run mode would have surfaced the bug in audit log before any real fire.
+
+---
+
 ## R-ARCHITECT-MUST-GREP-API-LOGIC — architect propose 含 API call sequence 必 grep verify return shape + side semantic
 
 **Owner 2026-05-17 二次 surface "这个问题被你们忽略了" (Knicks + Spurs NBA finals NO 显 = YES 价) + Bettor r168 自批.**

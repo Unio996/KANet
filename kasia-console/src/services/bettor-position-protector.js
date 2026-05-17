@@ -213,7 +213,12 @@ async function auditActiveRules() {
 async function fetchPolymarketPrice(tokenId) {
   if (!tokenId) return null;
   try {
-    const res = await fetch(`https://gamma-api.polymarket.com/markets?tokenId=${encodeURIComponent(tokenId)}`, {
+    // P0 EMERGENCY fix r169 (Bettor 02:51 + Owner 02:39 ACK 7 rules → daemon false-sold 3
+    // winning positions Bottoms/Iran/Arsenal within 2 min): gamma API param 是 `clob_token_ids`
+    // 不是 `tokenId`. variant-expander r141 ship 用对了, position-protector r139 ship 用错.
+    // 错位 致 gamma 返 random/wrong market → daemon 算 pnl_pct 错位 → false trigger
+    // R-ARCHITECT-MUST-GREP-API-LOGIC 第 2 案例 sediment + R-DAEMON-MUST-HAVE-DRY-RUN-MODE.
+    const res = await fetch(`https://gamma-api.polymarket.com/markets?clob_token_ids=${encodeURIComponent(tokenId)}`, {
       headers: { 'User-Agent': 'KANet-bettor-protector/1.0' },
     });
     if (!res.ok) return null;
@@ -222,7 +227,8 @@ async function fetchPolymarketPrice(tokenId) {
     const m = arr[0];
     if (!m.outcomePrices) return null;
     const prices = JSON.parse(m.outcomePrices);
-    // outcomePrices = ["YES_price", "NO_price"]; we want YES price (index 0)
+    // outcomePrices = ["YES_price", "NO_price"]; return YES price (index 0).
+    // Caller auditActiveRules() inverts for NO side rule: `rule.side === 'YES' ? price : (1 - price)`.
     const yesPrice = parseFloat(prices[0]);
     return Number.isFinite(yesPrice) ? yesPrice : null;
   } catch {
