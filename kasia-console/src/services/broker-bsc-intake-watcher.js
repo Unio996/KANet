@@ -294,11 +294,18 @@ async function inlineRefundBscOrphan({ orphanId, fromAddress, amount, txHash }) 
     return;
   }
   // Bug B1 import hotfix 5/17 (NWT 04:16 caught): evm-transfer.js exports `transferUsdt` directly (not factory).
-  // 旧 `getTransferUsdt` factory 在 exchange-machine.js (L804) 不在 evm-transfer.js.
+  // Bug B1 timeout retry 5/17 (NWT 04:29 caught): transferUsdt single RPC, default timeout, BSC under load 撞 TIMEOUT.
+  // Add 3-retry × 5s backoff (mirror Bug AX EVM settle pattern). Future TODO: switch to withFallbackRpc for parity.
   const { transferUsdt } = await import('./evm-transfer.js');
-  const r = await transferUsdt('bnb', wallet.privkey_encrypted, fromAddress, parseFloat(amount), 'USDT');
-  if (!r.ok) {
-    console.error(`[bsc-orphan-refund] transferUsdt fail orphan ${orphanId.slice(0,8)}: ${r.error}`);
+  let r = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    r = await transferUsdt('bnb', wallet.privkey_encrypted, fromAddress, parseFloat(amount), 'USDT');
+    if (r.ok) break;
+    console.warn(`[bsc-orphan-refund] transferUsdt attempt ${attempt}/3 fail orphan ${orphanId.slice(0,8)}: ${r.error}`);
+    if (attempt < 3) await new Promise(res => setTimeout(res, 5000 * attempt));
+  }
+  if (!r?.ok) {
+    console.error(`[bsc-orphan-refund] transferUsdt 3-retry exhausted orphan ${orphanId.slice(0,8)}: ${r?.error || 'unknown'}`);
     return;
   }
   const refundTx = r.txHash;
