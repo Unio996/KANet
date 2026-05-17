@@ -437,7 +437,46 @@ export async function registerExchangeRoutes(fastify) {
     }
 
     const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer_id);
-    if (!offer) return reply.code(404).send({ error: 'Offer not found' });
+    if (!offer) {
+      // Bug NWT-13:07 Phase 2: cross-pool take routing — 检 mm_orders (OTC pool).
+      // /api/exchange/accept 不只 handle exchange_offers, 也 dispatch OTC accept via kanet_accept_v1.
+      const otcOrder = sqlite.prepare(`
+        SELECT id, status, side, kas_amount, usdt_amount, price, chain, mm_receive_address, broadcast_txid, agent_address
+        FROM mm_orders WHERE id = ? AND broadcast_txid IS NOT NULL
+      `).get(offer_id);
+      if (!otcOrder) return reply.code(404).send({ error: 'Offer not found' });
+      if (!['published', 'open'].includes(otcOrder.status)) {
+        return reply.code(400).send({ error: `OTC order is ${otcOrder.status}, cannot accept` });
+      }
+
+      // Pre-check taker has enough to pay
+      const relay = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(relayNodeId);
+      if (!relay) return reply.code(400).send({ error: 'Invalid relayNodeId' });
+
+      // Broadcast kanet_accept_v1 to OTC channel (chain DM pipeline will dispatch handleAccept)
+      const { sendCommandAsync } = await import('../services/relay-manager.js');
+      let acceptTx = null;
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        try {
+          const res = await sendCommandAsync(relayNodeId, {
+            type: 'send_broadcast',
+            channel: 'kanet-otc',
+            message: JSON.stringify({
+              t: 'kanet_accept_v1', ref: offer_id, kas_addr: relay.address,
+            }),
+          });
+          acceptTx = res?.txId || null;
+          if (acceptTx) break;
+        } catch (err) {
+          console.error(`[exchange/accept OTC] broadcast attempt ${attempt}/5: ${err.message}`);
+        }
+        if (attempt < 5) await new Promise(r => setTimeout(r, 200 * attempt));
+      }
+      if (!acceptTx) return reply.code(500).send({ error: 'OTC accept broadcast failed — retry later' });
+
+      console.log(`[exchange/accept] cross-pool routed to OTC: order ${offer_id.slice(0,8)} accept_tx ${acceptTx?.slice(0,16)}`);
+      return reply.send({ ok: true, offer_id, status: 'accepted_pending', accept_tx: acceptTx, source: 'otc' });
+    }
     if (offer.protocol_status !== 'open') {
       return reply.code(400).send({ error: `Offer is ${offer.protocol_status}, cannot accept` });
     }
