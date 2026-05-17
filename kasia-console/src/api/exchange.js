@@ -81,20 +81,25 @@ export async function registerExchangeRoutes(fastify) {
     // 注: mm_orders 0 active 今天, UNION symbolic until OTC traffic 重启. 不动 mm_orders DDL.
     let otcRows = [];
     try {
-      // Bug NWT-13:01 Phase 1 hotfix: include 'published' (OTC initial state per order-machine.js L77).
-      // mm_orders created in 'published' state, transitions per L30. NWT 真测 0 surface 因 filter 漏.
-      const wantOtcStatus = status ? [status] : ['published', 'open', 'matched', 'pending_payment', 'awaiting_payment', 'paying', 'accepted'];
-      const placeholders = wantOtcStatus.map(() => '?').join(',');
+      // Bug NWT-13:02 Phase 1 hotfix v2: filter by broadcast_txid IS NOT NULL (chain proof = live market)
+      // 比 status enum 更 robust — OTC status 流转 published→accepted etc 不是 visibility 标准.
+      // 上链 = 公开市场可见 (semantics align with exchange_offers broadcast_at IS NOT NULL).
+      // status filter: 排除终态 (completed/cancelled/expired) - 仍 active 的 surface 出来.
+      const excludedStatus = ['completed', 'cancelled', 'expired', 'timed_out', 'failed'];
+      const statusFilter = status
+        ? `status = '${status.replace(/'/g, "''")}'`
+        : `status NOT IN (${excludedStatus.map(s => `'${s}'`).join(',')})`;
       otcRows = sqlite.prepare(`
         SELECT
           id, side, kas_amount, usdt_amount, price, chain,
           customer_address as taker, mm_receive_address as maker,
-          status as protocol_status, created_at as broadcast_at, updated_at,
+          status as protocol_status, created_at as broadcast_at,
+          completed_at, accepted_at, broadcast_txid,
           payment_txhash, kas_txhash, batch_index
         FROM mm_orders
-        WHERE status IN (${placeholders})
+        WHERE broadcast_txid IS NOT NULL AND ${statusFilter}
         ORDER BY created_at DESC LIMIT ?
-      `).all(...wantOtcStatus, Number(limit)).map(r => ({
+      `).all(Number(limit)).map(r => ({
         id: r.id,
         source: 'otc',
         protocol_status: r.protocol_status,
@@ -107,7 +112,8 @@ export async function registerExchangeRoutes(fastify) {
         maker: r.maker,
         taker: r.taker,
         broadcast_at: r.broadcast_at,
-        updated_at: r.updated_at,
+        broadcast_tx_id: r.broadcast_txid,
+        updated_at: r.completed_at || r.accepted_at || r.broadcast_at,
         market_key: 'KAS|USDT',
         verification: 'otc',
         payment_tx: r.payment_txhash,
