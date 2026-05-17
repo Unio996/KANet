@@ -66,8 +66,21 @@ const MIN_QTY_KAS = 1;
 const MAX_QTY_KAS = 5000;
 const EVM_ADDR_REGEX = /^0x[a-fA-F0-9]{40}$/;
 
-export function getFlowState(user_id) { return _state.get(user_id) || null; }
-export function setFlowState(user_id, state) { _state.set(user_id, state); }
+// Bug BI 5/17 fix (Owner UAT 真测残留 WAIT_PREPAY 跨 session): flow_state 加 TTL 30min 兜底.
+// 主路径: exchange-machine.js _refundEscrow + _settleEscrowToUser lifecycle hook clearFlowState.
+// 兜底: getFlowState 检 ts > 30min 旧 → auto clear + log (防 lifecycle 漏一处 OR 进程重启后 stale).
+const FLOW_STATE_TTL_MS = 30 * 60 * 1000;
+export function getFlowState(user_id) {
+  const s = _state.get(user_id);
+  if (!s) return null;
+  if (s._ts && (Date.now() - s._ts) > FLOW_STATE_TTL_MS) {
+    console.log(`[broker-v3] stale flow_state 30min TTL cleared for ${user_id.slice(-12)}`);
+    _state.delete(user_id);
+    return null;
+  }
+  return s;
+}
+export function setFlowState(user_id, state) { _state.set(user_id, { ...state, _ts: Date.now() }); }
 export function clearFlowState(user_id) { _state.delete(user_id); }
 export function _testReset() { _state.clear(); }
 

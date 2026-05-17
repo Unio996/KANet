@@ -664,24 +664,75 @@ function _renderBrowseList(offers) {
 }
 
 async function _doMyOrders(peer, prevReply) {
-  // P1 fix 5/14 (Tier 4 C1.6 UX gap, NWT + J2 双 host reproduce): broker publishes offers
-  // with maker = broker_addr (broker-as-maker pattern). 旧 listOffers({ maker: peer }) → 0 row.
-  // Fix: 走 stateMachine.getUserOffers(peer) (publish 后 record) + getOffer 拉详情.
+  // Bug BH 5/17 fix (Owner UAT 真测 "5 我的订单" 撞 假象 "没单"):
+  // 旧逻辑只查 stateMachine.getUserOffers(peer) (publish 后 in-memory cache).
+  // Owner 真发 58 KAS prepay 时, broker kaspa-intake 60s tick window 内 escrow=pending_prepay
+  // (offer 还没 publish) → cache 空 → 假象 "没单". 同时 inflow DM 又说 "已收 58 KAS" 矛盾.
+  // Fix: UNION user_escrow_balances 当前 in-flight rows + 5 min 内 settled/refunded rows (closure feedback).
   const offerIds = stateMachine.getUserOffers(peer);
-  if (offerIds.length === 0) return '你当前没 active 订单. 回 back 返回菜单.';
-  // Fetch detail in parallel (≤ 50 ids cap by addUserOffer prune)
-  const settled = await Promise.all(offerIds.slice(0, 5).map(id => client.getOffer(id)));
-  const offers = settled.filter(s => s.ok).map(s => s.offer).filter(Boolean);
-  if (offers.length === 0) return '你当前没 active 订单 (full expire). 回 back 返回菜单.';
-  // Sort by created_at DESC (most recent first)
-  offers.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
-  const cur = stateMachine.getFlowState(peer) || {};
-  stateMachine.setFlowState(peer, { ...cur, flow: 'MY_ORDERS', step: 'LIST', orders: offers });
-  const lines = ['📋 我的订单 (回 1-5 看详情, back 返回菜单):', ''];
-  offers.forEach((o, i) => {
-    lines.push(`${i + 1}️⃣ [${o.protocol_status}] ${o.give_amount} ${o.give_asset} → ${o.want_amount} ${o.want_asset}`);
-    lines.push(`   id: ${o.id?.slice(0, 12)}`);
+  // 主路径: SELECT user_escrow_balances + JOIN offer (per Q1 consensus filter)
+  const escrows = sqlite.prepare(`
+    SELECT id as eid, side, asset, chain, amount_quoted, target_amount, target_asset, target_chain,
+           offer_id, status, prepayment_tx, settle_tx, refund_tx, created_at, updated_at
+    FROM user_escrow_balances
+    WHERE user_kasia_addr = ?
+      AND (status IN ('pending_prepay','active','verifying','delivering','matched')
+           OR (status IN ('settled','refunded','timed_out','cancelled')
+               AND datetime(updated_at) > datetime('now','-5 minutes')))
+    ORDER BY datetime(created_at) DESC LIMIT 10
+  `).all(peer);
+
+  // Helper: render escrow row with stage label
+  const ESCROW_STAGE = {
+    pending_prepay: '⏳ 等收 prepay TX (1-2 min)',
+    active: '✓ 已收款, 替你挂单/接单中',
+    matched: '✓ 已接单, 等付款验证',
+    verifying: '⏳ 付款验证中 (~1-3 min)',
+    delivering: '⏳ 验证通过, 正在 deliver',
+    settled: '✓ 已 settle',
+    refunded: '↩ 已退款',
+    timed_out: '⏰ 已过期',
+    cancelled: '⊘ 已取消',
+  };
+  const closureNote = (e) => {
+    const ago = Math.floor((Date.now() - new Date(e.updated_at + 'Z').getTime()) / 60000);
+    if (['settled','refunded','timed_out','cancelled'].includes(e.status)) {
+      return ` (${ago} min 前)`;
+    }
+    return '';
+  };
+
+  if (escrows.length === 0 && offerIds.length === 0) {
+    return '你当前没 active 订单. 回 back 返回菜单.';
+  }
+
+  const lines = ['📋 我的订单 (回 back 返回菜单):', ''];
+  // 1) escrow rows (含 in-flight + 5 min closure)
+  escrows.forEach((e, i) => {
+    const stage = ESCROW_STAGE[e.status] || `[${e.status}]`;
+    const dir = e.side === 'buy_kas' ? '买 KAS' : '卖 KAS';
+    const amt = e.side === 'buy_kas' ? `${e.target_amount} KAS` : `${e.amount_quoted} KAS`;
+    lines.push(`${i + 1}️⃣ ${stage}${closureNote(e)}`);
+    lines.push(`   ${dir} ${amt} (链 ${e.chain || e.target_chain})`);
+    if (e.prepayment_tx) lines.push(`   prepay TX: ${String(e.prepayment_tx).slice(0,16)}...`);
+    if (e.settle_tx) lines.push(`   settle TX: ${String(e.settle_tx).slice(0,16)}...`);
+    if (e.refund_tx) lines.push(`   refund TX: ${String(e.refund_tx).slice(0,16)}...`);
+    if (e.offer_id) lines.push(`   offer: ${String(e.offer_id).slice(0,12)}`);
   });
+  // 2) Orphan offers (publish 但无 linked escrow, legacy OTC path)
+  if (offerIds.length > 0) {
+    const settled = await Promise.all(offerIds.slice(0, 5).map(id => client.getOffer(id)));
+    const offers = settled.filter(s => s.ok).map(s => s.offer).filter(Boolean)
+      .filter(o => !escrows.some(e => e.offer_id === o.id)); // 去重: escrow 已 cover 的不再列
+    offers.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+    const offset = escrows.length;
+    offers.forEach((o, i) => {
+      lines.push(`${offset + i + 1}️⃣ [${o.protocol_status}] ${o.give_amount} ${o.give_asset} → ${o.want_amount} ${o.want_asset}`);
+      lines.push(`   id: ${o.id?.slice(0, 12)}`);
+    });
+    const cur = stateMachine.getFlowState(peer) || {};
+    stateMachine.setFlowState(peer, { ...cur, flow: 'MY_ORDERS', step: 'LIST', orders: offers });
+  }
   return lines.join('\n');
 }
 

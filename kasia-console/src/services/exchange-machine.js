@@ -336,6 +336,12 @@ export async function _settleEscrowToUser(escrowId, offerId) {
       WHERE id = ? AND status = 'active'
     `).run(settleTxHash, escrowId);
 
+    // Bug BI 5/17 fix (Owner UAT 真测残留 WAIT_PREPAY): escrow settled → clear flow_state.
+    try {
+      const { clearFlowState } = await import('./broker-v3/state-machine.js');
+      clearFlowState(e.user_kasia_addr);
+    } catch {}
+
     // Bug AJ 5/16 fix (Owner 07:10 真测 surface silent transition): DM user post settle.
     try {
       const { enqueue } = await import('./broker-action-queue.js');
@@ -434,6 +440,11 @@ export async function _refundEscrow(escrowId, reason = 'unspecified') {
         WHERE id = ? AND status = 'pending_prepay'
       `).run(escrowId);
       console.log(`[exchange-escrow-refund] escrow ${escrowId.slice(0,8)} pending_prepay → refunded (reason: ${reason}, no chain TX needed, Bug AW pre-check no paid TX)`);
+      // Bug BI 5/17 fix: escrow refunded (no-chain) → clear flow_state.
+      try {
+        const { clearFlowState } = await import('./broker-v3/state-machine.js');
+        clearFlowState(e.user_kasia_addr);
+      } catch {}
       try {
         const { enqueue } = await import('./broker-action-queue.js');
         enqueue({
@@ -520,6 +531,12 @@ export async function _refundEscrow(escrowId, reason = 'unspecified') {
       SET status = 'refunded', refund_tx = ?, updated_at = datetime('now')
       WHERE id = ? AND status = 'active'
     `).run(refundTxHash, escrowId);
+
+    // Bug BI 5/17 fix: escrow refunded (chain TX) → clear flow_state.
+    try {
+      const { clearFlowState } = await import('./broker-v3/state-machine.js');
+      clearFlowState(e.user_kasia_addr);
+    } catch {}
 
     // If associated offer exists + 'open' status → also cancel offer
     if (e.offer_id) {
