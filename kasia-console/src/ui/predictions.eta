@@ -763,7 +763,9 @@
                       <label class="block text-ink-500 mb-1">Relay (agent)</label>
                       <select x-model="watchAdd.relay_node_id" class="input input-xs w-full">
                         <option value="">— 选 agent —</option>
-                        <template x-for="a in (allAgents || [])" :key="a.id"><option :value="a.id" x-text="a.name + ' (' + a.id.slice(0,8) + ')'"></option></template>
+                        <% it.relayNodes.forEach(r => { %>
+                        <option value="<%= r.id %>"><%= r.name %> (<%= r.id.slice(0,8) %>)</option>
+                        <% }) %>
                       </select>
                     </div>
                     <div>
@@ -2149,6 +2151,8 @@ function predictionsPage() {
         const r = await fetch(url);
         const data = await r.json();
         this.watchRules = (data?.rules || []).map(rec => ({ ...rec, thresholds: rec.thresholds || [] }));
+        // default form's relay to currently selected agent (Owner 不用每次选)
+        if (!this.watchAdd.relay_node_id && this.selectedAgent) this.watchAdd.relay_node_id = this.selectedAgent;
       } catch (e) {
         console.warn('[watcher] load rules fail:', e.message);
         this.watchRules = [];
