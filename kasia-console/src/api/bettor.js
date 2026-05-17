@@ -486,7 +486,11 @@ export async function registerBettorRoutes(fastify) {
         for (const r of rows) {
           if (priceMap[r.token_id] != null) {
             const freshPrice = priceMap[r.token_id];
-            const sidePrice = r.side === 'YES' ? freshPrice : (1 - freshPrice);
+            // P0 hotfix r168 (Owner 5/17 二次 surface): batchFetchPrices returns side-specific
+            // (each tokenId → its own outcome price per Polymarket gamma convention).
+            // 之前 `r.side === 'YES' ? freshPrice : (1 - freshPrice)` = 重复 inversion for NO side
+            // → both YES and NO display same YES price. R-ARCHITECT-MUST-GREP-API-LOGIC sediment.
+            const sidePrice = freshPrice;
             r.current_price = sidePrice;
             r.hit_rate = sidePrice;
             r.payout_pct = sidePrice > 0 ? (1 - sidePrice) / sidePrice : 0;

@@ -2064,6 +2064,43 @@ const prompt = `分析市场: ${sanitizeForPrompt(rec.question)}`;
 
 ---
 
+## R-ARCHITECT-MUST-GREP-API-LOGIC — architect propose 含 API call sequence 必 grep verify return shape + side semantic
+
+**Owner 2026-05-17 二次 surface "这个问题被你们忽略了" (Knicks + Spurs NBA finals NO 显 = YES 价) + Bettor r168 自批.**
+
+**Bad** (Bettor r161 architect spec assumption — no grep verify):
+```js
+// Architect assumed: batchFetchPrices returns YES price always, ternary inverts for NO side
+const sidePrice = r.side === 'YES' ? freshPrice : (1 - freshPrice);
+// Reality: batchFetchPrices returns side-specific (each tokenId → its own outcome price)
+// → 重复 inversion for NO side. Both YES and NO display same YES price → Owner UI 错位
+```
+
+**Why it breaks**: Architect propose without grepping actual API caller code → assumption mismatch silent slip past V1 ship. Owner 第一次 surface 被忽略, 第二次 surface 才 dig 真因.
+
+**Good**:
+```js
+// Step 1 (architect): grep batchFetchPrices implementation BEFORE proposing inversion logic
+// scripts/_check.mjs:
+import { batchFetchPrices } from './kasia-console/src/services/bettor-variant-expander.js';
+const out = await batchFetchPrices([yesTokenId, noTokenId]);
+console.log(out);  // { yesToken: 0.23, noToken: 0.77 } → side-specific!
+
+// Step 2: architect spec ONLY proposes ternary IF empirical shows uniform YES return
+const sidePrice = freshPrice;  // 1-line, side-specific source of truth
+```
+
+**Rule of thumb**: any architect spec referencing 3rd-party API call OR internal service:
+1. grep the implementation BEFORE proposing logic (response shape, side semantic, error mode)
+2. Sanity check via small probe script (e.g. `node -e "import('./...').then(m => console.log(await m.fn(...)))"` )
+3. spec the assumption explicitly in propose (e.g. "Assumes batchFetchPrices returns YES uniform; if side-specific, drop inversion ternary") so implementor can challenge
+
+Implementor co-responsibility: implementor 收 spec 含 API call sequence 必 cross-grep the API impl during review (KI-PHASE-B-PROCESS-1 守) — surface assumption mismatch in `J1 #N substantive review` BEFORE ship, not post-Owner-surface.
+
+Surface pattern: "Owner sees Knicks NO = $0.23 + Spurs NO = $0.23" → check API response YES vs NO → spec assumption mismatch root cause.
+
+---
+
 ## KI-CRON-CATCHUP-THRESHOLD-DEC — startup catchup threshold should be < interval (dev restart 频繁场景 design)
 
 **Owner 2026-05-17 严训 "推荐都是昨晚的事" + Bettor r164-r165 sediment.**
