@@ -293,8 +293,9 @@ async function inlineRefundBscOrphan({ orphanId, fromAddress, amount, txHash }) 
     sqlite.prepare(`UPDATE broker_orphan_inflows SET status = 'manual_review' WHERE id = ?`).run(orphanId);
     return;
   }
-  const { getTransferUsdt } = await import('./evm-transfer.js');
-  const transferUsdt = await getTransferUsdt();
+  // Bug B1 import hotfix 5/17 (NWT 04:16 caught): evm-transfer.js exports `transferUsdt` directly (not factory).
+  // 旧 `getTransferUsdt` factory 在 exchange-machine.js (L804) 不在 evm-transfer.js.
+  const { transferUsdt } = await import('./evm-transfer.js');
   const r = await transferUsdt('bnb', wallet.privkey_encrypted, fromAddress, parseFloat(amount), 'USDT');
   if (!r.ok) {
     console.error(`[bsc-orphan-refund] transferUsdt fail orphan ${orphanId.slice(0,8)}: ${r.error}`);
