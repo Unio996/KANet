@@ -163,6 +163,36 @@ function scoreMarket(m, nowMs) {
 
 // Phase B Sub B1.4 — async middle-range scorer with fundamental enricher.
 // scoreMarket above stays sync (handles tails). This handles yes ∈ [0.20, 0.80].
+// Phase 2.3 Strategy 多样性 (Owner 5/17 + Bettor r161-r162 consensus). Per-rec classify into 5 strategies.
+// Default fallback 'scavenger_main'. KISS V1 — no 'unclassified' tag (J1 #238 (a) ack).
+export function classifyStrategy(rec) {
+  const q = (rec.question || rec.market?.question || '').toLowerCase();
+  const yesPrice = Number(rec.yes_price ?? rec.yes ?? 0);
+  const noPrice = 1 - yesPrice;
+  const decision = (rec.decision || rec.side || '').toUpperCase();
+  const endDate = rec.end_date || rec.market?.endDate;
+  const daysToSettle = endDate ? (new Date(endDate).getTime() - Date.now()) / 86400000 : 999;
+
+  // 1. 捡尸: deadline ≤ 7d + NO @ ≥ 0.80 (Owner 5/17 钦定 收益 cap)
+  if (daysToSettle <= 7 && decision === 'NO' && noPrice >= 0.80) return 'scavenger_carrion';
+
+  // 2. Election locked: election + extreme price (no trajectory_std_5d data yet, approximate via extreme)
+  if (/(election|primary|governor|president|senate|congress)/.test(q) && (yesPrice > 0.90 || yesPrice < 0.10)) {
+    return 'scavenger_election_locked';
+  }
+
+  // 3. top-N rank: top X 排名 markets
+  if (/top\s*\d+/.test(q)) return 'scavenger_topN_rank';
+
+  // 4. Competitive: winner-of-N sports/awards/events
+  if (/(win the|champion|winner|mvp|trophy)/.test(q) && yesPrice >= 0.20 && yesPrice <= 0.80) {
+    return 'scavenger_competitive';
+  }
+
+  // 5. Default
+  return 'scavenger_main';
+}
+
 // Returns candidate {..., fundamental_estimate, fundamental_sources, fundamental_confidence, fund_gap, domain} or null.
 async function scoreMarketEnriched(m, nowMs) {
   if (!m.outcomePrices) return null;
@@ -349,14 +379,15 @@ function persistCandidates(candidates, relayNodeId, triggerType, openPositions) 
   const now = new Date().toISOString();
 
   // Phase B Sub B1.4: persist + fundamental_estimate/_sources/_confidence (v109 cols)
+  // Phase 2.3 v116 — strategy column added
   const stmt = sqlite.prepare(`
     INSERT INTO bettor_recommendations
       (id, relay_node_id, market_id, condition_id, slug, question,
        decision, fraction, size_usd, edge, p_mid, sigma, info_gap_months,
        yes_price, volume_24h, liquidity, end_date, score,
        reasoning_json, trigger_type, llm_tier, status, calibrator_confidence, lifecycle_state, scanned_at,
-       fundamental_estimate, fundamental_sources, fundamental_confidence)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
+       fundamental_estimate, fundamental_sources, fundamental_confidence, strategy)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const minOpenReturn = openPositions.length > 0
@@ -394,6 +425,8 @@ function persistCandidates(candidates, relayNodeId, triggerType, openPositions) 
         fundamental_raw_reasoning: c.fundamental_raw_reasoning || null,
       };
 
+      // Phase 2.3 — classifyStrategy per Owner 5/17 + Bettor r161-r162 5 strategies
+      const strategyTag = classifyStrategy({ question: c.market.question, yes_price: c.yes_price, decision: c.side, end_date: c.market.endDate });
       stmt.run(
         randomUUID(),
         relayNodeId,
@@ -422,7 +455,8 @@ function persistCandidates(candidates, relayNodeId, triggerType, openPositions) 
         // Phase B v109 fund cols (null for tail candidates, populated for middle enriched)
         c.fundamental_estimate ?? null,
         c.fundamental_sources ? JSON.stringify(c.fundamental_sources) : null,
-        c.fundamental_confidence ?? null
+        c.fundamental_confidence ?? null,
+        strategyTag                        // Phase 2.3 v116 strategy column
       );
       count++;
     }

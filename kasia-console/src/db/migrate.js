@@ -3631,6 +3631,17 @@ export function runMigrations() {
     }
   }
 
+  // v116: Phase 2.3 Strategy 多样性 (Owner 5/17 钦定 + Bettor r161-r162 consensus 9/9 ACK).
+  //   bettor_recommendations.strategy column (scavenger_main / scavenger_carrion / scavenger_topN_rank /
+  //   scavenger_election_locked / scavenger_competitive). Owner UI 选 filter chips.
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(bettor_recommendations)").all();
+    if (cols.length && !cols.some(c => c.name === 'strategy')) {
+      sqlite.exec(`ALTER TABLE bettor_recommendations ADD COLUMN strategy TEXT;`);
+      console.log('[migrate] v116: bettor_recommendations 加 strategy 列 (Phase 2.3 Strategy 多样性 tag).');
+    }
+  }
+
   // v115: Phase B Sub B5 Fundamental Enricher Wikipedia 24h cache (Bettor r157 §2 (f) consensus).
   //   bettor_wiki_cache (entity PK, summary, fetched_at) — avoid repeated Wikipedia REST API hits.
   {

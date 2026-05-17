@@ -1886,6 +1886,53 @@ const aggressive = pickBest(scored, x => x.payout, { hit: 0.25, depth: 200, ev: 
 
 ---
 
+## R-COMPETITOR-BLIND-SPOT — top-N market analysis 必研究 competitor displacement risk, 不单方面分析主 entity
+
+**Owner 2026-05-17 Finland top 5 -$490 真因 + Bettor r161-r162 sediment.**
+
+**Bad**:
+```js
+// top-N market enricher 只看主 entity (Finland 当前 polling + Wikipedia)
+// LLM 估 Finland top 5 = 70% (基于 Finland 自身 实力)
+// 没考虑 24 国 candidates 各自 displacement risk
+// 实际 fair price: 70% × Prod(1 - p_competitor displacement) ≈ 35%
+// Owner accept → -$490 loss
+```
+
+**Why it breaks**: top-N market (top 5 / top 10) 是 subset selection from larger pool. 主 entity 实力 != 入选概率. 入选概率 = 主 entity 实力 × (1 - 被 displace 风险). LLM 单方面 reason 主 entity 永远 high-confidence wrong.
+
+**Good**:
+```js
+// Phase 2.3 r161 — fetch top-N peer competitors (same event, same N)
+async function fetchTopNCompetitors(rec) {
+  const topN = extractTopN(rec.question);
+  if (!topN) return [];
+  const eventKey = extractEventKey(rec.slug);
+  const peers = await gammaMarkets({ event: eventKey })
+    .filter(m => m.slug !== rec.slug && extractTopN(m.question) === topN)
+    .sort((a, b) => b.lastTradePrice - a.lastTradePrice)
+    .slice(0, 10);
+  return peers;
+}
+
+// Prompt 加 peer section
+const prompt = `...
+⚠ 前 ${peers.length} competitor 当前 market price:
+${peers.map(p => `- ${p.entity}: yes ${(p.yes_price * 100).toFixed(1)}%`).join('\n')}
+
+关键: 不要单方面分析主 entity. 必看 competitor displacement 风险.
+输出 reasoning 必 mention 3 最强 displacers.`;
+
+// Sanity warning if reasoning < 80 char OR 没 mention competitors
+if (peers.length > 0 && (reasoning.length < 80 || !mentionsCompetitor)) {
+  warning = 'competitor_blind_spot';
+}
+```
+
+**Rule of thumb**: any LLM analysis on `top-N` / `winner-of-N` market types 必 fetch peer list + include in prompt + sanity warning if response 没 mention competitors. Single-entity reasoning on subset-selection markets is **structurally wrong**.
+
+---
+
 ## R-LLM-CROSS-STAGE-CONTEXT-CONFUSION — LLM 错位 league standings vs knockout bracket (etc) → stage-specific prompt context
 
 **Owner 2026-05-16 实测 PSG enricher "南辕北辙" 真因 + Bettor r159-r160 sediment.**
