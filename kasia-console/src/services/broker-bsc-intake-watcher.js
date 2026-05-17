@@ -260,7 +260,18 @@ export async function tickEscrow() {
       const orphanId = rnd();
       const r = orphanInsert.run(orphanId, String(t.amount), t.from || null, brokerBscAddr, t.tx_hash);
       if (r.changes > 0) {
-        console.warn(`[broker-bsc-intake-escrow] 🚨 orphan USDT inflow detected: ${t.amount} USDT from ${t.from?.slice(0,16) || 'unknown'} tx=${t.tx_hash.slice(0,16)} → orphan_id=${orphanId.slice(0,8)} (24hr sweep refund pending)`);
+        console.warn(`[broker-bsc-intake-escrow] 🚨 orphan USDT inflow detected: ${t.amount} USDT from ${t.from?.slice(0,16) || 'unknown'} tx=${t.tx_hash.slice(0,16)} → orphan_id=${orphanId.slice(0,8)} (inline refund firing)`);
+        // Bug NWT-03:55 B1 fix 5/17 (Owner 钦定立干 + scenario B 真链 surface P0):
+        // 旧逻辑: orphan detected 后等 sweep cron (Bug AA disabled, 24hr) → 用户钱黑洞 + 0 DM
+        // 新逻辑: inline auto-refund USDT + DM user (BSC only — Kaspa Bug AA over-detect 风险 backlog)
+        if (t.from) {
+          inlineRefundBscOrphan({ orphanId, fromAddress: t.from, amount: t.amount, txHash: t.tx_hash }).catch(err =>
+            console.error(`[broker-bsc-intake-escrow] inline refund orphan ${orphanId.slice(0,8)} err: ${err.message}`)
+          );
+        } else {
+          console.warn(`[broker-bsc-intake-escrow] orphan ${orphanId.slice(0,8)} NULL from_address — skip inline refund, mark manual_review`);
+          sqlite.prepare(`UPDATE broker_orphan_inflows SET status = 'manual_review' WHERE id = ?`).run(orphanId);
+        }
       }
     }
   } catch (err) {
@@ -268,6 +279,58 @@ export async function tickEscrow() {
   }
 
   return { ok: true, scanned: pending.length, matched };
+}
+
+// Bug NWT-03:55 B1 fix 5/17: inline BSC orphan auto-refund + DM (公众 P0).
+// 不等 24hr sweep (Bug AA disabled). BSC USDT user-error 多/少/错转账, 立刻 refund full + DM.
+async function inlineRefundBscOrphan({ orphanId, fromAddress, amount, txHash }) {
+  const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+  const wallet = sqlite.prepare(
+    "SELECT privkey_encrypted FROM agent_wallets WHERE relay_node_id = ? AND chain = 'bnb' AND is_default = 1 LIMIT 1"
+  ).get(BROKER_RELAY_ID);
+  if (!wallet?.privkey_encrypted) {
+    console.warn(`[bsc-orphan-refund] no broker bnb wallet, mark manual_review orphan ${orphanId.slice(0,8)}`);
+    sqlite.prepare(`UPDATE broker_orphan_inflows SET status = 'manual_review' WHERE id = ?`).run(orphanId);
+    return;
+  }
+  const { getTransferUsdt } = await import('./evm-transfer.js');
+  const transferUsdt = await getTransferUsdt();
+  const r = await transferUsdt('bnb', wallet.privkey_encrypted, fromAddress, parseFloat(amount), 'USDT');
+  if (!r.ok) {
+    console.error(`[bsc-orphan-refund] transferUsdt fail orphan ${orphanId.slice(0,8)}: ${r.error}`);
+    return;
+  }
+  const refundTx = r.txHash;
+  console.log(`[bsc-orphan-refund] ✓ refunded ${amount} USDT → ${fromAddress?.slice(-12)} TX ${refundTx?.slice(0,16)} for orphan ${orphanId.slice(0,8)}`);
+
+  // Mark refunded
+  sqlite.prepare(`
+    UPDATE broker_orphan_inflows SET status = 'refunded', refund_tx = ?, refunded_at = datetime('now') WHERE id = ?
+  `).run(refundTx, orphanId);
+
+  // DM user — find user kasia address by EVM (best effort, 0 fail OK)
+  try {
+    const userRelay = sqlite.prepare(`
+      SELECT rn.address as kasia_addr FROM agent_wallets aw
+      JOIN relay_nodes rn ON aw.relay_node_id = rn.id
+      WHERE aw.address = ? AND aw.chain = 'bnb' LIMIT 1
+    `).get(fromAddress);
+    if (userRelay?.kasia_addr) {
+      const { enqueue } = await import('./broker-action-queue.js');
+      enqueue({
+        kind: 'dm_orphan_refund',
+        peer: userRelay.kasia_addr,
+        payload: {
+          message: `✓ 收到你 ${amount} USDT (BSC) 但跟下单金额不匹配 (多转/少转/无匹配单), 已 100% 全额退还到你 BSC 地址.\n\n原 TX: ${txHash}\nrefund TX: ${refundTx}\n查链: https://bscscan.com/tx/${refundTx}\n\n如需重新下单, 回菜单输 1 (买) 或 2 (卖).`,
+        },
+      });
+      console.log(`[bsc-orphan-refund] DM enqueued for ${userRelay.kasia_addr.slice(-12)} orphan ${orphanId.slice(0,8)}`);
+    } else {
+      console.log(`[bsc-orphan-refund] no matching user relay for BSC ${fromAddress.slice(-12)} — refund 真链 done, no DM possible (external user)`);
+    }
+  } catch (e) {
+    console.warn(`[bsc-orphan-refund] DM enqueue err: ${e.message}`);
+  }
 }
 
 export function getEscrowStats() { return { started: !!_intakeInterval, ticks: _escrowTicks, matches: _escrowMatches }; }

@@ -39,13 +39,13 @@ const RETRY_BACKOFF_MS = 6000;
 // T-J2-V2-realtest 议 B1 (Owner 19:55+ 钦定 lifecycle): 4 新 kind — dm_payment_verified /
 // dm_complete / dm_timeout / dm_failed (终态显式 + USDT 验证通过节点反馈).
 // T-J1-2026-04-27 P0-3 (NWT 17:34 UX P0): dm_cancel — _pendingAccepts CANCEL after confirm.
-const TX_PRODUCING_KINDS = new Set(['dm_quote', 'dm_pay_instr', 'dm_completion', 'dm_position', 'dm_paid_no_tx', 'dm_auto_payment_detected', 'dm_kas_delivered', 'dm_order_confirmed', 'dm_price_query', 'dm_stop', 'dm_payment_verified', 'dm_complete', 'dm_timeout', 'dm_failed', 'dm_cancel', 'accept_v1', 'paid_v1', 'sendKas']);
+const TX_PRODUCING_KINDS = new Set(['dm_quote', 'dm_pay_instr', 'dm_completion', 'dm_position', 'dm_paid_no_tx', 'dm_auto_payment_detected', 'dm_kas_delivered', 'dm_order_confirmed', 'dm_price_query', 'dm_stop', 'dm_payment_verified', 'dm_complete', 'dm_timeout', 'dm_failed', 'dm_cancel', 'dm_orphan_refund', 'accept_v1', 'paid_v1', 'sendKas']);
 
 // T-J1-2026-04-26 ANTI-PATTERNS R19 (Owner '系统钢线' 钦定): broker → user DM 含的链上地址必须
 // 是 broker 自己 agent_wallets 的真地址. LLM/handler 上层若漏 (Layer 1-3 已防), action-queue 入链
 // 前 final assert. 命中违反 → 拒发 + log + enqueue dm_failed. 真因 J1 67903c5b 真测撞 LLM 编 fake
 // 0x1234567890... placeholder, 真 user 真转 USDT 到 fake 地址 = 钱永久丢 = production 灾难.
-const DM_USER_KINDS = new Set(['dm_quote', 'dm_pay_instr', 'dm_completion', 'dm_position', 'dm_paid_no_tx', 'dm_auto_payment_detected', 'dm_kas_delivered', 'dm_order_confirmed', 'dm_price_query', 'dm_stop', 'dm_payment_verified', 'dm_complete', 'dm_timeout', 'dm_failed']);
+const DM_USER_KINDS = new Set(['dm_quote', 'dm_pay_instr', 'dm_completion', 'dm_position', 'dm_paid_no_tx', 'dm_auto_payment_detected', 'dm_kas_delivered', 'dm_order_confirmed', 'dm_price_query', 'dm_stop', 'dm_payment_verified', 'dm_complete', 'dm_timeout', 'dm_failed', 'dm_orphan_refund']);
 
 let _ownEvmAddrCache = null;
 let _ownEvmAddrCacheAt = 0;
@@ -302,6 +302,7 @@ async function executeAction(item) {
     case 'dm_complete':  // T-J2-V2-realtest 议 B1: 交易完成
     case 'dm_timeout':  // T-J2-V2-realtest 议 B1: 订单超时
     case 'dm_failed':  // T-J2-V2-realtest 议 B1: 订单失败/争议
+    case 'dm_orphan_refund':  // Bug B1 5/17 (NWT scenario B 真链 P0): user 多/少/错转账 inline refund + DM
     case 'dm_cancel': {  // T-J1-2026-04-27 P0-3 (NWT 17:34 UX): _pendingAccepts CANCEL after confirm
       // T-J2-2026-04-28 Phase D P2 (γ NWT 9a547e81 + J1 8513b019): freshness check —
       // dm_quote (preview) reply 真 fire 前 verify state 还 align tool args. T1 preview reply
