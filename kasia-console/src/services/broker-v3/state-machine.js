@@ -235,19 +235,22 @@ async function _handleTradeFlow(user_id, msg, cur, side, relayNodeId) {
       return { reply: `数量需 ${MIN_QTY_KAS}-${MAX_QTY_KAS} KAS, 重新输.` };
     }
     draft.qty = qty;
+    // Bug BF supp 5/17 fix: 补全 sub-step prompts priceline (NWT push back commit 3 partial)
+    const _plQty = await _priceLine();
+    const _plPfx = _plQty ? _plQty + '\n\n' : '';
     // SELL 路径必 EVM 收款 addr (broker 代发 USDT 到 user); BUY KAS 不需 (broker 给 maker addr 收 USDT, user 收 KAS 到 Kasia)
     if (side === 'sell') {
       setFlowState(user_id, { ...cur, step: 'ADDR_INPUT', draft });
-      return { reply: `${qty} KAS. 请输你自己的 ${draft.pay_chain.toUpperCase()} EVM 钱包 (0x... 42 位) — broker 代发 USDT 到这. 严禁给 broker 或别人 addr.` };
+      return { reply: `${_plPfx}${qty} KAS. 请输你自己的 ${draft.pay_chain.toUpperCase()} EVM 钱包 (0x... 42 位) — broker 代发 USDT 到这. 严禁给 broker 或别人 addr.` };
     }
     // BUY KAS skip ADDR_INPUT — but go to PRICE_INPUT if ESCROW_MODE on (Bug H γ Step 4 #3)
     if (ESCROW_MODE) {
       setFlowState(user_id, { ...cur, step: 'PRICE_INPUT', draft });
       // 方向 B Phase 1 5/16 (Owner 04:53 严训 数字严谨 + NWT 05:06 propose): BUY pilot strict 数字 only.
       if (side === 'buy') {
-        return { reply: `${qty} KAS. 出价方式:\n  1️⃣ 用 live oracle 中间价 (mid)\n  2️⃣ 自定 USDT/KAS 价格\n回 1 或 2.` };
+        return { reply: `${_plPfx}${qty} KAS. 出价方式:\n  1️⃣ 用 live oracle 中间价 (mid)\n  2️⃣ 自定 USDT/KAS 价格\n回 1 或 2.` };
       }
-      return { reply: `${qty} KAS. 出价? 回 'mid' 用 live oracle 中间价 OR 自定 USDT/KAS 价格 (e.g. '0.035').` };
+      return { reply: `${_plPfx}${qty} KAS. 出价? 回 'mid' 用 live oracle 中间价 OR 自定 USDT/KAS 价格 (e.g. '0.035').` };
     }
     // Legacy non-escrow: skip price input, straight to CONFIRM
     setFlowState(user_id, { ...cur, step: 'CONFIRM', draft });
@@ -259,7 +262,8 @@ async function _handleTradeFlow(user_id, msg, cur, side, relayNodeId) {
     // Bug H γ Step 4 #3 (Owner 17:35): ESCROW_MODE SELL flow 加 PRICE_INPUT step
     if (ESCROW_MODE) {
       setFlowState(user_id, { ...cur, step: 'PRICE_INPUT', draft });
-      return { reply: `addr ✓. 出价? 回 'mid' 用 live oracle 中间价 OR 自定 USDT/KAS 价格 (e.g. '0.040').` };
+      const _plAddr = await _priceLine();
+      return { reply: `${_plAddr ? _plAddr + '\n\n' : ''}addr ✓. 出价? 回 'mid' 用 live oracle 中间价 OR 自定 USDT/KAS 价格 (e.g. '0.040').` };
     }
     // Legacy non-escrow: skip price input
     setFlowState(user_id, { ...cur, step: 'CONFIRM', draft });
@@ -278,7 +282,8 @@ async function _handleTradeFlow(user_id, msg, cur, side, relayNodeId) {
         return { reply: await _previewText(draft, side), triggerPreview: true };
       } else if (txt === '2') {
         setFlowState(user_id, { ...cur, step: 'PRICE_VALUE_INPUT', draft });
-        return { reply: `请输自定 USDT/KAS 价格 (e.g. 0.035, 合理范围 0-10).` };
+        const _plPv = await _priceLine();
+        return { reply: `${_plPv ? _plPv + '\n\n' : ''}请输自定 USDT/KAS 价格 (e.g. 0.035, 合理范围 0-10).` };
       } else {
         return { reply: `❓ 请输 1 (mid) 或 2 (自定价格).` };
       }
@@ -390,7 +395,11 @@ async function _previewText(draft, side) {
   const totalLine = side === 'buy'
     ? `  你付总额: ${totalStable} ${stableAsset} (${draft.qty} × ${effectivePrice})`
     : `  你收总额: ${totalStable} ${stableAsset} (${draft.qty} × ${effectivePrice})`;
-  const lines = [
+  // Bug BF supp 5/17: CONFIRM step 也加 priceline header (跟其他 sub-step prompt 一致)
+  const _plConfirm = midPrice && midPrice > 0 ? `📊 KAS 现价 ${midPrice} USDT (live)` : null;
+  const lines = [];
+  if (_plConfirm) { lines.push(_plConfirm, ''); }
+  lines.push(
     `📋 订单预览 (${verb} ${draft.qty} KAS, ${draft.pay_chain.toUpperCase()})`,
     '',
     `  方向: ${verb} KAS`,
@@ -400,7 +409,7 @@ async function _previewText(draft, side) {
     priceLine,
     totalLine,
     '  ─────────────────',
-  ];
+  );
   if (side === 'sell') lines.push(`  你的 ${stableAsset} 收款: ${draft.pay_address}`);
   // Bug AU 5/16 fix (NWT 07:28 Tier 4 surface): prompt 文本同步 strict 数字 for BUY pilot.
   // SELL flow preserve legacy YES/NO 字面 (per "先跑通一个" pilot scope).
