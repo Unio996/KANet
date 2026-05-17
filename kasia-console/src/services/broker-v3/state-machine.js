@@ -238,18 +238,22 @@ async function _handleTradeFlow(user_id, msg, cur, side, relayNodeId) {
     // Bug BF supp 5/17 fix: 补全 sub-step prompts priceline (NWT push back commit 3 partial)
     const _plQty = await _priceLine();
     const _plPfx = _plQty ? _plQty + '\n\n' : '';
-    // SELL 路径必 EVM 收款 addr (broker 代发 USDT 到 user); BUY KAS 不需 (broker 给 maker addr 收 USDT, user 收 KAS 到 Kasia)
+    // SELL: broker 代发 USDT 到 user — 需 user 输入 EVM 收款 addr.
     if (side === 'sell') {
       setFlowState(user_id, { ...cur, step: 'ADDR_INPUT', draft });
       return { reply: `${_plPfx}${qty} KAS. 请输你自己的 ${draft.pay_chain.toUpperCase()} EVM 钱包 (0x... 42 位) — broker 代发 USDT 到这. 严禁给 broker 或别人 addr.` };
     }
-    // BUY KAS skip ADDR_INPUT — but go to PRICE_INPUT if ESCROW_MODE on (Bug H γ Step 4 #3)
+    // Bug NWT-07:38 Layer 2 5/17 (Owner 14:29 真测 surface — external user attribution gap):
+    // BUY 也必须 ADDR_INPUT — user 输入 BSC 源地址, broker 用此 attribute 未来 USDT inflow.
+    // 不强求 (legacy back-compat OK), 但 ESCROW_MODE 必须 (escrow.user_pay_address 用于 watcher match).
+    if (side === 'buy' && ESCROW_MODE) {
+      setFlowState(user_id, { ...cur, step: 'ADDR_INPUT', draft });
+      return { reply: `${_plPfx}${qty} KAS. 请输你 ${draft.pay_chain.toUpperCase()} 钱包 (0x... 42 位) — 你会从此地址转 USDT 给 broker, broker 用此识别你的 transfer.\n严禁给别人 addr (转账匹配会错位).` };
+    }
     if (ESCROW_MODE) {
       setFlowState(user_id, { ...cur, step: 'PRICE_INPUT', draft });
       // 方向 B Phase 1 5/16 (Owner 04:53 严训 数字严谨 + NWT 05:06 propose): BUY pilot strict 数字 only.
-      if (side === 'buy') {
-        return { reply: `${_plPfx}${qty} KAS. 出价方式:\n  1️⃣ 用 live oracle 中间价 (mid)\n  2️⃣ 自定 USDT/KAS 价格\n回 1 或 2.` };
-      }
+      // SELL flow legacy preserve 'mid' OR numeric input.
       return { reply: `${_plPfx}${qty} KAS. 出价? 回 'mid' 用 live oracle 中间价 OR 自定 USDT/KAS 价格 (e.g. '0.035').` };
     }
     // Legacy non-escrow: skip price input, straight to CONFIRM
@@ -260,9 +264,14 @@ async function _handleTradeFlow(user_id, msg, cur, side, relayNodeId) {
     if (!EVM_ADDR_REGEX.test(msg)) return { reply: '地址格式不对, 应是 0x 开头 42 位. 重输 OR back.' };
     draft.pay_address = msg;
     // Bug H γ Step 4 #3 (Owner 17:35): ESCROW_MODE SELL flow 加 PRICE_INPUT step
+    // Bug NWT-07:38 Layer 2: BUY 也走 ADDR_INPUT → PRICE_INPUT (跟 SELL 对称, attribution 完整)
     if (ESCROW_MODE) {
       setFlowState(user_id, { ...cur, step: 'PRICE_INPUT', draft });
       const _plAddr = await _priceLine();
+      // BUY pilot strict 数字; SELL legacy 'mid' OR numeric.
+      if (side === 'buy') {
+        return { reply: `${_plAddr ? _plAddr + '\n\n' : ''}addr ✓. 出价方式:\n  1️⃣ 用 live oracle 中间价 (mid)\n  2️⃣ 自定 USDT/KAS 价格\n回 1 或 2.` };
+      }
       return { reply: `${_plAddr ? _plAddr + '\n\n' : ''}addr ✓. 出价? 回 'mid' 用 live oracle 中间价 OR 自定 USDT/KAS 价格 (e.g. '0.040').` };
     }
     // Legacy non-escrow: skip price input
