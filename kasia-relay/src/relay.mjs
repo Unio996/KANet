@@ -95,6 +95,16 @@ function shouldBlockOutbound(target, message) {
   // 陷阱 #45: shouldBlockOutbound 拦截了协议消息重试，导致 paid 广播永远上不了链
   if (message.startsWith('{"t":"kanet_')) return null;
 
+  // Bug BM 5/17 hotfix (NWT 真链 surface): broker menu select 短 keyword 不走 dedup.
+  // user 真测 "1" → "1" (BUY → BSC select) 8s 内被 block. menu/keyword 是 deterministic
+  // 合法 input, 不是 spam. Exempt 1-6 单字 / back / cancel / status / 价格? 等 short keyword.
+  const trimmed = message.trim();
+  if (/^[1-6]$/.test(trimmed)) return null;
+  if (/^(back|cancel|status|mid|yes|no|y|n|取消|返回|menu|查询|我的订单|订单|orders?)$/i.test(trimmed)) return null;
+  if (/^(价格?|price|多少(钱)?|现价|查价)\s*[?？]?$|^[?？]+$/i.test(trimmed)) return null;
+  if (/^0x[a-fA-F0-9]{40}$/.test(trimmed)) return null; // EVM addr
+  if (/^\d+(\.\d+)?$/.test(trimmed)) return null; // qty input
+
   // 防线 1: 幻觉模式匹配
   const hallMatch = HALLUCINATION_PATTERNS.find(p => p.test(message));
   if (hallMatch) {

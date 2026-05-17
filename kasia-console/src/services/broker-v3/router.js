@@ -123,6 +123,10 @@ function _isLanguageA(msg) {
   // 之前 'mid' 不在 whitelist → _isLanguageA false → handleMessage return null → conversations.js:283
   // canned 'choose 1-6' reply, escrow 没 INSERT. AT-07 + HP-05 Tier 4 实证 (NWT 01:42 + 01:46).
   if (/^mid$/i.test(head)) return true;
+  // Bug BL 5/17 hotfix (NWT 03:08 真链 surface): _isLanguageA 漏 price keyword → MENU_TOP "价格?" 等 fall canned.
+  // BG hotfix 只在 sub-step (curState exists) 走 processInput, MENU_TOP 时 _isLanguageA 是 gatekeeper.
+  // 加 same regex set 跟 state-machine.js Bug BG regex 一致 — preserve KI [feedback_grep_full_codebase_pattern_fix].
+  if (/^(价格?|price|多少(钱)?|现价|查价)\s*[?？]?$|^[?？]+$/i.test(head)) return true;
   if (/^0x[a-fA-F0-9]{40}$/.test(head)) return true;  // EVM addr
   if (/^[a-f0-9-]{8,}$/i.test(head)) return true;  // offer_id / uuid
   if (/^\d+(\.\d+)?$/.test(head)) return true;  // qty number
