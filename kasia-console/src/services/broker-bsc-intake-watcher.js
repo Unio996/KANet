@@ -319,24 +319,43 @@ async function inlineRefundBscOrphan({ orphanId, fromAddress, amount, txHash }) 
   // DM user — find user kasia address by EVM (best effort, 0 fail OK)
   try {
     // Bug B1 DM 5/17 hotfix (NWT 04:40 catch): EVM addr mixed-case EIP-55 vs SQL default case-sensitive.
-    // chain scan from RPC normalized lowercase, agent_wallets 存 EIP-55 checksum → 比较 FAIL → userRelay=undefined → DM skip.
+    // Bug NWT-07:38 Layer 1 hotfix (Owner 真测 surface): external user BSC addr 不在 agent_wallets (production
+    // 100% case). Fallback: 反查 recent pending_prepay escrow user_kasia_addr (10 min temporal correlation).
+    // Limitation: 多 concurrent user 同时段 ambiguity (picks most recent). Layer 2 (BUY ADDR_INPUT) 修架构.
+    let userKasiaAddr = null;
     const userRelay = sqlite.prepare(`
       SELECT rn.address as kasia_addr FROM agent_wallets aw
       JOIN relay_nodes rn ON aw.relay_node_id = rn.id
       WHERE aw.address = ? COLLATE NOCASE AND aw.chain = 'bnb' LIMIT 1
     `).get(fromAddress);
     if (userRelay?.kasia_addr) {
+      userKasiaAddr = userRelay.kasia_addr;
+      console.log(`[bsc-orphan-refund] internal user matched via agent_wallets — ${userKasiaAddr.slice(-12)}`);
+    } else {
+      // External user fallback: reverse-lookup via recent pending_prepay escrow temporal correlation
+      const recentEscrow = sqlite.prepare(`
+        SELECT user_kasia_addr FROM user_escrow_balances
+        WHERE status = 'pending_prepay' AND asset = 'USDT' AND chain = 'bnb'
+          AND datetime(created_at) > datetime('now', '-10 minutes')
+        ORDER BY created_at DESC LIMIT 1
+      `).get();
+      if (recentEscrow?.user_kasia_addr) {
+        userKasiaAddr = recentEscrow.user_kasia_addr;
+        console.log(`[bsc-orphan-refund] external user matched via recent escrow temporal — ${userKasiaAddr.slice(-12)} (orphan ${orphanId.slice(0,8)})`);
+      }
+    }
+    if (userKasiaAddr) {
       const { enqueue } = await import('./broker-action-queue.js');
       enqueue({
         kind: 'dm_orphan_refund',
-        peer: userRelay.kasia_addr,
+        peer: userKasiaAddr,
         payload: {
           message: `✓ 收到你 ${amount} USDT (BSC) 但跟下单金额不匹配 (多转/少转/无匹配单), 已 100% 全额退还到你 BSC 地址.\n\n原 TX: ${txHash}\nrefund TX: ${refundTx}\n查链: https://bscscan.com/tx/${refundTx}\n\n如需重新下单, 回菜单输 1 (买) 或 2 (卖).`,
         },
       });
-      console.log(`[bsc-orphan-refund] DM enqueued for ${userRelay.kasia_addr.slice(-12)} orphan ${orphanId.slice(0,8)}`);
+      console.log(`[bsc-orphan-refund] DM enqueued for ${userKasiaAddr.slice(-12)} orphan ${orphanId.slice(0,8)}`);
     } else {
-      console.log(`[bsc-orphan-refund] no matching user relay for BSC ${fromAddress.slice(-12)} — refund 真链 done, no DM possible (external user)`);
+      console.log(`[bsc-orphan-refund] no matching user via agent_wallets OR recent escrow for BSC ${fromAddress.slice(-12)} — refund 真链 done, no DM possible (true external)`);
     }
   } catch (e) {
     console.warn(`[bsc-orphan-refund] DM enqueue err: ${e.message}`);
