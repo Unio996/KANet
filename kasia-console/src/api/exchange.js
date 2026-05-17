@@ -81,7 +81,9 @@ export async function registerExchangeRoutes(fastify) {
     // 注: mm_orders 0 active 今天, UNION symbolic until OTC traffic 重启. 不动 mm_orders DDL.
     let otcRows = [];
     try {
-      const wantOtcStatus = status ? [status] : ['open', 'matched', 'pending_payment', 'awaiting_payment'];
+      // Bug NWT-13:01 Phase 1 hotfix: include 'published' (OTC initial state per order-machine.js L77).
+      // mm_orders created in 'published' state, transitions per L30. NWT 真测 0 surface 因 filter 漏.
+      const wantOtcStatus = status ? [status] : ['published', 'open', 'matched', 'pending_payment', 'awaiting_payment', 'paying', 'accepted'];
       const placeholders = wantOtcStatus.map(() => '?').join(',');
       otcRows = sqlite.prepare(`
         SELECT
