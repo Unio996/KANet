@@ -182,7 +182,7 @@ export function classifyStrategy(rec) {
   }
 
   // 3. top-N rank: top X 排名 markets
-  if (/top\s*\d+/.test(q)) return 'scavenger_topN_rank';
+  if (/top[\s-]*\d+/.test(q)) return 'scavenger_topN_rank';
 
   // 4. Competitive: winner-of-N sports/awards/events
   if (/(win the|champion|winner|mvp|trophy)/.test(q) && yesPrice >= 0.20 && yesPrice <= 0.80) {
