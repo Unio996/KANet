@@ -112,10 +112,10 @@ export async function processInput(user_id, msg, relayNodeId) {
     return { reply: '正在加载你的订单...', triggerMyOrders: true };
   }
 
-  // Bug BG 5/17 fix (Owner UAT 真测 "价格?" 撞 QTY parseFloat reject):
-  // 任意 input step "价"/"价格"/"price"/"多少"/"现价"/"查价"/"?" → 显 live price + 不打断 flow.
-  // 不 setFlowState, preserve current step, user 再发数字/选项 driver 继续.
-  if (/^(价|价格|price|多少|多少钱|现价|查价|[?？])$/i.test(head)) {
+  // Bug BG 5/17 hotfix (NWT 6 checklist 实跑撞 — 原 regex 漏 "价格?" 组合, Owner 截图 4 原痛真因没修):
+  // 旧 regex `/^(...|[?？])$/` 只匹配单 token. "价格?" (关键字+?) 不等于任何 alternative → fall through.
+  // 修法: 关键字 + 可选 [?？] 后缀 OR ? 单独. Test cases: 价/价格/价格?/价格？/?/？/多少/多少钱/多少?/现价/查价/price 全 ✓.
+  if (/^(价格?|price|多少(钱)?|现价|查价)\s*[?？]?$|^[?？]+$/i.test(head)) {
     let priceLine;
     try {
       const { getKasPrice } = await import('./exchange-client.js');
