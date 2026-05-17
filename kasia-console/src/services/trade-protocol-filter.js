@@ -482,9 +482,15 @@ async function _evaluateAutoTake(offerId, msg) {
   if (msg.give_asset?.toUpperCase() !== 'KAS' || msg.want_asset?.toUpperCase() !== 'USDT') return;
 
   // 5b. Check accepted_chains includes a chain we can pay on (bnb default)
+  // Bug NWT-13:47 真因 confirmed: acceptedChains 是 [{chain, address}] 对象 array, 旧 includes(c) 检 c 整对象
+  // 永远 false → payChain null → silent return → autoTaker 30+ day production silent dead from day 1.
+  // KI-12 第 13 次复刻 silent skip pattern.
+  // 修法: c.chain access, normalize case.
   const meta = msg.verification_meta || {};
   const acceptedChains = meta.accepted_chains || [];
-  const payChain = acceptedChains.find(c => ['bnb', 'eth', 'sol', 'tron'].includes(c)) || (acceptedChains.length === 0 ? 'bnb' : null);
+  const supported = ['bnb', 'eth', 'sol', 'tron'];
+  const match = acceptedChains.find(c => c && supported.includes(String(c.chain || c).toLowerCase()));
+  const payChain = (match && (match.chain || match)) || (acceptedChains.length === 0 ? 'bnb' : null);
   if (!payChain) return;
 
   // 6. Price evaluation
