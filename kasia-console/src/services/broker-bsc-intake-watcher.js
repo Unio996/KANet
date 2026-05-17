@@ -318,10 +318,12 @@ async function inlineRefundBscOrphan({ orphanId, fromAddress, amount, txHash }) 
 
   // DM user — find user kasia address by EVM (best effort, 0 fail OK)
   try {
+    // Bug B1 DM 5/17 hotfix (NWT 04:40 catch): EVM addr mixed-case EIP-55 vs SQL default case-sensitive.
+    // chain scan from RPC normalized lowercase, agent_wallets 存 EIP-55 checksum → 比较 FAIL → userRelay=undefined → DM skip.
     const userRelay = sqlite.prepare(`
       SELECT rn.address as kasia_addr FROM agent_wallets aw
       JOIN relay_nodes rn ON aw.relay_node_id = rn.id
-      WHERE aw.address = ? AND aw.chain = 'bnb' LIMIT 1
+      WHERE aw.address = ? COLLATE NOCASE AND aw.chain = 'bnb' LIMIT 1
     `).get(fromAddress);
     if (userRelay?.kasia_addr) {
       const { enqueue } = await import('./broker-action-queue.js');
