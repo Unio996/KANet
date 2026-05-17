@@ -31,15 +31,19 @@ let running = false;
 export function startVariantExpanderCron() {
   if (timer) return;
   console.log('[variant-expander] started (30 min cron, Phase 1 skeleton — 3-tier variant expansion stub, real algorithm Phase 2)');
-  // Phase 2.2 r154-r155 startup catch-up (R-CRON-NO-STARTUP-CATCHUP):
-  // 30min cron 同款 setInterval reset bug. Query last variant insert → if > 30min ago fire immediate catchup.
+  // Phase 2.2 r154 + r164-r165 threshold tightening: 1h uniform (Owner 5/17 钦定 (a))
+  const STARTUP_CATCHUP_MIN_AGE_MS = 60 * 60 * 1000;
   try {
     const last = sqlite.prepare(`SELECT MAX(created_at) AS t FROM bettor_variant_recommendations`).get();
     const lastMs = last?.t ? new Date(last.t).getTime() : 0;
     const ageMs = Date.now() - lastMs;
-    if (ageMs > TICK_INTERVAL_MS) {
-      console.log(`[variant-expander] startup catchup: last variant ${(ageMs / 60000).toFixed(1)}min ago, fire immediate`);
+    const ageMin = ageMs / 60000;
+    const nextCatchupMinIfNoScan = Math.max(0, (STARTUP_CATCHUP_MIN_AGE_MS - ageMs) / 60000);
+    if (ageMs > STARTUP_CATCHUP_MIN_AGE_MS) {
+      console.log(`[variant-expander] startup catchup: last variant ${ageMin.toFixed(1)}min ago > 1h threshold, fire immediate`);
       tick().catch(e => console.error('[variant-expander] catchup err:', e.message));
+    } else {
+      console.log(`[variant-expander] startup: last variant ${ageMin.toFixed(1)}min ago < 1h threshold, no catchup. Next catchup in ${nextCatchupMinIfNoScan.toFixed(0)} min.`);
     }
   } catch (e) {
     console.error('[variant-expander] startup catchup query err:', e.message);

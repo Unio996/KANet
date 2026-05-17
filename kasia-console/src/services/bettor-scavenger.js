@@ -647,17 +647,21 @@ let _cronTimer = null;
 
 export function startScavengerCron() {
   if (_cronTimer) return;
-  // Phase 2.2 r154-r155 startup catch-up (R-CRON-NO-STARTUP-CATCHUP sediment):
-  // setInterval-based cron 不查 last run, Console restart 重置 6h 倒计时 → cron 永不 fire if restarts <6h.
-  // Today 9 restart 累 23h 没 scan = Owner 5/16 严训 "12h 没新单子" 真因. Fix: query MAX(scanned_at),
-  // if > CRON_INTERVAL_MS ago → fire immediate catch-up (trigger_type='cron_startup_catchup' analytics).
+  // Phase 2.2 r154-r155 + r164-r165 threshold tightening: catch-up if > 1h (not > CRON_INTERVAL_MS 6h).
+  // Owner 5/17 严训 "推荐都是昨晚的事" 真因 = r154 阈值太松 dev restart 频繁场景失效 (KI-CRON-CATCHUP-THRESHOLD-DEC).
+  // V1 uniform 1h per Owner 钦定 (a); per-cron formula (interval × 2) Phase B+ backlog if needed.
+  const STARTUP_CATCHUP_MIN_AGE_MS = 60 * 60 * 1000;
   try {
     const last = sqlite.prepare(`SELECT MAX(scanned_at) AS t FROM bettor_recommendations WHERE trigger_type = 'cron' OR trigger_type = 'cron_startup_catchup'`).get();
     const lastMs = last?.t ? new Date(last.t).getTime() : 0;
     const ageMs = Date.now() - lastMs;
-    if (ageMs > CRON_INTERVAL_MS) {
-      console.log(`[scavenger] startup catchup: last scan ${(ageMs / 3600000).toFixed(1)}h ago, fire immediate`);
+    const ageHours = ageMs / 3600000;
+    const nextCatchupMinIfNoScan = Math.max(0, (STARTUP_CATCHUP_MIN_AGE_MS - ageMs) / 60000);
+    if (ageMs > STARTUP_CATCHUP_MIN_AGE_MS) {
+      console.log(`[scavenger] startup catchup: last scan ${ageHours.toFixed(1)}h ago > 1h threshold, fire immediate`);
       runScavengerScan('cron_startup_catchup').catch(err => console.log(`[scavenger] catchup err: ${err.message}`));
+    } else {
+      console.log(`[scavenger] startup: last scan ${ageHours.toFixed(2)}h ago < 1h threshold, no catchup. Next catchup in ${nextCatchupMinIfNoScan.toFixed(0)} min if no manual scan.`);
     }
   } catch (e) {
     console.log(`[scavenger] startup catchup query err: ${e.message}`);

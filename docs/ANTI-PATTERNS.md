@@ -2064,6 +2064,38 @@ const prompt = `分析市场: ${sanitizeForPrompt(rec.question)}`;
 
 ---
 
+## KI-CRON-CATCHUP-THRESHOLD-DEC — startup catchup threshold should be < interval (dev restart 频繁场景 design)
+
+**Owner 2026-05-17 严训 "推荐都是昨晚的事" + Bettor r164-r165 sediment.**
+
+**Bad** (R-CRON-NO-STARTUP-CATCHUP V1, threshold = interval):
+```js
+const CRON_INTERVAL_MS = 6 * 60 * 60 * 1000;  // 6h
+// ...
+if (ageMs > CRON_INTERVAL_MS) { /* fire catchup */ }  // ❌ threshold = interval
+```
+
+**Why it breaks**: dev cycle restarts (cherry-pick / hotfix / restart 频繁 1-5h intervals):
+- restart 时 last cron gap = 5h47min < 6h
+- catchup NOT fire (threshold > 6h not met)
+- setInterval 重计时 → next cron 6h 后
+- Owner 等到 6h+ 才有 new scan
+
+**Good**:
+```js
+const CRON_INTERVAL_MS = 6 * 60 * 60 * 1000;  // 6h interval
+const STARTUP_CATCHUP_MIN_AGE_MS = 60 * 60 * 1000;  // 1h threshold < interval
+if (ageMs > STARTUP_CATCHUP_MIN_AGE_MS) { /* fire catchup */ }  // ✓ threshold < interval
+```
+
+**Rule of thumb**: startup catchup threshold should be **< cron interval**, not = interval. Owner-facing data freshness expectation drives threshold:
+- Owner expects scan within 1h after restart → threshold 1h works (Bettor r164-r165 V1)
+- Per-cron formula `interval × 2` (V2): scavenger 6h → 12h, variant-expander 30min → 1h, position-protector 1min → 2min (principled formula, defer Phase B+)
+
+V1 uniform 1h works for all interval-based crons in dev restart 频繁 场景. V2 per-cron formula 待 production stable cycle.
+
+---
+
 ## R-CRON-NO-STARTUP-CATCHUP — setInterval-based cron 必加 startup catch-up 查 last run
 
 **Owner 2026-05-16 严训 "12h 没新单子" + Bettor r154-r155 sediment.**

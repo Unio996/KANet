@@ -28,15 +28,21 @@ let running = false;
 export function startPositionProtectorCron() {
   if (timer) return;
   console.log('[position-protector] started (1 min cron, Phase 1 skeleton — detect new positions + INSERT pending_owner_ack rules, NO firing)');
-  // Phase 2.2 r154-r155 startup catch-up (R-CRON-NO-STARTUP-CATCHUP):
-  // For 1min interval cron 60s reset 影响 small but consistent — apply same pattern for parity.
+  // Phase 2.2 r154 + r164-r165 threshold tightening: 1h uniform (Owner 5/17 钦定 (a))
+  // Note: position-protector 1min interval → 1h threshold means "missed 60 cycles" (= almost every restart fires).
+  // V1 uniform per Owner; per-cron formula (interval × 2 = 2min for protector) Phase B+ backlog.
+  const STARTUP_CATCHUP_MIN_AGE_MS = 60 * 60 * 1000;
   try {
     const last = sqlite.prepare(`SELECT MAX(check_at) AS t FROM position_protect_audit`).get();
     const lastMs = last?.t ? new Date(last.t).getTime() : 0;
     const ageMs = Date.now() - lastMs;
-    if (ageMs > TICK_INTERVAL_MS) {
-      console.log(`[position-protector] startup catchup: last audit ${(ageMs / 60000).toFixed(1)}min ago, fire immediate`);
+    const ageMin = ageMs / 60000;
+    const nextCatchupMinIfNoScan = Math.max(0, (STARTUP_CATCHUP_MIN_AGE_MS - ageMs) / 60000);
+    if (ageMs > STARTUP_CATCHUP_MIN_AGE_MS) {
+      console.log(`[position-protector] startup catchup: last audit ${ageMin.toFixed(1)}min ago > 1h threshold, fire immediate`);
       tick().catch(e => console.error('[position-protector] catchup err:', e.message));
+    } else {
+      console.log(`[position-protector] startup: last audit ${ageMin.toFixed(1)}min ago < 1h threshold, no catchup. Next catchup in ${nextCatchupMinIfNoScan.toFixed(0)} min.`);
     }
   } catch (e) {
     console.error('[position-protector] startup catchup query err:', e.message);
