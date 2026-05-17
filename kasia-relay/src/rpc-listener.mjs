@@ -107,7 +107,18 @@ let _seenDirty = false;
 let _seenTimer = null;
 
 let _blocklist = new Set();
-let _handshakeAccepted = new Set();  // ESM strict mode requires explicit declaration before any assignment
+// Bug NWT-09:45 (Root 1 race + 加固): Map<addr, {ts, success}> 替 Set 防 RPC flaky 永久 stale dedup.
+// - entry.success=false (pending OR failed) + age > 60s → 允许 retry (stale 自愈)
+// - entry.success=true (sendKaspa 确认成功) → 永久 dedup (真 connection 已建)
+let _handshakeAccepted = new Map();  // addr → { ts, success }
+const HANDSHAKE_PENDING_TTL_MS = 60_000;
+function _isHandshakeAccepted(addr) {
+  const entry = _handshakeAccepted.get(addr);
+  if (!entry) return false;
+  if (entry.success) return true; // permanent
+  if ((Date.now() - entry.ts) < HANDSHAKE_PENDING_TTL_MS) return true; // pending in race window
+  return false; // stale pending → allow retry
+}
 
 // ── Embedded Kaspa TX indexer state ──
 // Watched addresses that we should persist to kaspa_tx_log on every block observation.
@@ -651,12 +662,24 @@ async function processHandshake(txId, payloadHex, senderAddress) {
     const parsed = JSON.parse(decrypted);
 
     // Don't markSeen yet — only after accept is confirmed sent
-    log('HANDSHAKE from', senderAddress?.slice(-12) || 'unknown', '— alias:', parsed.alias);
+    log('HANDSHAKE from', senderAddress?.slice(-12) || 'unknown', '— alias:', parsed.alias, 'isResponse:', parsed.isResponse === true);
     const theirAlias = parsed.alias || null;
 
     if (!senderAddress) {
       log('HANDSHAKE: no sender address — will retry on next startup');
       return; // Don't mark seen: catch-up will retry
+    }
+
+    // Bug NWT-09:45 Root 2 fix: parsed.isResponse=true 表示对方 accept 我们的 init.
+    // 旧逻辑 processHandshake 不区分 → 把 broker accept 当 new init → fire 自己 accept → bidirectional loop.
+    // 新逻辑: isResponse=true 只 record connection establish + add dedup + return, 不 auto-accept.
+    if (parsed.isResponse === true) {
+      log('HANDSHAKE is a RESPONSE (other side accepted our init) — record + add dedup + skip auto-accept');
+      ingestTx({ traceId: txId, txid: txId, direction: 'inbound', localAddress: _myAddress });
+      ingestHandshake({ localAddress: _myAddress, remoteAddress: senderAddress, txid: txId, theirAlias });
+      _handshakeAccepted.set(senderAddress, { ts: Date.now(), success: true });
+      markSeen(txId);
+      return;
     }
 
     // Record the inbound handshake TX (observation only — no status advancement)
@@ -669,20 +692,25 @@ async function processHandshake(txId, payloadHex, senderAddress) {
       return;
     }
 
-    // DEDUP 1: in-memory check
-    if (_handshakeAccepted.has(senderAddress)) {
+    // DEDUP 1: in-memory check (Map + TTL self-heal per NWT 加固)
+    if (_isHandshakeAccepted(senderAddress)) {
       log('HANDSHAKE already accepted for', senderAddress.slice(-12), '— skipping (memory dedup)');
       markSeen(txId);
       return;
     }
-    log('HANDSHAKE step 2 dedup-1 in-memory pass');
+    // Bug NWT-09:45 Root 1 fix: immediate add pending (success=false) to close race window
+    // 旧 add 在 L740 sendKaspa 后 → 5-10s race window → 4 concurrent inbounds 全 race 过.
+    // 新 add 在 has() pass 后立即 → race window ~1ms (atomic-enough).
+    // pending entry success=false, age TTL 60s 自愈 (RPC fail / sendKaspa throw 不永久死).
+    _handshakeAccepted.set(senderAddress, { ts: Date.now(), success: false });
+    log('HANDSHAKE step 2 dedup-1 in-memory pass — pending added');
     // DEDUP 2: check Console relation_states (persists across restarts)
     if (CONSOLE_URL) {
       try {
         const rs = await fetch(`${CONSOLE_URL}/api/relation/status?local=${encodeURIComponent(_myAddress)}&peer=${encodeURIComponent(senderAddress)}`).then(r => r.json());
         if (rs.status === 'accepted' || rs.status === 'active' || rs.status === 'confirmed') {
           log('HANDSHAKE already', rs.status, 'for', senderAddress.slice(-12), '— skipping (DB dedup)');
-          _handshakeAccepted.add(senderAddress);
+          _handshakeAccepted.set(senderAddress, { ts: Date.now(), success: true });
           markSeen(txId);
           return;
         }
@@ -737,7 +765,8 @@ async function processHandshake(txId, payloadHex, senderAddress) {
       ingestTx({ traceId: txId, txid: sent?.txId, direction: 'outbound', amount: '0.2', fee: sent?.fee, localAddress: _myAddress });
       // Record accept AFTER sendKaspa succeeds, with the REAL outbound txid
       ingestHandshake({ localAddress: _myAddress, remoteAddress: senderAddress, txid: sent?.txId, theirAlias });
-      _handshakeAccepted.add(senderAddress);
+      // Bug NWT-09:45 Root 1 fix: mark success=true (sendKaspa 真 confirm) — 永久 dedup.
+      _handshakeAccepted.set(senderAddress, { ts: Date.now(), success: true });
       markSeen(txId); // Accept sent successfully — safe to mark as done
 
       // Auto-greet: handshake accepted → send a brief hello via Mind
