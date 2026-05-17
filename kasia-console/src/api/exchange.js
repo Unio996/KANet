@@ -67,15 +67,57 @@ export async function registerExchangeRoutes(fastify) {
     expireStale();
 
     const rows = sqlite.prepare(`
-      SELECT * FROM exchange_offers
+      SELECT *, 'exchange' as source FROM exchange_offers
       WHERE ${where}
       ORDER BY broadcast_at DESC
       LIMIT ? OFFSET ?
     `).all(...params, Number(limit), Number(offset));
 
+    // Bug NWT-12:50 Phase 1: OTC integration — UNION mm_orders 到 /api/exchange/offers
+    // 大循环 (exchange + broker + OTC) Owner 钦定. mm_orders shape 映射 exchange_offers fields:
+    // - side='sell' (broker 卖 KAS): give=KAS amount=kas_amount, want=USDT amount=usdt_amount
+    // - side='buy'  (broker 买 KAS): give=USDT amount=usdt_amount, want=KAS amount=kas_amount
+    // - source='otc' 字段标识来源 (UI 区分 + Phase 2 take routing 用)
+    // 注: mm_orders 0 active 今天, UNION symbolic until OTC traffic 重启. 不动 mm_orders DDL.
+    let otcRows = [];
+    try {
+      const wantOtcStatus = status ? [status] : ['open', 'matched', 'pending_payment', 'awaiting_payment'];
+      const placeholders = wantOtcStatus.map(() => '?').join(',');
+      otcRows = sqlite.prepare(`
+        SELECT
+          id, side, kas_amount, usdt_amount, price, chain,
+          customer_address as taker, mm_receive_address as maker,
+          status as protocol_status, created_at as broadcast_at, updated_at,
+          payment_txhash, kas_txhash, batch_index
+        FROM mm_orders
+        WHERE status IN (${placeholders})
+        ORDER BY created_at DESC LIMIT ?
+      `).all(...wantOtcStatus, Number(limit)).map(r => ({
+        id: r.id,
+        source: 'otc',
+        protocol_status: r.protocol_status,
+        give_asset: r.side === 'sell' ? 'KAS' : 'USDT',
+        give_amount: r.side === 'sell' ? String(r.kas_amount) : String(r.usdt_amount),
+        give_chain: r.side === 'sell' ? 'kaspa' : r.chain,
+        want_asset: r.side === 'sell' ? 'USDT' : 'KAS',
+        want_amount: r.side === 'sell' ? String(r.usdt_amount) : String(r.kas_amount),
+        want_chain: r.side === 'sell' ? r.chain : 'kaspa',
+        maker: r.maker,
+        taker: r.taker,
+        broadcast_at: r.broadcast_at,
+        updated_at: r.updated_at,
+        market_key: 'KAS|USDT',
+        verification: 'otc',
+        payment_tx: r.payment_txhash,
+        delivery_tx: r.kas_txhash,
+        unit_price: parseFloat(r.price) || null,
+      }));
+    } catch (e) { console.warn(`[exchange] OTC UNION mm_orders skip: ${e.message}`); }
+
     const total = sqlite.prepare(
       `SELECT COUNT(*) as cnt FROM exchange_offers WHERE ${where}`
     ).get(...params);
+    const totalOtc = otcRows.length;
 
     // Market groups summary
     const groups = sqlite.prepare(`
@@ -110,13 +152,20 @@ export async function registerExchangeRoutes(fastify) {
       return { ...offer, unit_price: unitPrice, price_vs_market: priceVsMarket ? parseFloat(priceVsMarket) : null, kas_market_price: kasPrice };
     });
 
+    // Bug NWT-12:50 Phase 1: merge OTC rows + 加 unit_price/price_vs_market
+    const mergedOffers = [...enriched, ...otcRows.map(o => {
+      if (!kasPrice || !o.unit_price) return o;
+      return { ...o, price_vs_market: parseFloat(((o.unit_price - kasPrice) / kasPrice * 100).toFixed(2)), kas_market_price: kasPrice };
+    })];
     return reply.send({
-      offers: enriched,
-      total: total.cnt,
+      offers: mergedOffers,
+      total: total.cnt + totalOtc,
+      total_exchange: total.cnt,
+      total_otc: totalOtc,
       groups,
       kas_market_price: kasPrice,
       node_info: {
-        note: '数据来自本节点索引，非全网完整订单簿',
+        note: '数据来自本节点索引，含 exchange + OTC pool (大循环 Phase 1)',
       },
     });
   });
