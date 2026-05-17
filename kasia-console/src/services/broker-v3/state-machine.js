@@ -112,6 +112,19 @@ export async function processInput(user_id, msg, relayNodeId) {
     return { reply: '正在加载你的订单...', triggerMyOrders: true };
   }
 
+  // Bug BG 5/17 fix (Owner UAT 真测 "价格?" 撞 QTY parseFloat reject):
+  // 任意 input step "价"/"价格"/"price"/"多少"/"现价"/"查价"/"?" → 显 live price + 不打断 flow.
+  // 不 setFlowState, preserve current step, user 再发数字/选项 driver 继续.
+  if (/^(价|价格|price|多少|多少钱|现价|查价|[?？])$/i.test(head)) {
+    let priceLine;
+    try {
+      const { getKasPrice } = await import('./exchange-client.js');
+      const p = await getKasPrice();
+      priceLine = (p && p > 0) ? `📊 KAS 现价 ${p} USDT (live)` : '⚠ oracle 暂不可用';
+    } catch { priceLine = '⚠ oracle 暂不可用'; }
+    return { reply: `${priceLine}\n\n(继续上一步操作, OR back 返回菜单)` };
+  }
+
   const cur = getFlowState(user_id);
   // 首次 OR MENU_TOP — show menu
   if (!cur || cur.flow === 'MENU_TOP') {
@@ -171,8 +184,8 @@ async function _menuTopText() {
 async function _handleMenuTop(user_id, msg) {
   const num = parseInt(msg, 10);
   switch (num) {
-    case 1: setFlowState(user_id, { flow: 'BUY_FLOW', step: 'CHAIN_SELECT', draft: { side: 'buy_kas' } }); return { reply: _chainSelectText('买') };
-    case 2: setFlowState(user_id, { flow: 'SELL_FLOW', step: 'CHAIN_SELECT', draft: { side: 'sell_kas' } }); return { reply: _chainSelectText('卖') };
+    case 1: setFlowState(user_id, { flow: 'BUY_FLOW', step: 'CHAIN_SELECT', draft: { side: 'buy_kas' } }); return { reply: await _chainSelectText('买') };
+    case 2: setFlowState(user_id, { flow: 'SELL_FLOW', step: 'CHAIN_SELECT', draft: { side: 'sell_kas' } }); return { reply: await _chainSelectText('卖') };
     case 3: setFlowState(user_id, { flow: 'BROWSE_MARKET', step: 'LIST', page: 0 }); return { reply: '正在加载市场挂单, 稍等...', triggerBrowse: true };
     case 4: setFlowState(user_id, { flow: 'ACCEPT_OFFER', step: 'OFFER_ID_INPUT' }); return { reply: '请输入要接的 offer_id (来 BROWSE_MARKET 选 OR 直接粘贴 8-32 字符 ID), 或回 back 返回菜单.' };
     case 5: setFlowState(user_id, { flow: 'MY_ORDERS', step: 'LIST' }); return { reply: '正在加载你的订单...', triggerMyOrders: true };
@@ -181,17 +194,28 @@ async function _handleMenuTop(user_id, msg) {
   }
 }
 
-function _chainSelectText(verb) {
-  return [
-    `${verb} KAS — 选支付链:`,
+// Bug BF 5/17 fix (Owner UAT 真测 sub-step 无 priceline): 各 input step prompt 前置 KAS 现价行.
+async function _priceLine() {
+  try {
+    const { getKasPrice } = await import('./exchange-client.js');
+    const p = await getKasPrice();
+    return (p && p > 0) ? `📊 KAS 现价 ${p} USDT (live)` : null;
+  } catch { return null; }
+}
+
+async function _chainSelectText(verb) {
+  const pl = await _priceLine();
+  const lines = [];
+  if (pl) { lines.push(pl); lines.push(''); }
+  lines.push(`${verb} KAS — 选支付链:`,
     '  1️⃣ BSC (BNB Chain, USDT)',
     '  2️⃣ ETH (Ethereum, USDT)',
     '  3️⃣ Polygon (USDT)',
     '  4️⃣ Arbitrum (USDT)',
     '  5️⃣ Optimism (USDT)',
     '  6️⃣ Base (USDC)',
-    '  回数字 1-6 选, back 返回菜单.',
-  ].join('\n');
+    '  回数字 1-6 选, back 返回菜单.');
+  return lines.join('\n');
 }
 
 async function _handleTradeFlow(user_id, msg, cur, side, relayNodeId) {
@@ -202,7 +226,8 @@ async function _handleTradeFlow(user_id, msg, cur, side, relayNodeId) {
     if (num < 1 || num > chains.length) return { reply: `数字超范围, 回 1-${SUPPORTED_CHAINS.length} 选链.` };
     draft.pay_chain = chains[num - 1];
     setFlowState(user_id, { ...cur, step: 'QTY_SELECT', draft });
-    return { reply: `已选 ${draft.pay_chain.toUpperCase()}. 数量 (KAS, ${MIN_QTY_KAS}-${MAX_QTY_KAS})?` };
+    const _pl1 = await _priceLine();
+    return { reply: `${_pl1 ? _pl1 + '\n\n' : ''}已选 ${draft.pay_chain.toUpperCase()}. 数量 (KAS, ${MIN_QTY_KAS}-${MAX_QTY_KAS})?` };
   }
   if (cur.step === 'QTY_SELECT') {
     const qty = parseFloat(msg);
