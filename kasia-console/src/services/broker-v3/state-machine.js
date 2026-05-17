@@ -348,22 +348,42 @@ async function _handleTradeFlow(user_id, msg, cur, side, relayNodeId) {
   if (cur.step === 'WAIT_PREPAY') {
     // Bug H 5/14 escrow mode: user 在 broker quote 等 user 真链 prepay 状态.
     if (!ESCROW_MODE) { clearFlowState(user_id); return { reply: '状态错乱 (escrow mode off), 回菜单.\n\n' + await _menuTopText() }; }
+    // ONE 真根因 fix 5/17 (Owner UAT g3 + J2 #440 第 6 件): WAIT_PREPAY prompt 走 user-context aggregator,
+    // 根据 escrow 当前 status 真实反映阶段, 不再 hardcode "1 取消 prepayment / 2 查询".
+    const { getUserBrokerContext, getPrimaryEscrow, renderEscrowStage } = await import('./user-context.js');
+    const ctx = await getUserBrokerContext(user_id);
+    const e = getPrimaryEscrow(ctx);
     // 方向 B Phase 1 5/16: BUY pilot 1=取消 / 2=查询 only. SELL legacy.
     if (side === 'buy') {
       if (msg === '1') {
+        // dynamic: in-flight (active/verifying/delivering) 不可 cancel
+        if (e && ['verifying','delivering','matched'].includes(e.status)) {
+          return { reply: `⚠ 当前状态 ${renderEscrowStage(e)} — 已 in-flight, 不可取消. 回 2 查询状态.` };
+        }
         return { reply: '正在取消报价 + 处理 refund...', triggerCancelEscrow: true, draft: cur.draft };
       }
       if (msg === '2') {
-        return { reply: '正在查 prepayment status...', triggerCheckPrepayStatus: true, draft: cur.draft };
+        return { reply: '正在查状态...', triggerCheckPrepayStatus: true, draft: cur.draft };
       }
-      return { reply: '等你真链 transfer USDT/KAS 到 broker 地址 (见上一条 quote). 5 min 超时自动取消.\n  1️⃣ 取消 prepayment\n  2️⃣ 查询 prepayment 状态\n回 1 或 2.' };
+      // dynamic prompt — escrow 实际 status 决定显示
+      if (!e || e.status === 'pending_prepay') {
+        return { reply: '等你真链 transfer USDT/KAS 到 broker 地址 (见上一条 quote). 5 min 超时自动取消.\n  1️⃣ 取消 prepayment\n  2️⃣ 查询 prepayment 状态\n回 1 或 2.' };
+      }
+      const stage = renderEscrowStage(e);
+      return { reply: `${stage}\n  1️⃣ ${['verifying','delivering','matched'].includes(e.status) ? '(in-flight 不可取消)' : '取消订单'}\n  2️⃣ 查询订单状态\n回 1 或 2.` };
     }
     // SELL legacy
     if (/^(no|取消|cancel)$/i.test(msg)) {
+      if (e && ['verifying','delivering','matched'].includes(e.status)) {
+        return { reply: `⚠ 当前 ${renderEscrowStage(e)} — in-flight 不可取消. 回 status 查询.` };
+      }
       return { reply: '正在取消报价 + 处理 refund...', triggerCancelEscrow: true, draft: cur.draft };
     }
-    if (/^(status|查)$/i.test(msg)) return { reply: '正在查 prepayment status...', triggerCheckPrepayStatus: true, draft: cur.draft };
-    return { reply: '等你真链 transfer USDT/KAS 到 broker 地址 (见上一条 quote). 5 min 超时自动取消. 回 cancel 立即放弃报价 / status 查状态.' };
+    if (/^(status|查)$/i.test(msg)) return { reply: '正在查状态...', triggerCheckPrepayStatus: true, draft: cur.draft };
+    if (!e || e.status === 'pending_prepay') {
+      return { reply: '等你真链 transfer USDT/KAS 到 broker 地址. 5 min 超时自动取消. 回 cancel 立即放弃 / status 查状态.' };
+    }
+    return { reply: `${renderEscrowStage(e)}. 回 status 查状态 (in-flight 不可 cancel).` };
   }
   return { reply: '状态错乱, 回 back 返回菜单重来.' };
 }

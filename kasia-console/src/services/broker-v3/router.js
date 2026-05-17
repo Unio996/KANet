@@ -298,34 +298,49 @@ async function _doCancelEscrow(peer, draft, prevReply) {
 }
 
 async function _doCheckPrepayStatus(peer, draft, prevReply) {
-  // Bug H 5/14 candidate A v2: query user_escrow_balances WHERE user=peer + status='pending_prepay'
-  const rows = sqlite.prepare(`
-    SELECT id, side, amount_quoted, asset, chain, broker_recv_addr, status, expires_at
-    FROM user_escrow_balances
-    WHERE user_kasia_addr = ? AND status = 'pending_prepay'
-    ORDER BY created_at DESC LIMIT 1
-  `).all(peer);
-  if (rows.length === 0) {
-    stateMachine.clearFlowState(peer);
+  // ONE 真根因 fix 5/17 (Owner UAT g3 + NWT 02:40 + J2 #440 共识 v2):
+  // 旧 query narrow status='pending_prepay' → escrow 已 active 时撞 race "无 active 报价".
+  // 新: 走 user-context aggregator, 各 status 真实显示当前阶段.
+  const { getUserBrokerContext, getPrimaryEscrow, renderEscrowStage } = await import('./user-context.js');
+  const ctx = await getUserBrokerContext(peer);
+  const e = getPrimaryEscrow(ctx);
+  if (!e) {
+    // 真无 in-flight escrow — 不 clearFlowState (上层 universal "back" 处理), 只 return status text.
     return '你当前无 active 报价. 回菜单重新下单.';
   }
-  const r = rows[0];
-  const remainingMs = new Date(r.expires_at).getTime() - Date.now();
+  const stage = renderEscrowStage(e);
+  const isBuy = e.side === 'buy_kas';
+  const remainingMs = new Date(e.expires_at + 'Z').getTime() - Date.now();
   const remainingMin = Math.max(0, Math.round(remainingMs / 60000));
-  // Bug AU 5/16 fix: status query prompt sync strict 数字 BUY pilot.
-  const isBuy = r.side === 'buy_kas';
-  return [
-    `📋 报价状态: pending_prepay (等你真链 transfer)`,
+  const lines = [
+    `📋 报价状态: ${stage}`,
     `  方向: ${isBuy ? '买 KAS' : '卖 KAS'}`,
-    `  请 transfer: ${r.amount_quoted} ${r.asset} on ${r.chain.toUpperCase()}`,
-    `  到: ${r.broker_recv_addr}`,
-    `  剩余时间: ${remainingMin} min`,
-    '',
-    isBuy
-      ? '回 1 取消 OR 等真链 transfer 到账 (5 min 超时自动失效).'
-      : '回 cancel 立即取消 OR 等真链 transfer 到账 (5 min 超时自动失效).',
-  ].join('\n');
+  ];
+  if (e.status === 'pending_prepay') {
+    lines.push(
+      `  请 transfer: ${e.amount_quoted} ${e.asset} on ${e.chain?.toUpperCase()}`,
+      `  到: ${e.broker_recv_addr}`,
+    );
+  } else {
+    lines.push(`  收款: ${e.amount_received || e.amount_quoted} ${e.asset} (已到账)`);
+    const linkedOffer = ctx.offers.get(e.offer_id);
+    if (linkedOffer) {
+      lines.push(`  offer: ${e.offer_id?.slice(0,12)} (${linkedOffer.protocol_status})`);
+      if (linkedOffer.delivery_tx) lines.push(`  delivery TX: ${linkedOffer.delivery_tx.slice(0,16)}...`);
+    }
+  }
+  if (remainingMin > 0 && ESCROW_REMAINING_STATUSES.includes(e.status)) {
+    lines.push(`  剩余时间: ${remainingMin} min`);
+  }
+  lines.push('');
+  if (['pending_prepay'].includes(e.status)) {
+    lines.push(isBuy ? '回 1 取消 OR 等真链 transfer 到账.' : '回 cancel 立即取消 OR 等真链 transfer 到账.');
+  } else if (['active', 'matched', 'verifying', 'delivering'].includes(e.status)) {
+    lines.push('回 back 返回菜单 (in-flight 不可 cancel).');
+  }
+  return lines.join('\n');
 }
+const ESCROW_REMAINING_STATUSES = ['pending_prepay', 'active'];
 
 // Bug H 5/14 candidate A v2 Sub #5.残: _doPublishAfterPrepay — escrow watcher service post-prepay-detect 调.
 // 接 escrowRowId (user_escrow_balances pending_prepay row), 真 publish offer with 正确 BUY/SELL semantic:
@@ -664,55 +679,25 @@ function _renderBrowseList(offers) {
 }
 
 async function _doMyOrders(peer, prevReply) {
-  // Bug BH 5/17 fix (Owner UAT 真测 "5 我的订单" 撞 假象 "没单"):
-  // 旧逻辑只查 stateMachine.getUserOffers(peer) (publish 后 in-memory cache).
-  // Owner 真发 58 KAS prepay 时, broker kaspa-intake 60s tick window 内 escrow=pending_prepay
-  // (offer 还没 publish) → cache 空 → 假象 "没单". 同时 inflow DM 又说 "已收 58 KAS" 矛盾.
-  // Fix: UNION user_escrow_balances 当前 in-flight rows + 5 min 内 settled/refunded rows (closure feedback).
+  // ONE 真根因 fix 5/17: 走 user-context aggregator (跟 _doCheckPrepayStatus 共 source).
+  const { getUserBrokerContext, renderEscrowStage, closureAgeMin } = await import('./user-context.js');
+  const ctx = await getUserBrokerContext(peer);
+  const allEscrows = [...ctx.escrows, ...ctx.closures]; // in-flight + 5 min closure
   const offerIds = stateMachine.getUserOffers(peer);
-  // 主路径: SELECT user_escrow_balances + JOIN offer (per Q1 consensus filter)
-  const escrows = sqlite.prepare(`
-    SELECT id as eid, side, asset, chain, amount_quoted, target_amount, target_asset, target_chain,
-           offer_id, status, prepayment_tx, settle_tx, refund_tx, created_at, updated_at
-    FROM user_escrow_balances
-    WHERE user_kasia_addr = ?
-      AND (status IN ('pending_prepay','active','verifying','delivering','matched')
-           OR (status IN ('settled','refunded','timed_out','cancelled')
-               AND datetime(updated_at) > datetime('now','-5 minutes')))
-    ORDER BY datetime(created_at) DESC LIMIT 10
-  `).all(peer);
 
-  // Helper: render escrow row with stage label
-  const ESCROW_STAGE = {
-    pending_prepay: '⏳ 等收 prepay TX (1-2 min)',
-    active: '✓ 已收款, 替你挂单/接单中',
-    matched: '✓ 已接单, 等付款验证',
-    verifying: '⏳ 付款验证中 (~1-3 min)',
-    delivering: '⏳ 验证通过, 正在 deliver',
-    settled: '✓ 已 settle',
-    refunded: '↩ 已退款',
-    timed_out: '⏰ 已过期',
-    cancelled: '⊘ 已取消',
-  };
-  const closureNote = (e) => {
-    const ago = Math.floor((Date.now() - new Date(e.updated_at + 'Z').getTime()) / 60000);
-    if (['settled','refunded','timed_out','cancelled'].includes(e.status)) {
-      return ` (${ago} min 前)`;
-    }
-    return '';
-  };
-
-  if (escrows.length === 0 && offerIds.length === 0) {
+  if (allEscrows.length === 0 && offerIds.length === 0) {
     return '你当前没 active 订单. 回 back 返回菜单.';
   }
 
   const lines = ['📋 我的订单 (回 back 返回菜单):', ''];
-  // 1) escrow rows (含 in-flight + 5 min closure)
-  escrows.forEach((e, i) => {
-    const stage = ESCROW_STAGE[e.status] || `[${e.status}]`;
+  // 1) escrow rows (in-flight + 5 min closure feedback)
+  allEscrows.forEach((e, i) => {
+    const stage = renderEscrowStage(e);
+    const ago = closureAgeMin(e);
+    const note = ago != null ? ` (${ago} min 前)` : '';
     const dir = e.side === 'buy_kas' ? '买 KAS' : '卖 KAS';
     const amt = e.side === 'buy_kas' ? `${e.target_amount} KAS` : `${e.amount_quoted} KAS`;
-    lines.push(`${i + 1}️⃣ ${stage}${closureNote(e)}`);
+    lines.push(`${i + 1}️⃣ ${stage}${note}`);
     lines.push(`   ${dir} ${amt} (链 ${e.chain || e.target_chain})`);
     if (e.prepayment_tx) lines.push(`   prepay TX: ${String(e.prepayment_tx).slice(0,16)}...`);
     if (e.settle_tx) lines.push(`   settle TX: ${String(e.settle_tx).slice(0,16)}...`);
@@ -723,9 +708,9 @@ async function _doMyOrders(peer, prevReply) {
   if (offerIds.length > 0) {
     const settled = await Promise.all(offerIds.slice(0, 5).map(id => client.getOffer(id)));
     const offers = settled.filter(s => s.ok).map(s => s.offer).filter(Boolean)
-      .filter(o => !escrows.some(e => e.offer_id === o.id)); // 去重: escrow 已 cover 的不再列
+      .filter(o => !allEscrows.some(e => e.offer_id === o.id));
     offers.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
-    const offset = escrows.length;
+    const offset = allEscrows.length;
     offers.forEach((o, i) => {
       lines.push(`${offset + i + 1}️⃣ [${o.protocol_status}] ${o.give_amount} ${o.give_asset} → ${o.want_amount} ${o.want_asset}`);
       lines.push(`   id: ${o.id?.slice(0, 12)}`);
