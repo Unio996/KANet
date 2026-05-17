@@ -346,6 +346,32 @@
                   <span x-show="agent.polymarket && !agent.polymarket.configured" class="text-ink-300">未配置 API</span>
                   <span x-show="!agent.polymarket" class="text-ink-300">无 Polygon 钱包</span>
                 </div>
+                <!-- Positions detail (top 10 by currentValue) -->
+                <template x-if="agent.polymarket?.positions && agent.polymarket.positions.length > 0">
+                  <div class="mt-2 space-y-1">
+                    <template x-for="p in agent.polymarket.positions" :key="(p.slug || 'na') + ':' + (p.outcome || 'na')">
+                      <div class="flex items-start justify-between text-[10px] bg-warm-50 px-2 py-1 rounded">
+                        <div class="flex-1 min-w-0 pr-2">
+                          <div class="text-ink-700 truncate" x-text="p.title || '(no title)'"></div>
+                          <div class="text-ink-400">
+                            <span x-text="p.outcome || '?'"></span> ·
+                            <span x-text="(p.size || 0).toFixed(0) + ' sh'"></span> ·
+                            entry $<span x-text="(p.avgPrice || 0).toFixed(3)"></span>
+                            → cur $<span x-text="(p.curPrice || 0).toFixed(3)"></span>
+                          </div>
+                          <div class="text-ink-400" x-show="p.endDate">
+                            end: <span x-text="(p.endDate || '').slice(0, 10)"></span>
+                            <span x-show="p.redeemable" class="ml-2 text-green-600 font-medium">⚡ redeemable</span>
+                          </div>
+                        </div>
+                        <div class="text-right shrink-0">
+                          <div class="tabular-nums font-medium" :class="(p.cashPnl || 0) >= 0 ? 'text-green-700' : 'text-red-600'" x-text="fmt(p.currentValue || 0)"></div>
+                          <div class="text-[9px] tabular-nums" :class="(p.cashPnl || 0) >= 0 ? 'text-green-500' : 'text-red-500'" x-text="((p.cashPnl || 0) >= 0 ? '+' : '') + fmt(p.cashPnl || 0)"></div>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                </template>
               </div>
             </div>
 

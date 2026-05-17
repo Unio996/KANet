@@ -274,6 +274,22 @@ async function _getPolymarketSummary(relayId) {
     const pusd = pusdBal || 0;
     // approxValueUsd 现在是 positions + USDC.e + pUSD 三层合计 (V2 抵押 + 持仓 + 闲置 USDC)
     const approxValueUsd = positionsValueUsd + usdc + pusd;
+    // Top 10 positions sorted by currentValue desc (Owner 1 眼看大仓位)
+    const positionsDetail = [...list]
+      .map(p => ({
+        slug: p.slug || p.eventSlug || '',
+        title: String(p.title || '').slice(0, 60),
+        outcome: p.outcome || '',
+        size: parseFloat(p.size || 0),
+        avgPrice: parseFloat(p.avgPrice || 0),
+        curPrice: parseFloat(p.curPrice || p.avgPrice || 0),
+        currentValue: parseFloat(p.currentValue || 0),
+        endDate: p.endDate || null,
+        redeemable: !!p.redeemable,
+        cashPnl: parseFloat(p.cashPnl || 0),
+      }))
+      .sort((a, b) => b.currentValue - a.currentValue)
+      .slice(0, 10);
     return {
       configured: hasCreds,
       walletAddress: wallet.address,
@@ -282,6 +298,7 @@ async function _getPolymarketSummary(relayId) {
       usdc,
       pusd,
       approxValueUsd,
+      positions: positionsDetail,
     };
   } catch {
     return null;
