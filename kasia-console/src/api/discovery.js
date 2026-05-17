@@ -380,15 +380,14 @@ export async function registerDiscoveryRoutes(fastify) {
       const { triggerProactiveAll } = await import('../services/mind-manager.js');
       triggerProactiveAll({ newHandshake: { from: addressA, to: addressB, txHash } }).catch(() => {});
 
-      // Scout 发现 inbound 握手 → Console 主动通知 Relay 去回复（不依赖 Relay 独立扫链）
-      const localAddrs = sqlite.prepare('SELECT id, address FROM relay_nodes').all();
-      const receiver = localAddrs.find(r => r.address === addressB);
-      if (receiver) {
-        const { sendCommandAsync } = await import('../services/relay-manager.js');
-        sendCommandAsync(receiver.id, { type: 'handshake', target: addressA }, 15000).catch(err => {
-          console.log(`[discovery] Relay handshake IPC failed for ${addressB.slice(-12)}: ${err?.message || err}`);
-        });
-      }
+      // Bug NWT-10:06 Layer 3 fix: 旧 "Console 主动通知 Relay 去回复" misroute — IPC type 'handshake'
+      // 在 relay.mjs L360 路由到 initiateHandshake (isResponse=false), 不是 acceptHandshake.
+      // broker 收 ExtClient init → relay scout processHandshake auto-accept (isResponse=true) ✓
+      // 但 Console discovery 又 fire IPC handshake → broker 再 send 第 2 个 TX isResponse=false → ExtClient
+      // 看到 init-style 又 auto-accept → bidirectional loop.
+      // 修法 Option A: 删 Console 这层冗余 + 错误 — relay 自身 scout 已 cover (processHandshake L647).
+      // 其他 IPC 'handshake' callers (admin manual init / explore.eta UI button / trading.js OTC) 是 legitimate
+      // user-initiated init action, 不动. 仅 discovery.js 这里是 "response" 但错路由到 initiate.
     } else if (interactionType === 'comm') {
       // Comm is too frequent to trigger proactive (causes message storms).
       // Agents handle comm via reactive (incoming messages) and timed proactive cycles.
