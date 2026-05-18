@@ -275,17 +275,39 @@ export async function _settleEscrowToUser(escrowId, offerId) {
       // Bug AS P1 fix 5/16 (NWT 04:24 audit completeness gap): replace enqueue (fire-and-forget +
       // 'queued:' stub) with enqueueVerified (await real txId). DB refund_tx/settle_tx 真 TX hash,
       // not stub. audit trail complete + user can verify on chain.
-      const { enqueueVerified } = await import('./broker-action-queue.js');
-      try {
-        const r = await enqueueVerified({
-          kind: 'sendKas', peer: e.user_target_addr,
-          payload: { amount_kas: e.target_amount, note: `escrow settle ${escrowId.slice(0,8)}` },
-        });
-        settleTxHash = r?.txId || `queued:${escrowId.slice(0,8)}`;
-        console.log(`[exchange-escrow-settle] KAS sendKas verified ${e.target_amount} → ${e.user_target_addr?.slice(-12)} TX ${settleTxHash?.slice(0,16)} for escrow ${escrowId.slice(0,8)}`);
-      } catch (err) {
-        settleTxHash = `queue-failed:${escrowId.slice(0,8)}`;
-        console.error(`[exchange-escrow-settle] KAS sendKas enqueueVerified fail for escrow ${escrowId.slice(0,8)}: ${err.message}`);
+      //
+      // Bug N14.8 P0 fix 5/18 (NWT N14.9 钦定): 'queue-failed' silent skip 第 N 次 KI-12.
+      // 旧 logic: catch err → settleTxHash = `queue-failed:${escrowId}` → 后 L332 UPDATE status='settled'
+      // → user 0 KAS 收 broker 仍 mark success state, audit trail false-positive, user 钱失.
+      // 修法 (mirror EVM path L310-326): 3-retry + DM user 通知 + 早 return (escrow 保 'active' 可后续 retry).
+      const { enqueueVerified, enqueue } = await import('./broker-action-queue.js');
+      let lastErr = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const r = await enqueueVerified({
+            kind: 'sendKas', peer: e.user_target_addr,
+            payload: { amount_kas: e.target_amount, note: `escrow settle ${escrowId.slice(0,8)} attempt ${attempt}` },
+          });
+          settleTxHash = r?.txId || `queued:${escrowId.slice(0,8)}`;
+          console.log(`[exchange-escrow-settle] KAS sendKas verified ${e.target_amount} → ${e.user_target_addr?.slice(-12)} TX ${settleTxHash?.slice(0,16)} for escrow ${escrowId.slice(0,8)} (attempt ${attempt})`);
+          lastErr = null;
+          break;
+        } catch (err) {
+          lastErr = err;
+          console.warn(`[exchange-escrow-settle] KAS sendKas enqueueVerified attempt ${attempt}/3 fail for escrow ${escrowId.slice(0,8)}: ${err.message}`);
+          if (attempt < 3) await new Promise(res => setTimeout(res, 5000 * attempt));
+        }
+      }
+      if (lastErr) {
+        console.error(`[exchange-escrow-settle] KAS sendKas 3 attempt FAIL for escrow ${escrowId.slice(0,8)}: ${lastErr.message} — escrow 保 'active' 后续 retry, user DM 通知`);
+        try {
+          enqueue({
+            kind: 'dm_failed',
+            peer: e.user_kasia_addr,
+            payload: { message: `⚠ 自动 deliver ${e.target_amount} KAS 失败 (3 retry: ${lastErr.message.slice(0,80)}). broker 后续 retry OR 30 min TTL 自动 refund 你 prepay.` },
+          });
+        } catch {}
+        return; // escrow status stays 'active', no UPDATE to 'settled' fake state
       }
     } else {
       // Bug AX P1 fix 5/16 (NWT 07:42 audit surface): EVM path 3 silent failure modes — no broker wallet,
