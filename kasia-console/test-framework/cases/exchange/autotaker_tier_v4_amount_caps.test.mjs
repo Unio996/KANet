@@ -30,11 +30,11 @@ export default {
 
     // verify tier determination for known production addresses
     // kzc2tgz4cchh: 40d, 0 card, 0 completed → Tier 2 (age ≥ 7d OR-condition)
-    const kzc = db.prepare("SELECT discovered_at, card_observed_at FROM identities WHERE substr(address,-12)='kzc2tgz4cchh'").get();
+    const kzc = db.prepare("SELECT discovered_at, card_timestamp FROM identities WHERE substr(address,-12)='kzc2tgz4cchh'").get();
     const kzcAge = (Date.now() - new Date(kzc.discovered_at).getTime()) / 86400000;
     const kzcCompleted = db.prepare("SELECT COUNT(*) AS cnt FROM exchange_offers WHERE substr(taker,-12)='kzc2tgz4cchh' AND protocol_status='completed'").get().cnt;
-    const kzcTier = tier(kzcAge, !!kzc.card_observed_at, kzcCompleted);
-    if (kzcTier !== 2) return { ok: false, error: `kzc2tgz4cchh expected Tier 2, got ${kzcTier} (age=${kzcAge.toFixed(1)}d card=${!!kzc.card_observed_at} completed=${kzcCompleted})` };
+    const kzcTier = tier(kzcAge, !!kzc.card_timestamp, kzcCompleted);
+    if (kzcTier !== 2) return { ok: false, error: `kzc2tgz4cchh expected Tier 2, got ${kzcTier} (age=${kzcAge.toFixed(1)}d card=${!!kzc.card_timestamp} completed=${kzcCompleted})` };
 
     // Synthetic checks
     const checks = [

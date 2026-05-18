@@ -293,8 +293,10 @@ async function _evaluateAutoTake(offerId, msg) {
     };
 
     // 1. peer 数据: age, has_card, completed_count
+    // NWT N19.5 P0 hotfix: identities column is `card_timestamp`, NOT `card_observed_at` (J2 typo from earlier
+    // grep misread "undefined" return = missing col, not null val). T0 grep cousin lesson.
     const peerRow = sqlite.prepare(
-      'SELECT discovered_at, card_observed_at FROM identities WHERE address = ?'
+      'SELECT discovered_at, card_timestamp FROM identities WHERE address = ?'
     ).get(msg._from);
     const completedCount = sqlite.prepare(
       "SELECT COUNT(*) AS cnt FROM exchange_offers WHERE taker = ? AND protocol_status = 'completed'"
@@ -303,7 +305,7 @@ async function _evaluateAutoTake(offerId, msg) {
       ? Date.now() - new Date(peerRow.discovered_at).getTime()
       : 0;
     const ageDays = ageMs / 86400000;
-    const hasCard = !!peerRow?.card_observed_at;
+    const hasCard = !!peerRow?.card_timestamp;
 
     // 2. tier determination (v3 OR-condition, NWT N19.2 ack)
     let tier;
