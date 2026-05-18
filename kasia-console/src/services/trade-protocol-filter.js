@@ -272,44 +272,94 @@ async function _evaluateAutoTake(offerId, msg) {
 
   console.log(`[autoTaker] opportunity: ${giveAmt} KAS @ ${offerPrice.toFixed(6)} (${(discount * 100).toFixed(2)}% below market ${marketPrice})`);
 
-  // 10b. ── Reputation gate ──
-  // Wire existing reputation.js into the autoTaker decision path.
-  // Previously isAutoTradeAllowed() existed but was never called.
+  // 10b. ── Tier-based amount cap (P1 v4, NWT N19.2 Owner 钦定 5/18 自主运营) ──
+  // 真因: pre-v4 reputation gate 0-completed → high risk → fail-closed → autoTaker 0 production fire
+  // (kzc2tgz4cchh 40d/770 broadcast/0 accept). v4: amount-tier + per-peer 24h sybil cap 替 reputation 硬 block.
+  // worst case 100 sybil × $50 = $5k/day exposure, broker treasury (P2) 防.
+  // tier 顺序在 rep check 前 (rep 仅 advisory + dispute-block).
   try {
-    const { assessReputation, isAutoTradeAllowed } = await import('./reputation.js');
-    const myAddr = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(bestRelay)?.address;
-    if (myAddr) {
-      const rep = assessReputation(myAddr, msg._from);
-      const gate = isAutoTradeAllowed(rep);
-      if (!gate.allowed) {
-        console.log(`[autoTaker] REPUTATION BLOCK: ${gate.reason} (peer risk=${rep.risk}) — skipping offer ${offerId.slice(0, 8)}`);
-        // Record a chain event so this decision is audit-visible
-        // Bug NWT-N4 fix 5/18 (KI-12 第 14 次 silent skip): 旧 offerId.slice(0,12) → extexch-1779062837238-X
-        // 12 char 截 "autotake_rep_block_extexch-1779" 所有 extexch- 前缀 offer 共享 txid →
-        // UNIQUE(txid, event_type) silent ignore 后续 → audit trail 丢. Use full offerId.
-        try {
-          const { recordChainEvent } = await import('./chain-event.js');
-          recordChainEvent({
-            txid: `autotake_rep_block_${offerId}`,
-            eventType: 'autotake_reputation_block',
-            payload: JSON.stringify({ offer_id: offerId, peer: msg._from, risk: rep.risk, reason: gate.reason, warnings: rep.warnings }),
-          });
-        } catch (err) { console.warn(`[autoTaker] rep_block audit recordChainEvent err: ${err.message}`); }
-        return;
-      }
-      // Medium risk: halve the effective size cap for this trade
-      if (gate.limitMultiplier && gate.limitMultiplier < 1) {
-        const reducedCap = maxUsdt * gate.limitMultiplier;
-        if (wantAmt > reducedCap) {
-          console.log(`[autoTaker] REPUTATION CAP: peer risk=${rep.risk}, effective cap $${reducedCap.toFixed(2)} < wantAmt $${wantAmt} — skipping`);
-          return;
-        }
-        console.log(`[autoTaker] reputation=${rep.risk} — proceeding with ${(gate.limitMultiplier * 100).toFixed(0)}% limit multiplier`);
-      }
+    const TIER_CAPS = {
+      1: { amount: 10, perPeerCount: 3, perPeerTotal: 5 },
+      2: { amount: 25, perPeerCount: 5, perPeerTotal: 50 },
+      3: { amount: 75, perPeerCount: 20, perPeerTotal: 500 },
+    };
+
+    // 1. peer 数据: age, has_card, completed_count
+    const peerRow = sqlite.prepare(
+      'SELECT discovered_at, card_observed_at FROM identities WHERE address = ?'
+    ).get(msg._from);
+    const completedCount = sqlite.prepare(
+      "SELECT COUNT(*) AS cnt FROM exchange_offers WHERE taker = ? AND protocol_status = 'completed'"
+    ).get(msg._from)?.cnt || 0;
+    const ageMs = peerRow?.discovered_at
+      ? Date.now() - new Date(peerRow.discovered_at).getTime()
+      : 0;
+    const ageDays = ageMs / 86400000;
+    const hasCard = !!peerRow?.card_observed_at;
+
+    // 2. tier determination (v3 OR-condition, NWT N19.2 ack)
+    let tier;
+    if (ageDays >= 30 && completedCount >= 3) tier = 3;
+    else if (ageDays >= 7 || hasCard || completedCount >= 1) tier = 2;
+    else tier = 1;
+    const caps = TIER_CAPS[tier];
+
+    // 3. amount cap check
+    if (wantAmt > caps.amount) {
+      console.log(`[autoTaker] TIER ${tier} AMOUNT CAP: wantAmt $${wantAmt} > $${caps.amount} (peer age=${ageDays.toFixed(1)}d card=${hasCard} completed=${completedCount}) — skipping`);
+      try {
+        const { recordChainEvent } = await import('./chain-event.js');
+        recordChainEvent({
+          txid: `autotake_tier_cap_${offerId}`,
+          eventType: 'autotake_tier_cap',
+          payload: JSON.stringify({ offer_id: offerId, peer: msg._from, tier, wantAmt, cap: caps.amount, ageDays: ageDays.toFixed(1), hasCard, completedCount }),
+        });
+      } catch (err) { console.warn(`[autoTaker] tier_cap audit err: ${err.message}`); }
+      return;
     }
+
+    // 4. per-peer 24h cumulative cap (anti-sybil)
+    const dayStart = new Date().toISOString().slice(0, 10) + 'T00:00:00Z';
+    const peerTakes = sqlite.prepare(
+      "SELECT payload FROM chain_events WHERE event_type = 'autotake_accepted' AND to_address = ? AND observed_at >= ?"
+    ).all(msg._from, dayStart);
+    let peerDayTotal = 0;
+    for (const r of peerTakes) {
+      try {
+        const p = JSON.parse(r.payload);
+        const m = p.want?.match(/^([\d.]+)/);
+        if (m) peerDayTotal += parseFloat(m[1]);
+      } catch {}
+    }
+    if (peerTakes.length >= caps.perPeerCount) {
+      console.log(`[autoTaker] TIER ${tier} PEER 24H COUNT CAP: ${peerTakes.length} ≥ ${caps.perPeerCount} (peer ${msg._from?.slice(-12)}) — sybil防 skipping`);
+      try {
+        const { recordChainEvent } = await import('./chain-event.js');
+        recordChainEvent({
+          txid: `autotake_peer_count_cap_${offerId}`,
+          eventType: 'autotake_peer_count_cap',
+          payload: JSON.stringify({ offer_id: offerId, peer: msg._from, tier, peerDayCount: peerTakes.length, cap: caps.perPeerCount }),
+        });
+      } catch (err) { console.warn(`[autoTaker] peer_count_cap audit err: ${err.message}`); }
+      return;
+    }
+    if (peerDayTotal + wantAmt > caps.perPeerTotal) {
+      console.log(`[autoTaker] TIER ${tier} PEER 24H TOTAL CAP: ${peerDayTotal.toFixed(2)} + ${wantAmt} > $${caps.perPeerTotal} — sybil防 skipping`);
+      try {
+        const { recordChainEvent } = await import('./chain-event.js');
+        recordChainEvent({
+          txid: `autotake_peer_total_cap_${offerId}`,
+          eventType: 'autotake_peer_total_cap',
+          payload: JSON.stringify({ offer_id: offerId, peer: msg._from, tier, peerDayTotal, wantAmt, cap: caps.perPeerTotal }),
+        });
+      } catch (err) { console.warn(`[autoTaker] peer_total_cap audit err: ${err.message}`); }
+      return;
+    }
+
+    console.log(`[autoTaker] TIER ${tier} PASS: peer age=${ageDays.toFixed(1)}d card=${hasCard} completed=${completedCount} wantAmt=$${wantAmt} dayTotal=$${peerDayTotal.toFixed(2)}/${caps.perPeerTotal} count=${peerTakes.length}/${caps.perPeerCount}`);
   } catch (e) {
-    console.error(`[autoTaker] reputation check failed: ${e.message} — proceeding conservatively (block)`);
-    return;  // fail-closed: if rep check errors, don't auto-trade
+    console.error(`[autoTaker] tier check error: ${e.message} — fail-closed skip`);
+    return;
   }
 
   // 11. Mode: approval (default) or auto
