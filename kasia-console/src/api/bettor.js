@@ -951,6 +951,126 @@ export async function registerBettorRoutes(fastify) {
     return reply.send(r);
   });
 
+  // ── r177 Phase 1 prediction_outcome_share asset_type 延伸 broker exchange ──
+  // (Bettor r177/r178/r190/r191 + Owner 5/18 一气呵成 + sub 1 schema 7b1d4b2e6)
+
+  // POST /api/prediction/maker/whitelist/apply — maker stake KAS + Owner approval queue
+  fastify.post('/api/prediction/maker/whitelist/apply', async (request, reply) => {
+    const { relay_node_id, stake_amount_kas, lock_days } = request.body || {};
+    if (!relay_node_id) return reply.code(400).send({ ok: false, error: 'relay_node_id required' });
+    const stake = parseFloat(stake_amount_kas);
+    if (!Number.isFinite(stake) || stake < 100) return reply.code(400).send({ ok: false, error: 'stake_amount_kas ≥ 100 required (Phase 1 bootstrap)' });
+    const days = parseInt(lock_days, 10) || 30;  // default 30d per r177 §c
+    const until = new Date(Date.now() + days * 86400_000).toISOString();
+    try {
+      sqlite.prepare(`INSERT INTO prediction_maker_whitelist (relay_node_id, stake_locked_kas, stake_lock_until, approved_by, approved_at, active) VALUES (?, ?, ?, NULL, CURRENT_TIMESTAMP, 0) ON CONFLICT(relay_node_id) DO UPDATE SET stake_locked_kas = excluded.stake_locked_kas, stake_lock_until = excluded.stake_lock_until`)
+        .run(relay_node_id, stake, until);
+      return reply.send({ ok: true, relay_node_id, stake_locked_kas: stake, stake_lock_until: until, active: 0, note: 'pending Owner approval' });
+    } catch (e) {
+      return reply.code(500).send({ ok: false, error: e.message });
+    }
+  });
+
+  // POST /api/prediction/maker/whitelist/approve — Owner approves maker (sets active=1)
+  fastify.post('/api/prediction/maker/whitelist/approve', async (request, reply) => {
+    const { relay_node_id, owner_relay_id } = request.body || {};
+    if (!relay_node_id) return reply.code(400).send({ ok: false, error: 'relay_node_id required' });
+    const r = sqlite.prepare(`UPDATE prediction_maker_whitelist SET active = 1, approved_by = ?, approved_at = CURRENT_TIMESTAMP WHERE relay_node_id = ?`).run(owner_relay_id || 'owner', relay_node_id);
+    if (r.changes === 0) return reply.code(404).send({ ok: false, error: 'maker not in whitelist (call /apply first)' });
+    return reply.send({ ok: true });
+  });
+
+  // GET /api/prediction/maker/whitelist — list all whitelist entries
+  fastify.get('/api/prediction/maker/whitelist', async (request, reply) => {
+    const rows = sqlite.prepare(`SELECT * FROM prediction_maker_whitelist ORDER BY approved_at DESC`).all();
+    return reply.send({ ok: true, makers: rows });
+  });
+
+  // POST /api/prediction/publish — maker emits prediction outcome offer (Phase 1 simplified: writes
+  // exchange_offers row with asset_type=prediction_outcome_share + outcome_* cols, on-chain broadcast
+  // via existing exchange publish flow defer to Phase 1.5 — Phase 1 stores DB only).
+  fastify.post('/api/prediction/publish', async (request, reply) => {
+    const b = request.body || {};
+    const required = ['maker_relay_id', 'outcome_token_id', 'outcome_condition_id', 'outcome_side', 'outcome_end_date', 'price', 'size_kas'];
+    for (const k of required) {
+      if (b[k] === undefined || b[k] === null || b[k] === '') return reply.code(400).send({ ok: false, error: `missing ${k}` });
+    }
+    // Verify maker whitelisted + stake active
+    const maker = sqlite.prepare(`SELECT relay_node_id, stake_lock_until, active FROM prediction_maker_whitelist WHERE relay_node_id = ? AND active = 1`).get(b.maker_relay_id);
+    if (!maker) return reply.code(403).send({ ok: false, error: 'maker not whitelisted or not Owner-approved' });
+    const lockUntil = new Date(maker.stake_lock_until).getTime();
+    if (!Number.isFinite(lockUntil) || lockUntil <= Date.now()) return reply.code(403).send({ ok: false, error: 'maker stake lock expired' });
+
+    const price = parseFloat(b.price);
+    const sizeKas = parseFloat(b.size_kas);
+    if (!Number.isFinite(price) || price <= 0 || price >= 1) return reply.code(400).send({ ok: false, error: 'price must be in (0, 1)' });
+    if (!Number.isFinite(sizeKas) || sizeKas <= 0) return reply.code(400).send({ ok: false, error: 'size_kas must be positive' });
+
+    const maxDeviation = b.max_deviation_pp != null ? Math.max(2, Math.min(10, parseFloat(b.max_deviation_pp))) : 5;
+    const expiresSecs = b.expires_in_seconds != null ? Math.max(30, Math.min(300, parseInt(b.expires_in_seconds, 10))) : 90;
+    const expiresAt = new Date(Date.now() + expiresSecs * 1000).toISOString();
+    const id = 'ext-pred-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+
+    try {
+      // Phase 1 simplified: stub broadcast_tx_id + market_key + verification (real chain broadcast Phase 1.5)
+      const stubTx = `r177-phase1-stub-${id}`;
+      const marketKey = `${b.outcome_condition_id}:${b.outcome_side}`;
+      const numShares = sizeKas / price;  // KAS / ($/share) = shares
+      sqlite.prepare(`INSERT INTO exchange_offers (
+        id, broadcast_tx_id, message_index, give_asset, give_amount, want_asset, want_amount, maker,
+        verification, protocol_status, is_fully_observed, market_key, expires_at, created_at, updated_at,
+        outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side, outcome_end_date, outcome_oracle_hook, outcome_max_deviation_pp,
+        published_price
+      ) VALUES (?, ?, 0, 'prediction_outcome_share', ?, 'KAS', ?, ?, 'prediction_outcome_match', 'open', 0, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(id, stubTx, String(numShares), String(sizeKas), b.maker_relay_id,
+             marketKey, expiresAt,
+             b.outcome_market_source || 'polymarket', b.outcome_condition_id, b.outcome_token_id, b.outcome_side, b.outcome_end_date,
+             b.outcome_oracle_hook || 'polymarket_uma_mirror', maxDeviation, price);
+      return reply.send({ ok: true, offer_id: id, shares: numShares, want_kas: sizeKas, price, expires_at: expiresAt });
+    } catch (e) {
+      return reply.code(500).send({ ok: false, error: e.message });
+    }
+  });
+
+  // POST /api/prediction/accept/:offer_id — taker accept, calls verifyPredictionMatch
+  fastify.post('/api/prediction/accept/:offer_id', async (request, reply) => {
+    const offerId = request.params.offer_id;
+    const acceptMsg = request.body || {};
+    const offer = sqlite.prepare(`SELECT * FROM exchange_offers WHERE id = ?`).get(offerId);
+    if (!offer) return reply.code(404).send({ ok: false, error: 'offer not found' });
+    if (offer.give_asset !== 'prediction_outcome_share' && offer.want_asset !== 'prediction_outcome_share') return reply.code(400).send({ ok: false, error: 'not a prediction_outcome_share offer' });
+    if (offer.protocol_status !== 'open') return reply.code(409).send({ ok: false, error: `offer status=${offer.protocol_status}, not open` });
+
+    // Normalize to verifier shape (offer.maker_relay_id alias for offer.maker)
+    const offerForVerify = { ...offer, maker_relay_id: offer.maker };
+    const { verifyPredictionMatch } = await import('../services/bettor-prediction-verifier.js');
+    const verify = await verifyPredictionMatch(offerForVerify, acceptMsg);
+    if (!verify.ok) return reply.code(403).send({ ok: false, error: `verify fail: ${verify.reason}` });
+
+    // Phase 1: mark matched. Phase 1.5/sub 4 will use exchange-machine.js transition() for full
+    // cross-chain settle. r177 Phase 1 simplified path doesn't go through exchange-machine yet.
+    // lint-allow-protocol-status-direct: r177-phase1-simplified-pre-exchange-machine-integration
+    sqlite.prepare(`UPDATE exchange_offers SET protocol_status = 'matched', taker = ?, matched_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(acceptMsg.taker_relay_id || acceptMsg.taker || null, offerId);
+    return reply.send({ ok: true, offer_id: offerId, status: 'matched' });
+  });
+
+  // GET /api/prediction/quote-book — list active prediction offers for UI
+  fastify.get('/api/prediction/quote-book', async (request, reply) => {
+    const rows = sqlite.prepare(`
+      SELECT id, maker, give_asset, give_amount, want_asset, want_amount,
+             outcome_token_id, outcome_condition_id, outcome_side, outcome_end_date,
+             outcome_oracle_hook, outcome_max_deviation_pp, published_price,
+             expires_at, created_at, protocol_status
+      FROM exchange_offers
+      WHERE (give_asset = 'prediction_outcome_share' OR want_asset = 'prediction_outcome_share')
+        AND protocol_status = 'open'
+        AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+      ORDER BY created_at DESC LIMIT 50
+    `).all();
+    return reply.send({ ok: true, offers: rows, count: rows.length });
+  });
+
   // ── Stair-step same-entity deadline auditor (Bettor r174 R-COMPETITOR-BLIND-SPOT 治本) ──
   // GET all active stair-step audits — entities with >1 deadline rec
   fastify.get('/api/bettor/stair-step-audit', async (request, reply) => {
