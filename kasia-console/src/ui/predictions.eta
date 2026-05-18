@@ -1253,8 +1253,14 @@
                   <span class="text-[10px] px-1.5 py-0.5 rounded ml-2" :class="r.status === 'active' ? 'bg-green-50 text-green-700' : r.status === 'pending_owner_ack' ? 'bg-amber-50 text-amber-700' : 'bg-gray-50 text-gray-500'" x-text="r.status"></span>
                 </div>
               </template>
-              <div class="text-[10px] text-ink-400 mt-2">
-                <button @click="bettorModalOpen = true; bettorTab = 'protect'" class="text-brand-600 hover:underline">🔍 完整保护 modal →</button>
+              <div class="flex items-center gap-2 mt-2 text-[10px]">
+                <!-- Phase 4a — inline pending ACK button for any rule status='pending_owner_ack' -->
+                <template x-for="r in bettorProtectRules.rules.filter(r => r.status === 'pending_owner_ack')" :key="r.id + ':pos-ack'">
+                  <button @click="ackBettorProtectRule(r)" :disabled="r._acking" class="px-2 py-1 rounded bg-amber-500 hover:bg-amber-600 text-white text-[10px] font-bold disabled:opacity-50">
+                    <span x-text="r._acking ? 'ACK中...' : '⏸ ACK ' + r.market_slug?.slice(0,12)"></span>
+                  </button>
+                </template>
+                <button @click="bettorModalOpen = true; bettorTab = 'protect'" class="text-brand-600 hover:underline ml-auto">🔍 完整保护 modal →</button>
               </div>
             </div>
           </template>
@@ -1281,6 +1287,11 @@
                     <span class="text-[10px] px-1.5 py-0.5 rounded font-bold" :class="a.severity === 'critical' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'" x-text="a.severity === 'critical' ? '🚨' : '⚠'"></span>
                     <span class="flex-1 text-ink-700 truncate" x-text="a.question"></span>
                     <span class="font-medium" :class="a.unrealized_pnl >= 0 ? 'text-green-600' : 'text-red-600'" x-text="'$' + (a.unrealized_pnl || 0).toFixed(2)"></span>
+                  </div>
+                  <!-- Phase 4a — inline approve/reject for adjustment -->
+                  <div class="flex items-center gap-2 mt-1">
+                    <button @click="bettorDecideAdjustment(a.id, 'approve')" class="px-2 py-0.5 rounded bg-red-500 hover:bg-red-600 text-white text-[10px] font-bold">✓ 确认止损 (paper)</button>
+                    <button @click="bettorDecideAdjustment(a.id, 'reject')" class="px-2 py-0.5 rounded bg-warm-200 hover:bg-warm-300 text-ink-700 text-[10px]">✗ 保留</button>
                   </div>
                 </div>
               </template>
@@ -1426,6 +1437,17 @@
                   <span class="tabular-nums font-medium" :class="(d.cum_pnl || 0) >= 0 ? 'text-green-600' : 'text-red-500'" x-text="'$' + (d.cum_pnl || 0).toFixed(2) + ' cum'"></span>
                 </div>
               </template>
+              <!-- Phase 4a — inline mini ascii bar chart (last 7 days cum PnL) -->
+              <div class="mt-3 p-2 bg-warm-50 rounded text-[10px] font-mono">
+                <div class="text-ink-500 mb-1">📈 last 7 days cum PnL</div>
+                <template x-for="d in bettorWinrate.cumulative.slice(-7)" :key="d.day + ':chart'">
+                  <div class="flex items-center gap-1">
+                    <span class="text-ink-400 w-16 truncate" x-text="d.day"></span>
+                    <span class="flex-1 inline-block h-3 rounded" :class="(d.cum_pnl || 0) >= 0 ? 'bg-green-300' : 'bg-red-300'" :style="'width:' + Math.min(Math.abs(d.cum_pnl || 0) / 5, 100) + '%; max-width:80%'"></span>
+                    <span class="tabular-nums w-16 text-right" :class="(d.cum_pnl || 0) >= 0 ? 'text-green-700' : 'text-red-600'" x-text="(d.cum_pnl || 0).toFixed(0)"></span>
+                  </div>
+                </template>
+              </div>
               <div class="text-[10px] text-ink-400 mt-2">
                 <button @click="bettorModalOpen = true; bettorTab = 'winrate'" class="text-brand-600 hover:underline">🔍 完整 chart modal →</button>
               </div>
