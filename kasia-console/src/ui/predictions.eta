@@ -1212,6 +1212,104 @@
     </div>
   </template>
 
+  <!-- r179 Phase 1c — 历史 tab (currentTab === 'history') 3 折叠 sub-section: 持仓快照 / 推荐流水 / 胜率轨迹 (modal still works for full detail) -->
+  <template x-if="currentTab === 'history'">
+    <div class="mb-4" x-init="if (!bettorHistory) loadBettorHistory(); if (!bettorWinrate) loadBettorWinrate(); if (!bettorHistoryRecs) loadBettorHistoryRecs(); if (!bettorRecord) loadBettorRecord()">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-bold text-ink-700">📜 历史</h2>
+        <div class="text-[11px] text-ink-400">Phase 1c — 3 折叠 sub-section, 详情仍 modal</div>
+      </div>
+
+      <!-- (1) 持仓快照 (record tab simplified summary) -->
+      <details class="card mb-3" open>
+        <summary class="text-sm font-semibold text-ink-700 cursor-pointer hover:text-brand-600">💼 持仓快照
+          <span x-show="bettorRecord && bettorRecord.batches" class="text-[10px] text-ink-400 font-normal" x-text="'(' + (bettorRecord.batches?.length || 0) + ' 批次)'"></span>
+        </summary>
+        <div class="mt-2">
+          <template x-if="!bettorRecord">
+            <div class="text-center py-4 text-sm text-ink-400">载入中...</div>
+          </template>
+          <template x-if="bettorRecord && bettorRecord.batches && bettorRecord.batches.length === 0">
+            <div class="text-center py-4 text-sm text-ink-400">暂无已结算推荐</div>
+          </template>
+          <template x-if="bettorRecord && bettorRecord.batches && bettorRecord.batches.length > 0">
+            <div class="space-y-1 text-[11px]">
+              <template x-for="b in bettorRecord.batches.slice(0, 10)" :key="(b.scanned_at || '') + ':history-rec'">
+                <div class="flex items-center justify-between text-ink-600 py-1 border-b border-warm-100">
+                  <span x-text="new Date(b.scanned_at).toLocaleString()"></span>
+                  <span x-text="(b.n_resolved || 0) + ' resolved / ' + (b.hit || 0) + '✓'"></span>
+                  <span class="font-medium" :class="(b.total_realized_pnl || 0) >= 0 ? 'text-green-600' : 'text-red-500'" x-text="'$' + (b.total_realized_pnl || 0).toFixed(2)"></span>
+                </div>
+              </template>
+              <div class="text-[10px] text-ink-400 mt-2">
+                <button @click="bettorModalOpen = true; bettorTab = 'record'" class="text-brand-600 hover:underline">🔍 详情 modal →</button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </details>
+
+      <!-- (2) 推荐流水 (history-recs tab simplified) -->
+      <details class="card mb-3">
+        <summary class="text-sm font-semibold text-ink-700 cursor-pointer hover:text-brand-600">📋 推荐流水
+          <span x-show="bettorHistoryRecs && bettorHistoryRecs.recommendations" class="text-[10px] text-ink-400 font-normal" x-text="'(' + (bettorHistoryRecs.recommendations?.length || 0) + ' 条)'"></span>
+        </summary>
+        <div class="mt-2">
+          <template x-if="!bettorHistoryRecs">
+            <div class="text-center py-4 text-sm text-ink-400">载入中...</div>
+          </template>
+          <template x-if="bettorHistoryRecs && (bettorHistoryRecs.recommendations || []).length > 0">
+            <div class="space-y-1 text-[11px]">
+              <template x-for="r in (bettorHistoryRecs.recommendations || []).slice(0, 10)" :key="r.id + ':history-rec-flow'">
+                <div class="flex items-center justify-between py-1 border-b border-warm-100">
+                  <a :href="'https://polymarket.com/event/' + (r.slug || r.condition_id || '')" target="_blank" rel="noopener" class="flex-1 text-ink-700 hover:text-brand-600 truncate mr-2" x-text="r.question"></a>
+                  <span class="px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap" :class="r.decision === 'YES' ? 'bg-green-100 text-green-700' : r.decision === 'NO' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'" x-text="r.decision"></span>
+                  <span class="ml-2 text-ink-500 tabular-nums" x-text="(r.yes_price * 100).toFixed(0) + '%'"></span>
+                  <span class="ml-2 text-[10px] px-1.5 py-0.5 rounded" :class="r.status === 'accepted' ? 'bg-green-50 text-green-600' : r.status === 'rejected' ? 'bg-red-50 text-red-500' : 'bg-gray-50 text-gray-500'" x-text="r.status"></span>
+                </div>
+              </template>
+              <div class="text-[10px] text-ink-400 mt-2">
+                <button @click="bettorModalOpen = true; bettorTab = 'history-recs'" class="text-brand-600 hover:underline">🔍 完整 list modal →</button>
+              </div>
+            </div>
+          </template>
+          <template x-if="bettorHistoryRecs && (bettorHistoryRecs.recommendations || []).length === 0">
+            <div class="text-center py-4 text-sm text-ink-400">暂无推荐流水</div>
+          </template>
+        </div>
+      </details>
+
+      <!-- (3) 胜率轨迹 (winrate tab simplified summary) -->
+      <details class="card mb-3">
+        <summary class="text-sm font-semibold text-ink-700 cursor-pointer hover:text-brand-600">📈 胜率轨迹
+          <span x-show="bettorWinrate?.cumulative?.length" class="text-[10px] text-ink-400 font-normal" x-text="'(' + ((bettorWinrate.cumulative[bettorWinrate.cumulative.length-1]?.cum_hit_rate || 0) * 100).toFixed(0) + '%, $' + (bettorWinrate.cumulative[bettorWinrate.cumulative.length-1]?.cum_pnl || 0).toFixed(0) + ')'"></span>
+        </summary>
+        <div class="mt-2">
+          <template x-if="!bettorWinrate">
+            <div class="text-center py-4 text-sm text-ink-400">载入中...</div>
+          </template>
+          <template x-if="bettorWinrate && bettorWinrate.cumulative && bettorWinrate.cumulative.length > 0">
+            <div class="space-y-1 text-[11px]">
+              <template x-for="(d, i) in bettorWinrate.cumulative.slice(-7)" :key="d.day + ':winrate'">
+                <div class="flex items-center justify-between py-1 border-b border-warm-100">
+                  <span class="text-ink-600" x-text="d.day"></span>
+                  <span class="tabular-nums" x-text="(d.cum_hit_rate * 100).toFixed(0) + '% 胜率'"></span>
+                  <span class="tabular-nums font-medium" :class="(d.cum_pnl || 0) >= 0 ? 'text-green-600' : 'text-red-500'" x-text="'$' + (d.cum_pnl || 0).toFixed(2) + ' cum'"></span>
+                </div>
+              </template>
+              <div class="text-[10px] text-ink-400 mt-2">
+                <button @click="bettorModalOpen = true; bettorTab = 'winrate'" class="text-brand-600 hover:underline">🔍 完整 chart modal →</button>
+              </div>
+            </div>
+          </template>
+          <template x-if="bettorWinrate && bettorWinrate.cumulative && bettorWinrate.cumulative.length === 0">
+            <div class="text-center py-4 text-sm text-ink-400">暂无胜率数据</div>
+          </template>
+        </div>
+      </details>
+    </div>
+  </template>
+
   <!-- r179 Phase 1b — 我的推荐 tab (currentTab === 'recs') — simplified copy, modal still works as fallback for full ACCEPT/variant -->
   <template x-if="currentTab === 'recs'">
     <div class="mb-4" x-init="if (!bettorRecs) loadBettor()">
