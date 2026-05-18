@@ -1481,8 +1481,26 @@
               <div class="flex items-center justify-between mt-2 text-[10px] text-ink-400">
                 <span x-show="r.end_date" x-text="'到期 ' + new Date(r.end_date).toLocaleDateString()"></span>
                 <span x-show="r.strategy" class="text-[10px] px-1.5 py-0.5 rounded bg-warm-50" x-text="r.strategy"></span>
-                <button @click="bettorModalOpen = true; bettorTab = 'recs'; if (!bettorRecs) loadBettor()" class="btn btn-xs btn-ghost text-[10px] text-brand-600">🔍 详情/下单 →</button>
               </div>
+              <!-- r179 Phase 2b — inline ACCEPT (extracted from modal line 1135) + 查看推理 secondary -->
+              <div class="flex gap-2 mt-2">
+                <button @click="bettorDetail = r" class="flex-1 text-[10px] text-brand-500 hover:text-brand-700 text-left">查看推理 →</button>
+                <button x-show="r.status === 'pending' && (r.decision === 'YES' || r.decision === 'NO') && r.strategy !== 'fossa-stable'"
+                        @click="acceptBettorRec(r)" :disabled="r._accepting"
+                        class="px-3 py-1 rounded text-[10px] font-bold text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                        :class="r.decision === 'YES' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'">
+                  <span x-text="r._accepting ? '下单中...' : '✓ ACCEPT 下单'"></span>
+                </button>
+                <button x-show="r.strategy === 'fossa-stable' && r.status === 'pending_due_diligence'"
+                        @click="bettorModalOpen = true; bettorTab = 'fossa'"
+                        class="px-3 py-1 rounded text-[10px] font-bold bg-orange-500 hover:bg-orange-600 text-white">
+                  ★ fossa final ack →
+                </button>
+                <span x-show="r.status === 'accepted'" class="px-3 py-1 rounded text-[10px] font-bold bg-gray-200 text-gray-600">已下单</span>
+                <span x-show="r.decision === 'SKIP'" class="px-3 py-1 rounded text-[10px] font-bold bg-gray-200 text-gray-500">SKIP</span>
+              </div>
+              <div x-show="r._acceptError" class="mt-1 text-[10px] text-red-500" x-text="'下单失败: ' + (r._acceptError || '')"></div>
+              <div x-show="r._acceptSuccess" class="mt-1 text-[10px] text-green-600" x-text="'✓ 下单成功 ' + (r._acceptSuccess || '')"></div>
             </div>
           </template>
         </div>
