@@ -486,7 +486,9 @@ let _autoTakeLock = false;
  * Default mode is 'approval' — creates a proposal in execution_states for Owner to confirm.
  */
 async function _evaluateAutoTake(offerId, msg) {
-  // NWT N8 probe 5/18 — autoTaker silent post restart 61 dig. 每 return 加 log 定位真因.
+  // NWT N8.1 5/18: autoTaker observability — 12 silent return 各 log gate + context.
+  // 真因 surface: N8 dig 真锁 'discount -0.61%<1.00%' (KAS market dropped 0.040→0.034, ExtClient offer pricing unchanged).
+  // Production keep: silent skip 是 KI-12 复刻 anti-pattern, 不 log 必 dig 1h+; 留 log = Brain/Owner 立见 reason.
   const _p = (gate) => console.log(`[autoTaker.probe] offer=${offerId.slice(0,12)} from=${msg._from?.slice(-12)} EXIT gate=${gate}`);
   console.log(`[autoTaker.entry] offer=${offerId.slice(0,12)} from=${msg._from?.slice(-12)} verification=${msg.verification} give=${msg.give_amount}${msg.give_asset}→${msg.want_amount}${msg.want_asset}`);
   if (_autoTakeLock) { _p('lock'); return; }
