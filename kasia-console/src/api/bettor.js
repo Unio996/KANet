@@ -1047,12 +1047,43 @@ export async function registerBettorRoutes(fastify) {
     const verify = await verifyPredictionMatch(offerForVerify, acceptMsg);
     if (!verify.ok) return reply.code(403).send({ ok: false, error: `verify fail: ${verify.reason}` });
 
-    // Phase 1: mark matched. Phase 1.5/sub 4 will use exchange-machine.js transition() for full
+    // r177 Phase 1 sub 4 — Owner ack gate strategy 分流 (per Bettor r177 §E):
+    //   size_kas < $50-equiv + spread ≤ 2pp → auto-fire OK
+    //   else → require explicit owner_final_ack in body
+    // Pre-computed: KAS price cached via market-data, size_usd = size_kas × KAS_USD
+    let allowAutoFire = false;
+    try {
+      const { getCachedKasPrice } = await import('../services/market-data.js');
+      const kasUsd = getCachedKasPrice() || 0.08;
+      const sizeUsd = parseFloat(offer.want_amount || 0) * kasUsd;
+      // Get fresh gamma for spread check
+      let spreadPp = 99;
+      if (offer.outcome_token_id) {
+        try {
+          const r = await fetch(`https://gamma-api.polymarket.com/markets?clob_token_ids=${encodeURIComponent(offer.outcome_token_id)}`, { signal: AbortSignal.timeout(3000) });
+          if (r.ok) {
+            const m = ((await r.json()) || [])[0];
+            if (m) {
+              const op = JSON.parse(m.outcomePrices || '[]');
+              const currentPrice = parseFloat(offer.outcome_side === 'YES' ? op[0] : op[1]);
+              if (Number.isFinite(currentPrice)) spreadPp = Math.abs(currentPrice - (offer.published_price || 0)) * 100;
+            }
+          }
+        } catch {}
+      }
+      allowAutoFire = sizeUsd < 50 && spreadPp <= 2;
+    } catch {}
+
+    if (!allowAutoFire && !acceptMsg.owner_final_ack) {
+      return reply.code(403).send({ ok: false, error: 'requires explicit owner_final_ack=true in body (size ≥ $50 or spread > 2pp threshold)' });
+    }
+
+    // Phase 1: mark matched. Phase 1.5/sub 5+ will use exchange-machine.js transition() for full
     // cross-chain settle. r177 Phase 1 simplified path doesn't go through exchange-machine yet.
     // lint-allow-protocol-status-direct: r177-phase1-simplified-pre-exchange-machine-integration
     sqlite.prepare(`UPDATE exchange_offers SET protocol_status = 'matched', taker = ?, matched_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
       .run(acceptMsg.taker_relay_id || acceptMsg.taker || null, offerId);
-    return reply.send({ ok: true, offer_id: offerId, status: 'matched' });
+    return reply.send({ ok: true, offer_id: offerId, status: 'matched', auto_fired: allowAutoFire });
   });
 
   // GET /api/prediction/quote-book — list active prediction offers for UI
