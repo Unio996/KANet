@@ -4003,5 +4003,31 @@ export function runMigrations() {
     }
   }
 
+  // v122: P2 broker treasury monitor snapshot table (Owner 自主运营 #3 钦定 5/18).
+  // NWT N19.6 verdict P2 fire. broker 多链多资产动态平衡能力 first step = 数据可见性.
+  // 5min cron snapshot 各链 balance, alert via chain_event 'treasury_alert' (broker 自治, 不 DM Owner).
+  {
+    const exists = sqlite.prepare(
+      "SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name='treasury_snapshot'"
+    ).get();
+    if (!exists.cnt) {
+      sqlite.exec(`
+        CREATE TABLE treasury_snapshot (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          relay_node_id   TEXT NOT NULL,
+          chain           TEXT NOT NULL,
+          asset           TEXT NOT NULL,
+          balance_raw     TEXT NOT NULL,
+          balance_human   REAL NOT NULL,
+          snapshot_at     TEXT NOT NULL DEFAULT (datetime('now')),
+          source          TEXT
+        );
+        CREATE INDEX idx_treasury_snapshot_relay_chain ON treasury_snapshot(relay_node_id, chain, asset, snapshot_at DESC);
+        CREATE INDEX idx_treasury_snapshot_time ON treasury_snapshot(snapshot_at DESC);
+      `);
+      console.log('[migrate] v122: treasury_snapshot 表 + 2 索引 创建 (P2 broker multi-chain balance audit trail).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

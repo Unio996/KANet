@@ -445,6 +445,12 @@ startSeederRefundWorker();
 import { startIntakeWatcher } from './services/broker-intake-watcher.js';
 startIntakeWatcher();
 
+// P2 broker treasury monitor (Owner 5/18 自主运营 #3 钦定 + NWT N19.6 verdict).
+// 5min cron snapshot broker 多链 USDT/USDC/KAS balance, alert via chain_event 'treasury_alert'.
+// 不动钱 (read-only), auto-rebalance 排日 Phase 2.
+import { startTreasuryMonitor } from './services/broker-treasury-monitor.js';
+startTreasuryMonitor();
+
 // J1-3 (Phase E v3 Step 1c, J1 #55 propose + NWT 01:15 ack): _sweepStaleAligning cron 5min
 // — broker-intake-watcher refund tick 仅 process 'awaiting_payment', 'aligning' rows 永不 sweep.
 // J2 Step 1b setConvoStateLock 入口 INSERT 'aligning' row 后必 cleanup pattern.
