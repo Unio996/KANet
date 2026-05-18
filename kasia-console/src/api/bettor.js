@@ -93,11 +93,18 @@ export async function registerBettorRoutes(fastify) {
 
     const rec = sqlite.prepare(`
       SELECT id, relay_node_id, condition_id, slug, question, decision,
-             size_usd, yes_price, end_date, status
+             size_usd, yes_price, end_date, status, strategy, pass_due_diligence
       FROM bettor_recommendations WHERE id = ?
     `).get(recId);
     if (!rec) return reply.code(404).send({ ok: false, error: 'recommendation not found' });
-    if (rec.status !== 'pending') return reply.code(409).send({ ok: false, error: `recommendation status=${rec.status}, not pending` });
+    // Bettor r173 + r178 ack + J1 #249 add — fossa-stable mode 永远 Owner explicit final ack
+    if (rec.strategy === 'fossa-stable' && !request.body?.owner_final_ack) {
+      return reply.code(403).send({ ok: false, error: 'fossa-stable strategy requires explicit owner_final_ack=true in body (LLM timeline blind spot guard)' });
+    }
+    if (rec.status === 'pending_due_diligence' && !request.body?.owner_final_ack) {
+      return reply.code(403).send({ ok: false, error: 'recommendation status=pending_due_diligence requires explicit owner_final_ack=true in body' });
+    }
+    if (rec.status !== 'pending' && rec.status !== 'pending_due_diligence') return reply.code(409).send({ ok: false, error: `recommendation status=${rec.status}, not pending` });
     if (!rec.condition_id) return reply.code(400).send({ ok: false, error: 'recommendation missing condition_id' });
     if (rec.decision !== 'YES' && rec.decision !== 'NO') return reply.code(400).send({ ok: false, error: `decision=${rec.decision} not tradeable` });
 
@@ -163,7 +170,12 @@ export async function registerBettorRoutes(fastify) {
 
     // Mark rec as accepted/filled/failed
     if (orderData.ok || orderData.success) {
-      sqlite.prepare(`UPDATE bettor_recommendations SET status='accepted' WHERE id=?`).run(recId);
+      const isFossaStable = rec.strategy === 'fossa-stable' || rec.status === 'pending_due_diligence';
+      if (isFossaStable) {
+        sqlite.prepare(`UPDATE bettor_recommendations SET status='accepted', owner_final_ack_at=CURRENT_TIMESTAMP WHERE id=?`).run(recId);
+      } else {
+        sqlite.prepare(`UPDATE bettor_recommendations SET status='accepted' WHERE id=?`).run(recId);
+      }
       return reply.send({
         ok: true,
         recommendation_id: recId,
@@ -907,5 +919,35 @@ export async function registerBettorRoutes(fastify) {
     const r = sqlite.prepare(`DELETE FROM event_calendar WHERE id = ?`).run(idNum);
     console.log(`[bettor-api] event_calendar delete id=${idNum} changes=${r.changes}`);
     return reply.send({ ok: true, id: idNum, removed: r.changes });
+  });
+
+  // ── Live News Inject (Owner 手动 feed 实时舆情 — fossa-stable Bettor r173 + J1 #249 add effective_until) ──
+  fastify.get('/api/bettor/live-news-inject', async (request, reply) => {
+    const rows = sqlite.prepare(`SELECT * FROM bettor_live_news_inject WHERE active = 1 AND effective_until > CURRENT_TIMESTAMP ORDER BY injected_at DESC`).all();
+    return reply.send({ ok: true, injects: rows });
+  });
+
+  fastify.post('/api/bettor/live-news-inject', async (request, reply) => {
+    const b = request.body || {};
+    if (!b.inject_text || !String(b.inject_text).trim()) return reply.code(400).send({ ok: false, error: 'inject_text required' });
+    const hours = parseFloat(b.effective_hours);
+    const effectiveHours = Number.isFinite(hours) && hours > 0 && hours <= 168 ? hours : 24;  // default 24h, max 7d
+    const id = (await import('node:crypto')).randomUUID();
+    const until = new Date(Date.now() + effectiveHours * 3600_000).toISOString();
+    sqlite.prepare(`INSERT INTO bettor_live_news_inject (id, inject_text, injected_by, effective_until) VALUES (?, ?, ?, ?)`).run(id, String(b.inject_text).slice(0, 4000), b.injected_by || 'owner', until);
+    return reply.send({ ok: true, id, effective_until: until });
+  });
+
+  fastify.delete('/api/bettor/live-news-inject/:id', async (request, reply) => {
+    const r = sqlite.prepare(`UPDATE bettor_live_news_inject SET active = 0 WHERE id = ?`).run(request.params.id);
+    if (r.changes === 0) return reply.code(404).send({ ok: false, error: 'inject not found' });
+    return reply.send({ ok: true });
+  });
+
+  // ── Fossa-stable scanner manual tick (debug + first-time bootstrap) ──
+  fastify.post('/api/bettor/fossa-stable/tick', async (request, reply) => {
+    const { runFossaStableScan } = await import('../services/bettor-fossa-stable-scanner.js');
+    const r = await runFossaStableScan();
+    return reply.send(r);
   });
 }

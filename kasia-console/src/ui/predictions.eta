@@ -223,6 +223,15 @@
               <span class="text-[10px] text-ink-500" x-text="'(' + watchRules.filter(r => r.status === 'active').length + ' 守)'"></span>
             </template>
           </button>
+          <!-- Owner 5/17 钦定 + Bettor r173/r178 + R-COMPETITOR-BLIND-SPOT 治本 — fossa-stable mode 强制尽调 + Owner final ack -->
+          <button @click="bettorTab = 'fossa'; loadFossaStable()"
+                  :class="bettorTab === 'fossa' ? 'border-b-2 border-orange-500 text-orange-700 font-medium' : 'text-ink-400 hover:text-ink-600'"
+                  class="px-4 py-2 text-sm flex items-center gap-1">
+            ★ Fossa-Stable
+            <template x-if="fossaRecs && fossaRecs.length">
+              <span class="text-[10px] text-orange-600 font-medium" x-text="'(' + fossaRecs.filter(r => r.status === 'pending_due_diligence').length + ' ⏸)'"></span>
+            </template>
+          </button>
         </div>
 
         <!-- Tab content: 调仓建议 (Phase 3e-1 止损队列) -->
@@ -867,6 +876,97 @@
                     </div>
                     <div x-show="r.last_alert_label" class="mt-1 text-[10px] text-red-600">
                       🚨 last alert: <span x-text="r.last_alert_label"></span> @ <span x-text="r.last_alert_at ? new Date(r.last_alert_at).toLocaleString() : '-'"></span>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <!-- Tab content: ★ Fossa-Stable mode (Owner 5/17 钦定 + Bettor r173/r178 + R-COMPETITOR-BLIND-SPOT 治本) -->
+        <template x-if="bettorTab === 'fossa'">
+          <div>
+            <div class="flex items-center justify-between mb-3">
+              <div class="text-xs text-ink-500">
+                ★ <span class="font-medium text-orange-700">Fossa-Stable</span> — 5-15% upside · ≤15d settle · ≥$50k vol/liq · LLM 二审强制 · <span class="text-red-600 font-medium">Owner final ack 才 fire</span> (autoTaker 永不动)
+              </div>
+              <button @click="fossaTickNow()" :disabled="fossaTicking" class="btn btn-sm btn-secondary text-[11px]">
+                <span x-text="fossaTicking ? '扫中...' : '立即扫'"></span>
+              </button>
+            </div>
+
+            <!-- Live News Inject (Owner 手动 feed 实时舆情, J1 #249 add effective_until 24h default) -->
+            <div class="card mb-3 border-l-4 border-l-orange-400">
+              <h3 class="text-sm font-bold mb-2">📰 Live News Inject (Owner 手动 feed 实时舆情)</h3>
+              <div class="text-[11px] text-ink-500 mb-2">
+                LLM 训练数据有 timeline blind spot. paste 最近 24h 关键新闻 (= 政经事件 / 卡塔尔会谈 / 内阁倒戈 etc) 给 scanner LLM 二审用. 默认 24h 后失效.
+              </div>
+              <textarea x-model="liveNewsInjectText" class="input input-xs w-full" rows="3" placeholder="例: 5/14 Wes Streeting 辞职 / 5/16 80+ Labour 后座议员签名 / Burnham 6/18 补选 NEC 批准 ..."></textarea>
+              <div class="flex items-center gap-2 mt-1">
+                <input type="number" x-model.number="liveNewsHours" class="input input-xs w-20" placeholder="24">
+                <span class="text-[10px] text-ink-400">小时后失效 (max 168h = 7d)</span>
+                <button @click="liveNewsSubmit()" :disabled="liveNewsSubmitting" class="btn btn-sm btn-primary text-[11px]">
+                  <span x-text="liveNewsSubmitting ? '保存中...' : '+ 加 inject'"></span>
+                </button>
+              </div>
+              <!-- Active inject list -->
+              <template x-if="liveNewsActive && liveNewsActive.length">
+                <div class="mt-2 space-y-1">
+                  <template x-for="n in liveNewsActive" :key="n.id">
+                    <div class="text-[10px] bg-warm-50 p-2 rounded flex items-start gap-2">
+                      <div class="flex-1">
+                        <div class="text-ink-700" x-text="n.inject_text.slice(0, 200) + (n.inject_text.length > 200 ? '...' : '')"></div>
+                        <div class="text-ink-400">injected by <span x-text="n.injected_by"></span> @ <span x-text="new Date(n.injected_at).toLocaleString()"></span> · expires <span x-text="new Date(n.effective_until).toLocaleString()"></span></div>
+                      </div>
+                      <button @click="liveNewsDelete(n.id)" class="text-red-500 text-xs">✗</button>
+                    </div>
+                  </template>
+                </div>
+              </template>
+            </div>
+
+            <!-- Fossa-stable recs list -->
+            <template x-if="!fossaRecs">
+              <div class="card text-center text-ink-400 py-8">载入中...</div>
+            </template>
+            <template x-if="fossaRecs && fossaRecs.length === 0">
+              <div class="card text-center text-ink-400 py-8">
+                <div>暂无 fossa-stable 推荐</div>
+                <div class="text-[11px] mt-1">1h cron 自动扫. 点 "立即扫" 现在 trigger 一次.</div>
+              </div>
+            </template>
+            <template x-if="fossaRecs && fossaRecs.length > 0">
+              <div class="space-y-2">
+                <template x-for="r in fossaRecs" :key="r.id">
+                  <div class="card card-compact border-l-4" :class="r.status === 'pending_due_diligence' ? 'border-l-orange-500 bg-orange-50/30' : (r.status === 'accepted' ? 'border-l-green-500' : 'border-l-gray-300 opacity-60')">
+                    <div class="flex items-start justify-between gap-2 mb-1">
+                      <div class="flex-1 min-w-0">
+                        <a :href="'https://polymarket.com/event/' + (r.slug || '')" target="_blank" rel="noopener" class="text-sm font-medium text-ink-700 hover:text-brand-600 block truncate" x-text="r.question || '(no title)'"></a>
+                        <div class="text-[11px] text-ink-500 mt-0.5">
+                          <span :class="r.decision === 'YES' ? 'text-green-700 font-medium' : 'text-red-700 font-medium'" x-text="'BUY ' + r.decision"></span> ·
+                          <span x-text="'$' + (r.yes_price * 100).toFixed(1) + '%'"></span> ·
+                          edge <span class="font-medium" x-text="(r.edge || 0).toFixed(1) + '%'"></span> ·
+                          size $<span x-text="r.size_usd"></span> ·
+                          settle <span x-text="r.end_date?.slice(0, 10)"></span>
+                        </div>
+                      </div>
+                      <span class="text-[10px] px-2 py-1 rounded font-medium whitespace-nowrap" :class="r.status === 'pending_due_diligence' ? 'bg-orange-200 text-orange-800' : (r.status === 'accepted' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500')" x-text="r.status"></span>
+                    </div>
+                    <div x-show="r.status === 'pending_due_diligence'" class="mt-2 pt-2 border-t border-orange-200">
+                      <div class="text-[10px] text-orange-700 mb-1">⚠ Owner 必 final ack — LLM timeline blind spot 不可靠. 扫单子前请独立 verify.</div>
+                      <div class="flex items-center gap-2">
+                        <button @click="fossaOwnerAck(r)" :disabled="r._acking" class="btn btn-sm bg-orange-500 hover:bg-orange-600 text-white text-[11px] px-3 py-1">
+                          <span x-text="r._acking ? '下单中...' : '★ Owner final ack (fire)'"></span>
+                        </button>
+                        <button @click="fossaReject(r)" class="btn btn-sm bg-warm-200 hover:bg-warm-300 text-ink-700 text-[11px] px-3 py-1">
+                          ✗ 拒绝 (不下单)
+                        </button>
+                        <span x-show="r._ackError" class="text-[10px] text-red-500" x-text="r._ackError"></span>
+                      </div>
+                    </div>
+                    <div x-show="r.owner_final_ack_at" class="mt-1 text-[10px] text-green-600">
+                      ✓ Owner final ack @ <span x-text="new Date(r.owner_final_ack_at).toLocaleString()"></span>
                     </div>
                   </div>
                 </template>
@@ -1716,6 +1816,14 @@ function predictionsPage() {
     watchRules: null,
     watcherTicking: false,
     watchSubmitting: false,
+
+    // Owner 5/17 钦定 + Bettor r173/r178 — ★ Fossa-stable mode
+    fossaRecs: null,
+    fossaTicking: false,
+    liveNewsInjectText: '',
+    liveNewsHours: 24,
+    liveNewsActive: null,
+    liveNewsSubmitting: false,
     watchAdd: { show: false, relay_node_id: '', token_id: '', market_title: '', outcome: 'Yes', current_size: 0, entry_avg_price: 0, thresholds: [
       { label: 'strong_yes', op: 'gte', price: 0.55, sell_pct: 60, action: 'sell 60% lock profit' },
       { label: 'mild_yes',   op: 'gte', price: 0.45, sell_pct: 30, action: 'sell 30% partial' },
@@ -2219,6 +2327,92 @@ function predictionsPage() {
         await fetch('/api/predictions/watch-rules/' + id, { method: 'DELETE' });
         await this.loadWatchRules();
       } catch (e) { console.warn('[watcher] delete fail:', e.message); }
+    },
+
+    // ── Fossa-Stable mode (Owner 5/17 + Bettor r173/r178) ──
+    async loadFossaStable() {
+      try {
+        const url = '/api/bettor/recommendations/history?days=7&limit=200' + (this.selectedAgent ? '&relay_node_id=' + this.selectedAgent : '');
+        const [recsRes, newsRes] = await Promise.all([
+          fetch(url).then(r => r.json()).catch(() => ({})),
+          fetch('/api/bettor/live-news-inject').then(r => r.json()).catch(() => ({})),
+        ]);
+        const allRecs = recsRes?.recommendations || [];
+        const fossa = allRecs.filter(r => r.strategy === 'fossa-stable');
+        fossa.forEach(r => { r._acking = false; r._ackError = null; });
+        this.fossaRecs = fossa;
+        this.liveNewsActive = newsRes?.injects || [];
+      } catch (e) {
+        console.warn('[fossa] load fail:', e.message);
+        this.fossaRecs = [];
+        this.liveNewsActive = [];
+      }
+    },
+
+    async fossaTickNow() {
+      this.fossaTicking = true;
+      try {
+        await fetch('/api/bettor/fossa-stable/tick', { method: 'POST' });
+        await this.loadFossaStable();
+      } catch (e) {
+        alert('fossa tick fail: ' + e.message);
+      } finally {
+        this.fossaTicking = false;
+      }
+    },
+
+    async liveNewsSubmit() {
+      if (!this.liveNewsInjectText.trim()) { alert('inject_text 必填'); return; }
+      this.liveNewsSubmitting = true;
+      try {
+        const res = await fetch('/api/bettor/live-news-inject', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ inject_text: this.liveNewsInjectText, effective_hours: this.liveNewsHours || 24 }),
+        });
+        const data = await res.json();
+        if (!data.ok) { alert('保存失败: ' + (data.error || 'unknown')); return; }
+        this.liveNewsInjectText = '';
+        await this.loadFossaStable();
+      } catch (e) {
+        alert('保存 fail: ' + e.message);
+      } finally {
+        this.liveNewsSubmitting = false;
+      }
+    },
+
+    async liveNewsDelete(id) {
+      if (!confirm('删除该 inject?')) return;
+      try {
+        await fetch('/api/bettor/live-news-inject/' + id, { method: 'DELETE' });
+        await this.loadFossaStable();
+      } catch (e) { console.warn('[live-news] delete fail:', e.message); }
+    },
+
+    async fossaOwnerAck(rec) {
+      const confirmed = confirm(`★ Owner final ack — fire ${rec.decision} @ $${rec.yes_price?.toFixed(3)} size $${rec.size_usd}?\n\nMarket: ${rec.question}\n\nLLM timeline blind spot 提醒: 你独立 verify 过 catalysts 了吗?`);
+      if (!confirmed) return;
+      rec._acking = true; rec._ackError = null;
+      try {
+        const res = await fetch('/api/bettor/recommendation/' + rec.id + '/accept', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ owner_final_ack: true }),
+        });
+        const data = await res.json();
+        if (!data.ok && !data.success) { rec._ackError = data.error || 'unknown error'; return; }
+        await this.loadFossaStable();
+      } catch (e) {
+        rec._ackError = e.message;
+      } finally {
+        rec._acking = false;
+      }
+    },
+
+    async fossaReject(rec) {
+      if (!confirm('拒绝该推荐 (= mark status=rejected 不下单)?')) return;
+      try {
+        await fetch('/api/bettor/recommendation/' + rec.id + '/reject', { method: 'POST' }).catch(() => {});
+        await this.loadFossaStable();
+      } catch (e) { console.warn('[fossa] reject fail:', e.message); }
     },
 
     async deleteBettorProtectRule(rule) {
