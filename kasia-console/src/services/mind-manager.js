@@ -1019,17 +1019,9 @@ export function startScheduler() {
 
   console.log(`[mind-manager] Price monitor active: ±${_priceThresholdPct}%`);
 
-  // ── Order Timeout Monitor ──
-  setInterval(async () => {
-    try {
-      // NWT N14 Phase β Step 2 sub#1 (5/18 Owner 钦定): OTC mm_orders 全清.
-      // 3 OTC-only sweeper 全删: (a) accepted timeout broadcast (b) execution_states approval timeout
-      // (c) dispute escalation. exchange-machine.js 有 own timeout/dispute 处理. OTC mm_orders ALL-TIME 4 row
-      // 0 production completed, sweeper 永远 0 row.
-      const { expireTimedOut } = await import('../services/order-machine.js');
-      expireTimedOut(); // order-machine 内部 OTC sweeper, sub#3 一并清
-    } catch {}
-  }, 60_000); // check every minute
+  // NWT N14.5 Phase β Step 2 sub#3b (5/18 Owner 钦定): OTC order timeout monitor 全删.
+  // OTC mm_orders 表 0 production caller (sub#5 v120 DROP 紧随). exchange-machine.js 有 own timeout/dispute 处理.
+  // order-machine.js 整文件删 (sub#3b same commit).
 }
 
 /**
