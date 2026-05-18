@@ -16,6 +16,16 @@ import { sqlite } from '../db/client.js';
 import { transition } from './exchange-machine.js';
 import { randomUUID } from 'node:crypto';
 
+// NWT N15 P0 5/18: kaspa_tx_log.observed_at 存 ISO+Z format ('2026-05-18T05:55:14.241Z'),
+// 旧 .replace(' ','T') + 'Z' 对 ISO+Z 输入产生 ...ZZ 双 Z → invalid Date → NaN → Bug Y 时间窗 guard fail.
+// 真后果: 陈年 TX (2hr+ 前) 误 match 新 escrow, broker 接旧 1 KAS 当 SELL pay (违 strict matching).
+// 修法: 统一 helper, normalize 输入 (含 ' '/T 分隔, Z suffix 已存与否). KI [[feedback_audit_sql_datetime_format]] 第 N+1 次复刻.
+function _parseDbTs(s) {
+  if (!s) return NaN;
+  const iso = s.includes('T') ? s : s.replace(' ', 'T');
+  return new Date(iso.endsWith('Z') ? iso : iso + 'Z').getTime();
+}
+
 const TICK_MS = 60_000;
 const REFUND_TICK_MS = 5 * 60_000;
 const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';  // Trader-B
@@ -625,10 +635,10 @@ export async function intakeKaspaEscrowTick() {
     // 真测 cascade: AT-05 50 KAS @13:12 (no quote) → AT-02 quote 50.0 @13:16 → watcher 13:17 错 match AT-05 历史 inflow
     // → AT-02 真 49.5 KAS @13:?? silently absorbed (-1% miss), no escrow row created, NWT 49.5 KAS lost.
     // 修: 限 inflow tx.observed_at >= escrow.created_at (quote 必先于 inflow 才能 match, 5s clock skew tolerance).
-    const escrowCreatedMs = new Date(e.created_at.replace(' ', 'T') + 'Z').getTime();
+    const escrowCreatedMs = _parseDbTs(e.created_at);
     // FIFO match by amount within ±0.5% tolerance (含 quote_seq noise) AND tx.observed_at >= escrow.created_at - 5s skew
     const tx = inboundTxs.find(t => {
-      const txMs = new Date(t.observed_at.replace(' ', 'T') + 'Z').getTime();
+      const txMs = _parseDbTs(t.observed_at);
       if (txMs < escrowCreatedMs - 5000) return false;  // Bug Y: historical orphan inflow 前于 quote 创建, skip
       const amt = parseFloat(t.amount);
       return Math.abs(amt - expectedAmount) / expectedAmount <= ESCROW_KAS_TOLERANCE_PCT;
@@ -692,9 +702,9 @@ export async function intakeKaspaEscrowTick() {
       const matchedTxIds = new Set();
       for (const e of pending) {
         const exp = parseFloat(e.amount_quoted);
-        const escMs = new Date(e.created_at.replace(' ', 'T') + 'Z').getTime();
+        const escMs = _parseDbTs(e.created_at);
         const tx = inboundTxs.find(t => {
-          const txMs = new Date(t.observed_at.replace(' ', 'T') + 'Z').getTime();
+          const txMs = _parseDbTs(t.observed_at);
           if (txMs < escMs - 5000) return false;  // Bug Y mirror: skip historical
           return Math.abs(parseFloat(t.amount) - exp) / exp <= ESCROW_KAS_TOLERANCE_PCT;
         });
