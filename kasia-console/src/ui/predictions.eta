@@ -1212,6 +1212,125 @@
     </div>
   </template>
 
+  <!-- r179 Phase 1d.a — 持仓 tab (currentTab === 'positions') 4 折叠 sub: 持仓保护 / 调仓建议 / Watcher / 活跃持仓 (modal still works as fallback).
+       NOTE: Bettor r186 spec "杀 modal" deferred to Phase 1d.b (post Owner full verify all 4 tabs work + Sophie 决策 stable).
+       Phase 1d.a additive only: 持仓 tab content added, modal preserved for fallback drilldown. -->
+  <template x-if="currentTab === 'positions'">
+    <div class="mb-4" x-init="if (!bettorProtectRules) loadBettorProtectRules(); if (!bettorAdjustments) loadBettorAdjustments(); if (!watchRules) loadWatchRules()">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-bold text-ink-700">💼 持仓</h2>
+        <div class="text-[11px] text-ink-400">Phase 1d.a — 4 折叠 sub-section, 详情仍 modal (1d.b will 杀 modal post-verify)</div>
+      </div>
+
+      <!-- (1) 🛡 持仓保护 (protect rules summary) -->
+      <details class="card mb-3" open>
+        <summary class="text-sm font-semibold text-ink-700 cursor-pointer hover:text-brand-600">🛡 持仓保护
+          <span x-show="bettorProtectRules && bettorProtectRules.rules" class="text-[10px] text-ink-400 font-normal" x-text="'(' + (bettorProtectRules.rules.filter(r => r.status === 'pending_owner_ack').length) + '⏸ + ' + (bettorProtectRules.rules.filter(r => r.status === 'active').length) + '✓)'"></span>
+        </summary>
+        <div class="mt-2">
+          <template x-if="!bettorProtectRules">
+            <div class="text-center py-4 text-sm text-ink-400">载入中...</div>
+          </template>
+          <template x-if="bettorProtectRules && bettorProtectRules.rules && bettorProtectRules.rules.length === 0">
+            <div class="text-center py-4 text-sm text-ink-400">暂无保护规则</div>
+          </template>
+          <template x-if="bettorProtectRules && bettorProtectRules.rules && bettorProtectRules.rules.length > 0">
+            <div class="space-y-1 text-[11px]">
+              <template x-for="r in bettorProtectRules.rules.slice(0, 10)" :key="r.id + ':pos-protect'">
+                <div class="flex items-center justify-between py-1 border-b border-warm-100">
+                  <span class="flex-1 text-ink-700 truncate" x-text="r.market_slug + ' ' + r.side"></span>
+                  <span class="text-ink-500 tabular-nums" x-text="(r.current_size || 0).toFixed(0) + ' sh @ $' + (r.entry_avg_price || 0).toFixed(3)"></span>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded ml-2" :class="r.status === 'active' ? 'bg-green-50 text-green-700' : r.status === 'pending_owner_ack' ? 'bg-amber-50 text-amber-700' : 'bg-gray-50 text-gray-500'" x-text="r.status"></span>
+                </div>
+              </template>
+              <div class="text-[10px] text-ink-400 mt-2">
+                <button @click="bettorModalOpen = true; bettorTab = 'protect'" class="text-brand-600 hover:underline">🔍 完整保护 modal →</button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </details>
+
+      <!-- (2) 💡 调仓建议 (adjustment queue summary) -->
+      <details class="card mb-3">
+        <summary class="text-sm font-semibold text-ink-700 cursor-pointer hover:text-brand-600">💡 调仓建议
+          <span x-show="bettorAdjustments?.count" class="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700 font-bold" x-text="bettorAdjustments.count"></span>
+        </summary>
+        <div class="mt-2">
+          <template x-if="!bettorAdjustments">
+            <div class="text-center py-4 text-sm text-ink-400">载入中...</div>
+          </template>
+          <template x-if="bettorAdjustments && (bettorAdjustments.adjustments || []).length === 0">
+            <div class="text-center py-4 text-sm text-ink-400">暂无调仓建议</div>
+          </template>
+          <template x-if="bettorAdjustments && (bettorAdjustments.adjustments || []).length > 0">
+            <div class="space-y-1 text-[11px]">
+              <template x-for="a in (bettorAdjustments.adjustments || []).slice(0, 5)" :key="a.id + ':pos-adj'">
+                <div class="py-1 border-b border-warm-100">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[10px] px-1.5 py-0.5 rounded font-bold" :class="a.severity === 'critical' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'" x-text="a.severity === 'critical' ? '🚨' : '⚠'"></span>
+                    <span class="flex-1 text-ink-700 truncate" x-text="a.question"></span>
+                    <span class="font-medium" :class="a.unrealized_pnl >= 0 ? 'text-green-600' : 'text-red-600'" x-text="'$' + (a.unrealized_pnl || 0).toFixed(2)"></span>
+                  </div>
+                </div>
+              </template>
+              <div class="text-[10px] text-ink-400 mt-2">
+                <button @click="bettorModalOpen = true; bettorTab = 'adjust'" class="text-brand-600 hover:underline">🔍 完整调仓 modal →</button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </details>
+
+      <!-- (3) 💰 阈值 Watcher (active rules + last alerts) -->
+      <details class="card mb-3" :open="watchRules && watchRules.some(r => r.last_alert_label)">
+        <summary class="text-sm font-semibold text-ink-700 cursor-pointer hover:text-brand-600">💰 阈值 Watcher
+          <span x-show="watchRules && watchRules.length" class="text-[10px] text-ink-400 font-normal" x-text="'(' + watchRules.filter(r => r.status === 'active').length + ' 守' + (watchRules.some(r => r.last_alert_label) ? ' · 🚨 alert active' : '') + ')'"></span>
+        </summary>
+        <div class="mt-2">
+          <template x-if="!watchRules">
+            <div class="text-center py-4 text-sm text-ink-400">载入中...</div>
+          </template>
+          <template x-if="watchRules && watchRules.length === 0">
+            <div class="text-center py-4 text-sm text-ink-400">暂无 watcher rule</div>
+          </template>
+          <template x-if="watchRules && watchRules.length > 0">
+            <div class="space-y-1 text-[11px]">
+              <template x-for="r in watchRules" :key="r.id + ':pos-watch'">
+                <div class="py-1 border-b border-warm-100" :class="r.last_alert_label ? 'bg-red-50/30 -mx-2 px-2' : ''">
+                  <div class="flex items-center justify-between">
+                    <span class="flex-1 text-ink-700 truncate" x-text="r.market_title"></span>
+                    <span class="text-ink-500 tabular-nums" x-text="(r.current_size || 0) + ' sh @ entry $' + (r.entry_avg_price || 0).toFixed(3)"></span>
+                    <span class="ml-2 text-ink-600 tabular-nums" x-text="'now $' + (r.last_check_price ?? 0).toFixed(3)"></span>
+                  </div>
+                  <div x-show="r.last_alert_label" class="text-[10px] text-red-600 mt-0.5">
+                    🚨 last alert: <span class="font-bold" x-text="r.last_alert_label"></span> @ <span x-text="r.last_alert_at ? new Date(r.last_alert_at).toLocaleString() : '-'"></span>
+                  </div>
+                </div>
+              </template>
+              <div class="text-[10px] text-ink-400 mt-2">
+                <button @click="bettorModalOpen = true; bettorTab = 'watcher'" class="text-brand-600 hover:underline">🔍 完整 Watcher modal →</button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </details>
+
+      <!-- (4) 📊 活跃持仓 — link to 外 active-positions-section (line 1473) which Owner can toggle via 我的持仓 button -->
+      <details class="card mb-3">
+        <summary class="text-sm font-semibold text-ink-700 cursor-pointer hover:text-brand-600">📊 活跃持仓
+          <span class="text-[10px] text-ink-400 font-normal">(use 我的持仓 button at top of page for full Polymarket positions panel)</span>
+        </summary>
+        <div class="mt-2">
+          <div class="text-[11px] text-ink-500">
+            完整 active 持仓 panel (Polymarket positions + redeem + sell + history) 现 在 page 下方 active-positions-section.
+            <button @click="showPositions = true; setTimeout(() => document.querySelector('.active-positions-section')?.scrollIntoView({ behavior: 'smooth' }), 50)" class="text-brand-600 hover:underline ml-1">🔍 展开 + scroll →</button>
+          </div>
+        </div>
+      </details>
+    </div>
+  </template>
+
   <!-- r179 Phase 1c — 历史 tab (currentTab === 'history') 3 折叠 sub-section: 持仓快照 / 推荐流水 / 胜率轨迹 (modal still works for full detail) -->
   <template x-if="currentTab === 'history'">
     <div class="mb-4" x-init="if (!bettorHistory) loadBettorHistory(); if (!bettorWinrate) loadBettorWinrate(); if (!bettorHistoryRecs) loadBettorHistoryRecs(); if (!bettorRecord) loadBettorRecord()">
