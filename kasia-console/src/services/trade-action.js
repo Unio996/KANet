@@ -80,9 +80,10 @@ export function gateTradeAction(orderId, action, source, agentAddress, opts = {}
   }
 
   // ── agent 和 peer 需要读 mode ──
-  const order = orderId
-    ? sqlite.prepare('SELECT * FROM mm_orders WHERE id = ?').get(orderId)
-    : null;
+  // NWT N14 Phase β Step 2 sub#2 (5/18 OTC deprecated): mm_orders read 删.
+  // gateTradeAction 是 OTC-only path (accept_order / pay_usdt / verify_payment / send_kas / publish_order / cancel_order),
+  // 现 routes 全 410 Gone, 6 OTC handler audit 1 week 后删. order = null → 下游 mode 走 agent default.
+  const order = null;
 
   const mode = order?.mode || _getAgentTradeMode(agentAddress) || 'manual';
 

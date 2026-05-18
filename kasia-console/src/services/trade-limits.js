@@ -40,16 +40,25 @@ export function getDailyUsage(agentAddress) {
   todayStart.setHours(0, 0, 0, 0);
   const since = todayStart.toISOString();
 
+  // NWT N14 Phase β Step 2 sub#2 (5/18 OTC deprecated): mm_orders read → exchange_offers.
+  // Schema 转: kas_amount/usdt_amount 从 give/want_asset 抽, status → protocol_status.
+  // agent_address 在 exchange_offers 是 maker (broker = maker pattern).
   const kas = sqlite.prepare(`
-    SELECT COALESCE(SUM(kas_amount), 0) as total
-    FROM mm_orders
-    WHERE agent_address = ? AND created_at >= ? AND status NOT IN ('cancelled', 'expired')
+    SELECT COALESCE(SUM(
+      CASE WHEN UPPER(give_asset) = 'KAS' THEN CAST(give_amount AS REAL)
+           WHEN UPPER(want_asset) = 'KAS' THEN CAST(want_amount AS REAL) ELSE 0 END
+    ), 0) as total
+    FROM exchange_offers
+    WHERE maker = ? AND created_at >= ? AND protocol_status NOT IN ('cancelled', 'expired', 'timed_out', 'refunded', 'failed')
   `).get(agentAddress, since);
 
   const usdt = sqlite.prepare(`
-    SELECT COALESCE(SUM(usdt_amount), 0) as total
-    FROM mm_orders
-    WHERE agent_address = ? AND created_at >= ? AND status NOT IN ('cancelled', 'expired')
+    SELECT COALESCE(SUM(
+      CASE WHEN UPPER(give_asset) LIKE 'USD%' THEN CAST(give_amount AS REAL)
+           WHEN UPPER(want_asset) LIKE 'USD%' THEN CAST(want_amount AS REAL) ELSE 0 END
+    ), 0) as total
+    FROM exchange_offers
+    WHERE maker = ? AND created_at >= ? AND protocol_status NOT IN ('cancelled', 'expired', 'timed_out', 'refunded', 'failed')
   `).get(agentAddress, since);
 
   return { kas: kas.total, usdt: usdt.total };

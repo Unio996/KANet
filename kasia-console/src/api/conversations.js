@@ -805,18 +805,23 @@ export async function registerConversationRoutes(fastify) {
     for (const m of msgSent) { if (!msgMap[m.peer]) msgMap[m.peer] = {}; msgMap[m.peer].sent = m.c; }
     for (const m of msgRecv) { if (!msgMap[m.peer]) msgMap[m.peer] = {}; msgMap[m.peer].received = m.c; }
 
-    // Get trade stats per peer
+    // Get trade stats per peer (NWT N14 Phase β Step 2 sub#2 5/18: mm_orders → exchange_offers)
+    // peer_address: 另一方 (maker=me → taker, taker=me → maker). kas_amount: 从 give/want_asset 抽.
     const tradeStats = sqlite.prepare(`
-      SELECT peer_address,
+      SELECT
+        CASE WHEN maker = ? THEN taker ELSE maker END AS peer_address,
         COUNT(*) as trade_count,
-        SUM(CASE WHEN status IN ('completed','resolved') THEN 1 ELSE 0 END) as completed,
-        SUM(CASE WHEN status IN ('disputed','escalated') THEN 1 ELSE 0 END) as disputed,
-        SUM(CASE WHEN status IN ('completed','resolved') THEN kas_amount ELSE 0 END) as total_volume,
+        SUM(CASE WHEN protocol_status = 'completed' THEN 1 ELSE 0 END) as completed,
+        SUM(CASE WHEN protocol_status = 'disputed' THEN 1 ELSE 0 END) as disputed,
+        SUM(CASE WHEN protocol_status = 'completed' THEN
+              CASE WHEN UPPER(give_asset) = 'KAS' THEN CAST(give_amount AS REAL)
+                   WHEN UPPER(want_asset) = 'KAS' THEN CAST(want_amount AS REAL) ELSE 0 END
+            ELSE 0 END) as total_volume,
         MAX(created_at) as last_trade_at
-      FROM mm_orders
-      WHERE agent_address = ? AND peer_address IS NOT NULL
+      FROM exchange_offers
+      WHERE (maker = ? OR taker = ?) AND (CASE WHEN maker = ? THEN taker ELSE maker END) IS NOT NULL
       GROUP BY peer_address
-    `).all(relay.address);
+    `).all(relay.address, relay.address, relay.address, relay.address);
 
     const tradeMap = {};
     for (const t of tradeStats) tradeMap[t.peer_address] = t;
