@@ -3743,5 +3743,62 @@ export function runMigrations() {
     }
   }
 
+  // v121: r177 Phase 1 prediction_outcome_share asset_type 延伸 broker exchange (Owner 5/18 + Bettor r177/r178/r190/r191).
+  //   - exchange_offers ALTER 加 8 outcome-* cols + maker_reputation_snapshot
+  //   - prediction_maker_whitelist 新表 (stake-locked KAS escrow + Owner approval)
+  //   - prediction_reputation_log 新表 (settled / disputed / slashed / counterparty_diversity events)
+  // Note: gap v119/v120 reserved for NWT broker Phase β work (cross-line agreed, v118+ J1 use v121+).
+  {
+    const tableInfo = sqlite.prepare("SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name='exchange_offers'").get();
+    if (tableInfo.cnt) {
+      const cols = sqlite.prepare("PRAGMA table_info(exchange_offers)").all().map(c => c.name);
+      const addCol = (name, type) => {
+        if (!cols.includes(name)) {
+          sqlite.exec(`ALTER TABLE exchange_offers ADD COLUMN ${name} ${type}`);
+          console.log(`[migrate] v121: exchange_offers 加 ${name} ${type} (r177 prediction outcome).`);
+        }
+      };
+      addCol('outcome_market_source', 'TEXT');           // 'polymarket' | 'kanet_native'
+      addCol('outcome_condition_id', 'TEXT');             // Polymarket conditionId hex
+      addCol('outcome_token_id', 'TEXT');                 // CLOB asset_id uint256 string
+      addCol('outcome_side', 'TEXT');                     // 'YES' | 'NO'
+      addCol('outcome_end_date', 'TEXT');                 // ISO8601 settle deadline
+      addCol('outcome_oracle_hook', 'TEXT');              // 'polymarket_uma_mirror' | 'kanet_consensus'
+      addCol('outcome_max_deviation_pp', 'REAL');         // 2-10 range, 5 default (r180 PB(a))
+      addCol('maker_reputation_snapshot', 'TEXT');        // JSON {settled_count, dispute_rate, ...}
+    }
+    const ex1 = sqlite.prepare("SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name='prediction_maker_whitelist'").get();
+    if (!ex1.cnt) {
+      sqlite.exec(`
+        CREATE TABLE prediction_maker_whitelist (
+          relay_node_id TEXT PRIMARY KEY,
+          stake_locked_kas REAL NOT NULL,
+          stake_lock_until TEXT NOT NULL,
+          approved_by TEXT,
+          approved_at TEXT NOT NULL,
+          active INTEGER DEFAULT 1
+        );
+        CREATE INDEX idx_pmw_active ON prediction_maker_whitelist(active);
+      `);
+      console.log('[migrate] v121: prediction_maker_whitelist 表 + 1 索引 创建 (r177 maker stake escrow + Owner approval).');
+    }
+    const ex2 = sqlite.prepare("SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name='prediction_reputation_log'").get();
+    if (!ex2.cnt) {
+      sqlite.exec(`
+        CREATE TABLE prediction_reputation_log (
+          id TEXT PRIMARY KEY,
+          maker_relay_id TEXT NOT NULL,
+          event_type TEXT NOT NULL,
+          settled_kas_delta REAL,
+          dispute_outcome TEXT,
+          recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX idx_prl_maker ON prediction_reputation_log(maker_relay_id);
+        CREATE INDEX idx_prl_event ON prediction_reputation_log(event_type);
+      `);
+      console.log('[migrate] v121: prediction_reputation_log 表 + 2 索引 创建 (r177 reputation snapshot 历史).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
