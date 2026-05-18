@@ -409,6 +409,12 @@ startBettorPositionProtector();
 import { startPositionWatcherCron } from './services/bettor-position-watcher.js';
 startPositionWatcherCron();
 
+// Fossa-stable scanner (Owner 5/17 钦定 + Bettor r173 + r178 ack) — 1h cron, due-diligence enforced.
+// Strict criteria: 5-15% upside + ≤15d settle + ≥$50k vol24 + ≥$50k liq.
+// Results pinned status='pending_due_diligence', Owner final ack gate at /api/bettor/recommendation/:id/accept.
+import { startFossaStableScannerCron } from './services/bettor-fossa-stable-scanner.js';
+startFossaStableScannerCron();
+
 // Phase B Variant Expander 3-tier (Owner 5/16 钦定 "B" + Bettor r141 spec) — 30 min cron.
 // per scanner rec → auto-find related markets → 3 档 variant (激进/适中/保守) INSERT.
 // Phase 1 skeleton + UI surface, Phase 2 will integrate depth-500 /book API real-time.

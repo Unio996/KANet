@@ -3709,5 +3709,39 @@ export function runMigrations() {
     }
   }
 
+  // v118: fossa-stable mode (Owner 5/17 钦定 + Bettor r173 + r178 ack + J1 #249 add).
+  //   - bettor_recommendations 加 due_diligence_json + pass_due_diligence + owner_final_ack_at
+  //   - bettor_live_news_inject 新表 (Owner 手动 feed 实时舆情 + effective_until 24h default per J1 add)
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(bettor_recommendations)").all();
+    if (cols.length && !cols.some(c => c.name === 'due_diligence_json')) {
+      sqlite.exec(`ALTER TABLE bettor_recommendations ADD COLUMN due_diligence_json TEXT;`);
+      console.log('[migrate] v118: bettor_recommendations 加 due_diligence_json 列 (LLM JSON schema output).');
+    }
+    if (cols.length && !cols.some(c => c.name === 'pass_due_diligence')) {
+      sqlite.exec(`ALTER TABLE bettor_recommendations ADD COLUMN pass_due_diligence INTEGER DEFAULT 0;`);
+      console.log('[migrate] v118: bettor_recommendations 加 pass_due_diligence 列 (LLM audit pass flag).');
+    }
+    if (cols.length && !cols.some(c => c.name === 'owner_final_ack_at')) {
+      sqlite.exec(`ALTER TABLE bettor_recommendations ADD COLUMN owner_final_ack_at TEXT;`);
+      console.log('[migrate] v118: bettor_recommendations 加 owner_final_ack_at 列 (fossa-stable Owner ack timestamp).');
+    }
+    const exists = sqlite.prepare("SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name='bettor_live_news_inject'").get();
+    if (!exists.cnt) {
+      sqlite.exec(`
+        CREATE TABLE bettor_live_news_inject (
+          id TEXT PRIMARY KEY,
+          inject_text TEXT NOT NULL,
+          injected_by TEXT DEFAULT 'owner',
+          injected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          effective_until TIMESTAMP NOT NULL,
+          active INTEGER DEFAULT 1
+        );
+        CREATE INDEX idx_blni_active ON bettor_live_news_inject(active, effective_until);
+      `);
+      console.log('[migrate] v118: bettor_live_news_inject 表 + 1 索引 创建 (Owner 手动 feed 实时舆情 + 24h default expiry per J1 add).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
