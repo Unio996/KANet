@@ -29,7 +29,8 @@ export class SelfAwarenessSkill extends Skill {
     const { consoleUrl, relayNodeId, address } = config;
 
     // Parallel fetch: balance, wallets, profile, recent broadcasts, mind config, portfolio
-    const [balance, wallets, profile, broadcasts, mindConfig, polyPositions, brokerAccounts, otcOrders, exchangeOffers] = await Promise.all([
+    // NWT N6.4 5/18: drop OTC mm-orders fetch (OTC pool deprecated, exchange_offers 是 single source).
+    const [balance, wallets, profile, broadcasts, mindConfig, polyPositions, brokerAccounts, exchangeOffers] = await Promise.all([
       fetchJson(`${consoleUrl}/api/relay/${relayNodeId}/balance`).catch(() => null),
       fetchJson(`${consoleUrl}/api/relay/${relayNodeId}/wallets`).catch(() => null),
       fetchJson(`${consoleUrl}/api/agent/profile`).catch(() => null),
@@ -37,7 +38,6 @@ export class SelfAwarenessSkill extends Skill {
       fetchJson(`${consoleUrl}/api/relay/${relayNodeId}/mind-config`).catch(() => null),
       fetchJson(`${consoleUrl}/api/predictions/positions?relay_node_id=${relayNodeId}`).catch(() => null),
       fetchJson(`${consoleUrl}/api/broker/accounts`).catch(() => null),
-      fetchJson(`${consoleUrl}/api/trade/mm-orders?status=active`).catch(() => null),
       fetchJson(`${consoleUrl}/api/exchange/offers?maker=${encodeURIComponent(address)}&limit=20`).catch(() => null),
     ]);
 
@@ -91,10 +91,7 @@ export class SelfAwarenessSkill extends Skill {
       } catch {}
     }
 
-    // OTC active orders
-    const activeOtc = (Array.isArray(otcOrders) ? otcOrders : [])
-      .filter(o => !['completed', 'cancelled', 'expired'].includes(o.status))
-      .map(o => ({ side: o.side, amount: o.amount, price: o.price, status: o.status }));
+    // NWT N6.4 5/18: OTC mm-orders deprecated, exchange_offers only.
 
     // Exchange offers (free market)
     const allExOffers = exchangeOffers?.offers || [];
@@ -111,7 +108,7 @@ export class SelfAwarenessSkill extends Skill {
       chainWallets,
       polyPositions: polyPos,
       stockPositions,
-      activeOtcOrders: activeOtc,
+      activeOtcOrders: [], // NWT N6.4 5/18: OTC deprecated, kept for prompt-builder shape compat
       activeExchangeOffers,
       brokerConnected: !!connectedBroker,
       brokerName: connectedBroker?.name || null,
