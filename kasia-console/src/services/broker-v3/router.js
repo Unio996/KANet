@@ -71,8 +71,13 @@ export async function handleMessage(peer, msg, opts = {}) {
   }
   // if curState exists (user in flow) → pass through, state-machine handles strict reject + re-prompt
 
-  const result = await stateMachine.processInput(peer, trimmed, relayNodeId);
+  // Bug NWT-N7.1 Layer D: pass opts.inbound_txid for idempotent guard (state machine 不被 stale catch-up 推倒).
+  const result = await stateMachine.processInput(peer, trimmed, relayNodeId, { inbound_txid: opts.inbound_txid });
   if (!result) return null;
+  if (result._idempotent_skip) {
+    console.log(`[broker-v3] idempotent skip duplicate inbound txid for ${peer?.slice(-12)} — state preserved`);
+    return null;
+  }
 
   let reply = result.reply || '';
 

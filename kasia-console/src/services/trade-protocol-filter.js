@@ -227,7 +227,13 @@ async function handlePaid(msg) {
   // Only process if not already paid
   if (['paid', 'verified', 'delivering', 'completed'].includes(order.status)) return;
 
-  transition(orderId, 'paid', { txHash: msg.tx });
+  // Bug NWT-N5 fix 5/18 (KI-12 第 15 次 silent skip): transition result 必 check.
+  // 旧 logic 直接 fire transition 不读返回, 失败时 chain_event 仍 record → false-positive audit.
+  const tResult = transition(orderId, 'paid', { txHash: msg.tx });
+  if (!tResult?.ok) {
+    console.warn(`[trade-filter] handlePaid transition fail order=${orderId.slice(0,8)} status=${order.status} → 'paid': ${tResult?.error || 'unknown'}`);
+    return; // 不记 false-positive payment event
+  }
 
   recordChainEvent({
     txid: msg.tx,
@@ -562,14 +568,17 @@ async function _evaluateAutoTake(offerId, msg) {
       if (!gate.allowed) {
         console.log(`[autoTaker] REPUTATION BLOCK: ${gate.reason} (peer risk=${rep.risk}) — skipping offer ${offerId.slice(0, 8)}`);
         // Record a chain event so this decision is audit-visible
+        // Bug NWT-N4 fix 5/18 (KI-12 第 14 次 silent skip): 旧 offerId.slice(0,12) → extexch-1779062837238-X
+        // 12 char 截 "autotake_rep_block_extexch-1779" 所有 extexch- 前缀 offer 共享 txid →
+        // UNIQUE(txid, event_type) silent ignore 后续 → audit trail 丢. Use full offerId.
         try {
           const { recordChainEvent } = await import('./chain-event.js');
           recordChainEvent({
-            txid: 'autotake_rep_block_' + offerId.slice(0, 12),
+            txid: `autotake_rep_block_${offerId}`,
             eventType: 'autotake_reputation_block',
             payload: JSON.stringify({ offer_id: offerId, peer: msg._from, risk: rep.risk, reason: gate.reason, warnings: rep.warnings }),
           });
-        } catch {}
+        } catch (err) { console.warn(`[autoTaker] rep_block audit recordChainEvent err: ${err.message}`); }
         return;
       }
       // Medium risk: halve the effective size cap for this trade

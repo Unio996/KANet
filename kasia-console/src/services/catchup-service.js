@@ -78,6 +78,10 @@ export function failPendingAction(actionId, errorMsg) {
  * Returns: [{ remoteAddress, localAddress, txid, traceId, message, receivedAt }]
  */
 export function getUnrepliedMessages(network = 'mainnet', limit = 50) {
+  // Bug NWT-N7.1 fix 5/18 (Owner 4-month Trader-B menu spam pain): 旧 NOT EXISTS replies 漏
+  // — ingestReply HTTP fail / trace_id mismatch / restart 后 _seen 清 → catch-up replay 同 inbound.
+  // Layer B fix: check 实际 outbound message presence (true source of truth, not replies table).
+  // 必 JOIN conversation_id (防 broker 主动 DM 同 peer 别的 conversation 误判已 reply).
   const rows = sqlite.prepare(`
     SELECT
       m.source_txid   AS txid,
@@ -97,6 +101,12 @@ export function getUnrepliedMessages(network = 'mainnet', limit = 50) {
       AND NOT EXISTS (
         SELECT 1 FROM replies r
         WHERE r.trace_id = m.trace_id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM messages outm
+        WHERE outm.conversation_id = m.conversation_id
+          AND outm.direction = 'outbound'
+          AND outm.created_at > m.created_at
       )
     ORDER BY m.created_at DESC
     LIMIT ?

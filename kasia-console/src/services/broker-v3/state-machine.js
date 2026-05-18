@@ -91,7 +91,27 @@ export function _testReset() { _state.clear(); }
  * @param {string} relayNodeId - broker (Trader-B) relay id
  * @returns {Promise<{ reply, nextState? }>}
  */
-export async function processInput(user_id, msg, relayNodeId) {
+// Bug NWT-N7.1 Layer D fix 5/18: per-user inbound txid idempotent guard. catch-up replay 同 inbound source_txid
+// 不再推进 state machine (4-month Owner Trader-B menu spam root). TTL 1h 自清防内存膨胀.
+const _seenInboundTxids = new Map(); // user_id → Map<txid, ts>
+const SEEN_TTL_MS = 60 * 60 * 1000;
+function _idempotentGuard(user_id, txid) {
+  if (!txid) return false;
+  let userMap = _seenInboundTxids.get(user_id);
+  if (!userMap) { userMap = new Map(); _seenInboundTxids.set(user_id, userMap); }
+  // TTL cleanup (cheap, per-call)
+  const cutoff = Date.now() - SEEN_TTL_MS;
+  for (const [k, ts] of userMap) { if (ts < cutoff) userMap.delete(k); }
+  if (userMap.has(txid)) return true;
+  userMap.set(txid, Date.now());
+  return false;
+}
+
+export async function processInput(user_id, msg, relayNodeId, opts = {}) {
+  // Bug NWT-N7.1 Layer D: if catch-up replay 同 inbound txid → no-op (防 state machine 被 stale catch-up 推倒)
+  if (opts.inbound_txid && _idempotentGuard(user_id, opts.inbound_txid)) {
+    return { reply: null, _idempotent_skip: true };
+  }
   // T-J2-2026-05-06 r230 fix: 取 leading token (split on whitespace), 接受 trailing suffix.
   // user '1 #salt-xxx' (避 anti-spam dedup) → head='1', strict regex 仍 match.
   // production '1' 单发 same (single-token trim → '1').

@@ -271,7 +271,9 @@ export async function registerConversationRoutes(fastify) {
         // v3 return null → 自然语言 OR 不识别 → canned reply 提醒 user 用菜单 OR DM matcher
         try {
           const { handleMessage: handleV3 } = await import('../services/broker-v3/index.js');
-          const v3Reply = await handleV3(peer, message, { relayNodeId: resolved });
+          // Bug NWT-N7.1 Layer D (4-month menu spam pain): pass inbound_txid for idempotent guard
+          // — state machine 不被 stale catch-up replay 推倒 (Trader-B restart 后 _seen 清失忆).
+          const v3Reply = await handleV3(peer, message, { relayNodeId: resolved, inbound_txid: txId });
           if (v3Reply !== null && v3Reply !== undefined) {
             console.log(`[api/agent/reply] broker-v3 routed peer=${peer.slice(-12)}`);
             return reply.send({ reply: v3Reply });

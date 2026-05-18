@@ -27,7 +27,9 @@ import { recordChainEvent } from './chain-event.js';
 
 const VALID_TRANSITIONS = {
   published:          ['accepted', 'cancelled', 'expired'],
-  accepted:           ['paying', 'published', 'cancelled', 'expired'],
+  // Bug NWT-N5 fix 5/18: accepted → paid direct allowed (paid_v1 是 already-paid proof, 不是 intent).
+  // paying state 是 maker-side intent (内部 attempt), OTC taker paid_v1 直跳 paid 合理 — chain TX 已 broadcast 证明.
+  accepted:           ['paying', 'paid', 'published', 'cancelled', 'expired'],
   paying:             ['paid', 'accepted', 'cancelled', 'expired'],     // can revert to accepted on failure
   // ── POST-PAYMENT: 已付款后只能 → disputed，不能 expired/cancelled（保护付款方）──
   paid:               ['verified', 'disputed'],
