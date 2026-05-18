@@ -3849,5 +3849,78 @@ export function runMigrations() {
     }
   }
 
+  // v119: exchange_offers protocol_status CHECK enum 加 awaiting_manual_confirm + awaiting_oracle.
+  // NWT N13 dig (5/18): exchange-machine.js routeToVerification L996/L998 写这俩 state, transition L110
+  // UPDATE 撞 SqliteError CHECK constraint failed → manual / oracle verification offers production crash.
+  // SQLite ALTER TABLE 不支持改 CHECK, 必走 recreate-table pattern (v83 precedent).
+  // Phase β Step 1 止血 (Owner 5/18 钦定 + NWT N13.1 ack v119+).
+  {
+    const checkRow = sqlite.prepare(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='exchange_offers'"
+    ).get();
+    if (checkRow && checkRow.sql && !checkRow.sql.includes('awaiting_manual_confirm')) {
+      sqlite.exec(`PRAGMA foreign_keys = OFF`);
+      sqlite.exec(`
+        CREATE TABLE exchange_offers_v119 (
+          id                  TEXT PRIMARY KEY,
+          broadcast_tx_id     TEXT NOT NULL,
+          message_index       INTEGER NOT NULL DEFAULT 0,
+          give_asset          TEXT NOT NULL,
+          give_amount         TEXT NOT NULL,
+          give_chain          TEXT,
+          want_asset          TEXT NOT NULL,
+          want_amount         TEXT NOT NULL,
+          want_chain          TEXT,
+          maker               TEXT NOT NULL,
+          broadcast_block     INTEGER,
+          broadcast_at        TEXT,
+          expires_at          TEXT,
+          verification        TEXT NOT NULL DEFAULT 'manual',
+          verification_meta   TEXT DEFAULT '{}',
+          protocol_status     TEXT NOT NULL DEFAULT 'open' CHECK(protocol_status IN ('open','matched','verifying','awaiting_manual_confirm','awaiting_oracle','delivering','completed','refunded','failed','expired','timed_out','cancelled','disputed')),
+          is_fully_observed   INTEGER NOT NULL DEFAULT 0,
+          market_key          TEXT NOT NULL,
+          observed_by_node    TEXT,
+          taker               TEXT,
+          taker_tx_id         TEXT,
+          completed_at        TEXT,
+          created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+          accept_commitment   TEXT,
+          matched_at          TEXT,
+          verifying_started_at TEXT,
+          disputed_at         TEXT,
+          timed_out_at        TEXT,
+          cancelled_at        TEXT,
+          maker_confirmed_at  TEXT,
+          taker_confirmed_at  TEXT,
+          metadata            TEXT DEFAULT '{}',
+          taker_chain         TEXT,
+          taker_payment_address TEXT,
+          delivering_at       TEXT,
+          payment_tx          TEXT,
+          delivery_tx         TEXT,
+          price_tolerance     REAL DEFAULT 0.01,
+          settle_grace_min    INTEGER DEFAULT 5,
+          filled_qty          REAL DEFAULT 0,
+          UNIQUE(broadcast_tx_id, message_index)
+        );
+      `);
+      const copiedV119 = sqlite.prepare(`
+        INSERT INTO exchange_offers_v119 SELECT * FROM exchange_offers
+      `).run();
+      sqlite.exec(`DROP TABLE exchange_offers`);
+      sqlite.exec(`ALTER TABLE exchange_offers_v119 RENAME TO exchange_offers`);
+      sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_exchange_offers_market_key ON exchange_offers(market_key)`);
+      sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_exchange_offers_status ON exchange_offers(protocol_status)`);
+      sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_exchange_offers_maker ON exchange_offers(maker)`);
+      sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_exchange_offers_broadcast_at ON exchange_offers(broadcast_at)`);
+      sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_exchange_offers_payment_tx_unique ON exchange_offers(payment_tx) WHERE payment_tx IS NOT NULL`);
+      sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_offers_open_expires ON exchange_offers(expires_at) WHERE protocol_status = 'open' AND expires_at IS NOT NULL`);
+      sqlite.exec(`PRAGMA foreign_keys = ON`);
+      console.log(`[migrate] v119: exchange_offers recreated 加 CHECK enum awaiting_manual_confirm + awaiting_oracle (${copiedV119.changes} row copied, 13 enum values total).`);
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
