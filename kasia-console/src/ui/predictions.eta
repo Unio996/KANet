@@ -2418,6 +2418,13 @@ function predictionsPage() {
         const stored = localStorage.getItem('predictions_compactView');
         if (stored === '1') this.compactView = true;
       } catch {}
+      // Phase 4c — bettorTab ↔ currentTab dual-direction sync defensive
+      // When user clicks new top tab, sync modal sub-tab so reopening modal lands on consistent view.
+      // When modal sub-tab clicked, sync top tab so URL hash reflects the actual content.
+      const TAB_TO_BETTOR = { recs: 'recs', history: 'history', positions: 'protect', scan: 'fossa' };
+      const BETTOR_TO_TAB = { recs: 'recs', record: 'history', history: 'history', winrate: 'history', 'history-recs': 'history', adjust: 'positions', protect: 'positions', watcher: 'positions', fossa: 'scan' };
+      this.$watch('currentTab', (v) => { const t = TAB_TO_BETTOR[v]; if (t && this.bettorTab !== t) this.bettorTab = t; });
+      this.$watch('bettorTab', (v) => { const t = BETTOR_TO_TAB[v]; if (t && this.currentTab !== t) this.currentTab = t; });
 
       // 优先级: 有 redeemable position 的 agent > 只有钱包的 agent
       // (避免选错 agent 后钱卡在另一个账户里看不到)
