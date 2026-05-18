@@ -102,7 +102,10 @@ export async function quoteBridge(fromChain, toChain, amountHuman, config, asset
   const url = 'https://app.across.to/api/suggested-fees?' + params.toString();
 
   const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
-  if (!res.ok) throw new Error(`Across quote HTTP ${res.status}: ${await res.text().slice(0, 200)}`);
+  // NWT N18.3 P0 5/18: paren-wrap await before .slice. JS `await x.y().z()` parses as
+  // `await (x.y().z())` so `.slice` was called on Promise<string> not string → TypeError.
+  // Pre-existing 4/24 bug (commit 8e894462b2), N18 USDT path triggered surface (T6b real chain).
+  if (!res.ok) throw new Error(`Across quote HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const data = await res.json();
 
   // Live API response shape (2026-04):
