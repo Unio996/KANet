@@ -926,6 +926,49 @@
               </template>
             </div>
 
+            <!-- Stair-step same-entity audit panel (Bettor r174 — R-COMPETITOR-BLIND-SPOT 治本) -->
+            <template x-if="stairAudits && stairAudits.length > 0">
+              <div class="card mb-3 border-l-4 border-l-purple-500">
+                <h3 class="text-sm font-bold mb-2">🪜 同 entity 多 deadline 阶梯 audit (Bettor r174 strict)</h3>
+                <div class="text-[11px] text-ink-500 mb-2">
+                  P(out Y2 | survive Y1) = (b-a)/(1-a). 推 highest conditional prob deadline.
+                  Owner 5/18 严训: 5/17 Starmer May 31 推漏 June 30 比对 (= R-COMPETITOR-BLIND-SPOT 第 4 案例).
+                </div>
+                <template x-for="ea in stairAudits" :key="ea.entity_key">
+                  <div class="mb-2 bg-purple-50/40 p-2 rounded">
+                    <div class="flex items-center justify-between mb-1">
+                      <span class="font-medium text-purple-700 text-xs" x-text="'★ ' + ea.entity_key + ' (' + ea.count + ' deadlines)'"></span>
+                      <span x-show="ea.recommended" class="text-[10px] px-2 py-0.5 rounded bg-purple-200 text-purple-800 font-medium"
+                            x-text="'推: ' + (ea.recommended?.deadline?.end_date?.slice(0,10)) + ' (' + ((ea.recommended?.prob || 0) * 100).toFixed(0) + '% conditional)'"></span>
+                    </div>
+                    <table class="text-[10px] w-full">
+                      <thead><tr class="text-ink-400"><th class="text-left">deadline</th><th>side</th><th class="text-right">YES price</th><th class="text-right">conditional (vs prev)</th></tr></thead>
+                      <tbody>
+                        <template x-for="(d, i) in ea.deadlines" :key="d.id">
+                          <tr>
+                            <td class="text-ink-700" x-text="d.end_date?.slice(0,10)"></td>
+                            <td class="text-center" :class="d.side === 'YES' ? 'text-green-700' : 'text-red-700'" x-text="d.side"></td>
+                            <td class="text-right tabular-nums" x-text="'$' + d.yes_price?.toFixed(3) + ' (' + (d.yes_price*100).toFixed(0) + '%)'"></td>
+                            <td class="text-right tabular-nums" x-text="i === 0 ? '—' : (ea.conditional[i-1]?.prob != null ? ((ea.conditional[i-1].prob * 100).toFixed(0) + '% (' + ea.conditional[i-1].days + 'd)') : 'arbitrage')"
+                                :class="i === 0 ? 'text-ink-400' : ((ea.conditional[i-1]?.prob || 0) > 0.5 ? 'text-purple-700 font-bold' : 'text-ink-500')"></td>
+                          </tr>
+                        </template>
+                      </tbody>
+                    </table>
+                    <template x-if="ea.mispricing_flags && ea.mispricing_flags.length > 0">
+                      <div class="mt-1 space-y-0.5">
+                        <template x-for="f in ea.mispricing_flags" :key="f.from + f.to + f.type">
+                          <div class="text-[10px] text-amber-700">
+                            ⚠ <span class="font-medium" x-text="f.type"></span> <span x-text="f.from + ' → ' + f.to"></span>: <span x-text="f.msg"></span>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </template>
+
             <!-- Fossa-stable recs list -->
             <template x-if="!fossaRecs">
               <div class="card text-center text-ink-400 py-8">载入中...</div>
@@ -1843,6 +1886,7 @@ function predictionsPage() {
     liveNewsHours: 24,
     liveNewsActive: null,
     liveNewsSubmitting: false,
+    stairAudits: null,  // Bettor r174 — same-entity multi-deadline conditional audit
     watchAdd: { show: false, relay_node_id: '', token_id: '', market_title: '', outcome: 'Yes', current_size: 0, entry_avg_price: 0, thresholds: [
       { label: 'strong_yes', op: 'gte', price: 0.55, sell_pct: 60, action: 'sell 60% lock profit' },
       { label: 'mild_yes',   op: 'gte', price: 0.45, sell_pct: 30, action: 'sell 30% partial' },
@@ -2354,19 +2398,22 @@ function predictionsPage() {
     async loadFossaStable() {
       try {
         const url = '/api/bettor/recommendations/history?days=7&limit=200' + (this.selectedAgent ? '&relay_node_id=' + this.selectedAgent : '');
-        const [recsRes, newsRes] = await Promise.all([
+        const [recsRes, newsRes, stairRes] = await Promise.all([
           fetch(url).then(r => r.json()).catch(() => ({})),
           fetch('/api/bettor/live-news-inject').then(r => r.json()).catch(() => ({})),
+          fetch('/api/bettor/stair-step-audit').then(r => r.json()).catch(() => ({})),
         ]);
         const allRecs = recsRes?.recommendations || [];
         const fossa = allRecs.filter(r => r.strategy === 'fossa-stable');
         fossa.forEach(r => { r._acking = false; r._ackError = null; });
         this.fossaRecs = fossa;
         this.liveNewsActive = newsRes?.injects || [];
+        this.stairAudits = stairRes?.audits || [];
       } catch (e) {
         console.warn('[fossa] load fail:', e.message);
         this.fossaRecs = [];
         this.liveNewsActive = [];
+        this.stairAudits = [];
       }
     },
 

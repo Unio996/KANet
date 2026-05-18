@@ -954,4 +954,21 @@ export async function registerBettorRoutes(fastify) {
     const r = await runFossaStableScan();
     return reply.send(r);
   });
+
+  // ── Stair-step same-entity deadline auditor (Bettor r174 R-COMPETITOR-BLIND-SPOT 治本) ──
+  // GET all active stair-step audits — entities with >1 deadline rec
+  fastify.get('/api/bettor/stair-step-audit', async (request, reply) => {
+    const { buildStairStepAudit } = await import('../services/bettor-stair-step-auditor.js');
+    // Pull from BOTH active recs AND live Polymarket query for same entities
+    const recs = sqlite.prepare(`
+      SELECT id, slug, question, end_date, yes_price, decision
+      FROM bettor_recommendations
+      WHERE status IN ('pending', 'pending_due_diligence') AND slug IS NOT NULL AND end_date IS NOT NULL
+      ORDER BY end_date ASC
+    `).all();
+    // Enhance by also fetching live event ladder from Polymarket for any entity slug starting with "starmer-out" / "trump-out" / etc
+    // (Phase 2 enhancement — for now, audit only what's in our DB)
+    const audits = buildStairStepAudit(recs);
+    return reply.send({ ok: true, audits, count: audits.length, rec_count: recs.length });
+  });
 }
