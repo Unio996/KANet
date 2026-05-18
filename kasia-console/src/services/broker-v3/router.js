@@ -75,8 +75,12 @@ export async function handleMessage(peer, msg, opts = {}) {
   const result = await stateMachine.processInput(peer, trimmed, relayNodeId, { inbound_txid: opts.inbound_txid });
   if (!result) return null;
   if (result._idempotent_skip) {
-    console.log(`[broker-v3] idempotent skip duplicate inbound txid for ${peer?.slice(-12)} — state preserved`);
-    return null;
+    // Bug NWT-N10 fix 5/18: 返 '' 而不是 null. null 让 conversations.js L286 fall-through 走 getMenuTopText canned menu
+    // (Bug BE 5/17 fix 引入的 fallback 旁路 Layer D silent guarantee) → 第 2 menu DM 重发.
+    // '' → conversations.js 见 v3Reply !== null && !== undefined → send {reply:''} → ai.mjs reply?.trim() || null → null
+    // → replyToMessage if(!replyText) silent return → 不发 DM ✓
+    console.log(`[broker-v3] idempotent skip duplicate inbound txid for ${peer?.slice(-12)} — return '' (not null) 防 canned menu fall-through`);
+    return '';
   }
 
   let reply = result.reply || '';

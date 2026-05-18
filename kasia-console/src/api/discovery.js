@@ -480,7 +480,21 @@ export async function registerDiscoveryRoutes(fastify) {
     let sql = 'SELECT txid, for_address, from_address, payload_type, block_time, indexed_by, processed_at FROM kanet_message_index WHERE 1=1';
     const params = [];
     if (type) { sql += ' AND payload_type = ?'; params.push(type); }
-    if (unprocessed === 'true') { sql += ' AND processed_at IS NULL'; }
+    if (unprocessed === 'true') {
+      sql += ' AND processed_at IS NULL';
+      // Bug NWT-N10 defense-in-depth (Layer B 完整版 5/18): SQL 加 NOT EXISTS outbound 检查.
+      // /ingest/unreplied-messages 路径 catchup-service.js Layer B 已加, 但本 endpoint 是 relay catch-up
+      // historical comm replay 第二 query path, 之前漏 Layer B equivalent. processComm 重处理 inbound
+      // 而 mark_processed 未 commit (crash 或 race) → 二次 catch-up 又 emit → menu spam.
+      // 修法: 已有 outbound message 在 inbound 同 conversation 之后 = 实际已 reply, 不再 surface 此 txid.
+      sql += ` AND NOT EXISTS (
+        SELECT 1 FROM messages m_in
+        JOIN messages m_out ON m_out.conversation_id = m_in.conversation_id
+          AND m_out.direction = 'outbound'
+          AND m_out.created_at > m_in.created_at
+        WHERE m_in.source_txid = kanet_message_index.txid AND m_in.direction = 'inbound'
+      )`;
+    }
     sql += ' ORDER BY block_time ASC LIMIT 100';
     const rows = sqlite.prepare(sql).all(...params);
     return reply.send(rows);
