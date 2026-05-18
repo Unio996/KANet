@@ -147,7 +147,152 @@
     </div>
   </template>
 
-  <!-- Bettor 推荐 modal -->
+  <!-- r179 Phase 4d killed bettorModalOpen modal — fossa content reparented to 扫单 tab + r177 prediction trade quote book embed -->
+
+  <!-- r177 Phase 1 sub 3 — 扫单 tab (currentTab === 'scan'): fossa-stable recs + Live News Inject + stair-step audit + KANet prediction trade quote book -->
+  <template x-if="currentTab === 'scan'">
+    <div class="mb-4" x-init="if (!fossaRecs) loadFossaStable(); if (!predictionQuoteBook) loadPredictionQuoteBook(); if (!makerWhitelist) loadMakerWhitelist()">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-bold text-ink-700">🔍 扫单</h2>
+        <div class="flex items-center gap-2 text-[11px]">
+          <button @click="fossaTickNow()" :disabled="fossaTicking" class="btn btn-sm btn-secondary text-[11px]">
+            <span x-text="fossaTicking ? '扫中...' : '立即扫'"></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Sub 1: Live News Inject (Owner 手动 feed 实时舆情) -->
+      <details class="card mb-3 border-l-4 border-l-orange-400">
+        <summary class="text-sm font-bold cursor-pointer hover:text-orange-700">📰 Live News Inject
+          <span x-show="liveNewsActive && liveNewsActive.length" class="text-[10px] text-ink-400 font-normal" x-text="'(' + liveNewsActive.length + ' active)'"></span>
+        </summary>
+        <div class="mt-2">
+          <div class="text-[11px] text-ink-500 mb-2">LLM training timeline blind spot. paste 最近 24h 新闻给 scanner LLM 二审用. 默认 24h 后失效.</div>
+          <textarea x-model="liveNewsInjectText" class="input input-xs w-full" rows="2" placeholder="例: 5/18 Streeting 81 backers 真 file ..."></textarea>
+          <div class="flex items-center gap-2 mt-1">
+            <input type="number" x-model.number="liveNewsHours" class="input input-xs w-20" placeholder="24">
+            <span class="text-[10px] text-ink-400">小时后失效 (max 168h)</span>
+            <button @click="liveNewsSubmit()" :disabled="liveNewsSubmitting" class="btn btn-sm btn-primary text-[11px]"><span x-text="liveNewsSubmitting ? '保存中...' : '+ 加 inject'"></span></button>
+          </div>
+          <template x-if="liveNewsActive && liveNewsActive.length">
+            <div class="mt-2 space-y-1">
+              <template x-for="n in liveNewsActive" :key="n.id">
+                <div class="text-[10px] bg-warm-50 p-2 rounded flex items-start gap-2">
+                  <div class="flex-1">
+                    <div class="text-ink-700" x-text="n.inject_text.slice(0, 200) + (n.inject_text.length > 200 ? '...' : '')"></div>
+                    <div class="text-ink-400">expires <span x-text="new Date(n.effective_until).toLocaleString()"></span></div>
+                  </div>
+                  <button @click="liveNewsDelete(n.id)" class="text-red-500 text-xs">✗</button>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+      </details>
+
+      <!-- Sub 2: Fossa-Stable recs (reparented from killed modal) -->
+      <details class="card mb-3 border-l-4 border-l-orange-500" open>
+        <summary class="text-sm font-bold cursor-pointer hover:text-orange-700">★ Fossa-Stable 推荐
+          <span x-show="fossaRecs && fossaRecs.length" class="text-[10px] text-orange-700 font-normal" x-text="'(' + fossaRecs.filter(r => r.status === 'pending_due_diligence').length + ' ⏸ pending due-diligence)'"></span>
+        </summary>
+        <div class="mt-2 text-[11px] text-ink-500 mb-2">5-15% upside · ≤15d settle · ≥$50k vol/liq · LLM 二审强制 · Owner final ack 才 fire</div>
+        <template x-if="!fossaRecs"><div class="text-center py-4 text-ink-400">载入中...</div></template>
+        <template x-if="fossaRecs && fossaRecs.length === 0"><div class="text-center py-4 text-ink-400">暂无 fossa-stable 推荐. 点 "立即扫" 触发.</div></template>
+        <template x-if="fossaRecs && fossaRecs.length > 0">
+          <div class="space-y-2">
+            <template x-for="r in fossaRecs" :key="r.id + ':scan-fossa'">
+              <div class="card card-compact border-l-4" :class="r.status === 'pending_due_diligence' ? 'border-l-orange-500 bg-orange-50/30' : 'border-l-green-500'">
+                <div class="flex items-start justify-between gap-2 mb-1">
+                  <a :href="'https://polymarket.com/event/' + (r.slug || '')" target="_blank" rel="noopener" class="flex-1 text-sm font-medium text-ink-700 hover:text-brand-600 block truncate" x-text="r.question || '(no title)'"></a>
+                  <span class="text-[10px] px-2 py-1 rounded font-medium whitespace-nowrap" :class="r.status === 'pending_due_diligence' ? 'bg-orange-200 text-orange-800' : 'bg-gray-100 text-gray-600'" x-text="r.status"></span>
+                </div>
+                <div class="text-[11px] text-ink-500"><span class="font-medium" :class="r.decision === 'YES' ? 'text-green-700' : 'text-red-700'" x-text="'BUY ' + r.decision"></span> · <span x-text="'$' + (r.yes_price * 100).toFixed(1) + '%'"></span> · edge <span x-text="(r.edge || 0).toFixed(1) + '%'"></span> · size $<span x-text="r.size_usd"></span> · settle <span x-text="r.end_date?.slice(0, 10)"></span></div>
+                <div x-show="r.status === 'pending_due_diligence'" class="mt-2 pt-2 border-t border-orange-200">
+                  <button @click="fossaOwnerAck(r)" :disabled="r._acking" class="btn btn-sm bg-orange-500 hover:bg-orange-600 text-white text-[11px] px-3 py-1"><span x-text="r._acking ? '下单中...' : '★ Owner final ack (fire)'"></span></button>
+                  <button @click="fossaReject(r)" class="btn btn-sm bg-warm-200 hover:bg-warm-300 text-ink-700 text-[11px] px-3 py-1 ml-2">✗ 拒绝</button>
+                </div>
+              </div>
+            </template>
+          </div>
+        </template>
+      </details>
+
+      <!-- Sub 3: Stair-step same-entity audit (Bettor r174) -->
+      <template x-if="stairAudits && stairAudits.length > 0">
+        <details class="card mb-3 border-l-4 border-l-purple-500">
+          <summary class="text-sm font-bold cursor-pointer hover:text-purple-700">🪜 同实体阶梯 audit
+            <span class="text-[10px] text-ink-400 font-normal" x-text="'(' + stairAudits.length + ')'"></span>
+          </summary>
+          <div class="mt-2 text-[11px] text-ink-500">P(out Y2 | survive Y1) = (b-a)/(1-a). 推 highest conditional prob deadline.</div>
+          <div class="mt-1 space-y-2">
+            <template x-for="ea in stairAudits" :key="ea.entity_key">
+              <div class="bg-purple-50/40 p-2 rounded text-[11px]">
+                <div class="font-medium text-purple-700 mb-1" x-text="'★ ' + ea.entity_key + ' (' + ea.count + ' deadlines)' + (ea.recommended ? ' — 推: ' + ea.recommended.deadline.end_date?.slice(0,10) : '')"></div>
+                <template x-if="ea.mispricing_flags && ea.mispricing_flags.length">
+                  <div class="text-[10px] text-amber-700">⚠ <span x-text="ea.mispricing_flags.length + ' flags'"></span></div>
+                </template>
+              </div>
+            </template>
+          </div>
+        </details>
+      </template>
+
+      <!-- Sub 4: r177 KANet prediction trade quote book (broker exchange asset_type=prediction_outcome_share) -->
+      <details class="card mb-3 border-l-4 border-l-cyan-500">
+        <summary class="text-sm font-bold cursor-pointer hover:text-cyan-700">🎯 KANet Prediction Trade Quote Book
+          <span x-show="predictionQuoteBook" class="text-[10px] text-ink-400 font-normal" x-text="'(' + (predictionQuoteBook?.count || 0) + ' active offers)'"></span>
+        </summary>
+        <div class="mt-2">
+          <div class="text-[11px] text-ink-500 mb-2">Maker quotes prediction outcome shares vs KAS. 4 layer Hybrid Latency Defense at accept time.</div>
+          <!-- Maker whitelist status -->
+          <div class="mb-3 p-2 bg-warm-50 rounded text-[11px]">
+            <div class="font-medium text-ink-700">Maker whitelist:</div>
+            <template x-if="makerWhitelist && makerWhitelist.length === 0"><div class="text-ink-400">暂无 maker. 申请: stake KAS 锁 30d + Owner approve</div></template>
+            <template x-if="makerWhitelist && makerWhitelist.length > 0">
+              <div class="space-y-1 mt-1">
+                <template x-for="m in makerWhitelist" :key="m.relay_node_id + ':whitelist'">
+                  <div class="flex items-center gap-2 text-[10px]">
+                    <span class="font-mono text-ink-500" x-text="m.relay_node_id?.slice(0,12) + '...'"></span>
+                    <span x-text="m.stake_locked_kas?.toFixed(0) + ' KAS lock'"></span>
+                    <span class="text-[10px] px-1.5 py-0.5 rounded" :class="m.active ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'" x-text="m.active ? '✓ active' : '⏸ pending Owner approve'"></span>
+                  </div>
+                </template>
+              </div>
+            </template>
+            <button @click="showMakerApply = !showMakerApply" class="btn btn-xs btn-secondary text-[10px] mt-2">申请 maker →</button>
+            <template x-if="showMakerApply">
+              <div class="mt-2 space-y-1">
+                <select x-model="makerApplyForm.relay_node_id" class="input input-xs w-full">
+                  <option value="">— 选 agent —</option>
+                  <% it.relayNodes.forEach(r => { %><option value="<%= r.id %>"><%= r.name %></option><% }) %>
+                </select>
+                <input type="number" x-model.number="makerApplyForm.stake_amount_kas" class="input input-xs w-full" placeholder="stake KAS (≥100)">
+                <button @click="submitMakerApply()" :disabled="makerApplySubmitting" class="btn btn-sm btn-primary text-[11px] w-full"><span x-text="makerApplySubmitting ? '申请中...' : '✓ submit stake + apply'"></span></button>
+              </div>
+            </template>
+          </div>
+          <!-- Active offers -->
+          <template x-if="!predictionQuoteBook"><div class="text-center py-4 text-ink-400">载入中...</div></template>
+          <template x-if="predictionQuoteBook && (predictionQuoteBook.offers || []).length === 0"><div class="text-center py-4 text-ink-400">暂无 prediction quotes</div></template>
+          <template x-if="predictionQuoteBook && (predictionQuoteBook.offers || []).length > 0">
+            <div class="space-y-1">
+              <template x-for="o in predictionQuoteBook.offers" :key="o.id + ':quote'">
+                <div class="flex items-center justify-between py-1 border-b border-warm-100 text-[11px]">
+                  <span class="font-mono text-ink-500" x-text="o.maker?.slice(0,12) + '...'"></span>
+                  <span class="px-1.5 py-0.5 rounded text-[10px] font-bold" :class="o.outcome_side === 'YES' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'" x-text="o.outcome_side"></span>
+                  <span class="tabular-nums" x-text="'$' + (o.published_price || 0).toFixed(3)"></span>
+                  <span class="tabular-nums" x-text="(o.give_amount || 0).slice(0,8) + ' sh'"></span>
+                  <span class="tabular-nums text-ink-500" x-text="'for ' + (o.want_amount || 0).slice(0,8) + ' KAS'"></span>
+                  <span class="text-[10px] text-ink-400" x-text="'exp ' + (o.expires_at ? new Date(o.expires_at).toLocaleTimeString() : '-')"></span>
+                  <button @click="takePredictionOffer(o)" :disabled="o._taking" class="btn btn-xs bg-cyan-500 hover:bg-cyan-600 text-white text-[10px] px-2 py-0.5"><span x-text="o._taking ? 'taking...' : '🎯 TAKE'"></span></button>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+      </details>
+    </div>
+  </template>
 
   <!-- r179 Phase 1d.a — 持仓 tab (currentTab === 'positions') 4 折叠 sub: 持仓保护 / 调仓建议 / Watcher / 活跃持仓 (modal still works as fallback).
        NOTE: Bettor r186 spec "杀 modal" deferred to Phase 1d.b (post Owner full verify all 4 tabs work + Sophie 决策 stable).
@@ -1158,6 +1303,13 @@ function predictionsPage() {
     liveNewsSubmitting: false,
     stairAudits: null,  // Bettor r174 — same-entity multi-deadline conditional audit
 
+    // r177 Phase 1 sub 3 — KANet prediction trade quote book
+    predictionQuoteBook: null,
+    makerWhitelist: null,
+    showMakerApply: false,
+    makerApplyForm: { relay_node_id: '', stake_amount_kas: 100 },
+    makerApplySubmitting: false,
+
     // r179 Phase 1a (Bettor r179/r180 + Owner 5/18 "按你推荐办!" ack) — sticky mode + tab routing.
     // Additive: old bettorTab + modal still exist, content reparent 1b/1c/1d.
     currentMode: 'all',     // fossa-stable | scavenger | variant | all
@@ -1774,6 +1926,62 @@ function predictionsPage() {
       } finally {
         rec._acking = false;
       }
+    },
+
+    // r177 Phase 1 sub 3 — prediction trade quote book methods
+    async loadPredictionQuoteBook() {
+      try {
+        const r = await fetch('/api/prediction/quote-book');
+        const data = await r.json();
+        this.predictionQuoteBook = data;
+      } catch (e) {
+        console.warn('[r177] quote-book load fail:', e.message);
+        this.predictionQuoteBook = { ok: false, offers: [], count: 0 };
+      }
+    },
+
+    async loadMakerWhitelist() {
+      try {
+        const r = await fetch('/api/prediction/maker/whitelist');
+        const data = await r.json();
+        this.makerWhitelist = data.makers || [];
+      } catch (e) { this.makerWhitelist = []; }
+    },
+
+    async submitMakerApply() {
+      const f = this.makerApplyForm;
+      if (!f.relay_node_id) { alert('选 agent'); return; }
+      if (!Number.isFinite(f.stake_amount_kas) || f.stake_amount_kas < 100) { alert('stake ≥ 100 KAS'); return; }
+      this.makerApplySubmitting = true;
+      try {
+        const res = await fetch('/api/prediction/maker/whitelist/apply', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relay_node_id: f.relay_node_id, stake_amount_kas: f.stake_amount_kas }),
+        });
+        const data = await res.json();
+        if (!data.ok) { alert('apply 失败: ' + (data.error || 'unknown')); return; }
+        this.showMakerApply = false;
+        await this.loadMakerWhitelist();
+        alert('✓ apply 提交. Owner approval pending.');
+      } catch (e) { alert('apply fail: ' + e.message); }
+      finally { this.makerApplySubmitting = false; }
+    },
+
+    async takePredictionOffer(o) {
+      const confirmed = confirm(`TAKE prediction offer?\n\n${o.outcome_side} @ $${(o.published_price || 0).toFixed(3)}\nshares: ${o.give_amount}\npay: ${o.want_amount} KAS\nexpires: ${o.expires_at}`);
+      if (!confirmed) return;
+      o._taking = true;
+      try {
+        const res = await fetch('/api/prediction/accept/' + o.id, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taker_relay_id: this.selectedAgent }),
+        });
+        const data = await res.json();
+        if (!data.ok) { alert('TAKE fail: ' + (data.error || 'unknown')); return; }
+        await this.loadPredictionQuoteBook();
+        alert('✓ matched! offer ' + data.offer_id);
+      } catch (e) { alert('TAKE fail: ' + e.message); }
+      finally { o._taking = false; }
     },
 
     async fossaReject(rec) {
