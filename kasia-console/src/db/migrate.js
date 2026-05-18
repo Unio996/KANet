@@ -3922,5 +3922,28 @@ export function runMigrations() {
     }
   }
 
+  // v120: DROP mm_orders + mm_quotes — OTC tables 全清.
+  // NWT N14.11 unblock (5/18): Phase β Step 2 sub#1-4 + N14.7 hotfix + N14.8/N14.9 recovery + sub#3b.fix2 全 ship clean.
+  // sub#3a trading.js 7 OTC routes 真删 + sub#3b 6 OTC handler + order-machine.js 全删 +
+  // sub#1 reputation/episode-builder/mind-manager → exchange_offers + sub#2 trade-action/limits/conversations 删 mm_orders read.
+  // mm_orders ALL-TIME 4 row (test 残, 0 production completed) / mm_quotes dormant.
+  // Phase α chain_event protocol_deprecated_use audit 5h+ 0 production caller.
+  // 安全 DROP (无 caller, no FK referencing).
+  {
+    const orderTable = sqlite.prepare(
+      "SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name='mm_orders'"
+    ).get();
+    const quoteTable = sqlite.prepare(
+      "SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name='mm_quotes'"
+    ).get();
+    if (orderTable.cnt > 0 || quoteTable.cnt > 0) {
+      const orderRows = orderTable.cnt > 0 ? sqlite.prepare('SELECT count(*) AS cnt FROM mm_orders').get().cnt : 0;
+      const quoteRows = quoteTable.cnt > 0 ? sqlite.prepare('SELECT count(*) AS cnt FROM mm_quotes').get().cnt : 0;
+      sqlite.exec(`DROP TABLE IF EXISTS mm_orders`);
+      sqlite.exec(`DROP TABLE IF EXISTS mm_quotes`);
+      console.log(`[migrate] v120: DROP mm_orders (${orderRows} row) + DROP mm_quotes (${quoteRows} row) — OTC tables 全清, single source = exchange_offers.`);
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
