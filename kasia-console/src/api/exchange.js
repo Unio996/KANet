@@ -73,59 +73,12 @@ export async function registerExchangeRoutes(fastify) {
       LIMIT ? OFFSET ?
     `).all(...params, Number(limit), Number(offset));
 
-    // Bug NWT-12:50 Phase 1: OTC integration — UNION mm_orders 到 /api/exchange/offers
-    // 大循环 (exchange + broker + OTC) Owner 钦定. mm_orders shape 映射 exchange_offers fields:
-    // - side='sell' (broker 卖 KAS): give=KAS amount=kas_amount, want=USDT amount=usdt_amount
-    // - side='buy'  (broker 买 KAS): give=USDT amount=usdt_amount, want=KAS amount=kas_amount
-    // - source='otc' 字段标识来源 (UI 区分 + Phase 2 take routing 用)
-    // 注: mm_orders 0 active 今天, UNION symbolic until OTC traffic 重启. 不动 mm_orders DDL.
-    let otcRows = [];
-    try {
-      // Bug NWT-13:02 Phase 1 hotfix v2: filter by broadcast_txid IS NOT NULL (chain proof = live market)
-      // 比 status enum 更 robust — OTC status 流转 published→accepted etc 不是 visibility 标准.
-      // 上链 = 公开市场可见 (semantics align with exchange_offers broadcast_at IS NOT NULL).
-      // status filter: 排除终态 (completed/cancelled/expired) - 仍 active 的 surface 出来.
-      const excludedStatus = ['completed', 'cancelled', 'expired', 'timed_out', 'failed'];
-      const statusFilter = status
-        ? `status = '${status.replace(/'/g, "''")}'`
-        : `status NOT IN (${excludedStatus.map(s => `'${s}'`).join(',')})`;
-      otcRows = sqlite.prepare(`
-        SELECT
-          id, side, kas_amount, usdt_amount, price, chain,
-          customer_address as taker, mm_receive_address as maker,
-          status as protocol_status, created_at as broadcast_at,
-          completed_at, accepted_at, broadcast_txid,
-          payment_txhash, kas_txhash, batch_index
-        FROM mm_orders
-        WHERE broadcast_txid IS NOT NULL AND ${statusFilter}
-        ORDER BY created_at DESC LIMIT ?
-      `).all(Number(limit)).map(r => ({
-        id: r.id,
-        source: 'otc',
-        protocol_status: r.protocol_status,
-        give_asset: r.side === 'sell' ? 'KAS' : 'USDT',
-        give_amount: r.side === 'sell' ? String(r.kas_amount) : String(r.usdt_amount),
-        give_chain: r.side === 'sell' ? 'kaspa' : r.chain,
-        want_asset: r.side === 'sell' ? 'USDT' : 'KAS',
-        want_amount: r.side === 'sell' ? String(r.usdt_amount) : String(r.kas_amount),
-        want_chain: r.side === 'sell' ? r.chain : 'kaspa',
-        maker: r.maker,
-        taker: r.taker,
-        broadcast_at: r.broadcast_at,
-        broadcast_tx_id: r.broadcast_txid,
-        updated_at: r.completed_at || r.accepted_at || r.broadcast_at,
-        market_key: 'KAS|USDT',
-        verification: 'otc',
-        payment_tx: r.payment_txhash,
-        delivery_tx: r.kas_txhash,
-        unit_price: parseFloat(r.price) || null,
-      }));
-    } catch (e) { console.warn(`[exchange] OTC UNION mm_orders skip: ${e.message}`); }
-
+    // NWT N6.3 Phase α (5/18 Owner 钦定 single source of truth): OTC UNION 撤. mm_orders deprecated,
+    // 不再 surface 到 exchange offers. exchange_offers 是 KANet 唯一 market state.
+    // 原 Phase 1 UNION 代码 archive 于 commit 1ef55da^ (5/18 J2 #471 propose / NWT #N6.3 ack).
     const total = sqlite.prepare(
       `SELECT COUNT(*) as cnt FROM exchange_offers WHERE ${where}`
     ).get(...params);
-    const totalOtc = otcRows.length;
 
     // Market groups summary
     const groups = sqlite.prepare(`
@@ -160,20 +113,15 @@ export async function registerExchangeRoutes(fastify) {
       return { ...offer, unit_price: unitPrice, price_vs_market: priceVsMarket ? parseFloat(priceVsMarket) : null, kas_market_price: kasPrice };
     });
 
-    // Bug NWT-12:50 Phase 1: merge OTC rows + 加 unit_price/price_vs_market
-    const mergedOffers = [...enriched, ...otcRows.map(o => {
-      if (!kasPrice || !o.unit_price) return o;
-      return { ...o, price_vs_market: parseFloat(((o.unit_price - kasPrice) / kasPrice * 100).toFixed(2)), kas_market_price: kasPrice };
-    })];
+    // NWT N6.3 Phase α: exchange_offers only (OTC UNION 撤)
     return reply.send({
-      offers: mergedOffers,
-      total: total.cnt + totalOtc,
+      offers: enriched,
+      total: total.cnt,
       total_exchange: total.cnt,
-      total_otc: totalOtc,
       groups,
       kas_market_price: kasPrice,
       node_info: {
-        note: '数据来自本节点索引，含 exchange + OTC pool (大循环 Phase 1)',
+        note: '数据来自本节点索引 (exchange pool; OTC pool deprecated 5/18)',
       },
     });
   });
@@ -438,44 +386,9 @@ export async function registerExchangeRoutes(fastify) {
 
     const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer_id);
     if (!offer) {
-      // Bug NWT-13:07 Phase 2: cross-pool take routing — 检 mm_orders (OTC pool).
-      // /api/exchange/accept 不只 handle exchange_offers, 也 dispatch OTC accept via kanet_accept_v1.
-      const otcOrder = sqlite.prepare(`
-        SELECT id, status, side, kas_amount, usdt_amount, price, chain, mm_receive_address, broadcast_txid, agent_address
-        FROM mm_orders WHERE id = ? AND broadcast_txid IS NOT NULL
-      `).get(offer_id);
-      if (!otcOrder) return reply.code(404).send({ error: 'Offer not found' });
-      if (!['published', 'open'].includes(otcOrder.status)) {
-        return reply.code(400).send({ error: `OTC order is ${otcOrder.status}, cannot accept` });
-      }
-
-      // Pre-check taker has enough to pay
-      const relay = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(relayNodeId);
-      if (!relay) return reply.code(400).send({ error: 'Invalid relayNodeId' });
-
-      // Broadcast kanet_accept_v1 to OTC channel (chain DM pipeline will dispatch handleAccept)
-      const { sendCommandAsync } = await import('../services/relay-manager.js');
-      let acceptTx = null;
-      for (let attempt = 1; attempt <= 5; attempt++) {
-        try {
-          const res = await sendCommandAsync(relayNodeId, {
-            type: 'send_broadcast',
-            channel: 'kanet-otc',
-            message: JSON.stringify({
-              t: 'kanet_accept_v1', ref: offer_id, kas_addr: relay.address,
-            }),
-          });
-          acceptTx = res?.txId || null;
-          if (acceptTx) break;
-        } catch (err) {
-          console.error(`[exchange/accept OTC] broadcast attempt ${attempt}/5: ${err.message}`);
-        }
-        if (attempt < 5) await new Promise(r => setTimeout(r, 200 * attempt));
-      }
-      if (!acceptTx) return reply.code(500).send({ error: 'OTC accept broadcast failed — retry later' });
-
-      console.log(`[exchange/accept] cross-pool routed to OTC: order ${offer_id.slice(0,8)} accept_tx ${acceptTx?.slice(0,16)}`);
-      return reply.send({ ok: true, offer_id, status: 'accepted_pending', accept_tx: acceptTx, source: 'otc' });
+      // NWT N6.3 Phase α: cross-pool dispatch 撤. OTC accept route deprecated 5/18.
+      // 原 Phase 2 fallback 代码 archive 于 commit 1ef55da^ (5/18 J2 #471 propose / NWT N6.3 ack).
+      return reply.code(404).send({ error: 'Offer not found' });
     }
     if (offer.protocol_status !== 'open') {
       return reply.code(400).send({ error: `Offer is ${offer.protocol_status}, cannot accept` });

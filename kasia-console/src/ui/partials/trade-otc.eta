@@ -1,5 +1,21 @@
 <!-- trade-otc partial — OTC market: orders, publish, deal management, trade chat -->
+<!-- NWT N6.3 Phase α 5/18: OTC deprecation banner. Phase β sweep 排日删 partial 整体. -->
 <div x-data="tradeOtc()" x-init="init()">
+
+  <!-- ⚠ OTC deprecated 5/18 -->
+  <div class="card mb-4 border-l-4 border-amber-500 bg-amber-50">
+    <div class="flex items-start gap-3 p-2">
+      <span class="text-amber-600 text-xl">⚠</span>
+      <div class="flex-1">
+        <h3 class="font-semibold text-amber-900">OTC pool 已 deprecated (2026-05-18)</h3>
+        <p class="text-sm text-amber-800 mt-1">
+          mm_orders 数据 frozen, 写入路径 410 Gone。请用 <a href="/exchange" class="underline font-medium">Exchange</a> tab 下单和接单。
+          KANet 钦定 exchange_offers 为唯一 market state。本面板仅供历史 read-only 查看, Phase β sweep 后整体下线。
+        </p>
+        <p class="text-xs text-amber-700/80 mt-1">参考: NWT #N6.3 + Owner 5/18 钦定。</p>
+      </div>
+    </div>
+  </div>
 
   <!-- ═══ Market Header ═══ -->
   <div class="card mb-5 flex items-center justify-between">

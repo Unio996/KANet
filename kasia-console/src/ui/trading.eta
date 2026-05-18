@@ -772,6 +772,12 @@
   }
 }" x-init="init()">
 
+  <!-- NWT N6.3 Phase α 5/18: OTC deprecation banner. trading 整页是 OTC market-maker UI, exchange tab 是 successor. -->
+  <div class="bg-amber-900/40 border-b border-amber-600/60 px-6 py-2 text-amber-200 text-sm flex items-center justify-between">
+    <span><strong>⚠ OTC pool deprecated 5/18</strong> — mm_orders 数据 frozen, /api/trade/mm-orders/* returns 410. 请用 <a href="/exchange" class="underline text-amber-100">Exchange</a> tab 下单。</span>
+    <span class="text-xs text-amber-300/70">Phase β: 代码 sweep 排日 (Owner 钦定 single source of truth)</span>
+  </div>
+
   <!-- Header -->
   <header class="border-b border-ink-600 px-6 py-4 flex items-center justify-between">
     <div class="flex items-center space-x-3">

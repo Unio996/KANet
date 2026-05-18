@@ -79,6 +79,23 @@ function _parseExecutionRow(row) {
   return row;
 }
 
+// NWT N6.3 Phase α (5/18 Owner 钦定 OTC deprecation): /api/trade/mm-orders/* + mm-quotes 410 Gone helper.
+// RFC 8594 Deprecation header + clear error message. 不删 routes (debug 留), 返 410 graceful.
+function _otcDeprecated410(reply, path) {
+  return reply
+    .code(410)
+    .header('Deprecation', 'true')
+    .header('Sunset', 'Sun, 01 Jun 2026 00:00:00 GMT')
+    .header('Link', '</api/exchange/offers>; rel="successor-version"')
+    .send({
+      error: 'OTC pool deprecated 5/18',
+      detail: `${path} is no longer available. mm_orders (OTC) absorbed into exchange_offers. Use /api/exchange/* endpoints.`,
+      successor: '/api/exchange/offers',
+      deprecated_at: '2026-05-18',
+      reference: 'NWT #N6.3 + Owner 5/18 钦定',
+    });
+}
+
 export async function registerTradingRoutes(fastify) {
 
   // GET /api/trade/kas-price — current KAS/USDT price (backend proxy, no CORS)
@@ -2035,6 +2052,8 @@ export async function registerTradingRoutes(fastify) {
 
   // GET /api/trade/mm-orders — query MM orders (supports status/relay_node_id filter)
   fastify.get('/api/trade/mm-orders', async (request, reply) => {
+    return _otcDeprecated410(reply, 'GET /api/trade/mm-orders');
+    /* eslint-disable no-unreachable -- 兜底 留旧逻辑 phase β sweep 删 */
     const { status, relay_node_id, limit = 50, offset = 0, broadcast_txid } = request.query;
 
     // Quick lookup by chain anchor
@@ -2084,6 +2103,8 @@ export async function registerTradingRoutes(fastify) {
   // POST /api/trade/mm-orders/publish — create MM order from UI (no ingest auth)
   // Auto-fills: agent's wallet address, current KAS price (if not provided), agent_address, KAS address
   fastify.post('/api/trade/mm-orders/publish', async (request, reply) => {
+    return _otcDeprecated410(reply, 'POST /api/trade/mm-orders/publish');
+    /* eslint-disable no-unreachable */
     const { createOrder } = await import('../services/order-machine.js');
     const { relay_node_id, side, kas_amount, price: clientPrice, chain: rawChain, peer_address, counterparty_order_id, broadcast_txid, mode } = request.body || {};
     if (!relay_node_id || !side || !kas_amount) {
@@ -2157,6 +2178,8 @@ export async function registerTradingRoutes(fastify) {
 
   // POST /api/trade/mm-orders — create MM order (requires ingest auth)
   fastify.post('/api/trade/mm-orders', async (request, reply) => {
+    return _otcDeprecated410(reply, 'POST /api/trade/mm-orders');
+    /* eslint-disable no-unreachable */
     await verifyIngestRequest(request, reply);
     if (reply.sent) return;
 
@@ -2192,6 +2215,8 @@ export async function registerTradingRoutes(fastify) {
 
   // PUT /api/trade/mm-orders/:id — update MM order status (requires ingest auth)
   fastify.put('/api/trade/mm-orders/:id', async (request, reply) => {
+    return _otcDeprecated410(reply, 'PUT /api/trade/mm-orders/:id');
+    /* eslint-disable no-unreachable */
     await verifyIngestRequest(request, reply);
     if (reply.sent) return;
 
@@ -2226,6 +2251,8 @@ export async function registerTradingRoutes(fastify) {
   // Source is ALWAYS 'owner' — this endpoint is for human UI operations only.
   // Agent/peer/system trade actions go through Mind callback → gateTradeAction with their own source.
   fastify.post('/api/trade/mm-orders/:id/action', async (request, reply) => {
+    return _otcDeprecated410(reply, 'POST /api/trade/mm-orders/:id/action');
+    /* eslint-disable no-unreachable */
     const { transition, linkOrders, getOrder } = await import('../services/order-machine.js');
     const { gateTradeAction } = await import('../services/trade-action.js');
     const { id } = request.params;
@@ -2679,6 +2706,8 @@ export async function registerTradingRoutes(fastify) {
 
   // GET /api/trade/mm-quotes — query quote history (supports relay_node_id filter)
   fastify.get('/api/trade/mm-quotes', async (request, reply) => {
+    return _otcDeprecated410(reply, 'GET /api/trade/mm-quotes');
+    /* eslint-disable no-unreachable */
     const { relay_node_id, limit = 100 } = request.query;
     let sql = 'SELECT * FROM mm_quotes';
     const params = [];
@@ -2694,6 +2723,8 @@ export async function registerTradingRoutes(fastify) {
 
   // POST /api/trade/mm-quotes — record new quote snapshot (requires ingest auth)
   fastify.post('/api/trade/mm-quotes', async (request, reply) => {
+    return _otcDeprecated410(reply, 'POST /api/trade/mm-quotes');
+    /* eslint-disable no-unreachable */
     await verifyIngestRequest(request, reply);
     if (reply.sent) return;
 

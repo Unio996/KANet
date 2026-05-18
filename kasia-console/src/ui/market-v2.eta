@@ -1,5 +1,11 @@
 <%~ include('partials/page-open', { _page: 'market', pageTitle: '', ...it }) %>
 
+<!-- NWT N6.3 Phase α 5/18: OTC deprecation banner. market-v2.eta 整体是 OTC market UI. -->
+<div class="bg-amber-100 border-b border-amber-400 px-4 py-1.5 text-amber-900 text-xs flex items-center justify-between gap-2">
+  <span><strong>⚠ OTC pool deprecated 5/18</strong> — mm_orders frozen, /api/trade/mm-orders/* 返 410。请用 <a href="/exchange" class="underline text-amber-950 font-semibold">Exchange</a> 下单接单。本页 read-only。</span>
+  <span class="text-amber-700/80 hidden sm:inline">参考: NWT #N6.3</span>
+</div>
+
 <div class="flex h-[calc(100vh-3.5rem)]" x-data="marketApp()" x-init="init()" x-cloak>
   <!-- Left: Orders Panel -->
   <div class="w-80 border-r border-warm-200 flex flex-col bg-white flex-shrink-0">

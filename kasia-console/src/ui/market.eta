@@ -46,6 +46,12 @@ body{background:#0a0e17;color:#e2e8f0;font-family:'Noto Sans SC',sans-serif}
 
 <body class="min-h-screen flex flex-col" x-data="market()" x-init="init()" x-cloak>
 
+<!-- NWT N6.3 Phase α 5/18: OTC deprecation banner. market.eta 整体是 OTC market UI, exchange 是 successor. -->
+<div class="bg-amber-900/40 border-b border-amber-600/60 px-4 py-1.5 text-amber-200 text-xs flex items-center justify-between gap-2">
+  <span><strong>⚠ OTC pool deprecated 5/18</strong> — mm_orders frozen, /api/trade/mm-orders/* returns 410. 请用 <a href="/exchange" class="underline text-amber-100 font-semibold">Exchange</a> 下单接单。本页 read-only。</span>
+  <span class="text-amber-300/70 hidden sm:inline">参考: NWT #N6.3</span>
+</div>
+
 <!-- 顶栏 -->
 <header class="flex items-center justify-between px-5 py-2.5 border-b border-base-700">
   <div class="flex items-center gap-4">

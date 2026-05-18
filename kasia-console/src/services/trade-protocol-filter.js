@@ -84,7 +84,21 @@ export async function onBroadcastWritten(row) {
 
 // ── Handlers ──────────────────────────────────────────────────
 
+// NWT N6.3 Phase α (5/18 Owner 钦定 OTC deprecation): log + audit 任何 kanet_*_v1 OTC handler call.
+// 兜底 still 处理 (in case 残 caller / replay), 但 visibility 100% — Phase β 删 handlers 前能确认 0 traffic.
+function _alertOtcDeprecated(handlerName, msg) {
+  console.warn(`[trade-filter DEPRECATED] ${handlerName} called for ${msg.t} tx=${msg._tx?.slice(0,16)} from=${msg._from?.slice(-12)} — OTC pool 已 deprecated 5/18, 请用 exchange_offers / kanet_exchange_v1.`);
+  try {
+    recordChainEvent({
+      txid: `otc_deprecated_${msg._tx || Date.now()}`,
+      eventType: 'protocol_deprecated_use',
+      payload: JSON.stringify({ handler: handlerName, msg_type: msg.t, order_id: msg.id || msg.ref, from: msg._from, channel: msg._channel }),
+    });
+  } catch (err) { /* audit best-effort, 不阻塞 handler */ }
+}
+
 async function handleOrder(msg) {
+  _alertOtcDeprecated('handleOrder', msg);
   const orderId = msg.id;
   if (!orderId) return;
 
@@ -135,6 +149,7 @@ async function handleOrder(msg) {
 }
 
 async function handleAccept(msg) {
+  _alertOtcDeprecated('handleAccept', msg);
   const orderId = msg.ref;
   if (!orderId) return;
 
@@ -218,6 +233,7 @@ async function handleAccept(msg) {
 }
 
 async function handlePaid(msg) {
+  _alertOtcDeprecated('handlePaid', msg);
   const orderId = msg.id;
   if (!orderId || !msg.tx) return;
 
@@ -249,6 +265,7 @@ async function handlePaid(msg) {
 }
 
 async function handleDelivered(msg) {
+  _alertOtcDeprecated('handleDelivered', msg);
   const orderId = msg.id;
   if (!orderId || !msg.tx) return;
 
@@ -273,6 +290,7 @@ async function handleDelivered(msg) {
 }
 
 async function handleCancel(msg) {
+  _alertOtcDeprecated('handleCancel', msg);
   const orderId = msg.id;
   if (!orderId) return;
 
@@ -294,6 +312,7 @@ async function handleCancel(msg) {
 }
 
 async function handleTimeout(msg) {
+  _alertOtcDeprecated('handleTimeout', msg);
   const orderId = msg.id;
   if (!orderId) return;
 
