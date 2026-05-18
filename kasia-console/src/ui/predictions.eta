@@ -1226,7 +1226,7 @@
        NOTE: Bettor r186 spec "杀 modal" deferred to Phase 1d.b (post Owner full verify all 4 tabs work + Sophie 决策 stable).
        Phase 1d.a additive only: 持仓 tab content added, modal preserved for fallback drilldown. -->
   <template x-if="currentTab === 'positions'">
-    <div class="mb-4" x-init="if (!bettorProtectRules) loadBettorProtectRules(); if (!bettorAdjustments) loadBettorAdjustments(); if (!watchRules) loadWatchRules()">
+    <div class="mb-4" x-init="if (!bettorProtectRules) loadBettorProtectRules(); if (!bettorAdjustments) loadBettorAdjustments(); if (!watchRules) loadWatchRules(); if (!positions || positions.length === 0) loadPositions()">
       <div class="flex items-center justify-between mb-3">
         <h2 class="text-lg font-bold text-ink-700">💼 持仓</h2>
         <div class="text-[11px] text-ink-400">Phase 1d.a — 4 折叠 sub-section, 详情仍 modal (1d.b will 杀 modal post-verify)</div>
@@ -1337,16 +1337,30 @@
         </div>
       </details>
 
-      <!-- (4) 📊 活跃持仓 — link to 外 active-positions-section (line 1473) which Owner can toggle via 我的持仓 button -->
-      <details class="card mb-3">
+      <!-- (4) 📊 活跃持仓 — Phase 4b inline summary list + fallback link to 外 active-positions-section full panel -->
+      <details class="card mb-3" :open="positions && positions.length > 0">
         <summary class="text-sm font-semibold text-ink-700 cursor-pointer hover:text-brand-600">📊 活跃持仓
-          <span class="text-[10px] text-ink-400 font-normal">(use 我的持仓 button at top of page for full Polymarket positions panel)</span>
+          <span x-show="positions" class="text-[10px] text-ink-400 font-normal" x-text="'(' + (positions?.length || 0) + ' 笔)'"></span>
         </summary>
         <div class="mt-2">
-          <div class="text-[11px] text-ink-500">
-            完整 active 持仓 panel (Polymarket positions + redeem + sell + history) 现 在 page 下方 active-positions-section.
-            <button @click="showPositions = true; setTimeout(() => document.querySelector('.active-positions-section')?.scrollIntoView({ behavior: 'smooth' }), 50)" class="text-brand-600 hover:underline ml-1">🔍 展开 + scroll →</button>
-          </div>
+          <template x-if="!positions || positions.length === 0">
+            <div class="text-center py-4 text-sm text-ink-400">暂无活跃持仓</div>
+          </template>
+          <template x-if="positions && positions.length > 0">
+            <div class="space-y-1 text-[11px]">
+              <template x-for="p in positions.slice(0, 10)" :key="(p.asset || p.market) + ':pos-inline'">
+                <div class="flex items-center justify-between py-1 border-b border-warm-100">
+                  <a :href="'https://polymarket.com/event/' + (p.slug || '')" target="_blank" rel="noopener" class="flex-1 text-ink-700 hover:text-brand-600 truncate mr-2" x-text="p.question || p.title || (p.market || '').slice(0,32)+'...'"></a>
+                  <span class="px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap" :class="p.outcome === 'Yes' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'" x-text="p.outcome"></span>
+                  <span class="ml-2 text-ink-500 tabular-nums" x-text="(p.size || 0).toFixed(0) + ' sh @ $' + (p.avgPrice || 0).toFixed(3)"></span>
+                  <span class="ml-2 font-medium tabular-nums" :class="(p.curPrice || 0) >= (p.avgPrice || 0) ? 'text-green-600' : 'text-red-600'" x-text="'cur $' + (p.curPrice || 0).toFixed(3)"></span>
+                </div>
+              </template>
+              <div class="text-[10px] text-ink-400 mt-2 flex items-center gap-2">
+                <button @click="showPositions = true; setTimeout(() => document.querySelector('.active-positions-section')?.scrollIntoView({ behavior: 'smooth' }), 50)" class="text-brand-600 hover:underline">🔍 完整 panel (redeem + sell + history) →</button>
+              </div>
+            </div>
+          </template>
         </div>
       </details>
     </div>
