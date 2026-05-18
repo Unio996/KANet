@@ -78,6 +78,27 @@ export async function onBroadcastWritten(row) {
 // order-machine.js OTC heart 一并删 (sub#3b same commit). exchange handlers (handleExchange/Accept/Cancel/
 // ManualConfirm/Paid/Delivered/Timeout/Dispute/Resolve) 留 (单 source of truth).
 
+// ── Exchange Protocol (v1.1 自由市场) ────────────────────────
+// NWT N14.7 P0 hotfix 5/18: sub#3b 删 handler 时误删了下面 exchange-machine imports + EXCHANGE_MSG const
+// (delete script boundary 误把这块吞了, P0 因 processPaymentSubmit + EXCHANGE_MSG undefined → exchange path
+// verifier 跑不动 stuck). 还原到原位.
+
+import { randomUUID } from 'crypto';
+import { processAccept as machineAccept, processManualConfirm, processCancel as machineCancel, processPaymentSubmit, transition as exchangeTransition } from './exchange-machine.js';
+
+// Exchange protocol v2 message type constants
+const EXCHANGE_MSG = {
+  PUBLISH:   'kanet_exchange_v1',
+  ACCEPT:    'kanet_exchange_accept_v1',
+  CANCEL:    'kanet_exchange_cancel_v1',
+  CONFIRM:   'kanet_confirm_v1',
+  PAID:      'kanet_exchange_paid_v1',
+  DELIVERED: 'kanet_exchange_delivered_v1',
+  TIMEOUT:   'kanet_exchange_timeout_v1',
+  DISPUTE:   'kanet_exchange_dispute_v1',
+  RESOLVE:   'kanet_exchange_resolve_v1',
+};
+
 /**
  * kanet_exchange_v1 — new offer broadcast
  *
