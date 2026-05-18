@@ -1212,6 +1212,66 @@
     </div>
   </template>
 
+  <!-- r179 Phase 1b — 我的推荐 tab (currentTab === 'recs') — simplified copy, modal still works as fallback for full ACCEPT/variant -->
+  <template x-if="currentTab === 'recs'">
+    <div class="mb-4" x-init="if (!bettorRecs) loadBettor()">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-bold text-ink-700">📋 我的推荐</h2>
+        <div class="flex items-center gap-2 text-[11px]">
+          <span x-show="bettorRecs?.scanned_at" class="text-ink-400" x-text="'last scan ' + new Date(bettorRecs.scanned_at).toLocaleTimeString()"></span>
+          <button @click="loadBettor()" :disabled="bettorScanning" class="btn btn-sm btn-secondary text-[11px]">
+            <span x-text="bettorScanning ? '扫描中...' : '🔄 重扫'"></span>
+          </button>
+        </div>
+      </div>
+      <!-- strategy filter chips (copy from modal — same bettorStrategyFilter state) -->
+      <template x-if="bettorRecs && (bettorRecs.recommendations || []).length">
+        <div class="flex gap-2 mb-3 text-[10px] flex-wrap">
+          <button @click="bettorStrategyFilter = 'all'" :class="bettorStrategyFilter === 'all' ? 'bg-brand-100 text-brand-700 font-bold' : 'bg-ink-50 text-ink-500'" class="px-2 py-1 rounded">全部</button>
+          <button @click="bettorStrategyFilter = 'scavenger_main'" :class="bettorStrategyFilter === 'scavenger_main' ? 'bg-brand-100 text-brand-700 font-bold' : 'bg-ink-50 text-ink-500'" class="px-2 py-1 rounded">稳单</button>
+          <button @click="bettorStrategyFilter = 'scavenger_carrion'" :class="bettorStrategyFilter === 'scavenger_carrion' ? 'bg-red-100 text-red-700 font-bold' : 'bg-ink-50 text-ink-500'" class="px-2 py-1 rounded">捡尸</button>
+          <button @click="bettorStrategyFilter = 'scavenger_topN_rank'" :class="bettorStrategyFilter === 'scavenger_topN_rank' ? 'bg-amber-100 text-amber-700 font-bold' : 'bg-ink-50 text-ink-500'" class="px-2 py-1 rounded">top-N</button>
+          <button @click="bettorStrategyFilter = 'scavenger_election_locked'" :class="bettorStrategyFilter === 'scavenger_election_locked' ? 'bg-green-100 text-green-700 font-bold' : 'bg-ink-50 text-ink-500'" class="px-2 py-1 rounded">election locked</button>
+          <button @click="bettorStrategyFilter = 'scavenger_competitive'" :class="bettorStrategyFilter === 'scavenger_competitive' ? 'bg-orange-100 text-orange-700 font-bold' : 'bg-ink-50 text-ink-500'" class="px-2 py-1 rounded">竞技</button>
+          <span class="text-ink-300 ml-2">(Phase 1b — 简化卡, 详情/下单 仍 modal)</span>
+        </div>
+      </template>
+      <!-- recs grid simplified (per-rec card minimum: question + decision + numbers + 详情/下单 → opens modal) -->
+      <template x-if="bettorRecs && (bettorRecs.recommendations || []).length">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <template x-for="r in (bettorRecs.recommendations || []).filter(x => bettorStrategyFilter === 'all' || (x.strategy || classifyStrategyClient(x)) === bettorStrategyFilter)" :key="r.id + ':simple'">
+            <div class="card card-compact" :class="r.decision === 'YES' ? 'border-l-4 border-l-green-500' : r.decision === 'NO' ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-gray-400'">
+              <div class="flex items-start gap-2 mb-2">
+                <a :href="'https://polymarket.com/event/' + (r.slug || r.condition_id || '')" target="_blank" rel="noopener" class="flex-1 text-sm font-medium text-ink-700 hover:text-brand-600" x-text="r.question"></a>
+                <span class="px-2 py-0.5 rounded text-[10px] font-bold whitespace-nowrap" :class="r.decision === 'YES' ? 'bg-green-100 text-green-700' : r.decision === 'NO' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'" x-text="r.decision === 'SKIP' ? 'SKIP' : 'BUY ' + r.decision"></span>
+              </div>
+              <div class="grid grid-cols-4 gap-2 text-[11px]">
+                <div><div class="text-ink-400">yes 价</div><div class="font-bold text-ink-700" x-text="(r.yes_price * 100).toFixed(1) + '%'"></div></div>
+                <div><div class="text-ink-400">edge</div><div class="font-bold text-ink-700" x-text="(r.edge * 100).toFixed(1) + 'pp'"></div></div>
+                <div><div class="text-ink-400">仓位</div><div class="font-bold text-ink-700" x-text="(r.fraction * 100).toFixed(1) + '%'"></div></div>
+                <div><div class="text-ink-400">$ size</div><div class="font-bold text-ink-700" x-text="'$' + (r.size_usd || 0).toFixed(0)"></div></div>
+              </div>
+              <div class="flex items-center justify-between mt-2 text-[10px] text-ink-400">
+                <span x-show="r.end_date" x-text="'到期 ' + new Date(r.end_date).toLocaleDateString()"></span>
+                <span x-show="r.strategy" class="text-[10px] px-1.5 py-0.5 rounded bg-warm-50" x-text="r.strategy"></span>
+                <button @click="bettorModalOpen = true; bettorTab = 'recs'; if (!bettorRecs) loadBettor()" class="btn btn-xs btn-ghost text-[10px] text-brand-600">🔍 详情/下单 →</button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </template>
+      <template x-if="bettorRecs && !(bettorRecs.recommendations || []).length">
+        <div class="text-center py-8 text-sm text-ink-400">
+          <span x-show="!bettorRecs.scanned_at">尚未扫描 — 点击 🔄 重扫</span>
+          <span x-show="bettorRecs.scanned_at">本批次无推荐符合条件 (edge&lt;5pt 或 gap&gt;3 月)</span>
+        </div>
+      </template>
+      <template x-if="!bettorRecs">
+        <div class="text-center py-8 text-sm text-ink-400">载入中...</div>
+      </template>
+    </div>
+  </template>
+
   <!-- Bettor 详情弹窗 -->
   <template x-if="bettorDetail">
     <div class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" @click="bettorDetail = null">
