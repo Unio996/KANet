@@ -1022,113 +1022,12 @@ export function startScheduler() {
   // ── Order Timeout Monitor ──
   setInterval(async () => {
     try {
-      const { expireTimedOut, transition } = await import('../services/order-machine.js');
-      expireTimedOut();
-
-      // ── Broadcast kanet_timeout_v1 for accepted orders that timed out ──
-      // expireTimedOut() handles expired/disputed, but accepted orders need
-      // special handling: broadcast accountability then revert to published
-      try {
-        const acceptedTimedOut = sqlite.prepare(
-          "SELECT * FROM mm_orders WHERE status = 'accepted' AND timeout_minutes > 0 AND accepted_at IS NOT NULL"
-        ).all();
-        for (const tOrder of acceptedTimedOut) {
-          const elapsedMin = (Date.now() - new Date(tOrder.accepted_at).getTime()) / 60000;
-          if (elapsedMin < tOrder.timeout_minutes) continue;
-
-          // Broadcast timeout accountability to the order's chain channel (via Relay IPC)
-          try {
-            const { sendCommandAsync: sendCmd } = await import('./relay-manager.js');
-            const timeoutMsg = JSON.stringify({
-              t: 'kanet_timeout_v1', v: 1, id: tOrder.id,
-              who: tOrder.peer_address || 'unknown',
-              reason: `payment_timeout_${tOrder.timeout_minutes}min`,
-              at_status: 'accepted',
-            });
-            const bcastResult = await sendCmd(tOrder.relay_node_id, { type: 'send_broadcast', channel: tOrder.id, message: timeoutMsg });
-            if (bcastResult?.ok) {
-              console.log(`[timeout] Broadcast kanet_timeout_v1 for ${tOrder.id.slice(0, 8)}`);
-              // Filter's handleTimeout will revert to published + tryNextAccept
-            } else {
-              // Fallback: revert locally if broadcast is not possible
-              transition(tOrder.id, 'published', { reason: `Timeout: payment_timeout_${tOrder.timeout_minutes}min`, force: true });
-              const { releaseFunds } = await import('./fund-lock.js');
-              releaseFunds(tOrder.id);
-              console.log(`[timeout] Local revert for ${tOrder.id.slice(0, 8)} (no relay for broadcast)`);
-            }
-          } catch (err) {
-            console.error(`[timeout] Failed to broadcast timeout for ${tOrder.id.slice(0, 8)}: ${err.message}`);
-            // Fallback: still revert locally even if broadcast fails
-            transition(tOrder.id, 'published', { reason: `Timeout: payment_timeout_${tOrder.timeout_minutes}min (broadcast failed)`, force: true });
-            try {
-              const { releaseFunds } = await import('./fund-lock.js');
-              releaseFunds(tOrder.id);
-            } catch {}
-          }
-        }
-      } catch (err) {
-        console.error(`[timeout] Accepted timeout check error: ${err.message}`);
-      }
-
-      // Phase 4: approval timeout — 超时的 pending execution_states
-      const overdue = sqlite.prepare(
-        "SELECT es.id, es.order_id, es.type, o.status as order_status FROM execution_states es JOIN mm_orders o ON o.id = es.order_id WHERE es.status = 'pending' AND es.approval_deadline IS NOT NULL AND es.approval_deadline < datetime('now')"
-      ).all();
-      for (const ex of overdue) {
-        const { rejectExecution } = await import('../services/execution-state.js');
-        // 付款前 → cancelled，付款后 → disputed
-        const paidStatuses = ['paid', 'verified', 'delivering'];
-        if (paidStatuses.includes(ex.order_status)) {
-          rejectExecution(ex.id, 'Approval timeout (post-payment) → disputed');
-          transition(ex.order_id, 'disputed', { reason: 'Approval timeout after payment', force: true });
-          console.log(`[approval-timeout] ${ex.order_id.slice(0, 8)} → disputed (post-payment)`);
-        } else {
-          rejectExecution(ex.id, 'Approval timeout (pre-payment) → cancelled');
-          transition(ex.order_id, 'cancelled', { reason: 'Approval timeout', force: true });
-          console.log(`[approval-timeout] ${ex.order_id.slice(0, 8)} → cancelled (pre-payment)`);
-        }
-      }
-      // Phase 5: dispute 升级路径（15min→重验，30min→通知，60min→冻结escalated）
-      const disputed = sqlite.prepare(
-        "SELECT id, status, completed_at, agent_address, payment_txhash, chain, counterparty_order_id FROM mm_orders WHERE status = 'disputed' AND completed_at IS NOT NULL"
-      ).all();
-      for (const d of disputed) {
-        const mins = (Date.now() - new Date(d.completed_at).getTime()) / 60000;
-        if (mins >= 60) {
-          // 60min → escalated（冻结，等待人工）
-          try {
-            const { transition: orderTransition } = await import('./order-machine.js');
-            orderTransition(d.id, 'escalated', { reason: `Dispute unresolved after ${Math.round(mins)} minutes — escalated for manual intervention` });
-            console.log(`[dispute] ${d.id.slice(0, 8)} → ESCALATED (${Math.round(mins)}min)`);
-          } catch (err) {
-            console.log(`[dispute] ${d.id.slice(0, 8)} escalate failed: ${err.message}`);
-          }
-        } else if (mins >= 30) {
-          // 30min → 通知 owner（写 event 作为通知记录）
-          const { insertEvent } = await import('../data/state/events.js');
-          try {
-            insertEvent({
-              scope: 'user', type: 'dispute_alert', source: 'system', level: 'warn',
-              description: `Order ${d.id.slice(0, 8)} disputed for ${Math.round(mins)}min — needs attention`,
-              agentAddress: d.agent_address,
-            });
-          } catch {} // 去重：如果已写过则 ignore
-          console.log(`[dispute] ${d.id.slice(0, 8)} ALERT: ${Math.round(mins)}min disputed, owner notified`);
-        } else if (mins >= 15 && d.payment_txhash && d.payment_txhash !== 'confirmed') {
-          // 15min → 自动重新验证链上 TX
-          try {
-            const port = process.env.PORT || 3100;
-            await fetch(`http://localhost:${port}/api/trade/mm-orders/${d.counterparty_order_id || d.id}/action`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ action: 'verify_payment', payment_txhash: d.payment_txhash }),
-            });
-            console.log(`[dispute] ${d.id.slice(0, 8)} auto-re-verify triggered at ${Math.round(mins)}min`);
-          } catch (err) {
-            console.log(`[dispute] ${d.id.slice(0, 8)} auto-re-verify failed: ${err.message}`);
-          }
-        }
-      }
+      // NWT N14 Phase β Step 2 sub#1 (5/18 Owner 钦定): OTC mm_orders 全清.
+      // 3 OTC-only sweeper 全删: (a) accepted timeout broadcast (b) execution_states approval timeout
+      // (c) dispute escalation. exchange-machine.js 有 own timeout/dispute 处理. OTC mm_orders ALL-TIME 4 row
+      // 0 production completed, sweeper 永远 0 row.
+      const { expireTimedOut } = await import('../services/order-machine.js');
+      expireTimedOut(); // order-machine 内部 OTC sweeper, sub#3 一并清
     } catch {}
   }, 60_000); // check every minute
 }

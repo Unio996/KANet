@@ -1,7 +1,8 @@
 /**
  * Episode Builder — 对话故事线聚合
  *
- * 将离散的 chain_events + mm_orders + messages 聚合为"对话故事线"。
+ * 将离散的 chain_events + exchange_offers + messages 聚合为"对话故事线"。
+ * (NWT N14 Phase β Step 2 sub#1, 5/18: OTC mm_orders deprecated, exchange_offers = single source)
  * 每个 episode = 一段有起止的交互（交易、握手、对话）。
  *
  * 不修改底层数据表，纯查询时聚合。
@@ -21,7 +22,7 @@ import { sqlite } from '../db/client.js';
 export function buildEpisodes(agentAddress, { limit = 30, status = 'all' } = {}) {
   const episodes = [];
 
-  // ── 1. Trade episodes (from mm_orders) ──
+  // ── 1. Trade episodes (from exchange_offers, NWT N14 Phase β Step 2 sub#1) ──
   const tradeEpisodes = _buildTradeEpisodes(agentAddress, limit, status);
   episodes.push(...tradeEpisodes);
 
@@ -47,19 +48,53 @@ export function buildEpisodes(agentAddress, { limit = 30, status = 'all' } = {})
 const TERMINAL_TRADE = new Set(['completed', 'cancelled', 'expired', 'resolved', 'escalated']);
 
 function _buildTradeEpisodes(agentAddress, limit, statusFilter) {
+  // NWT N14 Phase β Step 2 sub#1: 改 exchange_offers (OTC mm_orders deprecated).
+  // SQL alias 把 exchange_offers schema 映射成 _orderToEpisode 期望的 order shape, downstream 不动.
+  // - side 从 give_asset 推 (give KAS = sell, 否则 buy)
+  // - peer_address 是另一方 (maker = me → peer = taker, taker = me → peer = maker)
+  // - kas_amount/usdt_amount 从 give/want_asset 抽
+  // - paid_at ≈ matched_at (exchange protocol matched → verifying → delivering 不分 paid checkpoint)
+  // - verified_at ≈ verifying_started_at, delivered_at ≈ delivering_at
+  // - cancel_reason 没直接 column, 留 null
   let query = `
-    SELECT o.*,
-      i.display_name AS peer_name
-    FROM mm_orders o
-    LEFT JOIN identities i ON i.address = o.peer_address
-    WHERE o.agent_address = ?
+    SELECT
+      o.id,
+      o.maker AS agent_address,
+      CASE WHEN o.maker = ? THEN o.taker ELSE o.maker END AS peer_address,
+      i.display_name AS peer_name,
+      CASE WHEN UPPER(o.give_asset) = 'KAS' THEN 'sell' ELSE 'buy' END AS side,
+      o.protocol_status AS status,
+      CASE WHEN UPPER(o.give_asset) = 'KAS' THEN CAST(o.give_amount AS REAL)
+           WHEN UPPER(o.want_asset) = 'KAS' THEN CAST(o.want_amount AS REAL) ELSE 0 END AS kas_amount,
+      CASE WHEN UPPER(o.give_asset) LIKE 'USD%' THEN CAST(o.give_amount AS REAL)
+           WHEN UPPER(o.want_asset) LIKE 'USD%' THEN CAST(o.want_amount AS REAL) ELSE 0 END AS usdt_amount,
+      CASE WHEN UPPER(o.give_asset) = 'KAS' AND CAST(o.give_amount AS REAL) > 0
+              THEN CAST(o.want_amount AS REAL) / CAST(o.give_amount AS REAL)
+           WHEN UPPER(o.want_asset) = 'KAS' AND CAST(o.want_amount AS REAL) > 0
+              THEN CAST(o.give_amount AS REAL) / CAST(o.want_amount AS REAL)
+           ELSE NULL END AS price,
+      o.taker_chain AS chain,
+      o.created_at,
+      o.matched_at AS accepted_at,
+      o.matched_at AS paid_at,
+      o.verifying_started_at AS verified_at,
+      o.delivering_at AS delivered_at,
+      o.completed_at,
+      o.payment_tx AS payment_txhash,
+      o.delivery_tx AS kas_txhash,
+      NULL AS cancel_reason,
+      NULL AS counterparty_order_id
+    FROM exchange_offers o
+    LEFT JOIN identities i
+      ON i.address = (CASE WHEN o.maker = ? THEN o.taker ELSE o.maker END)
+    WHERE (o.maker = ? OR o.taker = ?)
   `;
-  const params = [agentAddress];
+  const params = [agentAddress, agentAddress, agentAddress, agentAddress];
 
   if (statusFilter === 'active') {
-    query += ` AND o.status NOT IN ('completed','cancelled','expired','resolved','escalated')`;
+    query += ` AND o.protocol_status NOT IN ('completed','cancelled','expired','timed_out','refunded','failed','disputed')`;
   } else if (statusFilter === 'completed') {
-    query += ` AND o.status IN ('completed','cancelled','expired','resolved','escalated')`;
+    query += ` AND o.protocol_status IN ('completed','cancelled','expired','timed_out','refunded','failed','disputed')`;
   }
 
   query += ` ORDER BY o.created_at DESC LIMIT ?`;
@@ -282,8 +317,37 @@ function _nextTradeStep(order) {
  * @param {string} [peerAddress] — required for social episodes
  */
 export function getEpisodeDetail(episodeId, agentAddress, peerAddress = null) {
-  // Trade episode: look up order
-  const order = episodeId ? sqlite.prepare('SELECT * FROM mm_orders WHERE id = ?').get(episodeId) : null;
+  // Trade episode: look up order (NWT N14 Phase β Step 2 sub#1: exchange_offers, mm_orders deprecated)
+  // shape alias to keep downstream _buildEvidence + _buildCounterpartyProfile compat.
+  const order = episodeId ? sqlite.prepare(`
+    SELECT
+      id,
+      maker AS agent_address,
+      CASE WHEN maker IS NOT NULL THEN taker ELSE maker END AS peer_address,
+      CASE WHEN UPPER(give_asset) = 'KAS' THEN 'sell' ELSE 'buy' END AS side,
+      protocol_status AS status,
+      CASE WHEN UPPER(give_asset) = 'KAS' THEN CAST(give_amount AS REAL)
+           WHEN UPPER(want_asset) = 'KAS' THEN CAST(want_amount AS REAL) ELSE 0 END AS kas_amount,
+      CASE WHEN UPPER(give_asset) LIKE 'USD%' THEN CAST(give_amount AS REAL)
+           WHEN UPPER(want_asset) LIKE 'USD%' THEN CAST(want_amount AS REAL) ELSE 0 END AS usdt_amount,
+      taker_chain AS chain,
+      created_at,
+      matched_at AS accepted_at,
+      completed_at,
+      payment_tx AS payment_txhash,
+      delivery_tx AS kas_txhash
+    FROM exchange_offers
+    WHERE id = ?
+  `).get(episodeId) : null;
+  // peer_address logic: if I'm maker, peer = taker; if I'm taker, peer = maker
+  if (order && order.agent_address === agentAddress) {
+    // I'm maker, peer_address already set to taker by CASE above (since maker IS NOT NULL)
+  } else if (order && order.peer_address === agentAddress) {
+    // I'm taker, swap so peer_address is maker
+    const tmp = order.agent_address;
+    order.agent_address = order.peer_address;
+    order.peer_address = tmp;
+  }
   const resolvedPeer = order?.peer_address || peerAddress;
 
   if (!resolvedPeer) return { profile: null, messages: [], evidence: [] };
@@ -328,14 +392,18 @@ function _buildCounterpartyProfile(agentAddress, peerAddress) {
     'SELECT status, trust_level, handshake_observed_at FROM relation_states WHERE local_address = ? AND peer_address = ?'
   ).get(agentAddress, peerAddress);
 
-  // Trade stats with this peer
+  // Trade stats with this peer (NWT N14 Phase β Step 2 sub#1: exchange_offers, mm_orders deprecated)
   const tradeStats = sqlite.prepare(`
     SELECT
       COUNT(*) as trade_count,
-      SUM(CASE WHEN status IN ('disputed','escalated') THEN 1 ELSE 0 END) as dispute_count,
-      SUM(CASE WHEN status = 'completed' THEN kas_amount ELSE 0 END) as total_volume
-    FROM mm_orders WHERE agent_address = ? AND peer_address = ?
-  `).get(agentAddress, peerAddress);
+      SUM(CASE WHEN protocol_status IN ('disputed') THEN 1 ELSE 0 END) as dispute_count,
+      SUM(CASE WHEN protocol_status = 'completed'
+               THEN CASE WHEN UPPER(give_asset) = 'KAS' THEN CAST(give_amount AS REAL)
+                         WHEN UPPER(want_asset) = 'KAS' THEN CAST(want_amount AS REAL) ELSE 0 END
+               ELSE 0 END) as total_volume
+    FROM exchange_offers
+    WHERE (maker = ? AND taker = ?) OR (maker = ? AND taker = ?)
+  `).get(agentAddress, peerAddress, peerAddress, agentAddress);
 
   const disputeRate = tradeStats.trade_count > 0
     ? ((tradeStats.dispute_count / tradeStats.trade_count) * 100).toFixed(1)
@@ -544,10 +612,11 @@ function _buildSocialEpisodes(agentAddress, limit) {
       });
     }
 
-    // Check for any trade with this peer
+    // Check for any trade with this peer (NWT N14 Phase β Step 2 sub#1: exchange_offers)
     const tradeWithPeer = sqlite.prepare(`
-      SELECT COUNT(*) as cnt FROM mm_orders WHERE agent_address = ? AND peer_address = ?
-    `).get(agentAddress, peerAddr)?.cnt || 0;
+      SELECT COUNT(*) as cnt FROM exchange_offers
+      WHERE (maker = ? AND taker = ?) OR (maker = ? AND taker = ?)
+    `).get(agentAddress, peerAddr, peerAddr, agentAddress)?.cnt || 0;
 
     if (tradeWithPeer > 0) continue; // Skip — already covered by trade episodes
 
@@ -586,17 +655,31 @@ function _buildSocialEpisodes(agentAddress, limit) {
 export function buildMindSummary(agentAddress, { days = 7, peerAddress = null } = {}) {
   const since = new Date(Date.now() - days * 86400_000).toISOString();
 
-  // ── Trade performance ──
+  // ── Trade performance (NWT N14 Phase β Step 2 sub#1: exchange_offers, mm_orders deprecated) ──
+  // Derive shape: side from give_asset, kas_amount/price from give/want, peer from maker/taker swap.
   const trades = sqlite.prepare(`
-    SELECT status, side, kas_amount, price, chain, peer_address, created_at, completed_at,
-      CASE WHEN peer_address IS NOT NULL THEN
-        (SELECT display_name FROM identities WHERE address = mm_orders.peer_address)
-      END AS peer_name
-    FROM mm_orders
-    WHERE agent_address = ? AND created_at > ?
-    ${peerAddress ? 'AND peer_address = ?' : ''}
+    SELECT
+      protocol_status AS status,
+      CASE WHEN UPPER(give_asset) = 'KAS' THEN 'sell' ELSE 'buy' END AS side,
+      CASE WHEN UPPER(give_asset) = 'KAS' THEN CAST(give_amount AS REAL)
+           WHEN UPPER(want_asset) = 'KAS' THEN CAST(want_amount AS REAL) ELSE 0 END AS kas_amount,
+      CASE WHEN UPPER(give_asset) = 'KAS' AND CAST(give_amount AS REAL) > 0
+              THEN CAST(want_amount AS REAL) / CAST(give_amount AS REAL)
+           WHEN UPPER(want_asset) = 'KAS' AND CAST(want_amount AS REAL) > 0
+              THEN CAST(give_amount AS REAL) / CAST(want_amount AS REAL)
+           ELSE NULL END AS price,
+      taker_chain AS chain,
+      CASE WHEN maker = ? THEN taker ELSE maker END AS peer_address,
+      created_at,
+      completed_at,
+      (SELECT display_name FROM identities WHERE address = (CASE WHEN maker = ? THEN taker ELSE maker END)) AS peer_name
+    FROM exchange_offers
+    WHERE (maker = ? OR taker = ?) AND created_at > ?
+    ${peerAddress ? 'AND ((maker = ? AND taker = ?) OR (maker = ? AND taker = ?))' : ''}
     ORDER BY created_at DESC LIMIT 50
-  `).all(...(peerAddress ? [agentAddress, since, peerAddress] : [agentAddress, since]));
+  `).all(...(peerAddress
+    ? [agentAddress, agentAddress, agentAddress, agentAddress, since, agentAddress, peerAddress, peerAddress, agentAddress]
+    : [agentAddress, agentAddress, agentAddress, agentAddress, since]));
 
   let completed = 0, disputed = 0, cancelled = 0, inProgress = 0;
   let totalVolume = 0;
