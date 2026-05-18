@@ -3766,6 +3766,7 @@ export function runMigrations() {
       addCol('outcome_oracle_hook', 'TEXT');              // 'polymarket_uma_mirror' | 'kanet_consensus'
       addCol('outcome_max_deviation_pp', 'REAL');         // 2-10 range, 5 default (r180 PB(a))
       addCol('maker_reputation_snapshot', 'TEXT');        // JSON {settled_count, dispute_rate, ...}
+      addCol('published_price', 'REAL');                  // maker quote $/share at publish time (vs current gamma)
     }
     const ex1 = sqlite.prepare("SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name='prediction_maker_whitelist'").get();
     if (!ex1.cnt) {
