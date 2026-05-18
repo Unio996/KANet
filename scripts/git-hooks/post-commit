@@ -39,15 +39,26 @@ fi
 #   - kasia-console/test-framework/cases/broker/*.test.mjs (case 改自身)
 #   - kasia-console/test-framework/personas/*.mjs (persona 改触发所有 domain)
 #   - kasia-console/test-framework/lib/*.mjs (lib 改触发所有 domain — runner 影响全域)
-# 未来 seeker / exchange domain 加同模式
+# 未来 seeker domain 加同模式
+#
+# NWT N16.5 5/18 (b) 补强: exchange domain + system domain (Playwright UI) 加 cron 触发
+# - exchange: kasia-console/src/api/exchange.js + services/exchange-machine*.js + services/exchange-verifiers*.js + cases/exchange/*
+# - system: src/ui/*.eta + cases/system/*.test.mjs (Playwright UI smoke 自动)
 infer_domains() {
   local domains=""
   if echo "$COMMIT_FILES" | grep -qE 'kasia-console/(src/services/(broker-|exchange-machine|asset-registry|chains|price-oracle|evm-transfer)|src/api/conversations|test-framework/cases/broker)'; then
-    domains="broker"
+    domains="$domains broker"
   fi
-  # framework 核心改动 → 跑所有 domain (目前只 broker)
+  if echo "$COMMIT_FILES" | grep -qE 'kasia-console/(src/api/exchange|src/services/exchange-(machine|verifiers|orders|client)|test-framework/cases/exchange)'; then
+    domains="$domains exchange"
+  fi
+  # NWT N16.5 (b): system domain = Playwright UI cases. 触发 condition: UI eta / api 改动 / system case 自身改.
+  if echo "$COMMIT_FILES" | grep -qE 'kasia-console/(src/ui/.*\.eta|src/api/(exchange|conversations|relay)|test-framework/cases/system)'; then
+    domains="$domains system"
+  fi
+  # framework 核心改动 → 跑所有 domain
   if echo "$COMMIT_FILES" | grep -qE 'kasia-console/test-framework/(lib|personas|adversarial)'; then
-    [ -z "$domains" ] && domains="broker"
+    [ -z "$domains" ] && domains="broker exchange system"
   fi
   # dedup
   echo "$domains" | tr ' ' '\n' | sort -u | tr '\n' ' '
@@ -75,24 +86,37 @@ echo "files: $(echo "$COMMIT_FILES" | head -c 200)" >> "$LOG"
 echo "domains: $DOMAINS" >> "$LOG"
 
 # 异步跑: 后台 fork, post-commit 立刻返
+# NWT N16.5 5/18 补强 (a)+(c):
+# (a) case count + duration metric: 每 domain 跑完 log "[post-commit] $DOMAIN: PASS N cases in Ts" (PASS) OR FAIL detail
+# (c) failure broadcast 含 first FAIL case name + first error line (不仅 count)
 (
   cd "$KANET_ROOT/kasia-console"
 
   for DOMAIN in $DOMAINS; do
     echo "[post-commit] running framework: --domain=$DOMAIN" >> "$LOG"
+    START_S=$(date +%s)
     OUTPUT=$(node scripts/test.mjs --domain="$DOMAIN" --quiet 2>&1)
     EXIT_CODE=$?
+    END_S=$(date +%s)
+    DURATION_S=$((END_S - START_S))
     echo "$OUTPUT" >> "$LOG"
 
-    if [ $EXIT_CODE -ne 0 ]; then
-      # 失败: 抓 summary 行 + fail case
-      SUMMARY=$(echo "$OUTPUT" | grep -E "Summary:|FAIL " | head -10)
+    # (a) metric: parse 'Summary: N PASS / M FAIL / T run' 行
+    SUMMARY_LINE=$(echo "$OUTPUT" | grep -E '^Summary:' | tail -1)
+    CASE_COUNT=$(echo "$SUMMARY_LINE" | grep -oE '[0-9]+ run' | grep -oE '[0-9]+' || echo "?")
+    PASS_COUNT=$(echo "$SUMMARY_LINE" | grep -oE '[0-9]+ PASS' | grep -oE '[0-9]+' || echo "?")
+    FAIL_COUNT=$(echo "$SUMMARY_LINE" | grep -oE '[0-9]+ FAIL' | grep -oE '[0-9]+' || echo "?")
 
-      # broadcast dev-coord (best-effort, 失败不重试)
+    if [ $EXIT_CODE -ne 0 ]; then
+      # (c) failure: 首 FAIL case name + first error line
+      FAIL_CASE=$(echo "$OUTPUT" | grep -E '^✗ FAIL \|' | head -1 | sed 's/^✗ FAIL | //;s/ (.*//;s/$//' | head -c 80)
+      FAIL_REASON=$(echo "$OUTPUT" | grep -A 5 '^✗ FAIL' | grep -E '✗|error|FAIL|TypeError|SyntaxError' | head -2 | head -c 200)
+
       BROADCAST_MSG="🚨 [post-commit] $COMMIT_HASH 撞 framework regression
 commit: $COMMIT_MSG
-domain: $DOMAIN
-$SUMMARY
+domain: $DOMAIN ($CASE_COUNT cases, ${DURATION_S}s, $PASS_COUNT PASS / $FAIL_COUNT FAIL)
+first FAIL: $FAIL_CASE
+reason: $FAIL_REASON
 
 trace: $LOG"
 
@@ -109,9 +133,9 @@ trace: $LOG"
           }));
         " "$BROADCAST_MSG")" >> "$LOG" 2>&1 || echo "[post-commit] broadcast failed (console maybe down)" >> "$LOG"
 
-      echo "[post-commit] FAIL broadcast attempted for $DOMAIN" >> "$LOG"
+      echo "[post-commit] $DOMAIN: FAIL ($CASE_COUNT cases, ${DURATION_S}s, $PASS_COUNT PASS / $FAIL_COUNT FAIL) — first '$FAIL_CASE'" >> "$LOG"
     else
-      echo "[post-commit] $DOMAIN: PASS" >> "$LOG"
+      echo "[post-commit] $DOMAIN: PASS ($CASE_COUNT cases, ${DURATION_S}s)" >> "$LOG"
     fi
   done
 ) &
