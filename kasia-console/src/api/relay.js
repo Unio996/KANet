@@ -1063,7 +1063,8 @@ export async function registerRelayRoutes(fastify) {
     if (!wallet.privkey_encrypted) return reply.code(400).send({ error: 'No private key' });
     if (!EVM_CHAINS.includes(wallet.chain)) return reply.code(400).send({ error: 'Bridge only supported on EVM chains' });
 
-    const { toChain, amount, recipient } = request.body || {};
+    // NWT N18 Owner A 钦定 5/18: body.asset (default 'USDC' backward compat) + USDT support via across-bridge USDT extension.
+    const { toChain, amount, recipient, asset = 'USDC' } = request.body || {};
     const BRIDGE_CHAINS = ['arbitrum','polygon','bnb','eth','base','optimism'];
     if (!BRIDGE_CHAINS.includes(toChain))
       return reply.code(400).send({ error: `bridge target chain must be one of: ${BRIDGE_CHAINS.join(',')}` });
@@ -1072,12 +1073,16 @@ export async function registerRelayRoutes(fastify) {
       return reply.code(400).send({ error: 'fromChain === toChain, use /swap instead' });
     if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0)
       return reply.code(400).send({ error: 'amount must be a positive number' });
+    if (!['USDC', 'USDT'].includes(asset))
+      return reply.code(400).send({ error: `asset must be USDC or USDT, got: ${asset}` });
+    if (asset === 'USDT' && (wallet.chain === 'base' || toChain === 'base'))
+      return reply.code(400).send({ error: 'base chain has no native USDT — use USDC for base path' });
 
     try {
       const { executeBridge } = await import('../services/across-bridge.js');
       const privateKey = decrypt(wallet.privkey_encrypted);
       const result = await executeBridge(
-        privateKey, wallet.chain, toChain, parseFloat(amount), recipient || wallet.address
+        privateKey, wallet.chain, toChain, parseFloat(amount), recipient || wallet.address, asset
       );
       recordChainEvent({
         txid: result.txHash,
@@ -1085,7 +1090,7 @@ export async function registerRelayRoutes(fastify) {
         fromAddress: wallet.address,
         toAddress: recipient || wallet.address,
         observedBy: 'relay',
-        payload: JSON.stringify({ fromChain: wallet.chain, toChain, amount: result.inputAmount, fee: result.fee }),
+        payload: JSON.stringify({ fromChain: wallet.chain, toChain, amount: result.inputAmount, fee: result.fee, asset }),
       });
       return reply.send(result);
     } catch (err) {

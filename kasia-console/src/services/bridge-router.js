@@ -277,3 +277,60 @@ export async function bridgeAsset({
     try { provider?.destroy?.(); } catch {}
   }
 }
+
+// ── Threshold Router (NWT N18 Owner 钦定 5/18 方案 A) ─────────────────
+// Across 收 % (0.05-0.5% of amount) vs Stargate 收固定 (~$0.50 LZ fee).
+// Cross-over ≈ $167 (0.3% × X = 0.50 → X = 167). 加 buffer 阈值 $150:
+//   - amount < $150 → Across (% 便宜)
+//   - amount ≥ $150 → Stargate (固定费便宜)
+// 实测对比 (J2 #504 verify):
+//   $10 transfer: Across $0.03, Stargate $0.50 → Across 17× cheaper
+//   $1000 transfer: Across $3.00, Stargate $0.50 → Stargate 6× cheaper
+// 不 quote 2 桥 (~1-2s latency), 直接金额查表立决.
+const BRIDGE_PROTOCOL_THRESHOLD_USD = 150;
+
+/**
+ * selectBridgeProtocol — 阈值 router 决策.
+ * Owner 关切: 大额 Across 收费太吓人 (% 累加), router 自动转 Stargate.
+ *
+ * @param {number} amountUsd - bridge amount in USD (caller responsibility to normalize)
+ * @returns {'across'|'stargate'}
+ */
+export function selectBridgeProtocol(amountUsd) {
+  if (typeof amountUsd !== 'number' || !Number.isFinite(amountUsd) || amountUsd <= 0) {
+    throw new Error(`selectBridgeProtocol: amountUsd must be positive finite number, got ${amountUsd}`);
+  }
+  return amountUsd < BRIDGE_PROTOCOL_THRESHOLD_USD ? 'across' : 'stargate';
+}
+
+/**
+ * selectAndBridge — 阈值 router + dispatch.
+ * Caller 一次调用, router 选 Across/Stargate, 不用关心.
+ *
+ * @param {object} params
+ * @param {string} params.privateKey
+ * @param {string} params.fromChain
+ * @param {string} params.toChain
+ * @param {number} params.amount - human amount (USD = USDC/USDT 1:1 assumption)
+ * @param {string} [params.recipient]
+ * @param {'USDC'|'USDT'} [params.asset]
+ * @param {string} [params.relayId] - for Stargate path chain_event 入账
+ * @returns {Promise<BridgeResult & { protocol }>}
+ */
+export async function selectAndBridge({ privateKey, fromChain, toChain, amount, recipient, asset = 'USDC', relayId }) {
+  const protocol = selectBridgeProtocol(amount);
+  console.log(`[bridge-router] selectAndBridge: ${amount} ${asset} ${fromChain}→${toChain} via ${protocol} (threshold $${BRIDGE_PROTOCOL_THRESHOLD_USD})`);
+
+  if (protocol === 'across') {
+    const { executeBridge } = await import('./across-bridge.js');
+    const result = await executeBridge(privateKey, fromChain, toChain, amount, recipient, asset);
+    return { ...result, protocol: 'across' };
+  } else {
+    // Stargate path: bridgeAsset 走当前 file 的 v0.1 OFT
+    const result = await bridgeAsset({
+      fromChain, toChain, asset, amount: String(amount), recipient,
+      relayId, slippagePct: 0.5,
+    });
+    return { ...result, protocol: 'stargate' };
+  }
+}

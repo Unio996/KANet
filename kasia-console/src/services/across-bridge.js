@@ -65,19 +65,25 @@ async function approveIfNeeded(usdc, spokePool, signer, amount) {
 /**
  * Execute an Across V3 bridge deposit.
  *
+ * NWT N18 Owner A 钦定 5/18: asset param added (USDC default backward compat, USDT extension).
+ *
  * @param {string} privateKey
  * @param {string} fromChain - source chain name
  * @param {string} toChain - destination chain name
- * @param {string|number} amountHuman - human USDC amount
+ * @param {string|number} amountHuman - human amount
  * @param {string} [recipient] - recipient on toChain (defaults to same address)
+ * @param {'USDC'|'USDT'} [asset] - bridge asset (default 'USDC' backward compat)
  * @returns {Promise<BridgeResult>}
  */
-export async function executeBridge(privateKey, fromChain, toChain, amountHuman, recipient) {
+export async function executeBridge(privateKey, fromChain, toChain, amountHuman, recipient, asset = 'USDC') {
   const config = loadConfig();
-  const quote = await quoteBridge(fromChain, toChain, amountHuman, config);
+  const quote = await quoteBridge(fromChain, toChain, amountHuman, config, asset);
   // outputAmount from Across API is ALREADY net of fee — do NOT subtract again
   const outputAmount = BigInt(quote.outputAmount);
-  const decimals = USDC_DECIMALS[fromChain] || 6;
+  // NWT N18: asset-aware decimal lookup (mirror config _decimals helper)
+  const decimals = (asset === 'USDT')
+    ? ((await import('./across-bridge-config.js')).USDT_DECIMALS[fromChain] || 6)
+    : (USDC_DECIMALS[fromChain] || 6);
 
   if (outputAmount <= 0n) {
     throw new Error(
@@ -101,28 +107,32 @@ export async function executeBridge(privateKey, fromChain, toChain, amountHuman,
     }
   }
   const spoke = config.SPOKE_POOLS[fromChain];
-  const usdc = config.USDC[fromChain];
+  // NWT N18: asset-aware token addr (USDC default backward compat, USDT extension)
+  const tokenSrc = (asset === 'USDT') ? config.USDT[fromChain] : config.USDC[fromChain];
+  const tokenDst = (asset === 'USDT') ? config.USDT[toChain] : config.USDC[toChain];
+  if (!tokenSrc) throw new Error(`Across ${asset} not supported on fromChain=${fromChain}`);
+  if (!tokenDst) throw new Error(`Across ${asset} not supported on toChain=${toChain} (e.g. base has no native USDT)`);
   const toChainId = config.CHAIN_IDS[toChain];
 
   // Stateful TX path: pick one healthy RPC upfront, lock it for approve+deposit+wait.
   // Do NOT use withFallbackRpc here — its 4s default per-RPC timeout and mid-flight
   // switching causes nonce conflicts across TXs (see pickHealthyRpc doc above).
   const healthyUrl = await pickHealthyRpc(meta.rpcPool);
-  console.log(`[across] TX path locked to RPC: ${healthyUrl}`);
+  console.log(`[across] TX path locked to RPC: ${healthyUrl}, asset=${asset}`);
 
   return withProvider(healthyUrl, async (provider) => {
     const signer = new ethers.Wallet(privateKey, provider);
-    const usdcContract = new ethers.Contract(usdc, ERC20_ABI, signer);
+    const tokenContract = new ethers.Contract(tokenSrc, ERC20_ABI, signer);
     const spokeContract = new ethers.Contract(spoke, SPOKE_ABI, signer);
 
-    const approvalTx = await approveIfNeeded(usdcContract, spoke, signer, BigInt(quote.inputAmount));
+    const approvalTx = await approveIfNeeded(tokenContract, spoke, signer, BigInt(quote.inputAmount));
     if (approvalTx) console.log(`[across] Approval TX: ${approvalTx}`);
 
     const tx = await spokeContract.depositV3(
       signer.address,
       recipient || signer.address,
-      usdc,
-      config.USDC[toChain],
+      tokenSrc,
+      tokenDst,
       quote.inputAmount,
       quote.outputAmount,
       toChainId,
@@ -133,7 +143,7 @@ export async function executeBridge(privateKey, fromChain, toChain, amountHuman,
       '0x',
     );
 
-    console.log(`[across] Deposit TX: ${tx.hash}`);
+    console.log(`[across] Deposit TX: ${tx.hash} (${asset})`);
     const receipt = await tx.wait();
     console.log(`[across] Confirmed block ${receipt.blockNumber}`);
 
@@ -147,6 +157,7 @@ export async function executeBridge(privateKey, fromChain, toChain, amountHuman,
       fromChain,
       toChain,
       destinationChainId: toChainId,
+      asset,
     };
   }, { timeoutMs: 60000 });
 }

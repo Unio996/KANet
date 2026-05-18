@@ -38,28 +38,63 @@ export const USDC = /** @type {const} */ ({
   optimism: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85',
 });
 
+// NWT N18 Owner A 钦定 5/18: USDT addr 5 chain (base 没原生 USDT, skip).
+// Across V3 API real-curl-verify USDT support: BSC↔ETH ✓ Polygon↔Arbitrum ✓
+// 比 Stargate 便宜 5-10 倍 (L2-L2 0.1-0.5% fee, ~2-30s fill).
+export const USDT = /** @type {const} */ ({
+  arbitrum: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9',
+  polygon: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
+  bnb: '0x55d398326f99059fF775485246999027B3197955',
+  eth: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+  optimism: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58',
+  // base: no native USDT — Across rejects, caller must use USDC for base path
+});
+
+// Sanity: checksum USDT addr at module load (mirror USDC pattern L24-26)
+for (const [k, v] of Object.entries(USDT)) {
+  ethers.getAddress(v);
+}
+
 /** USDC decimals per chain — BSC 是 18 位，其余都是 6 位 */
 export const USDC_DECIMALS = /** @type {const} */({ bnb: 18 });
 
-/** Chains where USDC decimals mismatch (18→6 or 6→18) requires allowUnmatchedDecimals */
+/** USDT decimals per chain — BSC 是 18 位 (UPVR-DECIMALS-MIGRATION), 其余 6 位 */
+export const USDT_DECIMALS = /** @type {const} */({ bnb: 18 });
+
+/** Chains where decimals mismatch (18→6 or 6→18) requires allowUnmatchedDecimals */
 export const BNB_CHAINS = new Set(['bnb']);
 
 export function loadConfig() {
-  return { SPOKE_POOLS, CHAIN_IDS, USDC };
+  return { SPOKE_POOLS, CHAIN_IDS, USDC, USDT };
 }
 
-export async function quoteBridge(fromChain, toChain, amountHuman, config) {
-  const decimals = USDC_DECIMALS[fromChain] || 6;
-  const amount = ethers.parseUnits(String(amountHuman), decimals).toString();
+/** Asset-aware token addr + decimal lookup. NWT N18 5/18: backward compat default 'USDC'. */
+function _tokenAddr(cfg, chain, asset) {
+  if (asset === 'USDT') {
+    if (!cfg.USDT[chain]) throw new Error(`Across USDT not supported on chain=${chain} (base has no native USDT)`);
+    return cfg.USDT[chain];
+  }
+  if (!cfg.USDC[chain]) throw new Error(`Across USDC not supported on chain=${chain}`);
+  return cfg.USDC[chain];
+}
+
+function _decimals(chain, asset) {
+  if (asset === 'USDT') return USDT_DECIMALS[chain] || 6;
+  return USDC_DECIMALS[chain] || 6;
+}
+
+export async function quoteBridge(fromChain, toChain, amountHuman, config, asset = 'USDC') {
   const cfg = config || loadConfig();
+  const decimals = _decimals(fromChain, asset);
+  const amount = ethers.parseUnits(String(amountHuman), decimals).toString();
   const params = new URLSearchParams({
-    inputToken: cfg.USDC[fromChain],
-    outputToken: cfg.USDC[toChain],
+    inputToken: _tokenAddr(cfg, fromChain, asset),
+    outputToken: _tokenAddr(cfg, toChain, asset),
     originChainId: String(cfg.CHAIN_IDS[fromChain]),
     destinationChainId: String(cfg.CHAIN_IDS[toChain]),
     amount,
   });
-  // BNB→any or any→BNB has 18↔6 decimal mismatch
+  // BNB↔any has 18↔6 decimal mismatch (both USDC and USDT)
   if (BNB_CHAINS.has(fromChain) || BNB_CHAINS.has(toChain)) {
     params.set('allowUnmatchedDecimals', 'true');
   }
@@ -82,6 +117,7 @@ export async function quoteBridge(fromChain, toChain, amountHuman, config) {
     timestamp: data.timestamp,
     toSpokePool: data.destinationSpokePoolAddress,
     fillDeadline: data.fillDeadline,
+    asset, // NWT N18: surface asset for caller (executeBridge needs it)
   };
 }
 
