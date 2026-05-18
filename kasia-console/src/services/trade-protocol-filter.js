@@ -486,25 +486,28 @@ let _autoTakeLock = false;
  * Default mode is 'approval' — creates a proposal in execution_states for Owner to confirm.
  */
 async function _evaluateAutoTake(offerId, msg) {
-  if (_autoTakeLock) return;
+  // NWT N8 probe 5/18 — autoTaker silent post restart 61 dig. 每 return 加 log 定位真因.
+  const _p = (gate) => console.log(`[autoTaker.probe] offer=${offerId.slice(0,12)} from=${msg._from?.slice(-12)} EXIT gate=${gate}`);
+  console.log(`[autoTaker.entry] offer=${offerId.slice(0,12)} from=${msg._from?.slice(-12)} verification=${msg.verification} give=${msg.give_amount}${msg.give_asset}→${msg.want_amount}${msg.want_asset}`);
+  if (_autoTakeLock) { _p('lock'); return; }
 
   // 1. Check enabled
   const { getConfig } = await import('../data/settings/configs.js');
   const enabled = await getConfig('autotake_enabled');
-  if (enabled !== 'true') return;
+  if (enabled !== 'true') { _p(`enabled=${enabled}`); return; }
 
   // 2. Skip own offers (trap #53)
   const localAddrs = sqlite.prepare('SELECT address FROM relay_nodes').all().map(r => r.address);
-  if (localAddrs.includes(msg._from)) return;
+  if (localAddrs.includes(msg._from)) { _p('own_offer'); return; }
 
   // 3. Only auto-verifiable offers
-  if (msg.verification === 'manual') return;
+  if (msg.verification === 'manual') { _p('verification_manual'); return; }
 
   // 4. Skip expired
-  if (msg.expires_at && new Date(msg.expires_at) < new Date()) return;
+  if (msg.expires_at && new Date(msg.expires_at) < new Date()) { _p('expired'); return; }
 
   // 5. Direction: only BUY (maker gives KAS, wants USDT)
-  if (msg.give_asset?.toUpperCase() !== 'KAS' || msg.want_asset?.toUpperCase() !== 'USDT') return;
+  if (msg.give_asset?.toUpperCase() !== 'KAS' || msg.want_asset?.toUpperCase() !== 'USDT') { _p(`direction give=${msg.give_asset} want=${msg.want_asset}`); return; }
 
   // 5b. Check accepted_chains includes a chain we can pay on (bnb default)
   // Bug NWT-13:47 真因 confirmed: acceptedChains 是 [{chain, address}] 对象 array, 旧 includes(c) 检 c 整对象
@@ -516,7 +519,7 @@ async function _evaluateAutoTake(offerId, msg) {
   const supported = ['bnb', 'eth', 'sol', 'tron'];
   const match = acceptedChains.find(c => c && supported.includes(String(c.chain || c).toLowerCase()));
   const payChain = (match && (match.chain || match)) || (acceptedChains.length === 0 ? 'bnb' : null);
-  if (!payChain) return;
+  if (!payChain) { _p(`payChain_null acceptedChains=${JSON.stringify(acceptedChains).slice(0,80)}`); return; }
 
   // 6. Price evaluation
   // Bug NWT-13:30 A1 fix (Owner production autoTaker 真测 silent disabled):
@@ -531,20 +534,20 @@ async function _evaluateAutoTake(offerId, msg) {
       marketPrice = await getKasPrice();
     } catch (err) { console.warn(`[autoTaker] getKasPrice fallback err: ${err.message}`); }
   }
-  if (!marketPrice) return; // 真 oracle down → skip (not silent disable)
+  if (!marketPrice) { _p('marketPrice_null'); return; }
 
   const giveAmt = parseFloat(msg.give_amount);
   const wantAmt = parseFloat(msg.want_amount);
-  if (!giveAmt || !wantAmt) return;
+  if (!giveAmt || !wantAmt) { _p(`amounts give=${giveAmt} want=${wantAmt}`); return; }
 
   const offerPrice = wantAmt / giveAmt; // USDT per KAS
   const discount = (marketPrice - offerPrice) / marketPrice;
   const minDiscount = parseFloat(await getConfig('autotake_min_discount_pct') || '0.5') / 100;
-  if (discount < minDiscount) return; // not cheap enough
+  if (discount < minDiscount) { _p(`discount ${(discount*100).toFixed(2)}%<${(minDiscount*100).toFixed(2)}% market=${marketPrice} offerPrice=${offerPrice.toFixed(6)}`); return; }
 
   // 7. Amount cap
   const maxUsdt = parseFloat(await getConfig('autotake_max_amount_usdt') || '50');
-  if (wantAmt > maxUsdt) return;
+  if (wantAmt > maxUsdt) { _p(`maxUsdt wantAmt=${wantAmt}>${maxUsdt}`); return; }
 
   // 8. Daily limit
   const today = new Date().toISOString().slice(0, 10);
@@ -552,11 +555,11 @@ async function _evaluateAutoTake(offerId, msg) {
     "SELECT COUNT(*) as cnt FROM chain_events WHERE event_type = 'autotake_accepted' AND observed_at >= ?"
   ).get(today + 'T00:00:00Z')?.cnt || 0;
   const dailyLimit = parseInt(await getConfig('autotake_daily_limit') || '3');
-  if (dailyCount >= dailyLimit) return;
+  if (dailyCount >= dailyLimit) { _p(`dailyLimit ${dailyCount}>=${dailyLimit}`); return; }
 
   // 9. Cooldown (configurable, default 30s, UTXO conflict prevention)
   const cooldownMs = (parseInt(await getConfig('autotake_cooldown_sec') || '30')) * 1000;
-  if (_lastAutoTakeAt && Date.now() - _lastAutoTakeAt < cooldownMs) return;
+  if (_lastAutoTakeAt && Date.now() - _lastAutoTakeAt < cooldownMs) { _p(`cooldown ${Date.now()-_lastAutoTakeAt}ms<${cooldownMs}ms`); return; }
 
   // 10. Find best local agent (has BNB wallet with most USDT)
   let bestRelay = null;
@@ -571,7 +574,7 @@ async function _evaluateAutoTake(offerId, msg) {
     bestRelay = relay.id;
     break;
   }
-  if (!bestRelay) return;
+  if (!bestRelay) { _p(`bestRelay_null localAddrs.length=${localAddrs.length}`); return; }
 
   console.log(`[autoTaker] opportunity: ${giveAmt} KAS @ ${offerPrice.toFixed(6)} (${(discount * 100).toFixed(2)}% below market ${marketPrice})`);
 
