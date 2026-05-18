@@ -86,6 +86,14 @@ export async function onBroadcastWritten(row) {
 import { randomUUID } from 'crypto';
 import { processAccept as machineAccept, processManualConfirm, processCancel as machineCancel, processPaymentSubmit, transition as exchangeTransition } from './exchange-machine.js';
 
+// NWT N19.3 P0 hotfix 5/18: _deriveMarketKey 被 sub#3b deca1e74 delete script 边界吞 (类 N14.7 imports 吞 KI).
+// N14.7 hotfix 72027b2d 还原 imports + EXCHANGE_MSG const 但漏 _deriveMarketKey, 5+ hr chain-broadcast offer
+// silently fail (handleExchange L122 ReferenceError, exchange_offers 不 indexed, broker-internal publish
+// 不走这 path 才没暴). 71 expired offer 部分根因 = 外部 chain maker broadcast 失败 not indexed.
+function _deriveMarketKey(giveAsset, wantAsset) {
+  return [giveAsset, wantAsset].sort().join('|');
+}
+
 // Exchange protocol v2 message type constants
 const EXCHANGE_MSG = {
   PUBLISH:   'kanet_exchange_v1',
