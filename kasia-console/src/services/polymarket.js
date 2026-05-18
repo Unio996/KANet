@@ -34,6 +34,10 @@ const NEG_RISK_CTF_EXCHANGE = '0xC5d563A36AE78145C45a50134d48A1215220f80a';
 const NEG_RISK_ADAPTER = '0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296';
 const CTF_EXCHANGE_V2 = '0xE111180000d2663C0091e4f400237545B87B996B';
 const NEG_RISK_CTF_EXCHANGE_V2 = '0xe2222d279d744050d28e00520010520000310F59';
+// CTF (Conditional Tokens Framework) ERC-1155 — holds actual position shares.
+// Binary + NegRisk markets all use this single contract (NegRisk wraps but balanceOf
+// on raw token_id returns ultimate truth — r178 verified J2 Bottoms NO 0 sh via this).
+const POLYGON_CTF_TOKEN = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
 // V1 path: spenders draw USDC.e directly. V2 spenders draw pUSD instead, so
 // they belong in POLYMARKET_PUSD_SPENDERS, not here.
 const POLYMARKET_SPENDERS = [
@@ -82,6 +86,29 @@ export async function getUsdcBalance(address) {
     });
   } catch (e) {
     console.error('[polymarket] USDC balance error:', e.message);
+    return null;
+  }
+}
+
+/**
+ * Query on-chain CTF ERC-1155 balance for a specific token_id (= asset_id from CLOB).
+ * Returns shares as float. Ultimate truth source for position size — getTrades
+ * aggregation misses redeems (CTF.redeemPositions / NegRiskAdapter.redeemPositions
+ * bypass CLOB) so chain hard-verify is needed to filter stale positions.
+ * Bettor r172 + r178 ack: J2 Bottoms NO verified 0 sh via this path.
+ */
+export async function getCtfBalance(walletAddress, tokenId) {
+  try {
+    return await withProvider(POLYGON_RPC, async (provider) => {
+      const ctf = new ethers.Contract(POLYGON_CTF_TOKEN, [
+        'function balanceOf(address owner, uint256 id) view returns (uint256)'
+      ], provider);
+      const bal = await ctf.balanceOf(walletAddress, tokenId);
+      // CTF positions are 6-decimal (USDC-denominated), same as collateral.
+      return parseFloat(ethers.formatUnits(bal, USDC_DECIMALS));
+    });
+  } catch (e) {
+    console.warn(`[polymarket] getCtfBalance failed for ${tokenId?.toString().slice(0,16)}...: ${e.message}`);
     return null;
   }
 }

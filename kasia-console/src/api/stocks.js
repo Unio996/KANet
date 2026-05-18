@@ -8,7 +8,7 @@ import { sqlite } from '../db/client.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 import crypto, { randomUUID } from 'crypto';
 import { fetchStockData, fetchYahooQuote, cachedPredictions, cachedCommodities, cachedFunding, cachedSentiment, fetchAllMarkets, cachedCrypto, cachedFundamentals, cachedIndustryPeers, cachedStockKlines, DIVERGENCE_WARN_THRESHOLD } from '../services/market-data.js';
-import { getPolygonWallet, getUsdcBalance, getPusdBalance, createApiKey, getOrderBook, checkAllowance, approveUsdc, checkTxStatus, redeemPositions, checkRedeemStatus, sweepUsdc, fetchUserActivity, fetchAccountValue, getMarketWinner, migrateToV2, ensureCtfApprovedForV2 } from '../services/polymarket.js';
+import { getPolygonWallet, getUsdcBalance, getPusdBalance, createApiKey, getOrderBook, checkAllowance, approveUsdc, checkTxStatus, redeemPositions, checkRedeemStatus, sweepUsdc, fetchUserActivity, fetchAccountValue, getMarketWinner, migrateToV2, ensureCtfApprovedForV2, getCtfBalance } from '../services/polymarket.js';
 import { predictDepositWallet, deployDepositWallet, transferPusdToDepositWallet, setupDepositWalletAllowances } from '../services/polymarket-deposit-wallet.js';
 import { decrypt } from '../services/crypto.js';
 
@@ -452,6 +452,31 @@ export async function registerStockRoutes(fastify) {
         }
       } catch (e) {
         console.warn('[predictions] data-api overlay failed:', e.message);
+      }
+
+      // Bettor r172 + r178 ack — chain CTF.balanceOf hard-verify for ACTIVE positions.
+      // Root: CTF.redeemPositions / NegRiskAdapter.redeemPositions bypass CLOB → getTrades
+      // aggregation never decreases on redeem → stale "Active" row永久 (Owner 5/17 12:00
+      // 严训 Bottoms NO 351 stale). Chain balanceOf is ultimate truth.
+      // Filter epsilon 0.01 (dust); drift > 0.5 sh → chain wins (partial redeem case).
+      try {
+        const polyAddrChain = getPolygonWallet(relay_node_id)?.address;
+        const activeForChain = allPositions.filter(p => !p.settled && p.asset && p.size > 0);
+        if (polyAddrChain && activeForChain.length > 0) {
+          await Promise.all(activeForChain.map(async (p) => {
+            const chainBal = await getCtfBalance(polyAddrChain, p.asset);
+            if (chainBal == null) return; // RPC fail — keep aggregation, don't filter (avoid false-hide)
+            if (chainBal < 0.01) { p._stale = true; return; }
+            if (Math.abs(chainBal - p.size) > 0.5) p.size = chainBal; // partial redeem → chain wins
+          }));
+          const before = allPositions.length;
+          for (let i = allPositions.length - 1; i >= 0; i--) {
+            if (allPositions[i]._stale) allPositions.splice(i, 1);
+          }
+          if (allPositions.length < before) console.log(`[predictions] chain hard-verify filtered ${before - allPositions.length} stale active positions for relay ${relay_node_id.slice(0,8)}`);
+        }
+      } catch (e) {
+        console.warn('[predictions] chain hard-verify failed:', e.message);
       }
 
       // For settled positions: query real on-chain balance.
