@@ -6,18 +6,6 @@ export default {
   description: 'P1.5 oracle resilience: /api/trade/kas-price multi-source + valid response shape',
   domain: 'exchange',
   tags: ['regression', 'oracle', 'kas-price'],
-  steps: [
-    {
-      action: 'http_post',
-      url: '/api/trade/kas-price',
-      method: 'GET',
-      expect: {
-        must: {
-          http_status_equals: 200,
-        },
-      },
-    },
-  ],
 
   async run() {
     const fetch = (await import('node:undici')).fetch ?? globalThis.fetch;
