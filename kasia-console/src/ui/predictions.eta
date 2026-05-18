@@ -74,19 +74,21 @@
        Additive only — old modal/tabs untouched (reparent happens Phase 1b/1c/1d).
        URL hash routing: /predictions#scan|recs|positions|history -->
   <div class="sticky top-0 z-30 -mx-4 px-4 py-2 mb-3 bg-warm-50 border-b border-warm-200 shadow-sm">
-    <div class="flex items-center gap-2 flex-wrap mb-2 text-[11px]">
-      <span class="text-ink-400 font-medium">Mode:</span>
-      <button @click="currentMode = 'fossa-stable'" :class="currentMode === 'fossa-stable' ? 'bg-orange-500 text-white font-bold' : 'bg-warm-100 text-ink-600 hover:bg-warm-200'" class="px-2.5 py-1 rounded">★ Fossa-Stable</button>
-      <button @click="currentMode = 'scavenger'"    :class="currentMode === 'scavenger' ? 'bg-brand-500 text-white font-bold' : 'bg-warm-100 text-ink-600 hover:bg-warm-200'" class="px-2.5 py-1 rounded">Scavenger</button>
-      <button @click="currentMode = 'variant'"      :class="currentMode === 'variant' ? 'bg-amber-500 text-white font-bold' : 'bg-warm-100 text-ink-600 hover:bg-warm-200'" class="px-2.5 py-1 rounded">Variant</button>
-      <button @click="currentMode = 'all'"          :class="currentMode === 'all' ? 'bg-ink-700 text-white font-bold' : 'bg-warm-100 text-ink-600 hover:bg-warm-200'" class="px-2.5 py-1 rounded">全部</button>
-      <span class="text-ink-300 text-[10px] ml-2">(Phase 1a inserted, content reparent 1b/1c/1d)</span>
+    <!-- Phase 3a mobile: overflow-x-auto + whitespace-nowrap so mode buttons scroll on small screen -->
+    <div class="flex items-center gap-2 overflow-x-auto mb-2 text-[11px] -mx-4 px-4 md:flex-wrap md:overflow-visible md:mx-0 md:px-0">
+      <span class="text-ink-400 font-medium whitespace-nowrap">Mode:</span>
+      <button @click="currentMode = 'fossa-stable'" :class="currentMode === 'fossa-stable' ? 'bg-orange-500 text-white font-bold' : 'bg-warm-100 text-ink-600 hover:bg-warm-200'" class="px-2.5 py-1 rounded whitespace-nowrap">★ Fossa-Stable</button>
+      <button @click="currentMode = 'scavenger'"    :class="currentMode === 'scavenger' ? 'bg-brand-500 text-white font-bold' : 'bg-warm-100 text-ink-600 hover:bg-warm-200'" class="px-2.5 py-1 rounded whitespace-nowrap">Scavenger</button>
+      <button @click="currentMode = 'variant'"      :class="currentMode === 'variant' ? 'bg-amber-500 text-white font-bold' : 'bg-warm-100 text-ink-600 hover:bg-warm-200'" class="px-2.5 py-1 rounded whitespace-nowrap">Variant</button>
+      <button @click="currentMode = 'all'"          :class="currentMode === 'all' ? 'bg-ink-700 text-white font-bold' : 'bg-warm-100 text-ink-600 hover:bg-warm-200'" class="px-2.5 py-1 rounded whitespace-nowrap">全部</button>
+      <span class="text-ink-300 text-[10px] ml-2 hidden md:inline whitespace-nowrap">(Phase 1a inserted, content reparent 1b/1c/1d)</span>
     </div>
-    <div class="flex items-center gap-1 text-sm border-b border-warm-200">
-      <button @click="setCurrentTab('scan')"      :class="currentTab === 'scan'      ? 'border-b-2 border-orange-500 text-orange-700 font-bold' : 'text-ink-500 hover:text-ink-700'" class="px-4 py-2">🔍 扫单</button>
-      <button @click="setCurrentTab('recs')"      :class="currentTab === 'recs'      ? 'border-b-2 border-brand-500 text-brand-700 font-bold' : 'text-ink-500 hover:text-ink-700'" class="px-4 py-2">📋 我的推荐</button>
-      <button @click="setCurrentTab('positions')" :class="currentTab === 'positions' ? 'border-b-2 border-amber-500 text-amber-700 font-bold' : 'text-ink-500 hover:text-ink-700'" class="px-4 py-2">💼 持仓</button>
-      <button @click="setCurrentTab('history')"   :class="currentTab === 'history'   ? 'border-b-2 border-purple-500 text-purple-700 font-bold' : 'text-ink-500 hover:text-ink-700'" class="px-4 py-2">📜 历史</button>
+    <!-- Phase 3a mobile: tab labels collapse 4 char on mobile, full on md+ -->
+    <div class="flex items-center gap-1 text-sm border-b border-warm-200 overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0">
+      <button @click="setCurrentTab('scan')"      :class="currentTab === 'scan'      ? 'border-b-2 border-orange-500 text-orange-700 font-bold' : 'text-ink-500 hover:text-ink-700'" class="px-3 py-2 whitespace-nowrap"><span class="md:hidden">🔍</span><span class="hidden md:inline">🔍 扫单</span></button>
+      <button @click="setCurrentTab('recs')"      :class="currentTab === 'recs'      ? 'border-b-2 border-brand-500 text-brand-700 font-bold' : 'text-ink-500 hover:text-ink-700'" class="px-3 py-2 whitespace-nowrap"><span class="md:hidden">📋</span><span class="hidden md:inline">📋 我的推荐</span></button>
+      <button @click="setCurrentTab('positions')" :class="currentTab === 'positions' ? 'border-b-2 border-amber-500 text-amber-700 font-bold' : 'text-ink-500 hover:text-ink-700'" class="px-3 py-2 whitespace-nowrap"><span class="md:hidden">💼</span><span class="hidden md:inline">💼 持仓</span></button>
+      <button @click="setCurrentTab('history')"   :class="currentTab === 'history'   ? 'border-b-2 border-purple-500 text-purple-700 font-bold' : 'text-ink-500 hover:text-ink-700'" class="px-3 py-2 whitespace-nowrap"><span class="md:hidden">📜</span><span class="hidden md:inline">📜 历史</span></button>
       <!-- Phase 2a: compactView toggle (VERBOSE default per Owner pattern, power user opt-in collapse) -->
       <div class="ml-auto flex items-center gap-2">
         <button @click="compactView = !compactView; try { localStorage.setItem('predictions_compactView', compactView ? '1' : '0'); } catch {}"
