@@ -81,17 +81,41 @@ function _parseExecutionRow(row) {
 
 // NWT N14.5 Phase β Step 2 sub#3a (5/18): _otcDeprecated410 helper 删 (routes 一并删, helper dead).
 
+// NWT N19.4 P1.5 5/18: in-memory KAS price cache (10min stale tolerance, multi-source fallback survival).
+// 单 oracle 429 时 autoTaker / market-seeder 不再 marketPrice_null silent exit.
+let _kasPriceCache = null; // { price, ts, source }
+
 export async function registerTradingRoutes(fastify) {
 
-  // GET /api/trade/kas-price — current KAS/USDT price (backend proxy, no CORS)
+  // GET /api/trade/kas-price — KAS/USDT mid price (multi-source fallback + stale cache).
+  // NWT N19.4 P1.5 5/18: 单 MEXC source 撞 429 → autoTaker marketPrice_null silent exit.
+  // 修法: 3 source fallback chain + 10min stale cache (last successful price 不丢).
+  // sources: MEXC → KuCoin → Binance → cache (≤10min stale).
   fastify.get('/api/trade/kas-price', async (request, reply) => {
-    try {
-      const res = await fetch('https://api.mexc.com/api/v3/ticker/price?symbol=KASUSDT', { signal: AbortSignal.timeout(3000) });
-      const data = await res.json();
-      return reply.send({ price: parseFloat(data.price), source: 'mexc' });
-    } catch {
-      return reply.send({ price: 0, source: 'unavailable' });
+    const SOURCES = [
+      { name: 'mexc',    url: 'https://api.mexc.com/api/v3/ticker/price?symbol=KASUSDT', parse: d => parseFloat(d.price) },
+      { name: 'kucoin',  url: 'https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=KAS-USDT', parse: d => parseFloat(d.data?.price) },
+      { name: 'binance', url: 'https://api.binance.com/api/v3/ticker/price?symbol=KASUSDT', parse: d => parseFloat(d.price) },
+    ];
+    for (const src of SOURCES) {
+      try {
+        const res = await fetch(src.url, { signal: AbortSignal.timeout(3000) });
+        if (!res.ok) continue;
+        const data = await res.json();
+        const price = src.parse(data);
+        if (price && price > 0 && Number.isFinite(price)) {
+          _kasPriceCache = { price, ts: Date.now(), source: src.name };
+          return reply.send({ price, source: src.name });
+        }
+      } catch { /* try next source */ }
     }
+    // All sources fail → use stale cache if within 10min
+    const STALE_TTL_MS = 10 * 60_000;
+    if (_kasPriceCache && (Date.now() - _kasPriceCache.ts) < STALE_TTL_MS) {
+      const ageS = Math.round((Date.now() - _kasPriceCache.ts) / 1000);
+      return reply.send({ price: _kasPriceCache.price, source: `cache:${_kasPriceCache.source} (${ageS}s stale)`, stale: true });
+    }
+    return reply.send({ price: 0, source: 'unavailable' });
   });
 
   // GET /trading — render trading page (legacy, preserved)
