@@ -31,8 +31,12 @@ export function start() {
     // Bug H γ 5/14 Sub #2 (Owner 12:05 钦定 candidate A v2): 并行 tickEscrow scan for
     // user_escrow_balances pending_prepay. ESCROW_MODE check inside tickEscrow — flag off → 直 return.
     tickEscrow().catch(e => console.warn(`[broker-bsc-intake-escrow] tick err: ${e.message}`));
+    // NWT N19.8 Owner 自主运营 #3 5/18: Polygon intake watcher additive (Option A).
+    // T3.B Polygon BUY E2E unblock — ExtClient-1 N18 bridge 已有 Polygon USDT, broker 也有 14 Polygon USDT.
+    // file misnomer (bsc-intake-watcher 含 polygon tick) accepted, Option B rename 排日.
+    tickPolygonEscrow().catch(e => console.warn(`[broker-polygon-intake-escrow] tick err: ${e.message}`));
   }, TICK_MS);
-  console.log(`[broker-bsc-intake] started, tick=${TICK_MS / 1000}s — BSC USDT inflow → legacy BUY flow + Bug H escrow flow (flag-gated)`);
+  console.log(`[broker-bsc-intake] started, tick=${TICK_MS / 1000}s — BSC USDT inflow + Polygon USDT inflow + Bug H escrow flow (flag-gated)`);
   return { ok: true };
 }
 
@@ -276,6 +280,125 @@ export async function tickEscrow() {
     }
   } catch (err) {
     console.error(`[broker-bsc-intake-escrow] orphan detect err: ${err.message}`);
+  }
+
+  return { ok: true, scanned: pending.length, matched };
+}
+
+// NWT N19.8 Option A 5/18 (Owner 自主运营 #3): Polygon intake watcher (parallel to tickEscrow but chain='polygon').
+// Pragmatic additive — file misnomer (bsc-intake-watcher 含 Polygon tick) accepted, Option B rename → broker-evm-intake-watcher 排日.
+// Polygon ExtClient N18 bridge 已有 USDT, broker 14 Polygon USDT. T3.B Polygon BUY E2E unblock.
+export async function tickPolygonEscrow() {
+  if (process.env.BROKER_V3_ESCROW_MODE !== 'true') return { ok: true, reason: 'escrow_mode_off' };
+
+  // Scan Polygon broker addr for pending escrow rows (BUY flow user prepays USDT on Polygon)
+  const brokerWallet = sqlite.prepare(
+    `SELECT address FROM agent_wallets WHERE relay_node_id = ? AND chain = 'polygon' AND is_default = 1 LIMIT 1`
+  ).get(BROKER_RELAY_ID);
+  if (!brokerWallet?.address) return { ok: false, reason: 'no_broker_polygon_wallet' };
+  const brokerPolygonAddr = brokerWallet.address;
+
+  // BUY pending escrow rows on polygon chain
+  const pending = sqlite.prepare(`
+    SELECT id, quote_seq, side, user_kasia_addr, amount_quoted, asset, chain, broker_recv_addr, target_amount, expires_at, status, prepayment_tx, created_at
+    FROM user_escrow_balances
+    WHERE (status = 'pending_prepay' OR (status = 'active' AND offer_id IS NULL))
+      AND side = 'buy_kas'
+      AND chain = 'polygon'
+      AND broker_recv_addr = ?
+      AND expires_at > datetime('now')
+    ORDER BY created_at ASC
+    LIMIT 10
+  `).all(brokerPolygonAddr);
+  if (!pending.length) return { ok: true, scanned: 0, matched: 0 };
+
+  // Scan Polygon USDT transfers to broker
+  const { scanRecentTransfers } = await import('./cross-chain-verify.mjs');
+  const scan = await scanRecentTransfers({ chain: 'polygon', recipient: brokerPolygonAddr, span_blocks: ESCROW_SCAN_SPAN_BLOCKS, paymentAsset: 'usdt' });
+  if (!scan.ok || !scan.events?.length) return { ok: true, scanned: pending.length, matched: 0 };
+
+  let matched = 0;
+  for (const e of pending) {
+    if (e.status === 'pending_prepay') {
+      const expectedAmount = parseFloat(e.amount_quoted);
+      // Bug AC drop block guard (same as BSC) — UNIQUE prepayment_tx + amount uniqueness mitigates historical inflow
+      const tx = scan.events.find(t => {
+        return Math.abs(t.amount - expectedAmount) / expectedAmount <= ESCROW_AMOUNT_TOLERANCE_PCT;
+      });
+      if (!tx) continue;
+
+      try {
+        sqlite.prepare(`
+          UPDATE user_escrow_balances
+          SET prepayment_tx = ?, amount_received = ?, user_refund_addr = ?, status = 'active',
+              expires_at = datetime('now', '+30 minutes'), updated_at = datetime('now')
+          WHERE id = ? AND status = 'pending_prepay'
+        `).run(tx.tx_hash, String(tx.amount), tx.from || null, e.id);
+      } catch (err) {
+        if (/UNIQUE constraint failed/.test(err.message)) {
+          console.warn(`[broker-polygon-intake-escrow] prepayment_tx ${tx.tx_hash.slice(0,16)} already used (anti-replay)`);
+          continue;
+        }
+        console.error(`[broker-polygon-intake-escrow] UPDATE err for escrow ${e.id.slice(0,8)}: ${err.message}`);
+        continue;
+      }
+
+      // DM user — payment detected (mirror BSC path L201-214)
+      try {
+        const { enqueue } = await import('./broker-action-queue.js');
+        enqueue({
+          kind: 'dm_auto_payment_detected',
+          peer: e.user_kasia_addr,
+          payload: {
+            message: `✓ 已收到你的 ${tx.amount} ${e.asset} (Polygon)\nTX: ${tx.tx_hash}\n链上可查: https://polygonscan.com/tx/${tx.tx_hash}\n下一步: 正在替你挂单, 等成交.`
+          },
+        });
+      } catch (err) { console.warn(`[broker-polygon-intake-escrow] DM payment detected err for escrow ${e.id.slice(0,8)}: ${err.message}`); }
+    }
+
+    // call _doPublishAfterPrepay (same as BSC path)
+    try {
+      const { _doPublishAfterPrepay } = await import('./broker-v3/router.js');
+      const r = await _doPublishAfterPrepay(e.id, BROKER_RELAY_ID);
+      if (!r.ok) {
+        console.error(`[broker-polygon-intake-escrow] _doPublishAfterPrepay fail for escrow ${e.id.slice(0,8)}: ${r.error}`);
+      } else {
+        matched++;
+        const prepayLabel = e.status === 'active' ? 'retry' : `prepay-detected (tx=${e.prepayment_tx?.slice(0,16)})`;
+        console.log(`[broker-polygon-intake-escrow] escrow ${e.id.slice(0,8)} ${prepayLabel} → offer ${r.offer_id?.slice(0,12)} published`);
+        try {
+          const { tryMarketableMatch } = await import('./exchange-machine.js');
+          const matchResult = await tryMarketableMatch(e.id);
+          if (matchResult.matched) {
+            console.log(`[broker-polygon-intake-escrow] escrow ${e.id.slice(0,8)} marketable MATCH cross-settled`);
+          }
+        } catch (err) { console.warn(`[broker-polygon-intake-escrow] matcher err: ${err.message}`); }
+      }
+    } catch (err) {
+      console.error(`[broker-polygon-intake-escrow] _doPublishAfterPrepay err for escrow ${e.id.slice(0,8)}: ${err.message}`);
+    }
+  }
+
+  // Polygon orphan detection: 简化 vs BSC — 仅 mark manual_review, 不 inline refund (Polygon refund 排 Option B 再加)
+  try {
+    const matchedTxIds = new Set();
+    for (const e of pending) {
+      const exp = parseFloat(e.amount_quoted);
+      const tx = scan.events.find(t => Math.abs(t.amount - exp) / exp <= ESCROW_AMOUNT_TOLERANCE_PCT);
+      if (tx) matchedTxIds.add(tx.tx_hash);
+    }
+    const { randomUUID: rnd } = await import('node:crypto');
+    const orphanInsert = sqlite.prepare(`INSERT OR IGNORE INTO broker_orphan_inflows (id, chain, asset, amount, from_address, to_address, prepayment_tx, status) VALUES (?, 'polygon', 'USDT', ?, ?, ?, ?, 'manual_review')`);
+    for (const t of scan.events) {
+      if (matchedTxIds.has(t.tx_hash)) continue;
+      const orphanId = rnd();
+      const r = orphanInsert.run(orphanId, String(t.amount), t.from || null, brokerPolygonAddr, t.tx_hash);
+      if (r.changes > 0) {
+        console.warn(`[broker-polygon-intake-escrow] 🚨 orphan Polygon USDT: ${t.amount} from ${t.from?.slice(0,16) || 'unknown'} tx=${t.tx_hash.slice(0,16)} → orphan_id=${orphanId.slice(0,8)} status=manual_review (Polygon auto-refund 排日 Option B)`);
+      }
+    }
+  } catch (err) {
+    console.error(`[broker-polygon-intake-escrow] orphan detect err: ${err.message}`);
   }
 
   return { ok: true, scanned: pending.length, matched };
