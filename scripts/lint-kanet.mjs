@@ -542,6 +542,30 @@ function checkChainEqNormalize(filepath, content) {
   }
 }
 
+// ── KI-30 (Bettor r181 2026-05-19): chain TX amount 必 toFixed(8) 守 Kaspa sompi precision ──
+// 真因: JS 浮点 17 decimal → Kaspa wallet API reject 'Amount cannot have more than 8 decimal places'.
+// Bug PRED-DECIMAL surface 第 1 prediction test fire 时撞 (Bettor r181 完整诊).
+// Whitelist marker `lint-allow-chain-amount-precision: <reason>` 同行 OR 前 5 行.
+function checkKI30_chain_amount_precision(filepath, content) {
+  // Skip test/migration/scripts (test fixture 可能 raw amount)
+  if (/[/\\]test-framework[/\\]/.test(filepath)) return;
+  if (/[/\\]scripts[/\\]/.test(filepath)) return;
+  if (/[/\\]db[/\\]migrate\.js$/.test(filepath)) return;
+
+  const lines = content.split('\n');
+  // 匹 `amount: String(xxxKas|xxxAmount|qty|sizeKas|stakeKas|netKas|numShares)`
+  // 跟 protocolMsg 内 give_amount/want_amount: String(...) (= 上链 amount field)
+  const pattern = /(?:amount|give_amount|want_amount):\s*String\(\s*([a-zA-Z_$][\w$]*)\s*\)/;
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(pattern);
+    if (!m) continue;
+    const windowStart = Math.max(0, i - 5);
+    const windowText = lines.slice(windowStart, i + 1).join('\n');
+    if (/lint-allow-chain-amount-precision/.test(windowText)) continue;
+    violate('KI-30', `[KI-30] chain TX amount field 用 String(${m[1]}) → JS 浮点 17-decimal Kaspa wallet reject. 必 .toFixed(8) 守 sompi 8-decimal max precision (Bettor r181 5/19 Bug PRED-DECIMAL). 如确需 raw String, 加注释 'lint-allow-chain-amount-precision: <reason>' (前 5 行 OR 同行).`, filepath, i + 1);
+  }
+}
+
 // ── 跑 ──
 for (const fp of targets) {
   let content;
@@ -561,6 +585,7 @@ for (const fp of targets) {
   checkABE_A6_protocol_status_owner(fp, content);  // ABE-A.6: protocol_status owner invariant
   checkChainEqNormalize(fp, content);  // Bug-C-5/14: chain === naked compare normalize
   checkChainHintDynamic(fp, content);  // Bug-D-residual-5/14: '回 1-N 选' hint hardcoded
+  checkKI30_chain_amount_precision(fp, content);  // KI-30 (Bettor r181 5/19): chain TX amount 必 toFixed(8)
 }
 checkR10();
 

@@ -148,7 +148,7 @@ export async function settlePredictionOutcomes() {
             const result = await sendCommandAsync(escrowRelay.id, {
               type: 'transfer',
               target: winnerAddr,
-              amount: String(stakeKas),
+              amount: stakeKas.toFixed(8),  // KI-30: Kaspa sompi max 8 decimal precision
             });
             payoutTxId = result?.txId || null;
             if (payoutTxId) break;
