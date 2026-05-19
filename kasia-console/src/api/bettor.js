@@ -1,5 +1,6 @@
 import { sqlite } from '../db/client.js';
 import { randomUUID } from 'node:crypto';
+import { lockFunds } from '../services/fund-lock.js';
 import { runScan, isScanRunning } from '../services/bettor-scanner.js';
 import { runScavengerScan, isScavengerRunning } from '../services/bettor-scavenger.js';
 import { resolveExpired, isResolverRunning } from '../services/bettor-resolver.js';
@@ -1025,6 +1026,57 @@ export async function registerBettorRoutes(fastify) {
     } catch {}
     if (!makerAddr) return reply.code(400).send({ ok: false, error: 'maker_relay_id has no resolvable kaspa address' });
 
+    // r177 Phase 2b'.1 (Bettor r205 共识 A1.a Owner trust + A2.b 真 prediction math + 1000 KAS cap):
+    // stake = (1 - published_price) × numShares × (1 / KAS_USD) = max payout to taker if maker loses.
+    // 真 prediction outcome share math, 不是 wager. R-MVP-MUST-ALIGN-SPEC sediment 守.
+    // cap 解早期 maker 门槛: MAX_STAKE_PER_OFFER (default 1000 KAS = ~$34 max payout @ KAS=$0.034).
+    const { getCachedKasPrice } = await import('../services/market-data.js');
+    const { getConfig } = await import('../data/settings/configs.js');
+    const kasUsd = getCachedKasPrice() || 0.034;
+    const stakeKas = (1 - price) * numShares * (1 / kasUsd);
+    if (!Number.isFinite(stakeKas) || stakeKas <= 0) {
+      return reply.code(400).send({ ok: false, error: `stake calc invalid: ${stakeKas} (price=${price}, numShares=${numShares}, kasUsd=${kasUsd})` });
+    }
+    const maxStakeRaw = await getConfig('kanet_prediction_max_stake_per_offer');
+    const MAX_STAKE_PER_OFFER = parseFloat(maxStakeRaw) || 1000;
+    if (stakeKas > MAX_STAKE_PER_OFFER) {
+      return reply.code(400).send({
+        ok: false,
+        error: `stake ${stakeKas.toFixed(2)} KAS exceeds max ${MAX_STAKE_PER_OFFER} KAS per offer — reduce share size (= size_kas / price). Hint: max shares ≈ ${(MAX_STAKE_PER_OFFER * kasUsd / (1 - price)).toFixed(1)} at price ${price}`,
+        stake_required_kas: stakeKas, max_stake_kas: MAX_STAKE_PER_OFFER,
+      });
+    }
+
+    // r177 Phase 2b'.1 escrow lock: maker stake KAS → Owner-trust escrow addr chain TX BEFORE broadcast.
+    // chain-first 守: escrow fail 早 abort 比 broadcast 后 fail 干净 (链上 0 痕迹).
+    const escrowAddr = await getConfig('kanet_prediction_escrow_addr');
+    if (!escrowAddr || !escrowAddr.startsWith('kaspa:')) {
+      return reply.code(503).send({ ok: false, error: 'kanet_prediction_escrow_addr not configured — operator action required' });
+    }
+    let escrowTxId = null;
+    {
+      const { sendCommandAsync } = await import('../services/relay-manager.js');
+      const ESCROW_MAX_ATTEMPTS = 3;
+      for (let attempt = 1; attempt <= ESCROW_MAX_ATTEMPTS; attempt++) {
+        try {
+          const result = await sendCommandAsync(b.maker_relay_id, {
+            type: 'transfer',
+            target: escrowAddr,
+            amount: String(stakeKas),
+          });
+          escrowTxId = result?.txId || null;
+          if (escrowTxId) break;
+          if (attempt < ESCROW_MAX_ATTEMPTS) await new Promise(r => setTimeout(r, attempt * 5000));
+        } catch (err) {
+          console.log(`[prediction-publish] escrow attempt ${attempt}/${ESCROW_MAX_ATTEMPTS} fail: ${err.message}`);
+          if (attempt < ESCROW_MAX_ATTEMPTS) await new Promise(r => setTimeout(r, attempt * 5000));
+        }
+      }
+    }
+    if (!escrowTxId) {
+      return reply.code(503).send({ ok: false, error: `escrow lock chain TX failed after 3 attempts — offer not created. Maker stake ${stakeKas.toFixed(2)} KAS not locked.` });
+    }
+
     const protocolMsg = {
       t: 'kanet_exchange_v1',
       id,
@@ -1046,6 +1098,10 @@ export async function registerBettorRoutes(fastify) {
       outcome_oracle_hook: b.outcome_oracle_hook || 'polymarket_uma_mirror',
       outcome_max_deviation_pp: maxDeviation,
       published_price: price,
+      // r177 Phase 2b'.1 extend: stake/payout 真 prediction math, peers 验证
+      stake_locked_kas: stakeKas,
+      max_payout_kas: stakeKas,  // taker 最大 payout = maker stake
+      escrow_lock_tx: escrowTxId,
     };
 
     // r177 Phase 2a hotfix PB1 (Bettor r199): 5-attempt 50s → 3-attempt 30s.
@@ -1078,11 +1134,11 @@ export async function registerBettorRoutes(fastify) {
         }
       }
     } catch (e) {
-      return reply.code(500).send({ ok: false, error: `broadcast import fail: ${e.message}` });
+      return reply.code(500).send({ ok: false, error: `broadcast import fail: ${e.message}`, escrow_lock_tx: escrowTxId, warning: 'escrow locked but broadcast import fail — manual refund needed' });
     }
 
     if (!broadcastTx) {
-      return reply.code(503).send({ ok: false, error: 'Broadcast failed after 3 attempts — offer not created. Relay may be syncing.' });
+      return reply.code(503).send({ ok: false, error: 'Broadcast failed after 3 attempts — offer not created. Escrow locked, manual refund needed.', escrow_lock_tx: escrowTxId, stake_locked_kas: stakeKas });
     }
 
     // r177 Phase 2a hotfix PB2 (Bettor r199): DB insert 3-attempt retry before 500.
@@ -1092,6 +1148,15 @@ export async function registerBettorRoutes(fastify) {
     //   不加新 priced_at col, 不动 migration.
     // r177 Phase 2a hotfix PB4: 双 populate maker_kaspa_addr (kaspa addr) + maker_relay_id (UUID).
     //   verifier Layer 4 whitelist 查 maker_relay_id; chain deliver 用 maker_kaspa_addr.
+    // r177 Phase 2b'.1: metadata json carries escrow_lock_tx + stake_locked_kas + max_payout_kas + settle_outcome_phase='escrowed'
+    const metadataJson = JSON.stringify({
+      escrow_lock_tx: escrowTxId,
+      stake_locked_kas: stakeKas,
+      max_payout_kas: stakeKas,
+      kas_usd_at_publish: kasUsd,
+      settle_outcome_phase: 'escrowed',  // Phase 2b'.2 settler 改 'paid' OR 'refunded'
+    });
+
     let dbInsertErr = null;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
@@ -1100,23 +1165,41 @@ export async function registerBettorRoutes(fastify) {
           verification, protocol_status, is_fully_observed, market_key, expires_at,
           broadcast_at, created_at, updated_at,
           outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side, outcome_end_date, outcome_oracle_hook, outcome_max_deviation_pp,
-          published_price, maker_kaspa_addr, maker_relay_id
-        ) VALUES (?, ?, 0, 'prediction_outcome_share', ?, 'KAS', ?, ?, 'prediction_outcome_match', 'open', 0, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          published_price, maker_kaspa_addr, maker_relay_id, metadata
+        ) VALUES (?, ?, 0, 'prediction_outcome_share', ?, 'KAS', ?, ?, 'prediction_outcome_match', 'open', 0, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
           .run(id, broadcastTx, String(numShares), String(sizeKas), makerAddr,
                marketKey, expiresAt, broadcastEmittedAt,
                b.outcome_market_source || 'polymarket', b.outcome_condition_id, b.outcome_token_id, b.outcome_side, b.outcome_end_date,
                b.outcome_oracle_hook || 'polymarket_uma_mirror', maxDeviation, price,
-               makerAddr, b.maker_relay_id);
-        return reply.send({ ok: true, offer_id: id, shares: numShares, want_kas: sizeKas, price, expires_at: expiresAt, broadcast_tx: broadcastTx, broadcast_at: broadcastEmittedAt });
+               makerAddr, b.maker_relay_id, metadataJson);
+        // fund_lock track stake (= 防 maker 重复用同 stake 挂多 offer 超 wallet balance)
+        try {
+          const balRes = await fetch(`http://127.0.0.1:${process.env.PORT || 3100}/api/relay/${b.maker_relay_id}/balance`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()).catch(() => null);
+          const currentBalance = parseFloat(balRes?.balance || '0');
+          const lockRes = lockFunds(makerAddr, id, 'KAS', stakeKas, currentBalance);
+          if (!lockRes.ok) {
+            console.warn(`[prediction-publish] fund_lock failed (non-critical, escrow chain TX already locked): ${lockRes.error}`);
+          }
+        } catch (e) {
+          console.warn(`[prediction-publish] fund_lock skipped: ${e.message}`);
+        }
+        return reply.send({
+          ok: true, offer_id: id, shares: numShares, want_kas: sizeKas, price,
+          expires_at: expiresAt, broadcast_tx: broadcastTx, broadcast_at: broadcastEmittedAt,
+          escrow_lock_tx: escrowTxId, stake_locked_kas: stakeKas, max_payout_kas: stakeKas,
+        });
       } catch (e) {
         dbInsertErr = e;
         console.warn(`[prediction-publish] DB insert attempt ${attempt}/3 fail: ${e.message}`);
         if (attempt < 3) await new Promise(r => setTimeout(r, 50 * attempt));
       }
     }
-    // 3 attempts exhausted — chain emit done but DB write fail. Scout indexer will resync.
-    console.error(`[prediction-publish] DB insert fail after broadcast ${broadcastTx?.slice(0,12)}: ${dbInsertErr?.message}`);
-    return reply.code(500).send({ ok: false, error: dbInsertErr?.message, broadcast_tx: broadcastTx, warning: 'chain emit OK, DB write fail after 3 attempts — scout indexer will resync' });
+    // 3 attempts exhausted — chain emit done but DB write fail. Escrow already locked.
+    console.error(`[prediction-publish] DB insert fail after broadcast ${broadcastTx?.slice(0,12)} escrow ${escrowTxId?.slice(0,12)}: ${dbInsertErr?.message}`);
+    return reply.code(500).send({
+      ok: false, error: dbInsertErr?.message, broadcast_tx: broadcastTx, escrow_lock_tx: escrowTxId, stake_locked_kas: stakeKas,
+      warning: 'chain emit + escrow OK, DB write fail — scout indexer will resync, manual fund_lock cleanup may be needed',
+    });
   });
 
   // POST /api/prediction/accept/:offer_id — taker accept, calls verifyPredictionMatch
