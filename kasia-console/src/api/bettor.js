@@ -1066,7 +1066,7 @@ export async function registerBettorRoutes(fastify) {
           const result = await sendCommandAsync(b.maker_relay_id, {
             type: 'transfer',
             target: escrowAddr,
-            amount: String(stakeKas),
+            amount: stakeKas.toFixed(8),  // KI-30: Kaspa sompi max 8 decimal precision, JS float 17-digit → reject
           });
           escrowTxId = result?.txId || null;
           if (escrowTxId) break;
@@ -1085,10 +1085,10 @@ export async function registerBettorRoutes(fastify) {
       t: 'kanet_exchange_v1',
       id,
       give_asset: 'prediction_outcome_share',
-      give_amount: String(numShares),
+      give_amount: numShares.toFixed(8),  // KI-30 chain-safe precision
       give_chain: null,
       want_asset: 'KAS',
-      want_amount: String(sizeKas),
+      want_amount: sizeKas.toFixed(8),  // KI-30 chain-safe precision
       want_chain: null,
       expires_at: expiresAt,
       verification: 'prediction_outcome_match',
