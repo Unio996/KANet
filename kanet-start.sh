@@ -13,6 +13,9 @@ export KANET_ROOT  # Console 子进程 (scanner spawn scout 用 cwd=$KANET_ROOT/
 # R-NWT-2026-04-28 (d) B phase 4: KANET_TEST_MODE 开 /api/test/reset_peer endpoint (test framework cleanup_peer_broker_state).
 # Production 部署不设此 env, endpoint 不注册. dev 机始终设. test framework 正常用.
 export KANET_TEST_MODE="${KANET_TEST_MODE:-1}"
+# N19.34 P0 (J2 #533 / NWT counter Q2 共识 5/19): NODE_ENV 显 set development for dev script.
+# production deploy 必 override NODE_ENV=production + unset KANET_TEST_MODE, 否则 index.js boot-time double-check refuse start.
+export NODE_ENV="${NODE_ENV:-development}"
 CONSOLE_DIR="$KANET_ROOT/kasia-console"
 LOG_DIR="$KANET_ROOT/logs"
 PID_DIR="$LOG_DIR/pids"
@@ -95,6 +98,7 @@ if [ -f "$ENV_FILE" ]; then
       # broker-v3 菜单 path gating env, J2 host kanet.env restore post Phase α reset
       BROKER_V3_ENABLED)       export BROKER_V3_ENABLED="$v" ;;
       BROKER_V3_ENABLED_PEERS) export BROKER_V3_ENABLED_PEERS="$v" ;;
+      BROKER_V3_ESCROW_MODE)   export BROKER_V3_ESCROW_MODE="$v" ;;
     esac
   done < "$ENV_FILE"
   ok "已加载配置: $ENV_FILE"

@@ -49,6 +49,21 @@ if (!process.env.CONSOLE_ENCRYPTION_KEY || process.env.CONSOLE_ENCRYPTION_KEY.le
   process.exit(1);
 }
 
+// N19.34 P0 (J2 #533 / NWT counter Q2 共识 5/19): boot-time double-check防 production deploy 忘 unset KANET_TEST_MODE.
+// 现 kanet-start.sh 默认 KANET_TEST_MODE=1 (dev script). production 部署忘 override → broker 自接 own offer (left-hand-right-hand) production. 严训 [[feedback_silent_skip_pattern_invariant_test]] enforce.
+// 双 layer fail-closed: production 显 set NODE_ENV=production → refuse; NODE_ENV undefined → 也 refuse (paranoid, dev script 必显 set NODE_ENV=development).
+if (process.env.KANET_TEST_MODE === '1') {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('[FATAL] KANET_TEST_MODE=1 with NODE_ENV=production — refuse start (防 broker self-deal production).');
+    process.exit(1);
+  }
+  if (!process.env.NODE_ENV) {
+    console.error('[FATAL] KANET_TEST_MODE=1 but NODE_ENV unset — refuse start (paranoid: dev script 必显 set NODE_ENV=development; production deploy 必显 set NODE_ENV=production + KANET_TEST_MODE unset).');
+    process.exit(1);
+  }
+  console.log(`[startup] KANET_TEST_MODE=1 active (NODE_ENV=${process.env.NODE_ENV}). own_offer + same-org skip bypass for multi-actor real-chain test.`);
+}
+
 // Run migrations
 runMigrations();
 
