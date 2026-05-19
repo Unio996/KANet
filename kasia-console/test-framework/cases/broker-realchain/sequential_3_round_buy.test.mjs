@@ -7,7 +7,12 @@
 // expected (post Phase 1a hedge fix + Path A+B + Option A + J2 #531):
 // - 3 broker offers (broker-v3-escrow path) published with hedge_enabled=true metadata
 // - autoTaker pipeline fires on each (KANET_TEST_MODE=1 bypass own_offer)
-// - 至少 1 offer reach completed → first hedge_placed event lifetime
+//
+// hedge_placed expected (broker maker path):
+//   NWT user DM broker → broker-v3-escrow publish offer (hedge_enabled=true metadata)
+//   → autoTaker (test mode bypass) → completion → executeHedgeGuarded → hedge_placed event
+// NOT required for success — depends on autoTaker mode (approval vs auto) + price favorable
+// (J2 #534 audit refinement 2 — comment clarify)
 //
 // expensive: true, skip_in_batch: true — manual only via --case=
 
@@ -65,21 +70,29 @@ export default {
     const eventCounts = {};
     for (const e of allEvents) eventCounts[e.event_type] = (eventCounts[e.event_type] || 0) + 1;
 
-    // verdict
+    // verdict (J2 #534 audit refinement 1):
+    // pipeline_alive: autoTaker pipeline 真 trigger (含 skip) — KI 18 invariant 守 verify
+    // autotake_fired: autoTaker 真接行动 (autotake_accepted OR autotake_proposal) — milestone signal
+    const pipeline_alive = (eventCounts['autotake_skip'] || 0) > 0
+      || (eventCounts['autotake_accepted'] || 0) > 0
+      || (eventCounts['autotake_proposal'] || 0) > 0;
+    const autotake_fired = (eventCounts['autotake_accepted'] || 0) > 0 || (eventCounts['autotake_proposal'] || 0) > 0;
     const hedge_fired = (eventCounts['hedge_placed'] || 0) > 0;
-    const autotake_fired = (eventCounts['autotake_accepted'] || 0) > 0 || (eventCounts['autotake_skip'] || 0) > 0;
     const completed_count = eventCounts['exchange_completed'] || 0;
 
-    const success = orchestratorResult.success_count >= 2 && autotake_fired;
+    // success = orchestrator 2/3 + autoTaker pipeline reached (含 silent skip surface)
+    // autotake_fired + hedge_fired 是 milestone metrics, NOT success gate
+    const success = orchestratorResult.success_count >= 2 && pipeline_alive;
 
     return {
       ok: success,
-      summary: `${orchestratorResult.success_count}/3 rounds completed flow, autotake_fired=${autotake_fired}, hedge_fired=${hedge_fired}, completions=${completed_count}`,
+      summary: `${orchestratorResult.success_count}/3 rounds, pipeline_alive=${pipeline_alive}, autotake_fired=${autotake_fired}, hedge_fired=${hedge_fired}, completions=${completed_count}`,
       details: {
         actors: orchestratorResult.results.map((r) => ({ id: r.id, ok: r.ok, duration_ms: r.duration_ms })),
         event_counts: eventCounts,
-        hedge_fired,
+        pipeline_alive,
         autotake_fired,
+        hedge_fired,
         completed_count,
       },
     };
