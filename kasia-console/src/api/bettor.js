@@ -1010,25 +1010,91 @@ export async function registerBettorRoutes(fastify) {
     const expiresSecs = b.expires_in_seconds != null ? Math.max(30, Math.min(300, parseInt(b.expires_in_seconds, 10))) : 90;
     const expiresAt = new Date(Date.now() + expiresSecs * 1000).toISOString();
     const id = 'ext-pred-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+    const marketKey = `${b.outcome_condition_id}:${b.outcome_side}`;
+    const numShares = sizeKas / price;  // KAS / ($/share) = shares
+
+    // r177 Phase 2a (Owner 5/19 "go phase 2 直 fire" + Bettor r198 ack):
+    // chain broadcast emit真上链 — 替换 Phase 1 stub `r177-phase1-stub-${id}`.
+    // 复用 /api/exchange/publish 5-attempt 重试 pattern (api/exchange.js:300-320).
+    // protocolMsg 用 kanet_exchange_v1 (Scout/relay 已识别) + 加 outcome_* extension fields,
+    // Phase 2b exchange-machine 集成时统一. NO TX NO STATE CHANGE — broadcast 失败 → 503 不写 DB.
+    let makerAddr = null;
+    try {
+      const relayRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(b.maker_relay_id);
+      makerAddr = relayRow?.address || null;
+    } catch {}
+    if (!makerAddr) return reply.code(400).send({ ok: false, error: 'maker_relay_id has no resolvable kaspa address' });
+
+    const protocolMsg = {
+      t: 'kanet_exchange_v1',
+      id,
+      give_asset: 'prediction_outcome_share',
+      give_amount: String(numShares),
+      give_chain: null,
+      want_asset: 'KAS',
+      want_amount: String(sizeKas),
+      want_chain: null,
+      expires_at: expiresAt,
+      verification: 'prediction_outcome_match',
+      verification_meta: {},
+      // outcome_* extension (Scout 暂忽略未知字段, Phase 2b 接入 ingest)
+      outcome_market_source: b.outcome_market_source || 'polymarket',
+      outcome_condition_id: b.outcome_condition_id,
+      outcome_token_id: b.outcome_token_id,
+      outcome_side: b.outcome_side,
+      outcome_end_date: b.outcome_end_date,
+      outcome_oracle_hook: b.outcome_oracle_hook || 'polymarket_uma_mirror',
+      outcome_max_deviation_pp: maxDeviation,
+      published_price: price,
+    };
+
+    let broadcastTx = null;
+    try {
+      const { sendCommandAsync } = await import('../services/relay-manager.js');
+      const MAX_BROADCAST_ATTEMPTS = 5;
+      for (let attempt = 1; attempt <= MAX_BROADCAST_ATTEMPTS; attempt++) {
+        try {
+          const result = await sendCommandAsync(b.maker_relay_id, {
+            type: 'send_broadcast',
+            channel: 'kanet-exchange',
+            message: JSON.stringify(protocolMsg),
+          });
+          broadcastTx = result?.txId || null;
+          if (broadcastTx) break;
+          if (attempt < MAX_BROADCAST_ATTEMPTS) {
+            console.log(`[prediction-publish] broadcast attempt ${attempt}/${MAX_BROADCAST_ATTEMPTS} no txId (mempool conflict?)`);
+            await new Promise(r => setTimeout(r, attempt * 5000));
+          }
+        } catch (err) {
+          console.log(`[prediction-publish] broadcast attempt ${attempt}/${MAX_BROADCAST_ATTEMPTS} fail: ${err.message}`);
+          if (attempt < MAX_BROADCAST_ATTEMPTS) await new Promise(r => setTimeout(r, attempt * 5000));
+        }
+      }
+    } catch (e) {
+      return reply.code(500).send({ ok: false, error: `broadcast import fail: ${e.message}` });
+    }
+
+    if (!broadcastTx) {
+      return reply.code(503).send({ ok: false, error: 'Broadcast failed after 5 attempts — offer not created. Relay may be syncing.' });
+    }
 
     try {
-      // Phase 1 simplified: stub broadcast_tx_id + market_key + verification (real chain broadcast Phase 1.5)
-      const stubTx = `r177-phase1-stub-${id}`;
-      const marketKey = `${b.outcome_condition_id}:${b.outcome_side}`;
-      const numShares = sizeKas / price;  // KAS / ($/share) = shares
       sqlite.prepare(`INSERT INTO exchange_offers (
         id, broadcast_tx_id, message_index, give_asset, give_amount, want_asset, want_amount, maker,
         verification, protocol_status, is_fully_observed, market_key, expires_at, created_at, updated_at,
         outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side, outcome_end_date, outcome_oracle_hook, outcome_max_deviation_pp,
         published_price
       ) VALUES (?, ?, 0, 'prediction_outcome_share', ?, 'KAS', ?, ?, 'prediction_outcome_match', 'open', 0, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(id, stubTx, String(numShares), String(sizeKas), b.maker_relay_id,
+        .run(id, broadcastTx, String(numShares), String(sizeKas), makerAddr,
              marketKey, expiresAt,
              b.outcome_market_source || 'polymarket', b.outcome_condition_id, b.outcome_token_id, b.outcome_side, b.outcome_end_date,
              b.outcome_oracle_hook || 'polymarket_uma_mirror', maxDeviation, price);
-      return reply.send({ ok: true, offer_id: id, shares: numShares, want_kas: sizeKas, price, expires_at: expiresAt });
+      return reply.send({ ok: true, offer_id: id, shares: numShares, want_kas: sizeKas, price, expires_at: expiresAt, broadcast_tx: broadcastTx });
     } catch (e) {
-      return reply.code(500).send({ ok: false, error: e.message });
+      // DB insert failed AFTER chain broadcast — chain is source of truth, scout 会 ingest 这条 broadcast,
+      // 下次 DB 重 indexer 可恢复. 不 retry broadcast 防重复入链.
+      console.error(`[prediction-publish] DB insert fail after broadcast ${broadcastTx?.slice(0,12)}: ${e.message}`);
+      return reply.code(500).send({ ok: false, error: e.message, broadcast_tx: broadcastTx, warning: 'chain emit OK, DB write fail — scout indexer will resync' });
     }
   });
 
