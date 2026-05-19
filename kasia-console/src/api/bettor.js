@@ -1171,7 +1171,7 @@ export async function registerBettorRoutes(fastify) {
           outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side, outcome_end_date, outcome_oracle_hook, outcome_max_deviation_pp,
           published_price, maker_kaspa_addr, maker_relay_id, metadata
         ) VALUES (?, ?, 0, 'prediction_outcome_share', ?, 'KAS', ?, ?, 'prediction_outcome_match', 'open', 0, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-          .run(id, broadcastTx, String(numShares), String(sizeKas), makerAddr,
+          .run(id, broadcastTx, numShares.toFixed(8), sizeKas.toFixed(8), makerAddr,
                marketKey, expiresAt, broadcastEmittedAt,
                b.outcome_market_source || 'polymarket', b.outcome_condition_id, b.outcome_token_id, b.outcome_side, b.outcome_end_date,
                b.outcome_oracle_hook || 'polymarket_uma_mirror', maxDeviation, price,
