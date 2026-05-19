@@ -23,7 +23,29 @@ import { decrypt } from './crypto.js';
  *
  * @param {object} row - { tx_hash, content, sender_address, channel_name, created_at }
  */
-export { _executeHedge as executeHedge };
+// J2 #520 / NWT N19.12 三方共识 5/19: wrap _executeHedge with hedge_failed emit guard.
+// 防 KI 第 17 次 silent skip — 任何 throw (SQL bug / decrypt fail / API error) 必 emit chain_event,
+// 而不是被 caller .catch(err => console.error) 静默吞掉. invariant: hedge attempt → chain_event emit.
+async function _executeHedgeGuarded(offerId, agentName, side, qty, preferredCex = null) {
+  try {
+    return await _executeHedge(offerId, agentName, side, qty, preferredCex);
+  } catch (err) {
+    console.error(`[exchange-hedge] FAILED hedge for offer ${(offerId||'').slice(0,8)} side=${side} qty=${qty}: ${err.message}`);
+    try {
+      const { recordChainEvent } = await import('./chain-event.js');
+      recordChainEvent({
+        txid: `hedge_failed_${offerId}_${Date.now()}`,
+        eventType: 'hedge_failed',
+        fromAddress: null, toAddress: null, observedBy: 'system',
+        payload: { offerId, agentName, side, qty, preferredCex, error: err.message?.slice(0, 200) },
+      });
+    } catch (emitErr) {
+      console.error(`[exchange-hedge] hedge_failed emit err: ${emitErr.message}`);
+    }
+    throw err;
+  }
+}
+export { _executeHedgeGuarded as executeHedge };
 export { _autoPayExchange as triggerAutoPay, _autoSettleAsset, _autoSettleAsset as _autoSendKas };
 
 export async function onBroadcastWritten(row) {
@@ -634,15 +656,19 @@ async function _executeHedge(offerId, agentName, side, qty, preferredCex = null)
   // 默认不对冲。只有 offer.meta.hedge_enabled === true 才触发对冲。
   // 防止 retail-proxy / bounty / auction 等 non-hedgeable offer 类型误触发 CEX 反向下单。
   // 3 个调用点（api/exchange.js / exchange-machine.js x2）全部自动受保护。
+  // KI 第 16 次 silent skip 修 (J2 #520 / NWT N19.12 三方共识 5/19):
+  // 旧 SQL "SELECT meta" 30 天 throw "no such column: meta" → executeHedge .catch 静默吞 →
+  // 0 chain_events hedge_*, 0 trade_log hedge-source, 配 5 家 CEX 凭据全废.
+  // exchange_offers 真字段名是 `metadata`, 不是 `meta`. 同款 KI silent skip (15 次).
   const _hedgeGateOffer = sqlite.prepare(
-    "SELECT meta FROM exchange_offers WHERE id = ? LIMIT 1"
+    "SELECT metadata FROM exchange_offers WHERE id = ? LIMIT 1"
   ).get(offerId);
   if (!_hedgeGateOffer) {
     console.log(`[exchange-hedge] offer ${offerId.slice(0, 8)} not found — skip`);
     return;
   }
   let _hedgeGateMeta = {};
-  try { _hedgeGateMeta = JSON.parse(_hedgeGateOffer.meta || '{}'); } catch {}
+  try { _hedgeGateMeta = JSON.parse(_hedgeGateOffer.metadata || '{}'); } catch {}
   if (_hedgeGateMeta.hedge_enabled !== true) {
     console.log(`[exchange-hedge] offer ${offerId.slice(0, 8)} hedge_enabled!=true → skip (default opt-in safety)`);
     return;
@@ -733,7 +759,7 @@ async function _executeHedge(offerId, agentName, side, qty, preferredCex = null)
     // user_kasia_address 来自 metadata (broker-intake-watcher.js:255 + broker-v3/router.js:109/119 写).
     // ref: NWT r270 PASS Reading D ship sequence.
     const userKasia = (() => {
-      try { return JSON.parse(_hedgeGateOffer.meta || '{}').user_kasia_address || null; } catch { return null; }
+      try { return JSON.parse(_hedgeGateOffer.metadata || '{}').user_kasia_address || null; } catch { return null; }
     })();
     if (userKasia && typeof userKasia === 'string' && userKasia.startsWith('kaspa:')) {
       setImmediate(async () => {

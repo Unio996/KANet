@@ -435,7 +435,9 @@ export async function _doPublishAfterPrepay(escrowRowId, relayNodeId) {
           escrow_user_target: e.user_target_addr,  // user's kasia addr (where broker forwards KAS post-match)
         },
         expires_minutes: 30,
-        metadata: { source: 'broker-v3-escrow', user_id: e.user_kasia_addr, side: 'buy_kas', escrow_id: e.id, hedge_enabled: false },
+        // hedge_enabled true (J2 #520 / NWT N19.12 三方共识 5/19): escrow path broker 真换仓位 (收 USDT 代发 KAS),
+        // 必须 CEX 对冲. 之前写死 false 是漏改 (router.js:526 注释明说 hedge-eligible 但 escrow 51 笔全 false).
+        metadata: { source: 'broker-v3-escrow', user_id: e.user_kasia_addr, side: 'buy_kas', escrow_id: e.id, hedge_enabled: true },
       }
     : {
         // SELL semantic: broker holds user KAS (escrow), wants USDT for user
@@ -456,7 +458,8 @@ export async function _doPublishAfterPrepay(escrowRowId, relayNodeId) {
           escrow_user_target: e.user_target_addr,  // user's EVM addr (where broker forwards USDT post-match)
         },
         expires_minutes: 30,
-        metadata: { source: 'broker-v3-escrow', user_id: e.user_kasia_addr, side: 'sell_kas', escrow_id: e.id, hedge_enabled: false },
+        // hedge_enabled true (J2 #520 / NWT N19.12 三方共识 5/19): SELL escrow path broker 同样换仓位 (收 KAS 代发 USDT).
+        metadata: { source: 'broker-v3-escrow', user_id: e.user_kasia_addr, side: 'sell_kas', escrow_id: e.id, hedge_enabled: true },
       };
 
   const r = await client.publishOffer(body);

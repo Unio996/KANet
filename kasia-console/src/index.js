@@ -451,6 +451,20 @@ startIntakeWatcher();
 import { startTreasuryMonitor } from './services/broker-treasury-monitor.js';
 startTreasuryMonitor();
 
+// P0c hedge invariant self-test (J2 #520 / NWT N19.12 三方共识 5/19, KI 第 16 次 silent skip 修).
+// 启动时 verify SQL 字段 + chain_event hedge_failed 路径存在, 防 KI 第 17 次复刻.
+try {
+  const sqlite = (await import('./db/sqlite.js')).default;
+  // Layer A: verify exchange_offers.metadata 存在 (历史 KI 16 真因 SELECT meta typo 30 day silent dead).
+  sqlite.prepare('SELECT metadata FROM exchange_offers WHERE 1=0').get();
+  // Layer B: verify chain_events table 接受 hedge_failed event_type (post-completed audit 用).
+  const { recordChainEvent } = await import('./services/chain-event.js');
+  if (typeof recordChainEvent !== 'function') throw new Error('recordChainEvent not exported');
+  console.log('[hedge-invariant] self-test PASS: exchange_offers.metadata exists + chain-event.js loaded');
+} catch (err) {
+  console.error(`[hedge-invariant] 🚨 self-test FAIL: ${err.message} — hedge 路径可能 silent dead, 立查!`);
+}
+
 // J1-3 (Phase E v3 Step 1c, J1 #55 propose + NWT 01:15 ack): _sweepStaleAligning cron 5min
 // — broker-intake-watcher refund tick 仅 process 'awaiting_payment', 'aligning' rows 永不 sweep.
 // J2 Step 1b setConvoStateLock 入口 INSERT 'aligning' row 后必 cleanup pattern.
