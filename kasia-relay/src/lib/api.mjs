@@ -3,6 +3,7 @@ const API_ENDPOINTS = {
   mainnet: 'https://api.kaspa.org',
   'testnet-10': 'https://api-tn10.kaspa.org',
   'testnet-11': 'https://api-tn11.kaspa.org',
+  'testnet-12': 'https://api-tn12.kaspa.org',  // Phase 3a SS testnet (Bettor r193 5/19, align 6/1 mainnet SS launch)
 };
 
 export class KaspaApi {
