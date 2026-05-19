@@ -3801,22 +3801,25 @@ export function runMigrations() {
     }
   }
 
-  // v122: r177 Phase 2a hotfix — exchange_offers 加 maker_kaspa_addr + maker_relay_id 双 col
+  // v123: r177 Phase 2a hotfix — exchange_offers 加 maker_kaspa_addr + maker_relay_id 双 col
   // (Bettor r199 PB4: 修 Phase 2a 改 maker col 为 kaspa addr 后 verifier Layer 4 whitelist lookup 失效 bug).
   //   prediction_maker_whitelist.relay_node_id 是 UUID, 现 offer.maker (kaspa addr) 查不到.
   //   propose: 双 populate — maker_kaspa_addr = kaspa addr (deliver/chain 用), maker_relay_id = UUID (whitelist 查).
   //   maker col 保留 kaspa addr (= exchange_offers schema 一致约定).
+  // R-CROSS-LINE-V-COLLISION (Bettor r202 sediment): 本 originally v122, 跟 J2 broker treasury (a0a6cde86
+  // 5/18 13:44 UTC) v122 跨 line 撞车. 较晚 ship 必 bump (J1 prediction 晚 → bump 123). 防 cherry-pick
+  // 中 v# 冲突. Propose 永久: dev-coord broadcast 加 "claim v#" 字段 lock 该号, 其他 line 必 bump.
   {
     const tableInfo = sqlite.prepare("SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name='exchange_offers'").get();
     if (tableInfo.cnt) {
       const cols = sqlite.prepare("PRAGMA table_info(exchange_offers)").all().map(c => c.name);
       if (!cols.includes('maker_kaspa_addr')) {
         sqlite.exec(`ALTER TABLE exchange_offers ADD COLUMN maker_kaspa_addr TEXT`);
-        console.log('[migrate] v122: exchange_offers 加 maker_kaspa_addr TEXT (r177 Phase 2a hotfix PB4).');
+        console.log('[migrate] v123: exchange_offers 加 maker_kaspa_addr TEXT (r177 Phase 2a hotfix PB4).');
       }
       if (!cols.includes('maker_relay_id')) {
         sqlite.exec(`ALTER TABLE exchange_offers ADD COLUMN maker_relay_id TEXT`);
-        console.log('[migrate] v122: exchange_offers 加 maker_relay_id TEXT (r177 Phase 2a hotfix PB4 — verifier whitelist lookup).');
+        console.log('[migrate] v123: exchange_offers 加 maker_relay_id TEXT (r177 Phase 2a hotfix PB4 — verifier whitelist lookup).');
       }
     }
   }
