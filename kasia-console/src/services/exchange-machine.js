@@ -1487,7 +1487,20 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
         if (finalOffer?.protocol_status === 'completed' && finalOffer.maker) {
           const localAgent = sqlite.prepare('SELECT id, name FROM relay_nodes WHERE address = ?').get(finalOffer.maker);
           if (localAgent) {
-            executeHedge(finalOffer).catch(err => console.error(`[exchange-hedge] error: ${err.message}`));
+            // NWT N19.38 KI 22 P0 fix (J2 #536 5/19): executeHedge signature is (offerId, agentName, side, qty, preferredCex)
+            // 旧 `executeHedge(finalOffer)` 传 object 作 offerId → sqlite WHERE id=? 不 match → L708 silent skip.
+            // Phase 1a Layer 1-3 (commit 45a041c08) 漏 修这 call site, broker BUY kaspa_tx 短 circuit path 30+ day silent dead.
+            // 修法 mirror L1810 verify-complete-path 同 pattern (4 args call).
+            const makerGaveKas = finalOffer.give_asset === 'KAS';
+            const hedgeSide = makerGaveKas ? 'BUY' : 'SELL';
+            const hedgeQty = makerGaveKas ? parseFloat(finalOffer.give_amount) : parseFloat(finalOffer.want_amount);
+            if (hedgeQty > 0) {
+              setImmediate(() => {
+                executeHedge(finalOffer.id, localAgent.name, hedgeSide, hedgeQty).catch(err =>
+                  console.error(`[exchange-hedge] L1490 BUY-kaspa-shortcut path err: ${err.message}`)
+                );
+              });
+            }
           }
           // Bug R 5/14 fix + Bug AM 5/16 fix (HP-01 真测 surface setImmediate 真测 unreliable):
           // BUY kaspa_tx short-circuit RETURNs before L1352 settle hook. Add explicit AWAIT sequence:
