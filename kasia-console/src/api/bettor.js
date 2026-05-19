@@ -1230,7 +1230,8 @@ export async function registerBettorRoutes(fastify) {
       let spreadPp = 99;
       if (offer.outcome_token_id) {
         try {
-          const r = await fetch(`https://gamma-api.polymarket.com/markets?clob_token_ids=${encodeURIComponent(offer.outcome_token_id)}`, { signal: AbortSignal.timeout(3000) });
+          // KI-31 (Bettor r184): &closed=true 守 — resolved market 不被 active filter 拒
+          const r = await fetch(`https://gamma-api.polymarket.com/markets?clob_token_ids=${encodeURIComponent(offer.outcome_token_id)}&closed=true`, { signal: AbortSignal.timeout(3000) });
           if (r.ok) {
             const m = ((await r.json()) || [])[0];
             if (m) {

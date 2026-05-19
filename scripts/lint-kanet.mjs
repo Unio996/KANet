@@ -542,6 +542,28 @@ function checkChainEqNormalize(filepath, content) {
   }
 }
 
+// ── KI-31 (Bettor r184 2026-05-19): Polymarket gamma single-market query 必含 &closed=true ──
+// 真因: gamma default filter active=true, resolved market 不返 ('market not found'). settler verify
+// 永卡 matched. closed=true 实 'include closed' (= active + closed 都返, 不破 active 路径).
+// Whitelist marker `lint-allow-gamma-no-closed: <reason>` 同行 OR 前 5 行 (= 真不需 closed 的 caller).
+function checkKI31_gamma_closed_query(filepath, content) {
+  if (/[/\\]test-framework[/\\]/.test(filepath)) return;
+  if (/[/\\]scripts[/\\]/.test(filepath)) return;
+
+  const lines = content.split('\n');
+  // 匹 gamma single-market query (clob_token_ids), 不含 &closed=true
+  const pattern = /gamma-api\.polymarket\.com\/markets\?clob_token_ids=[^"'`]+/;
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(pattern);
+    if (!m) continue;
+    if (m[0].includes('closed=true')) continue;  // 已守
+    const windowStart = Math.max(0, i - 5);
+    const windowText = lines.slice(windowStart, i + 1).join('\n');
+    if (/lint-allow-gamma-no-closed/.test(windowText)) continue;
+    violate('KI-31', `[KI-31] gamma single-market query 缺 &closed=true → resolved market 不返 (= settler 永卡 matched). 加 '&closed=true' 守 'include closed'. 如确不需, 加注释 'lint-allow-gamma-no-closed: <reason>' (Bettor r184 5/19 Bug PRED-GAMMA-CLOSED).`, filepath, i + 1);
+  }
+}
+
 // ── KI-30 (Bettor r181 2026-05-19): chain TX amount 必 toFixed(8) 守 Kaspa sompi precision ──
 // 真因: JS 浮点 17 decimal → Kaspa wallet API reject 'Amount cannot have more than 8 decimal places'.
 // Bug PRED-DECIMAL surface 第 1 prediction test fire 时撞 (Bettor r181 完整诊).
@@ -586,6 +608,7 @@ for (const fp of targets) {
   checkChainEqNormalize(fp, content);  // Bug-C-5/14: chain === naked compare normalize
   checkChainHintDynamic(fp, content);  // Bug-D-residual-5/14: '回 1-N 选' hint hardcoded
   checkKI30_chain_amount_precision(fp, content);  // KI-30 (Bettor r181 5/19): chain TX amount 必 toFixed(8)
+  checkKI31_gamma_closed_query(fp, content);  // KI-31 (Bettor r184 5/19): gamma single-market query 必 &closed=true
 }
 checkR10();
 
