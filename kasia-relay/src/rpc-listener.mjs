@@ -316,11 +316,21 @@ export async function startRpcListener() {
   // 修: 先 _connect 建立 RPC, 再 catchUpHistory, 然后加周期性 retry 兜底. ──
   await _connect(wallet);
 
-  // Catch up on missed pending_actions after RPC is ready
-  await catchUpHistory();
+  // J2 KI 23 fix (Owner 5/19 钦定 "按你推荐办"): stagger boot 避 8-relay 同 cron storm.
+  // 8 relay 同 boot + 同 60s cron interval → console event loop 阻塞 + ingest timeout cluster 每分钟一波.
+  // 修: random 0-60s offset boot 后 first catch-up, 自然分散 cron 到 60s window 内.
+  // 不动 catch-up logic, 不动 cron interval. setTimeout async 不阻 boot.
+  const STAGGER_MS = Math.floor(Math.random() * CATCHUP_RETRY_INTERVAL_MS);
+  log(`catch-up stagger boot: ${STAGGER_MS}ms (KI 23 anti-storm)`);
+
+  // First catch-up after stagger (async, 不阻 boot)
+  setTimeout(() => {
+    catchUpHistory().catch(err => log('initial catch-up err:', err?.message || err));
+  }, STAGGER_MS);
 
   // Periodic retry: pending_actions 若失败 (如 RPC 抖动) 每 60s 再试,
   // 直到 retry_count 达 max_retries (默认 3) 才终态 expired
+  // setInterval first fire = CATCHUP_RETRY_INTERVAL_MS, stagger offset 保留 → 8 relay 永不 sync storm
   if (_catchupTimer) clearInterval(_catchupTimer);
   _catchupTimer = setInterval(() => {
     catchUpHistory().catch(err => log('periodic catch-up err:', err?.message || err));
