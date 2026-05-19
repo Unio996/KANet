@@ -8,7 +8,8 @@ export default {
   tags: ['regression', 'oracle', 'kas-price'],
 
   async run() {
-    const fetch = (await import('node:undici')).fetch ?? globalThis.fetch;
+    // NWT N19.41 fix: node:undici 不是 built-in module (was assumption); 直用 globalThis.fetch (Node 18+ built-in)
+    const fetch = globalThis.fetch;
     const res = await fetch('http://127.0.0.1:3100/api/trade/kas-price', { signal: AbortSignal.timeout(8000) });
     if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
     const data = await res.json();

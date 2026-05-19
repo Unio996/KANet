@@ -23,7 +23,12 @@ export default {
     }
 
     // L2: INSERT exchange_offers 后必 dispatch onBroadcastWritten
-    if (!src.includes('onBroadcastWritten') || !src.match(/import.*onBroadcastWritten.*from.*trade-protocol-filter/)) {
+    // NWT N19.41 fix: 支持 static OR dynamic import (J2 #528 用 await import() inside try block)
+    const hasOnBroadcast = src.includes('onBroadcastWritten') && (
+      src.match(/import\s*\{[^}]*onBroadcastWritten/)                    // static import
+      || src.match(/await\s+import\([^)]*trade-protocol-filter/)         // dynamic import await
+    );
+    if (!hasOnBroadcast) {
       return { ok: false, error: 'onBroadcastWritten 未 dispatch in publish endpoint (KI 20 silent skip 风险)' };
     }
 
@@ -40,7 +45,8 @@ export default {
     }
 
     // L4: dispatch 用 protocolMsg content (taken from publish body)
-    if (!src.match(/onBroadcastWritten\([^)]*content:\s*JSON\.stringify\(protocolMsg\)/)) {
+    // NWT N19.41 fix: 加 /s flag (dotall) — J2 #528 multi-line `onBroadcastWritten({\n  tx_hash: ...,\n  content: JSON.stringify(protocolMsg),\n})`
+    if (!src.match(/onBroadcastWritten\([^)]*content:\s*JSON\.stringify\(protocolMsg\)/s)) {
       return { ok: false, error: 'dispatch payload 缺 content=protocolMsg (autoTaker parse 必)' };
     }
 
