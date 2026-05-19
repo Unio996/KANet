@@ -140,40 +140,47 @@ const EXCHANGE_MSG = {
 async function handleExchange(msg) {
   if (!msg.give_asset || !msg.want_asset) return;
 
-  const offerId = msg.id || randomUUID();
+  let offerId = msg.id || randomUUID();
   const msgIndex = msg.message_index || 0;
 
-  // Idempotent: skip if already indexed
+  // NWT N19.30 P0 fix (KI 第 21 次 silent skip 复刻):
+  // J2 #528 (commit f31d8eaf6) 在 /api/exchange/publish INSERT 后 dispatch onBroadcastWritten → handleExchange.
+  // 旧逻辑: existing 时 silent return → autoTaker 永不 fire on direct-API-publish path.
+  // 修法: existing 时**不** skip — 复用现 offer.id, 跳 INSERT, 继续 autoTaker dispatch (chain scanner path 也不破).
   const existing = sqlite.prepare(
     'SELECT id FROM exchange_offers WHERE broadcast_tx_id = ? AND message_index = ?'
   ).get(msg._tx, msgIndex);
-  if (existing) return;
+  if (existing) {
+    offerId = existing.id;
+    // 跳 INSERT (idempotent), 但继 autoTaker dispatch (下方 setImmediate). external chain scanner 与
+    // direct API publish 双 path 都 hit autoTaker, 守 trap #53 own_offer skip + KANET_TEST_MODE bypass.
+  } else {
+    const marketKey = _deriveMarketKey(msg.give_asset, msg.want_asset);
+    const now = msg._at || new Date().toISOString();
 
-  const marketKey = _deriveMarketKey(msg.give_asset, msg.want_asset);
-  const now = msg._at || new Date().toISOString();
+    sqlite.prepare(`
+      INSERT INTO exchange_offers (
+        id, broadcast_tx_id, message_index,
+        give_asset, give_amount, give_chain,
+        want_asset, want_amount, want_chain,
+        maker, broadcast_at, expires_at,
+        verification, verification_meta,
+        protocol_status, is_fully_observed, market_key,
+        observed_by_node,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', 0, ?, ?, ?, ?)
+    `).run(
+      offerId, msg._tx, msgIndex,
+      msg.give_asset, String(msg.give_amount || '0'), msg.give_chain || null,
+      msg.want_asset, String(msg.want_amount || '0'), msg.want_chain || null,
+      msg._from, now, msg.expires_at || null,
+      msg.verification || 'manual', JSON.stringify(msg.verification_meta || {}),
+      marketKey, null,
+      now, now
+    );
 
-  sqlite.prepare(`
-    INSERT INTO exchange_offers (
-      id, broadcast_tx_id, message_index,
-      give_asset, give_amount, give_chain,
-      want_asset, want_amount, want_chain,
-      maker, broadcast_at, expires_at,
-      verification, verification_meta,
-      protocol_status, is_fully_observed, market_key,
-      observed_by_node,
-      created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', 0, ?, ?, ?, ?)
-  `).run(
-    offerId, msg._tx, msgIndex,
-    msg.give_asset, String(msg.give_amount || '0'), msg.give_chain || null,
-    msg.want_asset, String(msg.want_amount || '0'), msg.want_chain || null,
-    msg._from, now, msg.expires_at || null,
-    msg.verification || 'manual', JSON.stringify(msg.verification_meta || {}),
-    marketKey, null,
-    now, now
-  );
-
-  console.log(`[exchange] Offer indexed: ${offerId.slice(0, 8)} ${msg.give_amount} ${msg.give_asset} → ${msg.want_amount} ${msg.want_asset} by ${msg._from.slice(-12)}`);
+    console.log(`[exchange] Offer indexed: ${offerId.slice(0, 8)} ${msg.give_amount} ${msg.give_asset} → ${msg.want_amount} ${msg.want_asset} by ${msg._from.slice(-12)}`);
+  }
 
   // 2026-04-14 Q5 audit fix: replay orphan accepts that arrived before publish
   // (Kaspa DAG 内 block TX order 不保证, accept 可能早于 publish 到达 ingest)
