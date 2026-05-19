@@ -1676,6 +1676,30 @@ export async function runCase(testCase) {
   ctx._aliases = testCase.aliases || {};
   ctx._test_started_at = result.started_at;  // (d) 7a-2 phase δ: DB query scope to test session
 
+  // NWT N19.36 Phase 3 — imperative async run() support (broker-realchain dual-style):
+  // First framework uses declarative `steps:[]`. Second framework (real-chain) uses
+  // imperative `async run(ctx)` for complex flows (DM round-trip + EVM transfer + offer poll).
+  // J2 #532 Q1 共识: 完全 parallel (declarative DSL too restrictive for real-chain async).
+  if (typeof testCase.run === 'function') {
+    try {
+      const runResult = await testCase.run(ctx);
+      result.run_result = runResult;
+      result.pass = runResult?.ok !== false;
+      if (!result.pass) {
+        result.failed_assertions.push({
+          step: 'run()',
+          msg: runResult?.error || runResult?.summary || 'run() returned ok:false',
+        });
+      }
+      if (runResult?.summary) result.summary = runResult.summary;
+    } catch (e) {
+      result.pass = false;
+      result.failed_assertions.push({ step: 'run()', msg: e.message });
+    }
+    result.ended_at = new Date().toISOString();
+    return result;
+  }
+
   // optional setup
   if (testCase.setup) {
     for (const s of (testCase.setup.actions || [])) {
