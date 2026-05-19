@@ -41,11 +41,51 @@ export default {
     db.close();
     if (rows.length !== 3) return { ok: false, error: `broker relay 实际 ${rows.length}/3 (Trader-A/B/M)` };
 
-    // L5: tickCrossMatchOnce can run synchronously without market price (audit-only)
-    const result = mod.tickCrossMatchOnce(null);  // null price = skip oracle gate
+    // L5: tickCrossMatchOnce callable
+    const result = mod.tickCrossMatchOnce(0.034);  // mock marketPrice
     if (typeof result?.scanCount !== 'number') return { ok: false, error: 'tickCrossMatchOnce 返 unexpected shape' };
     if (typeof result?.matchCount !== 'number') return { ok: false, error: 'matchCount 字段缺' };
 
-    return { ok: true, summary: 'Path B cross-match engine 5 layer (exports + 4 risk const + broker org DB + tick callable) PASS' };
+    // ── NWT N19.20 hotfix behavioral tests ──
+
+    // L6 (Issue 4): marketPrice null fail-closed (Risk gate 1 不 bypass)
+    const nullResult = mod.tickCrossMatchOnce(null);
+    if (nullResult.skipReason !== 'marketPrice_null') {
+      return { ok: false, error: 'Issue 4: marketPrice null 应 fail-closed + skipReason=marketPrice_null' };
+    }
+    if (nullResult.matches?.length !== 0) {
+      return { ok: false, error: 'Issue 4: marketPrice null tick 不应有 matches' };
+    }
+
+    // L7 (Issue 1): heartbeat 必 emit 即使 0 match (DB query verify)
+    const beforeCount = db.open ? null : (() => {
+      const db2 = new Database(DB_PATH, { readonly: true });
+      const c = db2.prepare("SELECT COUNT(*) AS c FROM chain_events WHERE event_type = 'kanet_cross_match_tick_v1'").get();
+      db2.close();
+      return c.c;
+    })();
+    mod.tickCrossMatchOnce(0.034);  // run 1 tick (有 marketPrice, 应 emit heartbeat)
+    const db3 = new Database(DB_PATH, { readonly: true });
+    const afterCount = db3.prepare("SELECT COUNT(*) AS c FROM chain_events WHERE event_type = 'kanet_cross_match_tick_v1'").get().c;
+    db3.close();
+    if (beforeCount !== null && afterCount <= beforeCount) {
+      return { ok: false, error: `Issue 1: heartbeat 未 emit (before=${beforeCount} after=${afterCount})` };
+    }
+
+    // L8 (Issue 2): txid scanCount suffix (避 UNIQUE collision)
+    // 静态 read src — 现 _internals 没 expose txid pattern, grep src 检
+    const { readFileSync } = await import('node:fs');
+    const enginePath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../src/services/cross-match-engine.js');
+    const src = readFileSync(enginePath, 'utf8');
+    if (!src.includes('_t${_scanCount}')) {
+      return { ok: false, error: 'Issue 2: txid 缺 _t${_scanCount} suffix (KI 14 collision 风险)' };
+    }
+
+    // L9 (Issue 3): chain align strict (Phase 1 fail-closed)
+    if (!src.includes('if (!buyUsdtChain || !sellUsdtChain || buyUsdtChain !== sellUsdtChain) continue')) {
+      return { ok: false, error: 'Issue 3: chain align 未 fail-closed (NULL wildcard 真链 settle 撞)' };
+    }
+
+    return { ok: true, summary: 'Path B 9 layer 全 PASS (5 structural + 4 behavioral hotfix Issue 1-4 NWT N19.20)' };
   },
 };

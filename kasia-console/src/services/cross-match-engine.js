@@ -50,6 +50,20 @@ export function tickCrossMatchOnce(marketPrice = null, brokerAddrs = null) {
   _lastTickAt = new Date().toISOString();
   brokerAddrs = brokerAddrs || _getBrokerOrgAddrs();
 
+  // NWT N19.20 hotfix Issue 4: marketPrice null fail-closed (Risk gate 1 不 bypass).
+  // 历史 KI 12 14 silent skip pattern 同款 — null 时 silently continue → fat-finger maker fake price bypass.
+  if (!marketPrice) {
+    console.warn('[cross-match] tick skipped: marketPrice null (Risk gate 1 fail-closed)');
+    try {
+      recordChainEvent({
+        txid: `cross_match_tick_${_scanCount}_${Date.now()}`,
+        eventType: 'kanet_cross_match_tick_v1',
+        payload: JSON.stringify({ scanCount: _scanCount, matchCount: _matchCount, skipReason: 'marketPrice_null' }),
+      });
+    } catch {}
+    return { matches: [], scanCount: _scanCount, matchCount: _matchCount, lastTickAt: _lastTickAt, skipReason: 'marketPrice_null' };
+  }
+
   const offers = sqlite.prepare(
     `SELECT id, maker, give_asset, give_amount, give_chain, want_asset, want_amount, want_chain
      FROM exchange_offers
@@ -74,12 +88,12 @@ export function tickCrossMatchOnce(marketPrice = null, brokerAddrs = null) {
       // same-maker can't cross self
       if (buy.maker === sell.maker) continue;
 
-      // Risk gate 2: chain align (Phase 1 same-chain USDT only)
-      // BUY gives USDT on buy.give_chain, SELL wants USDT on sell.want_chain — must match
+      // Risk gate 2: chain align (NWT N19.20 hotfix Issue 3 — fail-closed Phase 1).
+      // 历史 P4 audit: production 67% offer NULL chain. wildcard 会撞 settle mismatch (KAS-only ↔ BSC-USDT).
+      // Phase 1 strict: 双方都填 + 必 match. Phase 2 加 default chain inference.
       const buyUsdtChain = (buy.give_chain || '').toLowerCase() || null;
       const sellUsdtChain = (sell.want_chain || '').toLowerCase() || null;
-      if (buyUsdtChain && sellUsdtChain && buyUsdtChain !== sellUsdtChain) continue;
-      // If either null, treat as wildcard (Phase 1 accept; Phase 2 verify default chain)
+      if (!buyUsdtChain || !sellUsdtChain || buyUsdtChain !== sellUsdtChain) continue;
 
       // price math (normalize to USDT/KAS)
       const buyPrice = parseFloat(buy.give_amount) / parseFloat(buy.want_amount);
@@ -88,9 +102,9 @@ export function tickCrossMatchOnce(marketPrice = null, brokerAddrs = null) {
       // intersection: buy bid >= sell ask
       if (buyPrice < sellPrice) continue;
 
-      // Risk gate 1: oracle midpoint ±3% (防 fat-finger)
+      // Risk gate 1: oracle midpoint ±3% (防 fat-finger). marketPrice null 早 return 不会到这.
       const midpoint = (buyPrice + sellPrice) / 2;
-      if (marketPrice && Math.abs(midpoint - marketPrice) / marketPrice > PRICE_TOLERANCE) continue;
+      if (Math.abs(midpoint - marketPrice) / marketPrice > PRICE_TOLERANCE) continue;
 
       // Risk gate 4: qty 全配 (Phase 1 ±5%)
       const buyKas = parseFloat(buy.want_amount);
@@ -104,7 +118,8 @@ export function tickCrossMatchOnce(marketPrice = null, brokerAddrs = null) {
 
       try {
         recordChainEvent({
-          txid: `cross_match_${buy.id.slice(0,12)}_${sell.id.slice(0,12)}`,
+          // NWT N19.20 hotfix Issue 2: 加 _scanCount suffix 避 KI 14 txid UNIQUE collision 重 tick 同 pair.
+          txid: `cross_match_${buy.id.slice(0,12)}_${sell.id.slice(0,12)}_t${_scanCount}`,
           eventType: 'kanet_cross_match_v1',
           fromAddress: buy.maker,
           toAddress: sell.maker,
@@ -115,6 +130,7 @@ export function tickCrossMatchOnce(marketPrice = null, brokerAddrs = null) {
             midpoint, marketPrice,
             kas_qty: Math.min(buyKas, sellKas),
             buy_chain: buyUsdtChain, sell_chain: sellUsdtChain,
+            scan_count: _scanCount,
           }),
         });
       } catch (err) {
@@ -122,6 +138,19 @@ export function tickCrossMatchOnce(marketPrice = null, brokerAddrs = null) {
       }
     }
   }
+
+  // NWT N19.20 hotfix Issue 1: heartbeat emit (即使 0 match) 防 KI 18 silent skip (engine fire 不可观察).
+  // 同款 KI 16 hedge silent dead 反面 — invariant: every tick → chain_event emit.
+  try {
+    recordChainEvent({
+      txid: `cross_match_tick_${_scanCount}_${Date.now()}`,
+      eventType: 'kanet_cross_match_tick_v1',
+      payload: JSON.stringify({
+        scanCount: _scanCount, matchCount: _matchCount,
+        tickMatches: matches.length, buys: buys.length, sells: sells.length,
+      }),
+    });
+  } catch {}
 
   return { matches, scanCount: _scanCount, matchCount: _matchCount, lastTickAt: _lastTickAt };
 }
