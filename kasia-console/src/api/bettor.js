@@ -1148,11 +1148,15 @@ export async function registerBettorRoutes(fastify) {
       return reply.code(403).send({ ok: false, error: 'requires explicit owner_final_ack=true in body (size ≥ $50 or spread > 2pp threshold)' });
     }
 
-    // Phase 1: mark matched. Phase 1.5/sub 5+ will use exchange-machine.js transition() for full
-    // cross-chain settle. r177 Phase 1 simplified path doesn't go through exchange-machine yet.
-    // lint-allow-protocol-status-direct: r177-phase1-simplified-pre-exchange-machine-integration
-    sqlite.prepare(`UPDATE exchange_offers SET protocol_status = 'matched', taker = ?, matched_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-      .run(acceptMsg.taker_relay_id || acceptMsg.taker || null, offerId);
+    // r177 Phase 2b (Owner 5/19 一气呵成 + #286 立 fire): 走 exchange-machine.transition() 真状态机.
+    // open → matched (此处) → awaiting_oracle (settler 接管等 outcome) → completed (settler 调 settle).
+    // 真链 KAS payout (delivering→completed 钩 sendKas) defer 到 Phase 2b' (~120 LOC stake escrow 新工作).
+    try {
+      const { transition } = await import('../services/exchange-machine.js');
+      transition(offerId, 'matched', { taker: acceptMsg.taker_relay_id || acceptMsg.taker || null });
+    } catch (e) {
+      return reply.code(500).send({ ok: false, error: `transition fail: ${e.message}` });
+    }
     return reply.send({ ok: true, offer_id: offerId, status: 'matched', auto_fired: allowAutoFire });
   });
 

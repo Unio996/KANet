@@ -1,26 +1,26 @@
-// r177 Phase 2c — prediction_outcome_share settlement detector (Owner 5/19 钦定 "go phase 2 直 fire
-// 2c 不 UAT" + Bettor r197 0 push back ack).
+// r177 Phase 2c (detect+mark) + Phase 2b (state-machine 集成) — prediction_outcome_share
+// settlement settler.
 //
-// lint-allow-protocol-status-direct: r177-phase2c-settle-detector (Phase 2b exchange-machine
-// integration 接管后改走 transition(id,'completed'); 现阶段 detect+mark 与 chain payout 解耦).
+// Owner 5/19 "go phase 2 直 fire 2c 不 UAT" + Bettor r197 0 push back (2c initial)
+// Owner 5/19 "一气呵成 不停" + #286 立 fire (2b state-machine integration).
 //
-// 5min cron tick: 检查所有 outcome_end_date 已过的 prediction offer (matched/verifying/delivering 中),
-// 调 verifyPredictionOutcome (bettor-prediction-verifier.js 已 ship) → 若 resolved (winner 出):
-//   1. mark offer protocol_status=completed (direct UPDATE w/ allow marker per Phase 2b deferred)
-//      + metadata json{settle_winner, maker_outcome_side, maker_won, settle_kas_delta,
-//                      settle_outcome_phase='detected', settled_at}
-//   2. INSERT prediction_reputation_log (event_type='settled', settled_kas_delta)
+// 5min cron tick (prediction lifecycle 用 verifying/delivering — 都 in DB CHECK 约束):
+//   matched → verifying (settler 一拿到 matched 立 transition; 表 oracle 验证中)
+//   verifying (未 resolve) → 留 verifying 下次 tick
+//   verifying (resolved) → delivering → completed (同 tick 串 transition, prediction 无真链 delivery)
+// awaiting_oracle/awaiting_manual_confirm/verified 在 VALID_TRANSITIONS 但 DB CHECK 缺,
+// 需 migration 加入 → 留 Phase 2b' 一起加 (跟 fund_lock prediction 分类 + 真链 payout 同步).
 //
-// settle_kas_delta 语义: 正 = maker 赢 (taker 输 KAS), 负 = maker 输 (maker 真链 payout 待 Phase 2b
-// exchange-machine.transition delivering→completed 钩 evm-transfer/sendKas).
-// 本 service 只 detect + mark + log, 不动 chain TX. 解耦 detect 与 payout, Phase 2c isolated.
+// transition() to 'completed' 触发 exchange-machine 内 spendFunds(offerId) (idempotent 安全;
+// prediction Phase 1 publish 没 lock fund 所以 no-op) + DM taker (= UX 闭环 提示).
 //
-// 不撞 30s exchange-machine cron (expireStale/timeoutVerifying): gamma API 每 offer 1 fetch,
-// 5min 频率 + startup catch-up 1 tick (R-CRON-NO-STARTUP-CATCHUP sediment 守).
+// 真链 KAS payout 真转账 (delivering→completed 钩 sendKas 给 winner) 留 Phase 2b' (~120 LOC
+// stake escrow + fund_lock prediction 分类 + chain TX 真转), 跟 detect 解耦.
 
 import { sqlite } from '../db/client.js';
 import { randomUUID } from 'node:crypto';
 import { verifyPredictionOutcome } from './bettor-prediction-verifier.js';
+import { transition } from './exchange-machine.js';
 
 const TICK_INTERVAL_MS = 5 * 60 * 1000;  // 5 min
 const STARTUP_GRACE_MS = 30 * 1000;       // 30s grace 让 Console boot 其他 cron 先稳
@@ -50,6 +50,12 @@ export async function settlePredictionOutcomes() {
   }
   running = true;
   try {
+    // r177 Phase 2b: prediction lifecycle = matched → verifying → delivering → completed.
+    // 用 verifying/delivering 都 in DB CHECK 约束 (跟 awaiting_oracle 不同, 后者 CHECK 缺失,
+    // 需 v122 migration 才能 enable — 留 Phase 2b' 真链 payout 一起加).
+    //   matched → verifying: settler 首次 tick detect (= "已 detect 过期, oracle 验证中")
+    //   verifying (未 resolve) → 留 verifying 下次 tick
+    //   verifying (resolved) → delivering → completed: 同 tick 串 transition (prediction 无真链 delivery)
     const offers = sqlite.prepare(`
       SELECT id, maker, give_asset, give_amount, want_asset, want_amount, taker,
              outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side,
@@ -57,7 +63,7 @@ export async function settlePredictionOutcomes() {
              published_price, protocol_status, metadata
       FROM exchange_offers
       WHERE (give_asset = 'prediction_outcome_share' OR want_asset = 'prediction_outcome_share')
-        AND protocol_status IN ('matched','verifying','delivering')
+        AND protocol_status IN ('matched','verifying')
         AND outcome_end_date IS NOT NULL
         AND datetime(outcome_end_date) <= datetime('now')
     `).all();
@@ -66,6 +72,15 @@ export async function settlePredictionOutcomes() {
     let settled = 0, pending = 0, errored = 0;
     for (const offer of offers) {
       try {
+        // matched → verifying 立 transition (= settler 已认领, 表 oracle 验证中)
+        if (offer.protocol_status === 'matched') {
+          try {
+            transition(offer.id, 'verifying');
+          } catch (e) {
+            console.warn(`[prediction-settler] transition matched→verifying fail ${offer.id.slice(0,8)}: ${e.message}`);
+          }
+        }
+
         const offerForVerify = { ...offer, maker_relay_id: offer.maker };
         const r = await verifyPredictionOutcome(offerForVerify);
         if (!r.ok) {
@@ -89,12 +104,20 @@ export async function settlePredictionOutcomes() {
           maker_won: makerWon,
           settle_kas_delta: settleKasDelta,
           settled_at: new Date().toISOString(),
-          settle_outcome_phase: 'detected',  // Phase 2b 真链 payout 后改 'paid'
+          settle_outcome_phase: 'detected',  // Phase 2b' 真链 payout 后改 'paid'
         });
 
-        // lint-allow-protocol-status-direct: r177-phase2c-settle-detector-pre-exchange-machine-integration
-        sqlite.prepare(`UPDATE exchange_offers SET protocol_status='completed', completed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP, metadata=? WHERE id=?`)
-          .run(metaNew, offer.id);
+        // verifying → delivering → completed 同 tick 串 transition (= VALID_TRANSITIONS 真路径)
+        // prediction 无真链 KAS 转 (Phase 2b'), delivering state 仅做 audit timestamp,
+        // 立 走 completed. transition() 内 spendFunds idempotent + DM taker 表 settle 闭环.
+        try {
+          transition(offer.id, 'delivering');
+          transition(offer.id, 'completed', { metadata: metaNew });
+        } catch (e) {
+          console.error(`[prediction-settler] transition verifying→delivering→completed fail ${offer.id.slice(0,8)}: ${e.message}`);
+          errored++;
+          continue;
+        }
         if (offer.maker) {
           sqlite.prepare(`INSERT INTO prediction_reputation_log (id, maker_relay_id, event_type, settled_kas_delta, dispute_outcome, recorded_at) VALUES (?, ?, 'settled', ?, NULL, CURRENT_TIMESTAMP)`)
             .run(randomUUID(), offer.maker, settleKasDelta);
