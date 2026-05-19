@@ -368,6 +368,24 @@ export async function registerExchangeRoutes(fastify) {
       marketKey, now, now
     );
 
+    // NWT N19.27 / Owner 5/19 真链 Round 4 surface real trigger gap:
+    // `/api/exchange/publish` 是所有 publish 路径 chokepoint (broker-v3 + market-seeder + user UI),
+    // 但 INSERT 后 0 调 onBroadcastWritten → autoTaker pipeline 永不 fire on self-publish.
+    // 修: broadcast 成功后 dispatch onBroadcastWritten (同 broker-action-queue.js:347 wire fix pattern).
+    // 防 KI 第 20 次 silent skip — broker offer 上链 + DB 入库 + 但 trade-filter 不知.
+    try {
+      const { onBroadcastWritten } = await import('../services/trade-protocol-filter.js');
+      await onBroadcastWritten({
+        tx_hash: broadcastTx,
+        content: JSON.stringify(protocolMsg),
+        sender_address: makerAddr,
+        channel_name: channel,
+        created_at: now,
+      });
+    } catch (err) {
+      console.warn(`[exchange-publish] onBroadcastWritten notify err: ${err.message}`);
+    }
+
     return reply.send({
       ok: true,
       offer_id: offerId,
