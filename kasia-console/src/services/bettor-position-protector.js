@@ -218,6 +218,8 @@ async function fetchPolymarketPrice(tokenId) {
     // 不是 `tokenId`. variant-expander r141 ship 用对了, position-protector r139 ship 用错.
     // 错位 致 gamma 返 random/wrong market → daemon 算 pnl_pct 错位 → false trigger
     // R-ARCHITECT-MUST-GREP-API-LOGIC 第 2 案例 sediment + R-DAEMON-MUST-HAVE-DRY-RUN-MODE.
+    // lint-allow-gamma-no-closed: position-protector r177 scope 外 (= bettor sim 持仓监控, 非 prediction trade settler).
+    //   Bettor 后续评估是否也加 closed=true (= 防 resolved Polymarket 仓位漏监控). KI-31 (r184) 守 prediction trade 路径.
     const res = await fetch(`https://gamma-api.polymarket.com/markets?clob_token_ids=${encodeURIComponent(tokenId)}`, {
       headers: { 'User-Agent': 'KANet-bettor-protector/1.0' },
     });

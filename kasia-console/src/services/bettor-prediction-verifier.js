@@ -18,12 +18,15 @@ const GAMMA_TIMEOUT_MS = 10000;  // 10s default (was 5s)
 const GAMMA_RETRY_COUNT = 1;     // 1 retry on timeout/network (= 2 total attempts)
 
 // Bettor r182 polish 2: retry-wrapped gamma fetch. Throws final error after retries exhausted (= caller catch).
+// KI-31 (Bettor r184 5/19): URL 必含 &closed=true — Polymarket gamma default active=true filter,
+// resolved market 不返 ('market not found') → settler 永卡 matched. closed=true 实 'include closed'
+// (= active + closed 都返, 不破现 active 路径).
 async function fetchGammaWithRetry(tokenId) {
   let lastErr;
   for (let attempt = 0; attempt <= GAMMA_RETRY_COUNT; attempt++) {
     try {
       const res = await fetch(
-        `https://gamma-api.polymarket.com/markets?clob_token_ids=${encodeURIComponent(tokenId)}`,
+        `https://gamma-api.polymarket.com/markets?clob_token_ids=${encodeURIComponent(tokenId)}&closed=true`,
         { signal: AbortSignal.timeout(GAMMA_TIMEOUT_MS) },
       );
       return res;  // including non-2xx; caller checks res.ok
