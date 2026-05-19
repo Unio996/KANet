@@ -233,8 +233,10 @@ async function _evaluateAutoTake(offerId, msg) {
   if (enabled !== 'true') { await _p(`enabled=${enabled}`); return; }
 
   // 2. Skip own offers (trap #53)
+  // NWT N19.25 / Owner 钦定 5/19 "干!!!": KANET_TEST_MODE=1 bypass for multi-actor real-chain test.
+  // Production 默认 (无 var) 保持 skip own_offer 不变 (trap #53 防 self-deal).
   const localAddrs = sqlite.prepare('SELECT address FROM relay_nodes').all().map(r => r.address);
-  if (localAddrs.includes(msg._from)) { await _p('own_offer'); return; }
+  if (process.env.KANET_TEST_MODE !== '1' && localAddrs.includes(msg._from)) { await _p('own_offer'); return; }
 
   // 3. Only auto-verifiable offers
   if (msg.verification === 'manual') { await _p('verification_manual'); return; }

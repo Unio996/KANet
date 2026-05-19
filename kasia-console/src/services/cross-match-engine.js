@@ -84,7 +84,9 @@ export function tickCrossMatchOnce(marketPrice = null, brokerAddrs = null) {
   for (const buy of buys) {
     for (const sell of sells) {
       // Risk gate 3: same-org skip (Trader-A/B/M 互不撮合)
-      if (brokerAddrs.includes(buy.maker) && brokerAddrs.includes(sell.maker)) continue;
+      // NWT N19.25 / Owner 钦定 5/19 "干!!!": KANET_TEST_MODE=1 bypass for multi-actor real-chain test.
+      // Production 默认 (无 var) 保持 same-org skip 不变.
+      if (process.env.KANET_TEST_MODE !== '1' && brokerAddrs.includes(buy.maker) && brokerAddrs.includes(sell.maker)) continue;
       // same-maker can't cross self
       if (buy.maker === sell.maker) continue;
 
