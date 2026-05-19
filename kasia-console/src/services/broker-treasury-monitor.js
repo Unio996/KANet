@@ -70,27 +70,30 @@ async function _runSnapshot() {
       'SELECT chain, address FROM agent_wallets WHERE relay_node_id = ?'
     ).all(BROKER_RELAY_ID);
 
-    const snapshots = [];
+    // J2 P0 fix 5/19 (Owner 5/19 "快!" 钦定): sequential RPC → Promise.all parallel.
+    // 旧 sequential await EVM RPC × N chains × 2 assets → cumulative 30+ sec event loop block
+    // (arbitrum/eth/optimism RPC timeout 各 5-10s + JsonRpcProvider retry 1s × N).
+    // 修后 parallel: 单 worst chain 限速 ~5s, console event loop 不阻.
+    const tasks = [];
     for (const w of wallets) {
-      // Kaspa: use API balance endpoint
       if (w.chain === 'kaspa' || w.chain === 'kaspad') {
-        const snap = await _snapshotKaspaBalance(w.address);
-        if (snap) snapshots.push(snap);
+        tasks.push(_snapshotKaspaBalance(w.address).catch(err => {
+          console.warn(`[treasury-monitor] kaspa balance fail: ${err.message}`);
+          return null;
+        }));
         continue;
       }
-      // EVM: balance via RPC ERC20
       const tokens = TOKEN_REGISTRY[w.chain];
       if (!tokens) continue;
       for (const asset of ['USDT', 'USDC']) {
         if (!tokens[asset]) continue;
-        try {
-          const snap = await _snapshotEvmBalance(w.chain, asset, tokens[asset], tokens.decimals, w.address);
-          snapshots.push(snap);
-        } catch (err) {
+        tasks.push(_snapshotEvmBalance(w.chain, asset, tokens[asset], tokens.decimals, w.address).catch(err => {
           console.warn(`[treasury-monitor] ${w.chain}/${asset} balance fail: ${err.message}`);
-        }
+          return null;
+        }));
       }
     }
+    const snapshots = (await Promise.all(tasks)).filter(Boolean);
 
     // Persist snapshots
     const ins = sqlite.prepare(
