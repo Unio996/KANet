@@ -28,7 +28,7 @@ export default {
         ) VALUES (?, 'kaspa:qtest_maker', 'KAS', '10', 'USDT', '0.4',
           'matched', 'KAS-USDT', 'oracle', 1,
           datetime('now'), datetime('now'), datetime('now'), ?, '{}')
-      `).run(TEST_OFFER_ID, 'b'.repeat(64));
+      `).run(TEST_OFFER_ID, Array.from({length:64},()=>Math.floor(Math.random()*16).toString(16)).join(''));  // NWT N19.41 KI 24 fix: random hex
 
       // UPDATE to awaiting_oracle — what routeToVerification L998 does
       try {

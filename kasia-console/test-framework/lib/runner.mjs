@@ -1697,6 +1697,17 @@ export async function runCase(testCase) {
       result.failed_assertions.push({ step: 'run()', msg: e.message });
     }
     result.ended_at = new Date().toISOString();
+    // NWT N19.41 fix: imperative cases 也写 trace file (旧 patch 漏 — case fail reason 不可见, 5 cases all "missing trace" 真因).
+    try {
+      result.trace_file = _writeTraceFile(result);
+    } catch (err) {
+      result.pass = false;
+      result.failed_assertions.push({
+        step: '<trace>',
+        key: 'no_log_no_pass',
+        msg: `trace file 写失败 (${err.message}) — imperative case 强制 FAIL`,
+      });
+    }
     return result;
   }
 

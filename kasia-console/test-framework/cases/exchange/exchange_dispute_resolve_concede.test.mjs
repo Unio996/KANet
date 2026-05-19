@@ -42,7 +42,8 @@ export default {
       action: 'exec_sql',
       sql: `INSERT INTO exchange_offers (id, maker, taker, give_asset, give_amount, want_asset, want_amount, protocol_status, market_key, verification, is_fully_observed, created_at, updated_at, broadcast_at, broadcast_tx_id, metadata)
             VALUES (?, 'maker-addr-fake', 'taker-addr-fake', 'KAS', '10', 'USDT', '0.4', 'matched', 'KAS-USDT', 'manual', 1, datetime('now'), datetime('now'), datetime('now'), ?, ?)`,
-      params: [TEST_OFFER_ID, 'd'.repeat(64), JSON.stringify({ tag: TEST_OFFER_ID })],
+      // NWT N19.41 KI 24 fix: random hex (was 'd'.repeat(64), 04:01 stale row collision blocked subsequent runs for 5+ hr)
+      params: [TEST_OFFER_ID, Array.from({length:64},()=>Math.floor(Math.random()*16).toString(16)).join(''), JSON.stringify({ tag: TEST_OFFER_ID })],
     },
     {
       action: 'http_post',

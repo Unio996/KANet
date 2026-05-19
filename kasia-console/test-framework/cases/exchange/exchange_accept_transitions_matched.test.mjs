@@ -32,7 +32,7 @@ export default {
       params: [
         TEST_OFFER_ID,
         relayAddr('trader-b'),
-        'a'.repeat(64),  // fake 64-hex broadcast_tx_id (v83 trigger)
+        Array.from({length:64},()=>Math.floor(Math.random()*16).toString(16)).join(''),  // NWT N19.41 KI 24 fix: random hex (was 'a'.repeat(64), UNIQUE collision risk if stale row persists)
         JSON.stringify({ source: 'p0.2-test', tag: TEST_OFFER_ID }),
       ],
     },
