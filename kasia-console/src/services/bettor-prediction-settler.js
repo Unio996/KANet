@@ -57,7 +57,7 @@ export async function settlePredictionOutcomes() {
     //   verifying (未 resolve) → 留 verifying 下次 tick
     //   verifying (resolved) → delivering → completed: 同 tick 串 transition (prediction 无真链 delivery)
     const offers = sqlite.prepare(`
-      SELECT id, maker, give_asset, give_amount, want_asset, want_amount, taker,
+      SELECT id, maker, maker_kaspa_addr, maker_relay_id, give_asset, give_amount, want_asset, want_amount, taker,
              outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side,
              outcome_end_date, outcome_oracle_hook, outcome_max_deviation_pp,
              published_price, protocol_status, metadata
@@ -81,8 +81,9 @@ export async function settlePredictionOutcomes() {
           }
         }
 
-        const offerForVerify = { ...offer, maker_relay_id: offer.maker };
-        const r = await verifyPredictionOutcome(offerForVerify);
+        // r177 Phase 2a hotfix PB4: offer.maker_relay_id 直 from DB col (v122).
+        // verifyPredictionOutcome 只用 outcome_* fields, 不查 whitelist — 这里 alias 已 cleanup.
+        const r = await verifyPredictionOutcome(offer);
         if (!r.ok) {
           console.warn(`[prediction-settler] verify fail ${offer.id.slice(0, 8)}: ${r.reason}`);
           errored++;
@@ -118,9 +119,12 @@ export async function settlePredictionOutcomes() {
           errored++;
           continue;
         }
-        if (offer.maker) {
+        // r177 Phase 2a hotfix PB4: 用 maker_relay_id (UUID) 写 reputation log,
+        // 跟 prediction_maker_whitelist.relay_node_id 一致 (= 跨 cross-host reputation 查找).
+        const makerRelayForLog = offer.maker_relay_id || offer.maker;  // fallback for pre-v122 rows
+        if (makerRelayForLog) {
           sqlite.prepare(`INSERT INTO prediction_reputation_log (id, maker_relay_id, event_type, settled_kas_delta, dispute_outcome, recorded_at) VALUES (?, ?, 'settled', ?, NULL, CURRENT_TIMESTAMP)`)
-            .run(randomUUID(), offer.maker, settleKasDelta);
+            .run(randomUUID(), makerRelayForLog, settleKasDelta);
         }
         settled++;
         console.log(`[prediction-settler] settled ${offer.id.slice(0, 8)}: winner=${winner} maker_side=${offer.outcome_side} maker_won=${makerWon} delta=${settleKasDelta.toFixed(4)} KAS`);
