@@ -11,7 +11,29 @@
 
 import { sqlite } from '../db/client.js';
 
-const GAMMA_TIMEOUT_MS = 5000;  // per Bettor r178 ack: 5s default, no retry, reject fallback
+// Bettor r182 polish 2 (5/19): 5s timeout 太紧 (= restart 后 RPC catch-up 3-retry 才过). 10s + 1 retry.
+// 真因: cold start gamma API latency 可能 >5s. 单 retry 容忍 transient (= 既守 Hybrid Latency Defense
+// 不允许 stale price, 又避免误判 transient flap).
+const GAMMA_TIMEOUT_MS = 10000;  // 10s default (was 5s)
+const GAMMA_RETRY_COUNT = 1;     // 1 retry on timeout/network (= 2 total attempts)
+
+// Bettor r182 polish 2: retry-wrapped gamma fetch. Throws final error after retries exhausted (= caller catch).
+async function fetchGammaWithRetry(tokenId) {
+  let lastErr;
+  for (let attempt = 0; attempt <= GAMMA_RETRY_COUNT; attempt++) {
+    try {
+      const res = await fetch(
+        `https://gamma-api.polymarket.com/markets?clob_token_ids=${encodeURIComponent(tokenId)}`,
+        { signal: AbortSignal.timeout(GAMMA_TIMEOUT_MS) },
+      );
+      return res;  // including non-2xx; caller checks res.ok
+    } catch (e) {
+      lastErr = e;
+      if (attempt < GAMMA_RETRY_COUNT) continue;  // retry
+    }
+  }
+  throw lastErr;
+}
 
 /**
  * Verify accept message against published prediction offer.
@@ -29,10 +51,7 @@ export async function verifyPredictionMatch(offer, acceptMsg) {
   // Layer 2: deviation guard — current gamma price vs offer published yes_price
   if (offer.outcome_condition_id && offer.outcome_token_id) {
     try {
-      const res = await fetch(
-        `https://gamma-api.polymarket.com/markets?clob_token_ids=${encodeURIComponent(offer.outcome_token_id)}`,
-        { signal: AbortSignal.timeout(GAMMA_TIMEOUT_MS) },
-      );
+      const res = await fetchGammaWithRetry(offer.outcome_token_id);
       if (!res.ok) return { ok: false, reason: `gamma HTTP ${res.status}` };
       const arr = await res.json();
       const m = (arr || [])[0];
@@ -52,7 +71,7 @@ export async function verifyPredictionMatch(offer, acceptMsg) {
         return { ok: false, reason: `deviation ${deviationPp.toFixed(2)}pp > max ${maxDeviation}pp (gamma ${currentPrice} vs published ${publishedPrice})` };
       }
     } catch (e) {
-      // r178 ack: gamma timeout 5s no-retry → reject (safer than allow stale)
+      // r182 polish 2: gamma 10s + 1 retry 后仍 fail → reject (= 守 Hybrid Latency Defense 不许 stale).
       return { ok: false, reason: `gamma fetch fail: ${e.message}` };
     }
   }
@@ -91,10 +110,7 @@ export async function verifyPredictionOutcome(offer) {
   }
   if (!offer.outcome_token_id) return { ok: false, reason: 'missing outcome_token_id' };
   try {
-    const res = await fetch(
-      `https://gamma-api.polymarket.com/markets?clob_token_ids=${encodeURIComponent(offer.outcome_token_id)}`,
-      { signal: AbortSignal.timeout(GAMMA_TIMEOUT_MS) },
-    );
+    const res = await fetchGammaWithRetry(offer.outcome_token_id);
     if (!res.ok) return { ok: false, reason: `gamma HTTP ${res.status}` };
     const arr = await res.json();
     const m = (arr || [])[0];
