@@ -414,6 +414,13 @@ startPositionWatcherCron();
 import { startFossaStableScannerCron } from './services/bettor-fossa-stable-scanner.js';
 startFossaStableScannerCron();
 
+// r177 Phase 2c — prediction_outcome_share settlement detector (Owner 5/19 钦定 "go phase 2 直 fire
+// 2c 不 UAT" + Bettor r197 0 push back). 5min cron, settle expired prediction offers
+// via verifyPredictionOutcome → mark protocol_status='completed' + metadata + reputation log.
+// 真链 KAS payout 待 Phase 2b exchange-machine.transition delivering→completed 集成.
+import { startPredictionSettlerCron } from './services/bettor-prediction-settler.js';
+startPredictionSettlerCron();
+
 // Phase B Variant Expander 3-tier (Owner 5/16 钦定 "B" + Bettor r141 spec) — 30 min cron.
 // per scanner rec → auto-find related markets → 3 档 variant (激进/适中/保守) INSERT.
 // Phase 1 skeleton + UI surface, Phase 2 will integrate depth-500 /book API real-time.
