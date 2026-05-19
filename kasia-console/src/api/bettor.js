@@ -1052,10 +1052,14 @@ export async function registerBettorRoutes(fastify) {
       published_price: price,
     };
 
+    // r177 Phase 2a hotfix PB1 (Bettor r199): 5-attempt 50s → 3-attempt 30s.
+    //   原因: expires_in_seconds default 90s, 50s 占 56% lifetime 真挤. 3-attempt 5/10/15s = 30s
+    //   = 33% lifetime, 留 67% 给 taker take.
     let broadcastTx = null;
+    let broadcastEmittedAt = null;
     try {
       const { sendCommandAsync } = await import('../services/relay-manager.js');
-      const MAX_BROADCAST_ATTEMPTS = 5;
+      const MAX_BROADCAST_ATTEMPTS = 3;
       for (let attempt = 1; attempt <= MAX_BROADCAST_ATTEMPTS; attempt++) {
         try {
           const result = await sendCommandAsync(b.maker_relay_id, {
@@ -1064,7 +1068,10 @@ export async function registerBettorRoutes(fastify) {
             message: JSON.stringify(protocolMsg),
           });
           broadcastTx = result?.txId || null;
-          if (broadcastTx) break;
+          if (broadcastTx) {
+            broadcastEmittedAt = new Date().toISOString();
+            break;
+          }
           if (attempt < MAX_BROADCAST_ATTEMPTS) {
             console.log(`[prediction-publish] broadcast attempt ${attempt}/${MAX_BROADCAST_ATTEMPTS} no txId (mempool conflict?)`);
             await new Promise(r => setTimeout(r, attempt * 5000));
@@ -1079,27 +1086,41 @@ export async function registerBettorRoutes(fastify) {
     }
 
     if (!broadcastTx) {
-      return reply.code(503).send({ ok: false, error: 'Broadcast failed after 5 attempts — offer not created. Relay may be syncing.' });
+      return reply.code(503).send({ ok: false, error: 'Broadcast failed after 3 attempts — offer not created. Relay may be syncing.' });
     }
 
-    try {
-      sqlite.prepare(`INSERT INTO exchange_offers (
-        id, broadcast_tx_id, message_index, give_asset, give_amount, want_asset, want_amount, maker,
-        verification, protocol_status, is_fully_observed, market_key, expires_at, created_at, updated_at,
-        outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side, outcome_end_date, outcome_oracle_hook, outcome_max_deviation_pp,
-        published_price
-      ) VALUES (?, ?, 0, 'prediction_outcome_share', ?, 'KAS', ?, ?, 'prediction_outcome_match', 'open', 0, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(id, broadcastTx, String(numShares), String(sizeKas), makerAddr,
-             marketKey, expiresAt,
-             b.outcome_market_source || 'polymarket', b.outcome_condition_id, b.outcome_token_id, b.outcome_side, b.outcome_end_date,
-             b.outcome_oracle_hook || 'polymarket_uma_mirror', maxDeviation, price);
-      return reply.send({ ok: true, offer_id: id, shares: numShares, want_kas: sizeKas, price, expires_at: expiresAt, broadcast_tx: broadcastTx });
-    } catch (e) {
-      // DB insert failed AFTER chain broadcast — chain is source of truth, scout 会 ingest 这条 broadcast,
-      // 下次 DB 重 indexer 可恢复. 不 retry broadcast 防重复入链.
-      console.error(`[prediction-publish] DB insert fail after broadcast ${broadcastTx?.slice(0,12)}: ${e.message}`);
-      return reply.code(500).send({ ok: false, error: e.message, broadcast_tx: broadcastTx, warning: 'chain emit OK, DB write fail — scout indexer will resync' });
+    // r177 Phase 2a hotfix PB2 (Bettor r199): DB insert 3-attempt retry before 500.
+    //   原因: 现 broadcast 上链 + DB insert fail → 24h scout indexer resync 窗口. SQLite write 锁
+    //   contention / 磁盘满可能 transient fail, 3-attempt 50ms backoff cheap recovery.
+    // r177 Phase 2a hotfix PB3: 用 existing broadcast_at col 做 price 锚点时间戳 (= broadcast 确认时刻).
+    //   不加新 priced_at col, 不动 migration.
+    // r177 Phase 2a hotfix PB4: 双 populate maker_kaspa_addr (kaspa addr) + maker_relay_id (UUID).
+    //   verifier Layer 4 whitelist 查 maker_relay_id; chain deliver 用 maker_kaspa_addr.
+    let dbInsertErr = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        sqlite.prepare(`INSERT INTO exchange_offers (
+          id, broadcast_tx_id, message_index, give_asset, give_amount, want_asset, want_amount, maker,
+          verification, protocol_status, is_fully_observed, market_key, expires_at,
+          broadcast_at, created_at, updated_at,
+          outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side, outcome_end_date, outcome_oracle_hook, outcome_max_deviation_pp,
+          published_price, maker_kaspa_addr, maker_relay_id
+        ) VALUES (?, ?, 0, 'prediction_outcome_share', ?, 'KAS', ?, ?, 'prediction_outcome_match', 'open', 0, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(id, broadcastTx, String(numShares), String(sizeKas), makerAddr,
+               marketKey, expiresAt, broadcastEmittedAt,
+               b.outcome_market_source || 'polymarket', b.outcome_condition_id, b.outcome_token_id, b.outcome_side, b.outcome_end_date,
+               b.outcome_oracle_hook || 'polymarket_uma_mirror', maxDeviation, price,
+               makerAddr, b.maker_relay_id);
+        return reply.send({ ok: true, offer_id: id, shares: numShares, want_kas: sizeKas, price, expires_at: expiresAt, broadcast_tx: broadcastTx, broadcast_at: broadcastEmittedAt });
+      } catch (e) {
+        dbInsertErr = e;
+        console.warn(`[prediction-publish] DB insert attempt ${attempt}/3 fail: ${e.message}`);
+        if (attempt < 3) await new Promise(r => setTimeout(r, 50 * attempt));
+      }
     }
+    // 3 attempts exhausted — chain emit done but DB write fail. Scout indexer will resync.
+    console.error(`[prediction-publish] DB insert fail after broadcast ${broadcastTx?.slice(0,12)}: ${dbInsertErr?.message}`);
+    return reply.code(500).send({ ok: false, error: dbInsertErr?.message, broadcast_tx: broadcastTx, warning: 'chain emit OK, DB write fail after 3 attempts — scout indexer will resync' });
   });
 
   // POST /api/prediction/accept/:offer_id — taker accept, calls verifyPredictionMatch
@@ -1111,10 +1132,10 @@ export async function registerBettorRoutes(fastify) {
     if (offer.give_asset !== 'prediction_outcome_share' && offer.want_asset !== 'prediction_outcome_share') return reply.code(400).send({ ok: false, error: 'not a prediction_outcome_share offer' });
     if (offer.protocol_status !== 'open') return reply.code(409).send({ ok: false, error: `offer status=${offer.protocol_status}, not open` });
 
-    // Normalize to verifier shape (offer.maker_relay_id alias for offer.maker)
-    const offerForVerify = { ...offer, maker_relay_id: offer.maker };
+    // r177 Phase 2a hotfix PB4: offer.maker_relay_id 现 直 from DB col (v122). 不再 alias offer.maker
+    // (= kaspa addr). Layer 4 whitelist 查 prediction_maker_whitelist.relay_node_id 正确.
     const { verifyPredictionMatch } = await import('../services/bettor-prediction-verifier.js');
-    const verify = await verifyPredictionMatch(offerForVerify, acceptMsg);
+    const verify = await verifyPredictionMatch(offer, acceptMsg);
     if (!verify.ok) return reply.code(403).send({ ok: false, error: `verify fail: ${verify.reason}` });
 
     // r177 Phase 1 sub 4 — Owner ack gate strategy 分流 (per Bettor r177 §E):

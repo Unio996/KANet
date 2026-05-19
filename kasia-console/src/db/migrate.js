@@ -3801,5 +3801,25 @@ export function runMigrations() {
     }
   }
 
+  // v122: r177 Phase 2a hotfix — exchange_offers 加 maker_kaspa_addr + maker_relay_id 双 col
+  // (Bettor r199 PB4: 修 Phase 2a 改 maker col 为 kaspa addr 后 verifier Layer 4 whitelist lookup 失效 bug).
+  //   prediction_maker_whitelist.relay_node_id 是 UUID, 现 offer.maker (kaspa addr) 查不到.
+  //   propose: 双 populate — maker_kaspa_addr = kaspa addr (deliver/chain 用), maker_relay_id = UUID (whitelist 查).
+  //   maker col 保留 kaspa addr (= exchange_offers schema 一致约定).
+  {
+    const tableInfo = sqlite.prepare("SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name='exchange_offers'").get();
+    if (tableInfo.cnt) {
+      const cols = sqlite.prepare("PRAGMA table_info(exchange_offers)").all().map(c => c.name);
+      if (!cols.includes('maker_kaspa_addr')) {
+        sqlite.exec(`ALTER TABLE exchange_offers ADD COLUMN maker_kaspa_addr TEXT`);
+        console.log('[migrate] v122: exchange_offers 加 maker_kaspa_addr TEXT (r177 Phase 2a hotfix PB4).');
+      }
+      if (!cols.includes('maker_relay_id')) {
+        sqlite.exec(`ALTER TABLE exchange_offers ADD COLUMN maker_relay_id TEXT`);
+        console.log('[migrate] v122: exchange_offers 加 maker_relay_id TEXT (r177 Phase 2a hotfix PB4 — verifier whitelist lookup).');
+      }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
