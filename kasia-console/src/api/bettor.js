@@ -1242,11 +1242,13 @@ export async function registerBettorRoutes(fastify) {
           }
         } catch {}
       }
-      allowAutoFire = sizeUsd < 50 && spreadPp <= 2;
+      // Bettor r185 polish 3: float tolerance — spreadPp === 2.0 case (e.g. exact (98-96)/100) 浮点 artifact
+      // 可能算成 2.0000000000000004 > 2 致 auto-fire 误 gate. 容 0.05pp 浮点 noise.
+      allowAutoFire = sizeUsd < 50 && spreadPp <= 2.05;
     } catch {}
 
     if (!allowAutoFire && !acceptMsg.owner_final_ack) {
-      return reply.code(403).send({ ok: false, error: 'requires explicit owner_final_ack=true in body (size ≥ $50 or spread > 2pp threshold)' });
+      return reply.code(403).send({ ok: false, error: 'requires explicit owner_final_ack=true in body (size ≥ $50 or spread > 2.05pp threshold)' });
     }
 
     // r177 Phase 2b (Owner 5/19 一气呵成 + #286 立 fire): 走 exchange-machine.transition() 真状态机.
