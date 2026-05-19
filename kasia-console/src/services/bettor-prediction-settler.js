@@ -21,6 +21,8 @@ import { sqlite } from '../db/client.js';
 import { randomUUID } from 'node:crypto';
 import { verifyPredictionOutcome } from './bettor-prediction-verifier.js';
 import { transition } from './exchange-machine.js';
+import { sendCommandAsync } from './relay-manager.js';
+import { getConfig } from '../data/settings/configs.js';
 
 const TICK_INTERVAL_MS = 5 * 60 * 1000;  // 5 min
 const STARTUP_GRACE_MS = 30 * 1000;       // 30s grace 让 Console boot 其他 cron 先稳
@@ -93,39 +95,96 @@ export async function settlePredictionOutcomes() {
 
         const winner = r.winner;  // 'YES' or 'NO'
         const makerWon = (offer.outcome_side === winner);
-        const sizeKas = parseFloat(offer.want_amount) || 0;
-        const settleKasDelta = makerWon ? sizeKas : -sizeKas;
         const metaPrev = (() => {
           try { return JSON.parse(offer.metadata || '{}'); } catch { return {}; }
         })();
-        const metaNew = JSON.stringify({
+        // r177 Phase 2b'.1 stake = (1 - price) × shares × (1/KAS_USD) (真 prediction math).
+        // Phase 1 / 2 / 2a / 2b 时期写的 offer 没 metadata.stake_locked_kas, fallback want_amount (= wager math, legacy compat).
+        const stakeKas = parseFloat(metaPrev.stake_locked_kas) || parseFloat(offer.want_amount) || 0;
+        const settleKasDelta = makerWon ? stakeKas : -stakeKas;
+        const metaAfterDetect = {
           ...metaPrev,
           settle_winner: winner,
           maker_outcome_side: offer.outcome_side,
           maker_won: makerWon,
           settle_kas_delta: settleKasDelta,
           settled_at: new Date().toISOString(),
-          settle_outcome_phase: 'detected',  // Phase 2b' 真链 payout 后改 'paid'
-        });
+        };
 
-        // verifying → delivering → completed 同 tick 串 transition (= VALID_TRANSITIONS 真路径)
-        // prediction 无真链 KAS 转 (Phase 2b'), delivering state 仅做 audit timestamp,
-        // 立 走 completed. transition() 内 spendFunds idempotent + DM taker 表 settle 闭环.
+        // r177 Phase 2b'.2 真 KAS payout chain TX (Owner 5/19 "一气呵成" + Bettor r205/r206 共识 A1.a/A2.b):
+        // verifying → delivering (settler 准 payout) → 真链 sendKas → completed.
+        // winner_addr: maker_won = offer.maker_kaspa_addr (v123 双 col) || offer.maker (legacy fallback)
+        //            : taker_won = offer.taker (kaspa addr, transition('matched') 时 set)
+        // escrow_addr config + reverse-lookup relay_id (= relay 控 escrow 私钥) 走 sendCommandAsync transfer.
         try {
           transition(offer.id, 'delivering');
-          transition(offer.id, 'completed', { metadata: metaNew });
         } catch (e) {
-          console.error(`[prediction-settler] transition verifying→delivering→completed fail ${offer.id.slice(0,8)}: ${e.message}`);
+          console.error(`[prediction-settler] transition verifying→delivering fail ${offer.id.slice(0,8)}: ${e.message}`);
           errored++;
           continue;
         }
-        // r177 Phase 2a hotfix PB4: 用 maker_relay_id (UUID) 写 reputation log,
-        // 跟 prediction_maker_whitelist.relay_node_id 一致 (= 跨 cross-host reputation 查找).
-        const makerRelayForLog = offer.maker_relay_id || offer.maker;  // fallback for pre-v122 rows
+
+        const winnerAddr = makerWon
+          ? (offer.maker_kaspa_addr || offer.maker)
+          : offer.taker;
+        if (!winnerAddr || !String(winnerAddr).startsWith('kaspa:')) {
+          console.error(`[prediction-settler] payout target missing or invalid ${offer.id.slice(0,8)}: maker_won=${makerWon} winnerAddr=${winnerAddr}`);
+          errored++;
+          continue;  // 留 delivering, 下次 tick retry (Owner 介入 可能)
+        }
+
+        const escrowAddr = await getConfig('kanet_prediction_escrow_addr');
+        const escrowRelay = escrowAddr ? sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(escrowAddr) : null;
+        if (!escrowRelay) {
+          console.error(`[prediction-settler] escrow config missing OR relay row not found ${offer.id.slice(0,8)}: escrowAddr=${escrowAddr}. Stay delivering, Owner action required.`);
+          errored++;
+          continue;
+        }
+
+        let payoutTxId = null;
+        const PAYOUT_MAX_ATTEMPTS = 3;
+        for (let attempt = 1; attempt <= PAYOUT_MAX_ATTEMPTS; attempt++) {
+          try {
+            const result = await sendCommandAsync(escrowRelay.id, {
+              type: 'transfer',
+              target: winnerAddr,
+              amount: String(stakeKas),
+            });
+            payoutTxId = result?.txId || null;
+            if (payoutTxId) break;
+            if (attempt < PAYOUT_MAX_ATTEMPTS) await new Promise(r => setTimeout(r, attempt * 5000));
+          } catch (err) {
+            console.error(`[prediction-settler] payout attempt ${attempt}/${PAYOUT_MAX_ATTEMPTS} fail ${offer.id.slice(0,8)}: ${err.message}`);
+            if (attempt < PAYOUT_MAX_ATTEMPTS) await new Promise(r => setTimeout(r, attempt * 5000));
+          }
+        }
+        if (!payoutTxId) {
+          console.error(`[prediction-settler] payout chain TX exhausted 3 attempts ${offer.id.slice(0,8)} winner=${winnerAddr.slice(-12)} stake=${stakeKas.toFixed(4)} — stay delivering, next tick retry`);
+          errored++;
+          continue;  // 留 delivering, retry next tick (= 跟 exchange auto-deliver Bug-Z2 pattern 一致)
+        }
+
+        const metaFinal = JSON.stringify({
+          ...metaAfterDetect,
+          payout_tx: payoutTxId,
+          payout_target: winnerAddr,
+          settle_outcome_phase: 'paid',
+        });
+        try {
+          transition(offer.id, 'completed', { metadata: metaFinal });
+        } catch (e) {
+          console.error(`[prediction-settler] transition delivering→completed fail (after payout TX ${payoutTxId.slice(0,12)}) ${offer.id.slice(0,8)}: ${e.message} — manual DB cleanup needed (chain TX done)`);
+          errored++;
+          continue;
+        }
+        // r177 Phase 2a hotfix PB4: 用 maker_relay_id (UUID) 写 reputation log.
+        // r177 Phase 2b'.2: event_type='paid' 区分 detect-only vs 真链已 payout. (= 'settled' deprecated Phase 2b'.2 后)
+        const makerRelayForLog = offer.maker_relay_id || offer.maker;
         if (makerRelayForLog) {
-          sqlite.prepare(`INSERT INTO prediction_reputation_log (id, maker_relay_id, event_type, settled_kas_delta, dispute_outcome, recorded_at) VALUES (?, ?, 'settled', ?, NULL, CURRENT_TIMESTAMP)`)
+          sqlite.prepare(`INSERT INTO prediction_reputation_log (id, maker_relay_id, event_type, settled_kas_delta, dispute_outcome, recorded_at) VALUES (?, ?, 'paid', ?, NULL, CURRENT_TIMESTAMP)`)
             .run(randomUUID(), makerRelayForLog, settleKasDelta);
         }
+        console.log(`[prediction-settler] PAYOUT ${offer.id.slice(0, 8)}: winner=${winner} addr=${winnerAddr.slice(-12)} stake=${stakeKas.toFixed(4)} KAS payout_tx=${payoutTxId.slice(0,12)}`);
         settled++;
         console.log(`[prediction-settler] settled ${offer.id.slice(0, 8)}: winner=${winner} maker_side=${offer.outcome_side} maker_won=${makerWon} delta=${settleKasDelta.toFixed(4)} KAS`);
       } catch (e) {
