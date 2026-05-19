@@ -7,7 +7,8 @@ function getNetworkType(network) {
   switch (network) {
     case 'mainnet': return NetworkType.Mainnet;
     case 'testnet-10':
-    case 'testnet-11': return NetworkType.Testnet;
+    case 'testnet-11':
+    case 'testnet-12': return NetworkType.Testnet;  // Phase 3a SS testnet (Bettor r193 5/19)
     default: throw new Error(`Unsupported network type: ${network}`);
   }
 }
