@@ -204,46 +204,63 @@ let _autoTakeLock = false;
 
 /**
  * Evaluate an incoming offer for automatic acceptance.
- * Single-side first: only accept BUY offers (maker gives KAS, wants USDT → we pay USDT, get KAS).
+ * 双向 KAS↔USDT (J2 #523 / NWT N19.17/N19.18 三方共识 5/19):
+ * - SELL direction (maker give KAS, want USDT): broker BUY KAS at offer (broker pays USDT, gets KAS)
+ * - BUY direction (maker give USDT, want KAS): broker SELL KAS at offer (broker pays KAS, gets USDT)
+ * 前 30+ 天 hardcoded 单向 (L211-212), qqjdp=kzc2tgz4cchh 40d/770 broadcast 全 silent return.
  * Default mode is 'approval' — creates a proposal in execution_states for Owner to confirm.
  */
 async function _evaluateAutoTake(offerId, msg) {
   // NWT N8.1 5/18: autoTaker observability — 12 silent return 各 log gate + context.
-  // 真因 surface: N8 dig 真锁 'discount -0.61%<1.00%' (KAS market dropped 0.040→0.034, ExtClient offer pricing unchanged).
-  // Production keep: silent skip 是 KI-12 复刻 anti-pattern, 不 log 必 dig 1h+; 留 log = Brain/Owner 立见 reason.
-  const _p = (gate) => console.log(`[autoTaker.probe] offer=${offerId.slice(0,12)} from=${msg._from?.slice(-12)} EXIT gate=${gate}`);
+  // J2 #523 / NWT N19.18 P0c: autotake_skip chain_event emit (合 Path A commit, surface KI 18 silent skip).
+  const _p = async (gate) => {
+    console.log(`[autoTaker.probe] offer=${offerId.slice(0,12)} from=${msg._from?.slice(-12)} EXIT gate=${gate}`);
+    try {
+      const { recordChainEvent } = await import('./chain-event.js');
+      recordChainEvent({
+        txid: `autotake_skip_${offerId}_${gate.split(/[\s=<>]/)[0]}`,  // gate prefix avoid collision
+        eventType: 'autotake_skip',
+        payload: JSON.stringify({ offer_id: offerId, reason: gate, peer: msg._from, give: `${msg.give_amount}${msg.give_asset}`, want: `${msg.want_amount}${msg.want_asset}` }),
+      });
+    } catch (err) { /* don't break probe on emit fail */ }
+  };
   console.log(`[autoTaker.entry] offer=${offerId.slice(0,12)} from=${msg._from?.slice(-12)} verification=${msg.verification} give=${msg.give_amount}${msg.give_asset}→${msg.want_amount}${msg.want_asset}`);
-  if (_autoTakeLock) { _p('lock'); return; }
+  if (_autoTakeLock) { await _p('lock'); return; }
 
   // 1. Check enabled
   const { getConfig } = await import('../data/settings/configs.js');
   const enabled = await getConfig('autotake_enabled');
-  if (enabled !== 'true') { _p(`enabled=${enabled}`); return; }
+  if (enabled !== 'true') { await _p(`enabled=${enabled}`); return; }
 
   // 2. Skip own offers (trap #53)
   const localAddrs = sqlite.prepare('SELECT address FROM relay_nodes').all().map(r => r.address);
-  if (localAddrs.includes(msg._from)) { _p('own_offer'); return; }
+  if (localAddrs.includes(msg._from)) { await _p('own_offer'); return; }
 
   // 3. Only auto-verifiable offers
-  if (msg.verification === 'manual') { _p('verification_manual'); return; }
+  if (msg.verification === 'manual') { await _p('verification_manual'); return; }
 
   // 4. Skip expired
-  if (msg.expires_at && new Date(msg.expires_at) < new Date()) { _p('expired'); return; }
+  if (msg.expires_at && new Date(msg.expires_at) < new Date()) { await _p('expired'); return; }
 
-  // 5. Direction: only BUY (maker gives KAS, wants USDT)
-  if (msg.give_asset?.toUpperCase() !== 'KAS' || msg.want_asset?.toUpperCase() !== 'USDT') { _p(`direction give=${msg.give_asset} want=${msg.want_asset}`); return; }
+  // 5. Direction: 双向 KAS↔USDT (J2 #523 / NWT N19.17 三方共识 5/19)
+  // 真凶 (NWT N19.17 audit): hardcoded 单向 SELL → qqjdp=kzc2tgz4cchh 40d/770 broadcast BUY 全 silent return.
+  const giveU = msg.give_asset?.toUpperCase();
+  const wantU = msg.want_asset?.toUpperCase();
+  const isSellKas = giveU === 'KAS' && wantU === 'USDT';  // broker BUY KAS at offer (broker pay USDT)
+  const isBuyKas = giveU === 'USDT' && wantU === 'KAS';   // broker SELL KAS at offer (broker pay KAS)
+  if (!isSellKas && !isBuyKas) { await _p(`direction give=${msg.give_asset} want=${msg.want_asset}`); return; }
+  const direction = isSellKas ? 'SELL' : 'BUY';
 
-  // 5b. Check accepted_chains includes a chain we can pay on (bnb default)
-  // Bug NWT-13:47 真因 confirmed: acceptedChains 是 [{chain, address}] 对象 array, 旧 includes(c) 检 c 整对象
-  // 永远 false → payChain null → silent return → autoTaker 30+ day production silent dead from day 1.
-  // KI-12 第 13 次复刻 silent skip pattern.
-  // 修法: c.chain access, normalize case.
+  // 5b. Check accepted_chains includes a chain we can pay on (NWT N19.18 真 attack: direction-aware).
+  // SELL direction: broker pays USDT → needs USDT chain wallet (bnb default + eth/sol/tron)
+  // BUY direction: broker pays KAS → needs kaspa relay (broker pool 通过 relay send)
   const meta = msg.verification_meta || {};
   const acceptedChains = meta.accepted_chains || [];
-  const supported = ['bnb', 'eth', 'sol', 'tron'];
+  const supported = isSellKas ? ['bnb', 'eth', 'sol', 'tron'] : ['kaspa'];
   const match = acceptedChains.find(c => c && supported.includes(String(c.chain || c).toLowerCase()));
-  const payChain = (match && (match.chain || match)) || (acceptedChains.length === 0 ? 'bnb' : null);
-  if (!payChain) { _p(`payChain_null acceptedChains=${JSON.stringify(acceptedChains).slice(0,80)}`); return; }
+  const defaultChain = isSellKas ? 'bnb' : 'kaspa';
+  const payChain = (match && (match.chain || match)) || (acceptedChains.length === 0 ? defaultChain : null);
+  if (!payChain) { await _p(`payChain_null acceptedChains=${JSON.stringify(acceptedChains).slice(0,80)} dir=${direction}`); return; }
 
   // 6. Price evaluation
   // Bug NWT-13:30 A1 fix (Owner production autoTaker 真测 silent disabled):
@@ -258,20 +275,29 @@ async function _evaluateAutoTake(offerId, msg) {
       marketPrice = await getKasPrice();
     } catch (err) { console.warn(`[autoTaker] getKasPrice fallback err: ${err.message}`); }
   }
-  if (!marketPrice) { _p('marketPrice_null'); return; }
+  if (!marketPrice) { await _p('marketPrice_null'); return; }
 
   const giveAmt = parseFloat(msg.give_amount);
   const wantAmt = parseFloat(msg.want_amount);
-  if (!giveAmt || !wantAmt) { _p(`amounts give=${giveAmt} want=${wantAmt}`); return; }
+  if (!giveAmt || !wantAmt) { await _p(`amounts give=${giveAmt} want=${wantAmt}`); return; }
 
-  const offerPrice = wantAmt / giveAmt; // USDT per KAS
-  const discount = (marketPrice - offerPrice) / marketPrice;
+  // offerPrice 双向 normalize 到 USDT/KAS (NWT N19.18 Q1 attack downstream #2):
+  // SELL: maker give=KAS want=USDT → price = wantAmt/giveAmt (USDT/KAS) ✓ 正向
+  // BUY:  maker give=USDT want=KAS → price = giveAmt/wantAmt (USDT/KAS) 反向公式
+  const offerPrice = isSellKas ? (wantAmt / giveAmt) : (giveAmt / wantAmt);
+  // discount 双向 sign flip (NWT N19.18 Q1 attack downstream #3):
+  // SELL: broker BUY KAS @ offer, profit if offer < market → discount = (market - offer) / market
+  // BUY:  broker SELL KAS @ offer, profit if offer > market → discount = (offer - market) / market
+  const discount = isSellKas ? ((marketPrice - offerPrice) / marketPrice) : ((offerPrice - marketPrice) / marketPrice);
   const minDiscount = parseFloat(await getConfig('autotake_min_discount_pct') || '0.5') / 100;
-  if (discount < minDiscount) { _p(`discount ${(discount*100).toFixed(2)}%<${(minDiscount*100).toFixed(2)}% market=${marketPrice} offerPrice=${offerPrice.toFixed(6)}`); return; }
+  if (discount < minDiscount) { await _p(`discount ${(discount*100).toFixed(2)}%<${(minDiscount*100).toFixed(2)}% market=${marketPrice} offerPrice=${offerPrice.toFixed(6)} dir=${direction}`); return; }
 
-  // 7. Amount cap
+  // 7. Amount cap — normalize 双向到 USD value
+  // SELL: wantAmt 是 USDT (broker pay) → direct USD
+  // BUY:  wantAmt 是 KAS (broker pay) → USD = wantAmt × marketPrice
+  const wantUsd = isSellKas ? wantAmt : wantAmt * marketPrice;
   const maxUsdt = parseFloat(await getConfig('autotake_max_amount_usdt') || '50');
-  if (wantAmt > maxUsdt) { _p(`maxUsdt wantAmt=${wantAmt}>${maxUsdt}`); return; }
+  if (wantUsd > maxUsdt) { await _p(`maxUsdt wantUsd=${wantUsd.toFixed(2)}>${maxUsdt} dir=${direction}`); return; }
 
   // 8. Daily limit
   const today = new Date().toISOString().slice(0, 10);
@@ -279,26 +305,33 @@ async function _evaluateAutoTake(offerId, msg) {
     "SELECT COUNT(*) as cnt FROM chain_events WHERE event_type = 'autotake_accepted' AND observed_at >= ?"
   ).get(today + 'T00:00:00Z')?.cnt || 0;
   const dailyLimit = parseInt(await getConfig('autotake_daily_limit') || '3');
-  if (dailyCount >= dailyLimit) { _p(`dailyLimit ${dailyCount}>=${dailyLimit}`); return; }
+  if (dailyCount >= dailyLimit) { await _p(`dailyLimit ${dailyCount}>=${dailyLimit}`); return; }
 
   // 9. Cooldown (configurable, default 30s, UTXO conflict prevention)
   const cooldownMs = (parseInt(await getConfig('autotake_cooldown_sec') || '30')) * 1000;
-  if (_lastAutoTakeAt && Date.now() - _lastAutoTakeAt < cooldownMs) { _p(`cooldown ${Date.now()-_lastAutoTakeAt}ms<${cooldownMs}ms`); return; }
+  if (_lastAutoTakeAt && Date.now() - _lastAutoTakeAt < cooldownMs) { await _p(`cooldown ${Date.now()-_lastAutoTakeAt}ms<${cooldownMs}ms dir=${direction}`); return; }
 
-  // 10. Find best local agent (has BNB wallet with most USDT)
+  // 10. Find best local agent (NWT N19.18 Q1 attack downstream #4 — direction-aware wallet search):
+  // SELL: broker pays USDT → needs EVM wallet matching payChain (bnb/eth/sol/tron)
+  // BUY:  broker pays KAS → uses relay directly (Kaspa pool, no agent_wallets EVM row needed)
   let bestRelay = null;
   for (const addr of localAddrs) {
     const relay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(addr);
     if (!relay) continue;
-    const wallet = sqlite.prepare(
-      "SELECT * FROM agent_wallets WHERE relay_node_id = ? AND chain = 'bnb' AND is_default = 1"
-    ).get(relay.id);
-    if (!wallet) continue;
-    // No cached_balance column — accept first wallet with privkey, actual balance checked at pay time
-    bestRelay = relay.id;
-    break;
+    if (isSellKas) {
+      const wallet = sqlite.prepare(
+        "SELECT * FROM agent_wallets WHERE relay_node_id = ? AND chain = ? AND is_default = 1"
+      ).get(relay.id, payChain);
+      if (!wallet) continue;
+      bestRelay = relay.id;
+      break;
+    } else {
+      // BUY: broker pays KAS via Kaspa relay; no EVM wallet needed. First relay with valid id wins.
+      bestRelay = relay.id;
+      break;
+    }
   }
-  if (!bestRelay) { _p(`bestRelay_null localAddrs.length=${localAddrs.length}`); return; }
+  if (!bestRelay) { await _p(`bestRelay_null localAddrs.length=${localAddrs.length} dir=${direction}`); return; }
 
   console.log(`[autoTaker] opportunity: ${giveAmt} KAS @ ${offerPrice.toFixed(6)} (${(discount * 100).toFixed(2)}% below market ${marketPrice})`);
 
@@ -336,15 +369,15 @@ async function _evaluateAutoTake(offerId, msg) {
     else tier = 1;
     const caps = TIER_CAPS[tier];
 
-    // 3. amount cap check
-    if (wantAmt > caps.amount) {
-      console.log(`[autoTaker] TIER ${tier} AMOUNT CAP: wantAmt $${wantAmt} > $${caps.amount} (peer age=${ageDays.toFixed(1)}d card=${hasCard} completed=${completedCount}) — skipping`);
+    // 3. amount cap check (双向 normalize USD — wantUsd 算上面 L#)
+    if (wantUsd > caps.amount) {
+      console.log(`[autoTaker] TIER ${tier} AMOUNT CAP: wantUsd $${wantUsd.toFixed(2)} > $${caps.amount} (peer age=${ageDays.toFixed(1)}d card=${hasCard} completed=${completedCount} dir=${direction}) — skipping`);
       try {
         const { recordChainEvent } = await import('./chain-event.js');
         recordChainEvent({
           txid: `autotake_tier_cap_${offerId}`,
           eventType: 'autotake_tier_cap',
-          payload: JSON.stringify({ offer_id: offerId, peer: msg._from, tier, wantAmt, cap: caps.amount, ageDays: ageDays.toFixed(1), hasCard, completedCount }),
+          payload: JSON.stringify({ offer_id: offerId, peer: msg._from, tier, wantUsd, cap: caps.amount, direction, ageDays: ageDays.toFixed(1), hasCard, completedCount }),
         });
       } catch (err) { console.warn(`[autoTaker] tier_cap audit err: ${err.message}`); }
       return;
@@ -375,20 +408,20 @@ async function _evaluateAutoTake(offerId, msg) {
       } catch (err) { console.warn(`[autoTaker] peer_count_cap audit err: ${err.message}`); }
       return;
     }
-    if (peerDayTotal + wantAmt > caps.perPeerTotal) {
-      console.log(`[autoTaker] TIER ${tier} PEER 24H TOTAL CAP: ${peerDayTotal.toFixed(2)} + ${wantAmt} > $${caps.perPeerTotal} — sybil防 skipping`);
+    if (peerDayTotal + wantUsd > caps.perPeerTotal) {
+      console.log(`[autoTaker] TIER ${tier} PEER 24H TOTAL CAP: ${peerDayTotal.toFixed(2)} + ${wantUsd.toFixed(2)} > $${caps.perPeerTotal} (dir=${direction}) — sybil防 skipping`);
       try {
         const { recordChainEvent } = await import('./chain-event.js');
         recordChainEvent({
           txid: `autotake_peer_total_cap_${offerId}`,
           eventType: 'autotake_peer_total_cap',
-          payload: JSON.stringify({ offer_id: offerId, peer: msg._from, tier, peerDayTotal, wantAmt, cap: caps.perPeerTotal }),
+          payload: JSON.stringify({ offer_id: offerId, peer: msg._from, tier, peerDayTotal, wantUsd, direction, cap: caps.perPeerTotal }),
         });
       } catch (err) { console.warn(`[autoTaker] peer_total_cap audit err: ${err.message}`); }
       return;
     }
 
-    console.log(`[autoTaker] TIER ${tier} PASS: peer age=${ageDays.toFixed(1)}d card=${hasCard} completed=${completedCount} wantAmt=$${wantAmt} dayTotal=$${peerDayTotal.toFixed(2)}/${caps.perPeerTotal} count=${peerTakes.length}/${caps.perPeerCount}`);
+    console.log(`[autoTaker] TIER ${tier} PASS: peer age=${ageDays.toFixed(1)}d card=${hasCard} completed=${completedCount} wantUsd=$${wantUsd.toFixed(2)} dir=${direction} dayTotal=$${peerDayTotal.toFixed(2)}/${caps.perPeerTotal} count=${peerTakes.length}/${caps.perPeerCount}`);
   } catch (e) {
     console.error(`[autoTaker] tier check error: ${e.message} — fail-closed skip`);
     return;
@@ -399,7 +432,7 @@ async function _evaluateAutoTake(offerId, msg) {
   if (mode === 'auto') {
     _autoTakeLock = true;
     try {
-      await _executeAutoTake(offerId, bestRelay, payChain);
+      await _executeAutoTake(offerId, bestRelay, payChain, direction);
     } finally {
       _autoTakeLock = false;
     }
@@ -411,8 +444,8 @@ async function _evaluateAutoTake(offerId, msg) {
       type: 'autotake_proposal',
       source: 'auto-taker',
       agentAddress: localAddrs[0],
-      displaySummary: `AutoTake: BUY ${giveAmt} KAS @ ${offerPrice.toFixed(6)} (${(discount * 100).toFixed(2)}% below market $${marketPrice})`,
-      actionDetails: JSON.stringify({ offerId, offerPrice, marketPrice, discount, chain: 'bnb', relayId: bestRelay }),
+      displaySummary: `AutoTake: ${isSellKas ? 'BUY' : 'SELL'} ${isSellKas ? giveAmt : wantAmt} KAS @ ${offerPrice.toFixed(6)} (${(discount * 100).toFixed(2)}% ${isSellKas ? 'below' : 'above'} market $${marketPrice})`,
+      actionDetails: JSON.stringify({ offerId, offerPrice, marketPrice, discount, direction, chain: payChain, relayId: bestRelay }),
     });
     console.log(`[autoTaker] proposal created for offer ${offerId.slice(0, 8)}`);
   }
@@ -422,7 +455,7 @@ async function _evaluateAutoTake(offerId, msg) {
  * Execute auto-take by calling the internal accept API endpoint.
  * Reuses the full exchange.js accept path — broadcast, meta writes, auto-pay trigger.
  */
-async function _executeAutoTake(offerId, relayId, selectedChain = 'bnb') {
+async function _executeAutoTake(offerId, relayId, selectedChain = 'bnb', direction = 'SELL') {
   // Verify offer still open
   const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ? AND protocol_status = ?').get(offerId, 'open');
   if (!offer) {

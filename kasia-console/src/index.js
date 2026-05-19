@@ -458,10 +458,16 @@ startIntakeWatcher();
 import { startTreasuryMonitor } from './services/broker-treasury-monitor.js';
 startTreasuryMonitor();
 
+// C2 Cross-Match Engine (J2 #519/523 / NWT N19.11/N19.17 三方共识 5/19, Owner 钦定 "C 是骨架").
+// 30s cron 扫 open exchange_offers, 找 BUY+SELL 数学有交集 pair (oracle ±3% + chain align + same-org skip + qty ±5%).
+// emit chain_event 'kanet_cross_match_v1' Brain visible. Phase 1 audit-only, Phase 2 active match-settle.
+import { startCrossMatchEngine } from './services/cross-match-engine.js';
+startCrossMatchEngine();
+
 // P0c hedge invariant self-test (J2 #520 / NWT N19.12 三方共识 5/19, KI 第 16 次 silent skip 修).
 // 启动时 verify SQL 字段 + chain_event hedge_failed 路径存在, 防 KI 第 17 次复刻.
 try {
-  const sqlite = (await import('./db/sqlite.js')).default;
+  const { sqlite } = await import('./db/client.js');
   // Layer A: verify exchange_offers.metadata 存在 (历史 KI 16 真因 SELECT meta typo 30 day silent dead).
   sqlite.prepare('SELECT metadata FROM exchange_offers WHERE 1=0').get();
   // Layer B: verify chain_events table 接受 hedge_failed event_type (post-completed audit 用).
