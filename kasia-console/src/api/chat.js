@@ -165,18 +165,6 @@ export async function registerChatRoutes(fastify) {
     const relay = getRelayNode(relayId);
     if (!relay) return reply.code(404).send({ error: 'Account not found' });
 
-    // 🚨 Qclaude Monitor echo loop block (Owner 5/19 钦定 + J1 #305 + Bettor r199 stop signal 远端 host 没 listen, J2 console-side filter)
-    // Qclaude host channel-monitor.mjs 8s poll dev-coord → broadcast '📡 NEW' wrapper → 下次 poll 读自己 → 套娃无限. 每 8s 1 KAS fee.
-    // 在 console chokepoint reject 内容含 "Qclaude Monitor" + "📡 NEW" 的 broadcast: 不走 relay → 0 KAS spent → dev-coord clean.
-    // Qclaude relay 别的 (业务消息 / 报到 / fix commit broadcast) 不受影响 — precise pattern filter.
-    if (relay.name === 'Qclaude' && (message || '').includes('Qclaude Monitor') && (message || '').includes('📡 NEW')) {
-      console.warn(`[chat] Qclaude Monitor echo loop BLOCKED — relay=${relay.name} msg head: "${(message||'').slice(0,80)}"`);
-      return reply.code(429).send({
-        error: 'qclaude_monitor_echo_blocked',
-        detail: 'Qclaude Monitor 8s poll → broadcast self → recursive echo loop spam dev-coord. Owner 5/19 钦定 stop. Qclaude host 远端 fix monitor service 后此 filter 可拆.',
-      });
-    }
-
     // 🔒 Coordination-channel firewall (shared constants COORD_CHANNELS +
     //    OPUS_RELAY_NAMES at top of file; same guard applied in triggerAutoReply)
     if (COORD_CHANNELS.has(channel.trim()) && !OPUS_RELAY_NAMES.has(relay.name)) {
