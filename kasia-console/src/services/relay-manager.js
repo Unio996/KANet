@@ -90,6 +90,7 @@ export async function startRelay(relayNodeId) {
       name: account.name,
       startedAt: new Date().toISOString(),
       lastLog: '',
+      lastLogAt: 0,  // r216 bug fix: lastLog 是文本不能 new Date() 解析, 加独立 timestamp.
     };
 
     child.stdout.on('data', (data) => {
@@ -98,6 +99,7 @@ export async function startRelay(relayNodeId) {
         if (line) console.log(`[relay:${account.name}] ${line}`);
       }
       state.lastLog = lines.pop() || state.lastLog;
+      state.lastLogAt = Date.now();
     });
     child.stderr.on('data', (data) => {
       const lines = data.toString().trim().split('\n');
@@ -105,6 +107,7 @@ export async function startRelay(relayNodeId) {
         if (line) console.log(`[relay:${account.name}] ${line}`);
       }
       state.lastLog = lines.pop() || state.lastLog;
+      state.lastLogAt = Date.now();
     });
 
     child.on('exit', (code) => {
@@ -196,16 +199,18 @@ export function getStatus() {
 }
 
 // r211 O-3 PB-A — oracle live check (= 防 ghost market: DB is_oracle=1 但 relay process dead).
-//   alive 条件: child 还 in _relays + pid set + lastLog 不超 freshnessMs (default 60s).
+//   alive 条件: child 还 in _relays + pid set + lastLogAt 不超 freshnessMs (default 60s).
 //   bettor.js publish endpoint 调用 reject 死 oracle relay.
+// r216 bug fix: lastLog 是日志文本不是 timestamp, 改 lastLogAt (= Date.now() 当 stdout/stderr 来).
+//   首次 stdout/stderr 前 lastLogAt=0 → 用 startedAt fallback (= 刚 spawn 算 alive).
 export function isRelayAlive(relayNodeId, freshnessMs = 60_000) {
   const state = _relays[relayNodeId];
   if (!state) return { alive: false, reason: 'no relay process (= not started)' };
   if (!state.child || !state.child.send) return { alive: false, reason: 'child IPC dead' };
   if (!state.pid) return { alive: false, reason: 'no pid' };
-  const lastMs = state.lastLog ? new Date(state.lastLog).getTime() : 0;
+  const lastMs = state.lastLogAt || (state.startedAt ? new Date(state.startedAt).getTime() : 0);
   const ageMs = lastMs ? Date.now() - lastMs : Infinity;
-  if (ageMs > freshnessMs) return { alive: false, reason: `lastLog stale ${Math.round(ageMs/1000)}s (>${freshnessMs/1000}s)` };
+  if (ageMs > freshnessMs) return { alive: false, reason: `lastLogAt stale ${Math.round(ageMs/1000)}s (>${freshnessMs/1000}s)` };
   return { alive: true, ageMs, pid: state.pid };
 }
 
