@@ -18,7 +18,7 @@
 // stake escrow + fund_lock prediction 分类 + chain TX 真转), 跟 detect 解耦.
 
 import { sqlite } from '../db/client.js';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { verifyPredictionOutcome } from './bettor-prediction-verifier.js';
 import { transition } from './exchange-machine.js';
 import { sendCommandAsync } from './relay-manager.js';
@@ -62,11 +62,12 @@ export async function settlePredictionOutcomes() {
       SELECT id, maker, maker_kaspa_addr, maker_relay_id, give_asset, give_amount, want_asset, want_amount, taker,
              outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side,
              outcome_end_date, outcome_oracle_hook, outcome_max_deviation_pp,
-             outcome_oracle_relay_id, resolution_rule_spec,
+             outcome_oracle_relay_id, outcome_oracle_relay_ids, escrow_p2sh, resolution_rule_spec,
+             broadcast_tx_id, taker_escrow_lock_tx, revote_round,
              published_price, protocol_status, metadata
       FROM exchange_offers
       WHERE (give_asset = 'prediction_outcome_share' OR want_asset = 'prediction_outcome_share')
-        AND protocol_status IN ('matched','verifying')
+        AND protocol_status IN ('matched','verifying','collecting_sigs')
         AND outcome_end_date IS NOT NULL
         AND datetime(outcome_end_date) <= datetime('now')
     `).all();
@@ -85,10 +86,11 @@ export async function settlePredictionOutcomes() {
         }
 
         // r211 O-7 multi-oracle aggregation path (= Path D maker 自选 oracle):
-        //   若 outcome_oracle_relay_id 设, 走 collectMultiOracleVotes (= 收 3+ vote DM from voter daemon)
+        //   若 outcome_oracle_relay_id (legacy singular) OR outcome_oracle_relay_ids (Phase 4a plural) 设,
+        //   走 collectMultiOracleVotes (= 收 5 vote DM from voter daemon, 5-of-5 unanimous).
         //   否则 fallback legacy verifyPredictionOutcome (= polymarket_uma_mirror 直接 Polymarket gamma)
         let r;
-        if (offer.outcome_oracle_relay_id) {
+        if (offer.outcome_oracle_relay_id || offer.outcome_oracle_relay_ids) {
           r = await collectMultiOracleVotes(offer);
         } else {
           // r177 Phase 2a hotfix PB4: offer.maker_relay_id 直 from DB col (v122).
@@ -105,7 +107,7 @@ export async function settlePredictionOutcomes() {
         // r242 Phase 4a Sub 8 step 4 — Phase 2 dispatch if escrow_p2sh set (= SS trustless path).
         // 区分 Phase 3a 老 path (= trust-based escrow, 直 sendKaspa) vs Phase 4a path (= SS settle TX with 5 oracle sigs).
         if (offer.escrow_p2sh) {
-          const phase2Result = await dispatchPhase2OrCheckSigs(offer, r.winner, db);
+          const phase2Result = await dispatchPhase2OrCheckSigs(offer, r.winner, sqlite);
           if (phase2Result.handled) {
             if (phase2Result.completed) settled++;
             else pending++;
@@ -330,6 +332,22 @@ async function dispatchPhase2OrCheckSigs(offer, winnerStr, db) {
 
     try {
       const { sendCommandAsync } = await import('./relay-manager.js');
+      // Reconstruct outputs in {address, amountSompi} format (= unlockP2SHMultiSig expects this shape,
+      // 不是 wasm-serialized {value, scriptPublicKey}. phase2_tx_obj.outputs 是 TransactionOutput 序列化 form 不通用).
+      const makerStake = parseInt(meta.maker_stake_sompi, 10) || 0;
+      const takerStake = parseInt(meta.taker_stake_sompi, 10) || 0;
+      const minerFee = parseInt(meta.miner_fee_sompi, 10) || 10_000;
+      const brokerFeePct = parseInt(meta.broker_fee_pct, 10) || 0;
+      const spendable = BigInt(makerStake + takerStake - minerFee);
+      const brokerFeeAmount = (spendable * BigInt(brokerFeePct)) / 10000n;
+      const winnerAmount = spendable - brokerFeeAmount;
+      const winnerAddr = meta.phase2_winner === 0 ? offer.maker_kaspa_addr : offer.taker;
+      const brokerRow = meta.broker_relay_id ? sqlite.prepare(`SELECT address FROM relay_nodes WHERE id=?`).get(meta.broker_relay_id) : null;
+      const brokerAddr = brokerRow?.address;
+      if (!winnerAddr || !brokerAddr) {
+        console.error(`[settler] Phase 4a Sub 8 settle: missing winnerAddr or brokerAddr offer=${offer.id.slice(0,12)}`);
+        return { handled: true, completed: false };
+      }
       const submitResult = await sendCommandAsync(offer.maker_relay_id, {
         type: 'prediction_settle_tx',
         p2sh_address: offer.escrow_p2sh,
@@ -338,7 +356,10 @@ async function dispatchPhase2OrCheckSigs(offer, winnerStr, db) {
           { outpointTxid: offer.broadcast_tx_id, outpointIndex: 0 },
           { outpointTxid: offer.taker_escrow_lock_tx, outpointIndex: 0 },
         ],
-        outputs: meta.phase2_tx_obj?.outputs,
+        outputs: [
+          { address: winnerAddr, amountSompi: winnerAmount.toString() },
+          { address: brokerAddr, amountSompi: brokerFeeAmount.toString() },
+        ],
         sigs_by_input: sigsByInput,
         winner: meta.phase2_winner,
       });

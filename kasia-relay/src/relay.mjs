@@ -535,7 +535,29 @@ if (process.send) {
             // Phase 4a v0 简化: console 直 pass Transaction-shaped object via JSON OR
             // hex full-serialization. kaspa-wasm Transaction constructor expects object spec.
             // 现 设 cmd.tx_obj is the Transaction-spec object.
-            unsignedTx = new Transaction(cmd.tx_obj || JSON.parse(cmd.tx_hex));
+            const parsed = cmd.tx_obj || JSON.parse(cmd.tx_hex);
+            // Rehydrate BigInt fields lost in JSON.stringify roundtrip (= settler.buildSettleTxPreimage stringifies BigInt)
+            parsed.lockTime = BigInt(parsed.lockTime || 0);
+            parsed.gas = BigInt(parsed.gas || 0);
+            if (Array.isArray(parsed.inputs)) {
+              parsed.inputs = parsed.inputs.map(i => ({
+                ...i,
+                sequence: BigInt(i.sequence || 0),
+                sigOpCount: Number(i.sigOpCount || 0),
+                utxo: i.utxo ? {
+                  ...i.utxo,
+                  amount: BigInt(i.utxo.amount || 0),
+                  blockDaaScore: BigInt(i.utxo.blockDaaScore || 0),
+                } : undefined,
+              }));
+            }
+            if (Array.isArray(parsed.outputs)) {
+              parsed.outputs = parsed.outputs.map(o => ({
+                ...o,
+                value: BigInt(o.value || 0),
+              }));
+            }
+            unsignedTx = new Transaction(parsed);
           } catch (e) {
             throw new Error(`sign_input_for_settle: TX deserialize fail: ${e.message}`);
           }

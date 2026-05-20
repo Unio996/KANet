@@ -403,7 +403,7 @@ async function handleTxSignReq(voter, offer) {
     try {
       const signResult = await sendCommandAsync(voter.id, {
         type: 'sign_input_for_settle',
-        tx_obj: meta.phase2_tx_obj,
+        tx_hex: JSON.stringify(meta.phase2_tx_obj),  // relay JSON.parse 还原 tx_obj
         input_index: inputIdx,
       });
       if (!signResult?.ok || !signResult.signature) {

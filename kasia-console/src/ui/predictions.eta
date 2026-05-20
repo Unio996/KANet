@@ -2,35 +2,35 @@
 
 <div class="p-6" x-data="predictionsPage()" x-init="init(); _phase2DisclaimerInit()">
 
-  <!-- O-4 r211 PB-E Phase 2 trust-based 首访 modal (= 1 次 ack, LocalStorage flag persist) -->
+  <!-- Phase 4a SS trustless 首访 modal (= testnet-12 真 e2e ship 后, Owner r256 钦定 banner 更新) -->
   <div x-show="_showPhase2DisclaimerModal" x-cloak class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-    <div class="bg-white rounded-lg shadow-2xl max-w-lg w-full p-6 border-2 border-amber-400">
+    <div class="bg-white rounded-lg shadow-2xl max-w-lg w-full p-6 border-2 border-emerald-400">
       <div class="flex items-start gap-3 mb-4">
-        <span class="text-4xl">⚠</span>
+        <span class="text-4xl">✅</span>
         <div class="text-base">
-          <div class="font-bold text-amber-900 text-lg mb-2">KANet 预测市场 — Phase 2 现状声明</div>
-          <div class="text-amber-800 space-y-2">
-            <p><strong>现 Phase 2 trust-based escrow</strong>: maker 锁 KAS 实际在 Owner 控制钱包. Owner 理论上能挪走 (= 信 Owner 开源 audit + 多 community 自决信任).</p>
-            <p><strong>Phase 3 SS native trustless</strong>: 6/1 mainnet Kaspa SS launch 后升级到数学 enforced. SS script 自动 N-of-M oracle settle, Owner 也拿不走.</p>
-            <p>建议: 现适合 <strong>&lt; 10 KAS / offer</strong> 测试用. 大额请等 Phase 3 SS escrow ship.</p>
-            <p class="text-xs text-amber-600">点 "我理解 + 继续" 后此 modal 不再弹 (banner 仍持显).</p>
+          <div class="font-bold text-emerald-900 text-lg mb-2">KANet 预测市场 — Phase 4a SS trustless 现状</div>
+          <div class="text-emerald-800 space-y-2">
+            <p><strong>现 Phase 4a SS trustless escrow</strong>: maker + taker 双锁 KAS 到 SS P2SH 合约 (= silverscript native, Owner 也拿不走). 5-of-5 unanimous oracle 全签 settle, 真链 enforce.</p>
+            <p><strong>testnet-12 真 e2e 已 ship</strong>: 协议 publish → handshake → 双 stake → 5/5 vote → 5/5 TX-sig → SS settle TX 全 chain confirmed. 6 hotfix sediment 入档.</p>
+            <p>仍 testnet: 6/1 mainnet Kaspa SS launch 后正式上 mainnet. 现 testnet-12 真测验阶段.</p>
+            <p class="text-xs text-emerald-600">点 "我理解 + 继续" 后此 modal 不再弹 (banner 仍持显).</p>
           </div>
         </div>
       </div>
-      <button @click="_ackPhase2Disclaimer()" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-4 rounded">
+      <button @click="_ackPhase2Disclaimer()" class="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2 px-4 rounded">
         我理解 + 继续
       </button>
     </div>
   </div>
 
-  <!-- Phase 2 trust-based escrow disclaimer (PB-G consensus J1 #318 + Bettor r211 立 fire + r213 F1 sticky) -->
-  <div class="card card-compact mb-4 border-2 border-amber-300 bg-amber-50 sticky top-0 z-10">
+  <!-- Phase 4a SS trustless escrow banner (= Owner r256 钦定 banner 更新, Phase 2 trust-based 已退役) -->
+  <div class="card card-compact mb-4 border-2 border-emerald-300 bg-emerald-50 sticky top-0 z-10">
     <div class="flex items-start gap-3">
-      <span class="text-2xl">⚠</span>
-      <div class="text-sm text-amber-900 leading-relaxed">
-        <div class="font-bold mb-1">Phase 2 trust-based escrow (= Owner-controlled wallet)</div>
-        <div>Phase 3 SS native trustless 升级 = 6/1 mainnet SS launch 后. 现适合 <strong>&lt; 10 KAS / offer</strong> 测试用. 大额请等 Phase 3 SS escrow 数学 trustless ship 后.</div>
-        <div class="text-xs text-amber-700 mt-1">设计参考: KANet 整体认知 §3.1 trust-based 现实 + §3.3 SS 升级路径</div>
+      <span class="text-2xl">✅</span>
+      <div class="text-sm text-emerald-900 leading-relaxed">
+        <div class="font-bold mb-1">Phase 4a SS trustless escrow (= silverscript 数学 enforced, Owner 也拿不走)</div>
+        <div>maker + taker 双锁 SS P2SH + 5-of-5 unanimous oracle 全签 settle. testnet-12 真 e2e ship 完, 6/1 mainnet Kaspa SS launch 后正式 mainnet.</div>
+        <div class="text-xs text-emerald-700 mt-1">设计参考: SS contract PredictionEscrowUnanimous5.sil + Bettor r247 v3 13 ctor param + 6 hotfix sediment</div>
       </div>
     </div>
   </div>

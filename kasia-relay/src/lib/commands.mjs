@@ -22,6 +22,13 @@ export const COMMAND_TYPES = Object.freeze({
   SPLIT_UTXO: 'split_utxo',
   // T-J2-2026-05-12 #2 — read-only IPC: console 取 relay child rpc-listener._rpc state snapshot (UI 健康检测 P0 NWT spec).
   GET_RPC_STATE: 'get_rpc_state',
+  // Phase 4a SS trustless escrow (Sub 6+8+9) — oracle / maker IPC for prediction market settle TX flow.
+  ECDSA_SIGN: 'ecdsa_sign',
+  GET_PUBKEY: 'get_pubkey',
+  SIGN_INPUT_FOR_SETTLE: 'sign_input_for_settle',
+  PREDICTION_SETTLE_BUILD_PREIMAGE: 'prediction_settle_build_preimage',
+  PREDICTION_SETTLE_TX: 'prediction_settle_tx',
+  PREDICTION_REFUND_TX: 'prediction_refund_tx',
 });
 
 export const COMMAND_TYPE_SET = new Set(Object.values(COMMAND_TYPES));
@@ -40,6 +47,13 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.TRANSFER]: ['target', 'amount'],
   [COMMAND_TYPES.SPLIT_UTXO]: [],
   [COMMAND_TYPES.GET_RPC_STATE]: [],  // T-J2-2026-05-12 #2 — read-only, 无 required field
+  // Phase 4a SS trustless escrow
+  [COMMAND_TYPES.ECDSA_SIGN]: ['message'],
+  [COMMAND_TYPES.GET_PUBKEY]: [],
+  [COMMAND_TYPES.SIGN_INPUT_FOR_SETTLE]: ['tx_hex', 'input_index'],
+  [COMMAND_TYPES.PREDICTION_SETTLE_BUILD_PREIMAGE]: ['p2sh_address', 'required_input_outpoints', 'outputs'],
+  [COMMAND_TYPES.PREDICTION_SETTLE_TX]: ['p2sh_address', 'redeem_script_hex', 'required_input_outpoints', 'outputs', 'sigs_by_input', 'winner'],
+  [COMMAND_TYPES.PREDICTION_REFUND_TX]: ['p2sh_address', 'redeem_script_hex', 'branch'],
 });
 
 // R38 (Z23 sediment): typeof spec per field. Bug-Z23 真根因 — broker enqueue amount: number,
@@ -58,6 +72,13 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.PUBLISH_CARD]: { params: 'object' },
   [COMMAND_TYPES.SPLIT_UTXO]: { targetCount: 'number' },
   [COMMAND_TYPES.GET_RPC_STATE]: {},  // T-J2-2026-05-12 #2 — read-only, 无 typeof constraint
+  // Phase 4a SS trustless escrow
+  [COMMAND_TYPES.ECDSA_SIGN]: { message: 'string' },
+  [COMMAND_TYPES.GET_PUBKEY]: {},
+  [COMMAND_TYPES.SIGN_INPUT_FOR_SETTLE]: { tx_hex: 'string', input_index: 'number' },
+  [COMMAND_TYPES.PREDICTION_SETTLE_BUILD_PREIMAGE]: { p2sh_address: 'string', required_input_outpoints: 'array', outputs: 'array' },
+  [COMMAND_TYPES.PREDICTION_SETTLE_TX]: { p2sh_address: 'string', redeem_script_hex: 'string', required_input_outpoints: 'array', outputs: 'array', sigs_by_input: 'array', winner: 'number' },
+  [COMMAND_TYPES.PREDICTION_REFUND_TX]: { p2sh_address: 'string', redeem_script_hex: 'string', branch: 'number' },
 });
 
 export function validateCommandPayload(cmd) {
