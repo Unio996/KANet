@@ -27,6 +27,12 @@ function sha512Hex(data) {
   return crypto.createHash('sha512').update(data).digest('hex');
 }
 
+// KI 27 P0 5/20 (Owner 钦定 + Round 3 hedge_failed: Bybit "Order price has too many decimals"):
+// CEX spot pairs tick size ~0.0001 (4 decimals price) + 0.01 min lot (2 decimals qty).
+// JS float raw String(0.033912040000000004) overflow Bybit/most CEX. lint-allow-cex-precision: truncate before serialize.
+function _cexPrice(p) { return parseFloat(Number(p).toFixed(4)).toString(); }
+function _cexQty(q) { return parseFloat(Number(q).toFixed(2)).toString(); }
+
 /**
  * Place a limit order on any supported exchange.
  *
@@ -161,15 +167,15 @@ async function placeGateio({ baseUrl, apiKey, apiSecret, kasPair, side, price, q
       ? {
           currency_pair: kasPair,
           side: 'sell',
-          amount: String(qty),
+          amount: _cexQty(qty),
           type: 'market',
           time_in_force: 'ioc',
         }
       : {
           currency_pair: kasPair,
           side: side.toLowerCase(),
-          amount: String(qty),
-          price: String(price),
+          amount: _cexQty(qty),
+          price: _cexPrice(price),
           type: 'limit',
         }
   );
@@ -225,7 +231,7 @@ async function placeOkx({ baseUrl, apiKey, apiSecret, extra, kasPair, side, pric
   const path = '/api/v5/trade/order';
   const body = JSON.stringify({
     instId: kasPair, tdMode: 'cash', side: side.toLowerCase(),
-    ordType: 'limit', sz: String(qty), px: String(price),
+    ordType: 'limit', sz: _cexQty(qty), px: _cexPrice(price),
   });
   const sig = hmac256Base64(apiSecret, ts + 'POST' + path + body);
 
@@ -283,9 +289,11 @@ async function placeBybit({ baseUrl, apiKey, apiSecret, kasPair, side, price, qt
   const ts = Date.now().toString();
   const recvWindow = '5000';
   const path = '/v5/order/create';
+  // KI 27 P0 fix 5/20 (Owner 钦定 hotfix after real_hedge_verify Round 3 hedge_failed):
+  // 使用 _cexQty/_cexPrice helpers (top of file) — 5 CEX uniform precision.
   const body = JSON.stringify({
     category: 'spot', symbol: kasPair, side: side.charAt(0).toUpperCase() + side.slice(1).toLowerCase(),
-    orderType: 'Limit', qty: String(qty), price: String(price),
+    orderType: 'Limit', qty: _cexQty(qty), price: _cexPrice(price),
   });
   const sig = hmac256(apiSecret, ts + apiKey + recvWindow + body);
 
@@ -329,7 +337,7 @@ async function placeKucoin({ baseUrl, apiKey, apiSecret, extra, kasPair, side, p
   const path = '/api/v1/orders';
   const body = JSON.stringify({
     clientOid: crypto.randomUUID(), side: side.toLowerCase(), symbol: kasPair,
-    type: 'limit', price: String(price), size: String(qty),
+    type: 'limit', price: _cexPrice(price), size: _cexQty(qty),
   });
   const sig = hmac256Base64(apiSecret, ts + 'POST' + path + body);
   const passphraseSig = hmac256Base64(apiSecret, extra?.passphrase || '');
@@ -373,7 +381,7 @@ async function placeBitget({ baseUrl, apiKey, apiSecret, extra, kasPair, side, p
   const path = '/api/v2/spot/trade/place-order';
   const body = JSON.stringify({
     symbol: kasPair, side: side.toLowerCase(), orderType: 'limit',
-    force: 'gtc', price: String(price), size: String(qty),
+    force: 'gtc', price: _cexPrice(price), size: _cexQty(qty),
   });
   const sig = hmac256Base64(apiSecret, ts + 'POST' + path + body);
 
@@ -442,7 +450,7 @@ async function placeHtx({ baseUrl, apiKey, apiSecret, kasPair, side, price, qty 
   const htxSide = side === 'BUY' ? 'buy-limit' : 'sell-limit';
   const body = JSON.stringify({
     'account-id': accountId, symbol: kasPair, type: htxSide,
-    amount: String(qty), price: String(price),
+    amount: _cexQty(qty), price: _cexPrice(price),
   });
 
   const res = await fetch(`${baseUrl}${path}?${orderParams.toString()}`, {
