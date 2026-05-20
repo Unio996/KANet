@@ -1593,6 +1593,118 @@ export async function registerBettorRoutes(fastify) {
     });
   });
 
+  // POST /api/prediction/refund/:offer_id — Phase 4a Sub 9 (Bettor r240) — SS refund chain TX.
+  //
+  // Manual trigger by maker (= PB-S9-1 候选 C 双兼 maker_manual + settler_auto).
+  // 2 branches:
+  //   - matched offer + (dissent_max_rounds OR deadline 过) → refund_both (= 双 stake 双 output)
+  //   - open_awaiting_taker_stake + deadline 过 → refund_maker_unjoined (= 单 stake 单 output)
+  // race protection: WHERE refund_txid IS NULL (= 防 manual + auto 双 trigger 撞 chain TX).
+  fastify.post('/api/prediction/refund/:offer_id', async (request, reply) => {
+    const offerId = request.params.offer_id;
+    const offer = sqlite.prepare(`SELECT * FROM exchange_offers WHERE id = ?`).get(offerId);
+    if (!offer) return reply.code(404).send({ ok: false, error: 'offer not found' });
+    if (offer.refund_txid) {
+      return reply.code(409).send({ ok: false, error: `refund already issued: ${offer.refund_txid}` });
+    }
+    if (!offer.escrow_p2sh) {
+      return reply.code(400).send({ ok: false, error: 'offer has no escrow_p2sh (= not Phase 4a SS offer)' });
+    }
+    if (!offer.maker_relay_id || !offer.maker_kaspa_addr) {
+      return reply.code(400).send({ ok: false, error: 'offer missing maker_relay_id or maker_kaspa_addr' });
+    }
+
+    // Decide branch by status
+    let branch, extraInput = null;
+    if (offer.protocol_status === 'open_awaiting_taker_stake') {
+      // refund_maker_unjoined (= taker 未 join, 单 stake 单 output)
+      const deadlineMs = new Date(offer.outcome_end_date).getTime();
+      if (Number.isFinite(deadlineMs) && deadlineMs > Date.now()) {
+        return reply.code(403).send({ ok: false, error: `cannot refund yet, deadline ${offer.outcome_end_date} not passed` });
+      }
+      branch = 2;
+    } else if (offer.protocol_status === 'matched' || offer.protocol_status === 'verifying') {
+      // refund_both (= 双 stake, oracle 分歧 OR deadline 过)
+      const deadlineMs = new Date(offer.outcome_end_date).getTime();
+      if (Number.isFinite(deadlineMs) && deadlineMs > Date.now()) {
+        return reply.code(403).send({ ok: false, error: `cannot refund yet, deadline ${offer.outcome_end_date} not passed` });
+      }
+      if (!offer.taker || !offer.taker_escrow_lock_tx) {
+        return reply.code(400).send({ ok: false, error: 'matched offer missing taker addr or taker_escrow_lock_tx (= taker hadn\'t locked stake)' });
+      }
+      branch = 1;
+    } else {
+      return reply.code(409).send({ ok: false, error: `offer status=${offer.protocol_status}, not refund-eligible (must be open_awaiting_taker_stake OR matched/verifying)` });
+    }
+
+    // Parse metadata for redeem script + sompi amounts
+    let meta;
+    try { meta = JSON.parse(offer.metadata || '{}'); }
+    catch (e) { return reply.code(500).send({ ok: false, error: `metadata JSON parse fail: ${e.message}` }); }
+    const redeemScriptHex = meta.redeem_script_hex;
+    if (!redeemScriptHex) return reply.code(500).send({ ok: false, error: 'offer metadata missing redeem_script_hex' });
+    const minerFeeSompi = parseInt(meta.miner_fee_sompi, 10) || 10_000;
+    const makerStakeSompi = parseInt(meta.maker_stake_sompi, 10);
+    const takerStakeSompi = parseInt(meta.taker_stake_sompi, 10);
+
+    const { sendCommandAsync } = await import('../services/relay-manager.js');
+    let result;
+    try {
+      if (branch === 2) {
+        // refund_maker_unjoined — relay queries P2SH UTXO + builds 1-input 1-output TX
+        result = await sendCommandAsync(offer.maker_relay_id, {
+          type: 'prediction_refund_tx',
+          branch: 2,
+          p2sh_address: offer.escrow_p2sh,
+          redeem_script_hex: redeemScriptHex,
+          maker_address: offer.maker_kaspa_addr,
+        });
+      } else {
+        // refund_both — caller pre-resolves both outpoints (= maker_lock_tx[0] + taker_lock_tx[0]).
+        // amounts: each refund = stake - half(minerFee). For Phase 4a v0 simplification (1:1 stake), equal split.
+        const halfFee = Math.floor(minerFeeSompi / 2);
+        result = await sendCommandAsync(offer.maker_relay_id, {
+          type: 'prediction_refund_tx',
+          branch: 1,
+          p2sh_address: offer.escrow_p2sh,
+          redeem_script_hex: redeemScriptHex,
+          required_input_outpoints: [
+            { outpointTxid: offer.broadcast_tx_id, outpointIndex: 0 },     // maker escrow lock TX output[0]
+            { outpointTxid: offer.taker_escrow_lock_tx, outpointIndex: 0 }, // taker escrow lock TX output[0]
+          ],
+          outputs: [
+            { address: offer.maker_kaspa_addr, amountSompi: String((makerStakeSompi - halfFee).toString()) },
+            { address: offer.taker, amountSompi: String((takerStakeSompi - halfFee).toString()) },
+          ],
+        });
+      }
+    } catch (err) {
+      console.error(`[prediction-refund] relay IPC fail offer=${offerId.slice(0,12)}: ${err.message}`);
+      return reply.code(503).send({ ok: false, error: `relay IPC fail: ${err.message}` });
+    }
+    if (!result?.ok || !result.txId) {
+      return reply.code(503).send({ ok: false, error: `refund TX submit fail: ${result?.error || 'no txId'}`, relay_result: result });
+    }
+
+    // DB UPDATE refund_txid + transition refunded — race protection via WHERE refund_txid IS NULL.
+    // protocol_status 走 transition() [ABE-A.6] 单一所有权.
+    try {
+      const updateResult = sqlite.prepare(`UPDATE exchange_offers SET refund_txid = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND refund_txid IS NULL`)
+        .run(result.txId, offerId);
+      if (updateResult.changes === 0) {
+        console.warn(`[prediction-refund] race: refund_txid already set for offer=${offerId.slice(0,12)} — chain TX ${result.txId} duplicate?`);
+        return reply.code(409).send({ ok: false, error: 'race: refund_txid already set (= concurrent trigger), chain TX may be duplicate', chain_tx_id: result.txId });
+      }
+      const { transition } = await import('../services/exchange-machine.js');
+      transition(offerId, 'refunded');
+    } catch (e) {
+      console.error(`[prediction-refund] DB update fail (chain TX done ${result.txId}): ${e.message}`);
+      return reply.code(500).send({ ok: false, error: `DB update fail (chain TX done): ${e.message}`, chain_tx_id: result.txId });
+    }
+
+    return reply.send({ ok: true, offer_id: offerId, branch, refund_txid: result.txId, status: 'refunded' });
+  });
+
   // POST /api/prediction/accept/:offer_id — taker accept, calls verifyPredictionMatch
   fastify.post('/api/prediction/accept/:offer_id', async (request, reply) => {
     const offerId = request.params.offer_id;
