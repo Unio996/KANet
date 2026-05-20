@@ -48,6 +48,8 @@ async function _executeHedgeGuarded(offerId, agentName, side, qty, preferredCex 
 }
 export { _executeHedgeGuarded as executeHedge };
 export { _autoPayExchange as triggerAutoPay, _autoSettleAsset, _autoSettleAsset as _autoSendKas };
+// KI 49.3 (NWT N19.118): expose _evaluateAutoTake for真 integration test (mutation mindset).
+// Test calls this directly with mock msg + asserts autotake_skip chain_event emit (real production gate path).
 
 export async function onBroadcastWritten(row) {
   if (!row.content || !row.content.startsWith('{"t":"kanet_')) return;
@@ -218,7 +220,7 @@ let _autoTakeLock = false;
  * 前 30+ 天 hardcoded 单向 (L211-212), qqjdp=kzc2tgz4cchh 40d/770 broadcast 全 silent return.
  * Default mode is 'approval' — creates a proposal in execution_states for Owner to confirm.
  */
-async function _evaluateAutoTake(offerId, msg) {
+export async function _evaluateAutoTake(offerId, msg) {
   // NWT N8.1 5/18: autoTaker observability — 12 silent return 各 log gate + context.
   // J2 #523 / NWT N19.18 P0c: autotake_skip chain_event emit (合 Path A commit, surface KI 18 silent skip).
   const _p = async (gate) => {
