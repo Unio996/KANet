@@ -476,10 +476,14 @@ export async function registerDiscoveryRoutes(fastify) {
 
   // GET /api/discovery/message-index — 查询消息索引（支持过滤）
   fastify.get('/api/discovery/message-index', async (request, reply) => {
-    const { type, unprocessed } = request.query;
+    // NWT N19.50 architect spec / Owner 5/20 钦定 Ship A J2=implementor:
+    // 加 `since` block_time filter — 现 11,936 unprocessed × 40k messages NOT EXISTS = 4.88亿次比较, SQLite 持锁 5-15s.
+    // since=5min lookback (relay 传) reduce candidate 11,936 → ~32 rows. back-compat (无 since = 老版本 relay).
+    const { type, unprocessed, since } = request.query;
     let sql = 'SELECT txid, for_address, from_address, payload_type, block_time, indexed_by, processed_at FROM kanet_message_index WHERE 1=1';
     const params = [];
     if (type) { sql += ' AND payload_type = ?'; params.push(type); }
+    if (since) { sql += ' AND block_time > ?'; params.push(since); }
     if (unprocessed === 'true') {
       sql += ' AND processed_at IS NULL';
       // Bug NWT-N10 defense-in-depth (Layer B 完整版 5/18): SQL 加 NOT EXISTS outbound 检查.

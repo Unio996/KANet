@@ -457,10 +457,13 @@ async function catchUpHistory() {
 
   // 3. Historical comm messages — 从 kanet_message_index 取未处理的历史 comm TX
   //    按 txid 从链上取 payload → 调 processComm（和实时完全相同的路径）
+  // NWT N19.50 / Owner 5/20 钦定 Ship A: 加 since=5min lookback 防 4.88亿次比较 SQLite 持锁.
+  // 对齐 unreplied-messages L419 既有 pattern (since ISO timestamp filter).
+  const commSinceParam = new Date(Date.now() - 5 * 60 * 1000).toISOString();
   let commCount = 0;
   try {
     const res = await fetch(
-      `${CONSOLE_URL}/api/discovery/message-index?type=comm&unprocessed=true`,
+      `${CONSOLE_URL}/api/discovery/message-index?type=comm&unprocessed=true&since=${encodeURIComponent(commSinceParam)}`,
       { headers: { 'x-ingest-secret': process.env.INGEST_SECRET || '' }, signal: AbortSignal.timeout(10000) },
     );
     if (res.ok) {
