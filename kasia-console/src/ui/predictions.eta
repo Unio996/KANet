@@ -1,6 +1,27 @@
 <%~ include('partials/page-open', { _page: 'predictions', pageTitle: '预测市场', ...it }) %>
 
-<div class="p-6" x-data="predictionsPage()" x-init="init()">
+<div class="p-6" x-data="predictionsPage()" x-init="init(); _phase2DisclaimerInit()">
+
+  <!-- O-4 r211 PB-E Phase 2 trust-based 首访 modal (= 1 次 ack, LocalStorage flag persist) -->
+  <div x-show="_showPhase2DisclaimerModal" x-cloak class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+    <div class="bg-white rounded-lg shadow-2xl max-w-lg w-full p-6 border-2 border-amber-400">
+      <div class="flex items-start gap-3 mb-4">
+        <span class="text-4xl">⚠</span>
+        <div class="text-base">
+          <div class="font-bold text-amber-900 text-lg mb-2">KANet 预测市场 — Phase 2 现状声明</div>
+          <div class="text-amber-800 space-y-2">
+            <p><strong>现 Phase 2 trust-based escrow</strong>: maker 锁 KAS 实际在 Owner 控制钱包. Owner 理论上能挪走 (= 信 Owner 开源 audit + 多 community 自决信任).</p>
+            <p><strong>Phase 3 SS native trustless</strong>: 6/1 mainnet Kaspa SS launch 后升级到数学 enforced. SS script 自动 N-of-M oracle settle, Owner 也拿不走.</p>
+            <p>建议: 现适合 <strong>&lt; 10 KAS / offer</strong> 测试用. 大额请等 Phase 3 SS escrow ship.</p>
+            <p class="text-xs text-amber-600">点 "我理解 + 继续" 后此 modal 不再弹 (banner 仍持显).</p>
+          </div>
+        </div>
+      </div>
+      <button @click="_ackPhase2Disclaimer()" class="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-4 rounded">
+        我理解 + 继续
+      </button>
+    </div>
+  </div>
 
   <!-- Phase 2 trust-based escrow disclaimer (PB-G consensus J1 #318 + Bettor r211 立 fire) -->
   <div class="card card-compact mb-4 border-2 border-amber-300 bg-amber-50">
@@ -1277,6 +1298,15 @@ function predictionsPage() {
     pageSize: 20,
     showExpired: false,
     showGuide: !localStorage.getItem('prediction_guide_seen'),
+    // O-4 r211 PB-E Phase 2 trust-based disclaimer modal (= 1 次 ack persist)
+    _showPhase2DisclaimerModal: false,
+    _phase2DisclaimerInit() {
+      this._showPhase2DisclaimerModal = !localStorage.getItem('kanet_phase2_disclaimer_acked_v1');
+    },
+    _ackPhase2Disclaimer() {
+      localStorage.setItem('kanet_phase2_disclaimer_acked_v1', new Date().toISOString());
+      this._showPhase2DisclaimerModal = false;
+    },
     selectedAgent: '<%= it.relayNodes[0]?.id || "" %>',
     walletStatus: { hasWallet: false },
     walletMsg: '',
