@@ -29,8 +29,19 @@ export default {
   async run(opts = {}) {
     const duration_ms = opts.duration_ms || 60 * 60 * 1000;  // 1 hour
     const spawn_rate_per_min = opts.spawn_rate_per_min || 0.5;  // 30/hr peak
-    const buyerPool = opts.buyerPool || ['NWT'];  // need ≥5 funded agent for full spec; minimal NWT default
-    const sellerPool = opts.sellerPool || ['NWT'];
+    // KI 44.1 Conflict #1 fix (NWT N19.89): 5 buyer + 3 seller pool (per spec).
+    // Caveat: 实际 BSC USDT only sufficient on NWT/Trader-M/J2 (Phase 5-1 snapshot 实证). Pool may need pre-fund.
+    const buyerPool = opts.buyerPool || ['NWT', 'Trader-M', 'J2', 'Trader-A', 'KANet'];
+    const sellerPool = opts.sellerPool || ['NWT', 'Trader-M', 'J2'];
+
+    // KI 44.1 Conflict #2 fix (NWT N19.89 Path B): hedge_router enable + small_order_cex=kucoin route.
+    // qty 10-30 KAS = $0.34-$1 = clear KuCoin $0.10 min. Avoids Bybit $5 (KI 28 复刻).
+    if (opts.enableRouterPath !== false) {
+      const { setConfig } = await import('../../../src/data/settings/configs.js');
+      await setConfig('hedge_router_enabled', 'true');
+      await setConfig('hedge_router_small_order_cex', 'kucoin');
+      await setConfig('hedge_router_small_order_threshold_usd', '5');  // < $5 → kucoin route
+    }
 
     // Build actor templates — per spawn, optsBuilder creates fresh opts (avoid shared state)
     const buyerTemplates = buyerPool.map((name) => {
@@ -46,7 +57,8 @@ export default {
           userKasia: r.address,
           brokerKasia: BROKER_KASIA,
           userEvmAddr: opts.userEvmAddrMap?.[name] || '0xd3618e37354700d21FE8728Bd278Dc1924974799',
-          qty: 1 + Math.floor(Math.random() * 5),  // 1-5 KAS small per spawn (avoid pool drain)
+          // KI 44.1 Conflict #2 fix: qty 10-30 KAS = $0.34-$1.02 = clear KuCoin $0.10 min via router
+          qty: 10 + Math.floor(Math.random() * 21),
           policy: { maxStepUsdt: 5 },
         }),
       };
@@ -61,7 +73,7 @@ export default {
         persona: { id: `seller_${name}` },
         optsBuilder: (i) => ({
           relayId: r.id,
-          qty: 1 + Math.floor(Math.random() * 5),
+          qty: 10 + Math.floor(Math.random() * 21),  // KI 44.1: 10-30 KAS (KuCoin route via Path B)
           pricePerKas: 0.034,
           expiresMin: 5,
         }),
@@ -71,12 +83,21 @@ export default {
     const actorTemplates = [...buyerTemplates, ...sellerTemplates];
     if (actorTemplates.length === 0) return { ok: false, error: 'no actors available (relay lookup fail)' };
 
-    const metrics = await runStress({
-      actorTemplates,
-      duration_ms,
-      spawn_rate_per_min,
-      max_concurrent: 10,
-    });
+    let metrics;
+    try {
+      metrics = await runStress({
+        actorTemplates,
+        duration_ms,
+        spawn_rate_per_min,
+        max_concurrent: 10,
+      });
+    } finally {
+      // KI 44.1 cleanup: revert router_enabled (test-pollution 防)
+      if (opts.enableRouterPath !== false) {
+        const { setConfig } = await import('../../../src/data/settings/configs.js');
+        await setConfig('hedge_router_enabled', 'false');
+      }
+    }
 
     // Pass criteria check
     const diff = metrics.final_pre_post_diff;
