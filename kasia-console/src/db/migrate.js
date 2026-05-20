@@ -4163,5 +4163,15 @@ export function runMigrations() {
     if (seeded > 0) console.log(`[migrate] v127: seeded ${seeded} KAS pool alarm knobs (Phase 5-2 Sub-1).`);
   }
 
+  // v128: Phase 5-2 Sub-2 KI 37 CEX inventory alarm knob (NWT N19.70 spec, J2 ship)
+  {
+    const exists = sqlite.prepare("SELECT key FROM config_entries WHERE key=?");
+    const ins = sqlite.prepare("INSERT INTO config_entries (key, value) VALUES (?, ?)");
+    if (!exists.get('bybit_kas_accumulation_alert')) {
+      ins.run('bybit_kas_accumulation_alert', '1000');
+      console.log('[migrate] v128: seeded bybit_kas_accumulation_alert=1000 (Phase 5-2 Sub-2).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

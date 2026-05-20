@@ -14,6 +14,8 @@ import { ethers } from 'ethers';
 import { sqlite } from '../db/client.js';
 import { withFallbackRpc } from './chains.js';
 import { getConfig } from '../data/settings/configs.js';
+import { decrypt } from './crypto.js';
+import { getBalance as cexGetBalance } from './exchange-orders.js';
 
 const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
 const TICK_INTERVAL_MS = 5 * 60_000; // 5 min, stagger 2.5 min offset from market-seeder
@@ -46,6 +48,31 @@ async function _snapshotEvmBalance(chain, asset, tokenAddr, decimals, walletAddr
     const balanceHuman = parseFloat(ethers.formatUnits(balanceRaw, decimals));
     return { chain, asset, balance_raw: balanceRaw.toString(), balance_human: balanceHuman, source: 'rpc' };
   });
+}
+
+// Phase 5-2 Sub-2 KI 37 (NWT N19.70): CEX inventory snapshot 加入 5min tick.
+async function _snapshotCexBalance(accountRow) {
+  try {
+    const apiKey = accountRow.api_key_encrypted ? decrypt(accountRow.api_key_encrypted) : null;
+    const apiSecret = accountRow.api_secret_encrypted ? decrypt(accountRow.api_secret_encrypted) : null;
+    const passphrase = accountRow.extra_encrypted ? (JSON.parse(decrypt(accountRow.extra_encrypted))?.passphrase || null) : null;
+    if (!apiKey || !apiSecret) return [];
+    const bal = await cexGetBalance({
+      exchange: accountRow.exchange, apiKey, apiSecret, passphrase, baseUrl: accountRow.base_url,
+    });
+    if (bal.error || (bal.kas === null && bal.usdt === null)) return [];
+    const rows = [];
+    if (bal.kas !== null && bal.kas !== undefined) {
+      rows.push({ chain: `cex:${accountRow.exchange}`, asset: 'KAS', balance_raw: String(bal.kas * 1e8), balance_human: bal.kas, source: 'cex_api' });
+    }
+    if (bal.usdt !== null && bal.usdt !== undefined) {
+      rows.push({ chain: `cex:${accountRow.exchange}`, asset: 'USDT', balance_raw: String(bal.usdt * 1e6), balance_human: bal.usdt, source: 'cex_api' });
+    }
+    return rows;
+  } catch (err) {
+    console.warn(`[treasury-monitor] cex:${accountRow.exchange} balance fail: ${err.message}`);
+    return [];
+  }
 }
 
 async function _snapshotKaspaBalance(walletAddr) {
@@ -93,7 +120,18 @@ async function _runSnapshot() {
         }));
       }
     }
-    const snapshots = (await Promise.all(tasks)).filter(Boolean);
+    // Phase 5-2 Sub-2: CEX inventory snapshot 加入 parallel batch
+    const cexAccounts = sqlite.prepare('SELECT * FROM exchange_accounts').all();
+    for (const acc of cexAccounts) {
+      tasks.push(_snapshotCexBalance(acc));  // returns array, flatten below
+    }
+    const taskResults = await Promise.all(tasks);
+    const snapshots = [];
+    for (const r of taskResults) {
+      if (r === null) continue;
+      if (Array.isArray(r)) snapshots.push(...r);
+      else snapshots.push(r);
+    }
 
     // Persist snapshots
     const ins = sqlite.prepare(
@@ -126,6 +164,12 @@ async function _runSnapshot() {
       if (kasSnap.balance_human > KAS_HIGH) {
         alerts.push({ type: 'kas_high', asset: 'KAS', chain: kasSnap.chain, balance: kasSnap.balance_human, threshold: KAS_HIGH });
       }
+    }
+    // Phase 5-2 Sub-2 KI 37: Bybit KAS accumulation alarm (积压 → Owner 周期 withdraw)
+    const bybitKasAccum = parseFloat(await getConfig('bybit_kas_accumulation_alert') || '1000');
+    const bybitKasSnap = snapshots.find(s => s.chain === 'cex:bybit' && s.asset === 'KAS');
+    if (bybitKasSnap && bybitKasSnap.balance_human > bybitKasAccum) {
+      alerts.push({ type: 'cex_kas_accum', cex: 'bybit', balance: bybitKasSnap.balance_human, threshold: bybitKasAccum });
     }
     for (const [asset, list] of Object.entries(byAsset)) {
       const low = list.filter(s => s.balance_human < FLOOR_USD && asset !== 'KAS'); // KAS native, different scale
