@@ -12,8 +12,23 @@
 // Phase 2 (later): real LLM brain via services/llm-caller.js (stress/UAT only).
 
 import { sendDm, waitForReply, transferEvmUsdt, parseQuote } from '../../lib/real-chain-runner.mjs';
+import { existsSync, writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
 
 const CONSOLE_URL = process.env.CONSOLE_URL || 'http://127.0.0.1:3100';
+const LOCK_DIR = 'C:/kanet/logs/agent-locks';
+
+// KI 43 H-2 fix (NWT N19.83): per-relay-broker lock — 防 2 agent 共享 NWT relay 抢同 broker DM stream.
+// KI 31 复刻 pattern, scope per-loop instance.
+function acquireAgentLock(relayId, brokerKasia) {
+  try { mkdirSync(LOCK_DIR, { recursive: true }); } catch {}
+  const lockFile = `${LOCK_DIR}/${relayId.slice(0,8)}_${brokerKasia.slice(6,18)}.lock`;
+  if (existsSync(lockFile)) return { ok: false, lockFile, holderPid: null };
+  writeFileSync(lockFile, String(process.pid));
+  return { ok: true, lockFile };
+}
+function releaseAgentLock(lockFile) {
+  try { unlinkSync(lockFile); } catch {}
+}
 
 /**
  * Run an autonomous agent loop until goal completed or max steps reached.
@@ -29,22 +44,53 @@ const CONSOLE_URL = process.env.CONSOLE_URL || 'http://127.0.0.1:3100';
  * @param {number} [opts.maxSteps=20] — hard upper bound on loop iterations
  * @returns {Promise<{ ok, step, history, finalState }>}
  */
-export async function runAgentLoop({ id, persona, context, goal, policy, brainFn, maxSteps = 20 }) {
+export async function runAgentLoop({ id, persona, context, goal, policy, brainFn, maxSteps = 20, totalTimeoutMs = 15 * 60_000 }) {
   if (!brainFn) throw new Error('runAgentLoop: brainFn required');
   if (!context?.relayId) throw new Error('runAgentLoop: context.relayId required');
 
+  // KI 43 H-2 fix: per-relay-broker lock acquire (only if brokerKasia in context — DM agents).
+  let lock = null;
+  if (context.brokerKasia) {
+    lock = acquireAgentLock(context.relayId, context.brokerKasia);
+    if (!lock.ok) {
+      return { ok: false, step: 0, history: [], finalState: { completionReason: `agent_lock_held: ${lock.lockFile}` } };
+    }
+  }
+
+  try {
+    return await _runAgentLoopInner({ id, persona, context, goal, policy, brainFn, maxSteps, totalTimeoutMs });
+  } finally {
+    if (lock?.lockFile) releaseAgentLock(lock.lockFile);
+  }
+}
+
+async function _runAgentLoopInner({ id, persona, context, goal, policy, brainFn, maxSteps, totalTimeoutMs }) {
+
+  // KI 43 H-1 fix (NWT N19.83): own-state (don't mutate shared context) — 多 agent 并发安全.
+  // KI 43 H-3 fix: lastError state — brain 可 detect 上 action 失败 (避 silent retry storm).
   const state = {
-    id, persona, goal, policy, context,
+    id, persona, goal, policy,
+    context: { ...context },  // shallow clone — agent 不污染共享 ref
     history: [],
     completed: false,
     completionReason: null,
     lastReply: null,
+    lastError: null,         // KI 43 H-3
     pendingOfferId: null,
     pendingPayment: null,
+    _ownFlags: {},           // KI 43 H-1: agent 私 flag namespace (e.g., userEvmAddrSent)
   };
+
+  // KI 43 L-6 fix: wall-clock deadline
+  const deadline = Date.now() + totalTimeoutMs;
 
   let step = 0;
   while (step < maxSteps && !state.completed) {
+    // KI 43 L-6: wall-clock timeout check
+    if (Date.now() > deadline) {
+      state.completionReason = `wall_clock_timeout after ${totalTimeoutMs}ms`;
+      break;
+    }
     step++;
     let decision;
     try {
@@ -55,10 +101,14 @@ export async function runAgentLoop({ id, persona, context, goal, policy, brainFn
     }
     if (!decision || decision.action === 'stop') {
       state.completionReason = decision?.reason || 'brain returned stop';
+      // KI 43 L-7 fix: stop with completes → mark completed
+      if (decision?.completes) state.completed = true;
       break;
     }
 
     const stepLog = { step, action: decision.action, ts: Date.now() };
+    // KI 43 H-3: reset lastError before this step (set if this action fails)
+    state.lastError = null;
 
     try {
       if (decision.action === 'send_dm') {
@@ -108,6 +158,7 @@ export async function runAgentLoop({ id, persona, context, goal, policy, brainFn
       }
     } catch (err) {
       stepLog.error = err.message;
+      state.lastError = err.message;  // KI 43 H-3: brain visible on next iter
     }
 
     state.history.push(stepLog);
@@ -144,12 +195,18 @@ export function mockBuyerBrain(state) {
   const last = state.lastReply || '';
   const h = state.history;
 
+  // KI 43 H-3 fix: brain see lastError → don't retry, stop with explicit failure
+  if (state.lastError) {
+    return { action: 'stop', reason: `last_action_err: ${state.lastError}` };
+  }
+
   // Final: payment done → broker auto-handles escrow → stop
   if (h.some(s => s.action === 'transfer_usdt' && s.tx)) {
     return { action: 'stop', reason: 'usdt_paid', completes: 'buy_kas_pay_complete' };
   }
 
-  // Got quote → transfer USDT
+  // KI 43 M-5 fix: preview state — broker 发 "订单预览" 阶段不 transfer, 等下 reply 含 "精确" 才转账.
+  // pendingPayment 只在 parseQuote 找到 "精确 X USDT" + address 时 set, preview 阶段 pendingPayment 仍 null.
   if (state.pendingPayment?.amount && state.pendingPayment?.address) {
     return {
       action: 'transfer_usdt',
@@ -164,17 +221,26 @@ export function mockBuyerBrain(state) {
   if (/🎯|KAS\s*买卖|主菜单|main menu/i.test(last)) return { action: 'send_dm', payload: { message: '1' } };
   if (/选择.*链|chain|BSC|BNB/i.test(last)) return { action: 'send_dm', payload: { message: '1' } };
   if (/数量|qty|多少/i.test(last)) return { action: 'send_dm', payload: { message: String(state.goal?.qty ?? 50) } };
-  if (/地址|address|0x/i.test(last) && !state.context?.userEvmAddrSent) {
-    state.context.userEvmAddrSent = true;
+  // KI 43 H-1 fix: 用 state._ownFlags (per-agent) 不 state.context (shared)
+  if (/地址|address|0x/i.test(last) && !state._ownFlags.userEvmAddrSent) {
+    state._ownFlags.userEvmAddrSent = true;
     return { action: 'send_dm', payload: { message: state.context.userEvmAddr } };
   }
   if (/price|价格|mid|中位/i.test(last)) return { action: 'send_dm', payload: { message: '1' } };
+  // KI 43 M-5: preview = "订单预览" 时 send '1' 确认, 等下 reply 含 "精确" → pendingPayment 才 set
+  if (/订单预览|preview|预览/i.test(last)) return { action: 'send_dm', payload: { message: '1' } };
   if (/confirm|确认|是否/i.test(last)) return { action: 'send_dm', payload: { message: '1' } };
 
-  // Fallback: send '1' (advance most menus)
-  if (h.length < 10) return { action: 'send_dm', payload: { message: '1' } };
+  // KI 43 M-4 fix: align maxSteps with brain inner limit — brain stops at < 10, outer maxSteps default 20.
+  // Use Math.min for hard cap. Brain inner uses 12 max (slightly < outer 20 for safety margin).
+  if (h.length < 12) return { action: 'send_dm', payload: { message: '1' } };
 
-  return { action: 'stop', reason: 'no_progress_after_10_steps' };
+  return { action: 'stop', reason: 'no_progress_after_12_steps' };
+}
+
+// KI 43 L-7 fix: helper to force completes flag (prevent forget-completes bug).
+export function makeStopDecision(reason, completes = null) {
+  return { action: 'stop', reason, completes };
 }
 
 /**
