@@ -281,6 +281,23 @@ export async function registerRelayRoutes(fastify) {
     return reply.send({ relayId: request.params.id, relayName: relay.name, ...result });
   });
 
+  // Phase 4a Sub 6 (Bettor r235) — GET /api/relay/:id/pubkey
+  // Return relay x-only secp256k1 pubkey (= SS contract oracle ctor param param + cross-host verification).
+  // Derive from kaspa address (= deterministic, no privkey exposure).
+  fastify.get('/api/relay/:id/pubkey', async (request, reply) => {
+    const relay = getRelayNode(request.params.id);
+    if (!relay) return reply.code(404).send({ ok: false, error: 'relay_not_found' });
+    if (!relay.address) return reply.code(400).send({ ok: false, error: 'relay has no kaspa address' });
+    try {
+      const kaspa = await import('kaspa-wasm');
+      const xpk = kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(relay.address));
+      const xOnlyHex = xpk.toString();
+      return reply.send({ ok: true, relay_id: relay.id, relay_name: relay.name, address: relay.address, x_only_pubkey: xOnlyHex });
+    } catch (e) {
+      return reply.code(500).send({ ok: false, error: `x-only pubkey derive fail: ${e.message}` });
+    }
+  });
+
   // T-J2-2026-05-12 #4 — system-wide RPC overview (聚合全 relay state, header indicator + dashboard 用).
   fastify.get('/api/system/rpc-overview', async (_request, reply) => {
     const relays = listRelayNodes();
@@ -321,7 +338,7 @@ export async function registerRelayRoutes(fastify) {
     if (!amountKas || amountKas <= 0) return reply.code(400).send({ error: 'Amount must be > 0' });
 
     try {
-      const result = await sendCommandAsync(request.params.id, { type: 'transfer', target: to.trim(), amount: String(amountKas) });
+      const result = await sendCommandAsync(request.params.id, { type: 'transfer', target: to.trim(), amount: amountKas.toFixed(8) });
       if (!result) return reply.code(503).send({ error: 'Relay not running' });
       if (result.error) return reply.code(400).send({ error: result.error });
       return reply.send({ ok: true, txId: result.txId, fee: result.fee });

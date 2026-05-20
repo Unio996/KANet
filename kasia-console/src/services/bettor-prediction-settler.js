@@ -242,11 +242,13 @@ export async function collectMultiOracleVotes(offer, db = sqlite) {
   }
 
   // Parse + filter votes for current revote round (= 防 旧 round vote 蒙混 进新 round tally)
+  // r235 PB-S6-3 加: ECDSA sig verify (= 防 attacker 注假 oracle_vote chain_events row).
   const REQUIRED_SIGS = 5;
   const MAX_REVOTE_ROUNDS = 2;
   const currentRound = offer.revote_round || 0;
   const tally = { YES: 0, NO: 0, DISPUTE: 0 };
   const voters = new Map();  // voter_relay_id → outcome
+  let kaspa = null;  // lazy load
   for (const v of votes) {
     try {
       const p = JSON.parse(v.payload || '{}');
@@ -256,6 +258,32 @@ export async function collectMultiOracleVotes(offer, db = sqlite) {
       if (voteRound !== currentRound) continue;
       // dedupe per voter (= same voter multi-vote in same round, take first)
       if (voters.has(p.voter_relay_id)) continue;
+
+      // r235 PB-S6-3 sig verify: reject vote 假 sig OR placeholder (= Phase 3a "phase3a_skeleton" 不接受 Phase 4a).
+      if (!p.signature || p.signature === 'phase3a_skeleton') {
+        console.warn(`[settler] vote rejected: missing or placeholder sig, voter=${p.voter_relay_id?.slice(0,8)} offer=${offer.id.slice(0,8)}`);
+        continue;
+      }
+      if (!p.voter_pubkey || p.voter_pubkey.length !== 64) {
+        console.warn(`[settler] vote rejected: invalid voter_pubkey, voter=${p.voter_relay_id?.slice(0,8)}`);
+        continue;
+      }
+      try {
+        if (!kaspa) kaspa = await import('kaspa-wasm');
+        // Reconstruct canonical message (= voter signed JSON without signature field)
+        const { signature, ...unsigned } = p;
+        const message = JSON.stringify(unsigned);
+        // verifyMessage expects PublicKey or hex string; x-only is 32-byte hex
+        const valid = kaspa.verifyMessage({ message, signature, publicKey: p.voter_pubkey });
+        if (!valid) {
+          console.warn(`[settler] vote sig INVALID voter=${p.voter_relay_id?.slice(0,8)} offer=${offer.id.slice(0,8)}`);
+          continue;
+        }
+      } catch (verifyErr) {
+        console.warn(`[settler] vote sig verify error voter=${p.voter_relay_id?.slice(0,8)}: ${verifyErr.message}`);
+        continue;
+      }
+
       voters.set(p.voter_relay_id, p.outcome);
       if (tally[p.outcome] !== undefined) tally[p.outcome]++;
     } catch {}
