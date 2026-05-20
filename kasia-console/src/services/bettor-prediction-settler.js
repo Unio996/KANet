@@ -212,11 +212,14 @@ export async function settlePredictionOutcomes() {
 //   收 voter daemon DM (= kanet_oracle_vote_v1) via chain_events 'oracle_vote' to maker_kaspa_addr.
 //   3+ aligned outcome (= 3-of-5 multi-sig consensus) → declare winner.
 //   Phase 3a MVP: 仅 DB aggregation. Phase 4 (= SS contract address available) 真 build settleByMultiOracle TX.
-async function collectMultiOracleVotes(offer) {
+//
+// r213 O-8.1 (Bettor ACK 修方 #1): export 出来 → multi-oracle-vote-settle.test.mjs 真 import (= 不再 inline mirror).
+//   依赖: sqlite (= argument-injectable via 2nd param 为 testability).
+export async function collectMultiOracleVotes(offer, db = sqlite) {
   if (!offer.maker_kaspa_addr) {
     return { ok: false, reason: 'missing maker_kaspa_addr (= aggregator target)' };
   }
-  const votes = sqlite.prepare(`
+  const votes = db.prepare(`
     SELECT id, from_address, payload, observed_at
     FROM chain_events
     WHERE event_type = 'oracle_vote'

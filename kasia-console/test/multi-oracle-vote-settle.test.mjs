@@ -18,7 +18,11 @@ import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
+import { collectMultiOracleVotes as collectMultiOracleVotesReal } from '../src/services/bettor-prediction-settler.js';
 
+// r213 O-8.1 (Bettor ACK 修方 #1): 真 import 不再 inline mirror.
+//   collectMultiOracleVotesReal(offer, db) — 2nd arg 注入 test in-memory db (= 不依赖 production sqlite).
+//   原 inline mirror 保留 backup (= 双 verify path 防 import regression).
 let db;
 
 function setupTestDB() {
@@ -225,5 +229,67 @@ describe('O-8 Multi-Oracle Vote Settlement (Phase 3a r211 v3 Path D)', () => {
     const offerWithOracle = { ...offer, outcome_oracle_relay_id: 'oracle-r1' };
     const useAggregator2 = !!offerWithOracle.outcome_oracle_relay_id;
     assert.equal(useAggregator2, true, 'aggregator path');
+  });
+});
+
+// r213 O-8.1 (Bettor ACK 修方 #1): 真 import suite — 不 mock, 真 call settler 出口.
+// 平行 inline mirror suite: 两 suite 同步通则 inline mirror 跟 production 一致 (= 双 verify path).
+describe('O-8.1 Real Import — collectMultiOracleVotes from settler.js (Bettor r213 ACK 修方 #1)', () => {
+  beforeEach(() => setupTestDB());
+
+  it('R1. real import quorum YES — 3 YES + 2 NO → YES', async () => {
+    const offer = seedOffer('ext-pred-R1', 'kaspa:makerR1');
+    seedVote(offer.id, offer.maker_kaspa_addr, 'voter-1', 'YES');
+    seedVote(offer.id, offer.maker_kaspa_addr, 'voter-2', 'YES');
+    seedVote(offer.id, offer.maker_kaspa_addr, 'voter-3', 'YES');
+    seedVote(offer.id, offer.maker_kaspa_addr, 'voter-4', 'NO');
+    seedVote(offer.id, offer.maker_kaspa_addr, 'voter-5', 'NO');
+
+    const r = await collectMultiOracleVotesReal(offer, db);
+    assert.equal(r.ok, true);
+    assert.equal(r.resolved, true);
+    assert.equal(r.winner, 'YES');
+    assert.equal(r.votes_yes, 3);
+    assert.equal(r.votes_no, 2);
+  });
+
+  it('R2. real import dedupe — same voter 5× → 1 unique', async () => {
+    const offer = seedOffer('ext-pred-R2', 'kaspa:makerR2');
+    for (let i = 0; i < 5; i++) {
+      seedVote(offer.id, offer.maker_kaspa_addr, 'voter-spam', 'YES');
+    }
+    const r = await collectMultiOracleVotesReal(offer, db);
+    assert.equal(r.resolved, false);
+    assert.equal(r.total_voters, 1);
+  });
+
+  it('R3. real import missing maker_kaspa_addr → reject', async () => {
+    const r = await collectMultiOracleVotesReal({ id: 'x', maker_kaspa_addr: null }, db);
+    assert.equal(r.ok, false);
+    assert.match(r.reason, /missing maker_kaspa_addr/);
+  });
+
+  it('R4. real import no votes yet → pending', async () => {
+    const offer = seedOffer('ext-pred-R4', 'kaspa:makerR4');
+    const r = await collectMultiOracleVotesReal(offer, db);
+    assert.equal(r.ok, false);
+    assert.match(r.reason, /no oracle votes/);
+  });
+
+  it('R5. real import inline-mirror divergence detector', async () => {
+    // r213 sediment: 双 verify path 防 inline mirror drift from production.
+    // 同 input 调 inline + real, 比较 output 字段对齐.
+    const offer = seedOffer('ext-pred-R5', 'kaspa:makerR5');
+    seedVote(offer.id, offer.maker_kaspa_addr, 'voter-1', 'YES');
+    seedVote(offer.id, offer.maker_kaspa_addr, 'voter-2', 'YES');
+    seedVote(offer.id, offer.maker_kaspa_addr, 'voter-3', 'NO');
+
+    const rInline = await collectMultiOracleVotes(offer);
+    const rReal = await collectMultiOracleVotesReal(offer, db);
+    assert.equal(rInline.ok, rReal.ok);
+    assert.equal(rInline.resolved, rReal.resolved);
+    assert.equal(rInline.votes_yes, rReal.votes_yes);
+    assert.equal(rInline.votes_no, rReal.votes_no);
+    assert.equal(rInline.total_voters, rReal.total_voters);
   });
 });
