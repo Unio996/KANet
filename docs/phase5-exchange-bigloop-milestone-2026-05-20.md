@@ -148,4 +148,75 @@ Owner pending pick. NWT 推 (C). J2 推 (C).
 
 ---
 
+## 9. File Inventory (per NWT N19.109 suggestion 2)
+
+### Phase 5 core code changes
+
+| File | Phase | KI | Purpose |
+|------|-------|-----|---------|
+| `kasia-console/src/services/hedge-router.js` (NEW) | 5-2.5 | 35, 42, 47.1 | CEX capability router (selectHedgeAccount + getFailoverChain) |
+| `kasia-console/src/services/trade-protocol-filter.js` | 5-2.5 + 5-2 + KI 40-43 | 35, 40, 42, 47.1 | hedge_router 接入 + failover loop + getConfig import |
+| `kasia-console/src/services/broker-treasury-monitor.js` | 5-2 | 34, 36-38 | KAS alarm + CEX inventory + dev-coord broadcast + throttle bypass |
+| `kasia-console/src/services/cross-match-engine.js` | 5-3 | 34 | 4 config knob migrate code → DB |
+| `kasia-console/src/services/exchange-orders.js` | 5-2 + KI 42.1 | 27, 42.1 | _cexPrice/_cexQty + _setMockPlaceOrder injection |
+| `kasia-console/src/db/migrate.js` | 5-2 + 5-3 + 5-2.5 | 34, 36-39 | v125-v129 (4 + 2 + 1 + 8 + 1 knob seeds + throttle_log table) |
+| `kasia-console/src/api/treasury.js` (NEW) | 5-2 Sub-4 | 39 | /api/treasury/trend + /latest endpoints |
+| `kasia-console/src/index.js` | 5-2 Sub-4 | 39 | registerTreasuryRoutes wire |
+
+### Test framework (Phase 5-4 + 5-5 + 5-5-B)
+
+| File | Phase | KI | Purpose |
+|------|-------|-----|---------|
+| `kasia-console/test-framework/lib/stress-harness.mjs` (NEW) | 5-5 + 5-5-B | 44, 46, 46.1, 48 | runStress + abortHook + 5 condition check |
+| `kasia-console/test-framework/personas/agent/_agent_base.mjs` (NEW) | 5-4 | 41, 43, 43.1, 46.1 | runAgentLoop + 3 mock brain + lock + lastError + metricsSink |
+| `kasia-console/test-framework/personas/agent/autonomous_buyer.mjs` (NEW) | 5-4 | 41, 46.1 | buyer persona wrapper |
+| `kasia-console/test-framework/personas/agent/autonomous_seller.mjs` (NEW) | 5-4 | 41 | seller persona wrapper |
+| `kasia-console/test-framework/personas/agent/autonomous_taker.mjs` (NEW) | 5-4 | 41 | taker persona wrapper |
+| `kasia-console/test-framework/cases/multi-agent/*.test.mjs` (5 NEW) | 5-4 + 5-5 + 5-5-B | 41-46 | stress + chaos + lock isolation + 5-5-A + 5-5-B |
+| `kasia-console/test-framework/cases/exchange/hedge_router_*.test.mjs` (2 NEW) | 5-2.5 | 35, 42, 42.1 | router capability + failover integration |
+| `kasia-console/test-framework/cases/broker-realchain/real_hedge_verify.test.mjs` | KI 22-32 | 22-32 | first hedge_placed real chain verify |
+
+### Scripts
+
+| File | Purpose |
+|------|---------|
+| `kasia-console/scripts/_prefund_stress_pool.mjs` (NEW) | broker→Trader-A USDT prefund |
+| `kasia-console/scripts/_stress_puppeteer_monitor.mjs` (NEW) | Puppeteer :9223 dedicated UI monitor |
+| `kasia-console/scripts/_stress_rollback.mjs` (NEW) | crash recovery |
+| `kasia-console/scripts/_phase5_1_snapshot.mjs` (NEW) | agent × chain × CEX snapshot |
+| `kasia-console/scripts/_dev_coord_monitor.mjs` (NEW) | persistent dev-coord push notifier |
+
+### Docs
+
+| File | Purpose |
+|------|---------|
+| `docs/exchange-asset-snapshot-2026-05-20.md` (NEW) | Phase 5-1 snapshot (7 section) |
+| `docs/phase5-3-knob-audit-2026-05-20.md` (NEW) | Phase 5-3 audit (4 migrate / 6 keep) |
+| `docs/phase5-6-test-plan-2026-05-20.md` (NEW) | Phase 5-6 test plan (8 section + 7 friction matrix) |
+| `docs/phase5-exchange-bigloop-milestone-2026-05-20.md` (THIS) | Phase 5 全 milestone |
+
+### Database migrations (Phase 5)
+
+| Version | Purpose |
+|---------|---------|
+| v125 | 4 tunable knobs (broker_treasury_floor/high_usd + cross_match_price/qty_tol) |
+| v126 | 8 hedge_router_* knobs |
+| v127 | 2 KAS pool alarm knobs (broker_kas_floor/high) |
+| v128 | 1 bybit_kas_accumulation_alert knob |
+| v129 | throttle_log table + idx_throttle_key_time |
+
+## 10. Phase 5-5 future polish (per NWT N19.109 suggestion 3)
+
+**autotake_accepted = 3 fired during 12 min Phase 1**:
+- broker autoTaker (production) was active during stress test, NOT just stress test agents
+- Phase 5-5-B/5-5-C pass criteria 计算 cycle pace 需 distinguish:
+  - stress agent-driven cycles (test marker source)
+  - production autotaker-driven cycles (no marker, fires on any open offer matching discount)
+- Future polish: stress-harness 加 autotake_skip_count baseline + post diff. 真 stress 数 = total_completed - autotaker_completed.
+
+Tracked in `[[feedback_phase5_5_autotaker_inflation]]` (待 sediment memory).
+
+---
+
 **Author**: J2 (5/20 13:10 UTC sediment after NWT N19.108 主动重启 ping).
+**Updated**: 5/20 13:15 UTC (NWT N19.109 suggestion 2 file inventory + suggestion 3 autotaker polish).
