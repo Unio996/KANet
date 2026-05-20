@@ -735,22 +735,22 @@ async function _executeHedge(offerId, agentName, side, qty, preferredCex = null)
     return;
   }
 
-  // Get best available exchange account (prefer specified CEX, fallback to default)
-  let account = null;
-  if (preferredCex) {
-    const normalized = HEDGE_CEX_MAP[preferredCex.toLowerCase()] || preferredCex.toLowerCase();
-    account = sqlite.prepare('SELECT * FROM exchange_accounts WHERE exchange = ?').get(normalized);
-  }
-  if (!account) {
-    account = sqlite.prepare(
-      'SELECT * FROM exchange_accounts WHERE is_default = 1 LIMIT 1'
-    ).get() || sqlite.prepare('SELECT * FROM exchange_accounts LIMIT 1').get();
-  }
+  // Phase 5-2.5 KI 35 (NWT N19.69): hedge-router 替换原 picker, knob-driven CEX 分流.
+  // Backward compat: hedge_router_enabled=false → 行为同原 picker (Phase 1a 不破).
+  // Peek price via bybit for orderValueUsdt routing decision (CEX-independent oracle defer):
+  const { selectHedgeAccount } = await import('./hedge-router.js');
+  const peekPrice = await _fetchHedgePrice('bybit', side).catch(() => null);
+  const orderValueUsdt = peekPrice && qty ? Number(peekPrice) * Number(qty) : null;
+  const { account, route } = await selectHedgeAccount({
+    preferredCex, orderValueUsdt, side,
+    mode: process.env.KANET_HEDGE_MODE || 'production',
+  });
 
   if (!account) {
     console.log(`[exchange-hedge] No exchange account configured — cannot hedge ${offerId.slice(0, 8)}`);
     return;
   }
+  console.log(`[exchange-hedge] router pick: ${account.exchange} (route=${route}) for offer ${offerId.slice(0,8)}`);
 
   const def = EXCHANGE_REGISTRY.find(e => e.id === account.exchange);
   if (!def) {

@@ -4126,5 +4126,27 @@ export function runMigrations() {
     if (seeded > 0) console.log(`[migrate] v125: seeded ${seeded} tunable knobs (Phase 5-3 migration).`);
   }
 
+  // v126: Phase 5-2.5 KI 35 hedge-router seed (NWT N19.69 spec, J2 ship)
+  // 8 knob全 DB-backed, hedge_router_enabled=false → backward compat (Phase 1a 不破).
+  {
+    const exists = sqlite.prepare("SELECT key FROM config_entries WHERE key=?");
+    const ins = sqlite.prepare("INSERT INTO config_entries (key, value) VALUES (?, ?)");
+    const seeds = [
+      ['hedge_router_enabled', 'false'],                    // gate: false = backward compat
+      ['hedge_router_default_cex', 'bybit'],                // production
+      ['hedge_router_auto_e2e_cex', 'gateio'],              // auto-withdraw CEX
+      ['hedge_router_small_order_cex', 'kucoin'],           // $0.10 min
+      ['hedge_router_small_order_threshold_usd', '5'],      // bybit $5 min boundary
+      ['hedge_router_kas_floor_for_default', '5000'],       // K-pool low threshold
+      ['hedge_router_failover_chain', 'bybit,gateio,kucoin'],
+      ['hedge_router_kas_high_threshold_kas', '50000'],     // 高位 (Phase 5-2 用)
+    ];
+    let seeded = 0;
+    for (const [k, v] of seeds) {
+      if (!exists.get(k)) { ins.run(k, v); seeded++; }
+    }
+    if (seeded > 0) console.log(`[migrate] v126: seeded ${seeded} hedge-router knobs (Phase 5-2.5 KI 35).`);
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
