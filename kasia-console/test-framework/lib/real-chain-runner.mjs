@@ -240,7 +240,7 @@ export async function pollChainEvents(sinceIso, eventTypes, opts = {}) {
 // ── DM-driven broker buy flow (NWT BUY KAS via broker) ───────────
 
 export async function brokerBuyFlow(relayId, userKasia, brokerKasia, opts) {
-  const { qty, chain = 'BSC', userEvmAddr, dmTimeoutMs = 45000 } = opts;
+  const { qty, chain = 'BSC', userEvmAddr, dmTimeoutMs = 90000 } = opts;  // 90s for post-restart resilience
   if (!qty || qty < 1) throw new Error(`qty must be >= 1 (broker min), got ${qty}`);
 
   // 6-step DM with smart quote detection
@@ -262,7 +262,41 @@ export async function brokerBuyFlow(relayId, userKasia, brokerKasia, opts) {
     if (quote) {
       return { ok: true, quote, reply };
     }
-    await sleep(2500);
+    await sleep(7000);
   }
-  return { ok: false, error: 'no quote captured after 8 steps' };
+  // KI 29 5/20 (Owner redirect 自决): post-step-8 broker 报价 (含 "精确") 可能 lag 3-15s 才到.
+  // Round 6 qty=50 实测: broker confirm-2 reply 是 preview, 真 报价 来自 separate async escrow publish.
+  // poll broker DM 最后 30s 抓 精确 pattern 才宣告 no quote.
+  const lastQuotePoll = await pollChainEvents(new Date().toISOString(), [], { timeoutMs: 30000, pollMs: 3000, untilFound: () => false }).catch(() => ({}));
+  // Actually 简单 — poll messages table for new inbound from broker with 精确 pattern
+  const startPollIso = new Date(Date.now() - 5000).toISOString();  // start 5s ago to catch already-arrived
+  const dl = Date.now() + 30000;
+  while (Date.now() < dl) {
+    await sleep(3000);
+    const latest = await getLatestInboundFrom(userKasia, brokerKasia, startPollIso);
+    if (latest) {
+      const q = parseQuote(latest.content_text);
+      if (q) return { ok: true, quote: q, reply: latest };
+    }
+  }
+  return { ok: false, error: 'no quote captured after 8 steps + 30s post-poll' };
+}
+
+// Helper: get latest broker DM inbound to user since timestamp
+async function getLatestInboundFrom(userKasia, brokerKasia, sinceIso) {
+  const db = getReadDb();
+  const r = db.prepare(`
+    SELECT m.content_text, m.received_at, m.source_txid
+    FROM messages m
+    JOIN conversations c ON c.id = m.conversation_id
+    JOIN identities ri ON ri.id = c.remote_identity_id
+    JOIN identities li ON li.id = c.local_identity_id
+    WHERE m.direction = 'inbound'
+      AND li.address = ?
+      AND ri.address = ?
+      AND m.received_at > ?
+    ORDER BY m.received_at DESC LIMIT 1
+  `).get(userKasia, brokerKasia, sinceIso);
+  db.close();
+  return r;
 }
