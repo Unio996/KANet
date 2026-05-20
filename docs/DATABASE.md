@@ -258,9 +258,22 @@
 | style | TEXT | 风格描述 |
 | social_style | TEXT | balanced/proactive/reactive |
 | trading_config_json | TEXT | 交易配置 |
+| is_bot_autoreply | INTEGER | v67 bot autoreply 标记 |
+| is_dex_broker | INTEGER | v68 DEX Broker 标记 |
+| is_service | INTEGER | v? service relay 标记 |
+| broker_referral_code | TEXT | v124 broker referral 码 |
+| broker_stake_locked_kas | REAL | v124 broker stake KAS |
+| broker_stake_lock_until | TEXT | v124 broker stake unlock 时间 |
+| broker_approved_by | TEXT | v124 broker 批准者 |
+| broker_approved_at | TEXT | v124 broker 批准时间 |
+| **is_oracle** | INTEGER | **v124 r211 v3** — Path D oracle relay 标记，is_oracle=1 + isRelayAlive() 同时满足才可被 maker 选为 outcome_oracle_relay_id |
+| **oracle_capabilities** | TEXT | **v124** — JSON array oracle 能力（e.g. `["kanet_ai_consensus_v1","polymarket_uma_mirror"]`） |
+| **oracle_stake_locked_kas** | REAL | **v124** — oracle stake KAS（Phase 4 SS escrow） |
+| **oracle_reputation_score** | REAL | **v124** — oracle 信誉分（Phase 4+ 由 settle 历史累计） |
 
-**写入方**：relay API（用户配置）
-**读取方**：mind-manager.js、health API、几乎所有 Agent 操作
+**写入方**：relay API（用户配置）、bettor-prediction-voter.js (v124 oracle 字段)
+**读取方**：mind-manager.js、health API、几乎所有 Agent 操作、bettor.js publish (v124 is_oracle + isRelayAlive)、bettor-prediction-voter.js cron tick
+**v124 r211 v3 oracle 字段意义**：Path D 设计 = maker 在 publish 时自选 oracle relay_id（必满足 `is_oracle=1` + `isRelayAlive()` PB-A 实现）。Phase 3a MVP 5 J1tn-* (Alice/Bob/Carol/Dave/Eve) 全 `is_oracle=1` + `oracle_capabilities=["kanet_ai_consensus_v1"]`，3-of-5 multi-sig quorum 走 `PredictionEscrowMulti.sil`。
 
 ---
 
@@ -492,9 +505,22 @@
 | market_key | TEXT NOT NULL | 派生分组键（本地索引，不上链） |
 | taker | TEXT | 接单方地址 |
 | broadcast_tx_id | TEXT NOT NULL | 链上广播 TX |
+| maker_kaspa_addr | TEXT | v122 maker Kaspa addr 双锚 |
+| maker_relay_id | TEXT | v122 maker relay UUID |
+| outcome_market_source | TEXT | r177 Phase 2 prediction market source (polymarket/kanet_native) |
+| outcome_condition_id | TEXT | r177 Phase 2 prediction market condition id |
+| outcome_token_id | TEXT | r177 Phase 2 prediction CLOB token id (= clob_token_ids 查询 key) |
+| outcome_side | TEXT | r177 Phase 2 maker 押的 side (YES/NO) |
+| outcome_end_date | TEXT | r177 Phase 2 market 截止时间 (settler 触发 condition) |
+| outcome_oracle_hook | TEXT | r177 Phase 2 oracle hook 类型 (polymarket_uma_mirror/kanet_ai_consensus_v1) |
+| outcome_max_deviation_pp | REAL | r177 Phase 2 价格 deviation 上限 pp |
+| published_price | REAL | r177 Phase 2 publish 时价格快照 |
+| **outcome_oracle_relay_id** | TEXT | **v124 r211 v3** — Path D maker 自选 oracle relay UUID (= relay_nodes.id where is_oracle=1)；触发 settler dispatcher 走 collectMultiOracleVotes (3-of-5 quorum) |
+| **resolution_rule_spec** | TEXT | **v124** — JSON 5 字段 `{data_source_canonical, secondary_sources, ambiguity_handler, dispute_keywords, edge_case_examples}` (= structured oracle 判定规则，voter daemon 读取 deriveVote) |
 
-**写入方**：exchange.js（乐观写入）、trade-protocol-filter.js
-**读取方**：/exchange 页面
+**写入方**：exchange.js（乐观写入）、trade-protocol-filter.js、bettor.js publish (r211 v3 oracle 字段)
+**读取方**：/exchange 页面、bettor-prediction-settler.js (collectMultiOracleVotes + verifyPredictionOutcome dispatcher)、bettor-prediction-voter.js (扫 outcome_oracle_relay_id=this)
+**v124 r211 v3 dispatcher 规则**：settler.js#L91 `if (offer.outcome_oracle_relay_id) → collectMultiOracleVotes(aggregator) else → verifyPredictionOutcome(legacy polymarket gamma)`。Phase 3a aggregator 走 chain_events.event_type='oracle_vote' query + 3-of-5 quorum tally + dedupe by voter_relay_id。
 
 ---
 
@@ -684,10 +710,12 @@ CEX 交易日志。v51 新增 `exchange` 列记录交易所归属（旧记录为
 3. 改字段：SQLite 不支持直接改，需建新表→迁移→删旧表
 4. 新表：migrate.js 新版本，加 `IF NOT EXISTS` 保护
 
-**当前最新版本：v69（retail_dex_orders.agent_pay_addr + mid_price_at_quote）**
+**当前最新版本：v124（r211 Phase 3a v3 oracle — Path D maker 自选 oracle + 3-of-5 multi-sig）**
 
 ## 版本历史（近期）
 
+- **v124 (2026-05-20 r211 Phase 3a v3 oracle)**: `exchange_offers` 新加 `outcome_oracle_relay_id` + `resolution_rule_spec` (= Path D maker 自选 oracle + 5 字段 structured 判定规则); `relay_nodes` 新加 `is_oracle` + `oracle_capabilities` + `oracle_stake_locked_kas` + `oracle_reputation_score` + `broker_referral_code/broker_stake_locked_kas/broker_stake_lock_until/broker_approved_by/broker_approved_at` (broker treasury 字段同 line 出 v124)
+- v122 (2026-05-19 r177 Phase 2 prediction market): exchange_offers 新加 outcome_* 字段 (= polymarket-style prediction market on Kaspa) + `maker_kaspa_addr` + `maker_relay_id`
 - v69 (2026-04-22 T6): retail_dex_orders.agent_pay_addr + mid_price_at_quote
 - v68 (2026-04-22 T2): retail_dex_orders 新表 + relay_nodes.is_dex_broker
 - v67: is_bot_autoreply on relay_nodes
