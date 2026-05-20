@@ -106,13 +106,14 @@ export default {
     }
     console.log(`[real_hedge_verify] step 2 ✓ broker offer ${brokerOffer.id.slice(0,12)} ${brokerOffer.give_amount}${brokerOffer.give_asset}→${brokerOffer.want_amount}${brokerOffer.want_asset}`);
 
-    // Step 3: trigger manual /api/exchange/accept from Trader-A (has KAS pool, bypass autoTaker discount gate)
-    console.log(`[real_hedge_verify] step 3: Trader-A manual /api/exchange/accept`);
-    const traderA = getRelayInfo('Trader-A');
-    if (!traderA) return { ok: false, error: 'Trader-A relay not found' };
+    // Step 3: trigger manual /api/exchange/accept from Trader-M (74 KAS, sufficient for 50 KAS taker pay)
+    // (Trader-A only 7.47 KAS, insufficient — Round 7 KI fix)
+    console.log(`[real_hedge_verify] step 3: Trader-M manual /api/exchange/accept`);
+    const traderM = getRelayInfo('Trader-M');
+    if (!traderM) return { ok: false, error: 'Trader-M relay not found' };
 
     const acceptBody = {
-      relayNodeId: traderA.id,
+      relayNodeId: traderM.id,
       offer_id: brokerOffer.id,
       selected_chain: 'bnb',
       payment_asset: 'USDT',
