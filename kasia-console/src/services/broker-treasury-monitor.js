@@ -174,14 +174,19 @@ async function _runSnapshot() {
 
     // Phase 5-2 Sub-3 KI 38 (NWT N19.70): red-line alarm → dev-coord broadcast 通知 Owner
     // throttle: 同 alert (type + asset/cex/chain) 1h 内只 broadcast 1 次 (防 spam).
+    // Phase 5-6 KI 45 Sub-3 (NWT N19.94 Sub-C): KANET_STRESS_MODE=1 process-scoped env bypass throttle
+    // (stress test 期 alarm-per-fail raw visibility — N19.74 Q7 a+).
+    const stressMode = process.env.KANET_STRESS_MODE === '1';
     const RED_LINE_TYPES = new Set(['kas_floor', 'floor', 'cex_kas_accum']);
     const redAlerts = alerts.filter(a => RED_LINE_TYPES.has(a.type));
     for (const a of redAlerts) {
       const throttleKey = `treasury_red_${a.type}_${a.asset || a.cex || a.chain || 'global'}`;
-      const lastSent = sqlite.prepare(
-        `SELECT created_at FROM throttle_log WHERE key=? ORDER BY created_at DESC LIMIT 1`
-      ).get(throttleKey);
-      if (lastSent && Date.now() - new Date(lastSent.created_at + 'Z').getTime() < 3600_000) continue;
+      if (!stressMode) {
+        const lastSent = sqlite.prepare(
+          `SELECT created_at FROM throttle_log WHERE key=? ORDER BY created_at DESC LIMIT 1`
+        ).get(throttleKey);
+        if (lastSent && Date.now() - new Date(lastSent.created_at + 'Z').getTime() < 3600_000) continue;
+      }
       try {
         const msg = `🚨 [treasury-alert] ${a.type} ${JSON.stringify(a).slice(0, 200)}`;
         const PORT = process.env.PORT || 3100;

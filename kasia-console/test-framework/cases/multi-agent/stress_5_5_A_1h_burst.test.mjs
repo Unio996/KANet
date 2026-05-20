@@ -107,6 +107,10 @@ export default {
         }
       } catch {}
     };
+    // KI 45 Sub-3 (NWT N19.94 Sub-C): KANET_STRESS_MODE=1 process env bypass throttle for raw alarm visibility
+    const origStressMode = process.env.KANET_STRESS_MODE;
+    process.env.KANET_STRESS_MODE = '1';
+
     let metrics1, metrics2;
     try {
       // Phase 1: KuCoin
@@ -147,6 +151,9 @@ export default {
         if (configBackup.smallCex !== undefined) await setConfig('hedge_router_small_order_cex', configBackup.smallCex || 'kucoin');
         if (configBackup.smallThreshold !== undefined) await setConfig('hedge_router_small_order_threshold_usd', configBackup.smallThreshold || '5');
       }
+      // KI 45 Sub-3: restore KANET_STRESS_MODE env var
+      if (origStressMode === undefined) delete process.env.KANET_STRESS_MODE;
+      else process.env.KANET_STRESS_MODE = origStressMode;
     }
 
     // KI 45 Sub-2: aggregate metrics across phases
