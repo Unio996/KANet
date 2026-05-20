@@ -74,6 +74,13 @@ async function _runReplenishTick() {
 
       const needed = target - w.usdt;
       console.log(`[stress-pool-replenish] ${name} ${w.usdt.toFixed(3)} < floor ${floor} → fire broker→${w.address.slice(0,10)} +${needed.toFixed(3)} USDT`);
+      // KI 50.1 Issue #2 (NWT N19.119 R-3): DRY_RUN gate — log not act, testable.
+      if (process.env.DRY_RUN === '1') {
+        console.log(`[stress-pool-replenish DRY_RUN] would transfer ${needed.toFixed(3)} USDT → ${name} (no real TX)`);
+        // throttle log even in DRY_RUN to prevent repeat tick spam
+        sqlite.prepare(`INSERT INTO throttle_log (key, created_at) VALUES (?, datetime('now'))`).run(`stress_replenish_${name}`);
+        continue;
+      }
       const r = await _broker2RelayUsdtTransfer(brokerBnb.id, w.address, needed);
       if (r.ok) {
         console.log(`[stress-pool-replenish] ✓ ${name} +${needed.toFixed(3)} USDT TX ${r.txHash.slice(0, 16)}`);

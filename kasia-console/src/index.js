@@ -483,6 +483,10 @@ startIntakeWatcher();
 import { startTreasuryMonitor } from './services/broker-treasury-monitor.js';
 startTreasuryMonitor();
 
+// Phase 6 #4 Sub-2 KI 50 (NWT N19.119 hook): auto stress pool replenish (gated by KANET_STRESS_MODE=1)
+import { startStressPoolReplenish } from './services/broker-stress-pool-replenish.js';
+startStressPoolReplenish();
+
 // C2 Cross-Match Engine (J2 #519/523 / NWT N19.11/N19.17 三方共识 5/19, Owner 钦定 "C 是骨架").
 // 30s cron 扫 open exchange_offers, 找 BUY+SELL 数学有交集 pair (oracle ±3% + chain align + same-org skip + qty ±5%).
 // emit chain_event 'kanet_cross_match_v1' Brain visible. Phase 1 audit-only, Phase 2 active match-settle.
