@@ -64,6 +64,7 @@ async function getDbMetrics() {
   });
 
   const pages = {};
+  const pageErrorLog = {};  // KI 45.2 Sub-4 polish #2 (NWT N19.98): real JS error capture
   const tabs = [
     { name: 'portfolio', url: `${CONSOLE_URL}/portfolio` },
     { name: 'relays', url: `${CONSOLE_URL}/relays` },
@@ -71,6 +72,16 @@ async function getDbMetrics() {
   ];
   for (const t of tabs) {
     const p = await browser.newPage();
+    pageErrorLog[t.name] = [];
+    // KI 45.2 polish #2: capture pageerror + console.error (NOT in DOM, only Console)
+    p.on('pageerror', err => {
+      pageErrorLog[t.name].push({ ts: new Date().toISOString(), type: 'pageerror', err: err.message });
+    });
+    p.on('console', msg => {
+      if (msg.type() === 'error') {
+        pageErrorLog[t.name].push({ ts: new Date().toISOString(), type: 'console_error', err: msg.text() });
+      }
+    });
     try {
       await p.goto(t.url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
       console.log(`[stress-monitor] tab ${t.name} loaded ${t.url}`);
@@ -101,7 +112,15 @@ async function getDbMetrics() {
           // Generic DOM dump — count visible text containing numeric
           const visibleText = await pages[t.name].evaluate(() => document.body?.innerText?.slice(0, 5000) || '');
           sample[`${t.name}_text_length`] = visibleText.length;
-          sample[`${t.name}_has_error`] = /error|exception|undefined/i.test(visibleText.slice(0, 1000));
+          // KI 45.2 Sub-4 polish #1 (NWT N19.98): narrow regex — only real JS error patterns
+          const errorPatterns = [
+            /Uncaught\s+(TypeError|ReferenceError|SyntaxError|RangeError)/,
+            /JavaScript\s+error/,
+            /window\.onerror/,
+          ];
+          sample[`${t.name}_has_error`] = errorPatterns.some(re => re.test(visibleText));
+          // KI 45.2 polish #2: dump page error log (collected via page.on listeners)
+          sample[`${t.name}_errors`] = (pageErrorLog[t.name] || []).slice(-10);  // last 10 per tick
         } catch (e) {
           sample[`${t.name}_err`] = e.message;
         }
