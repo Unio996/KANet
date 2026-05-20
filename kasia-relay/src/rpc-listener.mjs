@@ -413,9 +413,13 @@ async function catchUpHistory() {
   }
 
   // 2. Unreplied messages — generate AI reply and send
+  // NWT N19.45 / Owner 5/19 钦定 "解除限制" P0 fix: 加 since=ISO timestamp filter.
+  // 之前每 cycle SQL NOT EXISTS scan messages 40k+ rows, 8 relay 并发 → SQLite 排队 console event loop block 20s+.
+  // 修后 since=last cycle timestamp (60s ago default), reduce scan to recent N min messages (~50-200 rows).
+  const sinceParam = new Date(Date.now() - 5 * 60 * 1000).toISOString();  // 5 min lookback
   try {
     const res = await fetch(
-      `${CONSOLE_URL}/ingest/unreplied-messages?network=${KASPA_NETWORK}&limit=20`,
+      `${CONSOLE_URL}/ingest/unreplied-messages?network=${KASPA_NETWORK}&limit=20&since=${encodeURIComponent(sinceParam)}`,
       { headers: { 'x-ingest-secret': process.env.INGEST_SECRET || '' }, signal: AbortSignal.timeout(5000) },
     );
     if (res.ok) {

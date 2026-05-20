@@ -77,11 +77,17 @@ export function failPendingAction(actionId, errorMsg) {
  * Find inbound messages that have no reply record.
  * Returns: [{ remoteAddress, localAddress, txid, traceId, message, receivedAt }]
  */
-export function getUnrepliedMessages(network = 'mainnet', limit = 50) {
+export function getUnrepliedMessages(network = 'mainnet', limit = 50, sinceTs = null) {
   // Bug NWT-N7.1 fix 5/18 (Owner 4-month Trader-B menu spam pain): 旧 NOT EXISTS replies 漏
   // — ingestReply HTTP fail / trace_id mismatch / restart 后 _seen 清 → catch-up replay 同 inbound.
   // Layer B fix: check 实际 outbound message presence (true source of truth, not replies table).
   // 必 JOIN conversation_id (防 broker 主动 DM 同 peer 别的 conversation 误判已 reply).
+  //
+  // NWT N19.45 / Owner 5/19 钦定 "解除限制" P0 fix: 加 sinceTs filter 防 SQLite 排队.
+  // 旧: 8 relay × 3 endpoint × NOT EXISTS scan messages 40k rows = console event loop block 20s+.
+  // 修后: 加 m.created_at > sinceTs filter, relay 传 last-seen timestamp (default 24h ago if null).
+  // SQL scan reduce 40k → 最近 N min messages (~50-200 rows typical).
+  const sinceCutoff = sinceTs || new Date(Date.now() - 24 * 3600 * 1000).toISOString();
   const rows = sqlite.prepare(`
     SELECT
       m.source_txid   AS txid,
@@ -96,6 +102,7 @@ export function getUnrepliedMessages(network = 'mainnet', limit = 50) {
     JOIN identities li  ON li.id = c.local_identity_id
     WHERE m.direction    = 'inbound'
       AND m.message_type = 'text'
+      AND m.created_at   > ?
       AND li.network     = ?
       AND ri.address LIKE 'kaspa:%'
       AND NOT EXISTS (
@@ -110,7 +117,7 @@ export function getUnrepliedMessages(network = 'mainnet', limit = 50) {
       )
     ORDER BY m.created_at DESC
     LIMIT ?
-  `).all(network, limit);
+  `).all(sinceCutoff, network, limit);
 
   return rows;
 }

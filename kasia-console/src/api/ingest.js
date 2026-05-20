@@ -167,7 +167,10 @@ export async function registerIngestRoutes(fastify) {
   fastify.get('/ingest/unreplied-messages', async (request, reply) => {
     const network = request.query.network || 'mainnet';
     const limit = parseInt(request.query.limit) || 50;
-    const results = getUnrepliedMessages(network, limit);
+    // NWT N19.45 P0 fix: accept `since` ISO timestamp filter, relay 传 last-seen.
+    // default 24h ago if not provided (back-compat for old relay versions).
+    const sinceTs = request.query.since || null;
+    const results = getUnrepliedMessages(network, limit, sinceTs);
     return reply.send({ messages: results });
   });
 
