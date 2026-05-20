@@ -36,6 +36,7 @@ import { registerPortfolioRoutes } from './api/portfolio.js';
 import { registerBackupRoutes } from './api/backup.js';
 import { registerBudgetRoutes } from './api/budget.js';
 import { registerAdminRoutes } from './api/admin.js';
+import { registerTreasuryRoutes } from './api/treasury.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from './i18n/index.js';
 import { autoStartIfEnabled } from './services/scanner.js';
 import { startAllAdapters, stopAllAdapters } from './services/adapter-launcher.js';
@@ -175,6 +176,7 @@ await registerPortfolioRoutes(fastify);
 await registerBackupRoutes(fastify);
 await registerBudgetRoutes(fastify);
 await registerAdminRoutes(fastify);
+await registerTreasuryRoutes(fastify);
 
 // NWT-V3 / Qclaude monitor 系统 — route 必须在 fastify.listen 之前注册
 import { registerMonitorRoutes } from './api/monitor-dashboard.js';
