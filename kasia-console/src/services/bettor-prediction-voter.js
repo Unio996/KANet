@@ -98,7 +98,11 @@ async function processVoter(voter) {
 
       // 4. fetch evidence + decide outcome (= Phase 3a MVP: polymarket gamma resolve)
       const voteResult = await deriveVote(offer);
-      if (!voteResult.ok) { errored++; continue; }
+      if (!voteResult.ok) {
+        console.warn(`[prediction-voter] deriveVote fail voter=${voter.name} offer=${offer.id.slice(0,8)}: ${voteResult.reason}`);
+        errored++;
+        continue;
+      }
 
       // 5. build kanet_oracle_vote_v1 JSON (= PB-B schema)
       const evidenceHash = createHash('sha256').update(voteResult.evidence_raw || '').digest('hex');
@@ -232,8 +236,24 @@ async function deriveKanetNativeVote(offer, spec) {
     evidence_url = `kanet_native_spec:${offer.id}`;
   }
 
-  // LLM call (= Bettor r219 spec). Qwen3.6-LAN via Adapter.
-  const adapterPort = process.env.QWEN_ADAPTER_PORT || '3210';
+  // LLM call (= Bettor r219 spec). r220 fix: 直 call upstream openai-compatible endpoint,
+  // 不走 agent-adapter /reply (= adapter 只暴 /reply 不是 /v1/chat/completions).
+  // 上游 URL 从 adapter_nodes.ai_provider_url via offer.outcome_oracle_relay_id (= voter relay) lookup.
+  let providerUrl = process.env.QWEN_LLM_URL || null;
+  let providerModel = null;
+  if (!providerUrl) {
+    try {
+      const row = sqlite.prepare(`
+        SELECT a.ai_provider_url, a.ai_model
+        FROM relay_nodes r JOIN adapter_nodes a ON r.adapter_node_id = a.id
+        WHERE r.id = ?
+      `).get(offer.outcome_oracle_relay_id);
+      providerUrl = row?.ai_provider_url || null;
+      providerModel = row?.ai_model || null;
+    } catch {}
+  }
+  if (!providerUrl) return { ok: false, reason: 'no LLM provider URL configured (= adapter ai_provider_url missing)' };
+
   const prompt = `预测市场结果判定:\n` +
     `market_question: ${offer.outcome_condition_id || '(none)'}\n` +
     `data_source: ${evidence_url}\n` +
@@ -243,15 +263,18 @@ async function deriveKanetNativeVote(offer, spec) {
   let llmConfidence = 0;
   let llmReason = '';
   try {
-    const llmRes = await fetch(`http://127.0.0.1:${adapterPort}/v1/chat/completions`, {
+    const url = providerUrl.replace(/\/$/, '') + '/chat/completions';
+    const llmRes = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(60_000),
       body: JSON.stringify({
+        model: providerModel || undefined,
         messages: [{ role: 'user', content: prompt }],
         chat_template_kwargs: { enable_thinking: false },  // Qwen Rule 11 必加
         response_format: { type: 'json_object' },
         temperature: 0.1,
+        max_tokens: 200,
       }),
     });
     if (!llmRes.ok) return { ok: false, reason: `LLM HTTP ${llmRes.status}` };
