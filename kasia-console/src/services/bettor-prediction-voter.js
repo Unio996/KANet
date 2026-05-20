@@ -77,7 +77,7 @@ async function processVoter(voter) {
   let voted = 0, skipped = 0, errored = 0;
   // 2. scan offers this voter 该投票
   const offers = sqlite.prepare(`
-    SELECT id, maker, maker_kaspa_addr, outcome_oracle_relay_id, outcome_token_id, outcome_condition_id, outcome_side, outcome_end_date, resolution_rule_spec, protocol_status
+    SELECT id, maker, maker_kaspa_addr, outcome_market_source, outcome_oracle_relay_id, outcome_token_id, outcome_condition_id, outcome_side, outcome_end_date, resolution_rule_spec, protocol_status
     FROM exchange_offers
     WHERE outcome_oracle_relay_id = ?
       AND protocol_status IN ('matched','verifying')
