@@ -19,7 +19,7 @@ const DB_PATH = 'C:/kanet/kasia-console/data/console.db';
  * @param {number} [opts.max_concurrent=20] — cap concurrent actors
  * @returns {Promise<{ metrics, spawned, completed }>}
  */
-export async function runStress({ actorTemplates, duration_ms, spawn_rate_per_min, max_concurrent = 20 }) {
+export async function runStress({ actorTemplates, duration_ms, spawn_rate_per_min, max_concurrent = 20, abortHook = null }) {
   if (!actorTemplates?.length) throw new Error('runStress: actorTemplates required');
   if (!duration_ms || duration_ms < 1000) throw new Error('runStress: duration_ms required (>= 1s)');
 
@@ -47,18 +47,56 @@ export async function runStress({ actorTemplates, duration_ms, spawn_rate_per_mi
   const active = new Set();
   let templateIdx = 0;
 
+  // KI 46 (NWT N19.102): auto-emergency-stop — 5 abort conditions, invoke rollback on trigger.
+  let aborted = false;
+  let abortReason = null;
+  const consecutiveSampleFails = { count: 0 };
+  const brokerDmLatencies = [];  // populated by abortHook if available
+  async function checkAbort(s) {
+    const conds = [];
+    // 1. actor fail rate > 70%
+    if (metrics.actors_spawned > 5 && metrics.actors_failed / metrics.actors_spawned > 0.7) {
+      conds.push(`actor_fail_rate ${(metrics.actors_failed / metrics.actors_spawned * 100).toFixed(0)}%`);
+    }
+    // 2. K-pool drain > 1000 KAS early warning
+    if (pre.k_pool != null && s.k_pool != null && (pre.k_pool - s.k_pool) > 1000) {
+      conds.push(`k_pool_drain ${pre.k_pool - s.k_pool} KAS`);
+    }
+    // 3. hedge_skipped > 0 (circuit trip)
+    if (pre.hedge_skipped != null && s.hedge_skipped > pre.hedge_skipped) {
+      conds.push(`hedge_skipped +${s.hedge_skipped - pre.hedge_skipped}`);
+    }
+    // 4. Console crash (5 consecutive sample fail)
+    if (consecutiveSampleFails.count >= 5) {
+      conds.push(`5_consecutive_sample_fail (console_crash)`);
+    }
+    // 5. broker DM stuck (5 consecutive > 60s)
+    if (brokerDmLatencies.length >= 5 && brokerDmLatencies.slice(-5).every(l => l > 60_000)) {
+      conds.push(`broker_dm_stuck (5 cycles > 60s)`);
+    }
+    if (conds.length > 0) {
+      aborted = true;
+      abortReason = conds.join('; ');
+      console.error(`[stress-harness] ABORT TRIGGER: ${abortReason}`);
+      if (abortHook) try { await abortHook({ reason: abortReason, metrics }); } catch {}
+    }
+  }
+
   // Metric sampler (every 60s)
-  const sampleTimer = setInterval(() => {
+  const sampleTimer = setInterval(async () => {
     try {
       const s = collectMetrics(db, startIso);
       metrics.samples.push({ ts_iso: new Date().toISOString(), phase: 'sample', ...s });
+      consecutiveSampleFails.count = 0;
+      await checkAbort(s);
     } catch (err) {
       metrics.samples.push({ ts_iso: new Date().toISOString(), phase: 'sample_err', error: err.message });
+      consecutiveSampleFails.count++;
     }
   }, 60_000);
 
   // Spawn loop
-  while (Date.now() < deadline) {
+  while (Date.now() < deadline && !aborted) {
     if (active.size < max_concurrent) {
       const tmpl = actorTemplates[templateIdx % actorTemplates.length];
       templateIdx++;
@@ -98,6 +136,8 @@ export async function runStress({ actorTemplates, duration_ms, spawn_rate_per_mi
     hedge_skipped_delta: post.hedge_skipped - pre.hedge_skipped,
     offers_completed_delta: post.offers_completed - pre.offers_completed,
   };
+  metrics.aborted = aborted;
+  metrics.abort_reason = abortReason;
   db.close();
 
   return metrics;
