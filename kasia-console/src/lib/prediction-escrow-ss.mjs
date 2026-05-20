@@ -70,6 +70,9 @@ function intExpr(n) {
  * Compute PredictionEscrowUnanimous5 P2SH addr + redeem script for given ctor args.
  * Per-offer compile via silverc.exe shellout (Path α, Bettor r230 钦定).
  *
+ * v3 (Bettor r233): 13 ctor params 加 makerStakeAmount + takerStakeAmount (= 真 P2P 双锁).
+ * 3 entrypoints: settle (5 oracle unanimous), refund_both (双方各回 stake), refund_maker_unjoined (= taker 未 join 单边 refund).
+ *
  * @returns {{ p2shAddr: string, redeemScript: string, cacheHit: boolean }}
  */
 export async function computeEscrowP2SH(args) {
@@ -86,9 +89,12 @@ export async function computeEscrowP2SH(args) {
   const deadline = validateInt(args.deadline, 'deadline', 1);
   const minerFee = validateInt(args.minerFee, 'minerFee', 0, 10_000_000);
   const brokerFeePct = validateInt(args.brokerFeePct, 'brokerFeePct', 0, 9999);  // < 10000 防 force refund
+  // v3 加: 双 stake sompi int (= 真 P2P, 必 > 0)
+  const makerStakeAmount = validateInt(args.makerStakeAmount, 'makerStakeAmount', 1);
+  const takerStakeAmount = validateInt(args.takerStakeAmount, 'takerStakeAmount', 1);
   if (!args.network) throw new Error('network required');
 
-  // Build ctor JSON (= silverc CLI 接 format)
+  // Build ctor JSON (= silverc CLI 接 format, 13 params 顺序 align .sil v3 signature)
   const ctorJson = [
     bytes32Expr(makerPk),
     bytes32Expr(takerPk),
@@ -97,6 +103,8 @@ export async function computeEscrowP2SH(args) {
     intExpr(deadline),
     intExpr(minerFee),
     intExpr(brokerFeePct),
+    intExpr(makerStakeAmount),
+    intExpr(takerStakeAmount),
   ];
   const ctorJsonStr = JSON.stringify(ctorJson);
 

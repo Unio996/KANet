@@ -33,6 +33,10 @@ const VALID_TRANSITIONS = {
   verified:                 ['delivering', 'disputed', 'timed_out', 'refunded'], // delivery retry or manual intervention
   awaiting_manual_confirm:  ['completed', 'disputed', 'timed_out', 'refunded'],
   awaiting_oracle:          ['completed', 'failed', 'timed_out', 'refunded'],
+  // Phase 4a E pre-handshake states (Bettor r232/r233):
+  pending_taker:            ['handshake_done', 'cancelled', 'expired'],  // step 1 → step 2 OR maker abort OR handshake timeout
+  handshake_done:           ['open_awaiting_taker_stake', 'cancelled', 'expired'],  // step 2 → step 3 OR maker abort
+  open_awaiting_taker_stake:['matched', 'refunded', 'expired', 'timed_out'],  // step 3 → step 4 OR maker refund unjoined
 };
 
 // Terminal states — no further transitions allowed

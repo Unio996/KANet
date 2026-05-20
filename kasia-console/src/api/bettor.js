@@ -1327,14 +1327,24 @@ export async function registerBettorRoutes(fastify) {
       });
     } catch (e) { return reply.code(500).send({ ok: false, error: `pubkey derive fail: ${e.message}` });}
 
-    // takerPk: 0x00..00 placeholder (= unknown at publish, accept 时填入 OR Phase 4a single-PK 用 makerPk 占位)
-    // Bettor r225 6 守 #4 'maker ≠ taker' 在 accept endpoint 验, 此处 contract ctor 必须填 taker pubkey but unknown.
-    // 暂用 makerPk 占位 → accept 时若 taker ≠ maker, 必 re-compile + new P2SH addr → 不可行 (= immutable contract).
-    // 决: Phase 4a v0 takerPk = pre-determined OR maker 自双锁 (= taker join 后 compose 第二 SS contract).
-    // 实用化: Phase 4a v0 接受 takerPk = makerPk placeholder, SS settle 时 winner=1 means makerPk wins (= 等价 maker won),
-    // 这个 simplification 是 Phase 4a MVP, Phase 4a v1 升级 to 真 taker 自由 join (= 待 spec discussion w/ Bettor).
-    // 标 takerPk = makerPk + 留 metadata.taker_unbound=1 (= UI 显 "等 taker 接 (= 但 Phase 4a v0 简化)").
-    const takerPk = makerPk;
+    // E pre-handshake (Bettor r232 reject D + r233 .sil v3): takerPk 从 pending_taker_pubkey 真值取.
+    // pending-offer + taker-handshake 必先 done, publish-v2 才能用真 takerPk compile SS contract.
+    // (Sub 4 revision 2026-05-20 r233 — D maker-self-bet simplification 失 P2P 经济意义 reject.)
+    if (!b.pending_offer_id) {
+      return reply.code(400).send({ ok: false, error: 'pending_offer_id required (= must POST /api/prediction/pending-offer + /api/prediction/taker-handshake first, E pre-handshake flow)' });
+    }
+    const pendingOffer = sqlite.prepare(`SELECT id, pending_taker_pubkey, pending_handshake_expires_at, protocol_status FROM exchange_offers WHERE id = ?`).get(b.pending_offer_id);
+    if (!pendingOffer) return reply.code(404).send({ ok: false, error: `pending offer ${b.pending_offer_id} not found` });
+    if (pendingOffer.protocol_status !== 'handshake_done') {
+      return reply.code(409).send({ ok: false, error: `pending offer status=${pendingOffer.protocol_status}, must be handshake_done (= taker handshake required)` });
+    }
+    if (!pendingOffer.pending_taker_pubkey || pendingOffer.pending_taker_pubkey.length !== 64) {
+      return reply.code(400).send({ ok: false, error: 'pending offer missing valid pending_taker_pubkey' });
+    }
+    if (pendingOffer.pending_handshake_expires_at && new Date(pendingOffer.pending_handshake_expires_at).getTime() < Date.now()) {
+      return reply.code(410).send({ ok: false, error: `handshake expired at ${pendingOffer.pending_handshake_expires_at}, re-handshake required` });
+    }
+    const takerPk = pendingOffer.pending_taker_pubkey;
 
     // Compile SS contract per-offer + P2SH addr
     const price = parseFloat(b.price);
@@ -1358,12 +1368,19 @@ export async function registerBettorRoutes(fastify) {
     const minerFee = parseInt(b.miner_fee, 10) || 10_000;  // 0.0001 KAS default
     const deadline = Math.floor(outcomeEndMs / 1000);
 
+    // v3 双 stake: makerStakeAmount + takerStakeAmount (= 真 P2P, Bettor r233).
+    // Phase 4a v0 简化: taker_stake_amount = maker_stake_amount (= 1:1 双方 同等 stake).
+    // Phase 4b 经济模型加 odds-weighted stake (= maker stake based on price, taker stake based on (1-price)).
+    const stakeKasSompi = Math.floor(stakeKas * 1e8);  // sompi int
+
     const { computeEscrowP2SH } = await import('../lib/prediction-escrow-ss.mjs');
     let escrow;
     try {
       escrow = await computeEscrowP2SH({
         makerPk, takerPk, brokerPk, oraclePks,
         deadline, minerFee, brokerFeePct,
+        makerStakeAmount: stakeKasSompi,
+        takerStakeAmount: stakeKasSompi,  // Phase 4a v0 简化: 1:1
         network: makerRow.address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet',
       });
     } catch (e) {
@@ -1394,44 +1411,185 @@ export async function registerBettorRoutes(fastify) {
       escrow_lock_tx: escrowTxId,
       escrow_p2sh: escrow.p2shAddr,
       redeem_script_hex: escrow.redeemScript,
-      stake_locked_kas: stakeKas,
+      maker_stake_locked_kas: stakeKas,
+      maker_stake_sompi: stakeKasSompi,
+      taker_stake_sompi: stakeKasSompi,
       kas_usd_at_publish: kasUsd,
       miner_fee_sompi: minerFee,
       broker_fee_pct: brokerFeePct,
-      taker_unbound: 1,  // Phase 4a v0 simplification flag
-      phase_4a_v0: 1,
+      broker_relay_id: b.broker_relay_id,
+      phase: '4a-E',
     });
+    // UPDATE the pending offer in place (= 不新 INSERT, 复用 pending_offer_id).
+    // protocol_status 走 transition() 单一所有权 (= [ABE-A.6] lint enforce).
     try {
-      sqlite.prepare(`INSERT INTO exchange_offers (
-        id, broadcast_tx_id, message_index, give_asset, give_amount, want_asset, want_amount,
-        maker, verification, protocol_status, taker_locked,
-        market_key, expires_at, created_at, updated_at,
-        outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side,
-        outcome_end_date, outcome_oracle_hook, outcome_max_deviation_pp,
-        published_price, maker_kaspa_addr, maker_relay_id, metadata,
-        outcome_oracle_relay_ids, resolution_rule_spec,
-        escrow_p2sh
-      ) VALUES (?, ?, 0, 'prediction_outcome_share', ?, 'KAS', ?, ?, 'kanet_native_ss', 'open', 0, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(offerId, escrowTxId, numShares.toFixed(8), sizeKas.toFixed(8), makerRow.address,
-             `${b.outcome_condition_id}:${b.outcome_side}`, expiresAt,
-             b.outcome_market_source, b.outcome_condition_id, b.outcome_token_id, b.outcome_side,
-             b.outcome_end_date, b.outcome_oracle_hook || 'kanet_ai_consensus_v1', 5,
-             price, makerRow.address, b.maker_relay_id, metadata,
-             JSON.stringify(oracleRelayIds), b.resolution_rule_spec, escrow.p2shAddr);
+      // Step 1: 非 status 列 直 UPDATE
+      sqlite.prepare(`UPDATE exchange_offers SET
+        broadcast_tx_id=?, give_asset='prediction_outcome_share', give_amount=?, want_asset='KAS', want_amount=?,
+        verification='kanet_native_ss',
+        outcome_market_source=?, outcome_condition_id=?, outcome_token_id=?, outcome_side=?,
+        outcome_end_date=?, outcome_oracle_hook=?, outcome_max_deviation_pp=5,
+        published_price=?, maker_kaspa_addr=?, maker_relay_id=?, metadata=?,
+        outcome_oracle_relay_ids=?, resolution_rule_spec=?,
+        escrow_p2sh=?, expires_at=?, updated_at=CURRENT_TIMESTAMP
+        WHERE id=?
+      `).run(
+        escrowTxId, numShares.toFixed(8), sizeKas.toFixed(8),
+        b.outcome_market_source, b.outcome_condition_id, b.outcome_token_id, b.outcome_side,
+        b.outcome_end_date, b.outcome_oracle_hook || 'kanet_ai_consensus_v1',
+        price, makerRow.address, b.maker_relay_id, metadata,
+        JSON.stringify(oracleRelayIds), b.resolution_rule_spec, escrow.p2shAddr, expiresAt,
+        b.pending_offer_id
+      );
+      // Step 2: protocol_status handshake_done → open_awaiting_taker_stake via transition()
+      const { transition } = await import('../services/exchange-machine.js');
+      transition(b.pending_offer_id, 'open_awaiting_taker_stake');
     } catch (e) {
-      console.error(`[prediction-publish-v2] DB insert fail: ${e.message}`);
-      return reply.code(500).send({ ok: false, error: `DB insert fail (escrow chain TX done ${escrowTxId}): ${e.message}` });
+      console.error(`[prediction-publish-v2] DB update fail: ${e.message}`);
+      return reply.code(500).send({ ok: false, error: `DB update fail (escrow chain TX done ${escrowTxId}): ${e.message}` });
     }
 
     return reply.send({
       ok: true,
-      offer_id: offerId,
+      offer_id: b.pending_offer_id,
       shares: numShares,
-      stake_locked_kas: stakeKas,
+      maker_stake_locked_kas: stakeKas,
+      taker_stake_required_kas: stakeKas,
       escrow_p2sh: escrow.p2shAddr,
-      escrow_lock_tx: escrowTxId,
+      maker_escrow_lock_tx: escrowTxId,
       expires_at: expiresAt,
-      phase: '4a-v0',
+      next_step: `POST /api/prediction/taker-stake/${b.pending_offer_id} (= taker 转 ${stakeKas.toFixed(8)} KAS to ${escrow.p2shAddr})`,
+      phase: '4a-E',
+    });
+  });
+
+  // POST /api/prediction/pending-offer — maker draft (= E pre-handshake step 1, 链下, 不上链).
+  // Sub 4 revision Bettor r232/r233.
+  fastify.post('/api/prediction/pending-offer', async (request, reply) => {
+    const b = request.body || {};
+    if (!b.maker_relay_id) return reply.code(400).send({ ok: false, error: 'missing maker_relay_id' });
+    const handshakeMins = Math.max(5, Math.min(60, parseInt(b.handshake_minutes, 10) || 30));
+    const handshakeExpiresAt = new Date(Date.now() + handshakeMins * 60_000).toISOString();
+    const id = 'ext-pred-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+    const draftMeta = JSON.stringify({
+      proposed_market_question: b.market_question || null,
+      proposed_odds: b.odds || null,
+      proposed_size_kas: b.size_kas || null,
+      proposed_outcome_side: b.outcome_side || null,
+      proposed_oracle_relay_ids: b.outcome_oracle_relay_ids || null,
+      proposed_broker_relay_id: b.broker_relay_id || null,
+      proposed_resolution_rule_spec: b.resolution_rule_spec || null,
+      phase: '4a-E-pending',
+    });
+    try {
+      sqlite.prepare(`INSERT INTO exchange_offers (
+        id, broadcast_tx_id, message_index, give_asset, give_amount, want_asset, want_amount,
+        maker, verification, protocol_status, taker_locked, market_key, expires_at,
+        created_at, updated_at, maker_relay_id, metadata, pending_handshake_expires_at
+      ) VALUES (?, ?, 0, 'prediction_outcome_share', '0', 'KAS', '0', ?, 'pending_handshake', 'pending_taker', 0, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?)
+      `).run(id, 'pending-draft-' + id.slice(-8), b.maker_relay_id, `pending:${id}`, handshakeExpiresAt, b.maker_relay_id, draftMeta, handshakeExpiresAt);
+    } catch (e) {
+      return reply.code(500).send({ ok: false, error: `pending-offer insert fail: ${e.message}` });
+    }
+    return reply.send({ ok: true, pending_offer_id: id, handshake_expires_at: handshakeExpiresAt, next_step: `taker 发现 → POST /api/prediction/taker-handshake/${id}` });
+  });
+
+  // POST /api/prediction/taker-handshake/:offer_id — taker 自调, provides taker_kaspa_addr → derive pubkey.
+  // E pre-handshake step 2.
+  fastify.post('/api/prediction/taker-handshake/:offer_id', async (request, reply) => {
+    const offerId = request.params.offer_id;
+    const b = request.body || {};
+    if (!b.taker_kaspa_addr) return reply.code(400).send({ ok: false, error: 'missing taker_kaspa_addr' });
+    const offer = sqlite.prepare(`SELECT id, maker_relay_id, protocol_status, pending_handshake_expires_at FROM exchange_offers WHERE id = ?`).get(offerId);
+    if (!offer) return reply.code(404).send({ ok: false, error: 'pending offer not found' });
+    if (offer.protocol_status !== 'pending_taker') {
+      return reply.code(409).send({ ok: false, error: `offer status=${offer.protocol_status}, not pending_taker` });
+    }
+    if (new Date(offer.pending_handshake_expires_at).getTime() < Date.now()) {
+      return reply.code(410).send({ ok: false, error: 'handshake expired' });
+    }
+    // Derive taker x-only pubkey from kaspa addr
+    const kaspa = await import('kaspa-wasm');
+    let takerPk;
+    try {
+      takerPk = kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(b.taker_kaspa_addr)).toString();
+    } catch (e) {
+      return reply.code(400).send({ ok: false, error: `taker_kaspa_addr invalid: ${e.message}` });
+    }
+    try {
+      // 非 status cols 直 UPDATE
+      sqlite.prepare(`UPDATE exchange_offers SET pending_taker_pubkey=?, taker=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+        .run(takerPk, b.taker_kaspa_addr, offerId);
+      // protocol_status 走 transition() (= [ABE-A.6] 单一所有权)
+      const { transition } = await import('../services/exchange-machine.js');
+      transition(offerId, 'handshake_done');
+    } catch (e) {
+      return reply.code(500).send({ ok: false, error: `handshake update fail: ${e.message}` });
+    }
+    return reply.send({ ok: true, offer_id: offerId, taker_pubkey: takerPk, next_step: `maker POST /api/prediction/publish-v2 with pending_offer_id=${offerId}` });
+  });
+
+  // POST /api/prediction/taker-stake/:offer_id — taker funds SS P2SH escrow (= E step 4, 触发 matched).
+  fastify.post('/api/prediction/taker-stake/:offer_id', async (request, reply) => {
+    const offerId = request.params.offer_id;
+    const b = request.body || {};
+    if (!b.taker_relay_id) return reply.code(400).send({ ok: false, error: 'missing taker_relay_id (= 用 taker 自己 relay 转账)' });
+    const offer = sqlite.prepare(`SELECT id, escrow_p2sh, protocol_status, taker, pending_taker_pubkey, metadata FROM exchange_offers WHERE id = ?`).get(offerId);
+    if (!offer) return reply.code(404).send({ ok: false, error: 'offer not found' });
+    if (offer.protocol_status !== 'open_awaiting_taker_stake') {
+      return reply.code(409).send({ ok: false, error: `offer status=${offer.protocol_status}, not open_awaiting_taker_stake (= maker must publish-v2 first)` });
+    }
+    // Verify taker relay matches pending_taker_pubkey
+    const takerRow = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id = ?`).get(b.taker_relay_id);
+    if (!takerRow?.address) return reply.code(400).send({ ok: false, error: 'taker_relay_id has no resolvable kaspa address' });
+    const kaspa = await import('kaspa-wasm');
+    let takerPkActual;
+    try { takerPkActual = kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(takerRow.address)).toString(); }
+    catch (e) { return reply.code(400).send({ ok: false, error: `taker address derive pubkey fail: ${e.message}` }); }
+    if (takerPkActual !== offer.pending_taker_pubkey) {
+      return reply.code(403).send({ ok: false, error: 'taker_relay_id pubkey ≠ pending_taker_pubkey (= 不是 handshake 时的 taker)' });
+    }
+    // Look up taker stake amount from metadata
+    let stakeKas;
+    try { stakeKas = JSON.parse(offer.metadata).maker_stake_locked_kas; } catch {}
+    if (!Number.isFinite(stakeKas) || stakeKas <= 0) return reply.code(500).send({ ok: false, error: 'offer metadata.maker_stake_locked_kas missing/invalid' });
+
+    // Taker transfer stake → same SS P2SH addr
+    const { sendCommandAsync } = await import('../services/relay-manager.js');
+    let takerEscrowTxId = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const r = await sendCommandAsync(b.taker_relay_id, { type: 'transfer', target: offer.escrow_p2sh, amount: stakeKas.toFixed(8) });
+        takerEscrowTxId = r?.txId || null;
+        if (takerEscrowTxId) break;
+        if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 5000));
+      } catch (err) {
+        console.log(`[prediction-taker-stake] attempt ${attempt}/3 fail: ${err.message}`);
+        if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 5000));
+      }
+    }
+    if (!takerEscrowTxId) return reply.code(503).send({ ok: false, error: `taker escrow lock chain TX failed after 3 attempts, P2SH=${offer.escrow_p2sh}` });
+
+    try {
+      // 非 status cols 直 UPDATE
+      sqlite.prepare(`UPDATE exchange_offers SET
+        taker_stake_locked_kas=?, taker_escrow_lock_tx=?, taker=?, matched_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
+        WHERE id=?
+      `).run(stakeKas, takerEscrowTxId, takerRow.address, offerId);
+      // protocol_status 走 transition() (= [ABE-A.6] 单一所有权)
+      const { transition } = await import('../services/exchange-machine.js');
+      transition(offerId, 'matched');
+    } catch (e) {
+      console.error(`[prediction-taker-stake] DB update fail (chain TX done ${takerEscrowTxId}): ${e.message}`);
+      return reply.code(500).send({ ok: false, error: `DB update fail (chain TX done): ${e.message}` });
+    }
+    return reply.send({
+      ok: true,
+      offer_id: offerId,
+      taker_stake_locked_kas: stakeKas,
+      taker_escrow_lock_tx: takerEscrowTxId,
+      status: 'matched',
+      next_step: 'voter cron 5 min tick scans offer, oracle vote → DM → maker collect 5-of-5 unanimous → settle TX',
     });
   });
 
