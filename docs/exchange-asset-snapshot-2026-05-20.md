@@ -1,6 +1,6 @@
 # KANet Exchange Asset Snapshot — 2026-05-20
 
-**Generated**: 2026-05-20T05:21:54.262Z
+**Generated**: 2026-05-20T05:28:12.499Z
 **Scope**: 7 agent × 10 chain × 5 CEX + hedge lifetime + 24h flow + 7-day trend + capability matrix
 **Phase**: 5-1 (NWT N19.66 spec, J2 ship)
 **Status**: first cut — NWT review pending
@@ -13,8 +13,8 @@
 | Bettor | 1.788 | — | — | 0 | — | — | — | — | — | — |
 | J2 | 26.682 | 12.884 | — | 0.100 | 0 | — | — | — | — | — |
 | KANet | 4.419 | — | — | — | — | — | — | — | — | — |
-| NWT | 286.234 | 37.760 | — | — | — | — | — | — | — | — |
-| Opus | — | — | — | — | — | — | — | — | — | — |
+| NWT | 286.233 | 37.760 | — | — | — | — | — | — | — | — |
+| Opus | _coord relay no wallets_ | — | — | — | — | — | — | — | — | — |
 | Qclaude | 0.843 | — | — | — | — | — | — | — | — | — |
 | Trader-A | 7.472 | 1.165 | 0 | 1.899 | 1.949 | 0 | 0.949 | 0 | 0 | 0 |
 | Trader-B | 21301.811 | 448.828 | 0 | 14.093 | 14.043 | 0 | 14.043 | 0 | 0 | 0 |
@@ -24,23 +24,23 @@
 
 | Exchange | Label | Default | Auto-trade | Auto-withdraw | KAS/USDT min order |
 |---|---|---|---|---|---|
-| bitget | Bitget Main |  | ✓ | ✗ 手动 | TBD |
-| bybit | Bybit Main | ✓ | ✓ | ✗ 手动 (Owner) | 5 USDT |
-| gateio | Gate Main |  | ✓ | ✓ API | TBD |
-| kucoin | KuCoin Main |  | ✓ | ✗ 手动 | TBD |
-| mexc | MEXC Main |  | ✓ | ✗ 手动 | TBD |
+| bitget | Bitget Main |  | ✓ | ✗ 手动 | $1 USDT (minTradeUSDT) |
+| bybit | Bybit Main | ✓ | ✓ | ✗ 手动 (Owner) | $5 USDT (instrumentInfo minOrderAmt) |
+| gateio | Gate Main |  | ✓ | ✓ API | $3 USDT (min_quote_amount) |
+| kucoin | KuCoin Main |  | ✓ | ✗ 手动 | $0.10 USDT (minFunds — 最低) |
+| mexc | MEXC Main |  | ✓ | ✗ 手动 | ~$1 USDT (默认 spot) |
 
 ## Sec 3 — 24h chain_events 流量
 
 | event_type | count |
 |---|---|
-| comm | 13813 |
-| kanet_cross_match_tick_v1 | 2312 |
+| comm | 13810 |
+| kanet_cross_match_tick_v1 | 2316 |
 | text | 1930 |
-| tx | 916 |
-| treasury_alert | 530 |
+| tx | 917 |
+| treasury_alert | 528 |
 | autotake_skip | 90 |
-| broker_kas_refunded | 20 |
+| broker_kas_refunded | 21 |
 | handshake | 10 |
 | broker_chunk_filled | 9 |
 | exchange_completed | 9 |
@@ -62,7 +62,7 @@
 |---|---|
 | cancelled | 4 |
 | completed | 9 |
-| expired | 124 |
+| expired | 125 |
 | open | 1 |
 
 ### hedge lifetime (all time)
@@ -90,10 +90,12 @@
 | 维度 | 余 | cycle / day max |
 |---|---|---|
 | KAS-bound (broker) | 21302 KAS | 106 |
-| USDT-bound (BSC) | TBD | TBD |
-| Bybit risk limit | TBD | TBD |
+| USDT-bound (BSC) | \$448.83 USDT | 66 |
+| Bybit risk limit | TBD (查 Bybit account API) | TBD |
 
-**实测今天**: cycle rate sub-1/day (28 KAS/day drain → 750 day runway 实际值). 重度压测目标 10k cycle → 当前 K-pool 撞死.
+**Bottleneck**: USDT-bound 是 current limit (66 < 106 KAS-bound) at qty=200.
+
+**实测 24h (NWT N19.67 Fix #3 校准)**: 9 exchange_completed (含今早 hedge test burst 集中 5h 窗内 ~2 cycle/h) + idle baseline ~0. 重度压测目标 10k cycle → 当前 K-pool + USDT-pool 都撞死.
 
 ## Sec 7 — Alarm Threshold Propose (NWT review)
 

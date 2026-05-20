@@ -47,6 +47,12 @@ sec1.push('| Agent | KAS | BSC USDT | ETH USDT | Polygon | Arbitrum | Base | Opt
 sec1.push('|-------|-----|----------|----------|---------|----------|------|----------|-----------|-----|------|');
 
 for (const r of relays) {
+  // NWT N19.67 Fix #4: Opus = coordination relay, no wallets
+  if (r.name === 'Opus' && !r.address) {
+    sec1.push(`| ${r.name} | _coord relay no wallets_ | — | — | — | — | — | — | — | — | — |`);
+    console.log(' ', r.name, '(coord relay, skipped)');
+    continue;
+  }
   const row = [r.name];
   const kasBal = await fetchKasBalance(r.id);
   row.push(kasBal?.toString() ?? '—');
@@ -69,12 +75,13 @@ const sec2 = [];
 sec2.push('\n## Sec 2 — 5 CEX 账户清单\n');
 sec2.push('| Exchange | Label | Default | Auto-trade | Auto-withdraw | KAS/USDT min order |');
 sec2.push('|---|---|---|---|---|---|');
+// NWT N19.67 Fix #1: API verify min order from N19.61
 const cexCap = {
-  bybit:   { autoT: '✓', autoW: '✗ 手动 (Owner)', minAmt: '5 USDT' },
-  mexc:    { autoT: '✓', autoW: '✗ 手动',         minAmt: 'TBD' },
-  gateio:  { autoT: '✓', autoW: '✓ API',          minAmt: 'TBD' },
-  bitget:  { autoT: '✓', autoW: '✗ 手动',         minAmt: 'TBD' },
-  kucoin:  { autoT: '✓', autoW: '✗ 手动',         minAmt: 'TBD' },
+  bybit:   { autoT: '✓', autoW: '✗ 手动 (Owner)', minAmt: '$5 USDT (instrumentInfo minOrderAmt)' },
+  mexc:    { autoT: '✓', autoW: '✗ 手动',         minAmt: '~$1 USDT (默认 spot)' },
+  gateio:  { autoT: '✓', autoW: '✓ API',          minAmt: '$3 USDT (min_quote_amount)' },
+  bitget:  { autoT: '✓', autoW: '✗ 手动',         minAmt: '$1 USDT (minTradeUSDT)' },
+  kucoin:  { autoT: '✓', autoW: '✗ 手动',         minAmt: '$0.10 USDT (minFunds — 最低)' },
 };
 for (const x of exc) {
   const c = cexCap[x.exchange] || { autoT: '?', autoW: '?', minAmt: '?' };
@@ -142,11 +149,17 @@ sec6.push('');
 sec6.push('| 维度 | 余 | cycle / day max |');
 sec6.push('|---|---|---|');
 const kasPool = await fetchKasBalance(broker.id);
+const brokerEvm = await fetchAllWallets(broker.id);
+const bscUsdt = brokerEvm.bnb?.usdt ?? 0;
+const usdtCycles = Math.floor(bscUsdt / 6.74);
 sec6.push(`| KAS-bound (broker) | ${kasPool?.toFixed(0) ?? '?'} KAS | ${kasPool ? Math.floor(kasPool/200) : '?'} |`);
-sec6.push('| USDT-bound (BSC) | TBD | TBD |');
-sec6.push('| Bybit risk limit | TBD | TBD |');
+sec6.push(`| USDT-bound (BSC) | \\$${bscUsdt.toFixed(2)} USDT | ${usdtCycles} |`);
+sec6.push('| Bybit risk limit | TBD (查 Bybit account API) | TBD |');
 sec6.push('');
-sec6.push('**实测今天**: cycle rate sub-1/day (28 KAS/day drain → 750 day runway 实际值). 重度压测目标 10k cycle → 当前 K-pool 撞死.');
+// NWT N19.67 Fix #3: 校准 burst vs idle
+sec6.push('**Bottleneck**: USDT-bound 是 current limit (' + usdtCycles + ' < 106 KAS-bound) at qty=200.');
+sec6.push('');
+sec6.push('**实测 24h (NWT N19.67 Fix #3 校准)**: 9 exchange_completed (含今早 hedge test burst 集中 5h 窗内 ~2 cycle/h) + idle baseline ~0. 重度压测目标 10k cycle → 当前 K-pool + USDT-pool 都撞死.');
 
 const sec7 = [
   '\n## Sec 7 — Alarm Threshold Propose (NWT review)\n',
