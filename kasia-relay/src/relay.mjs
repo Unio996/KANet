@@ -556,6 +556,51 @@ if (process.send) {
           return;
         }
 
+        case 'prediction_settle_tx': {
+          // Phase 4a Sub 8 step 3 (Bettor r242) — settle SS chain TX submit (= branch 0).
+          //   Inputs: 2 P2SH UTXOs (maker_stake + taker_stake)
+          //   Outputs: 2 (winner P2PK + broker P2PK)
+          //   sigsByInput: [[sig1..sig5 for input 0], [sig1..sig5 for input 1]]
+          //   winner: 0 (maker won) | 1 (taker won)
+          // 复用 p2sh.mjs unlockP2SHMultiSig.
+          const { unlockP2SHMultiSig } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const redeemScript = new Uint8Array(Buffer.from(cmd.redeem_script_hex, 'hex'));
+          const r = await unlockP2SHMultiSig(
+            cmd.p2sh_address, redeemScript,
+            cmd.required_input_outpoints,  // [{outpointTxid, outpointIndex}, {...}]
+            cmd.outputs,                    // [{address, amountSompi}, {...}]
+            cmd.sigs_by_input,              // [[5 sigs for input 0], [5 sigs for input 1]]
+            cmd.winner,                     // 0|1
+            wallet.getNetworkId(),
+            0n,
+          );
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: { ok: true, branch: 0, txId: r.txId } });
+          }
+          return;
+        }
+
+        case 'prediction_settle_build_preimage': {
+          // Phase 4a Sub 8 step 4 (Bettor r242) — maker_relay builds unsigned TX for Phase 2 DM dispatch.
+          // Returns tx_obj that voters use as input to sign_input_for_settle IPC.
+          const { buildSettleTxPreimage } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await buildSettleTxPreimage(
+            cmd.p2sh_address,
+            cmd.required_input_outpoints,
+            cmd.outputs,
+            wallet.getNetworkId(),
+            0n,
+          );
+          // Serialize BigInt → string for IPC pass-through (Q1 C fallback per r242 note)
+          const txObjForIpc = JSON.parse(JSON.stringify(r.txObj, (_k, v) => typeof v === 'bigint' ? v.toString() : v));
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: { ok: true, tx_obj: txObjForIpc, input_count: r.inputCount } });
+          }
+          return;
+        }
+
         case 'prediction_refund_tx': {
           // Phase 4a Sub 9 — build + sign + submit SS refund TX (= maker single sig).
           //   branch 1 (refund_both): 2 inputs (maker_stake + taker_stake) → 2 outputs (maker + taker refund)

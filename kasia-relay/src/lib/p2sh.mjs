@@ -235,6 +235,156 @@ export async function unlockP2SH(wallet, p2shAddress, redeemScript, branch, toAd
   }
 }
 
+// ── 5. unlockP2SHMultiSig (Phase 4a Sub 8 NEW, Bettor r242 adapt) ──
+
+/**
+ * Unlock P2SH UTXOs with multi-sig settle (= PredictionEscrowUnanimous5 settle pattern).
+ * 2 inputs (= maker_stake + taker_stake) + 2 outputs (= winner P2PK + broker P2PK).
+ * Pre-collected ECDSA sigs (= 5 oracle sigs per input via Phase 2 DM round trip).
+ *
+ * sigData per input scriptSig: [sig1+0x01][sig2+0x01]...[sig5+0x01][winner_byte][selector OP_0][redeem]
+ *   - winner_byte: OP_0 for YES (winner=0), OP_1 for NO (winner=1)
+ *   - selector: OP_0 (= settle entrypoint, branch=0)
+ *
+ * @param {string} p2shAddress
+ * @param {Uint8Array} redeemScript
+ * @param {Array<{outpointTxid: string, outpointIndex: number}>} requiredInputOutpoints — 2 outpoints
+ * @param {Array<{address: string, amountSompi: bigint|string}>} outputs — 2 outputs
+ * @param {Array<Array<string>>} sigsByInput — sigsByInput[i] = 5 oracle sigs hex for input i (= 10 sigs total for 2 inputs)
+ * @param {number} winner — 0 (maker won) | 1 (taker won)
+ * @param {string} networkId — 'testnet-12'
+ * @param {bigint} [lockTime=0]
+ * @returns {Promise<{ txId: string }>}
+ */
+export async function unlockP2SHMultiSig(p2shAddress, redeemScript, requiredInputOutpoints, outputs, sigsByInput, winner, networkId, lockTime = 0n) {
+  if (requiredInputOutpoints.length !== 2) throw new Error(`unlockP2SHMultiSig requires 2 outpoints, got ${requiredInputOutpoints.length}`);
+  if (outputs.length !== 2) throw new Error(`unlockP2SHMultiSig requires 2 outputs, got ${outputs.length}`);
+  if (sigsByInput.length !== 2) throw new Error(`sigsByInput must be 2 arrays (one per input), got ${sigsByInput.length}`);
+  if (sigsByInput.some(arr => arr.length !== 5)) throw new Error(`each input requires 5 oracle sigs (= unanimous)`);
+  if (winner !== 0 && winner !== 1) throw new Error(`winner must be 0 (maker) or 1 (taker), got ${winner}`);
+
+  const txLockTime = BigInt(lockTime);
+  const rpc = await connectRpc(networkId);
+  try {
+    const { entries } = await rpc.getUtxosByAddresses([p2shAddress]);
+    if (!entries?.length) throw new Error(`No UTXOs at P2SH ${p2shAddress}`);
+
+    const matched = requiredInputOutpoints.map(req => {
+      const found = entries.find(e =>
+        e.outpoint.transactionId === req.outpointTxid && Number(e.outpoint.index) === Number(req.outpointIndex)
+      );
+      if (!found) throw new Error(`UTXO not found: ${req.outpointTxid}:${req.outpointIndex}`);
+      return found;
+    });
+
+    const txOutputs = outputs.map(o => new TransactionOutput(
+      typeof o.amountSompi === 'string' ? BigInt(o.amountSompi) : o.amountSompi,
+      payToAddressScript(new Address(o.address))
+    ));
+
+    // sigData builder per input — selector OP_0 (= settle, branch=0), winner OP_0/1, 5 sigs with sighashtype byte
+    const winnerOpHex = winner === 0 ? '00' : '51';  // OP_0 / OP_1
+    const selectorOpHex = '00';  // OP_0 settle branch
+    const sighashTypeByte = '01';  // SIGHASH_ALL per Bitcoin/Kaspa convention
+
+    // Assemble scriptSig per input via ScriptBuilder (= concat 5 sig+sighashtype + winner + selector + redeem push)
+    function assembleScriptSig(sigs5) {
+      const sb = new ScriptBuilder();
+      // push 5 sigs with sighashtype byte append (= Bitcoin convention r242 Bettor reminder)
+      for (const sigHex of sigs5) {
+        const sigWithType = sigHex + sighashTypeByte;
+        const sigBytes = hexStrToBytes(sigWithType);
+        sb.addData(sigBytes);
+      }
+      // push winner byte (OP_0 OR OP_1 small int push)
+      sb.addOp(winner === 0 ? 0x00 : 0x51);
+      // push selector (= OP_0 settle)
+      sb.addOp(0x00);
+      // append redeem script as data push at end (= P2SH convention)
+      sb.addData(redeemScript);
+      return sb.toString();
+    }
+
+    const scriptSigs = sigsByInput.map(sigs5 => assembleScriptSig(sigs5));
+
+    const signedTx = new Transaction({
+      version: 0,
+      inputs: matched.map((utxo, i) => ({
+        previousOutpoint: { transactionId: utxo.outpoint.transactionId, index: utxo.outpoint.index },
+        signatureScript: scriptSigs[i],
+        sequence: 0n,
+        sigOpCount: 5,  // 5 oracle checkSig calls in settle entrypoint
+      })),
+      outputs: txOutputs,
+      lockTime: txLockTime,
+      gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000',
+      payload: '',
+    });
+
+    const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: result.transactionId };
+  } finally {
+    try { await rpc.disconnect(); } catch {}
+  }
+}
+
+// Helper: hex string → Uint8Array (small util, reuse if file lacks one)
+function hexStrToBytes(hex) {
+  const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
+  const out = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(clean.substr(i * 2, 2), 16);
+  return out;
+}
+
+/**
+ * Build unsigned settle TX for sighash computation (= Phase 2 dispatch DM payload).
+ * Maker_relay calls this to construct candidate TX whose sighash 5 oracles must sign.
+ *
+ * Returns the Transaction OBJ (= IPC pass tx_obj to oracle voter via sign_input_for_settle).
+ *
+ * @returns {{ txObj: object, sighashInputs: Array<{inputIndex: number, sighashHint: string}> }}
+ */
+export async function buildSettleTxPreimage(p2shAddress, requiredInputOutpoints, outputs, networkId, lockTime = 0n) {
+  const rpc = await connectRpc(networkId);
+  try {
+    const { entries } = await rpc.getUtxosByAddresses([p2shAddress]);
+    if (!entries?.length) throw new Error(`No UTXOs at P2SH ${p2shAddress}`);
+    const matched = requiredInputOutpoints.map(req => {
+      const found = entries.find(e =>
+        e.outpoint.transactionId === req.outpointTxid && Number(e.outpoint.index) === Number(req.outpointIndex)
+      );
+      if (!found) throw new Error(`UTXO not found: ${req.outpointTxid}:${req.outpointIndex}`);
+      return found;
+    });
+    const txOutputs = outputs.map(o => new TransactionOutput(
+      typeof o.amountSompi === 'string' ? BigInt(o.amountSompi) : o.amountSompi,
+      payToAddressScript(new Address(o.address))
+    ));
+    const txObj = {
+      version: 0,
+      inputs: matched.map(utxo => ({
+        previousOutpoint: { transactionId: utxo.outpoint.transactionId, index: utxo.outpoint.index },
+        signatureScript: '',
+        sequence: 0n,
+        sigOpCount: 5,
+        utxo,
+      })),
+      outputs: txOutputs,
+      lockTime: BigInt(lockTime),
+      gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000',
+      payload: '',
+    };
+    return {
+      txObj,
+      inputCount: matched.length,
+    };
+  } finally {
+    try { await rpc.disconnect(); } catch {}
+  }
+}
+
 // ── 4. unlockP2SHDual (Phase 4a Sub 9 NEW, Bettor r240 adapt) ──
 
 /**
