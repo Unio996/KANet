@@ -113,7 +113,20 @@ async function _runSnapshot() {
 
     const FLOOR_USD = parseFloat(await getConfig('broker_treasury_floor_usd') || String(FLOOR_USD_DEFAULT));
     const HIGH_THRESHOLD_USD = parseFloat(await getConfig('broker_treasury_high_usd') || String(HIGH_THRESHOLD_USD_DEFAULT));
+    // Phase 5-2 Sub-1 KI 36 (NWT N19.70): KAS pool alarm (KAS 之前 skip, broker 主 pool 没监控)
+    const KAS_FLOOR = parseFloat(await getConfig('broker_kas_floor') || '5000');
+    const KAS_HIGH = parseFloat(await getConfig('broker_kas_high') || '50000');
     const alerts = [];
+    // KAS pool specific alarm (KAS native, USD scale 不通用)
+    const kasSnap = snapshots.find(s => s.asset === 'KAS' && (s.chain === 'kaspa' || s.chain === 'kaspad'));
+    if (kasSnap) {
+      if (kasSnap.balance_human < KAS_FLOOR) {
+        alerts.push({ type: 'kas_floor', asset: 'KAS', chain: kasSnap.chain, balance: kasSnap.balance_human, threshold: KAS_FLOOR });
+      }
+      if (kasSnap.balance_human > KAS_HIGH) {
+        alerts.push({ type: 'kas_high', asset: 'KAS', chain: kasSnap.chain, balance: kasSnap.balance_human, threshold: KAS_HIGH });
+      }
+    }
     for (const [asset, list] of Object.entries(byAsset)) {
       const low = list.filter(s => s.balance_human < FLOOR_USD && asset !== 'KAS'); // KAS native, different scale
       const high = list.filter(s => s.balance_human > HIGH_THRESHOLD_USD && asset !== 'KAS');

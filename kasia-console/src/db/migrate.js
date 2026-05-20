@@ -4148,5 +4148,20 @@ export function runMigrations() {
     if (seeded > 0) console.log(`[migrate] v126: seeded ${seeded} hedge-router knobs (Phase 5-2.5 KI 35).`);
   }
 
+  // v127: Phase 5-2 Sub-1 KI 36 KAS pool alarm knobs (NWT N19.70 spec, J2 ship)
+  {
+    const exists = sqlite.prepare("SELECT key FROM config_entries WHERE key=?");
+    const ins = sqlite.prepare("INSERT INTO config_entries (key, value) VALUES (?, ?)");
+    const seeds = [
+      ['broker_kas_floor', '5000'],   // red-line K-pool
+      ['broker_kas_high', '50000'],   // 资金过度集中 alarm
+    ];
+    let seeded = 0;
+    for (const [k, v] of seeds) {
+      if (!exists.get(k)) { ins.run(k, v); seeded++; }
+    }
+    if (seeded > 0) console.log(`[migrate] v127: seeded ${seeded} KAS pool alarm knobs (Phase 5-2 Sub-1).`);
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
