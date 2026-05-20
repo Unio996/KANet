@@ -31,7 +31,9 @@ export default {
     const spawn_rate_per_min = opts.spawn_rate_per_min || 0.5;  // 30/hr peak
     // KI 44.1 Conflict #1 fix (NWT N19.89): 5 buyer + 3 seller pool (per spec).
     // Caveat: 实际 BSC USDT only sufficient on NWT/Trader-M/J2 (Phase 5-1 snapshot 实证). Pool may need pre-fund.
-    const buyerPool = opts.buyerPool || ['NWT', 'Trader-M', 'J2', 'Trader-A', 'KANet'];
+    // KI 45 fix (J2 grep N19.94 sub-1 pre-flight): KANet no BSC wallet (agent_wallets chain='bnb'=0).
+    // Pool capacity 实证 = 4 buyer (with BSC USDT) + 3 seller. spec 5 buyer 不 achievable until KANet wallet gen.
+    const buyerPool = opts.buyerPool || ['NWT', 'Trader-M', 'J2', 'Trader-A'];
     const sellerPool = opts.sellerPool || ['NWT', 'Trader-M', 'J2'];
 
     // KI 44.1 Conflict #2 fix (NWT N19.89 Path B): hedge_router enable + small_order_cex=kucoin route.
