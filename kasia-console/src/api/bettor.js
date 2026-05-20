@@ -6,6 +6,7 @@ import { runScavengerScan, isScavengerRunning } from '../services/bettor-scaveng
 import { resolveExpired, isResolverRunning } from '../services/bettor-resolver.js';
 import { snapshotOpenPositions, isTrackerRunning } from '../services/bettor-position-tracker.js';
 import { evaluatePositions, isReactorRunning } from '../services/bettor-reactor.js';
+import { isRelayAlive } from '../services/relay-manager.js';
 
 export async function registerBettorRoutes(fastify) {
   // GET /api/bettor/recommendations — top N most-recent batch (optional filter by relay_node_id)
@@ -1010,6 +1011,13 @@ export async function registerBettorRoutes(fastify) {
     const oracleRelay = sqlite.prepare(`SELECT id, name, address, is_oracle, oracle_capabilities FROM relay_nodes WHERE id = ? AND is_oracle = 1`).get(b.outcome_oracle_relay_id);
     if (!oracleRelay) {
       return reply.code(400).send({ ok: false, error: `oracle relay ${b.outcome_oracle_relay_id.slice(0,8)} not found OR not registered as oracle (is_oracle=0)` });
+    }
+    // r211 O-3 PB-A fix-1 (Bettor r213 F2): DB flag check ≠ active live check.
+    // ghost market 防: relay process crashed / daemon dead → DB row 仍 is_oracle=1 → publish 仍通过.
+    // 修: relay-manager.isRelayAlive 检 child + pid + lastLog freshness (60s default).
+    const aliveness = isRelayAlive(b.outcome_oracle_relay_id);
+    if (!aliveness.alive) {
+      return reply.code(400).send({ ok: false, error: `oracle relay ${oracleRelay.name} (${b.outcome_oracle_relay_id.slice(0,8)}) not alive: ${aliveness.reason}` });
     }
     // r211 O-3 PB-A — resolution_rule_spec 5 字段 validate (= doc 2 v0.3 §21 structured rule)
     let resolutionRuleSpec = null;
