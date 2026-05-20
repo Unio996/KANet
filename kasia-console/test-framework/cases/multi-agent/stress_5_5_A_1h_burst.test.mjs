@@ -99,11 +99,24 @@ export default {
     // Phase 2 (30-55 min): Bybit route, hedge_router_enabled=false.
     // Drain 2 (55-60 min): no spawn, final cleanup.
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    // KI 45.1 Issue #3 fix (NWT N19.96): prefix filter — only delete stress test lock files, not other tests'.
+    // KI 43 lock format: ${relayId.slice(0,8)}_${brokerKasia.slice(6,18)}.lock — non-distinguishable, so use newer prefix.
+    // Use targeted unlink per known (relayId, brokerKasia) pair.
     const forceCleanLocks = async () => {
       try {
-        const { rmSync, existsSync } = await import('node:fs');
-        if (existsSync('C:/kanet/logs/agent-locks')) {
-          rmSync('C:/kanet/logs/agent-locks', { recursive: true, force: true });
+        const { unlinkSync, existsSync } = await import('node:fs');
+        const LOCK_DIR = 'C:/kanet/logs/agent-locks';
+        // Only clean locks held by our buyer/seller pool (relayId-prefix match).
+        const allRelays = [...new Set([...buyerPool, ...sellerPool])];
+        const { getRelayInfo: getInfo } = await import('../../lib/real-chain-runner.mjs');
+        for (const name of allRelays) {
+          const r = getInfo(name);
+          if (!r) continue;
+          const brokerSlice = BROKER_KASIA.slice(6, 18);
+          const lockFile = `${LOCK_DIR}/${r.id.slice(0, 8)}_${brokerSlice}.lock`;
+          if (existsSync(lockFile)) {
+            try { unlinkSync(lockFile); } catch {}
+          }
         }
       } catch {}
     };
@@ -164,7 +177,8 @@ export default {
     const hedgePlacedDelta = (metrics1?.final_pre_post_diff?.hedge_placed_delta ?? 0) + (metrics2?.final_pre_post_diff?.hedge_placed_delta ?? 0);
     const hedgeFailedDelta = (metrics1?.final_pre_post_diff?.hedge_failed_delta ?? 0) + (metrics2?.final_pre_post_diff?.hedge_failed_delta ?? 0);
     const hedgeSkippedDelta = (metrics1?.final_pre_post_diff?.hedge_skipped_delta ?? 0) + (metrics2?.final_pre_post_diff?.hedge_skipped_delta ?? 0);
-    const kPoolDelta = (metrics2?.final_pre_post_diff?.k_pool_delta ?? null);  // phase2 final reflects total
+    // KI 45.1 Issue #1 fix (NWT N19.96): sum both phases — runStress per-call pre/post snapshots independent.
+    const kPoolDelta = (metrics1?.final_pre_post_diff?.k_pool_delta ?? 0) + (metrics2?.final_pre_post_diff?.k_pool_delta ?? 0);
 
     // KI 45 Sub-3 Q7 (NWT N19.94 J2 #574 a+): 80% threshold + 0 hedge_skipped hard
     const failures = [];
@@ -177,8 +191,13 @@ export default {
     if (hedgeSkippedDelta > 0) {
       failures.push(`hedge_skipped Δ ${hedgeSkippedDelta} — circuit breaker tripped (hard fail per Q7 a+)`);
     }
+    // KI 45.1 Issue #2 fix (NWT N19.96): remove `totalSpawned > 5` mask — gate always applies; add min spawn check
+    const MIN_SPAWN = 5;
+    if (totalSpawned < MIN_SPAWN) {
+      failures.push(`totalSpawned ${totalSpawned} < min ${MIN_SPAWN} (spawn rate too low)`);
+    }
     const targetHedge = Math.floor((totalSpawned * 0.8));
-    if (hedgePlacedDelta < targetHedge && totalSpawned > 5) {
+    if (hedgePlacedDelta < targetHedge) {
       failures.push(`hedge_placed Δ ${hedgePlacedDelta} < target ${targetHedge} (80% of spawn ${totalSpawned})`);
     }
     return {
