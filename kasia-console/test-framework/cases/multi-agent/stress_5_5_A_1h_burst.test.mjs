@@ -124,6 +124,27 @@ export default {
     const origStressMode = process.env.KANET_STRESS_MODE;
     process.env.KANET_STRESS_MODE = '1';
 
+    // KI 45 Sub-5 (NWT N19.94 Q-rollback): atomic state file write for crash recovery via _stress_rollback.mjs
+    const runId = `${Date.now()}`;
+    const markerPrefix = `stress_5_5_A_${runId}_`;
+    try {
+      const { mkdirSync, writeFileSync, renameSync } = await import('node:fs');
+      const STATE_DIR = 'C:/kanet/logs/stress-state';
+      mkdirSync(STATE_DIR, { recursive: true });
+      const stateData = {
+        run_id: runId,
+        started_iso: new Date().toISOString(),
+        marker_prefix: markerPrefix,
+        config_backup: configBackup,
+        env_backup: { KANET_STRESS_MODE: origStressMode },
+      };
+      const tmpFile = `${STATE_DIR}/run-${runId}.json.tmp`;
+      const finalFile = `${STATE_DIR}/run-${runId}.json`;
+      writeFileSync(tmpFile, JSON.stringify(stateData, null, 2));
+      renameSync(tmpFile, finalFile);  // atomic rename
+      console.log(`[5-5-A] state backup → ${finalFile}`);
+    } catch (e) { console.warn(`[5-5-A] state file write fail: ${e.message}`); }
+
     let metrics1, metrics2;
     try {
       // Phase 1: KuCoin
