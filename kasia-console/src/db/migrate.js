@@ -3882,5 +3882,46 @@ export function runMigrations() {
     }
   }
 
+  // v130: Phase 4a SS trustless escrow (Bettor r224 sub 2, Owner 5-of-5 unanimous + UI 必现 钦定).
+  //   r224 ack J1 #343 5/5 PB merge: exchange_offers 加 outcome_oracle_relay_ids JSON array (= 5 oracle set, 替 r211 单 col),
+  //   + revote_round + escrow_p2sh + settle_txid + refund_txid (= SS escrow lifecycle on-chain anchors).
+  //   relay_nodes 加 voter_misbehave_count (= softer DoS shield, auto-pause at 3) + ecdsa_pubkey_xonly (= 32 byte hex for SS oracle ctor).
+  //   v# bump 130 (= J2 broker 线 v125-129 claimed, 较晚 ship 必 bump per [[feedback-cross-line-v-collision]]).
+  {
+    const tableInfo = sqlite.prepare("SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name='exchange_offers'").get();
+    if (tableInfo.cnt) {
+      const cols = sqlite.prepare("PRAGMA table_info(exchange_offers)").all().map(c => c.name);
+      if (!cols.includes('outcome_oracle_relay_ids')) {
+        sqlite.exec(`ALTER TABLE exchange_offers ADD COLUMN outcome_oracle_relay_ids TEXT`);
+        console.log('[migrate] v130: exchange_offers 加 outcome_oracle_relay_ids TEXT (= JSON array of 5 oracle relay UUIDs, Bettor r224 maker 自选 oracle SET).');
+      }
+      if (!cols.includes('revote_round')) {
+        sqlite.exec(`ALTER TABLE exchange_offers ADD COLUMN revote_round INTEGER DEFAULT 0`);
+        console.log('[migrate] v130: exchange_offers 加 revote_round INTEGER (= 当前 revote round, 0=原投, max 2 per J1 #343 PB-1).');
+      }
+      if (!cols.includes('escrow_p2sh')) {
+        sqlite.exec(`ALTER TABLE exchange_offers ADD COLUMN escrow_p2sh TEXT`);
+        console.log('[migrate] v130: exchange_offers 加 escrow_p2sh TEXT (= SS P2SH addr computed from contract + ctor args).');
+      }
+      if (!cols.includes('settle_txid')) {
+        sqlite.exec(`ALTER TABLE exchange_offers ADD COLUMN settle_txid TEXT`);
+        console.log('[migrate] v130: exchange_offers 加 settle_txid TEXT (= 5-of-5 unanimous settle TX chain anchor).');
+      }
+      if (!cols.includes('refund_txid')) {
+        sqlite.exec(`ALTER TABLE exchange_offers ADD COLUMN refund_txid TEXT`);
+        console.log('[migrate] v130: exchange_offers 加 refund_txid TEXT (= deadline 过 maker refund TX chain anchor).');
+      }
+    }
+    const relayCols = sqlite.prepare("PRAGMA table_info(relay_nodes)").all().map(c => c.name);
+    if (!relayCols.includes('voter_misbehave_count')) {
+      sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN voter_misbehave_count INTEGER DEFAULT 0`);
+      console.log('[migrate] v130: relay_nodes 加 voter_misbehave_count INTEGER (= J1 #343 PB-5 softer DoS shield, auto-pause at 3 dissents).');
+    }
+    if (!relayCols.includes('ecdsa_pubkey_xonly')) {
+      sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN ecdsa_pubkey_xonly TEXT`);
+      console.log('[migrate] v130: relay_nodes 加 ecdsa_pubkey_xonly TEXT (= 32 byte hex x-only secp256k1 pubkey, SS oracle ctor param per J1 #343 PB-4).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
