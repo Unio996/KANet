@@ -171,6 +171,32 @@ async function _runSnapshot() {
     if (bybitKasSnap && bybitKasSnap.balance_human > bybitKasAccum) {
       alerts.push({ type: 'cex_kas_accum', cex: 'bybit', balance: bybitKasSnap.balance_human, threshold: bybitKasAccum });
     }
+
+    // Phase 5-2 Sub-3 KI 38 (NWT N19.70): red-line alarm → dev-coord broadcast 通知 Owner
+    // throttle: 同 alert (type + asset/cex/chain) 1h 内只 broadcast 1 次 (防 spam).
+    const RED_LINE_TYPES = new Set(['kas_floor', 'floor', 'cex_kas_accum']);
+    const redAlerts = alerts.filter(a => RED_LINE_TYPES.has(a.type));
+    for (const a of redAlerts) {
+      const throttleKey = `treasury_red_${a.type}_${a.asset || a.cex || a.chain || 'global'}`;
+      const lastSent = sqlite.prepare(
+        `SELECT created_at FROM throttle_log WHERE key=? ORDER BY created_at DESC LIMIT 1`
+      ).get(throttleKey);
+      if (lastSent && Date.now() - new Date(lastSent.created_at + 'Z').getTime() < 3600_000) continue;
+      try {
+        const msg = `🚨 [treasury-alert] ${a.type} ${JSON.stringify(a).slice(0, 200)}`;
+        const PORT = process.env.PORT || 3100;
+        await fetch(`http://127.0.0.1:${PORT}/api/chat/send`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relayId: BROKER_RELAY_ID, channel: 'dev-coord', message: msg }),
+          signal: AbortSignal.timeout(8000),
+        });
+        sqlite.prepare(`INSERT INTO throttle_log (key, created_at) VALUES (?, datetime('now'))`).run(throttleKey);
+        console.log(`[treasury-monitor] red-line broadcast: ${a.type} ${a.asset || a.cex}`);
+      } catch (err) {
+        console.error(`[treasury-monitor] red-line broadcast fail: ${err.message}`);
+      }
+    }
     for (const [asset, list] of Object.entries(byAsset)) {
       const low = list.filter(s => s.balance_human < FLOOR_USD && asset !== 'KAS'); // KAS native, different scale
       const high = list.filter(s => s.balance_human > HIGH_THRESHOLD_USD && asset !== 'KAS');

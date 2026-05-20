@@ -4173,5 +4173,23 @@ export function runMigrations() {
     }
   }
 
+  // v129: Phase 5-2 Sub-3 KI 38 throttle_log (NWT N19.70 T-4 spec: atomic race-safe)
+  {
+    const hasTable = sqlite.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='throttle_log'"
+    ).get();
+    if (!hasTable) {
+      sqlite.exec(`
+        CREATE TABLE throttle_log (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          key TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_throttle_key_time ON throttle_log (key, created_at DESC);
+      `);
+      console.log('[migrate] v129: throttle_log table + idx (Phase 5-2 Sub-3 red-line alarm broadcast throttle).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
