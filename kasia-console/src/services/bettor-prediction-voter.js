@@ -154,8 +154,29 @@ async function processVoter(voter) {
   return { voted, skipped, errored };
 }
 
-// deriveVote — Phase 3a MVP: Polymarket gamma resolution check. Phase 4+ 加 LLM consensus.
+// deriveVote — Phase 3a MVP dispatcher per Bettor r219 spec.
+//   1) Polymarket gamma (= polymarket.com source) — direct resolved price check
+//   2) kanet_native (= any other data_source_canonical URL) — fetch + LLM consensus (Qwen3.6-LAN)
 async function deriveVote(offer) {
+  // Parse resolution_rule_spec → data_source_canonical (= judge URL)
+  let spec = null;
+  try { spec = JSON.parse(offer.resolution_rule_spec || '{}'); } catch {}
+  const sourceUrl = spec?.data_source_canonical;
+
+  // Branch 1: Polymarket gamma (= legacy path, source URL 含 polymarket.com)
+  if (offer.outcome_market_source === 'polymarket' || sourceUrl?.includes('polymarket.com')) {
+    return derivePolymarketVote(offer);
+  }
+
+  // Branch 2: kanet_native (= Phase 3a MVP Bettor r219 spec — LLM consensus)
+  if (offer.outcome_market_source === 'kanet_native') {
+    return deriveKanetNativeVote(offer, spec);
+  }
+
+  return { ok: false, reason: `unsupported outcome_market_source: ${offer.outcome_market_source}` };
+}
+
+async function derivePolymarketVote(offer) {
   if (!offer.outcome_token_id) {
     return { ok: false, reason: 'missing outcome_token_id' };
   }
@@ -176,12 +197,81 @@ async function deriveVote(offer) {
     let outcome = 'DISPUTE';
     if (yesPrice === 1 && noPrice === 0) outcome = 'YES';
     else if (yesPrice === 0 && noPrice === 1) outcome = 'NO';
-    else {
-      // not resolved yet — Phase 3a skip vote (= settler also skip pending)
-      return { ok: false, reason: 'gamma not resolved yet' };
-    }
+    else return { ok: false, reason: 'gamma not resolved yet' };
     return { ok: true, outcome, evidence_url: url, evidence_raw };
   } catch (e) {
     return { ok: false, reason: `gamma fetch fail: ${e.message}` };
   }
+}
+
+// Bettor r219 spec — kanet_native deriveVote (LLM consensus via Qwen3.6-LAN).
+//   fetch data_source_canonical URL → text → LLM prompt → JSON {outcome, confidence}
+//   confidence < 0.6 → DISPUTE (= 低信置不强 YES/NO)
+//   Qwen Rule 11: enable_thinking=false 必加 (= 漏会 60-120s timeout)
+async function deriveKanetNativeVote(offer, spec) {
+  const url = spec?.data_source_canonical;
+  if (!url || typeof url !== 'string') {
+    return { ok: false, reason: 'kanet_native missing data_source_canonical URL in resolution_rule_spec' };
+  }
+
+  // Phase 3a MVP: 若 URL 不是 http(s) (= 是 free-text 描述 like "Phase 3a真 round-trip 测试"),
+  // skip fetch + LLM 用 spec 全文 + market metadata 推 outcome.
+  let evidence_text = '';
+  let evidence_url = url;
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      if (!res.ok) return { ok: false, reason: `kanet_native source HTTP ${res.status}` };
+      evidence_text = (await res.text()).slice(0, 2000);  // 上限防 prompt context 撑爆
+    } catch (e) {
+      return { ok: false, reason: `kanet_native fetch fail: ${e.message}` };
+    }
+  } else {
+    // free-text description path — 用 spec 5 字段 作 evidence
+    evidence_text = JSON.stringify(spec);
+    evidence_url = `kanet_native_spec:${offer.id}`;
+  }
+
+  // LLM call (= Bettor r219 spec). Qwen3.6-LAN via Adapter.
+  const adapterPort = process.env.QWEN_ADAPTER_PORT || '3210';
+  const prompt = `预测市场结果判定:\n` +
+    `market_question: ${offer.outcome_condition_id || '(none)'}\n` +
+    `data_source: ${evidence_url}\n` +
+    `evidence: ${evidence_text}\n` +
+    `判定: 此市场结果是 YES 还是 NO? 只 JSON 回 {"outcome": "YES"|"NO"|"DISPUTE", "confidence": 0-1, "reason": "..."}`;
+  let llmOutcome = 'DISPUTE';
+  let llmConfidence = 0;
+  let llmReason = '';
+  try {
+    const llmRes = await fetch(`http://127.0.0.1:${adapterPort}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(60_000),
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: prompt }],
+        chat_template_kwargs: { enable_thinking: false },  // Qwen Rule 11 必加
+        response_format: { type: 'json_object' },
+        temperature: 0.1,
+      }),
+    });
+    if (!llmRes.ok) return { ok: false, reason: `LLM HTTP ${llmRes.status}` };
+    const llmJson = await llmRes.json();
+    const content = llmJson?.choices?.[0]?.message?.content || '{}';
+    let parsed;
+    try { parsed = JSON.parse(content); } catch { parsed = {}; }
+    llmOutcome = parsed.outcome === 'YES' || parsed.outcome === 'NO' ? parsed.outcome : 'DISPUTE';
+    llmConfidence = parseFloat(parsed.confidence) || 0;
+    llmReason = String(parsed.reason || '').slice(0, 200);
+  } catch (e) {
+    return { ok: false, reason: `LLM fetch fail: ${e.message}` };
+  }
+
+  // 低信置 → DISPUTE fallback (= 防误判)
+  const finalOutcome = llmConfidence < 0.6 ? 'DISPUTE' : llmOutcome;
+  return {
+    ok: true,
+    outcome: finalOutcome,
+    evidence_url,
+    evidence_raw: JSON.stringify({ evidence_text: evidence_text.slice(0, 500), llm_confidence: llmConfidence, llm_reason: llmReason }),
+  };
 }
