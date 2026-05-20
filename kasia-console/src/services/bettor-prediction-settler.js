@@ -210,13 +210,21 @@ export async function settlePredictionOutcomes() {
   }
 }
 
-// r211 O-7 collectMultiOracleVotes — maker-side aggregator (= Path D + PB-D consensus).
-//   收 voter daemon DM (= kanet_oracle_vote_v1) via chain_events 'oracle_vote' to maker_kaspa_addr.
-//   3+ aligned outcome (= 3-of-5 multi-sig consensus) → declare winner.
-//   Phase 3a MVP: 仅 DB aggregation. Phase 4 (= SS contract address available) 真 build settleByMultiOracle TX.
+// r234 Sub 5 collectMultiOracleVotes — 5-of-5 unanimous + revote + misbehave + auto-pause.
 //
-// r213 O-8.1 (Bettor ACK 修方 #1): export 出来 → multi-oracle-vote-settle.test.mjs 真 import (= 不再 inline mirror).
-//   依赖: sqlite (= argument-injectable via 2nd param 为 testability).
+// v2 (= Phase 4a r234): Path D + PB-D consensus + Owner 钦定 5-of-5 unanimous (= 一票否决).
+//   收 voter daemon DM (= kanet_oracle_vote_v1) via chain_events 'oracle_vote' to maker_kaspa_addr.
+//   REQUIRED_SIGS=5 + outcomes 必一致 → declare winner (= 不再 3-of-5 majority).
+//   分歧 (= 任 1 oracle 不一致) → trigger revote (= round < MAX) OR 留 verifying (= round 满 → deadline 后 refund).
+//   misbehave_count++ on non-majority voters + auto-pause at 3.
+//
+// dependency: payload 必含 revote_round field (= Sub 6 voter sign 时加, filter 当前 round votes).
+//
+// Bettor r234 reviewer 加固 默认 (= J1 implementation):
+//   - majority tie-break: DISPUTE (= 不 arbitrary 选 YES, 平票 = ambiguous)
+//   - misbehave++ scope: 仅 non-majority voters (= dissenting from consensus)
+//   - MAX_REVOTE_ROUNDS=2 (= J1 #343 PB-1)
+//   - auto-pause threshold: misbehave_count >= 3 (= J1 #343 PB-5)
 export async function collectMultiOracleVotes(offer, db = sqlite) {
   if (!offer.maker_kaspa_addr) {
     return { ok: false, reason: 'missing maker_kaspa_addr (= aggregator target)' };
@@ -233,27 +241,64 @@ export async function collectMultiOracleVotes(offer, db = sqlite) {
     return { ok: false, reason: 'no oracle votes received yet' };
   }
 
-  // Parse + tally by outcome
+  // Parse + filter votes for current revote round (= 防 旧 round vote 蒙混 进新 round tally)
+  const REQUIRED_SIGS = 5;
+  const MAX_REVOTE_ROUNDS = 2;
+  const currentRound = offer.revote_round || 0;
   const tally = { YES: 0, NO: 0, DISPUTE: 0 };
-  const voters = new Set();
+  const voters = new Map();  // voter_relay_id → outcome
   for (const v of votes) {
     try {
       const p = JSON.parse(v.payload || '{}');
       if (p.t !== 'kanet_oracle_vote_v1') continue;
-      // dedupe per voter (= same voter multi-vote, take latest)
+      // r234 加: filter by revote_round (= 旧 round vote 不算 当前 round)
+      const voteRound = parseInt(p.revote_round, 10) || 0;
+      if (voteRound !== currentRound) continue;
+      // dedupe per voter (= same voter multi-vote in same round, take first)
       if (voters.has(p.voter_relay_id)) continue;
-      voters.add(p.voter_relay_id);
+      voters.set(p.voter_relay_id, p.outcome);
       if (tally[p.outcome] !== undefined) tally[p.outcome]++;
     } catch {}
   }
 
-  const REQUIRED_SIGS = 3;  // r211 v3 Phase 3a: 3-of-5 multi-sig consensus
-  if (tally.YES >= REQUIRED_SIGS) {
-    return { ok: true, resolved: true, winner: 'YES', votes_yes: tally.YES, votes_no: tally.NO, total_voters: voters.size };
+  // 5-of-5 unanimous check (= Owner 钦定 一票否决)
+  if (voters.size < REQUIRED_SIGS) {
+    return { ok: true, resolved: false, reason: 'waiting more votes', voters: voters.size, required: REQUIRED_SIGS, round: currentRound };
   }
-  if (tally.NO >= REQUIRED_SIGS) {
-    return { ok: true, resolved: true, winner: 'NO', votes_yes: tally.YES, votes_no: tally.NO, total_voters: voters.size };
+  const outcomes = new Set([...voters.values()]);
+  if (outcomes.size === 1) {
+    const winner = [...outcomes][0];
+    return { ok: true, resolved: true, winner, votes_yes: tally.YES, votes_no: tally.NO, total_voters: voters.size, round: currentRound };
   }
-  // 不 quorum yet — 继续 wait (= 留 verifying)
-  return { ok: true, resolved: false, votes_yes: tally.YES, votes_no: tally.NO, votes_dispute: tally.DISPUTE, total_voters: voters.size, required: REQUIRED_SIGS };
+
+  // Dissent (= 不一致) → 触发 revote round + misbehave 累加 + auto-pause
+  // Majority outcome (= 多数派, tie → DISPUTE default = ambiguous flag)
+  let majority = 'DISPUTE';
+  const maxCount = Math.max(tally.YES, tally.NO, tally.DISPUTE);
+  const topCount = [tally.YES, tally.NO, tally.DISPUTE].filter(c => c === maxCount).length;
+  if (topCount === 1) {
+    majority = tally.YES === maxCount ? 'YES' : (tally.NO === maxCount ? 'NO' : 'DISPUTE');
+  }
+  // misbehave_count++ for non-majority voters (= dissent from consensus). Tie → 全 dissent (= 无 majority).
+  for (const [voterRelayId, outcome] of voters) {
+    if (outcome === majority) continue;
+    db.prepare(`UPDATE relay_nodes SET voter_misbehave_count = voter_misbehave_count + 1 WHERE id = ?`).run(voterRelayId);
+    const newCount = db.prepare(`SELECT voter_misbehave_count FROM relay_nodes WHERE id = ?`).get(voterRelayId)?.voter_misbehave_count;
+    if (newCount >= 3) {
+      // [ABE-A.6] is_oracle 是 relay attribute 不是 protocol_status, 直 UPDATE allowed.
+      db.prepare(`UPDATE relay_nodes SET is_oracle = 0 WHERE id = ?`).run(voterRelayId);
+      console.warn(`[settler] voter ${voterRelayId.slice(0,8)} auto-paused (misbehave_count=${newCount} >= 3, dissent on offer ${offer.id.slice(0,12)} round ${currentRound})`);
+    }
+  }
+
+  if (currentRound < MAX_REVOTE_ROUNDS) {
+    // 触发 next revote round (= UPDATE revote_round++, Sub 7 voter daemon scan + re-DM)
+    db.prepare(`UPDATE exchange_offers SET revote_round = revote_round + 1 WHERE id = ?`).run(offer.id);
+    console.log(`[settler] dissent on offer ${offer.id.slice(0,12)} round ${currentRound} → trigger revote round ${currentRound + 1}, majority=${majority}, dissenters=${voters.size - tally[majority] || 0}`);
+    return { ok: true, resolved: false, dissent: true, round: currentRound, next_round: currentRound + 1, majority, tally };
+  }
+
+  // Round 满 (= MAX_REVOTE_ROUNDS done) 仍分歧 → 留 verifying, deadline 后 refund_both
+  console.log(`[settler] dissent on offer ${offer.id.slice(0,12)} round ${currentRound} max done → deadline refund_both`);
+  return { ok: true, resolved: false, dissent_max_rounds: true, round: currentRound, reason: 'oracle 分歧 max revote rounds 仍未一致, 等 deadline → refund_both', majority, tally };
 }
