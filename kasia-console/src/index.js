@@ -491,6 +491,10 @@ startStressPoolReplenish();
 import { startMultichainRebalance } from './services/broker-multichain-rebalance.js';
 startMultichainRebalance();
 
+// Phase 6 #4 Sub-3 KI 52: broker KAS pool refill from Gate.io CEX (1h cron when K-pool < floor)
+import { startBrokerKasRefill } from './services/broker-kas-refill.js';
+startBrokerKasRefill();
+
 // C2 Cross-Match Engine (J2 #519/523 / NWT N19.11/N19.17 三方共识 5/19, Owner 钦定 "C 是骨架").
 // 30s cron 扫 open exchange_offers, 找 BUY+SELL 数学有交集 pair (oracle ±3% + chain align + same-org skip + qty ±5%).
 // emit chain_event 'kanet_cross_match_v1' Brain visible. Phase 1 audit-only, Phase 2 active match-settle.
