@@ -47,11 +47,14 @@ export async function runStress({ actorTemplates, duration_ms, spawn_rate_per_mi
   const active = new Set();
   let templateIdx = 0;
 
-  // KI 46 (NWT N19.102): auto-emergency-stop — 5 abort conditions, invoke rollback on trigger.
+  // KI 46 (NWT N19.102) + KI 46.1 (NWT N19.103) fix: auto-emergency-stop with proper instrumentation.
   let aborted = false;
   let abortReason = null;
+  let checkAbortInFlight = false;  // KI 46.1 #2 fix: concurrent guard
   const consecutiveSampleFails = { count: 0 };
-  const brokerDmLatencies = [];  // populated by abortHook if available
+  // KI 46.1 #1 fix (NWT N19.103 critical): broker DM latency populated via metricsSink callback (b path).
+  // Actor (autonomous_buyer.run) reports brokerDmLatency to this array via opts.metricsSink callback.
+  const brokerDmLatencies = [];
   async function checkAbort(s) {
     const conds = [];
     // 1. actor fail rate > 70%
@@ -82,8 +85,13 @@ export async function runStress({ actorTemplates, duration_ms, spawn_rate_per_mi
     }
   }
 
-  // Metric sampler (every 60s)
+  // Metric sampler (every 60s) — KI 46.1 #2 concurrent guard + KI 46.1 #3 clearInterval on abort
   const sampleTimer = setInterval(async () => {
+    if (checkAbortInFlight || aborted) {
+      if (aborted) clearInterval(sampleTimer);
+      return;
+    }
+    checkAbortInFlight = true;
     try {
       const s = collectMetrics(db, startIso);
       metrics.samples.push({ ts_iso: new Date().toISOString(), phase: 'sample', ...s });
@@ -92,8 +100,21 @@ export async function runStress({ actorTemplates, duration_ms, spawn_rate_per_mi
     } catch (err) {
       metrics.samples.push({ ts_iso: new Date().toISOString(), phase: 'sample_err', error: err.message });
       consecutiveSampleFails.count++;
+    } finally {
+      checkAbortInFlight = false;
     }
   }, 60_000);
+
+  // KI 46.1 #1 fix: inject brokerDmLatencies push helper into actor optsBuilder via metricsSink.
+  // Each actor's optsBuilder will be wrapped to inject metricsSink callback.
+  const metricsSink = {
+    reportBrokerDmLatency: (latencyMs) => {
+      if (typeof latencyMs === 'number' && latencyMs > 0) {
+        brokerDmLatencies.push(latencyMs);
+        if (brokerDmLatencies.length > 20) brokerDmLatencies.shift();  // bounded
+      }
+    },
+  };
 
   // Spawn loop
   while (Date.now() < deadline && !aborted) {
@@ -104,7 +125,10 @@ export async function runStress({ actorTemplates, duration_ms, spawn_rate_per_mi
       metrics.actors_spawned++;
       const promise = (async () => {
         try {
-          await tmpl.personaFn({ id: actorId }, tmpl.optsBuilder(metrics.actors_spawned));
+          // KI 46.1 #1: inject metricsSink for broker DM latency reporting (5th abort condition)
+          const builtOpts = tmpl.optsBuilder(metrics.actors_spawned);
+          builtOpts.metricsSink = metricsSink;
+          await tmpl.personaFn({ id: actorId }, builtOpts);
           metrics.actors_completed++;
         } catch (err) {
           metrics.actors_failed++;

@@ -115,13 +115,21 @@ async function _runAgentLoopInner({ id, persona, context, goal, policy, brainFn,
         const text = decision.payload?.message;
         if (!text) throw new Error('send_dm requires payload.message');
         const startIso = new Date().toISOString();
+        const dmStartMs = Date.now();
         await sendDm(context.relayId, context.brokerKasia, text);
         const reply = await waitForReply(
           context.brokerKasia, context.userKasia, startIso,
           { timeoutMs: decision.payload.timeoutMs || 60_000 }
         );
+        const dmLatencyMs = Date.now() - dmStartMs;
+        // KI 46.1 #1 (NWT N19.103 critical): report broker DM latency to stress harness metricsSink
+        // (used for 5th abort condition: 5 consecutive cycles > 60s = broker_dm_stuck)
+        if (context.metricsSink?.reportBrokerDmLatency) {
+          context.metricsSink.reportBrokerDmLatency(dmLatencyMs);
+        }
         stepLog.sent = text;
         stepLog.reply = reply?.content_text || null;
+        stepLog.latency_ms = dmLatencyMs;
         state.lastReply = reply?.content_text || null;
         if (reply?.content_text) {
           const q = parseQuote(reply.content_text);

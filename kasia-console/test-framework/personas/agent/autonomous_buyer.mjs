@@ -16,7 +16,8 @@ export default {
     const result = await runAgentLoop({
       id: persona.id,
       persona,
-      context: { relayId, relayName, userKasia, brokerKasia, userEvmAddr },
+      // KI 46.1 #1: thread metricsSink through context for broker DM latency reporting
+      context: { relayId, relayName, userKasia, brokerKasia, userEvmAddr, metricsSink: opts.metricsSink },
       goal: { kind: 'buy_kas', qty },
       policy: opts.policy || { maxStepUsdt: 20 },
       brainFn: brain,
