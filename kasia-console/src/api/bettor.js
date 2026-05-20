@@ -1484,9 +1484,9 @@ export async function registerBettorRoutes(fastify) {
     try {
       sqlite.prepare(`INSERT INTO exchange_offers (
         id, broadcast_tx_id, message_index, give_asset, give_amount, want_asset, want_amount,
-        maker, verification, protocol_status, taker_locked, market_key, expires_at,
+        maker, verification, protocol_status, market_key, expires_at,
         created_at, updated_at, maker_relay_id, metadata, pending_handshake_expires_at
-      ) VALUES (?, ?, 0, 'prediction_outcome_share', '0', 'KAS', '0', ?, 'pending_handshake', 'pending_taker', 0, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?)
+      ) VALUES (?, ?, 0, 'prediction_outcome_share', '0', 'KAS', '0', ?, 'pending_handshake', 'pending_taker', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?)
       `).run(id, 'pending-draft-' + id.slice(-8), b.maker_relay_id, `pending:${id}`, handshakeExpiresAt, b.maker_relay_id, draftMeta, handshakeExpiresAt);
     } catch (e) {
       return reply.code(500).send({ ok: false, error: `pending-offer insert fail: ${e.message}` });
