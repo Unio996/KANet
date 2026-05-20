@@ -195,6 +195,20 @@ export function getStatus() {
   }));
 }
 
+// r211 O-3 PB-A — oracle live check (= 防 ghost market: DB is_oracle=1 但 relay process dead).
+//   alive 条件: child 还 in _relays + pid set + lastLog 不超 freshnessMs (default 60s).
+//   bettor.js publish endpoint 调用 reject 死 oracle relay.
+export function isRelayAlive(relayNodeId, freshnessMs = 60_000) {
+  const state = _relays[relayNodeId];
+  if (!state) return { alive: false, reason: 'no relay process (= not started)' };
+  if (!state.child || !state.child.send) return { alive: false, reason: 'child IPC dead' };
+  if (!state.pid) return { alive: false, reason: 'no pid' };
+  const lastMs = state.lastLog ? new Date(state.lastLog).getTime() : 0;
+  const ageMs = lastMs ? Date.now() - lastMs : Infinity;
+  if (ageMs > freshnessMs) return { alive: false, reason: `lastLog stale ${Math.round(ageMs/1000)}s (>${freshnessMs/1000}s)` };
+  return { alive: true, ageMs, pid: state.pid };
+}
+
 /**
  * Send a command to a Relay child process.
  *

@@ -130,7 +130,15 @@ async function processVoter(voter) {
       }
 
       // 7. log chain_events 'oracle_vote' (= 防 same-tick double-vote + audit trail)
-      // Phase 3a MVP: synthetic txid (= 'oracle_vote:<voter>:<offer>:<ts>'). Phase 4 真 chain TX ID.
+      //
+      // Bettor r213 F6 (MEDIUM): synthetic txid risk — Phase 3a MVP 用 'oracle_vote:<voter8>:<offer8>:<ts>'
+      // 不是真 chain TX ID. 真 chain audit (= kaspad block index cross-check) 此 row 必 missing.
+      // KI sediment 第 14/15 次 (5/18 N4): chain_event txid 截断撞 UNIQUE silent ignore.
+      // 现 collision risk 低 (voter8 differs 同 tick + Date.now() 毫秒 + slice 8 char), 但真链 audit 时全 fail.
+      //
+      // Phase 4 升级: voter daemon 真 broadcast on-chain (= kanet_oracle_vote_v1 protocol msg).
+      // 现 1-to-1 DM (PB-C) 不上链 (= 5x fee 省), chain_events row 是 local audit log not chain truth.
+      // 当 真上链时 backfill txid_real col, 当前 synthetic_txid pattern 保留.
       const syntheticTxid = `oracle_vote:${voter.id.slice(0,8)}:${offer.id.slice(0,8)}:${Date.now()}`;
       sqlite.prepare(`
         INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
