@@ -98,7 +98,7 @@ export default {
         userKasia: NWT_KASIA,
         brokerKasia: BROKER_KASIA,
         userEvmAddr: NWT_BSC_ADDR,
-        qty: 50,  // KI 28 5/20: Bybit min order value ~$1, 50 KAS × 0.034 = $1.70 clears threshold
+        qty: 200,  // KI 32 5/20 Owner钦定 Path A: Bybit真 min $5, 200×$0.034=$6.74 safe (摩擦~$0.12/run round-trip 不烧)
         chain: 'BSC',
         fromRelayName: 'NWT',
       },
