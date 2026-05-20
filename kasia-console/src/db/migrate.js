@@ -3923,5 +3923,31 @@ export function runMigrations() {
     }
   }
 
+  // v131: Phase 4a Sub 4 revision E pre-handshake (Bettor r232 reject D + accept E + r233 .sil v3 双 stake).
+  //   exchange_offers 加 pending_taker_pubkey + handshake_expires + taker_stake + taker_escrow_tx (= 真 P2P 双锁 4 cols).
+  //   bump v131 (= 跨 prediction line 自身后接 v130).
+  {
+    const tableInfo = sqlite.prepare("SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name='exchange_offers'").get();
+    if (tableInfo.cnt) {
+      const cols = sqlite.prepare("PRAGMA table_info(exchange_offers)").all().map(c => c.name);
+      if (!cols.includes('pending_taker_pubkey')) {
+        sqlite.exec(`ALTER TABLE exchange_offers ADD COLUMN pending_taker_pubkey TEXT`);
+        console.log('[migrate] v131: exchange_offers 加 pending_taker_pubkey TEXT (= E pre-handshake taker x-only pubkey).');
+      }
+      if (!cols.includes('pending_handshake_expires_at')) {
+        sqlite.exec(`ALTER TABLE exchange_offers ADD COLUMN pending_handshake_expires_at TEXT`);
+        console.log('[migrate] v131: exchange_offers 加 pending_handshake_expires_at TEXT (= handshake 过期时间, maker 重新 publish).');
+      }
+      if (!cols.includes('taker_stake_locked_kas')) {
+        sqlite.exec(`ALTER TABLE exchange_offers ADD COLUMN taker_stake_locked_kas REAL DEFAULT 0`);
+        console.log('[migrate] v131: exchange_offers 加 taker_stake_locked_kas REAL (= taker 锁 SS P2SH 的 KAS 数).');
+      }
+      if (!cols.includes('taker_escrow_lock_tx')) {
+        sqlite.exec(`ALTER TABLE exchange_offers ADD COLUMN taker_escrow_lock_tx TEXT`);
+        console.log('[migrate] v131: exchange_offers 加 taker_escrow_lock_tx TEXT (= taker stake 锁 chain TX hash).');
+      }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
