@@ -136,7 +136,9 @@ export async function settlePredictionOutcomes() {
         const winnerAddr = makerWon
           ? (offer.maker_kaspa_addr || offer.maker)
           : offer.taker;
-        if (!winnerAddr || !String(winnerAddr).startsWith('kaspa:')) {
+        // r216 Bug surfaced: 之前 `startsWith('kaspa:')` 拒 testnet `kaspatest:` (= Phase 3a 真 round-trip 撞).
+        // accept mainnet kaspa: + testnet-12 kaspatest: 双 prefix.
+        if (!winnerAddr || !(String(winnerAddr).startsWith('kaspa:') || String(winnerAddr).startsWith('kaspatest:'))) {
           console.error(`[prediction-settler] payout target missing or invalid ${offer.id.slice(0,8)}: maker_won=${makerWon} winnerAddr=${winnerAddr}`);
           errored++;
           continue;  // 留 delivering, 下次 tick retry (Owner 介入 可能)

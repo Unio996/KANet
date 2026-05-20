@@ -1090,7 +1090,9 @@ export async function registerBettorRoutes(fastify) {
     // r177 Phase 2b'.1 escrow lock: maker stake KAS → Owner-trust escrow addr chain TX BEFORE broadcast.
     // chain-first 守: escrow fail 早 abort 比 broadcast 后 fail 干净 (链上 0 痕迹).
     const escrowAddr = await getConfig('kanet_prediction_escrow_addr');
-    if (!escrowAddr || !escrowAddr.startsWith('kaspa:')) {
+    // r216 Bug surfaced: 之前 `startsWith('kaspa:')` 拒 testnet `kaspatest:` prefix (= Phase 3a 真 round-trip 撞到).
+    // 修: accept 双 prefix (mainnet kaspa: + testnet-12 kaspatest:).
+    if (!escrowAddr || !(escrowAddr.startsWith('kaspa:') || escrowAddr.startsWith('kaspatest:'))) {
       return reply.code(503).send({ ok: false, error: 'kanet_prediction_escrow_addr not configured — operator action required' });
     }
     let escrowTxId = null;
