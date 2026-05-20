@@ -76,9 +76,10 @@ done
 #   taskkill //F //IM llama-server.exe
 
 # ── 阶段 4：清理残留 node 进程（relay、adapter、scout、test-cron） ───────
+# 5/20 patch: 排除 kanet-tn12 testnet sandbox 路径 (= mainnet stop 不动 testnet, 之前撞 14h 14:43 5 J1tn-* + Qwen 全死)
 CHILD_PIDS=$(powershell -Command "
   Get-CimInstance Win32_Process |
-    Where-Object { \$_.Name -eq 'node.exe' -and (\$_.CommandLine -match 'relay' -or \$_.CommandLine -match 'index\.mjs' -or \$_.CommandLine -match 'scout' -or \$_.CommandLine -match 'cc-bridge' -or \$_.CommandLine -match 'qwen-bridge-worker' -or \$_.CommandLine -match 'channel-bridge' -or \$_.CommandLine -match 'kaspa-ws-proxy' -or \$_.CommandLine -match 'test-cron') } |
+    Where-Object { \$_.Name -eq 'node.exe' -and (\$_.CommandLine -match 'relay' -or \$_.CommandLine -match 'index\.mjs' -or \$_.CommandLine -match 'scout' -or \$_.CommandLine -match 'cc-bridge' -or \$_.CommandLine -match 'qwen-bridge-worker' -or \$_.CommandLine -match 'channel-bridge' -or \$_.CommandLine -match 'kaspa-ws-proxy' -or \$_.CommandLine -match 'test-cron') -and (\$_.CommandLine -notmatch 'kanet-tn12') } |
     Select-Object -ExpandProperty ProcessId
 " 2>/dev/null | tr -d '\r')
 
