@@ -1006,6 +1006,38 @@ export async function registerBettorRoutes(fastify) {
     const lockUntil = new Date(maker.stake_lock_until).getTime();
     if (!Number.isFinite(lockUntil) || lockUntil <= Date.now()) return reply.code(403).send({ ok: false, error: 'maker stake lock expired' });
 
+    // r211 O-3 PB-A — outcome_oracle_relay_id required + oracle live check (Path D maker 自选 oracle)
+    // 防 ghost market: maker 选 oracle 必 is_oracle=1 + relay 真 alive
+    if (!b.outcome_oracle_relay_id) {
+      return reply.code(400).send({ ok: false, error: 'missing outcome_oracle_relay_id (= Path D maker 自选 oracle, 必填)' });
+    }
+    const oracleRelay = sqlite.prepare(`SELECT id, name, address, is_oracle, oracle_capabilities FROM relay_nodes WHERE id = ? AND is_oracle = 1`).get(b.outcome_oracle_relay_id);
+    if (!oracleRelay) {
+      return reply.code(400).send({ ok: false, error: `oracle relay ${b.outcome_oracle_relay_id.slice(0,8)} not found OR not registered as oracle (is_oracle=0)` });
+    }
+    // r211 O-3 PB-A — resolution_rule_spec 5 字段 validate (= doc 2 v0.3 §21 structured rule)
+    let resolutionRuleSpec = null;
+    if (b.resolution_rule_spec) {
+      try {
+        const spec = typeof b.resolution_rule_spec === 'string' ? JSON.parse(b.resolution_rule_spec) : b.resolution_rule_spec;
+        const required5 = ['data_source_canonical', 'secondary_sources', 'ambiguity_handler', 'dispute_keywords', 'edge_case_examples'];
+        for (const f of required5) {
+          if (spec[f] === undefined || spec[f] === null) {
+            return reply.code(400).send({ ok: false, error: `resolution_rule_spec missing required field: ${f} (= doc 2 v0.3 §21 spec 5 字段)` });
+          }
+        }
+        resolutionRuleSpec = JSON.stringify(spec);
+      } catch (e) {
+        return reply.code(400).send({ ok: false, error: `resolution_rule_spec JSON parse fail: ${e.message}` });
+      }
+    } else {
+      // Phase 3a inherit from outcome_oracle_hook (= legacy polymarket_uma_mirror gamma rule)
+      // Phase 4+ make this required for all market_source='kanet_native'
+      if (b.outcome_market_source === 'kanet_native') {
+        return reply.code(400).send({ ok: false, error: 'resolution_rule_spec required for kanet_native market (= doc 2 v0.3 §21 防 free-text 扯皮)' });
+      }
+    }
+
     const price = parseFloat(b.price);
     const sizeKas = parseFloat(b.size_kas);
     if (!Number.isFinite(price) || price <= 0 || price >= 1) return reply.code(400).send({ ok: false, error: 'price must be in (0, 1)' });
@@ -1169,13 +1201,15 @@ export async function registerBettorRoutes(fastify) {
           verification, protocol_status, is_fully_observed, market_key, expires_at,
           broadcast_at, created_at, updated_at,
           outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side, outcome_end_date, outcome_oracle_hook, outcome_max_deviation_pp,
-          published_price, maker_kaspa_addr, maker_relay_id, metadata
-        ) VALUES (?, ?, 0, 'prediction_outcome_share', ?, 'KAS', ?, ?, 'prediction_outcome_match', 'open', 0, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          published_price, maker_kaspa_addr, maker_relay_id, metadata,
+          outcome_oracle_relay_id, resolution_rule_spec
+        ) VALUES (?, ?, 0, 'prediction_outcome_share', ?, 'KAS', ?, ?, 'prediction_outcome_match', 'open', 0, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
           .run(id, broadcastTx, numShares.toFixed(8), sizeKas.toFixed(8), makerAddr,
                marketKey, expiresAt, broadcastEmittedAt,
                b.outcome_market_source || 'polymarket', b.outcome_condition_id, b.outcome_token_id, b.outcome_side, b.outcome_end_date,
                b.outcome_oracle_hook || 'polymarket_uma_mirror', maxDeviation, price,
-               makerAddr, b.maker_relay_id, metadataJson);
+               makerAddr, b.maker_relay_id, metadataJson,
+               b.outcome_oracle_relay_id, resolutionRuleSpec);
         // fund_lock track stake (= 防 maker 重复用同 stake 挂多 offer 超 wallet balance)
         try {
           const balRes = await fetch(`http://127.0.0.1:${process.env.PORT || 3100}/api/relay/${b.maker_relay_id}/balance`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()).catch(() => null);
