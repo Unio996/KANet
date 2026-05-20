@@ -12,10 +12,12 @@
 
 import { sqlite } from '../db/client.js';
 import { recordChainEvent } from './chain-event.js';
+import { getConfig } from '../data/settings/configs.js';
 
 const TICK_MS = 30 * 1000;
-const PRICE_TOLERANCE = 0.03;  // ±3% oracle deviation
-const QTY_TOLERANCE = 0.05;    // ±5% qty deviation (full-fill Phase 1)
+// Phase 5-3 KI N19.68 migrate: tunable via config_entries (defaults preserve original).
+const PRICE_TOLERANCE_DEFAULT = 0.03;  // ±3% oracle deviation
+const QTY_TOLERANCE_DEFAULT = 0.05;    // ±5% qty deviation (full-fill Phase 1)
 const BROKER_ORG_NAMES = ['Trader-A', 'Trader-B', 'Trader-M'];
 
 let _running = false;
@@ -45,7 +47,9 @@ function _getBrokerOrgAddrs() {
   ).all(...BROKER_ORG_NAMES).map(r => r.address);
 }
 
-export function tickCrossMatchOnce(marketPrice = null, brokerAddrs = null) {
+export function tickCrossMatchOnce(marketPrice = null, brokerAddrs = null, opts = {}) {
+  const PRICE_TOLERANCE = opts.priceTol ?? PRICE_TOLERANCE_DEFAULT;
+  const QTY_TOLERANCE = opts.qtyTol ?? QTY_TOLERANCE_DEFAULT;
   _scanCount++;
   _lastTickAt = new Date().toISOString();
   brokerAddrs = brokerAddrs || _getBrokerOrgAddrs();
@@ -165,7 +169,9 @@ export function startCrossMatchEngine() {
   const runTick = async () => {
     try {
       const marketPrice = await _getMarketPrice();
-      tickCrossMatchOnce(marketPrice);
+      const priceTol = parseFloat(await getConfig('cross_match_price_tol') || String(PRICE_TOLERANCE_DEFAULT));
+      const qtyTol = parseFloat(await getConfig('cross_match_qty_tol') || String(QTY_TOLERANCE_DEFAULT));
+      tickCrossMatchOnce(marketPrice, null, { priceTol, qtyTol });
     } catch (err) {
       console.error(`[cross-match] tick err: ${err.message}`);
     }
@@ -179,7 +185,7 @@ export function startCrossMatchEngine() {
 }
 
 export const _internals = {
-  TICK_MS, PRICE_TOLERANCE, QTY_TOLERANCE, BROKER_ORG_NAMES,
+  TICK_MS, PRICE_TOLERANCE_DEFAULT, QTY_TOLERANCE_DEFAULT, BROKER_ORG_NAMES,
   _getMarketPrice, _getBrokerOrgAddrs,
   getStats: () => ({ scanCount: _scanCount, matchCount: _matchCount, lastTickAt: _lastTickAt, running: _running }),
 };

@@ -4108,5 +4108,23 @@ export function runMigrations() {
     }
   }
 
+  // v125: Phase 5-3 KI N19.68 migrate 4 tunable knobs from code constants → config_entries DB
+  // (NWT N19.66 Q4 spec, J2 N19.68 ack: tunable runtime, no restart needed for value tweaks)
+  {
+    const exists = sqlite.prepare("SELECT key FROM config_entries WHERE key=?");
+    const ins = sqlite.prepare("INSERT INTO config_entries (key, value) VALUES (?, ?)");
+    const seeds = [
+      ['broker_treasury_floor_usd', '50'],
+      ['broker_treasury_high_usd', '500'],
+      ['cross_match_price_tol', '0.03'],
+      ['cross_match_qty_tol', '0.05'],
+    ];
+    let seeded = 0;
+    for (const [k, v] of seeds) {
+      if (!exists.get(k)) { ins.run(k, v); seeded++; }
+    }
+    if (seeded > 0) console.log(`[migrate] v125: seeded ${seeded} tunable knobs (Phase 5-3 migration).`);
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

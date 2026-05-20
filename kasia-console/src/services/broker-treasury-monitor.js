@@ -13,6 +13,7 @@
 import { ethers } from 'ethers';
 import { sqlite } from '../db/client.js';
 import { withFallbackRpc } from './chains.js';
+import { getConfig } from '../data/settings/configs.js';
 
 const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
 const TICK_INTERVAL_MS = 5 * 60_000; // 5 min, stagger 2.5 min offset from market-seeder
@@ -30,11 +31,10 @@ const TOKEN_REGISTRY = {
 
 const ERC20_BALANCE_ABI = ['function balanceOf(address) view returns (uint256)'];
 
-// Alert thresholds (Owner config TBD, hardcode pilot values)
-// Floor: 任一链单 asset < $50 → alert (绝对底线)
-// Imbalance: 任一链 > $500 + 同 asset 任一其他链 < $50 → alert (相对spread)
-const FLOOR_USD = 50;
-const HIGH_THRESHOLD_USD = 500;
+// Alert thresholds — Phase 5-3 KI N19.68 migrate to config_entries DB (Owner runtime tune via UI)
+// Defaults preserve original values. Floor: 任一链单 asset < $50 → alert. Imbalance: > $500 + < $50.
+const FLOOR_USD_DEFAULT = 50;
+const HIGH_THRESHOLD_USD_DEFAULT = 500;
 
 let _tickInterval = null;
 let _ticking = false;
@@ -111,6 +111,8 @@ async function _runSnapshot() {
       byAsset[s.asset].push(s);
     }
 
+    const FLOOR_USD = parseFloat(await getConfig('broker_treasury_floor_usd') || String(FLOOR_USD_DEFAULT));
+    const HIGH_THRESHOLD_USD = parseFloat(await getConfig('broker_treasury_high_usd') || String(HIGH_THRESHOLD_USD_DEFAULT));
     const alerts = [];
     for (const [asset, list] of Object.entries(byAsset)) {
       const low = list.filter(s => s.balance_human < FLOOR_USD && asset !== 'KAS'); // KAS native, different scale
@@ -162,4 +164,4 @@ export function stopTreasuryMonitor() {
 }
 
 // 测试 / 内部访问
-export const _internals = { _runSnapshot, TOKEN_REGISTRY, FLOOR_USD, HIGH_THRESHOLD_USD };
+export const _internals = { _runSnapshot, TOKEN_REGISTRY, FLOOR_USD_DEFAULT, HIGH_THRESHOLD_USD_DEFAULT };
