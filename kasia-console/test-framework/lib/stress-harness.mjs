@@ -73,9 +73,11 @@ export async function runStress({ actorTemplates, duration_ms, spawn_rate_per_mi
     if (consecutiveSampleFails.count >= 5) {
       conds.push(`5_consecutive_sample_fail (console_crash)`);
     }
-    // 5. broker DM stuck (5 consecutive > 60s)
-    if (brokerDmLatencies.length >= 5 && brokerDmLatencies.slice(-5).every(l => l > 60_000)) {
-      conds.push(`broker_dm_stuck (5 cycles > 60s)`);
+    // 5. broker DM stuck (5 consecutive > 90s)
+    // KI 48 (NWT N19.106 real test): 60s → 90s. Real stress pace ~65s/cycle is normal (Kasia broadcast time).
+    // 90s = truly stuck threshold (3× normal cycle time).
+    if (brokerDmLatencies.length >= 5 && brokerDmLatencies.slice(-5).every(l => l > 90_000)) {
+      conds.push(`broker_dm_stuck (5 cycles > 90s)`);
     }
     if (conds.length > 0) {
       aborted = true;

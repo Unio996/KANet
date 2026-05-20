@@ -46,7 +46,7 @@ function getBrokerKPool() {
   } catch { return null; }
 }
 
-export async function selectHedgeAccount({ preferredCex, orderValueUsdt, side, mode = 'production' }) {
+export async function selectHedgeAccount({ preferredCex, orderValueUsdt, qty, side, mode = 'production' }) {
   // 1. Caller override (test framework, manual hedge) — 永 honor
   if (preferredCex) {
     const acct = getAccountByName(preferredCex);
@@ -70,6 +70,12 @@ export async function selectHedgeAccount({ preferredCex, orderValueUsdt, side, m
   if (orderValueUsdt && orderValueUsdt < smallThreshold) {
     const cex = await getConfig('hedge_router_small_order_cex') || 'kucoin';
     return { account: getAccountByName(cex), route: 'small_order' };
+  }
+  // KI 47.1 (NWT N19.106 real test sediment): peekPrice fail under load → orderValueUsdt=null → fall-through to default Bybit = KI 28 复刻 ($5 min reject).
+  // qty-based fallback: small qty likely small order → route small_order_cex (kucoin $0.10 min).
+  if (!orderValueUsdt && typeof qty === 'number' && qty > 0 && qty < 100) {
+    const cex = await getConfig('hedge_router_small_order_cex') || 'kucoin';
+    return { account: getAccountByName(cex), route: 'small_order_qty_fallback' };
   }
 
   // 5. Broker K-pool low → 转 auto-withdraw CEX (Gate.io)

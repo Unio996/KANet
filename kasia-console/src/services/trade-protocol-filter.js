@@ -743,7 +743,7 @@ async function _executeHedge(offerId, agentName, side, qty, preferredCex = null)
   const peekPrice = await _fetchHedgePrice('bybit', side).catch(() => null);
   const orderValueUsdt = peekPrice && qty ? Number(peekPrice) * Number(qty) : null;
   let { account, route } = await selectHedgeAccount({
-    preferredCex, orderValueUsdt, side,
+    preferredCex, orderValueUsdt, qty, side,  // KI 47.1: pass qty for fallback when peekPrice fails
     mode: process.env.KANET_HEDGE_MODE || 'production',
   });
 
