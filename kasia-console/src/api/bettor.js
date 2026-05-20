@@ -1782,6 +1782,102 @@ export async function registerBettorRoutes(fastify) {
     return reply.send({ ok: true, offers: rows, count: rows.length });
   });
 
+  // Phase 4a Sub 10 (Bettor r243) — /api/prediction/quote-book-v2
+  // Extended quote-book with Phase 4a SS fields (= escrow_p2sh / settle_txid / refund_txid / revote_round / oracle votes summary).
+  // Supports all Phase 4a states (open_awaiting_taker_stake / matched / verifying / collecting_sigs / completed / refunded).
+  fastify.get('/api/prediction/quote-book-v2', async (request, reply) => {
+    const includeStates = (request.query.statuses || 'open,handshake_done,open_awaiting_taker_stake,matched,verifying,collecting_sigs,completed,refunded').split(',');
+    const placeholders = includeStates.map(() => '?').join(',');
+    const rows = sqlite.prepare(`
+      SELECT id, maker, maker_kaspa_addr, maker_relay_id, taker, give_asset, give_amount, want_asset, want_amount,
+             outcome_token_id, outcome_condition_id, outcome_side, outcome_end_date, outcome_market_source,
+             outcome_oracle_hook, outcome_oracle_relay_ids, outcome_max_deviation_pp, published_price,
+             expires_at, created_at, updated_at, matched_at, protocol_status, metadata,
+             escrow_p2sh, settle_txid, refund_txid, revote_round,
+             taker_stake_locked_kas, taker_escrow_lock_tx, pending_taker_pubkey, pending_handshake_expires_at,
+             outcome_oracle_relay_id
+      FROM exchange_offers
+      WHERE (give_asset = 'prediction_outcome_share' OR want_asset = 'prediction_outcome_share')
+        AND protocol_status IN (${placeholders})
+      ORDER BY created_at DESC LIMIT 100
+    `).all(...includeStates);
+
+    // Enrich with oracle vote summary + explorer URL prefix
+    const network = process.env.KASPA_NETWORK || 'testnet-12';
+    const explorerBase = network === 'mainnet' ? 'https://explorer.kaspa.org' : 'https://explorer-tn12.kaspa.org';
+    const enriched = rows.map(o => {
+      let voteSummary = null;
+      if (o.escrow_p2sh) {
+        try {
+          const votes = sqlite.prepare(`
+            SELECT payload FROM chain_events
+            WHERE event_type='oracle_vote' AND to_address=?
+              AND payload LIKE ? AND payload LIKE ?
+          `).all(o.maker_kaspa_addr, `%"offer_id":"${o.id}"%`, `%"revote_round":${o.revote_round || 0}%`);
+          const tally = { YES: 0, NO: 0, DISPUTE: 0 };
+          const voters = new Set();
+          const voteDetails = [];
+          for (const v of votes) {
+            try {
+              const p = JSON.parse(v.payload || '{}');
+              if (p.t !== 'kanet_oracle_vote_v1' || voters.has(p.voter_relay_id)) continue;
+              voters.add(p.voter_relay_id);
+              if (tally[p.outcome] !== undefined) tally[p.outcome]++;
+              voteDetails.push({
+                voter_relay_id: p.voter_relay_id,
+                outcome: p.outcome,
+                evidence_url: p.evidence_url,
+                evidence_hash: p.evidence_hash,
+                vote_timestamp: p.vote_timestamp,
+              });
+            } catch {}
+          }
+          voteSummary = { tally, voters_count: voters.size, required: 5, details: voteDetails };
+        } catch {}
+      }
+      return {
+        ...o,
+        is_phase_4a: !!o.escrow_p2sh,
+        explorer: {
+          escrow: o.escrow_p2sh ? `${explorerBase}/addresses/${o.escrow_p2sh}` : null,
+          settle: o.settle_txid ? `${explorerBase}/txs/${o.settle_txid}` : null,
+          refund: o.refund_txid ? `${explorerBase}/txs/${o.refund_txid}` : null,
+          maker_escrow_lock: o.escrow_p2sh ? `${explorerBase}/txs/${o.broadcast_tx_id || ''}` : null,
+          taker_escrow_lock: o.taker_escrow_lock_tx ? `${explorerBase}/txs/${o.taker_escrow_lock_tx}` : null,
+        },
+        oracle_vote_summary: voteSummary,
+      };
+    });
+
+    return reply.send({ ok: true, offers: enriched, count: enriched.length, network });
+  });
+
+  // Phase 4a Sub 10 — GET /api/oracles — public leaderboard (= Phase 4b stub).
+  fastify.get('/api/oracles', async (request, reply) => {
+    const rows = sqlite.prepare(`
+      SELECT id, name, address, is_oracle, oracle_capabilities, voter_misbehave_count,
+             oracle_reputation_score, oracle_stake_locked_kas, ecdsa_pubkey_xonly
+      FROM relay_nodes
+      WHERE is_oracle = 1
+      ORDER BY voter_misbehave_count ASC, oracle_reputation_score DESC, name ASC
+      LIMIT 50
+    `).all();
+    // Count votes per oracle
+    const oracles = rows.map(r => {
+      let voteCount = 0;
+      try {
+        const c = sqlite.prepare(`SELECT COUNT(*) AS cnt FROM chain_events WHERE event_type='oracle_vote' AND from_address=?`).get(r.address);
+        voteCount = c?.cnt || 0;
+      } catch {}
+      return {
+        ...r,
+        oracle_capabilities: (() => { try { return JSON.parse(r.oracle_capabilities || '[]'); } catch { return []; } })(),
+        total_votes: voteCount,
+      };
+    });
+    return reply.send({ ok: true, oracles, count: oracles.length });
+  });
+
   // ── Stair-step same-entity deadline auditor (Bettor r174 R-COMPETITOR-BLIND-SPOT 治本) ──
   // GET all active stair-step audits — entities with >1 deadline rec
   fastify.get('/api/bettor/stair-step-audit', async (request, reply) => {
