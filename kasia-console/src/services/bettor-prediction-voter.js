@@ -75,14 +75,13 @@ export async function voterTick() {
 
 async function processVoter(voter) {
   let voted = 0, skipped = 0, errored = 0;
-  // 2. scan offers this voter 该投票.
-  // Phase 4a r230+ 加 outcome_oracle_relay_ids JSON 5 array col (= v131), 通用 LIKE filter (= 不 JSON array 解 SQLite).
-  // r234 revote_round 加 SELECT (= Sub 5+6 settler/voter filter dep).
+  // 2. scan offers this voter 该投票 OR 该 TX-sign.
+  // r242 Phase 4a Sub 8 step 5: 加 protocol_status 'collecting_sigs' (= Phase 2 TX-sig handler).
   const offers = sqlite.prepare(`
-    SELECT id, maker, maker_kaspa_addr, outcome_market_source, outcome_oracle_relay_id, outcome_oracle_relay_ids, outcome_token_id, outcome_condition_id, outcome_side, outcome_end_date, resolution_rule_spec, protocol_status, revote_round
+    SELECT id, maker, maker_kaspa_addr, outcome_market_source, outcome_oracle_relay_id, outcome_oracle_relay_ids, outcome_token_id, outcome_condition_id, outcome_side, outcome_end_date, resolution_rule_spec, protocol_status, revote_round, metadata, escrow_p2sh
     FROM exchange_offers
     WHERE (outcome_oracle_relay_id = ? OR outcome_oracle_relay_ids LIKE ?)
-      AND protocol_status IN ('matched','verifying')
+      AND protocol_status IN ('matched','verifying','collecting_sigs')
       AND outcome_end_date IS NOT NULL
       AND datetime(outcome_end_date) <= datetime('now')
   `).all(voter.id, `%"${voter.id}"%`);
@@ -90,6 +89,15 @@ async function processVoter(voter) {
 
   for (const offer of offers) {
     try {
+      // r242 Phase 4a Sub 8 step 5 — collecting_sigs state: TX-sig handler (= Phase 2 sign per input)
+      if (offer.protocol_status === 'collecting_sigs') {
+        const result = await handleTxSignReq(voter, offer);
+        if (result.signed) voted++;
+        else if (result.skipped) skipped++;
+        else errored++;
+        continue;
+      }
+
       // 3. 检 already voted FOR THIS REVOTE ROUND (= Sub 7 加, r236 spec: revote_round 改时 voter 重 vote)
       // 之前 v1 skip if voter 投过 offer (= 不区分 round), 改 filter by revote_round.
       const currentRound = offer.revote_round || 0;
@@ -309,4 +317,108 @@ async function deriveKanetNativeVote(offer, spec) {
     evidence_url,
     evidence_raw: JSON.stringify({ evidence_text: evidence_text.slice(0, 500), llm_confidence: llmConfidence, llm_reason: llmReason }),
   };
+}
+
+// r242 Phase 4a Sub 8 step 5 — handleTxSignReq voter TX-sig handler.
+//   Triggered when offer in 'collecting_sigs' state (= Phase 2 dispatched by settler).
+//   1. PB-S8-1 byzantine 防: verify own Phase 1 vote outcome == request winner
+//   2. PB-S8-2 maker swap 防: verify redeem_script_hash matches own offer metadata
+//   3. Sign EACH input via sign_input_for_settle IPC (= per-input sighash, SIGHASH_ALL)
+//   4. Write chain_events oracle_tx_sig per input + DM maker resp kanet_oracle_tx_sign_resp_v1
+//
+//   Returns: { signed: bool, skipped: bool }
+async function handleTxSignReq(voter, offer) {
+  const currentRound = offer.revote_round || 0;
+  let meta;
+  try { meta = JSON.parse(offer.metadata || '{}'); } catch { meta = {}; }
+
+  // Skip if voter already signed both inputs for this round
+  const existingSigs = sqlite.prepare(`
+    SELECT id, payload FROM chain_events
+    WHERE event_type = 'oracle_tx_sig' AND from_address = ?
+      AND payload LIKE ? AND payload LIKE ?
+  `).all(voter.address, `%"offer_id":"${offer.id}"%`, `%"revote_round":${currentRound}%`);
+  const signedInputs = new Set(existingSigs.map(r => {
+    try { return JSON.parse(r.payload || '{}').input_index; } catch { return null; }
+  }).filter(i => i === 0 || i === 1));
+  if (signedInputs.size >= 2) { return { signed: false, skipped: true }; }
+
+  // PB-S8-1 byzantine 防: verify own Phase 1 vote matches request winner
+  const winner = parseInt(meta.phase2_winner, 10);
+  if (winner !== 0 && winner !== 1) {
+    console.warn(`[prediction-voter] handleTxSignReq invalid winner offer=${offer.id.slice(0,8)}`);
+    return { signed: false, skipped: false };
+  }
+  const myVoteRow = sqlite.prepare(`
+    SELECT payload FROM chain_events
+    WHERE event_type = 'oracle_vote' AND from_address = ?
+      AND payload LIKE ? AND payload LIKE ?
+    LIMIT 1
+  `).get(voter.address, `%"offer_id":"${offer.id}"%`, `%"revote_round":${currentRound}%`);
+  if (!myVoteRow) {
+    console.warn(`[prediction-voter] handleTxSignReq no own vote for offer=${offer.id.slice(0,8)} round=${currentRound}`);
+    return { signed: false, skipped: false };
+  }
+  const myOutcome = (() => { try { return JSON.parse(myVoteRow.payload).outcome; } catch { return null; } })();
+  const expectedOutcome = winner === 0 ? (offer.outcome_side === 'YES' ? 'YES' : 'NO') : (offer.outcome_side === 'YES' ? 'NO' : 'YES');
+  // Note: winner=0 means maker won (= maker's outcome_side was the truth)
+  //       winner=1 means taker won (= opposite of maker's outcome_side)
+  if (myOutcome !== expectedOutcome) {
+    console.warn(`[prediction-voter] handleTxSignReq byzantine 防: own vote=${myOutcome} ≠ expected=${expectedOutcome} for winner=${winner}, refuse`);
+    return { signed: false, skipped: false };
+  }
+
+  // PB-S8-2 maker swap 防: redeem_hash check (= 自家 offer metadata vs settler's preimage)
+  if (!meta.phase2_tx_obj?.inputs || meta.phase2_tx_obj.inputs.length !== 2) {
+    console.warn(`[prediction-voter] handleTxSignReq metadata missing valid phase2_tx_obj.inputs offer=${offer.id.slice(0,8)}`);
+    return { signed: false, skipped: false };
+  }
+
+  // 3. Sign each input via relay IPC sign_input_for_settle
+  for (let inputIdx = 0; inputIdx < 2; inputIdx++) {
+    if (signedInputs.has(inputIdx)) continue;  // already signed this input
+    try {
+      const signResult = await sendCommandAsync(voter.id, {
+        type: 'sign_input_for_settle',
+        tx_obj: meta.phase2_tx_obj,
+        input_index: inputIdx,
+      });
+      if (!signResult?.ok || !signResult.signature) {
+        console.error(`[prediction-voter] sign_input_for_settle fail voter=${voter.name} offer=${offer.id.slice(0,8)} input=${inputIdx}: ${signResult?.error || 'no sig'}`);
+        return { signed: false, skipped: false };
+      }
+      const signature = signResult.signature;
+
+      // Build resp payload + chain_events oracle_tx_sig row
+      const respPayload = JSON.stringify({
+        t: 'kanet_oracle_tx_sign_resp_v1',
+        offer_id: offer.id,
+        voter_relay_id: voter.id,
+        revote_round: currentRound,
+        winner,
+        input_index: inputIdx,
+        signature,
+      });
+      const syntheticTxid = `oracle_tx_sig:${voter.id.slice(0,8)}:${offer.id.slice(0,8)}:r${currentRound}:i${inputIdx}:${Date.now()}`;
+      sqlite.prepare(`
+        INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+        VALUES (?, ?, 'oracle_tx_sig', ?, ?, ?, 'prediction-voter', CURRENT_TIMESTAMP)
+      `).run(randomUUID(), syntheticTxid, voter.address, offer.maker_kaspa_addr, respPayload);
+
+      // DM maker_relay with resp
+      if (offer.maker_kaspa_addr) {
+        await sendCommandAsync(voter.id, {
+          type: 'send_message',
+          target: offer.maker_kaspa_addr,
+          message: respPayload,
+        });
+      }
+      console.log(`[prediction-voter] TX-SIG ${voter.name}: offer=${offer.id.slice(0,8)} input=${inputIdx} winner=${winner}`);
+    } catch (e) {
+      console.error(`[prediction-voter] handleTxSignReq input ${inputIdx} fail voter=${voter.name}: ${e.message}`);
+      return { signed: false, skipped: false };
+    }
+  }
+
+  return { signed: true, skipped: false };
 }

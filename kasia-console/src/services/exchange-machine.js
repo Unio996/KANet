@@ -28,7 +28,7 @@ import crypto from 'crypto';
 const VALID_TRANSITIONS = {
   open:                     ['matched', 'cancelled', 'expired', 'refunded', 'timed_out'],
   matched:                  ['verifying', 'awaiting_manual_confirm', 'awaiting_oracle', 'refunded'],
-  verifying:                ['delivering', 'disputed', 'timed_out', 'refunded'],
+  verifying:                ['delivering', 'collecting_sigs', 'disputed', 'timed_out', 'refunded'],
   delivering:               ['completed', 'verified', 'disputed', 'refunded'],  // verified = revert on delivery failure
   verified:                 ['delivering', 'disputed', 'timed_out', 'refunded'], // delivery retry or manual intervention
   awaiting_manual_confirm:  ['completed', 'disputed', 'timed_out', 'refunded'],
@@ -37,6 +37,8 @@ const VALID_TRANSITIONS = {
   pending_taker:            ['handshake_done', 'cancelled', 'expired'],  // step 1 → step 2 OR maker abort OR handshake timeout
   handshake_done:           ['open_awaiting_taker_stake', 'cancelled', 'expired'],  // step 2 → step 3 OR maker abort
   open_awaiting_taker_stake:['matched', 'refunded', 'expired', 'timed_out'],  // step 3 → step 4 OR maker refund unjoined
+  // Phase 4a Sub 8 Phase 2 — TX-sig collection state (Bettor r242):
+  collecting_sigs:          ['completed', 'verifying', 'refunded', 'timed_out'],  // 5-of-5 unanimous → dispatched Phase 2 → wait 10 TX sigs OR timeout fallback
 };
 
 // Terminal states — no further transitions allowed
