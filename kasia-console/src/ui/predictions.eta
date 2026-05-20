@@ -184,7 +184,7 @@
 
   <!-- r177 Phase 1 sub 3 — 扫单 tab (currentTab === 'scan'): fossa-stable recs + Live News Inject + stair-step audit + KANet prediction trade quote book -->
   <template x-if="currentTab === 'scan'">
-    <div class="mb-4" x-init="if (!fossaRecs) loadFossaStable(); if (!predictionQuoteBook) loadPredictionQuoteBook(); if (!makerWhitelist) loadMakerWhitelist()">
+    <div class="mb-4" x-init="if (!fossaRecs) loadFossaStable(); if (!predictionQuoteBook) loadPredictionQuoteBook(); if (!predictionQuoteBookV2) loadPredictionQuoteBookV2(); if (!makerWhitelist) loadMakerWhitelist()">
       <div class="flex items-center justify-between mb-3">
         <h2 class="text-lg font-bold text-ink-700">🔍 扫单</h2>
         <div class="flex items-center gap-2 text-[11px]">
@@ -269,6 +269,80 @@
           </div>
         </details>
       </template>
+
+      <!-- Phase 4a Sub 10 (Bettor r243/r244) — SS trustless escrow + 5-of-5 unanimous offers -->
+      <details class="card mb-3 border-l-4 border-l-purple-500" open>
+        <summary class="text-sm font-bold cursor-pointer hover:text-purple-700">🔒 Phase 4a SS Trustless Escrow + 5-of-5 Unanimous
+          <span x-show="predictionQuoteBookV2" class="text-[10px] text-ink-400 font-normal" x-text="'(' + ((predictionQuoteBookV2?.offers || []).filter(o => o.is_phase_4a).length) + ' Phase 4a offers, network: ' + (predictionQuoteBookV2?.network || '-') + ')'"></span>
+        </summary>
+        <div class="mt-2">
+          <div class="text-[11px] text-ink-500 mb-2">SS contract trustless escrow. 5 maker-selected oracles 全 unanimous → settle TX. 分歧 → revote max 2. 仍分歧 + deadline 过 → refund_both. taker 未 join + deadline 过 → refund_maker_unjoined.</div>
+          <template x-if="!predictionQuoteBookV2"><div class="text-center py-4 text-ink-400">载入中...</div></template>
+          <template x-if="predictionQuoteBookV2 && (predictionQuoteBookV2.offers || []).filter(o => o.is_phase_4a).length === 0">
+            <div class="text-center py-4 text-ink-400">暂无 Phase 4a SS offers</div>
+          </template>
+          <template x-if="predictionQuoteBookV2">
+            <div class="space-y-2">
+              <template x-for="o in (predictionQuoteBookV2.offers || []).filter(o => o.is_phase_4a)" :key="o.id + ':p4a'">
+                <div class="border border-purple-200 bg-purple-50 rounded p-2 text-[11px]">
+                  <div class="flex justify-between items-center mb-1">
+                    <span class="font-bold" x-text="o.outcome_condition_id"></span>
+                    <span class="px-2 py-0.5 rounded font-bold text-white" :class="{
+                      'bg-gray-500': ['pending_taker','handshake_done','open_awaiting_taker_stake'].includes(o.protocol_status),
+                      'bg-blue-500': ['matched','verifying'].includes(o.protocol_status),
+                      'bg-amber-500': o.protocol_status === 'collecting_sigs',
+                      'bg-green-600': o.protocol_status === 'completed',
+                      'bg-red-500': o.protocol_status === 'refunded'
+                    }" x-text="o.protocol_status"></span>
+                  </div>
+                  <div class="space-y-0.5">
+                    <div>🔒 P2SH: <code class="text-[10px]" x-text="(o.escrow_p2sh || '').slice(0, 30) + '...'"></code>
+                      <a :href="o.explorer?.escrow" target="_blank" class="text-purple-600 underline ml-1">🔗</a>
+                    </div>
+                    <template x-if="o.revote_round > 0">
+                      <div class="px-2 py-1 bg-amber-100 text-amber-800 rounded text-[10px]">⚠ 重审 Round <span x-text="o.revote_round"></span>/2</div>
+                    </template>
+                    <template x-if="o.oracle_vote_summary">
+                      <div>
+                        🗳️ 投票: <span class="text-green-700 font-bold" x-text="o.oracle_vote_summary.tally.YES + ' YES'"></span> /
+                        <span class="text-red-700 font-bold" x-text="o.oracle_vote_summary.tally.NO + ' NO'"></span> /
+                        <span class="text-gray-600 font-bold" x-text="o.oracle_vote_summary.tally.DISPUTE + ' DISPUTE'"></span>
+                        <span class="text-ink-500" x-text="'(' + o.oracle_vote_summary.voters_count + '/5)'"></span>
+                      </div>
+                    </template>
+                    <template x-if="o.settle_txid">
+                      <div class="text-green-700">
+                        ✅ Settled: <code class="text-[10px]" x-text="o.settle_txid.slice(0, 16) + '...'"></code>
+                        <a :href="o.explorer?.settle" target="_blank" class="text-purple-600 underline ml-1">🔗</a>
+                      </div>
+                    </template>
+                    <template x-if="o.refund_txid">
+                      <div class="text-amber-700">
+                        💸 Refunded: <code class="text-[10px]" x-text="o.refund_txid.slice(0, 16) + '...'"></code>
+                        <a :href="o.explorer?.refund" target="_blank" class="text-purple-600 underline ml-1">🔗</a>
+                      </div>
+                    </template>
+                    <div class="text-ink-500">截止: <span x-text="o.outcome_end_date"></span></div>
+                  </div>
+                  <template x-if="o.oracle_vote_summary && (o.oracle_vote_summary.details || []).length > 0">
+                    <details class="mt-1">
+                      <summary class="text-[10px] text-ink-500 cursor-pointer">查看 5 oracle 投票详情</summary>
+                      <div class="mt-1 space-y-0.5 text-[10px]">
+                        <template x-for="v in o.oracle_vote_summary.details" :key="v.voter_relay_id">
+                          <div class="bg-white p-1 rounded">
+                            Oracle <code x-text="v.voter_relay_id.slice(0,8)"></code>: <strong x-text="v.outcome"></strong>
+                            evidence: <code x-text="(v.evidence_hash || '').slice(0,16)"></code>
+                          </div>
+                        </template>
+                      </div>
+                    </details>
+                  </template>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+      </details>
 
       <!-- Sub 4: r177 KANet prediction trade quote book (broker exchange asset_type=prediction_outcome_share) -->
       <details class="card mb-3 border-l-4 border-l-cyan-500">
@@ -1366,6 +1440,7 @@ function predictionsPage() {
 
     // r177 Phase 1 sub 3 — KANet prediction trade quote book
     predictionQuoteBook: null,
+    predictionQuoteBookV2: null,  // Phase 4a Sub 10 — SS escrow + 5-of-5 unanimous offers (Bettor r243/r244)
     makerWhitelist: null,
     showMakerApply: false,
     makerApplyForm: { relay_node_id: '', stake_amount_kas: 100 },
@@ -2000,6 +2075,18 @@ function predictionsPage() {
       } catch (e) {
         console.warn('[r177] quote-book load fail:', e.message);
         this.predictionQuoteBook = { ok: false, offers: [], count: 0 };
+      }
+    },
+
+    // Phase 4a Sub 10 (Bettor r243/r244) — quote-book-v2 Phase 4a SS offers + enrichment
+    async loadPredictionQuoteBookV2() {
+      try {
+        const r = await fetch('/api/prediction/quote-book-v2');
+        const data = await r.json();
+        this.predictionQuoteBookV2 = data;
+      } catch (e) {
+        console.warn('[Phase 4a] quote-book-v2 load fail:', e.message);
+        this.predictionQuoteBookV2 = { ok: false, offers: [], count: 0 };
       }
     },
 
