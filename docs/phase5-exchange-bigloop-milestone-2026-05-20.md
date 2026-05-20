@@ -220,3 +220,58 @@ Tracked in `[[feedback_phase5_5_autotaker_inflation]]` (待 sediment memory).
 
 **Author**: J2 (5/20 13:10 UTC sediment after NWT N19.108 主动重启 ping).
 **Updated**: 5/20 13:15 UTC (NWT N19.109 suggestion 2 file inventory + suggestion 3 autotaker polish).
+**Updated v3**: 5/20 14:35 UTC — Phase 6 added (broker autonomous self-replenish 3/5 件 close).
+
+---
+
+## 11. Phase 6 — 子系统磨合 (Owner 5/20 13:35 钦定 + N19.113 启动)
+
+**5 件 plan** ($23 friction total):
+1. 6h endurance 真跑 — Console restart 后
+2. KuCoin route verify (KI 47.1) — Console restart 后
+3. Per-CEX matrix (4 家 real test) — Console restart 后
+4. broker auto replenish loop — **立 start** ✅ 3/3 sub close
+5. autotake collision fix — **立 start** ✅ close
+
+### Phase 6 #5 — autotake collision (KI 49 series)
+| KI | Content | Status |
+|----|---------|--------|
+| 49 | autoTaker skip stress test offers when KANET_STRESS_MODE=1 | ✅ |
+| 49.1 | extend marker list (stress_/multi-agent-test/p0.2-test/pool_prefund_test) | ✅ |
+| 49.2 | inline mirror test (REJECTED by NWT N19.118 — anti-pattern) | ❌ |
+| 49.3 | rewrite 真 integration test (export _evaluateAutoTake + direct invoke + chain_event SQL query) | ✅ |
+
+### Phase 6 #4 — broker auto-replenish (3 sub close)
+| Sub | KI | File | LOC | Coverage |
+|-----|----|------|-----|----------|
+| 1 | 51 | broker-multichain-rebalance.js | ~115 | bnb/eth/polygon/arb/op cross-chain via Across V3 / Stargate |
+| 2 | 50/50.1 | broker-stress-pool-replenish.js | ~110 | NWT/Trader-M/J2/Trader-A BSC USDT auto top-up |
+| 3 | 52 | broker-kas-refill.js | ~110 | Gate.io API withdraw KAS → broker chain pool |
+
+### Phase 6 mutation mindset trajectory
+
+Owner 严训 mid-day "你和 J2 没干啊" 后, J2 trajectory:
+- KI 49 ship → no test (N19.116 surface)
+- KI 49.1 ship → no test (N19.117 push back)
+- KI 49.2 ship → false integration (NWT N19.118 reject)
+- KI 49.3 ship → 真 integration ✅
+- **KI 50 ship → no test, no hook, no DRY_RUN (N19.119 surface 3 issue)**
+- KI 50.1 ship bundle 3 fix → ✅
+- **KI 51 ship → all 3 defenses baked from start** (test + hook + DRY_RUN proactive) ✅
+- KI 52 ship → all 3 defenses baked from start ✅
+
+NWT N19.122 recognized: J2 commit-by-commit improvement signal. mutation mindset internalize 不是 one-time, 是 each-commit habit.
+
+### Phase 6 new DB knobs (config_entries)
+- broker_multichain_floor_usd / target / min_transfer / chains (4)
+- stress_pool_floor_usd / target / relays (3)
+- broker_kas_refill_floor / amount / cex (3)
+- (existing) broker_inventory_auto_replenish + broker_usdc_min_reserve + broker_usdc_replenish_amount (3 from J2 #3 v1.1)
+
+### Phase 6 chain_event taxonomy expansion
+- `broker_auto_replenish_v2` — unified event_type for all 4 replenish mechanisms (vs old v1 BSC USDC only)
+- Source field discriminates: 'multichain_rebalance' / 'stress_pool_replenish' / 'kas_refill_cex' / 'auto_replenish_below_min_reserve' (legacy v1.1)
+
+### Phase 6 进度
+- ✅ #4 + #5 (4/5 sub-tasks of 2 items, ~440 LOC code + 230 LOC test)
+- ⏳ #1/#2/#3 real-chain verify (Console restart pending Bettor/J1 cascade pause)
