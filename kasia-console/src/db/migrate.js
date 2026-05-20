@@ -3949,5 +3949,63 @@ export function runMigrations() {
     }
   }
 
+  // v132: Phase 4a Sub 11 rebuild exchange_offers CHECK constraint (Bettor r247).
+  //   原 CHECK 不含 Phase 4a states (pending_taker / handshake_done / open_awaiting_taker_stake / collecting_sigs).
+  //   SQLite 不支持 ALTER CHECK, 必 rebuild table.
+  //   Bettor 4 reviewer 加固: idempotency / explicit column order / index recreate / row count verify.
+  //
+  // sediment [[ss-audit-required]] 第 11 项: 加新 protocol_status state 时必同步 CHECK constraint.
+  {
+    const tableInfo = sqlite.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='exchange_offers'").get();
+    const checkMatch = tableInfo?.sql?.match(/CHECK\s*\(\s*protocol_status\s+IN\s*\(([^)]+)\)\s*\)/);
+    const currentCheckStates = checkMatch ? checkMatch[1].split(',').map(s => s.trim().replace(/'/g, '')) : [];
+    const needed = ['pending_taker', 'handshake_done', 'open_awaiting_taker_stake', 'collecting_sigs'];
+    const missing = needed.filter(s => !currentCheckStates.includes(s));
+    if (missing.length > 0 && tableInfo?.sql) {
+      console.log(`[migrate] v132: exchange_offers CHECK 缺 ${missing.length} state (${missing.join(',')}), rebuild table.`);
+      // Capture indexes for recreation
+      const indexes = sqlite.prepare(`SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name='exchange_offers' AND sql IS NOT NULL`).all();
+      const rowCountBefore = sqlite.prepare(`SELECT COUNT(*) AS cnt FROM exchange_offers`).get().cnt;
+      const colsList = sqlite.prepare(`PRAGMA table_info(exchange_offers)`).all().map(c => c.name);
+      const colsCsv = colsList.join(', ');
+
+      // Build new CREATE TABLE with updated CHECK (= include Phase 4a states)
+      const allStates = [
+        'open', 'matched', 'verifying', 'delivering', 'completed', 'refunded', 'failed', 'expired', 'timed_out', 'cancelled', 'disputed', 'verified',
+        'pending_handshake', 'pending_taker', 'handshake_done', 'open_awaiting_taker_stake', 'collecting_sigs', 'awaiting_manual_confirm', 'awaiting_oracle',
+      ];
+      const newCheckClause = `CHECK (protocol_status IN (${allStates.map(s => `'${s}'`).join(',')}))`;
+      const newSql = tableInfo.sql
+        .replace(/CREATE TABLE\s+"?exchange_offers"?/, 'CREATE TABLE exchange_offers_v132')
+        .replace(/CHECK\s*\(\s*protocol_status\s+IN\s*\([^)]+\)\s*\)/, newCheckClause);
+
+      sqlite.exec('BEGIN TRANSACTION');
+      try {
+        sqlite.exec('DROP TABLE IF EXISTS exchange_offers_v132');  // idempotency 加固 1
+        sqlite.exec(newSql);
+        sqlite.exec(`INSERT INTO exchange_offers_v132 (${colsCsv}) SELECT ${colsCsv} FROM exchange_offers`);  // explicit column order 加固 2
+        const rowCountAfter = sqlite.prepare(`SELECT COUNT(*) AS cnt FROM exchange_offers_v132`).get().cnt;
+        if (rowCountAfter !== rowCountBefore) {
+          throw new Error(`v132 row count mismatch: before=${rowCountBefore} after=${rowCountAfter}`);  // backup verify 加固 4
+        }
+        sqlite.exec('DROP TABLE exchange_offers');
+        sqlite.exec('ALTER TABLE exchange_offers_v132 RENAME TO exchange_offers');
+        // index recreate 加固 3
+        for (const idx of indexes) {
+          if (idx.sql) {
+            try { sqlite.exec(idx.sql); }
+            catch (ie) { console.warn(`[migrate] v132 index ${idx.name} recreate fail: ${ie.message}`); }
+          }
+        }
+        sqlite.exec('COMMIT');
+        console.log(`[migrate] v132: exchange_offers rebuilt (${rowCountBefore} rows preserved, ${indexes.length} indexes recreated, CHECK 加 ${needed.length} Phase 4a states).`);
+      } catch (e) {
+        sqlite.exec('ROLLBACK');
+        console.error(`[migrate] v132 ROLLBACK: ${e.message}`);
+        throw e;
+      }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
