@@ -4,7 +4,7 @@
 // Verify Phase 1a hedge mechanism (commit 45a041c08) 30-day silent dead 修后 first 真触发.
 //
 // flow (~$0.14 USDT cost):
-// 1. NWT DM broker BUY 0.7 KAS BSC → broker publishes broker-v3-escrow offer (hedge_enabled=true)
+// 1. NWT DM broker BUY 1.2 KAS BSC → broker publishes broker-v3-escrow offer (hedge_enabled=true)
 // 2. find broker open offer (waiting for KAS taker)
 // 3. NWT-or-another-relay manual /api/exchange/accept the broker offer
 //    autoTaker rejected discount too low (0.26%<1%), manual accept bypasses
@@ -77,7 +77,7 @@ export default {
         userKasia: NWT_KASIA,
         brokerKasia: BROKER_KASIA,
         userEvmAddr: NWT_BSC_ADDR,
-        qty: 0.7,
+        qty: 50,  // KI 28 5/20: Bybit min order value ~$1, 50 KAS × 0.034 = $1.70 clears threshold
         chain: 'BSC',
         fromRelayName: 'NWT',
       },
@@ -155,7 +155,7 @@ export default {
     for (const e of events) counts[e.event_type] = (counts[e.event_type] || 0) + 1;
 
     return {
-      ok: finalOffer?.protocol_status === 'completed',
+      ok: finalOffer?.protocol_status === 'completed' && hedgeFired === true,
       summary: `offer=${brokerOffer.id.slice(0,12)} final=${finalOffer?.protocol_status || 'TIMEOUT'} hedge_fired=${hedgeFired} (baseline ${hedgeBaseline} → ${hedgeFinal})`,
       details: {
         broker_offer_id: brokerOffer.id,
