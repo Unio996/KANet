@@ -36,8 +36,13 @@ export default {
 
     // KI 44.1 Conflict #2 fix (NWT N19.89 Path B): hedge_router enable + small_order_cex=kucoin route.
     // qty 10-30 KAS = $0.34-$1 = clear KuCoin $0.10 min. Avoids Bybit $5 (KI 28 复刻).
+    // KI 44.2 fix (NWT N19.90): backup-restore config pattern (align KI 42.1) — test 不污染 prod config.
+    const configBackup = {};
     if (opts.enableRouterPath !== false) {
-      const { setConfig } = await import('../../../src/data/settings/configs.js');
+      const { setConfig, getConfig } = await import('../../../src/data/settings/configs.js');
+      configBackup.enabled = await getConfig('hedge_router_enabled');
+      configBackup.smallCex = await getConfig('hedge_router_small_order_cex');
+      configBackup.smallThreshold = await getConfig('hedge_router_small_order_threshold_usd');
       await setConfig('hedge_router_enabled', 'true');
       await setConfig('hedge_router_small_order_cex', 'kucoin');
       await setConfig('hedge_router_small_order_threshold_usd', '5');  // < $5 → kucoin route
@@ -92,10 +97,12 @@ export default {
         max_concurrent: 10,
       });
     } finally {
-      // KI 44.1 cleanup: revert router_enabled (test-pollution 防)
+      // KI 44.2 fix (NWT N19.90): backup-restore — preserve original config (NOT覆写 default 'false').
       if (opts.enableRouterPath !== false) {
         const { setConfig } = await import('../../../src/data/settings/configs.js');
-        await setConfig('hedge_router_enabled', 'false');
+        if (configBackup.enabled !== undefined) await setConfig('hedge_router_enabled', configBackup.enabled || 'false');
+        if (configBackup.smallCex !== undefined) await setConfig('hedge_router_small_order_cex', configBackup.smallCex || 'kucoin');
+        if (configBackup.smallThreshold !== undefined) await setConfig('hedge_router_small_order_threshold_usd', configBackup.smallThreshold || '5');
       }
     }
 
