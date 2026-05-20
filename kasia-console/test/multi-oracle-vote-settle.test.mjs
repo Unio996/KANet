@@ -5,13 +5,38 @@
  *
  * Run: node --test test/multi-oracle-vote-settle.test.mjs
  */
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, before } from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import { collectMultiOracleVotes as collectMultiOracleVotesReal } from '../src/services/bettor-prediction-settler.js';
 
 let db;
+
+// r235 Sub 6 加: 真 ECDSA sign for test votes. cache keypairs by voterId 防 重新 derive expensive.
+let kaspa;
+const _voterKeypairs = new Map();  // voterId → { privKey, xOnlyPubkey }
+
+async function ensureKaspa() {
+  if (!kaspa) kaspa = await import('kaspa-wasm');
+  return kaspa;
+}
+
+async function getVoterKeypair(voterId) {
+  if (_voterKeypairs.has(voterId)) return _voterKeypairs.get(voterId);
+  await ensureKaspa();
+  // Deterministic private key from voterId (= 32-byte hash, hash voterId → fake but deterministic privkey).
+  // 不 cryptographically safe — tests only.
+  const { createHash } = await import('node:crypto');
+  const hash = createHash('sha256').update(voterId).digest();
+  // Force odd-y (kaspa-wasm PrivateKey requires valid x-only). Just use first 32 bytes as is.
+  const privKeyHex = Buffer.from(hash).toString('hex');
+  const privKey = new kaspa.PrivateKey(privKeyHex);
+  const xOnlyPubkey = privKey.toPublicKey().toXOnlyPublicKey().toString();
+  const kp = { privKey, xOnlyPubkey };
+  _voterKeypairs.set(voterId, kp);
+  return kp;
+}
 
 function setupTestDB() {
   db = new Database(':memory:');
@@ -58,16 +83,23 @@ function seedRelay(relayId) {
     .run(relayId, `relay-${relayId.slice(0,8)}`);
 }
 
-function seedVote(offerId, makerAddr, voterId, outcome, revoteRound = 0) {
-  const payload = JSON.stringify({
+async function seedVote(offerId, makerAddr, voterId, outcome, revoteRound = 0) {
+  await ensureKaspa();
+  const { xOnlyPubkey, privKey } = await getVoterKeypair(voterId);
+  const unsigned = {
     t: 'kanet_oracle_vote_v1',
     offer_id: offerId,
     voter_relay_id: voterId,
+    voter_pubkey: xOnlyPubkey,
     outcome,
-    revote_round: revoteRound,
+    evidence_url: null,
     evidence_hash: 'a'.repeat(64),
     vote_timestamp: new Date().toISOString(),
-  });
+    revote_round: revoteRound,
+  };
+  const message = JSON.stringify(unsigned);
+  const signature = kaspa.signMessage({ message, privateKey: privKey });
+  const payload = JSON.stringify({ ...unsigned, signature });
   db.prepare(`INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
               VALUES (?, ?, 'oracle_vote', ?, ?, ?, 'test', CURRENT_TIMESTAMP)`)
     .run(randomUUID(), `vote:${voterId}:${offerId.slice(0,8)}:${randomUUID().slice(0,8)}`, `kaspa:${voterId}`, makerAddr, payload);
@@ -78,7 +110,7 @@ describe('Phase 4a Sub 5 — 5-of-5 unanimous + revote + misbehave (Bettor r234)
 
   it('1. unanimous YES — 5 YES → resolved YES', async () => {
     const offer = seedOffer('off-unan-yes', 'kaspa:m1');
-    for (let i = 1; i <= 5; i++) { seedRelay(`v${i}`); seedVote(offer.id, offer.maker_kaspa_addr, `v${i}`, 'YES', 0); }
+    for (let i = 1; i <= 5; i++) { seedRelay(`v${i}`); await seedVote(offer.id, offer.maker_kaspa_addr, `v${i}`, 'YES', 0); }
     const r = await collectMultiOracleVotesReal(offer, db);
     assert.equal(r.resolved, true);
     assert.equal(r.winner, 'YES');
@@ -88,7 +120,7 @@ describe('Phase 4a Sub 5 — 5-of-5 unanimous + revote + misbehave (Bettor r234)
 
   it('2. unanimous NO — 5 NO → resolved NO', async () => {
     const offer = seedOffer('off-unan-no', 'kaspa:m2');
-    for (let i = 1; i <= 5; i++) { seedRelay(`v${i}`); seedVote(offer.id, offer.maker_kaspa_addr, `v${i}`, 'NO', 0); }
+    for (let i = 1; i <= 5; i++) { seedRelay(`v${i}`); await seedVote(offer.id, offer.maker_kaspa_addr, `v${i}`, 'NO', 0); }
     const r = await collectMultiOracleVotesReal(offer, db);
     assert.equal(r.resolved, true);
     assert.equal(r.winner, 'NO');
@@ -96,8 +128,8 @@ describe('Phase 4a Sub 5 — 5-of-5 unanimous + revote + misbehave (Bettor r234)
 
   it('3. 4 YES + 1 NO — NOT unanimous → dissent + revote round 0→1', async () => {
     const offer = seedOffer('off-4y1n', 'kaspa:m3');
-    for (let i = 1; i <= 4; i++) { seedRelay(`v${i}`); seedVote(offer.id, offer.maker_kaspa_addr, `v${i}`, 'YES', 0); }
-    seedRelay('v5'); seedVote(offer.id, offer.maker_kaspa_addr, 'v5', 'NO', 0);
+    for (let i = 1; i <= 4; i++) { seedRelay(`v${i}`); await seedVote(offer.id, offer.maker_kaspa_addr, `v${i}`, 'YES', 0); }
+    seedRelay('v5'); await seedVote(offer.id, offer.maker_kaspa_addr, 'v5', 'NO', 0);
 
     const r = await collectMultiOracleVotesReal(offer, db);
     assert.equal(r.resolved, false);
@@ -118,7 +150,7 @@ describe('Phase 4a Sub 5 — 5-of-5 unanimous + revote + misbehave (Bettor r234)
 
   it('4. < 5 voters → pending (= waiting more votes)', async () => {
     const offer = seedOffer('off-3v', 'kaspa:m4');
-    for (let i = 1; i <= 3; i++) { seedRelay(`v${i}`); seedVote(offer.id, offer.maker_kaspa_addr, `v${i}`, 'YES', 0); }
+    for (let i = 1; i <= 3; i++) { seedRelay(`v${i}`); await seedVote(offer.id, offer.maker_kaspa_addr, `v${i}`, 'YES', 0); }
     const r = await collectMultiOracleVotesReal(offer, db);
     assert.equal(r.resolved, false);
     assert.match(r.reason, /waiting more votes/);
@@ -129,9 +161,9 @@ describe('Phase 4a Sub 5 — 5-of-5 unanimous + revote + misbehave (Bettor r234)
   it('5. revote_round filter — old round votes ignored', async () => {
     const offer = seedOffer('off-roundfilter', 'kaspa:m5', /* round= */ 1);
     // 4 votes from round 0 (= stale, must be ignored)
-    for (let i = 1; i <= 4; i++) { seedRelay(`v${i}`); seedVote(offer.id, offer.maker_kaspa_addr, `v${i}`, 'YES', 0); }
+    for (let i = 1; i <= 4; i++) { seedRelay(`v${i}`); await seedVote(offer.id, offer.maker_kaspa_addr, `v${i}`, 'YES', 0); }
     // 5 votes from round 1 (= current)
-    for (let i = 1; i <= 5; i++) { seedVote(offer.id, offer.maker_kaspa_addr, `v${i}`, 'YES', 1); }
+    for (let i = 1; i <= 5; i++) { await seedVote(offer.id, offer.maker_kaspa_addr, `v${i}`, 'YES', 1); }
 
     const r = await collectMultiOracleVotesReal(offer, db);
     assert.equal(r.resolved, true);
@@ -147,8 +179,8 @@ describe('Phase 4a Sub 5 — 5-of-5 unanimous + revote + misbehave (Bettor r234)
 
     // Set up offer where v is dissenting voter
     const offer = seedOffer('off-pause', 'kaspa:m6');
-    for (let i = 1; i <= 4; i++) { seedRelay(`v${i}`); seedVote(offer.id, offer.maker_kaspa_addr, `v${i}`, 'YES', 0); }
-    seedVote(offer.id, offer.maker_kaspa_addr, v, 'NO', 0);
+    for (let i = 1; i <= 4; i++) { seedRelay(`v${i}`); await seedVote(offer.id, offer.maker_kaspa_addr, `v${i}`, 'YES', 0); }
+    await seedVote(offer.id, offer.maker_kaspa_addr, v, 'NO', 0);
 
     await collectMultiOracleVotesReal(offer, db);
 
@@ -159,8 +191,8 @@ describe('Phase 4a Sub 5 — 5-of-5 unanimous + revote + misbehave (Bettor r234)
 
   it('7. max revote rounds done — round 2 + dissent →留 verifying, refund-eligible', async () => {
     const offer = seedOffer('off-maxround', 'kaspa:m7', /* round= */ 2);
-    for (let i = 1; i <= 4; i++) { seedRelay(`v${i}`); seedVote(offer.id, offer.maker_kaspa_addr, `v${i}`, 'YES', 2); }
-    seedRelay('v5'); seedVote(offer.id, offer.maker_kaspa_addr, 'v5', 'NO', 2);
+    for (let i = 1; i <= 4; i++) { seedRelay(`v${i}`); await seedVote(offer.id, offer.maker_kaspa_addr, `v${i}`, 'YES', 2); }
+    seedRelay('v5'); await seedVote(offer.id, offer.maker_kaspa_addr, 'v5', 'NO', 2);
 
     const r = await collectMultiOracleVotesReal(offer, db);
     assert.equal(r.resolved, false);
@@ -176,8 +208,8 @@ describe('Phase 4a Sub 5 — 5-of-5 unanimous + revote + misbehave (Bettor r234)
   it('8. dedupe same voter — multi-vote in same round → counted once', async () => {
     const offer = seedOffer('off-dedupe', 'kaspa:m8');
     seedRelay('v-spam');
-    for (let i = 0; i < 5; i++) seedVote(offer.id, offer.maker_kaspa_addr, 'v-spam', 'YES', 0);
-    for (let i = 2; i <= 5; i++) { seedRelay(`v${i}`); seedVote(offer.id, offer.maker_kaspa_addr, `v${i}`, 'YES', 0); }
+    for (let i = 0; i < 5; i++) await seedVote(offer.id, offer.maker_kaspa_addr, 'v-spam', 'YES', 0);
+    for (let i = 2; i <= 5; i++) { seedRelay(`v${i}`); await seedVote(offer.id, offer.maker_kaspa_addr, `v${i}`, 'YES', 0); }
 
     const r = await collectMultiOracleVotesReal(offer, db);
     assert.equal(r.resolved, true, 'v-spam counted once, plus 4 unique = 5 voters');
