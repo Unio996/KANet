@@ -1,42 +1,35 @@
-// Phase 4a Sub 3 — PredictionEscrowUnanimous5 P2SH addr compute (Bettor r225 v2.1 audit + Owner 5-of-5 unanimous 钦定).
+// Phase 4a Sub 3 v2 — PredictionEscrowUnanimous5 P2SH addr compute (Bettor r228 catch + r229/r230 v2 spec).
 //
-// Workflow:
-//   1. Load artifact (= silverc compile output JSON, 523 byte script + abi)
-//   2. Build redeem_script = ctor args push opcodes prepend + artifact.script
-//      - ctor 11 params (.sil source order):
-//          byte[32] makerPk, takerPk, brokerPk,
-//          byte[32] oracle1Pk, oracle2Pk, oracle3Pk, oracle4Pk, oracle5Pk,
-//          int deadline, int minerFee, int brokerFeePct
-//      - silverscript convention: ctor args pushed LIFO before script (= last param pushed first onto stack)
-//   3. P2SH script = createPayToScriptHashScript(redeem_script) via kaspa-wasm ScriptBuilder
-//   4. P2SH addr = addressFromScriptPublicKey(p2shScript, network)
+// 关键 sediment (= r228 reviewer 真 catch):
+//   silverscript --ctor 是 compile-time bake (= ctor args 编进 artifact.script literal).
+//   per-offer 不同 ctor → 不同 artifact.script → 不同 P2SH addr.
+//   v1 prepend 274 byte ctor 是 double-encoding 错 (= maker stake 锁错 addr 永 lost 风险).
+//   v2 修法: 每 publish 真 shellout silverc.exe → 新 artifact → artifact.script 直 当 redeem.
 //
-// 用 by:
-//   - api/bettor.js publish endpoint Sub 4 (= maker transfer SS P2SH addr 不 maker 自家钱包)
-//   - services/bettor-prediction-settler.js Sub 8 (= settle TX build use same redeem_script)
-//   - services/bettor-prediction-settler.js Sub 9 (= refund TX build use same redeem_script)
+// Workflow (= Path α: .106 装 silverc binary 自治):
+//   1. Validate ctor args (= part of r225 6 链下守)
+//   2. Build ctor JSON (= [{kind:'array', data:[{kind:'byte', data:N}...]}, ..., {kind:'int', data:N}])
+//   3. cache by sha256(.sil source + ctor JSON) — 防 .sil 改 cache invalidate
+//   4. cache miss → execFileSync(silverc.exe, [sil, --ctor, ctor.json, -c]) → stdout JSON artifact
+//   5. P2SH = ScriptBuilder.fromScript(artifact.script).createPayToScriptHashScript()
+//   6. addr = addressFromScriptPublicKey(spk, network)
+//
+// Deterministic verify (r230 加固 #3):
+//   J1 .106 silverc binary sha256=9e4dc3a6 (= match Bettor .109).
+//   同 binary + 同 .sil + 同 ctor → 必同 artifact.script (= 已 verify cross-host).
 
-import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
+import { execFileSync } from 'child_process';
+import { createHash } from 'crypto';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
+import { tmpdir } from 'os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ARTIFACT_PATH = join(__dirname, 'PredictionEscrowUnanimous5.json');
 
-// Cached artifact load (= 单 contract, 不变, 启动 load 1 次)
-let _artifact = null;
-function getArtifact() {
-  if (_artifact) return _artifact;
-  const raw = readFileSync(ARTIFACT_PATH, 'utf8');
-  _artifact = JSON.parse(raw);
-  if (_artifact.contract_name !== 'PredictionEscrowUnanimous5') {
-    throw new Error(`unexpected contract_name: ${_artifact.contract_name}`);
-  }
-  if (!Array.isArray(_artifact.script) || _artifact.script.length !== 523) {
-    throw new Error(`unexpected script size: ${_artifact.script?.length} (expect 523)`);
-  }
-  return _artifact;
-}
+const SILVERC = process.env.SILVERC_PATH || 'D:/silverscript/target/release/silverc.exe';
+const SIL_SOURCE = process.env.PREDICTION_SIL_PATH || join(__dirname, 'PredictionEscrowUnanimous5.sil');
+const CACHE_DIR = process.env.SS_ARTIFACT_CACHE_DIR || join(tmpdir(), 'kanet-ss-artifact-cache');
 
 // hex → Uint8Array
 function hexToBytes(hex) {
@@ -47,7 +40,7 @@ function hexToBytes(hex) {
   return out;
 }
 
-// validate 32-byte x-only pubkey hex
+// Validate 32-byte x-only pubkey hex
 function validatePubkeyHex(hex, name) {
   if (typeof hex !== 'string') throw new Error(`${name} must be hex string`);
   const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
@@ -56,7 +49,6 @@ function validatePubkeyHex(hex, name) {
   return clean;
 }
 
-// validate integer ctor param
 function validateInt(v, name, min = 0, max = Number.MAX_SAFE_INTEGER) {
   const n = parseInt(v, 10);
   if (!Number.isFinite(n) || n < min || n > max) {
@@ -65,22 +57,23 @@ function validateInt(v, name, min = 0, max = Number.MAX_SAFE_INTEGER) {
   return n;
 }
 
+// silverc ctor format: byte[32] = {kind:'array', data:[{kind:'byte', data:N}...]}, int = {kind:'int', data:N}
+function bytes32Expr(hexStr) {
+  const bytes = hexToBytes(hexStr);
+  return { kind: 'array', data: Array.from(bytes, b => ({ kind: 'byte', data: b })) };
+}
+function intExpr(n) {
+  return { kind: 'int', data: n };
+}
+
 /**
  * Compute PredictionEscrowUnanimous5 P2SH addr + redeem script for given ctor args.
+ * Per-offer compile via silverc.exe shellout (Path α, Bettor r230 钦定).
  *
- * @param {object} args
- * @param {string} args.makerPk      32-byte x-only hex
- * @param {string} args.takerPk      32-byte x-only hex
- * @param {string} args.brokerPk     32-byte x-only hex
- * @param {string[]} args.oraclePks  5 × 32-byte x-only hex (= maker 自选 5 oracle relay pubkeys)
- * @param {number} args.deadline    epoch seconds (UTC int, Kaspa tx.time second precision)
- * @param {number} args.minerFee    sompi int (= testnet 默 10000)
- * @param {number} args.brokerFeePct basis points (= 100 means 1%, < 10000)
- * @param {string} args.network     "mainnet" | "testnet-12"
- * @returns {{ p2shAddr: string, redeemScript: string }}  redeemScript = hex
+ * @returns {{ p2shAddr: string, redeemScript: string, cacheHit: boolean }}
  */
 export async function computeEscrowP2SH(args) {
-  // Validate ctor args (= match .sil ctor signature)
+  // Validate r225 6 链下守 early-fail
   const makerPk = validatePubkeyHex(args.makerPk, 'makerPk');
   const takerPk = validatePubkeyHex(args.takerPk, 'takerPk');
   const brokerPk = validatePubkeyHex(args.brokerPk, 'brokerPk');
@@ -88,62 +81,89 @@ export async function computeEscrowP2SH(args) {
     throw new Error('oraclePks must be array of 5 x-only pubkeys');
   }
   const oraclePks = args.oraclePks.map((pk, i) => validatePubkeyHex(pk, `oracle${i+1}Pk`));
-  // Unique check — 5 oracle 不重复 + maker/taker/broker/oracle 不重叠 (= r225 6 链下守, Sub 4 publish 也加, 此处早 fail safe)
   const allPks = new Set([makerPk, takerPk, brokerPk, ...oraclePks]);
   if (allPks.size !== 8) throw new Error('ctor pubkeys must all be unique (maker/taker/broker + 5 oracle = 8 distinct)');
   const deadline = validateInt(args.deadline, 'deadline', 1);
   const minerFee = validateInt(args.minerFee, 'minerFee', 0, 10_000_000);
-  const brokerFeePct = validateInt(args.brokerFeePct, 'brokerFeePct', 0, 9999);  // < 10000 防 force refund per Bettor 6 守
+  const brokerFeePct = validateInt(args.brokerFeePct, 'brokerFeePct', 0, 9999);  // < 10000 防 force refund
   if (!args.network) throw new Error('network required');
 
-  // kaspa-wasm late import (= load only when called, init time savings)
+  // Build ctor JSON (= silverc CLI 接 format)
+  const ctorJson = [
+    bytes32Expr(makerPk),
+    bytes32Expr(takerPk),
+    bytes32Expr(brokerPk),
+    ...oraclePks.map(bytes32Expr),
+    intExpr(deadline),
+    intExpr(minerFee),
+    intExpr(brokerFeePct),
+  ];
+  const ctorJsonStr = JSON.stringify(ctorJson);
+
+  // Cache key = sha256(.sil source + ctor) — .sil 改自动 invalidate
+  const silSource = readFileSync(SIL_SOURCE);
+  const sourceHash = createHash('sha256').update(silSource).digest('hex').slice(0, 16);
+  const cacheKey = createHash('sha256').update(sourceHash + ctorJsonStr).digest('hex');
+  if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true });
+  const cacheFile = join(CACHE_DIR, `${cacheKey}.json`);
+  const ctorPath = join(CACHE_DIR, `${cacheKey}.ctor.json`);
+
+  let artifact;
+  let cacheHit = false;
+  if (existsSync(cacheFile)) {
+    artifact = JSON.parse(readFileSync(cacheFile, 'utf8'));
+    cacheHit = true;
+  } else {
+    writeFileSync(ctorPath, ctorJsonStr);
+    let stdout;
+    try {
+      stdout = execFileSync(SILVERC, [SIL_SOURCE, '--ctor', ctorPath, '-c'], {
+        stdio: 'pipe',
+        timeout: 30_000,
+      });
+    } catch (e) {
+      const stderr = e.stderr?.toString() || '';
+      throw new Error(`silverc compile fail: ${e.message}${stderr ? ` | stderr: ${stderr.slice(0, 300)}` : ''}`);
+    }
+    artifact = JSON.parse(stdout.toString());
+    if (artifact.contract_name !== 'PredictionEscrowUnanimous5') {
+      throw new Error(`unexpected contract_name: ${artifact.contract_name}`);
+    }
+    if (!Array.isArray(artifact.script) || artifact.script.length === 0) {
+      throw new Error(`compile output missing script bytes`);
+    }
+    writeFileSync(cacheFile, JSON.stringify(artifact));
+  }
+
+  // P2SH wrap: artifact.script 是完整 redeem (ctor 已 baked, NO prepend per r228 catch)
   const kaspa = await import('kaspa-wasm');
   const { ScriptBuilder, addressFromScriptPublicKey } = kaspa;
-
-  // Build redeem_script:
-  // silverscript convention — ctor args pushed in LIFO order (= last param first).
-  // Order REVERSED from .sil signature:
-  //   push brokerFeePct (int)
-  //   push minerFee (int)
-  //   push deadline (int)
-  //   push oracle5Pk .. oracle1Pk (32-byte each)
-  //   push brokerPk .. makerPk (32-byte each)
-  // Then artifact.script (= 523 bytes contract logic).
-  //
-  // 注意: 此 LIFO 顺序 ↔ .sil signature 顺序的关系是 silverscript SDK convention.
-  // Phase 4a 真 e2e PASS 验后 sediment 写明确 (Bettor compile JSON 提供顺序若 explicit, 优先).
-  const builder = new ScriptBuilder();
-  builder.addData(hexToBytes(brokerPk));
-  builder.addData(hexToBytes(takerPk));
-  builder.addData(hexToBytes(makerPk));
-  for (let i = 5; i >= 1; i--) {
-    builder.addData(hexToBytes(oraclePks[i-1]));
-  }
-  builder.addI64(BigInt(brokerFeePct));
-  builder.addI64(BigInt(minerFee));
-  builder.addI64(BigInt(deadline));
-  // Append contract script bytes
-  const scriptBytes = new Uint8Array(getArtifact().script);
-  builder.addOps(scriptBytes);
-
-  // P2SH wrap + addr
+  const scriptBytes = new Uint8Array(artifact.script);
+  const builder = ScriptBuilder.fromScript(scriptBytes);
   const p2shSpk = builder.createPayToScriptHashScript();
   const addr = addressFromScriptPublicKey(p2shSpk, args.network);
   if (!addr) throw new Error('addressFromScriptPublicKey returned undefined');
 
   return {
     p2shAddr: addr.toString(),
-    redeemScript: builder.toString(),  // hex
+    redeemScript: Buffer.from(scriptBytes).toString('hex'),
+    cacheHit,
   };
 }
 
-/** Inspect loaded artifact (= debug helper). */
-export function getEscrowArtifactSummary() {
-  const a = getArtifact();
+/** Inspect silverc binary + .sil source (= debug helper). */
+export function getEscrowToolchainSummary() {
+  const silSource = readFileSync(SIL_SOURCE);
+  const sourceHash = createHash('sha256').update(silSource).digest('hex').slice(0, 16);
+  let silvercVersion = null;
+  try {
+    silvercVersion = execFileSync(SILVERC, ['--help'], { stdio: 'pipe', timeout: 5000 }).toString().split('\n')[0].trim();
+  } catch {}
   return {
-    contract_name: a.contract_name,
-    script_size: a.script.length,
-    abi_entries: a.abi?.map(e => ({ name: e.name, inputs: e.inputs?.length || 0 })) || [],
-    state_layout: a.state_layout,
+    silverc_path: SILVERC,
+    silverc_help_first_line: silvercVersion,
+    sil_source_path: SIL_SOURCE,
+    sil_source_hash16: sourceHash,
+    cache_dir: CACHE_DIR,
   };
 }
