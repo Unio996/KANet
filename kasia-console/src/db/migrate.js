@@ -3824,5 +3824,63 @@ export function runMigrations() {
     }
   }
 
+  // v124: r211 oracle v3 + broker layer 同 batch (Bettor r207 PB-A broker ALTER + r211 consensus O-1 oracle ALTER)
+  //   exchange_offers ADD outcome_oracle_relay_id + resolution_rule_spec (= Path D maker 自选 oracle as P2P primitive)
+  //   relay_nodes ADD broker_referral_code/stake/lock/approved + is_oracle/capabilities/stake/reputation (= unified KANet user role)
+  //   一并 v124 (= 跟 r211 Bettor broker layer 同 migration, J1 #320 ack 倾 propose, 等 Bettor 同意 OR push back).
+  {
+    const tableInfo = sqlite.prepare("SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name='exchange_offers'").get();
+    if (tableInfo.cnt) {
+      const cols = sqlite.prepare("PRAGMA table_info(exchange_offers)").all().map(c => c.name);
+      if (!cols.includes('outcome_oracle_relay_id')) {
+        sqlite.exec(`ALTER TABLE exchange_offers ADD COLUMN outcome_oracle_relay_id TEXT`);
+        console.log('[migrate] v124: exchange_offers 加 outcome_oracle_relay_id TEXT (r211 Path D maker 自选 oracle as P2P primitive).');
+      }
+      if (!cols.includes('resolution_rule_spec')) {
+        sqlite.exec(`ALTER TABLE exchange_offers ADD COLUMN resolution_rule_spec TEXT`);
+        console.log('[migrate] v124: exchange_offers 加 resolution_rule_spec TEXT (= JSON 5 字段 structured oracle resolution spec).');
+      }
+    }
+    const relayCols = sqlite.prepare("PRAGMA table_info(relay_nodes)").all().map(c => c.name);
+    // Broker layer 统一 KANet 角色 (Bettor r207 PB-A consensus, J1 #314)
+    if (!relayCols.includes('broker_referral_code')) {
+      sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN broker_referral_code TEXT`);
+      console.log('[migrate] v124: relay_nodes 加 broker_referral_code TEXT (r207 PB-A 统一 broker 角色, 跨 prediction+exchange).');
+    }
+    if (!relayCols.includes('broker_stake_locked_kas')) {
+      sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN broker_stake_locked_kas REAL DEFAULT 0`);
+      console.log('[migrate] v124: relay_nodes 加 broker_stake_locked_kas REAL (r207 PB-A).');
+    }
+    if (!relayCols.includes('broker_stake_lock_until')) {
+      sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN broker_stake_lock_until TEXT`);
+      console.log('[migrate] v124: relay_nodes 加 broker_stake_lock_until TEXT (r207 PB-A).');
+    }
+    if (!relayCols.includes('broker_approved_by')) {
+      sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN broker_approved_by TEXT`);
+      console.log('[migrate] v124: relay_nodes 加 broker_approved_by TEXT (r207 PB-A).');
+    }
+    if (!relayCols.includes('broker_approved_at')) {
+      sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN broker_approved_at TEXT`);
+      console.log('[migrate] v124: relay_nodes 加 broker_approved_at TEXT (r207 PB-A).');
+    }
+    // Oracle 角色 (Bettor r211 v3 consensus, J1 #316 Path D + #318 PB v3)
+    if (!relayCols.includes('is_oracle')) {
+      sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN is_oracle INTEGER DEFAULT 0`);
+      console.log('[migrate] v124: relay_nodes 加 is_oracle INTEGER (r211 v3 oracle 统一角色, 跟 broker 同结构).');
+    }
+    if (!relayCols.includes('oracle_capabilities')) {
+      sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN oracle_capabilities TEXT`);
+      console.log('[migrate] v124: relay_nodes 加 oracle_capabilities TEXT (= JSON list, e.g. ["polymarket_uma_mirror","kanet_ai_consensus_v1"]).');
+    }
+    if (!relayCols.includes('oracle_stake_locked_kas')) {
+      sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN oracle_stake_locked_kas REAL DEFAULT 0`);
+      console.log('[migrate] v124: relay_nodes 加 oracle_stake_locked_kas REAL (= 错判 slash 工具).');
+    }
+    if (!relayCols.includes('oracle_reputation_score')) {
+      sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN oracle_reputation_score REAL DEFAULT 0`);
+      console.log('[migrate] v124: relay_nodes 加 oracle_reputation_score REAL (= 跨 settle 历史).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
