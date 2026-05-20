@@ -1246,6 +1246,195 @@ export async function registerBettorRoutes(fastify) {
     });
   });
 
+  // POST /api/prediction/publish-v2 — Phase 4a SS trustless escrow + 5-of-5 unanimous (Bettor r225 v2.1 contract).
+  //
+  // Replaces Phase 3a trust-based path (= POST /api/prediction/publish). maker stake KAS goes to
+  // PredictionEscrowUnanimous5 P2SH addr (= silverc compile per-offer per ctor), 不 Owner trust addr.
+  //
+  // 6 链下守 (Bettor r225 audit):
+  //   1. unique 5 oracle relay_ids (= maker 自选 oracle SET, Path D)
+  //   2. deadline > now + 15 min (= 防 SS contract refund deadline too tight)
+  //   3. broker_fee_pct < 10000 (= 防 force refund 100% fee)
+  //   4. maker ≠ taker ≠ oracle (= 8 unique pubkeys, computeEscrowP2SH 再校 belt-and-suspenders)
+  //   5. 5 oracle isRelayAlive (= 防 ghost market, 跟 Phase 3a 同)
+  //   6. KAS price 在 publish 时锁 (= 防 stake math drift)
+  fastify.post('/api/prediction/publish-v2', async (request, reply) => {
+    const b = request.body || {};
+    const required = [
+      'maker_relay_id', 'broker_relay_id', 'outcome_oracle_relay_ids',
+      'outcome_market_source', 'outcome_condition_id', 'outcome_token_id', 'outcome_side', 'outcome_end_date',
+      'resolution_rule_spec', 'price', 'size_kas', 'broker_fee_pct',
+    ];
+    for (const k of required) {
+      if (b[k] === undefined || b[k] === null || b[k] === '') return reply.code(400).send({ ok: false, error: `missing ${k}` });
+    }
+
+    // 守 1+4: 5 oracle relay_ids JSON array, 8 unique (= maker/broker/taker_pubkey + 5 oracle)
+    let oracleRelayIds;
+    try {
+      oracleRelayIds = Array.isArray(b.outcome_oracle_relay_ids) ? b.outcome_oracle_relay_ids : JSON.parse(b.outcome_oracle_relay_ids);
+    } catch { return reply.code(400).send({ ok: false, error: 'outcome_oracle_relay_ids must be JSON array of 5 relay_ids' }); }
+    if (!Array.isArray(oracleRelayIds) || oracleRelayIds.length !== 5) {
+      return reply.code(400).send({ ok: false, error: 'outcome_oracle_relay_ids must be exactly 5 relay_ids' });
+    }
+    if (new Set(oracleRelayIds).size !== 5) {
+      return reply.code(400).send({ ok: false, error: 'outcome_oracle_relay_ids must be 5 unique' });
+    }
+    if (oracleRelayIds.includes(b.maker_relay_id) || oracleRelayIds.includes(b.broker_relay_id)) {
+      return reply.code(400).send({ ok: false, error: 'maker/broker cannot be oracle' });
+    }
+    if (b.maker_relay_id === b.broker_relay_id) {
+      return reply.code(400).send({ ok: false, error: 'maker ≠ broker required' });
+    }
+
+    // 守 5: 5 oracle isRelayAlive + is_oracle=1
+    for (let i = 0; i < 5; i++) {
+      const orow = sqlite.prepare(`SELECT id, name, address FROM relay_nodes WHERE id = ? AND is_oracle = 1`).get(oracleRelayIds[i]);
+      if (!orow) return reply.code(400).send({ ok: false, error: `oracle ${i+1} (${oracleRelayIds[i].slice(0,8)}) not registered as is_oracle=1` });
+      const live = isRelayAlive(oracleRelayIds[i]);
+      if (!live.alive) return reply.code(400).send({ ok: false, error: `oracle ${i+1} (${orow.name}) not alive: ${live.reason}` });
+    }
+
+    // 守 2: deadline > now + 15 min
+    const outcomeEndMs = new Date(b.outcome_end_date).getTime();
+    if (!Number.isFinite(outcomeEndMs) || outcomeEndMs < Date.now() + 15 * 60_000) {
+      return reply.code(400).send({ ok: false, error: 'outcome_end_date must be > now + 15 minutes' });
+    }
+
+    // 守 3: broker_fee_pct < 10000
+    const brokerFeePct = parseInt(b.broker_fee_pct, 10);
+    if (!Number.isFinite(brokerFeePct) || brokerFeePct < 0 || brokerFeePct >= 10000) {
+      return reply.code(400).send({ ok: false, error: 'broker_fee_pct must be 0-9999 (basis points, < 10000 防 force refund)' });
+    }
+
+    // Lookup maker + broker + 5 oracle addresses → x-only pubkeys
+    const kaspa = await import('kaspa-wasm');
+    const { XOnlyPublicKey, Address } = kaspa;
+    function addrToXOnlyHex(addr) {
+      try { return XOnlyPublicKey.fromAddress(new Address(addr)).toString(); }
+      catch (e) { throw new Error(`extract pubkey from ${addr}: ${e.message}`); }
+    }
+    const makerRow = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id = ?`).get(b.maker_relay_id);
+    const brokerRow = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id = ?`).get(b.broker_relay_id);
+    if (!makerRow?.address || !brokerRow?.address) return reply.code(400).send({ ok: false, error: 'maker or broker relay has no resolvable kaspa address' });
+    let makerPk, brokerPk, oraclePks;
+    try {
+      makerPk = addrToXOnlyHex(makerRow.address);
+      brokerPk = addrToXOnlyHex(brokerRow.address);
+      oraclePks = oracleRelayIds.map(rid => {
+        const r = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id = ?`).get(rid);
+        return addrToXOnlyHex(r.address);
+      });
+    } catch (e) { return reply.code(500).send({ ok: false, error: `pubkey derive fail: ${e.message}` });}
+
+    // takerPk: 0x00..00 placeholder (= unknown at publish, accept 时填入 OR Phase 4a single-PK 用 makerPk 占位)
+    // Bettor r225 6 守 #4 'maker ≠ taker' 在 accept endpoint 验, 此处 contract ctor 必须填 taker pubkey but unknown.
+    // 暂用 makerPk 占位 → accept 时若 taker ≠ maker, 必 re-compile + new P2SH addr → 不可行 (= immutable contract).
+    // 决: Phase 4a v0 takerPk = pre-determined OR maker 自双锁 (= taker join 后 compose 第二 SS contract).
+    // 实用化: Phase 4a v0 接受 takerPk = makerPk placeholder, SS settle 时 winner=1 means makerPk wins (= 等价 maker won),
+    // 这个 simplification 是 Phase 4a MVP, Phase 4a v1 升级 to 真 taker 自由 join (= 待 spec discussion w/ Bettor).
+    // 标 takerPk = makerPk + 留 metadata.taker_unbound=1 (= UI 显 "等 taker 接 (= 但 Phase 4a v0 简化)").
+    const takerPk = makerPk;
+
+    // Compile SS contract per-offer + P2SH addr
+    const price = parseFloat(b.price);
+    const sizeKas = parseFloat(b.size_kas);
+    if (!Number.isFinite(price) || price <= 0 || price >= 1) return reply.code(400).send({ ok: false, error: 'price must be in (0, 1)' });
+    if (!Number.isFinite(sizeKas) || sizeKas <= 0) return reply.code(400).send({ ok: false, error: 'size_kas must be positive' });
+
+    // 守 6: KAS price 在 publish 锁 (= metadata 写, settle/refund 时不重算)
+    const { getCachedKasPrice } = await import('../services/market-data.js');
+    const { getConfig } = await import('../data/settings/configs.js');
+    const kasUsd = getCachedKasPrice() || 0.034;
+    const numShares = sizeKas / price;
+    const stakeKas = (1 - price) * numShares * (1 / kasUsd);
+    if (!Number.isFinite(stakeKas) || stakeKas <= 0) return reply.code(400).send({ ok: false, error: `stake calc invalid: ${stakeKas}` });
+    const maxStakeRaw = await getConfig('kanet_prediction_max_stake_per_offer');
+    const MAX_STAKE_PER_OFFER = parseFloat(maxStakeRaw) || 1000;
+    if (stakeKas > MAX_STAKE_PER_OFFER) {
+      return reply.code(400).send({ ok: false, error: `stake ${stakeKas.toFixed(2)} KAS exceeds max ${MAX_STAKE_PER_OFFER} KAS` });
+    }
+
+    const minerFee = parseInt(b.miner_fee, 10) || 10_000;  // 0.0001 KAS default
+    const deadline = Math.floor(outcomeEndMs / 1000);
+
+    const { computeEscrowP2SH } = await import('../lib/prediction-escrow-ss.mjs');
+    let escrow;
+    try {
+      escrow = await computeEscrowP2SH({
+        makerPk, takerPk, brokerPk, oraclePks,
+        deadline, minerFee, brokerFeePct,
+        network: makerRow.address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet',
+      });
+    } catch (e) {
+      return reply.code(500).send({ ok: false, error: `SS contract compile fail: ${e.message}` });
+    }
+
+    // Maker transfer stake KAS → SS P2SH addr (= 替 trust-based escrow_addr)
+    const { sendCommandAsync } = await import('../services/relay-manager.js');
+    let escrowTxId = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const r = await sendCommandAsync(b.maker_relay_id, { type: 'transfer', target: escrow.p2shAddr, amount: stakeKas.toFixed(8) });
+        escrowTxId = r?.txId || null;
+        if (escrowTxId) break;
+        if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 5000));
+      } catch (err) {
+        console.log(`[prediction-publish-v2] escrow lock attempt ${attempt}/3 fail: ${err.message}`);
+        if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 5000));
+      }
+    }
+    if (!escrowTxId) return reply.code(503).send({ ok: false, error: `escrow SS lock chain TX failed after 3 attempts, P2SH=${escrow.p2shAddr}` });
+
+    // INSERT offer
+    const offerId = 'ext-pred-v2-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+    const expiresSecs = Math.max(60, Math.min(600, parseInt(b.expires_in_seconds, 10) || 300));
+    const expiresAt = new Date(Date.now() + expiresSecs * 1000).toISOString();
+    const metadata = JSON.stringify({
+      escrow_lock_tx: escrowTxId,
+      escrow_p2sh: escrow.p2shAddr,
+      redeem_script_hex: escrow.redeemScript,
+      stake_locked_kas: stakeKas,
+      kas_usd_at_publish: kasUsd,
+      miner_fee_sompi: minerFee,
+      broker_fee_pct: brokerFeePct,
+      taker_unbound: 1,  // Phase 4a v0 simplification flag
+      phase_4a_v0: 1,
+    });
+    try {
+      sqlite.prepare(`INSERT INTO exchange_offers (
+        id, broadcast_tx_id, message_index, give_asset, give_amount, want_asset, want_amount,
+        maker, verification, protocol_status, taker_locked,
+        market_key, expires_at, created_at, updated_at,
+        outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side,
+        outcome_end_date, outcome_oracle_hook, outcome_max_deviation_pp,
+        published_price, maker_kaspa_addr, maker_relay_id, metadata,
+        outcome_oracle_relay_ids, resolution_rule_spec,
+        escrow_p2sh
+      ) VALUES (?, ?, 0, 'prediction_outcome_share', ?, 'KAS', ?, ?, 'kanet_native_ss', 'open', 0, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(offerId, escrowTxId, numShares.toFixed(8), sizeKas.toFixed(8), makerRow.address,
+             `${b.outcome_condition_id}:${b.outcome_side}`, expiresAt,
+             b.outcome_market_source, b.outcome_condition_id, b.outcome_token_id, b.outcome_side,
+             b.outcome_end_date, b.outcome_oracle_hook || 'kanet_ai_consensus_v1', 5,
+             price, makerRow.address, b.maker_relay_id, metadata,
+             JSON.stringify(oracleRelayIds), b.resolution_rule_spec, escrow.p2shAddr);
+    } catch (e) {
+      console.error(`[prediction-publish-v2] DB insert fail: ${e.message}`);
+      return reply.code(500).send({ ok: false, error: `DB insert fail (escrow chain TX done ${escrowTxId}): ${e.message}` });
+    }
+
+    return reply.send({
+      ok: true,
+      offer_id: offerId,
+      shares: numShares,
+      stake_locked_kas: stakeKas,
+      escrow_p2sh: escrow.p2shAddr,
+      escrow_lock_tx: escrowTxId,
+      expires_at: expiresAt,
+      phase: '4a-v0',
+    });
+  });
+
   // POST /api/prediction/accept/:offer_id — taker accept, calls verifyPredictionMatch
   fastify.post('/api/prediction/accept/:offer_id', async (request, reply) => {
     const offerId = request.params.offer_id;
