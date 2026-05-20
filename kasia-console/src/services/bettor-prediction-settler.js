@@ -320,9 +320,39 @@ export async function collectMultiOracleVotes(offer, db = sqlite) {
   }
 
   if (currentRound < MAX_REVOTE_ROUNDS) {
-    // 触发 next revote round (= UPDATE revote_round++, Sub 7 voter daemon scan + re-DM)
+    // 触发 next revote round (= UPDATE revote_round++, voter daemon scan 下 tick 自然 catch)
     db.prepare(`UPDATE exchange_offers SET revote_round = revote_round + 1 WHERE id = ?`).run(offer.id);
     console.log(`[settler] dissent on offer ${offer.id.slice(0,12)} round ${currentRound} → trigger revote round ${currentRound + 1}, majority=${majority}, dissenters=${voters.size - tally[majority] || 0}`);
+
+    // r236 Sub 7 dispatchRevoteDM (= cross-host scenario, maker_relay → 5 oracle 主动通知).
+    // 同一 console: voter cron 下 tick 自动 scan 新 revote_round → 重 vote. DM 是冗余但 useful for cross-host.
+    // Single-tx 不重复发: 仅在 revote_round 真 changed 时 dispatch (= 跟 settler 的 UPDATE 同一时机).
+    try {
+      const oracleRelayIdsStr = offer.outcome_oracle_relay_ids;
+      if (oracleRelayIdsStr && offer.maker_relay_id) {
+        const oracleRelayIds = JSON.parse(oracleRelayIdsStr);
+        const placeholders = oracleRelayIds.map(() => '?').join(',');
+        const oracles = db.prepare(`SELECT id, address FROM relay_nodes WHERE id IN (${placeholders})`).all(...oracleRelayIds);
+        const revotePayload = JSON.stringify({
+          t: 'kanet_oracle_revote_v1',
+          offer_id: offer.id,
+          new_round: currentRound + 1,
+          previous_round_tally: tally,
+          deadline_warning: offer.outcome_end_date,
+        });
+        // dispatch via maker_relay (= async, non-blocking). 不 sendCommandAsync 阻塞 settler tick.
+        // Use Promise.allSettled — 失 oracle DM 不影响 settler 继续.
+        Promise.allSettled(oracles.map(o =>
+          sendCommandAsync(offer.maker_relay_id, { type: 'send_message', target: o.address, message: revotePayload })
+        )).then(results => {
+          const okCount = results.filter(r => r.status === 'fulfilled').length;
+          console.log(`[settler] revote DM dispatched offer=${offer.id.slice(0,12)} round=${currentRound + 1}: ${okCount}/${oracles.length} sent`);
+        }).catch(e => console.error(`[settler] revote DM dispatch fail: ${e.message}`));
+      }
+    } catch (dmErr) {
+      console.warn(`[settler] revote DM build fail (revote_round still bumped, voter cron next tick will catch): ${dmErr.message}`);
+    }
+
     return { ok: true, resolved: false, dissent: true, round: currentRound, next_round: currentRound + 1, majority, tally };
   }
 
