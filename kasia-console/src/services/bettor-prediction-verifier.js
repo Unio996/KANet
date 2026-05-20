@@ -52,7 +52,9 @@ export async function verifyPredictionMatch(offer, acceptMsg) {
   }
 
   // Layer 2: deviation guard — current gamma price vs offer published yes_price
-  if (offer.outcome_condition_id && offer.outcome_token_id) {
+  // r220 Phase 3a: 仅 polymarket source 走 gamma deviation check.
+  // kanet_native source (= LLM consensus path, voter deriveVote kanet_native branch) 不应用 gamma price 校.
+  if (offer.outcome_market_source === 'polymarket' && offer.outcome_condition_id && offer.outcome_token_id) {
     try {
       const res = await fetchGammaWithRetry(offer.outcome_token_id);
       if (!res.ok) return { ok: false, reason: `gamma HTTP ${res.status}` };
