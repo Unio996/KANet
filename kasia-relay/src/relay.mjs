@@ -521,6 +521,41 @@ if (process.send) {
           return;
         }
 
+        case 'sign_input_for_settle': {
+          // Phase 4a Sub 8 (Bettor r238 Path A two-phase sign) — oracle signs a specific TX input.
+          //
+          // Maker dispatches Phase 2 DM kanet_oracle_tx_sign_req_v1 含 unsigned TX hex + input index.
+          // Oracle voter daemon recv DM → verify own vote outcome + redeem_hash match → 调本 IPC.
+          // Returns ECDSA/Schnorr sig over input sighash (= 真 SS contract checkSig 兼).
+          //
+          // PB-S8-2 安全: privkey 不 leave relay process. Console 仅 pass tx_hex + input_index.
+          const { Transaction, createInputSignature, SighashType } = await import('kaspa-wasm');
+          const wallet = getWallet();
+          if (!cmd.tx_hex || typeof cmd.tx_hex !== 'string') {
+            throw new Error('sign_input_for_settle: cmd.tx_hex required (= unsigned TX hex serialization)');
+          }
+          const inputIndex = parseInt(cmd.input_index, 10);
+          if (!Number.isFinite(inputIndex) || inputIndex < 0) {
+            throw new Error('sign_input_for_settle: cmd.input_index required (= 0-based)');
+          }
+          // Phase 4a v0: TX deserialization + sighash via kaspa-wasm.
+          // TODO Sub 8.1 testnet 真 e2e 验: TX hex serialization format compatibility, sighash type selection.
+          let unsignedTx;
+          try {
+            // Phase 4a v0 简化: console 直 pass Transaction-shaped object via JSON OR
+            // hex full-serialization. kaspa-wasm Transaction constructor expects object spec.
+            // 现 设 cmd.tx_obj is the Transaction-spec object.
+            unsignedTx = new Transaction(cmd.tx_obj || JSON.parse(cmd.tx_hex));
+          } catch (e) {
+            throw new Error(`sign_input_for_settle: TX deserialize fail: ${e.message}`);
+          }
+          const signature = createInputSignature(unsignedTx, inputIndex, wallet.getPrivateKey(), SighashType.All);
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: { ok: true, signature, input_index: inputIndex } });
+          }
+          return;
+        }
+
         case 'prediction_refund_tx': {
           // Phase 4a Sub 9 — build + sign + submit SS refund TX (= maker single sig).
           //   branch 1 (refund_both): 2 inputs (maker_stake + taker_stake) → 2 outputs (maker + taker refund)
