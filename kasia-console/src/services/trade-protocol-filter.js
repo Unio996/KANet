@@ -246,13 +246,16 @@ async function _evaluateAutoTake(offerId, msg) {
   const localAddrs = sqlite.prepare('SELECT address FROM relay_nodes').all().map(r => r.address);
   if (process.env.KANET_TEST_MODE !== '1' && localAddrs.includes(msg._from)) { await _p('own_offer'); return; }
 
-  // Phase 6 #5 KI 49 (NWT N19.113): skip stress test offers during KANET_STRESS_MODE=1.
+  // Phase 6 #5 KI 49 (NWT N19.113 + N19.115): skip stress/test offers during KANET_STRESS_MODE=1.
   // 12 min real test 实证 production autoTaker fired 3 cycles on stress agent offers (inflation pollutes pass criteria).
-  // metadata source 'stress_5_5_*' marker → autoTaker skip, leave to stress agent taker.
+  // KI 49.1 (NWT N19.115 review): extend match list — multi-agent-test / p0.2-test / pool_prefund_test 也 catch.
+  const STRESS_SOURCE_MARKERS = ['stress_', 'multi-agent-test', 'p0.2-test', 'pool_prefund_test'];
   if (process.env.KANET_STRESS_MODE === '1') {
     let metaSource = null;
     try { metaSource = JSON.parse(msg.metadata || '{}').source; } catch {}
-    if (metaSource?.startsWith('stress_')) { await _p('stress_test_offer'); return; }
+    if (metaSource && STRESS_SOURCE_MARKERS.some(m => metaSource === m || metaSource.startsWith(m))) {
+      await _p('stress_mode_skip'); return;
+    }
   }
 
   // 3. Only auto-verifiable offers
