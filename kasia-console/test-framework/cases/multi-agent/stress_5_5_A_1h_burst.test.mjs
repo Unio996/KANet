@@ -27,7 +27,10 @@ export default {
   expensive: true,
 
   async run(opts = {}) {
-    const duration_ms = opts.duration_ms || 60 * 60 * 1000;  // 1 hour
+    const total_duration_ms = opts.duration_ms || 60 * 60 * 1000;  // 1 hour
+    const drain_ms = opts.drain_ms || 5 * 60 * 1000;  // 5 min mid-switch drain (NWT N19.94 Sub-A)
+    // Phase split: 25 min KuCoin + 5 min drain + 25 min Bybit + 5 min final drain
+    const phase_spawn_ms = (total_duration_ms - 2 * drain_ms) / 2;
     const spawn_rate_per_min = opts.spawn_rate_per_min || 0.5;  // 30/hr peak
     // KI 44.1 Conflict #1 fix (NWT N19.89): 5 buyer + 3 seller pool (per spec).
     // Caveat: 实际 BSC USDT only sufficient on NWT/Trader-M/J2 (Phase 5-1 snapshot 实证). Pool may need pre-fund.
@@ -90,14 +93,52 @@ export default {
     const actorTemplates = [...buyerTemplates, ...sellerTemplates];
     if (actorTemplates.length === 0) return { ok: false, error: 'no actors available (relay lookup fail)' };
 
-    let metrics;
+    // KI 45 Sub-2 (NWT N19.94 Sub-A): hybrid phase protocol.
+    // Phase 1 (0-25 min): KuCoin route, hedge_router_enabled=true (already set above).
+    // Drain 1 (25-30 min): no spawn, force-cleanup lock files post-drain.
+    // Phase 2 (30-55 min): Bybit route, hedge_router_enabled=false.
+    // Drain 2 (55-60 min): no spawn, final cleanup.
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    const forceCleanLocks = async () => {
+      try {
+        const { rmSync, existsSync } = await import('node:fs');
+        if (existsSync('C:/kanet/logs/agent-locks')) {
+          rmSync('C:/kanet/logs/agent-locks', { recursive: true, force: true });
+        }
+      } catch {}
+    };
+    let metrics1, metrics2;
     try {
-      metrics = await runStress({
+      // Phase 1: KuCoin
+      console.log('[5-5-A] Phase 1 start: KuCoin route, duration ' + (phase_spawn_ms / 60_000).toFixed(1) + ' min');
+      metrics1 = await runStress({
         actorTemplates,
-        duration_ms,
+        duration_ms: phase_spawn_ms,
         spawn_rate_per_min,
         max_concurrent: 10,
       });
+      // Drain 1
+      console.log('[5-5-A] Drain 1: ' + (drain_ms / 60_000).toFixed(1) + ' min wait + force-clean locks');
+      await sleep(drain_ms);
+      await forceCleanLocks();
+      // Switch to Bybit
+      if (opts.enableRouterPath !== false) {
+        const { setConfig } = await import('../../../src/data/settings/configs.js');
+        await setConfig('hedge_router_enabled', 'false');  // → Bybit primary (default)
+        console.log('[5-5-A] Phase switch: router_enabled=false → Bybit primary');
+      }
+      // Phase 2: Bybit
+      console.log('[5-5-A] Phase 2 start: Bybit route, duration ' + (phase_spawn_ms / 60_000).toFixed(1) + ' min');
+      metrics2 = await runStress({
+        actorTemplates,
+        duration_ms: phase_spawn_ms,
+        spawn_rate_per_min,
+        max_concurrent: 10,
+      });
+      // Final drain
+      console.log('[5-5-A] Final drain: ' + (drain_ms / 60_000).toFixed(1) + ' min');
+      await sleep(drain_ms);
+      await forceCleanLocks();
     } finally {
       // KI 44.2 fix (NWT N19.90): backup-restore — preserve original config (NOT覆写 default 'false').
       if (opts.enableRouterPath !== false) {
@@ -108,21 +149,35 @@ export default {
       }
     }
 
-    // Pass criteria check
-    const diff = metrics.final_pre_post_diff;
+    // KI 45 Sub-2: aggregate metrics across phases
+    const allMetrics = { phase1_kucoin: metrics1, phase2_bybit: metrics2 };
+    const totalSpawned = (metrics1?.actors_spawned ?? 0) + (metrics2?.actors_spawned ?? 0);
+    const totalCompleted = (metrics1?.actors_completed ?? 0) + (metrics2?.actors_completed ?? 0);
+    const totalFailed = (metrics1?.actors_failed ?? 0) + (metrics2?.actors_failed ?? 0);
+    const hedgePlacedDelta = (metrics1?.final_pre_post_diff?.hedge_placed_delta ?? 0) + (metrics2?.final_pre_post_diff?.hedge_placed_delta ?? 0);
+    const hedgeFailedDelta = (metrics1?.final_pre_post_diff?.hedge_failed_delta ?? 0) + (metrics2?.final_pre_post_diff?.hedge_failed_delta ?? 0);
+    const hedgeSkippedDelta = (metrics1?.final_pre_post_diff?.hedge_skipped_delta ?? 0) + (metrics2?.final_pre_post_diff?.hedge_skipped_delta ?? 0);
+    const kPoolDelta = (metrics2?.final_pre_post_diff?.k_pool_delta ?? null);  // phase2 final reflects total
+
+    // KI 45 Sub-3 Q7 (NWT N19.94 J2 #574 a+): 80% threshold + 0 hedge_skipped hard
     const failures = [];
-    if (metrics.actors_failed > metrics.actors_spawned * 0.5) {
-      failures.push(`actor fail rate ${metrics.actors_failed}/${metrics.actors_spawned} > 50%`);
+    if (totalFailed > totalSpawned * 0.5) {
+      failures.push(`actor fail rate ${totalFailed}/${totalSpawned} > 50%`);
     }
-    if (diff.k_pool_delta !== null && diff.k_pool_delta < -2000) {
-      failures.push(`K-pool drain ${diff.k_pool_delta} KAS (> 2000 unsustainable)`);
+    if (kPoolDelta !== null && kPoolDelta < -2000) {
+      failures.push(`K-pool drain ${kPoolDelta} KAS (> 2000 unsustainable)`);
     }
-    // hedge_placed target loose (cycle rate test-dependent on real CEX availability)
-    // Don't gate — just report
+    if (hedgeSkippedDelta > 0) {
+      failures.push(`hedge_skipped Δ ${hedgeSkippedDelta} — circuit breaker tripped (hard fail per Q7 a+)`);
+    }
+    const targetHedge = Math.floor((totalSpawned * 0.8));
+    if (hedgePlacedDelta < targetHedge && totalSpawned > 5) {
+      failures.push(`hedge_placed Δ ${hedgePlacedDelta} < target ${targetHedge} (80% of spawn ${totalSpawned})`);
+    }
     return {
       ok: failures.length === 0,
-      summary: `5-5-A 1h smoke: spawned=${metrics.actors_spawned} completed=${metrics.actors_completed} failed=${metrics.actors_failed} | hedge Δ +${diff.hedge_placed_delta}/${diff.hedge_failed_delta}/${diff.hedge_skipped_delta} | K-pool Δ ${diff.k_pool_delta} KAS`,
-      details: { metrics, diff, failures },
+      summary: `5-5-A 1h hybrid: spawned=${totalSpawned}/completed=${totalCompleted}/failed=${totalFailed} | hedge Δ +${hedgePlacedDelta} placed / +${hedgeFailedDelta} failed / +${hedgeSkippedDelta} skipped | K-pool Δ ${kPoolDelta} KAS`,
+      details: { phase1_kucoin: metrics1, phase2_bybit: metrics2, totals: { totalSpawned, totalCompleted, totalFailed, hedgePlacedDelta, hedgeFailedDelta, hedgeSkippedDelta, kPoolDelta }, failures },
     };
   },
 };
