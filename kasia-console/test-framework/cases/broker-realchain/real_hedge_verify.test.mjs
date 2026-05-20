@@ -19,6 +19,11 @@ import {
   publishOffer, transferEvmUsdt, dmRoundTrip,
 } from '../../lib/real-chain-runner.mjs';
 import Database from 'better-sqlite3';
+import { existsSync, writeFileSync, unlinkSync, readFileSync } from 'node:fs';
+
+// NWT N19.60 KI 31 Sub-1 5/20: 防 concurrent (Round N-1 still polling + Round N start) 共用同 NWT
+// relay 污染 parseQuote — 双 Flow inbound 抢同 broker reply. Run #9 quote 1 KAS 不 50 KAS 真因.
+const LOCK_FILE = 'C:/kanet/logs/real_hedge_verify.lock';
 
 const NWT_RELAY = '5b236c08-03d0-456c-953d-e10001610938';
 const NWT_KASIA = 'kaspa:qzd2ktu49f4cqwy7f4s2kmd5m4j0l27gfghjenurypaum99qxz2w7ktl95grm';
@@ -36,6 +41,22 @@ export default {
   expensive: true,
 
   async run() {
+    // NWT N19.60 KI 31 Sub-1: file lock 防并发 (前 Round 仍 DM polling + 新 Round start 同 NWT relay).
+    if (existsSync(LOCK_FILE)) {
+      let owner = '';
+      try { owner = readFileSync(LOCK_FILE, 'utf8'); } catch {}
+      return { ok: false, error: `real_hedge_verify 已在运行 (lock pid=${owner}). 等前 Run 完或删 ${LOCK_FILE}` };
+    }
+    writeFileSync(LOCK_FILE, String(process.pid));
+
+    try {
+      return await this._runInner();
+    } finally {
+      try { unlinkSync(LOCK_FILE); } catch {}
+    }
+  },
+
+  async _runInner() {
     const startIso = new Date().toISOString();
     console.log(`[real_hedge_verify] start ${startIso}`);
 
