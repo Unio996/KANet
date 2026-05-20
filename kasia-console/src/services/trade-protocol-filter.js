@@ -741,7 +741,7 @@ async function _executeHedge(offerId, agentName, side, qty, preferredCex = null)
   const { selectHedgeAccount } = await import('./hedge-router.js');
   const peekPrice = await _fetchHedgePrice('bybit', side).catch(() => null);
   const orderValueUsdt = peekPrice && qty ? Number(peekPrice) * Number(qty) : null;
-  const { account, route } = await selectHedgeAccount({
+  let { account, route } = await selectHedgeAccount({
     preferredCex, orderValueUsdt, side,
     mode: process.env.KANET_HEDGE_MODE || 'production',
   });
@@ -752,7 +752,7 @@ async function _executeHedge(offerId, agentName, side, qty, preferredCex = null)
   }
   console.log(`[exchange-hedge] router pick: ${account.exchange} (route=${route}) for offer ${offerId.slice(0,8)}`);
 
-  const def = EXCHANGE_REGISTRY.find(e => e.id === account.exchange);
+  let def = EXCHANGE_REGISTRY.find(e => e.id === account.exchange);
   if (!def) {
     console.log(`[exchange-hedge] Unknown exchange: ${account.exchange}`);
     return;
@@ -778,14 +778,38 @@ async function _executeHedge(offerId, agentName, side, qty, preferredCex = null)
 
   console.log(`[exchange-hedge] ${agentName} ${side} ${qty} KAS @ ${price.toFixed(5)} on ${account.exchange} (hedge for offer ${offerId.slice(0, 8)})`);
 
-  const result = await placeOrder({
-    authStyle: def.authStyle,
-    baseUrl: account.base_url || def.baseUrl,
-    headerName: def.headerName,
-    apiKey, apiSecret, extra,
-    symbol: def.kasPair, kasPair: def.kasPair,
-    side, price, qty,
-  });
+  // Phase 5-2 F-1 KI 40 (NWT N19.78): hedge-router failover loop.
+  // 任 CEX placeOrder fail → try next in failover chain (router_enabled才走). Backward compat: disabled 时只走 default.
+  const { getFailoverChain, _internals: routerInternals } = await import('./hedge-router.js');
+  let attempts = 0;
+  let result = null;
+  let chainRemaining = (await getConfig('hedge_router_enabled')) === 'true'
+    ? await getFailoverChain(account.exchange) : [];
+  while (true) {
+    result = await placeOrder({
+      authStyle: def.authStyle,
+      baseUrl: account.base_url || def.baseUrl,
+      headerName: def.headerName,
+      apiKey, apiSecret, extra,
+      symbol: def.kasPair, kasPair: def.kasPair,
+      side, price, qty,
+    });
+    if (result.ok || attempts >= 3 || chainRemaining.length === 0) break;
+    const nextCex = chainRemaining.shift();
+    const nextAccount = routerInternals.getAccountByName(nextCex);
+    if (!nextAccount) break;
+    console.log(`[hedge-router-failover] ${account.exchange} failed (${result.error?.slice(0,80)}), try ${nextCex}`);
+    account = nextAccount;
+    const nextDef = EXCHANGE_REGISTRY.find(e => e.id === account.exchange);
+    if (!nextDef) break;
+    def = nextDef;
+    try {
+      apiKey = account.api_key_encrypted ? decrypt(account.api_key_encrypted) : null;
+      apiSecret = account.api_secret_encrypted ? decrypt(account.api_secret_encrypted) : null;
+      extra = account.extra_encrypted ? JSON.parse(decrypt(account.extra_encrypted)) : {};
+    } catch (err) { console.log(`[hedge-router-failover] decrypt fail ${nextCex}: ${err.message}`); break; }
+    attempts++;
+  }
 
   if (result.ok) {
     console.log(`[exchange-hedge] SUCCESS orderId=${result.orderId} for offer ${offerId.slice(0, 8)}`);
