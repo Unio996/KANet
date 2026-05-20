@@ -102,6 +102,19 @@ export async function settlePredictionOutcomes() {
         }
         if (!r.resolved) { pending++; continue; }
 
+        // r242 Phase 4a Sub 8 step 4 — Phase 2 dispatch if escrow_p2sh set (= SS trustless path).
+        // 区分 Phase 3a 老 path (= trust-based escrow, 直 sendKaspa) vs Phase 4a path (= SS settle TX with 5 oracle sigs).
+        if (offer.escrow_p2sh) {
+          const phase2Result = await dispatchPhase2OrCheckSigs(offer, r.winner, db);
+          if (phase2Result.handled) {
+            if (phase2Result.completed) settled++;
+            else pending++;
+            continue;
+          }
+          // Fall through 到 legacy path if dispatchPhase2OrCheckSigs returned not-handled (= 不期望, log)
+          console.warn(`[settler] Phase 4a path fell through for offer ${offer.id.slice(0,12)}, fallback legacy`);
+        }
+
         const winner = r.winner;  // 'YES' or 'NO'
         const makerWon = (offer.outcome_side === winner);
         const metaPrev = (() => {
@@ -208,6 +221,143 @@ export async function settlePredictionOutcomes() {
   } finally {
     running = false;
   }
+}
+
+// r242 Phase 4a Sub 8 step 4 — Phase 2 dispatch + check 10 TX sigs collected.
+//   First call (= offer in 'verifying' state): dispatch Phase 2 DM 5 oracle TX-sig req → transition collecting_sigs.
+//   Subsequent calls (= offer in 'collecting_sigs' state): check chain_events oracle_tx_sig rows for current round.
+//   When 10 sigs collected (= 5 oracle × 2 inputs): assemble + submit settle TX via IPC.
+//   Returns: { handled: bool, completed: bool }
+async function dispatchPhase2OrCheckSigs(offer, winnerStr, db) {
+  const winner = winnerStr === 'YES' ? 0 : (winnerStr === 'NO' ? 1 : null);
+  if (winner === null) return { handled: false };  // DISPUTE not supported in settle (= 走 refund_both)
+  const currentRound = offer.revote_round || 0;
+
+  let meta;
+  try { meta = JSON.parse(offer.metadata || '{}'); } catch { meta = {}; }
+
+  if (offer.protocol_status === 'verifying') {
+    // First Phase 2 dispatch — build preimage + DM 5 oracle TX-sig req + transition collecting_sigs
+    try {
+      const { sendCommandAsync } = await import('./relay-manager.js');
+      const makerStake = parseInt(meta.maker_stake_sompi, 10) || 0;
+      const takerStake = parseInt(meta.taker_stake_sompi, 10) || 0;
+      const minerFee = parseInt(meta.miner_fee_sompi, 10) || 10_000;
+      const brokerFeePct = parseInt(meta.broker_fee_pct, 10) || 0;
+      const spendable = BigInt(makerStake + takerStake - minerFee);
+      const brokerFeeAmount = (spendable * BigInt(brokerFeePct)) / 10000n;
+      const winnerAmount = spendable - brokerFeeAmount;
+      const winnerAddr = winner === 0 ? offer.maker_kaspa_addr : offer.taker;
+      const brokerRelayId = meta.broker_relay_id;
+      const brokerRow = brokerRelayId ? db.prepare(`SELECT address FROM relay_nodes WHERE id=?`).get(brokerRelayId) : null;
+      const brokerAddr = brokerRow?.address;
+      if (!winnerAddr || !brokerAddr) {
+        console.error(`[settler] Phase 2 dispatch: missing winnerAddr or brokerAddr offer=${offer.id.slice(0,12)}`);
+        return { handled: true, completed: false };
+      }
+
+      // Build preimage via relay IPC
+      const preimage = await sendCommandAsync(offer.maker_relay_id, {
+        type: 'prediction_settle_build_preimage',
+        p2sh_address: offer.escrow_p2sh,
+        required_input_outpoints: [
+          { outpointTxid: offer.broadcast_tx_id, outpointIndex: 0 },
+          { outpointTxid: offer.taker_escrow_lock_tx, outpointIndex: 0 },
+        ],
+        outputs: [
+          { address: winnerAddr, amountSompi: winnerAmount.toString() },
+          { address: brokerAddr, amountSompi: brokerFeeAmount.toString() },
+        ],
+      });
+      if (!preimage?.ok || !preimage.tx_obj) {
+        console.error(`[settler] Phase 2 build_preimage fail offer=${offer.id.slice(0,12)}: ${preimage?.error}`);
+        return { handled: true, completed: false };
+      }
+
+      // Stash preimage + winner in metadata (= voter handler reads via offer scan)
+      const newMeta = { ...meta, phase2_tx_obj: preimage.tx_obj, phase2_winner: winner, phase2_dispatched_at: new Date().toISOString() };
+      db.prepare(`UPDATE exchange_offers SET metadata=? WHERE id=?`).run(JSON.stringify(newMeta), offer.id);
+
+      // DM 5 oracle with kanet_oracle_tx_sign_req_v1 (= async, non-blocking)
+      const oracleIds = JSON.parse(offer.outcome_oracle_relay_ids || '[]');
+      const oracleAddrs = oracleIds.length > 0
+        ? db.prepare(`SELECT id, address FROM relay_nodes WHERE id IN (${oracleIds.map(()=>'?').join(',')})`).all(...oracleIds)
+        : [];
+      const reqPayload = JSON.stringify({
+        t: 'kanet_oracle_tx_sign_req_v1',
+        offer_id: offer.id,
+        revote_round: currentRound,
+        winner,
+        redeem_script_hash: createHash('sha256').update(meta.redeem_script_hex || '', 'hex').digest('hex'),
+      });
+      Promise.allSettled(oracleAddrs.map(o =>
+        sendCommandAsync(offer.maker_relay_id, { type: 'send_message', target: o.address, message: reqPayload })
+      )).catch(() => {});
+
+      // Transition to collecting_sigs
+      transition(offer.id, 'collecting_sigs');
+      console.log(`[settler] Phase 4a Sub 8 Phase 2 dispatched offer=${offer.id.slice(0,12)} winner=${winnerStr} round=${currentRound}`);
+      return { handled: true, completed: false };
+    } catch (e) {
+      console.error(`[settler] Phase 2 dispatch fail offer=${offer.id?.slice(0,12)}: ${e.message}`);
+      return { handled: true, completed: false };
+    }
+  }
+
+  if (offer.protocol_status === 'collecting_sigs') {
+    // Check chain_events oracle_tx_sig rows for current round, assemble + submit if 10 collected
+    const sigRows = db.prepare(`SELECT payload FROM chain_events WHERE event_type='oracle_tx_sig' AND to_address=? AND payload LIKE ?`)
+      .all(offer.maker_kaspa_addr, `%"offer_id":"${offer.id}"%`);
+    const sigsByInput = [[], []];
+    const oracleSeenForInput = [new Set(), new Set()];
+    for (const row of sigRows) {
+      try {
+        const p = JSON.parse(row.payload || '{}');
+        if (p.t !== 'kanet_oracle_tx_sign_resp_v1') continue;
+        const r = parseInt(p.revote_round, 10) || 0;
+        if (r !== currentRound) continue;
+        const inputIdx = parseInt(p.input_index, 10);
+        if (inputIdx !== 0 && inputIdx !== 1) continue;
+        if (oracleSeenForInput[inputIdx].has(p.voter_relay_id)) continue;
+        oracleSeenForInput[inputIdx].add(p.voter_relay_id);
+        sigsByInput[inputIdx].push(p.signature);
+      } catch {}
+    }
+    if (sigsByInput[0].length < 5 || sigsByInput[1].length < 5) {
+      // TODO Sub 8.1: timeout fallback (= 5 min no progress → refund_both eligible)
+      return { handled: true, completed: false };
+    }
+
+    try {
+      const { sendCommandAsync } = await import('./relay-manager.js');
+      const submitResult = await sendCommandAsync(offer.maker_relay_id, {
+        type: 'prediction_settle_tx',
+        p2sh_address: offer.escrow_p2sh,
+        redeem_script_hex: meta.redeem_script_hex,
+        required_input_outpoints: [
+          { outpointTxid: offer.broadcast_tx_id, outpointIndex: 0 },
+          { outpointTxid: offer.taker_escrow_lock_tx, outpointIndex: 0 },
+        ],
+        outputs: meta.phase2_tx_obj?.outputs,
+        sigs_by_input: sigsByInput,
+        winner: meta.phase2_winner,
+      });
+      if (!submitResult?.ok || !submitResult.txId) {
+        console.error(`[settler] Phase 4a Sub 8 settle submit fail offer=${offer.id.slice(0,12)}: ${submitResult?.error}`);
+        return { handled: true, completed: false };
+      }
+
+      db.prepare(`UPDATE exchange_offers SET settle_txid=? WHERE id=?`).run(submitResult.txId, offer.id);
+      transition(offer.id, 'completed');
+      console.log(`[settler] Phase 4a Sub 8 SETTLE COMPLETED offer=${offer.id.slice(0,12)} settle_txid=${submitResult.txId.slice(0,16)} winner=${meta.phase2_winner}`);
+      return { handled: true, completed: true };
+    } catch (e) {
+      console.error(`[settler] Phase 4a Sub 8 settle assemble fail offer=${offer.id?.slice(0,12)}: ${e.message}`);
+      return { handled: true, completed: false };
+    }
+  }
+
+  return { handled: false };
 }
 
 // r234 Sub 5 collectMultiOracleVotes — 5-of-5 unanimous + revote + misbehave + auto-pause.
