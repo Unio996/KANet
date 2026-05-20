@@ -62,6 +62,7 @@ export async function settlePredictionOutcomes() {
       SELECT id, maker, maker_kaspa_addr, maker_relay_id, give_asset, give_amount, want_asset, want_amount, taker,
              outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side,
              outcome_end_date, outcome_oracle_hook, outcome_max_deviation_pp,
+             outcome_oracle_relay_id, resolution_rule_spec,
              published_price, protocol_status, metadata
       FROM exchange_offers
       WHERE (give_asset = 'prediction_outcome_share' OR want_asset = 'prediction_outcome_share')
@@ -83,9 +84,17 @@ export async function settlePredictionOutcomes() {
           }
         }
 
-        // r177 Phase 2a hotfix PB4: offer.maker_relay_id 直 from DB col (v122).
-        // verifyPredictionOutcome 只用 outcome_* fields, 不查 whitelist — 这里 alias 已 cleanup.
-        const r = await verifyPredictionOutcome(offer);
+        // r211 O-7 multi-oracle aggregation path (= Path D maker 自选 oracle):
+        //   若 outcome_oracle_relay_id 设, 走 collectMultiOracleVotes (= 收 3+ vote DM from voter daemon)
+        //   否则 fallback legacy verifyPredictionOutcome (= polymarket_uma_mirror 直接 Polymarket gamma)
+        let r;
+        if (offer.outcome_oracle_relay_id) {
+          r = await collectMultiOracleVotes(offer);
+        } else {
+          // r177 Phase 2a hotfix PB4: offer.maker_relay_id 直 from DB col (v122).
+          // verifyPredictionOutcome 只用 outcome_* fields, 不查 whitelist — 这里 alias 已 cleanup.
+          r = await verifyPredictionOutcome(offer);
+        }
         if (!r.ok) {
           console.warn(`[prediction-settler] verify fail ${offer.id.slice(0, 8)}: ${r.reason}`);
           errored++;
@@ -197,4 +206,49 @@ export async function settlePredictionOutcomes() {
   } finally {
     running = false;
   }
+}
+
+// r211 O-7 collectMultiOracleVotes — maker-side aggregator (= Path D + PB-D consensus).
+//   收 voter daemon DM (= kanet_oracle_vote_v1) via chain_events 'oracle_vote' to maker_kaspa_addr.
+//   3+ aligned outcome (= 3-of-5 multi-sig consensus) → declare winner.
+//   Phase 3a MVP: 仅 DB aggregation. Phase 4 (= SS contract address available) 真 build settleByMultiOracle TX.
+async function collectMultiOracleVotes(offer) {
+  if (!offer.maker_kaspa_addr) {
+    return { ok: false, reason: 'missing maker_kaspa_addr (= aggregator target)' };
+  }
+  const votes = sqlite.prepare(`
+    SELECT id, from_address, payload, observed_at
+    FROM chain_events
+    WHERE event_type = 'oracle_vote'
+      AND to_address = ?
+      AND payload LIKE ?
+  `).all(offer.maker_kaspa_addr, `%"offer_id":"${offer.id}"%`);
+
+  if (!votes.length) {
+    return { ok: false, reason: 'no oracle votes received yet' };
+  }
+
+  // Parse + tally by outcome
+  const tally = { YES: 0, NO: 0, DISPUTE: 0 };
+  const voters = new Set();
+  for (const v of votes) {
+    try {
+      const p = JSON.parse(v.payload || '{}');
+      if (p.t !== 'kanet_oracle_vote_v1') continue;
+      // dedupe per voter (= same voter multi-vote, take latest)
+      if (voters.has(p.voter_relay_id)) continue;
+      voters.add(p.voter_relay_id);
+      if (tally[p.outcome] !== undefined) tally[p.outcome]++;
+    } catch {}
+  }
+
+  const REQUIRED_SIGS = 3;  // r211 v3 Phase 3a: 3-of-5 multi-sig consensus
+  if (tally.YES >= REQUIRED_SIGS) {
+    return { ok: true, resolved: true, winner: 'YES', votes_yes: tally.YES, votes_no: tally.NO, total_voters: voters.size };
+  }
+  if (tally.NO >= REQUIRED_SIGS) {
+    return { ok: true, resolved: true, winner: 'NO', votes_yes: tally.YES, votes_no: tally.NO, total_voters: voters.size };
+  }
+  // 不 quorum yet — 继续 wait (= 留 verifying)
+  return { ok: true, resolved: false, votes_yes: tally.YES, votes_no: tally.NO, votes_dispute: tally.DISPUTE, total_voters: voters.size, required: REQUIRED_SIGS };
 }

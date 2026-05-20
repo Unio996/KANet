@@ -130,10 +130,12 @@ async function processVoter(voter) {
       }
 
       // 7. log chain_events 'oracle_vote' (= 防 same-tick double-vote + audit trail)
+      // Phase 3a MVP: synthetic txid (= 'oracle_vote:<voter>:<offer>:<ts>'). Phase 4 真 chain TX ID.
+      const syntheticTxid = `oracle_vote:${voter.id.slice(0,8)}:${offer.id.slice(0,8)}:${Date.now()}`;
       sqlite.prepare(`
-        INSERT INTO chain_events (id, event_type, from_address, to_address, payload, created_at)
-        VALUES (?, 'oracle_vote', ?, ?, ?, CURRENT_TIMESTAMP)
-      `).run(randomUUID(), voter.address, offer.maker_kaspa_addr, JSON.stringify(votePayload));
+        INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+        VALUES (?, ?, 'oracle_vote', ?, ?, ?, 'prediction-voter', CURRENT_TIMESTAMP)
+      `).run(randomUUID(), syntheticTxid, voter.address, offer.maker_kaspa_addr, JSON.stringify(votePayload));
 
       console.log(`[prediction-voter] VOTE ${voter.name}: offer=${offer.id.slice(0,8)} outcome=${voteResult.outcome}`);
     } catch (e) {
