@@ -75,25 +75,30 @@ export async function voterTick() {
 
 async function processVoter(voter) {
   let voted = 0, skipped = 0, errored = 0;
-  // 2. scan offers this voter 该投票
+  // 2. scan offers this voter 该投票.
+  // Phase 4a r230+ 加 outcome_oracle_relay_ids JSON 5 array col (= v131), 通用 LIKE filter (= 不 JSON array 解 SQLite).
+  // r234 revote_round 加 SELECT (= Sub 5+6 settler/voter filter dep).
   const offers = sqlite.prepare(`
-    SELECT id, maker, maker_kaspa_addr, outcome_oracle_relay_id, outcome_token_id, outcome_condition_id, outcome_side, outcome_end_date, resolution_rule_spec, protocol_status
+    SELECT id, maker, maker_kaspa_addr, outcome_market_source, outcome_oracle_relay_id, outcome_oracle_relay_ids, outcome_token_id, outcome_condition_id, outcome_side, outcome_end_date, resolution_rule_spec, protocol_status, revote_round
     FROM exchange_offers
-    WHERE outcome_oracle_relay_id = ?
+    WHERE (outcome_oracle_relay_id = ? OR outcome_oracle_relay_ids LIKE ?)
       AND protocol_status IN ('matched','verifying')
       AND outcome_end_date IS NOT NULL
       AND datetime(outcome_end_date) <= datetime('now')
-  `).all(voter.id);
+  `).all(voter.id, `%"${voter.id}"%`);
   if (!offers.length) return { voted, skipped, errored };
 
   for (const offer of offers) {
     try {
-      // 3. 检 already voted (= chain_events 查 same voter + offer)
+      // 3. 检 already voted FOR THIS REVOTE ROUND (= Sub 7 加, r236 spec: revote_round 改时 voter 重 vote)
+      // 之前 v1 skip if voter 投过 offer (= 不区分 round), 改 filter by revote_round.
+      const currentRound = offer.revote_round || 0;
       const existingVote = sqlite.prepare(`
         SELECT id FROM chain_events
-        WHERE event_type = 'oracle_vote' AND from_address = ? AND payload LIKE ?
+        WHERE event_type = 'oracle_vote' AND from_address = ?
+          AND payload LIKE ? AND payload LIKE ?
         LIMIT 1
-      `).get(voter.address, `%"offer_id":"${offer.id}"%`);
+      `).get(voter.address, `%"offer_id":"${offer.id}"%`, `%"revote_round":${currentRound}%`);
       if (existingVote) { skipped++; continue; }
 
       // 4. fetch evidence + decide outcome (= Phase 3a MVP: polymarket gamma resolve)
