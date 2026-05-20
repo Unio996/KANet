@@ -47,11 +47,26 @@ export default {
     if (r.route !== 'small_order') failures.push(`T3: route=${r.route} expected small_order (val $1)`);
     if (r.account?.exchange !== 'kucoin') failures.push(`T3: exchange=${r.account?.exchange} expected kucoin`);
 
-    // Test 4: large order + K-pool sufficient → default bybit
-    // (treasury_snapshot may or may not have KAS row; if not, brokerKPool=null → falls through to default)
+    // Test 4a/4b — KI 42 Weak Test #4 fix (NWT N19.82): setup treasury_snapshot row to force determined route.
+    // Use raw sqlite to inject snapshot rows (bypass treasury monitor 5min cycle).
+    const Database = (await import('better-sqlite3')).default;
+    const db = new Database('C:/kanet/kasia-console/data/console.db');
+    const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+    // T4a: K-pool high (> floor 5000) → default route forced
+    db.prepare(`INSERT INTO treasury_snapshot (relay_node_id, chain, asset, balance_raw, balance_human, source) VALUES (?, 'kaspa', 'KAS', ?, ?, 'test_inject')`)
+      .run(BROKER_RELAY_ID, String(10000 * 1e8), 10000);
     r = await router.selectHedgeAccount({ orderValueUsdt: 100, side: 'SELL' });
-    // Acceptable: default OR k_pool_low (depends on whether KAS snapshot exists)
-    if (r.route !== 'default' && r.route !== 'k_pool_low') failures.push(`T4: route=${r.route} expected default|k_pool_low`);
+    if (r.route !== 'default') failures.push(`T4a (K-pool=10000>floor): route=${r.route} expected default`);
+    if (r.account?.exchange !== 'bybit') failures.push(`T4a: exchange=${r.account?.exchange} expected bybit`);
+    // T4b: K-pool low (< floor 5000) → k_pool_low → gateio route forced
+    db.prepare(`INSERT INTO treasury_snapshot (relay_node_id, chain, asset, balance_raw, balance_human, source) VALUES (?, 'kaspa', 'KAS', ?, ?, 'test_inject')`)
+      .run(BROKER_RELAY_ID, String(1000 * 1e8), 1000);  // newest row (most recent ts wins per L37 DESC query)
+    r = await router.selectHedgeAccount({ orderValueUsdt: 100, side: 'SELL' });
+    if (r.route !== 'k_pool_low') failures.push(`T4b (K-pool=1000<floor): route=${r.route} expected k_pool_low`);
+    if (r.account?.exchange !== 'gateio') failures.push(`T4b: exchange=${r.account?.exchange} expected gateio`);
+    // Cleanup test_inject rows
+    db.prepare(`DELETE FROM treasury_snapshot WHERE source='test_inject'`).run();
+    db.close();
 
     // Test 5: auto_e2e mode → gateio (regardless of size)
     r = await router.selectHedgeAccount({ orderValueUsdt: 100, side: 'SELL', mode: 'auto_e2e' });

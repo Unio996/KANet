@@ -778,22 +778,28 @@ async function _executeHedge(offerId, agentName, side, qty, preferredCex = null)
 
   console.log(`[exchange-hedge] ${agentName} ${side} ${qty} KAS @ ${price.toFixed(5)} on ${account.exchange} (hedge for offer ${offerId.slice(0, 8)})`);
 
-  // Phase 5-2 F-1 KI 40 (NWT N19.78): hedge-router failover loop.
-  // 任 CEX placeOrder fail → try next in failover chain (router_enabled才走). Backward compat: disabled 时只走 default.
+  // Phase 5-2 F-1 KI 40 + KI 42 fix (NWT N19.78 / N19.82):
+  // KI 42 Bug #1 fix: attempts increment 重排 — placeOrder pre-increment, max 3 total (1 primary + 2 failover).
+  // KI 42 Bug #2 fix: hedge_failed payload 含 attemptedChain[] 全路径 (KI 18 audit trail invariant).
+  // KI 42 Bug #3 fix: failover 重 fetch price (避 stale initial CEX price).
   const { getFailoverChain, _internals: routerInternals } = await import('./hedge-router.js');
+  const attemptedChain = [];  // 累积 [{exchange, error}] for chain_event audit trail
   let attempts = 0;
   let result = null;
+  let livePrice = price;
   let chainRemaining = (await getConfig('hedge_router_enabled')) === 'true'
     ? await getFailoverChain(account.exchange) : [];
   while (true) {
+    attempts++;  // pre-increment: attempts=1 on first try (KI 42 #1 fix)
     result = await placeOrder({
       authStyle: def.authStyle,
       baseUrl: account.base_url || def.baseUrl,
       headerName: def.headerName,
       apiKey, apiSecret, extra,
       symbol: def.kasPair, kasPair: def.kasPair,
-      side, price, qty,
+      side, price: livePrice, qty,
     });
+    if (!result.ok) attemptedChain.push({ exchange: account.exchange, error: result.error });
     if (result.ok || attempts >= 3 || chainRemaining.length === 0) break;
     const nextCex = chainRemaining.shift();
     const nextAccount = routerInternals.getAccountByName(nextCex);
@@ -808,7 +814,10 @@ async function _executeHedge(offerId, agentName, side, qty, preferredCex = null)
       apiSecret = account.api_secret_encrypted ? decrypt(account.api_secret_encrypted) : null;
       extra = account.extra_encrypted ? JSON.parse(decrypt(account.extra_encrypted)) : {};
     } catch (err) { console.log(`[hedge-router-failover] decrypt fail ${nextCex}: ${err.message}`); break; }
-    attempts++;
+    // KI 42 Bug #3 fix: re-fetch price for new CEX (避 stale initial price)
+    const refreshed = await _fetchHedgePrice(account.exchange, side).catch(() => null);
+    if (refreshed) { livePrice = refreshed; }
+    else { console.log(`[hedge-router-failover] price refresh fail ${nextCex}, using prev price ${livePrice}`); }
   }
 
   if (result.ok) {
@@ -876,12 +885,16 @@ async function _executeHedge(offerId, agentName, side, qty, preferredCex = null)
       });
     }
   } else {
-    console.log(`[exchange-hedge] FAILED: ${result.error} for offer ${offerId.slice(0, 8)}`);
+    console.log(`[exchange-hedge] FAILED: ${result.error} for offer ${offerId.slice(0, 8)} (after ${attempts} attempts on chain ${attemptedChain.map(a => a.exchange).join('→') || account.exchange})`);
     _hedgeFailures.push(Date.now());
+    // KI 42 Bug #2 fix: emit complete attemptedChain audit trail (KI 18 invariant — chain_event 含完整故障路径).
     recordChainEvent({
       txid: offerId, eventType: 'hedge_failed',
       fromAddress: null, toAddress: null, observedBy: 'system',
-      payload: { exchange: account.exchange, side, qty, price, error: result.error },
+      payload: {
+        exchange: account.exchange, side, qty, price: livePrice, error: result.error,
+        attempts, attemptedChain,  // [{exchange, error}, ...] 全 CEX 失败路径
+      },
     });
   }
 }

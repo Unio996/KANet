@@ -36,10 +36,11 @@ function getDefaultAccount() {
 // Returns null if no recent snapshot (treasury_monitor may not yet include KAS branch — Phase 5-2 Sub-1).
 function getBrokerKPool() {
   try {
+    // KI 42 fix: ORDER BY id DESC (auto-increment) — snapshot_at 同秒精度可能 tie, id 保证 strict order.
     const row = sqlite.prepare(`
       SELECT balance_human FROM treasury_snapshot
       WHERE chain='kaspa' AND asset='KAS'
-      ORDER BY snapshot_at DESC LIMIT 1
+      ORDER BY id DESC LIMIT 1
     `).get();
     return row ? Number(row.balance_human) : null;
   } catch { return null; }
