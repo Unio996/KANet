@@ -50,7 +50,14 @@ function _cexQty(q) { return parseFloat(Number(q).toFixed(2)).toString(); }
  * @param {number} params.qty
  * @returns {Promise<object>} { ok, orderId, status, executedQty, error, raw }
  */
+// KI 42.1 test injection point (NWT N19.85): test can override placeOrder behavior
+// via _setMockPlaceOrder(fn) — production code path unchanged when mock is null.
+let _mockPlaceOrder = null;
+export function _setMockPlaceOrder(fn) { _mockPlaceOrder = fn; }
+export function _clearMockPlaceOrder() { _mockPlaceOrder = null; }
+
 export async function placeOrder(params) {
+  if (_mockPlaceOrder) return _mockPlaceOrder(params);
   const { authStyle } = params;
 
   try {

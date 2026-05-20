@@ -15,6 +15,7 @@ import { recordChainEvent } from './chain-event.js';
 import { checkLimits } from './trade-limits.js';
 import { placeOrder } from './exchange-orders.js';
 import { decrypt } from './crypto.js';
+import { getConfig } from '../data/settings/configs.js';
 // exchange-machine imports merged below at line ~352
 
 /**
