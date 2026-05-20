@@ -247,6 +247,8 @@ export function makeStopDecision(reason, completes = null) {
  * Mock brain for an offer taker — accepts the first broker SELL offer matching policy.
  */
 export async function mockTakerBrain(state) {
+  // KI 43.1 H-3 ext (NWT N19.86): see lastError → stop, 防 silent retry storm
+  if (state.lastError) return { action: 'stop', reason: `last_action_err: ${state.lastError}` };
   // Already accepted → wait for completion or stop
   if (state.pendingOfferId) {
     return { action: 'stop', reason: 'offer_accepted', completes: 'accept_done' };
@@ -274,6 +276,8 @@ export async function mockTakerBrain(state) {
  * Mock brain for a publisher (seller) — publishes one offer matching goal, then stops.
  */
 export function mockSellerBrain(state) {
+  // KI 43.1 H-3 ext (NWT N19.86): see lastError → stop
+  if (state.lastError) return { action: 'stop', reason: `last_action_err: ${state.lastError}` };
   if (state.history.some(s => s.action === 'publish_offer' && s.publish?.ok)) {
     return { action: 'stop', reason: 'offer_published', completes: 'publish_done' };
   }
