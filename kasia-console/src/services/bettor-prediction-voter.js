@@ -104,19 +104,49 @@ async function processVoter(voter) {
         continue;
       }
 
-      // 5. build kanet_oracle_vote_v1 JSON (= PB-B schema)
+      // 5. build kanet_oracle_vote_v1 JSON (= Bettor r235 Sub 6 spec).
+      // r234 加: revote_round 字段, settler filter 当前 round votes.
+      // r235 PB-S6 加: 真 ECDSA sign via relay IPC + voter_pubkey x-only derive.
       const evidenceHash = createHash('sha256').update(voteResult.evidence_raw || '').digest('hex');
-      const votePayload = {
+
+      // 5a. Get voter x-only pubkey via relay IPC (= relay holds privkey, derive in-process)
+      let voterXOnlyPubkey;
+      try {
+        const pkResult = await sendCommandAsync(voter.id, { type: 'get_pubkey' });
+        voterXOnlyPubkey = pkResult?.x_only_pubkey;
+        if (!voterXOnlyPubkey || voterXOnlyPubkey.length !== 64) {
+          throw new Error(`get_pubkey returned invalid: ${voterXOnlyPubkey}`);
+        }
+      } catch (pkErr) {
+        console.error(`[prediction-voter] get_pubkey fail voter=${voter.name}: ${pkErr.message}`);
+        errored++;
+        continue;
+      }
+
+      // 5b. Build unsigned payload + sign via relay IPC
+      const unsignedPayload = {
         t: 'kanet_oracle_vote_v1',
         offer_id: offer.id,
         voter_relay_id: voter.id,
-        voter_pubkey: voter.address,  // Phase 3a Phase 4 真 derive x-only pubkey
+        voter_pubkey: voterXOnlyPubkey,  // 32-byte x-only hex (= SS contract ctor oracleNPk match)
         outcome: voteResult.outcome,  // 'YES' | 'NO' | 'DISPUTE'
         evidence_url: voteResult.evidence_url || null,
         evidence_hash: evidenceHash,
         vote_timestamp: new Date().toISOString(),
-        signature: 'phase3a_skeleton',  // Phase 4 真 sign by voter privkey
+        revote_round: offer.revote_round || 0,  // Sub 5 settler filter, r234 spec
       };
+      const messageToSign = JSON.stringify(unsignedPayload);  // canonical signature input
+      let signature;
+      try {
+        const signResult = await sendCommandAsync(voter.id, { type: 'ecdsa_sign', message: messageToSign });
+        signature = signResult?.signature;
+        if (!signature) throw new Error('ecdsa_sign returned empty signature');
+      } catch (signErr) {
+        console.error(`[prediction-voter] ecdsa_sign fail voter=${voter.name} offer=${offer.id.slice(0,8)}: ${signErr.message}`);
+        errored++;
+        continue;
+      }
+      const votePayload = { ...unsignedPayload, signature };
 
       // 6. send DM to maker_relay (= PB-C 1-to-1, PB-D aggregator)
       if (!offer.maker_kaspa_addr) { errored++; continue; }

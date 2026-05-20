@@ -480,6 +480,36 @@ if (process.send) {
           }
           return;  // skip generic completion reply
         }
+
+        case 'ecdsa_sign': {
+          // Phase 4a r234/r235 Sub 6 — ECDSA sign a payload message (= voter daemon signs oracle vote).
+          // 用 kaspa-wasm signMessage (= secp256k1 over message hash, returns hex sig).
+          // PB-S6-2 安全: privkey 不 leak, sign 后立 forget. 仅 console.log message hash, NOT privkey.
+          const { signMessage } = await import('kaspa-wasm');
+          const wallet = getWallet();  // = lib/wallet.mjs instance, exists per relay process
+          const privKey = wallet.getPrivateKey();
+          const message = String(cmd.message || '');
+          if (!message) throw new Error('ecdsa_sign: missing cmd.message (string)');
+          const signature = signMessage({ message, privateKey: privKey });
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: { ok: true, signature, message_len: message.length } });
+          }
+          return;
+        }
+
+        case 'get_pubkey': {
+          // Phase 4a Sub 6 — return relay x-only pubkey (= SS contract oracle ctor param).
+          // Read-only, derives from wallet without exposing privkey.
+          const kaspa = await import('kaspa-wasm');
+          const wallet = getWallet();
+          const addr = wallet.getAddress();
+          const xpk = kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(addr));
+          const xOnlyHex = xpk.toString();
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: { ok: true, x_only_pubkey: xOnlyHex, address: addr } });
+          }
+          return;
+        }
       }
       // 如果有 requestId，回传执行结果给 Console
       if (cmd.requestId && process.send) {
