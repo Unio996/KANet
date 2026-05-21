@@ -68,12 +68,22 @@ export default {
 
       console.log(`[stress_6h_real_burst] cycle ${cycleIdx} fire qty=${qty} ${isBig ? '(BIG)' : '(small)'}`);
 
-      // Clear NWT escrow before each cycle (avoid Bug AW race)
+      // Clear NWT escrow before each cycle (avoid Bug AW race) — Fix-1 KI 63 (NWT N19.153/154):
+      // raw SQL UPDATE 绕过 broker refund path → escrow status='refunded' refund_tx=NULL → broker BSC USDT stuck.
+      // 改 _refundEscrow proper path (Bug AW + Bug AP guard + transferUsdt + UPDATE refund_tx + audit).
       try {
-        const wdb = new Database(DB_PATH);
-        wdb.prepare(`UPDATE user_escrow_balances SET status='refunded' WHERE user_kasia_addr=? AND status='active'`).run(NWT_KASIA);
-        wdb.close();
-      } catch {}
+        const { _refundEscrow } = await import('../../../src/services/exchange-machine.js');
+        const rdb = new Database(DB_PATH, { readonly: true });
+        const activeIds = rdb.prepare(`SELECT id FROM user_escrow_balances WHERE user_kasia_addr=? AND status='active'`).all(NWT_KASIA);
+        rdb.close();
+        for (const e of activeIds) {
+          await _refundEscrow(e.id, 'pre_cycle_cleanup_test').catch(err =>
+            console.warn(`[stress_6h_real_burst] refund ${e.id.slice(0,8)} skip: ${err.message}`)
+          );
+        }
+      } catch (err) {
+        console.warn(`[stress_6h_real_burst] pre-cycle cleanup err: ${err.message}`);
+      }
 
       const cycleStart = Date.now();
       try {
