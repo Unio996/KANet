@@ -4077,5 +4077,19 @@ export function runMigrations() {
     }
   }
 
+  // v134 — B2 v0.5 Sub 2d Phase 2a: pool_markets.metadata JSON for phase2_tx_obj stash
+  // Mirrors exchange_offers.metadata pattern (= phase2_tx_obj + winner + silent_oracle_index + dispatched_at).
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(pool_markets)").all();
+    if (!cols.some(c => c.name === 'metadata')) {
+      try {
+        sqlite.exec(`ALTER TABLE pool_markets ADD COLUMN metadata TEXT`);
+        console.log('[migrate] v134: pool_markets 加 metadata TEXT (= phase2_tx_obj + winner + silent_oracle_index stash, B2 v0.5 Sub 2d Phase 2a).');
+      } catch (e) {
+        console.warn(`[migrate] v134 ADD COLUMN fail: ${e.message}`);
+      }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

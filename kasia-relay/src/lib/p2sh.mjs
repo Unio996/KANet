@@ -382,10 +382,13 @@ function hexStrToBytes(hex) {
  * @returns {{ txObj: object, sighashInputs: Array<{inputIndex: number, sighashHint: string}> }}
  */
 export async function buildSettleTxPreimage(p2shAddress, requiredInputOutpoints, outputs, networkId, lockTime = 0n) {
+  // B2 v0.5 Sub 2d Phase 2a: accept p2shAddress as string OR array (= spine + N side p2sh for pool settle).
+  // 1V1 path passes string; pool path passes array.
+  const p2shList = Array.isArray(p2shAddress) ? p2shAddress : [p2shAddress];
   const rpc = await connectRpc(networkId);
   try {
-    const { entries } = await rpc.getUtxosByAddresses([p2shAddress]);
-    if (!entries?.length) throw new Error(`No UTXOs at P2SH ${p2shAddress}`);
+    const { entries } = await rpc.getUtxosByAddresses(p2shList);
+    if (!entries?.length) throw new Error(`No UTXOs at P2SH(s) ${p2shList.join(',')}`);
     const matched = requiredInputOutpoints.map(req => {
       const found = entries.find(e =>
         e.outpoint.transactionId === req.outpointTxid && Number(e.outpoint.index) === Number(req.outpointIndex)
