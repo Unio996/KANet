@@ -60,14 +60,20 @@ export async function voterTick() {
     if (!voterRelays.length) return { ok: true, voters: 0 };
 
     let totalVoted = 0, totalSkipped = 0, totalErrored = 0;
+    let poolVoted = 0, poolSkipped = 0, poolErrored = 0;
     for (const voter of voterRelays) {
       const r = await processVoter(voter);
       totalVoted += r.voted;
       totalSkipped += r.skipped;
       totalErrored += r.errored;
+      // B2 v0.5 Sub 2c — pool_markets oracle vote (= parallel to 1V1 prediction)
+      const p = await processPoolMarket(voter);
+      poolVoted += p.voted;
+      poolSkipped += p.skipped;
+      poolErrored += p.errored;
     }
-    console.log(`[prediction-voter] tick: ${voterRelays.length} voter relays, voted=${totalVoted} skipped=${totalSkipped} errored=${totalErrored}`);
-    return { ok: true, voters: voterRelays.length, voted: totalVoted, skipped: totalSkipped, errored: totalErrored };
+    console.log(`[prediction-voter] tick: ${voterRelays.length} voter relays, 1V1 voted=${totalVoted} skipped=${totalSkipped} errored=${totalErrored} | pool voted=${poolVoted} skipped=${poolSkipped} errored=${poolErrored}`);
+    return { ok: true, voters: voterRelays.length, voted: totalVoted, skipped: totalSkipped, errored: totalErrored, pool: { voted: poolVoted, skipped: poolSkipped, errored: poolErrored } };
   } finally {
     running = false;
   }
@@ -195,6 +201,130 @@ async function processVoter(voter) {
       console.log(`[prediction-voter] VOTE ${voter.name}: offer=${offer.id.slice(0,8)} outcome=${voteResult.outcome}`);
     } catch (e) {
       console.error(`[prediction-voter] process fail voter=${voter.name} offer=${offer.id?.slice(0,8)}: ${e.message}`);
+      errored++;
+    }
+  }
+  return { voted, skipped, errored };
+}
+
+// B2 v0.5 Sub 2c — process pool_markets where this voter is one of 3 oracles
+// Per service spec docs/poolspine-service-layer-spec-2026-05-21.md.
+//
+// Pool oracle Phase 1 = outcome vote (= same shape as 1V1 Phase 1 vote but on pool_markets table).
+// Pool oracle Phase 2 (settle TX sig) deferred — depends on settler Sub 2d shape.
+async function processPoolMarket(voter) {
+  let voted = 0, skipped = 0, errored = 0;
+  const markets = sqlite.prepare(`
+    SELECT id, maker_relay_id, outcome_market_source, outcome_token_id, outcome_condition_id, outcome_side,
+           resolution_rule_spec, protocol_status, deadline, oracle_relay_ids
+    FROM pool_markets
+    WHERE oracle_relay_ids LIKE ?
+      AND protocol_status = 'verifying'
+      AND deadline <= ?
+  `).all(`%"${voter.id}"%`, Math.floor(Date.now() / 1000));
+  if (!markets.length) return { voted, skipped, errored };
+
+  for (const market of markets) {
+    try {
+      // Defense in depth: re-parse JSON to confirm match (LIKE may false-positive on prefix collision)
+      let oracleIds;
+      try { oracleIds = JSON.parse(market.oracle_relay_ids || '[]'); } catch { oracleIds = []; }
+      if (!Array.isArray(oracleIds) || !oracleIds.includes(voter.id)) { skipped++; continue; }
+
+      // Skip if already voted for this market
+      const existing = sqlite.prepare(`
+        SELECT id FROM chain_events
+        WHERE event_type = 'pool_oracle_vote' AND from_address = ?
+          AND payload LIKE ?
+        LIMIT 1
+      `).get(voter.address, `%"market_id":"${market.id}"%`);
+      if (existing) { skipped++; continue; }
+
+      // deriveVote adapter — pass market as offer-shaped object (= reuse same deriveVote)
+      const offerLike = {
+        id: market.id,
+        outcome_market_source: market.outcome_market_source,
+        outcome_token_id: market.outcome_token_id,
+        outcome_condition_id: market.outcome_condition_id,
+        outcome_side: market.outcome_side,
+        resolution_rule_spec: market.resolution_rule_spec,
+        outcome_oracle_relay_id: voter.id,
+      };
+      const voteResult = await deriveVote(offerLike);
+      if (!voteResult.ok) {
+        console.warn(`[prediction-voter:pool] deriveVote fail voter=${voter.name} market=${market.id.slice(0,12)}: ${voteResult.reason}`);
+        errored++;
+        continue;
+      }
+
+      // Get voter x-only pubkey via relay IPC
+      let voterXOnlyPubkey;
+      try {
+        const pkResult = await sendCommandAsync(voter.id, { type: 'get_pubkey' });
+        voterXOnlyPubkey = pkResult?.x_only_pubkey;
+        if (!voterXOnlyPubkey || voterXOnlyPubkey.length !== 64) {
+          throw new Error(`get_pubkey returned invalid: ${voterXOnlyPubkey}`);
+        }
+      } catch (pkErr) {
+        console.error(`[prediction-voter:pool] get_pubkey fail voter=${voter.name}: ${pkErr.message}`);
+        errored++;
+        continue;
+      }
+
+      const evidenceHash = createHash('sha256').update(voteResult.evidence_raw || '').digest('hex');
+      const unsignedPayload = {
+        t: 'pool_oracle_vote_v1',
+        market_id: market.id,
+        voter_relay_id: voter.id,
+        voter_pubkey: voterXOnlyPubkey,
+        outcome: voteResult.outcome,
+        evidence_url: voteResult.evidence_url || null,
+        evidence_hash: evidenceHash,
+        vote_timestamp: new Date().toISOString(),
+      };
+      const messageToSign = JSON.stringify(unsignedPayload);
+      let signature;
+      try {
+        const signResult = await sendCommandAsync(voter.id, { type: 'ecdsa_sign', message: messageToSign });
+        signature = signResult?.signature;
+        if (!signature) throw new Error('ecdsa_sign returned empty signature');
+      } catch (signErr) {
+        console.error(`[prediction-voter:pool] ecdsa_sign fail voter=${voter.name} market=${market.id.slice(0,12)}: ${signErr.message}`);
+        errored++;
+        continue;
+      }
+      const votePayload = { ...unsignedPayload, signature };
+
+      // DM maker_relay (= settler aggregator path)
+      const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
+      if (!makerRow?.address) {
+        console.warn(`[prediction-voter:pool] maker_relay ${market.maker_relay_id.slice(0,8)} has no address`);
+        errored++;
+        continue;
+      }
+      try {
+        await sendCommandAsync(voter.id, {
+          type: 'send_message',
+          target: makerRow.address,
+          message: JSON.stringify(votePayload),
+        });
+        voted++;
+      } catch (sendErr) {
+        console.error(`[prediction-voter:pool] DM fail voter=${voter.name} market=${market.id.slice(0,12)}: ${sendErr.message}`);
+        errored++;
+        continue;
+      }
+
+      // chain_events 'pool_oracle_vote' audit trail
+      const syntheticTxid = `pool_oracle_vote:${voter.id.slice(0,8)}:${market.id.slice(0,12)}:${Date.now()}`;
+      sqlite.prepare(`
+        INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+        VALUES (?, ?, 'pool_oracle_vote', ?, ?, ?, 'prediction-voter', CURRENT_TIMESTAMP)
+      `).run(randomUUID(), syntheticTxid, voter.address, makerRow.address, JSON.stringify(votePayload));
+
+      console.log(`[prediction-voter:pool] VOTE ${voter.name}: market=${market.id.slice(0,12)} outcome=${voteResult.outcome}`);
+    } catch (e) {
+      console.error(`[prediction-voter:pool] process fail voter=${voter.name} market=${market.id?.slice(0,12)}: ${e.message}`);
       errored++;
     }
   }

@@ -4062,5 +4062,20 @@ export function runMigrations() {
     }
   }
 
+  // v133 — B2 v0.5 Sub 2c: pool_markets.oracle_relay_ids JSON (= voter daemon fast scan)
+  // Without this column the voter would need per-tick pubkey IPC + scan by pk match.
+  // Mirrors exchange_offers.outcome_oracle_relay_ids pattern.
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(pool_markets)").all();
+    if (!cols.some(c => c.name === 'oracle_relay_ids')) {
+      try {
+        sqlite.exec(`ALTER TABLE pool_markets ADD COLUMN oracle_relay_ids TEXT`);
+        console.log('[migrate] v133: pool_markets 加 oracle_relay_ids TEXT (= JSON array of 3 oracle relay_ids for voter daemon LIKE scan, B2 v0.5 Sub 2c).');
+      } catch (e) {
+        console.warn(`[migrate] v133 ADD COLUMN fail: ${e.message}`);
+      }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
