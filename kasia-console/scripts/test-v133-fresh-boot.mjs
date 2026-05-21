@@ -1,0 +1,61 @@
+// B2 v0.5 Sub 2c — v133 fresh boot smoke per Bettor r334 push (= r329 v62 pattern)
+// Verifies migrate.js v62 + v133 work from scratch on empty DB without error.
+
+import { existsSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+const TEMP_DB = join(tmpdir(), `kanet-v133-smoke-${Date.now()}.db`);
+process.env.DB_PATH = TEMP_DB;
+process.env.CONSOLE_ENCRYPTION_KEY = '0'.repeat(64);
+process.env.NODE_ENV = 'test';
+
+console.log(`[smoke] temp DB: ${TEMP_DB}`);
+
+try {
+  if (existsSync(TEMP_DB)) unlinkSync(TEMP_DB);
+
+  const { sqlite } = await import('../src/db/client.js');
+  const { runMigrations } = await import('../src/db/migrate.js');
+
+  console.log('[smoke] running migrations on fresh DB...');
+  runMigrations();
+
+  // Verify v62 tables
+  const pmCols = sqlite.prepare("PRAGMA table_info(pool_markets)").all();
+  const sidesCols = sqlite.prepare("PRAGMA table_info(pool_bettor_sides)").all();
+  console.log(`[smoke] pool_markets cols: ${pmCols.length}`);
+  console.log(`[smoke] pool_bettor_sides cols: ${sidesCols.length}`);
+
+  // Verify v133 column
+  const hasRelay = pmCols.find(c => c.name === 'oracle_relay_ids');
+  if (!hasRelay) {
+    console.error('[smoke] FAIL: pool_markets.oracle_relay_ids col missing after fresh migrate');
+    process.exit(1);
+  }
+  console.log(`[smoke] pool_markets.oracle_relay_ids col present: ${hasRelay.type} ✓`);
+
+  // Try insert to confirm column works end-to-end
+  const testId = 'smoke-test-' + Date.now();
+  sqlite.prepare(`INSERT INTO pool_markets (
+    id, maker_relay_id, spine_p2sh, market_metadata_hash, deadline, oracle_relay_ids
+  ) VALUES (?,?,?,?,?,?)`).run(
+    testId, 'voter1', 'kaspatest:smoke', 'a'.repeat(64), Math.floor(Date.now()/1000),
+    JSON.stringify(['v1','v2','v3'])
+  );
+  const row = sqlite.prepare('SELECT oracle_relay_ids FROM pool_markets WHERE id = ?').get(testId);
+  if (!row || !row.oracle_relay_ids) {
+    console.error('[smoke] FAIL: INSERT/SELECT round-trip fail');
+    process.exit(1);
+  }
+  console.log(`[smoke] insert+select round-trip: ${row.oracle_relay_ids} ✓`);
+
+  console.log('[smoke] PASS — v62 + v133 fresh boot migrate works');
+  sqlite.close();
+  unlinkSync(TEMP_DB);
+} catch (e) {
+  console.error('[smoke] FAIL:', e.message);
+  console.error(e.stack);
+  if (existsSync(TEMP_DB)) try { unlinkSync(TEMP_DB); } catch {}
+  process.exit(1);
+}
