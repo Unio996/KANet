@@ -184,6 +184,7 @@ export function decideConsensus(market) {
  * @param {number} args.winner — 0 or 1
  * @param {number} args.brokerFeePct — basis points (0-9999)
  * @param {number} args.oracleBond — sompi
+ * @param {number} args.minerFee — sompi (= must subtract from output sum or kaspad rejects)
  * @param {boolean} args.unanimous
  * @param {?number} args.silentOracleIndex — 0/1/2 if forfeit_1 else null
  * @returns {{
@@ -194,14 +195,21 @@ export function decideConsensus(market) {
  * }}
  */
 export function computePoolPayouts(args) {
-  const { participants, winner, brokerFeePct, oracleBond, unanimous, silentOracleIndex } = args;
+  const { participants, winner, brokerFeePct, oracleBond, minerFee, unanimous, silentOracleIndex } = args;
+  if (!Number.isFinite(minerFee) || minerFee < 0) throw new Error('minerFee required (sompi int)');
   const winners = participants.map((p, i) => ({ ...p, idx: i })).filter(p => p.direction === winner);
   const losers = participants.filter(p => p.direction !== winner);
   if (!winners.length) throw new Error('no winners');
 
   const totalLoserStake = losers.reduce((s, p) => s + p.stake, 0);
   const totalWinnerStake = winners.reduce((s, p) => s + p.stake, 0);
-  const losingPool = totalLoserStake;  // r339: maker is bettor, not seeder
+  // Self-catch: subtract minerFee from losing pool (= same class as 1V1 settle TX fee bug observed
+  // 5/21 in tn12 console.log "transaction has 10000 fees which is under the required amount of 13130").
+  // Winners absorb fee. losingPool >= brokerFee + minerFee required else throws.
+  const losingPool = Math.max(0, totalLoserStake - minerFee);
+  if (totalLoserStake < minerFee) {
+    throw new Error(`losing pool (${totalLoserStake}) less than minerFee (${minerFee}) — settle impossible without fee`);
+  }
   const brokerFee = Math.floor(losingPool * brokerFeePct / 10000);
   const distributablePool = losingPool - brokerFee;
 
@@ -312,6 +320,7 @@ export async function dispatchPhase2(market, decision) {
         winner: decision.winner,
         brokerFeePct: parseInt(market.broker_fee_pct, 10) || 0,
         oracleBond: parseInt(market.oracle_bond_amount, 10) || 0,
+        minerFee: parseInt(market.miner_fee, 10) || 20_000,
         unanimous: decision.unanimous,
         silentOracleIndex: decision.silentOracleIndex ?? null,
       });
