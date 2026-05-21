@@ -19,7 +19,10 @@ try {
 
   const ORACLE_RELAY_IDS = ['oracle-1', 'oracle-2', 'oracle-3'];
   const MARKET_ID = 'pool-test-' + Date.now();
-  const OLD_TS = new Date(Date.now() - 31 * 60_000).toISOString(); // 31 min ago
+  // OLD_TS must be > ORACLE_SILENT_TIMEOUT_MIN ago to trigger timeout cases.
+  // Default 30min → seed 31 min ago. Mainnet 1440min → seed 1441 min ago.
+  const timeoutMin = parseInt(process.env.ORACLE_SILENT_TIMEOUT_MIN, 10) || 30;
+  const OLD_TS = new Date(Date.now() - (timeoutMin + 1) * 60_000).toISOString();
 
   function seedMarket(updated_at) {
     sqlite.prepare(`INSERT INTO pool_markets (

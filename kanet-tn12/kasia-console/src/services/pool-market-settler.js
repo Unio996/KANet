@@ -19,14 +19,21 @@ import { sqlite } from '../db/client.js';
 
 const TICK_INTERVAL_MS = 5 * 60 * 1000;     // 5 min
 const STARTUP_GRACE_MS = 60 * 1000;         // 60s grace (= 错峰 voter daemon 45s startup)
-const ORACLE_SILENT_TIMEOUT_MS = 30 * 60_000;  // 30 min after status='verifying' → forfeit eligible
+
+// Per Bettor r336 + v0.5 spec section 4.3: ORACLE_SILENT_TIMEOUT_MIN ENV var.
+// Default 30 min OK for testnet rapid iteration. Mainnet deploy MUST set 1440 (= 24h 钢线).
+const ORACLE_SILENT_TIMEOUT_MIN = parseInt(process.env.ORACLE_SILENT_TIMEOUT_MIN, 10) || 30;
+const ORACLE_SILENT_TIMEOUT_MS = ORACLE_SILENT_TIMEOUT_MIN * 60_000;
 
 let timer = null;
 let running = false;
 
 export function startPoolMarketSettlerCron() {
   if (timer) return;
-  console.log('[pool-settler] started — 5min cron, aggregate 3 oracle votes + consensus check (Sub 2d Phase 1)');
+  console.log(`[pool-settler] started — 5min cron, aggregate 3 oracle votes + consensus check, silent_timeout=${ORACLE_SILENT_TIMEOUT_MIN}min (Sub 2d Phase 1)`);
+  if (ORACLE_SILENT_TIMEOUT_MIN < 1440) {
+    console.warn(`[pool-settler] WARN: ORACLE_SILENT_TIMEOUT_MIN=${ORACLE_SILENT_TIMEOUT_MIN} < 1440 (= mainnet 24h 钢线 per v0.5 spec section 4.3). Set ORACLE_SILENT_TIMEOUT_MIN=1440 for mainnet.`);
+  }
   setTimeout(() => {
     poolSettlerTick().catch(e => console.error('[pool-settler] startup tick:', e.message));
   }, STARTUP_GRACE_MS);
