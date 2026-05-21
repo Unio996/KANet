@@ -98,7 +98,7 @@ export default {
         userKasia: NWT_KASIA,
         brokerKasia: BROKER_KASIA,
         userEvmAddr: NWT_BSC_ADDR,
-        qty: 200,  // KI 32 5/20 Owner钦定 Path A: Bybit真 min $5, 200×$0.034=$6.74 safe (摩擦~$0.12/run round-trip 不烧)
+        qty: 30,  // KI 54 5/21 Phase 6 #2 KuCoin verify: 30×$0.034=$1.02 < $5 small_order_threshold → router→KuCoin ($0.10 min)
         chain: 'BSC',
         fromRelayName: 'NWT',
       },
