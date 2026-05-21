@@ -107,18 +107,24 @@ export async function registerPoolRoutes(fastify) {
     // INSERT pool_markets row
     const marketId = 'ext-pool-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
     try {
+      // Stash spine_redeem_script_hex in metadata at create time (= Phase 2c prerequisite per Bettor r348).
+      // Required for settle/refund TX scriptSig assembly downstream (= P2SH unlock needs redeem script).
+      const initialMetadata = JSON.stringify({
+        spine_redeem_script_hex: spineResult.redeemScript,
+      });
+
       sqlite.prepare(`INSERT INTO pool_markets (
         id, maker_relay_id, spine_p2sh, spine_lock_tx, market_metadata_hash,
         oracle1_pk, oracle2_pk, oracle3_pk, broker_pk,
         deadline, miner_fee, broker_fee_pct, oracle_bond_amount, maker_stake_amount,
         outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side, resolution_rule_spec,
-        protocol_status, sides_merkle_root, oracle_relay_ids, broker_relay_id
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        protocol_status, sides_merkle_root, oracle_relay_ids, broker_relay_id, metadata
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
         marketId, b.maker_relay_id, spineResult.p2shAddr, spineTxId, marketMetadataHash,
         oraclePks[0], oraclePks[1], oraclePks[2], brokerPk,
         deadline, minerFee, brokerFeePct, oracleBondAmount, makerStakeAmount,
         b.outcome_market_source, b.outcome_condition_id, b.outcome_token_id, b.outcome_side, b.resolution_rule_spec,
-        'pending_oracle_deposits', '', JSON.stringify(b.oracle_relay_ids), b.broker_relay_id,
+        'pending_oracle_deposits', '', JSON.stringify(b.oracle_relay_ids), b.broker_relay_id, initialMetadata,
       );
     } catch (e) {
       console.error(`[pool/market/create] DB insert fail: ${e.message}`);

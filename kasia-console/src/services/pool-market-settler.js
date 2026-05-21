@@ -509,19 +509,23 @@ async function handleCollectingSigs(market) {
     return;
   }
   const inputCount = meta.phase2_input_count;
-  const requiredPerInput = meta.phase2_unanimous ? 3 : 2;
+  // Critical correctness per PoolSide.settled_via_spine (entry 0): takes NO sigs.
+  // Only SPINE input (idx 0) requires 3 oracle sigs (unanimous) or 2 (forfeit_1).
+  // Side inputs (idx 1..N) auto-unlock via [selector_0 + side_redeem_push] scriptSig at assembly time.
+  const SPINE_INPUT_IDX = 0;
+  const spineRequiredSigs = meta.phase2_unanimous ? 3 : 2;
   const signingOracles = meta.phase2_unanimous
     ? [0, 1, 2]
     : [0, 1, 2].filter(i => i !== meta.phase2_silent_oracle_index);
 
-  // Scan chain_events for sigs scoped to this market
+  // Scan chain_events for sigs scoped to this market + spine input only
   const sigRows = sqlite.prepare(`
     SELECT payload FROM chain_events
     WHERE event_type = 'pool_oracle_tx_sig'
       AND payload LIKE ?
   `).all(`%"market_id":"${market.id}"%`);
 
-  // sigsByInput[i] = [{voter_relay_id, signature}, ...]
+  // sigsByInput[i] = [{voter_relay_id, signature}, ...] — only inputIdx=0 populated in pool
   const sigsByInput = Array.from({ length: inputCount }, () => []);
   const seenByInput = Array.from({ length: inputCount }, () => new Set());
   for (const row of sigRows) {
@@ -537,11 +541,11 @@ async function handleCollectingSigs(market) {
     } catch {}
   }
 
-  // Check all inputs have required sigs
-  const missing = sigsByInput.map((sigs, i) => ({ inputIdx: i, count: sigs.length })).filter(x => x.count < requiredPerInput);
-  if (missing.length > 0) {
+  // Gate ONLY on spine input sig count (= sides need no sigs per settled_via_spine entry)
+  const spineSigCount = sigsByInput[SPINE_INPUT_IDX].length;
+  if (spineSigCount < spineRequiredSigs) {
     if (Math.random() < 0.1) {  // log 10% of ticks to avoid spam
-      console.log(`[pool-settler:collecting] market=${market.id.slice(0,12)} waiting sigs: ${missing.map(m => `input${m.inputIdx}=${m.count}/${requiredPerInput}`).join(' ')}`);
+      console.log(`[pool-settler:collecting] market=${market.id.slice(0,12)} waiting spine sigs ${spineSigCount}/${spineRequiredSigs}`);
     }
     return;
   }
