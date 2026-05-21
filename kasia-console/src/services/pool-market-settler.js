@@ -58,7 +58,7 @@ export async function poolSettlerTick() {
              updated_at, maker_stake_amount, oracle_bond_amount, miner_fee, metadata,
              outcome_market_source, outcome_token_id, outcome_side
       FROM pool_markets
-      WHERE protocol_status = 'verifying'
+      WHERE protocol_status IN ('verifying', 'collecting_sigs')
         AND deadline <= ?
     `).all(Math.floor(Date.now() / 1000));
     if (!markets.length) return { ok: true, processed: 0 };
@@ -66,6 +66,12 @@ export async function poolSettlerTick() {
     let consensus = 0, pending = 0, refund = 0, errored = 0;
     for (const market of markets) {
       try {
+        // Phase 2b: collecting_sigs status → handle sig aggregation + submit
+        if (market.protocol_status === 'collecting_sigs') {
+          await handleCollectingSigs(market);
+          continue;
+        }
+
         const decision = decideConsensus(market);
         if (decision.action === 'consensus') {
           consensus++;
@@ -478,4 +484,90 @@ export async function dispatchRefund(market, decision) {
   } catch (e) {
     console.error(`[pool-settler] dispatchRefund fail market=${market.id?.slice(0,12)}: ${e.message}`);
   }
+}
+
+/**
+ * Phase 2b: handleCollectingSigs — scan chain_events for oracle sigs + assemble + broadcast settle TX.
+ *
+ * Pool sigs schema (= mirrors 1V1 'oracle_tx_sig' chain_events):
+ *   payload.t = 'kanet_pool_oracle_tx_sign_resp_v1'
+ *   payload.market_id = market.id
+ *   payload.voter_relay_id
+ *   payload.input_index (= 0..N for spine + N sides)
+ *   payload.signature
+ *
+ * Required sigs per input: 3 if unanimous, 2 if forfeit_1.
+ * When all inputs reach required sig count, submit settle TX via maker_relay IPC.
+ *
+ * @param {object} market — pool_markets row in 'collecting_sigs' state
+ */
+async function handleCollectingSigs(market) {
+  let meta;
+  try { meta = JSON.parse(market.metadata || '{}'); } catch { meta = {}; }
+  if (!meta.phase2_tx_obj || !meta.phase2_input_count) {
+    console.warn(`[pool-settler:collecting] market=${market.id.slice(0,12)} missing phase2 metadata, skip`);
+    return;
+  }
+  const inputCount = meta.phase2_input_count;
+  const requiredPerInput = meta.phase2_unanimous ? 3 : 2;
+  const signingOracles = meta.phase2_unanimous
+    ? [0, 1, 2]
+    : [0, 1, 2].filter(i => i !== meta.phase2_silent_oracle_index);
+
+  // Scan chain_events for sigs scoped to this market
+  const sigRows = sqlite.prepare(`
+    SELECT payload FROM chain_events
+    WHERE event_type = 'pool_oracle_tx_sig'
+      AND payload LIKE ?
+  `).all(`%"market_id":"${market.id}"%`);
+
+  // sigsByInput[i] = [{voter_relay_id, signature}, ...]
+  const sigsByInput = Array.from({ length: inputCount }, () => []);
+  const seenByInput = Array.from({ length: inputCount }, () => new Set());
+  for (const row of sigRows) {
+    try {
+      const p = JSON.parse(row.payload || '{}');
+      if (p.t !== 'kanet_pool_oracle_tx_sign_resp_v1') continue;
+      const inputIdx = parseInt(p.input_index, 10);
+      if (inputIdx < 0 || inputIdx >= inputCount) continue;
+      if (!p.voter_relay_id || !p.signature) continue;
+      if (seenByInput[inputIdx].has(p.voter_relay_id)) continue;
+      seenByInput[inputIdx].add(p.voter_relay_id);
+      sigsByInput[inputIdx].push({ voter_relay_id: p.voter_relay_id, signature: p.signature });
+    } catch {}
+  }
+
+  // Check all inputs have required sigs
+  const missing = sigsByInput.map((sigs, i) => ({ inputIdx: i, count: sigs.length })).filter(x => x.count < requiredPerInput);
+  if (missing.length > 0) {
+    if (Math.random() < 0.1) {  // log 10% of ticks to avoid spam
+      console.log(`[pool-settler:collecting] market=${market.id.slice(0,12)} waiting sigs: ${missing.map(m => `input${m.inputIdx}=${m.count}/${requiredPerInput}`).join(' ')}`);
+    }
+    return;
+  }
+
+  // All sigs collected. Submit via maker_relay 'pool_settle_tx' IPC (= TBD in Phase 2c relay handler).
+  // For Phase 2b first ship: log + stash sigs in metadata for inspection. Actual TX submit waits Phase 2c.
+  const sigsByInputSerialized = sigsByInput.map(input => input.map(s => s.signature));
+  const newMeta = { ...meta, phase2b_sigs_collected_at: new Date().toISOString(), phase2b_sigs_count: sigsByInput.map(s => s.length) };
+  sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .run(JSON.stringify(newMeta), market.id);
+
+  console.log(`[pool-settler:collecting] market=${market.id.slice(0,12)} ALL SIGS COLLECTED inputs=${inputCount} sigs/input=${requiredPerInput} signers=${signingOracles.join(',')}`);
+  console.log(`[pool-settler:collecting] TODO Phase 2c: pool_settle_tx IPC submit — sigs ready in metadata.phase2b_sigs_collected_at`);
+
+  // Phase 2c stub: actual submit will go here
+  // const submitResult = await sendCommandAsync(market.maker_relay_id, {
+  //   type: 'pool_settle_tx',
+  //   p2sh_addresses: [market.spine_p2sh, ...sides.map(s => s.side_p2sh)],
+  //   redeem_script_hex: meta.spine_redeem_script_hex,  // TBD: stash at create time
+  //   tx_obj_preimage: meta.phase2_tx_obj,
+  //   sigs_by_input: sigsByInputSerialized,
+  //   winner: meta.phase2_winner,
+  //   unanimous: meta.phase2_unanimous,
+  //   silent_oracle_index: meta.phase2_silent_oracle_index,
+  // });
+  // if (submitResult?.ok && submitResult.txId) {
+  //   sqlite.prepare('UPDATE pool_markets SET settle_txid=?, protocol_status=? WHERE id=?').run(submitResult.txId, 'completed', market.id);
+  // }
 }
