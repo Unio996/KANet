@@ -54,7 +54,7 @@ export async function poolSettlerTick() {
   try {
     const markets = sqlite.prepare(`
       SELECT id, maker_relay_id, spine_p2sh, spine_lock_tx, oracle1_pk, oracle2_pk, oracle3_pk,
-             oracle_relay_ids, deadline, protocol_status, sides_merkle_root, broker_pk, broker_fee_pct,
+             oracle_relay_ids, deadline, protocol_status, sides_merkle_root, broker_pk, broker_fee_pct, broker_relay_id,
              updated_at, maker_stake_amount, oracle_bond_amount, miner_fee, metadata,
              outcome_market_source, outcome_token_id, outcome_side
       FROM pool_markets
@@ -176,6 +176,65 @@ export function decideConsensus(market) {
 }
 
 /**
+ * Pure function — compute pool payout amounts per Bettor r339 spec.
+ * Extracted for testability (= no DB, no IPC).
+ *
+ * @param {object} args
+ * @param {Array<{stake: number, direction: number, isMaker?: boolean}>} args.participants — maker + bettors
+ * @param {number} args.winner — 0 or 1
+ * @param {number} args.brokerFeePct — basis points (0-9999)
+ * @param {number} args.oracleBond — sompi
+ * @param {boolean} args.unanimous
+ * @param {?number} args.silentOracleIndex — 0/1/2 if forfeit_1 else null
+ * @returns {{
+ *   brokerFee: number,
+ *   winnerPayouts: Array<{participantIndex: number, isMaker: boolean, amount: number}>,
+ *   makerExtraOutput: ?number,
+ *   oracleBondReturns: Array<{oracleIndex: number, amount: number}>,  // forfeit_1 silent excluded
+ * }}
+ */
+export function computePoolPayouts(args) {
+  const { participants, winner, brokerFeePct, oracleBond, unanimous, silentOracleIndex } = args;
+  const winners = participants.map((p, i) => ({ ...p, idx: i })).filter(p => p.direction === winner);
+  const losers = participants.filter(p => p.direction !== winner);
+  if (!winners.length) throw new Error('no winners');
+
+  const totalLoserStake = losers.reduce((s, p) => s + p.stake, 0);
+  const totalWinnerStake = winners.reduce((s, p) => s + p.stake, 0);
+  const losingPool = totalLoserStake;  // r339: maker is bettor, not seeder
+  const brokerFee = Math.floor(losingPool * brokerFeePct / 10000);
+  const distributablePool = losingPool - brokerFee;
+
+  // Forfeit_1 50/25/25 split per v0.5 spec section 4.4
+  let winnerForfeitShare = 0, makerForfeitShare = 0, perOracleForfeitShare = 0;
+  if (!unanimous && typeof silentOracleIndex === 'number') {
+    winnerForfeitShare = Math.floor(oracleBond * 50 / 100);
+    makerForfeitShare = Math.floor(oracleBond * 25 / 100);
+    perOracleForfeitShare = Math.floor(oracleBond * 25 / 100 / 2);
+  }
+
+  const winnerPayouts = winners.map(w => {
+    const winnerShare = totalWinnerStake > 0
+      ? Math.floor((distributablePool + winnerForfeitShare) * w.stake / totalWinnerStake)
+      : 0;
+    let amount = w.stake + winnerShare;
+    if (w.isMaker) amount += makerForfeitShare;
+    return { participantIndex: w.idx, isMaker: !!w.isMaker, amount };
+  });
+
+  const isMakerWinner = winners.some(w => w.isMaker);
+  const makerExtraOutput = (!isMakerWinner && makerForfeitShare > 0) ? makerForfeitShare : null;
+
+  const oracleBondReturns = [];
+  for (let i = 0; i < 3; i++) {
+    if (!unanimous && silentOracleIndex === i) continue;
+    oracleBondReturns.push({ oracleIndex: i, amount: oracleBond + perOracleForfeitShare });
+  }
+
+  return { brokerFee, winnerPayouts, makerExtraOutput, oracleBondReturns };
+}
+
+/**
  * Phase 2a-2: dispatch settle TX preimage construction + DM oracles for sigs.
  * Only handles 'consensus' decisions (= unanimous OR majority_forfeit_1).
  * Refund branch handled separately in Phase 2a-3.
@@ -193,7 +252,7 @@ export function decideConsensus(market) {
  */
 export async function dispatchPhase2(market, decision) {
   try {
-    // 1. Read winning bettors from pool_bettor_sides
+    // 1. Read bettors from pool_bettor_sides
     const sides = sqlite.prepare(`
       SELECT bettor_pk, bettor_relay_id, direction, stake_amount, side_p2sh, side_lock_tx, merkle_index
       FROM pool_bettor_sides
@@ -201,35 +260,12 @@ export async function dispatchPhase2(market, decision) {
         AND side_lock_tx IS NOT NULL
       ORDER BY merkle_index ASC
     `).all(market.id);
-    if (!sides.length) {
-      console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} has no registered sides`);
-      return;
-    }
-    const winners = sides.filter(s => s.direction === decision.winner);
-    const losers = sides.filter(s => s.direction !== decision.winner);
-    if (!winners.length) {
-      console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} no winners on direction ${decision.winner}`);
-      return;
-    }
 
-    // 2. Compute output amounts (= simplified proportional pool model)
+    // Per Bettor r339: maker is a bettor (= not a seeder). maker direction = outcome_side mapping.
+    const makerDirection = market.outcome_side === 'YES' ? 0 : 1;
     const makerStake = parseInt(market.maker_stake_amount, 10) || 0;
-    const totalLoserStake = losers.reduce((s, b) => s + (parseInt(b.stake_amount, 10) || 0), 0);
-    const totalWinnerStake = winners.reduce((s, b) => s + (parseInt(b.stake_amount, 10) || 0), 0);
-    const oracleBond = parseInt(market.oracle_bond_amount, 10) || 0;
-    const minerFee = parseInt(market.miner_fee, 10) || 20_000;
-    const brokerFeePct = parseInt(market.broker_fee_pct, 10) || 0;
 
-    // Pool divided among winners + broker:
-    //   losingPool = totalLoserStake + makerStake (= maker contributes pool seed)
-    //   brokerFee = losingPool * brokerFeePct / 10000
-    //   winnerNetPayout = losingPool - brokerFee (= split proportional to winner stake)
-    //   Each winner gets: own_stake + winnerNetPayout * own_stake / totalWinnerStake
-    const losingPool = totalLoserStake + makerStake;
-    const brokerFee = Math.floor(losingPool * brokerFeePct / 10000);
-    const winnerNetPayout = losingPool - brokerFee;
-
-    // 3. Look up addresses (= maker, broker, 3 oracles, N winners) by relay_id / pubkey
+    // 2. Look up addresses
     const oracleIds = JSON.parse(market.oracle_relay_ids || '[]');
     const oracleRows = oracleIds.map(rid => sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(rid));
     if (oracleRows.some(r => !r?.address)) {
@@ -242,38 +278,62 @@ export async function dispatchPhase2(market, decision) {
       return;
     }
 
-    // Bettor addresses derived from pubkey (= P2PK ScriptPublicKey at chain time, but DM target needs address).
-    // For first draft: store bettor_relay_id → look up address. Bettor self-claim path makes payout to known addr.
-    const winnerAddrs = winners.map(w => {
-      const row = w.bettor_relay_id
-        ? sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(w.bettor_relay_id)
-        : null;
-      return row?.address || null;
-    });
-    if (winnerAddrs.some(a => !a)) {
-      console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} missing winner addresses (some bettor_relay_id has no address row)`);
+    // r339 push 3: broker_relay_id required (= broker fee output dest, no longer placeholder).
+    const brokerRow = market.broker_relay_id
+      ? sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.broker_relay_id)
+      : null;
+    if (!brokerRow?.address) {
+      console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} missing broker address (broker_relay_id=${market.broker_relay_id})`);
       return;
     }
 
-    // 4. Build outputs array per PoolSpine.sil entry 0 ordering:
-    //    [broker, winner_1, ..., winner_N, oracle1_bond, oracle2_bond, oracle3_bond]
+    // Bettor addresses
+    const sideAddrs = sides.map(s => {
+      const row = s.bettor_relay_id
+        ? sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(s.bettor_relay_id)
+        : null;
+      return row?.address || null;
+    });
+    if (sideAddrs.some(a => !a)) {
+      console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} missing bettor addresses`);
+      return;
+    }
+
+    // 3. Build participants array (= maker + bettors), use pure function computePoolPayouts.
+    const participants = [
+      { addr: makerRow.address, stake: makerStake, direction: makerDirection, isMaker: true },
+      ...sides.map((s, i) => ({ addr: sideAddrs[i], stake: parseInt(s.stake_amount, 10) || 0, direction: s.direction, isMaker: false })),
+    ];
+
+    let payouts;
+    try {
+      payouts = computePoolPayouts({
+        participants,
+        winner: decision.winner,
+        brokerFeePct: parseInt(market.broker_fee_pct, 10) || 0,
+        oracleBond: parseInt(market.oracle_bond_amount, 10) || 0,
+        unanimous: decision.unanimous,
+        silentOracleIndex: decision.silentOracleIndex ?? null,
+      });
+    } catch (e) {
+      console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} computePoolPayouts fail: ${e.message}`);
+      return;
+    }
+
+    // 4. Build outputs per PoolSpine.sil entry 0 ordering:
+    //    [broker, winner_1..winner_N, optional maker creator-fee output, oracle_bond_returns[]]
     const outputs = [];
-    if (brokerFee > 0) {
-      // broker address derived from broker_pk (= P2PK). First draft: skip broker if pk not resolvable, broker fee folds to winners.
-      // TODO Phase 2 refinement: store broker_relay_id at create time + look up address.
-      outputs.push({ address: makerRow.address, amountSompi: brokerFee.toString() });  // placeholder = maker (broker addr lookup TODO)
+    if (payouts.brokerFee > 0) {
+      outputs.push({ address: brokerRow.address, amountSompi: payouts.brokerFee.toString() });
     }
-    for (let i = 0; i < winners.length; i++) {
-      const ownStake = parseInt(winners[i].stake_amount, 10) || 0;
-      const share = totalWinnerStake > 0 ? Math.floor(winnerNetPayout * ownStake / totalWinnerStake) : 0;
-      const payout = ownStake + share;
-      outputs.push({ address: winnerAddrs[i], amountSompi: payout.toString() });
+    for (const w of payouts.winnerPayouts) {
+      outputs.push({ address: participants[w.participantIndex].addr, amountSompi: w.amount.toString() });
     }
-    // 3 oracle bond returns (= unanimous case all 3 get back; forfeit_1 case silent loses)
-    for (let i = 0; i < 3; i++) {
-      const isSilent = !decision.unanimous && decision.silentOracleIndex === i;
-      if (isSilent) continue;  // silent oracle bond forfeit (= TODO: split 50%/25%/25% per spec, simplified for first draft)
-      outputs.push({ address: oracleRows[i].address, amountSompi: oracleBond.toString() });
+    if (payouts.makerExtraOutput) {
+      outputs.push({ address: makerRow.address, amountSompi: payouts.makerExtraOutput.toString() });
+    }
+    for (const r of payouts.oracleBondReturns) {
+      outputs.push({ address: oracleRows[r.oracleIndex].address, amountSompi: r.amount.toString() });
     }
 
     // 5. Build input outpoints: spine + N side lock TXs
