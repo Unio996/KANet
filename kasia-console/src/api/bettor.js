@@ -1650,6 +1650,10 @@ export async function registerBettorRoutes(fastify) {
     const minerFeeSompi = parseInt(meta.miner_fee_sompi, 10) || 10_000;
     const makerStakeSompi = parseInt(meta.maker_stake_sompi, 10);
     const takerStakeSompi = parseInt(meta.taker_stake_sompi, 10);
+    // Sub 8.3 Bug 15: SS contract refund_both / refund_maker_unjoined branches require tx.time >= deadline
+    // (= OP_CHECKLOCKTIMEVERIFY equiv). TX lockTime must be set to deadline_seconds OR later.
+    // SS contract baked deadline = Math.floor(outcome_end_date_ms / 1000).
+    const deadlineSeconds = Math.floor(new Date(offer.outcome_end_date).getTime() / 1000);
 
     const { sendCommandAsync } = await import('../services/relay-manager.js');
     let result;
@@ -1662,6 +1666,7 @@ export async function registerBettorRoutes(fastify) {
           p2sh_address: offer.escrow_p2sh,
           redeem_script_hex: redeemScriptHex,
           maker_address: offer.maker_kaspa_addr,
+          lock_time: deadlineSeconds,  // Sub 8.3 Bug 15: SS contract require(tx.time >= deadline)
         });
       } else {
         // refund_both — caller pre-resolves both outpoints (= maker_lock_tx[0] + taker_lock_tx[0]).
@@ -1680,6 +1685,7 @@ export async function registerBettorRoutes(fastify) {
             { address: offer.maker_kaspa_addr, amountSompi: String((makerStakeSompi - halfFee).toString()) },
             { address: offer.taker, amountSompi: String((takerStakeSompi - halfFee).toString()) },
           ],
+          lock_time: deadlineSeconds,  // Sub 8.3 Bug 15: SS contract require(tx.time >= deadline)
         });
       }
     } catch (err) {

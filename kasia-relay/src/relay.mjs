@@ -622,10 +622,12 @@ if (process.send) {
           const { unlockP2SH, unlockP2SHDual } = await import('./lib/p2sh.mjs');
           const wallet = getWallet();
           const redeemScript = new Uint8Array(Buffer.from(cmd.redeem_script_hex, 'hex'));
+          // Sub 8.3 Bug 15: SS contract refund branches require(tx.time >= deadline). Pass lock_time from caller (= deadline_seconds).
+          const lockTime = BigInt(cmd.lock_time || 0);
           let result;
           if (cmd.branch === 2) {
             // refund_maker_unjoined: 1 input + 1 output
-            const r = await unlockP2SH(wallet, cmd.p2sh_address, redeemScript, 2, cmd.maker_address, 0n);
+            const r = await unlockP2SH(wallet, cmd.p2sh_address, redeemScript, 2, cmd.maker_address, lockTime);
             result = { ok: true, branch: 2, txId: r.txId, amount: r.amount?.toString() };
           } else if (cmd.branch === 1) {
             // refund_both: 2 inputs + 2 outputs
@@ -633,7 +635,7 @@ if (process.send) {
               wallet, cmd.p2sh_address, redeemScript, 1,
               cmd.required_input_outpoints,  // [{outpointTxid, outpointIndex}, ...]
               cmd.outputs,                    // [{address, amountSompi: bigint}, ...]
-              0n,
+              lockTime,
             );
             result = { ok: true, branch: 1, txId: r.txId };
           } else {
