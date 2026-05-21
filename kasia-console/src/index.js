@@ -432,6 +432,11 @@ startPredictionSettlerCron();
 import { startPredictionVoterCron } from './services/bettor-prediction-voter.js';
 startPredictionVoterCron();
 
+// B2 v0.5 Sub 2d Phase 1 — pool_markets settler (aggregate 3 oracle votes + consensus check).
+// Phase 2 (TX construction + sig orchestration + broadcast) deferred.
+import { startPoolMarketSettlerCron } from './services/pool-market-settler.js';
+startPoolMarketSettlerCron();
+
 // Phase B Variant Expander 3-tier (Owner 5/16 钦定 "B" + Bettor r141 spec) — 30 min cron.
 // per scanner rec → auto-find related markets → 3 档 variant (激进/适中/保守) INSERT.
 // Phase 1 skeleton + UI surface, Phase 2 will integrate depth-500 /book API real-time.
