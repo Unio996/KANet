@@ -4110,9 +4110,10 @@ export function runMigrations() {
 
   // v125: Phase 5-3 KI N19.68 migrate 4 tunable knobs from code constants → config_entries DB
   // (NWT N19.66 Q4 spec, J2 N19.68 ack: tunable runtime, no restart needed for value tweaks)
+  // KI 53 hotfix (5/21): config_entries 没 'value' column, 用完整 schema (value_encrypted plain store per configs.js:12 non-sensitive path)
   {
     const exists = sqlite.prepare("SELECT key FROM config_entries WHERE key=?");
-    const ins = sqlite.prepare("INSERT INTO config_entries (key, value) VALUES (?, ?)");
+    const ins = sqlite.prepare("INSERT INTO config_entries (id, key, category, value_encrypted, is_sensitive, created_at, updated_at) VALUES (?, ?, 'general', ?, 0, ?, ?)");
     const seeds = [
       ['broker_treasury_floor_usd', '50'],
       ['broker_treasury_high_usd', '500'],
@@ -4120,17 +4121,19 @@ export function runMigrations() {
       ['cross_match_qty_tol', '0.05'],
     ];
     let seeded = 0;
+    const now = new Date().toISOString();
     for (const [k, v] of seeds) {
-      if (!exists.get(k)) { ins.run(k, v); seeded++; }
+      if (!exists.get(k)) { ins.run(randomUUID(), k, v, now, now); seeded++; }
     }
     if (seeded > 0) console.log(`[migrate] v125: seeded ${seeded} tunable knobs (Phase 5-3 migration).`);
   }
 
   // v126: Phase 5-2.5 KI 35 hedge-router seed (NWT N19.69 spec, J2 ship)
   // 8 knob全 DB-backed, hedge_router_enabled=false → backward compat (Phase 1a 不破).
+  // KI 53 hotfix (5/21): config_entries schema fix.
   {
     const exists = sqlite.prepare("SELECT key FROM config_entries WHERE key=?");
-    const ins = sqlite.prepare("INSERT INTO config_entries (key, value) VALUES (?, ?)");
+    const ins = sqlite.prepare("INSERT INTO config_entries (id, key, category, value_encrypted, is_sensitive, created_at, updated_at) VALUES (?, ?, 'general', ?, 0, ?, ?)");
     const seeds = [
       ['hedge_router_enabled', 'false'],                    // gate: false = backward compat
       ['hedge_router_default_cex', 'bybit'],                // production
@@ -4142,33 +4145,38 @@ export function runMigrations() {
       ['hedge_router_kas_high_threshold_kas', '50000'],     // 高位 (Phase 5-2 用)
     ];
     let seeded = 0;
+    const now = new Date().toISOString();
     for (const [k, v] of seeds) {
-      if (!exists.get(k)) { ins.run(k, v); seeded++; }
+      if (!exists.get(k)) { ins.run(randomUUID(), k, v, now, now); seeded++; }
     }
     if (seeded > 0) console.log(`[migrate] v126: seeded ${seeded} hedge-router knobs (Phase 5-2.5 KI 35).`);
   }
 
   // v127: Phase 5-2 Sub-1 KI 36 KAS pool alarm knobs (NWT N19.70 spec, J2 ship)
+  // KI 53 hotfix (5/21): config_entries schema fix.
   {
     const exists = sqlite.prepare("SELECT key FROM config_entries WHERE key=?");
-    const ins = sqlite.prepare("INSERT INTO config_entries (key, value) VALUES (?, ?)");
+    const ins = sqlite.prepare("INSERT INTO config_entries (id, key, category, value_encrypted, is_sensitive, created_at, updated_at) VALUES (?, ?, 'general', ?, 0, ?, ?)");
     const seeds = [
       ['broker_kas_floor', '5000'],   // red-line K-pool
       ['broker_kas_high', '50000'],   // 资金过度集中 alarm
     ];
     let seeded = 0;
+    const now = new Date().toISOString();
     for (const [k, v] of seeds) {
-      if (!exists.get(k)) { ins.run(k, v); seeded++; }
+      if (!exists.get(k)) { ins.run(randomUUID(), k, v, now, now); seeded++; }
     }
     if (seeded > 0) console.log(`[migrate] v127: seeded ${seeded} KAS pool alarm knobs (Phase 5-2 Sub-1).`);
   }
 
   // v128: Phase 5-2 Sub-2 KI 37 CEX inventory alarm knob (NWT N19.70 spec, J2 ship)
+  // KI 53 hotfix (5/21): config_entries schema fix.
   {
     const exists = sqlite.prepare("SELECT key FROM config_entries WHERE key=?");
-    const ins = sqlite.prepare("INSERT INTO config_entries (key, value) VALUES (?, ?)");
+    const ins = sqlite.prepare("INSERT INTO config_entries (id, key, category, value_encrypted, is_sensitive, created_at, updated_at) VALUES (?, ?, 'general', ?, 0, ?, ?)");
     if (!exists.get('bybit_kas_accumulation_alert')) {
-      ins.run('bybit_kas_accumulation_alert', '1000');
+      const now = new Date().toISOString();
+      ins.run(randomUUID(), 'bybit_kas_accumulation_alert', '1000', now, now);
       console.log('[migrate] v128: seeded bybit_kas_accumulation_alert=1000 (Phase 5-2 Sub-2).');
     }
   }
