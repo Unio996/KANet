@@ -157,8 +157,25 @@ CREATE TABLE pool_bettor_sides (
 - Private (= bettor list in maker DB, sides_merkle_root on chain) — privacy, but maker can lie about list contents
 - v0.5: public bettor list (= sides_merkle_root on chain + public bettor pubkey list off-chain, verifiable)
 
+## Path B status — DEFERRED Phase 2b (per Bettor r342 + r343 audit + r343 accept defer)
+
+**Phase 2a (current) ships Path A only** (= cooperative spine settle_unanimous TX with all bettor payouts as outputs). PoolSide consumed via `settled_via_spine` entry 0 — no output value verification, no Merkle proof needed.
+
+**Path B (= bettor self-claim via PoolSide.claim_winner)** NOT shipped in Phase 2a. 3 bugs to fix before Phase 2b ship:
+
+### PoolSide.sil Phase 2b backlog (= Bettor r342 audit)
+
+1. **Bug 1: Merkle proof position info missing** — lines 72/74/76/78/80/82 always-right concat. Only leaf at position 0 verifies. Fix candidate: add `int leafIndex` ctor param + if-else for bit at each level.
+2. **Bug 2: Payout math mismatch** — line 89 `stakeAmount * totalPool / winnerPool` ≠ computePoolPayouts. Side contract must accept (losingPool, totalWinnerStake, brokerFee, winnerForfeitShare, minerFee) oracle-signed + re-derive same math.
+3. **Bug 3: Canonical leaf not full** — line 71 `blake2b(bettorPk)` insufficient. Use `blake2b(bettorPk || direction || stakeAmount || marketMetadataHash)` for cross-market identity collision resistance.
+
+### Path B revisit trigger
+
+If Phase 2a Path A testnet e2e fails (= 50-bettor TX size limit / sig issue / etc) → fix 3 bugs + ship Path B fallback. Otherwise Phase 2b ships post-v0.5 MVP.
+
 ## TODO Phase 2 (post-v0.5 MVP)
 
+- Path B PoolSide.claim_winner 3 bug fixes (= above)
 - Padding sentinel strategy for variable depth Merkle proofs
 - Refund_all distribution math (= losing side stakes split per spec 50/25/25)
 - Bond forfeit math reconciliation (= 25% reward to remaining signed oracles)

@@ -79,7 +79,12 @@ export async function poolSettlerTick() {
         } else if (decision.action === 'refund') {
           refund++;
           console.log(`[pool-settler] REFUND market=${market.id.slice(0,12)} reason=${decision.reason}`);
-          // Phase 2: build refund TX (= maker single-sig, all 3 oracle bonds forfeited)
+          // Phase 2a-3: skip if already dispatched
+          let meta = {};
+          try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+          if (!meta.refund_dispatched_at) {
+            await dispatchRefund(market, decision);
+          }
         } else {
           pending++;
         }
@@ -397,5 +402,80 @@ export async function dispatchPhase2(market, decision) {
     console.log(`[pool-settler] DISPATCHED Phase 2 market=${market.id.slice(0,12)} winner=${decision.winner} unanimous=${decision.unanimous} inputs=${requiredInputOutpoints.length} outputs=${outputs.length} → collecting_sigs`);
   } catch (e) {
     console.error(`[pool-settler] dispatchPhase2 fail market=${market.id?.slice(0,12)}: ${e.message}`);
+  }
+}
+
+/**
+ * Phase 2a-3: dispatch refund_unanimous_silent — maker single-sig refund TX.
+ *
+ * Per PoolSpine.sil entry 2 refund_unanimous_silent:
+ *   - Maker single-sig (no oracle sigs needed)
+ *   - require(tx.time >= deadline)
+ *   - Maker recovers stake + 3 oracle bonds (= total forfeit to maker)
+ *
+ * Bettor sides separately refund via PoolSide.refund_market_cancelled entry 2.
+ * For Phase 2a-3 first ship: only spine refund TX broadcast (= maker recover).
+ * Bettor side refunds happen async via their own claim TX.
+ *
+ * @param {object} market — pool_markets row
+ * @param {object} decision — { action: 'refund', reason: string }
+ */
+export async function dispatchRefund(market, decision) {
+  try {
+    // 1. Compute maker output amount per PoolSpine.sil entry 2:
+    //    tx.outputs[0].value == makerStakeAmount + oracleBondAmount * 3 - minerFee
+    const makerStake = parseInt(market.maker_stake_amount, 10) || 0;
+    const oracleBond = parseInt(market.oracle_bond_amount, 10) || 0;
+    const minerFee = parseInt(market.miner_fee, 10) || 20_000;
+    const makerRefundAmount = makerStake + oracleBond * 3 - minerFee;
+    if (makerRefundAmount <= 0) {
+      console.warn(`[pool-settler] dispatchRefund market=${market.id.slice(0,12)} makerRefundAmount=${makerRefundAmount} ≤ 0, skip`);
+      return;
+    }
+
+    // 2. Look up maker address
+    const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
+    if (!makerRow?.address) {
+      console.warn(`[pool-settler] dispatchRefund market=${market.id.slice(0,12)} no maker address`);
+      return;
+    }
+
+    // 3. Build refund TX preimage — reuse 'prediction_settle_build_preimage' IPC with single-p2sh + 1 output
+    //    Inputs: spine UTXO only (= maker stake + 3 bonds locked here)
+    //    Output: maker_refund_amount to maker_address
+    const preimage = await sendCommandAsync(market.maker_relay_id, {
+      type: 'prediction_settle_build_preimage',
+      p2sh_address: market.spine_p2sh,  // single string for refund (= only spine, no sides)
+      required_input_outpoints: [
+        { outpointTxid: market.spine_lock_tx, outpointIndex: 0 },
+      ],
+      outputs: [
+        { address: makerRow.address, amountSompi: makerRefundAmount.toString() },
+      ],
+    });
+    if (!preimage?.ok || !preimage.tx_obj) {
+      console.error(`[pool-settler] dispatchRefund build_preimage fail market=${market.id.slice(0,12)}: ${preimage?.error}`);
+      return;
+    }
+
+    // 4. Stash refund metadata + transition to refunding (single-sig path skips collecting_sigs)
+    let prevMeta = {};
+    try { prevMeta = JSON.parse(market.metadata || '{}'); } catch {}
+    const newMeta = {
+      ...prevMeta,
+      refund_tx_obj: preimage.tx_obj,
+      refund_reason: decision.reason,
+      refund_dispatched_at: new Date().toISOString(),
+      refund_amount: makerRefundAmount,
+    };
+    sqlite.prepare('UPDATE pool_markets SET metadata = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(JSON.stringify(newMeta), 'refunding', market.id);
+
+    // 5. Phase 2a-3 first ship: stash only. Phase 2b collecting_sigs handler will trigger maker sign + broadcast.
+    //    For maker single-sig refund, simpler: maker_relay signs locally + broadcasts immediately (no DM needed).
+    //    Future iteration: route through collecting_sigs handler for state machine consistency.
+    console.log(`[pool-settler] DISPATCHED Refund market=${market.id.slice(0,12)} reason=${decision.reason} maker_refund=${makerRefundAmount} → refunding`);
+  } catch (e) {
+    console.error(`[pool-settler] dispatchRefund fail market=${market.id?.slice(0,12)}: ${e.message}`);
   }
 }
