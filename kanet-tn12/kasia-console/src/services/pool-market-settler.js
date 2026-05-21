@@ -16,6 +16,8 @@
 //                       Actual TX construction + sig orchestration → Sub 2d Phase 2.
 
 import { sqlite } from '../db/client.js';
+import { sendCommandAsync } from './relay-manager.js';
+import { createHash } from 'node:crypto';
 
 const TICK_INTERVAL_MS = 5 * 60 * 1000;     // 5 min
 const STARTUP_GRACE_MS = 60 * 1000;         // 60s grace (= 错峰 voter daemon 45s startup)
@@ -51,9 +53,9 @@ export async function poolSettlerTick() {
   running = true;
   try {
     const markets = sqlite.prepare(`
-      SELECT id, maker_relay_id, spine_p2sh, oracle1_pk, oracle2_pk, oracle3_pk,
-             oracle_relay_ids, deadline, protocol_status, sides_merkle_root,
-             updated_at, maker_stake_amount, oracle_bond_amount,
+      SELECT id, maker_relay_id, spine_p2sh, spine_lock_tx, oracle1_pk, oracle2_pk, oracle3_pk,
+             oracle_relay_ids, deadline, protocol_status, sides_merkle_root, broker_pk, broker_fee_pct,
+             updated_at, maker_stake_amount, oracle_bond_amount, miner_fee, metadata,
              outcome_market_source, outcome_token_id, outcome_side
       FROM pool_markets
       WHERE protocol_status = 'verifying'
@@ -68,7 +70,12 @@ export async function poolSettlerTick() {
         if (decision.action === 'consensus') {
           consensus++;
           console.log(`[pool-settler] CONSENSUS market=${market.id.slice(0,12)} winner=${decision.winner} unanimous=${decision.unanimous} silent_oracle=${decision.silentOracleIndex ?? 'none'}`);
-          // Phase 2: build settle TX + request 3 oracle sigs (= deferred)
+          // Phase 2a-2: skip if already dispatched (check metadata.phase2_dispatched_at)
+          let meta = {};
+          try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+          if (!meta.phase2_dispatched_at) {
+            await dispatchPhase2(market, decision);
+          }
         } else if (decision.action === 'refund') {
           refund++;
           console.log(`[pool-settler] REFUND market=${market.id.slice(0,12)} reason=${decision.reason}`);
@@ -166,4 +173,160 @@ export function decideConsensus(market) {
   }
 
   return { action: 'pending', reason: `votes=${votes.length}/3 age=${Math.floor(ageMs/60000)}min (timeout 30min)` };
+}
+
+/**
+ * Phase 2a-2: dispatch settle TX preimage construction + DM oracles for sigs.
+ * Only handles 'consensus' decisions (= unanimous OR majority_forfeit_1).
+ * Refund branch handled separately in Phase 2a-3.
+ *
+ * Output layout per PoolSpine.sil entry 0 settle_unanimous:
+ *   - outputs[0] = broker fee (P2PK brokerPk)
+ *   - outputs[1..N] = N winner payouts (P2PK each winning bettor pubkey)
+ *   - outputs[last 3] = oracle bond returns (P2PK each oraclePk)
+ *
+ * For forfeit_1 (1 silent oracle): silent oracle bond NOT returned (= forfeit),
+ *   simplified to maker (Phase 2 KIP-10 loop refinement deferred).
+ *
+ * @param {object} market — pool_markets row
+ * @param {{ winner: number, unanimous: boolean, silentOracleIndex?: number }} decision
+ */
+export async function dispatchPhase2(market, decision) {
+  try {
+    // 1. Read winning bettors from pool_bettor_sides
+    const sides = sqlite.prepare(`
+      SELECT bettor_pk, bettor_relay_id, direction, stake_amount, side_p2sh, side_lock_tx, merkle_index
+      FROM pool_bettor_sides
+      WHERE market_id = ?
+        AND side_lock_tx IS NOT NULL
+      ORDER BY merkle_index ASC
+    `).all(market.id);
+    if (!sides.length) {
+      console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} has no registered sides`);
+      return;
+    }
+    const winners = sides.filter(s => s.direction === decision.winner);
+    const losers = sides.filter(s => s.direction !== decision.winner);
+    if (!winners.length) {
+      console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} no winners on direction ${decision.winner}`);
+      return;
+    }
+
+    // 2. Compute output amounts (= simplified proportional pool model)
+    const makerStake = parseInt(market.maker_stake_amount, 10) || 0;
+    const totalLoserStake = losers.reduce((s, b) => s + (parseInt(b.stake_amount, 10) || 0), 0);
+    const totalWinnerStake = winners.reduce((s, b) => s + (parseInt(b.stake_amount, 10) || 0), 0);
+    const oracleBond = parseInt(market.oracle_bond_amount, 10) || 0;
+    const minerFee = parseInt(market.miner_fee, 10) || 20_000;
+    const brokerFeePct = parseInt(market.broker_fee_pct, 10) || 0;
+
+    // Pool divided among winners + broker:
+    //   losingPool = totalLoserStake + makerStake (= maker contributes pool seed)
+    //   brokerFee = losingPool * brokerFeePct / 10000
+    //   winnerNetPayout = losingPool - brokerFee (= split proportional to winner stake)
+    //   Each winner gets: own_stake + winnerNetPayout * own_stake / totalWinnerStake
+    const losingPool = totalLoserStake + makerStake;
+    const brokerFee = Math.floor(losingPool * brokerFeePct / 10000);
+    const winnerNetPayout = losingPool - brokerFee;
+
+    // 3. Look up addresses (= maker, broker, 3 oracles, N winners) by relay_id / pubkey
+    const oracleIds = JSON.parse(market.oracle_relay_ids || '[]');
+    const oracleRows = oracleIds.map(rid => sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(rid));
+    if (oracleRows.some(r => !r?.address)) {
+      console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} missing oracle addresses`);
+      return;
+    }
+    const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
+    if (!makerRow?.address) {
+      console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} no maker address`);
+      return;
+    }
+
+    // Bettor addresses derived from pubkey (= P2PK ScriptPublicKey at chain time, but DM target needs address).
+    // For first draft: store bettor_relay_id → look up address. Bettor self-claim path makes payout to known addr.
+    const winnerAddrs = winners.map(w => {
+      const row = w.bettor_relay_id
+        ? sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(w.bettor_relay_id)
+        : null;
+      return row?.address || null;
+    });
+    if (winnerAddrs.some(a => !a)) {
+      console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} missing winner addresses (some bettor_relay_id has no address row)`);
+      return;
+    }
+
+    // 4. Build outputs array per PoolSpine.sil entry 0 ordering:
+    //    [broker, winner_1, ..., winner_N, oracle1_bond, oracle2_bond, oracle3_bond]
+    const outputs = [];
+    if (brokerFee > 0) {
+      // broker address derived from broker_pk (= P2PK). First draft: skip broker if pk not resolvable, broker fee folds to winners.
+      // TODO Phase 2 refinement: store broker_relay_id at create time + look up address.
+      outputs.push({ address: makerRow.address, amountSompi: brokerFee.toString() });  // placeholder = maker (broker addr lookup TODO)
+    }
+    for (let i = 0; i < winners.length; i++) {
+      const ownStake = parseInt(winners[i].stake_amount, 10) || 0;
+      const share = totalWinnerStake > 0 ? Math.floor(winnerNetPayout * ownStake / totalWinnerStake) : 0;
+      const payout = ownStake + share;
+      outputs.push({ address: winnerAddrs[i], amountSompi: payout.toString() });
+    }
+    // 3 oracle bond returns (= unanimous case all 3 get back; forfeit_1 case silent loses)
+    for (let i = 0; i < 3; i++) {
+      const isSilent = !decision.unanimous && decision.silentOracleIndex === i;
+      if (isSilent) continue;  // silent oracle bond forfeit (= TODO: split 50%/25%/25% per spec, simplified for first draft)
+      outputs.push({ address: oracleRows[i].address, amountSompi: oracleBond.toString() });
+    }
+
+    // 5. Build input outpoints: spine + N side lock TXs
+    const requiredInputOutpoints = [
+      { outpointTxid: market.spine_lock_tx, outpointIndex: 0 },
+      ...sides.map(s => ({ outpointTxid: s.side_lock_tx, outpointIndex: 0 })),
+    ];
+
+    // 6. Call maker_relay 'prediction_settle_build_preimage' with multi-p2sh array (= spine + N side p2sh)
+    const p2shAddresses = [market.spine_p2sh, ...sides.map(s => s.side_p2sh)];
+    const preimage = await sendCommandAsync(market.maker_relay_id, {
+      type: 'prediction_settle_build_preimage',
+      p2sh_address: p2shAddresses,  // array — multi-p2sh extension Phase 2a-1
+      required_input_outpoints: requiredInputOutpoints,
+      outputs,
+    });
+    if (!preimage?.ok || !preimage.tx_obj) {
+      console.error(`[pool-settler] dispatchPhase2 build_preimage fail market=${market.id.slice(0,12)}: ${preimage?.error}`);
+      return;
+    }
+
+    // 7. Stash phase2_tx_obj + winner + silent_oracle_index in pool_markets.metadata
+    const newMeta = {
+      phase2_tx_obj: preimage.tx_obj,
+      phase2_winner: decision.winner,
+      phase2_unanimous: decision.unanimous,
+      phase2_silent_oracle_index: decision.silentOracleIndex ?? null,
+      phase2_dispatched_at: new Date().toISOString(),
+      phase2_input_count: requiredInputOutpoints.length,
+      phase2_output_count: outputs.length,
+    };
+    sqlite.prepare('UPDATE pool_markets SET metadata = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(JSON.stringify(newMeta), 'collecting_sigs', market.id);
+
+    // 8. DM 3 oracle relays with kanet_pool_oracle_tx_sign_req_v1
+    //    (= adapted from 1V1 kanet_oracle_tx_sign_req_v1, uses market_id instead of offer_id)
+    const reqPayload = JSON.stringify({
+      t: 'kanet_pool_oracle_tx_sign_req_v1',
+      market_id: market.id,
+      winner: decision.winner,
+      unanimous: decision.unanimous,
+      silent_oracle_index: decision.silentOracleIndex ?? null,
+      input_count: requiredInputOutpoints.length,
+    });
+    const signingOracles = decision.unanimous
+      ? [0, 1, 2]
+      : [0, 1, 2].filter(i => i !== decision.silentOracleIndex);
+    Promise.allSettled(signingOracles.map(i =>
+      sendCommandAsync(market.maker_relay_id, { type: 'send_message', target: oracleRows[i].address, message: reqPayload })
+    )).catch(() => {});
+
+    console.log(`[pool-settler] DISPATCHED Phase 2 market=${market.id.slice(0,12)} winner=${decision.winner} unanimous=${decision.unanimous} inputs=${requiredInputOutpoints.length} outputs=${outputs.length} → collecting_sigs`);
+  } catch (e) {
+    console.error(`[pool-settler] dispatchPhase2 fail market=${market.id?.slice(0,12)}: ${e.message}`);
+  }
 }
