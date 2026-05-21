@@ -353,7 +353,7 @@ fastify.post('/lang', (request, reply) => {
 
 // Start
 await ensureIngestSecret();
-await fastify.listen({ port: PORT, host: process.env.HOST || '127.0.0.1' });
+await fastify.listen({ port: PORT, host: '127.0.0.1' });
 console.log(`[kasia-console] running at http://localhost:${PORT}`);
 
 // Auto-register Mind skills from agent-mind/src/skills/
@@ -424,9 +424,18 @@ startFossaStableScannerCron();
 import { startPredictionSettlerCron } from './services/bettor-prediction-settler.js';
 startPredictionSettlerCron();
 
-// r211 O-6 prediction voter daemon (= Path D oracle voter cron, sync mainnet)
+// Phase 3a r211 O-6 — prediction oracle voter daemon (Bettor r211 v3 + J1 #318 PB consensus).
+// 5min cron, scan host-local is_oracle=1 relays + vote offers via Polymarket gamma (Phase 3a MVP).
+// Vote DM to maker_relay (PB-D aggregator), 1-to-1 不上链 broadcast (PB-C, 5x fee 省).
+// kanet_oracle_vote_v1 JSON + evidence_hash sha256 (PB-B). Phase 3a 仅 polymarket_uma_mirror,
+// Phase 4 加 LLM consensus + multi-source diversity.
 import { startPredictionVoterCron } from './services/bettor-prediction-voter.js';
 startPredictionVoterCron();
+
+// B2 v0.5 Sub 2d Phase 1 — pool_markets settler (aggregate 3 oracle votes + consensus check).
+// Phase 2 (TX construction + sig orchestration + broadcast) deferred.
+import { startPoolMarketSettlerCron } from './services/pool-market-settler.js';
+startPoolMarketSettlerCron();
 
 // Phase B Variant Expander 3-tier (Owner 5/16 钦定 "B" + Bettor r141 spec) — 30 min cron.
 // per scanner rec → auto-find related markets → 3 档 variant (激进/适中/保守) INSERT.
