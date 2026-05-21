@@ -1,3 +1,8 @@
+// DEPRECATED 5/21 (J2 #637 Group C audit, KI 63 整合):
+// Driver for _phasec_real_p2p_path1/path2_sell (already DEPRECATED by NWT N19.159).
+// broker-v2 era P2P encrypted DM mode (ii). broker-v3 native real-chain DM via cn_buyer_real / cn_seller_real persona.
+// Framework equivalent: test-framework/lib/real-chain-runner.mjs + personas/real-chain/.
+//
 // _phasec_real_p2p_driver.mjs — Phase C real P2P chain DM driver.
 //
 // J1 ed759126 Path 4 T1+T2 实施 reference. NWT 14:36 mode (ii) propose.
