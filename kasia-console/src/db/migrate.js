@@ -4007,5 +4007,60 @@ export function runMigrations() {
     }
   }
 
+  // v62 — B2 v0.5 pool prediction market tables (= PoolSpine + PoolSide architecture)
+  // Per service spec docs/poolspine-service-layer-spec-2026-05-21.md Section 6.
+  // Note: v62 lives in the modern migration namespace (= Bettor B2 v0.5 SS contract Sub 2a, 2026-05-21).
+  {
+    const tables = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('pool_markets','pool_bettor_sides')").all();
+    if (tables.length < 2) {
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS pool_markets (
+          id TEXT PRIMARY KEY,
+          maker_relay_id TEXT NOT NULL,
+          spine_p2sh TEXT NOT NULL,
+          spine_lock_tx TEXT,
+          market_metadata_hash TEXT NOT NULL,
+          oracle1_pk TEXT, oracle2_pk TEXT, oracle3_pk TEXT,
+          broker_pk TEXT,
+          deadline INTEGER NOT NULL,
+          miner_fee INTEGER,
+          broker_fee_pct INTEGER,
+          oracle_bond_amount INTEGER,
+          maker_stake_amount INTEGER,
+          outcome_market_source TEXT,
+          outcome_condition_id TEXT,
+          outcome_token_id TEXT,
+          outcome_side TEXT,
+          resolution_rule_spec TEXT,
+          protocol_status TEXT DEFAULT 'pending_bettors',
+          settle_txid TEXT,
+          refund_txid TEXT,
+          sides_merkle_root TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_pool_markets_status ON pool_markets(protocol_status);
+        CREATE INDEX IF NOT EXISTS idx_pool_markets_deadline ON pool_markets(deadline);
+
+        CREATE TABLE IF NOT EXISTS pool_bettor_sides (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          market_id TEXT NOT NULL REFERENCES pool_markets(id),
+          bettor_pk TEXT NOT NULL,
+          bettor_relay_id TEXT,
+          direction INTEGER NOT NULL,
+          stake_amount INTEGER NOT NULL,
+          side_p2sh TEXT NOT NULL,
+          side_lock_tx TEXT,
+          merkle_index INTEGER,
+          claim_txid TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_pool_sides_market ON pool_bettor_sides(market_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_pool_sides_bettor_market ON pool_bettor_sides(market_id, bettor_pk);
+      `);
+      console.log('[migrate] v62: pool_markets + pool_bettor_sides tables created (B2 v0.5 SS contract Sub 2a).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
