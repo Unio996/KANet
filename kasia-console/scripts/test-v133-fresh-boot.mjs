@@ -33,24 +33,34 @@ try {
     console.error('[smoke] FAIL: pool_markets.oracle_relay_ids col missing after fresh migrate');
     process.exit(1);
   }
-  console.log(`[smoke] pool_markets.oracle_relay_ids col present: ${hasRelay.type} ✓`);
+  console.log(`[smoke] v133 pool_markets.oracle_relay_ids col present: ${hasRelay.type} ✓`);
 
-  // Try insert to confirm column works end-to-end
+  // Verify v134 column (= phase2_tx_obj stash)
+  const hasMeta = pmCols.find(c => c.name === 'metadata');
+  if (!hasMeta) {
+    console.error('[smoke] FAIL: pool_markets.metadata col missing after fresh migrate');
+    process.exit(1);
+  }
+  console.log(`[smoke] v134 pool_markets.metadata col present: ${hasMeta.type} ✓`);
+
+  // Try insert to confirm both columns work end-to-end
   const testId = 'smoke-test-' + Date.now();
+  const metaJson = JSON.stringify({ phase2_winner: 0, phase2_dispatched_at: new Date().toISOString() });
   sqlite.prepare(`INSERT INTO pool_markets (
-    id, maker_relay_id, spine_p2sh, market_metadata_hash, deadline, oracle_relay_ids
-  ) VALUES (?,?,?,?,?,?)`).run(
+    id, maker_relay_id, spine_p2sh, market_metadata_hash, deadline, oracle_relay_ids, metadata
+  ) VALUES (?,?,?,?,?,?,?)`).run(
     testId, 'voter1', 'kaspatest:smoke', 'a'.repeat(64), Math.floor(Date.now()/1000),
-    JSON.stringify(['v1','v2','v3'])
+    JSON.stringify(['v1','v2','v3']), metaJson
   );
-  const row = sqlite.prepare('SELECT oracle_relay_ids FROM pool_markets WHERE id = ?').get(testId);
-  if (!row || !row.oracle_relay_ids) {
+  const row = sqlite.prepare('SELECT oracle_relay_ids, metadata FROM pool_markets WHERE id = ?').get(testId);
+  if (!row || !row.oracle_relay_ids || !row.metadata) {
     console.error('[smoke] FAIL: INSERT/SELECT round-trip fail');
     process.exit(1);
   }
-  console.log(`[smoke] insert+select round-trip: ${row.oracle_relay_ids} ✓`);
+  console.log(`[smoke] insert+select round-trip oracle_relay_ids: ${row.oracle_relay_ids} ✓`);
+  console.log(`[smoke] insert+select round-trip metadata: ${row.metadata} ✓`);
 
-  console.log('[smoke] PASS — v62 + v133 fresh boot migrate works');
+  console.log('[smoke] PASS — v62 + v133 + v134 fresh boot migrate works');
   sqlite.close();
   unlinkSync(TEMP_DB);
 } catch (e) {
