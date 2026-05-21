@@ -4091,5 +4091,20 @@ export function runMigrations() {
     }
   }
 
+  // v135 — B2 v0.5 Sub 2d Phase 2a-2 fix: pool_markets.broker_relay_id
+  // Per Bettor r339 push: dispatcher needs broker address for broker fee output.
+  // Without this col broker fee placeholder folds to maker (= wrong).
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(pool_markets)").all();
+    if (!cols.some(c => c.name === 'broker_relay_id')) {
+      try {
+        sqlite.exec(`ALTER TABLE pool_markets ADD COLUMN broker_relay_id TEXT`);
+        console.log('[migrate] v135: pool_markets 加 broker_relay_id TEXT (= broker fee output dest lookup, B2 v0.5 Sub 2d Phase 2a-2 r339 concede).');
+      } catch (e) {
+        console.warn(`[migrate] v135 ADD COLUMN fail: ${e.message}`);
+      }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
