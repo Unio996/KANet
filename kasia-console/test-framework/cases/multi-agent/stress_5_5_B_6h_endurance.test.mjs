@@ -80,7 +80,9 @@ export default {
         optsBuilder: (i) => ({
           relayId: r.id, relayName: name, userKasia: r.address, brokerKasia: BROKER_KASIA,
           userEvmAddr: opts.userEvmAddrMap?.[name] || '0xd3618e37354700d21FE8728Bd278Dc1924974799',
-          qty: 10 + Math.floor(Math.random() * 21),
+          // KI 57 (NWT N19.140): mix 80% small (10-30 KAS) + 20% big (100-250 KAS) to真 exercise router 3-CEX paths.
+          // Small → KuCoin route (<$5). Big → Bybit/Gate.io default/auto_e2e (≥$5). 6h × 30/hr × 0.2 = ~36 big cycles.
+          qty: Math.random() < 0.8 ? (10 + Math.floor(Math.random() * 21)) : (100 + Math.floor(Math.random() * 151)),
           policy: { maxStepUsdt: 5 },
         }),
       };
@@ -92,7 +94,7 @@ export default {
         id: `seller_${name}`,
         personaFn: autonomousSeller.run,
         persona: { id: `seller_${name}` },
-        optsBuilder: () => ({ relayId: r.id, qty: 10 + Math.floor(Math.random() * 21), pricePerKas: 0.034, expiresMin: 5 }),
+        optsBuilder: () => ({ relayId: r.id, qty: Math.random() < 0.8 ? (10 + Math.floor(Math.random() * 21)) : (100 + Math.floor(Math.random() * 151)), pricePerKas: 0.034, expiresMin: 5 }),
       };
     }).filter(Boolean);
     const actorTemplates = [...buyerTemplates, ...sellerTemplates];
