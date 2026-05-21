@@ -10,6 +10,7 @@
 
 import autonomousBuyer from '../../personas/agent/autonomous_buyer.mjs';
 import autonomousSeller from '../../personas/agent/autonomous_seller.mjs';
+import autonomousTaker from '../../personas/agent/autonomous_taker.mjs';
 import { runStress } from '../../lib/stress-harness.mjs';
 import { getRelayInfo } from '../../lib/real-chain-runner.mjs';
 
@@ -97,7 +98,24 @@ export default {
         optsBuilder: () => ({ relayId: r.id, qty: Math.random() < 0.8 ? (10 + Math.floor(Math.random() * 21)) : (100 + Math.floor(Math.random() * 151)), pricePerKas: 0.034, expiresMin: 5 }),
       };
     }).filter(Boolean);
-    const actorTemplates = [...buyerTemplates, ...sellerTemplates];
+    // KI 58 (NWT N19.142): add taker actors — without takers, broker BUY offers + seller offers all expire (no settle).
+    // takerPool = KAS-holding relays. autonomous_taker scans open offers, accepts with discount filter.
+    const takerPool = opts.takerPool || ['NWT', 'Trader-M', 'J2'];
+    const takerTemplates = takerPool.map((name) => {
+      const r = getRelayInfo(name);
+      if (!r) return null;
+      return {
+        id: `taker_${name}`,
+        personaFn: autonomousTaker.run,
+        persona: { id: `taker_${name}` },
+        optsBuilder: () => ({
+          relayId: r.id, userKasia: r.address,
+          maxKasQty: 250, maxUsdtPay: 10,  // accept up to 250 KAS per offer / max $10 pay
+        }),
+      };
+    }).filter(Boolean);
+
+    const actorTemplates = [...buyerTemplates, ...sellerTemplates, ...takerTemplates];
 
     // Sub-A drain protocol
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -105,7 +123,7 @@ export default {
       try {
         const { unlinkSync, existsSync } = await import('node:fs');
         const LOCK_DIR = 'C:/kanet/logs/agent-locks';
-        const allRelays = [...new Set([...buyerPool, ...sellerPool])];
+        const allRelays = [...new Set([...buyerPool, ...sellerPool, ...takerPool])];
         const { getRelayInfo: getInfo } = await import('../../lib/real-chain-runner.mjs');
         for (const name of allRelays) {
           const r = getInfo(name);
