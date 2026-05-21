@@ -586,6 +586,7 @@ if (process.send) {
             cmd.winner,                     // 0|1
             wallet.getNetworkId(),
             0n,
+            cmd.tx_obj_preimage || null,    // Sub 8.2 Bug 14: voter's exact tx_obj for byte-identical sighash
           );
           if (cmd.requestId && process.send) {
             process.send({ requestId: cmd.requestId, result: { ok: true, branch: 0, txId: r.txId } });

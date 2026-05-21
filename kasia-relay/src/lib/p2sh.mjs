@@ -256,7 +256,7 @@ export async function unlockP2SH(wallet, p2shAddress, redeemScript, branch, toAd
  * @param {bigint} [lockTime=0]
  * @returns {Promise<{ txId: string }>}
  */
-export async function unlockP2SHMultiSig(p2shAddress, redeemScript, requiredInputOutpoints, outputs, sigsByInput, winner, networkId, lockTime = 0n) {
+export async function unlockP2SHMultiSig(p2shAddress, redeemScript, requiredInputOutpoints, outputs, sigsByInput, winner, networkId, lockTime = 0n, txObjPreimage = null) {
   if (requiredInputOutpoints.length !== 2) throw new Error(`unlockP2SHMultiSig requires 2 outpoints, got ${requiredInputOutpoints.length}`);
   if (outputs.length !== 2) throw new Error(`unlockP2SHMultiSig requires 2 outputs, got ${outputs.length}`);
   if (sigsByInput.length !== 2) throw new Error(`sigsByInput must be 2 arrays (one per input), got ${sigsByInput.length}`);
@@ -282,45 +282,81 @@ export async function unlockP2SHMultiSig(p2shAddress, redeemScript, requiredInpu
       payToAddressScript(new Address(o.address))
     ));
 
-    // sigData builder per input — selector OP_0 (= settle, branch=0), winner OP_0/1, 5 sigs with sighashtype byte
+    // sigData builder per input — selector OP_0 (= settle, branch=0), winner OP_0/1, 5 sigs
+    //
+    // Sub 8.1 fix (5/21 Owner directive): createInputSignature returns 66-byte hex
+    // [0x41 OP_PUSHBYTES_65][64-byte Schnorr sig][0x01 SIGHASH_ALL] — ALREADY push-encoded.
+    // Previous Sub 8 bug: code appended extra 0x01 sighash byte + used sb.addData() which adds
+    // ANOTHER push prefix → double push + double sighash byte → kaspad "malformed signature".
+    //
+    // Reference: p2sh.mjs unlockP2SH single-sig branch line 202 doc + AgentEscrow .106 production.
+    //
+    // sigData layout for settle entrypoint:
+    //   [sig1_push_encoded_66b] × 5
+    //   + [winner_OP] (OP_0 maker / OP_1 taker)
+    //   + [selector_OP_0] (entrypoint 0 = settle)
+    //   + [redeem_script_push]
     const winnerOpHex = winner === 0 ? '00' : '51';  // OP_0 / OP_1
     const selectorOpHex = '00';  // OP_0 settle branch
-    const sighashTypeByte = '01';  // SIGHASH_ALL per Bitcoin/Kaspa convention
 
-    // Assemble scriptSig per input via ScriptBuilder (= concat 5 sig+sighashtype + winner + selector + redeem push)
+    // Compute redeem script push via ScriptBuilder (reuse Bettor pattern from unlockP2SH line 207-208)
+    const redeemPushSb = new ScriptBuilder();
+    redeemPushSb.addData(redeemScript);
+    const redeemPushHex = redeemPushSb.toString();
+
     function assembleScriptSig(sigs5) {
-      const sb = new ScriptBuilder();
-      // push 5 sigs with sighashtype byte append (= Bitcoin convention r242 Bettor reminder)
-      for (const sigHex of sigs5) {
-        const sigWithType = sigHex + sighashTypeByte;
-        const sigBytes = hexStrToBytes(sigWithType);
-        sb.addData(sigBytes);
-      }
-      // push winner byte (OP_0 OR OP_1 small int push)
-      sb.addOp(winner === 0 ? 0x00 : 0x51);
-      // push selector (= OP_0 settle)
-      sb.addOp(0x00);
-      // append redeem script as data push at end (= P2SH convention)
-      sb.addData(redeemScript);
-      return sb.toString();
+      // sigs5 are already push-encoded hex from createInputSignature — concat directly
+      const sigsConcat = sigs5.join('');
+      return sigsConcat + winnerOpHex + selectorOpHex + redeemPushHex;
     }
 
     const scriptSigs = sigsByInput.map(sigs5 => assembleScriptSig(sigs5));
 
-    const signedTx = new Transaction({
-      version: 0,
-      inputs: matched.map((utxo, i) => ({
-        previousOutpoint: { transactionId: utxo.outpoint.transactionId, index: utxo.outpoint.index },
-        signatureScript: scriptSigs[i],
-        sequence: 0n,
-        sigOpCount: 5,  // 5 oracle checkSig calls in settle entrypoint
-      })),
-      outputs: txOutputs,
-      lockTime: txLockTime,
-      gas: 0n,
-      subnetworkId: '0000000000000000000000000000000000000000',
-      payload: '',
-    });
+    // Sub 8.2 (Bug 14): reuse voter's exact tx_obj if provided (= byte-identical TX body → sighash match).
+    // Else fallback to fresh Transaction build (= legacy path, may have field serialization drift).
+    let signedTx;
+    if (txObjPreimage) {
+      // Reuse phase2_tx_obj that voters signed against. Inject scriptSigs into inputs.
+      // Rehydrate BigInt fields lost in JSON roundtrip (= same logic as voter's sign_input_for_settle handler).
+      const parsed = JSON.parse(JSON.stringify(txObjPreimage));
+      parsed.lockTime = BigInt(parsed.lockTime || 0);
+      parsed.gas = BigInt(parsed.gas || 0);
+      if (Array.isArray(parsed.inputs)) {
+        parsed.inputs = parsed.inputs.map((inp, i) => ({
+          ...inp,
+          signatureScript: scriptSigs[i],  // inject signed scriptSig
+          sequence: BigInt(inp.sequence || 0),
+          sigOpCount: Number(inp.sigOpCount || 0),
+          utxo: inp.utxo ? {
+            ...inp.utxo,
+            amount: BigInt(inp.utxo.amount || 0),
+            blockDaaScore: BigInt(inp.utxo.blockDaaScore || 0),
+          } : undefined,
+        }));
+      }
+      if (Array.isArray(parsed.outputs)) {
+        parsed.outputs = parsed.outputs.map(o => ({
+          ...o,
+          value: BigInt(o.value || 0),
+        }));
+      }
+      signedTx = new Transaction(parsed);
+    } else {
+      signedTx = new Transaction({
+        version: 0,
+        inputs: matched.map((utxo, i) => ({
+          previousOutpoint: { transactionId: utxo.outpoint.transactionId, index: utxo.outpoint.index },
+          signatureScript: scriptSigs[i],
+          sequence: 0n,
+          sigOpCount: 5,  // 5 oracle checkSig calls in settle entrypoint
+        })),
+        outputs: txOutputs,
+        lockTime: txLockTime,
+        gas: 0n,
+        subnetworkId: '0000000000000000000000000000000000000000',
+        payload: '',
+      });
+    }
 
     const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: result.transactionId };

@@ -362,6 +362,7 @@ async function dispatchPhase2OrCheckSigs(offer, winnerStr, db) {
         ],
         sigs_by_input: sigsByInput,
         winner: meta.phase2_winner,
+        tx_obj_preimage: meta.phase2_tx_obj,  // Sub 8.2 Bug 14: voter's exact tx_obj for byte-identical sighash
       });
       if (!submitResult?.ok || !submitResult.txId) {
         console.error(`[settler] Phase 4a Sub 8 settle submit fail offer=${offer.id.slice(0,12)}: ${submitResult?.error}`);

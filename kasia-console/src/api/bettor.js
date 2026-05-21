@@ -1369,7 +1369,7 @@ export async function registerBettorRoutes(fastify) {
       return reply.code(400).send({ ok: false, error: `stake ${stakeKas.toFixed(2)} KAS exceeds max ${MAX_STAKE_PER_OFFER} KAS` });
     }
 
-    const minerFee = parseInt(b.miner_fee, 10) || 10_000;  // 0.0001 KAS default
+    const minerFee = parseInt(b.miner_fee, 10) || 20_000;  // 0.0002 KAS default (= Sub 8.1 Bug 13: 10000 too low for kaspad standardness 13130 for 5-sig settle TX, 20000 safe margin)
     const deadline = Math.floor(outcomeEndMs / 1000);
 
     // v3 双 stake: makerStakeAmount + takerStakeAmount (= 真 P2P, Bettor r233).
