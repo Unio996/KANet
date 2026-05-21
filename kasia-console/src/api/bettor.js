@@ -1375,7 +1375,12 @@ export async function registerBettorRoutes(fastify) {
     // v3 双 stake: makerStakeAmount + takerStakeAmount (= 真 P2P, Bettor r233).
     // Phase 4a v0 简化: taker_stake_amount = maker_stake_amount (= 1:1 双方 同等 stake).
     // Phase 4b 经济模型加 odds-weighted stake (= maker stake based on price, taker stake based on (1-price)).
-    const stakeKasSompi = Math.floor(stakeKas * 1e8);  // sompi int
+    //
+    // Sub 8.3 Bug 17 ROOT CAUSE: Math.floor(stakeKas * 1e8) vs (stakeKas.toFixed(8) → kasToSompi)
+    // 不一致 → 1 sompi mismatch baked ctor vs actual transfer → settle TX outputs[].value 不 match contract require → "script ran but verification failed".
+    // Fix: use SAME conversion. Math.round(stakeKas * 1e8) → exact sompi → kas string from sompi → transfer exact.
+    const stakeKasSompi = Math.round(stakeKas * 1e8);  // sompi int (= Math.round NOT floor, match kaspad's kasToSompi rounding)
+    const stakeKasStr = (stakeKasSompi / 1e8).toFixed(8);  // KAS string from canonical sompi (= guarantee transfer matches baked)
 
     const { computeEscrowP2SH } = await import('../lib/prediction-escrow-ss.mjs');
     let escrow;
@@ -1396,7 +1401,7 @@ export async function registerBettorRoutes(fastify) {
     let escrowTxId = null;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const r = await sendCommandAsync(b.maker_relay_id, { type: 'transfer', target: escrow.p2shAddr, amount: stakeKas.toFixed(8) });
+        const r = await sendCommandAsync(b.maker_relay_id, { type: 'transfer', target: escrow.p2shAddr, amount: stakeKasStr });
         escrowTxId = r?.txId || null;
         if (escrowTxId) break;
         if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 5000));
@@ -1553,17 +1558,21 @@ export async function registerBettorRoutes(fastify) {
     if (takerPkActual !== offer.pending_taker_pubkey) {
       return reply.code(403).send({ ok: false, error: 'taker_relay_id pubkey ≠ pending_taker_pubkey (= 不是 handshake 时的 taker)' });
     }
-    // Look up taker stake amount from metadata
-    let stakeKas;
-    try { stakeKas = JSON.parse(offer.metadata).maker_stake_locked_kas; } catch {}
-    if (!Number.isFinite(stakeKas) || stakeKas <= 0) return reply.code(500).send({ ok: false, error: 'offer metadata.maker_stake_locked_kas missing/invalid' });
+    // Look up taker stake amount from metadata (= maker baked sompi, NOT KAS float)
+    // Sub 8.3 Bug 17: taker MUST transfer EXACT sompi count = maker baked, NOT float-derived. Else 1 sompi mismatch.
+    let metaParsed;
+    try { metaParsed = JSON.parse(offer.metadata); } catch {}
+    const takerStakeSompi = parseInt(metaParsed?.taker_stake_sompi, 10);
+    if (!Number.isFinite(takerStakeSompi) || takerStakeSompi <= 0) return reply.code(500).send({ ok: false, error: 'offer metadata.taker_stake_sompi missing/invalid' });
+    const stakeKasStr = (takerStakeSompi / 1e8).toFixed(8);  // canonical KAS string from baked sompi
+    const stakeKas = takerStakeSompi / 1e8;  // for logging only
 
     // Taker transfer stake → same SS P2SH addr
     const { sendCommandAsync } = await import('../services/relay-manager.js');
     let takerEscrowTxId = null;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const r = await sendCommandAsync(b.taker_relay_id, { type: 'transfer', target: offer.escrow_p2sh, amount: stakeKas.toFixed(8) });
+        const r = await sendCommandAsync(b.taker_relay_id, { type: 'transfer', target: offer.escrow_p2sh, amount: stakeKasStr });
         takerEscrowTxId = r?.txId || null;
         if (takerEscrowTxId) break;
         if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 5000));

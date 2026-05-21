@@ -77,9 +77,11 @@ export async function settlePredictionOutcomes() {
     for (const offer of offers) {
       try {
         // matched → verifying 立 transition (= settler 已认领, 表 oracle 验证中)
+        // Sub 8.3 Bug 18: refresh in-memory offer.protocol_status after transition (= dispatchPhase2OrCheckSigs checks it).
         if (offer.protocol_status === 'matched') {
           try {
             transition(offer.id, 'verifying');
+            offer.protocol_status = 'verifying';  // in-memory refresh post DB transition
           } catch (e) {
             console.warn(`[prediction-settler] transition matched→verifying fail ${offer.id.slice(0,8)}: ${e.message}`);
           }
