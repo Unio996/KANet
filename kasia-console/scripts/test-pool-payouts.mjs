@@ -26,6 +26,7 @@ function assertEq(label, actual, expected) {
     winner: 0,
     brokerFeePct: 0,
     oracleBond: 1000,
+    minerFee: 0,
     unanimous: true,
     silentOracleIndex: null,
   });
@@ -58,6 +59,7 @@ function assertEq(label, actual, expected) {
     winner: 0,
     brokerFeePct: 500,  // 5%
     oracleBond: 1000,
+    minerFee: 0,
     unanimous: true,
     silentOracleIndex: null,
   });
@@ -89,6 +91,7 @@ function assertEq(label, actual, expected) {
     winner: 0,
     brokerFeePct: 0,
     oracleBond: 1000,
+    minerFee: 0,
     unanimous: false,
     silentOracleIndex: 2,
   });
@@ -127,6 +130,7 @@ function assertEq(label, actual, expected) {
     winner: 0,
     brokerFeePct: 0,
     oracleBond: 1000,
+    minerFee: 0,
     unanimous: false,
     silentOracleIndex: 0,
   });
@@ -149,6 +153,59 @@ function assertEq(label, actual, expected) {
       { oracleIndex: 2, amount: 1125 },
     ],
   });
+}
+
+// Test 5: minerFee subtraction (= self-catch fix for 5/21 1V1 fee rejection)
+{
+  const r = computePoolPayouts({
+    participants: [
+      { stake: 100, direction: 0, isMaker: true },   // maker YES, wins
+      { stake: 200, direction: 1 },                  // bettor1 NO, loses → contributes pool
+    ],
+    winner: 0,
+    brokerFeePct: 0,
+    oracleBond: 1000,
+    minerFee: 50,
+    unanimous: true,
+    silentOracleIndex: null,
+  });
+  // losingPool = 200 - 50 = 150 (minerFee subtracted)
+  // brokerFee = 0, distributable = 150
+  // maker: 100 + floor(150*100/100) = 100+150 = 250
+  // inputs (maker + bettor + 3 bonds) = 100 + 200 + 3000 = 3300
+  // outputs (maker + 3 bonds) = 250 + 3000 = 3250
+  // diff = 3300 - 3250 = 50 = minerFee ✓ (chain accepts)
+  assertEq('T5 minerFee subtracted from losingPool', {
+    brokerFee: r.brokerFee,
+    winners: r.winnerPayouts.map(w => w.amount),
+    bondReturns: r.oracleBondReturns.map(o => o.amount),
+  }, {
+    brokerFee: 0,
+    winners: [250],
+    bondReturns: [1000, 1000, 1000],
+  });
+}
+
+// Test 6: minerFee > losingPool throws (= settle impossible)
+{
+  let threw = false;
+  try {
+    computePoolPayouts({
+      participants: [
+        { stake: 100, direction: 0, isMaker: true },
+        { stake: 50,  direction: 1 },                // bettor stake too low to cover fee
+      ],
+      winner: 0,
+      brokerFeePct: 0,
+      oracleBond: 1000,
+      minerFee: 100,  // > losingPool (50)
+      unanimous: true,
+      silentOracleIndex: null,
+    });
+  } catch (e) {
+    threw = e.message.includes('less than minerFee');
+  }
+  assertEq('T6 minerFee > losingPool throws explicit error', threw, true);
 }
 
 console.log(`\n=== ${pass} PASS / ${fail} FAIL ===`);
