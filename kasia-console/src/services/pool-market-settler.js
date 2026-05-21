@@ -384,6 +384,7 @@ export async function dispatchPhase2(market, decision) {
       phase2_dispatched_at: new Date().toISOString(),
       phase2_input_count: requiredInputOutpoints.length,
       phase2_output_count: outputs.length,
+      phase2_outputs: outputs,  // Phase 2c step 2c: full outputs array for collecting_sigs handler IPC assembly
     };
     sqlite.prepare('UPDATE pool_markets SET metadata = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
       .run(JSON.stringify(newMeta), 'collecting_sigs', market.id);
@@ -550,28 +551,64 @@ async function handleCollectingSigs(market) {
     return;
   }
 
-  // All sigs collected. Submit via maker_relay 'pool_settle_tx' IPC (= TBD in Phase 2c relay handler).
-  // For Phase 2b first ship: log + stash sigs in metadata for inspection. Actual TX submit waits Phase 2c.
-  const sigsByInputSerialized = sigsByInput.map(input => input.map(s => s.signature));
-  const newMeta = { ...meta, phase2b_sigs_collected_at: new Date().toISOString(), phase2b_sigs_count: sigsByInput.map(s => s.length) };
-  sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-    .run(JSON.stringify(newMeta), market.id);
+  // Spine has required sigs. Load side data for TX assembly (= side_redeem_script_hex needed per side, v136+).
+  const sides = sqlite.prepare(`
+    SELECT side_p2sh, side_lock_tx, side_redeem_script_hex FROM pool_bettor_sides
+    WHERE market_id = ? AND side_lock_tx IS NOT NULL
+    ORDER BY merkle_index ASC
+  `).all(market.id);
 
-  console.log(`[pool-settler:collecting] market=${market.id.slice(0,12)} ALL SIGS COLLECTED inputs=${inputCount} sigs/input=${requiredPerInput} signers=${signingOracles.join(',')}`);
-  console.log(`[pool-settler:collecting] TODO Phase 2c: pool_settle_tx IPC submit — sigs ready in metadata.phase2b_sigs_collected_at`);
+  if (!meta.spine_redeem_script_hex) {
+    console.warn(`[pool-settler:collecting] market=${market.id.slice(0,12)} missing meta.spine_redeem_script_hex (= pre-v135 market or create-time omission), cannot assemble TX`);
+    return;
+  }
+  if (!Array.isArray(meta.phase2_outputs) || !meta.phase2_outputs.length) {
+    console.warn(`[pool-settler:collecting] market=${market.id.slice(0,12)} missing meta.phase2_outputs (= pre-2c step 2c dispatched), cannot assemble TX`);
+    return;
+  }
+  if (sides.some(s => !s.side_redeem_script_hex)) {
+    console.warn(`[pool-settler:collecting] market=${market.id.slice(0,12)} some sides missing side_redeem_script_hex (= pre-v136 registered), cannot assemble TX`);
+    return;
+  }
 
-  // Phase 2c stub: actual submit will go here
-  // const submitResult = await sendCommandAsync(market.maker_relay_id, {
-  //   type: 'pool_settle_tx',
-  //   p2sh_addresses: [market.spine_p2sh, ...sides.map(s => s.side_p2sh)],
-  //   redeem_script_hex: meta.spine_redeem_script_hex,  // TBD: stash at create time
-  //   tx_obj_preimage: meta.phase2_tx_obj,
-  //   sigs_by_input: sigsByInputSerialized,
-  //   winner: meta.phase2_winner,
-  //   unanimous: meta.phase2_unanimous,
-  //   silent_oracle_index: meta.phase2_silent_oracle_index,
-  // });
-  // if (submitResult?.ok && submitResult.txId) {
-  //   sqlite.prepare('UPDATE pool_markets SET settle_txid=?, protocol_status=? WHERE id=?').run(submitResult.txId, 'completed', market.id);
-  // }
+  const spineSigs = sigsByInput[SPINE_INPUT_IDX].map(s => s.signature);
+
+  // Phase 2c step 2c first ship: unanimous (entry 0) only. forfeit_1 entry 1 deferred next iteration.
+  if (!meta.phase2_unanimous) {
+    console.warn(`[pool-settler:collecting] market=${market.id.slice(0,12)} forfeit_1 entry 1 not yet supported in unlockPoolSpineP2SH, skip until next iteration`);
+    return;
+  }
+
+  console.log(`[pool-settler:collecting] market=${market.id.slice(0,12)} attempting settle TX submit (spine_sigs=${spineSigs.length}, sides=${sides.length}, signers=${signingOracles.join(',')})`);
+
+  try {
+    const submitResult = await sendCommandAsync(market.maker_relay_id, {
+      type: 'pool_settle_tx',
+      spine_p2sh_address: market.spine_p2sh,
+      side_p2sh_addresses: sides.map(s => s.side_p2sh),
+      spine_redeem_script_hex: meta.spine_redeem_script_hex,
+      side_redeem_script_hexes: sides.map(s => s.side_redeem_script_hex),
+      required_input_outpoints: [
+        { outpointTxid: market.spine_lock_tx, outpointIndex: 0 },
+        ...sides.map(s => ({ outpointTxid: s.side_lock_tx, outpointIndex: 0 })),
+      ],
+      outputs: meta.phase2_outputs,
+      spine_sigs: spineSigs,
+      winner: meta.phase2_winner,
+      sides_merkle_root: market.sides_merkle_root,
+      unanimous: meta.phase2_unanimous,
+      tx_obj_preimage: meta.phase2_tx_obj,
+    });
+
+    if (!submitResult?.ok || !submitResult.txId) {
+      console.error(`[pool-settler:collecting] pool_settle_tx submit fail market=${market.id.slice(0,12)}: ${submitResult?.error}`);
+      return;
+    }
+
+    sqlite.prepare('UPDATE pool_markets SET settle_txid = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(submitResult.txId, 'completed', market.id);
+    console.log(`[pool-settler:collecting] SETTLED market=${market.id.slice(0,12)} settle_txid=${submitResult.txId.slice(0,16)} winner=${meta.phase2_winner}`);
+  } catch (e) {
+    console.error(`[pool-settler:collecting] settle submit exception market=${market.id?.slice(0,12)}: ${e.message}`);
+  }
 }

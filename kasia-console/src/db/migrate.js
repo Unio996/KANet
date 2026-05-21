@@ -4106,5 +4106,20 @@ export function runMigrations() {
     }
   }
 
+  // v136 — B2 v0.5 Sub 2d Phase 2c step 2c: pool_bettor_sides.side_redeem_script_hex
+  // Required for handleCollectingSigs to assemble settle TX scriptSig per side input.
+  // PoolSide.settled_via_spine scriptSig = [selector_0 + side_redeem_push].
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(pool_bettor_sides)").all();
+    if (!cols.some(c => c.name === 'side_redeem_script_hex')) {
+      try {
+        sqlite.exec(`ALTER TABLE pool_bettor_sides ADD COLUMN side_redeem_script_hex TEXT`);
+        console.log('[migrate] v136: pool_bettor_sides 加 side_redeem_script_hex TEXT (= settled_via_spine scriptSig assembly, B2 v0.5 Sub 2d Phase 2c step 2c).');
+      } catch (e) {
+        console.warn(`[migrate] v136 ADD COLUMN fail: ${e.message}`);
+      }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

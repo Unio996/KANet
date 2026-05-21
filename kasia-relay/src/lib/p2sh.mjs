@@ -514,3 +514,122 @@ export async function unlockP2SHDual(wallet, p2shAddress, redeemScript, branch, 
     try { await rpc.disconnect(); } catch {}
   }
 }
+
+// ── 6. unlockPoolSpineP2SH (B2 v0.5 Sub 2d Phase 2c step 2a) ──
+
+/**
+ * Pool spine + sides multi-input unlock for cooperative Path A spine settle TX.
+ *
+ * Per PoolSpine.sil entry 0 settle_unanimous: spine input needs 3 oracle sigs + winner + sidesMerkleRoot.
+ * Per PoolSide.sil entry 0 settled_via_spine: side inputs need NO sigs.
+ *
+ * scriptSig layout:
+ *   - spine input: [3 oracle sigs push-encoded 66B each] + winnerOP + sidesMerkleRoot push + selector_0 + spine_redeem push
+ *   - side input: [selector_0] + [side_redeem push]
+ *
+ * Phase 2c step 2a first ship: unanimous (entry 0) only. forfeit_1 entry 1 deferred next step.
+ */
+export async function unlockPoolSpineP2SH(args) {
+  const {
+    spineP2shAddress, sideP2shAddresses, spineRedeemScriptHex, sideRedeemScriptHexes,
+    requiredInputOutpoints, outputs, spineSigs, winner, sidesMerkleRootHex,
+    unanimous, networkId, lockTime = 0n, txObjPreimage = null,
+  } = args;
+
+  if (!unanimous) throw new Error('Phase 2c step 2a first ship supports unanimous only — forfeit_1 entry 1 deferred next step');
+  if (!Array.isArray(spineSigs) || spineSigs.length !== 3) throw new Error(`spineSigs must be 3 sigs for unanimous, got ${spineSigs?.length}`);
+  if (winner !== 0 && winner !== 1) throw new Error(`winner must be 0 or 1, got ${winner}`);
+  if (!Array.isArray(sideP2shAddresses) || !Array.isArray(sideRedeemScriptHexes)) throw new Error('sideP2shAddresses and sideRedeemScriptHexes required arrays');
+  if (sideP2shAddresses.length !== sideRedeemScriptHexes.length) throw new Error(`side count mismatch: ${sideP2shAddresses.length} addresses vs ${sideRedeemScriptHexes.length} redeem scripts`);
+  if (requiredInputOutpoints.length !== 1 + sideP2shAddresses.length) throw new Error(`input outpoint count ${requiredInputOutpoints.length} != 1 spine + ${sideP2shAddresses.length} sides`);
+
+  const txLockTime = BigInt(lockTime);
+  const rpc = await connectRpc(networkId);
+  try {
+    const allP2shList = [spineP2shAddress, ...sideP2shAddresses];
+    const { entries } = await rpc.getUtxosByAddresses(allP2shList);
+    if (!entries?.length) throw new Error(`No UTXOs found at pool P2SH addresses`);
+
+    const matched = requiredInputOutpoints.map(req => {
+      const found = entries.find(e =>
+        e.outpoint.transactionId === req.outpointTxid && Number(e.outpoint.index) === Number(req.outpointIndex)
+      );
+      if (!found) throw new Error(`UTXO not found: ${req.outpointTxid}:${req.outpointIndex}`);
+      return found;
+    });
+
+    const txOutputs = outputs.map(o => new TransactionOutput(
+      typeof o.amountSompi === 'string' ? BigInt(o.amountSompi) : o.amountSompi,
+      payToAddressScript(new Address(o.address))
+    ));
+
+    const winnerOpHex = winner === 0 ? '00' : '51';
+    const selectorOpHex = '00';
+
+    const rootBytes = new Uint8Array(Buffer.from(sidesMerkleRootHex.replace(/^0x/, ''), 'hex'));
+    if (rootBytes.length !== 32) throw new Error(`sidesMerkleRoot must be 32 bytes, got ${rootBytes.length}`);
+    const rootPushSb = new ScriptBuilder();
+    rootPushSb.addData(rootBytes);
+    const rootPushHex = rootPushSb.toString();
+
+    const spineRedeemBytes = new Uint8Array(Buffer.from(spineRedeemScriptHex, 'hex'));
+    const spineRedeemPushSb = new ScriptBuilder();
+    spineRedeemPushSb.addData(spineRedeemBytes);
+    const spineRedeemPushHex = spineRedeemPushSb.toString();
+
+    const spineScriptSig = spineSigs.join('') + winnerOpHex + rootPushHex + selectorOpHex + spineRedeemPushHex;
+
+    const sideScriptSigs = sideRedeemScriptHexes.map(redeemHex => {
+      const redeemBytes = new Uint8Array(Buffer.from(redeemHex, 'hex'));
+      const sb = new ScriptBuilder();
+      sb.addData(redeemBytes);
+      return selectorOpHex + sb.toString();
+    });
+
+    const allScriptSigs = [spineScriptSig, ...sideScriptSigs];
+
+    let signedTx;
+    if (txObjPreimage) {
+      const parsed = JSON.parse(JSON.stringify(txObjPreimage));
+      parsed.lockTime = BigInt(parsed.lockTime || 0);
+      parsed.gas = BigInt(parsed.gas || 0);
+      if (Array.isArray(parsed.inputs)) {
+        parsed.inputs = parsed.inputs.map((inp, i) => ({
+          ...inp,
+          signatureScript: allScriptSigs[i],
+          sequence: BigInt(inp.sequence || 0),
+          sigOpCount: i === 0 ? 3 : 0,
+          utxo: inp.utxo ? {
+            ...inp.utxo,
+            amount: BigInt(inp.utxo.amount || 0),
+            blockDaaScore: BigInt(inp.utxo.blockDaaScore || 0),
+          } : undefined,
+        }));
+      }
+      if (Array.isArray(parsed.outputs)) {
+        parsed.outputs = parsed.outputs.map(o => ({ ...o, value: BigInt(o.value || 0) }));
+      }
+      signedTx = new Transaction(parsed);
+    } else {
+      signedTx = new Transaction({
+        version: 0,
+        inputs: matched.map((utxo, i) => ({
+          previousOutpoint: { transactionId: utxo.outpoint.transactionId, index: utxo.outpoint.index },
+          signatureScript: allScriptSigs[i],
+          sequence: 0n,
+          sigOpCount: i === 0 ? 3 : 0,
+        })),
+        outputs: txOutputs,
+        lockTime: txLockTime,
+        gas: 0n,
+        subnetworkId: '0000000000000000000000000000000000000000',
+        payload: '',
+      });
+    }
+
+    const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: result.transactionId };
+  } finally {
+    try { await rpc.disconnect(); } catch {}
+  }
+}

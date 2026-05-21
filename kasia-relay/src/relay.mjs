@@ -594,6 +594,35 @@ if (process.send) {
           return;
         }
 
+        case 'pool_settle_tx': {
+          // B2 v0.5 Sub 2d Phase 2c step 2b — pool settle TX submit (= cooperative Path A).
+          // Inputs: 1 spine UTXO + N side UTXOs
+          // Outputs: broker + N winners + maker_extra? + oracle_bond_returns
+          // spineSigs: 3 oracle sigs for spine input (= unanimous entry 0)
+          // Side inputs auto-unlock via [selector_0 + side_redeem_push] (= settled_via_spine no sigs)
+          const { unlockPoolSpineP2SH } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockPoolSpineP2SH({
+            spineP2shAddress: cmd.spine_p2sh_address,
+            sideP2shAddresses: cmd.side_p2sh_addresses,
+            spineRedeemScriptHex: cmd.spine_redeem_script_hex,
+            sideRedeemScriptHexes: cmd.side_redeem_script_hexes,
+            requiredInputOutpoints: cmd.required_input_outpoints,
+            outputs: cmd.outputs,
+            spineSigs: cmd.spine_sigs,
+            winner: cmd.winner,
+            sidesMerkleRootHex: cmd.sides_merkle_root,
+            unanimous: cmd.unanimous,
+            networkId: wallet.getNetworkId(),
+            lockTime: BigInt(cmd.lock_time || 0),
+            txObjPreimage: cmd.tx_obj_preimage || null,
+          });
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+          }
+          return;
+        }
+
         case 'prediction_settle_build_preimage': {
           // Phase 4a Sub 8 step 4 (Bettor r242) — maker_relay builds unsigned TX for Phase 2 DM dispatch.
           // Returns tx_obj that voters use as input to sign_input_for_settle IPC.
