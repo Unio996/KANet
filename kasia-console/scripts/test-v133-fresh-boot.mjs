@@ -69,7 +69,26 @@ try {
   console.log(`[smoke] insert+select round-trip metadata: ${row.metadata} ✓`);
   console.log(`[smoke] insert+select round-trip broker_relay_id: ${row.broker_relay_id} ✓`);
 
-  console.log('[smoke] PASS — v62 + v133 + v134 + v135 fresh boot migrate works');
+  // Verify v136 column (= side_redeem_script_hex on pool_bettor_sides, r351 push)
+  const sidesCols2 = sqlite.prepare("PRAGMA table_info(pool_bettor_sides)").all();
+  const hasSideRedeem = sidesCols2.find(c => c.name === 'side_redeem_script_hex');
+  if (!hasSideRedeem) {
+    console.error('[smoke] FAIL: pool_bettor_sides.side_redeem_script_hex col missing after fresh migrate');
+    process.exit(1);
+  }
+  console.log(`[smoke] v136 pool_bettor_sides.side_redeem_script_hex col present: ${hasSideRedeem.type} ✓`);
+
+  // INSERT round-trip on pool_bettor_sides
+  sqlite.prepare(`INSERT INTO pool_bettor_sides (market_id, bettor_pk, direction, stake_amount, side_p2sh, side_redeem_script_hex)
+                  VALUES (?,?,?,?,?,?)`).run(testId, 'b'.repeat(64), 0, 100, 'kaspatest:side', 'deadbeefcafe');
+  const sideRow = sqlite.prepare('SELECT side_redeem_script_hex FROM pool_bettor_sides WHERE market_id = ?').get(testId);
+  if (!sideRow || !sideRow.side_redeem_script_hex) {
+    console.error('[smoke] FAIL: pool_bettor_sides side_redeem_script_hex INSERT/SELECT fail');
+    process.exit(1);
+  }
+  console.log(`[smoke] insert+select round-trip side_redeem_script_hex: ${sideRow.side_redeem_script_hex} ✓`);
+
+  console.log('[smoke] PASS — v62 + v133 + v134 + v135 + v136 fresh boot migrate works');
   sqlite.close();
   unlinkSync(TEMP_DB);
 } catch (e) {
