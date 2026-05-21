@@ -5,27 +5,29 @@
 // Tree depth: max 6 levels (= 2^6 = 64 leaves max, covers v0.5 50-bettor cap)
 // Padding sentinel: zero hash (= 32 bytes of 0x00) for empty slots
 
-import { createHash } from 'crypto';
+import { blake2b } from '@noble/hashes/blake2b';
 
-// kaspa-wasm doesn't expose blake2b directly to Node — use noble-hashes OR sha256 placeholder
-// Note: SS contract uses OP_BLAKE2B internally. For off-chain verification, must match exactly.
-// Production version: use @noble/hashes/blake2b. For first draft, use sha256 placeholder until cross-host verify.
+// Must match PoolSide.sil OP_BLAKE2B (= blake2b-256, 32-byte digest, no personalization).
+// Per Bettor r331: sha256 placeholder = v0.5 blocker (= Merkle root verify FAIL at runtime).
 
 const MAX_DEPTH = 6;
 const ZERO_HASH = Buffer.alloc(32, 0).toString('hex');
 
+function blake2b256(buf) {
+  return Buffer.from(blake2b(buf, { dkLen: 32 })).toString('hex');
+}
+
 function hashLeaf(bettorPubkey) {
-  // Hash leaf = blake2b(bettorPubkey || direction || stakeAmount) per spec
-  // First draft: hash just bettorPubkey for simplicity (= matches PoolSide.sil first draft)
-  // Production: include direction + stakeAmount for collision resistance
+  // PoolSide.sil: leaf = blake2b(byte[](bettorPk))
   const cleanPk = bettorPubkey.startsWith('0x') ? bettorPubkey.slice(2) : bettorPubkey;
-  return createHash('sha256').update(Buffer.from(cleanPk, 'hex')).digest('hex');
+  return blake2b256(Buffer.from(cleanPk, 'hex'));
 }
 
 function hashPair(left, right) {
+  // PoolSide.sil: level_i = blake2b(left || right)
   const leftBuf = Buffer.from(left, 'hex');
   const rightBuf = Buffer.from(right, 'hex');
-  return createHash('sha256').update(Buffer.concat([leftBuf, rightBuf])).digest('hex');
+  return blake2b256(Buffer.concat([leftBuf, rightBuf]));
 }
 
 /**

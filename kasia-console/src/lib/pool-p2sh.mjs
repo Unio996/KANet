@@ -10,6 +10,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
+import { blake2b } from '@noble/hashes/blake2b';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -147,10 +148,10 @@ export async function computeSpineP2SH(args) {
 
   const result = await compileAndComputeP2SH(SPINE_SIL, ctorJson, 'PoolSpine', args.network);
 
-  // Compute P2SH hash for Side ctor reference (= blake2b of redeem script)
-  // Note: Kaspa P2SH hash is OP_BLAKE2B [32-byte hash] OP_EQUAL where hash = blake2b(redeem)
-  const p2shHash = createHash('sha256').update(result.scriptBytes).digest('hex'); // sha256 placeholder, kaspa uses blake2b
-  // Production: use kaspa-wasm blake2b helper for exact match — defer if needed
+  // Kaspa P2SH: OP_BLAKE2B [32-byte hash] OP_EQUAL where hash = blake2b-256(redeem)
+  // Must match SS contract OP_BLAKE2B (= blake2b dkLen 32, no personalization).
+  // Per Bettor r331: sha256 placeholder = v0.5 blocker (= side ctor would bake wrong spine hash).
+  const p2shHash = Buffer.from(blake2b(result.scriptBytes, { dkLen: 32 })).toString('hex');
 
   return {
     p2shAddr: result.p2shAddr,
