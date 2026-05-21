@@ -48,7 +48,7 @@ function* walk(dir, ext = ['.js', '.mjs']) {
 const argv = process.argv.slice(2);
 const targets = argv.length > 0
   ? argv.map(p => path.resolve(p)).filter(exists)
-  : [...walk(path.join(ROOT, 'kasia-console/src')), ...walk(path.join(ROOT, 'agent-mind/src')), ...walk(path.join(ROOT, 'agent-adapter/src')), ...walk(path.join(ROOT, 'scripts'))];
+  : [...walk(path.join(ROOT, 'kasia-console/src')), ...walk(path.join(ROOT, 'agent-mind/src')), ...walk(path.join(ROOT, 'agent-adapter/src')), ...walk(path.join(ROOT, 'scripts')), ...walk(path.join(ROOT, 'kasia-console/test-framework'))];
 
 console.log(`[lint-kanet] scanning ${targets.length} files...`);
 
@@ -588,6 +588,32 @@ function checkKI30_chain_amount_precision(filepath, content) {
   }
 }
 
+// ── KI-63 (NWT N19.153/154 + J2 #628 5/21): test framework 绝不 raw SQL 写 production state table ──
+// 17 row $34.35 USDT stuck broker BSC wallet 真因 = stress_6h_real_burst.test.mjs:74 + multi_persona_pool.test.mjs:108
+// raw SQL UPDATE user_escrow_balances SET status='refunded' 绕过 _refundEscrow + transferUsdt + Bug AW guard.
+// rule: test-framework/**/*.mjs 禁直接 SQL 改 production state. 必走 _refundEscrow / API endpoint / transition().
+function checkKI63_test_raw_sql_state(filepath, content) {
+  // Only enforce in test-framework files
+  if (!/[/\\]test-framework[/\\]/.test(filepath)) return;
+  const lines = content.split('\n');
+  const FORBIDDEN_PATTERNS = [
+    { rx: /UPDATE\s+user_escrow_balances\s+SET\s+status\s*=\s*['"](refunded|settled)/i, table: 'user_escrow_balances', col: 'status' },
+    { rx: /UPDATE\s+retail_dex_orders\s+SET\s+state\s*=\s*['"](refunded|settled|delivered)/i, table: 'retail_dex_orders', col: 'state' },
+    { rx: /UPDATE\s+exchange_offers\s+SET\s+protocol_status\s*=\s*['"](completed|cancelled|refunded)/i, table: 'exchange_offers', col: 'protocol_status' },
+  ];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    for (const { rx, table, col } of FORBIDDEN_PATTERNS) {
+      if (!rx.test(line)) continue;
+      // Whitelist marker `lint-allow-test-raw-sql-state: <reason>` 同行 OR 前 3 行
+      const windowStart = Math.max(0, i - 3);
+      const windowText = lines.slice(windowStart, i + 1).join('\n');
+      if (/lint-allow-test-raw-sql-state/.test(windowText)) continue;
+      violate('KI-63', `[KI-63] test framework raw SQL write production ${table}.${col} — 必走 _refundEscrow / API endpoint / transition() (5/21 17 row $34.35 USDT stuck broker BSC 真因). 如确需 raw SQL, 加注释 'lint-allow-test-raw-sql-state: <reason>' (前 3 行 OR 同行).`, filepath, i + 1);
+    }
+  }
+}
+
 // ── 跑 ──
 for (const fp of targets) {
   let content;
@@ -609,6 +635,7 @@ for (const fp of targets) {
   checkChainHintDynamic(fp, content);  // Bug-D-residual-5/14: '回 1-N 选' hint hardcoded
   checkKI30_chain_amount_precision(fp, content);  // KI-30 (Bettor r181 5/19): chain TX amount 必 toFixed(8)
   checkKI31_gamma_closed_query(fp, content);  // KI-31 (Bettor r184 5/19): gamma single-market query 必 &closed=true
+  checkKI63_test_raw_sql_state(fp, content);  // KI-63 (NWT N19.153 5/21): test framework raw SQL write production state forbidden
 }
 checkR10();
 

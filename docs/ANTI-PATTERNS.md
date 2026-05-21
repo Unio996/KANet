@@ -2287,4 +2287,46 @@ async loadFoo() {
 
 ---
 
+## KI-63 测试框架绝不 raw SQL 写 production state 表 (NWT N19.153 + J2 #628, 5/21 17 row $34.35 USDT 真因)
+
+**坑**: stress test 'pre-cycle clear escrow' raw SQL UPDATE 绕过 broker refund path → status='refunded' refund_tx=NULL → user USDT 真上链 broker BSC 但 broker 没退 → 17 row × ~$34.35 USDT 真钱 stuck.
+
+**真凶**:
+```js
+// stress_6h_real_burst.test.mjs:74 (KI 60 J2 ship)
+// stress_6h_multi_persona_pool.test.mjs:108 (KI 62 v1 NWT ship — copy-paste of KI 60 pattern)
+wdb.prepare(`UPDATE user_escrow_balances SET status='refunded' WHERE user_kasia_addr=? AND status='active'`).run(kasia);
+```
+
+**为什么坏**: raw SQL UPDATE 跳过:
+- `_refundEscrow(escrowId, reason)` proper path
+- `transferUsdt()` 真链 refund
+- Bug AW guard (race 检测)
+- Bug AP guard (linked completed offer detection)
+- `refund_tx` 字段 (永远 NULL → broker 真亏)
+
+测试代码自身没察觉 — DM cycle 100% pass, 但 production money silent stuck broker wallet.
+
+**修法 (Fix-1 commit 51ee9b285)**:
+```js
+const { _refundEscrow } = await import('../../../src/services/exchange-machine.js');
+const rdb = new Database(DB_PATH, { readonly: true });
+const activeIds = rdb.prepare(`SELECT id FROM user_escrow_balances WHERE user_kasia_addr=? AND status='active'`).all(kasia);
+rdb.close();
+for (const e of activeIds) {
+  await _refundEscrow(e.id, 'pre_cycle_cleanup_test').catch(err => console.warn(`refund ${e.id.slice(0,8)} skip: ${err.message}`));
+}
+```
+
+**lint 永久守 (scripts/lint-kanet.mjs KI-63 rule)**: test-framework/**/*.mjs 禁:
+- `UPDATE user_escrow_balances SET status='refunded'/'settled'`
+- `UPDATE retail_dex_orders SET state='refunded'/'settled'/'delivered'`
+- `UPDATE exchange_offers SET protocol_status='completed'/'cancelled'/'refunded'`
+
+如确需 raw SQL, 加注释 `lint-allow-test-raw-sql-state: <reason>` (前 3 行 OR 同行) escape.
+
+**Rule of thumb**: test framework 模仿真用户行为 必走 production code path (API endpoint OR internal lib function `_refundEscrow` / `transition()`). raw SQL = 测试自残 + production money silent stuck + bypass audit trail. 同根 KI-12 silent skip pattern (第 17 次复刻).
+
+---
+
 *本档案在 v2 spec 第八章元教训基础上独立。spec 聚焦"这次怎么做"，本档案聚焦"下次别再犯"。*
