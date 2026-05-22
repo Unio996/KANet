@@ -22,8 +22,9 @@
 import { sqlite } from '../db/client.js';
 import { randomUUID } from 'crypto';
 import { isOfferAlreadyRefunded } from './broker-refund-dedup.js';
+import { getBrokerRelayIdOrThrow } from './broker-config-resolver.js';
 
-const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+// KI 65 Block A.3.2 (NWT N19.207): each call site runtime helper, no module-load const.
 const FEE_KAS = 0.1;
 
 // Cancel intent detection — 用户**真**真 user-facing cancel-and-refund 表达.
@@ -53,7 +54,7 @@ export function detectCancelIntent(message) {
  * Cross-check: retail_dex_orders state='awaiting_payment' (broker holds KAS).
  */
 function _findRefundableOffers(peerAddr) {
-  const brokerAddr = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id=?`).get(BROKER_RELAY_ID)?.address;
+  const brokerAddr = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id=?`).get(getBrokerRelayIdOrThrow())?.address;
   if (!brokerAddr) return [];
 
   // Bug-Z18+ status 扩 (Owner 04:33 真测撞 expired offer 真**真 catch).
@@ -161,7 +162,7 @@ export async function handleCancelAndRefund(peerAddr) {
     try {
       await fetch(`http://127.0.0.1:${PORT}/api/exchange/cancel`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ relayNodeId: BROKER_RELAY_ID, offer_id: offer.id }),
+        body: JSON.stringify({ relayNodeId: getBrokerRelayIdOrThrow(), offer_id: offer.id }),
       });
     } catch (e) {
       console.warn(`[cancel-refund] cancel API err for ${offer.id.slice(0,8)}: ${e.message}`);

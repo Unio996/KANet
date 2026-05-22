@@ -28,7 +28,8 @@ import { transition } from './broker-state-machine.js';  // SA-4 真 transition 
 import { transition as exchangeTransition } from './exchange-machine.js';
 
 // T-J2-2026-05-07 r256 T1.5a: 主动 DM chain-truth grounding (Owner 钦定 broker user-facing 必 chain truth + TX evidence)
-const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+import { getBrokerRelayIdOrThrow } from './broker-config-resolver.js';
+// KI 65 Block A.3.2 (NWT N19.207): runtime helper, no module-load const.
 
 // fire-and-forget DM 真 user with refund TX evidence + explorer URL. silent fail 真 NOT 阻 refund (T1.5b query path 真 ground 真 chain truth).
 async function _dmRefundUser(userKasiaAddr, refundAmount, realTxId, isBackfill) {

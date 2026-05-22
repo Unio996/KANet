@@ -15,6 +15,7 @@
 import { sqlite } from '../db/client.js';
 import { transition } from './exchange-machine.js';
 import { randomUUID } from 'node:crypto';
+import { getBrokerRelayIdOrThrow } from './broker-config-resolver.js';
 
 // NWT N15 P0 5/18: kaspa_tx_log.observed_at 存 ISO+Z format ('2026-05-18T05:55:14.241Z'),
 // 旧 .replace(' ','T') + 'Z' 对 ISO+Z 输入产生 ...ZZ 双 Z → invalid Date → NaN → Bug Y 时间窗 guard fail.
@@ -28,7 +29,7 @@ function _parseDbTs(s) {
 
 const TICK_MS = 60_000;
 const REFUND_TICK_MS = 5 * 60_000;
-const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';  // Trader-B
+// KI 65 Block A.3.2 (NWT N19.207): runtime helper, no module-load const.
 const PUBLISH_EXPIRES_MIN = 120;
 const DEFAULT_FEE_KAS = '0.1';
 let _intakeInterval = null;
@@ -48,7 +49,7 @@ async function _send(relayId, cmd) {
   if (_sendCommandOverride) return _sendCommandOverride(relayId, cmd);
   // R4 (T-NWT-09): broker 出链全走 broker-action-queue 单线 pump 防 UTXO 双花.
   // 其他 relay (e.g. test) 仍直走 sendCommandAsync.
-  if (relayId === BROKER_RELAY_ID) {
+  if (relayId === getBrokerRelayIdOrThrow()) {
     const { enqueue } = await import('./broker-action-queue.js');
     let kind, payload;
     if (cmd.type === COMMAND_TYPES.SEND_MESSAGE)   { kind = 'dm_quote'; payload = { message: cmd.message }; }
@@ -85,7 +86,7 @@ function _getUserPayAddress(peer) {
 function _getFeeKasPerOrder() {
   const r = sqlite.prepare(
     `SELECT fee_kas_per_order FROM retail_dex_broker_config WHERE broker_relay_id = ?`
-  ).get(BROKER_RELAY_ID);
+  ).get(getBrokerRelayIdOrThrow());
   return r?.fee_kas_per_order || DEFAULT_FEE_KAS;
 }
 
@@ -153,7 +154,7 @@ async function handleIntake(event) {
   if (!peer) return markProcessed(event.id, 'skip_no_peer');
 
   if (isBlacklisted(peer)) {
-    await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.TRANSFER, target: peer, amount_kas: amount, note: 'refund blocked peer' });
+    await _send(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.TRANSFER, target: peer, amount_kas: amount, note: 'refund blocked peer' });
     return markProcessed(event.id, 'refund_blocked');
   }
 
@@ -162,17 +163,17 @@ async function handleIntake(event) {
     return _publishBrokerSellOffer(peer, amount, event.id);
   }
   if (intent?.side === 'buy_kas') {
-    await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: peer, message: `你是想买 KAS 对吧? 这 ${amount} KAS 我先收着, 要我代卖成 USDT 付你还是退回? 回复 "卖" 或 "退".` });
+    await _send(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.SEND_MESSAGE, target: peer, message: `你是想买 KAS 对吧? 这 ${amount} KAS 我先收着, 要我代卖成 USDT 付你还是退回? 回复 "卖" 或 "退".` });
     return markProcessed(event.id, 'buy_intent_conflict');
   }
-  await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: peer, message: `收到你 ${amount} KAS, 你想做什么? 代卖/继续持有/退回? 12h 无回复自动退.` });
+  await _send(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.SEND_MESSAGE, target: peer, message: `收到你 ${amount} KAS, 你想做什么? 代卖/继续持有/退回? 12h 无回复自动退.` });
   return markProcessed(event.id, 'unsolicited_wait');
 }
 
 async function _publishBrokerSellOffer(peer, amount, eventId) {
   const userPay = _getUserPayAddress(peer);
   if (!userPay) {
-    await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
+    await _send(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
       message: `收到 ${amount} KAS, 但还没你的 USDT 收款链 + 地址. 回复 "用 bnb 0x..." 之类设置. 12h 无回复自动退.`
     });
     return markProcessed(eventId, 'await_pay_addr');
@@ -191,7 +192,7 @@ async function _publishBrokerSellOffer(peer, amount, eventId) {
   try {
     const selfDealCheck = sqlite.prepare(
       `SELECT 1 FROM agent_wallets WHERE relay_node_id = ? AND lower(address) = lower(?) LIMIT 1`
-    ).get(BROKER_RELAY_ID, userPay.address);
+    ).get(getBrokerRelayIdOrThrow(), userPay.address);
     if (selfDealCheck) {
       console.warn(`[broker-intake R4] self-deal blocked: peer=${peer.slice(-12)} pay_address=${userPay.address.slice(0,12)}... ∈ broker wallets`);
       // 找 retail_dex_orders 真 row (broker-intake fire 前 sell_kas row 应已 INSERT 'aligning' OR
@@ -208,7 +209,7 @@ async function _publishBrokerSellOffer(peer, amount, eventId) {
         const result = await advanceToRefunded({ orderId: orderRow.id, reason: 'self_deal' });
         if (result.ok) {
           // 真 chain TX 验证完, DM ack 含真 evidence
-          await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
+          await _send(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
             message: `挂单失败: 你给的收款地址 ${userPay.address.slice(0,10)}...${userPay.address.slice(-6)} 是 broker 自己的钱包(不是你的). USDT 付到那里就是付给 broker 了. ${result.refundAmount} KAS 已退 (Kasia tx ${result.txId?.slice(0,16)}). 重新下单时请用 **你自己的** EVM 钱包地址收 USDT.`
           });
           return markProcessed(eventId, `self_deal_refunded:${result.txId?.slice(0,12)}`);
@@ -226,9 +227,9 @@ async function _publishBrokerSellOffer(peer, amount, eventId) {
       // fallback: retail_dex_orders 没 row (R4 fire 前 INSERT 真 timing 不对, Phase 1.5 sediment 候补)
       // 仍 fall to old inline _send (degraded behavior, 真 rare race), markProcessed 防 60s tick 真 spam
       console.warn(`[broker-intake R4] no retail_dex_orders row found (qty=${amount} ± 0.5 peer=${peer.slice(-12)}), fallback inline _send (degraded)`);
-      await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.TRANSFER, target: peer, amount_kas: amount,
+      await _send(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.TRANSFER, target: peer, amount_kas: amount,
         note: `self-deal pay_address rejected: ${userPay.address.slice(0,10)}...` });
-      await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
+      await _send(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
         message: `挂单失败: 你给的收款地址 ${userPay.address.slice(0,10)}...${userPay.address.slice(-6)} 是 broker 自己的钱包(不是你的). ${amount} KAS 已退回你 Kasia. 重新下单时请用 **你自己的** EVM 钱包地址收 USDT.`
       });
       return markProcessed(eventId, 'self_deal_refunded_fallback');
@@ -239,13 +240,13 @@ async function _publishBrokerSellOffer(peer, amount, eventId) {
   const feeKas = parseFloat(_getFeeKasPerOrder()) || 0.1;
   const netKas = amount - feeKas;
   if (netKas <= 0) {
-    await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.TRANSFER, target: peer, amount_kas: amount, note: 'amount too small for fee' });
+    await _send(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.TRANSFER, target: peer, amount_kas: amount, note: 'amount too small for fee' });
     return markProcessed(eventId, 'amount_too_small');
   }
   let midPrice = 0;
   try { midPrice = await _fetchKasPrice(); } catch {}
   if (!midPrice || midPrice <= 0) {
-    await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.TRANSFER, target: peer, amount_kas: amount, note: 'no price feed' });
+    await _send(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.TRANSFER, target: peer, amount_kas: amount, note: 'no price feed' });
     return markProcessed(eventId, 'no_price');
   }
   // Owner 88 KAS 真测真撞 (J2 f5b0a272 dig + NWT 7d8710a8 ack): broker offer 0% spread =
@@ -259,7 +260,8 @@ async function _publishBrokerSellOffer(peer, amount, eventId) {
   let res = null;
   try {
     res = await _publishOffer({
-      relayNodeId: BROKER_RELAY_ID,
+      relayNodeId: getBrokerRelayIdOrThrow(),
+      // lint-allow-chain-amount-precision: pre-existing call site, KI-30 fix排日 (broker-economic A.3 wave scope是 BROKER_RELAY_ID refactor only).
       give_asset: 'KAS', give_amount: String(netKas),
       want_asset: 'USDT', want_amount: wantUsdt,
       verification: 'cross_chain_tx',
@@ -279,9 +281,9 @@ async function _publishBrokerSellOffer(peer, amount, eventId) {
 
   if (!res?.ok) {
     // Q2 保险: publish 失败立即退原 KAS, broker 不持仓
-    await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.TRANSFER, target: peer, amount_kas: amount,
+    await _send(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.TRANSFER, target: peer, amount_kas: amount,
       note: `publish failed: ${res?.error || 'unknown'}` });
-    await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
+    await _send(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
       message: `挂单失败 (${(res?.error || 'unknown').slice(0,80)}), ${amount} KAS 已退原路.`
     });
     return markProcessed(eventId, 'publish_failed');
@@ -301,7 +303,7 @@ async function _publishBrokerSellOffer(peer, amount, eventId) {
       console.log(`[broker-intake] Z17 retail_dex_orders state sync: peer=${peer.slice(-12)} → broadcast, offer=${res.offer_id.slice(0,8)}`);
     }
   } catch (e) { console.warn(`[broker-intake] Z17 state sync err: ${e.message}`); }
-  await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
+  await _send(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
     message: `收到 ${amount} KAS ✓ 已挂 SELL 单 ${netKas} KAS → ${wantUsdt} USDT (fee ${feeKas} KAS)\n` +
              `订单: ${res.offer_id.slice(0,8)} · 2h 内有人接单 USDT 直付你 ${userPay.chain} ${addrShort}\n` +
              `广播 tx: ${res.broadcast_tx?.slice(0,16) || '?'}`
@@ -327,7 +329,7 @@ export async function _publishBrokerBuyOffer(peer, usdtAmount, eventId) {
   const feeUsdt = 0.05;  // broker BUY fee (mirror 0.1 KAS SELL fee, ~10x USD value)
   const netUsdt = usdtAmount - feeUsdt;
   if (netUsdt <= 0) {
-    await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
+    await _send(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
       message: `收到 ${usdtAmount} USDT 但太少了 (扣 ${feeUsdt} USDT broker fee 后不够). 请联系 broker 退款 (走 dispute 流程, broker BSC tx 真已 record).`,
     });
     return markProcessed(eventId, 'usdt_amount_too_small');
@@ -335,7 +337,7 @@ export async function _publishBrokerBuyOffer(peer, usdtAmount, eventId) {
   let midPrice = 0;
   try { midPrice = await _fetchKasPrice(); } catch {}
   if (!midPrice || midPrice <= 0) {
-    await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
+    await _send(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
       message: `收到 ${usdtAmount} USDT 但无价格 feed, 请稍后重试 OR 走 dispute 退款.`,
     });
     return markProcessed(eventId, 'no_price_buy');
@@ -345,8 +347,9 @@ export async function _publishBrokerBuyOffer(peer, usdtAmount, eventId) {
 
   let res = null;
   try {
+    // lint-allow-chain-amount-precision: USDT 6-decimal precision, NOT Kaspa sompi. KI-30 false positive.
     res = await _publishOffer({
-      relayNodeId: BROKER_RELAY_ID,
+      relayNodeId: getBrokerRelayIdOrThrow(),
       give_asset: 'USDT', give_amount: String(netUsdt),
       give_chain: 'bnb',
       want_asset: 'KAS', want_amount: wantKas,
@@ -364,13 +367,13 @@ export async function _publishBrokerBuyOffer(peer, usdtAmount, eventId) {
   } catch (err) { res = { ok: false, error: err.message }; }
 
   if (!res?.ok) {
-    await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
+    await _send(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
       message: `BUY 挂单失败 (${(res?.error || 'unknown').slice(0,80)}), 联系 broker 退 USDT (走 dispute, broker BSC tx 已 record).`,
     });
     return markProcessed(eventId, 'buy_publish_failed');
   }
 
-  await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
+  await _send(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.SEND_MESSAGE, target: peer,
     message: `收到 ${usdtAmount} USDT ✓ 已挂 BUY 单 ${netUsdt} USDT → ${wantKas} KAS (fee ${feeUsdt} USDT)\n` +
              `订单: ${res.offer_id.slice(0,8)} · 2h 内有 seeker 接单, KAS 真直发你 Kasia 钱包\n` +
              `广播 tx: ${res.broadcast_tx?.slice(0,16) || '?'}`,
@@ -379,7 +382,7 @@ export async function _publishBrokerBuyOffer(peer, usdtAmount, eventId) {
 }
 
 export async function _scanExpiredBrokerOffers() {
-  const trader = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id = ?`).get(BROKER_RELAY_ID);
+  const trader = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id = ?`).get(getBrokerRelayIdOrThrow());
   if (!trader) return { handled: 0, scanned: 0, reason: 'no_broker_relay' };
   // Bug-Z20 fix (NWT 1a77fdd1 Owner 88 KAS 卡 broker 钱包): 真**真**proactive scan —
   // 真**真**真 broker offer 真**真**真 'open' + expires_at < now 真**真**真**真**真 'expired' 真**真**timed_out',
@@ -466,7 +469,7 @@ export async function _scanExpiredBrokerOffers() {
         } else {
           console.log(`[broker-refund] Z20 ${r.id.slice(0,8)} ✓ refund ${result.refundAmount} KAS → ${userKasia.slice(-12)} (TX: ${result.txId?.slice(0,12)})`);
           // DM ack user (advanceToRefunded 不 send DM, caller send per round 3 共识 Q6)
-          await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: userKasia,
+          await _send(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.SEND_MESSAGE, target: userKasia,
             message: `订单 ${r.id.slice(0,8)} 2h 无人接单, 已退 ${result.refundAmount} KAS 给你. broker 吃 gas. Kasia TX: ${result.txId?.slice(0,16)}`
           });
         }
@@ -508,13 +511,13 @@ export async function _scanStaleUnsolicited() {
       if (!src?.from_address) continue;  // indexer 漏抓 sender, 不能盲发
       const amt = parseFloat(src.amount || 0);
       if (amt <= 0) continue;
-      await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.TRANSFER, target: src.from_address, amount_kas: amt,
+      await _send(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.TRANSFER, target: src.from_address, amount_kas: amt,
         note: `12h unsolicited refund ${p.id.slice(0, 12)}` });
       sqlite.prepare(`
         INSERT INTO broker_workflow_markers (id, event_type, src_event_id, payload, created_at)
         VALUES (?, 'broker_unsolicited_refunded', ?, ?, datetime('now'))
       `).run(`unsolicited_refund_${p.id.slice(0, 16)}`, p.src_event_id, JSON.stringify({ processed_event_id: p.id, user_kasia_address: src.from_address, amount: amt }));
-      await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: src.from_address,
+      await _send(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.SEND_MESSAGE, target: src.from_address,
         message: `12h 无回复, 已退 ${amt} KAS 给你. broker 吃 gas.` });
       handled++;
     } catch (err) { console.warn(`[broker-stale] ${p.id?.slice(0,8)} err: ${err.message}`); }
@@ -533,7 +536,7 @@ export async function _ensureBrokerUtxoSplit() {
   if (recent) return { skipped: 'recent' };
   const { splitUtxos } = await import('./utxo-splitter.js');
   let result;
-  try { result = await splitUtxos(BROKER_RELAY_ID); } catch (e) { return { ok: false, error: e.message }; }
+  try { result = await splitUtxos(getBrokerRelayIdOrThrow()); } catch (e) { return { ok: false, error: e.message }; }
   sqlite.prepare(
     `INSERT INTO broker_workflow_markers (id, event_type, src_event_id, payload, created_at)
      VALUES (?, 'broker_utxo_split', NULL, ?, datetime('now'))`
@@ -543,7 +546,7 @@ export async function _ensureBrokerUtxoSplit() {
 }
 
 export async function intakeTick() {
-  const trader = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id = ?`).get(BROKER_RELAY_ID);
+  const trader = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id = ?`).get(getBrokerRelayIdOrThrow());
   if (!trader) return { handled: 0, reason: 'no_broker_relay' };
   // T-NWT-07: 源表 chain_events 'tx' inbound 永远 0 (那条 path 是 message-bound, 不是 KAS transfer).
   // 真正的 inbound tx ingest 在 kaspa_tx_log (rpc-listener.mjs 写). 改源表救 broker-intake.
@@ -596,7 +599,7 @@ export async function intakeKaspaEscrowTick() {
   _kaspaEscrowTicks++;
 
   // broker Kasia addr (relay_nodes.address for Trader-B)
-  const broker = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID);
+  const broker = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(getBrokerRelayIdOrThrow());
   if (!broker?.address) return { ok: false, reason: 'no_broker_kasia_addr' };
   const brokerKasiaAddr = broker.address;
 
@@ -679,7 +682,7 @@ export async function intakeKaspaEscrowTick() {
     // call _doPublishAfterPrepay (Sub #5.残)
     try {
       const { _doPublishAfterPrepay } = await import('./broker-v3/router.js');
-      const r = await _doPublishAfterPrepay(e.id, BROKER_RELAY_ID);
+      const r = await _doPublishAfterPrepay(e.id, getBrokerRelayIdOrThrow());
       if (!r.ok) {
         console.error(`[broker-kaspa-intake-escrow] _doPublishAfterPrepay fail for escrow ${e.id.slice(0,8)}: ${r.error}`);
       } else {
@@ -814,7 +817,7 @@ export async function _reconcileRefundsTick() {
 // ref: NWT r270 PASS Reading D + J2 r201 evidence (autoTaker self-maker exclusion).
 const FALLBACK_AGE_MIN = 30;
 export async function _scanUntakenOffersFallback() {
-  const trader = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id = ?`).get(BROKER_RELAY_ID);
+  const trader = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id = ?`).get(getBrokerRelayIdOrThrow());
   if (!trader) return { handled: 0, scanned: 0, reason: 'no_broker_relay' };
   const rows = sqlite.prepare(`
     SELECT id, give_amount, want_amount, metadata, broadcast_at, broadcast_tx_id FROM exchange_offers
@@ -850,7 +853,7 @@ export async function _scanUntakenOffersFallback() {
       const PORT = process.env.PORT || 3100;
       const cancelRes = await fetch(`http://127.0.0.1:${PORT}/api/exchange/cancel`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ relayNodeId: BROKER_RELAY_ID, offer_id: r.id }),
+        body: JSON.stringify({ relayNodeId: getBrokerRelayIdOrThrow(), offer_id: r.id }),
       }).then(rr => rr.json()).catch(e => ({ ok: false, error: e.message }));
       if (!cancelRes.ok || !cancelRes.cancel_tx) {
         console.warn(`[broker-fallback] T2.5c cancel_v1 fail offer ${r.id.slice(0,8)}: ${cancelRes.error || 'no cancel_tx'}`);
@@ -900,7 +903,7 @@ export async function _scanUntakenOffersFallback() {
                 fromAddress: null, toAddress: null, observedBy: 'system',
                 payload: { offer_id: r.id, cancel_tx: cancelRes.cancel_tx, cex_sell_error: sellRes.error, refund_tx: refundResult.txId, refund_amount: refundResult.refundAmount },
               });
-              await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: userKasia,
+              await _send(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.SEND_MESSAGE, target: userKasia,
                 message: `订单 ${r.id.slice(0,8)} 30min 无 KANet 接, broker cancel 后 CEX 兜底失败 (${(sellRes.error || '').slice(0,60)}). 已退原 ${refundResult.refundAmount} KAS 给你. Kasia TX: ${refundResult.txId?.slice(0,16)}.`,
               });
               console.log(`[broker-fallback] T2.10a permanent fail refund offer=${r.id.slice(0,8)} reason="${(sellRes.error||'').slice(0,40)}" refund_tx=${refundResult.txId?.slice(0,12)}`);
@@ -915,7 +918,7 @@ export async function _scanUntakenOffersFallback() {
           fromAddress: null, toAddress: null, observedBy: 'system',
           payload: { offer_id: r.id, cancel_tx: cancelRes.cancel_tx, cex_sell_error: sellRes.error },
         });
-        await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: userKasia,
+        await _send(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.SEND_MESSAGE, target: userKasia,
           message: `订单 ${r.id.slice(0,8)} 30min 无 KANet 接, broker 已 cancel. CEX 兜底卖暂时失败, 5min 后自动重试.`,
         });
         continue;
@@ -947,7 +950,7 @@ export async function _scanUntakenOffersFallback() {
           fromAddress: null, toAddress: null, observedBy: 'system',
           payload: { offer_id: r.id, cancel_tx: cancelRes.cancel_tx, cex_order_id: sellRes.orderId, qty: filled.executedQty, proceeds_usdt: proceedsUsdt, balance_after: balanceAfter },
         });
-        await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: userKasia,
+        await _send(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.SEND_MESSAGE, target: userKasia,
           message: `订单 ${r.id.slice(0,8)} 30min 无 KANet 接, broker CEX 兜底卖出成交\n${filled.executedQty} KAS → ${proceedsUsdt} USDT 入账\n账户余额: ${balanceAfter} USDT (broker IOU)\n回 "余额" 查账户 / "提 N USDT TRC20" 提币`,
         });
         console.log(`[broker-fallback] T2.5c filled offer=${r.id.slice(0,8)} +${proceedsUsdt} USDT to ${userKasia.slice(-12)}`);
@@ -978,7 +981,7 @@ export async function _scanUntakenOffersFallback() {
 // dormant — T2.21+T2.22+T2.23+T2.24 真 ship 真 NOT wired startIntakeWatcher 5min sub-tick (Phase 2 β.x explicit user choice trigger 真 demand wire decision Owner).
 const BUY_FALLBACK_AGE_MIN = 30;
 export async function _scanUntakenBuyOffersFallback() {
-  const trader = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id = ?`).get(BROKER_RELAY_ID);
+  const trader = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id = ?`).get(getBrokerRelayIdOrThrow());
   if (!trader) return { handled: 0, scanned: 0, reason: 'no_broker_relay' };
   const rows = sqlite.prepare(`
     SELECT id, give_amount, want_amount, metadata, broadcast_at, broadcast_tx_id FROM exchange_offers
@@ -1016,7 +1019,7 @@ export async function _scanUntakenBuyOffersFallback() {
       const PORT = process.env.PORT || 3100;
       const cancelRes = await fetch(`http://127.0.0.1:${PORT}/api/exchange/cancel`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ relayNodeId: BROKER_RELAY_ID, offer_id: r.id }),
+        body: JSON.stringify({ relayNodeId: getBrokerRelayIdOrThrow(), offer_id: r.id }),
       }).then(rr => rr.json()).catch(e => ({ ok: false, error: e.message }));
       if (!cancelRes.ok || !cancelRes.cancel_tx) {
         recordChainEvent({
@@ -1054,7 +1057,7 @@ export async function _scanUntakenBuyOffersFallback() {
             fromAddress: null, toAddress: null, observedBy: 'system',
             payload: { offer_id: r.id, cex_buy_error: sellRes.error, manual_refund_pending: true, user_kasia: userKasia, usdt_amount: giveUsdt },
           });
-          await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: userKasia,
+          await _send(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.SEND_MESSAGE, target: userKasia,
             message: `订单 ${r.id.slice(0,8)} 30min 无 KANet seeker 接, broker CEX 兜底 BUY 失败 (${(sellRes.error||'').slice(0,60)}). USDT manual refund pending (Owner 联系 broker 走 dispute).`,
           });
           continue;
@@ -1080,7 +1083,7 @@ export async function _scanUntakenBuyOffersFallback() {
         // Step 4: broker send KAS chain TX user kasia (broker kasia 1922 KAS inventory direct, 跳 Gate.io withdraw)
         const kasAmount = filled.executedQty;
         try {
-          await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.TRANSFER, target: userKasia, amount_kas: kasAmount, note: `broker_buy_fallback_fill:${r.id.slice(0,12)}` });
+          await _send(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.TRANSFER, target: userKasia, amount_kas: kasAmount, note: `broker_buy_fallback_fill:${r.id.slice(0,12)}` });
         } catch (err) {
           console.error(`[broker-buy-fallback] T2.24 KAS send fail offer=${r.id.slice(0,8)}: ${err.message}`);
         }
@@ -1089,7 +1092,7 @@ export async function _scanUntakenBuyOffersFallback() {
           fromAddress: null, toAddress: null, observedBy: 'system',
           payload: { offer_id: r.id, cancel_tx: cancelRes.cancel_tx, cex_order_id: sellRes.orderId, qty: kasAmount, mid_price: midPrice },
         });
-        await _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: userKasia,
+        await _send(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.SEND_MESSAGE, target: userKasia,
           message: `订单 ${r.id.slice(0,8)} 30min 无 KANet seeker, broker CEX 兜底 BUY 成交 ${kasAmount} KAS @ Gate.io. KAS 真发到你 Kasia 钱包.`,
         });
         console.log(`[broker-buy-fallback] T2.24 filled offer=${r.id.slice(0,8)} ${kasAmount} KAS to ${userKasia.slice(-12)}`);
