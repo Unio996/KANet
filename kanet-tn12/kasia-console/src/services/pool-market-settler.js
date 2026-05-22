@@ -100,9 +100,16 @@ export async function poolSettlerTick() {
     `).all(Math.floor(Date.now() / 1000));
     if (!markets.length) return { ok: true, processed: 0 };
 
-    let consensus = 0, pending = 0, refund = 0, errored = 0;
+    let consensus = 0, pending = 0, refund = 0, errored = 0, doomed = 0;
     for (const market of markets) {
       try {
+        // Phase 2b Ship #1 — doomed-market skip. A market marked needs_larger_pot can never
+        // settle (settle TX storage mass exceeds the 500k cap). Without this skip dispatchPhase2
+        // recomputes the same doomed mass every tick forever, starving healthy markets.
+        let doomedMeta = {};
+        try { doomedMeta = JSON.parse(market.metadata || '{}'); } catch {}
+        if (doomedMeta.needs_larger_pot) { doomed++; continue; }
+
         // Phase 2b: collecting_sigs status → handle sig aggregation + submit
         if (market.protocol_status === 'collecting_sigs') {
           await handleCollectingSigs(market);
@@ -136,8 +143,8 @@ export async function poolSettlerTick() {
         console.error(`[pool-settler] process fail market=${market.id?.slice(0,12)}: ${e.message}`);
       }
     }
-    console.log(`[pool-settler] tick: ${markets.length} verifying markets, consensus=${consensus} refund=${refund} pending=${pending} errored=${errored}`);
-    return { ok: true, processed: markets.length, consensus, refund, pending, errored };
+    console.log(`[pool-settler] tick: ${markets.length} verifying markets, consensus=${consensus} refund=${refund} pending=${pending} doomed=${doomed} errored=${errored}`);
+    return { ok: true, processed: markets.length, consensus, refund, pending, doomed, errored };
   } finally {
     running = false;
   }
