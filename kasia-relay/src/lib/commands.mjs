@@ -80,7 +80,8 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.GET_PUBKEY]: {},
   [COMMAND_TYPES.SIGN_INPUT_FOR_SETTLE]: { tx_hex: 'string', input_index: 'number' },
   // p2sh_address allows array for pool multi-p2sh (= spine + N side) per B2 v0.5 Sub 2d Phase 2a-1.
-  [COMMAND_TYPES.PREDICTION_SETTLE_BUILD_PREIMAGE]: { p2sh_address: ['string', 'array'], required_input_outpoints: 'array', outputs: 'array' },
+  // sig_op_counts optional per-input array (Phase 3 bug 5 — preimage/final sighash consistency).
+  [COMMAND_TYPES.PREDICTION_SETTLE_BUILD_PREIMAGE]: { p2sh_address: ['string', 'array'], required_input_outpoints: 'array', outputs: 'array', sig_op_counts: 'array' },
   [COMMAND_TYPES.PREDICTION_SETTLE_TX]: { p2sh_address: 'string', redeem_script_hex: 'string', required_input_outpoints: 'array', outputs: 'array', sigs_by_input: 'array', winner: 'number' },
   [COMMAND_TYPES.PREDICTION_REFUND_TX]: { p2sh_address: 'string', redeem_script_hex: 'string', branch: 'number' },
   [COMMAND_TYPES.POOL_SETTLE_TX]: { spine_p2sh_address: 'string', side_p2sh_addresses: 'array', spine_redeem_script_hex: 'string', side_redeem_script_hexes: 'array', required_input_outpoints: 'array', outputs: 'array', spine_sigs_by_input: 'array', spine_input_count: 'number', winner: 'number' },
