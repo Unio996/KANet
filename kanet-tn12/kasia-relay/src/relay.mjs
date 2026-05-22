@@ -635,6 +635,7 @@ if (process.send) {
             cmd.outputs,
             wallet.getNetworkId(),
             0n,
+            cmd.sig_op_counts || null,  // Phase 3 bug 5: per-input sigOpCount (pool [3×spine,0×side])
           );
           // Serialize BigInt → string for IPC pass-through (Q1 C fallback per r242 note)
           const txObjForIpc = JSON.parse(JSON.stringify(r.txObj, (_k, v) => typeof v === 'bigint' ? v.toString() : v));

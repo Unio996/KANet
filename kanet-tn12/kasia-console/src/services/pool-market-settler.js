@@ -391,12 +391,16 @@ export async function dispatchPhase2(market, decision) {
 
     // 6. Call maker_relay 'prediction_settle_build_preimage' with multi-p2sh array.
     //    Spine P2SH appears once in p2sh list (= all its UTXOs fetched by that address).
+    //    Phase 3 bug 5: per-input sigOpCount — spine inputs have 3 checkSig, sides 0.
+    //    Preimage sigOpCount MUST match final settle TX (= Kaspa sighash includes sig_op_counts_hash).
     const p2shAddresses = [market.spine_p2sh, ...sides.map(s => s.side_p2sh)];
+    const sigOpCounts = requiredInputOutpoints.map((_, i) => (i < spineInputCount ? 3 : 0));
     const preimage = await sendCommandAsync(market.maker_relay_id, {
       type: 'prediction_settle_build_preimage',
       p2sh_address: p2shAddresses,  // array — multi-p2sh extension Phase 2a-1
       required_input_outpoints: requiredInputOutpoints,
       outputs,
+      sig_op_counts: sigOpCounts,
     });
     if (!preimage?.ok || !preimage.tx_obj) {
       console.error(`[pool-settler] dispatchPhase2 build_preimage fail market=${market.id.slice(0,12)}: ${preimage?.error}`);

@@ -381,9 +381,14 @@ function hexStrToBytes(hex) {
  *
  * @returns {{ txObj: object, sighashInputs: Array<{inputIndex: number, sighashHint: string}> }}
  */
-export async function buildSettleTxPreimage(p2shAddress, requiredInputOutpoints, outputs, networkId, lockTime = 0n) {
+export async function buildSettleTxPreimage(p2shAddress, requiredInputOutpoints, outputs, networkId, lockTime = 0n, sigOpCounts = null) {
   // B2 v0.5 Sub 2d Phase 2a: accept p2shAddress as string OR array (= spine + N side p2sh for pool settle).
   // 1V1 path passes string; pool path passes array.
+  //
+  // sigOpCounts (B2 v0.5 Phase 3 bug 5 fix): optional per-input sigOpCount array.
+  // CRITICAL: Kaspa sighash includes sig_op_counts_hash (all inputs' sigOpCount). The preimage
+  // sigOpCount MUST equal the final settle TX sigOpCount or checkSig fails ("script ran,
+  // verification failed"). Pool passes [3×spine, 0×side]; 1V1 omits → default 5 (unchanged).
   const p2shList = Array.isArray(p2shAddress) ? p2shAddress : [p2shAddress];
   const rpc = await connectRpc(networkId);
   try {
@@ -396,17 +401,20 @@ export async function buildSettleTxPreimage(p2shAddress, requiredInputOutpoints,
       if (!found) throw new Error(`UTXO not found: ${req.outpointTxid}:${req.outpointIndex}`);
       return found;
     });
+    if (sigOpCounts && sigOpCounts.length !== matched.length) {
+      throw new Error(`sigOpCounts length ${sigOpCounts.length} != input count ${matched.length}`);
+    }
     const txOutputs = outputs.map(o => new TransactionOutput(
       typeof o.amountSompi === 'string' ? BigInt(o.amountSompi) : o.amountSompi,
       payToAddressScript(new Address(o.address))
     ));
     const txObj = {
       version: 0,
-      inputs: matched.map(utxo => ({
+      inputs: matched.map((utxo, i) => ({
         previousOutpoint: { transactionId: utxo.outpoint.transactionId, index: utxo.outpoint.index },
         signatureScript: '',
         sequence: 0n,
-        sigOpCount: 5,
+        sigOpCount: sigOpCounts ? sigOpCounts[i] : 5,
         utxo,
       })),
       outputs: txOutputs,
@@ -610,7 +618,9 @@ export async function unlockPoolSpineP2SH(args) {
           ...inp,
           signatureScript: allScriptSigs[i],
           sequence: BigInt(inp.sequence || 0),
-          sigOpCount: i < spineInputCount ? 3 : 0,
+          // CRITICAL (Phase 3 bug 5): keep preimage's sigOpCount — Kaspa sighash includes
+          // sig_op_counts_hash. Override here ≠ preimage → sighash mismatch → checkSig fail.
+          sigOpCount: Number(inp.sigOpCount || 0),
           utxo: inp.utxo ? {
             ...inp.utxo,
             amount: BigInt(inp.utxo.amount || 0),
