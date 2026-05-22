@@ -100,10 +100,98 @@ export async function registerAdminRoutes(fastify) {
         LIMIT 50
       `).all();
 
+      // === KI 64 Phase 1B v3 sub 1B.2 — BROKER STATE (cross-product per scope_json) ===
+      // Per broker: name / scope[] / KAS balance / USDT各 chain / hedge 24h / DM cap / 最后活动 / status
+      const brokerRows = sqlite.prepare(`
+        SELECT id, name, address, scope_json, dm_count_today
+        FROM relay_nodes
+        WHERE is_dex_broker=1
+        ORDER BY name
+      `).all();
+
+      // Pre-fetch latest treasury balance per (relay, chain, asset) — most recent snapshot
+      // Window 5 min ago to ensure 'live' freshness; older = stale
+      const treasuryRows = sqlite.prepare(`
+        SELECT t.relay_node_id, t.chain, t.asset, t.balance_human
+        FROM treasury_snapshot t
+        INNER JOIN (
+          SELECT relay_node_id, chain, asset, MAX(snapshot_at) AS max_ts
+          FROM treasury_snapshot
+          WHERE snapshot_at > datetime('now', '-1 hour')
+          GROUP BY relay_node_id, chain, asset
+        ) latest ON t.relay_node_id=latest.relay_node_id
+                AND t.chain=latest.chain
+                AND t.asset=latest.asset
+                AND t.snapshot_at=latest.max_ts
+      `).all();
+
+      // hedge 24h count per broker (chain_events.event_type IN hedge_*)
+      // chain_events 没 explicit broker_relay_id col, hedge events 用 chain_events.txid which carries offer_id
+      // 简化: COUNT all hedge_* events 24h (Trader-B is sole broker, attribute全)
+      const hedgeRow = sqlite.prepare(`
+        SELECT
+          SUM(CASE WHEN event_type='hedge_placed' THEN 1 ELSE 0 END) AS placed,
+          SUM(CASE WHEN event_type='hedge_failed' THEN 1 ELSE 0 END) AS failed,
+          SUM(CASE WHEN event_type='hedge_skipped' THEN 1 ELSE 0 END) AS skipped
+        FROM chain_events
+        WHERE event_type IN ('hedge_placed','hedge_failed','hedge_skipped')
+          AND observed_at > datetime('now', '-24 hours')
+      `).get();
+
+      // Latest broker activity from chain_events where from_address=broker.kasia OR observed_by mentions broker name
+      const brokers = brokerRows.map(b => {
+        let scope = [];
+        try { scope = JSON.parse(b.scope_json || '[]'); } catch {}
+
+        // Per-chain USDT/USDC balance (broker-specific filter)
+        const balances = treasuryRows
+          .filter(t => t.relay_node_id === b.id)
+          .map(t => ({ chain: t.chain, asset: t.asset, amount: Number((t.balance_human || 0).toFixed(4)) }));
+
+        const kasBalance = balances.find(x => x.chain === 'kaspa' && x.asset === 'KAS')?.amount ?? null;
+        const usdtByChain = balances.filter(x => x.asset === 'USDT').reduce((acc, x) => { acc[x.chain] = x.amount; return acc; }, {});
+
+        // Last activity from chain_events (any event where from_address matches broker kasia OR observed_by mentions)
+        const lastActivityRow = sqlite.prepare(`
+          SELECT MAX(observed_at) AS last_ts
+          FROM chain_events
+          WHERE from_address=?
+        `).get(b.address);
+
+        const lastActivityTs = lastActivityRow?.last_ts || null;
+        let ageMin = null;
+        if (lastActivityTs) {
+          ageMin = Math.floor((Date.now() - new Date(lastActivityTs.replace(' ', 'T') + 'Z').getTime()) / 60000);
+        }
+
+        // Status derive: <5min active / <60min idle / else down
+        let status = 'unknown';
+        if (ageMin === null) status = 'unknown';
+        else if (ageMin < 5) status = 'alive';
+        else if (ageMin < 60) status = 'idle';
+        else status = 'down';
+
+        return {
+          id: b.id,
+          name: b.name,
+          address: b.address,
+          scope,
+          kas_pool: kasBalance,
+          usdt_by_chain: usdtByChain,
+          dm_count_today: b.dm_count_today || 0,
+          dm_cap: 200,  // Daily DM cap per relay (KI 63 sediment, fixed for now)
+          hedge_24h: { placed: hedgeRow?.placed || 0, failed: hedgeRow?.failed || 0, skipped: hedgeRow?.skipped || 0 },
+          last_activity: lastActivityTs,
+          age_min: ageMin,
+          status,
+        };
+      });
+
       return reply.send({
         ok: true,
         ts: new Date().toISOString(),
         market,
+        brokers,
         stuck: stuck.map(e => ({
           id: e.id,
           side: e.side,
