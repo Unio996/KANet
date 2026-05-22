@@ -143,6 +143,66 @@
       </div>
     </section>
 
+    <!-- ═══ FINANCIAL KPI PANEL (KI-64 1B.3 — 24h broker P&L cross-product) ═══ -->
+    <section class="bg-white rounded-lg shadow-sm border border-warm-200">
+      <div class="px-5 py-3 border-b border-warm-200 flex items-center gap-2">
+        <span class="text-emerald-600">💰</span>
+        <h2 class="text-sm font-semibold text-ink-700">财务 KPI (24h cross-product)</h2>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead class="bg-warm-50 text-ink-500">
+            <tr>
+              <th class="px-3 py-2 text-left">Broker</th>
+              <th class="px-3 py-2 text-right">Exchange Fee</th>
+              <th class="px-3 py-2 text-right">Prediction Fee</th>
+              <th class="px-3 py-2 text-right">Hedge KAS 量</th>
+              <th class="px-3 py-2 text-right">Hedge USD 值</th>
+              <th class="px-3 py-2 text-right">Hedge 均价</th>
+              <th class="px-3 py-2 text-right">完成单数</th>
+              <th class="px-3 py-2 text-right">完成 KAS</th>
+              <th class="px-3 py-2 text-right">完成 USDT</th>
+              <th class="px-3 py-2 text-right">净盈亏</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-warm-100">
+            <template x-if="financials.length === 0">
+              <tr>
+                <td colspan="10" class="px-3 py-8 text-center text-ink-300">无 broker 财务数据</td>
+              </tr>
+            </template>
+            <template x-for="f in financials" :key="f.id">
+              <tr class="hover:bg-warm-50">
+                <td class="px-3 py-2 font-medium text-ink-700" x-text="f.name"></td>
+                <td class="px-3 py-2 text-right text-ink-400 font-mono"
+                    x-text="f.fee_exchange_24h != null ? '$' + f.fee_exchange_24h.toFixed(2) : 'N/A'"
+                    title="broker_fee_kas column 排日"></td>
+                <td class="px-3 py-2 text-right text-ink-400 font-mono"
+                    x-text="f.fee_prediction_24h != null ? '$' + f.fee_prediction_24h.toFixed(2) : 'N/A'"
+                    title="Bettor B2 mainnet merge 后填"></td>
+                <td class="px-3 py-2 text-right font-mono text-blue-600" x-text="f.hedge_24h_kas_volume ?? 0"></td>
+                <td class="px-3 py-2 text-right font-mono text-blue-600"
+                    x-text="f.hedge_24h_usd_value != null ? '$' + f.hedge_24h_usd_value.toFixed(2) : '—'"></td>
+                <td class="px-3 py-2 text-right font-mono text-ink-500"
+                    x-text="f.hedge_24h_avg_price != null ? '$' + f.hedge_24h_avg_price.toFixed(6) : '—'"></td>
+                <td class="px-3 py-2 text-right font-mono" x-text="f.completed_offers_24h ?? 0"></td>
+                <td class="px-3 py-2 text-right font-mono text-ink-600"
+                    x-text="f.completed_kas_volume_24h != null ? f.completed_kas_volume_24h.toFixed(2) : '—'"></td>
+                <td class="px-3 py-2 text-right font-mono text-ink-600"
+                    x-text="f.completed_usdt_volume_24h != null ? '$' + f.completed_usdt_volume_24h.toFixed(2) : '—'"></td>
+                <td class="px-3 py-2 text-right text-ink-400 font-mono"
+                    x-text="f.net_pnl_24h != null ? (f.net_pnl_24h >= 0 ? '+' : '') + '$' + f.net_pnl_24h.toFixed(2) : 'N/A'"
+                    title="fee tracking ship 后启用"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+        <div class="px-3 py-2 text-[10px] text-ink-300 border-t border-warm-100">
+          注: Exchange Fee / 净盈亏 = N/A 直 \`broker_fee_kas\` column ship 排日. Prediction Fee = N/A 直 Bettor B2 mainnet merge 后. 当前 hedge stats + 完成 stats 为 derived value.
+        </div>
+      </div>
+    </section>
+
     <!-- ═══ STUCK ESCROW PANEL (KI-63 实证 — silent stuck surface) ═══ -->
     <section class="bg-white rounded-lg shadow-sm border border-warm-200">
       <div class="px-5 py-3 border-b border-warm-200 flex items-center justify-between">
@@ -216,6 +276,7 @@ function adminControlRoom() {
   return {
     market: {},
     brokers: [],
+    financials: [],
     stuck: [],
     lastRefresh: null,
     lastRefreshRel: '',
@@ -236,6 +297,7 @@ function adminControlRoom() {
         }
         this.market = data.market || {};
         this.brokers = data.brokers || [];
+        this.financials = data.financials || [];
         this.stuck = data.stuck || [];
         this.lastRefresh = Date.now();
         this._updateRel();

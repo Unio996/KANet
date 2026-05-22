@@ -138,6 +138,38 @@ export async function registerAdminRoutes(fastify) {
           AND observed_at > datetime('now', '-24 hours')
       `).get();
 
+      // 1B.3 Panel B 财务 KPI — hedge value 24h (qty × price summed from payload)
+      // Per broker 拆 排日 (chain_events 现 lacks broker_relay_id col; single-broker era acceptable)
+      const hedgePlacedDetails = sqlite.prepare(`
+        SELECT payload FROM chain_events
+        WHERE event_type='hedge_placed' AND observed_at > datetime('now', '-24 hours')
+      `).all();
+      let hedge24hKasVolume = 0;
+      let hedge24hUsdValue = 0;
+      for (const ev of hedgePlacedDetails) {
+        try {
+          const p = JSON.parse(ev.payload);
+          const qty = Number(p.qty) || 0;
+          const price = Number(p.price) || 0;
+          hedge24hKasVolume += qty;
+          hedge24hUsdValue += qty * price;
+        } catch {}
+      }
+
+      // 24h completed offer stats (cross-product placeholder — exchange only现; prediction N/A 待 Bettor B2 mainnet)
+      const completedStats = sqlite.prepare(`
+        SELECT
+          COUNT(*) AS count,
+          COALESCE(SUM(CASE WHEN want_asset='KAS' THEN CAST(want_amount AS REAL)
+                            WHEN give_asset='KAS' THEN CAST(give_amount AS REAL)
+                            ELSE 0 END), 0) AS kas_volume,
+          COALESCE(SUM(CASE WHEN want_asset='USDT' THEN CAST(want_amount AS REAL)
+                            WHEN give_asset='USDT' THEN CAST(give_amount AS REAL)
+                            ELSE 0 END), 0) AS usdt_volume
+        FROM exchange_offers
+        WHERE protocol_status='completed' AND updated_at > datetime('now', '-24 hours')
+      `).get();
+
       // Latest broker activity from chain_events where from_address=broker.kasia OR observed_by mentions broker name
       const brokers = brokerRows.map(b => {
         let scope = [];
@@ -205,11 +237,27 @@ export async function registerAdminRoutes(fastify) {
         };
       });
 
+      // 1B.3 Panel B 财务 KPI cross-product (per broker — 单 broker era 共享 hedge data)
+      const financials = brokerRows.map(b => ({
+        id: b.id,
+        name: b.name,
+        fee_exchange_24h: null,  // exchange offer fee not yet logged in DB — 排日 加 broker_fee_kas col
+        fee_prediction_24h: null,  // prediction broker not yet exists — N/A til Bettor B2 mainnet merge
+        hedge_24h_kas_volume: Number(hedge24hKasVolume.toFixed(4)),
+        hedge_24h_usd_value: Number(hedge24hUsdValue.toFixed(4)),
+        hedge_24h_avg_price: hedge24hKasVolume > 0 ? Number((hedge24hUsdValue / hedge24hKasVolume).toFixed(6)) : null,
+        completed_offers_24h: completedStats.count,
+        completed_kas_volume_24h: Number(completedStats.kas_volume.toFixed(4)),
+        completed_usdt_volume_24h: Number(completedStats.usdt_volume.toFixed(4)),
+        net_pnl_24h: null,  // null until fee tracking lands — propose Phase 1B follow-up 排日
+      }));
+
       return reply.send({
         ok: true,
         ts: new Date().toISOString(),
         market,
         brokers,
+        financials,
         stuck: stuck.map(e => ({
           id: e.id,
           side: e.side,
