@@ -7,7 +7,7 @@
 // - 阈值 alert: 写 chain_event 'treasury_alert' (broker 自治, Brain visible, 不 DM Owner)
 // - read-only, 不动钱 (auto-rebalance 排日 Phase 2)
 //
-// vs broker-inventory-watcher.js: 后者是 BSC USDC 单一 auto-swap action, 本 service 是 multi-chain passive monitor.
+// vs marketmaker-inventory-watcher.js (KI 65 A.3.3 renamed): 后者是 BSC USDC 单一 auto-swap action, 本 service 是 multi-chain passive monitor.
 // 两者并存 (single responsibility — one swaps, one monitors).
 
 import { ethers } from 'ethers';
@@ -16,8 +16,9 @@ import { withFallbackRpc } from './chains.js';
 import { getConfig } from '../data/settings/configs.js';
 import { decrypt } from './crypto.js';
 import { getBalance as cexGetBalance } from './exchange-orders.js';
+import { getBrokerRelayIdOrThrow } from './broker-config-resolver.js';
 
-const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+// KI 65 A.3.4 wave 4 (5/22): runtime helper, no module-load const.
 const TICK_INTERVAL_MS = 5 * 60_000; // 5 min, stagger 2.5 min offset from market-seeder
 const TICK_OFFSET_MS = 150_000;
 
@@ -78,7 +79,7 @@ async function _snapshotCexBalance(accountRow) {
 async function _snapshotKaspaBalance(walletAddr) {
   // Console-internal API call (kaspa-ws-proxy via /api/relay/.../balance)
   try {
-    const res = await fetch(`http://127.0.0.1:${process.env.PORT || 3100}/api/relay/${BROKER_RELAY_ID}/balance`, { signal: AbortSignal.timeout(5000) });
+    const res = await fetch(`http://127.0.0.1:${process.env.PORT || 3100}/api/relay/${getBrokerRelayIdOrThrow()}/balance`, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) return null;
     const data = await res.json();
     const kas = parseFloat(data.balance);
@@ -95,7 +96,7 @@ async function _runSnapshot() {
   try {
     const wallets = sqlite.prepare(
       'SELECT chain, address FROM agent_wallets WHERE relay_node_id = ?'
-    ).all(BROKER_RELAY_ID);
+    ).all(getBrokerRelayIdOrThrow());
 
     // J2 P0 fix 5/19 (Owner 5/19 "快!" 钦定): sequential RPC → Promise.all parallel.
     // 旧 sequential await EVM RPC × N chains × 2 assets → cumulative 30+ sec event loop block
@@ -138,7 +139,7 @@ async function _runSnapshot() {
       'INSERT INTO treasury_snapshot (relay_node_id, chain, asset, balance_raw, balance_human, source) VALUES (?, ?, ?, ?, ?, ?)'
     );
     const tx = sqlite.transaction((items) => {
-      for (const s of items) ins.run(BROKER_RELAY_ID, s.chain, s.asset, s.balance_raw, s.balance_human, s.source);
+      for (const s of items) ins.run(getBrokerRelayIdOrThrow(), s.chain, s.asset, s.balance_raw, s.balance_human, s.source);
     });
     tx(snapshots);
 
@@ -193,7 +194,7 @@ async function _runSnapshot() {
         await fetch(`http://127.0.0.1:${PORT}/api/chat/send`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ relayId: BROKER_RELAY_ID, channel: 'dev-coord', message: msg }),
+          body: JSON.stringify({ relayId: getBrokerRelayIdOrThrow(), channel: 'dev-coord', message: msg }),
           signal: AbortSignal.timeout(8000),
         });
         sqlite.prepare(`INSERT INTO throttle_log (key, created_at) VALUES (?, datetime('now'))`).run(throttleKey);

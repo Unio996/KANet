@@ -204,6 +204,7 @@ export async function registerExchangeRoutes(fastify) {
       t: 'kanet_exchange_v1',
       id: offerId,
       give_asset,
+      // lint-allow-chain-amount-precision: API layer pass-through, precision handled at chain TX layer (broker-action-queue.js + evm-transfer.js). KI-30 fix排日.
       give_amount: String(give_amount),
       give_chain: give_chain || null,
       want_asset,
@@ -611,7 +612,9 @@ export async function registerExchangeRoutes(fastify) {
   // Bug H γ Step 4 (Owner 17:35 钦定 invariant K+U total 不减少 baseline).
   // /portfolio Exchange Custody section consumes this endpoint.
   fastify.get('/api/exchange/custody-pool', async (request, reply) => {
-    const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';  // Trader-B
+    // KI 65 A.3.4 wave 4 (5/22): runtime helper, no hardcoded UUID literal.
+    const { getBrokerRelayIdOrThrow } = await import('../services/broker-config-resolver.js');
+    const BROKER_RELAY_ID = getBrokerRelayIdOrThrow();
     try {
       // broker kasia addr
       const broker = sqlite.prepare('SELECT name, address FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID);

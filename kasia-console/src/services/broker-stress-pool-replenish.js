@@ -8,8 +8,9 @@
 
 import { sqlite } from '../db/client.js';
 import { getConfig } from '../data/settings/configs.js';
+import { getBrokerRelayIdOrThrow } from './broker-config-resolver.js';
 
-const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+// KI 65 A.3.4 wave 4 (5/22): runtime helper, no module-load const.
 const TICK_INTERVAL_MS = 5 * 60_000;  // 5 min
 const CONSOLE_PORT = process.env.PORT || 3100;
 const DEFAULT_FLOOR_USD = 3;
@@ -32,7 +33,7 @@ async function _fetchRelayBnbWallet(relayId) {
 
 async function _broker2RelayUsdtTransfer(brokerBnbWalletId, toAddr, amount) {
   try {
-    const res = await fetch(`http://127.0.0.1:${CONSOLE_PORT}/api/relay/${BROKER_RELAY_ID}/wallets/${brokerBnbWalletId}/send`, {
+    const res = await fetch(`http://127.0.0.1:${CONSOLE_PORT}/api/relay/${getBrokerRelayIdOrThrow()}/wallets/${brokerBnbWalletId}/send`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ asset: 'usdt', amount: amount.toFixed(3), to: toAddr }),
       signal: AbortSignal.timeout(30_000),
@@ -54,7 +55,7 @@ async function _runReplenishTick() {
     const relayNames = poolRelaysCsv.split(',').map(s => s.trim()).filter(Boolean);
 
     // Find broker BSC wallet
-    const brokerBnb = sqlite.prepare(`SELECT id FROM agent_wallets WHERE relay_node_id=? AND chain='bnb' AND is_default=1`).get(BROKER_RELAY_ID);
+    const brokerBnb = sqlite.prepare(`SELECT id FROM agent_wallets WHERE relay_node_id=? AND chain='bnb' AND is_default=1`).get(getBrokerRelayIdOrThrow());
     if (!brokerBnb) {
       console.warn('[stress-pool-replenish] broker BSC wallet not found, skip');
       return;

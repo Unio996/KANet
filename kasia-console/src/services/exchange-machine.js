@@ -16,6 +16,7 @@ import { getVerifier } from './exchange-verifiers.js';
 import { recordChainEvent } from './chain-event.js';
 import { executeHedge } from './trade-protocol-filter.js';
 import { releaseFunds, spendFunds } from './fund-lock.js';
+import { getBrokerRelayIdOrThrow } from './broker-config-resolver.js';
 import crypto from 'crypto';
 
 // ── Valid Transitions ─────────────────────────────────────────
@@ -565,7 +566,8 @@ export async function _refundEscrow(escrowId, reason = 'unspecified') {
   }
 
   // Broker relay lookup (escrow.broker_recv_addr == relay_nodes.address for kaspa, or agent_wallets.address for EVM)
-  const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';  // Trader-B (matches broker-bsc-intake-watcher)
+  // KI 65 A.3.4 wave 4 (5/22): runtime helper, no hardcoded literal.
+  const BROKER_RELAY_ID = getBrokerRelayIdOrThrow();
   const refundAmount = e.amount_received || e.amount_quoted;
   const isKasRefund = e.asset === 'KAS';  // SELL escrow: prepaid KAS, refund KAS
   let refundTxHash = null;
@@ -805,7 +807,8 @@ export async function sweepOrphanInflows() {
       } else if (o.chain === 'bnb') {
         // BSC orphan: transferUsdt direct via evm-transfer.
         const transferUsdt = await getTransferUsdt();
-        const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+        // KI 65 A.3.4 wave 4: runtime helper.
+        const BROKER_RELAY_ID = getBrokerRelayIdOrThrow();
         const wallet = sqlite.prepare(
           "SELECT privkey_encrypted FROM agent_wallets WHERE relay_node_id = ? AND chain = 'bnb' AND is_default = 1 LIMIT 1"
         ).get(BROKER_RELAY_ID);

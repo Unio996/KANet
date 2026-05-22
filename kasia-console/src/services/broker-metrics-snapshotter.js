@@ -18,10 +18,10 @@
 import { sqlite } from '../db/client.js';
 
 const SNAPSHOT_INTERVAL_MS = 60 * 60 * 1000;  // 1h
-// Bug V 5/15 fix (NWT 11:27 自批 + J2 grep verify): broker = Trader-B = 0a8e9723, NOT J2 (c9c37c37).
-// J2 host broadcasts from c9c37c37 (own identity), broker custody escrow flow uses 0a8e9723.
-// Align 8 other broker file constants — see broker-bsc-intake-watcher.js + broker-action-queue.js etc.
-const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';  // Trader-B (broker custody, not J2 self)
+// KI 65 A.3.4 wave 4 (5/22): runtime helper, no module-load const.
+// Historical Bug V 5/15 context (no longer hardcoded literal — see git history if Bug V details needed).
+// lint-allow-broker-uuid: historical Bug V 5/15 fix annotation in deprecated literal removed by A.3.4; helper used at call sites.
+import { getBrokerRelayIdOrThrow } from './broker-config-resolver.js';
 let _timer = null;
 let _running = false;
 
