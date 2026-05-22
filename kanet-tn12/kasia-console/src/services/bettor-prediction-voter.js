@@ -338,8 +338,9 @@ async function processPoolMarket(voter) {
 
 // B2 v0.5 Sub 2d Phase 2c — pool oracle TX-sign handler.
 // When pool_markets reaches 'collecting_sigs', settler dispatchPhase2 has stashed phase2_tx_obj.
-// Each oracle signs the SPINE input (input_index=0) — sides need no sigs (settled_via_spine).
-// Writes chain_events 'pool_oracle_tx_sig' that handleCollectingSigs aggregates.
+// Spine P2SH has MULTIPLE UTXOs (1 maker stake + N oracle bonds) — each spine input (0..spineInputCount-1)
+// needs 3 oracle sigs. Side inputs (spineInputCount..end) need no sigs (settled_via_spine).
+// Phase 3 e2e caught: signing only input 0 left oracle bond UTXO inputs unsigned → kaspad reject.
 async function processPoolTxSign(voter) {
   let signed = 0, skipped = 0, errored = 0;
   const markets = sqlite.prepare(`
@@ -366,44 +367,52 @@ async function processPoolTxSign(voter) {
         if (myIndex === meta.phase2_silent_oracle_index) { skipped++; continue; }
       }
 
-      // Skip if already signed spine input for this market
-      const SPINE_INPUT_IDX = 0;
-      const existing = sqlite.prepare(`
-        SELECT id FROM chain_events
-        WHERE event_type = 'pool_oracle_tx_sig' AND from_address = ?
-          AND payload LIKE ? AND payload LIKE ?
-        LIMIT 1
-      `).get(voter.address, `%"market_id":"${market.id}"%`, `%"input_index":${SPINE_INPUT_IDX}%`);
-      if (existing) { skipped++; continue; }
+      const spineInputCount = meta.phase2_spine_input_count || 1;
+      let signedAny = false;
+      // Sign each spine input (0..spineInputCount-1) — all locked by PoolSpine redeem
+      for (let inputIdx = 0; inputIdx < spineInputCount; inputIdx++) {
+        // Skip if already signed this input for this market
+        const existing = sqlite.prepare(`
+          SELECT id FROM chain_events
+          WHERE event_type = 'pool_oracle_tx_sig' AND from_address = ?
+            AND payload LIKE ? AND payload LIKE ?
+          LIMIT 1
+        `).get(voter.address, `%"market_id":"${market.id}"%`, `%"input_index":${inputIdx}%`);
+        if (existing) { continue; }
 
-      // Sign spine input via relay IPC sign_input_for_settle (= reuse 1V1 IPC)
-      const signResult = await sendCommandAsync(voter.id, {
-        type: 'sign_input_for_settle',
-        tx_hex: JSON.stringify(meta.phase2_tx_obj),
-        input_index: SPINE_INPUT_IDX,
-      });
-      if (!signResult?.ok || !signResult.signature) {
-        console.error(`[prediction-voter:pool-txsign] sign fail voter=${voter.name} market=${market.id.slice(0,12)}: ${signResult?.error || 'no sig'}`);
-        errored++;
-        continue;
+        const signResult = await sendCommandAsync(voter.id, {
+          type: 'sign_input_for_settle',
+          tx_hex: JSON.stringify(meta.phase2_tx_obj),
+          input_index: inputIdx,
+        });
+        if (!signResult?.ok || !signResult.signature) {
+          console.error(`[prediction-voter:pool-txsign] sign fail voter=${voter.name} market=${market.id.slice(0,12)} input=${inputIdx}: ${signResult?.error || 'no sig'}`);
+          errored++;
+          continue;
+        }
+
+        const respPayload = JSON.stringify({
+          t: 'kanet_pool_oracle_tx_sign_resp_v1',
+          market_id: market.id,
+          voter_relay_id: voter.id,
+          input_index: inputIdx,
+          winner: meta.phase2_winner,
+          signature: signResult.signature,
+        });
+        const syntheticTxid = `pool_oracle_tx_sig:${voter.id.slice(0,8)}:${market.id.slice(0,12)}:i${inputIdx}:${Date.now()}`;
+        sqlite.prepare(`
+          INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+          VALUES (?, ?, 'pool_oracle_tx_sig', ?, ?, ?, 'prediction-voter', CURRENT_TIMESTAMP)
+        `).run(randomUUID(), syntheticTxid, voter.address, voter.address, respPayload);
+        signedAny = true;
       }
 
-      const respPayload = JSON.stringify({
-        t: 'kanet_pool_oracle_tx_sign_resp_v1',
-        market_id: market.id,
-        voter_relay_id: voter.id,
-        input_index: SPINE_INPUT_IDX,
-        winner: meta.phase2_winner,
-        signature: signResult.signature,
-      });
-      const syntheticTxid = `pool_oracle_tx_sig:${voter.id.slice(0,8)}:${market.id.slice(0,12)}:i${SPINE_INPUT_IDX}:${Date.now()}`;
-      sqlite.prepare(`
-        INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
-        VALUES (?, ?, 'pool_oracle_tx_sig', ?, ?, ?, 'prediction-voter', CURRENT_TIMESTAMP)
-      `).run(randomUUID(), syntheticTxid, voter.address, voter.address, respPayload);
-
-      console.log(`[prediction-voter:pool-txsign] SIGNED ${voter.name}: market=${market.id.slice(0,12)} spine input`);
-      signed++;
+      if (signedAny) {
+        console.log(`[prediction-voter:pool-txsign] SIGNED ${voter.name}: market=${market.id.slice(0,12)} ${spineInputCount} spine inputs`);
+        signed++;
+      } else {
+        skipped++;
+      }
     } catch (e) {
       console.error(`[prediction-voter:pool-txsign] fail voter=${voter.name} market=${market.id?.slice(0,12)}: ${e.message}`);
       errored++;

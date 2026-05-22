@@ -532,16 +532,25 @@ export async function unlockP2SHDual(wallet, p2shAddress, redeemScript, branch, 
 export async function unlockPoolSpineP2SH(args) {
   const {
     spineP2shAddress, sideP2shAddresses, spineRedeemScriptHex, sideRedeemScriptHexes,
-    requiredInputOutpoints, outputs, spineSigs, winner, sidesMerkleRootHex,
+    requiredInputOutpoints, outputs, spineSigsByInput, spineInputCount, winner, sidesMerkleRootHex,
     unanimous, networkId, lockTime = 0n, txObjPreimage = null,
   } = args;
 
   if (!unanimous) throw new Error('Phase 2c step 2a first ship supports unanimous only — forfeit_1 entry 1 deferred next step');
-  if (!Array.isArray(spineSigs) || spineSigs.length !== 3) throw new Error(`spineSigs must be 3 sigs for unanimous, got ${spineSigs?.length}`);
   if (winner !== 0 && winner !== 1) throw new Error(`winner must be 0 or 1, got ${winner}`);
   if (!Array.isArray(sideP2shAddresses) || !Array.isArray(sideRedeemScriptHexes)) throw new Error('sideP2shAddresses and sideRedeemScriptHexes required arrays');
   if (sideP2shAddresses.length !== sideRedeemScriptHexes.length) throw new Error(`side count mismatch: ${sideP2shAddresses.length} addresses vs ${sideRedeemScriptHexes.length} redeem scripts`);
-  if (requiredInputOutpoints.length !== 1 + sideP2shAddresses.length) throw new Error(`input outpoint count ${requiredInputOutpoints.length} != 1 spine + ${sideP2shAddresses.length} sides`);
+  // Spine P2SH has spineInputCount UTXOs (= 1 maker stake + N oracle bonds).
+  if (!Number.isInteger(spineInputCount) || spineInputCount < 1) throw new Error(`spineInputCount must be ≥1, got ${spineInputCount}`);
+  if (!Array.isArray(spineSigsByInput) || spineSigsByInput.length !== spineInputCount) {
+    throw new Error(`spineSigsByInput must be ${spineInputCount} arrays, got ${spineSigsByInput?.length}`);
+  }
+  if (spineSigsByInput.some(sigs => !Array.isArray(sigs) || sigs.length !== 3)) {
+    throw new Error('each spine input requires 3 oracle sigs for unanimous');
+  }
+  if (requiredInputOutpoints.length !== spineInputCount + sideP2shAddresses.length) {
+    throw new Error(`input outpoint count ${requiredInputOutpoints.length} != ${spineInputCount} spine + ${sideP2shAddresses.length} sides`);
+  }
 
   const txLockTime = BigInt(lockTime);
   const rpc = await connectRpc(networkId);
@@ -577,7 +586,10 @@ export async function unlockPoolSpineP2SH(args) {
     spineRedeemPushSb.addData(spineRedeemBytes);
     const spineRedeemPushHex = spineRedeemPushSb.toString();
 
-    const spineScriptSig = spineSigs.join('') + winnerOpHex + rootPushHex + selectorOpHex + spineRedeemPushHex;
+    // Each spine input gets its own scriptSig (= own 3 sigs over that input's sighash).
+    const spineScriptSigs = spineSigsByInput.map(sigs =>
+      sigs.join('') + winnerOpHex + rootPushHex + selectorOpHex + spineRedeemPushHex
+    );
 
     const sideScriptSigs = sideRedeemScriptHexes.map(redeemHex => {
       const redeemBytes = new Uint8Array(Buffer.from(redeemHex, 'hex'));
@@ -586,7 +598,7 @@ export async function unlockPoolSpineP2SH(args) {
       return selectorOpHex + sb.toString();
     });
 
-    const allScriptSigs = [spineScriptSig, ...sideScriptSigs];
+    const allScriptSigs = [...spineScriptSigs, ...sideScriptSigs];
 
     let signedTx;
     if (txObjPreimage) {
@@ -598,7 +610,7 @@ export async function unlockPoolSpineP2SH(args) {
           ...inp,
           signatureScript: allScriptSigs[i],
           sequence: BigInt(inp.sequence || 0),
-          sigOpCount: i === 0 ? 3 : 0,
+          sigOpCount: i < spineInputCount ? 3 : 0,
           utxo: inp.utxo ? {
             ...inp.utxo,
             amount: BigInt(inp.utxo.amount || 0),
@@ -617,7 +629,7 @@ export async function unlockPoolSpineP2SH(args) {
           previousOutpoint: { transactionId: utxo.outpoint.transactionId, index: utxo.outpoint.index },
           signatureScript: allScriptSigs[i],
           sequence: 0n,
-          sigOpCount: i === 0 ? 3 : 0,
+          sigOpCount: i < spineInputCount ? 3 : 0,
         })),
         outputs: txOutputs,
         lockTime: txLockTime,

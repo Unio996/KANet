@@ -369,13 +369,28 @@ export async function dispatchPhase2(market, decision) {
       outputs.push({ address: oracleRows[r.oracleIndex].address, amountSompi: r.amount.toString() });
     }
 
-    // 5. Build input outpoints: spine + N side lock TXs
+    // 5. Build input outpoints. Spine P2SH has MULTIPLE UTXOs: 1 maker stake (spine_lock_tx) +
+    //    N oracle bond deposits (= each oracle/deposit was a separate transfer → separate UTXO).
+    //    Phase 3 e2e caught: settle TX missing oracle bond UTXOs → kaspad "spend > inputs".
+    //    All spine-P2SH UTXOs need PoolSpine settle_unanimous scriptSig (3 sigs each).
+    const depositRows = sqlite.prepare(`
+      SELECT payload FROM chain_events
+      WHERE event_type = 'pool_oracle_deposit' AND payload LIKE ?
+    `).all(`%"market_id":"${market.id}"%`);
+    const oracleDepositOutpoints = depositRows.map(r => {
+      const p = JSON.parse(r.payload);
+      return { outpointTxid: p.deposit_tx, outpointIndex: 0 };
+    });
+    // Spine inputs = maker stake UTXO + N oracle bond UTXOs (= all locked by PoolSpine redeem)
+    const spineInputCount = 1 + oracleDepositOutpoints.length;
     const requiredInputOutpoints = [
-      { outpointTxid: market.spine_lock_tx, outpointIndex: 0 },
-      ...sides.map(s => ({ outpointTxid: s.side_lock_tx, outpointIndex: 0 })),
+      { outpointTxid: market.spine_lock_tx, outpointIndex: 0 },  // maker stake
+      ...oracleDepositOutpoints,                                  // N oracle bonds
+      ...sides.map(s => ({ outpointTxid: s.side_lock_tx, outpointIndex: 0 })),  // N bettor sides
     ];
 
-    // 6. Call maker_relay 'prediction_settle_build_preimage' with multi-p2sh array (= spine + N side p2sh)
+    // 6. Call maker_relay 'prediction_settle_build_preimage' with multi-p2sh array.
+    //    Spine P2SH appears once in p2sh list (= all its UTXOs fetched by that address).
     const p2shAddresses = [market.spine_p2sh, ...sides.map(s => s.side_p2sh)];
     const preimage = await sendCommandAsync(market.maker_relay_id, {
       type: 'prediction_settle_build_preimage',
@@ -402,6 +417,7 @@ export async function dispatchPhase2(market, decision) {
       phase2_silent_oracle_index: decision.silentOracleIndex ?? null,
       phase2_dispatched_at: new Date().toISOString(),
       phase2_input_count: requiredInputOutpoints.length,
+      phase2_spine_input_count: spineInputCount,  // Phase 3 bug 4: spine has 1 maker + N oracle bond UTXOs
       phase2_output_count: outputs.length,
       phase2_outputs: outputs,  // Phase 2c step 2c: full outputs array for collecting_sigs handler IPC assembly
     };
@@ -417,6 +433,7 @@ export async function dispatchPhase2(market, decision) {
       unanimous: decision.unanimous,
       silent_oracle_index: decision.silentOracleIndex ?? null,
       input_count: requiredInputOutpoints.length,
+      spine_input_count: spineInputCount,
     });
     const signingOracles = decision.unanimous
       ? [0, 1, 2]
@@ -529,10 +546,10 @@ async function handleCollectingSigs(market) {
     return;
   }
   const inputCount = meta.phase2_input_count;
-  // Critical correctness per PoolSide.settled_via_spine (entry 0): takes NO sigs.
-  // Only SPINE input (idx 0) requires 3 oracle sigs (unanimous) or 2 (forfeit_1).
-  // Side inputs (idx 1..N) auto-unlock via [selector_0 + side_redeem_push] scriptSig at assembly time.
-  const SPINE_INPUT_IDX = 0;
+  // Spine P2SH has MULTIPLE UTXOs (1 maker stake + N oracle bonds) — inputs 0..spineInputCount-1.
+  // Each spine input needs PoolSpine settle_unanimous scriptSig (3 sigs unanimous / 2 forfeit_1).
+  // Side inputs (spineInputCount..end) auto-unlock via [selector_0 + side_redeem_push] (no sigs).
+  const spineInputCount = meta.phase2_spine_input_count || 1;
   const spineRequiredSigs = meta.phase2_unanimous ? 3 : 2;
   const signingOracles = meta.phase2_unanimous
     ? [0, 1, 2]
@@ -561,11 +578,17 @@ async function handleCollectingSigs(market) {
     } catch {}
   }
 
-  // Gate ONLY on spine input sig count (= sides need no sigs per settled_via_spine entry)
-  const spineSigCount = sigsByInput[SPINE_INPUT_IDX].length;
-  if (spineSigCount < spineRequiredSigs) {
-    if (Math.random() < 0.1) {  // log 10% of ticks to avoid spam
-      console.log(`[pool-settler:collecting] market=${market.id.slice(0,12)} waiting spine sigs ${spineSigCount}/${spineRequiredSigs}`);
+  // Gate on ALL spine inputs (0..spineInputCount-1) having required sig count.
+  // Side inputs need no sigs (settled_via_spine entry).
+  const spineMissing = [];
+  for (let i = 0; i < spineInputCount; i++) {
+    if (sigsByInput[i].length < spineRequiredSigs) {
+      spineMissing.push(`input${i}=${sigsByInput[i].length}/${spineRequiredSigs}`);
+    }
+  }
+  if (spineMissing.length > 0) {
+    if (Math.random() < 0.1) {
+      console.log(`[pool-settler:collecting] market=${market.id.slice(0,12)} waiting spine sigs: ${spineMissing.join(' ')}`);
     }
     return;
   }
@@ -590,7 +613,11 @@ async function handleCollectingSigs(market) {
     return;
   }
 
-  const spineSigs = sigsByInput[SPINE_INPUT_IDX].map(s => s.signature);
+  // spineSigsByInput[i] = array of signatures for spine input i (= 3 sigs unanimous)
+  const spineSigsByInput = [];
+  for (let i = 0; i < spineInputCount; i++) {
+    spineSigsByInput.push(sigsByInput[i].map(s => s.signature));
+  }
 
   // Phase 2c step 2c first ship: unanimous (entry 0) only. forfeit_1 entry 1 deferred next iteration.
   if (!meta.phase2_unanimous) {
@@ -598,7 +625,22 @@ async function handleCollectingSigs(market) {
     return;
   }
 
-  console.log(`[pool-settler:collecting] market=${market.id.slice(0,12)} attempting settle TX submit (spine_sigs=${spineSigs.length}, sides=${sides.length}, signers=${signingOracles.join(',')})`);
+  // Rebuild full required_input_outpoints (= must match dispatchPhase2 ordering: spine + oracle bonds + sides)
+  const depositRows = sqlite.prepare(`
+    SELECT payload FROM chain_events
+    WHERE event_type = 'pool_oracle_deposit' AND payload LIKE ?
+  `).all(`%"market_id":"${market.id}"%`);
+  const oracleDepositOutpoints = depositRows.map(r => {
+    const p = JSON.parse(r.payload);
+    return { outpointTxid: p.deposit_tx, outpointIndex: 0 };
+  });
+  const requiredInputOutpoints = [
+    { outpointTxid: market.spine_lock_tx, outpointIndex: 0 },
+    ...oracleDepositOutpoints,
+    ...sides.map(s => ({ outpointTxid: s.side_lock_tx, outpointIndex: 0 })),
+  ];
+
+  console.log(`[pool-settler:collecting] market=${market.id.slice(0,12)} attempting settle TX submit (spine_inputs=${spineInputCount}, sides=${sides.length}, signers=${signingOracles.join(',')})`);
 
   try {
     const submitResult = await sendCommandAsync(market.maker_relay_id, {
@@ -607,12 +649,10 @@ async function handleCollectingSigs(market) {
       side_p2sh_addresses: sides.map(s => s.side_p2sh),
       spine_redeem_script_hex: meta.spine_redeem_script_hex,
       side_redeem_script_hexes: sides.map(s => s.side_redeem_script_hex),
-      required_input_outpoints: [
-        { outpointTxid: market.spine_lock_tx, outpointIndex: 0 },
-        ...sides.map(s => ({ outpointTxid: s.side_lock_tx, outpointIndex: 0 })),
-      ],
+      required_input_outpoints: requiredInputOutpoints,
       outputs: meta.phase2_outputs,
-      spine_sigs: spineSigs,
+      spine_input_count: spineInputCount,
+      spine_sigs_by_input: spineSigsByInput,
       winner: meta.phase2_winner,
       sides_merkle_root: market.sides_merkle_root,
       unanimous: meta.phase2_unanimous,
