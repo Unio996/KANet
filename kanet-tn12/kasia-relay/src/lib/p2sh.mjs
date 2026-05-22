@@ -269,11 +269,12 @@ export async function unlockP2SHMultiSig(p2shAddress, redeemScript, requiredInpu
     const { entries } = await rpc.getUtxosByAddresses([p2shAddress]);
     if (!entries?.length) throw new Error(`No UTXOs at P2SH ${p2shAddress}`);
 
+    // Match by txid only (= Phase 3 UAT bug 6: lock transfer output index non-deterministic).
     const matched = requiredInputOutpoints.map(req => {
-      const found = entries.find(e =>
-        e.outpoint.transactionId === req.outpointTxid && Number(e.outpoint.index) === Number(req.outpointIndex)
-      );
-      if (!found) throw new Error(`UTXO not found: ${req.outpointTxid}:${req.outpointIndex}`);
+      const hits = entries.filter(e => e.outpoint.transactionId === req.outpointTxid);
+      if (hits.length === 0) throw new Error(`UTXO not found for lock tx: ${req.outpointTxid}`);
+      if (hits.length > 1) throw new Error(`ambiguous: ${hits.length} UTXOs at P2SH from tx ${req.outpointTxid}`);
+      const found = hits[0];
       return found;
     });
 
@@ -394,12 +395,14 @@ export async function buildSettleTxPreimage(p2shAddress, requiredInputOutpoints,
   try {
     const { entries } = await rpc.getUtxosByAddresses(p2shList);
     if (!entries?.length) throw new Error(`No UTXOs at P2SH(s) ${p2shList.join(',')}`);
+    // Match by txid only — a lock transfer produces exactly 1 UTXO at the target P2SH;
+    // the output INDEX is non-deterministic (Generator may order payment/change either way).
+    // Phase 3 UAT bug 6: hardcoded index 0 was luck. Use the actual found UTXO's index.
     const matched = requiredInputOutpoints.map(req => {
-      const found = entries.find(e =>
-        e.outpoint.transactionId === req.outpointTxid && Number(e.outpoint.index) === Number(req.outpointIndex)
-      );
-      if (!found) throw new Error(`UTXO not found: ${req.outpointTxid}:${req.outpointIndex}`);
-      return found;
+      const hits = entries.filter(e => e.outpoint.transactionId === req.outpointTxid);
+      if (hits.length === 0) throw new Error(`UTXO not found for lock tx: ${req.outpointTxid}`);
+      if (hits.length > 1) throw new Error(`ambiguous: ${hits.length} UTXOs at P2SH from tx ${req.outpointTxid}`);
+      return hits[0];
     });
     if (sigOpCounts && sigOpCounts.length !== matched.length) {
       throw new Error(`sigOpCounts length ${sigOpCounts.length} != input count ${matched.length}`);
@@ -459,11 +462,12 @@ export async function unlockP2SHDual(wallet, p2shAddress, redeemScript, branch, 
     const { entries } = await rpc.getUtxosByAddresses([p2shAddress]);
     if (!entries?.length) throw new Error(`No UTXOs at P2SH ${p2shAddress}`);
 
+    // Match by txid only (= Phase 3 UAT bug 6: lock transfer output index non-deterministic).
     const matched = requiredInputOutpoints.map(req => {
-      const found = entries.find(e =>
-        e.outpoint.transactionId === req.outpointTxid && Number(e.outpoint.index) === Number(req.outpointIndex)
-      );
-      if (!found) throw new Error(`UTXO not found: ${req.outpointTxid}:${req.outpointIndex}`);
+      const hits = entries.filter(e => e.outpoint.transactionId === req.outpointTxid);
+      if (hits.length === 0) throw new Error(`UTXO not found for lock tx: ${req.outpointTxid}`);
+      if (hits.length > 1) throw new Error(`ambiguous: ${hits.length} UTXOs at P2SH from tx ${req.outpointTxid}`);
+      const found = hits[0];
       return found;
     });
 
@@ -567,11 +571,12 @@ export async function unlockPoolSpineP2SH(args) {
     const { entries } = await rpc.getUtxosByAddresses(allP2shList);
     if (!entries?.length) throw new Error(`No UTXOs found at pool P2SH addresses`);
 
+    // Match by txid only (= Phase 3 UAT bug 6: lock transfer output index non-deterministic).
     const matched = requiredInputOutpoints.map(req => {
-      const found = entries.find(e =>
-        e.outpoint.transactionId === req.outpointTxid && Number(e.outpoint.index) === Number(req.outpointIndex)
-      );
-      if (!found) throw new Error(`UTXO not found: ${req.outpointTxid}:${req.outpointIndex}`);
+      const hits = entries.filter(e => e.outpoint.transactionId === req.outpointTxid);
+      if (hits.length === 0) throw new Error(`UTXO not found for lock tx: ${req.outpointTxid}`);
+      if (hits.length > 1) throw new Error(`ambiguous: ${hits.length} UTXOs at P2SH from tx ${req.outpointTxid}`);
+      const found = hits[0];
       return found;
     });
 
