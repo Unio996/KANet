@@ -4330,6 +4330,18 @@ export function runMigrations() {
         sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN fee_rate_override REAL`);
         console.log("[migrate] v138: relay_nodes 加 fee_rate_override REAL (per-broker fee% override, NULL = use system default 0.005).");
       }
+      // A.1.2 hotfix (NWT N19.200): backfill 必 outside column-exist guard.
+      // KI-12 silent skip 第 N 次: A.1 ran → column exist → guard skip → backfill 永远不 fire.
+      // Fix: independent invariant — count NULL rows + UPDATE all 4 case (idempotent on re-run).
+      const nullCount = sqlite.prepare("SELECT COUNT(*) c FROM relay_nodes WHERE roles_json IS NULL").get().c;
+      if (nullCount > 0) {
+        sqlite.exec(`UPDATE relay_nodes SET roles_json='["broker","oracle"]' WHERE is_dex_broker=1 AND is_oracle=1 AND roles_json IS NULL`);
+        sqlite.exec(`UPDATE relay_nodes SET roles_json='["broker"]' WHERE is_dex_broker=1 AND is_oracle=0 AND roles_json IS NULL`);
+        sqlite.exec(`UPDATE relay_nodes SET roles_json='["oracle"]' WHERE is_oracle=1 AND is_dex_broker=0 AND roles_json IS NULL`);
+        sqlite.exec(`UPDATE relay_nodes SET roles_json='["user"]' WHERE is_dex_broker=0 AND is_oracle=0 AND roles_json IS NULL`);
+        const remainingNull = sqlite.prepare("SELECT COUNT(*) c FROM relay_nodes WHERE roles_json IS NULL").get().c;
+        console.log(`[migrate] v138 A.1.2: backfilled ${nullCount - remainingNull} relay_nodes roles_json (${remainingNull} still NULL).`);
+      }
     }
   }
 
