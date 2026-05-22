@@ -43,10 +43,13 @@ export async function registerPoolRoutes(fastify) {
     const brokerPk = await deriveXOnlyPubkey(brokerRow.address);
     const oraclePks = await Promise.all(oracleRows.map(r => deriveXOnlyPubkey(r.address)));
 
-    // deadline + amounts
+    // deadline + amounts.
+    // UAT pain point #2: 15-min minimum is friction for quick testnet demos. POOL_DEADLINE_MIN_OVERRIDE
+    // env lets testnet relax it (e.g. =2 for a 2-min demo). Defaults to 15 — mainnet leaves it unset.
+    const minDeadlineMin = parseInt(process.env.POOL_DEADLINE_MIN_OVERRIDE, 10) || 15;
     const outcomeEndMs = new Date(b.outcome_end_date).getTime();
-    if (!Number.isFinite(outcomeEndMs) || outcomeEndMs < Date.now() + 15 * 60_000) {
-      return reply.code(400).send({ ok: false, error: 'outcome_end_date must be > now + 15 minutes' });
+    if (!Number.isFinite(outcomeEndMs) || outcomeEndMs < Date.now() + minDeadlineMin * 60_000) {
+      return reply.code(400).send({ ok: false, error: `outcome_end_date must be > now + ${minDeadlineMin} minutes` });
     }
     const deadline = Math.floor(outcomeEndMs / 1000);
     const minerFee = parseInt(b.miner_fee, 10) || 20_000;

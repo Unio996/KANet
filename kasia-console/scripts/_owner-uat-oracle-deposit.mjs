@@ -46,6 +46,7 @@ console.log('');
 console.log('=== ORACLE BOND DEPOSITED ===');
 console.log(`  oracle:             ${oracle.name} (role ${oracleRole})`);
 console.log(`  deposit_tx:         ${j.deposit_tx}`);
+console.log(`  explorer:           https://explorer-tn12.kaspa.org/txs/${j.deposit_tx}`);
 console.log(`  deposits_received:  ${j.deposits_received}/3`);
 console.log(`  market_status:      ${j.market_status}`);
 console.log('');

@@ -28,8 +28,11 @@ if (!question || !deadlineMinRaw || !stakeKasRaw) {
 }
 const deadlineMin = parseInt(deadlineMinRaw, 10);
 const stakeKas = parseFloat(stakeKasRaw);
-if (!Number.isFinite(deadlineMin) || deadlineMin < 16) {
-  console.error(`deadline_minutes must be an integer >= 16 (got ${deadlineMinRaw}) — protocol requires deadline > now+15min`);
+// Pain point #2: honor POOL_DEADLINE_MIN_OVERRIDE — testnet can set a short deadline for quick demos.
+const minDeadline = (parseInt(process.env.POOL_DEADLINE_MIN_OVERRIDE, 10) || 15) + 1;
+if (!Number.isFinite(deadlineMin) || deadlineMin < minDeadline) {
+  console.error(`deadline_minutes must be an integer >= ${minDeadline} (got ${deadlineMinRaw})`);
+  console.error(`(protocol minimum is ${minDeadline - 1} min; set POOL_DEADLINE_MIN_OVERRIDE on the Console env to relax it for testnet)`);
   process.exit(1);
 }
 if (!Number.isFinite(stakeKas) || stakeKas <= 0) {
@@ -72,6 +75,7 @@ console.log('=== MARKET CREATED ===');
 console.log(`  market_id:      ${j.market_id}`);
 console.log(`  spine_p2sh:     ${j.spine_p2sh}`);
 console.log(`  spine_lock_tx:  ${j.spine_lock_tx}`);
+console.log(`  explorer:       https://explorer-tn12.kaspa.org/txs/${j.spine_lock_tx}`);
 console.log(`  status:         ${j.status}`);
 console.log('');
 console.log(`NEXT: 3 oracles must deposit bonds. Run (×3, role 1/2/3):`);
