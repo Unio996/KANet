@@ -30,6 +30,19 @@ const ORACLE_SILENT_TIMEOUT_MS = ORACLE_SILENT_TIMEOUT_MIN * 60_000;
 let timer = null;
 let running = false;
 
+/**
+ * Parse a SQLite CURRENT_TIMESTAMP string as UTC.
+ * SQLite stores 'YYYY-MM-DD HH:MM:SS' with no timezone — it IS UTC, but JS `new Date(str)`
+ * on a space-separated string parses it as LOCAL time → 中国 host UTC+8 → 8h skew →
+ * instant false ORACLE_SILENT_TIMEOUT. Phase 3 e2e caught this (= market false-refunded 3 min in).
+ */
+export function parseSqliteUtc(ts) {
+  if (!ts) return Date.now();
+  if (typeof ts === 'number') return ts;
+  const iso = ts.includes('T') ? ts : ts.replace(' ', 'T');
+  return new Date(iso.endsWith('Z') ? iso : iso + 'Z').getTime();
+}
+
 export function startPoolMarketSettlerCron() {
   if (timer) return;
   console.log(`[pool-settler] started — 5min cron, aggregate 3 oracle votes + consensus check, silent_timeout=${ORACLE_SILENT_TIMEOUT_MIN}min (Sub 2d Phase 1)`);
@@ -143,7 +156,7 @@ export function decideConsensus(market) {
     votes.push({ oracleIndex: i, outcome: payload.outcome, voter_relay_id: oracleRelayId, ts: row.observed_at });
   }
 
-  const verifyingSinceMs = market.updated_at ? new Date(market.updated_at).getTime() : Date.now();
+  const verifyingSinceMs = parseSqliteUtc(market.updated_at);
   const ageMs = Date.now() - verifyingSinceMs;
   const pastSilentTimeout = ageMs >= ORACLE_SILENT_TIMEOUT_MS;
 

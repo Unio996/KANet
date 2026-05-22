@@ -15,7 +15,7 @@ try {
   const { runMigrations } = await import('../src/db/migrate.js');
   runMigrations();
 
-  const { decideConsensus } = await import('../src/services/pool-market-settler.js');
+  const { decideConsensus, parseSqliteUtc } = await import('../src/services/pool-market-settler.js');
 
   const ORACLE_RELAY_IDS = ['oracle-1', 'oracle-2', 'oracle-3'];
   const MARKET_ID = 'pool-test-' + Date.now();
@@ -102,6 +102,31 @@ try {
   seedVote('oracle-3', 'NO');
   d = decideConsensus(getMarket());
   assertEq('Case 6: 3 voted disagreement → pending', d.action, 'pending');
+
+  // Case 7: parseSqliteUtc handles SQLite 'YYYY-MM-DD HH:MM:SS' format as UTC (Phase 3 e2e bug)
+  {
+    // SQLite CURRENT_TIMESTAMP format — must parse as UTC not local
+    const sqliteTs = '2026-05-22 00:50:09';
+    const parsed = parseSqliteUtc(sqliteTs);
+    const expectedUtc = Date.UTC(2026, 4, 22, 0, 50, 9);
+    assertEq('Case 7: parseSqliteUtc SQLite format as UTC', parsed, expectedUtc);
+  }
+  // Case 8: parseSqliteUtc handles ISO 'T...Z' format too
+  {
+    const isoTs = '2026-05-22T00:50:09.000Z';
+    const parsed = parseSqliteUtc(isoTs);
+    assertEq('Case 8: parseSqliteUtc ISO format', parsed, new Date(isoTs).getTime());
+  }
+  // Case 9: decideConsensus with SQLite-format updated_at — 2 voted, 3 min ago → pending NOT consensus
+  {
+    reset();
+    const threeMinAgoSqlite = new Date(Date.now() - 3 * 60_000).toISOString().slice(0, 19).replace('T', ' ');
+    seedMarket(threeMinAgoSqlite);  // SQLite format, 3 min ago
+    seedVote('oracle-1', 'YES');
+    seedVote('oracle-2', 'YES');
+    const d = decideConsensus(getMarket());
+    assertEq('Case 9: 2 voted + SQLite-fmt 3min-ago updated_at → pending (not false-timeout consensus)', d.action, 'pending');
+  }
 
   console.log(`\n=== ${pass} PASS / ${fail} FAIL ===`);
   sqlite.close();
