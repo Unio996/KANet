@@ -27,8 +27,32 @@ const STARTUP_GRACE_MS = 60 * 1000;         // 60s grace (= 错峰 voter daemon 
 const ORACLE_SILENT_TIMEOUT_MIN = parseInt(process.env.ORACLE_SILENT_TIMEOUT_MIN, 10) || 30;
 const ORACLE_SILENT_TIMEOUT_MS = ORACLE_SILENT_TIMEOUT_MIN * 60_000;
 
+// B2 v0.5 Phase 3 bug 8 — Kaspa Crescendo KIP-9 storage mass constraints.
+// A pool settle TX with many small-value outputs blows the storage mass cap (= UAT cycle 3:
+// 0.5 KAS bettor stakes → broker_fee 500k sompi → storage_mass 1.99M > 500k cap).
+const KIP9_C = 1e12;                          // KIP-9 mass constant
+const STORAGE_MASS_CAP = 500_000;             // kaspad standardness cap
+const STORAGE_MASS_SAFE_THRESHOLD = 400_000;  // 20% buffer — settle aborts above this
+const MIN_BROKER_FEE_SOMPI = 5_000_000;       // 0.05 KAS broker_fee floor (Bettor r370)
+
 let timer = null;
 let running = false;
+
+/**
+ * Estimate a transaction's KIP-9 storage mass.
+ * storage_mass = C × max(0, Σ(1/output_value) − inputCount² / Σ(input_value))
+ * Verified against UAT cycle 3 observed mass (1,991,668 ≈ computed).
+ *
+ * @param {number[]} inputValues - sompi values of each input UTXO
+ * @param {number[]} outputValues - sompi values of each output
+ * @returns {number} estimated storage mass
+ */
+export function estimateStorageMass(inputValues, outputValues) {
+  const sumOutInv = outputValues.reduce((s, v) => s + (v > 0 ? 1 / v : 0), 0);
+  const sumIn = inputValues.reduce((s, v) => s + v, 0);
+  const inputsTerm = sumIn > 0 ? (inputValues.length * inputValues.length) / sumIn : 0;
+  return Math.max(0, Math.round(KIP9_C * (sumOutInv - inputsTerm)));
+}
 
 /**
  * Parse a SQLite CURRENT_TIMESTAMP string as UTC.
@@ -220,6 +244,8 @@ export function decideConsensus(market) {
  */
 export function computePoolPayouts(args) {
   const { participants, winner, brokerFeePct, oracleBond, minerFee, unanimous, silentOracleIndex } = args;
+  // Bug 8: broker_fee floor — defaults to MIN_BROKER_FEE_SOMPI; tests may pass 0 to isolate proportional math.
+  const minBrokerFee = (args.minBrokerFee === undefined) ? MIN_BROKER_FEE_SOMPI : args.minBrokerFee;
   if (!Number.isFinite(minerFee) || minerFee < 0) throw new Error('minerFee required (sompi int)');
   const winners = participants.map((p, i) => ({ ...p, idx: i })).filter(p => p.direction === winner);
   const losers = participants.filter(p => p.direction !== winner);
@@ -234,7 +260,13 @@ export function computePoolPayouts(args) {
   if (totalLoserStake < minerFee) {
     throw new Error(`losing pool (${totalLoserStake}) less than minerFee (${minerFee}) — settle impossible without fee`);
   }
-  const brokerFee = Math.floor(losingPool * brokerFeePct / 10000);
+  // Bug 8: broker_fee floor MIN_BROKER_FEE_SOMPI (= 0.05 KAS) — a tiny broker output
+  // dominates KIP-9 storage mass (Σ 1/output_value). Floored so the output isn't dust-small.
+  const brokerFeeRaw = Math.floor(losingPool * brokerFeePct / 10000);
+  const brokerFee = Math.max(brokerFeeRaw, minBrokerFee);
+  if (losingPool < brokerFee) {
+    throw new Error(`losing pool (${losingPool}) less than broker_fee floor (${brokerFee}) — pot too small to settle`);
+  }
   const distributablePool = losingPool - brokerFee;
 
   // Forfeit_1 50/25/25 split per v0.5 spec section 4.4
@@ -388,6 +420,25 @@ export async function dispatchPhase2(market, decision) {
       ...oracleDepositOutpoints,                                  // N oracle bonds
       ...sides.map(s => ({ outpointTxid: s.side_lock_tx, outpointIndex: 0 })),  // N bettor sides
     ];
+
+    // Bug 8: pre-settle KIP-9 storage mass check. A settle TX with too-small outputs blows
+    // the kaspad storage mass cap (500k) → rejected forever. Abort + mark needs_larger_pot
+    // rather than retry a doomed submit every tick.
+    const inputValues = [
+      parseInt(market.maker_stake_amount, 10) || 0,
+      ...oracleDepositOutpoints.map(() => parseInt(market.oracle_bond_amount, 10) || 0),
+      ...sides.map(s => parseInt(s.stake_amount, 10) || 0),
+    ];
+    const outputValues = outputs.map(o => parseInt(o.amountSompi, 10) || 0);
+    const estMass = estimateStorageMass(inputValues, outputValues);
+    if (estMass > STORAGE_MASS_SAFE_THRESHOLD) {
+      console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} estimated storage mass ${estMass} > ${STORAGE_MASS_SAFE_THRESHOLD} (cap ${STORAGE_MASS_CAP}) — pot too small, marking needs_larger_pot`);
+      let prevM = {};
+      try { prevM = JSON.parse(market.metadata || '{}'); } catch {}
+      sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .run(JSON.stringify({ ...prevM, needs_larger_pot: true, est_storage_mass: estMass }), market.id);
+      return;
+    }
 
     // 6. Call maker_relay 'prediction_settle_build_preimage' with multi-p2sh array.
     //    Spine P2SH appears once in p2sh list (= all its UTXOs fetched by that address).

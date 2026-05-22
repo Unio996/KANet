@@ -59,6 +59,9 @@ export async function registerPoolRoutes(fastify) {
     const oracleBondKas = parseFloat(b.oracle_bond_kas);
     if (!Number.isFinite(makerStakeKas) || makerStakeKas <= 0) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be positive' });
     if (!Number.isFinite(oracleBondKas) || oracleBondKas <= 0) return reply.code(400).send({ ok: false, error: 'oracle_bond_kas must be positive' });
+    // Bug 8: minimum maker stake — small stakes produce tiny settle-TX outputs that blow the
+    // Kaspa KIP-9 storage mass cap. v0.5 requires a minimum viable pot.
+    if (makerStakeKas < 1) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be >= 1 KAS (v0.5 minimum — smaller stakes produce a settle TX exceeding Kaspa storage mass cap)' });
     const makerStakeAmount = Math.round(makerStakeKas * 1e8);
     const oracleBondAmount = Math.round(oracleBondKas * 1e8);
     const makerStakeStr = (makerStakeAmount / 1e8).toFixed(8);
@@ -223,6 +226,8 @@ export async function registerPoolRoutes(fastify) {
     if (direction !== 0 && direction !== 1) return reply.code(400).send({ ok: false, error: 'direction must be 0 (YES) or 1 (NO)' });
     const stakeAmount = Math.round(parseFloat(b.stake_kas) * 1e8);
     if (stakeAmount <= 0) return reply.code(400).send({ ok: false, error: 'stake_kas must be positive' });
+    // Bug 8: minimum bettor stake — a tiny stake → tiny winner-payout output → KIP-9 storage mass overflow.
+    if (stakeAmount < 50_000_000) return reply.code(400).send({ ok: false, error: 'stake_kas must be >= 0.5 KAS (v0.5 minimum — smaller stakes produce a settle TX exceeding Kaspa storage mass cap)' });
 
     // Compute side P2SH
     const oraclePks = [market.oracle1_pk, market.oracle2_pk, market.oracle3_pk];
