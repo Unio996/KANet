@@ -28,13 +28,12 @@ const FEE_KAS_CAP = 10;
  * @returns {object|null} relay_nodes row or null
  */
 export function getBrokerRelay(scope = null) {
-  // v138 roles_json populated for all relays (A.1.2 backfill ensures no NULL).
-  // Match relays with 'broker' role.
+  // A.2.1 hotfix (NWT N19.204): use json_each精确 match (LIKE substring 不 robust 防 future role 名 substring overlap).
   // scope param reserved for future cross-product attribution; v1 ignores (single broker scope).
   const row = sqlite.prepare(`
-    SELECT * FROM relay_nodes
-    WHERE roles_json LIKE '%"broker"%'
-    ORDER BY created_at ASC
+    SELECT rn.* FROM relay_nodes rn
+    WHERE EXISTS (SELECT 1 FROM json_each(rn.roles_json) je WHERE je.value = 'broker')
+    ORDER BY rn.created_at ASC
     LIMIT 1
   `).get();
   return row || null;
@@ -46,9 +45,9 @@ export function getBrokerRelay(scope = null) {
  */
 export function getAllBrokers() {
   return sqlite.prepare(`
-    SELECT * FROM relay_nodes
-    WHERE roles_json LIKE '%"broker"%'
-    ORDER BY created_at ASC
+    SELECT rn.* FROM relay_nodes rn
+    WHERE EXISTS (SELECT 1 FROM json_each(rn.roles_json) je WHERE je.value = 'broker')
+    ORDER BY rn.created_at ASC
   `).all();
 }
 
@@ -61,9 +60,9 @@ export function getAllBrokers() {
 export function getMarketMakerRelay() {
   // Prefer relay with 'marketmaker' role explicitly; fall back to broker for backward compat.
   let row = sqlite.prepare(`
-    SELECT * FROM relay_nodes
-    WHERE roles_json LIKE '%"marketmaker"%'
-    ORDER BY created_at ASC
+    SELECT rn.* FROM relay_nodes rn
+    WHERE EXISTS (SELECT 1 FROM json_each(rn.roles_json) je WHERE je.value = 'marketmaker')
+    ORDER BY rn.created_at ASC
     LIMIT 1
   `).get();
   if (!row) {
@@ -111,7 +110,8 @@ export async function getBrokerFeeRate(relayId) {
  * @returns {Promise<number>} fee KAS (>= floor, <= cap)
  */
 export async function getBrokerFeeKas(relayId, tradeSizeKas) {
-  if (!tradeSizeKas || tradeSizeKas <= 0) return FEE_KAS_FLOOR;
+  // A.2.1 hotfix (NWT N19.204 push 2): 0 trade = 0 fee (not floor). illogical to charge 0.05 KAS on 0-size trade.
+  if (!tradeSizeKas || tradeSizeKas <= 0) return 0;
   const rate = await getBrokerFeeRate(relayId);
   const raw = tradeSizeKas * rate;
   return Math.max(FEE_KAS_FLOOR, Math.min(FEE_KAS_CAP, raw));

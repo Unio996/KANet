@@ -49,6 +49,9 @@ export default {
       }
 
       // Invariant 5: getBrokerFeeKas formula correct
+      // A.2.1 push 2: 0 trade = 0 fee (not floor)
+      const fee0 = await getBrokerFeeKas(broker.id, 0);
+      if (fee0 !== 0) return { ok: false, summary: `fee at 0 KAS expected 0, got ${fee0}` };
       // small (1 KAS) → floor 0.05
       const fee1 = await getBrokerFeeKas(broker.id, 1);
       if (fee1 !== 0.05) return { ok: false, summary: `fee at 1 KAS expected 0.05 (floor), got ${fee1}` };
