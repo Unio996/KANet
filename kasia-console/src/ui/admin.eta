@@ -310,7 +310,7 @@
                 状态 <span x-show="historyFilters.sort === 'protocol_status'" x-text="historyFilters.dir === 'desc' ? '↓' : '↑'"></span>
               </th>
               <th class="px-3 py-2 text-left">Source</th>
-              <th class="px-3 py-2 text-left">Settle TX</th>
+              <th class="px-3 py-2 text-left">Settle TX (Pay / Deliver)</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-warm-100">
@@ -331,7 +331,7 @@
                 <td class="px-3 py-2">
                   <span class="px-1.5 py-0.5 rounded text-[10px] bg-blue-100 text-blue-700" x-text="h.scope"></span>
                 </td>
-                <td class="px-3 py-2" x-text="h.side"></td>
+                <td class="px-3 py-2" x-text="h.direction || '—'"></td>
                 <td class="px-3 py-2 text-right font-mono" x-text="h.give.amount + ' ' + h.give.asset"></td>
                 <td class="px-3 py-2 text-right font-mono" x-text="h.want.amount + ' ' + h.want.asset"></td>
                 <td class="px-3 py-2">
@@ -340,7 +340,12 @@
                         x-text="h.status"></span>
                 </td>
                 <td class="px-3 py-2 text-[10px] text-ink-500" x-text="h.source || '—'"></td>
-                <td class="px-3 py-2 font-mono text-ink-400 text-[10px]" x-text="h.settle_tx ? h.settle_tx.slice(0,12) + '…' : '—'"></td>
+                <td class="px-3 py-2 font-mono text-ink-400 text-[10px]">
+                  <span :title="'Payment TX (USDT leg): ' + (h.payment_tx || 'none')"
+                        x-text="h.payment_tx ? 'P:' + h.payment_tx.slice(0,10) + '…' : 'P:—'"></span>
+                  <span class="ml-1" :title="'Delivery TX (KAS leg): ' + (h.delivery_tx || 'none')"
+                        x-text="h.delivery_tx ? 'D:' + h.delivery_tx.slice(0,10) + '…' : 'D:—'"></span>
+                </td>
               </tr>
             </template>
           </tbody>

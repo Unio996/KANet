@@ -316,10 +316,11 @@ export async function registerAdminRoutes(fastify) {
       const statusSql = status === 'all' ? '' : `AND protocol_status=@status`;
 
       // Search filter (TX prefix / user prefix / offer_id prefix)
+      // 1B.4.1 hotfix (NWT N19.188): real schema has delivery_tx + payment_tx, NOT settle_tx
       let searchSql = '';
       const params = { limit, offset, status };
       if (search) {
-        searchSql = `AND (id LIKE @search OR maker LIKE @search OR taker LIKE @search OR broadcast_tx_id LIKE @search OR settle_tx LIKE @search)`;
+        searchSql = `AND (id LIKE @search OR maker LIKE @search OR taker LIKE @search OR broadcast_tx_id LIKE @search OR delivery_tx LIKE @search OR payment_tx LIKE @search)`;
         params.search = `${search}%`;
       }
 
@@ -333,10 +334,13 @@ export async function registerAdminRoutes(fastify) {
       const totalRow = sqlite.prepare(`SELECT COUNT(*) AS total FROM exchange_offers ${whereClause}`).get(params);
       const total = totalRow?.total || 0;
 
-      // Paged rows
+      // Paged rows — 1B.4.1 hotfix (NWT N19.188): use real schema columns
+      // - No `side` col; direction implicit from give_asset → want_asset (KAS→USDT = SELL, USDT→KAS = BUY)
+      // - No `settle_tx` col; settlement has 2 legs: payment_tx (taker→maker USDT) + delivery_tx (maker→taker KAS)
+      // - outcome_side exists only for prediction (YES/NO), unused for exchange flow
       const rows = sqlite.prepare(`
-        SELECT id, maker, taker, side, market_key, give_asset, give_amount, want_asset, want_amount,
-               protocol_status, broadcast_tx_id, settle_tx, created_at, updated_at,
+        SELECT id, maker, taker, market_key, give_asset, give_amount, want_asset, want_amount,
+               protocol_status, broadcast_tx_id, payment_tx, delivery_tx, created_at, updated_at,
                json_extract(metadata, '$.source') AS source
         FROM exchange_offers
         ${whereClause}
@@ -352,22 +356,27 @@ export async function registerAdminRoutes(fastify) {
         total,
         total_pages: Math.ceil(total / limit),
         filters: { range, search, sort: safeSortBy, dir: sortDir, scope, status },
-        items: rows.map(r => ({
-          id: r.id,
-          scope: 'exchange',  // prediction待 mainnet merge
-          maker: r.maker,
-          taker: r.taker,
-          side: r.side,
-          market_key: r.market_key,
-          give: { asset: r.give_asset, amount: r.give_amount },
-          want: { asset: r.want_asset, amount: r.want_amount },
-          status: r.protocol_status,
-          broadcast_tx: r.broadcast_tx_id,
-          settle_tx: r.settle_tx,
-          source: r.source,
-          created_at: r.created_at,
-          updated_at: r.updated_at,
-        })),
+        items: rows.map(r => {
+          // Derive direction from give_asset (KAS→USDT = SELL KAS, USDT→KAS = BUY KAS)
+          const direction = r.give_asset === 'KAS' ? 'SELL' : r.give_asset === 'USDT' || r.give_asset === 'USDC' ? 'BUY' : '—';
+          return {
+            id: r.id,
+            scope: 'exchange',  // prediction待 mainnet merge
+            maker: r.maker,
+            taker: r.taker,
+            direction,  // derived, not from `side` col
+            market_key: r.market_key,
+            give: { asset: r.give_asset, amount: r.give_amount },
+            want: { asset: r.want_asset, amount: r.want_amount },
+            status: r.protocol_status,
+            broadcast_tx: r.broadcast_tx_id,
+            payment_tx: r.payment_tx,   // taker→maker USDT leg
+            delivery_tx: r.delivery_tx, // maker→taker KAS leg
+            source: r.source,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+          };
+        }),
       });
     } catch (err) {
       return reply.code(500).send({ error: err.message });
