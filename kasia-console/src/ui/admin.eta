@@ -1,0 +1,189 @@
+<%~ include('partials/page-open', { _page: 'admin', pageTitle: 'Admin Control Room', ...it }) %>
+
+<div class="h-full flex flex-col" x-data="adminControlRoom()" x-init="loadAll()">
+
+  <!-- ═══ HEADER BAR ═══ -->
+  <div class="flex-shrink-0 bg-white border-b border-warm-200 px-5 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-white font-bold text-xs">A</div>
+      <div>
+        <div class="text-sm font-semibold text-ink-700">KANet Admin Control Room</div>
+        <div class="text-[10px] text-ink-400">Phase 1A — market state + stuck escrow surface</div>
+      </div>
+    </div>
+    <div class="flex items-center gap-3 text-xs">
+      <span class="text-ink-400" x-show="lastRefresh">上次刷新 <span x-text="lastRefreshRel"></span></span>
+      <label class="flex items-center gap-1 text-ink-500">
+        <input type="checkbox" x-model="autoRefresh" @change="toggleAutoRefresh()" class="w-3 h-3">
+        <span>30s 自动刷新</span>
+      </label>
+      <button @click="loadAll()" class="text-brand-500 hover:text-brand-700 flex items-center gap-1">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+        刷新
+      </button>
+    </div>
+  </div>
+
+  <!-- ═══ MAIN CONTENT ═══ -->
+  <div class="flex-1 overflow-y-auto p-5 space-y-5">
+
+    <!-- ═══ MARKET STATE ═══ -->
+    <section class="bg-white rounded-lg shadow-sm border border-warm-200">
+      <div class="px-5 py-3 border-b border-warm-200 flex items-center gap-2">
+        <span class="text-green-600">✅</span>
+        <h2 class="text-sm font-semibold text-ink-700">MARKET STATE (24h)</h2>
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 p-5">
+        <div class="text-center">
+          <p class="text-xs text-ink-400 uppercase tracking-wider">活跃挂单</p>
+          <p class="mt-1 text-2xl font-bold text-ink-700" x-text="market.active_offers ?? '—'"></p>
+        </div>
+        <div class="text-center">
+          <p class="text-xs text-ink-400 uppercase tracking-wider">已匹配</p>
+          <p class="mt-1 text-2xl font-bold text-blue-600" x-text="market.matched ?? '—'"></p>
+        </div>
+        <div class="text-center">
+          <p class="text-xs text-ink-400 uppercase tracking-wider">24h 完成</p>
+          <p class="mt-1 text-2xl font-bold text-green-600" x-text="market.completed_24h ?? '—'"></p>
+        </div>
+        <div class="text-center">
+          <p class="text-xs text-ink-400 uppercase tracking-wider">24h 取消</p>
+          <p class="mt-1 text-2xl font-bold text-ink-500" x-text="market.cancelled_24h ?? '—'"></p>
+        </div>
+        <div class="text-center">
+          <p class="text-xs text-ink-400 uppercase tracking-wider">争议中</p>
+          <p class="mt-1 text-2xl font-bold" :class="(market.disputed ?? 0) > 0 ? 'text-red-600' : 'text-ink-500'" x-text="market.disputed ?? '—'"></p>
+        </div>
+        <div class="text-center">
+          <p class="text-xs text-ink-400 uppercase tracking-wider">24h KAS 量</p>
+          <p class="mt-1 text-2xl font-bold text-brand-500" x-text="market.kas_volume_24h?.toFixed(2) ?? '—'"></p>
+        </div>
+        <div class="text-center">
+          <p class="text-xs text-ink-400 uppercase tracking-wider">KAS 价</p>
+          <p class="mt-1 text-2xl font-bold text-purple-600" x-text="market.mid_price ? '$' + market.mid_price.toFixed(4) : '—'"></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ STUCK ESCROW PANEL (KI-63 实证 — silent stuck surface) ═══ -->
+    <section class="bg-white rounded-lg shadow-sm border border-warm-200">
+      <div class="px-5 py-3 border-b border-warm-200 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span :class="stuck.length > 0 ? 'text-red-600' : 'text-green-600'" x-text="stuck.length > 0 ? '⚠' : '✅'"></span>
+          <h2 class="text-sm font-semibold text-ink-700">卡住 Escrow 监控 (active &gt; 1h 或 refunded 但无 refund_tx)</h2>
+        </div>
+        <span class="text-xs px-2 py-0.5 rounded"
+              :class="stuck.length > 0 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'">
+          <span x-text="stuck.length"></span> 笔
+        </span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead class="bg-warm-50 text-ink-500">
+            <tr>
+              <th class="px-3 py-2 text-left">ID</th>
+              <th class="px-3 py-2 text-left">方向</th>
+              <th class="px-3 py-2 text-right">金额</th>
+              <th class="px-3 py-2 text-left">资产</th>
+              <th class="px-3 py-2 text-left">链</th>
+              <th class="px-3 py-2 text-left">用户</th>
+              <th class="px-3 py-2 text-left">状态</th>
+              <th class="px-3 py-2 text-right">年龄(h)</th>
+              <th class="px-3 py-2 text-left">原因</th>
+              <th class="px-3 py-2 text-left">付款 TX</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-warm-100">
+            <template x-if="stuck.length === 0">
+              <tr>
+                <td colspan="10" class="px-3 py-8 text-center text-ink-300">无卡住 escrow ✓</td>
+              </tr>
+            </template>
+            <template x-for="e in stuck" :key="e.id">
+              <tr class="hover:bg-warm-50">
+                <td class="px-3 py-2 font-mono text-ink-600" x-text="e.id?.slice(0,8)"></td>
+                <td class="px-3 py-2" x-text="e.side"></td>
+                <td class="px-3 py-2 text-right font-mono" x-text="e.amount ?? '—'"></td>
+                <td class="px-3 py-2" x-text="e.asset"></td>
+                <td class="px-3 py-2" x-text="e.chain"></td>
+                <td class="px-3 py-2 font-mono text-ink-500" x-text="(e.user_addr || '').slice(0,12) + '…'"></td>
+                <td class="px-3 py-2">
+                  <span class="px-1.5 py-0.5 rounded text-[10px] font-medium"
+                        :class="e.status === 'refunded' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'"
+                        x-text="e.status"></span>
+                </td>
+                <td class="px-3 py-2 text-right" x-text="e.age_hours"></td>
+                <td class="px-3 py-2">
+                  <span class="text-[10px]"
+                        :class="e.stuck_reason === 'refund_tx_lie' ? 'text-red-700' : 'text-yellow-700'"
+                        x-text="e.stuck_reason === 'refund_tx_lie' ? 'refund_tx=NULL (KI 63 lie)' : '超时未settle'"></span>
+                </td>
+                <td class="px-3 py-2 font-mono text-ink-400 text-[10px]" x-text="(e.paytx || '').slice(0,16) + (e.paytx ? '…' : '—')"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="text-center text-[10px] text-ink-300 pt-2">
+      Phase 1A — Owner '重点中的重点'. v5 spec NWT N19.174/175/177. 后续 Phase 1B-D / Phase 2 排日.
+    </div>
+
+  </div>
+</div>
+
+<script>
+function adminControlRoom() {
+  return {
+    market: {},
+    stuck: [],
+    lastRefresh: null,
+    lastRefreshRel: '',
+    autoRefresh: true,
+    _timer: null,
+
+    async loadAll() {
+      try {
+        const r = await fetch('/api/admin/overview');
+        if (!r.ok) {
+          console.error('[admin] /api/admin/overview HTTP', r.status);
+          return;
+        }
+        const data = await r.json();
+        if (!data.ok) {
+          console.error('[admin] /api/admin/overview error', data.error);
+          return;
+        }
+        this.market = data.market || {};
+        this.stuck = data.stuck || [];
+        this.lastRefresh = Date.now();
+        this._updateRel();
+      } catch (e) {
+        console.error('[admin] load fail', e);
+      }
+    },
+
+    _updateRel() {
+      if (!this.lastRefresh) return;
+      const sec = Math.floor((Date.now() - this.lastRefresh) / 1000);
+      this.lastRefreshRel = sec < 5 ? '刚刚' : sec < 60 ? `${sec}s 前` : `${Math.floor(sec/60)}m 前`;
+    },
+
+    toggleAutoRefresh() {
+      if (this._timer) { clearInterval(this._timer); this._timer = null; }
+      if (this.autoRefresh) {
+        this._timer = setInterval(() => { this.loadAll(); this._updateRel(); }, 30000);
+      }
+    },
+
+    init() {
+      this.toggleAutoRefresh();
+      // tick rel time every 5s without full refresh
+      setInterval(() => this._updateRel(), 5000);
+    },
+  };
+}
+</script>
+
+<%~ include('partials/page-close', it) %>
