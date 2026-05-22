@@ -257,8 +257,118 @@
       </div>
     </section>
 
+    <!-- ═══ HISTORY PANEL (KI-64 1B.4 — pagination + filter + search + sort) ═══ -->
+    <section class="bg-white rounded-lg shadow-sm border border-warm-200">
+      <div class="px-5 py-3 border-b border-warm-200 flex items-center justify-between flex-wrap gap-2">
+        <div class="flex items-center gap-2">
+          <span class="text-violet-600">📋</span>
+          <h2 class="text-sm font-semibold text-ink-700">历史单子</h2>
+          <span class="text-[10px] text-ink-400">
+            <span x-text="historyTotal"></span> 条 / 第 <span x-text="historyPage"></span>/<span x-text="historyTotalPages || 1"></span> 页
+          </span>
+        </div>
+        <div class="flex items-center gap-2 text-xs flex-wrap">
+          <select x-model="historyFilters.range" @change="loadHistory(1)" class="px-2 py-1 border border-warm-300 rounded text-ink-600">
+            <option value="24h">最近 24h</option>
+            <option value="7d">最近 7d</option>
+            <option value="30d">最近 30d</option>
+            <option value="all">全部</option>
+          </select>
+          <select x-model="historyFilters.status" @change="loadHistory(1)" class="px-2 py-1 border border-warm-300 rounded text-ink-600">
+            <option value="all">全部状态</option>
+            <option value="completed">完成</option>
+            <option value="cancelled">取消</option>
+            <option value="disputed">争议</option>
+            <option value="expired">过期</option>
+            <option value="open">活跃</option>
+          </select>
+          <select x-model="historyFilters.scope" @change="loadHistory(1)" class="px-2 py-1 border border-warm-300 rounded text-ink-600">
+            <option value="all">全部 scope</option>
+            <option value="exchange">Exchange</option>
+            <option value="prediction">Prediction (待)</option>
+          </select>
+          <input x-model="historyFilters.search" @keydown.enter="loadHistory(1)" placeholder="搜索 ID / TX / 地址"
+                 class="px-2 py-1 border border-warm-300 rounded text-ink-600 w-44">
+          <button @click="loadHistory(1)" class="px-2 py-1 bg-brand-500 text-white rounded hover:bg-brand-600">搜</button>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead class="bg-warm-50 text-ink-500">
+            <tr>
+              <th class="px-3 py-2 text-left cursor-pointer hover:bg-warm-100" @click="sortBy('updated_at')">
+                时间 <span x-show="historyFilters.sort === 'updated_at'" x-text="historyFilters.dir === 'desc' ? '↓' : '↑'"></span>
+              </th>
+              <th class="px-3 py-2 text-left">ID</th>
+              <th class="px-3 py-2 text-left">Scope</th>
+              <th class="px-3 py-2 text-left">方向</th>
+              <th class="px-3 py-2 text-right cursor-pointer hover:bg-warm-100" @click="sortBy('give_amount')">
+                给 <span x-show="historyFilters.sort === 'give_amount'" x-text="historyFilters.dir === 'desc' ? '↓' : '↑'"></span>
+              </th>
+              <th class="px-3 py-2 text-right">收</th>
+              <th class="px-3 py-2 text-left cursor-pointer hover:bg-warm-100" @click="sortBy('protocol_status')">
+                状态 <span x-show="historyFilters.sort === 'protocol_status'" x-text="historyFilters.dir === 'desc' ? '↓' : '↑'"></span>
+              </th>
+              <th class="px-3 py-2 text-left">Source</th>
+              <th class="px-3 py-2 text-left">Settle TX</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-warm-100">
+            <template x-if="history.length === 0 && !historyLoading">
+              <tr>
+                <td colspan="9" class="px-3 py-8 text-center text-ink-300">
+                  尚无历史 (当前 filter / 范围内). 试调整 filter OR 时间范围.
+                </td>
+              </tr>
+            </template>
+            <template x-if="historyLoading">
+              <tr><td colspan="9" class="px-3 py-4 text-center text-ink-400">加载中...</td></tr>
+            </template>
+            <template x-for="h in history" :key="h.id">
+              <tr class="hover:bg-warm-50">
+                <td class="px-3 py-2 text-ink-500" :title="'UTC: ' + h.updated_at" x-text="formatLocalTime(h.updated_at)"></td>
+                <td class="px-3 py-2 font-mono text-ink-600" x-text="h.id?.slice(0,8)"></td>
+                <td class="px-3 py-2">
+                  <span class="px-1.5 py-0.5 rounded text-[10px] bg-blue-100 text-blue-700" x-text="h.scope"></span>
+                </td>
+                <td class="px-3 py-2" x-text="h.side"></td>
+                <td class="px-3 py-2 text-right font-mono" x-text="h.give.amount + ' ' + h.give.asset"></td>
+                <td class="px-3 py-2 text-right font-mono" x-text="h.want.amount + ' ' + h.want.asset"></td>
+                <td class="px-3 py-2">
+                  <span class="px-1.5 py-0.5 rounded text-[10px] font-medium"
+                        :class="statusBadgeClass(h.status)"
+                        x-text="h.status"></span>
+                </td>
+                <td class="px-3 py-2 text-[10px] text-ink-500" x-text="h.source || '—'"></td>
+                <td class="px-3 py-2 font-mono text-ink-400 text-[10px]" x-text="h.settle_tx ? h.settle_tx.slice(0,12) + '…' : '—'"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+        <!-- Pagination -->
+        <div class="px-5 py-3 border-t border-warm-100 flex items-center justify-between text-xs">
+          <div class="text-ink-500">
+            显示 <span x-text="history.length > 0 ? ((historyPage - 1) * historyLimit + 1) : 0"></span>-<span x-text="(historyPage - 1) * historyLimit + history.length"></span> 共 <span x-text="historyTotal"></span> 条
+            <span class="text-[10px] text-ink-300 ml-2">时区: 本地 UTC+7 (源 UTC)</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button @click="loadHistory(Math.max(1, historyPage - 1))" :disabled="historyPage <= 1 || historyLoading"
+                    class="px-2 py-1 border border-warm-300 rounded text-ink-600 hover:bg-warm-50 disabled:opacity-40">上一页</button>
+            <span class="font-mono"><span x-text="historyPage"></span> / <span x-text="historyTotalPages || 1"></span></span>
+            <button @click="loadHistory(historyPage + 1)" :disabled="historyPage >= historyTotalPages || historyLoading"
+                    class="px-2 py-1 border border-warm-300 rounded text-ink-600 hover:bg-warm-50 disabled:opacity-40">下一页</button>
+            <select x-model="historyLimit" @change="loadHistory(1)" class="px-2 py-1 border border-warm-300 rounded text-ink-600">
+              <option value="20">20/页</option>
+              <option value="50">50/页</option>
+              <option value="100">100/页</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <div class="text-center text-[10px] text-ink-300 pt-2">
-      Phase 1A — Owner '重点中的重点'. v5 spec NWT N19.174/175/177. 后续 Phase 1B-D / Phase 2 排日.
+      Phase 1A + 1B v3 — Owner '重点中的重点'. v5 spec NWT N19.174/175/177/180/181. 后续 Phase 1C/1D / Phase 2 排日.
     </div>
 
   </div>
@@ -271,12 +381,30 @@ function adminControlRoom() {
     brokers: [],
     financials_total: null,
     stuck: [],
+    history: [],
+    historyTotal: 0,
+    historyPage: 1,
+    historyLimit: 50,
+    historyTotalPages: 0,
+    historyLoading: false,
+    historyFilters: {
+      range: '24h',
+      status: 'all',
+      scope: 'all',
+      search: '',
+      sort: 'updated_at',
+      dir: 'desc',
+    },
     lastRefresh: null,
     lastRefreshRel: '',
     autoRefresh: true,
     _timer: null,
 
     async loadAll() {
+      await Promise.all([this.loadOverview(), this.loadHistory(this.historyPage)]);
+    },
+
+    async loadOverview() {
       try {
         const r = await fetch('/api/admin/overview');
         if (!r.ok) {
@@ -297,6 +425,74 @@ function adminControlRoom() {
       } catch (e) {
         console.error('[admin] load fail', e);
       }
+    },
+
+    async loadHistory(page) {
+      this.historyLoading = true;
+      try {
+        const params = new URLSearchParams({
+          range: this.historyFilters.range,
+          status: this.historyFilters.status,
+          scope: this.historyFilters.scope,
+          search: this.historyFilters.search,
+          sort: this.historyFilters.sort,
+          dir: this.historyFilters.dir,
+          page: String(page || 1),
+          limit: String(this.historyLimit),
+        });
+        const r = await fetch('/api/admin/history?' + params);
+        if (!r.ok) { console.error('[admin] /api/admin/history HTTP', r.status); return; }
+        const data = await r.json();
+        if (!data.ok) { console.error('[admin] /api/admin/history error', data.error); return; }
+        this.history = data.items || [];
+        this.historyTotal = data.total || 0;
+        this.historyTotalPages = data.total_pages || 0;
+        this.historyPage = data.page || 1;
+      } catch (e) {
+        console.error('[admin] history load fail', e);
+      } finally {
+        this.historyLoading = false;
+      }
+    },
+
+    sortBy(field) {
+      if (this.historyFilters.sort === field) {
+        this.historyFilters.dir = this.historyFilters.dir === 'desc' ? 'asc' : 'desc';
+      } else {
+        this.historyFilters.sort = field;
+        this.historyFilters.dir = 'desc';
+      }
+      this.loadHistory(1);
+    },
+
+    formatLocalTime(utcStr) {
+      if (!utcStr) return '—';
+      try {
+        let iso = utcStr;
+        if (!iso.includes('T')) iso = iso.replace(' ', 'T') + 'Z';
+        const d = new Date(iso);
+        if (isNaN(d.getTime())) return utcStr;
+        // UTC+7 Bangkok
+        const local = new Date(d.getTime() + 7 * 60 * 60 * 1000);
+        const Y = local.getUTCFullYear();
+        const M = String(local.getUTCMonth() + 1).padStart(2, '0');
+        const D = String(local.getUTCDate()).padStart(2, '0');
+        const h = String(local.getUTCHours()).padStart(2, '0');
+        const m = String(local.getUTCMinutes()).padStart(2, '0');
+        return `${M}-${D} ${h}:${m}`;
+      } catch { return utcStr; }
+    },
+
+    statusBadgeClass(status) {
+      const map = {
+        completed: 'bg-green-100 text-green-700',
+        cancelled: 'bg-gray-100 text-gray-700',
+        disputed: 'bg-red-100 text-red-700',
+        expired: 'bg-yellow-100 text-yellow-700',
+        open: 'bg-blue-100 text-blue-700',
+        matched: 'bg-indigo-100 text-indigo-700',
+      };
+      return map[status] || 'bg-warm-100 text-ink-500';
     },
 
     _updateRel() {

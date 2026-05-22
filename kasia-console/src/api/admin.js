@@ -281,4 +281,96 @@ export async function registerAdminRoutes(fastify) {
       return reply.code(500).send({ error: err.message });
     }
   });
+
+  // KI 64 Phase 1B v3 sub 1B.4 — admin Control Room history with pagination + filter + search + sort
+  // Separate endpoint (not in /overview) — large dataset, query-driven,独立 page state.
+  fastify.get('/api/admin/history', async (request, reply) => {
+    try {
+      const q = request.query || {};
+      const range = String(q.range || '24h');  // 24h / 7d / 30d / all
+      const search = String(q.search || '').trim();
+      const sortBy = String(q.sort || 'updated_at');  // updated_at / give_amount / status
+      const sortDir = String(q.dir || 'desc').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+      const scope = String(q.scope || 'all');  // all / exchange / prediction
+      const status = String(q.status || 'all');  // all / completed / cancelled / disputed / expired
+      const page = Math.max(1, parseInt(q.page, 10) || 1);
+      const limit = Math.min(200, Math.max(10, parseInt(q.limit, 10) || 50));
+      const offset = (page - 1) * limit;
+
+      // SQL whitelist sort columns (防 SQL injection via sortBy param)
+      const SORT_WHITELIST = new Set(['updated_at', 'created_at', 'give_amount', 'want_amount', 'protocol_status']);
+      const safeSortBy = SORT_WHITELIST.has(sortBy) ? sortBy : 'updated_at';
+
+      // Date range filter
+      const rangeSql = (() => {
+        switch (range) {
+          case '7d': return `AND updated_at > datetime('now', '-7 days')`;
+          case '30d': return `AND updated_at > datetime('now', '-30 days')`;
+          case 'all': return ``;
+          case '24h':
+          default: return `AND updated_at > datetime('now', '-1 day')`;
+        }
+      })();
+
+      // Status filter
+      const statusSql = status === 'all' ? '' : `AND protocol_status=@status`;
+
+      // Search filter (TX prefix / user prefix / offer_id prefix)
+      let searchSql = '';
+      const params = { limit, offset, status };
+      if (search) {
+        searchSql = `AND (id LIKE @search OR maker LIKE @search OR taker LIKE @search OR broadcast_tx_id LIKE @search OR settle_tx LIKE @search)`;
+        params.search = `${search}%`;
+      }
+
+      // Note: scope filter ('exchange' vs 'prediction') currently only exchange_offers source.
+      // prediction history待 Bettor B2 mainnet merge + pool_markets ingest. Phase 1B.4 v1 仅 exchange.
+      const scopeNote = scope === 'prediction' ? `AND 0=1` : ''; // prediction returns 0 row
+
+      const whereClause = `WHERE 1=1 ${rangeSql} ${statusSql} ${searchSql} ${scopeNote}`;
+
+      // Total count
+      const totalRow = sqlite.prepare(`SELECT COUNT(*) AS total FROM exchange_offers ${whereClause}`).get(params);
+      const total = totalRow?.total || 0;
+
+      // Paged rows
+      const rows = sqlite.prepare(`
+        SELECT id, maker, taker, side, market_key, give_asset, give_amount, want_asset, want_amount,
+               protocol_status, broadcast_tx_id, settle_tx, created_at, updated_at,
+               json_extract(metadata, '$.source') AS source
+        FROM exchange_offers
+        ${whereClause}
+        ORDER BY ${safeSortBy} ${sortDir}
+        LIMIT @limit OFFSET @offset
+      `).all(params);
+
+      return reply.send({
+        ok: true,
+        ts: new Date().toISOString(),
+        page,
+        limit,
+        total,
+        total_pages: Math.ceil(total / limit),
+        filters: { range, search, sort: safeSortBy, dir: sortDir, scope, status },
+        items: rows.map(r => ({
+          id: r.id,
+          scope: 'exchange',  // prediction待 mainnet merge
+          maker: r.maker,
+          taker: r.taker,
+          side: r.side,
+          market_key: r.market_key,
+          give: { asset: r.give_asset, amount: r.give_amount },
+          want: { asset: r.want_asset, amount: r.want_amount },
+          status: r.protocol_status,
+          broadcast_tx: r.broadcast_tx_id,
+          settle_tx: r.settle_tx,
+          source: r.source,
+          created_at: r.created_at,
+          updated_at: r.updated_at,
+        })),
+      });
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
 }
