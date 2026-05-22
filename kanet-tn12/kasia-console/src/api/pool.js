@@ -232,6 +232,13 @@ export async function registerPoolRoutes(fastify) {
     // Bug 8: minimum bettor stake — a tiny stake → tiny winner-payout output → KIP-9 storage mass overflow.
     if (stakeAmount < 50_000_000) return reply.code(400).send({ ok: false, error: 'stake_kas must be >= 0.5 KAS (v0.5 minimum — smaller stakes produce a settle TX exceeding Kaspa storage mass cap)' });
 
+    // PoolSpine.sil L13 v0.5 hard rule: 50 bettors max per market. Checked here — before
+    // transferAndConfirm locks stake on-chain — so a rejected 51st bettor never strands funds.
+    const bettorCount = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(marketId).c;
+    if (bettorCount >= 50) {
+      return reply.code(409).send({ ok: false, error: 'market full — 50 bettors max per market (v0.5 scope, PoolSpine.sil L13)' });
+    }
+
     // Compute side P2SH
     const oraclePks = [market.oracle1_pk, market.oracle2_pk, market.oracle3_pk];
     const spineP2shHash = createHash('sha256').update(market.spine_p2sh).digest('hex');  // placeholder, production uses actual P2SH script hash
