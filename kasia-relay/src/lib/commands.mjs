@@ -31,6 +31,8 @@ export const COMMAND_TYPES = Object.freeze({
   PREDICTION_REFUND_TX: 'prediction_refund_tx',
   // B2 v0.5 Sub 2d Phase 2c — pool settle TX submit (= multi-input spine + N sides).
   POOL_SETTLE_TX: 'pool_settle_tx',
+  // B2 v0.5 Phase 3 bug 7 fix — confirm transfer UTXO landed in accepted set.
+  CHECK_UTXO_LANDED: 'check_utxo_landed',
 });
 
 export const COMMAND_TYPE_SET = new Set(Object.values(COMMAND_TYPES));
@@ -57,6 +59,7 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.PREDICTION_SETTLE_TX]: ['p2sh_address', 'redeem_script_hex', 'required_input_outpoints', 'outputs', 'sigs_by_input', 'winner'],
   [COMMAND_TYPES.PREDICTION_REFUND_TX]: ['p2sh_address', 'redeem_script_hex', 'branch'],
   [COMMAND_TYPES.POOL_SETTLE_TX]: ['spine_p2sh_address', 'side_p2sh_addresses', 'spine_redeem_script_hex', 'side_redeem_script_hexes', 'required_input_outpoints', 'outputs', 'spine_sigs_by_input', 'spine_input_count', 'winner'],
+  [COMMAND_TYPES.CHECK_UTXO_LANDED]: ['address', 'txid'],
 });
 
 // R38 (Z23 sediment): typeof spec per field. Bug-Z23 真根因 — broker enqueue amount: number,
@@ -85,6 +88,7 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.PREDICTION_SETTLE_TX]: { p2sh_address: 'string', redeem_script_hex: 'string', required_input_outpoints: 'array', outputs: 'array', sigs_by_input: 'array', winner: 'number' },
   [COMMAND_TYPES.PREDICTION_REFUND_TX]: { p2sh_address: 'string', redeem_script_hex: 'string', branch: 'number' },
   [COMMAND_TYPES.POOL_SETTLE_TX]: { spine_p2sh_address: 'string', side_p2sh_addresses: 'array', spine_redeem_script_hex: 'string', side_redeem_script_hexes: 'array', required_input_outpoints: 'array', outputs: 'array', spine_sigs_by_input: 'array', spine_input_count: 'number', winner: 'number' },
+  [COMMAND_TYPES.CHECK_UTXO_LANDED]: { address: 'string', txid: 'string' },
 });
 
 export function validateCommandPayload(cmd) {

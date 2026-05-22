@@ -299,3 +299,46 @@ export async function getRelayRpcState(relayNodeId) {
   }
 }
 
+/**
+ * B2 v0.5 Phase 3 bug 7 fix — transfer + confirm the UTXO landed in the accepted UTXO set.
+ *
+ * "NO TX NO STATE CHANGE": a TX can be mempool-accepted (transfer returns a txId) yet lose
+ * a double-spend race (is_accepted=false) → no UTXO. Callers MUST confirm before recording
+ * success / advancing protocol state. This helper does transfer → poll check_utxo_landed.
+ *
+ * Cross-line shared (= pool.js + broker exchange-machine.js + 1V1 trading.js should adopt).
+ *
+ * @param {string} relayNodeId - the relay performing the transfer
+ * @param {string} target - destination address (P2SH or P2PK)
+ * @param {string} amount - KAS amount string
+ * @param {object} [opts]
+ * @param {number} [opts.pollIntervalMs=3000]
+ * @param {number} [opts.maxWaitMs=30000]
+ * @returns {Promise<{ ok: true, txId: string, landed: true }>} on confirmed landing
+ * @throws if transfer fails OR the UTXO never lands within maxWaitMs
+ */
+export async function transferAndConfirm(relayNodeId, target, amount, opts = {}) {
+  const pollIntervalMs = opts.pollIntervalMs || 3000;
+  const maxWaitMs = opts.maxWaitMs || 30000;
+
+  const result = await sendCommandAsync(relayNodeId, { type: 'transfer', target, amount });
+  if (!result) throw new Error('relay not running');
+  if (result.error) throw new Error(`transfer failed: ${result.error}`);
+  const txId = result.txId;
+  if (!txId) throw new Error('transfer returned no txId');
+
+  // Poll until the UTXO from this txId appears at the target (= accepted UTXO set).
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, pollIntervalMs));
+    let check;
+    try {
+      check = await sendCommandAsync(relayNodeId, { type: 'check_utxo_landed', address: target, txid: txId }, 10000);
+    } catch (e) {
+      continue;  // transient RPC error — keep polling until deadline
+    }
+    if (check?.landed) return { ok: true, txId, landed: true };
+  }
+  throw new Error(`transfer ${txId} mempool-accepted but UTXO did not land at ${target} within ${maxWaitMs}ms (= likely lost a double-spend race, is_accepted=false)`);
+}
+
