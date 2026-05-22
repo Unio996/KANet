@@ -1,6 +1,6 @@
 // multichain_rebalance_integration — Phase 6 #4 Sub-1 KI 51 真 integration test
 //
-// Verifies broker-multichain-rebalance._runRebalanceTick:
+// Verifies marketmaker-multichain-rebalance._runRebalanceTick (KI 65 A.3.3 wave 3 rename, A.3.3.1 test path fix):
 //   T1: DRY_RUN=1 → throttle_log insert (deficit chain), NO chain_event emit
 //   T2: throttle 1h prevent re-fire same deficit chain
 //   T3: no deficits → no throttle inserts (early return)
@@ -17,7 +17,7 @@ export default {
 
   async run() {
     const failures = [];
-    const svc = await import('../../../src/services/broker-multichain-rebalance.js');
+    const svc = await import('../../../src/services/marketmaker-multichain-rebalance.js');
     const { setConfig, getConfig } = await import('../../../src/data/settings/configs.js');
     const db = new Database(DB_PATH);
 

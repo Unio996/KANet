@@ -1,6 +1,6 @@
 // kas_refill_integration — Phase 6 #4 Sub-3 KI 52 真 integration (mutation mindset baked from start)
 //
-// Verifies broker-kas-refill._runRefillTick:
+// Verifies marketmaker-kas-refill._runRefillTick (KI 65 A.3.3 wave 3 rename, A.3.3.1 test path fix):
 //   T1: K-pool >= floor → tick NOT act (no withdraw, no throttle)
 //   T2: K-pool < floor + DRY_RUN=1 → log + throttle insert, no chain_event emit
 //   T3: throttle 1h prevent re-fire same cex
@@ -18,7 +18,7 @@ export default {
 
   async run() {
     const failures = [];
-    const svc = await import('../../../src/services/broker-kas-refill.js');
+    const svc = await import('../../../src/services/marketmaker-kas-refill.js');
     const { setConfig, getConfig } = await import('../../../src/data/settings/configs.js');
     const db = new Database(DB_PATH);
 
