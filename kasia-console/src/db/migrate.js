@@ -4378,5 +4378,36 @@ export function runMigrations() {
     }
   }
 
+  // v140: KI 65 broker经济生态 Block A.5 简化 close (Owner 5/22 13:54 钦定 — abandon broker-v4)
+  //   Owner insight: SS escrow Phase 4a (1-2 月后) 时 broker 自然 0 EVM, 不需要立即 broker-v4 重写.
+  //   简化路径: Trader-A/B 兼 broker + marketmaker. MarketMaker-A relay 保留作 future N-node template.
+  //   exchange_accounts rollback to Trader-B (= primary marketmaker via ORDER BY created_at ASC).
+  //   Idempotent: re-run safe.
+  {
+    const traderB = sqlite.prepare("SELECT id FROM relay_nodes WHERE name = 'Trader-B'").get();
+    const traderA = sqlite.prepare("SELECT id FROM relay_nodes WHERE name = 'Trader-A'").get();
+    if (traderB) {
+      // Step 1: Trader-B + Trader-A roles 兼 broker + marketmaker.
+      const upd1 = sqlite.prepare(`UPDATE relay_nodes SET roles_json = '["broker","marketmaker"]' WHERE name IN ('Trader-A','Trader-B') AND roles_json != '["broker","marketmaker"]'`).run();
+      if (upd1.changes > 0) {
+        console.log(`[migrate] v140: Trader-A/B roles_json 兼 broker+marketmaker (${upd1.changes} rows updated).`);
+      }
+      // Step 2: rollback v139 CEX backfill — exchange_accounts.relay_node_id → Trader-B.
+      // getMarketMakerRelay() ORDER BY created_at ASC LIMIT 1 picks Trader-B (4/21) over MarketMaker-A (5/22).
+      // Runtime broker filter `WHERE relay_node_id = Trader-B` must find CEX rows.
+      const upd2 = sqlite.prepare(`UPDATE exchange_accounts SET relay_node_id = ? WHERE relay_node_id != ?`).run(traderB.id, traderB.id);
+      if (upd2.changes > 0) {
+        console.log(`[migrate] v140: rollback exchange_accounts.relay_node_id → Trader-B (${upd2.changes} rows reattributed from MarketMaker-A or NULL).`);
+      }
+      // Invariant: every exchange_accounts row → Trader-B.
+      const wrongCount = sqlite.prepare(`SELECT COUNT(*) c FROM exchange_accounts WHERE relay_node_id != ? OR relay_node_id IS NULL`).get(traderB.id).c;
+      if (wrongCount > 0) {
+        console.warn(`[migrate] v140: invariant: ${wrongCount} exchange_accounts row(s) not attributed to Trader-B. Manual review.`);
+      }
+    } else {
+      console.log('[migrate] v140: Trader-B not found — skip simplified consolidation, will re-fire on next boot.');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
