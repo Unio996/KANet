@@ -20,6 +20,7 @@ import { sqlite } from '../db/client.js';
 import { decrypt } from './crypto.js';
 import { EXCHANGE_REGISTRY } from '../lib/exchange-registry.js';
 import { placeOrder, getBalance, getOrder } from './exchange-orders.js';
+import { getMarketMakerRelayIdOrThrow } from './broker-config-resolver.js';
 
 function sha512Hex(data) { return crypto.createHash('sha512').update(data).digest('hex'); }
 function hmac512Hex(secret, data) { return crypto.createHmac('sha512', secret).update(data).digest('hex'); }
@@ -43,8 +44,10 @@ function normalizeChain(chain) {
  * @returns {object|null} { exchange, apiKey, apiSecret, extra, baseUrl, def }
  */
 export function getCexAccount(cex) {
-  const row = sqlite.prepare('SELECT * FROM exchange_accounts WHERE exchange = ? LIMIT 1').get(cex)
-    || sqlite.prepare('SELECT * FROM exchange_accounts WHERE is_default = 1 LIMIT 1').get();
+  // KI 65 A.5.2: per-relay ownership filter (MarketMaker 库存层). Fallback unfiltered for pre-v139 boot path.
+  const mmaId = getMarketMakerRelayIdOrThrow();
+  const row = sqlite.prepare('SELECT * FROM exchange_accounts WHERE exchange = ? AND relay_node_id = ? LIMIT 1').get(cex, mmaId)
+    || sqlite.prepare('SELECT * FROM exchange_accounts WHERE relay_node_id = ? AND is_default = 1 LIMIT 1').get(mmaId);
   if (!row) return null;
   try {
     const apiKey = row.api_key_encrypted ? decrypt(row.api_key_encrypted) : null;
@@ -108,6 +111,7 @@ export async function withdrawCex({ cex = 'gateio', asset, amount, toAddr, chain
   if (!gateChain) return { ok: false, error: 'chain 必填' };
 
   const path = '/withdrawals';
+  // lint-allow-chain-amount-precision: Gate.io v4 withdrawals API accepts decimal-string, not Kaspa sompi (CEX-side rounding upstream).
   const body = JSON.stringify({
     currency: String(asset).toUpperCase(),
     address: String(toAddr),

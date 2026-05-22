@@ -4345,5 +4345,38 @@ export function runMigrations() {
     }
   }
 
+  // v139: KI 65 broker经济生态 Block A.5.2 — exchange_accounts relay_node_id (per-relay ownership)
+  //   NWT N19.216 + Owner 5/22 11:18 钦定 mining pool model: 单节点 = 1 MarketMaker + N broker.
+  //   exchange_accounts ADD COLUMN relay_node_id TEXT → MarketMaker 持库存层 per-relay attribution.
+  //   Backfill: NULL rows → MarketMaker-A id (depends on spawn-marketmaker-a.mjs first run; if MarketMaker
+  //   not yet spawned 则 skip backfill — safe re-run on next boot).
+  //   Admin /api/exchange-accounts list 保 org-wide (= 不加 filter). Runtime 4 services filter per-relay.
+  {
+    const tableInfo = sqlite.prepare("SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name='exchange_accounts'").get();
+    if (tableInfo.cnt) {
+      const cols = sqlite.prepare("PRAGMA table_info(exchange_accounts)").all().map(c => c.name);
+      if (!cols.includes('relay_node_id')) {
+        sqlite.exec(`ALTER TABLE exchange_accounts ADD COLUMN relay_node_id TEXT`);
+        console.log("[migrate] v139: exchange_accounts 加 relay_node_id TEXT (KI 65 A.5.2 per-relay ownership, MarketMaker 库存层).");
+      }
+      // Backfill OUTSIDE column-exist guard (A.1.2 sediment: KI-12 silent skip 防御).
+      const mmaRow = sqlite.prepare(`
+        SELECT rn.id FROM relay_nodes rn
+        WHERE EXISTS (SELECT 1 FROM json_each(rn.roles_json) je WHERE je.value = 'marketmaker')
+        ORDER BY rn.created_at ASC LIMIT 1
+      `).get();
+      if (mmaRow) {
+        const nullCount = sqlite.prepare("SELECT COUNT(*) c FROM exchange_accounts WHERE relay_node_id IS NULL").get().c;
+        if (nullCount > 0) {
+          sqlite.prepare(`UPDATE exchange_accounts SET relay_node_id = ? WHERE relay_node_id IS NULL`).run(mmaRow.id);
+          const remainingNull = sqlite.prepare("SELECT COUNT(*) c FROM exchange_accounts WHERE relay_node_id IS NULL").get().c;
+          console.log(`[migrate] v139: backfilled ${nullCount - remainingNull} exchange_accounts.relay_node_id → MarketMaker (${mmaRow.id}); ${remainingNull} still NULL.`);
+        }
+      } else {
+        console.log('[migrate] v139: no MarketMaker relay found (roles_json includes "marketmaker") — backfill skipped, will re-fire on next boot after spawn.');
+      }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
