@@ -237,10 +237,13 @@ export async function registerAdminRoutes(fastify) {
         };
       });
 
-      // 1B.3 Panel B 财务 KPI cross-product (per broker — 单 broker era 共享 hedge data)
-      const financials = brokerRows.map(b => ({
-        id: b.id,
-        name: b.name,
+      // 1B.3.1 hotfix (NWT N19.186): aggregate single row 'broker 合计 24h' instead of per-broker array.
+      // Bug: hedge_24h / completed stats are GLOBAL (chain_events 无 broker_relay_id col), 之前 map per broker
+      // duplicated same value to both Trader-A + Trader-B → misleading admin.
+      // Fix: single financials_total object. Per-broker attribution待 v138 chain_events.broker_relay_id col (排日).
+      const financials_total = {
+        scope: 'all_brokers_aggregate',
+        broker_count: brokerRows.length,
         fee_exchange_24h: null,  // exchange offer fee not yet logged in DB — 排日 加 broker_fee_kas col
         fee_prediction_24h: null,  // prediction broker not yet exists — N/A til Bettor B2 mainnet merge
         hedge_24h_kas_volume: Number(hedge24hKasVolume.toFixed(4)),
@@ -250,14 +253,15 @@ export async function registerAdminRoutes(fastify) {
         completed_kas_volume_24h: Number(completedStats.kas_volume.toFixed(4)),
         completed_usdt_volume_24h: Number(completedStats.usdt_volume.toFixed(4)),
         net_pnl_24h: null,  // null until fee tracking lands — propose Phase 1B follow-up 排日
-      }));
+        note: 'per-broker attribution待 chain_events.broker_relay_id col (v138排日)',
+      };
 
       return reply.send({
         ok: true,
         ts: new Date().toISOString(),
         market,
         brokers,
-        financials,
+        financials_total,
         stuck: stuck.map(e => ({
           id: e.id,
           side: e.side,
