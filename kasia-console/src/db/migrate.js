@@ -4307,5 +4307,29 @@ export function runMigrations() {
     }
   }
 
+  // v138: KI 65 broker经济生态 Block A.1 — relay_nodes roles_json + fee_rate_override
+  //   NWT N19.196/197/198 + J2 #669/670 + Owner final 钦定 (5/22 09:48).
+  //   roles_json TEXT (= JSON array of roles: 'broker' / 'marketmaker' / 'oracle' / 'user', UI category + RBAC future)
+  //   fee_rate_override REAL (NULL = use system default 0.005, populated = per-broker fee curve override for竞争)
+  //   Backfill: is_dex_broker=1 → roles=['broker'], is_oracle=1 → roles=['oracle'], both → ['broker','oracle']
+  {
+    const tableInfo = sqlite.prepare("SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name='relay_nodes'").get();
+    if (tableInfo.cnt) {
+      const cols = sqlite.prepare("PRAGMA table_info(relay_nodes)").all().map(c => c.name);
+      if (!cols.includes('roles_json')) {
+        sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN roles_json TEXT`);
+        console.log("[migrate] v138: relay_nodes 加 roles_json TEXT (broker经济生态 Block A.1 角色拆分 — 'broker'/'marketmaker'/'oracle'/'user').");
+        sqlite.exec(`UPDATE relay_nodes SET roles_json='["broker"]' WHERE is_dex_broker=1 AND is_oracle=0 AND roles_json IS NULL`);
+        sqlite.exec(`UPDATE relay_nodes SET roles_json='["oracle"]' WHERE is_oracle=1 AND is_dex_broker=0 AND roles_json IS NULL`);
+        sqlite.exec(`UPDATE relay_nodes SET roles_json='["broker","oracle"]' WHERE is_dex_broker=1 AND is_oracle=1 AND roles_json IS NULL`);
+        console.log("[migrate] v138: relay_nodes roles_json backfilled per is_dex_broker / is_oracle.");
+      }
+      if (!cols.includes('fee_rate_override')) {
+        sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN fee_rate_override REAL`);
+        console.log("[migrate] v138: relay_nodes 加 fee_rate_override REAL (per-broker fee% override, NULL = use system default 0.005).");
+      }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
