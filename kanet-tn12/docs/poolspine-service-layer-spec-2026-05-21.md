@@ -173,6 +173,22 @@ CREATE TABLE pool_bettor_sides (
 
 If Phase 2a Path A testnet e2e fails (= 50-bettor TX size limit / sig issue / etc) → fix 3 bugs + ship Path B fallback. Otherwise Phase 2b ships post-v0.5 MVP.
 
+## TODO Phase 2b — settlement gaps (real-chain confirmed in Part A Scenario 4)
+
+- **forfeit_1 entry** — 2-of-3 majority with 1 silent oracle past timeout: decideConsensus
+  returns `consensus` but `unlockPoolSpineP2SH` is unanimous-only ("forfeit_1 deferred").
+  PoolSpine.sil entry 1 settle_majority_forfeit_1 + the 50/25/25 forfeit split must wire through.
+- **disagreement-timeout / refund** — a non-unanimous, non-2-of-3-majority vote split
+  (e.g. 2 YES + 1 NO) → decideConsensus returns `pending` → market stuck at `verifying`
+  permanently with no resolution path. Stakes locked indefinitely. Need: after a timeout,
+  route a disagreement market to refund_all OR a Phase 5 challenge mechanism.
+  Witnessed real-chain in Scenario 4 (market ext-pool-1779445342903-bgk4s, 6 min verifying).
+- **doomed-market settler skip** — markets that can never settle (storage mass over cap,
+  needs_larger_pot) keep retrying a rejected submit every tick, slowing healthy markets.
+  handleCollectingSigs / dispatchPhase2 should skip known-doomed markets.
+- **relay UTXO compaction** — testnet relays fragment their UTXO set over repeated cycles;
+  transfers eventually hit "Storage mass exceeds maximum". Need a self-consolidation path.
+
 ## TODO Phase 2 (post-v0.5 MVP)
 
 - Path B PoolSide.claim_winner 3 bug fixes (= above)
