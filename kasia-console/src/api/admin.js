@@ -148,7 +148,15 @@ export async function registerAdminRoutes(fastify) {
           .filter(t => t.relay_node_id === b.id)
           .map(t => ({ chain: t.chain, asset: t.asset, amount: Number((t.balance_human || 0).toFixed(4)) }));
 
-        const kasBalance = balances.find(x => x.chain === 'kaspa' && x.asset === 'KAS')?.amount ?? null;
+        // 1B.2.1 Fix 2 (NWT N19.184 P0): KAS pool sum across ALL chains by asset='KAS'.
+        // Bug: Trader-B KAS lives on CEX legs (cex:bybit / cex:gateio / cex:mexc), not chain='kaspa'.
+        // Filter chain='kaspa' missed 131,051 KAS, returned null.
+        // Fix: aggregate all asset='KAS' across chains.
+        const kasBalance = balances
+          .filter(x => x.asset === 'KAS')
+          .reduce((sum, x) => sum + (x.amount || 0), 0);
+        const kas_pool = kasBalance > 0 ? Number(kasBalance.toFixed(4)) : null;
+
         const usdtByChain = balances.filter(x => x.asset === 'USDT').reduce((acc, x) => { acc[x.chain] = x.amount; return acc; }, {});
 
         // Last activity from chain_events (any event where from_address matches broker kasia OR observed_by mentions)
@@ -161,22 +169,32 @@ export async function registerAdminRoutes(fastify) {
         const lastActivityTs = lastActivityRow?.last_ts || null;
         let ageMin = null;
         if (lastActivityTs) {
-          ageMin = Math.floor((Date.now() - new Date(lastActivityTs.replace(' ', 'T') + 'Z').getTime()) / 60000);
+          // 1B.2.1 Fix 1 (NWT N19.184 P0): ageMin parse safe across timestamp formats.
+          // Bug: '2026-05-21T18:35:53.559Z'.replace(' ', 'T') + 'Z' = double-Z → NaN → status='down' wrong.
+          // Fix: detect format — if already has 'T' (ISO), use as-is; if has space (SQLite), convert.
+          let isoTs = lastActivityTs;
+          if (!isoTs.includes('T')) isoTs = isoTs.replace(' ', 'T') + 'Z';
+          const parsed = new Date(isoTs);
+          if (!isNaN(parsed.getTime())) {
+            ageMin = Math.floor((Date.now() - parsed.getTime()) / 60000);
+          }
+          // else ageMin stays null → status='unknown' fallthrough
         }
 
-        // Status derive: <5min active / <60min idle / else down
+        // Status derive — explicit NaN/null guard (Fix 1 part 2)
         let status = 'unknown';
-        if (ageMin === null) status = 'unknown';
-        else if (ageMin < 5) status = 'alive';
-        else if (ageMin < 60) status = 'idle';
-        else status = 'down';
+        if (ageMin !== null && !isNaN(ageMin)) {
+          if (ageMin < 5) status = 'alive';
+          else if (ageMin < 60) status = 'idle';
+          else status = 'down';
+        }
 
         return {
           id: b.id,
           name: b.name,
           address: b.address,
           scope,
-          kas_pool: kasBalance,
+          kas_pool,
           usdt_by_chain: usdtByChain,
           dm_count_today: b.dm_count_today || 0,
           dm_cap: 200,  // Daily DM cap per relay (KI 63 sediment, fixed for now)
