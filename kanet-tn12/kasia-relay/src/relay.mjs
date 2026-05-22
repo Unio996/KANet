@@ -624,6 +624,18 @@ if (process.send) {
           return;
         }
 
+        case 'check_utxo_landed': {
+          // B2 v0.5 Phase 3 bug 7 fix — confirm a transfer's UTXO landed in the accepted UTXO set.
+          // A mempool-accepted TX can lose a double-spend race (is_accepted=false) → no UTXO.
+          const { checkUtxoLanded } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await checkUtxoLanded(cmd.address, cmd.txid, wallet.getNetworkId());
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: { ok: true, landed: r.landed } });
+          }
+          return;
+        }
+
         case 'prediction_settle_build_preimage': {
           // Phase 4a Sub 8 step 4 (Bettor r242) — maker_relay builds unsigned TX for Phase 2 DM dispatch.
           // Returns tx_obj that voters use as input to sign_input_for_settle IPC.

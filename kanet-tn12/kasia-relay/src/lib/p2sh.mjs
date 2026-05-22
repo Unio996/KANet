@@ -660,3 +660,28 @@ export async function unlockPoolSpineP2SH(args) {
     try { await rpc.disconnect(); } catch {}
   }
 }
+
+// ── 7. checkUtxoLanded (B2 v0.5 Phase 3 bug 7 fix) ──
+
+/**
+ * Check whether a transfer's UTXO actually landed at the target address in the accepted UTXO set.
+ *
+ * Bug 7: a TX can be mempool-accepted (submitTransaction returns a txId) yet lose a
+ * double-spend race → is_accepted=false → no UTXO. Callers that record success on the
+ * returned txId alone violate "NO TX NO STATE CHANGE". This confirms the UTXO is real.
+ *
+ * @param {string} address - target address (P2SH or P2PK) the transfer paid to
+ * @param {string} txid - the transfer TX id
+ * @param {string} networkId
+ * @returns {Promise<{ landed: boolean }>}
+ */
+export async function checkUtxoLanded(address, txid, networkId) {
+  const rpc = await connectRpc(networkId);
+  try {
+    const { entries } = await rpc.getUtxosByAddresses([address]);
+    const landed = (entries || []).some(e => e.outpoint?.transactionId === txid);
+    return { landed };
+  } finally {
+    try { await rpc.disconnect(); } catch {}
+  }
+}

@@ -4,7 +4,7 @@
 import { sqlite } from '../db/client.js';
 import { computeSpineP2SH, computeSideP2SH } from '../lib/pool-p2sh.mjs';
 import { buildSidesMerkleTree, getMerkleProof } from '../services/pool-merkle-builder.js';
-import { sendCommandAsync } from '../services/relay-manager.js';
+import { sendCommandAsync, transferAndConfirm } from '../services/relay-manager.js';
 import { createHash, randomUUID } from 'node:crypto';
 
 function deriveXOnlyPubkey(address) {
@@ -89,20 +89,16 @@ export async function registerPoolRoutes(fastify) {
       return reply.code(500).send({ ok: false, error: `spine SS compile fail: ${e.message}` });
     }
 
-    // Maker relay locks stake → spine P2SH
+    // Maker relay locks stake → spine P2SH.
+    // Bug 7 fix: transferAndConfirm verifies the UTXO actually landed (NO TX NO STATE CHANGE) +
+    // surfaces the real transfer error (= not a generic "failed after 3 attempts").
     let spineTxId = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        const r = await sendCommandAsync(b.maker_relay_id, { type: 'transfer', target: spineResult.p2shAddr, amount: makerStakeStr });
-        spineTxId = r?.txId || null;
-        if (spineTxId) break;
-        if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 5000));
-      } catch (err) {
-        console.log(`[pool/market/create] maker stake lock attempt ${attempt}/3 fail: ${err.message}`);
-        if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 5000));
-      }
+    try {
+      const r = await transferAndConfirm(b.maker_relay_id, spineResult.p2shAddr, makerStakeStr);
+      spineTxId = r.txId;
+    } catch (err) {
+      return reply.code(503).send({ ok: false, error: `maker stake lock failed: ${err.message} (spine_p2sh=${spineResult.p2shAddr})` });
     }
-    if (!spineTxId) return reply.code(503).send({ ok: false, error: `maker stake lock failed after 3 attempts, spine_p2sh=${spineResult.p2shAddr}` });
 
     // INSERT pool_markets row
     const marketId = 'ext-pool-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
@@ -170,19 +166,14 @@ export async function registerPoolRoutes(fastify) {
     if (existing) return reply.code(409).send({ ok: false, error: 'oracle already deposited' });
 
     const bondStr = (market.oracle_bond_amount / 1e8).toFixed(8);
+    // Bug 7 fix: transferAndConfirm verifies the bond UTXO actually landed at the spine P2SH.
     let bondTxId = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        const r = await sendCommandAsync(b.oracle_relay_id, { type: 'transfer', target: market.spine_p2sh, amount: bondStr });
-        bondTxId = r?.txId || null;
-        if (bondTxId) break;
-        if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 5000));
-      } catch (err) {
-        console.log(`[pool/oracle/deposit] attempt ${attempt}/3 fail: ${err.message}`);
-        if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 5000));
-      }
+    try {
+      const r = await transferAndConfirm(b.oracle_relay_id, market.spine_p2sh, bondStr);
+      bondTxId = r.txId;
+    } catch (err) {
+      return reply.code(503).send({ ok: false, error: `oracle bond lock failed: ${err.message}` });
     }
-    if (!bondTxId) return reply.code(503).send({ ok: false, error: 'oracle bond lock failed after 3 attempts' });
 
     // Record deposit chain_event
     const { randomUUID } = await import('node:crypto');
@@ -250,21 +241,16 @@ export async function registerPoolRoutes(fastify) {
       return reply.code(500).send({ ok: false, error: `side SS compile fail: ${e.message}` });
     }
 
-    // Lock stake to side P2SH
+    // Lock stake to side P2SH.
+    // Bug 7 fix: transferAndConfirm verifies the stake UTXO actually landed at the side P2SH.
     const stakeStr = (stakeAmount / 1e8).toFixed(8);
     let sideTxId = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        const r = await sendCommandAsync(b.bettor_relay_id, { type: 'transfer', target: sideResult.p2shAddr, amount: stakeStr });
-        sideTxId = r?.txId || null;
-        if (sideTxId) break;
-        if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 5000));
-      } catch (err) {
-        console.log(`[pool/bettor/register] attempt ${attempt}/3 fail: ${err.message}`);
-        if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 5000));
-      }
+    try {
+      const r = await transferAndConfirm(b.bettor_relay_id, sideResult.p2shAddr, stakeStr);
+      sideTxId = r.txId;
+    } catch (err) {
+      return reply.code(503).send({ ok: false, error: `bettor stake lock failed: ${err.message}` });
     }
-    if (!sideTxId) return reply.code(503).send({ ok: false, error: 'bettor stake lock failed after 3 attempts' });
 
     // Get current bettor count for merkle_index
     const merkleIndex = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(marketId).c;
