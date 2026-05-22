@@ -1,21 +1,19 @@
-// broker-kas-refill.js — Phase 6 #4 Sub-3 KI 52 (NWT N19.114 spec)
+// marketmaker-kas-refill.js — Phase 6 #4 Sub-3 KI 52 (NWT N19.114 spec)
 //
-// 1h cron OR K-pool < kas_floor: detect broker K-pool low → Gate.io withdraw KAS to broker chain pool.
+// 1h cron OR K-pool < kas_floor: detect MarketMaker K-pool low → Gate.io withdraw KAS to MarketMaker chain pool.
 // Only Gate.io supports API withdraw (Bybit/MEXC/Bitget/KuCoin 手动 per Owner 5/20 校准).
 //
 // Audit chain_event 'broker_auto_replenish_v2' source='kas_refill_cex'.
 // Throttle 1h per (cex+amount).
 // DRY_RUN=1 gate: log + skip real withdraw (R-3 spec).
 //
-// Defenses baked from start (NWT mutation mindset internalize):
-// - index.js hook (startBrokerKasRefill)
-// - DRY_RUN gate
-// - 真 integration test
+// KI 65 A.3.3 wave 3 (5/22): renamed from broker-kas-refill.js (MarketMaker role separation).
 
 import { sqlite } from '../db/client.js';
 import { getConfig } from '../data/settings/configs.js';
+import { getMarketMakerRelayIdOrThrow } from './broker-config-resolver.js';
 
-const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+// KI 65 A.3.3 (NWT N19.208): runtime helper, no module-load const.
 const TICK_INTERVAL_MS = 60 * 60_000;  // 1h cron
 const DEFAULT_KAS_FLOOR = 5000;
 const DEFAULT_REFILL_AMOUNT = 2000;
@@ -26,7 +24,7 @@ let _tickInterval = null;
 let _ticking = false;
 
 async function _getBrokerKasAddress() {
-  const r = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id=?`).get(BROKER_RELAY_ID);
+  const r = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id=?`).get(getMarketMakerRelayIdOrThrow());
   return r?.address || null;
 }
 

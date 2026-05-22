@@ -65,6 +65,20 @@ export function getAllBrokers() {
 }
 
 /**
+ * Get MarketMaker relay ID — throws if not configured.
+ * A.3.3 wave 3 (NWT N19.208): MarketMaker role files use this helper.
+ * Pre-A.5 sweep: broker also acts as MarketMaker (Trader-B has both roles).
+ *
+ * @returns {string} relay_nodes.id
+ * @throws {Error} if no MarketMaker relay registered (and no broker fallback either)
+ */
+export function getMarketMakerRelayIdOrThrow() {
+  const r = getMarketMakerRelay();
+  if (!r) throw new Error('No MarketMaker relay configured (roles_json includes "marketmaker" OR broker fallback)');
+  return r.id;
+}
+
+/**
  * Get the MarketMaker relay (separate role from broker per Block A.5 sweep).
  * For now (pre-A.5), broker + marketmaker often same relay (Trader-B has both).
  *

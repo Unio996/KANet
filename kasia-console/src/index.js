@@ -488,11 +488,13 @@ import { startStressPoolReplenish } from './services/broker-stress-pool-replenis
 startStressPoolReplenish();
 
 // Phase 6 #4 Sub-1 KI 51: broker multi-chain rebalance via Across V3 / Stargate (production cron, default chains bnb/eth/polygon/arbitrum/optimism)
-import { startMultichainRebalance } from './services/broker-multichain-rebalance.js';
+// KI 65 A.3.3 wave 3 (5/22): renamed broker-multichain-rebalance.js → marketmaker-multichain-rebalance.js (role separation MarketMaker vs broker)
+import { startMultichainRebalance } from './services/marketmaker-multichain-rebalance.js';
 startMultichainRebalance();
 
 // Phase 6 #4 Sub-3 KI 52: broker KAS pool refill from Gate.io CEX (1h cron when K-pool < floor)
-import { startBrokerKasRefill } from './services/broker-kas-refill.js';
+// KI 65 A.3.3 wave 3 (5/22): renamed broker-kas-refill.js → marketmaker-kas-refill.js
+import { startBrokerKasRefill } from './services/marketmaker-kas-refill.js';
 startBrokerKasRefill();
 
 // C2 Cross-Match Engine (J2 #519/523 / NWT N19.11/N19.17 三方共识 5/19, Owner 钦定 "C 是骨架").

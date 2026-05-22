@@ -1,13 +1,14 @@
-// broker-inventory-watcher.js — broker BSC USDC 真 auto-replenish swap (J2 #3 v1.1 自治库存)
-// 真 trigger: broker BSC USDC < MIN_RESERVE → auto swap N USDT → ~N USDC (PancakeSwap V2)
-// 真 design (Owner '丝滑 10 链' 钦定): broker 真自治, 真不 manual swap 每次 user 真买 USDC
+// marketmaker-inventory-watcher.js — MarketMaker BSC USDC 真 auto-replenish swap (J2 #3 v1.1 自治库存)
+// 真 trigger: MarketMaker BSC USDC < MIN_RESERVE → auto swap N USDT → ~N USDC (PancakeSwap V2)
+// 真 design (Owner '丝滑 10 链' 钦定): MarketMaker 真自治, 真不 manual swap 每次 user 真买 USDC
 // 真 spec gated by config flag (default off), 真 opt-in production
+//
+// KI 65 A.3.3 wave 3 (5/22): renamed from broker-inventory-watcher.js (Owner broker经济生态: MarketMaker role 拆分).
 
 import { ethers } from 'ethers';
 import { sqlite } from '../db/client.js';
 import { swapUsdtToUsdc } from './broker-swap.js';
-
-const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+import { getMarketMakerRelayIdOrThrow } from './broker-config-resolver.js';
 const BSC_RPC = 'https://bsc-dataseed1.binance.org';
 const USDC_BSC = '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d';
 const ERC20_ABI = ['function balanceOf(address) view returns (uint256)'];
@@ -45,7 +46,7 @@ async function _checkAndReplenish() {
     const cfg = await _getConfig();
     if (!cfg.enabled) return;
 
-    const wallet = sqlite.prepare(`SELECT address, privkey_encrypted FROM agent_wallets WHERE relay_node_id=? AND chain='bnb' AND is_default=1`).get(BROKER_RELAY_ID);
+    const wallet = sqlite.prepare(`SELECT address, privkey_encrypted FROM agent_wallets WHERE relay_node_id=? AND chain='bnb' AND is_default=1`).get(getMarketMakerRelayIdOrThrow());
     if (!wallet?.privkey_encrypted) return;
 
     const usdc = new ethers.Contract(USDC_BSC, ERC20_ABI, _getProvider());

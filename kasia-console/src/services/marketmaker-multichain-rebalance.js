@@ -1,15 +1,18 @@
-// broker-multichain-rebalance.js — Phase 6 #4 Sub-1 (NWT N19.114 spec)
+// marketmaker-multichain-rebalance.js — Phase 6 #4 Sub-1 (NWT N19.114 spec)
 //
-// 5min cron: snapshot broker BSC/ETH/Polygon/Arbitrum/Optimism USDT balance.
+// 5min cron: snapshot MarketMaker BSC/ETH/Polygon/Arbitrum/Optimism USDT balance.
 // If any chain < floor: find surplus chain (>= floor + min transfer) → bridge to deficit via selectAndBridge (Across V3 or Stargate).
 // Audit: chain_event 'broker_auto_replenish_v2' source='multichain_rebalance'.
 // Throttle: 1h per (deficit chain) prevent over-fire.
+//
+// KI 65 A.3.3 wave 3 (5/22): renamed from broker-multichain-rebalance.js (MarketMaker role separation).
 
 import { sqlite } from '../db/client.js';
 import { getConfig } from '../data/settings/configs.js';
 import { decrypt } from './crypto.js';
+import { getMarketMakerRelayIdOrThrow } from './broker-config-resolver.js';
 
-const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+// KI 65 A.3.3 (NWT N19.208): runtime helper, no module-load const.
 const TICK_INTERVAL_MS = 5 * 60_000;
 const CONSOLE_PORT = process.env.PORT || 3100;
 const DEFAULT_FLOOR_USD = 20;       // chain USDT < $20 → trigger
@@ -23,7 +26,7 @@ let _ticking = false;
 
 async function _fetchChainUsdt(chain) {
   try {
-    const res = await fetch(`http://127.0.0.1:${CONSOLE_PORT}/api/relay/${BROKER_RELAY_ID}/wallets`, { signal: AbortSignal.timeout(8_000) });
+    const res = await fetch(`http://127.0.0.1:${CONSOLE_PORT}/api/relay/${getMarketMakerRelayIdOrThrow()}/wallets`, { signal: AbortSignal.timeout(8_000) });
     if (!res.ok) return null;
     const d = await res.json();
     const w = (d.chains || []).find(c => c.chain === chain);
@@ -84,7 +87,7 @@ async function _runRebalanceTick() {
       }
 
       // Get broker private key for src chain
-      const wallet = sqlite.prepare(`SELECT privkey_encrypted FROM agent_wallets WHERE relay_node_id=? AND chain=? AND is_default=1`).get(BROKER_RELAY_ID, src.chain);
+      const wallet = sqlite.prepare(`SELECT privkey_encrypted FROM agent_wallets WHERE relay_node_id=? AND chain=? AND is_default=1`).get(getMarketMakerRelayIdOrThrow(), src.chain);
       if (!wallet?.privkey_encrypted) {
         console.warn(`[multichain-rebalance] no privkey for broker ${src.chain}, skip`);
         continue;
@@ -96,7 +99,7 @@ async function _runRebalanceTick() {
       // Execute bridge via selectAndBridge (Across V3 or Stargate based on amount)
       try {
         const { selectAndBridge } = await import('./bridge-router.js');
-        const r = await selectAndBridge({ privateKey, fromChain: src.chain, toChain: d.chain, amount: needed, recipient: d.address, asset: 'USDT', relayId: BROKER_RELAY_ID });
+        const r = await selectAndBridge({ privateKey, fromChain: src.chain, toChain: d.chain, amount: needed, recipient: d.address, asset: 'USDT', relayId: getMarketMakerRelayIdOrThrow() });
         if (r.success || r.txHash) {
           console.log(`[multichain-rebalance] ✓ ${src.chain}→${d.chain} +${needed.toFixed(2)} USDT via ${r.protocol} TX ${(r.txHash || r.depositTxHash)?.slice(0, 16)}`);
           try {
