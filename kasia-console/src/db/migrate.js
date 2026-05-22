@@ -4283,7 +4283,7 @@ export function runMigrations() {
     }
   }
 
-  // v133: KI 64 Phase 1B v3 sub-phase 1B.1 (admin Control Room broker state cross-product).
+  // v137: KI 64 Phase 1B v3 sub-phase 1B.1 (admin Control Room broker state cross-product).
   //   relay_nodes 加 scope_json TEXT (UI category list 'exchange'/'prediction'/'both', UI filter only NOT code routing per J2 #647)
   //   relay_nodes 加 dm_count_today INTEGER DEFAULT 0 (broker DM cap tracking, surface 200/day cap status)
   //   Spec: NWT N19.180/181 + J2 #654 v3 (4 push back concede).
@@ -4293,16 +4293,16 @@ export function runMigrations() {
       const cols = sqlite.prepare("PRAGMA table_info(relay_nodes)").all().map(c => c.name);
       if (!cols.includes('scope_json')) {
         sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN scope_json TEXT`);
-        console.log("[migrate] v133: relay_nodes 加 scope_json TEXT (admin UI category filter, NOT code routing per J2 #647).");
+        console.log("[migrate] v137: relay_nodes 加 scope_json TEXT (admin UI category filter, NOT code routing per J2 #647).");
         // Backfill existing rows: broker → 'exchange', oracle → 'prediction', both → 'exchange,prediction'
         sqlite.exec(`UPDATE relay_nodes SET scope_json='["exchange"]' WHERE is_dex_broker=1 AND is_oracle=0 AND scope_json IS NULL`);
         sqlite.exec(`UPDATE relay_nodes SET scope_json='["prediction"]' WHERE is_oracle=1 AND is_dex_broker=0 AND scope_json IS NULL`);
         sqlite.exec(`UPDATE relay_nodes SET scope_json='["exchange","prediction"]' WHERE is_dex_broker=1 AND is_oracle=1 AND scope_json IS NULL`);
-        console.log("[migrate] v133: relay_nodes scope_json backfilled per is_dex_broker / is_oracle flags.");
+        console.log("[migrate] v137: relay_nodes scope_json backfilled per is_dex_broker / is_oracle flags.");
       }
       if (!cols.includes('dm_count_today')) {
         sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN dm_count_today INTEGER DEFAULT 0`);
-        console.log("[migrate] v133: relay_nodes 加 dm_count_today INTEGER DEFAULT 0 (broker DM cap tracking, 200/day surface admin UI).");
+        console.log("[migrate] v137: relay_nodes 加 dm_count_today INTEGER DEFAULT 0 (broker DM cap tracking, 200/day surface admin UI).");
       }
     }
   }
