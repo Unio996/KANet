@@ -4322,7 +4322,9 @@ export function runMigrations() {
         sqlite.exec(`UPDATE relay_nodes SET roles_json='["broker"]' WHERE is_dex_broker=1 AND is_oracle=0 AND roles_json IS NULL`);
         sqlite.exec(`UPDATE relay_nodes SET roles_json='["oracle"]' WHERE is_oracle=1 AND is_dex_broker=0 AND roles_json IS NULL`);
         sqlite.exec(`UPDATE relay_nodes SET roles_json='["broker","oracle"]' WHERE is_dex_broker=1 AND is_oracle=1 AND roles_json IS NULL`);
-        console.log("[migrate] v138: relay_nodes roles_json backfilled per is_dex_broker / is_oracle.");
+        // A.1.1 hotfix (NWT N19.199): backfill 'user' role for non-broker non-oracle relays
+        sqlite.exec(`UPDATE relay_nodes SET roles_json='["user"]' WHERE is_dex_broker=0 AND is_oracle=0 AND roles_json IS NULL`);
+        console.log("[migrate] v138: relay_nodes roles_json backfilled per is_dex_broker / is_oracle / default user.");
       }
       if (!cols.includes('fee_rate_override')) {
         sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN fee_rate_override REAL`);
