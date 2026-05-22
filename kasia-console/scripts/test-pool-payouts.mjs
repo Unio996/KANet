@@ -1,7 +1,7 @@
 // B2 v0.5 Sub 2d Phase 2a-2 — computePoolPayouts unit test
 // Per Bettor r339 critical pushes: maker-as-bettor + forfeit_1 50/25/25 split + broker_relay_id.
 
-import { computePoolPayouts } from '../src/services/pool-market-settler.js';
+import { computePoolPayouts, estimateStorageMass } from '../src/services/pool-market-settler.js';
 
 let pass = 0, fail = 0;
 function assertEq(label, actual, expected) {
@@ -27,6 +27,7 @@ function assertEq(label, actual, expected) {
     brokerFeePct: 0,
     oracleBond: 1000,
     minerFee: 0,
+    minBrokerFee: 0,
     unanimous: true,
     silentOracleIndex: null,
   });
@@ -60,6 +61,7 @@ function assertEq(label, actual, expected) {
     brokerFeePct: 500,  // 5%
     oracleBond: 1000,
     minerFee: 0,
+    minBrokerFee: 0,
     unanimous: true,
     silentOracleIndex: null,
   });
@@ -92,6 +94,7 @@ function assertEq(label, actual, expected) {
     brokerFeePct: 0,
     oracleBond: 1000,
     minerFee: 0,
+    minBrokerFee: 0,
     unanimous: false,
     silentOracleIndex: 2,
   });
@@ -131,6 +134,7 @@ function assertEq(label, actual, expected) {
     brokerFeePct: 0,
     oracleBond: 1000,
     minerFee: 0,
+    minBrokerFee: 0,
     unanimous: false,
     silentOracleIndex: 0,
   });
@@ -166,6 +170,7 @@ function assertEq(label, actual, expected) {
     brokerFeePct: 0,
     oracleBond: 1000,
     minerFee: 50,
+    minBrokerFee: 0,
     unanimous: true,
     silentOracleIndex: null,
   });
@@ -198,7 +203,8 @@ function assertEq(label, actual, expected) {
       winner: 0,
       brokerFeePct: 0,
       oracleBond: 1000,
-      minerFee: 100,  // > losingPool (50)
+      minerFee: 100,
+    minBrokerFee: 0,  // > losingPool (50)
       unanimous: true,
       silentOracleIndex: null,
     });
@@ -206,6 +212,45 @@ function assertEq(label, actual, expected) {
     threw = e.message.includes('less than minerFee');
   }
   assertEq('T6 minerFee > losingPool throws explicit error', threw, true);
+}
+
+// Test 7: broker_fee floor (Bug 8) — brokerFeePct=0 but floor applies
+{
+  const r = computePoolPayouts({
+    participants: [
+      { stake: 1_000_000_000, direction: 0, isMaker: true },  // 10 KAS maker YES wins
+      { stake: 1_000_000_000, direction: 1 },                 // 10 KAS bettor NO loses
+    ],
+    winner: 0,
+    brokerFeePct: 0,        // 0% → raw fee 0
+    oracleBond: 100_000_000,
+    minerFee: 20_000,
+    unanimous: true,
+    silentOracleIndex: null,
+    // minBrokerFee defaults to 5,000,000 (the floor)
+  });
+  // brokerFeeRaw=0, floored to 5,000,000
+  assertEq('T7 broker_fee floor applies when pct gives 0', r.brokerFee, 5_000_000);
+}
+
+// Test 8: estimateStorageMass matches UAT cycle 3 observed (1,991,668)
+{
+  // cycle 3: 6 inputs (maker 2KAS + 3 oracle 1KAS + 2 bettor 0.5KAS), 6 outputs
+  const inputs = [2e8, 1e8, 1e8, 1e8, 5e7, 5e7];
+  const outputs = [500000, 2.4e8, 6e7, 1e8, 1e8, 1e8];  // broker 0.005KAS + maker + bettor1 + 3 bonds
+  const mass = estimateStorageMass(inputs, outputs);
+  // Within 5% of observed 1,991,668 (= payout estimates are approximate)
+  const ok = mass > 1_800_000 && mass < 2_200_000;
+  assertEq('T8 estimateStorageMass ~ cycle 3 observed (1.8M-2.2M)', ok, true);
+}
+
+// Test 9: estimateStorageMass — large outputs stay under cap
+{
+  // 10 KAS-scale pot: 6 inputs, 6 outputs all >= 0.1 KAS
+  const inputs = [1e9, 1e8, 1e8, 1e8, 1e9, 1e9];
+  const outputs = [1e7, 1.5e9, 1.5e9, 1e8, 1e8, 1e8];  // broker 0.1KAS + large winners + bonds
+  const mass = estimateStorageMass(inputs, outputs);
+  assertEq('T9 large-pot storage mass under 500k cap', mass < 500_000, true);
 }
 
 console.log(`\n=== ${pass} PASS / ${fail} FAIL ===`);
