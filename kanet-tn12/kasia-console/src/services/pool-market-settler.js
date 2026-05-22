@@ -389,7 +389,13 @@ export async function dispatchPhase2(market, decision) {
     }
 
     // 7. Stash phase2_tx_obj + winner + silent_oracle_index in pool_markets.metadata
+    // CRITICAL: spread prior metadata (= preserve spine_redeem_script_hex stashed at create time).
+    // Phase 3 e2e caught: without ...prevMeta the create-time spine_redeem_script_hex got wiped →
+    // handleCollectingSigs "missing meta.spine_redeem_script_hex" → settle TX cannot assemble.
+    let prevMeta = {};
+    try { prevMeta = JSON.parse(market.metadata || '{}'); } catch {}
     const newMeta = {
+      ...prevMeta,
       phase2_tx_obj: preimage.tx_obj,
       phase2_winner: decision.winner,
       phase2_unanimous: decision.unanimous,
