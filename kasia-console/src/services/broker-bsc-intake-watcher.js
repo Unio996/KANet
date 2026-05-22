@@ -14,11 +14,10 @@
 // 不破 existing bsc-incoming-watcher (maker payment verify scope 不同).
 
 import { sqlite } from '../db/client.js';
-import { getBrokerRelay } from './broker-config-resolver.js';
+import { getBrokerRelayIdOrThrow } from './broker-config-resolver.js';
 
 const TICK_MS = 30 * 1000;
-// KI 65 Block A.3.1 (NWT N19.196): config-driven broker resolution. Module-load fixed, fallback hardcode safety.
-const BROKER_RELAY_ID = getBrokerRelay()?.id || '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+// KI 65 Block A.3.1.1 (NWT N19.206 REJECT module-load const): each call site runtime helper.
 const SCAN_SPAN_BLOCKS = 1500;  // ~75min BSC (3s blocks)
 const AMOUNT_TOLERANCE_PCT = 0.01;  // ±1% match
 
@@ -55,7 +54,7 @@ export async function tick() {
   // R19 hygiene: dynamic load broker BSC addr
   const brokerWallet = sqlite.prepare(
     `SELECT address FROM agent_wallets WHERE relay_node_id = ? AND chain = 'bnb' AND is_default = 1 LIMIT 1`
-  ).get(BROKER_RELAY_ID);
+  ).get(getBrokerRelayIdOrThrow());
   if (!brokerWallet?.address) return { ok: false, reason: 'no_broker_bsc_wallet' };
   const brokerBscAddr = brokerWallet.address;
 
@@ -136,7 +135,7 @@ export async function tickEscrow() {
   // Scan BSC broker addr for pending escrow rows (BUY flow user prepays USDT)
   const brokerWallet = sqlite.prepare(
     `SELECT address FROM agent_wallets WHERE relay_node_id = ? AND chain = 'bnb' AND is_default = 1 LIMIT 1`
-  ).get(BROKER_RELAY_ID);
+  ).get(getBrokerRelayIdOrThrow());
   if (!brokerWallet?.address) return { ok: false, reason: 'no_broker_bsc_wallet' };
   const brokerBscAddr = brokerWallet.address;
 
@@ -225,7 +224,7 @@ export async function tickEscrow() {
     // call _doPublishAfterPrepay to publish offer backed by escrow (post Bug K guard relax)
     try {
       const { _doPublishAfterPrepay } = await import('./broker-v3/router.js');
-      const r = await _doPublishAfterPrepay(e.id, BROKER_RELAY_ID);
+      const r = await _doPublishAfterPrepay(e.id, getBrokerRelayIdOrThrow());
       if (!r.ok) {
         console.error(`[broker-bsc-intake-escrow] _doPublishAfterPrepay fail for escrow ${e.id.slice(0,8)}: ${r.error}`);
       } else {
@@ -296,7 +295,7 @@ export async function tickPolygonEscrow() {
   // Scan Polygon broker addr for pending escrow rows (BUY flow user prepays USDT on Polygon)
   const brokerWallet = sqlite.prepare(
     `SELECT address FROM agent_wallets WHERE relay_node_id = ? AND chain = 'polygon' AND is_default = 1 LIMIT 1`
-  ).get(BROKER_RELAY_ID);
+  ).get(getBrokerRelayIdOrThrow());
   if (!brokerWallet?.address) return { ok: false, reason: 'no_broker_polygon_wallet' };
   const brokerPolygonAddr = brokerWallet.address;
 
@@ -361,7 +360,7 @@ export async function tickPolygonEscrow() {
     // call _doPublishAfterPrepay (same as BSC path)
     try {
       const { _doPublishAfterPrepay } = await import('./broker-v3/router.js');
-      const r = await _doPublishAfterPrepay(e.id, BROKER_RELAY_ID);
+      const r = await _doPublishAfterPrepay(e.id, getBrokerRelayIdOrThrow());
       if (!r.ok) {
         console.error(`[broker-polygon-intake-escrow] _doPublishAfterPrepay fail for escrow ${e.id.slice(0,8)}: ${r.error}`);
       } else {
@@ -409,11 +408,11 @@ export async function tickPolygonEscrow() {
 // Bug NWT-03:55 B1 fix 5/17: inline BSC orphan auto-refund + DM (公众 P0).
 // 不等 24hr sweep (Bug AA disabled). BSC USDT user-error 多/少/错转账, 立刻 refund full + DM.
 async function inlineRefundBscOrphan({ orphanId, fromAddress, amount, txHash }) {
-  // A.3.1: shadow var removed (module-level BROKER_RELAY_ID resolved via getBrokerRelay).
+  // A.3.1: shadow var removed (module-level getBrokerRelayIdOrThrow() resolved via getBrokerRelay).
   // Local shadow was duplicate; use module-scope constant.
   const wallet = sqlite.prepare(
     "SELECT privkey_encrypted FROM agent_wallets WHERE relay_node_id = ? AND chain = 'bnb' AND is_default = 1 LIMIT 1"
-  ).get(BROKER_RELAY_ID);
+  ).get(getBrokerRelayIdOrThrow());
   if (!wallet?.privkey_encrypted) {
     console.warn(`[bsc-orphan-refund] no broker bnb wallet, mark manual_review orphan ${orphanId.slice(0,8)}`);
     sqlite.prepare(`UPDATE broker_orphan_inflows SET status = 'manual_review' WHERE id = ?`).run(orphanId);

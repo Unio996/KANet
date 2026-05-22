@@ -40,6 +40,19 @@ export function getBrokerRelay(scope = null) {
 }
 
 /**
+ * Get primary broker relay ID — throws if not configured.
+ * Use this in call sites that need broker_id 真 runtime resolved (no hardcoded fallback per A.3.1.1).
+ *
+ * @returns {string} relay_nodes.id
+ * @throws {Error} if no broker relay registered
+ */
+export function getBrokerRelayIdOrThrow() {
+  const r = getBrokerRelay();
+  if (!r) throw new Error('No broker relay configured (roles_json includes "broker")');
+  return r.id;
+}
+
+/**
  * Get all broker relays (for multi-broker iteration).
  * @returns {object[]} array of relay_nodes rows
  */

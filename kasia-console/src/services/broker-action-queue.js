@@ -22,12 +22,11 @@ import { randomUUID } from 'crypto';
 // Owner 88 KAS Bug-Z21 真因 = broker enqueue 'send_kas', relay only 'transfer'. Now broker
 // imports COMMAND_TYPES from relay's canonical source-of-truth.
 import { COMMAND_TYPES } from '../../../kasia-relay/src/lib/commands.mjs';
-import { getBrokerRelay } from './broker-config-resolver.js';
+import { getBrokerRelayIdOrThrow } from './broker-config-resolver.js';
 
-// KI 65 Block A.3.1 (NWT N19.196 broker经济生态): config-driven broker resolution.
-// Module-load-time fixed (broker id 不 runtime swap), fallback to original Trader-B hardcode for safety.
-// Future multi-broker (Block A.5+) may need dynamic per-call. v1: module-load fixed is sufficient.
-const BROKER_RELAY_ID = getBrokerRelay()?.id || '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+// KI 65 Block A.3.1.1 (NWT N19.206 REJECT 真 100% config-driven):
+// 每 call site runtime `getBrokerRelayIdOrThrow()`. 无 const, 无 hardcoded fallback.
+// Throws if no broker registered — fail-fast 防 stale state路由错 relay.
 const TTL_DEFAULT_MS = 10 * 60 * 1000;
 const RETRY_MAX = 3;
 // R4 Bug 9 (J2 RCA 4e7be515): relay anti-spam fail-closed 5s 内同 message dedup 拒.
@@ -55,7 +54,7 @@ let _ownEvmAddrCache = null;
 let _ownEvmAddrCacheAt = 0;
 function _ownEvmAddrSet() {
   if (_ownEvmAddrCache && Date.now() - _ownEvmAddrCacheAt < 60_000) return _ownEvmAddrCache;
-  const rows = sqlite.prepare(`SELECT LOWER(address) AS addr FROM agent_wallets WHERE relay_node_id = ?`).all(BROKER_RELAY_ID);
+  const rows = sqlite.prepare(`SELECT LOWER(address) AS addr FROM agent_wallets WHERE relay_node_id = ?`).all(getBrokerRelayIdOrThrow());
   _ownEvmAddrCache = new Set(rows.map(r => r.addr));
   _ownEvmAddrCacheAt = Date.now();
   return _ownEvmAddrCache;
@@ -205,7 +204,7 @@ async function pump() {
   if (!_executeOverride && _queue.length > 0) {
     try {
       const { waitForRelay } = await import('./relay-manager.js');
-      await waitForRelay(BROKER_RELAY_ID, 60000);
+      await waitForRelay(getBrokerRelayIdOrThrow(), 60000);
     } catch (e) {
       console.warn(`[broker-queue] waitForRelay timeout: ${e.message} — pump 继续, 单项 retry 兜底`);
     }
@@ -323,10 +322,10 @@ async function executeAction(item) {
         );
         if (stale) {
           const note = '上一条订单画像内容过时 (你已变更 qty/addr/chain). 我按你最新 input 重新报价中, 上条 skip.';
-          return sendCommandAsync(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: item.peer, message: note });
+          return sendCommandAsync(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.SEND_MESSAGE, target: item.peer, message: note });
         }
       }
-      return sendCommandAsync(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: item.peer, message: p.message });
+      return sendCommandAsync(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.SEND_MESSAGE, target: item.peer, message: p.message });
     }
     case 'accept_v1':
     case 'paid_v1': {
@@ -337,13 +336,13 @@ async function executeAction(item) {
       // (offer 留 'open', taker=null) → bsc-watcher 检测 USDT 但 paid event 拒 → KAS 永不
       // deliver. 5 笔 manual rescue 同根因. 修法: pump 真发后调 onBroadcastWritten 通知, 跟
       // /api/chat/send 路径对齐. 不动协议, 不新文件, broker 真融入 exchange 完整完成.
-      const result = await sendCommandAsync(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_BROADCAST, channel: p.channel || 'kanet-exchange', message: p.message });
+      const result = await sendCommandAsync(getBrokerRelayIdOrThrow(), { type: COMMAND_TYPES.SEND_BROADCAST, channel: p.channel || 'kanet-exchange', message: p.message });
       // sendCommandAsync resolves msg.result (relay-manager.js:260) = relay 返回的 { txId, fee },
       // 没有 ok 字段. 用 txId 判 success (跟 broker-queue 别处 line 175 same convention).
       if (result?.txId) {
         try {
           const { onBroadcastWritten } = await import('./trade-protocol-filter.js');
-          const broker = sqlite.prepare('SELECT address FROM relay_nodes WHERE id=?').get(BROKER_RELAY_ID);
+          const broker = sqlite.prepare('SELECT address FROM relay_nodes WHERE id=?').get(getBrokerRelayIdOrThrow());
           // T-NWT-2026-04-26 wire-fix-v3: retry 时 line 152 给 message 加 ` [r2]` 防 anti-spam
           // dedup, 但 JSON 协议消息加 suffix 后 trade-filter JSON.parse fail silent. strip
           // suffix 让 onBroadcastWritten 拿到干净 JSON. (DM 路径不经此 wire fix, 不影响.)
@@ -369,7 +368,7 @@ async function executeAction(item) {
       // <exception> regression — String(undefined||'').trim()='' break sendKaspa to-required check).
       const transferTarget = item.peer ? String(item.peer).trim() : item.peer;
       const transferAmount = (p.amount_kas != null && p.amount_kas !== '') ? String(p.amount_kas) : p.amount_kas;
-      return sendCommandAsync(BROKER_RELAY_ID, {
+      return sendCommandAsync(getBrokerRelayIdOrThrow(), {
         type: COMMAND_TYPES.TRANSFER,
         target: transferTarget,
         amount: transferAmount,

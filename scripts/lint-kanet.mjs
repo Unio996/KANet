@@ -588,6 +588,30 @@ function checkKI30_chain_amount_precision(filepath, content) {
   }
 }
 
+// ── KI-65 (NWT N19.206 + J2 #677 5/22): broker经济生态 — 禁 hardcoded BROKER_RELAY_ID UUID literal ──
+//   A.3.1 first attempt 用 `getBrokerRelay()?.id || '0a8e9723-...'` 保 hardcoded fallback → defeat config-driven.
+//   A.3.1.1 hotfix: 全 source 0 hardcoded UUID literal. 用 getBrokerRelayIdOrThrow() runtime helper.
+//   rule: src/**/*.js 禁含 '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0' literal (= Trader-B production UUID).
+function checkKI65_no_hardcoded_broker_id(filepath, content) {
+  // Only enforce in src/services (broker production code path)
+  if (!/[/\\]src[/\\]services[/\\]/.test(filepath)) return;
+  // Allow broker-config-resolver.js itself (it's the helper, defines no fallback)
+  if (filepath.endsWith('broker-config-resolver.js')) return;
+  // Allow scripts/ (operator recovery may need hardcoded for emergency)
+  const lines = content.split('\n');
+  const HARDCODED_BROKER_UUID = /['"]0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0['"]/;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (HARDCODED_BROKER_UUID.test(line)) {
+      // Whitelist marker `lint-allow-broker-uuid: <reason>` 同行 OR 前 3 行
+      const windowStart = Math.max(0, i - 3);
+      const windowText = lines.slice(windowStart, i + 1).join('\n');
+      if (/lint-allow-broker-uuid/.test(windowText)) continue;
+      violate('KI-65', `[KI-65] hardcoded broker UUID '0a8e9723-...' literal 不允许 src/services. 用 getBrokerRelayIdOrThrow() runtime helper from broker-config-resolver.js. 如确需 literal (emergency recovery / migration), 加注释 'lint-allow-broker-uuid: <reason>' (前 3 行 OR 同行).`, filepath, i + 1);
+    }
+  }
+}
+
 // ── KI-63 (NWT N19.153/154 + J2 #628 5/21): test framework 绝不 raw SQL 写 production state table ──
 // 17 row $34.35 USDT stuck broker BSC wallet 真因 = stress_6h_real_burst.test.mjs:74 + multi_persona_pool.test.mjs:108
 // raw SQL UPDATE user_escrow_balances SET status='refunded' 绕过 _refundEscrow + transferUsdt + Bug AW guard.
@@ -636,6 +660,7 @@ for (const fp of targets) {
   checkKI30_chain_amount_precision(fp, content);  // KI-30 (Bettor r181 5/19): chain TX amount 必 toFixed(8)
   checkKI31_gamma_closed_query(fp, content);  // KI-31 (Bettor r184 5/19): gamma single-market query 必 &closed=true
   checkKI63_test_raw_sql_state(fp, content);  // KI-63 (NWT N19.153 5/21): test framework raw SQL write production state forbidden
+  checkKI65_no_hardcoded_broker_id(fp, content);  // KI-65 (NWT N19.206 5/22): no hardcoded BROKER_RELAY_ID UUID literal in src/services
 }
 checkR10();
 

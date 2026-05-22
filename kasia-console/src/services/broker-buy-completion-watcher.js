@@ -4,11 +4,10 @@
 // 单 file 双路径不新建 (永不新建先迭代). 标记: broker_buy_dm_sent vs broker_sell_dm_sent.
 
 import { sqlite } from '../db/client.js';
-import { getBrokerRelay } from './broker-config-resolver.js';
+import { getBrokerRelayIdOrThrow } from './broker-config-resolver.js';
 
 const TICK_MS = 60_000;
-// KI 65 Block A.3.1 (NWT N19.196): config-driven broker resolution. Module-load fixed, fallback hardcode safety.
-const BROKER_RELAY_ID = getBrokerRelay()?.id || '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+// KI 65 Block A.3.1.1 (NWT N19.206 REJECT module-load const): each call site runtime helper.
 let _tickInterval = null;
 let _sendOverride = null;
 
@@ -18,7 +17,7 @@ export function _testResetSendCommand() { _sendOverride = null; }
 async function _send(relayId, cmd) {
   if (_sendOverride) return _sendOverride(relayId, cmd);
   // R4 (T-NWT-09): broker 出链走 broker-action-queue 单线 pump 防 UTXO 双花.
-  if (relayId === BROKER_RELAY_ID) {
+  if (relayId === getBrokerRelayIdOrThrow()) {
     const { enqueue } = await import('./broker-action-queue.js');
     if (cmd.type === 'send_message') {
       enqueue({ kind: 'dm_completion', peer: cmd.target, payload: { message: cmd.message } });
@@ -71,7 +70,7 @@ async function _processCompleted(offer, brokerAddr) {
 
   const deliveryTx = offer.delivery_tx || offer.taker_tx_id || '?';
   const msg = `🎉 你买的 ${acc.qty} KAS 已到! Maker 发的 tx ${String(deliveryTx).slice(0, 16)}... 链上可查. 谢谢使用 KANet broker.`;
-  await _send(BROKER_RELAY_ID, { type: 'send_message', target: acc.user_kasia_address, message: msg });
+  await _send(getBrokerRelayIdOrThrow(), { type: 'send_message', target: acc.user_kasia_address, message: msg });
   _markDmed(offer.id, acc.user_kasia_address, deliveryTx);
   return true;
 }
@@ -112,13 +111,13 @@ async function _processSellCompleted(offer) {
   const usdtAmount = offer.want_amount || meta.quoted_usdt || '?';
   const payChain = (meta.pay_chain || 'bnb').toUpperCase();
   const msg = `🎉 你卖的 ${meta.intent_qty || meta.net_kas} KAS 完成! Taker 已付 ${usdtAmount} USDT 到你 ${payChain} (tx ${txShort}...). 链上可查. 谢谢使用 KANet broker.`;
-  await _send(BROKER_RELAY_ID, { type: 'send_message', target: userPeer, message: msg });
+  await _send(getBrokerRelayIdOrThrow(), { type: 'send_message', target: userPeer, message: msg });
   _markSellDmed(offer.id, userPeer, paymentTx);
   return true;
 }
 
 export async function completionTick() {
-  const trader = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id = ?`).get(BROKER_RELAY_ID);
+  const trader = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id = ?`).get(getBrokerRelayIdOrThrow());
   if (!trader) return { handled: 0, reason: 'no_broker_relay' };
   // BUY 路径: broker = taker
   const buyOffers = sqlite.prepare(`
