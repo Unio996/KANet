@@ -71,6 +71,11 @@ export async function voterTick() {
       poolVoted += p.voted;
       poolSkipped += p.skipped;
       poolErrored += p.errored;
+      // B2 v0.5 Sub 2d Phase 2c — pool oracle TX-sign (= collecting_sigs state)
+      const ts = await processPoolTxSign(voter);
+      poolVoted += ts.signed;
+      poolSkipped += ts.skipped;
+      poolErrored += ts.errored;
     }
     console.log(`[prediction-voter] tick: ${voterRelays.length} voter relays, 1V1 voted=${totalVoted} skipped=${totalSkipped} errored=${totalErrored} | pool voted=${poolVoted} skipped=${poolSkipped} errored=${poolErrored}`);
     return { ok: true, voters: voterRelays.length, voted: totalVoted, skipped: totalSkipped, errored: totalErrored, pool: { voted: poolVoted, skipped: poolSkipped, errored: poolErrored } };
@@ -329,6 +334,82 @@ async function processPoolMarket(voter) {
     }
   }
   return { voted, skipped, errored };
+}
+
+// B2 v0.5 Sub 2d Phase 2c — pool oracle TX-sign handler.
+// When pool_markets reaches 'collecting_sigs', settler dispatchPhase2 has stashed phase2_tx_obj.
+// Each oracle signs the SPINE input (input_index=0) — sides need no sigs (settled_via_spine).
+// Writes chain_events 'pool_oracle_tx_sig' that handleCollectingSigs aggregates.
+async function processPoolTxSign(voter) {
+  let signed = 0, skipped = 0, errored = 0;
+  const markets = sqlite.prepare(`
+    SELECT id, oracle_relay_ids, metadata
+    FROM pool_markets
+    WHERE protocol_status = 'collecting_sigs'
+      AND oracle_relay_ids LIKE ?
+  `).all(`%"${voter.id}"%`);
+  if (!markets.length) return { signed, skipped, errored };
+
+  for (const market of markets) {
+    try {
+      let oracleIds;
+      try { oracleIds = JSON.parse(market.oracle_relay_ids || '[]'); } catch { oracleIds = []; }
+      if (!Array.isArray(oracleIds) || !oracleIds.includes(voter.id)) { skipped++; continue; }
+
+      let meta;
+      try { meta = JSON.parse(market.metadata || '{}'); } catch { meta = {}; }
+      if (!meta.phase2_tx_obj) { skipped++; continue; }
+
+      // forfeit_1: silent oracle does not sign
+      if (!meta.phase2_unanimous && typeof meta.phase2_silent_oracle_index === 'number') {
+        const myIndex = oracleIds.indexOf(voter.id);
+        if (myIndex === meta.phase2_silent_oracle_index) { skipped++; continue; }
+      }
+
+      // Skip if already signed spine input for this market
+      const SPINE_INPUT_IDX = 0;
+      const existing = sqlite.prepare(`
+        SELECT id FROM chain_events
+        WHERE event_type = 'pool_oracle_tx_sig' AND from_address = ?
+          AND payload LIKE ? AND payload LIKE ?
+        LIMIT 1
+      `).get(voter.address, `%"market_id":"${market.id}"%`, `%"input_index":${SPINE_INPUT_IDX}%`);
+      if (existing) { skipped++; continue; }
+
+      // Sign spine input via relay IPC sign_input_for_settle (= reuse 1V1 IPC)
+      const signResult = await sendCommandAsync(voter.id, {
+        type: 'sign_input_for_settle',
+        tx_hex: JSON.stringify(meta.phase2_tx_obj),
+        input_index: SPINE_INPUT_IDX,
+      });
+      if (!signResult?.ok || !signResult.signature) {
+        console.error(`[prediction-voter:pool-txsign] sign fail voter=${voter.name} market=${market.id.slice(0,12)}: ${signResult?.error || 'no sig'}`);
+        errored++;
+        continue;
+      }
+
+      const respPayload = JSON.stringify({
+        t: 'kanet_pool_oracle_tx_sign_resp_v1',
+        market_id: market.id,
+        voter_relay_id: voter.id,
+        input_index: SPINE_INPUT_IDX,
+        winner: meta.phase2_winner,
+        signature: signResult.signature,
+      });
+      const syntheticTxid = `pool_oracle_tx_sig:${voter.id.slice(0,8)}:${market.id.slice(0,12)}:i${SPINE_INPUT_IDX}:${Date.now()}`;
+      sqlite.prepare(`
+        INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+        VALUES (?, ?, 'pool_oracle_tx_sig', ?, ?, ?, 'prediction-voter', CURRENT_TIMESTAMP)
+      `).run(randomUUID(), syntheticTxid, voter.address, voter.address, respPayload);
+
+      console.log(`[prediction-voter:pool-txsign] SIGNED ${voter.name}: market=${market.id.slice(0,12)} spine input`);
+      signed++;
+    } catch (e) {
+      console.error(`[prediction-voter:pool-txsign] fail voter=${voter.name} market=${market.id?.slice(0,12)}: ${e.message}`);
+      errored++;
+    }
+  }
+  return { signed, skipped, errored };
 }
 
 // deriveVote — Phase 3a MVP dispatcher per Bettor r219 spec.
