@@ -14,9 +14,11 @@
 // 不破 existing bsc-incoming-watcher (maker payment verify scope 不同).
 
 import { sqlite } from '../db/client.js';
+import { getBrokerRelay } from './broker-config-resolver.js';
 
 const TICK_MS = 30 * 1000;
-const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+// KI 65 Block A.3.1 (NWT N19.196): config-driven broker resolution. Module-load fixed, fallback hardcode safety.
+const BROKER_RELAY_ID = getBrokerRelay()?.id || '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
 const SCAN_SPAN_BLOCKS = 1500;  // ~75min BSC (3s blocks)
 const AMOUNT_TOLERANCE_PCT = 0.01;  // ±1% match
 
@@ -407,7 +409,8 @@ export async function tickPolygonEscrow() {
 // Bug NWT-03:55 B1 fix 5/17: inline BSC orphan auto-refund + DM (公众 P0).
 // 不等 24hr sweep (Bug AA disabled). BSC USDT user-error 多/少/错转账, 立刻 refund full + DM.
 async function inlineRefundBscOrphan({ orphanId, fromAddress, amount, txHash }) {
-  const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+  // A.3.1: shadow var removed (module-level BROKER_RELAY_ID resolved via getBrokerRelay).
+  // Local shadow was duplicate; use module-scope constant.
   const wallet = sqlite.prepare(
     "SELECT privkey_encrypted FROM agent_wallets WHERE relay_node_id = ? AND chain = 'bnb' AND is_default = 1 LIMIT 1"
   ).get(BROKER_RELAY_ID);

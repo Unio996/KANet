@@ -4,9 +4,11 @@
 // 单 file 双路径不新建 (永不新建先迭代). 标记: broker_buy_dm_sent vs broker_sell_dm_sent.
 
 import { sqlite } from '../db/client.js';
+import { getBrokerRelay } from './broker-config-resolver.js';
 
 const TICK_MS = 60_000;
-const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+// KI 65 Block A.3.1 (NWT N19.196): config-driven broker resolution. Module-load fixed, fallback hardcode safety.
+const BROKER_RELAY_ID = getBrokerRelay()?.id || '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
 let _tickInterval = null;
 let _sendOverride = null;
 

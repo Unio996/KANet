@@ -22,8 +22,12 @@ import { randomUUID } from 'crypto';
 // Owner 88 KAS Bug-Z21 真因 = broker enqueue 'send_kas', relay only 'transfer'. Now broker
 // imports COMMAND_TYPES from relay's canonical source-of-truth.
 import { COMMAND_TYPES } from '../../../kasia-relay/src/lib/commands.mjs';
+import { getBrokerRelay } from './broker-config-resolver.js';
 
-const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+// KI 65 Block A.3.1 (NWT N19.196 broker经济生态): config-driven broker resolution.
+// Module-load-time fixed (broker id 不 runtime swap), fallback to original Trader-B hardcode for safety.
+// Future multi-broker (Block A.5+) may need dynamic per-call. v1: module-load fixed is sufficient.
+const BROKER_RELAY_ID = getBrokerRelay()?.id || '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
 const TTL_DEFAULT_MS = 10 * 60 * 1000;
 const RETRY_MAX = 3;
 // R4 Bug 9 (J2 RCA 4e7be515): relay anti-spam fail-closed 5s 内同 message dedup 拒.
