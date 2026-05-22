@@ -5,7 +5,7 @@ import { sqlite } from '../db/client.js';
 import { computeSpineP2SH, computeSideP2SH } from '../lib/pool-p2sh.mjs';
 import { buildSidesMerkleTree, getMerkleProof } from '../services/pool-merkle-builder.js';
 import { sendCommandAsync } from '../services/relay-manager.js';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 function deriveXOnlyPubkey(address) {
   return import('kaspa-wasm').then(kaspa => {
@@ -331,6 +331,99 @@ export async function registerPoolRoutes(fastify) {
       market_id: marketId,
       status: 'verifying',
       next_step: 'pool-settler cron picks up market, triggers 3 oracle vote, then spine settle TX',
+    });
+  });
+
+  // POST /api/pool/market/:id/oracle/vote — manual oracle vote with explicit outcome.
+  // For Owner UAT + stress testing (= Scenario 4 disagreement needs controlled outcomes).
+  // Production path is the voter daemon's LLM-derived auto-vote; this is the manual override.
+  fastify.post('/api/pool/market/:id/oracle/vote', async (request, reply) => {
+    const marketId = request.params.id;
+    const b = request.body || {};
+    if (!b.oracle_relay_id) return reply.code(400).send({ ok: false, error: 'oracle_relay_id required' });
+    const outcome = (b.outcome || '').toUpperCase();
+    if (outcome !== 'YES' && outcome !== 'NO' && outcome !== 'DISPUTE') {
+      return reply.code(400).send({ ok: false, error: 'outcome must be YES, NO, or DISPUTE' });
+    }
+
+    const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
+    if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
+    if (market.protocol_status !== 'verifying') {
+      return reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, not in 'verifying' (vote requires verifying state)` });
+    }
+
+    let oracleIds;
+    try { oracleIds = JSON.parse(market.oracle_relay_ids || '[]'); } catch { oracleIds = []; }
+    if (!oracleIds.includes(b.oracle_relay_id)) {
+      return reply.code(403).send({ ok: false, error: 'oracle_relay_id not in market oracle set' });
+    }
+
+    const oracleRow = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(b.oracle_relay_id);
+    if (!oracleRow?.address) return reply.code(400).send({ ok: false, error: 'oracle relay has no resolvable address' });
+
+    // Skip if already voted
+    const existing = sqlite.prepare(`
+      SELECT id FROM chain_events WHERE event_type = 'pool_oracle_vote'
+        AND from_address = ? AND payload LIKE ? LIMIT 1
+    `).get(oracleRow.address, `%"market_id":"${marketId}"%`);
+    if (existing) return reply.code(409).send({ ok: false, error: 'this oracle already voted on this market' });
+
+    // get oracle x-only pubkey via relay IPC
+    let oraclePubkey;
+    try {
+      const pkResult = await sendCommandAsync(b.oracle_relay_id, { type: 'get_pubkey' });
+      oraclePubkey = pkResult?.x_only_pubkey;
+      if (!oraclePubkey || oraclePubkey.length !== 64) throw new Error(`get_pubkey invalid: ${oraclePubkey}`);
+    } catch (e) {
+      return reply.code(503).send({ ok: false, error: `get_pubkey fail: ${e.message}` });
+    }
+
+    const unsignedPayload = {
+      t: 'pool_oracle_vote_v1',
+      market_id: marketId,
+      voter_relay_id: b.oracle_relay_id,
+      voter_pubkey: oraclePubkey,
+      outcome,
+      evidence_url: 'uat_manual_vote',
+      evidence_hash: createHash('sha256').update(`uat_manual_vote:${outcome}`).digest('hex'),
+      vote_timestamp: new Date().toISOString(),
+    };
+    let signature;
+    try {
+      const signResult = await sendCommandAsync(b.oracle_relay_id, { type: 'ecdsa_sign', message: JSON.stringify(unsignedPayload) });
+      signature = signResult?.signature;
+      if (!signature) throw new Error('ecdsa_sign returned empty');
+    } catch (e) {
+      return reply.code(503).send({ ok: false, error: `ecdsa_sign fail: ${e.message}` });
+    }
+    const votePayload = { ...unsignedPayload, signature };
+
+    const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
+    if (makerRow?.address) {
+      try {
+        await sendCommandAsync(b.oracle_relay_id, { type: 'send_message', target: makerRow.address, message: JSON.stringify(votePayload) });
+      } catch { /* DM best-effort — chain_event is the source of truth for settler */ }
+    }
+
+    const syntheticTxid = `pool_oracle_vote:${b.oracle_relay_id.slice(0,8)}:${marketId.slice(0,12)}:${Date.now()}`;
+    sqlite.prepare(`
+      INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+      VALUES (?, ?, 'pool_oracle_vote', ?, ?, ?, 'uat-manual-vote', CURRENT_TIMESTAMP)
+    `).run(randomUUID(), syntheticTxid, oracleRow.address, makerRow?.address || '', JSON.stringify(votePayload));
+
+    const voteCount = sqlite.prepare(`
+      SELECT COUNT(*) c FROM chain_events WHERE event_type = 'pool_oracle_vote' AND payload LIKE ?
+    `).get(`%"market_id":"${marketId}"%`).c;
+
+    return reply.send({
+      ok: true,
+      market_id: marketId,
+      oracle_relay_id: b.oracle_relay_id,
+      outcome,
+      votes_recorded: voteCount,
+      next_step: voteCount >= 3
+        ? 'all 3 votes in — pool-settler cron will aggregate consensus + dispatch settle TX'
+        : `${3 - voteCount} more oracle vote(s) needed`,
     });
   });
 }
