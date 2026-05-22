@@ -46,6 +46,9 @@ export default {
 
       // === Phase 2: DOM keywords for 3 new Phase 1B panels ===
       const bodyText = await page.evaluate(() => document.body?.innerText || '');
+      // 1B.5.1 hotfix (NWT N19.190): CSS `uppercase` class renders innerText 大写化
+      //   'Hedge KAS' → 'HEDGE KAS' (eta line 165 uppercase tracking-wider)
+      //   '搜索' → '搜' (button text; '搜索' 仅 in input placeholder, NOT innerText)
       const required = [
         // Panel A (1B.2)
         'Broker 状态',
@@ -55,12 +58,12 @@ export default {
         'DM 用量',
         // Panel B (1B.3)
         '财务 KPI',
-        'Hedge KAS',  // matches "Hedge KAS 量"
+        'HEDGE KAS',  // CSS uppercase 大写化, matches "HEDGE KAS 量"
         '净盈亏',
         // Panel C (1B.4)
         '历史单子',
         '最近 24h',  // filter dropdown
-        '搜索',
+        '搜',         // button text (not '搜索', which is input placeholder)
         '上一页',
         '下一页',
       ];
