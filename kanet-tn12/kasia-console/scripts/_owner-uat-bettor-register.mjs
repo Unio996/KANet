@@ -62,6 +62,7 @@ console.log(`  bettor:        ${bettor.name}`);
 console.log(`  side:          ${side}`);
 console.log(`  side_p2sh:     ${j.side_p2sh}`);
 console.log(`  side_lock_tx:  ${j.side_lock_tx}`);
+console.log(`  explorer:      https://explorer-tn12.kaspa.org/txs/${j.side_lock_tx}`);
 console.log(`  merkle_index:  ${j.merkle_index}`);
 console.log('');
 console.log('NEXT: register more bettors, OR wait for deadline + oracles vote. Vote runs:');
