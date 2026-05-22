@@ -176,6 +176,11 @@ If Phase 2a Path A testnet e2e fails (= 50-bettor TX size limit / sig issue / et
 ## TODO Phase 2 (post-v0.5 MVP)
 
 - Path B PoolSide.claim_winner 3 bug fixes (= above)
+- unlockPoolSpineP2SH sigOpCount explicit fail-fast (Bettor r358 audit sediment) — replace
+  `Number(inp.sigOpCount || 0)` silent fallback with explicit `undefined` throw. If an IPC
+  roundtrip ever drops the sigOpCount field, a spine input would silently become 0 →
+  sighash mismatch → Phase 3 bug 5 re-trigger. Currently safe (plain Number survives JSON
+  roundtrip) but KI-12 silent-skip anti-pattern history makes the hardening worthwhile.
 - Padding sentinel strategy for variable depth Merkle proofs
 - Refund_all distribution math (= losing side stakes split per spec 50/25/25)
 - Bond forfeit math reconciliation (= 25% reward to remaining signed oracles)
