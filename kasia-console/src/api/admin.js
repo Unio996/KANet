@@ -448,4 +448,74 @@ export async function registerAdminRoutes(fastify) {
       return reply.code(500).send({ error: err.message });
     }
   });
+
+  // KI 65 Block B.2 (Owner 5/23 钦定): broker self-query own fee history.
+  //
+  // GET /api/admin/broker/my-fees?relayId=<self id>
+  //   collected_{24h,7d,30d,alltime}, pending_settle (= confirming未 chain block confirm),
+  //   recent_trades (last 10), fee_rate config.
+  //
+  // multi-broker note: relayId param required (= broker self-identifies).
+  // single-broker pre-v2: relayId mismatches primary broker → 404.
+  fastify.get('/api/admin/broker/my-fees', async (request, reply) => {
+    try {
+      const relayId = String(request.query?.relayId || '').trim();
+      if (!relayId) return reply.code(400).send({ error: 'relayId query param required' });
+      const broker = sqlite.prepare(`
+        SELECT id, name, address, roles_json, fee_rate_override FROM relay_nodes WHERE id = ?
+      `).get(relayId);
+      if (!broker) return reply.code(404).send({ error: `relay ${relayId} not found` });
+      const isBroker = (() => {
+        try { return JSON.parse(broker.roles_json || '[]').includes('broker'); }
+        catch { return false; }
+      })();
+      if (!isBroker) return reply.code(400).send({ error: `relay ${broker.name} is not a broker (roles_json: ${broker.roles_json})` });
+
+      const settleSql = `broker_fee_kas IS NOT NULL AND state NOT IN ('expired','failed','refunded','refunding')`;
+      const aggFor = (rangeSql) => sqlite.prepare(`
+        SELECT COUNT(*) AS trade_count, COALESCE(SUM(CAST(broker_fee_kas AS REAL)), 0) AS total_fee_kas
+        FROM retail_dex_orders WHERE ${settleSql} ${rangeSql}
+      `).get();
+      const c24h = aggFor(`AND created_at > datetime('now', '-1 day')`);
+      const c7d = aggFor(`AND created_at > datetime('now', '-7 days')`);
+      const c30d = aggFor(`AND created_at > datetime('now', '-30 days')`);
+      const cAll = aggFor('');
+      // pending_settle = confirming state with fee allocated, awaiting Kaspa block confirm
+      const pendingRow = sqlite.prepare(`
+        SELECT COUNT(*) AS c, COALESCE(SUM(CAST(broker_fee_kas AS REAL)), 0) AS pending_fee
+        FROM retail_dex_orders WHERE state='confirming' AND broker_fee_kas IS NOT NULL
+      `).get();
+      const recent = sqlite.prepare(`
+        SELECT id, side, state, qty, broker_fee_kas, net_delivery_kas, created_at
+        FROM retail_dex_orders WHERE broker_fee_kas IS NOT NULL
+        ORDER BY created_at DESC LIMIT 10
+      `).all();
+
+      const FEE_RATE_FALLBACK = 0.005;
+      const feeRate = (broker.fee_rate_override != null) ? broker.fee_rate_override : FEE_RATE_FALLBACK;
+      return reply.send({
+        ok: true,
+        ts: new Date().toISOString(),
+        broker: { id: broker.id, name: broker.name, address: broker.address, fee_rate: feeRate, fee_rate_source: broker.fee_rate_override != null ? 'override' : 'system_default' },
+        collected: {
+          d1: { trades: c24h.trade_count, fee_kas: Math.round(c24h.total_fee_kas * 1000) / 1000 },
+          d7: { trades: c7d.trade_count, fee_kas: Math.round(c7d.total_fee_kas * 1000) / 1000 },
+          d30: { trades: c30d.trade_count, fee_kas: Math.round(c30d.total_fee_kas * 1000) / 1000 },
+          alltime: { trades: cAll.trade_count, fee_kas: Math.round(cAll.total_fee_kas * 1000) / 1000 },
+        },
+        pending_settle: {
+          trades: pendingRow.c,
+          fee_kas: Math.round(pendingRow.pending_fee * 1000) / 1000,
+          note: 'state=confirming, KAS delivery TX broadcast but awaiting block confirm',
+        },
+        recent_trades: recent.map(r => ({
+          id: r.id, side: r.side, state: r.state,
+          qty_kas: r.qty, fee_kas: r.broker_fee_kas, net_delivery_kas: r.net_delivery_kas,
+          created_at: r.created_at,
+        })),
+      });
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
 }
