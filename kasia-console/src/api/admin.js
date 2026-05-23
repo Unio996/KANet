@@ -251,11 +251,29 @@ export async function registerAdminRoutes(fastify) {
           AND state NOT IN ('expired','failed','refunded','refunding')
           AND created_at > datetime('now', '-1 day')
       `).get();
+
+      // KI 65 #85.2 (Owner 5/23 钦定, NWT N19.235): autoTaker skip 24h distribution by reason.
+      // observability for filter calibration (= which gate rejects most offers).
+      const autotakeSkip24h = sqlite.prepare(`
+        SELECT json_extract(payload, '$.reason') AS reason, COUNT(*) AS c
+        FROM chain_events
+        WHERE event_type = 'autotake_skip' AND observed_at > datetime('now', '-1 day')
+        GROUP BY reason ORDER BY c DESC LIMIT 20
+      `).all();
+      const autotakeAccepted24h = sqlite.prepare(`
+        SELECT COUNT(*) AS c FROM chain_events
+        WHERE event_type = 'autotake_accepted' AND observed_at > datetime('now', '-1 day')
+      `).get();
       const financials_total = {
         scope: 'all_brokers_aggregate',
         broker_count: brokerRows.length,
         fee_exchange_24h_kas: Math.round(feeAgg24h.fee_kas * 1000) / 1000,  // KAS units (not USD)
         fee_exchange_24h_trades: feeAgg24h.trades,
+        autotake_24h: {
+          accepted: autotakeAccepted24h?.c || 0,
+          skip_count: autotakeSkip24h.reduce((s, r) => s + r.c, 0),
+          skip_by_reason: autotakeSkip24h.map(r => ({ reason: r.reason || 'unknown', count: r.c })),
+        },
         fee_exchange_24h: null,  // legacy null (was $ placeholder, now superseded by fee_exchange_24h_kas)
         fee_prediction_24h: null,  // prediction broker not yet exists — N/A til Bettor B2 mainnet merge
         hedge_24h_kas_volume: Number(hedge24hKasVolume.toFixed(4)),

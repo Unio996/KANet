@@ -837,8 +837,12 @@
                 </select>
               </label>
               <label class="flex flex-col gap-0.5">
-                <span class="text-ink-400">Min Discount %</span>
-                <input type="number" step="0.1" min="0" x-model.number="autoTakerConfig.min_discount" class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-full" />
+                <span class="text-ink-400">Buy KAS Min Discount % <span class="text-ink-300">(broker 买)</span></span>
+                <input type="number" step="0.1" min="0" max="50" x-model.number="autoTakerConfig.buy_min_discount_pct" class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-full" />
+              </label>
+              <label class="flex flex-col gap-0.5">
+                <span class="text-ink-400">Sell KAS Min Premium % <span class="text-ink-300">(broker 卖)</span></span>
+                <input type="number" step="0.1" min="0" max="50" x-model.number="autoTakerConfig.sell_min_premium_pct" class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-full" />
               </label>
               <label class="flex flex-col gap-0.5">
                 <span class="text-ink-400">Max Amount (USDT)</span>
@@ -1013,7 +1017,7 @@ function exchangeApp() {
     opsTab: 'arb',
     brokerStats: null,
     autoTakerProposals: [],
-    autoTakerConfig: { enabled: false, mode: 'approval', min_discount: 0.5, max_amount: 50, daily_limit: 3, cooldown_sec: 30 },
+    autoTakerConfig: { enabled: false, mode: 'approval', min_discount: 0.5, buy_min_discount_pct: 0.5, sell_min_premium_pct: 0.5, max_amount: 50, daily_limit: 3, cooldown_sec: 30 },
     autoTakerSaveStatus: '',  // '' | 'saving' | 'saved' | 'error'
     autoTakerSaveError: '',
     autoTakerStats: { today_accepted: 0, today_profit: 0, success_rate: 0 },
@@ -1130,6 +1134,7 @@ function exchangeApp() {
         if (!addr || !amt || !this.form?.relayNodeId) return;
         if (!confirm('Send ' + amt + ' KAS to ' + addr + '?')) return;
         try {
+          // lint-allow-chain-amount-precision: UI send-kas dialog, amt 来自 user input string, relay backend kasToSompi 真 8-decimal coerce.
           const r = await fetch('/api/relay/' + this.form.relayNodeId + '/transfer', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ target: addr, amount: String(amt) }) });
           const d = await r.json();
           if (d.txId) { alert('Sent! TX: ' + d.txId); this.walletPanel = null; await this.loadWallet(); }
@@ -1142,12 +1147,14 @@ function exchangeApp() {
       try {
         const d = await fetch('/api/exchange/autotaker-config').then(r => r.json());
         this.autoTakerConfig = {
-          enabled:      d.enabled,
-          mode:         d.mode || 'approval',
-          min_discount: d.min_discount,
-          max_amount:   d.max_amount,
-          daily_limit:  d.daily_limit,
-          cooldown_sec: d.cooldown_sec,
+          enabled:               d.enabled,
+          mode:                  d.mode || 'approval',
+          min_discount:          d.min_discount,
+          buy_min_discount_pct:  d.buy_min_discount_pct ?? d.min_discount,
+          sell_min_premium_pct:  d.sell_min_premium_pct ?? d.min_discount,
+          max_amount:            d.max_amount,
+          daily_limit:           d.daily_limit,
+          cooldown_sec:          d.cooldown_sec,
         };
       } catch {}
     },
@@ -1733,12 +1740,13 @@ function exchangeApp() {
           method: 'PUT',
           headers: {'Content-Type':'application/json'},
           body: JSON.stringify({
-            enabled:      c.enabled,
-            mode:         c.mode,
-            min_discount: c.min_discount,
-            max_amount:   c.max_amount,
-            daily_limit:  c.daily_limit,
-            cooldown_sec: c.cooldown_sec,
+            enabled:               c.enabled,
+            mode:                  c.mode,
+            buy_min_discount_pct:  c.buy_min_discount_pct,
+            sell_min_premium_pct:  c.sell_min_premium_pct,
+            max_amount:            c.max_amount,
+            daily_limit:           c.daily_limit,
+            cooldown_sec:          c.cooldown_sec,
           }),
         });
         const d = await r.json();

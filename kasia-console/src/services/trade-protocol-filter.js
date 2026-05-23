@@ -223,14 +223,24 @@ let _autoTakeLock = false;
 export async function _evaluateAutoTake(offerId, msg) {
   // NWT N8.1 5/18: autoTaker observability — 12 silent return 各 log gate + context.
   // J2 #523 / NWT N19.18 P0c: autotake_skip chain_event emit (合 Path A commit, surface KI 18 silent skip).
-  const _p = async (gate) => {
+  // KI 65 #85.2 (Owner 5/23 钦定, NWT N19.235): structured skip payload — reason / market / threshold / direction.
+  // _p(gate, extra) — extra carries call-site context (= market_price / offer_price / threshold / direction).
+  const _p = async (gate, extra = {}) => {
     console.log(`[autoTaker.probe] offer=${offerId.slice(0,12)} from=${msg._from?.slice(-12)} EXIT gate=${gate}`);
     try {
       const { recordChainEvent } = await import('./chain-event.js');
       recordChainEvent({
         txid: `autotake_skip_${offerId}_${gate.split(/[\s=<>]/)[0]}`,  // gate prefix avoid collision
         eventType: 'autotake_skip',
-        payload: JSON.stringify({ offer_id: offerId, reason: gate, peer: msg._from, give: `${msg.give_amount}${msg.give_asset}`, want: `${msg.want_amount}${msg.want_asset}` }),
+        payload: JSON.stringify({
+          offer_id: offerId,
+          reason: gate.split(/[\s=<>]/)[0],  // first token = canonical reason (lock/enabled/own_offer/discount/maxUsdt/...)
+          reason_detail: gate,                // full gate string for debug
+          peer: msg._from,
+          give: `${msg.give_amount}${msg.give_asset}`,
+          want: `${msg.want_amount}${msg.want_asset}`,
+          ...extra,
+        }),
       });
     } catch (err) { /* don't break probe on emit fail */ }
   };
@@ -318,7 +328,17 @@ export async function _evaluateAutoTake(offerId, msg) {
   const legacyDefault = await getConfig('autotake_min_discount_pct') || '0.5';
   const thresholdKey = isSellKas ? 'autotake_buy_min_discount_pct' : 'autotake_sell_min_premium_pct';
   const minDiscount = parseFloat((await getConfig(thresholdKey)) || legacyDefault) / 100;
-  if (discount < minDiscount) { await _p(`discount ${(discount*100).toFixed(2)}%<${(minDiscount*100).toFixed(2)}% market=${marketPrice} offerPrice=${offerPrice.toFixed(6)} dir=${direction} key=${thresholdKey}`); return; }
+  if (discount < minDiscount) {
+    await _p(`discount ${(discount*100).toFixed(2)}%<${(minDiscount*100).toFixed(2)}% market=${marketPrice} offerPrice=${offerPrice.toFixed(6)} dir=${direction} key=${thresholdKey}`, {
+      market_price: marketPrice,
+      offer_price: Number(offerPrice.toFixed(6)),
+      threshold_pct: Number((minDiscount * 100).toFixed(4)),
+      actual_pct: Number((discount * 100).toFixed(4)),
+      direction,
+      threshold_key: thresholdKey,
+    });
+    return;
+  }
 
   // 7. Amount cap — normalize 双向到 USD value
   // SELL: wantAmt 是 USDT (broker pay) → direct USD

@@ -196,6 +196,38 @@
       </div>
     </section>
 
+    <!-- ═══ AUTOTAKER OBSERVABILITY PANEL (KI 65 #85.2 — 24h skip 分布) ═══ -->
+    <section class="bg-white rounded-lg shadow-sm border border-warm-200" x-show="financials_total?.autotake_24h">
+      <div class="px-5 py-3 border-b border-warm-200 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="text-blue-600">⚙</span>
+          <h2 class="text-sm font-semibold text-ink-700">autoTaker 观测 (24h)</h2>
+        </div>
+        <div class="flex items-center gap-3 text-xs">
+          <span class="px-2 py-0.5 bg-green-100 text-green-700 rounded">
+            accepted: <span class="font-bold" x-text="financials_total?.autotake_24h?.accepted ?? 0"></span>
+          </span>
+          <span class="px-2 py-0.5 bg-amber-100 text-amber-700 rounded">
+            skipped: <span class="font-bold" x-text="financials_total?.autotake_24h?.skip_count ?? 0"></span>
+          </span>
+        </div>
+      </div>
+      <div class="px-5 py-3">
+        <div class="text-xs text-ink-500 mb-2">skip 分布 by reason (= 真 calibration data, 哪个 gate reject 最多):</div>
+        <template x-if="(financials_total?.autotake_24h?.skip_by_reason || []).length === 0">
+          <div class="text-xs text-ink-300 italic">无 skip event 24h</div>
+        </template>
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+          <template x-for="r in (financials_total?.autotake_24h?.skip_by_reason || [])" :key="r.reason">
+            <div class="flex items-center justify-between px-2 py-1 bg-warm-50 rounded">
+              <span class="text-xs text-ink-600 truncate" x-text="r.reason"></span>
+              <span class="text-xs font-bold text-ink-800 ml-2" x-text="r.count"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+    </section>
+
     <!-- ═══ STUCK ESCROW PANEL (KI-63 实证 — silent stuck surface) ═══ -->
     <section class="bg-white rounded-lg shadow-sm border border-warm-200">
       <div class="px-5 py-3 border-b border-warm-200 flex items-center justify-between">
