@@ -16,6 +16,9 @@ const STORAGE_MASS_SAFE_THRESHOLD_L4 = 400_000;  // KIP-9 cap with 20% buffer
 const MIN_BROKER_FEE_SOMPI_L4 = 5_000_000;       // 0.05 KAS broker fee floor
 const BETTOR_MIN_STAKE_L4 = 50_000_000;          // 0.5 KAS bettor min (Bug 8)
 const MAX_BETTORS_L4 = 50;                       // PoolSpine.sil L13 cap
+// Bettor r441 D7 disclaimer + r444 钦定 (b) — softcap per-market pot. Testnet 4 KAS;
+// mainnet TBD by Owner. Env override for ops adjustment without code change.
+const MAKER_STAKE_MAX_KAS = parseFloat(process.env.POOL_MAKER_STAKE_MAX_KAS) || 4;
 
 function deriveXOnlyPubkey(address) {
   return import('kaspa-wasm').then(kaspa => {
@@ -82,6 +85,8 @@ export async function registerPoolRoutes(fastify) {
     // Bug 8: minimum maker stake — small stakes produce tiny settle-TX outputs that blow the
     // Kaspa KIP-9 storage mass cap. v0.5 requires a minimum viable pot.
     if (makerStakeKas < 1) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be >= 1 KAS (v0.5 minimum — smaller stakes produce a settle TX exceeding Kaspa storage mass cap)' });
+    // Bettor r444 钦定 — per-market softcap enforce backend-side (= UI shows expose, backend rejects)
+    if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS (v0.5 testnet per-market softcap, Bettor r444 + Owner钦定 SS-baked)` });
     const makerStakeAmount = Math.round(makerStakeKas * 1e8);
     const oracleBondAmount = Math.round(oracleBondKas * 1e8);
     const makerStakeStr = (makerStakeAmount / 1e8).toFixed(8);
@@ -195,6 +200,7 @@ export async function registerPoolRoutes(fastify) {
       ok: true,
       default_miner_fee_sompi: 50_000,
       maker_stake_min_kas: 1,
+      maker_stake_max_kas: MAKER_STAKE_MAX_KAS,
       bettor_stake_min_kas: 0.5,
       bettors_max: 50,
       deadline_max_days: parseInt(process.env.POOL_DEADLINE_MAX_DAY, 10) || 30,
