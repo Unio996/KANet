@@ -11,6 +11,8 @@
 
 import { sqlite } from '../src/db/client.js';
 import { getBrokerRelayIdOrThrow } from '../src/services/broker-config-resolver.js';
+import cnSellerReal from '../test-framework/personas/real-chain/cn_seller_real.mjs';
+import cnBuyerReal from '../test-framework/personas/real-chain/cn_buyer_real.mjs';
 
 function pickRelay(ctx, type = 'user') {
   const pool = ctx.relays.filter(r => r.name.startsWith(`stress-${type}-`));
@@ -37,6 +39,62 @@ function getBrokerInfo() {
   return { id: brokerId, ...broker };
 }
 
+// Phase 5.0 — load stress relay full info (Kasia + BSC) for real-mode invocation.
+function loadRelayWalletInfo(relayId) {
+  const relay = sqlite.prepare('SELECT id, name, address FROM relay_nodes WHERE id = ?').get(relayId);
+  if (!relay) return null;
+  const bnb = sqlite.prepare(`SELECT address FROM agent_wallets WHERE relay_node_id = ? AND chain = 'bnb' AND is_default = 1`).get(relayId);
+  return {
+    relayId: relay.id,
+    name: relay.name,
+    kasia: relay.address,
+    bsc: bnb?.address || null,
+  };
+}
+
+// Phase 5.0 — wrap persona invoke with real chain flow. Returns { ok, tx_hashes, persona_stage }.
+// Phase 5 only A1 wired; other scenarios fall back to plan-only via planOnly arg in caller.
+export async function invokeSellReal({ user, broker, kasAmount }) {
+  if (!user.kasia || !user.bsc) return { ok: false, error: `user ${user.name} missing kasia/bsc address` };
+  try {
+    const result = await cnSellerReal.run(
+      { id: `stress_${user.name}` },
+      {
+        relayId: user.relayId,
+        userKasia: user.kasia,
+        brokerKasia: broker.address,
+        userEvmAddr: user.bsc,
+        qty: kasAmount,
+        chain: 'BSC',
+      },
+    );
+    return { ok: result.stage === 'completed_flow', persona_stage: result.stage, quote: result.quote, error: result.error };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+export async function invokeBuyReal({ user, broker, kasAmount }) {
+  if (!user.kasia || !user.bsc) return { ok: false, error: `user ${user.name} missing kasia/bsc address` };
+  try {
+    const result = await cnBuyerReal.run(
+      { id: `stress_${user.name}` },
+      {
+        relayId: user.relayId,
+        userKasia: user.kasia,
+        brokerKasia: broker.address,
+        userEvmAddr: user.bsc,
+        qty: kasAmount,
+        chain: 'BSC',
+        fromRelayName: user.name,
+      },
+    );
+    return { ok: result.stage === 'completed_flow', persona_stage: result.stage, payTx: result.payTx, error: result.error };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
 function basePlan(scenarioId, scenarioDesc) {
   return {
     scenario: scenarioId,
@@ -51,9 +109,10 @@ function basePlan(scenarioId, scenarioDesc) {
 // Group A — happy path (broker matches user via exchange offer protocol)
 function makeSell(kasAmount) {
   return async (ctx, scenario) => {
-    const user = pickRelay(ctx);
+    const userBase = pickRelay(ctx);
+    const user = loadRelayWalletInfo(userBase.id);
     const plan = basePlan(scenario.id, scenario.desc);
-    plan.user = { name: user.name, id: user.id };
+    plan.user = { name: user.name, id: user.relayId };
     plan.kas_amount = kasAmount;
     plan.estimated_usdt = +(kasAmount * 0.0343).toFixed(4);  // ~$0.0343/KAS approx market
     plan.preconditions = [
@@ -69,6 +128,16 @@ function makeSell(kasAmount) {
       `5. hedge (CEX KAS buy back, if size ≥ 25 KAS)`,
       `6. chain_event broker_fee_collected (= ${(kasAmount * 0.005).toFixed(4)} KAS fee, Block A.2 公式)`,
     ];
+    // Phase 5.0 — real-mode invoke if ctx.realMode flag set (A1 MVP, A2-A6 排日 expand)
+    if (ctx.realMode && scenario.id === 'A1') {
+      console.log(`[scenario-${scenario.id}] real-mode invoke cn_seller_real for ${user.name}`);
+      const realResult = await invokeSellReal({ user, broker: plan.broker, kasAmount });
+      plan.real_invoke = realResult;
+      plan.ok = realResult.ok;
+      if (!realResult.ok) plan.error = realResult.error;
+    } else if (ctx.realMode) {
+      plan.real_invoke = { ok: false, skipped: true, reason: `Phase 5.0 MVP — only A1 real-mode wired, ${scenario.id} 排日 expand` };
+    }
     return plan;
   };
 }

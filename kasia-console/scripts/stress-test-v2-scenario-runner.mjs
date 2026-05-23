@@ -199,8 +199,13 @@ async function main() {
   const dryRun = !args.includes('--no-dry-run');  // default TRUE (production safety)
   const intervalMs = parseInt(args.find(a => a.startsWith('--interval-ms='))?.slice('--interval-ms='.length) || '5000', 10);
   const useScheduler = args.includes('--scheduler');
+  // Phase 5.0 args:
+  const realMode = args.includes('--real-mode');  // Phase 5: 真 invoke persona real-chain flow (A1 MVP, A2+ 排日)
 
-  console.log(`[stress-runner] Phase 2.1 — seed=${SEED} dryRun=${dryRun} scheduler=${useScheduler} interval=${intervalMs}ms`);
+  console.log(`[stress-runner] Phase 5.0 — seed=${SEED} dryRun=${dryRun} scheduler=${useScheduler} realMode=${realMode} interval=${intervalMs}ms`);
+  if (realMode && dryRun) {
+    console.warn('[stress-runner] ⚠ --real-mode + dryRun=true: real invoke executes but dryRun flag passes through to schema. Phase 5.0 MVP — only A1 wired.');
+  }
 
   if (listOnly) {
     console.log('\n17 scenarios:');
@@ -223,7 +228,7 @@ async function main() {
 
   const relays = loadStressRelays();
   const rng = makeRng(SEED);
-  const ctx = { rng, relays };
+  const ctx = { rng, relays, realMode };
 
   const toRun = scenarioFilter ? SCENARIOS.filter(s => s.id === scenarioFilter) : SCENARIOS;
   if (toRun.length === 0) {
