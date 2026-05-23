@@ -5,7 +5,17 @@ import { sqlite } from '../db/client.js';
 import { computeSpineP2SH, computeSideP2SH } from '../lib/pool-p2sh.mjs';
 import { buildSidesMerkleTree, getMerkleProof } from '../services/pool-merkle-builder.js';
 import { sendCommandAsync, transferAndConfirm } from '../services/relay-manager.js';
+import { estimateStorageMass } from '../services/pool-market-settler.js';
 import { createHash, randomUUID } from 'node:crypto';
+
+// L4 (area-11): create-time invariants. Hardcoded mirrors of the settler constants;
+// kept inline rather than imported because they're stable v0.5 protocol values
+// (KIP-9 standardness cap + W3 broker fee floor design choice). Area-10 hardening
+// may refactor these into a shared protocol-constants module.
+const STORAGE_MASS_SAFE_THRESHOLD_L4 = 400_000;  // KIP-9 cap with 20% buffer
+const MIN_BROKER_FEE_SOMPI_L4 = 5_000_000;       // 0.05 KAS broker fee floor
+const BETTOR_MIN_STAKE_L4 = 50_000_000;          // 0.5 KAS bettor min (Bug 8)
+const MAX_BETTORS_L4 = 50;                       // PoolSpine.sil L13 cap
 
 function deriveXOnlyPubkey(address) {
   return import('kaspa-wasm').then(kaspa => {
@@ -75,6 +85,30 @@ export async function registerPoolRoutes(fastify) {
     const makerStakeAmount = Math.round(makerStakeKas * 1e8);
     const oracleBondAmount = Math.round(oracleBondKas * 1e8);
     const makerStakeStr = (makerStakeAmount / 1e8).toFixed(8);
+
+    // L4 (area-11): create-time invariants reject configs that cannot settle later.
+    // Worst-case scenario: 50 bettors at min stake all on the winning side opposite the
+    // maker → maker is the sole loser, distributable = maker_stake − broker_fee − minerFee,
+    // each winner output ≈ bettor_min_stake + distributable/50 (= tiny if maker_stake is
+    // small relative to fee floor), 3 oracle bond returns at oracleBondAmount. Storage mass
+    // and losingPool ≥ fee-floor checks below mirror the runtime checks in dispatchPhase2
+    // (settler L454) so a doomed config is rejected at create instead of locking maker stake.
+    const minerFee_L4 = parseInt(b.miner_fee, 10) || 20_000;
+    const worstLosingPool = makerStakeAmount;  // worst case: maker is sole loser
+    if (worstLosingPool < MIN_BROKER_FEE_SOMPI_L4 + minerFee_L4) {
+      return reply.code(400).send({ ok: false, error: `worst-case losingPool ${worstLosingPool} sompi < broker_fee_floor ${MIN_BROKER_FEE_SOMPI_L4} + minerFee ${minerFee_L4} — market would be unsettlable (area-11 L4)` });
+    }
+    const worstDistributable = worstLosingPool - MIN_BROKER_FEE_SOMPI_L4 - minerFee_L4;
+    const worstWinnerOutput = BETTOR_MIN_STAKE_L4 + Math.floor(worstDistributable / MAX_BETTORS_L4);
+    const worstInputs = [makerStakeAmount, oracleBondAmount, oracleBondAmount, oracleBondAmount];
+    for (let i = 0; i < MAX_BETTORS_L4; i++) worstInputs.push(BETTOR_MIN_STAKE_L4);
+    const worstOutputs = [MIN_BROKER_FEE_SOMPI_L4];
+    for (let i = 0; i < MAX_BETTORS_L4; i++) worstOutputs.push(worstWinnerOutput);
+    worstOutputs.push(oracleBondAmount, oracleBondAmount, oracleBondAmount);
+    const worstMass = estimateStorageMass(worstInputs, worstOutputs);
+    if (worstMass > STORAGE_MASS_SAFE_THRESHOLD_L4) {
+      return reply.code(400).send({ ok: false, error: `worst-case storage mass ${worstMass} > safe threshold ${STORAGE_MASS_SAFE_THRESHOLD_L4} (oracle_bond_kas=${oracleBondKas} relative to maker stake produces dust outputs) — area-11 L4` });
+    }
 
     // market_metadata_hash
     const metaInput = JSON.stringify({
