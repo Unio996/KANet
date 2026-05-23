@@ -331,6 +331,15 @@ fastify.get('/handshakes', async (request, reply) => {
   return reply.viewAsync('handshakes', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', relayNodes, _page: 'handshakes' });
 });
 
+// KANet-UI A.1 — B2 pool prediction market maker create UI (= V2 Editorial Dashboard)
+// spec: docs/b2-pool-ui-spec-v0.1.md Section 1 A.1, Bettor r443+r449 lock
+fastify.get('/predictions/pool/create', async (request, reply) => {
+  const lang = parseLang(request.headers.cookie);
+  const t = getT(lang);
+  const relayNodes = _listRelayNodes();
+  return reply.viewAsync('predictions-pool-create', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', relayNodes, _page: 'predictions-pool-create' });
+});
+
 // /audit → redirect to /contacts
 fastify.get('/audit', async (request, reply) => {
   const agent = request.query.agent ? `?agent=${request.query.agent}` : '';
