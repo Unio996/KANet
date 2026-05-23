@@ -221,6 +221,15 @@ export async function registerPoolRoutes(fastify) {
       return reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, bettor registration closed` });
     }
 
+    // Area-1 invariant: oracle ∩ bettor = ∅ (PoolSpine.sil L9-16, pp.txt 1.4). An oracle
+    // betting on its own adjudication is a direct manipulation vector. Reject before
+    // transferAndConfirm so no stake gets stranded.
+    let oracleIds = [];
+    try { oracleIds = JSON.parse(market.oracle_relay_ids || '[]'); } catch {}
+    if (oracleIds.includes(b.bettor_relay_id)) {
+      return reply.code(403).send({ ok: false, error: 'bettor_relay_id is in market oracle set — oracle/bettor exclusivity (area-1 invariant)' });
+    }
+
     const bettorRow = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(b.bettor_relay_id);
     if (!bettorRow?.address) return reply.code(400).send({ ok: false, error: 'bettor relay not found' });
 
