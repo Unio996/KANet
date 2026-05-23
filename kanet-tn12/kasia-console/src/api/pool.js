@@ -245,8 +245,11 @@ export async function registerPoolRoutes(fastify) {
     const bettorPk = await deriveXOnlyPubkey(bettorRow.address);
     const direction = parseInt(b.direction, 10);
     if (direction !== 0 && direction !== 1) return reply.code(400).send({ ok: false, error: 'direction must be 0 (YES) or 1 (NO)' });
+    // Q13 (area-8 E2): parseFloat('abc') = NaN; NaN <= 0 is false; NaN < 50M is also false →
+    // NaN/Infinity slip through both checks. Use Number.isFinite (matches create endpoint at
+    // L51/57/63/64). Reject before transferAndConfirm so no stake gets stranded.
     const stakeAmount = Math.round(parseFloat(b.stake_kas) * 1e8);
-    if (stakeAmount <= 0) return reply.code(400).send({ ok: false, error: 'stake_kas must be positive' });
+    if (!Number.isFinite(stakeAmount) || stakeAmount <= 0) return reply.code(400).send({ ok: false, error: 'stake_kas must be a positive finite number' });
     // Bug 8: minimum bettor stake — a tiny stake → tiny winner-payout output → KIP-9 storage mass overflow.
     if (stakeAmount < 50_000_000) return reply.code(400).send({ ok: false, error: 'stake_kas must be >= 0.5 KAS (v0.5 minimum — smaller stakes produce a settle TX exceeding Kaspa storage mass cap)' });
 
@@ -255,6 +258,16 @@ export async function registerPoolRoutes(fastify) {
     const bettorCount = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(marketId).c;
     if (bettorCount >= 50) {
       return reply.code(409).send({ ok: false, error: 'market full — 50 bettors max per market (v0.5 scope, PoolSpine.sil L13)' });
+    }
+
+    // Q14 (area-8 E8): PoolSide ctor has no disambiguator. Same (bettor_pk, direction,
+    // stake_amount) derives the IDENTICAL PoolSide P2SH. A second registration with these
+    // exact params would lock stake to the same address; SS PoolSide.claim_winner unlocks
+    // only one UTXO at that address → second stake permanently stuck. Block at registration.
+    const dup = sqlite.prepare('SELECT id FROM pool_bettor_sides WHERE market_id = ? AND bettor_pk = ? AND direction = ? AND stake_amount = ?')
+      .get(marketId, bettorPk, direction, stakeAmount);
+    if (dup) {
+      return reply.code(409).send({ ok: false, error: 'same (bettor_pk, direction, stake_amount) already registered — vary stake_kas to register an additional position' });
     }
 
     // Compute side P2SH
