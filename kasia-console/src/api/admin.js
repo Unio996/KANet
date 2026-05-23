@@ -715,13 +715,30 @@ export async function registerAdminRoutes(fastify) {
           });
         }
 
-        // Real transfer
+        // Real transfer — Phase 1B.2 (NWT N19.256): support asset='BNB' / native gas funding.
+        // Native (asset matches chain nativeSymbol): use signer.sendTransaction (= ETH-style native transfer).
+        // ERC20 (USDT/USDC): use transferUsdt helper.
+        const isNative = ['BNB', 'ETH', 'MATIC', 'AVAX'].includes(String(asset).toUpperCase());
         const { transferUsdt } = await import('../services/evm-transfer.js');
+        const { decrypt } = await import('../services/crypto.js');
+        const { EVM_RPC_URLS, isEvmChain } = await import('../services/chains.js');
+        const { ethers } = await import('ethers');
         const results = [];
         for (const r of recipients) {
           if (r.error) { results.push(r); continue; }
           try {
-            const tx = await transferUsdt(chain, brokerWallet.privkey_encrypted, r.address, amountPer, asset);
+            let tx;
+            if (isNative && isEvmChain(chain)) {
+              // Native transfer (BNB / ETH / MATIC / AVAX gas)
+              const rpcUrl = EVM_RPC_URLS[chain];
+              const provider = new ethers.JsonRpcProvider(rpcUrl);
+              const signer = new ethers.Wallet(decrypt(brokerWallet.privkey_encrypted), provider);
+              const sendTx = await signer.sendTransaction({ to: r.address, value: ethers.parseEther(String(amountPer)) });
+              tx = { ok: true, txHash: sendTx.hash };
+              try { provider.destroy?.(); } catch {}
+            } else {
+              tx = await transferUsdt(chain, brokerWallet.privkey_encrypted, r.address, amountPer, asset);
+            }
             results.push({ ...r, ok: tx.ok, tx_hash: tx.txHash, error: tx.error });
             if (tx.ok) {
               recordChainEvent({
@@ -729,14 +746,14 @@ export async function registerAdminRoutes(fastify) {
                 eventType: 'stress_test_funded',
                 fromAddress: brokerWallet.address,
                 toAddress: r.address,
-                payload: JSON.stringify({ relay_id: r.relay_id, name: r.name, amount: amountPer, asset, chain }),
+                payload: JSON.stringify({ relay_id: r.relay_id, name: r.name, amount: amountPer, asset, chain, native: isNative }),
               });
             }
           } catch (err) {
             results.push({ ...r, ok: false, error: err.message });
           }
         }
-        return reply.send({ ok: true, dryRun: false, asset, chain, results });
+        return reply.send({ ok: true, dryRun: false, asset, chain, native: isNative, results });
       } catch (err) {
         return reply.code(500).send({ error: err.message });
       }
