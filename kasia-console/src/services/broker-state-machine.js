@@ -175,6 +175,46 @@ export function transition({ orderId, expectedFromState, toState, opts = {}, db 
       auditPayload,
       'broker-state-machine.transition'
     );
+
+    // KI 65 B.3 (Owner 5/23 钦定, NWT N19.227 txid bind=deliver_tx_hash): broker_fee_collected onchain audit.
+    // Fire on transition to 'completed' (= deliveryTxHash provided, KAS settled, fee 真 collected).
+    if (toState === 'completed' && opts.deliveryTxHash) {
+      const order = db.prepare(`
+        SELECT id, side, qty, broker_fee_kas, net_delivery_kas, user_kasia_address
+        FROM retail_dex_orders WHERE id = ?
+      `).get(orderId);
+      if (order && order.broker_fee_kas != null) {
+        const broker = db.prepare(`
+          SELECT id, address, fee_rate_override FROM relay_nodes rn
+          WHERE EXISTS (SELECT 1 FROM json_each(rn.roles_json) je WHERE je.value = 'broker')
+          ORDER BY rn.created_at ASC LIMIT 1
+        `).get();
+        const rateUsed = (broker?.fee_rate_override != null) ? broker.fee_rate_override : 0.005;
+        const feePayload = JSON.stringify({
+          order_id: order.id,
+          broker_relay_id: broker?.id || null,
+          broker_address: broker?.address || null,
+          fee_kas: order.broker_fee_kas,
+          trade_size_kas: order.qty,
+          net_delivery_kas: order.net_delivery_kas,
+          rate_used: rateUsed,
+          side: order.side,
+          user_kasia_address: order.user_kasia_address,
+        });
+        db.prepare(`
+          INSERT INTO chain_events (id, txid, from_address, to_address, event_type, payload, observed_by, observed_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        `).run(
+          crypto.randomUUID(),
+          opts.deliveryTxHash,
+          broker?.address || null,
+          broker?.address || null,
+          'broker_fee_collected',
+          feePayload,
+          'broker-state-machine.transition'
+        );
+      }
+    }
   } else {
     db.prepare(`
       INSERT INTO broker_workflow_markers (id, event_type, src_event_id, payload, created_at)
