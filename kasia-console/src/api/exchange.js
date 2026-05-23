@@ -1395,18 +1395,21 @@ export async function registerExchangeRoutes(fastify) {
   // ── GET/PUT /api/exchange/autotaker-config — AutoTaker 配置 ──
   fastify.get('/api/exchange/autotaker-config', async (request, reply) => {
     const { getConfig } = await import('../data/settings/configs.js');
+    const legacyDiscount = await getConfig('autotake_min_discount_pct') || '0.5';
     return reply.send({
-      enabled:          (await getConfig('autotake_enabled')) === 'true',
-      mode:             (await getConfig('autotake_mode')) || 'approval',
-      min_discount:     parseFloat(await getConfig('autotake_min_discount_pct') || '0.5'),
-      max_amount:       parseFloat(await getConfig('autotake_max_amount_usdt') || '50'),
-      daily_limit:      parseInt(await getConfig('autotake_daily_limit') || '3'),
-      cooldown_sec:     parseInt(await getConfig('autotake_cooldown_sec') || '30'),
+      enabled:               (await getConfig('autotake_enabled')) === 'true',
+      mode:                  (await getConfig('autotake_mode')) || 'approval',
+      min_discount:          parseFloat(legacyDiscount),  // legacy field, preserved for back-compat
+      buy_min_discount_pct:  parseFloat((await getConfig('autotake_buy_min_discount_pct')) || legacyDiscount),
+      sell_min_premium_pct:  parseFloat((await getConfig('autotake_sell_min_premium_pct')) || legacyDiscount),
+      max_amount:            parseFloat(await getConfig('autotake_max_amount_usdt') || '50'),
+      daily_limit:           parseInt(await getConfig('autotake_daily_limit') || '3'),
+      cooldown_sec:          parseInt(await getConfig('autotake_cooldown_sec') || '30'),
     });
   });
 
   fastify.put('/api/exchange/autotaker-config', async (request, reply) => {
-    const { enabled, mode, min_discount, max_amount, daily_limit, cooldown_sec } = request.body || {};
+    const { enabled, mode, min_discount, buy_min_discount_pct, sell_min_premium_pct, max_amount, daily_limit, cooldown_sec } = request.body || {};
     const { setConfig } = await import('../data/settings/configs.js');
     const cat = { category: 'exchange_autotaker' };
     const updates = [];
@@ -1426,6 +1429,18 @@ export async function registerExchangeRoutes(fastify) {
         return reply.code(400).send({ error: 'min_discount must be 0-50' });
       await setConfig('autotake_min_discount_pct', String(v), cat);
       updates.push(`min_discount=${v}`);
+    }
+    if (buy_min_discount_pct !== undefined) {
+      const v = parseFloat(buy_min_discount_pct);
+      if (isNaN(v) || v < 0 || v > 50) return reply.code(400).send({ error: 'buy_min_discount_pct must be 0-50' });
+      await setConfig('autotake_buy_min_discount_pct', String(v), cat);
+      updates.push(`buy_min_discount_pct=${v}`);
+    }
+    if (sell_min_premium_pct !== undefined) {
+      const v = parseFloat(sell_min_premium_pct);
+      if (isNaN(v) || v < 0 || v > 50) return reply.code(400).send({ error: 'sell_min_premium_pct must be 0-50' });
+      await setConfig('autotake_sell_min_premium_pct', String(v), cat);
+      updates.push(`sell_min_premium_pct=${v}`);
     }
     if (max_amount !== undefined) {
       const v = parseFloat(max_amount);

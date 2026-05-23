@@ -313,8 +313,12 @@ export async function _evaluateAutoTake(offerId, msg) {
   // SELL: broker BUY KAS @ offer, profit if offer < market → discount = (market - offer) / market
   // BUY:  broker SELL KAS @ offer, profit if offer > market → discount = (offer - market) / market
   const discount = isSellKas ? ((marketPrice - offerPrice) / marketPrice) : ((offerPrice - marketPrice) / marketPrice);
-  const minDiscount = parseFloat(await getConfig('autotake_min_discount_pct') || '0.5') / 100;
-  if (discount < minDiscount) { await _p(`discount ${(discount*100).toFixed(2)}%<${(minDiscount*100).toFixed(2)}% market=${marketPrice} offerPrice=${offerPrice.toFixed(6)} dir=${direction}`); return; }
+  // KI 65 #85.1 (Owner 5/23 钦定): buy/sell threshold 分开 — broker BUY KAS 用 buy_min_discount,
+  // broker SELL KAS 用 sell_min_premium. Backward compat fallback to legacy autotake_min_discount_pct.
+  const legacyDefault = await getConfig('autotake_min_discount_pct') || '0.5';
+  const thresholdKey = isSellKas ? 'autotake_buy_min_discount_pct' : 'autotake_sell_min_premium_pct';
+  const minDiscount = parseFloat((await getConfig(thresholdKey)) || legacyDefault) / 100;
+  if (discount < minDiscount) { await _p(`discount ${(discount*100).toFixed(2)}%<${(minDiscount*100).toFixed(2)}% market=${marketPrice} offerPrice=${offerPrice.toFixed(6)} dir=${direction} key=${thresholdKey}`); return; }
 
   // 7. Amount cap — normalize 双向到 USD value
   // SELL: wantAmt 是 USDT (broker pay) → direct USD
