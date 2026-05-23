@@ -47,14 +47,23 @@ async function preflight() {
     checks.push({ name: 'console_health', ok: false, err: e.message });
     return { ok: false, checks };
   }
-  // 2. Trader-B kas_pool — broker primary, must have > 50 KAS for gas buffer
+  // 2. Trader-B kas_pool — broker primary, must have > 50 KAS for gas buffer.
+  //    Phase 1A.1 hotfix (NWT N19.240): KAS sits across multi-chain (cex:bybit/gateio/bitget/kucoin/mexc),
+  //    not just chain='kaspa'. Aggregate per-chain latest snapshot sum for true total.
   const brokerId = getBrokerRelayIdOrThrow();
   const treasury = sqlite.prepare(`
-    SELECT balance_human FROM treasury_snapshot
-    WHERE relay_node_id = ? AND asset='KAS' AND chain='kaspa'
-    ORDER BY snapshot_at DESC LIMIT 1
+    SELECT COALESCE(SUM(balance_human), 0) AS total FROM treasury_snapshot t
+    INNER JOIN (
+      SELECT relay_node_id, chain, asset, MAX(snapshot_at) AS max_ts
+      FROM treasury_snapshot
+      WHERE relay_node_id = ? AND asset='KAS' AND snapshot_at > datetime('now', '-1 hour')
+      GROUP BY chain
+    ) latest ON t.relay_node_id=latest.relay_node_id
+            AND t.chain=latest.chain
+            AND t.asset=latest.asset
+            AND t.snapshot_at=latest.max_ts
   `).get(brokerId);
-  const kasPool = Number(treasury?.balance_human || 0);
+  const kasPool = Number(treasury?.total || 0);
   checks.push({ name: 'broker_kas_pool', ok: kasPool > 50, kas: kasPool });
   if (kasPool <= 50) return { ok: false, checks };
 
