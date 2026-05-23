@@ -26,6 +26,12 @@ const STARTUP_GRACE_MS = 60 * 1000;         // 60s grace (= 错峰 voter daemon 
 // Default 30 min OK for testnet rapid iteration. Mainnet deploy MUST set 1440 (= 24h 钢线).
 const ORACLE_SILENT_TIMEOUT_MIN = parseInt(process.env.ORACLE_SILENT_TIMEOUT_MIN, 10) || 30;
 const ORACLE_SILENT_TIMEOUT_MS = ORACLE_SILENT_TIMEOUT_MIN * 60_000;
+// Area-7 T5 / area-4 Gap 6: DISAGREEMENT_TIMEOUT independent timer (= NOT ORACLE_SILENT_TIMEOUT
+// reuse, different semantics — disagreement is info-complete, no value waiting 24h). testnet
+// 5 min default, matches PoolSpine.sil refund_disagreement entry's `tx.time >= deadline + 300`
+// SS-hardcoded value. Mainnet rebuild SS + Console with longer value (1-2h per area-7 T5).
+const DISAGREEMENT_TIMEOUT_MIN = parseInt(process.env.DISAGREEMENT_TIMEOUT_MIN, 10) || 5;
+const DISAGREEMENT_TIMEOUT_MS = DISAGREEMENT_TIMEOUT_MIN * 60_000;
 
 // B2 v0.5 Phase 3 bug 8 — Kaspa Crescendo KIP-9 storage mass constraints.
 // A pool settle TX with many small-value outputs blows the storage mass cap (= UAT cycle 3:
@@ -117,6 +123,29 @@ export async function poolSettlerTick() {
         }
 
         const decision = decideConsensus(market);
+        // 7b — first-detection stash for refund_disagreement timing (= area-4 Gap 6 dual-track).
+        // Pure-function decideConsensus signals via stashDisagreementDetected flag; the write
+        // side-effect lives here so decideConsensus stays free of DB mutation. The stash is
+        // once-and-readonly: if disagreement_detected_at already set, this branch is bypassed
+        // (decideConsensus only emits the flag on first detection per its read of metadata).
+        if (decision.stashDisagreementDetected) {
+          let meta = {};
+          try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+          const detectedAt = new Date().toISOString();
+          sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+            .run(JSON.stringify({ ...meta, disagreement_detected_at: detectedAt }), market.id);
+          // Dual-track per Owner: also write chain_event so the protocol fact is on-chain,
+          // not only in internal DB state. Synthetic txid since this isn't a chain TX.
+          const syntheticTxid = `disagreement_detected:${market.id.slice(0,12)}:${Date.now()}`;
+          sqlite.prepare(`
+            INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+            VALUES (lower(hex(randomblob(16))), ?, 'disagreement_detected', NULL, NULL, ?, 'pool-settler', CURRENT_TIMESTAMP)
+          `).run(syntheticTxid, JSON.stringify({ market_id: market.id, detected_at: detectedAt, silent_oracle_index: decision.silentOracleIndex }));
+          console.log(`[pool-settler] DISAGREEMENT DETECTED market=${market.id.slice(0,12)} silentOracleIndex=${decision.silentOracleIndex} detected_at=${detectedAt}`);
+          // After stash, fall through to pending++ for this tick — next tick decideConsensus
+          // will use the stashed timestamp for timeout math.
+        }
+
         if (decision.action === 'consensus') {
           consensus++;
           console.log(`[pool-settler] CONSENSUS market=${market.id.slice(0,12)} winner=${decision.winner} unanimous=${decision.unanimous} silent_oracle=${decision.silentOracleIndex ?? 'none'}`);
@@ -134,6 +163,14 @@ export async function poolSettlerTick() {
           try { meta = JSON.parse(market.metadata || '{}'); } catch {}
           if (!meta.refund_dispatched_at) {
             await dispatchRefund(market, decision);
+          }
+        } else if (decision.action === 'refund_disagreement') {
+          refund++;
+          console.log(`[pool-settler] REFUND_DISAGREEMENT market=${market.id.slice(0,12)} silentOracleIndex=${decision.silentOracleIndex} reason=${decision.reason}`);
+          let meta = {};
+          try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+          if (!meta.refund_disagreement_dispatched_at) {
+            await dispatchRefundDisagreement(market, decision);
           }
         } else {
           pending++;
@@ -195,28 +232,56 @@ export function decideConsensus(market) {
   const ageMs = Date.now() - verifyingSinceMs;
   const pastSilentTimeout = ageMs >= ORACLE_SILENT_TIMEOUT_MS;
 
-  // Case 1: 3-of-3 same outcome → unanimous consensus
+  // 7b helper: read disagreement_detected_at stash (= area-4 Gap 6 once-and-readonly). The
+  // stash itself is written by poolSettlerTick on first detection (= side-effect kept out of
+  // this pure function); decideConsensus only reads it for timeout math.
+  let disagreementDetectedAtMs = null;
+  try {
+    const meta = JSON.parse(market.metadata || '{}');
+    if (meta.disagreement_detected_at) disagreementDetectedAtMs = parseSqliteUtc(meta.disagreement_detected_at);
+  } catch {}
+
+  // Case 1: 3-of-3 outcomes (consensus or full dissent)
   if (votes.length === 3) {
     const outcomes = new Set(votes.map(v => v.outcome));
     if (outcomes.size === 1 && (outcomes.has('YES') || outcomes.has('NO'))) {
       const winner = votes[0].outcome === 'YES' ? 0 : 1;
       return { action: 'consensus', winner, unanimous: true };
     }
-    // Disagreement (= 2 YES + 1 NO or vice versa) — Area 4 refund_disagreement entry handles
-    // this case post-DISAGREEMENT_TIMEOUT (= burn silent's bond for Gap 1B, return all for Gap 1A).
-    return { action: 'pending', reason: `disagreement: ${[...outcomes].join(',')}` };
+    // Gap 1A — 3 dissent (e.g. 2 YES + 1 NO or 1Y+1N+1other-YES/NO etc.). silentOracleIndex=-1.
+    // On first detection: caller stashes disagreement_detected_at + writes chain_event. Once
+    // stashed, after DISAGREEMENT_TIMEOUT we return refund_disagreement action with sIO=-1.
+    if (!disagreementDetectedAtMs) {
+      return { action: 'pending', reason: `disagreement (Gap 1A pending stash): ${[...outcomes].join(',')}`, stashDisagreementDetected: true, silentOracleIndex: -1 };
+    }
+    const disAgeMs = Date.now() - disagreementDetectedAtMs;
+    if (disAgeMs >= DISAGREEMENT_TIMEOUT_MS) {
+      return { action: 'refund_disagreement', silentOracleIndex: -1, reason: `Gap 1A: 3 dissent (${[...outcomes].join(',')}) past ${DISAGREEMENT_TIMEOUT_MIN}min` };
+    }
+    return { action: 'pending', reason: `Gap 1A: 3 dissent age ${Math.floor(disAgeMs/60000)}min < ${DISAGREEMENT_TIMEOUT_MIN}min` };
   }
 
-  // Case 2: 2-of-3 same outcome + 1 silent past timeout → majority forfeit
+  // Case 2: 2 votes + 1 silent (past silent timeout)
   if (votes.length === 2 && pastSilentTimeout) {
     const outcomes = new Set(votes.map(v => v.outcome));
+    const signedIndices = new Set(votes.map(v => v.oracleIndex));
+    const silentOracleIndex = [0, 1, 2].find(i => !signedIndices.has(i));
     if (outcomes.size === 1 && (outcomes.has('YES') || outcomes.has('NO'))) {
+      // 2 same direction + 1 silent → forfeit_1 (existing settle path)
       const winner = votes[0].outcome === 'YES' ? 0 : 1;
-      const signedIndices = new Set(votes.map(v => v.oracleIndex));
-      const silentOracleIndex = [0, 1, 2].find(i => !signedIndices.has(i));
       return { action: 'consensus', winner, unanimous: false, silentOracleIndex };
     }
-    return { action: 'pending', reason: `2-of-3 disagreement: ${[...outcomes].join(',')}` };
+    // Gap 1B — 2 split + 1 silent. silentOracleIndex identifies the silent oracle. On first
+    // detection: stash disagreement_detected_at + chain_event. After DISAGREEMENT_TIMEOUT,
+    // return refund_disagreement with silentOracleIndex = silent's index (silent bond burned).
+    if (!disagreementDetectedAtMs) {
+      return { action: 'pending', reason: `disagreement (Gap 1B pending stash): ${[...outcomes].join(',')} + oracle ${silentOracleIndex} silent`, stashDisagreementDetected: true, silentOracleIndex };
+    }
+    const disAgeMs = Date.now() - disagreementDetectedAtMs;
+    if (disAgeMs >= DISAGREEMENT_TIMEOUT_MS) {
+      return { action: 'refund_disagreement', silentOracleIndex, reason: `Gap 1B: 2 dissent + oracle ${silentOracleIndex} silent past ${DISAGREEMENT_TIMEOUT_MIN}min` };
+    }
+    return { action: 'pending', reason: `Gap 1B: mid-disagreement age ${Math.floor(disAgeMs/60000)}min < ${DISAGREEMENT_TIMEOUT_MIN}min` };
   }
 
   // Case 3: ≤1 vote past silent timeout → refund_all (= per Bettor r335: 1 vote insufficient majority)
@@ -596,6 +661,133 @@ export async function dispatchRefund(market, decision) {
     console.log(`[pool-settler] DISPATCHED Refund market=${market.id.slice(0,12)} reason=${decision.reason} maker_refund=${makerRefundAmount} → refunding`);
   } catch (e) {
     console.error(`[pool-settler] dispatchRefund fail market=${market.id?.slice(0,12)}: ${e.message}`);
+  }
+}
+
+/**
+ * 7b — dispatchRefundDisagreement: build settle TX preimage for the refund_disagreement SS
+ * entry (area-4 + Owner Gap 1B burn). Mirrors dispatchPhase2 pattern but constructs the
+ * refund_disagreement output layout:
+ *   - silentOracleIndex === -1 (Gap 1A): 4 outputs = maker + 3 oracle bonds (all dissent)
+ *   - silentOracleIndex === 0|1|2 (Gap 1B): 3 outputs = maker + 2 dissent oracle bonds
+ *     (silent oracle's bond NOT in outputs → input/output difference burned per Owner)
+ *
+ * Output[0] = maker recovers (makerStakeAmount - minerFee) per area-4 Gap 9.
+ * Output[1..N] = surviving oracle bond returns at oracleBondAmount each.
+ *
+ * Stashes refund_disagreement_tx_obj in metadata + transitions market to 'collecting_sigs'.
+ * handleCollectingSigs aggregates the 2 oracle sigs (= per signingPair = 2 - silentOracleIndex
+ * for Gap 1B, any pair for Gap 1A) and the relay IPC (= 7c) assembles + submits.
+ *
+ * @param {object} market — pool_markets row
+ * @param {{ silentOracleIndex: number, reason: string }} decision
+ */
+export async function dispatchRefundDisagreement(market, decision) {
+  try {
+    const { silentOracleIndex } = decision;
+    if (silentOracleIndex !== -1 && (silentOracleIndex < 0 || silentOracleIndex > 2)) {
+      console.warn(`[pool-settler] dispatchRefundDisagreement market=${market.id.slice(0,12)} invalid silentOracleIndex=${silentOracleIndex}`);
+      return;
+    }
+
+    const makerStake = parseInt(market.maker_stake_amount, 10) || 0;
+    const oracleBond = parseInt(market.oracle_bond_amount, 10) || 0;
+    const minerFee = parseInt(market.miner_fee, 10) || 20_000;
+
+    const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
+    if (!makerRow?.address) {
+      console.warn(`[pool-settler] dispatchRefundDisagreement market=${market.id.slice(0,12)} no maker address`);
+      return;
+    }
+
+    const oracleIds = JSON.parse(market.oracle_relay_ids || '[]');
+    const oracleRows = oracleIds.map(rid => sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(rid));
+    if (oracleRows.some(r => !r?.address)) {
+      console.warn(`[pool-settler] dispatchRefundDisagreement market=${market.id.slice(0,12)} missing oracle addresses`);
+      return;
+    }
+
+    // Build outputs per silentOracleIndex
+    const makerRefund = makerStake - minerFee;
+    if (makerRefund <= 0) {
+      console.warn(`[pool-settler] dispatchRefundDisagreement market=${market.id.slice(0,12)} makerRefund=${makerRefund} <= 0`);
+      return;
+    }
+    const outputs = [{ address: makerRow.address, amountSompi: makerRefund.toString() }];
+    // For Gap 1A: include all 3 oracle bonds. For Gap 1B: skip the silent oracle.
+    for (let i = 0; i < 3; i++) {
+      if (silentOracleIndex === i) continue;
+      outputs.push({ address: oracleRows[i].address, amountSompi: oracleBond.toString() });
+    }
+    // Sanity: outputs.length should match SS entry's strict equality check
+    const expectedOutputCount = silentOracleIndex === -1 ? 4 : 3;
+    if (outputs.length !== expectedOutputCount) {
+      console.warn(`[pool-settler] dispatchRefundDisagreement market=${market.id.slice(0,12)} outputs.length=${outputs.length} != expected ${expectedOutputCount}`);
+      return;
+    }
+
+    // Inputs: spine (maker stake UTXO) + N oracle deposit UTXOs (= each oracle's bond UTXO)
+    const depositRows = sqlite.prepare(`
+      SELECT payload FROM chain_events
+      WHERE event_type = 'pool_oracle_deposit' AND payload LIKE ?
+    `).all(`%"market_id":"${market.id}"%`);
+    const oracleDepositOutpoints = depositRows.map(r => {
+      const p = JSON.parse(r.payload);
+      return { outpointTxid: p.deposit_tx, outpointIndex: 0 };
+    });
+    const requiredInputOutpoints = [
+      { outpointTxid: market.spine_lock_tx, outpointIndex: 0 },
+      ...oracleDepositOutpoints,
+    ];
+
+    // signingPair: Gap 1B forced to 2 - silentOracleIndex; Gap 1A defaults to 0 (oracle1+2)
+    const signingPair = silentOracleIndex === -1 ? 0 : (2 - silentOracleIndex);
+    const signingOracles = silentOracleIndex === -1
+      ? [0, 1]   // Gap 1A: signingPair=0 → oracle1+2 sign
+      : [0, 1, 2].filter(i => i !== silentOracleIndex);
+
+    // Build preimage via maker_relay (single-p2sh refund TX on spine inputs only)
+    const preimage = await sendCommandAsync(market.maker_relay_id, {
+      type: 'prediction_settle_build_preimage',
+      p2sh_address: market.spine_p2sh,
+      required_input_outpoints: requiredInputOutpoints,
+      outputs,
+    });
+    if (!preimage?.ok || !preimage.tx_obj) {
+      console.error(`[pool-settler] dispatchRefundDisagreement build_preimage fail market=${market.id.slice(0,12)}: ${preimage?.error}`);
+      return;
+    }
+
+    let prevMeta = {};
+    try { prevMeta = JSON.parse(market.metadata || '{}'); } catch {}
+    const newMeta = {
+      ...prevMeta,
+      refund_disagreement_tx_obj: preimage.tx_obj,
+      refund_disagreement_silent_oracle_index: silentOracleIndex,
+      refund_disagreement_signing_pair: signingPair,
+      refund_disagreement_dispatched_at: new Date().toISOString(),
+      refund_disagreement_outputs: outputs,
+      refund_disagreement_input_count: requiredInputOutpoints.length,
+    };
+    sqlite.prepare('UPDATE pool_markets SET metadata = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(JSON.stringify(newMeta), 'collecting_sigs', market.id);
+
+    // DM the 2 signing oracles for refund_disagreement sigs (= 7c relay IPC schema handles
+    // the unlock scriptSig assembly per signingPair).
+    const reqPayload = JSON.stringify({
+      t: 'kanet_pool_oracle_refund_disagreement_sign_req_v1',
+      market_id: market.id,
+      silent_oracle_index: silentOracleIndex,
+      signing_pair: signingPair,
+      input_count: requiredInputOutpoints.length,
+    });
+    Promise.allSettled(signingOracles.map(i =>
+      sendCommandAsync(market.maker_relay_id, { type: 'send_message', target: oracleRows[i].address, message: reqPayload })
+    )).catch(() => {});
+
+    console.log(`[pool-settler] DISPATCHED RefundDisagreement market=${market.id.slice(0,12)} silentOracleIndex=${silentOracleIndex} signingPair=${signingPair} outputs=${outputs.length} signers=${signingOracles.join(',')} → collecting_sigs`);
+  } catch (e) {
+    console.error(`[pool-settler] dispatchRefundDisagreement fail market=${market.id?.slice(0,12)}: ${e.message}`);
   }
 }
 
