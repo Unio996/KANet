@@ -12,14 +12,14 @@
  */
 import * as kaspa from 'kaspa-wasm';
 import { getWallet } from './lib/wallet.mjs';
-import { decrypt } from './lib/crypto.mjs';
+import { decrypt, isValidKaspaAddress } from './lib/crypto.mjs';
 import { deriveAliases } from './lib/alias.mjs';
 import { classifyPayload, PREFIX_HEX, PREFIX } from './lib/protocol.mjs';
 import { acceptHandshake, sendKaspa, sendMessage } from './chain.mjs';
 import { getAIReply } from './ai.mjs';
 import { routeMessage } from './router.mjs';
 import { loadSeen, saveSeen } from './state.mjs';
-import { ingestMessage, ingestReply, ingestTx, ingestHandshake } from './ingest.mjs';
+import { ingestMessage, ingestReply, ingestTx, ingestHandshake, ingestKaspaTx } from './ingest.mjs';
 
 const { RpcClient, Encoding } = kaspa;
 const Resolver = kaspa.Resolver || null;  // npm ^0.13.0 removed Resolver
@@ -32,6 +32,9 @@ const KASPA_NETWORK = process.env.KASPA_NETWORK || 'mainnet';
 const RECONNECT_BASE_MS      = 5000;
 const RECONNECT_MAX_MS       = 60000;
 const BLOCKLIST_INTERVAL_MS  = 30000;
+const CATCHUP_RETRY_INTERVAL_MS = 60000;
+let _catchupTimer = null;
+const WATCHED_REFRESH_MS     = 60000;    // indexer watched addresses refresh
 const SEEN_FLUSH_INTERVAL_MS = 5000;
 
 // Minimum hex length for any Kasia payload (shortest prefix = "ciph_msg:" in hex)
@@ -50,6 +53,48 @@ let _running = false;
 let _reconnecting = false;
 let _reconnectAttempt = 0;
 let _blocklistTimer = null;
+let _healthTimer = null;
+let _walletRef = null;
+// T-J2-2026-05-12 #1 — RPC state observability (UI 健康检测 P0 误导 bug fix)
+// 给 console UI 探针真反映 relay child 内部 _rpc state, 替 console daemon 自己 RpcClient 测的 misleading /api/config/rpc-status.
+let _currentUrl = null;       // 当前 connect 的 URL (directUrl OR resolver-derived)
+let _lastConnectedAt = null;  // 最后一次 connect 成功的 epoch ms
+let _lastError = null;        // 最后一次 disconnect / health check / reconnect fail 的 message
+
+/**
+ * Shared RpcClient accessor — 任何 transaction/broadcast 路径必须用这个,
+ * 不再 new RpcClient. 由 _connect/_scheduleReconnect 统一维护.
+ */
+export function getSharedRpcClient() {
+  if (!_rpc) throw new Error('RpcClient not yet connected — call waitForRpc first');
+  return _rpc;
+}
+
+export function isRpcConnected() {
+  return _rpc !== null;
+}
+
+// T-J2-2026-05-12 #1 — RPC state observability getter (consumed by relay.mjs IPC 'get_rpc_state', see #2).
+// 返 snapshot, 不 expose RpcClient 本身. lastConnectedAt/lastError 给 UI 显示 "30s 前连上" / 最后一次错原因.
+export function getRpcState() {
+  return {
+    connected: _rpc !== null && !_reconnecting,
+    reconnecting: _reconnecting,
+    attempt: _reconnectAttempt,
+    currentUrl: _currentUrl,
+    lastConnectedAt: _lastConnectedAt,
+    lastError: _lastError,
+  };
+}
+
+export async function waitForRpc(timeoutMs = 30000) {
+  const start = Date.now();
+  while (!isRpcConnected() && (Date.now() - start) < timeoutMs) {
+    await new Promise(r => setTimeout(r, 200));
+  }
+  if (!isRpcConnected()) throw new Error(`Shared RpcClient not ready after ${timeoutMs}ms`);
+  return _rpc;
+}
 
 let _myAddress = null;
 let _myPrivateKeyHex = null;
@@ -62,6 +107,16 @@ let _seenDirty = false;
 let _seenTimer = null;
 
 let _blocklist = new Set();
+let _handshakeAccepted = new Set();  // ESM strict mode requires explicit declaration before any assignment
+
+// ── Embedded Kaspa TX indexer state ──
+// Watched addresses that we should persist to kaspa_tx_log on every block observation.
+// Refreshed periodically from Console /api/indexer/watched-addresses.
+let _watchedAddresses = new Set();
+let _watchedRefreshTimer = null;
+// Dedup for indexed TXs (prevents re-posting the same TX seen in multiple block notifications)
+const _indexedTxs = new Set();
+const INDEXED_MAX = 20000;
 
 // ── Logging ─────────────────────────────────────────────────────────────────
 
@@ -93,6 +148,17 @@ function pruneAttempted() {
 }
 
 function isToUs(tx) {
+  // 漏洞 #9 fix (2026-05-04): 排除自己发的 outbound TX。
+  // 旧逻辑: 只看 outputs 含 _myAddress → 自己发握手时找零 output 含自己 → isToUs=true →
+  // processHandshake → decrypt 失败 (payload 加密给 peer pubkey, 自己 privkey 解不开) →
+  // throw "Unsupported state or unable to authenticate data"。
+  // 真 e2e (5/4 J2→Trader-M TX 3f342dee) 漏洞 #3 telemetry 暴露此 bug, events 表 3 行 throw 留痕。
+  // 修法: inputs 含 _myAddress = 我们是 sender, 直接 return false 不 process 自己 outbound。
+  // 真握手主路径不影响: peer 那边 inputs 不含 _myAddress (sender 是另一方), outputs 含自己 → 仍 return true。
+  const inputs = tx?.inputs || [];
+  for (const inp of inputs) {
+    if (inp?.verboseData?.scriptPublicKeyAddress === _myAddress) return false;
+  }
   const outputs = tx?.outputs || [];
   for (const out of outputs) {
     if (out?.verboseData?.scriptPublicKeyAddress === _myAddress) return true;
@@ -129,6 +195,97 @@ async function refreshBlocklist() {
   } catch {}
 }
 
+async function refreshWatchedAddresses() {
+  if (!CONSOLE_URL) return;
+  try {
+    const res = await fetch(
+      `${CONSOLE_URL}/api/indexer/watched-addresses?network=${KASPA_NETWORK}`,
+      { signal: AbortSignal.timeout(5000) },
+    );
+    if (res.ok) {
+      const data = await res.json();
+      _watchedAddresses = new Set(data.addresses || []);
+      // Always watch our own address too (defense in depth)
+      if (_myAddress) _watchedAddresses.add(_myAddress);
+    }
+  } catch {}
+}
+
+// Parse TX outputs, index any that send to a watched address.
+// Runs BEFORE protocol filter so it's independent of Kasia protocol handling.
+function indexBlockTxs(block) {
+  if (_watchedAddresses.size === 0) return;
+
+  const blockHash = block?.verboseData?.hash || block?.header?.hash || null;
+  const blockTime = block?.header?.timestamp
+    ? Math.floor(Number(block.header.timestamp) / 1000)  // ms → s
+    : Math.floor(Date.now() / 1000);
+
+  const txs = block.transactions || block.body?.transactions || [];
+  for (const tx of txs) {
+    const txId = tx?.verboseData?.transactionId || tx?.id;
+    if (!txId) continue;
+
+    // Dedup: skip if we've already reported this TX
+    if (_indexedTxs.has(txId)) continue;
+
+    const outputs = tx?.outputs || [];
+    if (outputs.length === 0) continue;
+
+    // Find outputs to watched addresses
+    let matchedRecipient = null;
+    let matchedAmountSompi = 0;
+    const outputSummary = [];
+
+    for (const out of outputs) {
+      const addr = out?.verboseData?.scriptPublicKeyAddress;
+      const amountSompi = parseInt(out?.value || '0', 10);
+      if (addr) {
+        outputSummary.push({ address: addr, amount_sompi: amountSompi });
+      }
+      if (addr && _watchedAddresses.has(addr)) {
+        // Sum all outputs to same watched recipient (some TXs split outputs)
+        if (!matchedRecipient) matchedRecipient = addr;
+        if (addr === matchedRecipient) matchedAmountSompi += amountSompi;
+      }
+    }
+
+    if (!matchedRecipient) continue;  // No watched address in outputs → skip
+
+    // Extract best-effort sender from first input
+    let fromAddress = null;
+    const inputs = tx?.inputs || [];
+    for (const inp of inputs) {
+      const addr = inp?.verboseData?.scriptPublicKeyAddress;
+      if (addr) { fromAddress = addr; break; }
+    }
+
+    const amountKas = matchedAmountSompi / 1e8;
+
+    // Fire and forget — ingest.mjs handles backoff on Console failures
+    ingestKaspaTx({
+      txId,
+      blockHash,
+      blockTime,
+      fromAddress,
+      toAddress: matchedRecipient,
+      amount: amountKas,
+      outputs: outputSummary,
+    });
+
+    // Mark indexed so we don't re-report
+    _indexedTxs.add(txId);
+    if (_indexedTxs.size > INDEXED_MAX) {
+      // Drop oldest half (simple eviction)
+      let toDrop = _indexedTxs.size - (INDEXED_MAX / 2);
+      for (const id of _indexedTxs) {
+        if (toDrop-- <= 0) break;
+        _indexedTxs.delete(id);
+      }
+    }
+  }
+}
+
 // ── Connection lifecycle ────────────────────────────────────────────────────
 
 export async function startRpcListener() {
@@ -141,10 +298,22 @@ export async function startRpcListener() {
 
   _seenTimer = setInterval(flushSeen, SEEN_FLUSH_INTERVAL_MS);
 
-  // Catch up on missed transactions before subscribing to new blocks
+  // ── 启动顺序 (2026-04-23 修): 原 catchUpHistory 在 _connect 之前调, 但它内部
+  // 通过 sendKaspa 需要 getSharedRpcClient(), 结果 _rpc 是 null, 所有 pending
+  // handshake_accept 首次尝试都失败 (Shared RpcClient not ready after 30000ms).
+  // 因为 catchUpHistory 只在启动时跑一次, 失败的 pending_action 永远卡死 pending.
+  // 修: 先 _connect 建立 RPC, 再 catchUpHistory, 然后加周期性 retry 兜底. ──
+  await _connect(wallet);
+
+  // Catch up on missed pending_actions after RPC is ready
   await catchUpHistory();
 
-  await _connect(wallet);
+  // Periodic retry: pending_actions 若失败 (如 RPC 抖动) 每 60s 再试,
+  // 直到 retry_count 达 max_retries (默认 3) 才终态 expired
+  if (_catchupTimer) clearInterval(_catchupTimer);
+  _catchupTimer = setInterval(() => {
+    catchUpHistory().catch(err => log('periodic catch-up err:', err?.message || err));
+  }, CATCHUP_RETRY_INTERVAL_MS);
 }
 
 /**
@@ -232,7 +401,14 @@ async function catchUpHistory() {
       const { messages } = await res.json();
       for (const msg of messages) {
         if (!msg.remoteAddress || !msg.message || _blocklist.has(msg.remoteAddress)) continue;
-        if (!msg.remoteAddress.startsWith('kaspa:')) continue; // Skip invalid addresses
+        // Strict bech32 check — the old startsWith('kaspa:') guard let test
+        // fixtures like `kaspa:qqtrustedintro<ts>aaa` through, which then
+        // crashed encrypt() and burned brain inference + RPC every restart.
+        if (!isValidKaspaAddress(msg.remoteAddress)) {
+          log(`catch-up: skip invalid kaspa address ${msg.remoteAddress.slice(0, 30)}…`);
+          if (msg.txid) markSeen(msg.txid); // permanent skip, do not poll again
+          continue;
+        }
         try {
           // Skip if already processed (prevents replay after restart)
           if (msg.txid && _seen.has(msg.txid)) {
@@ -308,6 +484,7 @@ async function catchUpHistory() {
 }
 
 async function _connect(wallet) {
+  _walletRef = wallet;
   const networkId = wallet.getNetworkId();
   const directUrl = await resolveRpcUrl();
 
@@ -318,10 +495,13 @@ async function _connect(wallet) {
       : (() => { throw new Error('No RPC URL configured and Resolver unavailable. Set KASPA_RPC_URL env var.'); })();
 
   _rpc = new RpcClient(rpcOpts);
+  _currentUrl = directUrl || '(resolver)';  // T-J2-2026-05-12 #1 — track URL for getRpcState()
 
   log('connecting to', directUrl || 'resolver...');
   await _rpc.connect({});
   _reconnectAttempt = 0;
+  _lastConnectedAt = Date.now();  // T-J2-2026-05-12 #1
+  _lastError = null;              // T-J2-2026-05-12 #1 — clear on success
 
   const { isSynced } = await _rpc.getServerInfo();
   log(isSynced ? 'node is synced' : 'WARNING: node is not synced');
@@ -334,6 +514,11 @@ async function _connect(wallet) {
   if (_blocklistTimer) clearInterval(_blocklistTimer);
   await refreshBlocklist();
   _blocklistTimer = setInterval(refreshBlocklist, BLOCKLIST_INTERVAL_MS);
+
+  // Embedded indexer: refresh watched addresses
+  await refreshWatchedAddresses();
+  _watchedRefreshTimer = setInterval(refreshWatchedAddresses, WATCHED_REFRESH_MS);
+  log(`indexer: watching ${_watchedAddresses.size} addresses`);
 
   let blockCount = 0;
   _rpc.addEventListener('block-added', async (event) => {
@@ -350,8 +535,22 @@ async function _connect(wallet) {
 
   _rpc.addEventListener('disconnect', () => {
     log('DISCONNECTED from node');
+    _lastError = 'disconnect event';  // T-J2-2026-05-12 #1
     _scheduleReconnect(wallet);
   });
+
+  // Health check: 每 30s ping getServerInfo, 失败立刻 reconnect (补 SDK 不 emit disconnect 的漏洞)
+  if (_healthTimer) clearInterval(_healthTimer);
+  _healthTimer = setInterval(async () => {
+    try {
+      await _rpc.getServerInfo();
+    } catch (err) {
+      const msg = err?.message || String(err);
+      log('health check failed:', msg, '— triggering reconnect');
+      _lastError = `health check: ${msg}`;  // T-J2-2026-05-12 #1
+      _scheduleReconnect(wallet);
+    }
+  }, 30_000);
 
   log('listening...');
 }
@@ -359,6 +558,7 @@ async function _connect(wallet) {
 function _scheduleReconnect(wallet) {
   if (_reconnecting || !_running) return;
   _reconnecting = true;
+  if (_healthTimer) { clearInterval(_healthTimer); _healthTimer = null; }
 
   const delay = Math.min(
     RECONNECT_BASE_MS * Math.pow(2, _reconnectAttempt),
@@ -375,7 +575,9 @@ function _scheduleReconnect(wallet) {
       await _connect(wallet);
       log('reconnected');
     } catch (err) {
-      log('reconnect failed:', err?.message || err);
+      const msg = err?.message || String(err);
+      log('reconnect failed:', msg);
+      _lastError = `reconnect: ${msg}`;  // T-J2-2026-05-12 #1
       _scheduleReconnect(wallet);
     }
   }, delay);
@@ -384,7 +586,9 @@ function _scheduleReconnect(wallet) {
 export async function stopRpcListener() {
   _running = false;
   if (_blocklistTimer) { clearInterval(_blocklistTimer); _blocklistTimer = null; }
+  if (_watchedRefreshTimer) { clearInterval(_watchedRefreshTimer); _watchedRefreshTimer = null; }
   if (_seenTimer) { clearInterval(_seenTimer); _seenTimer = null; }
+  if (_catchupTimer) { clearInterval(_catchupTimer); _catchupTimer = null; }
   flushSeen();
   if (_rpc) { try { await _rpc.disconnect(); } catch {} _rpc = null; }
   log('stopped');
@@ -395,6 +599,15 @@ export async function stopRpcListener() {
 async function handleBlock(event) {
   const block = event?.data?.block;
   if (!block) return;
+
+  // Embedded Kaspa TX indexer: record watched-address TXs BEFORE protocol filtering.
+  // This is independent of protocol payload — we want to track all value transfers
+  // to/from our Agents for later verification, not just Kasia messages.
+  try {
+    indexBlockTxs(block);
+  } catch (err) {
+    log('ERROR in indexBlockTxs:', err?.message || err);
+  }
 
   const transactions = block.transactions || block.body?.transactions || [];
 
@@ -448,6 +661,7 @@ async function processHandshake(txId, payloadHex, senderAddress) {
 
     // Record the inbound handshake TX (observation only — no status advancement)
     ingestTx({ traceId: txId, txid: txId, direction: 'inbound', localAddress: _myAddress });
+    log('HANDSHAKE step 1 ingestTx ok');
 
     if (_blocklist.has(senderAddress)) {
       log('BLOCKED — handshake ignored');
@@ -456,12 +670,12 @@ async function processHandshake(txId, payloadHex, senderAddress) {
     }
 
     // DEDUP 1: in-memory check
-    if (!_handshakeAccepted) _handshakeAccepted = new Set();
     if (_handshakeAccepted.has(senderAddress)) {
       log('HANDSHAKE already accepted for', senderAddress.slice(-12), '— skipping (memory dedup)');
       markSeen(txId);
       return;
     }
+    log('HANDSHAKE step 2 dedup-1 in-memory pass');
     // DEDUP 2: check Console relation_states (persists across restarts)
     if (CONSOLE_URL) {
       try {
@@ -474,6 +688,7 @@ async function processHandshake(txId, payloadHex, senderAddress) {
         }
       } catch {}
     }
+    log('HANDSHAKE step 3 dedup-2 db pass');
 
     // Register inbound handshake in Console → triggers pending_actions queue
     ingestMessage({
@@ -482,6 +697,7 @@ async function processHandshake(txId, payloadHex, senderAddress) {
       txid: txId, messageType: 'handshake', contentText: '',
       theirAlias,
     });
+    log('HANDSHAKE step 4 ingestMessage ok');
 
     // Atomic create + claim: write pending_action and lock it before spending KAS
     // If claim fails, catch-up already took this one — skip sendKaspa
@@ -499,8 +715,11 @@ async function processHandshake(txId, payloadHex, senderAddress) {
         );
         const claimData = await claimRes.json();
         if (!claimData.claimed) {
-          log('HANDSHAKE claim failed for', senderAddress.slice(-12), '— already processing, skipping');
-          markSeen(txId);
+          // 漏洞 #6 fix (2026-05-04): 不 markSeen — 让 catch-up 真有 retry 能力。
+          // 旧逻辑: claim fail → markSeen → 如果其他 worker 之后也 fail (如 sendKaspa throw),
+          // 这笔握手永久死, pending_action 终态 expired 也不会重新唤醒本路径。
+          // step 2/3 (memory + DB dedup) 已防真重复 accept, markSeen 是冗余的。
+          log('HANDSHAKE claim failed for', senderAddress.slice(-12), '— already processing, will recheck next cycle');
           return;
         }
       } catch (claimErr) {
@@ -508,6 +727,7 @@ async function processHandshake(txId, payloadHex, senderAddress) {
         log('HANDSHAKE claim check failed:', claimErr?.message, '— proceeding');
       }
     }
+    log('HANDSHAKE step 5 claim ok');
 
     log('auto-accepting handshake...');
     const draft = await acceptHandshake({ address: senderAddress });
@@ -537,9 +757,29 @@ async function processHandshake(txId, payloadHex, senderAddress) {
     } else {
       log('HANDSHAKE: accept draft failed — will retry on next startup');
     }
-  } catch {
-    // Decrypt failed — not for us, mark seen to avoid retrying
-    markSeen(txId);
+  } catch (err) {
+    // T1-bugfix-handshake Step 1: log err.message (was silent swallow per NWT r124 architect verdict)
+    log(`HANDSHAKE processing failed for ${senderAddress?.slice(-12) || 'unknown'}: ${err?.message || err}`);
+    // 漏洞 #3 fix (2026-05-04): outer catch 同步上报到 Console events 表, 让系统级追踪可见。
+    // 否则只能挖 Relay log 文件, 系统层完全无痕迹。 catch-up retry 机制不变。
+    if (CONSOLE_URL) {
+      fetch(`${CONSOLE_URL}/ingest/event`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-ingest-secret': process.env.INGEST_SECRET || '' },
+        body: JSON.stringify({
+          traceId: `handshake-fail:${txId}`,
+          eventScope: 'relay',
+          eventType: 'handshake_processing_failed',
+          source: 'relay',
+          level: 'error',
+          summary: `processHandshake throw txId=${txId.slice(0,12)} sender=${senderAddress?.slice(-12) || 'unknown'}: ${err?.message || err}`,
+          agentAddress: _myAddress,
+        }),
+        signal: AbortSignal.timeout(3000),
+      }).catch(() => {});
+    }
+    // T1-bugfix-handshake Step 3 (iii) design fix per NWT r130: NOT markSeen on silent throw — catch-up retries next cycle.
+    // Risk mitigation: if throw is deterministic, infinite retry — revert + add retry-counter cap if observed.
   }
 }
 
@@ -599,7 +839,7 @@ async function processComm(txId, payloadHex, senderAddress) {
       fetch(`${process.env.CONSOLE_URL || 'http://localhost:3100'}/api/identity/annotate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-ingest-secret': process.env.INGEST_SECRET || '' },
-        body: JSON.stringify({ network: KASPA_NETWORK, address: senderAddress, tags: 'kbeam_user' }),
+        body: JSON.stringify({ network: 'mainnet', address: senderAddress, tags: 'kbeam_user' }),
       }).catch(() => {});
     } catch {}
     return; // Don't reply, don't ingest — save resources
@@ -609,16 +849,6 @@ async function processComm(txId, payloadHex, senderAddress) {
   if (!senderAddress) {
     log('unknown sender — skipping ingest and reply');
     return;
-  }
-
-  // 解包 kanet_chat_v1 结构化广播（JSON 包装保护 UTF-8 中文）
-  if (plaintext.startsWith('{"t":"kanet_chat_v1"')) {
-    try {
-      const chatMsg = JSON.parse(plaintext);
-      if (chatMsg.t === 'kanet_chat_v1' && chatMsg.text) {
-        plaintext = chatMsg.text;
-      }
-    } catch (_) { /* fallback 原始内容 */ }
   }
 
   // senderAddress 确认有效后，才 ingest
@@ -709,6 +939,13 @@ async function processPayment(txId, payloadHex, senderAddress, tx) {
 // ── Shared reply logic ──────────────────────────────────────────────────────
 
 async function replyToMessage(txId, senderAddress, messageText) {
+  // Defense in depth: every send path eventually calls encrypt() which throws
+  // hard on non-bech32 addresses. Validate once at the entry so any caller
+  // (catch-up loop, processComm, processPayment, future ones) is protected.
+  if (!isValidKaspaAddress(senderAddress)) {
+    log(`replyToMessage: skip invalid kaspa address ${(senderAddress || '').slice(0, 30)}…`);
+    return;
+  }
   const { agent } = routeMessage(messageText);
   log('ROUTE →', agent);
 
@@ -724,8 +961,12 @@ async function replyToMessage(txId, senderAddress, messageText) {
   }
   log('AI →', replyText.slice(0, 80));
 
-  // Send with auto-truncate retry (same pattern as chat broadcast)
+  // Guardrail: cap message length (fee + sanity)
   let text = replyText;
+  if (text.length > 5000) {
+    text = text.slice(0, 5000).replace(/\s+\S*$/, '') + ' [...]';
+    log(`Message capped: ${replyText.length} → ${text.length} chars`);
+  }
   let attempts = 0;
   const MAX_ATTEMPTS = 4;
 
@@ -755,10 +996,10 @@ async function replyToMessage(txId, senderAddress, messageText) {
     } catch (err) {
       const errMsg = err?.message || err?.toString?.() || '';
       if ((errMsg.includes('Insufficient funds') || errMsg.includes('Storage mass')) && attempts < MAX_ATTEMPTS - 1) {
-        const target = Math.max(20, Math.floor(text.length * 0.6));
+        const target = Math.max(20, Math.floor(text.length * 0.9));
         text = text.slice(0, target).replace(/\s+\S*$/, '') + '...';
         attempts++;
-        log(`Storage mass exceeded, retrying with ${text.length} chars (attempt ${attempts + 1})`);
+        log(`⚠ Storage mass fallback, retrying with ${text.length} chars (attempt ${attempts + 1}/${MAX_ATTEMPTS})`);
       } else {
         log('Reply send failed:', errMsg);
         return;
@@ -782,4 +1023,13 @@ async function findAddressByAlias(alias) {
     return data?.peerAddress || null;
   } catch {}
   return null;
+}
+
+/**
+ * 外部触发 reconnect — 供 transaction.mjs 在 WS 错误时调用.
+ * 幂等: 正在 reconnecting 会 no-op.
+ */
+export function triggerReconnect(reason = 'external') {
+  log('external reconnect trigger:', reason);
+  if (_walletRef) _scheduleReconnect(_walletRef);
 }

@@ -1,0 +1,5 @@
+[QCLAUDE 进度 1/5] 阶段 1 读需求 — T5b 两个核心:
+1. exchange-machine.js: transition completed 时加 maker auto-pay-give (seeder USDT → taker)
+2. market-seeder.js: 超时退款 worker (published→expired → cancel_v1 + transferUsdt)
+已确认: transferUsdt(chain, privkeyEncrypted, toAddress, amount), sendCommandAsync, _testInjectSendCommand 模式。
+下一步: 查代码细节。

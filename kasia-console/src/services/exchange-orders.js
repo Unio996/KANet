@@ -148,13 +148,31 @@ async function openOrdersBinanceLike({ baseUrl, headerName, apiKey, apiSecret, s
 
 async function placeGateio({ baseUrl, apiKey, apiSecret, kasPair, side, price, qty }) {
   const path = '/api/v4/spot/orders';
-  const body = JSON.stringify({
-    currency_pair: kasPair,
-    side: side.toLowerCase(),
-    amount: String(qty),
-    price: String(price),
-    type: 'limit',
-  });
+  // T-J2-2026-05-10 r221 T2.13 (NWT r287 PASS + J2 push back 修订):
+  // SELL hedge → market+ioc (priority speed not price, broker spread cover fee).
+  //   实证 5/10 08:21 NWT manual unblock: limit 0.03755 below market 30s 真 NEVER fill, market sell fill <5s.
+  //   amount=base (KAS qty) — Gate.io market SELL semantic align.
+  // BUY hedge → 保 limit (Phase 1 不修, Phase 2 α parity 时再 review):
+  //   Gate.io market BUY 期望 amount=quote (USDT), 现 placeOrder caller 用 qty=KAS — semantic mismatch.
+  //   broker zero-custody BUY ch17 §17.7 不在 5/10 真测路径, 不 block Step 5 production verify.
+  const isMarketSell = String(side).toUpperCase() === 'SELL';
+  const body = JSON.stringify(
+    isMarketSell
+      ? {
+          currency_pair: kasPair,
+          side: 'sell',
+          amount: String(qty),
+          type: 'market',
+          time_in_force: 'ioc',
+        }
+      : {
+          currency_pair: kasPair,
+          side: side.toLowerCase(),
+          amount: String(qty),
+          price: String(price),
+          type: 'limit',
+        }
+  );
   const ts = Math.floor(Date.now() / 1000).toString();
   const bodyHash = sha512Hex(body);
   const signStr = `POST\n${path}\n\n${bodyHash}\n${ts}`;

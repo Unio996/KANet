@@ -195,6 +195,7 @@ export async function publishCard(params) {
     card.name = params.name;
     if (params.skills) card.skills = params.skills;
     if (params.summary) card.summary = params.summary;
+    if (params.serviceTerms && typeof params.serviceTerms === 'object') card.service_terms = params.serviceTerms;
   }
 
   // Self-encrypt extension data for mixed/private modes
@@ -204,6 +205,7 @@ export async function publishCard(params) {
   }
 
   const cardJson = JSON.stringify(card);
+  if (cardJson.length > 980) throw new Error(`card exceeds 980B preflight (${cardJson.length} chars)`);
   if (Buffer.byteLength(cardJson, 'utf-8') > 1024) {
     throw new Error(`Card exceeds 1024 byte limit (${Buffer.byteLength(cardJson, 'utf-8')} bytes)`);
   }

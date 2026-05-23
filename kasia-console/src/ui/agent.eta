@@ -11,6 +11,7 @@
       graphNodes: [], graphEdges: [], selectedGraphNode: null,
       balance: null, balLoading: false,
       spending: null, spendLoading: false,
+      budgetInfo: null, budgetInput: '', budgetSaving: false,
       wallets: null, walletsLoading: false,
       goals: [], goalsLoading: false,
       mindSkills: [], recentActivity: [],
@@ -49,7 +50,7 @@
       },
 
       async loadAll() {
-        this.loadBal(); this.loadSpent(); this.loadWallets();
+        this.loadBal(); this.loadSpent(); this.loadBudget(); this.loadWallets();
         this.loadGoals(); this.loadSkills(); this.loadTxHistory();
         this.loadPendingApprovals(); this.loadHealth(); this.loadContacts();
       },
@@ -166,6 +167,11 @@
         try { const r = await fetch('/api/agent/spending?relay_node_id=' + this.agent.id + '&days=1'); this.spending = await r.json(); }
         catch { this.spending = null; } this.spendLoading = false;
       },
+      async loadBudget() {
+        if (!this.agent) return;
+        try { const r = await fetch('/api/budget/' + this.agent.id); this.budgetInfo = await r.json(); }
+        catch { this.budgetInfo = null; }
+      },
       async loadWallets() {
         if (!this.agent) return; this.walletsLoading = true;
         try { const r = await fetch('/api/relay/' + this.agent.id + '/wallets'); this.wallets = await r.json(); }
@@ -211,6 +217,23 @@
         } catch(e) { alert(e.message); }
       },
       copyAddr(t) { navigator.clipboard.writeText(t); },
+
+      async saveBudget() {
+        if (!this.agent) return;
+        const val = parseFloat(this.budgetInput);
+        if (isNaN(val) || val < 0) { alert('请输入有效的数字'); return; }
+        this.budgetSaving = true;
+        try {
+          await fetch('/api/budget/' + this.agent.id, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({budgetKas:val}) });
+          await this.loadBudget();
+          this.budgetInput = '';
+        } catch(e) { alert(e.message); }
+        this.budgetSaving = false;
+      },
+      async resetBudget() {
+        if (!this.agent || !confirm('确定重置为无限制？')) return;
+        try { await fetch('/api/budget/' + this.agent.id, {method:'DELETE'}); await this.loadBudget(); } catch(e) { alert(e.message); }
+      },
 
       async addGoal() {
         if (!this.agent || !this.newGoalText.trim()) return;
@@ -399,7 +422,7 @@
 
           <!-- Tabs: 高频（通讯录/目标/历史） + 状态 + 低频折叠（钱包/Card/技能） -->
           <div class="flex gap-1 mb-4 bg-white rounded-xl p-1 border border-warm-300">
-            <template x-for="t in [{id:'contacts',l:'通讯录'},{id:'goals',l:'目标'},{id:'history',l:'历史'}]" :key="t.id">
+            <template x-for="t in [{id:'contacts',l:'通讯录'},{id:'goals',l:'目标'},{id:'history',l:'历史'},{id:'budget',l:'预算'}]" :key="t.id">
               <button @click="activeTab = t.id; if(t.id==='contacts') loadContacts();" class="flex-1 px-3 py-2 text-sm font-medium rounded-lg transition-colors"
                 :class="activeTab === t.id ? 'bg-brand-50 text-brand-600' : 'text-ink-400 hover:text-ink-600'" x-text="t.l"></button>
             </template>
@@ -758,6 +781,80 @@
               </div>
             </template>
             <div x-show="!health" class="bg-white rounded-xl border border-warm-300 p-8 text-center text-xs text-ink-300">健康数据加载中...</div>
+          </div>
+
+          <!-- ===== TAB: 预算 ===== -->
+          <div x-show="activeTab === 'budget'" class="space-y-4">
+            <div x-show="!agent" class="bg-white rounded-xl border border-warm-300 p-8 text-center text-xs text-ink-300">请先选择 Agent</div>
+            <template x-show="agent">
+              <div class="space-y-4">
+                <!-- Budget info card -->
+                <div x-show="budgetInfo" class="bg-white rounded-xl border border-warm-300 overflow-hidden">
+                  <div class="px-5 py-3 border-b border-warm-200">
+                    <span class="text-xs font-medium text-ink-300 uppercase tracking-wider">今日 KAS 预算</span>
+                  </div>
+                  <div class="p-5">
+                    <!-- Budget header -->
+                    <div class="flex items-center justify-between mb-3">
+                      <div>
+                        <span class="text-xs text-ink-400">预算</span>
+                        <div class="text-2xl font-bold text-ink-700" x-text="budgetInfo.isUnlimited ? '无限制' : budgetInfo.budget.toFixed(2) + ' KAS'"></div>
+                      </div>
+                      <div class="text-right">
+                        <span class="text-xs text-ink-400">剩余</span>
+                        <div class="text-2xl font-bold" :class="budgetInfo.isUnlimited ? 'text-emerald-600' : (budgetInfo.remaining > 0 ? 'text-emerald-600' : 'text-red-600')" x-text="budgetInfo.isUnlimited ? '∞' : budgetInfo.remaining.toFixed(2) + ' KAS'"></div>
+                      </div>
+                    </div>
+                    <!-- Progress bar -->
+                    <div x-show="!budgetInfo.isUnlimited" class="mb-3">
+                      <div class="flex justify-between text-xs text-ink-400 mb-1">
+                        <span>已花费 <span x-text="budgetInfo.spent.toFixed(4)"></span> KAS</span>
+                        <span><span x-text="budgetInfo.count"></span> 笔交易</span>
+                      </div>
+                      <div class="w-full bg-warm-100 rounded-full h-2.5 overflow-hidden">
+                        <div class="h-full rounded-full transition-all duration-500"
+                          :class="((budgetInfo.spent / budgetInfo.budget) > 0.9 ? 'bg-red-500' : (budgetInfo.spent / budgetInfo.budget > 0.7 ? 'bg-amber-500' : 'bg-emerald-500'))"
+                          :style="'width:' + Math.min(100, (budgetInfo.spent / budgetInfo.budget) * 100) + '%'"></div>
+                      </div>
+                    </div>
+                    <!-- Last tx -->
+                    <div x-show="budgetInfo.lastTx" class="text-xs text-ink-300 mt-2">
+                      最近交易: <span class="font-mono" x-text="budgetInfo.lastTx"></span>
+                    </div>
+                    <!-- Set budget -->
+                    <div class="mt-4 pt-4 border-t border-warm-200 flex items-center gap-2">
+                      <input type="number" step="0.01" min="0" placeholder="设置每日预算 (KAS)"
+                        x-model="budgetInput" @keydown.enter="saveBudget()"
+                        class="flex-1 px-3 py-1.5 text-sm border border-warm-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-brand-400">
+                      <button @click="saveBudget()" :disabled="budgetSaving"
+                        class="px-4 py-1.5 text-sm font-medium rounded-lg bg-brand-500 text-white hover:bg-brand-600 disabled:opacity-50">
+                        <span x-text="budgetSaving ? '保存中...' : '保存'"></span>
+                      </button>
+                      <button @click="resetBudget()"
+                        class="px-4 py-1.5 text-sm font-medium rounded-lg bg-white border border-warm-300 text-ink-500 hover:bg-warm-50">
+                        重置
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <!-- No budget set yet -->
+                <div x-show="!budgetInfo" class="bg-white rounded-xl border border-warm-300 overflow-hidden">
+                  <div class="px-5 py-3 border-b border-warm-200">
+                    <span class="text-xs font-medium text-ink-300 uppercase tracking-wider">今日 KAS 预算</span>
+                  </div>
+                  <div class="p-5 text-center text-ink-400 text-sm">尚未设置预算（无限制）</div>
+                  <div class="px-5 pb-5 pt-2 flex items-center gap-2">
+                    <input type="number" step="0.01" min="0" placeholder="设置每日预算 (KAS)"
+                      x-model="budgetInput" @keydown.enter="saveBudget()"
+                      class="flex-1 px-3 py-1.5 text-sm border border-warm-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-brand-400">
+                    <button @click="saveBudget()" :disabled="budgetSaving"
+                      class="px-4 py-1.5 text-sm font-medium rounded-lg bg-brand-500 text-white hover:bg-brand-600 disabled:opacity-50">
+                      <span x-text="budgetSaving ? '保存中...' : '设置'"></span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </template>
           </div>
 
           <!-- Quick actions -->

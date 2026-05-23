@@ -9,13 +9,59 @@
 // Run: INGEST_SECRET=xxx node --test test/e2e-pipeline.test.mjs
 // =============================================================================
 
-import { describe, it, before } from "node:test";
+import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import Database from "better-sqlite3";
+import { resolve } from "node:path";
 
 const CONSOLE_URL   = process.env.CONSOLE_URL   || "http://localhost:3100";
 const INGEST_SECRET = process.env.INGEST_SECRET || "";
+const DB_PATH       = process.env.DB_PATH || resolve("./data/console.db");
 const NETWORK       = "mainnet";
+
+// Bug history (2026-04-13): this file used to leave every fixture row in the
+// live Console DB. Across ~470 test runs from 2026-04-04 to 2026-04-12 this
+// accumulated into 7,945 orphan identity rows + 9,812 orphan messages which
+// the Relay catch-up loop kept trying to reply to, crashing encrypt() every
+// cycle. Defense layer in relay (isValidKaspaAddress) now skips these safely,
+// but we still clean up so DB doesn't grow forever. TODO: migrate to isolated
+// test DB so we never touch live Console state.
+function cleanupE2EFixtures() {
+  let db;
+  try { db = new Database(DB_PATH); }
+  catch (e) {
+    console.warn(`[cleanup] cannot open DB at ${DB_PATH}: ${e.message} — skipping`);
+    return;
+  }
+  try {
+    db.pragma("foreign_keys = OFF");
+    // Match every prefix this file uses. Covers current + scenario peers.
+    const PATTERNS = [
+      "kaspa:qqtest_%", "kaspa:qqlocal_agent_%", "kaspa:qqscenario_%",
+      "kaspa:qqiso_%", "kaspa:qqdup_%", "kaspa:qqempty_%",
+      "kaspa:qqnonexistent_%",
+    ];
+    const whereId = PATTERNS.map(p => `address LIKE '${p}'`).join(" OR ");
+    const ids = db.prepare(`SELECT id FROM identities WHERE ${whereId}`).all().map(r => r.id);
+    if (ids.length === 0) { db.close(); return; }
+    const csv = ids.map(i => `'${i}'`).join(",");
+    const addrWhere =
+      PATTERNS.map(p => `local_address LIKE '${p}'`).join(" OR ") + " OR " +
+      PATTERNS.map(p => `peer_address LIKE '${p}'`).join(" OR ");
+
+    const tx = db.transaction(() => {
+      db.prepare(`DELETE FROM messages WHERE sender_identity_id IN (${csv}) OR receiver_identity_id IN (${csv})`).run();
+      try { db.prepare(`DELETE FROM conversations WHERE local_identity_id IN (${csv}) OR remote_identity_id IN (${csv})`).run(); } catch {}
+      try { db.prepare(`DELETE FROM relation_states WHERE ${addrWhere}`).run(); } catch {}
+      db.prepare(`DELETE FROM identities WHERE ${whereId}`).run();
+    });
+    tx();
+    console.log(`[cleanup] removed ${ids.length} e2e fixture identity rows and related`);
+  } finally {
+    db.close();
+  }
+}
 
 const authHeaders = { "x-ingest-secret": INGEST_SECRET, "Content-Type": "application/json" };
 
@@ -375,6 +421,12 @@ describe("Layer 3: Full Pipeline Scenarios", () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe("Layer 4: Error Handling & Edge Cases", () => {
+
+  // Layer 4 is the last describe block — its after() runs after all prior
+  // describes have finished, so a single cleanup here covers Layers 1-4.
+  after(() => {
+    cleanupE2EFixtures();
+  });
 
   it("4.1 ingest event with missing traceId still works", async () => {
     const res = await ingest("/ingest/event", {

@@ -1,41 +1,210 @@
 <%~ include('partials/page-open', { _page: 'contacts', pageTitle: '通讯录', ...it }) %>
 
 <div class="p-6" x-data="contactsPage()">
-  <!-- 顶栏 -->
-  <div class="flex items-center gap-3 mb-3">
-    <select x-model="selectedAgent" @change="load()" class="rounded-lg border border-warm-300 px-3 py-2 text-sm bg-white font-medium">
+  <!-- 顶栏 — 一行三个互斥切换按钮 -->
+  <div class="flex items-center gap-3 mb-3 flex-wrap">
+    <select x-model="selectedAgent" @change="load(); ssInit(); spInit()" class="rounded-lg border border-warm-300 px-3 py-2 text-sm bg-white font-medium">
       <% it.relayNodes.forEach(r => { %>
       <option value="<%= r.id %>"><%= r.name %></option>
       <% }) %>
     </select>
     <span class="text-sm text-ink-700" x-show="!loading" x-text="contacts.length + ' 个联系人'"></span>
-    <button @click="showAdd = !showAdd" class="btn btn-primary btn-sm ml-auto">
-      <span x-text="showAdd ? '收起' : '+ 添加'"></span>
-    </button>
+    <div class="ml-auto flex items-center gap-1.5">
+      <button @click="activePanel = activePanel==='add' ? null : 'add'"
+              class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+              :class="activePanel==='add' ? 'bg-brand-500 text-white' : 'bg-white border border-warm-300 text-ink-600 hover:bg-warm-50'">
+        + 添加联系人
+      </button>
+      <button @click="activePanel = activePanel==='social' ? null : 'social'"
+              class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors inline-flex items-center gap-1.5"
+              :class="activePanel==='social' ? 'bg-brand-500 text-white' : 'bg-white border border-warm-300 text-ink-600 hover:bg-warm-50'">
+        社交管理
+        <span class="badge text-[9px]" :class="activePanel==='social' ? 'bg-white/20 text-white' : ssBadges[ssMode]" x-text="ssLabels[ssMode]"></span>
+      </button>
+      <button @click="activePanel = activePanel==='tags' ? null : 'tags'"
+              class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors inline-flex items-center gap-1.5"
+              :class="activePanel==='tags' ? 'bg-brand-500 text-white' : 'bg-white border border-warm-300 text-ink-600 hover:bg-warm-50'">
+        标签管理
+        <span class="text-[9px]" :class="activePanel==='tags' ? 'text-white/80' : 'text-ink-300'" x-text="'(' + knownTags.length + ')'"></span>
+      </button>
+      <button @click="activePanel = activePanel==='backup' ? null : 'backup'"
+              class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+              :class="activePanel==='backup' ? 'bg-brand-500 text-white' : 'bg-white border border-warm-300 text-ink-600 hover:bg-warm-50'"
+              title="导出/导入通讯录和社交配置">
+        备份/恢复
+      </button>
+    </div>
   </div>
 
-  <!-- 添加联系人（折叠） -->
-  <div x-show="showAdd" x-transition class="card mb-4">
-    <div class="grid grid-cols-3 gap-3">
-      <div>
-        <label class="block text-xs text-ink-400 mb-1">地址 *</label>
-        <input type="text" x-model="addForm.address" placeholder="kaspa:qr..." class="w-full text-sm border border-warm-300 rounded-lg px-3 py-2 font-mono" />
+  <!-- 单一面板区 — 根据 activePanel 显示对应内容 -->
+  <div x-show="activePanel" x-transition class="mb-4 border border-warm-200 rounded-xl overflow-hidden bg-white">
+
+    <!-- 添加联系人面板 -->
+    <div x-show="activePanel==='add'" class="p-4">
+      <div class="grid grid-cols-3 gap-3">
+        <div>
+          <label class="block text-xs text-ink-400 mb-1">地址 *</label>
+          <input type="text" x-model="addForm.address" placeholder="kaspa:qr..." class="w-full text-sm border border-warm-300 rounded-lg px-3 py-2 font-mono" />
+        </div>
+        <div>
+          <label class="block text-xs text-ink-400 mb-1">名称</label>
+          <input type="text" x-model="addForm.display_name" class="w-full text-sm border border-warm-300 rounded-lg px-3 py-2" />
+        </div>
+        <div>
+          <label class="block text-xs text-ink-400 mb-1">信任等级</label>
+          <select x-model="addForm.trust_level" class="w-full text-sm border border-warm-300 rounded-lg px-3 py-2">
+            <option value="normal">普通</option>
+            <option value="recommended">推荐</option>
+            <option value="blocked">屏蔽</option>
+          </select>
+        </div>
       </div>
-      <div>
-        <label class="block text-xs text-ink-400 mb-1">名称</label>
-        <input type="text" x-model="addForm.display_name" class="w-full text-sm border border-warm-300 rounded-lg px-3 py-2" />
-      </div>
-      <div>
-        <label class="block text-xs text-ink-400 mb-1">信任等级</label>
-        <select x-model="addForm.trust_level" class="w-full text-sm border border-warm-300 rounded-lg px-3 py-2">
-          <option value="normal">普通</option>
-          <option value="recommended">推荐</option>
-          <option value="blocked">屏蔽</option>
-        </select>
+      <div class="flex justify-end mt-3">
+        <button @click="addContact()" class="btn btn-primary btn-sm" :disabled="!addForm.address?.trim()">保存</button>
       </div>
     </div>
-    <div class="flex justify-end mt-3">
-      <button @click="addContact()" class="btn btn-primary btn-sm" :disabled="!addForm.address?.trim()">保存</button>
+
+    <!-- 标签管理面板 -->
+    <div x-show="activePanel==='tags'" class="p-4">
+      <div class="text-[10px] text-ink-400 mb-2">所有已知标签（× 从全部联系人删除此标签）</div>
+      <div x-show="knownTags.length === 0" class="text-xs text-ink-300 py-2">暂无标签</div>
+      <div class="flex flex-wrap gap-1">
+        <template x-for="kt in knownTags" :key="kt.tag">
+          <span class="inline-flex items-center border border-warm-300 rounded overflow-hidden bg-white">
+            <span class="text-[10px] px-2 py-0.5 text-ink-600">
+              <span x-text="kt.tag"></span>
+              <span class="text-ink-300 ml-1" x-text="'(' + kt.count + ')'"></span>
+            </span>
+            <button @click="deleteGlobalTag(kt.tag)"
+              class="text-ink-400 hover:text-red-600 hover:bg-red-50 px-1.5 border-l border-warm-200 text-[10px] leading-none"
+              title="从所有联系人全局删除此标签">×</button>
+          </span>
+        </template>
+      </div>
+    </div>
+
+    <!-- 备份/恢复面板 -->
+    <div x-show="activePanel==='backup'" class="p-4 space-y-4">
+      <div>
+        <div class="text-sm font-semibold text-ink-700 mb-1">📥 导出主观数据</div>
+        <div class="text-[11px] text-ink-400 mb-2">
+          包含: 联系人名字/标签/备注/权限 · 分类 · 社交设置 · Agent 社交原则<br />
+          不含: 私钥/助记词/API key/链上记录 (这些需要另外备份 kanet.env 和链上恢复)
+        </div>
+        <div class="flex items-center gap-2">
+          <a href="/api/backup/export" download class="btn btn-primary btn-sm text-xs">
+            ⬇ 下载 JSON 备份
+          </a>
+          <span class="text-[10px] text-ink-300">文件名: kanet-backup-YYYYMMDD.json</span>
+        </div>
+      </div>
+
+      <div class="border-t border-warm-200 pt-4">
+        <div class="text-sm font-semibold text-ink-700 mb-1">📤 导入恢复</div>
+        <div class="text-[11px] text-ink-400 mb-2">
+          模式: <strong>merge</strong>(默认, 不覆盖已填写字段) · <strong>replace</strong>(全覆盖, 慎用)
+        </div>
+        <div class="flex items-center gap-2 flex-wrap">
+          <input type="file" accept="application/json" @change="backupFile = $event.target.files[0]"
+                 class="text-[11px] text-ink-600" />
+          <select x-model="backupMode" class="text-xs border border-warm-300 rounded px-2 py-1 bg-white">
+            <option value="merge">merge (合并)</option>
+            <option value="replace">replace (覆盖)</option>
+          </select>
+          <button @click="doImport()" :disabled="!backupFile || backupBusy"
+                  class="btn btn-primary btn-sm text-xs">
+            <span x-show="!backupBusy">导入</span>
+            <span x-show="backupBusy">导入中...</span>
+          </button>
+        </div>
+        <div x-show="backupResult" x-transition class="mt-3 text-xs p-2 rounded"
+             :class="backupResult?.ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'"
+             x-html="backupResultMsg"></div>
+      </div>
+    </div>
+
+    <!-- 社交管理面板 -->
+    <div x-show="activePanel==='social'">
+      <!-- 社交风格 -->
+      <div class="px-4 py-3">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <div class="w-1.5 h-5 rounded-full" :class="ssColors[ssMode]"></div>
+            <h3 class="text-sm font-semibold text-ink-700">社交风格</h3>
+          </div>
+          <button @click="ssShowAdv = !ssShowAdv" class="text-[11px] text-ink-400 hover:text-brand-600 transition-colors">
+            <span x-text="ssShowAdv ? '收起' : '高级设置 ›'"></span>
+          </button>
+        </div>
+        <!-- Three mode cards -->
+        <div class="grid grid-cols-3 gap-2 mb-3">
+          <template x-for="m in ['active', 'balanced', 'conservative']" :key="m">
+            <button @click="ssMode = m; ssSave()"
+              class="rounded-lg border px-3 py-2.5 text-left transition-all"
+              :class="ssMode === m ? 'border-brand-400 bg-brand-50/60' : 'border-warm-200 bg-white hover:border-warm-300'">
+              <div class="text-xs font-semibold mb-0.5" :class="ssMode === m ? 'text-ink-700' : 'text-ink-500'" x-text="ssLabels[m]"></div>
+              <div class="text-[10px]" :class="ssMode === m ? 'text-ink-500' : 'text-ink-300'" x-text="ssDescs[m]"></div>
+              <div class="flex gap-1.5 mt-1.5">
+                <span class="text-[9px] text-ink-400 bg-warm-100 px-1 py-0.5 rounded" x-text="'握手 ' + ssPresets[m].maxNewHandshakes + '/天'"></span>
+                <span class="text-[9px] text-ink-400 bg-warm-100 px-1 py-0.5 rounded" x-text="'冷却 ' + ssPresets[m].peerCooldownHours + 'h'"></span>
+              </div>
+            </button>
+          </template>
+        </div>
+        <!-- Effective params -->
+        <div class="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-ink-400">
+          <span>冷却: <strong class="text-ink-600" x-text="ssEffective.peerCooldownHours + 'h'"></strong></span>
+          <span>跨Agent: <strong class="text-ink-600" x-text="ssEffective.crossAgentHours + 'h'"></strong></span>
+          <span>握手: <strong class="text-ink-600" x-text="ssEffective.maxNewHandshakes + '/天'"></strong></span>
+          <span>跟进: <strong class="text-ink-600" x-text="ssEffective.followUpHours ? ssEffective.followUpHours + 'h' : '不跟进'"></strong></span>
+          <span>退避: <strong class="text-ink-600" x-text="ssEffective.unansweredMax + '条/' + ssEffective.unansweredCooldownDays + '天'"></strong></span>
+        </div>
+        <!-- Advanced overrides -->
+        <div x-show="ssShowAdv" x-transition class="mt-3 pt-3 border-t border-warm-200">
+          <div class="text-[10px] text-ink-400 mb-2">微调参数（留空使用预设值）</div>
+          <div class="grid grid-cols-2 gap-x-4 gap-y-2">
+            <template x-for="p in ssParams" :key="p.key">
+              <div class="flex items-center gap-2">
+                <label class="text-[11px] text-ink-500 w-24 flex-shrink-0" x-text="p.label"></label>
+                <input type="number" :placeholder="ssPresets[ssMode][p.key] ?? '-'"
+                  :value="ssOverrides[p.key] ?? ''"
+                  @input="if($event.target.value==='') delete ssOverrides[p.key]; else ssOverrides[p.key]=Number($event.target.value)"
+                  class="w-16 text-[11px] border border-warm-300 rounded px-2 py-1 bg-white text-ink-700 text-right focus:border-brand-400 focus:outline-none" />
+                <span class="text-[10px] text-ink-300" x-text="p.unit"></span>
+              </div>
+            </template>
+          </div>
+          <div class="flex justify-between items-center mt-3">
+            <button x-show="ssHasOverrides" @click="ssOverrides = {}; ssSave()" class="text-[10px] text-ink-400 hover:text-red-500">重置为预设</button>
+            <div></div>
+            <button @click="ssSave()" class="btn btn-primary btn-sm text-[11px]" x-text="ssSaving ? '保存中...' : '保存'"></button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 分隔线 + 社交原则 -->
+      <div class="px-4 py-3 border-t border-warm-200">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-semibold text-ink-700">社交原则</h3>
+          <span class="text-[10px] text-ink-300" x-text="principles.length + ' 条'"></span>
+        </div>
+        <div x-show="spLoading" class="text-xs text-ink-300 py-2">加载中...</div>
+        <div class="space-y-1">
+          <template x-for="(p, i) in principles" :key="i">
+            <div class="flex items-start gap-2 group text-xs">
+              <span class="text-ink-300 w-4 flex-shrink-0 pt-0.5" x-text="(i+1) + '.'"></span>
+              <div class="flex-1 text-ink-600" x-text="p"></div>
+              <button @click="moveUp(i)" x-show="i > 0" class="text-ink-300 hover:text-brand-600 opacity-0 group-hover:opacity-100 text-[10px]">↑</button>
+              <button @click="removeRule(i)" class="text-ink-300 hover:text-red-500 opacity-0 group-hover:opacity-100 text-[10px]">✕</button>
+            </div>
+          </template>
+        </div>
+        <div class="flex items-center gap-2 mt-3 pt-3 border-t border-warm-200">
+          <input x-model="newRule" @keydown.enter.prevent="addRule()" placeholder="添加新原则..."
+            class="flex-1 text-xs border border-warm-300 rounded-lg px-3 py-1.5 bg-white" />
+          <button @click="addRule()" class="btn btn-primary btn-sm text-[10px]" :disabled="!newRule.trim()">添加</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -65,9 +234,28 @@
         <!-- 摘要行 -->
         <div class="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-warm-50 transition-colors"
           @click="toggle(p.peer)">
-          <span class="badge text-[9px] w-8 text-center flex-shrink-0" :class="p.is_local ? 'badge-info' : 'badge-warning'" x-text="p.is_local ? '内部' : '外部'"></span>
           <div class="w-40 flex-shrink-0">
-            <div class="text-sm font-medium text-ink-700 truncate" x-text="p.peer_name || '未命名'"></div>
+            <div class="text-sm font-medium text-ink-700 truncate flex items-center gap-1">
+              <!-- 点击名字直接 inline 编辑 (stop propagation 避免触发展开) -->
+              <template x-if="editingName !== p.peer">
+                <span @click.stop="editingName = p.peer; editName = p.peer_name || ''"
+                      class="cursor-text hover:underline decoration-dotted decoration-ink-300"
+                      :class="!p.peer_name && 'italic text-ink-300'"
+                      title="点击编辑"
+                      x-text="p.peer_name || '未命名'"></span>
+              </template>
+              <template x-if="editingName === p.peer">
+                <input @click.stop x-model="editName"
+                       @keydown.enter.prevent.stop="saveName(p)"
+                       @keydown.escape="editingName = null"
+                       @blur="saveName(p)"
+                       class="text-sm border border-brand-400 rounded px-1 py-0 bg-white w-28 outline-none"
+                       x-init="$nextTick(() => $el.focus())" />
+              </template>
+              <template x-if="p.classification === 'verified_agent'">
+                <span class="text-yellow-500 text-[11px]" title="已验证 — 完成过链上交易">⭐</span>
+              </template>
+            </div>
             <div class="text-[10px] text-ink-300 font-mono" x-text="shortAddr(p.peer)"></div>
           </div>
           <div class="flex gap-0.5 flex-shrink-0 max-w-28 overflow-hidden">
@@ -81,6 +269,9 @@
           <template x-if="p.status && !p.is_local">
             <span class="badge text-[8px]" :class="p.status==='active'?'badge-success':p.status==='accepted'?'badge-info':'badge-neutral'" x-text="p.status"></span>
           </template>
+          <template x-if="!p.status && !p.is_local">
+            <span class="badge badge-neutral text-[8px]">链上交互</span>
+          </template>
           <span class="text-xs text-blue-600 w-12 flex-shrink-0" x-text="'↑' + p.out_count"></span>
           <span class="text-xs text-green-600 w-12 flex-shrink-0" x-text="'↓' + p.in_count"></span>
           <span class="text-xs font-bold text-ink-700 w-14 flex-shrink-0" x-text="'Σ' + (p.unique_total || p.total)"></span>
@@ -93,20 +284,66 @@
           <div class="border-t border-warm-200">
             <!-- 信息栏 -->
             <div class="px-4 py-2.5 bg-warm-100/50 border-b border-warm-100 space-y-1.5">
+              <!-- 权限（trust_level）— "屏蔽" 就是拉黑 -->
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <span class="text-[10px] text-ink-400 w-8">权限:</span>
+                <select :value="p.trust_level || 'normal'" @change="saveTrust(p, $event.target.value)" class="text-[10px] border border-warm-300 rounded px-1.5 py-0.5 bg-white">
+                  <option value="normal">普通</option>
+                  <option value="recommended">推荐</option>
+                  <option value="owner">主人</option>
+                  <option value="blocked">屏蔽（拉黑）</option>
+                </select>
+                <span x-show="p.trust_level === 'blocked'" class="text-[9px] text-red-600 font-medium">🚫 已屏蔽</span>
+              </div>
               <div class="flex items-center gap-2">
-                <span class="text-[10px] text-ink-400">地址:</span>
+                <span class="text-[10px] text-ink-400 w-8">地址:</span>
                 <span class="text-[10px] text-ink-600 font-mono break-all cursor-copy select-all" @click="navigator.clipboard.writeText(p.peer)" title="点击复制" x-text="p.peer"></span>
               </div>
-              <div class="flex items-center gap-1.5 flex-wrap">
-                <span class="text-[10px] text-ink-400">标签:</span>
-                <template x-for="t in (p.tags||'').split(',').filter(Boolean)" :key="t">
-                  <span class="badge badge-neutral text-[9px]" x-text="t"></span>
-                </template>
-                <input x-model="editTag" placeholder="+ 添加" @keydown.enter.prevent="saveTag(p)" class="text-[10px] border border-warm-300 rounded px-2 py-0.5 w-20 bg-white" />
-                <button @click="saveTag(p)" class="btn btn-primary btn-sm text-[10px] py-0" x-show="editTag.trim()">加</button>
+              <!-- 标签 combobox: 点击弹已有列表, 输入可过滤, 底部可新增 -->
+              <div class="flex items-start gap-1.5">
+                <span class="text-[10px] text-ink-400 w-8 mt-0.5 flex-shrink-0">标签:</span>
+                <div class="flex-1 flex flex-wrap gap-1 items-center">
+                  <template x-for="t in (p.tags||'').split(',').filter(Boolean)" :key="t">
+                    <span class="inline-flex items-center gap-0.5 badge badge-info text-[9px]">
+                      <span x-text="t"></span>
+                      <button @click="removeTag(p, t)" class="text-ink-400 hover:text-red-600 ml-0.5" title="从此联系人移除">×</button>
+                    </span>
+                  </template>
+                  <div class="relative" @click.outside="tagComboOpen = false">
+                    <input x-model="editTag"
+                           @focus="tagComboOpen = true"
+                           @keydown.enter.prevent="if(editTag.trim()){ addTag(p, editTag); editTag=''; tagComboOpen=false; }"
+                           @keydown.escape="tagComboOpen = false; editTag=''"
+                           placeholder="+ 选标签或新增"
+                           class="text-[10px] border border-warm-300 rounded px-2 py-0.5 w-32 bg-white" />
+                    <div x-show="tagComboOpen" x-transition.opacity.duration.100ms
+                         class="absolute top-full left-0 mt-1 w-56 max-h-52 overflow-y-auto bg-white border border-warm-300 rounded-lg shadow-lg z-30">
+                      <!-- 已知标签（过滤 + 扣除已有）-->
+                      <template x-for="kt in tagComboFiltered(p)" :key="kt.tag">
+                        <button @click="addTag(p, kt.tag); editTag=''; tagComboOpen=false"
+                                class="w-full text-left text-[11px] px-3 py-1.5 hover:bg-brand-50 transition-colors">
+                          <span class="text-ink-700" x-text="kt.tag"></span>
+                          <span class="text-ink-300 ml-1" x-text="'(' + kt.count + ')'"></span>
+                        </button>
+                      </template>
+                      <!-- 没有匹配时的空态 -->
+                      <div x-show="tagComboFiltered(p).length === 0 && !editTag.trim()"
+                           class="text-[10px] px-3 py-2 text-ink-300">
+                        无可用标签 — 输入内容新增
+                      </div>
+                      <!-- 新增项（输入文本不匹配任何已知时出现）-->
+                      <template x-if="editTag.trim() && !tagComboIsExistingKnown()">
+                        <button @click="addTag(p, editTag); editTag=''; tagComboOpen=false"
+                                class="w-full text-left text-[11px] px-3 py-1.5 hover:bg-green-50 border-t border-warm-200 text-green-700 transition-colors">
+                          + 新增 "<span x-text="editTag.trim()"></span>"
+                        </button>
+                      </template>
+                    </div>
+                  </div>
+                </div>
               </div>
               <div class="flex items-center gap-1.5">
-                <span class="text-[10px] text-ink-400">备注:</span>
+                <span class="text-[10px] text-ink-400 w-8">备注:</span>
                 <span class="text-[10px] text-ink-500" x-text="p.notes || '无'" x-show="!editingNote"></span>
                 <input x-show="editingNote" x-model="editNote" @keydown.enter.prevent="saveNote(p)" class="text-[10px] border border-warm-300 rounded px-2 py-0.5 flex-1 bg-white" />
                 <button @click="editingNote ? saveNote(p) : (editingNote=true, editNote=p.notes||'')" class="text-[10px] text-brand-600 hover:text-brand-700 cursor-pointer" x-text="editingNote ? '保存' : '编辑'"></button>
@@ -132,33 +369,46 @@
                 <option value="100">100</option>
               </select>
             </div>
-            <!-- 行为明细 -->
+            <!-- 行为明细 — 文本消息走气泡样式, 其他事件走紧凑日志行 -->
             <div x-show="detailLoading" class="text-center text-ink-300 py-6 text-xs">加载中...</div>
-            <div class="divide-y divide-warm-100 max-h-[500px] overflow-y-auto">
+            <div class="max-h-[500px] overflow-y-auto px-4 py-3 space-y-2">
               <template x-for="(e, i) in detailEvents" :key="i">
-                <div class="px-4 py-2 text-xs" :class="e.dir==='out' ? 'bg-blue-50/30' : ''">
-                  <div class="flex gap-2 items-start">
-                    <span class="w-5 flex-shrink-0 font-bold" :class="e.dir==='out' ? 'text-blue-500' : 'text-green-500'" x-text="e.dir==='out' ? '→' : '←'"></span>
-                    <span class="w-28 flex-shrink-0 text-ink-400 font-mono" x-text="KANet.formatTime(e.ts)"></span>
-                    <span class="badge badge-neutral text-[8px] flex-shrink-0" x-text="e.type"></span>
-                    <div class="flex-1 min-w-0">
-                      <template x-if="e.content">
-                        <div class="text-ink-600 whitespace-pre-wrap break-words" x-text="e.content"></div>
+                <div>
+                  <!-- 文本消息 → 气泡 (左白右绿, 一眼分清方向) -->
+                  <template x-if="e.content">
+                    <div class="flex" :class="e.dir==='out' ? 'justify-end' : 'justify-start'">
+                      <div class="max-w-[75%]">
+                        <div class="rounded-xl px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap break-words"
+                             :class="e.dir==='out'
+                               ? 'bg-green-100 text-green-900 rounded-br-sm'
+                               : 'bg-white border border-warm-200 text-ink-700 rounded-bl-sm'"
+                             x-text="e.content"></div>
+                        <div class="text-[9px] text-ink-300 mt-0.5 px-1"
+                             :class="e.dir==='out' ? 'text-right' : ''"
+                             x-text="KANet.formatTime(e.ts)"></div>
+                      </div>
+                    </div>
+                  </template>
+                  <!-- 握手 / 其他非文本事件 → 紧凑日志行 -->
+                  <template x-if="!e.content">
+                    <div class="flex gap-2 items-center text-[10px] text-ink-400 py-0.5">
+                      <span class="w-5 flex-shrink-0 font-bold" :class="e.dir==='out' ? 'text-green-500' : 'text-blue-500'" x-text="e.dir==='out' ? '→' : '←'"></span>
+                      <span class="w-28 flex-shrink-0 font-mono" x-text="KANet.formatTime(e.ts)"></span>
+                      <span class="badge badge-neutral text-[8px] flex-shrink-0" x-text="e.type"></span>
+                      <template x-if="e.type==='handshake' && e.dir==='out'">
+                        <span class="text-green-600">已发出握手</span>
                       </template>
-                      <template x-if="!e.content && e.type==='handshake' && e.dir==='out'">
-                        <span class="text-green-600">已接受握手</span>
-                      </template>
-                      <template x-if="!e.content && e.type==='handshake' && e.dir==='in'">
+                      <template x-if="e.type==='handshake' && e.dir==='in'">
                         <span class="text-blue-600">收到握手请求</span>
                       </template>
-                      <template x-if="!e.content && e.type!=='handshake' && e.txid">
-                        <div class="font-mono text-ink-300 break-all text-[10px]" x-text="'tx: ' + e.txid"></div>
+                      <template x-if="e.type!=='handshake' && e.txid">
+                        <span class="font-mono text-ink-300 break-all" x-text="'tx: ' + e.txid.slice(0,16) + '...'"></span>
                       </template>
-                      <template x-if="!e.content && e.type!=='handshake' && !e.txid">
+                      <template x-if="e.type!=='handshake' && !e.txid">
                         <span class="text-ink-300">—</span>
                       </template>
                     </div>
-                  </div>
+                  </template>
                 </div>
               </template>
             </div>
@@ -187,12 +437,119 @@ function contactsPage() {
     editTag: '',
     editNote: '',
     editingNote: false,
+    editingName: null,
+    editName: '',
+    knownTags: [],   // [{tag, count}] 按使用频率排
+    tagComboOpen: false,
+    activePanel: null,  // null | 'add' | 'social' | 'tags' | 'backup' — 顶栏互斥切换
+    backupFile: null,
+    backupMode: 'merge',
+    backupBusy: false,
+    backupResult: null,
+    backupResultMsg: '',
     quickMsg: '',
     sending: false,
     sendStatus: '',
-    showAdd: false,
     addForm: { address: '', display_name: '', trust_level: 'normal' },
 
+    // ── 社交设置 ──
+    ssMode: 'balanced',
+    ssOverrides: {},
+    ssShowAdv: false,
+    ssSaving: false,
+    ssPresets: {
+      active:       { peerCooldownHours: 24,  crossAgentHours: 6,  maxNewHandshakes: 5, followUpHours: 24,   maxFollowUps: 3, unansweredMax: 5, unansweredCooldownDays: 7  },
+      balanced:     { peerCooldownHours: 48,  crossAgentHours: 12, maxNewHandshakes: 2, followUpHours: 48,   maxFollowUps: 2, unansweredMax: 3, unansweredCooldownDays: 30 },
+      conservative: { peerCooldownHours: 96,  crossAgentHours: 24, maxNewHandshakes: 0, followUpHours: null, maxFollowUps: 0, unansweredMax: 1, unansweredCooldownDays: 90 },
+    },
+    ssLabels: { active: '积极', balanced: '稳健', conservative: '保守' },
+    ssDescs:  { active: '主动出击，适合推广期', balanced: '日常运营，攻守兼备', conservative: '仅回应，低调运行' },
+    ssColors: { active: 'bg-green-500', balanced: 'bg-brand-500', conservative: 'bg-warm-400' },
+    ssBadges: { active: 'badge-success', balanced: 'badge-info', conservative: 'badge-neutral' },
+    ssParams: [
+      { key: 'peerCooldownHours', label: '同一人冷却', unit: '小时' },
+      { key: 'crossAgentHours', label: '跨Agent防重', unit: '小时' },
+      { key: 'maxNewHandshakes', label: '每日新握手', unit: '次/天' },
+      { key: 'followUpHours', label: '跟进间隔', unit: '小时' },
+      { key: 'maxFollowUps', label: '跟进上限', unit: '次' },
+      { key: 'unansweredMax', label: '无回复上限', unit: '条' },
+      { key: 'unansweredCooldownDays', label: '无回复冷却', unit: '天' },
+    ],
+    get ssEffective() {
+      const base = { ...this.ssPresets[this.ssMode] };
+      for (const [k, v] of Object.entries(this.ssOverrides)) { if (v !== null && v !== '' && base[k] !== undefined) base[k] = Number(v); }
+      return base;
+    },
+    get ssHasOverrides() { return Object.values(this.ssOverrides).some(v => v !== null && v !== '' && v !== undefined); },
+
+    // ── 社交原则 ──
+    principles: [],
+    newRule: '',
+    spLoading: false,
+    spSaving: false,
+
+    async ssInit() {
+      if (!this.selectedAgent) return;
+      try {
+        const res = await fetch('/api/relay/' + this.selectedAgent + '/mind-config');
+        const cfg = await res.json();
+        this.ssMode = cfg.socialStyle || 'balanced';
+        this.ssOverrides = cfg.socialOverrides || {};
+      } catch {}
+    },
+
+    async ssSave() {
+      if (!this.selectedAgent) return;
+      this.ssSaving = true;
+      await fetch('/api/relay/' + this.selectedAgent + '/mind-config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ socialStyle: this.ssMode, socialOverrides: this.ssHasOverrides ? this.ssOverrides : null }),
+      });
+      this.ssSaving = false;
+    },
+
+    async spInit() {
+      if (!this.selectedAgent) return;
+      this.spLoading = true;
+      try {
+        const res = await fetch('/api/relay/' + this.selectedAgent + '/mind-config');
+        const cfg = await res.json();
+        this.principles = cfg.principles || [];
+      } catch {}
+      this.spLoading = false;
+    },
+
+    async spSave() {
+      if (!this.selectedAgent) return;
+      this.spSaving = true;
+      await fetch('/api/relay/' + this.selectedAgent + '/mind-config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ principles: this.principles }),
+      });
+      this.spSaving = false;
+    },
+
+    addRule() {
+      if (!this.newRule.trim()) return;
+      this.principles.push(this.newRule.trim());
+      this.newRule = '';
+      this.spSave();
+    },
+
+    removeRule(i) {
+      this.principles.splice(i, 1);
+      this.spSave();
+    },
+
+    moveUp(i) {
+      if (i <= 0) return;
+      [this.principles[i-1], this.principles[i]] = [this.principles[i], this.principles[i-1]];
+      this.spSave();
+    },
+
+    // ── 原有方法 ──
     shortAddr(addr) {
       if (!addr || addr.length < 30) return addr;
       return addr.slice(0, 12) + '...' + addr.slice(-12);
@@ -242,18 +599,6 @@ function contactsPage() {
       this.detailLoading = false;
     },
 
-    async saveTag(p) {
-      if (!this.editTag.trim() || !p.identity_id) return;
-      const newTags = p.tags ? p.tags + ',' + this.editTag.trim() : this.editTag.trim();
-      await fetch('/api/contacts/update', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: p.identity_id, tags: newTags }),
-      });
-      p.tags = newTags;
-      this.editTag = '';
-    },
-
     async saveNote(p) {
       if (!p.identity_id) return;
       await fetch('/api/contacts/update', {
@@ -263,6 +608,82 @@ function contactsPage() {
       });
       p.notes = this.editNote;
       this.editingNote = false;
+    },
+
+    async saveName(p) {
+      if (!p.identity_id) return;
+      await fetch('/api/contacts/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: p.identity_id, display_name: this.editName }),
+      });
+      p.peer_name = this.editName;
+      this.editingName = null;
+    },
+
+    async saveTrust(p, level) {
+      if (!p.identity_id) return;
+      await fetch('/api/contacts/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: p.identity_id, trust_level: level }),
+      });
+      p.trust_level = level;
+    },
+
+    async doImport() {
+      if (!this.backupFile) return;
+      this.backupBusy = true;
+      this.backupResult = null;
+      try {
+        const text = await this.backupFile.text();
+        const snapshot = JSON.parse(text);
+        const res = await fetch('/api/backup/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ snapshot, mode: this.backupMode }),
+        });
+        const data = await res.json();
+        this.backupResult = data;
+        if (data.ok) {
+          this.backupResultMsg = `✓ 导入成功 — identities: ${data.identities}, relations: ${data.relationStates}, agents: ${data.agents}, skipped: ${data.skipped}`;
+          // 刷新页面数据
+          await this.load();
+          await this.loadKnownTags();
+        } else {
+          this.backupResultMsg = '✗ ' + (data.error || '未知错误');
+        }
+      } catch (e) {
+        this.backupResult = { ok: false };
+        this.backupResultMsg = '✗ JSON 解析失败: ' + e.message;
+      }
+      this.backupBusy = false;
+    },
+
+    tagComboFiltered(p) {
+      const current = (p.tags || '').split(',').map(t => t.trim()).filter(Boolean);
+      const q = (this.editTag || '').trim().toLowerCase();
+      return this.knownTags
+        .filter(kt => !current.includes(kt.tag))
+        .filter(kt => !q || kt.tag.toLowerCase().includes(q));
+    },
+
+    tagComboIsExistingKnown() {
+      const q = (this.editTag || '').trim().toLowerCase();
+      if (!q) return true;
+      return this.knownTags.some(kt => kt.tag.toLowerCase() === q);
+    },
+
+    async deleteGlobalTag(tag) {
+      if (!tag) return;
+      if (!confirm(`确认从所有联系人删除标签 "${tag}"？此操作不可撤销。`)) return;
+      await fetch('/api/contacts/tags/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tag }),
+      });
+      await this.loadKnownTags();
+      await this.load();   // 刷新所有联系人（tags 字段会变）
     },
 
     async sendMsg(p) {
@@ -297,11 +718,16 @@ function contactsPage() {
         body: JSON.stringify(this.addForm),
       });
       this.addForm = { address: '', display_name: '', trust_level: 'normal' };
-      this.showAdd = false;
+      this.activePanel = null;
       await this.load();
     },
 
-    async init() { await this.load(); },
+    async init() {
+      await this.load();
+      await this.loadKnownTags();
+      await this.ssInit();
+      await this.spInit();
+    },
 
     async load() {
       this.loading = true;
@@ -311,6 +737,46 @@ function contactsPage() {
         this.contacts = await res.json();
       } catch { this.contacts = []; }
       this.loading = false;
+    },
+
+    async loadKnownTags() {
+      try {
+        const res = await fetch('/api/contacts/tags');
+        const counts = await res.json();  // { tag: count }
+        this.knownTags = Object.entries(counts)
+          .map(([tag, count]) => ({ tag, count }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 12);
+      } catch { this.knownTags = []; }
+    },
+
+    async addTag(p, rawTag) {
+      if (!p.identity_id) return;
+      const tag = (rawTag || '').trim().toLowerCase().replace(/[^a-z0-9_\u4e00-\u9fff]/g, '');
+      if (!tag) return;
+      const existing = (p.tags || '').split(',').map(t => t.trim()).filter(Boolean);
+      if (existing.includes(tag)) return;
+      const newTags = [...existing, tag].join(',');
+      await fetch('/api/contacts/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: p.identity_id, tags: newTags }),
+      });
+      p.tags = newTags;
+      // refresh known tags to pick up new ones
+      this.loadKnownTags();
+    },
+
+    async removeTag(p, tag) {
+      if (!p.identity_id) return;
+      const existing = (p.tags || '').split(',').map(t => t.trim()).filter(Boolean);
+      const newTags = existing.filter(t => t !== tag).join(',');
+      await fetch('/api/contacts/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: p.identity_id, tags: newTags }),
+      });
+      p.tags = newTags;
     },
   };
 }

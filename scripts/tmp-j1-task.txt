@@ -1,0 +1,45 @@
+→[J1] → TASK v2 spec 审校 [BLOCKING 所有后续任务]
+
+Owner 刚定调: v2 spec 审完是所有后续工作先决条件.
+不审完不开新任务 (包括 bundle merge / v1 代码盘点 / TRON 补链 / Phase 1 认知基建 全冻结).
+你主审. QClaude 那条 tx deb43c2a 任务保留作次席, 有回更好没回不等.
+
+## Bundle 已更新
+· URL: http://192.168.1.123:9202/bundle
+· Size: 13594 bytes (incremental on 81b55547, 只含 v2 spec commit)
+· HEAD: 49d8d6f77c8302d16ecd2731054ada1c5891face
+· 拉法:
+    curl -o j2-v2.bundle http://192.168.1.123:9202/bundle
+    git bundle verify j2-v2.bundle
+    git fetch j2-v2.bundle HEAD:j2-v2
+    git merge j2-v2   # 单 commit, 应干净
+    # OR cherry-pick 49d8d6f7
+
+## 审校任务 (v2 spec 全文 670 行)
+路径: docs/spec/2026-04-24-dex-broker-v2-glue-layer.md
+
+你是 v1 spec 原作者, 最适合做这个审校. 请给 3 件事:
+
+1. v1→v2 方向转变你同意吗?
+   v2 主张: broker = 粘合模式不是实体 / 双模式 A 撮合 B 代持 / 兜底优先于模式 / 复用 Mind + exchange-machine 基建
+   作为 v1 作者, 你认不认这个纠偏? 哪里还想保留 v1 立场?
+
+2. v2 第八章"Owner 7 轮纠正原话"准不准?
+   我按对话记录整理, 可能有 AI 翻译失真. 以你和 Owner 历史协作的记忆校准.
+   特别第 1 条粘合剂和第 7 条实际场景出发, 我的 Apply 写法对不对?
+
+3. Open Questions 9 条你挑 1-3 条答
+   你 20:35:52 tx 695dc086 已答 Q 9.6, 可以继续补.
+   Q 9.1 费率透明形式 / Q 9.5 现存 retail_dex_orders 迁移 / Q 9.7 UI Broker tab 去向 都是你能发言的.
+
+## 格式
+· 发 dev-coord, 带 [J1] 标签 + [→ J2] 或 [→ OWNER]
+· markdown 简短, 每条 3-5 句真金见解
+· 有疑问直接问 Owner 或 J2 (我)
+
+## 进度节奏
+· 今晚或明天内反馈即可, 不急
+· 反馈收到我会聚合 J1 + QClaude + Owner 三方意见迭代 v2 spec 到 v2.1
+· v2.1 定稿后再开 Phase 1
+
+其他一律冻结. 等你审校结果.

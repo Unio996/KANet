@@ -170,6 +170,11 @@ function _buildMindCallbacks() {
 export async function getMind(relayNodeId) {
   if (!relayNodeId) return null;
 
+  // R5 T-NWT-16 (defensive): service relay 不挂 Mind. Gate -1 (getReply) 已禁言, getMind
+  // 同步禁防 proactive cycle (mind-manager.triggerProactive) 启 Mind for service.
+  const svc = sqlite.prepare('SELECT is_service, is_dex_broker FROM relay_nodes WHERE id=?').get(relayNodeId);
+  if (svc?.is_service === 1 || svc?.is_dex_broker === 1) return null;
+
   let name = relayToName[relayNodeId];
   if (!name) {
     // Unknown relayNodeId — try to look up
@@ -376,6 +381,18 @@ function _strangerMeta(address) {
  * @returns {Promise<string|null>} reply text, or null if Mind unavailable
  */
 export async function getReply(relayNodeId, peer, message, channel) {
+  // ── Gate -1 (R5 T-NWT-16, was R4 (3) Stage 3 T-NWT-10): service mute ──
+  // Service relay (is_service=1, R5 重构后 broker = Service 不是 Agent) = deterministic
+  // 协议执行体. broker-buy-handler / broker-sell-handler / broker-buy-completion-watcher /
+  // broker-intake-watcher 全覆盖 DM 路径. Mind reactive/proactive 自由发挥造矛盾文案
+  // (R4 实证). is_service=1 全禁 Mind 出口.
+  // (migrate v76 ec4367c8 auto-set is_dex_broker=1 → is_service=1, 兼容老 column.)
+  const svc = sqlite.prepare('SELECT is_service, is_dex_broker FROM relay_nodes WHERE id=?').get(relayNodeId);
+  if (svc?.is_service === 1 || svc?.is_dex_broker === 1) {
+    console.log(`[mind-manager] SERVICE MUTE ${relayNodeId.slice(0,8)} (is_service=${svc?.is_service||0}) — Mind reply skipped`);
+    return null;
+  }
+
   // ── Gate 0: "stop messaging" detection ──
   if (peer && message && detectStopRequest(peer, message)) {
     console.log(`[mind-manager] STOP REQUEST from ${peer.slice(-8)} — auto do_not_contact, no reply sent`);
@@ -391,6 +408,32 @@ export async function getReply(relayNodeId, peer, message, channel) {
   if (gate.rateLimited) {
     console.log(`[mind-manager] Message throttled: ${peer?.slice(-8)}`);
     return null;
+  }
+
+  // ── Gate 1.5 (T-J1-2026-04-27 R26 root治, J1 e450ea19 arch thesis 真 ship B): ──
+  // ── transactional sender suppression — peer Mind 真不 reactive reply broker/service DMs ──
+  //
+  // 真 R26 production case (Sophie 05:18 hijack accept, Eric SELL trigger Bug-Z6 etc):
+  // broker DM → user Mind 真 LLM auto-reply 真 fake order confirmation 真 broker accept 真 hallucinate intent.
+  //
+  // R26 真 generalize to peer-side: NWT edfad42a2 真 sibling-broker filter 真 broker→broker only,
+  // 真**不 cover** user-LAN-Qwen→broker (broker outbound 真 user agents Mind reactive reply).
+  //
+  // 真 fix: 真 inbound from broker/service relay → user Mind 真 silent (transactional, not conversational).
+  // 真 user explicit Kasia client 真 user input layer 真 separate (not Mind reactive).
+  // 真 dual invariant 真 close R26 trust loop:
+  //   own-side mute (Gate -1 above): broker doesn't Mind-reply user DMs
+  //   sender-side mute (Gate 1.5): user doesn't Mind-reply broker DMs
+  // 真 R29 (J1 ANTI-PATTERNS sediment) 真 architectural alignment: broker user-facing content 真 tool-generated,
+  // 真 user Mind 真 conversational layer 真 not 真 hijack-able 真 broker side.
+  if (peer) {
+    const senderRole = sqlite.prepare(
+      'SELECT is_service, is_dex_broker, name FROM relay_nodes WHERE address = ?'
+    ).get(peer);
+    if (senderRole?.is_service === 1 || senderRole?.is_dex_broker === 1) {
+      console.log(`[mind-manager] TRANSACTIONAL SENDER MUTE ${relayNodeId.slice(0,8)} ← ${senderRole.name||'broker'} (R26 J1) — Mind reactive reply skipped`);
+      return null;
+    }
   }
 
   const mind = await getMind(relayNodeId);

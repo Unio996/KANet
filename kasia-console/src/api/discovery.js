@@ -40,7 +40,8 @@ export async function registerDiscoveryRoutes(fastify) {
     const t = getT(lang);
     const dir = isRtl(lang) ? 'rtl' : 'ltr';
     const langs = LANG_NAMES;
-    return reply.viewAsync('explore', { title: 'Explore', t, lang, dir, langs, _page: 'explore' });
+    const relays = sqlite.prepare('SELECT id, name, address FROM relay_nodes WHERE address IS NOT NULL ORDER BY name').all();
+    return reply.viewAsync('explore', { title: 'Explore', t, lang, dir, langs, _page: 'explore', relays });
   });
 
   // GET /network — Kasia Network Activity page
@@ -284,8 +285,15 @@ export async function registerDiscoveryRoutes(fastify) {
       return reply.code(400).send({ error: 'addressA, addressB, txHash are required' });
     }
 
-    // Deduplicate by txHash (v47: check chain_events instead of interaction_records)
-    const dup = sqlite.prepare('SELECT 1 FROM chain_events WHERE txid = ?').get(txHash);
+    // 漏洞 #1 fix (2026-05-04): dup check 必须按 (txid, event_type) 双键。
+    // 历史 bug: Relay processHandshake step 1 调 ingestTx 写 chain_events event_type='tx';
+    // Scout 随后调本 endpoint 报 interactionType='handshake', 旧 dedup 按整 txid 短路 →
+    // 后续 observeHandshake / pending_actions / sendCommandAsync IPC 全部 skip →
+    // 备份救济路径死。 5/1 c382fd2c handshake 漏处理的根因之一。
+    const dedupEventType = interactionType || 'interaction';
+    const dup = sqlite.prepare(
+      'SELECT 1 FROM chain_events WHERE txid = ? AND event_type = ?'
+    ).get(txHash, dedupEventType);
     if (dup) {
       return reply.send({ ok: true, duplicate: true });
     }
@@ -316,18 +324,44 @@ export async function registerDiscoveryRoutes(fastify) {
           observeHandshake(addressB, addressA, txHash, occurredAt || new Date().toISOString());
 
           // 写入 pending_actions — inbound 握手等待 Relay 接受
+          // 2026-04-23 修复: 原 guard 用 handshake_observed_at, 该字段 observeHandshake 刚填过,
+          // 导致 guard 立即命中, inbound 握手永远无法入队触发 accept. 改为 handshake_accepted_at.
           try {
-            const { randomUUID } = await import('crypto');
-            const now = new Date().toISOString();
-            sqlite.prepare(`
-              INSERT OR IGNORE INTO pending_actions
-                (id, action_type, direction, local_address, target_address, source, idempotent_key, status, trigger_txid, created_at, updated_at)
-              VALUES (?, 'handshake_accept', 'inbound', ?, ?, 'scout', ?, 'pending', ?, ?, ?)
-            `).run(
-              randomUUID(), addressB, addressA,
-              `handshake_accept:${addressB}:${addressA}`,
-              txHash || null, now, now,
-            );
+            const already = sqlite.prepare(`
+              SELECT 1 FROM relation_states
+              WHERE local_address = ? AND peer_address = ?
+                AND (handshake_accepted_at IS NOT NULL
+                  OR status IN ('accepted','confirmed','active'))
+              LIMIT 1
+            `).get(addressB, addressA);
+            if (already) {
+              console.log(`[discovery] skip handshake_accept enqueue: already active with ${addressA.slice(-12)}`);
+            } else {
+              // 漏洞 #2 fix (2026-05-04): 见 ingest-service.js 同款修法注释。
+              const { randomUUID } = await import('crypto');
+              const now = new Date().toISOString();
+              const idempotentKey = `handshake_accept:${addressB}:${addressA}`;
+              const existing = sqlite.prepare(
+                'SELECT id, status FROM pending_actions WHERE idempotent_key = ?'
+              ).get(idempotentKey);
+              if (existing && (existing.status === 'failed' || existing.status === 'expired')) {
+                sqlite.prepare(`
+                  UPDATE pending_actions
+                  SET status = 'pending', trigger_txid = ?, retry_count = 0, error = NULL, updated_at = ?
+                  WHERE id = ?
+                `).run(txHash || null, now, existing.id);
+                console.log(`[discovery] reset failed/expired pending_action ${existing.id.slice(0,8)} for new trigger`);
+              } else if (!existing) {
+                sqlite.prepare(`
+                  INSERT INTO pending_actions
+                    (id, action_type, direction, local_address, target_address, source, idempotent_key, status, trigger_txid, created_at, updated_at)
+                  VALUES (?, 'handshake_accept', 'inbound', ?, ?, 'scout', ?, 'pending', ?, ?, ?)
+                `).run(
+                  randomUUID(), addressB, addressA, idempotentKey,
+                  txHash || null, now, now,
+                );
+              }
+            }
           } catch (paErr) {
             console.log(`[discovery] pending_actions write failed: ${paErr.message}`);
           }
@@ -363,7 +397,9 @@ export async function registerDiscoveryRoutes(fastify) {
       }
     }
 
-    return reply.send({ ok: true, id, duplicate: false });
+    // v47 leftover: this used to return interaction_records.lastInsertRowid as `id`,
+    // but that table is gone. txHash is the natural identifier in chain_events.
+    return reply.send({ ok: true, id: txHash, duplicate: false });
   });
 
   // GET /api/discovery/stats — discovery funnel metrics

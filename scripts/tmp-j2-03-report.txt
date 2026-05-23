@@ -1,0 +1,48 @@
+→[J1] T-J2-03 身份冒用根因排查 · 阶段报告
+
+## 硬编码 J2 relayId 清单 (grep c9c37c37 全仓库)
+
+| 文件 : 行 | 用途 | 风险评级 |
+|---|---|---|
+| kasia-console/src/api/stocks.js:783 | `const relayId = relayNodes?.id || 'c9c37c37...'` fallback | 🔴 高 - 任何 stocks API 调用 relay 查空就走 J2 |
+| kasia-console/src/ui/predictions-quick.eta:92 | UI 模板 `RELAY_ID: '<%= relayId || "c9c37c37..." %>'` fallback | 🟡 中 - UI 层, 只影响浏览器请求 |
+| scripts/_send-j2-changelog.mjs:63 | 一次性 dev-coord 发送 hardcode J2 | 🟢 低 - 脚本不自动跑 |
+| scripts/_send-j2-sync.mjs:29 | 同上 | 🟢 低 |
+
+## 协作频道发送路径清单
+
+走 /api/chat/send (J1 firewall 覆盖):
+· agent-mind/src/mind.mjs:1018
+· agent-mind/src/action-executor.mjs:473
+
+**走 sendCommandAsync IPC 直通 Relay (J1 firewall 不覆盖)**:
+· kasia-console/src/api/chat.js:173, 455
+· kasia-console/src/api/exchange.js:262, 435, 543, 599, 651
+· kasia-console/src/services/retail-dex.js:541, 637
+· kasia-console/src/services/retail-dex-pusher.js:79
+
+## 关键观察: 冒用消息内容特征
+
+冒用的 3-4 条 tx (7ed6f0c5 / 7a6217b0 / b37e2d5d / 3819e4b9 / 4168716b) 全部是 **AI 生成的频道总结/监听汇报**, 不是:
+· 不是 retail-dex-pusher 订单状态模板 (📋 / ✅ / 🎉 emoji 开头)
+· 不是 exchange.js 协议消息 (JSON 结构)
+· 不是 mind.mjs proactive 风格 (带 reasoning)
+
+内容特征 "[J2] 频道监听报告 === dev-coord === ..." 像是另一个 Opus CC session 做状态汇总.
+
+## 嫌疑升级排序
+
+1. 🔴 **本机另一个 Claude Code Opus session** (Owner 开过没关 / 残留 / watchdog script 通过 claude CLI 运行)
+2. 🟡 stocks.js:783 fallback 被某 cron/scheduled task 触发
+3. 🟡 某个 mcp server 工具错用 J2 relay
+4. 🟢 我之前 _send-j2-*.mjs (确认不自动跑)
+
+## 建议进一步排查
+
+A. 查 ps 进程列表找意外的 claude / node / cc 进程
+B. 开 Console debug log 记录每次 /api/chat/send 的 relayId + process context (远程到本机)
+C. 问 Owner 有没有在某处配了 cron/schedule 调用某脚本
+
+J2 待 J1 选下一步. Monitor 挂着.
+
+— J2 HEAD=11741b37 (未 merge J1 bf8d91d5 hotfix, 等新 bundle 含 J2 白名单)

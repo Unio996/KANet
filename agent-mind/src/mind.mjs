@@ -17,6 +17,7 @@ import { createConfirmToken } from './confirm-store.mjs';
 import { getState, requestEscalation, confirmEscalation, checkDegradation, recordAction, recordNoToolCall, getAvailableTools } from './skills/code-ops/layer-engine.mjs';
 import { detectIntent, checkSenderPermission } from './skills/code-ops/intent-detector.mjs';
 import { buildDiagnosticPlan, executePlan, formatResultsForBrain } from './skills/code-ops/executor.mjs';
+import { recommendBet } from './skills/bettor/kelly.mjs';
 
 /**
  * Sanitize text before sending to AI providers.
@@ -52,7 +53,7 @@ const MINDS_DIR = path.join(PROJECT_ROOT, 'minds');
 // Each sender address = one conversation channel. Natural isolation via
 // blockchain address uniqueness. No keyword classification needed for routing.
 //
-// Channel 1: console_owner — Owner via Console UI. Never expires.
+// Channel: each peer (incl. owner:* surfaces) has its own. Owner-relation channels never expire.
 // Channel 2+: on-chain address — Each peer gets their own channel.
 
 const CHANNEL_TIMEOUTS = {
@@ -146,11 +147,16 @@ export async function createMind(agentName, relayNodeId, callbacks = {}) {
 
   /**
    * Derive channel key from sender identity.
-   * Owner via Console → 'console_owner' (one channel, never expires)
-   * On-chain peer → their address (one channel per unique address)
+   * Each peer gets its own channel — including each owner:* surface
+   * (owner:predictions / owner:debug / owner:chat / owner:portfolio …).
+   * Owner-relation channels never expire (handled in _getOrCreateChannel via ch.relation).
+   *
+   * Bug history: previously all owner:* peers collapsed to a single 'console_owner'
+   * channel, causing different UI surfaces' conversation history to bleed into each
+   * other. Sophie answered "嗨 Sophie" with a continuation of an earlier BTC
+   * prediction analysis from a different surface. Per-peer channels fix it.
    */
   function _channelKey(sender, senderMeta) {
-    if (senderMeta?.relation === 'owner' || sender?.startsWith('owner:')) return 'console_owner';
     return sender || 'unknown';
   }
 
@@ -163,9 +169,9 @@ export async function createMind(agentName, relayNodeId, callbacks = {}) {
   function _getOrCreateChannel(channelKey, relation) {
     const now = Date.now();
 
-    // Clean expired channels (skip owner — never expires)
+    // Clean expired channels (skip owner-relation channels — never expire)
     for (const [key, ch] of _channels) {
-      if (key === 'console_owner') continue;
+      if (ch.relation === 'owner') continue;
       const timeout = _channelTimeout(ch.relation);
       if (timeout !== Infinity && now - ch.lastActiveAt > timeout) {
         console.log(`[channel] ${config.name}: expired "${key.slice(-12)}" (${ch.history.length} turns, ${Math.round((now - ch.createdAt) / 60000)}min)`);
@@ -177,7 +183,9 @@ export async function createMind(agentName, relayNodeId, callbacks = {}) {
     if (!ch) {
       ch = { relation, history: [], createdAt: now, lastActiveAt: now };
       _channels.set(channelKey, ch);
-      const label = channelKey === 'console_owner' ? 'console_owner (never expires)' : `${channelKey.slice(-12)} (${relation}, ${Math.round(_channelTimeout(relation) / 60000)}min)`;
+      const label = relation === 'owner'
+        ? `owner:${channelKey.split(':')[1] || 'main'} (never expires)`
+        : `${channelKey.slice(-12)} (${relation}, ${Math.round(_channelTimeout(relation) / 60000)}min)`;
       console.log(`[channel] ${config.name}: opened ${label}`);
     }
     ch.lastActiveAt = now;
@@ -223,8 +231,11 @@ export async function createMind(agentName, relayNodeId, callbacks = {}) {
     const ch = _getOrCreateChannel(chKey, relation);
     _recordTurn(ch, 'user', message);
 
-    // Owner channel with active conversation history → skip conv-ops shortcuts
-    const ownerHasHistory = (chKey === 'console_owner' && ch.history.length > 2);
+    // Owner channel with active conversation history → skip conv-ops shortcuts.
+    // Per-peer channels: any owner-relation channel with > 2 turns counts as
+    // "in the middle of a chat", so a keyword like "buy" doesn't get hijacked
+    // by Conversational Ops mid-conversation.
+    const ownerHasHistory = (relation === 'owner' && ch.history.length > 2);
 
     // Sibling agents: skip conv-ops entirely — prevents query_card ping-pong loops.
     // Siblings sending "query_system" / "query_balance" etc. should get a normal Brain reply, not structured query_card.
@@ -341,7 +352,7 @@ export async function createMind(agentName, relayNodeId, callbacks = {}) {
     const sessionId = config.name?.toLowerCase() || 'default';
     const layerState = getState(sessionId);
     const senderPerm = checkSenderPermission(relation, 'L4');
-    const intentResult = detectIntent(message, layerState.currentLayer, layerState._pendingConfirm);
+    const intentResult = detectIntent(message, layerState.currentLayer, layerState._pendingConfirm, sender);
     let codeOpsResultContext = '';  // diagnostic results for Brain (not tool syntax)
     console.log(`[mind] ${config.name} code-ops: layer=${layerState.currentLayer} intent=${intentResult.category}→${intentResult.targetLayer} sender=${relation} perm=${senderPerm.allowed}`);
 
@@ -406,7 +417,11 @@ export async function createMind(agentName, relayNodeId, callbacks = {}) {
     };
     const task = await contextBuilder.buildReactiveTask(input, sender, {
       episodeHistory: ch.history.slice(0, -1), // exclude current message (already in input)
-      episodeIntent: chKey === 'console_owner' ? 'owner' : chKey.slice(-12),
+      // Use peer suffix as topic label so different owner surfaces show distinctly
+      // (e.g. "predictions" / "debug" / "chat") instead of collapsing to "owner".
+      episodeIntent: senderMeta?.relation === 'owner'
+        ? (sender?.split(':')[1] || 'general')
+        : sender?.slice(-12),
     });
 
     // Call Brain via Adapter — send system and user as separate layers
@@ -459,8 +474,9 @@ export async function createMind(agentName, relayNodeId, callbacks = {}) {
           actionLog.push({ round: round + 1, blocked: true, ...actionResults[actionResults.length - 1] });
           continue;
         }
+        let result;
         console.log(`[mind] ${config.name} executing: ${action.type} ${JSON.stringify(action.params).slice(0, 80)}`);
-        const result = await executeTradeAction(action, config);
+        result = await executeTradeAction(action, config);
         actionResults.push({ action: action.type, params: action.params, result });
         actionLog.push({ round: round + 1, ...actionResults[actionResults.length - 1] });
       }
@@ -591,8 +607,20 @@ export async function createMind(agentName, relayNodeId, callbacks = {}) {
           relation: 'owner', authority: ['chat', 'suggest', 'manage_goals', 'manage_self', 'trade'],
         });
 
+        // market_maker focus: hard-filter social actions — maker doesn't chat
+        const SOCIAL_ACTIONS = new Set(['FOLLOW_UP', 'SEND_MESSAGE', 'INITIATE_HANDSHAKE', 'SEND_BROADCAST']);
+        const isMaker = (config.focus || 'balanced') === 'market_maker';
+        const filtered = actions.filter(a => {
+          if (a.type === 'DO_NOTHING') return false;
+          if (isMaker && SOCIAL_ACTIONS.has(a.type)) {
+            console.log(`[mind] ${config.name} market_maker: blocked social action ${a.type}`);
+            return false;
+          }
+          return true;
+        });
+
         // Map ACTION tag types to executor-compatible format
-        const mapped = actions.filter(a => a.type !== 'DO_NOTHING').map(a => ({
+        const mapped = filtered.map(a => ({
           type: a.type === 'FOLLOW_UP' ? 'follow_up'
             : a.type === 'SEND_MESSAGE' ? 'send_message'
             : a.type === 'INITIATE_HANDSHAKE' ? 'initiate_handshake'
@@ -1050,6 +1078,51 @@ async function executeTradeAction(action, config) {
         const result = await executeTool(type, params || action, layerState.currentLayer, isSelfHealing);
         if (result.ok) recordAction(sessionId);
         return result.result || result;
+      }
+
+      // ── Bettor: deterministic Kelly + Bet Card ──
+      case 'BET_PREDICT': {
+        const inputs = {
+          pMid: Number(params.pMid),
+          sigma: Number(params.sigma) || 0,
+          yesPrice: Number(params.yesPrice),
+          bankroll: Number(params.bankroll) || 1000,
+          infoGapMonths: Number(params.infoGapMonths) || 0,
+          kellyFraction: Number(params.kellyFraction) || 0.25,
+        };
+        if (!Number.isFinite(inputs.pMid) || inputs.pMid < 0 || inputs.pMid > 1) {
+          return { error: `BET_PREDICT: invalid pMid=${params.pMid}` };
+        }
+        if (!Number.isFinite(inputs.yesPrice) || inputs.yesPrice <= 0 || inputs.yesPrice >= 1) {
+          return { error: `BET_PREDICT: invalid yesPrice=${params.yesPrice}` };
+        }
+        const rec = recommendBet(inputs);
+        const market = (params.market || 'unnamed market').toString().slice(0, 80);
+        const pct = (n) => `${(n * 100).toFixed(1)}%`;
+        const usd = (n) => `$${n.toFixed(2)}`;
+        const edge = rec.side === 'YES'
+          ? Math.abs(inputs.pMid - inputs.yesPrice)
+          : rec.side === 'NO'
+            ? Math.abs((1 - inputs.pMid) - (1 - inputs.yesPrice))
+            : 0;
+        const betCard = [
+          `Bet Card — ${market}`,
+          `决策: ${rec.side === 'SKIP' ? 'SKIP' : `BUY ${rec.side}`}`,
+          `edge: ${rec.side === 'SKIP' ? 'N/A' : pct(edge)}`,
+          `仓位: ${pct(rec.fraction)} (${usd(rec.size)})`,
+          `估值: pMid=${pct(inputs.pMid)}, σ=${pct(inputs.sigma)}, info gap=${inputs.infoGapMonths.toFixed(1)} 月`,
+          `规则: 1/${(1 / inputs.kellyFraction).toFixed(0)} Kelly, edge<5pt skip, gap>1月折半, gap>3月跳过`,
+          `推理: ${rec.reasoning.join(' | ')}`,
+        ].join('\n');
+        return {
+          ok: true,
+          decision: rec.side,
+          fraction: rec.fraction,
+          size: rec.size,
+          edge,
+          betCard,
+          instruction: 'reply with betCard verbatim, no commentary',
+        };
       }
 
       default:

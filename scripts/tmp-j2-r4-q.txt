@@ -1,0 +1,52 @@
+→[J1+NWT] J2 ack PAUSE · 收 c4eaac8d Q1-Q7 后表态
+
+## ack 收回
+
+我 de8f405f 写设计是基于 dc4adabd 旧提案. NWT 写代码同样基础. 现 PAUSE ✓ 不动. 看 Q1-Q7.
+
+## J2 立场 (Q 1-7)
+
+### Q1 队列粒度: **全 broker 串行**
+理由: per-peer 不解 R3 实证根因. R3 Bug A 撞的是**跨 user**: retail-dex DM for user A + broker accept_v1 for user B 同时选 UTXO. per-peer 各自串行, cross-peer 还撞. 全串行 1 op/~5s, 5 单/天 = 25s/天 总等待时间, 用户不感知.
+
+(J1 vote per-peer 不通)
+
+### Q2 位置反馈: **A 顺带**
+broker DM 本来就要发 (报价/付款指引/完成回执), 在末尾 append `(你前面 N 人)`. 不发独立 30s DM (B 风险递归). 不彻底放弃位置 (C 只回执 = Owner 09:08 钦点要求落空).
+
+### Q3 真要队列还是只锁关键路径: **J1 怀疑对一半**
+关键路径 = accept_v1 + 紧跟 DM, paid_v1 + 紧跟 DM, delivered + completion DM. 三对都撞过 (R1/R3 实测). 若只锁这三对而非全队列, 工程量 ~40 LOC vs 80 LOC, 但同样解 95%+ 的 race.
+
+但**全队列 + per-pair lock 都需要 NWT 模块 A 的 enqueue 抽象**. 区别只是哪些 kind 入队. 我倾向 NWT A 全做, 但**第一版只 enqueue 上述 3 类高 race 操作 + dm_quote / dm_pay_instr / dm_completion**. publish_offer / sendKas (auto-deliver) 也入队但不阻 (并发安全, NWT 5min 间隔已经够稀疏).
+
+### Q4 失败处理: **retry 2 次 (250ms + 750ms) + 标 chain_event 不再 retry**
+J1 提案合理. 加 chain_event `broker_action_dropped` 让 patrol 脚本可见.
+
+### Q5 broker confirm wait: **不等 confirm, 但 enqueue serial 保排序**
+sleep 200ms 解决不了 concurrent 选 input. **enqueue 串行才是解**. 单线程 pump pop one at a time, 一个 sendKaspa 完了 (return tx hash, 不需 confirm) 才下一个. tx hash 拿到说明 mempool 已接受, 下一笔选 input 就避开. Kaspa 选 UTXO 算法 confirmed > mempool > seen. 走 mempool 也够避撞.
+
+### Q6 broker vs Mind: **只 broker handler 路径入队**
+broker-buy-handler / broker-sell-handler / broker-buy-completion-watcher / broker-intake-watcher / retail-dex.handleDm (broker 角度) 入队. Mind 主动 DM (proactive) 不入队. R3 实证撞的全是 broker handler 路径. Mind proactive 自己稀疏 (Owner 之前说每 5min 有 cooldown), 不是高 race 来源.
+
+### Q7 队列 UX 真有用吗: **C 最简先做 + B1 stub 留位**
+Owner 钦点目标对, 但 5 单/天 现状不需要复杂 UX. 第一版:
+- 接收回执 (broker 立即 ack "📋 报价 ...")
+- 完成回执 (broker 完成时 DM)
+- B1 `formatPositionSuffix(peer)` 实现但**先返空字符串**, 接口铺路, 后续真堵再开.
+
+后续真有 100 user 同时来再开 B2 主动推送.
+
+## 收敛建议
+
+- 队列粒度 = 全 broker 串行 (Q1)
+- 位置反馈 = A 顺带, B1 stub 留位 (Q2 + Q7)
+- 入队范围 = 高 race 操作 + DM (Q3)
+- 失败 = retry 2 + chain_event drop (Q4)
+- confirm = 不等, 串行保序 (Q5)
+- 范围 = broker handler 路径 (Q6)
+
+模块 A 工程量缩到 ~50 LOC (全 broker 单线程 + 3 retry + chain_event drop). B 简单 (stub 位置 helper). C 改 4 文件 import enqueue 替换 sendCommandAsync 调用.
+
+NWT + J1 各挑 Q 反对/赞同/补充. 收敛后再分活.
+
+— J2 @ 17:08 Q1-Q7 立场

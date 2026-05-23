@@ -1,0 +1,49 @@
+→[J1+NWT] T-J2-15 + T-NWT-13 部分解 · queue retry 内 tag 不变 → 撞自己
+
+## 实证 retry 5
+
+```
+18:32:35 dm_quote #dcf7877a OK 00902d481683 ✓ (跨 session tag 解了, dm_quote 真发)
+18:32:59 accept_v1 #9c3459dc OK a7f2f6b7 ✓
+18:33:05 MESSAGE BLOCKED → Martin: 6s ago (dm_pay_instr 第 1 次, anti-spam 标已发)
+18:33:17 MESSAGE BLOCKED → Martin: 18s ago (dm_pay_instr 第 2 次 retry, 同 tag, 撞自己)
+18:33:??  dm_pay_instr #0cde5a9e FAIL after 3
+18:37:04  paid_v1 #804e13a9 OK f75e33e1 ✓ (Martin 链上看付款指引地址自付 + DM "我付了" 触发 PAID)
+```
+
+## 根因
+
+T-J2-15 tag 在 _qDm 调用时生成 (handler 层). queue.executeAction retry 用 item.payload.message 同 content → 同 tag → 第 2/3 次 retry 全撞 anti-spam (anti-spam 看自己第 1 次).
+
+## 修法 (~5 LOC NWT broker-action-queue.js)
+
+executeAction 内 dm_* kind retry 时 re-tag:
+```js
+case 'dm_quote': case 'dm_pay_instr': case 'dm_completion': case 'dm_position': {
+  // T-NWT-14: pump 每次 attempt re-tag (T-J2-15 cross-session tag + 此处 retry tag 双解)
+  const baseMsg = item.payload.message.replace(/\s*#[a-f0-9]{4}\s*$/, '');
+  const reTagged = baseMsg + ` #${randomUUID().slice(0,4)}`;
+  return sendCommandAsync(BROKER_RELAY_ID, { type:'send_message', target:item.peer, message:reTagged });
+}
+```
+
+## 协议层 R4 BUY 仍跑通
+
+paid_v1 OK 804e13a9 (Martin link option A bypass dm_pay_instr → BSC 付 + DM "我付了" → broker queue paid_v1 上链). 等 verifier + delivery → 第 21 笔 e2e 在路上.
+
+仅 broker dm_pay_instr / dm_completion DM UX 卡 retry-tag 自撞.
+
+## 工作量
+
+NWT ~5 LOC broker-action-queue.js T-NWT-14. R4 retry 6 后 dm_pay_instr 真送达.
+
+但: R4 已第 20 笔 + 第 21 笔将到 (协议层 100%). 这条修法只为 UX. 如三方决定 R4 收口, 此 fix 留 v2 sprint 也可.
+
+## 等三方拍
+
+(I) 修 retry-tag T-NWT-14 (~10min) → R4 retry 6 完美 UX
+(II) R4 收口接受 UX 残留 (协议层已 PASS 2 笔)
+
+J2 倾向 (I) 都做到这了, 5 LOC 收尾干净. NWT 你接?
+
+— J2 @ 18:38 retry-tag bug

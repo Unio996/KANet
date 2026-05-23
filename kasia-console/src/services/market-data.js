@@ -242,22 +242,24 @@ export const cachedStockKlines = cached('stock_klines', fetchStockKlines);
 
 export async function fetchPredictionData() {
   try {
-    // Polymarket Gamma API — active markets sorted by 24h volume
-    // Fetch two pages in parallel (Gamma API max 500 per request)
-    const [res1, res2] = await Promise.all([
-      fetch('https://gamma-api.polymarket.com/markets?closed=false&limit=500&offset=0&order=volume24hr&ascending=false', {
+    // Polymarket Gamma API — active markets sorted by 24h volume.
+    // Bug U2 fix (Bettor r120 + Phase B B1.4 hotfix parity): gamma 100/page hard-cap today (5/14 18:17 UTC).
+    // Pre-fix hardcoded limit=500/offset=500 fetched only 200 markets (each page 100 < 500). Bottoms (vol rank ~250)
+    // missed → UI search "Bottoms" empty. Paginate 100/page up to 50 pages = 5000 markets covers all active.
+    const PAGE_SIZE = 100;
+    const MAX_PAGES = 50;
+    const markets = [];
+    for (let off = 0; off < PAGE_SIZE * MAX_PAGES; off += PAGE_SIZE) {
+      const res = await fetch(`https://gamma-api.polymarket.com/markets?closed=false&limit=${PAGE_SIZE}&offset=${off}&order=volume24hr&ascending=false`, {
         signal: AbortSignal.timeout(TIMEOUT), headers: { 'User-Agent': 'KANet/1.0' },
-      }),
-      fetch('https://gamma-api.polymarket.com/markets?closed=false&limit=500&offset=500&order=volume24hr&ascending=false', {
-        signal: AbortSignal.timeout(TIMEOUT), headers: { 'User-Agent': 'KANet/1.0' },
-      }).catch(() => null),
-    ]);
-
-    if (!res1.ok) return { source: 'prediction', ok: false, error: `HTTP ${res1.status}`, data: [] };
-
-    const page1 = await res1.json();
-    const page2 = res2?.ok ? await res2.json() : [];
-    const markets = [...(Array.isArray(page1) ? page1 : []), ...(Array.isArray(page2) ? page2 : [])];
+      }).catch(() => null);
+      if (!res || !res.ok) break;
+      const page = await res.json().catch(() => null);
+      if (!Array.isArray(page) || page.length === 0) break;
+      markets.push(...page);
+      if (page.length < PAGE_SIZE) break;
+    }
+    if (markets.length === 0) return { source: 'prediction', ok: false, error: 'gamma returned no markets', data: [] };
     const data = (Array.isArray(markets) ? markets : []).map(m => {
       // Parse outcome prices: ["0.65", "0.35"] → { yes: 65, no: 35 }
       let yes = null, no = null;
@@ -688,6 +690,54 @@ export function getCachedKasPrice() {
   if (hit?.data?.data?.KAS?.price) return hit.data.data.KAS.price;
   // Cache miss — trigger background fetch so next call has data
   cachedCrypto().catch(() => {});
+  return 0;
+}
+
+// ═══════════════════════════════════════════════════
+//  Native chain token prices (BNB / ETH / MATIC / AVAX / SOL / TRX)
+//  Used by /portfolio to USD-value native balances ("其他资产" card).
+//  CoinGecko simple/price — 1 request, 6 tokens, 60s cache.
+// ═══════════════════════════════════════════════════
+const NATIVE_PRICE_IDS = {
+  bnb:       { gecko: 'binancecoin',  symbol: 'BNB' },
+  eth:       { gecko: 'ethereum',     symbol: 'ETH' },
+  arbitrum:  { gecko: 'ethereum',     symbol: 'ETH' },  // ARB native gas = ETH
+  optimism:  { gecko: 'ethereum',     symbol: 'ETH' },
+  base:      { gecko: 'ethereum',     symbol: 'ETH' },
+  polygon:   { gecko: 'matic-network',symbol: 'MATIC' },
+  avalanche: { gecko: 'avalanche-2',  symbol: 'AVAX' },
+  sol:       { gecko: 'solana',       symbol: 'SOL' },
+  tron:      { gecko: 'tron',         symbol: 'TRX' },
+};
+
+export async function fetchNativeTokenPrices() {
+  try {
+    const ids = [...new Set(Object.values(NATIVE_PRICE_IDS).map(x => x.gecko))].join(',');
+    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT) });
+    if (!res.ok) return { source: 'native_prices', ok: false, error: `HTTP ${res.status}`, data: {} };
+    const json = await res.json();
+    // Normalize: map { ethereum: { usd: 2400 } } → { eth: 2400, arbitrum: 2400, ... }
+    const data = {};
+    for (const [chain, meta] of Object.entries(NATIVE_PRICE_IDS)) {
+      const price = json?.[meta.gecko]?.usd;
+      if (typeof price === 'number') data[chain] = price;
+    }
+    return { source: 'native_prices', ok: true, data };
+  } catch (e) {
+    return { source: 'native_prices', ok: false, error: e.message, data: {} };
+  }
+}
+
+// 60s cache — native prices don't change minute-to-minute and CoinGecko is rate-limited
+export const cachedNativeTokenPrices = cached('native_prices', fetchNativeTokenPrices, 60_000);
+
+/** Synchronous read of cached native token price for a chain. Returns 0 if cache miss. */
+export function getCachedNativePrice(chain) {
+  const hit = _cache['native_prices'];
+  if (hit?.data?.data?.[chain]) return hit.data.data[chain];
+  // Cache miss — trigger background fetch
+  cachedNativeTokenPrices().catch(() => {});
   return 0;
 }
 export const cachedFundamentals = cached('fundamentals', fetchStockFundamentals, 60 * 60 * 1000); // 1 hour

@@ -113,3 +113,21 @@ export function ingestTx({ traceId, txid, direction = "outbound", amount = null,
     status: "broadcasted",
   });
 }
+
+/**
+ * Report a Kaspa TX observed in a block to the embedded indexer.
+ * Relay pre-filters TXs against watched addresses; Console writes to kaspa_tx_log.
+ * Phase 1 stress test S10B drove this — RPC UTXO verification is fragile after spend.
+ */
+export function ingestKaspaTx({ txId, blockHash, blockTime, fromAddress, toAddress, amount, outputs }) {
+  post("/ingest/kaspa-tx", {
+    txId,
+    blockHash: blockHash || null,
+    blockTime: blockTime || null,
+    fromAddress: fromAddress || null,
+    toAddress,
+    amount,
+    outputs: outputs || null,
+    network: RELAY_NETWORK,
+  });
+}

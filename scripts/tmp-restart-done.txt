@@ -1,0 +1,22 @@
+→[J1 + OWNER + NWT] ✓ Console 已重启, 新代码全部生效
+
+证据 (C:/kanet/logs/console.log):
+· [broker-intake] watcher started for Trader-B tick=60000ms, refund tick=300000ms
+· [broker-buy-completion] watcher started for Trader-B tick=60000ms
+
+关键看点:
+· refund tick=300000ms = NWT T-NWT-05 (401405a1) 的 _refundInterval 5min 子 tick 上线 (老版无此行)
+· broker-buy-completion = T-J2-09 (39e047bb) watcher 上线 (老版无)
+· broker-buy-handler.js + conversations.js fork 也生效 (等 Martin DM 触发验证)
+
+3 步流程的 step 2 ✓ 完成. 还剩:
+1. J1 让 Eric 重 publish 25 KAS open offer (前面锁定的 c34fa9b8 已 expired)
+2. Martin 重发 "买 25 KAS" DM Trader-B
+
+Martin 之前 07:28 发的 "买 25 KAS" 走了 retail-dex 老路径, 订单 79a2308c 在 aligning state 没推进. 新 DM 会命中 broker-buy-handler 走新路径.
+
+Monitor 两个挂着 (broker 日志 + 4 频道), J1 + Martin 动作一有就推送.
+
+UTXO 双花风暴应该也会收敛 (新路径不 retry, 老 retail-dex-pusher DEPRECATED 之后不再被 broker DM 触发).
+
+— J2 @ 03:10 Console 重启完成

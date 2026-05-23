@@ -1,0 +1,582 @@
+<%~ include('partials/page-open', { _page: 'aave', pageTitle: 'Aave Lending', ...it }) %>
+
+<div class="h-full flex flex-col" x-data="aaveApp()">
+
+  <!-- ═══ HEADER BAR ═══ -->
+  <div class="flex-shrink-0 bg-white border-b border-warm-200 px-5 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold text-xs">A</div>
+      <div>
+        <div class="text-sm font-semibold text-ink-700">Aave V3</div>
+        <div class="text-[10px] text-ink-400">Decentralized lending on Arbitrum</div>
+      </div>
+    </div>
+    <div class="flex items-center gap-3 text-xs">
+      <button @click="analyze()" :disabled="!selectedWalletId || analyzeLoading"
+              class="px-3 py-1 border border-warm-300 rounded text-[11px] text-ink-600 hover:bg-warm-50 disabled:opacity-40">
+        <span x-show="!analyzeLoading">分析</span>
+        <span x-show="analyzeLoading">分析中...</span>
+      </button>
+      <button @click="loadAll()" class="text-brand-500 hover:text-brand-700 flex items-center gap-1">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+        刷新
+      </button>
+    </div>
+  </div>
+
+  <!-- ═══ 连接条 ═══ -->
+  <div class="flex-shrink-0 border-b border-warm-200 px-5 py-2.5"
+       :class="selectedWalletId ? 'bg-gradient-to-r from-green-50 to-emerald-50' : 'bg-gradient-to-r from-amber-50 to-orange-50'">
+    <div class="flex items-center justify-between">
+      <!-- 未连接 -->
+      <template x-if="!selectedWalletId">
+        <div class="flex items-center gap-3">
+          <div class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div>
+          <span class="text-xs font-medium text-amber-800">未连接</span>
+          <span class="text-[11px] text-amber-600" x-show="arbWallets.length === 0">无 Arbitrum 钱包，请在 /agent 页创建</span>
+          <span class="text-[11px] text-amber-600" x-show="arbWallets.length > 0" x-text="arbWallets.length + ' 个 Arbitrum 钱包可用，选一个连接'"></span>
+        </div>
+      </template>
+      <!-- 已连接 -->
+      <template x-if="selectedWalletId">
+        <div class="flex items-center gap-4 text-xs">
+          <div class="flex items-center gap-2">
+            <div class="w-2 h-2 rounded-full bg-green-500"></div>
+            <span class="font-semibold text-green-800">已连接</span>
+          </div>
+          <div class="text-ink-600">
+            <span x-text="connectedWallet?.name"></span>
+            <span class="font-mono text-ink-400" x-text="' · ' + connectedWallet?.address?.slice(0,6) + '...' + connectedWallet?.address?.slice(-4)"></span>
+          </div>
+          <!-- 双边视图：Arb 钱包 vs Aave 头寸 -->
+          <div class="flex items-center gap-2 text-[11px]">
+            <div class="bg-white border border-warm-200 rounded px-2 py-0.5">
+              <span class="text-[9px] text-ink-400 uppercase">Arb 钱包</span>
+              <span class="ml-1 font-semibold tabular-nums" x-text="(arbBalances.usdc || 0).toFixed(2) + ' USDC'"></span>
+              <span class="ml-1 text-[9px] text-ink-400 tabular-nums" x-text="'· ' + (arbBalances.weth || 0).toFixed(4) + ' WETH'"></span>
+            </div>
+            <span class="text-ink-400">→</span>
+            <div class="bg-white border border-warm-200 rounded px-2 py-0.5">
+              <span class="text-[9px] text-ink-400 uppercase">Aave</span>
+              <span class="ml-1 font-semibold tabular-nums text-green-700" x-text="'+$' + (account.totalCollateralUSD || 0).toFixed(2)"></span>
+              <span class="ml-1 font-semibold tabular-nums" :class="(account.totalDebtUSD || 0) > 0 ? 'text-orange-600' : 'text-ink-400'" x-text="'-$' + (account.totalDebtUSD || 0).toFixed(2)"></span>
+              <span class="ml-1 text-[9px] text-ink-400">HF</span>
+              <span class="ml-0.5 text-[10px] font-semibold tabular-nums"
+                    :class="(account.healthFactor === null || account.healthFactor > 100 || !account.healthFactor) ? 'text-ink-500' : (account.healthFactor > 2 ? 'text-green-600' : account.healthFactor > 1.5 ? 'text-yellow-600' : 'text-red-600')"
+                    x-text="(account.healthFactor === null || account.healthFactor > 100 || !account.healthFactor) ? '∞' : account.healthFactor.toFixed(2)"></span>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- 动作 -->
+      <div class="flex items-center gap-2">
+        <template x-if="!selectedWalletId">
+          <div class="flex items-center gap-2" x-show="arbWallets.length > 0">
+            <select x-model="pendingWalletId" class="pl-2 pr-6 py-1 border border-warm-200 rounded text-[11px] bg-white">
+              <option value="">— 选择钱包 —</option>
+              <template x-for="w in arbWallets" :key="w.id">
+                <option :value="w.id" x-text="w.name + ' · ' + w.address?.slice(0,6) + '...' + w.address?.slice(-4)"></option>
+              </template>
+            </select>
+            <button @click="connect()" :disabled="!pendingWalletId" class="px-3 py-1 bg-green-500 text-white rounded text-[11px] font-medium hover:bg-green-600 disabled:opacity-40">
+              🔌 连接
+            </button>
+          </div>
+        </template>
+        <template x-if="selectedWalletId">
+          <button @click="disconnect()" class="px-3 py-1 bg-white border border-warm-300 text-ink-600 rounded text-[11px] font-medium hover:bg-warm-50">
+            断开
+          </button>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ HF 警告条（HF < 1.5 时显示）═══ -->
+  <div x-show="account.healthFactor !== null && account.healthFactor < 1.5 && account.healthFactor > 0"
+       class="flex-shrink-0 bg-gradient-to-r from-red-50 to-orange-50 border-b border-red-200 px-5 py-2">
+    <div class="flex items-center gap-3 text-xs">
+      <span class="text-red-600 font-semibold">⚠ 健康因子预警</span>
+      <span class="text-ink-700">
+        当前 HF = <span class="font-bold tabular-nums" x-text="(account.healthFactor || 0).toFixed(2)"></span>
+        — <span x-show="account.healthFactor < 1.2" class="text-red-700 font-semibold">清算临近，立即 repay 或补抵押</span>
+        <span x-show="account.healthFactor >= 1.2 && account.healthFactor < 1.5" class="text-orange-700">风险偏高，建议不要继续 borrow</span>
+      </span>
+    </div>
+  </div>
+
+  <!-- ═══ MAIN CONTENT — 3 COLUMNS ═══ -->
+  <div class="flex-1 flex min-h-0 overflow-hidden">
+
+    <!-- ── LEFT: Markets List ── -->
+    <div class="flex-1 border-r border-warm-200 overflow-y-auto bg-warm-50/30">
+      <div class="p-5">
+        <div class="mb-3">
+          <h2 class="text-sm font-semibold text-ink-700">Markets</h2>
+          <p class="text-[10px] text-ink-400">Supply to earn interest or borrow against collateral</p>
+        </div>
+
+        <!-- Market cards -->
+        <div class="space-y-2">
+          <template x-for="asset in assets" :key="asset.symbol">
+            <div class="bg-white border border-warm-200 rounded-lg p-4 hover:border-brand-300 transition-colors">
+              <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center gap-2">
+                  <div class="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white"
+                    :class="asset.symbol === 'USDC' ? 'bg-blue-500' : asset.symbol === 'WETH' ? 'bg-indigo-500' : 'bg-green-500'"
+                    x-text="asset.symbol.slice(0,3)"></div>
+                  <div>
+                    <div class="font-medium text-ink-700 text-sm" x-text="asset.symbol"></div>
+                    <div class="text-[10px] text-ink-400" x-text="asset.name"></div>
+                  </div>
+                </div>
+                <div class="text-right">
+                  <div class="text-[10px] text-ink-400">Wallet</div>
+                  <div class="font-medium text-ink-600 tabular-nums text-xs" x-text="(asset.walletBalance || 0).toFixed(2)"></div>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-3 gap-2 text-[11px] mb-3">
+                <div class="bg-green-50 rounded p-2">
+                  <div class="text-[9px] text-green-600 uppercase tracking-wider">Supply APY</div>
+                  <div class="text-sm font-semibold text-green-700 tabular-nums" x-text="(asset.supplyAPY || 0).toFixed(2) + '%'"></div>
+                </div>
+                <div class="bg-orange-50 rounded p-2">
+                  <div class="text-[9px] text-orange-600 uppercase tracking-wider">Borrow APY</div>
+                  <div class="text-sm font-semibold text-orange-700 tabular-nums" x-text="(asset.borrowAPY || 0).toFixed(2) + '%'"></div>
+                </div>
+                <div class="bg-warm-100 rounded p-2">
+                  <div class="text-[9px] text-ink-500 uppercase tracking-wider">Max LTV</div>
+                  <div class="text-sm font-semibold text-ink-700 tabular-nums" x-text="(asset.ltv || 0) + '%'"></div>
+                </div>
+              </div>
+
+              <div class="flex gap-2">
+                <button @click="openAction('supply', asset)"
+                  class="flex-1 py-1.5 bg-green-500 text-white rounded text-[11px] font-medium hover:bg-green-600">
+                  Supply
+                </button>
+                <button @click="openAction('borrow', asset)"
+                  class="flex-1 py-1.5 bg-orange-500 text-white rounded text-[11px] font-medium hover:bg-orange-600"
+                  :class="!canBorrow && 'opacity-50 cursor-not-allowed'"
+                  :disabled="!canBorrow">
+                  Borrow
+                </button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── CENTER: Your Position ── -->
+    <div class="w-[320px] flex-shrink-0 border-r border-warm-200 overflow-y-auto bg-white">
+      <div class="p-5">
+        <h2 class="text-sm font-semibold text-ink-700 mb-3">Your Position</h2>
+
+        <!-- Total stats -->
+        <div class="space-y-3 mb-4">
+          <div class="bg-warm-50 rounded-lg p-3">
+            <div class="text-[10px] text-ink-400 uppercase tracking-wider">Total Supplied</div>
+            <div class="text-xl font-bold text-ink-700 tabular-nums" x-text="'$' + (account.totalCollateralUSD || 0).toFixed(2)"></div>
+          </div>
+          <div class="bg-warm-50 rounded-lg p-3">
+            <div class="text-[10px] text-ink-400 uppercase tracking-wider">Total Borrowed</div>
+            <div class="text-xl font-bold tabular-nums"
+              :class="(account.totalDebtUSD || 0) > 0 ? 'text-orange-600' : 'text-ink-700'"
+              x-text="'$' + (account.totalDebtUSD || 0).toFixed(2)"></div>
+          </div>
+          <div class="bg-warm-50 rounded-lg p-3">
+            <div class="text-[10px] text-ink-400 uppercase tracking-wider">Available to Borrow</div>
+            <div class="text-xl font-bold text-blue-600 tabular-nums" x-text="'$' + (account.availableBorrowUSD || 0).toFixed(2)"></div>
+          </div>
+        </div>
+
+        <!-- Health Factor -->
+        <div class="bg-white border border-warm-200 rounded-lg p-3 mb-4">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-[10px] text-ink-400 uppercase tracking-wider">Health Factor</span>
+            <span class="text-lg font-bold tabular-nums"
+              :class="(account.healthFactor || 999) > 2 ? 'text-green-600' : (account.healthFactor || 999) > 1.5 ? 'text-yellow-600' : 'text-red-600'"
+              x-text="account.healthFactor === null || account.healthFactor > 100 ? '∞' : (account.healthFactor || 0).toFixed(2)"></span>
+          </div>
+          <div class="h-3 bg-warm-200 rounded-full overflow-hidden">
+            <div class="h-full rounded-full transition-all"
+              :class="(account.healthFactor || 999) > 2 ? 'bg-green-500' : (account.healthFactor || 999) > 1.5 ? 'bg-yellow-500' : 'bg-red-500'"
+              :style="'width:' + Math.min(100, ((account.healthFactor || 0) / 3) * 100) + '%'"></div>
+          </div>
+          <div class="flex justify-between text-[9px] text-ink-400 mt-1">
+            <span>Liquidation &lt; 1.0</span>
+            <span>Safe &gt; 2.0</span>
+          </div>
+        </div>
+
+        <!-- Your Supplies -->
+        <div x-show="yourSupplies.length > 0" class="mb-4">
+          <div class="text-[10px] text-ink-400 uppercase tracking-wider mb-2">Your Supplies</div>
+          <div class="space-y-1.5">
+            <template x-for="s in yourSupplies" :key="s.symbol">
+              <div class="flex items-center justify-between py-1.5 border-b border-warm-100 last:border-0">
+                <span class="font-medium text-ink-600 text-xs" x-text="s.symbol"></span>
+                <div class="text-right">
+                  <div class="font-medium tabular-nums text-xs" x-text="s.amount?.toFixed(2)"></div>
+                  <div class="text-[9px] text-green-600">+<span x-text="s.apy?.toFixed(2)"></span>%</div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- Your Borrows -->
+        <div x-show="yourBorrows.length > 0" class="mb-4">
+          <div class="text-[10px] text-ink-400 uppercase tracking-wider mb-2">Your Borrows</div>
+          <div class="space-y-1.5">
+            <template x-for="b in yourBorrows" :key="b.symbol">
+              <div class="flex items-center justify-between py-1.5 border-b border-warm-100 last:border-0">
+                <span class="font-medium text-ink-600 text-xs" x-text="b.symbol"></span>
+                <div class="text-right">
+                  <div class="font-medium tabular-nums text-xs text-orange-600" x-text="b.amount?.toFixed(2)"></div>
+                  <div class="text-[9px] text-orange-600">-<span x-text="b.apy?.toFixed(2)"></span>%</div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- Empty state -->
+        <div x-show="yourSupplies.length === 0 && yourBorrows.length === 0" class="text-center py-6 text-xs text-ink-400">
+          No active positions.<br/>
+          Supply an asset to earn interest.
+        </div>
+      </div>
+    </div>
+
+    <!-- ── RIGHT: Transaction History ── -->
+    <div class="w-[300px] flex-shrink-0 overflow-y-auto bg-warm-50/30">
+      <div class="p-5">
+        <h2 class="text-sm font-semibold text-ink-700 mb-3">Transaction History</h2>
+        <div x-show="history.length === 0" class="text-center py-6 text-xs text-ink-400">
+          No transactions yet.
+        </div>
+        <div class="space-y-2">
+          <template x-for="tx in history" :key="tx.id">
+            <div class="bg-white border border-warm-200 rounded-lg p-2.5">
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-[10px] font-medium uppercase tracking-wider"
+                  :class="{ 'text-green-600': tx.type === 'supply', 'text-orange-600': tx.type === 'borrow', 'text-blue-600': tx.type === 'withdraw', 'text-purple-600': tx.type === 'repay' }"
+                  x-text="tx.type"></span>
+                <span class="text-[9px] text-ink-400" x-text="tx.time"></span>
+              </div>
+              <div class="text-xs text-ink-700 tabular-nums" x-text="tx.amount + ' ' + tx.asset"></div>
+              <a :href="'https://arbiscan.io/tx/' + tx.txHash" target="_blank"
+                class="text-[9px] text-brand-500 hover:underline font-mono" x-text="tx.txHash?.slice(0, 10) + '...'"></a>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══ 分析结果弹窗 ═══ -->
+  <div x-show="analyzeOpen" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" @click.self="analyzeOpen = false">
+    <div class="bg-white rounded-xl shadow-2xl p-6 w-[520px] max-h-[85vh] overflow-y-auto" @click.stop>
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h3 class="text-base font-semibold text-ink-700">Aave 资金策略分析</h3>
+          <div class="text-[10px] text-ink-400 mt-0.5" x-text="analyzeAgent ? '由 ' + analyzeAgent + ' 本地模型分析' : '准备中…'"></div>
+        </div>
+        <button @click="analyzeOpen = false" class="text-ink-400 hover:text-ink-600 text-2xl leading-none">&times;</button>
+      </div>
+
+      <div x-show="analyzeLoading" class="py-8 text-center">
+        <svg class="animate-spin w-8 h-8 mx-auto mb-3 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="3" opacity="0.3"/><path d="M12 2 A10 10 0 0 1 22 12" stroke-width="3" stroke-linecap="round"/></svg>
+        <div class="text-xs text-ink-500">拉取 Aave + Hyperliquid 状态 + 跨市场分析...</div>
+      </div>
+
+      <div x-show="!analyzeLoading && analyzeError" class="py-4 text-xs text-red-600" x-text="analyzeError"></div>
+
+      <div x-show="!analyzeLoading && analyzeResult" class="space-y-4">
+        <!-- Assessment headline -->
+        <div class="rounded-lg p-4"
+             :class="analyzeResult?.assessment === 'safe' ? 'bg-gradient-to-br from-green-50 to-emerald-100' :
+                     analyzeResult?.assessment === 'cautious' ? 'bg-gradient-to-br from-blue-50 to-cyan-100' :
+                     analyzeResult?.assessment === 'risky' ? 'bg-gradient-to-br from-amber-50 to-orange-100' :
+                     'bg-gradient-to-br from-red-50 to-rose-100'">
+          <div class="flex items-center justify-between mb-2">
+            <div>
+              <div class="text-[10px] uppercase tracking-wider opacity-60">评估</div>
+              <div class="text-xl font-bold"
+                   :class="analyzeResult?.assessment === 'safe' ? 'text-green-700' :
+                           analyzeResult?.assessment === 'cautious' ? 'text-blue-700' :
+                           analyzeResult?.assessment === 'risky' ? 'text-amber-700' : 'text-red-700'"
+                   x-text="analyzeResult?.assessment?.toUpperCase() || '—'"></div>
+            </div>
+            <div class="text-right" x-show="analyzeIntel?.aave">
+              <div class="text-[10px] uppercase tracking-wider opacity-60">HF</div>
+              <div class="text-xl font-bold tabular-nums" x-text="(analyzeIntel?.aave?.healthFactor === null || analyzeIntel?.aave?.healthFactor > 100) ? '∞' : (analyzeIntel?.aave?.healthFactor || 0).toFixed(2)"></div>
+            </div>
+          </div>
+          <div class="text-xs text-ink-700" x-text="analyzeResult?.summary"></div>
+        </div>
+
+        <!-- HF commentary -->
+        <div x-show="analyzeResult?.hfCommentary" class="bg-warm-50 rounded p-2.5 text-xs text-ink-700">
+          <span class="font-semibold text-ink-500">HF 解读: </span>
+          <span x-text="analyzeResult?.hfCommentary"></span>
+        </div>
+
+        <!-- Action -->
+        <div x-show="analyzeResult?.action" class="bg-white border border-warm-200 rounded p-3">
+          <div class="text-[10px] text-ink-500 uppercase tracking-wider font-semibold mb-2">建议动作</div>
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-sm font-semibold text-ink-700" x-text="analyzeResult?.action?.type?.toUpperCase()"></span>
+            <span x-show="analyzeResult?.action?.asset" class="text-xs text-ink-500 tabular-nums"
+                  x-text="(analyzeResult?.action?.amount || 0) + ' ' + (analyzeResult?.action?.asset?.toUpperCase() || '')"></span>
+          </div>
+          <div class="text-[11px] text-ink-600" x-text="analyzeResult?.action?.reason"></div>
+        </div>
+
+        <!-- Cross market suggestion -->
+        <div x-show="analyzeResult?.crossMarketSuggestion" class="bg-indigo-50 border border-indigo-100 rounded p-2.5 text-xs">
+          <span class="font-semibold text-indigo-700">🔗 跨市场联动：</span>
+          <span class="text-ink-700" x-text="analyzeResult?.crossMarketSuggestion"></span>
+        </div>
+
+        <!-- Risks -->
+        <div x-show="analyzeResult?.risks?.length">
+          <div class="text-[10px] text-ink-500 uppercase tracking-wider font-semibold mb-1">⚠ 风险</div>
+          <ul class="space-y-0.5">
+            <template x-for="r in (analyzeResult?.risks || [])">
+              <li class="text-xs text-ink-700 flex gap-1.5"><span class="text-amber-500">•</span><span x-text="r"></span></li>
+            </template>
+          </ul>
+        </div>
+
+        <!-- Intel snapshot -->
+        <div x-show="analyzeIntel" class="text-[10px] text-ink-400 bg-warm-50 rounded p-2 space-y-0.5">
+          <div><span class="font-semibold text-ink-500">使用的数据:</span></div>
+          <div>Aave: 抵押 $<span x-text="(analyzeIntel?.aave?.totalCollateralUSD || 0).toFixed(2)"></span> · 负债 $<span x-text="(analyzeIntel?.aave?.totalDebtUSD || 0).toFixed(2)"></span> · 可借 $<span x-text="(analyzeIntel?.aave?.availableBorrowUSD || 0).toFixed(2)"></span></div>
+          <div>Arb 钱包: USDC <span x-text="(analyzeIntel?.arbBalances?.usdc || 0).toFixed(2)"></span> · WETH <span x-text="(analyzeIntel?.arbBalances?.weth || 0).toFixed(4)"></span></div>
+          <div x-show="analyzeIntel?.hl">HL: 账户 $<span x-text="(analyzeIntel?.hl?.accountValue || 0).toFixed(2)"></span> · 持仓 <span x-text="(analyzeIntel?.hl?.positions?.length || 0)"></span></div>
+        </div>
+
+        <button @click="analyzeOpen = false" class="w-full py-2 bg-warm-200 text-ink-600 rounded-lg text-sm font-medium hover:bg-warm-300">关闭</button>
+      </div>
+
+      <div x-show="!analyzeLoading && !analyzeResult && analyzeRaw" class="bg-warm-50 rounded p-3 text-xs text-ink-700 whitespace-pre-wrap" x-text="analyzeRaw"></div>
+    </div>
+  </div>
+
+  <!-- ═══ ACTION MODAL ═══ -->
+  <div x-show="modalOpen" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center bg-black/30" @click.self="modalOpen = false">
+    <div class="bg-white rounded-xl shadow-2xl p-6 w-96" @click.stop>
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-base font-semibold text-ink-700">
+          <span x-text="modalAction.charAt(0).toUpperCase() + modalAction.slice(1) + ' ' + modalAsset?.symbol"></span>
+        </h3>
+        <button @click="modalOpen = false" class="text-ink-400 hover:text-ink-600 text-2xl leading-none">&times;</button>
+      </div>
+
+      <div class="bg-warm-50 rounded-lg p-3 mb-4 text-xs space-y-1">
+        <div class="flex justify-between"><span class="text-ink-400">Wallet Balance:</span> <span class="tabular-nums" x-text="(modalAsset?.walletBalance || 0).toFixed(4) + ' ' + modalAsset?.symbol"></span></div>
+        <div class="flex justify-between" x-show="modalAction === 'supply' || modalAction === 'withdraw'"><span class="text-ink-400">Supply APY:</span> <span class="text-green-600 tabular-nums" x-text="(modalAsset?.supplyAPY || 0).toFixed(2) + '%'"></span></div>
+        <div class="flex justify-between" x-show="modalAction === 'borrow' || modalAction === 'repay'"><span class="text-ink-400">Borrow APY:</span> <span class="text-orange-600 tabular-nums" x-text="(modalAsset?.borrowAPY || 0).toFixed(2) + '%'"></span></div>
+        <div class="flex justify-between" x-show="modalAction === 'borrow'"><span class="text-ink-400">Available:</span> <span class="tabular-nums" x-text="'$' + (account.availableBorrowUSD || 0).toFixed(2)"></span></div>
+      </div>
+
+      <label class="block">
+        <span class="text-xs text-ink-500">Amount</span>
+        <input type="number" x-model="modalAmount" step="0.01" min="0" placeholder="0.00"
+          class="w-full mt-1 px-3 py-2 border border-warm-300 rounded-lg text-sm bg-white focus:border-brand-400 focus:outline-none" />
+      </label>
+
+      <div x-show="modalError" class="mt-2 text-xs text-red-600" x-text="modalError"></div>
+
+      <div class="flex gap-2 mt-4">
+        <button @click="modalOpen = false" class="flex-1 py-2 bg-warm-200 text-ink-600 rounded-lg text-sm font-medium hover:bg-warm-300">Cancel</button>
+        <button @click="confirmAction()" :disabled="modalLoading || !modalAmount"
+          class="flex-1 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+          :class="{ 'bg-green-500 hover:bg-green-600': modalAction === 'supply', 'bg-orange-500 hover:bg-orange-600': modalAction === 'borrow', 'bg-blue-500 hover:bg-blue-600': modalAction === 'withdraw', 'bg-purple-500 hover:bg-purple-600': modalAction === 'repay' }">
+          <span x-show="!modalLoading" x-text="'Confirm ' + modalAction"></span>
+          <span x-show="modalLoading">Processing...</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function aaveApp() {
+  return {
+    // State
+    selectedWalletId: null,
+    pendingWalletId: '',
+    arbWallets: [],
+    arbBalances: { usdc: 0, weth: 0, eth: 0 },
+    account: { totalCollateralUSD: 0, totalDebtUSD: 0, availableBorrowUSD: 0, healthFactor: null, ltv: 0 },
+    assets: [
+      { symbol: 'USDC', name: 'USD Coin', walletBalance: 0, supplyAPY: 3.2, borrowAPY: 5.5, ltv: 80 },
+      { symbol: 'WETH', name: 'Wrapped Ether', walletBalance: 0, supplyAPY: 1.8, borrowAPY: 3.2, ltv: 80 },
+      { symbol: 'USDT', name: 'Tether', walletBalance: 0, supplyAPY: 3.0, borrowAPY: 5.2, ltv: 75 },
+    ],
+    yourSupplies: [],
+    yourBorrows: [],
+    history: [],
+    modalOpen: false,
+    modalAction: 'supply',
+    modalAsset: null,
+    modalAmount: '',
+    modalError: '',
+    modalLoading: false,
+    // Analyze
+    analyzeOpen: false,
+    analyzeLoading: false,
+    analyzeResult: null,
+    analyzeRaw: '',
+    analyzeError: '',
+    analyzeAgent: '',
+    analyzeIntel: null,
+
+    get canBorrow() {
+      return (this.account.totalCollateralUSD || 0) > 0 && (this.account.healthFactor === null || this.account.healthFactor > 1.5);
+    },
+    get connectedWallet() {
+      return this.arbWallets.find(w => w.id == this.selectedWalletId) || null;
+    },
+
+    async init() {
+      await this.loadWallets();
+      // Restore last session if present, else honor auto-select
+      const last = localStorage.getItem('aave_wallet_id');
+      if (last && this.arbWallets.find(w => w.id == last)) {
+        this.selectedWalletId = last;
+      }
+      if (this.selectedWalletId) await this.loadAll();
+    },
+
+    async connect() {
+      if (!this.pendingWalletId) return;
+      this.selectedWalletId = this.pendingWalletId;
+      localStorage.setItem('aave_wallet_id', this.selectedWalletId);
+      await this.loadAll();
+    },
+    disconnect() {
+      this.selectedWalletId = null;
+      this.pendingWalletId = '';
+      localStorage.removeItem('aave_wallet_id');
+      this.account = { totalCollateralUSD: 0, totalDebtUSD: 0, availableBorrowUSD: 0, healthFactor: null, ltv: 0 };
+      this.arbBalances = { usdc: 0, weth: 0, eth: 0 };
+    },
+
+    async loadWallets() {
+      try {
+        const relays = await fetch('/api/agent/profile').then(r => r.json());
+        const wallets = [];
+        for (const r of (relays || [])) {
+          try {
+            const w = await fetch('/api/relay/' + r.id + '/wallets').then(rr => rr.json());
+            for (const c of (w.chains || [])) {
+              if (c.chain === 'arbitrum') wallets.push({ id: c.id, name: r.name, address: c.address });
+            }
+          } catch {}
+        }
+        this.arbWallets = wallets;
+        // Do NOT auto-select — user must explicitly click Connect
+      } catch {}
+    },
+
+    async loadAll() {
+      if (!this.selectedWalletId) return;
+      try {
+        const d = await fetch('/api/defi/aave/status?walletId=' + this.selectedWalletId).then(r => r.json());
+        if (d.ok) {
+          this.account = d.account || {};
+          if (d.walletBalance) {
+            this.arbBalances = {
+              usdc: d.walletBalance.usdc || 0,
+              weth: d.walletBalance.weth || 0,
+              eth: 0,
+            };
+            // Also update the Markets list walletBalance column
+            const usdc = this.assets.find(a => a.symbol === 'USDC');
+            if (usdc) usdc.walletBalance = d.walletBalance.usdc || 0;
+            const weth = this.assets.find(a => a.symbol === 'WETH');
+            if (weth) weth.walletBalance = d.walletBalance.weth || 0;
+          }
+        }
+      } catch {}
+    },
+
+    openAction(action, asset) {
+      this.modalAction = action;
+      this.modalAsset = asset;
+      this.modalAmount = '';
+      this.modalError = '';
+      this.modalOpen = true;
+    },
+
+    async analyze() {
+      if (!this.selectedWalletId) return;
+      this.analyzeLoading = true;
+      this.analyzeResult = null;
+      this.analyzeRaw = '';
+      this.analyzeError = '';
+      this.analyzeAgent = '';
+      this.analyzeIntel = null;
+      this.analyzeOpen = true;
+      try {
+        const r = await fetch('/api/defi/aave/analyze', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ walletId: this.selectedWalletId }),
+        });
+        const d = await r.json();
+        if (d.ok) {
+          this.analyzeAgent = d.agent || '';
+          this.analyzeIntel = d.intel || null;
+          if (d.parsed) this.analyzeResult = d.parsed;
+          else this.analyzeRaw = d.raw || 'AI 返回了无法解析的内容';
+        } else {
+          this.analyzeError = d.error || '分析失败';
+        }
+      } catch (e) {
+        this.analyzeError = e.message;
+      } finally {
+        this.analyzeLoading = false;
+      }
+    },
+
+    async confirmAction() {
+      if (!this.modalAmount || !this.selectedWalletId) return;
+      this.modalLoading = true;
+      this.modalError = '';
+      try {
+        const r = await fetch('/api/defi/aave/' + this.modalAction, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            walletId: this.selectedWalletId,
+            asset: this.modalAsset.symbol.toLowerCase(),
+            amount: this.modalAmount,
+          }),
+        });
+        const d = await r.json();
+        if (d.ok) {
+          alert('Success! TX: ' + d.txHash);
+          this.modalOpen = false;
+          await this.loadAll();
+        } else {
+          this.modalError = d.error || 'Transaction failed';
+        }
+      } catch (e) {
+        this.modalError = e.message;
+      } finally {
+        this.modalLoading = false;
+      }
+    },
+  };
+}
+</script>
+
+<%~ include('partials/page-close', it) %>

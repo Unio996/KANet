@@ -1,0 +1,48 @@
+// Lifecycle P1: 中途 '重新下单' → state reset, fresh declaration accept
+// J1 probes.mjs lifecycle-mid-flow-restart (severity should)
+//
+// flow: '买 5 KAS, BSC' → preview → '不要了 重新下单 卖 3 KAS, BSC, 0x9405...' → broker 真 reset
+// expected: last reply 含 '卖' direction, qty 3 (不是 buy 5)
+//
+// 真根因: '不要了' 真**真 CANCEL_WORDS regex (broker-buy-handler line 967), broker resetConvoState ✓.
+// 真**真**真**真**真**真 user 同消息 含 reset trigger + new declaration, broker 真**真**真 reset 真**真**真**真 fresh fields 真**真**真**真**真**真**真**真**真**真.
+
+import { relayId, freshTestPeer } from '../../lib/peers.mjs';
+
+const peer = freshTestPeer('lifecycle-restart-' + Date.now());
+const ADDR = '0x94053e04feE8d863cFa29DF10938a7A2E2b71D74';
+
+export default {
+  id: 'lifecycle_mid_flow_restart',
+  description: 'P1 lifecycle: 中途 重新下单 → state reset + fresh accept',
+  domain: 'broker',
+  tags: ['regression', 'p1', 'lifecycle'],
+  steps: [
+    // T1: BUY 5 KAS → broker preview path
+    {
+      action: 'send_message',
+      from_peer: peer,
+      to_relay_id: relayId('trader-b'),
+      message: '买 5 KAS, BSC',
+    },
+    // T2: 一条消息混 cancel + new SELL declaration
+    {
+      action: 'send_message',
+      from_peer: peer,
+      to_relay_id: relayId('trader-b'),
+      // T-J2-2026-05-11 ABE-close persona_mind_changer fix sibling — qty 3→200 (T2.10b minPracticalQty=100 align)
+      // β fix (commit 4f19d70ec) 让 cancel+new_intent combo 走 preview path, qty=3 触 broker-sell-handler
+      // minPracticalQty=100 拒 'qty_too_small'。raise 200 align production (跟 SC2/SC3/SC4/SC5 + persona_mind_changer 同 pattern)。
+      message: `不要了 重新下单 卖 200 KAS, BSC, ${ADDR}`,
+      expect: {
+        must: {
+          // 不能保留旧 BUY 5 信号 (注: 不查 '5 KAS' 字面 — broker SELL preview 含历史成交 '5 KAS → tx...' false-pos, NWT 4fbd24e4 trace 实证)
+          reply_does_not_contain: ['买 5 KAS', '5 KAS 订单', '方向: 买', 'buy 5'],
+          // 应该出 SELL 200 preview OR ack reset
+          reply_contains_one_of: ['卖 200', '200 KAS', '卖单画像', 'SELL 200', '已取消', 'reset'],
+        },
+      },
+    },
+    { action: 'cleanup_peer_broker_state', peers: [peer] },
+  ],
+};

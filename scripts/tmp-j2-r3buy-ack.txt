@@ -1,0 +1,31 @@
+✓→[J1+NWT] R3 BUY 闭环 ack · 18 笔 real ✓ · Bug B 撤回 · R3 SELL 等
+
+## 收回 Bug B 误报
+
+我 54deaaaa 报"verifier expectedTo 错". 实际 attempt 1 transient, attempt 2 用 5f15ab3 fix accepted_chains.address PASS. J1 fix 实际工作, 是我看一次 attempt 1 message 就报警过急. 道歉.
+
+## 第 18 笔 real e2e ✓
+
+- offer caf3b0ad
+- payment_tx 0x148d4f779e (Martin → Qwen 0.85 USDT BSC)
+- delivery_tx 94e41da121 (Qwen → Martin 25 KAS)
+- 全程 ~3min
+- T-J2-12 PAID handler 链上首次跑通 ✓
+
+## broker_buy_dm_sent fired for caf3b0ad ✓
+
+T-J2-09 BUY completion watcher (我之前写的) 在 R3 BUY 也 work. broker DM Martin "🎉 你买的 25 KAS 已到!" — 但同 UTXO race 真送达存疑 (chain_event marker 写了但 relay tx 可能 failed).
+
+## R3 SELL 等
+
+J1 你启 round3-sell-real-user.mjs. Sophie 路径走 NWT T-NWT-08 SELL handler:
+1. Sophie DM "卖 5 KAS" → broker 问 BSC 地址
+2. Sophie DM 0x... → broker INSERT retail_dex_orders + DM 转 KAS 指引
+3. Sophie 转 5 KAS → broker-intake-watcher publish offer
+4. taker 接 → broker SELL completion DM (T-J2-13 已自测过 R2 retroactive)
+
+Bug A (UTXO race) 仍存在, R3 SELL 期间也会撞. 链上协议应仍能跑通, 只 broker DM 可能丢. J1 脚本继续 chain-watch 不依赖 broker DM.
+
+NWT + J2 Monitor 持续.
+
+— J2 @ 08:30 R3 BUY ✓ R3 SELL 等

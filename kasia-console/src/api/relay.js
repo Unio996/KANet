@@ -5,17 +5,30 @@ import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 import { addressFromMnemonic } from '../services/wallet.js';
 import { nowIso } from '../lib/time.js';
 import { registerMindSkills } from '../data/settings/skills.js';
-import { sendCommand, sendCommandAsync } from '../services/relay-manager.js';
+import { sendCommand, sendCommandAsync, getRelayRpcState } from '../services/relay-manager.js';
 import { sqlite } from '../db/client.js';
 import { Mnemonic } from 'kaspa-wasm';
 import { getWorkingRpc } from '../services/rpc-health.js';
 import { writeFile, readFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { startRelay } from '../services/relay-manager.js';
+import { startRelay, stopRelay } from '../services/relay-manager.js';
 import { getMind } from '../services/mind-manager.js';
 import { ethers } from 'ethers';
 import { encrypt, decrypt } from '../services/crypto.js';
 import { randomUUID } from 'crypto';
+import {
+  CHAIN_META,
+  EVM_CHAINS as REGISTRY_EVM_CHAINS,
+  SUPPORTED_CHAINS as REGISTRY_SUPPORTED_CHAINS,
+  STABLECOINS as REGISTRY_STABLECOINS,
+  EVM_RPC_URLS as REGISTRY_EVM_RPC_URLS,
+  withFallbackRpc,
+  getExplorerAddressUrl,
+  getExplorerTxUrl,
+  getPublicMeta,
+  isEvmChain,
+} from '../services/chains.js';
+import { recordChainEvent } from '../services/chain-event.js';
 
 const KANET_ROOT = process.env.KANET_ROOT || 'D:/Anthropic';
 const MINDS_DIR = `${KANET_ROOT}/agent-mind/minds`;
@@ -96,10 +109,132 @@ export async function registerRelayRoutes(fastify) {
   fastify.post('/relays/:id/assign', async (request, reply) => {
     const { adapter_node_id } = request.body;
     updateRelayNode(request.params.id, { adapterNodeId: adapter_node_id || null });
+    // Auto-start relay if adapter assigned and relay has address+mnemonic
+    if (adapter_node_id) {
+      const relay = getRelayNode(request.params.id);
+      if (relay?.address && relay?.mnemonic_encrypted) {
+        const result = await startRelay(request.params.id);
+        if (result.ok) console.log(`[relay-manager] Auto-started ${relay.name} relay after adapter assign`);
+      }
+    }
     return reply.redirect('/relays');
   });
 
+  // Restart a single relay process — Bug 1 path C (per Owner 5/2 approve, T1-bugfix-handshake)
+  // Plumb stopRelay + startRelay sequential. Use case: re-process catch-up after rpc-listener.mjs hot-fix.
+  fastify.post('/api/relay/:id/restart', async (request, reply) => {
+    const id = request.params.id;
+    const relay = getRelayNode(id);
+    if (!relay) return reply.code(404).send({ error: 'Relay not found' });
+    const stopResult = await stopRelay(id);
+    // stopResult.ok=false reason='not_running' is OK — proceed to start
+    const startResult = await startRelay(id);
+    if (!startResult.ok) {
+      return reply.code(503).send({ error: 'restart failed', stopResult, startResult });
+    }
+    console.log(`[relay-manager] Restarted ${relay.name} relay (PID ${startResult.pid})`);
+    return reply.send({ ok: true, stopResult, startResult });
+  });
+
+  // T-J2-2026-05-11 Phase 2 η.2 (Owner 5/11 钦定 + NWT #16 propose):
+  // GET /api/relay/:id — relay 详情含 role + is_dex_broker + is_service
+  // POST /api/relay/:id/role — UI 改 role + 同步 legacy field (is_dex_broker/is_service) + ROLE_SKILL_ALLOWED auto-enforce
+  fastify.get('/api/relay/:id', async (request, reply) => {
+    const relay = sqlite.prepare(`
+      SELECT id, name, address, network, role, is_dex_broker, is_service, focus,
+             evolution_interval_hours, proactive_interval_minutes, created_at, updated_at
+      FROM relay_nodes WHERE id = ?
+    `).get(request.params.id);
+    if (!relay) return reply.code(404).send({ error: 'relay_not_found' });
+    return reply.send({ relay });
+  });
+
+  // T-J2-2026-05-11 Phase 2 η.2 + η.2-fix (J1 #114 catch): predictor skill 实际 names
+  // (Bettor 5/8-5/10 ship): bettor / prediction_sense / onboard_polymarket。
+  // 虚构 'polymarket-trader/sports-tracker' fix per J1 #114 grep verify。
+  const VALID_ROLES = ['broker', 'trader', 'predictor', 'general', 'user'];
+  const ROLE_SKILL_ALLOWED_LOCAL = {
+    broker: ['matcher', 'order-book', 'cex-bridge'],
+    trader: ['matcher', 'order-book'],
+    user: ['wallet-query'],
+    predictor: ['bettor', 'prediction_sense', 'onboard_polymarket'],
+    general: [],
+  };
+  const TRADING_SKILLS_LOCAL = new Set([
+    'matcher', 'order-book', 'cex-bridge', 'bettor', 'prediction_sense', 'onboard_polymarket', 'wallet-query',
+  ]);
+
+  fastify.post('/api/relay/:id/role', async (request, reply) => {
+    const { role: newRole } = request.body || {};
+    if (!newRole || !VALID_ROLES.includes(newRole)) {
+      return reply.code(400).send({ error: 'invalid_role', message: `role 必 ∈ [${VALID_ROLES.join(', ')}]` });
+    }
+    const relay = sqlite.prepare(`SELECT id, name, role, is_dex_broker, is_service FROM relay_nodes WHERE id = ?`).get(request.params.id);
+    if (!relay) return reply.code(404).send({ error: 'relay_not_found' });
+
+    const oldRole = relay.role;
+    if (oldRole === newRole) {
+      return reply.send({ ok: true, role: newRole, unchanged: true });
+    }
+
+    // legacy field 同步 (role authoritative, legacy mirror)
+    const newIsDexBroker = newRole === 'broker' ? 1 : 0;
+    const newIsService = newRole === 'broker' ? 1 : 0;
+
+    const now = new Date().toISOString();
+    sqlite.prepare(`
+      UPDATE relay_nodes
+      SET role = ?, is_dex_broker = ?, is_service = ?, updated_at = ?
+      WHERE id = ?
+    `).run(newRole, newIsDexBroker, newIsService, now, request.params.id);
+
+    // ROLE_SKILL_ALLOWED auto-enforce: 不兼容 active trading skill auto-disable
+    const allowed = ROLE_SKILL_ALLOWED_LOCAL[newRole] || [];
+    const allowedSet = new Set(allowed);
+    const activeSkills = sqlite.prepare(`
+      SELECT id, name FROM skills WHERE relay_node_id = ? AND status = 'active'
+    `).all(request.params.id);
+    const disabled_skills = [];
+    const disableStmt = sqlite.prepare(`UPDATE skills SET status='disabled', updated_at=? WHERE id=?`);
+    for (const s of activeSkills) {
+      if (TRADING_SKILLS_LOCAL.has(s.name) && !allowedSet.has(s.name)) {
+        disableStmt.run(now, s.id);
+        disabled_skills.push(s.name);
+      }
+    }
+
+    // suggested skills: ROLE_SKILL_ALLOWED 中此 agent 已 disabled 状态的 skill (UI prompt 一键启用)
+    const disabledMatch = sqlite.prepare(`
+      SELECT name FROM skills WHERE relay_node_id = ? AND status = 'disabled' AND name IN (${allowed.map(() => '?').join(',') || "''"})
+    `).all(request.params.id, ...allowed);
+    const suggested_skills = disabledMatch.map(r => r.name);
+
+    console.log(`[relay role] ${relay.name}: '${oldRole}' → '${newRole}', is_dex_broker=${newIsDexBroker}, disabled=${disabled_skills.length}, suggested=${suggested_skills.length}`);
+
+    return reply.send({
+      ok: true,
+      role: newRole,
+      old_role: oldRole,
+      legacy_sync: { is_dex_broker: newIsDexBroker, is_service: newIsService },
+      side_effects: { disabled_skills, suggested_skills },
+    });
+  });
+
   // Balance query — auto-selects best available RPC node
+  // GET /api/relay/:id/active-peers — addresses this agent has a live handshake with
+  // Used by Explore page to disable "send handshake" button for already-connected peers.
+  fastify.get('/api/relay/:id/active-peers', async (request, reply) => {
+    const relay = getRelayNode(request.params.id);
+    if (!relay?.address) return reply.send({ peers: [] });
+    const rows = sqlite.prepare(`
+      SELECT DISTINCT peer_address FROM relation_states
+      WHERE local_address = ?
+        AND (handshake_observed_at IS NOT NULL
+          OR status IN ('accepted','confirmed','active'))
+    `).all(relay.address);
+    return reply.send({ peers: rows.map(r => r.peer_address) });
+  });
+
   fastify.get('/api/relay/:id/balance', async (request, reply) => {
     const relay = getRelayNode(request.params.id);
     if (!relay?.address) return reply.send({ balance: null });
@@ -136,6 +271,51 @@ export async function registerRelayRoutes(fastify) {
     return reply.send({ balance: null });
   });
 
+  // T-J2-2026-05-12 #4 — relay child RPC state probe (UI 健康检测 P0, NWT spec sub #4/7).
+  // 跟 /api/config/rpc-status 区别: 该 endpoint 测 console daemon 自己 RpcClient (misleading).
+  // 本 endpoint 走 IPC 拿 relay child 内部 _rpc state (真反映 broker/scout 等子进程 RPC 连接状态).
+  fastify.get('/api/relay/:id/rpc-state', async (request, reply) => {
+    const relay = getRelayNode(request.params.id);
+    if (!relay) return reply.code(404).send({ ok: false, error: 'relay_not_found' });
+    const result = await getRelayRpcState(request.params.id);
+    return reply.send({ relayId: request.params.id, relayName: relay.name, ...result });
+  });
+
+  // Phase 4a Sub 6 (Bettor r235) — GET /api/relay/:id/pubkey
+  // Return relay x-only secp256k1 pubkey (= SS contract oracle ctor param param + cross-host verification).
+  // Derive from kaspa address (= deterministic, no privkey exposure).
+  fastify.get('/api/relay/:id/pubkey', async (request, reply) => {
+    const relay = getRelayNode(request.params.id);
+    if (!relay) return reply.code(404).send({ ok: false, error: 'relay_not_found' });
+    if (!relay.address) return reply.code(400).send({ ok: false, error: 'relay has no kaspa address' });
+    try {
+      const kaspa = await import('kaspa-wasm');
+      const xpk = kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(relay.address));
+      const xOnlyHex = xpk.toString();
+      return reply.send({ ok: true, relay_id: relay.id, relay_name: relay.name, address: relay.address, x_only_pubkey: xOnlyHex });
+    } catch (e) {
+      return reply.code(500).send({ ok: false, error: `x-only pubkey derive fail: ${e.message}` });
+    }
+  });
+
+  // T-J2-2026-05-12 #4 — system-wide RPC overview (聚合全 relay state, header indicator + dashboard 用).
+  fastify.get('/api/system/rpc-overview', async (_request, reply) => {
+    const relays = listRelayNodes();
+    const results = await Promise.all(
+      relays.map(async (r) => {
+        const result = await getRelayRpcState(r.id);
+        return { id: r.id, name: r.name, address: r.address, ...result };
+      }),
+    );
+    const summary = {
+      total: results.length,
+      connected: results.filter((r) => r.ok && r.state?.connected).length,
+      reconnecting: results.filter((r) => r.ok && r.state?.reconnecting).length,
+      unreachable: results.filter((r) => !r.ok).length,
+    };
+    return reply.send({ summary, relays: results });
+  });
+
   // Split UTXOs for concurrent sends
   fastify.post('/api/relay/:id/split-utxos', async (request, reply) => {
     try {
@@ -157,9 +337,14 @@ export async function registerRelayRoutes(fastify) {
     const amountKas = parseFloat(amount);
     if (!amountKas || amountKas <= 0) return reply.code(400).send({ error: 'Amount must be > 0' });
 
-    const sent = sendCommand(request.params.id, { type: 'transfer', target: to.trim(), amount: String(amountKas) });
-    if (!sent) return reply.code(503).send({ error: 'Relay not running' });
-    return reply.send({ ok: true });
+    try {
+      const result = await sendCommandAsync(request.params.id, { type: 'transfer', target: to.trim(), amount: amountKas.toFixed(8) });
+      if (!result) return reply.code(503).send({ error: 'Relay not running' });
+      if (result.error) return reply.code(400).send({ error: result.error });
+      return reply.send({ ok: true, txId: result.txId, fee: result.fee });
+    } catch (err) {
+      return reply.code(500).send({ error: err.message || 'Transfer failed' });
+    }
   });
 
   // Reveal mnemonic (local UI only)
@@ -170,26 +355,16 @@ export async function registerRelayRoutes(fastify) {
 
   // ── Multi-chain Wallet Management (agent_wallets table) ─────
 
-  const SUPPORTED_CHAINS = ['bnb', 'eth', 'sol', 'tron', 'polygon'];
-  const EVM_CHAINS = ['bnb', 'eth', 'polygon'];
-  const EVM_RPC_URLS = { bnb: 'https://bsc-dataseed1.binance.org', eth: 'https://eth.llamarpc.com', polygon: 'https://polygon-bor-rpc.publicnode.com' };
-  const STABLECOINS = {
-    bnb: {
-      usdt: { address: '0x55d398326f99059fF775485246999027B3197955', decimals: 18 },
-      usdc: { address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', decimals: 18 },
-    },
-    eth: {
-      usdt: { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', decimals: 6 },
-      usdc: { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', decimals: 6 },
-    },
-    polygon: {
-      usdt: { address: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F', decimals: 6 },
-      usdc: { address: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', decimals: 6 },
-    },
-  };
-  // 向后兼容：旧代码引用 USDT_CONTRACTS 的地方
+  // Chain metadata sourced from central registry (src/services/chains.js).
+  // Add new chains or stablecoin variants there — this file no longer duplicates it.
+  const SUPPORTED_CHAINS = REGISTRY_SUPPORTED_CHAINS;
+  const EVM_CHAINS = REGISTRY_EVM_CHAINS;
+  const EVM_RPC_URLS = REGISTRY_EVM_RPC_URLS; // legacy single-URL map; new code uses withFallbackRpc
+  const STABLECOINS = REGISTRY_STABLECOINS;
   const USDT_CONTRACTS = Object.fromEntries(
-    Object.entries(STABLECOINS).map(([chain, coins]) => [chain, coins.usdt])
+    Object.entries(STABLECOINS)
+      .filter(([, coins]) => coins.usdt)
+      .map(([chain, coins]) => [chain, coins.usdt])
   );
 
   // Generate wallet by chain
@@ -252,22 +427,41 @@ export async function registerRelayRoutes(fastify) {
 
   async function getEvmBalances(chain, address) {
     const coins = STABLECOINS[chain];
-    if (!EVM_RPC_URLS[chain] || !coins) return { usdt: null, usdc: null, native: null };
+    if (!isEvmChain(chain) || !coins) return { usdt: null, usdc: null, native: null };
     try {
-      const provider = new ethers.JsonRpcProvider(EVM_RPC_URLS[chain]);
-      const abi = ['function balanceOf(address) view returns (uint256)'];
-      const usdtContract = new ethers.Contract(coins.usdt.address, abi, provider);
-      const usdcContract = new ethers.Contract(coins.usdc.address, abi, provider);
-      const [usdtBal, usdcBal, nativeBal] = await Promise.race([
-        Promise.all([usdtContract.balanceOf(address), usdcContract.balanceOf(address), provider.getBalance(address)]),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
-      ]);
-      return {
-        usdt: parseFloat(ethers.formatUnits(usdtBal, coins.usdt.decimals)),
-        usdc: parseFloat(ethers.formatUnits(usdcBal, coins.usdc.decimals)),
-        native: parseFloat(ethers.formatEther(nativeBal)),
-      };
-    } catch { return { usdt: null, native: null }; }
+      return await withFallbackRpc(chain, async (provider) => {
+        const abi = ['function balanceOf(address) view returns (uint256)'];
+        const usdtContract = coins.usdt ? new ethers.Contract(coins.usdt.address, abi, provider) : null;
+        const usdcContract = coins.usdc ? new ethers.Contract(coins.usdc.address, abi, provider) : null;
+        const extras = (coins.usdcExtras || []).map(e => ({
+          contract: new ethers.Contract(e.address, abi, provider),
+          decimals: e.decimals,
+        }));
+
+        const [usdtBal, usdcBal, nativeBal, ...extraBals] = await Promise.all([
+          usdtContract ? usdtContract.balanceOf(address) : Promise.resolve(null),
+          usdcContract ? usdcContract.balanceOf(address) : Promise.resolve(null),
+          provider.getBalance(address),
+          ...extras.map(e => e.contract.balanceOf(address)),
+        ]);
+
+        let usdcTotal = 0;
+        if (usdcBal != null && coins.usdc) {
+          usdcTotal += parseFloat(ethers.formatUnits(usdcBal, coins.usdc.decimals));
+        }
+        extraBals.forEach((bal, i) => {
+          if (bal != null) usdcTotal += parseFloat(ethers.formatUnits(bal, extras[i].decimals));
+        });
+
+        return {
+          usdt: usdtBal != null && coins.usdt ? parseFloat(ethers.formatUnits(usdtBal, coins.usdt.decimals)) : 0,
+          usdc: usdcTotal,
+          native: parseFloat(ethers.formatEther(nativeBal)),
+        };
+      }, { timeoutMs: 4000 });
+    } catch {
+      return { usdt: null, usdc: null, native: null };
+    }
   }
 
   async function getKasBalance(relayId) {
@@ -580,6 +774,7 @@ export async function registerRelayRoutes(fastify) {
     const { to, amount } = request.body || {};
     if (!to || !amount) return reply.code(400).send({ error: 'to and amount required' });
 
+    let provider;
     try {
       const privateKey = decrypt(wallet.privkey_encrypted);
 
@@ -588,7 +783,7 @@ export async function registerRelayRoutes(fastify) {
         const usdt = USDT_CONTRACTS[wallet.chain];
         if (!rpcUrl || !usdt) return reply.code(400).send({ error: 'Chain not configured for withdraw' });
 
-        const provider = new ethers.JsonRpcProvider(rpcUrl);
+        provider = new ethers.JsonRpcProvider(rpcUrl);
         const signer = new ethers.Wallet(privateKey, provider);
         const contract = new ethers.Contract(usdt.address, [
           'function transfer(address to, uint256 amount) returns (bool)',
@@ -605,7 +800,173 @@ export async function registerRelayRoutes(fastify) {
     } catch (err) {
       console.error(`[wallet] Withdraw failed: ${err.message}`);
       return reply.code(500).send({ error: err.message });
+    } finally {
+      try { provider?.destroy?.(); } catch {}
     }
+  });
+
+  // ── GET /api/chains/meta — public chain registry snapshot for the frontend ──
+  // Frontend fetches this once to know explorer URLs, native symbols, chain IDs,
+  // stablecoin addresses — everything needed to render and operate on wallets.
+  fastify.get('/api/chains/meta', async (_req, reply) => {
+    return reply.send({ ok: true, chains: getPublicMeta() });
+  });
+
+  // ── POST /api/relay/:id/wallets/:walletId/send — generic EVM transfer ──
+  // Supports native / usdt / usdc. Body: { asset: 'native'|'usdt'|'usdc', amount, to }
+  //
+  // Guardrails (money code, fail-closed):
+  //   1. Destination must be a valid checksum EVM address (ethers.getAddress throws on invalid)
+  //   2. Amount must be > 0 and parseable
+  //   3. Pre-check balance before broadcasting — return error on insufficient funds
+  //   4. RPC failure → no state mutation, just error
+  //   5. All TXs logged to console for audit
+  fastify.post('/api/relay/:id/wallets/:walletId/send', async (request, reply) => {
+    const relay = getRelayNode(request.params.id);
+    if (!relay) return reply.code(404).send({ error: 'Relay not found' });
+
+    const wallet = sqlite.prepare(
+      'SELECT id, chain, address, privkey_encrypted FROM agent_wallets WHERE id = ? AND relay_node_id = ?'
+    ).get(request.params.walletId, request.params.id);
+    if (!wallet) return reply.code(404).send({ error: 'Wallet not found' });
+    if (!wallet.privkey_encrypted) return reply.code(400).send({ error: 'No private key — cannot send' });
+
+    const { asset, amount, to } = request.body || {};
+    if (!asset || !amount || !to) return reply.code(400).send({ error: 'asset, amount, to required' });
+
+    const assetKey = String(asset).toLowerCase();
+    if (!['native', 'usdt', 'usdc'].includes(assetKey)) {
+      return reply.code(400).send({ error: `asset must be native | usdt | usdc (got ${asset})` });
+    }
+
+    // Guardrail 1: positive amount (chain-agnostic)
+    const amountNum = parseFloat(amount);
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
+      return reply.code(400).send({ error: 'amount must be a positive number' });
+    }
+
+    const toRaw = String(to).trim();
+
+    // ── EVM chains (bnb/eth/polygon/arbitrum/optimism/avalanche/base) ──
+    if (isEvmChain(wallet.chain)) {
+      // Checksum address
+      let toAddr;
+      try { toAddr = ethers.getAddress(toRaw); }
+      catch { return reply.code(400).send({ error: `Invalid EVM destination address: ${toRaw}` }); }
+
+      const coins = STABLECOINS[wallet.chain] || {};
+      if (assetKey !== 'native' && !coins[assetKey]) {
+        return reply.code(400).send({ error: `${assetKey.toUpperCase()} not configured on ${wallet.chain}` });
+      }
+
+      try {
+        const privateKey = decrypt(wallet.privkey_encrypted);
+        const result = await withFallbackRpc(wallet.chain, async (provider) => {
+          const signer = new ethers.Wallet(privateKey, provider);
+          if (assetKey === 'native') {
+            const balance = await provider.getBalance(signer.address);
+            const amountWei = ethers.parseEther(String(amountNum));
+            if (balance < amountWei) {
+              throw new Error(`Insufficient ${CHAIN_META[wallet.chain].nativeSymbol} balance`);
+            }
+            const tx = await signer.sendTransaction({ to: toAddr, value: amountWei });
+            return { txHash: tx.hash };
+          }
+          const token = coins[assetKey];
+          const erc20 = new ethers.Contract(
+            token.address,
+            ['function transfer(address to, uint256 amount) returns (bool)',
+             'function balanceOf(address) view returns (uint256)'],
+            signer,
+          );
+          const amountWei = ethers.parseUnits(String(amountNum), token.decimals);
+          const bal = await erc20.balanceOf(signer.address);
+          if (bal < amountWei) {
+            throw new Error(`Insufficient ${assetKey.toUpperCase()} balance on ${wallet.chain}`);
+          }
+          const tx = await erc20.transfer(toAddr, amountWei);
+          return { txHash: tx.hash };
+        }, { timeoutMs: 10000 });
+
+        console.log(`[wallet/send] ${wallet.chain} ${amountNum} ${assetKey} ${wallet.address} → ${toAddr} TX: ${result.txHash}`);
+        return reply.send({
+          ok: true, txHash: result.txHash, chain: wallet.chain, asset: assetKey,
+          amount: amountNum, to: toAddr,
+          explorerUrl: getExplorerTxUrl(wallet.chain, result.txHash),
+        });
+      } catch (err) {
+        console.error(`[wallet/send] EVM failed: ${err.message}`);
+        return reply.code(500).send({ error: err.message });
+      }
+    }
+
+    // ── Solana ──
+    if (wallet.chain === 'sol') {
+      // Solana base58 address: 32-44 chars, no 0/O/I/l
+      if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(toRaw)) {
+        return reply.code(400).send({ error: `Invalid Solana destination address: ${toRaw}` });
+      }
+      try {
+        if (assetKey === 'native') {
+          const { transferSolNative } = await import('../services/sol-transfer.js');
+          const result = await transferSolNative(wallet.privkey_encrypted, toRaw, amountNum);
+          if (!result.ok) return reply.code(500).send({ error: result.error });
+          console.log(`[wallet/send] sol ${amountNum} SOL ${wallet.address} → ${toRaw} TX: ${result.txHash}`);
+          return reply.send({
+            ok: true, txHash: result.txHash, chain: 'sol', asset: 'native',
+            amount: amountNum, to: toRaw,
+            explorerUrl: getExplorerTxUrl('sol', result.txHash),
+          });
+        }
+        const { transferSPL } = await import('../services/sol-transfer.js');
+        const result = await transferSPL(wallet.privkey_encrypted, toRaw, amountNum, assetKey.toUpperCase());
+        if (!result.ok) return reply.code(500).send({ error: result.error });
+        console.log(`[wallet/send] sol ${amountNum} ${assetKey} ${wallet.address} → ${toRaw} TX: ${result.txHash}`);
+        return reply.send({
+          ok: true, txHash: result.txHash, chain: 'sol', asset: assetKey,
+          amount: amountNum, to: toRaw,
+          explorerUrl: getExplorerTxUrl('sol', result.txHash),
+        });
+      } catch (err) {
+        console.error(`[wallet/send] sol failed: ${err.message}`);
+        return reply.code(500).send({ error: err.message });
+      }
+    }
+
+    // ── TRON ──
+    if (wallet.chain === 'tron') {
+      // TRON base58check: starts with T, total 34 chars
+      if (!/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(toRaw)) {
+        return reply.code(400).send({ error: `Invalid TRON destination address: ${toRaw}` });
+      }
+      try {
+        if (assetKey === 'native') {
+          const { transferTronNative } = await import('../services/tron-transfer.js');
+          const result = await transferTronNative(wallet.privkey_encrypted, toRaw, amountNum);
+          if (!result.ok) return reply.code(500).send({ error: result.error });
+          console.log(`[wallet/send] tron ${amountNum} TRX ${wallet.address} → ${toRaw} TX: ${result.txHash}`);
+          return reply.send({
+            ok: true, txHash: result.txHash, chain: 'tron', asset: 'native',
+            amount: amountNum, to: toRaw,
+            explorerUrl: getExplorerTxUrl('tron', result.txHash),
+          });
+        }
+        const { transferTRC20 } = await import('../services/tron-transfer.js');
+        const result = await transferTRC20(wallet.privkey_encrypted, toRaw, amountNum, assetKey.toUpperCase());
+        if (!result.ok) return reply.code(500).send({ error: result.error });
+        console.log(`[wallet/send] tron ${amountNum} ${assetKey} ${wallet.address} → ${toRaw} TX: ${result.txHash}`);
+        return reply.send({
+          ok: true, txHash: result.txHash, chain: 'tron', asset: assetKey,
+          amount: amountNum, to: toRaw,
+          explorerUrl: getExplorerTxUrl('tron', result.txHash),
+        });
+      } catch (err) {
+        console.error(`[wallet/send] tron failed: ${err.message}`);
+        return reply.code(500).send({ error: err.message });
+      }
+    }
+
+    return reply.code(400).send({ error: `Send not supported on chain: ${wallet.chain}` });
   });
 
   // POST /api/relay/:id/wallets/:walletId/swap — swap between tokens on same chain (Uniswap V3)
@@ -655,10 +1016,11 @@ export async function registerRelayRoutes(fastify) {
     if (!toAddr) return reply.code(400).send({ error: `Unknown token: ${toToken}. Available: ${Object.keys(tokens).join(', ')}` });
     if (fromAddr === toAddr) return reply.code(400).send({ error: 'Cannot swap same token' });
 
+    let provider;
     try {
       const privateKey = decrypt(wallet.privkey_encrypted);
       const rpcUrl = wallet.chain === 'polygon' ? 'https://polygon.drpc.org' : EVM_RPC_URLS[wallet.chain];
-      const provider = new ethers.JsonRpcProvider(rpcUrl);
+      provider = new ethers.JsonRpcProvider(rpcUrl);
       const signer = new ethers.Wallet(privateKey, provider);
 
       const decimals = 6; // USDC/USDT 都是 6 位（Polygon 原生 USDC 也是 6）
@@ -701,6 +1063,50 @@ export async function registerRelayRoutes(fastify) {
     } catch (err) {
       console.error(`[swap] Failed: ${err.message}`);
       return reply.code(500).send({ error: err.message });
+    } finally {
+      try { provider?.destroy?.(); } catch {}
+    }
+  });
+
+  // POST /api/relay/:id/wallets/:walletId/bridge — Across V3 USDC 跨链
+  fastify.post('/api/relay/:id/wallets/:walletId/bridge', async (request, reply) => {
+    const relay = getRelayNode(request.params.id);
+    if (!relay) return reply.code(404).send({ error: 'Relay not found' });
+
+    const wallet = sqlite.prepare(
+      'SELECT id, chain, address, privkey_encrypted FROM agent_wallets WHERE id = ? AND relay_node_id = ?'
+    ).get(request.params.walletId, request.params.id);
+    if (!wallet) return reply.code(404).send({ error: 'Wallet not found' });
+    if (!wallet.privkey_encrypted) return reply.code(400).send({ error: 'No private key' });
+    if (!EVM_CHAINS.includes(wallet.chain)) return reply.code(400).send({ error: 'Bridge only supported on EVM chains' });
+
+    const { toChain, amount, recipient } = request.body || {};
+    const BRIDGE_CHAINS = ['arbitrum','polygon','bnb','eth','base','optimism'];
+    if (!BRIDGE_CHAINS.includes(toChain))
+      return reply.code(400).send({ error: `bridge target chain must be one of: ${BRIDGE_CHAINS.join(',')}` });
+    if (wallet.chain === toChain)
+      return reply.code(400).send({ error: 'fromChain === toChain, use /swap instead' });
+    if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0)
+      return reply.code(400).send({ error: 'amount must be a positive number' });
+
+    try {
+      const { executeBridge } = await import('../services/across-bridge.js');
+      const privateKey = decrypt(wallet.privkey_encrypted);
+      const result = await executeBridge(
+        privateKey, wallet.chain, toChain, parseFloat(amount), recipient || wallet.address
+      );
+      recordChainEvent({
+        txid: result.txHash,
+        eventType: 'bridge_deposit',
+        fromAddress: wallet.address,
+        toAddress: recipient || wallet.address,
+        observedBy: 'relay',
+        payload: JSON.stringify({ fromChain: wallet.chain, toChain, amount: result.inputAmount, fee: result.fee }),
+      });
+      return reply.send(result);
+    } catch (err) {
+      console.error(`[bridge] Failed: ${err.message}`);
+      return reply.code(500).send({ error: err.message });
     }
   });
 
@@ -708,7 +1114,7 @@ export async function registerRelayRoutes(fastify) {
   fastify.post('/relays/generate-mnemonic', async (request, reply) => {
     const { network } = request.body || {};
     const mnemonic = Mnemonic.random(12).phrase;
-    const address = addressFromMnemonic(mnemonic, network || process.env.KASPA_NETWORK || 'mainnet');
+    const address = addressFromMnemonic(mnemonic, network || 'mainnet');
     return reply.send({ mnemonic, address });
   });
 
@@ -743,6 +1149,7 @@ export async function registerRelayRoutes(fastify) {
       socialStyle: relay.social_style || 'balanced',
       socialOverrides: relay.social_overrides ? JSON.parse(relay.social_overrides) : null,
       focus: relay.focus || 'balanced',
+      autoHandshake: relay.social_overrides ? (JSON.parse(relay.social_overrides)?.autoHandshake === true) : false,
     });
   });
 
@@ -751,7 +1158,7 @@ export async function registerRelayRoutes(fastify) {
     const relay = getRelayNode(request.params.id);
     if (!relay) return reply.code(404).send({ error: 'Relay not found' });
 
-    const { vision, principles, style, evolutionIntervalHours, proactiveIntervalMinutes, socialStyle, socialOverrides, focus } = request.body || {};
+    const { vision, principles, style, evolutionIntervalHours, proactiveIntervalMinutes, socialStyle, socialOverrides, focus, autoHandshake } = request.body || {};
     const now = nowIso();
     const fields = [];
     const vals = [];
@@ -764,6 +1171,12 @@ export async function registerRelayRoutes(fastify) {
     if (socialStyle !== undefined) { fields.push('social_style = ?'); vals.push(socialStyle); }
     if (socialOverrides !== undefined) { fields.push('social_overrides = ?'); vals.push(socialOverrides ? JSON.stringify(socialOverrides) : null); }
     if (focus !== undefined) { fields.push('focus = ?'); vals.push(focus); }
+    if (autoHandshake !== undefined) {
+      // Merge into social_overrides JSON
+      const existing = relay.social_overrides ? JSON.parse(relay.social_overrides) : {};
+      existing.autoHandshake = !!autoHandshake;
+      fields.push('social_overrides = ?'); vals.push(JSON.stringify(existing));
+    }
 
     if (fields.length === 0) return reply.code(400).send({ error: 'No fields to update' });
 
@@ -773,6 +1186,17 @@ export async function registerRelayRoutes(fastify) {
     sqlite.prepare(`UPDATE relay_nodes SET ${fields.join(', ')} WHERE id = ?`).run(...vals);
 
     return reply.send({ ok: true });
+  });
+
+  // PUT /api/relay/:id/focus — 快捷更新 Agent Focus 模式
+  fastify.put('/api/relay/:id/focus', async (request, reply) => {
+    const relay = getRelayNode(request.params.id);
+    if (!relay) return reply.code(404).send({ error: 'Relay not found' });
+    const { focus } = request.body || {};
+    const allowed = ['market_maker', 'social', 'balanced'];
+    if (!allowed.includes(focus)) return reply.code(400).send({ error: 'Invalid focus: must be market_maker, social, or balanced' });
+    sqlite.prepare('UPDATE relay_nodes SET focus = ?, updated_at = ? WHERE id = ?').run(focus, new Date().toISOString(), request.params.id);
+    return reply.send({ ok: true, focus });
   });
 
   // ── Agent Goals ──────────────────────────────────────────────────
@@ -909,7 +1333,7 @@ export async function registerRelayRoutes(fastify) {
     const relay = getRelayNode(request.params.id);
     if (!relay) return reply.code(404).send({ error: 'Relay not found' });
 
-    const { name, entityType, summary, mode } = request.body || {};
+    const { name, entityType, summary, mode, serviceTerms } = request.body || {};
     if (!name?.trim()) return reply.code(400).send({ error: 'Name is required' });
 
     const skills = sqlite.prepare(
@@ -927,6 +1351,7 @@ export async function registerRelayRoutes(fastify) {
         summary: summary?.trim() || undefined, mode: mode || 'public',
         rootTx: existingCard?.card_root_tx || null,
         parentTx: existingCard?.card_latest_tx || null,
+        serviceTerms: (serviceTerms && typeof serviceTerms === 'object') ? serviceTerms : undefined,
       },
     });
     if (!sent) return reply.code(503).send({ error: 'Relay not running' });
@@ -958,8 +1383,7 @@ export async function registerRelayRoutes(fastify) {
     try {
       // 1. Generate mnemonic + address
       const mnemonic = Mnemonic.random(12).phrase;
-      const network = process.env.KASPA_NETWORK || 'mainnet';
-      const address = addressFromMnemonic(mnemonic, network);
+      const address = addressFromMnemonic(mnemonic, 'mainnet');
 
       // 2. Resolve adapter based on AI mode
       let adapterId = null;
@@ -975,14 +1399,14 @@ export async function registerRelayRoutes(fastify) {
           aiProviderKey: aiProviderKey,
           aiModel: aiModel || null,
         });
-      } else if (aiMode === 'openclaw') {
-        // OpenClaw agent protocol
+      } else if (aiMode === 'ollama') {
+        // Ollama: create adapter for local model
         adapterId = createAdapterNode({
           name: name.trim() + '-brain',
-          aiProvider: 'openclaw',
-          aiProviderUrl: aiProviderUrl || null,
-          aiProviderKey: aiProviderKey || null,
-          aiModel: null,
+          aiProvider: 'openai',
+          aiProviderUrl: 'http://localhost:11434/v1',
+          aiProviderKey: 'ollama',
+          aiModel: aiModel || 'llama3.3',
         });
       } else {
         // Fallback: pick first available adapter
@@ -995,7 +1419,7 @@ export async function registerRelayRoutes(fastify) {
         name: name.trim(),
         mnemonic,
         address,
-        network,
+        network: 'mainnet',
         adapterNodeId: adapterId,
         pollMs: 2000,
       });
@@ -1135,10 +1559,10 @@ export async function registerRelayRoutes(fastify) {
 
   // POST /api/relay/:id/send-command — unified command to Relay (Console transmits, Relay executes)
   fastify.post('/api/relay/:id/send-command', async (request, reply) => {
-    const body = request.body || {};
-    if (!body.type) return reply.code(400).send({ error: 'type is required' });
+    const { type, target, message, params, channel, amount } = request.body || {};
+    if (!type) return reply.code(400).send({ error: 'type is required' });
     try {
-      const result = await sendCommandAsync(request.params.id, body);
+      const result = await sendCommandAsync(request.params.id, { type, target, message, params, channel, amount });
       return reply.send({ ok: true, ...result });
     } catch (err) {
       return reply.code(503).send({ ok: false, error: err.message || 'Relay command failed' });

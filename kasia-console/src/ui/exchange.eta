@@ -1,730 +1,999 @@
-<%~ include('partials/page-open', { _page: 'exchange', pageTitle: 'Free Market', ...it }) %>
+<%~ include('partials/page-open', { _page: 'exchange', pageTitle: 'Exchange', ...it }) %>
 
-<div class="p-6 max-w-5xl mx-auto" x-data="exchangeApp()">
+<div class="h-full flex flex-col" x-data="exchangeApp()">
 
-  <!-- Node visibility notice -->
-  <div class="mb-5 bg-warm-50 border border-warm-200 rounded-lg px-4 py-3 text-xs text-ink-500">
-    <span class="font-medium text-ink-600">Protocol-Level Market</span> —
-    Broadcast stream observed by your local node. Not a global orderbook.
-  </div>
-
-  <!-- Tab bar -->
-  <div class="flex items-center border-b border-warm-200 mb-5">
-    <button @click="activeTab = 'market'"
-      :class="activeTab === 'market' ? 'border-brand-500 text-brand-600' : 'border-transparent text-ink-400 hover:text-ink-600'"
-      class="px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors">
-      Market
-    </button>
-    <button @click="activeTab = 'deals'"
-      :class="activeTab === 'deals' ? 'border-brand-500 text-brand-600' : 'border-transparent text-ink-400 hover:text-ink-600'"
-      class="px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5">
-      My Deals
-      <span x-show="activeDeals.length > 0"
-        class="bg-brand-500 text-white text-[10px] leading-none px-1.5 py-0.5 rounded-full"
-        x-text="activeDeals.length"></span>
-    </button>
-    <button @click="activeTab = 'arb'; loadArbitrageData()"
-      :class="activeTab === 'arb' ? 'border-brand-500 text-brand-600' : 'border-transparent text-ink-400 hover:text-ink-600'"
-      class="px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors">
-      Arbitrage
-    </button>
-    <div class="ml-auto flex items-center gap-2 text-xs pb-1">
-      <span class="text-ink-400">Agent:</span>
-      <select x-model="form.relayNodeId" @change="onAgentChange()"
-        class="px-2 py-1 border border-warm-200 rounded text-xs bg-white focus:ring-1 focus:ring-brand-300">
-        <template x-for="r in relays" :key="r.id">
-          <option :value="r.id" x-text="r.name"></option>
-        </template>
-      </select>
-    </div>
-  </div>
-
-  <!-- ═══ MARKET TAB ═══ -->
-  <div x-show="activeTab === 'market'">
-
-    <!-- Market groups bar -->
-    <div class="flex items-center gap-2 mb-4 flex-wrap">
-      <button @click="filter = ''"
-        :class="filter === '' ? 'bg-brand-500 text-white' : 'bg-warm-100 text-ink-500 hover:bg-warm-200'"
-        class="px-3 py-1.5 rounded-full text-xs font-medium transition-colors">
-        All
+  <!-- ═══ DISCOVERY BAR + WALLET ═══ -->
+  <div class="flex-shrink-0 bg-white border-b border-warm-200 relative">
+    <div class="px-5 py-2.5 flex items-center gap-5 text-xs overflow-x-auto">
+      <!-- Market metrics -->
+      <div class="flex items-center gap-1.5">
+        <span class="text-ink-400">KAS</span>
+        <span class="text-ink-700 font-semibold tabular-nums" x-text="kasPrice ? '$' + kasPrice.toFixed(5) : '—'"></span>
+      </div>
+      <div class="w-px h-4 bg-warm-200"></div>
+      <div class="flex items-center gap-1.5">
+        <span class="text-ink-400">Open</span>
+        <span class="text-ink-600 font-medium tabular-nums" x-text="openOffers.length"></span>
+      </div>
+      <div x-show="overview.totalCompleted >= 5" class="flex items-center gap-1.5">
+        <span class="text-ink-400">Settled</span>
+        <span class="text-green-600 font-medium tabular-nums" x-text="overview.totalCompleted"></span>
+      </div>
+      <!-- Wallet summary (click to expand) -->
+      <div class="w-px h-4 bg-warm-200"></div>
+      <button @click="openWalletPanel('kas')" class="flex items-center gap-1 hover:text-brand-500 transition-colors">
+        <span class="text-ink-400">KAS</span>
+        <span class="font-semibold tabular-nums text-ink-700" x-text="(wallet.kas||0).toFixed(1)"></span>
+        <span x-show="wallet.kasLocked>0" class="text-[10px] text-orange-500 tabular-nums" x-text="'('+(wallet.kasLocked||0).toFixed(1)+' locked)'"></span>
       </button>
-      <template x-for="g in groups" :key="g.market_key">
-        <button @click="filter = g.market_key"
-          :class="filter === g.market_key ? 'bg-brand-500 text-white' : 'bg-warm-100 text-ink-500 hover:bg-warm-200'"
-          class="px-3 py-1.5 rounded-full text-xs font-medium transition-colors">
-          <span x-text="g.market_key"></span>
-          <span class="ml-1 opacity-60" x-text="'(' + g.cnt + ')'"></span>
+      <template x-for="c in chainSummary" :key="c.chain">
+        <button @click="openWalletPanel(c.chain)" class="flex items-center gap-1 hover:text-brand-500 transition-colors">
+          <span class="text-ink-400 text-[10px]" x-text="c.name"></span>
+          <span class="tabular-nums text-ink-600" x-text="((c.usdt||0)>0?(c.usdt||0).toFixed(2)+' USDT':'') + ((c.usdc||0)>0?((c.usdt||0)>0?' / ':'')+(c.usdc||0).toFixed(2)+' USDC':'') + ((c.usdt||0)===0&&(c.usdc||0)===0?'0 USDT':'')"></span>
+          <span x-show="c.locked>0" class="text-[10px] text-orange-500 tabular-nums" x-text="'('+(c.locked||0).toFixed(2)+' locked)'"></span>
         </button>
       </template>
-    </div>
-
-    <!-- Action bar -->
-    <div class="flex items-center justify-between mb-4">
-      <div class="text-sm text-ink-400">
-        <span x-text="filtered.length"></span> offers
-        <span x-show="filter" class="ml-1">in <span x-text="filter" class="font-medium text-ink-600"></span></span>
-      </div>
-      <button @click="showForm = !showForm"
-        class="px-4 py-2 bg-brand-500 text-white rounded-lg text-sm font-medium hover:bg-brand-600 transition-colors">
-        + Publish Offer
+      <!-- Add wallet -->
+      <button @click="showAddWallet = true" class="text-ink-400 hover:text-brand-500 transition-colors text-[11px] flex items-center gap-0.5">
+        <span class="text-sm leading-none">+</span> Wallet
       </button>
+      <!-- Agent selector -->
+      <div class="ml-auto flex items-center gap-2">
+        <select x-model="form.relayNodeId" @change="onAgentChange()"
+          class="pl-2 pr-6 py-1 border border-warm-200 rounded text-xs bg-white">
+          <template x-for="r in relays" :key="r.id">
+            <option :value="r.id" x-text="r.name"></option>
+          </template>
+        </select>
+      </div>
     </div>
 
-    <!-- Publish form (collapsed) -->
-    <div x-show="showForm" x-transition class="mb-6 bg-white border border-warm-200 rounded-lg p-5">
-      <h3 class="text-sm font-semibold text-ink-700 mb-4">Publish an Offer</h3>
-      <div class="grid grid-cols-2 gap-4">
-        <div>
-          <label class="block text-xs font-medium text-ink-500 mb-1">I give</label>
-          <div class="flex gap-2">
-            <input x-model="form.give_amount" type="text" placeholder="Amount"
-              class="flex-1 px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
-            <input x-model="form.give_asset" type="text" placeholder="Asset (e.g. KAS)"
-              class="w-32 px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
-          </div>
-          <input x-model="form.give_chain" type="text" placeholder="Chain (optional, e.g. kaspa)"
-            class="mt-2 w-full px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-ink-500 mb-1">I want</label>
-          <div class="flex gap-2">
-            <input x-model="form.want_amount" type="text" placeholder="Amount"
-              class="flex-1 px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
-            <input x-model="form.want_asset" type="text" placeholder="Asset (e.g. USDT)"
-              class="w-32 px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
-          </div>
-          <input x-model="form.want_chain" type="text" placeholder="Chain (optional, e.g. bnb)"
-            class="mt-2 w-full px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
-        </div>
+    <!-- ═══ WALLET POPUP PANEL (below discovery bar) ═══ -->
+    <div x-show="walletPanel" x-transition class="absolute top-full left-0 right-0 z-30 bg-white border-b border-warm-200 shadow-lg p-4 max-h-80 overflow-y-auto">
+      <div class="flex items-center justify-between mb-3">
+        <h4 class="text-sm font-semibold text-ink-700" x-text="walletPanel==='kas'?'Kaspa Wallet':(walletPanel?.toUpperCase()+' Wallets')"></h4>
+        <button @click="walletPanel=null" class="text-ink-400 hover:text-ink-600 text-xs">Close</button>
       </div>
-      <div class="grid grid-cols-3 gap-4 mt-4">
-        <div>
-          <label class="block text-xs font-medium text-ink-500 mb-1">Verification</label>
-          <select x-model="form.verification"
-            class="w-full px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300">
-            <option value="manual">Manual (both confirm)</option>
-            <option value="cross_chain_tx">Cross-chain TX</option>
-            <option value="kaspa_tx">Kaspa TX</option>
-          </select>
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-ink-500 mb-1">Expires</label>
-          <select x-model="form.expires_minutes"
-            class="w-full px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300">
-            <option value="30">30 min</option>
-            <option value="60" selected>1 hour</option>
-            <option value="360">6 hours</option>
-            <option value="1440">24 hours</option>
-          </select>
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-ink-500 mb-1">Agent</label>
-          <select x-model="form.relayNodeId"
-            class="w-full px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300">
-            <template x-for="r in relays" :key="r.id">
-              <option :value="r.id" x-text="r.name"></option>
-            </template>
-          </select>
-        </div>
-      </div>
-      <div class="mt-4 flex justify-end gap-2">
-        <button @click="showForm = false"
-          class="px-4 py-2 text-sm text-ink-500 hover:text-ink-700 transition-colors">Cancel</button>
-        <button @click="publishOffer()" :disabled="publishing"
-          class="px-4 py-2 bg-brand-500 text-white rounded-lg text-sm font-medium hover:bg-brand-600 transition-colors disabled:opacity-50">
-          <span x-show="!publishing">Broadcast to Network</span>
-          <span x-show="publishing">Broadcasting...</span>
-        </button>
-      </div>
-      <p x-show="formError" x-text="formError" class="mt-2 text-xs text-red-600"></p>
-      <p x-show="formSuccess" x-text="formSuccess" class="mt-2 text-xs text-green-600"></p>
-    </div>
 
-    <!-- Offer stream -->
-    <div class="space-y-3">
-      <template x-if="loading">
-        <div class="text-center py-12 text-ink-400 text-sm">Loading offers...</div>
-      </template>
-      <template x-if="!loading && filtered.length === 0">
-        <div class="text-center py-12 text-ink-400">
-          <p class="text-sm">No offers observed yet</p>
-          <p class="text-xs mt-1">Publish the first offer to start the market</p>
+      <!-- KAS wallet detail -->
+      <template x-if="walletPanel==='kas'">
+        <div class="space-y-2 text-[12px]">
+          <div class="flex items-center justify-between"><span class="text-ink-400">Address</span>
+            <span class="text-[10px] text-brand-500 cursor-pointer tabular-nums" @click="copyAddr(agentAddr)" x-text="agentAddr" title="Click to copy"></span></div>
+          <div class="flex items-center justify-between"><span class="text-ink-400">Balance</span><span class="font-semibold tabular-nums" x-text="(wallet.kas||0).toFixed(2)+' KAS'"></span></div>
+          <div x-show="wallet.kasLocked>0" class="flex items-center justify-between"><span class="text-ink-400">Locked</span><span class="tabular-nums text-orange-600" x-text="(wallet.kasLocked||0).toFixed(2)+' KAS'"></span></div>
+          <div class="flex items-center justify-between"><span class="text-ink-400">Available</span><span class="tabular-nums text-green-600" x-text="((wallet.kas||0)-(wallet.kasLocked||0)).toFixed(2)+' KAS'"></span></div>
+          <div x-data="{showSend:false,sendAddr:'',sendAmt:''}" class="mt-2">
+            <button @click="showSend=!showSend" class="text-[11px] text-brand-500 hover:text-brand-700">Withdraw KAS</button>
+            <div x-show="showSend" class="mt-2 space-y-2">
+              <input x-model="sendAddr" placeholder="Target kaspa:q... address" class="w-full border border-warm-300 rounded px-2 py-1.5 text-[11px] bg-warm-50 focus:border-brand-400 focus:outline-none" />
+              <input x-model.number="sendAmt" placeholder="Amount (KAS)" type="number" class="w-full border border-warm-300 rounded px-2 py-1.5 text-[11px] bg-warm-50 focus:border-brand-400 focus:outline-none" />
+              <button @click="$dispatch('send-kas',{addr:sendAddr,amt:sendAmt})" class="w-full py-1.5 rounded bg-red-50 text-red-600 border border-red-200 text-[11px] font-semibold hover:bg-red-100">Send</button>
+            </div>
+          </div>
         </div>
       </template>
-      <template x-for="o in filtered" :key="o.id">
-        <div class="bg-white border border-warm-200 rounded-lg p-4 hover:border-brand-200 transition-colors">
-          <div class="flex items-start justify-between">
-            <div class="flex-1">
-              <div class="flex items-center gap-3">
-                <span class="text-lg font-semibold text-ink-700">
-                  <span x-text="o.give_amount"></span>
-                  <span x-text="o.give_asset" class="text-brand-600"></span>
-                </span>
-                <span class="text-ink-300">&rarr;</span>
-                <span class="text-lg font-semibold text-ink-700">
-                  <span x-text="o.want_amount"></span>
-                  <span x-text="o.want_asset" class="text-brand-600"></span>
-                </span>
+
+      <!-- Multi-chain wallet detail -->
+      <template x-if="walletPanel && walletPanel!=='kas'">
+        <div class="space-y-3">
+          <template x-for="w in panelWallets" :key="w.id||w.address">
+            <div class="p-3 rounded-lg border border-warm-200 bg-warm-50">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-[10px] text-brand-500 cursor-pointer tabular-nums" @click="copyAddr(w.address)" x-text="w.address" title="Click to copy"></span>
+                <span x-show="w.isDefault" class="text-[9px] bg-brand-50 text-brand-600 px-1.5 py-0.5 rounded">default</span>
               </div>
-              <div class="flex items-center gap-3 mt-2 text-xs text-ink-400">
-                <span x-text="'by ' + KANet.shortAddr(o.maker)"></span>
-                <span x-show="o.give_chain" x-text="o.give_chain + ' &rarr;'"></span>
-                <span x-show="o.want_chain" x-text="o.want_chain"></span>
-                <span class="px-1.5 py-0.5 rounded text-[10px] font-medium" :class="statusBadge(o.protocol_status)"
-                  x-text="o.protocol_status"></span>
-                <span x-text="KANet.relativeTime(o.broadcast_at)"></span>
-                <span x-show="o.verification !== 'manual'"
-                  class="px-1.5 py-0.5 bg-brand-50 text-brand-600 rounded text-[10px]"
-                  x-text="o.verification"></span>
+              <div class="grid grid-cols-4 gap-2 text-[11px]">
+                <div><span class="text-ink-400">USDT</span><div class="font-medium tabular-nums text-ink-700" x-text="(w.usdt||0).toFixed(2)"></div></div>
+                <div><span class="text-ink-400">USDC</span><div class="font-medium tabular-nums text-ink-700" x-text="(w.usdc||0).toFixed(2)"></div></div>
+                <div><span class="text-ink-400" x-text="w.chain==='polygon'?'MATIC':w.chain==='bnb'?'BNB':w.chain==='eth'?'ETH':w.chain==='sol'?'SOL':w.chain==='tron'?'TRX':w.chain?.toUpperCase()"></span><div class="font-medium tabular-nums text-ink-700" x-text="(w.gas||0).toFixed(4)"></div></div>
+                <div x-show="w.locked>0"><span class="text-ink-400">Locked</span><div class="font-medium tabular-nums text-orange-600" x-text="(w.locked||0).toFixed(2)+' USDT'"></div></div>
+              </div>
+              <div class="flex gap-2 mt-2">
+                <button @click="copyAddr(w.address)" class="px-2 py-1 rounded text-[10px] bg-warm-100 text-ink-400 hover:text-ink-700 border border-warm-200">Copy</button>
+                <button @click="withdrawPrompt(w)" class="px-2 py-1 rounded text-[10px] bg-warm-100 text-ink-400 hover:text-red-600 border border-warm-200">Withdraw</button>
+                <button @click="showPrivkeyFor(w)" class="px-2 py-1 rounded text-[10px] bg-warm-100 text-ink-400 hover:text-orange-600 border border-warm-200">Private Key</button>
               </div>
             </div>
-            <!-- Accept (only open offers that are not mine) -->
-            <button x-show="o.protocol_status === 'open' && !isMine(o)"
-              @click="acceptOffer(o)"
-              class="px-3 py-1.5 bg-green-500 text-white rounded-lg text-xs font-medium hover:bg-green-600 transition-colors">
-              Accept
-            </button>
-            <!-- Cancel (only open offers that I made) -->
-            <button x-show="o.protocol_status === 'open' && isMaker(o)"
-              @click="cancelOffer(o)"
-              class="px-3 py-1.5 bg-warm-200 text-ink-600 rounded-lg text-xs font-medium hover:bg-warm-300 transition-colors">
-              Cancel
-            </button>
-          </div>
+          </template>
+          <button @click="createWallet(walletPanel)" class="w-full py-2 rounded-lg border border-dashed border-warm-300 text-[11px] text-ink-400 hover:text-brand-500 hover:border-brand-300 transition-all">
+            + Create new <span x-text="walletPanel?.toUpperCase()"></span> wallet
+          </button>
         </div>
       </template>
     </div>
-
-    <div class="mt-6 text-center">
-      <button @click="loadOffers()" class="text-xs text-ink-400 hover:text-brand-500 transition-colors">Refresh</button>
-    </div>
   </div>
 
-  <!-- ═══ MY DEALS TAB ═══ -->
-  <div x-show="activeTab === 'deals'">
+  <!-- ═══ SPLIT PANE ═══ -->
+  <div class="flex-1 flex min-h-0">
 
-    <template x-if="myDeals.length === 0">
-      <div class="text-center py-16 text-ink-400">
-        <p class="text-sm">No deals yet</p>
-        <p class="text-xs mt-1">Publish or accept an offer to start trading</p>
+    <!-- ── LEFT PANE (360px) ── -->
+    <div class="w-[360px] flex-shrink-0 border-r border-warm-200 flex flex-col bg-white
+                max-md:w-full" :class="selectedOffer && 'max-md:hidden'">
+
+      <!-- Left tabs -->
+      <div class="flex border-b border-warm-200 flex-shrink-0">
+        <button @click="leftTab = 'market'"
+          :class="leftTab === 'market' ? 'border-brand-500 text-brand-600 font-medium' : 'border-transparent text-ink-400 hover:text-ink-600'"
+          class="flex-1 px-3 py-2.5 text-xs border-b-2 -mb-px transition-colors">Market</button>
+        <button @click="leftTab = 'deals'"
+          :class="leftTab === 'deals' ? 'border-brand-500 text-brand-600 font-medium' : 'border-transparent text-ink-400 hover:text-ink-600'"
+          class="flex-1 px-3 py-2.5 text-xs border-b-2 -mb-px transition-colors flex items-center justify-center gap-1">
+          My Deals
+          <span x-show="activeDeals.length" class="bg-brand-500 text-white text-[9px] leading-none px-1.5 py-0.5 rounded-full"
+            x-text="activeDeals.length"></span>
+        </button>
+        <button @click="leftTab = 'history'"
+          :class="leftTab === 'history' ? 'border-brand-500 text-brand-600 font-medium' : 'border-transparent text-ink-400 hover:text-ink-600'"
+          class="flex-1 px-3 py-2.5 text-xs border-b-2 -mb-px transition-colors">History</button>
       </div>
-    </template>
 
-    <!-- Active deals -->
-    <div x-show="activeDeals.length > 0" class="mb-8">
-      <h3 class="text-xs font-semibold text-ink-500 uppercase tracking-wider mb-3">Active</h3>
-      <div class="space-y-3">
-        <template x-for="o in activeDeals" :key="o.id">
-          <div class="bg-white border rounded-lg overflow-hidden transition-all"
-            :class="expandedId === o.id ? 'border-brand-300 ring-1 ring-brand-100' : 'border-warm-200'">
+      <!-- Offer list -->
+      <div class="flex-1 overflow-y-auto">
 
-            <!-- Summary row -->
-            <div @click="toggleDetail(o.id)" class="p-4 flex items-center justify-between cursor-pointer hover:bg-warm-50/50 transition-colors">
-              <div class="flex items-center gap-3 min-w-0">
-                <div class="text-sm font-semibold text-ink-700 truncate">
-                  <span x-text="o.give_amount + ' ' + o.give_asset"></span>
-                  <span class="text-ink-300 mx-1">&rarr;</span>
-                  <span x-text="o.want_amount + ' ' + o.want_asset"></span>
-                </div>
-                <span class="px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0"
-                  :class="statusBadge(o.protocol_status)" x-text="statusLabel(o.protocol_status)"></span>
-                <span class="text-[10px] px-1.5 py-0.5 rounded-full shrink-0"
+        <!-- Loading -->
+        <div x-show="loading" class="p-8 text-center text-ink-400 text-xs">Loading offers...</div>
+
+        <!-- MARKET tab: open offers sorted by price -->
+        <div x-show="leftTab === 'market' && !loading">
+          <!-- Empty state -->
+          <div x-show="openOffers.length === 0" class="p-8 text-center">
+            <div class="text-ink-400 text-sm mb-1">No open offers</div>
+            <template x-if="lastCompleted">
+              <div class="text-xs text-ink-400 mb-4">
+                Last trade: <span class="text-green-600 font-medium" x-text="lastCompleted.give_amount + ' ' + lastCompleted.give_asset"></span>
+                settled <span x-text="KANet.relativeTime(lastCompleted.completed_at)"></span>
+              </div>
+            </template>
+            <button @click="showForm = true" class="text-xs text-brand-500 hover:text-brand-700 font-medium">Be the first maker</button>
+          </div>
+          <!-- Offer list items -->
+          <template x-for="o in openOffers" :key="o.id">
+            <div @click="selectOffer(o)" class="px-4 py-3 border-b border-warm-100 cursor-pointer transition-colors"
+              :class="selectedOffer?.id === o.id ? 'bg-brand-50 border-l-2 border-l-brand-500' : 'hover:bg-warm-50 border-l-2 border-l-transparent'">
+              <!-- Row 1: side + amount + price -->
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                  :class="o.give_asset === 'KAS' ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'"
+                  x-text="o.give_asset === 'KAS' ? 'SELL' : 'BUY'"></span>
+                <span class="text-sm font-semibold text-ink-700 tabular-nums" x-text="o.give_amount + ' ' + o.give_asset"></span>
+                <span class="text-ink-300 text-xs">&rarr;</span>
+                <span class="text-sm text-ink-600 tabular-nums" x-text="o.want_amount + ' ' + o.want_asset"></span>
+              </div>
+              <!-- Row 2: price badge + chains + countdown -->
+              <div class="flex items-center gap-2 mt-1.5">
+                <template x-if="priceComparison(o)">
+                  <span class="text-[10px] font-medium tabular-nums" :class="priceColor(o)"
+                    x-text="'$' + priceComparison(o).offerPrice.toFixed(5) + ' (' + (priceComparison(o).diffPct >= 0 ? '+' : '') + priceComparison(o).diffPct + '%)'"></span>
+                </template>
+                <template x-for="ch in getChains(o)" :key="ch">
+                  <span class="text-[9px] px-1 py-0.5 bg-warm-100 text-ink-500 rounded uppercase" x-text="ch"></span>
+                </template>
+                <span class="ml-auto text-[10px] text-ink-400 tabular-nums" x-text="KANet.countdown(o.expires_at)"></span>
+              </div>
+              <!-- Row 3: maker + reputation + role -->
+              <div class="flex items-center gap-2 mt-1 flex-wrap">
+                <span class="text-[10px] text-ink-400 font-mono" x-text="KANet.shortAddr(o.maker)"></span>
+                <template x-if="getReputation(o.maker)">
+                  <span class="text-[10px] text-yellow-500" x-text="KANet.starRating(getReputation(o.maker).stars)"></span>
+                </template>
+                <template x-if="getReputation(o.maker)">
+                  <span class="text-[9px] px-1.5 py-0.5 rounded-full font-medium"
+                    :class="KANet.riskBadge(getReputation(o.maker).risk).css"
+                    x-text="getReputation(o.maker).totalTrades === 0 ? 'New' : getReputation(o.maker).completed + ' trades'"></span>
+                </template>
+                <span x-show="isMaker(o)" class="text-[9px] px-1 py-0.5 bg-brand-50 text-brand-600 rounded font-medium">you</span>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- MY DEALS tab: active deals where I am maker or taker -->
+        <div x-show="leftTab === 'deals' && !loading">
+          <div x-show="activeDeals.length === 0" class="p-8 text-center text-ink-400 text-xs">No active deals</div>
+          <template x-for="o in activeDeals" :key="o.id">
+            <div @click="selectOffer(o)" class="px-4 py-3 border-b border-warm-100 cursor-pointer transition-colors"
+              :class="selectedOffer?.id === o.id ? 'bg-brand-50 border-l-2 border-l-brand-500' : 'hover:bg-warm-50 border-l-2 border-l-transparent'">
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] font-bold px-1.5 py-0.5 rounded"
                   :class="isMaker(o) ? 'bg-brand-50 text-brand-600' : 'bg-green-50 text-green-700'"
-                  x-text="isMaker(o) ? 'maker' : 'taker'"></span>
+                  x-text="isMaker(o) ? 'MAKER' : 'TAKER'"></span>
+                <span class="text-sm font-semibold text-ink-700 tabular-nums" x-text="o.give_amount + ' ' + o.give_asset + ' → ' + o.want_amount + ' ' + o.want_asset"></span>
               </div>
-              <svg class="w-4 h-4 text-ink-400 shrink-0 transition-transform" :class="expandedId === o.id && 'rotate-180'"
-                fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/>
-              </svg>
+              <div class="flex items-center gap-2 mt-1.5">
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-medium" :class="statusBadge(o.protocol_status)"
+                  x-text="statusLabel(o.protocol_status)"></span>
+                <span class="text-[10px] text-ink-400" x-text="KANet.relativeTime(o.matched_at || o.broadcast_at)"></span>
+              </div>
             </div>
+          </template>
+        </div>
 
-            <!-- Detail panel -->
-            <template x-if="expandedId === o.id">
-              <div class="border-t border-warm-100 bg-warm-50/30">
-                <!-- Info grid -->
-                <div class="px-4 pt-4 pb-2 grid grid-cols-2 gap-x-8 gap-y-1.5 text-xs">
-                  <div class="text-ink-500">Maker <span class="text-ink-700 font-mono ml-1" x-text="KANet.shortAddr(o.maker)"></span></div>
-                  <div class="text-ink-500">Taker <span class="text-ink-700 font-mono ml-1" x-text="o.taker ? KANet.shortAddr(o.taker) : '—'"></span></div>
-                  <div class="text-ink-500">Verification <span class="text-ink-700 ml-1" x-text="o.verification"></span></div>
-                  <div class="text-ink-500">Published <span class="text-ink-700 ml-1" x-text="KANet.formatTime(o.broadcast_at)"></span></div>
-                </div>
-
-                <!-- Timeline -->
-                <div class="px-4 py-3">
-                  <template x-for="(step, i) in getTimeline(o)" :key="i">
-                    <div class="flex items-start gap-2.5">
-                      <div class="flex flex-col items-center" style="min-width:14px">
-                        <div class="w-2 h-2 rounded-full shrink-0 mt-1"
-                          :class="step.done ? 'bg-green-500' : (step.active ? 'bg-brand-500 ring-2 ring-brand-200' : 'bg-warm-300')"></div>
-                        <div x-show="i < getTimeline(o).length - 1"
-                          class="w-px grow min-h-[16px]"
-                          :class="step.done ? 'bg-green-200' : 'bg-warm-200'"></div>
-                      </div>
-                      <div class="pb-2 min-w-0">
-                        <span class="text-xs font-medium" :class="step.done || step.active ? 'text-ink-700' : 'text-ink-400'" x-text="step.label"></span>
-                        <span x-show="step.time" class="text-[10px] text-ink-400 ml-1.5" x-text="KANet.relativeTime(step.time)"></span>
-                        <span x-show="step.detail" class="text-[10px] text-ink-400 ml-1" x-text="step.detail"></span>
-                      </div>
-                    </div>
-                  </template>
-                </div>
-
-                <!-- Action buttons -->
-                <div class="px-4 pb-3 flex flex-wrap gap-2" x-show="canConfirm(o) || canSubmitPayment(o) || canDispute(o)">
-                  <button x-show="canConfirm(o)" @click="confirmDeal(o)" :disabled="actionLoading"
-                    class="px-3 py-1.5 bg-green-500 text-white rounded text-xs font-medium hover:bg-green-600 transition-colors disabled:opacity-50">
-                    Confirm Delivery
-                  </button>
-                  <button x-show="canSubmitPayment(o)" @click="actionMode = (actionMode === 'payment' ? null : 'payment')"
-                    class="px-3 py-1.5 bg-brand-500 text-white rounded text-xs font-medium hover:bg-brand-600 transition-colors">
-                    Submit Payment
-                  </button>
-                  <button x-show="canDispute(o)" @click="actionMode = (actionMode === 'dispute' ? null : 'dispute')"
-                    class="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded text-xs font-medium hover:bg-red-100 transition-colors">
-                    Dispute
-                  </button>
-                </div>
-
-                <!-- Payment form (inline) -->
-                <div x-show="actionMode === 'payment' && expandedId === o.id" class="px-4 pb-4">
-                  <div class="bg-white border border-warm-200 rounded-lg p-3 space-y-2">
-                    <div class="text-xs font-medium text-ink-600 mb-2">Submit cross-chain payment proof</div>
-                    <input x-model="paymentTx" type="text" placeholder="TX Hash (e.g. 0xabc...)"
-                      class="w-full px-3 py-2 border border-warm-200 rounded text-xs focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
-                    <div class="flex gap-2">
-                      <select x-model="paymentChain"
-                        class="px-3 py-2 border border-warm-200 rounded text-xs focus:ring-1 focus:ring-brand-300">
-                        <option value="bnb">BNB</option>
-                        <option value="eth">ETH</option>
-                        <option value="sol">SOL</option>
-                        <option value="tron">TRON</option>
-                      </select>
-                      <button @click="submitPayment(o)" :disabled="actionLoading || !paymentTx"
-                        class="px-4 py-2 bg-brand-500 text-white rounded text-xs font-medium hover:bg-brand-600 disabled:opacity-50 transition-colors">
-                        <span x-show="!actionLoading">Submit</span>
-                        <span x-show="actionLoading">Verifying...</span>
-                      </button>
-                      <button @click="actionMode = null" class="px-3 py-2 text-xs text-ink-400 hover:text-ink-600">Cancel</button>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Dispute form (inline) -->
-                <div x-show="actionMode === 'dispute' && expandedId === o.id" class="px-4 pb-4">
-                  <div class="bg-red-50 border border-red-200 rounded-lg p-3 space-y-2">
-                    <div class="text-xs font-medium text-red-700 mb-2">Raise a dispute</div>
-                    <input x-model="disputeReason" type="text" placeholder="Reason for dispute"
-                      class="w-full px-3 py-2 border border-red-200 rounded text-xs bg-white focus:ring-1 focus:ring-red-300 focus:border-red-300" />
-                    <div class="flex gap-2">
-                      <button @click="disputeDeal(o)" :disabled="actionLoading || !disputeReason"
-                        class="px-4 py-2 bg-red-500 text-white rounded text-xs font-medium hover:bg-red-600 disabled:opacity-50 transition-colors">
-                        Confirm Dispute
-                      </button>
-                      <button @click="actionMode = null" class="px-3 py-2 text-xs text-ink-400 hover:text-ink-600">Cancel</button>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Action feedback -->
-                <div x-show="actionError" class="px-4 pb-3">
-                  <p class="text-xs text-red-600" x-text="actionError"></p>
-                </div>
+        <!-- HISTORY tab: terminal state offers -->
+        <div x-show="leftTab === 'history' && !loading">
+          <div x-show="completedDeals.length === 0" class="p-8 text-center text-ink-400 text-xs">No history yet</div>
+          <template x-for="o in pagedHistory" :key="o.id">
+            <div @click="selectOffer(o)" class="px-4 py-3 border-b border-warm-100 cursor-pointer transition-colors"
+              :class="selectedOffer?.id === o.id ? 'bg-brand-50 border-l-2 border-l-brand-500' : 'hover:bg-warm-50 border-l-2 border-l-transparent'">
+              <div class="flex items-center gap-2">
+                <span class="text-sm text-ink-600 tabular-nums" x-text="o.give_amount + ' ' + o.give_asset + ' → ' + o.want_amount + ' ' + o.want_asset"></span>
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-medium" :class="statusBadge(o.protocol_status)"
+                  x-text="statusLabel(o.protocol_status)"></span>
               </div>
-            </template>
-          </div>
-        </template>
-      </div>
-    </div>
-
-    <!-- Completed deals -->
-    <div x-show="completedDeals.length > 0">
-      <h3 class="text-xs font-semibold text-ink-500 uppercase tracking-wider mb-3">Completed</h3>
-      <div class="space-y-2">
-        <template x-for="o in completedDeals" :key="o.id">
-          <div class="bg-white border border-warm-200 rounded-lg overflow-hidden"
-            :class="expandedId === o.id ? 'ring-1 ring-warm-300' : ''">
-
-            <div @click="toggleDetail(o.id)" class="p-3 flex items-center justify-between cursor-pointer hover:bg-warm-50/50 transition-colors">
-              <div class="flex items-center gap-3 min-w-0">
-                <div class="text-sm text-ink-600 truncate">
-                  <span x-text="o.give_amount + ' ' + o.give_asset"></span>
-                  <span class="text-ink-300 mx-1">&rarr;</span>
-                  <span x-text="o.want_amount + ' ' + o.want_asset"></span>
-                </div>
-                <span class="px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0"
-                  :class="statusBadge(o.protocol_status)" x-text="o.protocol_status"></span>
-                <span class="text-[10px] text-ink-400 shrink-0" x-text="KANet.relativeTime(o.completed_at || o.disputed_at || o.timed_out_at || o.cancelled_at || o.updated_at)"></span>
-              </div>
-              <svg class="w-4 h-4 text-ink-400 shrink-0 transition-transform" :class="expandedId === o.id && 'rotate-180'"
-                fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/>
-              </svg>
+              <div class="text-[10px] text-ink-400 mt-1" x-text="KANet.relativeTime(o.completed_at || o.timed_out_at || o.cancelled_at || o.updated_at)"></div>
             </div>
-
-            <template x-if="expandedId === o.id">
-              <div class="border-t border-warm-100 bg-warm-50/30">
-                <div class="px-4 pt-3 pb-2 grid grid-cols-2 gap-x-8 gap-y-1.5 text-xs">
-                  <div class="text-ink-500">Maker <span class="text-ink-700 font-mono ml-1" x-text="KANet.shortAddr(o.maker)"></span></div>
-                  <div class="text-ink-500">Taker <span class="text-ink-700 font-mono ml-1" x-text="o.taker ? KANet.shortAddr(o.taker) : '—'"></span></div>
-                  <div class="text-ink-500">Verification <span class="text-ink-700 ml-1" x-text="o.verification"></span></div>
-                  <div class="text-ink-500">Published <span class="text-ink-700 ml-1" x-text="KANet.formatTime(o.broadcast_at)"></span></div>
-                </div>
-                <div class="px-4 py-3">
-                  <template x-for="(step, i) in getTimeline(o)" :key="i">
-                    <div class="flex items-start gap-2.5">
-                      <div class="flex flex-col items-center" style="min-width:14px">
-                        <div class="w-2 h-2 rounded-full shrink-0 mt-1"
-                          :class="step.done ? 'bg-green-500' : (step.active ? 'bg-brand-500' : 'bg-warm-300')"></div>
-                        <div x-show="i < getTimeline(o).length - 1"
-                          class="w-px grow min-h-[16px]"
-                          :class="step.done ? 'bg-green-200' : 'bg-warm-200'"></div>
-                      </div>
-                      <div class="pb-2">
-                        <span class="text-xs font-medium" :class="step.done ? 'text-ink-700' : 'text-ink-400'" x-text="step.label"></span>
-                        <span x-show="step.time" class="text-[10px] text-ink-400 ml-1.5" x-text="KANet.relativeTime(step.time)"></span>
-                        <span x-show="step.detail" class="text-[10px] text-ink-400 ml-1" x-text="step.detail"></span>
-                      </div>
-                    </div>
-                  </template>
-                </div>
-              </div>
-            </template>
+          </template>
+          <!-- Pagination -->
+          <div x-show="historyTotalPages > 1" class="flex items-center justify-center gap-3 py-3 text-xs text-ink-400">
+            <button @click="historyPage = Math.max(1, historyPage - 1)" :disabled="historyPage <= 1"
+              class="px-2 py-1 rounded hover:bg-warm-100 disabled:opacity-30">&larr;</button>
+            <span x-text="historyPage + ' / ' + historyTotalPages"></span>
+            <button @click="historyPage = Math.min(historyTotalPages, historyPage + 1)" :disabled="historyPage >= historyTotalPages"
+              class="px-2 py-1 rounded hover:bg-warm-100 disabled:opacity-30">&rarr;</button>
           </div>
-        </template>
+        </div>
       </div>
-    </div>
 
-    <div class="mt-6 text-center">
-      <button @click="loadOffers()" class="text-xs text-ink-400 hover:text-brand-500 transition-colors">Refresh</button>
-    </div>
-  </div>
-
-  <!-- ═══ ARBITRAGE TAB ═══ -->
-  <div x-show="activeTab === 'arb'">
-
-    <!-- ── Area 1: CEX Overview ── -->
-    <div class="mb-6">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="text-xs font-semibold text-ink-500 uppercase tracking-wider">CEX Overview</h3>
-        <button @click="loadBalances()" class="text-xs text-ink-400 hover:text-brand-500 transition-colors flex items-center gap-1">
-          <span>Refresh</span>
+      <!-- Publish button (fixed at bottom of left pane) -->
+      <div class="flex-shrink-0 p-3 border-t border-warm-200">
+        <button @click="showForm = !showForm"
+          class="w-full py-2.5 bg-brand-500 text-white rounded-lg text-xs font-semibold hover:bg-brand-600 transition-colors">
+          + Publish Offer
         </button>
       </div>
-      <template x-if="arbLoading.balances">
-        <div class="flex gap-3">
-          <template x-for="i in 3" :key="i">
-            <div class="flex-1 bg-warm-100 animate-pulse rounded-lg h-20"></div>
-          </template>
-        </div>
-      </template>
-      <template x-if="!arbLoading.balances">
-        <div class="flex gap-3 flex-wrap">
-          <template x-for="b in cexBalances" :key="b.accountId || b.exchange">
-            <div class="bg-white border border-warm-200 rounded-lg px-4 py-3 min-w-[140px]">
-              <div class="flex items-center gap-1.5 mb-2">
-                <span class="text-sm font-semibold text-ink-700" x-text="b.label || b.exchange.toUpperCase()"></span>
-                <span x-show="b.isDefault" class="text-amber-500 text-xs">&#9733;</span>
-              </div>
-              <template x-if="!b.error">
-                <div class="space-y-0.5">
-                  <div class="text-xs text-ink-500">KAS <span class="font-medium text-ink-700" x-text="b.kas !== null ? Number(b.kas).toLocaleString(undefined, {maximumFractionDigits: 4}) : '--'"></span></div>
-                  <div class="text-xs text-ink-500">USDT <span class="font-medium text-ink-700" x-text="b.usdt !== null ? Number(b.usdt).toLocaleString(undefined, {maximumFractionDigits: 2}) : '--'"></span></div>
-                </div>
-              </template>
-              <template x-if="b.error">
-                <div class="text-xs text-red-500 flex items-center gap-1">
-                  <span>&#9888;</span> <span x-text="b.error"></span>
-                </div>
-              </template>
-            </div>
-          </template>
-          <a href="/trading" class="bg-warm-50 border border-dashed border-warm-300 rounded-lg px-4 py-3 min-w-[140px] flex items-center justify-center text-xs text-ink-400 hover:text-brand-500 hover:border-brand-300 transition-colors">
-            + Add Account
-          </a>
-        </div>
-      </template>
     </div>
 
-    <!-- ── Area 2: Live Spreads (split: Your Exchanges + Other Markets) ── -->
-    <div class="mb-6">
-      <div class="flex items-center justify-between mb-3">
-        <div class="flex items-center gap-2">
-          <h3 class="text-xs font-semibold text-ink-500 uppercase tracking-wider">Live Spreads</h3>
-          <span x-show="fundedExchanges.length" class="text-[10px] text-ink-400"
-            x-text="'(' + fundedExchanges.map(e => e.toUpperCase()).join(' · ') + ')'"></span>
-          <span x-show="spreadsCachedAt" class="text-[10px] text-ink-300" x-text="'Updated ' + KANet.formatTime(spreadsCachedAt)"></span>
+    <!-- ── RIGHT PANE ── -->
+    <div class="flex-1 overflow-y-auto bg-warm-50
+                max-md:w-full" :class="!selectedOffer && 'max-md:hidden'">
+
+      <!-- Mobile back button -->
+      <button x-show="selectedOffer" @click="selectedOffer = null"
+        class="md:hidden flex items-center gap-1 px-4 py-2 text-xs text-brand-500 border-b border-warm-200 w-full bg-white">
+        &larr; Back to list
+      </button>
+
+      <!-- Empty state -->
+      <div x-show="!selectedOffer && !showForm" class="flex items-center justify-center h-full">
+        <div class="text-center py-20">
+          <div class="text-4xl mb-3 opacity-30">&#9878;</div>
+          <div class="text-sm text-ink-400">Select an offer to view details</div>
+          <div class="text-xs text-ink-300 mt-1">or publish your own</div>
         </div>
-        <button @click="loadSpreads()" class="text-xs text-ink-400 hover:text-brand-500 transition-colors">Refresh</button>
       </div>
-      <template x-if="arbLoading.spreads">
-        <div class="bg-warm-100 animate-pulse rounded-lg h-32"></div>
-      </template>
-      <template x-if="!arbLoading.spreads">
-        <div>
-          <template x-if="spreadRows.length === 0">
-            <div class="text-center py-8 text-ink-400 text-sm">No spread data available</div>
-          </template>
-          <template x-if="spreadRows.length > 0">
+
+      <!-- ── PUBLISH FORM ── -->
+      <div x-show="showForm && !selectedOffer" class="p-6 max-w-lg mx-auto">
+        <div class="bg-white border border-warm-200 rounded-xl p-6">
+          <div class="flex items-center justify-between mb-5">
+            <h3 class="text-sm font-semibold text-ink-700">Publish Offer</h3>
+            <button @click="showForm = false" class="text-ink-400 hover:text-ink-600 text-xs">Close</button>
+          </div>
+          <!-- Market price reference -->
+          <div x-show="kasPrice" class="mb-5 bg-warm-50 rounded-lg px-4 py-2.5 text-xs flex items-center justify-between">
+            <span class="text-ink-500">Market: <span class="font-semibold text-ink-700" x-text="'$' + (kasPrice||0).toFixed(5) + '/KAS'"></span></span>
+            <span x-show="formPriceDiff() !== null" class="font-medium"
+              :class="Math.abs(formPriceDiff()) < 0.3 ? 'text-ink-500' : (formPriceDiff() > 2 ? 'text-red-500' : 'text-green-600')"
+              x-text="formPriceDiff() !== null ? ((formPriceDiff() >= 0 ? '+' : '') + formPriceDiff().toFixed(1) + '%') : ''"></span>
+          </div>
+          <!-- Quick templates -->
+          <div class="flex gap-2 mb-4">
+            <button @click="fillSellTemplate()" class="px-3 py-1.5 bg-red-50 text-red-600 rounded text-xs font-medium hover:bg-red-100">Sell KAS</button>
+            <button @click="fillBuyTemplate()" class="px-3 py-1.5 bg-green-50 text-green-600 rounded text-xs font-medium hover:bg-green-100">Buy KAS</button>
+          </div>
+          <div class="grid grid-cols-2 gap-4 mb-4">
             <div>
-              <!-- Your Exchanges (actionable) -->
-              <template x-if="actionableSpreads.length > 0">
-                <div class="bg-white border border-warm-200 rounded-lg overflow-hidden mb-3">
-                  <div class="px-4 py-2 bg-warm-50 border-b border-warm-100 text-xs font-semibold text-ink-600">Your Exchanges</div>
-                  <table class="w-full text-sm">
-                    <thead>
-                      <tr class="border-b border-warm-100 text-xs text-ink-400">
-                        <th class="text-left px-4 py-2 font-medium">Buy From</th>
-                        <th class="text-left px-4 py-2 font-medium">Sell To</th>
-                        <th class="text-right px-4 py-2 font-medium">Spread</th>
-                        <th class="text-right px-4 py-2 font-medium">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <template x-for="s in actionableSpreads" :key="'a_' + s.buy_from + s.sell_to">
-                        <tr class="border-b border-warm-50 last:border-0 transition-colors"
-                          :class="s.opportunity ? 'bg-green-50' : ''">
-                          <td class="px-4 py-2 font-medium text-ink-700" x-text="s.buy_from.toUpperCase()"></td>
-                          <td class="px-4 py-2 font-medium text-ink-700" x-text="s.sell_to.toUpperCase()"></td>
-                          <td class="px-4 py-2 text-right font-mono"
-                            :class="s.spread_pct >= 0.3 ? 'text-green-600 font-semibold' : s.spread_pct >= 0 ? 'text-ink-600' : 'text-ink-300'"
-                            x-text="(s.spread_pct >= 0 ? '+' : '') + s.spread_pct.toFixed(4) + '%'"></td>
-                          <td class="px-4 py-2 text-right">
-                            <span x-show="s.opportunity" class="text-[10px] font-semibold text-green-700 bg-green-100 px-2 py-0.5 rounded-full">OPPORTUNITY</span>
-                            <span x-show="!s.opportunity" class="text-ink-300">&mdash;</span>
-                          </td>
-                        </tr>
-                      </template>
-                    </tbody>
-                  </table>
-                </div>
-              </template>
-              <template x-if="actionableSpreads.length === 0">
-                <div class="text-center py-4 text-ink-400 text-xs mb-3 bg-white border border-warm-200 rounded-lg">
-                  No configured exchanges with balance — <a href="/trading" class="text-brand-500 hover:underline">add account</a>
-                </div>
-              </template>
-
-              <!-- Other Markets (collapsed) -->
-              <div>
-                <button @click="showOtherSpreads = !showOtherSpreads"
-                  class="text-xs text-ink-400 hover:text-ink-600 transition-colors flex items-center gap-1 mb-2">
-                  <span x-text="showOtherSpreads ? '&#9660;' : '&#9654;'"></span>
-                  Other Markets (<span x-text="otherSpreads.length"></span>)
-                </button>
-                <div x-show="showOtherSpreads" x-transition class="bg-white border border-warm-200 rounded-lg overflow-hidden opacity-70">
-                  <table class="w-full text-xs">
-                    <thead>
-                      <tr class="border-b border-warm-100 text-ink-400">
-                        <th class="text-left px-3 py-1.5 font-medium">Buy From</th>
-                        <th class="text-left px-3 py-1.5 font-medium">Sell To</th>
-                        <th class="text-right px-3 py-1.5 font-medium">Spread</th>
-                        <th class="text-right px-3 py-1.5 font-medium"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <template x-for="s in otherSpreads" :key="'o_' + s.buy_from + s.sell_to">
-                        <tr class="border-b border-warm-50 last:border-0">
-                          <td class="px-3 py-1.5 text-ink-400" x-text="s.buy_from.toUpperCase()"></td>
-                          <td class="px-3 py-1.5 text-ink-400" x-text="s.sell_to.toUpperCase()"></td>
-                          <td class="px-3 py-1.5 text-right font-mono text-ink-300"
-                            x-text="(s.spread_pct >= 0 ? '+' : '') + s.spread_pct.toFixed(4) + '%'"></td>
-                          <td class="px-3 py-1.5 text-right">
-                            <a href="/trading" class="text-[10px] text-brand-500 hover:underline">+ Add Account</a>
-                          </td>
-                        </tr>
-                      </template>
-                    </tbody>
-                  </table>
-                </div>
+              <label class="block text-[10px] font-medium text-ink-500 uppercase tracking-wider mb-1">I give</label>
+              <div class="flex gap-2">
+                <input x-model="form.give_amount" type="text" placeholder="Amount"
+                  class="flex-1 px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
+                <input x-model="form.give_asset" type="text" placeholder="KAS"
+                  class="w-20 px-3 py-2 border border-warm-200 rounded-lg text-sm uppercase focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
               </div>
-              <div class="mt-2 text-[10px] text-ink-400">Source: public APIs, 30s cache</div>
             </div>
-          </template>
+            <div>
+              <label class="block text-[10px] font-medium text-ink-500 uppercase tracking-wider mb-1">I want</label>
+              <div class="flex gap-2">
+                <input x-model="form.want_amount" type="text" placeholder="Amount"
+                  class="flex-1 px-3 py-2 border border-warm-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
+                <input x-model="form.want_asset" type="text" placeholder="USDT"
+                  class="w-20 px-3 py-2 border border-warm-200 rounded-lg text-sm uppercase focus:ring-1 focus:ring-brand-300 focus:border-brand-300" />
+              </div>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-4 mb-5">
+            <div>
+              <label class="block text-[10px] font-medium text-ink-500 uppercase tracking-wider mb-1">Verification</label>
+              <select x-model="form.verification" class="w-full px-3 py-2 border border-warm-200 rounded-lg text-sm">
+                <option value="cross_chain_tx">Cross-chain TX</option>
+                <option value="kaspa_tx">Kaspa TX</option>
+                <option value="manual">Manual</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-[10px] font-medium text-ink-500 uppercase tracking-wider mb-1">Expires</label>
+              <select x-model="form.expires_minutes" class="w-full px-3 py-2 border border-warm-200 rounded-lg text-sm">
+                <option value="30">30 min</option>
+                <option value="60" selected>1 hour</option>
+                <option value="360">6 hours</option>
+              </select>
+            </div>
+          </div>
+          <div x-show="formError" class="text-xs text-red-600 mb-3" x-text="formError"></div>
+          <div x-show="formSuccess" class="text-xs text-green-600 mb-3" x-text="formSuccess"></div>
+          <button @click="publishOffer()" :disabled="publishing"
+            class="w-full py-2.5 bg-brand-500 text-white rounded-lg text-sm font-semibold hover:bg-brand-600 disabled:opacity-50 transition-colors">
+            <span x-show="!publishing">Publish</span>
+            <span x-show="publishing">Broadcasting...</span>
+          </button>
         </div>
-      </template>
-    </div>
-
-    <!-- ── Today's KAS Sales ── -->
-    <div class="mb-6">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="text-xs font-semibold text-ink-500 uppercase tracking-wider">Today's KAS Sales</h3>
-        <span class="text-[10px] text-ink-400"
-          x-text="new Date().toLocaleDateString(undefined, {month:'short', day:'numeric'})"></span>
       </div>
 
-      <template x-if="arbLoading.usage">
-        <div class="bg-warm-100 animate-pulse rounded-lg h-32"></div>
-      </template>
+      <!-- ── DEAL DETAIL ── -->
+      <div x-show="selectedOffer" class="p-6 max-w-2xl">
 
-      <template x-if="!arbLoading.usage">
-        <div class="bg-white border border-warm-200 rounded-lg p-4">
-
-          <!-- Total progress bar -->
-          <template x-if="dailyTotal">
-            <div class="mb-4">
-              <div class="flex items-center justify-between mb-1.5">
-                <span class="text-sm font-semibold text-ink-700">
-                  <span x-text="Number(dailyTotal.sold_kas).toLocaleString()"></span>
-                  <span class="text-ink-400 font-normal">
-                    / <span x-text="Number(dailyTotal.limit_kas).toLocaleString()"></span> KAS
-                  </span>
+        <!-- Deal header -->
+        <div class="mb-5">
+          <div class="flex items-center gap-3">
+            <span class="text-xs font-bold px-2 py-1 rounded"
+              :class="selectedOffer?.give_asset === 'KAS' ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'"
+              x-text="selectedOffer?.give_asset === 'KAS' ? 'SELL' : 'BUY'"></span>
+            <span class="text-xl font-bold text-ink-700 tabular-nums"
+              x-text="(selectedOffer?.give_amount || '') + ' ' + (selectedOffer?.give_asset || '')"></span>
+            <span class="text-ink-300">&rarr;</span>
+            <span class="text-xl font-bold text-ink-700 tabular-nums"
+              x-text="(selectedOffer?.want_amount || '') + ' ' + (selectedOffer?.want_asset || '')"></span>
+          </div>
+          <div class="flex items-center gap-3 mt-2 text-xs text-ink-400">
+            <template x-if="selectedOffer && priceComparison(selectedOffer)">
+              <span class="font-medium tabular-nums" :class="priceColor(selectedOffer)"
+                x-text="'$' + priceComparison(selectedOffer).offerPrice.toFixed(5) + '/KAS (' + (priceComparison(selectedOffer).diffPct >= 0 ? '+' : '') + priceComparison(selectedOffer).diffPct + '% vs market)'"></span>
+            </template>
+            <span class="flex items-center gap-1.5 relative">
+              Maker: <span class="font-mono" x-text="KANet.shortAddr(selectedOffer?.maker || '')"></span>
+              <template x-if="selectedOffer && getReputation(selectedOffer.maker)">
+                <span class="text-yellow-500" x-text="KANet.starRating(getReputation(selectedOffer.maker).stars)"></span>
+              </template>
+              <template x-if="selectedOffer && getReputation(selectedOffer.maker)">
+                <span class="px-1.5 py-0.5 rounded-full text-[10px] font-medium"
+                  :class="KANet.riskBadge(getReputation(selectedOffer.maker).risk).css"
+                  x-text="KANet.riskBadge(getReputation(selectedOffer.maker).risk).text"></span>
+              </template>
+              <!-- 信誉公式公示 ℹ — 点击展开明细 -->
+              <template x-if="selectedOffer && getReputation(selectedOffer.maker)">
+                <span class="relative inline-block">
+                  <button @click="showRepInfo = showRepInfo === selectedOffer.maker ? null : selectedOffer.maker"
+                          class="text-ink-300 hover:text-brand-500 text-[11px]" title="信誉如何计算?">ⓘ</button>
+                  <div x-show="showRepInfo === selectedOffer.maker" @click.outside="showRepInfo = null"
+                       class="absolute top-full left-0 mt-1 w-72 bg-white border border-warm-300 rounded-lg shadow-xl z-40 p-3 text-left">
+                    <div class="text-[11px] font-semibold text-ink-700 mb-2">信誉明细 (链上事实)</div>
+                    <div class="space-y-1 text-[10px]" x-data="{ r: getReputation(selectedOffer.maker) || {} }">
+                      <div class="flex justify-between"><span class="text-ink-400">完成交易</span><span class="font-semibold text-green-600 tabular-nums" x-text="r.completed + ' 笔'"></span></div>
+                      <div class="flex justify-between"><span class="text-ink-400">争议</span><span class="font-semibold text-red-600 tabular-nums" x-text="r.disputed + ' 笔'"></span></div>
+                      <div class="flex justify-between"><span class="text-ink-400">违约取消 (接单后)</span><span class="font-semibold text-amber-600 tabular-nums" x-text="(r.matchedCancelled || 0) + ' 笔'"></span></div>
+                      <div class="flex justify-between text-ink-300"><span>过期未接 (不计入)</span><span class="tabular-nums" x-text="(r.cancelled - (r.matchedCancelled || 0)) + ' 笔'"></span></div>
+                      <div class="border-t border-warm-200 pt-1 mt-2">
+                        <div class="flex justify-between font-semibold"><span class="text-ink-500">完成率</span><span class="tabular-nums" x-text="r.completionRate !== null ? Math.round(r.completionRate * 100) + '%' : '— (无交割记录)'"></span></div>
+                        <div class="text-[9px] text-ink-400 mt-1" x-text="'分母 = 完成(' + r.completed + ') + 争议(' + r.disputed + ') + 违约(' + (r.matchedCancelled||0) + ') = ' + (r.actionableTotal || 0)"></div>
+                      </div>
+                    </div>
+                    <div class="text-[9px] text-ink-400 mt-2 pt-2 border-t border-warm-200 leading-relaxed">
+                      <strong>说明</strong>: maker 挂的单没接到就过期, <strong>不算违约</strong>. 只有 matched 之后的结果 (完成/争议/违约取消) 才计入完成率.
+                      争议是公开上链事件, 在 #kanet-disputes 频道可审计.
+                    </div>
+                  </div>
                 </span>
-                <span class="text-sm font-mono"
-                  :class="dailyTotal.pct_used >= 80 ? 'text-red-500 font-semibold' :
-                          dailyTotal.pct_used >= 50 ? 'text-amber-500' : 'text-green-600'"
-                  x-text="dailyTotal.pct_used + '%'"></span>
-              </div>
-              <div class="w-full bg-warm-200 rounded-full h-3 overflow-hidden">
-                <div class="h-full rounded-full transition-all duration-500"
-                  :class="dailyTotal.pct_used >= 80 ? 'bg-red-500' :
-                          dailyTotal.pct_used >= 50 ? 'bg-amber-500' : 'bg-green-500'"
-                  :style="'width:' + Math.min(dailyTotal.pct_used, 100) + '%'"></div>
-              </div>
-              <div x-show="dailyTotal.pct_used >= 100"
-                class="mt-2 text-xs text-red-600 font-semibold">
-                Daily limit reached — SELL_MAKER paused until midnight UTC
-              </div>
-              <div x-show="dailyTotal.pct_used >= 80 && dailyTotal.pct_used < 100"
-                class="mt-2 text-xs text-amber-600">
-                80% used — Brain will reduce sell frequency
-              </div>
-            </div>
-          </template>
+              </template>
+            </span>
+            <span x-show="selectedOffer?.taker">Taker: <span class="font-mono" x-text="KANet.shortAddr(selectedOffer?.taker || '')"></span></span>
+          </div>
+        </div>
 
-          <!-- Per-exchange breakdown -->
-          <div class="space-y-1.5 mb-4">
-            <template x-for="u in dailyUsage" :key="u.exchange">
-              <div class="flex items-center gap-3"
-                :class="u.sold_kas === 0 ? 'opacity-50' : ''">
-                <span class="text-xs font-medium text-ink-600 w-14 shrink-0"
-                  x-text="u.label || u.exchange.toUpperCase()"></span>
-                <div class="flex-1 bg-warm-100 rounded-full h-1.5 overflow-hidden">
-                  <div class="h-full rounded-full"
-                    :class="u.pct_used >= 80 ? 'bg-red-400' :
-                            u.pct_used >= 50 ? 'bg-amber-400' : 'bg-green-400'"
-                    :style="'width:' + Math.min(u.pct_used, 100) + '%'"></div>
+        <!-- Pipeline stepper -->
+        <div class="bg-white border border-warm-200 rounded-xl p-5 mb-4">
+          <div class="flex items-center justify-between mb-4">
+            <template x-for="(step, i) in getTimeline(selectedOffer || {})" :key="i">
+              <div class="flex items-center" :class="i > 0 && 'flex-1'">
+                <div x-show="i > 0" class="flex-1 h-px mx-2" :class="step.done ? 'bg-green-400' : 'bg-warm-200'"></div>
+                <div class="flex flex-col items-center gap-1">
+                  <div class="w-3 h-3 rounded-full flex-shrink-0 transition-all"
+                    :class="step.done ? 'bg-green-500' : (step.active ? 'bg-brand-500 ring-4 ring-brand-100 animate-pulse' : 'bg-warm-300')"></div>
+                  <span class="text-[9px] whitespace-nowrap" :class="step.done || step.active ? 'text-ink-600 font-medium' : 'text-ink-400'" x-text="step.label"></span>
                 </div>
-                <span class="text-xs text-ink-500 tabular-nums w-28 text-right shrink-0"
-                  x-text="Number(u.sold_kas).toLocaleString() + ' KAS'"></span>
               </div>
             </template>
           </div>
-
-          <!-- Editable limit -->
-          <div class="flex items-center gap-2 pt-3 border-t border-warm-100">
-            <span class="text-xs text-ink-400 shrink-0">Daily limit:</span>
-            <input type="number" min="100" step="1000"
-              x-model.number="dailyLimitInput"
-              class="w-24 text-xs border border-warm-200 rounded px-2 py-1 text-center
-                     focus:outline-none focus:border-brand-400"
-              @keydown.enter="saveDailyLimit()">
-            <span class="text-xs text-ink-400">KAS</span>
-            <button @click="saveDailyLimit()"
-              :disabled="dailyLimitSaving"
-              class="text-xs px-3 py-1 bg-brand-500 text-white rounded hover:bg-brand-600
-                     disabled:opacity-50 transition-colors">
-              <span x-show="!dailyLimitSaving">Save</span>
-              <span x-show="dailyLimitSaving">...</span>
-            </button>
-            <span class="text-[10px] text-ink-400 ml-auto">Resets midnight UTC</span>
-          </div>
-
+          <!-- Step detail (timestamp + info) -->
+          <template x-for="(step, i) in getTimeline(selectedOffer || {})" :key="'d'+i">
+            <div x-show="step.time || step.detail" class="text-[10px] text-ink-400 flex items-center gap-2 mt-1">
+              <span class="font-medium text-ink-500" x-text="step.label + ':'"></span>
+              <span x-show="step.time" x-text="KANet.relativeTime(step.time)"></span>
+              <span x-show="step.detail" class="text-ink-500" x-text="step.detail"></span>
+            </div>
+          </template>
         </div>
-      </template>
-    </div>
 
-    <!-- ── Area 3: Active Arbitrage Offers ── -->
-    <div class="mb-6">
-      <div class="flex items-center gap-2 mb-3">
-        <h3 class="text-xs font-semibold text-ink-500 uppercase tracking-wider">Active Arbitrage Offers</h3>
-        <span class="text-[10px] text-ink-400" x-text="'(' + arbOffers.length + ')'"></span>
-      </div>
-      <template x-if="arbOffers.length === 0">
-        <div class="text-center py-8 text-ink-400 text-sm bg-white border border-warm-200 rounded-lg">No active arbitrage offers</div>
-      </template>
-      <div class="space-y-3">
-        <template x-for="o in arbOffers" :key="o.id">
-          <div class="bg-white border border-warm-200 rounded-lg p-4">
-            <div class="flex items-center justify-between">
-              <div>
-                <span class="text-sm font-semibold text-ink-700">
-                  <template x-if="o.give_asset === 'KAS'">
-                    <span>SELL <span x-text="o.give_amount"></span> KAS @ <span x-text="o.want_amount && o.give_amount ? (parseFloat(o.want_amount) / parseFloat(o.give_amount)).toFixed(5) : '?'"></span></span>
-                  </template>
-                  <template x-if="o.give_asset !== 'KAS'">
-                    <span>BUY KAS: give <span x-text="o.give_amount + ' ' + o.give_asset"></span></span>
-                  </template>
-                </span>
-              </div>
-              <span class="text-[10px] px-2 py-0.5 rounded-full"
-                :class="o.protocol_status === 'open' ? 'bg-blue-100 text-blue-700' : 'bg-warm-100 text-ink-500'"
-                x-text="o.protocol_status"></span>
+        <!-- Trust information -->
+        <div class="bg-white border border-warm-200 rounded-xl p-5 mb-4">
+          <!-- Lock status -->
+          <div class="flex items-start gap-3 mb-3">
+            <div class="text-xl mt-0.5" x-text="selectedOffer?.protocol_status !== 'open' || isMaker(selectedOffer) ? '&#128274;' : '&#128275;'"
+              :class="selectedOffer?.protocol_status !== 'open' ? 'opacity-100' : 'opacity-40'"></div>
+            <div>
+              <!-- Maker viewing own offer -->
+              <template x-if="selectedOffer && isMaker(selectedOffer) && selectedOffer.protocol_status === 'open'">
+                <div>
+                  <div class="text-sm font-medium text-ink-700">Your <span x-text="selectedOffer.give_amount + ' ' + selectedOffer.give_asset"></span> is locked</div>
+                  <div class="text-xs text-ink-400 mt-0.5">Visible to potential takers. Expires <span x-text="KANet.countdown(selectedOffer.expires_at)"></span>.</div>
+                </div>
+              </template>
+              <!-- Maker viewing matched offer -->
+              <template x-if="selectedOffer && isMaker(selectedOffer) && ['matched','verifying','delivering'].includes(selectedOffer.protocol_status)">
+                <div>
+                  <div class="text-sm font-medium text-ink-700">Your <span x-text="selectedOffer.give_amount + ' ' + selectedOffer.give_asset"></span> is locked</div>
+                  <div class="text-xs text-ink-400 mt-0.5">Buyer is paying. If no payment in 30 minutes, your KAS will be auto-released.</div>
+                </div>
+              </template>
+              <!-- Taker viewing open offer -->
+              <template x-if="selectedOffer && !isMine(selectedOffer) && selectedOffer.protocol_status === 'open'">
+                <div>
+                  <div class="text-sm font-medium text-green-700">Seller has locked <span x-text="selectedOffer.give_amount + ' ' + selectedOffer.give_asset"></span> in escrow</div>
+                  <div class="text-xs text-ink-400 mt-0.5">System will verify your payment and deliver automatically.</div>
+                </div>
+              </template>
+              <!-- Taker viewing active deal -->
+              <template x-if="selectedOffer && isTaker(selectedOffer) && ['matched','verifying','delivering'].includes(selectedOffer.protocol_status)">
+                <div>
+                  <div class="text-sm font-medium text-ink-700">Trade in progress</div>
+                  <div class="text-xs text-ink-400 mt-0.5" x-text="selectedOffer.protocol_status === 'verifying' ? 'Verifying your payment on-chain...' : (selectedOffer.protocol_status === 'delivering' ? 'Delivering KAS to your wallet...' : 'Awaiting payment...')"></div>
+                </div>
+              </template>
+              <!-- Completed -->
+              <template x-if="selectedOffer && selectedOffer.protocol_status === 'completed'">
+                <div>
+                  <div class="text-sm font-medium text-green-700">Trade completed</div>
+                  <div class="text-xs text-ink-400 mt-0.5" x-text="'Settled ' + KANet.relativeTime(selectedOffer.completed_at)"></div>
+                </div>
+              </template>
+              <!-- Timed out -->
+              <template x-if="selectedOffer && selectedOffer.protocol_status === 'timed_out'">
+                <div>
+                  <div class="text-sm font-medium text-amber-600">Timed out</div>
+                  <div class="text-xs text-ink-400 mt-0.5">Buyer did not pay in time. KAS has been released.</div>
+                </div>
+              </template>
+              <!-- Disputed -->
+              <template x-if="selectedOffer && selectedOffer.protocol_status === 'disputed'">
+                <div>
+                  <div class="text-sm font-medium text-red-600">Disputed</div>
+                  <div class="text-xs text-ink-400 mt-0.5">Your funds are protected. Awaiting resolution.</div>
+                </div>
+              </template>
             </div>
-            <div class="mt-2 flex items-center gap-4 text-xs text-ink-400">
-              <span>By: <span class="text-ink-600" x-text="arbAgentName(o.maker)"></span></span>
-              <span x-text="KANet.relativeTime(o.broadcast_at)"></span>
-            </div>
-            <div class="mt-3">
-              <button @click="cancelArbOffer(o)"
-                class="text-xs px-3 py-1.5 border border-red-200 text-red-600 rounded hover:bg-red-50 transition-colors"
-                :disabled="o._cancelling">
-                <span x-show="!o._cancelling">Cancel</span>
-                <span x-show="o._cancelling">Cancelling...</span>
+          </div>
+        </div>
+
+        <!-- On-chain proof — every step has TX -->
+        <div x-show="selectedOffer?.broadcast_tx_id && !selectedOffer?.broadcast_tx_id?.startsWith('pending_')"
+          class="bg-white border border-warm-200 rounded-xl p-5 mb-4">
+          <div class="text-[10px] font-semibold text-ink-400 uppercase tracking-wider mb-3">On-chain Proof</div>
+          <div class="space-y-2 text-[10px]">
+            <!-- Publish TX (Kaspa) -->
+            <div x-show="selectedOffer?.broadcast_tx_id && !selectedOffer?.broadcast_tx_id?.startsWith('pending_')" class="flex items-center gap-2">
+              <span class="text-ink-400 w-16 flex-shrink-0">Publish</span>
+              <a :href="KANet.explorerTxUrl('kaspa', selectedOffer?.broadcast_tx_id)" target="_blank" rel="noopener"
+                class="text-brand-500 hover:text-brand-700 font-mono truncate" x-text="selectedOffer?.broadcast_tx_id"></a>
+              <button @click="KANet.copy(selectedOffer?.broadcast_tx_id)" class="text-ink-300 hover:text-brand-500 flex-shrink-0" title="Copy">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
               </button>
             </div>
+            <!-- Accept TX (Kaspa) -->
+            <div x-show="selectedOffer?.taker_tx_id && !selectedOffer?.taker_tx_id?.startsWith('pending_')" class="flex items-center gap-2">
+              <span class="text-ink-400 w-16 flex-shrink-0">Accept</span>
+              <a :href="KANet.explorerTxUrl('kaspa', selectedOffer?.taker_tx_id)" target="_blank" rel="noopener"
+                class="text-brand-500 hover:text-brand-700 font-mono truncate" x-text="selectedOffer?.taker_tx_id"></a>
+              <button @click="KANet.copy(selectedOffer?.taker_tx_id)" class="text-ink-300 hover:text-brand-500 flex-shrink-0" title="Copy">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+              </button>
+            </div>
+            <!-- Payment TX (cross-chain: BNB/ETH/SOL/TRON) -->
+            <div x-show="getPaymentTx(selectedOffer || {})" class="flex items-center gap-2">
+              <span class="text-ink-400 w-16 flex-shrink-0">Payment</span>
+              <a :href="KANet.explorerTxUrl(selectedOffer?.taker_chain || 'kaspa', getPaymentTx(selectedOffer || {}))" target="_blank" rel="noopener"
+                class="text-brand-500 hover:text-brand-700 font-mono truncate" x-text="getPaymentTx(selectedOffer || {})"></a>
+              <button @click="KANet.copy(getPaymentTx(selectedOffer || {}))" class="text-ink-300 hover:text-brand-500 flex-shrink-0" title="Copy">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+              </button>
+              <span class="text-ink-300 uppercase" x-text="selectedOffer?.taker_chain || ''"></span>
+            </div>
           </div>
+        </div>
+
+        <!-- ── INLINE ACCEPT (for open offers not mine) ── -->
+        <div x-show="selectedOffer?.protocol_status === 'open' && !isMine(selectedOffer)"
+          class="bg-white border-2 border-green-200 rounded-xl p-5 mb-4">
+          <div class="text-xs font-semibold text-ink-600 uppercase tracking-wider mb-4">Accept This Offer</div>
+          <div class="grid grid-cols-2 gap-4 mb-4">
+            <div class="bg-green-50 rounded-lg p-3 text-center">
+              <div class="text-[10px] text-green-600 uppercase font-medium mb-1">You receive</div>
+              <div class="text-lg font-bold text-green-700" x-text="(selectedOffer?.give_amount || '') + ' ' + (selectedOffer?.give_asset || '')"></div>
+            </div>
+            <div class="bg-red-50 rounded-lg p-3 text-center">
+              <div class="text-[10px] text-red-500 uppercase font-medium mb-1">You pay</div>
+              <div class="text-lg font-bold text-red-600" x-text="(selectedOffer?.want_amount || '') + ' ' + (selectedOffer?.want_asset || '')"></div>
+            </div>
+          </div>
+          <!-- Chain selection -->
+          <template x-if="getChains(selectedOffer).length > 0">
+            <div class="mb-4">
+              <label class="block text-[10px] font-medium text-ink-500 uppercase tracking-wider mb-2">Payment chain</label>
+              <div class="flex gap-2">
+                <template x-for="ch in getChains(selectedOffer)" :key="ch">
+                  <button @click="acceptChain = ch; loadChainBalance(ch)"
+                    class="px-3 py-2 rounded-lg border text-xs font-medium uppercase transition-colors"
+                    :class="acceptChain === ch ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-warm-200 text-ink-500 hover:border-brand-300'">
+                    <span x-text="ch"></span>
+                  </button>
+                </template>
+              </div>
+            </div>
+          </template>
+          <!-- Token selection (P2a: multi-token support) -->
+          <template x-if="getChains(selectedOffer).length > 0 && acceptChain">
+            <div class="mb-4">
+              <label class="block text-[10px] font-medium text-ink-500 uppercase tracking-wider mb-2">Pay with</label>
+              <div class="flex gap-2">
+                <template x-for="tk in ['usdt','usdc','dai']" :key="tk">
+                  <button @click="acceptPaymentAsset = tk"
+                    class="px-3 py-2 rounded-lg border text-xs font-medium uppercase transition-colors"
+                    :class="acceptPaymentAsset === tk ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-warm-200 text-ink-500 hover:border-brand-300'"
+                    x-text="tk"></button>
+                </template>
+              </div>
+            </div>
+          </template>
+          <!-- Balance check -->
+          <div x-show="acceptBalance !== null" class="mb-4 px-4 py-2.5 rounded-lg text-xs"
+            :class="acceptBalanceOk ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'">
+            <span x-text="(acceptChain || '').toUpperCase()"></span> wallet:
+            <span class="font-semibold" x-text="acceptBalance?.toFixed(2) + ' ' + (acceptPaymentAsset || 'USDT').toUpperCase()"></span>
+            <span x-text="acceptBalanceOk ? ' — sufficient' : ' — insufficient'"></span>
+          </div>
+          <div class="text-[10px] text-ink-400 mb-4">System will auto-pay from your wallet after confirmation.</div>
+          <div x-show="acceptError" class="text-xs text-red-600 mb-3" x-text="acceptError"></div>
+          <button @click="confirmAccept()"
+            :disabled="acceptLoading || (getChains(selectedOffer).length > 0 && !acceptChain) || (acceptBalance !== null && !acceptBalanceOk)"
+            class="w-full py-3 bg-green-500 text-white rounded-lg text-sm font-semibold hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+            <span x-show="!acceptLoading">Accept Offer</span>
+            <span x-show="acceptLoading">Processing...</span>
+          </button>
+        </div>
+
+        <!-- ── CANCEL (my open offer) ── -->
+        <div x-show="selectedOffer?.protocol_status === 'open' && isMaker(selectedOffer)" class="mb-4">
+          <button @click="cancelOffer(selectedOffer)"
+            class="px-4 py-2 bg-warm-200 text-ink-600 rounded-lg text-xs font-medium hover:bg-warm-300 transition-colors">Cancel Offer</button>
+        </div>
+
+        <!-- ── DEAL ACTIONS (matched/verifying) ── -->
+        <div x-show="selectedOffer && canConfirm(selectedOffer)" class="mb-4">
+          <button @click="confirmDeal(selectedOffer)" :disabled="actionLoading"
+            class="px-4 py-2.5 bg-green-500 text-white rounded-lg text-xs font-semibold hover:bg-green-600 disabled:opacity-50 transition-colors">
+            Confirm Delivery
+          </button>
+        </div>
+
+        <!-- Dispute (raise) -->
+        <div x-show="selectedOffer && canDispute(selectedOffer)" class="mb-4">
+          <div x-show="!showDispute">
+            <button @click="showDispute = true" class="text-xs text-red-500 hover:text-red-700">发起争议</button>
+          </div>
+          <div x-show="showDispute" class="bg-red-50 border border-red-200 rounded-lg p-4">
+            <div class="text-[11px] text-red-700 mb-2">
+              📢 发起争议会<strong>上链广播</strong>到 #kanet-disputes 频道，所有 KANet 节点都能看到，包括对方的 Agent。这是一个公开的信誉事件，慎重。
+            </div>
+            <input x-model="disputeReason" type="text" placeholder="争议原因 (会包含在广播里)"
+              class="w-full px-3 py-2 border border-red-200 rounded text-xs bg-white mb-2" />
+            <div class="flex gap-2">
+              <button @click="disputeDeal(selectedOffer)" :disabled="!disputeReason || actionLoading"
+                class="px-3 py-1.5 bg-red-500 text-white rounded text-xs font-medium disabled:opacity-50">确认发起 (上链广播)</button>
+              <button @click="showDispute = false" class="px-3 py-1.5 text-xs text-ink-400">取消</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Dispute (resolve/concede) — 已进入 disputed 状态, 只能"认输", 不能宣判对方输 -->
+        <div x-show="selectedOffer && selectedOffer.protocol_status === 'disputed' && (isMaker(selectedOffer) || isTaker(selectedOffer))" class="mb-4">
+          <div x-show="!showConcede">
+            <button @click="showConcede = true" class="text-xs text-amber-600 hover:text-amber-700 underline decoration-dotted">解决争议: 我认输 →</button>
+          </div>
+          <div x-show="showConcede" class="bg-amber-50 border border-amber-200 rounded-lg p-4">
+            <div class="text-[11px] text-amber-900 mb-2">
+              ⚠ 你将<strong>主动认输</strong>并让对方获胜。<br />
+              作为 <span x-text="isMaker(selectedOffer) ? 'Maker' : 'Taker'"></span>，对方会收到：
+              <strong x-text="isMaker(selectedOffer) ? '你的 KAS 被 spendFunds 结算 (不退还)' : '你原本要付的金额判为无效, 对方恢复 KAS'"></strong>
+            </div>
+            <div class="text-[11px] text-amber-900 mb-2">
+              📢 resolve 动作会<strong>上链广播</strong>到 #kanet-disputes，作为你的<strong>公开认输记录</strong>，会影响未来的声誉。
+            </div>
+            <div class="flex gap-2">
+              <button @click="concedeDispute(selectedOffer)" :disabled="actionLoading"
+                class="px-3 py-1.5 bg-amber-600 text-white rounded text-xs font-medium disabled:opacity-50">
+                <span x-show="!actionLoading">确认认输 (上链广播)</span>
+                <span x-show="actionLoading">广播中...</span>
+              </button>
+              <button @click="showConcede = false" class="px-3 py-1.5 text-xs text-ink-400">取消</button>
+            </div>
+          </div>
+        </div>
+
+        <div x-show="actionError" class="text-xs text-red-600 mb-3" x-text="actionError"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ OPERATOR TOOLS (collapsible) ═══ -->
+  <div class="flex-shrink-0 border-t border-warm-200" x-data="{ opsOpen: false }">
+    <button @click="opsOpen = !opsOpen; if (opsOpen && !arbInitialized) loadArbitrageData(); if (opsOpen) { loadSeedData(); loadLimits(); }"
+      class="w-full px-5 py-2.5 text-xs text-ink-400 hover:text-ink-600 flex items-center gap-2 transition-colors">
+      <span :class="opsOpen && 'rotate-90'" class="transition-transform">&#9654;</span>
+      Operator Tools
+    </button>
+    <div x-show="opsOpen" x-transition class="border-t border-warm-100">
+      <!-- Top-level: Trading / Market Making (DeFi removed — Aave/Hyper/Aevo moved to independent pages) -->
+      <div class="flex border-b border-warm-200 px-5 bg-warm-50">
+        <button @click="opsGroup = 'trading'; opsTab = 'arb'"
+          :class="opsGroup === 'trading' ? 'border-brand-500 text-brand-700 font-medium' : 'border-transparent text-ink-400'"
+          class="px-4 py-2 text-xs border-b-2 -mb-px">Trading</button>
+        <button @click="opsGroup = 'mm'; opsTab = 'seed'"
+          :class="opsGroup === 'mm' ? 'border-brand-500 text-brand-700 font-medium' : 'border-transparent text-ink-400'"
+          class="px-4 py-2 text-xs border-b-2 -mb-px">Market Making</button>
+      </div>
+      <!-- Sub-tabs per group -->
+      <div class="flex border-b border-warm-100 px-5" x-show="opsGroup === 'trading'">
+        <button @click="opsTab = 'arb'"
+          :class="opsTab === 'arb' ? 'border-brand-400 text-brand-600' : 'border-transparent text-ink-400'"
+          class="px-3 py-1.5 text-[11px] border-b -mb-px">CEX Arbitrage (hedges Exchange offers)</button>
+      </div>
+      <div class="flex border-b border-warm-100 px-5" x-show="opsGroup === 'mm'">
+        <button @click="opsTab = 'seed'"
+          :class="opsTab === 'seed' ? 'border-brand-400 text-brand-600' : 'border-transparent text-ink-400'"
+          class="px-3 py-1.5 text-[11px] border-b -mb-px">Seeder</button>
+        <button @click="opsTab = 'autotaker'"
+          :class="opsTab === 'autotaker' ? 'border-brand-400 text-brand-600' : 'border-transparent text-ink-400'"
+          class="px-3 py-1.5 text-[11px] border-b -mb-px">AutoTaker</button>
+        <button @click="opsTab = 'broker'; loadBrokerStats()"
+          :class="opsTab === 'broker' ? 'border-brand-400 text-brand-600' : 'border-transparent text-ink-400'"
+          class="px-3 py-1.5 text-[11px] border-b -mb-px">Broker (零售代理)</button>
+      </div>
+      <div class="p-5 max-h-[32rem] overflow-y-auto">
+        <!-- Arb content placeholder — preserved from existing -->
+        <div x-show="opsTab === 'arb'" class="text-xs text-ink-500">
+          <div class="grid grid-cols-3 gap-4 mb-4">
+            <template x-for="b in cexBalances" :key="b.exchange">
+              <div class="bg-white border border-warm-200 rounded-lg p-3">
+                <div class="font-medium text-ink-600" x-text="b.exchange"></div>
+                <div class="tabular-nums" x-text="(b.kas != null ? Number(b.kas).toFixed(1) + ' KAS' : '—')"></div>
+                <div class="tabular-nums" x-text="(b.usdt != null ? '$' + Number(b.usdt).toFixed(2) : '—')"></div>
+              </div>
+            </template>
+          </div>
+          <div class="text-ink-400">Full arbitrage dashboard available in /trading page.</div>
+        </div>
+        <!-- Seed + Limits + Asset Status -->
+        <div x-show="opsTab === 'seed'" class="text-xs text-ink-500 space-y-4">
+          <!-- Seeder Controls -->
+          <div class="flex items-center gap-4">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" :checked="seedConfig.enabled" @change="toggleSeeder()" class="rounded" />
+              <span>Seeder enabled</span>
+            </label>
+            <button @click="triggerSeed()" :disabled="seedTriggering"
+              class="px-3 py-1 bg-brand-500 text-white rounded text-xs disabled:opacity-50">
+              <span x-show="!seedTriggering">Seed Now</span>
+              <span x-show="seedTriggering">Seeding...</span>
+            </button>
+          </div>
+
+          <!-- Today Stats -->
+          <div class="grid grid-cols-3 gap-3">
+            <div class="bg-white border border-warm-200 rounded-lg p-2.5 text-center">
+              <div class="text-lg font-semibold text-ink-700" x-text="seedStats.seeded || 0"></div>
+              <div class="text-ink-400">Published</div>
+            </div>
+            <div class="bg-white border border-warm-200 rounded-lg p-2.5 text-center">
+              <div class="text-lg font-semibold text-green-600" x-text="seedStats.taken || 0"></div>
+              <div class="text-ink-400">Taken</div>
+            </div>
+            <div class="bg-white border border-warm-200 rounded-lg p-2.5 text-center">
+              <div class="text-lg font-semibold" :class="(seedStats.net_usdt || 0) >= 0 ? 'text-green-600' : 'text-red-500'"
+                x-text="(seedStats.net_usdt >= 0 ? '+$' : '-$') + Math.abs(seedStats.net_usdt || 0).toFixed(2)"></div>
+              <div class="text-ink-400">Net P&L</div>
+            </div>
+          </div>
+
+          <!-- Asset Status -->
+          <div class="bg-warm-50 border border-warm-200 rounded-lg p-3">
+            <div class="font-medium text-ink-600 mb-2">Asset Status</div>
+            <div class="grid grid-cols-2 gap-2">
+              <div class="flex justify-between">
+                <span class="text-ink-400">KAS Balance</span>
+                <span class="text-ink-700 tabular-nums font-medium" x-text="limitsData.status?.kas_balance != null ? Number(limitsData.status.kas_balance).toFixed(1) + ' KAS' : '—'"></span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-ink-400">Locked</span>
+                <span class="text-orange-600 tabular-nums font-medium" x-text="Number(limitsData.status?.locked_kas || 0).toFixed(1) + ' KAS'"></span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-ink-400">Open Exposure</span>
+                <span class="text-ink-700 tabular-nums font-medium" x-text="Number(limitsData.status?.current_exposure_kas || 0).toFixed(1) + ' KAS'"></span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-ink-400">Available</span>
+                <span class="text-green-600 tabular-nums font-medium" x-text="Number(limitsData.status?.available_kas || 0).toFixed(1) + ' KAS'"></span>
+              </div>
+            </div>
+            <!-- Exposure bar -->
+            <div class="mt-2 h-2 bg-warm-200 rounded-full overflow-hidden">
+              <div class="h-full bg-brand-500 rounded-full transition-all"
+                :style="'width:' + Math.min(100, (limitsData.status?.current_exposure_kas || 0) / (limitsData.limits?.total_exposure_kas || 20000) * 100) + '%'"></div>
+            </div>
+            <div class="text-right text-ink-400 mt-0.5" x-text="Number(limitsData.status?.current_exposure_kas || 0).toFixed(0) + ' / ' + Number(limitsData.limits?.total_exposure_kas || 20000) + ' KAS'"></div>
+          </div>
+
+          <!-- Seeder Config -->
+          <div class="bg-warm-50 border border-warm-200 rounded-lg p-3">
+            <div class="font-medium text-ink-600 mb-2">Seeder Config</div>
+            <div class="grid grid-cols-2 gap-x-4 gap-y-2">
+              <label class="flex flex-col gap-0.5">
+                <span class="text-ink-400">Sell Spread %</span>
+                <input type="number" step="0.1" min="0" x-model.number="seedConfig.sell_spread_pct"
+                  class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-full" />
+              </label>
+              <label class="flex flex-col gap-0.5">
+                <span class="text-ink-400">Buy Spread %</span>
+                <input type="number" step="0.1" min="0" x-model.number="seedConfig.buy_spread_pct"
+                  class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-full" />
+              </label>
+              <label class="flex flex-col gap-0.5">
+                <span class="text-ink-400">Amount (KAS)</span>
+                <input type="number" min="1" x-model.number="seedConfig.amount_kas"
+                  class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-full" />
+              </label>
+              <label class="flex flex-col gap-0.5">
+                <span class="text-ink-400">Expires (min)</span>
+                <input type="number" min="5" x-model.number="seedConfig.expires_minutes"
+                  class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-full" />
+              </label>
+            </div>
+            <button @click="saveSeedConfig()" :disabled="seedSaving"
+              class="mt-2 px-3 py-1 bg-brand-500 text-white rounded text-xs disabled:opacity-50 w-full">
+              <span x-show="!seedSaving">Save Seeder Config</span>
+              <span x-show="seedSaving">Saving...</span>
+            </button>
+          </div>
+
+          <!-- Exchange Limits -->
+          <div class="bg-warm-50 border border-warm-200 rounded-lg p-3">
+            <div class="font-medium text-ink-600 mb-2">Exchange Limits</div>
+            <div class="grid grid-cols-3 gap-x-3 gap-y-2">
+              <label class="flex flex-col gap-0.5">
+                <span class="text-ink-400">Per Offer (KAS)</span>
+                <input type="number" min="10" x-model.number="limitsForm.per_offer_kas"
+                  class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-full" />
+              </label>
+              <label class="flex flex-col gap-0.5">
+                <span class="text-ink-400">Total Exposure (KAS)</span>
+                <input type="number" min="100" x-model.number="limitsForm.total_exposure_kas"
+                  class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-full" />
+              </label>
+              <label class="flex flex-col gap-0.5">
+                <span class="text-ink-400">Price Guard %</span>
+                <input type="number" min="1" max="50" step="0.5" x-model.number="limitsForm.price_deviation_pct"
+                  class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-full" />
+              </label>
+            </div>
+            <button @click="saveLimits()" :disabled="limitsSaving"
+              class="mt-2 px-3 py-1 bg-brand-500 text-white rounded text-xs disabled:opacity-50 w-full">
+              <span x-show="!limitsSaving">Save Limits</span>
+              <span x-show="limitsSaving">Saving...</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- ═══ AutoTaker (Market Making) ═══ -->
+        <div x-show="opsTab === 'autotaker'" class="text-xs text-ink-500 space-y-4">
+          <!-- Proposals -->
+          <div class="bg-warm-50 border border-warm-200 rounded-lg p-3">
+            <div class="font-medium text-ink-600 mb-2">AutoTaker Proposals</div>
+            <div x-show="!autoTakerProposals?.length" class="text-ink-400 text-center py-4">No pending proposals. AutoTaker will generate proposals when profitable offers appear.</div>
+            <template x-for="p in autoTakerProposals" :key="p.id">
+              <div class="flex items-center justify-between py-2 border-b border-warm-100 last:border-0">
+                <div class="flex-1">
+                  <span class="font-semibold text-green-600 tabular-nums" x-text="'-' + (p.discount*100).toFixed(1) + '%'"></span>
+                  <span class="text-ink-600 ml-2" x-text="p.amount + ' KAS @ ' + p.price?.toFixed(6)"></span>
+                  <span class="text-ink-400 ml-2" x-text="'profit ~$' + p.profit?.toFixed(2)"></span>
+                </div>
+                <div class="flex gap-1.5">
+                  <button @click="approveAutoTake(p.id)" class="px-2 py-1 bg-green-500 text-white rounded text-[10px] hover:bg-green-600">Accept</button>
+                  <button @click="rejectAutoTake(p.id)" class="px-2 py-1 bg-warm-200 text-ink-500 rounded text-[10px] hover:bg-warm-300">Reject</button>
+                </div>
+              </div>
+            </template>
+          </div>
+          <!-- Config -->
+          <div class="bg-warm-50 border border-warm-200 rounded-lg p-3">
+            <div class="font-medium text-ink-600 mb-2">AutoTaker Config</div>
+            <div class="grid grid-cols-2 gap-x-4 gap-y-2">
+              <label class="flex items-center gap-2 col-span-2">
+                <input type="checkbox" :checked="autoTakerConfig.enabled" @change="toggleAutoTaker()" class="rounded" />
+                <span>AutoTaker enabled</span>
+              </label>
+              <label class="flex items-center gap-2 col-span-2">
+                <span class="text-ink-400">Mode:</span>
+                <select x-model="autoTakerConfig.mode" :class="autoTakerConfig.mode === 'auto' ? 'bg-green-50 text-green-700 border-green-300' : 'bg-yellow-50 text-yellow-700 border-yellow-300'" class="border rounded px-2 py-0.5 text-xs">
+                  <option value="approval">Approval（生成建议，等你批准）</option>
+                  <option value="auto">Auto（限额内自动执行）</option>
+                </select>
+              </label>
+              <label class="flex flex-col gap-0.5">
+                <span class="text-ink-400">Min Discount %</span>
+                <input type="number" step="0.1" min="0" x-model.number="autoTakerConfig.min_discount" class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-full" />
+              </label>
+              <label class="flex flex-col gap-0.5">
+                <span class="text-ink-400">Max Amount (USDT)</span>
+                <input type="number" min="1" x-model.number="autoTakerConfig.max_amount" class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-full" />
+              </label>
+              <label class="flex flex-col gap-0.5">
+                <span class="text-ink-400">Daily Limit</span>
+                <input type="number" min="1" x-model.number="autoTakerConfig.daily_limit" class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-full" />
+              </label>
+              <label class="flex flex-col gap-0.5">
+                <span class="text-ink-400">Cooldown (sec)</span>
+                <input type="number" min="5" x-model.number="autoTakerConfig.cooldown_sec" class="border border-warm-300 rounded px-2 py-1 text-ink-700 bg-white w-full" />
+              </label>
+            </div>
+            <button @click="saveAutoTakerConfig()" :disabled="autoTakerSaveStatus === 'saving'"
+              :class="autoTakerSaveStatus === 'saved' ? 'bg-green-500' : autoTakerSaveStatus === 'error' ? 'bg-red-500' : 'bg-brand-500'"
+              class="mt-2 px-3 py-1 text-white rounded text-xs w-full transition-colors">
+              <span x-show="!autoTakerSaveStatus">Save AutoTaker Config</span>
+              <span x-show="autoTakerSaveStatus === 'saving'">保存中...</span>
+              <span x-show="autoTakerSaveStatus === 'saved'">✓ 已保存</span>
+              <span x-show="autoTakerSaveStatus === 'error'" x-text="'✗ ' + autoTakerSaveError"></span>
+            </button>
+          </div>
+          <!-- Stats -->
+          <div class="grid grid-cols-3 gap-3">
+            <div class="bg-white border border-warm-200 rounded-lg p-2.5 text-center">
+              <div class="text-lg font-semibold text-ink-700" x-text="autoTakerStats.today_accepted || 0"></div>
+              <div class="text-ink-400">Accepted Today</div>
+            </div>
+            <div class="bg-white border border-warm-200 rounded-lg p-2.5 text-center">
+              <div class="text-lg font-semibold text-green-600" x-text="'$' + (autoTakerStats.today_profit || 0).toFixed(2)"></div>
+              <div class="text-ink-400">Profit Today</div>
+            </div>
+            <div class="bg-white border border-warm-200 rounded-lg p-2.5 text-center">
+              <div class="text-lg font-semibold text-ink-600" x-text="(autoTakerStats.success_rate || 0).toFixed(0) + '%'"></div>
+              <div class="text-ink-400">Success Rate</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══ Broker (零售代理) tab ═══ -->
+        <div x-show="opsTab === 'broker'" class="text-xs text-ink-500 space-y-4">
+          <!-- 当前 Broker -->
+          <div class="bg-white border border-warm-200 rounded-lg p-4">
+            <div class="font-medium text-ink-600 mb-2">当前 Broker Agent</div>
+            <div x-show="!brokerStats?.broker" class="text-ink-400">无 Broker (未设置 is_dex_broker=1)</div>
+            <template x-if="brokerStats?.broker">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="font-semibold text-ink-700" x-text="brokerStats.broker.name || '—'"></span>
+                  <span class="text-[10px] text-brand-500 bg-brand-50 px-1.5 py-0.5 rounded">DEX Broker</span>
+                </div>
+                <div class="text-[11px] text-ink-400 mt-1" x-text="brokerStats.broker.address?.slice(0, 12) + '…'"></div>
+              </div>
+            </template>
+          </div>
+          <!-- 撮合费率 -->
+          <div class="bg-white border border-warm-200 rounded-lg p-4">
+            <div class="font-medium text-ink-600 mb-2">撮合费率</div>
+            <div class="flex items-center gap-2">
+              <span class="text-lg font-bold text-brand-600" x-text="'KAS ' + (brokerStats?.fee_kas_per_order || '—')"></span>
+              <span class="text-ink-400">/ 订单</span>
+            </div>
+            <div class="text-[10px] text-ink-400 mt-1">透明费率，每笔撮合订单收取固定 KAS 手续费</div>
+          </div>
+          <!-- 服务中订单 -->
+          <div class="bg-white border border-warm-200 rounded-lg p-4">
+            <div class="font-medium text-ink-600 mb-2">
+              服务中订单
+              <span class="text-[10px] text-ink-400" x-text="'(' + (brokerStats?.active_orders?.length || 0) + ')'"></span>
+            </div>
+            <div x-show="!brokerStats?.active_orders?.length" class="text-ink-400 text-center py-3">无</div>
+            <template x-for="o in (brokerStats?.active_orders || [])" :key="o.id">
+              <div class="flex items-center justify-between py-1.5 border-b border-warm-100 last:border-0">
+                <div>
+                  <span class="font-mono text-[10px]" :class="o.side === 'buy' ? 'text-green-600' : 'text-red-500'" x-text="o.side?.toUpperCase()"></span>
+                  <span class="ml-1.5 text-ink-600" x-text="(o.qty || 0) + ' KAS'"></span>
+                  <span class="text-[10px] text-ink-400 ml-1" x-text="o.state"></span>
+                </div>
+                <span class="text-[10px] text-ink-400" x-text="'$' + (o.quoted_usdt || 0)"></span>
+              </div>
+            </template>
+          </div>
+          <!-- M2 挂单 -->
+          <div class="bg-white border border-warm-200 rounded-lg p-4">
+            <div class="font-medium text-ink-600 mb-2">
+              M2 零售挂单
+              <span class="text-[10px] text-ink-400" x-text="'(' + (brokerStats?.active_publications?.length || 0) + ')'"></span>
+            </div>
+            <div x-show="!brokerStats?.active_publications?.length" class="text-ink-400 text-center py-3">无</div>
+            <template x-for="p in (brokerStats?.active_publications || [])" :key="p.id">
+              <div class="flex items-center justify-between py-1.5 border-b border-warm-100 last:border-0">
+                <div>
+                  <span class="font-mono text-[10px]" :class="p.side === 'buy_kas' ? 'text-green-600' : 'text-red-500'" x-text="p.side?.toUpperCase()"></span>
+                  <span class="ml-1.5 text-ink-600" x-text="(p.qty || 0) + ' KAS'"></span>
+                  <span class="text-[10px] text-ink-400 ml-1" x-text="p.state"></span>
+                </div>
+                <span class="text-[10px] text-ink-400" x-text="'$' + (p.total_usdt || 0) + ' @ ' + p.limit_price"></span>
+              </div>
+            </template>
+          </div>
+          <!-- 累计成交 -->
+          <div class="grid grid-cols-2 gap-3">
+            <div class="bg-white border border-warm-200 rounded-lg p-3 text-center">
+              <div class="text-lg font-bold text-ink-700" x-text="brokerStats?.totals?.completed_orders || 0"></div>
+              <div class="text-ink-400 text-[10px]">撮合完成订单</div>
+            </div>
+            <div class="bg-white border border-warm-200 rounded-lg p-3 text-center">
+              <div class="text-lg font-bold text-ink-700" x-text="brokerStats?.totals?.completed_m2 || 0"></div>
+              <div class="text-ink-400 text-[10px]">M2 零售成交</div>
+            </div>
+            <div class="bg-white border border-warm-200 rounded-lg p-3 text-center">
+              <div class="text-lg font-bold text-green-600" x-text="(brokerStats?.totals?.total_kas_settled || 0).toFixed(0)"></div>
+              <div class="text-ink-400 text-[10px]">累计 KAS 结算</div>
+            </div>
+            <div class="bg-white border border-warm-200 rounded-lg p-3 text-center">
+              <div class="text-lg font-bold text-brand-600" x-text="(brokerStats?.totals?.total_broker_fee_kas || 0).toFixed(1)"></div>
+              <div class="text-ink-400 text-[10px]">累计 Broker 手续费</div>
+            </div>
+          </div>
+          <!-- 公开声明 -->
+          <div class="bg-warm-50 border border-warm-200 rounded-lg p-3 text-[11px] text-ink-600 space-y-1">
+            <div class="font-semibold text-ink-700">公开声明</div>
+            <div>• <span class="font-medium">非托管</span>: USDT 直付 Maker, Broker 全程不持有用户资金</div>
+            <div>• <span class="font-medium">10min 兜底退款</span>: 超时未 fill 自动退款用户原 USDT 地址</div>
+            <div>• <span class="font-medium">费率透明</span>: <span x-text="brokerStats?.fee_kas_per_order || '0.1'"></span> KAS/单, 从 net_delivery 隐形扣, 不单独索取</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ ADD WALLET MODAL (full overlay, above everything) ═══ -->
+  <div x-show="showAddWallet" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center bg-black/30" @click.self="showAddWallet = false">
+    <div class="bg-white rounded-xl shadow-2xl p-6 w-80" @click.stop>
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-sm font-semibold text-ink-700">Add Wallet</h3>
+        <button @click="showAddWallet = false" class="text-ink-400 hover:text-ink-600">&times;</button>
+      </div>
+      <p class="text-xs text-ink-400 mb-4">Select a chain to create a new wallet for this Agent.</p>
+      <div class="space-y-2">
+        <template x-for="ch in [{id:'bnb',name:'BNB (BSC)',desc:'USDT/USDC/BNB'},{id:'eth',name:'Ethereum',desc:'USDT/USDC/ETH'},{id:'arbitrum',name:'Arbitrum',desc:'USDT/USDC/ETH'},{id:'optimism',name:'Optimism',desc:'USDT/USDC/ETH'},{id:'base',name:'Base',desc:'USDC/ETH'},{id:'avalanche',name:'Avalanche',desc:'USDT/USDC/AVAX'},{id:'polygon',name:'Polygon',desc:'USDT/USDC/MATIC'},{id:'sol',name:'Solana',desc:'USDT/USDC/SOL'},{id:'tron',name:'TRON',desc:'USDT/USDC/TRX'}]" :key="ch.id">
+          <button @click="addingWallet = ch.id; createWallet(ch.id).then(() => { addingWallet = false; showAddWallet = false; })" :disabled="addingWallet"
+            class="w-full flex items-center justify-between px-4 py-3 rounded-lg border border-warm-200 hover:border-brand-400 hover:bg-brand-50 transition-all text-left disabled:opacity-50">
+            <div>
+              <div class="text-sm font-medium text-ink-700" x-text="ch.name"></div>
+              <div class="text-[11px] text-ink-400" x-text="ch.desc"></div>
+            </div>
+            <span x-show="addingWallet === ch.id" class="text-xs text-brand-500">Creating...</span>
+            <span x-show="addingWallet !== ch.id" class="text-ink-300 text-lg">&rarr;</span>
+          </button>
         </template>
       </div>
     </div>
-
-    <!-- ── Area 4: Hedge History ── -->
-    <div class="mb-6">
-      <h3 class="text-xs font-semibold text-ink-500 uppercase tracking-wider mb-3">Hedge History</h3>
-      <template x-if="arbLoading.hedges">
-        <div class="bg-warm-100 animate-pulse rounded-lg h-24"></div>
-      </template>
-      <template x-if="!arbLoading.hedges">
-        <div>
-          <template x-if="hedgeHistory.length === 0">
-            <div class="text-center py-8 text-ink-400 text-sm bg-white border border-warm-200 rounded-lg">No hedge history</div>
-          </template>
-          <template x-if="hedgeHistory.length > 0">
-            <div class="bg-white border border-warm-200 rounded-lg overflow-hidden">
-              <table class="w-full text-sm">
-                <thead>
-                  <tr class="border-b border-warm-100 text-xs text-ink-400">
-                    <th class="text-left px-4 py-2 font-medium">Time</th>
-                    <th class="text-left px-4 py-2 font-medium">Side</th>
-                    <th class="text-right px-4 py-2 font-medium">Qty</th>
-                    <th class="text-right px-4 py-2 font-medium">Price</th>
-                    <th class="text-left px-4 py-2 font-medium">Exchange</th>
-                    <th class="text-center px-4 py-2 font-medium">Result</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <template x-for="h in hedgeHistory" :key="h.id || h.observed_at">
-                    <tr class="border-b border-warm-50 last:border-0">
-                      <td class="px-4 py-2 text-xs text-ink-500" x-text="KANet.formatTime(h.observed_at)"></td>
-                      <td class="px-4 py-2 font-medium" :class="h.side === 'BUY' ? 'text-green-600' : 'text-red-500'" x-text="h.side || '—'"></td>
-                      <td class="px-4 py-2 text-right font-mono text-ink-700" x-text="h.qty ? Number(h.qty).toLocaleString() : '—'"></td>
-                      <td class="px-4 py-2 text-right font-mono text-ink-700" x-text="h.price ? Number(h.price).toFixed(5) : '—'"></td>
-                      <td class="px-4 py-2 text-ink-600" x-text="(h.exchange || '—').toUpperCase()"></td>
-                      <td class="px-4 py-2 text-center">
-                        <template x-if="h.event_type === 'hedge_placed'"><span class="text-green-600">&#10004;</span></template>
-                        <template x-if="h.event_type === 'hedge_failed'"><span class="text-red-500">&#10008; <span class="text-[10px]" x-text="h.error || ''"></span></span></template>
-                        <template x-if="h.event_type === 'hedge_skipped'"><span class="text-amber-500">skipped</span></template>
-                      </td>
-                    </tr>
-                  </template>
-                </tbody>
-              </table>
-            </div>
-          </template>
-        </div>
-      </template>
-    </div>
-
   </div>
 
 </div>
@@ -738,25 +1007,71 @@ function exchangeApp() {
     relays: [],
     myAddresses: [],
     currentAddress: null,
-    filter: '',
     loading: true,
-    activeTab: 'market',
+    leftTab: 'market',
+    opsGroup: 'trading',
+    opsTab: 'arb',
+    brokerStats: null,
+    autoTakerProposals: [],
+    autoTakerConfig: { enabled: false, mode: 'approval', min_discount: 0.5, max_amount: 50, daily_limit: 3, cooldown_sec: 30 },
+    autoTakerSaveStatus: '',  // '' | 'saving' | 'saved' | 'error'
+    autoTakerSaveError: '',
+    autoTakerStats: { today_accepted: 0, today_profit: 0, success_rate: 0 },
+    aaveStatus: { account: {}, walletBalance: {} },
+    hyperStatus: { account: {}, positions: [], funding: [] },
+    aevoStatus: { equity: 0, available: 0, marginPct: 0, portfolioGreeks: null, positions: [] },
+    selectedOffer: null,
+    kasPrice: null,
+    overview: { totalCompleted: 0, avgSettlement: null, volume24h: null },
     showForm: false,
+    showDispute: false,
+    showConcede: false,
+    showRepInfo: null,  // null | maker address — 哪个 peer 的信誉明细正显示
     publishing: false,
     formError: '',
     formSuccess: '',
     form: {
       give_asset: '', give_amount: '', give_chain: '',
       want_asset: '', want_amount: '', want_chain: '',
-      verification: 'manual', expires_minutes: '60',
+      verification: 'cross_chain_tx', expires_minutes: '60',
       relayNodeId: '',
     },
-    // Arbitrage tab state
+
+    // Accept state
+    acceptChain: null,
+    acceptPaymentAsset: 'usdt',
+    acceptBalance: null,
+    acceptBalanceOk: false,
+    acceptLoading: false,
+    acceptError: '',
+
+    // Deal actions
+    actionLoading: false,
+    actionError: '',
+    paymentTx: '',
+    paymentChain: 'bnb',
+    disputeReason: '',
+
+    // Seed state
+    seedConfig: { enabled: false, sell_spread_pct: 1.0, buy_spread_pct: 1.0, amount_kas: 100, expires_minutes: 30, sell_agent_id: '', buy_agent_id: '' },
+    limitsData: { limits: { per_offer_kas: 5000, total_exposure_kas: 20000, price_deviation_pct: 5 }, status: {} },
+    limitsForm: { per_offer_kas: 5000, total_exposure_kas: 20000, price_deviation_pct: 5 },
+    limitsSaving: false,
+    wallet: { kas: 0, kasLocked: 0, chains: [] },
+    walletPanel: null,
+    agentAddr: '',
+    showAddWallet: false,
+    addingWallet: false,
+    seedOrders: [],
+    seedStats: { seeded: 0, taken: 0, net_usdt: 0 },
+    seedTriggering: false,
+    seedSaving: false,
+
+    // Arb state
     cexBalances: [],
     spreadRows: [],
     spreadsCachedAt: null,
     fundedExchanges: [],
-    showOtherSpreads: false,
     arbOffers: [],
     hedgeHistory: [],
     dailyUsage: [],
@@ -766,45 +1081,83 @@ function exchangeApp() {
     arbLoading: { balances: false, spreads: false, hedges: false, usage: false },
     arbInitialized: false,
 
-    // Deal detail
-    expandedId: null,
-    actionMode: null, // null | 'payment' | 'dispute'
-    actionLoading: false,
-    actionError: '',
-    paymentTx: '',
-    paymentChain: 'bnb',
-    disputeReason: '',
+    // Reputation
+    reputationMap: {},
+
+    // Polling
+    _detailPoll: null,
 
     // ── Computed ──
-    get filtered() {
-      if (!this.filter) return this.offers;
-      return this.offers.filter(o => o.market_key === this.filter);
-    },
-    get myDeals() {
-      return this.offers.filter(o => this.isMine(o));
-    },
+    get openOffers() { return this.offers.filter(o => o.protocol_status === 'open'); },
+    get myDeals() { return this.offers.filter(o => this.isMine(o)); },
     get activeDeals() {
       return this.myDeals.filter(o =>
-        ['open', 'matched', 'verifying', 'awaiting_manual_confirm'].includes(o.protocol_status)
-      );
+        ['open', 'matched', 'verifying', 'awaiting_manual_confirm', 'delivering'].includes(o.protocol_status));
     },
     get completedDeals() {
       return this.myDeals.filter(o =>
-        ['completed', 'disputed', 'timed_out', 'expired', 'cancelled'].includes(o.protocol_status)
-      );
+        ['completed', 'disputed', 'timed_out', 'expired', 'cancelled'].includes(o.protocol_status))
+        .sort((a, b) => {
+          const ta = a.completed_at || a.timed_out_at || a.cancelled_at || a.updated_at || '';
+          const tb = b.completed_at || b.timed_out_at || b.cancelled_at || b.updated_at || '';
+          return tb.localeCompare(ta); // descending — newest first
+        });
     },
-    get actionableSpreads() {
-      return this.spreadRows.filter(s => s.actionable);
+    historyPage: 1,
+    historyPageSize: 10,
+    get pagedHistory() {
+      const start = (this.historyPage - 1) * this.historyPageSize;
+      return this.completedDeals.slice(start, start + this.historyPageSize);
     },
-    get otherSpreads() {
-      return this.spreadRows.filter(s => !s.actionable);
+    get historyTotalPages() {
+      return Math.max(1, Math.ceil(this.completedDeals.length / this.historyPageSize));
+    },
+    get lastCompleted() {
+      return this.offers.find(o => o.protocol_status === 'completed') || null;
     },
 
     // ── Init ──
     async init() {
       await this.loadRelays();
-      await this.loadOffers();
+      await Promise.all([this.loadOffers(), this.loadKasPrice(), this.loadAutoTakerConfig()]);
+      this.loadWallet(); // async, don't block
       setInterval(() => this.loadOffers(), 30000);
+      setInterval(() => this.loadKasPrice(), 60000);
+      setInterval(() => this.loadWallet(), 15000); // wallet balances refresh
+      // KAS withdraw via send-kas event (from wallet panel inline form)
+      this.$el?.addEventListener('send-kas', async (e) => {
+        const { addr, amt } = e.detail || {};
+        if (!addr || !amt || !this.form?.relayNodeId) return;
+        if (!confirm('Send ' + amt + ' KAS to ' + addr + '?')) return;
+        try {
+          const r = await fetch('/api/relay/' + this.form.relayNodeId + '/transfer', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ target: addr, amount: String(amt) }) });
+          const d = await r.json();
+          if (d.txId) { alert('Sent! TX: ' + d.txId); this.walletPanel = null; await this.loadWallet(); }
+          else alert('Error: ' + (d.error || 'Unknown'));
+        } catch (e) { alert('Error: ' + e.message); }
+      });
+    },
+
+    async loadAutoTakerConfig() {
+      try {
+        const d = await fetch('/api/exchange/autotaker-config').then(r => r.json());
+        this.autoTakerConfig = {
+          enabled:      d.enabled,
+          mode:         d.mode || 'approval',
+          min_discount: d.min_discount,
+          max_amount:   d.max_amount,
+          daily_limit:  d.daily_limit,
+          cooldown_sec: d.cooldown_sec,
+        };
+      } catch {}
+    },
+
+    async loadKasPrice() {
+      try {
+        const res = await fetch('/api/trade/kas-price');
+        const data = await res.json();
+        this.kasPrice = data?.price || null;
+      } catch {}
     },
 
     async loadRelays() {
@@ -822,6 +1175,8 @@ function exchangeApp() {
 
     onAgentChange() {
       this.currentAddress = this.relays.find(r => r.id === this.form.relayNodeId)?.address || null;
+      this.walletPanel = null;
+      this.loadWallet();
     },
 
     async loadOffers() {
@@ -830,6 +1185,25 @@ function exchangeApp() {
         const data = await res.json();
         this.offers = data.offers || [];
         this.groups = data.groups || [];
+        // Compute overview stats from offers
+        const completed = this.offers.filter(o => o.protocol_status === 'completed');
+        this.overview.totalCompleted = completed.length;
+        if (completed.length >= 5) {
+          const times = completed.filter(o => o.matched_at && o.completed_at).map(o =>
+            (new Date(o.completed_at) - new Date(o.matched_at)) / 1000);
+          if (times.length) {
+            const avg = times.reduce((a, b) => a + b, 0) / times.length;
+            const m = Math.floor(avg / 60); const s = Math.round(avg % 60);
+            this.overview.avgSettlement = m + 'm ' + s + 's';
+          }
+        }
+        // Update selected offer if still exists
+        if (this.selectedOffer) {
+          const updated = this.offers.find(o => o.id === this.selectedOffer.id);
+          if (updated) this.selectedOffer = updated;
+        }
+        // Fetch reputation for visible makers
+        this.loadReputations();
       } catch (e) {
         console.error('Failed to load offers:', e);
       } finally {
@@ -837,100 +1211,155 @@ function exchangeApp() {
       }
     },
 
-    // ── Role helpers (scoped to current Agent) ──
-    isMaker(o) { return this.currentAddress && o.maker === this.currentAddress; },
-    isTaker(o) { return this.currentAddress && o.taker === this.currentAddress; },
+    async loadReputations() {
+      const makers = [...new Set(this.offers.map(o => o.maker).filter(Boolean))];
+      const unknown = makers.filter(m => !this.reputationMap[m]);
+      if (!unknown.length) return;
+      try {
+        const res = await fetch('/api/exchange/reputation/batch?addresses=' + unknown.join(',') + (this.currentAddress ? '&my_address=' + this.currentAddress : ''));
+        const data = await res.json();
+        Object.assign(this.reputationMap, data);
+      } catch {}
+    },
+
+    getReputation(addr) { return this.reputationMap[addr] || null; },
+
+    // ── Selection ──
+    selectOffer(o) {
+      this.selectedOffer = o;
+      this.showForm = false;
+      this.acceptChain = null;
+      this.acceptBalance = null;
+      this.acceptError = '';
+      this.actionError = '';
+      this.showDispute = false;
+      // Auto-select single chain
+      const chains = this.getChains(o);
+      if (chains.length === 1) { this.acceptChain = chains[0]; this.loadChainBalance(chains[0]); }
+      // Start fast polling for active deals
+      this._startDetailPoll(o);
+    },
+
+    _startDetailPoll(o) {
+      if (this._detailPoll) clearInterval(this._detailPoll);
+      const active = ['matched', 'verifying', 'delivering', 'awaiting_manual_confirm'];
+      if (active.includes(o.protocol_status)) {
+        this._detailPoll = setInterval(() => this.loadOffers(), 5000);
+      }
+    },
+
+    // ── Helpers ──
+    isMaker(o) { return o && this.currentAddress && o.maker === this.currentAddress; },
+    isTaker(o) { return o && this.currentAddress && o.taker === this.currentAddress; },
     isMine(o) { return this.isMaker(o) || this.isTaker(o); },
 
-    // ── Action visibility ──
-    canConfirm(o) {
-      if (o.protocol_status !== 'awaiting_manual_confirm') return false;
-      if (this.isMaker(o) && !o.maker_confirmed_at) return true;
-      if (this.isTaker(o) && !o.taker_confirmed_at) return true;
-      return false;
-    },
-    canSubmitPayment(o) {
-      if (o.verification !== 'cross_chain_tx') return false;
-      if (!['matched', 'verifying'].includes(o.protocol_status)) return false;
-      if (!this.isTaker(o)) return false;
-      try { const m = JSON.parse(o.verification_meta || '{}'); return !m.payment_tx; } catch { return true; }
-    },
-    canDispute(o) {
-      return ['matched', 'verifying', 'awaiting_manual_confirm'].includes(o.protocol_status) &&
-        (this.isMaker(o) || this.isTaker(o));
+    getChains(o) {
+      if (!o) return [];
+      try {
+        const m = JSON.parse(o.verification_meta || '{}');
+        return (m.accepted_chains || []).map(c => c.chain);
+      } catch { return []; }
     },
 
-    // ── Detail panel ──
-    toggleDetail(id) {
-      if (this.expandedId === id) { this.expandedId = null; }
-      else { this.expandedId = id; this.actionMode = null; this.actionError = ''; this.paymentTx = ''; this.disputeReason = ''; }
+    priceComparison(o) {
+      if (!o || !this.kasPrice || this.kasPrice <= 0) return null;
+      const giveKas = o.give_asset === 'KAS';
+      const wantKas = o.want_asset === 'KAS';
+      if (!giveKas && !wantKas) return null;
+      const kasAmt = parseFloat(giveKas ? o.give_amount : o.want_amount);
+      const usdtAmt = parseFloat(giveKas ? o.want_amount : o.give_amount);
+      if (!kasAmt || !usdtAmt) return null;
+      const offerPrice = usdtAmt / kasAmt;
+      const diffPct = ((offerPrice - this.kasPrice) / this.kasPrice * 100).toFixed(1);
+      return { offerPrice, diffPct: parseFloat(diffPct), isSell: giveKas };
     },
 
-    // ── Timeline ──
+    priceColor(o) {
+      const pc = this.priceComparison(o);
+      if (!pc) return '';
+      const absDiff = Math.abs(pc.diffPct);
+      if (absDiff < 0.3) return 'text-ink-500';
+      if (pc.isSell) return pc.diffPct < 0 ? 'text-green-600' : (pc.diffPct > 2 ? 'text-red-500' : 'text-amber-500');
+      return pc.diffPct > 0 ? 'text-green-600' : (pc.diffPct < -2 ? 'text-red-500' : 'text-amber-500');
+    },
+
+    getPaymentTx(o) {
+      if (!o) return null;
+      if (o.payment_tx) return o.payment_tx;
+      try { const m = JSON.parse(o.verification_meta || '{}'); return m.payment_tx || null; } catch { return null; }
+    },
+
+    getExplorerUrl(o) {
+      const tx = this.getPaymentTx(o);
+      if (!tx) return '#';
+      const chain = o?.taker_chain || '';
+      if (chain === 'bnb') return 'https://bscscan.com/tx/' + tx;
+      if (chain === 'eth') return 'https://etherscan.io/tx/' + tx;
+      if (chain === 'sol') return 'https://solscan.io/tx/' + tx;
+      if (chain === 'tron') return 'https://tronscan.org/#/transaction/' + tx;
+      return '#';
+    },
+
     getTimeline(o) {
+      if (!o || !o.id) return [];
       const steps = [];
       steps.push({ label: 'Published', done: true, time: o.broadcast_at });
 
       const isMatched = !!o.matched_at;
       steps.push({
-        label: 'Matched',
-        done: isMatched,
+        label: 'Matched', done: isMatched,
         active: o.protocol_status === 'matched',
         time: o.matched_at,
         detail: o.taker ? 'by ' + KANet.shortAddr(o.taker) : '',
       });
 
       if (o.verification === 'manual') {
-        const awaitDone = o.protocol_status === 'completed' || !!o.maker_confirmed_at && !!o.taker_confirmed_at;
+        const awaitDone = o.protocol_status === 'completed' || (!!o.maker_confirmed_at && !!o.taker_confirmed_at);
         const parts = [];
         if (o.maker_confirmed_at) parts.push('maker confirmed');
         if (o.taker_confirmed_at) parts.push('taker confirmed');
         steps.push({
-          label: 'Confirmation',
-          done: awaitDone,
+          label: 'Confirmation', done: awaitDone,
           active: o.protocol_status === 'awaiting_manual_confirm',
           time: o.maker_confirmed_at || o.taker_confirmed_at,
-          detail: parts.length ? parts.join(', ') : (isMatched ? 'waiting for both parties' : ''),
+          detail: parts.length ? parts.join(', ') : (isMatched ? 'waiting for both' : ''),
         });
       } else {
         let verifyDetail = '';
-        try {
-          const m = JSON.parse(o.verification_meta || '{}');
-          if (m.payment_tx) verifyDetail = 'TX: ' + m.payment_tx.slice(0, 16) + '...';
-        } catch {}
+        try { const m = JSON.parse(o.verification_meta || '{}'); if (m.payment_tx) verifyDetail = 'TX: ' + m.payment_tx.slice(0, 12) + '...'; } catch {}
         steps.push({
           label: 'Verification',
-          done: ['completed', 'disputed'].includes(o.protocol_status) && !!o.verifying_started_at,
+          done: ['completed', 'disputed', 'delivering'].includes(o.protocol_status) && !!o.verifying_started_at,
           active: o.protocol_status === 'verifying',
           time: o.verifying_started_at,
           detail: verifyDetail || (o.protocol_status === 'verifying' ? 'checking payment...' : ''),
         });
       }
 
-      // Terminal state
-      if (o.completed_at) {
-        steps.push({ label: 'Completed', done: true, time: o.completed_at });
-      } else if (o.disputed_at) {
-        steps.push({ label: 'Disputed', done: true, time: o.disputed_at, detail: 'escalated' });
-      } else if (o.timed_out_at) {
-        steps.push({ label: 'Timed out', done: true, time: o.timed_out_at });
-      } else if (o.cancelled_at) {
-        steps.push({ label: 'Cancelled', done: true, time: o.cancelled_at });
-      } else if (['expired'].includes(o.protocol_status)) {
-        steps.push({ label: 'Expired', done: true, time: o.expires_at });
-      } else {
-        steps.push({ label: 'Settlement', done: false });
+      if (o.delivering_at || o.protocol_status === 'delivering') {
+        steps.push({
+          label: 'Delivering', done: !!o.completed_at,
+          active: o.protocol_status === 'delivering',
+          time: o.delivering_at,
+          detail: o.protocol_status === 'delivering' ? 'sending KAS...' : '',
+        });
       }
+
+      if (o.completed_at) steps.push({ label: 'Completed', done: true, time: o.completed_at });
+      else if (o.disputed_at) steps.push({ label: 'Disputed', done: true, time: o.disputed_at });
+      else if (o.timed_out_at) steps.push({ label: 'Timed out', done: true, time: o.timed_out_at });
+      else if (o.cancelled_at) steps.push({ label: 'Cancelled', done: true, time: o.cancelled_at });
+      else if (o.protocol_status === 'expired') steps.push({ label: 'Expired', done: true, time: o.expires_at });
+      else steps.push({ label: 'Settlement', done: false });
 
       return steps;
     },
 
-    // ── Status helpers ──
     statusBadge(s) {
       return {
         'bg-green-50 text-green-700': s === 'open',
         'bg-blue-50 text-blue-700': s === 'matched',
-        'bg-amber-50 text-amber-700': s === 'verifying' || s === 'awaiting_manual_confirm',
+        'bg-amber-50 text-amber-700': s === 'verifying' || s === 'awaiting_manual_confirm' || s === 'delivering',
         'bg-green-100 text-green-800': s === 'completed',
         'bg-red-50 text-red-600': s === 'disputed' || s === 'timed_out',
         'bg-warm-100 text-ink-500': s === 'cancelled' || s === 'expired',
@@ -941,7 +1370,45 @@ function exchangeApp() {
       return map[s] || s;
     },
 
-    // ── Market actions ──
+    canConfirm(o) {
+      if (!o || o.protocol_status !== 'awaiting_manual_confirm') return false;
+      if (this.isMaker(o) && !o.maker_confirmed_at) return true;
+      if (this.isTaker(o) && !o.taker_confirmed_at) return true;
+      return false;
+    },
+    canDispute(o) {
+      return o && ['matched', 'verifying', 'awaiting_manual_confirm'].includes(o.protocol_status) &&
+        (this.isMaker(o) || this.isTaker(o));
+    },
+
+    // ── Publish form ──
+    formPriceDiff() {
+      if (!this.kasPrice) return null;
+      const ga = this.form.give_asset?.toUpperCase();
+      const wa = this.form.want_asset?.toUpperCase();
+      const gAmt = parseFloat(this.form.give_amount);
+      const wAmt = parseFloat(this.form.want_amount);
+      if (!gAmt || !wAmt) return null;
+      let offerPrice;
+      if (ga === 'KAS' && wa === 'USDT') offerPrice = wAmt / gAmt;
+      else if (ga === 'USDT' && wa === 'KAS') offerPrice = gAmt / wAmt;
+      else return null;
+      return ((offerPrice - this.kasPrice) / this.kasPrice * 100);
+    },
+    fillSellTemplate() {
+      this.form.give_asset = 'KAS'; this.form.give_amount = '100';
+      this.form.want_asset = 'USDT';
+      this.form.want_amount = this.kasPrice ? (100 * this.kasPrice * 1.01).toFixed(4) : '';
+      this.form.verification = 'cross_chain_tx';
+    },
+    fillBuyTemplate() {
+      this.form.give_asset = 'USDT'; this.form.want_asset = 'KAS';
+      this.form.want_amount = '100';
+      this.form.give_amount = this.kasPrice ? (100 * this.kasPrice * 0.99).toFixed(4) : '';
+      this.form.verification = 'kaspa_tx';
+    },
+
+    // ── Actions ──
     async publishOffer() {
       this.formError = ''; this.formSuccess = '';
       if (!this.form.give_asset || !this.form.give_amount || !this.form.want_asset || !this.form.want_amount) {
@@ -955,45 +1422,66 @@ function exchangeApp() {
         });
         const data = await res.json();
         if (data.ok) {
-          this.formSuccess = `Offer published! ID: ${data.offer_id?.slice(0, 8)}`;
+          this.formSuccess = 'Offer published!';
           this.showForm = false;
-          this.form.give_asset = ''; this.form.give_amount = ''; this.form.give_chain = '';
-          this.form.want_asset = ''; this.form.want_amount = ''; this.form.want_chain = '';
+          this.form.give_asset = ''; this.form.give_amount = '';
+          this.form.want_asset = ''; this.form.want_amount = '';
           await this.loadOffers();
         } else { this.formError = data.error || 'Broadcast failed'; }
       } catch (e) { this.formError = e.message; }
       finally { this.publishing = false; }
     },
 
-    async acceptOffer(offer) {
-      if (!this.form.relayNodeId && this.relays.length) this.form.relayNodeId = this.relays[0].id;
-      if (!this.form.relayNodeId) { alert('No agent available'); return; }
-      const name = this.relays.find(r => r.id === this.form.relayNodeId)?.name || 'Agent';
-      if (!confirm(`${name} accepts: ${offer.give_amount} ${offer.give_asset} \u2192 ${offer.want_amount} ${offer.want_asset}?`)) return;
+    async loadChainBalance(chain) {
+      if (!this.form.relayNodeId) return;
       try {
-        const res = await fetch('/api/exchange/accept', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ relayNodeId: this.form.relayNodeId, offer_id: offer.id }),
-        });
+        // Use wallets API which already has cached balances
+        const res = await fetch(`/api/relay/${this.form.relayNodeId}/wallets`);
         const data = await res.json();
-        if (data.ok) { await this.loadOffers(); this.activeTab = 'deals'; }
-        else { alert(data.error || 'Accept failed'); }
-      } catch (e) { alert(e.message); }
+        const wallet = (data?.chains || []).find(w => w.chain === chain && w.isDefault);
+        const bal = parseFloat(wallet?.usdtBalance || 0);
+        const needed = parseFloat(this.selectedOffer?.want_amount || 0);
+        this.acceptBalance = bal;
+        this.acceptBalanceOk = bal >= needed;
+      } catch { this.acceptBalance = null; }
     },
 
-    async cancelOffer(offer) {
+    async confirmAccept() {
+      if (!this.form.relayNodeId) { this.acceptError = 'No agent'; return; }
+      this.acceptLoading = true; this.acceptError = '';
+      try {
+        const body = { relayNodeId: this.form.relayNodeId, offer_id: this.selectedOffer.id };
+        if (this.acceptChain) body.selected_chain = this.acceptChain;
+        if (this.acceptPaymentAsset) body.payment_asset = this.acceptPaymentAsset;
+        const res = await fetch('/api/exchange/accept', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          this.leftTab = 'deals';
+          await this.loadOffers();
+          // Re-select to see updated state
+          const updated = this.offers.find(o => o.id === this.selectedOffer.id);
+          if (updated) this.selectOffer(updated);
+        } else { this.acceptError = data.error || 'Accept failed'; }
+      } catch (e) { this.acceptError = e.message; }
+      finally { this.acceptLoading = false; }
+    },
+
+    async cancelOffer(o) {
       if (!confirm('Cancel this offer?')) return;
       try {
         const res = await fetch('/api/exchange/cancel', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ relayNodeId: this.form.relayNodeId, offer_id: offer.id }),
+          body: JSON.stringify({ relayNodeId: this.form.relayNodeId, offer_id: o.id }),
         });
         const data = await res.json();
-        if (data.ok) { await this.loadOffers(); } else { alert(data.error || 'Cancel failed'); }
+        if (data.ok) { this.selectedOffer = null; await this.loadOffers(); }
+        else { alert(data.error || 'Cancel failed'); }
       } catch (e) { alert(e.message); }
     },
 
-    // ── Deal actions ──
     async confirmDeal(o) {
       const role = this.isMaker(o) ? 'maker' : 'taker';
       this.actionLoading = true; this.actionError = '';
@@ -1003,23 +1491,8 @@ function exchangeApp() {
           body: JSON.stringify({ relayNodeId: this.form.relayNodeId, offer_id: o.id, role }),
         });
         const data = await res.json();
-        if (data.ok) { await this.loadOffers(); this.actionMode = null; }
+        if (data.ok) { await this.loadOffers(); }
         else { this.actionError = data.error || 'Confirm failed'; }
-      } catch (e) { this.actionError = e.message; }
-      finally { this.actionLoading = false; }
-    },
-
-    async submitPayment(o) {
-      if (!this.paymentTx) return;
-      this.actionLoading = true; this.actionError = '';
-      try {
-        const res = await fetch('/api/exchange/submit-payment', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ relayNodeId: this.form.relayNodeId, offer_id: o.id, payment_tx: this.paymentTx, payment_chain: this.paymentChain }),
-        });
-        const data = await res.json();
-        if (data.ok) { await this.loadOffers(); this.actionMode = null; this.paymentTx = ''; }
-        else { this.actionError = data.error || 'Submit failed'; }
       } catch (e) { this.actionError = e.message; }
       finally { this.actionLoading = false; }
     },
@@ -1028,140 +1501,391 @@ function exchangeApp() {
       if (!this.disputeReason) return;
       this.actionLoading = true; this.actionError = '';
       try {
+        // 选一个合适的 relay: 优先 currentAddress 对应的 relay
+        const myRelay = this.relays.find(r => r.address === this.currentAddress) || this.relays[0];
         const res = await fetch('/api/exchange/dispute', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ relayNodeId: this.form.relayNodeId, offer_id: o.id, reason: this.disputeReason }),
+          body: JSON.stringify({ relayNodeId: myRelay?.id, offer_id: o.id, reason: this.disputeReason }),
         });
         const data = await res.json();
-        if (data.ok) { await this.loadOffers(); this.actionMode = null; this.disputeReason = ''; }
+        if (data.ok) { await this.loadOffers(); this.showDispute = false; this.disputeReason = ''; }
         else { this.actionError = data.error || 'Dispute failed'; }
       } catch (e) { this.actionError = e.message; }
       finally { this.actionLoading = false; }
     },
 
-    // ── Arbitrage Tab Methods ──
+    async concedeDispute(o) {
+      this.actionLoading = true; this.actionError = '';
+      try {
+        const myRelay = this.relays.find(r => r.address === this.currentAddress) || this.relays[0];
+        if (!myRelay) throw new Error('No relay available');
+        const res = await fetch('/api/exchange/resolve', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relayNodeId: myRelay.id, offer_id: o.id }),
+          // 不传 outcome, 让后端根据调用方 address 自动派生 (concede-only)
+        });
+        const data = await res.json();
+        if (data.ok) {
+          await this.loadOffers();
+          this.showConcede = false;
+        } else {
+          this.actionError = data.error || 'Resolve failed';
+        }
+      } catch (e) { this.actionError = e.message; }
+      finally { this.actionLoading = false; }
+    },
 
+    // ── Arbitrage ──
     async loadArbitrageData() {
       if (this.arbInitialized) return;
       this.arbInitialized = true;
-      await Promise.all([this.loadBalances(), this.loadSpreads(), this.loadArbOffers(), this.loadHedgeHistory(), this.loadDailyUsage()]);
-      // Auto-refresh spreads every 30s while tab is active
-      setInterval(() => { if (this.activeTab === 'arb') this.loadSpreads(); }, 30000);
+      await Promise.all([this.loadBalances(), this.loadSpreads()]);
     },
-
     async loadBalances() {
       this.arbLoading.balances = true;
       try {
         const res = await fetch('/api/trade/balances?bust=' + Date.now());
         const data = await res.json();
-        const accounts = await fetch('/api/trade/accounts').then(r => r.json());
-        const defaultId = (accounts || []).find(a => a.is_default)?.id;
-        this.cexBalances = (data.balances || []).map(b => ({ ...b, isDefault: b.accountId === defaultId }));
-      } catch (e) {
-        this.cexBalances = [{ exchange: 'error', kas: null, usdt: null, error: e.message }];
-      } finally {
-        this.arbLoading.balances = false;
-      }
+        this.cexBalances = data.balances || [];
+      } catch { this.cexBalances = []; }
+      finally { this.arbLoading.balances = false; }
     },
-
     async loadSpreads() {
-      this.arbLoading.spreads = true;
-      try {
-        const res = await fetch('/api/trade/spreads');
-        const data = await res.json();
-        this.spreadRows = data.spreads || [];
-        this.spreadsCachedAt = data.cachedAt || null;
-        this.fundedExchanges = data.funded_exchanges || [];
-      } catch {
-        this.spreadRows = [];
-      } finally {
-        this.arbLoading.spreads = false;
-      }
+      try { const data = await fetch('/api/trade/spreads').then(r => r.json()); this.spreadRows = data.spreads || []; } catch {}
     },
 
-    async loadArbOffers() {
-      try {
-        const res = await fetch('/api/exchange/offers?limit=200');
-        const data = await res.json();
-        const allOffers = data.offers || [];
-        this.arbOffers = allOffers.filter(o =>
-          ['open', 'matched', 'verifying'].includes(o.protocol_status) && this.myAddresses.includes(o.maker)
-        );
-      } catch {
-        this.arbOffers = [];
-      }
+    // ── Broker ──
+    async loadBrokerStats() {
+      try { const data = await fetch('/api/broker/stats').then(r => r.json()); this.brokerStats = data || {}; } catch {}
     },
 
-    async loadHedgeHistory() {
-      this.arbLoading.hedges = true;
-      try {
-        const res = await fetch('/api/agent/activity-log?limit=200');
-        const data = await res.json();
-        const logs = data.log || data.events || data || [];
-        const hedges = (Array.isArray(logs) ? logs : [])
-          .filter(e => e.event_type && e.event_type.startsWith('hedge'))
-          .slice(0, 20)
-          .map(e => {
-            const p = typeof e.payload === 'string' ? JSON.parse(e.payload || '{}') : (e.payload || {});
-            return { ...e, side: p.side, qty: p.qty, price: p.price, exchange: p.exchange, error: p.error };
-          });
-        this.hedgeHistory = hedges;
-      } catch {
-        this.hedgeHistory = [];
-      } finally {
-        this.arbLoading.hedges = false;
+    // ── Seeder ──
+    async loadSeedData() {
+      const [cfg, status, priceData] = await Promise.allSettled([
+        fetch('/api/exchange/seeder/config').then(r => r.json()),
+        fetch('/api/exchange/seeder/status').then(r => r.json()),
+        fetch('/api/trade/kas-price').then(r => r.json()),
+      ]);
+      if (cfg.status === 'fulfilled' && cfg.value) Object.assign(this.seedConfig, cfg.value);
+      if (status.status === 'fulfilled' && status.value) {
+        this.seedOrders = status.value.active_orders || [];
+        this.seedStats = status.value.today || {};
       }
+      if (priceData.status === 'fulfilled') this.kasPrice = priceData.value?.price || null;
     },
-
-    async loadDailyUsage() {
-      this.arbLoading.usage = true;
+    async toggleSeeder() { this.seedConfig.enabled = !this.seedConfig.enabled; await this.saveSeedConfig(); },
+    async saveSeedConfig() {
+      this.seedSaving = true;
+      try { await fetch('/api/exchange/seeder/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this.seedConfig) }); } catch {}
+      finally { this.seedSaving = false; }
+    },
+    async triggerSeed() {
+      this.seedTriggering = true;
       try {
-        const res = await fetch('/api/trade/daily-usage');
-        const data = await res.json();
-        this.dailyUsage = data.exchanges || [];
-        this.dailyTotal = data.total || null;
-        this.dailyLimitInput = data.total?.limit_kas || 10000;
-      } catch {
-        this.dailyUsage = [];
-        this.dailyTotal = null;
-      } finally {
-        this.arbLoading.usage = false;
+        await fetch('/api/exchange/seeder/trigger', { method: 'POST' });
+        await new Promise(r => setTimeout(r, 1500));
+        await this.loadSeedData(); await this.loadOffers();
+      } catch {}
+      finally { this.seedTriggering = false; }
+    },
+    // ── Wallet (Market pattern) ──
+    async loadWallet() {
+      if (!this.form?.relayNodeId) return;
+      try {
+        const data = await fetch('/api/relay/' + this.form.relayNodeId + '/wallets').then(r => r.json());
+        this.agentAddr = data.kaspa?.address || '';
+        const allWallets = (data.chains || []).map(w => ({
+          id: w.id, chain: w.chain, name: w.chain === 'polygon' ? 'POLYGON' : w.chain.toUpperCase(),
+          address: w.address, label: w.label || (w.isDefault ? 'default' : ''),
+          isDefault: w.isDefault,
+          usdt: w.usdtBalance || 0, usdc: w.usdcBalance || 0, gas: w.nativeBalance || 0, locked: 0,
+        }));
+        try {
+          const locks = await fetch('/api/trade/fund-locks?relay_node_id=' + encodeURIComponent(this.form.relayNodeId)).then(r => r.json());
+          const lockArr = Array.isArray(locks) ? locks : (locks.locks || []);
+          const lockedMap = {};
+          for (const l of lockArr) { if (l.status === 'locked') lockedMap[l.asset] = (lockedMap[l.asset] || 0) + l.amount; }
+          for (const w of allWallets) w.locked = lockedMap['usdt_' + w.chain] || 0;
+          this.wallet = { kas: data.kaspa?.balance || 0, kasLocked: lockedMap['kas'] || 0, chains: allWallets };
+        } catch {
+          this.wallet = { kas: data.kaspa?.balance || 0, kasLocked: 0, chains: allWallets };
+        }
+      } catch {}
+    },
+    get panelWallets() {
+      if (!this.walletPanel || this.walletPanel === 'kas') return [];
+      return this.wallet.chains.filter(w => w.chain === this.walletPanel);
+    },
+    get chainSummary() {
+      const map = {};
+      for (const w of this.wallet.chains) {
+        const key = w.chain;
+        if (!map[key]) map[key] = { name: w.name, chain: key, usdt: 0, usdc: 0, locked: 0, count: 0 };
+        map[key].usdt += w.usdt || 0;
+        map[key].usdc += w.usdc || 0;
+        map[key].locked += w.locked || 0;
+        map[key].count++;
       }
+      return Object.values(map);
     },
-
-    async saveDailyLimit() {
-      const v = parseInt(this.dailyLimitInput);
-      if (!v || v < 100) return;
-      this.dailyLimitSaving = true;
+    openWalletPanel(chain) {
+      if (this.walletPanel === chain) { this.walletPanel = null; return; }
+      this.walletPanel = chain;
+    },
+    copyAddr(addr) {
+      if (!addr) return;
+      try { navigator.clipboard.writeText(addr); } catch {
+        const ta = document.createElement('textarea'); ta.value = addr;
+        document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      const el = event?.target;
+      if (el) { const prev = el.textContent; el.textContent = 'Copied!'; setTimeout(() => { el.textContent = prev; }, 1500); }
+    },
+    withdrawPrompt(wallet) {
+      // Native gas symbol per chain — covers all 9 supported chains
+      const NATIVE_SYMBOL = {
+        bnb: 'BNB', eth: 'ETH', polygon: 'MATIC',
+        arbitrum: 'ETH', optimism: 'ETH', base: 'ETH',
+        avalanche: 'AVAX', sol: 'SOL', tron: 'TRX',
+      };
+      const chainName = wallet.chain?.toUpperCase();
+      const gasName = NATIVE_SYMBOL[wallet.chain] || chainName;
+      // Address format hint per chain
+      const addrHint = wallet.chain === 'sol' ? 'base58 (~32-44 chars)'
+                     : wallet.chain === 'tron' ? 'T... (~34 chars)'
+                     : '0x...';
+      const choice = prompt(
+        'Withdraw (' + chainName + '):\n' +
+        '  1 = USDT (' + (wallet.usdt||0).toFixed(2) + ' available)\n' +
+        '  2 = USDC (' + (wallet.usdc||0).toFixed(2) + ' available)\n' +
+        '  3 = ' + gasName + ' (' + (wallet.gas||0).toFixed(4) + ' available)\n\n' +
+        'Enter 1 / 2 / 3:'
+      );
+      if (!choice) return;
+      const pick = choice.trim();
+      const asset = pick === '2' ? 'usdc' : pick === '3' ? 'native' : pick === '1' ? 'usdt' : null;
+      if (!asset) return;
+      const assetLabel = asset === 'native' ? gasName : asset.toUpperCase();
+      const toAddr = prompt('Target address (' + chainName + ', ' + addrHint + '):');
+      if (!toAddr) return;
+      const trimmed = toAddr.trim();
+      // Chain-aware address validation (mirrors portfolio.eta sendPrompt)
+      const validators = {
+        sol:  a => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a),
+        tron: a => /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(a),
+      };
+      const validate = validators[wallet.chain] || (a => /^0x[a-fA-F0-9]{40}$/.test(a));
+      if (!validate(trimmed)) { alert('Invalid address format for ' + chainName); return; }
+      const amt = prompt('Amount (' + assetLabel + '):');
+      if (!amt || isNaN(amt)) return;
+      if (!confirm('Send ' + amt + ' ' + assetLabel + '\nTo: ' + trimmed + '\nChain: ' + chainName + '\n\nThis is irreversible.')) return;
+      this.doWithdraw(wallet, trimmed, parseFloat(amt), asset);
+    },
+    async doWithdraw(wallet, toAddr, amount, asset = 'usdt') {
+      // Route through /api/relay/:id/wallets/:walletId/send — same backend as
+      // /portfolio. This unifies the two pages: both support 9 chains × 3 assets
+      // (native + USDT + USDC) via a single dispatch path. Old /api/trade/withdraw
+      // (trading.js) was bnb/eth-only and the source of "提现暂不支持" gaps.
+      const relayId = this.form?.relayNodeId;
+      if (!relayId) { alert('Error: no agent selected'); return; }
       try {
-        const res = await fetch('/api/trade/daily-limit', {
+        const r = await fetch('/api/relay/' + relayId + '/wallets/' + wallet.id + '/send', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ asset, amount, to: toAddr }),
+        });
+        const d = await r.json();
+        if (r.ok && (d.ok || d.txHash)) {
+          alert('Sent! TX: ' + (d.txHash || '').slice(0, 20) + '...\n\n' + (d.explorerUrl || ''));
+          await this.loadWallet();
+        } else {
+          alert('Error: ' + (d.error || 'HTTP ' + r.status));
+        }
+      } catch (e) { alert('Error: ' + e.message); }
+    },
+    async showPrivkeyFor(wallet) {
+      if (!confirm('Show private key? Keep it safe.')) return;
+      try {
+        const r = await fetch('/api/relay/' + this.form.relayNodeId + '/wallets/' + wallet.id + '/privkey').then(r => r.json());
+        if (r.privkey) prompt('Private key (Ctrl+C to copy):', r.privkey);
+        else alert(r.error || 'Could not retrieve');
+      } catch { alert('Failed'); }
+    },
+    async createWallet(chain) {
+      try {
+        await fetch('/api/relay/' + this.form.relayNodeId + '/wallets', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ chain }) });
+        await this.loadWallet();
+        this.openWalletPanel(chain);
+      } catch (e) { alert('Failed: ' + e.message); }
+    },
+    // ── AutoTaker ──
+    async toggleAutoTaker() {
+      this.autoTakerConfig.enabled = !this.autoTakerConfig.enabled;
+      await this.saveAutoTakerConfig();
+    },
+    async saveAutoTakerConfig() {
+      const c = this.autoTakerConfig;
+      this.autoTakerSaveStatus = 'saving';
+      this.autoTakerSaveError = '';
+      try {
+        const r = await fetch('/api/exchange/autotaker-config', {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ limit_kas: v }),
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            enabled:      c.enabled,
+            mode:         c.mode,
+            min_discount: c.min_discount,
+            max_amount:   c.max_amount,
+            daily_limit:  c.daily_limit,
+            cooldown_sec: c.cooldown_sec,
+          }),
         });
-        const data = await res.json();
-        if (data.ok) await this.loadDailyUsage();
-      } catch {}
-      finally { this.dailyLimitSaving = false; }
+        const d = await r.json();
+        if (d.ok) {
+          this.autoTakerSaveStatus = 'saved';
+          setTimeout(() => { this.autoTakerSaveStatus = ''; }, 2000);
+        } else {
+          this.autoTakerSaveStatus = 'error';
+          this.autoTakerSaveError = d.error || 'unknown';
+          setTimeout(() => { this.autoTakerSaveStatus = ''; }, 4000);
+        }
+      } catch (e) {
+        this.autoTakerSaveStatus = 'error';
+        this.autoTakerSaveError = e.message;
+        setTimeout(() => { this.autoTakerSaveStatus = ''; }, 4000);
+      }
     },
-
-    arbAgentName(address) {
-      const r = this.relays.find(r => r.address === address);
-      return r ? r.name : (address ? address.slice(0, 14) + '...' : 'Unknown');
-    },
-
-    async cancelArbOffer(o) {
-      if (!confirm('Cancel this offer?')) return;
-      o._cancelling = true;
+    async approveAutoTake(id) {
       try {
-        const res = await fetch('/api/exchange/cancel', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ relayNodeId: this.form.relayNodeId, offer_id: o.id }),
+        const r = await fetch('/api/trade/approve-execution/' + id, { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) this.autoTakerProposals = this.autoTakerProposals.filter(p => p.id !== id);
+      } catch {}
+    },
+    async rejectAutoTake(id) {
+      try {
+        const r = await fetch('/api/trade/reject-execution/' + id, { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) this.autoTakerProposals = this.autoTakerProposals.filter(p => p.id !== id);
+      } catch {}
+    },
+    // ── Aave ──
+    async loadAaveStatus() {
+      const arbWallet = this.wallet.chains?.find(w => w.chain === 'arbitrum');
+      if (!arbWallet?.id) return;
+      try {
+        const d = await fetch('/api/defi/aave/status?walletId=' + arbWallet.id).then(r => r.json());
+        if (d.ok) this.aaveStatus = d;
+      } catch {}
+    },
+    async aaveAction(action) {
+      const arbWallet = this.wallet.chains?.find(w => w.chain === 'arbitrum');
+      if (!arbWallet?.id) { alert('No Arbitrum wallet. Create one first.'); return; }
+      const amount = prompt(action.charAt(0).toUpperCase() + action.slice(1) + ' amount (USDC):');
+      if (!amount || isNaN(amount)) return;
+      if (!confirm(action + ' ' + amount + ' USDC on Aave?')) return;
+      try {
+        const r = await fetch('/api/defi/aave/' + action, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ walletId: arbWallet.id, asset: 'usdc', amount }),
+        });
+        const d = await r.json();
+        if (d.ok) { alert('Success! TX: ' + d.txHash); await this.loadAaveStatus(); }
+        else alert('Error: ' + (d.error || 'Unknown'));
+      } catch (e) { alert('Error: ' + e.message); }
+    },
+    // ── Hyperliquid ──
+    async loadHyperStatus() {
+      const arbWallet = this.wallet.chains?.find(w => w.chain === 'arbitrum');
+      if (!arbWallet?.id) return;
+      try {
+        const d = await fetch('/api/defi/hyperliquid/status?walletId=' + arbWallet.id).then(r => r.json());
+        if (d.ok) this.hyperStatus = d;
+      } catch {}
+    },
+    async hyperAction(action) {
+      const arbWallet = this.wallet.chains?.find(w => w.chain === 'arbitrum');
+      if (!arbWallet?.id) { alert('No Arbitrum wallet.'); return; }
+      if (action === 'close') {
+        const asset = prompt('Close position for which asset? (e.g. ETH, BTC)');
+        if (!asset) return;
+        if (!confirm('Close ' + asset + ' position?')) return;
+        try {
+          const r = await fetch('/api/defi/hyperliquid/close', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ walletId: arbWallet.id, asset }) });
+          const d = await r.json();
+          if (d.ok) { alert('Closed! ' + (d.closedSize || '')); await this.loadHyperStatus(); }
+          else alert('Error: ' + (d.error || 'Unknown'));
+        } catch (e) { alert('Error: ' + e.message); }
+        return;
+      }
+      const asset = prompt('Asset (e.g. ETH, BTC):');
+      if (!asset) return;
+      const size = prompt('Size (e.g. 0.01):');
+      if (!size) return;
+      const stopLoss = prompt('Stop loss price (mandatory):');
+      if (!stopLoss) { alert('Stop loss is mandatory.'); return; }
+      const leverage = prompt('Leverage (1-5, default 3):', '3');
+      if (!confirm(action.toUpperCase() + ' ' + size + ' ' + asset + ' @ ' + leverage + 'x leverage, SL=' + stopLoss + '?')) return;
+      try {
+        const r = await fetch('/api/defi/hyperliquid/order', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ walletId: arbWallet.id, asset, side: action, size, leverage: parseInt(leverage), stopLoss, type: 'market' }) });
+        const d = await r.json();
+        if (d.ok) { alert('Order placed!'); await this.loadHyperStatus(); }
+        else alert('Error: ' + (d.error || 'Unknown'));
+      } catch (e) { alert('Error: ' + e.message); }
+    },
+    // ── Aevo ──
+    async loadAevoStatus() {
+      if (!this.form?.relayNodeId) return;
+      try {
+        const [acc, pos] = await Promise.allSettled([
+          fetch('/api/defi/aevo/account?agentId=' + this.form.relayNodeId).then(r => r.json()),
+          fetch('/api/defi/aevo/positions?agentId=' + this.form.relayNodeId).then(r => r.json()),
+        ]);
+        if (acc.status === 'fulfilled' && !acc.value.error) {
+          Object.assign(this.aevoStatus, acc.value);
+        }
+        if (pos.status === 'fulfilled' && pos.value.ok) {
+          this.aevoStatus.positions = pos.value.positions || [];
+        }
+      } catch {}
+    },
+    async aevoAction(action) {
+      if (action === 'positions') { await this.loadAevoStatus(); return; }
+      const instrument = prompt('Instrument (e.g. ETH-20260501-4000-C):');
+      if (!instrument) return;
+      const amount = prompt('Contracts (e.g. 1):');
+      if (!amount) return;
+      const price = prompt('Limit price (leave empty for market):');
+      const side = action === 'buy_call' || action === 'buy_put' ? 'buy' : 'sell';
+      if (!confirm(side.toUpperCase() + ' ' + amount + 'x ' + instrument + (price ? ' @ $' + price : ' market') + '?')) return;
+      try {
+        const arbWallet = this.wallet.chains?.find(w => w.chain === 'arbitrum');
+        const r = await fetch('/api/defi/aevo/order', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ agentId: this.form.relayNodeId, walletId: arbWallet?.id, instrument, side, amount, price: price || undefined }) });
+        const d = await r.json();
+        if (d.ok) { alert('Order placed!'); await this.loadAevoStatus(); }
+        else alert('Error: ' + (d.error || 'Unknown'));
+      } catch (e) { alert('Error: ' + e.message); }
+    },
+    async loadLimits() {
+      try {
+        const qs = this.form?.relayNodeId ? `?relayNodeId=${this.form.relayNodeId}` : '';
+        const data = await fetch('/api/exchange/limits' + qs).then(r => r.json());
+        this.limitsData = data;
+        this.limitsForm = { ...data.limits };
+      } catch {}
+    },
+    async saveLimits() {
+      this.limitsSaving = true;
+      try {
+        const res = await fetch('/api/exchange/limits', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.limitsForm),
         });
         const data = await res.json();
-        if (data.ok) { await this.loadArbOffers(); await this.loadOffers(); }
+        if (data.ok) await this.loadLimits();
       } catch {}
-      finally { o._cancelling = false; }
+      finally { this.limitsSaving = false; }
     },
   };
 }

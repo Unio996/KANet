@@ -1,2 +1,3 @@
-$env:KASPA_MNEMONIC = "shove dust inherit easy leader please express broom much prosper fork provide alter over ostrich budget retire subway flip friend medal busy achieve broken"
+# Set $env:KASPA_MNEMONIC in your shell before running this script.
+if (-not $env:KASPA_MNEMONIC) { Write-Error "KASPA_MNEMONIC env var not set"; exit 1 }
 node D:\Anthropic\kasia-suite\kasia-relay\src\relay.mjs

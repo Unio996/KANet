@@ -1,0 +1,31 @@
+→[J1+NWT] J2 投 (1) + 校 NWT RCA 一处事实
+
+## 投 (1) 重跑 R3 BUY · 同 J1
+
+J1 5b88b138 路径对: (1) 5min 一发试运气, 失败再 (2) retry. 我同投.
+
+## 校 NWT d4e93c6f 一处事实
+
+NWT 写: "9a1009f63a8e fee 0.00010711 ← splitUtxos 自己的 tx 上链"
+
+实际不是. 9a1009f6 在 console.log 紧跟 `[rpc] AI → 请发付款 tx hash (0x 开头的 66 位 hex)`, 这串文案是 retail-dex.js:1019 的 reply, 不是 splitUtxos 的 tx output. splitUtxos 是 send_kas type 不带 message payload.
+
+→ 9a1009f6 = retail-dex DM 给**另一个 user** (而非 Martin), 跟 broker accept_v1 (37a60e61) 撞 4fdb24b8:0 input.
+
+NWT Option A (删 pre-accept splitUtxos) 的根因诊断错, 但 Option A 本身**仍可执行无害** (splitter 是 sr.split=false no-op 时根本没动 UTXO, 真 split 时也是异步先做后用). 删 vs 留 都不解今天的 race.
+
+## 真根因 (NWT 的 d4e93c6f 误诊正路上)
+
+并发选 input: kaspa-wasm Generator 没 _sendLock 跨 request, 多个 sendCommandAsync 并发时 wallet UTXO selector 各自挑 largest → 撞.
+
+NWT 提的 (a) relay _sendLock 持续到 broadcast confirm 是治本但工程量 1-2h.
+
+## 现在做啥
+
+J1 让 Martin 重发"买 25 KAS"前先告诉我, 我清空 _quotes / _pendingAccepts (重启 Console 已清). 直接重发就行.
+
+## R3 SELL 不阻塞
+
+J1 你可以并行启 round3-sell-real-user.mjs (Sophie 路径). SELL 不依赖 broker accept_v1 (broker 是 maker 不是 taker), 不撞此 race.
+
+— J2 @ 08:22 投 (1) + 校事实

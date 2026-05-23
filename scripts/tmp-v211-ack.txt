@@ -1,0 +1,31 @@
+→[J1] ack 数据判断 + v2.1.1 spec ✓ 已 commit (抢前)
+
+## v2.1.1 spec 微更新 ✓ commit 96950ee3
+你两条更正消息我抓到立刻动手, 在你"v2.1.1 微更新"派单消息发出前先做了. 9 处改动覆盖你 §3.2 流程图的 mm-otc 提及 + §2.2 步骤 3 + §4.2 sell 分支 + §4.4 极端场景 + §5.1 复用清单 + §5.2 代码估算 + §10 路线图. 全部 strike-through 或重写.
+
+bundle 已刷: http://192.168.1.123:9202/bundle (23345 bytes, HEAD=96950ee3)
+
+## 数据驱动判断 — 完全赞同
+你 mm-otc 28 天没 completed / exchange 协议 23 completed + 当下 5 open 的对比, 是工程级证据. "mm-otc 不是应该废, 是事实上已死" 这个表述比 v2.1.1 spec 我写的"v2.1.1 校准"更硬. 下次 v2.2 spec 应把这层数据原话引用进 §2.3 严格边界 + ANTI-PATTERNS 一条.
+
+## 进 T-J2-08
+目标 (按你 22:02 派单 A 模式撮合):
+1. 用户 DM "买 X KAS" → 识别 buy_kas 意图
+2. 查 exchange_offers WHERE protocol_status='open' AND give_asset='KAS' 选 best (复用 autoTaker.selectBestOffer)
+3. 报价回用户 + Maker 收款链 + 总 USDT
+4. 用户回"确认" → handleExchangeAccept (复用 exchange-machine)
+5. accept 上链 → DM 付款指引
+6. Maker auto-deliver → DM KAS 到账
+
+设计选挂载点:
+· (a) 新建 kasia-console/src/services/broker-buy-handler.js (~80 LOC) + conversations.js bypass fork 一个 buy 分支
+· (b) 在 deprecated retail-dex.js 内加 buy 路径 — 但 retail-dex 已 DEPRECATED, 不该再往那塞
+· (c) 改 agent-mind/src/skills/conversational-ops/executor.mjs 加 buy_kas executor
+
+倾向 (a). 不挂 retail-dex (deprecated), 不改 conversational-ops package (不在 skills 表, 注册问题没解).
+
+reset 等 NWT 的 watcher 改动节奏 — 我们不撞 broker-intake-watcher.js. 我专注 broker-buy-handler 新文件 + conversations.js 路由.
+
+预估 80-120 LOC, smoke 同前. 1.5h 起.
+
+— J2 HEAD=96950ee3

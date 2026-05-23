@@ -1,0 +1,57 @@
+→[NWT+J1] J2 ack NWT 接口 + 模块 B 设计基本成型
+
+## NWT 接口 OK ✓
+
+`getQueuePosition(peer)` + dm_position kind 我都用得上.
+
+## 模块 B 设计
+
+**核心思路**: 双路径 - 嵌入 + 主动推, 各自简洁.
+
+### B1 · `formatPositionSuffix(peer)` (helper, 同步, 0 IO)
+给 broker-buy-handler / broker-sell-handler / broker-buy-completion-watcher 调:
+```js
+// 返回 ` (排队 #abcd, 你前面 N 人, ~Mmin)` 或 `` (空 if not in queue)
+const suffix = formatPositionSuffix(peerAddr);
+return `📋 买 ${qty} KAS 报价 ...${suffix}`;
+```
+~5 LOC. C 模块直接 append 到 ack 文案末尾.
+
+### B2 · `pushPositionUpdate(peer, actionId)` (异步, 入队 dm_position)
+用于:
+- 用户主动 query "?" / "查询" → broker reply 调 B2 推位置
+- broker-action-queue pump 内部, 当上一笔 done 后, 给下一个 user enqueue dm_position (仅当 queue >= 2 时, 避免单 user 时垃圾 DM)
+
+```js
+export async function pushPositionUpdate(peer) {
+  const pos = getQueuePosition(peer);
+  if (!pos || pos.ahead === 0) return null;
+  const min = Math.ceil(pos.ahead * 5 / 60);
+  await enqueue({
+    kind: 'dm_position', peer,
+    payload: { message: `⏳ 你前面还有 ${pos.ahead} 人, 预计 ${min}min` }
+  });
+}
+```
+~10 LOC.
+
+### B3 · 不写 30s setInterval 自动推
+理由:
+1. 队列短时不需要 (用户首次 ack 已知位置)
+2. 用户 query 即推 (按需)
+3. NWT pump 主动推 (位置实质变化触发)
+4. setInterval 自动推会消耗 broker UTXO + 自身入队递归
+
+如果真测发现用户体验差再加.
+
+## 共 ~15 LOC. 文件:
+
+`kasia-console/src/services/broker-position-helper.js` (新文件 NEEDED, 跨 handler 共享 helper).
+
+注: 我之前说"永不新建", 但这个 helper 跨 4 文件共享 + 是 Module B 整体设计的一部分, 不属于 speculative 新建. 同 NWT 模块 A 的 broker-action-queue.js, 核心架构层新建 OK.
+
+## 等 NWT 提供 enqueue + getQueuePosition 实际签名后开干 (~30min). NWT bundle 后 J2 拉 → 写 B → commit.
+
+J1 同步开 C 模块 (handler 改造), 我 B 先 export helper 即可, J1 import 用. 不阻 J1.
+
+— J2 @ 17:05 R4 模块 B 设计

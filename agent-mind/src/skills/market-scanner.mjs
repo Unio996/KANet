@@ -239,7 +239,17 @@ export class MarketScannerSkill extends Skill {
       midPrice = (spotLive[0].bid + spotLive[0].ask) / 2;
     }
 
-    _cache = { venues, kanet, midPrice, bestSpread, live, inventory, orderbooks, dailyUsage, ts: new Date().toISOString() };
+    // Recent exchange fills (for pricing reference)
+    let recentFills = [];
+    try {
+      const fillRes = await fetchJson(`${config.consoleUrl}/api/exchange/offers?status=completed&limit=20`);
+      recentFills = (fillRes?.offers || [])
+        .filter(o => o.metadata && JSON.parse(o.metadata).source === 'seeder' && o.give_asset === 'KAS')
+        .slice(0, 10)
+        .map(o => ({ price: parseFloat(o.want_amount) / parseFloat(o.give_amount), amount: o.give_amount, at: o.completed_at }));
+    } catch {}
+
+    _cache = { venues, kanet, midPrice, bestSpread, live, inventory, orderbooks, dailyUsage, recentFills, ts: new Date().toISOString() };
     _cacheTime = now;
     return _cache;
   }
@@ -453,6 +463,13 @@ export class MarketScannerSkill extends Skill {
       lines.push('⚡ MAKE_MARKET authorized: you may emit');
       lines.push(`[ACTION:MAKE_MARKET amount=300 sell_price=${topOpp.sellPrice.toFixed(5)} buy_price=${topOpp.buyPrice.toFixed(5)} hedge_cex=${topOpp.sellAt} reason="spread ${topOpp.pct.toFixed(2)}% opportunity"]`);
       lines.push('Constraints: amount 50-500 KAS, sell_price > buy_price, hedge_cex must be a configured exchange');
+    }
+
+    // Recent exchange fills (pricing reference)
+    const fills = gathered.recentFills || [];
+    if (fills.length > 0) {
+      const avgPrice = fills.reduce((s, f) => s + f.price, 0) / fills.length;
+      lines.push('', `Recent fills (${fills.length} trades, avg ${avgPrice.toFixed(6)} USDT/KAS)`);
     }
 
     const canSell = hasSell && sellVenues.length > 0;

@@ -1,0 +1,92 @@
+→[QCLAUDE-NWT] → TASK T-ARCH-03 + T-ARCH-04 并行 (kanet-arch 频道前面派的 channel-bridge 没扫, 重发 dev-coord)
+
+## T-ARCH-03 · retail-dex/* + v1 spec 头警告 (注释注入, 不改逻辑)
+
+改 6 个文件, 顶部各加注释块:
+
+### kasia-console/src/services/retail-dex.js 顶部 (在第一行 // 注释之前插入):
+```
+// ⚠ DEPRECATED in v2 — see docs/spec/2026-04-24-dex-broker-v2-glue-layer.md
+// 本文件 1123 行约 70% 偷 autoTaker / market-seeder / exchange-machine 的活.
+// 不扩展不模仿. 新 broker 能力走 Mind + exchange-machine 已有基建.
+// 粘合层独有代码预算 <210 行, 不放这里.
+//
+```
+
+### kasia-console/src/services/retail-dex-dialog.js 顶部:
+```
+// ⚠ DEPRECATED in v2 — see docs/spec/2026-04-24-dex-broker-v2-glue-layer.md
+// 重复 Mind 的 llm-dispatcher + conversational-ops + confirm-store 已有能力.
+// 不扩展. 新对话能力走 Mind 主路.
+//
+```
+
+### kasia-console/src/services/retail-dex-memory.js 顶部:
+```
+// ⚠ DEPRECATED in v2 — see docs/spec/2026-04-24-dex-broker-v2-glue-layer.md
+// 重复 agent-mind/src/kernels/memory.mjs 的 per-peer notes 能力.
+// 不扩展. 新记忆能力走 Mind memory kernel.
+//
+```
+
+### kasia-console/src/services/retail-dex-pusher.js 顶部:
+```
+// ⚠ DEPRECATED in v2 — see docs/spec/2026-04-24-dex-broker-v2-glue-layer.md
+// 重复 Mind proactive pipeline. 模板文案可迁移, 本文件整体弃用.
+// 不扩展. 新推送走 mind-manager.triggerProactive.
+//
+```
+
+### kasia-console/src/services/retail-dex-profile.js 顶部:
+```
+// ⚠ DEPRECATED in v2 — see docs/spec/2026-04-24-dex-broker-v2-glue-layer.md
+// 重复 agent-mind/src/skills/address-profiler.mjs + self-awareness.mjs.
+// 不扩展. 新画像走 Mind skill.
+//
+```
+
+### docs/spec/2026-04-23-dex-agent-v1.md 顶部 (在标题 # 之前插入):
+```
+> ⚠ SUPERSEDED BY v2 — docs/spec/2026-04-24-dex-broker-v2-glue-layer.md
+> 本 spec 由 J1 Opus 2026-04-23 设计, 方向偏离 (broker 当实体做).
+> Owner 2026-04-24 多轮纠正后校准为 v2. 本文件保留作历史档案, 不按它执行任何新任务.
+
+```
+
+完成标准: git diff 只有 6 处注释块插入, 零逻辑行改动.
+完成后: git add + commit "docs: DEPRECATED warnings on retail-dex/* + v1 spec" + 回 dev-coord 贴 tx.
+
+## T-ARCH-04 · Trader-B skill 激活 + adapter 切本地 Qwen (纯 SQL)
+
+Owner 定案: adapter 切到本地千问 (47045123, Trader-A 同款).
+
+执行 SQL (用 sqlite3 或 node better-sqlite3):
+```sql
+-- 1. Trader-B adapter 切本地 Qwen
+UPDATE relay_nodes SET adapter_node_id='47045123-ef40-4df7-8909-ebe388f40fbe'
+WHERE id='0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+
+-- 2. 启用 6 个粘合 skill
+UPDATE skills SET status='active'
+WHERE relay_node_id='0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0'
+  AND name IN ('conversational-ops', 'self_awareness', 'address_profiler',
+               'social_outreach', 'price_tracker', 'market_scanner');
+
+-- 3. 关闭 retail-proxy skill (回归 Mind 主路)
+UPDATE skills SET status='disabled'
+WHERE relay_node_id='0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0' AND name='retail-proxy';
+```
+
+⚠ 禁止启用的 skill (broker 不做交易):
+mm_otc, trade_executor, order_executor, cross_chain_verify, hyperliquid_manager,
+aevo_manager, polymarket, stock_tracker — 全保持 disabled.
+
+完成标准:
+- 查询确认 adapter_node_id='47045123-...'
+- 查询确认 6 skill status='active', retail-proxy status='disabled'
+- curl /api/broker/stats?brokerId=0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0 返回新状态
+- 发一条 dev-coord 贴 SQL 执行结果 + 新 skill 列表 (带 → J2 OPUS 标签)
+
+## 两个任务可并行, 不阻塞. 都是配置/注释级改动, 零代码逻辑风险.
+
+反馈到 dev-coord. 我 (J2 Opus) 会用 Monitor 实时抓到.

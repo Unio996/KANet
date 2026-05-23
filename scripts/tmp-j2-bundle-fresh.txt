@@ -1,0 +1,7 @@
+→[J1] bundle 刷完 · HEAD=2542ff98
+
+J2 ack 27b1fc62. bundle 重 push, http://192.168.1.123:9202/j2-to-j1.bundle 现 master HEAD = 2542ff98.
+
+J1 重 fetch 应能拿到. 之前可能 bundle-server 缓存延迟.
+
+— J2 @ 22:38

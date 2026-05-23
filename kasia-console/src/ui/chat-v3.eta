@@ -9,7 +9,6 @@
 
 <div class="flex h-[calc(100vh-0px)]" x-data="{
   channel: '',
-  channelInput: 'kanet-public',
   messages: [],
   accounts: <%= JSON.stringify(it.relays.map(r => ({ id: r.id, name: r.name, address: r.address }))) %>,
   selectedAccount: '<%= it.relays[0]?.id || '' %>',
@@ -20,22 +19,206 @@
   polling: null,
   lastTime: '',
 
-  // Escrow panel
-  showEscrow: false,
-  escrowAmount: '2',
-  escrowList: [],
-  escrowBusy: false,
-  escrowCurrent: null,
+  // Channel sidebar state
+  channels: [],
+  newChannelInput: 'kanet-public',
+  lastChainChannel: '',
+  channelsLastChecked: '',  // 页面加载基线时间，不随轮询更新
+  _readChannels: new Set(),  // 本次会话已读频道，loadChannels 后清零其 new_count
+  contextMenu: null,
+  newChannelDesc: '',
+  contextTimeout: null,
 
   async init() {
-    this.channel = this._agentChannel();
+    this.newChannelInput = 'kanet-public';
+    // 首次加载用 1 小时前作为基线，显示近期未读
+    this.channelsLastChecked = new Date(Date.now() - 3600000).toISOString();
+    await this.loadChannels(this.channelsLastChecked);
+    if (this.mode === 'local') {
+      this.channel = this._agentChannel();
+    } else {
+      this.channel = this.channels.length > 0 ? this.channels[0].channel_name : 'kanet-public';
+      this.newChannelInput = this.channel;
+    }
+    // 过滤掉内部频道（_local 后缀），只显示链上频道
+    this.channels = this.channels.filter(ch => !ch.channel_name.endsWith('_local'));
     await this.loadMessages();
     this.polling = setInterval(() => this.poll(), 3000);
   },
+
+  // ── Channel list management ──────────────────────────────────────────
+
+  async loadChannels(after) {
+    try {
+      let url = '/api/chat/channels';
+      if (after) url += '?after=' + encodeURIComponent(after);
+      const res = await fetch(url);
+      const data = await res.json();
+      const localChannels = this._loadLocalChannels();
+      const serverChannels = (data.channels || []).map(c => ({ ...c, source: 'server' }));
+      this.channels = this._mergeChannels(localChannels, serverChannels);
+      // 已读频道清零 new_count
+      for (const ch of this.channels) {
+        if (this._readChannels.has(ch.channel_name)) ch.new_count = 0;
+      }
+      // 过滤掉内部频道（_local 后缀），只显示链上频道
+      this.channels = this.channels.filter(ch => !ch.channel_name.endsWith('_local'));
+    } catch {}
+  },
+
+  _mergeChannels(local, server) {
+    const map = new Map();
+    for (const ch of local) map.set(ch.channel_name, { ...ch, source: 'local' });
+    for (const ch of server) {
+      const existing = map.get(ch.channel_name);
+      if (existing) {
+        map.set(ch.channel_name, {
+          channel_name: ch.channel_name,
+          description: ch.description || existing.description || null,
+          msg_count: Math.max(existing.msg_count || 0, ch.msg_count || 0),
+          new_count: ch.new_count || existing.new_count || 0,
+          last_message_at: new Date(ch.last_message_at) > new Date(existing.last_message_at)
+            ? ch.last_message_at : existing.last_message_at,
+          source: ch.source === 'local' ? 'local' : 'server'
+        });
+      } else {
+        map.set(ch.channel_name, { ...ch, source: 'server' });
+      }
+    }
+    return [...map.values()].sort((a, b) => {
+      const ta = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
+      const tb = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
+      return tb - ta;
+    });
+  },
+
+  _persistChannels() {
+    try {
+      const local = this.channels.filter(ch => ch.source === 'local');
+      localStorage.setItem('chat_channels', JSON.stringify(local));
+    } catch {}
+  },
+
+  _loadLocalChannels() {
+    try {
+      const raw = localStorage.getItem('chat_channels');
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return parsed.filter(ch => !ch.channel_name.endsWith('_local'));
+    } catch { return []; }
+  },
+
+  async joinChannel() {
+    const trimmed = this.newChannelInput.trim();
+    if (!trimmed) return;
+    const desc = this.newChannelDesc.trim() || undefined;
+    // 切到链上模式 + 创建/更新频道记录
+    this.mode = 'chain';
+    this.lastChainChannel = trimmed;
+    try {
+      await fetch('/api/chat/channels', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: trimmed, description: desc }) });
+    } catch {}
+    // 已存在 → 直接切换
+    const exists = this.channels.find(ch => ch.channel_name === trimmed);
+    if (!exists) {
+      const newCh = { channel_name: trimmed, description: desc || null, msg_count: 0, last_message_at: null, source: 'local' };
+      this.channels = [newCh, ...this.channels];
+      this._persistChannels();
+    }
+    this.channel = trimmed;
+    this.messages = [];
+    this.lastTime = '';
+    this.newChannelDesc = '';
+    await this.loadMessages();
+  },
+
+  async leaveChannel(channelName) {
+    this.channels = this.channels.filter(ch => ch.channel_name !== channelName);
+    this._persistChannels();
+    try {
+      await fetch('/api/chat/channels/' + encodeURIComponent(channelName), { method: 'DELETE' });
+    } catch {}
+    this.hideContextMenu();
+    if (this.channel === channelName) {
+      const first = this.channels[0];
+      if (first) { this.channel = first.channel_name; this.messages = []; this.lastTime = ''; this.loadMessages(); }
+    }
+  },
+
+  async refreshChannels() {
+    await this.loadChannels();
+    if (!this.channels.find(ch => ch.channel_name === this.channel)) {
+      const first = this.channels[0];
+      if (first) { this.channel = first.channel_name; this.messages = []; this.lastTime = ''; this.loadMessages(); }
+    }
+  },
+
+  async editChannelDesc(ch) {
+    this.hideContextMenu();
+    const trimmed = window.prompt('编辑备注:', ch.description || '');
+    if (trimmed === null) return; // cancelled
+    try {
+      await fetch('/api/chat/channels', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: ch.channel_name, description: trimmed || null }) });
+    } catch { return; }
+    ch.description = trimmed || null;
+    await this.loadChannels(this.channelsLastChecked || undefined);
+  },
+
+  // ── Context menu ──────────────────────────────────────────────────────
+
+  showContextMenu(channel, event) {
+    event.preventDefault();
+    this.contextMenu = { channel, x: event.clientX, y: event.clientY };
+  },
+
+  hideContextMenu() {
+    this.contextMenu = null;
+    if (this.contextTimeout) { clearTimeout(this.contextTimeout); this.contextTimeout = null; }
+  },
+
+  startLongPress(channel, event) {
+    this.contextTimeout = setTimeout(() => {
+      const cx = event.touches?.[0]?.clientX || window.innerWidth / 2;
+      const cy = event.touches?.[0]?.clientY || window.innerHeight / 2;
+      this.showContextMenu(channel, { preventDefault: () => {}, clientX: cx, clientY: cy });
+    }, 500);
+  },
+
+  endLongPress() {
+    if (this.contextTimeout) { clearTimeout(this.contextTimeout); this.contextTimeout = null; }
+  },
+
+  // ── UI helpers ────────────────────────────────────────────────────────
+
+  relativeTime(dateStr) {
+    if (!dateStr) return '';
+    try {
+      const diff = Date.now() - new Date(dateStr).getTime();
+      const mins = Math.floor(diff / 60000);
+      if (mins < 1) return '刚刚';
+      if (mins < 60) return mins + '分钟前';
+      const hours = Math.floor(mins / 60);
+      if (hours < 24) return hours + '小时前';
+      return Math.floor(hours / 24) + '天前';
+    } catch { return dateStr; }
+  },
+
+  channelIconClass() {
+    return 'text-ink-500';
+  },
+
+  channelActive(name) { return this.mode === 'chain' && this.channel === name; },
+  displayChannelName(name) {
+    // Strip _local suffix for display
+    return name && name.endsWith('_local') ? name.slice(0, -6) : name;
+  },
+
+  // ── Original chat methods ────────────────────────────────────────────
+
   _agentChannel() {
-    if (this.selectedAccount === '__all__') return 'group';
+    if (this.selectedAccount === '__all__') return 'group_local';
     const acct = this.accounts.find(a => a.id === this.selectedAccount);
-    return acct ? acct.name : 'home';
+    return acct ? acct.name + '_local' : 'home_local';
   },
   switchAgent() {
     if (this.mode === 'local') { this.channel = this._agentChannel(); this.messages = []; this.lastTime = ''; this.loadMessages(); }
@@ -60,8 +243,9 @@
         this.$nextTick(() => this.scrollBottom());
       }
     } catch {}
+    // 同时刷新频道列表未读数
+    await this.loadChannels(this.channelsLastChecked || undefined);
   },
-  switchChannel() { if (this.channelInput.trim()) { this.channel = this.channelInput.trim(); this.messages = []; this.lastTime = ''; this.loadMessages(); } },
   async send() {
     if (!this.msgInput.trim() || !this.selectedAccount || this.sending) return;
     const content = this.msgInput.trim();
@@ -92,76 +276,70 @@
   cardDataEntries(data) { if (!data || typeof data !== 'object') return []; const e = []; const f = (o, p) => { for (const [k,v] of Object.entries(o)) { if (v == null) continue; const key = p ? p+'.'+k : k; if (Array.isArray(v)) e.push([key, v.length+' items']); else if (typeof v === 'object') f(v,key); else e.push([key, String(v)]); } }; f(data,''); return e.slice(0,12); },
   async doConfirm(msg) { const card = this.parseCard(msg.content); if (!card) return; try { const r = await fetch('/api/chat/confirm', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({relayNodeId:this.selectedAccount,token:card.token}) }); const d = await r.json(); msg.content = d.ok ? '已执行: ' + (typeof d.result === 'string' ? d.result : JSON.stringify(d.result)) : '失败: ' + (d.error||'unknown'); } catch(e) { msg.content = '执行失败: ' + e.message; } },
   fmtTime(t) { if (!t) return ''; try { return new Date(t).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}); } catch { return t; } },
-
-  // ── Escrow methods ──
-  _escrowCard(type, data) {
-    const now = new Date().toISOString();
-    const acct = this.accounts.find(a => a.id === this.selectedAccount);
-    this.messages.push({ id: 'escrow-' + Date.now(), sender_address: acct?.address || 'system', content: JSON.stringify({ type: 'query_card', label: type, data, summary: '' }), created_at: now });
-    this.$nextTick(() => this.scrollBottom());
-  },
-  async escrowCreate() {
-    if (this.escrowBusy || !this.selectedAccount) return;
-    this.escrowBusy = true;
-    const acct = this.accounts.find(a => a.id === this.selectedAccount);
-    try {
-      const pubRes = await fetch('/api/relay/' + this.selectedAccount + '/send-command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'get_pubkey' }) });
-      const { pubkey32 } = await pubRes.json();
-      const res = await fetch('/api/escrow/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-        relayNodeId: this.selectedAccount,
-        buyerPk32: pubkey32, sellerPk32: pubkey32, arbiterPk32: pubkey32,
-        buyerAddress: acct.address, sellerAddress: acct.address, arbiterAddress: acct.address,
-        amountKas: this.escrowAmount, deadline: 0,
-      })});
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error);
-      this.escrowCurrent = data;
-      this._escrowCard('Order Placed', { Status: 'Awaiting Payment', 'Contract Address': data.p2shAddress.slice(0,25)+'...', Amount: this.escrowAmount + ' KAS', 'Order ID': data.id.slice(0,8), Note: 'Funds will be held in smart contract until delivery confirmed' });
-      await this.escrowRefreshList();
-    } catch (e) { this.error = e.message; }
-    this.escrowBusy = false;
-  },
-  async escrowLock() {
-    if (this.escrowBusy || !this.escrowCurrent?.id) return;
-    this.escrowBusy = true;
-    try {
-      const res = await fetch('/api/escrow/lock', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ escrowId: this.escrowCurrent.id, relayNodeId: this.selectedAccount }) });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error);
-      this._escrowCard('Payment Secured', { Status: 'Funds Locked On-Chain', 'TX ID': data.txId.slice(0,16)+'...', Amount: this.escrowAmount + ' KAS', Note: 'Seller can see the locked funds. Awaiting delivery...' });
-      this.escrowCurrent.lockTxId = data.txId;
-      await this.escrowRefreshList();
-    } catch (e) { this.error = e.message; }
-    this.escrowBusy = false;
-  },
-  async escrowRelease() {
-    if (this.escrowBusy || !this.escrowCurrent?.id) return;
-    this.escrowBusy = true;
-    const acct = this.accounts.find(a => a.id === this.selectedAccount);
-    try {
-      const res = await fetch('/api/escrow/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ escrowId: this.escrowCurrent.id, relayNodeId: this.selectedAccount, branch: 0, toAddress: acct.address }) });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error);
-      this._escrowCard('Delivery Confirmed', { Status: 'Payment Released to Seller', 'TX ID': data.txId.slice(0,16)+'...', Note: 'Transaction complete. Funds transferred on-chain.' });
-      this.escrowCurrent = null;
-      await this.escrowRefreshList();
-    } catch (e) { this.error = e.message; }
-    this.escrowBusy = false;
-  },
-  async escrowRefreshList() {
-    try {
-      const res = await fetch('/api/escrow/list?limit=10');
-      const data = await res.json();
-      this.escrowList = data.escrows || [];
-    } catch {}
-  },
-  escrowStatusColor(s) {
-    return { created: 'bg-gray-100 text-gray-600', locked: 'bg-yellow-100 text-yellow-700', released: 'bg-green-100 text-green-700', refunded: 'bg-blue-100 text-blue-700', disputed: 'bg-red-100 text-red-700' }[s] || 'bg-gray-100 text-gray-600';
-  },
 }">
 
-  <!-- Left: Agent selector + mode -->
-  <div class="w-52 border-r border-warm-200 flex flex-col bg-warm-50/50 flex-shrink-0">
+  <!-- Left: Channel list + Agent selector -->
+  <div class="w-56 border-r border-warm-200 flex flex-col bg-warm-50/50 flex-shrink-0">
+    <!-- Top: Channel section (flex-1) -->
+    <div class="flex flex-col min-h-0 flex-1">
+      <!-- Channel header -->
+      <div class="px-3 py-2.5 border-b border-warm-200 flex items-center justify-between">
+        <span class="text-xs font-semibold text-ink-500 uppercase tracking-wider">频道</span>
+        <button @click="refreshChannels()" class="text-ink-400 hover:text-ink-600 transition-colors p-0.5" title="刷新频道列表">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Add channel input -->
+      <div class="px-3 py-1.5 border-b border-warm-200">
+        <div class="flex gap-1 mb-1">
+          <input x-model="newChannelInput" @keydown.enter="joinChannel()"
+            placeholder="输入频道名..."
+            class="flex-1 text-xs border border-warm-200 rounded px-2 py-1.5 bg-white focus:outline-none focus:border-brand-300" />
+          <button @click="joinChannel()"
+            class="text-brand-500 hover:text-brand-700 px-1.5 transition-colors" title="加入频道">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+            </svg>
+          </button>
+        </div>
+        <input x-model="newChannelDesc" @keydown.enter="joinChannel()"
+          placeholder="备注（可选）"
+          class="w-full text-xs border border-warm-200 rounded px-2 py-1 bg-white focus:outline-none focus:border-brand-300" />
+      </div>
+
+      <!-- Channel list -->
+      <div class="flex-1 overflow-y-auto px-1 py-1">
+        <template x-for="ch in channels" :key="ch.channel_name">
+          <button @click="mode='chain'; lastChainChannel=ch.channel_name; channel=ch.channel_name; ch.new_count=0; _readChannels.add(ch.channel_name); messages=[]; lastTime=''; loadMessages()"
+            @contextmenu="showContextMenu(ch, $event)"
+            @touchstart="startLongPress(ch, $event)"
+            @touchend="endLongPress()"
+            @touchmove="endLongPress()"
+            @mousedown="hideContextMenu()"
+            class="w-full flex flex-col items-start gap-0 px-2 py-1.5 rounded-md text-left transition-colors mb-0.5 min-h-[28px]"
+            :class="channelActive(ch.channel_name)
+              ? 'bg-brand-50 text-brand-600 font-medium'
+              : ch.new_count ? 'text-ink-800 font-semibold hover:bg-warm-100' : 'text-ink-600 hover:bg-warm-100'">
+            <div class="flex items-center gap-1.5 w-full min-w-0">
+              <span class="font-bold text-[11px] flex-shrink-0" :class="channelIconClass(ch.channel_name)">#</span>
+              <span class="flex-1 truncate" x-text="displayChannelName(ch.channel_name)"></span>
+              <span x-show="ch.new_count" class="text-[10px] bg-brand-500 text-white rounded-full px-1.5 min-w-[18px] text-center flex-shrink-0" x-text="ch.new_count"></span>
+              <span x-show="!ch.new_count" class="text-[10px] text-ink-300 tabular-nums flex-shrink-0" x-text="ch.msg_count || ''"></span>
+              <span class="text-[10px] text-ink-300 tabular-nums flex-shrink-0 hidden lg:inline" x-show="ch.last_message_at && !ch.new_count" x-text="relativeTime(ch.last_message_at)"></span>
+            </div>
+            <span class="text-[9px] text-ink-300 truncate w-full" x-show="ch.description" x-text="ch.description"></span>
+          </button>
+        </template>
+      </div>
+    </div>
+
+    <!-- Separator -->
+    <div class="border-t border-warm-200"></div>
+
+    <!-- Bottom: Agent selector + mode toggle -->
     <div class="px-3 py-3 border-b border-warm-200 space-y-2">
       <select x-model="selectedAccount" @change="switchAgent()"
         class="w-full bg-white border border-warm-200 rounded-lg px-3 py-2 text-sm text-ink-700 focus:outline-none focus:border-brand-400">
@@ -171,93 +349,17 @@
         <option value="__all__">全体 Agent</option>
       </select>
       <div class="flex gap-1">
-        <button @click="mode='local'; channel=_agentChannel(); messages=[]; lastTime=''; loadMessages();"
+        <button @click="lastChainChannel=channel; mode='local'; channel=_agentChannel(); messages=[]; lastTime=''; loadMessages();"
           class="flex-1 text-[11px] py-1 rounded transition-colors"
           :class="mode==='local' ? 'bg-green-50 text-green-700 font-medium' : 'text-ink-400 hover:bg-warm-100'">
           内部
         </button>
-        <button @click="mode='chain'; channel=channelInput||'kanet-public'; messages=[]; lastTime=''; loadMessages();"
+        <button @click="mode='chain'; channel=lastChainChannel||channel||'kanet-public'; newChannelInput=channel; messages=[]; lastTime=''; loadMessages();"
           class="flex-1 text-[11px] py-1 rounded transition-colors"
           :class="mode==='chain' ? 'bg-brand-50 text-brand-700 font-medium' : 'text-ink-400 hover:bg-warm-100'">
           链上
         </button>
       </div>
-    </div>
-    <!-- Channel input for chain mode -->
-    <div x-show="mode==='chain'" class="px-3 py-2 border-b border-warm-200">
-      <div class="flex gap-1">
-        <input x-model="channelInput" @keydown.enter="switchChannel()" placeholder="频道名..."
-          class="flex-1 text-xs border border-warm-200 rounded px-2 py-1.5 bg-white focus:outline-none focus:border-brand-300" />
-        <button @click="switchChannel()" class="text-xs text-brand-500 hover:text-brand-700 px-2">加入</button>
-      </div>
-    </div>
-    <!-- Escrow toggle -->
-    <div class="px-3 py-2 border-t border-warm-200">
-      <button @click="showEscrow = !showEscrow; if(showEscrow) escrowRefreshList()"
-        class="w-full text-[11px] py-1.5 rounded font-medium transition-colors"
-        :class="showEscrow ? 'bg-purple-50 text-purple-700' : 'text-ink-400 hover:bg-warm-100'">
-        Silverscript
-      </button>
-    </div>
-
-    <!-- Escrow panel -->
-    <div x-show="showEscrow" x-transition class="px-3 py-2 border-t border-warm-200 space-y-2 overflow-y-auto max-h-[50vh]">
-      <!-- Scenario hint -->
-      <div class="text-[10px] text-purple-500 leading-snug">
-        On-chain escrow powered by Kaspa Silverscript (TN12)
-      </div>
-
-      <!-- Step 1: Place order -->
-      <div class="space-y-1.5">
-        <div class="text-[10px] font-semibold text-purple-600 uppercase tracking-wider">New Order</div>
-        <div class="flex gap-1">
-          <input x-model="escrowAmount" placeholder="Amount" class="flex-1 text-xs border border-warm-200 rounded px-2 py-1 bg-white focus:outline-none focus:border-purple-300 w-16" />
-          <span class="text-[10px] text-ink-300 self-center">KAS</span>
-        </div>
-        <button @click="escrowCreate()" :disabled="escrowBusy"
-          class="w-full text-[11px] py-1.5 rounded font-medium transition-colors"
-          :class="escrowBusy ? 'bg-warm-200 text-ink-300' : 'bg-purple-500 text-white hover:bg-purple-600'">
-          <span x-show="!escrowBusy">Place Order</span>
-          <span x-show="escrowBusy">Processing...</span>
-        </button>
-      </div>
-
-      <!-- Step 2 & 3: Pay + Confirm -->
-      <div x-show="escrowCurrent" class="space-y-1.5 pt-1 border-t border-purple-100">
-        <div class="text-[10px] text-purple-500 font-mono truncate" x-text="'Contract: ...' + (escrowCurrent?.p2shAddress?.slice(-12) || '')"></div>
-        <button @click="escrowLock()" :disabled="escrowBusy"
-          class="w-full text-[11px] py-1.5 rounded font-medium transition-colors"
-          :class="escrowBusy ? 'bg-warm-200 text-ink-300' : 'bg-yellow-500 text-white hover:bg-yellow-600'">
-          <span x-show="!escrowBusy">Pay & Lock Funds</span>
-          <span x-show="escrowBusy">Locking...</span>
-        </button>
-        <button @click="escrowRelease()" :disabled="escrowBusy"
-          class="w-full text-[11px] py-1.5 rounded font-medium transition-colors"
-          :class="escrowBusy ? 'bg-warm-200 text-ink-300' : 'bg-green-500 text-white hover:bg-green-600'">
-          <span x-show="!escrowBusy">Confirm Delivery</span>
-          <span x-show="escrowBusy">Releasing...</span>
-        </button>
-      </div>
-
-      <!-- Order history -->
-      <div x-show="escrowList.length > 0" class="space-y-1 pt-1.5 border-t border-warm-100">
-        <div class="text-[10px] font-semibold text-ink-400">Orders</div>
-        <template x-for="e in escrowList" :key="e.id">
-          <div class="flex items-center justify-between text-[10px] py-0.5">
-            <span class="font-mono text-ink-400" x-text="e.id.slice(0,6)"></span>
-            <span class="px-1.5 py-0.5 rounded-full text-[9px] font-medium"
-              :class="escrowStatusColor(e.status)"
-              x-text="{created:'pending',locked:'paid',released:'completed',refunded:'refunded',disputed:'disputed'}[e.status] || e.status"></span>
-          </div>
-        </template>
-      </div>
-    </div>
-
-    <!-- Info -->
-    <div class="flex-1"></div>
-    <div class="px-3 py-2 text-[10px] text-ink-300">
-      <span x-show="mode==='local'" class="text-green-600">内部通道 · 不消耗 KAS</span>
-      <span x-show="mode==='chain'">链上广播 · #<span x-text="channel"></span></span>
     </div>
   </div>
 
@@ -266,7 +368,14 @@
     <!-- Header -->
     <div class="px-5 py-3 border-b border-warm-200 flex items-center justify-between bg-white flex-shrink-0">
       <div class="flex items-center gap-2">
-        <span class="text-sm font-semibold text-ink-700" x-text="mode==='local' ? (selectedAccount==='__all__' ? '全体对话' : _agentChannel()) : '#' + channel"></span>
+        <span class="text-sm font-semibold text-ink-700">
+          <template x-if="mode === 'local'">
+            <span x-text="selectedAccount === '__all__' ? '全体对话' : displayChannelName(_agentChannel())"></span>
+          </template>
+          <template x-if="mode === 'chain'">
+            <span>#<span x-text="channel"></span></span>
+          </template>
+        </span>
         <span class="text-xs text-ink-300" x-text="messages.length + ' 条'"></span>
       </div>
     </div>
@@ -275,7 +384,7 @@
     <div id="chat-messages" class="flex-1 overflow-y-auto px-5 py-4 space-y-3">
       <div x-show="messages.length === 0" class="flex items-center justify-center h-full">
         <div class="text-center text-ink-300 text-sm">
-          <p x-text="mode==='local' ? '和 ' + _agentChannel() + ' 说点什么' : '#' + channel + ' 暂无消息'"></p>
+          <p x-text="mode==='local' ? '和 ' + displayChannelName(_agentChannel()) + ' 说点什么' : '#' + channel + ' 暂无消息'"></p>
         </div>
       </div>
 
@@ -346,7 +455,7 @@
     <div class="px-5 py-3 border-t border-warm-200 bg-white flex-shrink-0">
       <div class="flex gap-2 items-end">
         <input type="text" x-model="msgInput" @keydown.enter="send()"
-          :placeholder="mode!=='local' ? '链上广播...' : selectedAccount==='__all__' ? '对全体 Agent 说...' : '对 ' + _agentChannel() + ' 说...'"
+          :placeholder="mode!=='local' ? '链上广播...' : selectedAccount==='__all__' ? '对全体 Agent 说...' : '对 ' + displayChannelName(_agentChannel()) + ' 说...'"
           class="flex-1 px-4 py-2.5 border border-warm-200 rounded-xl text-sm text-ink-700 placeholder-ink-300 bg-warm-50/50 focus:outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-100" />
         <button @click="send()" :disabled="sending || !msgInput.trim()"
           class="px-5 py-2.5 rounded-xl text-sm font-medium transition-colors flex-shrink-0"
@@ -358,6 +467,23 @@
       <div x-show="error" class="mt-1 text-xs text-red-500" x-text="error"></div>
     </div>
   </div>
+
+  <!-- Context menu -->
+  <div x-show="contextMenu"
+    x-bind:style="'position:fixed;left:'+Math.min(contextMenu.x, window.innerWidth-180)+'px;top:'+Math.min(contextMenu.y, window.innerHeight-90)+'px'"
+    @click.outside="hideContextMenu()"
+    @mousedown.stop
+    class="bg-white border border-warm-200 rounded shadow-md z-50 text-xs w-28">
+    <button @click="editChannelDesc(contextMenu.channel)"
+      class="w-full text-left px-3 py-2 hover:bg-warm-100 text-ink-700 transition-colors border-b border-warm-100">
+      编辑备注
+    </button>
+    <button @click="leaveChannel(contextMenu.channel.channel_name)"
+      class="w-full text-left px-3 py-2 hover:bg-warm-100 text-red-600 transition-colors">
+      退出频道
+    </button>
+  </div>
+
 </div>
 
 <%~ include('partials/page-close', it) %>

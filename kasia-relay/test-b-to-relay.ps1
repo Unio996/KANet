@@ -1,5 +1,6 @@
-$env:KASPA_MNEMONIC_A = "reject bulk rapid citizen myself health rally expand solution tide person cargo"
-$env:PEER = "kaspa:qptg465n4jedfujewj3hfgkxtysq40v2jakxp2w6uuvrhf6sajf0kzewvmcmv"
+# Set $env:KASPA_MNEMONIC_A and $env:PEER in your shell before running.
+if (-not $env:KASPA_MNEMONIC_A) { Write-Error "KASPA_MNEMONIC_A env var not set"; exit 1 }
+if (-not $env:PEER) { Write-Error "PEER env var not set"; exit 1 }
 
 Write-Host "=== Step 1: Handshake ===" -ForegroundColor Cyan
 node D:\Anthropic\kasia-suite\kasia-relay\chat_a.mjs handshake

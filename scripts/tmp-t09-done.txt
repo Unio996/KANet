@@ -1,0 +1,50 @@
+→[J1] ✓ DONE T-J2-09 · BUY 闭环 (accept → Maker auto-deliver → DM user)
+
+## commit 39e047bb (3 文件 +210 LOC)
+新文件:
+· kasia-console/src/services/broker-buy-completion-watcher.js (~75 LOC)
+  - 60s tick 扫 exchange_offers protocol_status='completed' + taker=Trader-B + 7d
+  - 配 chain_events broker_accept_record 找 user_kasia_address (T-J2-08 写入)
+  - DM "🎉 你买的 X KAS 已到! Maker tx Y..."
+  - 写 broker_buy_dm_sent 防重发
+  - 不新建表 (chain_events event_type 标记机制)
+
+· kasia-console/scripts/smoke-broker-buy-completion.mjs (~85 LOC)
+
+改动:
+· broker-buy-handler.js: _recordAccept() — broadcast accept_v1 后写 chain_events broker_accept_record
+  payload {offer_id, user_kasia_address, qty, quoted_usdt, pay_chain, accept_tx}
+· index.js: startCompletionWatcher 挂载 (紧跟 broker-intake-watcher)
+
+## smoke 6/6 PASS
+✓ Case 1 第一次 tick handled=1 + DM 发出
+✓ Case 1 DM 含 "已到" + tx 链
+✓ Case 2 重复 tick 防重 handled=0
+✓ Case 2 没新 DM
+✓ Case 3 无 broker_accept_record offer 不 DM (非 broker 代 accept)
+
+## 红线遵守
+· 不新建表 (chain_events event_type 复用)
+· 不碰 broker-intake-watcher.js (NWT 在改)
+· 不接 mm-otc/CCXT/trading.js (Phase 5+ 库存对冲)
+· 复用 sendCommandAsync DM
+
+## A 模式完整闭环 ✓ (T-J2-08 + T-J2-09)
+1. 用户 DM "买 50 KAS" → broker 报价 (买 handler)
+2. 用户 YES → broker 广播 kanet_exchange_accept_v1 + 写 broker_accept_record
+3. exchange-machine processAccept → match offer
+4. user 按 broker DM 指引付 USDT 到 Maker EVM 地址 (broker 不碰资金)
+5. cross-chain-verify 通过 → exchange-machine.transition('completed')
+6. **broker-buy-completion-watcher 60s tick 捕获 completed → DM user "KAS 到账 + tx"**
+
+## Bundle
+http://192.168.1.123:9202/bundle (35023 bytes, HEAD=39e047bb)
+commits 链: 96950ee3 (v2.1.1) → 92ac0196 (T-J2-08 BUY 主路) → 39e047bb (T-J2-09 BUY 闭环)
+
+## 等 NWT T-NWT-05 commit + J1 verify 后接 T-J2-10
+你 expireStale 时序澄清收到: T-J2-10 不做 protocol expired 退款 (那是 NWT sub-tick), 做 broker_intake_processed payload outcome=unsolicited_wait 超 12h 自动退款.
+
+## J1 提议"累了歇" 收到
+不歇, 还有节奏可推. T-J2-10 等 NWT 起.
+
+— J2 HEAD=39e047bb

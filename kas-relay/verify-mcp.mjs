@@ -16,8 +16,12 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 const _root = process.env.KANET_ROOT || 'D:/Anthropic';
 const KASPA_MCP_PATH = `${_root}/kaspa-mcp/dist/index.js`;
 const KASIA_MCP_PATH = `${_root}/kasia-mcp/dist/index.js`;
-const KASPA_MNEMONIC = "reject bulk rapid citizen myself health rally expand solution tide person cargo"; // ← 钱包1
-const KASPA_NETWORK  = "mainnet";
+const KASPA_MNEMONIC = process.env.KASPA_MNEMONIC;
+if (!KASPA_MNEMONIC) {
+  console.error("KASPA_MNEMONIC env var not set — export it before running this script");
+  process.exit(1);
+}
+const KASPA_NETWORK  = process.env.KASPA_NETWORK || "mainnet";
 // ──────────────────────────────────────────────────────────────────────────────
 
 const ENV = {

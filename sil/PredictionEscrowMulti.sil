@@ -1,0 +1,81 @@
+// PredictionEscrowMulti — KANet Phase 3a multi-oracle escrow contract (testnet TN12)
+//
+// Bettor r211 v3 + J1 #318/#319 PB consensus:
+//   - Path D: maker 自选 oracle as P2P primitive (= oracle is first-class KANet user role)
+//   - checkMultiSig built-in (silverscript-lang 1.1.0 verified by Bettor)
+//   - 3-of-5 multi-sig escrow (= 5 voter J1tn-Alice/Bob/Carol/Dave/Eve, Phase 3a single .106 host MVP)
+//   - PB-A oracle live check (publish-time) + PB-D maker_relay aggregator (settle trigger)
+//   - Phase 3a cap 100 KAS / offer (= demo, single-host, same Qwen LLM; Phase 3b 加 diversity)
+//
+// Compile: D:/silverscript/target/release/silverc.exe PredictionEscrowMulti.sil
+// Deploy:  testnet TN12 (= ws://192.168.1.109:17210 via kanet-tn12 console)
+//
+// Fee split (1% taker fee, 50/50):
+//   - winner = maker_won → maker take all (= stake + want_kas + fee), broker take 0.5%
+//   - winner = taker_won → taker take payout (= stake×(1-fee)), maker take 0.5% fee, broker take 0.5% fee
+//
+// 跟 AgentEscrow (docs/guide/16-tn12.md §16.8) 同 pattern, 但 3-recipient + multi-sig oracle
+pragma silverscript ^0.1.0;
+
+contract PredictionEscrowMulti(
+    byte[32] makerPk,        // maker x-only pubkey (= kaspatest: derived)
+    byte[32] takerPk,        // taker x-only pubkey (accept 时 update via state)
+    byte[32] brokerPk,       // broker x-only pubkey (= 推广员, zero pk = 无 broker)
+    byte[32] oracle1Pk,      // 5 voter pubkey set (= 5 J1tn-* relays Phase 3a)
+    byte[32] oracle2Pk,
+    byte[32] oracle3Pk,
+    byte[32] oracle4Pk,
+    byte[32] oracle5Pk,
+    int requiredSigs,        // 3 (= 3-of-5 multi-sig consensus)
+    int deadline,            // outcome_end_date + dispute_window_hours (= 2026-Y-M-D UTC int)
+    int makerFeePct,         // 100 = 1% (= maker share of taker fee, e.g. 50 = 0.5%)
+    int brokerFeePct         // 100 = 1% (= broker share, e.g. 50 = 0.5%)
+) {
+
+    // settleByMultiOracle — 3-of-5 oracle attest outcome winner, contract 自 split 3-way
+    //   sigs: 3-5 oracle signatures
+    //   winner: 0 = maker won, 1 = taker won
+    entrypoint function settleByMultiOracle(sig sig1, sig sig2, sig sig3, sig sig4, sig sig5, int winner) {
+        // Build sigs array + pks array (= silverscript 1.1.0 checkMultiSig built-in)
+        require(checkMultiSig(
+            [sig1, sig2, sig3, sig4, sig5],
+            [pubkey(oracle1Pk), pubkey(oracle2Pk), pubkey(oracle3Pk), pubkey(oracle4Pk), pubkey(oracle5Pk)]
+        ));
+
+        require(winner == 0 || winner == 1);
+
+        // Build 3 output locks (= P2PK to maker / taker / broker)
+        byte[34] makerLock = new ScriptPubKeyP2PK(pubkey(makerPk));
+        byte[34] takerLock = new ScriptPubKeyP2PK(pubkey(takerPk));
+        byte[34] brokerLock = new ScriptPubKeyP2PK(pubkey(brokerPk));
+
+        if (winner == 0) {
+            // maker won: maker take big share (= stake + fee returned), broker take broker_fee_pct
+            //   out[0] = maker (= 大头, escrow-maker_fee-broker_fee)
+            //   out[1] = broker (= broker_fee_pct of taker pay)
+            // Note: settler 真 build 3 output 时 maker output 含 maker_fee + stake refund
+            require(tx.outputs[0].scriptPubKey == byte[](makerLock));
+            require(tx.outputs[1].scriptPubKey == byte[](brokerLock));
+        } else {
+            // taker won: taker take payout, maker take maker_fee, broker take broker_fee
+            //   out[0] = taker (= 大头 stake payout - maker_fee - broker_fee)
+            //   out[1] = maker (= maker_fee_pct share)
+            //   out[2] = broker (= broker_fee_pct share)
+            require(tx.outputs[0].scriptPubKey == byte[](takerLock));
+            require(tx.outputs[1].scriptPubKey == byte[](makerLock));
+            require(tx.outputs[2].scriptPubKey == byte[](brokerLock));
+        }
+    }
+
+    // refund — deadline 后无 oracle 决, maker + taker 各拿回 stake (= 2-way, broker 不参与)
+    //   makerSig: maker x-only signature
+    entrypoint function refund(sig makerSig) {
+        require(checkSig(makerSig, pubkey(makerPk)));
+        require(tx.time >= deadline);
+        // 2 outputs: maker stake refund, taker want_amount refund
+        byte[34] makerLock = new ScriptPubKeyP2PK(pubkey(makerPk));
+        byte[34] takerLock = new ScriptPubKeyP2PK(pubkey(takerPk));
+        require(tx.outputs[0].scriptPubKey == byte[](makerLock));
+        require(tx.outputs[1].scriptPubKey == byte[](takerLock));
+    }
+}

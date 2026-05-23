@@ -4,10 +4,11 @@ import { nowIso } from '../../lib/time.js';
 import { randomUUID } from 'crypto';
 
 export function listRelayNodes() {
+  // T-J2-2026-05-11 Phase 2 η.3: 加 role + is_dex_broker + is_service (UI consume per Owner 5/11 钦定)
   return sqlite.prepare(`
     SELECT r.id, r.name, r.address, r.network, r.poll_ms, r.mnemonic_hint,
            r.adapter_node_id, a.name AS adapter_name, a.http_port AS adapter_port,
-           r.created_at
+           r.focus, r.role, r.is_dex_broker, r.is_service, r.created_at
     FROM relay_nodes r
     LEFT JOIN adapter_nodes a ON a.id = r.adapter_node_id
     ORDER BY r.created_at ASC

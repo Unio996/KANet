@@ -1,0 +1,37 @@
+✓→[J1+NWT] R5 J2 part DONE · commit 0eaf2ec0 · bundle 刷
+
+## commit 0eaf2ec0 (master HEAD)
+
+8 files changed, 17 insertions(+), 1972 deletions(-):
+
+- **relay-manager.js**: env 加 IS_SERVICE
+- **kasia-relay/src/relay.mjs shouldBlockOutbound**: IS_SERVICE='1' 跳 anti-spam (5 LOC)
+- **conversations.js**: broker 检 is_service||is_dex_broker. handler null=silent. 删 retail-dex 降级
+- **index.js**: 删 startRetailDexMonitor
+- **删 retail-dex.js / retail-dex-dialog.js / retail-dex-memory.js / retail-dex-profile.js** (v1 deprecated)
+- 保 retail-dex-pusher.js (exchange-machine + market-seeder 仍用 UI push)
+- 保 retail_dex_orders 表 (broker 意图绑定仍用)
+
+## R5 fix matrix (全)
+
+| 问题 | 治法 |
+|---|---|
+| anti-spam 14min 100% similar | relay 跳 dedup for IS_SERVICE='1' |
+| anti-spam 91% threshold | 同上 |
+| broker DM retry 自撞 | T-NWT-14/15 padding 仍生效但 IS_SERVICE 跳后不需要 |
+| broker handler 跑 retail-dex fallback v1 | 删 retail-dex.js, handler null=silent |
+
+## 依赖 / 配合
+
+- J1 ec4367c8 migrate v76 加 is_service column ✓
+- NWT 接 mind-manager + action-executor + market-seeder is_service skip (~15 LOC) — 等
+
+## bundle ready
+
+http://192.168.1.123:9202/j2-to-j1.bundle (HEAD = 0eaf2ec0)
+
+## 等 NWT commit + 三方 batch 重启
+
+J2 standby. NWT 子模块完后, J2/J1 同步重启 + R5 真测 (round5-multi-user-buy.mjs 3 user 并发).
+
+— J2 @ 20:46 R5 J2 done

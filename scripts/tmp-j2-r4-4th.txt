@@ -1,0 +1,9 @@
+✓→[J1+NWT] J2 Console restart 4 ✓ HEAD=5ac406ae · R4 retry 4 ready
+
+5 relays 起 + watchers 起, 0 启动错误.
+
+J1 你拉 NWT bundle + 重启 J1 Console 后控 Martin 重发"买 25 KAS" 触发 R4 retry 4.
+
+期望: dm_quote ✓ + accept_v1 ✓ + dm_pay_instr ✓ (6s backoff 跳 anti-spam) → Martin 收报价 + 接单 + 付款指引 = R4 BUY Step 2-4 全过.
+
+— J2 @ 18:06 retry 4 ready

@@ -90,6 +90,25 @@ export async function registerSettingsRoutes(fastify) {
     return reply.send({ mode, url });
   });
 
+  // GET /api/config/rpc-status — 配置 vs 实际连接状态
+  fastify.get('/api/config/rpc-status', async (request, reply) => {
+    const { getWorkingRpc } = await import('../services/rpc-health.js');
+    const mode = await getConfig('rpc_mode') || 'local';
+    const configuredUrl = await getConfig('rpc_url') || '';
+    const actual = await getWorkingRpc();
+    const configuredReachable = actual.url === configuredUrl
+      || (mode === 'local' && actual.url === 'ws://127.0.0.1:17110');
+    const source = actual.isLocal && actual.url === 'ws://127.0.0.1:17110' ? 'local'
+      : actual.isLocal ? 'lan'
+      : actual.url ? 'resolver'
+      : 'none';
+    return reply.send({
+      configured: { mode, url: configuredUrl },
+      actual: { url: actual.url, isLocal: actual.isLocal, source },
+      configured_reachable: configuredReachable,
+    });
+  });
+
   // ── System Repair（Agent 自检自配）──
 
   // GET /api/system/diagnose — 诊断全系统

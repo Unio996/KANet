@@ -1,0 +1,110 @@
+// PredictionEscrowUnanimous5 v3 — KANet Phase 4a SS escrow (testnet TN12)
+//
+// Bettor r232 reject D simplification + accept E pre-handshake — 加 双 stake P2P:
+//   - maker + taker pre-handshake (= 链下) → 双方真 pubkey → 真 P2SH addr
+//   - maker 锁 stake_maker → P2SH (= 1st UTXO)
+//   - taker 锁 stake_taker → 同 P2SH (= 2nd UTXO)
+//   - settle: 5 oracle 全签 + 一致 winner → spendable (= 双 input sum - minerFee) 拆 winner + broker
+//   - refund_both: deadline 过 双方 staked → 拆 maker_stake + taker_stake 各回
+//   - refund_maker_unjoined: deadline 过 taker 没 stake → maker 拿回单边 stake
+//
+// 跟 v2.1 diff:
+//   - ctor 加 makerStakeAmount + takerStakeAmount (= 13 params)
+//   - settle 改 inputs.length == 2 (= 双 UTXO 必)
+//   - refund 拆 2 entrypoints: refund_both / refund_maker_unjoined
+//   - 删除 v2.1 activeInputIndex == 0 (= 2-input case 不能强制 0)
+//
+// 编译: silverc.exe PredictionEscrowUnanimous5.sil --ctor args.json
+pragma silverscript ^0.1.0;
+
+contract PredictionEscrowUnanimous5(
+    byte[32] makerPk,
+    byte[32] takerPk,
+    byte[32] brokerPk,
+    byte[32] oracle1Pk,
+    byte[32] oracle2Pk,
+    byte[32] oracle3Pk,
+    byte[32] oracle4Pk,
+    byte[32] oracle5Pk,
+    int deadline,
+    int minerFee,
+    int brokerFeePct,
+    int makerStakeAmount,
+    int takerStakeAmount
+) {
+
+    // settle — 5 oracle 全签 + 一致 winner → spendable (= 双 input - minerFee) 拆 winner + broker
+    //   winner: 0 = maker won, 1 = taker won
+    //   要求: 双 stake 都 locked (= inputs.length == 2)
+    entrypoint function settle(
+        sig sig1,
+        sig sig2,
+        sig sig3,
+        sig sig4,
+        sig sig5,
+        int winner
+    ) {
+        require(checkSig(sig1, pubkey(oracle1Pk)));
+        require(checkSig(sig2, pubkey(oracle2Pk)));
+        require(checkSig(sig3, pubkey(oracle3Pk)));
+        require(checkSig(sig4, pubkey(oracle4Pk)));
+        require(checkSig(sig5, pubkey(oracle5Pk)));
+
+        require(winner == 0 || winner == 1);
+        require(tx.inputs.length == 2);
+        require(tx.outputs.length == 2);
+
+        int spendable = tx.inputs[0].value + tx.inputs[1].value - minerFee;
+        int brokerFeeAmount = spendable * brokerFeePct / 10000;
+        int winnerAmount = spendable - brokerFeeAmount;
+
+        byte[34] makerLock = new ScriptPubKeyP2PK(pubkey(makerPk));
+        byte[34] takerLock = new ScriptPubKeyP2PK(pubkey(takerPk));
+        byte[34] brokerLock = new ScriptPubKeyP2PK(pubkey(brokerPk));
+
+        if (winner == 0) {
+            require(tx.outputs[0].scriptPubKey == byte[](makerLock));
+        } else {
+            require(tx.outputs[0].scriptPubKey == byte[](takerLock));
+        }
+        require(tx.outputs[0].value == winnerAmount);
+        require(tx.outputs[1].scriptPubKey == byte[](brokerLock));
+        require(tx.outputs[1].value == brokerFeeAmount);
+    }
+
+    // refund_both — deadline 过, maker + taker 双 staked → 按 ctor stake 比例 split
+    //   触发场景: oracle 分歧 (= revote 仍不一致) OR DoS (= 1 oracle 不签)
+    entrypoint function refund_both(sig makerSig) {
+        require(checkSig(makerSig, pubkey(makerPk)));
+        require(tx.time >= deadline * 1000);  // bug 10d fix Path A
+        require(tx.inputs.length == 2);
+        require(tx.outputs.length == 2);
+
+        int spendable = tx.inputs[0].value + tx.inputs[1].value - minerFee;
+        int totalStake = makerStakeAmount + takerStakeAmount;
+        int makerRefund = spendable * makerStakeAmount / totalStake;
+        int takerRefund = spendable - makerRefund;
+
+        byte[34] makerLock = new ScriptPubKeyP2PK(pubkey(makerPk));
+        byte[34] takerLock = new ScriptPubKeyP2PK(pubkey(takerPk));
+        require(tx.outputs[0].scriptPubKey == byte[](makerLock));
+        require(tx.outputs[0].value == makerRefund);
+        require(tx.outputs[1].scriptPubKey == byte[](takerLock));
+        require(tx.outputs[1].value == takerRefund);
+    }
+
+    // refund_maker_unjoined — deadline 过, 仅 maker staked (= taker 没 join handshake 后 stake)
+    //   触发场景: maker stake locked 后 taker 没在 deadline 前 stake → maker 单边 refund
+    entrypoint function refund_maker_unjoined(sig makerSig) {
+        require(checkSig(makerSig, pubkey(makerPk)));
+        require(tx.time >= deadline * 1000);  // bug 10d fix Path A
+        require(tx.inputs.length == 1);
+        require(this.activeInputIndex == 0);
+        require(tx.outputs.length == 1);
+
+        int amount = tx.inputs[0].value - minerFee;
+        byte[34] makerLock = new ScriptPubKeyP2PK(pubkey(makerPk));
+        require(tx.outputs[0].scriptPubKey == byte[](makerLock));
+        require(tx.outputs[0].value == amount);
+    }
+}

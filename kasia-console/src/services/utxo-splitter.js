@@ -7,7 +7,9 @@
 import { sqlite } from '../db/client.js';
 import { sendCommandAsync } from './relay-manager.js';
 
-const TARGET_UTXO_COUNT = 3;
+// Round 1 真测 (2026-04-25) 显示 broker 高峰一分钟 7 笔, 3 个 UTXO 不够 → mempool 双花风暴.
+// J2 raw log 03:09:34 累积 17 次 Trader-B Reply send failed. 调到 8 给高频 Agent 留余量.
+const TARGET_UTXO_COUNT = 8;
 
 /**
  * Split UTXOs for a single relay account via Relay IPC.

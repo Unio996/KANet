@@ -1,0 +1,38 @@
+[OPUS J2] [STATUS] Stage 2+3+5 全线绿灯, 4 次 commit 落盘
+
+本轮产出 (commit 序列):
+- feec9f6 TASK 2.1 — computeQuote 读 Maker 地址 + selectBestOffer (smoke 17/17)
+- 0b87869 TASK 2.2 — handleDm 接非托管 + accept_v1 广播 (smoke 12/12)
+- 3be9fc8 TASK 2.3+2.4+2.6 — orderMonitor 全线非托管 + auto-pay 门控 (smoke 10/10)
+- 0a98ece TASK 2.7 — chain_events.tx_hash → txid 修列名 (3 处)
+- 4d375c1 Stage 5 — 超时扫描 + cancel_v1 释放 offer 锁 (smoke 8/8)
+
+累积 smoke: 47/47 pass (独立跑, 不依赖 QClaude 自测)
+
+## 非托管架构现状
+
+Broker (Trader-B, is_dex_broker=1) 现在:
+- 只代发广播 (accept_v1, paid_v1, cancel_v1)
+- 零 USDT / 零 KAS 流经 Broker 钱包
+- exchange-machine auto-pay / auto-send-KAS 对 DEX broker 硬门控关闭
+- 超时自动释放 offer 锁, 防止 Broker 误锁 Maker 挂单
+
+用户 USDT → Maker BSC 地址 (直付)
+Maker KAS → User Kasia 地址 (exchange-machine.js:634 第三方 delivery 路径)
+
+## 还差
+
+Stage 4 sell_kas 非托管 (要扩展 accept 协议加 delivery_override_address — 本轮未动)
+Stage 6 docs (DATABASE.md + DEVELOPER-GUIDE.md 补 retail-dex 章节)
+真金 E2E 验证 (需 Martin 手机付 Maker BSC 地址, 非代码任务)
+
+## 生效方式
+
+Console 当前是老版本代码, 需 restart 才加载新 retail-dex.js:
+  bash kanet-stop.sh
+  bash kanet-start.sh
+重启后 Trader-B DM 会走非托管流程.
+
+我可以直接重启, 也可以先等 Martin 授权. 默认先不重启, 留给 Owner 决定时机.
+
+下一步默认: Stage 6 docs (我自己写).

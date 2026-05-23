@@ -1,0 +1,1894 @@
+{
+  "contract_name": "PredictionEscrowUnanimous5",
+  "script": [
+    107,
+    108,
+    118,
+    0,
+    156,
+    99,
+    117,
+    85,
+    121,
+    32,
+    97,
+    98,
+    99,
+    100,
+    101,
+    102,
+    103,
+    104,
+    105,
+    106,
+    107,
+    108,
+    109,
+    110,
+    111,
+    112,
+    113,
+    114,
+    115,
+    116,
+    117,
+    118,
+    119,
+    120,
+    121,
+    122,
+    123,
+    124,
+    125,
+    126,
+    127,
+    128,
+    172,
+    105,
+    84,
+    121,
+    32,
+    129,
+    130,
+    131,
+    132,
+    133,
+    134,
+    135,
+    136,
+    137,
+    138,
+    139,
+    140,
+    141,
+    142,
+    143,
+    144,
+    145,
+    146,
+    147,
+    148,
+    149,
+    150,
+    151,
+    152,
+    153,
+    154,
+    155,
+    156,
+    157,
+    158,
+    159,
+    160,
+    172,
+    105,
+    83,
+    121,
+    32,
+    161,
+    162,
+    163,
+    164,
+    165,
+    166,
+    167,
+    168,
+    169,
+    170,
+    171,
+    172,
+    173,
+    174,
+    175,
+    176,
+    177,
+    178,
+    179,
+    180,
+    181,
+    182,
+    183,
+    184,
+    185,
+    186,
+    187,
+    188,
+    189,
+    190,
+    191,
+    192,
+    172,
+    105,
+    82,
+    121,
+    32,
+    193,
+    194,
+    195,
+    196,
+    197,
+    198,
+    199,
+    200,
+    201,
+    202,
+    203,
+    204,
+    205,
+    206,
+    207,
+    208,
+    209,
+    210,
+    211,
+    212,
+    213,
+    214,
+    215,
+    216,
+    217,
+    218,
+    219,
+    220,
+    221,
+    222,
+    223,
+    224,
+    172,
+    105,
+    120,
+    32,
+    225,
+    226,
+    227,
+    228,
+    229,
+    230,
+    231,
+    232,
+    233,
+    234,
+    235,
+    236,
+    237,
+    238,
+    239,
+    240,
+    241,
+    242,
+    243,
+    244,
+    245,
+    246,
+    247,
+    248,
+    249,
+    250,
+    251,
+    252,
+    253,
+    254,
+    255,
+    0,
+    172,
+    105,
+    118,
+    0,
+    156,
+    120,
+    81,
+    156,
+    155,
+    105,
+    179,
+    81,
+    156,
+    105,
+    185,
+    0,
+    156,
+    105,
+    180,
+    82,
+    156,
+    105,
+    0,
+    190,
+    2,
+    16,
+    39,
+    148,
+    118,
+    1,
+    50,
+    149,
+    2,
+    16,
+    39,
+    150,
+    82,
+    121,
+    0,
+    156,
+    99,
+    0,
+    195,
+    32,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    3,
+    0,
+    0,
+    32,
+    124,
+    126,
+    1,
+    172,
+    126,
+    135,
+    105,
+    103,
+    0,
+    195,
+    32,
+    33,
+    34,
+    35,
+    36,
+    37,
+    38,
+    39,
+    40,
+    41,
+    42,
+    43,
+    44,
+    45,
+    46,
+    47,
+    48,
+    49,
+    50,
+    51,
+    52,
+    53,
+    54,
+    55,
+    56,
+    57,
+    58,
+    59,
+    60,
+    61,
+    62,
+    63,
+    64,
+    3,
+    0,
+    0,
+    32,
+    124,
+    126,
+    1,
+    172,
+    126,
+    135,
+    105,
+    104,
+    0,
+    194,
+    82,
+    121,
+    82,
+    121,
+    148,
+    156,
+    105,
+    81,
+    195,
+    32,
+    65,
+    66,
+    67,
+    68,
+    69,
+    70,
+    71,
+    72,
+    73,
+    74,
+    75,
+    76,
+    77,
+    78,
+    79,
+    80,
+    81,
+    82,
+    83,
+    84,
+    85,
+    86,
+    87,
+    88,
+    89,
+    90,
+    91,
+    92,
+    93,
+    94,
+    95,
+    96,
+    3,
+    0,
+    0,
+    32,
+    124,
+    126,
+    1,
+    172,
+    126,
+    135,
+    105,
+    81,
+    194,
+    120,
+    156,
+    105,
+    0,
+    122,
+    117,
+    0,
+    122,
+    117,
+    117,
+    117,
+    117,
+    117,
+    117,
+    117,
+    81,
+    103,
+    118,
+    81,
+    156,
+    99,
+    117,
+    118,
+    32,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    172,
+    105,
+    6,
+    128,
+    157,
+    193,
+    68,
+    158,
+    1,
+    176,
+    179,
+    81,
+    156,
+    105,
+    185,
+    0,
+    156,
+    105,
+    180,
+    81,
+    156,
+    105,
+    0,
+    195,
+    32,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    3,
+    0,
+    0,
+    32,
+    124,
+    126,
+    1,
+    172,
+    126,
+    135,
+    105,
+    0,
+    194,
+    0,
+    190,
+    2,
+    16,
+    39,
+    148,
+    156,
+    105,
+    117,
+    81,
+    103,
+    117,
+    0,
+    105,
+    104,
+    104
+  ],
+  "ast": {
+    "name": "PredictionEscrowUnanimous5",
+    "params": [
+      {
+        "type_ref": {
+          "base": "byte",
+          "array_dims": [
+            {
+              "kind": "fixed",
+              "value": 32
+            }
+          ]
+        },
+        "name": "makerPk",
+        "span": "byte[32] makerPk",
+        "type_span": "byte[32]",
+        "name_span": "makerPk"
+      },
+      {
+        "type_ref": {
+          "base": "byte",
+          "array_dims": [
+            {
+              "kind": "fixed",
+              "value": 32
+            }
+          ]
+        },
+        "name": "takerPk",
+        "span": "byte[32] takerPk",
+        "type_span": "byte[32]",
+        "name_span": "takerPk"
+      },
+      {
+        "type_ref": {
+          "base": "byte",
+          "array_dims": [
+            {
+              "kind": "fixed",
+              "value": 32
+            }
+          ]
+        },
+        "name": "brokerPk",
+        "span": "byte[32] brokerPk",
+        "type_span": "byte[32]",
+        "name_span": "brokerPk"
+      },
+      {
+        "type_ref": {
+          "base": "byte",
+          "array_dims": [
+            {
+              "kind": "fixed",
+              "value": 32
+            }
+          ]
+        },
+        "name": "oracle1Pk",
+        "span": "byte[32] oracle1Pk",
+        "type_span": "byte[32]",
+        "name_span": "oracle1Pk"
+      },
+      {
+        "type_ref": {
+          "base": "byte",
+          "array_dims": [
+            {
+              "kind": "fixed",
+              "value": 32
+            }
+          ]
+        },
+        "name": "oracle2Pk",
+        "span": "byte[32] oracle2Pk",
+        "type_span": "byte[32]",
+        "name_span": "oracle2Pk"
+      },
+      {
+        "type_ref": {
+          "base": "byte",
+          "array_dims": [
+            {
+              "kind": "fixed",
+              "value": 32
+            }
+          ]
+        },
+        "name": "oracle3Pk",
+        "span": "byte[32] oracle3Pk",
+        "type_span": "byte[32]",
+        "name_span": "oracle3Pk"
+      },
+      {
+        "type_ref": {
+          "base": "byte",
+          "array_dims": [
+            {
+              "kind": "fixed",
+              "value": 32
+            }
+          ]
+        },
+        "name": "oracle4Pk",
+        "span": "byte[32] oracle4Pk",
+        "type_span": "byte[32]",
+        "name_span": "oracle4Pk"
+      },
+      {
+        "type_ref": {
+          "base": "byte",
+          "array_dims": [
+            {
+              "kind": "fixed",
+              "value": 32
+            }
+          ]
+        },
+        "name": "oracle5Pk",
+        "span": "byte[32] oracle5Pk",
+        "type_span": "byte[32]",
+        "name_span": "oracle5Pk"
+      },
+      {
+        "type_ref": {
+          "base": "int"
+        },
+        "name": "deadline",
+        "span": "int deadline",
+        "type_span": "int ",
+        "name_span": "deadline"
+      },
+      {
+        "type_ref": {
+          "base": "int"
+        },
+        "name": "minerFee",
+        "span": "int minerFee",
+        "type_span": "int ",
+        "name_span": "minerFee"
+      },
+      {
+        "type_ref": {
+          "base": "int"
+        },
+        "name": "brokerFeePct",
+        "span": "int brokerFeePct",
+        "type_span": "int ",
+        "name_span": "brokerFeePct"
+      }
+    ],
+    "constants": [],
+    "functions": [
+      {
+        "name": "settle",
+        "params": [
+          {
+            "type_ref": {
+              "base": "sig"
+            },
+            "name": "sig1",
+            "span": "sig sig1",
+            "type_span": "sig ",
+            "name_span": "sig1"
+          },
+          {
+            "type_ref": {
+              "base": "sig"
+            },
+            "name": "sig2",
+            "span": "sig sig2",
+            "type_span": "sig ",
+            "name_span": "sig2"
+          },
+          {
+            "type_ref": {
+              "base": "sig"
+            },
+            "name": "sig3",
+            "span": "sig sig3",
+            "type_span": "sig ",
+            "name_span": "sig3"
+          },
+          {
+            "type_ref": {
+              "base": "sig"
+            },
+            "name": "sig4",
+            "span": "sig sig4",
+            "type_span": "sig ",
+            "name_span": "sig4"
+          },
+          {
+            "type_ref": {
+              "base": "sig"
+            },
+            "name": "sig5",
+            "span": "sig sig5",
+            "type_span": "sig ",
+            "name_span": "sig5"
+          },
+          {
+            "type_ref": {
+              "base": "int"
+            },
+            "name": "winner",
+            "span": "int winner",
+            "type_span": "int ",
+            "name_span": "winner"
+          }
+        ],
+        "entrypoint": true,
+        "return_types": [],
+        "body": [
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "call",
+                "data": {
+                  "name": "checkSig",
+                  "args": [
+                    {
+                      "kind": "identifier",
+                      "data": "sig1",
+                      "span": "sig1"
+                    },
+                    {
+                      "kind": "call",
+                      "data": {
+                        "name": "pubkey",
+                        "args": [
+                          {
+                            "kind": "identifier",
+                            "data": "oracle1Pk",
+                            "span": "oracle1Pk"
+                          }
+                        ],
+                        "name_span": "pubkey"
+                      },
+                      "span": "pubkey(oracle1Pk)"
+                    }
+                  ],
+                  "name_span": "checkSig"
+                },
+                "span": "checkSig(sig1, pubkey(oracle1Pk))"
+              },
+              "message": null,
+              "span": "require(checkSig(sig1, pubkey(oracle1Pk)));",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "call",
+                "data": {
+                  "name": "checkSig",
+                  "args": [
+                    {
+                      "kind": "identifier",
+                      "data": "sig2",
+                      "span": "sig2"
+                    },
+                    {
+                      "kind": "call",
+                      "data": {
+                        "name": "pubkey",
+                        "args": [
+                          {
+                            "kind": "identifier",
+                            "data": "oracle2Pk",
+                            "span": "oracle2Pk"
+                          }
+                        ],
+                        "name_span": "pubkey"
+                      },
+                      "span": "pubkey(oracle2Pk)"
+                    }
+                  ],
+                  "name_span": "checkSig"
+                },
+                "span": "checkSig(sig2, pubkey(oracle2Pk))"
+              },
+              "message": null,
+              "span": "require(checkSig(sig2, pubkey(oracle2Pk)));",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "call",
+                "data": {
+                  "name": "checkSig",
+                  "args": [
+                    {
+                      "kind": "identifier",
+                      "data": "sig3",
+                      "span": "sig3"
+                    },
+                    {
+                      "kind": "call",
+                      "data": {
+                        "name": "pubkey",
+                        "args": [
+                          {
+                            "kind": "identifier",
+                            "data": "oracle3Pk",
+                            "span": "oracle3Pk"
+                          }
+                        ],
+                        "name_span": "pubkey"
+                      },
+                      "span": "pubkey(oracle3Pk)"
+                    }
+                  ],
+                  "name_span": "checkSig"
+                },
+                "span": "checkSig(sig3, pubkey(oracle3Pk))"
+              },
+              "message": null,
+              "span": "require(checkSig(sig3, pubkey(oracle3Pk)));",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "call",
+                "data": {
+                  "name": "checkSig",
+                  "args": [
+                    {
+                      "kind": "identifier",
+                      "data": "sig4",
+                      "span": "sig4"
+                    },
+                    {
+                      "kind": "call",
+                      "data": {
+                        "name": "pubkey",
+                        "args": [
+                          {
+                            "kind": "identifier",
+                            "data": "oracle4Pk",
+                            "span": "oracle4Pk"
+                          }
+                        ],
+                        "name_span": "pubkey"
+                      },
+                      "span": "pubkey(oracle4Pk)"
+                    }
+                  ],
+                  "name_span": "checkSig"
+                },
+                "span": "checkSig(sig4, pubkey(oracle4Pk))"
+              },
+              "message": null,
+              "span": "require(checkSig(sig4, pubkey(oracle4Pk)));",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "call",
+                "data": {
+                  "name": "checkSig",
+                  "args": [
+                    {
+                      "kind": "identifier",
+                      "data": "sig5",
+                      "span": "sig5"
+                    },
+                    {
+                      "kind": "call",
+                      "data": {
+                        "name": "pubkey",
+                        "args": [
+                          {
+                            "kind": "identifier",
+                            "data": "oracle5Pk",
+                            "span": "oracle5Pk"
+                          }
+                        ],
+                        "name_span": "pubkey"
+                      },
+                      "span": "pubkey(oracle5Pk)"
+                    }
+                  ],
+                  "name_span": "checkSig"
+                },
+                "span": "checkSig(sig5, pubkey(oracle5Pk))"
+              },
+              "message": null,
+              "span": "require(checkSig(sig5, pubkey(oracle5Pk)));",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "or",
+                  "left": {
+                    "kind": "binary",
+                    "data": {
+                      "op": "eq",
+                      "left": {
+                        "kind": "identifier",
+                        "data": "winner",
+                        "span": "winner"
+                      },
+                      "right": {
+                        "kind": "int",
+                        "data": 0,
+                        "span": "0 "
+                      }
+                    },
+                    "span": "winner == 0 "
+                  },
+                  "right": {
+                    "kind": "binary",
+                    "data": {
+                      "op": "eq",
+                      "left": {
+                        "kind": "identifier",
+                        "data": "winner",
+                        "span": "winner"
+                      },
+                      "right": {
+                        "kind": "int",
+                        "data": 1,
+                        "span": "1"
+                      }
+                    },
+                    "span": "winner == 1"
+                  }
+                },
+                "span": "winner == 0 || winner == 1"
+              },
+              "message": null,
+              "span": "require(winner == 0 || winner == 1);",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "eq",
+                  "left": {
+                    "kind": "nullary",
+                    "data": "tx_inputs_length",
+                    "span": "tx.inputs.length"
+                  },
+                  "right": {
+                    "kind": "int",
+                    "data": 1,
+                    "span": "1"
+                  }
+                },
+                "span": "tx.inputs.length == 1"
+              },
+              "message": null,
+              "span": "require(tx.inputs.length == 1);",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "eq",
+                  "left": {
+                    "kind": "nullary",
+                    "data": "active_input_index",
+                    "span": "this.activeInputIndex"
+                  },
+                  "right": {
+                    "kind": "int",
+                    "data": 0,
+                    "span": "0"
+                  }
+                },
+                "span": "this.activeInputIndex == 0"
+              },
+              "message": null,
+              "span": "require(this.activeInputIndex == 0);",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "eq",
+                  "left": {
+                    "kind": "nullary",
+                    "data": "tx_outputs_length",
+                    "span": "tx.outputs.length"
+                  },
+                  "right": {
+                    "kind": "int",
+                    "data": 2,
+                    "span": "2"
+                  }
+                },
+                "span": "tx.outputs.length == 2"
+              },
+              "message": null,
+              "span": "require(tx.outputs.length == 2);",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "variable_definition",
+            "data": {
+              "type_ref": {
+                "base": "int"
+              },
+              "modifiers": [],
+              "name": "spendable",
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "sub",
+                  "left": {
+                    "kind": "introspection",
+                    "data": {
+                      "kind": "input_value",
+                      "index": {
+                        "kind": "int",
+                        "data": 0,
+                        "span": "0"
+                      },
+                      "field_span": ".value"
+                    },
+                    "span": "tx.inputs[0].value"
+                  },
+                  "right": {
+                    "kind": "identifier",
+                    "data": "minerFee",
+                    "span": "minerFee"
+                  }
+                },
+                "span": "tx.inputs[0].value - minerFee"
+              },
+              "span": "int spendable = tx.inputs[0].value - minerFee;",
+              "type_span": "int ",
+              "modifier_spans": [],
+              "name_span": "spendable"
+            }
+          },
+          {
+            "kind": "variable_definition",
+            "data": {
+              "type_ref": {
+                "base": "int"
+              },
+              "modifiers": [],
+              "name": "brokerFeeAmount",
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "div",
+                  "left": {
+                    "kind": "binary",
+                    "data": {
+                      "op": "mul",
+                      "left": {
+                        "kind": "identifier",
+                        "data": "spendable",
+                        "span": "spendable"
+                      },
+                      "right": {
+                        "kind": "identifier",
+                        "data": "brokerFeePct",
+                        "span": "brokerFeePct"
+                      }
+                    },
+                    "span": "spendable * brokerFeePct"
+                  },
+                  "right": {
+                    "kind": "int",
+                    "data": 10000,
+                    "span": "10000"
+                  }
+                },
+                "span": "spendable * brokerFeePct / 10000"
+              },
+              "span": "int brokerFeeAmount = spendable * brokerFeePct / 10000;",
+              "type_span": "int ",
+              "modifier_spans": [],
+              "name_span": "brokerFeeAmount"
+            }
+          },
+          {
+            "kind": "variable_definition",
+            "data": {
+              "type_ref": {
+                "base": "int"
+              },
+              "modifiers": [],
+              "name": "winnerAmount",
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "sub",
+                  "left": {
+                    "kind": "identifier",
+                    "data": "spendable",
+                    "span": "spendable"
+                  },
+                  "right": {
+                    "kind": "identifier",
+                    "data": "brokerFeeAmount",
+                    "span": "brokerFeeAmount"
+                  }
+                },
+                "span": "spendable - brokerFeeAmount"
+              },
+              "span": "int winnerAmount = spendable - brokerFeeAmount;",
+              "type_span": "int ",
+              "modifier_spans": [],
+              "name_span": "winnerAmount"
+            }
+          },
+          {
+            "kind": "variable_definition",
+            "data": {
+              "type_ref": {
+                "base": "byte",
+                "array_dims": [
+                  {
+                    "kind": "fixed",
+                    "value": 34
+                  }
+                ]
+              },
+              "modifiers": [],
+              "name": "makerLock",
+              "expr": {
+                "kind": "new",
+                "data": {
+                  "name": "ScriptPubKeyP2PK",
+                  "args": [
+                    {
+                      "kind": "call",
+                      "data": {
+                        "name": "pubkey",
+                        "args": [
+                          {
+                            "kind": "identifier",
+                            "data": "makerPk",
+                            "span": "makerPk"
+                          }
+                        ],
+                        "name_span": "pubkey"
+                      },
+                      "span": "pubkey(makerPk)"
+                    }
+                  ],
+                  "name_span": "ScriptPubKeyP2PK"
+                },
+                "span": "new ScriptPubKeyP2PK(pubkey(makerPk))"
+              },
+              "span": "byte[34] makerLock = new ScriptPubKeyP2PK(pubkey(makerPk));",
+              "type_span": "byte[34]",
+              "modifier_spans": [],
+              "name_span": "makerLock"
+            }
+          },
+          {
+            "kind": "variable_definition",
+            "data": {
+              "type_ref": {
+                "base": "byte",
+                "array_dims": [
+                  {
+                    "kind": "fixed",
+                    "value": 34
+                  }
+                ]
+              },
+              "modifiers": [],
+              "name": "takerLock",
+              "expr": {
+                "kind": "new",
+                "data": {
+                  "name": "ScriptPubKeyP2PK",
+                  "args": [
+                    {
+                      "kind": "call",
+                      "data": {
+                        "name": "pubkey",
+                        "args": [
+                          {
+                            "kind": "identifier",
+                            "data": "takerPk",
+                            "span": "takerPk"
+                          }
+                        ],
+                        "name_span": "pubkey"
+                      },
+                      "span": "pubkey(takerPk)"
+                    }
+                  ],
+                  "name_span": "ScriptPubKeyP2PK"
+                },
+                "span": "new ScriptPubKeyP2PK(pubkey(takerPk))"
+              },
+              "span": "byte[34] takerLock = new ScriptPubKeyP2PK(pubkey(takerPk));",
+              "type_span": "byte[34]",
+              "modifier_spans": [],
+              "name_span": "takerLock"
+            }
+          },
+          {
+            "kind": "variable_definition",
+            "data": {
+              "type_ref": {
+                "base": "byte",
+                "array_dims": [
+                  {
+                    "kind": "fixed",
+                    "value": 34
+                  }
+                ]
+              },
+              "modifiers": [],
+              "name": "brokerLock",
+              "expr": {
+                "kind": "new",
+                "data": {
+                  "name": "ScriptPubKeyP2PK",
+                  "args": [
+                    {
+                      "kind": "call",
+                      "data": {
+                        "name": "pubkey",
+                        "args": [
+                          {
+                            "kind": "identifier",
+                            "data": "brokerPk",
+                            "span": "brokerPk"
+                          }
+                        ],
+                        "name_span": "pubkey"
+                      },
+                      "span": "pubkey(brokerPk)"
+                    }
+                  ],
+                  "name_span": "ScriptPubKeyP2PK"
+                },
+                "span": "new ScriptPubKeyP2PK(pubkey(brokerPk))"
+              },
+              "span": "byte[34] brokerLock = new ScriptPubKeyP2PK(pubkey(brokerPk));",
+              "type_span": "byte[34]",
+              "modifier_spans": [],
+              "name_span": "brokerLock"
+            }
+          },
+          {
+            "kind": "if",
+            "data": {
+              "condition": {
+                "kind": "binary",
+                "data": {
+                  "op": "eq",
+                  "left": {
+                    "kind": "identifier",
+                    "data": "winner",
+                    "span": "winner"
+                  },
+                  "right": {
+                    "kind": "int",
+                    "data": 0,
+                    "span": "0"
+                  }
+                },
+                "span": "winner == 0"
+              },
+              "then_branch": [
+                {
+                  "kind": "require",
+                  "data": {
+                    "expr": {
+                      "kind": "binary",
+                      "data": {
+                        "op": "eq",
+                        "left": {
+                          "kind": "introspection",
+                          "data": {
+                            "kind": "output_script_pub_key",
+                            "index": {
+                              "kind": "int",
+                              "data": 0,
+                              "span": "0"
+                            },
+                            "field_span": ".scriptPubKey"
+                          },
+                          "span": "tx.outputs[0].scriptPubKey"
+                        },
+                        "right": {
+                          "kind": "call",
+                          "data": {
+                            "name": "byte[]",
+                            "args": [
+                              {
+                                "kind": "identifier",
+                                "data": "makerLock",
+                                "span": "makerLock"
+                              }
+                            ],
+                            "name_span": "byte[]"
+                          },
+                          "span": "byte[](makerLock)"
+                        }
+                      },
+                      "span": "tx.outputs[0].scriptPubKey == byte[](makerLock)"
+                    },
+                    "message": null,
+                    "span": "require(tx.outputs[0].scriptPubKey == byte[](makerLock));",
+                    "message_span": null
+                  }
+                }
+              ],
+              "else_branch": [
+                {
+                  "kind": "require",
+                  "data": {
+                    "expr": {
+                      "kind": "binary",
+                      "data": {
+                        "op": "eq",
+                        "left": {
+                          "kind": "introspection",
+                          "data": {
+                            "kind": "output_script_pub_key",
+                            "index": {
+                              "kind": "int",
+                              "data": 0,
+                              "span": "0"
+                            },
+                            "field_span": ".scriptPubKey"
+                          },
+                          "span": "tx.outputs[0].scriptPubKey"
+                        },
+                        "right": {
+                          "kind": "call",
+                          "data": {
+                            "name": "byte[]",
+                            "args": [
+                              {
+                                "kind": "identifier",
+                                "data": "takerLock",
+                                "span": "takerLock"
+                              }
+                            ],
+                            "name_span": "byte[]"
+                          },
+                          "span": "byte[](takerLock)"
+                        }
+                      },
+                      "span": "tx.outputs[0].scriptPubKey == byte[](takerLock)"
+                    },
+                    "message": null,
+                    "span": "require(tx.outputs[0].scriptPubKey == byte[](takerLock));",
+                    "message_span": null
+                  }
+                }
+              ],
+              "span": "if (winner == 0) {\n            require(tx.outputs[0].scriptPubKey == byte[](makerLock));\n        } else {\n            require(tx.outputs[0].scriptPubKey == byte[](takerLock));\n        }",
+              "then_span": "require(tx.outputs[0].scriptPubKey == byte[](makerLock));",
+              "else_span": "require(tx.outputs[0].scriptPubKey == byte[](takerLock));"
+            }
+          },
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "eq",
+                  "left": {
+                    "kind": "introspection",
+                    "data": {
+                      "kind": "output_value",
+                      "index": {
+                        "kind": "int",
+                        "data": 0,
+                        "span": "0"
+                      },
+                      "field_span": ".value"
+                    },
+                    "span": "tx.outputs[0].value"
+                  },
+                  "right": {
+                    "kind": "identifier",
+                    "data": "winnerAmount",
+                    "span": "winnerAmount"
+                  }
+                },
+                "span": "tx.outputs[0].value == winnerAmount"
+              },
+              "message": null,
+              "span": "require(tx.outputs[0].value == winnerAmount);",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "eq",
+                  "left": {
+                    "kind": "introspection",
+                    "data": {
+                      "kind": "output_script_pub_key",
+                      "index": {
+                        "kind": "int",
+                        "data": 1,
+                        "span": "1"
+                      },
+                      "field_span": ".scriptPubKey"
+                    },
+                    "span": "tx.outputs[1].scriptPubKey"
+                  },
+                  "right": {
+                    "kind": "call",
+                    "data": {
+                      "name": "byte[]",
+                      "args": [
+                        {
+                          "kind": "identifier",
+                          "data": "brokerLock",
+                          "span": "brokerLock"
+                        }
+                      ],
+                      "name_span": "byte[]"
+                    },
+                    "span": "byte[](brokerLock)"
+                  }
+                },
+                "span": "tx.outputs[1].scriptPubKey == byte[](brokerLock)"
+              },
+              "message": null,
+              "span": "require(tx.outputs[1].scriptPubKey == byte[](brokerLock));",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "eq",
+                  "left": {
+                    "kind": "introspection",
+                    "data": {
+                      "kind": "output_value",
+                      "index": {
+                        "kind": "int",
+                        "data": 1,
+                        "span": "1"
+                      },
+                      "field_span": ".value"
+                    },
+                    "span": "tx.outputs[1].value"
+                  },
+                  "right": {
+                    "kind": "identifier",
+                    "data": "brokerFeeAmount",
+                    "span": "brokerFeeAmount"
+                  }
+                },
+                "span": "tx.outputs[1].value == brokerFeeAmount"
+              },
+              "message": null,
+              "span": "require(tx.outputs[1].value == brokerFeeAmount);",
+              "message_span": null
+            }
+          }
+        ],
+        "return_type_spans": [],
+        "span": "entrypoint function settle(\n        sig sig1,\n        sig sig2,\n        sig sig3,\n        sig sig4,\n        sig sig5,\n        int winner\n    ) {\n        require(checkSig(sig1, pubkey(oracle1Pk)));\n        require(checkSig(sig2, pubkey(oracle2Pk)));\n        require(checkSig(sig3, pubkey(oracle3Pk)));\n        require(checkSig(sig4, pubkey(oracle4Pk)));\n        require(checkSig(sig5, pubkey(oracle5Pk)));\n\n        require(winner == 0 || winner == 1);\n        require(tx.inputs.length == 1);\n        require(this.activeInputIndex == 0);\n        require(tx.outputs.length == 2);\n\n        int spendable = tx.inputs[0].value - minerFee;\n        int brokerFeeAmount = spendable * brokerFeePct / 10000;\n        int winnerAmount = spendable - brokerFeeAmount;\n\n        byte[34] makerLock = new ScriptPubKeyP2PK(pubkey(makerPk));\n        byte[34] takerLock = new ScriptPubKeyP2PK(pubkey(takerPk));\n        byte[34] brokerLock = new ScriptPubKeyP2PK(pubkey(brokerPk));\n\n        if (winner == 0) {\n            require(tx.outputs[0].scriptPubKey == byte[](makerLock));\n        } else {\n            require(tx.outputs[0].scriptPubKey == byte[](takerLock));\n        }\n        require(tx.outputs[0].value == winnerAmount);\n        require(tx.outputs[1].scriptPubKey == byte[](brokerLock));\n        require(tx.outputs[1].value == brokerFeeAmount);\n    }",
+        "name_span": "settle",
+        "body_span": "require(checkSig(sig1, pubkey(oracle1Pk)));\n        require(checkSig(sig2, pubkey(oracle2Pk)));\n        require(checkSig(sig3, pubkey(oracle3Pk)));\n        require(checkSig(sig4, pubkey(oracle4Pk)));\n        require(checkSig(sig5, pubkey(oracle5Pk)));\n\n        require(winner == 0 || winner == 1);\n        require(tx.inputs.length == 1);\n        require(this.activeInputIndex == 0);\n        require(tx.outputs.length == 2);\n\n        int spendable = tx.inputs[0].value - minerFee;\n        int brokerFeeAmount = spendable * brokerFeePct / 10000;\n        int winnerAmount = spendable - brokerFeeAmount;\n\n        byte[34] makerLock = new ScriptPubKeyP2PK(pubkey(makerPk));\n        byte[34] takerLock = new ScriptPubKeyP2PK(pubkey(takerPk));\n        byte[34] brokerLock = new ScriptPubKeyP2PK(pubkey(brokerPk));\n\n        if (winner == 0) {\n            require(tx.outputs[0].scriptPubKey == byte[](makerLock));\n        } else {\n            require(tx.outputs[0].scriptPubKey == byte[](takerLock));\n        }\n        require(tx.outputs[0].value == winnerAmount);\n        require(tx.outputs[1].scriptPubKey == byte[](brokerLock));\n        require(tx.outputs[1].value == brokerFeeAmount);"
+      },
+      {
+        "name": "refund",
+        "params": [
+          {
+            "type_ref": {
+              "base": "sig"
+            },
+            "name": "makerSig",
+            "span": "sig makerSig",
+            "type_span": "sig ",
+            "name_span": "makerSig"
+          }
+        ],
+        "entrypoint": true,
+        "return_types": [],
+        "body": [
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "call",
+                "data": {
+                  "name": "checkSig",
+                  "args": [
+                    {
+                      "kind": "identifier",
+                      "data": "makerSig",
+                      "span": "makerSig"
+                    },
+                    {
+                      "kind": "call",
+                      "data": {
+                        "name": "pubkey",
+                        "args": [
+                          {
+                            "kind": "identifier",
+                            "data": "makerPk",
+                            "span": "makerPk"
+                          }
+                        ],
+                        "name_span": "pubkey"
+                      },
+                      "span": "pubkey(makerPk)"
+                    }
+                  ],
+                  "name_span": "checkSig"
+                },
+                "span": "checkSig(makerSig, pubkey(makerPk))"
+              },
+              "message": null,
+              "span": "require(checkSig(makerSig, pubkey(makerPk)));",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "time_op",
+            "data": {
+              "tx_var": "tx_time",
+              "expr": {
+                "kind": "identifier",
+                "data": "deadline",
+                "span": "deadline"
+              },
+              "message": null,
+              "span": "require(tx.time >= deadline);",
+              "tx_var_span": "tx.time",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "eq",
+                  "left": {
+                    "kind": "nullary",
+                    "data": "tx_inputs_length",
+                    "span": "tx.inputs.length"
+                  },
+                  "right": {
+                    "kind": "int",
+                    "data": 1,
+                    "span": "1"
+                  }
+                },
+                "span": "tx.inputs.length == 1"
+              },
+              "message": null,
+              "span": "require(tx.inputs.length == 1);",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "eq",
+                  "left": {
+                    "kind": "nullary",
+                    "data": "active_input_index",
+                    "span": "this.activeInputIndex"
+                  },
+                  "right": {
+                    "kind": "int",
+                    "data": 0,
+                    "span": "0"
+                  }
+                },
+                "span": "this.activeInputIndex == 0"
+              },
+              "message": null,
+              "span": "require(this.activeInputIndex == 0);",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "eq",
+                  "left": {
+                    "kind": "nullary",
+                    "data": "tx_outputs_length",
+                    "span": "tx.outputs.length"
+                  },
+                  "right": {
+                    "kind": "int",
+                    "data": 1,
+                    "span": "1"
+                  }
+                },
+                "span": "tx.outputs.length == 1"
+              },
+              "message": null,
+              "span": "require(tx.outputs.length == 1);",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "variable_definition",
+            "data": {
+              "type_ref": {
+                "base": "int"
+              },
+              "modifiers": [],
+              "name": "amount",
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "sub",
+                  "left": {
+                    "kind": "introspection",
+                    "data": {
+                      "kind": "input_value",
+                      "index": {
+                        "kind": "int",
+                        "data": 0,
+                        "span": "0"
+                      },
+                      "field_span": ".value"
+                    },
+                    "span": "tx.inputs[0].value"
+                  },
+                  "right": {
+                    "kind": "identifier",
+                    "data": "minerFee",
+                    "span": "minerFee"
+                  }
+                },
+                "span": "tx.inputs[0].value - minerFee"
+              },
+              "span": "int amount = tx.inputs[0].value - minerFee;",
+              "type_span": "int ",
+              "modifier_spans": [],
+              "name_span": "amount"
+            }
+          },
+          {
+            "kind": "variable_definition",
+            "data": {
+              "type_ref": {
+                "base": "byte",
+                "array_dims": [
+                  {
+                    "kind": "fixed",
+                    "value": 34
+                  }
+                ]
+              },
+              "modifiers": [],
+              "name": "makerLock",
+              "expr": {
+                "kind": "new",
+                "data": {
+                  "name": "ScriptPubKeyP2PK",
+                  "args": [
+                    {
+                      "kind": "call",
+                      "data": {
+                        "name": "pubkey",
+                        "args": [
+                          {
+                            "kind": "identifier",
+                            "data": "makerPk",
+                            "span": "makerPk"
+                          }
+                        ],
+                        "name_span": "pubkey"
+                      },
+                      "span": "pubkey(makerPk)"
+                    }
+                  ],
+                  "name_span": "ScriptPubKeyP2PK"
+                },
+                "span": "new ScriptPubKeyP2PK(pubkey(makerPk))"
+              },
+              "span": "byte[34] makerLock = new ScriptPubKeyP2PK(pubkey(makerPk));",
+              "type_span": "byte[34]",
+              "modifier_spans": [],
+              "name_span": "makerLock"
+            }
+          },
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "eq",
+                  "left": {
+                    "kind": "introspection",
+                    "data": {
+                      "kind": "output_script_pub_key",
+                      "index": {
+                        "kind": "int",
+                        "data": 0,
+                        "span": "0"
+                      },
+                      "field_span": ".scriptPubKey"
+                    },
+                    "span": "tx.outputs[0].scriptPubKey"
+                  },
+                  "right": {
+                    "kind": "call",
+                    "data": {
+                      "name": "byte[]",
+                      "args": [
+                        {
+                          "kind": "identifier",
+                          "data": "makerLock",
+                          "span": "makerLock"
+                        }
+                      ],
+                      "name_span": "byte[]"
+                    },
+                    "span": "byte[](makerLock)"
+                  }
+                },
+                "span": "tx.outputs[0].scriptPubKey == byte[](makerLock)"
+              },
+              "message": null,
+              "span": "require(tx.outputs[0].scriptPubKey == byte[](makerLock));",
+              "message_span": null
+            }
+          },
+          {
+            "kind": "require",
+            "data": {
+              "expr": {
+                "kind": "binary",
+                "data": {
+                  "op": "eq",
+                  "left": {
+                    "kind": "introspection",
+                    "data": {
+                      "kind": "output_value",
+                      "index": {
+                        "kind": "int",
+                        "data": 0,
+                        "span": "0"
+                      },
+                      "field_span": ".value"
+                    },
+                    "span": "tx.outputs[0].value"
+                  },
+                  "right": {
+                    "kind": "identifier",
+                    "data": "amount",
+                    "span": "amount"
+                  }
+                },
+                "span": "tx.outputs[0].value == amount"
+              },
+              "message": null,
+              "span": "require(tx.outputs[0].value == amount);",
+              "message_span": null
+            }
+          }
+        ],
+        "return_type_spans": [],
+        "span": "entrypoint function refund(sig makerSig) {\n        require(checkSig(makerSig, pubkey(makerPk)));\n        require(tx.time >= deadline);\n        require(tx.inputs.length == 1);\n        require(this.activeInputIndex == 0);\n        require(tx.outputs.length == 1);\n\n        int amount = tx.inputs[0].value - minerFee;\n        byte[34] makerLock = new ScriptPubKeyP2PK(pubkey(makerPk));\n        require(tx.outputs[0].scriptPubKey == byte[](makerLock));\n        require(tx.outputs[0].value == amount);\n    }",
+        "name_span": "refund",
+        "body_span": "require(checkSig(makerSig, pubkey(makerPk)));\n        require(tx.time >= deadline);\n        require(tx.inputs.length == 1);\n        require(this.activeInputIndex == 0);\n        require(tx.outputs.length == 1);\n\n        int amount = tx.inputs[0].value - minerFee;\n        byte[34] makerLock = new ScriptPubKeyP2PK(pubkey(makerPk));\n        require(tx.outputs[0].scriptPubKey == byte[](makerLock));\n        require(tx.outputs[0].value == amount);"
+      }
+    ],
+    "span": "contract PredictionEscrowUnanimous5(\n    byte[32] makerPk,\n    byte[32] takerPk,\n    byte[32] brokerPk,\n    byte[32] oracle1Pk,\n    byte[32] oracle2Pk,\n    byte[32] oracle3Pk,\n    byte[32] oracle4Pk,\n    byte[32] oracle5Pk,\n    int deadline,\n    int minerFee,\n    int brokerFeePct\n) {\n\n    // settle — 5 oracle 全签 + 一致 winner → 2-way split\n    //   winner: 0 = maker won, 1 = taker won\n    entrypoint function settle(\n        sig sig1,\n        sig sig2,\n        sig sig3,\n        sig sig4,\n        sig sig5,\n        int winner\n    ) {\n        require(checkSig(sig1, pubkey(oracle1Pk)));\n        require(checkSig(sig2, pubkey(oracle2Pk)));\n        require(checkSig(sig3, pubkey(oracle3Pk)));\n        require(checkSig(sig4, pubkey(oracle4Pk)));\n        require(checkSig(sig5, pubkey(oracle5Pk)));\n\n        require(winner == 0 || winner == 1);\n        require(tx.inputs.length == 1);\n        require(this.activeInputIndex == 0);\n        require(tx.outputs.length == 2);\n\n        int spendable = tx.inputs[0].value - minerFee;\n        int brokerFeeAmount = spendable * brokerFeePct / 10000;\n        int winnerAmount = spendable - brokerFeeAmount;\n\n        byte[34] makerLock = new ScriptPubKeyP2PK(pubkey(makerPk));\n        byte[34] takerLock = new ScriptPubKeyP2PK(pubkey(takerPk));\n        byte[34] brokerLock = new ScriptPubKeyP2PK(pubkey(brokerPk));\n\n        if (winner == 0) {\n            require(tx.outputs[0].scriptPubKey == byte[](makerLock));\n        } else {\n            require(tx.outputs[0].scriptPubKey == byte[](takerLock));\n        }\n        require(tx.outputs[0].value == winnerAmount);\n        require(tx.outputs[1].scriptPubKey == byte[](brokerLock));\n        require(tx.outputs[1].value == brokerFeeAmount);\n    }\n\n    // refund — deadline 过, maker 拿回全 stake (- minerFee)\n    //   触发: revote 仍分歧 OR oracle DoS 不签 OR 任何原因 settle 不上链\n    entrypoint function refund(sig makerSig) {\n        require(checkSig(makerSig, pubkey(makerPk)));\n        require(tx.time >= deadline);\n        require(tx.inputs.length == 1);\n        require(this.activeInputIndex == 0);\n        require(tx.outputs.length == 1);\n\n        int amount = tx.inputs[0].value - minerFee;\n        byte[34] makerLock = new ScriptPubKeyP2PK(pubkey(makerPk));\n        require(tx.outputs[0].scriptPubKey == byte[](makerLock));\n        require(tx.outputs[0].value == amount);\n    }\n}",
+    "name_span": "PredictionEscrowUnanimous5"
+  },
+  "abi": [
+    {
+      "name": "settle",
+      "inputs": [
+        {
+          "name": "sig1",
+          "type_name": "sig"
+        },
+        {
+          "name": "sig2",
+          "type_name": "sig"
+        },
+        {
+          "name": "sig3",
+          "type_name": "sig"
+        },
+        {
+          "name": "sig4",
+          "type_name": "sig"
+        },
+        {
+          "name": "sig5",
+          "type_name": "sig"
+        },
+        {
+          "name": "winner",
+          "type_name": "int"
+        }
+      ]
+    },
+    {
+      "name": "refund",
+      "inputs": [
+        {
+          "name": "makerSig",
+          "type_name": "sig"
+        }
+      ]
+    }
+  ],
+  "without_selector": false,
+  "state_layout": {
+    "start": 1,
+    "len": 0
+  },
+  "debug_info": null
+}

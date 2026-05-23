@@ -74,7 +74,7 @@
         <!-- TX link -->
         <div x-show="storyData?.tx" class="mt-2 flex items-center gap-2">
           <span class="text-[9px] text-ink-300">TX:</span>
-          <a :href="storyData?.tx?.startsWith('0x') ? 'https://bscscan.com/tx/'+storyData.tx : 'https://explorer.kaspa.org/txs/'+storyData.tx"
+          <a :href="KANet.explorerTxUrl(storyData?.tx?.startsWith('0x') ? (deal?.chain || 'bnb') : 'kaspa', storyData.tx)"
             target="_blank" class="font-mono text-[10px] text-brand-500 hover:text-brand-700 underline underline-offset-2 decoration-brand-200 hover:decoration-brand-400 transition-colors" x-text="storyData?.tx"></a>
         </div>
         <div x-show="storyData?.time" class="mt-1 text-[9px] text-ink-300" x-text="storyData?.time"></div>
@@ -178,7 +178,7 @@
                     <div>
                       <span class="text-ink-300" x-text="k+': '"></span>
                       <template x-if="k==='TX' && v && v.length > 10">
-                        <a :href="v.startsWith('0x') ? 'https://bscscan.com/tx/'+v : 'https://explorer.kaspa.org/txs/'+v" target="_blank"
+                        <a :href="KANet.explorerTxUrl(v.startsWith('0x') ? (deal?.chain || 'bnb') : 'kaspa', v)" target="_blank"
                           class="text-brand-500 hover:text-brand-700 underline underline-offset-2 decoration-brand-200 transition-colors" x-text="v"></a>
                       </template>
                       <template x-if="k!=='TX' || !v || v.length <= 10">

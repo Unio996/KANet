@@ -168,7 +168,7 @@ body{background:#0a0e17;color:#e2e8f0;font-family:'Noto Sans SC',sans-serif}
           <!-- TX 印记（可点击跳转浏览器）-->
           <div x-show="storyData?.tx" class="mt-2 flex items-center gap-2">
             <span class="text-[9px] text-slate-500">TX:</span>
-            <a :href="storyData?.tx?.startsWith('0x') ? 'https://bscscan.com/tx/'+storyData.tx : 'https://explorer.kaspa.org/txs/'+storyData.tx"
+            <a :href="KANet.explorerTxUrl(storyData?.tx?.startsWith('0x') ? (deal?.chain || 'bnb') : 'kaspa', storyData.tx)"
               target="_blank" class="font-data text-[10px] text-cyan-400/60 hover:text-cyan-400 underline decoration-cyan-400/15 hover:decoration-cyan-400/40 transition-all" x-text="storyData?.tx"></a>
           </div>
           <!-- 时间 -->
@@ -247,7 +247,7 @@ body{background:#0a0e17;color:#e2e8f0;font-family:'Noto Sans SC',sans-serif}
                     <div>
                       <span class="text-slate-600" x-text="k+': '"></span>
                       <template x-if="k==='链上TX' && v && v.length > 10">
-                        <a :href="v.startsWith('0x') ? 'https://bscscan.com/tx/'+v : 'https://explorer.kaspa.org/txs/'+v" target="_blank"
+                        <a :href="KANet.explorerTxUrl(v.startsWith('0x') ? (deal?.chain || 'bnb') : 'kaspa', v)" target="_blank"
                           class="text-cyan-400/50 hover:text-cyan-400 underline decoration-cyan-400/15 hover:decoration-cyan-400/40 transition-all" x-text="v"></a>
                       </template>
                       <template x-if="k!=='链上TX' || !v || v.length <= 10">
@@ -628,10 +628,7 @@ function market() {
             if (ex.output_txid) {
               const txShort = ex.output_txid.slice(0, 16) + '...' + ex.output_txid.slice(-6);
               const isKasTx = !ex.output_txid.startsWith('0x');
-              const evmExplorers = { bnb: 'https://bscscan.com/tx/', eth: 'https://etherscan.io/tx/', sol: 'https://solscan.io/tx/', tron: 'https://tronscan.org/#/transaction/' };
-              const explorerUrl = isKasTx
-                ? 'https://explorer.kaspa.org/txs/' + ex.output_txid
-                : (evmExplorers[this.deal?.chain] || 'https://bscscan.com/tx/') + ex.output_txid;
+              const explorerUrl = KANet.explorerTxUrl(isKasTx ? 'kaspa' : (this.deal?.chain || 'bnb'), ex.output_txid);
               flow.push({ t: 'sys', icon: '🔗', msg: txShort, time, style: 'success', txUrl: explorerUrl, txFull: ex.output_txid,
                 proof: { '链上TX': ex.output_txid, '执行规则': ex.type, '来源': ex.source, '时间': time }, _o: false });
             }

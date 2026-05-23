@@ -48,15 +48,49 @@ export class PredictionSenseSkill extends Skill {
   formatForBrain(gathered) {
     if (gathered.error) return { name: this.name, description: this.description, data: {}, instructions: 'Prediction market data unavailable.' };
 
-    const sections = ['--- PREDICTION MARKETS (Polymarket, live) ---'];
-    sections.push(`Top ${gathered.count} markets by volume:\n`);
+    const all = gathered.markets || [];
 
-    for (const m of gathered.markets) {
+    // Proactive/reflect: compact summary (Top 10 by volume + Top 5 expiring soon)
+    // Reactive (user asked): Top 20 by volume
+    const isCompact = this._taskType === 'proactive' || this._taskType === 'reflect';
+
+    const byVolume = [...all].sort((a, b) => (b.volume || 0) - (a.volume || 0));
+    const topMarkets = isCompact ? byVolume.slice(0, 10) : byVolume.slice(0, 20);
+
+    // Expiring soon: markets with end_date within 7 days
+    let expiringSoon = [];
+    if (isCompact) {
+      const now = Date.now();
+      const weekMs = 7 * 24 * 3600 * 1000;
+      expiringSoon = all
+        .filter(m => m.end_date && new Date(m.end_date).getTime() - now < weekMs && new Date(m.end_date).getTime() > now)
+        .sort((a, b) => new Date(a.end_date) - new Date(b.end_date))
+        .slice(0, 5)
+        .filter(m => !topMarkets.some(t => t.question === m.question));
+    }
+
+    const sections = ['--- PREDICTION MARKETS (Polymarket, live) ---'];
+    sections.push(`${all.length} markets tracked, showing top ${topMarkets.length}${expiringSoon.length ? ' + ' + expiringSoon.length + ' expiring soon' : ''}:\n`);
+
+    const formatMarket = (m) => {
       const vol = m.volume ? `$${(m.volume / 1000).toFixed(0)}K vol` : '';
-      sections.push(`  Q: ${m.question}`);
-      if (m.outcome) sections.push(`     → ${m.outcome}`);
-      if (vol) sections.push(`     ${vol}`);
+      const lines = [`  Q: ${m.question}`];
+      if (m.outcome) lines.push(`     → ${m.outcome}`);
+      if (vol) lines.push(`     ${vol}`);
+      return lines.join('\n');
+    };
+
+    for (const m of topMarkets) {
+      sections.push(formatMarket(m));
       sections.push('');
+    }
+
+    if (expiringSoon.length) {
+      sections.push('Expiring within 7 days:');
+      for (const m of expiringSoon) {
+        sections.push(formatMarket(m));
+        sections.push('');
+      }
     }
 
     sections.push(
@@ -70,7 +104,7 @@ export class PredictionSenseSkill extends Skill {
     return {
       name: this.name,
       description: this.description,
-      data: { marketCount: gathered.count },
+      data: { marketCount: all.length, shown: topMarkets.length + expiringSoon.length },
       instructions: sections.join('\n'),
     };
   }

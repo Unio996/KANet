@@ -13,23 +13,37 @@
 
 import { sqlite } from '../db/client.js';
 import { getVerifier } from './exchange-verifiers.js';
+import { recordChainEvent } from './chain-event.js';
 import { executeHedge } from './trade-protocol-filter.js';
-import { sendCommandAsync } from './relay-manager.js';
+import { releaseFunds, spendFunds } from './fund-lock.js';
 import crypto from 'crypto';
 
 // ── Valid Transitions ─────────────────────────────────────────
 
+// T-J2-2026-05-11 Phase 2 A.1 (NWT #18 ABE audit): 加 refunded transition + TERMINAL state。
+// 3 direct UPDATE bypass sites (broker-state-authority.js:482 真 refunded; api/exchange.js:48 真 expired;
+// broker-intake-watcher.js:429 真 timed_out) — A.2-A.4 重定向走 transition() 必要 VALID_TRANSITIONS 含 refunded。
+// refunded source states: open/matched/verifying/delivering/verified/awaiting_manual_confirm/awaiting_oracle
+// (broker-state-authority advanceToRefunded 真 cancel-refund 路径, 任 active state 都可走 refund)。
 const VALID_TRANSITIONS = {
-  open:                     ['matched', 'cancelled', 'expired'],
-  matched:                  ['verifying', 'awaiting_manual_confirm', 'awaiting_oracle', 'escrow_locked'],
-  escrow_locked:            ['verifying', 'awaiting_manual_confirm', 'timed_out'],
-  verifying:                ['completed', 'disputed', 'timed_out'],
-  awaiting_manual_confirm:  ['completed', 'disputed', 'timed_out'],
-  awaiting_oracle:          ['completed', 'failed', 'timed_out'],
+  open:                     ['matched', 'cancelled', 'expired', 'refunded', 'timed_out'],
+  matched:                  ['verifying', 'awaiting_manual_confirm', 'awaiting_oracle', 'refunded'],
+  verifying:                ['delivering', 'collecting_sigs', 'disputed', 'timed_out', 'refunded'],
+  delivering:               ['completed', 'verified', 'disputed', 'refunded'],  // verified = revert on delivery failure
+  verified:                 ['delivering', 'disputed', 'timed_out', 'refunded'], // delivery retry or manual intervention
+  awaiting_manual_confirm:  ['completed', 'disputed', 'timed_out', 'refunded'],
+  awaiting_oracle:          ['completed', 'failed', 'timed_out', 'refunded'],
+  // Phase 4a E pre-handshake states (Bettor r232/r233):
+  pending_taker:            ['handshake_done', 'cancelled', 'expired'],  // step 1 → step 2 OR maker abort OR handshake timeout
+  handshake_done:           ['open_awaiting_taker_stake', 'cancelled', 'expired'],  // step 2 → step 3 OR maker abort
+  open_awaiting_taker_stake:['matched', 'refunded', 'expired', 'timed_out'],  // step 3 → step 4 OR maker refund unjoined
+  // Phase 4a Sub 8 Phase 2 — TX-sig collection state (Bettor r242):
+  collecting_sigs:          ['completed', 'verifying', 'refunded', 'timed_out'],  // 5-of-5 unanimous → dispatched Phase 2 → wait 10 TX sigs OR timeout fallback
 };
 
 // Terminal states — no further transitions allowed
-const TERMINAL = new Set(['completed', 'disputed', 'timed_out', 'failed', 'cancelled', 'expired']);
+// A.1: 加 refunded (broker-state-authority advanceToRefunded 真 terminal sink, 跟 cancelled/expired 同 class)
+const TERMINAL = new Set(['completed', 'disputed', 'timed_out', 'failed', 'cancelled', 'expired', 'refunded']);
 
 // ── State Transitions ─────────────────────────────────────────
 
@@ -37,7 +51,7 @@ const TERMINAL = new Set(['completed', 'disputed', 'timed_out', 'failed', 'cance
  * Transition an offer to a new protocol_status.
  * Enforces valid transitions. Sets timestamps and is_fully_observed.
  */
-function transition(offerId, newStatus, extra = {}) {
+export function transition(offerId, newStatus, extra = {}) {
   const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offerId);
   if (!offer) throw new Error(`Offer not found: ${offerId}`);
 
@@ -62,6 +76,7 @@ function transition(offerId, newStatus, extra = {}) {
     verifying:               'verifying_started_at',
     awaiting_manual_confirm: 'verifying_started_at',
     awaiting_oracle:         'verifying_started_at',
+    delivering:              'delivering_at',
     completed:               'completed_at',
     disputed:                'disputed_at',
     timed_out:               'timed_out_at',
@@ -72,13 +87,27 @@ function transition(offerId, newStatus, extra = {}) {
     vals.push(now);
   }
 
-  // Terminal states → is_fully_observed = true
+  // Terminal states → is_fully_observed = true + fund lock resolution
+  // IMPORTANT: both paths must run for ANY terminal transition. handleExchangeDelivered
+  // in trade-protocol-filter.js used to bypass transition() with direct SQL UPDATE,
+  // which caused fund_lock leaks on completed. See Phase 1 stress test S9 finding.
   if (TERMINAL.has(newStatus)) {
     updates.push('is_fully_observed = 1');
+    if (newStatus === 'completed') {
+      // Delivery completed → mark funds as spent (idempotent; safe to call twice)
+      try { spendFunds(offerId); } catch (e) { console.error(`[exchange-machine] spendFunds error: ${e.message}`); }
+    } else {
+      // Cancel/expire/dispute/timed_out/failed → release fund locks
+      try { releaseFunds(offerId); } catch (e) { console.error(`[exchange-machine] releaseFunds error: ${e.message}`); }
+    }
   }
 
   // Extra fields (taker, accept_commitment, etc.)
+  // Skip metadata-only keys consumed by chain_event recording (txHash) — they're
+  // not columns on exchange_offers and would crash the UPDATE.
+  const META_ONLY = new Set(['txHash']);
   for (const [k, v] of Object.entries(extra)) {
+    if (META_ONLY.has(k)) continue;
     updates.push(`${k} = ?`);
     vals.push(v);
   }
@@ -88,6 +117,66 @@ function transition(offerId, newStatus, extra = {}) {
 
   console.log(`[exchange-machine] ${offerId.slice(0, 8)}: ${offer.protocol_status} → ${newStatus}`);
 
+  // ── chain_events: 每次状态变更都留链上审计痕迹 ──
+  try {
+    recordChainEvent({
+      txid: extra.txHash || extra.taker_tx_id || null,
+      eventType: `exchange_${newStatus}`,
+      fromAddress: offer.maker,
+      toAddress: offer.taker,
+      payload: JSON.stringify({
+        offer_id: offerId,
+        give_asset: offer.give_asset, give_amount: offer.give_amount,
+        want_asset: offer.want_asset, want_amount: offer.want_amount,
+        from_status: offer.protocol_status, to_status: newStatus,
+      }),
+    });
+  } catch (evtErr) {
+    console.warn(`[exchange-machine] chain_event recording failed: ${evtErr.message}`);
+  }
+
+  // 议 B1 (Owner 19:55+ 钦定 lifecycle): 关键状态变更主动 DM taker.
+  // 各 transition 点显式反馈 — verifying → delivering (USDT 验证通过) / completed (final)
+  // / timed_out / disputed / failed. user 永不静默, 每节点知道在哪.
+  if (offer.taker && offer.taker.startsWith('kaspa:')) {
+    let _dmKind = null, _dmMsg = null;
+    if (newStatus === 'delivering') {
+      _dmKind = 'dm_payment_verified';
+      _dmMsg = `✅ USDT 验证通过, 正在发 ${offer.give_amount} ${offer.give_asset} 给你, 1-2 分钟到账.`;
+    } else if (newStatus === 'completed') {
+      _dmKind = 'dm_complete';
+      _dmMsg = `🎉 交易完成! ${offer.give_amount} ${offer.give_asset} 已到账. 谢谢使用 KANet broker, 想继续买卖随时回我.`;
+    } else if (newStatus === 'timed_out') {
+      _dmKind = 'dm_timeout';
+      _dmMsg = `⏰ 订单超时 — 30 分钟内没收到付款验证, 已自动取消. 资金如已转出请联系 Owner 处理.`;
+    } else if (newStatus === 'disputed') {
+      // T-J2-2026-04-27 v1.1: 真 educate user 真 dispute 真因 + 真 actionable (J2 R21 沉淀,
+      // J1 22:14 + 24:42 真测撞 underpayment dispute 真灾难 — 真 actionable explanation 防 user 真懵).
+      _dmKind = 'dm_failed';
+      const meta = JSON.parse(offer.verification_meta || '{}');
+      const reason = meta.dispute_reason || '';
+      if (/Underpayment/i.test(reason)) {
+        const expectedM = reason.match(/expected (\d+\.?\d*)/);
+        const gotM = reason.match(/got (\d+\.?\d*)/);
+        const expected = expectedM ? expectedM[1] : '?';
+        const got = gotM ? gotM[1] : '?';
+        const ratio = expectedM && gotM ? (parseFloat(got)/parseFloat(expected)*100).toFixed(0) : '?';
+        _dmMsg = `⚠ 订单 #${offer.id.slice(0,8)} 进入争议:\n· 你转: ${got} ${offer.want_asset}\n· 期望: ${expected} ${offer.want_asset}\n· 真转 ${ratio}% 真不够 (真容差 99.5%+)\n\nbroker 真按比例 deliver: ${(parseFloat(offer.give_amount) * parseFloat(got||0) / parseFloat(expected||1)).toFixed(6)} ${offer.give_asset} (broker 真不收 fee, 等比例发货 zero-loss).\n请等 ~1min broker 真处理. 大额或紧急可联系 Owner.`;
+      } else {
+        _dmMsg = `⚠ 订单 #${offer.id.slice(0,8)} 进入争议: ${reason || '链上验证未通过'}.\nbroker 真自动 retry 3 次未过 → 真 dispute. broker 真 review 真因后 either 退款 OR 按真转 amount 比例 deliver. 真处理 ~5min, 大额或紧急可联系 Owner.`;
+      }
+    } else if (newStatus === 'failed') {
+      _dmKind = 'dm_failed';
+      _dmMsg = `❌ 订单 #${offer.id.slice(0,8)} 失败: 链上验证或发送出错. broker 真 review 真因, 真 retry OR 真退款. 大额或紧急可联系 Owner 真客服 (真不会消失你的资金).`;
+    }
+    if (_dmKind) {
+      // fire-and-forget (transition 是 sync, 不阻塞流程, DM 失败 warn 不抛)
+      import('./broker-action-queue.js').then(m => {
+        m.enqueue({ kind: _dmKind, peer: offer.taker, payload: { message: _dmMsg } });
+      }).catch(e => console.warn(`[exchange-machine] lifecycle DM ${_dmKind} err: ${e.message}`));
+    }
+  }
+
   // 交割完成 → 升级 maker 和 taker 的 classification 到 verified_agent（只升不降）
   if (newStatus === 'completed' && offer.maker && offer.taker) {
     sqlite.prepare(`
@@ -96,119 +185,83 @@ function transition(offerId, newStatus, extra = {}) {
     `).run(offer.maker, offer.taker);
   }
 
+  // T5b: maker auto-pay-give — BUY offer (give=USDT) 完成时自动付 USDT 给 taker
+  // 仅当 pub.state='filled' 时触发（避免 double pay）
+  if (newStatus === 'completed' && offer.give_asset === 'USDT' && offer.give_chain) {
+    try { _makerAutoPayGive(offer).catch(e => console.error(`[exchange-machine] makerAutoPayGive error: ${e.message}`)); }
+    catch {}
+  }
+
   return sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offerId);
 }
 
-// ── Escrow Integration ───────────────────────────────────────
+// ── Maker Auto-Pay-Give (T5b) ──────────────────────────────────────
 
 /**
- * Check if an offer should use P2SH escrow.
- * Condition: maker is a local Agent (has relay_node entry).
+ * T5b: For BUY offers (maker gives USDT), auto-pay USDT to taker when completed.
+ * Only fires when pub.state='filled' (taker already sent KAS).
  */
-function shouldUseEscrow(offer) {
-  if (!offer.maker) return false;
-  const local = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(offer.maker);
-  return !!local;
-}
-
-/**
- * Get x-only pubkey for a local relay via IPC.
- */
-async function getLocalPubkey32(address) {
-  const relay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(address);
-  if (!relay) throw new Error(`No relay for address ${address}`);
-  const result = await sendCommandAsync(relay.id, { type: 'get_pubkey' });
-  if (!result.pubkey32) throw new Error('get_pubkey returned no pubkey32');
-  return { pubkey32: result.pubkey32, relayId: relay.id };
-}
-
-/**
- * Create escrow for a matched offer: compile contract + lock funds.
- * Non-blocking — failure logs warning but does not throw.
- */
-async function tryCreateAndLockEscrow(offer) {
-  try {
-    const { pubkey32, relayId } = await getLocalPubkey32(offer.maker);
-    // Initial simplification: all three roles use maker's key
-    // TODO: get taker pubkey from Agent Card, designate independent arbiter
-    const buyerPk32 = pubkey32;
-    const sellerPk32 = pubkey32;
-    const arbiterPk32 = pubkey32;
-
-    // 1. Create escrow contract
-    const createResult = await sendCommandAsync(relayId, {
-      type: 'create_escrow', buyerPk32, sellerPk32, arbiterPk32,
-    });
-    if (createResult.error) throw new Error(createResult.error);
-
-    // 2. Write escrow_states (status=created)
-    const escrowId = crypto.randomUUID();
-    const now = new Date().toISOString();
-    sqlite.prepare(`
-      INSERT INTO escrow_states
-      (id, offer_id, initiator_relay_id, buyer_address, seller_address,
-       arbiter_address, p2sh_address, redeem_script_hex, amount_sompi, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'created', ?, ?)
-    `).run(
-      escrowId, offer.id, relayId,
-      offer.maker, offer.taker || 'pending', offer.maker,
-      createResult.p2shAddress, createResult.redeemScriptHex,
-      String(BigInt(Math.round(Number(offer.give_amount || 0) * 1e8))), now, now,
-    );
-
-    // 3. Lock funds into P2SH
-    // give_amount is stored as-is from the offer (e.g. "3" means 3 KAS, not sompi)
-    const amountKas = String(offer.give_amount || '0');
-    const lockResult = await sendCommandAsync(relayId, {
-      type: 'lock_escrow', p2shAddress: createResult.p2shAddress, amountKas,
-    });
-    if (lockResult.error) throw new Error(lockResult.error);
-
-    // 4. Update escrow status
-    sqlite.prepare(
-      "UPDATE escrow_states SET status = 'locked', lock_txid = ?, updated_at = ? WHERE id = ?"
-    ).run(lockResult.txId, new Date().toISOString(), escrowId);
-
-    // 5. Transition offer
-    transition(offer.id, 'escrow_locked');
-    console.log(`[escrow] ${offer.id.slice(0, 8)} locked ${amountKas} KAS → ${createResult.p2shAddress.slice(-12)} TX: ${lockResult.txId}`);
-    return true;
-  } catch (e) {
-    console.log(`[escrow] ${offer.id.slice(0, 8)} escrow failed (non-blocking): ${e.message}`);
-    return false;
+export async function _makerAutoPayGive(offer) {
+  const pub = sqlite.prepare(
+    "SELECT * FROM retail_dex_buy_publications WHERE seeder_publish_offer_id = ? AND state = 'filled'"
+  ).get(offer.id);
+  if (!pub) {
+    // No matching pub or pub not filled — skip (may be a non-seeder BUY offer)
+    return;
   }
+
+  const transferUsdt = await getTransferUsdt();
+  const wallet = sqlite.prepare(
+    "SELECT privkey_encrypted FROM agent_wallets WHERE relay_node_id = ? AND chain = ? AND is_default = 1 LIMIT 1"
+  ).get(offer.maker, pub.pay_chain);
+  if (!wallet?.privkey_encrypted) {
+    console.warn(`[exchange-machine] maker auto-pay: no seeder wallet for offer ${offer.id.slice(0, 8)}, pub ${pub.id.slice(0, 8)}`);
+    return;
+  }
+
+  const takerAddr = offer.taker_payment_address;
+  const amount = parseFloat(pub.total_usdt);
+
+  console.log(`[exchange-machine] maker auto-pay: sending ${amount} USDT → ${takerAddr?.slice(0, 12)}... on ${pub.pay_chain} for offer ${offer.id.slice(0, 8)}`);
+  const result = await transferUsdt(pub.pay_chain, wallet.privkey_encrypted, takerAddr, amount);
+  if (!result.ok) {
+    sqlite.prepare("UPDATE retail_dex_buy_publications SET state = 'failed', error_reason = ? WHERE id = ?").run(`maker_auto_pay_failed: ${result.error}`, pub.id);
+    // T7 push DM
+    try {
+      const refreshedPub = sqlite.prepare("SELECT * FROM retail_dex_buy_publications WHERE id = ?").get(pub.id);
+      const { pushPubTransition } = await import('./retail-dex-pusher.js');
+      pushPubTransition({ pub: refreshedPub, newState: 'failed', brokerRelayId: pub.broker_relay_id }).catch(e => console.warn(`[em] push failed: ${e.message}`));
+    } catch {}
+    throw new Error(`maker_auto_pay_failed: ${result.error}`);
+  }
+
+  console.log(`[exchange-machine] maker auto-pay TX: ${result.txHash} for offer ${offer.id.slice(0, 8)}`);
+
+  // Success: mark pub completed
+  const now = new Date().toISOString();
+  sqlite.prepare("UPDATE retail_dex_buy_publications SET state = 'completed', filled_at = ?, kas_delivery_tx = ?, updated_at = ? WHERE id = ?").run(result.txHash, result.txHash, now, pub.id);
+  // T7 push DM
+  try {
+    const refreshedPub = sqlite.prepare("SELECT * FROM retail_dex_buy_publications WHERE id = ?").get(pub.id);
+    const { pushPubTransition } = await import('./retail-dex-pusher.js');
+    pushPubTransition({ pub: refreshedPub, newState: 'completed', brokerRelayId: pub.broker_relay_id }).catch(e => console.warn(`[em] push completed: ${e.message}`));
+  } catch {}
 }
 
+// ── Test Injection ───────────────────────────────────────────
+
+let _transferUsdtOverride = null;
+export function _testInjectTransferUsdt(fn) { _transferUsdtOverride = fn; }
+export function _testResetTransferUsdt() { _transferUsdtOverride = null; }
+
 /**
- * Execute escrow on offer completion/dispute/timeout.
+ * Internal: get transferUsdt (from override or dynamic import).
+ * Used by _makerAutoPayGive so smoke tests can inject a mock.
  */
-async function tryExecuteEscrow(offerId, branch) {
-  const escrow = sqlite.prepare(
-    "SELECT * FROM escrow_states WHERE offer_id = ? AND status = 'locked'"
-  ).get(offerId);
-  if (!escrow) return; // no escrow for this offer
-
-  try {
-    const toAddress = branch === 0 ? escrow.seller_address : escrow.buyer_address;
-    const lockTime = (branch === 1 && escrow.deadline) ? escrow.deadline : 0;
-    const result = await sendCommandAsync(escrow.initiator_relay_id, {
-      type: 'execute_escrow',
-      p2shAddress: escrow.p2sh_address,
-      redeemScriptHex: escrow.redeem_script_hex,
-      branch, toAddress, lockTime,
-    });
-    if (result.error) throw new Error(result.error);
-
-    const statusMap = { 0: 'released', 1: 'refunded', 2: 'released' };
-    sqlite.prepare(
-      'UPDATE escrow_states SET status = ?, unlock_txid = ?, updated_at = ? WHERE id = ?'
-    ).run(statusMap[branch], result.txId, new Date().toISOString(), escrow.id);
-
-    const branchNames = ['release', 'refund', 'arbitrate'];
-    console.log(`[escrow] ${offerId.slice(0, 8)} ${branchNames[branch]} → ${toAddress.slice(-12)} TX: ${result.txId}`);
-  } catch (e) {
-    console.log(`[escrow] ${offerId.slice(0, 8)} execute failed: ${e.message}`);
-  }
+async function getTransferUsdt() {
+  if (_transferUsdtOverride) return _transferUsdtOverride;
+  const m = await import('./evm-transfer.js');
+  return m.transferUsdt;
 }
 
 // ── Accept Logic ──────────────────────────────────────────────
@@ -225,7 +278,18 @@ export function processAccept(msg) {
 
   const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(msg.offer_id);
   if (!offer) {
-    console.log(`[exchange-machine] Accept for unknown offer: ${msg.offer_id}`);
+    // 2026-04-14 Q5 audit fix: stash orphan accept for replay when publish arrives later
+    // (Kaspa DAG 不保证同 block TX order, Scout 批量扫链可能 accept 先到 publish 后到)
+    try {
+      const id = msg._tx || crypto.randomUUID();
+      sqlite.prepare(`
+        INSERT OR REPLACE INTO pending_exchange_accepts (id, offer_id, msg_json, received_at)
+        VALUES (?, ?, ?, ?)
+      `).run(id, msg.offer_id, JSON.stringify(msg), new Date().toISOString());
+      console.log(`[exchange-machine] Accept for unknown offer ${msg.offer_id.slice(0,8)} → stashed for replay (orphan buffer)`);
+    } catch (e) {
+      console.log(`[exchange-machine] Accept for unknown offer ${msg.offer_id.slice(0,8)}, orphan stash failed: ${e.message}`);
+    }
     return null;
   }
 
@@ -235,10 +299,51 @@ export function processAccept(msg) {
     return null;
   }
 
+  // Self-accept prevention: maker cannot accept own offer.
+  // T-NWT-2026-04-26 self-accept fix: broker_dynamic_quote 路径 broker 自挂 maker + broker 代 user
+  // 发 accept_v1 → msg._from = broker = maker 误伤. payload 已 carry receive_address (= user kasia),
+  // 用 receive_address 当真 taker (broker 自挂时), fallback _from (普通 client 不 carry receive_address).
+  // 普通 user 自 accept: receive_address 缺 → fallback _from = user = maker → 仍 reject ✓
+  // broker 代 accept: receive_address = user, _from = broker, maker = broker → taker(user) !== maker(broker) → 通过 ✓
+  const taker = msg.receive_address || msg._from;
+  if (taker && taker === offer.maker) {
+    console.log(`[exchange-machine] Accept rejected: self-accept (maker === taker: ${taker.slice(-12)})`);
+    return null;
+  }
+
   // Check expiry
   if (offer.expires_at && new Date() > new Date(offer.expires_at)) {
     transition(offer.id, 'expired');
     return null;
+  }
+
+  // ── Partial fill (NWT 2026-04-29 broker-v2 阶段 2 task 2/7) ──
+  // Owner 钦定 限价单簿 partial fill: accept_v1 可指定 amount (chunk_qty < give_amount).
+  // 缺省 amount = full give_amount (向后兼容). MVP single-chunk-per-offer (multi-taker 由
+  // market-seeder republish 残量实现, multi-chunk-per-offer 留 phase 2).
+  const offerGiveAmount = parseFloat(offer.give_amount);
+  const requestedAmount = msg.amount !== undefined && msg.amount !== null
+    ? parseFloat(msg.amount)
+    : offerGiveAmount;
+  if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
+    console.log(`[exchange-machine] Accept rejected: invalid amount ${msg.amount} (offer ${offer.id.slice(0,8)})`);
+    return null;
+  }
+  if (requestedAmount > offerGiveAmount + 1e-9) {
+    console.log(`[exchange-machine] Accept rejected: amount ${requestedAmount} > give_amount ${offerGiveAmount} (offer ${offer.id.slice(0,8)})`);
+    return null;
+  }
+
+  // 1% price tolerance check (phase 1 single param). 仅当 msg.price 提供时校验.
+  if (msg.price !== undefined && msg.price !== null && offerGiveAmount > 0) {
+    const offerPrice = parseFloat(offer.want_amount) / offerGiveAmount;
+    const requestedPrice = parseFloat(msg.price);
+    const tolerance = offer.price_tolerance != null ? parseFloat(offer.price_tolerance) : 0.01;
+    if (offerPrice > 0 && Number.isFinite(requestedPrice) &&
+        Math.abs(requestedPrice - offerPrice) / offerPrice > tolerance + 1e-9) {
+      console.log(`[exchange-machine] Accept rejected: price ${requestedPrice} exceeds ${(tolerance*100).toFixed(2)}% tolerance vs offer ${offerPrice} (offer ${offer.id.slice(0,8)})`);
+      return null;
+    }
   }
 
   // Validate accept_commitment (if provided)
@@ -246,29 +351,63 @@ export function processAccept(msg) {
     .update(`${msg.offer_id}${msg._from}${Date.now()}`)
     .digest('hex');
 
-  // Transition: open → matched
-  const matched = transition(offer.id, 'matched', {
-    taker: msg._from,
-    taker_tx_id: msg._tx,
-    accept_commitment: commitment,
-  });
-
-  // Try P2SH escrow (non-blocking — failure degrades gracefully)
-  if (shouldUseEscrow(matched)) {
-    tryCreateAndLockEscrow(matched).then(ok => {
-      if (ok) {
-        // escrow_locked → continue to verification
-        const updated = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(matched.id);
-        routeToVerification(updated);
-      } else {
-        // escrow failed, proceed without escrow
-        routeToVerification(matched);
-      }
-    });
-    return matched; // return immediately, escrow runs async
+  // Write taker_chain + taker_payment_address from accept message (cross-node sync)
+  // T-J2-2026-04-27 v1.2 (c): 真存 evm_recv_address 进 verification_meta (USDC delivery 真用).
+  // accept_v1 真 receive_address = user kasia (KAS path), evm_recv_address = user EVM (stable path).
+  // exchange-machine auto-deliver Bug-Z2 fix 真 lookup verification_meta.evm_recv_address (stable) OR taker_payment_address (KAS).
+  if (msg.selected_chain || msg.receive_address || msg.evm_recv_address) {
+    const meta = JSON.parse(offer.verification_meta || '{}');
+    if (msg.selected_chain) meta.receive_chain = msg.selected_chain;
+    if (msg.receive_address) meta.receive_address = msg.receive_address;
+    if (msg.evm_recv_address) meta.evm_recv_address = msg.evm_recv_address;
+    // T-J2-2026-05-11 Phase 2 B.1 (NWT #18 ABE audit): 加 protocol_status='open' guard 防 race。
+    // 之前 2 个 concurrent accept 同 offer → 两 UPDATE 都 succeed → 第二 overwrite taker_chain/addr,
+    // 之后 transition() 仅 first 命中 open→matched, 第二 fail revert 但 taker 字段已被 overwrite,
+    // race window 内 stale data 写入。加 status=open guard, 第二 UPDATE 0 row affect, 第一稳赢。
+    const updRes = sqlite.prepare(`UPDATE exchange_offers SET taker_chain = ?, taker_payment_address = ?, verification_meta = ? WHERE id = ? AND protocol_status = 'open'`)
+      .run(msg.selected_chain || null, msg.receive_address || null, JSON.stringify(meta), offer.id);
+    if (updRes.changes === 0) {
+      console.warn(`[exchange-machine] B.1 race: accept_v1 offer ${offer.id.slice(0,8)} taker UPDATE 0 rows (status != 'open', 已被前一个 accept 接走)`);
+    }
   }
 
-  // Route to verification (no escrow path)
+  // Transition: open → matched (含 filled_qty 记录 partial fill 量)
+  // T-NWT-2026-04-26 self-accept fix follow-up: taker 字段同 self-accept check 逻辑 —
+  // broker 代发时真 taker 在 receive_address (msg._from = broker 信使).
+  // 普通 client 不 carry receive_address → fallback msg._from.
+  const matched = transition(offer.id, 'matched', {
+    taker: msg.receive_address || msg._from,
+    taker_tx_id: msg._tx,
+    accept_commitment: commitment,
+    filled_qty: requestedAmount,
+  });
+
+  // ── chain_events broker_chunk_filled audit (NWT v84 partial fill spec) ──
+  // Audit trail 给 order-book.getOrderStatus sub_chunks 渲染. txid 必 64 hex (v83 trigger).
+  // msg._tx 来自 accept_v1 chain TX, 应为 64 hex; 不合规 recordChainEvent 自 try/catch 吞.
+  try {
+    if (msg._tx && msg._tx.length === 64) {
+      recordChainEvent({
+        txid: msg._tx,
+        eventType: 'broker_chunk_filled',
+        fromAddress: msg.receive_address || msg._from,
+        toAddress: offer.maker,
+        payload: {
+          order_id: offer.id,
+          chunk_qty: requestedAmount,
+          chunk_price: msg.price !== undefined ? parseFloat(msg.price) : null,
+          taker_addr: msg.receive_address || msg._from,
+          offer_give_amount: offerGiveAmount,
+          offer_want_asset: offer.want_asset,
+          offer_give_asset: offer.give_asset,
+        },
+      });
+    }
+  } catch (auditErr) {
+    console.warn(`[exchange-machine] broker_chunk_filled audit failed: ${auditErr.message}`);
+  }
+
+  // Route to verification
   return routeToVerification(matched);
 }
 
@@ -282,7 +421,7 @@ export function processAccept(msg) {
  * @returns {object} updated offer
  */
 function routeToVerification(offer) {
-  if (offer.protocol_status !== 'matched' && offer.protocol_status !== 'escrow_locked') return offer;
+  if (offer.protocol_status !== 'matched') return offer;
 
   const vType = offer.verification || 'manual';
   const verifier = getVerifier(vType);
@@ -330,7 +469,7 @@ export function processManualConfirm(msg) {
   const offer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(msg.offer_id);
   if (!offer) return null;
 
-  if (offer.protocol_status !== 'awaiting_manual_confirm' && offer.protocol_status !== 'escrow_locked') {
+  if (offer.protocol_status !== 'awaiting_manual_confirm') {
     console.log(`[exchange-machine] Confirm rejected: offer ${msg.offer_id.slice(0, 8)} is ${offer.protocol_status}`);
     return null;
   }
@@ -359,9 +498,7 @@ export function processManualConfirm(msg) {
   // Re-read and check if both confirmed
   const updated = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer.id);
   if (updated.maker_confirmed_at && updated.taker_confirmed_at) {
-    const completed = transition(offer.id, 'completed');
-    tryExecuteEscrow(offer.id, 0); // release → seller
-    return completed;
+    return transition(offer.id, 'completed');
   }
 
   return updated;
@@ -398,6 +535,49 @@ export function processCancel(msg) {
  * Expire stale offers. Called periodically.
  * @returns {number} count of expired offers
  */
+/**
+ * Check for disputes that have been open too long (72h threshold).
+ *
+ * 2026-04-14 (stub): 暂时只 log 警告, 不自动 resolve.
+ * 下轮需要设计 "原本 outcome" 逻辑:
+ *   - 若 dispute 发生时 status=delivering → 默认 taker_wins (KAS 已发)
+ *   - 若 dispute 发生时 status=verifying/matched → 默认 maker_wins (钱未到)
+ * 需要 verification_meta 里记录 pre_dispute_status, 才能安全地 auto-resolve.
+ * 当前只告警, 避免误判.
+ *
+ * @returns {number} count of aging disputes
+ */
+/**
+ * Q5 audit fix: clean up stale orphan accepts (>1h old, publish never arrived)
+ */
+export function cleanupStaleOrphanAccepts() {
+  const result = sqlite.prepare(
+    "DELETE FROM pending_exchange_accepts WHERE received_at < datetime('now', '-1 hour')"
+  ).run();
+  if (result.changes > 0) {
+    console.log(`[exchange-machine] cleaned up ${result.changes} stale orphan accepts (>1h old)`);
+  }
+  return result.changes;
+}
+
+export function checkStaleDisputes() {
+  const stale = sqlite.prepare(
+    `SELECT id, maker, taker,
+            json_extract(verification_meta, '$.dispute_at') AS dispute_at,
+            json_extract(verification_meta, '$.dispute_by') AS dispute_by
+     FROM exchange_offers
+     WHERE protocol_status = 'disputed'
+       AND json_extract(verification_meta, '$.dispute_at') IS NOT NULL
+       AND datetime(json_extract(verification_meta, '$.dispute_at'), '+72 hours') < datetime('now')
+       AND json_extract(verification_meta, '$.resolved_at') IS NULL`
+  ).all();
+
+  for (const s of stale) {
+    console.warn(`[exchange] ⚠ STALE DISPUTE ${s.id.slice(0, 8)} disputed_at=${s.dispute_at} by=${s.dispute_by?.slice(-8)} — 超过 72h 未 resolve, TODO: auto-resolve (下轮实现)`);
+  }
+  return stale.length;
+}
+
 export function expireStale() {
   const now = new Date().toISOString();
   const stale = sqlite.prepare(
@@ -416,23 +596,156 @@ export function expireStale() {
  * Check and timeout verification in progress. Called periodically.
  * @returns {number} count of timed out offers
  */
-export function timeoutVerifying() {
-  const now = new Date().toISOString();
+// V5 fix (NWT r186 ack KI-29 复刻第 2 次 + r187 standby): emit timeout_v1 chain TX BEFORE transition('timed_out').
+// 跟 checkMatchedTimeout line 642-665 同款 ⑤ NO TX NO STATE CHANGE 5 attempt retry pattern.
+// reason: timeoutVerifying 真 transition() 内 SET only, 0 emit chain TX → KI-20 violation (跨 node 真 0 sync).
+// post fix: chain-first 严守 (broadcast → transition), trade-protocol-filter handleExchangeTimeout (line 1090) 真 sole writer per chain ingest 真 redundant 但 0 harm (idempotent state guard).
+async function _emitTimeoutAndTransition(id, reason) {
+  const offer = sqlite.prepare('SELECT maker, taker FROM exchange_offers WHERE id = ?').get(id);
+  if (!offer) return false;
+  const relay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(offer.maker);
+  if (relay) {
+    const { sendCommandAsync } = await import('./relay-manager.js');
+    const msg = JSON.stringify({
+      t: 'kanet_exchange_timeout_v1', offer_id: id, taker: offer.taker, reason,
+    });
+    let timeoutTxId = null;
+    for (let ta = 1; ta <= 3; ta++) {
+      try {
+        const tr = await sendCommandAsync(relay.id, { type: 'send_broadcast', channel: 'kanet-exchange', message: msg });
+        timeoutTxId = tr?.txId;
+        if (timeoutTxId) break;
+      } catch (te) {
+        console.error(`[exchange-machine] timeout broadcast attempt ${ta}/3 (${reason}): ${te.message}`);
+        if (ta < 3) await new Promise(r => setTimeout(r, 200));
+      }
+    }
+    if (!timeoutTxId) {
+      console.warn(`[exchange-machine] timeout broadcast failed for ${id.slice(0,8)} (${reason}) — staying in current state, retry next tick`);
+      return false;
+    }
+  }
+  // Non-local maker (no relay) OR broadcast success → NOW transition (chain-after-set).
+  transition(id, 'timed_out');
+  return true;
+}
+
+export async function timeoutVerifying() {
+  // Original: verifying/awaiting states → timed_out after 30min
   const stuck = sqlite.prepare(
     `SELECT id, verification FROM exchange_offers
-     WHERE protocol_status IN ('verifying', 'awaiting_manual_confirm', 'awaiting_oracle', 'escrow_locked')
-     AND expires_at IS NOT NULL AND expires_at < ?`
-  ).all(now);
+     WHERE protocol_status IN ('verifying', 'awaiting_manual_confirm', 'awaiting_oracle')
+     AND verifying_started_at IS NOT NULL
+     AND datetime(verifying_started_at, '+30 minutes') < datetime('now')`
+  ).all();
 
   for (const { id } of stuck) {
-    transition(id, 'timed_out');
-    tryExecuteEscrow(id, 1); // refund → buyer
+    await _emitTimeoutAndTransition(id, 'verifying_timeout_30min');
   }
 
-  return stuck.length;
+  // delivering → verified (revert for retry) after 60min
+  // KAS may have been sent but broadcast confirmation slow — revert, don't dispute
+  const stuckDelivering = sqlite.prepare(
+    `SELECT id FROM exchange_offers
+     WHERE protocol_status = 'delivering'
+     AND delivering_at IS NOT NULL
+     AND datetime(delivering_at, '+60 minutes') < datetime('now')`
+  ).all();
+
+  for (const { id } of stuckDelivering) {
+    console.log(`[exchange-machine] delivering timeout 60min → verified (revert for retry): ${id.slice(0,8)}`);
+    transition(id, 'verified', {});
+  }
+
+  // verified → timed_out after 60min (total window 120min from delivering)
+  // All retry attempts exhausted — release funds
+  const stuckVerified = sqlite.prepare(
+    `SELECT id FROM exchange_offers
+     WHERE protocol_status = 'verified'
+     AND delivering_at IS NOT NULL
+     AND datetime(delivering_at, '+120 minutes') < datetime('now')`
+  ).all();
+
+  for (const { id } of stuckVerified) {
+    console.log(`[exchange-machine] verified timeout (120min total) → timed_out: ${id.slice(0,8)}`);
+    await _emitTimeoutAndTransition(id, 'verified_timeout_120min');
+  }
+
+  return stuck.length + stuckDelivering.length + stuckVerified.length;
+}
+
+// ── Matched Timeout ──────────────────────────────────────────
+
+/**
+ * Check for matched offers that haven't received payment within 30 minutes.
+ * Broadcasts kanet_exchange_timeout_v1 and reopens the offer.
+ * Does NOT use transition() — timeout revert is an exceptional flow.
+ */
+export async function checkMatchedTimeout() {
+  const stale = sqlite.prepare(`
+    SELECT id, maker, taker, taker_chain FROM exchange_offers
+    WHERE protocol_status = 'matched'
+    AND matched_at IS NOT NULL
+    AND datetime(matched_at, '+30 minutes') < datetime('now')
+  `).all();
+
+  for (const offer of stale) {
+    console.log(`[exchange-machine] matched timeout: offer ${offer.id.slice(0,8)} (taker ${(offer.taker || '').slice(-8)})`);
+
+    // ⑤ NO TX NO STATE CHANGE — Broadcast timeout FIRST, reopen only after TX is on chain.
+    const relay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(offer.maker);
+
+    if (relay) {
+      const { sendCommandAsync } = await import('./relay-manager.js');
+      const timeoutMsg = JSON.stringify({
+        t: 'kanet_exchange_timeout_v1',
+        offer_id: offer.id,
+        taker: offer.taker,
+        reason: 'payment_timeout',
+        reopen: true,
+      });
+
+      let timeoutTxId = null;
+      for (let ta = 1; ta <= 3; ta++) {
+        try {
+          const tr = await sendCommandAsync(relay.id, { type: 'send_broadcast', channel: 'kanet-exchange', message: timeoutMsg });
+          timeoutTxId = tr?.txId;
+          if (timeoutTxId) break;
+        } catch (te) {
+          console.error(`[exchange-machine] timeout broadcast attempt ${ta}/3: ${te.message}`);
+          if (ta < 3) await new Promise(r => setTimeout(r, 200));
+        }
+      }
+
+      if (!timeoutTxId) {
+        console.warn(`[exchange-machine] timeout broadcast failed for ${offer.id.slice(0,8)} — staying matched, will retry next tick`);
+        continue;
+      }
+    }
+    // Non-local maker (no relay): proceed with local-only timeout
+
+    // Broadcast succeeded (or non-local) → NOW reopen
+    // TIMEZONE FIX: use JS toISOString() for Z suffix consistency
+    const nowIsoR = new Date().toISOString();
+    sqlite.prepare(`
+      UPDATE exchange_offers
+      SET protocol_status = 'open',
+          taker = NULL, taker_chain = NULL, taker_payment_address = NULL,
+          payment_tx = NULL, matched_at = NULL,
+          updated_at = ?
+      WHERE id = ? AND protocol_status = 'matched'
+    `).run(nowIsoR, offer.id);
+
+    releaseFunds(offer.id);
+  }
+
+  return stale.length;
 }
 
 // ── Payment Submit (cross_chain_tx / kaspa_tx verification) ──
+// NOTE: processPaymentSubmit is still used by kanet_exchange_paid_v1 handler
+// (handleExchangePaid transitions to verifying first, then calls this).
+// The old /api/exchange/submit-payment REST endpoint is deprecated.
 
 /**
  * Taker submits a payment TX hash for on-chain verification.
@@ -444,18 +757,37 @@ export function processPaymentSubmit({ offer_id, payment_tx, payment_chain }) {
   if (offer.protocol_status !== 'verifying') return { error: 'invalid_status', current: offer.protocol_status };
   if (!payment_tx) return { error: 'payment_tx_required' };
 
+  // Security: use taker_chain from offer (set at accept time), fallback to body value for backward compat
+  const verifyChain = offer.taker_chain || payment_chain;
+  if (!verifyChain) return { error: 'no payment chain on record' };
+
+  // 2026-04-14 Q3 audit fix: TX reuse 防御 — payment_tx 已被别的 offer 用过就拒绝.
+  const existingUse = sqlite.prepare(
+    'SELECT id FROM exchange_offers WHERE payment_tx = ? AND id != ?'
+  ).get(payment_tx, offer_id);
+  if (existingUse) {
+    console.log(`[exchange] processPaymentSubmit REUSE BLOCKED — ${payment_tx.slice(0,16)} already used by offer ${existingUse.id.slice(0,8)}`);
+    return { error: 'payment_tx_reused', original_offer: existingUse.id };
+  }
+
   const now = new Date().toISOString();
   const meta = JSON.parse(offer.verification_meta || '{}');
   meta.payment_tx = payment_tx;
-  meta.payment_chain = payment_chain;
+  meta.payment_chain = verifyChain;
   meta.submitted_at = now;
 
-  sqlite.prepare(
-    'UPDATE exchange_offers SET verification_meta = ?, updated_at = ? WHERE id = ?'
-  ).run(JSON.stringify(meta), now, offer_id);
+  // 同时写入 payment_tx 列 (UNIQUE index 会在并发 reuse 时抛 constraint 错误)
+  try {
+    sqlite.prepare(
+      'UPDATE exchange_offers SET verification_meta = ?, payment_tx = ?, updated_at = ? WHERE id = ?'
+    ).run(JSON.stringify(meta), payment_tx, now, offer_id);
+  } catch (dbErr) {
+    console.log(`[exchange] processPaymentSubmit DB UNIQUE conflict: ${dbErr.message}`);
+    return { error: 'payment_tx_reused_concurrent', db_error: dbErr.message };
+  }
 
   // Async verification — does not block API response
-  _verifyAndComplete(offer_id, payment_tx, payment_chain).catch(err =>
+  _verifyAndComplete(offer_id, payment_tx, verifyChain).catch(err =>
     console.error(`[exchange] _verifyAndComplete error offer=${offer_id.slice(0,8)}:`, err.message)
   );
 
@@ -471,16 +803,40 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
 
   const meta = JSON.parse(offer.verification_meta || '{}');
   const expectedAmount = parseFloat(offer.want_amount) || 0;
-  const expectedTo = meta.receive_address || null;
+  // expectedTo depends on payment chain semantics.
+  //   kaspa_tx (BUY path: payer sends KAS to maker) — expected recipient is the
+  //     Kasia delivery address. receive_address holds it; fall back to maker.
+  //   cross_chain_tx (SELL path: payer sends USDT to maker on EVM/SOL/TRON) —
+  //     expected recipient is the maker's payment address from accepted_chains
+  //     keyed by the offer's taker_chain. receive_address here is the KAS
+  //     delivery target on Kasia, NOT the EVM USDT recipient — using it would
+  //     cause "Recipient mismatch" against the actual EVM payee.
+  let expectedTo;
+  if (payment_chain === 'kaspa') {
+    expectedTo = meta.receive_address || meta.expected_address || offer.maker;
+  } else {
+    const acceptedChains = Array.isArray(meta.accepted_chains) ? meta.accepted_chains : [];
+    const match = acceptedChains.find(c => c && String(c.chain).toLowerCase() === String(payment_chain).toLowerCase());
+    expectedTo = match?.address || meta.maker_payment_address || meta.expected_address || null;
+  }
 
   try {
-    const { verifyCrossChainTx } = await import('./cross-chain-verify.mjs');
-    const vr = await verifyCrossChainTx({
-      txHash: payment_tx,
-      chain: payment_chain,
-      expectedAmount,
-      expectedTo,
-    });
+    let vr;
+
+    // Kaspa same-chain TX: submitTransaction accepted = TX is real. Trust txId directly.
+    if (payment_chain === 'kaspa') {
+      console.log(`[exchange] kaspa_tx: trusting txId ${payment_tx.slice(0,16)} (submitTransaction = verified)`);
+      vr = { confirmed: true, confirmations: 1, required: 1, actualAmount: expectedAmount, recipient: expectedTo || '', sender: '' };
+    } else {
+      const { verifyCrossChainTx } = await import('./cross-chain-verify.mjs');
+      vr = await verifyCrossChainTx({
+        txHash: payment_tx,
+        chain: payment_chain,
+        expectedAmount,
+        expectedTo,
+        paymentAsset: meta.payment_asset || 'usdt',
+      });
+    }
 
     if (vr.confirmed) {
       meta.verified_tx = payment_tx;
@@ -491,20 +847,300 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
         'UPDATE exchange_offers SET verification_meta = ?, updated_at = ? WHERE id = ?'
       ).run(JSON.stringify(meta), new Date().toISOString(), offer_id);
 
-      const completedOffer = transition(offer_id, 'completed', {});
-      tryExecuteEscrow(offer_id, 0); // release → seller
-      console.log(`[exchange] offer ${offer_id.slice(0,8)} payment verified → completed (${vr.actualAmount} USDT, ${vr.confirmations}/${vr.required} conf)`);
+      // BUY path (give_asset=USDT, want_asset=KAS, kaspa_tx): KAS already received.
+      // No delivery needed — go straight to completed.
+      if (offer.give_asset !== 'KAS' && payment_chain === 'kaspa') {
+        sqlite.prepare('UPDATE exchange_offers SET delivery_tx = ? WHERE id = ?').run(payment_tx, offer_id);
+        transition(offer_id, 'delivering', { txHash: payment_tx }); // brief pass-through
+        transition(offer_id, 'completed', { txHash: payment_tx });
+        try { const { spendFunds } = await import('./fund-lock.js'); spendFunds(offer_id); } catch {}
+        sqlite.prepare(`
+          INSERT INTO chain_events (id, event_type, from_address, to_address, txid, payload, observed_at)
+          VALUES (?, 'exchange_completed', ?, ?, ?, ?, datetime('now'))
+        `).run(crypto.randomUUID(), offer.maker, offer.taker, payment_tx, JSON.stringify({
+          offer_id, give_asset: offer.give_asset, give_amount: offer.give_amount,
+          want_asset: offer.want_asset, want_amount: offer.want_amount,
+          payment_tx, verification: 'kaspa_tx',
+        }));
+        console.log(`[exchange] offer ${offer_id.slice(0,8)} BUY kaspa_tx verified → completed (KAS received, no delivery needed)`);
+        // Trigger hedge
+        const finalOffer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer_id);
+        if (finalOffer?.protocol_status === 'completed' && finalOffer.maker) {
+          const localAgent = sqlite.prepare('SELECT id, name FROM relay_nodes WHERE address = ?').get(finalOffer.maker);
+          if (localAgent) {
+            executeHedge(finalOffer).catch(err => console.error(`[exchange-hedge] error: ${err.message}`));
+          }
+        }
+        return;
+      }
 
-      // Trigger hedge after cross_chain_tx verification → completed
-      if (completedOffer?.maker) {
-        const localAgent = sqlite.prepare('SELECT id, name FROM relay_nodes WHERE address = ?').get(completedOffer.maker);
+      const deliveringOffer = transition(offer_id, 'delivering', {});
+      console.log(`[exchange] offer ${offer_id.slice(0,8)} payment verified → delivering (${vr.actualAmount} USDT, ${vr.confirmations}/${vr.required} conf)`);
+
+      // D2 (NWT broker-v2 phase 1 r6): retail_dex_orders.state lifecycle 写 executing.
+      // self-review fix v2 (J2 2e5a926a cross review ❌ critical 修):
+      //   - 改读 metadata.user_kasia_address (verification_meta 实际不存此字段)
+      //   - empirical evidence: broker-intake-watcher.js L188 set metadata.user_kasia_address (SELL flow)
+      //   - verification_meta 仅含 accepted_chains/expected_asset 等 verifier hints
+      //   - 多 row advance 风险 → SELECT specific row id + UPDATE WHERE id=? (LIMIT 1 等价)
+      try {
+        // 1) link 优先: exchange_offer_id (post-finalize 链)
+        // 2) fallback: metadata.user_kasia_address (SELL flow broker-intake-watcher.js L188 set)
+        // 3) fallback: offer.taker (BUY flow user = taker)
+        let metaUserAddr = null;
+        try {
+          const meta = JSON.parse(deliveringOffer.metadata || '{}');
+          if (meta.user_kasia_address && typeof meta.user_kasia_address === 'string' && meta.user_kasia_address.startsWith('kaspa:')) {
+            metaUserAddr = meta.user_kasia_address;
+          }
+        } catch {}
+        const userAddr = metaUserAddr || deliveringOffer.taker || '';
+        // SELECT specific row 防多 row advance
+        const target = sqlite.prepare(`
+          SELECT id FROM retail_dex_orders
+          WHERE (exchange_offer_id = ? OR (exchange_offer_id IS NULL AND user_kasia_address = ? AND created_at > datetime('now','-2 hours')))
+            AND state IN ('paid', 'awaiting_payment')
+          ORDER BY created_at DESC LIMIT 1
+        `).get(offer_id, userAddr);
+        if (target?.id) {
+          // lint-allow-state-update: PZ-STATE-T-EXCHANGE exchange-machine 独立状态机 (跟 broker SELL_KAS retail_dex_orders 共表但不同 service). 'executing' state 不在 v0.1 7 state ALLOWED_TRANSITIONS, phase Z exchange 状态机重构后 transition() 共用.
+          const upd = sqlite.prepare(`
+            UPDATE retail_dex_orders SET state = 'executing', updated_at = datetime('now')
+            WHERE id = ? AND state IN ('paid', 'awaiting_payment')
+          `).run(target.id);
+          if (upd.changes > 0) {
+            console.log(`[exchange] D2 retail_dex_orders state lifecycle: ${target.id} → 'executing' (offer ${offer_id.slice(0,8)} userAddr=${userAddr.slice(-12)})`);
+          }
+        }
+      } catch (e) { console.warn(`[exchange] D2 executing UPDATE err: ${e.message}`); }
+
+      // T-NWT-2026-04-27 Bug-Z2 fix (J1 25:24 真发现): auto-deliver 真 generic (USDC/USDT/etc)
+      // 老 hardcode `give_asset === 'KAS'` → USDC maker 真 deliver 真不 trigger = USDC e2e 真断.
+      // 真 fix: condition generic + KAS path 用现 sendCommandAsync transfer (backward compat),
+      // 非 KAS 路径用 J1 settler-router sendAsset generic (USDC/USDT × 7 EVM chain).
+      if (deliveringOffer?.give_asset && deliveringOffer.taker) {
+        const deliveryAgent = sqlite.prepare('SELECT id, name FROM relay_nodes WHERE address = ?').get(deliveringOffer.maker);
+        if (deliveryAgent) {
+          const give_asset = deliveringOffer.give_asset;
+          const give_chain = deliveringOffer.give_chain || 'kaspa';
+          const MAX_DELIVERY_ATTEMPTS = 3;
+          const DELIVERY_RETRY_MS = 10_000;
+          let deliveryTxId = null;
+
+          // T-22-05 retail-proxy: accept 可带 verification_meta.receive_address 指定第三方收件地址
+          // KAS path: receive_address 必 kaspa: prefix (KAS 真 native chain).
+          // 非 KAS path: receive_address 真 EVM/Sol/Tron addr (跟 give_chain 匹), 或 fallback taker_payment_address.
+          let deliveryTarget;
+          if (give_asset === 'KAS') {
+            deliveryTarget = deliveringOffer.taker; // default kaspa addr
+            try {
+              const dmeta = JSON.parse(deliveringOffer.verification_meta || '{}');
+              if (dmeta.receive_address && typeof dmeta.receive_address === 'string'
+                  && dmeta.receive_address.startsWith('kaspa:')) {
+                deliveryTarget = dmeta.receive_address;
+                console.log(`[exchange] KAS delivery routed to third-party ${deliveryTarget.slice(-12)} (taker=${deliveringOffer.taker.slice(-12)})`);
+              }
+            } catch {}
+          } else {
+            // 非 KAS (USDC/USDT/etc): 真 user EVM addr.
+            // T-J2-2026-04-27 v1.2 (c) priority lookup:
+            //   1. verification_meta.evm_recv_address (J2 v1.2 (c) 真 fix, stable 真 explicit EVM addr)
+            //   2. taker_payment_address (legacy, 老 path 可能存 kasia 误用)
+            //   3. dmeta.receive_address (老 fallback, 排除 kaspa: prefix)
+            try {
+              const dmeta = JSON.parse(deliveringOffer.verification_meta || '{}');
+              if (dmeta.evm_recv_address && typeof dmeta.evm_recv_address === 'string'
+                  && dmeta.evm_recv_address.startsWith('0x')) {
+                deliveryTarget = dmeta.evm_recv_address;
+              } else if (deliveringOffer.taker_payment_address && deliveringOffer.taker_payment_address.startsWith('0x')) {
+                deliveryTarget = deliveringOffer.taker_payment_address;
+              } else if (dmeta.receive_address && typeof dmeta.receive_address === 'string'
+                  && !dmeta.receive_address.startsWith('kaspa:')) {
+                deliveryTarget = dmeta.receive_address;
+              }
+            } catch {}
+          }
+
+          if (!deliveryTarget) {
+            console.error(`[exchange] Bug-Z2 no deliveryTarget for ${give_asset} offer ${offer_id.slice(0,8)} (taker=${deliveringOffer.taker?.slice(-12)}, taker_pay_addr=${deliveringOffer.taker_payment_address?.slice(-12) || 'null'})`);
+            return;
+          }
+
+          for (let attempt = 1; attempt <= MAX_DELIVERY_ATTEMPTS; attempt++) {
+            try {
+              if (give_asset === 'KAS') {
+                // KAS 走现 relay transfer (backward compat 不动)
+                const { sendCommandAsync } = await import('./relay-manager.js');
+                const sendResult = await sendCommandAsync(deliveryAgent.id, {
+                  type: 'transfer',
+                  target: deliveryTarget,
+                  amount: String(deliveringOffer.give_amount),
+                });
+                deliveryTxId = sendResult?.txId;
+              } else {
+                // T-NWT-2026-04-27 Bug-Z2 fix: 非 KAS 走 J1 settler-router sendAsset generic
+                const { sendAsset } = await import('./settler-router.js');
+                const sendResult = await sendAsset({
+                  asset: give_asset,
+                  chain: give_chain,
+                  to: deliveryTarget,
+                  qty: parseFloat(deliveringOffer.give_amount),
+                  relayId: deliveryAgent.id,
+                });
+                deliveryTxId = sendResult?.txHash || sendResult?.txId;
+                if (!deliveryTxId && sendResult?.error) throw new Error(sendResult.error);
+              }
+              console.log(`[exchange] ${give_asset} delivery attempt ${attempt}: ${deliveringOffer.give_amount} ${give_asset} → ${deliveryTarget.slice(-12)} TX: ${deliveryTxId || '?'}`);
+              if (deliveryTxId) break; // success
+            } catch (err) {
+              console.error(`[exchange] ${give_asset} delivery attempt ${attempt}/${MAX_DELIVERY_ATTEMPTS} FAILED: ${err.message}`);
+              if (attempt < MAX_DELIVERY_ATTEMPTS) {
+                await new Promise(r => setTimeout(r, DELIVERY_RETRY_MS));
+              }
+            }
+          }
+
+          if (deliveryTxId) {
+            // === NO TX NO STATE CHANGE ===
+            // KAS delivery TX returned from Relay. Now broadcast delivered_v1.
+            // MUST succeed on chain before marking completed.
+            const { sendCommandAsync: sendCmd } = await import('./relay-manager.js');
+            const deliveredMsg = JSON.stringify({
+              t: 'kanet_exchange_delivered_v1',
+              offer_id: deliveringOffer.id,
+              delivery_tx: deliveryTxId,
+              delivery_asset: deliveringOffer.give_asset,
+              delivery_amount: deliveringOffer.give_amount,
+              receiver: deliveryTarget, // T-22-05: 真实收件人(可能是第三方,见上)
+            });
+
+            let deliveredBcastTxId = null;
+            for (let ba = 1; ba <= 5; ba++) {
+              try {
+                const br = await sendCmd(deliveryAgent.id, { type: 'send_broadcast', channel: 'kanet-exchange', message: deliveredMsg });
+                deliveredBcastTxId = br?.txId;
+                if (deliveredBcastTxId) break;
+              } catch (be) {
+                console.error(`[exchange] delivered broadcast attempt ${ba}/5: ${be.message}`);
+              }
+              if (ba < 5) await new Promise(r => setTimeout(r, 200 * ba));
+            }
+
+            if (!deliveredBcastTxId) {
+              // Delivered broadcast failed — KAS was sent but we can't prove it on chain yet.
+              // Stay in delivering, do NOT mark completed. Operator or next tick can retry.
+              console.error(`[exchange] offer ${offer_id.slice(0,8)} KAS sent (${deliveryTxId}) but delivered broadcast failed. Staying in delivering.`);
+              sqlite.prepare(`
+                INSERT INTO chain_events (id, event_type, from_address, to_address, txid, payload, observed_at)
+                VALUES (?, 'kas_delivery', ?, ?, ?, ?, datetime('now'))
+              `).run(crypto.randomUUID(), deliveringOffer.maker, deliveringOffer.taker, deliveryTxId,
+                JSON.stringify({ offer_id: deliveringOffer.id, amount: deliveringOffer.give_amount, broadcast_failed: true }));
+            } else {
+              // Both KAS delivery AND broadcast succeeded — NOW mark completed
+              sqlite.prepare('UPDATE exchange_offers SET delivery_tx = ? WHERE id = ?').run(deliveryTxId, offer_id);
+              transition(offer_id, 'completed', { txHash: deliveryTxId });
+
+              // D2 (NWT broker-v2 phase 1 r6): retail_dex_orders.state lifecycle 写 completed + deliver_tx_hash.
+              // self-review fix v2 (J2 2e5a926a cross review ❌ critical 修):
+              //   - 改读 metadata.user_kasia_address (broker-intake-watcher.js L188 set, SELL flow link)
+              //   - SELECT specific row id 防多 row advance
+              try {
+                let metaUserAddr2 = null;
+                try {
+                  const meta = JSON.parse(deliveringOffer.metadata || '{}');
+                  if (meta.user_kasia_address && typeof meta.user_kasia_address === 'string' && meta.user_kasia_address.startsWith('kaspa:')) {
+                    metaUserAddr2 = meta.user_kasia_address;
+                  }
+                } catch {}
+                const userAddr2 = metaUserAddr2 || deliveringOffer.taker || '';
+                const target = sqlite.prepare(`
+                  SELECT id FROM retail_dex_orders
+                  WHERE (exchange_offer_id = ? OR (exchange_offer_id IS NULL AND user_kasia_address = ? AND created_at > datetime('now','-2 hours')))
+                    AND state IN ('executing', 'paid', 'awaiting_payment')
+                  ORDER BY created_at DESC LIMIT 1
+                `).get(offer_id, userAddr2);
+                if (target?.id) {
+                  // lint-allow-state-update: PZ-STATE-T-EXCHANGE exchange-machine 独立状态机 delivery completed transition. 跨 v0.1 7 state ALLOWED_TRANSITIONS (executing 不在), phase Z exchange 状态机重构 transition() 共用.
+                  const upd = sqlite.prepare(`
+                    UPDATE retail_dex_orders SET state = 'completed', deliver_tx_hash = ?, updated_at = datetime('now')
+                    WHERE id = ? AND state IN ('executing', 'paid', 'awaiting_payment')
+                  `).run(deliveryTxId, target.id);
+                  if (upd.changes > 0) {
+                    console.log(`[exchange] D2 retail_dex_orders state lifecycle: ${target.id} → 'completed' (offer ${offer_id.slice(0,8)} tx ${deliveryTxId.slice(0,12)})`);
+                  }
+                }
+              } catch (e) { console.warn(`[exchange] D2 completed UPDATE err: ${e.message}`); }
+              sqlite.prepare(`
+                INSERT INTO chain_events (id, event_type, from_address, to_address, txid, payload, observed_at)
+                VALUES (?, 'kas_delivery', ?, ?, ?, ?, datetime('now'))
+              `).run(crypto.randomUUID(), deliveringOffer.maker, deliveringOffer.taker, deliveryTxId,
+                JSON.stringify({ offer_id: deliveringOffer.id, amount: deliveringOffer.give_amount, broadcast_tx: deliveredBcastTxId }));
+              try { const { spendFunds } = await import('./fund-lock.js'); spendFunds(deliveringOffer.id); } catch {}
+              sqlite.prepare(`
+                INSERT INTO chain_events (id, event_type, from_address, to_address, payload, observed_at)
+                VALUES (?, 'exchange_completed', ?, ?, ?, datetime('now'))
+              `).run(crypto.randomUUID(), deliveringOffer.maker, deliveringOffer.taker, JSON.stringify({
+                offer_id: deliveringOffer.id, give_asset: deliveringOffer.give_asset, give_amount: deliveringOffer.give_amount,
+                want_asset: deliveringOffer.want_asset, want_amount: deliveringOffer.want_amount, taker_chain: deliveringOffer.taker_chain,
+                delivery_tx: deliveryTxId, broadcast_tx: deliveredBcastTxId,
+                price: parseFloat(deliveringOffer.want_amount) / parseFloat(deliveringOffer.give_amount) || 0,
+              }));
+              console.log(`[exchange] offer ${offer_id.slice(0,8)} delivering → completed (delivery TX: ${deliveryTxId.slice(0,12)}, broadcast: ${deliveredBcastTxId.slice(0,12)})`);
+              // T-J2-V2 议 2 (Owner 真测 #2 退场后 NWT 转 Owner #2 痛点 '订单全生命周期 broker 主动 DM'):
+              // KAS 发出 + broadcast 成功 → 主动 DM user 通知 'KAS 已发'. 不让 user 查 explorer.
+              try {
+                const { enqueue } = await import('./broker-action-queue.js');
+                enqueue({
+                  kind: 'dm_kas_delivered',
+                  peer: deliveryTarget,
+                  payload: {
+                    message: `✅ 已发出 ${deliveringOffer.give_amount} KAS 到你 Kasia 钱包, 1-2 分钟到账.\n\nTX: ${deliveryTxId}\n查看: https://explorer.kaspa.org/txs/${deliveryTxId}\n\n感谢使用 KANet broker.`,
+                  },
+                });
+              } catch (e) { console.warn(`[exchange] dm_kas_delivered enqueue err: ${e.message}`); }
+            }
+          } else {
+            // 3 attempts failed → revert to verified (retryable, not dispute)
+            transition(offer_id, 'verified', {});
+            sqlite.prepare(`
+              INSERT INTO chain_events (id, event_type, from_address, payload, observed_at)
+              VALUES (?, 'exchange_delivery_reverted', ?, ?, datetime('now'))
+            `).run(crypto.randomUUID(), deliveringOffer.maker, JSON.stringify({
+              offer_id: deliveringOffer.id, reason: 'delivery_failed_3_attempts_reverted',
+            }));
+            console.warn(`[exchange] offer ${offer_id.slice(0,8)} delivering → verified (3 delivery failures, reverted for retry)`);
+          }
+        }
+      }
+
+      // BUY path (kaspa_tx): taker already sent KAS, maker received it.
+      // No separate delivery needed — go straight to completed.
+      // maker auto-pay-give is triggered by transition() below (completed → _makerAutoPayGive)
+      if (payment_chain === 'kaspa' && deliveringOffer?.give_asset !== 'KAS') {
+        sqlite.prepare('UPDATE exchange_offers SET delivery_tx = ? WHERE id = ?').run(payment_tx, offer_id);
+        const completedOffer = transition(offer_id, 'completed', { txHash: payment_tx });
+        sqlite.prepare(`
+          INSERT INTO chain_events (id, event_type, from_address, to_address, payload, observed_at)
+          VALUES (?, 'exchange_completed', ?, ?, ?, datetime('now'))
+        `).run(crypto.randomUUID(), deliveringOffer.maker, deliveringOffer.taker, JSON.stringify({
+          offer_id: deliveringOffer.id, give_asset: deliveringOffer.give_asset, give_amount: deliveringOffer.give_amount,
+          want_asset: deliveringOffer.want_asset, want_amount: deliveringOffer.want_amount,
+          payment_chain, payment_tx,
+        }));
+        console.log(`[exchange] BUY kaspa_tx offer ${offer_id.slice(0,8)} delivering → completed (KAS already received)`);
+      }
+
+      // Trigger hedge after completed (only if delivery succeeded)
+      const finalOffer = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offer_id);
+      if (finalOffer?.protocol_status === 'completed' && finalOffer.maker) {
+        const localAgent = sqlite.prepare('SELECT id, name FROM relay_nodes WHERE address = ?').get(finalOffer.maker);
         if (localAgent) {
-          const makerGaveKas = completedOffer.give_asset === 'KAS';
+          const makerGaveKas = finalOffer.give_asset === 'KAS';
           const hedgeSide = makerGaveKas ? 'BUY' : 'SELL';
-          const hedgeQty = makerGaveKas ? parseFloat(completedOffer.give_amount) : parseFloat(completedOffer.want_amount);
+          const hedgeQty = makerGaveKas ? parseFloat(finalOffer.give_amount) : parseFloat(finalOffer.want_amount);
           if (hedgeQty > 0) {
             setImmediate(() => {
-              executeHedge(completedOffer.id, localAgent.name, hedgeSide, hedgeQty).catch(err =>
+              executeHedge(finalOffer.id, localAgent.name, hedgeSide, hedgeQty).catch(err =>
                 console.error(`[exchange-hedge] verify-complete-path trigger error: ${err.message}`)
               );
             });
@@ -527,6 +1163,13 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
         'UPDATE exchange_offers SET verification_meta = ?, updated_at = ? WHERE id = ?'
       ).run(JSON.stringify(dmeta), new Date().toISOString(), offer_id);
       transition(offer_id, 'disputed', {});
+      // Record exchange_disputed for audit
+      sqlite.prepare(`
+        INSERT INTO chain_events (id, event_type, from_address, payload, observed_at)
+        VALUES (?, 'exchange_disputed', ?, ?, datetime('now'))
+      `).run(crypto.randomUUID(), offer.maker, JSON.stringify({
+        offer_id, reason: dmeta.dispute_reason,
+      }));
     }
   } catch (err) {
     console.error(`[exchange] _verifyAndComplete error:`, err.message);
@@ -560,7 +1203,6 @@ export function processDispute({ offer_id, disputer_address, reason }) {
   ).run(JSON.stringify(meta), new Date().toISOString(), offer_id);
 
   transition(offer_id, 'disputed', {});
-  tryExecuteEscrow(offer_id, 2); // arbitrate
   console.log(`[exchange] offer ${offer_id.slice(0,8)} disputed by ${disputer_address.slice(-8)}: ${reason}`);
 
   return { ok: true, status: 'disputed' };

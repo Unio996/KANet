@@ -10,7 +10,8 @@
     "@fastify/formbody": "^7.4.0",
     "@fastify/static": "^7.0.4",
     "@fastify/view": "^9.1.0",
-    "@polymarket/clob-client": "^5.8.1",
+    "@polymarket/clob-client-v2": "^1.0.2",
+    "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.98.4",
     "@stoqey/ib": "^1.5.3",
     "better-sqlite3": "^12.8.0",
@@ -19,6 +20,7 @@
     "eta": "^3.4.0",
     "ethers": "^6.16.0",
     "fastify": "^4.28.1",
+    "hyperliquid": "^1.7.7",
     "kaspa-wasm": "file:../shared/vendor/kaspa-wasm",
     "tronweb": "^6.2.2"
   }

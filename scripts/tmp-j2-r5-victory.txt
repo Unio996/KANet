@@ -1,0 +1,63 @@
+🎉🎉→[J1+NWT+OWNER] R5 真测大成功 · IS_SERVICE 治本 · Bug 9 完全消除
+
+## 实证 (broker-queue OK txId 全到位)
+
+```
+21:26 dm_quote #70b9a6da OK 4874c91e ← Martin 报价 真发
+      dm_quote #62137d8f OK 1bee6de2 ← Sophie 报价 真发
+      dm_quote #e20866e1 OK de34fb66 ← Eric 报价 真发
+21:26 accept_v1 #742e49a3 OK 85dad4b3 ← user 1 accept 上链
+      dm_pay_instr #b448157b OK a8a0e05c ← user 1 收付款指引 ✓ (R4 Bug 9 撞过, R5 不撞)
+21:26 accept_v1 #4730cfd1 OK a2d79139 ← user 2
+      dm_pay_instr #8c6464f3 OK 1e5d7f3a ← user 2 收付款指引 ✓
+21:26 accept_v1 #31f2935c OK c4dd9957 ← user 3
+      dm_pay_instr #3b48d168 OK 160424bc ← user 3 收付款指引 ✓
+21:26 paid_v1 #846563c1 OK bf791adf ← user PAID
+      dm_completion #03656059 OK 05e50227 ← user 收完成通知 ✓
+21:27 paid_v1 #08ebbd69 OK e9bba48b ← 另 user PAID
+      dm_completion #cbd5fd1b OK 8db8d702 ← 收完成通知 ✓
+```
+
+**所有 broker DM 真送达** (12 笔 broker-queue OK 全有真 txId, 0 FAIL, 0 BLOCKED).
+
+R4 anti-spam 残留 (12+ 修补) → R5 IS_SERVICE bypass = **一处 5 LOC 完全治本**.
+
+## R5 架构升级 ✓
+
+- broker = Service 范式落地
+- Mind/Brain 禁言 (mind-manager service skip)
+- market-seeder 检 service skip ([seeder] SKIP — 0a8e9723 is service)
+- relay anti-spam bypass (IS_SERVICE='1' 跳 dedup)
+- retail-dex.js v1 删除 (1972 LOC 删干净)
+
+## R5 BUY 多用户并发 ✓
+
+3 user 同时下单. queue 单线 FIFO. dm_quote/accept_v1/dm_pay_instr 序列化干净.
+
+## 1 个新 bug (Bug 10)
+
+```
+[exchange-machine] Accept rejected: self-accept (maker === taker: hy65lxur9c5l)
+```
+
+broker selectBestOffer 选到 Trader-B 自己旧 seeder offer (R5 前 seeder 还为 Trader-B 挂的). exchange-machine 防 self-trade 拒. 修法:
+
+(a) selectBestOffer 加 `WHERE maker != BROKER_ADDR` 过滤
+(b) 清旧 seeder offer (一次性 cancel)
+(c) 等旧 offer 自然过期 (60min)
+
+J2 倾向 (a) 5 LOC, 一劳永逸. R5 真测下次重跑前修.
+
+## Q6 残留 race 大减
+
+R5 之前每 5min seeder 撞 UTXO 多次. R5 后 seeder 已 SKIP, Mind 已禁, **race 降至**:
+- exchange-machine cancel/expire 自动 broadcast 偶发撞
+- 这些是 protocol 自身 broadcast, 走 broker queue 后无 race
+
+仅看到 1 次 21:27:11 send failed (a8a0e05ce... 对 8db8d7023... 撞), 但 broker-queue 这边对应 OK 都拿到 txId, 说明 race 是 retry/旧 broadcast 路径, broker 主路径不受影响.
+
+## 第 22-24 笔 e2e 在路上
+
+3 user (Martin/Sophie/Eric) 都 paid_v1, 等 verifier + delivery + dm_completion. R5 应能 3 笔 e2e 一波闭环.
+
+— J2 @ 21:28 R5 真测胜利

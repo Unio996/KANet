@@ -1,0 +1,117 @@
+<%~ include('partials/page-open', { _page: 'approvals', pageTitle: '待审批操作', ...it }) %>
+
+<div class="p-6 space-y-5" x-data="approvalsPage()" x-init="loadPending()" x-cloak>
+
+  <!-- Header -->
+  <div class="flex items-center justify-between">
+    <a href="/agent" class="inline-flex items-center gap-1 text-sm text-ink-400 hover:text-ink-600 transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+      返回 我的 Agent
+    </a>
+    <span class="text-xs text-ink-300" x-show="loadTime" x-text="'刷新于 ' + KANet.relativeTime(loadTime)"></span>
+  </div>
+
+  <!-- Pending list -->
+  <template x-if="!loading && pending.length > 0">
+    <div class="space-y-3">
+      <div class="text-xs font-medium text-amber-700 uppercase tracking-wider px-1">
+        <span x-text="pending.length + ' 条待审批'"></span>
+      </div>
+      <template x-for="pa in pending" :key="pa.id">
+        <div class="card card-flush overflow-hidden">
+          <div class="px-5 py-3 border-b border-warm-200 flex items-center justify-between">
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="status-dot yellow" style="width:6px;height:6px;"></span>
+              <span class="text-sm font-medium text-ink-700 truncate" x-text="pa.display_summary || pa.type"></span>
+            </div>
+            <div class="flex items-center gap-2 flex-shrink-0">
+              <span class="text-xs text-ink-300" x-text="pa.agent_name || '?'"></span>
+              <span class="text-xs text-ink-300" x-text="KANet.relativeTime(pa.created_at)"></span>
+            </div>
+          </div>
+          <div class="px-5 py-3">
+            <template x-if="pa.params">
+              <div class="text-xs text-amber-700 font-mono bg-amber-50 rounded-lg p-2.5 break-all" x-text="JSON.stringify(pa.params, null, 2)"></div>
+            </template>
+            <template x-if="!pa.params && pa.details">
+              <div class="text-xs text-ink-400 bg-warm-50 rounded-lg p-2.5 break-all" x-text="pa.details"></div>
+            </template>
+            <div class="flex items-center justify-end gap-2 mt-3">
+              <button @click="rejectExec(pa.id)"
+                class="px-4 py-1.5 text-sm font-medium rounded-lg bg-white border border-warm-300 text-ink-500 hover:bg-warm-50 hover:text-ink-700 transition-colors"
+                :disabled="processing === pa.id">
+                拒绝
+              </button>
+              <button @click="approveExec(pa.id)"
+                class="px-4 py-1.5 text-sm font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-sm"
+                :disabled="processing === pa.id">
+                <span x-text="processing === pa.id ? '处理中...' : '批准'"></span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+  </template>
+
+  <!-- Empty state -->
+  <template x-if="!loading && pending.length === 0">
+    <div class="card text-center py-12">
+      <div class="text-3xl mb-2">✓</div>
+      <p class="text-sm text-ink-500 font-medium">所有待审批操作已清理</p>
+      <p class="text-xs text-ink-300 mt-1">当前没有待处理的执行审批</p>
+    </div>
+  </template>
+
+  <!-- Loading -->
+  <div x-show="loading" class="space-y-3">
+    <div class="card card-flush"><div class="skeleton px-5 py-3" style="height:24px;"></div></div>
+    <div class="card card-flush"><div class="skeleton px-5 py-4" style="height:80px;"></div></div>
+  </div>
+
+</div>
+
+<script>
+function approvalsPage() {
+  return {
+    pending: [],
+    loading: false,
+    processing: null,
+    loadTime: null,
+
+    async loadPending() {
+      this.loading = true;
+      try {
+        const r = await fetch('/api/trade/pending-approvals');
+        this.pending = await r.json();
+        this.loadTime = Date.now();
+      } catch {
+        this.pending = [];
+      }
+      this.loading = false;
+    },
+
+    async approveExec(id) {
+      this.processing = id;
+      try {
+        await fetch('/api/trade/approve-execution/' + id, { method: 'POST' });
+        await this.loadPending();
+      } catch(e) {
+        alert('批准失败: ' + e.message);
+      }
+      this.processing = null;
+    },
+
+    async rejectExec(id) {
+      this.processing = id;
+      try {
+        await fetch('/api/trade/reject-execution/' + id, { method: 'POST' });
+        await this.loadPending();
+      } catch(e) {
+        alert('拒绝失败: ' + e.message);
+      }
+      this.processing = null;
+    }
+  };
+}
+</script>

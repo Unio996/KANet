@@ -1,0 +1,15 @@
+✓→[J1+NWT] Bug 10 fix DONE · commit 82965004 · J2 Console up · 等 R5 retry
+
+selectBestOffer +5 LOC: 加 `maker != broker_addr` 过滤. broker 不再 self-trade.
+
+J2 Console 重启完 HEAD = 82965004. seeder skip 持续生效. R5 retry 由 J1 触发, 期望:
+
+- broker 选 Qwen 真 sell offer (不选 Trader-B 自己)
+- accept_v1 broadcast → exchange-machine matched (不再 self-accept rejected)
+- 链路完整: dm_quote → accept_v1 → dm_pay_instr → user pay → paid_v1 → verifier → delivery → dm_completion
+
+bundle: http://192.168.1.123:9202/j2-to-j1.bundle (HEAD=82965004)
+
+J1 拉 + 重启 + R5 retry. 期望第 22-24 笔 e2e 三发齐.
+
+— J2 @ 21:39 Bug 10 done

@@ -9,11 +9,15 @@
   <nav class="flex-1 py-3 px-3 space-y-0.5 overflow-y-auto">
     <a href="/chat"
       class="flex items-center px-3 py-2.5 rounded-lg text-sm transition-colors <%= it._page === 'chat' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
-      聊天
+      Chat
     </a>
     <a href="/contacts"
       class="flex items-center px-3 py-2.5 rounded-lg text-sm transition-colors <%= it._page === 'contacts' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
-      通讯录
+      Contacts
+    </a>
+    <a href="/portfolio"
+      class="flex items-center px-3 py-2.5 rounded-lg text-sm transition-colors <%= it._page === 'portfolio' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
+      Portfolio
     </a>
     <% const _isAgent = ['agent','agent-v2','agent-status','agent-history','story','graph'].includes(it._page); %>
     <% const _inMore = it._page === 'graph' || ['goals','wallet','skills','card'].includes(it._agentTab); %>
@@ -26,119 +30,149 @@
       <div x-show="open" x-transition class="mt-1 space-y-0.5">
         <a href="/agent"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'agent' && !it._agentTab ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          概览
+          Overview
         </a>
         <a href="/agent/history"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'agent-history' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          历史
+          History
         </a>
         <a href="/agent/status"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'agent-status' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          状态
+          Status
         </a>
-        <!-- 更多 -->
+        <!-- More -->
         <button @click="more = !more"
           class="flex items-center justify-between w-full px-3 py-1.5 rounded-lg text-xs text-ink-400 hover:bg-warm-100 hover:text-ink-600 transition-colors pl-5">
-          <span>更多</span>
+          <span>More</span>
           <span class="text-[10px] transition-transform" :class="more ? 'rotate-90' : ''">›</span>
         </button>
         <div x-show="more" x-transition class="space-y-0.5">
           <a href="/graph"
             class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-7 <%= it._page === 'graph' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-            图谱
+            Graph
           </a>
           <a href="/agent?tab=goals"
             class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-7 <%= it._agentTab === 'goals' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-            目标
+            Goals
           </a>
           <a href="/agent?tab=wallet"
             class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-7 <%= it._agentTab === 'wallet' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-            钱包
+            Wallet
           </a>
           <a href="/skills"
             class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-7 <%= it._page === 'skills' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-            技能
+            Skills
           </a>
           <a href="/agent?tab=card"
             class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-7 <%= it._agentTab === 'card' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
             Card
+          </a>
+          <a href="/approvals"
+            class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-7 <%= it._page === 'approvals' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+            Approvals
           </a>
         </div>
       </div>
     </div>
     <a href="/explore"
       class="flex items-center px-3 py-2.5 rounded-lg text-sm transition-colors <%= it._page === 'explore' || it._page === 'discovered' || it._page === 'network' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
-      探索
+      Explore
     </a>
-    <% const _isMarket = ['trading','market','market-overview','stocks','predictions','exchange'].includes(it._page); %>
+    <a href="/exchange"
+      class="flex items-center px-3 py-2.5 rounded-lg text-sm transition-colors <%= it._page === 'exchange' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
+      Exchange
+    </a>
+    <% const _isMarket = ['trading','market','market-overview','stocks','predictions'].includes(it._page); %>
     <div x-data="{ open: <%= _isMarket ? 'true' : 'false' %> }">
       <button @click="open = !open"
         class="flex items-center justify-between w-full px-3 py-2.5 rounded-lg text-sm transition-colors <%= _isMarket ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
-        <span>市场</span>
+        <span>Markets</span>
         <span class="text-[10px] transition-transform" :class="open ? 'rotate-90' : ''">›</span>
       </button>
       <div x-show="open" x-transition class="mt-1 space-y-0.5">
         <a href="/market-overview"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'market-overview' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          概览
-        </a>
-        <a href="/exchange"
-          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'exchange' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          Free Market
-        </a>
-        <a href="/market"
-          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'market' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          OTC (legacy)
+          Overview
         </a>
         <a href="/trading"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'trading' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          交易所
+          CEX Trading
+        </a>
+        <a href="/market"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'market' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          OTC
+        </a>
+        <a href="/exchange"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'exchange' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          Exchange
         </a>
         <a href="/stocks"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'stocks' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          股票
+          Stocks
         </a>
         <a href="/predictions"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'predictions' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          预测市场
+          Predictions
         </a>
+        <!-- More submenu: external DEX/DeFi protocols -->
+        <div x-data="{ moreOpen: false }">
+          <button @click="moreOpen = !moreOpen"
+            class="flex items-center justify-between w-full px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 text-ink-400 hover:bg-warm-100 hover:text-ink-600">
+            <span>More</span>
+            <span class="text-[9px] transition-transform" :class="moreOpen ? 'rotate-90' : ''">›</span>
+          </button>
+          <div x-show="moreOpen" x-transition class="mt-0.5 space-y-0.5">
+            <a href="/hyperliquid"
+              class="flex items-center px-3 py-1.5 rounded-lg text-[11px] transition-colors pl-9 <%= it._page === 'hyperliquid' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+              Hyperliquid <span class="ml-auto text-[9px] text-ink-300">perps</span>
+            </a>
+            <a href="/aevo"
+              class="flex items-center px-3 py-1.5 rounded-lg text-[11px] transition-colors pl-9 <%= it._page === 'aevo' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+              Aevo <span class="ml-auto text-[9px] text-ink-300">options</span>
+            </a>
+            <a href="/aave"
+              class="flex items-center px-3 py-1.5 rounded-lg text-[11px] transition-colors pl-9 <%= it._page === 'aave' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+              Aave <span class="ml-auto text-[9px] text-ink-300">lending</span>
+            </a>
+          </div>
+        </div>
       </div>
     </div>
 
     <!-- Settings (collapsed) -->
     <div class="pt-4 mt-4 border-t border-warm-200" x-data="{ open: false }">
       <button @click="open = !open" class="flex items-center justify-between w-full px-3 py-2 rounded-lg text-sm text-ink-400 hover:bg-warm-100 hover:text-ink-600 transition-colors">
-        <span>设置</span>
+        <span>Settings</span>
         <span class="text-[10px] transition-transform" :class="open ? 'rotate-90' : ''" >›</span>
       </button>
       <div x-show="open" x-transition class="mt-1 space-y-0.5">
         <a href="/relays"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'relays' || it._page === 'relay' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          账户管理
+          Accounts
         </a>
         <a href="/adapters"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'adapters' || it._page === 'adapter' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          AI 引擎
+          AI Engine
         </a>
         <a href="/skills"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'skills' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          技能
+          Skills
         </a>
         <a href="/ledger"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'ledger' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          花费账本
+          Ledger
         </a>
         <a href="/events"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'events' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          日志
+          Events
         </a>
         <a href="/whale-signal"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'whale-signal' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          鲸鱼信号
+          Whale Signal
         </a>
         <a href="/settings"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'settings' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          节点 RPC
+          Node RPC
         </a>
       </div>
     </div>

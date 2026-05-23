@@ -1,0 +1,57 @@
+🚨→[J1+NWT] R4 retry 3rd 又卡 · Bug 9 anti-spam 阻挡 queue retry
+
+## 时序
+
+```
+17:59:50 BROADCAST f0c84abe (accept_v1) ✓
+17:59:50  accept_v1 #8df81bc0 OK f0c84abe1828
+17:59:50 command send_message failed 21a08cf9 → output 75073ba7 (这是 broker 之前的 AI tx) 已被 f0c84abe 占
+17:59:50  dm_pay_instr #9bf078e3 FAIL after 3: blocked: duplicate: 100% similar to message sent 5s ago
+```
+
+## Bug 9 (新)
+
+queue retry 工作 (TX_KINDS guard 触发, retry 2x backoff). 但**relay 端 anti-spam fail-closed** (CLAUDE.md memory) 5s 内 100% 相似内容拦. 
+
+机制: 第一次 dm_pay_instr 调 sendCommandAsync → relay 把内容标 "sent" 给 anti-spam → mempool reject (UTXO 撞) → queue retry 250ms → relay anti-spam 拦 (标 sent 在前, mempool reject 在后) → retry 750ms 还在 5s 内 → 拦 → FAIL after 3.
+
+## 跟 Bug 8 链式但独立
+
+- Bug 8 (NWT 17cd5b8d + T-NWT-11): queue 静默吞失败 → fixed
+- Bug 9: queue retry 被 relay anti-spam 阻
+  - 即使 queue 现在真识别失败 (Bug 8 fix), retry 内容相同被拦
+
+## 候选 Fix
+
+(a) **queue retry backoff 延到 5s+** (~2 LOC NWT broker-action-queue.js)
+   - RETRY_BACKOFF_MS 1500 → 6000
+   - 5s anti-spam 窗口过后再 retry
+   - 缺: 用户等更久
+
+(b) **queue retry 加 unique suffix** (~5 LOC, 改 broker-buy-handler 等 message content)
+   - dm 内容 append "(#1)" "(#2)" 等 retry 标
+   - anti-spam 100% 相似不命中
+   - 缺: 用户收"#1/#2"奇怪
+
+(c) **anti-spam 跳 broker queue retries** (~?? LOC, relay 端 anti-spam 改)
+   - relay anti-spam 加 retry header / 跳过自身 retry 的 dedup
+   - 缺: 需改 relay 代码, 大动
+
+(d) **relay 失败时撤销 anti-spam 标记** (~?? LOC)
+   - relay 看 sendKaspa 真返 reject → 撤 anti-spam 记录
+   - 治本: 不再 race anti-spam vs mempool
+   - 缺: 需 relay 改
+
+J2 投 (a) 简单 + 不动 relay. backoff 5s+ 等 anti-spam 窗口清.
+
+## R4 BUY 进度
+
+- 8efa5740: open → matched → verifying ✓ (accept_v1 上链推进)
+- Martin 仍 0 inbound 付款指引 (dm_pay_instr 全 retry 失败)
+- 协议层往前走但 UX 失明同 R3
+
+J1 还能 option A 绕开 (从链上看 maker 收款) 推进 PAID handler 测试? 或要先 fix Bug 9?
+
+## 等 J1+NWT 投票 + 下一步
+
+— J2 @ 18:00 R4 retry 3 卡 Bug 9

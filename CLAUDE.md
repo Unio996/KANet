@@ -10,9 +10,26 @@
    - 34 张活跃表全覆盖：用途、字段、写入方、读取方、陷阱
    - 持续更新（最近：2026-04-06）。改表前必查本文档确认影响范围
 
-3. **Alpha 达标标准** → `docs/ALPHA-CHECKLIST.md`
+3. **工程陷阱档案（写代码前必扫）** → `docs/ANTI-PATTERNS.md`
+   - 12 条具体踩坑模式 + Case Study (新建/角色/asset硬编码/单skill/教条/relayId/协作频道/probe副作用/Qwen kill switch/DM kind 注册/中文助词/接位扫描)
+   - **新会话 / 接位 Agent 写代码前必扫** + 跑 `node scripts/lint-kanet.mjs` 静态查
+   - 撞了未在档案的新坑 → 立即追加一条 + 写 lint rule 堵死
 
-4. **系统架构（详细版）** → `docs/kanet-system-architecture.md`
+4. **Qwen LLM 调用规则** → `QWEN-RULES.md`
+   - Rule 11: Qwen3.6 caller 必加 `chat_template_kwargs.enable_thinking=false`, `/no_think` 实测无效
+   - 写新 LLM caller 前必读. broker-llm-agent.js 漏过这条撞 60-120s timeout 全崩
+
+5. **Alpha 达标标准** → `docs/ALPHA-CHECKLIST.md`
+
+6. **测试框架（QA 子系统，写/改代码前必读）** → `docs/TEST-FRAMEWORK.md`
+   - 自治测试体系，落地 `kasia-console/test-framework/`，作为 kasia-console QA 子系统
+   - 所有 broker / seeker / agent 业务级测试在这里写
+   - 三层结构：lib/(领域无关) + personas/(用户人格) + cases/<domain>/(业务场景)
+   - 跑：`node scripts/test.mjs --domain=broker` (整 domain) / `--case=...` (单个) / `--all` (全部)
+   - 实操教程 → `kasia-console/test-framework/README.md`
+   - 加新业务必同步加 case；修 bug 必同步加 regression case 守住
+
+7. **系统架构（详细版）** → `docs/kanet-system-architecture.md`
    - 五大模块职责、25张表读写映射、数据流、已知裂缝、API 清单
 
 5. **数据架构危机** → `（已归档，详见 DEVELOPER-GUIDE 第三章 pending_actions 架构）`
@@ -27,8 +44,24 @@
 
 8. **记忆索引** → `（使用当前项目的 .claude 记忆系统）`
 
+## 接位 SOP（新会话 / 接替前任 Agent 必跑）
+
+**写代码前 4 步扫描**（漏一步重复犯历史错, 见 ANTI-PATTERNS.md 规则 12）:
+
+1. **领域 anti-pattern**: `grep -i <topic> docs/ANTI-PATTERNS.md docs/QWEN-RULES.md`
+2. **现有 caller 模式**: `grep -rn <key_function> kasia-console/src/` (e.g. 写 LLM caller → `grep chat_template_kwargs` 看 4 个现有 caller)
+3. **该领域 commit 历史**: `git log --grep=<topic> --oneline -20` (近期相关 fix 暴露的坑)
+4. **memory 相关 feedback**: `grep -ri <topic> ~/.claude/projects/*/memory/feedback_*.md`
+
+**写完 commit 前必跑**: `node scripts/lint-kanet.mjs <changed-files>` — 失败一条 commit 都不让 (git pre-commit hook 强制).
+
+**改 broker / agent 业务代码后必跑**: `cd kasia-console && node scripts/test.mjs --domain=<相关 domain>` — framework 一键回归。修 bug 必同步加 regression case 进 `kasia-console/test-framework/cases/<domain>/` 守住，永不退化。详见 `docs/TEST-FRAMEWORK.md`.
+
+跳步 SOP = 重复犯错的根因 (Owner 2026-04-26 元问题). NWT 接位漏 ANTI-PATTERNS.md → 漏 QWEN Rule 11 → broker LLM 60-120s timeout 全崩, 是负面教材.
+
 ## 核心原则（违反即退回）
 
+- **NO TX NO STATE CHANGE** — 链上行为铁律。广播/TX 没上链 = 什么都没发生，不准推进本地状态。try-catch 吞掉广播失败 = 乐观写入 = 致命 bug。详见 DEVELOPER-GUIDE "第零条 bis"
 - **不猜代码，查了再写** — 列名、函数名、参数名、路径，每次引用前先查。记忆不可信，代码是唯一真相。零例外。
 - **先读透现有代码再动手** — 不理解就不改
 - **继承优化，不替换重写** — 已有功能不能退化
@@ -59,29 +92,64 @@ DATABASE.md 有改动时（新表/删表/加字段），必须同步更新文档
 | agent-mind | `agent-mind` | Agent 灵魂（五核、技能、决策）|
 | agent-adapter | `agent-adapter` | AI 大脑桥接（多 provider）|
 
-## 当前系统状态（2026-04-06 更新）
+## 当前系统状态（2026-04-12 更新）
 
-### 数据架构 — 技术债已清零
-- `relation_states` 是社交关系唯一真相源（196 条）
-- `chain_events` 是链上事件唯一真相源（63230 条）
-- `account_relations` 已删除（v46 DROP TABLE，account-relations.js 同步删除）
-- `interaction_records` 已删除（v47 DROP TABLE，17 处读取全迁移到 chain_events）
-- `replies.sent_txid` hack 已删除（chain_events 是真相源）
-- 数据库字典 `docs/DATABASE.md` 已建立，34 张活跃表全覆盖
-- 当前 migrate.js 最新版本：v52
+### 数据架构
+- `relation_states` 是社交关系唯一真相源
+- `chain_events` 是链上事件唯一真相源
+- 数据库字典 `docs/DATABASE.md` 已建立
+- 当前 migrate.js 最新版本：v55
 
-### 协议与交易 — 全部已实现
+### 4/12 基础修复
+- 提币改 sendCommandAsync — 错误正确回传前端（陷阱 #46）
+- Adapter 更新自动同步 agent_connections（syncConnectionFromAdapter）
+- 分配 adapter 后自动启动 relay（陷阱 #47）
+- **Agent 默认不主动握手** — autoHandshake 开关，UI 在 /agent 页（陷阱 #48）
+
+### Exchange 协议 v2.1 — 全自动交割（2026-04-10）
+- 7 条协议消息：publish / accept(含选链) / paid / delivered / timeout / cancel / dispute
+- 状态机：open → matched → verifying → delivering → completed
+- auto-pay：本地 Agent accept 后自动付 USDT（evm-transfer.js，BNB/ETH）
+- auto-deliver：验证通过后自动发 KAS（3 次重试，失败 dispute）
+- 超时机制：matched 30 分钟无 paid → timeout → reopen
+- Brain 感知：context-builder + self-awareness 注入挂单状态
+- 端到端验证通过：挂单 → 接单 → 付款 → 验证 → 发 KAS → completed，全程零人工
+- 设计文档：`docs/superpowers/specs/2026-04-10-exchange-settlement-design.md`
+- Phase 2 完成：SOL/TRON auto-pay（4/11）。待做：Swap 集成
+- 4/11 修复：timeoutVerifying 超时逻辑修正（expires_at → verifying_started_at+30min）
+- 4/11 增强：Seeder 双向做市（buy-side USDT→KAS + kaspa_tx 验证）
+- 4/11 增强：Exchange UI 三层可验证证据链接（Kaspa/BSC/ETH/SOL/TRON explorer）
+
+### 做市管线
+- Market Seeder（market-seeder.js）：5min tick 自动挂单，价格跟随市价 + spread%
+- Seeder 挂单带 accepted_chains（BNB/ETH 收款地址）、verification: cross_chain_tx
+- Fund Lock 接入 exchange_offers（publish 锁 / cancel 释放 / completed 花费）
+- Spending Ledger 修复（broadcast + transfer TX 全覆盖）
+
+### 协议与交易
 - `relation_states` + `chain_events` + `execution_states` + `pending_actions` 四张协议状态表
-- 自由市场 Phase 0-5 全部完成（fund_lock/limits/权限/三模式/dispute）
-- 协议级自由市场 /exchange 上线（报价/接单/取消 + 乐观更新 + 可插拔验证器）
+- OTC 系统（mm_orders）仍在运行，exchange 是其泛化版（任意资产 ↔ 任意资产）
 - 做市管线（market-scanner 8 CEX + order-executor + CEX 自动对冲）
-- 交易协议上链（trade-protocol-filter.js，7 种协议消息）
+- 交易协议上链（trade-protocol-filter.js，OTC 7 条 + Exchange 7 条）
+- evm-transfer.js 共享 ERC20 transfer 函数（trading.js + exchange 共用）
 
 ### Agent 自治 — 5 Agent 全绿
 - Health Monitor + Self-Healing + patrol 脚本持续监控
 - 社交认知链（防骚扰）+ anti-spam fail-closed
 - 目标反馈机制（cooldown + auto-retire）
 - pending_actions 意图队列（意图与事实分离）
+
+### 4/13 Week 1-2 密集产出
+- **Hyperliquid 真实集成**：SDK 踩 4 坑后跑通，Intel Panel + AI Analyze + Deposit + 连接条，首笔真实合约交易（HYPE LONG → 主动平仓 -$0.45 学费）
+- **Aave/Aevo 收尾**：两页都加分析按钮（本地 Qwen + 跨市场联动，Aave 会看 HL 保证金给建议）+ 连接条。Aevo 10+ 天静默 bug 修复（signing_key_enc 列 v58 补）
+- **声誉通电**：relation_states.classification 5 态 + reputation.js 176 行已存在但从没被调用过，三处接入：autoTaker 硬门禁 / 手动 accept 软警告 / /api/exchange/peer-reputation endpoint
+- **事前余额校验**：exchange publish/accept 双向校验 EVM+KAS，堵住发空单/接空单
+- **Exchange Phase 1 stress test 12/12 全绿**：发现并修复脆弱点 #4 (dispute resolve 缺失) 和 #5 (fund_lock 泄漏)，意外完成 KANet 第 16 笔 completed real E2E 交易
+- **脆弱点 #4 修复**：新 `POST /api/exchange/resolve/:id` 支持 maker_wins/taker_wins outcome，救活卡 2 天 f8e70ae1 dispute
+- **脆弱点 #5 修复**：transition() completed 分支 + handleExchangeDelivered 快捷路径双重 spendFunds，v59 backfill 回填 2 笔卡单
+- **脆弱点 #3 根治 (Week 2 Day 1)**：嵌入式 Kaspa TX indexer，Relay 订阅 block-added 写入 kaspa_tx_log (v60)，verifier 本地优先 RPC 降级。修复意外发现：之前 kaspa 分支是硬编码 `confirmed: true` stub，相当于关闭 Kaspa 验证。现在真正验证生效。
+- **dispute 历史档案**：首次通过 resolve endpoint 把 f8e70ae1 从 disputed 推进到 cancelled，保留完整 meta
+- **窄门定位校准 (Owner 两次纠正)**：先从"集成 HL/Aave/Aevo"校准到"走协议窄门"，再从"只做协议"校准到"协议+完整集成+Agent 自动化三者有机整合"。KANet 占位 = "用 Kaspa 信任链把 AI Agent 连接到社交/购物/交易所有市场，全自动全可审计全链上履历"
 
 ## 启动/停止
 

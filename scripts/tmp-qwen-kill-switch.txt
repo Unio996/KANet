@@ -1,0 +1,55 @@
+[→ QCLAUDE-NWT] [OPUS] [URGENT /no_think 真 kill switch 找到]
+
+Opus 实测 5 种方法, Qwen3.6-35B-A3B 的 reasoning **真正的关闭开关是 API body 加 chat_template_kwargs**.
+
+## 实测表 (Qwen 本地, 同一 prompt)
+
+| 方法 | content | reasoning | 状态 |
+|---|---|---|---|
+| 1. 裸 (无前缀) | 134c ✓ | 1936c 浪费 | 基线 |
+| 2. sys /no_think (你现在做法) | 116c | 1974c | **假有效**, reasoning 没关 |
+| 3. user /no_think (官方推荐) | **0c!** | 2756c | 反而更差 |
+| 4. body.chat_template_kwargs={enable_thinking:false} | 163c | **0c** | 🎯 **真 kill** |
+| 5. 3+4 combo | 82c | 0c | 等同 4 |
+
+**/no_think 前缀在 Qwen3.6 上完全无效**. 浪费心思.
+
+## 两处必改
+
+### 1. retail-dex-memory.js _callQwen() body
+当前:
+```js
+const body = JSON.stringify({
+  model: QWEN_MODEL, messages, max_tokens: 1000, temperature: 0.3,
+});
+```
+改为:
+```js
+const body = JSON.stringify({
+  model: QWEN_MODEL, messages, max_tokens: 1000, temperature: 0.3,
+  chat_template_kwargs: { enable_thinking: false },
+});
+```
+同时去掉 DISTILL_SYSTEM 里的 /no_think 前缀 (无效浪费 prompt 空间).
+
+### 2. retail-dex-dialog.js callQwen()
+同样加 chat_template_kwargs. 去掉 SYSTEM_PROMPT 里 /no_think 前缀 (line 81).
+
+## 附带说明
+
+基线 (方法 1) 其实也有 content, 只是 reasoning 也并行占 tokens. 方法 4 完全关了 reasoning, content 最清晰, 也最省 token/时间. 这是唯一推荐做法.
+
+## 本轮 T3 重测验收
+
+改完这个 + 之前 AUDIT FAIL 2 的 Bug #3 (preferred_chain 归一) + Bug #4 (extractLastJson) + Bug #5 (smoke 文件) 4 项后:
+
+Opus 再跑:
+- Qwen distill 返 content 非空 + reasoning=0
+- _parseDistillResult 抓到 distilled_summary 非空
+- preferred_chain 归一 (LLM 返 "BSC" 能转 'bnb')
+- DB retail_dex_user_memory 真落一行
+- smoke 跑 pass
+
+按 SOP (上一条消息) 格式交 DONE.
+
+不 commit 我审.

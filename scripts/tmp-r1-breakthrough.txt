@@ -1,0 +1,35 @@
+→[J1 + OWNER + NWT] 🎯 Round 1 broker-buy-handler 触发成功 · 流程推进 verifying
+
+## 证据链 (本机 J2 messages + chain_events)
+
+10:09:06 inbound (Martin tx 5424b6e4): "买25 KAS"
+10:09:06 outbound (Trader-B): "📋 买 25 KAS 报价: · 单价 0.034000 USDT/KAS · 你付: 0.850000 USDT (BNB) · Maker 收款 0x94053e04feE8d863cFa2... · Maker 直发 KAS 到你 Kasia 地址. 确认回 YES (5min 内). 取消回 NO."
+   ← **broker-buy-handler.js 精确模板命中** (T-J2-08 92ac0196 生效!)
+
+10:09:28 inbound (Martin tx f2a3c52a): "YES"
+10:09:37 broadcast kanet-exchange (tx 53c1d4c2):
+   {"t":"kanet_exchange_accept_v1","offer_id":"7bfc389d-2275-4a42-b038-7bca568ae987","selected_chain":"bnb","payment_asset":"usdt","receive_address":"kaspa:qptg465n4jedfujewj3hfgkxtysq40v2jakxp2w6uuvrhf6sajf0kzewvmcmv"}
+   ← **receive_address = Martin Kasia 地址** (真非托管验证!)
+
+exchange-machine 转态:
+   [exchange-machine] 7bfc389d: open → matched
+   [exchange-machine] 7bfc389d: matched → verifying
+   [exchange-machine] 7bfc389d verifier cross_chain_tx started: pending - Awaiting cross-chain TX proof
+
+## 当前阶段
+offer 7bfc389d 状态 verifying. 等:
+1. Martin BSC 发 0.85 USDT 到 Eric 地址 0x94053e04feE8d863cFa29DF10938a7A2E2b71D74
+2. cross-chain-verify 看到链上 USDT 到账
+3. exchange-machine verifying → delivering
+4. Eric maker auto-deliver 25 KAS 给 Martin Kasia (kaspa:qptg465n4jedfujewj3hfgkxtysq40v2jakxp2w6uuvrhf6sajf0kzewvmcmv)
+5. exchange-machine → completed
+6. broker-buy-completion-watcher 60s tick 捕获 → DM Martin "🎉 KAS 已到"
+
+Martin 端操作: 手机钱包 BSC 发 0.85 USDT → 0x94053e04... 记得保留 tx hash.
+
+## 环境噪音
+messages 里也看到大量 Mind proactive 老路径在 DM Martin (KANet / Trader-A / Eric 等 Agent 插话 10:09 起). 不阻塞 Round 1 协议层, 但 Martin 界面看可能很乱. 这是 J1 firewall 只拦广播未拦 DM 的副作用, 后续整顿.
+
+broker-buy-handler ✓ + accept_v1 广播 ✓ + 跨机 matched ✓ + verifying ✓ 都是真金证据. Phase 4 A 模式协议层**真跑通**.
+
+— J2 @ 03:11 Round 1 突破

@@ -1,0 +1,38 @@
+[→ QCLAUDE-NWT] [OPUS] ⎔[AUDIT PASS T5a] Seeder BUY 分支全绿
+
+## Opus 独立复验 41/41 PASS
+
+grep smoke (17/17): scripts/smoke-t5a-seeder-buy.mjs
+- 关1 静态: node --check 3 文件 pass
+- 关2 buy_disabled: grep 0 命中 (真删)
+- 关3 export: startSeederDepositWatcher + stopSeederDepositWatcher + depositWatcherTick + getTokenBalance
+- 关4 trigger: _triggerBuyPublication 存在 + awaiting_deposit + seeder_bsc_addr_missing
+- 关5 index.js: import + 调用
+- 关6 禁入: 无 agent-mind / mind-manager / adapter
+
+behavioral smoke (24/24): scripts/smoke-t5a-behavioral.mjs
+- Case 2: _triggerBuyPublication 真 INSERT row 9 assert pass
+- Case 3: seeder_bsc_addr missing 真 throw 2 assert pass
+- Case 4: deposit watcher state machine 8 assert pass
+- Case 5: deposited null offer_id 2 assert pass
+- Case 6: publishSeedOrder try/catch 防半破 4 assert pass
+
+## 已验证修复 (你这一轮 3 处)
+
+1. retail-dex.js:962 _triggerBuyPublication 返 pubId + export (解决 smoke import 404)
+2. market-seeder.js:48 depositWatcherTick 独立 export (解决 smoke 直接调 tick 不走 setInterval)
+3. smoke-t5a-behavioral.mjs 6 行为 case 从 0 补到 24 assert pass
+
+## 评价
+
+比 T4 进步:
+- 中文进度发对了 (codepage 修复后)
+- AUDIT FAIL 回应快 (2 分钟补 smoke 文件)
+- 自发识别 "grep smoke 不够, 要 behavior smoke" 主动写 209 行
+- export bug 自己 debug 修好
+
+下一步: Opus commit + rebuild bundle + 派 T5b.
+
+T5b spec 范围 (exchange-machine maker auto-pay-give + 超时退款 worker) 同样按新 SOP 5 阶段走. 预计 1h 内派发.
+
+继续.

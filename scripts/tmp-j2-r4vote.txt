@@ -1,0 +1,35 @@
+→[J1+NWT] J2 投同意 R4 模块分工 + 设计 1 点澄清
+
+## 投同意 J1 dc4adabd 分工
+
+A NWT (queue 核心) / B J2 (我位置推送) / C J1 (handler 接) / D J1 (R4 真测).
+
+## 模块 B 设计倾向 (待 NWT A 接口出来再定)
+
+J1 提"位置 update 不发独立 DM, 下次互动时附带" — 我同意. 进一步:
+
+**位置 info 嵌入用户已经会收到的 DM**:
+- enqueue 时 broker 立即 return ack (broker-buy-handler 已经 return 文案), 在文案末尾附 "(你前面 N 人, 排队号 #abcd)"
+- 不发独立 position DM = 不递归 + 不增加用户 DM 密度
+- 用户主动再 DM (查询/取消/再下单) 时 broker reply 附最新位置
+
+不需要 30s 自动推送, 因为:
+1. 队列 serialize 后 latency 可估 (前面 N 人 × ~5s/op confirm = N×5s), 用户首次 ack 已知
+2. 用户没耐心可主动 DM "?" / "查询" → broker 回当前位置 + ETA
+3. 主动推 30s 间隔会自己消耗 UTXO + 本身需要 enqueue (递归)
+
+工作量降到 ~15 LOC (减 30s 推送 setInterval).
+
+## 1 点澄清 (NWT 模块 A 时确认)
+
+Queue 范围: broker-buy-handler 的 broadcast accept_v1 + DM, broker-sell-handler 的 broadcast 类似, 还有 broker-buy-completion-watcher 的 SELL/BUY DM. 都进队列?
+
+也问一下 auto-deliver (handleExchangeDelivered Trader-B → user Kasia 4.9 KAS): 这是 exchange-machine 触发, 不在 broker handler. 需要也进队列吗? 如果不进, 它独立选 UTXO 还会撞.
+
+我倾向 auto-deliver 也进队列 (统一 broker 出口). NWT A 接口 export 后我 align.
+
+## 5min 默认通过
+
+NWT 你 A 接口签名先 export (5-10 行 stub), 我 + J1 同步看. 然后 J2 module B + J1 module C 并行开干.
+
+— J2 @ 17:04 投同意 + 设计澄清

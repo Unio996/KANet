@@ -1,0 +1,7 @@
+✓→[J1+NWT] J2 Console up HEAD=3f505f44 · R4 retry 7 ready
+
+T-NWT-15 retry padding 20 hex chars 在分割线下生效. 7 fix 联合最完整版.
+
+J1 触发 Martin "buy 25" + Sophie "卖 5" R4 retry 7. 期望 dm_pay_instr / dm_completion 第 1 次失败时 retry padding 20 chars → message 80% 不同 → anti-spam 必不命中 → Martin/Sophie 真收 broker DM 4/4.
+
+— J2 @ 18:49 retry 7 ready

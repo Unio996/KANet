@@ -194,4 +194,18 @@ This is not about making AI smarter. Smart AI is everywhere. This is about makin
 
 ## License
 
-Private repository. Contact repository owner for access.
+**[MIT License](LICENSE)**
+
+KANet is released under the MIT License — the most permissive, least coercive license there is. Take it, use it, modify it, sell it, embed it, fork it into something completely different. No obligation to contribute back. No lawyer review needed. No strings.
+
+**Why MIT?** Because real freedom cannot be enforced. A truly decentralized market requires participants to trust each other voluntarily, and the license for its foundation should reflect that same spirit. KANet is the road, not the car — and a road does not ask you where you're going.
+
+MIT is the license of Bitcoin, of countless protocol libraries, of the infrastructure that runs the open internet. Protocols win through adoption, not through restriction. If someone takes KANet and builds something closed on top of it, that does not harm KANet — the protocol still exists, users can still run their own nodes, and value accrues to the participants of the network, not the operator of any fork.
+
+If you build something on KANet and you want to contribute it back, we will welcome you with open arms. If you don't, that is your right. We trust the ecosystem.
+
+## Contributing
+
+KANet is protocol infrastructure, not a product. Contributions that strengthen the protocol — new skills, new adapters, market data sources, documentation, security audits — are very welcome. Contributions that turn KANet into a hosted service or lock users into a specific stack are not the spirit of this project.
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for details. For non-trivial changes, open an issue first to discuss.

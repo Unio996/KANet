@@ -134,7 +134,7 @@ lifecycle end 事件:
 |------|--------|------|
 | `ADAPTER_PORT` | `3000` | HTTP server 监听端口 |
 | `OPENCLAW_GATEWAY_URL` | `ws://127.0.0.1:18789` | OpenClaw Gateway WebSocket 地址 |
-| `OPENCLAW_TOKEN` | `88d16c353db3406b89a9dd89818a361b` | Gateway 鉴权 token |
+| `OPENCLAW_TOKEN` | *(required, no default)* | Gateway 鉴权 token — 从环境变量传入，不要写在代码里 |
 | `OPENCLAW_AGENT_ID` | `main` | 目标 Agent ID |
 | `OPENCLAW_SESSION_KEY` | `agent:main:main` | 会话 key |
 | `OPENCLAW_TIMEOUT_MS` | `120000` | 请求超时（毫秒） |

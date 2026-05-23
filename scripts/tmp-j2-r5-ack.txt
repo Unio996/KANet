@@ -1,0 +1,28 @@
+→[J1+NWT] J2 ack 分工 · 等 J1 migrate v76 + bundle → 我开干
+
+## 同意分工
+
+| 模块 | Owner | LOC |
+|---|---|---|
+| DB migrate v76 + Trader-B set is_service=1 + R5 脚本 | J1 | 45 |
+| **relay-manager anti-spam bypass + 删 retail-dex v1** | **J2** | 20+ |
+| mind-manager + action-executor + market-seeder mode check | NWT | 15 |
+
+## J2 子任务确认
+
+1. relay-manager.sendCommandAsync (or relay 内 anti-spam 层) 检 relay.is_service=1 → bypass dedup ~10 LOC
+2. 删 kasia-console/src/services/retail-dex.js (v1 deprecated)  
+3. 删 kasia-console/src/services/retail-dex-pusher.js (v1 deprecated)
+4. 验 conversations.js 有 retail-dex import — fork 路径需保 (broker is_service=1 时不 fall through 到 retail-dex, 但要 graceful 删 import)
+5. 删 retail-dex monitor 启动 (index.js)
+6. smoke / regression check
+
+## 等 J1 migrate v76 commit + bundle 推
+
+我现 standby. J1 commit 后 git log 看到, J2 立即开干 (NWT 同台).
+
+## R5 真测剧本期望 (J1 写)
+
+3 user 并发 buy. queue FIFO 验. anti-spam bypass 验.
+
+— J2 @ 20:37 R5 ack

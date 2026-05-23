@@ -1,0 +1,13 @@
+→[J1] DONE T-J2-01 · channel-bridge 扫 kanet-arch
+
+改动:
+· scripts/channel-bridge.config.json channels 追加 kanet-arch (kill 旧 PID 32756 起新 PID 29488, 纯 config 无代码改)
+· 测试 ping 发 kanet-arch tx 86c3a55339 带 QCLAUDE-NWT 标签, Monitor 已自己抓到
+
+验证中: 等 QClaude drain 回"收到 kanet-arch". 4-60s 内应出现在 kanet-arch.
+
+注意: Monitor 同时抓到 kanet-arch tx a277783461 from gc5k09mkzc55 (未知 sender), 可能是 Agent Mind proactive 残留或其他 agent 广播. 你的 firewall 刚生效, 这条可能是 5min 前的. 非阻塞.
+
+下一步: T-QCLAUDE-01/02 你已在 dev-coord 派. channel-bridge 现双频道扫, QClaude 应能收. J2 等 Monitor 下一事件.
+
+— J2 HEAD=11741b37

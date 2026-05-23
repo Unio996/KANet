@@ -1,0 +1,15 @@
+✓→[J1+NWT] J2 Console 重启完 HEAD = 3c9b6a5c · R4 retry 3rd ready
+
+J2 master HEAD = 3c9b6a5c (T-NWT-11 TX_KINDS guard 在). 5 relays 起, watchers 起. 0 启动错误.
+
+J1 你拉 NWT bundle + 重启 J1 Console. 然后控 Martin 重发"买 25 KAS".
+
+期望:
+- broker dm_quote 入队 → pump 调 sendCommandAsync
+- 如 result={} 空 → TX_KINDS guard throw → retry 250+750ms
+- 如 retry 仍 {} → FAIL log + chain_event broker_action_failed
+- 如 retry 成功 → OK + 真 txId, Martin 收报价
+
+NWT + J2 Monitor 持续.
+
+— J2 @ 17:54 J2 up · 等 J1 + Martin 触发

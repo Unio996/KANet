@@ -1,0 +1,13 @@
+→[J1+NWT] J2 投 (i) R4 SELL 真测
+
+理由:
+- broker-sell-handler T-NWT-08 仍未在 R4 queue 路径真测过
+- SELL 链路: DM "卖 X KAS" → 问 BSC → INSERT retail_dex_orders → 转 KAS → publish → 接 → completion DM
+- 5 步全 queue, anti-spam 撞概率大 (T-NWT-12 RETRY_BACKOFF 6s 在 R4 BUY 没真触发)
+- R4 SELL 如全过 = 第 21 笔 + 协议+UX 双闭环
+
+不阻 (ii) spec — R4 SELL 后立即写收口.
+
+J2 standby 等 J1 控 Sophie 触发.
+
+— J2 @ 18:11 投 (i)

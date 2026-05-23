@@ -87,6 +87,24 @@ export function updateConnectionStatus(id, status, errorMsg) {
   `).run(status, errorMsg || null, nowIso(), id);
 }
 
+/**
+ * Sync agent_connections from adapter_nodes after adapter config update.
+ * Updates base_url, model, and bumps credential_version so Adapter cache invalidates.
+ */
+export function syncConnectionFromAdapter(adapterNodeId) {
+  const a = sqlite.prepare('SELECT * FROM adapter_nodes WHERE id = ?').get(adapterNodeId);
+  if (!a) return;
+  const conn = getConnectionByAdapter(adapterNodeId);
+  if (!conn) return;
+  const baseUrl = a.ai_provider_url || conn.base_url;
+  const model = a.ai_model || conn.model;
+  if (baseUrl === conn.base_url && model === conn.model) return; // no change
+  const newVersion = (conn.credential_version || 0) + 1;
+  sqlite.prepare(`
+    UPDATE agent_connections SET base_url = ?, model = ?, credential_version = ?, updated_at = ? WHERE id = ?
+  `).run(baseUrl, model, newVersion, nowIso(), conn.id);
+}
+
 // ── resolveRequestAuth (the architectural divide) ──────────────────────────
 
 /**
@@ -95,10 +113,10 @@ export function updateConnectionStatus(id, status, errorMsg) {
  *
  * @param {string} connectionId
  * @param {boolean} forceRefresh - true after 401, triggers refresh attempt
- * @returns {object} RequestAuthContext
+ * @returns {Promise<object>} RequestAuthContext
  */
-export function resolveRequestAuth(connectionId, forceRefresh = false) {
-  const conn = getConnection(connectionId);
+export async function resolveRequestAuth(connectionId, forceRefresh = false) {
+  let conn = getConnection(connectionId);
   if (!conn) {
     return {
       connectionId,
@@ -137,22 +155,28 @@ export function resolveRequestAuth(connectionId, forceRefresh = false) {
     }
 
     const now = Date.now();
-    const expiresAt = conn.expires_at ? new Date(conn.expires_at).getTime() : Infinity;
-    const isExpired = expiresAt <= now;
-    const isExpiring = expiresAt - now < 5 * 60_000; // < 5 min
+    const expiresAtMs = conn.expires_at ? new Date(conn.expires_at).getTime() : Infinity;
+    const isExpired = expiresAtMs <= now;
+    const isExpiring = expiresAtMs - now < 5 * 60_000; // < 5 min
 
-    // If expired or force_refresh requested, attempt refresh
+    // If expired or force_refresh requested, attempt a synchronous refresh
+    // (not waiting for the 60s background worker). Falls back to error if
+    // refresh token is missing or refresh itself fails.
     if ((isExpired || forceRefresh) && conn.refresh_token_enc) {
-      // Phase 3 will implement actual refresh here.
-      // For now, mark as needing reauth if expired.
-      if (isExpired) {
-        updateConnectionStatus(conn.id, 'expired', 'Token expired — refresh not yet implemented');
+      try {
+        await _refreshConnection(conn);
+      } catch (err) {
+        console.log(`[connection-manager] sync refresh threw: ${err.message}`);
+      }
+      conn = getConnection(connectionId);  // reload after refresh attempt
+      if (!conn || conn.status === 'refresh_failed' || conn.status === 'expired' ||
+          conn.status === 'reauth_required' || conn.status === 'revoked') {
         return {
           connectionId,
-          provider: conn.provider,
-          status: 'expired',
-          errorCode: 'AUTH_EXPIRED',
-          errorMessage: 'Token expired',
+          provider: conn?.provider,
+          status: conn?.status || 'expired',
+          errorCode: conn?.status === 'reauth_required' ? 'AUTH_REAUTH_REQUIRED' : 'AUTH_EXPIRED',
+          errorMessage: conn?.last_refresh_error || 'Token expired',
         };
       }
     }
@@ -273,13 +297,15 @@ export function startRefreshWorker() {
 }
 
 async function _checkAndRefresh() {
+  // Include 'expired' and 'refresh_failed' so a dead token can still be
+  // auto-revived by the worker. 'reauth_required' stays excluded — user action
+  // is needed there.
   const rows = sqlite.prepare(`
     SELECT * FROM agent_connections
     WHERE auth_mode = 'oauth'
-      AND status IN ('connected', 'expiring')
+      AND status IN ('connected', 'expiring', 'expired', 'refresh_failed')
       AND refresh_token_enc IS NOT NULL
-      AND refresh_after IS NOT NULL
-      AND refresh_after <= datetime('now')
+      AND (refresh_after IS NULL OR refresh_after <= datetime('now'))
   `).all();
 
   for (const conn of rows) {
@@ -289,6 +315,20 @@ async function _checkAndRefresh() {
       console.log(`[connection-manager] Refresh failed for ${conn.id}: ${err.message}`);
     }
   }
+}
+
+/**
+ * Public: manually trigger a refresh for one connection. Used by the
+ * /api/auth/retry-refresh endpoint when UI wants to revive a dead token
+ * without waiting for the 60s worker tick.
+ */
+export async function retryRefresh(connectionId) {
+  const conn = getConnection(connectionId);
+  if (!conn) throw new Error('Connection not found');
+  if (conn.auth_mode !== 'oauth') throw new Error('Not an OAuth connection');
+  if (!conn.refresh_token_enc) throw new Error('No refresh token — need re-OAuth');
+  await _refreshConnection(conn);
+  return getConnection(connectionId);
 }
 
 async function _refreshConnection(conn) {

@@ -1,0 +1,29 @@
+→[J1+NWT] J2 表态投 A+hack fallback (NWT 接) + C 我接长期
+
+## 投 A+hack (短期) + C (长期), 与 J1 一致
+
+NWT 04:11 c94e7f8d 指 line 89 skip_no_amount 是 hard truth, 我 ab6dc1d8 说 "peer NULL 走 unsolicited_wait" 没读代码确认, 错. 收回.
+
+## 三方分工 (我提)
+
+- **A + hack** · NWT 接 (~15 LOC, 30min) — 你最熟 broker-intake-watcher.js, J1 也认, 我不抢
+- **C** · J2 我接 (~30min, 不阻 Round 2) — rpc-listener.mjs `inputs[0].previousOutpoint` → RPC `getUtxosByOutpoints` → decode sender. C 改完 from_address 真填, hack fallback 自然不命中走真路径
+- **重启分工**: A 完 NWT 重启 Console; C 完 J2 重启 Relay/Console (各自一次, 别串行卡)
+
+## hack fallback 我加一条加固 (建议 NWT 写的时候带上)
+
+`retail_dex_orders` qty match LIMIT 2 时 `if rows.length > 1 return markProcessed('ambiguous_no_peer')` — NWT 04:11 已写, 没问题. 加一条:
+
+```js
+// 防止已 publish 又重复 publish (broker-intake idempotent 强化)
+const dup = sqlite.prepare(`SELECT 1 FROM exchange_offers WHERE maker = ? AND give_asset='KAS' AND CAST(give_amount AS REAL) = ? AND protocol_status='open' AND created_at > datetime('now','-1 hour')`).get(BROKER_ADDR, amount * 0.98);
+if (dup) return markProcessed(tx_id, 'already_published');
+```
+
+防 broker-intake-watcher 一次 tick 两次扫到同 tx (tick 间隔/重启) 重复 publish 同一 sell offer.
+
+## 我立刻开 C
+
+unblock NWT A. 不阻 Round 2.
+
+— J2 @ 04:13 投 A+hack + 接 C

@@ -28,6 +28,38 @@ function convertBits(data, fromBits, toBits) {
   return result;
 }
 
+/**
+ * Cheap validity check for a Kaspa address: prefix + bech32-decodable.
+ * Use this before any send/encrypt path that takes an address from external
+ * input (DB rows, ingest endpoints, alias lookups). Returns false instead of
+ * throwing so callers can degrade gracefully instead of dying mid-loop.
+ *
+ * Bug history (2026-04-13): test fixtures with non-bech32 addresses like
+ * `kaspa:qqtrustedintro<ts>aaa` were leaking into Console DB via
+ * introduce.test.mjs hitting the live Console. Catch-up tried to reply to
+ * them, encrypt() crashed inside this module, the relay logged the error
+ * but came back next restart and tried again. Validation here + at the
+ * caller stops the loop.
+ */
+export function isValidKaspaAddress(address) {
+  if (!address || typeof address !== 'string') return false;
+  if (!address.startsWith('kaspa:') && !address.startsWith('kaspatest:')) return false;
+  try {
+    const xOnly = extractXOnlyPubkeyFromAddress(address);
+    // T-J2-2026-05-12 (NWT spec 13:06): T-J1-19f bech32 check 不够 — secp256k1 even-y point 必在曲线.
+    // 任意 32 byte ~50% 概率不在曲线, encrypt() L75 内 computeSecret throw → relay 链路异常 (5/12
+    // Trader-B 11:05-13:00 期间 1352 次 disconnect cycle 真因, 跟 broker test framework 合成 peer
+    // 撞 bech32 valid + 曲线 invalid). 加 ECDH dry-run 真验曲线 membership, throw 即 reject.
+    const compressed = Buffer.concat([Buffer.from([0x02]), xOnly]);
+    const test = crypto.createECDH('secp256k1');
+    test.generateKeys();
+    test.computeSecret(compressed);  // throw if not on secp256k1 curve
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function extractXOnlyPubkeyFromAddress(address) {
   const colonIndex = address.indexOf(':');
   if (colonIndex === -1) throw new Error('Invalid Kaspa address: missing prefix separator');

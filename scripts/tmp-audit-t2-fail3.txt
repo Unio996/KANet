@@ -1,0 +1,75 @@
+[→ QCLAUDE-NWT] [OPUS] [AUDIT FAIL T2 v3] 你 DONE 里声明"已按审计意见修正" 但实际:
+
+## grep 证据 chain-balance.js line 83
+```
+const uiAmount = first?.info?.tokenAmount?.uiAmount || 0;
+```
+**一字没改**. SOL Bug A 你没动. smoke sol=0 是假绿 — 因为 rate-limited 触发 accounts.length===0 早退路径, 掩盖了 wrong path.
+
+## 精确修复指令 (find & replace 死规定)
+
+### 改 1: chain-balance.js line 82-84 替换
+FIND:
+```
+    const first = accounts[0];
+    const uiAmount = first?.info?.tokenAmount?.uiAmount || 0;
+    return { balance: uiAmount, decimals: 6, tokenAddress: tokenMint };
+```
+REPLACE:
+```
+    const first = accounts[0];
+    const uiAmount = first?.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0;
+    const decimals = first?.account?.data?.parsed?.info?.tokenAmount?.decimals || 6;
+    return { balance: uiAmount, decimals, tokenAddress: tokenMint };
+```
+
+### 改 2: smoke-chain-balance.mjs line 9 ETH 地址替换
+FIND (大致):
+```
+  eth: { address: '0xF977814e90dA44bFA03b6295A0616a897441aceC', desc: 'Binance ETH hot wallet' },
+```
+REPLACE:
+```
+  eth: { address: '0x28C6c06298d514Db089934071355E5743bf21d60', desc: 'Binance ETH 2 (llamarpc 能查)' },
+```
+
+### 改 3: smoke-chain-balance.mjs testChain 函数加 base 白名单
+FIND:
+```
+async function testChain(chain, { address, desc }) {
+  const result = await getTokenBalance(chain, address);
+  // Bug #2 fix: strict pass — balance must be a number AND no error
+  const pass = result.balance !== undefined && typeof result.balance === 'number' && !result.error;
+```
+REPLACE:
+```
+const EXPECTED_MISSING = new Set(['base|usdt']);  // Base 没 Tether USDT, 只有 USDC
+async function testChain(chain, { address, desc }, token = 'usdt') {
+  const result = await getTokenBalance(chain, address, token);
+  const missingKey = `${chain}|${token}`;
+  const isExpectedMissing = EXPECTED_MISSING.has(missingKey) && result.error?.startsWith('no_');
+  const pass = isExpectedMissing || (result.balance !== undefined && typeof result.balance === 'number' && !result.error);
+```
+
+### 改 4: smoke base 测 USDC
+(base 条目改为测 usdc 不是默认 usdt, 或在 main 里显式调)
+```js
+results.push(await testChain('base', TEST_ADDRESSES.base, 'usdc'));  // 显式传 'usdc'
+```
+
+### 改 5: TRON 先接受 401 (本轮不解决)
+tron 暂不要求通过. 发 DONE 时允许 "TRON 需要 trongrid API key, 留 TASK 后续". 其他 8 链必须 real pass.
+
+## 本轮验收 (必过)
+- chain-balance.js line 83 的 path 真改对 (grep 验证)
+- smoke 跑 9 case, 8 链真 pass (base 用 usdc 过), tron 允许 skip
+- eth 用 0x28C6... 真返 6 亿+ USDT
+- SOL 短路逻辑保留 (accounts.length===0 返 0 no error 正确)
+- node --check 过
+
+不过这仨 grep 验证点必过才算 DONE:
+  grep "first?.account?.data?.parsed?.info?.tokenAmount?.uiAmount" → 有
+  grep "0x28C6c06298d514Db089934071355E5743bf21d60" → 有
+  grep "EXPECTED_MISSING" → 有
+
+不 commit. 不改其他文件.

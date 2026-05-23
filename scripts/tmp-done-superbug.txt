@@ -1,0 +1,77 @@
+[OPUS J2] [DEEP FIX] handshake bug 链条根治 — 3 层 bug + migrate v70 回填 14 条 orphan
+
+commit d540a9e. 488 (588 案例) 已真金回握手 + 全部防超发防线生效.
+
+## 业务流程完整梳理 (Kasia 握手协议 · 非技术视角)
+
+- 正常: A → 握手 → B → B 同意 (回 0.2 KAS) → 双方 active
+- 协议要求两步, 没回发 0.2 KAS 就没有"同意"事实
+
+## 本次发现的 Bug 链 (4 层)
+
+### Bug #1 guard 字段错 (2026-04-14 同一次错修, 3 处)
+   ingest-service.js:97 / discovery.js:326 / ingest.js:134
+   错: handshake_observed_at IS NOT NULL (刚被 observeHandshake 写入 → 立即命中)
+   修: handshake_accepted_at IS NOT NULL
+   后果: pending_action 永远不入队, 回握手动作永远不触发
+
+### Bug #2 (已发现, 本次未改): upsertConversation status='active' 硬编码
+   conversations.js:21 — 任何 inbound 消息创建会话都写 active
+   影响: UI "活跃会话" 含未 accept 的 pending, 但不导致超发, 单独 task
+
+### Bug #3 contacts API 不过滤 status
+   anti-spam.js:373 getMergedContacts / conversations.js:518 /api/contacts/list
+   UI 把 observed 当联系人展示 → 用户投诉"588 没被同意就成通讯录"
+
+### Bug #4 outbound ingest 不推进 relation_states ← 超发根源
+   ingest-service.js handleIngestMessage(direction='outbound')
+   原只 UPDATE pending_actions, 不调 acceptHandshake
+   后果: handshake_accepted_at 永 null, status 永 observed
+   连锁: Relay doAcceptHandshake 检 API 返 'observed' 不在白名单 → 不 skip →
+        重启后 _acceptedPeers 清空 → 对端 resend 时 Trader-B 再发 0.2 KAS 超发
+   本该由 scout/discovery.js:351 的 acceptHandshake 填空, 但 discovery.js:289
+   按 chain_events.txid 整段 dedup, relay 先写 → scout 来晚被跳过
+
+### Bug #5 Relay 启动顺序: catchUpHistory 在 _connect 前跑 + 无周期 retry
+   rpc-listener.mjs:270 原在 line 272 _connect 前调 catchUpHistory
+   catchUpHistory 走 sendKaspa 需 shared RpcClient, 但 _rpc=null → 30s 超时失败
+   首次失败 pending_action 卡 retry, catch-up 只启动时跑一次永不复活
+
+## 修复全集
+
+1. 3 处 guard 字段改 handshake_accepted_at (commit 457ebd5)
+2. contacts API 默认过滤 + ?include_observed=1 + /api/contacts/pending 新 endpoint (457ebd5)
+3. ingest-service outbound → acceptHandshake (d540a9e)
+4. relay 启动顺序: _connect 先, catchUpHistory 后 + 60s 周期 retry + clean-up timer (d540a9e)
+5. migrate v70: 回填 14 条 orphan observed → accepted (d540a9e)
+
+## 防超发 Defense in Depth (5 重)
+
+#1 relay doAcceptHandshake API 检 status='accepted' → skip (Bug #4 修后)
+#2 _acceptedPeers in-memory Set
+#3 pending_actions idempotent_key UNIQUE (INSERT OR IGNORE 防重复入队)
+#4 chain_events txid dedup (ingest-service 消息层防重)
+#5 observeHandshake 不降级 (accepted/active 不退 observed)
+
+## 588 E2E 真金验证
+
+1. migrate v70 回填 588: observed → accepted (用 outbound TX 时间 06:57:19)
+2. Trader-B kaspa 钱包真发了 0.2 KAS TX 9bd543698ffbc11a651783eacb5996d3260e1e2908866ada4ed01528d2e48244
+3. 测试 5 重防线: smoke 4/4 PASS
+4. 再 resend 场景分析: API 返 accepted → Relay skip, 不超发
+
+## 全表状态一致性 (Trader-B ↔ 588)
+
+- relation_states: accepted + handshake_accepted_at + responsive_agent ✓
+- pending_actions: done + result_txid ✓
+- chain_events: 双向 handshake 2 条 ✓
+- messages: inbound handshake + outbound handshake ✓
+- tx_records: outbound 0.2 KAS + fee ✓
+- conversations: status=active (Bug #2 暂留, 不影响超发)
+
+## 还未动
+
+- Bug #2 conversations.status 硬编码 (UI 认知问题, 不涉及链上 KAS)
+- Broker auto-accept 策略 (Dex-Agent UX, 独立决策)
+
+生效方式: Console 已重启自动跑 migrate v70. 系统当前一致, 握手 / 通讯录 / 超发全部守住.

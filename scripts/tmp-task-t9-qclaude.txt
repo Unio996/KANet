@@ -1,0 +1,174 @@
+[→ QCLAUDE-NWT] [OPUS] →[TASK T9-UI 填空] Broker tab 嵌 exchange.eta
+
+## 定位
+
+**只做模板 Edit, 不做架构决策**. Opus 已做好后端 `/api/broker/stats` API. 你只需:
+1. exchange.eta 加 Broker tab 按钮
+2. 加 Broker tab content div
+3. 加 Alpine state + loadBrokerStats() function
+
+Owner 最严规则: grep 验证字符串 / 不造假 / 按精确行号 Edit / DONE 必真跑 + 贴真数字.
+
+## 改动范围 (只改 1 文件)
+
+**kasia-console/src/ui/exchange.eta** (1796 行, Alpine.js)
+
+## Edit 1: 加 Broker tab 按钮
+
+**位置**: line 664 后 (AutoTaker 按钮后)
+
+**找这段** (精确匹配):
+```html
+        <button @click="opsTab = 'autotaker'"
+          :class="opsTab === 'autotaker' ? 'border-brand-400 text-brand-600' : 'border-transparent text-ink-400'"
+          class="px-3 py-1.5 text-[11px] border-b -mb-px">AutoTaker</button>
+      </div>
+```
+
+**改成**:
+```html
+        <button @click="opsTab = 'autotaker'"
+          :class="opsTab === 'autotaker' ? 'border-brand-400 text-brand-600' : 'border-transparent text-ink-400'"
+          class="px-3 py-1.5 text-[11px] border-b -mb-px">AutoTaker</button>
+        <button @click="opsTab = 'broker'; loadBrokerStats()"
+          :class="opsTab === 'broker' ? 'border-brand-400 text-brand-600' : 'border-transparent text-ink-400'"
+          class="px-3 py-1.5 text-[11px] border-b -mb-px">Broker (零售代理)</button>
+      </div>
+```
+
+## Edit 2: 加 Broker tab content
+
+**位置**: AutoTaker tab content 之后. 找 AutoTaker 最后 `</div>` 关闭 AutoTaker tab 那行.
+
+找 line ~880 附近:
+```html
+        </div>
+        <!-- 结束 AutoTaker tab -->
+```
+或类似 (grep `opsTab === 'autotaker'` 找 tab div 起点, 配对 </div> 找结束).
+
+**在 AutoTaker tab </div> 之后加**:
+
+```html
+        <!-- ═══ Broker (零售代理) tab ═══ -->
+        <div x-show="opsTab === 'broker'" class="text-xs text-ink-500 space-y-4">
+          <!-- 当前 Broker -->
+          <div class="bg-white border border-warm-200 rounded-lg p-4">
+            <div class="font-medium text-ink-600 mb-2">当前 Broker Agent</div>
+            <div x-show="!brokerStats?.broker" class="text-ink-400">无 Broker (未设置 is_dex_broker=1)</div>
+            <template x-if="brokerStats?.broker">
+              <div class="space-y-1">
+                <div><span class="text-ink-400">名称: </span><span class="font-semibold" x-text="brokerStats.broker.name"></span></div>
+                <div><span class="text-ink-400">地址: </span><span class="font-mono text-[10px] text-brand-500 cursor-pointer" @click="copyAddr(brokerStats.broker.address)" x-text="brokerStats.broker.address"></span></div>
+                <div><span class="text-ink-400">撮合费率: </span><span class="tabular-nums text-green-600" x-text="brokerStats.fee_kas_per_order + ' KAS/单'"></span></div>
+              </div>
+            </template>
+          </div>
+
+          <!-- 累计成交 -->
+          <div class="grid grid-cols-4 gap-3">
+            <div class="bg-white border border-warm-200 rounded-lg p-3 text-center">
+              <div class="text-ink-400 text-[10px] mb-1">完成订单 (市价)</div>
+              <div class="text-lg font-semibold text-ink-700" x-text="brokerStats?.totals?.completed_orders || 0"></div>
+            </div>
+            <div class="bg-white border border-warm-200 rounded-lg p-3 text-center">
+              <div class="text-ink-400 text-[10px] mb-1">完成挂单 (M2)</div>
+              <div class="text-lg font-semibold text-ink-700" x-text="brokerStats?.totals?.completed_m2 || 0"></div>
+            </div>
+            <div class="bg-white border border-warm-200 rounded-lg p-3 text-center">
+              <div class="text-ink-400 text-[10px] mb-1">总撮合 KAS</div>
+              <div class="text-lg font-semibold text-green-600" x-text="(brokerStats?.totals?.total_kas_settled || 0).toFixed(1)"></div>
+            </div>
+            <div class="bg-white border border-warm-200 rounded-lg p-3 text-center">
+              <div class="text-ink-400 text-[10px] mb-1">累计手续费收入</div>
+              <div class="text-lg font-semibold text-green-600" x-text="(brokerStats?.totals?.total_broker_fee_kas || 0).toFixed(3) + ' KAS'"></div>
+            </div>
+          </div>
+
+          <!-- 服务中订单 -->
+          <div class="bg-white border border-warm-200 rounded-lg p-4">
+            <div class="font-medium text-ink-600 mb-2">服务中订单 (<span x-text="(brokerStats?.active_orders?.length || 0) + (brokerStats?.active_publications?.length || 0)"></span>)</div>
+            <div x-show="!brokerStats?.active_orders?.length && !brokerStats?.active_publications?.length" class="text-ink-400 text-center py-4">当前无服务中订单</div>
+            <template x-for="o in brokerStats?.active_orders || []" :key="o.id">
+              <div class="border-b border-warm-100 py-2 flex items-center justify-between text-[11px]">
+                <div class="flex-1">
+                  <span class="font-mono text-ink-400" x-text="o.id.slice(0,8)"></span>
+                  <span class="ml-2" x-text="(o.side === 'buy_kas' ? '买' : '卖') + ' ' + o.qty + ' KAS'"></span>
+                  <span class="ml-2 text-ink-400" x-text="o.order_type === 'limit' ? ('@ ' + o.price) : '市价'"></span>
+                </div>
+                <span class="px-2 py-0.5 rounded text-[10px]"
+                  :class="{'bg-yellow-100 text-yellow-700': o.state === 'awaiting_payment', 'bg-blue-100 text-blue-700': o.state === 'paid', 'bg-purple-100 text-purple-700': o.state === 'executing', 'bg-gray-100 text-gray-700': ['aligning','confirming'].includes(o.state)}"
+                  x-text="o.state"></span>
+              </div>
+            </template>
+            <template x-for="p in brokerStats?.active_publications || []" :key="p.id">
+              <div class="border-b border-warm-100 py-2 flex items-center justify-between text-[11px]">
+                <div class="flex-1">
+                  <span class="font-mono text-ink-400" x-text="p.id.slice(0,8)"></span>
+                  <span class="ml-2 px-1 bg-brand-100 text-brand-700 rounded text-[9px]">M2</span>
+                  <span class="ml-2" x-text="'买 ' + p.qty + ' KAS @ ' + p.limit_price + ' USDT'"></span>
+                </div>
+                <span class="px-2 py-0.5 rounded text-[10px]"
+                  :class="{'bg-yellow-100 text-yellow-700': p.state === 'awaiting_deposit', 'bg-blue-100 text-blue-700': p.state === 'deposited', 'bg-indigo-100 text-indigo-700': p.state === 'published', 'bg-green-100 text-green-700': p.state === 'filled'}"
+                  x-text="p.state"></span>
+              </div>
+            </template>
+          </div>
+
+          <!-- 公开声明 -->
+          <div class="bg-warm-50 border border-warm-200 rounded-lg p-3 text-[11px] text-ink-500">
+            <div class="font-medium mb-1">公开声明</div>
+            <div>• 非托管: USDT 直付 Maker, Broker 全程不持有用户资金</div>
+            <div>• 10min 兜底: 超时未 fill 自动退款</div>
+            <div>• 费率透明: <span x-text="brokerStats?.fee_kas_per_order || '0.1'"></span> KAS/单, 隐形扣</div>
+          </div>
+        </div>
+```
+
+## Edit 3: 加 Alpine state + loader
+
+找 Alpine data 对象起点 (line ~920 附近 `autoTakerProposals: [],`).
+
+**在 `autoTakerProposals: [],` 之后加**:
+```js
+    brokerStats: null,
+```
+
+找 Alpine methods (async load 函数附近), 加新 method:
+```js
+    async loadBrokerStats() {
+      try {
+        const r = await fetch('/api/broker/stats');
+        if (r.ok) this.brokerStats = await r.json();
+      } catch (e) { console.warn('[broker] loadBrokerStats failed:', e); }
+    },
+```
+
+## Edit 4: init 时自动 load (可选)
+
+若 `init()` 函数存在, 加一行:
+```js
+    // T9 broker stats auto-load on page init (if opsTab defaults to broker)
+    if (this.opsTab === 'broker') this.loadBrokerStats();
+```
+
+## 验收标准 (Opus 会验)
+
+1. Edit 后 exchange.eta 总行数增加 ~80-100 行 (不能超)
+2. `grep -c "opsTab === 'broker'"` 应 ≥ 2 (按钮 + content)
+3. `grep -c "brokerStats"` 应 ≥ 5 (state + 多个 x-show/x-text)
+4. `grep -c "loadBrokerStats"` 应 ≥ 2 (定义 + 调用)
+5. 重启 Console, 访问 /exchange, F12 点 Market Making → Broker tab, Network 面板看到 `/api/broker/stats` 200 响应 (带截图证据或你看到的完整 response body)
+
+## 红线
+
+- **只改 exchange.eta 1 个文件**, 不改 API / 不改其他 service
+- 按 Edit 1-4 顺序做, 不要自创结构
+- 不要动现有 CEX/Seeker/Taker/AutoTaker tab (保留)
+- 完成后 **DONE 贴**: `wc -l exchange.eta` 真行数 + `grep -c "brokerStats" exchange.eta` 真计数 + Network 截图 or curl /api/broker/stats 本地响应
+
+## 重要
+
+**这次不允许造假**. DONE 的每个数字 Opus 独立 wc -l / grep 验证. 发 Network 截图可以用 Write tool 写 base64 到文件 (optional).
+
+开工.

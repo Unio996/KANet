@@ -14,6 +14,9 @@ kaspa-scout/data/
 kanet.env
 _relay_env.txt
 
+# === 运行时 dump 目录（dump-launch.mjs / 进程日志，含明文密钥）===
+logs/
+
 # === 数据库 ===
 *.db
 *.sqlite
@@ -31,8 +34,54 @@ downloads/
 sophie-debug-*.txt
 sophie-live-*.txt
 tmp-*.html
+tmp-*.json
 *.pid
+nwt-*.json
+bridge-req.json
+test-*.mjs
+test-*.png
+test-alpine*.html
+agent-adapter/debug*.mjs
+kasia-relay/test-openclaw.mjs
+
+# === 大文件 / 本地资产 ===
+models/
+tools/
+$extractDir/
+extractDir/
+
+# === 个人备份脚本（不开源）===
+backup.ps1
+**/backup.ps1
 
 # === IDE / 工具 ===
 .claude/
 .superpowers/
+
+# === opencode 本地开发工具链（永不入库）===
+AGENTS.md
+AGENTS.*.md
+ONBOARDING.md
+KANET-STATE.md
+opencode.json
+opencode-*.bat
+.opencode-*.md
+sandbox/
+
+# === Qwen 本地工具链产物 ===
+qwen.tar.gz
+qwen.tar
+scripts/code-index.db
+qclaude.bat
+qclaude.sh
+# scripts/qwen-bridge-worker.js — 2026-04-23 取消 gitignore
+# Rule 11 (QWEN-RULES.md) kill switch 修复需随仓库走, J1 opencode 拉到
+# 非 llama host 机器不用启动它, 但文件可存
+
+# === channel-bridge runtime state ===
+scripts/channel-bridge.processed.jsonl
+scripts/channel-bridge.pid
+scripts/channel-bridge.lastts.json
+
+# Local bundle server working directory (J1↔J2 LAN sync)
+.bundle-serve/

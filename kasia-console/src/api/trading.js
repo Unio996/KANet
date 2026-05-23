@@ -18,7 +18,7 @@ import { recordChainEvent } from '../services/chain-event.js';
 import { verifyCrossChainTx } from '../services/cross-chain-verify.mjs';
 import { analyzeMarket } from '../services/signal-engine.js';
 import { generateProposal } from '../services/strategy-engine.js';
-import { fetchAllMarkets, fetchCryptoData, fetchStockData, fetchPredictionData, fetchCommodityData, fetchFundingRates, fetchSentiment, fetchCryptoGlobal, fetchEconomicCalendar } from '../services/market-data.js';
+import { fetchAllMarkets, fetchCryptoData, fetchStockData, fetchPredictionData, fetchCommodityData, cachedFunding, cachedSentiment, cachedCryptoGlobal, cachedCalendar } from '../services/market-data.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 import { EXCHANGE_REGISTRY } from '../lib/exchange-registry.js';
 
@@ -123,6 +123,7 @@ export async function registerTradingRoutes(fastify) {
     const { chain, address } = request.query;
     if (!chain || !address) return reply.code(400).send({ error: 'chain and address required' });
 
+    let provider;
     try {
       const EVM_CHAINS = ['bnb', 'eth'];
       if (EVM_CHAINS.includes(chain)) {
@@ -134,7 +135,7 @@ export async function registerTradingRoutes(fastify) {
         };
         if (!RPC[chain]) return reply.code(400).send({ error: 'unsupported chain' });
 
-        const provider = new ethers.JsonRpcProvider(RPC[chain]);
+        provider = new ethers.JsonRpcProvider(RPC[chain]);
         const [nativeBal, usdtBal] = await Promise.all([
           provider.getBalance(address),
           new ethers.Contract(USDT[chain].address, ['function balanceOf(address) view returns (uint256)'], provider).balanceOf(address),
@@ -151,6 +152,8 @@ export async function registerTradingRoutes(fastify) {
       return reply.send({ chain, address, native: 0, usdt: 0, note: 'real-time balance not yet implemented for ' + chain });
     } catch (err) {
       return reply.code(500).send({ error: err.message });
+    } finally {
+      try { provider?.destroy?.(); } catch {}
     }
   });
 
@@ -162,6 +165,7 @@ export async function registerTradingRoutes(fastify) {
     const wallet = sqlite.prepare('SELECT * FROM agent_wallets WHERE id = ?').get(walletId);
     if (!wallet?.privkey_encrypted) return reply.code(400).send({ error: 'Wallet not found or no private key' });
 
+    let provider;
     try {
       const privateKey = decrypt(wallet.privkey_encrypted);
       const EVM_CHAINS = ['bnb', 'eth'];
@@ -173,7 +177,7 @@ export async function registerTradingRoutes(fastify) {
           bnb: { address: '0x55d398326f99059fF775485246999027B3197955', decimals: 18 },
           eth: { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', decimals: 6 },
         };
-        const provider = new ethers.JsonRpcProvider(RPC[chain]);
+        provider = new ethers.JsonRpcProvider(RPC[chain]);
         const signer = new ethers.Wallet(privateKey, provider);
 
         if (asset === 'usdt') {
@@ -207,6 +211,8 @@ export async function registerTradingRoutes(fastify) {
     } catch (err) {
       console.error(`[withdraw] failed:`, err.message);
       return reply.code(500).send({ error: '提现失败: ' + err.message });
+    } finally {
+      try { provider?.destroy?.(); } catch {}
     }
   });
 
@@ -953,16 +959,16 @@ export async function registerTradingRoutes(fastify) {
   fastify.get('/api/market/commodities', async (request, reply) => reply.send(await fetchCommodityData()));
 
   // GET /api/market/funding — futures funding rates
-  fastify.get('/api/market/funding', async (request, reply) => reply.send(await fetchFundingRates()));
+  fastify.get('/api/market/funding', async (request, reply) => reply.send(await cachedFunding()));
 
   // GET /api/market/sentiment — fear & greed index
-  fastify.get('/api/market/sentiment', async (request, reply) => reply.send(await fetchSentiment()));
+  fastify.get('/api/market/sentiment', async (request, reply) => reply.send(await cachedSentiment()));
 
   // GET /api/market/crypto-global — CoinGecko total market cap, BTC dominance, volume
-  fastify.get('/api/market/crypto-global', async (request, reply) => reply.send(await fetchCryptoGlobal()));
+  fastify.get('/api/market/crypto-global', async (request, reply) => reply.send(await cachedCryptoGlobal()));
 
   // GET /api/market/calendar — Forex Factory economic calendar (today + this week)
-  fastify.get('/api/market/calendar', async (request, reply) => reply.send(await fetchEconomicCalendar()));
+  fastify.get('/api/market/calendar', async (request, reply) => reply.send(await cachedCalendar()));
 
   // ── Signal & Strategy API (for Mind consumption) ─────────────────────────
 
@@ -2557,35 +2563,14 @@ export async function registerTradingRoutes(fastify) {
       transition(id, 'paying', { force: true });
 
       try {
-        const privateKey = decrypt(wallet.privkey_encrypted);
-        const { ethers } = await import('ethers');
-        const EVM_RPC = { bnb: 'https://bsc-dataseed1.binance.org', eth: 'https://eth.llamarpc.com' };
-        const USDT = {
-          bnb: { address: '0x55d398326f99059fF775485246999027B3197955', decimals: 18 },
-          eth: { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', decimals: 6 },
-        };
-        if (!EVM_RPC[chain] || !USDT[chain]) {
-          failExecution(execId, 'Chain not supported: ' + chain);
-          return reply.code(400).send({ error: 'Chain ' + chain + ' not supported for USDT payment' });
+        const { transferERC20 } = await import('../services/evm-transfer.js');
+        const txResult = await transferERC20(chain, wallet.privkey_encrypted, sellerAddr, usdtAmount);
+        if (!txResult.ok) {
+          failExecution(execId, txResult.error);
+          transition(id, 'accepted', { reason: txResult.error, force: true });
+          return reply.code(400).send({ error: txResult.error });
         }
-
-        const provider = new ethers.JsonRpcProvider(EVM_RPC[chain]);
-        const signer = new ethers.Wallet(privateKey, provider);
-        const contract = new ethers.Contract(USDT[chain].address, [
-          'function balanceOf(address) view returns (uint256)',
-          'function transfer(address to, uint256 amount) returns (bool)',
-        ], signer);
-
-        const balance = await contract.balanceOf(wallet.address);
-        const balanceFloat = parseFloat(ethers.formatUnits(balance, USDT[chain].decimals));
-        if (balanceFloat < usdtAmount) {
-          failExecution(execId, 'USDT insufficient: ' + balanceFloat.toFixed(2));
-          transition(id, 'accepted', { reason: 'USDT insufficient: ' + balanceFloat.toFixed(2), force: true });
-          return reply.code(400).send({ error: 'USDT balance insufficient: have ' + balanceFloat.toFixed(2) + ', need ' + usdtAmount.toFixed(2) });
-        }
-
-        const amountWei = ethers.parseUnits(String(usdtAmount.toFixed(USDT[chain].decimals > 6 ? 6 : USDT[chain].decimals)), USDT[chain].decimals);
-        const tx = await contract.transfer(sellerAddr, amountWei);
+        const tx = { hash: txResult.txHash };
         console.log(`[trade] USDT payment: ${usdtAmount} USDT → ${sellerAddr} on ${chain} TX: ${tx.hash}`);
 
         completeExecution(execId, { outputTxid: tx.hash, summary: `💰 已付款 ${usdtAmount.toFixed(2)} USDT → ${sellerAddr.slice(0,8)}...（${chain.toUpperCase()} 链），等待到账确认` });
@@ -2786,12 +2771,15 @@ export async function registerTradingRoutes(fastify) {
     }
 
     // ── Approval mode: create pending execution ──
+    // NOTE: status 'pending' (not 'pending_approval') — 与 createExecution 统一.
+    // API 查询 + approve/reject endpoint 全部按 'pending' 检查, 之前写
+    // 'pending_approval' 产生 31 条孤岛 10-24 天无人处理 (opencode 发现).
     if (mode === 'approval') {
       const execId = randomUUID();
       const now = nowIso();
       sqlite.prepare(`
         INSERT INTO execution_states (id, agent_address, type, source, status, display_summary, action_details, created_at, updated_at)
-        VALUES (?, ?, ?, 'agent', 'pending_approval', ?, ?, ?, ?)
+        VALUES (?, ?, ?, 'agent', 'pending', ?, ?, ?, ?)
       `).run(execId, agent.address, action, `${action} ${kasAmount} KAS ${side || ''} → ${market || 'exchange'}`, JSON.stringify({ amount: kasAmount, side, market }), now, now);
       return reply.send({ pending: true, executionId: execId, summary: `${action} ${kasAmount} KAS ${side || ''} → ${market || 'exchange'}` });
     }

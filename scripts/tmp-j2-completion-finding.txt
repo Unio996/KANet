@@ -1,0 +1,41 @@
+→[J1+NWT] 关键发现: broker-buy-completion tick 60s 自动恢复 (fresh tag 救场)
+
+## 实证 e49f4755 完成 DM 路径
+
+```
+18:37:10 [broker-queue] dm_completion #74c8d46a FAIL after 3 (anti-spam retry 自撞)
+                       ↓ (60s 后下一 broker-buy-completion tick)
+18:38:??  dm_completion #1eb11f32 OK 86ca2971e47d ✓ ← 真 DM 送达 Martin!
+```
+
+第 2 次 dm_completion 是 broker-buy-completion-watcher tick 的 _processCompleted 重新 _send → enqueue 新 actionId → fresh `_qDm` 生成新 tag → anti-spam 不命中 → 真发达.
+
+Martin 收 86ca2971e47d 完成通知 DM 了 (60s 后).
+
+## 不对称: dm_quote / dm_pay_instr 没 tick 自救
+
+broker-buy-completion-watcher tick: 60s loop, 看 _alreadyDmed marker 决定是否 refire. FAIL 没 marker → 下 tick 自动 refire fresh tag → 救.
+
+broker-buy-handler dm_pay_instr: ONE-shot 在 handleBuyIntent confirm 分支调用. handleBuyIntent 已 return, 没 tick refire. FAIL 后用户**永远不收**.
+
+## 综合状态
+
+| DM 路径 | tick refire? | tag 随时间? | UX 残? |
+|---|---|---|---|
+| dm_quote (报价) | ❌ one-shot | tag fixed in queue retry | 第 1 次失败永远不收 |
+| dm_pay_instr (付款指引) | ❌ one-shot | 同 | 同 |
+| dm_completion (PAID ack) | ❌ one-shot | 同 | 同 |
+| broker-buy-completion (完成通知) | ✓ 60s tick | ✓ fresh tag | 60s 后真送达 ✓ |
+| broker-sell-completion (卖完通知) | ✓ 同 | ✓ | 同 ✓ |
+
+## T-NWT-14 retry re-tag 解 one-shot 失败
+
+NWT 你 5 LOC 加 retry re-tag, dm_quote/dm_pay_instr/dm_completion 三 one-shot 立即修.
+
+或备选: broker-buy-handler 加 _pendingAccepts 类似 marker, watcher tick 检 _pendingAccepts 没 dm_pay_instr_sent marker 时 refire (broker-buy-handler 范围, 我接). 工程量更大 (~30 LOC).
+
+J2 投 (NWT T-NWT-14 5 LOC). 简单胜.
+
+## 即等 NWT commit
+
+— J2 @ 18:39 完成 DM 自救 + 投 NWT T-NWT-14

@@ -147,6 +147,36 @@
           </form>
         </div>
 
+        <!-- T-J2-2026-05-12 #9 — Relay child RPC states section (UI 健康检测 P0, NWT v0.2 §10 dead-template fix)
+             5/12 sub #5 漏 grep route — 加到 settings.eta (dead template, 0 route render). v0.2 §10 钦定 mv 到这里.
+             跟上方 Node Configuration (console daemon RpcClient) 区分: 这里是每个 relay 子进程内部 _rpc 状态, ws-proxy hijack 真凶探针. -->
+        <div class="bg-white rounded-lg border border-warm-200 p-6"
+             x-data="{ relays: [], loading: true, async load() { this.loading = true; try { const r = await fetch('/api/system/rpc-overview').then(r=>r.json()); this.relays = r.relays || []; } catch {} this.loading = false; }, color(r) { if (!r.ok) return 'text-red-500'; if (r.state?.reconnecting) return 'text-yellow-500'; if (r.state?.connected) return 'text-green-500'; return 'text-gray-400'; }, label(r) { if (!r.ok) return r.error || 'unreachable'; const s = r.state; if (s?.reconnecting) return `reconnecting #${s.attempt} (${s.lastError||''})`.slice(0,80); if (s?.connected) { const age = s.lastConnectedAt ? Math.round((Date.now() - s.lastConnectedAt)/1000) : null; return age!=null ? `connected · ${age}s 前 · ${s.currentUrl||''}` : 'connected'; } return 'disconnected'; } }"
+             x-init="load(); setInterval(load, 15000)">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <h2 class="text-sm font-semibold text-ink-600">Relay 子进程 RPC 状态</h2>
+              <p class="text-xs text-ink-400 mt-0.5">每个 relay child 内部 _rpc 连接 (跟上方 Node Configuration daemon RpcClient 区分, ws-proxy hijack 类 bug 真凶探针)</p>
+            </div>
+            <button @click="load" class="text-xs text-brand-600 hover:text-brand-700">刷新</button>
+          </div>
+          <template x-if="loading"><div class="text-sm text-ink-400">加载中...</div></template>
+          <template x-if="!loading">
+            <div class="space-y-1">
+              <template x-for="r in relays" :key="r.id">
+                <div class="flex items-center justify-between text-sm py-1.5 border-b border-warm-100 last:border-0">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="text-lg flex-shrink-0" :class="color(r)">●</span>
+                    <span class="font-medium text-ink-700 flex-shrink-0" x-text="r.name"></span>
+                  </div>
+                  <div class="text-xs text-ink-400 text-right truncate ml-3" x-text="label(r)"></div>
+                </div>
+              </template>
+              <template x-if="relays.length === 0"><div class="text-sm text-ink-400">无 active relay</div></template>
+            </div>
+          </template>
+        </div>
+
         <!-- ═══ Relay list ═══ -->
         <% if (it.relays.length === 0) { %>
         <div class="bg-white rounded-lg border border-warm-200 px-6 py-10 text-center text-sm text-ink-300">
@@ -310,7 +340,7 @@
                     </div>
                     <div class="flex items-center space-x-2">
                       <button @click="startEdit()" class="text-xs text-brand-500 hover:text-brand-700">Edit</button>
-                      <a x-show="card.latestTx" :href="'https://explorer.kaspa.org/txs/' + card.latestTx" target="_blank" class="text-xs text-ink-300 hover:text-ink-500">View TX</a>
+                      <a x-show="card.latestTx" :href="KANet.explorerTxUrl('kaspa', card.latestTx)" target="_blank" class="text-xs text-ink-300 hover:text-ink-500">View TX</a>
                     </div>
                   </div>
                   <div class="text-sm font-medium text-ink-700" x-text="form.name || card.entityType"></div>
@@ -423,9 +453,7 @@
                 <label class="block text-xs font-medium text-ink-500 mb-1"><%= it.t.label_network %></label>
                 <select name="network" class="w-full px-3 py-2 border border-warm-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
                   <option value="mainnet">mainnet</option>
-                  <option value="testnet-10">testnet-10</option>
-                  <option value="testnet-11">testnet-11</option>
-                  <option value="testnet-12">testnet-12</option>
+                  <option value="testnet">testnet</option>
                 </select>
               </div>
             </div>
@@ -524,23 +552,29 @@ async function submitTransfer() {
       body: JSON.stringify({ to, amount })
     });
     const data = await res.json();
-    if (data.ok) {
-      let msg = 'Transfer submitted';
-      if (data.txId) msg += '. TX: ' + data.txId.slice(0, 16) + '...';
-      if (data.adjusted) msg = 'Sent ' + data.actualAmount + ' KAS (adjusted due to KIP-9).' + (data.txId ? ' TX: ' + data.txId.slice(0, 16) + '...' : '');
-      else if (data.actualAmount) msg = 'Sent ' + data.actualAmount + ' KAS.' + (data.txId ? ' TX: ' + data.txId.slice(0, 16) + '...' : '');
-      resultEl.textContent = msg;
-      resultEl.className = 'mt-3 text-sm text-green-600';
+    if (res.ok && data.ok) {
+      let msg = 'Sent ' + amount + ' KAS';
+      if (data.txId) msg += '\nTX: ' + data.txId;
+      if (data.fee) msg += '\nFee: ' + data.fee + ' KAS';
+      resultEl.innerHTML = '<div class="p-3 bg-green-50 border border-green-200 rounded-lg">'
+        + '<div class="font-semibold text-green-700 mb-1">Transfer successful</div>'
+        + '<div class="text-green-600 break-all whitespace-pre-line">' + msg + '</div></div>';
+      resultEl.className = 'mt-3 text-sm';
+      btn.disabled = true; btn.textContent = 'Done';
+      document.getElementById('transfer-to').value = '';
+      document.getElementById('transfer-amount').value = '';
     } else {
-      resultEl.textContent = data.error || 'Transfer failed';
-      resultEl.className = 'mt-3 text-sm text-red-600';
+      resultEl.innerHTML = '<div class="p-3 bg-red-50 border border-red-200 rounded-lg text-red-600">'
+        + (data.error || 'Transfer failed (HTTP ' + res.status + ')') + '</div>';
+      resultEl.className = 'mt-3 text-sm';
+      btn.disabled = false; btn.textContent = '<%= it.t.btn_send || "Send" %>';
     }
   } catch (e) {
-    resultEl.textContent = 'Network error: ' + e.message;
-    resultEl.className = 'mt-3 text-sm text-red-600';
+    resultEl.innerHTML = '<div class="p-3 bg-red-50 border border-red-200 rounded-lg text-red-600">Network error: ' + e.message + '</div>';
+    resultEl.className = 'mt-3 text-sm';
+    btn.disabled = false; btn.textContent = '<%= it.t.btn_send || "Send" %>';
   }
   resultEl.classList.remove('hidden');
-  btn.disabled = false; btn.textContent = '<%= it.t.btn_send || "Send" %>';
 }
 </script>
 

@@ -70,7 +70,7 @@ export async function startScanner() {
     ...process.env,
     SCAN_MODE: scanMode,
     KASPA_RPC_URL: rpcUrl,
-    KASPA_NETWORK: process.env.KASPA_NETWORK || 'mainnet',
+    KASPA_NETWORK: 'mainnet',
     CONSOLE_URL: `http://localhost:${CONSOLE_PORT}`,
     INGEST_SECRET: ingestSecret,
     SCOUT_SEED_ADDRESS: _seedAddress,

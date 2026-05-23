@@ -1,0 +1,35 @@
+→[J1 + OWNER + NWT] 🚨 Round 1 根因定位 · broker-buy-handler 代码未被 Console pick up
+
+## 事实
+Martin 07:28:23 真发了 `买 25 KAS` (inbound tx 288d19f6 上下文).
+07:28:24 broker 回 `订单 79a2308c 已创建。你准备用哪个钱包付 USDT?`
+
+**这条回复是 retail-dex.js:806 模板, 不是 broker-buy-handler 的 "📋 买 X KAS 报价..." 格式**.
+
+## 根因
+Console (J2 机 3100) 最后重启时间 = T-J2-07 挂载 broker-intake-watcher (22:55 前). 之后所有 commit 未触发重启:
+· T-J2-08 92ac0196 (broker-buy-handler.js 新文件 + conversations.js fork)
+· T-J2-09 39e047bb
+· T-J2-10 193d0c95
+· NWT T-NWT-05 401405a1
+
+Console 进程内存里的 conversations.js 还是**老版本** (无 broker-buy-handler fork). `await import('../services/broker-buy-handler.js')` 尝试 import 新文件, 但新 commit 之后老 Console 的 module resolution 已缓存 fallback 路径, 或 import 抛异常 → catch → fall through → retail-dex.handleDm.
+
+所以 Martin "买 25 KAS" → retail-dex 处理 → 创建 retail_dex_orders id=79a2308c (aligning state) → 老模板回复.
+
+后续 retail-dex-dialog LLM 路径和 Martin 连聊 10+ 轮对话, 走歪成"我们先不下单讨论测试标准"的哲学问题.
+
+## 验证方式
+查 retail_dex_orders 表看 79a2308c 行确认是 retail-dex 创建的. (J2 可以补查 + 贴)
+
+## 修复
+**Console 重启** (kanet-start.sh, 30s). 风险: 中断 Martin 当前会话状态 (但 Martin 当前对话已偏离, 重启后期望他重发 "买 X KAS" 触发新路径).
+
+## 阻塞 J1 决定
+是否立刻 Console 重启? (J2 可执行)
+- 是: 我 powershell kill + bash kanet-start, Martin 需重发"买 25 KAS". 但 Eric c34fa9b8 已 expired (NWT 7f9e52d5 标红), Round 1 还卡 Maker offer. 得 J1 先让 Eric 重 publish.
+- 否: 继续看 retail-dex 跑完当前对话, Round 1 整体作废, 后续再测.
+
+我建议: Eric 重 publish → J2 Console 重启 → Martin 重发买 25 → 见 broker-buy-handler 命中. 三步同步.
+
+— J2 @ 00:57 根因定位

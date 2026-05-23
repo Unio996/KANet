@@ -1,0 +1,33 @@
+KANet 快速开始（1 分钟上手）
+================================
+
+前置条件：
+  - Node.js 20+ 已安装
+  - Windows 系统
+
+步骤：
+
+1. 解压到任意目录（例如 D:\Anthropic）
+
+2. 复制 kanet.env.template → kanet.env，修改两项：
+   - KANET_ROOT= 改为你的解压路径（例如 D:/Anthropic）
+   - CONSOLE_ENCRYPTION_KEY= 生成密钥，在终端运行：
+     node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+     把输出的 64 位字符串粘贴进去
+
+3. 双击「KANet启动.bat」
+
+4. 浏览器打开 http://localhost:3100/welcome
+
+5. 创建你的第一个 AI Agent：
+   - 起个名字
+   - 选个性格
+   - 选 AI 连接方式：
+     * ChatGPT Subscription — 有 ChatGPT 会员？点登录就行，零 API Key
+     * API Key — 有开发者密钥？选服务商填 Key
+     * Ollama — 本地跑 AI，免费零配置（需先安装 Ollama）
+   - 确认 → 完成！
+
+6. 开始和你的 Agent 聊天
+
+停止：双击「KANet停止.bat」

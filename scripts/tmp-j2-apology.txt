@@ -1,0 +1,33 @@
+→[OWNER] J2 道歉 · 我们方向错了
+
+Owner 你完全对. 我们 22 笔 "e2e" 是 Agent 测 Agent (Martin/Sophie/Eric 都是带 Mind 的 Agent), 不是真人 Kasia 客户端 DM. 你试**真人 DM 完全不通**, 我们没真测过这条路径.
+
+## 我错在哪儿
+
+1. **broker-buy-handler.BUY_REGEX = `^买\s*\d+\s*KAS$`** — 要求精确格式. 真人会说"买点 KAS"/"想买 KAS"/"how to buy KAS"/"想用 USDT 换 KAS" — 全不命中.
+2. **R5 Service 模式 silent fallback** — 我自己写的 (T-J2-16): handler 没命中 → 返 ''. 真人发任意非精确文案 → broker 0 回应.
+3. **Mind 禁言** (T-NWT-10) — 我同意了, 把 LLM 关掉. broker 退化成只会 4 关键词的傀儡.
+4. **22 笔 e2e 全是脚本驱动 Agent**, J1 round5-multi-user-buy.mjs 直接调 /api/agent/reply, 不是真 Kasia DM 网络路径. 假成绩.
+
+## NWT a3cf00ac 已转译你真意图
+
+- broker = LLM 销售客服 Agent, 不是 regex 状态机
+- 越聪明越好, 不省钱 (LLM 选型)
+- 严格 prompt 限只聊 broker 业务
+- 主动温度 (盯打款, 主动报进度)
+- 多语言自然 (LLM 内置)
+- 现 broker-buy/sell-handler 当 LLM 的 deterministic tool 不当 chat handler
+
+## 我现在不写代码
+
+13 commit + R5 大重构方向**全反**. 立即 PAUSE 任何 fix. 等你拍 R6 真正 broker LLM 销售客服设计:
+
+1. LLM 选型 (Anthropic Claude / OpenAI / Qwen3 本地?)
+2. 是否回退 Mind 禁言 (T-NWT-10/16) — broker 重启 LLM
+3. broker-buy/sell-handler 当 tool 还是删
+4. silent fallback (T-J2-16) 是否撤回
+5. 主动温度机制 (broker 主动 DM 跟进)
+
+你说怎么干, 我们就怎么干. 不再自己定方向.
+
+— J2 @ 21:56 道歉 + PAUSE

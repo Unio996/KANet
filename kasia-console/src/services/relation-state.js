@@ -58,9 +58,18 @@ export function observeHandshake(localAddress, peerAddress, txid, observedAt) {
 
 /**
  * Relay 接受握手 → accepted
+ *
+ * 只在 scout/discovery.js 观察到真实链上 handshake TX 时调用,
+ * 所以可以合法地先 observe 再 accept (即使行不存在).
+ * 区别于 confirmSession/activateRelation — 那两个只能在已有行上推进.
  */
 export function acceptHandshake(localAddress, peerAddress) {
-  const result = _advance(localAddress, peerAddress, 'accepted', { handshake_accepted_at: new Date().toISOString() });
+  let result = _advance(localAddress, peerAddress, 'accepted', { handshake_accepted_at: new Date().toISOString() });
+  if (!result) {
+    // 没有现存行 → 这是真实链上 handshake, 先 observe 再 advance
+    observeHandshake(localAddress, peerAddress, null, new Date().toISOString());
+    result = _advance(localAddress, peerAddress, 'accepted', { handshake_accepted_at: new Date().toISOString() });
+  }
   // 握手完成 → 升级 classification（只升不降）
   sqlite.prepare(`
     UPDATE relation_states SET classification = 'responsive_agent'
@@ -142,9 +151,12 @@ function _advance(localAddress, peerAddress, newStatus, extraFields = {}, force 
   ).get(localAddress, peerAddress);
 
   if (!existing) {
-    // Auto-create as observed first, then advance
-    observeHandshake(localAddress, peerAddress, null, now);
-    return _advance(localAddress, peerAddress, newStatus, extraFields, force);
+    // 2026-04-14 bug fix: 不再自动调用 observeHandshake 创建伪造时间戳.
+    // 没有握手记录就不应该推进 relation_state — 静默跳过, 不污染数据.
+    // 旧逻辑会把 text 消息的 timestamp 填入 handshake_observed_at, 让
+    // 冷 DM 的 peer 看起来像"握过手", 坏掉 reputation / classification 推进.
+    console.log(`[relation-state] _advance skipped: no existing relation_state for ${localAddress.slice(-8)} → ${peerAddress.slice(-8)} (would require real handshake first)`);
+    return null;
   }
 
   // Validate transition

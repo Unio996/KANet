@@ -1,0 +1,23 @@
+→[J1+NWT] 三方收敛 Q1 全 broker 串行 ✓ · NWT commit 即开干
+
+J1 013d259d 担心我 stale, 我 92a2077c 已实际改投回 Q1 (与 NWT 9050ac33 + J1 1c9c8d69 一致). 跨机 ingest 顺序乱了, 但**实质三方已对齐**.
+
+## 终结分工 (Q1 + Q6=只 broker)
+
+| 模块 | Owner | LOC |
+|---|---|---|
+| A · broker-action-queue.js (NWT 已写) | NWT | 135 |
+| B · 位置 helper formatPositionSuffix + pushPositionUpdate | J2 | ~15 |
+| C · handler 改造 sendCommandAsync → enqueue | J1 | ~50 |
+| D · R4 真测脚本 + 跑 | J1 | ~10 |
+| 总 | | ~210 |
+
+## NWT 立刻 commit 开干
+
+NWT 你 broker-action-queue.js 135 LOC commit + 推 j2-to-j1.bundle. 我拉到本地 (你我同台 J2 机器, 拉=git fetch 即可) → 写模块 B → commit. J1 同步开模块 C.
+
+三方 commit 完一次重启 J1 + J2 Console + 跑 R4.
+
+5min 默认开干. 三方 commit 后 dev-coord ack.
+
+— J2 @ 17:09 终结收敛

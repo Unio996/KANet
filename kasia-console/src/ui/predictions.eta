@@ -1,10 +1,43 @@
 <%~ include('partials/page-open', { _page: 'predictions', pageTitle: '预测市场', ...it }) %>
 
-<div class="p-6" x-data="predictionsPage()" x-init="init()">
+<div class="p-6" x-data="predictionsPage()" x-init="init(); _phase2DisclaimerInit()">
+
+  <!-- Phase 4a SS trustless 首访 modal (= testnet-12 真 e2e ship 后, Owner r256 钦定 banner 更新) -->
+  <div x-show="_showPhase2DisclaimerModal" x-cloak class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+    <div class="bg-white rounded-lg shadow-2xl max-w-lg w-full p-6 border-2 border-emerald-400">
+      <div class="flex items-start gap-3 mb-4">
+        <span class="text-4xl">✅</span>
+        <div class="text-base">
+          <div class="font-bold text-emerald-900 text-lg mb-2">KANet 预测市场 — Phase 4a SS trustless 现状</div>
+          <div class="text-emerald-800 space-y-2">
+            <p><strong>现 Phase 4a SS trustless escrow</strong>: maker + taker 双锁 KAS 到 SS P2SH 合约 (= silverscript native, Owner 也拿不走). 5-of-5 unanimous oracle 全签 settle, 真链 enforce.</p>
+            <p><strong>testnet-12 真 e2e 已 ship</strong>: 协议 publish → handshake → 双 stake → 5/5 vote → 5/5 TX-sig → SS settle TX 全 chain confirmed. 6 hotfix sediment 入档.</p>
+            <p>仍 testnet: 6/1 mainnet Kaspa SS launch 后正式上 mainnet. 现 testnet-12 真测验阶段.</p>
+            <p class="text-xs text-emerald-600">点 "我理解 + 继续" 后此 modal 不再弹 (banner 仍持显).</p>
+          </div>
+        </div>
+      </div>
+      <button @click="_ackPhase2Disclaimer()" class="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2 px-4 rounded">
+        我理解 + 继续
+      </button>
+    </div>
+  </div>
+
+  <!-- Phase 4a SS trustless escrow banner (= Owner r256 钦定 banner 更新, Phase 2 trust-based 已退役) -->
+  <div class="card card-compact mb-4 border-2 border-emerald-300 bg-emerald-50 sticky top-0 z-10">
+    <div class="flex items-start gap-3">
+      <span class="text-2xl">✅</span>
+      <div class="text-sm text-emerald-900 leading-relaxed">
+        <div class="font-bold mb-1">Phase 4a SS trustless escrow (= silverscript 数学 enforced, Owner 也拿不走)</div>
+        <div>maker + taker 双锁 SS P2SH + 5-of-5 unanimous oracle 全签 settle. testnet-12 真 e2e ship 完, 6/1 mainnet Kaspa SS launch 后正式 mainnet.</div>
+        <div class="text-xs text-emerald-700 mt-1">设计参考: SS contract PredictionEscrowUnanimous5.sil + Bettor r247 v3 13 ctor param + 6 hotfix sediment</div>
+      </div>
+    </div>
+  </div>
 
   <!-- 钱包状态栏 -->
   <div class="card card-compact mb-4 flex items-center gap-4 flex-wrap">
-    <select x-model="selectedAgent" @change="loadWalletStatus()" class="rounded-lg border border-warm-300 px-3 py-1.5 text-sm bg-white font-medium">
+    <select x-model="selectedAgent" @change="onAgentChange()" class="rounded-lg border border-warm-300 px-3 py-1.5 text-sm bg-white font-medium">
       <% it.relayNodes.forEach(r => { %>
       <option value="<%= r.id %>"><%= r.name %></option>
       <% }) %>
@@ -13,7 +46,16 @@
     <template x-if="walletStatus.hasWallet">
       <div class="flex items-center gap-3 text-sm">
         <span class="font-mono text-xs text-ink-400 cursor-pointer" @click="navigator.clipboard.writeText(walletStatus.address)" title="点击复制" x-text="walletStatus.address?.slice(0,8) + '...' + walletStatus.address?.slice(-6)"></span>
-        <span class="font-bold" :class="walletStatus.usdc > 0 ? 'text-green-600' : 'text-ink-400'" x-text="(walletStatus.usdc ?? 0).toFixed(2) + ' USDC'"></span>
+        <span class="font-bold" :class="walletStatus.pusd > 0 ? 'text-green-600' : 'text-ink-400'" x-text="(walletStatus.pusd ?? 0).toFixed(2) + ' pUSD'"
+              title="Polymarket V2 抵押 token. 1 pUSD = 1 USDC, 可双向 wrap"></span>
+        <template x-if="walletStatus.usdc > 0">
+          <span class="text-xs"
+                :class="walletStatus.v2Migrated ? 'text-ink-500' : 'text-amber-600'"
+                x-text="walletStatus.usdc.toFixed(2) + ' USDC' + (walletStatus.v2Migrated ? '' : ' 未包装')"
+                :title="walletStatus.v2Migrated
+                  ? 'Polymarket 赎回回款 = USDC（不是 pUSD）。可点 \'包装为 pUSD\' 继续下单，或点 \'退出\' 提现到外部地址。'
+                  : 'Polymarket V2 不直接吃 USDC，点 \'迁移到 V2\' 包成 pUSD'"></span>
+        </template>
         <template x-if="walletStatus.usdt > 0">
           <span class="text-xs text-ink-500" x-text="walletStatus.usdt.toFixed(2) + ' USDT'"></span>
         </template>
@@ -26,6 +68,16 @@
         <template x-if="!walletStatus.approved && walletStatus.hasWallet">
           <button @click="doApprove()" :disabled="approving" class="btn btn-sm btn-warning text-[10px]">
             <span x-text="approving ? '授权中...' : '授权 USDC'"></span>
+          </button>
+        </template>
+        <template x-if="walletStatus.v2Migrated">
+          <span class="badge badge-success text-[9px]" title="pUSD 已 approve V2 exchange">V2 ✓</span>
+        </template>
+        <template x-if="walletStatus.approved && (!walletStatus.v2Migrated || walletStatus.usdc > 0)">
+          <button @click="doMigrateV2()" :disabled="migratingV2"
+                  :class="walletStatus.v2Migrated ? 'btn btn-sm btn-ghost text-[10px] text-ink-500' : 'btn btn-sm btn-warning text-[10px]'"
+                  :title="walletStatus.v2Migrated ? '把这笔 USDC 包成 pUSD 用于继续下单（不想下单可点 \'退出\' 提现）' : 'Polymarket 4/28 切到 V2 抵押 token, 必须迁移才能下单'">
+            <span x-text="migratingV2 ? '迁移中...' : (walletStatus.v2Migrated ? '包装为 pUSD' : '迁移到 V2')"></span>
           </button>
         </template>
         <template x-if="walletStatus.hasClobKey">
@@ -50,6 +102,671 @@
     </template>
     <div x-show="walletMsg" class="text-xs ml-2" :class="walletMsg.includes('失败') ? 'text-red-500' : 'text-green-600'" x-text="walletMsg"></div>
   </div>
+
+  <!-- r179 Phase 1a (Bettor r179/r180 + Owner 5/18 "按你推荐办!" ack) — sticky mode bar + 4 main tab top bar.
+       Additive only — old modal/tabs untouched (reparent happens Phase 1b/1c/1d).
+       URL hash routing: /predictions#scan|recs|positions|history -->
+  <div class="sticky top-0 z-30 -mx-4 px-4 py-2 mb-3 bg-warm-50 border-b border-warm-200 shadow-sm">
+    <!-- Phase 3a mobile: overflow-x-auto + whitespace-nowrap so mode buttons scroll on small screen -->
+    <div class="flex items-center gap-2 overflow-x-auto mb-2 text-[11px] -mx-4 px-4 md:flex-wrap md:overflow-visible md:mx-0 md:px-0">
+      <span class="text-ink-400 font-medium whitespace-nowrap">Mode:</span>
+      <button @click="currentMode = 'fossa-stable'" :class="currentMode === 'fossa-stable' ? 'bg-orange-500 text-white font-bold' : 'bg-warm-100 text-ink-600 hover:bg-warm-200'" class="px-2.5 py-1 rounded whitespace-nowrap">★ Fossa-Stable</button>
+      <button @click="currentMode = 'scavenger'"    :class="currentMode === 'scavenger' ? 'bg-brand-500 text-white font-bold' : 'bg-warm-100 text-ink-600 hover:bg-warm-200'" class="px-2.5 py-1 rounded whitespace-nowrap">Scavenger</button>
+      <button @click="currentMode = 'variant'"      :class="currentMode === 'variant' ? 'bg-amber-500 text-white font-bold' : 'bg-warm-100 text-ink-600 hover:bg-warm-200'" class="px-2.5 py-1 rounded whitespace-nowrap">Variant</button>
+      <button @click="currentMode = 'all'"          :class="currentMode === 'all' ? 'bg-ink-700 text-white font-bold' : 'bg-warm-100 text-ink-600 hover:bg-warm-200'" class="px-2.5 py-1 rounded whitespace-nowrap">全部</button>
+      <span class="text-ink-300 text-[10px] ml-2 hidden md:inline whitespace-nowrap">(Phase 1a inserted, content reparent 1b/1c/1d)</span>
+    </div>
+    <!-- Phase 3a mobile: tab labels collapse 4 char on mobile, full on md+ -->
+    <div class="flex items-center gap-1 text-sm border-b border-warm-200 overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0">
+      <button @click="setCurrentTab('scan')"      :class="currentTab === 'scan'      ? 'border-b-2 border-orange-500 text-orange-700 font-bold' : 'text-ink-500 hover:text-ink-700'" class="px-3 py-2 whitespace-nowrap"><span class="md:hidden">🔍</span><span class="hidden md:inline">🔍 扫单</span></button>
+      <button @click="setCurrentTab('recs')"      :class="currentTab === 'recs'      ? 'border-b-2 border-brand-500 text-brand-700 font-bold' : 'text-ink-500 hover:text-ink-700'" class="px-3 py-2 whitespace-nowrap"><span class="md:hidden">📋</span><span class="hidden md:inline">📋 我的推荐</span></button>
+      <button @click="setCurrentTab('positions')" :class="currentTab === 'positions' ? 'border-b-2 border-amber-500 text-amber-700 font-bold' : 'text-ink-500 hover:text-ink-700'" class="px-3 py-2 whitespace-nowrap"><span class="md:hidden">💼</span><span class="hidden md:inline">💼 持仓</span></button>
+      <button @click="setCurrentTab('history')"   :class="currentTab === 'history'   ? 'border-b-2 border-purple-500 text-purple-700 font-bold' : 'text-ink-500 hover:text-ink-700'" class="px-3 py-2 whitespace-nowrap"><span class="md:hidden">📜</span><span class="hidden md:inline">📜 历史</span></button>
+      <!-- Phase 2a: compactView toggle (VERBOSE default per Owner pattern, power user opt-in collapse) -->
+      <div class="ml-auto flex items-center gap-2">
+        <button @click="compactView = !compactView; try { localStorage.setItem('predictions_compactView', compactView ? '1' : '0'); } catch {}"
+                :class="compactView ? 'bg-ink-700 text-white font-bold' : 'bg-warm-100 text-ink-600 hover:bg-warm-200'"
+                class="px-2.5 py-1 rounded text-[10px]"
+                :title="compactView ? '紧凑视图 — click 展开 VERBOSE' : 'VERBOSE 视图 — click 收起紧凑'">
+          <span x-text="compactView ? '🗜 紧凑' : '📖 VERBOSE'"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bettor 入口按钮 + modal 已 Phase 4d 杀 (r179 close). 4 new top tabs 全 cover, drilldowns 在 tab 内.
+       Bettor data 通过 我的推荐 tab x-init 或 inline 重扫 button 加载. -->
+  <div class="mb-4 flex items-center gap-3 flex-wrap text-xs text-ink-400">
+    <template x-if="bettorRecs && bettorRecs.scanned_at">
+      <span x-text="'Bettor last scan ' + new Date(bettorRecs.scanned_at).toLocaleString()"></span>
+    </template>
+    <template x-if="bettorRecs && !bettorRecs.scanned_at">
+      <span>Bettor 尚未扫描 — click 📋 我的推荐 tab 加载</span>
+    </template>
+  </div>
+
+  <!-- Phase 2.1c Bettor r151 §3.C — Protect rule edit modal (4-field form) -->
+  <template x-if="protectEditModal">
+    <div class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" @click="closeProtectEditModal()" @keydown.escape.window="closeProtectEditModal()">
+      <div class="card max-w-md w-full" @click.stop>
+        <div class="flex items-center justify-between mb-3 pb-2 border-b border-warm-200">
+          <div class="text-sm font-bold">✏️ 改 保护规则阈值</div>
+          <button @click="closeProtectEditModal()" class="text-ink-400 hover:text-ink-700 text-xl">✕</button>
+        </div>
+        <div class="text-[10px] text-ink-500 mb-3" x-text="protectEditModal?.market_slug"></div>
+        <div class="space-y-3 text-xs">
+          <div>
+            <label class="block text-ink-500 mb-1">止损 % (负数, 默认 -30%)</label>
+            <input type="number" step="0.05" min="-1" max="0" x-model.number="protectEditForm.stop_loss_pct" class="w-full px-2 py-1 border border-warm-300 rounded">
+          </div>
+          <div>
+            <label class="block text-ink-500 mb-1">Cooldown 小时 (默认 12h, 触发止损前最小持仓时间)</label>
+            <input type="number" step="1" min="0" x-model.number="protectEditForm.cooldown_hours" class="w-full px-2 py-1 border border-warm-300 rounded">
+          </div>
+          <div>
+            <label class="block text-ink-500 mb-1">时间天数 (默认 60d, 超过自动 close)</label>
+            <input type="number" step="1" min="1" x-model.number="protectEditForm.time_close_days" class="w-full px-2 py-1 border border-warm-300 rounded">
+          </div>
+          <div>
+            <label class="block text-ink-500 mb-1">止盈价 (📋 ref only, 待 Phase 3 swap-suggester reactivate)</label>
+            <input type="number" step="0.01" min="0" max="1" x-model.number="protectEditForm.take_profit_price" class="w-full px-2 py-1 border border-warm-300 rounded text-ink-400">
+          </div>
+        </div>
+        <div class="flex gap-2 mt-4">
+          <button @click="saveProtectEditModal()" class="flex-1 px-3 py-1.5 bg-brand-500 hover:bg-brand-600 text-white rounded text-xs font-bold">💾 保存 (改后需重新 ACK)</button>
+          <button @click="closeProtectEditModal()" class="px-3 py-1.5 bg-warm-200 hover:bg-warm-300 text-ink-700 rounded text-xs">取消</button>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <!-- r179 Phase 4d killed bettorModalOpen modal — fossa content reparented to 扫单 tab + r177 prediction trade quote book embed -->
+
+  <!-- r177 Phase 1 sub 3 — 扫单 tab (currentTab === 'scan'): fossa-stable recs + Live News Inject + stair-step audit + KANet prediction trade quote book -->
+  <template x-if="currentTab === 'scan'">
+    <div class="mb-4" x-init="if (!fossaRecs) loadFossaStable(); if (!predictionQuoteBook) loadPredictionQuoteBook(); if (!predictionQuoteBookV2) loadPredictionQuoteBookV2(); if (!makerWhitelist) loadMakerWhitelist()">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-bold text-ink-700">🔍 扫单</h2>
+        <div class="flex items-center gap-2 text-[11px]">
+          <button @click="fossaTickNow()" :disabled="fossaTicking" class="btn btn-sm btn-secondary text-[11px]">
+            <span x-text="fossaTicking ? '扫中...' : '立即扫'"></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Sub 1: Live News Inject (Owner 手动 feed 实时舆情) -->
+      <details class="card mb-3 border-l-4 border-l-orange-400">
+        <summary class="text-sm font-bold cursor-pointer hover:text-orange-700">📰 Live News Inject
+          <span x-show="liveNewsActive && liveNewsActive.length" class="text-[10px] text-ink-400 font-normal" x-text="'(' + liveNewsActive.length + ' active)'"></span>
+        </summary>
+        <div class="mt-2">
+          <div class="text-[11px] text-ink-500 mb-2">LLM training timeline blind spot. paste 最近 24h 新闻给 scanner LLM 二审用. 默认 24h 后失效.</div>
+          <textarea x-model="liveNewsInjectText" class="input input-xs w-full" rows="2" placeholder="例: 5/18 Streeting 81 backers 真 file ..."></textarea>
+          <div class="flex items-center gap-2 mt-1">
+            <input type="number" x-model.number="liveNewsHours" class="input input-xs w-20" placeholder="24">
+            <span class="text-[10px] text-ink-400">小时后失效 (max 168h)</span>
+            <button @click="liveNewsSubmit()" :disabled="liveNewsSubmitting" class="btn btn-sm btn-primary text-[11px]"><span x-text="liveNewsSubmitting ? '保存中...' : '+ 加 inject'"></span></button>
+          </div>
+          <template x-if="liveNewsActive && liveNewsActive.length">
+            <div class="mt-2 space-y-1">
+              <template x-for="n in liveNewsActive" :key="n.id">
+                <div class="text-[10px] bg-warm-50 p-2 rounded flex items-start gap-2">
+                  <div class="flex-1">
+                    <div class="text-ink-700" x-text="n.inject_text.slice(0, 200) + (n.inject_text.length > 200 ? '...' : '')"></div>
+                    <div class="text-ink-400">expires <span x-text="new Date(n.effective_until).toLocaleString()"></span></div>
+                  </div>
+                  <button @click="liveNewsDelete(n.id)" class="text-red-500 text-xs">✗</button>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+      </details>
+
+      <!-- Sub 2: Fossa-Stable recs (reparented from killed modal) -->
+      <details class="card mb-3 border-l-4 border-l-orange-500" open>
+        <summary class="text-sm font-bold cursor-pointer hover:text-orange-700">★ Fossa-Stable 推荐
+          <span x-show="fossaRecs && fossaRecs.length" class="text-[10px] text-orange-700 font-normal" x-text="'(' + fossaRecs.filter(r => r.status === 'pending_due_diligence').length + ' ⏸ pending due-diligence)'"></span>
+        </summary>
+        <div class="mt-2 text-[11px] text-ink-500 mb-2">5-15% upside · ≤15d settle · ≥$50k vol/liq · LLM 二审强制 · Owner final ack 才 fire</div>
+        <template x-if="!fossaRecs"><div class="text-center py-4 text-ink-400">载入中...</div></template>
+        <template x-if="fossaRecs && fossaRecs.length === 0"><div class="text-center py-4 text-ink-400">暂无 fossa-stable 推荐. 点 "立即扫" 触发.</div></template>
+        <template x-if="fossaRecs && fossaRecs.length > 0">
+          <div class="space-y-2">
+            <template x-for="r in fossaRecs" :key="r.id + ':scan-fossa'">
+              <div class="card card-compact border-l-4" :class="r.status === 'pending_due_diligence' ? 'border-l-orange-500 bg-orange-50/30' : 'border-l-green-500'">
+                <div class="flex items-start justify-between gap-2 mb-1">
+                  <a :href="'https://polymarket.com/event/' + (r.slug || '')" target="_blank" rel="noopener" class="flex-1 text-sm font-medium text-ink-700 hover:text-brand-600 block truncate" x-text="r.question || '(no title)'"></a>
+                  <span class="text-[10px] px-2 py-1 rounded font-medium whitespace-nowrap" :class="r.status === 'pending_due_diligence' ? 'bg-orange-200 text-orange-800' : 'bg-gray-100 text-gray-600'" x-text="r.status"></span>
+                </div>
+                <div class="text-[11px] text-ink-500"><span class="font-medium" :class="r.decision === 'YES' ? 'text-green-700' : 'text-red-700'" x-text="'BUY ' + r.decision"></span> · <span x-text="'$' + (r.yes_price * 100).toFixed(1) + '%'"></span> · edge <span x-text="(r.edge || 0).toFixed(1) + '%'"></span> · size $<span x-text="r.size_usd"></span> · settle <span x-text="r.end_date?.slice(0, 10)"></span></div>
+                <div x-show="r.status === 'pending_due_diligence'" class="mt-2 pt-2 border-t border-orange-200">
+                  <button @click="fossaOwnerAck(r)" :disabled="r._acking" class="btn btn-sm bg-orange-500 hover:bg-orange-600 text-white text-[11px] px-3 py-1"><span x-text="r._acking ? '下单中...' : '★ Owner final ack (fire)'"></span></button>
+                  <button @click="fossaReject(r)" class="btn btn-sm bg-warm-200 hover:bg-warm-300 text-ink-700 text-[11px] px-3 py-1 ml-2">✗ 拒绝</button>
+                </div>
+              </div>
+            </template>
+          </div>
+        </template>
+      </details>
+
+      <!-- Sub 3: Stair-step same-entity audit (Bettor r174) -->
+      <template x-if="stairAudits && stairAudits.length > 0">
+        <details class="card mb-3 border-l-4 border-l-purple-500">
+          <summary class="text-sm font-bold cursor-pointer hover:text-purple-700">🪜 同实体阶梯 audit
+            <span class="text-[10px] text-ink-400 font-normal" x-text="'(' + stairAudits.length + ')'"></span>
+          </summary>
+          <div class="mt-2 text-[11px] text-ink-500">P(out Y2 | survive Y1) = (b-a)/(1-a). 推 highest conditional prob deadline.</div>
+          <div class="mt-1 space-y-2">
+            <template x-for="ea in stairAudits" :key="ea.entity_key">
+              <div class="bg-purple-50/40 p-2 rounded text-[11px]">
+                <div class="font-medium text-purple-700 mb-1" x-text="'★ ' + ea.entity_key + ' (' + ea.count + ' deadlines)' + (ea.recommended ? ' — 推: ' + ea.recommended.deadline.end_date?.slice(0,10) : '')"></div>
+                <template x-if="ea.mispricing_flags && ea.mispricing_flags.length">
+                  <div class="text-[10px] text-amber-700">⚠ <span x-text="ea.mispricing_flags.length + ' flags'"></span></div>
+                </template>
+              </div>
+            </template>
+          </div>
+        </details>
+      </template>
+
+      <!-- Phase 4a Sub 10 (Bettor r243/r244) — SS trustless escrow + 5-of-5 unanimous offers -->
+      <details class="card mb-3 border-l-4 border-l-purple-500" open>
+        <summary class="text-sm font-bold cursor-pointer hover:text-purple-700">🔒 Phase 4a SS Trustless Escrow + 5-of-5 Unanimous
+          <span x-show="predictionQuoteBookV2" class="text-[10px] text-ink-400 font-normal" x-text="'(' + ((predictionQuoteBookV2?.offers || []).filter(o => o.is_phase_4a).length) + ' Phase 4a offers, network: ' + (predictionQuoteBookV2?.network || '-') + ')'"></span>
+        </summary>
+        <div class="mt-2">
+          <div class="text-[11px] text-ink-500 mb-2">SS contract trustless escrow. 5 maker-selected oracles 全 unanimous → settle TX. 分歧 → revote max 2. 仍分歧 + deadline 过 → refund_both. taker 未 join + deadline 过 → refund_maker_unjoined.</div>
+          <template x-if="!predictionQuoteBookV2"><div class="text-center py-4 text-ink-400">载入中...</div></template>
+          <template x-if="predictionQuoteBookV2 && (predictionQuoteBookV2.offers || []).filter(o => o.is_phase_4a).length === 0">
+            <div class="text-center py-4 text-ink-400">暂无 Phase 4a SS offers</div>
+          </template>
+          <template x-if="predictionQuoteBookV2">
+            <div class="space-y-2">
+              <template x-for="o in (predictionQuoteBookV2.offers || []).filter(o => o.is_phase_4a)" :key="o.id + ':p4a'">
+                <div class="border border-purple-200 bg-purple-50 rounded p-2 text-[11px]">
+                  <div class="flex justify-between items-center mb-1">
+                    <span class="font-bold" x-text="o.outcome_condition_id"></span>
+                    <span class="px-2 py-0.5 rounded font-bold text-white" :class="{
+                      'bg-gray-500': ['pending_taker','handshake_done','open_awaiting_taker_stake'].includes(o.protocol_status),
+                      'bg-blue-500': ['matched','verifying'].includes(o.protocol_status),
+                      'bg-amber-500': o.protocol_status === 'collecting_sigs',
+                      'bg-green-600': o.protocol_status === 'completed',
+                      'bg-red-500': o.protocol_status === 'refunded'
+                    }" x-text="o.protocol_status"></span>
+                  </div>
+                  <div class="space-y-0.5">
+                    <div>🔒 P2SH: <code class="text-[10px]" x-text="(o.escrow_p2sh || '').slice(0, 30) + '...'"></code>
+                      <a :href="o.explorer?.escrow" target="_blank" class="text-purple-600 underline ml-1">🔗</a>
+                    </div>
+                    <template x-if="o.revote_round > 0">
+                      <div class="px-2 py-1 bg-amber-100 text-amber-800 rounded text-[10px]">⚠ 重审 Round <span x-text="o.revote_round"></span>/2</div>
+                    </template>
+                    <template x-if="o.oracle_vote_summary">
+                      <div>
+                        🗳️ 投票: <span class="text-green-700 font-bold" x-text="o.oracle_vote_summary.tally.YES + ' YES'"></span> /
+                        <span class="text-red-700 font-bold" x-text="o.oracle_vote_summary.tally.NO + ' NO'"></span> /
+                        <span class="text-gray-600 font-bold" x-text="o.oracle_vote_summary.tally.DISPUTE + ' DISPUTE'"></span>
+                        <span class="text-ink-500" x-text="'(' + o.oracle_vote_summary.voters_count + '/5)'"></span>
+                      </div>
+                    </template>
+                    <template x-if="o.settle_txid">
+                      <div class="text-green-700">
+                        ✅ Settled: <code class="text-[10px]" x-text="o.settle_txid.slice(0, 16) + '...'"></code>
+                        <a :href="o.explorer?.settle" target="_blank" class="text-purple-600 underline ml-1">🔗</a>
+                      </div>
+                    </template>
+                    <template x-if="o.refund_txid">
+                      <div class="text-amber-700">
+                        💸 Refunded: <code class="text-[10px]" x-text="o.refund_txid.slice(0, 16) + '...'"></code>
+                        <a :href="o.explorer?.refund" target="_blank" class="text-purple-600 underline ml-1">🔗</a>
+                      </div>
+                    </template>
+                    <div class="text-ink-500">截止: <span x-text="o.outcome_end_date"></span></div>
+                  </div>
+                  <template x-if="o.oracle_vote_summary && (o.oracle_vote_summary.details || []).length > 0">
+                    <details class="mt-1">
+                      <summary class="text-[10px] text-ink-500 cursor-pointer">查看 5 oracle 投票详情</summary>
+                      <div class="mt-1 space-y-0.5 text-[10px]">
+                        <template x-for="v in o.oracle_vote_summary.details" :key="v.voter_relay_id">
+                          <div class="bg-white p-1 rounded">
+                            Oracle <code x-text="v.voter_relay_id.slice(0,8)"></code>: <strong x-text="v.outcome"></strong>
+                            evidence: <code x-text="(v.evidence_hash || '').slice(0,16)"></code>
+                          </div>
+                        </template>
+                      </div>
+                    </details>
+                  </template>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+      </details>
+
+      <!-- Sub 4: r177 KANet prediction trade quote book (broker exchange asset_type=prediction_outcome_share) -->
+      <details class="card mb-3 border-l-4 border-l-cyan-500">
+        <summary class="text-sm font-bold cursor-pointer hover:text-cyan-700">🎯 KANet Prediction Trade Quote Book
+          <span x-show="predictionQuoteBook" class="text-[10px] text-ink-400 font-normal" x-text="'(' + (predictionQuoteBook?.count || 0) + ' active offers)'"></span>
+        </summary>
+        <div class="mt-2">
+          <div class="text-[11px] text-ink-500 mb-2">Maker quotes prediction outcome shares vs KAS. 4 layer Hybrid Latency Defense at accept time.</div>
+          <!-- Maker whitelist status -->
+          <div class="mb-3 p-2 bg-warm-50 rounded text-[11px]">
+            <div class="font-medium text-ink-700">Maker whitelist:</div>
+            <template x-if="makerWhitelist && makerWhitelist.length === 0"><div class="text-ink-400">暂无 maker. 申请: stake KAS 锁 30d + Owner approve</div></template>
+            <template x-if="makerWhitelist && makerWhitelist.length > 0">
+              <div class="space-y-1 mt-1">
+                <template x-for="m in makerWhitelist" :key="m.relay_node_id + ':whitelist'">
+                  <div class="flex items-center gap-2 text-[10px]">
+                    <span class="font-mono text-ink-500" x-text="m.relay_node_id?.slice(0,12) + '...'"></span>
+                    <span x-text="m.stake_locked_kas?.toFixed(0) + ' KAS lock'"></span>
+                    <span class="text-[10px] px-1.5 py-0.5 rounded" :class="m.active ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'" x-text="m.active ? '✓ active' : '⏸ pending Owner approve'"></span>
+                  </div>
+                </template>
+              </div>
+            </template>
+            <button @click="showMakerApply = !showMakerApply" class="btn btn-xs btn-secondary text-[10px] mt-2">申请 maker →</button>
+            <template x-if="showMakerApply">
+              <div class="mt-2 space-y-1">
+                <select x-model="makerApplyForm.relay_node_id" class="input input-xs w-full">
+                  <option value="">— 选 agent —</option>
+                  <% it.relayNodes.forEach(r => { %><option value="<%= r.id %>"><%= r.name %></option><% }) %>
+                </select>
+                <input type="number" x-model.number="makerApplyForm.stake_amount_kas" class="input input-xs w-full" placeholder="stake KAS (≥100)">
+                <button @click="submitMakerApply()" :disabled="makerApplySubmitting" class="btn btn-sm btn-primary text-[11px] w-full"><span x-text="makerApplySubmitting ? '申请中...' : '✓ submit stake + apply'"></span></button>
+              </div>
+            </template>
+          </div>
+          <!-- Active offers -->
+          <template x-if="!predictionQuoteBook"><div class="text-center py-4 text-ink-400">载入中...</div></template>
+          <template x-if="predictionQuoteBook && (predictionQuoteBook.offers || []).length === 0"><div class="text-center py-4 text-ink-400">暂无 prediction quotes</div></template>
+          <template x-if="predictionQuoteBook && (predictionQuoteBook.offers || []).length > 0">
+            <div class="space-y-1">
+              <template x-for="o in predictionQuoteBook.offers" :key="o.id + ':quote'">
+                <div class="flex items-center justify-between py-1 border-b border-warm-100 text-[11px]">
+                  <span class="font-mono text-ink-500" x-text="o.maker?.slice(0,12) + '...'"></span>
+                  <span class="px-1.5 py-0.5 rounded text-[10px] font-bold" :class="o.outcome_side === 'YES' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'" x-text="o.outcome_side"></span>
+                  <span class="tabular-nums" x-text="'$' + (o.published_price || 0).toFixed(3)"></span>
+                  <span class="tabular-nums" x-text="(o.give_amount || 0).slice(0,8) + ' sh'"></span>
+                  <span class="tabular-nums text-ink-500" x-text="'for ' + (o.want_amount || 0).slice(0,8) + ' KAS'"></span>
+                  <span class="text-[10px] text-ink-400" x-text="'exp ' + (o.expires_at ? new Date(o.expires_at).toLocaleTimeString() : '-')"></span>
+                  <button @click="takePredictionOffer(o)" :disabled="o._taking" class="btn btn-xs bg-cyan-500 hover:bg-cyan-600 text-white text-[10px] px-2 py-0.5"><span x-text="o._taking ? 'taking...' : '🎯 TAKE'"></span></button>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+      </details>
+    </div>
+  </template>
+
+  <!-- r179 Phase 1d.a — 持仓 tab (currentTab === 'positions') 4 折叠 sub: 持仓保护 / 调仓建议 / Watcher / 活跃持仓 (modal still works as fallback).
+       NOTE: Bettor r186 spec "杀 modal" deferred to Phase 1d.b (post Owner full verify all 4 tabs work + Sophie 决策 stable).
+       Phase 1d.a additive only: 持仓 tab content added, modal preserved for fallback drilldown. -->
+  <template x-if="currentTab === 'positions'">
+    <div class="mb-4" x-init="if (!bettorProtectRules) loadBettorProtectRules(); if (!bettorAdjustments) loadBettorAdjustments(); if (!watchRules) loadWatchRules(); if (!positions || positions.length === 0) loadPositions()">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-bold text-ink-700">💼 持仓</h2>
+        <div class="text-[11px] text-ink-400">Phase 1d.a — 4 折叠 sub-section, 详情仍 modal (1d.b will 杀 modal post-verify)</div>
+      </div>
+
+      <!-- (1) 🛡 持仓保护 (protect rules summary) -->
+      <details class="card mb-3" open>
+        <summary class="text-sm font-semibold text-ink-700 cursor-pointer hover:text-brand-600">🛡 持仓保护
+          <span x-show="bettorProtectRules && bettorProtectRules.rules" class="text-[10px] text-ink-400 font-normal" x-text="'(' + (bettorProtectRules.rules.filter(r => r.status === 'pending_owner_ack').length) + '⏸ + ' + (bettorProtectRules.rules.filter(r => r.status === 'active').length) + '✓)'"></span>
+        </summary>
+        <div class="mt-2">
+          <template x-if="!bettorProtectRules">
+            <div class="text-center py-4 text-sm text-ink-400">载入中...</div>
+          </template>
+          <template x-if="bettorProtectRules && bettorProtectRules.rules && bettorProtectRules.rules.length === 0">
+            <div class="text-center py-4 text-sm text-ink-400">暂无保护规则</div>
+          </template>
+          <template x-if="bettorProtectRules && bettorProtectRules.rules && bettorProtectRules.rules.length > 0">
+            <div class="space-y-1 text-[11px]">
+              <template x-for="r in bettorProtectRules.rules.slice(0, 10)" :key="r.id + ':pos-protect'">
+                <div class="flex items-center justify-between py-1 border-b border-warm-100">
+                  <span class="flex-1 text-ink-700 truncate" x-text="r.market_slug + ' ' + r.side"></span>
+                  <span class="text-ink-500 tabular-nums" x-text="(r.current_size || 0).toFixed(0) + ' sh @ $' + (r.entry_avg_price || 0).toFixed(3)"></span>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded ml-2" :class="r.status === 'active' ? 'bg-green-50 text-green-700' : r.status === 'pending_owner_ack' ? 'bg-amber-50 text-amber-700' : 'bg-gray-50 text-gray-500'" x-text="r.status"></span>
+                </div>
+              </template>
+              <div class="flex items-center gap-2 mt-2 text-[10px]">
+                <!-- Phase 4a — inline pending ACK button for any rule status='pending_owner_ack' -->
+                <template x-for="r in bettorProtectRules.rules.filter(r => r.status === 'pending_owner_ack')" :key="r.id + ':pos-ack'">
+                  <button @click="ackBettorProtectRule(r)" :disabled="r._acking" class="px-2 py-1 rounded bg-amber-500 hover:bg-amber-600 text-white text-[10px] font-bold disabled:opacity-50">
+                    <span x-text="r._acking ? 'ACK中...' : '⏸ ACK ' + r.market_slug?.slice(0,12)"></span>
+                  </button>
+                </template>
+                <button @click="bettorModalOpen = true; bettorTab = 'protect'" class="text-brand-600 hover:underline ml-auto">🔍 完整保护 modal →</button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </details>
+
+      <!-- (2) 💡 调仓建议 (adjustment queue summary) -->
+      <details class="card mb-3">
+        <summary class="text-sm font-semibold text-ink-700 cursor-pointer hover:text-brand-600">💡 调仓建议
+          <span x-show="bettorAdjustments?.count" class="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700 font-bold" x-text="bettorAdjustments.count"></span>
+        </summary>
+        <div class="mt-2">
+          <template x-if="!bettorAdjustments">
+            <div class="text-center py-4 text-sm text-ink-400">载入中...</div>
+          </template>
+          <template x-if="bettorAdjustments && (bettorAdjustments.adjustments || []).length === 0">
+            <div class="text-center py-4 text-sm text-ink-400">暂无调仓建议</div>
+          </template>
+          <template x-if="bettorAdjustments && (bettorAdjustments.adjustments || []).length > 0">
+            <div class="space-y-1 text-[11px]">
+              <template x-for="a in (bettorAdjustments.adjustments || []).slice(0, 5)" :key="a.id + ':pos-adj'">
+                <div class="py-1 border-b border-warm-100">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[10px] px-1.5 py-0.5 rounded font-bold" :class="a.severity === 'critical' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'" x-text="a.severity === 'critical' ? '🚨' : '⚠'"></span>
+                    <span class="flex-1 text-ink-700 truncate" x-text="a.question"></span>
+                    <span class="font-medium" :class="a.unrealized_pnl >= 0 ? 'text-green-600' : 'text-red-600'" x-text="'$' + (a.unrealized_pnl || 0).toFixed(2)"></span>
+                  </div>
+                  <!-- Phase 4a — inline approve/reject for adjustment -->
+                  <div class="flex items-center gap-2 mt-1">
+                    <button @click="bettorDecideAdjustment(a.id, 'approve')" class="px-2 py-0.5 rounded bg-red-500 hover:bg-red-600 text-white text-[10px] font-bold">✓ 确认止损 (paper)</button>
+                    <button @click="bettorDecideAdjustment(a.id, 'reject')" class="px-2 py-0.5 rounded bg-warm-200 hover:bg-warm-300 text-ink-700 text-[10px]">✗ 保留</button>
+                  </div>
+                </div>
+              </template>
+              <div class="text-[10px] text-ink-400 mt-2">
+                <button @click="bettorModalOpen = true; bettorTab = 'adjust'" class="text-brand-600 hover:underline">🔍 完整调仓 modal →</button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </details>
+
+      <!-- (3) 💰 阈值 Watcher (active rules + last alerts) -->
+      <details class="card mb-3" :open="watchRules && watchRules.some(r => r.last_alert_label)">
+        <summary class="text-sm font-semibold text-ink-700 cursor-pointer hover:text-brand-600">💰 阈值 Watcher
+          <span x-show="watchRules && watchRules.length" class="text-[10px] text-ink-400 font-normal" x-text="'(' + watchRules.filter(r => r.status === 'active').length + ' 守' + (watchRules.some(r => r.last_alert_label) ? ' · 🚨 alert active' : '') + ')'"></span>
+        </summary>
+        <div class="mt-2">
+          <template x-if="!watchRules">
+            <div class="text-center py-4 text-sm text-ink-400">载入中...</div>
+          </template>
+          <template x-if="watchRules && watchRules.length === 0">
+            <div class="text-center py-4 text-sm text-ink-400">暂无 watcher rule</div>
+          </template>
+          <template x-if="watchRules && watchRules.length > 0">
+            <div class="space-y-1 text-[11px]">
+              <template x-for="r in watchRules" :key="r.id + ':pos-watch'">
+                <div class="py-1 border-b border-warm-100" :class="r.last_alert_label ? 'bg-red-50/30 -mx-2 px-2' : ''">
+                  <div class="flex items-center justify-between">
+                    <span class="flex-1 text-ink-700 truncate" x-text="r.market_title"></span>
+                    <span class="text-ink-500 tabular-nums" x-text="(r.current_size || 0) + ' sh @ entry $' + (r.entry_avg_price || 0).toFixed(3)"></span>
+                    <span class="ml-2 text-ink-600 tabular-nums" x-text="'now $' + (r.last_check_price ?? 0).toFixed(3)"></span>
+                  </div>
+                  <div x-show="r.last_alert_label" class="text-[10px] text-red-600 mt-0.5">
+                    🚨 last alert: <span class="font-bold" x-text="r.last_alert_label"></span> @ <span x-text="r.last_alert_at ? new Date(r.last_alert_at).toLocaleString() : '-'"></span>
+                  </div>
+                </div>
+              </template>
+              <div class="text-[10px] text-ink-400 mt-2">
+                <button @click="bettorModalOpen = true; bettorTab = 'watcher'" class="text-brand-600 hover:underline">🔍 完整 Watcher modal →</button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </details>
+
+      <!-- (4) 📊 活跃持仓 — Phase 4b inline summary list + fallback link to 外 active-positions-section full panel -->
+      <details class="card mb-3" :open="positions && positions.length > 0">
+        <summary class="text-sm font-semibold text-ink-700 cursor-pointer hover:text-brand-600">📊 活跃持仓
+          <span x-show="positions" class="text-[10px] text-ink-400 font-normal" x-text="'(' + (positions?.length || 0) + ' 笔)'"></span>
+        </summary>
+        <div class="mt-2">
+          <template x-if="!positions || positions.length === 0">
+            <div class="text-center py-4 text-sm text-ink-400">暂无活跃持仓</div>
+          </template>
+          <template x-if="positions && positions.length > 0">
+            <div class="space-y-1 text-[11px]">
+              <template x-for="p in positions.slice(0, 10)" :key="(p.asset || p.market) + ':pos-inline'">
+                <div class="flex items-center justify-between py-1 border-b border-warm-100">
+                  <a :href="'https://polymarket.com/event/' + (p.slug || '')" target="_blank" rel="noopener" class="flex-1 text-ink-700 hover:text-brand-600 truncate mr-2" x-text="p.question || p.title || (p.market || '').slice(0,32)+'...'"></a>
+                  <span class="px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap" :class="p.outcome === 'Yes' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'" x-text="p.outcome"></span>
+                  <span class="ml-2 text-ink-500 tabular-nums" x-text="(p.size || 0).toFixed(0) + ' sh @ $' + (p.avgPrice || 0).toFixed(3)"></span>
+                  <span class="ml-2 font-medium tabular-nums" :class="(p.curPrice || 0) >= (p.avgPrice || 0) ? 'text-green-600' : 'text-red-600'" x-text="'cur $' + (p.curPrice || 0).toFixed(3)"></span>
+                </div>
+              </template>
+              <div class="text-[10px] text-ink-400 mt-2 flex items-center gap-2">
+                <button @click="showPositions = true; setTimeout(() => document.querySelector('.active-positions-section')?.scrollIntoView({ behavior: 'smooth' }), 50)" class="text-brand-600 hover:underline">🔍 完整 panel (redeem + sell + history) →</button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </details>
+    </div>
+  </template>
+
+  <!-- r179 Phase 1c — 历史 tab (currentTab === 'history') 3 折叠 sub-section: 持仓快照 / 推荐流水 / 胜率轨迹 (modal still works for full detail) -->
+  <template x-if="currentTab === 'history'">
+    <div class="mb-4" x-init="if (!bettorHistory) loadBettorHistory(); if (!bettorWinrate) loadBettorWinrate(); if (!bettorHistoryRecs) loadBettorHistoryRecs(); if (!bettorRecord) loadBettorRecord()">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-bold text-ink-700">📜 历史</h2>
+        <div class="text-[11px] text-ink-400">Phase 1c — 3 折叠 sub-section, 详情仍 modal</div>
+      </div>
+
+      <!-- (1) 持仓快照 (record tab simplified summary) -->
+      <details class="card mb-3" open>
+        <summary class="text-sm font-semibold text-ink-700 cursor-pointer hover:text-brand-600">💼 持仓快照
+          <span x-show="bettorRecord && bettorRecord.batches" class="text-[10px] text-ink-400 font-normal" x-text="'(' + (bettorRecord.batches?.length || 0) + ' 批次)'"></span>
+        </summary>
+        <div class="mt-2">
+          <template x-if="!bettorRecord">
+            <div class="text-center py-4 text-sm text-ink-400">载入中...</div>
+          </template>
+          <template x-if="bettorRecord && bettorRecord.batches && bettorRecord.batches.length === 0">
+            <div class="text-center py-4 text-sm text-ink-400">暂无已结算推荐</div>
+          </template>
+          <template x-if="bettorRecord && bettorRecord.batches && bettorRecord.batches.length > 0">
+            <div class="space-y-1 text-[11px]">
+              <template x-for="b in bettorRecord.batches.slice(0, 10)" :key="(b.scanned_at || '') + ':history-rec'">
+                <div class="flex items-center justify-between text-ink-600 py-1 border-b border-warm-100">
+                  <span x-text="new Date(b.scanned_at).toLocaleString()"></span>
+                  <span x-text="(b.n_resolved || 0) + ' resolved / ' + (b.hit || 0) + '✓'"></span>
+                  <span class="font-medium" :class="(b.total_realized_pnl || 0) >= 0 ? 'text-green-600' : 'text-red-500'" x-text="'$' + (b.total_realized_pnl || 0).toFixed(2)"></span>
+                </div>
+              </template>
+              <div class="text-[10px] text-ink-400 mt-2">
+                <button @click="bettorModalOpen = true; bettorTab = 'record'" class="text-brand-600 hover:underline">🔍 详情 modal →</button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </details>
+
+      <!-- (2) 推荐流水 (history-recs tab simplified) -->
+      <details class="card mb-3">
+        <summary class="text-sm font-semibold text-ink-700 cursor-pointer hover:text-brand-600">📋 推荐流水
+          <span x-show="bettorHistoryRecs && bettorHistoryRecs.recommendations" class="text-[10px] text-ink-400 font-normal" x-text="'(' + (bettorHistoryRecs.recommendations?.length || 0) + ' 条)'"></span>
+        </summary>
+        <div class="mt-2">
+          <template x-if="!bettorHistoryRecs">
+            <div class="text-center py-4 text-sm text-ink-400">载入中...</div>
+          </template>
+          <template x-if="bettorHistoryRecs && (bettorHistoryRecs.recommendations || []).length > 0">
+            <div class="space-y-1 text-[11px]">
+              <template x-for="r in (bettorHistoryRecs.recommendations || []).slice(0, 10)" :key="r.id + ':history-rec-flow'">
+                <div class="flex items-center justify-between py-1 border-b border-warm-100">
+                  <a :href="'https://polymarket.com/event/' + (r.slug || r.condition_id || '')" target="_blank" rel="noopener" class="flex-1 text-ink-700 hover:text-brand-600 truncate mr-2" x-text="r.question"></a>
+                  <span class="px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap" :class="r.decision === 'YES' ? 'bg-green-100 text-green-700' : r.decision === 'NO' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'" x-text="r.decision"></span>
+                  <span class="ml-2 text-ink-500 tabular-nums" x-text="(r.yes_price * 100).toFixed(0) + '%'"></span>
+                  <span class="ml-2 text-[10px] px-1.5 py-0.5 rounded" :class="r.status === 'accepted' ? 'bg-green-50 text-green-600' : r.status === 'rejected' ? 'bg-red-50 text-red-500' : 'bg-gray-50 text-gray-500'" x-text="r.status"></span>
+                </div>
+              </template>
+              <div class="text-[10px] text-ink-400 mt-2">
+                <button @click="bettorModalOpen = true; bettorTab = 'history-recs'" class="text-brand-600 hover:underline">🔍 完整 list modal →</button>
+              </div>
+            </div>
+          </template>
+          <template x-if="bettorHistoryRecs && (bettorHistoryRecs.recommendations || []).length === 0">
+            <div class="text-center py-4 text-sm text-ink-400">暂无推荐流水</div>
+          </template>
+        </div>
+      </details>
+
+      <!-- (3) 胜率轨迹 (winrate tab simplified summary) -->
+      <details class="card mb-3">
+        <summary class="text-sm font-semibold text-ink-700 cursor-pointer hover:text-brand-600">📈 胜率轨迹
+          <span x-show="bettorWinrate?.cumulative?.length" class="text-[10px] text-ink-400 font-normal" x-text="'(' + ((bettorWinrate.cumulative[bettorWinrate.cumulative.length-1]?.cum_hit_rate || 0) * 100).toFixed(0) + '%, $' + (bettorWinrate.cumulative[bettorWinrate.cumulative.length-1]?.cum_pnl || 0).toFixed(0) + ')'"></span>
+        </summary>
+        <div class="mt-2">
+          <template x-if="!bettorWinrate">
+            <div class="text-center py-4 text-sm text-ink-400">载入中...</div>
+          </template>
+          <template x-if="bettorWinrate && bettorWinrate.cumulative && bettorWinrate.cumulative.length > 0">
+            <div class="space-y-1 text-[11px]">
+              <template x-for="(d, i) in bettorWinrate.cumulative.slice(-7)" :key="d.day + ':winrate'">
+                <div class="flex items-center justify-between py-1 border-b border-warm-100">
+                  <span class="text-ink-600" x-text="d.day"></span>
+                  <span class="tabular-nums" x-text="(d.cum_hit_rate * 100).toFixed(0) + '% 胜率'"></span>
+                  <span class="tabular-nums font-medium" :class="(d.cum_pnl || 0) >= 0 ? 'text-green-600' : 'text-red-500'" x-text="'$' + (d.cum_pnl || 0).toFixed(2) + ' cum'"></span>
+                </div>
+              </template>
+              <!-- Phase 4a — inline mini ascii bar chart (last 7 days cum PnL) -->
+              <div class="mt-3 p-2 bg-warm-50 rounded text-[10px] font-mono">
+                <div class="text-ink-500 mb-1">📈 last 7 days cum PnL</div>
+                <template x-for="d in bettorWinrate.cumulative.slice(-7)" :key="d.day + ':chart'">
+                  <div class="flex items-center gap-1">
+                    <span class="text-ink-400 w-16 truncate" x-text="d.day"></span>
+                    <span class="flex-1 inline-block h-3 rounded" :class="(d.cum_pnl || 0) >= 0 ? 'bg-green-300' : 'bg-red-300'" :style="'width:' + Math.min(Math.abs(d.cum_pnl || 0) / 5, 100) + '%; max-width:80%'"></span>
+                    <span class="tabular-nums w-16 text-right" :class="(d.cum_pnl || 0) >= 0 ? 'text-green-700' : 'text-red-600'" x-text="(d.cum_pnl || 0).toFixed(0)"></span>
+                  </div>
+                </template>
+              </div>
+              <div class="text-[10px] text-ink-400 mt-2">
+                <button @click="bettorModalOpen = true; bettorTab = 'winrate'" class="text-brand-600 hover:underline">🔍 完整 chart modal →</button>
+              </div>
+            </div>
+          </template>
+          <template x-if="bettorWinrate && bettorWinrate.cumulative && bettorWinrate.cumulative.length === 0">
+            <div class="text-center py-4 text-sm text-ink-400">暂无胜率数据</div>
+          </template>
+        </div>
+      </details>
+    </div>
+  </template>
+
+  <!-- r179 Phase 1b — 我的推荐 tab (currentTab === 'recs') — simplified copy, modal still works as fallback for full ACCEPT/variant -->
+  <template x-if="currentTab === 'recs'">
+    <div class="mb-4" x-init="if (!bettorRecs) loadBettor()">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-bold text-ink-700">📋 我的推荐</h2>
+        <div class="flex items-center gap-2 text-[11px]">
+          <span x-show="bettorRecs?.scanned_at" class="text-ink-400" x-text="'last scan ' + new Date(bettorRecs.scanned_at).toLocaleTimeString()"></span>
+          <button @click="loadBettor()" :disabled="bettorScanning" class="btn btn-sm btn-secondary text-[11px]">
+            <span x-text="bettorScanning ? '扫描中...' : '🔄 重扫'"></span>
+          </button>
+        </div>
+      </div>
+      <!-- strategy filter chips (copy from modal — same bettorStrategyFilter state) -->
+      <template x-if="bettorRecs && (bettorRecs.recommendations || []).length">
+        <div class="flex gap-2 mb-3 text-[10px] flex-wrap">
+          <button @click="bettorStrategyFilter = 'all'" :class="bettorStrategyFilter === 'all' ? 'bg-brand-100 text-brand-700 font-bold' : 'bg-ink-50 text-ink-500'" class="px-2 py-1 rounded">全部</button>
+          <button @click="bettorStrategyFilter = 'scavenger_main'" :class="bettorStrategyFilter === 'scavenger_main' ? 'bg-brand-100 text-brand-700 font-bold' : 'bg-ink-50 text-ink-500'" class="px-2 py-1 rounded">稳单</button>
+          <button @click="bettorStrategyFilter = 'scavenger_carrion'" :class="bettorStrategyFilter === 'scavenger_carrion' ? 'bg-red-100 text-red-700 font-bold' : 'bg-ink-50 text-ink-500'" class="px-2 py-1 rounded">捡尸</button>
+          <button @click="bettorStrategyFilter = 'scavenger_topN_rank'" :class="bettorStrategyFilter === 'scavenger_topN_rank' ? 'bg-amber-100 text-amber-700 font-bold' : 'bg-ink-50 text-ink-500'" class="px-2 py-1 rounded">top-N</button>
+          <button @click="bettorStrategyFilter = 'scavenger_election_locked'" :class="bettorStrategyFilter === 'scavenger_election_locked' ? 'bg-green-100 text-green-700 font-bold' : 'bg-ink-50 text-ink-500'" class="px-2 py-1 rounded">election locked</button>
+          <button @click="bettorStrategyFilter = 'scavenger_competitive'" :class="bettorStrategyFilter === 'scavenger_competitive' ? 'bg-orange-100 text-orange-700 font-bold' : 'bg-ink-50 text-ink-500'" class="px-2 py-1 rounded">竞技</button>
+          <span class="text-ink-300 ml-2">(Phase 1b — 简化卡, 详情/下单 仍 modal)</span>
+        </div>
+      </template>
+      <!-- recs grid simplified (per-rec card minimum: question + decision + numbers + 详情/下单 → opens modal) -->
+      <template x-if="bettorRecs && (bettorRecs.recommendations || []).length">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <template x-for="r in (bettorRecs.recommendations || []).filter(x => bettorStrategyFilter === 'all' || (x.strategy || classifyStrategyClient(x)) === bettorStrategyFilter)" :key="r.id + ':simple'">
+            <div class="card card-compact" :class="r.decision === 'YES' ? 'border-l-4 border-l-green-500' : r.decision === 'NO' ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-gray-400'">
+              <div class="flex items-start gap-2 mb-2">
+                <a :href="'https://polymarket.com/event/' + (r.slug || r.condition_id || '')" target="_blank" rel="noopener" class="flex-1 text-sm font-medium text-ink-700 hover:text-brand-600" x-text="r.question"></a>
+                <span class="px-2 py-0.5 rounded text-[10px] font-bold whitespace-nowrap" :class="r.decision === 'YES' ? 'bg-green-100 text-green-700' : r.decision === 'NO' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'" x-text="r.decision === 'SKIP' ? 'SKIP' : 'BUY ' + r.decision"></span>
+              </div>
+              <div class="grid grid-cols-4 gap-2 text-[11px]">
+                <div><div class="text-ink-400">yes 价</div><div class="font-bold text-ink-700" x-text="(r.yes_price * 100).toFixed(1) + '%'"></div></div>
+                <div><div class="text-ink-400">edge</div><div class="font-bold text-ink-700" x-text="(r.edge * 100).toFixed(1) + 'pp'"></div></div>
+                <div><div class="text-ink-400">仓位</div><div class="font-bold text-ink-700" x-text="(r.fraction * 100).toFixed(1) + '%'"></div></div>
+                <div><div class="text-ink-400">$ size</div><div class="font-bold text-ink-700" x-text="'$' + (r.size_usd || 0).toFixed(0)"></div></div>
+              </div>
+              <div class="flex items-center justify-between mt-2 text-[10px] text-ink-400">
+                <span x-show="r.end_date" x-text="'到期 ' + new Date(r.end_date).toLocaleDateString()"></span>
+                <span x-show="r.strategy" class="text-[10px] px-1.5 py-0.5 rounded bg-warm-50" x-text="r.strategy"></span>
+              </div>
+              <!-- r179 Phase 2b — inline ACCEPT (extracted from modal line 1135) + 查看推理 secondary -->
+              <div class="flex gap-2 mt-2">
+                <button @click="bettorDetail = r" class="flex-1 text-[10px] text-brand-500 hover:text-brand-700 text-left">查看推理 →</button>
+                <button x-show="r.status === 'pending' && (r.decision === 'YES' || r.decision === 'NO') && r.strategy !== 'fossa-stable'"
+                        @click="acceptBettorRec(r)" :disabled="r._accepting"
+                        class="px-3 py-1 rounded text-[10px] font-bold text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                        :class="r.decision === 'YES' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'">
+                  <span x-text="r._accepting ? '下单中...' : '✓ ACCEPT 下单'"></span>
+                </button>
+                <button x-show="r.strategy === 'fossa-stable' && r.status === 'pending_due_diligence'"
+                        @click="bettorModalOpen = true; bettorTab = 'fossa'"
+                        class="px-3 py-1 rounded text-[10px] font-bold bg-orange-500 hover:bg-orange-600 text-white">
+                  ★ fossa final ack →
+                </button>
+                <span x-show="r.status === 'accepted'" class="px-3 py-1 rounded text-[10px] font-bold bg-gray-200 text-gray-600">已下单</span>
+                <span x-show="r.decision === 'SKIP'" class="px-3 py-1 rounded text-[10px] font-bold bg-gray-200 text-gray-500">SKIP</span>
+              </div>
+              <div x-show="r._acceptError" class="mt-1 text-[10px] text-red-500" x-text="'下单失败: ' + (r._acceptError || '')"></div>
+              <div x-show="r._acceptSuccess" class="mt-1 text-[10px] text-green-600" x-text="'✓ 下单成功 ' + (r._acceptSuccess || '')"></div>
+            </div>
+          </template>
+        </div>
+      </template>
+      <template x-if="bettorRecs && !(bettorRecs.recommendations || []).length">
+        <div class="text-center py-8 text-sm text-ink-400">
+          <span x-show="!bettorRecs.scanned_at">尚未扫描 — 点击 🔄 重扫</span>
+          <span x-show="bettorRecs.scanned_at">本批次无推荐符合条件 (edge&lt;5pt 或 gap&gt;3 月)</span>
+        </div>
+      </template>
+      <template x-if="!bettorRecs">
+        <div class="text-center py-8 text-sm text-ink-400">载入中...</div>
+      </template>
+    </div>
+  </template>
+
+  <!-- Bettor 详情弹窗 -->
+  <template x-if="bettorDetail">
+    <div class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" @click="bettorDetail = null">
+      <div class="card max-w-xl w-full max-h-[80vh] overflow-y-auto" @click.stop>
+        <div class="flex items-start justify-between mb-3">
+          <div class="text-sm font-medium" x-text="bettorDetail.question"></div>
+          <button @click="bettorDetail = null" class="text-ink-400 hover:text-ink-700">✕</button>
+        </div>
+        <div class="text-xs text-ink-500 space-y-2">
+          <div><strong>决策:</strong> <span x-text="bettorDetail.decision === 'SKIP' ? 'SKIP' : 'BUY ' + bettorDetail.decision"></span></div>
+          <div><strong>市场报价:</strong> YES @ <span x-text="(bettorDetail.yes_price * 100).toFixed(1) + '%'"></span></div>
+          <div><strong>我估:</strong> pMid <span x-text="(bettorDetail.p_mid * 100).toFixed(1) + '%'"></span> σ <span x-text="(bettorDetail.sigma * 100).toFixed(1) + '%'"></span></div>
+          <div><strong>edge:</strong> <span x-text="(bettorDetail.edge * 100).toFixed(2) + ' pp'"></span></div>
+          <div><strong>仓位:</strong> <span x-text="(bettorDetail.fraction * 100).toFixed(2) + '% (= $' + bettorDetail.size_usd.toFixed(2) + ' on $1000 bankroll)'"></span></div>
+          <div><strong>info gap:</strong> <span x-text="bettorDetail.info_gap_months.toFixed(1) + ' 月'"></span></div>
+          <div><strong>vol24h:</strong> <span x-text="'$' + (bettorDetail.volume_24h || 0).toLocaleString()"></span></div>
+          <div><strong>到期:</strong> <span x-text="bettorDetail.end_date ? new Date(bettorDetail.end_date).toLocaleString() : '?'"></span></div>
+          <div><strong>LLM tier:</strong> <span x-text="bettorDetail.llm_tier"></span></div>
+          <div><strong>触发:</strong> <span x-text="bettorDetail.trigger_type"></span></div>
+          <div class="border-t border-warm-200 pt-2 mt-2">
+            <div class="font-medium mb-1">LLM 估值理由:</div>
+            <div class="text-ink-600 italic" x-text="(bettorDetail.reasoning && bettorDetail.reasoning.reasoning) || '(无)'"></div>
+          </div>
+          <div>
+            <div class="font-medium mb-1">Kelly 推理 trace:</div>
+            <ul class="text-ink-600 list-disc list-inside text-[11px]">
+              <template x-for="(line, i) in (bettorDetail.reasoning && bettorDetail.reasoning.trace) || []" :key="i">
+                <li x-text="line"></li>
+              </template>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </template>
 
   <!-- 新手引导 -->
   <template x-if="showGuide">
@@ -94,7 +811,8 @@
   <!-- Sort + Filter tabs -->
   <div class="flex items-center gap-2 mb-4 flex-wrap">
     <div class="tab-bar">
-      <button class="tab-item" :class="sortBy === 'volume' && 'active'" @click="sortBy = 'volume'; page = 1">热门</button>
+      <button class="tab-item" :class="sortBy === 'volume' && 'active'" @click="sortBy = 'volume'; page = 1">24h 热门</button>
+      <button class="tab-item" :class="sortBy === 'total' && 'active'" @click="sortBy = 'total'; page = 1">总押注量</button>
       <button class="tab-item" :class="sortBy === 'ending' && 'active'" @click="sortBy = 'ending'; page = 1">即将到期</button>
       <button class="tab-item" :class="sortBy === 'volatile' && 'active'" @click="sortBy = 'volatile'; page = 1">争议最大</button>
       <button class="tab-item" :class="sortBy === 'newest' && 'active'" @click="sortBy = 'newest'; page = 1">最新</button>
@@ -107,33 +825,322 @@
     </div>
   </div>
 
-  <!-- 持仓面板 -->
+  <!-- 持仓面板 — Phase 2.1c (Owner 5/16 严训 "盈亏茫然" + Bettor r151-r152 consensus 7/7 ACK):
+       (A) P&L 公式 fix (cur × size - cost, not shares - dollar) + max@settle dim 副数
+       (B) Aggregate header (total cost / 现值 / P&L sum, client-side computed)
+       (C) Inline expandable per-card 4 模块 (保护规则 + 调仓建议 + 出清 + 历史)
+       (D) 调仓建议 hide-if-0
+       (E) Bettor modal sub-tab → 活跃持仓 scrollIntoView
+       (F) Reactor stale warning amber if > 2h since last tick -->
   <template x-if="showPositions">
-    <div class="card mb-5">
-      <div class="text-sm font-medium text-ink-700 mb-3">我的持仓</div>
-      <div x-show="!positions.length" class="text-xs text-ink-400 py-4 text-center">暂无持仓</div>
-      <template x-for="pos in positions" :key="pos.asset">
-        <div class="py-2 border-b border-warm-100 last:border-0 text-xs">
-          <div class="flex items-center gap-2">
-            <span class="font-medium text-ink-700 flex-1" x-text="pos.question || pos.title || pos.market?.slice(0,20) + '...'"></span>
-            <span class="px-1.5 py-0.5 rounded text-[10px] font-medium" :class="pos.outcome === 'Yes' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'" x-text="pos.outcome"></span>
-            <span class="font-bold" x-text="pos.size + ' 份'"></span>
-            <span class="text-ink-400" x-text="'@ $' + (pos.avgPrice || 0).toFixed(3)"></span>
-            <span x-show="pos.closed" class="px-1.5 py-0.5 rounded bg-warm-200 text-ink-500 text-[10px]">待结算</span>
+    <div class="card mb-5 active-positions-section">
+      <div class="flex items-center justify-between mb-3">
+        <div class="text-sm font-medium text-ink-700">活跃持仓
+          <span x-show="positions && positions.length" class="text-xs text-ink-400 font-normal" x-text="'(' + positions.length + ' 笔)'"></span>
+        </div>
+      </div>
+      <!-- (F) Reactor stale warning (Bettor r152 §2) -->
+      <div x-show="reactorStaleHours > 2" class="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded mb-2">
+        ⚠ 调仓 reactor 上次 tick <span x-text="reactorStaleHours?.toFixed(1)"></span> 小时前 — 可能 cron 失效, 调仓建议不更新 (r153 backlog dig 真因)
+      </div>
+      <!-- (B) Aggregate header (client-side computed) -->
+      <template x-if="positions && positions.length">
+        <div class="bg-warm-50 rounded p-2 mb-3 text-xs">
+          <div class="flex items-center gap-4 flex-wrap">
+            <span class="text-ink-500">总成本 <span class="font-bold text-ink-700" x-text="'$' + portfolioAggregate.totalCost.toFixed(2)"></span></span>
+            <span class="text-ink-500">现值 <span class="font-bold text-ink-700" x-text="'$' + portfolioAggregate.currentValue.toFixed(2)"></span></span>
+            <span class="font-bold" :class="portfolioAggregate.pnl >= 0 ? 'text-green-600' : 'text-red-500'"
+                  x-text="'P&L ' + (portfolioAggregate.pnl >= 0 ? '+$' : '-$') + Math.abs(portfolioAggregate.pnl).toFixed(2) + ' (' + (portfolioAggregate.pnlPct >= 0 ? '+' : '') + (portfolioAggregate.pnlPct * 100).toFixed(1) + '%)'"></span>
+            <span class="text-ink-300 text-[10px]">max @ settle <span x-text="(portfolioAggregate.maxAtSettle >= 0 ? '+$' : '-$') + Math.abs(portfolioAggregate.maxAtSettle).toFixed(2)"></span></span>
           </div>
-          <div class="text-[10px] text-ink-400 mt-0.5" x-show="pos.totalCost > 0" x-text="'投入 $' + pos.totalCost.toFixed(2) + ' · 预期价值 $' + (pos.size * 1).toFixed(2) + ' (如胜)'"></div>
         </div>
       </template>
-      <!-- 活跃订单 -->
-      <div class="mt-3">
-        <div class="text-xs font-medium text-ink-500 mb-2">活跃订单</div>
-        <div x-show="!orders.length" class="text-xs text-ink-300 text-center py-2">无活跃订单</div>
+      <div x-show="!positions.length" class="text-xs text-ink-400 py-4 text-center">暂无活跃持仓</div>
+      <template x-for="pos in positions" :key="pos.asset">
+        <div class="py-3 border-b border-warm-100 last:border-0 text-xs">
+          <!-- Header row clickable to expand (C) -->
+          <div class="flex items-center gap-2 cursor-pointer hover:bg-warm-50 -mx-2 px-2 rounded" @click="pos._expanded = !pos._expanded">
+            <span class="text-ink-400 text-[10px] w-3" x-text="pos._expanded ? '▼' : '▶'"></span>
+            <a :href="'https://polymarket.com/event/' + pos.market" target="_blank" rel="noopener" @click.stop
+              class="font-medium text-brand-600 hover:text-brand-800 flex-1" x-text="pos.question || pos.market?.slice(0,20) + '...'"></a>
+            <span class="px-1.5 py-0.5 rounded text-[10px] font-medium" :class="pos.outcome === 'Yes' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'" x-text="pos.outcome"></span>
+            <span class="font-bold" x-text="pos.size + ' shares'"></span>
+            <span class="text-ink-400" x-text="'@ $' + (pos.avgPrice || 0).toFixed(3)"></span>
+          </div>
+          <!-- Row 2: cost, P&L (FIXED FORMULA), max@settle dim, end date -->
+          <div class="flex items-center gap-4 mt-1.5 flex-wrap">
+            <span class="text-[10px] text-ink-500">Cost <span class="font-medium" x-text="'$' + (pos.totalCost || 0).toFixed(2)"></span></span>
+            <!-- Phase 2.1c (A) FIX: P&L = (size × curPrice) - totalCost. Previous bug混 shares 数 - dollar cost. -->
+            <span class="text-[10px] font-bold"
+              :class="((pos.size * (pos.curPrice || pos.avgPrice)) - pos.totalCost) >= 0 ? 'text-green-600' : 'text-red-500'"
+              x-text="'P&L ' + (((pos.size * (pos.curPrice || pos.avgPrice)) - pos.totalCost) >= 0 ? '+$' : '-$') + Math.abs((pos.size * (pos.curPrice || pos.avgPrice)) - pos.totalCost).toFixed(2) + ' (' + (pos.totalCost > 0 ? (((pos.size * (pos.curPrice || pos.avgPrice)) - pos.totalCost) / pos.totalCost * 100).toFixed(1) : '0') + '%)'"></span>
+            <span class="text-[10px] text-ink-300" :title="'赢极限 if YES settles to $1'" x-text="'max@settle ' + ((pos.size - pos.totalCost) >= 0 ? '+$' : '-$') + Math.abs(pos.size - pos.totalCost).toFixed(2)"></span>
+            <span class="text-[10px] text-ink-400" x-show="pos.endDate" x-text="'Ends ' + KANet.relativeTime(pos.endDate)"></span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded"
+              :class="pos.status === 'expired_pending' ? 'bg-amber-50 text-amber-600' : 'bg-green-50 text-green-600'"
+              x-text="pos.status === 'expired_pending' ? 'Awaiting resolution' : 'Active'"></span>
+          </div>
+          <!-- (C) Expandable inline 4 modules: 保护规则 / 调仓建议 / 出清 / 历史 -->
+          <div x-show="pos._expanded" x-collapse class="mt-3 space-y-2">
+            <!-- 保护规则 inline -->
+            <div class="bg-warm-50 rounded p-2 text-[10px]">
+              <div class="flex items-center justify-between mb-1">
+                <span class="font-bold text-ink-600">🛡 保护规则</span>
+                <template x-if="getProtectRuleFor(pos)">
+                  <div class="flex gap-1">
+                    <button @click.stop="openProtectEditModal(getProtectRuleFor(pos))" class="px-2 py-0.5 rounded bg-ink-100 hover:bg-ink-200 text-ink-700">✏️ 改</button>
+                    <button @click.stop="ackBettorProtectRule(getProtectRuleFor(pos))" x-show="getProtectRuleFor(pos)?.status === 'pending_owner_ack'" :disabled="getProtectRuleFor(pos)?._acking" class="px-2 py-0.5 rounded bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-50">✓ ACK 启用</button>
+                    <span x-show="getProtectRuleFor(pos)?.status === 'active'" class="px-2 py-0.5 rounded bg-green-100 text-green-700 font-bold">✓ Active</span>
+                  </div>
+                </template>
+              </div>
+              <template x-if="getProtectRuleFor(pos)">
+                <div class="text-ink-500">
+                  止损 <span x-text="(getProtectRuleFor(pos).stop_loss_pct * 100).toFixed(0) + '%'"></span> after
+                  <span x-text="getProtectRuleFor(pos).cooldown_hours + 'h'"></span> ·
+                  时间 <span x-text="getProtectRuleFor(pos).time_close_days + 'd'"></span> ·
+                  <span class="text-ink-300 italic" :title="'📋 reference only, 待 Phase 3 swap-suggester'">止盈 $<span x-text="getProtectRuleFor(pos).take_profit_price?.toFixed(4)"></span> (ref)</span>
+                </div>
+              </template>
+              <template x-if="!getProtectRuleFor(pos)">
+                <div class="text-ink-400">保护规则待生成 (cron 1 min 内 INSERT)</div>
+              </template>
+            </div>
+            <!-- 调仓建议 hide if 0 -->
+            <template x-if="getAdjustmentFor(pos)">
+              <div class="bg-amber-50 rounded p-2 text-[10px]">
+                <div class="flex items-center justify-between mb-1">
+                  <span class="font-bold text-amber-700">💡 调仓建议</span>
+                  <div class="flex gap-1">
+                    <button @click.stop="bettorDecideAdjustment(getAdjustmentFor(pos).id, 'approve')" class="px-2 py-0.5 rounded bg-red-500 hover:bg-red-600 text-white">✓ 确认止损 (paper)</button>
+                    <button @click.stop="bettorDecideAdjustment(getAdjustmentFor(pos).id, 'reject')" class="px-2 py-0.5 rounded bg-ink-200 hover:bg-ink-300 text-ink-700">✗ 保留</button>
+                  </div>
+                </div>
+                <div class="text-ink-600">
+                  <span x-text="getAdjustmentFor(pos).trigger_reason"></span> · 触发于
+                  <span x-text="new Date(getAdjustmentFor(pos).created_at).toLocaleString().slice(5)"></span>
+                </div>
+              </div>
+            </template>
+          </div>
+          <!-- Row 3: market ID + Polymarket link -->
+          <div class="flex items-center gap-3 mt-1">
+            <span class="text-[10px] text-ink-300 font-mono" x-text="pos.market?.slice(0,16) + '...'" @click="navigator.clipboard.writeText(pos.market)" title="Click to copy conditionId" style="cursor:pointer"></span>
+            <a :href="'https://polymarket.com/event/' + pos.market" target="_blank" rel="noopener"
+              class="text-[10px] text-brand-400 hover:text-brand-600">View on Polymarket</a>
+          </div>
+          <!-- Row 4: 出清 button (Bettor r46 (B) Step 1, 独立显眼一行) -->
+          <!-- Owner click 死路 hotfix: 移 x-show 容器 / 显式 cursor / 强制 boolean disabled / 始终渲染 + 内层条件 active 才 click -->
+          <div class="flex items-center gap-2 mt-2 pt-2 border-t-2 border-amber-300 bg-amber-50 rounded p-2">
+            <button type="button" @click.prevent.stop="sellActivePosition(pos)" :disabled="!!pos._closing"
+              style="cursor:pointer"
+              class="flex-1 px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded font-bold text-sm disabled:opacity-50 disabled:cursor-not-allowed shadow-md border-2 border-amber-700">
+              <span x-show="!pos._closing">💰 一键出清 (sell @ market · <span x-text="pos.size"></span> shares)</span>
+              <span x-show="pos._closing">出清中...</span>
+            </button>
+            <span x-show="pos._closeTx" class="text-[10px] text-green-600 whitespace-nowrap">✓ TX <a :href="'https://polygonscan.com/tx/' + pos._closeTx" target="_blank" rel="noopener" class="font-mono underline" x-text="pos._closeTx?.slice(0,10) + '...'"></a></span>
+            <span x-show="pos._closeError" class="text-[10px] text-red-500" x-text="pos._closeError"></span>
+          </div>
+        </div>
+      </template>
+      <!-- 战绩汇总卡 — 不依赖 capital, 只要 wins+losses+pending>0 就展示 (sweep 后 capital 可能负) -->
+      <template x-if="summary && ((summary.wins || 0) + (summary.losses || 0) + (summary.pending || 0) > 0)">
+        <div class="mt-4 pt-3 border-t border-warm-200">
+          <div class="text-xs font-semibold text-ink-500 uppercase tracking-wider mb-3">战绩统计</div>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+            <!-- 本金 → 当前 (capital > 0 才显示, sweep 后 fallback 用 totalStaked) -->
+            <div class="bg-gradient-to-br from-brand-50 to-brand-100 rounded-lg p-3 col-span-2" x-show="summary.capital && summary.capital > 0">
+              <div class="text-[10px] text-ink-400 uppercase tracking-wide">
+                <span x-show="!summary.capitalNote">本金 → 当前账面</span>
+                <span x-show="summary.capitalNote === 'swept'">累积投入 → 当前账面 (sweep 过)</span>
+              </div>
+              <div class="text-lg font-bold text-brand-700 mt-0.5">
+                $<span x-text="summary.capital.toFixed(2)"></span>
+                <span class="text-ink-400 mx-1">→</span>
+                $<span x-text="(summary.currentTotal || 0).toFixed(2)"></span>
+              </div>
+              <div class="text-xs mt-0.5" :class="(summary.roiTotal || 0) >= 0 ? 'text-green-600 font-semibold' : 'text-red-500 font-semibold'" x-show="summary.capital > 0">
+                翻 <span x-text="((summary.currentTotal || 0) / summary.capital).toFixed(2) + '×'"></span>
+                · ROI <span x-text="((summary.roiTotal || 0) >= 0 ? '+' : '') + ((summary.roiTotal || 0) * 100).toFixed(0) + '%'"></span>
+              </div>
+            </div>
+            <!-- 战绩 -->
+            <div class="bg-warm-50 rounded-lg p-3">
+              <div class="text-[10px] text-ink-400 uppercase tracking-wide">战绩</div>
+              <div class="text-lg font-bold text-ink-700 mt-0.5">
+                <span class="text-green-600" x-text="summary.wins"></span><span class="text-[10px] text-ink-500 mr-1.5">胜</span>
+                <span class="text-red-500" x-text="summary.losses"></span><span class="text-[10px] text-ink-500 mr-1.5">负</span>
+                <template x-if="summary.pending > 0">
+                  <span><span class="text-amber-500" x-text="summary.pending"></span><span class="text-[10px] text-ink-500">待</span></span>
+                </template>
+              </div>
+              <div class="text-xs text-ink-500 mt-0.5">
+                <template x-if="summary.winRate != null">
+                  <span>胜率 <span class="font-semibold" x-text="(summary.winRate * 100).toFixed(0) + '%'"></span></span>
+                </template>
+              </div>
+            </div>
+            <!-- 已实现 -->
+            <div class="bg-warm-50 rounded-lg p-3">
+              <div class="text-[10px] text-ink-400 uppercase tracking-wide">已实现净利</div>
+              <div class="text-lg font-bold mt-0.5" :class="summary.realizedPnl >= 0 ? 'text-green-600' : 'text-red-500'"
+                x-text="(summary.realizedPnl >= 0 ? '+$' : '−$') + Math.abs(summary.realizedPnl).toFixed(2)"></div>
+              <div class="text-xs text-ink-500 mt-0.5">
+                <template x-if="summary.roiRealized != null">
+                  <span x-text="(summary.roiRealized >= 0 ? '+' : '') + (summary.roiRealized * 100).toFixed(0) + '% on 本金'"></span>
+                </template>
+              </div>
+            </div>
+          </div>
+          <!-- 资金效率 + 明细 -->
+          <div class="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ink-500">
+            <span>累计下注 <span class="font-semibold text-ink-700" x-text="'$' + summary.totalStaked.toFixed(2)"></span></span>
+            <template x-if="summary.turnover != null">
+              <span>资金周转 <span class="font-semibold text-ink-700" x-text="summary.turnover.toFixed(1) + '×'"></span></span>
+            </template>
+            <span>USDC <span class="font-semibold text-ink-700" x-text="'$' + summary.currentUsdc.toFixed(2)"></span></span>
+            <span>持仓市值 <span class="font-semibold text-ink-700" x-text="'$' + summary.currentTokenValue.toFixed(2)"></span></span>
+            <template x-if="summary.unrealizedPnl !== 0">
+              <span :class="summary.unrealizedPnl >= 0 ? 'text-amber-600' : 'text-red-500'">
+                浮动 <span class="font-semibold" x-text="(summary.unrealizedPnl >= 0 ? '+$' : '−$') + Math.abs(summary.unrealizedPnl).toFixed(2)"></span>
+              </span>
+            </template>
+          </div>
+        </div>
+      </template>
+      <!-- 资金时间线 -->
+      <template x-if="summary && summary.timeline && summary.timeline.length > 0">
+        <div class="mt-4 pt-3 border-t border-warm-200">
+          <div class="flex items-center justify-between mb-2">
+            <div class="text-xs font-semibold text-ink-500 uppercase tracking-wider">资金时间线</div>
+            <button @click="timelineExpanded = !timelineExpanded" class="text-[10px] text-brand-500 hover:text-brand-700"
+              x-text="timelineExpanded ? '收起明细' : '展开明细'"></button>
+          </div>
+          <!-- Sparkline (USDC 余额曲线) -->
+          <div class="bg-gradient-to-b from-warm-50 to-white rounded-lg p-3 mb-2 relative">
+            <svg :viewBox="'0 0 600 90'" class="w-full h-20" preserveAspectRatio="none">
+              <!-- Area fill under line -->
+              <path :d="sparklineAreaPath()" fill="rgba(59, 130, 246, 0.08)" stroke="none"></path>
+              <!-- Line -->
+              <path :d="sparklinePath()" fill="none" stroke="rgb(59, 130, 246)" stroke-width="1.5" vector-effect="non-scaling-stroke"></path>
+              <!-- Event dot decoration removed (Bettor r134 真根因 + Owner DevTools 5/15):
+                   <template x-for> inside SVG namespace breaks Alpine init walk —
+                   <template> in SVG ≠ HTMLTemplateElement, no .content DocumentFragment.
+                   Alpine "Cannot read properties of undefined (reading 'children')" interrupted
+                   directive registration, leaving ACCEPT button :disabled / @click unbound
+                   (Bug U1 4-attempt sediment — KI-Phase-B-UI-3 — never use <template x-for>
+                   inside SVG; use imperative D3-style render or path-only visualization). -->
+            </svg>
+            <!-- Endpoints label -->
+            <div class="flex justify-between text-[10px] text-ink-400 mt-0.5 font-mono">
+              <span>起 $<span x-text="summary.capital.toFixed(2)"></span></span>
+              <span class="text-ink-500">
+                峰 $<span x-text="sparklinePeak().toFixed(2)"></span>
+              </span>
+              <span :class="summary.currentUsdc >= summary.capital ? 'text-green-600' : 'text-ink-400'">
+                现 $<span x-text="summary.currentUsdc.toFixed(2)"></span>
+              </span>
+            </div>
+          </div>
+          <!-- 事件明细 (可折叠) -->
+          <div x-show="timelineExpanded" x-transition>
+            <template x-for="(ev, idx) in summary.timeline" :key="idx">
+              <div class="flex items-center gap-2 py-1.5 border-b border-warm-50 last:border-0 text-[11px]">
+                <span class="text-ink-400 font-mono flex-shrink-0 w-20" x-text="ev.date.slice(5, 16).replace('T', ' ')"></span>
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-bold flex-shrink-0 w-12 text-center"
+                  :class="ev.action === 'WIN' ? 'bg-green-100 text-green-700' : ev.action === 'LOSE' ? 'bg-red-100 text-red-600' : ev.action === 'BUY' ? 'bg-blue-100 text-blue-700' : 'bg-warm-100 text-ink-500'"
+                  x-text="ev.action === 'WIN' ? '✓赢' : ev.action === 'LOSE' ? '✗输' : ev.action === 'BUY' ? '买入' : ev.action"></span>
+                <span class="font-semibold flex-shrink-0 w-16 text-right"
+                  :class="ev.amount > 0 ? 'text-green-600' : ev.amount < 0 ? 'text-ink-600' : 'text-ink-400'"
+                  x-text="(ev.amount >= 0 ? '+$' : '−$') + Math.abs(ev.amount).toFixed(2)"></span>
+                <span class="flex-1 text-ink-600 min-w-0 truncate" x-text="ev.marketTitle || ''"></span>
+                <span class="text-ink-400 flex-shrink-0" x-text="'bal $' + ev.runningUsdc.toFixed(2)"></span>
+              </div>
+            </template>
+          </div>
+        </div>
+      </template>
+      <!-- History (settled + redeemable) -->
+      <div x-show="settled.length > 0" class="mt-4 pt-3 border-t border-warm-200">
+          <div class="flex items-center justify-between mb-2">
+            <div class="text-xs font-semibold text-ink-500 uppercase tracking-wider">历史交易</div>
+            <!-- 一键清算全部 redeemable position (绕过单按钮 UI bug 的兜底路径) -->
+            <button x-show="settled.some(p => p.redeemable && !p._redeemed)"
+              @click="redeemAll()" :disabled="redeemingAll"
+              class="px-2 py-0.5 bg-green-600 text-white rounded text-[10px] font-medium hover:bg-green-700 disabled:opacity-50">
+              <span x-show="!redeemingAll" x-text="'一键清算 (' + settled.filter(p => p.redeemable && !p._redeemed).length + ')'"></span>
+              <span x-show="redeemingAll">清算中...</span>
+            </button>
+          </div>
+          <template x-for="pos in settled" :key="pos.asset">
+            <div class="py-3 border-b border-warm-50 last:border-0 text-xs">
+              <div class="flex items-center gap-2">
+                <!-- Verdict 徽章 (WIN/LOSE/PENDING) -->
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-bold flex-shrink-0"
+                  :class="pos.verdict === 'WIN' ? 'bg-green-100 text-green-700' : pos.verdict === 'LOSE' ? 'bg-red-100 text-red-600' : 'bg-warm-100 text-ink-500'"
+                  x-text="pos.verdict === 'WIN' ? '✓ 赢' : pos.verdict === 'LOSE' ? '✗ 输' : '⏳'"></span>
+                <!-- 单笔净利 -->
+                <span class="text-[11px] font-semibold flex-shrink-0 w-16"
+                  :class="(pos.realizedPnl || 0) >= 0 ? 'text-green-600' : 'text-red-500'"
+                  x-text="pos.realizedPnl != null ? ((pos.realizedPnl >= 0 ? '+$' : '−$') + Math.abs(pos.realizedPnl).toFixed(2)) : ''"></span>
+                <a :href="'https://polymarket.com/event/' + pos.market" target="_blank" rel="noopener"
+                  class="flex-1 text-ink-600 hover:text-brand-600 min-w-0 truncate" x-text="pos.question || pos.market?.slice(0,20) + '...'"></a>
+                <span class="px-1.5 py-0.5 rounded text-[10px] flex-shrink-0" :class="pos.outcome === 'Yes' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-500'" x-text="pos.outcome"></span>
+                <span class="text-[10px] text-ink-400 flex-shrink-0" x-text="pos.size + '×$' + (pos.avgPrice || 0).toFixed(3)"></span>
+              </div>
+              <div class="flex items-center gap-2 mt-1.5 text-[10px] text-ink-400">
+                <span>成本 $<span x-text="(pos.totalCost || 0).toFixed(2)"></span></span>
+                <template x-if="pos.actualReceived != null && pos.actualReceived > 0">
+                  <span>回款 $<span x-text="pos.actualReceived.toFixed(2)"></span></span>
+                </template>
+                <template x-if="pos.winner">
+                  <span>裁决 <span class="font-mono" x-text="pos.winner"></span></span>
+                </template>
+                <!-- Redeemable: show Redeem button -->
+                <button x-show="pos.redeemable && !pos._redeemed" @click="redeemPosition(pos)" :disabled="pos._redeeming"
+                  class="px-3 py-1 bg-green-500 text-white rounded text-[10px] font-medium hover:bg-green-600 disabled:opacity-50 transition-colors ml-auto">
+                  <span x-show="!pos._redeeming">Redeem</span>
+                  <span x-show="pos._redeeming">Redeeming...</span>
+                </button>
+                <!-- Already redeemed (from API check or just-redeemed) -->
+                <span x-show="pos.redeemed || pos._redeemed" class="text-green-600 font-medium px-2 py-0.5 bg-green-50 rounded">Already Redeemed</span>
+                <!-- TX link after successful redeem -->
+                <a x-show="pos._redeemTx" :href="'https://polygonscan.com/tx/' + pos._redeemTx" target="_blank" rel="noopener"
+                  class="text-brand-500 hover:text-brand-700 font-mono" x-text="pos._redeemTx ? 'TX ' + pos._redeemTx.slice(0,12) + '...' : ''"></a>
+                <span x-show="pos._redeemError" class="text-red-500" x-text="pos._redeemError"></span>
+              </div>
+            </div>
+          </template>
+      </div>
+      <!-- 活跃订单 (LIVE limit orders 未成交) — Owner 5/17 04:44 钦定 UI 显示让 user 手动操作 -->
+      <div class="mt-3 pt-3 border-t border-warm-200">
+        <div class="text-sm font-semibold text-ink-700 mb-2">📋 挂单 (未成交)
+          <span x-show="orders && orders.length" class="text-xs text-ink-400 font-normal" x-text="'(' + orders.length + ')'"></span>
+        </div>
+        <div x-show="!orders.length" class="text-xs text-ink-400 text-center py-2">无挂单</div>
         <template x-for="ord in orders" :key="ord.id">
-          <div class="flex items-center gap-2 py-1.5 border-b border-warm-50 last:border-0 text-xs">
-            <span class="badge text-[8px]" :class="ord.side==='BUY'?'badge-success':'badge-error'" x-text="ord.side"></span>
-            <span class="text-ink-600" x-text="'$' + (ord.price || 0)"></span>
-            <span class="text-ink-400" x-text="ord.original_size + ' 份'"></span>
-            <button @click="cancelOrd(ord.id)" class="ml-auto text-red-400 hover:text-red-600 text-[10px]">撤单</button>
+          <div class="py-2 border-b border-warm-100 last:border-0 text-xs">
+            <div class="flex items-center gap-2 mb-1">
+              <a :href="'https://polymarket.com/event/' + (ord.slug || ord.market || '')" target="_blank" rel="noopener"
+                 class="flex-1 font-medium text-ink-700 hover:text-brand-600 truncate"
+                 :title="ord.question || ord.market"
+                 x-text="ord.question || ('condition ' + (ord.market?.slice(0,12) + '...'))"></a>
+              <span class="px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap" :class="ord.side==='BUY'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'" x-text="ord.side + ' ' + (ord.outcome || '')"></span>
+            </div>
+            <div class="flex items-center gap-3 text-[11px] text-ink-500">
+              <span>挂价 <span class="font-bold text-ink-700" x-text="'$' + (ord.price || 0)"></span></span>
+              <template x-if="ord.current_price != null">
+                <span :class="ord.current_price > parseFloat(ord.price) ? 'text-red-500' : 'text-green-600'"
+                      :title="ord.current_price > parseFloat(ord.price) ? '挂价低于市场, 不会 fill — 改高重挂' : '挂价 ≥ 市场, 应即时 fill'"
+                      x-text="'现价 $' + ord.current_price.toFixed(4) + (ord.current_price > parseFloat(ord.price) ? ' ⚠ 低于市场' : ' ✓')"></span>
+              </template>
+              <span class="text-ink-400" x-text="ord.original_size + ' 份'"></span>
+              <span class="text-ink-400" x-text="'fill ' + (Number(ord.size_matched || 0)).toFixed(0) + '/' + ord.original_size"></span>
+              <template x-if="ord.endDate">
+                <span class="text-ink-400" x-text="'到期 ' + new Date(ord.endDate).toLocaleDateString()"></span>
+              </template>
+              <button @click="cancelOrd(ord.id)" class="ml-auto px-2 py-1 rounded bg-red-50 text-red-600 hover:bg-red-100 text-[10px] font-medium">✗ 撤单</button>
+            </div>
           </div>
         </template>
       </div>
@@ -177,6 +1184,7 @@
 
         <!-- 交易数据 -->
         <div class="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-[11px] text-ink-400">
+          <template x-if="m.volume > 0"><span class="font-medium text-ink-500" x-text="'总量: $' + formatVol(m.volume)"></span></template>
           <template x-if="m.volume24h > 0"><span x-text="'24h: $' + formatVol(m.volume24h)"></span></template>
           <template x-if="m.liquidity > 0"><span x-text="'流动性: $' + formatVol(m.liquidity)"></span></template>
           <template x-if="m.spread != null"><span x-text="'价差: ' + (m.spread * 100).toFixed(1) + '%'"></span></template>
@@ -279,28 +1287,32 @@
                     <span x-text="'成本: $' + (tradeForm.price * tradeForm.size).toFixed(2)"></span>
                     <span class="ml-2" x-text="'潜在盈利: $' + ((1 - tradeForm.price) * tradeForm.size).toFixed(2)"></span>
                   </div>
-                  <button @click="submitOrder(m)" :disabled="ordering || !canTrade" class="btn btn-primary w-full text-xs">
-                    <span x-text="ordering ? '提交中...' : '提交订单'"></span>
+                  <!-- Pre-flight 提示：总是说明为什么下不了/能下 -->
+                  <template x-if="checkTrade(m)">
+                    <div class="text-[10px] text-amber-700 bg-amber-50 rounded px-2 py-1.5 leading-snug" x-text="checkTrade(m).msg"></div>
+                  </template>
+                  <button @click="submitOrder(m)" :disabled="ordering || !!checkTrade(m)" class="btn btn-primary w-full text-xs">
+                    <span x-text="ordering ? '提交中...' : (checkTrade(m) ? '无法下单' : '提交订单')"></span>
                   </button>
                   <div x-show="tradeMsg" class="text-[10px]" :class="tradeMsg.includes('成功') ? 'text-green-600' : 'text-red-500'" x-text="tradeMsg"></div>
                 </div>
               </div>
-              <!-- 订单簿 -->
+              <!-- 订单簿 — Polymarket CLOB: bids 低→高，asks 高→低。top-of-book 在末尾 -->
               <div>
-                <div class="text-xs font-medium text-ink-700 mb-2">订单簿</div>
+                <div class="text-xs font-medium text-ink-700 mb-2">订单簿 (顶部最接近成交价)</div>
                 <div x-show="bookLoading" class="text-xs text-ink-300 py-4 text-center">加载中...</div>
                 <template x-if="!bookLoading && book">
                   <div class="text-[10px] space-y-1">
-                    <div class="text-ink-400 font-medium">卖出 (Asks)</div>
-                    <template x-for="ask in (book.asks || []).slice(0,5)" :key="ask.price">
+                    <div class="text-ink-400 font-medium">卖出 (Asks — 你买入需付)</div>
+                    <template x-for="ask in (book.asks || []).slice(-5)" :key="ask.price">
                       <div class="flex justify-between">
                         <span class="text-red-500" x-text="'$' + ask.price"></span>
                         <span class="text-ink-400" x-text="ask.size"></span>
                       </div>
                     </template>
                     <div class="border-t border-warm-200 my-1"></div>
-                    <div class="text-ink-400 font-medium">买入 (Bids)</div>
-                    <template x-for="bid in (book.bids || []).slice(0,5)" :key="bid.price">
+                    <div class="text-ink-400 font-medium">买入 (Bids — 你卖出可得)</div>
+                    <template x-for="bid in (book.bids || []).slice(-5).reverse()" :key="bid.price">
                       <div class="flex justify-between">
                         <span class="text-green-600" x-text="'$' + bid.price"></span>
                         <span class="text-ink-400" x-text="bid.size"></span>
@@ -360,13 +1372,26 @@ function predictionsPage() {
     pageSize: 20,
     showExpired: false,
     showGuide: !localStorage.getItem('prediction_guide_seen'),
+    // O-4 r211 PB-E Phase 2 trust-based disclaimer modal (= 1 次 ack persist)
+    _showPhase2DisclaimerModal: false,
+    _phase2DisclaimerInit() {
+      this._showPhase2DisclaimerModal = !localStorage.getItem('kanet_phase2_disclaimer_acked_v1');
+    },
+    _ackPhase2Disclaimer() {
+      localStorage.setItem('kanet_phase2_disclaimer_acked_v1', new Date().toISOString());
+      this._showPhase2DisclaimerModal = false;
+    },
     selectedAgent: '<%= it.relayNodes[0]?.id || "" %>',
     walletStatus: { hasWallet: false },
     walletMsg: '',
     approving: false,
+    migratingV2: false,
     settingUp: false,
-    showPositions: false,
+    showPositions: true,
     positions: [],
+    settled: [],
+    summary: null,
+    timelineExpanded: false,
     orders: [],
     tradeIdx: null,
     tradeForm: { outcome: 'yes', side: 'BUY', price: 0.50, size: 10 },
@@ -375,6 +1400,63 @@ function predictionsPage() {
     book: null,
     bookLoading: false,
     creatingWallet: false,
+    redeemingAll: false,
+
+    // Bettor (Phase 3a + 3d)
+    bettorRecs: null,
+    bettorScanning: false,
+    bettorModalOpen: false,
+    bettorDetail: null,
+    bettorTab: 'recs',
+    bettorRecord: null,
+    bettorResolving: false,
+    bettorHistory: null,
+    bettorWinrate: null,  // Module 4b — 胜率轨迹 timeline data {days, daily, cumulative}
+    bettorHistoryRecs: null,  // Owner 5/15 + Bettor r132 — 推荐历史 raw rec table
+    bettorHistoryFilter: 'all',
+    bettorProtectRules: null,  // Owner 5/16 + Bettor r139 — 持仓保护 rules + ack/active/triggered
+    bettorVariants: null,      // Owner 5/16 + Bettor r141 — Variant Expander 3-tier (per parent rec id keyed map)
+    bettorStrategyFilter: 'all',  // Phase 2.3 Owner 5/17 + Bettor r161-r162 — strategy filter chips (all / scavenger_main / carrion / topN_rank / election_locked / competitive)
+    reactorStaleHours: 0,      // Phase 2.1c Bettor r152 — reactor stale warning (UI banner if > 2h)
+    protectEditModal: null,    // Phase 2.1c Bettor r151 (b) — modal edit form for protect rule thresholds
+    protectEditForm: { stop_loss_pct: -0.30, cooldown_hours: 12, take_profit_price: 0.95, time_close_days: 60 },
+    bettorAdjustments: null,
+    bettorEvaluating: false,
+    closingAll: false,
+
+    // Owner 5/17 钦定 mode 1+2 — 阈值 Watcher
+    watchRules: null,
+    watcherTicking: false,
+    watchSubmitting: false,
+
+    // Owner 5/17 钦定 + Bettor r173/r178 — ★ Fossa-stable mode
+    fossaRecs: null,
+    fossaTicking: false,
+    liveNewsInjectText: '',
+    liveNewsHours: 24,
+    liveNewsActive: null,
+    liveNewsSubmitting: false,
+    stairAudits: null,  // Bettor r174 — same-entity multi-deadline conditional audit
+
+    // r177 Phase 1 sub 3 — KANet prediction trade quote book
+    predictionQuoteBook: null,
+    predictionQuoteBookV2: null,  // Phase 4a Sub 10 — SS escrow + 5-of-5 unanimous offers (Bettor r243/r244)
+    makerWhitelist: null,
+    showMakerApply: false,
+    makerApplyForm: { relay_node_id: '', stake_amount_kas: 100 },
+    makerApplySubmitting: false,
+
+    // r179 Phase 1a (Bettor r179/r180 + Owner 5/18 "按你推荐办!" ack) — sticky mode + tab routing.
+    // Additive: old bettorTab + modal still exist, content reparent 1b/1c/1d.
+    currentMode: 'all',     // fossa-stable | scavenger | variant | all
+    currentTab: 'scan',     // scan | recs | positions | history
+    compactView: false,     // Phase 2a: VERBOSE default per Owner pattern. localStorage persisted.
+    watchAdd: { show: false, relay_node_id: '', token_id: '', market_title: '', outcome: 'Yes', current_size: 0, entry_avg_price: 0, thresholds: [
+      { label: 'strong_yes', op: 'gte', price: 0.55, sell_pct: 60, action: 'sell 60% lock profit' },
+      { label: 'mild_yes',   op: 'gte', price: 0.45, sell_pct: 30, action: 'sell 30% partial' },
+      { label: 'mild_no',    op: 'lte', price: 0.25, sell_pct: 50, action: 'sell 50% cut loss' },
+      { label: 'strong_no',  op: 'lte', price: 0.18, sell_pct: 100, action: 'full exit 认输' },
+    ] },
 
     get filtered() {
       let list = this.markets;
@@ -398,6 +1480,8 @@ function predictionsPage() {
       // Sort
       if (this.sortBy === 'volume') {
         list = [...list].sort((a, b) => (b.volume24h || 0) - (a.volume24h || 0));
+      } else if (this.sortBy === 'total') {
+        list = [...list].sort((a, b) => (b.volume || 0) - (a.volume || 0));
       } else if (this.sortBy === 'ending') {
         const now = new Date().toISOString();
         list = [...list].filter(m => m.endDate && m.endDate > now)
@@ -418,23 +1502,815 @@ function predictionsPage() {
       return this.filtered.slice(start, start + this.pageSize);
     },
 
-    get canTrade() {
-      return this.walletStatus.hasWallet && this.walletStatus.hasClobKey
-        && this.tradeForm.price > 0 && this.tradeForm.price < 1 && this.tradeForm.size > 0;
+    // Sparkline helpers: USDC-balance trajectory from timeline events
+    _sparkValues() {
+      if (!this.summary || !this.summary.timeline) return [];
+      return [this.summary.capital, ...this.summary.timeline.map(t => t.runningUsdc)];
+    },
+    _sparkBounds() {
+      const values = this._sparkValues();
+      if (!values.length) return { min: 0, max: 1, range: 1 };
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      return { min, max, range: (max - min) || 1 };
+    },
+    sparklinePoints() {
+      const values = this._sparkValues();
+      if (values.length < 2) return [];
+      const { min, range } = this._sparkBounds();
+      const w = 600, h = 90, pad = 8;
+      const step = (w - pad * 2) / (values.length - 1);
+      return values.slice(1).map((v, i) => ({
+        x: (pad + (i + 1) * step).toFixed(1),
+        y: (h - pad - ((v - min) / range) * (h - pad * 2)).toFixed(1),
+        action: this.summary.timeline[i].action,
+      }));
+    },
+    sparklinePath() {
+      const values = this._sparkValues();
+      if (values.length < 2) return '';
+      const { min, range } = this._sparkBounds();
+      const w = 600, h = 90, pad = 8;
+      const step = (w - pad * 2) / (values.length - 1);
+      return values.map((v, i) => {
+        const x = pad + i * step;
+        const y = h - pad - ((v - min) / range) * (h - pad * 2);
+        return (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1);
+      }).join(' ');
+    },
+    sparklineAreaPath() {
+      const line = this.sparklinePath();
+      if (!line) return '';
+      const values = this._sparkValues();
+      const w = 600, h = 90, pad = 8;
+      const step = (w - pad * 2) / (values.length - 1);
+      const lastX = pad + (values.length - 1) * step;
+      return line + ' L' + lastX.toFixed(1) + ',' + (h - pad) + ' L' + pad + ',' + (h - pad) + ' Z';
+    },
+    sparklinePeak() {
+      const values = this._sparkValues();
+      return values.length ? Math.max(...values) : 0;
+    },
+
+    // Pre-flight check — returns null if order can submit, or {msg} explaining why not.
+    // Called from template + submitOrder. 让按钮"会说话"而不是静默灰掉。
+    checkTrade(m) {
+      if (!this.walletStatus.hasWallet) return { msg: '先创建 Polygon 钱包（顶部按钮）' };
+      if (!this.walletStatus.approved) return { msg: '先授权 USDC 给 Polymarket（顶部 "授权 USDC" 按钮）' };
+      if (!this.walletStatus.v2Migrated) return { msg: 'Polymarket 4/28 升级到 V2，先迁移到 pUSD（顶部 "迁移到 V2" 按钮）' };
+      if (!this.walletStatus.hasClobKey) return { msg: '先设置 CLOB API Key（顶部 "设置 API Key" 按钮）' };
+      const price = Number(this.tradeForm.price);
+      const size = Number(this.tradeForm.size);
+      if (!(price > 0 && price < 1)) return { msg: '价格必须在 $0.01–$0.99 之间，按 0.01 为最小刻度' };
+      if (!(size > 0)) return { msg: '数量必须 > 0' };
+      const cost = price * size;
+      if (cost < 5) {
+        const minSize = Math.ceil(5 / price);
+        return { msg: `Polymarket 最小订单 $5（当前 $${cost.toFixed(2)}）。数量至少填 ${minSize}` };
+      }
+      if (this.tradeForm.side === 'BUY') {
+        // V2: 抵押是 pUSD（USDC 1:1 wrap）。挂单期间 pUSD 不会从 token balance 扣（V2
+        // 用 allowance 锁定模型），但要确保 balance ≥ 已挂单总额 + 当前下单。
+        const bal = this.walletStatus.pusd || 0;
+        if (cost > bal) {
+          const maxSize = Math.floor(bal / price * 100) / 100;
+          const wrapBtn = this.walletStatus.v2Migrated ? '"包装为 pUSD"' : '"迁移到 V2"';
+          return { msg: `pUSD 不够（需 $${cost.toFixed(2)}，余 $${bal.toFixed(2)}）。当前价最多买 ${maxSize} 份。USDC 还有 $${(this.walletStatus.usdc||0).toFixed(2)}，可点 ${wrapBtn} 把 USDC 包装成 pUSD。` };
+        }
+      } else {
+        // SELL: 必须已持有该 outcome token（CLOB 不支持裸空）
+        const tokenId = this.tradeForm.outcome === 'yes'
+          ? (m?.clobTokenIds?.[0])
+          : (m?.clobTokenIds?.[1]);
+        if (!tokenId) return { msg: '无法解析 Token ID（市场数据缺失）' };
+        const held = (this.positions || []).find(p => String(p.asset) === String(tokenId));
+        const heldSize = held?.size || 0;
+        if (heldSize < size) {
+          const outOther = this.tradeForm.outcome === 'yes' ? 'No' : 'Yes';
+          const mirrorPrice = (1 - price).toFixed(2);
+          return { msg: `你持有 ${heldSize} 份 ${this.tradeForm.outcome.toUpperCase()}，不够卖 ${size}。Polymarket 不支持裸空，想押反方向请改「${outOther} + 买入 @ $${mirrorPrice}」（经济等价）` };
+        }
+      }
+      return null;
+    },
+
+    setCurrentTab(t) {
+      this.currentTab = t;
+      try { history.replaceState(null, '', '#' + t); } catch {}
     },
 
     async init() {
-      // 先查哪个 Agent 有 Polygon 钱包，优先选它
-      for (const opt of document.querySelectorAll('select[x-model="selectedAgent"] option')) {
+      // r179 Phase 1a — URL hash routing init for new currentTab
+      try {
+        const h = (location.hash || '').replace('#', '');
+        if (['scan','recs','positions','history'].includes(h)) this.currentTab = h;
+      } catch {}
+      window.addEventListener('hashchange', () => {
+        const h = (location.hash || '').replace('#', '');
+        if (['scan','recs','positions','history'].includes(h)) this.currentTab = h;
+      });
+      // Phase 2a — compactView persisted via localStorage
+      try {
+        const stored = localStorage.getItem('predictions_compactView');
+        if (stored === '1') this.compactView = true;
+      } catch {}
+      // Phase 4c — bettorTab ↔ currentTab dual-direction sync defensive
+      // When user clicks new top tab, sync modal sub-tab so reopening modal lands on consistent view.
+      // When modal sub-tab clicked, sync top tab so URL hash reflects the actual content.
+      const TAB_TO_BETTOR = { recs: 'recs', history: 'history', positions: 'protect', scan: 'fossa' };
+      const BETTOR_TO_TAB = { recs: 'recs', record: 'history', history: 'history', winrate: 'history', 'history-recs': 'history', adjust: 'positions', protect: 'positions', watcher: 'positions', fossa: 'scan' };
+      this.$watch('currentTab', (v) => { const t = TAB_TO_BETTOR[v]; if (t && this.bettorTab !== t) this.bettorTab = t; });
+      this.$watch('bettorTab', (v) => { const t = BETTOR_TO_TAB[v]; if (t && this.currentTab !== t) this.currentTab = t; });
+
+      // 优先级: 有 redeemable position 的 agent > 只有钱包的 agent
+      // (避免选错 agent 后钱卡在另一个账户里看不到)
+      const opts = Array.from(document.querySelectorAll('select[x-model="selectedAgent"] option'));
+      let redeemableAgent = null;
+      let walletAgent = null;
+      for (const opt of opts) {
         try {
-          const res = await fetch('/api/predictions/wallet?relay_node_id=' + opt.value);
-          const data = await res.json();
-          if (data.hasWallet) { this.selectedAgent = opt.value; break; }
-        } catch {}
+          const wRes = await fetch('/api/predictions/wallet?relay_node_id=' + opt.value);
+          const wData = await wRes.json();
+          if (!wData.hasWallet) continue;
+          if (!walletAgent) walletAgent = opt.value;
+          const pRes = await fetch('/api/predictions/positions?relay_node_id=' + opt.value);
+          const pData = await pRes.json();
+          const hasRedeemable = (pData.settled || []).some(p => p.redeemable && !p._redeemed);
+          if (hasRedeemable) { redeemableAgent = opt.value; break; }
+        } catch (e) { console.warn('[init] probe failed for', opt.value, e.message); }
       }
-      await Promise.all([this.loadMarkets(), this.loadWalletStatus()]);
-      // 有 CLOB key 时加载持仓
-      if (this.walletStatus.hasClobKey) this.loadPositions();
+      this.selectedAgent = redeemableAgent || walletAgent || this.selectedAgent;
+      console.log('[init] selectedAgent =', this.selectedAgent, redeemableAgent ? '(has redeemable)' : '(wallet only)');
+      await Promise.all([this.loadMarkets(), this.loadWalletStatus(), this.loadBettor()]);
+      if (this.walletStatus.hasClobKey) this.loadPositionsAll();
+    },
+
+    // ── Bettor (Phase 3a) — per-agent scan via selectedAgent's adapter ──────
+    async loadBettor() {
+      try {
+        const url = '/api/bettor/recommendations?limit=10' + (this.selectedAgent ? '&relay_node_id=' + this.selectedAgent : '');
+        const r = await fetch(url);
+        this.bettorRecs = await r.json();
+        // Bug U1 Layer 2 defensive (J1 #208 Hypothesis 9 originally proposed + Bettor r135 越界 ship
+        // 83071f9ca confirms via Owner Ctrl+Shift+R 仍 🚫 post Layer 1 SVG circles 删):
+        // Alpine x-for :key="r.id" 可能复用 stale _accepting=true proxy state across loadBettor refreshes
+        // (same rec id between scans → DOM/proxy preserved → stale field stays).
+        // Explicit reset cleans 🚫 cursor stuck after prior failed/hung accept attempts.
+        (this.bettorRecs?.recommendations || []).forEach(rec => {
+          rec._accepting = false;
+          rec._acceptError = null;
+          rec._acceptSuccess = null;
+        });
+      } catch (e) {
+        console.warn('[bettor] load failed:', e.message);
+        this.bettorRecs = { recommendations: [] };
+      }
+      // Always load bettorHistory so close-all button visibility computes (any tab open)
+      this.loadBettorHistory().catch(() => {});
+      // Owner 5/16 + Bettor r141 — load variant 3-tier expander per rec (group by parent_rec_id)
+      this.loadBettorVariants().catch(() => {});
+    },
+
+    // Phase 2.1c — Bettor r151 §3.B aggregate header (client-side computed)
+    get portfolioAggregate() {
+      const totalCost = (this.positions || []).reduce((s, p) => s + (p.totalCost || 0), 0);
+      const currentValue = (this.positions || []).reduce((s, p) => s + (p.size || 0) * (p.curPrice || p.avgPrice || 0), 0);
+      const pnl = currentValue - totalCost;
+      const pnlPct = totalCost > 0 ? pnl / totalCost : 0;
+      const maxAtSettle = (this.positions || []).reduce((s, p) => s + ((p.size || 0) - (p.totalCost || 0)), 0);
+      return { totalCost, currentValue, pnl, pnlPct, maxAtSettle };
+    },
+
+    // Phase 2.1c — Bettor r151 §3.C: join protect rule by token_id == position.asset
+    getProtectRuleFor(pos) {
+      if (!this.bettorProtectRules?.rules) return null;
+      return this.bettorProtectRules.rules.find(r => r.token_id === pos.asset && (r.status === 'pending_owner_ack' || r.status === 'active'));
+    },
+    // Phase 2.1c — Bettor r151 §3.D: join adjustment by condition_id; hide if none
+    getAdjustmentFor(pos) {
+      if (!this.bettorAdjustments?.adjustments) return null;
+      return this.bettorAdjustments.adjustments.find(a => a.condition_id === pos.market || a.market === pos.market);
+    },
+    // Phase 2.1c — Bettor r151 §3.C: modal edit form for protect rule thresholds
+    openProtectEditModal(rule) {
+      if (!rule) return;
+      this.protectEditModal = rule;
+      this.protectEditForm = {
+        stop_loss_pct: rule.stop_loss_pct ?? -0.30,
+        cooldown_hours: rule.cooldown_hours ?? 12,
+        take_profit_price: rule.take_profit_price ?? 0.95,
+        time_close_days: rule.time_close_days ?? 60,
+      };
+    },
+    closeProtectEditModal() { this.protectEditModal = null; },
+    async saveProtectEditModal() {
+      if (!this.protectEditModal) return;
+      try {
+        await fetch('/api/bettor/position-protect/rules/' + this.protectEditModal.id, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.protectEditForm),
+        });
+        await this.loadBettorProtectRules();
+        this.closeProtectEditModal();
+      } catch (e) {
+        console.warn('[bettor] save protect edit failed:', e.message);
+      }
+    },
+    // Phase 2.1c — Bettor r152 §2: reactor stale watcher (warning amber if > 2h)
+    async loadReactorStale() {
+      try {
+        const r = await fetch('/api/bettor/reactor/last-tick');
+        const j = await r.json();
+        if (j.last_tick) {
+          const ms = Date.now() - new Date(j.last_tick).getTime();
+          this.reactorStaleHours = ms / 3600000;
+        } else this.reactorStaleHours = 0;
+      } catch { this.reactorStaleHours = 0; }
+    },
+
+    // Phase 2.3 r161-r162 — client-side classifyStrategy fallback for existing recs (strategy column NULL pre-v116)
+    // Mirrors server bettor-scavenger.js classifyStrategy(). KISS V1.
+    classifyStrategyClient(rec) {
+      const q = (rec.question || '').toLowerCase();
+      const yesPrice = Number(rec.yes_price || 0);
+      const noPrice = 1 - yesPrice;
+      const decision = (rec.decision || '').toUpperCase();
+      const endDate = rec.end_date;
+      const daysToSettle = endDate ? (new Date(endDate).getTime() - Date.now()) / 86400000 : 999;
+      if (daysToSettle <= 7 && decision === 'NO' && noPrice >= 0.80) return 'scavenger_carrion';
+      if (/(election|primary|governor|president|senate|congress)/.test(q) && (yesPrice > 0.90 || yesPrice < 0.10)) return 'scavenger_election_locked';
+      if (/top[\s-]*\d+/.test(q)) return 'scavenger_topN_rank';
+      if (/(win the|champion|winner|mvp|trophy)/.test(q) && yesPrice >= 0.20 && yesPrice <= 0.80) return 'scavenger_competitive';
+      return 'scavenger_main';
+    },
+
+    async loadBettorVariants() {
+      try {
+        const url = '/api/bettor/variant-recommendations' + (this.selectedAgent ? '?relay_node_id=' + this.selectedAgent : '');
+        const r = await fetch(url);
+        const data = await r.json();
+        const byParent = {};
+        // R-ALPINE-UI-2 defensive: reset client-side ephemeral _accepting per Alpine x-for stale proxy
+        for (const v of data.variants || []) {
+          v._accepting = false;
+          v._acceptError = null;
+          if (!byParent[v.parent_rec_id]) byParent[v.parent_rec_id] = [];
+          byParent[v.parent_rec_id].push(v);
+        }
+        this.bettorVariants = byParent;
+      } catch (e) {
+        console.warn('[bettor] variants load failed:', e.message);
+        this.bettorVariants = {};
+      }
+    },
+
+    async acceptBettorVariant(variant) {
+      // Phase 2 r146 — accept variant: POST /variant-recommendation/:id/accept → INSERT new rec + sibling supersede,
+      // then trigger /recommendation/:new_id/accept for Polymarket order fire (confirm dialog appears).
+      console.log('[acceptBettorVariant] variant=', variant?.id?.slice(0,8), 'tier=', variant?.strategy_tier);
+      const sizeUsd = 200;  // default size, Phase 2.1 may allow Owner UI override
+      const confirmed = confirm(`接受变种 ${variant.strategy_tier} ${variant.side}?\n${variant.market_slug?.slice(0, 80)}\nyes ${(variant.current_price * 100).toFixed(1)}% / EV ${((variant.ev_per_dollar || 0) * 100).toFixed(1)}% / $${sizeUsd}\n\n点 OK 创建 rec, 再 ACCEPT 触发 Polymarket order`);
+      if (!confirmed) return;
+      variant._accepting = true; variant._acceptError = null;
+      try {
+        const res = await fetch('/api/bettor/variant-recommendation/' + variant.id + '/accept', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          variant.status = 'accepted';
+          await this.loadBettorVariants();
+          await this.loadBettor();  // refresh primary rec list (new variant_accept rec INSERT)
+          alert(`变种 promoted to recommendation:\nnew_rec_id=${data.new_rec_id?.slice(0,8)}\n现刷新推荐列表, 在新 rec 上点 ACCEPT 触发 Polymarket 下单`);
+        } else {
+          variant._acceptError = data.error || 'unknown error';
+        }
+      } catch (e) {
+        variant._acceptError = e.message;
+      } finally {
+        variant._accepting = false;
+      }
+    },
+
+    async bettorScan() {
+      if (this.bettorScanning) return;
+      this.bettorScanning = true;
+      try {
+        const r = await fetch('/api/bettor/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ trigger_type: 'manual', relay_node_id: this.selectedAgent }),
+        });
+        const j = await r.json();
+        if (!j.ok) console.log('[bettor] scan trigger response:', j.reason);
+        for (let i = 0; i < 240; i++) {
+          await new Promise(res => setTimeout(res, 5000));
+          const sRes = await fetch('/api/bettor/scan/status');
+          const sJ = await sRes.json();
+          if (!sJ.running) break;
+        }
+        await this.loadBettor();
+      } catch (e) {
+        console.error('[bettor] scan failed:', e.message);
+      } finally {
+        this.bettorScanning = false;
+      }
+    },
+
+    async loadBettorRecord() {
+      try {
+        const url = '/api/bettor/track-record' + (this.selectedAgent ? '?relay_node_id=' + this.selectedAgent : '');
+        const r = await fetch(url);
+        this.bettorRecord = await r.json();
+      } catch (e) {
+        console.warn('[bettor] track-record load failed:', e.message);
+        this.bettorRecord = { stats: {}, recent: [] };
+      }
+    },
+
+    async loadBettorHistory() {
+      try {
+        const url = '/api/bettor/history?limit=200' + (this.selectedAgent ? '&relay_node_id=' + this.selectedAgent : '');
+        const r = await fetch(url);
+        this.bettorHistory = await r.json();
+      } catch (e) {
+        console.warn('[bettor] history load failed:', e.message);
+        this.bettorHistory = { total: 0, batches: [], positions: [] };
+      }
+    },
+
+    async loadBettorWinrate() {
+      // Module 4b (Owner 5/15 推荐历史 + 胜率时间轨迹). Fetches daily + cumulative timeline.
+      try {
+        const days = 30;
+        const url = '/api/bettor/hit-rate-timeline?days=' + days + (this.selectedAgent ? '&relay_node_id=' + this.selectedAgent : '');
+        const r = await fetch(url);
+        this.bettorWinrate = await r.json();
+      } catch (e) {
+        console.warn('[bettor] winrate load failed:', e.message);
+        this.bettorWinrate = { ok: false, days: 30, daily: [], cumulative: [] };
+      }
+    },
+
+    async loadBettorHistoryRecs() {
+      // Owner 5/15 严训 "推荐 history 没保存" + Bettor r132: data IS saved (173 rows on
+      // Bettor host, similar J1), Owner saw 战绩 tab showing 0 outcome_log rows (legitimate
+      // 24-48h oracle delay) and assumed not saved. UI tab to browse raw rec table fills gap.
+      try {
+        const days = 30;
+        const limit = 500;
+        const url = '/api/bettor/recommendations/history?days=' + days + '&limit=' + limit + (this.selectedAgent ? '&relay_node_id=' + this.selectedAgent : '');
+        const r = await fetch(url);
+        this.bettorHistoryRecs = await r.json();
+      } catch (e) {
+        console.warn('[bettor] history recs load failed:', e.message);
+        this.bettorHistoryRecs = { ok: false, days: 30, count: 0, recommendations: [] };
+      }
+    },
+
+    async loadBettorProtectRules() {
+      // Owner 5/16 钦定 + Bettor r139 — 持仓保护 rules. Returns 3 status groups
+      // (pending_owner_ack / active / triggered_*). UI filters in template.
+      try {
+        const url = '/api/bettor/position-protect/rules' + (this.selectedAgent ? '?relay_node_id=' + this.selectedAgent : '');
+        const r = await fetch(url);
+        const data = await r.json();
+        // Reset client-side ephemeral _acking / _ackError state per Alpine x-for :key
+        // stale proxy KI-Phase-B-UI-4 (Bug U1 Layer 2).
+        (data?.rules || []).forEach(rec => { rec._acking = false; rec._ackError = null; });
+        this.bettorProtectRules = data;
+      } catch (e) {
+        console.warn('[bettor] protect rules load failed:', e.message);
+        this.bettorProtectRules = { ok: false, count: 0, rules: [] };
+      }
+    },
+
+    async ackBettorProtectRule(rule) {
+      // Owner ACK rule → status='active' + 派 HMAC token (Phase 3 daemon firing 用 token verify).
+      console.log('[ackBettorProtectRule] called rule=', rule?.id?.slice(0,8), 'status=', rule?.status);
+      const confirmed = confirm(`启用持仓保护 ${rule.market_slug} ${rule.side}?\n止损 ${(rule.stop_loss_pct * 100).toFixed(0)}% / 止盈 $${rule.take_profit_price?.toFixed(4)} / 时间 ${rule.time_close_days}d`);
+      if (!confirmed) return;
+      rule._acking = true; rule._ackError = null;
+      try {
+        const res = await fetch('/api/bettor/position-protect/rules/' + rule.id + '/ack', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          rule.status = 'active';
+          await this.loadBettorProtectRules();
+        } else {
+          rule._ackError = data.error || 'unknown error';
+        }
+      } catch (e) {
+        rule._ackError = e.message;
+      } finally {
+        rule._acking = false;
+      }
+    },
+
+    async loadWatchRules() {
+      try {
+        const url = '/api/predictions/watch-rules' + (this.selectedAgent ? '?relay_node_id=' + this.selectedAgent : '');
+        const r = await fetch(url);
+        const data = await r.json();
+        this.watchRules = (data?.rules || []).map(rec => ({ ...rec, thresholds: rec.thresholds || [] }));
+        // default form's relay to currently selected agent (Owner 不用每次选)
+        if (!this.watchAdd.relay_node_id && this.selectedAgent) this.watchAdd.relay_node_id = this.selectedAgent;
+      } catch (e) {
+        console.warn('[watcher] load rules fail:', e.message);
+        this.watchRules = [];
+      }
+    },
+
+    async watcherTickNow() {
+      this.watcherTicking = true;
+      try {
+        await fetch('/api/predictions/watch-rules/tick', { method: 'POST' });
+        await this.loadWatchRules();
+      } catch (e) {
+        alert('tick fail: ' + e.message);
+      } finally {
+        this.watcherTicking = false;
+      }
+    },
+
+    async watchSubmit() {
+      const f = this.watchAdd;
+      if (!f.relay_node_id || !f.token_id || !f.market_title || !f.current_size || !f.entry_avg_price) {
+        alert('relay_node_id / token_id / market_title / current_size / entry_avg_price 必填');
+        return;
+      }
+      if (!Array.isArray(f.thresholds) || f.thresholds.length === 0) {
+        alert('至少一个阈值');
+        return;
+      }
+      this.watchSubmitting = true;
+      try {
+        const res = await fetch('/api/predictions/watch-rules', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            relay_node_id: f.relay_node_id, token_id: f.token_id, market_title: f.market_title,
+            outcome: f.outcome, current_size: f.current_size, entry_avg_price: f.entry_avg_price,
+            thresholds: f.thresholds,
+          }),
+        });
+        const data = await res.json();
+        if (!data.ok) { alert('保存失败: ' + (data.error || 'unknown')); return; }
+        this.watchAdd.show = false;
+        await this.loadWatchRules();
+      } catch (e) {
+        alert('保存 fail: ' + e.message);
+      } finally {
+        this.watchSubmitting = false;
+      }
+    },
+
+    async watchToggleStatus(rule) {
+      const newStatus = rule.status === 'active' ? 'paused' : 'active';
+      try {
+        await fetch('/api/predictions/watch-rules/' + rule.id, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: newStatus }),
+        });
+        await this.loadWatchRules();
+      } catch (e) { console.warn('[watcher] toggle fail:', e.message); }
+    },
+
+    async watchDelete(id) {
+      if (!confirm('删除该 watcher rule?')) return;
+      try {
+        await fetch('/api/predictions/watch-rules/' + id, { method: 'DELETE' });
+        await this.loadWatchRules();
+      } catch (e) { console.warn('[watcher] delete fail:', e.message); }
+    },
+
+    // ── Fossa-Stable mode (Owner 5/17 + Bettor r173/r178) ──
+    async loadFossaStable() {
+      try {
+        const url = '/api/bettor/recommendations/history?days=7&limit=200' + (this.selectedAgent ? '&relay_node_id=' + this.selectedAgent : '');
+        const [recsRes, newsRes, stairRes] = await Promise.all([
+          fetch(url).then(r => r.json()).catch(() => ({})),
+          fetch('/api/bettor/live-news-inject').then(r => r.json()).catch(() => ({})),
+          fetch('/api/bettor/stair-step-audit').then(r => r.json()).catch(() => ({})),
+        ]);
+        const allRecs = recsRes?.recommendations || [];
+        const fossa = allRecs.filter(r => r.strategy === 'fossa-stable');
+        fossa.forEach(r => { r._acking = false; r._ackError = null; });
+        this.fossaRecs = fossa;
+        this.liveNewsActive = newsRes?.injects || [];
+        this.stairAudits = stairRes?.audits || [];
+      } catch (e) {
+        console.warn('[fossa] load fail:', e.message);
+        this.fossaRecs = [];
+        this.liveNewsActive = [];
+        this.stairAudits = [];
+      }
+    },
+
+    async fossaTickNow() {
+      this.fossaTicking = true;
+      try {
+        await fetch('/api/bettor/fossa-stable/tick', { method: 'POST' });
+        await this.loadFossaStable();
+      } catch (e) {
+        alert('fossa tick fail: ' + e.message);
+      } finally {
+        this.fossaTicking = false;
+      }
+    },
+
+    async liveNewsSubmit() {
+      if (!this.liveNewsInjectText.trim()) { alert('inject_text 必填'); return; }
+      this.liveNewsSubmitting = true;
+      try {
+        const res = await fetch('/api/bettor/live-news-inject', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ inject_text: this.liveNewsInjectText, effective_hours: this.liveNewsHours || 24 }),
+        });
+        const data = await res.json();
+        if (!data.ok) { alert('保存失败: ' + (data.error || 'unknown')); return; }
+        this.liveNewsInjectText = '';
+        await this.loadFossaStable();
+      } catch (e) {
+        alert('保存 fail: ' + e.message);
+      } finally {
+        this.liveNewsSubmitting = false;
+      }
+    },
+
+    async liveNewsDelete(id) {
+      if (!confirm('删除该 inject?')) return;
+      try {
+        await fetch('/api/bettor/live-news-inject/' + id, { method: 'DELETE' });
+        await this.loadFossaStable();
+      } catch (e) { console.warn('[live-news] delete fail:', e.message); }
+    },
+
+    async fossaOwnerAck(rec) {
+      const confirmed = confirm(`★ Owner final ack — fire ${rec.decision} @ $${rec.yes_price?.toFixed(3)} size $${rec.size_usd}?\n\nMarket: ${rec.question}\n\nLLM timeline blind spot 提醒: 你独立 verify 过 catalysts 了吗?`);
+      if (!confirmed) return;
+      rec._acking = true; rec._ackError = null;
+      try {
+        const res = await fetch('/api/bettor/recommendation/' + rec.id + '/accept', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ owner_final_ack: true }),
+        });
+        const data = await res.json();
+        if (!data.ok && !data.success) { rec._ackError = data.error || 'unknown error'; return; }
+        await this.loadFossaStable();
+      } catch (e) {
+        rec._ackError = e.message;
+      } finally {
+        rec._acking = false;
+      }
+    },
+
+    // r177 Phase 1 sub 3 — prediction trade quote book methods
+    async loadPredictionQuoteBook() {
+      try {
+        const r = await fetch('/api/prediction/quote-book');
+        const data = await r.json();
+        this.predictionQuoteBook = data;
+      } catch (e) {
+        console.warn('[r177] quote-book load fail:', e.message);
+        this.predictionQuoteBook = { ok: false, offers: [], count: 0 };
+      }
+    },
+
+    // Phase 4a Sub 10 (Bettor r243/r244) — quote-book-v2 Phase 4a SS offers + enrichment
+    async loadPredictionQuoteBookV2() {
+      try {
+        const r = await fetch('/api/prediction/quote-book-v2');
+        const data = await r.json();
+        this.predictionQuoteBookV2 = data;
+      } catch (e) {
+        console.warn('[Phase 4a] quote-book-v2 load fail:', e.message);
+        this.predictionQuoteBookV2 = { ok: false, offers: [], count: 0 };
+      }
+    },
+
+    async loadMakerWhitelist() {
+      try {
+        const r = await fetch('/api/prediction/maker/whitelist');
+        const data = await r.json();
+        this.makerWhitelist = data.makers || [];
+      } catch (e) { this.makerWhitelist = []; }
+    },
+
+    async submitMakerApply() {
+      const f = this.makerApplyForm;
+      if (!f.relay_node_id) { alert('选 agent'); return; }
+      if (!Number.isFinite(f.stake_amount_kas) || f.stake_amount_kas < 100) { alert('stake ≥ 100 KAS'); return; }
+      this.makerApplySubmitting = true;
+      try {
+        const res = await fetch('/api/prediction/maker/whitelist/apply', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relay_node_id: f.relay_node_id, stake_amount_kas: f.stake_amount_kas }),
+        });
+        const data = await res.json();
+        if (!data.ok) { alert('apply 失败: ' + (data.error || 'unknown')); return; }
+        this.showMakerApply = false;
+        await this.loadMakerWhitelist();
+        alert('✓ apply 提交. Owner approval pending.');
+      } catch (e) { alert('apply fail: ' + e.message); }
+      finally { this.makerApplySubmitting = false; }
+    },
+
+    async takePredictionOffer(o) {
+      const confirmed = confirm(`TAKE prediction offer?\n\n${o.outcome_side} @ $${(o.published_price || 0).toFixed(3)}\nshares: ${o.give_amount}\npay: ${o.want_amount} KAS\nexpires: ${o.expires_at}`);
+      if (!confirmed) return;
+      o._taking = true;
+      try {
+        const res = await fetch('/api/prediction/accept/' + o.id, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taker_relay_id: this.selectedAgent }),
+        });
+        const data = await res.json();
+        if (!data.ok) { alert('TAKE fail: ' + (data.error || 'unknown')); return; }
+        await this.loadPredictionQuoteBook();
+        alert('✓ matched! offer ' + data.offer_id);
+      } catch (e) { alert('TAKE fail: ' + e.message); }
+      finally { o._taking = false; }
+    },
+
+    async fossaReject(rec) {
+      if (!confirm('拒绝该推荐 (= mark status=rejected 不下单)?')) return;
+      try {
+        await fetch('/api/bettor/recommendation/' + rec.id + '/reject', { method: 'POST' }).catch(() => {});
+        await this.loadFossaStable();
+      } catch (e) { console.warn('[fossa] reject fail:', e.message); }
+    },
+
+    async deleteBettorProtectRule(rule) {
+      const confirmed = confirm(`删除持仓保护规则 ${rule.market_slug} ${rule.side}?`);
+      if (!confirmed) return;
+      try {
+        await fetch('/api/bettor/position-protect/rules/' + rule.id, { method: 'DELETE' });
+        await this.loadBettorProtectRules();
+      } catch (e) {
+        console.warn('[bettor] delete protect rule failed:', e.message);
+      }
+    },
+
+    async loadBettorAdjustments() {
+      try {
+        const url = '/api/bettor/adjustments?status=pending' + (this.selectedAgent ? '&relay_node_id=' + this.selectedAgent : '');
+        const r = await fetch(url);
+        this.bettorAdjustments = await r.json();
+      } catch (e) {
+        console.warn('[bettor] adjustments load failed:', e.message);
+        this.bettorAdjustments = { count: 0, adjustments: [] };
+      }
+    },
+
+    async acceptBettorRec(r) {
+      // Bug U1 debug instrumentation (Bettor r120 — narrow click-no-response root cause).
+      // Logs entry/confirm/POST/response so Owner DevTools Console can pinpoint which step fails.
+      console.log('[acceptBettorRec] called rec=', r?.id?.slice(0,8), 'status=', r?.status, 'decision=', r?.decision, '_accepting=', r?._accepting);
+      const sizeUsd = (r.size_usd || 0).toFixed(0);
+      const dir = r.decision;
+      const confirmed = confirm(`确认下单 BUY ${dir} $${sizeUsd}?\n${r.question}\n当前 yes 价: ${(r.yes_price*100).toFixed(2)}%`);
+      console.log('[acceptBettorRec] confirm=', confirmed);
+      if (!confirmed) return;
+      r._accepting = true;
+      r._acceptError = null;
+      r._acceptSuccess = null;
+      try {
+        console.log('[acceptBettorRec] POST /api/bettor/recommendation/' + r.id + '/accept');
+        const res = await fetch('/api/bettor/recommendation/' + r.id + '/accept', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        console.log('[acceptBettorRec] response status=', res.status);
+        const data = await res.json();
+        console.log('[acceptBettorRec] response body=', data);
+        if (data.ok) {
+          r.status = 'accepted';
+          r._acceptSuccess = `cost $${data.cost_basis_usd} (${data.size_shares} shares @ ${data.entry_price})`;
+          // refresh portfolio
+          this.loadPositions();
+        } else {
+          r._acceptError = data.error || 'unknown error';
+        }
+      } catch (e) {
+        console.log('[acceptBettorRec] catch error=', e.message);
+        r._acceptError = e.message;
+      } finally {
+        r._accepting = false;
+      }
+    },
+
+    async bettorEvaluateNow() {
+      if (this.bettorEvaluating) return;
+      this.bettorEvaluating = true;
+      try {
+        await fetch('/api/bettor/evaluate-now', { method: 'POST' });
+        await new Promise(r => setTimeout(r, 4000));
+        await this.loadBettorAdjustments();
+      } catch (e) { console.error('[bettor] evaluate failed:', e.message); }
+      this.bettorEvaluating = false;
+    },
+
+    async bettorDecideAdjustment(id, decision) {
+      try {
+        const r = await fetch('/api/bettor/adjustments/' + id + '/decide', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ decision }),
+        });
+        const j = await r.json();
+        if (!j.ok) { alert('决策失败: ' + (j.error || j.reason)); return; }
+        await this.loadBettorAdjustments();
+        if (this.bettorTab === 'history') await this.loadBettorHistory();
+      } catch (e) { console.error('[bettor] decide failed:', e.message); }
+    },
+
+    // Bettor r46 (B) Step 1: 真盘 active position 出清 (placeOrder sell at market bid - $0.01)
+    async sellActivePosition(pos) {
+      console.log('[出清] click fired, pos=', pos);
+      window.alert('debug: 按钮 click 已触发\n持仓: ' + pos.size + ' shares ' + pos.outcome + '\nasset id: ' + (pos.asset || 'MISSING').slice(0, 20) + '...\nstatus: ' + pos.status);
+      if (pos.status !== 'active') { alert('当前持仓 status=' + pos.status + ', 仅 active 可出清'); return; }
+      if (pos._closing) { console.log('[出清] already closing, skip'); return; }
+      // 2 步 confirm (真盘比 sim 严, 防误击)
+      const bestBidEst = pos.curPrice || pos.avgPrice || 0.5;
+      const estimatedSellPrice = Math.max(0.01, bestBidEst - 0.01);
+      const estimatedProceeds = estimatedSellPrice * pos.size;
+      const confirmed = confirm(
+        `卖出 ${pos.size} ${pos.outcome} shares\n` +
+        `估卖价: $${estimatedSellPrice.toFixed(3)} (market bid - $0.01 slippage)\n` +
+        `估收回: $${estimatedProceeds.toFixed(2)} USDC\n` +
+        `当前 P&L: ${(pos.size - pos.totalCost >= 0 ? '+' : '')}$${(pos.size - pos.totalCost).toFixed(2)}\n\n` +
+        `此操作不可撤销, 链上 TX. 确认?`
+      );
+      if (!confirmed) return;
+      const sellConfirm = prompt('真盘操作 — 输入 SELL 确认 (防误击):');
+      if (sellConfirm !== 'SELL') { alert('未确认 (需输入 SELL), 已取消'); return; }
+      pos._closing = true;
+      pos._closeError = '';
+      pos._closeTx = '';
+      try {
+        const r = await fetch('/api/predictions/positions/' + pos.asset + '/close', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relay_node_id: this.selectedAgent, size: pos.size }),
+        });
+        const j = await r.json();
+        if (!j.ok) { pos._closeError = j.error || 'unknown'; pos._closing = false; return; }
+        pos._closeTx = j.order_result?.transactionHash || j.order_result?.transactionsHashes?.[0] || j.order_result?.orderID || 'submitted';
+        alert(`✓ 卖单已提交\n卖价 $${j.sell_price?.toFixed(3)}, 估收回 $${j.proceeds_usdc?.toFixed(2)} USDC, slippage ${j.slippage_pct?.toFixed(2)}%`);
+        // refresh positions after a delay
+        setTimeout(() => this.loadPositions(), 5000);
+      } catch (e) {
+        pos._closeError = e.message;
+      }
+      pos._closing = false;
+    },
+
+    // Bettor r44 architect spec: 一键出清 sim 持仓 (Owner 直接介入, 不走 adjustment 审批)
+    // confirm modal: 显示 OPEN 数 + 浮动 PnL preview, 1 步 confirm 足够 (sim 0 风险)
+    async closeAllSimPositions() {
+      if (this.closingAll) return;
+      const open = (this.bettorHistory?.positions || []).filter(p => !p.closed_at);
+      if (open.length === 0) { alert('没有 OPEN 持仓可出清'); return; }
+      const sumPnl = open.reduce((s, p) => s + (p.latest_snapshot?.unrealized_pnl || 0), 0);
+      const sign = sumPnl >= 0 ? '+' : '';
+      const ok = confirm(
+        `即将 close ${open.length} 笔 sim 持仓\n` +
+        `预计锁定浮动 PnL: ${sign}$${sumPnl.toFixed(2)} (按最新 snapshot 计)\n` +
+        `此操作不可撤销 (sim 数据 status 同样落记录)\n\n` +
+        `确认 close 全部?`
+      );
+      if (!ok) return;
+      this.closingAll = true;
+      try {
+        const r = await fetch('/api/bettor/positions/close-all', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relay_node_id: this.selectedAgent, decided_by: 'owner-manual-close-all' }),
+        });
+        const j = await r.json();
+        if (!j.ok) { alert('出清失败: ' + (j.error || j.reason)); this.closingAll = false; return; }
+        alert(`✓ 出清完成: ${j.closed_count} 笔 close, 锁定 ${j.total_realized_pnl >= 0 ? '+' : ''}$${j.total_realized_pnl.toFixed(2)}`);
+        await this.loadBettorHistory();
+        if (this.bettorTab === 'record') await this.loadBettorRecord();
+      } catch (e) { console.error('[bettor] close-all failed:', e.message); alert('出清失败: ' + e.message); }
+      this.closingAll = false;
+    },
+
+    async bettorResolveNow() {
+      if (this.bettorResolving) return;
+      this.bettorResolving = true;
+      try {
+        await fetch('/api/bettor/resolve-now', { method: 'POST' });
+        // Resolver runs async; wait briefly + reload
+        await new Promise(r => setTimeout(r, 8000));
+        await this.loadBettorRecord();
+      } catch (e) {
+        console.error('[bettor] resolve failed:', e.message);
+      } finally {
+        this.bettorResolving = false;
+      }
     },
 
     async loadMarkets() {
@@ -488,21 +2364,41 @@ function predictionsPage() {
     },
 
     async logoutPolymarket() {
-      if (!confirm('退出 Polymarket？API Key 将被删除，下次使用需重新连接。')) return;
+      const usdc = Number(this.walletStatus?.usdc || 0);
+      const msg = '退出 Polymarket 将执行:\n' +
+        '  1. 取消所有挂单\n' +
+        '  2. 把 ' + usdc.toFixed(2) + ' USDC 扫回你指定的地址\n' +
+        '  3. 删除 CLOB API Key\n' +
+        '  4. 删除 Polygon 钱包和私钥 (不可恢复)\n\n' +
+        '请输入接收 USDC 的 Polygon 地址 (0x...):';
+      const dest = prompt(msg);
+      if (!dest) return;
+      if (!/^0x[a-fA-F0-9]{40}$/.test(dest.trim())) {
+        alert('无效地址。必须是 0x 开头的 40 位十六进制。');
+        return;
+      }
+      if (!confirm('确认退出并转移 ' + usdc.toFixed(2) + ' USDC 到 ' + dest.slice(0, 10) + '...' + dest.slice(-6) + ' ?')) return;
+      this.walletMsg = '退出中...';
       try {
-        await fetch('/api/settings/config', {
+        const res = await fetch('/api/polymarket/' + this.selectedAgent + '/exit', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ key: 'polymarket_api_' + this.selectedAgent, value: null, action: 'delete' }),
+          body: JSON.stringify({ destinationAddress: dest.trim() }),
         });
-      } catch {}
-      this.walletStatus = { hasWallet: true, approved: false, hasClobKey: false, usdc: 0 };
-      this.showPositions = false;
-      this.positions = [];
-      this.orders = [];
-      this.tradeIdx = null;
-      this.walletMsg = '';
-      await this.loadWalletStatus();
+        const data = await res.json();
+        if (!data.ok) {
+          this.walletMsg = '退出失败 (' + (data.step || '?') + '): ' + (data.error || '');
+          return;
+        }
+        this.walletMsg = '退出完成: 转出 ' + data.steps.sweep.amount + ' USDC, TX ' + data.steps.sweep.txHash.slice(0, 12) + '...';
+        this.walletStatus = { hasWallet: false, approved: false, hasClobKey: false, usdc: 0 };
+        this.showPositions = false;
+        this.positions = [];
+        this.orders = [];
+        this.tradeIdx = null;
+      } catch (e) {
+        this.walletMsg = '退出请求失败: ' + e.message;
+      }
     },
 
     async loadWalletStatus() {
@@ -511,6 +2407,16 @@ function predictionsPage() {
         const res = await fetch('/api/polymarket/' + this.selectedAgent + '/status');
         this.walletStatus = await res.json();
       } catch { this.walletStatus = { hasWallet: false }; }
+    },
+
+    async onAgentChange() {
+      this.positions = [];
+      this.settled = [];
+      this.orders = [];
+      this.summary = null;
+      await this.loadWalletStatus();
+      this.loadBettor();
+      this.loadPositions();
     },
 
     async doApprove() {
@@ -547,6 +2453,24 @@ function predictionsPage() {
         this.walletMsg = '授权失败: ' + e.message;
         this.approving = false;
       }
+    },
+
+    async doMigrateV2() {
+      this.migratingV2 = true;
+      this.walletMsg = '';
+      try {
+        const res = await fetch('/api/polymarket/' + this.selectedAgent + '/migrate-v2', { method: 'POST' });
+        const data = await res.json();
+        if (data.ok) {
+          const sent = Object.keys(data.txHashes || {}).length;
+          this.walletMsg = sent ? `V2 迁移完成: ${sent} 笔 TX, pUSD 余额 ${data.pusdBalance}` : 'V2 已就绪';
+          // 刷新 walletStatus 拉新的 pusd / v2Migrated
+          await this.loadWalletStatus();
+        } else {
+          this.walletMsg = '迁移失败: ' + (data.error || '');
+        }
+      } catch (e) { this.walletMsg = '迁移失败: ' + e.message; }
+      this.migratingV2 = false;
     },
 
     async setupClob() {
@@ -590,7 +2514,9 @@ function predictionsPage() {
     },
 
     async submitOrder(m) {
-      if (!this.canTrade || this.ordering) return;
+      if (this.ordering) return;
+      const blocker = this.checkTrade(m);
+      if (blocker) { this.tradeMsg = blocker.msg; return; }
       this.ordering = true;
       this.tradeMsg = '';
       // 找 token ID
@@ -622,6 +2548,16 @@ function predictionsPage() {
       this.ordering = false;
     },
 
+    async loadPositionsAll() {
+      // Phase 2.1c — bundle positions + protect rules + adjustments + reactor stale for inline display
+      await this.loadPositions();
+      await Promise.all([
+        this.loadBettorProtectRules().catch(() => {}),
+        this.loadBettorAdjustments().catch(() => {}),
+        this.loadReactorStale().catch(() => {}),
+      ]);
+    },
+
     async loadPositions() {
       if (!this.walletStatus.hasClobKey) return;
       try {
@@ -632,6 +2568,8 @@ function predictionsPage() {
         const posData = await posRes.json();
         const ordData = await ordRes.json();
         this.positions = posData.positions || [];
+        this.settled = posData.settled || [];
+        this.summary = posData.summary || null;
         this.orders = ordData.orders || [];
       } catch {}
     },
@@ -644,26 +2582,167 @@ function predictionsPage() {
       } catch {}
     },
 
+    async redeemPosition(pos) {
+      console.log('[redeem] clicked', { agent: this.selectedAgent, market: pos.market, redeemable: pos.redeemable });
+      if (!this.selectedAgent) {
+        pos._redeemError = 'No agent selected';
+        return;
+      }
+      if (!pos.market) {
+        pos._redeemError = 'No conditionId (pos.market empty)';
+        return;
+      }
+      pos._redeeming = true;
+      pos._redeemError = '';
+      try {
+        const res = await fetch('/api/polymarket/' + this.selectedAgent + '/redeem', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ conditionId: pos.market }),
+        });
+        const data = await res.json();
+        console.log('[redeem] response', data);
+        if (data.ok) {
+          pos._redeemed = true;
+          pos._redeemTx = data.txHash;
+          this.loadWalletStatus();
+        } else {
+          pos._redeemError = data.error || 'Redeem failed';
+          console.error('[redeem] failed', data);
+        }
+      } catch (e) {
+        pos._redeemError = e.message;
+        console.error('[redeem] network error', e);
+      } finally {
+        pos._redeeming = false;
+      }
+    },
+
+    async redeemAll() {
+      const targets = this.settled.filter(p => p.redeemable && !p._redeemed);
+      console.log('[redeemAll] targets=' + targets.length);
+      if (!targets.length) return;
+      this.redeemingAll = true;
+      try {
+        for (const pos of targets) {
+          await this.redeemPosition(pos);
+        }
+      } finally {
+        this.redeemingAll = false;
+      }
+    },
+
+    async _ensureRulesDigest(m) {
+      if (m._rulesDigest) return m._rulesDigest;
+      const id = m.conditionId || m.slug;
+      if (!id) return null;
+      try {
+        const r = await fetch('/api/predictions/market/' + id + '/rules');
+        if (r.ok) {
+          const d = await r.json();
+          if (d?.rules_digest) { m._rulesDigest = d; return d; }
+        }
+      } catch {}
+      m._rulesParsing = true;
+      try {
+        const r = await fetch('/api/predictions/market/' + id + '/parse-rules', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ backend: 'qwen' }),
+        });
+        const d = await r.json();
+        if (d?.ok) { m._rulesDigest = d; return d; }
+      } catch {}
+      finally { m._rulesParsing = false; }
+      return null;
+    },
+
+    async _fetchTopOfBook(tokenId) {
+      try {
+        const res = await fetch('/api/predictions/book/' + tokenId);
+        const d = await res.json();
+        // bids sorted low→high, asks sorted high→low — top of book is LAST element
+        const bids = d.bids || []; const asks = d.asks || [];
+        const bestBid = bids.length ? parseFloat(bids[bids.length-1].price) : null;
+        const bestAsk = asks.length ? parseFloat(asks[asks.length-1].price) : null;
+        return { bestBid, bestAsk };
+      } catch { return { bestBid: null, bestAsk: null }; }
+    },
+
     async askAgent(m) {
       if (m._asking) return;
       m._asking = true;
       m._agentReply = null;
-      const question = `分析这个预测市场并给出你的判断：
-"${m.question}"
-当前概率: Yes ${m.yes}% / No ${m.no}%
-24h成交: $${this.formatVol(m.volume24h || 0)}
-流动性: $${this.formatVol(m.liquidity || 0)}
-截止日期: ${m.endDate || '未知'}
-${m.description ? '规则: ' + m.description.slice(0, 200) : ''}
-请分析：1) 你认为结果会怎样？2) 当前市场定价合理吗？3) 如果要下注，你建议什么方向和仓位？`;
+      m._chatHistory = [{ role: 'agent', text: '读取规则 + 抓盘口...' }];
+
+      // 1) 规则 digest（缓存优先，没缓存就 Qwen 解析 10-20s）
+      const rulesRes = await this._ensureRulesDigest(m);
+      if (m._rulesParsing) m._chatHistory[0].text = '规则解析中 (~15s)...';
+
+      // 2) 实时 top-of-book — Yes / No 两侧
+      const [yesBook, noBook] = await Promise.all([
+        m.clobTokenIds?.[0] ? this._fetchTopOfBook(m.clobTokenIds[0]) : Promise.resolve({}),
+        m.clobTokenIds?.[1] ? this._fetchTopOfBook(m.clobTokenIds[1]) : Promise.resolve({}),
+      ]);
+
+      // 3) 到期倒计时
+      const msLeft = m.endDate ? (new Date(m.endDate).getTime() - Date.now()) : null;
+      const timeLeft = msLeft == null ? '未知' :
+        msLeft < 0 ? '已过期' :
+        msLeft < 3600e3 ? Math.round(msLeft/60e3) + ' 分钟' :
+        msLeft < 86400e3 ? (msLeft/3600e3).toFixed(1) + ' 小时' :
+        (msLeft/86400e3).toFixed(1) + ' 天';
+
+      // 4) 用户余额
+      const balance = (this.walletStatus?.usdc ?? 0).toFixed(2);
+
+      // 5) 规则 digest 结构化字段
+      const rd = rulesRes?.rules_digest || {};
+      const yesCond = rulesRes?.decision_inputs?.yes_conditions || '-';
+      const noCond = rulesRes?.decision_inputs?.no_conditions || '-';
+      const risks = (rulesRes?.risks || []).join('; ') || '(无)';
+
+      const question = `你是 Polymarket 预测市场交易顾问。基于下面的全部信息给一个**可执行**的建议，不要含糊、不要"需更多信息"。
+
+# 市场
+问题: ${m.question}
+截止: ${m.endDate || '未知'} (距今 ${timeLeft})
+
+# 当前定价 (真实 top-of-book)
+市场隐含: Yes ${m.yes ?? '?'}% / No ${m.no ?? '?'}%
+Yes 盘口: 买入需付 $${yesBook.bestAsk ?? '?'} / 卖出可得 $${yesBook.bestBid ?? '?'}
+No  盘口: 买入需付 $${noBook.bestAsk ?? '?'} / 卖出可得 $${noBook.bestBid ?? '?'}
+24h 成交: $${this.formatVol(m.volume24h || 0)} | 流动性: $${this.formatVol(m.liquidity || 0)}
+
+# 规则 digest (Qwen 解析)
+Yes 赢条件: ${yesCond}
+No  赢条件: ${noCond}
+数据源: ${rd.data_source || '未指定'} | 时区: ${rd.timezone || '未指定'}
+⚠ 风险点: ${risks}
+
+# 完整规则原文
+${m.description || '(无)'}
+
+# 用户
+Polymarket USDC 余额: $${balance}
+
+# 必答 (按编号回，给数字)
+1. 你估计真实概率是多少？(给一个具体数字，如 "真实 Yes ≈ 3%")
+2. 对比市场价，哪一边 EV 为正？说明为什么。
+3. 推荐下单: direction (Yes/No) + side (BUY/SELL) + 限价 $ + 仓位 $USDC。仓位要参考用户 $${balance} 余额，不能建议超过 30%。
+4. 止损/退场条件一句话。
+
+不要复读问题。不要说"因不确定所以无法建议"。你有规则、价格、时间、余额，给具体数字。`;
+
       try {
-        const res = await fetch('/api/agent/reply', {
+        const res = await fetch('/api/agent/consult', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             relayNodeId: this.selectedAgent,
-            peer: 'owner:predictions',
-            message: question,
+            topic: 'predictions',
+            question,
+            systemNote: '用户在预测市场面板点击"问 Agent"。给出具体下单建议（方向/限价/仓位/止损）。',
           }),
         });
         const data = await res.json();
@@ -672,6 +2751,7 @@ ${m.description ? '规则: ' + m.description.slice(0, 200) : ''}
         m._chatHistory = [{ role: 'agent', text: reply }];
       } catch (e) {
         m._agentReply = '分析失败: ' + e.message;
+        m._chatHistory = [{ role: 'agent', text: '分析失败: ' + e.message }];
       }
       m._asking = false;
     },
@@ -685,13 +2765,14 @@ ${m.description ? '规则: ' + m.description.slice(0, 200) : ''}
       m._chatHistory.push({ role: 'user', text: msg });
       try {
         const context = `关于预测市场 "${m.question}" (Yes ${m.yes}%/No ${m.no}%)，用户说: ${msg}`;
-        const res = await fetch('/api/agent/reply', {
+        const res = await fetch('/api/agent/consult', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             relayNodeId: this.selectedAgent,
-            peer: 'owner:predictions',
-            message: context,
+            topic: 'predictions',
+            question: context,
+            systemNote: '接续刚才的预测市场问答，继续给具体建议。',
           }),
         });
         const data = await res.json();
@@ -718,6 +2799,7 @@ ${m.description ? '规则: ' + m.description.slice(0, 200) : ''}
       if (m.yes > 10) return '市场认为不太可能发生';
       return '市场几乎确定不会发生（仅 ' + m.yes + '%）';
     },
+
   };
 }
 </script>

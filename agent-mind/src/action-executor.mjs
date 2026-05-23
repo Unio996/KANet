@@ -14,6 +14,7 @@
 import { fetchJson } from './utils.mjs';
 import { executeTool, executeConfirmed } from './skills/code-ops/executor.mjs';
 import { getState, recordAction } from './skills/code-ops/layer-engine.mjs';
+import { recommendBet } from './skills/bettor/kelly.mjs';
 
 /**
  * Required authority for each action type.
@@ -55,12 +56,11 @@ const ACTION_REQUIRED_AUTHORITY = {
   SEND_KAS:             'trade',
   VERIFY_PAYMENT:       'trade',
   POLYMARKET_ORDER:     'trade',
+  BET_PREDICT:          'chat',
   MAKE_MARKET:          'trade',
   SELL_MAKER:           'trade',
   BUY_MAKER:            'trade',
   CANCEL_OFFERS:        'trade',
-  CONFIRM_ESCROW:       'trade',
-  DISPUTE_ESCROW:       'trade',
 
   // Moderate actions — need at least 'suggest' authority
   initiate_handshake:   'suggest',
@@ -244,11 +244,9 @@ export class ActionExecutor {
       case 'BROKER_ORDER':
         return this.executeBrokerOrder(action);
 
-      // ── Escrow actions ──
-      case 'CONFIRM_ESCROW':
-        return this.executeEscrowConfirm(action);
-      case 'DISPUTE_ESCROW':
-        return this.executeEscrowDispute(action);
+      // ── Bettor: deterministic Kelly + Bet Card reply ──
+      case 'BET_PREDICT':
+        return this.executeBetPredict(action);
 
       // ── System actions (白名单制) ──
       case 'SYSTEM_DOWNLOAD':
@@ -329,14 +327,15 @@ export class ActionExecutor {
 
   /**
    * Anti-spam gate: check Console before any outbound proactive contact.
+   * messageType: 'text' (strict — requires prior handshake) | 'handshake' (lenient — handshake itself)
    * Returns { allowed: true } or { allowed: false, reason }.
    */
-  async _antiSpamCheck(targetAddress) {
+  async _antiSpamCheck(targetAddress, messageType = 'text') {
     try {
       const { consoleUrl } = this.config;
       const agentAddr = this.config.address;
       const res = await fetchJson(
-        `${consoleUrl}/api/agent/outbound-check?agent_address=${encodeURIComponent(agentAddr)}&peer_address=${encodeURIComponent(targetAddress)}`
+        `${consoleUrl}/api/agent/outbound-check?agent_address=${encodeURIComponent(agentAddr)}&peer_address=${encodeURIComponent(targetAddress)}&message_type=${messageType}`
       );
       if (!res.allowed) {
         console.log(`[agent-mind:executor] ANTI-SPAM BLOCKED → ${targetAddress.slice(-8)}: ${res.reason}`);
@@ -457,6 +456,23 @@ export class ActionExecutor {
       return { ok: false, reason: 'empty broadcast message' };
     }
 
+    // 🔒 Coordination channel firewall (2026-04-24 proactive-spam incident)
+    // These channels are for humans + Opus protagonists only. Any Agent Mind
+    // (Sophie / Kasia_1 / Eric / Qwen / broker / seeder) reaching here on its
+    // proactive cycle will create compounding LLM-generated noise that drowns
+    // real coordination. Hard block, with explicit log so the failure is
+    // visible in the skipped-broadcast record.
+    const COORD_CHANNELS = new Set(['dev-coord', 'kanet-arch', 'kanet-review', 'kanet-alert']);
+    const channelName = action.channel || 'general';
+    if (COORD_CHANNELS.has(channelName)) {
+      console.log(`[agent-mind:executor] Broadcast BLOCKED — #${channelName} is a coordination channel reserved for humans + Opus (Agent Mind proactive not permitted)`);
+      this.memory.recordEvent({
+        type: 'broadcast_blocked',
+        summary: `Broadcast BLOCKED to coordination channel #${channelName}: "${action.message?.slice(0, 50)}"`,
+      });
+      return { ok: false, reason: `channel #${channelName} blocked for Agent Mind — reserved for coordination` };
+    }
+
     // Dedup: check recent events for similar broadcasts (prevent spam loops)
     const recentBroadcasts = this.memory.shortTermEvents
       .filter(e => e.type === 'broadcast')
@@ -540,14 +556,20 @@ export class ActionExecutor {
   async initiateHandshake(action) {
     const { consoleUrl, relayNodeId } = this.config;
 
+    // Default: agents do NOT initiate handshakes unless explicitly enabled
+    if (!this.config.autoHandshake) {
+      console.log(`[agent-mind:executor] INITIATE_HANDSHAKE blocked — autoHandshake disabled (default)`);
+      return { ok: false, reason: 'autoHandshake disabled' };
+    }
+
     // Validate target address format (must be full kaspa:q... address, ≥60 chars)
     if (!action.target || !action.target.startsWith('kaspa:q') || action.target.includes('...') || action.target.length < 60) {
       console.log(`[agent-mind:executor] Invalid target address: ${action.target} (len=${action.target?.length}) — skipped`);
       return { ok: false, reason: `invalid address: ${action.target}` };
     }
 
-    // ══ LOCK 0: Anti-spam gate ══
-    const spamCheck = await this._antiSpamCheck(action.target);
+    // ══ LOCK 0: Anti-spam gate (handshake mode — 不走 text gate) ══
+    const spamCheck = await this._antiSpamCheck(action.target, 'handshake');
     if (!spamCheck.allowed) {
       return { ok: false, reason: `anti-spam: ${spamCheck.reason}` };
     }
@@ -1012,10 +1034,22 @@ export class ActionExecutor {
   async executeCancelOffers(action) {
     const { consoleUrl, address } = this.config;
     const reason = action.params?.reason || action.reason || 'agent cancelled';
+    const targetId = action.params?.offer_id || action.offer_id || null;
+
     try {
-      const res = await fetchJson(`${consoleUrl}/api/exchange/offers?maker=${encodeURIComponent(address)}&status=open`);
-      const offers = res?.offers || res || [];
-      if (offers.length === 0) return { ok: true, cancelled: 0, reason: 'no open offers' };
+      let offers;
+      if (targetId) {
+        // Single offer cancel — offer_id can be 8-char prefix or full UUID
+        const res = await fetchJson(`${consoleUrl}/api/exchange/offers?maker=${encodeURIComponent(address)}&status=open`);
+        const all = res?.offers || res || [];
+        offers = all.filter(o => o.id.startsWith(targetId));
+        if (offers.length === 0) return { ok: false, reason: `No open offer matching ${targetId}` };
+      } else {
+        // Cancel all open offers
+        const res = await fetchJson(`${consoleUrl}/api/exchange/offers?maker=${encodeURIComponent(address)}&status=open`);
+        offers = res?.offers || res || [];
+        if (offers.length === 0) return { ok: true, cancelled: 0, reason: 'no open offers' };
+      }
 
       let cancelled = 0;
       for (const offer of offers) {
@@ -1023,7 +1057,7 @@ export class ActionExecutor {
           await fetchJson(`${consoleUrl}/api/exchange/cancel`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ offerId: offer.id, relayNodeId: this.config.relayNodeId }),
+            body: JSON.stringify({ offer_id: offer.id, relayNodeId: this.config.relayNodeId }),
           });
           cancelled++;
         } catch {}
@@ -1031,7 +1065,7 @@ export class ActionExecutor {
 
       this.memory.recordEvent({
         type: 'cancel_offers',
-        summary: `Cancelled ${cancelled}/${offers.length} open offers. ${reason}`,
+        summary: `Cancelled ${cancelled}/${offers.length} offer(s). ${reason}`,
       });
 
       return { ok: true, cancelled, total: offers.length };
@@ -1150,6 +1184,57 @@ export class ActionExecutor {
   }
 
   /**
+   * Bettor: deterministic Kelly compute + format Bet Card + reply.
+   *
+   * Brain emits [ACTION:BET_PREDICT pMid=.. sigma=.. yesPrice=.. bankroll=..
+   *   infoGapMonths=.. kellyFraction=0.25 market="..."]
+   * We do the math (no LLM in this path) and reply.
+   */
+  async executeBetPredict(action) {
+    const p = action.params || action;
+    const inputs = {
+      pMid: Number(p.pMid),
+      sigma: Number(p.sigma) || 0,
+      yesPrice: Number(p.yesPrice),
+      bankroll: Number(p.bankroll) || 1000,
+      infoGapMonths: Number(p.infoGapMonths) || 0,
+      kellyFraction: Number(p.kellyFraction) || 0.25,
+    };
+
+    if (!Number.isFinite(inputs.pMid) || inputs.pMid < 0 || inputs.pMid > 1) {
+      return { ok: false, reason: `BET_PREDICT: invalid pMid=${p.pMid}` };
+    }
+    if (!Number.isFinite(inputs.yesPrice) || inputs.yesPrice <= 0 || inputs.yesPrice >= 1) {
+      return { ok: false, reason: `BET_PREDICT: invalid yesPrice=${p.yesPrice}` };
+    }
+
+    const rec = recommendBet(inputs);
+
+    const market = (p.market || 'unnamed market').toString().slice(0, 80);
+    const pct = (n) => `${(n * 100).toFixed(1)}%`;
+    const usd = (n) => `$${n.toFixed(2)}`;
+    const edge = rec.side === 'YES'
+      ? Math.abs(inputs.pMid - inputs.yesPrice)
+      : rec.side === 'NO'
+        ? Math.abs((1 - inputs.pMid) - (1 - inputs.yesPrice))
+        : 0;
+
+    const lines = [
+      `Bet Card — ${market}`,
+      `决策: ${rec.side === 'SKIP' ? 'SKIP' : `BUY ${rec.side}`}`,
+      `edge: ${rec.side === 'SKIP' ? 'N/A' : pct(edge)}`,
+      `仓位: ${pct(rec.fraction)} (${usd(rec.size)})`,
+      `估值: pMid=${pct(inputs.pMid)}, σ=${pct(inputs.sigma)}, info gap=${inputs.infoGapMonths.toFixed(1)} 月`,
+      `规则: 1/${(1 / inputs.kellyFraction).toFixed(0)} Kelly, edge<5pt skip, gap>1月折半, gap>3月跳过`,
+      `推理: ${rec.reasoning.join(' | ')}`,
+    ];
+    const text = lines.join('\n');
+
+    console.log(`[agent-mind:executor] BET_PREDICT ${market}: ${rec.side} ${pct(rec.fraction)}`);
+    return this.sendReply({ text });
+  }
+
+  /**
    * Execute a trade action via Console callback.
    * Source is always 'agent' — this is Mind-initiated.
    * The callback (tradeGate) is injected by Console at createMind() time.
@@ -1246,66 +1331,4 @@ export class ActionExecutor {
     return result;
   }
 
-  // ── Escrow: confirm delivery (release funds) ──
-
-  async executeEscrowConfirm(action) {
-    const { consoleUrl, relayNodeId } = this.config;
-    const offerId = action.offer_id || action.params?.offer_id;
-    if (!offerId) return { ok: false, reason: 'CONFIRM_ESCROW: missing offer_id' };
-
-    try {
-      // Determine role: if we are maker → confirm as maker, else as taker
-      const offer = await fetchJson(`${consoleUrl}/api/exchange/offers/${encodeURIComponent(offerId)}`).catch(() => null);
-      const myAddress = this.config.address;
-      const role = offer?.maker === myAddress ? 'maker' : 'taker';
-
-      const result = await fetchJson(`${consoleUrl}/api/exchange/confirm`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ relayNodeId, offer_id: offerId, role }),
-      });
-
-      if (result.error) {
-        console.log(`[executor] CONFIRM_ESCROW ${offerId.slice(0, 8)} failed: ${result.error}`);
-        return { ok: false, reason: result.error };
-      }
-
-      console.log(`[executor] CONFIRM_ESCROW ${offerId.slice(0, 8)} → ${result.status || 'confirmed'}`);
-      this.memory?.recordEvent({ type: 'escrow_confirmed', offerId, role });
-      return { ok: true, offerId, role, status: result.status };
-    } catch (err) {
-      console.log(`[executor] CONFIRM_ESCROW error: ${err.message}`);
-      return { ok: false, reason: err.message };
-    }
-  }
-
-  // ── Escrow: dispute (flag fraud / non-delivery) ──
-
-  async executeEscrowDispute(action) {
-    const { consoleUrl, relayNodeId } = this.config;
-    const offerId = action.offer_id || action.params?.offer_id;
-    if (!offerId) return { ok: false, reason: 'DISPUTE_ESCROW: missing offer_id' };
-
-    const reason = action.reason || action.params?.reason || 'Agent-initiated dispute';
-
-    try {
-      const result = await fetchJson(`${consoleUrl}/api/exchange/dispute`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ relayNodeId, offer_id: offerId, reason }),
-      });
-
-      if (result.error) {
-        console.log(`[executor] DISPUTE_ESCROW ${offerId.slice(0, 8)} failed: ${result.error}`);
-        return { ok: false, reason: result.error };
-      }
-
-      console.log(`[executor] DISPUTE_ESCROW ${offerId.slice(0, 8)} → disputed`);
-      this.memory?.recordEvent({ type: 'escrow_disputed', offerId, reason });
-      return { ok: true, offerId, status: 'disputed' };
-    } catch (err) {
-      console.log(`[executor] DISPUTE_ESCROW error: ${err.message}`);
-      return { ok: false, reason: err.message };
-    }
-  }
-}
+ }
