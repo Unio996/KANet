@@ -17,6 +17,7 @@ import { sendCommandAsync } from '../services/relay-manager.js';
 import { sqlite } from '../db/client.js';
 import { fmtDate, relativeTime } from '../lib/time.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
+import { recordChainEvent } from '../services/chain-event.js';
 
 export async function registerAdminRoutes(fastify) {
   // POST /api/admin/manual-handshake-accept — bypass chain protocol identification,
