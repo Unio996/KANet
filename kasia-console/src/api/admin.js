@@ -704,12 +704,14 @@ export async function registerAdminRoutes(fastify) {
         const totalNeeded = recipients.filter(r => !r.error).length * amountPer;
 
         if (dryRun) {
+          // Block A.3 Wave 3 (NWT r248): dynamic broker name lookup, not hardcode 'Trader-B'.
+          const brokerNameRow = sqlite.prepare('SELECT name FROM relay_nodes WHERE address = ? LIMIT 1').get(brokerWallet.address);
           return reply.send({
             ok: true,
             dryRun: true,
             asset, chain, amount_per: amountPer,
             total_needed: totalNeeded,
-            source: { address: brokerWallet.address, broker: 'Trader-B' },
+            source: { address: brokerWallet.address, broker: brokerNameRow?.name || 'unknown' },
             recipients,
             note: 'dryRun=true — NO real transfer. POST with dryRun:false to fire (Owner explicit ack).',
           });

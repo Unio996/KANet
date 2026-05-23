@@ -65,6 +65,18 @@ export function getAllBrokers() {
 }
 
 /**
+ * Block A.3 Wave 3 (NWT r248): broker/marketmaker org member names.
+ * Used by cross-match-engine self-deal anti-spam check (= broker family 不该相互match).
+ * @returns {string[]} array of relay_nodes.name strings
+ */
+export function getBrokerOrgNames() {
+  return sqlite.prepare(`
+    SELECT name FROM relay_nodes rn
+    WHERE EXISTS (SELECT 1 FROM json_each(rn.roles_json) je WHERE je.value IN ('broker', 'marketmaker'))
+  `).all().map(r => r.name);
+}
+
+/**
  * Get MarketMaker relay ID — throws if not configured.
  * A.3.3 wave 3 (NWT N19.208): MarketMaker role files use this helper.
  * Pre-A.5 sweep: broker also acts as MarketMaker (Trader-B has both roles).

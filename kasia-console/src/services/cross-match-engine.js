@@ -13,12 +13,14 @@
 import { sqlite } from '../db/client.js';
 import { recordChainEvent } from './chain-event.js';
 import { getConfig } from '../data/settings/configs.js';
+import { getBrokerOrgNames } from './broker-config-resolver.js';
 
 const TICK_MS = 30 * 1000;
 // Phase 5-3 KI N19.68 migrate: tunable via config_entries (defaults preserve original).
 const PRICE_TOLERANCE_DEFAULT = 0.03;  // ±3% oracle deviation
 const QTY_TOLERANCE_DEFAULT = 0.05;    // ±5% qty deviation (full-fill Phase 1)
-const BROKER_ORG_NAMES = ['Trader-A', 'Trader-B', 'Trader-M'];
+// Block A.3 Wave 3 (NWT r248): dynamic broker/marketmaker org names from relay_nodes roles_json.
+// Owner thesis: enable broker migration test (Trader-B → Trader-A swap).
 
 let _running = false;
 let _matchCount = 0;
@@ -41,10 +43,12 @@ async function _getMarketPrice() {
 }
 
 function _getBrokerOrgAddrs() {
-  const placeholders = BROKER_ORG_NAMES.map(() => '?').join(',');
+  const names = getBrokerOrgNames();
+  if (names.length === 0) return [];
+  const placeholders = names.map(() => '?').join(',');
   return sqlite.prepare(
     `SELECT address FROM relay_nodes WHERE name IN (${placeholders})`
-  ).all(...BROKER_ORG_NAMES).map(r => r.address);
+  ).all(...names).map(r => r.address);
 }
 
 export function tickCrossMatchOnce(marketPrice = null, brokerAddrs = null, opts = {}) {
@@ -185,7 +189,7 @@ export function startCrossMatchEngine() {
 }
 
 export const _internals = {
-  TICK_MS, PRICE_TOLERANCE_DEFAULT, QTY_TOLERANCE_DEFAULT, BROKER_ORG_NAMES,
+  TICK_MS, PRICE_TOLERANCE_DEFAULT, QTY_TOLERANCE_DEFAULT,
   _getMarketPrice, _getBrokerOrgAddrs,
   getStats: () => ({ scanCount: _scanCount, matchCount: _matchCount, lastTickAt: _lastTickAt, running: _running }),
 };

@@ -20,6 +20,7 @@
 
 import crypto from 'node:crypto';
 import { sqlite as defaultDb } from '../db/client.js';
+import { getBrokerRelay } from './broker-config-resolver.js';
 
 // ── 7 states ──
 //   active (3): aligning / awaiting_payment / paid
@@ -290,16 +291,20 @@ export function findActiveOrder(peerAddr, db = defaultDb) {
  * @param {object} [db] - optional db handle (default sqlite, test 传 testDb)
  * @returns {boolean} - true=escrowed / false=no escrow OR 已退
  */
-const TRADER_B_KAS_ADDR = 'kaspa:qrxw764gez624hfkfvpmzfx8a4mg2vze5n6vsgu8fymewrkuphy65lxur9c5l';
-
 export function checkBrokerEscrow(peerAddr, qty, orderCreatedAt, db = defaultDb) {
+  // Block A.3 Wave 3 (NWT r248): dynamic broker addr via resolver, no hardcode.
+  // Owner thesis: enable broker/marketmaker migration test (Trader-B → Trader-A swap).
+  const broker = getBrokerRelay();
+  if (!broker?.address) return false;  // No broker configured — graceful skip
+  const brokerKasAddr = broker.address;
+
   // 1. 入金: peer→broker, qty±0.5 KAS tolerance, observed_at>=orderCreatedAt
   const inbound = db.prepare(`
     SELECT COALESCE(SUM(amount), 0) AS total FROM kaspa_tx_log
     WHERE to_address = ?
       AND observed_at >= ?
       AND amount BETWEEN ? AND ?
-  `).get(TRADER_B_KAS_ADDR, orderCreatedAt, qty - 0.5, qty + 0.5);
+  `).get(brokerKasAddr, orderCreatedAt, qty - 0.5, qty + 0.5);
   const inAmt = Number(inbound?.total || 0);
   if (inAmt === 0) return false;  // 真没入金
 
@@ -310,7 +315,7 @@ export function checkBrokerEscrow(peerAddr, qty, orderCreatedAt, db = defaultDb)
     WHERE from_address = ?
       AND to_address = ?
       AND observed_at >= ?
-  `).get(TRADER_B_KAS_ADDR, peerAddr, orderCreatedAt);
+  `).get(brokerKasAddr, peerAddr, orderCreatedAt);
   const outAmt = Number(outbound?.total || 0);
 
   // 3. 余额 >= qty - 0.5 (含 fee buffer) → escrowed
