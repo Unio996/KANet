@@ -15,7 +15,7 @@
 
 import { getConfig } from '../data/settings/configs.js';
 import { sqlite } from '../db/client.js';
-import { getBrokerRelayIdOrThrow } from './broker-config-resolver.js';
+import { getMarketMakerRelayIdOrThrow } from './broker-config-resolver.js';
 
 const HEDGE_CEX_MAP = {
   bybit: 'bybit', gate: 'gateio', 'gate.io': 'gateio', gateio: 'gateio',
@@ -26,13 +26,13 @@ function getAccountByName(name) {
   if (!name) return null;
   const normalized = HEDGE_CEX_MAP[name.toLowerCase()] || name.toLowerCase();
   // KI 65 A.5.2: per-relay ownership filter (MarketMaker 库存层).
-  const mmaId = getBrokerRelayIdOrThrow();
+  const mmaId = getMarketMakerRelayIdOrThrow();
   return sqlite.prepare('SELECT * FROM exchange_accounts WHERE exchange = ? AND relay_node_id = ?').get(normalized, mmaId);
 }
 
 function getDefaultAccount() {
   // KI 65 A.5.2: per-relay ownership filter (MarketMaker 库存层).
-  const mmaId = getBrokerRelayIdOrThrow();
+  const mmaId = getMarketMakerRelayIdOrThrow();
   return sqlite.prepare('SELECT * FROM exchange_accounts WHERE relay_node_id = ? AND is_default = 1 LIMIT 1').get(mmaId)
     || sqlite.prepare('SELECT * FROM exchange_accounts WHERE relay_node_id = ? LIMIT 1').get(mmaId);
 }

@@ -21,7 +21,7 @@ import { generateProposal } from '../services/strategy-engine.js';
 import { fetchAllMarkets, fetchCryptoData, fetchStockData, fetchPredictionData, fetchCommodityData, cachedFunding, cachedSentiment, cachedCryptoGlobal, cachedCalendar } from '../services/market-data.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 import { EXCHANGE_REGISTRY } from '../lib/exchange-registry.js';
-import { getBrokerRelayIdOrThrow } from '../services/broker-config-resolver.js';
+import { getMarketMakerRelayIdOrThrow } from '../services/broker-config-resolver.js';
 
 /** Trade mode: DB → default DRY-RUN */
 async function getTradeMode() {
@@ -50,7 +50,7 @@ async function binanceLikeFetch(path, baseUrl, headerName, apiKey, apiSecret) {
 function getDefaultExchangeAccount() {
   // KI 65 A.5.2: runtime trade credentials filter per MarketMaker-A (库存层 = inventory CEX accounts).
   // Admin /api/exchange-accounts CRUD endpoints remain org-wide (no filter).
-  const mmaId = getBrokerRelayIdOrThrow();
+  const mmaId = getMarketMakerRelayIdOrThrow();
   const row = sqlite.prepare(
     'SELECT * FROM exchange_accounts WHERE relay_node_id = ? AND is_default = 1 LIMIT 1'
   ).get(mmaId) || sqlite.prepare(
@@ -1311,7 +1311,7 @@ export async function registerTradingRoutes(fastify) {
     let creds;
     if (exchangeParam) {
       // KI 65 A.5.2: runtime trade filter per MarketMaker-A (库存层).
-      const mmaId = getBrokerRelayIdOrThrow();
+      const mmaId = getMarketMakerRelayIdOrThrow();
       const row = sqlite.prepare(
         'SELECT * FROM exchange_accounts WHERE exchange = ? AND relay_node_id = ? ORDER BY is_default DESC LIMIT 1'
       ).get(exchangeParam, mmaId);
@@ -1546,7 +1546,7 @@ export async function registerTradingRoutes(fastify) {
     let creds;
     if (exchangeParam) {
       // KI 65 A.5.2: runtime trade filter per MarketMaker-A (库存层).
-      const mmaId = getBrokerRelayIdOrThrow();
+      const mmaId = getMarketMakerRelayIdOrThrow();
       const row = sqlite.prepare('SELECT * FROM exchange_accounts WHERE exchange = ? AND relay_node_id = ? ORDER BY is_default DESC LIMIT 1').get(exchangeParam, mmaId);
       if (!row) return reply.code(400).send({ error: `No account for exchange: ${exchangeParam}` });
       try {
@@ -1573,7 +1573,7 @@ export async function registerTradingRoutes(fastify) {
     let creds;
     if (exchangeParam) {
       // KI 65 A.5.2: runtime trade filter per MarketMaker-A (库存层).
-      const mmaId = getBrokerRelayIdOrThrow();
+      const mmaId = getMarketMakerRelayIdOrThrow();
       const row = sqlite.prepare('SELECT * FROM exchange_accounts WHERE exchange = ? AND relay_node_id = ? ORDER BY is_default DESC LIMIT 1').get(exchangeParam, mmaId);
       if (!row) return reply.code(400).send({ error: `No account for exchange: ${exchangeParam}` });
       try {

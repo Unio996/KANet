@@ -4468,55 +4468,67 @@ export function runMigrations() {
     }
   }
 
-  // v143: KI 65 r249 — MarketMaker 拆分 (NWT N19.270 / Owner 5/23 钦定 'MarketMaker-A 真 plug-in').
+  // v143: DEPRECATED — KI 65 r249 MarketMaker 拆分 strip.
   //
-  // Pre-r249 state (Block A.5 simplified consolidation 5/22): Trader-A/B 兼 broker+marketmaker.
-  // r249 design: separate roles so MarketMaker-A 成 marketmaker 独占 dispatch target.
+  // 5/23 Owner 雷霆 '我不要你给我硬换' 否决 strip. Implication: keep dual marketmaker
+  // (= Trader-A/B + MarketMaker-A 共存), 不 strip 现有 role, MarketMaker-A 加入 pool 而不替换.
   //
-  // After this migration:
-  //   Trader-A: ['broker']            ← broker only (= migration target swap test)
-  //   Trader-B: ['broker']            ← primary broker (was broker+marketmaker)
-  //   MarketMaker-A: ['marketmaker']  ← unique marketmaker (already set)
+  // v144 restores stripped roles (idempotent). v145 ALTERs user_escrow_balances for r250 path A
+  // zero-inventory matchmaker design.
   //
-  // getMarketMakerRelay() auto-resolves to MarketMaker-A (= only relay with marketmaker role).
-  // market-seeder dispatches publishOffer to MarketMaker-A.
+  // Code change companion: bc4131cd7 (Sub 1.4 swap 8 file getMarketMaker → getBroker) ALSO reverted
+  // in r250.1 ship — 8 service back to getMarketMaker (marketmaker pool ops, not broker pool).
   //
-  // Companion code change (r249 Sub 1.4 — J2 #734 gap catch): 8 broker hedge services + api/trading.js
-  // swap getMarketMakerRelayIdOrThrow → getBrokerRelayIdOrThrow. Reason: those services manage broker's
-  // own KAS pool + USDT pile + CEX accounts (= broker hedge ops, not marketmaker ops).
-  //
-  // market_seeder_config.sell_agent_id / buy_agent_id columns DEPRECATED (not removed for backward-compat).
-  // r249 Sub 1.1 removed fallback chain (config.* || getDefaultAgentId()) → seeder uses resolver only.
-  //
-  // NOTE: v142 is reserved for prediction line B2 v0.5 area-4 (pool_bettor_sides.refund_attempted_at)
-  // on origin/master — this local migrate.js will pick it up via cross-line merge later. No conflict
-  // expected since v142 touches pool_bettor_sides and v143 touches relay_nodes.
-  // Idempotent strip: only update rows whose roles_json still contains 'marketmaker'.
+  // Historical NOTE: v142 reserved for prediction line B2 v0.5 area-4 (pool_bettor_sides), no conflict.
+  // v143 stays in history as no-op record (= 不删 防 migration counter discontinuity).
+
+  // v144: r250 path A unblock — restore Trader-A/B dual marketmaker (Owner 5/23 雷霆 否决 v143 strip).
+  // Idempotent restore: only update rows missing 'marketmaker' role.
   {
     const traderRows = sqlite.prepare(`
       SELECT id, name, roles_json FROM relay_nodes
-      WHERE name IN ('Trader-A', 'Trader-B') AND roles_json LIKE '%marketmaker%'
+      WHERE name IN ('Trader-A', 'Trader-B') AND roles_json NOT LIKE '%marketmaker%'
     `).all();
     if (traderRows.length > 0) {
       const stmt = sqlite.prepare(`UPDATE relay_nodes SET roles_json = ? WHERE id = ?`);
-      let stripCount = 0;
+      let restoreCount = 0;
       for (const r of traderRows) {
         try {
           const roles = JSON.parse(r.roles_json || '[]');
-          const filtered = roles.filter(x => x !== 'marketmaker');
-          if (filtered.length !== roles.length) {
-            stmt.run(JSON.stringify(filtered), r.id);
-            stripCount++;
-            console.log(`[migrate] v143: ${r.name} roles_json ${JSON.stringify(roles)} → ${JSON.stringify(filtered)}`);
+          if (!roles.includes('marketmaker')) {
+            roles.push('marketmaker');
+            stmt.run(JSON.stringify(roles), r.id);
+            restoreCount++;
+            console.log(`[migrate] v144: ${r.name} roles_json restored → ${JSON.stringify(roles)}`);
           }
         } catch (err) {
-          console.warn(`[migrate] v143: skip ${r.name} (roles_json parse fail: ${err.message})`);
+          console.warn(`[migrate] v144: skip ${r.name} (roles_json parse fail: ${err.message})`);
         }
       }
-      if (stripCount > 0) {
-        console.log(`[migrate] v143: stripped 'marketmaker' from ${stripCount} relay(s). MarketMaker-A now unique marketmaker.`);
+      if (restoreCount > 0) {
+        console.log(`[migrate] v144: restored 'marketmaker' role on ${restoreCount} relay(s). Dual marketmaker preserved (Trader-A/B + MarketMaker-A pool).`);
       }
     }
+  }
+
+  // v145: r250 path A — user_escrow_balances 4 column add for zero-inventory matchmaker flow.
+  //   broker_role:      'custodial' (current half-custody) OR 'matchmaker' (r250 zero-inv)
+  //   maker_addr:       marketmaker's USDT receive address (= user pays here for matchmaker flow)
+  //   broker_fee_addr:  broker's USDT receive address (= 1% fee here)
+  //   broker_fee_amt:   USDT amount of broker fee
+  // Idempotent ADD COLUMN — SQLite ALTER tolerates re-run via PRAGMA check.
+  {
+    const cols = sqlite.prepare(`PRAGMA table_info(user_escrow_balances)`).all().map(c => c.name);
+    const addCol = (name, decl) => {
+      if (!cols.includes(name)) {
+        sqlite.exec(`ALTER TABLE user_escrow_balances ADD COLUMN ${name} ${decl}`);
+        console.log(`[migrate] v145: user_escrow_balances.${name} added.`);
+      }
+    };
+    addCol('broker_role', `TEXT NOT NULL DEFAULT 'custodial'`);
+    addCol('maker_addr', `TEXT`);
+    addCol('broker_fee_addr', `TEXT`);
+    addCol('broker_fee_amt', `REAL`);
   }
 
   console.log('[migrate] DB migrations complete.');

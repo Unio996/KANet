@@ -91,8 +91,54 @@ export function getMarketMakerRelayIdOrThrow() {
 }
 
 /**
+ * Get all MarketMaker relays (r250 path A — multi-marketmaker pool dispatch).
+ * Returns array of all relay_nodes rows with 'marketmaker' role.
+ *
+ * @returns {object[]} array of relay_nodes rows
+ */
+export function getMarketMakerRelays() {
+  return sqlite.prepare(`
+    SELECT rn.* FROM relay_nodes rn
+    WHERE EXISTS (SELECT 1 FROM json_each(rn.roles_json) je WHERE je.value = 'marketmaker')
+    ORDER BY rn.created_at ASC
+  `).all();
+}
+
+/**
+ * Pick a MarketMaker for a given offer (r250 path A — matchmaker dispatch).
+ * v1 strategy: filter marketmakers with open offer matching qty + chain + side,
+ * pick first by created_at ASC (deterministic).
+ *
+ * Future: load balance, best price, round-robin via DB state.
+ *
+ * @param {object} opts — { qty: number, chain: string, side: 'sell_kas'|'buy_kas' }
+ * @returns {object|null} relay_nodes row OR null if no marketmaker has matching open offer
+ */
+export function pickMarketMakerForOffer({ qty, chain, side }) {
+  if (!qty || !chain || !side) return null;
+  // Sell side from marketmaker's perspective: give KAS want USDT (= user BUY)
+  // Buy side from marketmaker's perspective: give USDT want KAS (= user SELL)
+  const giveAsset = side === 'sell_kas' ? 'USDT' : 'KAS';  // user gives → mm wants
+  const wantAsset = side === 'sell_kas' ? 'KAS' : 'USDT';  // user wants → mm gives
+  const chainCol = side === 'sell_kas' ? 'give_chain' : 'want_chain';
+  const row = sqlite.prepare(`
+    SELECT rn.* FROM relay_nodes rn
+    JOIN exchange_offers eo ON eo.maker = rn.address
+    WHERE EXISTS (SELECT 1 FROM json_each(rn.roles_json) je WHERE je.value = 'marketmaker')
+      AND eo.protocol_status = 'open'
+      AND eo.expires_at > datetime('now')
+      AND UPPER(eo.give_asset) = ?
+      AND UPPER(eo.want_asset) = ?
+      AND LOWER(eo.${chainCol}) = LOWER(?)
+    ORDER BY rn.created_at ASC LIMIT 1
+  `).get(wantAsset, giveAsset, chain);
+  return row || null;
+}
+
+/**
  * Get the MarketMaker relay (separate role from broker per Block A.5 sweep).
  * For now (pre-A.5), broker + marketmaker often same relay (Trader-B has both).
+ * r250: backward-compat fallback returning first marketmaker (ORDER BY created_at ASC LIMIT 1).
  *
  * @returns {object|null} relay_nodes row or null
  */

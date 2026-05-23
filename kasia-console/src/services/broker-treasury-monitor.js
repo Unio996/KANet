@@ -16,7 +16,7 @@ import { withFallbackRpc } from './chains.js';
 import { getConfig } from '../data/settings/configs.js';
 import { decrypt } from './crypto.js';
 import { getBalance as cexGetBalance } from './exchange-orders.js';
-import { getBrokerRelayIdOrThrow } from './broker-config-resolver.js';
+import { getBrokerRelayIdOrThrow, getMarketMakerRelayIdOrThrow } from './broker-config-resolver.js';
 
 // KI 65 A.3.4 wave 4 (5/22): runtime helper, no module-load const.
 const TICK_INTERVAL_MS = 5 * 60_000; // 5 min, stagger 2.5 min offset from market-seeder
@@ -122,9 +122,9 @@ async function _runSnapshot() {
       }
     }
     // Phase 5-2 Sub-2: CEX inventory snapshot 加入 parallel batch
-    // r249 Sub 1.4 (NWT N19.270): broker hedge service, query by broker (= 之前 mmaId 是 broker==marketmaker assumption, 现 解耦).
-    const brokerId = getBrokerRelayIdOrThrow();
-    const cexAccounts = sqlite.prepare('SELECT * FROM exchange_accounts WHERE relay_node_id = ?').all(brokerId);
+    // r250.1 (NWT N19.272 / Owner 5/23 '硬换' 否决): zero-inventory design, marketmaker holds inventory.
+    const mmaId = getMarketMakerRelayIdOrThrow();
+    const cexAccounts = sqlite.prepare('SELECT * FROM exchange_accounts WHERE relay_node_id = ?').all(mmaId);
     for (const acc of cexAccounts) {
       tasks.push(_snapshotCexBalance(acc));  // returns array, flatten below
     }
