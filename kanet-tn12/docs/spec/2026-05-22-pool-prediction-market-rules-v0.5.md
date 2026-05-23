@@ -1,8 +1,11 @@
-# Pool Prediction Market 规则 v0.5 (完整版 — 2026-05-23 v2)
+# Pool Prediction Market 规则 v0.5 (完整版 — 2026-05-23 v4)
 
-**状态**: Area 1-5 共识 + V8 + Q10 + Q2 + pp.txt 10 sub-question 全整合. Area 6+ dialogue 进行.
-**Source**: 5/21 spec 终稿 + PoolSpine.sil L9-16 + 5/22-5/23 area dialogue chain_events + pp.txt 第三方 review + Owner V8/Q10/Q2/Gap 1B/3 implementation 钦定 + J1 #480-#493 critique
-**Outstanding**: V8 nail #4 reveal-fail 罚倍数 / Q10 4 数字 / Q2 Tier 2 N 倍数 M / refund_unanimous_silent bond → maker 一并 revisit (= Owner 5/23 反对 carry-over known 缺陷) — 进 area 10/12. Area 6-12 待 dialogue.
+**状态**: 🎉 **12 area dialogue 真完整收敛** — Area 1-12 全 nail (= ~90 决议 + 60+ outstanding mainnet calibration framework + 11 patches shipped: Q11/Q12/Q13/Q14 area-1 enforce + Ship #1 doomed + F3 50 bettor + W3 余数 pending + E6/E7 pending + refund_disagreement SS pending)
+**Source**: 5/21 spec 终稿 + PoolSpine.sil L9-16 + 5/22-5/23 area dialogue chain_events + pp.txt 第三方 review + Owner V8/Q10/Q2/Gap 1B/3 implementation/RBF research 钦定 + J1 #480-#511 critique
+**Outstanding**: 60+ economic + Phase 5 design questions 待 mainnet ship-block calibration (= 详 Area 10/12 + Phase 5 design queue)
+**Critical learnings (5/23)**:
+- Kaspa **有 RBF** opt-in (= rusty-kaspa PR #499), 但 sighash binding 真等价防护 (= Area 8 E5 framing update)
+- silverscript `tx.time` = **SECONDS** (= silverscript TUTORIAL.md verbatim 证, silverc 内部 normalize Kaspa block ms → SS sec, Bitcoin convention). cycle 1-4 真不是 luck, unit 一直正确. 盲打改 ms 真会 100% 破所有 refund paths — J1 反向风险 catch.
 
 ---
 
@@ -112,9 +115,7 @@ maker 不传 oracle_relay_ids. 系统从 is_oracle=1 pool 随机抽 3.
 ```
 create (锁 maker stake, status=pending_oracle_sampling)
   ↓ 等 k block
-cron 算 seed + 抽 3 + chain_
-
---- RETRY CHUNK 1/9 END ---event 上链 (= 含 seed 输入 + 算出 seed + 池子快照 + 抽中 3 oracle)
+cron 算 seed + 抽 3 + chain_event 上链 (= 含 seed 输入 + 算出 seed + 池子快照 + 抽中 3 oracle)
   ↓
 status=pending_oracle_deposits + 通知抽中 oracle
 ```
@@ -242,9 +243,7 @@ operator 在 silent_timeout 前可手动覆盖.
 | **投票** | area 3 | oracle 上链 chain_event 说 "我认为是 X". decideConsensus 用来定 winner |
 | **签 settle TX** | area 4 | oracle 用 PK 签真正花钱的那笔 multisig TX. 签的是 `blake2b(market_id \|\| winner \|\| pools \|\| merkleRoot \|\| metadataHash)` |
 
-**投票 = 嘴
-
---- END CHUNK 2/9 ---上说; 签 TX = 真盖章**. area 3/4 边界画清.
+**投票 = 嘴上说; 签 TX = 真盖章**. area 3/4 边界画清.
 
 ## 3.9 V8 — Herd voting 防御 (= Owner 钦定 双轨路径)
 
@@ -334,9 +333,7 @@ mainnet day 1 用 transparency metric 替代: 每个 oracle 的 `total_votes / c
 Owner 5/23 catch: 现 oracle deposit 是 chain_event public. maker 可见 → 可联系 oracle 私下串谋 (= 即使 Option 1 random sampling 已防 maker 选 oracle, 抽中后 maker 仍可贿赂).
 
 ### 🚨 我 (a) "sampling 结果 commitment hash" 是 BROKEN — J1 catch
-我之前提 "chain_event 只放 hash, 不放抽中 3 oracle PK", vote 时 reveal. 但 area 2 钦定 sampling 算法是**确定性 Fisher-Yates from 公开 seed + 公开 pool snapshot**
-
---- END CHUNK 3/9 ---— 任何人 (含 maker) 拿到 chain_event 里的 seed 输入 + pool 快照, **本地跑同一算法**就能算出抽中是哪 3 个. **只 commit 结果 hash 不 commit 输入是没用的** — 输入已公开, 结果可推导.
+我之前提 "chain_event 只放 hash, 不放抽中 3 oracle PK", vote 时 reveal. 但 area 2 钦定 sampling 算法是**确定性 Fisher-Yates from 公开 seed + 公开 pool snapshot** — 任何人 (含 maker) 拿到 chain_event 里的 seed 输入 + pool 快照, **本地跑同一算法**就能算出抽中是哪 3 个. **只 commit 结果 hash 不 commit 输入是没用的** — 输入已公开, 结果可推导.
 
 ### J1 reframe — Q2 是 mainnet-only 问题 (= 跟 V8 parallel 双轨第 3 条)
 
@@ -418,9 +415,7 @@ completed OR refunded
 - maker stake → return
 - bettor 走 PoolSide.refund_market_cancelled 自取
 
-**Owner 反对 silent → maker** 真核心理由: maker stake 退 + 额外 +1 silent bond ≈ +pot cap free money → maker 协议层 +EV → 有动机创建判定模糊 market OR 贿赂 1 oracle 失声. (1) "consistency 跟 refund_unanimous_silent 一致" 是继承 known 缺陷, 撤回. (4) burn 0 manipulation vector + 0 SS 复杂度 + 跟 "protocol 不 rent-se
-
---- END CHUNK 4/9 ---ek" 哲学一致.
+**Owner 反对 silent → maker** 真核心理由: maker stake 退 + 额外 +1 silent bond ≈ +pot cap free money → maker 协议层 +EV → 有动机创建判定模糊 market OR 贿赂 1 oracle 失声. (1) "consistency 跟 refund_unanimous_silent 一致" 是继承 known 缺陷, 撤回. (4) burn 0 manipulation vector + 0 SS 复杂度 + 跟 "protocol 不 rent-seek" 哲学一致.
 
 ## 4.2 两个 refund 路径并存 (= J1 #492 catch 修正)
 
@@ -499,9 +494,7 @@ entrypoint function refund_disagreement(
     if (signingPair == 0) {
         require(checkSig(oracleSig1, pubkey(oracle1Pk)));
         require(checkSig(oracleSig2, pubkey(oracle2Pk)));
-    } else if (signing
-
---- END CHUNK 5/9 ---Pair == 1) {
+    } else if (signingPair == 1) {
         require(checkSig(oracleSig1, pubkey(oracle1Pk)));
         require(checkSig(oracleSig2, pubkey(oracle3Pk)));
     } else {
@@ -589,7 +582,7 @@ if (b.bettor_relay_id === market.maker_relay_id) {
 
 ## 5.6 小 market 不可结算 (= W6, cross area 5+11)
 
-`losingPool < broker_fee_floor → settle TX 不 fire → 卡死`. propose create 时 pool.js 加 check:
+`losingPool< broker_fee_floor → settle TX 不 fire → 卡死`. propose create 时 pool.js 加 check:
 - 现已 enforce maker_stake >= 1 KAS + bettor stake >= 0.5 KAS (= Bug 8 fix)
 - 加 worst-case check: `maker_stake + N × bettor_min_stake ≥ broker_fee_floor + minerFee + 其他 outputs`
 - area 11 一并细聊 + create-time enforce
@@ -600,9 +593,7 @@ if (b.bettor_relay_id === market.maker_relay_id) {
 
 ---
 
-# Area 6 — 惩罚规则 (= 收敛 6 决议, post Owner 
-
---- END CHUNK 6/9 ---Gap 1B burn reframe)
+# Area 6 — 惩罚规则 (= 收敛 6 决议, post Owner Gap 1B burn reframe)
 
 ## 6.1 losing bettor stake 不是 "罚" (= P1)
 
@@ -658,6 +649,382 @@ Tier 1 vs Tier 2 reveal-fail 处理可能不同 (= Owner 5/23 polish, 详 Area 3
 
 ---
 
+# Area 7 — Timing 规则 (= 收敛 11 决议)
+
+## T1 T_accept — oracle 抽中后 accept 窗口
+- testnet: 15-30 min (= 我们自己 agent 反应快)
+- mainnet: **2-4h** (= J1 #500 push back 30-60 min 太激进, operator async + human-in-loop 真现实, 不假设 operator 永远在键盘)
+
+## T2 D_deposit — 总 deposit phase deadline
+公式: `D_deposit = per-slot T_accept × max_attempts + 15-30 min buffer` (= 跟 cron stagger + block 传播延迟 留 buffer, 不 5 min 太紧)
+
+## T3 max_attempts — re-sample 上限 **per-slot 3**
+3 slots 独立 sample, 各自独立 accept 窗口, 各自独立 re-sample. per-slot 3 不 total 3 (= 否则 1 slot 抢光其他 slot 无法 re-sample).
+
+## T4 ORACLE_SILENT_TIMEOUT — 30/1440 现 env 保持
+- testnet: 30 min (= 真 cycle 1-4 验证)
+- mainnet: 1440 min (24h, 给 oracle operator 真处理时间)
+
+## T5 🚨 DISAGREEMENT_TIMEOUT — 不能 = ORACLE_SILENT_TIMEOUT (= J1 #500 真深 catch)
+- silent = oracle 没投票 → 等 24h 让回来投合理
+- disagreement = 3 票完整 = **信息完整态再等 24h 零价值**
+- 拖延 → 浪费用户钱锁的时间 (= Owner burn 哲学延伸 "protocol 不 rent-seek")
+- testnet:**5 min**
+- mainnet: **1-2h** (= 短 recovery window for daemon 重连, 不需 24h)
+- **SS 硬编码** (= 不继承 Console-side gating 漏洞, 趁 fresh refund_disagreement entry 立即 SS-hardcode)
+
+## T6 V7 grace — deadline → verifying 之间预留
+- testnet: 30 min (= 测试便利)
+- mainnet: **全局 12h** (= 跨 sports/政治/事件多数 result lag)
+- 累加: deadline + 12h grace + 24h ORACLE_SILENT_TIMEOUT = **36h 总 mainnet window**. UI 必 surface 给 maker.
+- area 12 hardening 加 per-market mapping (= polymarket_crypto 0h / sports 6h / election 48h)
+
+## T7 k value reorg safety
+- testnet: 占位 **100** block
+- mainnet: **TBD Kaspa team 推荐 finality depth** (= Kaspa research 5/23 found: 432,000 blocks ≈ 12h 是 absolute finality, 36,000 ≈ 1h 是 merge_depth_bound). Owner action: 在 KANet team 内部决, 不阻 v0.5 testnet.
+- doc 硬 outstanding: "MAINNET k 数字必有 Kaspa 推荐 source citation, 否则 mainnet ship block"
+
+## T8 register window validation (= J1 #500 漏 catch)
+create endpoint 加: `deadline - now >= D_deposit + register_window_min`
+- register_window_min testnet 30 min / mainnet 24h+
+- 防 deadline 16 min + D_deposit 90 min 真 conflict
+
+## T9 Chain timestamps 统一 (= J1 #500 catch, 跟 area 4 Gap 6 一致)
+- 所有 timing check 统一用 chain timestamps (= block-added time / chain_event observed_at)
+- wall-clock 只 fallback (= 单元测试 / dev mode)
+- SS tx.time + Console chain_event 双轨防 skew
+
+## T10 Tier 1 衰减起点 mainnet block 0 hard reset
+testnet 实验期不算. mainnet launch block 0 即衰减 timer 启. area 12 doc 钉.
+
+## T11 V7 grace v0.5 全局 12h + area 12 per-market mapping hardening
+v0.5 简单 (= 全局 12h 接受 crypto 浪费 + 政治可能不够), area 12 hardening 加 per-market grace mapping (= 跟 V8 reveal-fail 倍数 / Q10 4 数字 同 area 12 outstanding pattern).
+
+## 关键 unit 不变量 (= 5/23 J1 Q15 false-alarm sediment)
+**silverscript `tx.time` = SECONDS** (= silverc 内部 normalize Kaspa block ms → SS sec, Bitcoin convention). Console `deadline = Math.floor(outcomeEndMs / 1000)` = sec. 全 SS `tx.time >= deadline` 比较真 sec/sec unit-match. **不要盲打 ms patch** — fix wrong 100% break refund paths.
+
+---
+
+# Area 8 — Edge Cases (= 收敛 9 决议)
+
+## E1 — 50 cap = unique PoolSide P2SH 数
+maker UX surface "duplicate bettor_pk N times, 占 N seats". 不 block 但 visible.
+
+## E2 — Q13 stake input Number.isFinite ✅ shipped
+pool.js bettor/register 5 LOC + 10/10 test. master 37e3656c. NaN/Infinity/empty/undefined/0/-1/below-min 全 reject.
+
+## E3 — maker == broker OK + UX surface
+经济 net 0 给 maker (= fee 给自己), 跟 area 1.4 一致. UI 显示 "broker == maker (self)" tag, 防 bettor 暗藏被 self-broker.
+
+## E4 — accept 窗口 miss = operator 机会成本 (= 非 silent forfeit)
+跟 area 3.5 dissent 同 framing. 真 v0.5 不 heartbeat (= over-engineering), 接受简单. heartbeat area 12 hardening.
+
+## 🚨 E5 — Kaspa RBF + outputs 防护 (= 5/23 update post Kaspa research)
+
+**Kaspa 真有 opt-in RBF** (= rusty-kaspa PR #499 merged 2024-07, mainnet v1.0.0 post-Crescendo live). Bettor r418 + Owner 5/23 Kaspa research catch.
+
+**但 settle/refund TX 的 outputs 真被 oracle sig 通过 sighash 绑定**:
+- 攻击者无法 sign replacement TX 改 outputs (= 需 new oracle sigs)
+- RBF 仅可改 sig-unbound fields (= 主要 minerFee)
+- = **sig-binding chain-level 等价防护**
+
+正向不变量 (= 跟 area 1.8 marketMetadataHash 同级):
+> **Settle/refund TX outputs 被 oracle sig 通过 sighash 绑定. Kaspa 有 opt-in RBF, 但 replacement 真需 new sigs 重定向 output. RBF 仅改 sig-unbound fields (= 主要 minerFee), 不破协议 fund 流向.**
+
+**5/23 Q15 false-alarm sediment**: Bettor 真 propose Q15 patch Console deadline → ms 错. silverscript TUTORIAL.md verbatim 证 `tx.time` = SECONDS. cycle 1-4 真不是 luck. J1 #510 反向风险 catch 防 100% break refund paths. 真 lesson: **reviewer "fix wrong 怎么破" + 权威 source > 自查推理**.
+
+## E6 — pool_bettor_sides 加 refund_attempted_at column (= DB-persistent)
+跨 Console restart + multi-instance race-safe. 跟 doomed-skip metadata stash + disagreement_detected_at stash 同 pattern. **migration v142 pending** (= 注意 J2 真 ship v141).
+
+## E7 — POOL_DEADLINE_MAX_DAY env hard cap
+testnet 30 day / mainnet 365 day. 防 maker 锁单 100 年. pool.js create endpoint check `outcomeEndMs > NOW + maxDeadlineDay × 86400_000 → reject`. **pending ship**.
+
+## E8 — Q14 PoolSide P2SH duplicate dedupe ✅ shipped
+同 (bettor_pk, direction, stake_amount) → 同 P2SH → 第 2 stake 永久 stuck. pool.js bettor/register 加 SELECT duplicate match → 409 reject. master 37e3656c + 5/5 test.
+
+## E9 — Option 1 sampling filter 排除 maker + broker (= 跟 area 1.4 一致)
+sampling 实现预设, regression test 守住. **pending Option 1 implement 时 predicate**:
+```
+eligible_pool = relay_nodes WHERE is_oracle=1 AND id != maker_relay_id AND id != broker_relay_id
+```
+
+---
+
+# Area 9 — Dispute Resolution (= 收敛 9 决议)
+
+## D1 — v0.5 0 dispute path
+跟 area 2.11 "v0.5 假设 oracle 集合可信" + 反目标精神一致. 不发明 trust path. Phase 5 challenge mechanism 加.
+
+## D2 — evidence_hash flexible format (= J1 #504 catch LLM snapshot 非 replay)
+
+LLM 非确定性 → LLM hash 是该次推理 snapshot (= 证明 oracle daemon 不撒谎用 LLM), 不是 reproducible verification. Phase 5 deterministic replay (= seed pinning + model versioning).
+
+非 LLM oracle (= human / pure_source / The Sports DB / OpenWeather 等) flexible format:
+```json
+evidence: {
+  type: "llm_with_source" | "human" | "pure_source" | "...",
+  source_url: "...",
+  source_hash: "...",
+  reasoning_hash: "...",
+  timestamp: 1700000000
+}
+```
+chain_event 存 `sha256(JSON.stringify(evidence))` 当 evidence_hash. v0.5 voter daemon 仅 "llm_with_source" type, 其他 Phase 5 加.
+
+## D3 — Phase 5 challenge mechanism 10 design questions enumerate
+(不预答数字, Phase 5 实施者继承)
+1. challenge window 多长 (= area 7 timing)
+2. challenge bond 多大 (= area 10 经济)
+3. N 重投 oracle pool 来源 (= 跟原 3 set 一致? 必排除原 3?)
+4. N 是几 (= 9/7/5 trade-off)
+5. N 重投 oracle 报酬 (= challenge bond 分? KANet 库存?)
+6. overturn 阈值 (= N/2+1 simple / 2N/3 super-majority)
+7. 原 3 oracle slash 量 (= 全 bond? Tier 2 stake?)
+8. 不 overturn 时原 oracle 奖励 (= challenge bond × ?)
+9. multi-round challenge 允许?
+10. timeline 总长
+
+## D4 — v0.5 不区分误判 vs 作恶
+Phase 5 challenge + area 12 reputation system 是检测路径. off-chain pattern analysis (= 同 oracle 多 market 投反 consensus 重复) 属 area 12 reputation layer, 不属 protocol.
+
+## D5 — off-chain mediation 不进协议层, 必保非托管不变量
+broker / KANet 自行 implement mediation, 但限 UI 调解 / 信息中介 / Phase 5 challenge 入口 link, **不持任何用户资产** (= 反 area 1.2 反目标 = C 托管违反).
+
+## D6 — settle TX 上链后 challenge unwind (= J1 #504 漏 catch)
+- (a) pre-settle window — settle 延迟 N hour 给 challenge, challenge 触发不 broadcast settle
+- (b) post-settle + 补偿机制 — settle 不退, oracle bond 按 challenge 结果 slash 补偿
+- Phase 5 design 必答, 不阻 v0.5
+
+## D7 — vote-based truth ≠ actual truth (= J1 #504 漏 catch)
+9 oracle 重投也是 vote-based truth. doc 明: Phase 5 challenge 提供 "更大 sample size consensus", **不保证真相**. 真相 anchoring 需 external (= 跨 challenge round + 多 reputation 高 oracle 一致 + multi-source data agreement).
+
+## D8 — evidence-fraud auto-trigger (= J1 #504 漏 catch)
+Phase 5 deterministic replay 后, 假证据 = 自动 dispute 触发 (= 跟 D3 bettor 主动 challenge 不同, auto-detect). Phase 5 hardening 加.
+
+## D9 — oracle bond v0.5 show up collateral / Phase 5 correctness collateral (= J1 #505 catch)
+- **v0.5**: bond = "show up" collateral only (= silent forfeit, dissent 不罚)
+- **Phase 5**: 加 bond = "correctness collateral" (= challenge 推翻后 slash)
+- 跟 D3 challenge mechanism slash + D6 时点 + bond 大小 covers slash + 补偿 winning bettor 一起 design
+
+---
+
+# Area 10 — Economic Security (= 收敛 15 outstanding framework, mainnet ship-block calibration)
+
+## EC1-EC2 V8 reveal-fail (= mainnet B 启用后)
+- **Tier 1** (= 没 stake): governance forced exit + future sampling exclusion (= 不 "M_tier1 数字" 问题, 是流程)
+- **Tier 2 reveal-fail**: slash X% × N_tier2 stake (= 不是 per-market bond × M, 区分 per-market vs 全局)
+- 具体 X% Owner 决, mainnet ship-block calibration data
+
+## EC3-EC5 Q2/Q10 Tier 2 calibration
+- `N ≥ max_pot_cap × M`, M ≥ 1.5 数学下限 (= 防 sybil-bribe 1:1 cost)
+- 实际 mainnet M = f(oracle expected income + 真 fail rate, testnet 数据 inform)
+- 权重衰减 = **指数** (= smoother transition) + 总 transition window 12-18 月 (= 非 half-life)
+
+## EC6-EC7 governance + correct_votes
+- **EC6 governance multisig ≥ 3 independent parties M-of-N** (= Owner + 2 external KANet contributor / community delegate, 防 single trust point)
+- reason taxonomy 4 类: operator_dispute / performance_failure / voluntary_exit / compliance_required
+- governance form SS hardcoded 真复杂 (= SS 不读 chain_events, 3 option a baked / b on-chain registry / c Console-side enforce, Phase 5 真 SS design)
+- **EC7 correct_votes 定义 (a)**: 2-1 disagreement 全 abstain (= 不计 correct/total), 跟 area 3.5 dissent 不罚 + area 6 dissent 机会成本一致 + 防 herd-via-reputation
+
+## EC8-EC9 burn (= Owner 5/23 钦定延伸 Gap 1B)
+- **sub-option (i) 纯 burn 不重分配** (= 跟 Owner 反 carry-over 一致, EIP-1559 同精神)
+- refund_unanimous_silent: 3 bonds 全 burn, 不 → maker
+- forfeit_1 maker 25%: burn (= 25% 直接消失流入 minerFee), 其他 75% 按原 distribute (= 50% winner + 12.5×2% oracle reward 不动)
+
+## EC10 monitor
+maker_disagreement_fee_accumulated 月度 SQL view + 1% threshold alert → area 10 hardening re-design queue trigger.
+
+## EC11-EC15 (= J1 #506 part 2 漏)
+- **EC11 maker stake 经济下限**: ≥ X% × maker creator fee expected income (= 不只技术 1 KAS, calibrate mainnet)
+- **EC12 brokerFeePct hard cap**: mainnet 10% (= 1000 bps) 防 maker == broker 抽极限
+- **EC13 Tier 2 N dual-limit**: 下限 sybil `N ≥ max_pot_cap × M` + 上限 viability `N ≤ Y × median KANet operator wealth` (= 防 C 退化 A)
+- **EC14 bettor min stake mainnet dual-limit**: 技术 0.5 KAS + 经济 ≥ $5 USD floor (= mainnet ship-block 按 spot 算 effective KAS min, **KAS-USD oracle Phase 5 design**)
+- **EC15 Owner governance conflict transparency**: Tier 1 governance 决议必披露 signer 是否在被影响 market 有头寸 (= transparency 不 prohibition)
+
+## EC-Q1 SS vs Console boundary
+- Tier 2 N (EC4): SS hardcoded ✓
+- Weight formula (EC5): SS hardcoded ✓
+- bond × M slash (EC1/EC8/EC9): SS hardcoded ✓ (= refund/forfeit entry checkSig sighash 绑定)
+- monitor (EC10): Console ✓
+- governance form (EC6): **Phase 5 SS design** (= a/b/c trade-off 真复杂)
+
+## EC-Q2 mainnet ship-block calibration evidence
+不只 Owner 拍, **必 documented calibration data**:
+- testnet 数据 ≥ N market cycle 覆盖
+- calibration analysis (= reveal-fail 实际率 vs M_v8 假设 cost)
+- Owner final ack 基于 evidence
+
+---
+
+# Area 11 — TX Size Limits (= 收敛 7 决议)
+
+## L1 — 50 bettor worst-case storage mass 数学 verify
+worst-case (= 50 bettor 0.5 KAS, maker 1 KAS, oracle bond 1 KAS × 3, broker fee 0.05 KAS, all YES win):
+- inputs: 1 spine_maker + 3 oracle_bonds + 50 PoolSide = 54 inputs
+- outputs: 1 broker_fee + 50 winner payouts + 3 oracle bond returns = 54 outputs
+- KIP-9 storage mass ≈ **180K** (< 400K safe threshold ✓)
+- = 现 minimum 配置在 50 bettor cap **数学可行**
+
+Kaspa raw byte size + input count → Kaspa research 5/23 已答 (= no hard MAX_TX_SIZE / MAX_TX_INPUTS constant, 真都 mass-derived).
+
+## L2 — pot_cap = `min(N/M, max_tx_safe_pot)` dual-binding derived
+不是独立可选. 确定 N + M 后 pot_cap 自动决定. 加 TX size 上限 (= L1 数学算出可行最大), 真两 derived 取较紧.
+
+## L3 — refund_market_cancelled_anyone SS entry (= 0 sig!)
+J1 #507 真 catch: PoolSide ctor baked bettorPk → outputs pinned 到 bettor P2PK → **不需 sig parameter**. 任何人 broadcast 都把钱送 bettor 原地址.
+
+```
+entrypoint function refund_market_cancelled_anyone() {
+    require(tx.time >= deadline + LONG_TAIL_TIMEOUT);  // 1y SS-hardcoded
+    require(tx.inputs.length == 1);
+    require(tx.outputs.length == 1);
+    byte[34] bettorLock = new ScriptPubKeyP2PK(pubkey(bettorPk));
+    require(tx.outputs[0].scriptPubKey == byte[](bettorLock));
+    require(tx.outputs[0].value == stakeAmount - minerFee);
+}
+```
+
+简化 SS size + 安全等价 (= 攻击者无法重定向).
+
+## L4 — create-time check 两 invariant
+```js
+// storage mass worst-case
+const worstMass = estimateStorageMass(/* 50 bettor inputs/outputs */);
+if (worstMass > STORAGE_MASS_SAFE_THRESHOLD) reject('storage mass 超 safe');
+
+// W6 worst-case losingPool >= fees
+const minLosingPool = Math.min(maker_stake, 50 × bettor_min_stake) - minerFee;
+if (minLosingPool < broker_fee_floor + minerFee) reject('losingPool insufficient');
+```
+
+## L5 — Merkle proof depth log2(N)
+50 bettor → ceil(log2(50)) = 6 layers → 192B Merkle proof. 未来 expand 按 log2(N) 算, 上限跟 SS bytecode cap.
+
+## L6 — Kaspa input count limit
+Kaspa research 5/23 答: 真没 MAX_TX_INPUTS hard constant, 真 mass-derived ~83 inputs for standard P2PK transfer at 100K standardtx mass cap. Pool settle 54 inputs 真安全 below.
+
+## L7 — 两 refund entry 并存
+- **refund_market_cancelled** (= bettor sig 立即, area 4): bettor 自己签 + market cancelled chain_event → 立即 self-refund
+- **refund_market_cancelled_anyone** (= timelock 1y 0 sig, area 11 L3): long-tail safety net
+
+bettor 在线时正常路径 + bettor 失联 long-tail safety net.
+
+---
+
+# Area 12 — V0.5 vs Mainnet 简化差异 (= 收敛 M1-M10, 整合)
+
+## M1 — 全 12 area 差异表 (= J1 #508 catch 缺 area 1+8 row)
+
+| Area | v0.5 testnet | v1.0 mainnet day-1 | Phase 5+ hardening |
+|---|---|---|---|
+| 1 角色 | 同 (= 非托管/反目标/排他性 invariants) | 同 | 同 (= 不变量永久) |
+| 2 接单 | 公开 sampling | (c) 经济威慑 + Tier 1+2 | VRF identity hiding |
+| 3 投票 | A 公开 | B commit-reveal | reveal-fail 罚倍数 nail |
+| 4 结算 (refund_unanimous_silent) | → maker | → burn (= EC8 revisit) | challenge-driven slash |
+| 5 奖励 (forfeit_1 maker 25%) | → maker | → burn (= EC9 revisit) | calibrated split |
+| 6 惩罚 | silent forfeit only | + reveal-fail penalty | + correctness collateral |
+| 7 timing | testnet 短 (30 min ORACLE_SILENT 等) | mainnet 长 (= 1440 min etc) | per-market grace mapping |
+| 8 edge | E3 maker==broker UI tag / E7 deadline 30 day | E7 365 day | E4 heartbeat |
+| 9 dispute | 0 path | 0 path | challenge mechanism + evidence_hash deterministic |
+| 10 reputation | binary is_oracle | + transparency metric (= total_votes / correct_votes 公开) | sybil-resistant reputation |
+| 11 long-tail timeout | refund_market_cancelled bettor 立即 | + refund_market_cancelled_anyone (= timelock 1y 0 sig) | (= 同 mainnet) |
+| 12 oracle pool | testnet single operator | Tier 1+2 onboarding (= C 路径) | reputation 真 informed sampling |
+
+## M2 — mainnet 切换 trigger 拆 day-1 ship-block vs Phase 5 hardening
+
+### Day-1 ship-block (= 阻塞):
+- Tier 1+2 oracle onboarding 完成
+- V8 B flag 同步 (= Tier 2 准入开)
+- Q10 权重衰减 start block 定 + SS hardcoded
+- forfeit_1 / refund_unanimous_silent burn baked SS
+- EC1-EC15 全 calibration data ack
+- T7 Kaspa external queries 答完 (= M4)
+- governance multisig set up (= ≥ 3 independent)
+- v0.5 testnet ≥ N cycle e2e PASS
+
+### Phase 5 hardening triggers (= post-launch phased):
+- Q2 VRF sampling identity hiding (= mainnet 跑半年后)
+- evidence_hash deterministic LLM replay (= seed pinning + model versioning)
+- 信誉评分 sybil-resistant (= mainnet 数据 ≥ X 月)
+- D3 challenge mechanism (= 10 数字 nail 后)
+- D9 oracle bond correctness collateral 切换
+- per-market grace mapping (= V7 extension)
+
+## M3 — Phase 5 design queue 全 enumerate
+- D3 challenge 10 数字 / D6 settle TX unwind / D7 multi-anchor real truth / D8 evidence-fraud auto / D9 correctness collateral
+- EC1-EC15 mainnet calibration 数字
+- EC-Q1 governance form 3 option SS design
+- VRF Q2 sampling identity hiding
+- 信誉评分 sybil-resistant design
+- per-market grace mapping
+- PoolSide capacity expansion (= 50 → larger, log2(N) Merkle depth follow)
+- maker/broker overlap UX refinements (= E3 + EC12 cap)
+- F1 DISPUTE 删除后 voter daemon low-confidence behavior 长期 design (= 现 default 弃票, Phase 5 retry/notify/queue 多策略)
+
+## M4 — Kaspa external query queue (= 5/23 已 research)
+
+🎉 **5/23 已 mostly answered via Agent research**:
+- ✅ Finality depth: 432,000 blocks (~12h absolute, 36,000 = merge_depth_bound)
+- ✅ Max TX size: no hard byte constant, mass-derived (100K per-tx standardness)
+- ✅ Max input count: mass-derived ~83 standard
+- ✅ Max output count: storage mass-derived (KIP-9 STORM)
+- ✅ KIP-9 storage mass cap: mainnet = testnet (= 100K per-tx, 500K per-block)
+- ✅ RBF: 真有 opt-in (= rusty-kaspa PR #499)
+- ✅ Block timestamp precision: ms (= u64 Unix epoch), SS `tx.time` silverc normalize 到 sec
+- ⚠ testnet-12 → mainnet compat: KIP-10/14 mainnet live, KIP-16/17/20/21 TN12 only (= Toccata activation ~6/4-6/20)
+
+**剩 1 item Owner action**: 真 v0.5 SS contracts 依赖 KIP-16/17/20/21? 若依赖 → mainnet ship 必等 Toccata. 真 audit J1 SS contracts opcode usage.
+
+## M5 — mainnet ship-block checklist
+- 全 area 1-11 v0.5 spec implement
+- 全 EC1-EC15 calibration data documented + Owner final ack
+- T7 Kaspa external queries answered (= M4 mostly done, KIP audit pending)
+- Tier 1 onboard 5-10 operators + KYC + reputation lock
+- Tier 2 registry SS ship + N calibrated
+- 权重衰减 SS hardcoded + start block defined
+- governance multisig set up (= EC6 ≥ 3 independent)
+- v0.5 testnet ≥ N cycle 真 e2e PASS
+- **全 v0.5 testnet bug log 公开 audit** (= 含 Bug 1-8 + 历史 stress test cycle catch list, 不藏)
+- **多形态 stress test ≥ N cycle** (= 1-bettor / 50-bettor / partial-bond / disagreement / all-silent / mid-disagreement / Q11/12/13/14 各 reject path / Q2 sampling failure)
+- **独立第三方安全审计** (= 非 KANet 内部, 外部 auditor)
+- **公开 testnet community access** (= 真用户 join, 非只我们 10 agent)
+- **emergency rollback 程序** (= 若 mainnet 上线后发现 critical bug 怎么 halt + recover, 跟 EC15 Owner governance multisig 路径关联)
+
+## M6 — testnet/mainnet **no migration** (= fresh start)
+新 refund_disagreement + refund_market_cancelled_anyone + burn 更新 = 新 SS = 新 P2SH. 现 testnet markets 永远孤立. mainnet **完全 fresh start** 带 area 1-11 全 spec baked. **不试图把 testnet 状态搬到 mainnet**.
+
+## M7 — Owner ack chain_event "mainnet_launch_ack"
+不只 Owner 一句话, 是 governance event 形式:
+```json
+{
+  ack_by: Owner_pubkey,
+  signatures: [governance multisig ≥ 3],
+  calibration_data_hash: ...,
+  reason: ...,
+  timestamp
+}
+```
+
+## M8 — naming convention
+- **v0.5**: 现 testnet design (= 12 area dialogue baseline)
+- **v1.0**: mainnet day-1 ship (= v0.5 + Tier 1+2 + V8 B + burn changes + EC calibration baked, 新 SS recompile, mainnet P2SH)
+- **Phase 5+**: post-mainnet hardening series (= VRF / deterministic evidence / reputation / challenge / correctness collateral 等)
+
+## M9 — KAS-USD oracle Phase 5 design (= EC14 USD floor 实施需)
+- CoinGecko / CoinMarketCap (= centralized API)
+- 链上 DEX TWAP (= 去中心化但需 mainnet 有 KAS DEX)
+- multi-source aggregate (= 复杂)
+Phase 5 design 必答, 不预 propose 来源.
+
+## M10 — area-1 invariant recurring audit
+mainnet day-1 ship 后**不是 done**:
+- 每月 protocol-level audit (= Q11/Q12/Q13/Q14 等 code check 仍在效)
+- 任何 broker / KANet update 不破 area 1.2 反目标 (= 不偷偷加 custody mode)
+- Tier 1 governance event 公开 review (= 不静默移除)
+- 新合约 entry / migration / patch 都 area-1 reaudit gate 通过
+
+---
+
 # 10 sub-question 收尾整合 (= pp.txt review + J1 #486/#488 答)
 
 | Q | 状态 | 答 |
@@ -681,9 +1048,7 @@ Tier 1 vs Tier 2 reveal-fail 处理可能不同 (= Owner 5/23 polish, 详 Area 3
 - **V8 nail #4 reveal-fail 具体倍数** (= bond × 1.5 / × 2 / Tier 2 stake 砍, 待 Area 10)
 - **V8.4 Tier 1 vs Tier 2 reveal-fail 处理可能不同** (= Tier 1 没 stake 砍, governance exclusion?, 待 Area 10)
 - **Q2 Tier 2 N 倍数 M** (= invariant `N ≥ max_pot_cap × M`, M 具体值待 Area 10)
-- **Q1
-
---- END CHUNK 7/9 ---0 4 数字** (= Tier 2 N + 权重公式 + governance + correct_votes 定义, 待 Area 10/12)
+- **Q10 4 数字** (= Tier 2 N + 权重公式 + governance + correct_votes 定义, 待 Area 10/12)
 - **refund_unanimous_silent bond → maker revisit** (= Owner 5/23 钦定 同 Gap 1B 反对继承 known 缺陷, Area 10 可能改 burn)
 - **forfeit_1 maker 25% share revisit** (= J1 #494 catch, 同 +EV pattern 缩小版 oracleBond × 0.25, Area 10 一并)
 - **PoolSide long-tail timeout escape** (= Owner 5/23 加 refund_market_cancelled_anyone 新 SS entry, market deadline + 1y 任何 sig, 防 bettor 失联资金永久 stuck, Area 11 / Phase 5)
@@ -714,11 +1079,20 @@ Tier 1 vs Tier 2 reveal-fail 处理可能不同 (= Owner 5/23 polish, 详 Area 3
 - Ship #1 doomed-skip ✅ ship + audit PASS (= master d649de59)
 - Q11 area-1 oracle/bettor 排他性 ✅ ship + audit PASS (= master 80d627e5)
 - Q12 area-1 maker/bettor 排他性 ✅ ship (= master ab373e5e + 4/4 test, area-1 invariant 完整 code enforce)
+- Q13 stake input Number.isFinite ✅ ship (= master 37e3656c + 10/10 test, E2 NaN bypass fix)
+- Q14 pool_bettor_sides duplicate 排他 ✅ ship (= master 37e3656c + 5/5 test, E8 PoolSide P2SH collision fix)
 - F3 50-bettor max ✅ ship (= master a988f2fa)
+- doc v3 area 1-6 ✅ ship (= master 123bb9c1 + tn12 4277f93f8, 33KB / 766 lines / 92 标题)
+- doc v4 area 7-12 + RBF + Q15 sediment **pending paste** (= 等 doc v4 write + J1 逐字 commit)
 - F2 refund_maker_unjoined wire → Area 4 决 "不做 fast-path", 接受 30min refund_unanimous_silent
-- F4 pot cap → Area 11
-- F1 DISPUTE 砍 → Area 3 钉死, 实 ship 等 area 6+area 10 收尾后整 batch (= voter daemon + endpoint + decideConsensus 3 site)
+- F4 pot cap → Area 11 L4 invariant check
+- F1 DISPUTE 砍 → Area 3 钉死, ship 等 doc v4 commit 后 batch (= voter daemon + endpoint + decideConsensus 3 site)
 - W3 forfeit_1 余数 patch → 等 refund_disagreement SS contract 一并 ship
+- E6 pool_bettor_sides 加 refund_attempted_at column migration v142 → pending
+- E7 POOL_DEADLINE_MAX_DAY env (testnet 30 / mainnet 365) → pending
+- E9 Option 1 sampling filter 排除 maker+broker → pending (= 待 Option 1 implement 时 predicate)
+- L4 create-time storage_mass + losingPool 两 invariant check → pending
+- refund_disagreement SS entry (= P6 parametric + 2 constraints + Gap 1B burn + Owner 5/23 钦定 silent → burn 不 → maker) → pending
 
 ## 重要 architecture 修正 5/22-5/23
 
@@ -731,7 +1105,14 @@ Tier 1 vs Tier 2 reveal-fail 处理可能不同 (= Owner 5/23 polish, 详 Area 3
 - **Area 4 钦定** (= Owner 5/23 deep reply): Gap 1B silent bond burn (= 反对继承 known 缺陷 → maker), 3 implementation 扩展 (chain_event 双轨 + PoolSide long-tail escape + monitor metric), pre-Ship orphan + DB freeze flag
 - **Area 5 钦定**: W1-W7 + Q12 patch maker_relay 排他 (= Q11 同款 area-1 enforce, ✅ shipped)
 - **Area 6 钦定**: P1-P6 (= losing stake 非罚 / 正面原则 "有无尽责 party 可奖" / Q11+Q12 ship 完 invariant complete / dissent 机会成本非 forfeit share / V8 reveal-fail placeholder / refund_disagreement (A) parametric SS shape + 2 constraint)
+- **Area 7 钦定**: T1-T11 timing (= T_accept / D_deposit / max_attempts / silent / disagreement / V7 grace / k / register window / chain timestamps / Tier 1 衰减起点 /per-market grace phasing)
+- **Area 8 钦定**: E1-E9 edge (= 50 cap unique PoolSide / Q13 stake isFinite / Q14 duplicate / E3 broker==maker UX / E4 accept miss 机会成本 / **E5 RBF framing update 5/23** / E6 DB column / E7 deadline cap / E9 sampling filter)
+- **Area 9 钦定**: D1-D9 dispute (= v0.5 0 path / evidence_hash flexible / Phase 5 challenge 10 questions / 误判 vs 作恶 area 12 reputation / off-chain mediation 非托管警示 / settle TX unwind pre vs post / vote truth ≠ actual / evidence-fraud auto / bond correctness collateral Phase 5)
+- **Area 10 钦定**: EC1-EC15 economic framework (= V8 reveal-fail bond × M / Tier 1 governance exit / Tier 2 slash X% × N / Q10 N+权重+governance+correct_votes / burn EC8+EC9 / monitor / maker stake economic floor / brokerFeePct hard cap 10% / Tier 2 N dual-limit / bettor USD floor / Owner governance conflict transparency)
+- **Area 11 钦定**: L1-L7 TX size (= worst-case 180K mass < 400K / pot_cap dual-binding / PoolSide.refund_market_cancelled_anyone 0 sig timelock / create-time 两 invariant / Merkle log2 / Kaspa input count / 两 refund entry 并存)
+- **Area 12 钦定**: M1-M10 mainnet (= 全 12 area row table / trigger 拆 day-1 vs hardening / Phase 5 design queue / Kaspa external query queue / ship-block checklist / no migration / governance multisig chain_event ack / v0.5/v1.0/Phase 5 naming / KAS-USD oracle / area-1 invariant recurring audit)
 - **forfeit_1 maker 25% share area 10 outstanding** (= J1 #494 catch, 同 +EV pattern 缩小版)
+- **🚨 5/23 Kaspa research findings**: RBF 真存在 (= sighash binding 等价防护) + Q15 false-alarm (= silverscript tx.time SECONDS, J1 反向风险 catch 防 100% break)
 
 ---
 
@@ -742,11 +1123,7 @@ Tier 1 vs Tier 2 reveal-fail 处理可能不同 (= Owner 5/23 polish, 详 Area 3
 
 **工程层还远没收敛** (= Area 4-12 + 6 个 outstanding 数字/形式):
 - 结算 / 惩罚 / edge cases / timing / dispute / economic security / TX size 这些恰是出 bug 最多的地方都没动
-- Area 1-3 共识只是开始. hard part 全在 
-
-[END doc v3 chunk 8 content]
-
-拼接顺序: r405-chunk1 + r404-chunk2 + r404-chunk3 + r404-chunk4 + r404-chunk5 + r404-chunk6 + r404-chunk7 + r406-this-chunk8 + r404-chunk9. 全 32803 bytes verbatim commit.edge cases + 经济模型 (= pending 段)
+- Area 1-3 共识只是开始. hard part 全在 edge cases + 经济模型 (= pending 段)
 
 **不能说 v0.5 可 ship**. 还需 Area 4-12 真深 dialogue + 收敛 + ship.
 
