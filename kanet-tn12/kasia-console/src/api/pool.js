@@ -230,6 +230,15 @@ export async function registerPoolRoutes(fastify) {
       return reply.code(403).send({ ok: false, error: 'bettor_relay_id is in market oracle set — oracle/bettor exclusivity (area-1 invariant)' });
     }
 
+    // Area-1: maker is the implicit bettor via outcome_side at create (stake locked at
+    // spine, direction = outcome_side). Allowing maker to also bettor/register would
+    // create a second stake at the maker's PoolSide → computePoolPayouts L374-376 would
+    // count the maker twice in `participants` (once isMaker:true from spine, once from
+    // sides.map). Block at registration to preserve "maker 恒 bettor" single identity.
+    if (b.bettor_relay_id === market.maker_relay_id) {
+      return reply.code(403).send({ ok: false, error: 'bettor_relay_id is the market maker — maker bets implicitly via outcome_side (area-1 invariant)' });
+    }
+
     const bettorRow = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(b.bettor_relay_id);
     if (!bettorRow?.address) return reply.code(400).send({ ok: false, error: 'bettor relay not found' });
 
