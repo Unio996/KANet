@@ -69,7 +69,7 @@ export async function registerPoolRoutes(fastify) {
       return reply.code(400).send({ ok: false, error: `outcome_end_date must be <= now + ${maxDeadlineDay} days (POOL_DEADLINE_MAX_DAY hard cap, area-8 E7)` });
     }
     const deadline = Math.floor(outcomeEndMs / 1000);
-    const minerFee = parseInt(b.miner_fee, 10) || 20_000;
+    const minerFee = parseInt(b.miner_fee, 10) || 50_000;
     const brokerFeePct = parseInt(b.broker_fee_pct, 10);
     if (!Number.isFinite(brokerFeePct) || brokerFeePct < 0 || brokerFeePct >= 10000) {
       return reply.code(400).send({ ok: false, error: 'broker_fee_pct must be 0-9999 basis points' });
@@ -93,7 +93,7 @@ export async function registerPoolRoutes(fastify) {
     // small relative to fee floor), 3 oracle bond returns at oracleBondAmount. Storage mass
     // and losingPool ≥ fee-floor checks below mirror the runtime checks in dispatchPhase2
     // (settler L454) so a doomed config is rejected at create instead of locking maker stake.
-    const minerFee_L4 = parseInt(b.miner_fee, 10) || 20_000;
+    const minerFee_L4 = parseInt(b.miner_fee, 10) || 50_000;
     const worstLosingPool = makerStakeAmount;  // worst case: maker is sole loser
     if (worstLosingPool < MIN_BROKER_FEE_SOMPI_L4 + minerFee_L4) {
       return reply.code(400).send({ ok: false, error: `worst-case losingPool ${worstLosingPool} sompi < broker_fee_floor ${MIN_BROKER_FEE_SOMPI_L4} + minerFee ${minerFee_L4} — market would be unsettlable (area-11 L4)` });
