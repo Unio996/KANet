@@ -752,12 +752,20 @@ export async function dispatchRefundDisagreement(market, decision) {
     // a final TX with lockTime=deadline+300, so all 4 input sigs would invalidate).
     // 7d bug 10b fix (cycle 5 rerun #1 catch): column is `deadline` (sec int), NOT
     // `outcome_end_date`. Date.parse(undefined)=NaN → NaN+300=NaN → BigInt(NaN||0)=0n → same bug.
+    // 7d bug 10c fix (cycle 5 rerun #2 catch via rusty-kaspa source): Kaspa LOCK_TIME_THRESHOLD =
+    // 500_000_000_000 (500B), NOT Bitcoin's 500M. Values < 500B interpreted as DAA score, ≥ 500B
+    // interpreted as Unix MILLISECONDS (not seconds). Setting lock_time = deadline_sec + 300
+    // (~1.78B) → Kaspa reads as DAA score 1.78B; testnet current DAA ~10M → "tx input #0 is not
+    // finalized" forever. Fix: multiply by 1000 → ms value ~1.78T > 500B → ms interpretation →
+    // block_time_ms catches up immediately. SS OP_CLTV just does raw u64 compare so lock_time_ms
+    // (1.78T) >= operand (deadline_sec + 300 = 1.78B) trivially passes. Console-level
+    // DISAGREEMENT_TIMEOUT_MIN (5min) is the real time gate now; SS CLTV becomes a no-op.
     const deadlineSec = parseInt(market.deadline, 10);
     if (!Number.isFinite(deadlineSec) || deadlineSec <= 0) {
       console.error(`[pool-settler] dispatchRefundDisagreement market=${market.id.slice(0,12)} invalid deadline=${market.deadline}`);
       return;
     }
-    const refundLockTimeSec = deadlineSec + 300;
+    const refundLockTimeMs = (deadlineSec + 300) * 1000;
 
     // Build preimage via maker_relay (single-p2sh refund TX on spine inputs only)
     const preimage = await sendCommandAsync(market.maker_relay_id, {
@@ -765,7 +773,7 @@ export async function dispatchRefundDisagreement(market, decision) {
       p2sh_address: market.spine_p2sh,
       required_input_outpoints: requiredInputOutpoints,
       outputs,
-      lock_time: refundLockTimeSec,
+      lock_time: refundLockTimeMs,
     });
     if (!preimage?.ok || !preimage.tx_obj) {
       console.error(`[pool-settler] dispatchRefundDisagreement build_preimage fail market=${market.id.slice(0,12)}: ${preimage?.error}`);
@@ -782,7 +790,7 @@ export async function dispatchRefundDisagreement(market, decision) {
       refund_disagreement_dispatched_at: new Date().toISOString(),
       refund_disagreement_outputs: outputs,
       refund_disagreement_input_count: requiredInputOutpoints.length,
-      refund_disagreement_lock_time: refundLockTimeSec,
+      refund_disagreement_lock_time: refundLockTimeMs,
     };
     sqlite.prepare('UPDATE pool_markets SET metadata = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
       .run(JSON.stringify(newMeta), 'collecting_sigs', market.id);
