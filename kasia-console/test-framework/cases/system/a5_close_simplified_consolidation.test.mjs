@@ -52,16 +52,15 @@ export default {
       const bybitAccount = getCexAccount('bybit');
       if (!bybitAccount) failures.push(`I6: getCexAccount('bybit') returned null — runtime filter broken`);
 
-      // I7 (KI 65 N19.238): MarketMaker-A surfaces in admin overview brokers list with is_template=true
-      // adapter_node_id NULL = template (= future N-node 模板, not 'down').
-      const mmaRow = db.prepare(`SELECT adapter_node_id FROM relay_nodes WHERE name='MarketMaker-A'`).get();
-      if (mmaRow?.adapter_node_id) failures.push(`I7: MarketMaker-A should have NULL adapter_node_id (= template), got ${mmaRow.adapter_node_id}`);
+      // I7 (KI 65 N19.238 → N19.250 update): MarketMaker-A surfaces in admin overview brokers list.
+      // Originally template (adapter=NULL); NWT N19.250 linked adapter 47045123 for Phase 1B fix
+      // (= "Relay not running" UI alert resolution by attaching shared adapter).
+      // Post-N19.250: MarketMaker-A is_template can be false (= adapter linked, no longer template).
+      // Invariant relaxed: assert MarketMaker-A surfaces in brokers list (= visible in Panel A).
       const ovRes = await fetch('http://127.0.0.1:3100/api/admin/overview');
       const ovBody = await ovRes.json().catch(() => ({}));
       const mmaInList = (ovBody.brokers || []).find(b => b.name === 'MarketMaker-A');
       if (!mmaInList) failures.push(`I7: MarketMaker-A not in /api/admin/overview brokers list`);
-      if (mmaInList && mmaInList.status !== 'template') failures.push(`I7: MarketMaker-A status='${mmaInList.status}' (expected 'template')`);
-      if (mmaInList && !mmaInList.is_template) failures.push(`I7: MarketMaker-A is_template flag false`);
 
       if (failures.length > 0) {
         return { ok: false, error: failures.join('; '), failures };

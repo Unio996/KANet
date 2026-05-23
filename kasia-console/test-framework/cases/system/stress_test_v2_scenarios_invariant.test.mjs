@@ -88,9 +88,12 @@ export default {
         // The import resolves (or fails on side effects, which is fine — module exists).
       }
 
-      // I5: stress relays each have adapter_node_id=NULL (= passive observer)
-      const withAdapter = db.prepare(`SELECT name FROM relay_nodes WHERE name LIKE 'stress-%' AND adapter_node_id IS NOT NULL`).all();
-      if (withAdapter.length > 0) failures.push(`I5: ${withAdapter.length} stress relays have adapter_node_id (should be NULL): ${withAdapter.map(r => r.name).join(',')}`);
+      // I5 (post-N19.250 update): stress relays adapter_node_id state.
+      // Phase 1A spawned with adapter=NULL (= passive observer pre-fund).
+      // NWT N19.250 Phase 1B fix linked adapter 47045123 to enable relay process spawn + portfolio UI.
+      // Invariant relaxed: assert stress relays exist (= 10 count). adapter linkage state acceptable both NULL or set.
+      const stressCount = db.prepare(`SELECT COUNT(*) c FROM relay_nodes WHERE name LIKE 'stress-%'`).get().c;
+      if (stressCount !== 10) failures.push(`I5: stress relay count ${stressCount} (expected 10)`);
 
       // I6: each stress relay has 5 EVM chain wallets
       for (const r of stressRelays) {
