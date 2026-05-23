@@ -123,8 +123,11 @@ export async function computeSpineP2SH(args) {
     throw new Error('oraclePks must be array of 3 x-only pubkeys (= v0.5 3-of-3)');
   }
   const oraclePks = args.oraclePks.map((pk, i) => validatePubkeyHex(pk, `oracle${i+1}Pk`));
-  const allPks = new Set([makerPk, brokerPk, ...oraclePks]);
-  if (allPks.size !== 5) throw new Error('ctor pubkeys must all be unique (maker + broker + 3 oracle = 5)');
+  // Bettor r449 D4 maker == broker thesis — allow broker_pk == maker_pk (= net-zero fee).
+  // Oracles still must be distinct from each other AND from {maker, broker} (Q11 invariant).
+  const oraclePkSet = new Set(oraclePks);
+  if (oraclePkSet.size !== 3) throw new Error('3 oracle pubkeys must be unique');
+  if (oraclePkSet.has(makerPk) || oraclePkSet.has(brokerPk)) throw new Error('oracles must be distinct from maker + broker (Q11 invariant)');
   const deadline = validateInt(args.deadline, 'deadline', 1);
   const minerFee = validateInt(args.minerFee, 'minerFee', 1, 10_000_000);
   const brokerFeePct = validateInt(args.brokerFeePct, 'brokerFeePct', 0, 9999);
