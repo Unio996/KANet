@@ -51,6 +51,41 @@ function _getBrokerOrgAddrs() {
   ).all(...names).map(r => r.address);
 }
 
+/**
+ * r250.2 path A — sync lookup: find 1 marketmaker open sell offer matching user BUY qty + chain.
+ * Returns offer row OR null.
+ *
+ * For BUY KAS (user gives USDT, wants KAS):
+ *   matchmaker offer must: give_asset='KAS' want_asset='USDT' give_chain='kaspa' want_chain=<chain>
+ *   want_amount >= user's USDT amount AND give_amount >= user's KAS qty
+ *
+ * @param {object} opts — { qty: number, chain: string } where chain is the USDT chain (bnb/eth/...)
+ * @returns {object|null} exchange_offers row OR null
+ */
+export function findOpenSellOffer({ qty, chain }) {
+  if (!qty || !chain) return null;
+  const chainKey = String(chain).toLowerCase();
+  // Marketmaker sells KAS for USDT on the user's chain.
+  // give_chain='kaspa' (= mm delivers KAS), want_chain=<user chain> (= mm receives USDT)
+  // give_amount (KAS) >= user qty (= mm has enough KAS to deliver)
+  const row = sqlite.prepare(`
+    SELECT eo.*, rn.id AS maker_relay_id, rn.name AS maker_name
+    FROM exchange_offers eo
+    JOIN relay_nodes rn ON rn.address = eo.maker
+    WHERE eo.protocol_status = 'open'
+      AND eo.expires_at > datetime('now')
+      AND UPPER(eo.give_asset) = 'KAS'
+      AND UPPER(eo.want_asset) = 'USDT'
+      AND LOWER(eo.give_chain) = 'kaspa'
+      AND LOWER(eo.want_chain) = ?
+      AND CAST(eo.give_amount AS REAL) >= ?
+      AND EXISTS (SELECT 1 FROM json_each(rn.roles_json) je WHERE je.value = 'marketmaker')
+    ORDER BY (CAST(eo.want_amount AS REAL) / CAST(eo.give_amount AS REAL)) ASC, eo.created_at ASC
+    LIMIT 1
+  `).get(chainKey, qty);
+  return row || null;
+}
+
 export function tickCrossMatchOnce(marketPrice = null, brokerAddrs = null, opts = {}) {
   const PRICE_TOLERANCE = opts.priceTol ?? PRICE_TOLERANCE_DEFAULT;
   const QTY_TOLERANCE = opts.qtyTol ?? QTY_TOLERANCE_DEFAULT;

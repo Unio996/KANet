@@ -302,16 +302,75 @@ async function _doQuote(peer, draft, relayNodeId, prevReply) {
   // ("YYYY-MM-DD HH:MM:SS" space, NOT ISO 8601 "T...Z"). 否则 sweep WHERE expires_at < datetime('now')
   // 字典序 compare 错 (T=84 > space=32) → expires_at 永远 NOT < now → sweep 永不 trigger.
   const escrowId = randomUUID();
+
+  // r250.2 path A — matchmaker mode lookup (NWT N19.273 spec, Owner 5/23 broker 零库存 钦定).
+  // Read BROKER_MATCHMAKER_MODE config: 'disabled' (default) / 'enabled' / 'shadow'.
+  // BUY only (= isBuy true); SELL path stays custodial for now (= mm 不 buy KAS phase 1).
+  // If 'enabled' AND findOpenSellOffer returns offer: INSERT with broker_role='matchmaker',
+  //   user transfers to marketmaker addr + separate 1% fee to broker addr.
+  // If 'shadow': INSERT custodial as before, but log + audit the would-be match decision.
+  let brokerRole = 'custodial';
+  let makerAddr = null;
+  let brokerFeeAddr = null;
+  let brokerFeeAmt = null;
+  let matchmakerOffer = null;
+  if (isBuy) {
+    let matchmakerMode = 'disabled';
+    try {
+      const { getConfig } = await import('../../data/settings/configs.js');
+      matchmakerMode = (await getConfig('BROKER_MATCHMAKER_MODE')) || 'disabled';
+    } catch {}
+    if (matchmakerMode !== 'disabled') {
+      const { findOpenSellOffer } = await import('../cross-match-engine.js');
+      matchmakerOffer = findOpenSellOffer({ qty, chain: chainKey });
+      if (matchmakerOffer) {
+        const mmWallet = sqlite.prepare(
+          'SELECT address FROM agent_wallets WHERE relay_node_id = ? AND chain = ? AND is_default = 1 LIMIT 1'
+        ).get(matchmakerOffer.maker_relay_id, chainKey)
+          || sqlite.prepare(
+            'SELECT address FROM agent_wallets WHERE relay_node_id = ? AND chain = ? LIMIT 1'
+          ).get(matchmakerOffer.maker_relay_id, chainKey);
+        if (mmWallet?.address) {
+          if (matchmakerMode === 'enabled') {
+            brokerRole = 'matchmaker';
+            makerAddr = mmWallet.address;
+            brokerFeeAddr = brokerRecvAddr;
+            brokerFeeAmt = +(baseQuoteUsdt * 0.01).toFixed(6);
+          }
+          try {
+            recordChainEvent({
+              txid: `matchmaker_decision_${escrowId.slice(0, 12)}_${Date.now()}`,
+              eventType: 'broker_matchmaker_decision_v1',
+              fromAddress: peer,
+              toAddress: mmWallet.address,
+              payload: JSON.stringify({
+                mode: matchmakerMode,
+                applied: brokerRole === 'matchmaker',
+                qty, chain: chainKey,
+                marketmaker: matchmakerOffer.maker_name,
+                mm_addr: mmWallet.address,
+                offer_id: matchmakerOffer.id,
+                broker_fee_amt_usdt: +(baseQuoteUsdt * 0.01).toFixed(6),
+              }),
+            });
+          } catch {}
+        }
+      }
+    }
+  }
+
   const expiresAt = sqlite.prepare("SELECT datetime('now', '+5 minutes') as t").get().t;
   try {
     sqlite.prepare(`
       INSERT INTO user_escrow_balances (
         id, quote_seq, side, user_kasia_addr, asset, chain, amount_quoted,
         broker_recv_addr, target_amount, target_asset, target_chain, user_target_addr,
-        status, expires_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_prepay', ?, datetime('now'), datetime('now'))
+        status, expires_at, created_at, updated_at,
+        broker_role, maker_addr, broker_fee_addr, broker_fee_amt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_prepay', ?, datetime('now'), datetime('now'), ?, ?, ?, ?)
     `).run(escrowId, nextSeq, draft.side, peer, prepayAsset, prepayChain, amountQuoted,
-           brokerRecvAddr, targetAmount, targetAsset, targetChain, userTargetAddr, expiresAt);
+           brokerRecvAddr, targetAmount, targetAsset, targetChain, userTargetAddr, expiresAt,
+           brokerRole, makerAddr, brokerFeeAddr, brokerFeeAmt);
   } catch (e) {
     // Bug NWT-13:21 Layer 1 fix (Owner 19:58 真测 surface): 旧 50-char truncate "user_escrow_balances.t" leak schema,
     // user 完全不知道发生啥. 改 console.error 完整 log + user-facing friendly message 不 leak SQL/schema.
@@ -324,6 +383,30 @@ async function _doQuote(peer, draft, relayNodeId, prevReply) {
   // Bug H γ P1 UX fix (NWT 13:31 surface): unit was "KAS/KAS" for BUY (targetAsset='KAS' both sides).
   // 真 unit: how many stable (USDT/USDC) per 1 KAS. stableAsset derived from chainKey (base→USDC, else USDT).
   const stableAssetForUnit = chainKey === 'base' ? 'USDC' : 'USDT';
+
+  // r250.2 path A — matchmaker mode reply: user transfers to marketmaker + separate fee to broker.
+  if (brokerRole === 'matchmaker') {
+    return [
+      `📋 报价 (买 ${qty} KAS, ${chainKey.toUpperCase()}) — matchmaker 模式`,
+      '',
+      `  KAS 中间价: ${midPrice.toFixed(6)} ${stableAssetForUnit}/KAS`,
+      `  撮合做市商: ${matchmakerOffer.maker_name}`,
+      '',
+      `💸 1) 转 ${amountQuoted} ${prepayAsset} 到做市商:`,
+      `  地址: ${makerAddr}`,
+      `  链: ${prepayChain.toUpperCase()}`,
+      '',
+      `💰 2) 另转 ${brokerFeeAmt.toFixed(6)} ${prepayAsset} 手续费 (1%) 到 broker:`,
+      `  地址: ${brokerFeeAddr}`,
+      `  链: ${prepayChain.toUpperCase()}`,
+      '',
+      `⏰ 5 分钟内两笔都到账, 否则报价自动失效 + refund.`,
+      `✓ 两笔到账后做市商直接 deliver ${qty} KAS to 你 Kasia (${peer.slice(0, 18)}...). broker 零库存撮合.`,
+      '',
+      '回 1 取消 / 2 查询状态.',
+    ].join('\n');
+  }
+
   return [
     `📋 报价 (${isBuy ? '买' : '卖'} ${qty} KAS, ${chainKey.toUpperCase()})`,
     '',
