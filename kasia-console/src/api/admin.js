@@ -715,14 +715,15 @@ export async function registerAdminRoutes(fastify) {
           });
         }
 
-        // Real transfer — Phase 1B.2 (NWT N19.256): support asset='BNB' / native gas funding.
-        // Native (asset matches chain nativeSymbol): use signer.sendTransaction (= ETH-style native transfer).
-        // ERC20 (USDT/USDC): use transferUsdt helper.
-        const isNative = ['BNB', 'ETH', 'MATIC', 'AVAX'].includes(String(asset).toUpperCase());
+        // Real transfer — Phase 1B.2 / 1B.2.1 (NWT N19.256/257): native gas funding.
+        // Trigger native via either (a) asset === 'native' alias OR (b) asset symbol matches chain nativeSymbol.
         const { transferUsdt } = await import('../services/evm-transfer.js');
         const { decrypt } = await import('../services/crypto.js');
-        const { EVM_RPC_URLS, isEvmChain } = await import('../services/chains.js');
+        const { EVM_RPC_URLS, isEvmChain, getNativeSymbol } = await import('../services/chains.js');
         const { ethers } = await import('ethers');
+        const chainNative = (getNativeSymbol(chain) || '').toUpperCase();
+        const assetUpper = String(asset).toUpperCase();
+        const isNative = isEvmChain(chain) && (assetUpper === 'NATIVE' || assetUpper === chainNative);
         const results = [];
         for (const r of recipients) {
           if (r.error) { results.push(r); continue; }
