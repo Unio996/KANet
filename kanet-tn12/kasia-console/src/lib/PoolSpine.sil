@@ -143,4 +143,73 @@ contract PoolSpine(
         require(tx.outputs[0].scriptPubKey == byte[](makerLock));
         require(tx.outputs[0].value == makerStakeAmount - minerFee);
     }
+
+    // entry 4 — refund_disagreement: 3 oracle votes split (Gap 1A 3-dissent / Gap 1B 1-silent)
+    // Per area-4 + Owner 5/23 burn 钦定: full refund to maker + dissent oracle bonds. Silent
+    // oracle bond (Gap 1B only) is BURNED (= not assigned to any output, sompi flow into
+    // minerFee). 2-of-3 oracle sig (= dropped maker sig per area-4 Gap 7 to prevent
+    // losing-maker rug-via-refund-race). DISAGREEMENT_TIMEOUT SS-hardcoded at 300 sec
+    // (testnet 5 min per area-7 T5; mainnet rebuild with different value = different P2SH).
+    //
+    // signingPair selects which 2 of 3 oracles sign:
+    //   0 = oracle1 + oracle2; 1 = oracle1 + oracle3; 2 = oracle2 + oracle3
+    // silentOracleIndex semantics:
+    //  -1 = Gap 1A (all 3 voted, all dissent) → 4 outputs = maker + 3 oracle bonds, any signingPair
+    //   0/1/2 = Gap 1B (this oracle silent) → 3 outputs = maker + 2 dissent oracle bonds,
+    //          signingPair forced to (2 - silentOracleIndex) per P6 defense-in-depth.
+    entrypoint function refund_disagreement(
+        sig oracleSig1,
+        sig oracleSig2,
+        int signingPair,
+        int silentOracleIndex
+    ) {
+        require(tx.time >= deadline + 300);
+        require(signingPair >= 0 && signingPair <= 2);
+        require(silentOracleIndex >= -1 && silentOracleIndex <= 2);
+
+        // P6 constraint 2: signingPair must NOT include silentOracleIndex (Gap 1B only)
+        if (silentOracleIndex == 0) {
+            require(signingPair == 2);
+        } else {
+            if (silentOracleIndex == 1) {
+                require(signingPair == 1);
+            } else {
+                if (silentOracleIndex == 2) {
+                    require(signingPair == 0);
+                }
+            }
+        }
+
+        // Sig verify per signingPair
+        if (signingPair == 0) {
+            require(checkSig(oracleSig1, pubkey(oracle1Pk)));
+            require(checkSig(oracleSig2, pubkey(oracle2Pk)));
+        } else {
+            if (signingPair == 1) {
+                require(checkSig(oracleSig1, pubkey(oracle1Pk)));
+                require(checkSig(oracleSig2, pubkey(oracle3Pk)));
+            } else {
+                require(checkSig(oracleSig1, pubkey(oracle2Pk)));
+                require(checkSig(oracleSig2, pubkey(oracle3Pk)));
+            }
+        }
+
+        // P6 constraint 1: outputs.length strict equality with silentOracleIndex sentinel
+        if (silentOracleIndex == -1) {
+            require(tx.outputs.length == 4);
+        } else {
+            require(tx.outputs.length == 3);
+        }
+
+        // output[0] = maker refund (= makerStakeAmount - minerFee, maker bears the fee per
+        // area-4 Gap 9 — consistent with refund_unanimous_silent).
+        byte[34] makerLock = new ScriptPubKeyP2PK(pubkey(makerPk));
+        require(tx.outputs[0].scriptPubKey == byte[](makerLock));
+        require(tx.outputs[0].value == makerStakeAmount - minerFee);
+
+        // outputs[1..N] = surviving (= non-silent) oracle bond returns. Full KIP-10
+        // ordering / amount verification deferred for first iteration (= matches existing
+        // settle_unanimous + forfeit_1 entries' TODO). The oracle sigs over the sighash
+        // already bind output destinations, so off-chain settler-built TXs are protected.
+    }
 }
