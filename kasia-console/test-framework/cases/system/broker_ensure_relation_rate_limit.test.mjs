@@ -10,9 +10,10 @@
 // Cleanup: removes test relation_states + chain_events post-run.
 
 import { randomUUID } from 'crypto';
-import Database from 'better-sqlite3';
+// NWT r247.8: use shared sqlite (= same connection as router.js handleMessage writes)
+// to eliminate WAL read-snapshot cache mismatch suspected in initial Sub 5.1 test fail.
+import { sqlite as db } from '../../../src/db/client.js';
 
-const DB_PATH = 'C:/kanet/kasia-console/data/console.db';
 const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';  // Trader-B
 
 export default {
@@ -24,10 +25,8 @@ export default {
 
   async run() {
     const failures = [];
-    const db = new Database(DB_PATH);
     const broker = db.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(BROKER_RELAY_ID);
     if (!broker?.address) {
-      db.close();
       return { ok: false, error: 'broker relay not found' };
     }
 
@@ -101,15 +100,37 @@ export default {
       db.prepare(`DELETE FROM relation_states WHERE peer_address LIKE 'kaspa:test_stranger_%'`).run();
       db.prepare(`DELETE FROM chain_events WHERE event_type='auto_handshake_by_broker' AND to_address LIKE 'kaspa:test_stranger_%'`).run();
 
+      // Diagnostic dump for failure cases (NWT r247.8 dig request).
       if (failures.length > 0) {
-        return { ok: false, error: failures.join('; '), failures };
+        const sample = db.prepare(`
+          SELECT classification, status, peer_address
+          FROM relation_states WHERE peer_address LIKE 'kaspa:test_stranger_%'
+          ORDER BY updated_at DESC LIMIT 5
+        `).all();
+        const auditSample = db.prepare(`
+          SELECT to_address, observed_at FROM chain_events
+          WHERE event_type='auto_handshake_by_broker' AND to_address LIKE 'kaspa:test_stranger_%'
+          ORDER BY observed_at DESC LIMIT 5
+        `).all();
+        // Cleanup before reporting (= no state pollution even on fail)
+        db.prepare(`DELETE FROM relation_states WHERE peer_address LIKE 'kaspa:test_stranger_%'`).run();
+        db.prepare(`DELETE FROM chain_events WHERE event_type='auto_handshake_by_broker' AND to_address LIKE 'kaspa:test_stranger_%'`).run();
+        return {
+          ok: false,
+          error: failures.join('; '),
+          failures,
+          diag_relation_sample: sample,
+          diag_audit_sample: auditSample,
+          diag_audit_count: auditRows,
+          diag_relation_count: relRows,
+        };
       }
       return {
         ok: true,
-        summary: `5 invariant PASS: 10 audit rows / 10 relation_states / classification 'seen_candidate' / status 'accepted' / 11th rate-limited`,
+        summary: `5 invariant PASS: 10 audit rows / 10 relation_states / no promote / status 'accepted' / 11th rate-limited`,
       };
     } finally {
-      db.close();
+      // NWT r247.8: shared sqlite no .close() (= singleton, Console keeps it open).
     }
   },
 };
