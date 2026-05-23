@@ -20,26 +20,32 @@ export default {
     if (typeof mod.tickCrossMatchOnce !== 'function') return { ok: false, error: 'tickCrossMatchOnce not exported' };
     if (!mod._internals) return { ok: false, error: '_internals 未 expose' };
 
-    // L2: 4 risk gate constants
-    if (mod._internals.PRICE_TOLERANCE !== 0.03) return { ok: false, error: `PRICE_TOLERANCE expect 0.03 got ${mod._internals.PRICE_TOLERANCE}` };
-    if (mod._internals.QTY_TOLERANCE !== 0.05) return { ok: false, error: `QTY_TOLERANCE expect 0.05 got ${mod._internals.QTY_TOLERANCE}` };
+    // L2: 4 risk gate constants — 5/21 update: cross-match-engine 已 refactor 为 *_DEFAULT 命名 + getConfig runtime override (Phase 5-3 v125 knob)
+    if (mod._internals.PRICE_TOLERANCE_DEFAULT !== 0.03) return { ok: false, error: `PRICE_TOLERANCE_DEFAULT expect 0.03 got ${mod._internals.PRICE_TOLERANCE_DEFAULT}` };
+    if (mod._internals.QTY_TOLERANCE_DEFAULT !== 0.05) return { ok: false, error: `QTY_TOLERANCE_DEFAULT expect 0.05 got ${mod._internals.QTY_TOLERANCE_DEFAULT}` };
     if (mod._internals.TICK_MS !== 30000) return { ok: false, error: `TICK_MS expect 30000 got ${mod._internals.TICK_MS}` };
-    if (!Array.isArray(mod._internals.BROKER_ORG_NAMES) || mod._internals.BROKER_ORG_NAMES.length !== 3) {
-      return { ok: false, error: 'BROKER_ORG_NAMES expect [Trader-A, Trader-B, Trader-M]' };
-    }
 
-    // L3: same-org skip 包含 3 broker relay
-    const expected = ['Trader-A', 'Trader-B', 'Trader-M'];
-    for (const n of expected) {
-      if (!mod._internals.BROKER_ORG_NAMES.includes(n)) return { ok: false, error: `BROKER_ORG_NAMES 缺 ${n}` };
+    // L3: broker/marketmaker org names — 5/23 update (Block A.3 Wave 3 NWT r248): dynamic resolver-driven
+    // 不 hardcoded list ([Trader-A,B,M]), use getBrokerOrgNames() = SELECT roles_json json_each IN ('broker','marketmaker')
+    // 真 swap test 兼容: SQL UPDATE roles_json removing 'broker' → resolver fallback Trader-A automatic
+    const { getBrokerOrgNames } = await import('../../../src/services/broker-config-resolver.js');
+    const orgNames = getBrokerOrgNames();
+    if (!Array.isArray(orgNames) || orgNames.length < 1) {
+      return { ok: false, error: 'getBrokerOrgNames() empty (no relay with broker/marketmaker role)' };
+    }
+    // L3.1: 现 config 期望 (= Owner 5/23 钦定) Trader-A + Trader-B 双 broker (= migration capability)
+    if (!orgNames.includes('Trader-A') || !orgNames.includes('Trader-B')) {
+      return { ok: false, error: `broker org missing Trader-A or Trader-B (got ${JSON.stringify(orgNames)})` };
     }
 
     // L4: 真生产 broker org relay 查得到 (DB)
     const db = new Database(DB_PATH, { readonly: true });
-    const placeholders = expected.map(() => '?').join(',');
-    const rows = db.prepare(`SELECT address FROM relay_nodes WHERE name IN (${placeholders})`).all(...expected);
+    const placeholders = orgNames.map(() => '?').join(',');
+    const rows = db.prepare(`SELECT address FROM relay_nodes WHERE name IN (${placeholders})`).all(...orgNames);
     db.close();
-    if (rows.length !== 3) return { ok: false, error: `broker relay 实际 ${rows.length}/3 (Trader-A/B/M)` };
+    if (rows.length !== orgNames.length) {
+      return { ok: false, error: `broker relay 实际 ${rows.length}/${orgNames.length} (resolver mismatch)` };
+    }
 
     // L5: tickCrossMatchOnce callable
     const result = mod.tickCrossMatchOnce(0.034);  // mock marketPrice
@@ -86,6 +92,6 @@ export default {
       return { ok: false, error: 'Issue 3: chain align 未 fail-closed (NULL wildcard 真链 settle 撞)' };
     }
 
-    return { ok: true, summary: 'Path B 9 layer 全 PASS (5 structural + 4 behavioral hotfix Issue 1-4 NWT N19.20)' };
+    return { ok: true, summary: 'Path B 9 layer 全 PASS (5 structural + 4 behavioral hotfix Issue 1-4 NWT N19.20 + Block A.3 Wave 3 dynamic broker org)' };
   },
 };
