@@ -746,12 +746,20 @@ export async function dispatchRefundDisagreement(market, decision) {
       ? [0, 1]   // Gap 1A: signingPair=0 → oracle1+2 sign
       : [0, 1, 2].filter(i => i !== silentOracleIndex);
 
+    // 7d bug 10 fix: SS PoolSpine entry-4 require(tx.time >= deadline + 300) (OP_CHECKLOCKTIMEVERIFY).
+    // tx.lockTime MUST be >= deadline_seconds + 300, AND preimage MUST carry the same lockTime
+    // (Kaspa sighash binds tx.lockTime — oracle sigs over preimage.lockTime=0 would mismatch
+    // a final TX with lockTime=deadline+300, so all 4 input sigs would invalidate).
+    const deadlineSec = Math.floor(Date.parse(market.outcome_end_date) / 1000);
+    const refundLockTimeSec = deadlineSec + 300;
+
     // Build preimage via maker_relay (single-p2sh refund TX on spine inputs only)
     const preimage = await sendCommandAsync(market.maker_relay_id, {
       type: 'prediction_settle_build_preimage',
       p2sh_address: market.spine_p2sh,
       required_input_outpoints: requiredInputOutpoints,
       outputs,
+      lock_time: refundLockTimeSec,
     });
     if (!preimage?.ok || !preimage.tx_obj) {
       console.error(`[pool-settler] dispatchRefundDisagreement build_preimage fail market=${market.id.slice(0,12)}: ${preimage?.error}`);
@@ -768,6 +776,7 @@ export async function dispatchRefundDisagreement(market, decision) {
       refund_disagreement_dispatched_at: new Date().toISOString(),
       refund_disagreement_outputs: outputs,
       refund_disagreement_input_count: requiredInputOutpoints.length,
+      refund_disagreement_lock_time: refundLockTimeSec,
     };
     sqlite.prepare('UPDATE pool_markets SET metadata = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
       .run(JSON.stringify(newMeta), 'collecting_sigs', market.id);
@@ -1052,6 +1061,10 @@ async function handleCollectingSigsRefundDisagreement(market, meta) {
       silent_oracle_index: silentOracleIndex,
       signing_pair: signingPair,
       tx_obj_preimage: meta.refund_disagreement_tx_obj,
+      // 7d bug 10 fix: pass lockTime for parity; unlockPoolSpineRefundDisagreement uses
+      // txObjPreimage.lockTime (already deadline+300) but this keeps the IPC self-describing
+      // in case future paths build the TX from scratch without preimage.
+      lock_time: meta.refund_disagreement_lock_time || 0,
     });
 
     if (!submitResult?.ok || !submitResult.txId) {
