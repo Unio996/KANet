@@ -19,7 +19,7 @@
 import * as stateMachine from './state-machine.js';
 import * as client from './exchange-client.js';
 import { sqlite } from '../../db/client.js';
-import { acceptHandshake } from '../relation-state.js';
+import { acceptHandshakeKeepClassification } from '../relation-state.js';
 import { recordChainEvent } from '../chain-event.js';
 
 // T-J2-2026-05-12 Fix 2 (5/12 sediment §3.2 bsc-vs-bnb naming): chain normalize.
@@ -72,19 +72,16 @@ async function _ensureRelation(relayNodeId, peer, inboundTxid) {
       return { skipped: 'rate_limit' };
     }
 
-    // acceptHandshake (relation-state.js:66) fallback-calls observeHandshake if needed.
+    // Sub 5.2 hotfix (NWT r247.10): use acceptHandshakeKeepClassification to skip auto-promote.
+    // Schema reality: classification column DEFAULT='seen_candidate' (NOT NULL), so observeHandshake
+    // INSERT puts row at 'seen_candidate', and old acceptHandshake's IN-list UPDATE would auto-promote
+    // to 'responsive_agent' (= anti-spam gate broken). KeepClassification skips that UPDATE.
     try {
-      acceptHandshake(broker.address, peer);
+      acceptHandshakeKeepClassification(broker.address, peer);
     } catch (e) {
       return { skipped: 'accept_fail', err: e.message };
     }
-
-    // Classification gate: 'seen_candidate' lock — no auto-promote.
-    sqlite.prepare(`
-      UPDATE relation_states
-      SET classification = 'seen_candidate'
-      WHERE local_address = ? AND peer_address = ? AND classification IS NULL
-    `).run(broker.address, peer);
+    // No manual classification UPDATE needed — DEFAULT 'seen_candidate' already preserved.
 
     // Audit chain_event for every auto-observe (visibility + rate-limit query source).
     recordChainEvent({

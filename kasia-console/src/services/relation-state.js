@@ -80,6 +80,22 @@ export function acceptHandshake(localAddress, peerAddress) {
 }
 
 /**
+ * Same as acceptHandshake but SKIPS classification promote.
+ * Used by broker IS_SERVICE auto-handshake (Sub 5, NWT r247.10) for stranger DMs:
+ * the row stays at default 'seen_candidate' classification (= anti-spam gate, not auto-promote to responsive_agent).
+ * Caller intent: "I'm accepting handshake for protocol reasons, NOT vouching for user reputation".
+ */
+export function acceptHandshakeKeepClassification(localAddress, peerAddress) {
+  let result = _advance(localAddress, peerAddress, 'accepted', { handshake_accepted_at: new Date().toISOString() });
+  if (!result) {
+    observeHandshake(localAddress, peerAddress, null, new Date().toISOString());
+    result = _advance(localAddress, peerAddress, 'accepted', { handshake_accepted_at: new Date().toISOString() });
+  }
+  // NO classification promote — preserve default 'seen_candidate'.
+  return result;
+}
+
+/**
  * 会话建立 → confirmed
  */
 export function confirmSession(localAddress, peerAddress) {
