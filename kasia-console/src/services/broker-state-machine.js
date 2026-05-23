@@ -189,7 +189,11 @@ export function transition({ orderId, expectedFromState, toState, opts = {}, db 
           WHERE EXISTS (SELECT 1 FROM json_each(rn.roles_json) je WHERE je.value = 'broker')
           ORDER BY rn.created_at ASC LIMIT 1
         `).get();
-        const rateUsed = (broker?.fee_rate_override != null) ? broker.fee_rate_override : 0.005;
+        // B.3.1 hotfix (NWT N19.230): derive rate_used from actual order data (= 0.0005 historical vs 0.005 new),
+        // not assume current system default. Honest audit chain trace.
+        const feeNum = parseFloat(order.broker_fee_kas);
+        const qtyNum = parseFloat(order.qty);
+        const rateUsed = (qtyNum > 0 && !isNaN(feeNum)) ? Number((feeNum / qtyNum).toFixed(6)) : null;
         const feePayload = JSON.stringify({
           order_id: order.id,
           broker_relay_id: broker?.id || null,

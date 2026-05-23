@@ -241,10 +241,22 @@ export async function registerAdminRoutes(fastify) {
       // Bug: hedge_24h / completed stats are GLOBAL (chain_events 无 broker_relay_id col), 之前 map per broker
       // duplicated same value to both Trader-A + Trader-B → misleading admin.
       // Fix: single financials_total object. Per-broker attribution待 v138 chain_events.broker_relay_id col (排日).
+      //
+      // KI 65 B.4 wire (Owner 5/23 钦定): fee_exchange_24h_kas + trade_count_24h 真 populate
+      // (filter = retail_dex_orders broker_fee_kas IS NOT NULL AND state NOT IN refund-path).
+      const feeAgg24h = sqlite.prepare(`
+        SELECT COALESCE(SUM(CAST(broker_fee_kas AS REAL)), 0) AS fee_kas, COUNT(*) AS trades
+        FROM retail_dex_orders
+        WHERE broker_fee_kas IS NOT NULL
+          AND state NOT IN ('expired','failed','refunded','refunding')
+          AND created_at > datetime('now', '-1 day')
+      `).get();
       const financials_total = {
         scope: 'all_brokers_aggregate',
         broker_count: brokerRows.length,
-        fee_exchange_24h: null,  // exchange offer fee not yet logged in DB — 排日 加 broker_fee_kas col
+        fee_exchange_24h_kas: Math.round(feeAgg24h.fee_kas * 1000) / 1000,  // KAS units (not USD)
+        fee_exchange_24h_trades: feeAgg24h.trades,
+        fee_exchange_24h: null,  // legacy null (was $ placeholder, now superseded by fee_exchange_24h_kas)
         fee_prediction_24h: null,  // prediction broker not yet exists — N/A til Bettor B2 mainnet merge
         hedge_24h_kas_volume: Number(hedge24hKasVolume.toFixed(4)),
         hedge_24h_usd_value: Number(hedge24hUsdValue.toFixed(4)),

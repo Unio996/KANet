@@ -152,9 +152,9 @@
       </div>
       <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 p-5">
         <div class="text-center">
-          <p class="text-xs text-ink-400 uppercase tracking-wider">Exchange Fee</p>
-          <p class="mt-1 text-xl font-bold text-ink-400" title="broker_fee_kas col 排日"
-             x-text="financials_total?.fee_exchange_24h != null ? '$' + financials_total.fee_exchange_24h.toFixed(2) : 'N/A'"></p>
+          <p class="text-xs text-ink-400 uppercase tracking-wider">Exchange Fee (KAS)</p>
+          <p class="mt-1 text-xl font-bold text-green-600" :title="financials_total?.fee_exchange_24h_trades + ' settled trades 24h'"
+             x-text="financials_total?.fee_exchange_24h_kas != null ? financials_total.fee_exchange_24h_kas.toFixed(3) + ' KAS' : '—'"></p>
         </div>
         <div class="text-center">
           <p class="text-xs text-ink-400 uppercase tracking-wider">Prediction Fee</p>
@@ -192,7 +192,7 @@
         </div>
       </div>
       <div class="px-5 py-2 text-[10px] text-ink-300 border-t border-warm-100">
-        注: Exchange Fee / 净盈亏 = N/A 待 broker_fee_kas col ship. Prediction Fee = N/A 待 Bettor B2 mainnet merge. 现 hedge + 完成 stats 是全 broker aggregate, per-broker 拆分待 chain_events.broker_relay_id col (v138 排日). broker 合计 = <span x-text="financials_total?.broker_count ?? 0"></span> brokers.
+        注: Exchange Fee KAS 24h 已 wire (KI 65 B.4, 真 filter state NOT IN refund-path). 净盈亏 = 待 hedge value vs fee delta calc. Prediction Fee = N/A 待 Bettor B2 mainnet merge. 现 hedge + 完成 stats 是全 broker aggregate, per-broker 拆分待 chain_events.broker_relay_id col (v138 排日). broker 合计 = <span x-text="financials_total?.broker_count ?? 0"></span> brokers.
       </div>
     </section>
 
