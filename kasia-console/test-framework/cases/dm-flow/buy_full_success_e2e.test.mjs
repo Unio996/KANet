@@ -90,10 +90,12 @@ export default {
     phases.push({ phase: 'B_poll_settle', finalStatus: finalEscrow?.status, finalEscrow });
 
     // Phase C: 3 oracle 真 verify (KI N19.265 Sub 3 — Owner 雷霆 catch + NWT r247.1)
-    // Beyond user_escrow_balances status, verify cross-table state alignment:
-    //   Oracle 1: relation_states user→broker pair exists with status accepted/active
+    // Sub 5.1 update (NWT r247.7): Oracle 1 now expects 'accepted' (= broker IS_SERVICE auto observeHandshake).
+    //   Oracle 1: relation_states user→broker pair status='accepted' (= Sub 5 auto-onboard)
+    //              classification='seen_candidate' (= anti-spam gate)
     //   Oracle 2: chain_events comm/comm_sent/text count > 0 for user→broker direction
-    //   Oracle 3: /api/contacts/list?relayId=<NWT> includes broker in returned peers
+    //   Oracle 3: /api/contacts/list includes broker as peer (= no longer msg_only fallback)
+    //   Oracle 4: chain_event 'auto_handshake_by_broker' audit row exists
     const dbR2 = new Database(DB_PATH, { readonly: true });
     const oracle1_relation = dbR2.prepare(`
       SELECT status, classification FROM relation_states
@@ -104,6 +106,13 @@ export default {
       WHERE from_address = ? AND to_address = ? AND event_type IN ('comm','comm_sent','text')
         AND datetime(observed_at) > datetime(?)
     `).get(NWT_KASIA, BROKER_KASIA, startIso).c;
+    // Sub 5.1: Oracle 4 — broker auto-handshake audit row
+    const oracle4_auto_handshake = dbR2.prepare(`
+      SELECT COUNT(*) c FROM chain_events
+      WHERE event_type = 'auto_handshake_by_broker'
+        AND from_address = ? AND to_address = ?
+        AND datetime(observed_at) > datetime(?)
+    `).get(BROKER_KASIA, NWT_KASIA, startIso).c;
     dbR2.close();
     // Sub 3.1 hotfix (NWT r247.2): API params + response shape + field names corrected.
     //   - param: relay_node_id (not relayId)
@@ -117,10 +126,12 @@ export default {
       oracle3_contacts = Array.isArray(contacts) && contacts.some(c => c.address === BROKER_KASIA);
     } catch {}
     phases.push({
-      phase: 'C_3_oracle',
+      phase: 'C_4_oracle',
       oracle1_relation: oracle1_relation || null,
+      oracle1_status_ok: oracle1_relation?.status === 'accepted',
       oracle2_comm_count: oracle2_comm,
       oracle3_contacts_has_broker: oracle3_contacts,
+      oracle4_auto_handshake_count: oracle4_auto_handshake,
     });
 
     // Phase D: verdict
