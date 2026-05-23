@@ -531,7 +531,7 @@ export async function registerConversationRoutes(fastify) {
       "SELECT COUNT(*) as c FROM relation_states WHERE local_address = ? AND handshake_accepted_at > ?"
     ).get(addr, since);
     const comms = sqlite.prepare(
-      "SELECT COUNT(*) as c FROM chain_events WHERE from_address = ? AND event_type IN ('comm','comm_sent') AND observed_at > ?"
+      "SELECT COUNT(*) as c FROM chain_events WHERE from_address = ? AND event_type IN ('comm','comm_sent','text') AND observed_at > ?"
     ).get(addr, since);
     const bcasts = sqlite.prepare(
       "SELECT COUNT(*) as c FROM broadcast_messages WHERE sender_address = ? AND created_at > ?"
@@ -791,14 +791,17 @@ export async function registerConversationRoutes(fastify) {
     `).all(relay.address, ...allowedStatuses);
 
     // Message counts per peer (from chain_events — from_address/to_address)
+    // KI N19.265 Sub 1 (Owner 5/23 雷霆 catch + NWT verify): add 'text' to filter union.
+    // Schema split: ingest-service.js writes event_type=messageType ('text') but old scout writes 'comm'.
+    // Filter MUST cover both until #2 schema unify (= future writes comm_sent/received).
     const msgSent = sqlite.prepare(`
       SELECT to_address as peer, COUNT(*) as c FROM chain_events
-      WHERE from_address = ? AND event_type IN ('comm','comm_sent') AND to_address IS NOT NULL
+      WHERE from_address = ? AND event_type IN ('comm','comm_sent','text') AND to_address IS NOT NULL
       GROUP BY to_address
     `).all(relay.address);
     const msgRecv = sqlite.prepare(`
       SELECT from_address as peer, COUNT(*) as c FROM chain_events
-      WHERE to_address = ? AND event_type IN ('comm','comm_received') AND from_address IS NOT NULL
+      WHERE to_address = ? AND event_type IN ('comm','comm_received','text') AND from_address IS NOT NULL
       GROUP BY from_address
     `).all(relay.address);
     const msgMap = {};
