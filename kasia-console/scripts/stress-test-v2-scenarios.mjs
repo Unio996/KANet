@@ -128,7 +128,7 @@ function makeSell(kasAmount) {
       `5. hedge (CEX KAS buy back, if size ≥ 25 KAS)`,
       `6. chain_event broker_fee_collected (= ${(kasAmount * 0.005).toFixed(4)} KAS fee, Block A.2 公式)`,
     ];
-    // Phase 5.0 — real-mode invoke if ctx.realMode flag set (A1 MVP, A2-A6 排日 expand)
+    // Phase 5.0 — real-mode invoke if ctx.realMode flag set (A1 MVP, A2-A3 排日 expand after A4 PASS)
     if (ctx.realMode && scenario.id === 'A1') {
       console.log(`[scenario-${scenario.id}] real-mode invoke cn_seller_real for ${user.name}`);
       const realResult = await invokeSellReal({ user, broker: plan.broker, kasAmount });
@@ -136,7 +136,7 @@ function makeSell(kasAmount) {
       plan.ok = realResult.ok;
       if (!realResult.ok) plan.error = realResult.error;
     } else if (ctx.realMode) {
-      plan.real_invoke = { ok: false, skipped: true, reason: `Phase 5.0 MVP — only A1 real-mode wired, ${scenario.id} 排日 expand` };
+      plan.real_invoke = { ok: false, skipped: true, reason: `Phase 5.0 MVP — A1 SELL wired only, ${scenario.id} 排日 expand` };
     }
     return plan;
   };
@@ -144,9 +144,10 @@ function makeSell(kasAmount) {
 
 function makeBuy(kasAmount) {
   return async (ctx, scenario) => {
-    const user = pickRelay(ctx);
+    const userBase = pickRelay(ctx);
+    const user = loadRelayWalletInfo(userBase.id);
     const plan = basePlan(scenario.id, scenario.desc);
-    plan.user = { name: user.name, id: user.id };
+    plan.user = { name: user.name, id: user.relayId };
     plan.kas_amount = kasAmount;
     plan.estimated_usdt = +(kasAmount * 0.0343).toFixed(4);
     plan.preconditions = [
@@ -162,6 +163,17 @@ function makeBuy(kasAmount) {
       `5. hedge (CEX KAS sell, if size ≥ 25 KAS)`,
       `6. chain_event broker_fee_collected`,
     ];
+    // Phase 5.0.1 — A4 BUY real-mode wired (= cnBuyerReal proven from (c) baseline PASS).
+    // NWT N19.254 propose: A4 lowest-risk first (= same persona as buy_cancel test).
+    if (ctx.realMode && scenario.id === 'A4') {
+      console.log(`[scenario-${scenario.id}] real-mode invoke cn_buyer_real for ${user.name}`);
+      const realResult = await invokeBuyReal({ user, broker: plan.broker, kasAmount });
+      plan.real_invoke = realResult;
+      plan.ok = realResult.ok;
+      if (!realResult.ok) plan.error = realResult.error;
+    } else if (ctx.realMode) {
+      plan.real_invoke = { ok: false, skipped: true, reason: `Phase 5.0 MVP — A4 BUY wired (post-A1 retry), ${scenario.id} 排日 expand` };
+    }
     return plan;
   };
 }
