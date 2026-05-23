@@ -4468,5 +4468,56 @@ export function runMigrations() {
     }
   }
 
+  // v143: KI 65 r249 — MarketMaker 拆分 (NWT N19.270 / Owner 5/23 钦定 'MarketMaker-A 真 plug-in').
+  //
+  // Pre-r249 state (Block A.5 simplified consolidation 5/22): Trader-A/B 兼 broker+marketmaker.
+  // r249 design: separate roles so MarketMaker-A 成 marketmaker 独占 dispatch target.
+  //
+  // After this migration:
+  //   Trader-A: ['broker']            ← broker only (= migration target swap test)
+  //   Trader-B: ['broker']            ← primary broker (was broker+marketmaker)
+  //   MarketMaker-A: ['marketmaker']  ← unique marketmaker (already set)
+  //
+  // getMarketMakerRelay() auto-resolves to MarketMaker-A (= only relay with marketmaker role).
+  // market-seeder dispatches publishOffer to MarketMaker-A.
+  //
+  // Companion code change (r249 Sub 1.4 — J2 #734 gap catch): 8 broker hedge services + api/trading.js
+  // swap getMarketMakerRelayIdOrThrow → getBrokerRelayIdOrThrow. Reason: those services manage broker's
+  // own KAS pool + USDT pile + CEX accounts (= broker hedge ops, not marketmaker ops).
+  //
+  // market_seeder_config.sell_agent_id / buy_agent_id columns DEPRECATED (not removed for backward-compat).
+  // r249 Sub 1.1 removed fallback chain (config.* || getDefaultAgentId()) → seeder uses resolver only.
+  //
+  // NOTE: v142 is reserved for prediction line B2 v0.5 area-4 (pool_bettor_sides.refund_attempted_at)
+  // on origin/master — this local migrate.js will pick it up via cross-line merge later. No conflict
+  // expected since v142 touches pool_bettor_sides and v143 touches relay_nodes.
+  // Idempotent strip: only update rows whose roles_json still contains 'marketmaker'.
+  {
+    const traderRows = sqlite.prepare(`
+      SELECT id, name, roles_json FROM relay_nodes
+      WHERE name IN ('Trader-A', 'Trader-B') AND roles_json LIKE '%marketmaker%'
+    `).all();
+    if (traderRows.length > 0) {
+      const stmt = sqlite.prepare(`UPDATE relay_nodes SET roles_json = ? WHERE id = ?`);
+      let stripCount = 0;
+      for (const r of traderRows) {
+        try {
+          const roles = JSON.parse(r.roles_json || '[]');
+          const filtered = roles.filter(x => x !== 'marketmaker');
+          if (filtered.length !== roles.length) {
+            stmt.run(JSON.stringify(filtered), r.id);
+            stripCount++;
+            console.log(`[migrate] v143: ${r.name} roles_json ${JSON.stringify(roles)} → ${JSON.stringify(filtered)}`);
+          }
+        } catch (err) {
+          console.warn(`[migrate] v143: skip ${r.name} (roles_json parse fail: ${err.message})`);
+        }
+      }
+      if (stripCount > 0) {
+        console.log(`[migrate] v143: stripped 'marketmaker' from ${stripCount} relay(s). MarketMaker-A now unique marketmaker.`);
+      }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

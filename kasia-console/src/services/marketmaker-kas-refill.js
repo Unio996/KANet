@@ -11,7 +11,7 @@
 
 import { sqlite } from '../db/client.js';
 import { getConfig } from '../data/settings/configs.js';
-import { getMarketMakerRelayIdOrThrow } from './broker-config-resolver.js';
+import { getBrokerRelayIdOrThrow } from './broker-config-resolver.js';
 
 // KI 65 A.3.3 (NWT N19.208): runtime helper, no module-load const.
 const TICK_INTERVAL_MS = 60 * 60_000;  // 1h cron
@@ -24,7 +24,7 @@ let _tickInterval = null;
 let _ticking = false;
 
 async function _getBrokerKasAddress() {
-  const r = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id=?`).get(getMarketMakerRelayIdOrThrow());
+  const r = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id=?`).get(getBrokerRelayIdOrThrow());
   return r?.address || null;
 }
 

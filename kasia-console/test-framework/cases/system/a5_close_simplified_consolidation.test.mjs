@@ -1,13 +1,16 @@
-// a5_close_simplified_consolidation — KI 65 Block A.5 简化 close (Owner 5/22 13:54 钦定)
+// a5_close_simplified_consolidation — KI 65 Block A.5 + r249 evolution
 //
-// Owner abandon broker-v4, Trader-A/B 兼 broker+marketmaker.
-// Invariants (post-v140 migration):
-//   I1: Trader-A + Trader-B 都 roles_json=["broker","marketmaker"]
-//   I2: getBrokerRelay() returns Trader-B (4/21, first created)
-//   I3: getMarketMakerRelay() returns Trader-B (= 兼)
-//   I4: All exchange_accounts.relay_node_id = Trader-B id
-//   I5: MarketMaker-A relay still exists (= future N-node template, 不删)
-//   I6: cex-bridge / hedge-router / broker-treasury-monitor runtime filter resolves to Trader-B
+// 5/22 Block A.5 (Owner 13:54 钦定): Trader-A/B 兼 broker+marketmaker (abandon broker-v4).
+// 5/23 r249 (NWT N19.270 / Owner 'MarketMaker-A plug-in'): strip marketmaker from Trader-A/B,
+//   MarketMaker-A 成 unique marketmaker. Broker hedge services swap getMarketMaker→getBroker.
+//
+// Invariants (post-v143 migration + Sub 1.4 resolver swap):
+//   I1: Trader-A + Trader-B roles_json=["broker"] (= marketmaker stripped, broker only)
+//   I2: getBrokerRelay() returns Trader-B (4/21, oldest broker)
+//   I3: getMarketMakerRelay() returns MarketMaker-A (= unique marketmaker post-strip)
+//   I4: All exchange_accounts.relay_node_id = Trader-B id (broker hedge unchanged)
+//   I5: MarketMaker-A relay exists (= now active marketmaker, not just template)
+//   I6: cex-bridge runtime filter resolves to Trader-B (broker) via getBrokerRelayIdOrThrow
 
 import Database from 'better-sqlite3';
 
@@ -28,17 +31,17 @@ export default {
       const mmA = db.prepare("SELECT id, roles_json FROM relay_nodes WHERE name = 'MarketMaker-A'").get();
       if (!traderB) return { ok: false, error: 'Trader-B relay missing' };
 
-      // I1: Trader-A + Trader-B 兼 roles
-      const expected = '["broker","marketmaker"]';
+      // I1 (post-r249 v143): Trader-A/B roles_json = ["broker"], marketmaker stripped.
+      const expected = '["broker"]';
       if (traderB.roles_json !== expected) failures.push(`I1: Trader-B roles_json = ${traderB.roles_json}, expected ${expected}`);
       if (traderA && traderA.roles_json !== expected) failures.push(`I1: Trader-A roles_json = ${traderA.roles_json}, expected ${expected}`);
 
-      // I2 + I3: helper resolution
+      // I2 + I3: helper resolution (post-r249: marketmaker resolves MarketMaker-A unique)
       const { getBrokerRelay, getMarketMakerRelay } = await import('../../../src/services/broker-config-resolver.js');
       const brokerRow = getBrokerRelay();
       const mmRow = getMarketMakerRelay();
       if (!brokerRow || brokerRow.id !== traderB.id) failures.push(`I2: getBrokerRelay returned ${brokerRow?.name || 'null'}, expected Trader-B`);
-      if (!mmRow || mmRow.id !== traderB.id) failures.push(`I3: getMarketMakerRelay returned ${mmRow?.name || 'null'}, expected Trader-B (兼)`);
+      if (!mmRow || !mmA || mmRow.id !== mmA.id) failures.push(`I3: getMarketMakerRelay returned ${mmRow?.name || 'null'}, expected MarketMaker-A (= post-r249 unique marketmaker)`);
 
       // I4: exchange_accounts → Trader-B
       const wrong = db.prepare(`SELECT COUNT(*) c FROM exchange_accounts WHERE relay_node_id != ? OR relay_node_id IS NULL`).get(traderB.id).c;
@@ -65,7 +68,7 @@ export default {
       if (failures.length > 0) {
         return { ok: false, error: failures.join('; '), failures };
       }
-      return { ok: true, summary: `7 invariant PASS: Trader-A/B 兼 roles, helper resolves Trader-B, ${db.prepare('SELECT COUNT(*) c FROM exchange_accounts').get().c} CEX → Trader-B, MarketMaker-A template (adapter NULL + status=template + is_template=true), cex-bridge runtime OK` };
+      return { ok: true, summary: `7 invariant PASS: Trader-A/B broker only (post-r249 strip), broker→Trader-B, marketmaker→MarketMaker-A, ${db.prepare('SELECT COUNT(*) c FROM exchange_accounts').get().c} CEX→Trader-B (broker hedge unchanged), cex-bridge runtime OK` };
     } finally {
       db.close();
     }

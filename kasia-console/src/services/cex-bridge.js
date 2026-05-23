@@ -20,7 +20,7 @@ import { sqlite } from '../db/client.js';
 import { decrypt } from './crypto.js';
 import { EXCHANGE_REGISTRY } from '../lib/exchange-registry.js';
 import { placeOrder, getBalance, getOrder } from './exchange-orders.js';
-import { getMarketMakerRelayIdOrThrow } from './broker-config-resolver.js';
+import { getBrokerRelayIdOrThrow } from './broker-config-resolver.js';
 
 function sha512Hex(data) { return crypto.createHash('sha512').update(data).digest('hex'); }
 function hmac512Hex(secret, data) { return crypto.createHmac('sha512', secret).update(data).digest('hex'); }
@@ -45,7 +45,7 @@ function normalizeChain(chain) {
  */
 export function getCexAccount(cex) {
   // KI 65 A.5.2: per-relay ownership filter (MarketMaker 库存层). Fallback unfiltered for pre-v139 boot path.
-  const mmaId = getMarketMakerRelayIdOrThrow();
+  const mmaId = getBrokerRelayIdOrThrow();
   const row = sqlite.prepare('SELECT * FROM exchange_accounts WHERE exchange = ? AND relay_node_id = ? LIMIT 1').get(cex, mmaId)
     || sqlite.prepare('SELECT * FROM exchange_accounts WHERE relay_node_id = ? AND is_default = 1 LIMIT 1').get(mmaId);
   if (!row) return null;

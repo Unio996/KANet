@@ -8,7 +8,7 @@
 import { ethers } from 'ethers';
 import { sqlite } from '../db/client.js';
 import { swapUsdtToUsdc } from './broker-swap.js';
-import { getMarketMakerRelayIdOrThrow } from './broker-config-resolver.js';
+import { getBrokerRelayIdOrThrow } from './broker-config-resolver.js';
 const BSC_RPC = 'https://bsc-dataseed1.binance.org';
 const USDC_BSC = '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d';
 const ERC20_ABI = ['function balanceOf(address) view returns (uint256)'];
@@ -46,7 +46,7 @@ async function _checkAndReplenish() {
     const cfg = await _getConfig();
     if (!cfg.enabled) return;
 
-    const wallet = sqlite.prepare(`SELECT address, privkey_encrypted FROM agent_wallets WHERE relay_node_id=? AND chain='bnb' AND is_default=1`).get(getMarketMakerRelayIdOrThrow());
+    const wallet = sqlite.prepare(`SELECT address, privkey_encrypted FROM agent_wallets WHERE relay_node_id=? AND chain='bnb' AND is_default=1`).get(getBrokerRelayIdOrThrow());
     if (!wallet?.privkey_encrypted) return;
 
     const usdc = new ethers.Contract(USDC_BSC, ERC20_ABI, _getProvider());

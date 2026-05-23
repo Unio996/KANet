@@ -9,6 +9,7 @@
 
 import { sqlite } from '../db/client.js';
 import { recordChainEvent } from './chain-event.js';
+import { getMarketMakerRelay } from './broker-config-resolver.js';
 
 let _timer = null;
 const TICK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
@@ -215,18 +216,10 @@ async function tick() {
   const config = sqlite.prepare('SELECT * FROM market_seeder_config WHERE id = ?').get('default');
   if (!config?.enabled) return { skipped: true, reason: 'disabled' };
 
-  // R5 T-NWT-16: 如果 sell_agent_id 或 buy_agent_id 是 service relay (broker), 跳过 seeder
-  // tick. broker-intake-watcher 自管 publish (broker 收 user KAS 后), 不需要 seeder 也跑.
-  // (migrate v76 ec4367c8: is_dex_broker=1 → is_service=1).
-  for (const fld of ['sell_agent_id', 'buy_agent_id']) {
-    const id = config[fld];
-    if (!id) continue;
-    const r = sqlite.prepare('SELECT is_service, is_dex_broker FROM relay_nodes WHERE id=?').get(id);
-    if (r?.is_service === 1 || r?.is_dex_broker === 1) {
-      console.log(`[seeder] SKIP — ${fld}=${id.slice(0,8)} is service (broker self-manages publish via broker-intake-watcher)`);
-      return { skipped: true, reason: `${fld} is service` };
-    }
-  }
+  // r249 Sub 1.1 (NWT N19.270 / Owner 5/23 钦定 MarketMaker-A plug-in): service-skip removed.
+  // Pre-r249 假设: sell/buy_agent_id = broker (Trader-B), broker-intake-watcher 自管 publish → seeder skip.
+  // r249 真 design: seeder dispatch dynamically to marketmaker via getMarketMakerRelay(), 不再 conflate broker.
+  // market_seeder_config.sell_agent_id / buy_agent_id columns deprecated (= nullable + ignored, see v143 comment).
 
   // Step 1: fetch current KAS price
   const midPrice = await fetchKasPrice();
@@ -277,14 +270,15 @@ async function tick() {
 // ── Publish Seed Order ────────────────────────────────────
 
 async function publishSeedOrder(config, midPrice, side) {
-  const agentId = side === 'sell'
-    ? (config.sell_agent_id || getDefaultAgentId())
-    : (config.buy_agent_id || getDefaultAgentId());
-
-  if (!agentId) {
-    console.log(`[seeder] No agent configured for ${side} orders`);
-    return { ok: false, error: 'no_agent' };
+  // r249 Sub 1.1 (NWT N19.270): resolver-driven dispatch to marketmaker.
+  // config.sell_agent_id / config.buy_agent_id deprecated (= ignored, see migration v143).
+  // Pre-r249 fallback chain (config field || getDefaultAgentId) removed — no silent broker conflation.
+  const mm = getMarketMakerRelay();
+  if (!mm?.id) {
+    console.log(`[seeder] No marketmaker configured for ${side} orders (= no relay_nodes with marketmaker role)`);
+    return { ok: false, error: 'no_marketmaker' };
   }
+  const agentId = mm.id;
 
   let giveAsset, giveAmount, wantAsset, wantAmount, spreadPct;
 
@@ -399,7 +393,4 @@ export async function fetchKasPrice() {
   }
 }
 
-function getDefaultAgentId() {
-  const row = sqlite.prepare('SELECT id FROM relay_nodes ORDER BY name LIMIT 1').get();
-  return row?.id || null;
-}
+// r249 Sub 1.1: getDefaultAgentId removed — fallback chain deprecated. Resolver pattern only.
