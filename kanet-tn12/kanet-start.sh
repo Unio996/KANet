@@ -93,6 +93,8 @@ if [ -f "$ENV_FILE" ]; then
       POOL_DEADLINE_MIN_OVERRIDE) export POOL_DEADLINE_MIN_OVERRIDE="$v" ;;
       # B2 v0.5 Phase 3 bug 8 — oracle silent timeout (mainnet=1440, testnet can lower)
       ORACLE_SILENT_TIMEOUT_MIN) export ORACLE_SILENT_TIMEOUT_MIN="$v" ;;
+      # B2 v0.5 area-8 E7 — pool market deadline maximum cap (testnet 30day default, mainnet 365day)
+      POOL_DEADLINE_MAX_DAY)   export POOL_DEADLINE_MAX_DAY="$v" ;;
     esac
   done < "$ENV_FILE"
   ok "已加载配置: $ENV_FILE"
