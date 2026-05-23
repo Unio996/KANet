@@ -100,7 +100,7 @@ export default {
         && typeof b0.dm_cap === 'number'
         && b0.hedge_24h
         && typeof b0.hedge_24h.placed === 'number'
-        && ['alive', 'idle', 'down', 'unknown'].includes(b0.status);
+        && ['alive', 'idle', 'down', 'unknown', 'template'].includes(b0.status);
       if (!brokerShapeOk) {
         await browser.close();
         return { ok: false, summary: `broker shape mismatch: ${JSON.stringify(b0).slice(0, 300)}` };

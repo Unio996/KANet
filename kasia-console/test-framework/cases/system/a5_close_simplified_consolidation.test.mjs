@@ -52,10 +52,21 @@ export default {
       const bybitAccount = getCexAccount('bybit');
       if (!bybitAccount) failures.push(`I6: getCexAccount('bybit') returned null — runtime filter broken`);
 
+      // I7 (KI 65 N19.238): MarketMaker-A surfaces in admin overview brokers list with is_template=true
+      // adapter_node_id NULL = template (= future N-node 模板, not 'down').
+      const mmaRow = db.prepare(`SELECT adapter_node_id FROM relay_nodes WHERE name='MarketMaker-A'`).get();
+      if (mmaRow?.adapter_node_id) failures.push(`I7: MarketMaker-A should have NULL adapter_node_id (= template), got ${mmaRow.adapter_node_id}`);
+      const ovRes = await fetch('http://127.0.0.1:3100/api/admin/overview');
+      const ovBody = await ovRes.json().catch(() => ({}));
+      const mmaInList = (ovBody.brokers || []).find(b => b.name === 'MarketMaker-A');
+      if (!mmaInList) failures.push(`I7: MarketMaker-A not in /api/admin/overview brokers list`);
+      if (mmaInList && mmaInList.status !== 'template') failures.push(`I7: MarketMaker-A status='${mmaInList.status}' (expected 'template')`);
+      if (mmaInList && !mmaInList.is_template) failures.push(`I7: MarketMaker-A is_template flag false`);
+
       if (failures.length > 0) {
         return { ok: false, error: failures.join('; '), failures };
       }
-      return { ok: true, summary: `6 invariant PASS: Trader-A/B 兼 roles, helper resolves Trader-B, ${db.prepare('SELECT COUNT(*) c FROM exchange_accounts').get().c} CEX → Trader-B, MarketMaker-A template retained, cex-bridge runtime OK` };
+      return { ok: true, summary: `7 invariant PASS: Trader-A/B 兼 roles, helper resolves Trader-B, ${db.prepare('SELECT COUNT(*) c FROM exchange_accounts').get().c} CEX → Trader-B, MarketMaker-A template (adapter NULL + status=template + is_template=true), cex-bridge runtime OK` };
     } finally {
       db.close();
     }

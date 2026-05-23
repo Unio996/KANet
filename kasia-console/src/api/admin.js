@@ -102,10 +102,13 @@ export async function registerAdminRoutes(fastify) {
 
       // === KI 64 Phase 1B v3 sub 1B.2 — BROKER STATE (cross-product per scope_json) ===
       // Per broker: name / scope[] / KAS balance / USDT各 chain / hedge 24h / DM cap / 最后活动 / status
+      // KI 65 #N19.238 (Owner 5/23 钦定): include marketmaker-role relays (= MarketMaker-A template).
+      // adapter_node_id NULL = template (= 真 future N-node 模板, 不报 down alert).
       const brokerRows = sqlite.prepare(`
-        SELECT id, name, address, scope_json, dm_count_today
-        FROM relay_nodes
+        SELECT id, name, address, scope_json, dm_count_today, adapter_node_id, roles_json
+        FROM relay_nodes rn
         WHERE is_dex_broker=1
+           OR EXISTS (SELECT 1 FROM json_each(rn.roles_json) je WHERE je.value = 'marketmaker')
         ORDER BY name
       `).all();
 
@@ -214,8 +217,12 @@ export async function registerAdminRoutes(fastify) {
         }
 
         // Status derive — explicit NaN/null guard (Fix 1 part 2)
+        // KI 65 #N19.238: adapter_node_id NULL = template (= 真保留 future N-node 模板, 不报 down).
+        const isTemplate = !b.adapter_node_id;
         let status = 'unknown';
-        if (ageMin !== null && !isNaN(ageMin)) {
+        if (isTemplate) {
+          status = 'template';
+        } else if (ageMin !== null && !isNaN(ageMin)) {
           if (ageMin < 5) status = 'alive';
           else if (ageMin < 60) status = 'idle';
           else status = 'down';
@@ -234,6 +241,7 @@ export async function registerAdminRoutes(fastify) {
           last_activity: lastActivityTs,
           age_min: ageMin,
           status,
+          is_template: isTemplate,  // KI 65 #N19.238: future N-node template marker
         };
       });
 

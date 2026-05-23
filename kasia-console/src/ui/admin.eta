@@ -77,7 +77,8 @@
           <h2 class="text-sm font-semibold text-ink-700">Broker 状态 (cross-product)</h2>
         </div>
         <span class="text-xs text-ink-400">
-          <span x-text="brokers.filter(b => b.status === 'alive').length"></span>/<span x-text="brokers.length"></span> alive
+          <span x-text="brokers.filter(b => b.status === 'alive').length"></span>/<span x-text="brokers.filter(b => b.status !== 'template').length"></span> alive
+          <span x-show="brokers.some(b => b.status === 'template')" class="text-purple-600 ml-1">(+<span x-text="brokers.filter(b => b.status === 'template').length"></span> 📋 template)</span>
         </span>
       </div>
       <div class="overflow-x-auto">
@@ -137,8 +138,9 @@
                     x-text="b.age_min != null ? (b.age_min < 60 ? b.age_min + 'min前' : Math.floor(b.age_min / 60) + 'h前') : '—'"></td>
                 <td class="px-3 py-2 text-center">
                   <span class="px-1.5 py-0.5 rounded text-[10px] font-medium"
-                        :class="b.status === 'alive' ? 'bg-green-100 text-green-700' : b.status === 'idle' ? 'bg-yellow-100 text-yellow-700' : b.status === 'down' ? 'bg-red-100 text-red-700' : 'bg-warm-100 text-ink-500'"
-                        x-text="b.status === 'alive' ? '✅ alive' : b.status === 'idle' ? '⚠ idle' : b.status === 'down' ? '❌ down' : '— unknown'"></span>
+                        :class="b.status === 'alive' ? 'bg-green-100 text-green-700' : b.status === 'idle' ? 'bg-yellow-100 text-yellow-700' : b.status === 'template' ? 'bg-purple-100 text-purple-700' : b.status === 'down' ? 'bg-red-100 text-red-700' : 'bg-warm-100 text-ink-500'"
+                        :title="b.status === 'template' ? 'KI 65 #N19.238: future N-node MarketMaker template (no adapter linked, intentional)' : ''"
+                        x-text="b.status === 'alive' ? '✅ alive' : b.status === 'idle' ? '⚠ idle' : b.status === 'template' ? '📋 template' : b.status === 'down' ? '❌ down' : '— unknown'"></span>
                 </td>
               </tr>
             </template>
