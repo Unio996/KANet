@@ -624,6 +624,30 @@ if (process.send) {
           return;
         }
 
+        case 'pool_refund_disagreement_tx': {
+          // B2 v0.5 area-4 7c — pool refund_disagreement TX submit. Spine-only (4 inputs),
+          // 3 (Gap 1B silent burn) or 4 (Gap 1A full) outputs per silentOracleIndex.
+          // Each spine input gets 2 oracle sigs (= signing pair derived from silent index).
+          const { unlockPoolSpineRefundDisagreement } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockPoolSpineRefundDisagreement({
+            spineP2shAddress: cmd.spine_p2sh_address,
+            spineRedeemScriptHex: cmd.spine_redeem_script_hex,
+            requiredInputOutpoints: cmd.required_input_outpoints,
+            outputs: cmd.outputs,
+            spineSigsByInput: cmd.spine_sigs_by_input,
+            silentOracleIndex: cmd.silent_oracle_index,
+            signingPair: cmd.signing_pair,
+            networkId: wallet.getNetworkId(),
+            lockTime: BigInt(cmd.lock_time || 0),
+            txObjPreimage: cmd.tx_obj_preimage || null,
+          });
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+          }
+          return;
+        }
+
         case 'check_utxo_landed': {
           // B2 v0.5 Phase 3 bug 7 fix — confirm a transfer's UTXO landed in the accepted UTXO set.
           // A mempool-accepted TX can lose a double-spend race (is_accepted=false) → no UTXO.

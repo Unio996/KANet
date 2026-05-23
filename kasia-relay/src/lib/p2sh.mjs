@@ -661,7 +661,140 @@ export async function unlockPoolSpineP2SH(args) {
   }
 }
 
-// ── 7. checkUtxoLanded (B2 v0.5 Phase 3 bug 7 fix) ──
+// ── 7. unlockPoolSpineRefundDisagreement (B2 v0.5 area-4 7c) ──
+
+/**
+ * Pool spine refund_disagreement unlock — area-4 Gap 1A/1B + Owner Gap 1B burn.
+ *
+ * Per PoolSpine.sil entry 4 refund_disagreement: each spine input needs 2 oracle sigs (=
+ * per signingPair) + signingPair OP + silentOracleIndex OP + selector_4 + spine_redeem push.
+ *
+ * Spine-only TX: 4 inputs (= 1 maker stake + 3 oracle bond UTXOs, all baked at create), no
+ * side inputs (bettors refund SEPARATELY via PoolSide.refund_market_cancelled per area-4
+ * Gap 2). Each of the 4 inputs has its own sighash → its own 2 oracle sigs.
+ *
+ * scriptSig per spine input:
+ *   [sigA push 66B][sigB push 66B][signingPair OP][silentOracleIndex OP][selector OP_4][spine_redeem push]
+ *
+ * OP encoding for ints:
+ *   -1 → OP_1NEGATE (0x4f); 0 → OP_0 (0x00); 1 → OP_1 (0x51); 2 → OP_2 (0x52)
+ *   selector entry 4 → OP_4 (0x54)
+ */
+export async function unlockPoolSpineRefundDisagreement(args) {
+  const {
+    spineP2shAddress, spineRedeemScriptHex,
+    requiredInputOutpoints, outputs, spineSigsByInput,
+    silentOracleIndex, signingPair,
+    networkId, lockTime = 0n, txObjPreimage = null,
+  } = args;
+
+  if (silentOracleIndex !== -1 && (silentOracleIndex < 0 || silentOracleIndex > 2)) {
+    throw new Error(`silentOracleIndex must be -1 or 0-2, got ${silentOracleIndex}`);
+  }
+  if (signingPair < 0 || signingPair > 2) throw new Error(`signingPair must be 0-2, got ${signingPair}`);
+  // P6 constraint 2 cross-check (defense in depth — SS enforces but assert here too for fast-fail)
+  if (silentOracleIndex !== -1 && signingPair !== (2 - silentOracleIndex)) {
+    throw new Error(`signingPair ${signingPair} must equal 2-silentOracleIndex (${2 - silentOracleIndex}) for Gap 1B`);
+  }
+  const expectedOutputCount = silentOracleIndex === -1 ? 4 : 3;
+  if (outputs.length !== expectedOutputCount) {
+    throw new Error(`outputs.length ${outputs.length} != expected ${expectedOutputCount} (silentOracleIndex=${silentOracleIndex})`);
+  }
+  if (!Array.isArray(spineSigsByInput) || spineSigsByInput.length !== requiredInputOutpoints.length) {
+    throw new Error(`spineSigsByInput must be ${requiredInputOutpoints.length} arrays`);
+  }
+  if (spineSigsByInput.some(sigs => !Array.isArray(sigs) || sigs.length !== 2)) {
+    throw new Error('each spine input requires 2 oracle sigs for refund_disagreement');
+  }
+
+  const intToOpHex = (n) => {
+    if (n === -1) return '4f';  // OP_1NEGATE
+    if (n === 0) return '00';   // OP_0
+    if (n === 1) return '51';   // OP_1
+    if (n === 2) return '52';   // OP_2
+    throw new Error(`unsupported int for OP encoding: ${n}`);
+  };
+  const signingPairOpHex = intToOpHex(signingPair);
+  const silentOracleIndexOpHex = intToOpHex(silentOracleIndex);
+  const selectorOpHex = '54';  // OP_4 = entry 4 (refund_disagreement)
+
+  const txLockTime = BigInt(lockTime);
+  const rpc = await connectRpc(networkId);
+  try {
+    const { entries } = await rpc.getUtxosByAddresses([spineP2shAddress]);
+    if (!entries?.length) throw new Error(`No UTXOs found at spine P2SH ${spineP2shAddress}`);
+
+    // Match by txid only (Phase 3 UAT bug 6 sediment).
+    const matched = requiredInputOutpoints.map(req => {
+      const hits = entries.filter(e => e.outpoint.transactionId === req.outpointTxid);
+      if (hits.length === 0) throw new Error(`UTXO not found for lock tx: ${req.outpointTxid}`);
+      if (hits.length > 1) throw new Error(`ambiguous: ${hits.length} UTXOs at spine from tx ${req.outpointTxid}`);
+      return hits[0];
+    });
+
+    const txOutputs = outputs.map(o => new TransactionOutput(
+      typeof o.amountSompi === 'string' ? BigInt(o.amountSompi) : o.amountSompi,
+      payToAddressScript(new Address(o.address))
+    ));
+
+    const spineRedeemBytes = new Uint8Array(Buffer.from(spineRedeemScriptHex, 'hex'));
+    const spineRedeemPushSb = new ScriptBuilder();
+    spineRedeemPushSb.addData(spineRedeemBytes);
+    const spineRedeemPushHex = spineRedeemPushSb.toString();
+
+    // Each spine input gets its own scriptSig (= own 2 sigs over its own sighash).
+    const spineScriptSigs = spineSigsByInput.map(sigs =>
+      sigs.join('') + signingPairOpHex + silentOracleIndexOpHex + selectorOpHex + spineRedeemPushHex
+    );
+
+    let signedTx;
+    if (txObjPreimage) {
+      const parsed = JSON.parse(JSON.stringify(txObjPreimage));
+      parsed.lockTime = BigInt(parsed.lockTime || 0);
+      parsed.gas = BigInt(parsed.gas || 0);
+      if (Array.isArray(parsed.inputs)) {
+        parsed.inputs = parsed.inputs.map((inp, i) => ({
+          ...inp,
+          signatureScript: spineScriptSigs[i],
+          sequence: BigInt(inp.sequence || 0),
+          // Phase 3 bug 5: keep preimage's sigOpCount (Kaspa sighash includes sig_op_counts_hash).
+          sigOpCount: Number(inp.sigOpCount || 0),
+          utxo: inp.utxo ? {
+            ...inp.utxo,
+            amount: BigInt(inp.utxo.amount || 0),
+            blockDaaScore: BigInt(inp.utxo.blockDaaScore || 0),
+          } : undefined,
+        }));
+      }
+      if (Array.isArray(parsed.outputs)) {
+        parsed.outputs = parsed.outputs.map(o => ({ ...o, value: BigInt(o.value || 0) }));
+      }
+      signedTx = new Transaction(parsed);
+    } else {
+      signedTx = new Transaction({
+        version: 0,
+        inputs: matched.map((utxo, i) => ({
+          previousOutpoint: { transactionId: utxo.outpoint.transactionId, index: utxo.outpoint.index },
+          signatureScript: spineScriptSigs[i],
+          sequence: 0n,
+          sigOpCount: 2,  // 2 oracle checkSig calls per spine input in refund_disagreement
+        })),
+        outputs: txOutputs,
+        lockTime: txLockTime,
+        gas: 0n,
+        subnetworkId: '0000000000000000000000000000000000000000',
+        payload: '',
+      });
+    }
+
+    const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: result.transactionId };
+  } finally {
+    try { await rpc.disconnect(); } catch {}
+  }
+}
+
+// ── 8. checkUtxoLanded (B2 v0.5 Phase 3 bug 7 fix) ──
 
 /**
  * Check whether a transfer's UTXO actually landed at the target address in the accepted UTXO set.
