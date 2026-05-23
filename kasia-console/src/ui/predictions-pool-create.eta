@@ -1,0 +1,436 @@
+<%~ include('partials/page-open', { _page: 'predictions-pool-create', pageTitle: '发起预测', ...it }) %>
+
+<!-- KANet-UI A.1 maker create market — V2 Editorial Dashboard 双栏
+     spec: docs/b2-pool-ui-spec-v0.1.md Section 1 A.1
+     美学: Editorial Financial Instrument (= Fraunces serif display + 古铜金 #b08a44 accent + verify-layer pattern)
+     backend: POST /api/pool/market/create per Bettor r449 4 决策 (= 5 required fields, 6 backend defaults)
+-->
+
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&display=swap" rel="stylesheet">
+
+<style>
+  .font-display { font-family: 'Fraunces', Georgia, serif; font-feature-settings: 'opsz' 36; }
+  .accent-gold { color: #b08a44; }
+  .accent-gold-bg { background: #b08a44; }
+  .accent-gold-bg:hover { background: #97742d; }
+  .accent-gold-border { border-color: #b08a44; }
+  .accent-gold-hover-bg:hover { background: #fef9eb; border-color: #b08a44; }
+  .stake-slider {
+    -webkit-appearance: none; appearance: none;
+    height: 4px; background: #e4e2dc; border-radius: 2px; outline: none;
+  }
+  .stake-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 18px; height: 18px; background: #b08a44; border-radius: 50%; cursor: pointer;
+    box-shadow: 0 0 0 4px rgba(176,138,68,0.15);
+  }
+  .timeline-step {
+    display: flex; align-items: center; gap: 10px; padding: 6px 0;
+    font-size: 13px; color: #6b6d7b;
+  }
+  .timeline-step.done { color: #16a34a; font-weight: 500; }
+  .timeline-step.active { color: #b08a44; font-weight: 500; }
+  .timeline-step.active .step-icon { animation: pulse 1.5s infinite; }
+  .step-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; border-radius: 50%;
+    flex-shrink: 0; font-size: 11px;
+  }
+  .timeline-step.done .step-icon { background: #16a34a; color: white; }
+  .timeline-step.active .step-icon { background: #b08a44; color: white; }
+  .timeline-step.pending .step-icon { background: #e4e2dc; color: #9496a1; }
+  @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(176,138,68,0.4); } 50% { box-shadow: 0 0 0 6px rgba(176,138,68,0); } }
+</style>
+
+<div class="p-6 max-w-5xl mx-auto" x-data="createPoolPage()" x-init="init()" x-cloak>
+
+  <!-- ============================================ -->
+  <!-- 钱包状态栏 (= 复用 predictions.eta pattern) -->
+  <!-- ============================================ -->
+  <div class="card card-compact mb-5 flex items-center gap-4 flex-wrap">
+    <select x-model="selectedRelayId" @change="onAgentChange()"
+            class="rounded-lg border border-warm-300 px-3 py-1.5 text-sm bg-white font-medium">
+      <% it.relayNodes.forEach(r => { %>
+      <option value="<%= r.id %>"><%= r.name %></option>
+      <% }) %>
+    </select>
+    <template x-if="walletAddress">
+      <div class="flex items-center gap-3 text-sm">
+        <span class="font-mono text-xs text-ink-400 cursor-pointer"
+              @click="navigator.clipboard.writeText(walletAddress)"
+              :title="walletAddress"
+              x-text="walletAddress.slice(0,12) + '...' + walletAddress.slice(-8)"></span>
+        <span class="font-bold" :class="kasBalance > 0 ? 'text-ink-700' : 'text-red-500'"
+              x-text="(kasBalance ?? 0).toFixed(4) + ' KAS'"
+              :title="kasBalance < 4 ? '余额 < 4 KAS, 最大押注上限受余额限制' : ''"></span>
+      </div>
+    </template>
+  </div>
+
+  <!-- ============================================ -->
+  <!-- ship 完成态: 显示 chain TX timeline -->
+  <!-- ============================================ -->
+  <template x-if="shipped">
+    <div class="card card-flush overflow-hidden mb-5 border border-warm-200">
+      <div class="px-6 py-5 border-b border-warm-200">
+        <h2 class="font-display text-2xl text-ink-700">押金 <span x-text="form.maker_stake_kas"></span> KAS 已锁</h2>
+        <p class="text-xs text-ink-400 mt-1">市场 ID: <span class="font-mono" x-text="result.market_id"></span></p>
+      </div>
+      <div class="px-6 py-5 space-y-1">
+        <template x-for="(step, i) in timeline" :key="step.id">
+          <div class="timeline-step" :class="step.state">
+            <span class="step-icon" x-text="step.state === 'done' ? '✓' : step.state === 'active' ? '◉' : (i+1)"></span>
+            <span x-text="step.label"></span>
+            <span class="text-xs text-ink-300 ml-auto" x-show="step.note" x-text="step.note"></span>
+          </div>
+        </template>
+      </div>
+      <div class="px-6 py-4 bg-warm-50 border-t border-warm-200 space-y-2 text-xs">
+        <div class="flex items-center gap-2">
+          <span class="text-ink-400 w-20">spine TX</span>
+          <a class="font-mono accent-gold hover:underline" target="_blank"
+             :href="'https://explorer-tn12.kaspa.org/txs/' + result.spine_lock_tx"
+             x-text="result.spine_lock_tx?.slice(0,16) + '...' + result.spine_lock_tx?.slice(-8)"></a>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-ink-400 w-20">spine P2SH</span>
+          <span class="font-mono text-ink-500" x-text="result.spine_p2sh?.slice(0,18) + '...' + result.spine_p2sh?.slice(-12)"></span>
+        </div>
+      </div>
+      <div class="px-6 py-4 border-t border-warm-200 flex gap-3">
+        <a :href="'/predictions/pool/' + result.market_id"
+           class="btn btn-secondary text-sm">查看市场详情 →</a>
+        <button @click="resetForm()" class="btn btn-ghost text-sm">再发一个</button>
+      </div>
+    </div>
+  </template>
+
+  <!-- ============================================ -->
+  <!-- 主表单 (= V2 Editorial Dashboard 双栏) -->
+  <!-- ============================================ -->
+  <template x-if="!shipped">
+    <div class="card card-flush overflow-hidden">
+      <!-- Header -->
+      <div class="px-6 py-5 border-b border-warm-200 flex items-baseline justify-between">
+        <h1 class="font-display text-3xl text-ink-700">发起预测</h1>
+        <span class="text-xs text-ink-400" title="V2 极简 4 input 30s 完整">极简表单 · 4 input · ~30s</span>
+      </div>
+
+      <div class="px-6 py-6 grid grid-cols-1 md:grid-cols-5 gap-6">
+
+        <!-- 左栏 内容 (= col-span-3) -->
+        <div class="md:col-span-3 space-y-5">
+
+          <!-- 题目 -->
+          <div>
+            <label class="block text-xs font-medium text-ink-500 mb-1.5">题目</label>
+            <input type="text" x-model="form.question" maxlength="200"
+                   placeholder="例: 比特币 6 月底前过 $80,000?"
+                   class="w-full font-display text-xl px-4 py-3 rounded-lg border border-warm-300 focus:border-amber-400 focus:ring-2 focus:ring-amber-100 focus:outline-none">
+            <p class="text-xs text-ink-400 mt-1">一句话, 让 oracle / bettor 一眼看懂</p>
+          </div>
+
+          <!-- 截止 -->
+          <div>
+            <label class="block text-xs font-medium text-ink-500 mb-1.5">截止时间 (UTC)</label>
+            <input type="datetime-local" x-model="form.outcome_end_date_local"
+                   :min="minDeadlineLocal" :max="maxDeadlineLocal"
+                   class="w-full font-mono text-sm px-4 py-2.5 rounded-lg border border-warm-300 focus:border-amber-400 focus:outline-none">
+            <p class="text-xs text-ink-400 mt-1">必 ≥ 现在 + <span x-text="minDeadlineMin"></span> 分钟 · ≤ <span x-text="maxDeadlineDay"></span> 天 (testnet)</p>
+          </div>
+
+          <!-- 规则 -->
+          <div>
+            <label class="block text-xs font-medium text-ink-500 mb-1.5">判定规则 (oracle 用这段判 YES/NO)</label>
+            <textarea x-model="form.resolution_rule_spec" rows="4" maxlength="1000"
+                      placeholder="例: 看 6/30 23:59 UTC Binance BTC/USDT 收盘价。 ≥80,000 = YES, 否则 NO."
+                      class="w-full text-sm px-4 py-3 rounded-lg border border-warm-300 focus:border-amber-400 focus:outline-none font-sans leading-relaxed"></textarea>
+            <div class="flex items-center justify-between mt-1">
+              <p class="text-xs text-ink-400">明确数据源 + 时间 + 阈值 = 减少 oracle 分歧</p>
+              <button @click="llmCheckRule()" :disabled="!form.resolution_rule_spec || llmChecking"
+                      class="text-xs accent-gold hover:underline disabled:opacity-40">
+                <span x-text="llmChecking ? '检查中...' : '🤖 LLM 检查规则清晰度'"></span>
+              </button>
+            </div>
+            <template x-if="llmResult">
+              <div class="mt-2 text-xs px-3 py-2 rounded-lg" :class="llmResult.score >= 7 ? 'bg-green-50 text-green-700' : llmResult.score >= 4 ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'">
+                <span class="font-medium">清晰度 <span x-text="llmResult.score"></span>/10:</span>
+                <span x-text="llmResult.advice"></span>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- 右栏 押注 (= col-span-2) -->
+        <div class="md:col-span-2 space-y-5 border-l border-warm-200 pl-6">
+
+          <!-- YES/NO -->
+          <div>
+            <label class="block text-xs font-medium text-ink-500 mb-1.5">你押哪边</label>
+            <div class="grid grid-cols-2 gap-2">
+              <button @click="form.outcome_side = 'YES'"
+                      class="py-3 rounded-lg border-2 transition font-display text-lg"
+                      :class="form.outcome_side === 'YES' ? 'accent-gold-bg text-white accent-gold-border' : 'border-warm-300 text-ink-500 accent-gold-hover-bg'">
+                YES
+              </button>
+              <button @click="form.outcome_side = 'NO'"
+                      class="py-3 rounded-lg border-2 transition font-display text-lg"
+                      :class="form.outcome_side === 'NO' ? 'accent-gold-bg text-white accent-gold-border' : 'border-warm-300 text-ink-500 accent-gold-hover-bg'">
+                NO
+              </button>
+            </div>
+          </div>
+
+          <!-- 押金 -->
+          <div>
+            <label class="block text-xs font-medium text-ink-500 mb-1.5 flex items-baseline justify-between">
+              <span>押 <span class="font-display text-base text-ink-700" x-text="form.maker_stake_kas"></span> KAS</span>
+              <span class="text-xs text-ink-400">(最低 1 / 上限 <span x-text="poolConfig?.maker_stake_max_kas ?? 4"></span> KAS)</span>
+            </label>
+            <input type="range" x-model.number="form.maker_stake_kas"
+                   :min="poolConfig?.maker_stake_min_kas ?? 1"
+                   :max="poolConfig?.maker_stake_max_kas ?? 4"
+                   step="0.5"
+                   class="w-full stake-slider">
+            <p class="text-xs text-ink-400 mt-1">SS 合约 baked 数学锁定不可调</p>
+          </div>
+
+          <!-- D7 disclaimer + checkbox -->
+          <div class="bg-warm-50 rounded-lg p-3 border border-warm-200 space-y-2">
+            <div class="text-xs text-ink-600 leading-relaxed space-y-1.5">
+              <div class="font-medium text-amber-700">⚠ Kaspa 测试网阶段 (等 Toccata 主网激活, 预计 2026/6/5-6/20)</div>
+              <ul class="space-y-1 pl-3 text-[11px]">
+                <li>• 单市场 <span x-text="poolConfig?.maker_stake_max_kas ?? 4"></span> KAS 封顶 — SS 合约 baked, 数学锁定不可调</li>
+                <li>• Oracle 2-of-3 多签 + P2SH 链上结算 — 零第三方托管, 钱归你私钥, KANet 团队也拿不到</li>
+                <li>• 赢家自动收钱 — 市场结束 → Oracle 投票 → 多签结算 TX → 钱直接到你原地址</li>
+                <li>• 争议走 refund — 2-1 分歧 或 3 沉默 时全员退款, PoolSide.refund_market_cancelled 自取</li>
+              </ul>
+            </div>
+            <label class="flex items-center gap-2 text-xs cursor-pointer pt-1 border-t border-warm-200">
+              <input type="checkbox" x-model="acceptedDisclaimer" class="accent-amber-600">
+              <span class="text-ink-600">我知道这些, 准备签名锁押金</span>
+            </label>
+          </div>
+
+          <!-- 发起 button -->
+          <button @click="submitMarket()" :disabled="!canSubmit || submitting"
+                  class="w-full py-3.5 rounded-lg font-display text-lg transition"
+                  :class="canSubmit && !submitting ? 'accent-gold-bg text-white shadow-sm' : 'bg-warm-200 text-ink-300 cursor-not-allowed'">
+            <span x-text="submitting ? '锁押金中...' : '发起预测 →'"></span>
+          </button>
+          <template x-if="submitError">
+            <div class="text-xs text-red-600 px-3 py-2 bg-red-50 rounded-lg" x-text="submitError"></div>
+          </template>
+        </div>
+      </div>
+    </div>
+  </template>
+
+</div>
+
+<script>
+function createPoolPage() {
+  return {
+    selectedRelayId: '<%= it.relayNodes[0]?.id || "" %>',
+    walletAddress: '',
+    kasBalance: null,
+    poolConfig: null,
+    minDeadlineMin: 15,
+    maxDeadlineDay: 30,
+    form: {
+      question: '',
+      outcome_end_date_local: '',
+      outcome_side: '',
+      maker_stake_kas: 1,
+      resolution_rule_spec: '',
+    },
+    acceptedDisclaimer: false,
+    llmChecking: false,
+    llmResult: null,
+    submitting: false,
+    submitError: '',
+    shipped: false,
+    result: null,
+    timeline: [],
+    pollHandle: null,
+
+    async init() {
+      // load /api/pool/config first → set min/max + default stake
+      try {
+        const r = await fetch('/api/pool/config');
+        const j = await r.json();
+        if (j.ok) {
+          this.poolConfig = j;
+          this.minDeadlineMin = parseInt(j.disagreement_timeout_min, 10) || 15;
+          // 实 backend min deadline 15 min override 通过 env, UI 用 hardcode 15 显示
+          this.maxDeadlineDay = parseInt(j.deadline_max_days, 10) || 30;
+          this.form.maker_stake_kas = j.maker_stake_min_kas || 1;
+        }
+      } catch (e) { console.warn('pool config load fail', e); }
+      this.setDefaultDeadline();
+      await this.onAgentChange();
+    },
+
+    setDefaultDeadline() {
+      // default = now + 1 hour (= 测试网 demo 友好)
+      const d = new Date(Date.now() + 60 * 60_000);
+      this.form.outcome_end_date_local = d.toISOString().slice(0, 16);
+    },
+
+    get minDeadlineLocal() {
+      return new Date(Date.now() + this.minDeadlineMin * 60_000).toISOString().slice(0, 16);
+    },
+    get maxDeadlineLocal() {
+      return new Date(Date.now() + this.maxDeadlineDay * 86400_000).toISOString().slice(0, 16);
+    },
+
+    get canSubmit() {
+      return this.form.question.trim()
+        && this.form.outcome_end_date_local
+        && this.form.outcome_side
+        && this.form.maker_stake_kas > 0
+        && this.form.resolution_rule_spec.trim()
+        && this.acceptedDisclaimer;
+    },
+
+    async onAgentChange() {
+      if (!this.selectedRelayId) return;
+      try {
+        const r = await fetch('/api/relay/' + this.selectedRelayId);
+        const j = await r.json();
+        this.walletAddress = j.address || '';
+      } catch (e) { this.walletAddress = ''; }
+      try {
+        const r = await fetch('/api/relay/' + this.selectedRelayId + '/balance');
+        const j = await r.json();
+        this.kasBalance = typeof j.kas === 'number' ? j.kas : null;
+      } catch (e) { this.kasBalance = null; }
+    },
+
+    async llmCheckRule() {
+      if (!this.form.resolution_rule_spec) return;
+      this.llmChecking = true;
+      this.llmResult = null;
+      // LLM endpoint 待 Bettor architect 钦定 — 现 placeholder stub.
+      // 替换为 POST /api/pool/llm-check-rule { rule, question } → { score, advice }
+      await new Promise(r => setTimeout(r, 800));
+      const r = this.form.resolution_rule_spec.trim();
+      const hasSource = /binance|coinbase|coingecko|polymarket|官方|UTC|GMT|\d/i.test(r);
+      const hasThreshold = /[><=]|大于|小于|等于|超过|不超|多少|\d/.test(r);
+      const score = (hasSource ? 5 : 0) + (hasThreshold ? 5 : 0);
+      this.llmResult = {
+        score,
+        advice: score >= 7 ? '规则清晰, oracle 易判定' : score >= 4 ? '建议加明确数据源 + 阈值 + 时间, 减少 oracle 分歧' : '规则太模糊, oracle 多半投不同 → refund_disagreement',
+      };
+      this.llmChecking = false;
+    },
+
+    async submitMarket() {
+      if (!this.canSubmit) return;
+      this.submitting = true;
+      this.submitError = '';
+      try {
+        const outcomeEndIso = new Date(this.form.outcome_end_date_local).toISOString();
+        const body = {
+          maker_relay_id: this.selectedRelayId,
+          outcome_side: this.form.outcome_side,
+          outcome_end_date: outcomeEndIso,
+          resolution_rule_spec: this.form.resolution_rule_spec.trim(),
+          maker_stake_kas: String(this.form.maker_stake_kas),
+        };
+        // backend r449 4 决策: 不传 oracle_relay_ids / broker_relay_id / broker_fee_pct / oracle_bond_kas
+        // / outcome_market_source / outcome_condition_id / outcome_token_id — 全 backend defaults fill
+        const r = await fetch('/api/pool/market/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const j = await r.json();
+        if (!j.ok) throw new Error(j.error || 'create fail');
+        this.result = j;
+        this.shipped = true;
+        this.initTimeline();
+        this.startStatusPoll();
+      } catch (e) {
+        this.submitError = e.message;
+      }
+      this.submitting = false;
+    },
+
+    initTimeline() {
+      this.timeline = [
+        { id: 'broadcast',   label: '广播 TX',                                   state: 'done', note: '' },
+        { id: 'mined',       label: '上链确认',                                   state: 'active', note: '~5-15s' },
+        { id: 'sampling',    label: '等 Oracle 抽签 (k=100 block ≈ 10s)',          state: 'pending', note: '' },
+        { id: 'oracle_deps', label: 'Oracle 接单',                                 state: 'pending', note: '0/3' },
+        { id: 'deadline',    label: '等截止 + 投票',                                state: 'pending', note: '' },
+        { id: 'settle',      label: '结算',                                         state: 'pending', note: '' },
+      ];
+    },
+
+    startStatusPoll() {
+      if (this.pollHandle) clearInterval(this.pollHandle);
+      const poll = async () => {
+        try {
+          const r = await fetch('/api/pool/market/' + this.result.market_id);
+          const j = await r.json();
+          if (j.ok && j.market) this.updateTimeline(j);
+        } catch (e) { /* transient */ }
+      };
+      poll();
+      // smart poll: 可见 + active 时 5s, hidden tab 时 30s
+      const interval = document.hidden ? 30_000 : 5_000;
+      this.pollHandle = setInterval(poll, interval);
+      document.addEventListener('visibilitychange', () => {
+        if (this.pollHandle) clearInterval(this.pollHandle);
+        this.pollHandle = setInterval(poll, document.hidden ? 30_000 : 5_000);
+      });
+    },
+
+    updateTimeline(data) {
+      const m = data.market;
+      const status = data.protocol_status || m.status;
+      const oracleDeposited = data.oracle_deposits_count || 0;
+      const set = (id, state, note) => {
+        const t = this.timeline.find(x => x.id === id);
+        if (t) { t.state = state; if (note !== undefined) t.note = note; }
+      };
+      // upgrade timeline based on backend state
+      if (status === 'pending_oracle_sampling' || status === 'pending_oracle_deposits' || status === 'pending_bettors' || status === 'verifying' || status === 'collecting_sigs' || status === 'completed' || status === 'refunded') {
+        set('mined', 'done', '');
+      }
+      if (status === 'pending_oracle_deposits' || status === 'pending_bettors' || status === 'verifying' || status === 'collecting_sigs' || status === 'completed' || status === 'refunded') {
+        set('sampling', 'done', '');
+        set('oracle_deps', 'active', oracleDeposited + '/3');
+      }
+      if (status === 'pending_bettors' || status === 'verifying' || status === 'collecting_sigs' || status === 'completed' || status === 'refunded') {
+        set('oracle_deps', 'done', '3/3');
+        set('deadline', 'active', '');
+      }
+      if (status === 'verifying' || status === 'collecting_sigs' || status === 'completed' || status === 'refunded') {
+        set('deadline', 'done', '');
+        set('settle', 'active', status);
+      }
+      if (status === 'completed' || status === 'refunded') {
+        set('settle', 'done', status);
+        if (this.pollHandle) { clearInterval(this.pollHandle); this.pollHandle = null; }
+      }
+    },
+
+    resetForm() {
+      this.shipped = false;
+      this.result = null;
+      this.submitError = '';
+      this.llmResult = null;
+      this.acceptedDisclaimer = false;
+      this.form.question = '';
+      this.form.outcome_side = '';
+      this.form.resolution_rule_spec = '';
+      this.setDefaultDeadline();
+      if (this.pollHandle) { clearInterval(this.pollHandle); this.pollHandle = null; }
+    },
+  };
+}
+</script>
+
+<%~ include('partials/page-close', it) %>
