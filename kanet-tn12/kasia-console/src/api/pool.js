@@ -374,8 +374,11 @@ export async function registerPoolRoutes(fastify) {
     const b = request.body || {};
     if (!b.oracle_relay_id) return reply.code(400).send({ ok: false, error: 'oracle_relay_id required' });
     const outcome = (b.outcome || '').toUpperCase();
-    if (outcome !== 'YES' && outcome !== 'NO' && outcome !== 'DISPUTE') {
-      return reply.code(400).send({ ok: false, error: 'outcome must be YES, NO, or DISPUTE' });
+    // F1 (area-3 钦定 + Owner): protocol layer accepts only YES/NO. The "DISPUTE" exit was
+    // spec-外 加戏 (pp.txt review found 0 mention in 5/21 spec). Oracle 接单 = commit to
+    // YES/NO; uncertainty is handled at accept time (don't deposit). silent = bond forfeit.
+    if (outcome !== 'YES' && outcome !== 'NO') {
+      return reply.code(400).send({ ok: false, error: 'outcome must be YES or NO (DISPUTE removed per area-3 spec — oracle 接单 commits to YES/NO; uncertainty → reject at accept time)' });
     }
 
     const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
