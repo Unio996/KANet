@@ -1,0 +1,192 @@
+// PredictionPoolUnanimous3 v0.5 draft — B2 v0.5 simplified single-market with 3 oracles
+//
+// Spec freeze 2026-05-21 (= 6 rounds adversarial critique converge):
+// - 3 oracle 3-of-3 unanimous (= silverscript supportable, NO m-of-n threshold)
+// - 3 entries: settle_all / settle_majority_forfeit_1 / refund_all
+// - Bond per oracle = pot × 50% baked (= attacker bribery cost ≥ bond per oracle)
+// - Forfeit silent only (= 不 punish dissenting signed oracle, avoid sycophancy)
+// - 25% reward to all signed oracle (= incentive 上线 behavior)
+// - Scope: testnet 全部 + 主网 < $100 KAS pot + 50 bettors max
+// - L3 challenge defer Phase 5+
+// - v1 reputation hook only (= chain_event record), v2 progressive forfeit
+//
+// v0.5 simplified to single-market MVP for 6/4 Toccata mainnet upgrade.
+// B2 spine+sides pool architecture = Phase 5+ extension post v0.5 prove.
+//
+// Differences from Phase 4a v0 PIE5:
+// - 5 oracle → 3 oracle (= simpler, lower collusion cost trade-off accepted)
+// - + bond per oracle baked into ctor (= economic security)
+// - + forfeit math 50/25/25 split (= bettors/maker/signed-oracles)
+// - + settle_majority_forfeit_1 entry (= 2 sign + 1 silent → settle + forfeit silent)
+// - L3 challenge mechanism deferred
+//
+// 编译: silverc.exe PredictionPoolUnanimous3.sil --ctor args.json
+
+pragma silverscript ^0.1.0;
+
+contract PredictionPoolUnanimous3(
+    byte[32] makerPk,
+    byte[32] takerPk,
+    byte[32] brokerPk,
+    byte[32] oracle1Pk,
+    byte[32] oracle2Pk,
+    byte[32] oracle3Pk,
+    int deadline,           // unix seconds, after which forfeit/refund eligible
+    int minerFee,           // sompi for chain TX miner fee
+    int brokerFeePct,       // basis points, e.g., 100 = 1%
+    int makerStakeAmount,   // sompi, maker contribution to escrow
+    int takerStakeAmount,   // sompi, taker contribution to escrow
+    int oracleBondAmount    // sompi, per-oracle bond (= pot × 50% recommended)
+) {
+    // entry 0 — settle_all: 3 oracle 全签 + winner OP_0/1 → spendable 拆 winner + 25%×3 oracle bond return + 25%×3 oracle reward (= 上线 incentive)
+    // Pre-condition: tx.inputs.length == 5 (= maker stake + taker stake + 3 oracle bond UTXOs)
+    // Outputs: 5 (= 1 winner + 1 broker fee + 3 oracle bond return)
+    entrypoint function settle_all(
+        sig sig1,
+        sig sig2,
+        sig sig3,
+        int winner  // 0 = maker, 1 = taker
+    ) {
+        require(checkSig(sig1, pubkey(oracle1Pk)));
+        require(checkSig(sig2, pubkey(oracle2Pk)));
+        require(checkSig(sig3, pubkey(oracle3Pk)));
+
+        require(winner == 0 || winner == 1);
+        require(tx.inputs.length == 5);
+        require(tx.outputs.length == 5);
+
+        // pool = maker stake + taker stake (= bond NOT in pool, returned to oracles)
+        int pool = tx.inputs[0].value + tx.inputs[1].value - minerFee;
+        int brokerFeeAmount = pool * brokerFeePct / 10000;
+        int winnerAmount = pool - brokerFeeAmount;
+
+        byte[34] makerLock = new ScriptPubKeyP2PK(pubkey(makerPk));
+        byte[34] takerLock = new ScriptPubKeyP2PK(pubkey(takerPk));
+        byte[34] brokerLock = new ScriptPubKeyP2PK(pubkey(brokerPk));
+        byte[34] oracle1Lock = new ScriptPubKeyP2PK(pubkey(oracle1Pk));
+        byte[34] oracle2Lock = new ScriptPubKeyP2PK(pubkey(oracle2Pk));
+        byte[34] oracle3Lock = new ScriptPubKeyP2PK(pubkey(oracle3Pk));
+
+        // output 0: winner (maker OR taker)
+        if (winner == 0) {
+            require(tx.outputs[0].scriptPubKey == byte[](makerLock));
+        } else {
+            require(tx.outputs[0].scriptPubKey == byte[](takerLock));
+        }
+        require(tx.outputs[0].value == winnerAmount);
+
+        // output 1: broker fee
+        require(tx.outputs[1].scriptPubKey == byte[](brokerLock));
+        require(tx.outputs[1].value == brokerFeeAmount);
+
+        // output 2-4: oracle bond return (= each oracle gets their bond back, all signed = no forfeit)
+        require(tx.outputs[2].scriptPubKey == byte[](oracle1Lock));
+        require(tx.outputs[2].value == oracleBondAmount);
+        require(tx.outputs[3].scriptPubKey == byte[](oracle2Lock));
+        require(tx.outputs[3].value == oracleBondAmount);
+        require(tx.outputs[4].scriptPubKey == byte[](oracle3Lock));
+        require(tx.outputs[4].value == oracleBondAmount);
+    }
+
+    // entry 1 — settle_majority_forfeit_1: 2 oracle 签 + 1 oracle silent 24h timeout → settle + forfeit silent oracle bond
+    // Three sub-cases by which oracle silent (= explicit per-sub-case entries for silverscript simplicity).
+    // For v0.5 MVP: combine all 3 cases here via signed-oracle position flags.
+    // Bond split: 50% to bettors (= via pool boost), 25% to maker, 25% to remaining 2 signed oracles (= 12.5% each).
+    entrypoint function settle_majority_forfeit_o3(
+        sig sig1,  // oracle1 signs
+        sig sig2,  // oracle2 signs
+        int winner
+    ) {
+        require(checkSig(sig1, pubkey(oracle1Pk)));
+        require(checkSig(sig2, pubkey(oracle2Pk)));
+        // oracle3 silent — NOT verified, bond forfeited
+
+        require(winner == 0 || winner == 1);
+        require(tx.time >= deadline * 1000);  // bug 10d fix Path A — Kaspa LOCK_TIME_THRESHOLD 500B needs ms operand
+        require(tx.inputs.length == 5);
+        require(tx.outputs.length == 6);  // winner + broker + 2 oracle bond return + 2 forfeit share (= bettors via pool boost is implicit, 25% to maker + 25%×2 signed oracles)
+
+        // pool = maker + taker stake + forfeited oracle3 bond × 50% (= bettors share via pool boost)
+        int forfeitedBond = oracleBondAmount;
+        int bettorShare = forfeitedBond / 2;       // 50% to bettors (= boosts winner pool)
+        int makerShare = forfeitedBond / 4;        // 25% to maker
+        int oracleReward = forfeitedBond / 4 / 2;  // 25% / 2 to remaining oracles each (= 12.5%)
+
+        int pool = tx.inputs[0].value + tx.inputs[1].value + bettorShare - minerFee;
+        int brokerFeeAmount = pool * brokerFeePct / 10000;
+        int winnerAmount = pool - brokerFeeAmount;
+
+        byte[34] makerLock = new ScriptPubKeyP2PK(pubkey(makerPk));
+        byte[34] takerLock = new ScriptPubKeyP2PK(pubkey(takerPk));
+        byte[34] brokerLock = new ScriptPubKeyP2PK(pubkey(brokerPk));
+        byte[34] oracle1Lock = new ScriptPubKeyP2PK(pubkey(oracle1Pk));
+        byte[34] oracle2Lock = new ScriptPubKeyP2PK(pubkey(oracle2Pk));
+
+        if (winner == 0) {
+            require(tx.outputs[0].scriptPubKey == byte[](makerLock));
+        } else {
+            require(tx.outputs[0].scriptPubKey == byte[](takerLock));
+        }
+        require(tx.outputs[0].value == winnerAmount);
+
+        require(tx.outputs[1].scriptPubKey == byte[](brokerLock));
+        require(tx.outputs[1].value == brokerFeeAmount);
+
+        // oracle 1 bond return + reward share
+        require(tx.outputs[2].scriptPubKey == byte[](oracle1Lock));
+        require(tx.outputs[2].value == oracleBondAmount + oracleReward);
+        require(tx.outputs[3].scriptPubKey == byte[](oracle2Lock));
+        require(tx.outputs[3].value == oracleBondAmount + oracleReward);
+
+        // output 4: maker forfeit share (= 25% of forfeited bond, separate from winnings)
+        require(tx.outputs[4].scriptPubKey == byte[](makerLock));
+        require(tx.outputs[4].value == makerShare);
+
+        // output 5: bettor share (= 50% of forfeited bond) — for v0.5 simplification, goes to maker too OR winner
+        // TODO: actual bettor pool implementation defer Phase 5+ (= currently single-market 1 maker 1 taker, "bettor share" = both)
+        // For v0.5 MVP: bettor share goes to MAKER as bookkeeping simplification
+        require(tx.outputs[5].scriptPubKey == byte[](makerLock));
+        require(tx.outputs[5].value == bettorShare);
+    }
+
+    // (Note: settle_majority_forfeit_o1 + settle_majority_forfeit_o2 also needed for other silent oracle cases,
+    //  pattern symmetric. Omit here for v0.5 first draft; impl in production .sil after silverc compile verify.)
+
+    // entry 2 — refund_all: all 3 oracle silent 24h + maker signs → refund maker + taker stake, forfeit 全 3 oracle bond
+    entrypoint function refund_all(sig makerSig) {
+        require(checkSig(makerSig, pubkey(makerPk)));
+        require(tx.time >= deadline * 1000);  // bug 10d fix Path A
+        require(tx.inputs.length == 5);
+        require(tx.outputs.length == 2);  // maker refund + taker refund (= 3 oracle bond goes to bettors share via maker)
+
+        // pool refund: each party gets back stake + share of 3 forfeited bonds
+        int totalForfeitedBond = oracleBondAmount * 3;
+        int bettorShare = totalForfeitedBond / 2;  // 50% to bettors
+        int makerShare = totalForfeitedBond / 4;   // 25% to maker
+        // 25% to "remaining oracles" = 0 oracles signed, so to maker for v0.5 simplification
+        int extraToMaker = totalForfeitedBond / 4;
+
+        int makerRefund = makerStakeAmount + bettorShare / 2 + makerShare + extraToMaker - minerFee / 2;
+        int takerRefund = takerStakeAmount + bettorShare / 2 - minerFee / 2;
+
+        byte[34] makerLock = new ScriptPubKeyP2PK(pubkey(makerPk));
+        byte[34] takerLock = new ScriptPubKeyP2PK(pubkey(takerPk));
+
+        require(tx.outputs[0].scriptPubKey == byte[](makerLock));
+        require(tx.outputs[0].value == makerRefund);
+        require(tx.outputs[1].scriptPubKey == byte[](takerLock));
+        require(tx.outputs[1].value == takerRefund);
+    }
+
+    // entry 3 — refund_maker_unjoined: maker published but taker未 join, oracle bond not locked → refund maker stake only
+    entrypoint function refund_maker_unjoined(sig makerSig) {
+        require(checkSig(makerSig, pubkey(makerPk)));
+        require(tx.time >= deadline * 1000);  // bug 10d fix Path A
+        require(tx.inputs.length == 1);  // only maker stake locked
+        require(tx.outputs.length == 1);
+
+        byte[34] makerLock = new ScriptPubKeyP2PK(pubkey(makerPk));
+        require(tx.outputs[0].scriptPubKey == byte[](makerLock));
+        require(tx.outputs[0].value == makerStakeAmount - minerFee);
+    }
+}

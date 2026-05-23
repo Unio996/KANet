@@ -87,7 +87,8 @@ contract PoolSpine(
         int winner,
         byte[32] sidesMerkleRoot
     ) {
-        require(tx.time >= deadline);
+        // bug 10d fix (Path A): Kaspa LOCK_TIME_THRESHOLD 500B requires ms-scale operand
+        require(tx.time >= deadline * 1000);
         require(winner == 0 || winner == 1);
         require(silentOracleIndex >= 0 && silentOracleIndex <= 2);
 
@@ -120,7 +121,7 @@ contract PoolSpine(
     // Maker single-sig sufficient since no settlement decision needed
     entrypoint function refund_unanimous_silent(sig makerSig) {
         require(checkSig(makerSig, pubkey(makerPk)));
-        require(tx.time >= deadline);
+        require(tx.time >= deadline * 1000);  // bug 10d fix Path A
 
         // Maker recovers stake + all 3 oracle bonds forfeited to maker
         // Bettor sides released independently via their own refund path
@@ -135,7 +136,7 @@ contract PoolSpine(
     // entry 2 — refund_maker_unjoined: no bettor joined, only spine UTXO + maker stake
     entrypoint function refund_maker_unjoined(sig makerSig) {
         require(checkSig(makerSig, pubkey(makerPk)));
-        require(tx.time >= deadline);
+        require(tx.time >= deadline * 1000);  // bug 10d fix Path A
         require(tx.inputs.length == 1);   // only spine
         require(tx.outputs.length == 1);
 
@@ -163,7 +164,9 @@ contract PoolSpine(
         int signingPair,
         int silentOracleIndex
     ) {
-        require(tx.time >= deadline + 300);
+        // bug 10d fix (Path A): Kaspa LOCK_TIME_THRESHOLD 500B requires ms-scale operand.
+        // (deadline + 300) sec * 1000 = deadline_ms + 300_000 ms (= preserved 5min buffer).
+        require(tx.time >= (deadline + 300) * 1000);
         require(signingPair >= 0 && signingPair <= 2);
         require(silentOracleIndex >= -1 && silentOracleIndex <= 2);
 
