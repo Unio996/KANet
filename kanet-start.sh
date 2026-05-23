@@ -89,6 +89,8 @@ if [ -f "$ENV_FILE" ]; then
       # BROKER_V2_ENABLED + BROKER_V2_ENABLED_PEERS broker-v2 phase 1 cutover gating 必 export
       BROKER_V2_ENABLED)       export BROKER_V2_ENABLED="$v" ;;
       BROKER_V2_ENABLED_PEERS) export BROKER_V2_ENABLED_PEERS="$v" ;;
+      # B2 v0.5 area-8 E7 — pool market deadline maximum cap (testnet 30day default, mainnet 365day)
+      POOL_DEADLINE_MAX_DAY)   export POOL_DEADLINE_MAX_DAY="$v" ;;
     esac
   done < "$ENV_FILE"
   ok "已加载配置: $ENV_FILE"

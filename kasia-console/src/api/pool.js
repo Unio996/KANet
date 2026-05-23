@@ -51,6 +51,13 @@ export async function registerPoolRoutes(fastify) {
     if (!Number.isFinite(outcomeEndMs) || outcomeEndMs < Date.now() + minDeadlineMin * 60_000) {
       return reply.code(400).send({ ok: false, error: `outcome_end_date must be > now + ${minDeadlineMin} minutes` });
     }
+    // E7 (area-8): pool market deadline hard cap. Without this, a maker can lock funds
+    // for 100 years. Testnet 30 day default; mainnet 365 day. Super-long horizon markets
+    // (= cross-year election cycles, etc.) deferred to Phase 5 explicit hardening.
+    const maxDeadlineDay = parseInt(process.env.POOL_DEADLINE_MAX_DAY, 10) || 30;
+    if (outcomeEndMs > Date.now() + maxDeadlineDay * 86400_000) {
+      return reply.code(400).send({ ok: false, error: `outcome_end_date must be <= now + ${maxDeadlineDay} days (POOL_DEADLINE_MAX_DAY hard cap, area-8 E7)` });
+    }
     const deadline = Math.floor(outcomeEndMs / 1000);
     const minerFee = parseInt(b.miner_fee, 10) || 20_000;
     const brokerFeePct = parseInt(b.broker_fee_pct, 10);
