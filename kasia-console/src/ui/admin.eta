@@ -234,6 +234,62 @@
       </div>
     </section>
 
+    <!-- ═══ STRESS TEST PANEL D (KI 65 Step 2 Phase 4 — run history) ═══ -->
+    <section class="bg-white rounded-lg shadow-sm border border-warm-200" x-show="stressRuns && stressRuns.length">
+      <div class="px-5 py-3 border-b border-warm-200 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="text-purple-600">🧪</span>
+          <h2 class="text-sm font-semibold text-ink-700">Stress Test Runs (latest 10)</h2>
+        </div>
+        <span class="text-xs px-2 py-0.5 rounded bg-purple-100 text-purple-700">
+          <span x-text="stressRuns?.length ?? 0"></span> runs
+        </span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead class="bg-warm-50 text-ink-500">
+            <tr>
+              <th class="px-3 py-2 text-left">Seed</th>
+              <th class="px-3 py-2 text-left">Mode</th>
+              <th class="px-3 py-2 text-left">DryRun</th>
+              <th class="px-3 py-2 text-left">Status</th>
+              <th class="px-3 py-2 text-right">Planned</th>
+              <th class="px-3 py-2 text-right">Executed</th>
+              <th class="px-3 py-2 text-right">OK</th>
+              <th class="px-3 py-2 text-right">Fail</th>
+              <th class="px-3 py-2 text-right">Chain Events</th>
+              <th class="px-3 py-2 text-left">Started</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="r in stressRuns" :key="r.id">
+              <tr class="border-t border-warm-100 hover:bg-warm-50">
+                <td class="px-3 py-2 font-mono text-[10px]" x-text="r.seed"></td>
+                <td class="px-3 py-2" x-text="r.mode"></td>
+                <td class="px-3 py-2">
+                  <span :class="r.dry_run ? 'text-amber-600' : 'text-red-600 font-bold'" x-text="r.dry_run ? 'dry' : '🔥 REAL'"></span>
+                </td>
+                <td class="px-3 py-2">
+                  <span class="px-1.5 py-0.5 rounded text-[10px]"
+                        :class="r.status === 'completed' ? 'bg-green-100 text-green-700' : r.status === 'aborted' ? 'bg-red-100 text-red-700' : r.status === 'running' ? 'bg-blue-100 text-blue-700' : 'bg-warm-100 text-ink-500'"
+                        x-text="r.status"></span>
+                </td>
+                <td class="px-3 py-2 text-right" x-text="r.scenarios_planned"></td>
+                <td class="px-3 py-2 text-right" x-text="r.scenarios_executed"></td>
+                <td class="px-3 py-2 text-right text-green-600" x-text="r.ok_count"></td>
+                <td class="px-3 py-2 text-right text-red-600" x-text="r.fail_count"></td>
+                <td class="px-3 py-2 text-right text-purple-600" x-text="r.chain_event_count"></td>
+                <td class="px-3 py-2 text-[10px] text-ink-400" x-text="r.started_at"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      <div class="px-5 py-2 text-[10px] text-ink-300 border-t border-warm-100">
+        注: 🔥 REAL = dry_run=false (= 真实 BSC TX 真 fire). dry runs 不影响 production state, real runs 真 spend $5 + sweep back. Phase 5 = 24h 真跑 (Owner $120 钦定后 fire).
+      </div>
+    </section>
+
     <!-- ═══ STUCK ESCROW PANEL (KI-63 实证 — silent stuck surface) ═══ -->
     <section class="bg-white rounded-lg shadow-sm border border-warm-200">
       <div class="px-5 py-3 border-b border-warm-200 flex items-center justify-between">
@@ -424,6 +480,7 @@ function adminControlRoom() {
     brokers: [],
     financials_total: null,
     stuck: [],
+    stressRuns: [],
     history: [],
     historyTotal: 0,
     historyPage: 1,
@@ -445,7 +502,16 @@ function adminControlRoom() {
     _timer: null,
 
     async loadAll() {
-      await Promise.all([this.loadOverview(), this.loadHistory(this.historyPage)]);
+      await Promise.all([this.loadOverview(), this.loadHistory(this.historyPage), this.loadStressRuns()]);
+    },
+
+    async loadStressRuns() {
+      try {
+        const r = await fetch('/api/admin/stress-test-runs?limit=10');
+        if (!r.ok) { this.stressRuns = []; return; }
+        const data = await r.json();
+        this.stressRuns = data.ok ? (data.runs || []) : [];
+      } catch (e) { this.stressRuns = []; }
     },
 
     async loadOverview() {

@@ -584,6 +584,81 @@ export async function registerAdminRoutes(fastify) {
   //   - Pre-flight: Trader-B BSC wallet balance >= 10 × amount_per + gas margin
   //   - Records chain_event 'stress_test_funded' per transfer (audit chain)
   //   - 0 stress-* relay → no-op return
+  // KI 65 Step 2 Phase 4 (NWT N19.248): admin Panel D — stress test run dashboard.
+  // GET /api/admin/stress-test-runs?limit=10
+  //   List latest stress_test_runs + scenario summary + chain_event refs count.
+  fastify.get('/api/admin/stress-test-runs', async (request, reply) => {
+    try {
+      const limit = Math.min(50, Math.max(1, parseInt(request.query?.limit || 10, 10)));
+      const runs = sqlite.prepare(`
+        SELECT id, seed, dry_run, mode, started_at, ended_at, status,
+               scenarios_planned, scenarios_executed, aborted_at_scenario, notes
+        FROM stress_test_runs ORDER BY started_at DESC LIMIT ?
+      `).all(limit);
+      const out = runs.map(r => {
+        const okCount = sqlite.prepare(`SELECT COUNT(*) c FROM stress_test_scenario_results WHERE run_id=? AND ok=1`).get(r.id).c;
+        const failCount = sqlite.prepare(`SELECT COUNT(*) c FROM stress_test_scenario_results WHERE run_id=? AND ok=0`).get(r.id).c;
+        const chainRefCount = sqlite.prepare(`
+          SELECT COUNT(*) c FROM stress_test_chain_event_refs
+          WHERE scenario_result_id IN (SELECT id FROM stress_test_scenario_results WHERE run_id = ?)
+        `).get(r.id).c;
+        return {
+          id: r.id,
+          seed: r.seed,
+          dry_run: !!r.dry_run,
+          mode: r.mode,
+          started_at: r.started_at,
+          ended_at: r.ended_at,
+          status: r.status,
+          scenarios_planned: r.scenarios_planned,
+          scenarios_executed: r.scenarios_executed,
+          aborted_at_scenario: r.aborted_at_scenario,
+          ok_count: okCount,
+          fail_count: failCount,
+          chain_event_count: chainRefCount,
+          notes: r.notes,
+        };
+      });
+      return reply.send({ ok: true, ts: new Date().toISOString(), runs: out });
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // GET /api/admin/stress-test-runs/:id — detail of single run with scenario_results + chain_event refs.
+  fastify.get('/api/admin/stress-test-runs/:id', async (request, reply) => {
+    try {
+      const run = sqlite.prepare(`SELECT * FROM stress_test_runs WHERE id = ?`).get(request.params.id);
+      if (!run) return reply.code(404).send({ error: 'run not found' });
+      const results = sqlite.prepare(`
+        SELECT id, scenario_id, fired_at, ok, error, selected_relays
+        FROM stress_test_scenario_results WHERE run_id = ?
+        ORDER BY fired_at
+      `).all(run.id);
+      const refs = sqlite.prepare(`
+        SELECT r.scenario_result_id, r.chain_event_id, r.event_type, r.attributed_at,
+               ce.txid, ce.from_address, ce.to_address
+        FROM stress_test_chain_event_refs r
+        LEFT JOIN chain_events ce ON ce.id = r.chain_event_id
+        WHERE r.scenario_result_id IN (SELECT id FROM stress_test_scenario_results WHERE run_id = ?)
+      `).all(run.id);
+      // Phase 4: enrich chain_event refs with explorer URLs (NWT gap (b) fold)
+      const { getExplorerTxUrl } = await import('../services/chains.js');
+      const enriched = refs.map(r => {
+        const chain = r.event_type?.startsWith('exchange_') || r.event_type === 'broker_fee_collected' ? 'kaspa' : 'bnb';
+        return { ...r, explorer_url: r.txid ? getExplorerTxUrl(chain, r.txid) : null };
+      });
+      return reply.send({
+        ok: true,
+        run: { ...run, dry_run: !!run.dry_run },
+        scenario_results: results.map(s => ({ ...s, ok: !!s.ok, selected_relays: s.selected_relays ? JSON.parse(s.selected_relays) : [] })),
+        chain_event_refs: enriched,
+      });
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
+
   fastify.post(
     '/api/admin/stress-test-fund',
     async (request, reply) => {
