@@ -76,6 +76,13 @@ export async function voterTick() {
       poolVoted += ts.signed;
       poolSkipped += ts.skipped;
       poolErrored += ts.errored;
+      // B2 v0.5 area-4 7c — pool oracle refund_disagreement TX-sign (= collecting_sigs +
+      // refund_disagreement_dispatched_at metadata; parallel to processPoolTxSign for the
+      // refund path, 2 sigs per spine input via signing_pair, silent oracle excluded).
+      const tsRd = await processPoolRefundDisagreementTxSign(voter);
+      poolVoted += tsRd.signed;
+      poolSkipped += tsRd.skipped;
+      poolErrored += tsRd.errored;
     }
     console.log(`[prediction-voter] tick: ${voterRelays.length} voter relays, 1V1 voted=${totalVoted} skipped=${totalSkipped} errored=${totalErrored} | pool voted=${poolVoted} skipped=${poolSkipped} errored=${poolErrored}`);
     return { ok: true, voters: voterRelays.length, voted: totalVoted, skipped: totalSkipped, errored: totalErrored, pool: { voted: poolVoted, skipped: poolSkipped, errored: poolErrored } };
@@ -415,6 +422,95 @@ async function processPoolTxSign(voter) {
       }
     } catch (e) {
       console.error(`[prediction-voter:pool-txsign] fail voter=${voter.name} market=${market.id?.slice(0,12)}: ${e.message}`);
+      errored++;
+    }
+  }
+  return { signed, skipped, errored };
+}
+
+// B2 v0.5 area-4 7c — pool oracle refund_disagreement TX-sign handler.
+// Mirrors processPoolTxSign but routes the refund_disagreement collecting_sigs path:
+// the market is in 'collecting_sigs' with metadata.refund_disagreement_dispatched_at set
+// (not phase2_dispatched_at). signing_pair determines which 2 oracles sign; the third
+// (= silent in Gap 1B, OR not-signing in Gap 1A's 0/1 default pair) skips.
+async function processPoolRefundDisagreementTxSign(voter) {
+  let signed = 0, skipped = 0, errored = 0;
+  const markets = sqlite.prepare(`
+    SELECT id, oracle_relay_ids, metadata
+    FROM pool_markets
+    WHERE protocol_status = 'collecting_sigs'
+      AND oracle_relay_ids LIKE ?
+  `).all(`%"${voter.id}"%`);
+  if (!markets.length) return { signed, skipped, errored };
+
+  for (const market of markets) {
+    try {
+      let meta;
+      try { meta = JSON.parse(market.metadata || '{}'); } catch { meta = {}; }
+      // Skip if this is the settle path (= phase2_dispatched_at present without
+      // refund_disagreement_dispatched_at) — processPoolTxSign handles that.
+      if (!meta.refund_disagreement_dispatched_at || !meta.refund_disagreement_tx_obj) {
+        continue;
+      }
+
+      const oracleIds = JSON.parse(market.oracle_relay_ids || '[]');
+      if (!Array.isArray(oracleIds) || !oracleIds.includes(voter.id)) { skipped++; continue; }
+
+      const myIndex = oracleIds.indexOf(voter.id);
+      const signingPair = meta.refund_disagreement_signing_pair;
+      const silentOracleIndex = meta.refund_disagreement_silent_oracle_index;
+      // signing_pair → indices: 0 = [0,1], 1 = [0,2], 2 = [1,2]
+      const signingIndices = signingPair === 0 ? [0, 1] : signingPair === 1 ? [0, 2] : [1, 2];
+      if (!signingIndices.includes(myIndex)) { skipped++; continue; }  // not my turn to sign
+
+      const inputCount = meta.refund_disagreement_input_count;
+      let signedAny = false;
+      for (let inputIdx = 0; inputIdx < inputCount; inputIdx++) {
+        // Skip if already signed this input
+        const existing = sqlite.prepare(`
+          SELECT id FROM chain_events
+          WHERE event_type = 'pool_oracle_refund_disagreement_tx_sig' AND from_address = ?
+            AND payload LIKE ? AND payload LIKE ?
+          LIMIT 1
+        `).get(voter.address, `%"market_id":"${market.id}"%`, `%"input_index":${inputIdx}%`);
+        if (existing) continue;
+
+        const signResult = await sendCommandAsync(voter.id, {
+          type: 'sign_input_for_settle',
+          tx_hex: JSON.stringify(meta.refund_disagreement_tx_obj),
+          input_index: inputIdx,
+        });
+        if (!signResult?.ok || !signResult.signature) {
+          console.error(`[prediction-voter:pool-refund-dis] sign fail voter=${voter.name} market=${market.id.slice(0,12)} input=${inputIdx}: ${signResult?.error || 'no sig'}`);
+          errored++;
+          continue;
+        }
+
+        const respPayload = JSON.stringify({
+          t: 'kanet_pool_oracle_refund_disagreement_tx_sig_v1',
+          market_id: market.id,
+          voter_relay_id: voter.id,
+          input_index: inputIdx,
+          silent_oracle_index: silentOracleIndex,
+          signing_pair: signingPair,
+          signature: signResult.signature,
+        });
+        const syntheticTxid = `pool_oracle_refund_dis_sig:${voter.id.slice(0,8)}:${market.id.slice(0,12)}:i${inputIdx}:${Date.now()}`;
+        sqlite.prepare(`
+          INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+          VALUES (?, ?, 'pool_oracle_refund_disagreement_tx_sig', ?, ?, ?, 'prediction-voter', CURRENT_TIMESTAMP)
+        `).run(randomUUID(), syntheticTxid, voter.address, voter.address, respPayload);
+        signedAny = true;
+      }
+
+      if (signedAny) {
+        console.log(`[prediction-voter:pool-refund-dis] SIGNED ${voter.name}: market=${market.id.slice(0,12)} ${inputCount} spine inputs (silent=${silentOracleIndex}, pair=${signingPair})`);
+        signed++;
+      } else {
+        skipped++;
+      }
+    } catch (e) {
+      console.error(`[prediction-voter:pool-refund-dis] fail voter=${voter.name} market=${market.id?.slice(0,12)}: ${e.message}`);
       errored++;
     }
   }
