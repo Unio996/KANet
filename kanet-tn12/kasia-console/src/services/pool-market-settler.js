@@ -809,6 +809,12 @@ export async function dispatchRefundDisagreement(market, decision) {
 async function handleCollectingSigs(market) {
   let meta;
   try { meta = JSON.parse(market.metadata || '{}'); } catch { meta = {}; }
+  // 7c: dispatchRefundDisagreement also transitions to collecting_sigs but stashes
+  // different metadata (refund_disagreement_tx_obj instead of phase2_tx_obj). Delegate
+  // to the dedicated handler before the settle-path metadata check would skip it.
+  if (meta.refund_disagreement_dispatched_at && meta.refund_disagreement_tx_obj) {
+    return handleCollectingSigsRefundDisagreement(market, meta);
+  }
   if (!meta.phase2_tx_obj || !meta.phase2_input_count) {
     console.warn(`[pool-settler:collecting] market=${market.id.slice(0,12)} missing phase2 metadata, skip`);
     return;
@@ -937,5 +943,126 @@ async function handleCollectingSigs(market) {
     console.log(`[pool-settler:collecting] SETTLED market=${market.id.slice(0,12)} settle_txid=${submitResult.txId.slice(0,16)} winner=${meta.phase2_winner}`);
   } catch (e) {
     console.error(`[pool-settler:collecting] settle submit exception market=${market.id?.slice(0,12)}: ${e.message}`);
+  }
+}
+
+/**
+ * 7c — handleCollectingSigsRefundDisagreement: aggregate 2 oracle sigs per spine input + submit
+ * pool_refund_disagreement_tx via maker_relay IPC. Mirrors handleCollectingSigs but tailored
+ * to the refund_disagreement entry: spine-only TX (no side inputs), 2 sigs per input (not 3),
+ * different chain_event payload type, different IPC command, no winner / sidesMerkleRoot.
+ *
+ * Sig schema:
+ *   payload.t = 'kanet_pool_oracle_refund_disagreement_tx_sig_v1'
+ *   payload.market_id = market.id
+ *   payload.voter_relay_id
+ *   payload.input_index (= 0..3 for 4 spine inputs)
+ *   payload.signature
+ *
+ * The signing oracles are derived from signing_pair (= 2 - silentOracleIndex for Gap 1B, or 0
+ * for Gap 1A defaulting to oracle1+2). Each input has its own sighash → its own sig pair.
+ */
+async function handleCollectingSigsRefundDisagreement(market, meta) {
+  const silentOracleIndex = meta.refund_disagreement_silent_oracle_index;
+  const signingPair = meta.refund_disagreement_signing_pair;
+  const inputCount = meta.refund_disagreement_input_count;
+  const expectedSigs = 2;
+
+  // Signing oracles per signingPair (= same mapping the SS entry enforces):
+  // signingPair 0 → oracle 1+2 (indices 0,1)
+  // signingPair 1 → oracle 1+3 (indices 0,2)
+  // signingPair 2 → oracle 2+3 (indices 1,2)
+  const signingOracleIndices = signingPair === 0 ? [0, 1] : signingPair === 1 ? [0, 2] : [1, 2];
+  const oracleIds = JSON.parse(market.oracle_relay_ids || '[]');
+  const signingRelayIds = signingOracleIndices.map(i => oracleIds[i]);
+
+  // Scan chain_events for refund_disagreement sigs scoped to this market
+  const sigRows = sqlite.prepare(`
+    SELECT payload FROM chain_events
+    WHERE event_type = 'pool_oracle_refund_disagreement_tx_sig'
+      AND payload LIKE ?
+  `).all(`%"market_id":"${market.id}"%`);
+
+  const sigsByInput = Array.from({ length: inputCount }, () => []);
+  const seenByInput = Array.from({ length: inputCount }, () => new Set());
+  for (const row of sigRows) {
+    try {
+      const p = JSON.parse(row.payload || '{}');
+      if (p.t !== 'kanet_pool_oracle_refund_disagreement_tx_sig_v1') continue;
+      const inputIdx = parseInt(p.input_index, 10);
+      if (inputIdx < 0 || inputIdx >= inputCount) continue;
+      if (!p.voter_relay_id || !p.signature) continue;
+      if (!signingRelayIds.includes(p.voter_relay_id)) continue;  // ignore sigs from non-signers
+      if (seenByInput[inputIdx].has(p.voter_relay_id)) continue;
+      seenByInput[inputIdx].add(p.voter_relay_id);
+      sigsByInput[inputIdx].push({ voter_relay_id: p.voter_relay_id, signature: p.signature });
+    } catch {}
+  }
+
+  // Gate on ALL spine inputs having required sig count.
+  const missing = [];
+  for (let i = 0; i < inputCount; i++) {
+    if (sigsByInput[i].length < expectedSigs) {
+      missing.push(`input${i}=${sigsByInput[i].length}/${expectedSigs}`);
+    }
+  }
+  if (missing.length > 0) {
+    if (Math.random() < 0.1) {
+      console.log(`[pool-settler:collecting-refund-dis] market=${market.id.slice(0,12)} waiting sigs: ${missing.join(' ')}`);
+    }
+    return;
+  }
+
+  // Order sigs per input to match signing_pair (oracleSig1 = lower index of the pair,
+  // oracleSig2 = higher). SS entry's checkSig expects them in this order per signingPair case.
+  const spineSigsByInput = sigsByInput.map(sigs => {
+    const ordered = sigs.slice().sort((a, b) => {
+      const ia = signingRelayIds.indexOf(a.voter_relay_id);
+      const ib = signingRelayIds.indexOf(b.voter_relay_id);
+      return ia - ib;
+    });
+    return ordered.map(s => s.signature);
+  });
+
+  // Rebuild required_input_outpoints (= spine_lock_tx + 3 oracle deposit outpoints, MUST
+  // match dispatchRefundDisagreement ordering).
+  const depositRows = sqlite.prepare(`
+    SELECT payload FROM chain_events
+    WHERE event_type = 'pool_oracle_deposit' AND payload LIKE ?
+  `).all(`%"market_id":"${market.id}"%`);
+  const oracleDepositOutpoints = depositRows.map(r => {
+    const p = JSON.parse(r.payload);
+    return { outpointTxid: p.deposit_tx, outpointIndex: 0 };
+  });
+  const requiredInputOutpoints = [
+    { outpointTxid: market.spine_lock_tx, outpointIndex: 0 },
+    ...oracleDepositOutpoints,
+  ];
+
+  console.log(`[pool-settler:collecting-refund-dis] market=${market.id.slice(0,12)} attempting refund_disagreement submit (silentOracleIndex=${silentOracleIndex}, signingPair=${signingPair})`);
+
+  try {
+    const submitResult = await sendCommandAsync(market.maker_relay_id, {
+      type: 'pool_refund_disagreement_tx',
+      spine_p2sh_address: market.spine_p2sh,
+      spine_redeem_script_hex: meta.spine_redeem_script_hex,
+      required_input_outpoints: requiredInputOutpoints,
+      outputs: meta.refund_disagreement_outputs,
+      spine_sigs_by_input: spineSigsByInput,
+      silent_oracle_index: silentOracleIndex,
+      signing_pair: signingPair,
+      tx_obj_preimage: meta.refund_disagreement_tx_obj,
+    });
+
+    if (!submitResult?.ok || !submitResult.txId) {
+      console.error(`[pool-settler:collecting-refund-dis] submit fail market=${market.id.slice(0,12)}: ${submitResult?.error}`);
+      return;
+    }
+
+    sqlite.prepare('UPDATE pool_markets SET refund_txid = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(submitResult.txId, 'refunded', market.id);
+    console.log(`[pool-settler:collecting-refund-dis] REFUNDED_DISAGREEMENT market=${market.id.slice(0,12)} refund_txid=${submitResult.txId.slice(0,16)} silentOracleIndex=${silentOracleIndex}`);
+  } catch (e) {
+    console.error(`[pool-settler:collecting-refund-dis] submit exception market=${market.id?.slice(0,12)}: ${e.message}`);
   }
 }
