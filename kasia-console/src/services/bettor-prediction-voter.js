@@ -153,7 +153,7 @@ async function processVoter(voter) {
         offer_id: offer.id,
         voter_relay_id: voter.id,
         voter_pubkey: voterXOnlyPubkey,  // 32-byte x-only hex (= SS contract ctor oracleNPk match)
-        outcome: voteResult.outcome,  // 'YES' | 'NO' | 'DISPUTE'
+        outcome: voteResult.outcome,  // 'YES' | 'NO' (F1: DISPUTE removed, low-confidence daemon abstains via ok:false)
         evidence_url: voteResult.evidence_url || null,
         evidence_hash: evidenceHash,
         vote_timestamp: new Date().toISOString(),
@@ -461,7 +461,9 @@ async function derivePolymarketVote(offer) {
     if (!Number.isFinite(yesPrice) || !Number.isFinite(noPrice)) {
       return { ok: false, reason: 'outcomePrices not finite' };
     }
-    let outcome = 'DISPUTE';
+    // F1 (area-3): no DISPUTE return path. Gamma not yet resolved → daemon abstains
+    // (ok:false), market gets silent vote → silent_timeout → refund / forfeit_1.
+    let outcome = null;
     if (yesPrice === 1 && noPrice === 0) outcome = 'YES';
     else if (yesPrice === 0 && noPrice === 1) outcome = 'NO';
     else return { ok: false, reason: 'gamma not resolved yet' };
@@ -473,7 +475,10 @@ async function derivePolymarketVote(offer) {
 
 // Bettor r219 spec — kanet_native deriveVote (LLM consensus via Qwen3.6-LAN).
 //   fetch data_source_canonical URL → text → LLM prompt → JSON {outcome, confidence}
-//   confidence < 0.6 → DISPUTE (= 低信置不强 YES/NO)
+//   F1 (area-3 钦定): protocol vote space is YES/NO/silent only. DISPUTE removed —
+//   low LLM confidence → daemon abstains (return ok:false). Market gets silent vote →
+//   silent_timeout → refund / forfeit_1 per area 4. operator can manually override
+//   via pool.js vote endpoint before silent_timeout if they reach a determination.
 //   Qwen Rule 11: enable_thinking=false 必加 (= 漏会 60-120s timeout)
 async function deriveKanetNativeVote(offer, spec) {
   const url = spec?.data_source_canonical;
@@ -517,12 +522,14 @@ async function deriveKanetNativeVote(offer, spec) {
   }
   if (!providerUrl) return { ok: false, reason: 'no LLM provider URL configured (= adapter ai_provider_url missing)' };
 
+  // F1 (area-3): prompt LLM for YES/NO only (DISPUTE removed). Low confidence → daemon
+  // abstains downstream, not LLM-emitted DISPUTE token.
   const prompt = `预测市场结果判定:\n` +
     `market_question: ${offer.outcome_condition_id || '(none)'}\n` +
     `data_source: ${evidence_url}\n` +
     `evidence: ${evidence_text}\n` +
-    `判定: 此市场结果是 YES 还是 NO? 只 JSON 回 {"outcome": "YES"|"NO"|"DISPUTE", "confidence": 0-1, "reason": "..."}`;
-  let llmOutcome = 'DISPUTE';
+    `判定: 此市场结果是 YES 还是 NO? 只 JSON 回 {"outcome": "YES"|"NO", "confidence": 0-1, "reason": "..."}. 信置低也仍选 YES 或 NO, 不输出其他.`;
+  let llmOutcome = null;
   let llmConfidence = 0;
   let llmReason = '';
   try {
@@ -545,18 +552,26 @@ async function deriveKanetNativeVote(offer, spec) {
     const content = llmJson?.choices?.[0]?.message?.content || '{}';
     let parsed;
     try { parsed = JSON.parse(content); } catch { parsed = {}; }
-    llmOutcome = parsed.outcome === 'YES' || parsed.outcome === 'NO' ? parsed.outcome : 'DISPUTE';
+    llmOutcome = (parsed.outcome === 'YES' || parsed.outcome === 'NO') ? parsed.outcome : null;
     llmConfidence = parseFloat(parsed.confidence) || 0;
     llmReason = String(parsed.reason || '').slice(0, 200);
   } catch (e) {
     return { ok: false, reason: `LLM fetch fail: ${e.message}` };
   }
 
-  // 低信置 → DISPUTE fallback (= 防误判)
-  const finalOutcome = llmConfidence < 0.6 ? 'DISPUTE' : llmOutcome;
+  // F1 (area-3): daemon abstains on low confidence OR unparseable LLM output. No DISPUTE
+  // token cast — silent vote means decideConsensus eventually triggers silent_timeout →
+  // refund / forfeit_1. Operator may manually override via /api/pool/market/:id/oracle/vote
+  // before silent_timeout if they reach an off-LLM determination.
+  if (llmOutcome === null || llmConfidence < 0.6) {
+    return {
+      ok: false,
+      reason: `daemon_abstain: ${llmOutcome === null ? 'LLM unparseable' : `confidence ${llmConfidence} < 0.6`} (operator manual vote allowed before silent_timeout)`,
+    };
+  }
   return {
     ok: true,
-    outcome: finalOutcome,
+    outcome: llmOutcome,
     evidence_url,
     evidence_raw: JSON.stringify({ evidence_text: evidence_text.slice(0, 500), llm_confidence: llmConfidence, llm_reason: llmReason }),
   };

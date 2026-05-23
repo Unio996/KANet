@@ -183,7 +183,11 @@ export function decideConsensus(market) {
     if (!row) continue;
     let payload;
     try { payload = JSON.parse(row.payload); } catch { continue; }
-    if (payload.outcome !== 'YES' && payload.outcome !== 'NO' && payload.outcome !== 'DISPUTE') continue;
+    // F1 (area-3 钦定): protocol vote space is YES/NO/silent only. DISPUTE filtered out
+    // (= chain_events with outcome=DISPUTE treated as no-vote / silent). pool.js vote
+    // endpoint rejects DISPUTE pre-insert, but defensively filter here in case of legacy
+    // chain_events with DISPUTE outcome from pre-F1 markets.
+    if (payload.outcome !== 'YES' && payload.outcome !== 'NO') continue;
     votes.push({ oracleIndex: i, outcome: payload.outcome, voter_relay_id: oracleRelayId, ts: row.observed_at });
   }
 
@@ -198,7 +202,8 @@ export function decideConsensus(market) {
       const winner = votes[0].outcome === 'YES' ? 0 : 1;
       return { action: 'consensus', winner, unanimous: true };
     }
-    // Disagreement (e.g. 2 YES + 1 NO, or any DISPUTE) — could trigger Phase 5 challenge or refund
+    // Disagreement (= 2 YES + 1 NO or vice versa) — Area 4 refund_disagreement entry handles
+    // this case post-DISAGREEMENT_TIMEOUT (= burn silent's bond for Gap 1B, return all for Gap 1A).
     return { action: 'pending', reason: `disagreement: ${[...outcomes].join(',')}` };
   }
 
