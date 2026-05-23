@@ -11,7 +11,7 @@ if [ -f "$KANET_ROOT/kanet.env" ]; then
 fi
 PID_DIR="$KANET_ROOT/logs/pids"
 CONSOLE_DIR="$KANET_ROOT/kasia-console"
-CONSOLE_PORT=3100
+CONSOLE_PORT=${CONSOLE_PORT:-3400}  # KANet-UI ops r38/r40 sediment: env override default for :3400; hardcoded 3100 BUG once killed mainnet console
 
 C_RESET='\033[0m'; C_GREEN='\033[32m'; C_DIM='\033[2m'; C_YELLOW='\033[33m'
 ok()   { echo -e "  ${C_GREEN}✓${C_RESET}  $*"; }

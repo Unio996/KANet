@@ -362,7 +362,7 @@ fastify.post('/lang', (request, reply) => {
 
 // Start
 await ensureIngestSecret();
-await fastify.listen({ port: PORT, host: '127.0.0.1' });
+await fastify.listen({ port: PORT, host: process.env.HOST || '127.0.0.1' });
 console.log(`[kasia-console] running at http://localhost:${PORT}`);
 
 // Auto-register Mind skills from agent-mind/src/skills/

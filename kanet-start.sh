@@ -17,7 +17,7 @@ CONSOLE_DIR="$KANET_ROOT/kasia-console"
 LOG_DIR="$KANET_ROOT/logs"
 PID_DIR="$LOG_DIR/pids"
 ENV_FILE="$KANET_ROOT/kanet.env"
-CONSOLE_PORT=3100
+CONSOLE_PORT=${CONSOLE_PORT:-3400}  # KANet-UI ops r38: env override default for :3400 multi-node oracle console (Carol host)
 
 mkdir -p "$LOG_DIR" "$PID_DIR"
 
