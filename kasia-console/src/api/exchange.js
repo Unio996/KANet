@@ -1673,13 +1673,15 @@ export async function registerExchangeRoutes(fastify) {
         LIMIT 50
       `).all();
 
-      // 累计成交
+      // 累计成交 — KI 65 #85.3: test fixture isolation (default exclude test-*).
+      const includeTest = String(request.query?.include_test || '') === '1';
+      const testFilter = includeTest ? '' : ` AND id NOT LIKE 'test-%' AND id NOT LIKE 'test_%'`;
       const completed = sqlite.prepare(`
         SELECT COUNT(*) as cnt,
                COALESCE(SUM(CAST(qty AS REAL)), 0) as total_kas,
                COALESCE(SUM(CAST(broker_fee_kas AS REAL)), 0) as total_fee_kas
         FROM retail_dex_orders
-        WHERE state = 'completed'
+        WHERE state = 'completed' ${testFilter}
       `).get();
 
       const completedPubs = sqlite.prepare(`

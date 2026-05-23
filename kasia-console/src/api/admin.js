@@ -244,12 +244,17 @@ export async function registerAdminRoutes(fastify) {
       //
       // KI 65 B.4 wire (Owner 5/23 钦定): fee_exchange_24h_kas + trade_count_24h 真 populate
       // (filter = retail_dex_orders broker_fee_kas IS NOT NULL AND state NOT IN refund-path).
+      // KI 65 #85.3 (Owner 5/23 钦定, NWT N19.234): test fixture isolation — default exclude test-*.
+      // NWT 5/22 87.9 KAS '100x bug' 真因 test fixture 污染. ?include_test=1 query param 真 toggle.
+      const includeTest = String(request.query?.include_test || '') === '1';
+      const testFilter = includeTest ? '' : ` AND id NOT LIKE 'test-%' AND id NOT LIKE 'test_%'`;
       const feeAgg24h = sqlite.prepare(`
         SELECT COALESCE(SUM(CAST(broker_fee_kas AS REAL)), 0) AS fee_kas, COUNT(*) AS trades
         FROM retail_dex_orders
         WHERE broker_fee_kas IS NOT NULL
           AND state NOT IN ('expired','failed','refunded','refunding')
           AND created_at > datetime('now', '-1 day')
+          ${testFilter}
       `).get();
 
       // KI 65 #85.2 (Owner 5/23 钦定, NWT N19.235): autoTaker skip 24h distribution by reason.
@@ -357,8 +362,11 @@ export async function registerAdminRoutes(fastify) {
       // Note: scope filter ('exchange' vs 'prediction') currently only exchange_offers source.
       // prediction history待 Bettor B2 mainnet merge + pool_markets ingest. Phase 1B.4 v1 仅 exchange.
       const scopeNote = scope === 'prediction' ? `AND 0=1` : ''; // prediction returns 0 row
+      // KI 65 #85.3: test fixture isolation — default exclude test-*. UI toggle 'show test data' → include_test=1.
+      const includeTest = String(q.include_test || '') === '1';
+      const testFilter = includeTest ? '' : ` AND id NOT LIKE 'test-%' AND id NOT LIKE 'test_%'`;
 
-      const whereClause = `WHERE 1=1 ${rangeSql} ${statusSql} ${searchSql} ${scopeNote}`;
+      const whereClause = `WHERE 1=1 ${rangeSql} ${statusSql} ${searchSql} ${scopeNote} ${testFilter}`;
 
       // Total count
       const totalRow = sqlite.prepare(`SELECT COUNT(*) AS total FROM exchange_offers ${whereClause}`).get(params);
@@ -426,6 +434,8 @@ export async function registerAdminRoutes(fastify) {
       const q = request.query || {};
       const range = String(q.range || '24h');  // 24h / 7d / 30d / all
       const brokerIdFilter = q.broker_id ? String(q.broker_id) : null;  // reserved, no-op v1
+      const includeTest = String(q.include_test || '') === '1';  // KI 65 #85.3: default exclude test-*
+      const testFilter = includeTest ? '' : ` AND id NOT LIKE 'test-%' AND id NOT LIKE 'test_%'`;
       const rangeSql = (() => {
         switch (range) {
           case '7d': return `AND created_at > datetime('now', '-7 days')`;
@@ -442,18 +452,18 @@ export async function registerAdminRoutes(fastify) {
           COALESCE(SUM(CAST(broker_fee_kas AS REAL)), 0) AS total_fee_kas,
           COALESCE(AVG(CAST(broker_fee_kas AS REAL)), 0) AS avg_fee_kas
         FROM retail_dex_orders
-        WHERE ${settleSql} ${rangeSql}
+        WHERE ${settleSql} ${rangeSql} ${testFilter}
       `).get();
       const breakdown = sqlite.prepare(`
         SELECT side, COUNT(*) AS c, COALESCE(SUM(CAST(broker_fee_kas AS REAL)), 0) AS fee_kas
         FROM retail_dex_orders
-        WHERE ${settleSql} ${rangeSql}
+        WHERE ${settleSql} ${rangeSql} ${testFilter}
         GROUP BY side
       `).all();
       const stateDist = sqlite.prepare(`
         SELECT state, COUNT(*) AS c
         FROM retail_dex_orders
-        WHERE broker_fee_kas IS NOT NULL ${rangeSql}
+        WHERE broker_fee_kas IS NOT NULL ${rangeSql} ${testFilter}
         GROUP BY state
       `).all();
       const broker = sqlite.prepare(`
@@ -501,10 +511,12 @@ export async function registerAdminRoutes(fastify) {
       })();
       if (!isBroker) return reply.code(400).send({ error: `relay ${broker.name} is not a broker (roles_json: ${broker.roles_json})` });
 
+      const includeTest = String(request.query?.include_test || '') === '1';  // KI 65 #85.3
+      const testFilter = includeTest ? '' : ` AND id NOT LIKE 'test-%' AND id NOT LIKE 'test_%'`;
       const settleSql = `broker_fee_kas IS NOT NULL AND state NOT IN ('expired','failed','refunded','refunding')`;
       const aggFor = (rangeSql) => sqlite.prepare(`
         SELECT COUNT(*) AS trade_count, COALESCE(SUM(CAST(broker_fee_kas AS REAL)), 0) AS total_fee_kas
-        FROM retail_dex_orders WHERE ${settleSql} ${rangeSql}
+        FROM retail_dex_orders WHERE ${settleSql} ${rangeSql} ${testFilter}
       `).get();
       const c24h = aggFor(`AND created_at > datetime('now', '-1 day')`);
       const c7d = aggFor(`AND created_at > datetime('now', '-7 days')`);
@@ -513,11 +525,11 @@ export async function registerAdminRoutes(fastify) {
       // pending_settle = confirming state with fee allocated, awaiting Kaspa block confirm
       const pendingRow = sqlite.prepare(`
         SELECT COUNT(*) AS c, COALESCE(SUM(CAST(broker_fee_kas AS REAL)), 0) AS pending_fee
-        FROM retail_dex_orders WHERE state='confirming' AND broker_fee_kas IS NOT NULL
+        FROM retail_dex_orders WHERE state='confirming' AND broker_fee_kas IS NOT NULL ${testFilter}
       `).get();
       const recent = sqlite.prepare(`
         SELECT id, side, state, qty, broker_fee_kas, net_delivery_kas, created_at
-        FROM retail_dex_orders WHERE broker_fee_kas IS NOT NULL
+        FROM retail_dex_orders WHERE broker_fee_kas IS NOT NULL ${testFilter}
         ORDER BY created_at DESC LIMIT 10
       `).all();
 

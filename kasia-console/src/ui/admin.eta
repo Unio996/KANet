@@ -13,6 +13,10 @@
     </div>
     <div class="flex items-center gap-3 text-xs">
       <span class="text-ink-400" x-show="lastRefresh">上次刷新 <span x-text="lastRefreshRel"></span></span>
+      <label class="flex items-center gap-1 text-ink-500" title="KI 65 #85.3: 默认排 test-* fixture (= 5/22 NWT 87.9 KAS 100x bug 防复刻)">
+        <input type="checkbox" x-model="includeTest" @change="loadAll()" class="w-3 h-3">
+        <span>显示测试数据</span>
+      </label>
       <label class="flex items-center gap-1 text-ink-500">
         <input type="checkbox" x-model="autoRefresh" @change="toggleAutoRefresh()" class="w-3 h-3">
         <span>30s 自动刷新</span>
@@ -435,6 +439,7 @@ function adminControlRoom() {
     lastRefresh: null,
     lastRefreshRel: '',
     autoRefresh: true,
+    includeTest: false,  // KI 65 #85.3: default exclude test-* fixture
     _timer: null,
 
     async loadAll() {
@@ -443,7 +448,8 @@ function adminControlRoom() {
 
     async loadOverview() {
       try {
-        const r = await fetch('/api/admin/overview');
+        const testQuery = this.includeTest ? '?include_test=1' : '';
+        const r = await fetch('/api/admin/overview' + testQuery);
         if (!r.ok) {
           console.error('[admin] /api/admin/overview HTTP', r.status);
           return;
@@ -476,6 +482,7 @@ function adminControlRoom() {
           dir: this.historyFilters.dir,
           page: String(page || 1),
           limit: String(this.historyLimit),
+          ...(this.includeTest ? { include_test: '1' } : {}),
         });
         const r = await fetch('/api/admin/history?' + params);
         if (!r.ok) { console.error('[admin] /api/admin/history HTTP', r.status); return; }
