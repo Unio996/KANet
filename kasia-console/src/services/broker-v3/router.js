@@ -19,6 +19,8 @@
 import * as stateMachine from './state-machine.js';
 import * as client from './exchange-client.js';
 import { sqlite } from '../../db/client.js';
+import { acceptHandshake } from '../relation-state.js';
+import { recordChainEvent } from '../chain-event.js';
 
 // T-J2-2026-05-12 Fix 2 (5/12 sediment §3.2 bsc-vs-bnb naming): chain normalize.
 // BSC family 统一 'bnb' (DB-canonical, align agent_wallets.chain). 跟 api/exchange.js 同款.
@@ -40,6 +42,65 @@ export const _testInternalsRouter = { normalizeChainKey };
 // MID_PRICE 改 dynamic /api/trade/kas-price (跟 market-seeder 同 source) — 替 hardcode 0.04 phase 1 placeholder.
 // FALLBACK_MID_PRICE 真 oracle down 时 graceful 用 (不阻 publish).
 const FALLBACK_MID_PRICE = 0.04;
+
+// KI N19.265 Sub 5 (NWT r247.4 spec, Owner thesis L2 align): broker IS_SERVICE auto observeHandshake
+// on first stranger DM. Reduces consumer DM friction (= no manual handshake button click required).
+// Anti-spam fail-closed: rate limit 10/h + classification 'seen_candidate' lock (no auto-promote)
+// + audit chain_event 'auto_handshake_by_broker' per observe.
+async function _ensureRelation(relayNodeId, peer, inboundTxid) {
+  try {
+    const broker = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(relayNodeId);
+    if (!broker?.address) return { skipped: 'no_broker_addr' };
+
+    // Idempotent — skip if already established.
+    const existing = sqlite.prepare(
+      'SELECT status FROM relation_states WHERE local_address = ? AND peer_address = ?'
+    ).get(broker.address, peer);
+    if (existing && ['accepted', 'active', 'confirmed'].includes(existing.status)) {
+      return { skipped: 'already_active' };
+    }
+
+    // Anti-spam rate limit: ≤10 auto-observe per broker per hour.
+    const recent = sqlite.prepare(`
+      SELECT COUNT(*) c FROM chain_events
+      WHERE event_type = 'auto_handshake_by_broker'
+        AND from_address = ?
+        AND observed_at > datetime('now', '-1 hour')
+    `).get(broker.address);
+    if (recent.c >= 10) {
+      console.warn(`[broker-v3 _ensureRelation] rate limit 10/h reached, skip ${peer?.slice(-12)}`);
+      return { skipped: 'rate_limit' };
+    }
+
+    // acceptHandshake (relation-state.js:66) fallback-calls observeHandshake if needed.
+    try {
+      acceptHandshake(broker.address, peer);
+    } catch (e) {
+      return { skipped: 'accept_fail', err: e.message };
+    }
+
+    // Classification gate: 'seen_candidate' lock — no auto-promote.
+    sqlite.prepare(`
+      UPDATE relation_states
+      SET classification = 'seen_candidate'
+      WHERE local_address = ? AND peer_address = ? AND classification IS NULL
+    `).run(broker.address, peer);
+
+    // Audit chain_event for every auto-observe (visibility + rate-limit query source).
+    recordChainEvent({
+      txid: inboundTxid || `auto-${Date.now()}`,
+      eventType: 'auto_handshake_by_broker',
+      fromAddress: broker.address,
+      toAddress: peer,
+      observedBy: 'broker-v3',
+      payload: JSON.stringify({ trigger: 'first_stranger_dm', dm_txid: inboundTxid || null }),
+    });
+    return { observed: true };
+  } catch (e) {
+    console.warn(`[broker-v3 _ensureRelation] error (graceful skip): ${e.message}`);
+    return { skipped: 'error', err: e.message };
+  }
+}
 
 /**
  * 主入口 — conversations.js BROKER_V3_ENABLED dispatch.
@@ -70,6 +131,9 @@ export async function handleMessage(peer, msg, opts = {}) {
     return null;  // menu top + 自然语言 → canned reply (no LLM fallback)
   }
   // if curState exists (user in flow) → pass through, state-machine handles strict reject + re-prompt
+
+  // KI N19.265 Sub 5: broker IS_SERVICE auto observeHandshake for stranger DM (= consumer onboarding friction reduction).
+  await _ensureRelation(relayNodeId, peer, opts.inbound_txid);
 
   // Bug NWT-N7.1 Layer D: pass opts.inbound_txid for idempotent guard (state machine 不被 stale catch-up 推倒).
   const result = await stateMachine.processInput(peer, trimmed, relayNodeId, { inbound_txid: opts.inbound_txid });
@@ -526,6 +590,7 @@ async function _doPublish(peer, draft, relayNodeId, prevReply) {
   // T-J2-2026-05-07 r259 T2.1c — Layer 4 Loop Closed: hedge_enabled flag 真 broker offer
   // hedge-eligible (executeHedge 真 trade-protocol-filter.js:836-848 真 opt-in gate, default skip).
   // Enable hedge 真 broker 真 fulfill via CEX (post Phase 1 cex-bridge ship).
+  // lint-allow-chain-amount-precision: exchange offer API give_amount = user qty integer KAS (no decimal precision concern).
   const body = isBuy
     ? {
         relayNodeId,
@@ -544,6 +609,7 @@ async function _doPublish(peer, draft, relayNodeId, prevReply) {
       }
     : {
         relayNodeId,
+        // lint-allow-chain-amount-precision: SELL path, same offer-level qty (no sompi precision concern at API layer).
         give_asset: 'KAS', give_amount: String(qty), give_chain: 'kaspa',
         want_asset: 'USDT', want_amount: wantAmount,
         want_chain: chainKey,
