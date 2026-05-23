@@ -89,7 +89,36 @@ export default {
     dbR.close();
     phases.push({ phase: 'B_poll_settle', finalStatus: finalEscrow?.status, finalEscrow });
 
-    // Phase C: verdict
+    // Phase C: 3 oracle 真 verify (KI N19.265 Sub 3 — Owner 雷霆 catch + NWT r247.1)
+    // Beyond user_escrow_balances status, verify cross-table state alignment:
+    //   Oracle 1: relation_states user→broker pair exists with status accepted/active
+    //   Oracle 2: chain_events comm/comm_sent/text count > 0 for user→broker direction
+    //   Oracle 3: /api/contacts/list?relayId=<NWT> includes broker in returned peers
+    const dbR2 = new Database(DB_PATH, { readonly: true });
+    const oracle1_relation = dbR2.prepare(`
+      SELECT status, classification FROM relation_states
+      WHERE local_address = ? AND peer_address = ?
+    `).get(NWT_KASIA, BROKER_KASIA);
+    const oracle2_comm = dbR2.prepare(`
+      SELECT COUNT(*) c FROM chain_events
+      WHERE from_address = ? AND to_address = ? AND event_type IN ('comm','comm_sent','text')
+        AND datetime(observed_at) > datetime(?)
+    `).get(NWT_KASIA, BROKER_KASIA, startIso).c;
+    dbR2.close();
+    let oracle3_contacts = false;
+    try {
+      const r = await fetch(`http://127.0.0.1:3100/api/contacts/list?relayId=${NWT_RELAY_ID}`);
+      const d = await r.json();
+      oracle3_contacts = (d.contacts || []).some(c => c.peer_address === BROKER_KASIA);
+    } catch {}
+    phases.push({
+      phase: 'C_3_oracle',
+      oracle1_relation: oracle1_relation || null,
+      oracle2_comm_count: oracle2_comm,
+      oracle3_contacts_has_broker: oracle3_contacts,
+    });
+
+    // Phase D: verdict
     if (!finalEscrow) {
       return { ok: false, summary: `❌ Phase B no escrow row found`, phases };
     }

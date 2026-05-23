@@ -243,6 +243,28 @@ export async function brokerBuyFlow(relayId, userKasia, brokerKasia, opts) {
   const { qty, chain = 'BSC', userEvmAddr, dmTimeoutMs = 90000 } = opts;  // 90s for post-restart resilience
   if (!qty || qty < 1) throw new Error(`qty must be >= 1 (broker min), got ${qty}`);
 
+  // KI N19.265 Sub 2 (NWT r247.1 ship lock): pre-step handshake — observeHandshake if relation_states
+  // not 'accepted'/'active' for this user→broker pair. Owner 雷霆 catch: NWT-TB 1885 DMs but 0 relation_states
+  // because broker IS_SERVICE skips observeHandshake for stranger DMs. Test must drive real user path.
+  try {
+    const { sqlite } = await import('../../src/db/client.js');
+    const existing = sqlite.prepare(`
+      SELECT status FROM relation_states WHERE local_address = ? AND peer_address = ?
+    `).get(userKasia, brokerKasia);
+    if (!existing || !['accepted', 'active', 'confirmed'].includes(existing.status)) {
+      const { sendCommandAsync } = await import('../../src/services/relay-manager.js');
+      console.log(`[brokerBuyFlow] pre-handshake: relation_states status=${existing?.status || 'none'} → fire type=handshake`);
+      try {
+        await sendCommandAsync(relayId, { type: 'handshake', target: brokerKasia }, 15000);
+      } catch (e) {
+        console.warn(`[brokerBuyFlow] handshake fire fail (continue anyway): ${e.message}`);
+      }
+      await sleep(6000);  // wait broker scout ingest + relation_states INSERT
+    }
+  } catch (e) {
+    console.warn(`[brokerBuyFlow] handshake pre-step error (continue): ${e.message}`);
+  }
+
   // 6-step DM with smart quote detection
   const steps = [
     ['back', 'reset'],
