@@ -24,6 +24,8 @@ const AMOUNT_TOLERANCE_PCT = 0.01;  // ±1% match
 let _intakeInterval = null;
 let _ticks = 0;
 let _matches = 0;
+let _matchmakerTicks = 0;
+let _matchmakerMatches = 0;
 
 export function start() {
   if (_intakeInterval) return { ok: false, reason: 'already_started' };
@@ -36,6 +38,9 @@ export function start() {
     // T3.B Polygon BUY E2E unblock — ExtClient-1 N18 bridge 已有 Polygon USDT, broker 也有 14 Polygon USDT.
     // file misnomer (bsc-intake-watcher 含 polygon tick) accepted, Option B rename 排日.
     tickPolygonEscrow().catch(e => console.warn(`[broker-polygon-intake-escrow] tick err: ${e.message}`));
+    // r250.3 (NWT N19.274 path A 零库存): matchmaker mode dual TX scan.
+    // broker_role='matchmaker' escrows need BOTH user → maker_addr (USDT) AND user → broker_fee_addr (1% fee) matched.
+    tickMatchmakerEscrow().catch(e => console.warn(`[broker-matchmaker-intake] tick err: ${e.message}`));
   }, TICK_MS);
   console.log(`[broker-bsc-intake] started, tick=${TICK_MS / 1000}s — BSC USDT inflow + Polygon USDT inflow + Bug H escrow flow (flag-gated)`);
   return { ok: true };
@@ -47,7 +52,14 @@ export function stop() {
   console.log(`[broker-bsc-intake] stopped (ticks=${_ticks}, matches=${_matches})`);
 }
 
-export function getStats() { return { started: !!_intakeInterval, ticks: _ticks, matches: _matches }; }
+export function getStats() {
+  return {
+    started: !!_intakeInterval,
+    ticks: _ticks,
+    matches: _matches,
+    matchmaker: { ticks: _matchmakerTicks, matches: _matchmakerMatches },
+  };
+}
 
 export async function tick() {
   _ticks++;
@@ -283,6 +295,96 @@ export async function tickEscrow() {
     console.error(`[broker-bsc-intake-escrow] orphan detect err: ${err.message}`);
   }
 
+  return { ok: true, scanned: pending.length, matched };
+}
+
+// r250.3 matchmaker mode dual TX scan (NWT N19.274 path A 零库存).
+// Scans both marketmaker addr (maker_addr) + broker fee addr (broker_fee_addr) per pending matchmaker escrow.
+// If BOTH match within tolerance → trigger marketmaker KAS deliver via /api/relay/:id/send-command (= COMMAND_TYPES.TRANSFER).
+// Currently BSC only (Phase 1). Polygon/eth/etc parallel additions follow same pattern.
+export async function tickMatchmakerEscrow() {
+  _matchmakerTicks++;
+  // Find pending matchmaker escrow rows (BUY KAS, dual-TX dispatch)
+  const pending = sqlite.prepare(`
+    SELECT id, quote_seq, user_kasia_addr, amount_quoted, target_amount, chain, broker_role, maker_addr, broker_fee_addr, broker_fee_amt, expires_at, created_at
+    FROM user_escrow_balances
+    WHERE broker_role = 'matchmaker'
+      AND status = 'pending_prepay'
+      AND side = 'buy_kas'
+      AND chain = 'bnb'
+      AND expires_at > datetime('now')
+    ORDER BY created_at ASC
+    LIMIT 10
+  `).all();
+  if (!pending.length) return { ok: true, scanned: 0, matched: 0 };
+
+  const { scanRecentTransfers } = await import('./cross-chain-verify.mjs');
+  let matched = 0;
+  for (const e of pending) {
+    if (!e.maker_addr || !e.broker_fee_addr || !e.broker_fee_amt) {
+      console.warn(`[matchmaker-intake] escrow ${e.id.slice(0,8)} missing maker/fee fields — skip`);
+      continue;
+    }
+    // Scan TX1 to maker_addr (= marketmaker USDT receipt, amount=amount_quoted)
+    const scan1 = await scanRecentTransfers({ chain: 'bnb', recipient: e.maker_addr, span_blocks: ESCROW_SCAN_SPAN_BLOCKS, paymentAsset: 'usdt' });
+    const tx1 = scan1.events?.find(t => Math.abs(t.amount - parseFloat(e.amount_quoted)) / parseFloat(e.amount_quoted) <= ESCROW_AMOUNT_TOLERANCE_PCT);
+    if (!tx1) continue;
+    // Scan TX2 to broker_fee_addr (= broker fee USDT receipt, amount=broker_fee_amt)
+    const scan2 = await scanRecentTransfers({ chain: 'bnb', recipient: e.broker_fee_addr, span_blocks: ESCROW_SCAN_SPAN_BLOCKS, paymentAsset: 'usdt' });
+    const tx2 = scan2.events?.find(t => Math.abs(t.amount - parseFloat(e.broker_fee_amt)) / parseFloat(e.broker_fee_amt) <= ESCROW_AMOUNT_TOLERANCE_PCT);
+    if (!tx2) continue;
+    // BOTH matched — promote escrow + audit + dispatch marketmaker KAS deliver
+    try {
+      sqlite.prepare(`
+        UPDATE user_escrow_balances
+        SET prepayment_tx = ?, amount_received = ?, status = 'awaiting_delivery', updated_at = datetime('now')
+        WHERE id = ? AND status = 'pending_prepay'
+      `).run(`${tx1.tx_hash}|${tx2.tx_hash}`, String(parseFloat(tx1.amount) + parseFloat(tx2.amount)), e.id);
+    } catch (err) {
+      console.error(`[matchmaker-intake] UPDATE err for escrow ${e.id.slice(0,8)}: ${err.message}`);
+      continue;
+    }
+    try {
+      const { recordChainEvent } = await import('./chain-event.js');
+      recordChainEvent({
+        txid: `matchmaker_dual_confirmed_${e.id.slice(0,12)}_${Date.now()}`,
+        eventType: 'matchmaker_dual_tx_confirmed_v1',
+        fromAddress: e.user_kasia_addr,
+        toAddress: e.maker_addr,
+        payload: JSON.stringify({
+          escrow_id: e.id, tx1_maker: tx1.tx_hash, tx2_broker_fee: tx2.tx_hash,
+          amount_quoted: e.amount_quoted, broker_fee_amt: e.broker_fee_amt,
+          chain: 'bnb',
+        }),
+      });
+    } catch {}
+    // Dispatch marketmaker KAS deliver via existing send-command endpoint (Bug-Z21 lesson: COMMAND_TYPES.TRANSFER, NOT 'send_kas').
+    try {
+      const mmRelay = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = (SELECT maker FROM exchange_offers WHERE id IN (SELECT offer_id FROM user_escrow_balances WHERE id = ?)) LIMIT 1').get(e.id)
+        || sqlite.prepare(`SELECT rn.id FROM relay_nodes rn JOIN agent_wallets aw ON aw.relay_node_id = rn.id WHERE aw.address = ? AND aw.chain = 'bnb'`).get(e.maker_addr);
+      if (!mmRelay?.id) {
+        console.warn(`[matchmaker-intake] cannot resolve marketmaker relay for maker_addr ${e.maker_addr.slice(0,10)} — escrow ${e.id.slice(0,8)} stuck awaiting_delivery, manual review`);
+        continue;
+      }
+      const PORT = parseInt(process.env.PORT || '3100');
+      const res = await fetch(`http://127.0.0.1:${PORT}/api/relay/${mmRelay.id}/send-command`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'transfer', target: e.user_kasia_addr, amount: parseFloat(e.target_amount) }),
+        signal: AbortSignal.timeout(20_000),
+      });
+      const result = await res.json().catch(() => ({}));
+      if (result?.ok) {
+        matched++;
+        _matchmakerMatches++;
+        console.log(`[matchmaker-intake] escrow ${e.id.slice(0,8)} dual TX confirmed → marketmaker deliver ${e.target_amount} KAS → user ${e.user_kasia_addr.slice(0,18)} TX queued`);
+      } else {
+        console.error(`[matchmaker-intake] marketmaker deliver dispatch fail for escrow ${e.id.slice(0,8)}: ${result?.error || 'unknown'}`);
+      }
+    } catch (err) {
+      console.error(`[matchmaker-intake] deliver dispatch err for escrow ${e.id.slice(0,8)}: ${err.message}`);
+    }
+  }
   return { ok: true, scanned: pending.length, matched };
 }
 
