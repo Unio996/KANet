@@ -14,6 +14,7 @@
 // Phase 2.2 will replace stubs with real flow invocation.
 
 import { sqlite } from '../src/db/client.js';
+import { SCENARIO_IMPL } from './stress-test-v2-scenarios.mjs';
 
 const SEED = parseInt(process.env.STRESS_TEST_SEED || String(Date.now()), 10);
 
@@ -62,27 +63,23 @@ function loadStressRelays() {
   `).all();
 }
 
-// Phase 2.0 stub — Phase 2.2 will implement real dryRun per scenario.
+// Phase 2.2 — real dryRun per scenario via SCENARIO_IMPL module.
+// Falls back to Phase 2.0 stub if impl missing (defensive).
 async function executeScenarioStub(scenario, ctx) {
-  const { rng, relays } = ctx;
+  const { relays } = ctx;
   if (relays.length === 0) {
     return { ok: false, scenario: scenario.id, error: 'no stress relays found — run Phase 1A setup first' };
   }
-  // Random select 1-3 relays for this scenario (= Phase 2.2 will tune per group)
-  const relayCount = scenario.group === 'stress' ? 3 : 1;
-  const selected = [];
-  for (let i = 0; i < relayCount && i < relays.length; i++) {
-    const idx = Math.floor(rng() * relays.length);
-    selected.push(relays[idx]);
+  const impl = SCENARIO_IMPL[scenario.id];
+  if (!impl) {
+    return { ok: false, scenario: scenario.id, error: `Phase 2.2 SCENARIO_IMPL missing for ${scenario.id}` };
   }
-  return {
-    ok: true,
-    scenario: scenario.id,
-    group: scenario.group,
-    desc: scenario.desc,
-    selected_relays: selected.map(r => r.name),
-    note: 'Phase 2.0 stub — Phase 2.2 will implement real dryRun + Phase 5 real-fire',
-  };
+  try {
+    const plan = await impl(ctx, scenario);
+    return { ok: !!plan?.ok, ...plan };
+  } catch (e) {
+    return { ok: false, scenario: scenario.id, error: e.message };
+  }
 }
 
 // Phase 2.1 — pre-flight fold (reuse phase1-setup pattern, lighter check).
@@ -124,7 +121,12 @@ async function runScheduled({ scenarios, ctx, intervalMs, dryRun, abortRef }) {
     r.dryRun = dryRun;
     r.fired_at = new Date(start).toISOString();
     results.push(r);
-    console.log(`[scheduler]   → ${r.ok ? 'planned' : 'failed'}: ${(r.selected_relays || []).join(',') || r.error || ''}`);
+    const detail = r.user?.name || (r.users || []).join(',') || r.error || '';
+    console.log(`[scheduler]   → ${r.ok ? 'planned' : 'failed'}: ${detail}`);
+    if (r.would_trigger && r.would_trigger.length) {
+      console.log(`[scheduler]     steps (${r.would_trigger.length}):`);
+      for (const step of r.would_trigger) console.log(`[scheduler]     • ${step}`);
+    }
 
     // Inter-scenario delay (= avoid Kaspa fee storm + RPC throttle).
     if (i < scenarios.length - 1) {
@@ -205,7 +207,12 @@ async function main() {
       const r = await executeScenarioStub(s, ctx);
       r.dryRun = dryRun;
       console.log(`[${r.ok ? '✓' : '✗'}] ${s.id} ${s.desc}`);
-      if (r.selected_relays) console.log(`    → relays: ${r.selected_relays.join(', ')}`);
+      const detail = r.user?.name || (r.users || []).join(',') || r.error || '';
+      if (detail) console.log(`    → ${detail}`);
+      if (r.would_trigger && r.would_trigger.length) {
+        console.log(`    steps (${r.would_trigger.length}):`);
+        for (const step of r.would_trigger) console.log(`    • ${step}`);
+      }
       results.push(r);
     }
   }
