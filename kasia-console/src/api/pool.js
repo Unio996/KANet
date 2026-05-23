@@ -28,13 +28,40 @@ function deriveXOnlyPubkey(address) {
 
 export async function registerPoolRoutes(fastify) {
   // POST /api/pool/market/create — maker creates market + locks stake
+  // Bettor r449 4 决策 — backend defaults for omitted V2-wireframe fields:
+  //   D1: oracle_relay_ids omitted → server-side Fisher-Yates sample 3 from is_oracle=1 pool
+  //   D2: outcome_market_source / outcome_condition_id / outcome_token_id → auto-fill defaults
+  //   D3: oracle_bond_kas omitted → 1 KAS (v0.5 hardcoded per Area 1.3)
+  //   D4: broker_fee_pct omitted → 0; broker_relay_id omitted → maker_relay_id (maker == broker thesis)
   fastify.post('/api/pool/market/create', async (request, reply) => {
     const b = request.body || {};
-    const required = ['maker_relay_id', 'broker_relay_id', 'oracle_relay_ids', 'outcome_market_source', 'outcome_condition_id', 'outcome_token_id', 'outcome_side', 'outcome_end_date', 'resolution_rule_spec', 'maker_stake_kas', 'oracle_bond_kas', 'broker_fee_pct'];
+    // Truly required: only the irreducible per-market choices the maker must make.
+    const required = ['maker_relay_id', 'outcome_side', 'outcome_end_date', 'resolution_rule_spec', 'maker_stake_kas'];
     for (const k of required) {
       if (b[k] === undefined || b[k] === null || b[k] === '') return reply.code(400).send({ ok: false, error: `missing ${k}` });
     }
 
+    // D4: broker defaults to maker (maker == broker thesis); broker_fee_pct default 0.
+    if (b.broker_relay_id === undefined || b.broker_relay_id === null || b.broker_relay_id === '') b.broker_relay_id = b.maker_relay_id;
+    if (b.broker_fee_pct === undefined || b.broker_fee_pct === null || b.broker_fee_pct === '') b.broker_fee_pct = 0;
+
+    // D3: oracle_bond_kas default 1 KAS hardcoded per v0.5 Area 1.3 + L1 worst-case math.
+    if (b.oracle_bond_kas === undefined || b.oracle_bond_kas === null || b.oracle_bond_kas === '') b.oracle_bond_kas = 1;
+
+    // D2: metadata defaults — UI 0 expose, backend single source of truth.
+    if (b.outcome_market_source === undefined || b.outcome_market_source === null || b.outcome_market_source === '') b.outcome_market_source = 'kanet_v05';
+    if (b.outcome_token_id === undefined || b.outcome_token_id === null || b.outcome_token_id === '') b.outcome_token_id = 'KAS_native';
+    if (b.outcome_condition_id === undefined || b.outcome_condition_id === null || b.outcome_condition_id === '') {
+      b.outcome_condition_id = createHash('sha256').update(`${b.resolution_rule_spec}||${b.outcome_end_date}||${b.outcome_side}`).digest('hex').slice(0, 16);
+    }
+
+    // D1: oracle_relay_ids omitted → server-side Fisher-Yates sample 3 from is_oracle=1 pool
+    // (excluding maker to prevent self-adjudication per area-1 invariant Q11).
+    if (!Array.isArray(b.oracle_relay_ids) || b.oracle_relay_ids.length === 0) {
+      const pool = sqlite.prepare('SELECT id FROM relay_nodes WHERE is_oracle = 1 AND id != ? ORDER BY RANDOM() LIMIT 3').all(b.maker_relay_id);
+      if (pool.length < 3) return reply.code(503).send({ ok: false, error: `oracle pool insufficient: ${pool.length} available, need 3 is_oracle=1 relays (excluding maker)` });
+      b.oracle_relay_ids = pool.map(r => r.id);
+    }
     if (!Array.isArray(b.oracle_relay_ids) || b.oracle_relay_ids.length !== 3) {
       return reply.code(400).send({ ok: false, error: 'oracle_relay_ids must be 3 unique relay ids (v0.5 3-of-3)' });
     }
