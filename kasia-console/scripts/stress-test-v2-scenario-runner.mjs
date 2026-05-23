@@ -85,12 +85,80 @@ async function executeScenarioStub(scenario, ctx) {
   };
 }
 
+// Phase 2.1 — pre-flight fold (reuse phase1-setup pattern, lighter check).
+//   Verify Console alive + 10 stress relays exist + autoTaker config sane.
+//   Returns { ok, checks } — abort if any fail BEFORE scenario fire.
+async function preflightLite() {
+  const CONSOLE_URL = process.env.CONSOLE_URL || 'http://127.0.0.1:3100';
+  const checks = [];
+  try {
+    const r = await fetch(`${CONSOLE_URL}/api/admin/overview`);
+    checks.push({ name: 'console_health', ok: r.ok });
+    if (!r.ok) return { ok: false, checks };
+  } catch (e) {
+    checks.push({ name: 'console_health', ok: false, err: e.message });
+    return { ok: false, checks };
+  }
+  const relays = loadStressRelays();
+  checks.push({ name: 'stress_relays_count', ok: relays.length === 10, count: relays.length });
+  if (relays.length !== 10) return { ok: false, checks };
+  return { ok: true, checks };
+}
+
+// Phase 2.1 — scheduler: spaced scenario fire over a window.
+//   Each scenario waits intervalMs between fires.
+//   abort flag (= SIGINT / abort hook) stops loop cleanly + dumps pending state.
+//   dryRun (default true) prevents any real-money side effect via scenario.dryRun().
+//   Phase 2.2 will wire real per-scenario dryRun(); Phase 2.0 stub used here.
+async function runScheduled({ scenarios, ctx, intervalMs, dryRun, abortRef }) {
+  const results = [];
+  for (let i = 0; i < scenarios.length; i++) {
+    if (abortRef.aborted) {
+      console.log(`[scheduler] ABORT signal — stopping at ${i}/${scenarios.length}`);
+      break;
+    }
+    const s = scenarios[i];
+    const start = Date.now();
+    console.log(`[scheduler] [${i + 1}/${scenarios.length}] firing ${s.id} (dryRun=${dryRun})`);
+    const r = await executeScenarioStub(s, ctx);
+    r.dryRun = dryRun;
+    r.fired_at = new Date(start).toISOString();
+    results.push(r);
+    console.log(`[scheduler]   → ${r.ok ? 'planned' : 'failed'}: ${(r.selected_relays || []).join(',') || r.error || ''}`);
+
+    // Inter-scenario delay (= avoid Kaspa fee storm + RPC throttle).
+    if (i < scenarios.length - 1) {
+      const remaining = scenarios.length - i - 1;
+      console.log(`[scheduler]   wait ${intervalMs}ms (${remaining} scenario(s) remaining)`);
+      await new Promise(res => setTimeout(res, intervalMs));
+    }
+  }
+  return results;
+}
+
+function setupAbortHandler() {
+  const ref = { aborted: false };
+  process.on('SIGINT', () => {
+    if (ref.aborted) {
+      console.log('[abort] forcing exit');
+      process.exit(2);
+    }
+    console.log('[abort] SIGINT received — finishing current scenario then stopping (Ctrl+C again to force)');
+    ref.aborted = true;
+  });
+  return ref;
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const scenarioFilter = args.find(a => a.startsWith('--scenario='))?.slice('--scenario='.length);
   const listOnly = args.includes('--list');
+  // Phase 2.1 args:
+  const dryRun = !args.includes('--no-dry-run');  // default TRUE (production safety)
+  const intervalMs = parseInt(args.find(a => a.startsWith('--interval-ms='))?.slice('--interval-ms='.length) || '5000', 10);
+  const useScheduler = args.includes('--scheduler');
 
-  console.log(`[stress-runner] Phase 2.0 skeleton — seed=${SEED}`);
+  console.log(`[stress-runner] Phase 2.1 — seed=${SEED} dryRun=${dryRun} scheduler=${useScheduler} interval=${intervalMs}ms`);
 
   if (listOnly) {
     console.log('\n17 scenarios:');
@@ -100,14 +168,18 @@ async function main() {
     return;
   }
 
-  const relays = loadStressRelays();
-  console.log(`[stress-runner] ${relays.length} stress relays loaded`);
-
-  if (relays.length === 0) {
-    console.error('[stress-runner] ABORT — no stress relays. Run scripts/stress-test-v2-phase1-setup.mjs first.');
+  // Phase 2.1 — pre-flight check (= 跑前 verify, abort if fail).
+  console.log('[stress-runner] pre-flight check...');
+  const pre = await preflightLite();
+  for (const c of pre.checks) {
+    console.log(`  [${c.ok ? '✓' : '✗'}] ${c.name}` + (c.count != null ? ` count=${c.count}` : '') + (c.err ? ` err=${c.err}` : ''));
+  }
+  if (!pre.ok) {
+    console.error('[stress-runner] ABORT — pre-flight fail');
     process.exit(1);
   }
 
+  const relays = loadStressRelays();
   const rng = makeRng(SEED);
   const ctx = { rng, relays };
 
@@ -117,18 +189,30 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`[stress-runner] running ${toRun.length} scenario(s) in stub mode...\n`);
-  const results = [];
-  for (const s of toRun) {
-    const r = await executeScenarioStub(s, ctx);
-    console.log(`[${r.ok ? '✓' : '✗'}] ${s.id} ${s.desc}`);
-    if (r.selected_relays) console.log(`    → relays: ${r.selected_relays.join(', ')}`);
-    results.push(r);
+  if (!dryRun) {
+    console.warn('[stress-runner] ⚠ dryRun=false — real-money side effects WOULD trigger in Phase 2.2+ (currently stub mode no-op)');
+  }
+
+  let results;
+  if (useScheduler) {
+    console.log(`[stress-runner] scheduler mode — ${toRun.length} scenarios, ${intervalMs}ms inter-fire delay`);
+    const abortRef = setupAbortHandler();
+    results = await runScheduled({ scenarios: toRun, ctx, intervalMs, dryRun, abortRef });
+  } else {
+    console.log(`[stress-runner] burst mode — ${toRun.length} scenarios back-to-back`);
+    results = [];
+    for (const s of toRun) {
+      const r = await executeScenarioStub(s, ctx);
+      r.dryRun = dryRun;
+      console.log(`[${r.ok ? '✓' : '✗'}] ${s.id} ${s.desc}`);
+      if (r.selected_relays) console.log(`    → relays: ${r.selected_relays.join(', ')}`);
+      results.push(r);
+    }
   }
 
   const passed = results.filter(r => r.ok).length;
-  console.log(`\n[stress-runner] Phase 2.0 stub: ${passed}/${results.length} scenarios planned`);
-  console.log('[stress-runner] Phase 2.2 will fill dryRun real flow. Phase 5 = 24h real-money execute.');
+  console.log(`\n[stress-runner] Phase 2.1 ${useScheduler ? 'scheduled' : 'burst'}: ${passed}/${results.length} scenarios planned (dryRun=${dryRun})`);
+  console.log('[stress-runner] Phase 2.2 will fill real dryRun per scenario. Phase 5 = 24h real-money execute.');
 }
 
 main().catch(e => { console.error(e); process.exit(1); });
