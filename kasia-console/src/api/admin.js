@@ -382,4 +382,70 @@ export async function registerAdminRoutes(fastify) {
       return reply.code(500).send({ error: err.message });
     }
   });
+
+  // KI 65 Block B.1 (Owner 5/23 钦定, NWT N19.227 path 钦定): broker fee aggregate per range.
+  //
+  // Filter semantics: `broker_fee_kas IS NOT NULL AND state NOT IN ('expired','failed','refunded','refunding')`.
+  //   state='completed' (4 rows historical) OR 'confirming' (= broker delivered KAS, awaiting block confirm) 真 fee collected.
+  //   state='expired'/'failed'/'refunded'/'refunding' 真 not collected (= refund path).
+  //
+  // multi-broker: defer Block B v2 (= retail_dex_orders no broker_id col, single broker implicit).
+  //   broker_id query param reserved for future multi-broker enable.
+  fastify.get('/api/admin/broker/fees', async (request, reply) => {
+    try {
+      const q = request.query || {};
+      const range = String(q.range || '24h');  // 24h / 7d / 30d / all
+      const brokerIdFilter = q.broker_id ? String(q.broker_id) : null;  // reserved, no-op v1
+      const rangeSql = (() => {
+        switch (range) {
+          case '7d': return `AND created_at > datetime('now', '-7 days')`;
+          case '30d': return `AND created_at > datetime('now', '-30 days')`;
+          case 'all': return ``;
+          case '24h':
+          default: return `AND created_at > datetime('now', '-1 day')`;
+        }
+      })();
+      const settleSql = `broker_fee_kas IS NOT NULL AND state NOT IN ('expired','failed','refunded','refunding')`;
+      const agg = sqlite.prepare(`
+        SELECT
+          COUNT(*) AS trade_count,
+          COALESCE(SUM(CAST(broker_fee_kas AS REAL)), 0) AS total_fee_kas,
+          COALESCE(AVG(CAST(broker_fee_kas AS REAL)), 0) AS avg_fee_kas
+        FROM retail_dex_orders
+        WHERE ${settleSql} ${rangeSql}
+      `).get();
+      const breakdown = sqlite.prepare(`
+        SELECT side, COUNT(*) AS c, COALESCE(SUM(CAST(broker_fee_kas AS REAL)), 0) AS fee_kas
+        FROM retail_dex_orders
+        WHERE ${settleSql} ${rangeSql}
+        GROUP BY side
+      `).all();
+      const stateDist = sqlite.prepare(`
+        SELECT state, COUNT(*) AS c
+        FROM retail_dex_orders
+        WHERE broker_fee_kas IS NOT NULL ${rangeSql}
+        GROUP BY state
+      `).all();
+      const broker = sqlite.prepare(`
+        SELECT id, name, address FROM relay_nodes rn
+        WHERE EXISTS (SELECT 1 FROM json_each(rn.roles_json) je WHERE je.value = 'broker')
+        ORDER BY rn.created_at ASC LIMIT 1
+      `).get();
+      return reply.send({
+        ok: true,
+        ts: new Date().toISOString(),
+        range,
+        broker_id_filter: brokerIdFilter,  // reserved for multi-broker v2
+        broker: broker ? { id: broker.id, name: broker.name, address: broker.address } : null,
+        trade_count: agg.trade_count,
+        total_fee_kas: Math.round(agg.total_fee_kas * 1000) / 1000,
+        avg_fee_kas: Math.round(agg.avg_fee_kas * 10000) / 10000,
+        breakdown: breakdown.map(b => ({ side: b.side, count: b.c, fee_kas: Math.round(b.fee_kas * 1000) / 1000 })),
+        state_distribution: stateDist.map(s => ({ state: s.state, count: s.c })),
+        filter_semantics: 'broker_fee_kas IS NOT NULL AND state NOT IN (expired/failed/refunded/refunding)',
+      });
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
 }
