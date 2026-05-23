@@ -750,7 +750,13 @@ export async function dispatchRefundDisagreement(market, decision) {
     // tx.lockTime MUST be >= deadline_seconds + 300, AND preimage MUST carry the same lockTime
     // (Kaspa sighash binds tx.lockTime — oracle sigs over preimage.lockTime=0 would mismatch
     // a final TX with lockTime=deadline+300, so all 4 input sigs would invalidate).
-    const deadlineSec = Math.floor(Date.parse(market.outcome_end_date) / 1000);
+    // 7d bug 10b fix (cycle 5 rerun #1 catch): column is `deadline` (sec int), NOT
+    // `outcome_end_date`. Date.parse(undefined)=NaN → NaN+300=NaN → BigInt(NaN||0)=0n → same bug.
+    const deadlineSec = parseInt(market.deadline, 10);
+    if (!Number.isFinite(deadlineSec) || deadlineSec <= 0) {
+      console.error(`[pool-settler] dispatchRefundDisagreement market=${market.id.slice(0,12)} invalid deadline=${market.deadline}`);
+      return;
+    }
     const refundLockTimeSec = deadlineSec + 300;
 
     // Build preimage via maker_relay (single-p2sh refund TX on spine inputs only)
