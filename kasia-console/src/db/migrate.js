@@ -4409,5 +4409,64 @@ export function runMigrations() {
     }
   }
 
+  // v141: KI 65 Step 2 Phase 3 (NWT N19.247) — stress test framework schema.
+  //   Track stress test runs + scenario results + chain_event refs (= post-run audit + abort/cleanup state dump).
+  //   stress_test_runs: 1 row per `node scripts/stress-test-v2-scenario-runner.mjs` invocation
+  //   stress_test_scenario_results: N row per run, 1 per scenario fired
+  //   stress_test_chain_event_refs: linkage table chain_events.id → scenario_result.id (audit attribution)
+  {
+    const runs = sqlite.prepare("SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name='stress_test_runs'").get();
+    if (!runs.cnt) {
+      sqlite.exec(`
+        CREATE TABLE stress_test_runs (
+          id TEXT PRIMARY KEY,
+          seed INTEGER NOT NULL,
+          dry_run INTEGER NOT NULL DEFAULT 1,
+          mode TEXT NOT NULL DEFAULT 'burst',
+          started_at TEXT NOT NULL DEFAULT (datetime('now')),
+          ended_at TEXT,
+          status TEXT NOT NULL DEFAULT 'running',
+          scenarios_planned INTEGER NOT NULL DEFAULT 0,
+          scenarios_executed INTEGER NOT NULL DEFAULT 0,
+          aborted_at_scenario TEXT,
+          notes TEXT
+        )
+      `);
+      console.log('[migrate] v141: stress_test_runs created.');
+    }
+    const results = sqlite.prepare("SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name='stress_test_scenario_results'").get();
+    if (!results.cnt) {
+      sqlite.exec(`
+        CREATE TABLE stress_test_scenario_results (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL,
+          scenario_id TEXT NOT NULL,
+          fired_at TEXT NOT NULL DEFAULT (datetime('now')),
+          ok INTEGER NOT NULL DEFAULT 0,
+          error TEXT,
+          selected_relays TEXT,
+          plan_json TEXT,
+          FOREIGN KEY (run_id) REFERENCES stress_test_runs(id)
+        )
+      `);
+      sqlite.exec(`CREATE INDEX idx_stress_results_run ON stress_test_scenario_results(run_id)`);
+      console.log('[migrate] v141: stress_test_scenario_results created.');
+    }
+    const refs = sqlite.prepare("SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name='stress_test_chain_event_refs'").get();
+    if (!refs.cnt) {
+      sqlite.exec(`
+        CREATE TABLE stress_test_chain_event_refs (
+          id TEXT PRIMARY KEY,
+          scenario_result_id TEXT NOT NULL,
+          chain_event_id TEXT NOT NULL,
+          event_type TEXT,
+          attributed_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+      sqlite.exec(`CREATE INDEX idx_stress_refs_result ON stress_test_chain_event_refs(scenario_result_id)`);
+      console.log('[migrate] v141: stress_test_chain_event_refs created.');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

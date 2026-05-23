@@ -15,6 +15,7 @@
 
 import { sqlite } from '../src/db/client.js';
 import { SCENARIO_IMPL } from './stress-test-v2-scenarios.mjs';
+import { randomUUID } from 'crypto';
 
 const SEED = parseInt(process.env.STRESS_TEST_SEED || String(Date.now()), 10);
 
@@ -61,6 +62,45 @@ function loadStressRelays() {
     WHERE name LIKE 'stress-%'
     ORDER BY name
   `).all();
+}
+
+// Phase 3 — stress_test_runs row + scenario_results ingest hook.
+function insertRunRow({ seed, dryRun, mode, planned }) {
+  const id = randomUUID();
+  sqlite.prepare(`
+    INSERT INTO stress_test_runs (id, seed, dry_run, mode, scenarios_planned, status)
+    VALUES (?, ?, ?, ?, ?, 'running')
+  `).run(id, seed, dryRun ? 1 : 0, mode, planned);
+  return id;
+}
+
+function insertScenarioResult(runId, result) {
+  const id = randomUUID();
+  sqlite.prepare(`
+    INSERT INTO stress_test_scenario_results (id, run_id, scenario_id, ok, error, selected_relays, plan_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    runId,
+    result.scenario || result.id || '?',
+    result.ok ? 1 : 0,
+    result.error || null,
+    JSON.stringify(result.selected_relays || (result.user ? [result.user.name] : (result.users || []))),
+    JSON.stringify(result),
+  );
+  return id;
+}
+
+function finalizeRun(runId, { executed, abortedAtScenario, notes }) {
+  sqlite.prepare(`
+    UPDATE stress_test_runs
+    SET ended_at = datetime('now'),
+        status = ?,
+        scenarios_executed = ?,
+        aborted_at_scenario = ?,
+        notes = ?
+    WHERE id = ?
+  `).run(abortedAtScenario ? 'aborted' : 'completed', executed, abortedAtScenario, notes || null, runId);
 }
 
 // Phase 2.2 — real dryRun per scenario via SCENARIO_IMPL module.
@@ -195,11 +235,17 @@ async function main() {
     console.warn('[stress-runner] ⚠ dryRun=false — real-money side effects WOULD trigger in Phase 2.2+ (currently stub mode no-op)');
   }
 
+  // Phase 3 — insert stress_test_runs row + ingest results per scenario.
+  const runId = insertRunRow({ seed: SEED, dryRun, mode: useScheduler ? 'scheduled' : 'burst', planned: toRun.length });
+  console.log(`[stress-runner] run_id=${runId} (= stress_test_runs row, ingest hook live)`);
+
   let results;
+  let abortedAt = null;
   if (useScheduler) {
     console.log(`[stress-runner] scheduler mode — ${toRun.length} scenarios, ${intervalMs}ms inter-fire delay`);
     const abortRef = setupAbortHandler();
     results = await runScheduled({ scenarios: toRun, ctx, intervalMs, dryRun, abortRef });
+    if (abortRef.aborted) abortedAt = toRun[results.length]?.id || 'unknown';
   } else {
     console.log(`[stress-runner] burst mode — ${toRun.length} scenarios back-to-back`);
     results = [];
@@ -217,9 +263,18 @@ async function main() {
     }
   }
 
+  // Phase 3 — bulk ingest scenario results + finalize run row.
+  for (const r of results) insertScenarioResult(runId, r);
+  finalizeRun(runId, {
+    executed: results.length,
+    abortedAtScenario: abortedAt,
+    notes: `dryRun=${dryRun} mode=${useScheduler ? 'scheduled' : 'burst'} interval=${intervalMs}ms`,
+  });
+
   const passed = results.filter(r => r.ok).length;
   console.log(`\n[stress-runner] Phase 2.1 ${useScheduler ? 'scheduled' : 'burst'}: ${passed}/${results.length} scenarios planned (dryRun=${dryRun})`);
-  console.log('[stress-runner] Phase 2.2 will fill real dryRun per scenario. Phase 5 = 24h real-money execute.');
+  console.log(`[stress-runner] run ${runId} ${abortedAt ? `ABORTED at ${abortedAt}` : 'completed'} — stress_test_runs + ${results.length} scenario_results rows ingested`);
+  console.log('[stress-runner] Phase 5 = 24h real-money execute reads stress_test_runs + chain_event refs.');
 }
 
 main().catch(e => { console.error(e); process.exit(1); });
