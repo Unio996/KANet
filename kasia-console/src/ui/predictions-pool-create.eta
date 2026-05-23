@@ -106,6 +106,57 @@
   </template>
 
   <!-- ============================================ -->
+  <!-- Polymarket 关键字搜索 (= Owner r455 钦定, iteration 2) -->
+  <!-- ============================================ -->
+  <template x-if="!shipped">
+    <div class="card card-flush overflow-hidden mb-5">
+      <div class="px-6 py-4 border-b border-warm-200">
+        <label class="block text-xs font-medium text-ink-500 mb-2">从 Polymarket 找议题（关键字搜索 · 不强求）</label>
+        <input type="text" x-model="searchQuery" @input.debounce.500ms="searchPolymarket()"
+               placeholder="例: BTC / Trump / 美联储 / Fed / election"
+               class="w-full text-sm px-4 py-2.5 rounded-lg border border-warm-300 focus:border-amber-400 focus:outline-none">
+      </div>
+      <template x-if="searching">
+        <div class="px-6 py-4 text-sm text-ink-400">搜索 Polymarket 中...</div>
+      </template>
+      <template x-if="!searching && searchResults && searchResults.length > 0">
+        <div class="px-6 py-4 space-y-2.5">
+          <template x-for="r in searchResults" :key="r.condition_id">
+            <div class="border border-warm-200 rounded-lg p-4 hover:border-amber-300 transition">
+              <h3 class="font-display text-base text-ink-700 mb-1" x-text="r.question"></h3>
+              <div class="flex items-center gap-3 text-xs text-ink-500 mb-2">
+                <span x-text="'Vol $' + (r.volume_24h ? r.volume_24h.toLocaleString(undefined,{maximumFractionDigits:0}) : '0')"></span>
+                <template x-if="r.yes_price !== null">
+                  <span x-text="'YES @' + (r.yes_price * 100).toFixed(0) + '¢'"></span>
+                </template>
+                <template x-if="r.end_date">
+                  <span x-text="'截止 ' + new Date(r.end_date).toLocaleDateString()"></span>
+                </template>
+              </div>
+              <button @click="usePolymarketMarket(r)"
+                      class="accent-gold-bg text-white text-xs px-3 py-1.5 rounded">
+                选用这个 →
+              </button>
+            </div>
+          </template>
+        </div>
+      </template>
+      <template x-if="!searching && searchQuery && searchQuery.length >= 2 && searchResults && searchResults.length === 0">
+        <div class="px-6 py-4 text-sm text-ink-400">
+          没找到匹配的 Polymarket 议题.
+          <button @click="useManualMode()" class="text-amber-700 underline ml-2">自己出题 →</button>
+        </div>
+      </template>
+      <template x-if="form.polymarketCondition">
+        <div class="px-6 py-3 bg-amber-50 border-t border-warm-200 text-xs text-amber-700 flex items-center justify-between">
+          <span>已选用 Polymarket 议题 (= 4 input 自动填好, 可调押金 + 勾 disclaimer + 发起)</span>
+          <button @click="clearPolymarketChoice()" class="underline text-amber-700">换一个 →</button>
+        </div>
+      </template>
+    </div>
+  </template>
+
+  <!-- ============================================ -->
   <!-- 主表单 (= V2 Editorial Dashboard 双栏) -->
   <!-- ============================================ -->
   <template x-if="!shipped">
@@ -243,6 +294,7 @@ function createPoolPage() {
       outcome_side: '',
       maker_stake_kas: 1,
       resolution_rule_spec: '',
+      polymarketCondition: null,  // iteration 2: set when 选用 Polymarket result
     },
     acceptedDisclaimer: false,
     llmChecking: false,
@@ -253,6 +305,10 @@ function createPoolPage() {
     result: null,
     timeline: [],
     pollHandle: null,
+    // iteration 2 — Polymarket 关键字搜索 (= Owner r455 钦定)
+    searchQuery: '',
+    searching: false,
+    searchResults: null,
 
     async init() {
       // load /api/pool/config first → set min/max + default stake
@@ -307,6 +363,54 @@ function createPoolPage() {
       } catch (e) { this.kasBalance = null; }
     },
 
+    // iteration 2 — Polymarket 关键字搜索 handlers (= Owner r455 钦定)
+    async searchPolymarket() {
+      const q = (this.searchQuery || '').trim();
+      if (q.length < 2) { this.searchResults = null; return; }
+      this.searching = true;
+      try {
+        const r = await fetch('/api/predictions/polymarket/search?q=' + encodeURIComponent(q));
+        const j = await r.json();
+        this.searchResults = j.ok ? (j.results || []) : [];
+      } catch (e) { this.searchResults = []; }
+      this.searching = false;
+    },
+
+    usePolymarketMarket(r) {
+      // auto-fill 题目 / 截止 / 规则 + outcome_condition_id (= polymarket condition 真链)
+      this.form.question = r.question || '';
+      if (r.end_date) {
+        try {
+          const d = new Date(r.end_date);
+          if (!isNaN(d.getTime())) this.form.outcome_end_date_local = d.toISOString().slice(0, 16);
+        } catch {}
+      }
+      if (r.description) {
+        // truncate to fit 1000 char limit; if no description fallback to question reference
+        this.form.resolution_rule_spec = (r.description || '').slice(0, 800).trim() || `参考 Polymarket 议题 "${r.question}" 的官方 resolution rules.`;
+      } else {
+        this.form.resolution_rule_spec = `看 Polymarket 议题 "${r.question}" 的官方判定 (slug: ${r.slug || r.condition_id}).`;
+      }
+      this.form.polymarketCondition = r.condition_id;
+      this.searchResults = null;
+      this.searchQuery = '';
+      this.llmResult = null;
+    },
+
+    clearPolymarketChoice() {
+      this.form.polymarketCondition = null;
+      this.form.question = '';
+      this.form.resolution_rule_spec = '';
+      this.setDefaultDeadline();
+      this.searchQuery = '';
+      this.searchResults = null;
+    },
+
+    useManualMode() {
+      this.searchResults = null;
+      this.searchQuery = '';
+    },
+
     async llmCheckRule() {
       if (!this.form.resolution_rule_spec) return;
       this.llmChecking = true;
@@ -340,6 +444,11 @@ function createPoolPage() {
         };
         // backend r449 4 决策: 不传 oracle_relay_ids / broker_relay_id / broker_fee_pct / oracle_bond_kas
         // / outcome_market_source / outcome_condition_id / outcome_token_id — 全 backend defaults fill
+        // iteration 2 (= r455 Polymarket): 如选 Polymarket 议题, 覆盖 outcome_market_source + condition_id 真链
+        if (this.form.polymarketCondition) {
+          body.outcome_market_source = 'polymarket';
+          body.outcome_condition_id = this.form.polymarketCondition;
+        }
         const r = await fetch('/api/pool/market/create', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -426,6 +535,9 @@ function createPoolPage() {
       this.form.question = '';
       this.form.outcome_side = '';
       this.form.resolution_rule_spec = '';
+      this.form.polymarketCondition = null;
+      this.searchQuery = '';
+      this.searchResults = null;
       this.setDefaultDeadline();
       if (this.pollHandle) { clearInterval(this.pollHandle); this.pollHandle = null; }
     },
