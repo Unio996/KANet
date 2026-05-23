@@ -76,7 +76,7 @@ contract PredictionEscrowUnanimous5(
     //   触发场景: oracle 分歧 (= revote 仍不一致) OR DoS (= 1 oracle 不签)
     entrypoint function refund_both(sig makerSig) {
         require(checkSig(makerSig, pubkey(makerPk)));
-        require(tx.time >= deadline);
+        require(tx.time >= deadline * 1000);  // bug 10d fix Path A
         require(tx.inputs.length == 2);
         require(tx.outputs.length == 2);
 
@@ -97,7 +97,7 @@ contract PredictionEscrowUnanimous5(
     //   触发场景: maker stake locked 后 taker 没在 deadline 前 stake → maker 单边 refund
     entrypoint function refund_maker_unjoined(sig makerSig) {
         require(checkSig(makerSig, pubkey(makerPk)));
-        require(tx.time >= deadline);
+        require(tx.time >= deadline * 1000);  // bug 10d fix Path A
         require(tx.inputs.length == 1);
         require(this.activeInputIndex == 0);
         require(tx.outputs.length == 1);

@@ -122,7 +122,10 @@ contract PoolSide(
     // Verification: maker sig (= bettor proves market cancelled via maker sig on refund TX)
     entrypoint function refund_market_cancelled(sig bettorSig) {
         require(checkSig(bettorSig, pubkey(bettorPk)));
-        require(tx.time >= deadline);
+        // bug 10d fix (cycle 5 Path A): Kaspa Crescendo LOCK_TIME_THRESHOLD = 500B.
+        // operand < 500B → DAA score (= testnet ~10M, never reaches 1.78B sec value).
+        // Multiply by 1000 → operand ≥ 500B → ms interpretation matches tx.lockTime ms.
+        require(tx.time >= deadline * 1000);
 
         require(tx.outputs.length == 1);
         byte[34] bettorLock = new ScriptPubKeyP2PK(pubkey(bettorPk));
