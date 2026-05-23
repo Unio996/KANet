@@ -858,14 +858,18 @@ export async function registerConversationRoutes(fastify) {
     // Owner 5/23 catch: NWT-TB 1885 chain DMs but 0 relation_states → broker hidden in UI.
     // Cap 50 peers to prevent UI explosion.
     const knownAddrs = new Set(contacts.map(c => c.address));
+    // Sub 4.1 hotfix (NWT r247.3): filter out scout self-self rows (= 206574 'comm' rows have
+    // from_address=to_address=sender, would show NWT in own contacts list with symmetric counts).
     const msgOnlyPeers = sqlite.prepare(`
       SELECT peer, MAX(c) AS total FROM (
         SELECT to_address AS peer, COUNT(*) AS c FROM chain_events
-        WHERE from_address = ? AND event_type IN ('comm','comm_sent','text') AND to_address IS NOT NULL
+        WHERE from_address = ? AND from_address != to_address
+          AND event_type IN ('comm','comm_sent','text') AND to_address IS NOT NULL
         GROUP BY to_address
         UNION ALL
         SELECT from_address AS peer, COUNT(*) AS c FROM chain_events
-        WHERE to_address = ? AND event_type IN ('comm','comm_received','text') AND from_address IS NOT NULL
+        WHERE to_address = ? AND from_address != to_address
+          AND event_type IN ('comm','comm_received','text') AND from_address IS NOT NULL
         GROUP BY from_address
       ) GROUP BY peer ORDER BY total DESC LIMIT 50
     `).all(relay.address, relay.address);
