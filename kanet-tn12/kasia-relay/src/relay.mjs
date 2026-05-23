@@ -663,6 +663,10 @@ if (process.send) {
         case 'prediction_settle_build_preimage': {
           // Phase 4a Sub 8 step 4 (Bettor r242) — maker_relay builds unsigned TX for Phase 2 DM dispatch.
           // Returns tx_obj that voters use as input to sign_input_for_settle IPC.
+          // 7d bug 10 fix: accept cmd.lock_time (default 0n). refund_disagreement path requires
+          // tx.lockTime >= deadline + 300 per SS OP_CHECKLOCKTIMEVERIFY; preimage MUST carry the
+          // same lockTime since Kaspa sighash binds tx.lockTime — oracle sigs computed over
+          // preimage with lockTime=0 would mismatch a final TX with lockTime=deadline+300.
           const { buildSettleTxPreimage } = await import('./lib/p2sh.mjs');
           const wallet = getWallet();
           const r = await buildSettleTxPreimage(
@@ -670,7 +674,7 @@ if (process.send) {
             cmd.required_input_outpoints,
             cmd.outputs,
             wallet.getNetworkId(),
-            0n,
+            BigInt(cmd.lock_time || 0),
             cmd.sig_op_counts || null,  // Phase 3 bug 5: per-input sigOpCount (pool [3×spine,0×side])
           );
           // Serialize BigInt → string for IPC pass-through (Q1 C fallback per r242 note)
