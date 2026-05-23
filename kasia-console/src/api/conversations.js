@@ -853,6 +853,47 @@ export async function registerConversationRoutes(fastify) {
       };
     });
 
+    // KI N19.265 Sub 4 (NWT r247.2 propose): UNION fallback — surface peers from chain_events
+    // when relation_states has 0 row for the pair. status='msg_only' (distinguishes from accepted).
+    // Owner 5/23 catch: NWT-TB 1885 chain DMs but 0 relation_states → broker hidden in UI.
+    // Cap 50 peers to prevent UI explosion.
+    const knownAddrs = new Set(contacts.map(c => c.address));
+    const msgOnlyPeers = sqlite.prepare(`
+      SELECT peer, MAX(c) AS total FROM (
+        SELECT to_address AS peer, COUNT(*) AS c FROM chain_events
+        WHERE from_address = ? AND event_type IN ('comm','comm_sent','text') AND to_address IS NOT NULL
+        GROUP BY to_address
+        UNION ALL
+        SELECT from_address AS peer, COUNT(*) AS c FROM chain_events
+        WHERE to_address = ? AND event_type IN ('comm','comm_received','text') AND from_address IS NOT NULL
+        GROUP BY from_address
+      ) GROUP BY peer ORDER BY total DESC LIMIT 50
+    `).all(relay.address, relay.address);
+    for (const p of msgOnlyPeers) {
+      if (knownAddrs.has(p.peer)) continue;
+      const msgs = msgMap[p.peer] || {};
+      const trades = tradeMap[p.peer] || {};
+      contacts.push({
+        id: null,
+        address: p.peer,
+        name: null,
+        status: 'msg_only',  // not in relation_states, only chain_events
+        trustLevel: 'normal',
+        entityType: null,
+        summary: null,
+        tags: '',
+        notes: '',
+        msgsSent: msgs.sent || 0,
+        msgsReceived: msgs.received || 0,
+        connectedAt: null,
+        tradeCount: trades.trade_count || 0,
+        tradeCompleted: trades.completed || 0,
+        tradeDisputed: trades.disputed || 0,
+        tradeVolume: trades.total_volume || 0,
+        lastTradeAt: trades.last_trade_at,
+      });
+    }
+
     return reply.send(contacts);
   });
 

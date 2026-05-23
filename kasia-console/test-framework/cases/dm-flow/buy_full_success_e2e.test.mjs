@@ -105,11 +105,16 @@ export default {
         AND datetime(observed_at) > datetime(?)
     `).get(NWT_KASIA, BROKER_KASIA, startIso).c;
     dbR2.close();
+    // Sub 3.1 hotfix (NWT r247.2): API params + response shape + field names corrected.
+    //   - param: relay_node_id (not relayId)
+    //   - response: contacts array direct (not d.contacts)
+    //   - field: c.address (not c.peer_address)
+    //   - include_observed=1: surface 'observed' status peers (default excludes)
     let oracle3_contacts = false;
     try {
-      const r = await fetch(`http://127.0.0.1:3100/api/contacts/list?relayId=${NWT_RELAY_ID}`);
-      const d = await r.json();
-      oracle3_contacts = (d.contacts || []).some(c => c.peer_address === BROKER_KASIA);
+      const r = await fetch(`http://127.0.0.1:3100/api/contacts/list?relay_node_id=${NWT_RELAY_ID}&include_observed=1`);
+      const contacts = await r.json();
+      oracle3_contacts = Array.isArray(contacts) && contacts.some(c => c.address === BROKER_KASIA);
     } catch {}
     phases.push({
       phase: 'C_3_oracle',

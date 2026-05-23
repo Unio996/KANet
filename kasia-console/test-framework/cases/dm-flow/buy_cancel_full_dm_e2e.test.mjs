@@ -148,11 +148,12 @@ export default {
         AND datetime(observed_at) > datetime(?)
     `).get(NWT_KASIA, BROKER_KASIA, startIso).c;
     dbR3.close();
+    // Sub 3.1 hotfix (NWT r247.2): API params + response + field names corrected.
     let oracle3_contacts = false;
     try {
-      const rContacts = await fetch(`http://127.0.0.1:3100/api/contacts/list?relayId=${NWT_RELAY_ID}`);
-      const d = await rContacts.json();
-      oracle3_contacts = (d.contacts || []).some(c => c.peer_address === BROKER_KASIA);
+      const rContacts = await fetch(`http://127.0.0.1:3100/api/contacts/list?relay_node_id=${NWT_RELAY_ID}&include_observed=1`);
+      const contacts = await rContacts.json();
+      oracle3_contacts = Array.isArray(contacts) && contacts.some(c => c.address === BROKER_KASIA);
     } catch {}
 
     const oracles = { statusStillActiveOk, refundTxNullOk, auditOk, replyRejectsOk,
