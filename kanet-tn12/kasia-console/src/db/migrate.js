@@ -4121,5 +4121,24 @@ export function runMigrations() {
     }
   }
 
+  // v142 — B2 v0.5 area-8 E6: pool_bettor_sides.refund_attempted_at TIMESTAMP NULL.
+  // Bumped to 142 to stay ahead of J2 #709's v141 (cross-line collision rule per
+  // feedback-cross-line-v-collision sediment). Used by post-PoolSide refund_market_cancelled
+  // broadcast to dedupe within a 24h cooldown — protects against multi-Console-instance
+  // races + Console-restart re-broadcasts (SS would reject the second TX anyway, but the
+  // cooldown saves miner fees + log noise). Subsequent refund attempts beyond 24h are
+  // re-allowed (e.g. if the bettor's first attempt failed for a transient reason).
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(pool_bettor_sides)").all();
+    if (!cols.some(c => c.name === 'refund_attempted_at')) {
+      try {
+        sqlite.exec(`ALTER TABLE pool_bettor_sides ADD COLUMN refund_attempted_at TIMESTAMP`);
+        console.log('[migrate] v142: pool_bettor_sides 加 refund_attempted_at TIMESTAMP (= area-8 E6 24h cooldown dedupe DB-persistent, B2 v0.5).');
+      } catch (e) {
+        console.warn(`[migrate] v142 ADD COLUMN fail: ${e.message}`);
+      }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
