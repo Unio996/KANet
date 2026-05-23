@@ -416,6 +416,40 @@ export async function registerPoolRoutes(fastify) {
     });
   });
 
+  // GET /api/predictions/polymarket/search?q=K — Polymarket keyword search (Owner r455 钦定)
+  // Owner thesis: 不 dump 热门 list, 关键字搜索式 → top 5 → 点选 auto-fill maker create form.
+  // Implementation: fetch active markets from Polymarket gamma + filter by question.includes(q).
+  fastify.get('/api/predictions/polymarket/search', async (request, reply) => {
+    const q = (request.query.q || '').trim().toLowerCase();
+    if (q.length < 2) return reply.send({ ok: true, query: q, results: [] });
+    try {
+      const r = await fetch('https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=200&order=volume24hr&ascending=false', {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!r.ok) return reply.code(502).send({ ok: false, error: `polymarket gamma ${r.status}` });
+      const markets = await r.json();
+      const results = (markets || [])
+        .filter(m => (m.question || '').toLowerCase().includes(q))
+        .slice(0, 5)
+        .map(m => {
+          let outcomePrices = null;
+          try { outcomePrices = JSON.parse(m.outcomePrices || '[]'); } catch {}
+          return {
+            condition_id: m.conditionId || m.condition_id,
+            question: m.question,
+            description: m.description,
+            end_date: m.endDate || m.end_date_iso,
+            volume_24h: parseFloat(m.volume24hr || 0),
+            yes_price: outcomePrices?.[0] ? parseFloat(outcomePrices[0]) : null,
+            slug: m.slug,
+          };
+        });
+      return reply.send({ ok: true, query: q, results });
+    } catch (e) {
+      return reply.code(502).send({ ok: false, error: `polymarket fetch fail: ${e.message}` });
+    }
+  });
+
   // GET /api/pool/market/:id/sides_merkle — return Merkle root + tree
   // GET /api/pool/market/:id — full row + computed status (= UI detail A.2b + cycle 5 poll-script fix)
   // Returns: { ok, market: {...all columns + parsed metadata}, sigs_collected, bettor_count }
