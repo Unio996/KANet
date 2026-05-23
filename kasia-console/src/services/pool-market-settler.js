@@ -282,11 +282,20 @@ export function computePoolPayouts(args) {
   const distributablePool = losingPool - brokerFee;
 
   // Forfeit_1 50/25/25 split per v0.5 spec section 4.4
+  // W3 (area-5/6): the 4 floor calls (winner / maker / oracle × 2) can each shed 0-1 sompi
+  // depending on oracleBond divisibility. Without explicit handling those sompi would leak
+  // into minerFee (implicit). Explicitly fold the remainder into makerForfeitShare so
+  // total_allocated == oracleBond (matches the W2 formula spec). area-10 outstanding may
+  // revisit whether maker share belongs to maker at all (same +EV pattern as Gap 1B burn),
+  // but until that decision the remainder follows the same destination as the 25% share.
   let winnerForfeitShare = 0, makerForfeitShare = 0, perOracleForfeitShare = 0;
   if (!unanimous && typeof silentOracleIndex === 'number') {
     winnerForfeitShare = Math.floor(oracleBond * 50 / 100);
     makerForfeitShare = Math.floor(oracleBond * 25 / 100);
     perOracleForfeitShare = Math.floor(oracleBond * 25 / 100 / 2);
+    const totalAllocated = winnerForfeitShare + makerForfeitShare + perOracleForfeitShare * 2;
+    const remainder = oracleBond - totalAllocated;
+    makerForfeitShare += remainder;
   }
 
   const winnerPayouts = winners.map(w => {
