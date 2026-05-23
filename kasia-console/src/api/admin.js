@@ -568,4 +568,102 @@ export async function registerAdminRoutes(fastify) {
       return reply.code(500).send({ error: err.message });
     }
   });
+
+  // KI 65 Step 2 Phase 1B (Owner 5/23 钦定): stress test funding endpoint.
+  //
+  // POST /api/admin/stress-test-fund
+  //   body: { dryRun: boolean=true, asset: 'USDT'=default, amount_per: 10=default, chain: 'bnb'=default }
+  //   auth: x-ingest-secret (= mutation endpoint, Owner only)
+  //
+  // dryRun=true (default): simulate + return manifest, NO transfer.
+  // dryRun=false: real transfer 10 × $amount_per from Trader-B BSC wallet to each stress-* relay.
+  //
+  // Safety:
+  //   - Auth required (mutation endpoint)
+  //   - dryRun default true (= 防 accidental fire)
+  //   - Pre-flight: Trader-B BSC wallet balance >= 10 × amount_per + gas margin
+  //   - Records chain_event 'stress_test_funded' per transfer (audit chain)
+  //   - 0 stress-* relay → no-op return
+  fastify.post(
+    '/api/admin/stress-test-fund',
+    async (request, reply) => {
+      try {
+        const body = request.body || {};
+        const dryRun = body.dryRun !== false;  // default true
+        // Auth: dryRun=true bypass (= read-only preview manifest). dryRun=false requires x-ingest-secret.
+        if (!dryRun) {
+          try { await verifyIngestRequest(request, reply); } catch { return; }
+          if (reply.sent) return;
+        }
+        const amountPer = parseFloat(body.amount_per || 10);
+        const asset = String(body.asset || 'USDT');
+        const chain = String(body.chain || 'bnb');
+        if (amountPer <= 0 || amountPer > 100) return reply.code(400).send({ error: 'amount_per must be 0-100' });
+
+        const stressRelays = sqlite.prepare(`
+          SELECT id, name FROM relay_nodes WHERE name LIKE 'stress-%'
+        `).all();
+        if (stressRelays.length === 0) return reply.code(400).send({ error: 'no stress-* relays found — run scripts/stress-test-v2-phase1-setup.mjs first' });
+
+        const { sqlite: db } = await import('../db/client.js');
+        const recipients = [];
+        for (const r of stressRelays) {
+          const w = db.prepare(`SELECT address FROM agent_wallets WHERE relay_node_id = ? AND chain = ? AND is_default = 1 LIMIT 1`).get(r.id, chain);
+          if (!w) {
+            recipients.push({ relay_id: r.id, name: r.name, error: `no ${chain} wallet` });
+            continue;
+          }
+          recipients.push({ relay_id: r.id, name: r.name, address: w.address, amount: amountPer, asset, chain });
+        }
+
+        // Broker BSC wallet (= Trader-B 默认 source)
+        const brokerWallet = db.prepare(`
+          SELECT aw.privkey_encrypted, aw.address FROM agent_wallets aw
+          INNER JOIN relay_nodes rn ON aw.relay_node_id = rn.id
+          WHERE rn.is_dex_broker = 1 AND aw.chain = ? AND aw.is_default = 1
+          ORDER BY rn.created_at ASC LIMIT 1
+        `).get(chain);
+        if (!brokerWallet) return reply.code(500).send({ error: `broker ${chain} wallet not found` });
+
+        const totalNeeded = recipients.filter(r => !r.error).length * amountPer;
+
+        if (dryRun) {
+          return reply.send({
+            ok: true,
+            dryRun: true,
+            asset, chain, amount_per: amountPer,
+            total_needed: totalNeeded,
+            source: { address: brokerWallet.address, broker: 'Trader-B' },
+            recipients,
+            note: 'dryRun=true — NO real transfer. POST with dryRun:false to fire (Owner explicit ack).',
+          });
+        }
+
+        // Real transfer
+        const { transferUsdt } = await import('../services/evm-transfer.js');
+        const results = [];
+        for (const r of recipients) {
+          if (r.error) { results.push(r); continue; }
+          try {
+            const tx = await transferUsdt(chain, brokerWallet.privkey_encrypted, r.address, amountPer, asset);
+            results.push({ ...r, ok: tx.ok, tx_hash: tx.txHash, error: tx.error });
+            if (tx.ok) {
+              recordChainEvent({
+                txid: tx.txHash,
+                eventType: 'stress_test_funded',
+                fromAddress: brokerWallet.address,
+                toAddress: r.address,
+                payload: JSON.stringify({ relay_id: r.relay_id, name: r.name, amount: amountPer, asset, chain }),
+              });
+            }
+          } catch (err) {
+            results.push({ ...r, ok: false, error: err.message });
+          }
+        }
+        return reply.send({ ok: true, dryRun: false, asset, chain, results });
+      } catch (err) {
+        return reply.code(500).send({ error: err.message });
+      }
+    },
+  );
 }
