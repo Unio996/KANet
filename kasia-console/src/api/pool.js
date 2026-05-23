@@ -181,8 +181,25 @@ export async function registerPoolRoutes(fastify) {
       spine_lock_tx: spineTxId,
       maker_stake_locked_kas: makerStakeAmount / 1e8,
       oracle_bond_required_kas: oracleBondAmount / 1e8,
+      // D4 wallet preview: fee breakdown for UI浮窗
+      miner_fee_sompi: minerFee,
+      broker_fee_pct_bps: brokerFeePct,
       status: 'pending_oracle_deposits',
       next_step: '3 oracle relays must call POST /api/pool/market/' + marketId + '/oracle/deposit',
+    });
+  });
+
+  // GET /api/pool/config — static defaults for UI pre-submit preview (D4 wallet浮窗 estimate fee)
+  fastify.get('/api/pool/config', async (request, reply) => {
+    return reply.send({
+      ok: true,
+      default_miner_fee_sompi: 50_000,
+      maker_stake_min_kas: 1,
+      bettor_stake_min_kas: 0.5,
+      bettors_max: 50,
+      deadline_max_days: parseInt(process.env.POOL_DEADLINE_MAX_DAY, 10) || 30,
+      disagreement_timeout_min: parseInt(process.env.DISAGREEMENT_TIMEOUT_MIN, 10) || 5,
+      oracle_silent_timeout_min: parseInt(process.env.ORACLE_SILENT_TIMEOUT_MIN, 10) || 30,
     });
   });
 
@@ -367,6 +384,49 @@ export async function registerPoolRoutes(fastify) {
   });
 
   // GET /api/pool/market/:id/sides_merkle — return Merkle root + tree
+  // GET /api/pool/market/:id — full row + computed status (= UI detail A.2b + cycle 5 poll-script fix)
+  // Returns: { ok, market: {...all columns + parsed metadata}, sigs_collected, bettor_count }
+  fastify.get('/api/pool/market/:id', async (request, reply) => {
+    const marketId = request.params.id;
+    const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
+    if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
+    let metaParsed = {};
+    try { metaParsed = JSON.parse(market.metadata || '{}'); } catch {}
+    const bettorCount = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(marketId).c;
+    const sigsCollected = sqlite.prepare(`
+      SELECT COUNT(*) c FROM chain_events
+      WHERE event_type IN ('pool_oracle_tx_sig', 'pool_oracle_refund_disagreement_tx_sig')
+        AND payload LIKE ?
+    `).get(`%"market_id":"${marketId}"%`).c;
+    return reply.send({
+      ok: true,
+      market: { ...market, metadata: metaParsed },
+      protocol_status: market.protocol_status,
+      bettor_count: bettorCount,
+      sigs_collected: sigsCollected,
+    });
+  });
+
+  // GET /api/agent/roles?relay_id=X — returns {is_oracle, is_broker, is_maker} for UI role-conditional tabs (A.3)
+  // is_oracle: relay_nodes.is_oracle column
+  // is_broker / is_maker: existence as broker_relay_id / maker_relay_id in pool_markets (= per-market role)
+  fastify.get('/api/agent/roles', async (request, reply) => {
+    const relayId = request.query.relay_id;
+    if (!relayId) return reply.code(400).send({ ok: false, error: 'relay_id query required' });
+    const relay = sqlite.prepare('SELECT id, address, is_oracle FROM relay_nodes WHERE id = ?').get(relayId);
+    if (!relay) return reply.code(404).send({ ok: false, error: 'relay not found' });
+    const isMaker = sqlite.prepare('SELECT 1 FROM pool_markets WHERE maker_relay_id = ? LIMIT 1').get(relayId) ? 1 : 0;
+    const isBroker = sqlite.prepare('SELECT 1 FROM pool_markets WHERE broker_relay_id = ? LIMIT 1').get(relayId) ? 1 : 0;
+    return reply.send({
+      ok: true,
+      relay_id: relayId,
+      address: relay.address,
+      is_oracle: !!relay.is_oracle,
+      is_broker: !!isBroker,
+      is_maker: !!isMaker,
+    });
+  });
+
   fastify.get('/api/pool/market/:id/sides_merkle', async (request, reply) => {
     const marketId = request.params.id;
     const market = sqlite.prepare('SELECT id, sides_merkle_root FROM pool_markets WHERE id = ?').get(marketId);
