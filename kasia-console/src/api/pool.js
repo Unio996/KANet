@@ -16,9 +16,9 @@ const STORAGE_MASS_SAFE_THRESHOLD_L4 = 400_000;  // KIP-9 cap with 20% buffer
 const MIN_BROKER_FEE_SOMPI_L4 = 5_000_000;       // 0.05 KAS broker fee floor
 const BETTOR_MIN_STAKE_L4 = 50_000_000;          // 0.5 KAS bettor min (Bug 8)
 const MAX_BETTORS_L4 = 50;                       // PoolSpine.sil L13 cap
-// Bettor r441 D7 disclaimer + r444 钦定 (b) — softcap per-market pot. Testnet 4 KAS;
-// mainnet TBD by Owner. Env override for ops adjustment without code change.
-const MAKER_STAKE_MAX_KAS = parseFloat(process.env.POOL_MAKER_STAKE_MAX_KAS) || 4;
+// Owner 5/24 钦定: KANet permissionless thesis — 任何有 KAS 余额的 agent 都能当 maker.
+// 4 KAS softcap (= Bettor r441/r444 propose) 撤回 — SS contract 本身没 max stake check,
+// 之前 backend if cap 是 over-cautious, 跟 permissionless thesis 矛盾. KAS 余额自决.
 
 function deriveXOnlyPubkey(address) {
   return import('kaspa-wasm').then(kaspa => {
@@ -112,8 +112,7 @@ export async function registerPoolRoutes(fastify) {
     // Bug 8: minimum maker stake — small stakes produce tiny settle-TX outputs that blow the
     // Kaspa KIP-9 storage mass cap. v0.5 requires a minimum viable pot.
     if (makerStakeKas < 1) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be >= 1 KAS (v0.5 minimum — smaller stakes produce a settle TX exceeding Kaspa storage mass cap)' });
-    // Bettor r444 钦定 — per-market softcap enforce backend-side (= UI shows expose, backend rejects)
-    if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS (v0.5 testnet per-market softcap, Bettor r444 + Owner钦定 SS-baked)` });
+    // Owner 5/24 钦定: 无 max cap. KAS 余额自决, permissionless thesis 落地.
     const makerStakeAmount = Math.round(makerStakeKas * 1e8);
     const oracleBondAmount = Math.round(oracleBondKas * 1e8);
     const makerStakeStr = (makerStakeAmount / 1e8).toFixed(8);
@@ -227,7 +226,6 @@ export async function registerPoolRoutes(fastify) {
       ok: true,
       default_miner_fee_sompi: 50_000,
       maker_stake_min_kas: 1,
-      maker_stake_max_kas: MAKER_STAKE_MAX_KAS,
       bettor_stake_min_kas: 0.5,
       bettors_max: 50,
       deadline_max_days: parseInt(process.env.POOL_DEADLINE_MAX_DAY, 10) || 30,
@@ -414,6 +412,103 @@ export async function registerPoolRoutes(fastify) {
       merkle_index: merkleIndex,
       sides_merkle_root: tree.root,
     });
+  });
+
+  // GET /api/agents?role=maker — list agents with KAS balance >= min stake (Owner 5/24 钦定 permissionless)
+  // KANet thesis: 任何有 KAS 余额的 agent 都能当 maker. UI dropdown 用此 filter, 不列空账户.
+  fastify.get('/api/agents', async (request, reply) => {
+    const role = (request.query.role || '').toLowerCase();
+    if (role && role !== 'maker') return reply.code(400).send({ ok: false, error: 'role: only "maker" supported currently' });
+    const rows = sqlite.prepare(`
+      SELECT r.id, r.name, r.address, COALESCE(b.balance_kas, 0) AS balance_kas
+      FROM relay_nodes r
+      LEFT JOIN address_balances b ON b.address = r.address
+      WHERE COALESCE(b.balance_kas, 0) >= 1
+      ORDER BY b.balance_kas DESC
+    `).all();
+    return reply.send({ ok: true, role: role || 'any', count: rows.length, agents: rows });
+  });
+
+  // POST /api/predictions/external/search-semantic — multi-lingual semantic search via maker adapter
+  // Owner 5/24 钦定: 用 maker 自己的 adapter LLM 翻译 query → 任何语言 → 英文 → Polymarket 搜索.
+  // Body: { q: <user input any language>, maker_relay_id: <to fetch maker's adapter> }
+  fastify.post('/api/predictions/external/search-semantic', async (request, reply) => {
+    const b = request.body || {};
+    const q = (b.q || '').trim();
+    const makerRelayId = b.maker_relay_id;
+    if (!q) return reply.code(400).send({ ok: false, error: 'q required' });
+    if (!makerRelayId) return reply.code(400).send({ ok: false, error: 'maker_relay_id required (= use maker own adapter)' });
+    const makerRow = sqlite.prepare(`
+      SELECT r.id, r.name, r.adapter_node_id, a.http_port
+      FROM relay_nodes r
+      LEFT JOIN adapter_nodes a ON a.id = r.adapter_node_id
+      WHERE r.id = ?
+    `).get(makerRelayId);
+    if (!makerRow) return reply.code(404).send({ ok: false, error: 'maker relay not found' });
+    if (!makerRow.http_port) return reply.code(400).send({ ok: false, error: 'maker relay has no adapter — use GET /api/predictions/polymarket/search with English query directly' });
+    // LLM translate via maker adapter
+    const traceId = `semantic-search:${makerRelayId.slice(0,8)}:${Date.now()}`;
+    let englishQuery = q;
+    let translationMethod = 'passthrough';
+    try {
+      const adapterUrl = `http://127.0.0.1:${makerRow.http_port}/reply`;
+      const adapterRes = await fetch(adapterUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          peer: 'predictions-semantic-search',
+          mindSystem: 'You translate user search queries to English keywords for prediction-market search. Output ONLY the English keywords (1-3 words, no explanation, no punctuation). Examples: 比特币→Bitcoin / 美国大选→US election / トランプ→Trump.',
+          mindUser: q,
+          trace_id: traceId,
+          txId: traceId,
+        }),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (adapterRes.ok) {
+        const adapterData = await adapterRes.json();
+        const translated = (adapterData.reply || '').trim();
+        if (translated && translated.length < 100 && translated !== q) {
+          englishQuery = translated;
+          translationMethod = `maker-adapter (${makerRow.name})`;
+        }
+      }
+    } catch (e) {
+      console.warn(`[semantic-search] adapter translate fail: ${e.message}, using raw query`);
+    }
+    // Polymarket search with translated query
+    try {
+      const r = await fetch('https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=200&order=volume24hr&ascending=false', {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!r.ok) return reply.code(502).send({ ok: false, error: `polymarket gamma ${r.status}` });
+      const markets = await r.json();
+      const lowerQ = englishQuery.toLowerCase();
+      const results = (markets || [])
+        .filter(m => (m.question || '').toLowerCase().includes(lowerQ))
+        .slice(0, 5)
+        .map(m => {
+          let outcomePrices = null;
+          try { outcomePrices = JSON.parse(m.outcomePrices || '[]'); } catch {}
+          return {
+            condition_id: m.conditionId || m.condition_id,
+            question: m.question,
+            description: m.description,
+            end_date: m.endDate || m.end_date_iso,
+            volume_24h: parseFloat(m.volume24hr || 0),
+            yes_price: outcomePrices?.[0] ? parseFloat(outcomePrices[0]) : null,
+            slug: m.slug,
+          };
+        });
+      return reply.send({
+        ok: true,
+        original_query: q,
+        translated_query: englishQuery,
+        translation_method: translationMethod,
+        results,
+      });
+    } catch (e) {
+      return reply.code(502).send({ ok: false, error: `polymarket fetch fail: ${e.message}` });
+    }
   });
 
   // GET /api/predictions/polymarket/search?q=K — Polymarket keyword search (Owner r455 钦定)
