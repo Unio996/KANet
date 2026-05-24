@@ -13,7 +13,7 @@
           testing: false,
           testResult: null,
           get activeUrl() {
-            if (this.mode === 'local') return 'ws://127.0.0.1:17110';
+            if (this.mode === 'local') return 'ws://127.0.0.1:17210';  // TN12 kaspad
             if (this.mode === 'discovered') return this.discoveredUrl;
             if (this.mode === 'custom') return this.customUrl;
             return '';
@@ -74,7 +74,7 @@
               <div class="flex items-center space-x-2">
                 <svg class="h-5 w-5 text-green-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
                 <span class="text-sm font-medium text-green-800"><%= it.t.local_node %></span>
-                <span class="text-xs text-green-600 font-mono">ws://127.0.0.1:17110</span>
+                <span class="text-xs text-green-600 font-mono">ws://127.0.0.1:17210</span>
               </div>
               <p class="text-xs text-green-700 mt-1"><%= it.t.local_node_desc %></p>
             </div>
