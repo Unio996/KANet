@@ -304,21 +304,26 @@ async function _doQuote(peer, draft, relayNodeId, prevReply) {
   const escrowId = randomUUID();
 
   // r250.2 path A — matchmaker mode lookup (NWT N19.273 spec, Owner 5/23 broker 零库存 钦定).
-  // Read BROKER_MATCHMAKER_MODE config: 'disabled' (default) / 'enabled' / 'shadow'.
+  // r251.3 (NWT N19.276 5/24): default flip 'disabled' → 'enabled', no-offer graceful reply
+  //   (= 不 fall back custodial own pool, broker 真零库存). Owner private DM 钦定 broker/marketmaker
+  //   永久分开. v146 SQL strip held pending Owner on-chain ack (= J2 #740 split ship plan).
+  // Read BROKER_MATCHMAKER_MODE config: 'enabled' (default r251.3) / 'disabled' / 'shadow'.
   // BUY only (= isBuy true); SELL path stays custodial for now (= mm 不 buy KAS phase 1).
   // If 'enabled' AND findOpenSellOffer returns offer: INSERT with broker_role='matchmaker',
   //   user transfers to marketmaker addr + separate 1% fee to broker addr.
+  // If 'enabled' AND no offer: r251.3 graceful reply '暂无流动性' (= 不 fall back custodial).
   // If 'shadow': INSERT custodial as before, but log + audit the would-be match decision.
+  // If 'disabled' (= explicit Owner config flip): fall back custodial (= broker delivers own pool).
   let brokerRole = 'custodial';
   let makerAddr = null;
   let brokerFeeAddr = null;
   let brokerFeeAmt = null;
   let matchmakerOffer = null;
+  let matchmakerMode = 'enabled';  // r251.3 default
   if (isBuy) {
-    let matchmakerMode = 'disabled';
     try {
       const { getConfig } = await import('../../data/settings/configs.js');
-      matchmakerMode = (await getConfig('BROKER_MATCHMAKER_MODE')) || 'disabled';
+      matchmakerMode = (await getConfig('BROKER_MATCHMAKER_MODE')) || 'enabled';
     } catch {}
     if (matchmakerMode !== 'disabled') {
       const { findOpenSellOffer } = await import('../cross-match-engine.js');
@@ -357,6 +362,23 @@ async function _doQuote(peer, draft, relayNodeId, prevReply) {
         }
       }
     }
+  }
+
+  // r251.3 graceful no-offer reply — when matchmaker mode 'enabled' AND no matchmaker offer found,
+  // do NOT fall back to broker custodial path (= broker 真零库存 Owner thesis). Reply '暂无流动性'.
+  // Owner can flip BROKER_MATCHMAKER_MODE='disabled' via config_entries to restore custodial fallback.
+  if (isBuy && matchmakerMode === 'enabled' && brokerRole !== 'matchmaker') {
+    stateMachine.clearFlowState(peer);
+    return [
+      `⚠ 暂无 ${chainKey.toUpperCase()} 链做市商挂单匹配你这单 (${qty} KAS).`,
+      '',
+      '可试:',
+      '  - 换链 (回菜单选 BNB / ETH / Polygon / Arbitrum / Optimism / Base)',
+      '  - 减小 qty',
+      '  - 晚点重试 (做市商挂单 5min cycle)',
+      '',
+      'broker 零库存撮合 — 不持 KAS pool 直接 deliver. 流动性由独立做市商提供.',
+    ].join('\n');
   }
 
   const expiresAt = sqlite.prepare("SELECT datetime('now', '+5 minutes') as t").get().t;
