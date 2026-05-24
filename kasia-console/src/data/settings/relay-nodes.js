@@ -8,7 +8,7 @@ export function listRelayNodes() {
   return sqlite.prepare(`
     SELECT r.id, r.name, r.address, r.network, r.poll_ms, r.mnemonic_hint,
            r.adapter_node_id, a.name AS adapter_name, a.http_port AS adapter_port,
-           r.focus, r.role, r.is_dex_broker, r.is_service, r.created_at
+           r.focus, r.role, r.is_dex_broker, r.is_service, r.is_oracle, r.created_at
     FROM relay_nodes r
     LEFT JOIN adapter_nodes a ON a.id = r.adapter_node_id
     ORDER BY r.created_at ASC

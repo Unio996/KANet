@@ -50,7 +50,14 @@
   <div class="card card-compact mb-5 flex items-center gap-4 flex-wrap">
     <select x-model="selectedRelayId" @change="onAgentChange()"
             class="rounded-lg border border-warm-300 px-3 py-1.5 text-sm bg-white font-medium">
-      <% it.relayNodes.forEach(r => { %>
+      <%
+        // #1 maker filter: oracle 不当 maker (= Q11 area-1 spec). 严格 maker eligibility 待 Bettor 定 (= prediction_maker_whitelist 等 mechanism).
+        const eligibleMakers = it.relayNodes.filter(r => !r.is_oracle);
+      %>
+      <% if (eligibleMakers.length === 0) { %>
+      <option value="">⚠ 无符合 maker 资格 agent (= 全 is_oracle=1)</option>
+      <% } %>
+      <% eligibleMakers.forEach(r => { %>
       <option value="<%= r.id %>"><%= r.name %></option>
       <% }) %>
     </select>
@@ -111,13 +118,13 @@
   <template x-if="!shipped">
     <div class="card card-flush overflow-hidden mb-5">
       <div class="px-6 py-4 border-b border-warm-200">
-        <label class="block text-xs font-medium text-ink-500 mb-2">从 Polymarket 找议题（关键字搜索 · 不强求）</label>
+        <label class="block text-xs font-medium text-ink-500 mb-2">找现成议题（关键字搜索 · 不强求）</label>
         <input type="text" x-model="searchQuery" @input.debounce.500ms="searchPolymarket()"
                placeholder="例: BTC / Trump / 美联储 / Fed / election"
                class="w-full text-sm px-4 py-2.5 rounded-lg border border-warm-300 focus:border-amber-400 focus:outline-none">
       </div>
       <template x-if="searching">
-        <div class="px-6 py-4 text-sm text-ink-400">搜索 Polymarket 中...</div>
+        <div class="px-6 py-4 text-sm text-ink-400">搜索中...</div>
       </template>
       <template x-if="!searching && searchResults && searchResults.length > 0">
         <div class="px-6 py-4 space-y-2.5">
@@ -143,13 +150,13 @@
       </template>
       <template x-if="!searching && searchQuery && searchQuery.length >= 2 && searchResults && searchResults.length === 0">
         <div class="px-6 py-4 text-sm text-ink-400">
-          没找到匹配的 Polymarket 议题.
+          没找到匹配议题.
           <button @click="useManualMode()" class="text-amber-700 underline ml-2">自己出题 →</button>
         </div>
       </template>
       <template x-if="form.polymarketCondition">
         <div class="px-6 py-3 bg-amber-50 border-t border-warm-200 text-xs text-amber-700 flex items-center justify-between">
-          <span>已选用 Polymarket 议题 (= 4 input 自动填好, 可调押金 + 勾 disclaimer + 发起)</span>
+          <span>已选用现成议题 (= 4 input 自动填好, 可调押金 + 勾 disclaimer + 发起)</span>
           <button @click="clearPolymarketChoice()" class="underline text-amber-700">换一个 →</button>
         </div>
       </template>
@@ -249,7 +256,7 @@
           <!-- D7 disclaimer + checkbox -->
           <div class="bg-warm-50 rounded-lg p-3 border border-warm-200 space-y-2">
             <div class="text-xs text-ink-600 leading-relaxed space-y-1.5">
-              <div class="font-medium text-amber-700">⚠ Kaspa 测试网阶段 (等 Toccata 主网激活, 预计 2026/6/5-6/20)</div>
+              <div class="font-medium text-amber-700">⚠ 协议机制提示</div>
               <ul class="space-y-1 pl-3 text-[11px]">
                 <li>• 单市场 <span x-text="poolConfig?.maker_stake_max_kas ?? 4"></span> KAS 封顶 — SS 合约 baked, 数学锁定不可调</li>
                 <li>• Oracle 2-of-3 多签 + P2SH 链上结算 — 零第三方托管, 钱归你私钥, KANet 团队也拿不到</li>
