@@ -35,7 +35,8 @@ function maxSafeOutputs(balanceSompi) {
 export async function splitUtxosRelay(targetCount = 3) {
   const wallet = getWallet();
   const address = wallet.getAddress();
-  const networkId = wallet.getNetworkId();
+  // KANet-UI r55 Layer 4: testnet-12 → testnet-10 for Generator (vendored wasm string match).
+  const networkId = wallet.getGeneratorNetworkId();
 
   const rpc = await waitForRpc();
   try {

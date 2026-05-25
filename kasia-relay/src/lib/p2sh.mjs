@@ -135,7 +135,7 @@ export async function lockToP2SH(wallet, p2shAddress, amountKas) {
       outputs: [new PaymentOutput(new Address(p2shAddress), kaspaToSompi(amountKas))],
       priorityFee: 0n,
       changeAddress: new Address(senderAddress),
-      networkId: wallet.getNetworkId(),
+      networkId: wallet.getGeneratorNetworkId(),
     });
 
     let txId = '';

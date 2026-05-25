@@ -186,7 +186,7 @@ async function _sendKaspaInner(to, amountSompi, priorityFee = 0n, payload, _isRe
       outputs: [new PaymentOutput(new Address(to), outputAmount)],
       priorityFee,
       changeAddress: new Address(senderAddress),
-      networkId: wallet.getNetworkId(),
+      networkId: wallet.getGeneratorNetworkId(),
       ...(payload ? { payload: hexToBytes(payload) } : {}),
     });
 

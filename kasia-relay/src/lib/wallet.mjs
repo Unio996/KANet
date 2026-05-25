@@ -70,6 +70,17 @@ export class KaspaWallet {
   getPrivateKey() { return this.privateKey; }
   getNetworkType() { return getNetworkType(this.network); }
   getNetworkId() { return this.network; }
+  /**
+   * Generator-compatible networkId (KANet-UI r55 5/24 Layer 4 root cause).
+   * vendored kaspa-wasm only knows 'testnet-10' / 'testnet-11' for Generator.networkId.
+   * 'testnet-12' raw passes RpcClient OK but Generator constructor throws RuntimeError "unreachable".
+   * Map testnet-12 → testnet-10 for Generator only (= same NetworkType.Testnet, wasm-accepted string).
+   * RPC connect uses raw getNetworkId() — RpcClient handles testnet-12 fine.
+   */
+  getGeneratorNetworkId() {
+    if (this.network === 'testnet-12') return 'testnet-10';
+    return this.network;
+  }
 }
 
 let walletInstance = null;
