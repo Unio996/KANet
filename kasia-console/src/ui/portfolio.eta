@@ -1,15 +1,61 @@
 <%~ include('partials/page-open', { _page: 'portfolio', pageTitle: 'Portfolio', ...it }) %>
 
+<!-- KANet-UI sub A6 portfolio Editorial 风格 propagate (= Bettor r63 钦定)
+     baseline: predictions-pool-create.eta Editorial Financial Instrument
+     - Fraunces serif display
+     - 古铜金 #b08a44 accent
+     - tabular nums for all amounts
+     - editorial card layout (cream + accent border, no gradient)
+-->
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&display=swap" rel="stylesheet">
+
+<style>
+  .pf-display { font-family: 'Fraunces', Georgia, serif; font-feature-settings: 'opsz' 36; }
+  .pf-accent-gold { color: #b08a44; }
+  .pf-accent-gold-bg { background: #b08a44; }
+  .pf-accent-gold-bg:hover { background: #97742d; }
+  .pf-accent-gold-border { border-color: #b08a44; }
+  .pf-accent-gold-border-t { border-top: 2px solid #b08a44; }
+  .pf-card-editorial {
+    background: white;
+    border: 1px solid #e4e2dc;
+    border-radius: 10px;
+    transition: border-color 0.15s;
+  }
+  .pf-card-editorial:hover { border-color: #d6d4cc; }
+  .pf-stat-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #6b6d7b;
+    font-weight: 500;
+  }
+  .pf-hero {
+    background: linear-gradient(135deg, #fef9eb 0%, #fefdf5 100%);
+    border: 1px solid #e4d4a6;
+    border-radius: 12px;
+    position: relative;
+  }
+  .pf-hero::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, #b08a44 0%, #d6b070 100%);
+    border-radius: 12px 12px 0 0;
+  }
+</style>
+
 <div class="h-full flex flex-col" x-data="portfolioApp()">
 
   <!-- ═══ HEADER (relative wrapper so wallet panel can slide down from here) ═══ -->
   <div class="relative flex-shrink-0">
     <div class="bg-white border-b border-warm-200 px-5 py-3 flex items-center justify-between">
       <div class="flex items-center gap-3">
-        <div class="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-xs">💼</div>
+        <div class="w-9 h-9 rounded-full flex items-center justify-center pf-accent-gold pf-accent-gold-border border-2 pf-display text-base font-semibold">P</div>
         <div>
-          <div class="text-sm font-semibold text-ink-700">Portfolio 总览</div>
-          <div class="text-[10px] text-ink-400">本机所有 Agent 的资产聚合视图（私钥永不共享，只看自己的）</div>
+          <div class="text-base pf-display text-ink-800">Portfolio</div>
+          <div class="text-[10px] text-ink-400 mt-0.5">本机 Agent 资产聚合 · 私钥永不外泄</div>
         </div>
       </div>
       <div class="flex items-center gap-3 text-xs">
@@ -155,54 +201,53 @@
   <div x-show="data && !error" class="flex-1 overflow-y-auto bg-warm-50/30">
     <div class="max-w-6xl mx-auto p-5 space-y-5">
 
-      <!-- ─── 总览大卡片 (5 cards: Total / KAS / Stable / Other / Open positions) ─── -->
-      <div class="grid grid-cols-5 gap-3">
-        <div class="rounded-xl p-4 shadow-sm text-white"
-             :class="unit === 'kas' ? 'bg-gradient-to-br from-green-500 to-emerald-600' : 'bg-gradient-to-br from-indigo-500 to-purple-600'">
-          <div class="text-[10px] uppercase tracking-wider opacity-80">
-            总资产 <span x-text="unit === 'kas' ? '(KAS)' : '(USD)'"></span>
-          </div>
-          <div class="text-2xl font-bold tabular-nums mt-1" x-text="grandTotal()"></div>
-          <div class="text-[10px] opacity-70 mt-1" x-text="unit === 'kas' ? '≈ $' + (data?.totals?.grandTotalUsd || 0).toFixed(2) + ' USD + ' + (data?.totals?.kas || 0).toFixed(2) + ' 原生 KAS' : '稳定币 + 其他资产 + DeFi + 永续 + KAS 等值'"></div>
-        </div>
-        <div class="bg-white border border-warm-200 rounded-xl p-4">
-          <div class="text-[10px] text-ink-400 uppercase tracking-wider">KAS 原生</div>
-          <div class="text-xl font-bold text-ink-700 tabular-nums mt-1" x-text="(data?.totals?.kas || 0).toFixed(2) + ' KAS'"></div>
+      <!-- ─── Hero card (= Editorial 总资产 + sub 4 stat) ─── -->
+      <div class="pf-hero p-6">
+        <div class="pf-stat-label mb-2">总资产 · <span x-text="unit === 'kas' ? 'KAS 计价' : 'USD 计价'"></span></div>
+        <div class="pf-display text-5xl text-ink-800 tabular-nums" x-text="grandTotal()"></div>
+        <div class="text-xs text-ink-500 mt-2" x-text="unit === 'kas' ? '≈ $' + (data?.totals?.grandTotalUsd || 0).toFixed(2) + ' USD + ' + (data?.totals?.kas || 0).toFixed(2) + ' 原生 KAS' : '稳定币 + 其他资产 + DeFi + 永续 + KAS 等值'"></div>
+      </div>
+
+      <!-- ─── 4 sub-stat row (= KAS / Stable / Other / Open) ─── -->
+      <div class="grid grid-cols-4 gap-3">
+        <div class="pf-card-editorial p-4">
+          <div class="pf-stat-label">KAS 原生</div>
+          <div class="pf-display text-2xl text-ink-800 tabular-nums mt-1" x-text="(data?.totals?.kas || 0).toFixed(2)"></div>
           <div class="text-[10px] text-ink-400 mt-1" x-text="kasPriceUsd ? '≈ $' + ((data?.totals?.kas || 0) * kasPriceUsd).toFixed(2) : 'Kaspa 钱包'"></div>
         </div>
-        <div class="bg-white border border-warm-200 rounded-xl p-4">
-          <div class="text-[10px] text-ink-400 uppercase tracking-wider">稳定币</div>
-          <div class="text-xl font-bold text-ink-700 tabular-nums mt-1" x-text="fmt(data?.totals?.stableUsd || 0)"></div>
+        <div class="pf-card-editorial p-4">
+          <div class="pf-stat-label">稳定币</div>
+          <div class="pf-display text-2xl text-ink-800 tabular-nums mt-1" x-text="fmt(data?.totals?.stableUsd || 0)"></div>
           <div class="text-[10px] text-ink-400 mt-1">USDT + USDC 多链</div>
         </div>
-        <div class="bg-white border border-warm-200 rounded-xl p-4">
-          <div class="text-[10px] text-ink-400 uppercase tracking-wider">其他资产</div>
-          <div class="text-xl font-bold text-ink-700 tabular-nums mt-1" x-text="fmt(data?.totals?.nativeUsd || 0)"></div>
-          <div class="text-[10px] text-ink-400 mt-1">原生代币 (BNB / ETH / MATIC / AVAX / SOL / TRX)</div>
+        <div class="pf-card-editorial p-4">
+          <div class="pf-stat-label">其他资产</div>
+          <div class="pf-display text-2xl text-ink-800 tabular-nums mt-1" x-text="fmt(data?.totals?.nativeUsd || 0)"></div>
+          <div class="text-[10px] text-ink-400 mt-1">BNB / ETH / MATIC / AVAX / SOL / TRX</div>
         </div>
-        <div class="bg-white border border-warm-200 rounded-xl p-4">
-          <div class="text-[10px] text-ink-400 uppercase tracking-wider">开仓数</div>
-          <div class="text-xl font-bold text-ink-700 tabular-nums mt-1" x-text="(data?.totals?.openPositionCount || 0)"></div>
+        <div class="pf-card-editorial p-4">
+          <div class="pf-stat-label">开仓数</div>
+          <div class="pf-display text-2xl text-ink-800 tabular-nums mt-1" x-text="(data?.totals?.openPositionCount || 0)"></div>
           <div class="text-[10px] text-ink-400 mt-1">HL + Aevo + Polymarket + Aave</div>
         </div>
       </div>
 
-      <!-- ─── Per-Agent 详情 ─── -->
+      <!-- ─── Per-Agent 详情 (= Editorial card with gold rule on top) ─── -->
       <template x-for="agent in (data?.agents || [])" :key="agent.id">
-        <div class="bg-white border border-warm-200 rounded-xl overflow-hidden">
+        <div class="pf-card-editorial overflow-hidden pf-accent-gold-border-t">
 
           <!-- Agent header -->
-          <div class="bg-gradient-to-r from-warm-50 to-warm-100 px-4 py-3 border-b border-warm-200 flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <div class="w-6 h-6 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center text-[10px] font-bold" x-text="agent.name?.slice(0,2)?.toUpperCase() || '?'"></div>
+          <div class="bg-warm-50/40 px-5 py-3 border-b border-warm-100 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-7 h-7 rounded-full pf-accent-gold pf-accent-gold-border border-2 flex items-center justify-center pf-display text-xs font-semibold" x-text="agent.name?.slice(0,2)?.toUpperCase() || '?'"></div>
               <div>
-                <div class="text-sm font-semibold text-ink-700" x-text="agent.name"></div>
+                <div class="text-sm pf-display text-ink-800" x-text="agent.name"></div>
                 <div class="text-[10px] font-mono text-ink-400" x-text="agent.address?.slice(0,14) + '...' + agent.address?.slice(-6)"></div>
               </div>
             </div>
-            <div class="text-right text-[11px]">
-              <div class="text-ink-400">本 Agent 资产</div>
-              <div class="font-semibold tabular-nums text-ink-700" x-text="fmtAgentTotal(agent)"></div>
+            <div class="text-right">
+              <div class="pf-stat-label">本 Agent 资产</div>
+              <div class="pf-display text-lg text-ink-800 tabular-nums" x-text="fmtAgentTotal(agent)"></div>
               <div class="text-[9px] text-ink-400" x-show="(agent.kaspa?.balance || 0) > 0" x-text="(agent.kaspa?.balance || 0).toFixed(2) + ' KAS' + (kasPriceUsd ? ' (≈$' + ((agent.kaspa?.balance || 0) * kasPriceUsd).toFixed(2) + ')' : '')"></div>
             </div>
           </div>
@@ -424,19 +469,19 @@
         </div>
       </template>
 
-      <!-- ─── Oracle Earnings (Oracle v0.3 sub #7 §10 D5 透明审计) ─── -->
-      <div class="bg-white border border-warm-200 rounded-lg p-4 mb-3">
-        <div class="flex items-center justify-between mb-3">
-          <h3 class="text-sm font-semibold text-ink-700">🎯 Oracle Earnings</h3>
-          <a href="/predictions/oracle-registry" class="text-[11px] text-amber-700 underline">在线 oracle 名单 →</a>
+      <!-- ─── Oracle Earnings (Oracle v0.3 sub #7 §10 D5 透明审计, Editorial 风格) ─── -->
+      <div class="pf-card-editorial pf-accent-gold-border-t p-5 mb-3">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="pf-display text-base text-ink-800">Oracle Earnings</h3>
+          <a href="/predictions/oracle-registry" class="text-[11px] pf-accent-gold hover:underline">在线 oracle 名单 →</a>
         </div>
         <template x-if="oracleEarnings && oracleEarnings.length > 0">
           <div>
             <!-- 总额 -->
             <div class="flex items-baseline gap-2 mb-3">
-              <span class="text-2xl font-display text-green-700"
+              <span class="pf-display text-3xl pf-accent-gold tabular-nums"
                     x-text="oracleEarnings.reduce((s,e) => s + (e.reward_amount || 0), 0).toFixed(2)"></span>
-              <span class="text-xs text-ink-400">KAS 累计 (= 所有 oracle role 跨 market 合计)</span>
+              <span class="text-xs text-ink-500">KAS 累计 · 所有 oracle role 跨 market</span>
             </div>
             <!-- per-market 细分 -->
             <div class="space-y-1.5 max-h-60 overflow-y-auto">
