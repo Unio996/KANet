@@ -1,0 +1,169 @@
+<%~ include('partials/layout-start', { title: 'Oracle Registry — Predictions', _page: 'predictions-oracle-registry' }) %>
+
+<!-- Oracle v0.3 sub #7 D1 — Markets › Predictions › Oracle Registry sub-page -->
+<!-- 显 active oracle (= 24h TTL filter) + Trust Score 1-100 + 绿/黄/红 + capability tag filter -->
+
+<div x-data="oracleRegistryPage()" x-init="init()" class="max-w-5xl mx-auto px-4 py-6 font-body text-ink-700">
+
+  <header class="mb-6">
+    <h1 class="text-2xl font-display text-ink-800">Oracle 注册名单</h1>
+    <p class="text-xs text-ink-500 mt-1">活跃 oracle (= 24h 内 announce / vote / settle 活动) — 按 Trust Score 排序</p>
+  </header>
+
+  <!-- Filter bar -->
+  <div class="flex flex-wrap items-center gap-3 mb-4 p-3 bg-warm-50 rounded-lg">
+    <label class="text-xs text-ink-500">档位:</label>
+    <select x-model="filter.tier" class="text-xs px-2 py-1 rounded border border-warm-300">
+      <option value="">全部</option>
+      <option value="1">Tier 1 KANet 精选</option>
+      <option value="2">Tier 2 stake-bonded</option>
+      <option value="3">Tier 3 system rule</option>
+    </select>
+    <label class="text-xs text-ink-500">能力 tag:</label>
+    <input type="text" x-model="filter.capabilityTag" @input.debounce.300ms="loadOracles()"
+           placeholder="e.g. weather / sports / finance"
+           class="text-xs px-2 py-1 rounded border border-warm-300 w-48">
+    <span class="text-xs text-ink-400 ml-auto">
+      <span x-text="oracles.length"></span> active oracle
+    </span>
+  </div>
+
+  <!-- Oracle list -->
+  <template x-if="loading">
+    <div class="text-center py-12 text-ink-400 text-sm">loading...</div>
+  </template>
+
+  <template x-if="!loading && filteredOracles.length === 0">
+    <div class="text-center py-12 text-ink-400 text-sm">
+      <div>暂无活跃 oracle 匹配筛选条件</div>
+      <div class="mt-2 text-xs">Phase 0 testnet 启动期, oracle pool 等社区涌现</div>
+    </div>
+  </template>
+
+  <div class="space-y-2">
+    <template x-for="o in filteredOracles" :key="o.relay_node_id">
+      <div class="bg-warm-50 rounded-lg p-3 flex items-center gap-3 hover:bg-warm-100 transition">
+        <!-- Trust Score dot (= 绿/黄/红) -->
+        <div class="flex-shrink-0">
+          <div class="w-3 h-3 rounded-full"
+               :class="trustColor(o.trust_score)"
+               :title="'Trust Score: ' + o.trust_score + ' (= ' + auditModeLabel(o.audit_mode) + ')'"></div>
+        </div>
+        <!-- Identity -->
+        <div class="flex-1 min-w-0">
+          <div class="text-sm font-medium text-ink-700" x-text="o.name || o.relay_node_id.slice(0, 8)"></div>
+          <div class="text-[11px] text-ink-400 font-mono truncate" x-text="o.pubkey.slice(0, 30) + '...'"></div>
+        </div>
+        <!-- Trust Score number + audit_mode hover -->
+        <div class="text-right">
+          <div class="text-lg font-display"
+               :class="trustTextColor(o.trust_score)"
+               x-text="o.trust_score"></div>
+          <div class="text-[10px] text-ink-400"
+               x-text="o.total_votes + ' votes / ' + (o.accuracy_pct || 0) + '% accuracy'"></div>
+        </div>
+        <!-- audit_mode badge (= Tier 1/2/3) -->
+        <div class="flex-shrink-0">
+          <span class="text-[10px] px-2 py-0.5 rounded"
+                :class="tierBadgeClass(o.tier)"
+                x-text="'Tier ' + o.tier"></span>
+        </div>
+        <!-- Capabilities -->
+        <div class="hidden md:block flex-shrink-0 max-w-[200px]">
+          <div class="flex flex-wrap gap-1 justify-end">
+            <template x-for="tag in (o.capabilities || []).slice(0, 3)">
+              <span class="text-[10px] px-1.5 py-0.5 bg-warm-200 rounded text-ink-600" x-text="tag"></span>
+            </template>
+          </div>
+        </div>
+      </div>
+    </template>
+  </div>
+
+  <!-- Phase 0 transition gate status (= 跟 sub #8 联动) -->
+  <div class="mt-8 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+    <div class="font-medium mb-1">📍 Phase 0 testnet only</div>
+    <div>Phase 1 mainnet 启用条件 (4 件):</div>
+    <ul class="mt-1 pl-4 space-y-0.5 text-[11px]">
+      <li>≥3 cycle testnet on-chain e2e PASS</li>
+      <li>Owner explicit publish ack</li>
+      <li>KANet Foundation reference 实施 publish (MIT)</li>
+      <li>≥1 第三方 deploy announce</li>
+    </ul>
+  </div>
+
+</div>
+
+<script>
+function oracleRegistryPage() {
+  return {
+    loading: true,
+    oracles: [],
+    filter: { tier: '', capabilityTag: '' },
+
+    async init() {
+      await this.loadOracles();
+    },
+
+    async loadOracles() {
+      this.loading = true;
+      try {
+        const params = new URLSearchParams();
+        if (this.filter.tier) params.set('tier', this.filter.tier);
+        if (this.filter.capabilityTag) params.set('capability_tag', this.filter.capabilityTag);
+        const r = await fetch('/api/oracle/registry?' + params.toString());
+        const j = await r.json();
+        this.oracles = (j.oracles || []).map(o => ({
+          ...o,
+          // backend 返 trust_score 计算 (= tier base + reputation modifier); UI fallback fallback
+          trust_score: o.trust_score ?? this.computeTrustFallback(o),
+          accuracy_pct: o.total_votes ? Math.round((o.correct_votes / o.total_votes) * 100) : 0,
+        }));
+      } catch (e) {
+        console.warn('oracle registry load fail', e);
+        this.oracles = [];
+      }
+      this.loading = false;
+    },
+
+    get filteredOracles() {
+      // backend 已 filter, UI 加 tier client-side filter for live switch
+      return this.oracles.filter(o => !this.filter.tier || String(o.tier) === this.filter.tier);
+    },
+
+    // tier base score + 历史 modifier (= fallback if backend 0 trust_score)
+    computeTrustFallback(o) {
+      const tierBase = { 1: 90, 2: 65, 3: 40 }[o.tier] || 40;
+      const accuracyModifier = o.total_votes > 5 ?
+        Math.round(((o.correct_votes / o.total_votes) - 0.5) * 20) : 0;
+      return Math.max(1, Math.min(100, tierBase + accuracyModifier));
+    },
+
+    trustColor(score) {
+      if (score >= 80) return 'bg-green-500';
+      if (score >= 50) return 'bg-amber-500';
+      return 'bg-red-500';
+    },
+
+    trustTextColor(score) {
+      if (score >= 80) return 'text-green-700';
+      if (score >= 50) return 'text-amber-700';
+      return 'text-red-700';
+    },
+
+    auditModeLabel(mode) {
+      return ({ tier1: 'KANet 精选', tier2: 'stake-bonded', tier3: 'system rule', consensual: '共识 settle' })[mode] || mode;
+    },
+
+    tierBadgeClass(tier) {
+      return ({
+        1: 'bg-green-100 text-green-700',
+        2: 'bg-amber-100 text-amber-700',
+        3: 'bg-red-100 text-red-700'
+      })[tier] || 'bg-gray-100 text-gray-700';
+    },
+  };
+}
+</script>
+
+<%~ include('partials/layout-end') %>

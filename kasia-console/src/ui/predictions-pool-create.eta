@@ -253,6 +253,59 @@
             <p class="text-xs text-ink-400 mt-1">SS 合约 baked 数学锁定不可调</p>
           </div>
 
+          <!-- 成交费 (Oracle v0.3 §8 disclose mandatory + 1 input + 1:1:1 split) -->
+          <div>
+            <label class="block text-xs font-medium text-ink-500 mb-1.5 flex items-baseline justify-between">
+              <span>成交费 <span class="font-display text-base text-ink-700" x-text="form.total_fee_pct"></span>%</span>
+              <span class="text-xs text-ink-400">(默认 3% · 范围 1-10)</span>
+            </label>
+            <input type="range" x-model.number="form.total_fee_pct" min="1" max="10" step="1"
+                   class="w-full stake-slider">
+            <!-- §8 4 disclose mandatory -->
+            <div class="mt-1.5 text-[11px] text-ink-400 space-y-0.5">
+              <div>📋 <span class="text-ink-500">类型</span>: 预测市场 (pool)</div>
+              <div>💰 <span class="text-ink-500">分账</span>: maker <span x-text="(form.total_fee_pct / 3).toFixed(1)"></span>% / oracle <span x-text="(form.total_fee_pct / 3).toFixed(1)"></span>% / broker <span x-text="(form.total_fee_pct / 3).toFixed(1)"></span>%</div>
+              <div>⚖ <span class="text-ink-500">最大费</span>: 同 <span x-text="form.total_fee_pct"></span>% (= 无 dispute)</div>
+            </div>
+            <button type="button" @click="form.showAdvancedFee = !form.showAdvancedFee"
+                    class="text-[11px] text-amber-700 underline mt-1">
+              <span x-text="form.showAdvancedFee ? '收起 ↑' : '调整分配比例 →'"></span>
+            </button>
+            <!-- Advanced collapse: 3 fee channel 分别调 -->
+            <div x-show="form.showAdvancedFee" x-transition class="mt-2 space-y-2 bg-warm-50 p-2 rounded">
+              <div>
+                <label class="text-[11px] text-ink-500">maker fee <span x-text="form.maker_fee_pct"></span>%</label>
+                <input type="range" x-model.number="form.maker_fee_pct" min="0" max="5" step="0.5" class="w-full">
+              </div>
+              <div>
+                <label class="text-[11px] text-ink-500">oracle fee <span x-text="form.oracle_fee_pct"></span>% (= range 5-20% spec lock)</label>
+                <input type="range" x-model.number="form.oracle_fee_pct" min="0" max="20" step="1" class="w-full">
+              </div>
+              <div>
+                <label class="text-[11px] text-ink-500">broker fee <span x-text="form.broker_fee_pct"></span>%</label>
+                <input type="range" x-model.number="form.broker_fee_pct" min="0" max="5" step="0.5" class="w-full">
+              </div>
+            </div>
+          </div>
+
+          <!-- commit_reveal (= O2, Phase 2 defer, default off) -->
+          <div>
+            <label class="flex items-center gap-2 text-xs cursor-pointer">
+              <input type="checkbox" x-model="form.commit_reveal_enabled" class="accent-amber-600">
+              <span class="text-ink-600">commit-reveal 投票 (= 防 herd, Phase 2 启用, testnet 默认 off)</span>
+            </label>
+          </div>
+
+          <!-- broker/oracle 互斥 warning (= pool v0.5 L52 钦定 + J1 #10 fold sub #7) -->
+          <template x-if="brokerOracleMutexWarning">
+            <div class="bg-red-50 border border-red-300 rounded-lg p-3 text-xs text-red-700">
+              ⚠ <span class="font-medium">broker/oracle 互斥铁律警告</span>:
+              <span x-text="brokerOracleMutexWarning"></span>
+              <br>
+              <span class="text-[11px] text-red-600">(= 强烈不建议, backend POST /api/oracle/announce 也 hard 403 拦)</span>
+            </div>
+          </template>
+
           <!-- D7 disclaimer + checkbox -->
           <div class="bg-warm-50 rounded-lg p-3 border border-warm-200 space-y-2">
             <div class="text-xs text-ink-600 leading-relaxed space-y-1.5">
@@ -302,7 +355,15 @@ function createPoolPage() {
       maker_stake_kas: 1,
       resolution_rule_spec: '',
       polymarketCondition: null,  // iteration 2: set when 选用 Polymarket result
+      // Oracle v0.3 §8/O2/§9 fold sub #7 — 5/26 final lock
+      total_fee_pct: 3,             // 主 input default 3%
+      maker_fee_pct: 1,             // advanced split default 1:1:1
+      oracle_fee_pct: 10,           // 议题 B spec range 5-20%, default 10
+      broker_fee_pct: 1,            // advanced split default 1:1:1
+      commit_reveal_enabled: false, // O2 Phase 2 defer, testnet default off
+      showAdvancedFee: false,       // collapse default
     },
+    brokerOracleMutexWarning: '',  // pool v0.5 L52 互斥 friendly warning
     acceptedDisclaimer: false,
     llmChecking: false,
     llmResult: null,
@@ -368,6 +429,23 @@ function createPoolPage() {
         const j = await r.json();
         this.kasBalance = typeof j.kas === 'number' ? j.kas : null;
       } catch (e) { this.kasBalance = null; }
+      // broker/oracle 互斥 check (= pool v0.5 L52 + J1 #10 fold sub #7)
+      await this.checkBrokerOracleMutex();
+    },
+
+    async checkBrokerOracleMutex() {
+      this.brokerOracleMutexWarning = '';
+      if (!this.selectedRelayId) return;
+      try {
+        // 查 oracle_registry — 如 maker_relay 同时 oracle → warning
+        const r = await fetch('/api/oracle/registry');
+        const j = await r.json();
+        const oracleList = j.oracles || [];
+        const isOracle = oracleList.some(o => o.relay_node_id === this.selectedRelayId);
+        if (isOracle) {
+          this.brokerOracleMutexWarning = '当前 agent 同时注册了 oracle role — broker 兼 oracle 有 manipulation 向量风险';
+        }
+      } catch (e) { /* silent fail = no warning, backend hard 403 兜底 */ }
     },
 
     // iteration 2 — Polymarket 关键字搜索 handlers (= Owner r455 钦定)

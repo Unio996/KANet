@@ -149,6 +149,16 @@ function checkR6(filepath, content) {
   }
 }
 
+// ── KI-33: broker-llm-agent.js SYSTEM_PROMPT 必含 {{trust_score}} placeholder (Oracle v0.3 §9) ──
+// Owner 5/26 钦定 KANet-UI r14 raise + Bettor r17 R3 close: oracle 信任分 broker LLM 必翻译
+// SYSTEM_PROMPT 含 {{trust_score}} 表示 oracle 介绍信誉翻译铁律已 baked, 防 prompt refactor 漏丢.
+function checkKI33_trust_score_placeholder(filepath, content) {
+  if (!/broker-llm-agent\.js$/.test(filepath)) return;
+  if (!content.includes('{{trust_score}}')) {
+    violate('KI-33', `[Oracle v0.3 §9] broker-llm-agent.js SYSTEM_PROMPT 缺 {{trust_score}} placeholder — Owner 5/26 钦定 oracle 介绍必翻译信任分. 加 "# Oracle 信任分铁律" section 含 {{trust_score}} 后端 inject 位置. spec ref: dev-coord-testnet Bettor r17 R3 §9.`, filepath, 1);
+  }
+}
+
 // ── R19: broker SYSTEM_PROMPT / preview_text 不准含 hardcoded EVM 地址 ──
 // J1 67903c5b 真测撞: SYSTEM_PROMPT example 含 `0xaD12544E...` LLM 直接 copy 当真地址输出.
 // 真 user 真转 USDT 到 LLM 编的 placeholder = 钱永久丢. 防御: SYSTEM_PROMPT 严禁完整 0x{40hex}, 用 '后端注入' 代.
@@ -618,6 +628,7 @@ for (const fp of targets) {
   checkKI30_chain_amount_precision(fp, content);  // KI-30 (Bettor r181 5/19): chain TX amount 必 toFixed(8)
   checkKI31_gamma_closed_query(fp, content);  // KI-31 (Bettor r184 5/19): gamma single-market query 必 &closed=true
   checkKI32_oracle_channel_mutex(fp, content);  // KI-32 (Oracle v0.3 R7 J2 #9 + J1 #4): oracle-registry NOT 进 COORD_CHANNELS + ORACLE_REGISTRY_CHANNELS 跟 COORD mutex
+  checkKI33_trust_score_placeholder(fp, content);  // KI-33 (Oracle v0.3 §9 5/26): broker-llm-agent.js SYSTEM_PROMPT 必含 {{trust_score}}
 }
 checkR10();
 

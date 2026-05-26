@@ -340,6 +340,14 @@ fastify.get('/predictions/pool/create', async (request, reply) => {
   return reply.viewAsync('predictions-pool-create', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', relayNodes, _page: 'predictions-pool-create' });
 });
 
+// Oracle v0.3 sub #7 D1 — Markets › Predictions › Oracle Registry sub-page
+// reads /api/oracle/registry (= J2 sub 1 oracle_registry table)
+fastify.get('/predictions/oracle-registry', async (request, reply) => {
+  const lang = parseLang(request.headers.cookie);
+  const t = getT(lang);
+  return reply.viewAsync('predictions-oracle-registry', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', _page: 'predictions-oracle-registry' });
+});
+
 // /audit → redirect to /contacts
 fastify.get('/audit', async (request, reply) => {
   const agent = request.query.agent ? `?agent=${request.query.agent}` : '';
