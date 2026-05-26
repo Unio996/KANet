@@ -11,7 +11,13 @@
 import { getConfig } from '../data/settings/configs.js';
 import net from 'net';
 
-const LOCAL_RPC = 'ws://127.0.0.1:17110';
+// 5/26 根治: env single source, 0 hardcode. C 盘/D 盘同 code 跑两环境, 0 drift.
+// fail-fast 暴 surface 错配, 不再 silent fallback mainnet 默认.
+const LOCAL_RPC = process.env.KASPA_RPC_URL;
+if (!LOCAL_RPC) throw new Error('KASPA_RPC_URL not set — check kanet.env propagation to Console child process');
+const LOCAL_PORT = parseInt(new URL(LOCAL_RPC).port);
+const LOCAL_NETWORK = process.env.KASPA_NETWORK;
+if (!LOCAL_NETWORK) throw new Error('KASPA_NETWORK not set — check kanet.env propagation');
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 let _cache = { url: null, isLocal: false, ts: 0 };
@@ -52,13 +58,13 @@ function parseWsUrl(url) {
  * 如果已知有余额却返回 0 UTXO，判定为未同步。
  */
 async function checkLocal() {
-  if (!await tcpPing('127.0.0.1', 17110, 2000)) return false;
+  if (!await tcpPing('127.0.0.1', LOCAL_PORT, 2000)) return false;
 
   // TCP 通了，验证数据完整性
   try {
     const kaspa = await import('kaspa-wasm');
     const { RpcClient, Encoding } = kaspa;
-    const rpc = new RpcClient({ url: LOCAL_RPC, encoding: Encoding.Borsh, networkId: 'mainnet' });
+    const rpc = new RpcClient({ url: LOCAL_RPC, encoding: Encoding.Borsh, networkId: LOCAL_NETWORK });
     await Promise.race([
       rpc.connect({}),
       new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000)),
@@ -146,22 +152,11 @@ export async function getWorkingRpc() {
     return { url: _cache.url, isLocal: _cache.isLocal };
   }
 
-  // 1. 本地节点优先
+  // 1. 本地节点优先 (= env 驱动 LOCAL_RPC)
+  // 5/26 根治: 删除 silent setConfig 自动写 DB — env 是 source of truth, DB 不该 silent drift.
   if (await checkLocal()) {
-    const wasLocal = _cache.isLocal && _cache.url === LOCAL_RPC;
     _cache = { url: LOCAL_RPC, isLocal: true, ts: Date.now() };
-    // 如果之前不是本地节点（从 discovered/configured 恢复），回写 DB
-    if (!wasLocal) {
-      try {
-        const { setConfig } = await import('../data/settings/configs.js');
-        await setConfig('rpc_mode', 'local', { category: 'node' });
-        await setConfig('rpc_url', LOCAL_RPC, { category: 'node' });
-        console.log('[rpc-health] local node restored — DB updated');
-      } catch (err) {
-        console.warn('[rpc-health] failed to persist local node to DB:', err.message);
-      }
-    }
-    console.log('[rpc-health] using local node');
+    console.log('[rpc-health] using local node:', LOCAL_RPC);
     return { url: LOCAL_RPC, isLocal: true };
   }
 
@@ -176,19 +171,12 @@ export async function getWorkingRpc() {
   }
 
   // 3. Resolver 发现
+  // 5/26 根治: 删除 silent setConfig 自动写 DB — env 是 source of truth.
   console.log('[rpc-health] local + configured unreachable, discovering...');
   const discovered = await discoverNode();
   if (discovered) {
     _cache = { url: discovered, isLocal: false, ts: Date.now() };
     console.log('[rpc-health] discovered node:', discovered);
-    // 同步回写 DB — 保持 config_entries 与实际运行状态一致
-    try {
-      const { setConfig } = await import('../data/settings/configs.js');
-      await setConfig('rpc_mode', 'discovered', { category: 'node' });
-      await setConfig('rpc_url', discovered, { category: 'node' });
-    } catch (err) {
-      console.warn('[rpc-health] failed to persist discovered node to DB:', err.message);
-    }
     return { url: discovered, isLocal: false };
   }
 

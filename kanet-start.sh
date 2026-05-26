@@ -84,7 +84,11 @@ if [ -f "$ENV_FILE" ]; then
       CONSOLE_ENCRYPTION_KEY)  CONSOLE_ENCRYPTION_KEY="$v" ;;
       OPENCLAW_TOKEN)          OPENCLAW_TOKEN="$v" ;;
       KASPA_NODE)              KASPA_NODE="$v" ;;
-      KASPA_WS_PROXY_PORT)     KASPA_WS_PROXY_PORT="$v" ;;
+      KASPA_WS_PROXY_PORT)        KASPA_WS_PROXY_PORT="$v" ;;
+      KASPA_WS_PROXY_TARGET_PORT) KASPA_WS_PROXY_TARGET_PORT="$v" ;;  # 5/13 Owner A 钦定 LISTEN/TARGET split (= restored after r43 git clean wipe)
+      # 5/26 根治 RPC drift — env single source, 必 export 给 Console 子进程
+      KASPA_RPC_URL)           export KASPA_RPC_URL="$v" ;;
+      KASPA_NETWORK)           export KASPA_NETWORK="$v" ;;
       # NWT 8aef0b5e critical fix — kanet.env 写但 case 未 match key 静默被忽略
       # BROKER_V2_ENABLED + BROKER_V2_ENABLED_PEERS broker-v2 phase 1 cutover gating 必 export
       BROKER_V2_ENABLED)       export BROKER_V2_ENABLED="$v" ;;
@@ -139,7 +143,7 @@ if [ -f "$WS_PROXY_SCRIPT" ]; then
   if netstat -an 2>/dev/null | grep -q "127.0.0.1:${WS_PROXY_PORT}.*LISTEN"; then
     ok "ws-proxy 已在运行 (port $WS_PROXY_PORT)"
   else
-    KASPA_NODE="$WS_PROXY_NODE" LISTEN_PORT="$WS_PROXY_PORT" TARGET_PORT="$WS_PROXY_PORT" \
+    KASPA_NODE="$WS_PROXY_NODE" LISTEN_PORT="$WS_PROXY_PORT" TARGET_PORT="${KASPA_WS_PROXY_TARGET_PORT:-$WS_PROXY_PORT}" \
       node "$WS_PROXY_SCRIPT" > "$LOG_DIR/kaspa-ws-proxy.log" 2>&1 &
     WS_PROXY_PID=$!
     echo "$WS_PROXY_PID" > "$PID_DIR/kaspa-ws-proxy.pid"
@@ -203,6 +207,8 @@ KANET_ROOT=$KANET_ROOT \
 CONSOLE_ENCRYPTION_KEY=$CONSOLE_ENCRYPTION_KEY \
 PORT=$CONSOLE_PORT \
 DB_PATH="$CONSOLE_DIR/data/console.db" \
+KASPA_RPC_URL="$KASPA_RPC_URL" \
+KASPA_NETWORK="$KASPA_NETWORK" \
   node "$CONSOLE_DIR/src/index.js" >> "$CONSOLE_LOG" 2>&1 &
 CONSOLE_PID=$!
 echo "$CONSOLE_PID" > "$PID_DIR/console.pid"
