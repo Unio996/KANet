@@ -1,5 +1,27 @@
 <%~ include('partials/page-open', { _page: 'agent', pageTitle: '我的 Agent', ...it }) %>
 
+<!-- KANet-UI sub A6.4 agent-v2 oracle tab Editorial 风格 propagate (= Bettor r66 钦定)
+     scope: oracle tab section (= /agent?tab=oracle Owner UAT 4 URL 之一)
+     - Fraunces serif for Trust Score + earnings + reputation stats
+     - 古铜金 #b08a44 accent (取代 amber)
+     - cosmetic only, 0 functionality change
+-->
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&display=swap" rel="stylesheet">
+
+<style>
+  .av-display { font-family: 'Fraunces', Georgia, serif; font-feature-settings: 'opsz' 36; }
+  .av-accent-gold { color: #b08a44; }
+  .av-accent-gold-bg { background: #b08a44; }
+  .av-accent-gold-border-t { border-top: 2px solid #b08a44; }
+  .av-stat-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #6b6d7b;
+    font-weight: 500;
+  }
+</style>
+
 <div class="p-6" x-data="agentApp()" x-cloak>
 
   <!-- ================================ -->
@@ -1126,24 +1148,24 @@
       <!-- ========================================= -->
       <!-- TAB CONTENT: Oracle (Oracle v0.3 sub #7)  -->
       <!-- ========================================= -->
-      <div id="tab-oracle" x-show="activeTab === 'oracle'" class="card card-flush overflow-hidden">
-        <div class="px-5 py-3.5 border-b border-warm-200 flex items-center justify-between">
-          <span class="text-xs font-medium text-ink-300 uppercase tracking-wider">Oracle 角色配置 + 信誉 + 收益</span>
-          <a href="/predictions/oracle-registry" class="text-xs text-amber-700 underline">在线裁判名单 →</a>
+      <div id="tab-oracle" x-show="activeTab === 'oracle'" class="card card-flush overflow-hidden av-accent-gold-border-t">
+        <div class="px-5 py-4 border-b border-warm-200 flex items-center justify-between">
+          <span class="av-display text-base text-ink-800">Oracle 角色 · 信誉 · 收益</span>
+          <a href="/predictions/oracle-registry" class="text-xs av-accent-gold hover:underline">在线裁判名单 →</a>
         </div>
         <div class="p-5 space-y-5">
-          <!-- Oracle 注册状态 -->
+          <!-- Oracle 注册状态 (= Editorial Trust Score hero) -->
           <div class="bg-warm-50 rounded-lg p-4">
-            <div class="text-xs font-medium text-ink-500 mb-2">Oracle 注册状态</div>
+            <div class="av-stat-label mb-2">Oracle 注册状态</div>
             <template x-if="oracleStatus?.registered">
               <div>
-                <div class="flex items-center gap-3 mb-2">
+                <div class="flex items-center gap-3 mb-3">
                   <div class="w-3 h-3 rounded-full"
                        :class="oracleStatus.trust_score >= 80 ? 'bg-green-500' : oracleStatus.trust_score >= 50 ? 'bg-amber-500' : 'bg-red-500'"></div>
-                  <span class="text-2xl font-display"
-                        :class="oracleStatus.trust_score >= 80 ? 'text-green-700' : oracleStatus.trust_score >= 50 ? 'text-amber-700' : 'text-red-700'"
+                  <span class="av-display text-4xl tabular-nums"
+                        :class="oracleStatus.trust_score >= 80 ? 'text-green-700' : oracleStatus.trust_score >= 50 ? 'av-accent-gold' : 'text-red-700'"
                         x-text="oracleStatus.trust_score"></span>
-                  <span class="text-xs text-ink-400">Trust Score (1-100)</span>
+                  <span class="text-xs text-ink-500">Trust Score · 1-100</span>
                 </div>
                 <div class="text-[11px] text-ink-500 space-y-0.5">
                   <div>档位: <span x-text="'Tier ' + oracleStatus.tier"></span></div>
@@ -1156,40 +1178,40 @@
             <template x-if="!oracleStatus?.registered">
               <div class="text-xs text-ink-400">
                 此 agent 尚未注册 oracle role.
-                <button @click="registerOracleModal = true" class="ml-1 text-amber-700 underline">注册 →</button>
+                <button @click="registerOracleModal = true" class="ml-1 av-accent-gold hover:underline">注册 →</button>
               </div>
             </template>
           </div>
 
-          <!-- 信誉 3 层显 -->
+          <!-- 信誉 3 层显 (= Editorial reputation stats) -->
           <div class="bg-warm-50 rounded-lg p-4" x-show="oracleStatus?.registered">
-            <div class="text-xs font-medium text-ink-500 mb-2">信誉 (Reputation)</div>
+            <div class="av-stat-label mb-3">信誉 · Reputation</div>
             <div class="grid grid-cols-3 gap-3 text-center">
               <div>
-                <div class="text-lg font-display text-ink-700" x-text="oracleStatus?.total_votes || 0"></div>
-                <div class="text-[10px] text-ink-400">总投票</div>
+                <div class="av-display text-2xl text-ink-800 tabular-nums" x-text="oracleStatus?.total_votes || 0"></div>
+                <div class="text-[10px] text-ink-400 mt-1">总投票</div>
               </div>
               <div>
-                <div class="text-lg font-display text-green-600" x-text="oracleStatus?.correct_votes || 0"></div>
-                <div class="text-[10px] text-ink-400">跟最终一致</div>
+                <div class="av-display text-2xl text-green-700 tabular-nums" x-text="oracleStatus?.correct_votes || 0"></div>
+                <div class="text-[10px] text-ink-400 mt-1">跟最终一致</div>
               </div>
               <div>
-                <div class="text-lg font-display text-amber-600"
+                <div class="av-display text-2xl av-accent-gold tabular-nums"
                      x-text="oracleStatus?.total_votes ? Math.round((oracleStatus.correct_votes / oracleStatus.total_votes) * 100) + '%' : '—'"></div>
-                <div class="text-[10px] text-ink-400">accuracy</div>
+                <div class="text-[10px] text-ink-400 mt-1">accuracy</div>
               </div>
             </div>
           </div>
 
-          <!-- Oracle 收益 -->
+          <!-- Oracle 收益 (= Editorial earnings hero) -->
           <div class="bg-warm-50 rounded-lg p-4" x-show="oracleStatus?.registered">
             <div class="flex items-center justify-between mb-2">
-              <span class="text-xs font-medium text-ink-500">Oracle Earnings</span>
-              <a href="/portfolio?tab=oracle-earnings" class="text-[11px] text-amber-700 underline">详细 →</a>
+              <span class="av-stat-label">Oracle Earnings</span>
+              <a href="/portfolio?tab=oracle-earnings" class="text-[11px] av-accent-gold hover:underline">详细 →</a>
             </div>
             <div class="flex items-baseline gap-2">
-              <span class="text-2xl font-display text-green-700" x-text="(oracleStatus?.total_earnings_kas || 0).toFixed(2)"></span>
-              <span class="text-xs text-ink-400">KAS 累计</span>
+              <span class="av-display text-3xl av-accent-gold tabular-nums" x-text="(oracleStatus?.total_earnings_kas || 0).toFixed(2)"></span>
+              <span class="text-xs text-ink-500">KAS 累计</span>
             </div>
             <div class="text-[11px] text-ink-400 mt-1">
               来源 prediction settle + 1V1 escrow dispute (= 跟最终结果一致才分)
