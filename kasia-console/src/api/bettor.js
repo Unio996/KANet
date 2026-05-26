@@ -2096,6 +2096,93 @@ export async function registerBettorRoutes(fastify) {
     }
   });
 
+  // ════════════════════════════════════════════════════════════════
+  // Oracle v0.3 sub 6 — dispute API (POST /api/oracle/dispute/trigger)
+  // ════════════════════════════════════════════════════════════════
+  // Per Bettor r16 §3.3 dispute escalation + J2 r3 catch #2 + Owner 5/26 全力推动.
+  //
+  // broker DM dispute → POST /api/oracle/dispute/trigger:
+  //   1. Validate escrow_id + 双方 statements + evidence
+  //   2. Sample N oracles via sub 2 sampler (= Fisher-Yates determinstic)
+  //   3. Emit chain_event 'oracle_dispute_triggered' (= audit trail)
+  //   4. Return sampled oracle list to caller (= broker passes to user via DM)
+  //
+  // §7 broker 升 "dispute trigger 入口" 不只 DM 翻译 (J2 r3 catch #2 + Bettor r16 ack).
+  // §3.3 联动 sub 2 sampler + sub 5 reputation.
+
+  fastify.post('/api/oracle/dispute/trigger', async (request, reply) => {
+    const { escrow_id, market_id, maker_statement, taker_statement, evidence, block_hash, broker_relay_id } = request.body || {};
+    if (!escrow_id || !block_hash) {
+      return reply.code(400).send({ ok: false, error: 'missing required: escrow_id, block_hash' });
+    }
+    if (!maker_statement && !taker_statement) {
+      return reply.code(400).send({ ok: false, error: 'at least one statement required (maker_statement OR taker_statement)' });
+    }
+
+    // Sample 3 oracles via sub 2 sampler (= Area 1.5 base, may scale Phase 5+)
+    const { sampleOracles } = await import('../services/oracle-sampler.js');
+    const sampleResult = sampleOracles({
+      blockHash: block_hash,
+      marketId: escrow_id,  // use escrow_id as marketId for sampler seed (= deterministic dispute oracle)
+      n: 3,
+      excludeRelayIds: broker_relay_id ? [broker_relay_id] : [],  // exclude broker per Area 1.4
+      tierFilter: [1, 2, 3],
+      attempt: 0,
+    });
+
+    if (!sampleResult.ok) {
+      return reply.code(503).send({
+        ok: false,
+        error: 'oracle_sampling_failed',
+        detail: sampleResult.error,
+        pool_size: sampleResult.pool_size,
+        eligible_count: sampleResult.eligible_count,
+      });
+    }
+
+    // Compute evidence_hash for chain_event audit (= J1 #2 C2 audit trail)
+    const evidenceCanonical = JSON.stringify({ maker_statement: maker_statement || null, taker_statement: taker_statement || null, evidence: evidence || null });
+    const { createHash, randomUUID } = await import('node:crypto');
+    const evidenceHash = createHash('sha256').update(evidenceCanonical).digest('hex');
+    const disputeId = randomUUID();
+
+    // Emit chain_event 'oracle_dispute_triggered' (= defense baked底线 5)
+    try {
+      const { recordChainEvent } = await import('../services/chain-event.js');
+      recordChainEvent({
+        txid: `oracle_dispute_${disputeId.slice(0, 12)}_${Date.now()}`,
+        eventType: 'oracle_dispute_triggered_v1',
+        fromAddress: broker_relay_id || null,
+        payload: JSON.stringify({
+          dispute_id: disputeId,
+          escrow_id,
+          market_id: market_id || null,
+          evidence_hash: evidenceHash,
+          sampled_oracle_ids: sampleResult.sampled.map(s => s.relay_node_id),
+          pool_size: sampleResult.pool_size,
+          eligible_count: sampleResult.eligible_count,
+          seed_hex: sampleResult.seed_hex,
+          block_hash,
+          attempt: 0,
+        }),
+      });
+    } catch (e) {
+      console.warn(`[oracle-dispute] chain_event emit fail for dispute ${disputeId.slice(0, 8)}: ${e.message}`);
+    }
+
+    return reply.send({
+      ok: true,
+      dispute_id: disputeId,
+      escrow_id,
+      sampled_oracles: sampleResult.sampled,
+      pool_size: sampleResult.pool_size,
+      eligible_count: sampleResult.eligible_count,
+      seed_hex: sampleResult.seed_hex,
+      evidence_hash: evidenceHash,
+      next: 'oracle sample chosen, broker DM should now request oracle deposits + voter cycle',
+    });
+  });
+
   // ── Stair-step same-entity deadline auditor (Bettor r174 R-COMPETITOR-BLIND-SPOT 治本) ──
   // GET all active stair-step audits — entities with >1 deadline rec
   fastify.get('/api/bettor/stair-step-audit', async (request, reply) => {
