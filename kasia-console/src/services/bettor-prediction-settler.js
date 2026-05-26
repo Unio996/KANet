@@ -312,7 +312,8 @@ async function dispatchPhase2OrCheckSigs(offer, winnerStr, db) {
       db.prepare(`UPDATE exchange_offers SET metadata=? WHERE id=?`).run(JSON.stringify(newMeta), offer.id);
 
       // DM 5 oracle with kanet_oracle_tx_sign_req_v1 (= async, non-blocking)
-      const oracleIds = JSON.parse(offer.outcome_oracle_relay_ids || '[]');
+      // NOTE: oracleIds already declared L272 above (= same fn scope). Reuse 不 redeclare.
+      // Hotfix 5/26 13:00 KANet-UI — console boot SyntaxError 'Identifier oracleIds already declared'.
       const oracleAddrs = oracleIds.length > 0
         ? db.prepare(`SELECT id, address FROM relay_nodes WHERE id IN (${oracleIds.map(()=>'?').join(',')})`).all(...oracleIds)
         : [];
