@@ -685,6 +685,35 @@ if (process.send) {
           return;
         }
 
+        case 'prediction_settle_consensual_build_preimage': {
+          // Oracle v0.3 sub 5b-2 (J2-tn dcde95e) — maker_relay builds settle_consensual unsigned TX.
+          // Per NWT sub 4 SS PredictionEscrowUnanimous5 settle_consensual entry:
+          //   - sigs: maker + taker (= 2 sig, no oracle 涉)
+          //   - outputs.length 2: [winner, broker]
+          //   - winner-binding explicit verify (J1 #2 C1 fix)
+          // Reuses buildSettleTxPreimage with sigOpCounts=[2,2] (= 2 sig per input from maker+taker).
+          // 1V1 escrow 2 inputs (= broadcast_tx + taker_escrow_lock_tx) each locked by same P2SH.
+          const { buildSettleTxPreimage } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          // sigOpCounts: each spine input needs 2 sigs (maker + taker) for settle_consensual checkSig
+          // (跟 settle_dispute 5 sig 区别). Caller may override via cmd.sig_op_counts.
+          const sigOpCounts = cmd.sig_op_counts || cmd.required_input_outpoints.map(() => 2);
+          const r = await buildSettleTxPreimage(
+            cmd.p2sh_address,
+            cmd.required_input_outpoints,
+            cmd.outputs,
+            wallet.getNetworkId(),
+            BigInt(cmd.lock_time || 0),
+            sigOpCounts,
+          );
+          const txObjForIpc = JSON.parse(JSON.stringify(r.txObj, (_k, v) => typeof v === 'bigint' ? v.toString() : v));
+          if (cmd.requestId && process.send) {
+            // Pass winner param back so caller can fork sign+submit logic
+            process.send({ requestId: cmd.requestId, result: { ok: true, tx_obj: txObjForIpc, input_count: r.inputCount, winner: cmd.winner } });
+          }
+          return;
+        }
+
         case 'prediction_refund_tx': {
           // Phase 4a Sub 9 — build + sign + submit SS refund TX (= maker single sig).
           //   branch 1 (refund_both): 2 inputs (maker_stake + taker_stake) → 2 outputs (maker + taker refund)
