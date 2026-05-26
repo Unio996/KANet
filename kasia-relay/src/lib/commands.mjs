@@ -27,6 +27,10 @@ export const COMMAND_TYPES = Object.freeze({
   GET_PUBKEY: 'get_pubkey',
   SIGN_INPUT_FOR_SETTLE: 'sign_input_for_settle',
   PREDICTION_SETTLE_BUILD_PREIMAGE: 'prediction_settle_build_preimage',
+  // Oracle v0.3 sub 5c (J2 r21 ship 730b910) — 1V1 escrow settle_consensual maker+taker mutual sig preimage build.
+  // KI sediment per feedback_ipc_double_enforce_register_both_layers 5/20: relay.mjs L688 case 漏 commands.mjs register
+  // → validateCommand reject silent → settler dispatch fail. NWT ad-hoc fix on .105 to unblock oracle happy path.
+  PREDICTION_SETTLE_CONSENSUAL_BUILD_PREIMAGE: 'prediction_settle_consensual_build_preimage',
   PREDICTION_SETTLE_TX: 'prediction_settle_tx',
   PREDICTION_REFUND_TX: 'prediction_refund_tx',
   // B2 v0.5 Sub 2d Phase 2c — pool settle TX submit (= multi-input spine + N sides).
@@ -58,6 +62,9 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.GET_PUBKEY]: [],
   [COMMAND_TYPES.SIGN_INPUT_FOR_SETTLE]: ['tx_hex', 'input_index'],
   [COMMAND_TYPES.PREDICTION_SETTLE_BUILD_PREIMAGE]: ['p2sh_address', 'required_input_outpoints', 'outputs'],
+  // Oracle v0.3 sub 5c — 1V1 escrow settle_consensual maker+taker mutual sig preimage build.
+  // KI sediment 5/20: COMMAND_PAYLOAD_SCHEMA missing entry → validateCommandPayload throws "required is not iterable".
+  [COMMAND_TYPES.PREDICTION_SETTLE_CONSENSUAL_BUILD_PREIMAGE]: ['p2sh_address', 'required_input_outpoints', 'outputs', 'winner'],
   [COMMAND_TYPES.PREDICTION_SETTLE_TX]: ['p2sh_address', 'redeem_script_hex', 'required_input_outpoints', 'outputs', 'sigs_by_input', 'winner'],
   [COMMAND_TYPES.PREDICTION_REFUND_TX]: ['p2sh_address', 'redeem_script_hex', 'branch'],
   [COMMAND_TYPES.POOL_SETTLE_TX]: ['spine_p2sh_address', 'side_p2sh_addresses', 'spine_redeem_script_hex', 'side_redeem_script_hexes', 'required_input_outpoints', 'outputs', 'spine_sigs_by_input', 'spine_input_count', 'winner'],
@@ -88,6 +95,8 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   // p2sh_address allows array for pool multi-p2sh (= spine + N side) per B2 v0.5 Sub 2d Phase 2a-1.
   // sig_op_counts optional per-input array (Phase 3 bug 5 — preimage/final sighash consistency).
   [COMMAND_TYPES.PREDICTION_SETTLE_BUILD_PREIMAGE]: { p2sh_address: ['string', 'array'], required_input_outpoints: 'array', outputs: 'array', sig_op_counts: 'array' },
+  // Oracle v0.3 sub 5c (NWT ad-hoc fix .105): consensual same shape as build_preimage + winner number.
+  [COMMAND_TYPES.PREDICTION_SETTLE_CONSENSUAL_BUILD_PREIMAGE]: { p2sh_address: 'string', required_input_outpoints: 'array', outputs: 'array', winner: 'number' },
   [COMMAND_TYPES.PREDICTION_SETTLE_TX]: { p2sh_address: 'string', redeem_script_hex: 'string', required_input_outpoints: 'array', outputs: 'array', sigs_by_input: 'array', winner: 'number' },
   [COMMAND_TYPES.PREDICTION_REFUND_TX]: { p2sh_address: 'string', redeem_script_hex: 'string', branch: 'number' },
   [COMMAND_TYPES.POOL_SETTLE_TX]: { spine_p2sh_address: 'string', side_p2sh_addresses: 'array', spine_redeem_script_hex: 'string', side_redeem_script_hexes: 'array', required_input_outpoints: 'array', outputs: 'array', spine_sigs_by_input: 'array', spine_input_count: 'number', winner: 'number' },
@@ -101,6 +110,10 @@ export function validateCommandPayload(cmd) {
     return { valid: false, error: `unknown command type: ${cmd.type} (valid: ${Array.from(COMMAND_TYPE_SET).join(', ')})` };
   }
   const required = COMMAND_PAYLOAD_SCHEMA[cmd.type];
+  if (!required) {
+    // KI hardening 5/26 — enum added without schema entry → defensive: fail-fast clear error, not iterate undefined throw.
+    return { valid: false, error: `internal: COMMAND_PAYLOAD_SCHEMA missing entry for ${cmd.type} (sediment 5/26 sub 5c hotfix)` };
+  }
   for (const field of required) {
     if (cmd[field] === undefined || cmd[field] === null) {
       return { valid: false, error: `${cmd.type} missing required field: ${field}` };
