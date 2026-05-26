@@ -1897,6 +1897,183 @@ export async function registerBettorRoutes(fastify) {
     return reply.send({ ok: true, oracles, count: oracles.length });
   });
 
+  // ════════════════════════════════════════════════════════════════
+  // Oracle v0.3 sub 5 — 信誉记录 + 查询 API (CRUD)
+  // ════════════════════════════════════════════════════════════════
+  // Per Bettor-tn r26 R7 CLOSE + Owner 5/26 "全力推动" 钦定.
+  // Source: oracle_registry + oracle_history v143 schema (= J2-tn sub 1 ship d582bee).
+  // schema_hash: fd16c5e3c4367a6ba45e6bf17200388603246fdc48b2f6d268554b91951efc6a
+  //
+  // 6 endpoints:
+  //   POST /api/oracle/announce            — register / re-announce oracle (TTL 24h)
+  //   GET  /api/oracle/registry            — list active oracles (filter tier/status)
+  //   GET  /api/oracle/:id/reputation      — aggregate vote/reward/slash per oracle
+  //   GET  /api/oracle/markets/:id/audit   — history rows for a market (= audit trail)
+  //   GET  /api/oracle/phase-readiness     — Phase 0→1 trigger (J1 #5 C5 spec)
+  //   POST /api/oracle/:id/vote            — voter v2 (sub 3) writes vote history
+
+  // POST /api/oracle/announce — oracle relay register OR re-announce (24h TTL).
+  // Per Area 12 Q10 tier 1/2/3 + Bettor r24 schema lock.
+  fastify.post('/api/oracle/announce', async (request, reply) => {
+    const { relay_node_id, pubkey, tier, capabilities, bond_amount } = request.body || {};
+    if (!relay_node_id || !pubkey || tier == null) {
+      return reply.code(400).send({ ok: false, error: 'missing required: relay_node_id, pubkey, tier' });
+    }
+    if (![1, 2, 3].includes(tier)) {
+      return reply.code(400).send({ ok: false, error: 'tier must be 1, 2, or 3 (CHECK constraint)' });
+    }
+    if (tier === 2 && (!bond_amount || bond_amount <= 0)) {
+      return reply.code(400).send({ ok: false, error: 'tier 2 requires bond_amount > 0' });
+    }
+    // TTL: 24h from now (per Area 2.4 D2)
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
+    const capsJson = capabilities ? JSON.stringify(capabilities) : null;
+    try {
+      sqlite.prepare(`
+        INSERT INTO oracle_registry (relay_node_id, pubkey, tier, capabilities, expires_at, bond_amount, status, epoch)
+        VALUES (?, ?, ?, ?, ?, ?, 'active', 1)
+        ON CONFLICT(relay_node_id) DO UPDATE SET
+          pubkey = excluded.pubkey,
+          tier = excluded.tier,
+          capabilities = excluded.capabilities,
+          expires_at = excluded.expires_at,
+          bond_amount = excluded.bond_amount,
+          status = 'active',
+          updated_at = datetime('now')
+      `).run(relay_node_id, pubkey, tier, capsJson, expiresAt, bond_amount || null);
+      return reply.send({ ok: true, relay_node_id, expires_at: expiresAt });
+    } catch (e) {
+      return reply.code(500).send({ ok: false, error: e.message });
+    }
+  });
+
+  // GET /api/oracle/registry — list active oracles (filter optional tier + status).
+  fastify.get('/api/oracle/registry', async (request, reply) => {
+    const { tier, status } = request.query || {};
+    const where = ["expires_at > datetime('now')"];
+    const params = [];
+    if (tier != null) {
+      const tierNum = parseInt(tier, 10);
+      if ([1, 2, 3].includes(tierNum)) { where.push('tier = ?'); params.push(tierNum); }
+    }
+    if (status) { where.push('status = ?'); params.push(status); }
+    const rows = sqlite.prepare(`
+      SELECT relay_node_id, pubkey, tier, capabilities, announced_at, expires_at,
+             bond_amount, status, epoch, updated_at
+      FROM oracle_registry
+      WHERE ${where.join(' AND ')}
+      ORDER BY tier ASC, announced_at DESC
+      LIMIT 200
+    `).all(...params);
+    const out = rows.map(r => ({
+      ...r,
+      capabilities: r.capabilities ? (() => { try { return JSON.parse(r.capabilities); } catch { return []; } })() : [],
+    }));
+    return reply.send({ ok: true, count: out.length, oracles: out });
+  });
+
+  // GET /api/oracle/:id/reputation — aggregate per oracle.
+  fastify.get('/api/oracle/:id/reputation', async (request, reply) => {
+    const oracleId = request.params.id;
+    if (!oracleId) return reply.code(400).send({ ok: false, error: 'missing oracle id' });
+    // Per area 3.5 + Bettor r17 EC7: 2-1 disagreement 全 abstain — no consensus → not counted in correct/total.
+    // total_votes = rows with vote IS NOT NULL (= excludes consensual rows where vote=NULL)
+    // correct_votes = rows where vote == consensus_outcome AND consensus_outcome IS NOT NULL (= excludes abstain)
+    const agg = sqlite.prepare(`
+      SELECT
+        COUNT(*) AS total_history,
+        SUM(CASE WHEN vote IS NOT NULL THEN 1 ELSE 0 END) AS total_votes,
+        SUM(CASE WHEN vote = consensus_outcome AND consensus_outcome IS NOT NULL THEN 1 ELSE 0 END) AS correct_votes,
+        SUM(CASE WHEN vote = 'silent' THEN 1 ELSE 0 END) AS silent_count,
+        SUM(COALESCE(reward_amount, 0)) AS total_reward,
+        SUM(COALESCE(slashed_amount, 0)) AS total_slashed,
+        MAX(settled_at) AS last_settled_at
+      FROM oracle_history
+      WHERE oracle_relay_id = ? AND epoch >= 1
+    `).get(oracleId);
+    const reg = sqlite.prepare(`SELECT tier, status, bond_amount, epoch FROM oracle_registry WHERE relay_node_id = ?`).get(oracleId);
+    const accuracy = (agg?.total_votes > 0) ? (agg.correct_votes / agg.total_votes) : null;
+    return reply.send({
+      ok: true,
+      oracle_relay_id: oracleId,
+      registry: reg || null,
+      history: {
+        total_history: agg?.total_history || 0,
+        total_votes: agg?.total_votes || 0,
+        correct_votes: agg?.correct_votes || 0,
+        silent_count: agg?.silent_count || 0,
+        accuracy,
+        total_reward: agg?.total_reward || 0,
+        total_slashed: agg?.total_slashed || 0,
+        last_settled_at: agg?.last_settled_at || null,
+      },
+    });
+  });
+
+  // GET /api/oracle/markets/:id/audit — history rows for a market (= per-market audit trail).
+  fastify.get('/api/oracle/markets/:id/audit', async (request, reply) => {
+    const marketId = request.params.id;
+    if (!marketId) return reply.code(400).send({ ok: false, error: 'missing market id' });
+    const rows = sqlite.prepare(`
+      SELECT id, oracle_relay_id, vote, consensus_outcome, reward_amount, slashed_amount,
+             audit_mode, audited_at, settled_at, epoch
+      FROM oracle_history
+      WHERE market_id = ?
+      ORDER BY audited_at ASC, settled_at ASC
+    `).all(marketId);
+    return reply.send({ ok: true, market_id: marketId, audit_count: rows.length, history: rows });
+  });
+
+  // GET /api/oracle/phase-readiness — Phase 0→1 trigger check (J1 #5 C5 + Bettor r25 ack).
+  // Returns count of non-KANet-internal tier 2/3 active oracles (= mainnet readiness signal).
+  fastify.get('/api/oracle/phase-readiness', async (request, reply) => {
+    const internalRaw = process.env.KANET_INTERNAL_RELAY_IDS || '';
+    const internalSet = new Set(internalRaw.split(',').map(s => s.trim()).filter(Boolean));
+    const allActive = sqlite.prepare(`
+      SELECT relay_node_id, tier FROM oracle_registry
+      WHERE status = 'active' AND tier IN (2, 3) AND expires_at > datetime('now')
+    `).all();
+    const externalCount = allActive.filter(r => !internalSet.has(r.relay_node_id)).length;
+    return reply.send({
+      ok: true,
+      total_active_tier_2_3: allActive.length,
+      external_count: externalCount,
+      kanet_internal_count: allActive.length - externalCount,
+      phase_1_ready: externalCount >= 1,
+      kanet_internal_relay_count: internalSet.size,
+      note: 'phase_1_ready=true requires ≥1 non-KANet-internal tier 2/3 active oracle (= Owner external ack still required for actual phase transition)',
+    });
+  });
+
+  // POST /api/oracle/:id/vote — voter v2 (sub 3) writes vote history row.
+  // Called by bettor-prediction-voter.js sub 3 after vote on market.
+  fastify.post('/api/oracle/:id/vote', async (request, reply) => {
+    const oracleId = request.params.id;
+    const { market_id, vote, consensus_outcome, reward_amount, slashed_amount, audit_mode, audited_at, settled_at } = request.body || {};
+    if (!oracleId || !market_id || !audit_mode) {
+      return reply.code(400).send({ ok: false, error: 'missing required: market_id, audit_mode' });
+    }
+    if (!['tier1', 'tier2', 'tier3', 'consensual'].includes(audit_mode)) {
+      return reply.code(400).send({ ok: false, error: `invalid audit_mode '${audit_mode}', expected tier1/tier2/tier3/consensual` });
+    }
+    // consensual row enforce: vote=NULL + reward=0 (= J2-tn r9 + J1 #2 C2 align)
+    if (audit_mode === 'consensual' && (vote != null || (reward_amount || 0) > 0)) {
+      return reply.code(400).send({ ok: false, error: 'consensual row must have vote=NULL + reward_amount=0' });
+    }
+    const id = (await import('node:crypto')).randomUUID();
+    try {
+      sqlite.prepare(`
+        INSERT INTO oracle_history (id, oracle_relay_id, market_id, vote, consensus_outcome,
+          reward_amount, slashed_amount, audit_mode, audited_at, settled_at, epoch)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+      `).run(id, oracleId, market_id, vote || null, consensus_outcome || null,
+             reward_amount || 0, slashed_amount || 0, audit_mode, audited_at || null, settled_at || null);
+      return reply.send({ ok: true, id });
+    } catch (e) {
+      return reply.code(500).send({ ok: false, error: e.message });
+    }
+  });
+
   // ── Stair-step same-entity deadline auditor (Bettor r174 R-COMPETITOR-BLIND-SPOT 治本) ──
   // GET all active stair-step audits — entities with >1 deadline rec
   fastify.get('/api/bettor/stair-step-audit', async (request, reply) => {
