@@ -135,9 +135,24 @@ async function processVoter(voter) {
         continue;
       }
 
+      // sub 3 voter v2 (Oracle v0.3 R7): settle_consensual skip detect.
+      // If chain_event 'pool_settle_consensual_dispatched' fired for this offer's market,
+      // skip voter dispatch (= 0 sample/vote/sig, oracle_history reward=0 consensual row).
+      const consensualSkip = sqlite.prepare(`
+        SELECT id FROM chain_events
+        WHERE event_type = 'pool_settle_consensual_dispatched'
+          AND payload LIKE ?
+        LIMIT 1
+      `).get(`%"market_id":"${offer.id}"%`);
+      if (consensualSkip) {
+        skipped++;
+        continue;
+      }
+
       // 5. build kanet_oracle_vote_v1 JSON (= Bettor r235 Sub 6 spec).
       // r234 加: revote_round 字段, settler filter 当前 round votes.
       // r235 PB-S6 加: 真 ECDSA sign via relay IPC + voter_pubkey x-only derive.
+      // sub 3 v2 (Oracle v0.3 R7): epoch=1 field for J1 #4 C3/C4 IS NULL/NOT NULL 分流.
       const evidenceHash = createHash('sha256').update(voteResult.evidence_raw || '').digest('hex');
 
       // 5a. Get voter x-only pubkey via relay IPC (= relay holds privkey, derive in-process)
@@ -165,6 +180,7 @@ async function processVoter(voter) {
         evidence_hash: evidenceHash,
         vote_timestamp: new Date().toISOString(),
         revote_round: offer.revote_round || 0,  // Sub 5 settler filter, r234 spec
+        epoch: 1,  // Oracle v0.3 sub 3 v2 (= J1 #4 C3/C4 fix: IS NULL/NOT NULL 分流 key)
       };
       const messageToSign = JSON.stringify(unsignedPayload);  // canonical signature input
       let signature;
@@ -252,6 +268,27 @@ async function processPoolMarket(voter) {
       `).get(voter.address, `%"market_id":"${market.id}"%`);
       if (existing) { skipped++; continue; }
 
+      // sub 3 v2 (Oracle v0.3 R7): settle_consensual skip detect.
+      // If 'pool_settle_consensual_dispatched' fired → skip + write oracle_history consensual row.
+      const consensualSkip = sqlite.prepare(`
+        SELECT id FROM chain_events
+        WHERE event_type = 'pool_settle_consensual_dispatched'
+          AND payload LIKE ?
+        LIMIT 1
+      `).get(`%"market_id":"${market.id}"%`);
+      if (consensualSkip) {
+        // Write consensual oracle_history row per J1 #2 C2 + J2-tn r9 align
+        try {
+          const { randomUUID: rndId } = await import('node:crypto');
+          sqlite.prepare(`
+            INSERT OR IGNORE INTO oracle_history (id, oracle_relay_id, market_id, audit_mode, vote, reward_amount, slashed_amount, settled_at, epoch)
+            VALUES (?, ?, ?, 'consensual', NULL, 0, 0, datetime('now'), 1)
+          `).run(rndId(), voter.id, market.id);
+        } catch {}
+        skipped++;
+        continue;
+      }
+
       // deriveVote adapter — pass market as offer-shaped object (= reuse same deriveVote)
       const offerLike = {
         id: market.id,
@@ -293,6 +330,7 @@ async function processPoolMarket(voter) {
         evidence_url: voteResult.evidence_url || null,
         evidence_hash: evidenceHash,
         vote_timestamp: new Date().toISOString(),
+        epoch: 1,  // Oracle v0.3 sub 3 v2 (= J1 #4 C3/C4 fix)
       };
       const messageToSign = JSON.stringify(unsignedPayload);
       let signature;
@@ -334,6 +372,19 @@ async function processPoolMarket(voter) {
         VALUES (?, ?, 'pool_oracle_vote', ?, ?, ?, 'prediction-voter', CURRENT_TIMESTAMP)
       `).run(randomUUID(), syntheticTxid, voter.address, makerRow.address, JSON.stringify(votePayload));
 
+      // sub 3 v2 (Oracle v0.3 R7): oracle_history row write per vote.
+      // Tier determined via oracle_registry.tier (= sub 1 schema). audit_mode = tier1/tier2/tier3.
+      try {
+        const regRow = sqlite.prepare(`SELECT tier FROM oracle_registry WHERE relay_node_id = ?`).get(voter.id);
+        const auditMode = regRow?.tier ? `tier${regRow.tier}` : 'tier1';  // default tier1 if not in registry (legacy compat)
+        sqlite.prepare(`
+          INSERT OR IGNORE INTO oracle_history (id, oracle_relay_id, market_id, vote, audit_mode, audited_at, epoch)
+          VALUES (?, ?, ?, ?, ?, datetime('now'), 1)
+        `).run(randomUUID(), voter.id, market.id, voteResult.outcome, auditMode);
+      } catch (histErr) {
+        console.warn(`[prediction-voter:pool] oracle_history write fail voter=${voter.name} market=${market.id.slice(0,12)}: ${histErr.message}`);
+      }
+
       console.log(`[prediction-voter:pool] VOTE ${voter.name}: market=${market.id.slice(0,12)} outcome=${voteResult.outcome}`);
     } catch (e) {
       console.error(`[prediction-voter:pool] process fail voter=${voter.name} market=${market.id?.slice(0,12)}: ${e.message}`);
@@ -367,6 +418,25 @@ async function processPoolTxSign(voter) {
       let meta;
       try { meta = JSON.parse(market.metadata || '{}'); } catch { meta = {}; }
       if (!meta.phase2_tx_obj) { skipped++; continue; }
+
+      // sub 3 v2 (Oracle v0.3 R7) fail-on-mixed (= J1 #2 C3 fix).
+      // If same market has both legacy (epoch=NULL) and v2 (epoch=1) sig events, abort dispatch
+      // — settler reads conflict + reject + alert. Prevents double-reward via epoch boundary cross.
+      const legacyEvents = sqlite.prepare(`
+        SELECT COUNT(*) AS c FROM chain_events
+        WHERE event_type = 'pool_oracle_tx_sig' AND payload LIKE ?
+          AND (payload NOT LIKE '%"epoch":%' OR payload LIKE '%"epoch":null%')
+      `).get(`%"market_id":"${market.id}"%`).c;
+      const v2Events = sqlite.prepare(`
+        SELECT COUNT(*) AS c FROM chain_events
+        WHERE event_type = 'pool_oracle_tx_sig' AND payload LIKE ?
+          AND payload LIKE '%"epoch":1%'
+      `).get(`%"market_id":"${market.id}"%`).c;
+      if (legacyEvents > 0 && v2Events > 0) {
+        console.error(`[prediction-voter:pool-tx-sig] 🚨 fail-on-mixed: market ${market.id.slice(0,12)} has both legacy (${legacyEvents}) and v2 (${v2Events}) sig events — abort dispatch (J1 #2 C3)`);
+        errored++;
+        continue;
+      }
 
       // forfeit_1: silent oracle does not sign
       if (!meta.phase2_unanimous && typeof meta.phase2_silent_oracle_index === 'number') {
@@ -405,6 +475,7 @@ async function processPoolTxSign(voter) {
           input_index: inputIdx,
           winner: meta.phase2_winner,
           signature: signResult.signature,
+          epoch: 1,  // Oracle v0.3 sub 3 v2 (= J1 #4 C3/C4 IS NULL/NOT NULL 分流)
         });
         const syntheticTxid = `pool_oracle_tx_sig:${voter.id.slice(0,8)}:${market.id.slice(0,12)}:i${inputIdx}:${Date.now()}`;
         sqlite.prepare(`
@@ -494,6 +565,7 @@ async function processPoolRefundDisagreementTxSign(voter) {
           silent_oracle_index: silentOracleIndex,
           signing_pair: signingPair,
           signature: signResult.signature,
+          epoch: 1,  // Oracle v0.3 sub 3 v2 (= J1 #4 C3/C4 IS NULL/NOT NULL 分流)
         });
         const syntheticTxid = `pool_oracle_refund_dis_sig:${voter.id.slice(0,8)}:${market.id.slice(0,12)}:i${inputIdx}:${Date.now()}`;
         sqlite.prepare(`
