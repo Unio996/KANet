@@ -537,7 +537,7 @@ export async function dispatchPhase2Consensual(offer, winner, db = sqlite) {
         // maker sig
         const makerSigRes = await sendCommandAsync(offer.maker_relay_id, {
           type: 'sign_input_for_settle',
-          tx_obj: preimage.tx_obj,
+          tx_hex: JSON.stringify(preimage.tx_obj),  // schema requires tx_hex, handler L538 parses back
           input_index: inputIdx,
         });
         if (!makerSigRes?.ok || !makerSigRes.signature) {
@@ -547,7 +547,7 @@ export async function dispatchPhase2Consensual(offer, winner, db = sqlite) {
         // taker sig
         const takerSigRes = await sendCommandAsync(takerRelayId, {
           type: 'sign_input_for_settle',
-          tx_obj: preimage.tx_obj,
+          tx_hex: JSON.stringify(preimage.tx_obj),
           input_index: inputIdx,
         });
         if (!takerSigRes?.ok || !takerSigRes.signature) {
