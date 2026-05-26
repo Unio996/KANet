@@ -26,6 +26,12 @@ contract PoolSpine(
     int deadline,             // unix seconds, after which forfeit/refund eligible
     int minerFee,             // sompi for chain TX
     int brokerFeePct,         // basis points
+    int oracleFeePct,         // basis points — Oracle v0.3 R7 truth matrix (range 5-20%, 500-2000 bps)
+                              //   prediction settle: losingPool × oracleFeePct / 10000 平分 3 oracle (合并 outputs[last 3] per J1 #2 选项 A)
+                              //   公式 sediment: distributablePool = losingPool − brokerFee − oracleFee
+                              //   KIP-10 loop verify + 真 enforce 跟 broker fee 一起 Phase 2 implement (= 不 NWT sub 4 scope)
+                              //   Layer 2 SS defense-in-depth deferred (= 等 Phase 2 KIP-10 loop spendable compute 时一起加 require)
+                              //   Layer 1 console create-time reject enforce per pool.js (= dynamic formula 12500 / oracleFeePct_bps × 100M sompi)
     int oracleBondAmount,     // per-oracle bond locked at deploy
     int makerStakeAmount,     // maker initial stake at deploy
     byte[32] marketMetadataHash  // sha256 of market spec (= condition_id, outcome_token_id, resolution_rule)

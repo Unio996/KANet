@@ -29,14 +29,23 @@ contract PredictionEscrowUnanimous5(
     int deadline,
     int minerFee,
     int brokerFeePct,
+    int oracleFeePct,
     int makerStakeAmount,
     int takerStakeAmount
 ) {
 
-    // settle — 5 oracle 全签 + 一致 winner → spendable (= 双 input - minerFee) 拆 winner + broker
+    // settle_dispute — 5 oracle 全签 + 一致 winner → oracle 介入 dispute path
+    //   Oracle v0.3 R7 truth matrix "1V1 escrow dispute settle":
+    //     broker 1% × notional + oracle 1% × notional (= total 2%), user 付 2%
+    //   ctor oracleFeePct (range 5-20 bps×100 e.g. 100 = 1%, baked into spine)
     //   winner: 0 = maker won, 1 = taker won
-    //   要求: 双 stake 都 locked (= inputs.length == 2)
-    entrypoint function settle(
+    //   inputs.length == 2 (= 双 stake locked)
+    //   outputs.length == 7 (= winner + broker + 5 oracle fee outputs)
+    //   Layer 2 SS defense-in-depth (= J1 #12 dynamic formula, NWT r13 ACK):
+    //     require(spendable * oracleFeePct >= 1_250_000_000_000)
+    //     = 12500 KAS × 10^8 sompi unit, 等价 (spendable × oracleFeePct / 10000 / 5) >= 0.25 KAS per oracle output
+    //     防 KIP-9 storage mass 撞 cap (= 5 oracle outputs 小 pot 量化撞墙, J1 #10 catch)
+    entrypoint function settle_dispute(
         sig sig1,
         sig sig2,
         sig sig3,
@@ -52,6 +61,63 @@ contract PredictionEscrowUnanimous5(
 
         require(winner == 0 || winner == 1);
         require(tx.inputs.length == 2);
+        require(tx.outputs.length == 7);
+
+        int spendable = tx.inputs[0].value + tx.inputs[1].value - minerFee;
+
+        // Layer 2 SS defense-in-depth: spendable × oracleFeePct >= 12500 KAS × 10^8 sompi
+        // 防 KIP-9 storage mass 撞 cap (= J1 #12 dynamic formula)
+        require(spendable * oracleFeePct >= 1250000000000);
+
+        int brokerFeeAmount = spendable * brokerFeePct / 10000;
+        int oracleFeeAmount = spendable * oracleFeePct / 10000;
+        int oraclePerFee = oracleFeeAmount / 5;
+        int distributableAmount = spendable - brokerFeeAmount - oracleFeeAmount;
+
+        byte[34] makerLock = new ScriptPubKeyP2PK(pubkey(makerPk));
+        byte[34] takerLock = new ScriptPubKeyP2PK(pubkey(takerPk));
+        byte[34] brokerLock = new ScriptPubKeyP2PK(pubkey(brokerPk));
+        byte[34] oracle1Lock = new ScriptPubKeyP2PK(pubkey(oracle1Pk));
+        byte[34] oracle2Lock = new ScriptPubKeyP2PK(pubkey(oracle2Pk));
+        byte[34] oracle3Lock = new ScriptPubKeyP2PK(pubkey(oracle3Pk));
+        byte[34] oracle4Lock = new ScriptPubKeyP2PK(pubkey(oracle4Pk));
+        byte[34] oracle5Lock = new ScriptPubKeyP2PK(pubkey(oracle5Pk));
+
+        if (winner == 0) {
+            require(tx.outputs[0].scriptPubKey == byte[](makerLock));
+        } else {
+            require(tx.outputs[0].scriptPubKey == byte[](takerLock));
+        }
+        require(tx.outputs[0].value == distributableAmount);
+        require(tx.outputs[1].scriptPubKey == byte[](brokerLock));
+        require(tx.outputs[1].value == brokerFeeAmount);
+        require(tx.outputs[2].scriptPubKey == byte[](oracle1Lock));
+        require(tx.outputs[2].value == oraclePerFee);
+        require(tx.outputs[3].scriptPubKey == byte[](oracle2Lock));
+        require(tx.outputs[3].value == oraclePerFee);
+        require(tx.outputs[4].scriptPubKey == byte[](oracle3Lock));
+        require(tx.outputs[4].value == oraclePerFee);
+        require(tx.outputs[5].scriptPubKey == byte[](oracle4Lock));
+        require(tx.outputs[5].value == oraclePerFee);
+        require(tx.outputs[6].scriptPubKey == byte[](oracle5Lock));
+        require(tx.outputs[6].value == oraclePerFee);
+    }
+
+    // settle_consensual — 双方 mutual confirm + 0 oracle (= "正常 settle" path)
+    //   Oracle v0.3 R7 truth matrix "1V1 escrow 正常 settle (双方 confirm)":
+    //     broker 1% × notional + oracle 0 (= user 付 1%)
+    //   maker + taker mutual sig → winner 由协商定 (= UI sub #7 consensual button trigger)
+    //   J1 #C1 fix: winner-binding explicit outputs verify (= UNCONSTRAINED winner attack 防)
+    //   inputs.length == 2 + outputs.length == 2 (= winner + broker only, 0 oracle output)
+    entrypoint function settle_consensual(
+        sig makerSig,
+        sig takerSig,
+        int winner
+    ) {
+        require(checkSig(makerSig, pubkey(makerPk)));
+        require(checkSig(takerSig, pubkey(takerPk)));
+        require(winner == 0 || winner == 1);
+        require(tx.inputs.length == 2);
         require(tx.outputs.length == 2);
 
         int spendable = tx.inputs[0].value + tx.inputs[1].value - minerFee;
@@ -62,6 +128,7 @@ contract PredictionEscrowUnanimous5(
         byte[34] takerLock = new ScriptPubKeyP2PK(pubkey(takerPk));
         byte[34] brokerLock = new ScriptPubKeyP2PK(pubkey(brokerPk));
 
+        // J1 #C1 fix: winner-binding explicit outputs verify (= UNCONSTRAINED winner attack 防)
         if (winner == 0) {
             require(tx.outputs[0].scriptPubKey == byte[](makerLock));
         } else {
