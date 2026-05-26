@@ -248,7 +248,7 @@ async function dispatchPhase2OrCheckSigs(offer, winnerStr, db) {
       const { sendCommandAsync } = await import('./relay-manager.js');
       const makerStake = parseInt(meta.maker_stake_sompi, 10) || 0;
       const takerStake = parseInt(meta.taker_stake_sompi, 10) || 0;
-      const minerFee = parseInt(meta.miner_fee_sompi, 10) || 10_000;
+      const minerFee = parseInt(meta.miner_fee_sompi, 10) || 20_000;
       const brokerFeePct = parseInt(meta.broker_fee_pct, 10) || 0;
       const oracleFeePct = parseInt(meta.oracle_fee_pct, 10) || 100;  // sub 5b: default 1% (per Bettor r17 truth matrix)
       const spendable = BigInt(makerStake + takerStake - minerFee);
@@ -367,7 +367,7 @@ async function dispatchPhase2OrCheckSigs(offer, winnerStr, db) {
       // 不是 wasm-serialized {value, scriptPublicKey}. phase2_tx_obj.outputs 是 TransactionOutput 序列化 form 不通用).
       const makerStake = parseInt(meta.maker_stake_sompi, 10) || 0;
       const takerStake = parseInt(meta.taker_stake_sompi, 10) || 0;
-      const minerFee = parseInt(meta.miner_fee_sompi, 10) || 10_000;
+      const minerFee = parseInt(meta.miner_fee_sompi, 10) || 20_000;
       const brokerFeePct = parseInt(meta.broker_fee_pct, 10) || 0;
       const spendable = BigInt(makerStake + takerStake - minerFee);
       const brokerFeeAmount = (spendable * BigInt(brokerFeePct)) / 10000n;
@@ -440,7 +440,7 @@ export async function dispatchPhase2Consensual(offer, winner, db = sqlite) {
     const { sendCommandAsync } = await import('./relay-manager.js');
     const makerStake = parseInt(meta.maker_stake_sompi, 10) || 0;
     const takerStake = parseInt(meta.taker_stake_sompi, 10) || 0;
-    const minerFee = parseInt(meta.miner_fee_sompi, 10) || 10_000;
+    const minerFee = parseInt(meta.miner_fee_sompi, 10) || 20_000;
     const brokerFeePct = parseInt(meta.broker_fee_pct, 10) || 100;  // default 1%
     const spendable = BigInt(makerStake + takerStake - minerFee);
     const brokerFeeAmount = (spendable * BigInt(brokerFeePct)) / 10000n;

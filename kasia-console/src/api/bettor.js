@@ -1664,7 +1664,7 @@ export async function registerBettorRoutes(fastify) {
     catch (e) { return reply.code(500).send({ ok: false, error: `metadata JSON parse fail: ${e.message}` }); }
     const redeemScriptHex = meta.redeem_script_hex;
     if (!redeemScriptHex) return reply.code(500).send({ ok: false, error: 'offer metadata missing redeem_script_hex' });
-    const minerFeeSompi = parseInt(meta.miner_fee_sompi, 10) || 10_000;
+    const minerFeeSompi = parseInt(meta.miner_fee_sompi, 10) || 20_000;  // Bug 14 fix sediment (J1 #35): 10_000 too low for kaspad 13_130 standardness
     const makerStakeSompi = parseInt(meta.maker_stake_sompi, 10);
     const takerStakeSompi = parseInt(meta.taker_stake_sompi, 10);
     // Sub 8.3 Bug 15: SS contract refund_both / refund_maker_unjoined branches require tx.time >= deadline
