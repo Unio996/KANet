@@ -1,35 +1,63 @@
 <%~ include('partials/page-open', { _page: 'contacts', pageTitle: '通讯录', ...it }) %>
 
+<!-- KANet-UI sub A6.3 contacts Editorial 风格 propagate (= Bettor r66 钦定)
+     baseline: predictions-pool-create.eta Editorial Financial Instrument
+     - Fraunces serif for headers + counts
+     - 古铜金 #b08a44 accent for active state + trust signals
+     - cosmetic only, 0 functionality change
+-->
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&display=swap" rel="stylesheet">
+
+<style>
+  .ct-display { font-family: 'Fraunces', Georgia, serif; font-feature-settings: 'opsz' 36; }
+  .ct-accent-gold { color: #b08a44; }
+  .ct-accent-gold-bg { background: #b08a44; }
+  .ct-accent-gold-bg:hover { background: #97742d; }
+  .ct-accent-gold-border { border-color: #b08a44; }
+  .ct-card-editorial {
+    background: white;
+    border: 1px solid #e4e2dc;
+    transition: border-color 0.15s;
+  }
+  .ct-card-editorial:hover { border-color: #d6d4cc; }
+  .ct-pill-active {
+    background: #b08a44 !important;
+    color: white !important;
+    border-color: #b08a44 !important;
+  }
+</style>
+
 <div class="p-6" x-data="contactsPage()">
-  <!-- 顶栏 — 一行三个互斥切换按钮 -->
-  <div class="flex items-center gap-3 mb-3 flex-wrap">
+  <!-- 顶栏 — Editorial header + 4 互斥切换按钮 (= gold accent on active) -->
+  <div class="flex items-center gap-3 mb-4 flex-wrap">
     <select x-model="selectedAgent" @change="load(); ssInit(); spInit()" class="rounded-lg border border-warm-300 px-3 py-2 text-sm bg-white font-medium">
       <% it.relayNodes.forEach(r => { %>
       <option value="<%= r.id %>"><%= r.name %></option>
       <% }) %>
     </select>
-    <span class="text-sm text-ink-700" x-show="!loading" x-text="contacts.length + ' 个联系人'"></span>
+    <span class="ct-display text-base ct-accent-gold tabular-nums" x-show="!loading" x-text="contacts.length"></span>
+    <span class="text-xs text-ink-500" x-show="!loading">个联系人</span>
     <div class="ml-auto flex items-center gap-1.5">
       <button @click="activePanel = activePanel==='add' ? null : 'add'"
-              class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-              :class="activePanel==='add' ? 'bg-brand-500 text-white' : 'bg-white border border-warm-300 text-ink-600 hover:bg-warm-50'">
+              class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border"
+              :class="activePanel==='add' ? 'ct-pill-active' : 'bg-white border-warm-300 text-ink-600 hover:bg-warm-50'">
         + 添加联系人
       </button>
       <button @click="activePanel = activePanel==='social' ? null : 'social'"
-              class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors inline-flex items-center gap-1.5"
-              :class="activePanel==='social' ? 'bg-brand-500 text-white' : 'bg-white border border-warm-300 text-ink-600 hover:bg-warm-50'">
+              class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors inline-flex items-center gap-1.5 border"
+              :class="activePanel==='social' ? 'ct-pill-active' : 'bg-white border-warm-300 text-ink-600 hover:bg-warm-50'">
         社交管理
         <span class="badge text-[9px]" :class="activePanel==='social' ? 'bg-white/20 text-white' : ssBadges[ssMode]" x-text="ssLabels[ssMode]"></span>
       </button>
       <button @click="activePanel = activePanel==='tags' ? null : 'tags'"
-              class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors inline-flex items-center gap-1.5"
-              :class="activePanel==='tags' ? 'bg-brand-500 text-white' : 'bg-white border border-warm-300 text-ink-600 hover:bg-warm-50'">
+              class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors inline-flex items-center gap-1.5 border"
+              :class="activePanel==='tags' ? 'ct-pill-active' : 'bg-white border-warm-300 text-ink-600 hover:bg-warm-50'">
         标签管理
         <span class="text-[9px]" :class="activePanel==='tags' ? 'text-white/80' : 'text-ink-300'" x-text="'(' + knownTags.length + ')'"></span>
       </button>
       <button @click="activePanel = activePanel==='backup' ? null : 'backup'"
-              class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-              :class="activePanel==='backup' ? 'bg-brand-500 text-white' : 'bg-white border border-warm-300 text-ink-600 hover:bg-warm-50'"
+              class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border"
+              :class="activePanel==='backup' ? 'ct-pill-active' : 'bg-white border-warm-300 text-ink-600 hover:bg-warm-50'"
               title="导出/导入通讯录和社交配置">
         备份/恢复
       </button>
