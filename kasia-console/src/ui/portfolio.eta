@@ -424,6 +424,51 @@
         </div>
       </template>
 
+      <!-- ─── Oracle Earnings (Oracle v0.3 sub #7 §10 D5 透明审计) ─── -->
+      <div class="bg-white border border-warm-200 rounded-lg p-4 mb-3">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-semibold text-ink-700">🎯 Oracle Earnings</h3>
+          <a href="/predictions/oracle-registry" class="text-[11px] text-amber-700 underline">在线 oracle 名单 →</a>
+        </div>
+        <template x-if="oracleEarnings && oracleEarnings.length > 0">
+          <div>
+            <!-- 总额 -->
+            <div class="flex items-baseline gap-2 mb-3">
+              <span class="text-2xl font-display text-green-700"
+                    x-text="oracleEarnings.reduce((s,e) => s + (e.reward_amount || 0), 0).toFixed(2)"></span>
+              <span class="text-xs text-ink-400">KAS 累计 (= 所有 oracle role 跨 market 合计)</span>
+            </div>
+            <!-- per-market 细分 -->
+            <div class="space-y-1.5 max-h-60 overflow-y-auto">
+              <template x-for="e in oracleEarnings.slice(0, 20)" :key="e.id">
+                <div class="flex items-center justify-between py-1 border-b border-warm-100 last:border-0 text-xs">
+                  <div class="flex-1">
+                    <div class="font-mono text-[10px] text-ink-400" x-text="e.market_id?.slice(0,12) + '... ' + (e.audited_at?.slice(0,10) || '')"></div>
+                    <div class="text-ink-500" x-text="'oracle: ' + (e.oracle_relay_name || e.oracle_relay_id?.slice(0,8))"></div>
+                  </div>
+                  <div class="text-right">
+                    <div class="text-green-600 font-medium" x-text="'+' + (e.reward_amount || 0).toFixed(4) + ' KAS'"></div>
+                    <div class="text-[10px]" :class="e.vote === e.consensus_outcome ? 'text-green-500' : 'text-red-500'"
+                         x-text="e.vote === e.consensus_outcome ? '✓ 跟最终一致' : '✗ 跟少数派'"></div>
+                  </div>
+                </div>
+              </template>
+            </div>
+            <div class="text-[10px] text-ink-400 mt-2">
+              透明审计 (§10): 显 oracle role 历史 vote + reward, 用户 audit oracle 工作量
+            </div>
+          </div>
+        </template>
+        <template x-if="!oracleEarnings || oracleEarnings.length === 0">
+          <div class="text-center py-6 text-xs text-ink-400">
+            <div>暂无 oracle earnings 记录</div>
+            <div class="mt-1 text-[10px]">
+              成为 oracle: <a href="/agent-v2?tab=oracle" class="text-amber-700 underline">Agent › Oracle tab 注册</a>
+            </div>
+          </div>
+        </template>
+      </div>
+
       <!-- ─── 底部提示 ─── -->
       <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-[11px] text-amber-900">
         <div class="font-semibold mb-1">📍 关于这个页面</div>
@@ -451,6 +496,8 @@ function portfolioApp() {
     lastRefresh: '',
     unit: localStorage.getItem('portfolio_unit') || 'usd',  // 'usd' | 'kas'
     chainsMeta: {},  // loaded from /api/chains/meta
+    // Oracle v0.3 sub #7 §10 §D5 — Oracle Earnings 透明审计
+    oracleEarnings: [],  // [{ id, market_id, oracle_relay_id, oracle_relay_name, vote, consensus_outcome, reward_amount, audited_at }, ...]
     // Hardcoded 9-chain catalog mirroring exchange.eta Add Wallet modal — single
     // source of truth for "supported chains" across both pages. Same shape as
     // exchange.eta line 826. If you add a chain, add it BOTH here and there.
