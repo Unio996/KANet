@@ -254,10 +254,11 @@ async function dispatchPhase2OrCheckSigs(offer, winnerStr, db) {
       const spendable = BigInt(makerStake + takerStake - minerFee);
       const brokerFeeAmount = (spendable * BigInt(brokerFeePct)) / 10000n;
       const oracleFeeTotal = (spendable * BigInt(oracleFeePct)) / 10000n;
-      const oraclePerSig = oracleFeeTotal / 5n;  // 5 oracle each gets oracleFeeTotal/5
-      // Spec deviation: 任意余数 (oracleFeeTotal % 5) 留在 winner output (= 1-4 sompi, ignorable)
-      const oracleFeeAssigned = oraclePerSig * 5n;  // exact assigned (= 5 × per-sig amount)
-      const winnerAmount = spendable - brokerFeeAmount - oracleFeeAssigned;
+      const oraclePerSig = oracleFeeTotal / 5n;  // 5 oracle each gets oracleFeeTotal/5 (= floor)
+      // J2 cross audit fix (sub 5b-1 vs NWT sub 4 SS): NWT SS distributableAmount = spendable - brokerFeeAmount - oracleFeeAmount (= 含余数, 余数 implicit minerFee).
+      // 必跟 NWT SS 一致 (= SS require(tx.outputs[0].value == distributableAmount), J2 emit winnerAmount 必 byte-exact match).
+      // oracleFeeTotal % 5 余数 (0-4 sompi) 不显式 output → kaspad 算 implicit minerFee (= 跟 W3 余数 maker pattern 不同, 这里余数 → miner 而非 stakeholder).
+      const winnerAmount = spendable - brokerFeeAmount - oracleFeeTotal;
       const winnerAddr = winner === 0 ? offer.maker_kaspa_addr : offer.taker;
       const brokerRelayId = meta.broker_relay_id;
       const brokerRow = brokerRelayId ? db.prepare(`SELECT address FROM relay_nodes WHERE id=?`).get(brokerRelayId) : null;
