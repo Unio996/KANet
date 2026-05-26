@@ -472,19 +472,47 @@ export async function dispatchPhase2(market, decision) {
     }
 
     // 4. Build outputs per PoolSpine.sil entry 0 ordering:
-    //    [broker, winner_1..winner_N, optional maker creator-fee output, oracle_bond_returns[]]
+    //    [broker, winner_1..winner_N, optional maker creator-fee output, oracle_bond_returns[+oracleFee/3]]
+    //
+    // Sub 5b (Oracle v0.3 J1 #21 critical gap fix): NWT sub 4 PoolSpine ctor 12 + outputs[last 3]
+    // 合并 bond + oracleFee/3 per oracle (= 3 oracle outputs each get bond_return + oracleFee/3 share).
+    // outputs.length 不变 (= PoolSpine 3 oracle), 但 amount 含 oracleFee share.
+    const oracleFeePct = parseInt(market.oracle_fee_pct, 10) || 100;  // default 1% per Bettor r17 truth matrix
+    const losingPoolForOracleFee = Math.max(0, parseInt(market.maker_stake_amount, 10) || 0); // approx; per NWT spec deviated
+    // Per Bettor r17 truth matrix: oracleFee = oracleFeePct × losingPool (= same source as brokerFee).
+    // computePoolPayouts didn't compute this; sub 5b adds explicitly.
+    const totalLoserStake = participants.filter(p => p.direction !== decision.winner).reduce((s, p) => s + p.stake, 0);
+    const minerFeeSompi = parseInt(market.miner_fee, 10) || 20_000;
+    const oracleLosingPool = Math.max(0, totalLoserStake - minerFeeSompi);
+    const oracleFeeTotal = Math.floor(oracleLosingPool * oracleFeePct / 10000);
+    const oracleFeePerSig = Math.floor(oracleFeeTotal / 3);  // 3 oracle each gets oracleFeeTotal/3
+    // Spec note: oracleFeeTotal % 3 余数 (= 0-2 sompi) 留 brokerFee 端 (= 等同 W3 余数 maker pattern reuse).
+    // Per J1 #4 fix: oracleFee deducted from broker pool? No — 跟 Bettor r17 truth matrix "brokerFeePct × losingPool" + "oracleFeePct × losingPool" 是 2 个独立 channel, 不 carved from broker.
+    // Settler 必从 distributablePool 进一步扣除 oracleFeeTotal (= winner pool 减小). 这是 NWT sub 4 PoolSpine 改的 semantic.
+
     const outputs = [];
     if (payouts.brokerFee > 0) {
       outputs.push({ address: brokerRow.address, amountSompi: payouts.brokerFee.toString() });
     }
+    // Winners reduced by oracleFeeTotal share — proportional to original share
+    // (= 等同 W2 spec "distributablePool = losingPool − brokerFee" 加 minus oracleFeeTotal)
+    let winnerOracleFeeDeducted = 0;
     for (const w of payouts.winnerPayouts) {
-      outputs.push({ address: participants[w.participantIndex].addr, amountSompi: w.amount.toString() });
+      // Pro-rata oracleFee deduction (= winner share scales linearly with stake)
+      const winnerStake = participants[w.participantIndex].stake;
+      const totalWinnerStake = payouts.winnerPayouts.reduce((s, p) => s + participants[p.participantIndex].stake, 0);
+      const oracleFeeShareForWinner = totalWinnerStake > 0 ? Math.floor(oracleFeeTotal * winnerStake / totalWinnerStake) : 0;
+      const adjustedAmount = Math.max(0, w.amount - oracleFeeShareForWinner);
+      winnerOracleFeeDeducted += oracleFeeShareForWinner;
+      outputs.push({ address: participants[w.participantIndex].addr, amountSompi: adjustedAmount.toString() });
     }
     if (payouts.makerExtraOutput) {
       outputs.push({ address: makerRow.address, amountSompi: payouts.makerExtraOutput.toString() });
     }
+    // Oracle bond returns + oracleFee/3 merged per output (= NWT sub 4 PoolSpine spec)
     for (const r of payouts.oracleBondReturns) {
-      outputs.push({ address: oracleRows[r.oracleIndex].address, amountSompi: r.amount.toString() });
+      const mergedAmount = r.amount + oracleFeePerSig;
+      outputs.push({ address: oracleRows[r.oracleIndex].address, amountSompi: mergedAmount.toString() });
     }
 
     // 5. Build input outpoints. Spine P2SH has MULTIPLE UTXOs: 1 maker stake (spine_lock_tx) +

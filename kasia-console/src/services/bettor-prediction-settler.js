@@ -242,15 +242,22 @@ async function dispatchPhase2OrCheckSigs(offer, winnerStr, db) {
 
   if (offer.protocol_status === 'verifying') {
     // First Phase 2 dispatch — build preimage + DM 5 oracle TX-sig req + transition collecting_sigs
+    // Sub 5b (Oracle v0.3 J1 #21 critical gap fix): outputs.length 2→7 align NWT sub 4 PredictionEscrowUnanimous5
+    // settle_dispute: winner + broker + 5 oracle fee outputs + winner-binding explicit verify.
     try {
       const { sendCommandAsync } = await import('./relay-manager.js');
       const makerStake = parseInt(meta.maker_stake_sompi, 10) || 0;
       const takerStake = parseInt(meta.taker_stake_sompi, 10) || 0;
       const minerFee = parseInt(meta.miner_fee_sompi, 10) || 10_000;
       const brokerFeePct = parseInt(meta.broker_fee_pct, 10) || 0;
+      const oracleFeePct = parseInt(meta.oracle_fee_pct, 10) || 100;  // sub 5b: default 1% (per Bettor r17 truth matrix)
       const spendable = BigInt(makerStake + takerStake - minerFee);
       const brokerFeeAmount = (spendable * BigInt(brokerFeePct)) / 10000n;
-      const winnerAmount = spendable - brokerFeeAmount;
+      const oracleFeeTotal = (spendable * BigInt(oracleFeePct)) / 10000n;
+      const oraclePerSig = oracleFeeTotal / 5n;  // 5 oracle each gets oracleFeeTotal/5
+      // Spec deviation: 任意余数 (oracleFeeTotal % 5) 留在 winner output (= 1-4 sompi, ignorable)
+      const oracleFeeAssigned = oraclePerSig * 5n;  // exact assigned (= 5 × per-sig amount)
+      const winnerAmount = spendable - brokerFeeAmount - oracleFeeAssigned;
       const winnerAddr = winner === 0 ? offer.maker_kaspa_addr : offer.taker;
       const brokerRelayId = meta.broker_relay_id;
       const brokerRow = brokerRelayId ? db.prepare(`SELECT address FROM relay_nodes WHERE id=?`).get(brokerRelayId) : null;
@@ -260,6 +267,30 @@ async function dispatchPhase2OrCheckSigs(offer, winnerStr, db) {
         return { handled: true, completed: false };
       }
 
+      // Sub 5b: lookup 5 oracle addresses for oracle fee outputs (= sub 4 SS settle_dispute outputs[2..6])
+      const oracleIds = JSON.parse(offer.outcome_oracle_relay_ids || '[]');
+      if (oracleIds.length !== 5) {
+        console.error(`[settler] Phase 2 dispatch: expected 5 oracle ids, got ${oracleIds.length} offer=${offer.id.slice(0,12)}`);
+        return { handled: true, completed: false };
+      }
+      const oracleRows = db.prepare(`SELECT id, address FROM relay_nodes WHERE id IN (${oracleIds.map(() => '?').join(',')})`).all(...oracleIds);
+      // Order oracle outputs by oracleIds (= match SS ctor oracleNPk[1..5] sequence per NWT sub 4)
+      const oracleAddrsOrdered = oracleIds.map(oid => oracleRows.find(r => r.id === oid)?.address).filter(Boolean);
+      if (oracleAddrsOrdered.length !== 5) {
+        console.error(`[settler] Phase 2 dispatch: oracle address lookup incomplete, got ${oracleAddrsOrdered.length}/5 offer=${offer.id.slice(0,12)}`);
+        return { handled: true, completed: false };
+      }
+
+      // Sub 5b outputs 7 (= NWT sub 4 settle_dispute outputs ordering):
+      //   [0] winner + winnerAmount
+      //   [1] broker + brokerFeeAmount
+      //   [2..6] oracle 1..5 + oraclePerSig each
+      const outputs = [
+        { address: winnerAddr, amountSompi: winnerAmount.toString() },
+        { address: brokerAddr, amountSompi: brokerFeeAmount.toString() },
+        ...oracleAddrsOrdered.map(addr => ({ address: addr, amountSompi: oraclePerSig.toString() })),
+      ];
+
       // Build preimage via relay IPC
       const preimage = await sendCommandAsync(offer.maker_relay_id, {
         type: 'prediction_settle_build_preimage',
@@ -268,10 +299,7 @@ async function dispatchPhase2OrCheckSigs(offer, winnerStr, db) {
           { outpointTxid: offer.broadcast_tx_id, outpointIndex: 0 },
           { outpointTxid: offer.taker_escrow_lock_tx, outpointIndex: 0 },
         ],
-        outputs: [
-          { address: winnerAddr, amountSompi: winnerAmount.toString() },
-          { address: brokerAddr, amountSompi: brokerFeeAmount.toString() },
-        ],
+        outputs,
       });
       if (!preimage?.ok || !preimage.tx_obj) {
         console.error(`[settler] Phase 2 build_preimage fail offer=${offer.id.slice(0,12)}: ${preimage?.error}`);
