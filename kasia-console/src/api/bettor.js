@@ -1614,6 +1614,78 @@ export async function registerBettorRoutes(fastify) {
     });
   });
 
+  // POST /api/prediction/consensual-confirm/:offer_id — Sub 8 (Oracle v0.3 J2 r37 ship per Bettor r56/r59).
+  //
+  // Trigger settle_consensual happy path: maker + taker 双方 confirm outcome, bypass 5-oracle dispute path.
+  // Both maker_relay + taker_relay must POST with same winner value → dispatchPhase2Consensual fires.
+  // If votes mismatch, offer stays in matched/verifying → voter cron continues dispute path 5-of-5 oracle vote.
+  //
+  // Body: { relay_id, winner } where winner is 0 (maker won) or 1 (taker won).
+  // Idempotent: same relay re-submits → overwrites their vote, no double-dispatch (status guard).
+  fastify.post('/api/prediction/consensual-confirm/:offer_id', async (request, reply) => {
+    const offerId = request.params.offer_id;
+    const b = request.body || {};
+    if (!b.relay_id) return reply.code(400).send({ ok: false, error: 'missing relay_id' });
+    if (b.winner !== 0 && b.winner !== 1) return reply.code(400).send({ ok: false, error: 'winner must be 0 (maker won) or 1 (taker won)' });
+
+    const offer = sqlite.prepare(`
+      SELECT id, maker_relay_id, taker, maker_kaspa_addr, escrow_p2sh, broadcast_tx_id, taker_escrow_lock_tx, protocol_status, metadata, outcome_oracle_relay_ids
+      FROM exchange_offers WHERE id = ?
+    `).get(offerId);
+    if (!offer) return reply.code(404).send({ ok: false, error: 'offer not found' });
+    if (!['matched', 'verifying'].includes(offer.protocol_status)) {
+      return reply.code(409).send({ ok: false, error: `offer status=${offer.protocol_status}, must be matched or verifying for consensual-confirm (collecting_sigs+ 已 dispatch, 不可再 vote)` });
+    }
+
+    // Resolve relay role: maker_relay_id vs taker (= taker col stores kaspa addr per taker-stake L1599)
+    const relayRow = sqlite.prepare(`SELECT id, address FROM relay_nodes WHERE id = ?`).get(b.relay_id);
+    if (!relayRow) return reply.code(404).send({ ok: false, error: 'relay_id not found in relay_nodes' });
+    let role;
+    if (b.relay_id === offer.maker_relay_id) role = 'maker';
+    else if (relayRow.address === offer.taker) role = 'taker';
+    else return reply.code(403).send({ ok: false, error: 'relay_id 既非 maker_relay_id 也非 taker — 只 escrow 双方可 confirm' });
+
+    // Read + update metadata.consensual_votes (= JSON {maker?: 0|1, taker?: 0|1})
+    let meta;
+    try { meta = JSON.parse(offer.metadata || '{}'); } catch { return reply.code(500).send({ ok: false, error: 'metadata JSON parse fail' }); }
+    const votes = { ...(meta.consensual_votes || {}), [role]: b.winner };
+    meta.consensual_votes = votes;
+    meta[`consensual_${role}_at`] = new Date().toISOString();
+
+    const bothAgreed = votes.maker !== undefined && votes.taker !== undefined && votes.maker === votes.taker;
+
+    // Persist votes first (= idempotent, prevents lost vote on dispatch crash)
+    sqlite.prepare(`UPDATE exchange_offers SET metadata = ? WHERE id = ?`).run(JSON.stringify(meta), offerId);
+
+    let dispatched = false, dispatchResult = null;
+    if (bothAgreed) {
+      // Fetch full offer for dispatchPhase2Consensual (= needs all cols)
+      const fullOffer = sqlite.prepare(`SELECT * FROM exchange_offers WHERE id = ?`).get(offerId);
+      try {
+        const { dispatchPhase2Consensual } = await import('../services/bettor-prediction-settler.js');
+        dispatchResult = await dispatchPhase2Consensual(fullOffer, votes.maker);
+        dispatched = !!dispatchResult?.handled;
+      } catch (e) {
+        console.error(`[consensual-confirm] dispatch fail offer=${offerId.slice(0,12)}: ${e.message}`);
+        return reply.code(500).send({ ok: false, error: `dispatch fail: ${e.message}`, votes });
+      }
+    }
+
+    return reply.send({
+      ok: true,
+      offer_id: offerId,
+      role,
+      vote: b.winner,
+      votes,
+      both_agreed: bothAgreed,
+      dispatched,
+      dispatch_result: dispatchResult || null,
+      next_step: bothAgreed
+        ? 'dispatchPhase2Consensual fired, settle TX preimage built, maker_sign + taker_sign DM exchange → 2-of-2 settle TX broadcast'
+        : (votes.maker === undefined ? 'awaiting maker confirm' : votes.taker === undefined ? 'awaiting taker confirm' : 'maker/taker disagree → voter cron continues dispute path 5-of-5 oracle vote'),
+    });
+  });
+
   // POST /api/prediction/refund/:offer_id — Phase 4a Sub 9 (Bettor r240) — SS refund chain TX.
   //
   // Manual trigger by maker (= PB-S9-1 候选 C 双兼 maker_manual + settler_auto).
