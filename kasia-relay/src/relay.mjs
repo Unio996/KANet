@@ -594,6 +594,32 @@ if (process.send) {
           return;
         }
 
+        case 'prediction_settle_consensual_tx': {
+          // Oracle v0.3 sub 5d (J2 r43 ship) — settle_consensual SS chain TX submit (= entry 1).
+          //   Inputs: 2 P2SH UTXOs (maker_stake + taker_stake)
+          //   Outputs: 2 (winner P2PK + broker P2PK, 0 oracle output per NWT sub 4 .sil)
+          //   sigsByInput: [[makerSig, takerSig], [makerSig, takerSig]] (= 2 sigs per input)
+          //   winner: 0 (maker won) | 1 (taker won)
+          //   selectorOpHex: '51' (= OP_1, 2nd entrypoint per .sil source order)
+          const { unlockP2SHConsensual } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const redeemScript = new Uint8Array(Buffer.from(cmd.redeem_script_hex, 'hex'));
+          const r = await unlockP2SHConsensual(
+            cmd.p2sh_address, redeemScript,
+            cmd.required_input_outpoints,
+            cmd.outputs,
+            cmd.sigs_by_input,  // [[maker_sig, taker_sig], [maker_sig, taker_sig]]
+            cmd.winner,
+            wallet.getNetworkId(),
+            0n,
+            cmd.tx_obj_preimage || null,
+          );
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: { ok: true, branch: 1, txId: r.txId } });
+          }
+          return;
+        }
+
         case 'pool_settle_tx': {
           // B2 v0.5 Sub 2d Phase 2c step 2b — pool settle TX submit (= cooperative Path A).
           // Inputs: 1 spine UTXO + N side UTXOs

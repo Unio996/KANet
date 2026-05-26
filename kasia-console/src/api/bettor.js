@@ -1597,6 +1597,13 @@ export async function registerBettorRoutes(fastify) {
         taker_stake_locked_kas=?, taker_escrow_lock_tx=?, taker=?, matched_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
         WHERE id=?
       `).run(stakeKas, takerEscrowTxId, takerRow.address, offerId);
+      // Sub 5d (J2 r43) — store taker_relay_id in metadata for dispatchPhase2Consensual sign IPC lookup
+      try {
+        const offerCur = sqlite.prepare(`SELECT metadata FROM exchange_offers WHERE id = ?`).get(offerId);
+        const metaCur = JSON.parse(offerCur?.metadata || '{}');
+        metaCur.taker_relay_id = b.taker_relay_id;
+        sqlite.prepare(`UPDATE exchange_offers SET metadata = ? WHERE id = ?`).run(JSON.stringify(metaCur), offerId);
+      } catch (e) { console.warn(`[taker-stake] metadata.taker_relay_id store fail (non-fatal): ${e.message}`); }
       // protocol_status 走 transition() (= [ABE-A.6] 单一所有权)
       const { transition } = await import('../services/exchange-machine.js');
       transition(offerId, 'matched');

@@ -32,6 +32,8 @@ export const COMMAND_TYPES = Object.freeze({
   // → validateCommand reject silent → settler dispatch fail. NWT ad-hoc fix on .105 to unblock oracle happy path.
   PREDICTION_SETTLE_CONSENSUAL_BUILD_PREIMAGE: 'prediction_settle_consensual_build_preimage',
   PREDICTION_SETTLE_TX: 'prediction_settle_tx',
+  // Oracle v0.3 sub 5d (J2 r43 ship) — settle_consensual TX submit (= entry 1, 2 sigs per input maker+taker, 2 outputs)
+  PREDICTION_SETTLE_CONSENSUAL_TX: 'prediction_settle_consensual_tx',
   PREDICTION_REFUND_TX: 'prediction_refund_tx',
   // B2 v0.5 Sub 2d Phase 2c — pool settle TX submit (= multi-input spine + N sides).
   POOL_SETTLE_TX: 'pool_settle_tx',
@@ -66,6 +68,7 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   // KI sediment 5/20: COMMAND_PAYLOAD_SCHEMA missing entry → validateCommandPayload throws "required is not iterable".
   [COMMAND_TYPES.PREDICTION_SETTLE_CONSENSUAL_BUILD_PREIMAGE]: ['p2sh_address', 'required_input_outpoints', 'outputs', 'winner'],
   [COMMAND_TYPES.PREDICTION_SETTLE_TX]: ['p2sh_address', 'redeem_script_hex', 'required_input_outpoints', 'outputs', 'sigs_by_input', 'winner'],
+  [COMMAND_TYPES.PREDICTION_SETTLE_CONSENSUAL_TX]: ['p2sh_address', 'redeem_script_hex', 'required_input_outpoints', 'outputs', 'sigs_by_input', 'winner'],
   [COMMAND_TYPES.PREDICTION_REFUND_TX]: ['p2sh_address', 'redeem_script_hex', 'branch'],
   [COMMAND_TYPES.POOL_SETTLE_TX]: ['spine_p2sh_address', 'side_p2sh_addresses', 'spine_redeem_script_hex', 'side_redeem_script_hexes', 'required_input_outpoints', 'outputs', 'spine_sigs_by_input', 'spine_input_count', 'winner'],
   [COMMAND_TYPES.POOL_REFUND_DISAGREEMENT_TX]: ['spine_p2sh_address', 'spine_redeem_script_hex', 'required_input_outpoints', 'outputs', 'spine_sigs_by_input', 'silent_oracle_index', 'signing_pair'],
@@ -98,6 +101,7 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   // Oracle v0.3 sub 5c (NWT ad-hoc fix .105): consensual same shape as build_preimage + winner number.
   [COMMAND_TYPES.PREDICTION_SETTLE_CONSENSUAL_BUILD_PREIMAGE]: { p2sh_address: 'string', required_input_outpoints: 'array', outputs: 'array', winner: 'number' },
   [COMMAND_TYPES.PREDICTION_SETTLE_TX]: { p2sh_address: 'string', redeem_script_hex: 'string', required_input_outpoints: 'array', outputs: 'array', sigs_by_input: 'array', winner: 'number' },
+  [COMMAND_TYPES.PREDICTION_SETTLE_CONSENSUAL_TX]: { p2sh_address: 'string', redeem_script_hex: 'string', required_input_outpoints: 'array', outputs: 'array', sigs_by_input: 'array', winner: 'number' },
   [COMMAND_TYPES.PREDICTION_REFUND_TX]: { p2sh_address: 'string', redeem_script_hex: 'string', branch: 'number' },
   [COMMAND_TYPES.POOL_SETTLE_TX]: { spine_p2sh_address: 'string', side_p2sh_addresses: 'array', spine_redeem_script_hex: 'string', side_redeem_script_hexes: 'array', required_input_outpoints: 'array', outputs: 'array', spine_sigs_by_input: 'array', spine_input_count: 'number', winner: 'number' },
   [COMMAND_TYPES.POOL_REFUND_DISAGREEMENT_TX]: { spine_p2sh_address: 'string', spine_redeem_script_hex: 'string', required_input_outpoints: 'array', outputs: 'array', spine_sigs_by_input: 'array', silent_oracle_index: 'number', signing_pair: 'number' },

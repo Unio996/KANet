@@ -366,6 +366,109 @@ export async function unlockP2SHMultiSig(p2shAddress, redeemScript, requiredInpu
   }
 }
 
+// ── 5b. unlockP2SHConsensual (Oracle v0.3 sub 5d J2 r43 ship) ──
+//
+// PredictionEscrowUnanimous5.sil settle_consensual entry (= entrypoint 1, selector OP_1).
+// 跟 unlockP2SHMultiSig 区分:
+//   - 2 sigs per input (= makerSig + takerSig, not 5 oracle)
+//   - selector OP_1 (= settle_consensual branch index), not OP_0 (= settle_dispute)
+//   - sigOpCount = 2 per input (not 5)
+//   - outputs.length 2 (= [winner P2PK, broker P2PK], 0 oracle output)
+//
+// scriptSig per input layout (= 跟 source order match silverc stack pop convention):
+//   [maker_sig push] [taker_sig push] [winner_OP] [selector_OP_1] [redeem_script push]
+//
+// @param {string} p2shAddress
+// @param {Uint8Array} redeemScript
+// @param {Array<{outpointTxid, outpointIndex}>} requiredInputOutpoints — 2 outpoints
+// @param {Array<{address, amountSompi}>} outputs — 2 outputs
+// @param {Array<Array<string>>} sigsByInput — sigsByInput[i] = [maker_sig, taker_sig] per input
+// @param {number} winner — 0 (maker won) | 1 (taker won)
+// @param {string} networkId
+// @param {bigint} [lockTime=0]
+// @param {object} [txObjPreimage] — voter's exact tx_obj for byte-identical sighash (Sub 8.2 Bug 14 pattern)
+// @returns {Promise<{txId}>}
+export async function unlockP2SHConsensual(p2shAddress, redeemScript, requiredInputOutpoints, outputs, sigsByInput, winner, networkId, lockTime = 0n, txObjPreimage = null) {
+  if (requiredInputOutpoints.length !== 2) throw new Error(`unlockP2SHConsensual requires 2 outpoints, got ${requiredInputOutpoints.length}`);
+  if (outputs.length !== 2) throw new Error(`unlockP2SHConsensual requires 2 outputs, got ${outputs.length}`);
+  if (sigsByInput.length !== 2) throw new Error(`sigsByInput must be 2 arrays (one per input), got ${sigsByInput.length}`);
+  if (sigsByInput.some(arr => arr.length !== 2)) throw new Error(`each input requires 2 sigs (= maker + taker for settle_consensual)`);
+  if (winner !== 0 && winner !== 1) throw new Error(`winner must be 0 (maker won) or 1 (taker won), got ${winner}`);
+
+  const txLockTime = BigInt(lockTime);
+  const rpc = await connectRpc(networkId);
+  try {
+    const { entries } = await rpc.getUtxosByAddresses([p2shAddress]);
+    if (!entries?.length) throw new Error(`No UTXOs at P2SH ${p2shAddress}`);
+    const matched = requiredInputOutpoints.map(req => {
+      const hits = entries.filter(e => e.outpoint.transactionId === req.outpointTxid);
+      if (hits.length === 0) throw new Error(`UTXO not found for lock tx: ${req.outpointTxid}`);
+      if (hits.length > 1) throw new Error(`ambiguous: ${hits.length} UTXOs at P2SH from tx ${req.outpointTxid}`);
+      return hits[0];
+    });
+    const txOutputs = outputs.map(o => new TransactionOutput(
+      typeof o.amountSompi === 'string' ? BigInt(o.amountSompi) : o.amountSompi,
+      payToAddressScript(new Address(o.address))
+    ));
+
+    const winnerOpHex = winner === 0 ? '00' : '51';
+    const selectorOpHex = '51';  // OP_1 = settle_consensual entrypoint (= 2nd entry per .sil source order)
+    const redeemPushSb = new ScriptBuilder();
+    redeemPushSb.addData(redeemScript);
+    const redeemPushHex = redeemPushSb.toString();
+
+    function assembleScriptSig(sigs2) {
+      const sigsConcat = sigs2.join('');
+      return sigsConcat + winnerOpHex + selectorOpHex + redeemPushHex;
+    }
+    const scriptSigs = sigsByInput.map(sigs2 => assembleScriptSig(sigs2));
+
+    let signedTx;
+    if (txObjPreimage) {
+      const parsed = JSON.parse(JSON.stringify(txObjPreimage));
+      parsed.lockTime = BigInt(parsed.lockTime || 0);
+      parsed.gas = BigInt(parsed.gas || 0);
+      if (Array.isArray(parsed.inputs)) {
+        parsed.inputs = parsed.inputs.map((inp, i) => ({
+          ...inp,
+          signatureScript: scriptSigs[i],
+          sequence: BigInt(inp.sequence || 0),
+          sigOpCount: Number(inp.sigOpCount || 0),
+          utxo: inp.utxo ? {
+            ...inp.utxo,
+            amount: BigInt(inp.utxo.amount || 0),
+            blockDaaScore: BigInt(inp.utxo.blockDaaScore || 0),
+          } : undefined,
+        }));
+      }
+      if (Array.isArray(parsed.outputs)) {
+        parsed.outputs = parsed.outputs.map(o => ({ ...o, value: BigInt(o.value || 0) }));
+      }
+      signedTx = new Transaction(parsed);
+    } else {
+      signedTx = new Transaction({
+        version: 0,
+        inputs: matched.map((utxo, i) => ({
+          previousOutpoint: { transactionId: utxo.outpoint.transactionId, index: utxo.outpoint.index },
+          signatureScript: scriptSigs[i],
+          sequence: 0n,
+          sigOpCount: 2,  // 2 checkSig calls in settle_consensual (= maker + taker)
+        })),
+        outputs: txOutputs,
+        lockTime: txLockTime,
+        gas: 0n,
+        subnetworkId: '0000000000000000000000000000000000000000',
+        payload: '',
+      });
+    }
+
+    const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: result.transactionId };
+  } finally {
+    try { await rpc.disconnect(); } catch {}
+  }
+}
+
 // Helper: hex string → Uint8Array (small util, reuse if file lacks one)
 function hexStrToBytes(hex) {
   const clean = hex.startsWith('0x') ? hex.slice(2) : hex;

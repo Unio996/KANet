@@ -507,7 +507,74 @@ export async function dispatchPhase2Consensual(offer, winner, db = sqlite) {
 
     transition(offer.id, 'collecting_sigs');  // reuse status state machine (= 2 sig vs 5+5+5+5+5 sig, transition same)
     console.log(`[settler:consensual] dispatched offer=${offer.id.slice(0,12)} winner=${winner}`);
-    return { handled: true, completed: false };
+
+    // Sub 5d (J2 r43 ship) — sign exchange + settle TX submit in-process for same-host case.
+    // Both maker_relay + taker_relay 在 same Console host → IPC sign 同步 collect + assemble + submit.
+    // Cross-host (= taker_relay on different Console) 留 v2 next cycle (= DM via chain_event).
+    const takerRelayId = meta.taker_relay_id;
+    if (!takerRelayId) {
+      console.log(`[settler:consensual] no taker_relay_id in metadata — sub 5d v1 requires same-host. v2 cross-host DM 留 next cycle. offer=${offer.id.slice(0,12)}`);
+      return { handled: true, completed: false };
+    }
+
+    try {
+      // Sign each input with maker_relay + taker_relay (= 2 sigs per input, 2 inputs = 4 sig IPC)
+      const sigsByInput = [[], []];
+      for (let inputIdx = 0; inputIdx < 2; inputIdx++) {
+        // maker sig
+        const makerSigRes = await sendCommandAsync(offer.maker_relay_id, {
+          type: 'sign_input_for_settle',
+          tx_obj: preimage.tx_obj,
+          input_index: inputIdx,
+        });
+        if (!makerSigRes?.ok || !makerSigRes.signature) {
+          console.error(`[settler:consensual] maker sign input ${inputIdx} fail offer=${offer.id.slice(0,12)}: ${makerSigRes?.error}`);
+          return { handled: true, completed: false };
+        }
+        // taker sig
+        const takerSigRes = await sendCommandAsync(takerRelayId, {
+          type: 'sign_input_for_settle',
+          tx_obj: preimage.tx_obj,
+          input_index: inputIdx,
+        });
+        if (!takerSigRes?.ok || !takerSigRes.signature) {
+          console.error(`[settler:consensual] taker sign input ${inputIdx} fail offer=${offer.id.slice(0,12)}: ${takerSigRes?.error}`);
+          return { handled: true, completed: false };
+        }
+        // Order: maker_sig first then taker_sig (= .sil source order: checkSig(makerSig) before checkSig(takerSig))
+        sigsByInput[inputIdx] = [makerSigRes.signature, takerSigRes.signature];
+      }
+
+      // Assemble + submit settle_consensual TX via prediction_settle_consensual_tx IPC
+      const submitRes = await sendCommandAsync(offer.maker_relay_id, {
+        type: 'prediction_settle_consensual_tx',
+        p2sh_address: offer.escrow_p2sh,
+        redeem_script_hex: meta.redeem_script_hex,
+        required_input_outpoints: [
+          { outpointTxid: offer.broadcast_tx_id, outpointIndex: 0 },
+          { outpointTxid: offer.taker_escrow_lock_tx, outpointIndex: 0 },
+        ],
+        outputs: [
+          { address: winnerAddr, amountSompi: winnerAmount.toString() },
+          { address: brokerAddr, amountSompi: brokerFeeAmount.toString() },
+        ],
+        sigs_by_input: sigsByInput,
+        winner,
+        tx_obj_preimage: preimage.tx_obj,
+      });
+      if (!submitRes?.ok || !submitRes.txId) {
+        console.error(`[settler:consensual] settle TX submit fail offer=${offer.id.slice(0,12)}: ${submitRes?.error}`);
+        return { handled: true, completed: false };
+      }
+
+      db.prepare(`UPDATE exchange_offers SET settle_txid=? WHERE id=?`).run(submitRes.txId, offer.id);
+      transition(offer.id, 'completed');
+      console.log(`[settler:consensual] SETTLE COMPLETED offer=${offer.id.slice(0,12)} settle_txid=${submitRes.txId.slice(0,16)} winner=${winner}`);
+      return { handled: true, completed: true, txId: submitRes.txId };
+    } catch (e) {
+      console.error(`[settler:consensual] sign+submit fail offer=${offer.id.slice(0,12)}: ${e.message}`);
+      return { handled: true, completed: false };
+    }
   } catch (e) {
     console.error(`[settler:consensual] dispatch fail offer=${offer.id?.slice(0,12)}: ${e.message}`);
     return { handled: true, completed: false };
