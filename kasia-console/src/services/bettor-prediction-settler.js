@@ -412,6 +412,106 @@ async function dispatchPhase2OrCheckSigs(offer, winnerStr, db) {
   return { handled: false };
 }
 
+/**
+ * Sub 5b-2 (Oracle v0.3 R7 J1 #21 critical gap) — settle_consensual dispatch path.
+ *
+ * Per NWT sub 4 SS settle_consensual entry shape (= PredictionEscrowUnanimous5.sil):
+ *   - signed by maker + taker (= 2 sig, 0 oracle涉)
+ *   - outputs.length 2: [winner, broker] (= 跟 settle_dispute 7 outputs 区分)
+ *   - winner-binding explicit verify (= J1 #2 C1 fix)
+ *   - broker fee 1% per truth matrix (= NOT carved from broker, 是 user 付 fee)
+ *
+ * Trigger: broker DM 收双方 confirm → broker calls this OR direct API.
+ * Emits chain_event 'pool_settle_consensual_dispatched' → sub 3 voter v2 skip detect 真依赖.
+ *
+ * Per J2-tn r9 + J1 #2 C2: 0 oracle work, 0 oracle reward, audit_mode='consensual' row in oracle_history.
+ *
+ * @param {object} offer — exchange_offers row (= 1V1 escrow)
+ * @param {number} winner — 0=maker won OR 1=taker won (= both party signed agreement)
+ * @param {Database} db
+ * @returns {{handled, completed, txId?}}
+ */
+export async function dispatchPhase2Consensual(offer, winner, db = sqlite) {
+  let meta;
+  try { meta = JSON.parse(offer.metadata || '{}'); } catch { meta = {}; }
+
+  try {
+    const { sendCommandAsync } = await import('./relay-manager.js');
+    const makerStake = parseInt(meta.maker_stake_sompi, 10) || 0;
+    const takerStake = parseInt(meta.taker_stake_sompi, 10) || 0;
+    const minerFee = parseInt(meta.miner_fee_sompi, 10) || 10_000;
+    const brokerFeePct = parseInt(meta.broker_fee_pct, 10) || 100;  // default 1%
+    const spendable = BigInt(makerStake + takerStake - minerFee);
+    const brokerFeeAmount = (spendable * BigInt(brokerFeePct)) / 10000n;
+    const winnerAmount = spendable - brokerFeeAmount;
+    const winnerAddr = winner === 0 ? offer.maker_kaspa_addr : offer.taker;
+    const brokerRelayId = meta.broker_relay_id;
+    const brokerRow = brokerRelayId ? db.prepare(`SELECT address FROM relay_nodes WHERE id=?`).get(brokerRelayId) : null;
+    const brokerAddr = brokerRow?.address;
+
+    if (!winnerAddr || !brokerAddr) {
+      console.error(`[settler:consensual] missing winnerAddr or brokerAddr offer=${offer.id.slice(0,12)}`);
+      return { handled: true, completed: false };
+    }
+
+    // settle_consensual outputs (= 2, 跟 settle_dispute 7 区分):
+    const outputs = [
+      { address: winnerAddr, amountSompi: winnerAmount.toString() },
+      { address: brokerAddr, amountSompi: brokerFeeAmount.toString() },
+    ];
+
+    // Build preimage via relay IPC (= settle_consensual entry sighash)
+    const preimage = await sendCommandAsync(offer.maker_relay_id, {
+      type: 'prediction_settle_consensual_build_preimage',  // NEW handler — pending kasia-relay impl (= sub 5b-2 follow-up)
+      p2sh_address: offer.escrow_p2sh,
+      required_input_outpoints: [
+        { outpointTxid: offer.broadcast_tx_id, outpointIndex: 0 },
+        { outpointTxid: offer.taker_escrow_lock_tx, outpointIndex: 0 },
+      ],
+      outputs,
+      winner,  // 0 or 1, signed by both parties per settle_consensual entry param
+    });
+    if (!preimage?.ok || !preimage.tx_obj) {
+      console.error(`[settler:consensual] build_preimage fail offer=${offer.id.slice(0,12)}: ${preimage?.error}`);
+      return { handled: true, completed: false };
+    }
+
+    // Stash preimage + winner in metadata (= maker_sign + taker_sign handler reads via offer scan)
+    const newMeta = { ...meta, consensual_tx_obj: preimage.tx_obj, consensual_winner: winner, consensual_dispatched_at: new Date().toISOString() };
+    db.prepare(`UPDATE exchange_offers SET metadata=? WHERE id=?`).run(JSON.stringify(newMeta), offer.id);
+
+    // Emit chain_event 'pool_settle_consensual_dispatched' → sub 3 voter v2 skip detect 真依赖 + sub 5 oracle_history consensual row write trigger
+    try {
+      const { recordChainEvent } = await import('./chain-event.js');
+      recordChainEvent({
+        txid: `consensual_dispatched:${offer.id.slice(0,12)}:${Date.now()}`,
+        eventType: 'pool_settle_consensual_dispatched',
+        fromAddress: offer.maker_kaspa_addr || null,
+        toAddress: offer.taker || null,
+        payload: JSON.stringify({
+          offer_id: offer.id,
+          market_id: offer.id,  // 1V1 escrow uses offer.id as market_id key (= cross-product unified key)
+          winner,
+          winner_addr: winnerAddr,
+          broker_fee_amount: brokerFeeAmount.toString(),
+          winner_amount: winnerAmount.toString(),
+          dispatched_at: new Date().toISOString(),
+          epoch: 1,
+        }),
+      });
+    } catch (e) {
+      console.warn(`[settler:consensual] chain_event emit fail for offer ${offer.id.slice(0,12)}: ${e.message}`);
+    }
+
+    transition(offer.id, 'collecting_sigs');  // reuse status state machine (= 2 sig vs 5+5+5+5+5 sig, transition same)
+    console.log(`[settler:consensual] dispatched offer=${offer.id.slice(0,12)} winner=${winner}`);
+    return { handled: true, completed: false };
+  } catch (e) {
+    console.error(`[settler:consensual] dispatch fail offer=${offer.id?.slice(0,12)}: ${e.message}`);
+    return { handled: true, completed: false };
+  }
+}
+
 // r234 Sub 5 collectMultiOracleVotes — 5-of-5 unanimous + revote + misbehave + auto-pause.
 //
 // v2 (= Phase 4a r234): Path D + PB-D consensus + Owner 钦定 5-of-5 unanimous (= 一票否决).
