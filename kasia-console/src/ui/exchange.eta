@@ -1,23 +1,56 @@
 <%~ include('partials/page-open', { _page: 'exchange', pageTitle: 'Exchange', ...it }) %>
 
+<!-- KANet-UI sub A6.2 exchange Editorial 风格 propagate (= Bettor r66 钦定)
+     baseline: predictions-pool-create.eta Editorial Financial Instrument
+     - Fraunces serif display for key numbers + headers
+     - 古铜金 #b08a44 accent for trust signals
+     - cosmetic only, 0 functionality change
+-->
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&display=swap" rel="stylesheet">
+
+<style>
+  .ex-display { font-family: 'Fraunces', Georgia, serif; font-feature-settings: 'opsz' 36; }
+  .ex-accent-gold { color: #b08a44; }
+  .ex-accent-gold-bg { background: #b08a44; }
+  .ex-accent-gold-border { border-color: #b08a44; }
+  .ex-tab-active {
+    border-bottom-color: #b08a44 !important;
+    color: #b08a44 !important;
+    font-weight: 500;
+  }
+  .ex-card-editorial {
+    background: white;
+    border: 1px solid #e4e2dc;
+    transition: border-color 0.15s;
+  }
+  .ex-card-editorial:hover { border-color: #d6d4cc; }
+  .ex-stat-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #6b6d7b;
+    font-weight: 500;
+  }
+</style>
+
 <div class="h-full flex flex-col" x-data="exchangeApp()">
 
   <!-- ═══ DISCOVERY BAR + WALLET ═══ -->
   <div class="flex-shrink-0 bg-white border-b border-warm-200 relative">
     <div class="px-5 py-2.5 flex items-center gap-5 text-xs overflow-x-auto">
-      <!-- Market metrics -->
+      <!-- Market metrics (= Editorial: gold accent on price + tabular Fraunces nums) -->
       <div class="flex items-center gap-1.5">
-        <span class="text-ink-400">KAS</span>
-        <span class="text-ink-700 font-semibold tabular-nums" x-text="kasPrice ? '$' + kasPrice.toFixed(5) : '—'"></span>
+        <span class="ex-stat-label">KAS</span>
+        <span class="ex-display text-sm ex-accent-gold tabular-nums" x-text="kasPrice ? '$' + kasPrice.toFixed(5) : '—'"></span>
       </div>
       <div class="w-px h-4 bg-warm-200"></div>
       <div class="flex items-center gap-1.5">
-        <span class="text-ink-400">Open</span>
-        <span class="text-ink-600 font-medium tabular-nums" x-text="openOffers.length"></span>
+        <span class="ex-stat-label">Open</span>
+        <span class="ex-display text-sm text-ink-700 tabular-nums" x-text="openOffers.length"></span>
       </div>
       <div x-show="overview.totalCompleted >= 5" class="flex items-center gap-1.5">
-        <span class="text-ink-400">Settled</span>
-        <span class="text-green-600 font-medium tabular-nums" x-text="overview.totalCompleted"></span>
+        <span class="ex-stat-label">Settled</span>
+        <span class="ex-display text-sm text-green-700 tabular-nums" x-text="overview.totalCompleted"></span>
       </div>
       <!-- Wallet summary (click to expand) -->
       <div class="w-px h-4 bg-warm-200"></div>
@@ -111,21 +144,21 @@
     <div class="w-[360px] flex-shrink-0 border-r border-warm-200 flex flex-col bg-white
                 max-md:w-full" :class="selectedOffer && 'max-md:hidden'">
 
-      <!-- Left tabs -->
+      <!-- Left tabs (= Editorial: gold underline on active) -->
       <div class="flex border-b border-warm-200 flex-shrink-0">
         <button @click="leftTab = 'market'"
-          :class="leftTab === 'market' ? 'border-brand-500 text-brand-600 font-medium' : 'border-transparent text-ink-400 hover:text-ink-600'"
-          class="flex-1 px-3 py-2.5 text-xs border-b-2 -mb-px transition-colors">Market</button>
+          :class="leftTab === 'market' ? 'ex-tab-active' : 'border-transparent text-ink-400 hover:text-ink-600'"
+          class="flex-1 px-3 py-2.5 text-xs border-b-2 -mb-px transition-colors ex-display">Market</button>
         <button @click="leftTab = 'deals'"
-          :class="leftTab === 'deals' ? 'border-brand-500 text-brand-600 font-medium' : 'border-transparent text-ink-400 hover:text-ink-600'"
-          class="flex-1 px-3 py-2.5 text-xs border-b-2 -mb-px transition-colors flex items-center justify-center gap-1">
+          :class="leftTab === 'deals' ? 'ex-tab-active' : 'border-transparent text-ink-400 hover:text-ink-600'"
+          class="flex-1 px-3 py-2.5 text-xs border-b-2 -mb-px transition-colors flex items-center justify-center gap-1 ex-display">
           My Deals
-          <span x-show="activeDeals.length" class="bg-brand-500 text-white text-[9px] leading-none px-1.5 py-0.5 rounded-full"
+          <span x-show="activeDeals.length" class="ex-accent-gold-bg text-white text-[9px] leading-none px-1.5 py-0.5 rounded-full"
             x-text="activeDeals.length"></span>
         </button>
         <button @click="leftTab = 'history'"
-          :class="leftTab === 'history' ? 'border-brand-500 text-brand-600 font-medium' : 'border-transparent text-ink-400 hover:text-ink-600'"
-          class="flex-1 px-3 py-2.5 text-xs border-b-2 -mb-px transition-colors">History</button>
+          :class="leftTab === 'history' ? 'ex-tab-active' : 'border-transparent text-ink-400 hover:text-ink-600'"
+          class="flex-1 px-3 py-2.5 text-xs border-b-2 -mb-px transition-colors ex-display">History</button>
       </div>
 
       <!-- Offer list -->
@@ -1162,7 +1195,7 @@ function exchangeApp() {
         if (!addr || !amt || !this.form?.relayNodeId) return;
         if (!confirm('Send ' + amt + ' KAS to ' + addr + '?')) return;
         try {
-          const r = await fetch('/api/relay/' + this.form.relayNodeId + '/transfer', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ target: addr, amount: String(amt) }) });
+          const r = await fetch('/api/relay/' + this.form.relayNodeId + '/transfer', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ target: addr, amount: Number(amt).toFixed(8) }) });
           const d = await r.json();
           if (d.txId) { alert('Sent! TX: ' + d.txId); this.walletPanel = null; await this.loadWallet(); }
           else alert('Error: ' + (d.error || 'Unknown'));
