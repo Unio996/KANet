@@ -1,5 +1,16 @@
 <%~ include('partials/page-open', { _page: 'relays', pageTitle: it.t.page_relays, ...it }) %>
 
+<!-- KANet-UI sub A6.5 relays Editorial header touch (= Bettor r66 A6 cycle close)
+     scope: header font touch only (= relays.eta 已 A1+R filter, 加 Fraunces 完成 visual baseline)
+     Settings 子 (= /settings/relays/adapters) 同 baseline.
+-->
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&display=swap" rel="stylesheet">
+
+<style>
+  .rl-display { font-family: 'Fraunces', Georgia, serif; font-feature-settings: 'opsz' 36; }
+  .rl-accent-gold { color: #b08a44; }
+</style>
+
       <div class="p-6">
       <div class="max-w-3xl mx-auto space-y-6">
 
@@ -51,8 +62,8 @@
         }">
           <div class="px-6 py-4 border-b border-warm-200 flex items-center justify-between">
             <div class="flex items-center space-x-2">
-              <svg class="h-5 w-5 text-ink-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>
-              <h2 class="text-sm font-semibold text-ink-600"><%= it.t.node_config %></h2>
+              <svg class="h-5 w-5 rl-accent-gold" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>
+              <h2 class="rl-display text-base text-ink-800"><%= it.t.node_config %></h2>
             </div>
             <% if (it.rpcUrl) { %>
             <span class="text-xs text-ink-300 font-mono"><%= it.rpcUrl %></span>
@@ -155,10 +166,10 @@
              x-init="load(); setInterval(load, 15000)">
           <div class="flex items-center justify-between mb-4">
             <div>
-              <h2 class="text-sm font-semibold text-ink-600">Relay 子进程 RPC 状态</h2>
-              <p class="text-xs text-ink-400 mt-0.5">每个 relay child 内部 _rpc 连接 (跟上方 Node Configuration daemon RpcClient 区分, ws-proxy hijack 类 bug 真凶探针)</p>
+              <h2 class="rl-display text-base text-ink-800">Relay 子进程 RPC 状态</h2>
+              <p class="text-xs text-ink-400 mt-0.5">每个 relay child 内部 _rpc 连接 (跟上方 Node Configuration daemon RpcClient 区分, ws-proxy hijack 类 bug 探针)</p>
             </div>
-            <button @click="load" class="text-xs text-brand-600 hover:text-brand-700">刷新</button>
+            <button @click="load" class="text-xs rl-accent-gold hover:underline">刷新</button>
           </div>
           <template x-if="loading"><div class="text-sm text-ink-400">加载中...</div></template>
           <template x-if="!loading">
