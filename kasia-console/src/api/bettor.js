@@ -1925,6 +1925,21 @@ export async function registerBettorRoutes(fastify) {
     if (tier === 2 && (!bond_amount || bond_amount <= 0)) {
       return reply.code(400).send({ ok: false, error: 'tier 2 requires bond_amount > 0' });
     }
+    // Audit gap #1 (J1 #11 + UI r14): broker/oracle 互斥 enforce per Area 1.4 排他性 + spec L52.
+    // broker manipulation vector: broker fee 跟 losing pool 正比, broker 兼 oracle 有动机让"大押注那边输"抽得多.
+    // Reject relays whose roles_json includes 'broker'.
+    const relay = sqlite.prepare(`SELECT roles_json, is_dex_broker FROM relay_nodes WHERE id = ?`).get(relay_node_id);
+    if (relay?.is_dex_broker === 1) {
+      return reply.code(403).send({ ok: false, error: `relay_node_id ${relay_node_id} has is_dex_broker=1 — broker/oracle 互斥 per Area 1.4 (spec L52)` });
+    }
+    if (relay?.roles_json) {
+      try {
+        const roles = JSON.parse(relay.roles_json);
+        if (Array.isArray(roles) && roles.includes('broker')) {
+          return reply.code(403).send({ ok: false, error: `relay_node_id ${relay_node_id} has 'broker' role — broker/oracle 互斥 per Area 1.4 (spec L52)` });
+        }
+      } catch {}
+    }
     // TTL: 24h from now (per Area 2.4 D2)
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
     const capsJson = capabilities ? JSON.stringify(capabilities) : null;
@@ -2053,8 +2068,15 @@ export async function registerBettorRoutes(fastify) {
     if (!oracleId || !market_id || !audit_mode) {
       return reply.code(400).send({ ok: false, error: 'missing required: market_id, audit_mode' });
     }
-    if (!['tier1', 'tier2', 'tier3', 'consensual'].includes(audit_mode)) {
-      return reply.code(400).send({ ok: false, error: `invalid audit_mode '${audit_mode}', expected tier1/tier2/tier3/consensual` });
+    // audit_mode 4 enum (per Bettor r18 freeze: 三档 trust signal + consensual 0 oracle 涉).
+    // J1 #11 gap #2 已 WITHDRAW (J1 #13): audit_mode 是 oracle tier 维度 NOT settle path enum.
+    //   tier1       = 第一档 KANet curated 投了
+    //   tier2       = 第二档 stake-bonded open 投了
+    //   tier3       = 第三档 system rule fallback (Phase 0 testnet)
+    //   consensual  = 1V1 escrow 双方 confirm (= 0 oracle work, vote=NULL + reward=0)
+    const AUDIT_MODE_ENUM = ['tier1', 'tier2', 'tier3', 'consensual'];
+    if (!AUDIT_MODE_ENUM.includes(audit_mode)) {
+      return reply.code(400).send({ ok: false, error: `invalid audit_mode '${audit_mode}', expected one of: ${AUDIT_MODE_ENUM.join(' / ')}` });
     }
     // consensual row enforce: vote=NULL + reward=0 (= J2-tn r9 + J1 #2 C2 align)
     if (audit_mode === 'consensual' && (vote != null || (reward_amount || 0) > 0)) {
