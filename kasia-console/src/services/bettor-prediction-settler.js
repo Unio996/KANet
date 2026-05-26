@@ -437,6 +437,19 @@ export async function dispatchPhase2Consensual(offer, winner, db = sqlite) {
   let meta;
   try { meta = JSON.parse(offer.metadata || '{}'); } catch { meta = {}; }
 
+  // Sub 5d hotfix (J2 r45 NWT catch): state machine requires matched → verifying → collecting_sigs path.
+  // VALID_TRANSITIONS: matched → [verifying,...]; verifying → [...collecting_sigs...]; matched → collecting_sigs FAILS.
+  // Hop through verifying if currently in matched.
+  if (offer.protocol_status === 'matched') {
+    try {
+      transition(offer.id, 'verifying');
+      offer.protocol_status = 'verifying';
+    } catch (e) {
+      console.error(`[settler:consensual] matched → verifying transition fail offer=${offer.id.slice(0,12)}: ${e.message}`);
+      return { handled: true, completed: false };
+    }
+  }
+
   try {
     const { sendCommandAsync } = await import('./relay-manager.js');
     const makerStake = parseInt(meta.maker_stake_sompi, 10) || 0;
