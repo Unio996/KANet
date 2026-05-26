@@ -2017,6 +2017,9 @@ export function runMigrations() {
 
   // v66: Opus relay — Owner-authorized independent identity for Opus AI sessions
   // mnemonic 留空给 Owner 手动设置 (避免 script 生成私钥)
+  // 5/24 Owner 钦定 DISABLE auto re-create (= local edit D:/kanet-tn12 only, 不 commit GitHub master 防 mainnet 受影响).
+  // Original boot-time INSERT 每次 restart 都重建已删 Opus row, Owner 不要. 注释掉, 加 explicit Owner-delete respect.
+  /* DISABLED 5/24 per Owner request:
   {
     const existing = sqlite.prepare("SELECT id FROM relay_nodes WHERE name = 'Opus'").get();
     if (!existing) {
@@ -2028,6 +2031,7 @@ export function runMigrations() {
       console.log('[migrate] v66: Opus relay inserted (mnemonic null, Owner sets manually).');
     }
   }
+  */
 
   // v67: relay_nodes.is_bot_autoreply column — tag Mind-auto-reply sources for future identity separation
   {
@@ -4137,6 +4141,72 @@ export function runMigrations() {
       } catch (e) {
         console.warn(`[migrate] v142 ADD COLUMN fail: ${e.message}`);
       }
+    }
+  }
+
+  // v143: Oracle v0.3 R7 CLOSE — oracle_registry + oracle_history tables.
+  //
+  // Per Bettor r26 spec freeze + r29 Owner "全力推动" fire 钦定 5/26.
+  //
+  // oracle_registry: 注册名单 (= sub 1 oracle-registry channel ingest + sub 5 query).
+  //   - tier 1 = KANet curated (= bond NULL, slash 不适, governance exit per Area 10 EC1)
+  //   - tier 2 = stake-bonded open (= bond > 0, slash X% per Area 10 EC2)
+  //   - tier 3 = system rule fallback (= bond NULL, 跟 Phase 0 cold start align)
+  //   - audit_mode 标 (= 跟 sub 5 oracle_history 一致, Phase 0 reputation 信号)
+  //   - epoch: v2+ (= IS NULL legacy v1 detection, J1 #4 C3/C4 fix per epoch IS NULL/NOT NULL 分流)
+  //
+  // oracle_history: 投票 + settle 记录 (= sub 5 信誉 query 主 source, sub 3 voter v2 写入).
+  //   - audit_mode = 'tier1' / 'tier2' / 'tier3' / 'consensual'
+  //     'consensual' row reward_amount=0 + vote=NULL (= settle_consensual path, 0 oracle work)
+  //     per J2 r9 + J1 #2 catch C2 + r17 truth matrix 1V1 escrow 正常 settle 行
+  //   - epoch: 跟 oracle_registry 同 schema (= 切换日 boundary, 老 reputation 冻结)
+  //
+  // Idempotent CREATE IF NOT EXISTS via PRAGMA table_info check.
+  {
+    const reg = sqlite.prepare("SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name='oracle_registry'").get();
+    if (!reg.cnt) {
+      sqlite.exec(`
+        CREATE TABLE oracle_registry (
+          relay_node_id TEXT PRIMARY KEY,
+          pubkey TEXT NOT NULL,
+          tier INTEGER NOT NULL CHECK (tier IN (1, 2, 3)),
+          capabilities TEXT,
+          announced_at TEXT NOT NULL DEFAULT (datetime('now')),
+          expires_at TEXT,
+          bond_amount INTEGER,
+          status TEXT NOT NULL DEFAULT 'active',
+          epoch INTEGER NOT NULL DEFAULT 1,
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_oracle_registry_tier_status ON oracle_registry(tier, status);
+        CREATE INDEX idx_oracle_registry_expires ON oracle_registry(expires_at);
+        CREATE INDEX idx_oracle_registry_epoch ON oracle_registry(epoch);
+      `);
+      console.log('[migrate] v143: oracle_registry table + 3 indexes created (Oracle v0.3 sub 1).');
+    }
+
+    const hist = sqlite.prepare("SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name='oracle_history'").get();
+    if (!hist.cnt) {
+      sqlite.exec(`
+        CREATE TABLE oracle_history (
+          id TEXT PRIMARY KEY,
+          oracle_relay_id TEXT NOT NULL,
+          market_id TEXT NOT NULL,
+          vote TEXT,
+          consensus_outcome TEXT,
+          reward_amount REAL DEFAULT 0,
+          slashed_amount REAL DEFAULT 0,
+          audit_mode TEXT NOT NULL,
+          audited_at TEXT,
+          settled_at TEXT,
+          epoch INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_oracle_history_oracle_settled ON oracle_history(oracle_relay_id, settled_at);
+        CREATE INDEX idx_oracle_history_market ON oracle_history(market_id);
+        CREATE INDEX idx_oracle_history_epoch ON oracle_history(epoch);
+      `);
+      console.log('[migrate] v143: oracle_history table + 3 indexes created (Oracle v0.3 sub 1 / sub 5).');
     }
   }
 

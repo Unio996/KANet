@@ -543,6 +543,61 @@ function checkKI30_chain_amount_precision(filepath, content) {
   }
 }
 
+// ── KI-32 (Oracle v0.3 R7 J2 catch 9 + J1 catch 9 endorse): oracle-registry NOT 进 COORD_CHANNELS ──
+// 真因: oracle-registry permissionless design (= tier 2/3 任何 relay 可 announce, day 1 同步开).
+// COORD_CHANNELS firewall 仅 OPUS_RELAY_NAMES (= Bettor/NWT/J2/J3/Opus/Qclaude) 可发, Agent Mind silence.
+// 把 oracle-registry 进 COORD_CHANNELS → 第二/三档 oracle 0 announce 路径 = 违 permissionless oracle design.
+//
+// 守 (= scan kasia-console/src/api/chat.js):
+//   COORD_CHANNELS Set 不可含 'oracle-registry'
+//   ORACLE_REGISTRY_CHANNELS Set (= 新 namespace) 不可含 COORD_CHANNELS 任何 channel
+//   两 Set 互斥 (= mutex)
+//
+// Whitelist marker: 'lint-allow-oracle-channel-mutex: <reason>' 同行 OR 前 3 行.
+function checkKI32_oracle_channel_mutex(filepath, content) {
+  // Only check chat.js
+  if (!/[/\\]api[/\\]chat\.js$/.test(filepath)) return;
+
+  const lines = content.split('\n');
+  // Extract COORD_CHANNELS + ORACLE_REGISTRY_CHANNELS Set literals
+  const coordRe = /COORD_CHANNELS\s*=\s*new\s+Set\(\[([^\]]+)\]/;
+  const oracleRe = /ORACLE_REGISTRY_CHANNELS\s*=\s*new\s+Set\(\[([^\]]+)\]/;
+
+  let coordLine = -1, oracleLine = -1;
+  let coordSet = null, oracleSet = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const cm = lines[i].match(coordRe);
+    if (cm) {
+      coordLine = i + 1;
+      coordSet = new Set(cm[1].split(',').map(s => s.trim().replace(/['"`]/g, '')).filter(Boolean));
+    }
+    const om = lines[i].match(oracleRe);
+    if (om) {
+      oracleLine = i + 1;
+      oracleSet = new Set(om[1].split(',').map(s => s.trim().replace(/['"`]/g, '')).filter(Boolean));
+    }
+  }
+
+  // Rule 1: COORD_CHANNELS 不可含 'oracle-registry'
+  if (coordSet?.has('oracle-registry')) {
+    const windowStart = Math.max(0, coordLine - 4);
+    const windowText = lines.slice(windowStart, coordLine).join('\n');
+    if (!/lint-allow-oracle-channel-mutex/.test(windowText)) {
+      violate('KI-32', `[KI-32] COORD_CHANNELS 含 'oracle-registry' → 违 permissionless oracle design (Oracle v0.3 R7 J2 catch 9). oracle-registry tier 2/3 任何 relay 可 announce, COORD firewall 仅 Opus → 第二/三档 0 announce 路径. 删 'oracle-registry' from COORD_CHANNELS + 用 ORACLE_REGISTRY_CHANNELS namespace.`, filepath, coordLine);
+    }
+  }
+
+  // Rule 2: ORACLE_REGISTRY_CHANNELS 不可跟 COORD_CHANNELS 重叠
+  if (coordSet && oracleSet) {
+    for (const ch of oracleSet) {
+      if (coordSet.has(ch)) {
+        violate('KI-32', `[KI-32] ORACLE_REGISTRY_CHANNELS 跟 COORD_CHANNELS 重叠 channel '${ch}' → namespace mutex 破. 同 channel 不可同时进 2 list (Oracle v0.3 R7 J1 #4 lint mutex propose).`, filepath, oracleLine);
+      }
+    }
+  }
+}
+
 // ── 跑 ──
 for (const fp of targets) {
   let content;
@@ -562,6 +617,7 @@ for (const fp of targets) {
   checkABE_A6_protocol_status_owner(fp, content);  // ABE-A.6: protocol_status owner invariant
   checkKI30_chain_amount_precision(fp, content);  // KI-30 (Bettor r181 5/19): chain TX amount 必 toFixed(8)
   checkKI31_gamma_closed_query(fp, content);  // KI-31 (Bettor r184 5/19): gamma single-market query 必 &closed=true
+  checkKI32_oracle_channel_mutex(fp, content);  // KI-32 (Oracle v0.3 R7 J2 #9 + J1 #4): oracle-registry NOT 进 COORD_CHANNELS + ORACLE_REGISTRY_CHANNELS 跟 COORD mutex
 }
 checkR10();
 
