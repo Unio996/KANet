@@ -105,6 +105,29 @@ export async function registerPoolRoutes(fastify) {
       return reply.code(400).send({ ok: false, error: 'broker_fee_pct must be 0-9999 basis points' });
     }
 
+    // Sub 5b-4 (Oracle v0.3 J1 #21 critical gap fix #4): oracleFeePct ctor param wire.
+    // Per Bettor r17 §10 truth matrix + NWT sub 4 SS ctor 14 params + R7 close.
+    // Default 100 bps (= 1% per truth matrix). Range 0-10000 basis points.
+    if (b.oracle_fee_pct === undefined || b.oracle_fee_pct === null || b.oracle_fee_pct === '') b.oracle_fee_pct = 100;
+    const oracleFeePct = parseInt(b.oracle_fee_pct, 10);
+    if (!Number.isFinite(oracleFeePct) || oracleFeePct < 0 || oracleFeePct >= 10000) {
+      return reply.code(400).send({ ok: false, error: 'oracle_fee_pct must be 0-9999 basis points' });
+    }
+
+    // Sub 5b-3 (Oracle v0.3 J1 #21 critical gap fix #3): Layer 1 console-side min-spendable check.
+    // Per J1 #12 dynamic formula `max(5_KAS_floor, 12500/oracleFeePct_bps)`.
+    // Prevents NWT sub 4 SS Layer 2 require(spendable >= X) reject with ugly error.
+    // Friendly create-time pool size error per user-facing UX (= 跟 W6 same pattern).
+    const SS_MIN_SPENDABLE_FLOOR_KAS = 5;  // hard floor per J1 #12 spec (= storage mass safety)
+    const dynamicMinKasFromFee = oracleFeePct > 0 ? Math.ceil(12500 / oracleFeePct) : 0;
+    const minSpendableKas = Math.max(SS_MIN_SPENDABLE_FLOOR_KAS, dynamicMinKasFromFee);
+    if (parseFloat(b.maker_stake_kas) < minSpendableKas) {
+      return reply.code(400).send({
+        ok: false,
+        error: `maker_stake_kas ${b.maker_stake_kas} < min spendable ${minSpendableKas} KAS (per Layer 1 console check, J1 #12 dynamic formula max(${SS_MIN_SPENDABLE_FLOOR_KAS}, 12500/${oracleFeePct})). Increase stake OR lower oracle_fee_pct.`
+      });
+    }
+
     const makerStakeKas = parseFloat(b.maker_stake_kas);
     const oracleBondKas = parseFloat(b.oracle_bond_kas);
     if (!Number.isFinite(makerStakeKas) || makerStakeKas <= 0) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be positive' });
