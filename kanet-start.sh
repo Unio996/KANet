@@ -89,6 +89,8 @@ if [ -f "$ENV_FILE" ]; then
       # 5/26 根治 RPC drift — env single source, 必 export 给 Console 子进程
       KASPA_RPC_URL)           export KASPA_RPC_URL="$v" ;;
       KASPA_NETWORK)           export KASPA_NETWORK="$v" ;;
+      # 5/26 sediment — Console PORT 从 kanet.env 读, 不靠 env override OR default 3400
+      PORT)                    CONSOLE_PORT="$v" ;;
       # NWT 8aef0b5e critical fix — kanet.env 写但 case 未 match key 静默被忽略
       # BROKER_V2_ENABLED + BROKER_V2_ENABLED_PEERS broker-v2 phase 1 cutover gating 必 export
       BROKER_V2_ENABLED)       export BROKER_V2_ENABLED="$v" ;;
