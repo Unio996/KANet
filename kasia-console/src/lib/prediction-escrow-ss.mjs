@@ -89,12 +89,14 @@ export async function computeEscrowP2SH(args) {
   const deadline = validateInt(args.deadline, 'deadline', 1);
   const minerFee = validateInt(args.minerFee, 'minerFee', 0, 10_000_000);
   const brokerFeePct = validateInt(args.brokerFeePct, 'brokerFeePct', 0, 9999);  // < 10000 防 force refund
+  // Sub 7 (Oracle v0.3 J2 r33 catch #2 ship): oracleFeePct ctor 第 12 arg align NWT sub 4 .sil L32
+  const oracleFeePct = validateInt(args.oracleFeePct, 'oracleFeePct', 0, 9999);
   // v3 加: 双 stake sompi int (= 真 P2P, 必 > 0)
   const makerStakeAmount = validateInt(args.makerStakeAmount, 'makerStakeAmount', 1);
   const takerStakeAmount = validateInt(args.takerStakeAmount, 'takerStakeAmount', 1);
   if (!args.network) throw new Error('network required');
 
-  // Build ctor JSON (= silverc CLI 接 format, 13 params 顺序 align .sil v3 signature)
+  // Build ctor JSON (= silverc CLI 接 format, 14 params 顺序 align .sil sub 4 signature)
   const ctorJson = [
     bytes32Expr(makerPk),
     bytes32Expr(takerPk),
@@ -103,6 +105,7 @@ export async function computeEscrowP2SH(args) {
     intExpr(deadline),
     intExpr(minerFee),
     intExpr(brokerFeePct),
+    intExpr(oracleFeePct),
     intExpr(makerStakeAmount),
     intExpr(takerStakeAmount),
   ];

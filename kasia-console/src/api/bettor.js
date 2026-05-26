@@ -1311,6 +1311,13 @@ export async function registerBettorRoutes(fastify) {
       return reply.code(400).send({ ok: false, error: 'broker_fee_pct must be 0-9999 (basis points, < 10000 防 force refund)' });
     }
 
+    // Sub 7 (J2 r33 catch #2 ship): oracle_fee_pct optional, default 100 bps = 1% (per Bettor r17 truth matrix path B prediction 1%)
+    if (b.oracle_fee_pct === undefined || b.oracle_fee_pct === null || b.oracle_fee_pct === '') b.oracle_fee_pct = 100;
+    const oracleFeePct = parseInt(b.oracle_fee_pct, 10);
+    if (!Number.isFinite(oracleFeePct) || oracleFeePct < 0 || oracleFeePct >= 10000) {
+      return reply.code(400).send({ ok: false, error: 'oracle_fee_pct must be 0-9999 basis points' });
+    }
+
     // Lookup maker + broker + 5 oracle addresses → x-only pubkeys
     const kaspa = await import('kaspa-wasm');
     const { XOnlyPublicKey, Address } = kaspa;
@@ -1387,7 +1394,7 @@ export async function registerBettorRoutes(fastify) {
     try {
       escrow = await computeEscrowP2SH({
         makerPk, takerPk, brokerPk, oraclePks,
-        deadline, minerFee, brokerFeePct,
+        deadline, minerFee, brokerFeePct, oracleFeePct,
         makerStakeAmount: stakeKasSompi,
         takerStakeAmount: stakeKasSompi,  // Phase 4a v0 简化: 1:1
         network: makerRow.address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet',
@@ -1426,6 +1433,7 @@ export async function registerBettorRoutes(fastify) {
       kas_usd_at_publish: kasUsd,
       miner_fee_sompi: minerFee,
       broker_fee_pct: brokerFeePct,
+      oracle_fee_pct: oracleFeePct,  // Sub 7 (J2 r33): settler L253 read this for Phase 2 dispatch
       broker_relay_id: b.broker_relay_id,
       phase: '4a-E',
     });
