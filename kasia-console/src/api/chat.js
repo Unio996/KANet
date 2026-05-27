@@ -412,6 +412,85 @@ export async function registerChatRoutes(fastify) {
     return reply.send({ ok: true, id, duplicate: false });
   });
 
+  // ──────────────────────────────────────────────────────────────────────
+  // KANet Dev Channel Tier 1 (kanet-dev-channel-tier1-task.md §3.1 §3.2 §3.3)
+  // Owner 5/27 钦定 NWT 主搞 + UI 配合, Editorial 风格 baseline.
+  // 只读公开 URL + onboarding + faucet + Track A/B 隔离 (visibility filter).
+  // ──────────────────────────────────────────────────────────────────────
+
+  // GET /welcome-dev — onboarding page (= task md §3.2)
+  fastify.get('/welcome-dev', async (request, reply) => {
+    const lang = parseLang(request.headers.cookie);
+    return reply.viewAsync('welcome-dev', { lang });
+  });
+
+  // GET /public/channel/:name — public read-only channel browser (= task md §3.1)
+  // Renders 公开 messages only (visibility='public'). Track A 默认 internal 不泄露.
+  const PUBLIC_CHANNELS = ['kanet-spec', 'kanet-bugs', 'kanet-showcase', 'kanet-marketplace', 'kanet-forks', 'kanet-general'];
+  fastify.get('/public/channel/:name', async (request, reply) => {
+    const { name } = request.params;
+    if (!/^[a-z0-9-]{1,40}$/.test(name)) return reply.code(400).type('text/plain').send('invalid channel name');
+    const lang = parseLang(request.headers.cookie);
+    reply.header('X-KANet-Disclaimer', 'testnet-only-no-investment-advice');
+    return reply.viewAsync('public-channel', { channelName: name, channels: PUBLIC_CHANNELS, lang });
+  });
+
+  // GET /api/public/channel/:name/messages — public message API (= task md §3.1)
+  // Hard filter visibility='public' (= Track A internal 默认不泄露 per §3.4)
+  fastify.get('/api/public/channel/:name/messages', async (request, reply) => {
+    const { name } = request.params;
+    const { since, until, tag, query, limit: rawLimit } = request.query;
+    if (!/^[a-z0-9-]{1,40}$/.test(name)) return reply.code(400).send({ error: 'invalid channel name' });
+    const limit = Math.min(parseInt(rawLimit) || 50, 200);
+
+    let sql = `SELECT id, sender_address, content as message_text, tx_hash as txid, created_at as timestamp
+               FROM broadcast_messages
+               WHERE channel_name = ? AND visibility = 'public' AND status != 'local'`;
+    const params = [name];
+    if (since) { sql += ' AND created_at > ?'; params.push(since); }
+    if (until) { sql += ' AND created_at < ?'; params.push(until); }
+    if (tag)   { sql += ' AND content LIKE ?'; params.push('%#' + tag + '%'); }
+    if (query) { sql += ' AND content LIKE ?'; params.push('%' + query + '%'); }
+    sql += ' ORDER BY created_at DESC LIMIT ?';
+    params.push(limit);
+
+    const messages = sqlite.prepare(sql).all(...params);
+    reply.header('X-KANet-Disclaimer', 'testnet-only-no-investment-advice');
+    return reply.send({ messages, channel: name });
+  });
+
+  // POST /api/faucet/request — auto faucet (= task md §3.3)
+  // Rate limit: same IP 24h ≤ 3 req, same wallet 永久 ≤ 1 req
+  // Owner 充值 dedicated faucet wallet 后启用. Tier 1 阶段 wallet 未配置则 503.
+  fastify.post('/api/faucet/request', async (request, reply) => {
+    const { wallet_address } = request.body || {};
+    const ip = request.ip || request.headers['x-forwarded-for'] || 'unknown';
+    if (!wallet_address || !/^kaspatest:[a-z0-9]+$/.test(wallet_address)) {
+      return reply.code(400).send({ error: 'wallet_address invalid, must be kaspatest:...' });
+    }
+    // Check wallet rate limit (= 永久 1 次)
+    const walletRow = sqlite.prepare('SELECT id FROM faucet_grants WHERE wallet_address = ?').get(wallet_address);
+    if (walletRow) return reply.code(429).send({ error: 'wallet already granted (= 永久 1 次 limit)' });
+    // Check IP rate limit (= 24h 3 次)
+    const day = Math.floor(Date.now() / 1000) - 86400;
+    const ipCount = sqlite.prepare('SELECT COUNT(*) AS cnt FROM faucet_grants WHERE ip_address = ? AND granted_at > ?').get(ip, day).cnt;
+    if (ipCount >= 3) return reply.code(429).send({ error: 'IP rate limit (= 24h 3 次 limit, current ' + ipCount + ')' });
+
+    // Tier 1 阶段: Owner 未配 dedicated wallet → 503 friendly
+    // TODO Owner 配置后 (per task md §3.3) 加 transferFromFaucet(wallet_address, 100000_00000000n)
+    const FAUCET_AMOUNT_SOMPI = 100000_00000000n; // 100k KAS
+    return reply.code(503).send({
+      error: 'Faucet pending Owner config (= dedicated wallet 未充值, Tier 1 阶段). 等 Owner 充值后启用.',
+      planned_amount: '100,000 testnet KAS',
+    });
+
+    // Future implementation (after Owner config):
+    // const txid = await transferFromFaucet(wallet_address, FAUCET_AMOUNT_SOMPI);
+    // sqlite.prepare(`INSERT INTO faucet_grants (ip_address, wallet_address, granted_at, amount_sompi, txid, status)
+    //                 VALUES (?, ?, ?, ?, ?, 'sent')`).run(ip, wallet_address, Math.floor(Date.now() / 1000), Number(FAUCET_AMOUNT_SOMPI), txid);
+    // return reply.send({ ok: true, txid, amount: '100,000 testnet KAS' });
+  });
+
   // ── Conversational Ops: confirm execute action ──
   fastify.post('/api/chat/confirm', async (request, reply) => {
     const { relayNodeId, token } = request.body || {};

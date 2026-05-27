@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="<%= it.lang || 'zh' %>">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KANet Dev Channel — Onboarding</title>
+  <meta name="robots" content="noindex" />
+  <meta name="description" content="KANet developer channel — testnet-only protocol demo, MIT licensed, no investment advice" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <!-- KANet Dev Channel Tier 1 — welcome-dev page (task md §3.2)
+       Editorial baseline (= Owner 5/27 钦定 "之前风格"):
+       - Fraunces serif display
+       - 古铜金 #b08a44 accent
+       - dc-* prefix
+       Onboarding 草稿 (Owner 改定 final 文案 per §8 prohibitions). -->
+
+  <style>
+    :root {
+      --warm-50: #fefcf7;
+      --warm-100: #faf6ec;
+      --warm-200: #e8e1d0;
+      --warm-300: #d6cdb4;
+      --ink-300: #9496a1;
+      --ink-400: #6b6d7b;
+      --ink-500: #4e5060;
+      --ink-700: #2d2e3a;
+      --ink-800: #1a1b25;
+      --dc-gold: #b08a44;
+      --dc-gold-light: #d6b070;
+    }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--warm-50); color: var(--ink-700); }
+    .dc-display { font-family: 'Fraunces', Georgia, serif; font-feature-settings: 'opsz' 36; }
+    .dc-accent-gold { color: var(--dc-gold); }
+    .dc-accent-gold-bg { background: var(--dc-gold); }
+    .dc-accent-gold-bg:hover { background: #97742d; }
+    .dc-accent-gold-border-t { border-top: 2px solid var(--dc-gold); }
+    .dc-card-editorial {
+      background: white;
+      border: 1px solid var(--warm-200);
+      border-radius: 10px;
+      transition: border-color 0.15s;
+    }
+    .dc-card-editorial:hover { border-color: var(--warm-300); }
+    .dc-stat-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--ink-400);
+      font-weight: 500;
+    }
+    .dc-hero {
+      background: linear-gradient(135deg, #fef9eb 0%, #fefdf5 100%);
+      border: 1px solid #e4d4a6;
+      border-radius: 12px;
+      position: relative;
+      padding: 32px;
+    }
+    .dc-hero::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, var(--dc-gold) 0%, var(--dc-gold-light) 100%);
+      border-radius: 12px 12px 0 0;
+    }
+    .dc-step-num {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      border: 2px solid var(--dc-gold);
+      color: var(--dc-gold);
+      display: inline-flex; align-items: center; justify-content: center;
+      font-family: 'Fraunces', Georgia, serif;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+    a { color: var(--dc-gold); }
+    a:hover { text-decoration: underline; }
+    code { background: var(--warm-100); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+  </style>
+</head>
+<body class="min-h-screen">
+
+  <div class="max-w-3xl mx-auto px-6 py-10">
+
+    <!-- HERO -->
+    <div class="dc-hero mb-8">
+      <div class="dc-stat-label mb-2">KANet 协议生态 · Track B testnet-only</div>
+      <h1 class="dc-display text-4xl text-ink-800 mb-3">KANet Dev Channel</h1>
+      <p class="text-base text-ink-500 leading-relaxed">
+        第一个在 Kaspa 链上跑的开发者协调频道。Dogfood 我们自己的协议, 同时 demo "用 Kaspa 协调 agent 开发社区"。
+      </p>
+    </div>
+
+    <%~ include('partials/dc-disclaimer', it) %>
+
+    <!-- Section 1: KANet 是什么 (Owner 改定 final) -->
+    <section class="dc-card-editorial p-6 mb-6">
+      <div class="dc-stat-label mb-2">§1</div>
+      <h2 class="dc-display text-2xl text-ink-800 mb-3">KANet 是什么</h2>
+      <p class="text-sm leading-relaxed text-ink-500">
+        <span class="text-ink-300 italic">[Owner 起草: 3 句话 KANet 简介]</span><br/>
+        KANet 是 Kaspa 链上的 AI Agent 协作 substrate。0 fee · 0 token · MIT 开源。
+        提供 3 个原语: 安全通信 / 身份与发现 / 价值结算。
+      </p>
+    </section>
+
+    <!-- Section 2: 为什么不在 Discord -->
+    <section class="dc-card-editorial p-6 mb-6">
+      <div class="dc-stat-label mb-2">§2</div>
+      <h2 class="dc-display text-2xl text-ink-800 mb-3">为什么协作不在 Discord</h2>
+      <p class="text-sm leading-relaxed text-ink-500">
+        <span class="text-ink-300 italic">[Owner 起草: 链上协作 vs Discord 对比 + link 5-Layer Trust Stack paper]</span><br/>
+        Dogfooding · Reputation 原生积累 · Filter 高质量参与者 · Fractal coordination (人协作 = agent 协作同一个协议).
+      </p>
+    </section>
+
+    <!-- Section 3: 5 min 入门 -->
+    <section class="mb-6">
+      <div class="dc-stat-label mb-2">§3 · 5 分钟入门 · 4 步</div>
+      <h2 class="dc-display text-2xl text-ink-800 mb-5">从 0 加入 KANet Dev Channel</h2>
+
+      <div class="space-y-4">
+        <!-- Step 1 -->
+        <div class="dc-card-editorial p-5 flex items-start gap-4">
+          <span class="dc-step-num">1</span>
+          <div class="flex-1">
+            <h3 class="dc-display text-lg text-ink-800 mb-1">生成 Kaspa testnet 钱包</h3>
+            <p class="text-sm text-ink-500">
+              <span class="text-ink-300 italic">[Owner 改: CLI 命令 / Kasia wallet 截图 link]</span>
+            </p>
+          </div>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="dc-card-editorial p-5 flex items-start gap-4">
+          <span class="dc-step-num">2</span>
+          <div class="flex-1">
+            <h3 class="dc-display text-lg text-ink-800 mb-1">获取测试 KAS</h3>
+            <p class="text-sm text-ink-500 mb-3">
+              输入你的 testnet 钱包地址, 系统会自动 转 100,000 测试 KAS (= 仅首次, 每 IP 24h 限 3 次)。
+            </p>
+            <form @submit.prevent="requestFaucet" x-data="{ addr: '', loading: false, result: null }">
+              <div class="flex gap-2">
+                <input
+                  x-model="addr"
+                  type="text"
+                  placeholder="kaspatest:qz..."
+                  class="flex-1 px-3 py-2 border border-warm-300 rounded-md text-sm font-mono focus:outline-none focus:border-amber-400"
+                  pattern="^kaspatest:[a-z0-9]+$"
+                  required
+                />
+                <button
+                  type="submit"
+                  :disabled="loading || !addr.trim()"
+                  class="dc-accent-gold-bg text-white px-4 py-2 rounded-md text-sm font-medium disabled:opacity-40"
+                  @click="async () => {
+                    if (!addr.trim()) return;
+                    loading = true; result = null;
+                    try {
+                      const r = await fetch('/api/faucet/request', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ wallet_address: addr.trim() }),
+                      });
+                      result = await r.json();
+                    } catch (e) {
+                      result = { error: e.message };
+                    } finally {
+                      loading = false;
+                    }
+                  }"
+                  x-text="loading ? '...' : '领取'"
+                ></button>
+              </div>
+              <p x-show="result?.ok" class="text-xs text-green-700 mt-2"
+                x-text="'已发送! TX: ' + (result?.txid || '').slice(0, 16) + '...'"></p>
+              <p x-show="result?.error" class="text-xs text-red-600 mt-2"
+                x-text="'失败: ' + result?.error"></p>
+            </form>
+          </div>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="dc-card-editorial p-5 flex items-start gap-4">
+          <span class="dc-step-num">3</span>
+          <div class="flex-1">
+            <h3 class="dc-display text-lg text-ink-800 mb-1">跑 KANet relay</h3>
+            <p class="text-sm text-ink-500">
+              <span class="text-ink-300 italic">[Owner 改: link GitHub README + 一键脚本 placeholder]</span><br/>
+              <code>git clone https://github.com/Unio996/KANet && cd KANet && ./kanet-start.sh</code>
+            </p>
+          </div>
+        </div>
+
+        <!-- Step 4 -->
+        <div class="dc-card-editorial p-5 flex items-start gap-4">
+          <span class="dc-step-num">4</span>
+          <div class="flex-1">
+            <h3 class="dc-display text-lg text-ink-800 mb-1">发第一条消息</h3>
+            <p class="text-sm text-ink-500">
+              加入 <a href="/public/channel/kanet-general">#kanet-general</a>, 自我介绍 + 描述你想 build 什么。
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 4: 频道结构 -->
+    <section class="dc-card-editorial p-6 mb-6 dc-accent-gold-border-t">
+      <div class="dc-stat-label mb-2">§4 · 频道结构</div>
+      <h2 class="dc-display text-2xl text-ink-800 mb-4">6 个 channel</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+        <a href="/public/channel/kanet-spec" class="block p-3 rounded border border-warm-200 hover:border-amber-300">
+          <div class="dc-display text-base text-ink-800">#kanet-spec</div>
+          <div class="text-xs text-ink-400 mt-1">协议 spec 讨论</div>
+        </a>
+        <a href="/public/channel/kanet-bugs" class="block p-3 rounded border border-warm-200 hover:border-amber-300">
+          <div class="dc-display text-base text-ink-800">#kanet-bugs</div>
+          <div class="text-xs text-ink-400 mt-1">bug 报告 + 协查</div>
+        </a>
+        <a href="/public/channel/kanet-showcase" class="block p-3 rounded border border-warm-200 hover:border-amber-300">
+          <div class="dc-display text-base text-ink-800">#kanet-showcase</div>
+          <div class="text-xs text-ink-400 mt-1">我建了什么 agent</div>
+        </a>
+        <a href="/public/channel/kanet-marketplace" class="block p-3 rounded border border-warm-200 hover:border-amber-300">
+          <div class="dc-display text-base text-ink-800">#kanet-marketplace</div>
+          <div class="text-xs text-ink-400 mt-1">需求 / 服务发布</div>
+        </a>
+        <a href="/public/channel/kanet-forks" class="block p-3 rounded border border-warm-200 hover:border-amber-300">
+          <div class="dc-display text-base text-ink-800">#kanet-forks</div>
+          <div class="text-xs text-ink-400 mt-1">第三方 fork 进展</div>
+        </a>
+        <a href="/public/channel/kanet-general" class="block p-3 rounded border border-warm-200 hover:border-amber-300">
+          <div class="dc-display text-base text-ink-800">#kanet-general</div>
+          <div class="text-xs text-ink-400 mt-1">闲聊 + 哲学 + 新人欢迎</div>
+        </a>
+      </div>
+    </section>
+
+    <%~ include('partials/dc-disclaimer', it) %>
+
+    <footer class="text-center text-xs text-ink-300 mt-10 mb-4">
+      KANet · Track B 协议生态 · MIT · testnet-only
+    </footer>
+
+  </div>
+
+</body>
+</html>

@@ -1,0 +1,33 @@
+<!-- KANet Dev Channel — Disclaimer block (Tier 1 task md §3.6)
+     Reusable in public-channel.eta + welcome-dev.eta
+     Owner 钦定: testnet-only + MIT + no investment advice + AI-assisted
+     最终文案 Owner 改定, UI 起草 placeholder -->
+
+<div class="dc-card-editorial p-4 my-4 text-xs leading-relaxed">
+  <div class="flex items-start gap-2 mb-2">
+    <span class="dc-accent-gold flex-shrink-0">⚠</span>
+    <p class="text-ink-700">
+      <strong>Testnet only</strong> · 此频道使用 Kaspa testnet TN12, 测试币无市场价值, 仅供开发者社区互动。
+    </p>
+  </div>
+  <div class="flex items-start gap-2 mb-2">
+    <span class="dc-accent-gold flex-shrink-0">📜</span>
+    <p class="text-ink-700">
+      <strong>MIT License</strong> · KANet 协议代码 MIT 开源
+      (<a href="https://github.com/Unio996/KANet" class="dc-accent-gold hover:underline" target="_blank" rel="noopener">GitHub</a>),
+      第三方部署 mainnet 完全是 deployer 自己的选择与法律责任。
+    </p>
+  </div>
+  <div class="flex items-start gap-2 mb-2">
+    <span class="dc-accent-gold flex-shrink-0">🚫</span>
+    <p class="text-ink-700">
+      <strong>本频道不构成投资建议</strong> · 任何技术讨论 / spec / demo / showcase 不视为金融建议或投资邀请。
+    </p>
+  </div>
+  <div class="flex items-start gap-2">
+    <span class="dc-accent-gold flex-shrink-0">🤖</span>
+    <p class="text-ink-700">
+      <strong>AI-assisted</strong> · 部分内容由 AI 生成或 AI 辅助撰写。
+    </p>
+  </div>
+</div>

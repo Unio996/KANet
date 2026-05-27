@@ -4242,5 +4242,74 @@ export function runMigrations() {
     }
   }
 
+  // v145: KANet Dev Channel Tier 1 — broadcast_messages.visibility + faucet_grants table
+  //
+  // Per kanet-dev-channel-tier1-task.md (= NWT 主搞, UI 配合, Owner 5/27 钦定).
+  //
+  // 2 件:
+  //   a) broadcast_messages add visibility col (= public/internal, default internal)
+  //       — public-channel API filter must use visibility='public', Owner manually 标 public
+  //       — 现有所有 msg 默认 internal (= 不泄露 Track A 内容)
+  //   b) faucet_grants table (= IP + wallet rate limit, 100k testnet KAS per first connect)
+  {
+    const bcastCols = sqlite.prepare("PRAGMA table_info(broadcast_messages)").all().map(c => c.name);
+    if (!bcastCols.includes('visibility')) {
+      sqlite.prepare(`
+        ALTER TABLE broadcast_messages ADD COLUMN visibility TEXT
+          NOT NULL DEFAULT 'internal'
+          CHECK (visibility IN ('internal', 'public'))
+      `).run();
+      sqlite.prepare(`CREATE INDEX IF NOT EXISTS idx_bcast_visibility ON broadcast_messages(visibility, channel_name, created_at DESC)`).run();
+      console.log('[migrate] v145: broadcast_messages.visibility col added (default internal, Track A 保护).');
+    }
+
+    const hasFaucetTable = sqlite.prepare(
+      "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='faucet_grants'"
+    ).get().cnt > 0;
+    if (!hasFaucetTable) {
+      sqlite.exec(`
+        CREATE TABLE faucet_grants (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          ip_address TEXT NOT NULL,
+          wallet_address TEXT NOT NULL UNIQUE,
+          granted_at INTEGER NOT NULL,
+          amount_sompi INTEGER NOT NULL,
+          txid TEXT,
+          status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'failed'))
+        );
+        CREATE INDEX idx_faucet_grants_ip_time ON faucet_grants(ip_address, granted_at);
+      `);
+      console.log('[migrate] v145: faucet_grants table created (Tier 1 自动 faucet, IP+wallet rate limit).');
+    }
+  }
+
+  // v146: Oracle v0.3 sub 10.x — predictions_offers_local_cache (Path B DM cache, SPOF recovery)
+  //
+  // Per Bettor r93 Owner ship-block: SS ctor params cache to all parties (= maker + taker + 5 oracle),
+  // 防 Console DB SPOF. Path A 链上 broadcast `kanet_prediction_params_v1` + Path B DM cache locally.
+  // Recovery path: if meta.redeem_script_hex missing → query local cache OR chain_event → silverc recompile.
+  {
+    const hasCacheTable = sqlite.prepare(
+      "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='predictions_offers_local_cache'"
+    ).get().cnt > 0;
+    if (!hasCacheTable) {
+      sqlite.exec(`
+        CREATE TABLE predictions_offers_local_cache (
+          offer_id TEXT PRIMARY KEY,
+          ctor_params_json TEXT NOT NULL,
+          params_hash TEXT NOT NULL,
+          p2sh_addr TEXT NOT NULL,
+          maker_sig TEXT NOT NULL,
+          taker_sig TEXT NOT NULL,
+          source TEXT NOT NULL DEFAULT 'publish' CHECK (source IN ('publish', 'dm', 'recovery_chain')),
+          received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX idx_predictions_cache_p2sh ON predictions_offers_local_cache(p2sh_addr);
+        CREATE INDEX idx_predictions_cache_hash ON predictions_offers_local_cache(params_hash);
+      `);
+      console.log('[migrate] v146: predictions_offers_local_cache table created (Oracle v0.3 sub 10.x SPOF recovery).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

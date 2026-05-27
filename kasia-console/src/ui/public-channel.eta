@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="<%= it.lang || 'zh' %>">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KANet Dev Channel — #<%= it.channelName %></title>
+  <meta name="robots" content="noindex" />
+  <meta name="description" content="KANet developer channel — testnet-only protocol demo, MIT licensed, no investment advice" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <!-- KANet Dev Channel Tier 1 — public-channel.eta (task md §3.1)
+       只读公开 URL, 不需登录, 不接受 POST. Track A 内容 filter by visibility='public'.
+       Editorial baseline (= Owner 5/27 钦定 "之前风格"): Fraunces + 古铜金 + dc-* prefix -->
+
+  <style>
+    :root {
+      --warm-50: #fefcf7;
+      --warm-100: #faf6ec;
+      --warm-200: #e8e1d0;
+      --warm-300: #d6cdb4;
+      --ink-300: #9496a1;
+      --ink-400: #6b6d7b;
+      --ink-500: #4e5060;
+      --ink-700: #2d2e3a;
+      --ink-800: #1a1b25;
+      --dc-gold: #b08a44;
+    }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--warm-50); color: var(--ink-700); }
+    .dc-display { font-family: 'Fraunces', Georgia, serif; font-feature-settings: 'opsz' 36; }
+    .dc-accent-gold { color: var(--dc-gold); }
+    .dc-accent-gold-bg { background: var(--dc-gold); }
+    .dc-accent-gold-bg:hover { background: #97742d; }
+    .dc-accent-gold-border-t { border-top: 2px solid var(--dc-gold); }
+    .dc-card-editorial {
+      background: white;
+      border: 1px solid var(--warm-200);
+      border-radius: 10px;
+    }
+    .dc-stat-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--ink-400);
+      font-weight: 500;
+    }
+    .dc-channel-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-family: 'Fraunces', Georgia, serif;
+      border: 1px solid var(--warm-200);
+      color: var(--ink-500);
+      text-decoration: none;
+      transition: all 0.15s;
+    }
+    .dc-channel-pill:hover { border-color: var(--dc-gold); color: var(--dc-gold); }
+    .dc-channel-pill.active { background: var(--dc-gold); color: white; border-color: var(--dc-gold); }
+    .dc-msg { padding: 12px 16px; border-bottom: 1px solid var(--warm-100); }
+    .dc-msg:last-child { border-bottom: 0; }
+    .dc-msg-meta { font-size: 11px; color: var(--ink-400); }
+    .dc-msg-sender { font-family: 'Fraunces', Georgia, serif; color: var(--dc-gold); font-weight: 500; }
+    .dc-msg-body { font-size: 14px; line-height: 1.6; color: var(--ink-700); white-space: pre-wrap; word-wrap: break-word; }
+    a { color: var(--dc-gold); }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body class="min-h-screen" x-data="publicChannelApp()" x-init="init()">
+
+  <div class="max-w-4xl mx-auto px-6 py-8">
+
+    <!-- HEADER -->
+    <header class="mb-6">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <div class="dc-stat-label mb-1">KANet Dev Channel · Track B · testnet-only</div>
+          <h1 class="dc-display text-3xl text-ink-800">#<%= it.channelName %></h1>
+        </div>
+        <a href="/welcome-dev" class="text-xs dc-accent-gold hover:underline">← 新人入门</a>
+      </div>
+
+      <!-- Channel switcher -->
+      <div class="flex flex-wrap gap-2">
+        <% (it.channels || []).forEach(ch => { %>
+        <a href="/public/channel/<%= ch %>"
+           class="dc-channel-pill <%= ch === it.channelName ? 'active' : '' %>">
+          #<%= ch %>
+        </a>
+        <% }) %>
+      </div>
+    </header>
+
+    <%~ include('partials/dc-disclaimer', it) %>
+
+    <!-- Search + tag filter -->
+    <div class="dc-card-editorial p-4 mb-4 flex items-center gap-3 flex-wrap">
+      <input
+        x-model="query"
+        @input.debounce.500ms="load()"
+        type="text"
+        placeholder="搜索关键字..."
+        class="flex-1 px-3 py-2 border border-warm-300 rounded-md text-sm focus:outline-none focus:border-amber-400 min-w-48"
+      />
+      <select x-model="tag" @change="load()" class="px-2 py-2 border border-warm-300 rounded-md text-sm">
+        <option value="">全部 tag</option>
+        <option value="spec">#spec</option>
+        <option value="bug">#bug</option>
+        <option value="showcase">#showcase</option>
+        <option value="forks">#forks</option>
+        <option value="general">#general</option>
+      </select>
+      <span class="text-xs text-ink-400" x-text="messages.length + ' 条'"></span>
+    </div>
+
+    <!-- Messages -->
+    <div class="dc-card-editorial dc-accent-gold-border-t">
+      <template x-if="loading">
+        <div class="p-8 text-center text-sm text-ink-400">加载中…</div>
+      </template>
+      <template x-if="!loading && messages.length === 0">
+        <div class="p-8 text-center text-sm text-ink-400">
+          <div class="dc-display text-lg text-ink-700 mb-2">暂无公开消息</div>
+          <div>Owner 标 visibility=public 的 message 才会显示在此频道。</div>
+          <div class="mt-2 text-xs">想发消息? → <a href="/welcome-dev">5 分钟入门</a></div>
+        </div>
+      </template>
+      <template x-for="m in messages" :key="m.txid">
+        <div class="dc-msg">
+          <div class="flex items-center justify-between mb-1">
+            <span class="dc-msg-sender" x-text="m.sender_alias || (m.sender_address || '').slice(0, 12) + '…'"></span>
+            <span class="dc-msg-meta" x-text="fmtTime(m.timestamp)"></span>
+          </div>
+          <div class="dc-msg-body" x-text="m.message_text"></div>
+          <div class="dc-msg-meta mt-2" x-show="m.txid">
+            <span>TX:</span>
+            <a :href="'/api/chain/tx/' + m.txid" target="_blank" x-text="(m.txid || '').slice(0, 16) + '…'" class="font-mono"></a>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <%~ include('partials/dc-disclaimer', it) %>
+
+    <footer class="text-center text-xs text-ink-300 mt-10 mb-4">
+      KANet · Track B 协议生态 · MIT · testnet-only · <a href="https://github.com/Unio996/KANet" target="_blank">GitHub</a>
+    </footer>
+
+  </div>
+
+  <script>
+    function publicChannelApp() {
+      return {
+        channelName: '<%= it.channelName %>',
+        messages: [],
+        loading: true,
+        query: '',
+        tag: '',
+
+        async init() {
+          await this.load();
+        },
+
+        async load() {
+          this.loading = true;
+          try {
+            const params = new URLSearchParams();
+            if (this.query) params.set('query', this.query);
+            if (this.tag) params.set('tag', this.tag);
+            const r = await fetch('/api/public/channel/' + this.channelName + '/messages?' + params.toString());
+            const j = await r.json();
+            this.messages = j.messages || [];
+          } catch {
+            this.messages = [];
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        fmtTime(iso) {
+          if (!iso) return '';
+          try {
+            return new Date(iso).toLocaleString(undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+          } catch { return iso; }
+        },
+      };
+    }
+  </script>
+</body>
+</html>
