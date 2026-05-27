@@ -248,7 +248,7 @@ async function dispatchPhase2OrCheckSigs(offer, winnerStr, db) {
       const { sendCommandAsync } = await import('./relay-manager.js');
       const makerStake = parseInt(meta.maker_stake_sompi, 10) || 0;
       const takerStake = parseInt(meta.taker_stake_sompi, 10) || 0;
-      const minerFee = parseInt(meta.miner_fee_sompi, 10) || 20_000;
+      const minerFee = parseInt(meta.miner_fee_sompi, 10) || 1_000_000;
       const brokerFeePct = parseInt(meta.broker_fee_pct, 10) || 0;
       const oracleFeePct = parseInt(meta.oracle_fee_pct, 10) || 100;  // sub 5b: default 1% (per Bettor r17 truth matrix)
       const spendable = BigInt(makerStake + takerStake - minerFee);
@@ -368,7 +368,7 @@ async function dispatchPhase2OrCheckSigs(offer, winnerStr, db) {
       // 不是 wasm-serialized {value, scriptPublicKey}. phase2_tx_obj.outputs 是 TransactionOutput 序列化 form 不通用).
       const makerStake = parseInt(meta.maker_stake_sompi, 10) || 0;
       const takerStake = parseInt(meta.taker_stake_sompi, 10) || 0;
-      const minerFee = parseInt(meta.miner_fee_sompi, 10) || 20_000;
+      const minerFee = parseInt(meta.miner_fee_sompi, 10) || 1_000_000;
       const brokerFeePct = parseInt(meta.broker_fee_pct, 10) || 0;
       const spendable = BigInt(makerStake + takerStake - minerFee);
       const brokerFeeAmount = (spendable * BigInt(brokerFeePct)) / 10000n;
@@ -454,7 +454,7 @@ export async function dispatchPhase2Consensual(offer, winner, db = sqlite) {
     const { sendCommandAsync } = await import('./relay-manager.js');
     const makerStake = parseInt(meta.maker_stake_sompi, 10) || 0;
     const takerStake = parseInt(meta.taker_stake_sompi, 10) || 0;
-    const minerFee = parseInt(meta.miner_fee_sompi, 10) || 20_000;
+    const minerFee = parseInt(meta.miner_fee_sompi, 10) || 1_000_000;
     const brokerFeePct = parseInt(meta.broker_fee_pct, 10) || 100;  // default 1%
     const spendable = BigInt(makerStake + takerStake - minerFee);
     const brokerFeeAmount = (spendable * BigInt(brokerFeePct)) / 10000n;
@@ -488,7 +488,7 @@ export async function dispatchPhase2Consensual(offer, winner, db = sqlite) {
     });
     if (!preimage?.ok || !preimage.tx_obj) {
       console.error(`[settler:consensual] build_preimage fail offer=${offer.id.slice(0,12)}: ${preimage?.error}`);
-      return { handled: true, completed: false };
+      return { handled: true, completed: false, step: 'build_preimage', error: preimage?.error || 'no error in response' };
     }
 
     // Stash preimage + winner in metadata (= maker_sign + taker_sign handler reads via offer scan)
@@ -542,7 +542,7 @@ export async function dispatchPhase2Consensual(offer, winner, db = sqlite) {
         });
         if (!makerSigRes?.ok || !makerSigRes.signature) {
           console.error(`[settler:consensual] maker sign input ${inputIdx} fail offer=${offer.id.slice(0,12)}: ${makerSigRes?.error}`);
-          return { handled: true, completed: false };
+          return { handled: true, completed: false, step: `maker_sign_${inputIdx}`, error: makerSigRes?.error || 'no error in response' };
         }
         // taker sig
         const takerSigRes = await sendCommandAsync(takerRelayId, {
@@ -552,7 +552,7 @@ export async function dispatchPhase2Consensual(offer, winner, db = sqlite) {
         });
         if (!takerSigRes?.ok || !takerSigRes.signature) {
           console.error(`[settler:consensual] taker sign input ${inputIdx} fail offer=${offer.id.slice(0,12)}: ${takerSigRes?.error}`);
-          return { handled: true, completed: false };
+          return { handled: true, completed: false, step: `taker_sign_${inputIdx}`, error: takerSigRes?.error || 'no error in response' };
         }
         // Order: maker_sig first then taker_sig (= .sil source order: checkSig(makerSig) before checkSig(takerSig))
         sigsByInput[inputIdx] = [makerSigRes.signature, takerSigRes.signature];
@@ -577,7 +577,7 @@ export async function dispatchPhase2Consensual(offer, winner, db = sqlite) {
       });
       if (!submitRes?.ok || !submitRes.txId) {
         console.error(`[settler:consensual] settle TX submit fail offer=${offer.id.slice(0,12)}: ${submitRes?.error}`);
-        return { handled: true, completed: false };
+        return { handled: true, completed: false, step: 'submit', error: submitRes?.error || 'no error in response' };
       }
 
       db.prepare(`UPDATE exchange_offers SET settle_txid=? WHERE id=?`).run(submitRes.txId, offer.id);
@@ -586,11 +586,11 @@ export async function dispatchPhase2Consensual(offer, winner, db = sqlite) {
       return { handled: true, completed: true, txId: submitRes.txId };
     } catch (e) {
       console.error(`[settler:consensual] sign+submit fail offer=${offer.id.slice(0,12)}: ${e.message}`);
-      return { handled: true, completed: false };
+      return { handled: true, completed: false, step: 'sign_submit_catch', error: e.message };
     }
   } catch (e) {
     console.error(`[settler:consensual] dispatch fail offer=${offer.id?.slice(0,12)}: ${e.message}`);
-    return { handled: true, completed: false };
+    return { handled: true, completed: false, step: 'outer_catch', error: e.message };
   }
 }
 

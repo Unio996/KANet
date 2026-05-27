@@ -1376,7 +1376,7 @@ export async function registerBettorRoutes(fastify) {
       return reply.code(400).send({ ok: false, error: `stake ${stakeKas.toFixed(2)} KAS exceeds max ${MAX_STAKE_PER_OFFER} KAS` });
     }
 
-    const minerFee = parseInt(b.miner_fee, 10) || 20_000;  // 0.0002 KAS default (= Sub 8.1 Bug 13: 10000 too low for kaspad standardness 13130 for 5-sig settle TX, 20000 safe margin)
+    const minerFee = parseInt(b.miner_fee, 10) || 1_000_000;  // post-Toccata Bug 19 (NWT r62 5/27): 20_000 too low for kaspad v1.2.0 mass pricing 100 sompi/mass × 7898 mass = 789_800 required for settle_consensual TX. 1_000_000 = ~25% safe margin.
     const deadline = Math.floor(outcomeEndMs / 1000);
 
     // v3 双 stake: makerStakeAmount + takerStakeAmount (= 真 P2P, Bettor r233).
@@ -1743,7 +1743,7 @@ export async function registerBettorRoutes(fastify) {
     catch (e) { return reply.code(500).send({ ok: false, error: `metadata JSON parse fail: ${e.message}` }); }
     const redeemScriptHex = meta.redeem_script_hex;
     if (!redeemScriptHex) return reply.code(500).send({ ok: false, error: 'offer metadata missing redeem_script_hex' });
-    const minerFeeSompi = parseInt(meta.miner_fee_sompi, 10) || 20_000;  // Bug 14 fix sediment (J1 #35): 10_000 too low for kaspad 13_130 standardness
+    const minerFeeSompi = parseInt(meta.miner_fee_sompi, 10) || 1_000_000;  // post-Toccata Bug 19 sediment (NWT r62): 20_000 too low for kaspad v1.2.0 mass pricing
     const makerStakeSompi = parseInt(meta.maker_stake_sompi, 10);
     const takerStakeSompi = parseInt(meta.taker_stake_sompi, 10);
     // Sub 8.3 Bug 15: SS contract refund_both / refund_maker_unjoined branches require tx.time >= deadline
