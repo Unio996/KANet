@@ -76,6 +76,8 @@ export async function onBroadcastWritten(row) {
         await handleExchangeDispute(msg); break;
       case EXCHANGE_MSG.RESOLVE:
         await handleExchangeResolve(msg); break;
+      case 'kanet_prediction_params_v1':
+        await handlePredictionParams(msg); break;
     }
   } catch (err) {
     console.error(`[trade-filter] Error processing ${msg.t}: ${err.message}`);
@@ -240,6 +242,25 @@ async function handlePaid(msg) {
   });
 
   console.log(`[trade-filter] Paid: ${orderId.slice(0, 8)} TX=${msg.tx.slice(0, 16)}`);
+}
+
+// Oracle v0.3 sub 10.x — SS SPOF Path A ingest (J2 r56 NWT r66 CRITICAL #3 fix).
+// Capture kanet_prediction_params_v1 broadcasts into chain_events (= canonical source for recovery).
+// Recovery code reads chain_events WHERE event_type='kanet_prediction_params_v1' AND offer_id=X.
+async function handlePredictionParams(msg) {
+  if (!msg.offer_id || !msg.params_hash || !msg.ctor_params) {
+    console.warn(`[trade-filter] kanet_prediction_params_v1 missing required fields tx=${msg._tx?.slice(0,12)}`);
+    return;
+  }
+  recordChainEvent({
+    txid: msg._tx,
+    eventType: 'kanet_prediction_params_v1',
+    fromAddress: msg._from,
+    toAddress: null,
+    observedBy: 'protocol',
+    payload: msg,  // full payload (= offer_id, p2sh_addr, ctor_params, params_hash, maker_sig, taker_sig)
+  });
+  console.log(`[trade-filter] kanet_prediction_params_v1 ingest offer=${msg.offer_id.slice(0,12)} tx=${msg._tx?.slice(0,12)}`);
 }
 
 async function handleDelivered(msg) {

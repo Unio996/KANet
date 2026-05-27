@@ -1435,6 +1435,11 @@ export async function registerBettorRoutes(fastify) {
       broker_fee_pct: brokerFeePct,
       oracle_fee_pct: oracleFeePct,  // Sub 7 (J2 r33): settler L253 read this for Phase 2 dispatch
       broker_relay_id: b.broker_relay_id,
+      // Sub 10.x SPOF (J2 r56 NWT r66 CRITICAL #2): pubkeys for recovery silverc recompile
+      maker_pk: makerPk,
+      taker_pk: takerPk,
+      broker_pk: brokerPk,
+      deadline_seconds: deadline,
       phase: '4a-E',
     });
     // UPDATE the pending offer in place (= 不新 INSERT, 复用 pending_offer_id).
@@ -1606,18 +1611,33 @@ export async function registerBettorRoutes(fastify) {
       } catch (e) { console.warn(`[taker-stake] metadata.taker_relay_id store fail (non-fatal): ${e.message}`); }
 
       // Sub 10.x (J2 r53 SS SPOF Path A+B per Bettor r93 Owner ship-block) —
-      // Emit params cache: broadcast + DM + local cache. Non-blocking, errors logged.
+      // Emit params cache: broadcast + DM + local cache.
+      // Path A REQUIRED (= NWT r66 CRITICAL #1): await + reply 503 if broadcast fail. taker_stake locked
+      // but offer cannot settle without on-chain canonical ctor_params. Caller can retry.
       try {
         const offerFull = sqlite.prepare(`SELECT * FROM exchange_offers WHERE id = ?`).get(offerId);
         const metaFull = JSON.parse(offerFull.metadata || '{}');
         const { emitPredictionParamsCache } = await import('../services/prediction-params-cache.js');
-        emitPredictionParamsCache({
+        const emitRes = await emitPredictionParamsCache({
           offer: offerFull,
           meta: metaFull,
           makerRelayId: offerFull.maker_relay_id,
           takerRelayId: b.taker_relay_id,
-        }).catch(e => console.warn(`[taker-stake] params cache emit fail (non-fatal): ${e.message}`));
-      } catch (e) { console.warn(`[taker-stake] params cache compose fail (non-fatal): ${e.message}`); }
+        });
+        if (!emitRes?.ok) {
+          console.error(`[taker-stake] Sub 10.x Path A REQUIRED FAIL offer=${offerId.slice(0,12)}: ${emitRes?.error}. Stakes locked at P2SH ${offer.escrow_p2sh}.`);
+          return reply.code(503).send({
+            ok: false,
+            error: `SS SPOF Path A on-chain broadcast required but failed: ${emitRes?.error}. Stakes locked at ${offer.escrow_p2sh}. Retry endpoint after relay/network healthy.`,
+            stakes_locked: { p2sh: offer.escrow_p2sh, maker_tx: offer.broadcast_tx_id, taker_tx: takerEscrowTxId },
+            params_hash: emitRes?.params_hash,
+          });
+        }
+        console.log(`[taker-stake] Sub 10.x Path A SUCCESS offer=${offerId.slice(0,12)} bcast=${emitRes.broadcast_tx_id?.slice(0,12)} dm=${emitRes.dm_count}/${emitRes.dm_total}`);
+      } catch (e) {
+        console.error(`[taker-stake] Sub 10.x emit exception offer=${offerId.slice(0,12)}: ${e.message}`);
+        return reply.code(503).send({ ok: false, error: `SS SPOF Path A emit exception: ${e.message}` });
+      }
       // protocol_status 走 transition() (= [ABE-A.6] 单一所有权)
       const { transition } = await import('../services/exchange-machine.js');
       transition(offerId, 'matched');
