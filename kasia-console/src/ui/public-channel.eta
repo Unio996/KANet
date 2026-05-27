@@ -82,14 +82,14 @@
         <a href="/welcome-dev" class="text-xs dc-accent-gold hover:underline">← 新人入门</a>
       </div>
 
-      <!-- Channel switcher -->
+      <!-- Channel switcher (= 6 hardcoded channels) -->
       <div class="flex flex-wrap gap-2">
-        <% (it.channels || []).forEach(ch => { %>
-        <a href="/public/channel/<%= ch %>"
-           class="dc-channel-pill <%= ch === it.channelName ? 'active' : '' %>">
-          #<%= ch %>
-        </a>
-        <% }) %>
+        <a href="/public/channel/kanet-spec"        class="dc-channel-pill <%= it.channelName === 'kanet-spec' ? 'active' : '' %>">#kanet-spec</a>
+        <a href="/public/channel/kanet-bugs"        class="dc-channel-pill <%= it.channelName === 'kanet-bugs' ? 'active' : '' %>">#kanet-bugs</a>
+        <a href="/public/channel/kanet-showcase"    class="dc-channel-pill <%= it.channelName === 'kanet-showcase' ? 'active' : '' %>">#kanet-showcase</a>
+        <a href="/public/channel/kanet-marketplace" class="dc-channel-pill <%= it.channelName === 'kanet-marketplace' ? 'active' : '' %>">#kanet-marketplace</a>
+        <a href="/public/channel/kanet-forks"       class="dc-channel-pill <%= it.channelName === 'kanet-forks' ? 'active' : '' %>">#kanet-forks</a>
+        <a href="/public/channel/kanet-general"     class="dc-channel-pill <%= it.channelName === 'kanet-general' ? 'active' : '' %>">#kanet-general</a>
       </div>
     </header>
 
