@@ -4210,5 +4210,37 @@ export function runMigrations() {
     }
   }
 
+  // v144: Bettor-tn r83 root fix — relay_nodes.address UNIQUE + 删 YUC dup (= NWT mirror)
+  //
+  // Owner 5/27 surface /portfolio 总资产 重复计算 = NWT+YUC 同 kaspa address 被聚合 2 次.
+  // YUC id=756662da 跟 NWT id=4094a133 完全同 address (...y8mywc98naqkhk),
+  // skill 32 行 100% identical, 0 unique data. import/clone accident.
+  //
+  // F3 root fix per Bettor r83 spec + UI r40 grep verify (= 全 83 表 YUC id 0 其他表 ref)
+  // + UI r40 加 2 refinement (= /relays + /agent display sanity) + Bettor r84 拍 fire.
+  //
+  // 3 件 atomic:
+  //   a) DELETE skills WHERE relay_node_id=YUC (= 32 rows)
+  //   b) DELETE relay_nodes WHERE id=YUC (= 1 row)
+  //   c) CREATE UNIQUE INDEX (partial, NULL/empty allowed) 防 future dup
+  {
+    const YUC_ID = '756662da-0f71-49a7-bfac-116e501ef2b9';
+    const yucExists = sqlite.prepare("SELECT COUNT(*) AS cnt FROM relay_nodes WHERE id = ?").get(YUC_ID);
+    if (yucExists.cnt > 0) {
+      const skillsDel = sqlite.prepare("DELETE FROM skills WHERE relay_node_id = ?").run(YUC_ID);
+      const relayDel = sqlite.prepare("DELETE FROM relay_nodes WHERE id = ?").run(YUC_ID);
+      console.log(`[migrate] v144: YUC dup cleanup — ${skillsDel.changes} skill rows + ${relayDel.changes} relay_nodes row deleted (Bettor r83).`);
+    }
+    const idxExists = sqlite.prepare("SELECT COUNT(*) AS cnt FROM sqlite_master WHERE type='index' AND name='idx_relay_nodes_address_unique'").get();
+    if (!idxExists.cnt) {
+      sqlite.prepare(`
+        CREATE UNIQUE INDEX idx_relay_nodes_address_unique
+        ON relay_nodes(address)
+        WHERE address IS NOT NULL AND address != ''
+      `).run();
+      console.log('[migrate] v144: relay_nodes.address UNIQUE partial index added (防 future dup).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
