@@ -240,6 +240,29 @@ async function dispatchPhase2OrCheckSigs(offer, winnerStr, db) {
   let meta;
   try { meta = JSON.parse(offer.metadata || '{}'); } catch { meta = {}; }
 
+  // Sub 10.x SPOF recovery (J2 r53 NWT r64 align): same recovery wire as dispatchPhase2Consensual.
+  // Apply before reading meta.redeem_script_hex which downstream uses.
+  if (!meta.redeem_script_hex || !offer.escrow_p2sh) {
+    try {
+      const { recoverPredictionParams } = await import('./prediction-params-cache.js');
+      const recovered = await recoverPredictionParams(offer.id);
+      if (!recovered) {
+        console.error(`[settler:dispute] SPOF recovery fail offer=${offer.id.slice(0, 12)} — no chain_event + no local cache`);
+        return { handled: true, completed: false };
+      }
+      meta = { ...meta, ...recovered.ctor_params };
+      if (!offer.escrow_p2sh && recovered.ctor_params.p2sh_addr) offer.escrow_p2sh = recovered.ctor_params.p2sh_addr;
+      try {
+        db.prepare(`UPDATE exchange_offers SET metadata = ?, escrow_p2sh = COALESCE(escrow_p2sh, ?) WHERE id = ?`)
+          .run(JSON.stringify(meta), offer.escrow_p2sh, offer.id);
+      } catch (e) { console.warn(`[settler:dispute] recovered meta persist fail: ${e.message}`); }
+      console.log(`[settler:dispute] SPOF recovery OK offer=${offer.id.slice(0, 12)} source=${recovered.source}`);
+    } catch (e) {
+      console.error(`[settler:dispute] SPOF recovery exception offer=${offer.id.slice(0, 12)}: ${e.message}`);
+      return { handled: true, completed: false };
+    }
+  }
+
   if (offer.protocol_status === 'verifying') {
     // First Phase 2 dispatch — build preimage + DM 5 oracle TX-sig req + transition collecting_sigs
     // Sub 5b (Oracle v0.3 J1 #21 critical gap fix): outputs.length 2→7 align NWT sub 4 PredictionEscrowUnanimous5
@@ -436,6 +459,32 @@ async function dispatchPhase2OrCheckSigs(offer, winnerStr, db) {
 export async function dispatchPhase2Consensual(offer, winner, db = sqlite) {
   let meta;
   try { meta = JSON.parse(offer.metadata || '{}'); } catch { meta = {}; }
+
+  // Sub 10.x SPOF recovery (J2 r53 NWT r64 align): if meta.redeem_script_hex missing OR escrow_p2sh missing,
+  // attempt recovery from chain_event (canonical) → local_cache (fallback). Recovered params recompile via
+  // silverc and assert P2SH match before continuing. Skip if all params present (= normal hot path).
+  if (!meta.redeem_script_hex || !offer.escrow_p2sh) {
+    try {
+      const { recoverPredictionParams } = await import('./prediction-params-cache.js');
+      const recovered = await recoverPredictionParams(offer.id);
+      if (!recovered) {
+        console.error(`[settler:consensual] SPOF recovery fail offer=${offer.id.slice(0, 12)} — no chain_event + no local cache`);
+        return { handled: true, completed: false };
+      }
+      // Merge recovered fields into meta + offer.escrow_p2sh for downstream code
+      meta = { ...meta, ...recovered.ctor_params };
+      if (!offer.escrow_p2sh && recovered.ctor_params.p2sh_addr) offer.escrow_p2sh = recovered.ctor_params.p2sh_addr;
+      // Persist recovered meta back to offer (= future ticks 不 重 recover)
+      try {
+        db.prepare(`UPDATE exchange_offers SET metadata = ?, escrow_p2sh = COALESCE(escrow_p2sh, ?) WHERE id = ?`)
+          .run(JSON.stringify(meta), offer.escrow_p2sh, offer.id);
+      } catch (e) { console.warn(`[settler:consensual] recovered meta persist fail: ${e.message}`); }
+      console.log(`[settler:consensual] SPOF recovery OK offer=${offer.id.slice(0, 12)} source=${recovered.source}`);
+    } catch (e) {
+      console.error(`[settler:consensual] SPOF recovery exception offer=${offer.id.slice(0, 12)}: ${e.message}`);
+      return { handled: true, completed: false };
+    }
+  }
 
   // Sub 5d hotfix (J2 r45 NWT catch): state machine requires matched → verifying → collecting_sigs path.
   // VALID_TRANSITIONS: matched → [verifying,...]; verifying → [...collecting_sigs...]; matched → collecting_sigs FAILS.
