@@ -4311,5 +4311,28 @@ export function runMigrations() {
     }
   }
 
+  // v147: sub 12.x prediction agent UI+DM menu (= Bettor r100 R2 final ACK, J2 scope).
+  // Per-user DM session context cache. sender_address PK (= keyed by user kaspa addr or relay_id).
+  // NOT truth source — DB chain truth (= exchange_offers.protocol_status) is canonical, this table just caches
+  // "user 上次选哪 market" for menu UX continuity. Stateless DM handler reads protocol_status fresh each command.
+  {
+    const hasSessionTable = sqlite.prepare(
+      "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='prediction_dm_session'"
+    ).get().cnt > 0;
+    if (!hasSessionTable) {
+      sqlite.exec(`
+        CREATE TABLE prediction_dm_session (
+          sender_address TEXT PRIMARY KEY,
+          last_market_id TEXT,
+          last_outcome TEXT,
+          last_action TEXT,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX idx_prediction_dm_session_updated ON prediction_dm_session(updated_at);
+      `);
+      console.log('[migrate] v147: prediction_dm_session table created (sub 12.x DM menu UX context cache, Bettor r100).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
