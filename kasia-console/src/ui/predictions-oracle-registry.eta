@@ -1,4 +1,4 @@
-<%~ include('partials/layout-start', { title: 'Oracle Registry — Predictions', _page: 'predictions-oracle-registry' }) %>
+<%~ include('partials/page-open', { _page: 'predictions-oracle-registry', pageTitle: 'Oracle Registry', ...it }) %>
 
 <!-- Oracle v0.3 sub #7 D1 — Markets › Predictions › Oracle Registry sub-page -->
 <!-- 显 active oracle (= 24h TTL filter) + Trust Score 1-100 + 绿/黄/红 + capability tag filter -->
@@ -166,4 +166,4 @@ function oracleRegistryPage() {
 }
 </script>
 
-<%~ include('partials/layout-end') %>
+<%~ include('partials/page-close', { ...it }) %>

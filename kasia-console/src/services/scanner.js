@@ -70,7 +70,7 @@ export async function startScanner() {
     ...process.env,
     SCAN_MODE: scanMode,
     KASPA_RPC_URL: rpcUrl,
-    KASPA_NETWORK: 'mainnet',
+    KASPA_NETWORK: process.env.KASPA_NETWORK || 'mainnet',  // 5/25 hotfix — D 盘 TN12 需 testnet-12, mainnet 硬编无法扫 testnet 链 (同 rpc-health.js 同款 pattern)
     CONSOLE_URL: `http://localhost:${CONSOLE_PORT}`,
     INGEST_SECRET: ingestSecret,
     SCOUT_SEED_ADDRESS: _seedAddress,
