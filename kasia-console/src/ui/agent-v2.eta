@@ -316,7 +316,8 @@
            {id:'history',l:'历史'},
            {id:'budget', l:'预算'},
            {id:'status', l:'状态'},
-           {id:'oracle', l:'Oracle'}
+           {id:'oracle', l:'Oracle'},
+           {id:'prediction', l:'Prediction Agent'}
          ]" :key="t.id">
           <button @click="activeTab = activeTab === t.id ? null : t.id"
             class="tab-item"
@@ -1224,6 +1225,70 @@
               ⚠ broker/oracle 互斥铁律警告: 此 agent 同时 broker, 高 manipulation 向量风险. 建议 unregister oracle.
             </div>
           </template>
+        </div>
+      </div>
+
+      <!-- ============================== -->
+      <!-- Prediction Agent role tab (Bettor r100 final spec UI scaffold) -->
+      <!-- ============================== -->
+      <div id="tab-prediction" x-show="activeTab === 'prediction'" class="card card-flush overflow-hidden av-accent-gold-border-t">
+        <div class="px-5 py-4 border-b border-warm-200 flex items-center justify-between">
+          <span class="av-display text-base text-ink-800">Prediction Agent · 菜单式 DM 代理</span>
+          <a href="/predictions" class="text-xs av-accent-gold hover:underline">Markets ▶ Predictions →</a>
+        </div>
+        <div class="p-5 space-y-5">
+          <!-- Hero · DM stats placeholder (= chain truth source, J2 v147 后 wire) -->
+          <div class="bg-warm-50 rounded-lg p-4">
+            <div class="av-stat-label mb-2">DM 代理状态</div>
+            <div class="text-xs text-ink-500">
+              <span class="text-ink-300 italic">[J2 v147 prediction_dm_session migrate + NWT single relay router ship 后 wire chain truth source]</span>
+            </div>
+            <div class="grid grid-cols-3 gap-3 mt-3 text-center">
+              <div>
+                <div class="av-display text-2xl text-ink-800 tabular-nums">—</div>
+                <div class="text-[10px] text-ink-400 mt-1">活跃 DM session</div>
+              </div>
+              <div>
+                <div class="av-display text-2xl text-green-700 tabular-nums">—</div>
+                <div class="text-[10px] text-ink-400 mt-1">完成 settle</div>
+              </div>
+              <div>
+                <div class="av-display text-2xl av-accent-gold tabular-nums">—</div>
+                <div class="text-[10px] text-ink-400 mt-1">WAITING_TAKER</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Menu Flow 教育 (= 5 step preview) -->
+          <div class="bg-warm-50 rounded-lg p-4">
+            <div class="av-stat-label mb-2">DM 菜单流程预览</div>
+            <pre class="text-[11px] text-ink-600 font-mono leading-relaxed">DM "@PredictionAgent /predict" →
+活跃市场:
+  [1] Arsenal vs Chelsea (deadline 2d)
+  [2] BTC > 70k EOM (5d)
+回 1-N OR /create /my_bets /help
+
+回 "1" → outcome 选择 → 回 "1" Arsenal 赢
+       → stake 选 (10/50/100 OR custom) → /confirm
+       → publish-v2 + escrow lock
+       → wait taker → settle 真链 → DM verdict</pre>
+          </div>
+
+          <!-- Router 哲学 -->
+          <div class="bg-warm-50 rounded-lg p-4">
+            <div class="av-stat-label mb-2">DM 路由 (NWT single relay router)</div>
+            <ul class="text-xs text-ink-600 space-y-1 list-disc list-inside">
+              <li>"/" 数字开头 → prediction agent menu (deterministic)</li>
+              <li>自然语言 → broker LLM agent (parse intent)</li>
+              <li>broker LLM 解析 "押 Arsenal 50" → route 到 prediction menu (= hybrid next cycle)</li>
+            </ul>
+          </div>
+
+          <!-- 7 维 36 cases ship-block gate 引用 -->
+          <div class="bg-amber-50/40 border border-amber-200/60 rounded-lg p-3 text-[11px] text-amber-900">
+            <div class="font-medium mb-1">📍 ship-block gate (= J1 #59c 7 维 36+ cases)</div>
+            <div>UI scaffold ship 后 J1 audit script + 24h soak + 5 用户并发 stress test 全 PASS 才 production ready.</div>
+          </div>
         </div>
       </div>
 
