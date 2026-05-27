@@ -78,32 +78,51 @@ function fetchUserBets(senderAddress) {
 
 /**
  * Get or initialize user's DM session (J2 v147 prediction_dm_session table).
+ * Schema: sender_address PK + last_market_id + last_outcome + last_action + updated_at
+ * State encoded in last_action prefix: "STATE:..." (= avoid schema dependency on `state` col).
  */
 function getOrInitSession(senderAddress) {
   const db = getDb();
   let row = db.prepare(`SELECT * FROM prediction_dm_session WHERE sender_address = ?`).get(senderAddress);
   if (!row) {
     db.prepare(`
-      INSERT INTO prediction_dm_session (sender_address, state, context_json, updated_at)
-      VALUES (?, ?, ?, datetime('now'))
-    `).run(senderAddress, STATE.IDLE, '{}');
+      INSERT INTO prediction_dm_session (sender_address, last_market_id, last_outcome, last_action, updated_at)
+      VALUES (?, ?, ?, ?, datetime('now'))
+    `).run(senderAddress, null, null, 'STATE:IDLE', senderAddress);
     row = db.prepare(`SELECT * FROM prediction_dm_session WHERE sender_address = ?`).get(senderAddress);
   }
+  // Derive state from last_action prefix (= "STATE:SELECT_MARKET" etc.)
+  const action = row.last_action || 'STATE:IDLE';
+  row.state = action.startsWith('STATE:') ? action.slice(6).split('|')[0] : 'IDLE';
+  // Derive aux from last_action suffix (= "STATE:CONFIRM_STAKE|stake=50" → 50)
+  const auxPart = action.includes('|') ? action.split('|').slice(1).join('|') : '';
+  row.aux = Object.fromEntries(
+    auxPart.split('|').filter(Boolean).map(p => {
+      const eq = p.indexOf('=');
+      return eq >= 0 ? [p.slice(0, eq), p.slice(eq + 1)] : [p, true];
+    })
+  );
   return row;
 }
 
 /**
- * Update session state + context.
+ * Update session state + market + outcome + aux.
+ * aux encoded into last_action via "|key=value" suffix (= bypass schema lacking context_json).
  */
-function updateSession(senderAddress, state, contextPatch = {}) {
+function updateSession(senderAddress, state, patch = {}) {
   const db = getDb();
   const cur = getOrInitSession(senderAddress);
-  const ctx = { ...JSON.parse(cur.context_json || '{}'), ...contextPatch };
+  // Merge aux: new patch overrides cur.aux
+  const auxMerged = { ...cur.aux, ...(patch.aux || {}) };
+  const auxStr = Object.entries(auxMerged).map(([k, v]) => `${k}=${v}`).join('|');
+  const lastAction = auxStr ? `STATE:${state}|${auxStr}` : `STATE:${state}`;
+  const lastMarketId = patch.last_market_id !== undefined ? patch.last_market_id : cur.last_market_id;
+  const lastOutcome = patch.last_outcome !== undefined ? patch.last_outcome : cur.last_outcome;
   db.prepare(`
     UPDATE prediction_dm_session
-    SET state = ?, context_json = ?, updated_at = datetime('now')
+    SET last_market_id = ?, last_outcome = ?, last_action = ?, updated_at = datetime('now')
     WHERE sender_address = ?
-  `).run(state, JSON.stringify(ctx), senderAddress);
+  `).run(lastMarketId, lastOutcome, lastAction, senderAddress);
 }
 
 // ── DM reply formatters (= deterministic menu rendering) ────────────────
@@ -210,14 +229,15 @@ export async function handleDmMessage(senderAddress, text) {
   if (!trimmed) return null;
 
   const session = getOrInitSession(senderAddress);
-  const ctx = JSON.parse(session.context_json || '{}');
+  // session.state derived from last_action prefix, session.aux from suffix kv pairs
+  // session.last_market_id + session.last_outcome from direct cols
 
   // /help — anywhere
   if (trimmed === MENU.HELP) return renderHelp();
 
   // /cancel — reset to IDLE
   if (trimmed === MENU.CANCEL) {
-    updateSession(senderAddress, STATE.IDLE, {});
+    updateSession(senderAddress, STATE.IDLE, { last_market_id: null, last_outcome: null, aux: {} });
     return '已取消. 回 /predict 重新开始 OR /help 菜单.';
   }
 
@@ -239,7 +259,10 @@ export async function handleDmMessage(senderAddress, text) {
   // /predict — enter SELECT_MARKET state
   if (trimmed === MENU.PREDICT) {
     const markets = fetchActiveMarkets();
-    updateSession(senderAddress, STATE.SELECT_MARKET, { markets_snapshot: markets.map(m => m.market_id) });
+    // Encode markets snapshot ids into aux as comma-list (= short enough for last_action col)
+    updateSession(senderAddress, STATE.SELECT_MARKET, {
+      aux: { ms: markets.map(m => m.market_id.slice(-8)).join(',') },
+    });
     return renderMarketList(markets);
   }
 
@@ -248,45 +271,37 @@ export async function handleDmMessage(senderAddress, text) {
     if (session.state !== STATE.CONFIRM_STAKE) {
       return '没有待确认的下注. 回 /predict 开始 OR /help 菜单.';
     }
-    // TODO: call POST /api/prediction/publish-v2 with ctx
-    // For now placeholder reply pending integration with prediction relay handler
+    // TODO: call POST /api/prediction/publish-v2 with session.last_market_id + last_outcome + aux.stake
     return [
-      '⏳ /confirm 收, 准备 publish-v2 escrow lock (= 实际 wire 等 NWT router 完成).',
-      `市场: ${ctx.market_question}`,
-      `Outcome: ${ctx.outcome_label}`,
-      `Stake: ${ctx.stake_kas} KAS`,
+      '⏳ /confirm 收, 准备 publish-v2 escrow lock (= 实际 wire 等 prediction-relay integration).',
+      `市场: ${session.last_market_id || '?'}`,
+      `Outcome: ${session.last_outcome || '?'}`,
+      `Stake: ${session.aux.stake || '?'} KAS`,
       '',
-      '(= placeholder, 等 prediction-agent integration ship)',
+      '(= placeholder, 等 prediction-agent → POST /api/prediction/publish-v2 wire)',
     ].join('\n');
   }
 
   // Number selection — context-dependent
   const num = parseInt(trimmed, 10);
   if (Number.isInteger(num) && num >= 1) {
+    const db = getDb();
+
     if (session.state === STATE.SELECT_MARKET) {
-      const marketIds = ctx.markets_snapshot || [];
-      if (num > marketIds.length) return `无效选项. 请回 1-${marketIds.length}.`;
-      const db = getDb();
-      const market = db.prepare(`SELECT * FROM pool_markets WHERE market_id = ?`).get(marketIds[num - 1]);
-      if (!market) return '该市场已不存在 (= 可能 closed). 回 /predict 刷新.';
-      updateSession(senderAddress, STATE.SELECT_OUTCOME, {
-        market_id: market.market_id,
-        market_question: market.question,
-      });
+      // Re-fetch fresh markets (= chain truth, snapshot may be stale)
+      const markets = fetchActiveMarkets();
+      if (num > markets.length) return `无效选项. 请回 1-${markets.length}.`;
+      const market = markets[num - 1];
+      updateSession(senderAddress, STATE.SELECT_OUTCOME, { last_market_id: market.market_id });
       return renderOutcomeList(market);
     }
 
     if (session.state === STATE.SELECT_OUTCOME) {
-      const db = getDb();
-      const market = db.prepare(`SELECT * FROM pool_markets WHERE market_id = ?`).get(ctx.market_id);
+      const market = db.prepare(`SELECT * FROM pool_markets WHERE market_id = ?`).get(session.last_market_id);
       if (!market) return '市场已 closed. 回 /predict 刷新.';
       const outcomes = JSON.parse(market.outcomes_json || '[]');
       if (num > outcomes.length) return `无效选项. 请回 1-${outcomes.length}.`;
-      updateSession(senderAddress, STATE.CONFIRM_STAKE, {
-        ...ctx,
-        outcome_idx: num - 1,
-        outcome_label: outcomes[num - 1],
-      });
+      updateSession(senderAddress, STATE.CONFIRM_STAKE, { last_outcome: outcomes[num - 1] });
       return renderStakeOptions(market, num - 1);
     }
 
@@ -295,11 +310,15 @@ export async function handleDmMessage(senderAddress, text) {
       if (num <= STAKE_OPTIONS_KAS.length) {
         stakeKas = STAKE_OPTIONS_KAS[num - 1];
       } else {
-        // Treat as custom amount (= the number itself is stake KAS)
         stakeKas = num;
       }
-      updateSession(senderAddress, STATE.CONFIRM_STAKE, { ...ctx, stake_kas: stakeKas });
-      return renderConfirmation({ ...ctx, stake_kas: stakeKas });
+      updateSession(senderAddress, STATE.CONFIRM_STAKE, { aux: { stake: stakeKas } });
+      const market = db.prepare(`SELECT * FROM pool_markets WHERE market_id = ?`).get(session.last_market_id);
+      return renderConfirmation({
+        market_question: market?.question || session.last_market_id,
+        outcome_label: session.last_outcome,
+        stake_kas: stakeKas,
+      });
     }
   }
 
