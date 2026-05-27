@@ -55,6 +55,7 @@ const STAKE_OPTIONS_KAS = [10, 50, 100];
 function fetchActiveMarkets(limit = 5) {
   const db = getDb();
   // E pre-handshake flow uses exchange_offers (= /api/prediction/pending-offer L1490 bettor.js)
+  // Bettor r106 Bug A hotfix: 2 null-field offers cause marketLabel render all `?` — exclude via NOT NULL 3-col filter
   return db.prepare(`
     SELECT id, maker_relay_id, outcome_oracle_relay_ids AS oracle_relay_ids,
            outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side,
@@ -62,6 +63,9 @@ function fetchActiveMarkets(limit = 5) {
     FROM exchange_offers
     WHERE protocol_status = 'pending_taker'
       AND pending_handshake_expires_at > datetime('now')
+      AND outcome_market_source IS NOT NULL
+      AND outcome_side IS NOT NULL
+      AND outcome_condition_id IS NOT NULL
     ORDER BY pending_handshake_expires_at ASC
     LIMIT ?
   `).all(limit);
@@ -382,8 +386,9 @@ export async function handleDmMessage(senderAddress, text, ctx = {}) {
     }
 
     if (session.state === STATE.SELECT_OUTCOME) {
-      const market = db.prepare(`SELECT * FROM pool_markets WHERE id = ?`).get(session.last_market_id);
-      if (!market) return '市场已 closed. 回 /predict 刷新.';
+      // Bettor r106 Bug B hotfix: pool_markets count=0 vs exchange_offers count=21 — sweep to exchange_offers per L51-57 spec
+      const market = db.prepare(`SELECT * FROM exchange_offers WHERE id = ?`).get(session.last_market_id);
+      if (!market) return '订单已 closed OR 失效. 回 /predict 刷新.';
       // Binary outcome: only 1 valid choice (= opposite of maker)
       if (num !== 1) return '无效选项. 回 1 确认对赌, OR /cancel.';
       const makerSide = market.outcome_side || '?';
@@ -400,7 +405,8 @@ export async function handleDmMessage(senderAddress, text, ctx = {}) {
         stakeKas = num;
       }
       updateSession(senderAddress, STATE.CONFIRM_STAKE, { aux: { stake: stakeKas } });
-      const market = db.prepare(`SELECT * FROM pool_markets WHERE id = ?`).get(session.last_market_id);
+      // Bettor r106 Bug B hotfix: pool_markets → exchange_offers (= sweep schema 一致)
+      const market = db.prepare(`SELECT * FROM exchange_offers WHERE id = ?`).get(session.last_market_id);
       return renderConfirmation({
         market_label: market ? marketLabel(market) : session.last_market_id,
         outcome_label: session.last_outcome,
