@@ -17,7 +17,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { relayId as resolveRelayId, relayAddr as resolveRelayAddr } from './peers.mjs';
 
 const CONSOLE_URL = process.env.KANET_CONSOLE_URL || 'http://127.0.0.1:3100';
-const DB_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../data/console.db');
+const DB_PATH = process.env.KANET_DB_PATH
+  || path.join(path.dirname(fileURLToPath(import.meta.url)), '../../data/console.db');
 // Owner 钦定 (2026-04-27 13:43): 'no log no pass' — 每个 case 跑测必须留完整 trace,
 // 没生成 trace 文件 → 自动 FAIL, 即使所有 assertion 都过. 保证审计可信.
 const TRACE_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../logs/test-runs');
