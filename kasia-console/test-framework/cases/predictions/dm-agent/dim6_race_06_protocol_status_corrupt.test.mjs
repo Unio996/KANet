@@ -14,7 +14,7 @@ export default {
   skip_in_batch: true,
   steps: [
     {
-      action: 'query_db',
+      action: 'exec_sql',
       sql: `INSERT INTO pool_markets (id, maker_relay_id, spine_p2sh, market_metadata_hash, deadline, protocol_status)
             VALUES (?, ?, ?, ?, ?, 'invalid_state_xyz')`,
       params: [
@@ -42,7 +42,7 @@ export default {
     },
     {
       // Cleanup: remove the corrupt row
-      action: 'query_db',
+      action: 'exec_sql',
       sql: `DELETE FROM pool_markets WHERE protocol_status = 'invalid_state_xyz'`,
     },
   ],

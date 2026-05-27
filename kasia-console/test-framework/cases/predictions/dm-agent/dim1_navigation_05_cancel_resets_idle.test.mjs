@@ -44,7 +44,7 @@ export default {
         must: {
           rows_min: 1,
           row_assert: {
-            last_action_one_of: ['STATE:IDLE', null, 'STATE:CANCELLED'],
+            last_action_contains: 'STATE:IDLE',
           },
         },
       },

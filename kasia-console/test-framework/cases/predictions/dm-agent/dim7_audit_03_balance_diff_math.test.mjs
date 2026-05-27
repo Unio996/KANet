@@ -14,20 +14,20 @@ export default {
   steps: [
     // Seed: 1 market settled, 1 user with direction=0 stake=1000 sompi, winner=0 → expect +1000 net
     {
-      action: 'query_db',
+      action: 'exec_sql',
       sql: `INSERT INTO pool_markets (id, maker_relay_id, spine_p2sh, market_metadata_hash, deadline,
             protocol_status, settle_txid)
             VALUES ('audit-fixture-win', ?, 'p2sh', 'hash', ?, 'completed', 'settle_tx_w')`,
       params: ['${env.PREDICTION_AGENT_RELAY_ID}', Math.floor(Date.now() / 1000) - 60],
     },
     {
-      action: 'query_db',
+      action: 'exec_sql',
       sql: `INSERT INTO chain_events (id, txid, event_type, payload, observed_by, observed_at)
             VALUES ('ev-aud-win', 'settle_tx_w', 'pool_settle_consensual_dispatched',
                     '{"market_id":"audit-fixture-win","winner":0}', 'test', datetime('now'))`,
     },
     {
-      action: 'query_db',
+      action: 'exec_sql',
       sql: `INSERT INTO pool_bettor_sides (market_id, bettor_pk, bettor_relay_id, direction,
             stake_amount, side_p2sh)
             VALUES ('audit-fixture-win', 'pk_winner', NULL, 0, 1000, 'side_p2sh_w')`,
@@ -46,15 +46,15 @@ export default {
     },
     // Cleanup
     {
-      action: 'query_db',
+      action: 'exec_sql',
       sql: `DELETE FROM pool_bettor_sides WHERE market_id = 'audit-fixture-win'`,
     },
     {
-      action: 'query_db',
+      action: 'exec_sql',
       sql: `DELETE FROM chain_events WHERE id = 'ev-aud-win'`,
     },
     {
-      action: 'query_db',
+      action: 'exec_sql',
       sql: `DELETE FROM pool_markets WHERE id = 'audit-fixture-win'`,
     },
   ],

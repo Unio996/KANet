@@ -780,6 +780,44 @@ const actions = {
     };
   },
 
+  // J1tn 2026-05-27 — GET counterpart for audit / health / read-only endpoints (dm-agent dim7 + dim4 dim5).
+  // Same return shape as http_post so all reply_* / http_status_equals assertions just work.
+  async http_get(step, ctx) {
+    const t0 = Date.now();
+    const PORT = process.env.PORT || 3100;
+    const target = step.url || step.path;
+    if (!target) return { ok: false, error: 'url/path required', latency_ms: 0, reply: '' };
+    const url = String(target).startsWith('http') ? target : `http://127.0.0.1:${PORT}${target}`;
+    let status, body, err;
+    try {
+      const r = await fetch(url, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        signal: AbortSignal.timeout(step.timeout_ms || 10_000),
+      });
+      status = r.status;
+      const text = await r.text();
+      try { body = JSON.parse(text); } catch { body = text; }
+    } catch (e) {
+      err = e?.message || String(e);
+    }
+    return {
+      ok: !err && status >= 200 && status < 300 && (typeof body !== 'object' || body?.ok !== false),
+      status,
+      body,
+      error: err,
+      latency_ms: Date.now() - t0,
+      reply: body !== undefined && body !== null ? (typeof body === 'string' ? body : JSON.stringify(body)).slice(0, 800) : (err || ''),
+    };
+  },
+
+  // J1tn 2026-05-27 — no-op step. Used by case authors as a placeholder for steps that depend on
+  // pending bundle ship (e.g. UI handler signature, NWT dispatcher wire). Records the note in trace
+  // for reviewer audit. Counts as PASS so dependent assertions still get evaluated if any.
+  async todo(step, ctx) {
+    return { ok: true, note: step.note || '(unspecified TODO)', skipped: true };
+  },
+
   /**
    * T-J2-2026-05-10 SC7 (triage T3): wire llm_mock_dialogue action handler.
    * 委托 test-framework/lib/llm-mock-user.mjs:runMockDialogue。
@@ -1013,6 +1051,83 @@ const assertions = {
     return step_result.status === expected
       ? { pass: true, expected, actual: step_result.status }
       : { pass: false, expected, actual: step_result.status, msg: `HTTP ${step_result.status} (want ${expected}); error=${step_result.error || 'n/a'}; body=${step_result.reply?.slice(0, 200) || 'n/a'}` };
+  },
+
+  // J1tn 2026-05-27 — alias 'http_status' → http_status_equals (case-author convenience, common name).
+  http_status(step_result, expected, ctx) {
+    return assertions.http_status_equals(step_result, expected, ctx);
+  },
+
+  // J1tn 2026-05-27 — pass if HTTP status is in the allowed list (used for cases where 200/400/422 are all acceptable).
+  http_status_one_of(step_result, list, ctx) {
+    if (!Array.isArray(list)) return { pass: false, expected: list, actual: step_result.status, msg: 'http_status_one_of requires array' };
+    return list.includes(step_result.status)
+      ? { pass: true, expected: list, actual: step_result.status }
+      : { pass: false, expected: list, actual: step_result.status, msg: `HTTP ${step_result.status} not in [${list.join(',')}]` };
+  },
+
+  // J1tn 2026-05-27 — pass if query_db returned at least N rows (lower-bound, NOT exact like db_row_count).
+  rows_min(step_result, expected, ctx) {
+    const rows = step_result?.rows;
+    if (!Array.isArray(rows)) return { pass: false, expected, actual: typeof rows, msg: 'step result has no rows[]' };
+    return rows.length >= expected
+      ? { pass: true, expected, actual: rows.length }
+      : { pass: false, expected, actual: rows.length, msg: `rows.length=${rows.length} < expected ${expected}` };
+  },
+
+  // J1tn 2026-05-27 — flexible per-row checks: { field_one_of, field_contains, field_min, field_max, field_not_null }.
+  // Spec form: row_assert: { last_action_one_of: ['STATE:IDLE','STATE:CANCELLED', null], c_field_min: 1, settle_txid_not_null: true }.
+  // Key suffix decides the check: <field>_one_of / _contains / _min / _max / _not_null. Falls back to equality.
+  // Operates on rows[0] (first row) — cases needing multi-row should iterate via row_field_equals or query_db assertion.
+  row_assert(step_result, spec, ctx) {
+    const rows = step_result?.rows;
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return { pass: false, expected: spec, actual: 'no rows', msg: 'row_assert needs at least 1 row' };
+    }
+    const row = rows[0];
+    const failures = [];
+    for (const [key, expected] of Object.entries(spec || {})) {
+      let m;
+      if ((m = key.match(/^(.+)_one_of$/))) {
+        const f = m[1]; const v = row[f];
+        if (!Array.isArray(expected)) failures.push(`${key}: spec not array`);
+        else if (!expected.includes(v)) failures.push(`${f}=${JSON.stringify(v)} not in ${JSON.stringify(expected)}`);
+      } else if ((m = key.match(/^(.+)_contains$/))) {
+        const f = m[1]; const v = row[f];
+        if (typeof v !== 'string' || !v.includes(expected)) failures.push(`${f}=${JSON.stringify(v)} does not contain ${JSON.stringify(expected)}`);
+      } else if ((m = key.match(/^(.+)_min$/))) {
+        const f = m[1]; const v = Number(row[f]);
+        if (!(v >= expected)) failures.push(`${f}=${row[f]} < min ${expected}`);
+      } else if ((m = key.match(/^(.+)_max$/))) {
+        const f = m[1]; const v = Number(row[f]);
+        if (!(v <= expected)) failures.push(`${f}=${row[f]} > max ${expected}`);
+      } else if ((m = key.match(/^(.+)_not_null$/))) {
+        const f = m[1]; const v = row[f];
+        if (v === null || v === undefined) failures.push(`${f} is null`);
+      } else if (key === 'rows_min') {
+        if (rows.length < expected) failures.push(`rows.length=${rows.length} < ${expected}`);
+      } else {
+        // Bare key — exact equality on row[key]
+        const v = row[key];
+        // eslint-disable-next-line eqeqeq
+        if (v != expected) failures.push(`${key}=${JSON.stringify(v)} != ${JSON.stringify(expected)}`);
+      }
+    }
+    return failures.length === 0
+      ? { pass: true, expected: spec, actual: row }
+      : { pass: false, expected: spec, actual: row, msg: failures.join(' | ') };
+  },
+
+  // J1tn 2026-05-27 — JSON response body has all listed top-level keys.
+  response_has_keys(step_result, keys, ctx) {
+    if (!Array.isArray(keys)) return { pass: false, expected: keys, actual: step_result.body, msg: 'response_has_keys requires array' };
+    if (!step_result.body || typeof step_result.body !== 'object') {
+      return { pass: false, expected: keys, actual: typeof step_result.body, msg: `body is not an object (got ${typeof step_result.body})` };
+    }
+    const missing = keys.filter(k => !(k in step_result.body));
+    return missing.length === 0
+      ? { pass: true, expected: keys, actual: Object.keys(step_result.body) }
+      : { pass: false, expected: keys, actual: Object.keys(step_result.body), msg: `missing keys: [${missing.join(',')}]` };
   },
 
   /**

@@ -23,7 +23,7 @@ export default {
       params: ['${env.TEST_USER_ADDR}'],
       expect: {
         must: {
-          row_assert: { last_action_one_of: ['STATE:IDLE', 'STATE:CANCELLED', null] },
+          row_assert: { last_action_contains: 'STATE:IDLE' },
         },
       },
     },

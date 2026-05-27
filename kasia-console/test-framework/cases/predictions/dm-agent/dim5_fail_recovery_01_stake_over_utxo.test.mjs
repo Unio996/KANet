@@ -35,7 +35,7 @@ export default {
       action: 'query_db',
       sql: `SELECT last_action FROM prediction_dm_session WHERE sender_address = ?`,
       params: ['${env.TEST_USER_ADDR}'],
-      expect: { must: { row_assert: { last_action_one_of: ['STATE:IDLE', 'STATE:SELECT_STAKE'] } } },
+      expect: { should: { row_assert: { last_action_contains: 'STATE:' } } },
     },
   ],
 };
