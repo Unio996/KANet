@@ -20,7 +20,7 @@ const Resolver = kaspa.Resolver || null;
 const SOMPI_PER_KAS = 100000000n;
 const MAX_DECIMAL_PLACES = 8;
 const KASIA_MIN_AMOUNT = '0.2';
-const FEE_RESERVE_BASE = 3000n;  // base fee for minimal TX (no payload)
+const FEE_RESERVE_BASE = 50000n;  // base fee for minimal TX (no payload). bumped 3000→50000 for post-Toccata kaspad v1.2.0 mass pricing (= ~100 sompi/mass unit per 5/27 实测).
 
 // Dynamic fee reserve based on payload size.
 // Kaspa charges ~1 sompi per byte of TX mass. Payload is hex-encoded (2 chars per byte).
@@ -29,8 +29,9 @@ const FEE_RESERVE_BASE = 3000n;  // base fee for minimal TX (no payload)
 function estimateFeeReserve(payloadHex) {
   if (!payloadHex) return FEE_RESERVE_BASE;
   const payloadBytes = BigInt(Math.ceil(payloadHex.length / 2));
-  // 10 sompi per payload byte (empirical) × 2 safety margin + base
-  const estimated = FEE_RESERVE_BASE + payloadBytes * 20n;
+  // 5/27 post-Toccata fee bump: 20 sompi/byte → 200 sompi/byte (= ~10x for kaspad v1.2.0 mass pricing).
+  // 实测 1301 byte broadcast required ~328200 fee = ~250 sompi/byte. 200n with safety margin 验证 sufficient.
+  const estimated = FEE_RESERVE_BASE + payloadBytes * 250n;
   // Cap at 1 KAS (100M sompi) — sanity limit
   return estimated < 100_000_000n ? estimated : 100_000_000n;
 }
@@ -181,10 +182,16 @@ async function _sendKaspaInner(to, amountSompi, priorityFee = 0n, payload, _isRe
       // else: use all entries — multiple inputs reduce mass, Generator handles the rest
     }
 
+    // 5/27 post-Toccata kaspad v1.2.0 fee bump: minimum priorityFee floor for transfers.
+    // 实测 transfer compute mass ~2000-3000 × 100 sompi/mass = 200000-300000 required.
+    // floor 500_000n (= 0.005 KAS) covers typical transfer up to ~5000 mass with safety margin.
+    const effectivePriorityFee = (amountSompi === 0n && to === senderAddress)
+      ? priorityFee  // self-send (broadcast/comm) — already factored into outputAmount = best.amount - feeReserve
+      : (priorityFee > 500_000n ? priorityFee : 500_000n);  // regular transfer — floor 500k sompi
     const generator = new Generator({
       entries: selectedEntries,
       outputs: [new PaymentOutput(new Address(to), outputAmount)],
-      priorityFee,
+      priorityFee: effectivePriorityFee,
       changeAddress: new Address(senderAddress),
       networkId: wallet.getGeneratorNetworkId(),
       ...(payload ? { payload: hexToBytes(payload) } : {}),

@@ -413,9 +413,24 @@ export async function unlockP2SHConsensual(p2shAddress, redeemScript, requiredIn
 
     const winnerOpHex = winner === 0 ? '00' : '51';
     const selectorOpHex = '51';  // OP_1 = settle_consensual entrypoint (= 2nd entry per .sil source order)
-    const redeemPushSb = new ScriptBuilder();
-    redeemPushSb.addData(redeemScript);
-    const redeemPushHex = redeemPushSb.toString();
+    // 5/27 post-Toccata bypass: ScriptBuilder.addData enforces pre-Toccata 520 cap (= kaspa-wasm 1.0.1 default
+    // covenants_enabled=false). Manually encode OP_PUSHDATA2 for redeem >520 byte. kaspad v1.2.0-toc.2 TN12
+    // always-toccata accepts up to 1M element. NWT r61 真因 sediment.
+    const redeemBytes = typeof redeemScript === 'string'
+      ? Buffer.from(redeemScript, 'hex')
+      : Buffer.from(redeemScript);
+    let redeemPushHex;
+    if (redeemBytes.length <= 75) {
+      redeemPushHex = redeemBytes.length.toString(16).padStart(2, '0') + redeemBytes.toString('hex');
+    } else if (redeemBytes.length <= 255) {
+      redeemPushHex = '4c' + redeemBytes.length.toString(16).padStart(2, '0') + redeemBytes.toString('hex');
+    } else if (redeemBytes.length <= 65535) {
+      const lo = (redeemBytes.length & 0xff).toString(16).padStart(2, '0');
+      const hi = ((redeemBytes.length >> 8) & 0xff).toString(16).padStart(2, '0');
+      redeemPushHex = '4d' + lo + hi + redeemBytes.toString('hex');
+    } else {
+      throw new Error(`redeem script too large: ${redeemBytes.length} bytes (= max OP_PUSHDATA4 65535)`);
+    }
 
     function assembleScriptSig(sigs2) {
       const sigsConcat = sigs2.join('');
