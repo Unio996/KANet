@@ -354,9 +354,9 @@ export async function registerConversationRoutes(fastify) {
         if (_p1Dispatch) {
           try {
             const { handleDmMessage } = await import('../services/prediction-agent-mind.mjs');
-            const p1Reply = await handleDmMessage(peer, message);
+            const p1Reply = await handleDmMessage(peer, message, { relayId: resolved });
             if (p1Reply !== null && p1Reply !== undefined) {
-              console.log(`[api/agent/reply] prediction-v1 routed peer=${peer.slice(-12)} dispatch=${_trimmed.startsWith('/') ? 'cmd' : 'digit-active'}`);
+              console.log(`[api/agent/reply] prediction-v1 routed peer=${peer.slice(-12)} dispatch=${_trimmed.startsWith('/') ? 'cmd' : 'digit-active'} relay=${resolved?.slice(0,8)}`);
               return reply.send({ reply: p1Reply });
             }
             console.log(`[api/agent/reply] prediction-v1 dispatched but returned null, fall through`);
