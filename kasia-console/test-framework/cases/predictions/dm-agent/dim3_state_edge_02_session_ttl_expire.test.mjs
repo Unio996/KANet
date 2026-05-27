@@ -11,8 +11,7 @@ export default {
   skip_in_batch: true,
   steps: [
     {
-      // Seed a stale prediction_dm_session row (updated_at 2 hours ago)
-      action: 'query_db',  // mutate via raw SQL ok in test framework (= DB seed)
+      action: 'exec_sql',
       sql: `INSERT OR REPLACE INTO prediction_dm_session
             (sender_address, last_market_id, last_outcome, last_action, updated_at)
             VALUES (?, 'stale-market', '0', 'STATE:SELECT_STAKE', datetime('now', '-2 hours'))`,
@@ -20,13 +19,16 @@ export default {
     },
     { action: 'todo', note: 'send DM "1" → expect broker-v3 reply (not prediction handler) because session stale' },
     {
+      // Verify the seeded stale row remains older than 1 hour (= row not revived by broker
+      // dispatching the digit; prediction handler correctly ignored the stale session per
+      // the NWT 27aa21a dispatcher's `updated_at > datetime('now', '-1 hour')` gate).
       action: 'query_db',
-      sql: `SELECT updated_at FROM prediction_dm_session WHERE sender_address = ?`,
+      sql: `SELECT (julianday('now') - julianday(updated_at)) * 24 * 60 AS minutes_old
+            FROM prediction_dm_session WHERE sender_address = ?`,
       params: ['${env.TEST_USER_ADDR}'],
       expect: {
         must: {
-          // Stale row was not auto-revived to "now" — broker handled, prediction skipped
-          row_assert: { 'updated_at_older_than_min': 60 },
+          row_assert: { minutes_old_min: 60 },
         },
       },
     },

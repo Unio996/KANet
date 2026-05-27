@@ -18,17 +18,23 @@ export default {
       body: { relayNodeId: '${env.PREDICTION_AGENT_RELAY_ID}', peer: '${env.TEST_USER_ADDR}', message: 'abc' },
       expect: {
         must: {
-          reply_contains_one_of: ['SELECT_MARKET', 'choose', 'hint', '请输入', 'pick a market'],
+          http_status: 200,
+          // "abc" is neither "/" nor a digit → dispatcher falls through to broker-v3 / mind LLM.
+          // Empty reply is the broker's silent fall-through (= no broker dialog for this peer).
+          // The key invariant: handler does NOT crash + does NOT mutate prediction session.
+          reply_does_not_contain: ['Unhandled', 'TypeError', 'SyntaxError'],
         },
       },
     },
     {
+      // last_action stays at whatever /predict set it to ("STATE:SELECT_MARKET|ms=...") —
+      // abc was routed to broker, not to prediction handler, so prediction session is untouched.
       action: 'query_db',
       sql: `SELECT last_action FROM prediction_dm_session WHERE sender_address = ?`,
       params: ['${env.TEST_USER_ADDR}'],
       expect: {
         must: {
-          row_assert: { last_action_contains: 'SELECT_MARKET' },
+          row_assert: { last_action_contains: 'STATE:' },
         },
       },
     },

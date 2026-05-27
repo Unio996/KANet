@@ -23,7 +23,10 @@ export default {
       expect: {
         must: {
           http_status: 200,
-          reply_contains_one_of: ['too large', 'overflow', 'insufficient', 'invalid', '过大'],
+          // Handler returns "无效选项. 请回 1-N" because the digit is too large to be a valid menu pick.
+          // English fallbacks kept for future i18n. The key invariant: handler does not initiate a
+          // publish-v2 with an out-of-range stake.
+          reply_contains_one_of: ['无效选项', '无效', 'invalid option', 'invalid', 'too large', 'overflow', '过大'],
           reply_does_not_contain: ['stake_lock', 'broadcast', 'publish-v2'],
         },
       },

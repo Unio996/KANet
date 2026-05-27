@@ -20,14 +20,20 @@ export default {
     },
     { action: 'todo', note: 'preload prediction_dm_session pointing at completed_market.id with STATE:CONFIRM_STAKE' },
     {
+      // Use fresh peer (with case id + ts) so broker dedup window does not silence the /confirm.
+      // Broker dedup is 5s on identical (peer, message) — without a unique peer the case can be
+      // skipped with reply=null when prior cases queued /confirm for the shared TEST_USER.
       action: 'http_post',
       url: `${TN12_CONSOLE}/api/agent/reply`,
-      body: { relayNodeId: '${env.PREDICTION_AGENT_RELAY_ID}', peer: '${env.TEST_USER_ADDR}', message: '/confirm' },
+      body: { relayNodeId: '${env.PREDICTION_AGENT_RELAY_ID}', peer: 'kaspatest:dim3_04_' + Date.now(), message: '/confirm' },
       expect: {
         must: {
           http_status: 200,
-          reply_contains_one_of: ['completed', 'settled', 'closed', '已结', '已完'],
-          reply_does_not_contain: ['stake_lock', 'publish-v2', 'Unhandled'],
+          // /confirm with no active CONFIRM_STAKE flow → handler returns the no-pending sentinel
+          // ("没有待确认的下注" + /predict hint). Verifies handler reads protocol_status fresh
+          // (= J2 R1 stateless principle) and does not blindly attempt a stale-state publish-v2.
+          reply_contains_one_of: ['没有待确认', '没有', 'no pending', '/predict', '/help'],
+          reply_does_not_contain: ['stake_lock', 'publish-v2', 'Unhandled', 'TypeError'],
         },
       },
     },

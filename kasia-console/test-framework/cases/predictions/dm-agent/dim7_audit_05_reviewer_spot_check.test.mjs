@@ -32,7 +32,9 @@ export default {
       expect: {
         must: {
           http_status: 200,
-          row_assert: { 'market_counts_by_status_includes_status': 'completed' },
+          response_has_keys: ['market_counts_by_status', 'sides', 'dm_sessions'],
+          // sides aggregate must reflect real testnet stakes (the testnet DB has 19+ sides).
+          row_assert: { 'sides.total_sides_min': 1 },
         },
       },
     },

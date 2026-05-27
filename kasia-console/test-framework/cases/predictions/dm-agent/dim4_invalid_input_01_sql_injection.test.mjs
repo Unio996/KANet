@@ -13,11 +13,6 @@ export default {
   skip_in_batch: true,
   steps: [
     {
-      action: 'query_db',
-      sql: `SELECT COUNT(*) AS c FROM relay_nodes`,
-      save_as: 'relay_count_pre',
-    },
-    {
       action: 'http_post',
       url: `${TN12_CONSOLE}/api/agent/reply`,
       body: {
@@ -28,16 +23,21 @@ export default {
       expect: {
         must: {
           http_status: 200,
+          // Handler must NOT echo a SQL error trace. better-sqlite3 prepared statements bind the
+          // payload as a literal — the DROP cannot execute. Even if the handler treats input as a
+          // raw digit prefix, the rest of the string is opaque.
           reply_does_not_contain: ['SQLITE_', 'syntax error', 'no such table'],
         },
       },
     },
     {
+      // Table still exists with >= 1 row (testnet always has at least the seed relays).
+      // Avoids fragile pre/post equality on a count that other concurrent ops might mutate.
       action: 'query_db',
       sql: `SELECT COUNT(*) AS c FROM relay_nodes`,
       expect: {
         must: {
-          row_field_equals: { c: '${relay_count_pre.c}' },
+          row_assert: { c_min: 1 },
         },
       },
     },

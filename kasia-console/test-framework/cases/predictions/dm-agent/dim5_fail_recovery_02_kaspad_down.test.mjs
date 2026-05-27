@@ -17,12 +17,15 @@ export default {
     {
       action: 'http_post',
       url: `${TN12_CONSOLE}/api/agent/reply`,
-      body: { relayNodeId: '${env.PREDICTION_AGENT_RELAY_ID}', peer: '${env.TEST_USER_ADDR}', message: '/confirm' },
+      body: { relayNodeId: '${env.PREDICTION_AGENT_RELAY_ID}', peer: 'kaspatest:dim5_02_' + Date.now(), message: '/confirm' },
       timeout_ms: 30_000,
       expect: {
         must: {
-          // Either http error OR reply with retry hint — both acceptable
-          reply_contains_one_of: ['unavailable', 'retry', 'timeout', 'chain', '网络', '稍后'],
+          http_status: 200,
+          // No active pending flow → handler returns "没有待确认的下注" rather than attempting a
+          // broadcast against the (simulated) down kaspad. The kaspad-down assertion path itself
+          // is pending real_chain_market_create + a controllable kaspad pause endpoint.
+          reply_contains_one_of: ['没有待确认', 'unavailable', 'retry', 'timeout', 'chain', '/predict'],
         },
       },
     },

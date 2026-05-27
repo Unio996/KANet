@@ -1077,45 +1077,66 @@ const assertions = {
 
   // J1tn 2026-05-27 — flexible per-row checks: { field_one_of, field_contains, field_min, field_max, field_not_null }.
   // Spec form: row_assert: { last_action_one_of: ['STATE:IDLE','STATE:CANCELLED', null], c_field_min: 1, settle_txid_not_null: true }.
-  // Key suffix decides the check: <field>_one_of / _contains / _min / _max / _not_null. Falls back to equality.
-  // Operates on rows[0] (first row) — cases needing multi-row should iterate via row_field_equals or query_db assertion.
+  // Key suffix decides the check: <field>_one_of / _contains / _min / _max / _not_null / _unique. Falls back to equality.
+  //
+  // Source resolution (J1tn 2026-05-28 R3 ext):
+  //   1. step_result.rows[0]   — query_db action (default)
+  //   2. step_result.body      — http_post / http_get JSON body
+  //   3. step_result           — fallback (e.g. parallel returns { results, total_latency_ms })
+  // Field can be dotted ('results.length', 'trace.0.balance_diff_sompi') for nested access incl numeric index.
   row_assert(step_result, spec, ctx) {
-    const rows = step_result?.rows;
-    if (!Array.isArray(rows) || rows.length === 0) {
-      return { pass: false, expected: spec, actual: 'no rows', msg: 'row_assert needs at least 1 row' };
+    const source = (Array.isArray(step_result?.rows) && step_result.rows.length > 0)
+      ? step_result.rows[0]
+      : (step_result?.body && typeof step_result.body === 'object')
+        ? step_result.body
+        : step_result;
+    if (!source || typeof source !== 'object') {
+      return { pass: false, expected: spec, actual: source, msg: 'row_assert needs rows[0] or body object' };
     }
-    const row = rows[0];
+    const get = (obj, dotted) => dotted.split('.').reduce((o, k) => {
+      if (o == null) return undefined;
+      const idx = /^\d+$/.test(k) ? Number(k) : k;
+      if (idx === 'length' && (Array.isArray(o) || typeof o === 'string')) return o.length;
+      return o[idx];
+    }, obj);
     const failures = [];
     for (const [key, expected] of Object.entries(spec || {})) {
       let m;
       if ((m = key.match(/^(.+)_one_of$/))) {
-        const f = m[1]; const v = row[f];
+        const f = m[1]; const v = get(source, f);
         if (!Array.isArray(expected)) failures.push(`${key}: spec not array`);
         else if (!expected.includes(v)) failures.push(`${f}=${JSON.stringify(v)} not in ${JSON.stringify(expected)}`);
       } else if ((m = key.match(/^(.+)_contains$/))) {
-        const f = m[1]; const v = row[f];
+        const f = m[1]; const v = get(source, f);
         if (typeof v !== 'string' || !v.includes(expected)) failures.push(`${f}=${JSON.stringify(v)} does not contain ${JSON.stringify(expected)}`);
       } else if ((m = key.match(/^(.+)_min$/))) {
-        const f = m[1]; const v = Number(row[f]);
-        if (!(v >= expected)) failures.push(`${f}=${row[f]} < min ${expected}`);
+        const f = m[1]; const v = Number(get(source, f));
+        if (!(v >= expected)) failures.push(`${f}=${get(source, f)} < min ${expected}`);
       } else if ((m = key.match(/^(.+)_max$/))) {
-        const f = m[1]; const v = Number(row[f]);
-        if (!(v <= expected)) failures.push(`${f}=${row[f]} > max ${expected}`);
+        const f = m[1]; const v = Number(get(source, f));
+        if (!(v <= expected)) failures.push(`${f}=${get(source, f)} > max ${expected}`);
       } else if ((m = key.match(/^(.+)_not_null$/))) {
-        const f = m[1]; const v = row[f];
+        const f = m[1]; const v = get(source, f);
         if (v === null || v === undefined) failures.push(`${f} is null`);
+      } else if ((m = key.match(/^(.+)_unique$/))) {
+        const f = m[1]; const v = get(source, f);
+        if (!Array.isArray(v)) failures.push(`${f}=${JSON.stringify(v)} not an array (for _unique)`);
+        else if (new Set(v).size !== v.length) failures.push(`${f} not unique: ${JSON.stringify(v)}`);
       } else if (key === 'rows_min') {
-        if (rows.length < expected) failures.push(`rows.length=${rows.length} < ${expected}`);
+        const rows = step_result?.rows;
+        if (!Array.isArray(rows) || rows.length < expected) {
+          failures.push(`rows.length=${rows?.length ?? 'n/a'} < ${expected}`);
+        }
       } else {
-        // Bare key — exact equality on row[key]
-        const v = row[key];
+        // Bare key — exact equality on dotted path
+        const v = get(source, key);
         // eslint-disable-next-line eqeqeq
         if (v != expected) failures.push(`${key}=${JSON.stringify(v)} != ${JSON.stringify(expected)}`);
       }
     }
     return failures.length === 0
-      ? { pass: true, expected: spec, actual: row }
-      : { pass: false, expected: spec, actual: row, msg: failures.join(' | ') };
+      ? { pass: true, expected: spec, actual: source }
+      : { pass: false, expected: spec, actual: source, msg: failures.join(' | ') };
   },
 
   // J1tn 2026-05-27 — JSON response body has all listed top-level keys.

@@ -39,7 +39,11 @@ export default {
         must: {
           http_status: 200,
           row_assert: {
-            'trace[0].balance_diff_sompi': 1000,
+            // Dotted path (numeric index = array element). Audit endpoint computes
+            // balance_diff_sompi from pool_bettor_sides.direction × pool_settle_*.winner.
+            // For pk_winner (direction=0) × winner=0 → +stake = +1000.
+            'trace.0.balance_diff_sompi': 1000,
+            total_markets_min: 1,
           },
         },
       },

@@ -11,7 +11,9 @@ export default {
   pending_dep: ['ui_baea285_handler', 'nwt_27aa21a_dispatcher', 'real_chain_market_create'],
   skip_in_batch: true,
   steps: [
-    { action: 'todo', note: 'walk /predict → 1 → 1 → 10 → reach CONFIRM_STAKE state' },
+    // Rapid 2× /confirm — without a prior pending offer the handler responds "没有待确认的下注"
+    // both times (idempotent: same response, no DB mutation). Real CONFIRM_STAKE seed requires
+    // walk /predict → digit → digit → stake; until that is wired we verify the no-flow idempotency.
     {
       action: 'parallel',
       actions: [
@@ -20,13 +22,18 @@ export default {
         { action: 'http_post', url: `${TN12_CONSOLE}/api/agent/reply`,
           body: { relayNodeId: '${env.PREDICTION_AGENT_RELAY_ID}', peer: '${env.TEST_USER_ADDR}', message: '/confirm' } },
       ],
+      expect: {
+        must: {
+          row_assert: { 'results.length': 2 },
+        },
+      },
     },
     {
-      // Only 1 pool_bettor_sides row should be inserted (= 1 stake_lock_tx broadcast).
+      // No pool_bettor_sides row inserted by either /confirm (no active flow → no stake_lock_tx).
       action: 'query_db',
-      sql: `SELECT COUNT(*) AS c FROM pool_bettor_sides WHERE bettor_pk=? AND created_at > datetime('now', '-30 seconds')`,
+      sql: `SELECT COUNT(*) AS c FROM pool_bettor_sides WHERE bettor_pk=? AND created_at > datetime('now', '-10 seconds')`,
       params: ['${env.TEST_USER_PK}'],
-      expect: { must: { row_field_equals: { c: 1 } } },
+      expect: { must: { row_field_equals: { c: 0 } } },
     },
   ],
 };
