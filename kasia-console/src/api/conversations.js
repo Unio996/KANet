@@ -322,6 +322,51 @@ export async function registerConversationRoutes(fastify) {
     //   2. handler null → fall to broker-llm-agent (LLM 销售客服 + role prompt + history)
     //   3. broker-llm-agent.handle 必返回 reply (含 fallback 友好 DM, 永不 silent)
     // 修 R5 T-J2-16 silent fallback (Owner 实证: 真人 DM "想买点 KAS" → silent → 没办法用)
+    // Sub 12.x prediction agent dispatch (NWT R2 r78 hotfix — move OUT of broker block to top-level).
+    // Bettor r100 final spec + r75/r76 refined: single relay 复用 prediction + broker, env-gated, chain truth canonical disambiguation.
+    // 0 relays have is_dex_broker=1/is_service=1 in current DB → broker block 不 enters → original placement dead code (r78 catch).
+    // Dispatch IF: "/" prefix (= explicit prediction command) OR pure digit + active prediction (chain truth OR mid-flow session).
+    // null return → fall through to broker block (= broker-v3 / v2 / mind LLM in existing chain).
+    if (!channel) {
+      const _p1Flag = process.env.PREDICTION_AGENT_ENABLED === '1';
+      const _p1Peers = (process.env.PREDICTION_AGENT_ENABLED_PEERS || '').split(',').map(s => s.trim()).filter(Boolean);
+      if (_p1Flag || _p1Peers.includes(peer)) {
+        const _trimmed = (message || '').trim();
+        let _p1Dispatch = _trimmed.startsWith('/');
+        if (!_p1Dispatch && /^[1-9]\d*$/.test(_trimmed)) {
+          const _activePred = sqlite.prepare(`
+            SELECT id FROM exchange_offers
+            WHERE (maker_kaspa_addr = ? OR taker = ?)
+              AND (give_asset = 'prediction_outcome_share' OR want_asset = 'prediction_outcome_share')
+              AND protocol_status IN ('open_awaiting_taker_stake','matched','verifying','collecting_sigs','pending_handshake','pending_taker','handshake_done')
+            LIMIT 1
+          `).get(peer, peer);
+          const _activeSession = !_activePred ? sqlite.prepare(`
+            SELECT 1 FROM prediction_dm_session
+            WHERE sender_address = ?
+              AND last_action IS NOT NULL
+              AND last_action NOT IN ('STATE:IDLE','STATE:COMPLETED','STATE:CANCELLED')
+              AND updated_at > datetime('now', '-1 hour')
+            LIMIT 1
+          `).get(peer) : null;
+          _p1Dispatch = !!(_activePred || _activeSession);
+        }
+        if (_p1Dispatch) {
+          try {
+            const { handleDmMessage } = await import('../services/prediction-agent-mind.mjs');
+            const p1Reply = await handleDmMessage(peer, message);
+            if (p1Reply !== null && p1Reply !== undefined) {
+              console.log(`[api/agent/reply] prediction-v1 routed peer=${peer.slice(-12)} dispatch=${_trimmed.startsWith('/') ? 'cmd' : 'digit-active'}`);
+              return reply.send({ reply: p1Reply });
+            }
+            console.log(`[api/agent/reply] prediction-v1 dispatched but returned null, fall through`);
+          } catch (err) {
+            console.error(`[api/agent/reply] prediction-v1 err for ${peer?.slice(0,8)}: ${err.message} — fall through`);
+          }
+        }
+      }
+    }
+
     if (!channel) {
       const broker = sqlite.prepare('SELECT is_dex_broker, is_service FROM relay_nodes WHERE id = ?').get(resolved);
       if (broker?.is_service === 1 || broker?.is_dex_broker === 1) {
@@ -415,52 +460,6 @@ export async function registerConversationRoutes(fastify) {
           }
         } catch (err) {
           console.warn(`[api/agent/reply] chain DM classifier err: ${err.message}`);
-        }
-
-        // Sub 12.x prediction agent dispatch (NWT R2 — Bettor r100 final spec + r75 refined + r76 (C) chain truth canonical).
-        // PRIOR broker-v3 — single relay 复用 prediction + broker, dispatcher pre-filter via chain truth + dm_session.
-        // Dispatch IF: "/" prefix (= explicit prediction command) OR pure digit + user has active prediction (chain truth)
-        // OR active mid-flow session (= last_action != STATE:IDLE per UI 4b1c947 encoding).
-        // 防 collision lock: ONE active session per peer (= 数字 "1" 不 hijack broker session).
-        // null/undefined return → fall to broker-v3 → broker-v2 → mind LLM.
-        const _p1Flag = process.env.PREDICTION_AGENT_ENABLED === '1';
-        const _p1Peers = (process.env.PREDICTION_AGENT_ENABLED_PEERS || '').split(',').map(s => s.trim()).filter(Boolean);
-        if (_p1Flag || _p1Peers.includes(peer)) {
-          const _trimmed = (message || '').trim();
-          let _p1Dispatch = _trimmed.startsWith('/');
-          if (!_p1Dispatch && /^[1-9]\d*$/.test(_trimmed)) {
-            // (C) chain truth canonical — active prediction offer takes routing precedence.
-            const _activePred = sqlite.prepare(`
-              SELECT id FROM exchange_offers
-              WHERE (maker_kaspa_addr = ? OR taker = ?)
-                AND (give_asset = 'prediction_outcome_share' OR want_asset = 'prediction_outcome_share')
-                AND protocol_status IN ('open_awaiting_taker_stake','matched','verifying','collecting_sigs','pending_handshake','pending_taker','handshake_done')
-              LIMIT 1
-            `).get(peer, peer);
-            // Mid-flow session (= published 前 用户 in SELECT_MARKET/OUTCOME/CONFIRM_STAKE) via dm_session last_action != IDLE.
-            const _activeSession = !_activePred ? sqlite.prepare(`
-              SELECT 1 FROM prediction_dm_session
-              WHERE sender_address = ?
-                AND last_action IS NOT NULL
-                AND last_action NOT IN ('STATE:IDLE','STATE:COMPLETED','STATE:CANCELLED')
-                AND updated_at > datetime('now', '-1 hour')
-              LIMIT 1
-            `).get(peer) : null;
-            _p1Dispatch = !!(_activePred || _activeSession);
-          }
-          if (_p1Dispatch) {
-            try {
-              const { handleDmMessage } = await import('../services/prediction-agent-mind.mjs');
-              const p1Reply = await handleDmMessage(peer, message);
-              if (p1Reply !== null && p1Reply !== undefined) {
-                console.log(`[api/agent/reply] prediction-v1 routed peer=${peer.slice(-12)} dispatch=${_trimmed.startsWith('/') ? 'cmd' : 'digit-active'}`);
-                return reply.send({ reply: await _r19Guard(p1Reply, 'prediction-v1.handleDmMessage') });
-              }
-              console.log(`[api/agent/reply] prediction-v1 dispatched but returned null, fall to broker-v3`);
-            } catch (err) {
-              console.error(`[api/agent/reply] prediction-v1 err for ${peer?.slice(0,8)}: ${err.message} — fall to broker-v3`);
-            }
-          }
         }
 
         // T-J2-2026-05-06 broker-v3 deterministic 路 A — BROKER_V3_ENABLED flag wire.
