@@ -1604,6 +1604,20 @@ export async function registerBettorRoutes(fastify) {
         metaCur.taker_relay_id = b.taker_relay_id;
         sqlite.prepare(`UPDATE exchange_offers SET metadata = ? WHERE id = ?`).run(JSON.stringify(metaCur), offerId);
       } catch (e) { console.warn(`[taker-stake] metadata.taker_relay_id store fail (non-fatal): ${e.message}`); }
+
+      // Sub 10.x (J2 r53 SS SPOF Path A+B per Bettor r93 Owner ship-block) —
+      // Emit params cache: broadcast + DM + local cache. Non-blocking, errors logged.
+      try {
+        const offerFull = sqlite.prepare(`SELECT * FROM exchange_offers WHERE id = ?`).get(offerId);
+        const metaFull = JSON.parse(offerFull.metadata || '{}');
+        const { emitPredictionParamsCache } = await import('../services/prediction-params-cache.js');
+        emitPredictionParamsCache({
+          offer: offerFull,
+          meta: metaFull,
+          makerRelayId: offerFull.maker_relay_id,
+          takerRelayId: b.taker_relay_id,
+        }).catch(e => console.warn(`[taker-stake] params cache emit fail (non-fatal): ${e.message}`));
+      } catch (e) { console.warn(`[taker-stake] params cache compose fail (non-fatal): ${e.message}`); }
       // protocol_status 走 transition() (= [ABE-A.6] 单一所有权)
       const { transition } = await import('../services/exchange-machine.js');
       transition(offerId, 'matched');
