@@ -144,16 +144,17 @@ function updateSession(senderAddress, state, patch = {}) {
 
 function renderHelp() {
   return [
-    'KANet Prediction Agent — DM 菜单',
+    'KANet Prediction Agent — DM 菜单 (v1 pure betting)',
     '',
     '/predict   — 浏览活跃市场 + 下注',
     '/my_bets   — 我的下注 + 状态',
-    '/create    — 创建新市场 (= 跳转 Markets UI)',
     '/cancel    — 取消当前流程',
     '/help      — 这个菜单',
     '',
     '直接回数字 (1-N) 选菜单项。',
     '自然语言 ("押 X 50") 会路由到 broker LLM agent (= 不是这里).',
+    '',
+    '想创建新市场? 浏览器开 http://192.168.1.105:3200/predictions/pool/create',
   ].join('\n');
 }
 
@@ -263,13 +264,15 @@ export async function handleDmMessage(senderAddress, text) {
     return '已取消. 回 /predict 重新开始 OR /help 菜单.';
   }
 
-  // /create — UI delegation
+  // /create — v1 cut per Owner钦定 r104 (= pure betting MVP)
+  // Reply with web UI delegation pointer if user attempts
   if (trimmed === MENU.CREATE) {
     return [
-      '创建新市场需要 Markets UI:',
-      '浏览器开 http://192.168.1.105:3200/predictions/pool/create',
+      'v1 DM 仅押注 (= 不含创单).',
+      '想创建新市场? 浏览器开:',
+      'http://192.168.1.105:3200/predictions/pool/create',
       '',
-      '(= 当前 DM 菜单只支持 接现有市场, create 走 web 表单)',
+      '回 /help 看 v1 完整 menu.',
     ].join('\n');
   }
 
