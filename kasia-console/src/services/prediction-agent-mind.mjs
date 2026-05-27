@@ -48,39 +48,51 @@ const STAKE_OPTIONS_KAS = [10, 50, 100];
 // ── DB query helpers (= chain truth, stateless) ──────────────────────────
 
 /**
- * Fetch active pool markets (= protocol_status='open' in pool_markets table).
- * Schema cols: id, outcome_market_source, outcome_condition_id, outcome_side,
- * deadline, maker_stake_amount, oracle_relay_ids, broker_relay_id, ...
- * Returns top N by deadline asc (soonest first).
+ * Fetch active offers awaiting taker (= protocol_status='pending_taker' in exchange_offers,
+ * since pool_markets is maker-first and taker-side flow uses exchange_offers per E pre-handshake).
+ * Returns top N by handshake expiry asc (soonest first).
  */
 function fetchActiveMarkets(limit = 5) {
   const db = getDb();
+  // E pre-handshake flow uses exchange_offers (= /api/prediction/pending-offer L1490 bettor.js)
   return db.prepare(`
-    SELECT id, outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side,
-           deadline, maker_stake_amount, oracle_relay_ids, broker_relay_id, maker_relay_id
-    FROM pool_markets
-    WHERE protocol_status = 'open' AND deadline > datetime('now')
-    ORDER BY deadline ASC
+    SELECT id, maker_relay_id, outcome_oracle_relay_ids AS oracle_relay_ids,
+           outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side,
+           pending_handshake_expires_at AS deadline, give_amount AS maker_stake_amount
+    FROM exchange_offers
+    WHERE protocol_status = 'pending_taker'
+      AND pending_handshake_expires_at > datetime('now')
+    ORDER BY pending_handshake_expires_at ASC
     LIMIT ?
   `).all(limit);
 }
 
 /**
- * Fetch user's own bets — query pool_markets where maker_relay_id == user's relay.
- * (= no pool_offers separate table in schema; pool_markets IS the offer entity)
+ * Fetch user's own offers — exchange_offers where maker_relay_id == user OR taker (addr) == user.
  *
- * @param {string} relayId — user's relay_node_id (since sender_address is too coarse)
+ * @param {string} senderAddress — user's kaspa addr
+ * @param {string} [relayId] — user's relay_node_id (optional, for maker-side filter)
  */
-function fetchUserBets(relayId) {
+function fetchUserBets(senderAddress, relayId) {
   const db = getDb();
+  if (relayId) {
+    return db.prepare(`
+      SELECT id, outcome_market_source, outcome_condition_id, outcome_side,
+             give_amount AS maker_stake_amount, protocol_status, pending_handshake_expires_at AS deadline, created_at
+      FROM exchange_offers
+      WHERE maker_relay_id = ? OR taker = ?
+      ORDER BY created_at DESC
+      LIMIT 10
+    `).all(relayId, senderAddress);
+  }
   return db.prepare(`
     SELECT id, outcome_market_source, outcome_condition_id, outcome_side,
-           maker_stake_amount, protocol_status, deadline, created_at
-    FROM pool_markets
-    WHERE maker_relay_id = ?
+           give_amount AS maker_stake_amount, protocol_status, pending_handshake_expires_at AS deadline, created_at
+    FROM exchange_offers
+    WHERE taker = ?
     ORDER BY created_at DESC
     LIMIT 10
-  `).all(relayId);
+  `).all(senderAddress);
 }
 
 /** Compose human-readable market name from outcome cols (no `question` col in schema). */
@@ -161,10 +173,10 @@ function renderHelp() {
 function renderMarketList(markets) {
   if (!markets.length) {
     return [
-      '当前 0 个活跃市场。',
+      '当前 0 个等待 taker 的市场。',
       '',
-      '回 /create 创建 (= 跳 Markets ▶ Predictions UI)',
-      '回 /help 帮助',
+      '想创建? 浏览器开 http://192.168.1.105:3200/predictions/pool/create',
+      '回 /help 看完整 menu。',
     ].join('\n');
   }
   const lines = ['活跃市场:'];
@@ -241,12 +253,14 @@ function renderMyBets(bets) {
  * - Only called when first char matches "/" OR digit (= deterministic prefix).
  * - Self-address contract: senderAddress must be the OTHER party (= not us).
  *
- * @param {string} senderAddress — kaspa: sender address
+ * @param {string} senderAddress — kaspa: sender address (= the OTHER party DM'ing us)
  * @param {string} text — raw DM message text
+ * @param {object} [ctx] — optional context: { relayId, baseUrl }. relayId is our agent's relay_node_id.
  * @returns {Promise<string|null>} — reply text or null
  */
-export async function handleDmMessage(senderAddress, text) {
+export async function handleDmMessage(senderAddress, text, ctx = {}) {
   if (!senderAddress || !text) return null;
+  const { relayId, baseUrl = 'http://127.0.0.1:3200' } = ctx;
 
   const trimmed = text.trim();
   if (!trimmed) return null;
@@ -278,7 +292,7 @@ export async function handleDmMessage(senderAddress, text) {
 
   // /my_bets — anywhere
   if (trimmed === MENU.MY_BETS) {
-    return renderMyBets(fetchUserBets(senderAddress));
+    return renderMyBets(fetchUserBets(senderAddress, relayId));
   }
 
   // /predict — enter SELECT_MARKET state
@@ -291,20 +305,66 @@ export async function handleDmMessage(senderAddress, text) {
     return renderMarketList(markets);
   }
 
-  // /confirm — only valid in CONFIRM_STAKE state
+  // /confirm — only valid in CONFIRM_STAKE state. Wire taker-handshake → taker-stake real call.
   if (trimmed === MENU.CONFIRM) {
     if (session.state !== STATE.CONFIRM_STAKE) {
       return '没有待确认的下注. 回 /predict 开始 OR /help 菜单.';
     }
-    // TODO: call POST /api/prediction/publish-v2 with session.last_market_id + last_outcome + aux.stake
-    return [
-      '⏳ /confirm 收, 准备 publish-v2 escrow lock (= 实际 wire 等 prediction-relay integration).',
-      `市场: ${session.last_market_id || '?'}`,
-      `Outcome: ${session.last_outcome || '?'}`,
-      `Stake: ${session.aux.stake || '?'} KAS`,
-      '',
-      '(= placeholder, 等 prediction-agent → POST /api/prediction/publish-v2 wire)',
-    ].join('\n');
+    if (!relayId) {
+      return [
+        '⚠ /confirm 需 relay context (= NWT router 应 pass relayId 给 handleDmMessage).',
+        '当前 session ready: market=' + (session.last_market_id || '?') + ', side=' + (session.last_outcome || '?') + ', stake=' + (session.aux.stake || '?') + ' KAS',
+        '',
+        '请 console restart load NWT 完整 router OR DM via UI 自行 publish-v2.',
+      ].join('\n');
+    }
+
+    // Step 1: taker-handshake to register our taker_kaspa_addr → derive pubkey
+    try {
+      const handshakeRes = await fetch(`${baseUrl}/api/prediction/taker-handshake/${session.last_market_id}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taker_kaspa_addr: senderAddress }),
+      });
+      const handshakeJson = await handshakeRes.json();
+      if (!handshakeRes.ok || !handshakeJson.ok) {
+        updateSession(senderAddress, STATE.IDLE, { aux: {} });
+        return `❌ taker-handshake fail: ${handshakeJson.error || handshakeRes.status}. /predict 重来.`;
+      }
+
+      // Step 2: maker publishes-v2 (= maker-side action, NOT our DM scope, must already happened)
+      // Per E pre-handshake flow: maker → pending-offer → wait taker handshake → maker publish-v2 → taker-stake
+      // We are taker, so we wait for status='open_awaiting_taker_stake' then call taker-stake.
+
+      // Step 3: taker-stake (= fund escrow)
+      const stakeRes = await fetch(`${baseUrl}/api/prediction/taker-stake/${session.last_market_id}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taker_relay_id: relayId }),
+      });
+      const stakeJson = await stakeRes.json();
+      if (!stakeRes.ok || !stakeJson.ok) {
+        // Common case: status mismatch (= maker has NOT yet publish-v2)
+        updateSession(senderAddress, STATE.WAITING_TAKER, { aux: {} });
+        return [
+          '⏳ Handshake ✓ but taker-stake 等 maker publish-v2 first.',
+          `Offer: ${session.last_market_id}`,
+          `Reason: ${stakeJson.error || stakeRes.status}`,
+          '',
+          '等 maker publish (= push DM 后续).  /my_bets 查看.',
+        ].join('\n');
+      }
+
+      updateSession(senderAddress, STATE.MATCHED, { aux: { tx: stakeJson.txid || stakeJson.tx } });
+      return [
+        '🎯 stake locked + MATCHED!',
+        `Offer: ${session.last_market_id}`,
+        `Taker stake: ${session.aux.stake} KAS → P2SH escrow`,
+        `TX: ${(stakeJson.txid || stakeJson.tx || '?').slice(0, 20)}...`,
+        '',
+        '等 deadline + consensual settle. /my_bets 查状态.',
+      ].join('\n');
+    } catch (e) {
+      return `❌ /confirm wire fail: ${e.message}. /predict 重来.`;
+    }
   }
 
   // Number selection — context-dependent
