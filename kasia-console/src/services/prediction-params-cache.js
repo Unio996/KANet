@@ -73,6 +73,32 @@ export function computeParamsHash(ctorParams) {
 }
 
 /**
+ * Verify dual-sig (maker_sig + taker_sig) against params_hash + pubkeys (NWT r67 R3 light gap fix).
+ * Forge defense: payload may carry valid hash (= attacker-computed self-consistent) but sigs from
+ * attacker's keys, not maker_pk/taker_pk in payload. verifyMessage rejects mismatch.
+ *
+ * @returns {Promise<{ valid: boolean, reason?: string }>}
+ */
+export async function verifyParamsDualSig({ ctor_params, params_hash, maker_sig, taker_sig }) {
+  if (!ctor_params || !params_hash || !maker_sig || !taker_sig) {
+    return { valid: false, reason: 'missing field (ctor_params, params_hash, maker_sig, or taker_sig)' };
+  }
+  if (!ctor_params.maker_pk || !ctor_params.taker_pk) {
+    return { valid: false, reason: 'ctor_params missing maker_pk or taker_pk for verify' };
+  }
+  try {
+    const kaspa = await import('kaspa-wasm');
+    const makerValid = kaspa.verifyMessage({ message: params_hash, signature: maker_sig, publicKey: ctor_params.maker_pk });
+    if (!makerValid) return { valid: false, reason: 'maker_sig invalid against ctor_params.maker_pk' };
+    const takerValid = kaspa.verifyMessage({ message: params_hash, signature: taker_sig, publicKey: ctor_params.taker_pk });
+    if (!takerValid) return { valid: false, reason: 'taker_sig invalid against ctor_params.taker_pk' };
+    return { valid: true };
+  } catch (e) {
+    return { valid: false, reason: `verifyMessage exception: ${e.message}` };
+  }
+}
+
+/**
  * Sign params_hash via relay's ecdsa_sign IPC (= secp256k1 over message).
  */
 async function signParamsHash(relayId, paramsHash) {
@@ -204,7 +230,14 @@ export async function recoverPredictionParams(offerId) {
     try {
       const payload = JSON.parse(rows[0].payload);
       const recomputedHash = computeParamsHash(payload.ctor_params);
-      if (recomputedHash === payload.params_hash) {
+      if (recomputedHash !== payload.params_hash) {
+        console.warn(`[params-recovery] chain_event hash mismatch offer=${offerId.slice(0, 12)} — rejecting forge attempt`);
+      } else {
+        // NWT r67 R3 light gap fix: defense-in-depth dual-sig verify (= 防 attacker self-consistent hash)
+        const sigCheck = await verifyParamsDualSig(payload);
+        if (!sigCheck.valid) {
+          console.warn(`[params-recovery] chain_event dual-sig REJECT offer=${offerId.slice(0, 12)}: ${sigCheck.reason} — forge defense`);
+        } else {
         // Cache locally for next time (hot-path optimization, NOT truth source)
         try {
           sqlite.prepare(`
@@ -213,10 +246,9 @@ export async function recoverPredictionParams(offerId) {
             VALUES (?, ?, ?, ?, ?, ?, 'recovery_chain', CURRENT_TIMESTAMP)
           `).run(offerId, JSON.stringify(payload.ctor_params), payload.params_hash, payload.p2sh_addr, payload.maker_sig, payload.taker_sig);
         } catch {}
-        console.log(`[params-recovery] offer=${offerId.slice(0, 12)} restored from CHAIN_EVENT (= canonical truth) + cached locally`);
+        console.log(`[params-recovery] offer=${offerId.slice(0, 12)} restored from CHAIN_EVENT (= canonical truth + dual-sig verify) + cached locally`);
         return { ctor_params: payload.ctor_params, params_hash: payload.params_hash, source: 'chain_event' };
-      } else {
-        console.warn(`[params-recovery] chain_event hash mismatch offer=${offerId.slice(0, 12)} — rejecting forge attempt`);
+        }
       }
     } catch (e) {
       console.warn(`[params-recovery] chain_event parse fail: ${e.message}`);
@@ -234,11 +266,22 @@ export async function recoverPredictionParams(offerId) {
     try {
       const ctorParams = JSON.parse(cached.ctor_params_json);
       const recomputedHash = computeParamsHash(ctorParams);
-      if (recomputedHash === cached.params_hash) {
-        console.warn(`[params-recovery] offer=${offerId.slice(0, 12)} restored from LOCAL cache FALLBACK (source=${cached.source}) — chain_event lookup failed; reduced trust level`);
-        return { ctor_params: ctorParams, params_hash: cached.params_hash, source: 'local_cache_fallback' };
-      } else {
+      if (recomputedHash !== cached.params_hash) {
         console.warn(`[params-recovery] local cache hash mismatch offer=${offerId.slice(0, 12)}: stored=${cached.params_hash.slice(0, 12)} recomputed=${recomputedHash.slice(0, 12)} — possible forge`);
+      } else {
+        // NWT r67 R3 light gap fix (parity with chain_event path): dual-sig verify on fallback too.
+        const sigCheck = await verifyParamsDualSig({
+          ctor_params: ctorParams,
+          params_hash: cached.params_hash,
+          maker_sig: cached.maker_sig,
+          taker_sig: cached.taker_sig,
+        });
+        if (!sigCheck.valid) {
+          console.warn(`[params-recovery] local cache dual-sig REJECT offer=${offerId.slice(0, 12)}: ${sigCheck.reason} — forge defense (local DB likely tampered)`);
+        } else {
+          console.warn(`[params-recovery] offer=${offerId.slice(0, 12)} restored from LOCAL cache FALLBACK (source=${cached.source}) — chain_event lookup failed; reduced trust level`);
+          return { ctor_params: ctorParams, params_hash: cached.params_hash, source: 'local_cache_fallback' };
+        }
       }
     } catch (e) {
       console.warn(`[params-recovery] local cache parse fail: ${e.message}`);

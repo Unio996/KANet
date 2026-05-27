@@ -244,12 +244,30 @@ async function handlePaid(msg) {
   console.log(`[trade-filter] Paid: ${orderId.slice(0, 8)} TX=${msg.tx.slice(0, 16)}`);
 }
 
-// Oracle v0.3 sub 10.x — SS SPOF Path A ingest (J2 r56 NWT r66 CRITICAL #3 fix).
+// Oracle v0.3 sub 10.x — SS SPOF Path A ingest (J2 r56 NWT r66 CRITICAL #3 fix + r67 R3 dual-sig).
 // Capture kanet_prediction_params_v1 broadcasts into chain_events (= canonical source for recovery).
-// Recovery code reads chain_events WHERE event_type='kanet_prediction_params_v1' AND offer_id=X.
+// Verify dual-sig BEFORE recordChainEvent to reject forge at source (= defense-in-depth, NWT r67 R3).
 async function handlePredictionParams(msg) {
-  if (!msg.offer_id || !msg.params_hash || !msg.ctor_params) {
+  if (!msg.offer_id || !msg.params_hash || !msg.ctor_params || !msg.maker_sig || !msg.taker_sig) {
     console.warn(`[trade-filter] kanet_prediction_params_v1 missing required fields tx=${msg._tx?.slice(0,12)}`);
+    return;
+  }
+  // NWT r67 R3 light gap fix: verify dual-sig BEFORE ingest. Reject forge spam at source.
+  // payload may carry self-consistent hash (= attacker-computed) but sigs from wrong keys.
+  try {
+    const { verifyParamsDualSig, computeParamsHash } = await import('./prediction-params-cache.js');
+    const recomputedHash = computeParamsHash(msg.ctor_params);
+    if (recomputedHash !== msg.params_hash) {
+      console.warn(`[trade-filter] kanet_prediction_params_v1 hash mismatch offer=${msg.offer_id.slice(0,12)} — REJECT ingest`);
+      return;
+    }
+    const sigCheck = await verifyParamsDualSig(msg);
+    if (!sigCheck.valid) {
+      console.warn(`[trade-filter] kanet_prediction_params_v1 dual-sig REJECT offer=${msg.offer_id.slice(0,12)}: ${sigCheck.reason}`);
+      return;
+    }
+  } catch (e) {
+    console.warn(`[trade-filter] kanet_prediction_params_v1 verify exception: ${e.message}`);
     return;
   }
   recordChainEvent({
@@ -260,7 +278,7 @@ async function handlePredictionParams(msg) {
     observedBy: 'protocol',
     payload: msg,  // full payload (= offer_id, p2sh_addr, ctor_params, params_hash, maker_sig, taker_sig)
   });
-  console.log(`[trade-filter] kanet_prediction_params_v1 ingest offer=${msg.offer_id.slice(0,12)} tx=${msg._tx?.slice(0,12)}`);
+  console.log(`[trade-filter] kanet_prediction_params_v1 ingest offer=${msg.offer_id.slice(0,12)} tx=${msg._tx?.slice(0,12)} dual-sig verified`);
 }
 
 async function handleDelivered(msg) {
