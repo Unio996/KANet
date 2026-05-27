@@ -300,7 +300,7 @@ export async function handleDmMessage(senderAddress, text, ctx = {}) {
     const markets = fetchActiveMarkets();
     // Encode markets snapshot ids into aux as comma-list (= short enough for last_action col)
     updateSession(senderAddress, STATE.SELECT_MARKET, {
-      aux: { ms: markets.map(m => m.market_id.slice(-8)).join(',') },
+      aux: { ms: markets.map(m => m.id.slice(-8)).join(',') },
     });
     return renderMarketList(markets);
   }
