@@ -459,6 +459,44 @@ export async function registerChatRoutes(fastify) {
     return reply.send({ messages, channel: name });
   });
 
+  // GET /api/prediction-agent/stats — DM session stats for Agent tab UI wire
+  // Per Bettor r100 R2 + sub-2c (KANet-UI):
+  // - Active DM sessions (= prediction_dm_session 非 IDLE state count)
+  // - Completed settles (= exchange_offers protocol_status='completed' for this maker_relay_id)
+  // - WAITING_TAKER (= exchange_offers protocol_status='pending_taker' for this maker_relay_id)
+  fastify.get('/api/prediction-agent/stats', async (request, reply) => {
+    const { relay_id } = request.query;
+    try {
+      // Active DM sessions: any session whose last_action != IDLE updated within 24h
+      const active = sqlite.prepare(`
+        SELECT COUNT(*) AS n FROM prediction_dm_session
+        WHERE last_action IS NOT NULL
+          AND last_action NOT LIKE '%IDLE%'
+          AND datetime(updated_at) > datetime('now', '-24 hours')
+      `).get().n;
+
+      let completed = 0;
+      let waitingTaker = 0;
+      if (relay_id) {
+        completed = sqlite.prepare(`
+          SELECT COUNT(*) AS n FROM exchange_offers
+          WHERE maker_relay_id = ? AND protocol_status = 'completed'
+        `).get(relay_id).n;
+        waitingTaker = sqlite.prepare(`
+          SELECT COUNT(*) AS n FROM exchange_offers
+          WHERE maker_relay_id = ? AND protocol_status = 'pending_taker'
+        `).get(relay_id).n;
+      } else {
+        completed = sqlite.prepare(`SELECT COUNT(*) AS n FROM exchange_offers WHERE protocol_status = 'completed'`).get().n;
+        waitingTaker = sqlite.prepare(`SELECT COUNT(*) AS n FROM exchange_offers WHERE protocol_status = 'pending_taker'`).get().n;
+      }
+
+      return reply.send({ ok: true, active, completed, waiting_taker: waitingTaker });
+    } catch (e) {
+      return reply.code(500).send({ ok: false, error: e.message });
+    }
+  });
+
   // POST /api/faucet/request — auto faucet (= task md §3.3)
   // Rate limit: same IP 24h ≤ 3 req, same wallet 永久 ≤ 1 req
   // Owner 充值 dedicated faucet wallet 后启用. Tier 1 阶段 wallet 未配置则 503.

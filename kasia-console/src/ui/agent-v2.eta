@@ -1237,26 +1237,29 @@
           <a href="/predictions" class="text-xs av-accent-gold hover:underline">Markets ▶ Predictions →</a>
         </div>
         <div class="p-5 space-y-5">
-          <!-- Hero · DM stats placeholder (= chain truth source, J2 v147 后 wire) -->
-          <div class="bg-warm-50 rounded-lg p-4">
-            <div class="av-stat-label mb-2">DM 代理状态</div>
-            <div class="text-xs text-ink-500">
-              <span class="text-ink-300 italic">[J2 v147 prediction_dm_session migrate + NWT single relay router ship 后 wire chain truth source]</span>
+          <!-- Hero · DM stats wired to /api/prediction-agent/stats (sub-2c) -->
+          <div class="bg-warm-50 rounded-lg p-4"
+               x-data="{ stats: null, loadStats() { fetch('/api/prediction-agent/stats?relay_id=' + (agent?.id||'')).then(r=>r.json()).then(d=>{ if(d.ok) this.stats = d; }).catch(()=>{}); } }"
+               x-init="loadStats(); setInterval(loadStats, 15000)">
+            <div class="flex items-center justify-between mb-2">
+              <div class="av-stat-label">DM 代理状态</div>
+              <button @click="loadStats()" class="text-[10px] av-accent-gold hover:underline">刷新</button>
             </div>
             <div class="grid grid-cols-3 gap-3 mt-3 text-center">
               <div>
-                <div class="av-display text-2xl text-ink-800 tabular-nums">—</div>
+                <div class="av-display text-2xl text-ink-800 tabular-nums" x-text="stats?.active ?? '—'"></div>
                 <div class="text-[10px] text-ink-400 mt-1">活跃 DM session</div>
               </div>
               <div>
-                <div class="av-display text-2xl text-green-700 tabular-nums">—</div>
+                <div class="av-display text-2xl text-green-700 tabular-nums" x-text="stats?.completed ?? '—'"></div>
                 <div class="text-[10px] text-ink-400 mt-1">完成 settle</div>
               </div>
               <div>
-                <div class="av-display text-2xl av-accent-gold tabular-nums">—</div>
+                <div class="av-display text-2xl av-accent-gold tabular-nums" x-text="stats?.waiting_taker ?? '—'"></div>
                 <div class="text-[10px] text-ink-400 mt-1">WAITING_TAKER</div>
               </div>
             </div>
+            <div class="text-[10px] text-ink-400 mt-2 text-center" x-show="!stats">loading...</div>
           </div>
 
           <!-- Menu Flow 教育 (= 5 step preview) -->
