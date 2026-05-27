@@ -45,6 +45,8 @@ export function composeCtorParams(offer, meta) {
     }
   } catch {}
 
+  // NWT r68 fix: redeem_script_hex NOT in canonical ctor_params (= 1301B = 2602 hex chars 超 5000 broadcast cap).
+  // redeem_script is derived OUTPUT of silverc(ctor_params + .sil source), recovery 时 recompile.
   return {
     offer_id: offer.id,
     p2sh_addr: offer.escrow_p2sh,
@@ -60,8 +62,46 @@ export function composeCtorParams(offer, meta) {
     taker_stake_sompi: parseInt(meta.taker_stake_sompi, 10) || 0,
     market_metadata_hash: meta.market_metadata_hash || null,
     protocol_version: meta.protocol_version || 'v0.3-full',
-    redeem_script_hex: meta.redeem_script_hex || null,  // include for fast recovery; recompile verifies hash
   };
+}
+
+/**
+ * Recompile redeem_script_hex from ctor_params via silverc (= NWT r68 fix).
+ * Called by recoverPredictionParams to derive redeem_script (= not in canonical payload).
+ *
+ * INVARIANTS: silverc binary in PATH + .sil source committed.
+ */
+async function recompileRedeemScript(ctorParams) {
+  try {
+    // Extract oracle pks as hex array (= computeEscrowP2SH expects x-only hex)
+    const kaspa = await import('kaspa-wasm');
+    const oraclePksHex = ctorParams.oracle_pks.map(o => {
+      if (typeof o === 'string') return o;  // already hex
+      // derive from address — recovery 也 needs relay address to derive
+      try { return kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(o.address)).toString(); }
+      catch { return null; }
+    }).filter(Boolean);
+    if (oraclePksHex.length !== 5) {
+      return { ok: false, error: `expected 5 oracle pks, got ${oraclePksHex.length}` };
+    }
+    const { computeEscrowP2SH } = await import('../lib/prediction-escrow-ss.mjs');
+    const escrow = await computeEscrowP2SH({
+      makerPk: ctorParams.maker_pk,
+      takerPk: ctorParams.taker_pk,
+      brokerPk: ctorParams.broker_pk,
+      oraclePks: oraclePksHex,
+      deadline: ctorParams.deadline,
+      minerFee: ctorParams.miner_fee_sompi,
+      brokerFeePct: ctorParams.broker_fee_pct,
+      oracleFeePct: ctorParams.oracle_fee_pct,
+      makerStakeAmount: ctorParams.maker_stake_sompi,
+      takerStakeAmount: ctorParams.taker_stake_sompi,
+      network: ctorParams.p2sh_addr?.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet',
+    });
+    return { ok: true, redeem_script_hex: escrow.redeemScript, p2sh_addr: escrow.p2shAddr };
+  } catch (e) {
+    return { ok: false, error: `silverc recompile fail: ${e.message}` };
+  }
 }
 
 /**
@@ -246,8 +286,19 @@ export async function recoverPredictionParams(offerId) {
             VALUES (?, ?, ?, ?, ?, ?, 'recovery_chain', CURRENT_TIMESTAMP)
           `).run(offerId, JSON.stringify(payload.ctor_params), payload.params_hash, payload.p2sh_addr, payload.maker_sig, payload.taker_sig);
         } catch {}
-        console.log(`[params-recovery] offer=${offerId.slice(0, 12)} restored from CHAIN_EVENT (= canonical truth + dual-sig verify) + cached locally`);
-        return { ctor_params: payload.ctor_params, params_hash: payload.params_hash, source: 'chain_event' };
+        // NWT r68 fix: redeem_script not in canonical payload, recompile via silverc
+        const recompiled = await recompileRedeemScript(payload.ctor_params);
+        if (!recompiled.ok) {
+          console.warn(`[params-recovery] silverc recompile fail offer=${offerId.slice(0, 12)}: ${recompiled.error}`);
+          return null;
+        }
+        // P2SH addr assertion: recompiled === broadcast claim
+        if (recompiled.p2sh_addr !== payload.p2sh_addr) {
+          console.warn(`[params-recovery] P2SH mismatch offer=${offerId.slice(0, 12)}: recompiled=${recompiled.p2sh_addr?.slice(0,30)} broadcast=${payload.p2sh_addr?.slice(0,30)} — rejecting`);
+          return null;
+        }
+        console.log(`[params-recovery] offer=${offerId.slice(0, 12)} restored from CHAIN_EVENT + dual-sig + silverc recompile (= P2SH match) + cached`);
+        return { ctor_params: payload.ctor_params, params_hash: payload.params_hash, source: 'chain_event', redeem_script_hex: recompiled.redeem_script_hex, p2sh_addr: recompiled.p2sh_addr };
         }
       }
     } catch (e) {
@@ -279,8 +330,14 @@ export async function recoverPredictionParams(offerId) {
         if (!sigCheck.valid) {
           console.warn(`[params-recovery] local cache dual-sig REJECT offer=${offerId.slice(0, 12)}: ${sigCheck.reason} — forge defense (local DB likely tampered)`);
         } else {
-          console.warn(`[params-recovery] offer=${offerId.slice(0, 12)} restored from LOCAL cache FALLBACK (source=${cached.source}) — chain_event lookup failed; reduced trust level`);
-          return { ctor_params: ctorParams, params_hash: cached.params_hash, source: 'local_cache_fallback' };
+          // NWT r68 fix: recompile redeem_script via silverc (same as chain path)
+          const recompiled = await recompileRedeemScript(ctorParams);
+          if (!recompiled.ok || recompiled.p2sh_addr !== cached.p2sh_addr) {
+            console.warn(`[params-recovery] local cache silverc recompile fail OR P2SH mismatch — rejecting`);
+          } else {
+            console.warn(`[params-recovery] offer=${offerId.slice(0, 12)} restored from LOCAL cache FALLBACK (= reduced trust) + silverc recompile`);
+            return { ctor_params: ctorParams, params_hash: cached.params_hash, source: 'local_cache_fallback', redeem_script_hex: recompiled.redeem_script_hex, p2sh_addr: recompiled.p2sh_addr };
+          }
         }
       }
     } catch (e) {

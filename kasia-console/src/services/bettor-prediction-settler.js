@@ -251,7 +251,11 @@ async function dispatchPhase2OrCheckSigs(offer, winnerStr, db) {
         return { handled: true, completed: false };
       }
       meta = { ...meta, ...recovered.ctor_params };
-      if (!offer.escrow_p2sh && recovered.ctor_params.p2sh_addr) offer.escrow_p2sh = recovered.ctor_params.p2sh_addr;
+      // NWT r68 fix: recovered carries silverc-recompiled redeem_script_hex separately (= not in canonical payload)
+      if (recovered.redeem_script_hex) meta.redeem_script_hex = recovered.redeem_script_hex;
+      if (!offer.escrow_p2sh && (recovered.p2sh_addr || recovered.ctor_params.p2sh_addr)) {
+        offer.escrow_p2sh = recovered.p2sh_addr || recovered.ctor_params.p2sh_addr;
+      }
       try {
         db.prepare(`UPDATE exchange_offers SET metadata = ?, escrow_p2sh = COALESCE(escrow_p2sh, ?) WHERE id = ?`)
           .run(JSON.stringify(meta), offer.escrow_p2sh, offer.id);
@@ -473,7 +477,11 @@ export async function dispatchPhase2Consensual(offer, winner, db = sqlite) {
       }
       // Merge recovered fields into meta + offer.escrow_p2sh for downstream code
       meta = { ...meta, ...recovered.ctor_params };
-      if (!offer.escrow_p2sh && recovered.ctor_params.p2sh_addr) offer.escrow_p2sh = recovered.ctor_params.p2sh_addr;
+      // NWT r68 fix: recovered carries silverc-recompiled redeem_script_hex separately (= not in canonical payload)
+      if (recovered.redeem_script_hex) meta.redeem_script_hex = recovered.redeem_script_hex;
+      if (!offer.escrow_p2sh && (recovered.p2sh_addr || recovered.ctor_params.p2sh_addr)) {
+        offer.escrow_p2sh = recovered.p2sh_addr || recovered.ctor_params.p2sh_addr;
+      }
       // Persist recovered meta back to offer (= future ticks 不 重 recover)
       try {
         db.prepare(`UPDATE exchange_offers SET metadata = ?, escrow_p2sh = COALESCE(escrow_p2sh, ?) WHERE id = ?`)
