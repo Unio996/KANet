@@ -48,32 +48,47 @@ const STAKE_OPTIONS_KAS = [10, 50, 100];
 // ── DB query helpers (= chain truth, stateless) ──────────────────────────
 
 /**
- * Fetch active pool markets (= status='open' in pool_markets table).
+ * Fetch active pool markets (= protocol_status='open' in pool_markets table).
+ * Schema cols: id, outcome_market_source, outcome_condition_id, outcome_side,
+ * deadline, maker_stake_amount, oracle_relay_ids, broker_relay_id, ...
  * Returns top N by deadline asc (soonest first).
  */
 function fetchActiveMarkets(limit = 5) {
   const db = getDb();
   return db.prepare(`
-    SELECT market_id, question, outcomes_json, deadline, maker_stake_kas
+    SELECT id, outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side,
+           deadline, maker_stake_amount, oracle_relay_ids, broker_relay_id, maker_relay_id
     FROM pool_markets
-    WHERE status = 'open' AND deadline > datetime('now')
+    WHERE protocol_status = 'open' AND deadline > datetime('now')
     ORDER BY deadline ASC
     LIMIT ?
   `).all(limit);
 }
 
 /**
- * Fetch user's own bets (= as maker or taker in pool_offers).
+ * Fetch user's own bets — query pool_markets where maker_relay_id == user's relay.
+ * (= no pool_offers separate table in schema; pool_markets IS the offer entity)
+ *
+ * @param {string} relayId — user's relay_node_id (since sender_address is too coarse)
  */
-function fetchUserBets(senderAddress) {
+function fetchUserBets(relayId) {
   const db = getDb();
   return db.prepare(`
-    SELECT offer_id, market_id, side, stake_kas, protocol_status, created_at
-    FROM pool_offers
-    WHERE maker_addr = ? OR taker_addr = ?
+    SELECT id, outcome_market_source, outcome_condition_id, outcome_side,
+           maker_stake_amount, protocol_status, deadline, created_at
+    FROM pool_markets
+    WHERE maker_relay_id = ?
     ORDER BY created_at DESC
     LIMIT 10
-  `).all(senderAddress, senderAddress);
+  `).all(relayId);
+}
+
+/** Compose human-readable market name from outcome cols (no `question` col in schema). */
+function marketLabel(m) {
+  const src = (m.outcome_market_source || '?').slice(0, 12);
+  const cond = (m.outcome_condition_id || '?').slice(0, 12);
+  const side = m.outcome_side || '?';
+  return `${src}/${cond} (${side})`;
 }
 
 /**
@@ -88,7 +103,7 @@ function getOrInitSession(senderAddress) {
     db.prepare(`
       INSERT INTO prediction_dm_session (sender_address, last_market_id, last_outcome, last_action, updated_at)
       VALUES (?, ?, ?, ?, datetime('now'))
-    `).run(senderAddress, null, null, 'STATE:IDLE', senderAddress);
+    `).run(senderAddress, null, null, 'STATE:IDLE');
     row = db.prepare(`SELECT * FROM prediction_dm_session WHERE sender_address = ?`).get(senderAddress);
   }
   // Derive state from last_action prefix (= "STATE:SELECT_MARKET" etc.)
@@ -153,28 +168,34 @@ function renderMarketList(markets) {
   }
   const lines = ['活跃市场:'];
   markets.forEach((m, i) => {
-    const ddl = new Date(m.deadline).toISOString().slice(0, 10);
-    lines.push(`[${i + 1}] ${m.question} (deadline ${ddl}, maker stake ${m.maker_stake_kas} KAS)`);
+    const ddl = (m.deadline || '').slice(0, 10);
+    const stake = (m.maker_stake_amount || 0) / 100_000_000; // sompi → KAS
+    lines.push(`[${i + 1}] ${marketLabel(m)} (deadline ${ddl}, maker stake ${stake} KAS)`);
   });
   lines.push('', `回 1-${markets.length} 选市场, OR /create /my_bets /help`);
   return lines.join('\n');
 }
 
 function renderOutcomeList(market) {
-  const outcomes = JSON.parse(market.outcomes_json || '[]');
-  const lines = [`市场: ${market.question}`, '', '选 outcome 押:'];
-  outcomes.forEach((o, i) => {
-    lines.push(`[${i + 1}] ${o}`);
-  });
-  lines.push('', `回 1-${outcomes.length} 选 outcome, OR /cancel`);
+  // pool_markets stores outcome_side as a single field (= YES/NO/winner_idx 等 binary by spec).
+  // Render side selection: taker can pick the OPPOSITE side of maker.
+  const makerSide = market.outcome_side || '?';
+  const oppSide = makerSide === 'YES' ? 'NO' : (makerSide === 'NO' ? 'YES' : `opposite of ${makerSide}`);
+  const lines = [
+    `市场: ${marketLabel(market)}`,
+    `Maker 押: ${makerSide}`,
+    '',
+    '选你的押注:',
+    `[1] ${oppSide} (= 跟 maker 对赌)`,
+  ];
+  lines.push('', '回 1 确认对赌, OR /cancel');
   return lines.join('\n');
 }
 
 function renderStakeOptions(market, outcomeIdx) {
-  const outcomes = JSON.parse(market.outcomes_json || '[]');
   const lines = [
-    `市场: ${market.question}`,
-    `Outcome: ${outcomes[outcomeIdx]}`,
+    `市场: ${marketLabel(market)}`,
+    `你押: outcome ${outcomeIdx + 1}`,
     '',
     '选 stake 数额 (KAS):',
   ];
@@ -189,11 +210,11 @@ function renderStakeOptions(market, outcomeIdx) {
 function renderConfirmation(ctx) {
   return [
     '准备 publish 下注:',
-    `市场: ${ctx.market_question}`,
-    `Outcome: ${ctx.outcome_label}`,
+    `市场: ${ctx.market_label}`,
+    `押: ${ctx.outcome_label}`,
     `Stake: ${ctx.stake_kas} KAS`,
     '',
-    '回 /confirm 确认 (= escrow lock + 等 taker)',
+    '回 /confirm 确认 (= taker-handshake + escrow lock)',
     '回 /cancel 取消',
   ].join('\n');
 }
@@ -203,7 +224,8 @@ function renderMyBets(bets) {
   const lines = ['我的下注:'];
   bets.forEach((b, i) => {
     const ts = (b.created_at || '').slice(0, 16);
-    lines.push(`[${i + 1}] ${b.offer_id.slice(0, 12)}... ${b.side} ${b.stake_kas} KAS · ${b.protocol_status} · ${ts}`);
+    const stake = (b.maker_stake_amount || 0) / 100_000_000;
+    lines.push(`[${i + 1}] ${b.id.slice(0, 12)}... · ${marketLabel(b)} · ${stake} KAS · ${b.protocol_status} · ${ts}`);
   });
   return lines.join('\n');
 }
@@ -292,17 +314,19 @@ export async function handleDmMessage(senderAddress, text) {
       const markets = fetchActiveMarkets();
       if (num > markets.length) return `无效选项. 请回 1-${markets.length}.`;
       const market = markets[num - 1];
-      updateSession(senderAddress, STATE.SELECT_OUTCOME, { last_market_id: market.market_id });
+      updateSession(senderAddress, STATE.SELECT_OUTCOME, { last_market_id: market.id });
       return renderOutcomeList(market);
     }
 
     if (session.state === STATE.SELECT_OUTCOME) {
-      const market = db.prepare(`SELECT * FROM pool_markets WHERE market_id = ?`).get(session.last_market_id);
+      const market = db.prepare(`SELECT * FROM pool_markets WHERE id = ?`).get(session.last_market_id);
       if (!market) return '市场已 closed. 回 /predict 刷新.';
-      const outcomes = JSON.parse(market.outcomes_json || '[]');
-      if (num > outcomes.length) return `无效选项. 请回 1-${outcomes.length}.`;
-      updateSession(senderAddress, STATE.CONFIRM_STAKE, { last_outcome: outcomes[num - 1] });
-      return renderStakeOptions(market, num - 1);
+      // Binary outcome: only 1 valid choice (= opposite of maker)
+      if (num !== 1) return '无效选项. 回 1 确认对赌, OR /cancel.';
+      const makerSide = market.outcome_side || '?';
+      const oppSide = makerSide === 'YES' ? 'NO' : (makerSide === 'NO' ? 'YES' : `opposite of ${makerSide}`);
+      updateSession(senderAddress, STATE.CONFIRM_STAKE, { last_outcome: oppSide });
+      return renderStakeOptions(market, 0);
     }
 
     if (session.state === STATE.CONFIRM_STAKE) {
@@ -313,9 +337,9 @@ export async function handleDmMessage(senderAddress, text) {
         stakeKas = num;
       }
       updateSession(senderAddress, STATE.CONFIRM_STAKE, { aux: { stake: stakeKas } });
-      const market = db.prepare(`SELECT * FROM pool_markets WHERE market_id = ?`).get(session.last_market_id);
+      const market = db.prepare(`SELECT * FROM pool_markets WHERE id = ?`).get(session.last_market_id);
       return renderConfirmation({
-        market_question: market?.question || session.last_market_id,
+        market_label: market ? marketLabel(market) : session.last_market_id,
         outcome_label: session.last_outcome,
         stake_kas: stakeKas,
       });
@@ -339,8 +363,8 @@ export async function handleDmMessage(senderAddress, text) {
 export function buildPublishedDm(market, stakeKas, deadline) {
   return [
     `✅ 下注 published, escrow locked ${stakeKas} KAS`,
-    `市场: ${market.question}`,
-    `Deadline: ${new Date(deadline).toISOString().slice(0, 16)}`,
+    `市场: ${marketLabel(market)}`,
+    `Deadline: ${(deadline || '').slice(0, 16)}`,
     '',
     'WAITING_TAKER. 等 counterparty accept.',
     '回 /my_bets 查看状态.',
@@ -354,7 +378,7 @@ export function buildMatchedDm(offerId, market, takerAddr) {
   return [
     `🎯 下注 MATCHED`,
     `Offer: ${offerId.slice(0, 12)}...`,
-    `市场: ${market.question}`,
+    `市场: ${marketLabel(market)}`,
     `Taker: ${takerAddr.slice(0, 12)}...`,
     '',
     '等 deadline reach + outcome 确认.',
@@ -369,7 +393,7 @@ export function buildCompletedDm(offerId, market, winnerOutcome, payoutTxId, pay
   const status = isWinner ? '🏆 WON' : '✗ LOST';
   return [
     `${status} — Offer ${offerId.slice(0, 12)}... settled`,
-    `市场: ${market.question}`,
+    `市场: ${marketLabel(market)}`,
     `Winner outcome: ${winnerOutcome}`,
     `Payout: ${payoutKas} KAS (TX ${payoutTxId.slice(0, 16)}...)`,
   ].join('\n');
