@@ -1,7 +1,7 @@
 # Phase 1 Release — 非托管 Kaspa 预测下注 (Polymarket/UMA 镜像)
 
-**Status**: 🟡 DRAFT — pending Sub5 (NWT regression 4 历史 settle TX green) + Owner 宣 ship. 宣布前不公开.
-**Author**: J1tn (Owner 钦定 r159 release note 委托)
+**Status**: ✅ SHIPPED 2026-05-28 (testnet-12) — SHIP GATE 4/4 green, Bettor architect 宣 ship (r160). Bettor reviewer 复核中.
+**Author**: J1tn (Owner 钦定 r159/r160 release note 委托)
 **Scope**: testnet-12 only. KANet 团队不运营主网; 第三方可独立部署.
 
 ---
@@ -27,7 +27,7 @@
 | 5-oracle 读真 gamma → YES + 48h 最终化 gate 过 | (voter cron) |
 | 10/10 sig collected → settle | `c045c58a` (winner=maker, YES 赢) |
 
-历史 settle TX (regression 基线, NWT Sub5 验绿): `ba8cc3b6` · `f64d40a2` · `b58e1585` · `63466037`。
+历史 settle TX (regression 基线, NWT Sub5 + Bettor 独立 verify **5/5 全 completed**, hash-anchor v2 重构 0-break 三 recovery 机制): `ba8cc3b6` · `f64d40a2` · `b58e1585` · `63466037` · `c045c58a`。
 
 ## 关键机制
 
@@ -35,6 +35,15 @@
   - 此 gate 源于一次 catch: gamma `closed=true` ≠ UMA 最终化 (挑战窗口可 reverse)。catch → fix → 真链验证 (Espresso 70天>48h, gate 正确放行)。
 - **5-of-5 multi-sig SS escrow**: 结算需 5 oracle 全签 (testnet Phase 3a)。
 - **链是唯一真相源**: offer 状态机 (matched→verifying→collecting_sigs→completed) 由链上事实驱动。
+
+## 用户透明层 (UI Sub6)
+
+预测市场 UI 每挂单三件可审计展示 (UI 只读权威字段, 0 主观判定 — 守去中心化):
+- **类型 badge** (读 Owner-approved condition mapping): 🪞 镜像 UMA / ⚖ 真并行判定 / 未映射。
+- **UMA 最终化状态** (protocol_status 驱动, 非猜倒计时防误导): verifying+ → ✅ 已最终化 (48h gate 已过) / 早期 → ⏳ 待验证。
+- **链上结算 TX → Kaspa explorer 链接** (任何人可独立审计资金流)。
+
+caveat: 最终化状态 + settle link 即时生效; mirror badge 待 Owner approve 真 condition mapping 后点亮。
 
 ## 定位 (Owner)
 
@@ -50,4 +59,4 @@
 
 ---
 
-*待 Sub5 green + Owner 宣 ship 后转正式 release note 公开。*
+*SHIPPED 2026-05-28 testnet-12. Bettor reviewer 复核中 (r160). 正式委托完成 (Owner r159/r160 钦定).*
