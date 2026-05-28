@@ -1,3 +1,8 @@
+// ⚠ Phase 2/3 oracle evolution — EXPERIMENTAL, auto-grant DISABLED, testnet research only.
+//   (Owner r167 钦定 status banner. auto-grant licensed_domains stays code-disabled until the
+//    post_settle_audit revocation engine is proven-live + Bettor reviewer sign-off. Phase 1 ship
+//    does NOT depend on this file.)
+//
 // Oracle v0.3 Phase 2 — parallel-judgment loop engine (J1tn cluster, Owner r148 architecture).
 //
 // ─────────────────────────────────────────────────────────────────────────────
