@@ -184,10 +184,13 @@ async function _sendKaspaInner(to, amountSompi, priorityFee = 0n, payload, _isRe
 
     // 5/27 post-Toccata kaspad v1.2.0 fee bump: minimum priorityFee floor for transfers.
     // 实测 transfer compute mass ~2000-3000 × 100 sompi/mass = 200000-300000 required.
-    // floor 500_000n (= 0.005 KAS) covers typical transfer up to ~5000 mass with safety margin.
+    // 5/28 J1tn R5 e2e catch — SS escrow lock TX (prediction publish-v2 → P2SH) generates compute
+    // mass ~22000 due to large output set + payload, requiring ~2,200,000 sompi at 100 sompi/mass.
+    // Bump floor 500_000n → 3_000_000n (= 0.03 KAS) to cover SS escrow + room for future tx-type
+    // growth without per-call override. Affects only the transfer-floor branch; self-send unchanged.
     const effectivePriorityFee = (amountSompi === 0n && to === senderAddress)
       ? priorityFee  // self-send (broadcast/comm) — already factored into outputAmount = best.amount - feeReserve
-      : (priorityFee > 500_000n ? priorityFee : 500_000n);  // regular transfer — floor 500k sompi
+      : (priorityFee > 3_000_000n ? priorityFee : 3_000_000n);  // regular transfer — floor 3M sompi (covers SS escrow mass ~25K)
     const generator = new Generator({
       entries: selectedEntries,
       outputs: [new PaymentOutput(new Address(to), outputAmount)],
