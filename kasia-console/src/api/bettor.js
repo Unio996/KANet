@@ -2436,4 +2436,73 @@ export async function registerBettorRoutes(fastify) {
     const audits = buildStairStepAudit(recs);
     return reply.send({ ok: true, audits, count: audits.length, rec_count: recs.length });
   });
+
+  // Phase 2 oracle 演进 — condition_id_mapping admin endpoints (J2 r74 v153 + Bettor r152 Sub 1).
+  //
+  // Owner approve workflow per r147: only Owner-approved mappings 真 live. mirror_only=1 → 钱跟 UMA, KANet
+  // 不并行判 (= 防 herding 拿答案考自己). mirror_only=0 + independent_source set → KANet 真并行判 vs UMA.
+  // Testnet trust model: caller asserts owner identity via approved_by string (= relay name OR addr).
+  // Mainnet hardening: relay sig verify backlog (= r147 spec).
+
+  // GET /api/oracle/mapping — list all OR filter by domain/mirror_only/condition_id
+  fastify.get('/api/oracle/mapping', async (request, reply) => {
+    const q = request.query || {};
+    let sql = 'SELECT condition_id, uma_assertion_id, independent_source, mirror_only, domain, created_at, approved_by, approved_at FROM condition_id_mapping WHERE 1=1';
+    const params = [];
+    if (q.condition_id) { sql += ' AND condition_id = ?'; params.push(q.condition_id); }
+    if (q.domain) { sql += ' AND domain = ?'; params.push(q.domain); }
+    if (q.mirror_only !== undefined) { sql += ' AND mirror_only = ?'; params.push(parseInt(q.mirror_only, 10) ? 1 : 0); }
+    sql += ' ORDER BY created_at DESC LIMIT 200';
+    const rows = sqlite.prepare(sql).all(...params);
+    return reply.send({ ok: true, count: rows.length, mappings: rows });
+  });
+
+  // GET /api/oracle/mapping/:condition_id — single lookup (= voter cron uses this)
+  fastify.get('/api/oracle/mapping/:condition_id', async (request, reply) => {
+    const row = sqlite.prepare(`
+      SELECT condition_id, uma_assertion_id, independent_source, mirror_only, domain, created_at, approved_by, approved_at
+      FROM condition_id_mapping WHERE condition_id = ?
+    `).get(request.params.condition_id);
+    if (!row) return reply.code(404).send({ ok: false, error: 'mapping not found' });
+    return reply.send({ ok: true, mapping: row });
+  });
+
+  // POST /api/oracle/mapping — create OR update (= upsert, Owner approves)
+  // Body: { condition_id, uma_assertion_id?, independent_source?, mirror_only, domain, approved_by }
+  // Rules: if mirror_only=0, independent_source REQUIRED (= 防假并行 spec). approved_by REQUIRED (= Owner identity).
+  fastify.post('/api/oracle/mapping', async (request, reply) => {
+    const b = request.body || {};
+    if (!b.condition_id || typeof b.condition_id !== 'string') {
+      return reply.code(400).send({ ok: false, error: 'condition_id required (string)' });
+    }
+    if (b.mirror_only !== 0 && b.mirror_only !== 1) {
+      return reply.code(400).send({ ok: false, error: 'mirror_only required (0 OR 1)' });
+    }
+    if (b.mirror_only === 0 && (!b.independent_source || typeof b.independent_source !== 'string')) {
+      return reply.code(400).send({ ok: false, error: 'mirror_only=0 requires independent_source (= 防假并行 Bettor r149)' });
+    }
+    if (b.independent_source && /polymarket\.com|gamma-api/i.test(b.independent_source)) {
+      return reply.code(400).send({ ok: false, error: 'independent_source 不能 含 polymarket.com OR gamma-api (= 防假并行 Bettor r150)' });
+    }
+    if (!b.approved_by || typeof b.approved_by !== 'string') {
+      return reply.code(400).send({ ok: false, error: 'approved_by required (= Owner identity, r147 spec)' });
+    }
+    try {
+      sqlite.prepare(`
+        INSERT INTO condition_id_mapping (condition_id, uma_assertion_id, independent_source, mirror_only, domain, approved_by, approved_at)
+        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(condition_id) DO UPDATE SET
+          uma_assertion_id = excluded.uma_assertion_id,
+          independent_source = excluded.independent_source,
+          mirror_only = excluded.mirror_only,
+          domain = excluded.domain,
+          approved_by = excluded.approved_by,
+          approved_at = CURRENT_TIMESTAMP
+      `).run(b.condition_id, b.uma_assertion_id || null, b.independent_source || null, b.mirror_only, b.domain || null, b.approved_by);
+      const row = sqlite.prepare(`SELECT * FROM condition_id_mapping WHERE condition_id = ?`).get(b.condition_id);
+      return reply.send({ ok: true, mapping: row });
+    } catch (e) {
+      return reply.code(500).send({ ok: false, error: `mapping upsert fail: ${e.message}` });
+    }
+  });
 }
