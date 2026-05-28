@@ -424,6 +424,15 @@ export async function registerChatRoutes(fastify) {
     return reply.viewAsync('welcome-dev', { lang });
   });
 
+  // GET /faucet — testnet KAS faucet page (= Tier 1 spec §5 第 4 URL, 2026-05-28 KANet-UI fill)
+  fastify.get('/faucet', async (request, reply) => {
+    const lang = parseLang(request.headers.cookie);
+    const faucetEnabled = !!process.env.FAUCET_RELAY_ID;
+    const amountKas = parseFloat(process.env.FAUCET_AMOUNT_KAS || '5');
+    reply.header('X-KANet-Disclaimer', 'testnet-only-no-investment-advice');
+    return reply.viewAsync('faucet', { lang, faucetEnabled, amountKas });
+  });
+
   // GET /public/channel/:name — public read-only channel browser (= task md §3.1)
   // Renders 公开 messages only (visibility='public'). Track A 默认 internal 不泄露.
   const PUBLIC_CHANNELS = ['kanet-spec', 'kanet-bugs', 'kanet-showcase', 'kanet-marketplace', 'kanet-forks', 'kanet-general'];
@@ -514,19 +523,37 @@ export async function registerChatRoutes(fastify) {
     const ipCount = sqlite.prepare('SELECT COUNT(*) AS cnt FROM faucet_grants WHERE ip_address = ? AND granted_at > ?').get(ip, day).cnt;
     if (ipCount >= 3) return reply.code(429).send({ error: 'IP rate limit (= 24h 3 次 limit, current ' + ipCount + ')' });
 
-    // Tier 1 阶段: Owner 未配 dedicated wallet → 503 friendly
-    // TODO Owner 配置后 (per task md §3.3) 加 transferFromFaucet(wallet_address, 100000_00000000n)
-    const FAUCET_AMOUNT_SOMPI = 100000_00000000n; // 100k KAS
-    return reply.code(503).send({
-      error: 'Faucet pending Owner config (= dedicated wallet 未充值, Tier 1 阶段). 等 Owner 充值后启用.',
-      planned_amount: '100,000 testnet KAS',
-    });
-
-    // Future implementation (after Owner config):
-    // const txid = await transferFromFaucet(wallet_address, FAUCET_AMOUNT_SOMPI);
-    // sqlite.prepare(`INSERT INTO faucet_grants (ip_address, wallet_address, granted_at, amount_sompi, txid, status)
-    //                 VALUES (?, ?, ?, ?, ?, 'sent')`).run(ip, wallet_address, Math.floor(Date.now() / 1000), Number(FAUCET_AMOUNT_SOMPI), txid);
-    // return reply.send({ ok: true, txid, amount: '100,000 testnet KAS' });
+    // 2026-05-28 KANet-UI wire (= Tier 1 缺件 fill, 全力推动):
+    // env FAUCET_RELAY_ID 配置后启用 (= Owner spawn FaucetRelay-tn 独立 relay + 充值后设 env).
+    // 未设 → 503 graceful (= 不破坏现有).
+    // grant amount: 5 KAS (= 500_000_000 sompi). 原 stub 100000_00000000n = 100k KAS 是 bug (= spec §NWT-2 本意小额,
+    //   但 1M sompi=0.01 KAS post-fee-bump 不够 1 帖, 5 KAS = ~250-1000 帖 合理 dev faucet 额度).
+    const FAUCET_RELAY_ID = process.env.FAUCET_RELAY_ID;
+    const FAUCET_AMOUNT_KAS = parseFloat(process.env.FAUCET_AMOUNT_KAS || '5');
+    if (!FAUCET_RELAY_ID) {
+      return reply.code(503).send({
+        error: 'Faucet pending config (= FAUCET_RELAY_ID env 未设, Owner spawn FaucetRelay-tn + 充值后启用).',
+        planned_amount: `${FAUCET_AMOUNT_KAS} testnet KAS`,
+      });
+    }
+    try {
+      const { sendCommandAsync } = await import('../services/relay-manager.js');
+      const result = await sendCommandAsync(FAUCET_RELAY_ID, {
+        type: 'transfer',
+        target: wallet_address,
+        amount: FAUCET_AMOUNT_KAS.toFixed(8),  // KI-30: sompi 8 decimal max
+      });
+      const txid = result?.txId || null;
+      if (!txid) {
+        return reply.code(503).send({ error: 'faucet transfer 未上链 (= relay 返回无 txId, 可能余额不足 OR relay down)' });
+      }
+      sqlite.prepare(`INSERT INTO faucet_grants (ip_address, wallet_address, granted_at, amount_sompi, txid, status)
+                      VALUES (?, ?, ?, ?, ?, 'sent')`)
+        .run(ip, wallet_address, Math.floor(Date.now() / 1000), Math.round(FAUCET_AMOUNT_KAS * 1e8), txid);
+      return reply.send({ ok: true, txid, amount: `${FAUCET_AMOUNT_KAS} testnet KAS` });
+    } catch (err) {
+      return reply.code(500).send({ error: `faucet transfer fail: ${err.message}` });
+    }
   });
 
   // ── Conversational Ops: confirm execute action ──

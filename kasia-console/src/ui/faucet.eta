@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="<%= it.lang || 'zh' %>">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KANet Testnet Faucet</title>
+  <meta name="robots" content="noindex" />
+  <meta name="description" content="KANet testnet KAS faucet — testnet-only, no real value, no investment advice" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <!-- KANet Dev Channel Tier 1 — faucet page (spec §5 第 4 URL, 2026-05-28 KANet-UI fill)
+       Editorial baseline (= Owner 5/27 钦定): Fraunces serif + 古铜金 #b08a44 + dc-* prefix -->
+
+  <style>
+    :root {
+      --warm-50: #fefcf7;
+      --warm-100: #faf6ec;
+      --warm-200: #e8e1d0;
+      --ink-400: #6b6d7b;
+      --ink-500: #4e5060;
+      --ink-700: #2d2e3a;
+      --ink-800: #1a1b25;
+      --dc-gold: #b08a44;
+    }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--warm-50); color: var(--ink-700); }
+    .dc-display { font-family: 'Fraunces', Georgia, serif; font-feature-settings: 'opsz' 36; }
+    .dc-accent-gold { color: var(--dc-gold); }
+    .dc-accent-gold-bg { background: var(--dc-gold); }
+    .dc-accent-gold-bg:hover { background: #97742d; }
+    .dc-card-editorial { background: white; border: 1px solid var(--warm-200); border-radius: 10px; }
+    .dc-input { border: 1px solid var(--warm-200); border-radius: 8px; background: white; }
+    .dc-input:focus { outline: none; border-color: var(--dc-gold); }
+  </style>
+</head>
+<body class="min-h-screen">
+  <div class="max-w-2xl mx-auto px-6 py-12" x-data="faucetApp()">
+
+    <!-- Sticky disclaimer banner -->
+    <div class="mb-8 text-center text-xs" style="color: var(--ink-400);">
+      ⚠ Testnet-only · 无真实价值 · 非投资建议 · MIT licensed protocol demo
+    </div>
+
+    <!-- Header -->
+    <div class="text-center mb-10">
+      <h1 class="dc-display text-4xl mb-3" style="color: var(--ink-800);">KANet <span class="dc-accent-gold">Testnet Faucet</span></h1>
+      <p class="text-sm" style="color: var(--ink-500);">
+        领取 testnet KAS 用于 KANet dev channel 测试 (= <%= it.amountKas || 5 %> KAS / 地址, 永久 1 次)
+      </p>
+    </div>
+
+    <!-- Faucet card -->
+    <div class="dc-card-editorial p-8">
+      <% if (!it.faucetEnabled) { %>
+        <!-- Disabled state: FAUCET_RELAY_ID not configured -->
+        <div class="text-center py-6">
+          <div class="text-3xl mb-3">🚧</div>
+          <p class="dc-display text-xl mb-2" style="color: var(--ink-700);">Faucet 暂未启用</p>
+          <p class="text-sm" style="color: var(--ink-400);">
+            管理员尚未配置 faucet relay (= FAUCET_RELAY_ID env)。<br/>
+            配置 + 充值后此页自动启用。
+          </p>
+        </div>
+      <% } else { %>
+        <!-- Active state: request form -->
+        <label class="block text-sm font-medium mb-2" style="color: var(--ink-700);">你的 testnet 地址</label>
+        <input type="text" x-model="addr" placeholder="kaspatest:qq..."
+               class="dc-input w-full px-4 py-3 text-sm font-mono mb-4" :disabled="loading" />
+
+        <button @click="request()" :disabled="loading || !addr"
+                class="dc-accent-gold-bg text-white w-full py-3 rounded-lg text-sm font-medium transition disabled:opacity-50">
+          <span x-show="!loading">领取 <%= it.amountKas || 5 %> testnet KAS</span>
+          <span x-show="loading">发送中…</span>
+        </button>
+
+        <!-- Result -->
+        <template x-if="result">
+          <div class="mt-5 p-4 rounded-lg text-sm"
+               :class="result.ok ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-700'">
+            <template x-if="result.ok">
+              <div>
+                <div class="font-medium mb-1">✅ 已发送 <span x-text="result.amount"></span></div>
+                <div class="text-xs font-mono break-all" style="color: var(--ink-400);">
+                  TX: <span x-text="result.txid"></span>
+                </div>
+              </div>
+            </template>
+            <template x-if="!result.ok">
+              <div x-text="result.error"></div>
+            </template>
+          </div>
+        </template>
+      <% } %>
+    </div>
+
+    <!-- Footer rules -->
+    <div class="mt-8 text-xs leading-relaxed" style="color: var(--ink-400);">
+      <p class="mb-1">规则:</p>
+      <ul class="list-disc list-inside space-y-1">
+        <li>每地址永久限领 1 次</li>
+        <li>同 IP 24h 限 3 次</li>
+        <li>testnet KAS 无真实价值, 仅用于协议测试</li>
+        <li>需要更多? <a href="/welcome-dev" class="dc-accent-gold underline">查看 dev 文档</a></li>
+      </ul>
+    </div>
+
+  </div>
+
+  <script>
+    function faucetApp() {
+      return {
+        addr: '',
+        loading: false,
+        result: null,
+        async request() {
+          if (!this.addr.trim()) return;
+          this.loading = true;
+          this.result = null;
+          try {
+            const r = await fetch('/api/faucet/request', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ wallet_address: this.addr.trim() }),
+            });
+            const j = await r.json();
+            this.result = r.ok ? { ok: true, txid: j.txid, amount: j.amount } : { ok: false, error: j.error || ('HTTP ' + r.status) };
+          } catch (e) {
+            this.result = { ok: false, error: e.message };
+          } finally {
+            this.loading = false;
+          }
+        },
+      };
+    }
+  </script>
+</body>
+</html>
