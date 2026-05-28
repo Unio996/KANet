@@ -300,10 +300,24 @@ export async function unlockP2SHMultiSig(p2shAddress, redeemScript, requiredInpu
     const winnerOpHex = winner === 0 ? '00' : '51';  // OP_0 / OP_1
     const selectorOpHex = '00';  // OP_0 settle branch
 
-    // Compute redeem script push via ScriptBuilder (reuse Bettor pattern from unlockP2SH line 207-208)
-    const redeemPushSb = new ScriptBuilder();
-    redeemPushSb.addData(redeemScript);
-    const redeemPushHex = redeemPushSb.toString();
+    // 5/28 Bettor operator hat: same OP_PUSHDATA2 bypass as L416 (= unlockP2SHConsensual).
+    // Settle TX redeem_script 1305 bytes > 520 ScriptBuilder.addData cap. Manual encode.
+    // Sediment: same fix applied L416 by NWT but unlockP2SHMultiSig path missed. KI sweep gap.
+    const redeemBytes_settle = typeof redeemScript === 'string'
+      ? Buffer.from(redeemScript, 'hex')
+      : Buffer.from(redeemScript);
+    let redeemPushHex;
+    if (redeemBytes_settle.length <= 75) {
+      redeemPushHex = redeemBytes_settle.length.toString(16).padStart(2, '0') + redeemBytes_settle.toString('hex');
+    } else if (redeemBytes_settle.length <= 255) {
+      redeemPushHex = '4c' + redeemBytes_settle.length.toString(16).padStart(2, '0') + redeemBytes_settle.toString('hex');
+    } else if (redeemBytes_settle.length <= 65535) {
+      const lo = (redeemBytes_settle.length & 0xff).toString(16).padStart(2, '0');
+      const hi = ((redeemBytes_settle.length >> 8) & 0xff).toString(16).padStart(2, '0');
+      redeemPushHex = '4d' + lo + hi + redeemBytes_settle.toString('hex');
+    } else {
+      throw new Error(`redeem script too large: ${redeemBytes_settle.length} bytes (= max OP_PUSHDATA4 65535)`);
+    }
 
     function assembleScriptSig(sigs5) {
       // sigs5 are already push-encoded hex from createInputSignature — concat directly
