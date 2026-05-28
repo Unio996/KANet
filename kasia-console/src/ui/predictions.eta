@@ -295,6 +295,9 @@
                       'bg-red-500': o.protocol_status === 'refunded'
                     }" x-text="o.protocol_status"></span>
                   </div>
+                  <div class="mb-1">
+                    <span class="px-1.5 py-0.5 rounded text-[10px] font-medium" :class="mirrorBadge(o).cls" x-text="mirrorBadge(o).label"></span>
+                  </div>
                   <div class="space-y-0.5">
                     <div>🔒 P2SH: <code class="text-[10px]" x-text="(o.escrow_p2sh || '').slice(0, 30) + '...'"></code>
                       <a :href="o.explorer?.escrow" target="_blank" class="text-purple-600 underline ml-1">🔗</a>
@@ -323,6 +326,16 @@
                       </div>
                     </template>
                     <div class="text-ink-500">截止: <span x-text="o.outcome_end_date"></span></div>
+                    <template x-if="umaFinalizedAfterTs(o) !== null && !o.settle_txid && !o.refund_txid">
+                      <div :class="umaFinalizedOffer(o) ? 'text-green-700' : 'text-amber-700'">
+                        <template x-if="!umaFinalizedOffer(o)">
+                          <span>⏳ UMA 最终化预计倒计时 <span class="font-mono" x-text="umaCountdownOffer(o)"></span> (此前不可结算, 防 48h 挑战期反转误结)</span>
+                        </template>
+                        <template x-if="umaFinalizedOffer(o)">
+                          <span>✅ UMA 预计已最终化 — 可结算</span>
+                        </template>
+                      </div>
+                    </template>
                   </div>
                   <template x-if="o.oracle_vote_summary && (o.oracle_vote_summary.details || []).length > 0">
                     <details class="mt-1">
@@ -1441,6 +1454,9 @@ function predictionsPage() {
     // r177 Phase 1 sub 3 — KANet prediction trade quote book
     predictionQuoteBook: null,
     predictionQuoteBookV2: null,  // Phase 4a Sub 10 — SS escrow + 5-of-5 unanimous offers (Bettor r243/r244)
+    nowTs: Date.now(),            // Phase 1 Sub6 — live clock for UMA finalization countdown tick
+    conditionMappings: {},        // Phase 1 Sub6 — {condition_id: mapping} from /api/oracle/mapping (J2)
+    umaWindowMs: null,            // Phase 1 Sub6 — UMA finalization window from /api/pool/config
     makerWhitelist: null,
     showMakerApply: false,
     makerApplyForm: { relay_node_id: '', stake_amount_kas: 100 },
@@ -1609,6 +1625,8 @@ function predictionsPage() {
         const h = (location.hash || '').replace('#', '');
         if (['scan','recs','positions','history'].includes(h)) this.currentTab = h;
       });
+      // Phase 1 Sub6 — live tick for UMA finalization countdown on Phase 4a SS offers
+      setInterval(() => { this.nowTs = Date.now(); }, 1000);
       // Phase 2a — compactView persisted via localStorage
       try {
         const stored = localStorage.getItem('predictions_compactView');
@@ -2078,12 +2096,71 @@ function predictionsPage() {
       }
     },
 
+    // ---- Phase 1 Sub6 — mirror_only badge + UMA finalization countdown (per-offer) ----
+    // Boundary-clean: client merges J2's existing /api/oracle/mapping (no bettor.js edit) +
+    // window from /api/pool/config (UI-as-mirror, no hardcoded 48h). Graceful when unmapped.
+    async loadMirrorMappings() {
+      try {
+        const [mR, cR] = await Promise.all([
+          fetch('/api/oracle/mapping'),
+          fetch('/api/pool/config'),
+        ]);
+        const mJ = await mR.json();
+        if (mJ.ok && Array.isArray(mJ.mappings)) {
+          const dict = {};
+          for (const m of mJ.mappings) { if (m.condition_id) dict[m.condition_id] = m; }
+          this.conditionMappings = dict;
+        }
+        const cJ = await cR.json();
+        if (cJ.ok && cJ.uma_finalization_window_ms !== undefined) {
+          this.umaWindowMs = cJ.uma_finalization_window_ms;
+        }
+      } catch (e) {
+        console.warn('[Sub6] mirror mappings / config load fail:', e.message);
+      }
+    },
+    mirrorBadge(o) {
+      const m = o && o.outcome_condition_id ? this.conditionMappings[o.outcome_condition_id] : null;
+      if (!m) return { label: '未映射 UMA', cls: 'bg-gray-200 text-gray-600' };
+      if (m.mirror_only === 1) {
+        return { label: '🪞 镜像 UMA · 钱跟 UMA', cls: 'bg-sky-100 text-sky-700' };
+      }
+      return { label: '⚖ 真并行判定 · 源 ' + (m.independent_source || '独立源'), cls: 'bg-green-100 text-green-700' };
+    },
+    // estimate finalization ts = maker outcome_end_date + protocol window (only polymarket-sourced)
+    umaFinalizedAfterTs(o) {
+      if (!o || o.outcome_market_source !== 'polymarket' || !o.outcome_end_date || !this.umaWindowMs) return null;
+      const closedTs = Date.parse(o.outcome_end_date);
+      if (!Number.isFinite(closedTs)) return null;
+      return closedTs + this.umaWindowMs;
+    },
+    umaRemainingMsOffer(o) {
+      const ts = this.umaFinalizedAfterTs(o);
+      return ts === null ? null : ts - this.nowTs;
+    },
+    umaFinalizedOffer(o) {
+      const r = this.umaRemainingMsOffer(o);
+      return r !== null && r <= 0;
+    },
+    umaCountdownOffer(o) {
+      const r = this.umaRemainingMsOffer(o);
+      if (r === null) return '';
+      if (r <= 0) return '已最终化';
+      const h = Math.floor(r / 3600000);
+      const m = Math.floor((r % 3600000) / 60000);
+      const s = Math.floor((r % 60000) / 1000);
+      if (h > 0) return h + 'h ' + m + 'm';
+      if (m > 0) return m + 'm ' + s + 's';
+      return s + 's';
+    },
+
     // Phase 4a Sub 10 (Bettor r243/r244) — quote-book-v2 Phase 4a SS offers + enrichment
     async loadPredictionQuoteBookV2() {
       try {
         const r = await fetch('/api/prediction/quote-book-v2');
         const data = await r.json();
         this.predictionQuoteBookV2 = data;
+        await this.loadMirrorMappings();  // Phase 1 Sub6 — mirror_only + window for badges/countdown
       } catch (e) {
         console.warn('[Phase 4a] quote-book-v2 load fail:', e.message);
         this.predictionQuoteBookV2 = { ok: false, offers: [], count: 0 };

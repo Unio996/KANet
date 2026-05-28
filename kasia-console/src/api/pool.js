@@ -263,6 +263,11 @@ export async function registerPoolRoutes(fastify) {
       deadline_max_days: parseInt(process.env.POOL_DEADLINE_MAX_DAY, 10) || 30,
       disagreement_timeout_min: parseInt(process.env.DISAGREEMENT_TIMEOUT_MIN, 10) || 5,
       oracle_silent_timeout_min: parseInt(process.env.ORACLE_SILENT_TIMEOUT_MIN, 10) || 30,
+      // Phase 1 Sub6 — expose UMA finalization window (= voter gate's source) so UI can
+      // compute finalization countdown without hardcoding 48h. 0 = gate disabled (testnet).
+      uma_finalization_window_ms: process.env.UMA_FINALIZATION_WINDOW_MS !== undefined
+        ? parseInt(process.env.UMA_FINALIZATION_WINDOW_MS, 10)
+        : 48 * 60 * 60 * 1000,
     });
   });
 
