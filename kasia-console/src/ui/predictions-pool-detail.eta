@@ -131,10 +131,11 @@ function poolDetailPage(marketId) {
     oracleList: [],
     auditHistory: [],
     stateMachine: [
-      { key: 'matched', label: 'matched' },
-      { key: 'verifying', label: 'verifying' },
-      { key: 'collecting_sigs', label: 'collecting_sigs' },
-      { key: 'completed', label: 'completed' },
+      { key: 'pending_oracle_deposits', label: '等预言机' },
+      { key: 'pending_bettors', label: '等下注' },
+      { key: 'verifying', label: '验证中' },
+      { key: 'collecting_sigs', label: '收签名' },
+      { key: 'completed', label: '已结算' },
     ],
 
     async init() {
@@ -206,8 +207,11 @@ function poolDetailPage(marketId) {
       return 'bg-warm-200 text-ink-600';
     },
     stateReached(key) {
-      var order = ['matched', 'verifying', 'collecting_sigs', 'completed'];
+      var order = ['pending_oracle_deposits', 'pending_bettors', 'verifying', 'collecting_sigs', 'completed'];
       var cur = this.market ? this.market.protocol_status : '';
+      // map aliases / terminal variants to the canonical viz step
+      var aliasMap = { matched: 'verifying', settled: 'completed', refunded: 'completed', disputed: 'collecting_sigs', active: 'pending_bettors' };
+      if (aliasMap[cur]) cur = aliasMap[cur];
       var curIdx = order.indexOf(cur);
       var keyIdx = order.indexOf(key);
       return curIdx >= 0 && keyIdx <= curIdx;
