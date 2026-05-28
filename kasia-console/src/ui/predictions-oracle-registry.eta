@@ -69,6 +69,11 @@
                 :class="tierBadgeClass(o.tier)"
                 x-text="'Tier ' + o.tier"></span>
         </div>
+        <!-- phase badge (= Bettor r133 三 Phase: 实习/毕业, interim 阈值待 spec 收敛) -->
+        <div class="flex-shrink-0">
+          <span class="text-[10px] px-2 py-0.5 rounded" :class="phaseClass(o)"
+                :title="phaseTooltip(o)" x-text="phaseLabel(o)"></span>
+        </div>
         <!-- Capabilities -->
         <div class="hidden md:block flex-shrink-0 max-w-[200px]">
           <div class="flex flex-wrap gap-1 justify-end">
@@ -210,6 +215,28 @@ function oracleRegistryPage() {
       if (a >= 0.8) return 'text-emerald-600';
       if (a >= 0.5) return 'text-amber-600';
       return 'text-red-600';
+    },
+
+    // Bettor r133 三 Phase 演进 — interim 阈值 (= 我 r91 挑3: testnet ≥10 单 vs spec 50 单, 待对抗收敛改这 2 const)
+    // 毕业(graduated): accuracy ≥ INTERIM_GRAD_ACCURACY 且 votes ≥ INTERIM_GRAD_MIN_VOTES; 否则 实习(intern/shadow).
+    phaseOf(o) {
+      const INTERIM_GRAD_ACCURACY = 90;   // % — spec propose 90, interim 同
+      const INTERIM_GRAD_MIN_VOTES = 10;  // 单 — spec propose 50, 我挑3 testnet 降 10
+      const votes = o.total_votes || 0;
+      const acc = o.accuracy_pct || 0;
+      if (votes >= INTERIM_GRAD_MIN_VOTES && acc >= INTERIM_GRAD_ACCURACY) return 'graduated';
+      return 'intern';
+    },
+    phaseLabel(o) {
+      return this.phaseOf(o) === 'graduated' ? '🎓 毕业' : '📝 实习';
+    },
+    phaseClass(o) {
+      return this.phaseOf(o) === 'graduated' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700';
+    },
+    phaseTooltip(o) {
+      return this.phaseOf(o) === 'graduated'
+        ? '毕业: 战绩达标可独立判长尾问题 (= interim 阈值 ≥10 单 ≥90%, 待 r133 spec 收敛)'
+        : '实习: 判定攒战绩中, 影子期不决定真结算 (= 攒够单数+准确率才上岗)';
     },
 
     async loadOracles() {
