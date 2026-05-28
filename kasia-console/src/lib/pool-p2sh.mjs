@@ -131,12 +131,14 @@ export async function computeSpineP2SH(args) {
   const deadline = validateInt(args.deadline, 'deadline', 1);
   const minerFee = validateInt(args.minerFee, 'minerFee', 1, 10_000_000);
   const brokerFeePct = validateInt(args.brokerFeePct, 'brokerFeePct', 0, 9999);
+  // Bettor r121 catch (J2 r69 fix): PoolSpine.sil L30 oracleFeePct ctor 缺 in ctorJson (KI sub 7 同款复刻).
+  const oracleFeePct = validateInt(args.oracleFeePct, 'oracleFeePct', 0, 9999);
   const oracleBondAmount = validateInt(args.oracleBondAmount, 'oracleBondAmount', 1);
   const makerStakeAmount = validateInt(args.makerStakeAmount, 'makerStakeAmount', 1);
   const marketMetadataHash = validateHashHex(args.marketMetadataHash, 'marketMetadataHash');
   if (!args.network) throw new Error('network required');
 
-  // PoolSpine.sil ctor order: maker, broker, oracle1-3, deadline, minerFee, brokerFeePct, oracleBondAmount, makerStakeAmount, marketMetadataHash
+  // PoolSpine.sil ctor order: maker, broker, oracle1-3, deadline, minerFee, brokerFeePct, oracleFeePct, oracleBondAmount, makerStakeAmount, marketMetadataHash
   const ctorJson = [
     bytes32Expr(makerPk),
     bytes32Expr(brokerPk),
@@ -144,6 +146,7 @@ export async function computeSpineP2SH(args) {
     intExpr(deadline),
     intExpr(minerFee),
     intExpr(brokerFeePct),
+    intExpr(oracleFeePct),
     intExpr(oracleBondAmount),
     intExpr(makerStakeAmount),
     bytes32Expr(marketMetadataHash),

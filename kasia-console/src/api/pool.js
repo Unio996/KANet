@@ -16,9 +16,10 @@ const STORAGE_MASS_SAFE_THRESHOLD_L4 = 400_000;  // KIP-9 cap with 20% buffer
 const MIN_BROKER_FEE_SOMPI_L4 = 5_000_000;       // 0.05 KAS broker fee floor
 const BETTOR_MIN_STAKE_L4 = 50_000_000;          // 0.5 KAS bettor min (Bug 8)
 const MAX_BETTORS_L4 = 50;                       // PoolSpine.sil L13 cap
-// Bettor r441 D7 disclaimer + r444 钦定 (b) — softcap per-market pot. Testnet 4 KAS;
-// mainnet TBD by Owner. Env override for ops adjustment without code change.
-const MAKER_STAKE_MAX_KAS = parseFloat(process.env.POOL_MAKER_STAKE_MAX_KAS) || 4;
+// 5/28 Owner 钦定: 押注 softcap 拆除 (= 之前 4 KAS testnet 限制阻 UI form 真用户测试). 改 Infinity = 0 cap.
+// Per-market math guards (= storage mass / oracle fee floor) still enforce at L1 console + SS contract.
+// Env override 保留可 ops set finite cap if needed.
+const MAKER_STAKE_MAX_KAS = parseFloat(process.env.POOL_MAKER_STAKE_MAX_KAS) || Infinity;
 
 function deriveXOnlyPubkey(address) {
   return import('kaspa-wasm').then(kaspa => {
@@ -182,7 +183,7 @@ export async function registerPoolRoutes(fastify) {
     try {
       spineResult = await computeSpineP2SH({
         makerPk, brokerPk, oraclePks,
-        deadline, minerFee, brokerFeePct,
+        deadline, minerFee, brokerFeePct, oracleFeePct,
         oracleBondAmount, makerStakeAmount,
         marketMetadataHash,
         network,
