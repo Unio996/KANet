@@ -197,7 +197,7 @@
       <!-- Sub 1: Live News Inject (Owner 手动 feed 实时舆情) -->
       <details class="card mb-3 border-l-4 border-l-orange-400">
         <summary class="text-sm font-bold cursor-pointer hover:text-orange-700">📰 Live News Inject
-          <span x-show="liveNewsActive && liveNewsActive.length" class="text-[10px] text-ink-400 font-normal" x-text="'(' + liveNewsActive.length + ' active)'"></span>
+          <span x-show="liveNewsActive && liveNewsActive.length" class="text-[10px] text-ink-400 font-normal" x-text="'(' + (liveNewsActive || []).length + ' active)'"></span>
         </summary>
         <div class="mt-2">
           <div class="text-[11px] text-ink-500 mb-2">LLM training timeline blind spot. paste 最近 24h 新闻给 scanner LLM 二审用. 默认 24h 后失效.</div>
@@ -226,7 +226,7 @@
       <!-- Sub 2: Fossa-Stable recs (reparented from killed modal) -->
       <details class="card mb-3 border-l-4 border-l-orange-500" open>
         <summary class="text-sm font-bold cursor-pointer hover:text-orange-700">★ Fossa-Stable 推荐
-          <span x-show="fossaRecs && fossaRecs.length" class="text-[10px] text-orange-700 font-normal" x-text="'(' + fossaRecs.filter(r => r.status === 'pending_due_diligence').length + ' ⏸ pending due-diligence)'"></span>
+          <span x-show="fossaRecs && fossaRecs.length" class="text-[10px] text-orange-700 font-normal" x-text="'(' + (fossaRecs || []).filter(r => r.status === 'pending_due_diligence').length + ' ⏸ pending due-diligence)'"></span>
         </summary>
         <div class="mt-2 text-[11px] text-ink-500 mb-2">5-15% upside · ≤15d settle · ≥$50k vol/liq · LLM 二审强制 · Owner final ack 才 fire</div>
         <template x-if="!fossaRecs"><div class="text-center py-4 text-ink-400">载入中...</div></template>
