@@ -1649,6 +1649,23 @@ export async function registerBettorRoutes(fastify) {
       // protocol_status 走 transition() (= [ABE-A.6] 单一所有权)
       const { transition } = await import('../services/exchange-machine.js');
       transition(offerId, 'matched');
+
+      // 5/28 Owner 钦定 DM push 实战 — taker-stake matched → notify maker.
+      // Fire-and-forget: failure doesn't roll back chain TX. Owner: "用户押了之后状态变了不通知".
+      try {
+        const { buildMatchedDm } = await import('../services/prediction-agent-mind.mjs');
+        const offerFull = sqlite.prepare('SELECT * FROM exchange_offers WHERE id = ?').get(offerId);
+        if (offerFull?.maker_kaspa_addr && offerFull?.taker) {
+          const dmText = buildMatchedDm(offerId, offerFull, offerFull.taker);
+          const { sendCommandAsync: sca } = await import('../services/relay-manager.js');
+          // DM to maker. Fire-and-forget.
+          sca(offerFull.maker_relay_id, { type: 'send_message', target: offerFull.maker_kaspa_addr, message: dmText })
+            .catch(e => console.warn(`[taker-stake] DM push to maker fail: ${e.message}`));
+          console.log(`[taker-stake] DM push fired to maker offer=${offerId.slice(0,12)}`);
+        }
+      } catch (dmErr) {
+        console.warn(`[taker-stake] DM push wire fail (non-fatal): ${dmErr.message}`);
+      }
     } catch (e) {
       console.error(`[prediction-taker-stake] DB update fail (chain TX done ${takerEscrowTxId}): ${e.message}`);
       return reply.code(500).send({ ok: false, error: `DB update fail (chain TX done): ${e.message}` });
@@ -2223,6 +2240,23 @@ export async function registerBettorRoutes(fastify) {
         last_settled_at: agg?.last_settled_at || null,
       },
     });
+  });
+
+  // GET /api/oracle/:id/history — recent oracle_history rows for one oracle (= Bettor r128 piece 3 trace gap).
+  // 2026-05-28 KANet-UI: reputation endpoint 只返 agg, 此 endpoint 补 "最近 N 单 trace" (= 用户验单).
+  fastify.get('/api/oracle/:id/history', async (request, reply) => {
+    const oracleId = request.params.id;
+    if (!oracleId) return reply.code(400).send({ ok: false, error: 'missing oracle id' });
+    const limit = Math.min(parseInt(request.query.limit, 10) || 10, 50);
+    const rows = sqlite.prepare(`
+      SELECT id, market_id, vote, consensus_outcome, reward_amount, slashed_amount,
+             audit_mode, settled_at, epoch
+      FROM oracle_history
+      WHERE oracle_relay_id = ? AND epoch >= 1
+      ORDER BY settled_at DESC, id DESC
+      LIMIT ?
+    `).all(oracleId, limit);
+    return reply.send({ ok: true, oracle_relay_id: oracleId, count: rows.length, history: rows });
   });
 
   // GET /api/oracle/markets/:id/audit — history rows for a market (= per-market audit trail).
