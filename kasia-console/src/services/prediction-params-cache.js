@@ -30,17 +30,24 @@ function canonicalJsonStringify(obj) {
  * Compose ctor_params object from offer + metadata + relay lookup.
  * Returns the canonical object (= input to hash + broadcast payload).
  */
-export function composeCtorParams(offer, meta) {
-  // Resolve oracle pubkeys from oracle_relay_ids (= JSON array of relay_ids)
+export async function composeCtorParams(offer, meta) {
+  // 5/28 NWT r84/Bettor r117 architect ack — compressed shape (hex_pubkey 数组).
+  // Before: oracle_pks = [{relay_id (36B), address (76B)}] × 5 = 560B
+  // After:  oracle_pks = [hex_pubkey (64B)] × 5 = 320B (= 19% Path A payload reduction)
+  // Recovery: address reverse-lookup not needed; silverc recompile takes hex_pubkey directly.
   let oraclePks = [];
   try {
     const oracleIds = JSON.parse(offer.outcome_oracle_relay_ids || '[]');
+    const kaspa = await import('kaspa-wasm');
     for (const rid of oracleIds) {
       const r = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id = ?`).get(rid);
       if (r?.address) {
-        // x-only pubkey hex from address — done lazily via caller if needed.
-        // Here we record relay_ids; ctor_params consumer (= recompile) re-derives pubkeys.
-        oraclePks.push({ relay_id: rid, address: r.address });
+        try {
+          const xpk = kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(r.address)).toString();
+          oraclePks.push(xpk);
+        } catch (e) {
+          console.warn(`[params-cache] oracle pubkey derive fail for ${rid?.slice(0,8)}: ${e.message}`);
+        }
       }
     }
   } catch {}
@@ -156,7 +163,7 @@ async function signParamsHash(relayId, paramsHash) {
  * Returns { ok, params_hash, broadcast_tx_id?, dm_count?, local_cache_inserted }.
  */
 export async function emitPredictionParamsCache({ offer, meta, makerRelayId, takerRelayId }) {
-  const ctorParams = composeCtorParams(offer, meta);
+  const ctorParams = await composeCtorParams(offer, meta);
   const paramsHash = computeParamsHash(ctorParams);
 
   // Dual-sign — maker + taker
