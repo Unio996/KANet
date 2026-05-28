@@ -20,18 +20,18 @@ const Resolver = kaspa.Resolver || null;
 const SOMPI_PER_KAS = 100000000n;
 const MAX_DECIMAL_PLACES = 8;
 const KASIA_MIN_AMOUNT = '0.2';
-const FEE_RESERVE_BASE = 50000n;  // base fee for minimal TX (no payload). bumped 3000→50000 for post-Toccata kaspad v1.2.0 mass pricing (= ~100 sompi/mass unit per 5/27 实测).
+const FEE_RESERVE_BASE = 300000n;       // 5/27-28 post-Toccata: base 300k sompi covers kaspad structure mass floor (~170k for minimal TX) + headroom.
+const STRUCTURE_FLOOR_FEE = 200000n;     // 5/28 NWT iter 4 (Bettor r110 spec): structural overhead baseline (= TX inputs/outputs/sigs mass independent of payload).
 
 // Dynamic fee reserve based on payload size.
-// Kaspa charges ~1 sompi per byte of TX mass. Payload is hex-encoded (2 chars per byte).
-// Empirical: 500-char message → ~500 bytes payload → ~5000 sompi fee.
-// Formula: base + (payloadBytes * 10) with 2x safety margin.
+// 5/28 NWT iter 4 normalize formula (Bettor r110 真因 #2 fix): feeReserve = max(FEE_RESERVE_BASE, payloadBytes * 1000 + STRUCTURE_FLOOR_FEE).
+// Rationale: tiny payload TX (e.g. 30B) still pays kaspad structure mass floor (~170k); base 300k covers. Larger payload accumulates dynamic via per-byte * 1000 sompi/byte.
+// Curve: 0B → 300k. 100B → max(300k, 100k+200k=300k) = 300k. 500B → max(300k, 500k+200k=700k) = 700k. 1301B → 1.5M (= 顶配 SS settle).
 function estimateFeeReserve(payloadHex) {
   if (!payloadHex) return FEE_RESERVE_BASE;
   const payloadBytes = BigInt(Math.ceil(payloadHex.length / 2));
-  // 5/27 post-Toccata fee bump: 20 sompi/byte → 200 sompi/byte (= ~10x for kaspad v1.2.0 mass pricing).
-  // 实测 1301 byte broadcast required ~328200 fee = ~250 sompi/byte. 200n with safety margin 验证 sufficient.
-  const estimated = FEE_RESERVE_BASE + payloadBytes * 250n;
+  const dynamic = payloadBytes * 1000n + STRUCTURE_FLOOR_FEE;
+  const estimated = dynamic > FEE_RESERVE_BASE ? dynamic : FEE_RESERVE_BASE;
   // Cap at 1 KAS (100M sompi) — sanity limit
   return estimated < 100_000_000n ? estimated : 100_000_000n;
 }
