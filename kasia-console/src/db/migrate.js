@@ -4451,5 +4451,63 @@ export function runMigrations() {
     }
   }
 
+  // v150: Oracle evolution shadow foundation (= dev-coord-testnet round 1 对抗讨论 v2 收敛,
+  // Bettor r138 + NWT r89 B + J1 R15/R16 schema 收敛). Additive-only, backward-compat,
+  // does NOT pre-commit contested policy (licensing numbers / bond tiers live in voter logic).
+  //
+  // oracle_history shadow cols (= 能力支柱 per-domain accuracy vs UMA ground-truth):
+  //   shadow_flag          — 1 = shadow row (judge-not-settle), 0 = real vote row
+  //   uma_resolved_outcome — UMA/Polymarket finalized outcome for scoring (NULL until finalize)
+  //   shadow_correct       — 1/0/NULL: did shadow vote match uma_resolved_outcome (NULL = pending finalize)
+  //   domain               — sports/finance/crypto/... for per-domain accuracy (J1 domain-shift catch)
+  //   uma_assertion_id     — UMA Optimistic Oracle assertion anchor (J2 真挑2 OO direct query linkage)
+  //   offer_id             — indexed lookup replacing LIKE payload scan (NWT r89 B perf debt)
+  // chain_events.offer_id  — same NWT r89 B: replace LIKE '%offer_id%' linear scan (24h soak shadow rows)
+  {
+    const ohCols = sqlite.prepare("PRAGMA table_info(oracle_history)").all();
+    const ohAdds = [
+      ['shadow_flag', 'INTEGER DEFAULT 0'],
+      ['uma_resolved_outcome', 'TEXT'],
+      ['shadow_correct', 'INTEGER'],
+      ['domain', 'TEXT'],
+      ['uma_assertion_id', 'TEXT'],
+      ['offer_id', 'TEXT'],
+    ];
+    for (const [name, type] of ohAdds) {
+      if (!ohCols.some(c => c.name === name)) {
+        try {
+          sqlite.exec(`ALTER TABLE oracle_history ADD COLUMN ${name} ${type}`);
+          console.log(`[migrate] v150: oracle_history.${name} added.`);
+        } catch (e) {
+          console.warn(`[migrate] v150 oracle_history.${name} ADD COLUMN fail: ${e.message}`);
+        }
+      }
+    }
+    // Indexes: offer_id lookup (NWT B), per-domain accuracy query, shadow-row filter.
+    try {
+      sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_oracle_history_offer ON oracle_history(offer_id)`);
+      sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_oracle_history_domain ON oracle_history(domain)`);
+      sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_oracle_history_shadow ON oracle_history(shadow_flag, oracle_relay_id)`);
+    } catch (e) {
+      console.warn(`[migrate] v150 oracle_history index fail: ${e.message}`);
+    }
+
+    // chain_events.offer_id — NWT r89 B: indexed lookup replaces LIKE payload scan.
+    const ceCols = sqlite.prepare("PRAGMA table_info(chain_events)").all();
+    if (!ceCols.some(c => c.name === 'offer_id')) {
+      try {
+        sqlite.exec(`ALTER TABLE chain_events ADD COLUMN offer_id TEXT`);
+        console.log('[migrate] v150: chain_events.offer_id added (NWT r89 B, replace LIKE scan).');
+      } catch (e) {
+        console.warn(`[migrate] v150 chain_events.offer_id ADD COLUMN fail: ${e.message}`);
+      }
+    }
+    try {
+      sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_chain_events_offer ON chain_events(offer_id)`);
+    } catch (e) {
+      console.warn(`[migrate] v150 chain_events.offer_id index fail: ${e.message}`);
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
