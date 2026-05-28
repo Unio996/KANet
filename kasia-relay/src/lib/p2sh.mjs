@@ -25,6 +25,28 @@ const Resolver = kaspa.Resolver || null;
 const SILVERC = process.env.SILVERSCRIPT_COMPILER || 'D:/silverscript/target/release/silverc.exe';
 const TMP_DIR = process.env.KANET_ROOT ? join(process.env.KANET_ROOT, 'tmp') : 'D:/kanet-tn12/tmp';
 
+// ── OP_PUSHDATA encoder (Bettor r113 KI sweep + NWT iter sediment) ──
+//
+// kaspa-wasm 1.0.1 ScriptBuilder.addData() enforces pre-Toccata 520-byte cap (= default covenants_enabled=false).
+// Post-Toccata kaspad v1.2.0 TN12 always-toccata accepts up to 1M element. Bypass via manual hex emit.
+// 5 call sites: unlockP2SH / unlockP2SHMultiSig / unlockP2SHConsensual / pool spine settle / pool refund.
+// Use this helper instead of ScriptBuilder.addData() for any data push > 75 bytes.
+function _encodePushDataHex(bytes) {
+  const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+  const len = buf.length;
+  if (len <= 75) {
+    return len.toString(16).padStart(2, '0') + buf.toString('hex');
+  } else if (len <= 255) {
+    return '4c' + len.toString(16).padStart(2, '0') + buf.toString('hex');
+  } else if (len <= 65535) {
+    const lo = (len & 0xff).toString(16).padStart(2, '0');
+    const hi = ((len >> 8) & 0xff).toString(16).padStart(2, '0');
+    return '4d' + lo + hi + buf.toString('hex');
+  } else {
+    throw new Error(`push data too large: ${len} bytes (= max OP_PUSHDATA4 65535)`);
+  }
+}
+
 // ── RPC connection (reuse pattern from transaction.mjs) ──
 
 async function connectRpc(networkId) {
@@ -722,14 +744,13 @@ export async function unlockPoolSpineP2SH(args) {
 
     const rootBytes = new Uint8Array(Buffer.from(sidesMerkleRootHex.replace(/^0x/, ''), 'hex'));
     if (rootBytes.length !== 32) throw new Error(`sidesMerkleRoot must be 32 bytes, got ${rootBytes.length}`);
-    const rootPushSb = new ScriptBuilder();
-    rootPushSb.addData(rootBytes);
-    const rootPushHex = rootPushSb.toString();
+    // 32-byte Merkle root < 75 → OP_DATA_32 encoding (= 0x20 + 32 bytes), no 520 cap risk but use bypass for consistency.
+    const rootPushHex = _encodePushDataHex(Buffer.from(rootBytes));
 
-    const spineRedeemBytes = new Uint8Array(Buffer.from(spineRedeemScriptHex, 'hex'));
-    const spineRedeemPushSb = new ScriptBuilder();
-    spineRedeemPushSb.addData(spineRedeemBytes);
-    const spineRedeemPushHex = spineRedeemPushSb.toString();
+    // 5/28 NWT c905e25 sweep follow-up (Bettor r113 KI catch): OP_PUSHDATA2 bypass for pool spine + sides redeem scripts.
+    // Per memory feedback_grep_full_codebase_pattern_fix — pattern bug must sweep全 codebase.
+    const spineRedeemBytes = Buffer.from(spineRedeemScriptHex, 'hex');
+    const spineRedeemPushHex = _encodePushDataHex(spineRedeemBytes);
 
     // Each spine input gets its own scriptSig (= own 3 sigs over that input's sighash).
     const spineScriptSigs = spineSigsByInput.map(sigs =>
@@ -737,10 +758,8 @@ export async function unlockPoolSpineP2SH(args) {
     );
 
     const sideScriptSigs = sideRedeemScriptHexes.map(redeemHex => {
-      const redeemBytes = new Uint8Array(Buffer.from(redeemHex, 'hex'));
-      const sb = new ScriptBuilder();
-      sb.addData(redeemBytes);
-      return selectorOpHex + sb.toString();
+      const redeemBytes = Buffer.from(redeemHex, 'hex');
+      return selectorOpHex + _encodePushDataHex(redeemBytes);
     });
 
     const allScriptSigs = [...spineScriptSigs, ...sideScriptSigs];
@@ -869,10 +888,9 @@ export async function unlockPoolSpineRefundDisagreement(args) {
       payToAddressScript(new Address(o.address))
     ));
 
-    const spineRedeemBytes = new Uint8Array(Buffer.from(spineRedeemScriptHex, 'hex'));
-    const spineRedeemPushSb = new ScriptBuilder();
-    spineRedeemPushSb.addData(spineRedeemBytes);
-    const spineRedeemPushHex = spineRedeemPushSb.toString();
+    // 5/28 NWT c905e25 sweep (Bettor r113 KI): OP_PUSHDATA2 bypass for pool refund spine redeem.
+    const spineRedeemBytes = Buffer.from(spineRedeemScriptHex, 'hex');
+    const spineRedeemPushHex = _encodePushDataHex(spineRedeemBytes);
 
     // Each spine input gets its own scriptSig (= own 2 sigs over its own sighash).
     const spineScriptSigs = spineSigsByInput.map(sigs =>
