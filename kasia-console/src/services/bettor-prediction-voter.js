@@ -611,6 +611,15 @@ async function deriveVote(offer) {
   return { ok: false, reason: `unsupported outcome_market_source: ${offer.outcome_market_source}` };
 }
 
+// P0 UMA finalization gate (Bettor r137/r139 Owner 钦定, J2 r70 propose):
+// gamma closed=true + outcomePrices 1/0 != UMA finalized (= 24-48h challenge window).
+// 在 UMA challenge 期 reverse 可能 → KANet 已 settle 错 + 付款不可逆.
+// Conservative gate: gamma closedTime + UMA_FINALIZATION_WINDOW_MS 才 ok:true (= 真 finalized).
+// Env override UMA_FINALIZATION_WINDOW_MS for testnet (default 48h prod, 0 testnet disable).
+const UMA_FINALIZATION_WINDOW_MS = process.env.UMA_FINALIZATION_WINDOW_MS !== undefined
+  ? parseInt(process.env.UMA_FINALIZATION_WINDOW_MS, 10)
+  : 48 * 60 * 60 * 1000;  // 48h default
+
 async function derivePolymarketVote(offer) {
   if (!offer.outcome_token_id) {
     return { ok: false, reason: 'missing outcome_token_id' };
@@ -622,7 +631,7 @@ async function derivePolymarketVote(offer) {
     const arr = await res.json();
     const m = (arr || [])[0];
     if (!m) return { ok: false, reason: 'gamma market not found' };
-    const evidence_raw = JSON.stringify({ outcomePrices: m.outcomePrices, closed: m.closed });
+    const evidence_raw = JSON.stringify({ outcomePrices: m.outcomePrices, closed: m.closed, closedTime: m.closedTime, endDate: m.endDate });
     const op = JSON.parse(m.outcomePrices || '[]');
     const yesPrice = parseFloat(op[0]);
     const noPrice = parseFloat(op[1]);
@@ -635,6 +644,26 @@ async function derivePolymarketVote(offer) {
     if (yesPrice === 1 && noPrice === 0) outcome = 'YES';
     else if (yesPrice === 0 && noPrice === 1) outcome = 'NO';
     else return { ok: false, reason: 'gamma not resolved yet' };
+
+    // P0 UMA finalization gate (= Bettor r137/r139 Owner 钦定, ship-gate Phase 1 mainnet).
+    // gamma closedTime OR endDate must be > UMA_FINALIZATION_WINDOW_MS ago (= 48h default).
+    // Within window → UMA can still reverse → abstain to prevent false settle.
+    if (UMA_FINALIZATION_WINDOW_MS > 0) {
+      const closedTs = m.closedTime ? new Date(m.closedTime).getTime() : (m.endDate ? new Date(m.endDate).getTime() : null);
+      if (!closedTs || !Number.isFinite(closedTs)) {
+        return { ok: false, reason: 'gamma missing closedTime/endDate — UMA finalization window 不可 verify' };
+      }
+      const ageMs = Date.now() - closedTs;
+      if (ageMs < UMA_FINALIZATION_WINDOW_MS) {
+        const remainingH = Math.ceil((UMA_FINALIZATION_WINDOW_MS - ageMs) / (60 * 60 * 1000));
+        return {
+          ok: false,
+          reason: `UMA finalization pending: gamma closed ${Math.floor(ageMs / 3600000)}h ago, need ≥${Math.floor(UMA_FINALIZATION_WINDOW_MS / 3600000)}h (wait ${remainingH}h more)`,
+          finalization_pending: true,
+          finalized_after_ts: closedTs + UMA_FINALIZATION_WINDOW_MS,
+        };
+      }
+    }
     return { ok: true, outcome, evidence_url: url, evidence_raw };
   } catch (e) {
     return { ok: false, reason: `gamma fetch fail: ${e.message}` };
