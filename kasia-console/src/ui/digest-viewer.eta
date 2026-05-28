@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="<%= it.lang || 'zh' %>">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KANet Dev-Coord Digest</title>
+  <meta name="robots" content="noindex" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <!-- Summary System L2 digest viewer (= Owner 2026-05-28 钦定 选 A) — Editorial baseline -->
+  <style>
+    :root {
+      --warm-50: #fefcf7; --warm-100: #faf6ec; --warm-200: #e8e1d0;
+      --ink-300: #9496a1; --ink-400: #6b6d7b; --ink-500: #4e5060; --ink-700: #2d2e3a; --ink-800: #1a1b25;
+      --dc-gold: #b08a44;
+    }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--warm-50); color: var(--ink-700); }
+    .dc-display { font-family: 'Fraunces', Georgia, serif; }
+    .dc-accent-gold { color: var(--dc-gold); }
+    .dc-accent-gold-bg { background: var(--dc-gold); }
+    .dc-accent-gold-bg:hover { background: #97742d; }
+    .dc-select, .dc-btn { border: 1px solid var(--warm-200); border-radius: 8px; background: white; }
+    .dc-select:focus { outline: none; border-color: var(--dc-gold); }
+    /* Markdown rendered content */
+    .md-body h1 { font-family: 'Fraunces', serif; font-size: 1.8rem; color: var(--ink-800); margin: 1.2rem 0 0.6rem; }
+    .md-body h2 { font-family: 'Fraunces', serif; font-size: 1.3rem; color: var(--ink-700); margin: 1.5rem 0 0.5rem; border-top: 1px solid var(--warm-200); padding-top: 1rem; }
+    .md-body h3 { font-size: 1.05rem; font-weight: 600; color: var(--ink-700); margin: 1rem 0 0.4rem; }
+    .md-body p { margin: 0.5rem 0; }
+    .md-body ul { list-style: disc; padding-left: 1.4rem; margin: 0.5rem 0; }
+    .md-body li { margin: 0.3rem 0; font-size: 0.9rem; }
+    .md-body code { background: var(--warm-100); padding: 1px 5px; border-radius: 4px; font-size: 0.82rem; color: var(--dc-gold); }
+    .md-body strong { color: var(--ink-800); }
+    .md-body table { border-collapse: collapse; margin: 0.8rem 0; width: 100%; font-size: 0.85rem; }
+    .md-body th, .md-body td { border: 1px solid var(--warm-200); padding: 5px 9px; text-align: left; }
+    .md-body th { background: var(--warm-100); }
+    .md-body details { margin: 0.6rem 0; }
+    .md-body summary { cursor: pointer; color: var(--dc-gold); font-size: 0.9rem; }
+    .md-body hr { border: 0; border-top: 1px solid var(--warm-200); margin: 1.5rem 0; }
+  </style>
+</head>
+<body class="min-h-screen">
+  <div class="max-w-4xl mx-auto px-6 py-10" x-data="digestApp()" x-init="init()">
+
+    <!-- Header + controls -->
+    <div class="flex items-center justify-between mb-6 flex-wrap gap-3">
+      <h1 class="dc-display text-3xl" style="color: var(--ink-800);">
+        Dev-Coord <span class="dc-accent-gold">Digest</span>
+      </h1>
+      <div class="flex items-center gap-2">
+        <select x-model="selected" @change="loadDigest()" class="dc-select px-3 py-2 text-sm">
+          <template x-for="f in files" :key="f.name">
+            <option :value="f.name" x-text="f.name + ' (' + Math.round(f.size/1024) + 'KB)'"></option>
+          </template>
+        </select>
+        <button @click="generate()" :disabled="generating"
+                class="dc-accent-gold-bg text-white px-4 py-2 rounded-lg text-sm transition disabled:opacity-50">
+          <span x-show="!generating">↻ 刷新生成</span>
+          <span x-show="generating">生成中…</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Disclaimer -->
+    <div class="text-xs mb-6" style="color: var(--ink-400);">
+      ⚠ Summary System L2 · 自动聚合 #dev-coord-testnet 链上 broadcast · testnet-only
+    </div>
+
+    <!-- Empty state -->
+    <template x-if="files.length === 0">
+      <div class="text-center py-16" style="color: var(--ink-400);">
+        <div class="text-3xl mb-3">📭</div>
+        <p>暂无 digest。点"刷新生成"创建第一份。</p>
+      </div>
+    </template>
+
+    <!-- Rendered digest -->
+    <div class="md-body" x-html="rendered" x-show="files.length > 0"></div>
+
+  </div>
+
+  <script>
+    function digestApp() {
+      return {
+        files: [],
+        selected: '',
+        rendered: '<p style="color:#9496a1">加载中…</p>',
+        generating: false,
+        async init() {
+          await this.loadList();
+          if (this.files.length > 0) {
+            this.selected = this.files[0].name;
+            await this.loadDigest();
+          }
+        },
+        async loadList() {
+          try {
+            const r = await fetch('/api/dashboard/digests');
+            const j = await r.json();
+            this.files = j.files || [];
+          } catch (e) { this.files = []; }
+        },
+        async loadDigest() {
+          if (!this.selected) return;
+          this.rendered = '<p style="color:#9496a1">加载中…</p>';
+          try {
+            const r = await fetch('/api/dashboard/digest/' + encodeURIComponent(this.selected));
+            const j = await r.json();
+            this.rendered = j.content ? marked.parse(j.content) : '<p>空</p>';
+          } catch (e) {
+            this.rendered = '<p style="color:#b91c1c">加载失败: ' + e.message + '</p>';
+          }
+        },
+        async generate() {
+          this.generating = true;
+          try {
+            const r = await fetch('/api/dashboard/digest/generate', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ hours: 12 }),
+            });
+            const j = await r.json();
+            if (j.ok) {
+              await this.loadList();
+              if (j.file) this.selected = j.file;
+              else if (this.files.length > 0) this.selected = this.files[0].name;
+              await this.loadDigest();
+            } else {
+              this.rendered = '<p style="color:#b91c1c">生成失败: ' + (j.error || 'unknown') + '</p>';
+            }
+          } catch (e) {
+            this.rendered = '<p style="color:#b91c1c">生成失败: ' + e.message + '</p>';
+          } finally {
+            this.generating = false;
+          }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

@@ -433,6 +433,63 @@ export async function registerChatRoutes(fastify) {
     return reply.viewAsync('faucet', { lang, faucetEnabled, amountKas });
   });
 
+  // ── Summary System L2 — digest viewer UI (= Owner 2026-05-28 钦定 选 A) ──
+  // digest MD files live in D:/KANet-Knowledge-Base/digests/, browser 无入口 → 加 viewer.
+  const DIGEST_DIR = process.env.KANET_DIGEST_DIR || 'D:/KANet-Knowledge-Base/digests';
+  const DIGEST_NAME_RE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}\.md$/;  // YYYY-MM-DD-HHMM.md, 防 path traversal
+
+  // GET /dashboard/digest — digest viewer page
+  fastify.get('/dashboard/digest', async (request, reply) => {
+    const lang = parseLang(request.headers.cookie);
+    return reply.viewAsync('digest-viewer', { lang });
+  });
+
+  // GET /api/dashboard/digests — list digest files (newest first)
+  fastify.get('/api/dashboard/digests', async (request, reply) => {
+    const fs = await import('node:fs');
+    if (!fs.existsSync(DIGEST_DIR)) return reply.send({ files: [] });
+    const files = fs.readdirSync(DIGEST_DIR)
+      .filter(f => DIGEST_NAME_RE.test(f))
+      .map(f => {
+        const st = fs.statSync(`${DIGEST_DIR}/${f}`);
+        return { name: f, mtime: st.mtimeMs, size: st.size };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+    return reply.send({ files });
+  });
+
+  // GET /api/dashboard/digest/:name — single digest MD content
+  fastify.get('/api/dashboard/digest/:name', async (request, reply) => {
+    const { name } = request.params;
+    if (!DIGEST_NAME_RE.test(name)) return reply.code(400).send({ error: 'invalid digest filename' });
+    const fs = await import('node:fs');
+    const fp = `${DIGEST_DIR}/${name}`;
+    if (!fs.existsSync(fp)) return reply.code(404).send({ error: 'digest not found' });
+    return reply.send({ name, content: fs.readFileSync(fp, 'utf-8') });
+  });
+
+  // POST /api/dashboard/digest/generate — trigger fresh digest (= run digest-daily.mjs)
+  fastify.post('/api/dashboard/digest/generate', async (request, reply) => {
+    const { hours } = request.body || {};
+    const h = Math.max(1, Math.min(48, parseInt(hours, 10) || 12));
+    try {
+      const { execFile } = await import('node:child_process');
+      const KANET_ROOT = process.env.KANET_ROOT || 'D:/kanet-tn12';
+      const result = await new Promise((resolve, reject) => {
+        execFile('node', [`${KANET_ROOT}/scripts/digest-daily.mjs`, '--hours', String(h)],
+          { timeout: 30000 }, (err, stdout, stderr) => {
+            if (err) reject(new Error(stderr || err.message));
+            else resolve(stdout);
+          });
+      });
+      // Parse output for written filename
+      const m = result.match(/wrote\s+\S+[\\/]([0-9-]+\.md)/);
+      return reply.send({ ok: true, file: m ? m[1] : null, output: result.trim().split('\n').slice(-1)[0] });
+    } catch (e) {
+      return reply.code(500).send({ error: `digest generate fail: ${e.message}` });
+    }
+  });
+
   // GET /public/channel/:name — public read-only channel browser (= task md §3.1)
   // Renders 公开 messages only (visibility='public'). Track A 默认 internal 不泄露.
   const PUBLIC_CHANNELS = ['kanet-spec', 'kanet-bugs', 'kanet-showcase', 'kanet-marketplace', 'kanet-forks', 'kanet-general'];

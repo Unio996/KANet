@@ -77,7 +77,9 @@ async function ensureIngestSecret() {
 
 const PORT = parseInt(process.env.PORT || '3100');
 
-const fastify = Fastify({ logger: false });
+// ignoreDuplicateSlashes: //welcome-dev → /welcome-dev (= Owner 2026-05-28 撞双斜杠 404 修).
+// ignoreTrailingSlash: /faucet/ → /faucet (= 顺手防尾斜杠 404).
+const fastify = Fastify({ logger: false, ignoreDuplicateSlashes: true, ignoreTrailingSlash: true });
 
 // Plugins
 await fastify.register(import('@fastify/formbody'));
