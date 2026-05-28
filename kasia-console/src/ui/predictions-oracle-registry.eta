@@ -246,7 +246,7 @@ function oracleRegistryPage() {
       if (p === 'graduated') {
         return '毕业: 已获域内执照 [' + (o.licensed_domains || []).join(', ') + '] (= 系统按客观战绩自动发, 仅授获证域)';
       }
-      return '实习: 练兵场判小额市场攒战绩 (= 小额真结算+5 冗余兜底, 攒够域内战绩系统自动发执照)';
+      return '并行判定期: KANet 预言机独立判 + UMA 镜像判, 钱跟 UMA 最终基准 (48h), KANet 判定被 UMA 打分攒战绩. 毕业后才判 UMA 覆盖不了的长尾 (= 那时 KANet 决定). (Bettor r148 Owner 钦定: 并行加速积累不加速结算)';
     },
 
     async loadOracles() {
