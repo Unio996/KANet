@@ -4386,5 +4386,70 @@ export function runMigrations() {
     }
   }
 
+  // v149: Dev Channel Tier 2.2 — N-way group coordination + Tier 1 chain_events.is_public.
+  // Per dev-channel-tier2-2-nway-group-propose-2026-05-28.md v2 (= Owner architect 3 炸弹 fix).
+  // 3 changes:
+  //   agent_groups — N-way group state (join/vote threshold 拆 + forming_expires timeout)
+  //   group_chat_log — group internal chat
+  //   chain_events.is_public — Tier 1 spec §2.A gap fill (J2-1 isolation)
+  {
+    const hasGroupsTable = sqlite.prepare(
+      "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='agent_groups'"
+    ).get().cnt > 0;
+    if (!hasGroupsTable) {
+      sqlite.exec(`
+        CREATE TABLE agent_groups (
+          group_id TEXT PRIMARY KEY,
+          scope TEXT NOT NULL,
+          scope_description TEXT,
+          initiator_addr TEXT NOT NULL,
+          initiator_pubkey TEXT NOT NULL,
+          members_json TEXT NOT NULL,
+          join_threshold INTEGER NOT NULL,
+          vote_threshold INTEGER NOT NULL,
+          current_member_count INTEGER DEFAULT 1,
+          status TEXT DEFAULT 'forming'
+            CHECK (status IN ('forming','active','completed','dissolved','expired')),
+          tunnel_status TEXT DEFAULT 'pending',
+          forming_expires_at INTEGER,
+          established_at INTEGER,
+          last_activity_at INTEGER,
+          bytes_total INTEGER DEFAULT 0
+        );
+        CREATE INDEX idx_agent_groups_status ON agent_groups(status);
+        CREATE INDEX idx_agent_groups_initiator ON agent_groups(initiator_addr);
+        CREATE INDEX idx_agent_groups_forming_expires ON agent_groups(forming_expires_at);
+      `);
+      console.log('[migrate] v149: agent_groups table created (Tier 2.2 N-way group, join/vote threshold + forming timeout).');
+    }
+    const hasGroupChatTable = sqlite.prepare(
+      "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='group_chat_log'"
+    ).get().cnt > 0;
+    if (!hasGroupChatTable) {
+      sqlite.exec(`
+        CREATE TABLE group_chat_log (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          group_id TEXT NOT NULL,
+          from_addr TEXT NOT NULL,
+          message TEXT NOT NULL,
+          sent_at INTEGER NOT NULL,
+          received_at INTEGER NOT NULL
+        );
+        CREATE INDEX idx_group_chat_group_time ON group_chat_log(group_id, sent_at);
+      `);
+      console.log('[migrate] v149: group_chat_log table created (Tier 2.2 group internal chat).');
+    }
+    // chain_events.is_public — Tier 1 spec §2.A gap (J2-1 chain_events isolation for public API JOIN)
+    const ceColsV149 = sqlite.prepare("PRAGMA table_info(chain_events)").all();
+    if (!ceColsV149.some(c => c.name === 'is_public')) {
+      try {
+        sqlite.exec(`ALTER TABLE chain_events ADD COLUMN is_public INTEGER DEFAULT 0`);
+        console.log('[migrate] v149: chain_events.is_public col added (Tier 1 §2.A J2-1 isolation, default 0=internal).');
+      } catch (e) {
+        console.warn(`[migrate] v149 chain_events.is_public ADD COLUMN fail: ${e.message}`);
+      }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

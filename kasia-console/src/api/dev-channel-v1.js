@@ -47,19 +47,22 @@ const CHANNEL_META = {
     rate_limit: { per_addr_per_24h: 20, per_addr_per_30min: 3 },
   },
   'kanet-general': {
-    // Tier 2.1 (2026-05-28): pair_invite + pair_ack allowed on #kanet-general for tunnel handshake.
-    description: 'Onboarding / 闲聊 / philosophy / unspecified / pair coordination',
-    valid_intents: ['discuss', 'broadcast', 'pair_invite', 'pair_ack'],
+    // Tier 2.1: pair_invite/pair_ack (1v1). Tier 2.2: group_invite/group_join_ack/group_propose (N-way).
+    description: 'Onboarding / 闲聊 / philosophy / unspecified / pair + group coordination',
+    valid_intents: ['discuss', 'broadcast', 'pair_invite', 'pair_ack', 'group_invite', 'group_join_ack', 'group_propose'],
     rate_limit: { per_addr_per_24h: 30, per_addr_per_30min: 5 },
   },
 };
 
 const MAX_ENVELOPE_BYTES = 4500; // spec §10 chain payload safety margin
 const VALID_TAGS = Object.keys(TAG_TO_CHANNEL);
-// Tier 2.1 (2026-05-28) — add pair_invite + pair_ack intents for tunnel handshake.
-// pair_invite: open collab invite, payload contains nat_endpoint + ed25519_pubkey + tunnel_protocols
-// pair_ack: accept (implicit reject by TTL), ref=invite_txid + own nat_endpoint + pubkey + negotiated protocol
-const VALID_INTENTS = ['discuss', 'propose', 'vote', 'broadcast', 'request', 'pair_invite', 'pair_ack'];
+// Tier 2.1 (2026-05-28) — pair_invite + pair_ack intents for 1-on-1 tunnel handshake.
+// Tier 2.2 (2026-05-28) — group_invite + group_join_ack + group_propose for N-way group coordination.
+//   group_invite: payload.members[] + join_threshold + vote_threshold + forming_ttl + nat_endpoint + pubkey
+//   group_join_ack: ref=invite_txid + joiner nat_endpoint + pubkey
+//   group_propose: ref=group_id, payload.proposal_id (= 群内 vote 用 Tier 1 vote intent ref=propose_txid)
+const VALID_INTENTS = ['discuss', 'propose', 'vote', 'broadcast', 'request', 'pair_invite', 'pair_ack',
+  'group_invite', 'group_join_ack', 'group_propose'];
 
 /** Validate envelope per spec §1 + §3. Returns { ok: true } or { ok: false, reason }. */
 function validateEnvelope(env) {
@@ -94,6 +97,45 @@ function validateEnvelope(env) {
     }
     if (typeof p.ed25519_pubkey !== 'string' || p.ed25519_pubkey.length < 32) {
       return { ok: false, reason: `${env.intent} requires payload.ed25519_pubkey base64 string` };
+    }
+  }
+  // Tier 2.2 (2026-05-28) — group handshake schema (v2 post Owner architect review)
+  if (env.intent === 'group_invite') {
+    const p = env.payload || {};
+    if (!Array.isArray(p.members) || p.members.length < 2 || p.members.length > 4) {
+      return { ok: false, reason: 'group_invite payload.members must be array 2-4 (= MAX_GROUP_SIZE)' };
+    }
+    if (typeof p.join_threshold !== 'number' || typeof p.vote_threshold !== 'number') {
+      return { ok: false, reason: 'group_invite requires payload.join_threshold + vote_threshold numbers (= 炸弹 3 拆)' };
+    }
+    if (p.join_threshold < 2 || p.join_threshold > p.members.length) {
+      return { ok: false, reason: 'join_threshold must be 2..members.length' };
+    }
+    if (p.vote_threshold < 1 || p.vote_threshold > p.members.length) {
+      return { ok: false, reason: 'vote_threshold must be 1..members.length' };
+    }
+    if (!p.nat_endpoint || typeof p.nat_endpoint.ip !== 'string' || typeof p.nat_endpoint.port !== 'number') {
+      return { ok: false, reason: 'group_invite requires payload.nat_endpoint{ip,port}' };
+    }
+    if (typeof p.ed25519_pubkey !== 'string' || p.ed25519_pubkey.length < 32) {
+      return { ok: false, reason: 'group_invite requires payload.ed25519_pubkey' };
+    }
+  }
+  if (env.intent === 'group_join_ack') {
+    if (!env.ref) return { ok: false, reason: 'group_join_ack requires ref (= group_invite txid)' };
+    const p = env.payload || {};
+    if (!p.nat_endpoint || typeof p.nat_endpoint.ip !== 'string' || typeof p.nat_endpoint.port !== 'number') {
+      return { ok: false, reason: 'group_join_ack requires payload.nat_endpoint{ip,port}' };
+    }
+    if (typeof p.ed25519_pubkey !== 'string' || p.ed25519_pubkey.length < 32) {
+      return { ok: false, reason: 'group_join_ack requires payload.ed25519_pubkey' };
+    }
+  }
+  if (env.intent === 'group_propose') {
+    if (!env.ref) return { ok: false, reason: 'group_propose requires ref (= group_id)' };
+    const p = env.payload || {};
+    if (typeof p.proposal_id !== 'string' || p.proposal_id.length === 0) {
+      return { ok: false, reason: 'group_propose requires payload.proposal_id string' };
     }
   }
   // Channel-intent compat
