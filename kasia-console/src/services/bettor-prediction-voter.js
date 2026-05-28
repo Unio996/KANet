@@ -651,6 +651,11 @@ const UMA_FINALIZATION_WINDOW_MS = process.env.UMA_FINALIZATION_WINDOW_MS !== un
   ? parseInt(process.env.UMA_FINALIZATION_WINDOW_MS, 10)
   : 48 * 60 * 60 * 1000;  // 48h default
 
+// SCOPE DISCLAIMER (Owner 钦定, testnet-only thesis):
+// Phase 1 borrows UMA's resolved outcomes (via Polymarket gamma) as ground-truth reference
+// for TESTNET shadow-scoring only. This is reading public on-chain data, not a production
+// dependency. Any mainnet deployment that creates a real settlement dependency on UMA
+// contracts is the deploying party's responsibility, not the protocol author's.
 export async function derivePolymarketVote(offer) {
   if (!offer.outcome_token_id) {
     return { ok: false, reason: 'missing outcome_token_id' };

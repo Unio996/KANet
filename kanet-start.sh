@@ -89,6 +89,12 @@ if [ -f "$ENV_FILE" ]; then
       # 5/26 根治 RPC drift — env single source, 必 export 给 Console 子进程
       KASPA_RPC_URL)           export KASPA_RPC_URL="$v" ;;
       KASPA_NETWORK)           export KASPA_NETWORK="$v" ;;
+      # 5/27 sub 12.x prediction agent dispatcher gate (= conversations.js L331)
+      PREDICTION_AGENT_ENABLED) export PREDICTION_AGENT_ENABLED="$v" ;;
+      # 5/28 Owner 钦定 testnet 0 limits
+      KANET_TESTNET_NO_LIMITS) export KANET_TESTNET_NO_LIMITS="$v" ;;
+      POOL_DEADLINE_MIN_OVERRIDE) export POOL_DEADLINE_MIN_OVERRIDE="$v" ;;
+      POOL_DEADLINE_MAX_DAY) export POOL_DEADLINE_MAX_DAY="$v" ;;
       # 5/26 sediment — Console PORT 从 kanet.env 读, 不靠 env override OR default 3400
       PORT)                    CONSOLE_PORT="$v" ;;
       # NWT 8aef0b5e critical fix — kanet.env 写但 case 未 match key 静默被忽略
@@ -211,6 +217,10 @@ PORT=$CONSOLE_PORT \
 DB_PATH="$CONSOLE_DIR/data/console.db" \
 KASPA_RPC_URL="$KASPA_RPC_URL" \
 KASPA_NETWORK="$KASPA_NETWORK" \
+PREDICTION_AGENT_ENABLED="$PREDICTION_AGENT_ENABLED" \
+KANET_TESTNET_NO_LIMITS="$KANET_TESTNET_NO_LIMITS" \
+POOL_DEADLINE_MIN_OVERRIDE="$POOL_DEADLINE_MIN_OVERRIDE" \
+POOL_DEADLINE_MAX_DAY="$POOL_DEADLINE_MAX_DAY" \
   node "$CONSOLE_DIR/src/index.js" >> "$CONSOLE_LOG" 2>&1 &
 CONSOLE_PID=$!
 echo "$CONSOLE_PID" > "$PID_DIR/console.pid"

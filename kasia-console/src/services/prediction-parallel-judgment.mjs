@@ -1,5 +1,13 @@
 // Oracle v0.3 Phase 2 — parallel-judgment loop engine (J1tn cluster, Owner r148 architecture).
 //
+// ─────────────────────────────────────────────────────────────────────────────
+// SCOPE DISCLAIMER (Owner 钦定, testnet-only thesis):
+// Phase 1 borrows UMA's resolved outcomes as ground-truth reference for TESTNET
+// shadow-scoring only. This is reading public on-chain data, not a production
+// dependency. Any mainnet deployment that creates a real settlement dependency on
+// UMA contracts is the deploying party's responsibility, not the protocol author's.
+// ─────────────────────────────────────────────────────────────────────────────
+//
 // 并行判定 (NOT pure shadow): KANet oracles judge real markets INDEPENDENTLY from an independent
 // source ‖ UMA remains the final settlement basis (money follows UMA, 48h finalization) ‖ KANet's
 // independent verdict is scored vs UMA's finalized outcome to accumulate per-domain track record.
