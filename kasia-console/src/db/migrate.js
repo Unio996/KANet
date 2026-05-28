@@ -4545,5 +4545,39 @@ export function runMigrations() {
     }
   }
 
+  // v152: oracle_disagreement_queue (= UMA herding mitigation, Bettor 修3 + r147 J1 cluster owner).
+  // When a shadow/post-settle oracle vote disagrees with UMA's finalized outcome, do NOT immediately
+  // mark the oracle incorrect (= UMA itself can herd / be wrong). Instead enqueue for review:
+  // Owner manual review OR confidence-threshold gate decides upheld (oracle wrong) vs dismissed
+  // (oracle was right, UMA herded). Protects honest oracles from UMA-disagreement false-slash.
+  {
+    const hasDQ = sqlite.prepare(
+      "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='oracle_disagreement_queue'"
+    ).get().cnt > 0;
+    if (!hasDQ) {
+      sqlite.exec(`
+        CREATE TABLE oracle_disagreement_queue (
+          id TEXT PRIMARY KEY,
+          market_id TEXT NOT NULL,
+          oracle_relay_id TEXT NOT NULL,
+          oracle_vote TEXT NOT NULL,
+          uma_outcome TEXT NOT NULL,
+          confidence REAL,
+          source TEXT NOT NULL DEFAULT 'shadow',
+          status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (status IN ('pending','reviewed','upheld','dismissed')),
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          resolved_by TEXT,
+          resolved_at TEXT,
+          notes TEXT
+        );
+        CREATE INDEX idx_oracle_dq_status ON oracle_disagreement_queue(status, created_at);
+        CREATE INDEX idx_oracle_dq_oracle ON oracle_disagreement_queue(oracle_relay_id);
+        CREATE INDEX idx_oracle_dq_market ON oracle_disagreement_queue(market_id);
+      `);
+      console.log('[migrate] v152: oracle_disagreement_queue table + 3 indexes created (UMA herding mitigation, J1 cluster).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
