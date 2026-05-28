@@ -379,6 +379,11 @@ await ensureIngestSecret();
 await fastify.listen({ port: PORT, host: process.env.HOST || '127.0.0.1' });
 console.log(`[kasia-console] running at http://localhost:${PORT}`);
 
+// Tier 2.1 pair ingestor — scans broadcast_messages for pair_invite/pair_ack envelopes + writes agent_pairs.
+// 30s tick, idempotent re-scan, boot catch-up from id 0.
+import { startPeriodicIngest } from './services/pair-ingestor.mjs';
+startPeriodicIngest({ interval_ms: 30_000 });
+
 // Auto-register Mind skills from agent-mind/src/skills/
 import { registerMindSkills } from './data/settings/skills.js';
 const KANET_ROOT = process.env.KANET_ROOT || 'D:/Anthropic';
