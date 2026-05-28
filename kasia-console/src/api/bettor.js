@@ -1655,6 +1655,77 @@ export async function registerBettorRoutes(fastify) {
     });
   });
 
+  // POST /api/prediction/retry-path-a/:offer_id — Sub 10.x retry (J2 r68 Bettor r110 真因 4).
+  //
+  // SPOF stuck stakes recovery: stake locked but Path A on-chain broadcast failed at taker-stake.
+  // Allows HTTP retry from operator/UI after relay/network healthy. Validates state + idempotent
+  // (chain_events 已 row → reject duplicate emit).
+  //
+  // Body: { taker_relay_id? } (optional, fallback to meta.taker_relay_id from publish-v2 storage)
+  fastify.post('/api/prediction/retry-path-a/:offer_id', async (request, reply) => {
+    const offerId = request.params.offer_id;
+    const b = request.body || {};
+
+    const offer = sqlite.prepare(`SELECT * FROM exchange_offers WHERE id = ?`).get(offerId);
+    if (!offer) return reply.code(404).send({ ok: false, error: 'offer not found' });
+
+    // Valid states: matched / verifying / collecting_sigs (= 已 stake locked, settle 在等 Path A)
+    const validStates = ['matched', 'verifying', 'collecting_sigs'];
+    if (!validStates.includes(offer.protocol_status)) {
+      return reply.code(409).send({ ok: false, error: `offer status=${offer.protocol_status}, retry-path-a only valid in ${validStates.join('/')}` });
+    }
+    if (!offer.escrow_p2sh) {
+      return reply.code(400).send({ ok: false, error: 'offer has no escrow_p2sh (= publish-v2 incomplete)' });
+    }
+
+    // Idempotent: check if chain_events already has kanet_prediction_params_v1 for this offer
+    const existing = sqlite.prepare(`
+      SELECT COUNT(*) AS cnt FROM chain_events
+      WHERE event_type = 'kanet_prediction_params_v1' AND payload LIKE ?
+    `).get(`%"offer_id":"${offerId}"%`);
+    if (existing.cnt > 0) {
+      return reply.send({ ok: true, already_emitted: true, chain_events_count: existing.cnt, message: 'Path A already on chain, no retry needed' });
+    }
+
+    let meta;
+    try { meta = JSON.parse(offer.metadata || '{}'); } catch { return reply.code(500).send({ ok: false, error: 'metadata JSON parse fail' }); }
+
+    const takerRelayId = b.taker_relay_id || meta.taker_relay_id;
+    if (!takerRelayId) {
+      return reply.code(400).send({ ok: false, error: 'taker_relay_id required (= not stored in metadata + not provided in body)' });
+    }
+
+    try {
+      const { emitPredictionParamsCache } = await import('../services/prediction-params-cache.js');
+      const emitRes = await emitPredictionParamsCache({
+        offer,
+        meta,
+        makerRelayId: offer.maker_relay_id,
+        takerRelayId,
+      });
+      if (!emitRes?.ok) {
+        return reply.code(503).send({
+          ok: false,
+          error: `Path A retry failed: ${emitRes?.error}`,
+          params_hash: emitRes?.params_hash,
+          retry_again: true,
+        });
+      }
+      return reply.send({
+        ok: true,
+        offer_id: offerId,
+        broadcast_tx_id: emitRes.broadcast_tx_id,
+        dm_count: emitRes.dm_count,
+        dm_total: emitRes.dm_total,
+        local_cache_inserted: emitRes.local_cache_inserted,
+        params_hash: emitRes.params_hash,
+      });
+    } catch (e) {
+      console.error(`[retry-path-a] exception offer=${offerId.slice(0,12)}: ${e.message}`);
+      return reply.code(500).send({ ok: false, error: `retry exception: ${e.message}` });
+    }
+  });
+
   // POST /api/prediction/consensual-confirm/:offer_id — Sub 8 (Oracle v0.3 J2 r37 ship per Bettor r56/r59).
   //
   // Trigger settle_consensual happy path: maker + taker 双方 confirm outcome, bypass 5-oracle dispute path.
