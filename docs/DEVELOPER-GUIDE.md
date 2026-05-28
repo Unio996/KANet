@@ -33,6 +33,7 @@
 | 17 | 零售 DEX Agent (retail-dex, 非托管) | [17-retail-dex.md](guide/17-retail-dex.md) | 154 |
 | 18 | 测试框架 (test-framework, QA 子系统) | [18-test-framework.md](guide/18-test-framework.md) | ~70 |
 | 19 | broker LLM 调用 format 与多 LLM 兼容性 | [19-broker-llm-format.md](guide/19-broker-llm-format.md) | ~150 |
+| 20 | Oracle 演进 (并行判定/执照/吊销, Owner thesis 落地) | [20-oracle-evolution.md](guide/20-oracle-evolution.md) | ~120 |
 
 ## 附录
 
