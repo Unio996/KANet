@@ -122,22 +122,25 @@ export async function registerPoolRoutes(fastify) {
     const SS_MIN_SPENDABLE_FLOOR_KAS = 5;  // hard floor per J1 #12 spec (= storage mass safety)
     const dynamicMinKasFromFee = oracleFeePct > 0 ? Math.ceil(12500 / oracleFeePct) : 0;
     const minSpendableKas = Math.max(SS_MIN_SPENDABLE_FLOOR_KAS, dynamicMinKasFromFee);
-    if (parseFloat(b.maker_stake_kas) < minSpendableKas) {
-      return reply.code(400).send({
-        ok: false,
-        error: `maker_stake_kas ${b.maker_stake_kas} < min spendable ${minSpendableKas} KAS (per Layer 1 console check, J1 #12 dynamic formula max(${SS_MIN_SPENDABLE_FLOOR_KAS}, 12500/${oracleFeePct})). Increase stake OR lower oracle_fee_pct.`
-      });
+    // 5/28 Owner 钦定: testnet 不要限制. KANET_TESTNET_NO_LIMITS=1 bypass min-spendable + min-stake guards.
+    if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
+      if (parseFloat(b.maker_stake_kas) < minSpendableKas) {
+        return reply.code(400).send({
+          ok: false,
+          error: `maker_stake_kas ${b.maker_stake_kas} < min spendable ${minSpendableKas} KAS (per Layer 1 console check, J1 #12 dynamic formula max(${SS_MIN_SPENDABLE_FLOOR_KAS}, 12500/${oracleFeePct})). Increase stake OR lower oracle_fee_pct.`
+        });
+      }
     }
 
     const makerStakeKas = parseFloat(b.maker_stake_kas);
     const oracleBondKas = parseFloat(b.oracle_bond_kas);
     if (!Number.isFinite(makerStakeKas) || makerStakeKas <= 0) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be positive' });
     if (!Number.isFinite(oracleBondKas) || oracleBondKas <= 0) return reply.code(400).send({ ok: false, error: 'oracle_bond_kas must be positive' });
-    // Bug 8: minimum maker stake — small stakes produce tiny settle-TX outputs that blow the
-    // Kaspa KIP-9 storage mass cap. v0.5 requires a minimum viable pot.
-    if (makerStakeKas < 1) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be >= 1 KAS (v0.5 minimum — smaller stakes produce a settle TX exceeding Kaspa storage mass cap)' });
-    // Bettor r444 钦定 — per-market softcap enforce backend-side (= UI shows expose, backend rejects)
-    if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS (v0.5 testnet per-market softcap, Bettor r444 + Owner钦定 SS-baked)` });
+    // 5/28 Owner 钦定: testnet 0 limits. Skip 1 KAS min + softcap when KANET_TESTNET_NO_LIMITS=1.
+    if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
+      if (makerStakeKas < 1) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be >= 1 KAS (v0.5 minimum — smaller stakes produce a settle TX exceeding Kaspa storage mass cap)' });
+      if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS (v0.5 testnet per-market softcap, Bettor r444 + Owner钦定 SS-baked)` });
+    }
     const makerStakeAmount = Math.round(makerStakeKas * 1e8);
     const oracleBondAmount = Math.round(oracleBondKas * 1e8);
     const makerStakeStr = (makerStakeAmount / 1e8).toFixed(8);
@@ -150,20 +153,23 @@ export async function registerPoolRoutes(fastify) {
     // and losingPool ≥ fee-floor checks below mirror the runtime checks in dispatchPhase2
     // (settler L454) so a doomed config is rejected at create instead of locking maker stake.
     const minerFee_L4 = parseInt(b.miner_fee, 10) || 50_000;
-    const worstLosingPool = makerStakeAmount;  // worst case: maker is sole loser
-    if (worstLosingPool < MIN_BROKER_FEE_SOMPI_L4 + minerFee_L4) {
-      return reply.code(400).send({ ok: false, error: `worst-case losingPool ${worstLosingPool} sompi < broker_fee_floor ${MIN_BROKER_FEE_SOMPI_L4} + minerFee ${minerFee_L4} — market would be unsettlable (area-11 L4)` });
-    }
-    const worstDistributable = worstLosingPool - MIN_BROKER_FEE_SOMPI_L4 - minerFee_L4;
-    const worstWinnerOutput = BETTOR_MIN_STAKE_L4 + Math.floor(worstDistributable / MAX_BETTORS_L4);
-    const worstInputs = [makerStakeAmount, oracleBondAmount, oracleBondAmount, oracleBondAmount];
-    for (let i = 0; i < MAX_BETTORS_L4; i++) worstInputs.push(BETTOR_MIN_STAKE_L4);
-    const worstOutputs = [MIN_BROKER_FEE_SOMPI_L4];
-    for (let i = 0; i < MAX_BETTORS_L4; i++) worstOutputs.push(worstWinnerOutput);
-    worstOutputs.push(oracleBondAmount, oracleBondAmount, oracleBondAmount);
-    const worstMass = estimateStorageMass(worstInputs, worstOutputs);
-    if (worstMass > STORAGE_MASS_SAFE_THRESHOLD_L4) {
-      return reply.code(400).send({ ok: false, error: `worst-case storage mass ${worstMass} > safe threshold ${STORAGE_MASS_SAFE_THRESHOLD_L4} (oracle_bond_kas=${oracleBondKas} relative to maker stake produces dust outputs) — area-11 L4` });
+    // 5/28 Owner 钦定: testnet 0 limits. Skip L4 worst-case guards when KANET_TESTNET_NO_LIMITS=1.
+    if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
+      const worstLosingPool = makerStakeAmount;
+      if (worstLosingPool < MIN_BROKER_FEE_SOMPI_L4 + minerFee_L4) {
+        return reply.code(400).send({ ok: false, error: `worst-case losingPool ${worstLosingPool} sompi < broker_fee_floor ${MIN_BROKER_FEE_SOMPI_L4} + minerFee ${minerFee_L4} — market would be unsettlable (area-11 L4)` });
+      }
+      const worstDistributable = worstLosingPool - MIN_BROKER_FEE_SOMPI_L4 - minerFee_L4;
+      const worstWinnerOutput = BETTOR_MIN_STAKE_L4 + Math.floor(worstDistributable / MAX_BETTORS_L4);
+      const worstInputs = [makerStakeAmount, oracleBondAmount, oracleBondAmount, oracleBondAmount];
+      for (let i = 0; i < MAX_BETTORS_L4; i++) worstInputs.push(BETTOR_MIN_STAKE_L4);
+      const worstOutputs = [MIN_BROKER_FEE_SOMPI_L4];
+      for (let i = 0; i < MAX_BETTORS_L4; i++) worstOutputs.push(worstWinnerOutput);
+      worstOutputs.push(oracleBondAmount, oracleBondAmount, oracleBondAmount);
+      const worstMass = estimateStorageMass(worstInputs, worstOutputs);
+      if (worstMass > STORAGE_MASS_SAFE_THRESHOLD_L4) {
+        return reply.code(400).send({ ok: false, error: `worst-case storage mass ${worstMass} > safe threshold ${STORAGE_MASS_SAFE_THRESHOLD_L4} (oracle_bond_kas=${oracleBondKas} relative to maker stake produces dust outputs) — area-11 L4` });
+      }
     }
 
     // market_metadata_hash
@@ -489,12 +495,33 @@ export async function registerPoolRoutes(fastify) {
       WHERE event_type IN ('pool_oracle_tx_sig', 'pool_oracle_refund_disagreement_tx_sig')
         AND payload LIKE ?
     `).get(`%"market_id":"${marketId}"%`).c;
+    // UMA finalization timing (Phase 1 Sub6 UI) — server owns the WHEN (finalized_after_ts),
+    // UI ticks the countdown. window_ms read from same env as voter's gate (= single source of
+    // truth, no UI-side hardcode of 48h). Only meaningful for polymarket-mirror markets (UMA
+    // 48h challenge window); kanet_native consensus markets have no UMA gate → null.
+    // closed_ts proxied from maker's deadline (unix sec); the voter's authoritative gate uses
+    // live gamma closedTime, so this is a display estimate, labelled "预计" in the UI.
+    const umaWindowMs = process.env.UMA_FINALIZATION_WINDOW_MS !== undefined
+      ? parseInt(process.env.UMA_FINALIZATION_WINDOW_MS, 10)
+      : 48 * 60 * 60 * 1000;
+    let umaFinalization = null;
+    if (umaWindowMs > 0 && market.outcome_market_source === 'polymarket' && market.deadline) {
+      const closedTs = Number(market.deadline) * 1000;  // pool_markets.deadline is unix seconds
+      if (Number.isFinite(closedTs) && closedTs > 0) {
+        umaFinalization = {
+          window_ms: umaWindowMs,
+          closed_ts: closedTs,
+          finalized_after_ts: closedTs + umaWindowMs,
+        };
+      }
+    }
     return reply.send({
       ok: true,
       market: { ...market, metadata: metaParsed },
       protocol_status: market.protocol_status,
       bettor_count: bettorCount,
       sigs_collected: sigsCollected,
+      uma_finalization: umaFinalization,
     });
   });
 

@@ -25,9 +25,10 @@
     <div class="mb-5">
       <h1 class="text-xl font-display text-ink-800" x-text="marketLabel()"></h1>
       <div class="text-[11px] text-ink-400 font-mono mt-1" x-text="marketId"></div>
-      <div class="mt-2">
+      <div class="mt-2 flex flex-wrap items-center gap-2">
         <span class="text-[11px] px-2 py-0.5 rounded font-medium" :class="statusBadgeClass()" x-text="statusLabel()"></span>
-        <span class="text-[11px] text-ink-400 ml-2" x-text="'deadline ' + (market?.deadline || '?')"></span>
+        <span class="text-[11px] px-2 py-0.5 rounded font-medium" :class="mappingBadge().cls" x-text="mappingBadge().label"></span>
+        <span class="text-[11px] text-ink-400" x-text="'deadline ' + (market?.deadline || '?')"></span>
       </div>
     </div>
 
@@ -39,6 +40,27 @@
                :class="stateReached(st.key) ? 'bg-emerald-100 text-emerald-700 font-medium' : 'bg-warm-100 text-ink-400'"
                x-text="st.label"></div>
           <span x-show="i < stateMachine.length - 1" class="text-ink-300">&rarr;</span>
+        </div>
+      </template>
+    </div>
+
+    <!-- ===== UMA finalization 倒计时 (Phase 1 Sub6) — 仅未结算时显 ===== -->
+    <div x-show="umaFinalization && !isSettled()" class="mb-4 rounded-lg px-4 py-3 border"
+         :class="umaFinalized() ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'">
+      <template x-if="!umaFinalized()">
+        <div class="flex items-start gap-2">
+          <span class="text-amber-700 text-sm">⏳</span>
+          <div class="text-xs text-amber-800">
+            <span class="font-medium">UMA 最终化预计倒计时</span>
+            <span class="font-mono ml-1" x-text="umaCountdownText()"></span>
+            <div class="text-[10px] text-amber-600 mt-0.5">此前不可结算 (= 防 UMA 48h 挑战期内反转误结). 基于 maker deadline 估算, 实际以预言机 gamma closedTime 为准.</div>
+          </div>
+        </div>
+      </template>
+      <template x-if="umaFinalized()">
+        <div class="flex items-center gap-2 text-xs text-emerald-700">
+          <span class="text-sm">✅</span>
+          <span class="font-medium">UMA 预计已最终化 — 可结算</span>
         </div>
       </template>
     </div>
@@ -130,6 +152,10 @@ function poolDetailPage(marketId) {
     sigsCollected: 0,
     oracleList: [],
     auditHistory: [],
+    mapping: null,          // condition_id_mapping row (mirror_only / independent_source) OR null=未映射
+    umaFinalization: null,  // { window_ms, closed_ts, finalized_after_ts } from server, OR null
+    nowTs: Date.now(),      // live clock for countdown tick
+    _tickTimer: null,
     stateMachine: [
       { key: 'pending_oracle_deposits', label: '等预言机' },
       { key: 'pending_bettors', label: '等下注' },
@@ -140,6 +166,8 @@ function poolDetailPage(marketId) {
 
     async init() {
       await this.load();
+      // live countdown tick (= UI owns the tick, server owns finalized_after_ts)
+      this._tickTimer = setInterval(() => { this.nowTs = Date.now(); }, 1000);
     },
 
     async load() {
@@ -155,13 +183,31 @@ function poolDetailPage(marketId) {
           this.market = mJ.market;
           this.bettorCount = mJ.bettor_count || 0;
           this.sigsCollected = mJ.sigs_collected || 0;
+          this.umaFinalization = mJ.uma_finalization || null;
         }
         this.auditHistory = (aJ.ok ? aJ.history : []) || [];
         this.buildOracleList();
+        await this.loadMapping();
       } catch (e) {
         console.warn('pool detail load fail', e);
       }
       this.loading = false;
+    },
+
+    // condition_id_mapping lookup (J2 Sub1 endpoint) — 404 = 未映射 (graceful)
+    async loadMapping() {
+      this.mapping = null;
+      const cond = this.market && this.market.outcome_condition_id;
+      if (!cond) return;
+      try {
+        const r = await fetch('/api/oracle/mapping/' + encodeURIComponent(cond));
+        if (r.ok) {
+          const j = await r.json();
+          this.mapping = j.ok ? j.mapping : null;
+        }
+      } catch (e) {
+        this.mapping = null;
+      }
     },
 
     buildOracleList() {
@@ -190,6 +236,35 @@ function poolDetailPage(marketId) {
     consensusOutcome() {
       var h = this.auditHistory.find(function(x){ return x.consensus_outcome; });
       return h ? h.consensus_outcome : null;
+    },
+    // ---- mirror_only / 并行判定 badge (Phase 1 Sub6) ----
+    mappingBadge() {
+      if (!this.mapping) return { label: '未映射 UMA', cls: 'bg-warm-200 text-ink-500' };
+      if (this.mapping.mirror_only === 1) {
+        return { label: '🪞 镜像 UMA · 钱跟 UMA 不并行打分', cls: 'bg-sky-100 text-sky-700' };
+      }
+      var src = this.mapping.independent_source || '独立源';
+      return { label: '⚖ 真并行判定 · 源 ' + src, cls: 'bg-emerald-100 text-emerald-700' };
+    },
+    // ---- UMA finalization 倒计时 (Phase 1 Sub6) ----
+    umaRemainingMs() {
+      if (!this.umaFinalization) return null;
+      return this.umaFinalization.finalized_after_ts - this.nowTs;
+    },
+    umaFinalized() {
+      var r = this.umaRemainingMs();
+      return r !== null && r <= 0;
+    },
+    umaCountdownText() {
+      var r = this.umaRemainingMs();
+      if (r === null) return '';
+      if (r <= 0) return '已最终化';
+      var h = Math.floor(r / 3600000);
+      var m = Math.floor((r % 3600000) / 60000);
+      var s = Math.floor((r % 60000) / 1000);
+      if (h > 0) return h + 'h ' + m + 'm';
+      if (m > 0) return m + 'm ' + s + 's';
+      return s + 's';
     },
     marketLabel() {
       if (!this.market) return '';
