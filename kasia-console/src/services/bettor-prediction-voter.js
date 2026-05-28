@@ -85,7 +85,38 @@ export async function voterTick() {
       poolErrored += tsRd.errored;
     }
     console.log(`[prediction-voter] tick: ${voterRelays.length} voter relays, 1V1 voted=${totalVoted} skipped=${totalSkipped} errored=${totalErrored} | pool voted=${poolVoted} skipped=${poolSkipped} errored=${poolErrored}`);
-    return { ok: true, voters: voterRelays.length, voted: totalVoted, skipped: totalSkipped, errored: totalErrored, pool: { voted: poolVoted, skipped: poolSkipped, errored: poolErrored } };
+
+    // Oracle v0.3 Phase 2 — parallel-judgment loop + post_settle_audit (J1tn cluster, Owner r148).
+    // Wired here (= voter cron has the derive fns + runs every 5min). judgeFn/umaResolveFn injected
+    // into the pure engine module (= no circular import). Best-effort: errors don't break voter tick.
+    let parallel = null, audit = null;
+    try {
+      const pj = await import('./prediction-parallel-judgment.mjs');
+      const voterRelayIds = voterRelays.map(v => v.id);
+
+      // judgeFn — KANet INDEPENDENT judgment from the independent_source (Bettor r150 flag:
+      // MUST read independent_source, NOT gamma/UMA, else 假并行). 防假并行 assertion baked.
+      const judgeFn = async (independentSource, offer) => {
+        if (/polymarket\.com|gamma-api/i.test(independentSource)) {
+          throw new Error(`假并行 blocked: independent_source "${independentSource}" is UMA/gamma, not independent (Bettor r150)`);
+        }
+        const r = await deriveKanetNativeVote(offer, { data_source_canonical: independentSource });
+        return r?.ok ? { outcome: r.outcome, confidence: r.confidence } : null;
+      };
+      // umaResolveFn — UMA finalized outcome (derivePolymarketVote, J2 cea78b1 48h gate).
+      const umaResolveFn = async (offer) => {
+        const r = await derivePolymarketVote(offer);
+        return r?.ok ? { ok: true, outcome: r.outcome } : { ok: false };
+      };
+
+      parallel = await pj.parallelJudgmentTick({ judgeFn, umaResolveFn, voterRelayIds });
+      audit = await pj.postSettleAudit(umaResolveFn);
+      console.log(`[prediction-voter] parallel: A.recorded=${parallel.phaseA.recorded} B.scored=${parallel.phaseB.scored} disagree=${parallel.phaseB.disagreements} | audit: checked=${audit.audited} dev=${audit.deviations} frozen=${audit.frozen.length}`);
+    } catch (e) {
+      console.warn(`[prediction-voter] parallel/audit tick err (non-fatal): ${e.message}`);
+    }
+
+    return { ok: true, voters: voterRelays.length, voted: totalVoted, skipped: totalSkipped, errored: totalErrored, pool: { voted: poolVoted, skipped: poolSkipped, errored: poolErrored }, parallel, audit };
   } finally {
     running = false;
   }
@@ -620,7 +651,7 @@ const UMA_FINALIZATION_WINDOW_MS = process.env.UMA_FINALIZATION_WINDOW_MS !== un
   ? parseInt(process.env.UMA_FINALIZATION_WINDOW_MS, 10)
   : 48 * 60 * 60 * 1000;  // 48h default
 
-async function derivePolymarketVote(offer) {
+export async function derivePolymarketVote(offer) {
   if (!offer.outcome_token_id) {
     return { ok: false, reason: 'missing outcome_token_id' };
   }
@@ -677,7 +708,7 @@ async function derivePolymarketVote(offer) {
 //   silent_timeout → refund / forfeit_1 per area 4. operator can manually override
 //   via pool.js vote endpoint before silent_timeout if they reach a determination.
 //   Qwen Rule 11: enable_thinking=false 必加 (= 漏会 60-120s timeout)
-async function deriveKanetNativeVote(offer, spec) {
+export async function deriveKanetNativeVote(offer, spec) {
   const url = spec?.data_source_canonical;
   if (!url || typeof url !== 'string') {
     return { ok: false, reason: 'kanet_native missing data_source_canonical URL in resolution_rule_spec' };

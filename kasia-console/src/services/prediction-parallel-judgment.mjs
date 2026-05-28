@@ -188,3 +188,101 @@ export async function parallelJudgmentTick({ judgeFn, umaResolveFn, voterRelayId
 
   return { phaseA: { recorded, skipped }, phaseB: scoreResult };
 }
+
+/**
+ * post_settle_audit — revocation backstop (Bettor 硬 gate, prerequisite for unlocking auto-grant).
+ *
+ * Cross-checks REAL settled oracle votes (oracle_history shadow_flag=0/NULL, audit_mode tierN) against
+ * UMA's finalized outcome. Reuses v150 cols (uma_resolved_outcome + shadow_correct) on real-vote rows
+ * as the cross-check result (shadow_flag distinguishes them from parallel rows).
+ *
+ * Herding defense (= same discipline as Phase B): a SINGLE deviation → oracle_disagreement_queue
+ * (source='post_settle'), NOT auto-slash (UMA can herd). Only a SUSTAINED deviation rate over
+ * threshold across ≥ minVotes audited votes triggers oracle_registry.frozen=1 (safety brake) — the
+ * revocation. Slash amount is recorded for SS/L1 enforcement by J2 (this module flags, J2 enforces).
+ *
+ * @param umaResolveFn (offer) → { ok, outcome } | { ok:false } (UMA 48h finalization gate, J2 cea78b1)
+ * @param opts { minVotes=10, maxDeviationRate=0.3 }
+ */
+export async function postSettleAudit(umaResolveFn, opts = {}) {
+  if (typeof umaResolveFn !== 'function') throw new Error('postSettleAudit requires umaResolveFn');
+  const minVotes = opts.minVotes ?? 10;
+  const maxDeviationRate = opts.maxDeviationRate ?? 0.3;
+
+  // 1. Cross-check real settled votes not yet audited (uma_resolved_outcome IS NULL).
+  const realVotes = sqlite.prepare(`
+    SELECT id, oracle_relay_id, market_id, offer_id, vote
+    FROM oracle_history
+    WHERE (shadow_flag = 0 OR shadow_flag IS NULL)
+      AND audit_mode IN ('tier1','tier2','tier3')
+      AND uma_resolved_outcome IS NULL
+  `).all();
+
+  let audited = 0, deviations = 0, pendingFinal = 0, noOffer = 0;
+  for (const row of realVotes) {
+    const offer = sqlite.prepare(
+      `SELECT * FROM exchange_offers WHERE id = ? OR outcome_condition_id = ? LIMIT 1`
+    ).get(row.offer_id || row.market_id, row.market_id);
+    if (!offer) { noOffer++; continue; }
+    const uma = await umaResolveFn(offer);
+    if (!uma || !uma.ok) { pendingFinal++; continue; }  // UMA not finalized yet (48h gate)
+
+    const correct = row.vote === uma.outcome ? 1 : 0;
+    sqlite.prepare(
+      `UPDATE oracle_history SET uma_resolved_outcome = ?, shadow_correct = ? WHERE id = ?`
+    ).run(uma.outcome, correct, row.id);
+    audited++;
+    if (!correct) {
+      deviations++;
+      sqlite.prepare(`
+        INSERT INTO oracle_disagreement_queue
+          (id, market_id, oracle_relay_id, oracle_vote, uma_outcome, source, status)
+        VALUES (?, ?, ?, ?, ?, 'post_settle', 'pending')
+      `).run(randomUUID(), row.market_id, row.oracle_relay_id, row.vote, uma.outcome);
+    }
+  }
+
+  // 2. Per-oracle sustained-deviation evaluation → frozen (revocation safety brake).
+  const oracleStats = sqlite.prepare(`
+    SELECT oracle_relay_id,
+           COUNT(*) AS total,
+           SUM(CASE WHEN shadow_correct = 0 THEN 1 ELSE 0 END) AS deviated
+    FROM oracle_history
+    WHERE (shadow_flag = 0 OR shadow_flag IS NULL)
+      AND audit_mode IN ('tier1','tier2','tier3')
+      AND uma_resolved_outcome IS NOT NULL
+    GROUP BY oracle_relay_id
+  `).all();
+
+  const frozen = [];
+  for (const s of oracleStats) {
+    if (s.total >= minVotes && (s.deviated / s.total) > maxDeviationRate) {
+      const reg = sqlite.prepare(`SELECT frozen FROM oracle_registry WHERE relay_node_id = ?`).get(s.oracle_relay_id);
+      if (reg && reg.frozen !== 1) {
+        sqlite.prepare(`UPDATE oracle_registry SET frozen = 1, updated_at = datetime('now') WHERE relay_node_id = ?`).run(s.oracle_relay_id);
+        frozen.push({ oracle_relay_id: s.oracle_relay_id, deviation_rate: +(s.deviated / s.total).toFixed(3), total: s.total });
+      }
+    }
+  }
+
+  return { audited, deviations, pendingFinal, noOffer, frozen };
+}
+
+/**
+ * isRevocationEngineReady — the hard-gate predicate. auto-grant stays disabled until this is true.
+ * Ready = post_settle_audit has run + cross-checked ≥1 real vote (= engine proven live, not just code).
+ * Wiring (voter cron) calls postSettleAudit each tick; once any real vote is audited, the engine is
+ * demonstrably operational and (subject to Bettor reviewer sign-off) auto-grant can be enabled.
+ */
+export function isRevocationEngineReady() {
+  try {
+    const n = sqlite.prepare(`
+      SELECT COUNT(*) AS c FROM oracle_history
+      WHERE (shadow_flag = 0 OR shadow_flag IS NULL) AND uma_resolved_outcome IS NOT NULL
+        AND audit_mode IN ('tier1','tier2','tier3')
+    `).get().c;
+    return { ready: n > 0, audited_real_votes: n };
+  } catch {
+    return { ready: false, audited_real_votes: 0 };
+  }
+}
