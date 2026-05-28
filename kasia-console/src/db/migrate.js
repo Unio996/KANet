@@ -4579,5 +4579,34 @@ export function runMigrations() {
     }
   }
 
+  // v153 — Phase 2 oracle 演进 J2 scope: condition_id_mapping table (Bettor r147/r149 Owner 钦定).
+  // 两类市场:
+  //   (1) 有 independent_source ≠ UMA → KANet 真并行判 → 跟 UMA 对比攒战绩 (= 真 herding 防御)
+  //   (2) mirror_only=1 (仅 gamma/UMA token) → 钱跟 UMA 不并行判 (= 防 "拿答案考自己")
+  // J1 voter cron 并行 loop 读 mapping 决定 skip vs derive (per r149 拍 + J1 R24b loop 引擎).
+  {
+    const hasMappingTable = sqlite.prepare(
+      "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='condition_id_mapping'"
+    ).get().cnt > 0;
+    if (!hasMappingTable) {
+      sqlite.exec(`
+        CREATE TABLE condition_id_mapping (
+          condition_id TEXT PRIMARY KEY,
+          uma_assertion_id TEXT,
+          independent_source TEXT,
+          mirror_only INTEGER NOT NULL DEFAULT 0 CHECK (mirror_only IN (0,1)),
+          domain TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          approved_by TEXT,
+          approved_at TEXT
+        );
+        CREATE INDEX idx_mapping_uma_assertion ON condition_id_mapping(uma_assertion_id);
+        CREATE INDEX idx_mapping_mirror_only ON condition_id_mapping(mirror_only, domain);
+        CREATE INDEX idx_mapping_domain ON condition_id_mapping(domain);
+      `);
+      console.log('[migrate] v153: condition_id_mapping table + 3 indexes created (Phase 2 oracle 两类市场 J2 r74 Bettor r149).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
