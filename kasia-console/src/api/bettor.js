@@ -1503,13 +1503,21 @@ export async function registerBettorRoutes(fastify) {
       proposed_resolution_rule_spec: b.resolution_rule_spec || null,
       phase: '4a-E-pending',
     });
+    // Bettor r110 hotfix (2026-05-28): populate outcome_* cols from body so /predict NOT NULL filter (= my r106 guard)
+    // doesn't drop legitimate drafts. Schema alignment with publish-v2 INSERT (L1219). If body lacks a field, store a
+    // 'pending-<id>' placeholder so col is NOT NULL but human-readable. metadata.proposed_* kept for backward compat.
+    const outcomeMarketSource = b.outcome_market_source || (b.market_question ? 'polymarket' : 'pending-' + id.slice(-8));
+    const outcomeConditionId = b.outcome_condition_id || b.market_question || ('pending-' + id.slice(-8));
+    const outcomeSide = b.outcome_side || 'pending';
     try {
       sqlite.prepare(`INSERT INTO exchange_offers (
         id, broadcast_tx_id, message_index, give_asset, give_amount, want_asset, want_amount,
         maker, verification, protocol_status, market_key, expires_at,
-        created_at, updated_at, maker_relay_id, metadata, pending_handshake_expires_at
-      ) VALUES (?, ?, 0, 'prediction_outcome_share', '0', 'KAS', '0', ?, 'pending_handshake', 'pending_taker', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?)
-      `).run(id, 'pending-draft-' + id.slice(-8), b.maker_relay_id, `pending:${id}`, handshakeExpiresAt, b.maker_relay_id, draftMeta, handshakeExpiresAt);
+        created_at, updated_at, maker_relay_id, metadata, pending_handshake_expires_at,
+        outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side
+      ) VALUES (?, ?, 0, 'prediction_outcome_share', '0', 'KAS', '0', ?, 'pending_handshake', 'pending_taker', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, 'pending-draft-' + id.slice(-8), b.maker_relay_id, `pending:${id}`, handshakeExpiresAt, b.maker_relay_id, draftMeta, handshakeExpiresAt,
+             outcomeMarketSource, outcomeConditionId, b.outcome_token_id || null, outcomeSide);
     } catch (e) {
       return reply.code(500).send({ ok: false, error: `pending-offer insert fail: ${e.message}` });
     }
