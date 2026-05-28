@@ -47,15 +47,19 @@ const CHANNEL_META = {
     rate_limit: { per_addr_per_24h: 20, per_addr_per_30min: 3 },
   },
   'kanet-general': {
-    description: 'Onboarding / 闲聊 / philosophy / unspecified',
-    valid_intents: ['discuss', 'broadcast'],
+    // Tier 2.1 (2026-05-28): pair_invite + pair_ack allowed on #kanet-general for tunnel handshake.
+    description: 'Onboarding / 闲聊 / philosophy / unspecified / pair coordination',
+    valid_intents: ['discuss', 'broadcast', 'pair_invite', 'pair_ack'],
     rate_limit: { per_addr_per_24h: 30, per_addr_per_30min: 5 },
   },
 };
 
 const MAX_ENVELOPE_BYTES = 4500; // spec §10 chain payload safety margin
 const VALID_TAGS = Object.keys(TAG_TO_CHANNEL);
-const VALID_INTENTS = ['discuss', 'propose', 'vote', 'broadcast', 'request'];
+// Tier 2.1 (2026-05-28) — add pair_invite + pair_ack intents for tunnel handshake.
+// pair_invite: open collab invite, payload contains nat_endpoint + ed25519_pubkey + tunnel_protocols
+// pair_ack: accept (implicit reject by TTL), ref=invite_txid + own nat_endpoint + pubkey + negotiated protocol
+const VALID_INTENTS = ['discuss', 'propose', 'vote', 'broadcast', 'request', 'pair_invite', 'pair_ack'];
 
 /** Validate envelope per spec §1 + §3. Returns { ok: true } or { ok: false, reason }. */
 function validateEnvelope(env) {
@@ -75,6 +79,22 @@ function validateEnvelope(env) {
   // Intent-specific schema checks (spec §3)
   if (env.intent === 'vote' && !env.ref) {
     return { ok: false, reason: 'vote intent requires ref (= parent propose txid)' };
+  }
+  // Tier 2.1 (2026-05-28) — pair handshake schema
+  if (env.intent === 'pair_ack' && !env.ref) {
+    return { ok: false, reason: 'pair_ack intent requires ref (= pair_invite txid)' };
+  }
+  if (env.intent === 'pair_invite' || env.intent === 'pair_ack') {
+    const p = env.payload || {};
+    if (!p.nat_endpoint || typeof p.nat_endpoint !== 'object') {
+      return { ok: false, reason: `${env.intent} requires payload.nat_endpoint object` };
+    }
+    if (typeof p.nat_endpoint.ip !== 'string' || typeof p.nat_endpoint.port !== 'number') {
+      return { ok: false, reason: `${env.intent} payload.nat_endpoint requires ip:string + port:number` };
+    }
+    if (typeof p.ed25519_pubkey !== 'string' || p.ed25519_pubkey.length < 32) {
+      return { ok: false, reason: `${env.intent} requires payload.ed25519_pubkey base64 string` };
+    }
   }
   // Channel-intent compat
   const channelName = TAG_TO_CHANNEL[env.tag];

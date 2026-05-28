@@ -4334,5 +4334,57 @@ export function runMigrations() {
     }
   }
 
+  // v148: Dev Channel Tier 2.1 — agent pair coordination tunnel.
+  // Per Owner 2026-05-28 dialogue + KANet-UI propose dev-channel-tier2-tunnel-propose-2026-05-28.md.
+  // Two tables:
+  //   agent_pairs — chain-anchored pair handshake state (invite + ack txids, peer addrs/pubkeys, tunnel status)
+  //   agent_local_endpoint — STUN-discovered external (ip, port) cache for NAT traversal
+  {
+    const hasPairsTable = sqlite.prepare(
+      "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='agent_pairs'"
+    ).get().cnt > 0;
+    if (!hasPairsTable) {
+      sqlite.exec(`
+        CREATE TABLE agent_pairs (
+          pair_id TEXT PRIMARY KEY,
+          invite_txid TEXT NOT NULL,
+          ack_txid TEXT NOT NULL,
+          peer_a_addr TEXT NOT NULL,
+          peer_b_addr TEXT NOT NULL,
+          peer_a_pubkey TEXT NOT NULL,
+          peer_b_pubkey TEXT NOT NULL,
+          pair_scope TEXT,
+          tunnel_status TEXT DEFAULT 'pending' CHECK (tunnel_status IN ('pending','active','chain_only','closed')),
+          tunnel_protocol TEXT,
+          established_at INTEGER,
+          last_seen_at INTEGER,
+          bytes_sent INTEGER DEFAULT 0,
+          bytes_received INTEGER DEFAULT 0
+        );
+        CREATE INDEX idx_agent_pairs_peer_a ON agent_pairs(peer_a_addr);
+        CREATE INDEX idx_agent_pairs_peer_b ON agent_pairs(peer_b_addr);
+        CREATE INDEX idx_agent_pairs_status ON agent_pairs(tunnel_status);
+      `);
+      console.log('[migrate] v148: agent_pairs table created (Tier 2.1 pair handshake state, KANet-UI propose).');
+    }
+    const hasEndpointTable = sqlite.prepare(
+      "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='agent_local_endpoint'"
+    ).get().cnt > 0;
+    if (!hasEndpointTable) {
+      sqlite.exec(`
+        CREATE TABLE agent_local_endpoint (
+          ip TEXT NOT NULL,
+          port INTEGER NOT NULL,
+          nat_type TEXT,
+          discovered_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL,
+          PRIMARY KEY (ip, port)
+        );
+        CREATE INDEX idx_agent_local_endpoint_expires ON agent_local_endpoint(expires_at);
+      `);
+      console.log('[migrate] v148: agent_local_endpoint table created (STUN cache 5min TTL).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
