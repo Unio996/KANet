@@ -4509,5 +4509,41 @@ export function runMigrations() {
     }
   }
 
+  // v151: Oracle license mechanism cols (= Owner finalize via Bettor r139: 执照=挣来的不是发的).
+  // License = objective auto-grant 0 主观: domain D shadow accuracy ≥ threshold + bond → system
+  // auto-adds D to oracle_registry.licensed_domains. NO human grant. Owner only safety brake (frozen).
+  // J2's P0 fix (cea78b1) was logic-only → v151 free for J1 (v# lock: v150=J1 oracle_history, v151=J1 registry).
+  //
+  // oracle_registry license cols (additive, backward-compat):
+  //   licensed_domains — JSON array of auto-earned domains (e.g. ["sports","crypto"]). NULL/[] = intern all domains.
+  //                      Derives 实习态 (= domain ∉ licensed_domains → intern, can judge only low-tier small pots).
+  //   frozen           — Owner safety brake (fail-closed). 1 = frozen (cannot vote), 0 = active. Owner can freeze
+  //                      on detected cheating but CANNOT grant license (= 去中心化 preserve, brake ≠ grant).
+  // Note: tier→max_pot mapping (Bettor r141 风险分级) lives in voter/settle logic as config constants,
+  // NOT schema — oracle_registry.tier (existing) drives it. 实习态 derived from licensed_domains, not a col.
+  {
+    const orCols = sqlite.prepare("PRAGMA table_info(oracle_registry)").all();
+    const orAdds = [
+      ['licensed_domains', 'TEXT'],           // JSON array, NULL = no domain licensed (intern everywhere)
+      ['frozen', 'INTEGER DEFAULT 0'],        // Owner safety brake, 0 = active
+    ];
+    for (const [name, type] of orAdds) {
+      if (!orCols.some(c => c.name === name)) {
+        try {
+          sqlite.exec(`ALTER TABLE oracle_registry ADD COLUMN ${name} ${type}`);
+          console.log(`[migrate] v151: oracle_registry.${name} added.`);
+        } catch (e) {
+          console.warn(`[migrate] v151 oracle_registry.${name} ADD COLUMN fail: ${e.message}`);
+        }
+      }
+    }
+    try {
+      // Partial-ish index for the common "active non-frozen licensed oracle" lookup.
+      sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_oracle_registry_frozen ON oracle_registry(frozen, status)`);
+    } catch (e) {
+      console.warn(`[migrate] v151 oracle_registry frozen index fail: ${e.message}`);
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
