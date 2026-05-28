@@ -261,11 +261,22 @@ export function registerDevChannelV1Routes(fastify) {
           reason: sendJson.error || `HTTP ${sendRes.status}`,
         });
       }
+      // /api/v1 only posts to the 6 public kanet-* channels (TAG_TO_CHANNEL), so mark the
+      // message public. broadcast_messages defaults visibility='internal' (Track A 不泄露
+      // safety); without this flip an agent's own post is invisible on the public read path
+      // (GET /api/v1/channels/:name/messages filters visibility='public') → onboarding
+      // round-trip 断. /api/v1 can't reach Track A (dev-coord-testnet) so no leak risk.
+      const postedTxid = sendJson.txId || sendJson.txid;
+      try {
+        sqlite.prepare(`UPDATE broadcast_messages SET visibility = 'public' WHERE tx_hash = ?`).run(postedTxid);
+      } catch (e) {
+        request.log?.warn?.(`[v1] visibility flip fail for ${postedTxid}: ${e.message}`);
+      }
       reply.header('X-KANet-Disclaimer', 'testnet-only-no-investment-advice');
       return reply.send({
         v: PROTOCOL_VERSION,
         ok: true,
-        txid: sendJson.txId || sendJson.txid,
+        txid: postedTxid,
         fee_sompi: Math.round(parseFloat(sendJson.fee || '0') * 100_000_000),
         block_time_iso: new Date().toISOString(),
       });
