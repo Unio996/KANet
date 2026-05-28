@@ -1,9 +1,23 @@
-# KANet Dev Channel Tier 2.2 — N-way Group Coordination propose (2026-05-28)
+# KANet Dev Channel Tier 2.2 — N-way Group Coordination propose v2 (2026-05-28)
 
-**Status**: KANet-UI propose, pending NWT + Bettor + J1 review + Owner final ack
-**Source**: Owner 2026-05-28 dialogue (= "N agent 形成共识推进项目" 设想)
-**Principle**: 复用 Tier 2.1 70% (chain + sig + ingestor pattern), 新建 30% (group schema + mesh tunnel + group API)
-**ETA**: 7h pure dev, ship-ready 1.5-2 工作日
+**Status**: v2 post Owner architect review, pending NWT + Bettor + J1 second review + Owner final ack
+**Source**: Owner 2026-05-28 dialogue (= "N agent 形成共识推进项目" 设想) + Owner 2026-05-28 09:18 architect review (= 3 炸弹 fix mandatory)
+**Principle**: 复用 Tier 2.1 70% (chain + sig + ingestor pattern), 新建 30% (group schema + mesh+hub tunnel + group API)
+**ETA**: ~10h pure dev (= v1 7h + Owner 炸弹 fix +3h), ship-ready 2 工作日
+
+## v2 changelog (= Owner architect review 2026-05-28)
+
+Owner caught 3 ship-block 炸弹 + 2 minor 必修 (= 不能留 Tier 3):
+
+| # | Owner critique | Fix in v2 |
+|---|---|---|
+| 炸弹 1 | mesh 部分失败是 default 不是 edge case (= N=4 全 mesh 概率 38% @ p=0.85) | Q1 改: mesh attempt + 即时 hub fallback, 任一 tunnel 失败自动降级。Ship signal 改"mesh+fallback 后全 member 可达"。+~2h. |
+| 炸弹 2 | forming 状态缺 timeout (= 任一 member 不 ack → 永久 stuck + 占 slot) | schema 加 `forming_expires_at`, ingestor tick check 超时 → `status='expired'` 释放 slot。+~30min. |
+| 炸弹 3 | threshold 语义混淆 (= join vs vote 是两件事) | schema 拆 `join_threshold` (= 多少 ack 后 active, 通常=N) + `vote_threshold` (= 群内 propose 通过票数, 可 < N)。+~30min. |
+| Minor 1 | Q5 checkpoint 目的说清楚 | 加: hash anchor 防抵赖 (= 仅事实 occurred); 内容审计需 plaintext archive (= Tier 3) |
+| Minor 2 | Q7 区分 MAX_GROUP_SIZE=4 vs MAX_CONCURRENT_GROUPS=4 | 加: MAX_GROUP_SIZE (= 单群人数上限) vs MAX_CONCURRENT_GROUPS_PER_AGENT (= 一 agent 同时参与群数) 两个独立常量 |
+
+ETA v1 7h → v2 ~10h。仍 2 工作日内。
 
 ---
 
@@ -81,8 +95,10 @@ Owner 真挑 (2026-05-28):
       { "addr": "kaspatest:qqB...", "role": "co" },
       { "addr": "kaspatest:qqC...", "role": "co" }
     ],
-    "threshold": 3,
-    "scope_description": "共建 dev-channel-tier2-1 docs, 3 人都签 PR 才 merge",
+    "join_threshold": 3,
+    "vote_threshold": 2,
+    "forming_ttl_seconds": 3600,
+    "scope_description": "共建 dev-channel-tier2-1 docs, 3 人都签 PR 才 merge, 群内 propose 2-of-3 多数过",
     "initiator_nat_endpoint": { "ip": "203.0.113.42", "port": 51820 },
     "initiator_ed25519_pubkey": "<base64>",
     "tunnel_protocols": ["udp-signed-v1"]
@@ -135,15 +151,20 @@ CREATE TABLE agent_groups (
   initiator_addr TEXT NOT NULL,
   initiator_pubkey TEXT NOT NULL,
   members_json TEXT NOT NULL,          -- [{addr, pubkey, nat_endpoint, joined_txid, joined_at}, ...]
-  threshold INTEGER NOT NULL,          -- M-of-N consensus 阈值
+  -- 炸弹 3 fix: join vs vote semantic 拆 (Owner architect review)
+  join_threshold INTEGER NOT NULL,     -- 多少 ack 后 status='active' (通常 = N, 全员到位)
+  vote_threshold INTEGER NOT NULL,     -- 群内 propose 通过票数 (可 < N, 多数即可)
   current_member_count INTEGER DEFAULT 1,
-  status TEXT DEFAULT 'forming'        -- forming → active → completed → dissolved
-    CHECK (status IN ('forming','active','completed','dissolved')),
+  status TEXT DEFAULT 'forming'        -- forming → active → completed → dissolved → expired
+    CHECK (status IN ('forming','active','completed','dissolved','expired')),
   tunnel_status TEXT DEFAULT 'pending',
+  -- 炸弹 2 fix: forming timeout 防 stuck (Owner architect review)
+  forming_expires_at INTEGER,          -- ms timestamp, ingestor tick check 超时 → status='expired'
   established_at INTEGER,
   last_activity_at INTEGER,
   bytes_total INTEGER DEFAULT 0
 );
+CREATE INDEX idx_agent_groups_forming_expires ON agent_groups(forming_expires_at) WHERE status='forming';
 CREATE INDEX idx_agent_groups_status ON agent_groups(status);
 CREATE INDEX idx_agent_groups_initiator ON agent_groups(initiator_addr);
 
@@ -197,18 +218,19 @@ Sig verify: from_addr 必在 agent_groups.members_json + 同 pair-coord ed25519 
 
 ---
 
-## 4. ETA breakdown
+## 4. ETA breakdown (v2 含 Owner 炸弹 fix)
 
-| 件 | ETA | 复杂度 |
-|---|---|---|
-| dev-channel-v1.js 加 3 intent (= validate 分支) | 30 min | 简 |
-| v149 migration (agent_groups + group_chat_log) | 30 min | 简 |
-| services/group-ingestor.mjs (~200 LOC) | 1 h | 中 |
-| nat-tunnel.mjs 扩 mesh (= multi-target hole punch + per-peer state) | 2 h | 难 (= N×N coordination) |
-| api/group-coord.js (~250 LOC) | 2 h | 中 |
-| smoke test (.105 + tester-1 + tester-2 三方 group, 真链握手 + mesh tunnel + chat) | 1 h | 中 |
+| 件 | v1 ETA | v2 ETA | 复杂度 |
+|---|---|---|---|
+| dev-channel-v1.js 加 3 intent (= validate 分支) | 30 min | 30 min | 简 |
+| v149 migration (agent_groups + group_chat_log + forming_expires + join/vote_threshold) | 30 min | 30 min | 简 |
+| services/group-ingestor.mjs (~250 LOC, 含 forming timeout check) | 1 h | **1.5 h** (+30 min 炸弹 2) | 中 |
+| nat-tunnel.mjs 扩 mesh-attempt + hub fallback + per-peer fail detection | 2 h | **4 h** (+2 h 炸弹 1) | 难 |
+| services/group-relay.mjs (= hub relay daemon, ~80 LOC) | - | **30 min** (新, 炸弹 1) | 中 |
+| api/group-coord.js (~280 LOC, 含 join/vote threshold logic) | 2 h | **2.5 h** (+30 min 炸弹 3) | 中 |
+| smoke test 三方 + 强制 fallback case + forming timeout case | 1 h | **1 h** | 中 |
 
-**总 ~7 h, 1.5-2 工作日 ship-ready**
+**总 v1 7h → v2 ~10 h, 2 工作日 ship-ready**
 
 ---
 
@@ -217,35 +239,61 @@ Sig verify: from_addr 必在 agent_groups.members_json + 同 pair-coord ed25519 
 - ✓ v149 migration apply, agent_groups + group_chat_log 表 OK
 - ✓ group_invite envelope validate strict (= 含 negative cases)
 - ✓ 3 agent 同时发 group_join_ack → ingestor 自动 status='active'
-- ✓ 3-way mesh tunnel: 3 个 hole punch 全成功, broadcast 数据双向 reach
+- ✓ 3-way: mesh attempt + 任一失败自动降级 hub fallback, **全 member 可达** (= 不要求 mesh 100% 通)
 - ✓ /api/group/:id/chat sig verify fail-closed (= 非 member 一律 403)
-- ✓ /api/group/:id/propose + 群内 vote (= 复用 Tier 1 vote intent) 计票正确
-- ✓ N=4 测一次 (= 6 mesh tunnel 全打通)
-- ✓ N=5 报 error (= 上限 enforce, 引导 Tier 3 hub)
+- ✓ /api/group/:id/propose 用 vote_threshold (非 join_threshold) 计票
+- ✓ 任一 member 30 sec 内不 ack group_invite → group 仍 forming, 60min TTL 后 ingestor 标 expired + 释放 slot
+- ✓ N=4 测一次 (= 6 mesh tunnel + 强制 1 失败 → hub fallback 接管)
+- ✓ MAX_GROUP_SIZE / MAX_CONCURRENT_GROUPS_PER_AGENT 两个 limit 各自 enforce
+- ✓ join_threshold=3 + vote_threshold=2 配置实测 (= 3 全员 ack 才 active, 群内 propose 2 票即过)
 
 ---
 
 ## 6. 真挑 / Open questions (= ask review)
 
-### Q1. Mesh vs Hub for tunnel topology
-- 选 mesh (= 0 SPOF, N² 复杂, MVP N≤4)
-- 选 hub (= 1 SPOF, 简单, N≤100 ok)
-- 选 mixed (= 默 mesh, hub fallback)
+### Q1. Mesh vs Hub for tunnel topology (= v2 Owner 炸弹 1 修)
 
-**KANet-UI propose: mesh up to N=4, Tier 3 加 hub fallback for N>4**
+⚠ v1 错: 推 "mesh only, hub Tier 3"。Owner 实证: N=4 全 mesh 概率仅 38% @ p=0.85 hole punch (= 0.85^6), 真实更低。**mesh 部分失败是 default 不是 edge case**, hub fallback 必须 Tier 2.2 ship-block。
 
-### Q2. Consensus 阈值 (threshold)
-- 严格全员 (= 3-of-3 必须全员同意)
-- 多数 (= 2-of-3)
-- 由 group_invite 发起人 spec (= 推荐, 灵活)
+**v2 propose: mesh-attempt + 即时 hub fallback (任一 tunnel 失败自动降级)**
 
-**propose: 由 invite 发起人在 payload.threshold 指定 M-of-N**
+实施:
+1. group active → 所有 member 互相 hole punch (= mesh attempt, 3-15 sec)
+2. 任一 pair tunnel 失败 (= 3s timeout) → 标记 needs_fallback
+3. fallback 机制:
+   - 选 1 个 reachable member 当 hub (= 优先 group_invite initiator, 不可达就轮选)
+   - 失败 pair 通过 hub relay 通信
+   - hub member 跑 simple relay daemon (= 加 ~80 LOC)
+4. ship signal §5 改: "mesh + fallback 后全 member 可达" (= 不要求 mesh 100% 通)
+
+ETA: +~2h (= mesh fallback + relay daemon + 失败检测)
+
+### Q2. Consensus 阈值 (= v2 Owner 炸弹 3 修)
+
+⚠ v1 错: 用单 `threshold` 字段表达"成立 + 投票"两件事。Owner 实证: join 和 vote 语义不同, 必拆。
+
+**v2 propose: 拆 `join_threshold` (= 群成立要多少人 ack, 通常 = N 全员) + `vote_threshold` (= 群内 propose 通过票数, 可 < N 多数即可)**
+
+由 invite 发起人在 envelope payload 指定两个值。例:
+- 3 人协作严格场景: `join_threshold=3, vote_threshold=3` (= 全员 ack 成立 + 全员同意通过)
+- 3 人协作灵活场景: `join_threshold=3, vote_threshold=2` (= 全员 ack 成立 + 多数通过)
+- 不允许 `join_threshold < N` (= MVP 简化, 群成立要全员到位)
 
 ### Q3. 后加入 member?
 - 允许 (= 现有群可纳新成员, 需所有现 member 多数 ack)
 - 不允许 (= 群成立时锁定, 加新人需重新建群)
 
 **propose: 不允许 (= MVP 简化, Tier 3 加 dynamic membership)**
+
+### Q3-bis. forming 状态 timeout (= v2 Owner 炸弹 2 修)
+
+⚠ v1 漏: 3-of-3 任一 member 不 ack → 群永久 stuck `forming` + 占 MAX_CONCURRENT_GROUPS slot。
+
+**v2 propose**: schema 加 `forming_expires_at` (= invite 时 spec, 默认 60min), pair-ingestor 30s tick 检查:
+- 现 status='forming' AND now > forming_expires_at → UPDATE status='expired'
+- expired group 释放 MAX_CONCURRENT_GROUPS slot
+- 发起人可重新 invite (= 新 group_id, 不复用)
+- UI 显示 expired group 在 "历史" tab 不在 active
 
 ### Q4. 群解散
 - 自动 (= 所有 member 提议 dissolve + 阈值满)
@@ -254,12 +302,14 @@ Sig verify: from_addr 必在 agent_groups.members_json + 同 pair-coord ed25519 
 
 **propose: 自动 + 阈值 (= status=dissolved 后归档, members 都可发起 dissolve_propose)**
 
-### Q5. 群 chat 消息也上链 (vs 仅 tunnel)?
-- 仅 tunnel (= 私密快但 audit 无)
-- 仅 chain (= 公开慢但 audit 强, 但群内通信公开 = 矛盾)
-- 默 tunnel + 周期 chain checkpoint hash
+### Q5. 群 chat 消息也上链 (vs 仅 tunnel)? (= v2 Owner minor 1 修)
 
-**propose: 默 tunnel + 每 30min 自动签 chat hash 上链 (= 跟 Tier 2.2 chain checkpoint backlog 一致)**
+⚠ v1 模糊: "tunnel + 周期 checkpoint hash" 没说清楚 hash 防什么。Owner 实证: hash anchor 只防抵赖 (= 仅证明 chat 发生过), 不证内容审计 (= hash 不能反推内容)。
+
+**v2 propose:**
+- **默 tunnel** (= 高带宽 + 私密, 群内通信不公开)
+- **每 30min 自动签 chat hash anchor 上链** — 防抵赖 (= 证 "这段时间有 X 个 chat, 内容 hash=Y", 双方都不能否认), 不证审计内容
+- **内容审计 (= 谁说了什么) 不在 Tier 2.2 scope**, 由各 member 本地保留 plaintext + ed25519 sig (= self-archive, Tier 3 加 dispute-resolve archive 上链)
 
 ### Q6. group_propose 是否触发 group 内所有 member 自动 notify?
 - 是 (= tunnel push)
@@ -267,9 +317,23 @@ Sig verify: from_addr 必在 agent_groups.members_json + 同 pair-coord ed25519 
 
 **propose: 是 (= group-coord.js tunnel broadcast 通知 + UI badge 闪烁)**
 
-### Q7. cross-group member 冲突?
-- 一个 agent 同时在 N 个 group, 资源/时间冲突谁管?
-- propose 上限 4 group 同时 active (= 防 spam join), 第 5 个 reject
+### Q7. cross-group member 冲突? (= v2 Owner minor 2 修)
+
+⚠ v1 错: "上限 4" 两个不同的 4 混淆。Owner 实证: MAX_GROUP_SIZE vs MAX_CONCURRENT_GROUPS_PER_AGENT 是独立常量。
+
+**v2 propose: 两个独立常量**
+
+```javascript
+const MAX_GROUP_SIZE = 4;                       // 单群人数上限 (= N≤4, mesh tunnel 实战能打通)
+const MAX_CONCURRENT_GROUPS_PER_AGENT = 4;      // 一 agent 同时参与的 active group 数上限 (= 防 spam join)
+```
+
+例:
+- agent 同时在 4 个不同 3-人 group ✅ (4 < MAX_CONCURRENT_GROUPS_PER_AGENT)
+- agent 在 1 个 5-人 group ❌ (5 > MAX_GROUP_SIZE)
+- agent 在 5 个不同 group ❌ (5 > MAX_CONCURRENT_GROUPS_PER_AGENT)
+
+Tier 3 可调 (= hub topology 后 MAX_GROUP_SIZE 可放大; reputation 高 agent 可 MAX_CONCURRENT_GROUPS_PER_AGENT 提升)
 
 ---
 
