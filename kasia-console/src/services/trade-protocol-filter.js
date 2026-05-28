@@ -244,31 +244,38 @@ async function handlePaid(msg) {
   console.log(`[trade-filter] Paid: ${orderId.slice(0, 8)} TX=${msg.tx.slice(0, 16)}`);
 }
 
-// Oracle v0.3 sub 10.x — SS SPOF Path A ingest (J2 r56 NWT r66 CRITICAL #3 fix + r67 R3 dual-sig).
-// Capture kanet_prediction_params_v1 broadcasts into chain_events (= canonical source for recovery).
-// Verify dual-sig BEFORE recordChainEvent to reject forge at source (= defense-in-depth, NWT r67 R3).
+// Oracle v0.3 sub 10.x — SS SPOF Path A ingest (NWT r66 + r67 + Bettor r118 hash-anchor model).
+// 5/28 Bettor r118: chain payload = hash-anchor minimal (= no ctor_params inline). Sig verify deferred
+// to recovery time when local cache provides ctor_params. Ingest only verifies hash + sigs present.
 async function handlePredictionParams(msg) {
-  if (!msg.offer_id || !msg.params_hash || !msg.ctor_params || !msg.maker_sig || !msg.taker_sig) {
-    console.warn(`[trade-filter] kanet_prediction_params_v1 missing required fields tx=${msg._tx?.slice(0,12)}`);
+  if (!msg.offer_id || !msg.params_hash || !msg.maker_sig || !msg.taker_sig) {
+    console.warn(`[trade-filter] kanet_prediction_params_v1 missing required fields (offer_id/params_hash/maker_sig/taker_sig) tx=${msg._tx?.slice(0,12)}`);
     return;
   }
-  // NWT r67 R3 light gap fix: verify dual-sig BEFORE ingest. Reject forge spam at source.
-  // payload may carry self-consistent hash (= attacker-computed) but sigs from wrong keys.
-  try {
-    const { verifyParamsDualSig, computeParamsHash } = await import('./prediction-params-cache.js');
-    const recomputedHash = computeParamsHash(msg.ctor_params);
-    if (recomputedHash !== msg.params_hash) {
-      console.warn(`[trade-filter] kanet_prediction_params_v1 hash mismatch offer=${msg.offer_id.slice(0,12)} — REJECT ingest`);
-      return;
-    }
-    const sigCheck = await verifyParamsDualSig(msg);
-    if (!sigCheck.valid) {
-      console.warn(`[trade-filter] kanet_prediction_params_v1 dual-sig REJECT offer=${msg.offer_id.slice(0,12)}: ${sigCheck.reason}`);
-      return;
-    }
-  } catch (e) {
-    console.warn(`[trade-filter] kanet_prediction_params_v1 verify exception: ${e.message}`);
+  // Hash format sanity check (= 64 hex chars sha256)
+  if (!/^[0-9a-f]{64}$/i.test(msg.params_hash)) {
+    console.warn(`[trade-filter] kanet_prediction_params_v1 invalid hash format offer=${msg.offer_id.slice(0,12)} — REJECT ingest`);
     return;
+  }
+  // v2 hash-anchor: skip dual-sig verify here (= no ctor_params for pubkey derive). Recovery time verify.
+  // v1 legacy (ctor_params inline) — still supported via dual-sig verify path.
+  if (msg.ctor_params) {
+    try {
+      const { verifyParamsDualSig, computeParamsHash } = await import('./prediction-params-cache.js');
+      const recomputedHash = computeParamsHash(msg.ctor_params);
+      if (recomputedHash !== msg.params_hash) {
+        console.warn(`[trade-filter] kanet_prediction_params_v1 v1 hash mismatch offer=${msg.offer_id.slice(0,12)} — REJECT ingest`);
+        return;
+      }
+      const sigCheck = await verifyParamsDualSig(msg);
+      if (!sigCheck.valid) {
+        console.warn(`[trade-filter] kanet_prediction_params_v1 v1 dual-sig REJECT offer=${msg.offer_id.slice(0,12)}: ${sigCheck.reason}`);
+        return;
+      }
+    } catch (e) {
+      console.warn(`[trade-filter] kanet_prediction_params_v1 v1 verify exception: ${e.message}`);
+      return;
+    }
   }
   recordChainEvent({
     txid: msg._tx,
@@ -276,9 +283,9 @@ async function handlePredictionParams(msg) {
     fromAddress: msg._from,
     toAddress: null,
     observedBy: 'protocol',
-    payload: msg,  // full payload (= offer_id, p2sh_addr, ctor_params, params_hash, maker_sig, taker_sig)
+    payload: msg,
   });
-  console.log(`[trade-filter] kanet_prediction_params_v1 ingest offer=${msg.offer_id.slice(0,12)} tx=${msg._tx?.slice(0,12)} dual-sig verified`);
+  console.log(`[trade-filter] kanet_prediction_params_v1 ingest offer=${msg.offer_id.slice(0,12)} tx=${msg._tx?.slice(0,12)} model=${msg.v === 2 ? 'hash-anchor' : 'v1-legacy'}`);
 }
 
 async function handleDelivered(msg) {

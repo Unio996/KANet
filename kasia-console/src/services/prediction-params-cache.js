@@ -191,16 +191,27 @@ export async function emitPredictionParamsCache({ offer, meta, makerRelayId, tak
     console.warn(`[params-cache] local cache INSERT fail offer=${offer.id?.slice(0, 12)}: ${e.message}`);
   }
 
-  const payload = {
+  // 5/28 Bettor r118 architect re-decide: (C) hash-anchor model.
+  // Chain TX payload = hash-anchor minimal (~540 chars) — sha256(canonical ctor_params) + signers refs.
+  // Full ctor_params stored in 7-party local cache (= maker + taker + 5 oracle DBs each INSERT OR IGNORE).
+  // 1-of-7 surviving = enough for recovery. Path B DM 升 best-effort (= not main path).
+  // Recovery: chain hash MUST match cache.params_hash else invalid (= forge defense preserved).
+  const chainAnchor = {
     t: 'kanet_prediction_params_v1',
+    v: 2,  // hash-anchor model (= v1 was full-ctor inline, deprecated due to storage mass empirical fail)
     offer_id: offer.id,
     p2sh_addr: offer.escrow_p2sh,
-    ctor_params: ctorParams,
     params_hash: paramsHash,
     maker_sig: makerSig,
     taker_sig: takerSig,
   };
-  const payloadJson = JSON.stringify(payload);
+  const chainPayloadJson = JSON.stringify(chainAnchor);
+  // Full payload for Path B DM (= best-effort, may carry full ctor_params for fast recovery)
+  const fullPayload = {
+    ...chainAnchor,
+    ctor_params: ctorParams,
+  };
+  const payloadJson = chainPayloadJson;  // Path A uses minimal chain anchor
 
   // Path A — broadcast to chain channel (= canonical truth, MUST succeed per NWT r64 catch).
   // local_cache 是 mutable → 攻击者删 console.db + 改 cache table 可 forge.
@@ -235,9 +246,10 @@ export async function emitPredictionParamsCache({ offer, meta, makerRelayId, tak
       if (r?.address) recipientAddrs.add(r.address);
     }
   } catch {}
-  // DM sends — async non-blocking
+  // DM sends — best-effort, full ctor_params payload for cache portability
+  const fullPayloadJson = JSON.stringify(fullPayload);
   await Promise.allSettled([...recipientAddrs].map(addr =>
-    sendCommandAsync(makerRelayId, { type: 'send_message', target: addr, message: payloadJson })
+    sendCommandAsync(makerRelayId, { type: 'send_message', target: addr, message: fullPayloadJson })
       .then(() => { dmCount++; })
       .catch(e => console.warn(`[params-cache] Path B DM to ${addr?.slice(0, 20)} fail: ${e.message}`))
   ));
@@ -267,7 +279,10 @@ export async function emitPredictionParamsCache({ offer, meta, makerRelayId, tak
  *   - kasia-wasm OP_PUSHDATA2 bypass active (= sub 8/9 era patch)
  */
 export async function recoverPredictionParams(offerId) {
-  // Path 1 — chain_event scan (= canonical truth)
+  // Path 1 — chain_event scan (= canonical hash-anchor source per Bettor r118).
+  // v2 hash-anchor: chain payload has params_hash + sigs but NO ctor_params. Recovery requires
+  //   chain hash + local_cache OR DM cache provides ctor_params. Hash MUST match.
+  // v1 legacy: chain payload has inline ctor_params (= old broadcasts pre-r118 refactor).
   const rows = sqlite.prepare(`
     SELECT payload FROM chain_events
     WHERE event_type = 'kanet_prediction_params_v1' AND payload LIKE ?
@@ -276,9 +291,51 @@ export async function recoverPredictionParams(offerId) {
   if (rows.length > 0) {
     try {
       const payload = JSON.parse(rows[0].payload);
+      // v2 hash-anchor model — chain has no ctor_params. Lookup local_cache by hash.
+      if (payload.v === 2 || !payload.ctor_params) {
+        const cached = sqlite.prepare(`
+          SELECT ctor_params_json, params_hash, p2sh_addr, maker_sig, taker_sig, source
+          FROM predictions_offers_local_cache WHERE offer_id = ?
+        `).get(offerId);
+        if (!cached) {
+          console.warn(`[params-recovery] hash-anchor offer=${offerId.slice(0,12)} chain hash exists but NO local cache — try Path B DM history (TODO future production)`);
+          return null;
+        }
+        // Hash MUST match chain anchor (= Bettor r118 forge defense)
+        if (cached.params_hash !== payload.params_hash) {
+          console.warn(`[params-recovery] hash-anchor mismatch offer=${offerId.slice(0,12)} chain=${payload.params_hash.slice(0,12)} cache=${cached.params_hash.slice(0,12)} — REJECT`);
+          return null;
+        }
+        // Re-verify by recompute hash from cache ctor_params
+        const ctorParams = JSON.parse(cached.ctor_params_json);
+        const recomputedHash = computeParamsHash(ctorParams);
+        if (recomputedHash !== payload.params_hash) {
+          console.warn(`[params-recovery] hash-anchor recompute mismatch offer=${offerId.slice(0,12)} — REJECT (cache tamper?)`);
+          return null;
+        }
+        // Dual-sig verify (= forge defense, signers committed to this exact hash on chain)
+        const sigCheck = await verifyParamsDualSig({
+          ctor_params: ctorParams,
+          params_hash: payload.params_hash,
+          maker_sig: payload.maker_sig,
+          taker_sig: payload.taker_sig,
+        });
+        if (!sigCheck.valid) {
+          console.warn(`[params-recovery] hash-anchor dual-sig REJECT offer=${offerId.slice(0,12)}: ${sigCheck.reason}`);
+          return null;
+        }
+        const recompiled = await recompileRedeemScript(ctorParams);
+        if (!recompiled.ok || recompiled.p2sh_addr !== payload.p2sh_addr) {
+          console.warn(`[params-recovery] hash-anchor silverc recompile fail OR P2SH mismatch offer=${offerId.slice(0,12)}`);
+          return null;
+        }
+        console.log(`[params-recovery] offer=${offerId.slice(0,12)} restored via HASH-ANCHOR chain + local cache + dual-sig + silverc recompile`);
+        return { ctor_params: ctorParams, params_hash: payload.params_hash, source: 'hash_anchor_cache', redeem_script_hex: recompiled.redeem_script_hex, p2sh_addr: recompiled.p2sh_addr };
+      }
+      // v1 legacy path (= inline ctor_params)
       const recomputedHash = computeParamsHash(payload.ctor_params);
       if (recomputedHash !== payload.params_hash) {
-        console.warn(`[params-recovery] chain_event hash mismatch offer=${offerId.slice(0, 12)} — rejecting forge attempt`);
+        console.warn(`[params-recovery] chain_event v1 hash mismatch offer=${offerId.slice(0, 12)} — rejecting forge attempt`);
       } else {
         // NWT r67 R3 light gap fix: defense-in-depth dual-sig verify (= 防 attacker self-consistent hash)
         const sigCheck = await verifyParamsDualSig(payload);
