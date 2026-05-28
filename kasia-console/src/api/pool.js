@@ -263,11 +263,6 @@ export async function registerPoolRoutes(fastify) {
       deadline_max_days: parseInt(process.env.POOL_DEADLINE_MAX_DAY, 10) || 30,
       disagreement_timeout_min: parseInt(process.env.DISAGREEMENT_TIMEOUT_MIN, 10) || 5,
       oracle_silent_timeout_min: parseInt(process.env.ORACLE_SILENT_TIMEOUT_MIN, 10) || 30,
-      // Phase 1 Sub6 — expose UMA finalization window (= voter gate's source) so UI can
-      // compute finalization countdown without hardcoding 48h. 0 = gate disabled (testnet).
-      uma_finalization_window_ms: process.env.UMA_FINALIZATION_WINDOW_MS !== undefined
-        ? parseInt(process.env.UMA_FINALIZATION_WINDOW_MS, 10)
-        : 48 * 60 * 60 * 1000,
     });
   });
 
@@ -500,33 +495,12 @@ export async function registerPoolRoutes(fastify) {
       WHERE event_type IN ('pool_oracle_tx_sig', 'pool_oracle_refund_disagreement_tx_sig')
         AND payload LIKE ?
     `).get(`%"market_id":"${marketId}"%`).c;
-    // UMA finalization timing (Phase 1 Sub6 UI) — server owns the WHEN (finalized_after_ts),
-    // UI ticks the countdown. window_ms read from same env as voter's gate (= single source of
-    // truth, no UI-side hardcode of 48h). Only meaningful for polymarket-mirror markets (UMA
-    // 48h challenge window); kanet_native consensus markets have no UMA gate → null.
-    // closed_ts proxied from maker's deadline (unix sec); the voter's authoritative gate uses
-    // live gamma closedTime, so this is a display estimate, labelled "预计" in the UI.
-    const umaWindowMs = process.env.UMA_FINALIZATION_WINDOW_MS !== undefined
-      ? parseInt(process.env.UMA_FINALIZATION_WINDOW_MS, 10)
-      : 48 * 60 * 60 * 1000;
-    let umaFinalization = null;
-    if (umaWindowMs > 0 && market.outcome_market_source === 'polymarket' && market.deadline) {
-      const closedTs = Number(market.deadline) * 1000;  // pool_markets.deadline is unix seconds
-      if (Number.isFinite(closedTs) && closedTs > 0) {
-        umaFinalization = {
-          window_ms: umaWindowMs,
-          closed_ts: closedTs,
-          finalized_after_ts: closedTs + umaWindowMs,
-        };
-      }
-    }
     return reply.send({
       ok: true,
       market: { ...market, metadata: metaParsed },
       protocol_status: market.protocol_status,
       bettor_count: bettorCount,
       sigs_collected: sigsCollected,
-      uma_finalization: umaFinalization,
     });
   });
 

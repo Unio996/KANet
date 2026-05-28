@@ -44,26 +44,9 @@
       </template>
     </div>
 
-    <!-- ===== UMA finalization 倒计时 (Phase 1 Sub6) — 仅未结算时显 ===== -->
-    <div x-show="umaFinalization && !isSettled()" class="mb-4 rounded-lg px-4 py-3 border"
-         :class="umaFinalized() ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'">
-      <template x-if="!umaFinalized()">
-        <div class="flex items-start gap-2">
-          <span class="text-amber-700 text-sm">⏳</span>
-          <div class="text-xs text-amber-800">
-            <span class="font-medium">UMA 最终化预计倒计时</span>
-            <span class="font-mono ml-1" x-text="umaCountdownText()"></span>
-            <div class="text-[10px] text-amber-600 mt-0.5">此前不可结算 (= 防 UMA 48h 挑战期内反转误结). 基于 maker deadline 估算, 实际以预言机 gamma closedTime 为准.</div>
-          </div>
-        </div>
-      </template>
-      <template x-if="umaFinalized()">
-        <div class="flex items-center gap-2 text-xs text-emerald-700">
-          <span class="text-sm">✅</span>
-          <span class="font-medium">UMA 预计已最终化 — 可结算</span>
-        </div>
-      </template>
-    </div>
+    <!-- ===== UMA finalization 状态 (Phase 1 Sub6, Bettor r156 option A) — protocol_status 驱动 ===== -->
+    <div x-show="umaFinalizationStatus()" class="mb-4 rounded-lg px-4 py-3 border text-xs font-medium"
+         :class="umaFinalizationStatus()?.cls" x-text="umaFinalizationStatus()?.label"></div>
 
     <!-- ===== piece 1: live 投票进度 (未结算) ===== -->
     <div x-show="!isSettled()" class="card p-4 mb-4">
@@ -153,9 +136,6 @@ function poolDetailPage(marketId) {
     oracleList: [],
     auditHistory: [],
     mapping: null,          // condition_id_mapping row (mirror_only / independent_source) OR null=未映射
-    umaFinalization: null,  // { window_ms, closed_ts, finalized_after_ts } from server, OR null
-    nowTs: Date.now(),      // live clock for countdown tick
-    _tickTimer: null,
     stateMachine: [
       { key: 'pending_oracle_deposits', label: '等预言机' },
       { key: 'pending_bettors', label: '等下注' },
@@ -166,8 +146,6 @@ function poolDetailPage(marketId) {
 
     async init() {
       await this.load();
-      // live countdown tick (= UI owns the tick, server owns finalized_after_ts)
-      this._tickTimer = setInterval(() => { this.nowTs = Date.now(); }, 1000);
     },
 
     async load() {
@@ -183,7 +161,6 @@ function poolDetailPage(marketId) {
           this.market = mJ.market;
           this.bettorCount = mJ.bettor_count || 0;
           this.sigsCollected = mJ.sigs_collected || 0;
-          this.umaFinalization = mJ.uma_finalization || null;
         }
         this.auditHistory = (aJ.ok ? aJ.history : []) || [];
         this.buildOracleList();
@@ -246,25 +223,17 @@ function poolDetailPage(marketId) {
       var src = this.mapping.independent_source || '独立源';
       return { label: '⚖ 真并行判定 · 源 ' + src, cls: 'bg-emerald-100 text-emerald-700' };
     },
-    // ---- UMA finalization 倒计时 (Phase 1 Sub6) ----
-    umaRemainingMs() {
-      if (!this.umaFinalization) return null;
-      return this.umaFinalization.finalized_after_ts - this.nowTs;
-    },
-    umaFinalized() {
-      var r = this.umaRemainingMs();
-      return r !== null && r <= 0;
-    },
-    umaCountdownText() {
-      var r = this.umaRemainingMs();
-      if (r === null) return '';
-      if (r <= 0) return '已最终化';
-      var h = Math.floor(r / 3600000);
-      var m = Math.floor((r % 3600000) / 60000);
-      var s = Math.floor((r % 60000) / 1000);
-      if (h > 0) return h + 'h ' + m + 'm';
-      if (m > 0) return m + 'm ' + s + 's';
-      return s + 's';
+    // ---- UMA finalization 状态 (Phase 1 Sub6, Bettor r156 option A) ----
+    // protocol_status-driven (not precise countdown): voter only votes (→ verifying) after the
+    // 48h UMA gate passes, so verifying+ = 已最终化. polymarket-sourced only.
+    umaFinalizationStatus() {
+      if (!this.market || this.market.outcome_market_source !== 'polymarket') return null;
+      var s = this.market.protocol_status;
+      if (['verifying', 'collecting_sigs', 'completed'].includes(s)) {
+        return { label: '✅ UMA 已最终化 · 验证已通过', cls: 'bg-emerald-50 border-emerald-200 text-emerald-700' };
+      }
+      if (['refunded'].includes(s)) return null;
+      return { label: '⏳ 待验证 · 验证时校验 UMA 48h 最终化', cls: 'bg-amber-50 border-amber-200 text-amber-700' };
     },
     marketLabel() {
       if (!this.market) return '';
