@@ -356,6 +356,14 @@ fastify.get('/predictions/oracle-registry', async (request, reply) => {
   return reply.viewAsync('predictions-oracle-registry', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', _page: 'predictions-oracle-registry' });
 });
 
+// Oracle UI piece 1+2 (Bettor r128/r129) — pool market detail page (= 填 create 页 dead link + oracle 透明度)
+// reads /api/pool/market/:id + /api/oracle/markets/:id/audit. State branch: live vote progress vs settled result.
+fastify.get('/predictions/pool/:id', async (request, reply) => {
+  const lang = parseLang(request.headers.cookie);
+  const t = getT(lang);
+  return reply.viewAsync('predictions-pool-detail', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', marketId: request.params.id, _page: 'predictions-pool-detail' });
+});
+
 // /audit → redirect to /contacts
 fastify.get('/audit', async (request, reply) => {
   const agent = request.query.agent ? `?agent=${request.query.agent}` : '';

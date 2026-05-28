@@ -1,0 +1,214 @@
+<!-- KANet Oracle UI piece 1+2 (Bettor r128/r129) — pool market detail
+     piece 1: live 投票进度 (未结算) · piece 2: settle 结果透明 (已结算)
+     数据: /api/pool/market/:id + /api/oracle/markets/:id/audit
+     NOTE: 所有逻辑在 script 块 (= 避免 eta 把 JS 当模板). eta tag 内仅 it.marketId 注入. -->
+<div x-data="poolDetailPage('<%= it.marketId %>')" x-init="init()" class="max-w-3xl mx-auto px-4 py-6 font-body text-ink-700">
+
+  <!-- back link -->
+  <a href="/predictions/oracle-registry" class="text-xs text-ink-400 hover:text-ink-600">&larr; 预言机注册表</a>
+
+  <!-- loading -->
+  <div x-show="loading" class="text-center py-16 text-ink-400">加载市场详情...</div>
+
+  <!-- not found -->
+  <div x-show="!loading && !market" class="text-center py-16">
+    <div class="text-3xl mb-3">🔍</div>
+    <p class="text-ink-500">市场不存在</p>
+    <p class="text-[11px] text-ink-400 font-mono mt-1" x-text="marketId"></p>
+  </div>
+
+  <div x-show="!loading && market">
+    <!-- header -->
+    <div class="mb-5">
+      <h1 class="text-xl font-display text-ink-800" x-text="marketLabel()"></h1>
+      <div class="text-[11px] text-ink-400 font-mono mt-1" x-text="marketId"></div>
+      <div class="mt-2">
+        <span class="text-[11px] px-2 py-0.5 rounded font-medium" :class="statusBadgeClass()" x-text="statusLabel()"></span>
+        <span class="text-[11px] text-ink-400 ml-2" x-text="'deadline ' + (market?.deadline || '?')"></span>
+      </div>
+    </div>
+
+    <!-- state machine viz -->
+    <div class="flex items-center gap-1 mb-6 text-[10px]">
+      <template x-for="(st, i) in stateMachine" :key="st.key">
+        <div class="flex items-center gap-1">
+          <div class="px-2 py-1 rounded"
+               :class="stateReached(st.key) ? 'bg-emerald-100 text-emerald-700 font-medium' : 'bg-warm-100 text-ink-400'"
+               x-text="st.label"></div>
+          <span x-show="i < stateMachine.length - 1" class="text-ink-300">&rarr;</span>
+        </div>
+      </template>
+    </div>
+
+    <!-- ===== piece 1: live 投票进度 (未结算) ===== -->
+    <div x-show="!isSettled()" class="card p-4 mb-4">
+      <div class="flex items-center justify-between mb-3">
+        <span class="text-sm font-medium text-ink-700">预言机投票进度</span>
+        <span class="text-xs text-ink-500" x-text="votedCount() + ' / ' + oracleList.length + ' 已投'"></span>
+      </div>
+      <!-- progress bar -->
+      <div class="w-full bg-warm-100 rounded-full h-2 mb-4">
+        <div class="bg-brand-500 h-2 rounded-full transition-all"
+             :style="'width: ' + (oracleList.length ? Math.round(votedCount()/oracleList.length*100) : 0) + '%'"></div>
+      </div>
+      <!-- 空态 -->
+      <div x-show="oracleList.length === 0" class="text-[11px] text-ink-400 py-2 text-center">
+        暂无预言机分配 (= 等 maker publish + oracle deposit)
+      </div>
+      <!-- oracle list + each vote -->
+      <div class="space-y-1.5">
+        <template x-for="o in oracleList" :key="o.relay_id">
+          <div class="flex items-center gap-2 text-xs bg-warm-50 rounded px-3 py-2">
+            <div class="w-2 h-2 rounded-full flex-shrink-0" :class="o.voted ? 'bg-emerald-500' : 'bg-warm-300'"></div>
+            <span class="font-mono text-ink-500 flex-1 truncate" x-text="o.relay_id.slice(0, 16)"></span>
+            <span x-show="o.voted" class="px-1.5 py-0.5 rounded font-medium"
+                  :class="o.vote === 'YES' ? 'bg-emerald-100 text-emerald-700' : (o.vote === 'NO' ? 'bg-red-100 text-red-700' : 'bg-warm-200 text-ink-500')"
+                  x-text="o.vote"></span>
+            <span x-show="!o.voted" class="text-ink-400">等待中</span>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- ===== piece 2: settle 结果透明 (已结算) ===== -->
+    <div x-show="isSettled()" class="card p-4 mb-4">
+      <div class="text-sm font-medium text-ink-700 mb-3">结算结果</div>
+      <!-- winner -->
+      <div class="bg-emerald-50 rounded-lg p-3 mb-4 text-center">
+        <div class="text-[11px] text-ink-500 mb-1">最终判定 (= 5 oracle 共识)</div>
+        <div class="text-2xl font-display text-emerald-700" x-text="consensusOutcome() || '—'"></div>
+      </div>
+      <!-- 5 oracle 各投啥 -->
+      <div class="text-[11px] text-ink-500 mb-2">各预言机投票 (= 验证凭什么判这方赢)</div>
+      <div class="space-y-1.5 mb-4">
+        <template x-for="h in auditHistory" :key="h.id">
+          <div class="flex items-center gap-2 text-xs bg-warm-50 rounded px-3 py-2">
+            <span class="font-mono text-ink-500 flex-1 truncate" x-text="(h.oracle_relay_id || '').slice(0, 16)"></span>
+            <span class="px-1.5 py-0.5 rounded font-medium"
+                  :class="h.vote === h.consensus_outcome ? 'bg-emerald-100 text-emerald-700' : (h.vote === 'silent' ? 'bg-warm-200 text-ink-500' : 'bg-red-100 text-red-700')"
+                  x-text="h.vote || '—'"></span>
+            <span x-show="h.reward_amount > 0" class="text-emerald-600 text-[11px]" x-text="'+' + (h.reward_amount || 0).toFixed(1)"></span>
+            <span x-show="h.slashed_amount > 0" class="text-red-600 text-[11px]" x-text="'-' + (h.slashed_amount || 0).toFixed(1)"></span>
+          </div>
+        </template>
+      </div>
+      <!-- 空态 -->
+      <div x-show="auditHistory.length === 0" class="text-[11px] text-ink-400 py-2 text-center">
+        暂无投票记录
+      </div>
+      <!-- payout TX explorer link -->
+      <div x-show="market?.settle_txid" class="mt-3">
+        <a :href="'https://explorer-tn10.kaspa.org/txs/' + market?.settle_txid" target="_blank"
+           class="block text-center bg-brand-500 hover:bg-brand-600 text-white rounded-lg py-2 text-xs font-medium">
+          🔗 结算 TX (Kaspa explorer)
+        </a>
+        <div class="text-[10px] text-ink-400 font-mono break-all mt-1 text-center" x-text="market?.settle_txid"></div>
+      </div>
+    </div>
+
+    <!-- market meta -->
+    <div class="card p-4 text-[11px] text-ink-500 space-y-1">
+      <div class="flex justify-between"><span>maker stake</span><span x-text="(market?.maker_stake_amount || '?') + ' KAS'"></span></div>
+      <div class="flex justify-between"><span>oracle bond (each)</span><span x-text="(market?.oracle_bond_amount || '?') + ' KAS'"></span></div>
+      <div class="flex justify-between"><span>bettor 数</span><span x-text="bettorCount"></span></div>
+      <div class="flex justify-between"><span>sigs collected</span><span x-text="sigsCollected"></span></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function poolDetailPage(marketId) {
+  return {
+    marketId: marketId,
+    loading: true,
+    market: null,
+    bettorCount: 0,
+    sigsCollected: 0,
+    oracleList: [],
+    auditHistory: [],
+    stateMachine: [
+      { key: 'matched', label: 'matched' },
+      { key: 'verifying', label: 'verifying' },
+      { key: 'collecting_sigs', label: 'collecting_sigs' },
+      { key: 'completed', label: 'completed' },
+    ],
+
+    async init() {
+      await this.load();
+    },
+
+    async load() {
+      this.loading = true;
+      try {
+        const [mR, aR] = await Promise.all([
+          fetch('/api/pool/market/' + encodeURIComponent(this.marketId)),
+          fetch('/api/oracle/markets/' + encodeURIComponent(this.marketId) + '/audit'),
+        ]);
+        const mJ = await mR.json();
+        const aJ = await aR.json();
+        if (mJ.ok) {
+          this.market = mJ.market;
+          this.bettorCount = mJ.bettor_count || 0;
+          this.sigsCollected = mJ.sigs_collected || 0;
+        }
+        this.auditHistory = (aJ.ok ? aJ.history : []) || [];
+        this.buildOracleList();
+      } catch (e) {
+        console.warn('pool detail load fail', e);
+      }
+      this.loading = false;
+    },
+
+    buildOracleList() {
+      var ids = [];
+      if (this.market && this.market.oracle_relay_ids) {
+        try {
+          var parsed = JSON.parse(this.market.oracle_relay_ids);
+          if (Array.isArray(parsed)) ids = parsed;
+        } catch (e) {
+          ids = String(this.market.oracle_relay_ids).split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+        }
+      }
+      var voteByOracle = {};
+      this.auditHistory.forEach(function(h){ if (h.oracle_relay_id) voteByOracle[h.oracle_relay_id] = h.vote; });
+      this.oracleList = ids.map(function(id){
+        return { relay_id: id, voted: voteByOracle[id] != null, vote: voteByOracle[id] || null };
+      });
+    },
+
+    isSettled() {
+      return this.market && (this.market.protocol_status === 'completed' || this.market.settle_txid);
+    },
+    votedCount() {
+      return this.oracleList.filter(function(o){ return o.voted; }).length;
+    },
+    consensusOutcome() {
+      var h = this.auditHistory.find(function(x){ return x.consensus_outcome; });
+      return h ? h.consensus_outcome : null;
+    },
+    marketLabel() {
+      if (!this.market) return '';
+      var src = this.market.outcome_market_source || 'market';
+      var cond = (this.market.outcome_condition_id || '').slice(0, 40);
+      return src + ' / ' + cond;
+    },
+    statusLabel() {
+      return this.market ? (this.market.protocol_status || 'unknown') : '';
+    },
+    statusBadgeClass() {
+      var s = this.market ? this.market.protocol_status : '';
+      if (s === 'completed') return 'bg-emerald-100 text-emerald-700';
+      if (s === 'collecting_sigs' || s === 'verifying') return 'bg-amber-100 text-amber-700';
+      return 'bg-warm-200 text-ink-600';
+    },
+    stateReached(key) {
+      var order = ['matched', 'verifying', 'collecting_sigs', 'completed'];
+      var cur = this.market ? this.market.protocol_status : '';
+      var curIdx = order.indexOf(cur);
+      var keyIdx = order.indexOf(key);
+      return curIdx >= 0 && keyIdx <= curIdx;
+    },
+  };
+}
+</script>
