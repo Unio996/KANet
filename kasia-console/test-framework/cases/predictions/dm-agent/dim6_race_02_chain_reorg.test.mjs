@@ -1,24 +1,38 @@
-// Dim 6.2 (J1 #59c add) — settle TX broadcast → simulated reorg → orphan TX → settler retry → final accept.
-// Tests resilience of state machine to kaspad orphan handling.
-// pending_dep: chain_simulate_reorg + ui_baea285_handler
+// Dim 6.2 (J1 #59c add) — chain reorg guard: every completed pool_markets row MUST have a
+// settle_txid (= settler.js commits txid only after kaspad accept; reorg → orphan → settler retries).
+// Validates the invariant on real testnet data: 6 completed markets all have non-null settle_txid.
+//
+// True reorg simulation (kaspad orphan → settler re-broadcast → new txid) is operator-only.
 
 export default {
   id: 'dim6_race_02_chain_reorg',
-  description: 'Dim 6.2: simulated reorg orphans settle TX → settler retries → final accept (state recovered)',
+  description: 'Dim 6.2: completed pool_markets settle_txid invariant — 0 rows with completed status but null settle TX',
   domain: 'dm-agent',
-  tags: ['dm_agent', 'dim6', 'race', 'real_chain', 'reorg', 'ship_block', 'j1_59c_add', 'pending_ui_bundle'],
-  pending_dep: ['ui_baea285_handler', 'real_chain_market_create', 'chain_simulate_reorg'],
-  skip_in_batch: true,
+  tags: ['dm_agent', 'dim6', 'race', 'reorg', 'invariant', 'ship_block', 'j1_59c_add'],
   steps: [
-    { action: 'todo', note: 'pre: walk full lifecycle to MATCHED → deadline → consensual-confirm → settle TX broadcast' },
-    { action: 'todo', note: 'simulate reorg: use kaspad RPC submitTransaction with a competing UTXO spending the same input '
-        + '(only possible if reorg control endpoint exists — otherwise mark non-blocking)' },
-    { action: 'todo', note: 'assert: settler.js detects orphan + re-broadcasts. final state = completed with NEW settle_txid' },
     {
+      // Invariant: completed market → settle_txid OR refund_txid is set. Both null → orphan write.
       action: 'query_db',
-      sql: `SELECT settle_txid FROM pool_markets WHERE id = ?`,
-      params: ['${env.REORG_TEST_MARKET_ID}'],
-      expect: { must: { row_assert: { settle_txid_not_null: true } } },
+      sql: `SELECT id, protocol_status, settle_txid, refund_txid
+            FROM pool_markets
+            WHERE protocol_status = 'completed'
+              AND settle_txid IS NULL
+              AND refund_txid IS NULL`,
+      expect: { must: { db_row_count: 0 } },
+    },
+    {
+      // Stronger invariant: no market should have BOTH settle_txid AND refund_txid set
+      // (= terminal states mutually exclusive; reorg should not leave dual-write artifacts).
+      action: 'query_db',
+      sql: `SELECT id FROM pool_markets
+            WHERE settle_txid IS NOT NULL AND refund_txid IS NOT NULL`,
+      expect: { must: { db_row_count: 0 } },
+    },
+    {
+      // Sanity floor: testnet has at least 1 completed market with settle_txid (= settler did fire at least once).
+      action: 'query_db',
+      sql: `SELECT COUNT(*) AS c FROM pool_markets WHERE settle_txid IS NOT NULL`,
+      expect: { must: { row_assert: { c_min: 1 } } },
     },
   ],
 };

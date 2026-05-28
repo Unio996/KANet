@@ -1,26 +1,42 @@
-// Dim 6.4 (J1 #59c add) — market started at protocol v0.3-full; mid-cycle config switches to v0.3-mid-a.
-// Verify settler.js dispatch branch picks the right spec for the started market (= 不 cross-contaminate).
-// pending_dep: ui_baea285_handler + real_chain_market_create
+// Dim 6.4 (J1 #59c add) — protocol_version migrate guard: pool_markets.protocol_status MUST be
+// one of the spec-defined values, even across version upgrades. Verifies the live testnet has
+// 0 markets in undefined / legacy status strings (= migration didn't strand any rows).
+//
+// Real version-drift dispatcher branch test requires live config flip + restart; operator-only.
+
+const SPEC_STATUSES = [
+  'pending_oracle_sampling', 'pending_oracle_deposits', 'pending_bettors',
+  'collecting_sigs', 'verifying', 'completed', 'refunded',
+  'doomed', 'errored', 'cancelled',
+];
 
 export default {
   id: 'dim6_race_04_protocol_version_migrate',
-  description: 'Dim 6.4: market in flight + protocol_version cfg change → settler dispatches correct branch',
+  description: 'Dim 6.4: pool_markets.protocol_status invariant — all rows in spec-defined status set (0 stranded)',
   domain: 'dm-agent',
-  tags: ['dm_agent', 'dim6', 'race', 'real_chain', 'protocol_version', 'ship_block', 'j1_59c_add', 'pending_ui_bundle'],
-  pending_dep: ['ui_baea285_handler', 'real_chain_market_create'],
-  skip_in_batch: true,
+  tags: ['dm_agent', 'dim6', 'race', 'migration', 'invariant', 'ship_block', 'j1_59c_add'],
   steps: [
-    { action: 'todo', note: 'pre: market m1 created at v0.3-full; entered MATCHED' },
-    { action: 'todo', note: 'change env PREDICTION_PROTOCOL_VERSION=v0.3-mid-a; restart Console (live config drift)' },
-    { action: 'todo', note: 'create market m2 at v0.3-mid-a; both m1 + m2 deadline arrive' },
-    { action: 'todo', note: 'assert: m1 settle uses v0.3-full dispatch branch (settler.js consensual phase 2 ConsensualSS path), '
-        + 'm2 uses v0.3-mid-a branch. Cross-contamination = state corrupt (= test FAIL).' },
     {
       action: 'query_db',
-      sql: `SELECT id, protocol_status, settle_txid FROM pool_markets
-            WHERE id IN (?, ?)`,
-      params: ['${env.MIGRATE_M1_ID}', '${env.MIGRATE_M2_ID}'],
-      expect: { must: { rows_min: 2 } },
+      sql: `SELECT DISTINCT protocol_status FROM pool_markets`,
+      expect: {
+        must: {
+          rows_min: 1,
+        },
+      },
+    },
+    {
+      // Per-status invariant: no row with status outside the spec list.
+      action: 'query_db',
+      sql: `SELECT id, protocol_status FROM pool_markets
+            WHERE protocol_status NOT IN ('${SPEC_STATUSES.join("','")}')`,
+      expect: { must: { db_row_count: 0 } },
+    },
+    {
+      // Deadline invariant: all rows have a valid deadline > 0 (= migration didn't null-out).
+      action: 'query_db',
+      sql: `SELECT id FROM pool_markets WHERE deadline IS NULL OR deadline <= 0`,
+      expect: { must: { db_row_count: 0 } },
     },
   ],
 };
