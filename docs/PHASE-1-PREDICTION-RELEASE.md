@@ -21,7 +21,11 @@
 Phase 1 证的是**工程层**, 不是经济层 — 避免误读:
 
 - ✅ **已证 (工程)**: 非托管资金管线 (P2SH 锁仓/双方签名/escrow 编译) + UMA 48h 最终化 gate + 结算 TX 管线, 真链端到端跑通。
-- ❌ **未证 (经济)**: 预言机抗操纵 / 激励模型抗对抗 / bond 数学 / 贿赂成本 / 经济安全。这些靠 Phase 2/3 (攒信任 + 真 bond + 持续吊销 + 真 slash) 真上场后才证。Phase 1 **不解** Owner 的经济兜底关切, 也不 imply 解。
+- ❌ **未证 (经济)**, 具体点名未证项:
+  - **bond 数学是否够覆盖 pot** (= sum(必贿 oracle bond) ≥ pot×1.5 真不真挡得住)
+  - **贿赂成本 / collusion resistance** (= 串谋腐蚀阈值 oracle 的成本是否 > 可能收益)
+  - **激励模型抗对抗** (= 养肥再杀 / sybil 刷单 / domain-shift 等攻击)
+  这些靠 Phase 2/3 (攒信任 + 真 bond + 持续吊销 + 真 slash) 真上场后才证。Phase 1 **不解** Owner 的经济兜底关切, 也不 imply 解。
 
 ## 真链证据 (testnet-12)
 
