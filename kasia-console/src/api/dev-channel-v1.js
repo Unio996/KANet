@@ -265,4 +265,40 @@ export function registerDevChannelV1Routes(fastify) {
     });
   });
 
+  // POST /api/admin/visibility/:txid — flip broadcast visibility internal↔public (Tier 1 spec §2.C, §3 J2-3)
+  // 2026-05-28 KANet-UI fill. Auth: env ADMIN_SECRET header gate (= 简化 admin, Tier 3 升级 multisig/pubkey).
+  // Body: { visibility: 'public' | 'internal' }
+  fastify.post('/api/admin/visibility/:txid', async (request, reply) => {
+    const adminSecret = process.env.ADMIN_SECRET;
+    if (!adminSecret) {
+      return reply.code(503).send({ v: PROTOCOL_VERSION, ok: false, error: 'admin endpoint disabled (= ADMIN_SECRET env 未设)' });
+    }
+    const provided = request.headers['x-kanet-admin-secret'];
+    if (!provided || provided !== adminSecret) {
+      return reply.code(403).send({ v: PROTOCOL_VERSION, ok: false, error: 'admin auth fail (= X-KANet-Admin-Secret header 缺失 OR 不匹配)' });
+    }
+    const { txid } = request.params;
+    if (!/^[a-f0-9]{64}$/.test(txid)) {
+      return reply.code(400).send({ v: PROTOCOL_VERSION, ok: false, error: 'invalid txid (= 64-char hex)' });
+    }
+    const { visibility } = request.body || {};
+    if (visibility !== 'public' && visibility !== 'internal') {
+      return reply.code(400).send({ v: PROTOCOL_VERSION, ok: false, error: "visibility must be 'public' or 'internal'" });
+    }
+    const row = sqlite.prepare(`SELECT id, channel_name, visibility FROM broadcast_messages WHERE tx_hash = ?`).get(txid);
+    if (!row) {
+      return reply.code(404).send({ v: PROTOCOL_VERSION, ok: false, error: 'txid not found in broadcast_messages' });
+    }
+    const result = sqlite.prepare(`UPDATE broadcast_messages SET visibility = ? WHERE tx_hash = ?`).run(visibility, txid);
+    return reply.send({
+      v: PROTOCOL_VERSION,
+      ok: true,
+      txid,
+      channel: row.channel_name,
+      previous_visibility: row.visibility,
+      new_visibility: visibility,
+      changed: result.changes,
+    });
+  });
+
 }
