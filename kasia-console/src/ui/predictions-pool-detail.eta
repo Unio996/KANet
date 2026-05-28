@@ -1,7 +1,10 @@
+<%~ include('partials/page-open', { _page: 'predictions-pool-detail', pageTitle: '市场详情', ...it }) %>
+
 <!-- KANet Oracle UI piece 1+2 (Bettor r128/r129) — pool market detail
      piece 1: live 投票进度 (未结算) · piece 2: settle 结果透明 (已结算)
      数据: /api/pool/market/:id + /api/oracle/markets/:id/audit
-     NOTE: 所有逻辑在 script 块 (= 避免 eta 把 JS 当模板). eta tag 内仅 it.marketId 注入. -->
+     NOTE: page-open partial 加载 Alpine.js + layout (= Bettor r130 实测抓漏 → 必加).
+     所有逻辑在 script 块 (= 避免 eta 把 JS 当模板). eta tag 内仅 it.marketId 注入. -->
 <div x-data="poolDetailPage('<%= it.marketId %>')" x-init="init()" class="max-w-3xl mx-auto px-4 py-6 font-body text-ink-700">
 
   <!-- back link -->
@@ -212,3 +215,5 @@ function poolDetailPage(marketId) {
   };
 }
 </script>
+
+<%~ include('partials/page-close', it) %>
