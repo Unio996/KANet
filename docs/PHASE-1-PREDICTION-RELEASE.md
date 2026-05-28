@@ -33,7 +33,9 @@
 
 - **UMA finalization gate** (commit `cea78b1`): `derivePolymarketVote` 加 `UMA_FINALIZATION_WINDOW_MS` (mainnet 默认 48h; testnet 可设短值练兵)。gamma `closedTime`/`endDate` + window 未过 → oracle abstain → 不 premature settle。
   - 此 gate 源于一次 catch: gamma `closed=true` ≠ UMA 最终化 (挑战窗口可 reverse)。catch → fix → 真链验证 (Espresso 70天>48h, gate 正确放行)。
-- **5-of-5 multi-sig SS escrow**: 结算需 5 oracle 全签 (testnet Phase 3a)。
+- **两条 settle 路径** (历史 TX 两类都含):
+  - **consensual 2-sig 快结**: maker + taker 双方对结果无争议 → 2-of-2 签直接结算 (e.g. `b58e1585`)。
+  - **oracle 5-of-5 判定**: 无人为共识 (镜像/争议路径) → 5 oracle 读真相全签结算 (e.g. Sub4 `c045c58a`, testnet Phase 3a)。
 - **链是唯一真相源**: offer 状态机 (matched→verifying→collecting_sigs→completed) 由链上事实驱动。
 
 ## 用户透明层 (UI Sub6)
@@ -54,7 +56,7 @@ caveat: 最终化状态 + settle link 即时生效; mirror badge 待 Owner appro
 
 ## 不在 Phase 1 范围 (后续)
 
-- Phase 2/3 oracle 演进 (并行判定 / 自动发执照 / 持续吊销) — 引擎已 ready (见 [guide/20-oracle-evolution.md](guide/20-oracle-evolution.md))，但**硬 gate 锁**：发执照前持续吊销引擎 (post_settle_audit) 必先 proven-live。Phase 1 不依赖这些。
+- Phase 2/3 oracle 演进 (并行判定 / 自动发执照 / 持续吊销) — 引擎代码已 ready，但**硬 gate 锁**：发执照前持续吊销引擎 (post_settle_audit) 必先 proven-live (= 已交叉核 ≥1 真票)。auto-grant 在代码层默认 DISABLED。Phase 1 完全不依赖这些。
 - 原生长尾市场即时结算 — 毕业 oracle 之后。
 
 ---
