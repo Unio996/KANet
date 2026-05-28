@@ -217,26 +217,36 @@ function oracleRegistryPage() {
       return 'text-red-600';
     },
 
-    // Bettor r133 三 Phase 演进 — interim 阈值 (= 我 r91 挑3: testnet ≥10 单 vs spec 50 单, 待对抗收敛改这 2 const)
-    // 毕业(graduated): accuracy ≥ INTERIM_GRAD_ACCURACY 且 votes ≥ INTERIM_GRAD_MIN_VOTES; 否则 实习(intern/shadow).
+    // Bettor r133 + Owner r139 执照=挣来的 — phase badge 读权威字段 oracle_registry.licensed_domains (= 系统自动算, UI 不自判).
+    // v151 后: 有执照域 = 毕业(licensed); 无执照 = 实习(练兵场, Owner round 2 可判小额真结算非纯 shadow); frozen = 冻结.
+    // per-domain: 一 oracle 可多域不同 phase (= sports🎓 / finance📝), 这里 card 显总览 (有任一执照=毕业态), modal 展开 per-domain.
     phaseOf(o) {
-      const INTERIM_GRAD_ACCURACY = 90;   // % — spec propose 90, interim 同
-      const INTERIM_GRAD_MIN_VOTES = 10;  // 单 — spec propose 50, 我挑3 testnet 降 10
-      const votes = o.total_votes || 0;
-      const acc = o.accuracy_pct || 0;
-      if (votes >= INTERIM_GRAD_MIN_VOTES && acc >= INTERIM_GRAD_ACCURACY) return 'graduated';
-      return 'intern';
+      if (o.frozen) return 'frozen';
+      const lic = Array.isArray(o.licensed_domains) ? o.licensed_domains : [];
+      return lic.length > 0 ? 'graduated' : 'intern';
     },
     phaseLabel(o) {
-      return this.phaseOf(o) === 'graduated' ? '🎓 毕业' : '📝 实习';
+      const p = this.phaseOf(o);
+      if (p === 'frozen') return '🧊 冻结';
+      if (p === 'graduated') {
+        const n = (o.licensed_domains || []).length;
+        return '🎓 毕业(' + n + '域)';
+      }
+      return '📝 实习';
     },
     phaseClass(o) {
-      return this.phaseOf(o) === 'graduated' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700';
+      const p = this.phaseOf(o);
+      if (p === 'frozen') return 'bg-sky-100 text-sky-700';
+      if (p === 'graduated') return 'bg-emerald-100 text-emerald-700';
+      return 'bg-amber-100 text-amber-700';
     },
     phaseTooltip(o) {
-      return this.phaseOf(o) === 'graduated'
-        ? '毕业: 战绩达标可独立判长尾问题 (= interim 阈值 ≥10 单 ≥90%, 待 r133 spec 收敛)'
-        : '实习: 判定攒战绩中, 影子期不决定真结算 (= 攒够单数+准确率才上岗)';
+      const p = this.phaseOf(o);
+      if (p === 'frozen') return '冻结: 执照暂停 (= 抽检发现退化 OR 争议触发, 待复核)';
+      if (p === 'graduated') {
+        return '毕业: 已获域内执照 [' + (o.licensed_domains || []).join(', ') + '] (= 系统按客观战绩自动发, 仅授获证域)';
+      }
+      return '实习: 练兵场判小额市场攒战绩 (= 小额真结算+5 冗余兜底, 攒够域内战绩系统自动发执照)';
     },
 
     async loadOracles() {

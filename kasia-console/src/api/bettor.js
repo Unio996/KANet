@@ -2191,7 +2191,7 @@ export async function registerBettorRoutes(fastify) {
     if (status) { where.push('status = ?'); params.push(status); }
     const rows = sqlite.prepare(`
       SELECT relay_node_id, pubkey, tier, capabilities, announced_at, expires_at,
-             bond_amount, status, epoch, updated_at
+             bond_amount, status, epoch, updated_at, licensed_domains, frozen
       FROM oracle_registry
       WHERE ${where.join(' AND ')}
       ORDER BY tier ASC, announced_at DESC
@@ -2200,6 +2200,9 @@ export async function registerBettorRoutes(fastify) {
     const out = rows.map(r => ({
       ...r,
       capabilities: r.capabilities ? (() => { try { return JSON.parse(r.capabilities); } catch { return []; } })() : [],
+      // v151 (Owner r139 执照=挣来的): licensed_domains JSON array, frozen 0/1. UI per-domain badge 读权威字段不自算.
+      licensed_domains: r.licensed_domains ? (() => { try { return JSON.parse(r.licensed_domains); } catch { return []; } })() : [],
+      frozen: !!r.frozen,
     }));
     return reply.send({ ok: true, count: out.length, oracles: out });
   });
