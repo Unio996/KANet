@@ -56,6 +56,8 @@ for pidfile in "$PID_DIR"/*.pid; do
   fi
   rm -f "$pidfile"
 done
+# tg-bot: 额外按 cmdline 清 (= 可能 session/手动起无 pidfile) — 防双开 (Telegram 单 poller/token, 否则 409 conflict)
+powershell -Command "Get-CimInstance Win32_Process -Filter \"name='node.exe'\" | Where-Object { \$_.CommandLine -like '*_launch_tg_bot*' -or \$_.CommandLine -like '*tg-bot*bot.mjs*' } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }" 2>/dev/null || true
 # 强制释放端口
 for PORT_CHECK in $CONSOLE_PORT; do
   PIDS=$(powershell -Command "
@@ -103,6 +105,9 @@ if [ -f "$ENV_FILE" ]; then
       BROKER_V2_ENABLED_PEERS) export BROKER_V2_ENABLED_PEERS="$v" ;;
       # B2 v0.5 area-8 E7 — pool market deadline maximum cap (testnet 30day default, mainnet 365day)
       POOL_DEADLINE_MAX_DAY)   export POOL_DEADLINE_MAX_DAY="$v" ;;
+      # 5/29 KANet-UI — dev-channel faucet relay (clean relay#2 d9a8fffb; 原 FaucetRelay-tn 撞 relay-instance BUG1 弃用). 必 export 否则 case 未 match 静默忽略 (= line 100 同坑).
+      FAUCET_RELAY_ID)         export FAUCET_RELAY_ID="$v" ;;
+      FAUCET_AMOUNT_KAS)       export FAUCET_AMOUNT_KAS="$v" ;;
     esac
   done < "$ENV_FILE"
   ok "已加载配置: $ENV_FILE"
@@ -238,6 +243,20 @@ if [ "$READY" -eq 0 ]; then
   err "Console 启动失败！日志:"
   tail -20 "$CONSOLE_LOG"
   exit 1
+fi
+
+# ── 启动 TG bot (broker X 电报前端, S4 — Owner r238/钦定 常驻) ────────────────
+# 在 Console ready 之后起 (bot poller 调 Console S1/S2/brokerInfo). launcher 自读 kanet.env
+# (token) + 解 ingest_secret + 起 tg-bot/bot.mjs. 0-key. broker 走 UI/DB config (env fallback broker-1).
+if grep -q "^TELEGRAM_BOT_TOKEN=" "$ENV_FILE" 2>/dev/null; then
+  TG_BOT_LOG="$LOG_DIR/tg-bot.log"
+  > "$TG_BOT_LOG"
+  ( cd "$CONSOLE_DIR" && node _launch_tg_bot.mjs >> "$TG_BOT_LOG" 2>&1 ) &
+  TG_BOT_PID=$!
+  echo "$TG_BOT_PID" > "$PID_DIR/tg-bot.pid"
+  echo -e "  ${C_GREEN}✓${C_RESET} TG bot @KANET_Broker_bot (PID $TG_BOT_PID, log $TG_BOT_LOG)"
+else
+  echo "  - TG bot 跳过 (kanet.env 无 TELEGRAM_BOT_TOKEN)"
 fi
 
 ok "Console 就绪  →  http://localhost:$CONSOLE_PORT  (PID $CONSOLE_PID)"
