@@ -2,7 +2,7 @@
 // 价值/信任步 NEVER executed here; bot deep-links the USER to Console/relay to act + pay on-chain.
 // Run:  TELEGRAM_BOT_TOKEN=.. BROKER_RELAY_ID=.. INGEST_SECRET=.. node tg-bot/bot.mjs
 import { Bot } from 'grammy';
-import { CONFIG, missingConfig } from './config.mjs';
+import { CONFIG, missingConfig, resolveBrokerRelayId } from './config.mjs';
 import * as api from './console-api.mjs';
 import * as M from './messages.mjs';
 
@@ -10,6 +10,12 @@ const missing = missingConfig();
 if (missing.length) { console.error('[tg-bot] missing env:', missing.join(', ')); process.exit(1); }
 
 const bot = new Bot(CONFIG.botToken);
+
+// broker X identity — resolved from UI/DB config (Owner sets in Console Settings, 0-restart),
+// refreshed periodically so a UI change takes effect live. env BROKER_RELAY_ID is fallback only.
+let brokerRelayId = await resolveBrokerRelayId();
+if (!brokerRelayId) console.warn('[tg-bot] no broker configured — set it in Console Settings → Telegram Bot Broker');
+setInterval(async () => { brokerRelayId = await resolveBrokerRelayId(); }, CONFIG.brokerRefreshMs);
 
 // per-user /link handshake state (tg_user -> {address, nonce}); in-mem, 5min TTL aligns Console nonce.
 const pending = new Map();
@@ -58,4 +64,4 @@ async function pollLoop() {
 setInterval(() => { pollLoop().catch(() => {}); }, CONFIG.pollMs);
 
 bot.start();
-console.log('[tg-bot] @' + CONFIG.botUsername + ' up (broker relay ' + CONFIG.brokerRelayId + ', 0-key / deep-link only)');
+console.log('[tg-bot] @' + CONFIG.botUsername + ' up (broker=' + (brokerRelayId || 'UNSET — set in Console Settings') + ', 0-key / deep-link only)');

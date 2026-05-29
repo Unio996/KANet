@@ -77,6 +77,36 @@
     <main class="flex-1 overflow-y-auto p-6">
       <div class="max-w-3xl mx-auto space-y-6">
 
+        <!-- Telegram Bot Broker (S4) -->
+        <div class="bg-white rounded-lg border border-gray-200" x-data="{
+          brokerId: '', brokers: [], saving: false, saved: false,
+          async init() {
+            try { const r = await fetch('/api/config/tg-bot-broker'); const j = await r.json(); this.brokers = j.brokers || []; this.brokerId = j.broker_relay_id || ''; } catch {}
+          },
+          async save() {
+            if (!this.brokerId) return; this.saving = true; this.saved = false;
+            try { const r = await fetch('/api/config/tg-bot-broker', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ broker_relay_id: this.brokerId }) }); const j = await r.json(); this.saved = !!j.ok; } catch {} finally { this.saving = false; }
+          }
+        }">
+          <div class="px-6 py-4 border-b border-gray-200 flex items-center space-x-2">
+            <svg class="h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 3v-3z"/></svg>
+            <h2 class="text-sm font-semibold text-gray-700">Telegram Bot — Broker 身份</h2>
+          </div>
+          <div class="px-6 py-5 space-y-4">
+            <p class="text-xs text-gray-500">这个 Telegram bot 代言哪个 broker(broker X)。改完<strong>即时生效、不用重启</strong>。bot 以该 broker 身份引导用户兑换/押注,佣金落该 broker 的链上地址。bot 不持私钥、碰不到资金。</p>
+            <select x-model="brokerId" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+              <option value="">— 选 broker relay —</option>
+              <template x-for="b in brokers" :key="b.id">
+                <option :value="b.id" x-text="b.name + ' · ' + (b.address || '').slice(0, 20) + '…'"></option>
+              </template>
+            </select>
+            <div class="flex items-center space-x-3">
+              <button @click="save()" :disabled="saving || !brokerId" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg disabled:opacity-50" x-text="saving ? '保存中…' : '保存'"></button>
+              <span x-show="saved" class="text-sm text-green-600">✓ 已保存(即时生效)</span>
+            </div>
+          </div>
+        </div>
+
         <!-- Node Configuration -->
         <div class="bg-white rounded-lg border border-gray-200" x-data="{
           mode: '<%= it.rpcMode %>',
