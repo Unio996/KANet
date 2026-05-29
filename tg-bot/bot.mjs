@@ -48,8 +48,8 @@ bot.command('verify', async (ctx) => {
   return ctx.reply('✅ 已绑定 ' + p.address + '。该地址链上事件会通知你。/help 看更多。');
 });
 
-bot.command('swap', (ctx) => { const b = M.bridge('swap'); return ctx.reply(b.note + '\n\n' + b.url); });
-bot.command('bet',  (ctx) => { const b = M.bridge('bet');  return ctx.reply(b.note + '\n\n' + b.url); });
+bot.command('swap', async (ctx) => { const broker = await api.brokerInfo(brokerRelayId); return ctx.reply(M.swapFlow(broker)); });
+bot.command('bet',  async (ctx) => { const broker = await api.brokerInfo(brokerRelayId); return ctx.reply(M.betFlow(broker)); });
 bot.command('discover', (ctx) => ctx.reply('浏览:\n' + CONFIG.consoleUrl + '/exchange\n' + CONFIG.consoleUrl + '/predictions'));
 
 // S1 reactive notification poller — only polls addresses a user explicitly /link'd (opt-in).

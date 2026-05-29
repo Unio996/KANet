@@ -40,7 +40,8 @@ export function subscribe(tgUserId, address, eventType, on) {
 }
 
 // broker X identity (read-only) — address shown to users so THEY pay on-chain (bot never moves funds).
-export async function brokerInfo() {
-  const r = await req('GET', `/api/relay/${CONFIG.brokerRelayId}`);
+export async function brokerInfo(brokerRelayId) {
+  if (!brokerRelayId) return null;
+  const r = await req('GET', `/api/relay/${brokerRelayId}`);
   return r.json?.relay || null;
 }
