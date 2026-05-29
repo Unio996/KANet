@@ -48,7 +48,8 @@ function* walk(dir, ext = ['.js', '.mjs']) {
 const argv = process.argv.slice(2);
 const targets = argv.length > 0
   ? argv.map(p => path.resolve(p)).filter(exists)
-  : [...walk(path.join(ROOT, 'kasia-console/src')), ...walk(path.join(ROOT, 'agent-mind/src')), ...walk(path.join(ROOT, 'agent-adapter/src')), ...walk(path.join(ROOT, 'scripts'))];
+  : [...walk(path.join(ROOT, 'kasia-console/src')), ...walk(path.join(ROOT, 'agent-mind/src')), ...walk(path.join(ROOT, 'agent-adapter/src')), ...walk(path.join(ROOT, 'scripts')),
+     ...(exists(path.join(ROOT, 'tg-bot')) ? walk(path.join(ROOT, 'tg-bot')) : [])];  // S5: TG bot service 0-key guard
 
 console.log(`[lint-kanet] scanning ${targets.length} files...`);
 
@@ -608,6 +609,21 @@ function checkKI32_oracle_channel_mutex(filepath, content) {
   }
 }
 
+// ── S5 (TG bot 0-key/0-custody guard, Bettor r211/r212): bot-service files (tg-bot/) MUST NOT touch
+// any key/signing primitive or execute a value/sign relay command. The bot is physically incapable of
+// touching keys or moving funds — value/trust steps deep-link to Console/relay. Machine-enforced.
+function checkS5_tgbot_zerokey(filepath, content) {
+  if (!/[\\/]tg-bot[\\/]/.test(filepath)) return;  // scope: the TG bot service only
+  const lines = content.split('\n');
+  const KEY_PRIM = /getPrivateKey|createInputSignature|signMessage|ecdsa_sign|sign_input_for_settle|\bPrivateKey\b|\bmnemonic\b|privKey|privateKey/i;
+  const VALUE_CMD = /type\s*:\s*['"`](transfer|prediction_settle_tx|prediction_settle_consensual_tx|pool_settle_tx|sign_input_for_settle|ecdsa_sign|get_privkey)['"`]/i;
+  lines.forEach((ln, i) => {
+    if (/^\s*(\/\/|\*)/.test(ln)) return;  // skip comment lines
+    if (KEY_PRIM.test(ln)) violate('S5', '[TG-BOT S5 0-key] bot-service 禁 key/signing primitive (getPrivateKey/createInputSignature/sign 等) — bot 物理碰不到 key. value/trust 步 deep-link Console/relay (Bettor r211).', filepath, i + 1);
+    if (VALUE_CMD.test(ln)) violate('S5', '[TG-BOT S5 0-custody] bot-service 禁执行 value/sign relay command (transfer/settle/sign) — bot 只 deep-link, 不 execute (Bettor r211).', filepath, i + 1);
+  });
+}
+
 // ── 跑 ──
 for (const fp of targets) {
   let content;
@@ -629,6 +645,7 @@ for (const fp of targets) {
   checkKI31_gamma_closed_query(fp, content);  // KI-31 (Bettor r184 5/19): gamma single-market query 必 &closed=true
   checkKI32_oracle_channel_mutex(fp, content);  // KI-32 (Oracle v0.3 R7 J2 #9 + J1 #4): oracle-registry NOT 进 COORD_CHANNELS + ORACLE_REGISTRY_CHANNELS 跟 COORD mutex
   checkKI33_trust_score_placeholder(fp, content);  // KI-33 (Oracle v0.3 §9 5/26): broker-llm-agent.js SYSTEM_PROMPT 必含 {{trust_score}}
+  checkS5_tgbot_zerokey(fp, content);  // S5 (Bettor r211/r212): TG bot service 0-key/0-custody machine-enforce
 }
 checkR10();
 
