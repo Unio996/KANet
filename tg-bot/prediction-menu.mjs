@@ -13,6 +13,9 @@ function fmtDeadline(unixSec) {
   return h > 0 ? `${h}h 后截止` : '已过期';
 }
 
+// 列表里截短标题 (resolution_rule_spec 可能含完整结算规则全文, Bettor r256). 详情页给全文.
+function trunc(s, n) { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+
 export function inBetFlow(tgUser) { return sessions.has(tgUser); }
 export function exitBetFlow(tgUser) { sessions.delete(tgUser); }
 
@@ -43,8 +46,8 @@ export async function handleReply(tgUser, text) {
     if (!cat) return `请回复有效品类编号 (1-${s.categories.length})。`;
     s.stage = 'market'; s.category = cat; s.markets = s.byCat[cat];
     const lines = [`📂 ${cat} — 选市场(回复编号):`, ''];
-    s.markets.forEach((m, i) => lines.push(`${i + 1}. ${m.resolution_rule_spec}  · ${fmtDeadline(m.deadline)} · ${m.bettor_count || 0} 人已押`));
-    lines.push('', '回复数字选市场。');
+    s.markets.forEach((m, i) => lines.push(`${i + 1}. ${trunc(m.resolution_rule_spec, 64)}  · ${fmtDeadline(m.deadline)} · ${m.bettor_count || 0} 人已押`));
+    lines.push('', '回复数字选市场(看完整结算规则)。');
     return lines.join('\n');
   }
 
@@ -52,13 +55,17 @@ export async function handleReply(tgUser, text) {
     const n = parseInt(raw, 10);
     const m = Number.isFinite(n) && s.markets[n - 1];
     if (!m) return `请回复有效市场编号 (1-${s.markets.length})。`;
-    s.stage = 'detail'; s.market = m;
-    return [
-      `📊 ${m.resolution_rule_spec}`,
-      `${fmtDeadline(m.deadline)} · 已 ${m.bettor_count || 0} 人押 · maker stake ${m.maker_stake_kas ?? '?'} KAS`,
-      '',
-      '你押哪边?  回复 1 = YES   ·   2 = NO',
-    ].join('\n');
+    // 拉完整记录给精确结算判据 (Bettor r256 finding: 用户押注前须见完整规则+结算源, 否则吞钱风险).
+    const dr = await api.poolMarket(m.id);
+    const full = (dr.json && (dr.json.market || (dr.json.id ? dr.json : null))) || m;
+    s.stage = 'detail'; s.market = full;
+    const lines = [
+      `📊 ${full.resolution_rule_spec}`,
+      `${fmtDeadline(full.deadline)} · 已 ${full.bettor_count || 0} 人押 · maker stake ${full.maker_stake_kas ?? '?'} KAS`,
+    ];
+    if (full.outcome_market_source) lines.push(`结算源: ${full.outcome_market_source}`);
+    lines.push('', '⚠ 押注前请看清上面【完整结算规则 + 结算源】— 这是判定输赢的唯一依据。', '你押哪边?  回复 1 = YES   ·   2 = NO');
+    return lines.join('\n');
   }
 
   if (s.stage === 'detail') {
