@@ -500,6 +500,11 @@ startMarketSeeder();
 startSeederDepositWatcher();
 startSeederRefundWorker();
 
+// Pool-market seeder (S-A, Bettor r240) — auto-mirror real Polymarket top-volume markets →
+// pending_bettors. Opt-in via POOL_SEEDER_ENABLED=1 + POOL_SEEDER_MAKER_RELAY (off = no-op).
+import { startPoolMarketSeeder } from './services/pool-market-seeder.js';
+startPoolMarketSeeder();
+
 // R5 T-J2-16: retail-dex v1 deprecated, deleted. broker is_service Service 模式
 // 直走 broker-buy/sell-handler + broker-action-queue. retail_dex_orders 表保留
 // (broker-intake-watcher / broker-sell-handler 仍用做用户意图绑定).
