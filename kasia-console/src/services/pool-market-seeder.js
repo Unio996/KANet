@@ -79,11 +79,20 @@ export async function pickGammaMarket() {
     const condStr = String(condId);
     const dup = sqlite.prepare('SELECT 1 FROM pool_markets WHERE outcome_condition_id = ? LIMIT 1').get(condStr);
     if (dup) continue;                                // r247 ③: dedup by conditionId
+    // Bettor r256 finding (Owner rigor): mirror the FULL resolution criteria, not just the title —
+    // bettors must see the precise settlement basis before staking. Compose question + gamma
+    // description + resolutionSource into resolution_rule_spec (capped for sane storage/display).
+    const description = String(m.description || '').trim();
+    const resolutionSource = String(m.resolutionSource || m.resolution_source || '').trim();
+    let rule = String(question).trim();
+    if (description) rule += `\n\nResolution criteria: ${description}`;
+    if (resolutionSource) rule += `\n\nResolution source: ${resolutionSource}`;
     return {
       conditionId: condStr,
-      question: String(question).slice(0, 480),
+      question: String(question).slice(0, 200),       // short title (logging only)
+      resolutionRule: rule.slice(0, 2000),            // full rule → resolution_rule_spec (r256)
       endDateIso: new Date(endMs).toISOString(),
-      category: categorizeMarket(question),           // r247 ①: question is the primary classifier
+      category: categorizeMarket(question),           // r247①/r256: classify on TITLE only (desc false-matches country kw)
       volume24h: parseFloat(m.volume24hr || m.volume || 0),
     };
   }
@@ -107,7 +116,7 @@ export async function tick() {
       maker_relay_id: maker,
       outcome_side: 'YES',
       outcome_end_date: gm.endDateIso,
-      resolution_rule_spec: gm.question,
+      resolution_rule_spec: gm.resolutionRule,
       maker_stake_kas: stakeKas,
       outcome_condition_id: gm.conditionId,
       outcome_market_source: 'polymarket',
