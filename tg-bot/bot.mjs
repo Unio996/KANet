@@ -90,11 +90,15 @@ async function pollPendingBets() {
     }
     const r = await api.poolRegisterConfirm(p.marketId, { linkedAddr: p.linkedAddr, direction: p.direction, stakeKas: p.stakeKas });
     const j = r.json || {};
-    if (r.ok && (j.registered || j.side_lock_tx || j.merkle_index != null)) {
+    if (r.ok && (j.registered || j.already_registered || j.side_lock_tx || j.merkle_index != null)) {
       PM.clearPendingPayment(p.tgUser);
       try { await bot.api.sendMessage(p.tgUser, `✅ 押注已入账! ${p.side} · ${(p.exact_sompi / 1e8).toFixed(8)} KAS\n市场: ${p.question}\n链上到账检测成功, side 已锁仓。结算后用绑定地址领取。`); } catch {}
+    } else if (j.wrong_payment_detected) {
+      // 错付被检测到 — 金额不符无法入账, 且少付会被合约永久锁死 (J2/Bettor 裁决). 诚实披露, 停止盯。
+      PM.clearPendingPayment(p.tgUser);
+      try { await bot.api.sendMessage(p.tgUser, `⚠ 检测到一笔金额不符的付款到该地址。\n按合约规则, 金额不符的付款无法被正确入账, 且【少付会被永久锁死、无法退回】。\n你的押注未成立。请勿再向此地址付款 (重复付款同样无法挽回)。`); } catch {}
     }
-    // else: payment not yet detected (or backend not ready) — keep polling silently.
+    // else (pending / not ok): payment not yet detected — keep polling silently.
   }
 }
 setInterval(() => { pollPendingBets().catch(() => {}); }, CONFIG.pollMs);

@@ -102,11 +102,11 @@ export async function handleReply(tgUser, text, linkedAddr) {
     s.amount = amt;
     const direction = s.side === 'YES' ? 0 : 1;   // PoolSide ctor: 0=YES 1=NO
     const pr = await api.poolRegisterPrep(s.market.id, { linkedAddr, direction, stakeKas: amt });
-    if (!pr.ok || !pr.json || !pr.json.side_p2sh || pr.json.exact_sompi == null) {
+    if (!pr.ok || !pr.json || !pr.json.side_p2sh || pr.json.exact_stake_sompi == null) {
       sessions.delete(tgUser);
       return `押注准备失败: ${(pr.json && pr.json.error) || ('HTTP ' + pr.status)}`;
     }
-    s.prep = { side_p2sh: pr.json.side_p2sh, exact_sompi: pr.json.exact_sompi, direction };
+    s.prep = { side_p2sh: pr.json.side_p2sh, exact_sompi: pr.json.exact_stake_sompi, direction };
     s.stage = 'confirm';
     const kas = sompiToKasStr(s.prep.exact_sompi);
     return [
