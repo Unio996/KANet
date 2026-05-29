@@ -4656,5 +4656,26 @@ export function runMigrations() {
     }
   }
 
+  // v156 — UNIQUE(side_lock_tx) on pool_bettor_sides (prediction-menu bot external-stake idempotency,
+  // Bettor r263 "幂等 UNIQUE tx" + J2 r86). DB-level guard so a single payment TX can't be replayed into
+  // multiple bettor registrations (= the confirm-external ③ idempotency, mirrors v61 exchange_offers.payment_tx).
+  // Partial (NOT NULL) so relay-path rows that predate this (or any NULL) are unaffected.
+  {
+    const hasIdx = sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_pool_sides_side_lock_tx_unique'").get();
+    if (!hasIdx) {
+      try {
+        const dups = sqlite.prepare("SELECT side_lock_tx FROM pool_bettor_sides WHERE side_lock_tx IS NOT NULL GROUP BY side_lock_tx HAVING COUNT(*) > 1").all();
+        if (dups.length > 0) {
+          console.warn(`[migrate] v156: ${dups.length} pre-existing duplicate side_lock_tx — skipping unique index (manual cleanup needed before external-stake go-live).`);
+        } else {
+          sqlite.exec("CREATE UNIQUE INDEX idx_pool_sides_side_lock_tx_unique ON pool_bettor_sides(side_lock_tx) WHERE side_lock_tx IS NOT NULL");
+          console.log('[migrate] v156: pool_bettor_sides UNIQUE(side_lock_tx) partial index created (external-stake TX-reuse guard, Bettor r263 J1 own).');
+        }
+      } catch (e) {
+        console.warn(`[migrate] v156 unique index fail: ${e.message}`);
+      }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
