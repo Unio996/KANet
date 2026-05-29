@@ -4,6 +4,7 @@ import { sqlite } from './client.js';
 import { randomUUID } from 'crypto';
 import { readFileSync, existsSync } from 'node:fs';
 import { encrypt } from '../services/crypto.js';
+import { categorizeMarket } from '../lib/market-category.js';
 
 export function runMigrations() {
   sqlite.exec(`
@@ -4632,6 +4633,26 @@ export function runMigrations() {
         CREATE INDEX idx_prefs_tg_user ON user_notification_prefs(telegram_user_id);
       `);
       console.log('[migrate] v154: user_notification_prefs table + 2 indexes created (TG bot S3 Bettor r219 J2 own).');
+    }
+  }
+
+  // v155 — pool_markets.category for prediction-menu bot discovery (Bettor r240 S-B + Owner r93 多样性钦定, J1 own).
+  // UI S-C grammY inline 菜单按品类分组 (政治/经济/体育/加密/other). Nullable TEXT, existing rows backfilled
+  // by resolution_rule_spec keyword (Bettor r245 11 真热点单 → 可直接测列表过滤). Idempotent: column-exists guard.
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(pool_markets)").all();
+    if (!cols.some(c => c.name === 'category')) {
+      try {
+        sqlite.exec(`ALTER TABLE pool_markets ADD COLUMN category TEXT`);
+        const rows = sqlite.prepare("SELECT id, resolution_rule_spec FROM pool_markets WHERE category IS NULL").all();
+        const upd = sqlite.prepare("UPDATE pool_markets SET category = ? WHERE id = ?");
+        let n = 0;
+        for (const r of rows) { upd.run(categorizeMarket(r.resolution_rule_spec), r.id); n++; }
+        sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_pool_markets_category ON pool_markets(category)`);
+        console.log(`[migrate] v155: pool_markets 加 category TEXT + idx + backfill ${n} 现有单 (prediction-menu bot S-B, Bettor r240/Owner r93 J1 own).`);
+      } catch (e) {
+        console.warn(`[migrate] v155 category ADD COLUMN/backfill fail: ${e.message}`);
+      }
     }
   }
 

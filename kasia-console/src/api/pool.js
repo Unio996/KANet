@@ -4,8 +4,9 @@
 import { sqlite } from '../db/client.js';
 import { computeSpineP2SH, computeSideP2SH } from '../lib/pool-p2sh.mjs';
 import { buildSidesMerkleTree, getMerkleProof } from '../services/pool-merkle-builder.js';
-import { sendCommandAsync, transferAndConfirm } from '../services/relay-manager.js';
+import { sendCommandAsync, transferAndConfirm, isRelayAlive } from '../services/relay-manager.js';
 import { estimateStorageMass } from '../services/pool-market-settler.js';
+import { categorizeMarket } from '../lib/market-category.js';
 import { createHash, randomUUID } from 'node:crypto';
 
 // L4 (area-11): create-time invariants. Hardcoded mirrors of the settler constants;
@@ -56,12 +57,25 @@ export async function registerPoolRoutes(fastify) {
       b.outcome_condition_id = createHash('sha256').update(`${b.resolution_rule_spec}||${b.outcome_end_date}||${b.outcome_side}`).digest('hex').slice(0, 16);
     }
 
+    // S-B (Bettor r240): discovery category for the prediction-menu bot. Caller may pass an explicit
+    // category (= seeder forwards gamma tags); otherwise auto-classify from the rule text. Never null.
+    if (b.category === undefined || b.category === null || b.category === '') {
+      b.category = categorizeMarket(b.resolution_rule_spec);
+    }
+
     // D1: oracle_relay_ids omitted → server-side Fisher-Yates sample 3 from is_oracle=1 pool
     // (excluding maker to prevent self-adjudication per area-1 invariant Q11).
     if (!Array.isArray(b.oracle_relay_ids) || b.oracle_relay_ids.length === 0) {
-      const pool = sqlite.prepare('SELECT id FROM relay_nodes WHERE is_oracle = 1 AND id != ? ORDER BY RANDOM() LIMIT 3').all(b.maker_relay_id);
-      if (pool.length < 3) return reply.code(503).send({ ok: false, error: `oracle pool insufficient: ${pool.length} available, need 3 is_oracle=1 relays (excluding maker)` });
-      b.oracle_relay_ids = pool.map(r => r.id);
+      // Sample from is_oracle=1, but only LIVE relay processes. r211 O-3: a DB is_oracle=1 row whose
+      // relay process is dead (e.g. UAT-Test relays not auto-started) → its bond deposit fails and the
+      // market sticks at pending_oracle_deposits forever. Mirrors the bettor.js publish isRelayAlive guard.
+      const candidates = sqlite.prepare('SELECT id FROM relay_nodes WHERE is_oracle = 1 AND id != ?').all(b.maker_relay_id);
+      const live = candidates.filter(r => isRelayAlive(r.id).alive);
+      if (live.length < 3) {
+        return reply.code(503).send({ ok: false, error: `oracle pool insufficient: ${live.length} live of ${candidates.length} is_oracle=1 relays (excluding maker) — need 3 running. Start more oracle relays.` });
+      }
+      for (let i = live.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [live[i], live[j]] = [live[j], live[i]]; }
+      b.oracle_relay_ids = live.slice(0, 3).map(r => r.id);
     }
     if (!Array.isArray(b.oracle_relay_ids) || b.oracle_relay_ids.length !== 3) {
       return reply.code(400).send({ ok: false, error: 'oracle_relay_ids must be 3 unique relay ids (v0.5 3-of-3)' });
@@ -223,13 +237,13 @@ export async function registerPoolRoutes(fastify) {
         oracle1_pk, oracle2_pk, oracle3_pk, broker_pk,
         deadline, miner_fee, broker_fee_pct, oracle_bond_amount, maker_stake_amount,
         outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side, resolution_rule_spec,
-        protocol_status, sides_merkle_root, oracle_relay_ids, broker_relay_id, metadata
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        protocol_status, sides_merkle_root, oracle_relay_ids, broker_relay_id, metadata, category
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
         marketId, b.maker_relay_id, spineResult.p2shAddr, spineTxId, marketMetadataHash,
         oraclePks[0], oraclePks[1], oraclePks[2], brokerPk,
         deadline, minerFee, brokerFeePct, oracleBondAmount, makerStakeAmount,
         b.outcome_market_source, b.outcome_condition_id, b.outcome_token_id, b.outcome_side, b.resolution_rule_spec,
-        'pending_oracle_deposits', '', JSON.stringify(b.oracle_relay_ids), b.broker_relay_id, initialMetadata,
+        'pending_oracle_deposits', '', JSON.stringify(b.oracle_relay_ids), b.broker_relay_id, initialMetadata, b.category,
       );
     } catch (e) {
       console.error(`[pool/market/create] DB insert fail: ${e.message}`);
@@ -246,6 +260,7 @@ export async function registerPoolRoutes(fastify) {
       // D4 wallet preview: fee breakdown for UI浮窗
       miner_fee_sompi: minerFee,
       broker_fee_pct_bps: brokerFeePct,
+      category: b.category,
       status: 'pending_oracle_deposits',
       next_step: '3 oracle relays must call POST /api/pool/market/' + marketId + '/oracle/deposit',
     });
@@ -483,6 +498,37 @@ export async function registerPoolRoutes(fastify) {
   // GET /api/pool/market/:id/sides_merkle — return Merkle root + tree
   // GET /api/pool/market/:id — full row + computed status (= UI detail A.2b + cycle 5 poll-script fix)
   // Returns: { ok, market: {...all columns + parsed metadata}, sigs_collected, bettor_count }
+  // GET /api/pool/markets — discovery list for the prediction-menu bot (S-C) + UI. S-B (Bettor r240).
+  // Read-only. Filters: ?status= (e.g. pending_bettors), ?category= (politics/economy/sports/crypto/other),
+  // ?limit= (default 50, cap 200), ?offset=. Newest first. Summary fields only + live bettor_count,
+  // so the grammY menu can group by category without N round-trips.
+  fastify.get('/api/pool/markets', async (request, reply) => {
+    const q = request.query || {};
+    const where = [];
+    const params = [];
+    if (q.status)   { where.push('protocol_status = ?'); params.push(String(q.status)); }
+    if (q.category) { where.push('category = ?'); params.push(String(q.category)); }
+    const limit = Math.min(Math.max(parseInt(q.limit, 10) || 50, 1), 200);
+    const offset = Math.max(parseInt(q.offset, 10) || 0, 0);
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const rows = sqlite.prepare(`
+      SELECT id, resolution_rule_spec, outcome_side, category, protocol_status,
+             deadline, maker_stake_amount, oracle_bond_amount,
+             outcome_market_source, outcome_condition_id, created_at,
+             (SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id) AS bettor_count
+      FROM pool_markets
+      ${whereSql}
+      ORDER BY created_at DESC
+      LIMIT ? OFFSET ?
+    `).all(...params, limit, offset);
+    const total = sqlite.prepare(`SELECT COUNT(*) c FROM pool_markets ${whereSql}`).get(...params).c;
+    const markets = rows.map(r => ({
+      ...r,
+      maker_stake_kas: r.maker_stake_amount != null ? r.maker_stake_amount / 1e8 : null,
+    }));
+    return reply.send({ ok: true, total, count: markets.length, limit, offset, markets });
+  });
+
   fastify.get('/api/pool/market/:id', async (request, reply) => {
     const marketId = request.params.id;
     const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
