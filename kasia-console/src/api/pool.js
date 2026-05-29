@@ -5,6 +5,7 @@ import { sqlite } from '../db/client.js';
 import { computeSpineP2SH, computeSideP2SH } from '../lib/pool-p2sh.mjs';
 import { buildSidesMerkleTree, getMerkleProof } from '../services/pool-merkle-builder.js';
 import { sendCommandAsync, transferAndConfirm, isRelayAlive } from '../services/relay-manager.js';
+import { getWorkingRpc } from '../services/rpc-health.js';
 import { estimateStorageMass } from '../services/pool-market-settler.js';
 import { categorizeMarket } from '../lib/market-category.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -519,10 +520,10 @@ export async function registerPoolRoutes(fastify) {
     let d;
     try { d = await _extStakeDeriveSide(market, b.linked_addr, v.direction, v.stakeAmount); }
     catch (e) { return reply.code(e.code || 500).send({ ok: false, error: e.message }); }
-    // Q14: same (bettor_pk, direction, stake) → identical PoolSide P2SH → a 2nd stake there is unclaimable.
-    const dup = sqlite.prepare('SELECT id FROM pool_bettor_sides WHERE market_id = ? AND bettor_pk = ? AND direction = ? AND stake_amount = ?')
-      .get(marketId, d.bettorPk, v.direction, v.stakeAmount);
-    if (dup) return reply.code(409).send({ ok: false, error: 'this (linked addr, direction, stake) already registered — vary stake_kas to add a position' });
+    // One position per address per market (DB UNIQUE market_id+bettor_pk) — warn at prep, BEFORE the user
+    // pays, so a duplicate bet never strands funds in a side P2SH that confirm would have to reject.
+    const existingForBettor = sqlite.prepare('SELECT direction, stake_amount FROM pool_bettor_sides WHERE market_id = ? AND bettor_pk = ?').get(marketId, d.bettorPk);
+    if (existingForBettor) return reply.code(409).send({ ok: false, error: `this address already has a position on this market (direction=${existingForBettor.direction}, stake=${existingForBettor.stake_amount / 1e8} KAS) — one position per address per market` });
     return reply.send({
       ok: true,
       market_id: marketId,
@@ -560,51 +561,52 @@ export async function registerPoolRoutes(fastify) {
     try { d = await _extStakeDeriveSide(market, b.linked_addr, v.direction, v.stakeAmount); }
     catch (e) { return reply.code(e.code || 500).send({ ok: false, error: e.message }); }
     const sideP2sh = d.sideResult.p2shAddr;
-    // Verify against the FULL outputs of each indexed TX (kaspa_tx_log.outputs_json = [{address,amount_sompi}]).
-    // NOT the to_address column — that's a single best-guess output biased to KNOWN relay addresses, so a
-    // payment's output to a (non-relay) side P2SH only shows in outputs_json. (Caught in e2e: the to_address
-    // held the maker's change, not the 0.5 to the side P2SH.) ① dest + ② amount fold into one exact check.
-    const hasExactSideOutput = (oj) => { try { return JSON.parse(oj || '[]').some(o => o.address === sideP2sh && Number(o.amount_sompi) === v.stakeAmount); } catch { return false; } };
-    const hasAnySideOutput   = (oj) => { try { return JSON.parse(oj || '[]').some(o => o.address === sideP2sh); } catch { return false; } };
-    // Resolve the payment TX: explicit tx_hash, else AUTO-DETECT (UI polls w/o tx_hash) — scan indexed TXs
-    // whose outputs_json mentions this side P2SH, newest first, excluding already-registered TXs.
-    let txId = (b.tx_hash || '').trim() || null;
-    if (!txId) {
-      const cands = sqlite.prepare(`
-        SELECT tx_id, outputs_json FROM kaspa_tx_log
-        WHERE outputs_json LIKE ?
-          AND tx_id NOT IN (SELECT side_lock_tx FROM pool_bettor_sides WHERE side_lock_tx IS NOT NULL)
-        ORDER BY block_time DESC LIMIT 20
-      `).all('%' + sideP2sh + '%');
-      const exactCand = cands.find(c => hasExactSideOutput(c.outputs_json));
-      if (!exactCand) {
-        // Re-poll AFTER a successful registration: auto-detect excludes this bettor's own (now-registered)
-        // TX, so it finds nothing new — report the existing registration as done (not "pending").
-        const mine = sqlite.prepare('SELECT side_lock_tx, merkle_index FROM pool_bettor_sides WHERE market_id = ? AND bettor_pk = ? AND direction = ? AND stake_amount = ?')
-          .get(marketId, d.bettorPk, v.direction, v.stakeAmount);
-        if (mine) return reply.send({ ok: true, registered: true, already_registered: true, side_p2sh: sideP2sh, side_lock_tx: mine.side_lock_tx, merkle_index: mine.merkle_index });
-        if (cands.some(c => hasAnySideOutput(c.outputs_json))) {
-          return reply.send({ ok: true, registered: false, wrong_payment_detected: true, side_p2sh: sideP2sh, exact_stake_sompi: v.stakeAmount, note: '错付: payment to the side P2SH found but amount ≠ exact stake — locked till deadline. Pay EXACTLY exact_stake_sompi.' });
-        }
-        return reply.send({ ok: true, registered: false, pending: true, side_p2sh: sideP2sh, exact_stake_sompi: v.stakeAmount, note: 'no matching payment detected yet — keep polling (indexer lag or unpaid)' });
-      }
-      txId = exactCand.tx_id;
+    // Detect the payment by querying the side P2SH's UTXOs DIRECTLY via RPC (Bettor r283 verified).
+    // Authoritative + real-time + indexer-INDEPENDENT: the kaspa_tx_log indexer only covers WATCHED
+    // addresses (relay-pulled), and a non-relay side P2SH is NOT watched, so an external user's payment
+    // would never be indexed (P0, Bettor r282 — my earlier kaspa_tx_log approach only passed e2e because
+    // the test payer was a relay = watched). getUtxosByAddresses sees the UTXO regardless of payer or
+    // indexing, and works for already-landed payments; the UTXO's outpoint.transactionId is the side_lock_tx.
+    let utxos;
+    try {
+      const { url: rpcUrl } = await getWorkingRpc();
+      if (!rpcUrl) return reply.code(503).send({ ok: false, error: 'no working Kaspa RPC node — retry shortly' });
+      const { RpcClient, Encoding, Address } = await import('kaspa-wasm');
+      const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: d.network });
+      await Promise.race([rpc.connect({}), new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 4000))]);
+      try { ({ entries: utxos } = await rpc.getUtxosByAddresses([new Address(sideP2sh)])); }
+      finally { await rpc.disconnect().catch(() => {}); }
+    } catch (e) {
+      return reply.code(503).send({ ok: false, error: `RPC UTXO query failed (${e.message}) — retry shortly` });
     }
-    // ③ idempotent: this exact TX already registered → replay returns ok (UNIQUE side_lock_tx, no double-count).
+    utxos = utxos || [];
+    const wantSompi = BigInt(v.stakeAmount);
+    const exactUtxo = utxos.find(u => { try { return BigInt(u.amount) === wantSompi; } catch { return false; } });
+    if (!exactUtxo) {
+      // Re-poll after success: the bettor already registered (its UTXO stays unspent at the side P2SH)?
+      const mine = sqlite.prepare('SELECT side_lock_tx, merkle_index FROM pool_bettor_sides WHERE market_id = ? AND bettor_pk = ? AND direction = ? AND stake_amount = ?')
+        .get(marketId, d.bettorPk, v.direction, v.stakeAmount);
+      if (mine) return reply.send({ ok: true, registered: true, already_registered: true, side_p2sh: sideP2sh, side_lock_tx: mine.side_lock_tx, merkle_index: mine.merkle_index });
+      // A UTXO exists but not the exact stake → 错付 (locked till deadline); else simply unpaid.
+      if (utxos.length > 0) {
+        return reply.send({ ok: true, registered: false, wrong_payment_detected: true, side_p2sh: sideP2sh, exact_stake_sompi: v.stakeAmount, note: `错付: side P2SH holds ${utxos.length} UTXO(s) but none == exact ${v.stakeAmount} sompi — pay EXACTLY (a mismatched amount is locked until the deadline).` });
+      }
+      return reply.send({ ok: true, registered: false, pending: true, side_p2sh: sideP2sh, exact_stake_sompi: v.stakeAmount, note: 'no matching payment detected yet — keep polling' });
+    }
+    // Exact UTXO found — its outpoint's transactionId is the canonical payment TX (= side_lock_tx).
+    const op = exactUtxo.outpoint || exactUtxo.entry?.outpoint;
+    const txId = op && (op.transactionId || op.transaction_id);
+    if (!txId) return reply.code(500).send({ ok: false, error: 'matching UTXO found but transactionId missing from its outpoint' });
+    // ③ idempotent: already registered for this TX → replay returns ok (UNIQUE side_lock_tx, no double-count).
     const already = sqlite.prepare('SELECT bettor_pk, direction, stake_amount, side_p2sh, merkle_index FROM pool_bettor_sides WHERE market_id = ? AND side_lock_tx = ?').get(marketId, txId);
     if (already) return reply.send({ ok: true, registered: true, already_registered: true, side_lock_tx: txId, ...already });
-    // Verify the resolved TX (NO TX NO STATE CHANGE): outputs_json must contain an output to the side P2SH
-    // for EXACTLY the stake (① dest + ② amount in one check).
-    const txRow = sqlite.prepare('SELECT outputs_json FROM kaspa_tx_log WHERE tx_id = ?').get(txId);
-    if (!txRow) return reply.code(404).send({ ok: false, error: 'tx_hash not in kaspa_tx_log (indexer lag — retry, or the TX did not land)' });
-    if (!hasExactSideOutput(txRow.outputs_json)) {
-      if (hasAnySideOutput(txRow.outputs_json)) return reply.code(400).send({ ok: false, error: `amount mismatch: tx pays the side P2SH but not EXACTLY ${v.stakeAmount} sompi (错付 → locked till deadline)` });
-      return reply.code(400).send({ ok: false, error: `dest mismatch: tx ${txId} has no output to side P2SH ${sideP2sh}` });
+    // One position per address per market (matches the DB UNIQUE(market_id, bettor_pk) — checked here so
+    // a re-bet / different-direction attempt returns a clean 409 instead of a raw constraint 500).
+    const existingForBettor = sqlite.prepare('SELECT side_lock_tx, direction, stake_amount, merkle_index FROM pool_bettor_sides WHERE market_id = ? AND bettor_pk = ?').get(marketId, d.bettorPk);
+    if (existingForBettor) {
+      if (existingForBettor.side_lock_tx === txId) return reply.send({ ok: true, registered: true, already_registered: true, side_lock_tx: txId, merkle_index: existingForBettor.merkle_index });
+      return reply.code(409).send({ ok: false, error: `this address already has a position on this market (direction=${existingForBettor.direction}, stake=${existingForBettor.stake_amount / 1e8} KAS) — one position per address per market` });
     }
-    // Q14 dup + 50-bettor cap (re-check at register time)
-    const dup = sqlite.prepare('SELECT id FROM pool_bettor_sides WHERE market_id = ? AND bettor_pk = ? AND direction = ? AND stake_amount = ?')
-      .get(marketId, d.bettorPk, v.direction, v.stakeAmount);
-    if (dup) return reply.code(409).send({ ok: false, error: 'this (linked addr, direction, stake) already registered' });
     const bettorCount = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(marketId).c;
     if (bettorCount >= 50) return reply.code(409).send({ ok: false, error: 'market full — 50 bettors max per market' });
     // Register — parity with the relay bettor/register: insert pool_bettor_sides + recompute Merkle root.
