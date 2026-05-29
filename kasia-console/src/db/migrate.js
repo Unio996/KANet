@@ -4608,5 +4608,32 @@ export function runMigrations() {
     }
   }
 
+  // v154 — TG bot S3 (Bettor r211/r217/r219 v1.3 — broker X 同身份延申): user_notification_prefs.
+  // 唯一允许 bot Console write 项 (= S5 lint+test 双 enforce 边界).
+  // 用户经 /link (S2 nonce+verifyMessage) 绑 TG user_id → kaspa_address, 选 event_type 订阅推送.
+  // S1 GET /api/events/since?address= 服务端过滤 chain_events 时, bot poll 用 prefs 决定推哪 TG user.
+  // 0-key: bot 0 持 kaspa key, 仅 TG user_id ↔ kaspa_address mapping + subscription state.
+  {
+    const hasPrefsTable = sqlite.prepare(
+      "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='user_notification_prefs'"
+    ).get().cnt > 0;
+    if (!hasPrefsTable) {
+      sqlite.exec(`
+        CREATE TABLE user_notification_prefs (
+          telegram_user_id TEXT NOT NULL,
+          kaspa_address TEXT NOT NULL,
+          event_type TEXT NOT NULL,
+          subscribed INTEGER NOT NULL DEFAULT 1 CHECK (subscribed IN (0,1)),
+          linked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (telegram_user_id, kaspa_address, event_type)
+        );
+        CREATE INDEX idx_prefs_address_event ON user_notification_prefs(kaspa_address, event_type, subscribed);
+        CREATE INDEX idx_prefs_tg_user ON user_notification_prefs(telegram_user_id);
+      `);
+      console.log('[migrate] v154: user_notification_prefs table + 2 indexes created (TG bot S3 Bettor r219 J2 own).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
