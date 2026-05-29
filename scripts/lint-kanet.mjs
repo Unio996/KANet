@@ -615,12 +615,16 @@ function checkKI32_oracle_channel_mutex(filepath, content) {
 function checkS5_tgbot_zerokey(filepath, content) {
   if (!/[\\/]tg-bot[\\/]/.test(filepath)) return;  // scope: the TG bot service only
   const lines = content.split('\n');
-  const KEY_PRIM = /getPrivateKey|createInputSignature|signMessage|ecdsa_sign|sign_input_for_settle|\bPrivateKey\b|\bmnemonic\b|privKey|privateKey/i;
+  const KEY_PRIM = /getPrivateKey|createInputSignature|signMessage|signTransaction|ecdsa_sign|sign_input_for_settle|\bPrivateKey\b|\bmnemonic\b|privKey|privateKey/i;
   const VALUE_CMD = /type\s*:\s*['"`](transfer|prediction_settle_tx|prediction_settle_consensual_tx|pool_settle_tx|sign_input_for_settle|ecdsa_sign|get_privkey)['"`]/i;
+  // value/escrow EXECUTION functions (Bettor r213: add sendKaspa/escrow). Bare "escrow" excluded —
+  // reading escrow status (offer.escrow_p2sh via GET) is allowed; only escrow COMPILE/LOCK/SPEND is not.
+  const VALUE_FN = /\bsendKaspa\b|computeEscrowP2SH|\bescrowLock\b|\bspendFunds\b|\blockFunds\b|unlockP2SH/i;
   lines.forEach((ln, i) => {
     if (/^\s*(\/\/|\*)/.test(ln)) return;  // skip comment lines
-    if (KEY_PRIM.test(ln)) violate('S5', '[TG-BOT S5 0-key] bot-service 禁 key/signing primitive (getPrivateKey/createInputSignature/sign 等) — bot 物理碰不到 key. value/trust 步 deep-link Console/relay (Bettor r211).', filepath, i + 1);
+    if (KEY_PRIM.test(ln)) violate('S5', '[TG-BOT S5 0-key] bot-service 禁 key/signing primitive (getPrivateKey/createInputSignature/signTransaction/sign 等) — bot 物理碰不到 key. value/trust 步 deep-link Console/relay (Bettor r211).', filepath, i + 1);
     if (VALUE_CMD.test(ln)) violate('S5', '[TG-BOT S5 0-custody] bot-service 禁执行 value/sign relay command (transfer/settle/sign) — bot 只 deep-link, 不 execute (Bettor r211).', filepath, i + 1);
+    if (VALUE_FN.test(ln)) violate('S5', '[TG-BOT S5 0-custody] bot-service 禁直调 value/escrow function (sendKaspa/computeEscrowP2SH/escrowLock/spendFunds/unlockP2SH) — bot 只 read+deep-link (Bettor r213).', filepath, i + 1);
   });
 }
 
