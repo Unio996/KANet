@@ -369,8 +369,15 @@ async function dispatchPhase2OrCheckSigs(offer, winnerStr, db) {
     // Check chain_events oracle_tx_sig rows for current round, assemble + submit if 10 collected
     const sigRows = db.prepare(`SELECT payload FROM chain_events WHERE event_type='oracle_tx_sig' AND to_address=? AND payload LIKE ?`)
       .all(offer.maker_kaspa_addr, `%"offer_id":"${offer.id}"%`);
-    const sigsByInput = [[], []];
-    const oracleSeenForInput = [new Set(), new Set()];
+    // Sigs MUST be ordered to match the redeem-script oracle pubkey order
+    // (= outcome_oracle_relay_ids), NOT DB-row / voter-processing order. assembleScriptSig
+    // (p2sh.mjs) concatenates the 5 sigs positionally and the silverc settle entrypoint checks
+    // sig[i] against oracle pubkey[i]. Collecting in arrival order silently passes only when the
+    // oracles' processing order happens to match the set order; a maker-invited oracle whose set
+    // position differs from its row order breaks verification ("script ran, but verification failed").
+    let oracleOrder = [];
+    try { oracleOrder = JSON.parse(offer.outcome_oracle_relay_ids || '[]'); } catch {}
+    const sigByOracleForInput = [new Map(), new Map()];
     for (const row of sigRows) {
       try {
         const p = JSON.parse(row.payload || '{}');
@@ -379,12 +386,13 @@ async function dispatchPhase2OrCheckSigs(offer, winnerStr, db) {
         if (r !== currentRound) continue;
         const inputIdx = parseInt(p.input_index, 10);
         if (inputIdx !== 0 && inputIdx !== 1) continue;
-        if (oracleSeenForInput[inputIdx].has(p.voter_relay_id)) continue;
-        oracleSeenForInput[inputIdx].add(p.voter_relay_id);
-        sigsByInput[inputIdx].push(p.signature);
+        if (sigByOracleForInput[inputIdx].has(p.voter_relay_id)) continue;
+        sigByOracleForInput[inputIdx].set(p.voter_relay_id, p.signature);
       } catch {}
     }
-    if (sigsByInput[0].length < 5 || sigsByInput[1].length < 5) {
+    // Emit each input's sigs in redeem-script oracle order (undefined if any missing).
+    const sigsByInput = [0, 1].map(i => oracleOrder.map(rid => sigByOracleForInput[i].get(rid)));
+    if (oracleOrder.length !== 5 || sigsByInput.some(arr => arr.length !== 5 || arr.some(s => !s))) {
       // TODO Sub 8.1: timeout fallback (= 5 min no progress → refund_both eligible)
       return { handled: true, completed: false };
     }

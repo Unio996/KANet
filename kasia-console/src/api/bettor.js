@@ -1376,7 +1376,13 @@ export async function registerBettorRoutes(fastify) {
       return reply.code(400).send({ ok: false, error: `stake ${stakeKas.toFixed(2)} KAS exceeds max ${MAX_STAKE_PER_OFFER} KAS` });
     }
 
-    const minerFee = parseInt(b.miner_fee, 10) || 1_000_000;  // post-Toccata Bug 19 (NWT r62 5/27): 20_000 too low for kaspad v1.2.0 mass pricing 100 sompi/mass × 7898 mass = 789_800 required for settle_consensual TX. 1_000_000 = ~25% safe margin.
+    // post-Toccata Bug 19 (NWT r62 5/27): kaspad v1.2.0 mass pricing = 100 sompi/mass. The baked
+    // minerFee must cover the WORST-CASE settle path = settle_dispute (2 in + 7 out + 5 sig/input,
+    // compute mass ≈ 16366 → ≈ 1_636_600 required), NOT just settle_consensual (mass ≈ 7898 →
+    // 789_800). Bug 13 class (maker-invite demo 5/28): a consensual-sized minerFee (1_000_000) makes
+    // the dispute settle TX un-submittable ("fees under required"). Default = dispute floor × ~1.5.
+    const DISPUTE_SETTLE_MIN_FEE = 1_636_600;  // kaspad standardness floor for the 2in/7out/10sig dispute TX
+    const minerFee = parseInt(b.miner_fee, 10) || 2_500_000;
     const deadline = Math.floor(outcomeEndMs / 1000);
 
     // v3 双 stake: makerStakeAmount + takerStakeAmount (= 真 P2P, Bettor r233).
@@ -1388,6 +1394,42 @@ export async function registerBettorRoutes(fastify) {
     // Fix: use SAME conversion. Math.round(stakeKas * 1e8) → exact sompi → kas string from sompi → transfer exact.
     const stakeKasSompi = Math.round(stakeKas * 1e8);  // sompi int (= Math.round NOT floor, match kaspad's kasToSompi rounding)
     const stakeKasStr = (stakeKasSompi / 1e8).toFixed(8);  // KAS string from canonical sompi (= guarantee transfer matches baked)
+
+    // 守 6 (Bettor r188 治本): publish-time fee-guard pre-validation. PredictionEscrowUnanimous5.sil
+    // settle_dispute requires `spendable * oracleFeePct >= 1.25e12` (KIP-9 dust guard — each of the 5
+    // oracle-fee outputs must clear ~0.25 KAS or kaspad rejects the settle TX). Without this check, a
+    // too-small stake/fee would lock escrow funds that can NEVER settle via the oracle dispute path
+    // (the consensual path has no oracle outputs, so a disputed small offer gets stuck). Reject HERE,
+    // before any on-chain lock (= 花钱代码验证所有路径). This guard bit twice at settle-time (Bug 14 +
+    // maker-invite demo 5/28); pre-validation stops it at the boundary.
+    const SETTLE_FEE_GUARD = 1_250_000_000_000;
+    // byte-identical to .sil:66 `spendable = inputs[0].value + inputs[1].value - minerFee`: *2 =
+    // makerStake + takerStake (v0 bakes takerStakeAmount == makerStakeAmount == stakeKasSompi below).
+    // If asymmetric stakes are ever allowed, change *2 to (makerStake + takerStake).
+    const spendableSompi = stakeKasSompi * 2 - minerFee;
+    if (spendableSompi * oracleFeePct < SETTLE_FEE_GUARD) {
+      const minOracleFeePct = Math.ceil(SETTLE_FEE_GUARD / spendableSompi);
+      const minStakeEachKas = ((SETTLE_FEE_GUARD / oracleFeePct + minerFee) / 2) / 1e8;
+      return reply.code(400).send({
+        ok: false,
+        error: `stake too small for oracle dispute settle: spendable(${spendableSompi}) × oracleFeePct(${oracleFeePct}) = ${spendableSompi * oracleFeePct} < ${SETTLE_FEE_GUARD} (KIP-9 dust guard: each of 5 oracle-fee outputs must be ≥ 0.25 KAS). Raise oracle_fee_pct to ≥ ${minOracleFeePct} OR each stake to ≥ ${minStakeEachKas.toFixed(2)} KAS.`,
+        settle_fee_guard: SETTLE_FEE_GUARD,
+        spendable_x_oracle_fee_pct: spendableSompi * oracleFeePct,
+      });
+    }
+
+    // 守 6b (Bettor r193 — same principle, second un-settleable failure mode): the baked minerFee must
+    // cover the settle_dispute TX's kaspad standardness floor (≈ 1_636_600 sompi for 2in/7out/10sig at
+    // 100 sompi/mass post-Toccata). A consensual-sized minerFee passes here but makes the *dispute*
+    // settle TX un-submittable ("fees under required"). Reject at publish, before any lock.
+    if (minerFee < DISPUTE_SETTLE_MIN_FEE) {
+      return reply.code(400).send({
+        ok: false,
+        error: `miner_fee ${minerFee} below settle_dispute kaspad floor ${DISPUTE_SETTLE_MIN_FEE} (2in/7out/10sig dispute TX ≈ 16366 mass × 100 sompi/mass post-Toccata). Raise miner_fee to ≥ ${DISPUTE_SETTLE_MIN_FEE} (default 2_500_000 covers it with margin).`,
+        dispute_settle_min_fee: DISPUTE_SETTLE_MIN_FEE,
+        miner_fee: minerFee,
+      });
+    }
 
     const { computeEscrowP2SH } = await import('../lib/prediction-escrow-ss.mjs');
     let escrow;
