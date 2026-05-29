@@ -23,20 +23,6 @@ export function startMessage() {
   ].join('\n');
 }
 
-// /link step 1 — user signs the nonce in their OWN relay (via Console), then pastes the proof back.
-export function linkInstructions(nonce) {
-  return [
-    '🔗 绑定地址(你自己签,bot 0 持钥):',
-    '1) 在 KANet Console 打开你的 relay,对下面这串 nonce 生成一次消息签名:',
-    '',
-    `   ${nonce}`,
-    '',
-    '2) 把得到的 proof 串粘回来:  /verify <proof>',
-    '',
-    '（bot 只把你的 proof 转给 Console 校验 —— 全程碰不到你的私钥。5 分钟内有效。）',
-  ].join('\n');
-}
-
 // 兑换 flow — show broker X's KAS receiving address; the USER pays on-chain from their own wallet.
 // bot 0 execute: 只显地址 + 引导 + deep-link。broker-intake-watcher 在链上检测到付款后继续。
 export function swapFlow(broker) {
@@ -77,8 +63,7 @@ export function help() {
   return [
     '命令:',
     '/start — 介绍',
-    '/link <kaspatest地址> — 绑定(收通知)',
-    '/verify <proof> — 完成绑定',
+    '/link <kaspatest地址> — 绑定地址(直接绑,无需签名)',
     '/swap — 兑换 KAS ↔ USDT(经 broker,链上)',
     '/bet — 押注预测市场',
     '/discover — 浏览开放挂单 / 市场',

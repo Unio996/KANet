@@ -18,9 +18,10 @@ let brokerRelayId = await resolveBrokerRelayId();
 if (!brokerRelayId) console.warn('[tg-bot] no broker configured — set it in Console Settings → Telegram Bot Broker');
 setInterval(async () => { brokerRelayId = await resolveBrokerRelayId(); }, CONFIG.brokerRefreshMs);
 
-// per-user /link handshake state (tg_user -> {address, nonce}); in-mem, 5min TTL aligns Console nonce.
-const pending = new Map();
 // linked users for the reactive notification poller (tg_user -> {address, lastTs}); in-mem v0.
+// /link binds directly — r275 全砍共识 (Bettor r277): no signature challenge (paying FROM an address
+// proves control; PoolSide claim needs the real key, so nonce/verify were redundant). Betting auth =
+// on-chain from-addr check at register-external/confirm.
 const linked = new Map();
 
 bot.command('start', (ctx) => { PM.exitBetFlow(String(ctx.from.id)); return ctx.reply(M.startMessage()); });
@@ -30,24 +31,14 @@ bot.command('link', async (ctx) => {
   const addr = (ctx.match || '').trim();
   if (!/^kaspatest:[a-z0-9]+$/.test(addr)) return ctx.reply('用法: /link <你的 kaspatest 地址>');
   const tgUser = String(ctx.from.id);
-  const r = await api.linkNonce(addr, tgUser);
-  if (!r.ok || !r.json?.nonce) return ctx.reply('绑定发起失败: ' + (r.json?.error || r.status));
-  pending.set(tgUser, { address: addr, nonce: r.json.nonce });
-  return ctx.reply(M.linkInstructions(r.json.nonce));
+  const r = await api.linkBind(addr, tgUser);
+  if (!r.ok || !r.json?.linked) return ctx.reply('绑定失败: ' + (r.json?.error || r.status));
+  linked.set(tgUser, { address: addr, lastTs: Date.now() });
+  return ctx.reply('✅ 已绑定 ' + addr + '。\n押注时从【这个地址】付款即视为你本人 — 链上 from 地址检测鉴权, 无需签名。该地址的链上事件也会通知你。\n/bet 开始押注。');
 });
 
-bot.command('verify', async (ctx) => {
-  const proof = (ctx.match || '').trim();
-  const tgUser = String(ctx.from.id);
-  const p = pending.get(tgUser);
-  if (!p) return ctx.reply('先 /link <地址> 拿 nonce。');
-  if (!proof) return ctx.reply('用法: /verify <proof>');
-  const r = await api.linkVerify(p.address, tgUser, p.nonce, proof);
-  if (!r.ok || !r.json?.linked) return ctx.reply('校验失败: ' + (r.json?.error || r.status));
-  pending.delete(tgUser);
-  linked.set(tgUser, { address: p.address, lastTs: Date.now() });
-  return ctx.reply('✅ 已绑定 ' + p.address + '。该地址链上事件会通知你。/help 看更多。');
-});
+// /verify 已废弃 (r275 全砍签名挑战). 留一句友好提示, 防老指引误导。
+bot.command('verify', (ctx) => ctx.reply('已无需验证 — /link 直接绑定即可(无需签名)。从绑定地址付款本身就是鉴权。/bet 开始押注。'));
 
 bot.command('swap', async (ctx) => { const broker = await api.brokerInfo(brokerRelayId); return ctx.reply(M.swapFlow(broker)); });
 bot.command('bet',  async (ctx) => ctx.reply(await PM.startBet(String(ctx.from.id))));  // S-C: in-chat 编号菜单
