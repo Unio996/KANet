@@ -5,6 +5,7 @@ import { Bot } from 'grammy';
 import { CONFIG, missingConfig, resolveBrokerRelayId } from './config.mjs';
 import * as api from './console-api.mjs';
 import * as M from './messages.mjs';
+import * as PM from './prediction-menu.mjs';
 
 const missing = missingConfig();
 if (missing.length) { console.error('[tg-bot] missing env:', missing.join(', ')); process.exit(1); }
@@ -49,8 +50,21 @@ bot.command('verify', async (ctx) => {
 });
 
 bot.command('swap', async (ctx) => { const broker = await api.brokerInfo(brokerRelayId); return ctx.reply(M.swapFlow(broker)); });
-bot.command('bet',  async (ctx) => { const broker = await api.brokerInfo(brokerRelayId); return ctx.reply(M.betFlow(broker)); });
+bot.command('bet',  async (ctx) => ctx.reply(await PM.startBet(String(ctx.from.id))));  // S-C: in-chat 编号菜单
 bot.command('discover', (ctx) => ctx.reply('浏览:\n' + CONFIG.consoleUrl + '/exchange\n' + CONFIG.consoleUrl + '/predictions'));
+
+// S-C menu navigation — plain-text numeric replies advance the bet flow (commands handled above).
+bot.on('message:text', async (ctx) => {
+  const tgUser = String(ctx.from.id);
+  const txt = ctx.message?.text || '';
+  if (txt.startsWith('/')) return;            // commands handled by bot.command
+  if (PM.inBetFlow(tgUser)) {
+    const reply = await PM.handleReply(tgUser, txt);
+    if (reply) await ctx.reply(reply);
+    return;
+  }
+  await ctx.reply('用 /help 看命令 · /bet 押注 · /swap 兑换 · /link 绑定地址');
+});
 
 // S1 reactive notification poller — only polls addresses a user explicitly /link'd (opt-in).
 async function pollLoop() {

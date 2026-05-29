@@ -45,3 +45,16 @@ export async function brokerInfo(brokerRelayId) {
   const r = await req('GET', `/api/relay/${brokerRelayId}`);
   return r.json?.relay || null;
 }
+
+// S-C — prediction markets (J1 S-B, contract frozen r81). Read-only for the in-chat menu.
+export function poolMarkets({ status, category, limit = 50, offset = 0 } = {}) {
+  const q = new URLSearchParams();
+  if (status) q.set('status', status);
+  if (category) q.set('category', category);
+  q.set('limit', String(limit));
+  q.set('offset', String(offset));
+  return req('GET', `/api/pool/markets?${q.toString()}`);
+}
+export function poolMarket(id) {
+  return req('GET', `/api/pool/market/${encodeURIComponent(id)}`);
+}
