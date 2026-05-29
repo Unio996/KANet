@@ -58,3 +58,19 @@ export function poolMarkets({ status, category, limit = 50, offset = 0 } = {}) {
 export function poolMarket(id) {
   return req('GET', `/api/pool/market/${encodeURIComponent(id)}`);
 }
+
+// S-C stage4-5 — POOL external bettor registration (design LOCKED Bettor r263; J1 building backend).
+// 0-custody (J1 S5): bot NEVER moves funds — prep computes the deterministic side-P2SH so the bot can
+// SHOW the user the exact address + exact amount; the USER pays from their own wallet.
+// prep = deterministic side-P2SH compute, NO state change. → {side_p2sh, exact_sompi(=baked stake), redeem_script}.
+// confirm = bot reports it's awaiting payment; backend runs the 3 validations (dest==side_p2sh +
+//   amount==exact_sompi + UNIQUE tx) against on-chain state → inserts pool_bettor_sides when detected.
+// Path mirrors the existing /api/pool/market/:id/bettor/register convention; exact -external path pending J1 ship.
+export function poolRegisterPrep(marketId, { linkedAddr, direction, stakeKas }) {
+  return req('POST', `/api/pool/market/${encodeURIComponent(marketId)}/bettor/register-external/prep`,
+    { linked_addr: linkedAddr, direction, stake_kas: stakeKas });
+}
+export function poolRegisterConfirm(marketId, { linkedAddr, direction, stakeKas }) {
+  return req('POST', `/api/pool/market/${encodeURIComponent(marketId)}/bettor/register-external/confirm`,
+    { linked_addr: linkedAddr, direction, stake_kas: stakeKas });
+}

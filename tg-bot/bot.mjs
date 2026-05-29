@@ -23,7 +23,7 @@ const pending = new Map();
 // linked users for the reactive notification poller (tg_user -> {address, lastTs}); in-mem v0.
 const linked = new Map();
 
-bot.command('start', (ctx) => ctx.reply(M.startMessage()));
+bot.command('start', (ctx) => { PM.exitBetFlow(String(ctx.from.id)); return ctx.reply(M.startMessage()); });
 bot.command('help', (ctx) => ctx.reply(M.help()));
 
 bot.command('link', async (ctx) => {
@@ -59,7 +59,7 @@ bot.on('message:text', async (ctx) => {
   const txt = ctx.message?.text || '';
   if (txt.startsWith('/')) return;            // commands handled by bot.command
   if (PM.inBetFlow(tgUser)) {
-    const reply = await PM.handleReply(tgUser, txt);
+    const reply = await PM.handleReply(tgUser, txt, linked.get(tgUser)?.address);
     if (reply) await ctx.reply(reply);
     return;
   }
@@ -76,6 +76,28 @@ async function pollLoop() {
   }
 }
 setInterval(() => { pollLoop().catch(() => {}); }, CONFIG.pollMs);
+
+// S-C stage5 — poll backend confirm for users awaiting on-chain bet payment (design LOCKED Bettor r263).
+// confirm runs server-side 3-validation (dest==side_p2sh + amount==exact_sompi + UNIQUE tx) → insert pool_bettor_sides.
+// 0-custody: bot only reports + notifies; it never moves funds. Stops watching past the market deadline.
+async function pollPendingBets() {
+  const nowSec = Date.now() / 1000;
+  for (const p of PM.listPendingPayments()) {
+    if (p.deadline && nowSec > p.deadline) {
+      PM.clearPendingPayment(p.tgUser);
+      try { await bot.api.sendMessage(p.tgUser, '⌛ 市场已截止, 停止盯付款。若你已付款会照常入账/结算。'); } catch {}
+      continue;
+    }
+    const r = await api.poolRegisterConfirm(p.marketId, { linkedAddr: p.linkedAddr, direction: p.direction, stakeKas: p.stakeKas });
+    const j = r.json || {};
+    if (r.ok && (j.registered || j.side_lock_tx || j.merkle_index != null)) {
+      PM.clearPendingPayment(p.tgUser);
+      try { await bot.api.sendMessage(p.tgUser, `✅ 押注已入账! ${p.side} · ${(p.exact_sompi / 1e8).toFixed(8)} KAS\n市场: ${p.question}\n链上到账检测成功, side 已锁仓。结算后用绑定地址领取。`); } catch {}
+    }
+    // else: payment not yet detected (or backend not ready) — keep polling silently.
+  }
+}
+setInterval(() => { pollPendingBets().catch(() => {}); }, CONFIG.pollMs);
 
 bot.start();
 console.log('[tg-bot] @' + CONFIG.botUsername + ' up (broker=' + (brokerRelayId || 'UNSET — set in Console Settings') + ', 0-key / deep-link only)');
