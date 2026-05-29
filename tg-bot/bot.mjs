@@ -34,11 +34,11 @@ bot.command('link', async (ctx) => {
   const r = await api.linkBind(addr, tgUser);
   if (!r.ok || !r.json?.linked) return ctx.reply('绑定失败: ' + (r.json?.error || r.status));
   linked.set(tgUser, { address: addr, lastTs: Date.now() });
-  return ctx.reply('✅ 已绑定 ' + addr + '。\n押注时从【这个地址】付款即视为你本人 — 链上 from 地址检测鉴权, 无需签名。该地址的链上事件也会通知你。\n/bet 开始押注。');
+  return ctx.reply('✅ 已绑定 ' + addr + '。\n这个地址有链上动态会通知你。\n/bet 开始押注。');
 });
 
-// /verify 已废弃 (r275 全砍签名挑战). 留一句友好提示, 防老指引误导。
-bot.command('verify', (ctx) => ctx.reply('已无需验证 — /link 直接绑定即可(无需签名)。从绑定地址付款本身就是鉴权。/bet 开始押注。'));
+// /verify 已废弃 (r275 砍签名挑战). 老用户可能还按旧习惯发, 友好重定向到 /link。
+bot.command('verify', (ctx) => ctx.reply('用 /link <你的 kaspatest 地址> 绑定即可。/bet 开始押注。'));
 
 bot.command('swap', async (ctx) => { const broker = await api.brokerInfo(brokerRelayId); return ctx.reply(M.swapFlow(broker)); });
 bot.command('bet',  async (ctx) => ctx.reply(await PM.startBet(String(ctx.from.id))));  // S-C: in-chat 编号菜单

@@ -63,7 +63,7 @@ export function help() {
   return [
     '命令:',
     '/start — 介绍',
-    '/link <kaspatest地址> — 绑定地址(直接绑,无需签名)',
+    '/link <kaspatest地址> — 绑定你的地址',
     '/swap — 兑换 KAS ↔ USDT(经 broker,链上)',
     '/bet — 押注预测市场',
     '/discover — 浏览开放挂单 / 市场',
