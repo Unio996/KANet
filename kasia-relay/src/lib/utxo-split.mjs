@@ -59,7 +59,12 @@ export async function splitUtxosRelay(targetCount = 3) {
       return { ok: false, reason: 'balance_too_low_for_split', maxSafe: maxN };
     }
 
-    const feeReserve = 5000n;
+    // 5/29 NWT iter 5 (UI r85 BUG2 catch): pre-Toccata feeReserve=5000n + priorityFee=0n
+    // 撞 kaspad v1.2.0 post-Toccata 100 sompi/mass standardness floor. split TX 1→N outputs mass ≈ N×~1500
+    // → 3-split TX mass ~4500 → required fee ~450000 sompi. Hardcoded 5000n way under floor → "not standard" reject.
+    // Fix: feeReserve floor = max(500k, N × 200k) covers structural overhead + per-output mass.
+    // priorityFee floor 500_000n same pattern as transaction.mjs iter 4 (= bce1916).
+    const feeReserve = BigInt(Math.max(500_000, splitCount * 200_000));
     const perOutput = (totalBalance - feeReserve) / BigInt(splitCount);
     const outputs = [];
     for (let i = 0; i < splitCount - 1; i++) {
@@ -69,7 +74,7 @@ export async function splitUtxosRelay(targetCount = 3) {
     const generator = new Generator({
       entries,
       outputs,
-      priorityFee: 0n,
+      priorityFee: 500_000n,
       changeAddress: new Address(address),
       networkId,
     });
