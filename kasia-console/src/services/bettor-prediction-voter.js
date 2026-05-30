@@ -384,10 +384,13 @@ async function processPoolMarket(voter) {
         continue;
       }
       // Bettor r95 cross-node hardening: broadcast vote ONCHAIN (= every node's Scout can ingest).
-      // Producer side per spec: relay emits kanet_oracle_vote_v1 protocol message to kanet-prediction
-      // channel. Real Kaspa txid replaces the prior synthetic 'pool_oracle_vote:...' string so
-      // cross-node dedup-by-txid works (consumer-side Scout filter on remote nodes recreates the
-      // same chain_events row from the same on-chain TX). Closes the most-severe c-class gap I
+      // Producer side per spec: relay emits pool_oracle_vote_v1 protocol message to kanet-prediction
+      // channel. (Per Bettor r98: type name MUST match actual payload.t value at L356 above —
+      // 'pool_oracle_vote_v1', NOT 'kanet_oracle_vote_v1' from Bettor r95 spec draft. J2 consumer
+      // filter must key on the actual payload t string to avoid silent-fail no-ingest.)
+      // Real Kaspa txid replaces the prior synthetic 'pool_oracle_vote:...' string so cross-node
+      // dedup-by-txid works (consumer-side Scout filter on remote nodes recreates the same
+      // chain_events row from the same on-chain TX). Closes the most-severe c-class gap I
       // diagnosed in r165 (vote was 100% local DB before this change).
       let voteTxid;
       try {
