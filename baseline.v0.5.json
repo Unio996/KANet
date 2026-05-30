@@ -1,6 +1,6 @@
 {
   "schema_version": "v0.5-baseline-r1",
-  "captured_at": "2026-05-30T04:59:23.667Z",
+  "captured_at": "2026-05-30T05:46:39.740Z",
   "captured_by": "NWT-tn regression-runner Plan A (A)",
   "summary": {
     "settle_tx_count": 73,
@@ -37,6 +37,15 @@
       "refund_disagreement"
     ],
     "ss_files_v05": {
+      "PoolSide": {
+        "sha256": "9331a7c70aa3a0c9acb0977033de122c97cbe3575fef773fe743538caede8481",
+        "entrypoints": [
+          "settled_via_spine",
+          "claim_winner",
+          "consumed_by_oracle_settlement",
+          "refund_market_cancelled"
+        ]
+      },
       "PoolSpine": {
         "sha256": "38ae5c74bc8b1729e590b970c1baaf5953fd02dd4ef57ae04954d0b60b8e39e3",
         "entrypoints": [
@@ -45,15 +54,6 @@
           "refund_unanimous_silent",
           "refund_maker_unjoined",
           "refund_disagreement"
-        ]
-      },
-      "PoolSide": {
-        "sha256": "9331a7c70aa3a0c9acb0977033de122c97cbe3575fef773fe743538caede8481",
-        "entrypoints": [
-          "settled_via_spine",
-          "claim_winner",
-          "consumed_by_oracle_settlement",
-          "refund_market_cancelled"
         ]
       }
     }

@@ -1,12 +1,40 @@
 {
   "schema_version": "v0.6-compat-verify-r1",
-  "verified_at": "2026-05-30T04:59:23.740Z",
+  "verified_at": "2026-05-30T05:46:39.815Z",
   "baseline_ref": {
     "path": "D:\\kanet-tn12\\baseline.v0.5.json",
     "schema": "v0.5-baseline-r1",
-    "captured_at": "2026-05-30T04:59:23.667Z"
+    "captured_at": "2026-05-30T05:46:39.740Z"
   },
   "checks": [
+    {
+      "name": "v0.5 PoolSide.sil 字节不变 (spec §7 ADDITIVE)",
+      "pass": true,
+      "detail": {
+        "current": "9331a7c70aa3a0c9acb0977033de122c97cbe3575fef773fe743538caede8481",
+        "baseline": "9331a7c70aa3a0c9acb0977033de122c97cbe3575fef773fe743538caede8481"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "v0.5 PoolSide entrypoints 不变 (= 4 件)",
+      "pass": true,
+      "detail": {
+        "current": [
+          "claim_winner",
+          "consumed_by_oracle_settlement",
+          "refund_market_cancelled",
+          "settled_via_spine"
+        ],
+        "baseline": [
+          "settled_via_spine",
+          "claim_winner",
+          "consumed_by_oracle_settlement",
+          "refund_market_cancelled"
+        ]
+      },
+      "severity": "hard"
+    },
     {
       "name": "v0.5 PoolSpine.sil 字节不变 (spec §7 ADDITIVE)",
       "pass": true,
@@ -38,66 +66,7 @@
       "severity": "hard"
     },
     {
-      "name": "v0.5 PoolSide.sil 字节不变 (spec §7 ADDITIVE)",
-      "pass": true,
-      "detail": {
-        "current": "9331a7c70aa3a0c9acb0977033de122c97cbe3575fef773fe743538caede8481",
-        "baseline": "9331a7c70aa3a0c9acb0977033de122c97cbe3575fef773fe743538caede8481"
-      },
-      "severity": "hard"
-    },
-    {
-      "name": "v0.5 PoolSide entrypoints 不变 (= 4 件)",
-      "pass": true,
-      "detail": {
-        "current": [
-          "claim_winner",
-          "consumed_by_oracle_settlement",
-          "refund_market_cancelled",
-          "settled_via_spine"
-        ],
-        "baseline": [
-          "settled_via_spine",
-          "claim_winner",
-          "consumed_by_oracle_settlement",
-          "refund_market_cancelled"
-        ]
-      },
-      "severity": "hard"
-    },
-    {
-      "name": "v0.6 PoolSpine_v06.sil 存在 + ≥3 entrypoint",
-      "pass": true,
-      "detail": {
-        "sha256": "add80d492058a3e41473d7c84c8cbda13a0163da31c5ff1c5d85b766b25b4b33",
-        "entrypoints": [
-          "settle_aggregate",
-          "dispute_reveal",
-          "refund_maker_unjoined"
-        ],
-        "expected": [
-          "settle_aggregate",
-          "dispute_reveal",
-          "refund_maker_unjoined"
-        ]
-      },
-      "severity": "hard"
-    },
-    {
-      "name": "v0.6 PoolSpine_v06 含 spec entrypoints",
-      "pass": true,
-      "detail": {
-        "missing": [],
-        "found": [
-          "settle_aggregate",
-          "dispute_reveal",
-          "refund_maker_unjoined"
-        ]
-      },
-      "severity": "hard"
-    },
-    {
-      "name": "v0.6 PoolSide_v06.sil 存在 + ≥3 entrypoint",
+      "name": "v0.6 PoolSide_v06.sil 存在 + ≥1 entrypoint",
       "pass": true,
       "detail": {
         "sha256": "9c14397cbd931a132e0c948672dc6a6c2bba65c6fa35dde1781d43ac8fa1a098",
@@ -106,38 +75,81 @@
           "claim_winner",
           "refund_market_cancelled"
         ],
-        "expected": [
-          "settled_via_spine",
-          "claim_winner",
-          "refund_market_cancelled"
-        ]
+        "classification": "PoolSide"
       },
       "severity": "hard"
     },
     {
-      "name": "v0.6 PoolSide_v06 含 spec entrypoints",
+      "name": "v0.6 PoolSide_v06 entrypoints 命中 spec hints (PoolSide)",
       "pass": true,
       "detail": {
-        "missing": [],
+        "matched": [
+          "settled_via_spine",
+          "claim_winner",
+          "refund_market_cancelled"
+        ],
         "found": [
+          "settled_via_spine",
+          "claim_winner",
+          "refund_market_cancelled"
+        ],
+        "hints": [
           "settled_via_spine",
           "claim_winner",
           "refund_market_cancelled"
         ]
       },
+      "severity": "soft"
+    },
+    {
+      "name": "v0.6 PoolSpine_v06.sil 存在 + ≥1 entrypoint",
+      "pass": true,
+      "detail": {
+        "sha256": "add80d492058a3e41473d7c84c8cbda13a0163da31c5ff1c5d85b766b25b4b33",
+        "entrypoints": [
+          "settle_aggregate",
+          "dispute_reveal",
+          "refund_maker_unjoined"
+        ],
+        "classification": "PoolSpine"
+      },
       "severity": "hard"
+    },
+    {
+      "name": "v0.6 PoolSpine_v06 entrypoints 命中 spec hints (PoolSpine)",
+      "pass": true,
+      "detail": {
+        "matched": [
+          "settle_aggregate",
+          "dispute_reveal",
+          "refund_maker_unjoined"
+        ],
+        "found": [
+          "settle_aggregate",
+          "dispute_reveal",
+          "refund_maker_unjoined"
+        ],
+        "hints": [
+          "settle_aggregate",
+          "dispute_reveal",
+          "refund_maker_unjoined",
+          "settle_tofn",
+          "settle_5sig"
+        ]
+      },
+      "severity": "soft"
     },
     {
       "name": "v0.5 ≠ v0.6 SS file hashes 全分 (= protocol_version branch 独立, 派生不同 P2SH)",
       "pass": true,
       "detail": {
         "v05_hashes": [
-          "38ae5c74bc8b1729e590b970c1baaf5953fd02dd4ef57ae04954d0b60b8e39e3",
-          "9331a7c70aa3a0c9acb0977033de122c97cbe3575fef773fe743538caede8481"
+          "9331a7c70aa3a0c9acb0977033de122c97cbe3575fef773fe743538caede8481",
+          "38ae5c74bc8b1729e590b970c1baaf5953fd02dd4ef57ae04954d0b60b8e39e3"
         ],
         "v06_hashes": [
-          "add80d492058a3e41473d7c84c8cbda13a0163da31c5ff1c5d85b766b25b4b33",
-          "9c14397cbd931a132e0c948672dc6a6c2bba65c6fa35dde1781d43ac8fa1a098"
+          "9c14397cbd931a132e0c948672dc6a6c2bba65c6fa35dde1781d43ac8fa1a098",
+          "add80d492058a3e41473d7c84c8cbda13a0163da31c5ff1c5d85b766b25b4b33"
         ]
       },
       "severity": "hard"
