@@ -710,10 +710,14 @@ CEX 交易日志。v51 新增 `exchange` 列记录交易所归属（旧记录为
 3. 改字段：SQLite 不支持直接改，需建新表→迁移→删旧表
 4. 新表：migrate.js 新版本，加 `IF NOT EXISTS` 保护
 
-**当前最新版本：v124（r211 Phase 3a v3 oracle — Path D maker 自选 oracle + 3-of-5 multi-sig）**
+**当前最新版本：v161（2026-05-30 r113 Oracle v0.6 path A — pool_snapshots += pool_stakes_json for F-S3 anti-grinding stake snapshot）**
 
 ## 版本历史（近期）
 
+- **v161 (2026-05-30 r113 Oracle v0.6 path A F-S3)**: `pool_snapshots` 新加 `pool_stakes_json` TEXT (= sompi integer string 同序 pool_pks_json; J2 r117 commit 46e904c per Bettor r48 F-S3 anti-grinding: stake 在 market 建市时 freeze, sample-time stake 会让 oracle 看 seed 后 rush-stake 抬权重 = seed-aware grinding). loadPoolSnapshot fail-fast 断 length == pool_size.
+- **v160 (2026-05-30 r113 Oracle v0.6 P0 byproduct strip)**: `pool_bettor_sides` DROP UNIQUE(market_id, bettor_pk) → ADD UNIQUE(side_p2sh) (= Owner P0 via Bettor r23: "1 address 1 market 1 position" byproduct 拔; 放开加仓/两边押/多次; J2 commit e18eab6 schema + J1 commit d81bbf581 endpoint strip).
+- **v159 (2026-05-30 r113 Oracle v0.6 path A J2.1)**: 3 新表 (J2 commit d804175 per Bettor r19 LOCK): `oracle_pool_membership` (relay_id PK + oracle_pk + stake_locked_kas + joined_at + stake_unlock_requested_at + active; v0.6 active oracle pool source, J2 r118 seed endpoint POST /api/oracle-pool/seed 注入); `pool_snapshots` (market_id PK + pool_merkle_root + pool_size + pool_pks_json [+ pool_stakes_json @ v161] + snapshot_at + protocol_version; 每 market 建市 freeze, J2 r119 ensurePoolSnapshot helper 写入, J1 commit 802ceb1b0 create-v06 wire 调用); `pool_committee` (market_id PK + committee_relay_ids + committee_pks + committee_pk_hash + vrf_seed + vrf_proof + threshold default 4 + sampled_at; 每 market deadline 后 sampleAndStoreCommittee VRF stake-weighted 抽 5 委员, J2 c974028 sampler).
+- **v158 (2026-05-30 r113 Oracle v0.6 path A J1)**: `pool_markets` 新加 `protocol_version` TEXT + `pool_merkle_root` TEXT (= J1 commit fcc14adc0 v0.6 opt-in via /api/pool/market/create-v06 endpoint; protocol_version='v0.6' 区分 v0.5; pool_merkle_root 烤进 PoolSpine_v06.sil ctor 锁池成员资格).
 - **v124 (2026-05-20 r211 Phase 3a v3 oracle)**: `exchange_offers` 新加 `outcome_oracle_relay_id` + `resolution_rule_spec` (= Path D maker 自选 oracle + 5 字段 structured 判定规则); `relay_nodes` 新加 `is_oracle` + `oracle_capabilities` + `oracle_stake_locked_kas` + `oracle_reputation_score` + `broker_referral_code/broker_stake_locked_kas/broker_stake_lock_until/broker_approved_by/broker_approved_at` (broker treasury 字段同 line 出 v124)
 - v122 (2026-05-19 r177 Phase 2 prediction market): exchange_offers 新加 outcome_* 字段 (= polymarket-style prediction market on Kaspa) + `maker_kaspa_addr` + `maker_relay_id`
 - v69 (2026-04-22 T6): retail_dex_orders.agent_pay_addr + mid_price_at_quote
