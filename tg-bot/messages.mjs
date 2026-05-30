@@ -10,7 +10,7 @@ export function startMessage() {
     '',
     '这是 builder 协议网络(不是产品)。经这个 broker bot 你可以:',
     '· /swap — 兑换 KAS ↔ USDT(经 broker,链上结算)',
-    '· /bet — 押注预测市场(你自己链上锁仓,5-oracle 结算)',
+    '· /bet — 押注预测市场(你自己链上锁定,5-oracle 结算)',
     '· /mybets — 看自己的押注 + 赢/输/退款状态',
     '· /link — 绑定你的地址,收链上通知',
     '· /discover — 浏览开放挂单 / 预测市场',
@@ -47,10 +47,10 @@ export function betFlow(broker) {
   return [
     `🎲 押注预测市场 — 经 broker ${name}`,
     '',
-    '在 Console 选市场押注:你自己链上锁仓,5 个 oracle 投票结算,全程链上可审计。',
+    '在 Console 选市场押注:你自己链上锁定,5 个 oracle 投票结算,全程链上可审计。',
     'broker 只撮合/引导,收协议内置的 broker 佣金(落 broker 链上地址)。',
     '',
-    '⚠ 你自己链上锁仓 + 签名,bot 不碰你的钱。',
+    '⚠ 你自己链上锁定 + 签名,bot 不碰你的钱。',
     `在网页操作: ${CONFIG.consoleUrl}/predictions`,
   ].join('\n');
 }

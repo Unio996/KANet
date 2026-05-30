@@ -102,16 +102,18 @@ export async function formatMyBets(linkedAddr) {
       p.settle_txid && p.did_win === false ? `😞 输 -${p.stake_kas} KAS` :
       p.settle_txid ? `📊 已结算待最终标注` :
       p.refund_txid ? `💸 已退款` :
-      p.side_lock_tx ? `⏳ 已锁仓等开奖` : `❓ 未上链`;
+      p.side_lock_tx ? `⏳ 已押注等开奖` : `❓ 未上链`;
     const odds = p.yes_implied_prob != null ? `池: YES ${(p.yes_implied_prob*100).toFixed(0)}% / NO ${(100-p.yes_implied_prob*100).toFixed(0)}%` : '';
-    const lockedAt = p.locked_at ? `锁仓于 ${fmtLockedAt(p.locked_at)}` : '';
+    const stakedAt = p.locked_at ? `押注于 ${fmtLockedAt(p.locked_at)}` : '';
     lines.push('');
     lines.push(`• ${p.my_side} ${p.stake_kas} KAS · ${status}`);
     lines.push(`  ${truncSmart(p.question || p.market_id || '', 70)}`);
-    const meta = [odds, lockedAt].filter(Boolean).join(' · ');
+    const meta = [odds, stakedAt].filter(Boolean).join(' · ');
     if (meta) lines.push(`  ${meta}`);
-    if (!p.settle_txid && !p.refund_txid && p.payout_if_win_kas) {
-      lines.push(`  赢可拿 ${Number(p.payout_if_win_kas).toFixed(4)} KAS`);
+    if (!p.settle_txid && !p.refund_txid) {
+      // Bettor r86 ②: open positions 加截止+开奖说明
+      if (p.outcome_end_date) lines.push(`  截止 ${p.outcome_end_date} · 开奖后自动结算到账绑定地址`);
+      if (p.payout_if_win_kas) lines.push(`  赢可拿 ${Number(p.payout_if_win_kas).toFixed(4)} KAS`);
     }
   }
   return lines.join('\n');
