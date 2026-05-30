@@ -4819,5 +4819,22 @@ export function runMigrations() {
     }
   }
 
+  // v161 — Bettor r48 F-S3 fix: snapshot stake-at-create-time (anti-grinding) in pool_snapshots.
+  // Without this, oracle could see VRF seed after market deadline (= endBlockHash + poolRoot are
+  // public after deadline) and rush-stake before sampleAndStoreCommittee runs, gaming weight.
+  // Snapshot stake at create when seed unknown → no grinding possible.
+  // pool_pks_json snapshots WHO; pool_stakes_json snapshots HOW MUCH.
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(pool_snapshots)").all();
+    if (!cols.some(c => c.name === 'pool_stakes_json')) {
+      try {
+        sqlite.exec('ALTER TABLE pool_snapshots ADD COLUMN pool_stakes_json TEXT');
+        console.log('[migrate] v161: pool_snapshots 加 pool_stakes_json (F-S3 fix: snapshot stake@create 防 seed-aware grinding).');
+      } catch (e) {
+        console.warn(`[migrate] v161 ALTER fail: ${e.message}`);
+      }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

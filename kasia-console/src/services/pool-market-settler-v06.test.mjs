@@ -44,39 +44,77 @@ expectThrow('reject negative deadline', () => describeEndBlockRule(-1), 'positiv
 
 // 2. fetchEndBlockHashCanonical with stub reader
 {
+  // current at 100_100, picked at 100_000 → depth 100 ≥ 50 default → OK
   const reader = {
     async getBlocksFromDaaScore(minDaa) {
       return [
-        { hash: 'aa'.repeat(32), daaScore: minDaa - 1 },  // below threshold
-        { hash: 'bb'.repeat(32), daaScore: minDaa },       // first crossing
+        { hash: 'aa'.repeat(32), daaScore: minDaa - 1 },
+        { hash: 'bb'.repeat(32), daaScore: minDaa },
         { hash: 'cc'.repeat(32), daaScore: minDaa + 1 },
       ];
     },
+    async getCurrentDaaScore() { return 100_100; },
   };
   const r = await fetchEndBlockHashCanonical(reader, 100_000);
   assert('fetch picks first crossing daaScore', r.hash === 'bb'.repeat(32));
   assert('block_daa matches', r.block_daa === 100_000);
+  assert('finality_depth_actual = 100', r.finality_depth_actual === 100);
 }
 
 await expectAsyncThrow('reject empty chain response', async () => {
-  await fetchEndBlockHashCanonical({ async getBlocksFromDaaScore() { return []; } }, 100_000);
+  await fetchEndBlockHashCanonical({
+    async getBlocksFromDaaScore() { return []; },
+    async getCurrentDaaScore() { return 100_100; },
+  }, 100_000);
 }, 'no blocks');
 
-await expectAsyncThrow('reject invalid reader', async () => {
+await expectAsyncThrow('reject invalid reader (no getBlocks)', async () => {
   await fetchEndBlockHashCanonical({}, 100_000);
 }, 'chainReader');
+
+await expectAsyncThrow('reject reader missing getCurrentDaaScore (F-S1 finality)', async () => {
+  await fetchEndBlockHashCanonical({
+    async getBlocksFromDaaScore(minDaa) { return [{ hash: 'aa'.repeat(32), daaScore: minDaa }]; },
+  }, 100_000);
+}, 'getCurrentDaaScore');
 
 await expectAsyncThrow('reject below-threshold-only response', async () => {
   await fetchEndBlockHashCanonical({
     async getBlocksFromDaaScore(minDaa) { return [{ hash: 'aa'.repeat(32), daaScore: minDaa - 5 }]; },
+    async getCurrentDaaScore() { return 100_100; },
   }, 100_000);
 }, 'none crossed');
 
 await expectAsyncThrow('reject wrong hash length', async () => {
   await fetchEndBlockHashCanonical({
     async getBlocksFromDaaScore(minDaa) { return [{ hash: 'aabb', daaScore: minDaa }]; },
+    async getCurrentDaaScore() { return 100_100; },
   }, 100_000);
 }, '64-char hex');
+
+// F-S1 finality depth tests (Bettor r48 close gate ① residual fix)
+await expectAsyncThrow('reject pre-finality block (depth < 50 default)', async () => {
+  await fetchEndBlockHashCanonical({
+    async getBlocksFromDaaScore(minDaa) { return [{ hash: 'bb'.repeat(32), daaScore: minDaa }]; },
+    async getCurrentDaaScore() { return 100_010; }, // depth = 10, < 50 default
+  }, 100_000);
+}, 'finality');
+
+{
+  // custom finalityDepth=20 allows depth-30 block
+  const r = await fetchEndBlockHashCanonical({
+    async getBlocksFromDaaScore(minDaa) { return [{ hash: 'bb'.repeat(32), daaScore: minDaa }]; },
+    async getCurrentDaaScore() { return 100_030; },
+  }, 100_000, 20);
+  assert('custom finalityDepth=20 + depth 30 passes', r.hash === 'bb'.repeat(32));
+}
+
+await expectAsyncThrow('reject negative finalityDepth', async () => {
+  await fetchEndBlockHashCanonical({
+    async getBlocksFromDaaScore(minDaa) { return [{ hash: 'bb'.repeat(32), daaScore: minDaa }]; },
+    async getCurrentDaaScore() { return 100_100; },
+  }, 100_000, -1);
+}, 'non-negative');
 
 // 3. computeV06Payouts — basic case (= maker loses)
 {
@@ -164,6 +202,44 @@ expectThrow('invalid winner', () => computeV06Payouts({
 // 6. THRESHOLD + COMMITTEE_SIZE exports
 assert('THRESHOLD = 4', THRESHOLD === 4);
 assert('COMMITTEE_SIZE = 5', COMMITTEE_SIZE === 5);
+
+// 7. F-P1 fix (BigInt totalIn): test with stake > 2^53 (= 9e15 sompi, 9e7 KAS pool)
+{
+  // 9e7 KAS = 9e15 sompi > 2^53 (9.0e15). Without BigInt totalIn, Number precision would lose.
+  const big = 9_000_000_000_000_000n; // 9e7 KAS = 9e15 sompi
+  const r = computeV06Payouts({
+    makerStakeSompi: big,
+    makerDirection: 1,
+    brokerFeePct: 100, oracleFeePct: 100, oracleBondSompi: 100_000_000,
+    minerFeeSompi: 50_000,
+    winner: 0,
+    bettors: [{ pk: 'aa'.repeat(32), direction: 0, stake_sompi: big }],
+  });
+  // If F-P1 not fixed, balance would silently fail. With fix, computation succeeds.
+  assert('F-P1: large stake (>2^53) computes without precision-induced balance fail',
+    !!r.winnerPayouts.find(w => w.pk === 'aa'.repeat(32)));
+}
+
+// 8. F-P3 fix (tolerance widened): many winners + dust
+{
+  // 20 winners, each gets pro-rata share with residue per winner
+  const bettors = [];
+  for (let i = 0; i < 20; i++) {
+    bettors.push({ pk: (i.toString(16).padStart(2, '0')).repeat(32), direction: 0, stake_sompi: 1_000_000_000 });
+  }
+  bettors.push({ pk: 'ff'.repeat(32), direction: 1, stake_sompi: 5_000_000_000 });
+  const r = computeV06Payouts({
+    makerStakeSompi: 10_000_000_000,
+    makerDirection: 1,
+    brokerFeePct: 99, oracleFeePct: 99, oracleBondSompi: 100_000_000,
+    minerFeeSompi: 50_000,
+    winner: 0,
+    bettors,
+  });
+  // 20 winners share distributable → up to 20 sompi residue allowed
+  assert('F-P3: many winners (20) compute under tolerance (= numWinners + 5)',
+    r.winnerPayouts.length === 20);
+}
 
 console.log(failed === 0 ? '[pool-market-settler-v06.test] ALL PASS' : `[pool-market-settler-v06.test] ${failed} FAIL`);
 process.exit(failed === 0 ? 0 : 1);

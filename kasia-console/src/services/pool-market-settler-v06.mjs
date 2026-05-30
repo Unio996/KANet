@@ -33,11 +33,16 @@ import {
 const THRESHOLD = 4; // 4-of-5 (Bettor r19 + J2 r104 lock)
 const MIN_BROKER_FEE_SOMPI = 5_000_000; // 0.05 KAS (mirrors v0.5 MIN_BROKER_FEE_SOMPI in pool-market-settler.js:42)
 
+// Bettor r48 F-S1 residual: chain tip blocks can be reorged. Require finality_depth
+// confirmation (= picked block at least N blocks deep from current tip) so that two
+// verifiers querying at different times converge to the same hash. testnet: 50 default.
+const DEFAULT_FINALITY_DEPTH = 50;
+
 /**
- * F-S1 canonical rule (Bettor r44 close gate ①):
+ * F-S1 canonical rule (Bettor r44 + r48 close gate ①):
  *
  *   endBlockHash = hash of the FIRST block on the selected-parent chain whose daaScore
- *                  is >= market.deadline_daa_score.
+ *                  is >= market.deadline_daa_score AND has reached finality depth.
  *
  * Why this is anti-grinding:
  *   - market.deadline is set at create time (= maker-controlled value).
@@ -71,22 +76,31 @@ export function describeEndBlockRule(deadlineDaaScore) {
 
 /**
  * Fetch endBlockHash from chain via injected reader (= relay IPC).
+ * Bettor r48 F-S1 residual fix: require finality_depth so the picked block is reorg-safe.
  *
- * @param {object} chainReader - { getBlocksFromDaaScore: (minDaa) => Promise<[{ hash, daaScore }]> }
+ * @param {object} chainReader - {
+ *     getBlocksFromDaaScore: (minDaa) => Promise<[{ hash, daaScore }]>,
+ *     getCurrentDaaScore: () => Promise<number>
+ *   }
  * @param {number} deadlineDaaScore
- * @returns {Promise<{ hash: string, block_daa: number }>}
+ * @param {number} [finalityDepth=DEFAULT_FINALITY_DEPTH]
+ * @returns {Promise<{ hash: string, block_daa: number, finality_depth_actual: number }>}
  */
-export async function fetchEndBlockHashCanonical(chainReader, deadlineDaaScore) {
+export async function fetchEndBlockHashCanonical(chainReader, deadlineDaaScore, finalityDepth = DEFAULT_FINALITY_DEPTH) {
   describeEndBlockRule(deadlineDaaScore); // validates input
   if (!chainReader || typeof chainReader.getBlocksFromDaaScore !== 'function') {
     throw new Error('chainReader.getBlocksFromDaaScore(minDaa) → Promise<[{hash,daaScore}]> required');
+  }
+  if (typeof chainReader.getCurrentDaaScore !== 'function') {
+    throw new Error('chainReader.getCurrentDaaScore() → Promise<number> required (F-S1 finality depth check)');
+  }
+  if (!Number.isInteger(finalityDepth) || finalityDepth < 0) {
+    throw new Error(`finalityDepth must be non-negative integer, got ${finalityDepth}`);
   }
   const blocks = await chainReader.getBlocksFromDaaScore(deadlineDaaScore);
   if (!Array.isArray(blocks) || blocks.length === 0) {
     throw new Error(`no blocks at daaScore >= ${deadlineDaaScore} (= deadline not reached on chain)`);
   }
-  // Take first block crossing the threshold (= canonical "earliest selection").
-  // chain reader is expected to return blocks sorted by daaScore ascending.
   const first = blocks.find(b => b.daaScore >= deadlineDaaScore);
   if (!first) {
     throw new Error(`chainReader returned blocks but none crossed daaScore ${deadlineDaaScore}`);
@@ -94,23 +108,36 @@ export async function fetchEndBlockHashCanonical(chainReader, deadlineDaaScore) 
   if (!first.hash || typeof first.hash !== 'string' || first.hash.length !== 64) {
     throw new Error(`endBlock hash must be 64-char hex, got: ${first.hash}`);
   }
-  return { hash: first.hash, block_daa: first.daaScore };
+  const currentDaa = await chainReader.getCurrentDaaScore();
+  if (!Number.isFinite(currentDaa) || currentDaa < first.daaScore) {
+    throw new Error(`current chain daaScore ${currentDaa} < picked block daaScore ${first.daaScore} (chain rewinded?)`);
+  }
+  const actualDepth = currentDaa - first.daaScore;
+  if (actualDepth < finalityDepth) {
+    throw new Error(`F-S1 finality: picked block depth ${actualDepth} < required ${finalityDepth} (anti-reorg gate). Retry after chain advances ${finalityDepth - actualDepth} more blocks.`);
+  }
+  return { hash: first.hash, block_daa: first.daaScore, finality_depth_actual: actualDepth };
 }
 
 /**
  * Load pool snapshot for a market (= what pool was at market create time).
- * Returns { pool_merkle_root, pool_size, pool_pks } where pool_pks is sorted.
+ * Bettor r48 F-S3 fix: returns pool_stakes too (= stake snapshot @ create, anti-grinding).
+ * Returns { pool_merkle_root, pool_size, pool_pks, pool_stakes } sorted by pk_hex ascending.
  */
 export function loadPoolSnapshot(marketId) {
   const row = sqlite.prepare(
-    'SELECT pool_merkle_root, pool_size, pool_pks_json FROM pool_snapshots WHERE market_id = ?'
+    'SELECT pool_merkle_root, pool_size, pool_pks_json, pool_stakes_json FROM pool_snapshots WHERE market_id = ?'
   ).get(marketId);
   if (!row) throw new Error(`no pool_snapshot for market ${marketId}`);
   const pks = JSON.parse(row.pool_pks_json);
   if (!Array.isArray(pks) || pks.length !== row.pool_size) {
     throw new Error(`pool_snapshot ${marketId} corrupt: size=${row.pool_size} pks=${pks?.length}`);
   }
-  return { pool_merkle_root: row.pool_merkle_root, pool_size: row.pool_size, pool_pks: pks };
+  const stakes = row.pool_stakes_json ? JSON.parse(row.pool_stakes_json) : null;
+  if (!stakes || !Array.isArray(stakes) || stakes.length !== pks.length) {
+    throw new Error(`pool_snapshot ${marketId} missing pool_stakes_json (= v161 migration applied? snapshot built post-fix?)`);
+  }
+  return { pool_merkle_root: row.pool_merkle_root, pool_size: row.pool_size, pool_pks: pks, pool_stakes: stakes };
 }
 
 /**
@@ -126,28 +153,22 @@ export function loadPoolSnapshot(marketId) {
  */
 export function sampleAndStoreCommittee(marketId, endBlockHash) {
   const snapshot = loadPoolSnapshot(marketId);
-  // Snapshot stored only PKs; need stake info from oracle_pool_membership at sample time.
-  // Note: stake AT SAMPLE TIME determines weight (= current stake state, not create-time).
-  // Bettor r42 1/4 reads "freeze pool snapshot" applies to MEMBERSHIP (= who's eligible) only;
-  // stake-weighting can use current stake. This avoids snapshotting stake which could be
-  // gamed by maker (= snapshot stake at create when known maker had min stake, gain stake
-  // before sample). Discuss with Bettor if pure pool snapshot incl stake is required.
-  const members = sqlite.prepare(`
-    SELECT relay_id, oracle_pk, stake_locked_kas
-    FROM oracle_pool_membership
-    WHERE active = 1 AND oracle_pk IN (${snapshot.pool_pks.map(() => '?').join(',')})
-  `).all(...snapshot.pool_pks);
-  if (members.length < COMMITTEE_SIZE) {
-    throw new Error(`pool active members ${members.length} < ${COMMITTEE_SIZE} (snapshot pool_size=${snapshot.pool_size})`);
-  }
+  // Bettor r48 F-S3 fix: weight by stake SNAPSHOTTED @ create (= seed unknown then), NOT
+  // current stake @ sample (= seed-aware grinding window opens after endBlockHash visible).
+  // pool_pks + pool_stakes are aligned arrays in sortedPks order.
   const seed = deriveCommitteeSeed(marketId, endBlockHash, snapshot.pool_merkle_root);
   const sampling = selectCommittee(
-    members.map(m => ({ pk_hex: m.oracle_pk, stake_sompi: BigInt(Math.round(Number(m.stake_locked_kas) * 1e8)) })),
+    snapshot.pool_pks.map((pk, i) => ({ pk_hex: pk, stake_sompi: BigInt(snapshot.pool_stakes[i]) })),
     seed
   );
-  // Resolve relay_ids in same order as sampled.selected
+  // Resolve relay_ids from current membership (relay_id mapping doesn't affect anti-grinding)
+  const members = sqlite.prepare(`
+    SELECT relay_id, oracle_pk
+    FROM oracle_pool_membership
+    WHERE oracle_pk IN (${snapshot.pool_pks.map(() => '?').join(',')})
+  `).all(...snapshot.pool_pks);
   const pkToRelay = new Map(members.map(m => [m.oracle_pk.toLowerCase(), m.relay_id]));
-  const committeeRelayIds = sampling.selected.map(s => pkToRelay.get(s.pk_hex));
+  const committeeRelayIds = sampling.selected.map(s => pkToRelay.get(s.pk_hex) || null);
   if (committeeRelayIds.some(r => !r)) throw new Error('sampling produced PK not in membership snapshot');
   const committeePks = sampling.selected.map(s => s.pk_hex);
   const committeePkHash = deriveCommitteePkHash(committeePks).toString('hex');
@@ -268,18 +289,19 @@ export function computeV06Payouts(args) {
       payout_sompi: (w.stake_sompi + share).toString(),
     });
   }
-  // Balance invariant (= J1 r142 sanity): outputs + minerFee == inputs
-  const totalIn = makerStakeSompi + bettors.reduce((s, b) => s + Number(b.stake_sompi), 0)
-    + COMMITTEE_SIZE * Number(oracleBondSompi);
+  // Balance invariant (= J1 r142 sanity, Bettor r48 F-P1 fix: all BigInt to avoid Number > 2^53 precision loss):
+  let totalIn = BigInt(makerStakeSompi);
+  for (const b of bettors) totalIn += BigInt(b.stake_sompi);
+  totalIn += BigInt(COMMITTEE_SIZE) * BigInt(oracleBondSompi);
   const totalWinnerOut = winnerPayouts.reduce((s, w) => s + BigInt(w.payout_sompi), 0n);
   const totalCommitteeOut = BigInt(COMMITTEE_SIZE) * (BigInt(oracleBondSompi) + oracleFeePerCommittee);
   const totalOut = totalWinnerOut + totalCommitteeOut + brokerFee + minerFee;
-  if (BigInt(totalIn) !== totalOut) {
-    // Rounding from division; tolerate residue <= COMMITTEE_SIZE (= oracleFee rounding remainder)
-    const diff = BigInt(totalIn) - totalOut;
-    if (diff < -BigInt(COMMITTEE_SIZE) || diff > BigInt(COMMITTEE_SIZE)) {
-      throw new Error(`balance invariant fail: in=${totalIn} out=${totalOut} diff=${diff}`);
-    }
+  // Bettor r48 F-P3 fix: dust from BOTH winner pro-rata (< numWinners) + oracleFee/N (< COMMITTEE_SIZE).
+  // tolerance = numWinners + COMMITTEE_SIZE covers both rounding residues.
+  const diff = totalIn - totalOut;
+  const tolerance = BigInt(winnerPayouts.length + COMMITTEE_SIZE);
+  if (diff < -tolerance || diff > tolerance) {
+    throw new Error(`balance invariant fail: in=${totalIn} out=${totalOut} diff=${diff} (tolerance ${tolerance})`);
   }
 
   return {
