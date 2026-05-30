@@ -16,7 +16,7 @@ import { createHash, randomUUID } from 'node:crypto';
 // may refactor these into a shared protocol-constants module.
 const STORAGE_MASS_SAFE_THRESHOLD_L4 = 400_000;  // KIP-9 cap with 20% buffer
 const MIN_BROKER_FEE_SOMPI_L4 = 5_000_000;       // 0.05 KAS broker fee floor
-const BETTOR_MIN_STAKE_L4 = 50_000_000;          // 0.5 KAS bettor min (Bug 8)
+const BETTOR_MIN_STAKE_L4 = 100_000;             // 0.001 KAS bettor PHYSICAL min (J2 r108 KIP-9 measurement, 4× safety margin over 50500 sompi math floor); Owner P0 + Bettor r25 stripped the 0.5 KAS rounded "product floor" — only chain physics constrains
 const MAX_BETTORS_L4 = 50;                       // PoolSpine.sil L13 cap
 // 5/28 Owner 钦定: 押注 softcap 拆除 (= 之前 4 KAS testnet 限制阻 UI form 真用户测试). 改 Infinity = 0 cap.
 // Per-market math guards (= storage mass / oracle fee floor) still enforce at L1 console + SS contract.
@@ -153,7 +153,8 @@ export async function registerPoolRoutes(fastify) {
     if (!Number.isFinite(oracleBondKas) || oracleBondKas <= 0) return reply.code(400).send({ ok: false, error: 'oracle_bond_kas must be positive' });
     // 5/28 Owner 钦定: testnet 0 limits. Skip 1 KAS min + softcap when KANET_TESTNET_NO_LIMITS=1.
     if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
-      if (makerStakeKas < 1) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be >= 1 KAS (v0.5 minimum — smaller stakes produce a settle TX exceeding Kaspa storage mass cap)' });
+      // Owner P0 + Bettor r25: maker min raised 1 → 100 KAS (= maker skin-in-game, prevents ghost markets).
+      if (makerStakeKas < 100) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be >= 100 KAS (maker skin-in-game floor per Owner P0, Bettor r25 — prevents ghost markets where maker has no real exposure)' });
       if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS (v0.5 testnet per-market softcap, Bettor r444 + Owner钦定 SS-baked)` });
     }
     const makerStakeAmount = Math.round(makerStakeKas * 1e8);
@@ -343,7 +344,8 @@ export async function registerPoolRoutes(fastify) {
     if (!Number.isFinite(makerStakeKas) || makerStakeKas <= 0) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be positive' });
     if (!Number.isFinite(oracleBondKas) || oracleBondKas <= 0) return reply.code(400).send({ ok: false, error: 'oracle_bond_kas must be positive' });
     if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
-      if (makerStakeKas < 1) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be >= 1 KAS' });
+      // Owner P0 + Bettor r25: maker min raised 1 → 100 KAS (skin-in-game; same rationale as v0.5 path).
+      if (makerStakeKas < 100) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be >= 100 KAS (maker skin-in-game floor)' });
       if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS` });
     }
     const makerStakeAmount = Math.round(makerStakeKas * 1e8);
@@ -550,8 +552,9 @@ export async function registerPoolRoutes(fastify) {
     // L51/57/63/64). Reject before transferAndConfirm so no stake gets stranded.
     const stakeAmount = Math.round(parseFloat(b.stake_kas) * 1e8);
     if (!Number.isFinite(stakeAmount) || stakeAmount <= 0) return reply.code(400).send({ ok: false, error: 'stake_kas must be a positive finite number' });
-    // Bug 8: minimum bettor stake — a tiny stake → tiny winner-payout output → KIP-9 storage mass overflow.
-    if (stakeAmount < 50_000_000) return reply.code(400).send({ ok: false, error: 'stake_kas must be >= 0.5 KAS (v0.5 minimum — smaller stakes produce a settle TX exceeding Kaspa storage mass cap)' });
+    // Bettor r25 + J2 r108: physical floor only (= chain KIP-9 storage mass), no rounded product floor.
+    // J2 measured: stake² >= 2.5e9 sompi (= 50500 sompi math floor); 100_000 sompi = 0.001 KAS with 4× safety.
+    if (stakeAmount < BETTOR_MIN_STAKE_L4) return reply.code(400).send({ ok: false, error: `stake_kas must be >= ${BETTOR_MIN_STAKE_L4 / 1e8} KAS (KIP-9 storage mass physical floor per J2 r108 measurement; smaller stakes produce settle TX exceeding mass cap)` });
 
     // PoolSpine.sil L13 v0.5 hard rule: 50 bettors max per market. Checked here — before
     // transferAndConfirm locks stake on-chain — so a rejected 51st bettor never strands funds.
@@ -642,7 +645,8 @@ export async function registerPoolRoutes(fastify) {
     if (direction !== 0 && direction !== 1) return { error: 'direction must be 0 (YES) or 1 (NO)', code: 400 };
     const stakeAmount = Math.round(parseFloat(b.stake_kas) * 1e8);
     if (!Number.isFinite(stakeAmount) || stakeAmount <= 0) return { error: 'stake_kas must be a positive finite number', code: 400 };
-    if (stakeAmount < 50_000_000) return { error: 'stake_kas must be >= 0.5 KAS (v0.5 minimum — smaller stakes overflow the settle-TX storage mass cap)', code: 400 };
+    // Bettor r25 + J2 r108 KIP-9 measurement: physical floor only (= chain storage mass), no product floor.
+    if (stakeAmount < BETTOR_MIN_STAKE_L4) return { error: `stake_kas must be >= ${BETTOR_MIN_STAKE_L4 / 1e8} KAS (KIP-9 storage mass physical floor per J2 r108 — 4× safety over math floor)`, code: 400 };
     return { direction, stakeAmount };
   }
   // Derive the deterministic side P2SH for an external bettor (by /link-bound address). Throws {code,message}
