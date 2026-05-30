@@ -1,0 +1,31 @@
+{
+  "mode": "static",
+  "analyzed_at": "2026-05-30T06:06:23.923Z",
+  "files_scanned": [
+    "PoolSide_v06",
+    "PoolSpine_v06"
+  ],
+  "findings": [
+    {
+      "severity": "INFO",
+      "msg": "Path A defense PRESENT — 10 individual checkSig + counter require ≥4",
+      "evidence": {
+        "individual_checksigs": 10,
+        "threshold_t": 4
+      }
+    },
+    {
+      "severity": "INFO",
+      "msg": "poolMerkleRoot baked in ctor (= committee constrained to public pool)"
+    },
+    {
+      "severity": "INFO",
+      "msg": "PoolSide v06 ctor binding fields — spineP2shHash:true, poolMerkleRoot:true"
+    },
+    {
+      "severity": "INFO",
+      "msg": "claim_winner body references merkle proof verify"
+    }
+  ],
+  "verdict": "DEFENSE_PRESENT"
+}

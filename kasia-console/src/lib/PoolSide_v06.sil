@@ -1,97 +1,160 @@
-// PoolSide_v06.sil — v0.6 anonymous-pool per-bettor side contract.
+// PoolSide_v06.sil — v0.6 anonymous-pool per-bettor side contract (path A LOCK).
 //
-// Per Bettor r16: per-bettor payout enforcement lives in PoolSide spend conditions
-// (not in spine). v0.5 left this as "TODO Phase 2: full Merkle verify per output" —
-// v0.6 fills the gap so 50-bettor pools settle independently per-side, no spine loop.
+// Per Bettor r19 lock (5/30): per-bettor payout enforcement lives in PoolSide spend conditions
+// (not in spine). v0.5 left this as "TODO Phase 2: full Merkle verify per output" — v0.6 fills
+// the gap so 50-bettor pools settle independently per-side with zero loops.
 //
-// Trust model differences from v0.5:
+// Trust model (path A, Owner ack via Bettor r19):
 // - v0.5 baked 3 individual oracle PKs in ctor (3-of-3 unanimous).
-// - v0.6 takes aggPk + aggSig at claim time (t-of-N FROST/MuSig2 aggregate). Per-event
-//   committee data can't be in ctor (J1 r99 catch + Bettor r7 confirm).
-// - Side binds to its market via spineP2shHash (= same anchor as v0.5).
+// - v0.6 first draft tried aggSig+aggPk arg → caught as fund-loss hole by Bettor r17 +
+//   J1 r119 self-audit (aggPk unbound, attacker self-fabricates with any pool member PKs).
+// - v0.6 path A LOCKED: 5 individual committee sigs at claim + side ctor bakes poolMerkleRoot
+//   + claim verifies committee ∈ poolMerkleRoot (40 blake2b depth-8 unroll) + 4-of-5 threshold
+//   counter on the 5 individual sigs (Owner ack 97.7% liveness).
+// - Side binds to its market via spineP2shHash (same anchor as v0.5).
 //
-// LIMITATION (first draft): aggPk-to-spine binding is NOT enforced at side level
-// (would require silverc OpTxInputSpk loop access, not currently exposed). Bettor
-// off-chain verifies aggPk matches the spine settle TX's committee aggregate before
-// submitting claim. Spine settle TX validates committee inclusion on-chain — side
-// claim_winner is independent fast-path with defense-in-depth via merkle subset proof.
-// Hardening pass: bake aggPk-derivation-root once OpTxInputSpk lands.
+// WHY safe: committee PKs are arg-provided BUT bound via merkle ⊂ poolMerkleRoot (ctor-baked).
+// 5 individual sigs prove THE 5 committee members consented. Impersonation requires forging an
+// individual committee member's private key (= same trust baseline as v0.5 PoolSide 3-of-3
+// oracle model, just per-event committee instead of fixed oracle).
 //
-// Payout formula fix vs v0.5: v0.5 L88 hardcoded winnerPool = totalYesPool (= NO winners
-// would compute wrong payout — v0.5 bug). v0.6 branches via arithmetic since silverc
-// supports int ops: winnerPool = totalYesPool*(1-w) + totalNoPool*w  (w ∈ {0,1}).
+// Hardcoded merkle order (leaf-left at every level): matches J2.1's pool-merkle-builder
+// convention + matches v0.5 PoolSide pattern. Inherits v0.5 latent leftmost-only bug for the
+// bettor merkle (= bettor at index != 0 fails merkle). Direction-aware merkle verify is a
+// follow-on (J1 r116 partial design; silverc if/else probe PASS at 223 bytes — feasibility
+// confirmed) once J2.1 confirms proof builder semantics for committee depth-8 + bettor depth-6.
+//
+// Threshold t=4-of-5 (Owner ack via Bettor r19 — 5/30): 97.7% liveness, tolerates 1 absent
+// committee member. Counter pattern per J1 r120 probe.
+//
+// Payout fix vs v0.5: branches via arithmetic since silverc has no native if for int:
+// winnerPool = totalYesPool*(1-w) + totalNoPool*w where w ∈ {0,1}.
 
 pragma silverscript ^0.1.0;
 
 contract PoolSide_v06(
     byte[32] bettorPk,
     byte[32] spineP2shHash,
+    byte[32] poolMerkleRoot,        // path A: same root as spine — anchors committee membership at claim
     byte[32] marketMetadataHash,
-    int direction,          // 0 = YES, 1 = NO
+    int direction,                  // 0 = YES, 1 = NO
     int stakeAmount,
     int deadline
 ) {
-    // entry 0 — settled_via_spine: side consumed by spine settle TX (cooperative path).
-    // Phase 1: trust spine settle entry to validate everything. Side just allows itself
-    // to be consumed alongside the spine UTXO; spine entry does aggregate sig + winner verify.
+    // entry 0 — settled_via_spine: cooperative path, trusts spine settle TX.
     entrypoint function settled_via_spine() {
         require(tx.inputs.length >= 2);  // spine + this side minimum
-        // Phase 2 TODO (matches v0.5 PoolSide L39-41): once silverc exposes
-        // OpTxInputSpk, verify one input's spk hash == spineP2shHash (cross-market reuse defense).
     }
 
-    // entry 1 — claim_winner: bettor self-claims with aggregate oracle sig + merkle proof.
-    // Depth-6 unrolled (= 2^6 = 64 ≥ 50-bettor v0.5 cap; matches v0.5 PoolSide.claim_winner).
-    // Per Bettor r16: this is the per-bettor enforcement layer (merkle ∈ sidesMerkleRoot
-    // + winner match + own output amount correct) — fills v0.5 "TODO Phase 2".
+    // entry 1 — claim_winner (path A LOCK): 4-of-5 individual committee sigs + committee
+    // merkle ∈ poolMerkleRoot + bettor merkle ∈ sidesMerkleRoot + payout output.
     entrypoint function claim_winner(
         sig bettorSig,
-        sig aggSig,
-        byte[32] aggPk,
+        sig c0Sig, sig c1Sig, sig c2Sig, sig c3Sig, sig c4Sig,
+        byte[32] c0Pk, byte[32] c1Pk, byte[32] c2Pk, byte[32] c3Pk, byte[32] c4Pk,
+        byte[32] c0s0, byte[32] c0s1, byte[32] c0s2, byte[32] c0s3, byte[32] c0s4, byte[32] c0s5, byte[32] c0s6, byte[32] c0s7,
+        byte[32] c1s0, byte[32] c1s1, byte[32] c1s2, byte[32] c1s3, byte[32] c1s4, byte[32] c1s5, byte[32] c1s6, byte[32] c1s7,
+        byte[32] c2s0, byte[32] c2s1, byte[32] c2s2, byte[32] c2s3, byte[32] c2s4, byte[32] c2s5, byte[32] c2s6, byte[32] c2s7,
+        byte[32] c3s0, byte[32] c3s1, byte[32] c3s2, byte[32] c3s3, byte[32] c3s4, byte[32] c3s5, byte[32] c3s6, byte[32] c3s7,
+        byte[32] c4s0, byte[32] c4s1, byte[32] c4s2, byte[32] c4s3, byte[32] c4s4, byte[32] c4s5, byte[32] c4s6, byte[32] c4s7,
         int settlementWinner,
         int totalYesPool,
         int totalNoPool,
         byte[32] sidesMerkleRoot,
-        byte[32] sibling0,
-        byte[32] sibling1,
-        byte[32] sibling2,
-        byte[32] sibling3,
-        byte[32] sibling4,
-        byte[32] sibling5
+        byte[32] sibling0, byte[32] sibling1, byte[32] sibling2,
+        byte[32] sibling3, byte[32] sibling4, byte[32] sibling5
     ) {
+        // ① bettor sig
         require(checkSig(bettorSig, pubkey(bettorPk)));
-        require(checkSig(aggSig, pubkey(aggPk)));
+
+        // ② path A t=4-of-5 threshold counter (same pattern as spine settle_aggregate).
+        int validSigs = 0;
+        if (checkSig(c0Sig, pubkey(c0Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c1Sig, pubkey(c1Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c2Sig, pubkey(c2Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c3Sig, pubkey(c3Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c4Sig, pubkey(c4Pk))) { validSigs = validSigs + 1; }
+        require(validSigs >= 4);
+
         require(settlementWinner == 0 || settlementWinner == 1);
         require(direction == settlementWinner);  // = "I'm on the winning side"
         require(totalYesPool > 0);
         require(totalNoPool > 0);
 
-        // Merkle proof verify: bettor's leaf climbs 6 levels to sidesMerkleRoot.
-        // Leaf = blake2b(bettorPk) (= v0.5 simplification; canonical version hashes (pk||dir||stake)).
-        byte[32] leaf = blake2b(byte[](bettorPk));
-        byte[] step0 = leaf + sibling0;
-        byte[32] level0 = blake2b(step0);
-        byte[] step1 = level0 + sibling1;
-        byte[32] level1 = blake2b(step1);
-        byte[] step2 = level1 + sibling2;
-        byte[32] level2 = blake2b(step2);
-        byte[] step3 = level2 + sibling3;
-        byte[32] level3 = blake2b(step3);
-        byte[] step4 = level3 + sibling4;
-        byte[32] level4 = blake2b(step4);
-        byte[] step5 = level4 + sibling5;
-        byte[32] root = blake2b(step5);
+        // ③ path A: each committee PK ∈ poolMerkleRoot (depth-8 merkle unroll, hardcoded leaf-left).
+        byte[32] c0Leaf  = blake2b(byte[](c0Pk));
+        byte[]   c0St0   = c0Leaf + c0s0;  byte[32] c0L0 = blake2b(c0St0);
+        byte[]   c0St1   = c0L0   + c0s1;  byte[32] c0L1 = blake2b(c0St1);
+        byte[]   c0St2   = c0L1   + c0s2;  byte[32] c0L2 = blake2b(c0St2);
+        byte[]   c0St3   = c0L2   + c0s3;  byte[32] c0L3 = blake2b(c0St3);
+        byte[]   c0St4   = c0L3   + c0s4;  byte[32] c0L4 = blake2b(c0St4);
+        byte[]   c0St5   = c0L4   + c0s5;  byte[32] c0L5 = blake2b(c0St5);
+        byte[]   c0St6   = c0L5   + c0s6;  byte[32] c0L6 = blake2b(c0St6);
+        byte[]   c0St7   = c0L6   + c0s7;  byte[32] c0Root = blake2b(c0St7);
+        require(c0Root == poolMerkleRoot);
+
+        byte[32] c1Leaf  = blake2b(byte[](c1Pk));
+        byte[]   c1St0   = c1Leaf + c1s0;  byte[32] c1L0 = blake2b(c1St0);
+        byte[]   c1St1   = c1L0   + c1s1;  byte[32] c1L1 = blake2b(c1St1);
+        byte[]   c1St2   = c1L1   + c1s2;  byte[32] c1L2 = blake2b(c1St2);
+        byte[]   c1St3   = c1L2   + c1s3;  byte[32] c1L3 = blake2b(c1St3);
+        byte[]   c1St4   = c1L3   + c1s4;  byte[32] c1L4 = blake2b(c1St4);
+        byte[]   c1St5   = c1L4   + c1s5;  byte[32] c1L5 = blake2b(c1St5);
+        byte[]   c1St6   = c1L5   + c1s6;  byte[32] c1L6 = blake2b(c1St6);
+        byte[]   c1St7   = c1L6   + c1s7;  byte[32] c1Root = blake2b(c1St7);
+        require(c1Root == poolMerkleRoot);
+
+        byte[32] c2Leaf  = blake2b(byte[](c2Pk));
+        byte[]   c2St0   = c2Leaf + c2s0;  byte[32] c2L0 = blake2b(c2St0);
+        byte[]   c2St1   = c2L0   + c2s1;  byte[32] c2L1 = blake2b(c2St1);
+        byte[]   c2St2   = c2L1   + c2s2;  byte[32] c2L2 = blake2b(c2St2);
+        byte[]   c2St3   = c2L2   + c2s3;  byte[32] c2L3 = blake2b(c2St3);
+        byte[]   c2St4   = c2L3   + c2s4;  byte[32] c2L4 = blake2b(c2St4);
+        byte[]   c2St5   = c2L4   + c2s5;  byte[32] c2L5 = blake2b(c2St5);
+        byte[]   c2St6   = c2L5   + c2s6;  byte[32] c2L6 = blake2b(c2St6);
+        byte[]   c2St7   = c2L6   + c2s7;  byte[32] c2Root = blake2b(c2St7);
+        require(c2Root == poolMerkleRoot);
+
+        byte[32] c3Leaf  = blake2b(byte[](c3Pk));
+        byte[]   c3St0   = c3Leaf + c3s0;  byte[32] c3L0 = blake2b(c3St0);
+        byte[]   c3St1   = c3L0   + c3s1;  byte[32] c3L1 = blake2b(c3St1);
+        byte[]   c3St2   = c3L1   + c3s2;  byte[32] c3L2 = blake2b(c3St2);
+        byte[]   c3St3   = c3L2   + c3s3;  byte[32] c3L3 = blake2b(c3St3);
+        byte[]   c3St4   = c3L3   + c3s4;  byte[32] c3L4 = blake2b(c3St4);
+        byte[]   c3St5   = c3L4   + c3s5;  byte[32] c3L5 = blake2b(c3St5);
+        byte[]   c3St6   = c3L5   + c3s6;  byte[32] c3L6 = blake2b(c3St6);
+        byte[]   c3St7   = c3L6   + c3s7;  byte[32] c3Root = blake2b(c3St7);
+        require(c3Root == poolMerkleRoot);
+
+        byte[32] c4Leaf  = blake2b(byte[](c4Pk));
+        byte[]   c4St0   = c4Leaf + c4s0;  byte[32] c4L0 = blake2b(c4St0);
+        byte[]   c4St1   = c4L0   + c4s1;  byte[32] c4L1 = blake2b(c4St1);
+        byte[]   c4St2   = c4L1   + c4s2;  byte[32] c4L2 = blake2b(c4St2);
+        byte[]   c4St3   = c4L2   + c4s3;  byte[32] c4L3 = blake2b(c4St3);
+        byte[]   c4St4   = c4L3   + c4s4;  byte[32] c4L4 = blake2b(c4St4);
+        byte[]   c4St5   = c4L4   + c4s5;  byte[32] c4L5 = blake2b(c4St5);
+        byte[]   c4St6   = c4L5   + c4s6;  byte[32] c4L6 = blake2b(c4St6);
+        byte[]   c4St7   = c4L6   + c4s7;  byte[32] c4Root = blake2b(c4St7);
+        require(c4Root == poolMerkleRoot);
+
+        // ④ bettor merkle proof ∈ sidesMerkleRoot (depth-6, hardcoded leaf-left order).
+        // Inherits v0.5 latent leftmost-only bug — direction-aware fix is follow-on.
+        byte[32] leaf  = blake2b(byte[](bettorPk));
+        byte[]   step0 = leaf  + sibling0;  byte[32] lvl0 = blake2b(step0);
+        byte[]   step1 = lvl0  + sibling1;  byte[32] lvl1 = blake2b(step1);
+        byte[]   step2 = lvl1  + sibling2;  byte[32] lvl2 = blake2b(step2);
+        byte[]   step3 = lvl2  + sibling3;  byte[32] lvl3 = blake2b(step3);
+        byte[]   step4 = lvl3  + sibling4;  byte[32] lvl4 = blake2b(step4);
+        byte[]   step5 = lvl4  + sibling5;  byte[32] root  = blake2b(step5);
         require(root == sidesMerkleRoot);
 
-        // Payout = bettor share of total pool (proportional to winner-side stakes).
-        // FIX vs v0.5 (L88 always picks YES): branch via arithmetic since silverc has no if.
-        // settlementWinner == 0 (YES): winnerPool = totalYesPool*1 + totalNoPool*0 = totalYesPool
-        // settlementWinner == 1 (NO):  winnerPool = totalYesPool*0 + totalNoPool*1 = totalNoPool
+        // ⑤ payout calculation (arithmetic branch — fixes v0.5 L88 NO-winner bug).
         int notWinner = 1 - settlementWinner;
         int winnerPool = totalYesPool * notWinner + totalNoPool * settlementWinner;
         int totalPool = totalYesPool + totalNoPool;
         int payout = stakeAmount * totalPool / winnerPool;
 
+        // ⑥ output to bettor.
         require(tx.outputs.length == 1);
         byte[34] bettorLock = new ScriptPubKeyP2PK(pubkey(bettorPk));
         require(tx.outputs[0].scriptPubKey == byte[](bettorLock));
