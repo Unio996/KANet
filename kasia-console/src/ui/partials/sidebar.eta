@@ -55,8 +55,8 @@
           <span class="text-[10px] transition-transform" :class="roles ? 'rotate-90' : ''">›</span>
         </button>
         <div x-show="roles" x-transition class="space-y-0.5">
-          <a href="/agent?tab=broker"
-            class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-7 <%= it._agentTab === 'broker' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          <a href="/broker"
+            class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-7 <%= it._page === 'broker' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
             Broker
           </a>
           <a href="/agent?tab=oracle"

@@ -377,6 +377,14 @@ fastify.get('/audit', async (request, reply) => {
 // /settings → redirect to /relays (node config is there now)
 fastify.get('/settings', async (request, reply) => reply.redirect('/relays'));
 
+// Broker home — Gap 1 (Owner UI buildout, Bettor r29 LOCK + r28 role-home 模板).
+// Subsume /agent?tab=broker (Iron Rule "建=取代非新增"). Data: J2 r111 kanet-broker endpoints.
+fastify.get('/broker', async (request, reply) => {
+  const lang = parseLang(request.headers.cookie);
+  const t = getT(lang);
+  return reply.viewAsync('broker-home', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', _page: 'broker' });
+});
+
 
 // POST /lang — set language cookie
 fastify.post('/lang', (request, reply) => {

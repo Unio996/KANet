@@ -1,0 +1,285 @@
+<%~ include('partials/page-open', { _page: 'broker', pageTitle: 'Broker', ...it }) %>
+
+<!--
+  Broker home — Gap 1 (Owner UI buildout, Bettor r29 LOCK).
+  Role-home 模板 5 公共块 (Bettor r28 refine ①): 角色身份 / 收入 / 状态 / 配置 / 历史.
+  Subsume: /agent?tab=broker → 此页 (Iron Rule "建=取代非新增", 页数净减).
+  Data 源: /api/kanet-broker/markets/:id + /api/kanet-broker/earnings/:id (J2 r111 ship).
+  oracle home 用同 5 块结构, 后续 commit 建.
+-->
+
+<style>
+  .rh-display { font-family: 'Fraunces', Georgia, serif; font-feature-settings: 'opsz' 36; }
+  .rh-block { @apply bg-white rounded-lg border border-warm-200 p-5; }
+  .rh-block-title { @apply text-[10px] uppercase tracking-wider text-ink-400 mb-3 flex items-center gap-1.5; }
+  .rh-block-dot { @apply w-1.5 h-1.5 rounded-full; }
+  .rh-stat-label { @apply text-[10px] uppercase tracking-wider text-ink-400; }
+  .rh-stat-value { @apply text-lg font-semibold text-ink-700 tabular-nums; }
+  .rh-divider { @apply border-t border-warm-100 my-3; }
+</style>
+
+<div class="p-6" x-data="brokerHome()" x-cloak>
+
+  <!-- LOADING SKELETON -->
+  <div x-show="loading" class="space-y-4">
+    <div class="skeleton" style="width:200px;height:36px;border-radius:8px;"></div>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="skeleton" style="height:140px;border-radius:8px;"></div>
+      <div class="skeleton" style="height:140px;border-radius:8px;"></div>
+    </div>
+  </div>
+
+  <!-- EMPTY (no broker agents) -->
+  <div x-show="!loading && agents.length === 0" class="rh-block text-center py-10">
+    <div class="text-sm text-ink-500 mb-2">还没有 broker 角色的 agent.</div>
+    <a href="/agent" class="text-xs text-brand-500 hover:text-brand-700">→ 去 /agent 把某个 relay 改成 broker 角色</a>
+  </div>
+
+  <!-- MAIN -->
+  <template x-if="!loading && agents.length > 0">
+    <div class="space-y-5">
+
+      <!-- AGENT SELECTOR -->
+      <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-3">
+          <select x-model.number="selectedIdx" @change="loadData()"
+            class="px-4 py-2 border border-warm-300 rounded-lg text-sm font-medium text-ink-600 bg-white focus:ring-2 focus:ring-brand-200 focus:border-brand-400 focus:outline-none">
+            <template x-for="(a, idx) in agents" :key="a.id">
+              <option :value="idx" x-text="a.name"></option>
+            </template>
+          </select>
+          <span class="text-[10px] uppercase tracking-wider text-ink-400">Broker</span>
+        </div>
+        <div x-show="agent" class="flex items-center gap-3">
+          <button class="text-[11px] font-mono text-ink-400 hover:text-brand-500 cursor-pointer"
+            @click="copyAddr()" x-text="shortAddr(agent?.address)" :title="agent?.address"></button>
+          <span class="text-sm font-bold text-ink-700 tabular-nums" x-text="agent?.kasBalance != null ? agent.kasBalance.toFixed(4) + ' KAS' : '--'"></span>
+        </div>
+      </div>
+
+      <!-- ① 角色身份 (role identity) -->
+      <div class="rh-block">
+        <div class="rh-block-title"><span class="rh-block-dot bg-brand-500"></span>角色身份</div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <div class="rh-stat-label">名称</div>
+            <div class="rh-stat-value" x-text="agent?.name"></div>
+          </div>
+          <div>
+            <div class="rh-stat-label">角色</div>
+            <div class="rh-stat-value">Broker</div>
+            <div class="text-[10px] text-ink-400 mt-0.5" x-show="agent?.role">role: <span x-text="agent.role"></span></div>
+          </div>
+          <div>
+            <div class="rh-stat-label">收款地址</div>
+            <div class="font-mono text-xs text-ink-600 break-all mt-1" x-text="agent?.address"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ② 收入 (earnings, J2 /api/kanet-broker/earnings 数据源) -->
+      <div class="rh-block">
+        <div class="rh-block-title"><span class="rh-block-dot bg-green-500"></span>收入</div>
+        <div x-show="earningsLoading" class="text-xs text-ink-300">加载中...</div>
+        <template x-if="!earningsLoading && earnings">
+          <div>
+            <div class="grid grid-cols-3 gap-4">
+              <div>
+                <div class="rh-stat-label">已结算</div>
+                <div class="rh-stat-value rh-display" x-text="fmtKas(earnings.totals?.realized_kas)"></div>
+                <div class="text-[10px] text-ink-400 mt-0.5">KAS · 实际到账</div>
+              </div>
+              <div>
+                <div class="rh-stat-label">未结算 (待 settle)</div>
+                <div class="rh-stat-value rh-display text-amber-700" x-text="fmtKas(earnings.totals?.pending_kas)"></div>
+                <div class="text-[10px] text-ink-400 mt-0.5">KAS</div>
+              </div>
+              <div>
+                <div class="rh-stat-label">已退还 (refund)</div>
+                <div class="rh-stat-value rh-display text-ink-400" x-text="fmtKas(earnings.totals?.refunded_kas)"></div>
+                <div class="text-[10px] text-ink-400 mt-0.5">KAS</div>
+              </div>
+            </div>
+            <div class="rh-divider"></div>
+            <div class="text-[10px] uppercase tracking-wider text-ink-400 mb-2">分域明细</div>
+            <div class="space-y-1.5">
+              <template x-for="d in earnings.by_domain || []" :key="d.domain">
+                <div class="flex items-center justify-between text-xs">
+                  <span class="text-ink-600 uppercase" x-text="d.domain"></span>
+                  <span class="tabular-nums text-ink-700">
+                    <span x-text="fmtKas(d.realized_kas)"></span> 已结
+                    <span class="text-ink-400 ml-2" x-show="d.pending_kas > 0">+ <span x-text="fmtKas(d.pending_kas)"></span> 待</span>
+                  </span>
+                </div>
+              </template>
+              <div x-show="!earnings.by_domain || earnings.by_domain.length === 0" class="text-xs text-ink-300">暂无分域数据</div>
+            </div>
+          </div>
+        </template>
+        <div x-show="earningsError" class="text-xs text-red-500" x-text="earningsError"></div>
+      </div>
+
+      <!-- ③ 状态 (status, J2 /api/kanet-broker/markets 数据源) -->
+      <div class="rh-block">
+        <div class="rh-block-title"><span class="rh-block-dot bg-blue-500"></span>状态</div>
+        <div x-show="marketsLoading" class="text-xs text-ink-300">加载中...</div>
+        <template x-if="!marketsLoading && markets">
+          <div>
+            <div class="grid grid-cols-3 gap-4">
+              <div>
+                <div class="rh-stat-label">active 市场</div>
+                <div class="rh-stat-value" x-text="markets.totals?.active ?? 0"></div>
+              </div>
+              <div>
+                <div class="rh-stat-label">已结算</div>
+                <div class="rh-stat-value" x-text="markets.totals?.settled ?? 0"></div>
+              </div>
+              <div>
+                <div class="rh-stat-label">refund/cancel</div>
+                <div class="rh-stat-value text-ink-400" x-text="markets.totals?.refunded ?? 0"></div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- ④ 配置 (config) -->
+      <div class="rh-block">
+        <div class="rh-block-title"><span class="rh-block-dot bg-purple-500"></span>配置</div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+          <div>
+            <div class="rh-stat-label">默认 broker fee% (per-market, 创建时设)</div>
+            <div class="text-ink-600 mt-1">
+              单笔由 maker 创建市场时定 (单位 basis points / 100 = %).
+              典型: 100 bps = 1%.
+            </div>
+          </div>
+          <div>
+            <div class="rh-stat-label">收款地址</div>
+            <div class="font-mono text-ink-700 break-all mt-1" x-text="agent?.address"></div>
+            <div class="text-[10px] text-ink-400 mt-0.5">所有跨域 broker fee 进此地址.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ⑤ 历史 (history — markets list) -->
+      <div class="rh-block">
+        <div class="rh-block-title"><span class="rh-block-dot bg-ink-400"></span>历史</div>
+        <div x-show="marketsLoading" class="text-xs text-ink-300">加载中...</div>
+        <template x-if="!marketsLoading && markets">
+          <div>
+            <div x-show="(markets.pool_markets || []).length === 0 && (markets.retail_dex_orders || []).length === 0" class="text-xs text-ink-300 py-3">
+              此 broker 尚未撮合任何市场/订单.
+            </div>
+            <div class="space-y-1.5">
+              <template x-for="m in (markets.pool_markets || []).slice(0, 10)" :key="m.id">
+                <div class="flex items-center justify-between text-xs py-1.5 border-b border-warm-100 last:border-0">
+                  <div class="flex-1 min-w-0">
+                    <div class="text-ink-700 truncate" :title="m.resolution_rule_spec || m.id" x-text="(m.resolution_rule_spec || m.id).slice(0, 64)"></div>
+                    <div class="text-[10px] text-ink-400 mt-0.5">
+                      <span class="uppercase">POOL</span> · <span x-text="m.protocol_status"></span> · stake <span x-text="m.maker_stake_kas ?? '?'"></span> KAS · fee <span x-text="((m.broker_fee_pct ?? 0)/100).toFixed(2)"></span>%
+                    </div>
+                  </div>
+                </div>
+              </template>
+              <template x-for="o in (markets.retail_dex_orders || []).slice(0, 5)" :key="o.id">
+                <div class="flex items-center justify-between text-xs py-1.5 border-b border-warm-100 last:border-0">
+                  <div class="flex-1 min-w-0">
+                    <div class="text-ink-700 truncate" x-text="(o.label || o.id).slice(0, 64)"></div>
+                    <div class="text-[10px] text-ink-400 mt-0.5">
+                      <span class="uppercase">RETAIL</span> · <span x-text="o.state"></span> · fee <span x-text="o.broker_fee_kas ?? '?'"></span> KAS
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+      </div>
+
+    </div>
+  </template>
+</div>
+
+<script>
+function brokerHome() {
+  return {
+    loading: true,
+    agents: [],
+    selectedIdx: 0,
+    get agent() { return this.agents[this.selectedIdx] || null; },
+    earnings: null, earningsLoading: false, earningsError: '',
+    markets: null, marketsLoading: false, marketsError: '',
+
+    fmtKas(n) {
+      const x = parseFloat(n);
+      if (!Number.isFinite(x)) return '0';
+      return x.toFixed(4);
+    },
+    shortAddr(a) {
+      if (!a) return '';
+      return a.slice(0, 14) + '...' + a.slice(-6);
+    },
+    copyAddr() {
+      if (!this.agent?.address) return;
+      navigator.clipboard.writeText(this.agent.address).catch(() => {});
+    },
+
+    async init() {
+      try {
+        // /api/relays = list all relays; pick those with role=broker OR is_dex_broker
+        const r = await fetch('/api/relays');
+        const j = await r.json();
+        this.agents = (j.relays || j || [])
+          .filter(x => x.role === 'broker' || x.is_dex_broker)
+          .map(x => ({ ...x, kasBalance: null }));
+        if (this.agents.length > 0) await this.loadData();
+      } catch (e) {
+        console.error('load broker agents fail:', e);
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async loadData() {
+      const a = this.agent;
+      if (!a) return;
+      // fetch balance + earnings + markets in parallel
+      this.earningsLoading = true; this.marketsLoading = true;
+      this.earnings = null; this.markets = null;
+      this.earningsError = ''; this.marketsError = '';
+
+      const fetchJson = async (url) => {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      };
+
+      try {
+        const [bal, earn, mkts] = await Promise.allSettled([
+          fetchJson(`/api/relay/${a.id}/balance`),
+          fetchJson(`/api/kanet-broker/earnings/${a.id}`),
+          fetchJson(`/api/kanet-broker/markets/${a.id}`),
+        ]);
+        if (bal.status === 'fulfilled') {
+          a.kasBalance = (typeof bal.value === 'number') ? bal.value : (bal.value?.balance ?? null);
+        }
+        if (earn.status === 'fulfilled') {
+          this.earnings = earn.value;
+        } else {
+          this.earningsError = '收入接口报错: ' + (earn.reason?.message || 'unknown');
+        }
+        if (mkts.status === 'fulfilled') {
+          this.markets = mkts.value;
+        } else {
+          this.marketsError = '市场接口报错: ' + (mkts.reason?.message || 'unknown');
+        }
+      } finally {
+        this.earningsLoading = false; this.marketsLoading = false;
+      }
+    },
+  };
+}
+</script>
+
+<%~ include('partials/page-close', it) %>
