@@ -1000,7 +1000,13 @@ export async function registerPoolRoutes(fastify) {
     `).get(`%"market_id":"${marketId}"%`).c;
     return reply.send({
       ok: true,
-      market: { ...market, metadata: metaParsed },
+      // Bettor r24 (Owner 查): bot prediction-menu reads full.maker_stake_kas → was undefined → "?".
+      // List endpoint (/api/pool/markets L984) already derives maker_stake_kas; detail must match.
+      market: {
+        ...market,
+        maker_stake_kas: market.maker_stake_amount != null ? market.maker_stake_amount / 1e8 : null,
+        metadata: metaParsed,
+      },
       protocol_status: market.protocol_status,
       bettor_count: bettorCount,
       sigs_collected: sigsCollected,
