@@ -384,6 +384,16 @@ async function verifyV06(baselinePath) {
     { path: mergeModulePath, exists: hasMergeModule }
   );
 
+  // Check 12: pool-committee-sampler.mjs 存在 (= J2.2+J2.3 c974028 committee 选拔+keyless 确定性抽样)
+  // Reason (Owner 铁律 ②): SS settle 需 committee 5 oracle 选拔结果; 缺则 v0.6 settle 不能跑 (没人签).
+  const samplerPath = path.join(REPO_ROOT, 'kasia-console/src/services/pool-committee-sampler.mjs');
+  const hasSampler = fs.existsSync(samplerPath);
+  check(
+    'pool-committee-sampler.mjs 存在 (J2.2+J2.3 keyless stake-weighted committee 选拔)',
+    hasSampler,
+    { path: samplerPath, exists: hasSampler }
+  );
+
   const total = report.pass + report.fail + report.deploy_pending;
   if (report.fail > 0) report.verdict = 'FAIL';
   else if (report.deploy_pending > 0) report.verdict = 'PASS_WITH_DEPLOY_PENDING';

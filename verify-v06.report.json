@@ -1,6 +1,6 @@
 {
   "schema_version": "v0.6-compat-verify-r1",
-  "verified_at": "2026-05-30T07:08:51.028Z",
+  "verified_at": "2026-05-30T08:52:47.765Z",
   "baseline_ref": {
     "path": "D:\\kanet-tn12\\baseline.v0.5.json",
     "schema": "v0.5-baseline-r1",
@@ -69,7 +69,7 @@
       "name": "v0.6 PoolSide_v06.sil 存在 + ≥1 entrypoint",
       "pass": true,
       "detail": {
-        "sha256": "16d7d47f5c3112a0d93219a9f9e325f5d9a0cd59c3faab7769afd3b769cac4ca",
+        "sha256": "642a4b23dfd45a7ae6f74b67a8346e4db7245b60ac6a9492464fcd62313fa00d",
         "entrypoints": [
           "settled_via_spine",
           "claim_winner",
@@ -148,7 +148,7 @@
           "38ae5c74bc8b1729e590b970c1baaf5953fd02dd4ef57ae04954d0b60b8e39e3"
         ],
         "v06_hashes": [
-          "16d7d47f5c3112a0d93219a9f9e325f5d9a0cd59c3faab7769afd3b769cac4ca",
+          "642a4b23dfd45a7ae6f74b67a8346e4db7245b60ac6a9492464fcd62313fa00d",
           "ca47584b3d54d328b54c5b385c5ff89ddb6c8588fe02902622f86b859f8eda86"
         ]
       },
@@ -232,11 +232,20 @@
         "exists": true
       },
       "severity": "hard"
+    },
+    {
+      "name": "pool-committee-sampler.mjs 存在 (J2.2+J2.3 keyless stake-weighted committee 选拔)",
+      "pass": true,
+      "detail": {
+        "path": "D:\\kanet-tn12\\kasia-console\\src\\services\\pool-committee-sampler.mjs",
+        "exists": true
+      },
+      "severity": "hard"
     }
   ],
-  "pass": 16,
+  "pass": 17,
   "fail": 0,
   "deploy_pending": 0,
   "verdict": "PASS",
-  "summary": "16/16 PASS, 0 hard FAIL, 0 deploy pending — verdict PASS"
+  "summary": "17/17 PASS, 0 hard FAIL, 0 deploy pending — verdict PASS"
 }
