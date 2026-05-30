@@ -416,6 +416,23 @@ export async function registerPoolRoutes(fastify) {
       return reply.code(500).send({ ok: false, error: `DB insert fail (spine TX done ${spineTxId}): ${e.message}` });
     }
 
+    // Bettor r51/r52 gate ② item ① — populate pool_snapshots via J2 r119 ensurePoolSnapshot
+    // (commit 69ada35, docs/oracle-v06-spec). Freezes pool stakes at create time so committee
+    // sampler at settle uses snapshot not live state (F-S3 anti-grinding). Helper verifies
+    // derived root == caller-supplied poolMerkleRoot (TOCTOU defense) before INSERT.
+    // Roll back pool_markets if helper fails so we never leave a market without a snapshot.
+    try {
+      const settlerMod = await import('../services/pool-market-settler-v06.mjs');
+      if (typeof settlerMod.ensurePoolSnapshot !== 'function') {
+        throw new Error('ensurePoolSnapshot helper not exported by pool-market-settler-v06.mjs');
+      }
+      settlerMod.ensurePoolSnapshot(marketId, poolMerkleRoot);
+    } catch (e) {
+      sqlite.prepare('DELETE FROM pool_markets WHERE id = ?').run(marketId);
+      console.error(`[pool/create-v06] ensurePoolSnapshot failed, market rolled back: ${e.message}`);
+      return reply.code(500).send({ ok: false, error: `pool snapshot create failed (market rolled back, spine TX ${spineTxId} stranded — manual recovery): ${e.message}` });
+    }
+
     return reply.send({
       ok: true,
       market_id: marketId,
