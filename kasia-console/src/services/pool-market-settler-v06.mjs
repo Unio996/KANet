@@ -120,8 +120,70 @@ export async function fetchEndBlockHashCanonical(chainReader, deadlineDaaScore, 
 }
 
 /**
+ * ensurePoolSnapshot — create market entry-point helper (J1 r147 + Bettor r52 contract).
+ *
+ * Called by pool.js create-v06 endpoint at market create time. Owns:
+ *   - SELECT active oracle_pool_membership ORDER BY oracle_pk ASC (= canonical match sampler)
+ *   - Derive poolMerkleRoot via buildPoolMerkleTree
+ *   - Verify derived root == expected (caller provides root that's baked into spine ctor)
+ *   - INSERT into pool_snapshots (= freeze membership + stake @ create time, F-S3 anti-grinding)
+ *
+ * Bettor r52 2-nail format trace:
+ *   (A) pool_stakes_json sompi integer strings, same order as pool_pks (NOT KAS float)
+ *   (B) loadPoolSnapshot asserts pool_stakes.length == pool_size
+ *
+ * J1 r147 contract: throws on root mismatch (= caller drift / TOCTOU defense).
+ *
+ * @returns {{ pool_size: number, pool_merkle_root: string, members: [{pk, stake_sompi}] }}
+ */
+export function ensurePoolSnapshot(marketId, expectedPoolMerkleRoot) {
+  if (!marketId || typeof marketId !== 'string') throw new Error('marketId required (string)');
+  const cleanExpected = (expectedPoolMerkleRoot || '').toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(cleanExpected)) {
+    throw new Error(`expectedPoolMerkleRoot must be 64-char hex (got ${cleanExpected.length} chars)`);
+  }
+  // Canonical order: ASC by oracle_pk (= matches sampler.sortedPks lookup convention)
+  const members = sqlite.prepare(`
+    SELECT oracle_pk, stake_locked_kas
+    FROM oracle_pool_membership
+    WHERE active = 1
+    ORDER BY oracle_pk ASC
+  `).all();
+  if (members.length === 0) {
+    throw new Error('oracle_pool_membership empty (= no active members; run /api/oracle-pool/seed or wait for join-stake)');
+  }
+  const pks = members.map(m => m.oracle_pk.toLowerCase());
+  // KAS float → sompi integer string (Bettor r52 (A) sompi-unit format)
+  const stakesSompi = members.map(m => BigInt(Math.round(Number(m.stake_locked_kas) * 1e8)).toString());
+  // Derive merkle root
+  const tree = buildPoolMerkleTree(pks);
+  const derivedRoot = tree.root.toString('hex');
+  if (derivedRoot !== cleanExpected) {
+    throw new Error(`pool_merkle_root mismatch: derived=${derivedRoot} expected=${cleanExpected} (= caller drifted from current pool state; rebuild ctor from current pool)`);
+  }
+  // INSERT OR REPLACE (idempotent re-snapshot OK, same content)
+  sqlite.prepare(`
+    INSERT OR REPLACE INTO pool_snapshots
+      (market_id, pool_merkle_root, pool_size, pool_pks_json, pool_stakes_json, snapshot_at, protocol_version)
+    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'v0.6')
+  `).run(
+    marketId,
+    derivedRoot,
+    members.length,
+    JSON.stringify(tree.sortedPks),
+    JSON.stringify(stakesSompi),
+  );
+  return {
+    pool_size: members.length,
+    pool_merkle_root: derivedRoot,
+    members: tree.sortedPks.map((pk, i) => ({ pk, stake_sompi: stakesSompi[i] })),
+  };
+}
+
+/**
  * Load pool snapshot for a market (= what pool was at market create time).
  * Bettor r48 F-S3 fix: returns pool_stakes too (= stake snapshot @ create, anti-grinding).
+ * Bettor r52 (B) fail-fast: assert pool_stakes.length == pool_size.
  * Returns { pool_merkle_root, pool_size, pool_pks, pool_stakes } sorted by pk_hex ascending.
  */
 export function loadPoolSnapshot(marketId) {
@@ -134,8 +196,12 @@ export function loadPoolSnapshot(marketId) {
     throw new Error(`pool_snapshot ${marketId} corrupt: size=${row.pool_size} pks=${pks?.length}`);
   }
   const stakes = row.pool_stakes_json ? JSON.parse(row.pool_stakes_json) : null;
-  if (!stakes || !Array.isArray(stakes) || stakes.length !== pks.length) {
+  if (!stakes || !Array.isArray(stakes)) {
     throw new Error(`pool_snapshot ${marketId} missing pool_stakes_json (= v161 migration applied? snapshot built post-fix?)`);
+  }
+  // Bettor r52 (B) fail-fast: pool_stakes must have same length as pool_size + pool_pks
+  if (stakes.length !== row.pool_size || stakes.length !== pks.length) {
+    throw new Error(`pool_snapshot ${marketId} length mismatch: pool_size=${row.pool_size} pks=${pks.length} stakes=${stakes.length}`);
   }
   return { pool_merkle_root: row.pool_merkle_root, pool_size: row.pool_size, pool_pks: pks, pool_stakes: stakes };
 }
