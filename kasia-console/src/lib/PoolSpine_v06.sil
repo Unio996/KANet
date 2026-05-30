@@ -2,6 +2,28 @@
 // Bettor r3 lock + Owner ack 5/30 + Bettor r10 finding (depth-4 too small) + J2 r102 attack math
 // + Bettor r12 lock (depth-8 ACK, J1 SS t-agnostic).
 //
+// ============================================================================
+// BROKEN — DO NOT DEPLOY (J1 r119 self-audit, 2026-05-30, triggered by Bettor r17).
+// ----------------------------------------------------------------------------
+// settle_aggregate has the SAME class of fund-loss hole that Bettor r17 caught in
+// PoolSide_v06.claim_winner. aggSig + aggPk are both args; checkSig(aggSig, pubkey(aggPk))
+// binds aggSig to aggPk but does NOT bind aggPk to the committee. silverc lacks a
+// MuSig2_KeyAgg primitive, so on-chain derivation of aggPk from c0..c4 is impossible.
+//
+// Attack (any broadcaster, not just broker): pick any 5 pool member PKs (public, in
+// poolMerkleRoot), provide own aggPk + self-signed aggSig, compute committeePkHash,
+// pick winner arbitrarily, send remaining spine balance to outputs[6+] (attacker's
+// own P2PK). Spine drains; sides settled_via_spine also drain (= they only require
+// inputs.length >= 2). Kaspa balance check holds total in == total out, but the
+// attacker controls the within-TX distribution.
+//
+// Fix (path A — Bettor ack pending r118/r119): strip aggSig entirely, add 5
+// individual committee sigs (5 checkSig instead of 1 aggSig+aggPk). The 5 committee
+// merkle proofs against poolMerkleRoot already prove membership; the new 5 checkSig
+// proves consent. Synchronized redesign with PoolSide_v06.sil (same root cause).
+// DO NOT pull this commit into deployment or wire to /api/pool/market/create-v06.
+// ============================================================================
+//
 // What changed from v0.5 PoolSpine.sil:
 // - v0.5: ctor baked 3 oracle PKs; settle = checkSig×3 against individuals (identities public).
 // - v0.6: ctor bakes ONE poolMerkleRoot (snapshot of the public oracle pool at market create);
