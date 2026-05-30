@@ -84,23 +84,24 @@ export async function computeSpineP2SH_v06(args) {
 /**
  * Compute PoolSide_v06 P2SH address + redeem script for a specific bettor.
  *
- * Ctor order MUST match PoolSide_v06.sil:
- *   (bettorPk, spineP2shHash, marketMetadataHash, direction, stakeAmount, deadline)
+ * Ctor order MUST match PoolSide_v06.sil (path A LOCK, Bettor r19, 5/30):
+ *   (bettorPk, spineP2shHash, poolMerkleRoot, marketMetadataHash, direction, stakeAmount, deadline)
  *
- * v0.6 changes from v0.5 PoolSide:
- * - Drops 3 individual oracle PKs from ctor (= per-event committee data now passed
- *   as args to claim_winner, not bakeable in ctor — J1 r99 + Bettor r7 confirm).
- * - claim_winner takes aggPk + aggSig (= t-of-N aggregate, FROST/MuSig2) instead of 3 oracleSig.
- * - Bound to its market via spineP2shHash (= same anchor as v0.5).
- *
- * Per Bettor r16: PoolSide_v06 is the per-bettor enforcement layer (merkle ∈ sidesMerkleRoot
- * + winner match + own output amount correct) — fills v0.5 "TODO Phase 2 full Merkle verify per output".
+ * v0.6 path A:
+ * - Drops v0.5's 3 individual oracle PKs from ctor (= per-event committee).
+ * - ADDS baked poolMerkleRoot (= same root as spine) — anchors committee membership at claim
+ *   time so the side can independently verify the 5 committee members are in the pool, without
+ *   relying on the spine UTXO being present in the TX (= silverc has no OpTxInputSpk introspection).
+ * - claim_winner takes 5 individual committee sigs (4-of-5 threshold counter) + 5 committee PKs +
+ *   5×8 depth-8 merkle proofs against poolMerkleRoot — closes the aggSig-aggPk-unbound hole
+ *   (J1 r118/r119, Bettor r17 catch). NO MuSig2/aggSig anywhere — silverc lacks KeyAgg primitive.
  *
  * @returns {{ p2shAddr, redeemScript, cacheHit }}
  */
 export async function computeSideP2SH_v06(args) {
   const bettorPk = validatePubkeyHex(args.bettorPk, 'bettorPk');
   const spineP2shHash = validateHashHex(args.spineP2shHash, 'spineP2shHash');
+  const poolMerkleRoot = validateHashHex(args.poolMerkleRoot, 'poolMerkleRoot');
   const marketMetadataHash = validateHashHex(args.marketMetadataHash, 'marketMetadataHash');
   const direction = validateInt(args.direction, 'direction', 0, 1);
   const stakeAmount = validateInt(args.stakeAmount, 'stakeAmount', 1);
@@ -110,6 +111,7 @@ export async function computeSideP2SH_v06(args) {
   const ctorJson = [
     bytes32Expr(bettorPk),
     bytes32Expr(spineP2shHash),
+    bytes32Expr(poolMerkleRoot),
     bytes32Expr(marketMetadataHash),
     intExpr(direction),
     intExpr(stakeAmount),
