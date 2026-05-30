@@ -4695,5 +4695,76 @@ export function runMigrations() {
     }
   }
 
+  // v159 — Oracle v0.6 J2.1 sub (Bettor r3+r6+r14 钦定, reconciled per r14 J1 v158 留 create-side).
+  // Scope: J2.1 = pool 经济/选拔 schema. v0.6 path A (Bettor r19 LOCK Owner ack):
+  //   - 5 个体 committee sig 替 aggSig+aggPk (J1 r118/r119 self-claim 洞 confirm + fix)
+  //   - poolMerkleRoot bake side ctor (J1 r119 r121 + Bettor r17 反转)
+  //   - 事前匿名: 投票前选谁随机 → 防定向贿赂 (Owner ack 弱化, 结算后 5 委员 PK 暴露 OK)
+  //   - t-of-N counter (J1 r120 silverc 实证 t=4-of-5 viable, J2 r104 经济模型 PASS)
+  //
+  // 3 表:
+  // (A) oracle_pool_membership — 当前 active oracle 池 (= poolMerkleRoot 派生 source)
+  //     stake_unlock_requested_at = 护栏 #4 (≥7d 退场延期, 巨鲸跑路也罚得到)
+  // (B) pool_snapshots — 每市场 publish 时 freeze 池 snapshot (poolMerkleRoot bake side ctor 用)
+  // (C) pool_committee — 每市场 VRF stake-weighted 抽 5 委员 (= 事前匿名结构, settle 时 reveal)
+  {
+    const hasOraclePool = sqlite.prepare(
+      "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='oracle_pool_membership'"
+    ).get().cnt > 0;
+    if (!hasOraclePool) {
+      sqlite.exec(`
+        CREATE TABLE oracle_pool_membership (
+          relay_id TEXT PRIMARY KEY,
+          oracle_pk TEXT NOT NULL,
+          stake_locked_kas REAL NOT NULL DEFAULT 0,
+          joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          stake_unlock_requested_at TEXT,
+          active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1))
+        );
+        CREATE INDEX idx_oracle_pool_active ON oracle_pool_membership(active, oracle_pk);
+        CREATE UNIQUE INDEX idx_oracle_pool_pk ON oracle_pool_membership(oracle_pk);
+      `);
+      console.log('[migrate] v159 (A): oracle_pool_membership table + 2 indexes (J2.1 v0.6 path A pool source).');
+    }
+
+    const hasSnapshots = sqlite.prepare(
+      "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='pool_snapshots'"
+    ).get().cnt > 0;
+    if (!hasSnapshots) {
+      sqlite.exec(`
+        CREATE TABLE pool_snapshots (
+          market_id TEXT PRIMARY KEY,
+          pool_merkle_root TEXT NOT NULL,
+          pool_size INTEGER NOT NULL,
+          pool_pks_json TEXT NOT NULL,
+          snapshot_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          protocol_version TEXT NOT NULL DEFAULT 'v0.6'
+        );
+        CREATE INDEX idx_pool_snapshots_version ON pool_snapshots(protocol_version, snapshot_at);
+      `);
+      console.log('[migrate] v159 (B): pool_snapshots table + 1 index (J2.1 v0.6 path A poolMerkleRoot freeze).');
+    }
+
+    const hasCommittee = sqlite.prepare(
+      "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='pool_committee'"
+    ).get().cnt > 0;
+    if (!hasCommittee) {
+      sqlite.exec(`
+        CREATE TABLE pool_committee (
+          market_id TEXT PRIMARY KEY,
+          committee_relay_ids TEXT NOT NULL,
+          committee_pks TEXT NOT NULL,
+          committee_pk_hash TEXT NOT NULL,
+          vrf_seed TEXT NOT NULL,
+          vrf_proof TEXT NOT NULL,
+          threshold INTEGER NOT NULL DEFAULT 4 CHECK (threshold BETWEEN 1 AND 5),
+          sampled_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX idx_pool_committee_sampled ON pool_committee(sampled_at);
+      `);
+      console.log('[migrate] v159 (C): pool_committee table + 1 index (J2.1 v0.6 path A VRF stake-weighted sample).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
