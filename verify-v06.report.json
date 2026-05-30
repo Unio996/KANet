@@ -1,6 +1,6 @@
 {
   "schema_version": "v0.6-compat-verify-r1",
-  "verified_at": "2026-05-30T08:52:47.765Z",
+  "verified_at": "2026-05-30T09:01:15.830Z",
   "baseline_ref": {
     "path": "D:\\kanet-tn12\\baseline.v0.5.json",
     "schema": "v0.5-baseline-r1",
@@ -241,11 +241,20 @@
         "exists": true
       },
       "severity": "hard"
+    },
+    {
+      "name": "pool-market-settler-v06.mjs 存在 (J2 v0.6 settler with F-S1 canonical endBlockHash + F-S2 256-bit rand)",
+      "pass": true,
+      "detail": {
+        "path": "D:\\kanet-tn12\\kasia-console\\src\\services\\pool-market-settler-v06.mjs",
+        "exists": true
+      },
+      "severity": "hard"
     }
   ],
-  "pass": 17,
+  "pass": 18,
   "fail": 0,
   "deploy_pending": 0,
   "verdict": "PASS",
-  "summary": "17/17 PASS, 0 hard FAIL, 0 deploy pending — verdict PASS"
+  "summary": "18/18 PASS, 0 hard FAIL, 0 deploy pending — verdict PASS"
 }

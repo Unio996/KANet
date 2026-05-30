@@ -394,6 +394,16 @@ async function verifyV06(baselinePath) {
     { path: samplerPath, exists: hasSampler }
   );
 
+  // Check 13: pool-market-settler-v06.mjs 存在 (= J2 86d1efc v0.6 settler with F-S1/F-S2 fix)
+  // Reason (Owner 铁律 ②): v0.6 market settle 需调此 settler 算 5 oracle payout / broker fee / winner share; 缺则 v0.6 market 无法 settle.
+  const settlerPath = path.join(REPO_ROOT, 'kasia-console/src/services/pool-market-settler-v06.mjs');
+  const hasSettler = fs.existsSync(settlerPath);
+  check(
+    'pool-market-settler-v06.mjs 存在 (J2 v0.6 settler with F-S1 canonical endBlockHash + F-S2 256-bit rand)',
+    hasSettler,
+    { path: settlerPath, exists: hasSettler }
+  );
+
   const total = report.pass + report.fail + report.deploy_pending;
   if (report.fail > 0) report.verdict = 'FAIL';
   else if (report.deploy_pending > 0) report.verdict = 'PASS_WITH_DEPLOY_PENDING';
