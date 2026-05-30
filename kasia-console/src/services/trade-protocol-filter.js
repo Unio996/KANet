@@ -78,6 +78,8 @@ export async function onBroadcastWritten(row) {
         await handleExchangeResolve(msg); break;
       case 'kanet_prediction_params_v1':
         await handlePredictionParams(msg); break;
+      case 'pool_oracle_vote_v1':
+        await handlePoolOracleVote(msg); break;  // Bettor r97 J2 consumer: 跨节点 oracle vote ingest
     }
   } catch (err) {
     console.error(`[trade-filter] Error processing ${msg.t}: ${err.message}`);
@@ -85,6 +87,93 @@ export async function onBroadcastWritten(row) {
 }
 
 // ── Handlers ──────────────────────────────────────────────────
+
+// Bettor r95/r97 J2 consumer half: cross-node oracle vote ingest.
+// Producer (J1 r166 bbaea95): voter broadcasts kanet-prediction channel w/ pool_oracle_vote_v1 payload
+// + REAL Kaspa txid. Same producer node ALSO direct-INSERTs chain_events 'pool_oracle_vote'.
+// Consumer (THIS handler): on ANY node receiving the broadcast, re-INSERT the same chain_event
+// row (same txid → INSERT OR IGNORE 幂等), so settler decideConsensus on remote nodes picks
+// up the vote identical to producer.
+//
+// Verification (跨节点防伪造):
+// 1. market_id exists in local pool_markets (= skip if we don't know this market)
+// 2. voter_pubkey 真在 market.oracle_relay_ids assigned oracle set
+// 3. signature 真验 (kaspa.verifyMessage 跟 prediction-params-cache 同款)
+//
+// Same-node case (producer + consumer on same Console, broadcast fires onBroadcastWritten locally):
+// the producer's direct INSERT already wrote the row; this handler's INSERT OR IGNORE no-ops.
+// Idempotency = chain_events.txid UNIQUE.
+async function handlePoolOracleVote(msg) {
+  const { randomUUID } = await import('crypto');
+  const kaspa = await import('kaspa-wasm');
+
+  if (!msg.market_id || !msg.voter_pubkey || !msg.outcome || !msg.signature) {
+    console.warn(`[trade-filter:pool-vote] msg missing fields (market=${msg.market_id?.slice(0,12)} voter=${msg.voter_pubkey?.slice(0,12)} outcome=${msg.outcome} sig=${!!msg.signature})`);
+    return;
+  }
+
+  // 1. Market exists on this node?
+  const market = sqlite.prepare('SELECT id, oracle_relay_ids FROM pool_markets WHERE id = ?').get(msg.market_id);
+  if (!market) {
+    // Cross-node case: vote for a market this node hasn't seen yet (market_publish broadcast
+    // is a separate cross-node hardening sub — Bettor r88 b-class market gap). Log + skip.
+    console.log(`[trade-filter:pool-vote] market ${msg.market_id.slice(0,12)} not in local DB (cross-node market_publish gap, skip vote)`);
+    return;
+  }
+
+  // 2. voter_pubkey is one of assigned oracles?
+  let oracleRelayIds = [];
+  try { oracleRelayIds = JSON.parse(market.oracle_relay_ids || '[]'); } catch {}
+  let isAssignedOracle = false;
+  for (const relayId of oracleRelayIds) {
+    const r = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(relayId);
+    if (!r?.address) continue;
+    try {
+      const xpk = kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(r.address)).toString();
+      if (xpk === msg.voter_pubkey) { isAssignedOracle = true; break; }
+    } catch {}
+  }
+  if (!isAssignedOracle) {
+    console.warn(`[trade-filter:pool-vote] voter_pubkey ${msg.voter_pubkey.slice(0,12)} not in assigned oracles for market ${msg.market_id.slice(0,12)} — reject`);
+    return;
+  }
+
+  // 3. Verify signature (= reconstruct unsignedPayload, verifyMessage against voter_pubkey).
+  // Producer signed: JSON.stringify({ t, market_id, voter_relay_id, voter_pubkey, outcome,
+  // evidence_url, evidence_hash, vote_timestamp, epoch }) — keys MUST match producer field order
+  // for canonical sig input. We rebuild by dropping `signature` from msg.
+  const unsignedCopy = { ...msg };
+  delete unsignedCopy.signature;
+  // Drop trade-filter-added _tx/_from/_channel/_at meta too (added at L41-44 onBroadcastWritten).
+  delete unsignedCopy._tx; delete unsignedCopy._from; delete unsignedCopy._channel; delete unsignedCopy._at;
+  const messageToVerify = JSON.stringify(unsignedCopy);
+  let sigValid = false;
+  try {
+    sigValid = kaspa.verifyMessage({ message: messageToVerify, signature: msg.signature, publicKey: msg.voter_pubkey });
+  } catch (e) {
+    console.warn(`[trade-filter:pool-vote] verifyMessage exception market=${msg.market_id.slice(0,12)}: ${e.message}`);
+    return;
+  }
+  if (!sigValid) {
+    console.warn(`[trade-filter:pool-vote] sig invalid voter=${msg.voter_pubkey.slice(0,12)} market=${msg.market_id.slice(0,12)} — reject`);
+    return;
+  }
+
+  // 4. Idempotent INSERT (same shape as producer L417-419: INSERT OR IGNORE on UNIQUE(txid)).
+  // observed_by 'scout-ingest' marks this came via cross-node ingest path; producer uses 'prediction-voter'.
+  // settler.decideConsensus reads chain_events WHERE event_type='pool_oracle_vote' regardless of observed_by.
+  try {
+    const fromAddr = msg._from || null;
+    const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = (SELECT maker_relay_id FROM pool_markets WHERE id = ?)').get(msg.market_id);
+    sqlite.prepare(`
+      INSERT OR IGNORE INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+      VALUES (?, ?, 'pool_oracle_vote', ?, ?, ?, 'scout-ingest', CURRENT_TIMESTAMP)
+    `).run(randomUUID(), msg._tx, fromAddr, makerRow?.address || null, JSON.stringify(msg));
+    console.log(`[trade-filter:pool-vote] ingested market=${msg.market_id.slice(0,12)} outcome=${msg.outcome} voter=${msg.voter_pubkey.slice(0,12)} tx=${msg._tx?.slice(0,16)}`);
+  } catch (e) {
+    console.warn(`[trade-filter:pool-vote] insert fail (likely dedup, ok): ${e.message}`);
+  }
+}
 
 async function handleOrder(msg) {
   const orderId = msg.id;
