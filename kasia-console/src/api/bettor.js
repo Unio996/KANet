@@ -10,13 +10,17 @@ import { isRelayAlive } from '../services/relay-manager.js';
 
 export async function registerBettorRoutes(fastify) {
   // GET /api/bettor/recommendations — top N most-recent batch (optional filter by relay_node_id)
+  // Owner UI audit fix 2026-05-30: 当带 relay 过滤时, 也包含全局 (relay_node_id IS NULL) 推荐.
+  // 因 fossa-stable scanner (cron, 全局扫 Polymarket) 写 NULL relay (= 待 Owner ack 全局推荐),
+  // 旧 UI 调时带 selectedAgent → 把这些全 filter 掉 → 用户 /predictions 看不到任何推荐.
+  // 修法: relay 过滤时 = WHERE relay_node_id = ? OR relay_node_id IS NULL.
   fastify.get('/api/bettor/recommendations', async (request, reply) => {
     const limit = Math.min(parseInt(request.query.limit) || 10, 50);
     const relayNodeId = request.query.relay_node_id || null;
 
-    // Find latest scan timestamp (per agent if given, else global latest)
+    // Find latest scan timestamp (per agent + global if relay given; else global latest)
     const latest = relayNodeId
-      ? sqlite.prepare(`SELECT scanned_at FROM bettor_recommendations WHERE relay_node_id = ? ORDER BY scanned_at DESC LIMIT 1`).get(relayNodeId)
+      ? sqlite.prepare(`SELECT scanned_at FROM bettor_recommendations WHERE relay_node_id = ? OR relay_node_id IS NULL ORDER BY scanned_at DESC LIMIT 1`).get(relayNodeId)
       : sqlite.prepare(`SELECT scanned_at FROM bettor_recommendations ORDER BY scanned_at DESC LIMIT 1`).get();
 
     if (!latest) return reply.send({ ok: true, scanned_at: null, recommendations: [] });
@@ -29,7 +33,7 @@ export async function registerBettorRoutes(fastify) {
                  reasoning_json, trigger_type, llm_tier, status, scanned_at,
                  fundamental_estimate, fundamental_sources, fundamental_confidence
           FROM bettor_recommendations
-          WHERE scanned_at = ? AND relay_node_id = ?
+          WHERE scanned_at = ? AND (relay_node_id = ? OR relay_node_id IS NULL)
           ORDER BY score DESC LIMIT ?
         `).all(latest.scanned_at, relayNodeId, limit)
       : sqlite.prepare(`
