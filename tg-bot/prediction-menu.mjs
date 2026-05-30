@@ -14,19 +14,27 @@ const STATE_FILE = join(__dirname, '_state.json');
 // 落盘 _state.json, bot 重启即 reload 续单. awaiting-confirm 与 stage5 付款监控跨重启不丢.
 const sessions = new Map();          // stage0-4 menu navigation per tg user
 const pendingPayments = new Map();   // stage5 awaiting on-chain payment, poller 域
+// Bettor r63 P0 fix ① — link store 必持久化, 否则 bot 重启丢 linkedAddr → pending 里 undefined 字段被
+// JSON.stringify drop → confirm 时 linked_addr 缺 → push 上链失败 silent → Owner 500 KAS 类卡死.
+const linkedAddrs = new Map();       // tg_user → { address, linked_at } — persists across bot restart
 
 try {
   if (existsSync(STATE_FILE)) {
     const j = JSON.parse(readFileSync(STATE_FILE, 'utf8'));
     for (const [k, v] of (j.sessions || [])) sessions.set(k, v);
     for (const [k, v] of (j.pendingPayments || [])) pendingPayments.set(k, v);
-    console.log(`[prediction-menu] state loaded: ${sessions.size} sessions, ${pendingPayments.size} pending payments`);
+    for (const [k, v] of (j.linkedAddrs || [])) linkedAddrs.set(k, v);
+    console.log(`[prediction-menu] state loaded: ${sessions.size} sessions, ${pendingPayments.size} pending payments, ${linkedAddrs.size} linked addrs`);
   }
 } catch (e) { console.warn(`[prediction-menu] state load skipped: ${e.message}`); }
 
 // Bettor r9 F2 (原子写): tmp + rename, 防 writeFileSync 崩在写一半 → _state.json 损坏 → JSON.parse 失败 → 两 Map 全丢。
 function _writeAtomic() {
-  const data = JSON.stringify({ sessions: [...sessions.entries()], pendingPayments: [...pendingPayments.entries()] });
+  const data = JSON.stringify({
+    sessions: [...sessions.entries()],
+    pendingPayments: [...pendingPayments.entries()],
+    linkedAddrs: [...linkedAddrs.entries()],
+  });
   const tmp = STATE_FILE + '.tmp';
   writeFileSync(tmp, data);
   renameSync(tmp, STATE_FILE);  // Node fs.renameSync 在 Windows 也覆盖
@@ -66,6 +74,17 @@ export function exitBetFlow(tgUser) { sessions.delete(tgUser); pendingPayments.d
 // stage5 — bot.mjs poller 用: 列出待检测付款 + 入账后清除.
 export function listPendingPayments() { return [...pendingPayments.entries()].map(([tgUser, p]) => ({ tgUser, ...p })); }
 export function clearPendingPayment(tgUser) { pendingPayments.delete(tgUser); persist(); }
+
+// Bettor r63 ① link store 持久化 — bot.mjs /link 调 setLinkedAddr, 任何使用 linkedAddr 的步骤调 getLinkedAddr.
+export function setLinkedAddr(tgUser, address) {
+  linkedAddrs.set(tgUser, { address, linked_at: Date.now() });
+  persistNow();  // 资金前置依赖 — 必同步落盘, 不走 debounce
+}
+export function getLinkedAddr(tgUser) {
+  const v = linkedAddrs.get(tgUser);
+  return v?.address || null;
+}
+export function listLinkedUsers() { return [...linkedAddrs.entries()].map(([tgUser, v]) => ({ tgUser, ...v })); }
 
 // /bet → stage0: 列品类 (按 pending_bettors 市场的 category 聚合)
 export async function startBet(tgUser) {
@@ -175,9 +194,17 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
     const t = raw.toLowerCase();
     const ok = raw === '1' || raw === '确认' || t === 'yes' || t === 'y';
     if (!ok) { sessions.delete(tgUser); return '已取消, 未发生任何付款。随时 /bet 重新开始。'; }
+    // Bettor r63 ② guard: linkedAddr 缺则别建 pending — 否则 poller confirm 调用 linked_addr 缺 silent fail.
+    // 优先从持久 link store 取 (= 抗 bot 重启), 退到 caller 传入的 (= 旧路径兼容).
+    const resolvedLinkedAddr = getLinkedAddr(tgUser) || linkedAddr || null;
+    if (!resolvedLinkedAddr) {
+      sessions.delete(tgUser);
+      persistNow();
+      return '⚠ 还没绑定你的 kaspatest 地址 — 请先 /link <你的 kaspatest 地址>, 再 /bet 重来。中奖时需要绑定地址的钥匙领。';
+    }
     const kas = sompiToKasStr(s.prep.exact_sompi);
     pendingPayments.set(tgUser, {
-      marketId: s.market.id, direction: s.prep.direction, stakeKas: s.amount, linkedAddr,
+      marketId: s.market.id, direction: s.prep.direction, stakeKas: s.amount, linkedAddr: resolvedLinkedAddr,
       side_p2sh: s.prep.side_p2sh, exact_sompi: s.prep.exact_sompi,
       question: s.market.resolution_rule_spec, side: s.side,
       deadline: s.market.deadline || null, since: Date.now(),

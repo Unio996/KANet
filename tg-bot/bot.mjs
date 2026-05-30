@@ -18,10 +18,9 @@ let brokerRelayId = await resolveBrokerRelayId();
 if (!brokerRelayId) console.warn('[tg-bot] no broker configured — set it in Console Settings → Telegram Bot Broker');
 setInterval(async () => { brokerRelayId = await resolveBrokerRelayId(); }, CONFIG.brokerRefreshMs);
 
-// linked users for the reactive notification poller (tg_user -> {address, lastTs}); in-mem v0.
-// /link binds directly — r275 全砍共识 (Bettor r277): no signature challenge (paying FROM an address
-// proves control; PoolSide claim needs the real key, so nonce/verify were redundant). Betting auth =
-// on-chain from-addr check at register-external/confirm.
+// linked users for the reactive notification poller (tg_user -> { address, lastTs }).
+// Bettor r63 P0 fix: link store 持久化已迁到 prediction-menu._state.json (getLinkedAddr/setLinkedAddr).
+// 这个 Map 仍维护 lastTs 用于 poller cursor (= ephemeral, 重启 = 重新从最近开始 poll 即可, 不丢钱).
 const linked = new Map();
 
 bot.command('start', (ctx) => { PM.exitBetFlow(String(ctx.from.id)); return ctx.reply(M.startMessage()); });
@@ -33,7 +32,8 @@ bot.command('link', async (ctx) => {
   const tgUser = String(ctx.from.id);
   const r = await api.linkBind(addr, tgUser);
   if (!r.ok || !r.json?.linked) return ctx.reply('绑定失败: ' + (r.json?.error || r.status));
-  linked.set(tgUser, { address: addr, lastTs: Date.now() });
+  PM.setLinkedAddr(tgUser, addr);  // Bettor r63 ① 持久化 — 抗 bot 重启
+  linked.set(tgUser, { address: addr, lastTs: Date.now() });  // poller cursor (= 重启可重置)
   return ctx.reply('✅ 已绑定 ' + addr + '。\n这个地址有链上动态会通知你。\n/bet 开始押注。');
 });
 
@@ -50,7 +50,8 @@ bot.on('message:text', async (ctx) => {
   const txt = ctx.message?.text || '';
   if (txt.startsWith('/')) return;            // commands handled by bot.command
   if (PM.inBetFlow(tgUser)) {
-    const reply = await PM.handleReply(tgUser, txt, linked.get(tgUser)?.address);
+    // Bettor r63 ①: 优先从持久 link store 取 (= 抗 bot 重启), in-mem 退化 fallback.
+    const reply = await PM.handleReply(tgUser, txt, PM.getLinkedAddr(tgUser) || linked.get(tgUser)?.address);
     if (reply) await ctx.reply(reply);
     return;
   }
@@ -85,6 +86,12 @@ async function pollPendingBets() {
       try { await bot.api.sendMessage(p.tgUser, '⌛ 市场已截止, 停止盯付款。若你已付款会照常入账/结算。'); } catch {}
       continue;
     }
+    // Bettor r63 ② guard: pending 缺 linkedAddr (= 老历史 pending in v0 in-mem 丢的) → 反馈用户而非 silent poll.
+    if (!p.linkedAddr) {
+      PM.clearPendingPayment(p.tgUser);
+      try { await bot.api.sendMessage(p.tgUser, '⚠ 这笔押注单异常: 缺绑定地址 (bot 旧版会话丢失). 押注未成立, 也不会自动确认。请先 /link <kaspatest 地址>, 再 /bet 重新走完整流程。\n(若已付款到上次显示的地址, 押注无法挽回 — 别再付了。)'); } catch {}
+      continue;
+    }
     const r = await api.poolRegisterConfirm(p.marketId, { linkedAddr: p.linkedAddr, direction: p.direction, stakeKas: p.stakeKas });
     const j = r.json || {};
     if (r.ok && (j.registered || j.already_registered || j.side_lock_tx || j.merkle_index != null)) {
@@ -94,8 +101,12 @@ async function pollPendingBets() {
       // 错付被检测到 — 金额不符无法入账, 且少付会被合约永久锁死 (J2/Bettor 裁决). 诚实披露, 停止盯。
       PM.clearPendingPayment(p.tgUser);
       try { await bot.api.sendMessage(p.tgUser, `⚠ 检测到一笔金额不符的付款到该地址。\n按合约规则, 金额不符的付款无法被正确入账, 且【少付会被永久锁死、无法退回】。\n你的押注未成立。请勿再向此地址付款 (重复付款同样无法挽回)。`); } catch {}
+    } else if (!r.ok && typeof j.error === 'string' && /linked.addr|linkedAddr/i.test(j.error)) {
+      // Bettor r63 ③ 不静默: confirm 端硬错 (linked_addr 缺/无效) → 通知用户重 /link, 停盯.
+      PM.clearPendingPayment(p.tgUser);
+      try { await bot.api.sendMessage(p.tgUser, `⚠ 押注单异常 (后端: ${j.error})。\n请先 /link <kaspatest 地址> 重新绑定, 再 /bet 重走流程。\n(此前显示的付款地址若已付, 押注无法挽回 — 别再付了。)`); } catch {}
     }
-    // else (pending / not ok): payment not yet detected — keep polling silently.
+    // else (pending / not ok / soft fail): payment not yet detected — keep polling silently.
   }
 }
 setInterval(() => { pollPendingBets().catch(() => {}); }, CONFIG.pollMs);
