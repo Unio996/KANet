@@ -195,6 +195,7 @@ async function liveAttack() {
     }
     const market = (await r.json()).market || {};
     const isV06 = market.protocol_version === 'v0.6';
+    report.market = market;
     step('fetch market', true, {
       market_id: market.id,
       protocol_version: market.protocol_version,
@@ -212,15 +213,80 @@ async function liveAttack() {
     return report;
   }
 
-  // Step 2: STUB — actual TX construction + broadcast wires when J1 path A SS ships
-  step('construct attack TX', false, {
-    stub_reason: 'pending J1 path A SS final ctor params + scriptSig format lock',
-    blocker: 'PoolSpine_v06_pathA.sil + pool-p2sh-v06-pathA.mjs ship to docs/oracle-v06-spec or main',
-    expected_path: 'attacker fakes 5 sigs over chosen disputeOutcomeHash + picks any 5 pool PKs + computes committeePkHash + builds settle_aggregate scriptSig + RPC submitTransaction',
-    expected_result: 'mempool reject "invalid signature" (= path A 5 individual checkSig each fail since attacker !=== committee privkey holders)',
-  });
-  report.verdict = 'STUB_PENDING_PATH_A_SHIP';
+  const spinePsh = report.market?.spine_p2sh;
 
+  // Step 2: Fetch spine UTXO via RPC
+  let spineUtxo = null;
+  try {
+    const k = await import('kaspa-wasm');
+    const rpc = new k.RpcClient({ url: process.env.KASPA_RPC_URL || 'ws://127.0.0.1:17210' });
+    await rpc.connect();
+    const r = await rpc.getUtxosByAddresses({ addresses: [spinePsh] });
+    await rpc.disconnect();
+    if (!r.entries?.length) {
+      step('fetch spine UTXO', false, { error: 'spine_p2sh has 0 UTXOs', address: spinePsh });
+      report.verdict = 'SPINE_NO_UTXO';
+      return report;
+    }
+    spineUtxo = r.entries[0];
+    step('fetch spine UTXO', true, {
+      txid: spineUtxo.outpoint.transactionId,
+      index: spineUtxo.outpoint.index,
+      amount_sompi: String(spineUtxo.entry.amount),
+    });
+  } catch (e) {
+    step('fetch spine UTXO', false, { error: e.message });
+    report.verdict = 'UTXO_FETCH_FAIL';
+    return report;
+  }
+
+  // Step 3: Construct minimal attack TX — spend spine UTXO with EMPTY scriptSig
+  // Expected: mempool reject (= P2SH script verify fails for any scriptSig that doesn't match SS predicates)
+  // This is Phase 1 (trivial reject proof). Phase 2 = construct full settle_aggregate scriptSig with attacker sigs (= prove path A 5-checkSig specifically rejects).
+  let attackResult = null;
+  try {
+    const k = await import('kaspa-wasm');
+    const rpc = new k.RpcClient({ url: process.env.KASPA_RPC_URL || 'ws://127.0.0.1:17210' });
+    await rpc.connect();
+    const attackerSpkParts = (await rpc.getServerInfo());  // sanity check connection
+    const lockedAmount = BigInt(spineUtxo.entry.amount);
+    const fee = 100000n;  // 0.001 KAS
+    const outValue = lockedAmount - fee;
+    // Use attacker addr as output target (= would steal 100 KAS if SS accepts)
+    const attackerAddr = (await fetch(`${CONSOLE_URL}/api/relay/${attackerRelay}`).then(r => r.json())).relay?.address;
+    if (!attackerAddr) throw new Error('attacker relay address not found');
+    const toSpk = k.payToAddressScript(new k.Address(attackerAddr));
+    const attackTx = new k.Transaction({
+      version: 0,
+      inputs: [{
+        previousOutpoint: { transactionId: spineUtxo.outpoint.transactionId, index: spineUtxo.outpoint.index },
+        signatureScript: '',  // EMPTY scriptSig = attack: try to spend without satisfying SS
+        sequence: 0n,
+        sigOpCount: 1,
+      }],
+      outputs: [new k.TransactionOutput(outValue, toSpk)],
+      lockTime: 0n,
+      gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000',
+      payload: '',
+    });
+    try {
+      const submitResult = await rpc.submitTransaction({ transaction: attackTx, allowOrphan: false });
+      attackResult = { ACCEPTED: true, txId: submitResult.transactionId, note: 'CRITICAL: spine accepted empty-scriptSig attack = SS is broken!' };
+    } catch (e) {
+      attackResult = { ACCEPTED: false, reject_reason: e.message };
+    }
+    await rpc.disconnect();
+  } catch (e) {
+    step('attack TX construct', false, { error: e.message });
+    report.verdict = 'ATTACK_CONSTRUCT_FAIL';
+    return report;
+  }
+
+  const attackBlocked = attackResult.ACCEPTED === false;
+  step('attack TX submit (empty scriptSig phase 1)', attackBlocked, attackResult);
+
+  report.verdict = attackBlocked ? 'ATTACK_BLOCKED_PHASE_1' : 'ATTACK_ACCEPTED_BREAK';
   return report;
 }
 
