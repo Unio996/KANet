@@ -77,7 +77,7 @@ export function clearPendingPayment(tgUser) { pendingPayments.delete(tgUser); pe
 
 // Bettor r63 ① link store 持久化 — bot.mjs /link 调 setLinkedAddr, 任何使用 linkedAddr 的步骤调 getLinkedAddr.
 export function setLinkedAddr(tgUser, address) {
-  linkedAddrs.set(tgUser, { address, linked_at: Date.now() });
+  linkedAddrs.set(tgUser, { address, linked_at: Date.now(), seen_settled: [] });
   persistNow();  // 资金前置依赖 — 必同步落盘, 不走 debounce
 }
 export function getLinkedAddr(tgUser) {
@@ -85,6 +85,20 @@ export function getLinkedAddr(tgUser) {
   return v?.address || null;
 }
 export function listLinkedUsers() { return [...linkedAddrs.entries()].map(([tgUser, v]) => ({ tgUser, ...v })); }
+
+// Bettor r71 ① — settle-result poller: bot 追踪已押市场, 结算/退款后通知用户.
+// seen_settled = per-user array of marketIds already notified for terminal state (= 防重复 ping).
+// Returns marketIds that are new-settled/refunded since last poll (= caller should notify these).
+export function pickFreshSettlements(tgUser, currentSettled) {
+  const v = linkedAddrs.get(tgUser);
+  if (!v) return [];
+  const seen = new Set(v.seen_settled || []);
+  const fresh = currentSettled.filter(m => !seen.has(m));
+  if (fresh.length === 0) return [];
+  v.seen_settled = [...seen, ...fresh];
+  persistNow();  // 终态记录 = 防重复 push, 必落盘
+  return fresh;
+}
 
 // /bet → stage0: 列品类 (按 pending_bettors 市场的 category 聚合)
 export async function startBet(tgUser) {

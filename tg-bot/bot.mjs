@@ -111,5 +111,43 @@ async function pollPendingBets() {
 }
 setInterval(() => { pollPendingBets().catch(() => {}); }, CONFIG.pollMs);
 
+// Bettor r71 ① — settle-result poller: 每 link'd 用户的所有 positions, 检测结算/退款后通知.
+// 0-custody: read-only my-positions; 不签不付. 跨重启幂等 (seen_settled 持久化 _state.json).
+async function pollSettleResults() {
+  for (const u of PM.listLinkedUsers()) {
+    try {
+      const r = await api.myPositions(u.address);
+      if (!r.ok) continue;
+      const positions = r.json?.positions || [];
+      // 终态: settle_txid 已写 (= settled) OR refund_txid 已写 (= refunded).
+      const terminal = positions.filter(p => p.settle_txid || p.refund_txid);
+      if (terminal.length === 0) continue;
+      const fresh = PM.pickFreshSettlements(u.tgUser, terminal.map(p => p.market_id));
+      if (fresh.length === 0) continue;
+      for (const marketId of fresh) {
+        const p = terminal.find(x => x.market_id === marketId);
+        if (!p) continue;
+        let msg;
+        if (p.settle_txid) {
+          // settled — find winning side via outcome_side from market detail or my position info
+          // my_side = my position direction (YES/NO). To know if I won: compare with the market's
+          // settled outcome. v0.5 settled outcome can be inferred by checking pool_markets.outcome_side
+          // OR by checking whether claim_txid exists for my position (= my P2SH was claimed = I won).
+          // Simplest signal: payout_if_win > stake = my side was winner (calc valid). But this is
+          // pre-settle estimate. Post-settle, claim_txid presence is the deterministic signal.
+          const claimed = !!p.claim_txid;
+          msg = claimed
+            ? `🎉 [${p.question || p.market_id}]\n你赢了! ${p.my_side} · 押注 ${p.stake_kas} KAS → 已到账 (claim TX: ${p.claim_txid.slice(0,16)}...)`
+            : `📊 [${p.question || p.market_id}] 已结算\n你的押注: ${p.my_side} · ${p.stake_kas} KAS · 结算 TX ${p.settle_txid.slice(0,16)}...\n用绑定地址的钱包检查到账 (赢家由 settle_via_spine 直发到地址).`;
+        } else if (p.refund_txid) {
+          msg = `💸 [${p.question || p.market_id}] 已退款\n市场取消/分歧, 退款 TX: ${p.refund_txid.slice(0,16)}...\n你的押注退回到绑定地址.`;
+        }
+        if (msg) { try { await bot.api.sendMessage(u.tgUser, msg); } catch {} }
+      }
+    } catch {}
+  }
+}
+setInterval(() => { pollSettleResults().catch(() => {}); }, CONFIG.pollMs);
+
 bot.start();
 console.log('[tg-bot] @' + CONFIG.botUsername + ' up (broker=' + (brokerRelayId || 'UNSET — set in Console Settings') + ', 0-key / deep-link only)');

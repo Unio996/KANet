@@ -74,3 +74,9 @@ export function poolRegisterConfirm(marketId, { linkedAddr, direction, stakeKas 
   return req('POST', `/api/pool/market/${encodeURIComponent(marketId)}/bettor/register-external/confirm`,
     { linked_addr: linkedAddr, direction, stake_kas: stakeKas });
 }
+
+// Bettor r70 B (Owner P0): /mybets data source. Returns positions[] with
+// payout-if-win + pool distribution + on-chain TX status (settle/refund).
+export function myPositions(linkedAddr) {
+  return req('GET', `/api/pool/my-positions?linked_addr=${encodeURIComponent(linkedAddr)}`);
+}
