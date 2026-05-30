@@ -1,6 +1,6 @@
 {
   "mode": "static",
-  "analyzed_at": "2026-05-30T06:06:23.923Z",
+  "analyzed_at": "2026-05-30T06:21:17.652Z",
   "files_scanned": [
     "PoolSide_v06",
     "PoolSpine_v06"
@@ -20,11 +20,11 @@
     },
     {
       "severity": "INFO",
-      "msg": "PoolSide v06 ctor binding fields — spineP2shHash:true, poolMerkleRoot:true"
+      "msg": "Position-aware merkle climb PRESENT — 40 if-else hash branches (J1 r126 fix d5d4ecbdd)"
     },
     {
       "severity": "INFO",
-      "msg": "claim_winner body references merkle proof verify"
+      "msg": "PoolSide v06 ctor binding fields — spineP2shHash:true, poolMerkleRoot:true"
     }
   ],
   "verdict": "DEFENSE_PRESENT"

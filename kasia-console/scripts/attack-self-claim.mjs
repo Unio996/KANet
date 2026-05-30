@@ -112,6 +112,23 @@ function staticAnalysis() {
     });
   }
 
+  // Defense check 3a: position-aware merkle climb (= J2 r105 catch + J1 r126 fix d5d4ecbdd)
+  // Bug pattern: `cur = blake2b(cur + sib)` (leftmost-only, fails for non-zero positions)
+  // Fix pattern: `if (b == 0) { cur = blake2b(cur + sib) } else { cur = blake2b(sib + cur) }`
+  const posAwareRe = /if\s*\(\s*\w+\s*==\s*0\s*\)\s*\{[^}]*blake2b\([^}]*\+[^}]*\)\s*;?\s*\}\s*else\s*\{[^}]*blake2b\([^}]*\+[^}]*\)/g;
+  const posAwareMatches = (spineSrc.match(posAwareRe) || []).length;
+  if (posAwareMatches >= 5) {
+    report.findings.push({
+      severity: 'INFO',
+      msg: `Position-aware merkle climb PRESENT — ${posAwareMatches} if-else hash branches (J1 r126 fix d5d4ecbdd)`,
+    });
+  } else {
+    report.findings.push({
+      severity: 'CRITICAL',
+      msg: `Position-aware merkle climb INSUFFICIENT — only ${posAwareMatches} if-else hash branches (J2 r105 catch — leftmost-only bug = legitimate settle fails for non-pos-0 oracles)`,
+    });
+  }
+
   // Defense check 3: PoolSide v06 — claim_winner spine-binding?
   const sideFile = files.find(f => /Side/i.test(f.name));
   if (sideFile) {

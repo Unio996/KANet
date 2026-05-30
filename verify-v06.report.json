@@ -1,6 +1,6 @@
 {
   "schema_version": "v0.6-compat-verify-r1",
-  "verified_at": "2026-05-30T06:05:41.262Z",
+  "verified_at": "2026-05-30T06:20:37.454Z",
   "baseline_ref": {
     "path": "D:\\kanet-tn12\\baseline.v0.5.json",
     "schema": "v0.5-baseline-r1",
@@ -69,7 +69,7 @@
       "name": "v0.6 PoolSide_v06.sil 存在 + ≥1 entrypoint",
       "pass": true,
       "detail": {
-        "sha256": "ec8e6fe8492afd4ae155a26e1170ff4685e667332709725c08ac4fbc698a9db2",
+        "sha256": "16d7d47f5c3112a0d93219a9f9e325f5d9a0cd59c3faab7769afd3b769cac4ca",
         "entrypoints": [
           "settled_via_spine",
           "claim_winner",
@@ -105,7 +105,7 @@
       "name": "v0.6 PoolSpine_v06.sil 存在 + ≥1 entrypoint",
       "pass": true,
       "detail": {
-        "sha256": "57695d612994a227987ac2f3baea9d128400fc61cf6d361d66d1daab1711c723",
+        "sha256": "ca47584b3d54d328b54c5b385c5ff89ddb6c8588fe02902622f86b859f8eda86",
         "entrypoints": [
           "settle_aggregate",
           "dispute_reveal",
@@ -148,8 +148,8 @@
           "38ae5c74bc8b1729e590b970c1baaf5953fd02dd4ef57ae04954d0b60b8e39e3"
         ],
         "v06_hashes": [
-          "ec8e6fe8492afd4ae155a26e1170ff4685e667332709725c08ac4fbc698a9db2",
-          "57695d612994a227987ac2f3baea9d128400fc61cf6d361d66d1daab1711c723"
+          "16d7d47f5c3112a0d93219a9f9e325f5d9a0cd59c3faab7769afd3b769cac4ca",
+          "ca47584b3d54d328b54c5b385c5ff89ddb6c8588fe02902622f86b859f8eda86"
         ]
       },
       "severity": "hard"
