@@ -976,17 +976,33 @@ export async function registerPoolRoutes(fastify) {
       SELECT id, resolution_rule_spec, outcome_side, category, protocol_status,
              deadline, maker_stake_amount, oracle_bond_amount,
              outcome_market_source, outcome_condition_id, created_at,
-             (SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id) AS bettor_count
+             (SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id) AS bettor_count,
+             (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id AND s.direction = 0) AS yes_bettor_stake_sompi,
+             (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id AND s.direction = 1) AS no_bettor_stake_sompi
       FROM pool_markets
       ${whereSql}
       ORDER BY created_at DESC
       LIMIT ? OFFSET ?
     `).all(...params, limit, offset);
     const total = sqlite.prepare(`SELECT COUNT(*) c FROM pool_markets ${whereSql}`).get(...params).c;
-    const markets = rows.map(r => ({
-      ...r,
-      maker_stake_kas: r.maker_stake_amount != null ? r.maker_stake_amount / 1e8 : null,
-    }));
+    // Bettor r70 A: pool distribution (pari-mutuel 赔率来源).
+    // maker is implicit bettor on outcome_side (= L535-541 area-1 invariant);
+    // YES pool = yes_bettor_stake + (maker if outcome='YES' else 0); NO pool symmetric.
+    const markets = rows.map(r => {
+      const makerSompi = r.maker_stake_amount || 0;
+      const makerOnYes = r.outcome_side === 'YES';
+      const yesPoolSompi = Number(r.yes_bettor_stake_sompi) + (makerOnYes ? makerSompi : 0);
+      const noPoolSompi = Number(r.no_bettor_stake_sompi) + (!makerOnYes ? makerSompi : 0);
+      const total = yesPoolSompi + noPoolSompi;
+      return {
+        ...r,
+        maker_stake_kas: r.maker_stake_amount != null ? r.maker_stake_amount / 1e8 : null,
+        yes_pool_kas: yesPoolSompi / 1e8,
+        no_pool_kas: noPoolSompi / 1e8,
+        yes_implied_prob: total > 0 ? yesPoolSompi / total : null,
+        no_implied_prob: total > 0 ? noPoolSompi / total : null,
+      };
+    });
     return reply.send({ ok: true, total, count: markets.length, limit, offset, markets });
   });
 
@@ -1002,6 +1018,18 @@ export async function registerPoolRoutes(fastify) {
       WHERE event_type IN ('pool_oracle_tx_sig', 'pool_oracle_refund_disagreement_tx_sig')
         AND payload LIKE ?
     `).get(`%"market_id":"${marketId}"%`).c;
+    // Bettor r70 A: pool distribution on detail too (same model as list).
+    const yesBettorSompi = sqlite.prepare(
+      'SELECT COALESCE(SUM(stake_amount),0) AS s FROM pool_bettor_sides WHERE market_id = ? AND direction = 0'
+    ).get(marketId).s;
+    const noBettorSompi = sqlite.prepare(
+      'SELECT COALESCE(SUM(stake_amount),0) AS s FROM pool_bettor_sides WHERE market_id = ? AND direction = 1'
+    ).get(marketId).s;
+    const makerSompi = market.maker_stake_amount || 0;
+    const makerOnYes = market.outcome_side === 'YES';
+    const yesPoolSompi = Number(yesBettorSompi) + (makerOnYes ? makerSompi : 0);
+    const noPoolSompi = Number(noBettorSompi) + (!makerOnYes ? makerSompi : 0);
+    const totalPoolSompi = yesPoolSompi + noPoolSompi;
     return reply.send({
       ok: true,
       // Bettor r24 (Owner 查): bot prediction-menu reads full.maker_stake_kas → was undefined → "?".
@@ -1009,12 +1037,85 @@ export async function registerPoolRoutes(fastify) {
       market: {
         ...market,
         maker_stake_kas: market.maker_stake_amount != null ? market.maker_stake_amount / 1e8 : null,
+        yes_pool_kas: yesPoolSompi / 1e8,
+        no_pool_kas: noPoolSompi / 1e8,
+        yes_implied_prob: totalPoolSompi > 0 ? yesPoolSompi / totalPoolSompi : null,
+        no_implied_prob: totalPoolSompi > 0 ? noPoolSompi / totalPoolSompi : null,
         metadata: metaParsed,
       },
       protocol_status: market.protocol_status,
       bettor_count: bettorCount,
       sigs_collected: sigsCollected,
     });
+  });
+
+  // GET /api/pool/my-positions?linked_addr=X — Bettor r70 B (Owner P0 bot /mybets):
+  // Returns all positions for a bettor across markets, with payout-if-win projections.
+  // Read-only, no auth (linked_addr is public).
+  fastify.get('/api/pool/my-positions', async (request, reply) => {
+    const linkedAddr = (request.query?.linked_addr || '').trim();
+    if (!linkedAddr || !linkedAddr.startsWith('kaspa')) {
+      return reply.code(400).send({ ok: false, error: 'linked_addr query param required (kaspa: prefix)' });
+    }
+    let bettorPk;
+    try { bettorPk = await deriveXOnlyPubkey(linkedAddr); }
+    catch (e) { return reply.code(400).send({ ok: false, error: `linked_addr derive pubkey fail: ${e.message}` }); }
+    const positions = sqlite.prepare(`
+      SELECT s.market_id, s.direction, s.stake_amount, s.side_p2sh, s.side_lock_tx, s.claim_txid, s.merkle_index,
+             m.resolution_rule_spec, m.outcome_side, m.protocol_status, m.deadline, m.category,
+             m.maker_stake_amount, m.broker_fee_pct, m.oracle_bond_amount, m.miner_fee, m.settle_txid, m.refund_txid
+      FROM pool_bettor_sides s
+      LEFT JOIN pool_markets m ON m.id = s.market_id
+      WHERE s.bettor_pk = ?
+      ORDER BY s.created_at DESC
+    `).all(bettorPk);
+
+    // For each position, compute pool distribution + payout-if-win.
+    const out = [];
+    for (const p of positions) {
+      const stakeSompi = Number(p.stake_amount);
+      const makerSompi = Number(p.maker_stake_amount || 0);
+      const makerOnYes = p.outcome_side === 'YES';
+      const yesBettor = sqlite.prepare(
+        'SELECT COALESCE(SUM(stake_amount),0) s FROM pool_bettor_sides WHERE market_id=? AND direction=0'
+      ).get(p.market_id).s;
+      const noBettor = sqlite.prepare(
+        'SELECT COALESCE(SUM(stake_amount),0) s FROM pool_bettor_sides WHERE market_id=? AND direction=1'
+      ).get(p.market_id).s;
+      const yesPool = Number(yesBettor) + (makerOnYes ? makerSompi : 0);
+      const noPool = Number(noBettor) + (!makerOnYes ? makerSompi : 0);
+      // Payout-if-win calculation (mirrors v0.5 computePoolPayouts L336+ and v0.6 computeV06Payouts):
+      // winner gets stake + pro-rata share of NET loser pool (= loser_total - brokerFee - oracleFee_total - minerFee).
+      const myDirection = p.direction;
+      const myPool = myDirection === 0 ? yesPool : noPool;
+      const otherPool = myDirection === 0 ? noPool : yesPool;
+      const brokerFee = Math.floor(otherPool * Number(p.broker_fee_pct || 0) / 10000);
+      // oracleFee_total ≈ otherPool * oracle_fee_pct / 10000 — but oracle_fee_pct not directly stored;
+      // fall back to 0 if unknown. Conservative: shows payout WITHOUT fee subtraction = upper bound.
+      const minerFee = Number(p.miner_fee || 0);
+      const netLoser = Math.max(otherPool - brokerFee - minerFee, 0);
+      const payoutIfWin = myPool > 0 ? stakeSompi + Math.floor(netLoser * stakeSompi / myPool) : stakeSompi;
+      out.push({
+        market_id: p.market_id,
+        question: p.resolution_rule_spec,
+        category: p.category,
+        my_direction: myDirection,
+        my_side: myDirection === 0 ? 'YES' : 'NO',
+        stake_kas: stakeSompi / 1e8,
+        deadline: p.deadline,
+        status: p.protocol_status,
+        yes_pool_kas: yesPool / 1e8,
+        no_pool_kas: noPool / 1e8,
+        yes_implied_prob: (yesPool + noPool) > 0 ? yesPool / (yesPool + noPool) : null,
+        payout_if_win_kas: payoutIfWin / 1e8,
+        side_p2sh: p.side_p2sh,
+        side_lock_tx: p.side_lock_tx,
+        claim_txid: p.claim_txid,
+        settle_txid: p.settle_txid,
+        refund_txid: p.refund_txid,
+      });
+    }
+    return reply.send({ ok: true, linked_addr: linkedAddr, bettor_pk: bettorPk, count: out.length, positions: out });
   });
 
   // GET /api/agent/roles?relay_id=X — returns {is_oracle, is_broker, is_maker} for UI role-conditional tabs (A.3)
