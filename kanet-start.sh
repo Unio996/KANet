@@ -251,7 +251,9 @@ fi
 if grep -q "^TELEGRAM_BOT_TOKEN=" "$ENV_FILE" 2>/dev/null; then
   TG_BOT_LOG="$LOG_DIR/tg-bot.log"
   > "$TG_BOT_LOG"
-  ( cd "$CONSOLE_DIR" && node _launch_tg_bot.mjs >> "$TG_BOT_LOG" 2>&1 ) &
+  # exec: 让 node 替换 subshell 进程映像, 使 $! = 真实 node PID (否则抓到 subshell PID,
+  # subshell fork 完即退 → pidfile 指向死 PID, 任何 pidfile-based health 监控会误报 bot-down. Bettor r269 flag.)
+  ( cd "$CONSOLE_DIR" && exec node _launch_tg_bot.mjs >> "$TG_BOT_LOG" 2>&1 ) &
   TG_BOT_PID=$!
   echo "$TG_BOT_PID" > "$PID_DIR/tg-bot.pid"
   echo -e "  ${C_GREEN}✓${C_RESET} TG bot @KANET_Broker_bot (PID $TG_BOT_PID, log $TG_BOT_LOG)"

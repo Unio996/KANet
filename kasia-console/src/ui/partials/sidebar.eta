@@ -101,8 +101,8 @@
         <span class="text-[10px] transition-transform" :class="open ? 'rotate-90' : ''">›</span>
       </button>
       <div x-show="open" x-transition class="mt-1 space-y-0.5">
-        <a href="/settings"
-          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'settings' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+        <a href="/network"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'network' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
           Network
         </a>
         <a href="/relays"
@@ -117,14 +117,6 @@
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 text-ink-400 hover:bg-warm-100 hover:text-ink-600"
           @click.prevent="document.querySelector('select[name=&quot;lang&quot;]')?.focus()">
           Language
-        </a>
-        <a href="/about"
-          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 text-ink-400 hover:bg-warm-100 hover:text-ink-600">
-          Security
-        </a>
-        <a href="/about"
-          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'about' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          About
         </a>
       </div>
     </div>
