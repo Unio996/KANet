@@ -119,6 +119,55 @@ export async function formatMyBets(linkedAddr) {
   return lines.join('\n');
 }
 
+// Bettor r87 ③ 防流失 — 给 /mybets 每个 open position 返按钮配置. bot.mjs 拿这个用
+// InlineKeyboard 显在 /mybets 消息下. callbackQuery handler 收 'mybet:addmore:<id>' →
+// 直接进该 market 的押注 flow (= 跳过 stage0/1 类目选 + 市场选, 直接 stage='detail').
+export async function buildMyBetsKeyboard(linkedAddr) {
+  if (!linkedAddr) return [];
+  const r = await api.myPositions(linkedAddr);
+  if (!r.ok) return [];
+  const positions = r.json?.positions || [];
+  // 仅 open + market still active (= 未结算, 未退款, deadline 未过 — 否则按了无意义)
+  const now = Math.floor(Date.now() / 1000);
+  const buttons = [];
+  for (const p of positions) {
+    if (p.settle_txid || p.refund_txid) continue;
+    if (p.deadline && p.deadline < now) continue;
+    buttons.push({
+      market_id: p.market_id,
+      label: `➕ 加注/反手: ${(p.question || p.market_id).slice(0, 30)}`,
+      callback_data: `mybet:addmore:${p.market_id}`,
+    });
+  }
+  return buttons;
+}
+
+// Bettor r87 ③ 续 — 用户点 '加注/反手' callback → 跳进 detail stage (= 已知 market, 直问方向).
+// 复用 _handleReplyImpl detail stage UX, 但需先 poolMarket(id) 拉全量记录构造 session.
+export async function startBetFromMarket(tgUser, marketId) {
+  const dr = await api.poolMarket(marketId);
+  const market = (dr.json && (dr.json.market || (dr.json.id ? dr.json : null))) || null;
+  if (!market) return '市场未找到。/bet 重选。';
+  // 直接进 detail 复用同 UI
+  sessions.set(tgUser, { stage: 'detail', market });
+  persist();
+  const lines = [
+    `📊 ${market.resolution_rule_spec}`,
+    `${fmtDeadline(market.deadline)} · 已 ${market.bettor_count || 0} 人押 · maker stake ${market.maker_stake_kas ?? '?'} KAS`,
+  ];
+  if (market.yes_pool_kas != null && market.no_pool_kas != null) {
+    const yp = Number(market.yes_pool_kas).toFixed(4);
+    const np = Number(market.no_pool_kas).toFixed(4);
+    const ypp = market.yes_implied_prob != null ? (market.yes_implied_prob * 100).toFixed(1) + '%' : '?';
+    const npp = market.no_implied_prob != null ? (market.no_implied_prob * 100).toFixed(1) + '%' : '?';
+    lines.push(`池子分布: YES ${yp} KAS (${ypp})  ·  NO ${np} KAS (${npp})`);
+    lines.push('赔率 = 对方池 / 自方池 (押对越少人, 赢得越多)。');
+  }
+  if (market.outcome_market_source) lines.push(`结算源: ${market.outcome_market_source}`);
+  lines.push('', '⚠ 押注前请看清上面【完整结算规则 + 结算源】— 这是判定输赢的唯一依据。', '你押哪边?  回复 1 = YES   ·   2 = NO');
+  return lines.join('\n');
+}
+
 export function inBetFlow(tgUser) { return sessions.has(tgUser) || pendingPayments.has(tgUser); }
 export function exitBetFlow(tgUser) { sessions.delete(tgUser); pendingPayments.delete(tgUser); persist(); }
 

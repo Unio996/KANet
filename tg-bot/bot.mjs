@@ -43,9 +43,25 @@ bot.command('verify', (ctx) => ctx.reply('用 /link <你的 kaspatest 地址> �
 bot.command('swap', async (ctx) => { const broker = await api.brokerInfo(brokerRelayId); return ctx.reply(M.swapFlow(broker)); });
 bot.command('bet',  async (ctx) => ctx.reply(await PM.startBet(String(ctx.from.id))));  // S-C: in-chat 编号菜单
 // Bettor r78 ① — /mybets: 列自己押注 + 赢/输/退款状态 (= J2 r126 my-positions wire).
+// Bettor r87 ③ 续 — 每 open position 加 inline-keyboard '➕ 加注/反手' (防流失, callback 接 startBetFromMarket).
 bot.command('mybets', async (ctx) => {
-  const addr = PM.getLinkedAddr(String(ctx.from.id)) || linked.get(String(ctx.from.id))?.address;
-  return ctx.reply(await PM.formatMyBets(addr));
+  const tgUser = String(ctx.from.id);
+  const addr = PM.getLinkedAddr(tgUser) || linked.get(tgUser)?.address;
+  const text = await PM.formatMyBets(addr);
+  const buttons = await PM.buildMyBetsKeyboard(addr);
+  if (buttons.length === 0) return ctx.reply(text);
+  // grammy reply_markup 直接传 — 每按钮 1 行, 简洁
+  return ctx.reply(text, {
+    reply_markup: { inline_keyboard: buttons.map(b => [{ text: b.label, callback_data: b.callback_data }]) },
+  });
+});
+
+// Bettor r87 ③ — '➕ 加注/反手' callback handler: 进该 market 的 detail stage (= 跳过类目/市场选).
+bot.callbackQuery(/^mybet:addmore:(.+)$/, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const marketId = ctx.match[1];
+  const reply = await PM.startBetFromMarket(String(ctx.from.id), marketId);
+  await ctx.reply(reply);
 });
 bot.command('discover', (ctx) => ctx.reply('浏览:\n' + CONFIG.consoleUrl + '/exchange\n' + CONFIG.consoleUrl + '/predictions'));
 
