@@ -438,11 +438,27 @@ export async function dispatchPhase2(market, decision) {
     }
 
     // Bettor addresses
+    // Bettor r67 ACK + J1 r153 Owner P0 closed-loop back-half fix: external bettors
+    // (bettor_relay_id NULL per register-external/v06 INSERT) derive payout address from
+    // x-only bettor_pk via P2PK reconstruction (round-trip address→XOnlyPublicKey→address
+    // verified PASS for standard P2PK wallet addresses). Relay-bound bettors continue
+    // using relay_nodes.address. Edge case noted by Bettor r67: non-P2PK linkedAddr
+    // (P2SH/multisig) would reconstruct to ≠ original; testnet standard wallets all P2PK
+    // so acceptable for first-ship, /link endpoint hardening can validate-on-bind later.
+    const kaspaWasm = await import('kaspa-wasm');
+    const settleNetwork = market.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
     const sideAddrs = sides.map(s => {
-      const row = s.bettor_relay_id
-        ? sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(s.bettor_relay_id)
-        : null;
-      return row?.address || null;
+      if (s.bettor_relay_id) {
+        const row = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(s.bettor_relay_id);
+        return row?.address || null;
+      }
+      // External bettor: derive P2PK address from x-only bettor_pk.
+      try {
+        return new kaspaWasm.XOnlyPublicKey(s.bettor_pk).toAddress(settleNetwork).toString();
+      } catch (e) {
+        console.warn(`[pool-settler] external bettor pk→addr fail market=${market.id.slice(0,12)} bettor_pk=${String(s.bettor_pk).slice(0,8)}: ${e.message}`);
+        return null;
+      }
     });
     if (sideAddrs.some(a => !a)) {
       console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} missing bettor addresses`);
