@@ -383,25 +383,49 @@ async function processPoolMarket(voter) {
         errored++;
         continue;
       }
+      // Bettor r95 cross-node hardening: broadcast vote ONCHAIN (= every node's Scout can ingest).
+      // Producer side per spec: relay emits kanet_oracle_vote_v1 protocol message to kanet-prediction
+      // channel. Real Kaspa txid replaces the prior synthetic 'pool_oracle_vote:...' string so
+      // cross-node dedup-by-txid works (consumer-side Scout filter on remote nodes recreates the
+      // same chain_events row from the same on-chain TX). Closes the most-severe c-class gap I
+      // diagnosed in r165 (vote was 100% local DB before this change).
+      let voteTxid;
+      try {
+        const bcastResult = await sendCommandAsync(voter.id, {
+          type: 'send_broadcast',
+          channel: 'kanet-prediction',
+          message: JSON.stringify(votePayload),
+        });
+        voteTxid = bcastResult?.txId;
+        if (!voteTxid) throw new Error(`broadcast returned no txId: ${JSON.stringify(bcastResult).slice(0, 200)}`);
+      } catch (bcastErr) {
+        console.error(`[prediction-voter:pool] vote broadcast fail voter=${voter.name} market=${market.id.slice(0,12)}: ${bcastErr.message}`);
+        errored++;
+        continue;
+      }
+
+      // DM maker_relay as fast-path (= settler picks up via local DB even before Scout ingest
+      // catches the broadcast). Not load-bearing for cross-node consistency — broadcast above is.
+      // Best-effort: failure logs warn but doesn't error out the vote (broadcast already onchain).
       try {
         await sendCommandAsync(voter.id, {
           type: 'send_message',
           target: makerRow.address,
           message: JSON.stringify(votePayload),
         });
-        voted++;
       } catch (sendErr) {
-        console.error(`[prediction-voter:pool] DM fail voter=${voter.name} market=${market.id.slice(0,12)}: ${sendErr.message}`);
-        errored++;
-        continue;
+        console.warn(`[prediction-voter:pool] DM fast-path fail voter=${voter.name} market=${market.id.slice(0,12)}: ${sendErr.message} (broadcast succeeded, settler will catch via Scout ingest)`);
       }
+      voted++;
 
-      // chain_events 'pool_oracle_vote' audit trail
-      const syntheticTxid = `pool_oracle_vote:${voter.id.slice(0,8)}:${market.id.slice(0,12)}:${Date.now()}`;
+      // chain_events 'pool_oracle_vote' — REAL txid from broadcast above (Bettor r95).
+      // INSERT OR IGNORE for idempotent dedup (Scout ingest on this same node may also INSERT
+      // an identical txid row; one wins, second no-ops). chain_events.txid UNIQUE constraint
+      // is the dedup anchor.
       sqlite.prepare(`
-        INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+        INSERT OR IGNORE INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
         VALUES (?, ?, 'pool_oracle_vote', ?, ?, ?, 'prediction-voter', CURRENT_TIMESTAMP)
-      `).run(randomUUID(), syntheticTxid, voter.address, makerRow.address, JSON.stringify(votePayload));
+      `).run(randomUUID(), voteTxid, voter.address, makerRow.address, JSON.stringify(votePayload));
 
       // sub 3 v2 (Oracle v0.3 R7): oracle_history row write per vote.
       // Tier determined via oracle_registry.tier (= sub 1 schema). audit_mode = tier1/tier2/tier3.
