@@ -19,9 +19,9 @@ oracle 不再是 maker 公开钉死的 5 个(可被定向贿赂),改成**一个�
 | **池** | 公开质押 oracle 池,成员 stake + 声誉 + 历史罚没全透明可观察 | 共识 |
 | **选拔** | 按 stake **线性**权重 **链下** VRF 随机抽委员会 (N=5–7);`VRF(seed=marketId+block_hash+pool_state)` + 公开 proof,任何人可验 | J2 r98/2 + Owner C |
 | **上链签** | 委员会用 FROST DKG 凑 1 个 MuSig2 聚合 Schnorr 签 (BIP340) | J1 r95, J2 r97 |
-| **SS 验** | SS 只验 ① `checkSig(aggSig, aggPk)` ② merkle proof: committee ⊂ ctor 烤的 pool root。**不验 VRF**,**0 新 silverc 原语** | **J1 r96 (妙解)** |
-| **选拔正确性** | 不靠链上强制,靠 **stake-slash 经济兜底**:选错/签错 = forfeit | J1 r96 |
-| **罚的粒度** | **(iii) 平时聚合匿名 / dispute 才亮个体票罚**。SS commit 时 bake `H(committee_PKs)`,dispute entrypoint require reveal + 个体 checkSig 对上 commit hash → forfeit 那个 oracle bond | 四方+Bettor 一致票 |
+| **SS 验 (J1 r99 时序纠)** | ctor 仅烤 `poolMerkleRoot` (创建时委员会未知);`aggPk` + `committeePkHash` + merkle proof = **settle TX 参数** (per-event)。SS 验 ① `checkSig(aggSig, aggPk)` ② committee ⊂ `poolMerkleRoot`。**不验 VRF**,**0 新 silverc 原语** | **J1 r96/r99** |
+| **选拔正确性** | 不靠链上强制,靠 **stake-slash 经济兜底**:选错/签错 = forfeit。VRF 公开可重算 → 选错 committee 同样公开可 dispute (命门覆盖选拔正确性,非只 outcome) | J1 r96 |
+| **罚的粒度** | **(iii) 平时聚合匿名 / dispute 才亮个体票罚**。**settle output 烤 `committeePkHash`** 绑死本笔 committee;dispute entrypoint require 揭晓个体 PKs (H = `committeePkHash`) + 个体 checkSig → forfeit 错判者。单绑省一笔 TX (Bettor r7,待 J1 判 silverc settle-output 可存,否则退双-TX commit-reveal) | 四方一致 + Bettor r7 |
 | **pot 上限** | **不设**。总 bond ≥ pot × 1.5 守在**池层** | 共识 |
 | **错判赔付** | 池 bond forfeit → 输方钱 + 错判 bond 共池 → 赢方按赔率分 (PoolSide:118 拆分模型可改) | J2 r97/5 |
 | **兼容** | v0.6 新市场 opt-in,v0.5 老市场不动 (`protocol_version` 分支) | NWT, 全 |
