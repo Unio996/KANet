@@ -59,8 +59,8 @@
             class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-7 <%= it._page === 'broker' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
             Broker
           </a>
-          <a href="/agent?tab=oracle"
-            class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-7 <%= it._agentTab === 'oracle' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          <a href="/oracle"
+            class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-7 <%= it._page === 'oracle' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
             Oracle
           </a>
         </div>

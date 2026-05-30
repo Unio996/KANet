@@ -385,6 +385,14 @@ fastify.get('/broker', async (request, reply) => {
   return reply.viewAsync('broker-home', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', _page: 'broker' });
 });
 
+// Oracle home — Gap 2 batch 1 (Owner UI buildout, Bettor r29 LOCK). 用同 role-home 5 块模板.
+// Subsume /agent?tab=oracle. Data: J1 r137 /api/oracle/income + /api/oracle/max-pot + relay endpoints.
+fastify.get('/oracle', async (request, reply) => {
+  const lang = parseLang(request.headers.cookie);
+  const t = getT(lang);
+  return reply.viewAsync('oracle-home', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', _page: 'oracle' });
+});
+
 
 // POST /lang — set language cookie
 fastify.post('/lang', (request, reply) => {

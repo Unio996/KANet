@@ -1,0 +1,282 @@
+<%~ include('partials/page-open', { _page: 'oracle', pageTitle: 'Oracle', ...it }) %>
+
+<!--
+  Oracle home — Gap 2 batch 1 (Bettor r28 排序: 核心 oracle 操作 home).
+  Role-home 模板 5 公共块 (Bettor r28 refine ①): 角色身份 / 收入 / 状态 / 配置 / 历史.
+  Subsume: /agent?tab=oracle → 此页, /predictions/oracle-registry 后续 commit 接入.
+  Data 源 (Bettor r29 sub J1 + J2 schema):
+    - /api/relay/:id/pubkey → 64-hex pk
+    - /api/oracle/income/:pk (J1 r137 9fefd881)
+    - /api/oracle/max-pot/:pk (J1 r137 9fefd881)
+    - /api/relay/:id/balance, /api/relays
+-->
+
+<style>
+  .rh-display { font-family: 'Fraunces', Georgia, serif; font-feature-settings: 'opsz' 36; }
+  .rh-block { @apply bg-white rounded-lg border border-warm-200 p-5; }
+  .rh-block-title { @apply text-[10px] uppercase tracking-wider text-ink-400 mb-3 flex items-center gap-1.5; }
+  .rh-block-dot { @apply w-1.5 h-1.5 rounded-full; }
+  .rh-stat-label { @apply text-[10px] uppercase tracking-wider text-ink-400; }
+  .rh-stat-value { @apply text-lg font-semibold text-ink-700 tabular-nums; }
+  .rh-divider { @apply border-t border-warm-100 my-3; }
+</style>
+
+<div class="p-6" x-data="oracleHome()" x-cloak>
+
+  <!-- LOADING SKELETON -->
+  <div x-show="loading" class="space-y-4">
+    <div class="skeleton" style="width:200px;height:36px;border-radius:8px;"></div>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="skeleton" style="height:140px;border-radius:8px;"></div>
+      <div class="skeleton" style="height:140px;border-radius:8px;"></div>
+    </div>
+  </div>
+
+  <!-- EMPTY -->
+  <div x-show="!loading && agents.length === 0" class="rh-block text-center py-10">
+    <div class="text-sm text-ink-500 mb-2">还没有 oracle 角色的 agent.</div>
+    <a href="/agent" class="text-xs text-brand-500 hover:text-brand-700">→ 去 /agent 把某个 relay 改成 oracle 角色</a>
+  </div>
+
+  <!-- MAIN -->
+  <template x-if="!loading && agents.length > 0">
+    <div class="space-y-5">
+
+      <!-- AGENT SELECTOR -->
+      <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-3">
+          <select x-model.number="selectedIdx" @change="loadData()"
+            class="px-4 py-2 border border-warm-300 rounded-lg text-sm font-medium text-ink-600 bg-white focus:ring-2 focus:ring-brand-200 focus:border-brand-400 focus:outline-none">
+            <template x-for="(a, idx) in agents" :key="a.id">
+              <option :value="idx" x-text="a.name"></option>
+            </template>
+          </select>
+          <span class="text-[10px] uppercase tracking-wider text-ink-400">Oracle</span>
+        </div>
+        <div x-show="agent" class="flex items-center gap-3">
+          <button class="text-[11px] font-mono text-ink-400 hover:text-brand-500 cursor-pointer"
+            @click="copyAddr()" x-text="shortAddr(agent?.address)" :title="agent?.address"></button>
+          <span class="text-sm font-bold text-ink-700 tabular-nums" x-text="agent?.kasBalance != null ? agent.kasBalance.toFixed(4) + ' KAS' : '--'"></span>
+        </div>
+      </div>
+
+      <!-- ① 角色身份 -->
+      <div class="rh-block">
+        <div class="rh-block-title"><span class="rh-block-dot bg-brand-500"></span>角色身份</div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <div class="rh-stat-label">名称</div>
+            <div class="rh-stat-value" x-text="agent?.name"></div>
+          </div>
+          <div>
+            <div class="rh-stat-label">角色</div>
+            <div class="rh-stat-value">Oracle</div>
+            <div class="text-[10px] text-ink-400 mt-0.5" x-show="agent?.role">role: <span x-text="agent.role"></span></div>
+          </div>
+          <div>
+            <div class="rh-stat-label">投票地址 (公钥派生)</div>
+            <div class="font-mono text-xs text-ink-600 break-all mt-1" x-text="agent?.address"></div>
+            <div class="text-[10px] text-ink-400 mt-0.5" x-show="oraclePk">PK: <span class="font-mono" x-text="oraclePk.slice(0,16) + '...'"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ② 收入 (J1 /api/oracle/income/:pk) -->
+      <div class="rh-block">
+        <div class="rh-block-title"><span class="rh-block-dot bg-green-500"></span>收入</div>
+        <div x-show="incomeLoading" class="text-xs text-ink-300">加载中...</div>
+        <template x-if="!incomeLoading && income">
+          <div>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <div class="rh-stat-label">v0.6 已结算市场累计收入</div>
+                <div class="rh-stat-value rh-display" x-text="fmtKas(income.total_income_kas)"></div>
+                <div class="text-[10px] text-ink-400 mt-0.5">KAS · 委员会 settle TX outputs sum</div>
+              </div>
+              <div>
+                <div class="rh-stat-label">本人参与的委员会次数</div>
+                <div class="rh-stat-value" x-text="income.per_market?.length ?? 0"></div>
+                <div class="text-[10px] text-ink-400 mt-0.5">market 数 · 各市场 1 次出席</div>
+              </div>
+            </div>
+            <div x-show="income.pending_tx_count > 0" class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-3">
+              <span x-text="income.pending_tx_count"></span> 笔 settle TX 还在等链上索引,显示值可能偏低
+            </div>
+          </div>
+        </template>
+        <div x-show="incomeError" class="text-xs text-red-500 mt-2" x-text="incomeError"></div>
+      </div>
+
+      <!-- ③ 状态 (J1 /api/oracle/max-pot/:pk = bond/pot 暴露 = 安全度) -->
+      <div class="rh-block">
+        <div class="rh-block-title"><span class="rh-block-dot bg-blue-500"></span>状态</div>
+        <div x-show="maxPotLoading" class="text-xs text-ink-300">加载中...</div>
+        <template x-if="!maxPotLoading && maxPot">
+          <div>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <div class="rh-stat-label">当前 active 委员会</div>
+                <div class="rh-stat-value" x-text="maxPot.per_market?.length ?? 0"></div>
+                <div class="text-[10px] text-ink-400 mt-0.5">市场数 · 我被 VRF 抽中且未 settle</div>
+              </div>
+              <div>
+                <div class="rh-stat-label">最大暴露 (bond × 抽中市场 oracle_bond)</div>
+                <div class="rh-stat-value rh-display text-amber-700" x-text="fmtKas(maxPot.total_pot_kas)"></div>
+                <div class="text-[10px] text-ink-400 mt-0.5">KAS · 若全部 dispute 输败的最大被罚总额</div>
+              </div>
+            </div>
+          </div>
+        </template>
+        <div x-show="maxPotError" class="text-xs text-red-500 mt-2" x-text="maxPotError"></div>
+      </div>
+
+      <!-- ④ 配置 -->
+      <div class="rh-block">
+        <div class="rh-block-title"><span class="rh-block-dot bg-purple-500"></span>配置</div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+          <div>
+            <div class="rh-stat-label">投票方式</div>
+            <div class="text-ink-600 mt-1">
+              事前匿名: 市场创建时 VRF stake-weighted 随机抽 5-of-N 委员, 投票前不公开身份 (防定向贿赂).
+              结算时暴露 5 个签名者 PK + 阈值 ≥4 of 5 必达.
+            </div>
+          </div>
+          <div>
+            <div class="rh-stat-label">stake 解锁延期</div>
+            <div class="text-ink-600 mt-1">
+              退出 oracle 池需 ≥7 天延期 (护栏 #4, Bettor r19 path A spec §2).
+              巨鲸跑路也罚得到, 防 dispute 期 stake 已撤.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ⑤ 历史 (income.per_market = 已结算市场 list) -->
+      <div class="rh-block">
+        <div class="rh-block-title"><span class="rh-block-dot bg-ink-400"></span>历史</div>
+        <div x-show="incomeLoading" class="text-xs text-ink-300">加载中...</div>
+        <template x-if="!incomeLoading && income">
+          <div>
+            <div x-show="(income.per_market || []).length === 0" class="text-xs text-ink-300 py-3">
+              此 oracle 尚未参与任何已结算市场.
+            </div>
+            <div class="space-y-1.5">
+              <template x-for="m in (income.per_market || []).slice(0, 20)" :key="m.market_id">
+                <div class="flex items-center justify-between text-xs py-1.5 border-b border-warm-100 last:border-0">
+                  <div class="flex-1 min-w-0">
+                    <div class="font-mono text-ink-700 truncate" :title="m.market_id" x-text="m.market_id"></div>
+                    <div class="text-[10px] text-ink-400 mt-0.5">
+                      <span x-show="m.status">status: <span x-text="m.status"></span></span>
+                      <span x-show="m.position != null" class="ml-2">committee 位置 #<span x-text="m.position"></span></span>
+                    </div>
+                  </div>
+                  <div class="text-right tabular-nums text-ink-700 ml-3" x-text="fmtKas(m.income_kas)"></div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+      </div>
+
+    </div>
+  </template>
+</div>
+
+<script>
+function oracleHome() {
+  return {
+    loading: true,
+    agents: [],
+    selectedIdx: 0,
+    oraclePk: '',
+    get agent() { return this.agents[this.selectedIdx] || null; },
+    income: null, incomeLoading: false, incomeError: '',
+    maxPot: null, maxPotLoading: false, maxPotError: '',
+
+    fmtKas(n) {
+      const x = parseFloat(n);
+      if (!Number.isFinite(x)) return '0';
+      return x.toFixed(4);
+    },
+    shortAddr(a) {
+      if (!a) return '';
+      return a.slice(0, 14) + '...' + a.slice(-6);
+    },
+    copyAddr() {
+      if (!this.agent?.address) return;
+      navigator.clipboard.writeText(this.agent.address).catch(() => {});
+    },
+
+    async init() {
+      try {
+        const r = await fetch('/api/relays');
+        const j = await r.json();
+        this.agents = (j.relays || j || [])
+          .filter(x => x.role === 'oracle' || x.is_oracle)
+          .map(x => ({ ...x, kasBalance: null }));
+        if (this.agents.length > 0) await this.loadData();
+      } catch (e) {
+        console.error('load oracle agents fail:', e);
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async loadData() {
+      const a = this.agent;
+      if (!a) return;
+      this.income = null; this.maxPot = null;
+      this.incomeError = ''; this.maxPotError = '';
+      this.oraclePk = '';
+
+      const fetchJson = async (url) => {
+        const r = await fetch(url);
+        if (!r.ok) {
+          const txt = await r.text().catch(() => '');
+          throw new Error('HTTP ' + r.status + (txt ? (' ' + txt.slice(0,80)) : ''));
+        }
+        return r.json();
+      };
+
+      // step 1: derive PK from address via /api/relay/:id/pubkey
+      let pk = '';
+      try {
+        const pkResp = await fetchJson(`/api/relay/${a.id}/pubkey`);
+        pk = (pkResp.pubkey || pkResp.pk || '').toLowerCase();
+        this.oraclePk = pk;
+      } catch (e) {
+        this.incomeError = 'pubkey 获取失败: ' + e.message;
+        this.maxPotError = this.incomeError;
+        return;
+      }
+
+      // step 2: parallel fetch balance + income + max-pot
+      this.incomeLoading = true; this.maxPotLoading = true;
+      try {
+        const [bal, inc, mp] = await Promise.allSettled([
+          fetchJson(`/api/relay/${a.id}/balance`),
+          fetchJson(`/api/oracle/income/${pk}`),
+          fetchJson(`/api/oracle/max-pot/${pk}`),
+        ]);
+        if (bal.status === 'fulfilled') {
+          a.kasBalance = (typeof bal.value === 'number') ? bal.value : (bal.value?.balance ?? null);
+        }
+        if (inc.status === 'fulfilled') {
+          this.income = inc.value;
+        } else {
+          this.incomeError = '收入接口报错: ' + (inc.reason?.message || 'unknown');
+        }
+        if (mp.status === 'fulfilled') {
+          this.maxPot = mp.value;
+        } else {
+          this.maxPotError = '最大暴露接口报错: ' + (mp.reason?.message || 'unknown');
+        }
+      } finally {
+        this.incomeLoading = false; this.maxPotLoading = false;
+      }
+    },
+  };
+}
+</script>
+
+<%~ include('partials/page-close', it) %>
