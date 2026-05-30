@@ -447,10 +447,11 @@ function oracleHome() {
 
     async loadMineAgents() {
       try {
-        const r = await fetch('/api/relays');
+        // /api/oracles = list relays where is_oracle=1 (legacy registry; v0.6 真池在 /api/oracle-pool/state, 但 operator-self-view 用 legacy 注册即可)
+        // (R-1 audit fix: /api/relays was 404 silent, oracle selector 跑空 — Owner UI audit 2026-05-30).
+        const r = await fetch('/api/oracles');
         const j = await r.json();
-        this.agents = (j.relays || j || [])
-          .filter(x => x.role === 'oracle' || x.is_oracle)
+        this.agents = ((j && j.oracles) || [])
           .map(x => ({ ...x, kasBalance: null }));
       } catch (e) {
         console.error('load oracle agents fail:', e);

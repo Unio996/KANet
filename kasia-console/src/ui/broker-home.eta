@@ -227,10 +227,11 @@ function brokerHome() {
 
     async init() {
       try {
-        // /api/relays = list all relays; pick those with role=broker OR is_dex_broker
-        const r = await fetch('/api/relays');
+        // /api/agent/profile returns array of relays with role / is_dex_broker / adapter info
+        // (R-1 audit fix: /api/relays was 404 silent, agent selector 跑空 — Owner UI audit 2026-05-30).
+        const r = await fetch('/api/agent/profile');
         const j = await r.json();
-        this.agents = (j.relays || j || [])
+        this.agents = (Array.isArray(j) ? j : [])
           .filter(x => x.role === 'broker' || x.is_dex_broker)
           .map(x => ({ ...x, kasBalance: null }));
         if (this.agents.length > 0) await this.loadData();
