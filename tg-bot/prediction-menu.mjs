@@ -3,7 +3,7 @@
 // 0-key/0-custody (J1 S5): bot 只读 + 显; 价值步 (stage4-5: escrow 地址 + 用户自钱包付 + 链上检测)
 //   待 J2/J1 taker-stake-external backend, 此处先 stub + 错付预防文案.
 import * as api from './console-api.mjs';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, renameSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -24,15 +24,27 @@ try {
   }
 } catch (e) { console.warn(`[prediction-menu] state load skipped: ${e.message}`); }
 
+// Bettor r9 F2 (原子写): tmp + rename, 防 writeFileSync 崩在写一半 → _state.json 损坏 → JSON.parse 失败 → 两 Map 全丢。
+function _writeAtomic() {
+  const data = JSON.stringify({ sessions: [...sessions.entries()], pendingPayments: [...pendingPayments.entries()] });
+  const tmp = STATE_FILE + '.tmp';
+  writeFileSync(tmp, data);
+  renameSync(tmp, STATE_FILE);  // Node fs.renameSync 在 Windows 也覆盖
+}
+
 let _saveTimer = null;
+// 菜单导航类 (sessions 翻页) 走 debounce, 高频小写合并; 资金关键步走 persistNow().
 function persist() {
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => {
-    try {
-      const data = JSON.stringify({ sessions: [...sessions.entries()], pendingPayments: [...pendingPayments.entries()] });
-      writeFileSync(STATE_FILE, data);
-    } catch (e) { console.warn(`[prediction-menu] state save fail: ${e.message}`); }
+    try { _writeAtomic(); } catch (e) { console.warn(`[prediction-menu] state save fail: ${e.message}`); }
   }, 250);
+}
+// Bettor r9 F1 (资金关键步同步 flush): 「确认押注」→ pendingPayments.set 后必须立刻落盘,
+// 不能用 debounce, 否则 250ms 窗口内崩溃 = 刚确认的付款监控丢 = 用户实付也没人盯。
+function persistNow() {
+  clearTimeout(_saveTimer);
+  try { _writeAtomic(); } catch (e) { console.warn(`[prediction-menu] state save fail (sync): ${e.message}`); }
 }
 
 const MIN_STAKE_KAS = 0.5;          // pool.js bettor/register 硬下限 (Bug 8: 更小 stake → settle TX 超 KIP-9 storage mass).
@@ -152,12 +164,16 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
       '· 多付 → 超出部分被矿工吃掉、要不回。',
       '· 任意钱包都能付; 但中奖要用你【绑定地址】的钥匙领取。',
       '',
-      '确认无误回复「确认」继续, 我给付款指引并盯链上到账。回复其他取消。',
+      `回复 1 = 确认付 ${kas} KAS 到这个一次性地址 (少付永久锁死, 多付被矿工吃掉)`,
+      '回复 0 = 取消',
     ].join('\n');
   }
 
   if (s.stage === 'confirm') {
-    const ok = raw === '确认' || raw.toLowerCase() === 'yes' || raw.toLowerCase() === 'y';
+    // Bettor r9 ③ 数字确认: 全流程数字一致 + exact-match 脆弱 (CONFIRM_WORDS 撞「确认了」不命中) 已修.
+    // 收兼容老指引: 1 / 确认 / yes / y 都接.
+    const t = raw.toLowerCase();
+    const ok = raw === '1' || raw === '确认' || t === 'yes' || t === 'y';
     if (!ok) { sessions.delete(tgUser); return '已取消, 未发生任何付款。随时 /bet 重新开始。'; }
     const kas = sompiToKasStr(s.prep.exact_sompi);
     pendingPayments.set(tgUser, {
@@ -167,6 +183,7 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
       deadline: s.market.deadline || null, since: Date.now(),
     });
     sessions.delete(tgUser);
+    persistNow();  // Bettor r9 F1: 资金关键步同步 flush, 不走 debounce — 250ms 窗口崩 = 监控丢
     return [
       '✅ 已记录。请现在【从你的钱包】付款:',
       `金额: ${kas} KAS  (= ${s.prep.exact_sompi} sompi)`,
