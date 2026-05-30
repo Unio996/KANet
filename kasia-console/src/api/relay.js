@@ -15,6 +15,7 @@ import { startRelay, stopRelay } from '../services/relay-manager.js';
 import { getMind } from '../services/mind-manager.js';
 import { ethers } from 'ethers';
 import { encrypt, decrypt } from '../services/crypto.js';
+import { verifyIngestRequest } from '../services/ingest-auth.js';
 import { randomUUID } from 'crypto';
 import {
   CHAIN_META,
@@ -101,6 +102,35 @@ export async function registerRelayRoutes(fastify) {
     return reply.redirect('/relays');
   });
 
+  // r281 (Bettor 5/30, Owner P0) — import an existing raw kaspa private key as a Console relay.
+  // 用于无助记词只有裸 privkey 的地址 (e.g. Owner 已绑 TG 的 qrymjvc). 创建后跟普通 relay 一样: 分配
+  // adapter 即自动启动, balance/transfer 等操作 endpoint 均可用 (走 KASPA_PRIVKEY env 路径).
+  // J2 r93 reviewer audit: 必须 verifyIngestRequest (跟 chat/send 等敏感写端点对称, 防任何能访问 Console
+  // 的人注入私钥创建可动钱的 relay).
+  fastify.post('/api/relay/import-privkey', { preHandler: async (request, reply) => { await verifyIngestRequest(request, reply); } }, async (request, reply) => {
+    const { name, privkey, network } = request.body || {};
+    if (!name || typeof name !== 'string' || !name.trim()) return reply.code(400).send({ ok: false, error: 'name required' });
+    if (!privkey || typeof privkey !== 'string') return reply.code(400).send({ ok: false, error: 'privkey required (64 hex chars)' });
+    const cleanPriv = privkey.startsWith('0x') ? privkey.slice(2) : privkey;
+    if (!/^[0-9a-fA-F]{64}$/.test(cleanPriv)) return reply.code(400).send({ ok: false, error: 'privkey must be 64 hex chars (32 bytes)' });
+    const net = network || 'testnet-12';
+    let address;
+    try {
+      const kaspa = await import('kaspa-wasm');
+      const sk = new kaspa.PrivateKey(cleanPriv);
+      const netType = (net === 'mainnet') ? kaspa.NetworkType.Mainnet : kaspa.NetworkType.Testnet;
+      address = sk.toKeypair().toAddress(netType).toString();
+    } catch (e) {
+      return reply.code(400).send({ ok: false, error: `address derive fail: ${e.message}` });
+    }
+    // dedup: same address already in relay_nodes
+    const existing = sqlite.prepare('SELECT id, name FROM relay_nodes WHERE address = ?').get(address);
+    if (existing) return reply.code(409).send({ ok: false, error: `address already registered as relay "${existing.name}" (id=${existing.id})`, existing_id: existing.id });
+    const newId = createRelayNode({ name: name.trim(), privkey: cleanPriv, address, network: net, adapterNodeId: null, pollMs: 2000 });
+    console.log(`[relay] r281 imported privkey-relay "${name.trim()}" → ${address}`);
+    return reply.send({ ok: true, id: newId, name: name.trim(), address, network: net });
+  });
+
   fastify.post('/relays/:id/delete', async (request, reply) => {
     deleteRelayNode(request.params.id);
     return reply.redirect('/relays');
@@ -109,10 +139,10 @@ export async function registerRelayRoutes(fastify) {
   fastify.post('/relays/:id/assign', async (request, reply) => {
     const { adapter_node_id } = request.body;
     updateRelayNode(request.params.id, { adapterNodeId: adapter_node_id || null });
-    // Auto-start relay if adapter assigned and relay has address+mnemonic
+    // Auto-start relay if adapter assigned and relay has address + (mnemonic OR privkey, r281).
     if (adapter_node_id) {
       const relay = getRelayNode(request.params.id);
-      if (relay?.address && relay?.mnemonic_encrypted) {
+      if (relay?.address && (relay?.mnemonic_encrypted || relay?.privkey_encrypted)) {
         const result = await startRelay(request.params.id);
         if (result.ok) console.log(`[relay-manager] Auto-started ${relay.name} relay after adapter assign`);
       }

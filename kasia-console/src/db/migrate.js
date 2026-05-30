@@ -4677,5 +4677,23 @@ export function runMigrations() {
     }
   }
 
+  // v157 — relay_nodes 加 privkey_encrypted + privkey_hint 列 (r281, Bettor 5/30 Owner P0).
+  // 之前 relay_nodes 只有 mnemonic_encrypted, 强制助记词型 relay; 一个裸 kaspa 私钥地址 (= Owner 的 qrymjvc,
+  // 系统已生成给他 + 已在 TG 绑定) 无法进入 Console 操作. Owner钦定: 私钥=控制权, 系统该支持. 加两列让
+  // createRelayNode 可接受 privkey (而非 mnemonic), startRelay 会传 KASPA_PRIVKEY env (wallet.mjs r281 同步
+  // 加了 fromPrivateKey factory + getWallet 读 KASPA_PRIVKEY 优先). 幂等: 列存在则跳.
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(relay_nodes)").all();
+    if (!cols.some(c => c.name === 'privkey_encrypted')) {
+      try {
+        sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN privkey_encrypted TEXT`);
+        sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN privkey_hint TEXT`);
+        console.log('[migrate] v157: relay_nodes 加 privkey_encrypted + privkey_hint (r281 私钥型 relay 支持, Owner P0).');
+      } catch (e) {
+        console.warn(`[migrate] v157 privkey 列加失败: ${e.message}`);
+      }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

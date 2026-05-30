@@ -66,6 +66,21 @@ export class KaspaWallet {
     }
   }
 
+  // r281 (Bettor 5/30 — Owner P0): privkey-backed wallet for relays whose key is a raw kaspa privkey
+  // (no mnemonic available). Owner钦定: 私钥=控制权, 系统该支持. KaspaWallet constructor already accepts
+  // a PrivateKey directly; this factory wraps it for the privkey-relay startup path (getWallet reads
+  // KASPA_PRIVKEY env when set, see below).
+  static fromPrivateKey(privKeyHex, network = 'mainnet') {
+    if (!privKeyHex || typeof privKeyHex !== 'string') throw new Error('privKeyHex (32-byte hex string) required');
+    const clean = privKeyHex.startsWith('0x') ? privKeyHex.slice(2) : privKeyHex;
+    if (!/^[0-9a-fA-F]{64}$/.test(clean)) throw new Error('privKeyHex must be 64 hex chars (32 bytes)');
+    try {
+      return new KaspaWallet(new PrivateKey(clean), network);
+    } catch (error) {
+      throw new Error(`Invalid private key: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   getAddress() { return this.keypair.toAddress(getNetworkType(this.network)).toString(); }
   getPrivateKey() { return this.privateKey; }
   getNetworkType() { return getNetworkType(this.network); }
@@ -87,10 +102,18 @@ let walletInstance = null;
 
 export function getWallet() {
   if (!walletInstance) {
-    const mnemonic = process.env.KASPA_MNEMONIC;
     const network = process.env.KASPA_NETWORK || 'mainnet';
+    // r281 (Bettor 5/30, Owner P0): privkey-backed relay path takes precedence over mnemonic.
+    // Console startRelay sets KASPA_PRIVKEY for relays whose key is a raw kaspa privkey (imported
+    // via /api/relay/import-privkey, no mnemonic available — = Owner钦定 privkey-as-control).
+    const privKey = process.env.KASPA_PRIVKEY;
+    if (privKey) {
+      walletInstance = KaspaWallet.fromPrivateKey(privKey, network);
+      return walletInstance;
+    }
+    const mnemonic = process.env.KASPA_MNEMONIC;
     const accountIndex = parseInt(process.env.KASPA_ACCOUNT_INDEX || '0', 10);
-    if (!mnemonic) throw new Error('KASPA_MNEMONIC environment variable must be set');
+    if (!mnemonic) throw new Error('KASPA_MNEMONIC or KASPA_PRIVKEY environment variable must be set');
     walletInstance = KaspaWallet.fromMnemonic(mnemonic, network, accountIndex);
   }
   return walletInstance;

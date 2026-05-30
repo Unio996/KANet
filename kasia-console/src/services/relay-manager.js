@@ -13,7 +13,7 @@ import { fork } from 'child_process';
 import { resolve } from 'path';
 import { sqlite } from '../db/client.js';
 import { getConfig } from '../data/settings/configs.js';
-import { getRelayMnemonic } from '../data/settings/relay-nodes.js';
+import { getRelayMnemonic, getRelayPrivkey } from '../data/settings/relay-nodes.js';
 
 const KANET_ROOT = process.env.KANET_ROOT || 'D:/Anthropic';
 const RELAY_DIR = resolve(process.env.RELAY_DIR || `${KANET_ROOT}/kasia-relay`);
@@ -54,8 +54,12 @@ export async function startRelay(relayNodeId) {
     console.log(`[relay-manager] Fixed identity type for ${account.name}: ${existingId.identity_type} → local`);
   }
 
-  const mnemonic = getRelayMnemonic(relayNodeId);
-  if (!mnemonic) return { ok: false, reason: 'no_mnemonic' };
+  // r281 (Owner P0): privkey-backed relay 优先 (无助记词只有裸 kaspa 私钥的地址,
+  // 如 Owner 已绑 TG 的 qrymjvc). Wallet.mjs getWallet 优先读 KASPA_PRIVKEY env.
+  // 助记词型 relay 保持原行为. 二者必至少一个.
+  const privkey = getRelayPrivkey(relayNodeId);
+  const mnemonic = privkey ? null : getRelayMnemonic(relayNodeId);
+  if (!privkey && !mnemonic) return { ok: false, reason: 'no_key' };
 
   // Resolve config
   const rpcUrl = await getConfig('rpc_url') || process.env.KASPA_RPC_URL || '';
@@ -65,7 +69,6 @@ export async function startRelay(relayNodeId) {
 
   const env = {
     ...process.env,
-    KASPA_MNEMONIC: mnemonic,
     CONSOLE_URL: `http://localhost:${CONSOLE_PORT}`,
     INGEST_SECRET: ingestSecret,
     RELAY_NODE_ID: relayNodeId,
@@ -76,6 +79,9 @@ export async function startRelay(relayNodeId) {
     POLL_MS: String(account.poll_ms || 2000),
     IS_SERVICE: account.is_service ? '1' : '0',  // R5 T-J2-16: Service 模式 relay (broker) 跳 anti-spam dedup
   };
+  // r281: pass exactly one of KASPA_PRIVKEY / KASPA_MNEMONIC (privkey wins). wallet.mjs reads them.
+  if (privkey) env.KASPA_PRIVKEY = privkey;
+  else env.KASPA_MNEMONIC = mnemonic;
 
   try {
     const child = fork('src/relay.mjs', [], {
