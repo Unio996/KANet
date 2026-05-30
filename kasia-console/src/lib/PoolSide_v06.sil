@@ -18,11 +18,32 @@
 // individual committee member's private key (= same trust baseline as v0.5 PoolSide 3-of-3
 // oracle model, just per-event committee instead of fixed oracle).
 //
-// Hardcoded merkle order (leaf-left at every level): matches J2.1's pool-merkle-builder
-// convention + matches v0.5 PoolSide pattern. Inherits v0.5 latent leftmost-only bug for the
-// bettor merkle (= bettor at index != 0 fails merkle). Direction-aware merkle verify is a
-// follow-on (J1 r116 partial design; silverc if/else probe PASS at 223 bytes — feasibility
-// confirmed) once J2.1 confirms proof builder semantics for committee depth-8 + bettor depth-6.
+// Position-aware merkle climb FIXED (J2 r105 catch + J1 r126 fix d5d4ecbdd; refresh per Bettor r38):
+// each climb level uses if/else bit-aware concat (bit_k = (idx / 2^k) % 2; 0=hash(cur||sib),
+// 1=hash(sib||cur)). Both committee merkle (5×depth-8) AND bettor merkle (depth-6) are position-aware
+// — all leaf positions verify correctly, not just position 0. NWT attack-static v2 fingerprints
+// the 40 if-else branches in spine + 6 in side as DEFENSE_PRESENT.
+//
+// PAYOUT FORMULA SEMANTICS (Bettor r38 F1 audit response):
+// `payout = stakeAmount * totalPool / winnerPool` treats totalPool/winnerPool as caller-provided
+// values. The off-chain settler MUST pass NET totals — i.e. totalPool excluding brokerFee +
+// 5×committeeBond + minerFee already deducted from the pool. Contract verifies structure not
+// arithmetic semantics: gross-vs-net interpretation is settler's responsibility. Documented here
+// rather than enforced inline because (1) v0.6 inherits this from v0.5 PoolSide L87-89 unchanged,
+// (2) explicit fee args in claim_winner would expand the already-large arg list further.
+//
+// PAYOUT OVERFLOW (Bettor r38 F2 audit response): silverc literal-fold probe accepts 1e20 mult
+// clean — strong evidence the SS arithmetic stack uses bignum (Kaspa SmartScript CScriptNum-style),
+// not i64. With Owner's bettor-floor strip (no upper-bound on stakes) extreme markets could
+// theoretically reach 1e20+ products; dynamic e2e (attack-self-claim live mode) is the
+// definitive runtime verification.
+//
+// MINER FEE (Bettor r38 F3 audit response): claim_winner enforces output[0].value == payout
+// without minerFee deduction — assumes settle_via_spine cooperative path (= spine settle TX
+// aggregates inputs/outputs across spine + all sides, miner fee paid from spine balance).
+// Self-claim path (= individual bettor TX) needs additional design for per-claim fee handling
+// (= bettor brings additional fee-paying input OR pre-deposit); first ship treats settle_via_spine
+// as primary, self-claim as best-effort fallback once TX-builder layer adds fee aggregation.
 //
 // Threshold t=4-of-5 (Owner ack via Bettor r19 — 5/30): 97.7% liveness, tolerates 1 absent
 // committee member. Counter pattern per J1 r120 probe.
