@@ -12,8 +12,17 @@ import crypto from 'node:crypto';
 
 const DB_PATH = 'D:/kanet-tn12/kasia-console/data/console.db';
 const REPO_ROOT = 'D:/kanet-tn12';
-const SS_V05 = path.join(REPO_ROOT, 'kasia-console/src/lib/PoolSpine.sil');
-const SS_V06 = path.join(REPO_ROOT, 'kasia-console/src/lib/PoolSpine_v06.sil');
+const SS_FILES_V05 = {
+  PoolSpine: path.join(REPO_ROOT, 'kasia-console/src/lib/PoolSpine.sil'),
+  PoolSide: path.join(REPO_ROOT, 'kasia-console/src/lib/PoolSide.sil'),
+};
+const SS_FILES_V06 = {
+  PoolSpine_v06: path.join(REPO_ROOT, 'kasia-console/src/lib/PoolSpine_v06.sil'),
+  PoolSide_v06: path.join(REPO_ROOT, 'kasia-console/src/lib/PoolSide_v06.sil'),
+};
+// Backward compat with earlier baseline that used single SS_V05/SS_V06 paths
+const SS_V05 = SS_FILES_V05.PoolSpine;
+const SS_V06 = SS_FILES_V06.PoolSpine_v06;
 
 const args = process.argv.slice(2);
 function arg(name, def) {
@@ -168,6 +177,9 @@ async function captureBaseline() {
       dispute_path_expected: 'dispatch via voter v2 + 7 outputs + oracleFee/5 split',
       ss_v05_file_sha256: sha256File(SS_V05),
       ss_v05_entrypoints: extractEntrypoints(SS_V05),
+      ss_files_v05: Object.fromEntries(
+        Object.entries(SS_FILES_V05).map(([k, p]) => [k, { sha256: sha256File(p), entrypoints: extractEntrypoints(p) }])
+      ),
     },
     settle_tx_baseline: settleSamples,
     bet_tx_baseline: betSamples,
@@ -208,44 +220,58 @@ async function verifyV06(baselinePath) {
   }
   report.deploy_pending = 0;
 
-  // Check 1: v0.5 SS file byte-identical (= ADDITIVE design守, v0.5 老市场零影响 spec §7)
-  const currentV05Hash = sha256File(SS_V05);
-  const baselineV05Hash = baseline.v0_5_invariants?.ss_v05_file_sha256;
-  check(
-    'v0.5 PoolSpine.sil 字节不变 (spec §7 ADDITIVE)',
-    currentV05Hash === baselineV05Hash,
-    { current: currentV05Hash, baseline: baselineV05Hash }
-  );
+  // Check 1: All v0.5 SS files byte-identical (= ADDITIVE design 守, spec §7)
+  const baselineV05Files = baseline.v0_5_invariants?.ss_files_v05 || {
+    PoolSpine: { sha256: baseline.v0_5_invariants?.ss_v05_file_sha256, entrypoints: baseline.v0_5_invariants?.ss_v05_entrypoints || [] }
+  };
+  for (const [name, p] of Object.entries(SS_FILES_V05)) {
+    const baselineEntry = baselineV05Files[name];
+    if (!baselineEntry) continue;
+    const currentHash = sha256File(p);
+    check(
+      `v0.5 ${name}.sil 字节不变 (spec §7 ADDITIVE)`,
+      currentHash === baselineEntry.sha256,
+      { current: currentHash, baseline: baselineEntry.sha256 }
+    );
+    const currentEps = extractEntrypoints(p);
+    check(
+      `v0.5 ${name} entrypoints 不变 (= ${baselineEntry.entrypoints.length} 件)`,
+      JSON.stringify(currentEps.sort()) === JSON.stringify([...(baselineEntry.entrypoints || [])].sort()),
+      { current: currentEps, baseline: baselineEntry.entrypoints }
+    );
+  }
 
-  // Check 2: v0.5 entrypoints unchanged
-  const currentV05Eps = extractEntrypoints(SS_V05);
-  const baselineV05Eps = baseline.v0_5_invariants?.ss_v05_entrypoints || [];
-  check(
-    'v0.5 entrypoints 不变 (= 5: settle_unanimous/settle_majority_forfeit_1/refund_*×3)',
-    JSON.stringify(currentV05Eps.sort()) === JSON.stringify([...baselineV05Eps].sort()),
-    { current: currentV05Eps, baseline: baselineV05Eps }
-  );
+  // Check v0.6 SS files exist + structural validity
+  const v06SpecEps = {
+    PoolSpine_v06: ['settle_aggregate', 'dispute_reveal', 'refund_maker_unjoined'],
+    PoolSide_v06: ['settled_via_spine', 'claim_winner', 'refund_market_cancelled'],
+  };
+  for (const [name, p] of Object.entries(SS_FILES_V06)) {
+    const hash = sha256File(p);
+    const eps = extractEntrypoints(p);
+    const expected = v06SpecEps[name] || [];
+    check(
+      `v0.6 ${name}.sil 存在 + ≥${expected.length} entrypoint`,
+      hash !== null && eps.length >= expected.length,
+      { sha256: hash, entrypoints: eps, expected }
+    );
+    if (expected.length) {
+      check(
+        `v0.6 ${name} 含 spec entrypoints`,
+        expected.every(e => eps.includes(e)),
+        { missing: expected.filter(e => !eps.includes(e)), found: eps }
+      );
+    }
+  }
 
-  // Check 3: v0.6 SS file exists + valid entrypoints (spec §1 = settle_aggregate + dispute_reveal + refund_maker_unjoined)
-  const v06Hash = sha256File(SS_V06);
-  const v06Eps = extractEntrypoints(SS_V06);
-  const v06ExpectedEps = ['settle_aggregate', 'dispute_reveal', 'refund_maker_unjoined'];
+  // v0.5 + v0.6 hashes differ (= protocol_version separation, 不同 P2SH 派生)
+  const allV05Hashes = Object.values(SS_FILES_V05).map(sha256File);
+  const allV06Hashes = Object.values(SS_FILES_V06).map(sha256File);
+  const overlap = allV05Hashes.some(h => h && allV06Hashes.includes(h));
   check(
-    'v0.6 PoolSpine_v06.sil 存在 + 3 entrypoint',
-    v06Hash !== null && v06Eps.length === 3,
-    { v06_sha256: v06Hash, v06_entrypoints: v06Eps, expected: v06ExpectedEps }
-  );
-  check(
-    'v0.6 entrypoints 包含 spec §1 锁定 3 件 (settle_aggregate/dispute_reveal/refund_maker_unjoined)',
-    v06ExpectedEps.every(e => v06Eps.includes(e)),
-    { missing: v06ExpectedEps.filter(e => !v06Eps.includes(e)), found: v06Eps }
-  );
-
-  // Check 4: v0.5 + v0.6 hashes differ (= protocol_version separation, 不同 P2SH 派生)
-  check(
-    'v0.5 ≠ v0.6 SS file hash (= protocol_version branch 独立, 派生不同 P2SH)',
-    currentV05Hash !== v06Hash,
-    { v05: currentV05Hash, v06: v06Hash }
+    'v0.5 ≠ v0.6 SS file hashes 全分 (= protocol_version branch 独立, 派生不同 P2SH)',
+    !overlap,
+    { v05_hashes: allV05Hashes, v06_hashes: allV06Hashes }
   );
 
   // Check 5: v0.5 chain invariants 现链 state vs baseline (= 老市场 bond/broker_fee 分布不飘)

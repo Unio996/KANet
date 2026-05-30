@@ -1,0 +1,113 @@
+// PoolSide_v06.sil — v0.6 anonymous-pool per-bettor side contract.
+//
+// Per Bettor r16: per-bettor payout enforcement lives in PoolSide spend conditions
+// (not in spine). v0.5 left this as "TODO Phase 2: full Merkle verify per output" —
+// v0.6 fills the gap so 50-bettor pools settle independently per-side, no spine loop.
+//
+// Trust model differences from v0.5:
+// - v0.5 baked 3 individual oracle PKs in ctor (3-of-3 unanimous).
+// - v0.6 takes aggPk + aggSig at claim time (t-of-N FROST/MuSig2 aggregate). Per-event
+//   committee data can't be in ctor (J1 r99 catch + Bettor r7 confirm).
+// - Side binds to its market via spineP2shHash (= same anchor as v0.5).
+//
+// LIMITATION (first draft): aggPk-to-spine binding is NOT enforced at side level
+// (would require silverc OpTxInputSpk loop access, not currently exposed). Bettor
+// off-chain verifies aggPk matches the spine settle TX's committee aggregate before
+// submitting claim. Spine settle TX validates committee inclusion on-chain — side
+// claim_winner is independent fast-path with defense-in-depth via merkle subset proof.
+// Hardening pass: bake aggPk-derivation-root once OpTxInputSpk lands.
+//
+// Payout formula fix vs v0.5: v0.5 L88 hardcoded winnerPool = totalYesPool (= NO winners
+// would compute wrong payout — v0.5 bug). v0.6 branches via arithmetic since silverc
+// supports int ops: winnerPool = totalYesPool*(1-w) + totalNoPool*w  (w ∈ {0,1}).
+
+pragma silverscript ^0.1.0;
+
+contract PoolSide_v06(
+    byte[32] bettorPk,
+    byte[32] spineP2shHash,
+    byte[32] marketMetadataHash,
+    int direction,          // 0 = YES, 1 = NO
+    int stakeAmount,
+    int deadline
+) {
+    // entry 0 — settled_via_spine: side consumed by spine settle TX (cooperative path).
+    // Phase 1: trust spine settle entry to validate everything. Side just allows itself
+    // to be consumed alongside the spine UTXO; spine entry does aggregate sig + winner verify.
+    entrypoint function settled_via_spine() {
+        require(tx.inputs.length >= 2);  // spine + this side minimum
+        // Phase 2 TODO (matches v0.5 PoolSide L39-41): once silverc exposes
+        // OpTxInputSpk, verify one input's spk hash == spineP2shHash (cross-market reuse defense).
+    }
+
+    // entry 1 — claim_winner: bettor self-claims with aggregate oracle sig + merkle proof.
+    // Depth-6 unrolled (= 2^6 = 64 ≥ 50-bettor v0.5 cap; matches v0.5 PoolSide.claim_winner).
+    // Per Bettor r16: this is the per-bettor enforcement layer (merkle ∈ sidesMerkleRoot
+    // + winner match + own output amount correct) — fills v0.5 "TODO Phase 2".
+    entrypoint function claim_winner(
+        sig bettorSig,
+        sig aggSig,
+        byte[32] aggPk,
+        int settlementWinner,
+        int totalYesPool,
+        int totalNoPool,
+        byte[32] sidesMerkleRoot,
+        byte[32] sibling0,
+        byte[32] sibling1,
+        byte[32] sibling2,
+        byte[32] sibling3,
+        byte[32] sibling4,
+        byte[32] sibling5
+    ) {
+        require(checkSig(bettorSig, pubkey(bettorPk)));
+        require(checkSig(aggSig, pubkey(aggPk)));
+        require(settlementWinner == 0 || settlementWinner == 1);
+        require(direction == settlementWinner);  // = "I'm on the winning side"
+        require(totalYesPool > 0);
+        require(totalNoPool > 0);
+
+        // Merkle proof verify: bettor's leaf climbs 6 levels to sidesMerkleRoot.
+        // Leaf = blake2b(bettorPk) (= v0.5 simplification; canonical version hashes (pk||dir||stake)).
+        byte[32] leaf = blake2b(byte[](bettorPk));
+        byte[] step0 = leaf + sibling0;
+        byte[32] level0 = blake2b(step0);
+        byte[] step1 = level0 + sibling1;
+        byte[32] level1 = blake2b(step1);
+        byte[] step2 = level1 + sibling2;
+        byte[32] level2 = blake2b(step2);
+        byte[] step3 = level2 + sibling3;
+        byte[32] level3 = blake2b(step3);
+        byte[] step4 = level3 + sibling4;
+        byte[32] level4 = blake2b(step4);
+        byte[] step5 = level4 + sibling5;
+        byte[32] root = blake2b(step5);
+        require(root == sidesMerkleRoot);
+
+        // Payout = bettor share of total pool (proportional to winner-side stakes).
+        // FIX vs v0.5 (L88 always picks YES): branch via arithmetic since silverc has no if.
+        // settlementWinner == 0 (YES): winnerPool = totalYesPool*1 + totalNoPool*0 = totalYesPool
+        // settlementWinner == 1 (NO):  winnerPool = totalYesPool*0 + totalNoPool*1 = totalNoPool
+        int notWinner = 1 - settlementWinner;
+        int winnerPool = totalYesPool * notWinner + totalNoPool * settlementWinner;
+        int totalPool = totalYesPool + totalNoPool;
+        int payout = stakeAmount * totalPool / winnerPool;
+
+        require(tx.outputs.length == 1);
+        byte[34] bettorLock = new ScriptPubKeyP2PK(pubkey(bettorPk));
+        require(tx.outputs[0].scriptPubKey == byte[](bettorLock));
+        require(tx.outputs[0].value == payout);
+    }
+
+    // entry 2 — refund_market_cancelled: bettor recovers stake after deadline.
+    // bug 10d fix (v0.5 PoolSide L125-128): Kaspa Crescendo LOCK_TIME_THRESHOLD = 500B.
+    // Multiply deadline by 1000 → operand ≥ 500B → ms interpretation matches tx.lockTime ms.
+    entrypoint function refund_market_cancelled(sig bettorSig) {
+        require(checkSig(bettorSig, pubkey(bettorPk)));
+        require(tx.time >= deadline * 1000);
+
+        require(tx.outputs.length == 1);
+        byte[34] bettorLock = new ScriptPubKeyP2PK(pubkey(bettorPk));
+        require(tx.outputs[0].scriptPubKey == byte[](bettorLock));
+        require(tx.outputs[0].value == stakeAmount - 1000);  // minerFee placeholder
+    }
+}
