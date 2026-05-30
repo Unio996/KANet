@@ -1,32 +1,36 @@
-// PoolSpine_v06.sil — v0.6 anonymous-pool oracle prediction spine (Bettor r3 lock + Owner ack 5/30)
+// PoolSpine_v06.sil — v0.6 anonymous-pool oracle prediction spine, **depth-8** (pool ≤256)
+// Bettor r3 lock + Owner ack 5/30 + Bettor r10 finding (depth-4 too small) + J2 r102 attack math
+// + Bettor r12 lock (depth-8 ACK, J1 SS t-agnostic).
 //
-// What changed from PoolSpine.sil (v0.5):
-// - v0.5 baked 3 oracle PKs in the ctor (settle = checkSig×3 against individuals — identities public).
-// - v0.6 bakes ONE poolMerkleRoot (snapshot of the public oracle pool at market create); committee is
-//   selected per-event by off-chain stake-weighted VRF and reaches consensus via FROST/MuSig2 — settle
-//   only verifies the aggregated Schnorr sig (checkSig×1) + merkle proof that each committee member is
-//   in the baked pool root. Identities of WHO signed are anonymous during the voting period and only
-//   revealed at settle TX (per Bettor r7: aggPk + committeePkHash + committee PKs are settle-TX args,
-//   NOT ctor — ctor at create time can't know the per-event committee).
+// What changed from v0.5 PoolSpine.sil:
+// - v0.5: ctor baked 3 oracle PKs; settle = checkSig×3 against individuals (identities public).
+// - v0.6: ctor bakes ONE poolMerkleRoot (snapshot of the public oracle pool at market create);
+//   committee is selected per-event by off-chain stake-weighted VRF and reaches consensus via
+//   FROST/MuSig2 t-of-N — settle only verifies the aggregated Schnorr sig (checkSig×1) + merkle
+//   proof that each committee member is in the ctor pool. Identities of WHO signed are anonymous
+//   during voting, revealed at settle TX; per-oracle VOTES stay aggregate, only revealed if disputed.
 //
 // SS validation per spec §1 (J1 r96 妙解 — zero new silverc primitives):
-//   ① checkSig(aggSig, aggPk)                      — committee jointly signed via MuSig2
-//   ② blake2b(c0||c1||c2||c3||c4) == committeePkHash — binds the revealed committee to the dispute commitment
-//   ③ for each c_i: merkle proof verifies c_i ∈ poolMerkleRoot — committee subset of the committed pool
+//   ① checkSig(aggSig, aggPk)                          — committee jointly signed via MuSig2
+//   ② blake2b(c0||c1||c2||c3||c4) == committeePkHash   — binds revealed committee to dispute commitment
+//   ③ for each c_i: depth-8 merkle proof verifies c_i ∈ poolMerkleRoot — committee subset of pool
+//
+// SS is t-agnostic (Bettor r12): aggregate sig has BIP340 form regardless of which t-of-N produced it,
+// so this contract works for any threshold. t is configured off-chain at the FROST DKG layer (J2 sub).
 //
 // Slash granularity is fork A (iii) per spec §1: aggregate fast path keeps individuals anonymous;
 // dispute_reveal entrypoint requires individual sigs matching the commitment for per-oracle bond
-// forfeiture. (Bond redirection at the SS-output level is simplified in this first draft — verifies
-// the commitment + individual sigs; full output enforcement = follow-on iteration.)
+// forfeiture. (Bond redirection at the SS-output level is structural and lives in the pool-bond
+// contract layer — first-draft here verifies the commitment + individual sigs.)
 //
-// Fixed scope for first draft (configurable later):
-// - committee size N = 5 (spec allows 5–7)
-// - pool merkle depth = 4 (pool size up to 16 oracles)
+// Fixed scope:
+// - committee size N = 5 (spec allows 5–7; locked at 5 for first ship)
+// - pool merkle depth = 8 (pool ≤ 256, future-proof per Bettor r10 finding + J2 r102 attack math)
 // - dispute_reveal binding via committeePkHash arg (off-chain coordinator-provided; the cleaner
 //   single-bind via P2SH-output baking committeePkHash is a follow-on once silverc P2SH primitive
 //   is confirmed — see r101).
 //
-// Backward compat (spec §7 + NWT): v0.5 PoolSpine.sil untouched, v0.5 markets continue. v0.6 opt-in
+// Backward compat (spec §7): v0.5 PoolSpine.sil untouched, v0.5 markets continue. v0.6 opt-in
 // via pool.js protocol_version='v0.6' branch (new contract = new P2SH = inherently distinct).
 
 pragma silverscript ^0.1.0;
@@ -34,7 +38,7 @@ pragma silverscript ^0.1.0;
 contract PoolSpine_v06(
     byte[32] makerPk,
     byte[32] brokerPk,
-    byte[32] poolMerkleRoot,    // root of blake2b(pk) leaves over the pool (sorted pk asc, depth 4)
+    byte[32] poolMerkleRoot,    // root of blake2b(pk) leaves over the pool (sorted pk asc, depth 8 ≤256)
     int deadline,
     int minerFee,
     int brokerFeePct,
@@ -44,31 +48,28 @@ contract PoolSpine_v06(
     byte[32] marketMetadataHash
 ) {
 
-    // entry 0 — settle_aggregate (fast path): committee's FROST/MuSig2 aggregate sig + merkle proofs
-    // that each committee member sits in the ctor-baked pool root. Committee identities ARE revealed
-    // here (c0_pk..c4_pk are args) — but the per-oracle VOTES stay aggregate (= anonymity ends at
-    // settle, votes only revealed if a dispute is raised).
+    // entry 0 — settle_aggregate (fast path): committee's MuSig2 aggregate sig + depth-8 merkle proofs.
+    // 40 sibling args total (5 committee × 8 levels) + 5 committee PKs revealed at settle.
     entrypoint function settle_aggregate(
         sig       aggSig,
-        byte[32]  aggPk,                // MuSig2-aggregated pubkey (BIP340)
-        byte[32]  committeePkHash,      // blake2b(c0||c1||c2||c3||c4) — binds for dispute_reveal
-        int       winner,               // 0 = YES, 1 = NO
-        byte[32]  sidesMerkleRoot,      // bettor-sides Merkle root (same role as v0.5 settle_unanimous)
+        byte[32]  aggPk,               // MuSig2-aggregated pubkey (BIP340)
+        byte[32]  committeePkHash,     // blake2b(c0||c1||c2||c3||c4) — binds for dispute_reveal
+        int       winner,              // 0 = YES, 1 = NO
+        byte[32]  sidesMerkleRoot,     // bettor-sides Merkle root (same role as v0.5 settle_unanimous)
         // 5 committee PKs (revealed at settle)
         byte[32]  c0Pk, byte[32] c1Pk, byte[32] c2Pk, byte[32] c3Pk, byte[32] c4Pk,
-        // each PK's merkle proof against poolMerkleRoot (4 siblings each = depth 4 / pool ≤16)
-        byte[32]  c0s0, byte[32] c0s1, byte[32] c0s2, byte[32] c0s3,
-        byte[32]  c1s0, byte[32] c1s1, byte[32] c1s2, byte[32] c1s3,
-        byte[32]  c2s0, byte[32] c2s1, byte[32] c2s2, byte[32] c2s3,
-        byte[32]  c3s0, byte[32] c3s1, byte[32] c3s2, byte[32] c3s3,
-        byte[32]  c4s0, byte[32] c4s1, byte[32] c4s2, byte[32] c4s3
+        // each PK's depth-8 merkle proof against poolMerkleRoot
+        byte[32]  c0s0, byte[32] c0s1, byte[32] c0s2, byte[32] c0s3, byte[32] c0s4, byte[32] c0s5, byte[32] c0s6, byte[32] c0s7,
+        byte[32]  c1s0, byte[32] c1s1, byte[32] c1s2, byte[32] c1s3, byte[32] c1s4, byte[32] c1s5, byte[32] c1s6, byte[32] c1s7,
+        byte[32]  c2s0, byte[32] c2s1, byte[32] c2s2, byte[32] c2s3, byte[32] c2s4, byte[32] c2s5, byte[32] c2s6, byte[32] c2s7,
+        byte[32]  c3s0, byte[32] c3s1, byte[32] c3s2, byte[32] c3s3, byte[32] c3s4, byte[32] c3s5, byte[32] c3s6, byte[32] c3s7,
+        byte[32]  c4s0, byte[32] c4s1, byte[32] c4s2, byte[32] c4s3, byte[32] c4s4, byte[32] c4s5, byte[32] c4s6, byte[32] c4s7
     ) {
         // ① checkSig×1 against the MuSig2 aggregate pubkey — proves the committee jointly signed
         require(checkSig(aggSig, pubkey(aggPk)));
         require(winner == 0 || winner == 1);
 
-        // ② committee commitment — concat 5 PKs in declared order, hash, compare to dispute commitment.
-        // (Order matters for the dispute_reveal match — fixed by entrypoint arg position.)
+        // ② committee commitment — binds the revealed committee to a hash usable by dispute_reveal.
         byte[] cConcat0 = c0Pk + c1Pk;
         byte[] cConcat1 = cConcat0 + c2Pk;
         byte[] cConcat2 = cConcat1 + c3Pk;
@@ -76,105 +77,91 @@ contract PoolSpine_v06(
         byte[32] committeeHash = blake2b(cConcat3);
         require(committeeHash == committeePkHash);
 
-        // ③ merkle proof: each committee PK must be a leaf in poolMerkleRoot.
-        // leaf format (per r103 correction to r100): blake2b(byte[](pk)) — hashed leaf, NOT raw PK.
-        // Climb 4 levels: leaf → sibling0 → sibling1 → sibling2 → sibling3 → root.
-        // Note: for a binary balanced tree of depth 4, each leaf has exactly 4 siblings on its path.
+        // ③ depth-8 merkle proof per committee PK: leaf = blake2b(byte[](pk)) climbs 8 levels.
+        // Leaf hashing + climbing order = PoolSide.sil L71-83 pattern (r103 corrected from sha256→blake2b).
         // The off-chain prover assembles siblings in climbing order; this contract verifies blindly
-        // (the same hash order is enforced by the committee's choice of aggSig over consistent state).
+        // and the same hash order is enforced by the committee's choice of aggSig.
 
-        // c0 proof
+        // c0 proof (8 climbing steps)
         byte[32] c0Leaf  = blake2b(byte[](c0Pk));
-        byte[]   c0Step0 = c0Leaf  + c0s0;
-        byte[32] c0Lv0   = blake2b(c0Step0);
-        byte[]   c0Step1 = c0Lv0   + c0s1;
-        byte[32] c0Lv1   = blake2b(c0Step1);
-        byte[]   c0Step2 = c0Lv1   + c0s2;
-        byte[32] c0Lv2   = blake2b(c0Step2);
-        byte[]   c0Step3 = c0Lv2   + c0s3;
-        byte[32] c0Root  = blake2b(c0Step3);
+        byte[]   c0St0   = c0Leaf + c0s0;  byte[32] c0L0 = blake2b(c0St0);
+        byte[]   c0St1   = c0L0   + c0s1;  byte[32] c0L1 = blake2b(c0St1);
+        byte[]   c0St2   = c0L1   + c0s2;  byte[32] c0L2 = blake2b(c0St2);
+        byte[]   c0St3   = c0L2   + c0s3;  byte[32] c0L3 = blake2b(c0St3);
+        byte[]   c0St4   = c0L3   + c0s4;  byte[32] c0L4 = blake2b(c0St4);
+        byte[]   c0St5   = c0L4   + c0s5;  byte[32] c0L5 = blake2b(c0St5);
+        byte[]   c0St6   = c0L5   + c0s6;  byte[32] c0L6 = blake2b(c0St6);
+        byte[]   c0St7   = c0L6   + c0s7;  byte[32] c0Root = blake2b(c0St7);
         require(c0Root == poolMerkleRoot);
 
         // c1 proof
         byte[32] c1Leaf  = blake2b(byte[](c1Pk));
-        byte[]   c1Step0 = c1Leaf  + c1s0;
-        byte[32] c1Lv0   = blake2b(c1Step0);
-        byte[]   c1Step1 = c1Lv0   + c1s1;
-        byte[32] c1Lv1   = blake2b(c1Step1);
-        byte[]   c1Step2 = c1Lv1   + c1s2;
-        byte[32] c1Lv2   = blake2b(c1Step2);
-        byte[]   c1Step3 = c1Lv2   + c1s3;
-        byte[32] c1Root  = blake2b(c1Step3);
+        byte[]   c1St0   = c1Leaf + c1s0;  byte[32] c1L0 = blake2b(c1St0);
+        byte[]   c1St1   = c1L0   + c1s1;  byte[32] c1L1 = blake2b(c1St1);
+        byte[]   c1St2   = c1L1   + c1s2;  byte[32] c1L2 = blake2b(c1St2);
+        byte[]   c1St3   = c1L2   + c1s3;  byte[32] c1L3 = blake2b(c1St3);
+        byte[]   c1St4   = c1L3   + c1s4;  byte[32] c1L4 = blake2b(c1St4);
+        byte[]   c1St5   = c1L4   + c1s5;  byte[32] c1L5 = blake2b(c1St5);
+        byte[]   c1St6   = c1L5   + c1s6;  byte[32] c1L6 = blake2b(c1St6);
+        byte[]   c1St7   = c1L6   + c1s7;  byte[32] c1Root = blake2b(c1St7);
         require(c1Root == poolMerkleRoot);
 
         // c2 proof
         byte[32] c2Leaf  = blake2b(byte[](c2Pk));
-        byte[]   c2Step0 = c2Leaf  + c2s0;
-        byte[32] c2Lv0   = blake2b(c2Step0);
-        byte[]   c2Step1 = c2Lv0   + c2s1;
-        byte[32] c2Lv1   = blake2b(c2Step1);
-        byte[]   c2Step2 = c2Lv1   + c2s2;
-        byte[32] c2Lv2   = blake2b(c2Step2);
-        byte[]   c2Step3 = c2Lv2   + c2s3;
-        byte[32] c2Root  = blake2b(c2Step3);
+        byte[]   c2St0   = c2Leaf + c2s0;  byte[32] c2L0 = blake2b(c2St0);
+        byte[]   c2St1   = c2L0   + c2s1;  byte[32] c2L1 = blake2b(c2St1);
+        byte[]   c2St2   = c2L1   + c2s2;  byte[32] c2L2 = blake2b(c2St2);
+        byte[]   c2St3   = c2L2   + c2s3;  byte[32] c2L3 = blake2b(c2St3);
+        byte[]   c2St4   = c2L3   + c2s4;  byte[32] c2L4 = blake2b(c2St4);
+        byte[]   c2St5   = c2L4   + c2s5;  byte[32] c2L5 = blake2b(c2St5);
+        byte[]   c2St6   = c2L5   + c2s6;  byte[32] c2L6 = blake2b(c2St6);
+        byte[]   c2St7   = c2L6   + c2s7;  byte[32] c2Root = blake2b(c2St7);
         require(c2Root == poolMerkleRoot);
 
         // c3 proof
         byte[32] c3Leaf  = blake2b(byte[](c3Pk));
-        byte[]   c3Step0 = c3Leaf  + c3s0;
-        byte[32] c3Lv0   = blake2b(c3Step0);
-        byte[]   c3Step1 = c3Lv0   + c3s1;
-        byte[32] c3Lv1   = blake2b(c3Step1);
-        byte[]   c3Step2 = c3Lv1   + c3s2;
-        byte[32] c3Lv2   = blake2b(c3Step2);
-        byte[]   c3Step3 = c3Lv2   + c3s3;
-        byte[32] c3Root  = blake2b(c3Step3);
+        byte[]   c3St0   = c3Leaf + c3s0;  byte[32] c3L0 = blake2b(c3St0);
+        byte[]   c3St1   = c3L0   + c3s1;  byte[32] c3L1 = blake2b(c3St1);
+        byte[]   c3St2   = c3L1   + c3s2;  byte[32] c3L2 = blake2b(c3St2);
+        byte[]   c3St3   = c3L2   + c3s3;  byte[32] c3L3 = blake2b(c3St3);
+        byte[]   c3St4   = c3L3   + c3s4;  byte[32] c3L4 = blake2b(c3St4);
+        byte[]   c3St5   = c3L4   + c3s5;  byte[32] c3L5 = blake2b(c3St5);
+        byte[]   c3St6   = c3L5   + c3s6;  byte[32] c3L6 = blake2b(c3St6);
+        byte[]   c3St7   = c3L6   + c3s7;  byte[32] c3Root = blake2b(c3St7);
         require(c3Root == poolMerkleRoot);
 
         // c4 proof
         byte[32] c4Leaf  = blake2b(byte[](c4Pk));
-        byte[]   c4Step0 = c4Leaf  + c4s0;
-        byte[32] c4Lv0   = blake2b(c4Step0);
-        byte[]   c4Step1 = c4Lv0   + c4s1;
-        byte[32] c4Lv1   = blake2b(c4Step1);
-        byte[]   c4Step2 = c4Lv1   + c4s2;
-        byte[32] c4Lv2   = blake2b(c4Step2);
-        byte[]   c4Step3 = c4Lv2   + c4s3;
-        byte[32] c4Root  = blake2b(c4Step3);
+        byte[]   c4St0   = c4Leaf + c4s0;  byte[32] c4L0 = blake2b(c4St0);
+        byte[]   c4St1   = c4L0   + c4s1;  byte[32] c4L1 = blake2b(c4St1);
+        byte[]   c4St2   = c4L1   + c4s2;  byte[32] c4L2 = blake2b(c4St2);
+        byte[]   c4St3   = c4L2   + c4s3;  byte[32] c4L3 = blake2b(c4St3);
+        byte[]   c4St4   = c4L3   + c4s4;  byte[32] c4L4 = blake2b(c4St4);
+        byte[]   c4St5   = c4L4   + c4s5;  byte[32] c4L5 = blake2b(c4St5);
+        byte[]   c4St6   = c4L5   + c4s6;  byte[32] c4L6 = blake2b(c4St6);
+        byte[]   c4St7   = c4L6   + c4s7;  byte[32] c4Root = blake2b(c4St7);
         require(c4Root == poolMerkleRoot);
 
-        // Structure floor (same shape as v0.5 settle_unanimous):
-        // inputs.length = spine + N bettor sides (≥ 4 to keep parity with v0.5's "spine + 3 oracle bonds" floor;
-        // committee bonds in v0.6 live in the pool layer, not per-market, so the on-market input set is
-        // just spine + sides).
-        require(tx.inputs.length >= 1);   // at least the spine input
-        require(tx.outputs.length >= 2);  // at least broker fee + 1 winner payout
+        // Structure floor (same shape as v0.5 settle_unanimous; full output enumeration deferred to
+        // v0.6 second iteration alongside the pool-bond layer, per Bettor r10 deferred items).
+        require(tx.inputs.length >= 1);
+        require(tx.outputs.length >= 2);
 
         // Broker fee = output[0] going to brokerPk (consistent with v0.5 ordering).
         byte[34] brokerLock = new ScriptPubKeyP2PK(pubkey(brokerPk));
         require(tx.outputs[0].scriptPubKey == byte[](brokerLock));
-
-        // Detailed output enumeration (winner payouts proportional to side stakes + committee bond
-        // refunds from the pool layer) is deferred to the v0.6 first-iteration sediment, same as
-        // v0.5 settle_unanimous did — full KIP-10 loop verify comes with the pool-layer bond contract.
     }
 
-    // entry 1 — dispute_reveal: triggered when a settle outcome is disputed. Forces the committee to
-    // reveal individual sigs over the disputed outcome — H(individual_PKs) must match the same
-    // committeePkHash from the settle, and each oracle's individual sig verifies. Per-oracle bond
-    // forfeiture (the actual slash) is structural (output redirection at the pool-bond layer); this
-    // first draft proves WHICH oracles signed which way so the off-chain settler can build the
-    // slashing TX correctly. Future iteration enforces the slash via SS-output checks.
+    // entry 1 — dispute_reveal: triggered when a settle outcome is disputed. Forces the committee
+    // to reveal individual sigs over the disputed outcome — H(individual_PKs) must match the same
+    // committeePkHash from the settle, and each oracle's individual sig verifies.
     entrypoint function dispute_reveal(
-        byte[32]  committeePkHash,   // must match the settle's committeePkHash
-        byte[32]  disputeOutcomeHash,// hash of the disputed claim (oracles' individual sigs are over this)
-        // individual PKs (same 5, same order as settle)
+        byte[32]  committeePkHash,    // must match the settle's committeePkHash
+        byte[32]  disputeOutcomeHash, // hash of the disputed claim (oracles' individual sigs over this)
         byte[32]  c0Pk, byte[32] c1Pk, byte[32] c2Pk, byte[32] c3Pk, byte[32] c4Pk,
-        // individual sigs over disputeOutcomeHash
         sig       c0Sig, sig c1Sig, sig c2Sig, sig c3Sig, sig c4Sig
     ) {
         // commitment binding: revealed PKs must hash to the same committeePkHash the settle used.
-        // (Off-chain coordinator ensures the disputer passes the same hash — verified by reviewer.)
         byte[] dConcat0 = c0Pk + c1Pk;
         byte[] dConcat1 = dConcat0 + c2Pk;
         byte[] dConcat2 = dConcat1 + c3Pk;
@@ -182,22 +169,19 @@ contract PoolSpine_v06(
         byte[32] dHash  = blake2b(dConcat3);
         require(dHash == committeePkHash);
 
-        // individual sig verify — proves each oracle did sign the disputeOutcomeHash. The off-chain
-        // dispute resolver compares this against the settle's aggregate to identify dissenters.
+        // individual sig verify — proves each oracle did sign disputeOutcomeHash.
         require(checkSig(c0Sig, pubkey(c0Pk)));
         require(checkSig(c1Sig, pubkey(c1Pk)));
         require(checkSig(c2Sig, pubkey(c2Pk)));
         require(checkSig(c3Sig, pubkey(c3Pk)));
         require(checkSig(c4Sig, pubkey(c4Pk)));
 
-        // First-draft structural floor; per-oracle bond redirection = follow-on iteration once the
-        // pool-bond contract layer is specced (spec §5 待实现 — dispute friction + bond at the pool level).
+        // First-draft structural floor; per-oracle bond redirection at the pool-bond layer (spec §5).
         require(tx.inputs.length >= 1);
         require(tx.outputs.length >= 1);
     }
 
-    // entry 2 — refund_maker_unjoined: identical semantics to v0.5 — no bettors joined, maker refunds.
-    // Kept here so v0.6 markets aren't worse off than v0.5 on the maker-no-bettor edge.
+    // entry 2 — refund_maker_unjoined: identical semantics to v0.5 (maker recovers stake if no bettor joined).
     entrypoint function refund_maker_unjoined(sig makerSig) {
         require(checkSig(makerSig, pubkey(makerPk)));
         require(tx.time >= deadline * 1000);  // bug 10d Path A: LOCK_TIME_THRESHOLD requires ms

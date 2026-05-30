@@ -200,10 +200,13 @@ async function verifyV06(baselinePath) {
     fail: 0,
   };
 
-  function check(name, pass, detail) {
-    report.checks.push({ name, pass, detail });
-    if (pass) report.pass++; else report.fail++;
+  function check(name, pass, detail, severity = 'hard') {
+    report.checks.push({ name, pass, detail, severity });
+    if (pass) report.pass++;
+    else if (severity === 'hard') report.fail++;
+    else report.deploy_pending++;
   }
+  report.deploy_pending = 0;
 
   // Check 1: v0.5 SS file byte-identical (= ADDITIVE design守, v0.5 老市场零影响 spec §7)
   const currentV05Hash = sha256File(SS_V05);
@@ -275,8 +278,45 @@ async function verifyV06(baselinePath) {
     { baseline: baselineSummary.settle_tx_count, current: currentSummary.settle_tx_count }
   );
 
-  report.verdict = report.fail === 0 ? 'PASS' : 'FAIL';
-  report.summary = `${report.pass}/${report.pass + report.fail} checks PASS — verdict ${report.verdict}`;
+  // Check 8: v158 schema deploy state (= J1 r108 ship 的 pool_markets += protocol_version + pool_merkle_root)
+  // NOT a hard fail — deploy gap is operational state. Verifier reports both true_pass + deploy_pending.
+  const db = new Database(DB_PATH, { readonly: true });
+  const poolCols = db.prepare('PRAGMA table_info(pool_markets)').all().map(c => c.name);
+  const hasV06Cols = poolCols.includes('protocol_version') && poolCols.includes('pool_merkle_root');
+  db.close();
+  check(
+    'v158 schema deployed (pool_markets has protocol_version + pool_merkle_root)',
+    hasV06Cols,
+    { has_protocol_version: poolCols.includes('protocol_version'), has_pool_merkle_root: poolCols.includes('pool_merkle_root'), note: hasV06Cols ? 'v0.6 ready' : 'DEPLOY_PENDING — Console need pull origin/j1tn/pred-menu-sab + restart for v158 migration to run' },
+    'soft'
+  );
+
+  // Check 9: /api/pool/market/create-v06 endpoint live (= curl 401/200 vs 404)
+  let createV06Status = null;
+  try {
+    const r = await fetch('http://127.0.0.1:3200/api/pool/market/create-v06', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    createV06Status = r.status;
+  } catch (e) {
+    createV06Status = `fetch_error:${e.message}`;
+  }
+  // 400 (missing required) or 401 (auth) = endpoint registered; 404 = deploy gap
+  const endpointLive = createV06Status === 400 || createV06Status === 401 || createV06Status === 403;
+  check(
+    '/api/pool/market/create-v06 endpoint live (= Console 跑新代码)',
+    endpointLive,
+    { http_status: createV06Status, note: endpointLive ? 'endpoint registered' : (createV06Status === 404 ? 'DEPLOY_PENDING (404) — Console restart needed' : 'unexpected status') },
+    'soft'
+  );
+
+  const total = report.pass + report.fail + report.deploy_pending;
+  if (report.fail > 0) report.verdict = 'FAIL';
+  else if (report.deploy_pending > 0) report.verdict = 'PASS_WITH_DEPLOY_PENDING';
+  else report.verdict = 'PASS';
+  report.summary = `${report.pass}/${total} PASS, ${report.fail} hard FAIL, ${report.deploy_pending} deploy pending — verdict ${report.verdict}`;
   return report;
 }
 
@@ -301,7 +341,8 @@ if (mode === 'baseline') {
   console.log(`v0.6 compat verify report: ${outAbs}`);
   console.log(report.summary);
   for (const c of report.checks) {
-    console.log(`  [${c.pass ? 'PASS' : 'FAIL'}] ${c.name}`);
+    const tag = c.pass ? 'PASS' : (c.severity === 'soft' ? 'DEPLOY_PENDING' : 'FAIL');
+    console.log(`  [${tag}] ${c.name}`);
     if (!c.pass) console.log('    detail:', JSON.stringify(c.detail).slice(0, 200));
   }
   process.exit(report.fail === 0 ? 0 : 1);
