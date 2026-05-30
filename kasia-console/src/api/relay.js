@@ -535,6 +535,7 @@ export async function registerRelayRoutes(fastify) {
       address: relay.address || null,
       balance: kasBalance,
       hasMnemonic: !!relay.mnemonic_encrypted,
+      hasPrivateKey: !!relay.privkey_encrypted,  // r281 privkey-backed relays (Bettor 168965a)
     };
 
     // Multi-chain wallets from agent_wallets

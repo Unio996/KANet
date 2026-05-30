@@ -329,10 +329,11 @@
               <div class="text-lg font-semibold text-ink-700 tabular-nums" x-text="(agent.kaspa?.balance || 0).toFixed(4) + ' KAS'"></div>
               <div class="text-[10px] text-ink-400 mt-0.5 font-mono truncate" :title="agent.kaspa?.address" x-text="agent.kaspa?.address?.slice(0,14) + '...'"></div>
               <div class="text-[10px] text-ink-400 mt-0.5" x-show="agent.kaspa?.hasMnemonic">✓ 助记词已保存</div>
-              <div class="text-[10px] text-orange-500 mt-0.5" x-show="!agent.kaspa?.hasMnemonic">⚠ 无助记词</div>
+              <div class="text-[10px] text-ink-400 mt-0.5" x-show="!agent.kaspa?.hasMnemonic && agent.kaspa?.hasPrivateKey">✓ 私钥已导入</div>
+              <div class="text-[10px] text-orange-500 mt-0.5" x-show="!agent.kaspa?.hasMnemonic && !agent.kaspa?.hasPrivateKey">⚠ 无密钥</div>
               <button @click="openSendModalKaspa(agent)"
-                      :disabled="!agent.kaspa?.hasMnemonic"
-                      :title="agent.kaspa?.hasMnemonic ? '发送 KAS' : '此地址无助记词,无法发送'"
+                      :disabled="!(agent.kaspa?.hasMnemonic || agent.kaspa?.hasPrivateKey)"
+                      :title="(agent.kaspa?.hasMnemonic || agent.kaspa?.hasPrivateKey) ? '发送 KAS' : '此地址无密钥(助记词/私钥都没),无法发送'"
                       class="mt-2 w-full px-2 py-1 rounded text-[10px] bg-warm-100 hover:bg-warm-200 text-ink-600 hover:text-brand-600 border border-warm-200 disabled:opacity-40 disabled:cursor-not-allowed">发送 KAS</button>
             </div>
 
@@ -786,8 +787,9 @@ function portfolioApp() {
     },
 
     // KAS 原生发送 — 由 agent 卡片 KAS 区的"发送 KAS"按钮触发. 走 /api/relay/:id/transfer
+    // 助记词 OR 私钥(r281 import-privkey relay) 任一即可发送, relay 进程内部从对应 env 加载.
     openSendModalKaspa(agent) {
-      if (!agent.kaspa?.hasMnemonic) return;
+      if (!(agent.kaspa?.hasMnemonic || agent.kaspa?.hasPrivateKey)) return;
       const isTestnet = (agent.kaspa.address || '').startsWith('kaspatest:');
       const prefix = isTestnet ? 'kaspatest:' : 'kaspa:';
       const validator = a => a.startsWith(prefix) && a.length >= prefix.length + 50;
