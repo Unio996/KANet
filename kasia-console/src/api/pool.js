@@ -1054,6 +1054,147 @@ export async function registerPoolRoutes(fastify) {
     });
   });
 
+  // ── Oracle UI backend (Bettor r29 J1 sub: 5-PK decoder + max-pot + income, Owner P0 UI buildout)
+  // Three GET endpoints for the new /oracle role-home page (UI r299 Gap 2 batch 1 panel c + e + a).
+  // Reads J2 v159 (oracle_pool_membership / pool_snapshots / pool_committee) + path A SS fingerprint.
+  // All three gracefully degrade if v159 schema not yet migrated (= J2 branch not yet on this Console).
+
+  function _v06TablesExist() {
+    const t = ['oracle_pool_membership', 'pool_snapshots', 'pool_committee'];
+    return t.every(n => sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(n));
+  }
+
+  // GET /api/pool/market/:id/v06-settle-decode — per-market trust read panel (Gap 2 c post-settle).
+  // Surfaces: 5 committee PKs revealed at settle + threshold + poolMerkleRoot binding +
+  // settle_txid (= UI can link to chain explorer for output verification).
+  fastify.get('/api/pool/market/:id/v06-settle-decode', async (request, reply) => {
+    if (!_v06TablesExist()) return reply.code(503).send({ ok: false, error: 'v159 schema not yet migrated (J2 branch pending)' });
+    const marketId = request.params.id;
+    const market = sqlite.prepare('SELECT id, protocol_version, protocol_status, spine_p2sh, settle_txid, pool_merkle_root FROM pool_markets WHERE id = ?').get(marketId);
+    if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
+    if (market.protocol_version !== 'v0.6') return reply.code(400).send({ ok: false, error: `v06-settle-decode applies to protocol_version=v0.6 only (this market: ${market.protocol_version || 'v0.5'})` });
+
+    const snapshot = sqlite.prepare('SELECT pool_merkle_root, pool_size, pool_pks_json FROM pool_snapshots WHERE market_id = ?').get(marketId);
+    const committee = sqlite.prepare('SELECT committee_pks, committee_pk_hash, threshold, sampled_at FROM pool_committee WHERE market_id = ?').get(marketId);
+    const settled = !!market.settle_txid;
+    let committeeArr = null;
+    if (committee) {
+      try { committeeArr = JSON.parse(committee.committee_pks); } catch {}
+    }
+
+    return reply.send({
+      ok: true,
+      market_id: marketId,
+      protocol_version: 'v0.6',
+      protocol_status: market.protocol_status,
+      settled,
+      settle_txid: market.settle_txid || null,
+      threshold_t_of_n: committee ? `${committee.threshold}-of-5` : '4-of-5 (default)',
+      committee_pks: settled && committeeArr ? committeeArr : null,    // null if pre-settle (anonymity preserved)
+      committee_pre_settle: !settled,
+      committee_pk_hash: committee ? committee.committee_pk_hash : null,
+      pool_merkle_root: snapshot?.pool_merkle_root || market.pool_merkle_root,
+      pool_size: snapshot?.pool_size || null,
+      pool_pks_json: snapshot ? snapshot.pool_pks_json : null,         // for off-chain replay/audit
+      committee_sampled_at: committee?.sampled_at || null,
+    });
+  });
+
+  // GET /api/oracle/max-pot/:pk — per-oracle max-pot exposure (Gap 2 e bond/pot ratio panel).
+  // = sum(oracleBondAmount) across active markets where this oracle is committee.
+  fastify.get('/api/oracle/max-pot/:pk', async (request, reply) => {
+    if (!_v06TablesExist()) return reply.code(503).send({ ok: false, error: 'v159 schema not yet migrated' });
+    const oraclePk = String(request.params.pk).toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(oraclePk)) return reply.code(400).send({ ok: false, error: 'pk must be 64-hex (32 bytes)' });
+
+    const rows = sqlite.prepare(`
+      SELECT pc.market_id, pc.committee_pks, pm.protocol_status, pm.oracle_bond_amount
+      FROM pool_committee pc
+      JOIN pool_markets pm ON pm.id = pc.market_id
+      WHERE pm.protocol_version = 'v0.6'
+        AND pm.protocol_status NOT IN ('completed', 'refunded', 'cancelled')
+    `).all();
+
+    let totalPotSompi = 0;
+    const perMarket = [];
+    for (const r of rows) {
+      let pks = [];
+      try { pks = JSON.parse(r.committee_pks); } catch {}
+      if (pks.map(p => String(p).toLowerCase()).includes(oraclePk)) {
+        const bond = parseInt(r.oracle_bond_amount, 10) || 0;
+        totalPotSompi += bond;
+        perMarket.push({ market_id: r.market_id, bond_at_risk_sompi: bond, status: r.protocol_status });
+      }
+    }
+    const membership = sqlite.prepare('SELECT stake_locked_kas, active FROM oracle_pool_membership WHERE oracle_pk = ?').get(oraclePk);
+
+    return reply.send({
+      ok: true,
+      oracle_pk: oraclePk,
+      active_committee_markets: perMarket.length,
+      total_pot_at_risk_sompi: totalPotSompi,
+      total_pot_at_risk_kas: totalPotSompi / 1e8,
+      stake_locked_kas: membership ? membership.stake_locked_kas : null,
+      pot_to_stake_ratio: membership && membership.stake_locked_kas > 0
+        ? (totalPotSompi / 1e8) / membership.stake_locked_kas
+        : null,
+      pool_active: membership ? !!membership.active : null,
+      per_market: perMarket,
+    });
+  });
+
+  // GET /api/oracle/income/:pk — per-oracle income from settled markets (Gap 2 a personal income panel).
+  // = sum of settle TX output[position+1].value where this oracle was in committee at position 0..4.
+  // Reads kaspa_tx_log.outputs_json for settled markets; gracefully shows pending if TX not indexed.
+  fastify.get('/api/oracle/income/:pk', async (request, reply) => {
+    if (!_v06TablesExist()) return reply.code(503).send({ ok: false, error: 'v159 schema not yet migrated' });
+    const oraclePk = String(request.params.pk).toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(oraclePk)) return reply.code(400).send({ ok: false, error: 'pk must be 64-hex (32 bytes)' });
+
+    const settled = sqlite.prepare(`
+      SELECT pc.market_id, pc.committee_pks, pm.settle_txid, pm.protocol_status
+      FROM pool_committee pc
+      JOIN pool_markets pm ON pm.id = pc.market_id
+      WHERE pm.protocol_version = 'v0.6'
+        AND pm.settle_txid IS NOT NULL
+    `).all();
+
+    let totalIncomeSompi = 0;
+    const perMarket = [];
+    let pendingTxCount = 0;
+    for (const r of settled) {
+      let pks = [];
+      try { pks = JSON.parse(r.committee_pks); } catch {}
+      const lcPks = pks.map(p => String(p).toLowerCase());
+      const position = lcPks.indexOf(oraclePk);
+      if (position < 0) continue;  // not in this market's committee
+
+      // settle TX outputs: [0]=brokerFee, [1..5]=c0..c4 (= position+1 = my output idx).
+      const txRow = sqlite.prepare('SELECT outputs_json FROM kaspa_tx_log WHERE tx_id = ?').get(r.settle_txid);
+      if (!txRow || !txRow.outputs_json) {
+        pendingTxCount += 1;
+        perMarket.push({ market_id: r.market_id, position, settle_txid: r.settle_txid, income_sompi: null, status: 'tx_pending_index' });
+        continue;
+      }
+      let outputs = [];
+      try { outputs = JSON.parse(txRow.outputs_json); } catch {}
+      const myOutput = outputs[position + 1];  // +1 to skip output[0] = broker fee
+      const payoutSompi = myOutput ? (parseInt(myOutput.value || myOutput.amount, 10) || 0) : 0;
+      totalIncomeSompi += payoutSompi;
+      perMarket.push({ market_id: r.market_id, position, settle_txid: r.settle_txid, income_sompi: payoutSompi, status: r.protocol_status });
+    }
+
+    return reply.send({
+      ok: true,
+      oracle_pk: oraclePk,
+      total_settled_markets: perMarket.length,
+      total_income_sompi: totalIncomeSompi,
+      total_income_kas: totalIncomeSompi / 1e8,
+      pending_tx_index_count: pendingTxCount,
+      per_market: perMarket,
+    });
+  });
+
   // POST /api/pool/market/:id/settle — trigger settlement (= oracle vote + spine settle TX)
   fastify.post('/api/pool/market/:id/settle', async (request, reply) => {
     const marketId = request.params.id;
