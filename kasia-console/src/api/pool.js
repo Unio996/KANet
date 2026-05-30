@@ -683,10 +683,11 @@ export async function registerPoolRoutes(fastify) {
     let d;
     try { d = await _extStakeDeriveSide(market, b.linked_addr, v.direction, v.stakeAmount); }
     catch (e) { return reply.code(e.code || 500).send({ ok: false, error: e.message }); }
-    // One position per address per market (DB UNIQUE market_id+bettor_pk) — warn at prep, BEFORE the user
-    // pays, so a duplicate bet never strands funds in a side P2SH that confirm would have to reject.
-    const existingForBettor = sqlite.prepare('SELECT direction, stake_amount FROM pool_bettor_sides WHERE market_id = ? AND bettor_pk = ?').get(marketId, d.bettorPk);
-    if (existingForBettor) return reply.code(409).send({ ok: false, error: `this address already has a position on this market (direction=${existingForBettor.direction}, stake=${existingForBettor.stake_amount / 1e8} KAS) — one position per address per market` });
+    // Owner P0 (Bettor r23): "1 address 1 market 1 position" prep-guard removed — was an
+    // architectural byproduct of v0.5 UNIQUE(market_id, bettor_pk), 0 user-need. Bettors may now
+    // 加仓/两边押/多次 (mature prediction market standard). Each (bettor_pk, direction, stake)
+    // tuple deterministically computes a distinct side P2SH, so multiple positions are naturally
+    // disambiguated. J2 v160 will drop the UNIQUE index → behavior change fully effective.
     return reply.send({
       ok: true,
       market_id: marketId,
@@ -763,13 +764,9 @@ export async function registerPoolRoutes(fastify) {
     // ③ idempotent: already registered for this TX → replay returns ok (UNIQUE side_lock_tx, no double-count).
     const already = sqlite.prepare('SELECT bettor_pk, direction, stake_amount, side_p2sh, merkle_index FROM pool_bettor_sides WHERE market_id = ? AND side_lock_tx = ?').get(marketId, txId);
     if (already) return reply.send({ ok: true, registered: true, already_registered: true, side_lock_tx: txId, ...already });
-    // One position per address per market (matches the DB UNIQUE(market_id, bettor_pk) — checked here so
-    // a re-bet / different-direction attempt returns a clean 409 instead of a raw constraint 500).
-    const existingForBettor = sqlite.prepare('SELECT side_lock_tx, direction, stake_amount, merkle_index FROM pool_bettor_sides WHERE market_id = ? AND bettor_pk = ?').get(marketId, d.bettorPk);
-    if (existingForBettor) {
-      if (existingForBettor.side_lock_tx === txId) return reply.send({ ok: true, registered: true, already_registered: true, side_lock_tx: txId, merkle_index: existingForBettor.merkle_index });
-      return reply.code(409).send({ ok: false, error: `this address already has a position on this market (direction=${existingForBettor.direction}, stake=${existingForBettor.stake_amount / 1e8} KAS) — one position per address per market` });
-    }
+    // Owner P0 (Bettor r23): "1 address 1 market 1 position" check stripped — was architectural
+    // byproduct of UNIQUE(market_id, bettor_pk), 0 user-need. TX-based idempotency above (line 764)
+    // still prevents double-counting the same payment. J2 v160 drops the DB UNIQUE index.
     const bettorCount = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(marketId).c;
     if (bettorCount >= 50) return reply.code(409).send({ ok: false, error: 'market full — 50 bettors max per market' });
     // Register — parity with the relay bettor/register: insert pool_bettor_sides + recompute Merkle root.
@@ -836,8 +833,7 @@ export async function registerPoolRoutes(fastify) {
     let d;
     try { d = await _extStakeDeriveSide_v06(market, b.linked_addr, v.direction, v.stakeAmount); }
     catch (e) { return reply.code(e.code || 500).send({ ok: false, error: e.message }); }
-    const existingForBettor = sqlite.prepare('SELECT direction, stake_amount FROM pool_bettor_sides WHERE market_id = ? AND bettor_pk = ?').get(marketId, d.bettorPk);
-    if (existingForBettor) return reply.code(409).send({ ok: false, error: `this address already has a position on this market (direction=${existingForBettor.direction}, stake=${existingForBettor.stake_amount / 1e8} KAS) — one position per address per market` });
+    // Owner P0 (Bettor r23): "1 addr 1 mkt 1 pos" prep-guard stripped — see v0.5 prep above for full rationale.
     return reply.send({
       ok: true,
       protocol_version: 'v0.6',
@@ -901,11 +897,7 @@ export async function registerPoolRoutes(fastify) {
     if (!txId) return reply.code(500).send({ ok: false, error: 'matching UTXO found but transactionId missing' });
     const already = sqlite.prepare('SELECT bettor_pk, direction, stake_amount, side_p2sh, merkle_index FROM pool_bettor_sides WHERE market_id = ? AND side_lock_tx = ?').get(marketId, txId);
     if (already) return reply.send({ ok: true, registered: true, already_registered: true, side_lock_tx: txId, ...already });
-    const existingForBettor = sqlite.prepare('SELECT side_lock_tx, direction, stake_amount, merkle_index FROM pool_bettor_sides WHERE market_id = ? AND bettor_pk = ?').get(marketId, d.bettorPk);
-    if (existingForBettor) {
-      if (existingForBettor.side_lock_tx === txId) return reply.send({ ok: true, registered: true, already_registered: true, side_lock_tx: txId, merkle_index: existingForBettor.merkle_index });
-      return reply.code(409).send({ ok: false, error: `this address already has a position on this market (direction=${existingForBettor.direction}, stake=${existingForBettor.stake_amount / 1e8} KAS) — one position per address per market` });
-    }
+    // Owner P0 (Bettor r23): "1 addr 1 mkt 1 pos" check stripped — see v0.5 confirm above for rationale.
     const bettorCount = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(marketId).c;
     if (bettorCount >= 50) return reply.code(409).send({ ok: false, error: 'market full — 50 bettors max per market' });
     const merkleIndex = bettorCount;
