@@ -98,8 +98,10 @@ export function selectCommittee(members, seed) {
     const idxBuf = Buffer.alloc(4);
     idxBuf.writeUInt32BE(i);
     const randHash = b2b(cat(seed, idxBuf));
-    // take first 8 bytes as uint64 (big-endian)
-    const rand = randHash.readBigUInt64BE(0);
+    // Bettor r44 F-S2 fix: take full 256-bit hash as BigInt (was 64-bit, modulo bias 显著
+    // when totalStake → 2^61). With 256-bit random vs ≤2^64 stake, bias factor ≈ 2^192 buckets
+    // per remainder → uniform within negligible bias.
+    const rand = BigInt('0x' + randHash.toString('hex'));
 
     const totalStake = remaining.reduce((s, m) => s + m.stake_sompi, 0n);
     const hit = rand % totalStake;
