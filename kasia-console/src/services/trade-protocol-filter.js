@@ -118,7 +118,12 @@ async function handlePoolOracleVote(msg) {
   }
 
   // 1. Market exists on this node?
-  const market = sqlite.prepare('SELECT id, oracle_relay_ids FROM pool_markets WHERE id = ?').get(msg.market_id);
+  // Cross-node-correct membership check: read oracle1/2/3_pk DIRECTLY (= protocol-truth on
+  // market row, cross-node consistent via market_publish). KANet-UI r332 caught: original
+  // code resolved relay_nodes WHERE id IN oracle_relay_ids (= local relay infra), which
+  // fails on cross-node ingest when peer's relays unknown locally. relay_nodes is plumbing
+  // not protocol membership. xpk recompute path obsoleted.
+  const market = sqlite.prepare('SELECT id, oracle1_pk, oracle2_pk, oracle3_pk FROM pool_markets WHERE id = ?').get(msg.market_id);
   if (!market) {
     // Cross-node case: vote for a market this node hasn't seen yet (market_publish broadcast
     // is a separate cross-node hardening sub — Bettor r88 b-class market gap). Log + skip.
@@ -126,20 +131,10 @@ async function handlePoolOracleVote(msg) {
     return;
   }
 
-  // 2. voter_pubkey is one of assigned oracles?
-  let oracleRelayIds = [];
-  try { oracleRelayIds = JSON.parse(market.oracle_relay_ids || '[]'); } catch {}
-  let isAssignedOracle = false;
-  for (const relayId of oracleRelayIds) {
-    const r = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(relayId);
-    if (!r?.address) continue;
-    try {
-      const xpk = kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(r.address)).toString();
-      if (xpk === msg.voter_pubkey) { isAssignedOracle = true; break; }
-    } catch {}
-  }
-  if (!isAssignedOracle) {
-    console.warn(`[trade-filter:pool-vote] voter_pubkey ${msg.voter_pubkey.slice(0,12)} not in assigned oracles for market ${msg.market_id.slice(0,12)} — reject`);
+  // 2. voter_pubkey is one of assigned oracles? Direct pk compare, no relay_nodes hop.
+  const assignedPks = [market.oracle1_pk, market.oracle2_pk, market.oracle3_pk].filter(Boolean);
+  if (!assignedPks.includes(msg.voter_pubkey)) {
+    console.warn(`[trade-filter:pool-vote] voter_pubkey ${msg.voter_pubkey.slice(0,12)} not in assigned oracles [${assignedPks.map(p=>p.slice(0,8)).join(',')}] for market ${msg.market_id.slice(0,12)} — reject`);
     return;
   }
 
