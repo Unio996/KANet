@@ -132,9 +132,13 @@ async function handlePoolOracleVote(msg) {
   }
 
   // 2. voter_pubkey is one of assigned oracles? Direct pk compare, no relay_nodes hop.
-  const assignedPks = [market.oracle1_pk, market.oracle2_pk, market.oracle3_pk].filter(Boolean);
-  if (!assignedPks.includes(msg.voter_pubkey)) {
-    console.warn(`[trade-filter:pool-vote] voter_pubkey ${msg.voter_pubkey.slice(0,12)} not in assigned oracles [${assignedPks.map(p=>p.slice(0,8)).join(',')}] for market ${msg.market_id.slice(0,12)} — reject`);
+  // Case-normalize both sides — F-A1 (settler 5/29) found mixed-case oracle_pk historically;
+  // producer get_pubkey IPC returns lowercase kaspa-wasm canonical hex but defense-in-depth.
+  const voterPkNorm = String(msg.voter_pubkey || '').toLowerCase();
+  const assignedPks = [market.oracle1_pk, market.oracle2_pk, market.oracle3_pk]
+    .filter(Boolean).map(p => String(p).toLowerCase());
+  if (!assignedPks.includes(voterPkNorm)) {
+    console.warn(`[trade-filter:pool-vote] voter_pubkey ${voterPkNorm.slice(0,12)} not in assigned oracles [${assignedPks.map(p=>p.slice(0,8)).join(',')}] for market ${msg.market_id.slice(0,12)} — reject`);
     return;
   }
 
