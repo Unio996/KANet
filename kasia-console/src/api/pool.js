@@ -16,7 +16,7 @@ import { createHash, randomUUID } from 'node:crypto';
 // may refactor these into a shared protocol-constants module.
 const STORAGE_MASS_SAFE_THRESHOLD_L4 = 400_000;  // KIP-9 cap with 20% buffer
 const MIN_BROKER_FEE_SOMPI_L4 = 5_000_000;       // 0.05 KAS broker fee floor
-const BETTOR_MIN_STAKE_L4 = 50_000_000;          // 0.5 KAS bettor min (Bug 8)
+const BETTOR_MIN_STAKE_L4 = 100_000;             // 0.001 KAS bettor PHYSICAL min (J2 r108 KIP-9 measurement, 4× safety margin over 50500 sompi math floor); Owner P0 + Bettor r25 stripped the 0.5 KAS rounded "product floor" — only chain physics constrains
 const MAX_BETTORS_L4 = 50;                       // PoolSpine.sil L13 cap
 // 5/28 Owner 钦定: 押注 softcap 拆除 (= 之前 4 KAS testnet 限制阻 UI form 真用户测试). 改 Infinity = 0 cap.
 // Per-market math guards (= storage mass / oracle fee floor) still enforce at L1 console + SS contract.
@@ -153,7 +153,8 @@ export async function registerPoolRoutes(fastify) {
     if (!Number.isFinite(oracleBondKas) || oracleBondKas <= 0) return reply.code(400).send({ ok: false, error: 'oracle_bond_kas must be positive' });
     // 5/28 Owner 钦定: testnet 0 limits. Skip 1 KAS min + softcap when KANET_TESTNET_NO_LIMITS=1.
     if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
-      if (makerStakeKas < 1) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be >= 1 KAS (v0.5 minimum — smaller stakes produce a settle TX exceeding Kaspa storage mass cap)' });
+      // Owner P0 + Bettor r25: maker min raised 1 → 100 KAS (= maker skin-in-game, prevents ghost markets).
+      if (makerStakeKas < 100) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be >= 100 KAS (maker skin-in-game floor per Owner P0, Bettor r25 — prevents ghost markets where maker has no real exposure)' });
       if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS (v0.5 testnet per-market softcap, Bettor r444 + Owner钦定 SS-baked)` });
     }
     const makerStakeAmount = Math.round(makerStakeKas * 1e8);
@@ -264,6 +265,170 @@ export async function registerPoolRoutes(fastify) {
       category: b.category,
       status: 'pending_oracle_deposits',
       next_step: '3 oracle relays must call POST /api/pool/market/' + marketId + '/oracle/deposit',
+    });
+  });
+
+  // POST /api/pool/market/create-v06 — v0.6 anonymous-pool oracle market (Bettor r3 lock + Owner ack 5/30).
+  // SEPARATE endpoint (not a branch of /create) to keep the v0.5 path zero-risk per spec §7 ADDITIVE.
+  // Differences from v0.5 create:
+  //   - No oracle_relay_ids (committee is selected per-event off-chain by stake-weighted VRF, not baked).
+  //   - Caller passes pool_merkle_root (depth-8 blake2b root of the pool snapshot; J2.1 derives + provides).
+  //   - Spine SS = PoolSpine_v06.sil; computed via computeSpineP2SH_v06.
+  //   - pool_markets stores protocol_version='v0.6' + pool_merkle_root for downstream settlement.
+  //   - Status goes directly to 'pending_bettors' (no on-market oracle-deposit phase — committee bonds
+  //     live at the pool-layer contract, not per-market).
+  fastify.post('/api/pool/market/create-v06', async (request, reply) => {
+    // 503 guard removed: path A LOCKED + shipped (Bettor r19, 5/30). Contracts now use 5
+    // individual committee sigs (4-of-5 threshold) + committee ∈ poolMerkleRoot binding.
+    const b = request.body || {};
+    const required = ['maker_relay_id', 'outcome_side', 'outcome_end_date', 'resolution_rule_spec', 'maker_stake_kas', 'pool_merkle_root'];
+    for (const k of required) {
+      if (b[k] === undefined || b[k] === null || b[k] === '') return reply.code(400).send({ ok: false, error: `missing ${k}` });
+    }
+    if (b.broker_relay_id === undefined || b.broker_relay_id === null || b.broker_relay_id === '') b.broker_relay_id = b.maker_relay_id;
+    if (b.broker_fee_pct === undefined || b.broker_fee_pct === null || b.broker_fee_pct === '') b.broker_fee_pct = 0;
+    if (b.oracle_bond_kas === undefined || b.oracle_bond_kas === null || b.oracle_bond_kas === '') b.oracle_bond_kas = 1;
+    if (b.oracle_fee_pct === undefined || b.oracle_fee_pct === null || b.oracle_fee_pct === '') b.oracle_fee_pct = 100;
+    if (b.outcome_market_source === undefined || b.outcome_market_source === null || b.outcome_market_source === '') b.outcome_market_source = 'kanet_v06';
+    if (b.outcome_token_id === undefined || b.outcome_token_id === null || b.outcome_token_id === '') b.outcome_token_id = 'KAS_native';
+    if (b.outcome_condition_id === undefined || b.outcome_condition_id === null || b.outcome_condition_id === '') {
+      b.outcome_condition_id = createHash('sha256').update(`${b.resolution_rule_spec}||${b.outcome_end_date}||${b.outcome_side}`).digest('hex').slice(0, 16);
+    }
+    if (b.category === undefined || b.category === null || b.category === '') {
+      b.category = categorizeMarket(b.resolution_rule_spec);
+    }
+
+    // pool_merkle_root: 32-byte hex (64 chars, optional 0x prefix), lowercased.
+    let poolMerkleRoot = String(b.pool_merkle_root).trim().replace(/^0x/, '');
+    if (!/^[0-9a-fA-F]{64}$/.test(poolMerkleRoot)) {
+      return reply.code(400).send({ ok: false, error: 'pool_merkle_root must be 64 hex chars (32-byte depth-8 blake2b root)' });
+    }
+    poolMerkleRoot = poolMerkleRoot.toLowerCase();
+
+    const makerRow = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(b.maker_relay_id);
+    const brokerRow = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(b.broker_relay_id);
+    if (!makerRow?.address || !brokerRow?.address) return reply.code(400).send({ ok: false, error: 'maker or broker relay has no resolvable address' });
+
+    const makerPk = await deriveXOnlyPubkey(makerRow.address);
+    const brokerPk = await deriveXOnlyPubkey(brokerRow.address);
+
+    const minDeadlineMin = parseInt(process.env.POOL_DEADLINE_MIN_OVERRIDE, 10) || 15;
+    const outcomeEndMs = new Date(b.outcome_end_date).getTime();
+    if (!Number.isFinite(outcomeEndMs) || outcomeEndMs < Date.now() + minDeadlineMin * 60_000) {
+      return reply.code(400).send({ ok: false, error: `outcome_end_date must be > now + ${minDeadlineMin} minutes` });
+    }
+    const maxDeadlineDay = parseInt(process.env.POOL_DEADLINE_MAX_DAY, 10) || 30;
+    if (outcomeEndMs > Date.now() + maxDeadlineDay * 86400_000) {
+      return reply.code(400).send({ ok: false, error: `outcome_end_date must be <= now + ${maxDeadlineDay} days` });
+    }
+    const deadline = Math.floor(outcomeEndMs / 1000);
+    const minerFee = parseInt(b.miner_fee, 10) || 50_000;
+    const brokerFeePct = parseInt(b.broker_fee_pct, 10);
+    if (!Number.isFinite(brokerFeePct) || brokerFeePct < 0 || brokerFeePct >= 10000) {
+      return reply.code(400).send({ ok: false, error: 'broker_fee_pct must be 0-9999 basis points' });
+    }
+    const oracleFeePct = parseInt(b.oracle_fee_pct, 10);
+    if (!Number.isFinite(oracleFeePct) || oracleFeePct < 0 || oracleFeePct >= 10000) {
+      return reply.code(400).send({ ok: false, error: 'oracle_fee_pct must be 0-9999 basis points' });
+    }
+
+    // Stake validation (same dynamic floor as v0.5; KANET_TESTNET_NO_LIMITS-aware).
+    const SS_MIN_SPENDABLE_FLOOR_KAS_V06 = 5;
+    const dynamicMinKas = oracleFeePct > 0 ? Math.ceil(12500 / oracleFeePct) : 0;
+    const minSpendableKas = Math.max(SS_MIN_SPENDABLE_FLOOR_KAS_V06, dynamicMinKas);
+    if (process.env.KANET_TESTNET_NO_LIMITS !== '1' && parseFloat(b.maker_stake_kas) < minSpendableKas) {
+      return reply.code(400).send({ ok: false, error: `maker_stake_kas ${b.maker_stake_kas} < min spendable ${minSpendableKas} KAS` });
+    }
+    const makerStakeKas = parseFloat(b.maker_stake_kas);
+    const oracleBondKas = parseFloat(b.oracle_bond_kas);
+    if (!Number.isFinite(makerStakeKas) || makerStakeKas <= 0) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be positive' });
+    if (!Number.isFinite(oracleBondKas) || oracleBondKas <= 0) return reply.code(400).send({ ok: false, error: 'oracle_bond_kas must be positive' });
+    if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
+      // Owner P0 + Bettor r25: maker min raised 1 → 100 KAS (skin-in-game; same rationale as v0.5 path).
+      if (makerStakeKas < 100) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be >= 100 KAS (maker skin-in-game floor)' });
+      if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS` });
+    }
+    const makerStakeAmount = Math.round(makerStakeKas * 1e8);
+    const oracleBondAmount = Math.round(oracleBondKas * 1e8);
+    const makerStakeStr = (makerStakeAmount / 1e8).toFixed(8);
+
+    const metaInput = JSON.stringify({
+      source: b.outcome_market_source,
+      condition: b.outcome_condition_id,
+      token: b.outcome_token_id,
+      side: b.outcome_side,
+      end: b.outcome_end_date,
+      rule: b.resolution_rule_spec,
+    });
+    const marketMetadataHash = createHash('sha256').update(metaInput).digest('hex');
+
+    // v0.6 spine P2SH via PoolSpine_v06.sil + the v06 builder.
+    const network = makerRow.address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    const { computeSpineP2SH_v06 } = await import('../lib/pool-p2sh-v06.mjs');
+    let spineResult;
+    try {
+      spineResult = await computeSpineP2SH_v06({
+        makerPk, brokerPk, poolMerkleRoot,
+        deadline, minerFee, brokerFeePct, oracleFeePct,
+        oracleBondAmount, makerStakeAmount,
+        marketMetadataHash,
+        network,
+      });
+    } catch (e) {
+      return reply.code(500).send({ ok: false, error: `v0.6 spine SS compile fail: ${e.message}` });
+    }
+
+    // Maker stake lock — NO TX NO STATE CHANGE.
+    let spineTxId = null;
+    try {
+      const r = await transferAndConfirm(b.maker_relay_id, spineResult.p2shAddr, makerStakeStr);
+      spineTxId = r.txId;
+    } catch (err) {
+      return reply.code(503).send({ ok: false, error: `maker stake lock failed: ${err.message} (spine_p2sh=${spineResult.p2shAddr})` });
+    }
+
+    // INSERT pool_markets with v0.6 columns. oracle1/2/3_pk left NULL (v0.6 has no individual baked
+    // oracles); oracle_relay_ids = '[]'; protocol_status straight to 'pending_bettors' (no oracle-
+    // deposit phase — committee bonds live at the pool-layer contract, not per-market).
+    const marketId = 'ext-pool-v06-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+    try {
+      const initialMetadata = JSON.stringify({
+        spine_redeem_script_hex: spineResult.redeemScript,
+        v06_pool_merkle_root: poolMerkleRoot,
+      });
+      sqlite.prepare(`INSERT INTO pool_markets (
+        id, maker_relay_id, spine_p2sh, spine_lock_tx, market_metadata_hash,
+        oracle1_pk, oracle2_pk, oracle3_pk, broker_pk,
+        deadline, miner_fee, broker_fee_pct, oracle_bond_amount, maker_stake_amount,
+        outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side, resolution_rule_spec,
+        protocol_status, sides_merkle_root, oracle_relay_ids, broker_relay_id, metadata, category,
+        protocol_version, pool_merkle_root
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        marketId, b.maker_relay_id, spineResult.p2shAddr, spineTxId, marketMetadataHash,
+        null, null, null, brokerPk,
+        deadline, minerFee, brokerFeePct, oracleBondAmount, makerStakeAmount,
+        b.outcome_market_source, b.outcome_condition_id, b.outcome_token_id, b.outcome_side, b.resolution_rule_spec,
+        'pending_bettors', '', '[]', b.broker_relay_id, initialMetadata, b.category,
+        'v0.6', poolMerkleRoot,
+      );
+    } catch (e) {
+      console.error(`[pool/create-v06] DB insert fail: ${e.message}`);
+      return reply.code(500).send({ ok: false, error: `DB insert fail (spine TX done ${spineTxId}): ${e.message}` });
+    }
+
+    return reply.send({
+      ok: true,
+      market_id: marketId,
+      protocol_version: 'v0.6',
+      spine_p2sh: spineResult.p2shAddr,
+      spine_lock_tx: spineTxId,
+      pool_merkle_root: poolMerkleRoot,
+      maker_stake_locked_kas: makerStakeAmount / 1e8,
+      miner_fee_sompi: minerFee,
+      broker_fee_pct_bps: brokerFeePct,
+      category: b.category,
+      status: 'pending_bettors',
+      next_step: 'bettors register directly via POST /api/pool/market/' + marketId + '/bettor/register-external/{prep,confirm} — no oracle-deposit phase in v0.6 (committee selected per-event off-chain).',
     });
   });
 
@@ -387,8 +552,9 @@ export async function registerPoolRoutes(fastify) {
     // L51/57/63/64). Reject before transferAndConfirm so no stake gets stranded.
     const stakeAmount = Math.round(parseFloat(b.stake_kas) * 1e8);
     if (!Number.isFinite(stakeAmount) || stakeAmount <= 0) return reply.code(400).send({ ok: false, error: 'stake_kas must be a positive finite number' });
-    // Bug 8: minimum bettor stake — a tiny stake → tiny winner-payout output → KIP-9 storage mass overflow.
-    if (stakeAmount < 50_000_000) return reply.code(400).send({ ok: false, error: 'stake_kas must be >= 0.5 KAS (v0.5 minimum — smaller stakes produce a settle TX exceeding Kaspa storage mass cap)' });
+    // Bettor r25 + J2 r108: physical floor only (= chain KIP-9 storage mass), no rounded product floor.
+    // J2 measured: stake² >= 2.5e9 sompi (= 50500 sompi math floor); 100_000 sompi = 0.001 KAS with 4× safety.
+    if (stakeAmount < BETTOR_MIN_STAKE_L4) return reply.code(400).send({ ok: false, error: `stake_kas must be >= ${BETTOR_MIN_STAKE_L4 / 1e8} KAS (KIP-9 storage mass physical floor per J2 r108 measurement; smaller stakes produce settle TX exceeding mass cap)` });
 
     // PoolSpine.sil L13 v0.5 hard rule: 50 bettors max per market. Checked here — before
     // transferAndConfirm locks stake on-chain — so a rejected 51st bettor never strands funds.
@@ -479,7 +645,8 @@ export async function registerPoolRoutes(fastify) {
     if (direction !== 0 && direction !== 1) return { error: 'direction must be 0 (YES) or 1 (NO)', code: 400 };
     const stakeAmount = Math.round(parseFloat(b.stake_kas) * 1e8);
     if (!Number.isFinite(stakeAmount) || stakeAmount <= 0) return { error: 'stake_kas must be a positive finite number', code: 400 };
-    if (stakeAmount < 50_000_000) return { error: 'stake_kas must be >= 0.5 KAS (v0.5 minimum — smaller stakes overflow the settle-TX storage mass cap)', code: 400 };
+    // Bettor r25 + J2 r108 KIP-9 measurement: physical floor only (= chain storage mass), no product floor.
+    if (stakeAmount < BETTOR_MIN_STAKE_L4) return { error: `stake_kas must be >= ${BETTOR_MIN_STAKE_L4 / 1e8} KAS (KIP-9 storage mass physical floor per J2 r108 — 4× safety over math floor)`, code: 400 };
     return { direction, stakeAmount };
   }
   // Derive the deterministic side P2SH for an external bettor (by /link-bound address). Throws {code,message}
@@ -520,10 +687,11 @@ export async function registerPoolRoutes(fastify) {
     let d;
     try { d = await _extStakeDeriveSide(market, b.linked_addr, v.direction, v.stakeAmount); }
     catch (e) { return reply.code(e.code || 500).send({ ok: false, error: e.message }); }
-    // One position per address per market (DB UNIQUE market_id+bettor_pk) — warn at prep, BEFORE the user
-    // pays, so a duplicate bet never strands funds in a side P2SH that confirm would have to reject.
-    const existingForBettor = sqlite.prepare('SELECT direction, stake_amount FROM pool_bettor_sides WHERE market_id = ? AND bettor_pk = ?').get(marketId, d.bettorPk);
-    if (existingForBettor) return reply.code(409).send({ ok: false, error: `this address already has a position on this market (direction=${existingForBettor.direction}, stake=${existingForBettor.stake_amount / 1e8} KAS) — one position per address per market` });
+    // Owner P0 (Bettor r23): "1 address 1 market 1 position" prep-guard removed — was an
+    // architectural byproduct of v0.5 UNIQUE(market_id, bettor_pk), 0 user-need. Bettors may now
+    // 加仓/两边押/多次 (mature prediction market standard). Each (bettor_pk, direction, stake)
+    // tuple deterministically computes a distinct side P2SH, so multiple positions are naturally
+    // disambiguated. J2 v160 will drop the UNIQUE index → behavior change fully effective.
     return reply.send({
       ok: true,
       market_id: marketId,
@@ -600,13 +768,9 @@ export async function registerPoolRoutes(fastify) {
     // ③ idempotent: already registered for this TX → replay returns ok (UNIQUE side_lock_tx, no double-count).
     const already = sqlite.prepare('SELECT bettor_pk, direction, stake_amount, side_p2sh, merkle_index FROM pool_bettor_sides WHERE market_id = ? AND side_lock_tx = ?').get(marketId, txId);
     if (already) return reply.send({ ok: true, registered: true, already_registered: true, side_lock_tx: txId, ...already });
-    // One position per address per market (matches the DB UNIQUE(market_id, bettor_pk) — checked here so
-    // a re-bet / different-direction attempt returns a clean 409 instead of a raw constraint 500).
-    const existingForBettor = sqlite.prepare('SELECT side_lock_tx, direction, stake_amount, merkle_index FROM pool_bettor_sides WHERE market_id = ? AND bettor_pk = ?').get(marketId, d.bettorPk);
-    if (existingForBettor) {
-      if (existingForBettor.side_lock_tx === txId) return reply.send({ ok: true, registered: true, already_registered: true, side_lock_tx: txId, merkle_index: existingForBettor.merkle_index });
-      return reply.code(409).send({ ok: false, error: `this address already has a position on this market (direction=${existingForBettor.direction}, stake=${existingForBettor.stake_amount / 1e8} KAS) — one position per address per market` });
-    }
+    // Owner P0 (Bettor r23): "1 address 1 market 1 position" check stripped — was architectural
+    // byproduct of UNIQUE(market_id, bettor_pk), 0 user-need. TX-based idempotency above (line 764)
+    // still prevents double-counting the same payment. J2 v160 drops the DB UNIQUE index.
     const bettorCount = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(marketId).c;
     if (bettorCount >= 50) return reply.code(409).send({ ok: false, error: 'market full — 50 bettors max per market' });
     // Register — parity with the relay bettor/register: insert pool_bettor_sides + recompute Merkle root.
@@ -624,6 +788,135 @@ export async function registerPoolRoutes(fastify) {
     sqlite.prepare('UPDATE pool_markets SET sides_merkle_root = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(tree.root, marketId);
     return reply.send({
       ok: true, registered: true, market_id: marketId, bettor_pk: d.bettorPk, direction: v.direction,
+      side_p2sh: sideP2sh, side_lock_tx: txId, merkle_index: merkleIndex, sides_merkle_root: tree.root,
+      bettor_count: bettorCount + 1, external: true,
+    });
+  });
+
+  // ── v0.6 path A external (0-key) pool betting — parallel to v0.5 /register-external/{prep,confirm}.
+  // Bettor r19 LOCK + Owner ack (5/30). Differences from v0.5:
+  // - market.protocol_version='v0.6' (= computed via computeSpineP2SH_v06 + PoolSpine_v06.sil settle_aggregate path A).
+  // - Side P2SH derived via computeSideP2SH_v06 — needs market.pool_merkle_root (v158 column) in ctor.
+  // - No oracle1/2/3_pk on v0.6 market rows; oracle-exclusivity check is skipped (committee is per-event).
+  // - Same exact-stake / wrong-payment-locked / 50-bettor-cap semantics as v0.5.
+  async function _extStakeDeriveSide_v06(market, linkedAddr, direction, stakeAmount) {
+    const bettorPk = await deriveXOnlyPubkey(linkedAddr);
+    const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
+    if (makerRow?.address && (await deriveXOnlyPubkey(makerRow.address)) === bettorPk) {
+      throw Object.assign(new Error('linked address is the market maker — maker bets implicitly via outcome_side (area-1)'), { code: 403 });
+    }
+    if (!market.pool_merkle_root) {
+      throw Object.assign(new Error('v0.6 market missing pool_merkle_root — corrupt market row'), { code: 500 });
+    }
+    const spineP2shHash = createHash('sha256').update(market.spine_p2sh).digest('hex');
+    const network = market.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    const { computeSideP2SH_v06 } = await import('../lib/pool-p2sh-v06.mjs');
+    const sideResult = await computeSideP2SH_v06({
+      bettorPk, spineP2shHash,
+      poolMerkleRoot: market.pool_merkle_root,
+      marketMetadataHash: market.market_metadata_hash,
+      direction, stakeAmount, deadline: market.deadline, network,
+    });
+    return { bettorPk, sideResult, network };
+  }
+
+  // POST /api/pool/market/:id/bettor/register-v06/prep — v0.6 step 1: compute side P2SH + exact stake.
+  fastify.post('/api/pool/market/:id/bettor/register-v06/prep', async (request, reply) => {
+    const marketId = request.params.id;
+    const b = request.body || {};
+    const v = _extStakeValidate(b);
+    if (v.error) return reply.code(v.code).send({ ok: false, error: v.error });
+    const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
+    if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
+    if (market.protocol_version !== 'v0.6') return reply.code(400).send({ ok: false, error: `market protocol_version=${market.protocol_version || 'v0.5'}, use /register-external for v0.5` });
+    if (market.protocol_status !== 'pending_bettors') {
+      return reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, bettor registration closed` });
+    }
+    const bettorCount = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(marketId).c;
+    if (bettorCount >= 50) return reply.code(409).send({ ok: false, error: 'market full — 50 bettors max per market' });
+    let d;
+    try { d = await _extStakeDeriveSide_v06(market, b.linked_addr, v.direction, v.stakeAmount); }
+    catch (e) { return reply.code(e.code || 500).send({ ok: false, error: e.message }); }
+    // Owner P0 (Bettor r23): "1 addr 1 mkt 1 pos" prep-guard stripped — see v0.5 prep above for full rationale.
+    return reply.send({
+      ok: true,
+      protocol_version: 'v0.6',
+      market_id: marketId,
+      direction: v.direction,
+      bettor_pk: d.bettorPk,
+      side_p2sh: d.sideResult.p2shAddr,
+      redeem_script: d.sideResult.redeemScript,
+      pool_merkle_root: market.pool_merkle_root,
+      exact_stake_sompi: v.stakeAmount,
+      exact_stake_kas: (v.stakeAmount / 1e8).toFixed(8),
+      network: d.network,
+      deadline: market.deadline,
+      warning: 'Pay EXACTLY exact_stake_sompi to side_p2sh. Underpayment is locked until deadline; overpayment excess is lost to fee. Claim winnings with your /link-bound key + 4-of-5 committee sigs at settle time.',
+    });
+  });
+
+  // POST /api/pool/market/:id/bettor/register-v06/confirm — v0.6 step 2: detect/verify payment → register.
+  fastify.post('/api/pool/market/:id/bettor/register-v06/confirm', async (request, reply) => {
+    const marketId = request.params.id;
+    const b = request.body || {};
+    const v = _extStakeValidate(b);
+    if (v.error) return reply.code(v.code).send({ ok: false, error: v.error });
+    const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
+    if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
+    if (market.protocol_version !== 'v0.6') return reply.code(400).send({ ok: false, error: `market protocol_version=${market.protocol_version || 'v0.5'}, use /register-external for v0.5` });
+    if (market.protocol_status !== 'pending_bettors') {
+      return reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, bettor registration closed` });
+    }
+    let d;
+    try { d = await _extStakeDeriveSide_v06(market, b.linked_addr, v.direction, v.stakeAmount); }
+    catch (e) { return reply.code(e.code || 500).send({ ok: false, error: e.message }); }
+    const sideP2sh = d.sideResult.p2shAddr;
+    // RPC UTXO query (indexer-independent per Bettor r283).
+    let utxos;
+    try {
+      const { url: rpcUrl } = await getWorkingRpc();
+      if (!rpcUrl) return reply.code(503).send({ ok: false, error: 'no working Kaspa RPC node — retry shortly' });
+      const { RpcClient, Encoding, Address } = await import('kaspa-wasm');
+      const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: d.network });
+      await Promise.race([rpc.connect({}), new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 4000))]);
+      try { ({ entries: utxos } = await rpc.getUtxosByAddresses([new Address(sideP2sh)])); }
+      finally { await rpc.disconnect().catch(() => {}); }
+    } catch (e) {
+      return reply.code(503).send({ ok: false, error: `RPC UTXO query failed (${e.message}) — retry shortly` });
+    }
+    utxos = utxos || [];
+    const wantSompi = BigInt(v.stakeAmount);
+    const exactUtxo = utxos.find(u => { try { return BigInt(u.amount) === wantSompi; } catch { return false; } });
+    if (!exactUtxo) {
+      const mine = sqlite.prepare('SELECT side_lock_tx, merkle_index FROM pool_bettor_sides WHERE market_id = ? AND bettor_pk = ? AND direction = ? AND stake_amount = ?')
+        .get(marketId, d.bettorPk, v.direction, v.stakeAmount);
+      if (mine) return reply.send({ ok: true, registered: true, already_registered: true, side_p2sh: sideP2sh, side_lock_tx: mine.side_lock_tx, merkle_index: mine.merkle_index });
+      if (utxos.length > 0) {
+        return reply.send({ ok: true, registered: false, wrong_payment_detected: true, side_p2sh: sideP2sh, exact_stake_sompi: v.stakeAmount, note: `错付: side P2SH holds ${utxos.length} UTXO(s) but none == exact ${v.stakeAmount} sompi — pay EXACTLY.` });
+      }
+      return reply.send({ ok: true, registered: false, pending: true, side_p2sh: sideP2sh, exact_stake_sompi: v.stakeAmount, note: 'no matching payment detected yet — keep polling' });
+    }
+    const op = exactUtxo.outpoint || exactUtxo.entry?.outpoint;
+    const txId = op && (op.transactionId || op.transaction_id);
+    if (!txId) return reply.code(500).send({ ok: false, error: 'matching UTXO found but transactionId missing' });
+    const already = sqlite.prepare('SELECT bettor_pk, direction, stake_amount, side_p2sh, merkle_index FROM pool_bettor_sides WHERE market_id = ? AND side_lock_tx = ?').get(marketId, txId);
+    if (already) return reply.send({ ok: true, registered: true, already_registered: true, side_lock_tx: txId, ...already });
+    // Owner P0 (Bettor r23): "1 addr 1 mkt 1 pos" check stripped — see v0.5 confirm above for rationale.
+    const bettorCount = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(marketId).c;
+    if (bettorCount >= 50) return reply.code(409).send({ ok: false, error: 'market full — 50 bettors max per market' });
+    const merkleIndex = bettorCount;
+    try {
+      sqlite.prepare(`INSERT INTO pool_bettor_sides (market_id, bettor_pk, bettor_relay_id, direction, stake_amount, side_p2sh, side_lock_tx, merkle_index, side_redeem_script_hex)
+        VALUES (?,?,?,?,?,?,?,?,?)`).run(marketId, d.bettorPk, null, v.direction, v.stakeAmount, sideP2sh, txId, merkleIndex, d.sideResult.redeemScript);
+    } catch (e) {
+      console.error(`[pool/register-v06/confirm] DB insert fail: ${e.message}`);
+      return reply.code(500).send({ ok: false, error: `DB insert fail: ${e.message}` });
+    }
+    const bettors = sqlite.prepare('SELECT bettor_pk FROM pool_bettor_sides WHERE market_id = ? ORDER BY merkle_index').all(marketId);
+    const tree = buildSidesMerkleTree(bettors.map(x => x.bettor_pk));
+    sqlite.prepare('UPDATE pool_markets SET sides_merkle_root = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(tree.root, marketId);
+    return reply.send({
+      ok: true, registered: true, protocol_version: 'v0.6', market_id: marketId, bettor_pk: d.bettorPk, direction: v.direction,
       side_p2sh: sideP2sh, side_lock_tx: txId, merkle_index: merkleIndex, sides_merkle_root: tree.root,
       bettor_count: bettorCount + 1, external: true,
     });
@@ -711,7 +1004,13 @@ export async function registerPoolRoutes(fastify) {
     `).get(`%"market_id":"${marketId}"%`).c;
     return reply.send({
       ok: true,
-      market: { ...market, metadata: metaParsed },
+      // Bettor r24 (Owner 查): bot prediction-menu reads full.maker_stake_kas → was undefined → "?".
+      // List endpoint (/api/pool/markets L984) already derives maker_stake_kas; detail must match.
+      market: {
+        ...market,
+        maker_stake_kas: market.maker_stake_amount != null ? market.maker_stake_amount / 1e8 : null,
+        metadata: metaParsed,
+      },
       protocol_status: market.protocol_status,
       bettor_count: bettorCount,
       sigs_collected: sigsCollected,
@@ -752,6 +1051,147 @@ export async function registerPoolRoutes(fastify) {
       sides_merkle_root: tree.root,
       bettor_count: bettors.length,
       bettors,
+    });
+  });
+
+  // ── Oracle UI backend (Bettor r29 J1 sub: 5-PK decoder + max-pot + income, Owner P0 UI buildout)
+  // Three GET endpoints for the new /oracle role-home page (UI r299 Gap 2 batch 1 panel c + e + a).
+  // Reads J2 v159 (oracle_pool_membership / pool_snapshots / pool_committee) + path A SS fingerprint.
+  // All three gracefully degrade if v159 schema not yet migrated (= J2 branch not yet on this Console).
+
+  function _v06TablesExist() {
+    const t = ['oracle_pool_membership', 'pool_snapshots', 'pool_committee'];
+    return t.every(n => sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(n));
+  }
+
+  // GET /api/pool/market/:id/v06-settle-decode — per-market trust read panel (Gap 2 c post-settle).
+  // Surfaces: 5 committee PKs revealed at settle + threshold + poolMerkleRoot binding +
+  // settle_txid (= UI can link to chain explorer for output verification).
+  fastify.get('/api/pool/market/:id/v06-settle-decode', async (request, reply) => {
+    if (!_v06TablesExist()) return reply.code(503).send({ ok: false, error: 'v159 schema not yet migrated (J2 branch pending)' });
+    const marketId = request.params.id;
+    const market = sqlite.prepare('SELECT id, protocol_version, protocol_status, spine_p2sh, settle_txid, pool_merkle_root FROM pool_markets WHERE id = ?').get(marketId);
+    if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
+    if (market.protocol_version !== 'v0.6') return reply.code(400).send({ ok: false, error: `v06-settle-decode applies to protocol_version=v0.6 only (this market: ${market.protocol_version || 'v0.5'})` });
+
+    const snapshot = sqlite.prepare('SELECT pool_merkle_root, pool_size, pool_pks_json FROM pool_snapshots WHERE market_id = ?').get(marketId);
+    const committee = sqlite.prepare('SELECT committee_pks, committee_pk_hash, threshold, sampled_at FROM pool_committee WHERE market_id = ?').get(marketId);
+    const settled = !!market.settle_txid;
+    let committeeArr = null;
+    if (committee) {
+      try { committeeArr = JSON.parse(committee.committee_pks); } catch {}
+    }
+
+    return reply.send({
+      ok: true,
+      market_id: marketId,
+      protocol_version: 'v0.6',
+      protocol_status: market.protocol_status,
+      settled,
+      settle_txid: market.settle_txid || null,
+      threshold_t_of_n: committee ? `${committee.threshold}-of-5` : '4-of-5 (default)',
+      committee_pks: settled && committeeArr ? committeeArr : null,    // null if pre-settle (anonymity preserved)
+      committee_pre_settle: !settled,
+      committee_pk_hash: committee ? committee.committee_pk_hash : null,
+      pool_merkle_root: snapshot?.pool_merkle_root || market.pool_merkle_root,
+      pool_size: snapshot?.pool_size || null,
+      pool_pks_json: snapshot ? snapshot.pool_pks_json : null,         // for off-chain replay/audit
+      committee_sampled_at: committee?.sampled_at || null,
+    });
+  });
+
+  // GET /api/oracle/max-pot/:pk — per-oracle max-pot exposure (Gap 2 e bond/pot ratio panel).
+  // = sum(oracleBondAmount) across active markets where this oracle is committee.
+  fastify.get('/api/oracle/max-pot/:pk', async (request, reply) => {
+    if (!_v06TablesExist()) return reply.code(503).send({ ok: false, error: 'v159 schema not yet migrated' });
+    const oraclePk = String(request.params.pk).toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(oraclePk)) return reply.code(400).send({ ok: false, error: 'pk must be 64-hex (32 bytes)' });
+
+    const rows = sqlite.prepare(`
+      SELECT pc.market_id, pc.committee_pks, pm.protocol_status, pm.oracle_bond_amount
+      FROM pool_committee pc
+      JOIN pool_markets pm ON pm.id = pc.market_id
+      WHERE pm.protocol_version = 'v0.6'
+        AND pm.protocol_status NOT IN ('completed', 'refunded', 'cancelled')
+    `).all();
+
+    let totalPotSompi = 0;
+    const perMarket = [];
+    for (const r of rows) {
+      let pks = [];
+      try { pks = JSON.parse(r.committee_pks); } catch {}
+      if (pks.map(p => String(p).toLowerCase()).includes(oraclePk)) {
+        const bond = parseInt(r.oracle_bond_amount, 10) || 0;
+        totalPotSompi += bond;
+        perMarket.push({ market_id: r.market_id, bond_at_risk_sompi: bond, status: r.protocol_status });
+      }
+    }
+    const membership = sqlite.prepare('SELECT stake_locked_kas, active FROM oracle_pool_membership WHERE oracle_pk = ?').get(oraclePk);
+
+    return reply.send({
+      ok: true,
+      oracle_pk: oraclePk,
+      active_committee_markets: perMarket.length,
+      total_pot_at_risk_sompi: totalPotSompi,
+      total_pot_at_risk_kas: totalPotSompi / 1e8,
+      stake_locked_kas: membership ? membership.stake_locked_kas : null,
+      pot_to_stake_ratio: membership && membership.stake_locked_kas > 0
+        ? (totalPotSompi / 1e8) / membership.stake_locked_kas
+        : null,
+      pool_active: membership ? !!membership.active : null,
+      per_market: perMarket,
+    });
+  });
+
+  // GET /api/oracle/income/:pk — per-oracle income from settled markets (Gap 2 a personal income panel).
+  // = sum of settle TX output[position+1].value where this oracle was in committee at position 0..4.
+  // Reads kaspa_tx_log.outputs_json for settled markets; gracefully shows pending if TX not indexed.
+  fastify.get('/api/oracle/income/:pk', async (request, reply) => {
+    if (!_v06TablesExist()) return reply.code(503).send({ ok: false, error: 'v159 schema not yet migrated' });
+    const oraclePk = String(request.params.pk).toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(oraclePk)) return reply.code(400).send({ ok: false, error: 'pk must be 64-hex (32 bytes)' });
+
+    const settled = sqlite.prepare(`
+      SELECT pc.market_id, pc.committee_pks, pm.settle_txid, pm.protocol_status
+      FROM pool_committee pc
+      JOIN pool_markets pm ON pm.id = pc.market_id
+      WHERE pm.protocol_version = 'v0.6'
+        AND pm.settle_txid IS NOT NULL
+    `).all();
+
+    let totalIncomeSompi = 0;
+    const perMarket = [];
+    let pendingTxCount = 0;
+    for (const r of settled) {
+      let pks = [];
+      try { pks = JSON.parse(r.committee_pks); } catch {}
+      const lcPks = pks.map(p => String(p).toLowerCase());
+      const position = lcPks.indexOf(oraclePk);
+      if (position < 0) continue;  // not in this market's committee
+
+      // settle TX outputs: [0]=brokerFee, [1..5]=c0..c4 (= position+1 = my output idx).
+      const txRow = sqlite.prepare('SELECT outputs_json FROM kaspa_tx_log WHERE tx_id = ?').get(r.settle_txid);
+      if (!txRow || !txRow.outputs_json) {
+        pendingTxCount += 1;
+        perMarket.push({ market_id: r.market_id, position, settle_txid: r.settle_txid, income_sompi: null, status: 'tx_pending_index' });
+        continue;
+      }
+      let outputs = [];
+      try { outputs = JSON.parse(txRow.outputs_json); } catch {}
+      const myOutput = outputs[position + 1];  // +1 to skip output[0] = broker fee
+      const payoutSompi = myOutput ? (parseInt(myOutput.value || myOutput.amount, 10) || 0) : 0;
+      totalIncomeSompi += payoutSompi;
+      perMarket.push({ market_id: r.market_id, position, settle_txid: r.settle_txid, income_sompi: payoutSompi, status: r.protocol_status });
+    }
+
+    return reply.send({
+      ok: true,
+      oracle_pk: oraclePk,
+      total_settled_markets: perMarket.length,
+      total_income_sompi: totalIncomeSompi,
+      total_income_kas: totalIncomeSompi / 1e8,
+      pending_tx_index_count: pendingTxCount,
+      per_market: perMarket,
     });
   });
 

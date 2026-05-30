@@ -27,7 +27,7 @@ function hexToBytes(hex) {
   return out;
 }
 
-function validatePubkeyHex(hex, name) {
+export function validatePubkeyHex(hex, name) {
   if (typeof hex !== 'string') throw new Error(`${name} must be hex string`);
   const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
   if (clean.length !== 64) throw new Error(`${name} must be 32 bytes (64 hex chars), got ${clean.length}`);
@@ -35,7 +35,7 @@ function validatePubkeyHex(hex, name) {
   return clean;
 }
 
-function validateHashHex(hex, name) {
+export function validateHashHex(hex, name) {
   if (typeof hex !== 'string') throw new Error(`${name} must be hex string`);
   const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
   if (clean.length !== 64) throw new Error(`${name} must be 32 bytes (64 hex chars), got ${clean.length}`);
@@ -43,7 +43,7 @@ function validateHashHex(hex, name) {
   return clean;
 }
 
-function validateInt(v, name, min = 0, max = Number.MAX_SAFE_INTEGER) {
+export function validateInt(v, name, min = 0, max = Number.MAX_SAFE_INTEGER) {
   const n = parseInt(v, 10);
   if (!Number.isFinite(n) || n < min || n > max) {
     throw new Error(`${name} must be integer in [${min}, ${max}], got ${v}`);
@@ -51,16 +51,17 @@ function validateInt(v, name, min = 0, max = Number.MAX_SAFE_INTEGER) {
   return n;
 }
 
-function bytes32Expr(hexStr) {
+export function bytes32Expr(hexStr) {
   const bytes = hexToBytes(hexStr);
   return { kind: 'array', data: Array.from(bytes, b => ({ kind: 'byte', data: b })) };
 }
 
-function intExpr(n) {
+export function intExpr(n) {
   return { kind: 'int', data: n };
 }
 
-async function compileAndComputeP2SH(silPath, ctorJson, contractName, network) {
+// v0.6 + future variants compose ctors via the helpers above and call this generic compile entry.
+export async function compileAndComputeP2SH(silPath, ctorJson, contractName, network) {
   const ctorJsonStr = JSON.stringify(ctorJson);
   const silSource = readFileSync(silPath);
   const sourceHash = createHash('sha256').update(silSource).digest('hex').slice(0, 16);

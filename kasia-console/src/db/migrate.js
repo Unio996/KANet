@@ -4695,6 +4695,32 @@ export function runMigrations() {
     }
   }
 
+  // v158 — pool_markets += protocol_version + pool_merkle_root for v0.6 anonymous-pool oracle
+  // (Bettor r3 lock + spec §7 ADDITIVE; v0.5 markets keep protocol_version NULL/'v0.5', v0.6 markets
+  // set 'v0.6' + bake the depth-8 blake2b poolMerkleRoot for SS verification). J2's J2.1 sampling
+  // module owns the actual root derivation (depth-8, blake2b leaves, ascending PK sort) — this column
+  // just records whatever the v0.6 create endpoint baked into the spine ctor.
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(pool_markets)").all();
+    if (!cols.some(c => c.name === 'protocol_version')) {
+      try {
+        sqlite.exec(`ALTER TABLE pool_markets ADD COLUMN protocol_version TEXT`);
+        console.log('[migrate] v158a: pool_markets += protocol_version TEXT (oracle v0.6 ADDITIVE, Bettor r3 J1 own).');
+      } catch (e) {
+        console.warn(`[migrate] v158a protocol_version fail: ${e.message}`);
+      }
+    }
+    const cols2 = sqlite.prepare("PRAGMA table_info(pool_markets)").all();
+    if (!cols2.some(c => c.name === 'pool_merkle_root')) {
+      try {
+        sqlite.exec(`ALTER TABLE pool_markets ADD COLUMN pool_merkle_root TEXT`);
+        console.log('[migrate] v158b: pool_markets += pool_merkle_root TEXT (= ctor-baked depth-8 root for v0.6 SS, Bettor r3 J1 own).');
+      } catch (e) {
+        console.warn(`[migrate] v158b pool_merkle_root fail: ${e.message}`);
+      }
+    }
+  }
+
   // v159 — Oracle v0.6 J2.1 sub (Bettor r3+r6+r14 钦定, reconciled per r14 J1 v158 留 create-side).
   // Scope: J2.1 = pool 经济/选拔 schema. v0.6 path A (Bettor r19 LOCK Owner ack):
   //   - 5 个体 committee sig 替 aggSig+aggPk (J1 r118/r119 self-claim 洞 confirm + fix)
