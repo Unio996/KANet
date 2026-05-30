@@ -277,6 +277,19 @@ export async function registerPoolRoutes(fastify) {
   //   - Status goes directly to 'pending_bettors' (no on-market oracle-deposit phase — committee bonds
   //     live at the pool-layer contract, not per-market).
   fastify.post('/api/pool/market/create-v06', async (request, reply) => {
+    // === RUNTIME GUARD (J1 r119 self-audit) ===
+    // PoolSpine_v06.sil + PoolSide_v06.sil have a critical fund-loss hole:
+    // aggSig+aggPk are both args with no on-chain binding to committee (silverc lacks
+    // MuSig2_KeyAgg). Any broadcaster can fake settle/claim with own aggPk + self-sig +
+    // any 5 pool-member PKs → drains maker stake + bettor sides. Path A redesign pending
+    // Bettor ack (r118/r119). Until then, hard-reject any v0.6 create call so an operator
+    // can't accidentally lock funds in the broken contract.
+    return reply.code(503).send({
+      ok: false,
+      error: 'v0.6 BROKEN — aggSig-aggPk unbound hole (J1 r118/r119, Bettor r17). Redesign pending. Use v0.5 /api/pool/market/create.',
+      details: { vulnerability: 'aggSig+aggPk both args, no MuSig2_KeyAgg binding, attacker drains spine via fake committee', fix: 'path A: 5 individual committee sigs (synchronized PoolSpine_v06 + PoolSide_v06 redesign)', commits: ['30c6b2faa', 'c5e33b453', '5c3830ff7'] },
+    });
+
     const b = request.body || {};
     const required = ['maker_relay_id', 'outcome_side', 'outcome_end_date', 'resolution_rule_spec', 'maker_stake_kas', 'pool_merkle_root'];
     for (const k of required) {
