@@ -26,6 +26,7 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const SPINE_V06_SIL = process.env.POOL_SPINE_V06_SIL_PATH || join(__dirname, 'PoolSpine_v06.sil');
+const SIDE_V06_SIL = process.env.POOL_SIDE_V06_SIL_PATH || join(__dirname, 'PoolSide_v06.sil');
 
 /**
  * Compute PoolSpine_v06 P2SH address + redeem script.
@@ -76,6 +77,50 @@ export async function computeSpineP2SH_v06(args) {
     p2shAddr: result.p2shAddr,
     redeemScript: result.redeemScript,
     p2shHash,
+    cacheHit: result.cacheHit,
+  };
+}
+
+/**
+ * Compute PoolSide_v06 P2SH address + redeem script for a specific bettor.
+ *
+ * Ctor order MUST match PoolSide_v06.sil:
+ *   (bettorPk, spineP2shHash, marketMetadataHash, direction, stakeAmount, deadline)
+ *
+ * v0.6 changes from v0.5 PoolSide:
+ * - Drops 3 individual oracle PKs from ctor (= per-event committee data now passed
+ *   as args to claim_winner, not bakeable in ctor — J1 r99 + Bettor r7 confirm).
+ * - claim_winner takes aggPk + aggSig (= t-of-N aggregate, FROST/MuSig2) instead of 3 oracleSig.
+ * - Bound to its market via spineP2shHash (= same anchor as v0.5).
+ *
+ * Per Bettor r16: PoolSide_v06 is the per-bettor enforcement layer (merkle ∈ sidesMerkleRoot
+ * + winner match + own output amount correct) — fills v0.5 "TODO Phase 2 full Merkle verify per output".
+ *
+ * @returns {{ p2shAddr, redeemScript, cacheHit }}
+ */
+export async function computeSideP2SH_v06(args) {
+  const bettorPk = validatePubkeyHex(args.bettorPk, 'bettorPk');
+  const spineP2shHash = validateHashHex(args.spineP2shHash, 'spineP2shHash');
+  const marketMetadataHash = validateHashHex(args.marketMetadataHash, 'marketMetadataHash');
+  const direction = validateInt(args.direction, 'direction', 0, 1);
+  const stakeAmount = validateInt(args.stakeAmount, 'stakeAmount', 1);
+  const deadline = validateInt(args.deadline, 'deadline', 1);
+  if (!args.network) throw new Error('network required');
+
+  const ctorJson = [
+    bytes32Expr(bettorPk),
+    bytes32Expr(spineP2shHash),
+    bytes32Expr(marketMetadataHash),
+    intExpr(direction),
+    intExpr(stakeAmount),
+    intExpr(deadline),
+  ];
+
+  const result = await compileAndComputeP2SH(SIDE_V06_SIL, ctorJson, 'PoolSide_v06', args.network);
+
+  return {
+    p2shAddr: result.p2shAddr,
+    redeemScript: result.redeemScript,
     cacheHit: result.cacheHit,
   };
 }
