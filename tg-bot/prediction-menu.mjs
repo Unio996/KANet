@@ -111,8 +111,15 @@ export async function formatMyBets(linkedAddr) {
     const meta = [odds, stakedAt].filter(Boolean).join(' · ');
     if (meta) lines.push(`  ${meta}`);
     if (!p.settle_txid && !p.refund_txid) {
-      // Bettor r86 ②: open positions 加截止+开奖说明
-      if (p.outcome_end_date) lines.push(`  截止 ${p.outcome_end_date} · 开奖后自动结算到账绑定地址`);
+      // Bettor r86 ② + r91 fix: 用 deadline_unix (pool_markets 实存列), bot 端格式化.
+      if (p.deadline_unix) {
+        const d = new Date(Number(p.deadline_unix) * 1000);
+        if (!Number.isNaN(+d)) {
+          const pad = n => n < 10 ? '0' + n : '' + n;
+          const ymd = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+          lines.push(`  截止 ${ymd} · 开奖后自动结算到账绑定地址`);
+        }
+      }
       if (p.payout_if_win_kas) lines.push(`  赢可拿 ${Number(p.payout_if_win_kas).toFixed(4)} KAS`);
     }
   }

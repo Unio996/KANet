@@ -1065,8 +1065,7 @@ export async function registerPoolRoutes(fastify) {
              s.created_at AS locked_at,
              m.resolution_rule_spec, m.outcome_side, m.protocol_status, m.deadline, m.category,
              m.maker_stake_amount, m.broker_fee_pct, m.oracle_bond_amount, m.miner_fee, m.settle_txid, m.refund_txid,
-             m.metadata,
-             m.outcome_end_date
+             m.metadata
       FROM pool_bettor_sides s
       LEFT JOIN pool_markets m ON m.id = s.market_id
       WHERE s.bettor_pk = ?
@@ -1128,7 +1127,9 @@ export async function registerPoolRoutes(fastify) {
         side_p2sh: p.side_p2sh,
         side_lock_tx: p.side_lock_tx,
         locked_at: p.locked_at,  // Bettor r82 ①: 注册时间 — bot 显 "押注于 X"
-        outcome_end_date: p.outcome_end_date,  // Bettor r86 ②: 开奖/结算时间 — bot 显 "截止 X · 开奖后自动结算"
+        // Bettor r86 ② + r91 fix: outcome_end_date 在 exchange_offers 不是 pool_markets (J2 编造列名教训).
+        // pool_markets 用 deadline (INTEGER unix sec); bot 端格式化为人类可读时间.
+        deadline_unix: p.deadline,
         claim_txid: p.claim_txid,
         settle_txid: p.settle_txid,
         refund_txid: p.refund_txid,
