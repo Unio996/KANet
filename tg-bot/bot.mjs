@@ -54,6 +54,12 @@ bot.on('message:text', async (ctx) => {
     if (reply) await ctx.reply(reply);
     return;
   }
+  // Bettor r8 即时止血: 用户输看似押注续单的词 (确认/yes/纯数字), 但本地已无 bet 流程态
+  // (bot 重启 / 会话超时), 明示而非甩裸菜单, 避免用户以为「确认」生效付了钱。
+  const t = (txt || '').trim().toLowerCase();
+  if (t === '确认' || t === 'yes' || t === 'y' || /^[0-9]+$/.test(t)) {
+    return ctx.reply('⌛ 这句像是回前次押注流程的话, 但本地会话已不存在(bot 重启或会话过期)。\n之前那笔押注没续上, 也没启动付款监控。请重新 /bet 走一遍。');
+  }
   await ctx.reply('用 /help 看命令 · /bet 押注 · /swap 兑换 · /link 绑定地址');
 });
 

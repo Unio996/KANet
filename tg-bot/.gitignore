@@ -1,0 +1,4 @@
+# Bot 运行时态: sessions + pendingPayments 持久化 (Bettor r8 P0).
+# 含 TG user IDs + market/side_p2sh 等用户数据, 不入库.
+_state.json
+_state.json.tmp

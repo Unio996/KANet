@@ -3,13 +3,37 @@
 // 0-key/0-custody (J1 S5): bot 只读 + 显; 价值步 (stage4-5: escrow 地址 + 用户自钱包付 + 链上检测)
 //   待 J2/J1 taker-stake-external backend, 此处先 stub + 错付预防文案.
 import * as api from './console-api.mjs';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 
-// in-mem session per tg user (stage0-3 navigation). 持久化到 prediction_dm_session = post-MVP follow-up.
-const sessions = new Map();
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const STATE_FILE = join(__dirname, '_state.json');
 
-// stage5: 用户已确认押注、等待链上付款检测的会话 (tgUser -> {marketId,direction,side_p2sh,exact_sompi,...}).
-// bot.mjs poller 轮询这些, 调 backend confirm (3 验证 dest+amount+UNIQUE) → 入账后通知用户. in-mem v0.
-const pendingPayments = new Map();
+// Bettor r8 P0 (Owner 14h 后回「确认」→ bot 已重启状态丢 → 走丢): sessions + pendingPayments
+// 落盘 _state.json, bot 重启即 reload 续单. awaiting-confirm 与 stage5 付款监控跨重启不丢.
+const sessions = new Map();          // stage0-4 menu navigation per tg user
+const pendingPayments = new Map();   // stage5 awaiting on-chain payment, poller 域
+
+try {
+  if (existsSync(STATE_FILE)) {
+    const j = JSON.parse(readFileSync(STATE_FILE, 'utf8'));
+    for (const [k, v] of (j.sessions || [])) sessions.set(k, v);
+    for (const [k, v] of (j.pendingPayments || [])) pendingPayments.set(k, v);
+    console.log(`[prediction-menu] state loaded: ${sessions.size} sessions, ${pendingPayments.size} pending payments`);
+  }
+} catch (e) { console.warn(`[prediction-menu] state load skipped: ${e.message}`); }
+
+let _saveTimer = null;
+function persist() {
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => {
+    try {
+      const data = JSON.stringify({ sessions: [...sessions.entries()], pendingPayments: [...pendingPayments.entries()] });
+      writeFileSync(STATE_FILE, data);
+    } catch (e) { console.warn(`[prediction-menu] state save fail: ${e.message}`); }
+  }, 250);
+}
 
 const MIN_STAKE_KAS = 0.5;          // pool.js bettor/register 硬下限 (Bug 8: 更小 stake → settle TX 超 KIP-9 storage mass).
 const SOMPI_PER_KAS = 1e8;
@@ -25,14 +49,17 @@ function fmtDeadline(unixSec) {
 function trunc(s, n) { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
 
 export function inBetFlow(tgUser) { return sessions.has(tgUser) || pendingPayments.has(tgUser); }
-export function exitBetFlow(tgUser) { sessions.delete(tgUser); pendingPayments.delete(tgUser); }
+export function exitBetFlow(tgUser) { sessions.delete(tgUser); pendingPayments.delete(tgUser); persist(); }
 
 // stage5 — bot.mjs poller 用: 列出待检测付款 + 入账后清除.
 export function listPendingPayments() { return [...pendingPayments.entries()].map(([tgUser, p]) => ({ tgUser, ...p })); }
-export function clearPendingPayment(tgUser) { pendingPayments.delete(tgUser); }
+export function clearPendingPayment(tgUser) { pendingPayments.delete(tgUser); persist(); }
 
 // /bet → stage0: 列品类 (按 pending_bettors 市场的 category 聚合)
 export async function startBet(tgUser) {
+  try { return await _startBetImpl(tgUser); } finally { persist(); }
+}
+async function _startBetImpl(tgUser) {
   const r = await api.poolMarkets({ status: 'pending_bettors', limit: 200 });
   const markets = (r.json && r.json.markets) || [];
   if (!markets.length) { sessions.delete(tgUser); return '现在没有可押注的市场。稍后再来,或 /discover 看看。'; }
@@ -48,6 +75,9 @@ export async function startBet(tgUser) {
 
 // 处理用户在菜单流程中的回复 (数字导航). 返 null = 不在流程, 交其他 handler.
 export async function handleReply(tgUser, text, linkedAddr) {
+  try { return await _handleReplyImpl(tgUser, text, linkedAddr); } finally { persist(); }
+}
+async function _handleReplyImpl(tgUser, text, linkedAddr) {
   const s = sessions.get(tgUser);
   const raw = (text || '').trim();
   if (!s) {
