@@ -142,21 +142,31 @@ export function ensurePoolSnapshot(marketId, expectedPoolMerkleRoot) {
   if (!/^[0-9a-f]{64}$/.test(cleanExpected)) {
     throw new Error(`expectedPoolMerkleRoot must be 64-char hex (got ${cleanExpected.length} chars)`);
   }
-  // Canonical order: ASC by oracle_pk (= matches sampler.sortedPks lookup convention)
-  const members = sqlite.prepare(`
+  const rawMembers = sqlite.prepare(`
     SELECT oracle_pk, stake_locked_kas
     FROM oracle_pool_membership
     WHERE active = 1
-    ORDER BY oracle_pk ASC
   `).all();
-  if (members.length === 0) {
+  if (rawMembers.length === 0) {
     throw new Error('oracle_pool_membership empty (= no active members; run /api/oracle-pool/seed or wait for join-stake)');
   }
-  const pks = members.map(m => m.oracle_pk.toLowerCase());
-  // KAS float → sompi integer string (Bettor r52 (A) sompi-unit format)
-  const stakesSompi = members.map(m => BigInt(Math.round(Number(m.stake_locked_kas) * 1e8)).toString());
-  // Derive merkle root
+  // Bettor r55 F-A1 fix: pair (pk,stake) BEFORE sorting, so stake stays attached to its pk
+  // regardless of DB storage case (= alignment robust against mixed-case oracle_pk inserts).
+  // KAS float → sompi integer string (Bettor r52 (A) sompi-unit format) computed per-pair.
+  const paired = rawMembers.map(m => ({
+    pk: m.oracle_pk.toLowerCase(),
+    stake_sompi: BigInt(Math.round(Number(m.stake_locked_kas) * 1e8)).toString(),
+  })).sort((a, b) => a.pk < b.pk ? -1 : (a.pk > b.pk ? 1 : 0));
+  const pks = paired.map(p => p.pk);
+  const stakesSompi = paired.map(p => p.stake_sompi);
+  // Derive merkle root (= buildPoolMerkleTree re-sorts internally; result.sortedPks must equal pks here)
   const tree = buildPoolMerkleTree(pks);
+  // Sanity (= regression guard against Bettor F-A1): tree.sortedPks must equal our pre-sorted pks
+  for (let i = 0; i < pks.length; i++) {
+    if (tree.sortedPks[i] !== pks[i]) {
+      throw new Error(`F-A1 alignment regression: position ${i} pks=${pks[i].slice(0,12)}.. tree.sortedPks=${tree.sortedPks[i].slice(0,12)}..`);
+    }
+  }
   const derivedRoot = tree.root.toString('hex');
   if (derivedRoot !== cleanExpected) {
     throw new Error(`pool_merkle_root mismatch: derived=${derivedRoot} expected=${cleanExpected} (= caller drifted from current pool state; rebuild ctor from current pool)`);
@@ -169,14 +179,14 @@ export function ensurePoolSnapshot(marketId, expectedPoolMerkleRoot) {
   `).run(
     marketId,
     derivedRoot,
-    members.length,
-    JSON.stringify(tree.sortedPks),
+    pks.length,
+    JSON.stringify(pks),
     JSON.stringify(stakesSompi),
   );
   return {
-    pool_size: members.length,
+    pool_size: pks.length,
     pool_merkle_root: derivedRoot,
-    members: tree.sortedPks.map((pk, i) => ({ pk, stake_sompi: stakesSompi[i] })),
+    members: paired.map(p => ({ pk: p.pk, stake_sompi: p.stake_sompi })),
   };
 }
 
