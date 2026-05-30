@@ -204,8 +204,13 @@ contract PoolSpine_v06(
         // Payout structure enforcement (Bettor r13/r15 fund-safety):
         //   outputs[0]       = broker fee (P2PK brokerPk)
         //   outputs[1..5]    = 5 committee bond-return + fee-share (P2PK c0Pk..c4Pk, fixed N=5)
-        //   outputs[6..]     = bettor winner payouts, bound via 5-of-N sigs over sidesMerkleRoot;
-        //                      each PoolSide_v06 enforces its own bettor-merkle-proof at claim time
+        //   outputs[6..]     = bettor winner payouts, attested by **TX sighash** (= SIGHASH_ALL covers
+        //                      every output's scriptPubKey + value); silverc checkSig validates the 5
+        //                      committee Schnorr sigs against this TX sighash, so the per-bettor payout
+        //                      amounts in outputs[6..] are cryptographically bound to committee consent.
+        //                      Verified L559/779/1014 in pool-market-settler.js + v0.5 PoolSpine pattern
+        //                      (= Bettor r46 F1 sighash resolution: option (a), TX sighash attests amount).
+        //                      Each PoolSide_v06 enforces its own bettor-merkle-proof at claim time
         //                      (per Bettor r15 split + matches v0.5 PoolSide.sil architecture).
         require(tx.inputs.length >= 1);
         require(tx.outputs.length >= 6);
