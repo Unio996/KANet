@@ -28,7 +28,12 @@ export { _executeHedge as executeHedge };
 export { _autoPayExchange as triggerAutoPay, _autoSettleAsset, _autoSettleAsset as _autoSendKas };
 
 export async function onBroadcastWritten(row) {
-  if (!row.content || !row.content.startsWith('{"t":"kanet_')) return;
+  // Pre-filter to skip non-protocol broadcasts cheaply (full JSON.parse only if prefix match).
+  // Bettor r97 J2 consumer half: pool_oracle_vote_v1 payload starts with "pool_" not "kanet_",
+  // so widen prefix check. Adds ~1ns cost per non-matching broadcast vs prevents silent skip
+  // of the entire new pool flow (= KI 49 silent skip pattern that bit voter ingest before).
+  if (!row.content) return;
+  if (!row.content.startsWith('{"t":"kanet_') && !row.content.startsWith('{"t":"pool_')) return;
 
   let msg;
   try {
