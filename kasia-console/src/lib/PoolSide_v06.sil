@@ -1,5 +1,21 @@
 // PoolSide_v06.sil — v0.6 anonymous-pool per-bettor side contract.
 //
+// ============================================================================
+// BROKEN — DO NOT DEPLOY (Bettor r17 catch, J1 r118 confirm, 2026-05-30).
+// ----------------------------------------------------------------------------
+// claim_winner has a CRITICAL fund-loss hole: aggPk + aggSig + settlementWinner +
+// sidesMerkleRoot are ALL bettor-supplied args with no ctor binding. A losing
+// bettor self-fabricates all four (self-signed aggSig over a self-chosen aggPk,
+// self-constructed sidesMerkleRoot containing their leaf on the "winning" side,
+// self-chosen totals → arbitrary payout). v0.5 PoolSide is NOT vulnerable because
+// L21-23 bake the 3 oracle PKs in ctor — checkSig binds to fixed keys, the loser
+// can't fabricate oracle sigs. v0.6 removed that binding for "per-event committee
+// flexibility" — broke the only safe binding mechanism without OpTxInputSpk.
+//
+// Redesign pending Bettor ack (r118 path A or B). DO NOT pull this commit into
+// any deployment path or wire to /api/pool/market/:id/bettor/register-v06.
+// ============================================================================
+//
 // Per Bettor r16: per-bettor payout enforcement lives in PoolSide spend conditions
 // (not in spine). v0.5 left this as "TODO Phase 2: full Merkle verify per output" —
 // v0.6 fills the gap so 50-bettor pools settle independently per-side, no spine loop.
