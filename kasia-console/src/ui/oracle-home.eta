@@ -50,16 +50,17 @@
       <div x-show="trustLoading" class="text-xs text-ink-300 py-2">加载中...</div>
       <template x-if="!trustLoading && pool">
         <div>
+          <div x-show="pool._source" class="text-[10px] text-ink-400 mb-2">数据源: <span class="font-mono" x-text="pool._source"></span> · 池空时表示等首批 oracle stake lock</div>
           <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
             <div>
-              <div class="rh-stat-label">池中 oracle 数</div>
+              <div class="rh-stat-label">真池 active oracle 数</div>
               <div class="rh-stat-value rh-display" x-text="pool.count"></div>
-              <div class="text-[10px] text-ink-400 mt-0.5">is_oracle=1 注册可被抽签</div>
+              <div class="text-[10px] text-ink-400 mt-0.5">stake locked 进真池 (= 可被 VRF 抽签)</div>
             </div>
             <div>
               <div class="rh-stat-label">总锁仓 KAS</div>
               <div class="rh-stat-value rh-display" x-text="fmtKas(pool.totalStake)"></div>
-              <div class="text-[10px] text-ink-400 mt-0.5">stake_locked_kas sum</div>
+              <div class="text-[10px] text-ink-400 mt-0.5">stake_locked_kas sum (real 经济安全)</div>
             </div>
             <div>
               <div class="rh-stat-label">前 5 集中度</div>
@@ -67,9 +68,9 @@
               <div class="text-[10px] text-ink-400 mt-0.5">越低 = 越分散 = 越抗共谋</div>
             </div>
             <div>
-              <div class="rh-stat-label">无违规率</div>
+              <div class="rh-stat-label">活跃率</div>
               <div class="rh-stat-value rh-display text-green-700" x-text="pool.cleanPct.toFixed(1) + '%'"></div>
-              <div class="text-[10px] text-ink-400 mt-0.5">voter_misbehave_count = 0 占比</div>
+              <div class="text-[10px] text-ink-400 mt-0.5">active / total membership</div>
             </div>
           </div>
           <div class="mt-3">
@@ -399,28 +400,38 @@ function oracleHome() {
     async loadTrust() {
       this.trustLoading = true; this.marketsLoading = true; this.trustError = '';
       try {
-        const [orcResp, mktResp] = await Promise.allSettled([
-          fetch('/api/oracles').then(r => r.json()),
+        const [poolResp, mktResp] = await Promise.allSettled([
+          fetch('/api/oracle-pool/state').then(r => r.json()),
           fetch('/api/pool/markets?limit=50').then(r => r.json()),
         ]);
 
-        // b 池透明
-        if (orcResp.status === 'fulfilled' && orcResp.value?.ok) {
-          const list = orcResp.value.oracles || [];
-          const stakes = list.map(o => parseFloat(o.oracle_stake_locked_kas) || 0);
+        // b 池透明 (R-3 audit fix 2026-05-30): 读 v159 真池 oracle_pool_membership 而非 legacy relay_nodes.
+        // /api/oracle-pool/state → { ok, total_members, active_members, total_active_stake_kas, members: [...] }
+        // 真池语义: 只有 stake 锁进池子的 oracle 才算 (= 跟 v0.6 path A 经济安全模型一致).
+        if (poolResp.status === 'fulfilled' && poolResp.value?.ok) {
+          const all = poolResp.value.members || [];
+          const active = all.filter(m => m.active === 1);
+          const stakes = active.map(m => parseFloat(m.stake_locked_kas) || 0);
           const totalStake = stakes.reduce((a, b) => a + b, 0);
-          const sorted = [...list].sort((a, b) => (parseFloat(b.oracle_stake_locked_kas) || 0) - (parseFloat(a.oracle_stake_locked_kas) || 0));
-          const top5Sum = sorted.slice(0, 5).reduce((s, o) => s + (parseFloat(o.oracle_stake_locked_kas) || 0), 0);
-          const cleanCount = list.filter(o => (o.voter_misbehave_count || 0) === 0).length;
+          const sorted = [...active].sort((a, b) => (parseFloat(b.stake_locked_kas) || 0) - (parseFloat(a.stake_locked_kas) || 0));
+          const top5Sum = sorted.slice(0, 5).reduce((s, m) => s + (parseFloat(m.stake_locked_kas) || 0), 0);
           this.pool = {
-            count: list.length,
+            count: active.length,
             totalStake,
             top5Pct: totalStake > 0 ? (top5Sum / totalStake * 100) : 0,
-            cleanPct: list.length > 0 ? (cleanCount / list.length * 100) : 100,
-            top10: sorted.slice(0, 10),
+            // active rate replaces clean-misbehave (v159 不直接 expose voter_misbehave_count, 改显 active率)
+            cleanPct: all.length > 0 ? (active.length / all.length * 100) : 100,
+            top10: sorted.slice(0, 10).map(m => ({
+              id: m.relay_id,
+              name: m.name,
+              oracle_stake_locked_kas: m.stake_locked_kas,
+              voter_misbehave_count: 0,    // legacy field, v159 不直接暴露 — UI bar 显 OK 默认
+            })),
+            // 加 source 标识让用户知道这是真池数据
+            _source: 'v0.6 真池 (oracle_pool_membership)',
           };
         } else {
-          this.trustError = '池数据接口异常: /api/oracles';
+          this.trustError = '池数据接口异常: /api/oracle-pool/state';
         }
         this.trustLoading = false;
 
