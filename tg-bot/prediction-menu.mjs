@@ -67,6 +67,25 @@ function fmtDeadline(unixSec) {
 
 // 列表里截短标题 (resolution_rule_spec 可能含完整结算规则全文, Bettor r256). 详情页给全文.
 function trunc(s, n) { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+// Bettor r82 ② — 句子/词边界截断, 不破词中间. 优先句号/逗号/空格回退.
+function truncSmart(s, n) {
+  s = String(s || '');
+  if (s.length <= n) return s;
+  const slice = s.slice(0, n);
+  const m = slice.match(/^(.*?)(?:[。.!?,，;； ]|\s)[^。.!?,，;； \s]*$/);
+  const cut = m ? m[1] : slice;
+  return (cut.length > 0 ? cut : slice).replace(/[\s,，。.!?;；]+$/, '') + '…';
+}
+// Bettor r82 ① — 锁仓时间显示 (SQLite created_at TEXT '2026-05-30 14:18:32' → 用户友好格式)
+function fmtLockedAt(s) {
+  if (!s) return '';
+  const t = String(s).replace(' ', 'T') + (String(s).endsWith('Z') ? '' : 'Z');
+  const d = new Date(t);
+  if (Number.isNaN(+d)) return String(s);
+  // 显示 "MM-DD HH:mm" 本地化 — 桌面浏览器/手机均可读
+  const pad = n => n < 10 ? '0' + n : '' + n;
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 // Bettor r78 ① — /mybets 命令: 列用户所有押注 + 状态 (押中/已结算赢/输/退款).
 // Reads /api/pool/my-positions (= J2 r126 backend). 0-custody read-only.
@@ -84,9 +103,13 @@ export async function formatMyBets(linkedAddr) {
       p.settle_txid ? `📊 已结算待最终标注` :
       p.refund_txid ? `💸 已退款` :
       p.side_lock_tx ? `⏳ 已锁仓等开奖` : `❓ 未上链`;
-    const odds = p.yes_implied_prob != null ? `[YES ${(p.yes_implied_prob*100).toFixed(0)}%]` : '';
+    const odds = p.yes_implied_prob != null ? `池: YES ${(p.yes_implied_prob*100).toFixed(0)}% / NO ${(100-p.yes_implied_prob*100).toFixed(0)}%` : '';
+    const lockedAt = p.locked_at ? `锁仓于 ${fmtLockedAt(p.locked_at)}` : '';
+    lines.push('');
     lines.push(`• ${p.my_side} ${p.stake_kas} KAS · ${status}`);
-    lines.push(`  ${(p.question || p.market_id || '').slice(0, 60)} ${odds}`);
+    lines.push(`  ${truncSmart(p.question || p.market_id || '', 70)}`);
+    const meta = [odds, lockedAt].filter(Boolean).join(' · ');
+    if (meta) lines.push(`  ${meta}`);
     if (!p.settle_txid && !p.refund_txid && p.payout_if_win_kas) {
       lines.push(`  赢可拿 ${Number(p.payout_if_win_kas).toFixed(4)} KAS`);
     }

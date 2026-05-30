@@ -1062,6 +1062,7 @@ export async function registerPoolRoutes(fastify) {
     catch (e) { return reply.code(400).send({ ok: false, error: `linked_addr derive pubkey fail: ${e.message}` }); }
     const positions = sqlite.prepare(`
       SELECT s.market_id, s.direction, s.stake_amount, s.side_p2sh, s.side_lock_tx, s.claim_txid, s.merkle_index,
+             s.created_at AS locked_at,
              m.resolution_rule_spec, m.outcome_side, m.protocol_status, m.deadline, m.category,
              m.maker_stake_amount, m.broker_fee_pct, m.oracle_bond_amount, m.miner_fee, m.settle_txid, m.refund_txid,
              m.metadata
@@ -1125,6 +1126,7 @@ export async function registerPoolRoutes(fastify) {
         payout_if_win_kas: payoutIfWin / 1e8,
         side_p2sh: p.side_p2sh,
         side_lock_tx: p.side_lock_tx,
+        locked_at: p.locked_at,  // Bettor r82 ①: 注册时间 — bot 显 "锁仓于 X"
         claim_txid: p.claim_txid,
         settle_txid: p.settle_txid,
         refund_txid: p.refund_txid,
