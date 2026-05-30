@@ -1063,7 +1063,8 @@ export async function registerPoolRoutes(fastify) {
     const positions = sqlite.prepare(`
       SELECT s.market_id, s.direction, s.stake_amount, s.side_p2sh, s.side_lock_tx, s.claim_txid, s.merkle_index,
              m.resolution_rule_spec, m.outcome_side, m.protocol_status, m.deadline, m.category,
-             m.maker_stake_amount, m.broker_fee_pct, m.oracle_bond_amount, m.miner_fee, m.settle_txid, m.refund_txid
+             m.maker_stake_amount, m.broker_fee_pct, m.oracle_bond_amount, m.miner_fee, m.settle_txid, m.refund_txid,
+             m.metadata
       FROM pool_bettor_sides s
       LEFT JOIN pool_markets m ON m.id = s.market_id
       WHERE s.bettor_pk = ?
@@ -1095,6 +1096,20 @@ export async function registerPoolRoutes(fastify) {
       const minerFee = Number(p.miner_fee || 0);
       const netLoser = Math.max(otherPool - brokerFee - minerFee, 0);
       const payoutIfWin = myPool > 0 ? stakeSompi + Math.floor(netLoser * stakeSompi / myPool) : stakeSompi;
+      // Bettor r76 F-N1 fix: winner direction lives in metadata.phase2_winner (= persisted by
+      // pool-market-settler.js L600 on consensus). Use this to derive won_or_lost so bot poller
+      // can show '你赢了' / '你输了' instead of generic '已结算'.
+      let outcomeWinner = null;
+      let didWin = null;
+      let actualPayoutKas = null;
+      try {
+        const meta = JSON.parse(p.metadata || '{}');
+        if (meta.phase2_winner === 0 || meta.phase2_winner === 1) {
+          outcomeWinner = meta.phase2_winner;
+          didWin = (myDirection === outcomeWinner);
+          if (didWin) actualPayoutKas = payoutIfWin / 1e8;
+        }
+      } catch {}
       out.push({
         market_id: p.market_id,
         question: p.resolution_rule_spec,
@@ -1113,6 +1128,11 @@ export async function registerPoolRoutes(fastify) {
         claim_txid: p.claim_txid,
         settle_txid: p.settle_txid,
         refund_txid: p.refund_txid,
+        // F-N1: settled outcome surface (NULL if not settled or oracle still voting).
+        outcome_winner: outcomeWinner,
+        outcome_side: outcomeWinner === 0 ? 'YES' : (outcomeWinner === 1 ? 'NO' : null),
+        did_win: didWin,
+        actual_payout_kas: actualPayoutKas,
       });
     }
     return reply.send({ ok: true, linked_addr: linkedAddr, bettor_pk: bettorPk, count: out.length, positions: out });
