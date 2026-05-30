@@ -30,13 +30,17 @@ export async function registerKanetBrokerRoutes(fastify) {
       ORDER BY created_at DESC
     `).all(relay_id);
 
-    const retailOrders = sqlite.prepare(`
+    // retail-dex orders use system-wide configured broker (retail_dex_broker_config) not per-order
+    // broker_relay_id. So: return all retail orders only if THIS relay_id is configured retail broker.
+    const isRetailBroker = sqlite.prepare(
+      'SELECT 1 FROM retail_dex_broker_config WHERE broker_relay_id = ? LIMIT 1'
+    ).get(relay_id);
+    const retailOrders = isRetailBroker ? sqlite.prepare(`
       SELECT id, state, broker_fee_kas, agent_pay_addr,
-             requested_at_quote, expires_at, created_at, settle_tx_hash, refund_tx_hash
+             mid_price_at_quote, expires_at, created_at, deliver_tx_hash, refund_tx_hash
       FROM retail_dex_orders
-      WHERE broker_relay_id = ?
       ORDER BY created_at DESC
-    `).all(relay_id);
+    `).all() : [];
 
     const totals = {
       pool_active: poolMarkets.filter(m => !m.settle_txid && !m.refund_txid).length,
@@ -78,10 +82,14 @@ export async function registerKanetBrokerRoutes(fastify) {
       FROM pool_markets WHERE broker_relay_id = ?
     `).all(relay_id);
 
-    const retailRows = sqlite.prepare(`
-      SELECT id, broker_fee_kas, state, settle_tx_hash, refund_tx_hash, updated_at
-      FROM retail_dex_orders WHERE broker_relay_id = ?
-    `).all(relay_id);
+    // Same retail-broker scope as above: system-wide broker config, return all if configured.
+    const isRetailBroker = sqlite.prepare(
+      'SELECT 1 FROM retail_dex_broker_config WHERE broker_relay_id = ? LIMIT 1'
+    ).get(relay_id);
+    const retailRows = isRetailBroker ? sqlite.prepare(`
+      SELECT id, broker_fee_kas, state, deliver_tx_hash, refund_tx_hash, updated_at
+      FROM retail_dex_orders
+    `).all() : [];
 
     let realizedPoolSompi = 0n;
     let pendingPoolSompi = 0n;
@@ -119,7 +127,7 @@ export async function registerKanetBrokerRoutes(fastify) {
 
     for (const r of retailRows) {
       const fee = parseFloat(r.broker_fee_kas || '0') || 0;
-      const isRealized = !!r.settle_tx_hash && r.state === 'completed';
+      const isRealized = !!r.deliver_tx_hash && r.state === 'completed';
       const isRefunded = !!r.refund_tx_hash || r.state === 'refunded' || r.state === 'cancelled';
       const status = isRealized ? 'settled' : (isRefunded ? 'refunded' : r.state);
       if (isRealized) {
