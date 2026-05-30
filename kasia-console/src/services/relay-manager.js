@@ -160,13 +160,17 @@ export async function stopRelay(relayNodeId) {
 }
 
 /**
- * Start relays for all accounts that have mnemonic + adapter configured.
+ * Start relays for all accounts that have (mnemonic OR privkey) + adapter configured.
+ * r281 (Bettor 168965a): privkey-backed relays must also boot here. PR updated startRelay()
+ * single-call path but missed this batch filter, so every Console restart left privkey
+ * relays (e.g. Owner-qrymjvc-tn) down — operator hit it manually 2026-05-30 ~10:00.
  */
 export async function startAll() {
   const accounts = sqlite.prepare(
     `SELECT r.id FROM relay_nodes r
      JOIN adapter_nodes a ON a.id = r.adapter_node_id
-     WHERE r.address IS NOT NULL AND r.mnemonic_encrypted IS NOT NULL`
+     WHERE r.address IS NOT NULL
+       AND (r.mnemonic_encrypted IS NOT NULL OR r.privkey_encrypted IS NOT NULL)`
   ).all();
 
   let started = 0;
