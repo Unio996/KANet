@@ -792,6 +792,140 @@ export async function registerPoolRoutes(fastify) {
     });
   });
 
+  // ── v0.6 path A external (0-key) pool betting — parallel to v0.5 /register-external/{prep,confirm}.
+  // Bettor r19 LOCK + Owner ack (5/30). Differences from v0.5:
+  // - market.protocol_version='v0.6' (= computed via computeSpineP2SH_v06 + PoolSpine_v06.sil settle_aggregate path A).
+  // - Side P2SH derived via computeSideP2SH_v06 — needs market.pool_merkle_root (v158 column) in ctor.
+  // - No oracle1/2/3_pk on v0.6 market rows; oracle-exclusivity check is skipped (committee is per-event).
+  // - Same exact-stake / wrong-payment-locked / 50-bettor-cap semantics as v0.5.
+  async function _extStakeDeriveSide_v06(market, linkedAddr, direction, stakeAmount) {
+    const bettorPk = await deriveXOnlyPubkey(linkedAddr);
+    const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
+    if (makerRow?.address && (await deriveXOnlyPubkey(makerRow.address)) === bettorPk) {
+      throw Object.assign(new Error('linked address is the market maker — maker bets implicitly via outcome_side (area-1)'), { code: 403 });
+    }
+    if (!market.pool_merkle_root) {
+      throw Object.assign(new Error('v0.6 market missing pool_merkle_root — corrupt market row'), { code: 500 });
+    }
+    const spineP2shHash = createHash('sha256').update(market.spine_p2sh).digest('hex');
+    const network = market.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    const { computeSideP2SH_v06 } = await import('../lib/pool-p2sh-v06.mjs');
+    const sideResult = await computeSideP2SH_v06({
+      bettorPk, spineP2shHash,
+      poolMerkleRoot: market.pool_merkle_root,
+      marketMetadataHash: market.market_metadata_hash,
+      direction, stakeAmount, deadline: market.deadline, network,
+    });
+    return { bettorPk, sideResult, network };
+  }
+
+  // POST /api/pool/market/:id/bettor/register-v06/prep — v0.6 step 1: compute side P2SH + exact stake.
+  fastify.post('/api/pool/market/:id/bettor/register-v06/prep', async (request, reply) => {
+    const marketId = request.params.id;
+    const b = request.body || {};
+    const v = _extStakeValidate(b);
+    if (v.error) return reply.code(v.code).send({ ok: false, error: v.error });
+    const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
+    if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
+    if (market.protocol_version !== 'v0.6') return reply.code(400).send({ ok: false, error: `market protocol_version=${market.protocol_version || 'v0.5'}, use /register-external for v0.5` });
+    if (market.protocol_status !== 'pending_bettors') {
+      return reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, bettor registration closed` });
+    }
+    const bettorCount = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(marketId).c;
+    if (bettorCount >= 50) return reply.code(409).send({ ok: false, error: 'market full — 50 bettors max per market' });
+    let d;
+    try { d = await _extStakeDeriveSide_v06(market, b.linked_addr, v.direction, v.stakeAmount); }
+    catch (e) { return reply.code(e.code || 500).send({ ok: false, error: e.message }); }
+    const existingForBettor = sqlite.prepare('SELECT direction, stake_amount FROM pool_bettor_sides WHERE market_id = ? AND bettor_pk = ?').get(marketId, d.bettorPk);
+    if (existingForBettor) return reply.code(409).send({ ok: false, error: `this address already has a position on this market (direction=${existingForBettor.direction}, stake=${existingForBettor.stake_amount / 1e8} KAS) — one position per address per market` });
+    return reply.send({
+      ok: true,
+      protocol_version: 'v0.6',
+      market_id: marketId,
+      direction: v.direction,
+      bettor_pk: d.bettorPk,
+      side_p2sh: d.sideResult.p2shAddr,
+      redeem_script: d.sideResult.redeemScript,
+      pool_merkle_root: market.pool_merkle_root,
+      exact_stake_sompi: v.stakeAmount,
+      exact_stake_kas: (v.stakeAmount / 1e8).toFixed(8),
+      network: d.network,
+      deadline: market.deadline,
+      warning: 'Pay EXACTLY exact_stake_sompi to side_p2sh. Underpayment is locked until deadline; overpayment excess is lost to fee. Claim winnings with your /link-bound key + 4-of-5 committee sigs at settle time.',
+    });
+  });
+
+  // POST /api/pool/market/:id/bettor/register-v06/confirm — v0.6 step 2: detect/verify payment → register.
+  fastify.post('/api/pool/market/:id/bettor/register-v06/confirm', async (request, reply) => {
+    const marketId = request.params.id;
+    const b = request.body || {};
+    const v = _extStakeValidate(b);
+    if (v.error) return reply.code(v.code).send({ ok: false, error: v.error });
+    const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
+    if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
+    if (market.protocol_version !== 'v0.6') return reply.code(400).send({ ok: false, error: `market protocol_version=${market.protocol_version || 'v0.5'}, use /register-external for v0.5` });
+    if (market.protocol_status !== 'pending_bettors') {
+      return reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, bettor registration closed` });
+    }
+    let d;
+    try { d = await _extStakeDeriveSide_v06(market, b.linked_addr, v.direction, v.stakeAmount); }
+    catch (e) { return reply.code(e.code || 500).send({ ok: false, error: e.message }); }
+    const sideP2sh = d.sideResult.p2shAddr;
+    // RPC UTXO query (indexer-independent per Bettor r283).
+    let utxos;
+    try {
+      const { url: rpcUrl } = await getWorkingRpc();
+      if (!rpcUrl) return reply.code(503).send({ ok: false, error: 'no working Kaspa RPC node — retry shortly' });
+      const { RpcClient, Encoding, Address } = await import('kaspa-wasm');
+      const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: d.network });
+      await Promise.race([rpc.connect({}), new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 4000))]);
+      try { ({ entries: utxos } = await rpc.getUtxosByAddresses([new Address(sideP2sh)])); }
+      finally { await rpc.disconnect().catch(() => {}); }
+    } catch (e) {
+      return reply.code(503).send({ ok: false, error: `RPC UTXO query failed (${e.message}) — retry shortly` });
+    }
+    utxos = utxos || [];
+    const wantSompi = BigInt(v.stakeAmount);
+    const exactUtxo = utxos.find(u => { try { return BigInt(u.amount) === wantSompi; } catch { return false; } });
+    if (!exactUtxo) {
+      const mine = sqlite.prepare('SELECT side_lock_tx, merkle_index FROM pool_bettor_sides WHERE market_id = ? AND bettor_pk = ? AND direction = ? AND stake_amount = ?')
+        .get(marketId, d.bettorPk, v.direction, v.stakeAmount);
+      if (mine) return reply.send({ ok: true, registered: true, already_registered: true, side_p2sh: sideP2sh, side_lock_tx: mine.side_lock_tx, merkle_index: mine.merkle_index });
+      if (utxos.length > 0) {
+        return reply.send({ ok: true, registered: false, wrong_payment_detected: true, side_p2sh: sideP2sh, exact_stake_sompi: v.stakeAmount, note: `错付: side P2SH holds ${utxos.length} UTXO(s) but none == exact ${v.stakeAmount} sompi — pay EXACTLY.` });
+      }
+      return reply.send({ ok: true, registered: false, pending: true, side_p2sh: sideP2sh, exact_stake_sompi: v.stakeAmount, note: 'no matching payment detected yet — keep polling' });
+    }
+    const op = exactUtxo.outpoint || exactUtxo.entry?.outpoint;
+    const txId = op && (op.transactionId || op.transaction_id);
+    if (!txId) return reply.code(500).send({ ok: false, error: 'matching UTXO found but transactionId missing' });
+    const already = sqlite.prepare('SELECT bettor_pk, direction, stake_amount, side_p2sh, merkle_index FROM pool_bettor_sides WHERE market_id = ? AND side_lock_tx = ?').get(marketId, txId);
+    if (already) return reply.send({ ok: true, registered: true, already_registered: true, side_lock_tx: txId, ...already });
+    const existingForBettor = sqlite.prepare('SELECT side_lock_tx, direction, stake_amount, merkle_index FROM pool_bettor_sides WHERE market_id = ? AND bettor_pk = ?').get(marketId, d.bettorPk);
+    if (existingForBettor) {
+      if (existingForBettor.side_lock_tx === txId) return reply.send({ ok: true, registered: true, already_registered: true, side_lock_tx: txId, merkle_index: existingForBettor.merkle_index });
+      return reply.code(409).send({ ok: false, error: `this address already has a position on this market (direction=${existingForBettor.direction}, stake=${existingForBettor.stake_amount / 1e8} KAS) — one position per address per market` });
+    }
+    const bettorCount = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(marketId).c;
+    if (bettorCount >= 50) return reply.code(409).send({ ok: false, error: 'market full — 50 bettors max per market' });
+    const merkleIndex = bettorCount;
+    try {
+      sqlite.prepare(`INSERT INTO pool_bettor_sides (market_id, bettor_pk, bettor_relay_id, direction, stake_amount, side_p2sh, side_lock_tx, merkle_index, side_redeem_script_hex)
+        VALUES (?,?,?,?,?,?,?,?,?)`).run(marketId, d.bettorPk, null, v.direction, v.stakeAmount, sideP2sh, txId, merkleIndex, d.sideResult.redeemScript);
+    } catch (e) {
+      console.error(`[pool/register-v06/confirm] DB insert fail: ${e.message}`);
+      return reply.code(500).send({ ok: false, error: `DB insert fail: ${e.message}` });
+    }
+    const bettors = sqlite.prepare('SELECT bettor_pk FROM pool_bettor_sides WHERE market_id = ? ORDER BY merkle_index').all(marketId);
+    const tree = buildSidesMerkleTree(bettors.map(x => x.bettor_pk));
+    sqlite.prepare('UPDATE pool_markets SET sides_merkle_root = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(tree.root, marketId);
+    return reply.send({
+      ok: true, registered: true, protocol_version: 'v0.6', market_id: marketId, bettor_pk: d.bettorPk, direction: v.direction,
+      side_p2sh: sideP2sh, side_lock_tx: txId, merkle_index: merkleIndex, sides_merkle_root: tree.root,
+      bettor_count: bettorCount + 1, external: true,
+    });
+  });
+
   // GET /api/predictions/polymarket/search?q=K — Polymarket keyword search (Owner r455 钦定)
   // Owner thesis: 不 dump 热门 list, 关键字搜索式 → top 5 → 点选 auto-fill maker create form.
   // Implementation: fetch active markets from Polymarket gamma + filter by question.includes(q).
