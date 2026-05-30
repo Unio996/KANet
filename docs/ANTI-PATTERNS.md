@@ -2362,4 +2362,29 @@ async loadFoo() {
 
 ---
 
+## 规则 42 · 测试/代码禁硬编码活私钥 — 用临时生成的 key 断言
+
+### Wrong
+```js
+// wallet.test.mjs — 硬编码某个线上地址的活私钥做断言
+const sk = '26482a23979c2e2cf576f4bbc949641b57a6a937ad8b7c9e183cfd840a25cde3';
+assert(KaspaWallet.fromPrivateKey(sk, 'testnet-12').getAddress() === 'kaspatest:qrymjvc...');
+```
+
+### Right
+```js
+// 临时生成 key (随机 32 byte hex), 形态/逻辑断言, 不绑定任何线上账户
+const sk = randomBytes(32).toString('hex');
+const w = KaspaWallet.fromPrivateKey(sk, 'testnet-12');
+assert(w.getAddress().startsWith('kaspatest:'));      // 验推导逻辑, 不验特定地址
+expectThrow(() => KaspaWallet.fromPrivateKey('zz', 'testnet-12'));  // mutation: 非法 hex
+```
+
+### Why
+私钥进 git = 永久泄露（历史 + 远端不可撤回），仓库 MIT public 更甚。即便 testnet 无币值，该写法会被复制到 mainnet 模式。测试要验的是 `fromPrivateKey` 的逻辑（hex 校验 / 0x strip / network 推导），随机临时 key 即可全覆盖，无需绑定任何线上账户。
+
+**前科**：r281 `wallet.test.mjs`（commit 168965a）硬编码 Owner qrymjvc 的活私钥 3 处，随 push 到 GitHub 两分支。Owner 裁定 testnet 不阻塞，但写法记此档案防扩散。详见 `KANet-Knowledge-Base/architecture/2026-05-30-privkey-relay-spec.md` §5。
+
+---
+
 *本档案在 v2 spec 第八章元教训基础上独立。spec 聚焦"这次怎么做"，本档案聚焦"下次别再犯"。*

@@ -249,6 +249,8 @@
 | name | TEXT NOT NULL | Agent 名称（目录名，含下划线） |
 | address | TEXT | Kaspa 地址 |
 | mnemonic_encrypted | TEXT | 加密助记词 |
+| **privkey_encrypted** | TEXT | **v157 r281** — 加密的裸 kaspa 私钥（64 hex/32 byte）。null=助记词型 relay。与 mnemonic_encrypted 二选一，导入私钥时只走此列 |
+| **privkey_hint** | TEXT | **v157 r281** — 固定标记 `'privkey-imported'`，**不含任何私钥字节**，仅 UI 标识私钥型 relay |
 | network | TEXT NOT NULL | mainnet/testnet |
 | adapter_node_id | TEXT | 关联 Adapter |
 | proactive_interval_minutes | INTEGER | proactive 间隔（默认60） |
@@ -710,10 +712,13 @@ CEX 交易日志。v51 新增 `exchange` 列记录交易所归属（旧记录为
 3. 改字段：SQLite 不支持直接改，需建新表→迁移→删旧表
 4. 新表：migrate.js 新版本，加 `IF NOT EXISTS` 保护
 
-**当前最新版本：v124（r211 Phase 3a v3 oracle — Path D maker 自选 oracle + 3-of-5 multi-sig）**
+**当前最新版本：v157（r281 私钥型 relay — relay_nodes 加 privkey_encrypted + privkey_hint）**
+
+> 注：v125–v156 尚未在本表逐条回填（r281 scope 外）；新增 migration 接 v157 之后。
 
 ## 版本历史（近期）
 
+- **v157 (2026-05-30 r281 私钥型 relay)**: `relay_nodes` 新加 `privkey_encrypted` + `privkey_hint`（裸 kaspa 私钥型 relay 支持，幂等 additive，不破助记词型）。详见 `KANet-Knowledge-Base/architecture/2026-05-30-privkey-relay-spec.md`
 - **v124 (2026-05-20 r211 Phase 3a v3 oracle)**: `exchange_offers` 新加 `outcome_oracle_relay_id` + `resolution_rule_spec` (= Path D maker 自选 oracle + 5 字段 structured 判定规则); `relay_nodes` 新加 `is_oracle` + `oracle_capabilities` + `oracle_stake_locked_kas` + `oracle_reputation_score` + `broker_referral_code/broker_stake_locked_kas/broker_stake_lock_until/broker_approved_by/broker_approved_at` (broker treasury 字段同 line 出 v124)
 - v122 (2026-05-19 r177 Phase 2 prediction market): exchange_offers 新加 outcome_* 字段 (= polymarket-style prediction market on Kaspa) + `maker_kaspa_addr` + `maker_relay_id`
 - v69 (2026-04-22 T6): retail_dex_orders.agent_pay_addr + mid_price_at_quote
