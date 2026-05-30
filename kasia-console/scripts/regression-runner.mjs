@@ -360,6 +360,30 @@ async function verifyV06(baselinePath) {
     'soft'
   );
 
+  // Check 10: v159 schema deployed (= J2.1 d804175 oracle_pool_membership + pool_snapshots)
+  // Reason (Owner 铁律 ②): J2.1 ship 后 schema 须落地, 否则 v0.6 market publish 时 poolMerkleRoot 派生路径 (pool_snapshots freeze) 无法 record, 用户 publish 失败.
+  const db2 = new Database(DB_PATH, { readonly: true });
+  const tableNames = db2.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('oracle_pool_membership','pool_snapshots','pool_committee')").all().map(t => t.name);
+  db2.close();
+  const v159Expected = ['oracle_pool_membership', 'pool_snapshots'];
+  const v159Missing = v159Expected.filter(t => !tableNames.includes(t));
+  check(
+    'v159 schema deployed (oracle_pool_membership + pool_snapshots tables)',
+    v159Missing.length === 0,
+    { found: tableNames, expected: v159Expected, missing: v159Missing, note: v159Missing.length === 0 ? 'J2.1 schema live' : 'DEPLOY_PENDING — J2.1 d804175 须 Console pull docs/oracle-v06-spec + restart' },
+    'soft'
+  );
+
+  // Check 11: pool-merkle-v06.mjs derive module 存在 (= J2.1 d804175 byte-align d5d4ecbdd SS climb)
+  // Reason (Owner 铁律 ②): J2.2/J2.3 sampling+VRF 依赖 derive 模块; 不存在则 v0.6 market 不能 derive poolMerkleRoot.
+  const mergeModulePath = path.join(REPO_ROOT, 'kasia-console/src/services/pool-merkle-v06.mjs');
+  const hasMergeModule = fs.existsSync(mergeModulePath);
+  check(
+    'pool-merkle-v06.mjs derive 模块存在 (J2.1 byte-align SS climb)',
+    hasMergeModule,
+    { path: mergeModulePath, exists: hasMergeModule }
+  );
+
   const total = report.pass + report.fail + report.deploy_pending;
   if (report.fail > 0) report.verdict = 'FAIL';
   else if (report.deploy_pending > 0) report.verdict = 'PASS_WITH_DEPLOY_PENDING';
