@@ -4766,5 +4766,32 @@ export function runMigrations() {
     }
   }
 
+  // v160 — Bettor r23 (Owner P0): 放开 "一地址一市场一仓位" 隐性约束.
+  // Iron Rule 触发: v62 idx_pool_sides_bettor_market UNIQUE(market_id, bettor_pk) 是
+  // 架构副产物 (= "每 bettor 一 side 烤死方向" 副作用), 0 user-need / 0 产品理由, 废掉
+  // 加仓 / 两边押 / 多次押 (成熟预测市场标配). Owner P0 立即放开.
+  //
+  // 修法: drop UNIQUE(market_id, bettor_pk) → 复用现 v156 UNIQUE(side_lock_tx WHERE NOT NULL)
+  // 做幂等. side_p2sh = computeSideP2SH(bettorPk + direction + stake_amount + spineP2shHash)
+  // 确定性派生 → 同 (bettor, direction, stake) 重押天然返同 P2SH = idempotent (= 已防重押).
+  // 不同 direction / 不同 stake → 不同 side_p2sh → 允许多 side. 这是协议本设计意图.
+  //
+  // SS 50-side/market 硬上限 (PoolSide_v06 + PoolSpine_v06 sidesMerkleRoot depth-6) 不变.
+  // 撤销已押仓位 = 另 feature, 不在本 v160 scope.
+  {
+    const hasUniqIdx = sqlite.prepare(
+      "SELECT count(*) as cnt FROM sqlite_master WHERE type='index' AND name='idx_pool_sides_bettor_market'"
+    ).get().cnt > 0;
+    if (hasUniqIdx) {
+      try {
+        sqlite.exec('DROP INDEX idx_pool_sides_bettor_market');
+        sqlite.exec('CREATE INDEX idx_pool_sides_market_bettor ON pool_bettor_sides(market_id, bettor_pk)');
+        console.log('[migrate] v160: dropped UNIQUE(market_id, bettor_pk); replaced with non-unique idx — 放开加仓/两边押 (Owner P0 r23).');
+      } catch (e) {
+        console.warn(`[migrate] v160 unique drop fail: ${e.message}`);
+      }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
