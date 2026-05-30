@@ -241,10 +241,11 @@
         <div class="flex gap-2 pt-1">
           <button @click="sendModal.open = false"
                   class="flex-1 px-3 py-1.5 bg-warm-200 hover:bg-warm-300 text-ink-700 rounded text-xs">取消</button>
-          <button @click="confirmSend()" :disabled="sendModal.sending"
+          <button @click="confirmSend()" :disabled="sendModal.sending || sendModal.txHash"
                   class="flex-1 px-3 py-1.5 bg-brand-500 hover:bg-brand-600 text-white rounded text-xs disabled:opacity-50">
-            <span x-show="!sendModal.sending">确认发送</span>
-            <span x-show="sendModal.sending">发送中...</span>
+            <span x-show="!sendModal.sending && !sendModal.txHash">确认发送</span>
+            <span x-show="sendModal.sending && !sendModal.txHash">发送中...</span>
+            <span x-show="sendModal.txHash">已广播 ✓</span>
           </button>
         </div>
       </div>
@@ -819,10 +820,15 @@ function portfolioApp() {
       this.sendModal.fromBalance = opt.balance;
     },
 
-    // 确认发送 — 路由到对应后端 (KAS 走 /transfer, 其他链走 /wallets/:id/send)
+    // 确认发送 — 路由到对应后端 (KAS 走 /transfer, 其他链走 /wallets/:id/send).
+    // 双发保护 (2026-05-30 operator 撞 2× 1000 KAS bug 后加固):
+    //   ① 入口 idempotency 守: sending 或已有 txHash 即返回, 防 race + 防成功后再点;
+    //   ② 成功不 finally 重置 sending — 保持按钮 disable 直到 modal 关 (2.5s 后);
+    //   ③ 按钮 :disabled 条件并联 txHash, 一旦有交易哈希永久锁死该次 modal.
     async confirmSend() {
       const m = this.sendModal;
-      m.error = ''; m.txHash = '';
+      if (m.sending || m.txHash) return;  // ① 双发守
+      m.error = '';
       const to = (m.toAddr || '').trim();
       const amt = parseFloat(m.amount);
       if (!to)              { m.error = '请输入目的地址'; return; }
@@ -830,6 +836,7 @@ function portfolioApp() {
       if (!(amt > 0))        { m.error = '金额必须 > 0'; return; }
       if (amt > parseFloat(m.fromBalance)) { m.error = '余额不足 (可用 ' + m.fromBalance + ' ' + m.assetLabel + ')'; return; }
       m.sending = true;
+      let succeeded = false;
       try {
         let url, body;
         if (m.chain === 'kaspa') {
@@ -848,6 +855,7 @@ function portfolioApp() {
         const d = await r.json();
         if (r.ok && (d.ok || d.txId || d.txHash)) {
           m.txHash = d.txId || d.txHash || '';
+          succeeded = true;  // ② 成功不重置 sending — 让按钮持续 disable 直到 modal 关
           setTimeout(() => { this.sendModal.open = false; this.loadAll(); }, 2500);
         } else {
           m.error = '失败: ' + (d.error || ('HTTP ' + r.status));
@@ -855,7 +863,7 @@ function portfolioApp() {
       } catch (e) {
         m.error = '失败: ' + e.message;
       } finally {
-        m.sending = false;
+        if (!succeeded) m.sending = false;  // 仅失败 / 异常才放开重试
       }
     },
 
