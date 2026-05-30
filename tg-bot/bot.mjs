@@ -42,6 +42,11 @@ bot.command('verify', (ctx) => ctx.reply('用 /link <你的 kaspatest 地址> �
 
 bot.command('swap', async (ctx) => { const broker = await api.brokerInfo(brokerRelayId); return ctx.reply(M.swapFlow(broker)); });
 bot.command('bet',  async (ctx) => ctx.reply(await PM.startBet(String(ctx.from.id))));  // S-C: in-chat 编号菜单
+// Bettor r78 ① — /mybets: 列自己押注 + 赢/输/退款状态 (= J2 r126 my-positions wire).
+bot.command('mybets', async (ctx) => {
+  const addr = PM.getLinkedAddr(String(ctx.from.id)) || linked.get(String(ctx.from.id))?.address;
+  return ctx.reply(await PM.formatMyBets(addr));
+});
 bot.command('discover', (ctx) => ctx.reply('浏览:\n' + CONFIG.consoleUrl + '/exchange\n' + CONFIG.consoleUrl + '/predictions'));
 
 // S-C menu navigation — plain-text numeric replies advance the bet flow (commands handled above).

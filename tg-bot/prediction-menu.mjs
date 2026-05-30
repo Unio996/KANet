@@ -68,6 +68,32 @@ function fmtDeadline(unixSec) {
 // 列表里截短标题 (resolution_rule_spec 可能含完整结算规则全文, Bettor r256). 详情页给全文.
 function trunc(s, n) { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
 
+// Bettor r78 ① — /mybets 命令: 列用户所有押注 + 状态 (押中/已结算赢/输/退款).
+// Reads /api/pool/my-positions (= J2 r126 backend). 0-custody read-only.
+export async function formatMyBets(linkedAddr) {
+  if (!linkedAddr) return '⚠ 还没绑定地址。先 /link <你的 kaspatest 地址>, 再 /mybets 看自己的押注。';
+  const r = await api.myPositions(linkedAddr);
+  if (!r.ok) return `查询失败: ${r.json?.error || r.status}`;
+  const positions = r.json?.positions || [];
+  if (!positions.length) return '你还没有押注记录。/bet 开始押。';
+  const lines = [`📋 你的押注 (${positions.length} 笔):`];
+  for (const p of positions) {
+    const status =
+      p.settle_txid && p.did_win === true ? `🎉 赢 +${Number(p.actual_payout_kas || 0).toFixed(4)} KAS` :
+      p.settle_txid && p.did_win === false ? `😞 输 -${p.stake_kas} KAS` :
+      p.settle_txid ? `📊 已结算待最终标注` :
+      p.refund_txid ? `💸 已退款` :
+      p.side_lock_tx ? `⏳ 已锁仓等开奖` : `❓ 未上链`;
+    const odds = p.yes_implied_prob != null ? `[YES ${(p.yes_implied_prob*100).toFixed(0)}%]` : '';
+    lines.push(`• ${p.my_side} ${p.stake_kas} KAS · ${status}`);
+    lines.push(`  ${(p.question || p.market_id || '').slice(0, 60)} ${odds}`);
+    if (!p.settle_txid && !p.refund_txid && p.payout_if_win_kas) {
+      lines.push(`  赢可拿 ${Number(p.payout_if_win_kas).toFixed(4)} KAS`);
+    }
+  }
+  return lines.join('\n');
+}
+
 export function inBetFlow(tgUser) { return sessions.has(tgUser) || pendingPayments.has(tgUser); }
 export function exitBetFlow(tgUser) { sessions.delete(tgUser); pendingPayments.delete(tgUser); persist(); }
 
@@ -158,6 +184,15 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
       `📊 ${full.resolution_rule_spec}`,
       `${fmtDeadline(full.deadline)} · 已 ${full.bettor_count || 0} 人押 · maker stake ${full.maker_stake_kas ?? '?'} KAS`,
     ];
+    // Bettor r78 ②: 显示池子分布 + 隐含赔率 (= Bettor r70 A 数据底座). pari-mutuel.
+    if (full.yes_pool_kas != null && full.no_pool_kas != null) {
+      const yp = Number(full.yes_pool_kas).toFixed(4);
+      const np = Number(full.no_pool_kas).toFixed(4);
+      const ypp = full.yes_implied_prob != null ? (full.yes_implied_prob * 100).toFixed(1) + '%' : '?';
+      const npp = full.no_implied_prob != null ? (full.no_implied_prob * 100).toFixed(1) + '%' : '?';
+      lines.push(`池子分布: YES ${yp} KAS (${ypp})  ·  NO ${np} KAS (${npp})`);
+      lines.push('赔率 = 对方池 / 自方池 (押对越少人, 赢得越多)。');
+    }
     if (full.outcome_market_source) lines.push(`结算源: ${full.outcome_market_source}`);
     lines.push('', '⚠ 押注前请看清上面【完整结算规则 + 结算源】— 这是判定输赢的唯一依据。', '你押哪边?  回复 1 = YES   ·   2 = NO');
     return lines.join('\n');
