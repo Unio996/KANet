@@ -92,7 +92,11 @@ export async function startBet(tgUser) {
 }
 async function _startBetImpl(tgUser) {
   const r = await api.poolMarkets({ status: 'pending_bettors', limit: 200 });
-  const markets = (r.json && r.json.markets) || [];
+  // Bettor r68 P0 fix: bot 走 register-external (v0.5 only) — v0.6 市场用 register-v06/confirm,
+  // bot 还没接. 不滤会拒 → 用户选中 v0.6 市场 register-external 拒 protocol mismatch = broken path.
+  // 等 bot v0.6 wire 完成再删此过滤.
+  const allMarkets = (r.json && r.json.markets) || [];
+  const markets = allMarkets.filter(m => m.protocol_version !== 'v0.6');
   if (!markets.length) { sessions.delete(tgUser); return '现在没有可押注的市场。稍后再来,或 /discover 看看。'; }
   const byCat = {};
   for (const m of markets) { const c = m.category || 'other'; (byCat[c] = byCat[c] || []).push(m); }
