@@ -20,10 +20,11 @@ export async function registerStockRoutes(fastify) {
 
   // ── Page routes ──
 
+  // /market-overview — retired (Gap 3 dedup, Bettor r36 GO).
+  // 边缘 Agent 市场综述页 (263L), 不在 sidebar, 用户少 → 302 /market (canonical).
+  // market-overview.eta fossil retained.
   fastify.get('/market-overview', async (request, reply) => {
-    const lang = parseLang(request.headers.cookie);
-    const t = getT(lang);
-    return reply.view('market-overview', { title: '市场概览', t, lang, dir: isRtl(lang) ? 'rtl' : 'ltr', langs: LANG_NAMES, _page: 'market-overview' });
+    return reply.redirect(302, '/market');
   });
 
   fastify.get('/stocks', async (request, reply) => {

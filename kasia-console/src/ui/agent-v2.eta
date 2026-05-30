@@ -1152,7 +1152,7 @@
       <div id="tab-oracle" x-show="activeTab === 'oracle'" class="card card-flush overflow-hidden av-accent-gold-border-t">
         <div class="px-5 py-4 border-b border-warm-200 flex items-center justify-between">
           <span class="av-display text-base text-ink-800">Oracle 角色 · 信誉 · 收益</span>
-          <a href="/predictions/oracle-registry" class="text-xs av-accent-gold hover:underline">在线裁判名单 →</a>
+          <a href="/oracle" class="text-xs av-accent-gold hover:underline">Oracle 信任系统 →</a>
         </div>
         <div class="p-5 space-y-5">
           <!-- Oracle 注册状态 (= Editorial Trust Score hero) -->

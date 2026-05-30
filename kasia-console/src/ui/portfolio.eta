@@ -544,7 +544,7 @@
       <div class="pf-card-editorial pf-accent-gold-border-t p-5 mb-3">
         <div class="flex items-center justify-between mb-4">
           <h3 class="pf-display text-base text-ink-800">Oracle Earnings</h3>
-          <a href="/predictions/oracle-registry" class="text-[11px] pf-accent-gold hover:underline">在线 oracle 名单 →</a>
+          <a href="/oracle" class="text-[11px] pf-accent-gold hover:underline">Oracle 信任系统 →</a>
         </div>
         <template x-if="oracleEarnings && oracleEarnings.length > 0">
           <div>

@@ -73,7 +73,7 @@
     </div>
 
     <!-- 5. Markets ▶ (= Exchange + Predictions only, 删 Overview/CEX/OTC/Stocks/More) -->
-    <% const _isMarket = ['exchange','predictions','predictions-pool-create','predictions-oracle-registry','predictions-quick','market','market-overview','market-v2','trading','trading-v2','stocks','hyperliquid','aevo','aave'].includes(it._page); %>
+    <% const _isMarket = ['exchange','predictions','predictions-pool-create','predictions-pool-detail','market','trading','stocks','hyperliquid','aevo','aave'].includes(it._page); %>
     <div x-data="{ open: <%= _isMarket ? 'true' : 'false' %> }">
       <button @click="open = !open"
         class="flex items-center justify-between w-full px-3 py-2.5 rounded-lg text-sm transition-colors <%= _isMarket ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
@@ -86,7 +86,7 @@
           Exchange
         </a>
         <a href="/predictions"
-          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= ['predictions','predictions-pool-create','predictions-oracle-registry','predictions-quick'].includes(it._page) ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= ['predictions','predictions-pool-create','predictions-pool-detail'].includes(it._page) ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
           Predictions
         </a>
       </div>

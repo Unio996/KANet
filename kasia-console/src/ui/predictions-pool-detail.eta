@@ -8,7 +8,7 @@
 <div x-data="poolDetailPage('<%= it.marketId %>')" x-init="init()" class="max-w-3xl mx-auto px-4 py-6 font-body text-ink-700">
 
   <!-- back link -->
-  <a href="/predictions/oracle-registry" class="text-xs text-ink-400 hover:text-ink-600">&larr; 预言机注册表</a>
+  <a href="/oracle" class="text-xs text-ink-400 hover:text-ink-600">&larr; Oracle 信任系统</a>
 
   <!-- loading -->
   <div x-show="loading" class="text-center py-16 text-ink-400">加载市场详情...</div>

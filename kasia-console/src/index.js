@@ -352,12 +352,12 @@ fastify.get('/predictions/pool/create', async (request, reply) => {
   return reply.viewAsync('predictions-pool-create', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', relayNodes, _page: 'predictions-pool-create' });
 });
 
-// Oracle v0.3 sub #7 D1 — Markets › Predictions › Oracle Registry sub-page
-// reads /api/oracle/registry (= J2 sub 1 oracle_registry table)
+// /predictions/oracle-registry — retired (Gap 3 dedup, Bettor r36 GO).
+// Subsumed by /oracle home (Owner 钦定 ② independent oracle system UI, Bettor r35 CLOSE).
+// 信任系统 tab + 我的 oracle tab 覆盖 registry 全功能 + 池透明 + 每市场信任 + onboarding.
+// predictions-oracle-registry.eta fossil retained.
 fastify.get('/predictions/oracle-registry', async (request, reply) => {
-  const lang = parseLang(request.headers.cookie);
-  const t = getT(lang);
-  return reply.viewAsync('predictions-oracle-registry', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', _page: 'predictions-oracle-registry' });
+  return reply.redirect(302, '/oracle');
 });
 
 // Oracle UI piece 1+2 (Bettor r128/r129) — pool market detail page (= 填 create 页 dead link + oracle 透明度)
