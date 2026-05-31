@@ -707,12 +707,9 @@ export async function dispatchPhase2(market, decision) {
       phase2_output_count: outputs.length,
       phase2_outputs: outputs,  // Phase 2c step 2c: full outputs array for collecting_sigs handler IPC assembly
     };
-    sqlite.prepare('UPDATE pool_markets SET metadata = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-      .run(JSON.stringify(newMeta), 'collecting_sigs', market.id);
-
     // 8. DM 3 oracle relays with kanet_pool_oracle_tx_sign_req_v1
     //    (= adapted from 1V1 kanet_oracle_tx_sign_req_v1, uses market_id instead of offer_id)
-    const reqPayload = JSON.stringify({
+    const reqPayloadObj = {
       t: 'kanet_pool_oracle_tx_sign_req_v1',
       market_id: market.id,
       winner: decision.winner,
@@ -720,7 +717,13 @@ export async function dispatchPhase2(market, decision) {
       silent_oracle_index: decision.silentOracleIndex ?? null,
       input_count: requiredInputOutpoints.length,
       spine_input_count: spineInputCount,
-    });
+    };
+    const reqPayload = JSON.stringify(reqPayloadObj);
+    // Persist payload for handleCollectingSigs re-DM (KANet-UI r387 follow-up).
+    newMeta.phase2_request_payload = reqPayloadObj;
+    sqlite.prepare('UPDATE pool_markets SET metadata = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(JSON.stringify(newMeta), 'collecting_sigs', market.id);
+
     // KANet-UI r386 Layer-9 KI 49: v0.6 5-oracle path. v0.5 hardcoded [0,1,2] missed 5-committee.
     // For v0.6 unanimous (5/5 same): all 5 sign. For v0.6 non-unanimous (4/5): exclude silent.
     const oracleN = oracleRows.length;
@@ -1041,6 +1044,30 @@ async function handleCollectingSigs(market) {
   if (spineMissing.length > 0) {
     if (Math.random() < 0.1) {
       console.log(`[pool-settler:collecting] market=${market.id.slice(0,12)} waiting spine sigs: ${spineMissing.join(' ')}`);
+    }
+    // KANet-UI r387 layer-9 follow-up: re-DM missing oracle sign_req. Pre-hotfix dispatchPhase2
+    // may have sent to wrong subset (e.g. v0.5 [0,1,2] for a v0.6 market) and oracles never knew
+    // they should sign. Throttle 5min via meta.last_sign_req_redm_at to avoid spam.
+    try {
+      const lastReDMms = meta.last_sign_req_redm_at ? new Date(meta.last_sign_req_redm_at).getTime() : 0;
+      if (Date.now() - lastReDMms > 5 * 60_000 && meta.phase2_request_payload) {
+        const signedSet = new Set();
+        for (const s of sigsByInput[0] || []) signedSet.add(s.voter_relay_id);
+        const missingOracles = signingOracles.filter(i => !signedSet.has(oracleArr[i]));
+        if (missingOracles.length > 0) {
+          const oracleRows = oracleArr.map(rid => sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(rid));
+          Promise.allSettled(missingOracles.map(i => oracleRows[i]?.address
+            ? sendCommandAsync(market.maker_relay_id, { type: 'send_message', target: oracleRows[i].address, message: JSON.stringify(meta.phase2_request_payload) })
+            : Promise.resolve()
+          )).catch(() => {});
+          const newMeta = { ...meta, last_sign_req_redm_at: new Date().toISOString() };
+          sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+            .run(JSON.stringify(newMeta), market.id);
+          console.log(`[pool-settler:collecting] re-DM sign_req market=${market.id.slice(0,12)} missing=${missingOracles.length}`);
+        }
+      }
+    } catch (e) {
+      console.warn(`[pool-settler:collecting] re-DM fail market=${market.id.slice(0,12)}: ${e.message}`);
     }
     return;
   }
