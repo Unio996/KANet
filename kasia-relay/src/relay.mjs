@@ -676,6 +676,13 @@ if (process.send) {
           // Side inputs auto-unlock via [selector_0 + side_redeem_push] (= settled_via_spine no sigs)
           const { unlockPoolSpineP2SH } = await import('./lib/p2sh.mjs');
           const wallet = getWallet();
+          // J2 r192 Part B v0.6: forward committee_data when present (= cmd.protocol_version='v0.6').
+          const committee_data = cmd.protocol_version === 'v0.6' ? {
+            committee_pks: cmd.committee_pks,
+            committee_indices: cmd.committee_indices,
+            committee_merkle_proofs: cmd.committee_merkle_proofs,
+            committee_pk_hash: cmd.committee_pk_hash,
+          } : null;
           const r = await unlockPoolSpineP2SH({
             spineP2shAddress: cmd.spine_p2sh_address,
             sideP2shAddresses: cmd.side_p2sh_addresses,
@@ -691,6 +698,7 @@ if (process.send) {
             networkId: wallet.getNetworkId(),
             lockTime: BigInt(cmd.lock_time || 0),
             txObjPreimage: cmd.tx_obj_preimage || null,
+            committee_data,
           });
           if (cmd.requestId && process.send) {
             process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });

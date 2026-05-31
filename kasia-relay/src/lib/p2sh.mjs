@@ -761,10 +761,59 @@ export async function unlockPoolSpineP2SH(args) {
     const spineRedeemBytes = Buffer.from(spineRedeemScriptHex, 'hex');
     const spineRedeemPushHex = _encodePushDataHex(spineRedeemBytes);
 
-    // Each spine input gets its own scriptSig (= own 3 sigs over that input's sighash).
-    const spineScriptSigs = spineSigsByInput.map(sigs =>
-      sigs.join('') + winnerOpHex + rootPushHex + selectorOpHex + spineRedeemPushHex
-    );
+    // J1 r221 + Bettor r219 ③ Layer-12 Part B: v0.6 settle_aggregate path uses 58-arg scriptSig
+    // (5 sigs + committeePkHash + winner + sidesMerkleRoot + 5 PKs + 5 indices + 5x8 siblings).
+    // Detect v0.6 via args.committee_data presence — Console settler bakes it via dispatchPhase2.
+    const isV06 = !!args.committee_data
+      && Array.isArray(args.committee_data.committee_pks)
+      && args.committee_data.committee_pks.length === 5;
+
+    // Each spine input gets its own scriptSig (= own sigs over that input's sighash).
+    const spineScriptSigs = spineSigsByInput.map(sigs => {
+      if (!isV06) {
+        // v0.5 legacy path: 3 sigs + winner + root + selector + redeem.
+        return sigs.join('') + winnerOpHex + rootPushHex + selectorOpHex + spineRedeemPushHex;
+      }
+      // v0.6 path A settle_aggregate. Push order per J1 r221 spec (= silverc LIFO, declaration
+      // reversed): siblings[4] depth7..0 → ... → siblings[0] depth7..0 → indices c4..c0 → PKs
+      // c4..c0 → sidesMerkleRoot → winner → committeePkHash → sigs c4..c0 → selector → redeem.
+      const cd = args.committee_data;
+      const proofs = cd.committee_merkle_proofs;  // 5 arrays of 8 hex strings (= sibling hashes)
+      const indices = cd.committee_indices;  // 5 ints
+      const pks = cd.committee_pks;  // 5 hex strings (32B x-only)
+      const committeePkHash = cd.committee_pk_hash;  // hex 32B
+      if (sigs.length !== 5) throw new Error(`v0.6 settle_aggregate needs 5 sigs per input, got ${sigs.length}`);
+      const pushBytes = (hex) => _encodePushDataHex(Buffer.from(hex, 'hex'));
+      const opNHex = (n) => {
+        if (n === 0) return '00';
+        if (n >= 1 && n <= 16) return (0x50 + n).toString(16).padStart(2, '0');
+        // Push as little-endian minimal int bytes (= silverc int encoding).
+        return _encodePushDataHex(Buffer.from([n & 0xff]));
+      };
+      // Siblings group: committee 4 → 0, within each 8 → 0 (= depth 7 down to 0 per silverc reverse).
+      let scriptSigHex = '';
+      for (let ci = 4; ci >= 0; ci--) {
+        const sibs = proofs[ci];
+        if (!Array.isArray(sibs) || sibs.length !== 8) {
+          throw new Error(`v0.6 settle_aggregate committee[${ci}] needs 8 siblings, got ${sibs?.length}`);
+        }
+        for (let d = 7; d >= 0; d--) scriptSigHex += pushBytes(sibs[d]);
+      }
+      // Indices c4..c0
+      for (let ci = 4; ci >= 0; ci--) scriptSigHex += opNHex(indices[ci]);
+      // PKs c4..c0
+      for (let ci = 4; ci >= 0; ci--) scriptSigHex += pushBytes(pks[ci]);
+      // sidesMerkleRoot, winner, committeePkHash
+      scriptSigHex += rootPushHex;
+      scriptSigHex += winnerOpHex;
+      scriptSigHex += pushBytes(committeePkHash);
+      // Sigs c4..c0 (already push-encoded from createInputSignature)
+      for (let ci = 4; ci >= 0; ci--) scriptSigHex += sigs[ci];
+      // Selector OP_0 (entry 0 = settle_aggregate) + redeem reveal
+      scriptSigHex += selectorOpHex;
+      scriptSigHex += spineRedeemPushHex;
+      return scriptSigHex;
+    });
 
     const sideScriptSigs = sideRedeemScriptHexes.map(redeemHex => {
       const redeemBytes = Buffer.from(redeemHex, 'hex');
