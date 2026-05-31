@@ -364,22 +364,39 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
     s.prep = { side_p2sh: pr.json.side_p2sh, exact_sompi: pr.json.exact_stake_sompi, direction };
     s.stage = 'confirm';
     const kas = sompiToKasStr(s.prep.exact_sompi);
-    return [
-      `📝 押注复核 — ${s.market.resolution_rule_spec}`,
-      `方向 ${s.side} · 金额 ${kas} KAS`,
-      '',
-      '下一步你要【从自己的钱包】把以下精确金额付到以下精确地址 (bot 全程不持钥、不碰你的钱):',
-      `金额: ${kas} KAS  (= ${s.prep.exact_sompi} sompi, 精确值)`,
-      `地址: ${s.prep.side_p2sh}`,
-      '',
-      '⚠ 必须付【这个精确金额】到【这个精确地址】。这是按你的金额烤进合约的一次性地址:',
-      '· 少付 → 资金被合约永久锁死、退不回 (refund 也救不了)。',
-      '· 多付 → 超出部分被矿工吃掉、要不回。',
-      '· 任意钱包都能付; 但中奖要用你【绑定地址】的钥匙领取。',
-      '',
-      `回复 1 = 确认付 ${kas} KAS 到这个一次性地址 (少付永久锁死, 多付被矿工吃掉)`,
-      '回复 0 = 取消',
-    ].join('\n');
+    // Owner P0 (Bettor r116 spec, KANet-UI ship): tap-to-copy 地址 + 精确金额 + Kaspa payment URI.
+    // 地址手抄风险高 → 用 Telegram HTML <code> 包成 monospace + tap-to-copy 块.
+    // URI = kaspatest:addr?amount=KAS (BIP-21 style, 钱包识别即点开预填). 不识别时 fallback = tap-to-copy.
+    // resolution_rule_spec 可能含 HTML 特殊字符, 必须 escape (HTML mode 整条解析).
+    const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const addr = s.prep.side_p2sh;
+    const uri = `${addr}?amount=${kas}`;
+    return {
+      text: [
+        `📝 押注复核 — ${esc(s.market.resolution_rule_spec)}`,
+        `方向 ${s.side} · 金额 ${kas} KAS`,
+        '',
+        '下一步你要<b>从自己的钱包</b>把以下<b>精确金额</b>付到以下<b>精确地址</b> (bot 全程不持钥、不碰你的钱):',
+        '',
+        `💰 金额 (点一下复制): <code>${kas}</code> KAS`,
+        `   = <code>${s.prep.exact_sompi}</code> sompi (精确值, 多/少 1 sompi 都不算)`,
+        '',
+        `📮 地址 (点一下复制):`,
+        `<code>${addr}</code>`,
+        '',
+        `📲 或点这直接打开钱包预填: <a href="${uri}">${addr.slice(0, 16)}…?amount=${kas}</a>`,
+        '   (Kaspa 钱包支持 URI 时一键填好, 不支持时回上面 tap-to-copy)',
+        '',
+        '⚠ 必须付【这个精确金额】到【这个精确地址】, 因为这是按你的金额烤进合约的一次性地址:',
+        '· 少付 → 资金被合约永久锁死、退不回 (refund 也救不了)。',
+        '· 多付 → 超出部分被矿工吃掉、要不回。',
+        '· 任意钱包都能付; 但中奖要用你<b>绑定地址</b>的钥匙领取。',
+        '',
+        `回复 <b>1</b> = 确认付 ${kas} KAS 到这个一次性地址 (少付永久锁死, 多付被矿工吃掉)`,
+        '回复 <b>0</b> = 取消',
+      ].join('\n'),
+      parseMode: 'HTML',
+    };
   }
 
   if (s.stage === 'confirm') {

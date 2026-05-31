@@ -73,7 +73,15 @@ bot.on('message:text', async (ctx) => {
   if (PM.inBetFlow(tgUser)) {
     // Bettor r63 ①: 优先从持久 link store 取 (= 抗 bot 重启), in-mem 退化 fallback.
     const reply = await PM.handleReply(tgUser, txt, PM.getLinkedAddr(tgUser) || linked.get(tgUser)?.address);
-    if (reply) await ctx.reply(reply);
+    if (reply) {
+      // Bettor r116 + KANet-UI: prediction-menu confirm 阶段返 { text, parseMode } 支持 HTML
+      // (tap-to-copy 地址 + payment URI). 其余阶段返 string 原路 ctx.reply.
+      if (typeof reply === 'object' && reply.text) {
+        await ctx.reply(reply.text, { parse_mode: reply.parseMode });
+      } else {
+        await ctx.reply(reply);
+      }
+    }
     return;
   }
   // Bettor r8 即时止血: 用户输看似押注续单的词 (确认/yes/纯数字), 但本地已无 bet 流程态
