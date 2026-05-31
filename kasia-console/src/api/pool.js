@@ -29,6 +29,94 @@ function deriveXOnlyPubkey(address) {
   });
 }
 
+// Bettor r117/r118/r120 cross-node hardening producer ② — broadcast market_publish
+// onchain so remote nodes' Scout + trade-protocol-filter rebuild pool_markets locally.
+// Best-effort: fail logs warn, doesn't fail create (spine_lock_tx already onchain).
+//
+// Schema pool_market_published_v1 (r179-locked, r180 3-way verified, r120 ACK).
+// market_metadata_hash 3-way alignment (r180 grep verified L191-198): producer/consumer/spine
+// all sha256(JSON.stringify({source, condition, token, side, end, rule})).
+async function _broadcastMarketPublished(marketRow, makerRelayId) {
+  try {
+    const pkResult = await sendCommandAsync(makerRelayId, { type: 'get_pubkey' });
+    const maker_relay_pk = pkResult?.x_only_pubkey;
+    if (!maker_relay_pk || maker_relay_pk.length !== 64) throw new Error(`maker get_pubkey invalid: ${maker_relay_pk}`);
+
+    const oracle_relay_pks = [marketRow.oracle1_pk, marketRow.oracle2_pk, marketRow.oracle3_pk].filter(Boolean);
+
+    const unsignedPayload = {
+      t: 'pool_market_published_v1',
+      market_id: marketRow.id,
+      spine_p2sh: marketRow.spine_p2sh,
+      spine_lock_tx: marketRow.spine_lock_tx,
+      market_metadata_hash: marketRow.market_metadata_hash,
+      maker_relay_pk,
+      outcome_market_source: marketRow.outcome_market_source,
+      outcome_condition_id: marketRow.outcome_condition_id,
+      outcome_token_id: marketRow.outcome_token_id,
+      outcome_side: marketRow.outcome_side,
+      outcome_end_date: marketRow.outcome_end_date || null,
+      resolution_rule_spec: marketRow.resolution_rule_spec,
+      deadline: marketRow.deadline,
+      miner_fee: marketRow.miner_fee,
+      broker_fee_pct: marketRow.broker_fee_pct,
+      oracle_bond_amount: marketRow.oracle_bond_amount,
+      maker_stake_amount: marketRow.maker_stake_amount,
+      oracle_relay_pks,
+      broker_pk: marketRow.broker_pk,
+      protocol_version: marketRow.protocol_version || 'v0.5',
+      pool_merkle_root: marketRow.pool_merkle_root || null,
+      category: marketRow.category,
+      published_at: new Date().toISOString(),
+    };
+    const messageToSign = JSON.stringify(unsignedPayload);
+    const signResult = await sendCommandAsync(makerRelayId, { type: 'ecdsa_sign', message: messageToSign });
+    const signature = signResult?.signature;
+    if (!signature) throw new Error('ecdsa_sign returned empty');
+
+    const payloadStr = JSON.stringify({ ...unsignedPayload, signature });
+    if (payloadStr.length > 4000) {
+      console.warn(`[pool/broadcast] market_publish payload ${payloadStr.length} > 4000 — chunked v1 TODO, sending single`);
+    }
+    const bcastResult = await sendCommandAsync(makerRelayId, {
+      type: 'send_broadcast', channel: 'kanet-prediction', message: payloadStr,
+    });
+    const txId = bcastResult?.txId;
+    if (!txId) throw new Error(`broadcast no txId: ${JSON.stringify(bcastResult).slice(0, 200)}`);
+    console.log(`[pool/broadcast] market_published ${marketRow.id.slice(0, 12)} txId=${txId.slice(0, 16)}...`);
+    return { ok: true, txId };
+  } catch (e) {
+    console.warn(`[pool/broadcast] market_publish fail ${marketRow.id?.slice(0, 12)}: ${e.message}`);
+    return { ok: false, error: e.message };
+  }
+}
+
+// Bettor r117/r120 cross-node hardening producer ② — broadcast bet_register onchain.
+// NO signature (chain side_lock_tx UTXO at side_p2sh is truth anchor; consumer
+// recomputes side_p2sh from bettor_pk + market.oracle_pks then verifies UTXO).
+async function _broadcastBetRegistered(args) {
+  const { market_id, bettor_pk, direction, stake_amount, side_p2sh, side_lock_tx, merkle_index, protocol_version, broadcaster_relay_id } = args;
+  try {
+    const unsignedPayload = {
+      t: 'pool_bet_registered_v1',
+      market_id, bettor_pk, direction, stake_amount,
+      side_p2sh, side_lock_tx, merkle_index,
+      protocol_version: protocol_version || 'v0.5',
+      registered_at: new Date().toISOString(),
+    };
+    const bcastResult = await sendCommandAsync(broadcaster_relay_id, {
+      type: 'send_broadcast', channel: 'kanet-prediction', message: JSON.stringify(unsignedPayload),
+    });
+    const txId = bcastResult?.txId;
+    if (!txId) throw new Error(`broadcast no txId: ${JSON.stringify(bcastResult).slice(0, 200)}`);
+    console.log(`[pool/broadcast] bet_registered ${market_id.slice(0, 12)}/${bettor_pk.slice(0, 8)} txId=${txId.slice(0, 16)}...`);
+    return { ok: true, txId };
+  } catch (e) {
+    console.warn(`[pool/broadcast] bet_register fail ${args.market_id?.slice(0, 12)}/${args.bettor_pk?.slice(0, 8)}: ${e.message}`);
+    return { ok: false, error: e.message };
+  }
+}
+
 export async function registerPoolRoutes(fastify) {
   // POST /api/pool/market/create — maker creates market + locks stake
   // Bettor r449 4 决策 — backend defaults for omitted V2-wireframe fields:
@@ -252,6 +340,11 @@ export async function registerPoolRoutes(fastify) {
       return reply.code(500).send({ ok: false, error: `DB insert fail (spine TX done ${spineTxId}): ${e.message}` });
     }
 
+    // Bettor r117/r120 producer ② cross-node broadcast (b-class market_publish gap fill).
+    const _mrow = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
+    let _bcast = null;
+    if (_mrow) _bcast = await _broadcastMarketPublished(_mrow, b.maker_relay_id);
+
     return reply.send({
       ok: true,
       market_id: marketId,
@@ -264,6 +357,7 @@ export async function registerPoolRoutes(fastify) {
       broker_fee_pct_bps: brokerFeePct,
       category: b.category,
       status: 'pending_oracle_deposits',
+      cross_node_publish_tx: _bcast?.txId || null,
       next_step: '3 oracle relays must call POST /api/pool/market/' + marketId + '/oracle/deposit',
     });
   });
@@ -416,6 +510,11 @@ export async function registerPoolRoutes(fastify) {
       return reply.code(500).send({ ok: false, error: `DB insert fail (spine TX done ${spineTxId}): ${e.message}` });
     }
 
+    // Bettor r117/r120 producer ② cross-node broadcast (= same as v0.5 create above).
+    const _mrowV06 = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
+    let _bcastV06 = null;
+    if (_mrowV06) _bcastV06 = await _broadcastMarketPublished(_mrowV06, b.maker_relay_id);
+
     return reply.send({
       ok: true,
       market_id: marketId,
@@ -426,6 +525,7 @@ export async function registerPoolRoutes(fastify) {
       maker_stake_locked_kas: makerStakeAmount / 1e8,
       miner_fee_sompi: minerFee,
       broker_fee_pct_bps: brokerFeePct,
+      cross_node_publish_tx: _bcastV06?.txId || null,
       category: b.category,
       status: 'pending_bettors',
       next_step: 'bettors register directly via POST /api/pool/market/' + marketId + '/bettor/register-external/{prep,confirm} — no oracle-deposit phase in v0.6 (committee selected per-event off-chain).',
@@ -786,10 +886,20 @@ export async function registerPoolRoutes(fastify) {
     const bettors = sqlite.prepare('SELECT bettor_pk FROM pool_bettor_sides WHERE market_id = ? ORDER BY merkle_index').all(marketId);
     const tree = buildSidesMerkleTree(bettors.map(x => x.bettor_pk));
     sqlite.prepare('UPDATE pool_markets SET sides_merkle_root = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(tree.root, marketId);
+
+    // Bettor r117/r120 producer ② cross-node broadcast: bet_register (no sig, chain UTXO is truth).
+    const _bcastBet = await _broadcastBetRegistered({
+      market_id: marketId, bettor_pk: d.bettorPk, direction: v.direction, stake_amount: v.stakeAmount,
+      side_p2sh: sideP2sh, side_lock_tx: txId, merkle_index: merkleIndex,
+      protocol_version: market.protocol_version || 'v0.5',
+      broadcaster_relay_id: market.maker_relay_id,
+    });
+
     return reply.send({
       ok: true, registered: true, market_id: marketId, bettor_pk: d.bettorPk, direction: v.direction,
       side_p2sh: sideP2sh, side_lock_tx: txId, merkle_index: merkleIndex, sides_merkle_root: tree.root,
       bettor_count: bettorCount + 1, external: true,
+      cross_node_publish_tx: _bcastBet?.txId || null,
     });
   });
 
@@ -915,10 +1025,19 @@ export async function registerPoolRoutes(fastify) {
     const bettors = sqlite.prepare('SELECT bettor_pk FROM pool_bettor_sides WHERE market_id = ? ORDER BY merkle_index').all(marketId);
     const tree = buildSidesMerkleTree(bettors.map(x => x.bettor_pk));
     sqlite.prepare('UPDATE pool_markets SET sides_merkle_root = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(tree.root, marketId);
+    // Bettor r117/r120 producer ② cross-node broadcast: bet_register (v0.6, same shape as v0.5).
+    const _bcastBetV06 = await _broadcastBetRegistered({
+      market_id: marketId, bettor_pk: d.bettorPk, direction: v.direction, stake_amount: v.stakeAmount,
+      side_p2sh: sideP2sh, side_lock_tx: txId, merkle_index: merkleIndex,
+      protocol_version: 'v0.6',
+      broadcaster_relay_id: market.maker_relay_id,
+    });
+
     return reply.send({
       ok: true, registered: true, protocol_version: 'v0.6', market_id: marketId, bettor_pk: d.bettorPk, direction: v.direction,
       side_p2sh: sideP2sh, side_lock_tx: txId, merkle_index: merkleIndex, sides_merkle_root: tree.root,
       bettor_count: bettorCount + 1, external: true,
+      cross_node_publish_tx: _bcastBetV06?.txId || null,
     });
   });
 
