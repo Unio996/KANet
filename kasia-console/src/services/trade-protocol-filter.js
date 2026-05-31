@@ -330,6 +330,23 @@ async function handlePoolMarketPublished(msg) {
     return;
   }
 
+  // Bettor §5.3 F-S3 cross-node snapshot bake: settler-tick committee sample requires
+  // pool_snapshots row. On producer node ensurePoolSnapshot is called at create-v06.
+  // On remote nodes we rebuild from LOCAL oracle_pool_membership + verify root matches
+  // broadcast's pool_merkle_root (= cross-node membership consistency check). v0.6 only.
+  if (msg.protocol_version === 'v0.6' && msg.pool_merkle_root) {
+    try {
+      const { ensurePoolSnapshot } = await import('./pool-market-settler-v06.mjs');
+      ensurePoolSnapshot(msg.market_id, msg.pool_merkle_root);
+      console.log(`[trade-filter:market-pub] snapshot baked market=${msg.market_id.slice(0,12)}`);
+    } catch (snapErr) {
+      // Mismatch = remote membership differs from local (stub root in test fires, or
+      // different oracle pool composition between nodes). Market row still ingested
+      // but settler-tick will skip committee sampling — operator can backfill later.
+      console.warn(`[trade-filter:market-pub] snapshot bake skip market=${msg.market_id.slice(0,12)}: ${snapErr.message}`);
+    }
+  }
+
   // Bettor r132 H2 critical upgrade: chunked market ~50s vs bet 单 TX 瞬到 → bet 必 first → race is
   // norm not edge. Post-market-ingest: re-scan broadcast_messages for orphaned pool_bet_registered_v1
   // referencing this market_id and re-run their handler. Idempotent via UNIQUE side_lock_tx.
