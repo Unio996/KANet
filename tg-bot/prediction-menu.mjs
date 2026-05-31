@@ -89,38 +89,108 @@ function fmtLockedAt(s) {
 
 // Bettor r78 ① — /mybets 命令: 列用户所有押注 + 状态 (押中/已结算赢/输/退款).
 // Reads /api/pool/my-positions (= J2 r126 backend). 0-custody read-only.
+// Bettor r143/r144 (Owner P0 现场): 同市场多笔押注合并成一条 block, 同 direction 加总.
+//   实证 Owner c9b933 在 pg1ab 有 3 单 (NO 2000 + NO 100 + YES 5) → 旧版列 3 条, 新版 1 block:
+//   YES 5 KAS (1 笔), NO 2100 KAS (2 笔). 一市场 = 一条 block, 不再每笔 1 条. 后端不动.
+//   铁律: 合并显示, 绝不删/清除任何押注行 (后端照样返全部).
 export async function formatMyBets(linkedAddr) {
   if (!linkedAddr) return '⚠ 还没绑定地址。先 /link <你的 kaspatest 地址>, 再 /mybets 看自己的押注。';
   const r = await api.myPositions(linkedAddr);
   if (!r.ok) return `查询失败: ${r.json?.error || r.status}`;
   const positions = r.json?.positions || [];
   if (!positions.length) return '你还没有押注记录。/bet 开始押。';
-  const lines = [`📋 你的押注 (${positions.length} 笔):`];
+
+  // 按 market_id 分组保序 (Map 按 insertion order)
+  const byMarket = new Map();
   for (const p of positions) {
-    const status =
-      p.settle_txid && p.did_win === true ? `🎉 赢 +${Number(p.actual_payout_kas || 0).toFixed(4)} KAS` :
-      p.settle_txid && p.did_win === false ? `😞 输 -${p.stake_kas} KAS` :
-      p.settle_txid ? `📊 已结算待最终标注` :
-      p.refund_txid ? `💸 已退款` :
-      p.side_lock_tx ? `⏳ 已押注等开奖` : `❓ 未上链`;
-    const odds = p.yes_implied_prob != null ? `池: YES ${(p.yes_implied_prob*100).toFixed(0)}% / NO ${(100-p.yes_implied_prob*100).toFixed(0)}%` : '';
-    const stakedAt = p.locked_at ? `押注于 ${fmtLockedAt(p.locked_at)}` : '';
+    if (!byMarket.has(p.market_id)) byMarket.set(p.market_id, []);
+    byMarket.get(p.market_id).push(p);
+  }
+
+  const lines = [`📋 你的押注 (${positions.length} 笔, ${byMarket.size} 个市场):`];
+
+  for (const [marketId, group] of byMarket) {
+    // 按 direction 二次聚合 (YES / NO 各加总 stake, 累计 count, 收集状态)
+    const byDir = new Map();
+    for (const p of group) {
+      const dir = p.my_side || (p.direction === 0 ? 'YES' : p.direction === 1 ? 'NO' : '?');
+      if (!byDir.has(dir)) byDir.set(dir, { stakeSum: 0, count: 0, statuses: { won: 0, lost: 0, settled_pending: 0, refunded: 0, open: 0, unchain: 0 }, payoutWin: 0, actualPayoutSum: 0 });
+      const a = byDir.get(dir);
+      a.stakeSum += Number(p.stake_kas) || 0;
+      a.count++;
+      if (p.settle_txid && p.did_win === true) { a.statuses.won++; a.actualPayoutSum += Number(p.actual_payout_kas) || 0; }
+      else if (p.settle_txid && p.did_win === false) a.statuses.lost++;
+      else if (p.settle_txid) a.statuses.settled_pending++;
+      else if (p.refund_txid) a.statuses.refunded++;
+      else if (p.side_lock_tx) { a.statuses.open++; a.payoutWin += Number(p.payout_if_win_kas) || 0; }
+      else a.statuses.unchain++;
+    }
+
+    // shared metadata 取 group 第一笔 (question / odds / deadline 同市场共享)
+    const sample = group[0];
+    const title = truncSmart(sample.question || marketId, 70);
+
     lines.push('');
-    lines.push(`• ${p.my_side} ${p.stake_kas} KAS · ${status}`);
-    lines.push(`  ${truncSmart(p.question || p.market_id || '', 70)}`);
-    const meta = [odds, stakedAt].filter(Boolean).join(' · ');
-    if (meta) lines.push(`  ${meta}`);
-    if (!p.settle_txid && !p.refund_txid) {
-      // Bettor r86 ② + r91 fix: 用 deadline_unix (pool_markets 实存列), bot 端格式化.
-      if (p.deadline_unix) {
-        const d = new Date(Number(p.deadline_unix) * 1000);
-        if (!Number.isNaN(+d)) {
-          const pad = n => n < 10 ? '0' + n : '' + n;
-          const ymd = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-          lines.push(`  截止 ${ymd} · 开奖后自动结算到账绑定地址`);
+    lines.push(`📍 ${title}`);
+
+    // 每 direction 1 行
+    // 用 group 第一笔的 locked_at 作"首押"时间 (保留时间信息, Bettor r82 加的)
+    // 收集 group 内 locked_at 最早 + 最晚
+    const allLocked = group.map(p => p.locked_at).filter(Boolean).sort();
+    const firstLocked = allLocked[0];
+    const lastLocked = allLocked[allLocked.length - 1];
+    for (const [dir, a] of byDir) {
+      // 单状态时显式; 混合时 collapsed
+      const s = a.statuses;
+      const onlyOpen = s.open === a.count;
+      const onlyWon = s.won === a.count;
+      const onlyLost = s.lost === a.count;
+      const onlyRefund = s.refunded === a.count;
+      let statusStr;
+      if (onlyWon)        statusStr = `🎉 赢 +${a.actualPayoutSum.toFixed(4)} KAS`;
+      else if (onlyLost)  statusStr = `😞 输 -${a.stakeSum.toFixed(4)} KAS`;
+      else if (onlyRefund) statusStr = `💸 已退款`;
+      else if (onlyOpen)  statusStr = `⏳ 已押注等开奖`;
+      else                statusStr = `📊 状态混合 (赢 ${s.won} · 输 ${s.lost} · 等 ${s.open} · 退 ${s.refunded})`;
+      const cnt = a.count > 1 ? ` (${a.count} 笔)` : '';
+      lines.push(`• ${dir} ${a.stakeSum.toFixed(4)} KAS${cnt} · ${statusStr}`);
+    }
+
+    // 共享 meta (Owner P0 r144 UX: 用 pari-mutuel 现池子算"赢可拿", 而非历史 payout_if_win 加总 = 加总会误导)
+    // pari-mutuel: 若胜方赢, 你的份额 = 你 stake / 胜方总 stake × 总 pool (扣 fee 后)
+    // 仅当 group 内全 open 状态 + market 池子数据可用时显示, 否则 skip 不误导.
+    const allOpen = group.every(p => p.side_lock_tx && !p.settle_txid && !p.refund_txid);
+    if (allOpen && sample.yes_pool_kas != null && sample.no_pool_kas != null) {
+      const yesPool = Number(sample.yes_pool_kas) || 0;
+      const noPool = Number(sample.no_pool_kas) || 0;
+      const totalPool = yesPool + noPool;
+      for (const [dir, a] of byDir) {
+        const sideTotal = dir === 'YES' ? yesPool : noPool;
+        if (sideTotal > 0) {
+          const projWin = totalPool * a.stakeSum / sideTotal;
+          lines.push(`  ${dir} 若赢可拿 ~${projWin.toFixed(2)} KAS (按现池子算, 未来变)`);
         }
       }
-      if (p.payout_if_win_kas) lines.push(`  赢可拿 ${Number(p.payout_if_win_kas).toFixed(4)} KAS`);
+    }
+
+    // 共享 meta (odds + 押注时间 + 截止)
+    const odds = sample.yes_implied_prob != null
+      ? `池: YES ${(sample.yes_implied_prob * 100).toFixed(0)}% / NO ${(100 - sample.yes_implied_prob * 100).toFixed(0)}%`
+      : '';
+    if (odds) lines.push(`  ${odds}`);
+    if (firstLocked) {
+      const t1 = fmtLockedAt(firstLocked);
+      const t2 = lastLocked && lastLocked !== firstLocked ? `..${fmtLockedAt(lastLocked)}` : '';
+      lines.push(`  押注于 ${t1}${t2}`);
+    }
+    // 截止 (Bettor r86 ② + r91 fix: 用 deadline_unix)
+    if (sample.deadline_unix) {
+      const d = new Date(Number(sample.deadline_unix) * 1000);
+      if (!Number.isNaN(+d)) {
+        const pad = n => n < 10 ? '0' + n : '' + n;
+        const ymd = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        lines.push(`  截止 ${ymd} · 开奖后自动结算到账绑定地址`);
+      }
     }
   }
   return lines.join('\n');
@@ -129,6 +199,7 @@ export async function formatMyBets(linkedAddr) {
 // Bettor r87 ③ 防流失 — 给 /mybets 每个 open position 返按钮配置. bot.mjs 拿这个用
 // InlineKeyboard 显在 /mybets 消息下. callbackQuery handler 收 'mybet:addmore:<id>' →
 // 直接进该 market 的押注 flow (= 跳过 stage0/1 类目选 + 市场选, 直接 stage='detail').
+// Bettor r143/r144 (Owner P0): 按 market_id 去重 — 每市场 1 个按钮 (原每笔 1 个 = Owner 看着重复).
 export async function buildMyBetsKeyboard(linkedAddr) {
   if (!linkedAddr) return [];
   const r = await api.myPositions(linkedAddr);
@@ -136,10 +207,13 @@ export async function buildMyBetsKeyboard(linkedAddr) {
   const positions = r.json?.positions || [];
   // 仅 open + market still active (= 未结算, 未退款, deadline 未过 — 否则按了无意义)
   const now = Math.floor(Date.now() / 1000);
+  const seenMarkets = new Set();
   const buttons = [];
   for (const p of positions) {
     if (p.settle_txid || p.refund_txid) continue;
     if (p.deadline && p.deadline < now) continue;
+    if (seenMarkets.has(p.market_id)) continue;     // 已加过这市场, 跳
+    seenMarkets.add(p.market_id);
     buttons.push({
       market_id: p.market_id,
       label: `➕ 加注/反手: ${(p.question || p.market_id).slice(0, 30)}`,
