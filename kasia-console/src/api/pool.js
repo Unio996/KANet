@@ -16,7 +16,15 @@ import { createHash, randomUUID } from 'node:crypto';
 // may refactor these into a shared protocol-constants module.
 const STORAGE_MASS_SAFE_THRESHOLD_L4 = 400_000;  // KIP-9 cap with 20% buffer
 const MIN_BROKER_FEE_SOMPI_L4 = 5_000_000;       // 0.05 KAS broker fee floor
-const BETTOR_MIN_STAKE_L4 = 100_000;             // 0.001 KAS bettor PHYSICAL min (J2 r108 KIP-9 measurement, 4× safety margin over 50500 sompi math floor); Owner P0 + Bettor r25 stripped the 0.5 KAS rounded "product floor" — only chain physics constrains
+// Bettor r158/Owner P2-3 LOCK — two-layer floor semantics split:
+// PHYS_FLOOR = chain physics (KIP-9 storage mass). MUST never be lowered.
+// POLICY = anti-bot product floor. May be tuned via spec discussion.
+// 3-layer enforce per Bettor r158 §5.3c: (1) API register hard reject (2) consumer
+// handlePoolBetRegistered reject (NWT r121 #1 - defends against malicious node directly
+// broadcasting <POLICY bet to bypass producer) (3) committee scan skip (SS layer per r199/4).
+const BETTOR_MIN_STAKE_PHYS_FLOOR = 100_000;     // 0.001 KAS — KIP-9 storage mass floor (J2 r108 measurement). Never lower.
+const BETTOR_MIN_STAKE_POLICY = 100_000_000;     // 1 KAS — anti-bot product floor (Bettor r158/Owner P0).
+const BETTOR_MIN_STAKE_L4 = BETTOR_MIN_STAKE_POLICY;  // Back-compat alias for existing callers — points to current active floor.
 const MAX_BETTORS_L4 = 50;                       // PoolSpine.sil L13 cap
 // 5/28 Owner 钦定: 押注 softcap 拆除 (= 之前 4 KAS testnet 限制阻 UI form 真用户测试). 改 Infinity = 0 cap.
 // Per-market math guards (= storage mass / oracle fee floor) still enforce at L1 console + SS contract.
@@ -675,7 +683,7 @@ export async function registerPoolRoutes(fastify) {
     if (!Number.isFinite(stakeAmount) || stakeAmount <= 0) return reply.code(400).send({ ok: false, error: 'stake_kas must be a positive finite number' });
     // Bettor r25 + J2 r108: physical floor only (= chain KIP-9 storage mass), no rounded product floor.
     // J2 measured: stake² >= 2.5e9 sompi (= 50500 sompi math floor); 100_000 sompi = 0.001 KAS with 4× safety.
-    if (stakeAmount < BETTOR_MIN_STAKE_L4) return reply.code(400).send({ ok: false, error: `stake_kas must be >= ${BETTOR_MIN_STAKE_L4 / 1e8} KAS (KIP-9 storage mass physical floor per J2 r108 measurement; smaller stakes produce settle TX exceeding mass cap)` });
+    if (stakeAmount < BETTOR_MIN_STAKE_POLICY) return reply.code(400).send({ ok: false, error: `stake_kas must be >= ${BETTOR_MIN_STAKE_POLICY / 1e8} KAS (anti-bot product floor, Bettor r158 P2-3 LOCK; physical KIP-9 floor is ${BETTOR_MIN_STAKE_PHYS_FLOOR / 1e8} KAS but policy gates above)` });
 
     // PoolSpine.sil L13 v0.5 hard rule: 50 bettors max per market. Checked here — before
     // transferAndConfirm locks stake on-chain — so a rejected 51st bettor never strands funds.
@@ -767,7 +775,7 @@ export async function registerPoolRoutes(fastify) {
     const stakeAmount = Math.round(parseFloat(b.stake_kas) * 1e8);
     if (!Number.isFinite(stakeAmount) || stakeAmount <= 0) return { error: 'stake_kas must be a positive finite number', code: 400 };
     // Bettor r25 + J2 r108 KIP-9 measurement: physical floor only (= chain storage mass), no product floor.
-    if (stakeAmount < BETTOR_MIN_STAKE_L4) return { error: `stake_kas must be >= ${BETTOR_MIN_STAKE_L4 / 1e8} KAS (KIP-9 storage mass physical floor per J2 r108 — 4× safety over math floor)`, code: 400 };
+    if (stakeAmount < BETTOR_MIN_STAKE_POLICY) return { error: `stake_kas must be >= ${BETTOR_MIN_STAKE_POLICY / 1e8} KAS (anti-bot product floor, Bettor r158 P2-3 LOCK; physical KIP-9 floor is ${BETTOR_MIN_STAKE_PHYS_FLOOR / 1e8} KAS but policy gates above)`, code: 400 };
     return { direction, stakeAmount };
   }
   // Derive the deterministic side P2SH for an external bettor (by /link-bound address). Throws {code,message}

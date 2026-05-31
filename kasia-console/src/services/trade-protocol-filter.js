@@ -457,6 +457,12 @@ async function handlePoolMarketChunk(msg) {
   }
 }
 
+// Bettor r158 §5.3c layer 2 — anti-bot policy floor defends against malicious node directly
+// broadcasting <POLICY bet to bypass producer (NWT r121 #1 命门). Hardcoded here matches
+// pool.js BETTOR_MIN_STAKE_POLICY constant (= 1 KAS = 1e8 sompi). DO NOT lower without
+// coordinated spec round — affects cross-node consensus.
+const BETTOR_MIN_STAKE_POLICY_SOMPI = 100_000_000n;
+
 async function handlePoolBetRegistered(msg) {
   const { createHash } = await import('crypto');
   const required = ['market_id', 'bettor_pk', 'direction', 'stake_amount', 'side_p2sh', 'side_lock_tx'];
@@ -465,6 +471,15 @@ async function handlePoolBetRegistered(msg) {
       console.warn(`[trade-filter:bet-reg] missing ${k} market=${msg.market_id?.slice(0,12)} — reject`);
       return;
     }
+  }
+
+  // Layer 2 floor check (NWT r121 #1): defense-in-depth against malicious producer.
+  let stakeSompi;
+  try { stakeSompi = BigInt(msg.stake_amount); }
+  catch { console.warn(`[trade-filter:bet-reg] stake_amount not integer market=${msg.market_id.slice(0,12)} val=${msg.stake_amount} — reject`); return; }
+  if (stakeSompi < BETTOR_MIN_STAKE_POLICY_SOMPI) {
+    console.warn(`[trade-filter:bet-reg] stake ${stakeSompi} < POLICY floor ${BETTOR_MIN_STAKE_POLICY_SOMPI} market=${msg.market_id.slice(0,12)} bettor=${msg.bettor_pk.slice(0,12)} — reject (anti-bot)`);
+    return;
   }
 
   // Idempotent: side_lock_tx UNIQUE index → INSERT OR IGNORE handles dedup. Cheap pre-check skips
