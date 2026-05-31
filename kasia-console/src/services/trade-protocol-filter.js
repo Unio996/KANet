@@ -89,6 +89,8 @@ export async function onBroadcastWritten(row) {
         await handlePoolMarketPublished(msg); break;  // Bettor r117/r118/r120 ② consumer: market_publish
       case 'pool_bet_registered_v1':
         await handlePoolBetRegistered(msg); break;  // Bettor r113/r117/r120 ② consumer: bet_register
+      case 'pool_market_chunk_v1':
+        await handlePoolMarketChunk(msg); break;  // Bettor r128/r129 + J1 e67c9328 chunked v1
     }
   } catch (err) {
     console.error(`[trade-filter] Error processing ${msg.t}: ${err.message}`);
@@ -281,6 +283,83 @@ async function handlePoolMarketPublished(msg) {
 // then RPC getUtxosByAddresses(side_p2sh) finds UTXO with amount===stake_amount AND outpoint.txid===side_lock_tx
 // AND UTXO still UNSPENT (Bettor r113 refine: UNSPENT = open position; spent = already settled, skip).
 // Idempotent via UNIQUE side_lock_tx index on pool_bettor_sides.
+// Bettor r128 + J1 r188 (e67c9328) chunked v1 reassembler. Producer pool.js _sendBroadcastChunked
+// splits market_publish payload > 450 chars into ord 0..total-1 chunks, envelope
+// {t:'pool_market_chunk_v1', hash, ord, total, data} per chunk. hash = sha256(full payloadStr) is
+// the dedup + integrity anchor. Consumer accumulates in-mem (cheap, market publishes are rare +
+// idempotent — dedup by hash), reassembles when complete, verifies hash byte-identical, then
+// recursively dispatches the reassembled JSON through the full pre-filter + switch path (= same
+// route a single-shot pool_market_published_v1 would take, no special-casing).
+const POOL_CHUNK_CACHE = new Map();  // key=hash → { total, parts: Map<ord,data>, firstAt }
+
+async function handlePoolMarketChunk(msg) {
+  const { createHash } = await import('crypto');
+  if (!msg.hash || msg.ord === undefined || !msg.total || msg.data === undefined) {
+    console.warn(`[trade-filter:chunk] missing fields hash=${msg.hash?.slice(0,12)} ord=${msg.ord} total=${msg.total} — reject`);
+    return;
+  }
+  const total = Number(msg.total);
+  const ord = Number(msg.ord);
+  if (!Number.isInteger(total) || total <= 0 || !Number.isInteger(ord) || ord < 0 || ord >= total) {
+    console.warn(`[trade-filter:chunk] bad ord=${ord} total=${total} hash=${msg.hash.slice(0,12)} — reject`);
+    return;
+  }
+
+  let entry = POOL_CHUNK_CACHE.get(msg.hash);
+  if (!entry) {
+    entry = { total, parts: new Map(), firstAt: Date.now() };
+    POOL_CHUNK_CACHE.set(msg.hash, entry);
+  } else if (entry.total !== total) {
+    console.warn(`[trade-filter:chunk] total mismatch hash=${msg.hash.slice(0,12)} cached=${entry.total} new=${total} — reject`);
+    return;
+  }
+  entry.parts.set(ord, msg.data);
+  console.log(`[trade-filter:chunk] cached hash=${msg.hash.slice(0,12)} ord=${ord}/${total - 1} have=${entry.parts.size}/${total} tx=${msg._tx?.slice(0,12)}`);
+  if (entry.parts.size < total) return;
+
+  // Reassemble in ord order
+  const ordered = [];
+  for (let i = 0; i < total; i++) {
+    const part = entry.parts.get(i);
+    if (part === undefined) {
+      console.warn(`[trade-filter:chunk] internal inconsistency: size=${total} but ord=${i} missing hash=${msg.hash.slice(0,12)}`);
+      return;
+    }
+    ordered.push(part);
+  }
+  const reassembled = ordered.join('');
+  const computedHash = createHash('sha256').update(reassembled).digest('hex');
+  if (computedHash !== msg.hash) {
+    console.warn(`[trade-filter:chunk] hash mismatch reassembled hash=${msg.hash.slice(0,12)} got=${computedHash.slice(0,12)} — reject corrupted chunks`);
+    POOL_CHUNK_CACHE.delete(msg.hash);
+    return;
+  }
+  POOL_CHUNK_CACHE.delete(msg.hash);
+  console.log(`[trade-filter:chunk] reassembled ${total} chunks hash=${msg.hash.slice(0,12)} payload_len=${reassembled.length} — dispatching to handler`);
+
+  let inner;
+  try {
+    inner = JSON.parse(reassembled);
+  } catch (e) {
+    console.warn(`[trade-filter:chunk] reassembled JSON parse fail hash=${msg.hash.slice(0,12)}: ${e.message}`);
+    return;
+  }
+  // Carry chain meta from any chunk (= same TX context, all chunks share sender). Use the LAST chunk's
+  // meta as anchor (= the one that completed reassembly).
+  inner._tx = msg._tx;
+  inner._from = msg._from;
+  inner._channel = msg._channel;
+  inner._at = msg._at;
+  // Direct switch dispatch (mirror onBroadcastWritten switch path). Only the types that can be
+  // chunked land here — currently only pool_market_published_v1 per Bettor r128 scope.
+  switch (inner.t) {
+    case 'pool_market_published_v1':
+      await handlePoolMarketPublished(inner); break;
+    default:
+      console.warn(`[trade-filter:chunk] reassembled unknown type t=${inner.t} hash=${msg.hash.slice(0,12)} — drop`);
+  }
+}
+
 async function handlePoolBetRegistered(msg) {
   const { createHash } = await import('crypto');
   const required = ['market_id', 'bettor_pk', 'direction', 'stake_amount', 'side_p2sh', 'side_lock_tx'];
