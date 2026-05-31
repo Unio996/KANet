@@ -84,8 +84,9 @@ export async function computeSpineP2SH_v06(args) {
 /**
  * Compute PoolSide_v06 P2SH address + redeem script for a specific bettor.
  *
- * Ctor order MUST match PoolSide_v06.sil (path A LOCK, Bettor r19, 5/30):
- *   (bettorPk, spineP2shHash, poolMerkleRoot, marketMetadataHash, direction, stakeAmount, deadline)
+ * Ctor order MUST match PoolSide_v06.sil v0.7 (Bettor §5.3c LOCKED 2026-05-31):
+ *   (bettorPk, spineP2shHash, poolMerkleRoot, marketMetadataHash, direction, deadline)
+ * v0.7: stakeAmount removed from ctor — variable amount via tx.inputs[0].value at claim.
  *
  * v0.6 path A:
  * - Drops v0.5's 3 individual oracle PKs from ctor (= per-event committee).
@@ -104,17 +105,18 @@ export async function computeSideP2SH_v06(args) {
   const poolMerkleRoot = validateHashHex(args.poolMerkleRoot, 'poolMerkleRoot');
   const marketMetadataHash = validateHashHex(args.marketMetadataHash, 'marketMetadataHash');
   const direction = validateInt(args.direction, 'direction', 0, 1);
-  const stakeAmount = validateInt(args.stakeAmount, 'stakeAmount', 1);
   const deadline = validateInt(args.deadline, 'deadline', 1);
   if (!args.network) throw new Error('network required');
 
+  // v0.7 Phase-2 (d) variable-stake: stakeAmount no longer in ctor (Bettor §5.3c LOCKED).
+  // Side P2SH binds only (bettorPk, spineP2shHash, poolMerkleRoot, marketMetadataHash,
+  // direction, deadline) — same bettor can deposit ANY amount; settler reads tx.inputs[0].value.
   const ctorJson = [
     bytes32Expr(bettorPk),
     bytes32Expr(spineP2shHash),
     bytes32Expr(poolMerkleRoot),
     bytes32Expr(marketMetadataHash),
     intExpr(direction),
-    intExpr(stakeAmount),
     intExpr(deadline),
   ];
 
