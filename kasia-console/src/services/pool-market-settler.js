@@ -106,7 +106,7 @@ export async function poolSettlerTick() {
     `).all(Math.floor(Date.now() / 1000));
     if (!markets.length) return { ok: true, processed: 0 };
 
-    let consensus = 0, pending = 0, refund = 0, errored = 0, doomed = 0;
+    let consensus = 0, pending = 0, refund = 0, errored = 0, doomed = 0, sampledCommittee = 0;
     for (const market of markets) {
       try {
         // Phase 2b Ship #1 — doomed-market skip. A market marked needs_larger_pot can never
@@ -115,6 +115,40 @@ export async function poolSettlerTick() {
         let doomedMeta = {};
         try { doomedMeta = JSON.parse(market.metadata || '{}'); } catch {}
         if (doomedMeta.needs_larger_pot) { doomed++; continue; }
+
+        // Bettor r172/r174 + J1 r205 ③ wire — v0.6 path A committee sampling. Idempotent: skip
+        // if already sampled. Requires pool_snapshots row (created at market create-v06 per F-S3
+        // anti-grinding). chainReader uses maker_relay_id (= already running). F-S1 finality_depth
+        // failures are non-fatal: throw → log → continue → next tick retries until chain advances.
+        if (market.protocol_version === 'v0.6' && (!market.oracle_relay_ids || market.oracle_relay_ids === '[]')) {
+          const alreadySampled = sqlite.prepare('SELECT market_id FROM pool_committee WHERE market_id = ?').get(market.id);
+          if (!alreadySampled) {
+            try {
+              const { createRelayChainReader } = await import('./relay-chain-reader.mjs');
+              const { fetchEndBlockHashCanonical, sampleAndStoreCommittee } = await import('./pool-market-settler-v06.mjs');
+              const chainReader = createRelayChainReader(market.maker_relay_id);
+              const currentDaa = await chainReader.getCurrentDaaScore();
+              const nowSec = Math.floor(Date.now() / 1000);
+              // Kaspa 10 BPS → 10 DAA per second. deadline (unix sec) → DAA score approximation.
+              const deadlineDaa = Math.max(1, currentDaa - Math.max(0, (nowSec - market.deadline) * 10));
+              const endBlock = await fetchEndBlockHashCanonical(chainReader, deadlineDaa);
+              const committee = sampleAndStoreCommittee(market.id, endBlock.hash);
+              // Wire committee_relay_ids → pool_markets.oracle_relay_ids so voter scan picks up.
+              sqlite.prepare('UPDATE pool_markets SET oracle_relay_ids = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+                .run(JSON.stringify(committee.committee_relay_ids), market.id);
+              sampledCommittee++;
+              console.log(`[pool-settler] committee sampled market=${market.id.slice(0,12)} pks=${committee.committee_pks.length} endBlock=${endBlock.hash.slice(0,16)} daa=${endBlock.block_daa}`);
+            } catch (sampleErr) {
+              // F-S1 finality not met / no blocks / snapshot missing → log + skip this tick.
+              console.log(`[pool-settler] committee sample retry market=${market.id.slice(0,12)}: ${sampleErr.message}`);
+              pending++;
+              continue;
+            }
+            // Re-load market with new oracle_relay_ids so downstream decideConsensus sees it.
+            const reloaded = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(market.id);
+            if (reloaded) Object.assign(market, reloaded);
+          }
+        }
 
         // Phase 2b: collecting_sigs status → handle sig aggregation + submit
         if (market.protocol_status === 'collecting_sigs') {
@@ -180,7 +214,7 @@ export async function poolSettlerTick() {
         console.error(`[pool-settler] process fail market=${market.id?.slice(0,12)}: ${e.message}`);
       }
     }
-    console.log(`[pool-settler] tick: ${markets.length} verifying markets, consensus=${consensus} refund=${refund} pending=${pending} doomed=${doomed} errored=${errored}`);
+    console.log(`[pool-settler] tick: ${markets.length} verifying markets, consensus=${consensus} refund=${refund} pending=${pending} doomed=${doomed} errored=${errored} sampledCommittee=${sampledCommittee}`);
     return { ok: true, processed: markets.length, consensus, refund, pending, doomed, errored };
   } finally {
     running = false;

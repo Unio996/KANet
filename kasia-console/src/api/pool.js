@@ -539,6 +539,18 @@ export async function registerPoolRoutes(fastify) {
       return reply.code(500).send({ ok: false, error: `DB insert fail (spine TX done ${spineTxId}): ${e.message}` });
     }
 
+    // Bettor r172/J1 r205 P0: F-S3 anti-grinding snapshot MUST be frozen @ create. Lazy build
+    // at settler-tick would let attacker observe endBlockHash then mutate pool to grind.
+    // Throws on root drift = caller fed wrong root; idempotent on re-create.
+    try {
+      const { ensurePoolSnapshot } = await import('../services/pool-market-settler-v06.mjs');
+      ensurePoolSnapshot(marketId, poolMerkleRoot);
+    } catch (snapErr) {
+      console.error(`[pool/create-v06] ensurePoolSnapshot fail market=${marketId.slice(0,12)}: ${snapErr.message}`);
+      // Don't 500 — spine TX already on chain. Market is partially registered (pool_markets row
+      // exists, pool_snapshots missing). Operator can re-run via backfill script.
+    }
+
     // Bettor r117/r120 producer ② cross-node broadcast (= same as v0.5 create above).
     const _mrowV06 = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
     let _bcastV06 = null;
