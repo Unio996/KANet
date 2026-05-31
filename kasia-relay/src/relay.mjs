@@ -438,6 +438,14 @@ if (process.send) {
                 log(`⚠ BROADCAST #${cmd.channel} mempool reject, sleep ${sleepMs}ms before retry (attempt ${bcastAttempts + 1}/${BCAST_MAX_ATTEMPTS})`);
                 await new Promise(r => setTimeout(r, sleepMs));
               } else if ((bcastErrMsg.includes('Insufficient funds') || bcastErrMsg.includes('Storage mass')) && bcastAttempts < BCAST_MAX_ATTEMPTS - 1) {
+                // Bettor r128 P0: JSON protocol payloads must NOT be truncated — silent
+                // corruption breaks consumer parse → handler never fires. Gate by content
+                // shape (starts with '{') so this protects all JSON channels (kanet-prediction,
+                // exchange, OTC, vote, future protocols) without coupling to channel name.
+                if (bcastMsg.trimStart().startsWith('{')) {
+                  log(`✘ BROADCAST #${cmd.channel} JSON payload ${bcastMsg.length} chars exceeds storage mass; surfacing error (no truncation per Bettor r128 P0)`);
+                  throw bcastErr;
+                }
                 const target = Math.max(20, Math.floor(bcastMsg.length * 0.9));
                 bcastMsg = bcastMsg.slice(0, target).replace(/\s+\S*$/, '') + '...';
                 bcastAttempts++;
