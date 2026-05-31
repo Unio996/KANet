@@ -476,8 +476,13 @@ export function computePoolPayouts(args) {
   const isMakerWinner = winners.some(w => w.isMaker);
   const makerExtraOutput = (!isMakerWinner && makerForfeitShare > 0) ? makerForfeitShare : null;
 
+  // Bettor r223 Layer-13: v0.5 hardcoded 3-oracle bond return. v0.6 committee model = stake
+  // pooled in pool_snapshots (committee-level, not per-market) → spine has only 1 maker UTXO
+  // input → no bond inputs → no bond outputs. Caller passes oracleCount (default 3 for v0.5
+  // back-compat, 0 for v0.6 path A).
+  const oracleCountForBonds = Number.isInteger(args.oracleCount) ? args.oracleCount : 3;
   const oracleBondReturns = [];
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < oracleCountForBonds; i++) {
     if (!unanimous && silentOracleIndex === i) continue;
     oracleBondReturns.push({ oracleIndex: i, amount: oracleBond + perOracleForfeitShare });
   }
@@ -582,6 +587,9 @@ export async function dispatchPhase2(market, decision) {
         minerFee: parseInt(market.miner_fee, 10) || 20_000,
         unanimous: decision.unanimous,
         silentOracleIndex: decision.silentOracleIndex ?? null,
+        // v0.6 path A: committee model has no per-market oracle bond → 0 returns.
+        // v0.5 / fallback: 3-oracle bond model.
+        oracleCount: market.protocol_version === 'v0.6' ? 0 : 3,
       });
     } catch (e) {
       console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} computePoolPayouts fail: ${e.message}`);
