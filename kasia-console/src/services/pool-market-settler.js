@@ -721,9 +721,13 @@ export async function dispatchPhase2(market, decision) {
       input_count: requiredInputOutpoints.length,
       spine_input_count: spineInputCount,
     });
+    // KANet-UI r386 Layer-9 KI 49: v0.6 5-oracle path. v0.5 hardcoded [0,1,2] missed 5-committee.
+    // For v0.6 unanimous (5/5 same): all 5 sign. For v0.6 non-unanimous (4/5): exclude silent.
+    const oracleN = oracleRows.length;
+    const allIdx = Array.from({ length: oracleN }, (_, i) => i);
     const signingOracles = decision.unanimous
-      ? [0, 1, 2]
-      : [0, 1, 2].filter(i => i !== decision.silentOracleIndex);
+      ? allIdx
+      : allIdx.filter(i => i !== decision.silentOracleIndex);
     Promise.allSettled(signingOracles.map(i =>
       sendCommandAsync(market.maker_relay_id, { type: 'send_message', target: oracleRows[i].address, message: reqPayload })
     )).catch(() => {});
@@ -992,10 +996,16 @@ async function handleCollectingSigs(market) {
   // Each spine input needs PoolSpine settle_unanimous scriptSig (3 sigs unanimous / 2 forfeit_1).
   // Side inputs (spineInputCount..end) auto-unlock via [selector_0 + side_redeem_push] (no sigs).
   const spineInputCount = meta.phase2_spine_input_count || 1;
-  const spineRequiredSigs = meta.phase2_unanimous ? 3 : 2;
+  // KANet-UI r386 Layer-9 KI 49: v0.6 5-oracle. v0.5 hardcoded [0,1,2] missed 5-committee.
+  // unanimous = all sign; non-unanimous = exclude silent (= 4 sigs for v0.6, 2 for v0.5).
+  let oracleArr = [];
+  try { oracleArr = JSON.parse(market.oracle_relay_ids || '[]'); } catch {}
+  const oracleNcollecting = oracleArr.length || 3;
+  const allIdxC = Array.from({ length: oracleNcollecting }, (_, i) => i);
   const signingOracles = meta.phase2_unanimous
-    ? [0, 1, 2]
-    : [0, 1, 2].filter(i => i !== meta.phase2_silent_oracle_index);
+    ? allIdxC
+    : allIdxC.filter(i => i !== meta.phase2_silent_oracle_index);
+  const spineRequiredSigs = signingOracles.length;
 
   // Scan chain_events for sigs scoped to this market + spine input only
   const sigRows = sqlite.prepare(`
