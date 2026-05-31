@@ -587,9 +587,11 @@ export async function dispatchPhase2(market, decision) {
         minerFee: parseInt(market.miner_fee, 10) || 20_000,
         unanimous: decision.unanimous,
         silentOracleIndex: decision.silentOracleIndex ?? null,
-        // v0.6 path A: committee model has no per-market oracle bond → 0 returns.
-        // v0.5 / fallback: 3-oracle bond model.
-        oracleCount: market.protocol_version === 'v0.6' ? 0 : 3,
+        // Bettor r225 2/2 (Owner 钦定 architecture lock): v0.6 committee 5-oracle, each posts
+        // per-market bond + earns oracleFee/N share. Settler must include 5 bond returns + 5
+        // oracleFee shares. Companion sub: committee bond deposit flow (post-VRF / pre-vote)
+        // must run so inputs include the 5 bond UTXOs that match these output returns.
+        oracleCount: market.protocol_version === 'v0.6' ? 5 : 3,
       });
     } catch (e) {
       console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} computePoolPayouts fail: ${e.message}`);
