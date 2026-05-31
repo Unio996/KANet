@@ -126,7 +126,17 @@ export async function poolSettlerTick() {
             try {
               const { createRelayChainReader } = await import('./relay-chain-reader.mjs');
               const { fetchEndBlockHashCanonical, sampleAndStoreCommittee } = await import('./pool-market-settler-v06.mjs');
-              const chainReader = createRelayChainReader(market.maker_relay_id);
+              const { getStatus, isRelayAlive } = await import('./relay-manager.js');
+              // Bettor r182/r183: maker_relay_id may be remote (cross-node ingested market) →
+              // local Console can't IPC to it. Use any locally-running relay for chainReader —
+              // chain state is global, any alive relay sees the same DAA progression.
+              let chainReaderRelayId = isRelayAlive(market.maker_relay_id) ? market.maker_relay_id : null;
+              if (!chainReaderRelayId) {
+                const localRunning = (getStatus() || []).find(r => r.running);
+                if (!localRunning) throw new Error('no locally-running relay available for chainReader');
+                chainReaderRelayId = localRunning.id;
+              }
+              const chainReader = createRelayChainReader(chainReaderRelayId);
               const currentDaa = await chainReader.getCurrentDaaScore();
               const nowSec = Math.floor(Date.now() / 1000);
               // Kaspa 10 BPS → 10 DAA per second. deadline (unix sec) → DAA score approximation.
