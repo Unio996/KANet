@@ -280,6 +280,36 @@ async function handlePoolMarketPublished(msg) {
     console.log(`[trade-filter:market-pub] ingested market=${msg.market_id.slice(0,12)} maker_pk=${msg.maker_relay_pk.slice(0,12)} tx=${msg._tx?.slice(0,16)}`);
   } catch (e) {
     console.warn(`[trade-filter:market-pub] insert fail market=${msg.market_id.slice(0,12)}: ${e.message}`);
+    return;
+  }
+
+  // Bettor r132 H2 critical upgrade: chunked market ~50s vs bet 单 TX 瞬到 → bet 必 first → race is
+  // norm not edge. Post-market-ingest: re-scan broadcast_messages for orphaned pool_bet_registered_v1
+  // referencing this market_id and re-run their handler. Idempotent via UNIQUE side_lock_tx.
+  try {
+    const orphanedBets = sqlite.prepare(`
+      SELECT tx_hash, sender_address, channel_name, content, created_at
+      FROM broadcast_messages
+      WHERE channel_name = 'kanet-prediction'
+        AND content LIKE '%pool_bet_registered_v1%'
+        AND content LIKE ?
+      ORDER BY created_at ASC
+    `).all(`%"market_id":"${msg.market_id}"%`);
+    if (orphanedBets.length > 0) {
+      console.log(`[trade-filter:market-pub] H2 rescan: ${orphanedBets.length} orphan bet(s) for market=${msg.market_id.slice(0,12)} — replaying`);
+      for (const row of orphanedBets) {
+        try {
+          await onBroadcastWritten({
+            tx_hash: row.tx_hash, content: row.content, sender_address: row.sender_address,
+            channel_name: row.channel_name, created_at: row.created_at,
+          });
+        } catch (replayErr) {
+          console.warn(`[trade-filter:market-pub] H2 bet replay fail tx=${row.tx_hash.slice(0,16)}: ${replayErr.message}`);
+        }
+      }
+    }
+  } catch (rescanErr) {
+    console.warn(`[trade-filter:market-pub] H2 rescan fail market=${msg.market_id.slice(0,12)}: ${rescanErr.message}`);
   }
 }
 
