@@ -134,8 +134,7 @@ export async function formatMyBets(linkedAddr) {
     lines.push(`📍 ${title}`);
 
     // 每 direction 1 行
-    // 用 group 第一笔的 locked_at 作"首押"时间 (保留时间信息, Bettor r82 加的)
-    // 收集 group 内 locked_at 最早 + 最晚
+    // 用 group 内 locked_at 最早 + 最晚 (保留时间信息, Bettor r82 加的)
     const allLocked = group.map(p => p.locked_at).filter(Boolean).sort();
     const firstLocked = allLocked[0];
     const lastLocked = allLocked[allLocked.length - 1];
@@ -154,23 +153,10 @@ export async function formatMyBets(linkedAddr) {
       else                statusStr = `📊 状态混合 (赢 ${s.won} · 输 ${s.lost} · 等 ${s.open} · 退 ${s.refunded})`;
       const cnt = a.count > 1 ? ` (${a.count} 笔)` : '';
       lines.push(`• ${dir} ${a.stakeSum.toFixed(4)} KAS${cnt} · ${statusStr}`);
-    }
-
-    // 共享 meta (Owner P0 r144 UX: 用 pari-mutuel 现池子算"赢可拿", 而非历史 payout_if_win 加总 = 加总会误导)
-    // pari-mutuel: 若胜方赢, 你的份额 = 你 stake / 胜方总 stake × 总 pool (扣 fee 后)
-    // 仅当 group 内全 open 状态 + market 池子数据可用时显示, 否则 skip 不误导.
-    const allOpen = group.every(p => p.side_lock_tx && !p.settle_txid && !p.refund_txid);
-    if (allOpen && sample.yes_pool_kas != null && sample.no_pool_kas != null) {
-      const yesPool = Number(sample.yes_pool_kas) || 0;
-      const noPool = Number(sample.no_pool_kas) || 0;
-      const totalPool = yesPool + noPool;
-      for (const [dir, a] of byDir) {
-        const sideTotal = dir === 'YES' ? yesPool : noPool;
-        if (sideTotal > 0) {
-          const projWin = totalPool * a.stakeSum / sideTotal;
-          lines.push(`  ${dir} 若赢可拿 ~${projWin.toFixed(2)} KAS (按现池子算, 未来变)`);
-        }
-      }
+      // 若赢可拿 = 直接加总每笔 payout_if_win_kas. 后端 endpoint 是 query-time 同池子快照统一算每笔
+      // (Bettor r147 实证 + 我 r345 多想一层的 pari-mutuel 反向算同分母 = 数学等价).
+      // → 简单加总即正确, 不需要 disclaimer "未来变" (现池就是 query 时的池).
+      if (onlyOpen && a.payoutWin > 0) lines.push(`  若赢可拿 ${a.payoutWin.toFixed(4)} KAS`);
     }
 
     // 共享 meta (odds + 押注时间 + 截止)
