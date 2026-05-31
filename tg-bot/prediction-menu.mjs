@@ -149,7 +149,7 @@ export async function formatMyBets(linkedAddr) {
       if (onlyWon)        statusStr = `🎉 赢 +${a.actualPayoutSum.toFixed(4)} KAS`;
       else if (onlyLost)  statusStr = `😞 输 -${a.stakeSum.toFixed(4)} KAS`;
       else if (onlyRefund) statusStr = `💸 已退款`;
-      else if (onlyOpen)  statusStr = `⏳ 已押注等开奖`;
+      else if (onlyOpen)  statusStr = (sample.deadline_unix && Number(sample.deadline_unix) < Math.floor(Date.now() / 1000)) ? `🔒 押注已截止 · 等开奖结算` : `⏳ 已押注等开奖`;
       else                statusStr = `📊 状态混合 (赢 ${s.won} · 输 ${s.lost} · 等 ${s.open} · 退 ${s.refunded})`;
       const cnt = a.count > 1 ? ` (${a.count} 笔)` : '';
       lines.push(`• ${dir} ${a.stakeSum.toFixed(4)} KAS${cnt} · ${statusStr}`);
