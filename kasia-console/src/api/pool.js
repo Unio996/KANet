@@ -55,7 +55,6 @@ async function _broadcastMarketPublished(marketRow, makerRelayId) {
       outcome_condition_id: marketRow.outcome_condition_id,
       outcome_token_id: marketRow.outcome_token_id,
       outcome_side: marketRow.outcome_side,
-      outcome_end_date: marketRow.outcome_end_date || null,
       resolution_rule_spec: marketRow.resolution_rule_spec,
       deadline: marketRow.deadline,
       miner_fee: marketRow.miner_fee,
@@ -277,12 +276,16 @@ export async function registerPoolRoutes(fastify) {
     }
 
     // market_metadata_hash
+    // Bettor r123 SHIP-BLOCK fix B: use persisted `deadline` (int unix seconds) NOT raw
+    // b.outcome_end_date (string, not stored in pool_markets) — so consumer can recompute
+    // hash from broadcast payload. Old code used ephemeral raw string, broadcast helper
+    // read marketRow.outcome_end_date = undefined → 100% consumer silent reject.
     const metaInput = JSON.stringify({
       source: b.outcome_market_source,
       condition: b.outcome_condition_id,
       token: b.outcome_token_id,
       side: b.outcome_side,
-      end: b.outcome_end_date,
+      end: deadline,
       rule: b.resolution_rule_spec,
     });
     const marketMetadataHash = createHash('sha256').update(metaInput).digest('hex');
@@ -451,7 +454,7 @@ export async function registerPoolRoutes(fastify) {
       condition: b.outcome_condition_id,
       token: b.outcome_token_id,
       side: b.outcome_side,
-      end: b.outcome_end_date,
+      end: deadline,
       rule: b.resolution_rule_spec,
     });
     const marketMetadataHash = createHash('sha256').update(metaInput).digest('hex');
