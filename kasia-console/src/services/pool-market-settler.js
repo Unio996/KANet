@@ -99,7 +99,7 @@ export async function poolSettlerTick() {
       SELECT id, maker_relay_id, spine_p2sh, spine_lock_tx, oracle1_pk, oracle2_pk, oracle3_pk,
              oracle_relay_ids, deadline, protocol_status, sides_merkle_root, broker_pk, broker_fee_pct, broker_relay_id,
              updated_at, maker_stake_amount, oracle_bond_amount, miner_fee, metadata,
-             outcome_market_source, outcome_token_id, outcome_side
+             outcome_market_source, outcome_token_id, outcome_side, protocol_version, pool_merkle_root
       FROM pool_markets
       WHERE protocol_status IN ('verifying', 'collecting_sigs')
         AND deadline <= ?
