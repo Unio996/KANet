@@ -127,15 +127,25 @@ export async function poolSettlerTick() {
               const { createRelayChainReader } = await import('./relay-chain-reader.mjs');
               const { fetchEndBlockHashCanonical, sampleAndStoreCommittee } = await import('./pool-market-settler-v06.mjs');
               const { getStatus, isRelayAlive } = await import('./relay-manager.js');
-              // Bettor r182/r183: maker_relay_id may be remote (cross-node ingested market) →
+              // Bettor r182/r183/r184: maker_relay_id may be remote (cross-node ingested market) →
               // local Console can't IPC to it. Use any locally-running relay for chainReader —
               // chain state is global, any alive relay sees the same DAA progression.
-              let chainReaderRelayId = isRelayAlive(market.maker_relay_id) ? market.maker_relay_id : null;
-              if (!chainReaderRelayId) {
-                const localRunning = (getStatus() || []).find(r => r.running);
-                if (!localRunning) throw new Error('no locally-running relay available for chainReader');
-                chainReaderRelayId = localRunning.id;
+              // isRelayAlive returns {alive: bool, reason: string} not a bare boolean — must
+              // read .alive (d4558dd silent bug: truthy object always selected maker_relay_id).
+              let chainReaderRelayId = null;
+              if (market.maker_relay_id) {
+                const aliveCheck = isRelayAlive(market.maker_relay_id);
+                if (aliveCheck?.alive) chainReaderRelayId = market.maker_relay_id;
               }
+              if (!chainReaderRelayId) {
+                const candidates = getStatus() || [];
+                // getStatus rows have relayNodeId + pid set when process is up. Pick first w/ pid +
+                // confirm IPC alive via isRelayAlive.alive (defense-in-depth vs stale state cache).
+                const localAlive = candidates.find(r => r.pid && isRelayAlive(r.relayNodeId)?.alive);
+                if (!localAlive) throw new Error(`no locally-alive relay for chainReader (checked ${candidates.length})`);
+                chainReaderRelayId = localAlive.relayNodeId;
+              }
+              console.log(`[pool-settler] committee sample using relay=${chainReaderRelayId?.slice(0,8)} for market=${market.id.slice(0,12)}`);
               const chainReader = createRelayChainReader(chainReaderRelayId);
               const currentDaa = await chainReader.getCurrentDaaScore();
               const nowSec = Math.floor(Date.now() / 1000);
