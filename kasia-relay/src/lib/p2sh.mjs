@@ -790,25 +790,29 @@ export async function unlockPoolSpineP2SH(args) {
         // Push as little-endian minimal int bytes (= silverc int encoding).
         return _encodePushDataHex(Buffer.from([n & 0xff]));
       };
-      // Siblings group: committee 4 → 0, within each 8 → 0 (= depth 7 down to 0 per silverc reverse).
+      // Bettor r245 实证定案: v0.5 push = declaration order (silverc binds locals via
+      // reverse-pop internally, declaration order == push order). v0.6 same convention.
+      // Declaration order: sigs c0..c4, committeePkHash, winner, sidesMerkleRoot, PKs c0..c4,
+      // indices c0..c4, siblings c0s0..c0s7 → c1s0..c1s7 → ... → c4s0..c4s7.
       let scriptSigHex = '';
-      for (let ci = 4; ci >= 0; ci--) {
+      // Sigs c0..c4 (already push-encoded from createInputSignature, 132 hex / 66 bytes each)
+      for (let ci = 0; ci < 5; ci++) scriptSigHex += sigs[ci];
+      // committeePkHash, winner, sidesMerkleRoot
+      scriptSigHex += pushBytes(committeePkHash);
+      scriptSigHex += winnerOpHex;
+      scriptSigHex += rootPushHex;
+      // PKs c0..c4
+      for (let ci = 0; ci < 5; ci++) scriptSigHex += pushBytes(pks[ci]);
+      // Indices c0..c4
+      for (let ci = 0; ci < 5; ci++) scriptSigHex += opNHex(indices[ci]);
+      // Siblings: committee 0..4 outer, depth 0..7 inner
+      for (let ci = 0; ci < 5; ci++) {
         const sibs = proofs[ci];
         if (!Array.isArray(sibs) || sibs.length !== 8) {
           throw new Error(`v0.6 settle_aggregate committee[${ci}] needs 8 siblings, got ${sibs?.length}`);
         }
-        for (let d = 7; d >= 0; d--) scriptSigHex += pushBytes(sibs[d]);
+        for (let d = 0; d < 8; d++) scriptSigHex += pushBytes(sibs[d]);
       }
-      // Indices c4..c0
-      for (let ci = 4; ci >= 0; ci--) scriptSigHex += opNHex(indices[ci]);
-      // PKs c4..c0
-      for (let ci = 4; ci >= 0; ci--) scriptSigHex += pushBytes(pks[ci]);
-      // sidesMerkleRoot, winner, committeePkHash
-      scriptSigHex += rootPushHex;
-      scriptSigHex += winnerOpHex;
-      scriptSigHex += pushBytes(committeePkHash);
-      // Sigs c4..c0 (already push-encoded from createInputSignature)
-      for (let ci = 4; ci >= 0; ci--) scriptSigHex += sigs[ci];
       // Selector OP_0 (entry 0 = settle_aggregate) + redeem reveal
       scriptSigHex += selectorOpHex;
       scriptSigHex += spineRedeemPushHex;
