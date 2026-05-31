@@ -489,6 +489,43 @@ if (process.send) {
           return;  // skip generic completion reply
         }
 
+        case 'chain_get_current_daa_score': {
+          // ③ committee chainReader (Bettor r170): Console wraps as chainReader.getCurrentDaaScore.
+          // Used by fetchEndBlockHashCanonical finality_depth check (F-S1).
+          try {
+            const { getCurrentDaaScore } = await import('./rpc-listener.mjs');
+            const daa = await getCurrentDaaScore();
+            if (cmd.requestId && process.send) {
+              process.send({ requestId: cmd.requestId, result: { ok: true, daa_score: daa } });
+            }
+          } catch (e) {
+            if (cmd.requestId && process.send) {
+              process.send({ requestId: cmd.requestId, result: { ok: false, error: e.message } });
+            }
+          }
+          return;
+        }
+
+        case 'chain_get_blocks_from_daa_score': {
+          // ③ committee chainReader: returns recent-blocks ring buffer filtered to daaScore >= minDaa.
+          // Console wraps as chainReader.getBlocksFromDaaScore; settler-tick finds first endBlock at/above
+          // deadline daaScore as VRF seed input for sampleAndStoreCommittee.
+          try {
+            const minDaa = Number(cmd.min_daa_score);
+            if (!Number.isFinite(minDaa) || minDaa < 0) throw new Error('min_daa_score must be non-negative number');
+            const { getRecentBlocksAtOrAbove } = await import('./rpc-listener.mjs');
+            const blocks = getRecentBlocksAtOrAbove(minDaa);
+            if (cmd.requestId && process.send) {
+              process.send({ requestId: cmd.requestId, result: { ok: true, blocks } });
+            }
+          } catch (e) {
+            if (cmd.requestId && process.send) {
+              process.send({ requestId: cmd.requestId, result: { ok: false, error: e.message } });
+            }
+          }
+          return;
+        }
+
         case 'ecdsa_sign': {
           // Phase 4a r234/r235 Sub 6 — ECDSA sign a payload message (= voter daemon signs oracle vote).
           // 用 kaspa-wasm signMessage (= secp256k1 over message hash, returns hex sig).

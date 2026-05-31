@@ -118,6 +118,33 @@ let _watchedRefreshTimer = null;
 const _indexedTxs = new Set();
 const INDEXED_MAX = 20000;
 
+// ── ③ committee chainReader: recent-blocks ring buffer for fetchEndBlockHashCanonical ──
+// Tracks (hash, daaScore) for every block-added event. Console settler-tick queries via
+// chain_get_blocks_from_daa_score IPC to find the canonical endBlock for VRF seed input.
+// Bettor r170 ③ 接线 — relay 唯一链上出口 (CLAUDE.md), Console 不直碰链.
+const RECENT_BLOCKS_MAX = 50000;  // ~14h @ 1bps testnet-12, plenty for any deadline
+const _recentBlocks = [];  // [{ hash, daaScore }] insertion order = block-added order
+const _recentBlockHashes = new Set();  // dedup
+export function getRecentBlocksAtOrAbove(minDaa) {
+  return _recentBlocks.filter(b => b.daaScore >= minDaa);
+}
+export async function getCurrentDaaScore() {
+  if (!_rpc) throw new Error('rpc not connected');
+  const info = await _rpc.getBlockDagInfo();
+  return Number(info.virtualDaaScore);
+}
+function _trackBlockForChainReader(block) {
+  const hash = block?.verboseData?.hash || block?.header?.hash;
+  const daa = Number(block?.header?.daaScore || 0);
+  if (!hash || !daa || _recentBlockHashes.has(hash)) return;
+  _recentBlocks.push({ hash, daaScore: daa });
+  _recentBlockHashes.add(hash);
+  if (_recentBlocks.length > RECENT_BLOCKS_MAX) {
+    const dropped = _recentBlocks.splice(0, _recentBlocks.length - RECENT_BLOCKS_MAX);
+    for (const d of dropped) _recentBlockHashes.delete(d.hash);
+  }
+}
+
 // ── Logging ─────────────────────────────────────────────────────────────────
 
 function log(...args) {
@@ -599,6 +626,10 @@ export async function stopRpcListener() {
 async function handleBlock(event) {
   const block = event?.data?.block;
   if (!block) return;
+
+  // ③ committee chainReader: track (hash, daaScore) into recent-blocks ring buffer for
+  // Console chain_get_blocks_from_daa_score IPC (committee endBlock VRF seed).
+  try { _trackBlockForChainReader(block); } catch (e) { log('chainReader track:', e?.message); }
 
   // Embedded Kaspa TX indexer: record watched-address TXs BEFORE protocol filtering.
   // This is independent of protocol payload — we want to track all value transfers
