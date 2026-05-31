@@ -1,8 +1,24 @@
 # Phase-2 (d) Variable-Stake — committee-attest-totals 启动备忘
 
-> Owner P0 #2 真解. 上午 (2026-05-31) 三方收敛, ②CLOSE 后启动. 等 J1 SS 专家终审 + Bettor 写正式 spec.
+> Owner P0 #2 真解. 上午 (2026-05-31) 三方收敛, ②CLOSE 后启动.
 >
 > 文件目的: 落地讨论, Bettor (新接位) 读 handoff 后看此一页即可拍板进 Phase-2.
+
+## 🔒 LOCK 状态
+
+**2026-05-31 13:50 LOCK by KANet-UI-tn (doc owner, Bettor r158 派最终拍板)**
+
+收敛 source: Bettor r119/r120/r122/r151/r152/r154/r155/r156/r157/r158 + NWT r119/r120/r121 + J2 r148/r158/r159/r160 + J1 r198/r199/r200/r201 + KANet-UI r348/r349/r350/r351/r352.
+
+LOCKED 范围:
+- §2 机制 (committee-attest-totals + per-UTXO 独立 claim 子变体)
+- §3 NWT 5 spec (全纳入)
+- §4 改动按层 (含 bot 文件行条件锁)
+- §5.3 + §5.3a + §5.3b + §5.3c (含 1 KAS POLICY + 三层防御)
+- §5.4 流程
+- §6 排期 P2-3/4/5 启动
+
+进 P2-3 (J2) + P2-4 (J1) + P2-5 (NWT) 实施. 实施期间细节微调 (= 非 spec change) 允许; **架构层改动 → 重开对抗 round** (不暗改 LOCKED spec).
 
 ---
 
@@ -221,11 +237,31 @@ J1 r199 后两 part (3 + 4) 加 SS-层关键约束, Bettor r156 钦定并入 spe
    - bot 文件行加: prediction-menu.mjs 显示 side_p2sh 处补警告 "⚠ 必须经 /bet 流程注册再付款, 直送 = 钱锁死".
    - 状态: 现 efe86a2 文案已写 "经 /bet 复核流程" 隐含此意, 改 (d) 后需 **显式强化** (= 写成红字铁律).
 
-2. **min_stake_sompi floor (r199/4)**: 防 dust 稀释 winner — committee scan 时低于阈值 (e.g. 10000 sompi = 0.0001 KAS) 的 UTXO **不计 totalPool/sidePool**.
-   - 实现: settler 计算 totals 时 filter `UNSPENT UTXO.value >= MIN_STAKE_SOMPI`. min 值由 spec 锁定 (默认 10000 sompi, 可配置).
-   - 攻击场景防: 恶意 bettor 发 1000 笔 1-sompi UTXO → settler 计 1000 个 → 稀释 totalPool → 正常 bettor 中奖额降. floor 杀此攻击.
-   - bot 提示: prep 阶段若 amount 低于 min, 直接拒 + 提示 "最少 X KAS".
-   - DB: pool_markets 新增 `min_stake_sompi` 列 (per-market 可配, 默认全局), 写入 spine ctor / 同 committee attest.
+2. **min_stake floor — 1 KAS policy 反机器人 + 三层防御 (r199/4 + Bettor r157/r158 + Owner 现场)**:
+
+   **常量定稿** (Bettor r158 收敛, J1 r200 + NWT r121 + J2 r159/r160 三方一致):
+   - `BETTOR_MIN_STAKE_POLICY = 1e8 sompi (= 1 KAS)` — **反机器人 / 反 dust 稀释** 政策地板
+   - `PHYS_FLOOR = 100000 sompi (0.001 KAS)` — KIP-9 物理下限, **不动** (= L4 后缀 KIP-9 语义)
+   - 重命名 `BETTOR_MIN_STAKE_L4` → `BETTOR_MIN_STAKE_POLICY` (= L4 语义留 PHYS_FLOOR)
+
+   **三层独立 enforce 任一不漏** (J1 r201 + NWT r121 #1):
+
+   | 层 | 位置 | 行为 | 防什么 |
+   |---|---|---|---|
+   | (1) API register | `pool.js:678/770` | 硬拒 `stake_kas < 1` | 普通误付 + 老路径 |
+   | (2) Consumer handler | `trade-protocol-filter.js handlePoolBetRegistered` | `< 1 KAS reject` | **NWT#1 命门**: 恶意节点直 broadcast `<1 KAS` 绕 producer, 远端 consumer 不查 → 每节点 DB 灌假数据 → /mybets 显假 |
+   | (3) Committee scan | `pool-market-settler.js dispatchPhase2` | UTXO `value < POLICY_FLOOR` 不计 totalPool/sidePool | **dust 稀释** winner attack (恶意发 1000 笔 1-sompi 稀释总池) |
+
+   **SS v0.7 不验金额** (= 变量金额前提, 烤 stake 已删). 防机器人责任全在上 3 层.
+
+   **3 处常量 + 文案同 PR (J2 r159 a 点警告)**:
+   - `pool.js:19` 常量改名
+   - `bot.mjs:58` `MIN_STAKE_KAS = 1`
+   - `prediction-menu.mjs:346/352` 文案 "最少 1 KAS"
+
+   **历史不追溯** (= 老的 < 1 KAS UTXO 不动, 不回溯改 DB).
+
+   - DB: pool_markets 新增 `min_stake_sompi` 列 (per-market 可配, 默认 = `BETTOR_MIN_STAKE_POLICY`), 写入 spine ctor 同 committee attest.
 
 ```
 J1 r198 ✓ → Bettor 写正式 spec (folded NWT 5 + J1 design + 拍板风险方案)
