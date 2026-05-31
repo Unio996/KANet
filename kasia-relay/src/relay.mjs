@@ -93,7 +93,10 @@ function shouldBlockOutbound(target, message) {
 
   // 协议消息不走去重拦截 — 协议重试是有意为之，不是垃圾消息
   // 陷阱 #45: shouldBlockOutbound 拦截了协议消息重试，导致 paid 广播永远上不了链
-  if (message.startsWith('{"t":"kanet_')) return null;
+  // KANet-UI r383: pool_oracle_vote_v1 / pool_market_published_v1 / pool_bet_registered_v1
+  // 跨 market 同 schema 不同字段 → similarity 85% > DEDUP_SIMILARITY 触发 → vote 永不广播.
+  // 同 KI 49 silent-skip 第 6 次 (= 'kanet_' prefix-only 漏覆盖 'pool_').
+  if (message.startsWith('{"t":"kanet_') || message.startsWith('{"t":"pool_')) return null;
 
   // 防线 1: 幻觉模式匹配
   const hallMatch = HALLUCINATION_PATTERNS.find(p => p.test(message));
