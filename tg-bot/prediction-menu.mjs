@@ -366,8 +366,13 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
     const kas = sompiToKasStr(s.prep.exact_sompi);
     // Owner P0 (Bettor r116 spec, KANet-UI ship): tap-to-copy 地址 + 精确金额 + Kaspa payment URI.
     // 地址手抄风险高 → 用 Telegram HTML <code> 包成 monospace + tap-to-copy 块.
-    // URI = kaspatest:addr?amount=KAS (BIP-21 style, 钱包识别即点开预填). 不识别时 fallback = tap-to-copy.
+    // URI 也用 <code> tap-to-copy (Telegram HTML <a href> 限 http/https/tg, kaspatest: 自定义 scheme 不保险).
     // resolution_rule_spec 可能含 HTML 特殊字符, 必须 escape (HTML mode 整条解析).
+    //
+    // 文案语气 (Owner 看 ed355da 提): 当前合约仍把 stake 烤进 P2SH (= 精确金额硬要求),
+    // 但 Bettor r119/r120/r122 + NWT r119 + J2 r148 三方已收敛方案 (d) committee-attest-totals
+    // = 下版按实际锁入额自动建仓, 多/少都按真值. 排 Phase-2 (② functional PASS 后启动).
+    // 现版仍要求精确, 文案改"建议精确"软化语气 + 加 "下版自动适应实际额" 提示, 不用"必须/铁律".
     const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const addr = s.prep.side_p2sh;
     const uri = `${addr}?amount=${kas}`;
@@ -376,10 +381,10 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
         `📝 押注复核 — ${esc(s.market.resolution_rule_spec)}`,
         `方向 ${s.side} · 金额 ${kas} KAS`,
         '',
-        '下一步你要<b>从自己的钱包</b>把以下<b>精确金额</b>付到以下<b>精确地址</b> (bot 全程不持钥、不碰你的钱):',
+        '下一步: <b>从你自己钱包</b>转 KAS 到下面地址 (bot 全程不持钥、不碰你的钱).',
         '',
-        `💰 金额 (点一下复制): <code>${kas}</code> KAS`,
-        `   = <code>${s.prep.exact_sompi}</code> sompi (精确值, 多/少 1 sompi 都不算)`,
+        `💰 建议金额 (点一下复制): <code>${kas}</code> KAS`,
+        `   = <code>${s.prep.exact_sompi}</code> sompi`,
         '',
         `📮 地址 (点一下复制):`,
         `<code>${addr}</code>`,
@@ -387,12 +392,16 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
         `📲 或复制此 URI 粘到钱包 (一键填好地址+金额):`,
         `<code>${uri}</code>`,
         '',
-        '⚠ 必须付【这个精确金额】到【这个精确地址】, 因为这是按你的金额烤进合约的一次性地址:',
-        '· 少付 → 资金被合约永久锁死、退不回 (refund 也救不了)。',
-        '· 多付 → 超出部分被矿工吃掉、要不回。',
+        '⚠ <b>现版本</b>合约把 stake 烤进了这个一次性地址, 所以建议按上面金额转 — 跟金额错位的后果:',
+        '· 转少 (含 0.001 KAS 小差) → 资金被合约锁死、退不回 (refund 也救不了)。',
+        '· 转多 → 超出部分被矿工吃掉、要不回。',
+        '建议: 用 tap-to-copy 复制金额, 钱包粘贴后核对再发。',
+        '',
+        '🔧 下版本规划 (Bettor r119/r122 收敛, J1 终审中): 改成"按你实际转入额自动建仓", 多/少都按真值押, 这个"精确"限制会消失。',
+        '',
         '· 任意钱包都能付; 但中奖要用你<b>绑定地址</b>的钥匙领取。',
         '',
-        `回复 <b>1</b> = 确认付 ${kas} KAS 到这个一次性地址 (少付永久锁死, 多付被矿工吃掉)`,
+        `回复 <b>1</b> = 确认转 ${kas} KAS 到这个地址`,
         '回复 <b>0</b> = 取消',
       ].join('\n'),
       parseMode: 'HTML',
