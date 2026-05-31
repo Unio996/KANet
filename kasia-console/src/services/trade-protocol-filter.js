@@ -246,6 +246,42 @@ async function handlePoolMarketPublished(msg) {
     return;
   }
 
+  // Bettor r135 H1 close-gate: verify spine_lock_tx UTXO on chain at spine_p2sh BEFORE INSERT.
+  // Without this, a valid maker sig over a fabricated payload (no actual on-chain stake) would
+  // get ingested — market listed everywhere, bets attempted, all fail because the spine never
+  // really existed. Same pattern as bet handler getUtxosByAddresses + outpoint match.
+  try {
+    const { getWorkingRpc } = await import('./rpc-health.js');
+    const { url: rpcUrl } = await getWorkingRpc();
+    if (!rpcUrl) {
+      console.warn(`[trade-filter:market-pub] no working RPC — skip (will replay on next broadcast)`);
+      return;
+    }
+    const { RpcClient, Encoding, Address } = await import('kaspa-wasm');
+    const network = msg.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: network });
+    let utxos;
+    try {
+      await Promise.race([rpc.connect({}), new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 4000))]);
+      ({ entries: utxos } = await rpc.getUtxosByAddresses([new Address(msg.spine_p2sh)]));
+    } finally {
+      try { await rpc.disconnect(); } catch {}
+    }
+    utxos = utxos || [];
+    const spineMatch = utxos.find(u => {
+      const op = u.outpoint || u.entry?.outpoint;
+      const txid = op && (op.transactionId || op.transaction_id);
+      return txid === msg.spine_lock_tx;
+    });
+    if (!spineMatch) {
+      console.warn(`[trade-filter:market-pub] spine_lock_tx ${msg.spine_lock_tx.slice(0,16)} not UNSPENT at spine_p2sh ${msg.spine_p2sh.slice(0,20)} (fake market or already settled) — reject`);
+      return;
+    }
+  } catch (e) {
+    console.warn(`[trade-filter:market-pub] spine UTXO verify fail market=${msg.market_id.slice(0,12)}: ${e.message} — skip (replay later)`);
+    return;
+  }
+
   // 3. INSERT OR IGNORE pool_markets — cols mirror create-v06 path (pool.js:399-413).
   //    Local-only cols (maker_relay_id / broker_relay_id / oracle_relay_ids) = NULL — we don't know
   //    peer's relay IDs (protocol membership lives in pubkey fields). updated_at / sides_merkle_root
@@ -262,7 +298,7 @@ async function handlePoolMarketPublished(msg) {
   // protocol fields like maker_pk on the row).
   const sentinelRelayId = `cross-node:${msg.maker_relay_pk}`;
   try {
-    sqlite.prepare(`INSERT OR IGNORE INTO pool_markets (
+    const insertResult = sqlite.prepare(`INSERT OR IGNORE INTO pool_markets (
       id, maker_relay_id, spine_p2sh, spine_lock_tx, market_metadata_hash,
       oracle1_pk, oracle2_pk, oracle3_pk, broker_pk,
       deadline, miner_fee, broker_fee_pct, oracle_bond_amount, maker_stake_amount,
@@ -277,6 +313,17 @@ async function handlePoolMarketPublished(msg) {
       'pending_bettors', '', '[]', sentinelRelayId, metadata, msg.category,
       msg.protocol_version || 'v0.5', msg.pool_merkle_root,
     );
+    // Bettor r135 close-gate #2: silent-skip guard — INSERT OR IGNORE returns changes=0 if
+    // either dedup (= row existed, ok) or constraint violation (= bug). Distinguish via
+    // SELECT after for forensic clarity. Bare INSERT OR IGNORE returning 0 hid f7f1af2 bug.
+    if (insertResult.changes === 0) {
+      const stillMissing = !sqlite.prepare('SELECT 1 FROM pool_markets WHERE id = ?').get(msg.market_id);
+      if (stillMissing) {
+        console.warn(`[trade-filter:market-pub] INSERT OR IGNORE changes=0 AND row still missing market=${msg.market_id.slice(0,12)} — constraint violation? (KI 49 silent-skip)`);
+        return;
+      }
+      // else: row exists from prior INSERT (e.g. same-node producer-direct), ok.
+    }
     console.log(`[trade-filter:market-pub] ingested market=${msg.market_id.slice(0,12)} maker_pk=${msg.maker_relay_pk.slice(0,12)} tx=${msg._tx?.slice(0,16)}`);
   } catch (e) {
     console.warn(`[trade-filter:market-pub] insert fail market=${msg.market_id.slice(0,12)}: ${e.message}`);
@@ -327,9 +374,23 @@ async function handlePoolMarketPublished(msg) {
 // recursively dispatches the reassembled JSON through the full pre-filter + switch path (= same
 // route a single-shot pool_market_published_v1 would take, no special-casing).
 const POOL_CHUNK_CACHE = new Map();  // key=hash → { total, parts: Map<ord,data>, firstAt }
+// Bettor r135 close-gate #3: chunk cache TTL. Incomplete reassembly (= producer crashed mid-broadcast,
+// or chunks lost on chain) would leak entries forever. Eviction: 5 min TTL since firstAt — generous
+// since chunked market takes ~50s end-to-end + chain propagation delays. Run lazy on each new chunk
+// (= O(cache_size), tiny for our scale).
+const POOL_CHUNK_TTL_MS = 5 * 60 * 1000;
+function _evictExpiredChunks(now = Date.now()) {
+  for (const [hash, entry] of POOL_CHUNK_CACHE) {
+    if (now - entry.firstAt > POOL_CHUNK_TTL_MS) {
+      console.warn(`[trade-filter:chunk] evict expired hash=${hash.slice(0,12)} age=${Math.round((now - entry.firstAt)/1000)}s have=${entry.parts.size}/${entry.total} (incomplete reassembly, dropped)`);
+      POOL_CHUNK_CACHE.delete(hash);
+    }
+  }
+}
 
 async function handlePoolMarketChunk(msg) {
   const { createHash } = await import('crypto');
+  _evictExpiredChunks();  // lazy GC every chunk
   if (!msg.hash || msg.ord === undefined || !msg.total || msg.data === undefined) {
     console.warn(`[trade-filter:chunk] missing fields hash=${msg.hash?.slice(0,12)} ord=${msg.ord} total=${msg.total} — reject`);
     return;
@@ -491,12 +552,19 @@ async function handlePoolBetRegistered(msg) {
   // 4. INSERT OR IGNORE pool_bettor_sides (UNIQUE side_lock_tx WHERE NOT NULL dedup anchor).
   //    bettor_relay_id NULL = external 0-key bettor on remote node (no local relay knows the privkey).
   try {
-    sqlite.prepare(`INSERT OR IGNORE INTO pool_bettor_sides
+    const insertResult = sqlite.prepare(`INSERT OR IGNORE INTO pool_bettor_sides
       (market_id, bettor_pk, bettor_relay_id, direction, stake_amount, side_p2sh, side_lock_tx, merkle_index, side_redeem_script_hex)
       VALUES (?,?,?,?,?,?,?,?,?)`).run(
         msg.market_id, msg.bettor_pk, null, msg.direction, msg.stake_amount,
         msg.side_p2sh, msg.side_lock_tx, msg.merkle_index || null, recomputedRedeem,
       );
+    if (insertResult.changes === 0) {
+      const stillMissing = !sqlite.prepare('SELECT 1 FROM pool_bettor_sides WHERE side_lock_tx = ?').get(msg.side_lock_tx);
+      if (stillMissing) {
+        console.warn(`[trade-filter:bet-reg] INSERT OR IGNORE changes=0 AND row still missing side_lock_tx=${msg.side_lock_tx.slice(0,16)} — constraint violation? (KI 49 silent-skip)`);
+        return;
+      }
+    }
     console.log(`[trade-filter:bet-reg] ingested market=${msg.market_id.slice(0,12)} bettor=${msg.bettor_pk.slice(0,12)} dir=${msg.direction} stake=${msg.stake_amount} tx=${msg.side_lock_tx.slice(0,16)}`);
   } catch (e) {
     console.warn(`[trade-filter:bet-reg] insert fail (likely UNIQUE dedup, ok): ${e.message}`);
