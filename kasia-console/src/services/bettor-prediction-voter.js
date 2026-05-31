@@ -661,8 +661,13 @@ async function deriveVote(offer) {
     return derivePolymarketVote(offer);
   }
 
-  // Branch 2: kanet_native (= Phase 3a MVP Bettor r219 spec — LLM consensus)
-  if (offer.outcome_market_source === 'kanet_native') {
+  // Branch 2: kanet_native (= Phase 3a MVP Bettor r219 spec — LLM consensus).
+  // kanet_v05 / kanet_v06 are pool.js create-v05/create-v06 defaults — same LLM
+  // consensus path as kanet_native (only differ in spine ctor + committee model
+  // upstream, vote derivation logic is identical).
+  if (offer.outcome_market_source === 'kanet_native'
+      || offer.outcome_market_source === 'kanet_v05'
+      || offer.outcome_market_source === 'kanet_v06') {
     return deriveKanetNativeVote(offer, spec);
   }
 
