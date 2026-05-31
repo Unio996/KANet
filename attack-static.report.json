@@ -1,6 +1,6 @@
 {
   "mode": "static",
-  "analyzed_at": "2026-05-30T06:21:17.652Z",
+  "analyzed_at": "2026-05-31T07:13:45.749Z",
   "files_scanned": [
     "PoolSide_v06",
     "PoolSpine_v06"
@@ -17,6 +17,18 @@
     {
       "severity": "INFO",
       "msg": "poolMerkleRoot baked in ctor (= committee constrained to public pool)"
+    },
+    {
+      "severity": "INFO",
+      "msg": "PoolSide v0.7 ctor 删 stakeAmount ✓ (= 变量金额支持)"
+    },
+    {
+      "severity": "INFO",
+      "msg": "PoolSide v0.7 claim/refund require inputs.length==1 ✓ (= per-UTXO 防求和 fraud)"
+    },
+    {
+      "severity": "INFO",
+      "msg": "PoolSide v0.7 payout 用 tx.inputs[0].value ✓ (= 变量金额命门)"
     },
     {
       "severity": "INFO",

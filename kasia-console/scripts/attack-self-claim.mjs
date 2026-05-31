@@ -112,6 +112,38 @@ function staticAnalysis() {
     });
   }
 
+  // Defense check 2b: PoolSide v0.7 variable-stake — ctor 不烤 stakeAmount + per-UTXO single-input + payout 用 tx.inputs[0].value
+  // (J1 P2-4 SS v0.7 ship + Bettor r158 三层防御 + P2 (d) Variable-Stake spec LOCK)
+  const sideFileForV07 = files.find(f => /Side/i.test(f.name));
+  if (sideFileForV07) {
+    const sideSrc = fs.readFileSync(sideFileForV07.path, 'utf8');
+    // a) ctor 块不含 stakeAmount (= 变量金额 v0.7 必)
+    const ctorBlock = sideSrc.match(/contract\s+\w+\s*\(([^)]+)\)/);
+    const ctorHasStakeAmount = ctorBlock && /\bstakeAmount\b/.test(ctorBlock[1]);
+    report.findings.push({
+      severity: ctorHasStakeAmount ? 'WARN' : 'INFO',
+      msg: ctorHasStakeAmount
+        ? 'PoolSide ctor 仍含 stakeAmount (= v0.6 旧版, 未升级 v0.7 变量金额)'
+        : 'PoolSide v0.7 ctor 删 stakeAmount ✓ (= 变量金额支持)',
+    });
+    // b) require(tx.inputs.length == 1) 存在 (= per-UTXO 防多 input 求和 fraud)
+    const inputsLenOne = /require\s*\(\s*tx\.inputs\.length\s*==\s*1\s*\)/.test(sideSrc);
+    report.findings.push({
+      severity: inputsLenOne ? 'INFO' : 'WARN',
+      msg: inputsLenOne
+        ? 'PoolSide v0.7 claim/refund require inputs.length==1 ✓ (= per-UTXO 防求和 fraud)'
+        : 'PoolSide claim/refund 未限 inputs.length==1 (= 多 UTXO 一 TX 求和 fraud risk)',
+    });
+    // c) payout 用 tx.inputs[0].value (= 变量金额命门)
+    const payoutVariable = /payout\s*=\s*tx\.inputs\[0\]\.value\s*\*/.test(sideSrc);
+    report.findings.push({
+      severity: payoutVariable ? 'INFO' : 'WARN',
+      msg: payoutVariable
+        ? 'PoolSide v0.7 payout 用 tx.inputs[0].value ✓ (= 变量金额命门)'
+        : 'PoolSide payout 未使用 tx.inputs[0].value (= 仍依烤死 stakeAmount, v0.6 旧版)',
+    });
+  }
+
   // Defense check 3a: position-aware merkle climb (= J2 r105 catch + J1 r126 fix d5d4ecbdd)
   // Bug pattern: `cur = blake2b(cur + sib)` (leftmost-only, fails for non-zero positions)
   // Fix pattern: `if (b == 0) { cur = blake2b(cur + sib) } else { cur = blake2b(sib + cur) }`

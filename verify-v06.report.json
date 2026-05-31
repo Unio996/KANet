@@ -1,6 +1,6 @@
 {
   "schema_version": "v0.6-compat-verify-r1",
-  "verified_at": "2026-05-30T09:01:15.830Z",
+  "verified_at": "2026-05-31T07:14:30.987Z",
   "baseline_ref": {
     "path": "D:\\kanet-tn12\\baseline.v0.5.json",
     "schema": "v0.5-baseline-r1",
@@ -69,7 +69,7 @@
       "name": "v0.6 PoolSide_v06.sil 存在 + ≥1 entrypoint",
       "pass": true,
       "detail": {
-        "sha256": "642a4b23dfd45a7ae6f74b67a8346e4db7245b60ac6a9492464fcd62313fa00d",
+        "sha256": "221968e7d1a8c576ab52d589081a7e2c887b5c5f9be826ffda7ef9010f7ea048",
         "entrypoints": [
           "settled_via_spine",
           "claim_winner",
@@ -148,7 +148,7 @@
           "38ae5c74bc8b1729e590b970c1baaf5953fd02dd4ef57ae04954d0b60b8e39e3"
         ],
         "v06_hashes": [
-          "642a4b23dfd45a7ae6f74b67a8346e4db7245b60ac6a9492464fcd62313fa00d",
+          "221968e7d1a8c576ab52d589081a7e2c887b5c5f9be826ffda7ef9010f7ea048",
           "ca47584b3d54d328b54c5b385c5ff89ddb6c8588fe02902622f86b859f8eda86"
         ]
       },
@@ -250,11 +250,21 @@
         "exists": true
       },
       "severity": "hard"
+    },
+    {
+      "name": "API 层 register prep stake<1 KAS reject (= 反机器人三层防御 layer 1)",
+      "pass": true,
+      "detail": {
+        "http_status": 400,
+        "expected": "400/404 reject 不是 200",
+        "note": "Bettor r158 三层防御 + NWT r121 cross-node spec"
+      },
+      "severity": "hard"
     }
   ],
-  "pass": 18,
+  "pass": 19,
   "fail": 0,
   "deploy_pending": 0,
   "verdict": "PASS",
-  "summary": "18/18 PASS, 0 hard FAIL, 0 deploy pending — verdict PASS"
+  "summary": "19/19 PASS, 0 hard FAIL, 0 deploy pending — verdict PASS"
 }

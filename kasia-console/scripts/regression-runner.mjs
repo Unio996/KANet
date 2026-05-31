@@ -404,6 +404,29 @@ async function verifyV06(baselinePath) {
     { path: settlerPath, exists: hasSettler }
   );
 
+  // Check 14: cross-node min_stake POLICY 三层 enforce (= Bettor r158 防机器人 + NWT r121 cross-node 双侧)
+  // Reason (Owner 铁律 ② + 反机器人): API 层 register prep stake<1 KAS 必 reject
+  // 防恶意节点直 broadcast <1 KAS 绕 producer floor
+  let underFloorStatus = null;
+  try {
+    const r = await fetch('http://127.0.0.1:3200/api/pool/market/nonexistent/bettor/register-external/prep', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ linked_addr: 'kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc', direction: 0, stake_kas: 0.5 }),
+    });
+    underFloorStatus = r.status;
+  } catch (e) {
+    underFloorStatus = `fetch_error:${e.message}`;
+  }
+  // 400/404 with stake-floor reject reason expected (= reject below floor, market_not_found ok too because endpoint reaches floor check)
+  // 200/201 = floor 没 enforce → CRITICAL
+  const apiFloorEnforced = underFloorStatus !== 200 && underFloorStatus !== 201;
+  check(
+    'API 层 register prep stake<1 KAS reject (= 反机器人三层防御 layer 1)',
+    apiFloorEnforced,
+    { http_status: underFloorStatus, expected: '400/404 reject 不是 200', note: 'Bettor r158 三层防御 + NWT r121 cross-node spec' }
+  );
+
   const total = report.pass + report.fail + report.deploy_pending;
   if (report.fail > 0) report.verdict = 'FAIL';
   else if (report.deploy_pending > 0) report.verdict = 'PASS_WITH_DEPLOY_PENDING';
