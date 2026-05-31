@@ -707,6 +707,39 @@ export async function dispatchPhase2(market, decision) {
       phase2_output_count: outputs.length,
       phase2_outputs: outputs,  // Phase 2c step 2c: full outputs array for collecting_sigs handler IPC assembly
     };
+    // J1 r221 + Bettor r218 ③ Layer-12: v0.6 settle_aggregate needs committee data — fetch
+    // 5 committee pks + their indices in pool_snapshots + 5×8 merkle proofs + committee_pk_hash,
+    // persist into meta so relay can assemble scriptSig per PoolSpine_v06.sil entry 0 spec.
+    if (market.protocol_version === 'v0.6') {
+      try {
+        const committeeRow = sqlite.prepare('SELECT committee_pks, committee_pk_hash FROM pool_committee WHERE market_id = ?').get(market.id);
+        if (!committeeRow) throw new Error('pool_committee row missing');
+        const committee_pks = JSON.parse(committeeRow.committee_pks);  // 5-element array, in selection order
+        if (!Array.isArray(committee_pks) || committee_pks.length !== 5) throw new Error('committee_pks must be 5');
+        const { loadPoolSnapshot } = await import('./pool-market-settler-v06.mjs');
+        const snapshot = loadPoolSnapshot(market.id);
+        const sortedPks = snapshot.pool_pks.map(p => String(p).toLowerCase());
+        const committee_indices = committee_pks.map(pk => {
+          const i = sortedPks.indexOf(String(pk).toLowerCase());
+          if (i < 0) throw new Error(`committee pk ${pk.slice(0,12)} not in pool snapshot`);
+          return i;
+        });
+        const { buildPoolMerkleTree, getPoolMerkleProof } = await import('./pool-merkle-v06.mjs');
+        const tree = buildPoolMerkleTree(sortedPks);
+        const committee_merkle_proofs = committee_indices.map(idx =>
+          getPoolMerkleProof(tree, idx).map(buf => buf.toString('hex'))
+        );  // 5 arrays of 8 hex strings each = 40 sibling hashes total
+        newMeta.phase2_committee_pks = committee_pks;
+        newMeta.phase2_committee_indices = committee_indices;
+        newMeta.phase2_committee_merkle_proofs = committee_merkle_proofs;
+        newMeta.phase2_committee_pk_hash = committeeRow.committee_pk_hash;
+        console.log(`[pool-settler] v0.6 committee data baked market=${market.id.slice(0,12)} indices=[${committee_indices.join(',')}]`);
+      } catch (e) {
+        console.error(`[pool-settler] dispatchPhase2 v0.6 committee data fail market=${market.id.slice(0,12)}: ${e.message}`);
+        return;
+      }
+    }
+
     // 8. DM 3 oracle relays with kanet_pool_oracle_tx_sign_req_v1
     //    (= adapted from 1V1 kanet_oracle_tx_sign_req_v1, uses market_id instead of offer_id)
     const reqPayloadObj = {
@@ -1122,6 +1155,15 @@ async function handleCollectingSigs(market) {
   console.log(`[pool-settler:collecting] market=${market.id.slice(0,12)} attempting settle TX submit (spine_inputs=${spineInputCount}, sides=${sides.length}, signers=${signingOracles.join(',')})`);
 
   try {
+    // J1 r221 + Bettor r218 ③ Layer-12: v0.6 committee data extras for settle_aggregate.
+    // Optional fields — only present for v0.6 markets where dispatchPhase2 baked them.
+    const v06Extras = market.protocol_version === 'v0.6' ? {
+      protocol_version: 'v0.6',
+      committee_pks: meta.phase2_committee_pks,
+      committee_indices: meta.phase2_committee_indices,
+      committee_merkle_proofs: meta.phase2_committee_merkle_proofs,
+      committee_pk_hash: meta.phase2_committee_pk_hash,
+    } : {};
     const submitResult = await sendCommandAsync(market.maker_relay_id, {
       type: 'pool_settle_tx',
       spine_p2sh_address: market.spine_p2sh,
@@ -1136,6 +1178,7 @@ async function handleCollectingSigs(market) {
       sides_merkle_root: market.sides_merkle_root,
       unanimous: meta.phase2_unanimous,
       tx_obj_preimage: meta.phase2_tx_obj,
+      ...v06Extras,
     });
 
     if (!submitResult?.ok || !submitResult.txId) {
