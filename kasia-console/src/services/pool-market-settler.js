@@ -253,6 +253,11 @@ export async function poolSettlerTick() {
  * }}
  */
 export function decideConsensus(market) {
+  // Bettor r197 P0 fix: v0.6 path A uses 5-committee 4-of-5 threshold (= committee-attest
+  // model post P2 §5.3 LOCK). v0.5 legacy 3-oracle 3-of-3 path below unchanged.
+  if (market.protocol_version === 'v0.6') {
+    return decideConsensusV06(market);
+  }
   let oracleIds;
   try { oracleIds = JSON.parse(market.oracle_relay_ids || '[]'); } catch { oracleIds = []; }
   if (!Array.isArray(oracleIds) || oracleIds.length !== 3) {
@@ -352,6 +357,48 @@ export function decideConsensus(market) {
   }
 
   return { action: 'pending', reason: `votes=${votes.length}/3 age=${Math.floor(ageMs/60000)}min (timeout 30min)` };
+}
+
+// v0.6 path A consensus: 5-committee, 4-of-5 same-outcome threshold for consensus.
+// No DISAGREEMENT_TIMEOUT branches (= committee model assumes Byzantine-1 fault tolerance
+// inherently; 4-of-5 either reaches threshold or doesn't). Silent timeout → refund.
+function decideConsensusV06(market) {
+  let oracleIds;
+  try { oracleIds = JSON.parse(market.oracle_relay_ids || '[]'); } catch { oracleIds = []; }
+  if (!Array.isArray(oracleIds) || oracleIds.length !== 5) {
+    return { action: 'pending', reason: `v0.6 invalid oracle_relay_ids (expected 5, got ${oracleIds?.length || 0})` };
+  }
+
+  const votes = [];
+  for (let i = 0; i < 5; i++) {
+    const oracleRelayId = oracleIds[i];
+    const row = sqlite.prepare(`
+      SELECT payload, observed_at FROM chain_events
+      WHERE event_type = 'pool_oracle_vote'
+        AND payload LIKE ?
+        AND payload LIKE ?
+      ORDER BY observed_at ASC LIMIT 1
+    `).get(`%"market_id":"${market.id}"%`, `%"voter_relay_id":"${oracleRelayId}"%`);
+    if (!row) continue;
+    let payload;
+    try { payload = JSON.parse(row.payload); } catch { continue; }
+    if (payload.outcome !== 'YES' && payload.outcome !== 'NO') continue;
+    votes.push({ oracleIndex: i, outcome: payload.outcome });
+  }
+
+  const yesCount = votes.filter(v => v.outcome === 'YES').length;
+  const noCount = votes.filter(v => v.outcome === 'NO').length;
+  // 4-of-5 same direction → consensus.
+  if (yesCount >= 4) return { action: 'consensus', winner: 0, unanimous: yesCount === 5, vote_summary: `v0.6 ${yesCount}/5 YES` };
+  if (noCount >= 4) return { action: 'consensus', winner: 1, unanimous: noCount === 5, vote_summary: `v0.6 ${noCount}/5 NO` };
+
+  // Threshold not met → timeout → refund.
+  const verifyingSinceMs = parseSqliteUtc(market.updated_at);
+  const ageMs = Date.now() - verifyingSinceMs;
+  if (ageMs >= ORACLE_SILENT_TIMEOUT_MS) {
+    return { action: 'refund', reason: `v0.6 4-of-5 threshold unmet (YES=${yesCount} NO=${noCount} total=${votes.length}/5) past ${Math.round(ORACLE_SILENT_TIMEOUT_MS/60000)}min timeout` };
+  }
+  return { action: 'pending', reason: `v0.6 votes ${votes.length}/5 (YES=${yesCount} NO=${noCount}) age=${Math.floor(ageMs/60000)}min < timeout` };
 }
 
 /**
