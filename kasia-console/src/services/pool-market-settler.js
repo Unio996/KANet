@@ -476,15 +476,19 @@ export function computePoolPayouts(args) {
   const isMakerWinner = winners.some(w => w.isMaker);
   const makerExtraOutput = (!isMakerWinner && makerForfeitShare > 0) ? makerForfeitShare : null;
 
-  // Bettor r223 Layer-13: v0.5 hardcoded 3-oracle bond return. v0.6 committee model = stake
-  // pooled in pool_snapshots (committee-level, not per-market) → spine has only 1 maker UTXO
-  // input → no bond inputs → no bond outputs. Caller passes oracleCount (default 3 for v0.5
-  // back-compat, 0 for v0.6 path A).
+  // Bettor r230 DECISION LOCK (4/4 consensus + Owner ack): A.1 testnet path.
+  // - v0.5: 3 oracle bond returns + oracleFee/3 share per existing flow
+  // - v0.6 A.1: 5 committee members get oracleFee/5 share BUT 0 bond return (= committee
+  //   has pool-level standing stake, no per-market bond posted on chain). oracleBondReturns
+  //   entries still allocated as position placeholders so dispatchPhase2 can merge fee shares.
+  //   Caller passes oracleCount + committeeMode (= bond=0).
   const oracleCountForBonds = Number.isInteger(args.oracleCount) ? args.oracleCount : 3;
+  const committeeMode = !!args.committeeMode;
   const oracleBondReturns = [];
   for (let i = 0; i < oracleCountForBonds; i++) {
     if (!unanimous && silentOracleIndex === i) continue;
-    oracleBondReturns.push({ oracleIndex: i, amount: oracleBond + perOracleForfeitShare });
+    const bondReturnAmount = committeeMode ? 0 : (oracleBond + perOracleForfeitShare);
+    oracleBondReturns.push({ oracleIndex: i, amount: bondReturnAmount });
   }
 
   return { brokerFee, winnerPayouts, makerExtraOutput, oracleBondReturns };
@@ -587,11 +591,10 @@ export async function dispatchPhase2(market, decision) {
         minerFee: parseInt(market.miner_fee, 10) || 20_000,
         unanimous: decision.unanimous,
         silentOracleIndex: decision.silentOracleIndex ?? null,
-        // Bettor r225 2/2 (Owner 钦定 architecture lock): v0.6 committee 5-oracle, each posts
-        // per-market bond + earns oracleFee/N share. Settler must include 5 bond returns + 5
-        // oracleFee shares. Companion sub: committee bond deposit flow (post-VRF / pre-vote)
-        // must run so inputs include the 5 bond UTXOs that match these output returns.
+        // Bettor r230 DECISION LOCK A.1: v0.6 = 5 committee members, NO per-market bond,
+        // oracleFee/5 share to each. v0.5 = 3 oracle bond+forfeit+fee/3.
         oracleCount: market.protocol_version === 'v0.6' ? 5 : 3,
+        committeeMode: market.protocol_version === 'v0.6',
       });
     } catch (e) {
       console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} computePoolPayouts fail: ${e.message}`);
@@ -612,7 +615,9 @@ export async function dispatchPhase2(market, decision) {
     const minerFeeSompi = parseInt(market.miner_fee, 10) || 20_000;
     const oracleLosingPool = Math.max(0, totalLoserStake - minerFeeSompi);
     const oracleFeeTotal = Math.floor(oracleLosingPool * oracleFeePct / 10000);
-    const oracleFeePerSig = Math.floor(oracleFeeTotal / 3);  // 3 oracle each gets oracleFeeTotal/3
+    // Bettor r230 A.1: v0.5 oracleFee/3, v0.6 oracleFee/5 (= committee size).
+    const oracleFeeDivisor = market.protocol_version === 'v0.6' ? 5 : 3;
+    const oracleFeePerSig = Math.floor(oracleFeeTotal / oracleFeeDivisor);
     // Spec note: oracleFeeTotal % 3 余数 (= 0-2 sompi) 留 brokerFee 端 (= 等同 W3 余数 maker pattern reuse).
     // Per J1 #4 fix: oracleFee deducted from broker pool? No — 跟 Bettor r17 truth matrix "brokerFeePct × losingPool" + "oracleFeePct × losingPool" 是 2 个独立 channel, 不 carved from broker.
     // Settler 必从 distributablePool 进一步扣除 oracleFeeTotal (= winner pool 减小). 这是 NWT sub 4 PoolSpine 改的 semantic.
