@@ -145,7 +145,7 @@ silverc `tx.inputs[i].value` 支持 ✓ (J1 r198/3 确认, PredictionEscrow*/Poo
 | (a) single UTXO claim | bettor consolidate first, 或 1 claim per UTXO 重复跑 | **J1 推 — 简单, 不限 UX** |
 | (b) max-N (e.g. 4) unrolled 求和 | 静态 unroll N input value | 限 UX (= 同 side 加注 ≤ 4 次), 不爽 |
 
-**Bettor r152 草案 (待全体对抗性评审, 非定稿): (a) 的 "per-UTXO 独立 claim" 子变体 (零 UX 限制).**
+**基于 §5.3 选 (a) 后子变体定义** — Bettor r152 草案 (待全体对抗性评审, 非定稿): (a) 的 "per-UTXO 独立 claim" 子变体 (零 UX 限制).
 
 > Owner 方法论 (2026-05-31): 重大问题定版前, Bettor 出草案 → J1/J2/NWT 对抗性+建议性讨论 → 收敛才 LOCK。本节即草案, 请各 agent 挑刺 (尤其 §5.3a 攻击面)。
 
@@ -178,7 +178,15 @@ NWT 认 (a) per-UTXO 方向, 提 4 个 ship-blocking gap, Bettor 逐条判定成
 4. **verifier / cross-node derive 共识 (成立)**: NWT verifier structural check 不破; 但 cross-node 视角**必含 derive 函数 (computeSideP2SH_v06 删 stakeAmount 后) 两节点 byte-match 共识 + 跨节点 e2e test**。
    → 并入 §7 测试方案第 5 项 (P2SH redeem byte-match 命门回归)。
 
-**结论**: (a) per-UTXO 是 minimum-viable 良好基底, 但 §5.3 ship-ready 前必补 [1 fee UX 文案 + 2 split-on-mass 策略 + 3 partial 二字段 + 4 cross-node derive 共识] 4 件。其中 **#2 是最重负担**, 决定 J2 settler 复杂度, 须在 LOCK 前请 J2 评估可行性 (是否反而该回退 single-deposit 约束以避免 spine mass 爆?)。**此点尚未收敛, 继续对抗。**
+**结论 (Bettor r156 收敛 ✅)**: (a) per-UTXO 是 minimum-viable 良好基底, ship-ready 前必补 [1 fee UX 文案 + 3 partial 二字段 + 4 cross-node derive 共识] 3 件 (#1/#3/#4 入本 spec).
+
+**关键 spine-mass (#2) 张力解** (Bettor r155/r156 + J2 r158 共识):
+- spine mass 爆是 v0.6 既存问题, **UTXO 数与烤不烤金额无关** (= max-N=50 bettor 已天然存在)
+- 变量金额 (per-UTXO) **mass-中性** — 不引入 mass 回归, 跟现 v0.6 同负担
+- **不回退 single-deposit 约束** (= 否 NWT 担心的"退回锁 UX")
+- settler split-on-mass 是**独立 backlog** (= v0.6 + variable 两路径都需要), 不是本 spec blocker
+
+**(a) per-UTXO 独立 claim 子变体 → 三方收敛 LOCK 候选**. 待 §5.3b/c 收 + J1 r199/3+4 加约束后 LOCK.
 
 #### §5.3b KANet-UI 对抗 (Bettor r153 派活)
 
@@ -204,7 +212,20 @@ NWT 认 (a) per-UTXO 方向, 提 4 个 ship-blocking gap, Bettor 逐条判定成
 
 → 我提议 §4 改: bot 文件行 prefix `[条件: SS v0.7 ship + relay/Console 适配齐 + P2-6 e2e PASS 后才改]`. 防 P2-7 提前 ship 误导用户.
 
-### 5.4 Blocker 清算后流程
+#### §5.3c J1 r199/3+4 两 SS-层约束 (Bettor r156 派整合)
+
+J1 r199 后两 part (3 + 4) 加 SS-层关键约束, Bettor r156 钦定并入 spec:
+
+1. **注册前转账必 forfeit 警告 (r199/3)**: bettor 知 `side_p2sh` 后绕过 `/register-external` 直送 KAS → 该 UTXO **无 sides_merkle 位** → claim_winner 永卡 (= 钱锁死). 与现"少付锁死"风险同源.
+   - **缓解**: register-external `/prep` endpoint 返 side_p2sh 时, bot 必须显著警告 "**先走 /register, 不能直接转 KAS 到此地址**" (= 注册路径写 sides_merkle 位才能 claim).
+   - bot 文件行加: prediction-menu.mjs 显示 side_p2sh 处补警告 "⚠ 必须经 /bet 流程注册再付款, 直送 = 钱锁死".
+   - 状态: 现 efe86a2 文案已写 "经 /bet 复核流程" 隐含此意, 改 (d) 后需 **显式强化** (= 写成红字铁律).
+
+2. **min_stake_sompi floor (r199/4)**: 防 dust 稀释 winner — committee scan 时低于阈值 (e.g. 10000 sompi = 0.0001 KAS) 的 UTXO **不计 totalPool/sidePool**.
+   - 实现: settler 计算 totals 时 filter `UNSPENT UTXO.value >= MIN_STAKE_SOMPI`. min 值由 spec 锁定 (默认 10000 sompi, 可配置).
+   - 攻击场景防: 恶意 bettor 发 1000 笔 1-sompi UTXO → settler 计 1000 个 → 稀释 totalPool → 正常 bettor 中奖额降. floor 杀此攻击.
+   - bot 提示: prep 阶段若 amount 低于 min, 直接拒 + 提示 "最少 X KAS".
+   - DB: pool_markets 新增 `min_stake_sompi` 列 (per-market 可配, 默认全局), 写入 spine ctor / 同 committee attest.
 
 ```
 J1 r198 ✓ → Bettor 写正式 spec (folded NWT 5 + J1 design + 拍板风险方案)
