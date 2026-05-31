@@ -877,37 +877,47 @@ export async function registerPoolRoutes(fastify) {
       return reply.code(503).send({ ok: false, error: `RPC UTXO query failed (${e.message}) — retry shortly` });
     }
     utxos = utxos || [];
-    const wantSompi = BigInt(v.stakeAmount);
-    const exactUtxo = utxos.find(u => { try { return BigInt(u.amount) === wantSompi; } catch { return false; } });
-    if (!exactUtxo) {
-      // Re-poll after success: the bettor already registered (its UTXO stays unspent at the side P2SH)?
-      const mine = sqlite.prepare('SELECT side_lock_tx, merkle_index FROM pool_bettor_sides WHERE market_id = ? AND bettor_pk = ? AND direction = ? AND stake_amount = ?')
-        .get(marketId, d.bettorPk, v.direction, v.stakeAmount);
-      if (mine) return reply.send({ ok: true, registered: true, already_registered: true, side_p2sh: sideP2sh, side_lock_tx: mine.side_lock_tx, merkle_index: mine.merkle_index });
-      // A UTXO exists but not the exact stake → 错付 (locked till deadline); else simply unpaid.
-      if (utxos.length > 0) {
-        return reply.send({ ok: true, registered: false, wrong_payment_detected: true, side_p2sh: sideP2sh, exact_stake_sompi: v.stakeAmount, note: `错付: side P2SH holds ${utxos.length} UTXO(s) but none == exact ${v.stakeAmount} sompi — pay EXACTLY (a mismatched amount is locked until the deadline).` });
+    // P2-3 Sub 2 LOCK (Bettor r163 +Owner): variable-amount per-UTXO independent claim.
+    // OLD: exact-match wantSompi vs UTXO.amount. NEW: find FIRST unregistered UTXO at
+    // side_p2sh; actual stake = UTXO.amount; POLICY floor still enforced. 1 confirm = 1 bet.
+    // body stake_kas validated >= POLICY earlier (early sanity) but not exact-match.
+    const registeredTxs = new Set(
+      sqlite.prepare('SELECT side_lock_tx FROM pool_bettor_sides WHERE market_id = ? AND bettor_pk = ? AND direction = ?')
+        .all(marketId, d.bettorPk, v.direction).map(r => r.side_lock_tx)
+    );
+    const candidate = utxos.find(u => {
+      const op = u.outpoint || u.entry?.outpoint;
+      const txid = op && (op.transactionId || op.transaction_id);
+      return txid && !registeredTxs.has(txid);
+    });
+    if (!candidate) {
+      if (utxos.length > 0 && registeredTxs.size > 0) {
+        // All payments already registered — return the most recent registration as reply.
+        const mineLatest = sqlite.prepare('SELECT side_lock_tx, merkle_index, stake_amount FROM pool_bettor_sides WHERE market_id = ? AND bettor_pk = ? AND direction = ? ORDER BY id DESC LIMIT 1')
+          .get(marketId, d.bettorPk, v.direction);
+        if (mineLatest) return reply.send({ ok: true, registered: true, already_registered: true, side_p2sh: sideP2sh, side_lock_tx: mineLatest.side_lock_tx, merkle_index: mineLatest.merkle_index, stake_sompi: mineLatest.stake_amount });
       }
-      return reply.send({ ok: true, registered: false, pending: true, side_p2sh: sideP2sh, exact_stake_sompi: v.stakeAmount, note: 'no matching payment detected yet — keep polling' });
+      return reply.send({ ok: true, registered: false, pending: true, side_p2sh: sideP2sh, note: `no unregistered payment detected at side_p2sh — pay any amount >= ${BETTOR_MIN_STAKE_POLICY / 1e8} KAS to claim a bet.` });
     }
-    // Exact UTXO found — its outpoint's transactionId is the canonical payment TX (= side_lock_tx).
-    const op = exactUtxo.outpoint || exactUtxo.entry?.outpoint;
+    const op = candidate.outpoint || candidate.entry?.outpoint;
     const txId = op && (op.transactionId || op.transaction_id);
-    if (!txId) return reply.code(500).send({ ok: false, error: 'matching UTXO found but transactionId missing from its outpoint' });
-    // ③ idempotent: already registered for this TX → replay returns ok (UNIQUE side_lock_tx, no double-count).
+    if (!txId) return reply.code(500).send({ ok: false, error: 'unregistered UTXO outpoint.transactionId missing' });
+    let actualStakeSompi;
+    try { actualStakeSompi = BigInt(candidate.amount); }
+    catch { return reply.code(500).send({ ok: false, error: `UTXO amount not BigInt-parseable: ${candidate.amount}` }); }
+    if (actualStakeSompi < BigInt(BETTOR_MIN_STAKE_POLICY)) {
+      return reply.send({ ok: true, registered: false, dust_below_floor: true, side_p2sh: sideP2sh, found_sompi: actualStakeSompi.toString(), policy_sompi: String(BETTOR_MIN_STAKE_POLICY), side_lock_tx_candidate: txId, note: `UTXO ${actualStakeSompi} sompi < POLICY floor ${BETTOR_MIN_STAKE_POLICY} sompi (= ${BETTOR_MIN_STAKE_POLICY / 1e8} KAS). Pay at least the floor to register. Below-floor deposits remain locked at side_p2sh until refund.` });
+    }
+    const stakeAmountInt = Number(actualStakeSompi);  // safe: even 90M KAS = 9e15 sompi < Number.MAX_SAFE_INTEGER
+    // ③ idempotent: rare race where same TX registers twice between SELECT + INSERT.
     const already = sqlite.prepare('SELECT bettor_pk, direction, stake_amount, side_p2sh, merkle_index FROM pool_bettor_sides WHERE market_id = ? AND side_lock_tx = ?').get(marketId, txId);
     if (already) return reply.send({ ok: true, registered: true, already_registered: true, side_lock_tx: txId, ...already });
-    // Owner P0 (Bettor r23): "1 address 1 market 1 position" check stripped — was architectural
-    // byproduct of UNIQUE(market_id, bettor_pk), 0 user-need. TX-based idempotency above (line 764)
-    // still prevents double-counting the same payment. J2 v160 drops the DB UNIQUE index.
     const bettorCount = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(marketId).c;
-    if (bettorCount >= 50) return reply.code(409).send({ ok: false, error: 'market full — 50 bettors max per market' });
-    // Register — parity with the relay bettor/register: insert pool_bettor_sides + recompute Merkle root.
-    // bettor_relay_id = NULL marks an external (0-key) bettor; side_lock_tx = the user's OWN payment TX.
+    if (bettorCount >= 50) return reply.code(409).send({ ok: false, error: 'market full — 50 bet slots max per market' });
     const merkleIndex = bettorCount;
     try {
       sqlite.prepare(`INSERT INTO pool_bettor_sides (market_id, bettor_pk, bettor_relay_id, direction, stake_amount, side_p2sh, side_lock_tx, merkle_index, side_redeem_script_hex)
-        VALUES (?,?,?,?,?,?,?,?,?)`).run(marketId, d.bettorPk, null, v.direction, v.stakeAmount, sideP2sh, txId, merkleIndex, d.sideResult.redeemScript);
+        VALUES (?,?,?,?,?,?,?,?,?)`).run(marketId, d.bettorPk, null, v.direction, stakeAmountInt, sideP2sh, txId, merkleIndex, d.sideResult.redeemScript);
     } catch (e) {
       console.error(`[pool/register-external/confirm] DB insert fail: ${e.message}`);
       return reply.code(500).send({ ok: false, error: `DB insert fail: ${e.message}` });
@@ -916,9 +926,9 @@ export async function registerPoolRoutes(fastify) {
     const tree = buildSidesMerkleTree(bettors.map(x => x.bettor_pk));
     sqlite.prepare('UPDATE pool_markets SET sides_merkle_root = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(tree.root, marketId);
 
-    // Bettor r117/r120 producer ② cross-node broadcast: bet_register (no sig, chain UTXO is truth).
+    // Producer cross-node broadcast: stake_amount uses ACTUAL UTXO value (Bettor r163 (c) LOCK).
     const _bcastBet = await _broadcastBetRegistered({
-      market_id: marketId, bettor_pk: d.bettorPk, direction: v.direction, stake_amount: v.stakeAmount,
+      market_id: marketId, bettor_pk: d.bettorPk, direction: v.direction, stake_amount: stakeAmountInt,
       side_p2sh: sideP2sh, side_lock_tx: txId, merkle_index: merkleIndex,
       protocol_version: market.protocol_version || 'v0.5',
       broadcaster_relay_id: market.maker_relay_id,
@@ -927,6 +937,7 @@ export async function registerPoolRoutes(fastify) {
     return reply.send({
       ok: true, registered: true, market_id: marketId, bettor_pk: d.bettorPk, direction: v.direction,
       side_p2sh: sideP2sh, side_lock_tx: txId, merkle_index: merkleIndex, sides_merkle_root: tree.root,
+      stake_sompi: stakeAmountInt, stake_kas: (stakeAmountInt / 1e8).toFixed(8),
       bettor_count: bettorCount + 1, external: true,
       cross_node_publish_tx: _bcastBet?.txId || null,
     });
@@ -1024,29 +1035,44 @@ export async function registerPoolRoutes(fastify) {
       return reply.code(503).send({ ok: false, error: `RPC UTXO query failed (${e.message}) — retry shortly` });
     }
     utxos = utxos || [];
-    const wantSompi = BigInt(v.stakeAmount);
-    const exactUtxo = utxos.find(u => { try { return BigInt(u.amount) === wantSompi; } catch { return false; } });
-    if (!exactUtxo) {
-      const mine = sqlite.prepare('SELECT side_lock_tx, merkle_index FROM pool_bettor_sides WHERE market_id = ? AND bettor_pk = ? AND direction = ? AND stake_amount = ?')
-        .get(marketId, d.bettorPk, v.direction, v.stakeAmount);
-      if (mine) return reply.send({ ok: true, registered: true, already_registered: true, side_p2sh: sideP2sh, side_lock_tx: mine.side_lock_tx, merkle_index: mine.merkle_index });
-      if (utxos.length > 0) {
-        return reply.send({ ok: true, registered: false, wrong_payment_detected: true, side_p2sh: sideP2sh, exact_stake_sompi: v.stakeAmount, note: `错付: side P2SH holds ${utxos.length} UTXO(s) but none == exact ${v.stakeAmount} sompi — pay EXACTLY.` });
+    // P2-3 Sub 2 LOCK (Bettor r163 + Owner): variable-amount per-UTXO independent claim. See v0.5
+    // confirm above for full rationale + invariants. v0.6 path uses computeSideP2SH_v06 which now
+    // (post-J1 0772dc855 v0.7) ignores stakeAmount in ctor → side_p2sh stable across any deposit value.
+    const registeredTxs = new Set(
+      sqlite.prepare('SELECT side_lock_tx FROM pool_bettor_sides WHERE market_id = ? AND bettor_pk = ? AND direction = ?')
+        .all(marketId, d.bettorPk, v.direction).map(r => r.side_lock_tx)
+    );
+    const candidate = utxos.find(u => {
+      const op = u.outpoint || u.entry?.outpoint;
+      const txid = op && (op.transactionId || op.transaction_id);
+      return txid && !registeredTxs.has(txid);
+    });
+    if (!candidate) {
+      if (utxos.length > 0 && registeredTxs.size > 0) {
+        const mineLatest = sqlite.prepare('SELECT side_lock_tx, merkle_index, stake_amount FROM pool_bettor_sides WHERE market_id = ? AND bettor_pk = ? AND direction = ? ORDER BY id DESC LIMIT 1')
+          .get(marketId, d.bettorPk, v.direction);
+        if (mineLatest) return reply.send({ ok: true, registered: true, already_registered: true, side_p2sh: sideP2sh, side_lock_tx: mineLatest.side_lock_tx, merkle_index: mineLatest.merkle_index, stake_sompi: mineLatest.stake_amount });
       }
-      return reply.send({ ok: true, registered: false, pending: true, side_p2sh: sideP2sh, exact_stake_sompi: v.stakeAmount, note: 'no matching payment detected yet — keep polling' });
+      return reply.send({ ok: true, registered: false, pending: true, side_p2sh: sideP2sh, note: `no unregistered payment detected at side_p2sh — pay any amount >= ${BETTOR_MIN_STAKE_POLICY / 1e8} KAS to claim a bet.` });
     }
-    const op = exactUtxo.outpoint || exactUtxo.entry?.outpoint;
+    const op = candidate.outpoint || candidate.entry?.outpoint;
     const txId = op && (op.transactionId || op.transaction_id);
-    if (!txId) return reply.code(500).send({ ok: false, error: 'matching UTXO found but transactionId missing' });
+    if (!txId) return reply.code(500).send({ ok: false, error: 'unregistered UTXO outpoint.transactionId missing' });
+    let actualStakeSompi;
+    try { actualStakeSompi = BigInt(candidate.amount); }
+    catch { return reply.code(500).send({ ok: false, error: `UTXO amount not BigInt-parseable: ${candidate.amount}` }); }
+    if (actualStakeSompi < BigInt(BETTOR_MIN_STAKE_POLICY)) {
+      return reply.send({ ok: true, registered: false, dust_below_floor: true, side_p2sh: sideP2sh, found_sompi: actualStakeSompi.toString(), policy_sompi: String(BETTOR_MIN_STAKE_POLICY), side_lock_tx_candidate: txId, note: `UTXO ${actualStakeSompi} sompi < POLICY floor ${BETTOR_MIN_STAKE_POLICY} sompi (= ${BETTOR_MIN_STAKE_POLICY / 1e8} KAS). Pay at least the floor to register. Below-floor deposits remain locked at side_p2sh until refund.` });
+    }
+    const stakeAmountInt = Number(actualStakeSompi);
     const already = sqlite.prepare('SELECT bettor_pk, direction, stake_amount, side_p2sh, merkle_index FROM pool_bettor_sides WHERE market_id = ? AND side_lock_tx = ?').get(marketId, txId);
     if (already) return reply.send({ ok: true, registered: true, already_registered: true, side_lock_tx: txId, ...already });
-    // Owner P0 (Bettor r23): "1 addr 1 mkt 1 pos" check stripped — see v0.5 confirm above for rationale.
     const bettorCount = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(marketId).c;
-    if (bettorCount >= 50) return reply.code(409).send({ ok: false, error: 'market full — 50 bettors max per market' });
+    if (bettorCount >= 50) return reply.code(409).send({ ok: false, error: 'market full — 50 bet slots max per market' });
     const merkleIndex = bettorCount;
     try {
       sqlite.prepare(`INSERT INTO pool_bettor_sides (market_id, bettor_pk, bettor_relay_id, direction, stake_amount, side_p2sh, side_lock_tx, merkle_index, side_redeem_script_hex)
-        VALUES (?,?,?,?,?,?,?,?,?)`).run(marketId, d.bettorPk, null, v.direction, v.stakeAmount, sideP2sh, txId, merkleIndex, d.sideResult.redeemScript);
+        VALUES (?,?,?,?,?,?,?,?,?)`).run(marketId, d.bettorPk, null, v.direction, stakeAmountInt, sideP2sh, txId, merkleIndex, d.sideResult.redeemScript);
     } catch (e) {
       console.error(`[pool/register-v06/confirm] DB insert fail: ${e.message}`);
       return reply.code(500).send({ ok: false, error: `DB insert fail: ${e.message}` });
@@ -1054,9 +1080,9 @@ export async function registerPoolRoutes(fastify) {
     const bettors = sqlite.prepare('SELECT bettor_pk FROM pool_bettor_sides WHERE market_id = ? ORDER BY merkle_index').all(marketId);
     const tree = buildSidesMerkleTree(bettors.map(x => x.bettor_pk));
     sqlite.prepare('UPDATE pool_markets SET sides_merkle_root = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(tree.root, marketId);
-    // Bettor r117/r120 producer ② cross-node broadcast: bet_register (v0.6, same shape as v0.5).
+    // Producer cross-node broadcast: stake_amount uses ACTUAL UTXO value (Bettor r163 (c) LOCK).
     const _bcastBetV06 = await _broadcastBetRegistered({
-      market_id: marketId, bettor_pk: d.bettorPk, direction: v.direction, stake_amount: v.stakeAmount,
+      market_id: marketId, bettor_pk: d.bettorPk, direction: v.direction, stake_amount: stakeAmountInt,
       side_p2sh: sideP2sh, side_lock_tx: txId, merkle_index: merkleIndex,
       protocol_version: 'v0.6',
       broadcaster_relay_id: market.maker_relay_id,
@@ -1065,6 +1091,7 @@ export async function registerPoolRoutes(fastify) {
     return reply.send({
       ok: true, registered: true, protocol_version: 'v0.6', market_id: marketId, bettor_pk: d.bettorPk, direction: v.direction,
       side_p2sh: sideP2sh, side_lock_tx: txId, merkle_index: merkleIndex, sides_merkle_root: tree.root,
+      stake_sompi: stakeAmountInt, stake_kas: (stakeAmountInt / 1e8).toFixed(8),
       bettor_count: bettorCount + 1, external: true,
       cross_node_publish_tx: _bcastBetV06?.txId || null,
     });
