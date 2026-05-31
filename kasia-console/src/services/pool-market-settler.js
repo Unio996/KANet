@@ -718,14 +718,16 @@ export async function dispatchPhase2(market, decision) {
         if (!Array.isArray(committee_pks) || committee_pks.length !== 5) throw new Error('committee_pks must be 5');
         const { loadPoolSnapshot } = await import('./pool-market-settler-v06.mjs');
         const snapshot = loadPoolSnapshot(market.id);
-        const sortedPks = snapshot.pool_pks.map(p => String(p).toLowerCase());
+        const { buildPoolMerkleTree, getPoolMerkleProof } = await import('./pool-merkle-v06.mjs');
+        // Bettor r221 hardening: buildPoolMerkleTree internally sorts. Use tree.sortedPks
+        // for index resolution to guarantee alignment regardless of snapshot storage order.
+        const tree = buildPoolMerkleTree(snapshot.pool_pks.map(p => String(p).toLowerCase()));
+        const sortedPks = tree.sortedPks;
         const committee_indices = committee_pks.map(pk => {
           const i = sortedPks.indexOf(String(pk).toLowerCase());
           if (i < 0) throw new Error(`committee pk ${pk.slice(0,12)} not in pool snapshot`);
           return i;
         });
-        const { buildPoolMerkleTree, getPoolMerkleProof } = await import('./pool-merkle-v06.mjs');
-        const tree = buildPoolMerkleTree(sortedPks);
         const committee_merkle_proofs = committee_indices.map(idx =>
           getPoolMerkleProof(tree, idx).map(buf => buf.toString('hex'))
         );  // 5 arrays of 8 hex strings each = 40 sibling hashes total
