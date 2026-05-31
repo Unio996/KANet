@@ -711,8 +711,17 @@ export async function unlockPoolSpineP2SH(args) {
   if (!Array.isArray(spineSigsByInput) || spineSigsByInput.length !== spineInputCount) {
     throw new Error(`spineSigsByInput must be ${spineInputCount} arrays, got ${spineSigsByInput?.length}`);
   }
-  if (spineSigsByInput.some(sigs => !Array.isArray(sigs) || sigs.length !== 3)) {
-    throw new Error('each spine input requires 3 oracle sigs for unanimous');
+  // KANet-UI r389 / Bettor r213 Layer-11 KI 49: v0.5 hardcoded 3-sig check rejects v0.6 5-sig
+  // unanimous. Accept any uniform count >= 3 (v0.5) or 5 (v0.6 path A settle_aggregate).
+  // PoolSpine_v06.sil entry 0 expects 5 committee sigs + 5 PKs + merkle proofs — caller
+  // (settler) responsible for assembling correct scriptSig per protocol_version. Here we
+  // only enforce uniformity across spine inputs (= each input gets same number of sigs).
+  const expectedSigCount = spineSigsByInput[0]?.length || 0;
+  if (![3, 5].includes(expectedSigCount)) {
+    throw new Error(`spine sigs/input must be 3 (v0.5) or 5 (v0.6 settle_aggregate), got ${expectedSigCount}`);
+  }
+  if (spineSigsByInput.some(sigs => !Array.isArray(sigs) || sigs.length !== expectedSigCount)) {
+    throw new Error(`each spine input must have ${expectedSigCount} oracle sigs (uniform across inputs)`);
   }
   if (requiredInputOutpoints.length !== spineInputCount + sideP2shAddresses.length) {
     throw new Error(`input outpoint count ${requiredInputOutpoints.length} != ${spineInputCount} spine + ${sideP2shAddresses.length} sides`);
