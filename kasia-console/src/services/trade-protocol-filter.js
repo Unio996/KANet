@@ -85,6 +85,10 @@ export async function onBroadcastWritten(row) {
         await handlePredictionParams(msg); break;
       case 'pool_oracle_vote_v1':
         await handlePoolOracleVote(msg); break;  // Bettor r97 J2 consumer: 跨节点 oracle vote ingest
+      case 'pool_market_published_v1':
+        await handlePoolMarketPublished(msg); break;  // Bettor r117/r118/r120 ② consumer: market_publish
+      case 'pool_bet_registered_v1':
+        await handlePoolBetRegistered(msg); break;  // Bettor r113/r117/r120 ② consumer: bet_register
     }
   } catch (err) {
     console.error(`[trade-filter] Error processing ${msg.t}: ${err.message}`);
@@ -176,6 +180,211 @@ async function handlePoolOracleVote(msg) {
     console.log(`[trade-filter:pool-vote] ingested market=${msg.market_id.slice(0,12)} outcome=${msg.outcome} voter=${msg.voter_pubkey.slice(0,12)} tx=${msg._tx?.slice(0,16)}`);
   } catch (e) {
     console.warn(`[trade-filter:pool-vote] insert fail (likely dedup, ok): ${e.message}`);
+  }
+}
+
+// Bettor r117/r118/r120 ② consumer half — cross-node market_publish ingest.
+// Producer (J1 a3565bf _broadcastMarketPublished pool.js:36-95): maker_relay ecdsa_sign over
+// JSON.stringify(unsignedPayload) + send_broadcast kanet-prediction. Schema 22 fields + sig.
+// Consumer: verify metadata_hash (3-way命门 producer/consumer/spine ctor anchor) + verify maker sig
+// (kaspa.verifyMessage via maker_relay_pk from payload, NOT relay_nodes lookup) + INSERT OR IGNORE
+// pool_markets. Cross-node-correct identity via maker_relay_pk in protocol payload (= ① c2c84d1
+// same lesson: protocol membership lives in protocol fields not local relay_nodes infra).
+async function handlePoolMarketPublished(msg) {
+  const { randomUUID, createHash } = await import('crypto');
+  const kaspa = await import('kaspa-wasm');
+
+  const required = ['market_id', 'spine_p2sh', 'market_metadata_hash', 'maker_relay_pk', 'signature',
+    'outcome_market_source', 'outcome_condition_id', 'outcome_token_id', 'outcome_side',
+    'resolution_rule_spec', 'deadline'];
+  for (const k of required) {
+    if (msg[k] === undefined || msg[k] === null) {
+      console.warn(`[trade-filter:market-pub] missing ${k} market=${msg.market_id?.slice(0,12)} — reject`);
+      return;
+    }
+  }
+
+  // Idempotent: already on this node? (= same-node producer-direct INSERT pre-empted, or prior consumer)
+  const existing = sqlite.prepare('SELECT id FROM pool_markets WHERE id = ?').get(msg.market_id);
+  if (existing) {
+    console.log(`[trade-filter:market-pub] market ${msg.market_id.slice(0,12)} already in local DB — skip`);
+    return;
+  }
+
+  // 1. Recompute market_metadata_hash (3-way命门: producer pool.js:283-291 == consumer == spine ctor anchor)
+  //    Formula a3565bf: end=deadline (int unix sec), NOT outcome_end_date. r123 fix landed.
+  const metaInput = JSON.stringify({
+    source: msg.outcome_market_source,
+    condition: msg.outcome_condition_id,
+    token: msg.outcome_token_id,
+    side: msg.outcome_side,
+    end: msg.deadline,
+    rule: msg.resolution_rule_spec,
+  });
+  const recomputedHash = createHash('sha256').update(metaInput).digest('hex');
+  if (recomputedHash !== msg.market_metadata_hash) {
+    console.warn(`[trade-filter:market-pub] metadata_hash mismatch market=${msg.market_id.slice(0,12)} expected=${msg.market_metadata_hash.slice(0,16)} got=${recomputedHash.slice(0,16)} — reject (3-way anchor break)`);
+    return;
+  }
+
+  // 2. Verify maker sig: rebuild unsignedPayload by stripping signature + meta (mirror producer L73 spread)
+  const unsignedCopy = { ...msg };
+  delete unsignedCopy.signature;
+  delete unsignedCopy._tx; delete unsignedCopy._from; delete unsignedCopy._channel; delete unsignedCopy._at;
+  const messageToVerify = JSON.stringify(unsignedCopy);
+  let sigValid = false;
+  try {
+    sigValid = kaspa.verifyMessage({ message: messageToVerify, signature: msg.signature, publicKey: String(msg.maker_relay_pk).toLowerCase() });
+  } catch (e) {
+    console.warn(`[trade-filter:market-pub] verifyMessage exception market=${msg.market_id.slice(0,12)}: ${e.message}`);
+    return;
+  }
+  if (!sigValid) {
+    console.warn(`[trade-filter:market-pub] sig invalid maker=${msg.maker_relay_pk?.slice(0,12)} market=${msg.market_id.slice(0,12)} — reject`);
+    return;
+  }
+
+  // 3. INSERT OR IGNORE pool_markets — cols mirror create-v06 path (pool.js:399-413).
+  //    Local-only cols (maker_relay_id / broker_relay_id / oracle_relay_ids) = NULL — we don't know
+  //    peer's relay IDs (protocol membership lives in pubkey fields). updated_at / sides_merkle_root
+  //    default. metadata flagged cross_node_origin for forensic clarity.
+  const oraclePks = Array.isArray(msg.oracle_relay_pks) ? msg.oracle_relay_pks : [];
+  const metadata = JSON.stringify({
+    cross_node_origin: true, source_tx: msg._tx, source_addr: msg._from,
+    published_at: msg.published_at,
+  });
+  try {
+    sqlite.prepare(`INSERT OR IGNORE INTO pool_markets (
+      id, maker_relay_id, spine_p2sh, spine_lock_tx, market_metadata_hash,
+      oracle1_pk, oracle2_pk, oracle3_pk, broker_pk,
+      deadline, miner_fee, broker_fee_pct, oracle_bond_amount, maker_stake_amount,
+      outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side, resolution_rule_spec,
+      protocol_status, sides_merkle_root, oracle_relay_ids, broker_relay_id, metadata, category,
+      protocol_version, pool_merkle_root
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      msg.market_id, null, msg.spine_p2sh, msg.spine_lock_tx, msg.market_metadata_hash,
+      oraclePks[0] || null, oraclePks[1] || null, oraclePks[2] || null, msg.broker_pk,
+      msg.deadline, msg.miner_fee, msg.broker_fee_pct, msg.oracle_bond_amount, msg.maker_stake_amount,
+      msg.outcome_market_source, msg.outcome_condition_id, msg.outcome_token_id, msg.outcome_side, msg.resolution_rule_spec,
+      'pending_bettors', '', '[]', null, metadata, msg.category,
+      msg.protocol_version || 'v0.5', msg.pool_merkle_root,
+    );
+    console.log(`[trade-filter:market-pub] ingested market=${msg.market_id.slice(0,12)} maker_pk=${msg.maker_relay_pk.slice(0,12)} tx=${msg._tx?.slice(0,16)}`);
+  } catch (e) {
+    console.warn(`[trade-filter:market-pub] insert fail market=${msg.market_id.slice(0,12)}: ${e.message}`);
+  }
+}
+
+// Bettor r113/r117/r120 ② consumer half — cross-node bet_register ingest.
+// Producer (J1 _broadcastBetRegistered pool.js:97-115): NO signature. Schema 9 fields.
+// Consumer verifies via CHAIN truth not sig: recompute side_p2sh from bettor_pk + market.spine + protocol_version,
+// then RPC getUtxosByAddresses(side_p2sh) finds UTXO with amount===stake_amount AND outpoint.txid===side_lock_tx
+// AND UTXO still UNSPENT (Bettor r113 refine: UNSPENT = open position; spent = already settled, skip).
+// Idempotent via UNIQUE side_lock_tx index on pool_bettor_sides.
+async function handlePoolBetRegistered(msg) {
+  const { createHash } = await import('crypto');
+  const required = ['market_id', 'bettor_pk', 'direction', 'stake_amount', 'side_p2sh', 'side_lock_tx'];
+  for (const k of required) {
+    if (msg[k] === undefined || msg[k] === null) {
+      console.warn(`[trade-filter:bet-reg] missing ${k} market=${msg.market_id?.slice(0,12)} — reject`);
+      return;
+    }
+  }
+
+  // Idempotent: side_lock_tx UNIQUE index → INSERT OR IGNORE handles dedup. Cheap pre-check skips
+  // entire RPC roundtrip if already ingested.
+  const existing = sqlite.prepare('SELECT id FROM pool_bettor_sides WHERE side_lock_tx = ?').get(msg.side_lock_tx);
+  if (existing) {
+    console.log(`[trade-filter:bet-reg] side_lock_tx ${msg.side_lock_tx.slice(0,16)} already ingested — skip`);
+    return;
+  }
+
+  // 1. Market must exist on this node (cross-node market_publish gap → skip until market_publish lands).
+  const market = sqlite.prepare(`SELECT id, spine_p2sh, market_metadata_hash, pool_merkle_root, deadline, protocol_version
+    FROM pool_markets WHERE id = ?`).get(msg.market_id);
+  if (!market) {
+    console.log(`[trade-filter:bet-reg] market ${msg.market_id.slice(0,12)} not in local DB (race vs market_publish, skip — replay on next broadcast)`);
+    return;
+  }
+
+  // 2. Recompute side_p2sh + verify == payload. Path differs v0.5 vs v0.6.
+  let recomputedSideP2sh, recomputedRedeem;
+  try {
+    if ((msg.protocol_version || market.protocol_version) === 'v0.6') {
+      const { computeSideP2SH_v06 } = await import('../lib/pool-p2sh-v06.mjs');
+      // Producer mirrors pool.js:811: spineP2shHash = sha256(market.spine_p2sh string) hex.
+      const spineP2shHash = createHash('sha256').update(market.spine_p2sh).digest('hex');
+      const network = market.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+      const r = await computeSideP2SH_v06({
+        bettorPk: msg.bettor_pk, spineP2shHash, poolMerkleRoot: market.pool_merkle_root,
+        marketMetadataHash: market.market_metadata_hash, direction: msg.direction,
+        stakeAmount: msg.stake_amount, deadline: market.deadline, network,
+      });
+      recomputedSideP2sh = r.p2shAddr; recomputedRedeem = r.redeemScript;
+    } else {
+      console.warn(`[trade-filter:bet-reg] v0.5 path not implemented yet market=${msg.market_id.slice(0,12)} — skip`);
+      return;
+    }
+  } catch (e) {
+    console.warn(`[trade-filter:bet-reg] side_p2sh recompute fail market=${msg.market_id.slice(0,12)}: ${e.message}`);
+    return;
+  }
+  if (recomputedSideP2sh !== msg.side_p2sh) {
+    console.warn(`[trade-filter:bet-reg] side_p2sh mismatch market=${msg.market_id.slice(0,12)} expected=${msg.side_p2sh?.slice(0,20)} got=${recomputedSideP2sh?.slice(0,20)} — reject (spoofed bettor_pk or wrong derivation)`);
+    return;
+  }
+
+  // 3. Chain truth: getUtxosByAddresses(side_p2sh) finds UTXO matching stake_amount + side_lock_tx,
+  //    AND it's still UNSPENT (= position open). Bettor r113 refine: spent UTXO = already settled, skip.
+  const { getWorkingRpc } = await import('./rpc-health.js');
+  const { url: rpcUrl } = await getWorkingRpc();
+  if (!rpcUrl) {
+    console.warn(`[trade-filter:bet-reg] no working RPC, skip (will replay on next broadcast)`);
+    return;
+  }
+  const { RpcClient, Encoding, Address } = await import('kaspa-wasm');
+  const network = market.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+  const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: network });
+  let utxos;
+  try {
+    await Promise.race([rpc.connect({}), new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 4000))]);
+    ({ entries: utxos } = await rpc.getUtxosByAddresses([new Address(msg.side_p2sh)]));
+  } catch (e) {
+    console.warn(`[trade-filter:bet-reg] RPC UTXO query fail market=${msg.market_id.slice(0,12)}: ${e.message} — skip (replay later)`);
+    try { await rpc.disconnect(); } catch {}
+    return;
+  } finally {
+    try { await rpc.disconnect(); } catch {}
+  }
+  utxos = utxos || [];
+  const wantSompi = BigInt(msg.stake_amount);
+  const exactUtxo = utxos.find(u => {
+    try {
+      if (BigInt(u.amount) !== wantSompi) return false;
+      const op = u.outpoint || u.entry?.outpoint;
+      const txid = op && (op.transactionId || op.transaction_id);
+      return txid === msg.side_lock_tx;
+    } catch { return false; }
+  });
+  if (!exactUtxo) {
+    // Position either never paid, already spent (settled), or wrong amount. Skip without INSERT —
+    // settled positions don't belong in pool_bettor_sides on this remote node (settler local truth wins).
+    console.log(`[trade-filter:bet-reg] no UNSPENT UTXO matching tx=${msg.side_lock_tx.slice(0,16)} amount=${msg.stake_amount} at ${msg.side_p2sh.slice(0,20)} (settled/unpaid/wrong) — skip`);
+    return;
+  }
+
+  // 4. INSERT OR IGNORE pool_bettor_sides (UNIQUE side_lock_tx WHERE NOT NULL dedup anchor).
+  //    bettor_relay_id NULL = external 0-key bettor on remote node (no local relay knows the privkey).
+  try {
+    sqlite.prepare(`INSERT OR IGNORE INTO pool_bettor_sides
+      (market_id, bettor_pk, bettor_relay_id, direction, stake_amount, side_p2sh, side_lock_tx, merkle_index, side_redeem_script_hex)
+      VALUES (?,?,?,?,?,?,?,?,?)`).run(
+        msg.market_id, msg.bettor_pk, null, msg.direction, msg.stake_amount,
+        msg.side_p2sh, msg.side_lock_tx, msg.merkle_index || null, recomputedRedeem,
+      );
+    console.log(`[trade-filter:bet-reg] ingested market=${msg.market_id.slice(0,12)} bettor=${msg.bettor_pk.slice(0,12)} dir=${msg.direction} stake=${msg.stake_amount} tx=${msg.side_lock_tx.slice(0,16)}`);
+  } catch (e) {
+    console.warn(`[trade-filter:bet-reg] insert fail (likely UNIQUE dedup, ok): ${e.message}`);
   }
 }
 
