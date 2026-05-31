@@ -41,6 +41,10 @@ export const COMMAND_TYPES = Object.freeze({
   POOL_REFUND_DISAGREEMENT_TX: 'pool_refund_disagreement_tx',
   // B2 v0.5 Phase 3 bug 7 fix — confirm transfer UTXO landed in accepted set.
   CHECK_UTXO_LANDED: 'check_utxo_landed',
+  // ③ committee chainReader (Bettor r170 + J1 r204/649197d) — Console wraps as chainReader.
+  // J1 r204 漏 register 白名单, validateCommandPayload reject silent → relay log "INVALID COMMAND" + settler "Relay not running". KI sediment 5/20 复刻 (relay.mjs L688 pattern), KANet-UI r365 补.
+  CHAIN_GET_CURRENT_DAA_SCORE: 'chain_get_current_daa_score',
+  CHAIN_GET_BLOCKS_FROM_DAA_SCORE: 'chain_get_blocks_from_daa_score',
 });
 
 export const COMMAND_TYPE_SET = new Set(Object.values(COMMAND_TYPES));
@@ -73,6 +77,9 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.POOL_SETTLE_TX]: ['spine_p2sh_address', 'side_p2sh_addresses', 'spine_redeem_script_hex', 'side_redeem_script_hexes', 'required_input_outpoints', 'outputs', 'spine_sigs_by_input', 'spine_input_count', 'winner'],
   [COMMAND_TYPES.POOL_REFUND_DISAGREEMENT_TX]: ['spine_p2sh_address', 'spine_redeem_script_hex', 'required_input_outpoints', 'outputs', 'spine_sigs_by_input', 'silent_oracle_index', 'signing_pair'],
   [COMMAND_TYPES.CHECK_UTXO_LANDED]: ['address', 'txid'],
+  // ③ committee chainReader — get current DAA score 不需 payload field; get blocks 需 min_daa_score.
+  [COMMAND_TYPES.CHAIN_GET_CURRENT_DAA_SCORE]: [],
+  [COMMAND_TYPES.CHAIN_GET_BLOCKS_FROM_DAA_SCORE]: ['min_daa_score'],
 });
 
 // R38 (Z23 sediment): typeof spec per field. Bug-Z23 真根因 — broker enqueue amount: number,
