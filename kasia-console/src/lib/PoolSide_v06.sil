@@ -53,13 +53,17 @@
 
 pragma silverscript ^0.1.0;
 
+// v0.7 Phase-2 (d) variable-stake (Bettor §5.3c LOCKED 2026-05-31):
+// stakeAmount removed from ctor → side P2SH no longer baked with amount. Bettor can deposit
+// any amount ≥ 1 KAS (API floor) to side_p2sh; claim_winner reads tx.inputs[0].value at spend
+// time. payout = side_value × totalPool / winnerPool. Per-UTXO independent claim (multiple
+// deposits = multiple claim TXs).
 contract PoolSide_v06(
     byte[32] bettorPk,
     byte[32] spineP2shHash,
     byte[32] poolMerkleRoot,        // path A: same root as spine — anchors committee membership at claim
     byte[32] marketMetadataHash,
     int direction,                  // 0 = YES, 1 = NO
-    int stakeAmount,
     int deadline
 ) {
     // entry 0 — settled_via_spine: cooperative path, trusts spine settle TX.
@@ -234,10 +238,12 @@ contract PoolSide_v06(
         require(bCur == sidesMerkleRoot);
 
         // ⑤ payout calculation (arithmetic branch — fixes v0.5 L88 NO-winner bug).
+        // v0.7: payout uses tx.inputs[0].value (variable amount), enforced single-input below.
         int notWinner = 1 - settlementWinner;
         int winnerPool = totalYesPool * notWinner + totalNoPool * settlementWinner;
         int totalPool = totalYesPool + totalNoPool;
-        int payout = stakeAmount * totalPool / winnerPool;
+        require(tx.inputs.length == 1);  // v0.7 per-UTXO claim: N deposits = N claim TXs
+        int payout = tx.inputs[0].value * totalPool / winnerPool;
 
         // ⑥ output to bettor.
         require(tx.outputs.length == 1);
@@ -253,9 +259,11 @@ contract PoolSide_v06(
         require(checkSig(bettorSig, pubkey(bettorPk)));
         require(tx.time >= deadline * 1000);
 
+        // v0.7 per-UTXO refund: spend exactly 1 UTXO, payout = its value - minerFee placeholder.
+        require(tx.inputs.length == 1);
         require(tx.outputs.length == 1);
         byte[34] bettorLock = new ScriptPubKeyP2PK(pubkey(bettorPk));
         require(tx.outputs[0].scriptPubKey == byte[](bettorLock));
-        require(tx.outputs[0].value == stakeAmount - 1000);  // minerFee placeholder
+        require(tx.outputs[0].value == tx.inputs[0].value - 1000);  // minerFee placeholder
     }
 }
