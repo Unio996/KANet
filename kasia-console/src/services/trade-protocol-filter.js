@@ -255,6 +255,12 @@ async function handlePoolMarketPublished(msg) {
     cross_node_origin: true, source_tx: msg._tx, source_addr: msg._from,
     published_at: msg.published_at,
   });
+  // maker_relay_id is NOT NULL on the table but cross-node ingest doesn't know peer's UUID.
+  // Use `cross-node:<maker_relay_pk>` sentinel — unique per peer maker + makes origin obvious
+  // in queries. UI and settler treat unknown relay_ids as remote (already handle null relay
+  // lookup gracefully — `relay_nodes WHERE id = ?` returns nothing, callers fall back to
+  // protocol fields like maker_pk on the row).
+  const sentinelRelayId = `cross-node:${msg.maker_relay_pk}`;
   try {
     sqlite.prepare(`INSERT OR IGNORE INTO pool_markets (
       id, maker_relay_id, spine_p2sh, spine_lock_tx, market_metadata_hash,
@@ -264,11 +270,11 @@ async function handlePoolMarketPublished(msg) {
       protocol_status, sides_merkle_root, oracle_relay_ids, broker_relay_id, metadata, category,
       protocol_version, pool_merkle_root
     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-      msg.market_id, null, msg.spine_p2sh, msg.spine_lock_tx, msg.market_metadata_hash,
+      msg.market_id, sentinelRelayId, msg.spine_p2sh, msg.spine_lock_tx, msg.market_metadata_hash,
       oraclePks[0] || null, oraclePks[1] || null, oraclePks[2] || null, msg.broker_pk,
       msg.deadline, msg.miner_fee, msg.broker_fee_pct, msg.oracle_bond_amount, msg.maker_stake_amount,
       msg.outcome_market_source, msg.outcome_condition_id, msg.outcome_token_id, msg.outcome_side, msg.resolution_rule_spec,
-      'pending_bettors', '', '[]', null, metadata, msg.category,
+      'pending_bettors', '', '[]', sentinelRelayId, metadata, msg.category,
       msg.protocol_version || 'v0.5', msg.pool_merkle_root,
     );
     console.log(`[trade-filter:market-pub] ingested market=${msg.market_id.slice(0,12)} maker_pk=${msg.maker_relay_pk.slice(0,12)} tx=${msg._tx?.slice(0,16)}`);
