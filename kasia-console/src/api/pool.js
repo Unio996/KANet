@@ -33,6 +33,31 @@ function deriveXOnlyPubkey(address) {
 // onchain so remote nodes' Scout + trade-protocol-filter rebuild pool_markets locally.
 // Best-effort: fail logs warn, doesn't fail create (spine_lock_tx already onchain).
 //
+// Bettor r128 (B) chunking: relay storage-mass safe budget ~450 char. Larger payloads chunked
+// via pool_market_chunk_v1 envelope: {t, hash, ord, total, data}. hash = sha256 over the full
+// inner payload string so consumer can verify reassembly integrity. data slice budget chosen
+// so each chunk envelope stays under SAFE_CHUNK_BUDGET.
+const SAFE_CHUNK_BUDGET = 450;  // hard ceiling per chunk (envelope + data)
+// Envelope overhead at worst (3-digit ord/total, 64-hex hash, json quotes): ~110 chars. Leave 340 for data.
+const CHUNK_DATA_BUDGET = 340;
+async function _sendBroadcastChunked(relayId, channel, payloadStr) {
+  if (payloadStr.length <= SAFE_CHUNK_BUDGET) {
+    return await sendCommandAsync(relayId, { type: 'send_broadcast', channel, message: payloadStr });
+  }
+  const hash = createHash('sha256').update(payloadStr).digest('hex');
+  const total = Math.ceil(payloadStr.length / CHUNK_DATA_BUDGET);
+  const txIds = [];
+  for (let ord = 0; ord < total; ord++) {
+    const data = payloadStr.slice(ord * CHUNK_DATA_BUDGET, (ord + 1) * CHUNK_DATA_BUDGET);
+    const chunkPayload = JSON.stringify({ t: 'pool_market_chunk_v1', hash, ord, total, data });
+    const r = await sendCommandAsync(relayId, { type: 'send_broadcast', channel, message: chunkPayload });
+    if (!r?.txId) throw new Error(`chunk ${ord+1}/${total} broadcast no txId: ${JSON.stringify(r).slice(0,200)}`);
+    txIds.push(r.txId);
+  }
+  console.log(`[pool/broadcast] chunked ${payloadStr.length} chars → ${total} chunks hash=${hash.slice(0,8)} txIds=[${txIds.map(t=>t.slice(0,8)).join(',')}]`);
+  return { ok: true, txId: txIds.join(','), chunks: total, hash };
+}
+
 // Schema pool_market_published_v1 (r179-locked, r180 3-way verified, r120 ACK).
 // market_metadata_hash 3-way alignment (r180 grep verified L191-198): producer/consumer/spine
 // all sha256(JSON.stringify({source, condition, token, side, end, rule})).
@@ -74,12 +99,7 @@ async function _broadcastMarketPublished(marketRow, makerRelayId) {
     if (!signature) throw new Error('ecdsa_sign returned empty');
 
     const payloadStr = JSON.stringify({ ...unsignedPayload, signature });
-    if (payloadStr.length > 4000) {
-      console.warn(`[pool/broadcast] market_publish payload ${payloadStr.length} > 4000 — chunked v1 TODO, sending single`);
-    }
-    const bcastResult = await sendCommandAsync(makerRelayId, {
-      type: 'send_broadcast', channel: 'kanet-prediction', message: payloadStr,
-    });
+    const bcastResult = await _sendBroadcastChunked(makerRelayId, 'kanet-prediction', payloadStr);
     const txId = bcastResult?.txId;
     if (!txId) throw new Error(`broadcast no txId: ${JSON.stringify(bcastResult).slice(0, 200)}`);
     console.log(`[pool/broadcast] market_published ${marketRow.id.slice(0, 12)} txId=${txId.slice(0, 16)}...`);
@@ -103,9 +123,7 @@ async function _broadcastBetRegistered(args) {
       protocol_version: protocol_version || 'v0.5',
       registered_at: new Date().toISOString(),
     };
-    const bcastResult = await sendCommandAsync(broadcaster_relay_id, {
-      type: 'send_broadcast', channel: 'kanet-prediction', message: JSON.stringify(unsignedPayload),
-    });
+    const bcastResult = await _sendBroadcastChunked(broadcaster_relay_id, 'kanet-prediction', JSON.stringify(unsignedPayload));
     const txId = bcastResult?.txId;
     if (!txId) throw new Error(`broadcast no txId: ${JSON.stringify(bcastResult).slice(0, 200)}`);
     console.log(`[pool/broadcast] bet_registered ${market_id.slice(0, 12)}/${bettor_pk.slice(0, 8)} txId=${txId.slice(0, 16)}...`);
