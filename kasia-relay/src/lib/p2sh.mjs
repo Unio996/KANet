@@ -812,8 +812,9 @@ export async function unlockPoolSpineP2SH(args) {
       // Selector OP_0 (entry 0 = settle_aggregate) + redeem reveal
       scriptSigHex += selectorOpHex;
       scriptSigHex += spineRedeemPushHex;
-      // J2 layer-15 diagnostic: dump scriptSig hex so 0x76 OP_DUP misalignment is locatable.
-      console.log(`[unlockPoolSpineP2SH v0.6] scriptSig hex (${scriptSigHex.length/2} B): ${scriptSigHex.slice(0, 200)}...${scriptSigHex.slice(-100)}`);
+      // J1 r245 + Bettor diff request: dump FULL scriptSig hex for byte-level cross-verify
+      // against Bettor's _diag_scriptsig_46f8a.cjs reconstruction.
+      console.log(`[unlockPoolSpineP2SH v0.6 FULL] scriptSig ${scriptSigHex.length/2}B: ${scriptSigHex}`);
       return scriptSigHex;
     });
 
