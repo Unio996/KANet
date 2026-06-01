@@ -115,6 +115,13 @@ export async function poolSettlerTick() {
         let doomedMeta = {};
         try { doomedMeta = JSON.parse(market.metadata || '{}'); } catch {}
         if (doomedMeta.needs_larger_pot) {
+          // Bettor r343 catch: active state machine 优先于 doomed-skip. ccvr9+unmfw 已 self-heal
+          // dispatchRefund (refund_dispatched_at set) + status='refunding' 但 needs_larger_pot=true
+          // 仍 set → 下次 tick L117 doomed-skip → handleRefunding (L141 之后) 永轮不到. 加 fall-through:
+          // refunding / cancelled status 跳过 doomed-skip 继续走 handleRefunding (= 同 34a402b 模式).
+          if (market.protocol_status === 'refunding' || market.protocol_status === 'cancelled') {
+            // Fall through to L141 refunding/collecting_sigs handler. 不 continue.
+          } else {
           // min-pot 选项 A (Bettor r339): v0.6/v0.7 anonymous-pool legacy needs_larger_pot markets
           // (= 7446fba 之前 marked, ccvr9 / unmfw / 等) 不该永远 skip 卡死. 同 storage-mass cap
           // 触发路径 → cancel-refund 全员 (= dispatchRefund maker + per-bettor 'bettor_refund_available').
@@ -171,6 +178,7 @@ export async function poolSettlerTick() {
           }
           doomed++;
           continue;
+          }  // end else (= not refunding/cancelled fall-through)
         }
 
         // G6 批 3 段① 0-bet PRE-sampling shortcut (Bettor r301 catch): committee sampling needs
