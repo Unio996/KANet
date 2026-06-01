@@ -1009,96 +1009,23 @@ async function computeMassAwareV07RefundFee({ market, makerStake, networkId, mak
   const spineRedeemHex = meta.spine_redeem_script_hex;
   if (!spineRedeemHex) throw new Error('market.metadata missing spine_redeem_script_hex');
 
-  // Look up the actual spine UTXO (needed for utxo.amount + scriptPublicKey in fake TX).
-  const kaspa = await import('kaspa-wasm');
-  const { RpcClient, Encoding, Address, Transaction, TransactionOutput,
-          payToAddressScript, calculateTransactionMass, kaspaToSompi } = kaspa;
-
-  // KANet-UI r452 catch: Resolver picks public Kaspa endpoint, NOT the patched local node.
-  // Use getWorkingRpc() to point at the LOCAL relaxed-mempool node (= same that pool.js
-  // L1067/L1225 path uses). KANet 铁律 feedback_use_system_rpc 5/12 sediment.
-  //
-  // CRITICAL (Bettor r303 catch): local node may be in IBD sync state → RPC hangs indefinitely
-  // → freezes settler daemon. Wrap in 15s timeout to fail-fast. Tick continues; next tick retries.
-  const { getWorkingRpc } = await import('./rpc-health.js');
-  const { url: rpcUrl } = await getWorkingRpc();
-  const RPC_TIMEOUT_MS = 15_000;
-  const withTimeout = (promise, ms, label) => Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error(`RPC timeout ${ms}ms (${label}) — node likely IBD syncing`)), ms)),
-  ]);
-  const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId });
-  await withTimeout(rpc.connect(), RPC_TIMEOUT_MS, 'rpc.connect');
-  let spineUtxo;
-  try {
-    const { entries } = await withTimeout(rpc.getUtxosByAddresses([market.spine_p2sh]), RPC_TIMEOUT_MS, 'getUtxos');
-    if (!entries?.length) throw new Error(`no UTXOs at spine_p2sh ${market.spine_p2sh}`);
-    const hits = entries.filter(e => e.outpoint.transactionId === market.spine_lock_tx);
-    if (!hits.length) throw new Error(`spine_lock_tx ${market.spine_lock_tx?.slice(0,12)} UTXO not found at ${market.spine_p2sh}`);
-    spineUtxo = hits[0];
-  } finally {
-    try { await rpc.disconnect(); } catch {}
-  }
-
-  // Build placeholder scriptSig with same byte layout as real signed TX:
-  //   [push(66 byte makerSig)] + [OP_2 0x52] + [OP_PUSHDATA2 + 2-byte LE length + redeem bytes]
-  // _encodePushDataHex helper would be cleaner but it's inside p2sh.mjs; replicate logic here.
-  const redeemBytes = Buffer.from(spineRedeemHex, 'hex');
-  let redeemPushHex;
-  if (redeemBytes.length <= 75) {
-    redeemPushHex = redeemBytes.length.toString(16).padStart(2, '0') + redeemBytes.toString('hex');
-  } else if (redeemBytes.length <= 255) {
-    redeemPushHex = '4c' + redeemBytes.length.toString(16).padStart(2, '0') + redeemBytes.toString('hex');
-  } else if (redeemBytes.length <= 65535) {
-    // OP_PUSHDATA2 + 2-byte little-endian length
-    const lenLE = Buffer.alloc(2);
-    lenLE.writeUInt16LE(redeemBytes.length);
-    redeemPushHex = '4d' + lenLE.toString('hex') + redeemBytes.toString('hex');
-  } else {
-    throw new Error(`redeem too large: ${redeemBytes.length} byte`);
-  }
-  // makerSig push: 0x41 (push 65 byte) + 64-byte sig (use dummy 0x00...) + 0x01 (SighashType.All)
-  const dummySigHex = '41' + '00'.repeat(64) + '01';
-  const dummyScriptSigHex = dummySigHex + '52' + redeemPushHex;
-
-  // Output amount: use stake - MIN_FEE as placeholder (= mass independent of value, so 占位 OK).
-  const placeholderOutputValue = BigInt(makerStake) - V07_MIN_FEE;
-  const outSpk = payToAddressScript(new Address(makerAddress));
-
-  // KANet-UI r454 + r455 sequential WASM panic 教训: kaspa-wasm Transaction.utxo 期望 the
-  // whole UtxoEntry shape (= outpoint + amount + scriptPublicKey + blockDaaScore + isCoinbase),
-  // not a partial. relay p2sh.mjs L228-236 直接 spread `utxo` (the whole entry from RPC).
-  // Build a clean utxo object preserving outpoint + numeric/bigint fields explicitly.
-  const utxoForMass = {
-    outpoint: {
-      transactionId: spineUtxo.outpoint.transactionId,
-      index: spineUtxo.outpoint.index,
-    },
-    amount: BigInt(spineUtxo.amount || spineUtxo.entry?.amount || 0),
-    scriptPublicKey: spineUtxo.scriptPublicKey || spineUtxo.entry?.scriptPublicKey,
-    blockDaaScore: BigInt(spineUtxo.blockDaaScore || spineUtxo.entry?.blockDaaScore || 0),
-    isCoinbase: spineUtxo.isCoinbase || spineUtxo.entry?.isCoinbase || false,
-  };
-  const fakeSignedTx = new Transaction({
-    version: 0,
-    inputs: [{
-      previousOutpoint: {
-        transactionId: spineUtxo.outpoint.transactionId,
-        index: spineUtxo.outpoint.index,
-      },
-      signatureScript: dummyScriptSigHex,
-      sequence: 0n,
-      sigOpCount: 1,
-      utxo: utxoForMass,
-    }],
-    outputs: [new TransactionOutput(placeholderOutputValue, outSpk)],
-    lockTime: BigInt(market.deadline) * 1000n,
-    gas: 0n,
-    subnetworkId: '0000000000000000000000000000000000000000',
-    payload: '',
+  // G6 批 3 段① Bettor r311 钦定: Console 手搓 UtxoEntry 喂 calculateTransactionMass 多次
+  // WASM panic (unreachable / 'outpoint is not an object' 等 N+1 whack-a-mole). 转 relay IPC
+  // 算 mass — relay 端有 well-tested kaspa-wasm UtxoEntry pattern (p2sh.mjs unlockPoolSpineRefundMakerUnjoined
+  // 已 ship), 直接 reuse. Console 只 IPC 调用拿结果, 不在 Console 手搓.
+  const result = await sendCommandAsync(market.maker_relay_id, {
+    type: 'pool_v07_compute_refund_mass',
+    spine_p2sh: market.spine_p2sh,
+    spine_lock_tx: market.spine_lock_tx,
+    spine_redeem_script_hex: spineRedeemHex,
+    maker_address: makerAddress,
+    maker_stake: String(makerStake),
+    deadline: String(market.deadline),
   });
-
-  const mass = calculateTransactionMass(networkId, fakeSignedTx);
+  if (!result?.ok || !result.mass) {
+    throw new Error(`relay mass compute fail: ${result?.error || 'no mass returned'}`);
+  }
+  const mass = BigInt(result.mass);
   let dynamicFee = BigInt(mass) * SOMPI_PER_MASS;
   if (dynamicFee < V07_MIN_FEE) dynamicFee = V07_MIN_FEE;
   if (dynamicFee > V07_MAX_FEE) dynamicFee = V07_MAX_FEE;

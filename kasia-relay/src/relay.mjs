@@ -706,6 +706,70 @@ if (process.send) {
           return;
         }
 
+        case 'pool_v07_compute_refund_mass': {
+          // G6 批 3 段① Bettor r311 钦定: Console 手搓 UtxoEntry 喂 calculateTransactionMass
+          // 多次 WASM panic (unreachable / 'outpoint is not an object' / scriptPublicKey 格式).
+          // Relay 端有 well-tested kaspa-wasm UtxoEntry pattern (p2sh.mjs 内 unlockPoolSpineRefundMakerUnjoined
+          // 已 ship), 直接 reuse: fetch UTXO + build fake signed TX + calculateTransactionMass + return.
+          const { RpcClient, Encoding, Address, Transaction, TransactionOutput,
+                  payToAddressScript, calculateTransactionMass } = await import('kaspa-wasm');
+          const wallet = getWallet();
+          const networkId = wallet.getNetworkId();
+          // Reuse relay's connectRpc helper for consistent URL + 15s timeout.
+          const { connectRpc, _encodePushDataHex } = await import('./lib/p2sh.mjs').then(m => ({
+            connectRpc: async (nid) => {
+              const { connectRpc } = await import('./lib/p2sh.mjs');
+              return connectRpc ? connectRpc(nid) : null;
+            },
+            _encodePushDataHex: m._encodePushDataHex,
+          })).catch(() => ({}));
+          const RPC_TIMEOUT_MS = 15_000;
+          const withTimeout = (p, ms, lbl) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`timeout ${ms}ms ${lbl}`)), ms))]);
+          const rpc = new RpcClient({ url: process.env.KASPA_RPC_URL || 'ws://127.0.0.1:17210', encoding: Encoding.Borsh, networkId });
+          await withTimeout(rpc.connect(), RPC_TIMEOUT_MS, 'connect');
+          let spineUtxo;
+          try {
+            const { entries } = await withTimeout(rpc.getUtxosByAddresses([cmd.spine_p2sh]), RPC_TIMEOUT_MS, 'getUtxos');
+            if (!entries?.length) throw new Error('no spine UTXO');
+            const hits = entries.filter(e => e.outpoint.transactionId === cmd.spine_lock_tx);
+            if (!hits.length) throw new Error('spine_lock_tx UTXO not found');
+            spineUtxo = hits[0];
+          } finally {
+            try { await rpc.disconnect(); } catch {}
+          }
+
+          const redeemBytes = Buffer.from(cmd.spine_redeem_script_hex, 'hex');
+          let redeemPushHex;
+          if (redeemBytes.length <= 75) redeemPushHex = redeemBytes.length.toString(16).padStart(2,'0') + redeemBytes.toString('hex');
+          else if (redeemBytes.length <= 255) redeemPushHex = '4c' + redeemBytes.length.toString(16).padStart(2,'0') + redeemBytes.toString('hex');
+          else { const lenLE = Buffer.alloc(2); lenLE.writeUInt16LE(redeemBytes.length); redeemPushHex = '4d' + lenLE.toString('hex') + redeemBytes.toString('hex'); }
+          const dummyScriptSigHex = '41' + '00'.repeat(64) + '01' + '52' + redeemPushHex;
+          const placeholderValue = BigInt(cmd.maker_stake) - 50000n;
+          const outSpk = payToAddressScript(new Address(cmd.maker_address));
+
+          // BUILD using relay-side pattern (= same as p2sh.mjs unlockPoolSpineRefundMakerUnjoined L1110+).
+          const fakeTx = new Transaction({
+            version: 0,
+            inputs: [{
+              previousOutpoint: { transactionId: spineUtxo.outpoint.transactionId, index: spineUtxo.outpoint.index },
+              signatureScript: dummyScriptSigHex,
+              sequence: 0n,
+              sigOpCount: 1,
+              utxo: spineUtxo,  // pass the WHOLE utxo entry from RPC (relay-tested pattern)
+            }],
+            outputs: [new TransactionOutput(placeholderValue, outSpk)],
+            lockTime: BigInt(cmd.deadline) * 1000n,
+            gas: 0n,
+            subnetworkId: '0000000000000000000000000000000000000000',
+            payload: '',
+          });
+          const mass = calculateTransactionMass(networkId, fakeTx);
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: { ok: true, mass: String(mass) } });
+          }
+          return;
+        }
+
         case 'pool_refund_maker_unjoined_tx': {
           // G2-B 二期 (Bettor r263 钦点) — PoolSpine_v06 entry 2 refund_maker_unjoined.
           // Maker single-sig + 1 input + 1 output, inline sign+submit (no DM/chain collection).
