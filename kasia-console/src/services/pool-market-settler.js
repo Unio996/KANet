@@ -1593,18 +1593,20 @@ async function handleCollectingSigs(market) {
   // Bettor r273 layer-17: sigs MUST be ordered to match committee_pks order so SS positional
   // checkSig(c_iSig, c_iPk) binds correctly. handleCollectingSigs scans chain_events by
   // observed_at → random order. Re-sort by oracle_relay_ids index (= committee order).
+  //
+  // qoyqv 实证 (Bettor r351 4/5 vote case): missing sig 不能 filter, 必 pad dummy 66B
+  // zero-sig 占位. v0.6/v0.7 SS settle_aggregate checkSig 内 validSigs counter — dummy
+  // sig 验失败 counter 不增, 但其他 4 sig PASS → counter=4 ≥ 4-of-5 threshold → SS accept.
+  // Dummy sig 必 same byte format as real (= 41 + 00×64 + 01 push-encoded) 不破坏 sigOpCount/sighash.
+  const DUMMY_SIG_PUSH_HEX = '41' + '00'.repeat(64) + '01';  // 66 byte push-encoded, validSigs 不增
   let oracleIdsForSort = [];
   try { oracleIdsForSort = JSON.parse(market.oracle_relay_ids || '[]'); } catch {}
   const spineSigsByInput = [];
   for (let i = 0; i < spineInputCount; i++) {
     const bySender = new Map(sigsByInput[i].map(s => [s.voter_relay_id, s.signature]));
-    const ordered = oracleIdsForSort.map(rid => bySender.get(rid)).filter(Boolean);
-    // Fallback to observed_at order if any committee member's sig missing (= safer than crash).
-    if (ordered.length === oracleIdsForSort.length && ordered.length > 0) {
-      spineSigsByInput.push(ordered);
-    } else {
-      spineSigsByInput.push(sigsByInput[i].map(s => s.signature));
-    }
+    // Pad missing positions with dummy sig (= same length as real, position-aware for SS positional checkSig).
+    const ordered = oracleIdsForSort.map(rid => bySender.get(rid) || DUMMY_SIG_PUSH_HEX);
+    spineSigsByInput.push(ordered);
   }
 
   // Bettor r283 G2-A: v0.5 phase2c-first-ship skipped non-unanimous (= forfeit_1 entry 1).
