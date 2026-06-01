@@ -854,13 +854,15 @@ export async function unlockPoolSpineP2SH(args) {
       }
       signedTx = new Transaction(parsed);
     } else {
+      // Bettor r271 layer-16: v0.6 settle_aggregate has 5 checkSig → sigOpCount=5.
+      const spineSigOpCountFinal = isV06 ? 5 : 3;
       signedTx = new Transaction({
         version: 0,
         inputs: matched.map((utxo, i) => ({
           previousOutpoint: { transactionId: utxo.outpoint.transactionId, index: utxo.outpoint.index },
           signatureScript: allScriptSigs[i],
           sequence: 0n,
-          sigOpCount: i < spineInputCount ? 3 : 0,
+          sigOpCount: i < spineInputCount ? spineSigOpCountFinal : 0,
         })),
         outputs: txOutputs,
         lockTime: txLockTime,
