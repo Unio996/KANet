@@ -725,7 +725,7 @@ export async function dispatchPhase2(market, decision) {
     if (payouts.makerExtraOutput) {
       outputs.push({ address: makerRow.address, amountSompi: payouts.makerExtraOutput.toString() });
     }
-    if (!isV06Outputs) {
+    if (!isAnonymousPoolOutputs) {
       // v0.5 legacy layout: bond returns at end
       for (const r of payouts.oracleBondReturns) {
         const mergedAmount = r.amount + oracleFeePerSig;
