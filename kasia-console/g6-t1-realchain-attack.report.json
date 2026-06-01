@@ -1,0 +1,37 @@
+{
+  "test": "G6 T1 真链 attack",
+  "tested_at": "2026-06-01T04:25:31.225Z",
+  "source": "kasia-relay/src/lib/p2sh.mjs _assertTxInvariants (live runtime extract)",
+  "source_first_100": "function _assertTxInvariants(matchedUtxos, signedTx, siteLabel = 'unknown') {\n  try {\n    const sumI",
+  "min_dust_sompi": "1000",
+  "cases": [
+    {
+      "name": "A 真攻 overspend 10K→20K",
+      "expected_throw_substring": "overspend",
+      "result": "THROWN: pre-submit invariant assert (g6-t1-realchain-attack): Σin=10000 < Σout=20000 (overspend 10000)",
+      "pass": true
+    },
+    {
+      "name": "B 真攻 0 fee Σin==Σout",
+      "expected_throw_substring": "0 miner fee",
+      "result": "THROWN: pre-submit invariant assert (g6-t1-realchain-attack): Σin==Σout (0 miner fee)",
+      "pass": true
+    },
+    {
+      "name": "C 真攻 dust 500 < 1000 floor",
+      "expected_throw_substring": "< dust",
+      "result": "THROWN: pre-submit invariant assert (g6-t1-realchain-attack): output[1] value=500 < dust 1000",
+      "pass": true
+    },
+    {
+      "name": "D 健康 (must NOT throw)",
+      "expected_throw_substring": null,
+      "result": "ACCEPTED (no throw)",
+      "pass": true
+    }
+  ],
+  "pass": 4,
+  "fail": 0,
+  "verdict": "ALL PASS",
+  "summary": "4/4 cases PASS — verdict ALL PASS"
+}
