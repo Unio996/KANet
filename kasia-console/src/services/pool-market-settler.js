@@ -601,10 +601,17 @@ export async function dispatchPhase2(market, decision) {
         committeeMode: market.protocol_version === 'v0.6',
       });
     } catch (e) {
-      // Bettor r291 Owner钦定 auto-refund: 0-bet markets reach consensus but computePoolPayouts
-      // throws 'no winners'. Route to dispatchRefund(refund_maker_unjoined) instead of stuck.
-      if (e.message?.includes('no winners')) {
-        console.log(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} 0-bet (no winners) → route to dispatchRefund`);
+      // Bettor r291/r293 Owner钦定 auto-refund: 0-bet markets fail computePoolPayouts via
+      // multiple strings: 'no winners' (= side empty after vote winner determined), OR
+      // 'losing pool (0) less than minerFee' (= 0 sides bet at all), OR
+      // 'less than broker_fee'. All mean 0-economy → route to dispatchRefund.
+      const msg = e.message || '';
+      const is0Bet = msg.includes('no winners')
+        || msg.includes('losing pool (0)')
+        || msg.includes('less than minerFee')
+        || msg.includes('less than broker_fee');
+      if (is0Bet) {
+        console.log(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} 0-bet (${msg.slice(0,80)}) → route to dispatchRefund`);
         await dispatchRefund(market, { action: 'refund', reason: '0-bet market, refund_maker_unjoined' });
         return;
       }
