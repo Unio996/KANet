@@ -884,7 +884,7 @@ export async function unlockPoolSpineP2SH(args) {
       const fee = sumIn - sumOut;
       if (fee < 0n) throw new Error(`Σin=${sumIn} < Σout=${sumOut} (overspend ${-fee}) — refusing submit`);
       if (fee === 0n) throw new Error(`Σin==Σout (0 miner fee) — refusing submit`);
-      const MIN_OUTPUT_DUST_SOMPI = 600n;  // KIP-9 conservative
+      const MIN_OUTPUT_DUST_SOMPI = 1000n;  // J1 r245 conservative (Kaspa KIP-9 mempool ~600; 1000 = ~67% margin)
       for (let i = 0; i < signedTx.outputs.length; i++) {
         const v = BigInt(typeof signedTx.outputs[i].value === 'bigint' ? signedTx.outputs[i].value : (signedTx.outputs[i].value || 0));
         if (v < MIN_OUTPUT_DUST_SOMPI) throw new Error(`output[${i}] value=${v} < dust floor ${MIN_OUTPUT_DUST_SOMPI} — refusing submit`);
