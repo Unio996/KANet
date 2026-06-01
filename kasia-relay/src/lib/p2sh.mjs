@@ -31,6 +31,26 @@ const TMP_DIR = process.env.KANET_ROOT ? join(process.env.KANET_ROOT, 'tmp') : '
 // Post-Toccata kaspad v1.2.0 TN12 always-toccata accepts up to 1M element. Bypass via manual hex emit.
 // 5 call sites: unlockP2SH / unlockP2SHMultiSig / unlockP2SHConsensual / pool spine settle / pool refund.
 // Use this helper instead of ScriptBuilder.addData() for any data push > 75 bytes.
+// Bettor r263 G6 批1.5 sweep: balance + dust invariant for ALL manual P2SH spend paths.
+// Centralized so all 5 submit sites get the same defense. Called before rpc.submitTransaction.
+function _assertTxInvariants(matchedUtxos, signedTx, siteLabel = 'unknown') {
+  try {
+    const sumIn = matchedUtxos.reduce((acc, u) => acc + BigInt(u.amount), 0n);
+    const sumOut = signedTx.outputs.reduce((acc, o) => acc + BigInt(typeof o.value === 'bigint' ? o.value : (o.value || 0)), 0n);
+    const fee = sumIn - sumOut;
+    if (fee < 0n) throw new Error(`Σin=${sumIn} < Σout=${sumOut} (overspend ${-fee})`);
+    if (fee === 0n) throw new Error(`Σin==Σout (0 miner fee)`);
+    const MIN_OUTPUT_DUST_SOMPI = 1000n;  // J1 r245 conservative
+    for (let i = 0; i < signedTx.outputs.length; i++) {
+      const v = BigInt(typeof signedTx.outputs[i].value === 'bigint' ? signedTx.outputs[i].value : (signedTx.outputs[i].value || 0));
+      if (v < MIN_OUTPUT_DUST_SOMPI) throw new Error(`output[${i}] value=${v} < dust ${MIN_OUTPUT_DUST_SOMPI}`);
+    }
+    console.log(`[${siteLabel} invariant] Σin=${sumIn} Σout=${sumOut} fee=${fee}, ${signedTx.outputs.length} outputs all >= dust`);
+  } catch (e) {
+    throw new Error(`pre-submit invariant assert (${siteLabel}): ${e.message}`);
+  }
+}
+
 function _encodePushDataHex(bytes) {
   const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
   const len = buf.length;
@@ -249,7 +269,7 @@ export async function unlockP2SH(wallet, p2shAddress, redeemScript, branch, toAd
       payload: '',
     });
 
-    // Submit
+    _assertTxInvariants([utxo], signedTx, 'unlockP2SH');
     const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: result.transactionId, amount: outValue };
   } finally {
@@ -395,6 +415,7 @@ export async function unlockP2SHMultiSig(p2shAddress, redeemScript, requiredInpu
       });
     }
 
+    _assertTxInvariants(matched, signedTx, 'p2sh-submit');
     const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: result.transactionId };
   } finally {
@@ -513,6 +534,7 @@ export async function unlockP2SHConsensual(p2shAddress, redeemScript, requiredIn
       });
     }
 
+    _assertTxInvariants(matched, signedTx, 'p2sh-submit');
     const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: result.transactionId };
   } finally {
@@ -674,6 +696,7 @@ export async function unlockP2SHDual(wallet, p2shAddress, redeemScript, branch, 
       payload: '',
     });
 
+    _assertTxInvariants(matched, signedTx, 'unlockP2SHDual');
     const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: result.transactionId };
   } finally {
@@ -876,24 +899,7 @@ export async function unlockPoolSpineP2SH(args) {
       });
     }
 
-    // Bettor r307 G6 批1 (a) Σin==Σout+fee invariant + (b) dust floor pre-submit assert.
-    // BigInt throughout to avoid JS Number precision loss at large pool sizes.
-    try {
-      const sumIn = matched.reduce((acc, u) => acc + BigInt(u.amount), 0n);
-      const sumOut = signedTx.outputs.reduce((acc, o) => acc + BigInt(typeof o.value === 'bigint' ? o.value : (o.value || 0)), 0n);
-      const fee = sumIn - sumOut;
-      if (fee < 0n) throw new Error(`Σin=${sumIn} < Σout=${sumOut} (overspend ${-fee}) — refusing submit`);
-      if (fee === 0n) throw new Error(`Σin==Σout (0 miner fee) — refusing submit`);
-      const MIN_OUTPUT_DUST_SOMPI = 1000n;  // J1 r245 conservative (Kaspa KIP-9 mempool ~600; 1000 = ~67% margin)
-      for (let i = 0; i < signedTx.outputs.length; i++) {
-        const v = BigInt(typeof signedTx.outputs[i].value === 'bigint' ? signedTx.outputs[i].value : (signedTx.outputs[i].value || 0));
-        if (v < MIN_OUTPUT_DUST_SOMPI) throw new Error(`output[${i}] value=${v} < dust floor ${MIN_OUTPUT_DUST_SOMPI} — refusing submit`);
-      }
-      console.log(`[unlockPoolSpineP2SH invariant] Σin=${sumIn} Σout=${sumOut} fee=${fee} sompi, ${signedTx.outputs.length} outputs all >= dust`);
-    } catch (e) {
-      throw new Error(`pre-submit balance/dust assert: ${e.message}`);
-    }
-
+    _assertTxInvariants(matched, signedTx, 'unlockPoolSpineP2SH');
     const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: result.transactionId };
   } finally {
@@ -1026,6 +1032,7 @@ export async function unlockPoolSpineRefundDisagreement(args) {
       });
     }
 
+    _assertTxInvariants(matched, signedTx, 'p2sh-submit');
     const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: result.transactionId };
   } finally {
