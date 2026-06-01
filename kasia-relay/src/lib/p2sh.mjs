@@ -876,6 +876,24 @@ export async function unlockPoolSpineP2SH(args) {
       });
     }
 
+    // Bettor r307 G6 批1 (a) Σin==Σout+fee invariant + (b) dust floor pre-submit assert.
+    // BigInt throughout to avoid JS Number precision loss at large pool sizes.
+    try {
+      const sumIn = matched.reduce((acc, u) => acc + BigInt(u.amount), 0n);
+      const sumOut = signedTx.outputs.reduce((acc, o) => acc + BigInt(typeof o.value === 'bigint' ? o.value : (o.value || 0)), 0n);
+      const fee = sumIn - sumOut;
+      if (fee < 0n) throw new Error(`Σin=${sumIn} < Σout=${sumOut} (overspend ${-fee}) — refusing submit`);
+      if (fee === 0n) throw new Error(`Σin==Σout (0 miner fee) — refusing submit`);
+      const MIN_OUTPUT_DUST_SOMPI = 600n;  // KIP-9 conservative
+      for (let i = 0; i < signedTx.outputs.length; i++) {
+        const v = BigInt(typeof signedTx.outputs[i].value === 'bigint' ? signedTx.outputs[i].value : (signedTx.outputs[i].value || 0));
+        if (v < MIN_OUTPUT_DUST_SOMPI) throw new Error(`output[${i}] value=${v} < dust floor ${MIN_OUTPUT_DUST_SOMPI} — refusing submit`);
+      }
+      console.log(`[unlockPoolSpineP2SH invariant] Σin=${sumIn} Σout=${sumOut} fee=${fee} sompi, ${signedTx.outputs.length} outputs all >= dust`);
+    } catch (e) {
+      throw new Error(`pre-submit balance/dust assert: ${e.message}`);
+    }
+
     const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: result.transactionId };
   } finally {
