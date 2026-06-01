@@ -686,6 +686,10 @@ if (process.send) {
             committee_indices: cmd.committee_indices,
             committee_merkle_proofs: cmd.committee_merkle_proofs,
             committee_pk_hash: cmd.committee_pk_hash,
+            // Bettor r353: v0.7 settle_aggregate sharding globals (undefined for v0.6 → p2sh skips).
+            global_yes_total_sompi: cmd.global_yes_total_sompi,
+            global_no_total_sompi: cmd.global_no_total_sompi,
+            global_commit_id: cmd.global_commit_id,
           } : null;
           const r = await unlockPoolSpineP2SH({
             spineP2shAddress: cmd.spine_p2sh_address,

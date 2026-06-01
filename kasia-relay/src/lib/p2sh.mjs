@@ -838,6 +838,21 @@ export async function unlockPoolSpineP2SH(args) {
         // Push as little-endian minimal int bytes (= silverc int encoding).
         return _encodePushDataHex(Buffer.from([n & 0xff]));
       };
+      // Bettor r353: Kaspa CScriptNum encoder for LARGE ints (globalYes/No = 1e10+ sompi exceed
+      // opNHex's 0-255 byte range). Little-endian minimal + high-bit sign disambiguation (= same
+      // CScriptNum convention as Bitcoin). Verified: 1e10 → '0500e40b5402' (matches the 1e10
+      // ctor amount encoding observed in PoolSpine_v07 redeem script scriptSig dump).
+      const encodeScriptNumPush = (val) => {
+        let v = BigInt(val);
+        if (v === 0n) return '00';  // int 0 = OP_0
+        const neg = v < 0n;
+        if (neg) v = -v;
+        const bytes = [];
+        while (v > 0n) { bytes.push(Number(v & 0xffn)); v >>= 8n; }
+        if (bytes[bytes.length - 1] & 0x80) bytes.push(neg ? 0x80 : 0x00);
+        else if (neg) bytes[bytes.length - 1] |= 0x80;
+        return _encodePushDataHex(Buffer.from(bytes));
+      };
       // Bettor r245 实证定案: v0.5 push = declaration order (silverc binds locals via
       // reverse-pop internally, declaration order == push order). v0.6 same convention.
       // Declaration order: sigs c0..c4, committeePkHash, winner, sidesMerkleRoot, PKs c0..c4,
@@ -853,6 +868,17 @@ export async function unlockPoolSpineP2SH(args) {
       for (let ci = 0; ci < 5; ci++) scriptSigHex += pushBytes(pks[ci]);
       // Indices c0..c4
       for (let ci = 0; ci < 5; ci++) scriptSigHex += opNHex(indices[ci]);
+      // Bettor r353: v0.7 settle_aggregate sharding globals — declaration order (PoolSpine_v07.sil
+      // L103-105) is AFTER indices, BEFORE siblings: globalYesTotal_sompi, globalNoTotal_sompi,
+      // global_commit_id(byte[32]). v0.6 SS has none → cd.global_yes_total_sompi undefined → skip
+      // → v0.6 scriptSig byte-identical to 46f8a-proven path. Missing them was the qoyqv
+      // 'pick at invalid location' (stack short 3 → all sibling picks off-by-3).
+      const hasV07Globals = cd.global_yes_total_sompi !== undefined && cd.global_yes_total_sompi !== null;
+      if (hasV07Globals) {
+        scriptSigHex += encodeScriptNumPush(cd.global_yes_total_sompi);
+        scriptSigHex += encodeScriptNumPush(cd.global_no_total_sompi);
+        scriptSigHex += pushBytes(cd.global_commit_id);
+      }
       // Siblings: committee 0..4 outer, depth 0..7 inner
       for (let ci = 0; ci < 5; ci++) {
         const sibs = proofs[ci];

@@ -1035,6 +1035,27 @@ export async function dispatchPhase2(market, decision) {
       }
     }
 
+    // Bettor r353 — v0.7 settle_aggregate sharding globals (qoyqv 实证 'pick at invalid location'):
+    // PoolSpine_v07.sil settle_aggregate (L103-105) ADDS 3 args between indices and siblings:
+    // globalYesTotal_sompi (int), globalNoTotal_sompi (int), global_commit_id (byte[32]).
+    // SS require()s them (L298-315): globalYes/No >= 0, sum >= 1e10, losingPool>=5×bond.
+    // v0.6 SS has NO these args (46f8a settled without) → bake ONLY for v0.7. Missing them =
+    // scriptSig short 3 stack items → all sibling picks off-by-3 → 'pick at invalid location'.
+    // direction 0=YES 1=NO (same convention as thin-check losingDirection above).
+    if (market.protocol_version === 'v0.7') {
+      const globalYes = participants.filter(p => p.direction === 0).reduce((s, p) => s + p.stake, 0);
+      const globalNo = participants.filter(p => p.direction === 1).reduce((s, p) => s + p.stake, 0);
+      // global_commit_id: SS L322-329 blake2b commit-check is INACTIVE (silverc int-to-byte
+      // unconfirmed) → field is layout-only (attested via committee sighash, not require()'d).
+      // Deterministic placeholder until J1 activates the cross-shard commit check.
+      const crypto = await import('crypto');
+      const globalCommitId = crypto.createHash('sha256').update(market.id).digest('hex');
+      newMeta.phase2_global_yes_sompi = globalYes;
+      newMeta.phase2_global_no_sompi = globalNo;
+      newMeta.phase2_global_commit_id = globalCommitId;
+      console.log(`[pool-settler] v0.7 sharding globals baked market=${market.id.slice(0,12)} globalYes=${globalYes} globalNo=${globalNo}`);
+    }
+
     // 8. DM 3 oracle relays with kanet_pool_oracle_tx_sign_req_v1
     //    (= adapted from 1V1 kanet_oracle_tx_sign_req_v1, uses market_id instead of offer_id)
     const reqPayloadObj = {
@@ -1647,8 +1668,12 @@ async function handleCollectingSigs(market) {
       committee_indices: meta.phase2_committee_indices,
       committee_merkle_proofs: meta.phase2_committee_merkle_proofs,
       committee_pk_hash: meta.phase2_committee_pk_hash,
-      // TODO (J1 #1.4): v0.7 settle 仍需 shard_id/shard_count/global_yes/global_no/commit_v2.
-      // 此处先 placeholder, J1 ship 后 settler 加 phase2_sharding 字段 + 透传.
+      // Bettor r353: v0.7 settle_aggregate sharding globals (baked in dispatchPhase2).
+      // v0.6 markets won't have these (meta.phase2_global_* undefined) → relay skips pushing
+      // them → v0.6 scriptSig stays byte-identical (46f8a-proven). v0.7 only.
+      global_yes_total_sompi: meta.phase2_global_yes_sompi,
+      global_no_total_sompi: meta.phase2_global_no_sompi,
+      global_commit_id: meta.phase2_global_commit_id,
     } : {};
     const submitResult = await sendCommandAsync(market.maker_relay_id, {
       type: 'pool_settle_tx',
