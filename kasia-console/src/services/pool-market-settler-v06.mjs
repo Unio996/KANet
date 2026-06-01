@@ -145,32 +145,39 @@ export async function fetchEndBlockHashCanonical(chainReader, deadlineDaaScore, 
  *
  * @returns {{ pool_merkle_root: string, pool_size: number, members: [{pk, stake_sompi}] }}
  */
-export function derivePoolMerkleRoot() {
+export function derivePoolMerkleRoot(snapshotDaa = null) {
   // DoD §2.2 J2 step [2] dual-read (5-agent 共识 KANet-UI r484/3): chain_view 单一读源 +
   // 7-day grace fallback to oracle_pool_membership. Priority: chain_view > legacy DB.
   //
-  // chain_view 来源: oracle-pool-chain-scanner scanAndDerivePool() 写入. 协议不变量: 任意
-  // 节点对同 snapshot_daa 必同 root (= chain SoT).
+  // Bettor r277 catch: 跨节点确定性必 take EXPLICIT snapshotDaa, 不能 latest (= 节点A scanner
+  // @ daaX, 节点B @ daaY, latest 不同 root). Caller (= create-v07) 先 fetch currentDaa 算
+  // snapshotDaa=currentDaa−FINALITY_N, 然后 call derivePoolMerkleRoot(snapshotDaa) → 各节点
+  // 同 daa 必同 root 满足协议不变量 ctor root == derive(snapshotDaa).
   //
-  // grace 期 (7d) 同节点旧 manual enrollments 仍 valid (legacy_origin marker); 期满后
-  // chain_view 必填否则 throw.
-  try {
-    const latest = sqlite.prepare(
-      'SELECT snapshot_daa, leaves_json, merkle_root, pool_size FROM oracle_pool_chain_view ORDER BY snapshot_daa DESC LIMIT 1'
-    ).get();
-    if (latest && latest.pool_size > 0) {
-      const leaves = JSON.parse(latest.leaves_json);
-      return {
-        pool_merkle_root: latest.merkle_root,
-        pool_size: latest.pool_size,
-        members: leaves.map(l => ({ pk: l.pk_x, stake_sompi: l.stake_sompi })),
-        source: 'chain_view',
-        snapshot_daa: latest.snapshot_daa,
-      };
+  // snapshotDaa=null (= legacy/grace period) → fallback 旧 oracle_pool_membership 路径,
+  // 不查 chain_view (= 避免 latest 跨节点漂移).
+  if (snapshotDaa !== null) {
+    try {
+      const row = sqlite.prepare(
+        'SELECT snapshot_daa, leaves_json, merkle_root, pool_size FROM oracle_pool_chain_view WHERE snapshot_daa = ?'
+      ).get(snapshotDaa);
+      if (row && row.pool_size > 0) {
+        const leaves = JSON.parse(row.leaves_json);
+        return {
+          pool_merkle_root: row.merkle_root,
+          pool_size: row.pool_size,
+          members: leaves.map(l => ({ pk: l.pk_x, stake_sompi: l.stake_sompi })),
+          source: 'chain_view',
+          snapshot_daa: row.snapshot_daa,
+        };
+      }
+      throw new Error(`no chain_view cached at snapshot_daa=${snapshotDaa} (= caller must call scanAndDerivePool first OR adjust snapshotDaa to N=600 below currentDaa)`);
+    } catch (e) {
+      if (e.message.includes('no chain_view cached')) throw e;
+      // Table may not exist on pre-v162 DB; fall through to legacy ONLY if grace mode (= no snapshotDaa).
+      console.warn(`[derivePoolMerkleRoot] chain_view read fail at daa=${snapshotDaa}: ${e.message}`);
+      throw e;
     }
-  } catch (e) {
-    // Table may not exist on pre-v162 DB. Fall through to legacy.
-    console.warn(`[derivePoolMerkleRoot] chain_view read fail, fallback legacy: ${e.message}`);
   }
 
   console.warn('[derivePoolMerkleRoot] LEGACY FALLBACK: oracle_pool_chain_view empty, reading oracle_pool_membership (7-day grace period, DoD §2.2 sediment).');
