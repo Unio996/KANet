@@ -957,6 +957,12 @@ export async function dispatchRefund(market, decision) {
  * producer node — same pattern as dispatchRefund). qlfpv-shape markets refund here.
  */
 async function handleRefunding(market) {
+  // G2-B 二期 only covers PoolSpine_v06 entry 2. v0.5 markets use a different SS (3 oracle
+  // bonds in spine) — refund there is a separate handler not in scope.
+  if (market.protocol_version !== 'v0.6') {
+    console.log(`[pool-settler:refunding] skip non-v0.6 market ${market.id.slice(0,12)} (protocol_version=${market.protocol_version}) — v0.5 refund handler not implemented`);
+    return;
+  }
   let meta = {};
   try { meta = JSON.parse(market.metadata || '{}'); } catch {}
   if (!meta.refund_tx_obj) {
