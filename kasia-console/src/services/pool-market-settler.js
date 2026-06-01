@@ -1181,9 +1181,11 @@ async function handleCollectingSigs(market) {
     }
   }
 
-  // Phase 2c step 2c first ship: unanimous (entry 0) only. forfeit_1 entry 1 deferred next iteration.
-  if (!meta.phase2_unanimous) {
-    console.warn(`[pool-settler:collecting] market=${market.id.slice(0,12)} forfeit_1 entry 1 not yet supported in unlockPoolSpineP2SH, skip until next iteration`);
+  // Bettor r283 G2-A: v0.5 phase2c-first-ship skipped non-unanimous (= forfeit_1 entry 1).
+  // v0.6 settle_aggregate has built-in 4-of-5 threshold counter (PoolSpine_v06.sil:79-83)
+  // so 4 valid sigs settle without a separate forfeit entry. Skip only for v0.5 markets.
+  if (!meta.phase2_unanimous && market.protocol_version !== 'v0.6') {
+    console.warn(`[pool-settler:collecting] market=${market.id.slice(0,12)} forfeit_1 entry 1 not yet supported in unlockPoolSpineP2SH (v0.5 only), skip until next iteration`);
     return;
   }
 
