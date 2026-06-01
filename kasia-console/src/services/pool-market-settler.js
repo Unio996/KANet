@@ -691,10 +691,10 @@ export async function dispatchPhase2(market, decision) {
     //    Phase 3 bug 5: per-input sigOpCount — spine inputs have 3 checkSig, sides 0.
     //    Preimage sigOpCount MUST match final settle TX (= Kaspa sighash includes sig_op_counts_hash).
     const p2shAddresses = [market.spine_p2sh, ...sides.map(s => s.side_p2sh)];
-    // Bettor r271 layer-16: v0.6 settle_aggregate has 5 checkSig + 40 blake2b → script-unit
-    // budget = sigOpCount × 309999/3 budget. v0.5 = 3, v0.6 = 5. sigOpCount IS in sighash
-    // preimage → changing it requires fresh sigs (= reset + re-bake per j2_reset_46f8a).
-    const spineSigOpCount = market.protocol_version === 'v0.6' ? 5 : 3;
+    // Bettor r271/r275 layer-16/18: budget formula 100k×N+9999. v0.6 used 510021,
+    // sigOpCount=5 budget=509999 → 22 short. Bump 8 → 809999 (~59% margin).
+    // sigOpCount IS in sighash → reset/re-collect on change.
+    const spineSigOpCount = market.protocol_version === 'v0.6' ? 8 : 3;
     const sigOpCounts = requiredInputOutpoints.map((_, i) => (i < spineInputCount ? spineSigOpCount : 0));
     const preimage = await sendCommandAsync(market.maker_relay_id, {
       type: 'prediction_settle_build_preimage',
