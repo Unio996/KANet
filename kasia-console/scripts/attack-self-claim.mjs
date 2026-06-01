@@ -220,6 +220,42 @@ function staticAnalysis() {
     });
   }
 
+  // Defense check 2e: min-pot SS↔settler 数学一致 (Bettor r329 Owner 终裁 选项 A)
+  // SS L313 require(losingPool >= MIN_LOSING_POOL) vs settler L659 thinThreshold = N*bond + broker + margin
+  // 必 thinThreshold >= MIN_LOSING_POOL (= settler 严守 SS 不漏放)
+  let ssMinLosingPool = null;
+  const v07ForMinPot = files.find(f => /Spine_v07$/i.test(f.name));
+  if (v07ForMinPot) {
+    const v07Src = fs.readFileSync(v07ForMinPot.path, 'utf8');
+    const m = v07Src.match(/require\s*\(\s*losingPool\s*>=\s*(\d+)\s*\)/);
+    if (m) ssMinLosingPool = BigInt(m[1]);
+  }
+  const settlerSrc = fs.readFileSync(path.join(REPO_ROOT, 'kasia-console/src/services/pool-market-settler.js'), 'utf8');
+  // settler L659 thinThreshold = N_COMMITTEE * oracleBondAmount + MIN_BROKER_FEE_SOMPI + STORAGE_MASS_MARGIN
+  const ncMatch = settlerSrc.match(/N_COMMITTEE\s*=\s*(\d+)/);
+  const mbfMatch = settlerSrc.match(/MIN_BROKER_FEE_SOMPI\s*=\s*([\d_]+)/);
+  const smmMatch = settlerSrc.match(/STORAGE_MASS_MARGIN\s*=\s*([\d_]+)/);
+  const obMatch = settlerSrc.match(/oracleBondAmount\s*=\s*(\d+)|oracleBond\s*=.*\|\|\s*(\d+)/);
+  if (ssMinLosingPool !== null && mbfMatch && smmMatch) {
+    const N = ncMatch ? BigInt(ncMatch[1]) : 5n;
+    const MBF = BigInt(mbfMatch[1].replace(/_/g, ''));
+    const SMM = BigInt(smmMatch[1].replace(/_/g, ''));
+    const OB = BigInt(100000000n);  // default oracleBondAmount 1 KAS, varies per market
+    const settlerThreshold = N * OB + MBF + SMM;
+    const consistent = settlerThreshold >= ssMinLosingPool;
+    report.findings.push({
+      severity: consistent ? 'INFO' : 'CRITICAL',
+      msg: consistent
+        ? `min-pot SS↔settler 一致 ✓ (SS L313 require>=${ssMinLosingPool} vs settler L659 thinThreshold=${settlerThreshold}, 严守 SS+ ${settlerThreshold - ssMinLosingPool}/${ssMinLosingPool}*100/1=${Number((settlerThreshold-ssMinLosingPool)*100n/ssMinLosingPool)}% margin)`
+        : `min-pot 反 invariant! settler 阈 ${settlerThreshold} < SS 阈 ${ssMinLosingPool} (= settler 放过 SS 守的 thin market, Bettor r329 选 A 数学一致破)`,
+    });
+  } else {
+    report.findings.push({
+      severity: 'INFO',
+      msg: `min-pot SS↔settler lint skipped (SS:${ssMinLosingPool} settler MBF:${!!mbfMatch} SMM:${!!smmMatch})`,
+    });
+  }
+
   // Defense check 3a: position-aware merkle climb (= J2 r105 catch + J1 r126 fix d5d4ecbdd)
   // Bug pattern: `cur = blake2b(cur + sib)` (leftmost-only, fails for non-zero positions)
   // Fix pattern: `if (b == 0) { cur = blake2b(cur + sib) } else { cur = blake2b(sib + cur) }`
