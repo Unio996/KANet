@@ -120,7 +120,9 @@ export async function poolSettlerTick() {
         // if already sampled. Requires pool_snapshots row (created at market create-v06 per F-S3
         // anti-grinding). chainReader uses maker_relay_id (= already running). F-S1 finality_depth
         // failures are non-fatal: throw → log → continue → next tick retries until chain advances.
-        if (market.protocol_version === 'v0.6' && (!market.oracle_relay_ids || market.oracle_relay_ids === '[]')) {
+        // G6 批 3 段① extend committee sampling to v0.7. v0.7 同 v0.6 用 5-committee + poolMerkleRoot,
+        // 只 SS bytecode 不同 (refund fee 范围). committee 抽样逻辑 reuse.
+        if ((market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7') && (!market.oracle_relay_ids || market.oracle_relay_ids === '[]')) {
           const alreadySampled = sqlite.prepare('SELECT market_id FROM pool_committee WHERE market_id = ?').get(market.id);
           if (!alreadySampled) {
             try {
@@ -263,7 +265,7 @@ export async function poolSettlerTick() {
 export function decideConsensus(market) {
   // Bettor r197 P0 fix: v0.6 path A uses 5-committee 4-of-5 threshold (= committee-attest
   // model post P2 §5.3 LOCK). v0.5 legacy 3-oracle 3-of-3 path below unchanged.
-  if (market.protocol_version === 'v0.6') {
+  if (market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7') {
     return decideConsensusV06(market);
   }
   let oracleIds;
@@ -371,10 +373,17 @@ export function decideConsensus(market) {
 // No DISAGREEMENT_TIMEOUT branches (= committee model assumes Byzantine-1 fault tolerance
 // inherently; 4-of-5 either reaches threshold or doesn't). Silent timeout → refund.
 function decideConsensusV06(market) {
+  // G6 批 3 段① 0-bet immediate refund short-circuit: if 0 bettor joined by deadline,
+  // SS entry 2 refund_maker_unjoined applies (no votes needed). Skip 30min ORACLE_SILENT_TIMEOUT
+  // wait — return refund immediately. Works for both v0.6 + v0.7.
+  const betCount = sqlite.prepare('SELECT COUNT(*) as c FROM pool_bettor_sides WHERE market_id = ?').get(market.id)?.c || 0;
+  if (betCount === 0) {
+    return { action: 'refund', reason: `0-bet market past deadline (no votes possible, refund_maker_unjoined)` };
+  }
   let oracleIds;
   try { oracleIds = JSON.parse(market.oracle_relay_ids || '[]'); } catch { oracleIds = []; }
   if (!Array.isArray(oracleIds) || oracleIds.length !== 5) {
-    return { action: 'pending', reason: `v0.6 invalid oracle_relay_ids (expected 5, got ${oracleIds?.length || 0})` };
+    return { action: 'pending', reason: `v0.6/v0.7 invalid oracle_relay_ids (expected 5, got ${oracleIds?.length || 0})` };
   }
 
   const votes = [];
