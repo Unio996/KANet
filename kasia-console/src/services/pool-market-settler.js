@@ -830,12 +830,18 @@ export async function dispatchPhase2(market, decision) {
  */
 export async function dispatchRefund(market, decision) {
   try {
-    // 1. Compute maker output amount per PoolSpine.sil entry 2:
-    //    tx.outputs[0].value == makerStakeAmount + oracleBondAmount * 3 - minerFee
+    // 1. Compute maker output amount.
+    //    v0.5 PoolSpine.sil entry 2 refund_unanimous_silent: maker recovers stake + 3 bonds.
+    //    v0.6 PoolSpine_v06.sil entry 2 refund_maker_unjoined (J1 r230 + Bettor r283 G2-B):
+    //    maker single-sig, no committee bond inputs (A.1 standing stake model) → just stake - fee.
+    //    Use 5M floor minerFee for v0.6 (= same as settle, mass coverage).
     const makerStake = parseInt(market.maker_stake_amount, 10) || 0;
     const oracleBond = parseInt(market.oracle_bond_amount, 10) || 0;
-    const minerFee = parseInt(market.miner_fee, 10) || 20_000;
-    const makerRefundAmount = makerStake + oracleBond * 3 - minerFee;
+    const baseMinerFeeR = parseInt(market.miner_fee, 10) || 20_000;
+    const minerFee = market.protocol_version === 'v0.6' ? Math.max(baseMinerFeeR, 5_000_000) : baseMinerFeeR;
+    const makerRefundAmount = market.protocol_version === 'v0.6'
+      ? (makerStake - minerFee)  // v0.6: no bond inputs (A.1)
+      : (makerStake + oracleBond * 3 - minerFee);  // v0.5: 3 bonds in spine
     if (makerRefundAmount <= 0) {
       console.warn(`[pool-settler] dispatchRefund market=${market.id.slice(0,12)} makerRefundAmount=${makerRefundAmount} ≤ 0, skip`);
       return;
