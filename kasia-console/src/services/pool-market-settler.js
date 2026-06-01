@@ -583,12 +583,16 @@ export async function dispatchPhase2(market, decision) {
 
     let payouts;
     try {
+      // Bettor r279 layer-20: v0.6 settle TX mass ~41430 needs fee >= 4143000 (100 sompi/mass).
+      // market.miner_fee 50000 way too low. Bump to 5000000 (0.05 KAS, ~21% margin over min).
+      const baseMinerFee = parseInt(market.miner_fee, 10) || 20_000;
+      const minerFeeFinal = market.protocol_version === 'v0.6' ? Math.max(baseMinerFee, 5_000_000) : baseMinerFee;
       payouts = computePoolPayouts({
         participants,
         winner: decision.winner,
         brokerFeePct: parseInt(market.broker_fee_pct, 10) || 0,
         oracleBond: parseInt(market.oracle_bond_amount, 10) || 0,
-        minerFee: parseInt(market.miner_fee, 10) || 20_000,
+        minerFee: minerFeeFinal,
         unanimous: decision.unanimous,
         silentOracleIndex: decision.silentOracleIndex ?? null,
         // Bettor r230 DECISION LOCK A.1: v0.6 = 5 committee members, NO per-market bond,
@@ -612,7 +616,8 @@ export async function dispatchPhase2(market, decision) {
     // Per Bettor r17 truth matrix: oracleFee = oracleFeePct × losingPool (= same source as brokerFee).
     // computePoolPayouts didn't compute this; sub 5b adds explicitly.
     const totalLoserStake = participants.filter(p => p.direction !== decision.winner).reduce((s, p) => s + p.stake, 0);
-    const minerFeeSompi = parseInt(market.miner_fee, 10) || 20_000;
+    const baseMinerFeeSompi = parseInt(market.miner_fee, 10) || 20_000;
+    const minerFeeSompi = market.protocol_version === 'v0.6' ? Math.max(baseMinerFeeSompi, 5_000_000) : baseMinerFeeSompi;
     const oracleLosingPool = Math.max(0, totalLoserStake - minerFeeSompi);
     const oracleFeeTotal = Math.floor(oracleLosingPool * oracleFeePct / 10000);
     // Bettor r230 A.1: v0.5 oracleFee/3, v0.6 oracleFee/5 (= committee size).
