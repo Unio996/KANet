@@ -445,16 +445,7 @@ export function computePoolPayouts(args) {
   if (losingPool < brokerFee) {
     throw new Error(`losing pool (${losingPool}) less than broker_fee floor (${brokerFee}) — pot too small to settle`);
   }
-  // J1 r228 Plan X (layer-19 follow): v0.6 SS L204-240 requires outputs[1..5] each
-  // >= oracleBondAmount. Decision A.1 has no per-market deposit → take 5×bond from
-  // losing pool (= losers pay fixed committee fee). distributablePool shrinks accordingly.
-  const oracleCountForBonds = Number.isInteger(args.oracleCount) ? args.oracleCount : 3;
-  const committeeMode = !!args.committeeMode;
-  const committeeFixedFeeTotal = committeeMode ? oracleBond * oracleCountForBonds : 0;
-  if (committeeFixedFeeTotal > 0 && losingPool - brokerFee < committeeFixedFeeTotal) {
-    throw new Error(`losing pool (${losingPool - brokerFee}) after broker fee < 5×oracleBond (${committeeFixedFeeTotal}) — pot too small for committee fee`);
-  }
-  const distributablePool = losingPool - brokerFee - committeeFixedFeeTotal;
+  const distributablePool = losingPool - brokerFee;
 
   // Forfeit_1 50/25/25 split per v0.5 spec section 4.4
   // W3 (area-5/6): the 4 floor calls (winner / maker / oracle × 2) can each shed 0-1 sompi
@@ -485,13 +476,18 @@ export function computePoolPayouts(args) {
   const isMakerWinner = winners.some(w => w.isMaker);
   const makerExtraOutput = (!isMakerWinner && makerForfeitShare > 0) ? makerForfeitShare : null;
 
-  // J1 r228 Plan X final: committeeMode = each committee member gets oracleBond (= fixed
-  // fee from losing pool, satisfies SS outputs[1..5] >= oracleBondAmount). dispatchPhase2
-  // adds oracleFee/N share on top via merged output.
+  // Bettor r230 DECISION LOCK (4/4 consensus + Owner ack): A.1 testnet path.
+  // - v0.5: 3 oracle bond returns + oracleFee/3 share per existing flow
+  // - v0.6 A.1: 5 committee members get oracleFee/5 share BUT 0 bond return (= committee
+  //   has pool-level standing stake, no per-market bond posted on chain). oracleBondReturns
+  //   entries still allocated as position placeholders so dispatchPhase2 can merge fee shares.
+  //   Caller passes oracleCount + committeeMode (= bond=0).
+  const oracleCountForBonds = Number.isInteger(args.oracleCount) ? args.oracleCount : 3;
+  const committeeMode = !!args.committeeMode;
   const oracleBondReturns = [];
   for (let i = 0; i < oracleCountForBonds; i++) {
     if (!unanimous && silentOracleIndex === i) continue;
-    const bondReturnAmount = committeeMode ? oracleBond : (oracleBond + perOracleForfeitShare);
+    const bondReturnAmount = committeeMode ? 0 : (oracleBond + perOracleForfeitShare);
     oracleBondReturns.push({ oracleIndex: i, amount: bondReturnAmount });
   }
 
