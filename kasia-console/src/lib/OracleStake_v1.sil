@@ -1,0 +1,45 @@
+// OracleStake_v1 — KANet Oracle v0.3 onchain stake-derived oracle pool (Phase-2)
+//
+// Decision: docs/2026-06-01-onchain-stake-oracle-pool-DECISION.md (5-agent 共识 乙路线)
+// §2.1 e1 RESOLVED: Option C 锁 — v1 drop e1, Phase5 = OracleStake_v2 加 slash entry
+//   (J1 r255 证伪 Option B: silverc tx context 仅 inputs/outputs/time/activeInputIndex,
+//    无 getUtxo()/链查询 primitive → governance UTXO 验证做不到; ctor 烤入 = 同 migration 雷)
+//
+// 设计原则:
+//   - 每 oracle 独立 P2SH stake UTXO (ctor stakerPkX + lockUntilDaa 唯一确定 addr)
+//   - 池 = 链上 OracleStake_v1 P2SH UTXO 集合 (跨节点扫链派生, 非 DB 表)
+//   - v1 仅 e0 self-unstake; 无 slash 路径 (cost-of-capital + off-chain re-enroll veto 兜底)
+//   - Phase 5 升级 = OracleStake_v2 silverc rewrite (新 ctor 含 quorumPk + e1 slash entry,
+//     新 P2SH addr, 显式版本号迁移 — 所有 v1 staker 必 v2 re-enroll)
+//
+// 锁时语义 (silverc tx.time = tx.lockTime literal):
+//   - Kaspa LOCK_TIME_THRESHOLD = 500_000_000_000; lockTime < 500B → DAA score; >= 500B → ms epoch
+//   - testnet-12 daa 当前 ~5e8, 远 < 500B → DAA score mode 安全 (consumer 端 tx.lockTime = lockUntilDaa)
+//   - lockUntilDaa 必 ≥ max(参投 market resolutionDaa) + cooldown_N (caller 保证, J1 r254/3 反挑承接)
+//
+// 编译: silverc.exe OracleStake_v1.sil --ctor args.json
+//   args.json: { stakerPkX: <32B x-only>, lockUntilDaa: <int>, minerFee: <int> }
+pragma silverscript ^0.1.0;
+
+contract OracleStake_v1(
+    byte[32] stakerPkX,
+    int lockUntilDaa,
+    int minerFee
+) {
+
+    // e0 timeout_unlock — staker 自助 unstake, lockUntilDaa 过 + 自签
+    //   触发: 所有参投 market 已 settled + cooldown 过, 安全退出
+    //   inputs.length == 1, outputs.length == 1 (= 单 UTXO → staker P2PK)
+    entrypoint function timeout_unlock(sig stakerSig) {
+        require(checkSig(stakerSig, pubkey(stakerPkX)));
+        require(tx.time >= lockUntilDaa);
+        require(tx.inputs.length == 1);
+        require(this.activeInputIndex == 0);
+        require(tx.outputs.length == 1);
+
+        int amount = tx.inputs[0].value - minerFee;
+        byte[34] stakerLock = new ScriptPubKeyP2PK(pubkey(stakerPkX));
+        require(tx.outputs[0].scriptPubKey == byte[](stakerLock));
+        require(tx.outputs[0].value == amount);
+    }
+}
