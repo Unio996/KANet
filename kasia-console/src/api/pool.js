@@ -1858,4 +1858,123 @@ export async function registerPoolRoutes(fastify) {
         : `${3 - voteCount} more oracle vote(s) needed`,
     });
   });
+
+  // POST /api/pool/market/:id/bettor-refund-claim — DoD C 退款自取 (Bettor r261/r386 钦点).
+  //
+  // KANet 内置自取 path (Owner r488 / docs/2026-06-02-self-refund-builtin-path-DECISION.md):
+  // bettor 全程 tg-bot + Relay 内置签 (= 0 外部钱包 Kasware path drop).
+  //
+  // Endpoint orchestrates:
+  //   1. Lookup pool_bettor_sides row (= bettor_pk + side_p2sh + side_lock_tx + side_redeem_script_hex)
+  //   2. Resolve signing relay: bettor_relay_id 不可用 (= register-v06 confirm 通常 NULL); 解析路径
+  //      为 deriveXOnlyPubkey(relay_nodes.address) == bettor_pk 找匹配 relay (Bettor r392 catch).
+  //      不查 relay_nodes.ecdsa_pubkey_xonly 列 (= 常 NULL, ccvr9 实测对不上).
+  //   3. Byte-size mass-aware fee (= 复用 891c94d/G2-B sediment 估算).
+  //   4. lock_time = (market.deadline + 7200) * 1000 ms (= J1 5dd590cd0 SS grace fix 7200s 后).
+  //   5. IPC matched relay 'pool_side_refund_cancelled_tx' (= 801af4d handler 7132ddd builder).
+  //   6. Return refund_txid or error.
+  //
+  // Body: { bettor_pk } OR { side_id }.
+  fastify.post('/api/pool/market/:id/bettor-refund-claim', async (request, reply) => {
+    const marketId = request.params.id;
+    const b = request.body || {};
+    const bettorPk = (typeof b.bettor_pk === 'string' ? b.bettor_pk.toLowerCase() : null);
+    const sideId = b.side_id;
+    if (!bettorPk && !sideId) {
+      return reply.code(400).send({ ok: false, error: 'bettor_pk or side_id required' });
+    }
+
+    const market = sqlite.prepare(`
+      SELECT id, deadline, spine_p2sh, protocol_version, protocol_status
+      FROM pool_markets WHERE id = ?
+    `).get(marketId);
+    if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
+
+    let side;
+    if (sideId) {
+      side = sqlite.prepare(`
+        SELECT id, bettor_pk, side_p2sh, side_lock_tx, side_redeem_script_hex, stake_amount, direction
+        FROM pool_bettor_sides WHERE id = ? AND market_id = ?
+      `).get(sideId, marketId);
+    } else {
+      side = sqlite.prepare(`
+        SELECT id, bettor_pk, side_p2sh, side_lock_tx, side_redeem_script_hex, stake_amount, direction
+        FROM pool_bettor_sides WHERE market_id = ? AND lower(bettor_pk) = ?
+      `).get(marketId, bettorPk);
+    }
+    if (!side) return reply.code(404).send({ ok: false, error: 'side row not found for bettor in market' });
+    if (!side.side_lock_tx) return reply.code(409).send({ ok: false, error: 'side stake not yet locked on chain' });
+    if (!side.side_redeem_script_hex) return reply.code(409).send({ ok: false, error: 'side row missing redeem_script_hex (= pre-v136 register, cannot self-claim)' });
+
+    // Resolve signing relay via deriveXOnlyPubkey(relay_nodes.address) match (Bettor r392 catch).
+    const candidates = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE address IS NOT NULL').all();
+    let signingRelay = null;
+    for (const row of candidates) {
+      try {
+        const pk = await deriveXOnlyPubkey(row.address);
+        if (String(pk).toLowerCase() === String(side.bettor_pk).toLowerCase()) {
+          signingRelay = row;
+          break;
+        }
+      } catch {}
+    }
+    if (!signingRelay) {
+      return reply.code(404).send({
+        ok: false,
+        error: `no local relay matches bettor_pk=${String(side.bettor_pk).slice(0,12)}.. via deriveXOnlyPubkey(address) — bettor relay not on this node`,
+      });
+    }
+
+    // Byte-size mass-aware fee: refund TX 1-in 1-out + side redeem ~1999B → ~2300B → mass ~5750 → fee ~632_500.
+    // 跟 unlockPoolSpineRefundMakerUnjoined 同公式 (Bettor 891c94d sediment).
+    const redeemBytes = Buffer.from(side.side_redeem_script_hex, 'hex');
+    const sigScriptSize = 70 + redeemBytes.length;
+    const txByteEstimate = 45 + sigScriptSize + 50 + 80;
+    const massEst = Math.ceil(txByteEstimate * 2.5);
+    const FEE_MIN = 1000;
+    const FEE_MAX = 100_000_000;
+    let fee = Math.max(FEE_MIN, massEst * 110);
+    if (fee > FEE_MAX) fee = FEE_MAX;
+
+    const stakeSompi = BigInt(side.stake_amount);
+    const outAmount = stakeSompi - BigInt(fee);
+    if (outAmount <= 1000n) {
+      return reply.code(409).send({ ok: false, error: `output ${outAmount} <= dust 1000 (= fee ${fee} too high for stake ${stakeSompi})` });
+    }
+
+    // J1 5dd590cd0 grace fix: SS L260/270 require(tx.time >= (deadline + 7200) * 1000) ms.
+    const REFUND_GRACE_SEC = 7200;
+    const lockTime = (BigInt(market.deadline) + BigInt(REFUND_GRACE_SEC)) * 1000n;
+
+    try {
+      const submitResult = await sendCommandAsync(signingRelay.id, {
+        type: 'pool_side_refund_cancelled_tx',
+        side_p2sh_address: side.side_p2sh,
+        side_redeem_script_hex: side.side_redeem_script_hex,
+        required_input_outpoint: { outpointTxid: side.side_lock_tx, outpointIndex: 0 },
+        output: { address: signingRelay.address, amountSompi: outAmount.toString() },
+        lock_time: lockTime.toString(),
+      });
+      if (!submitResult?.ok || !submitResult.txId) {
+        return reply.code(500).send({ ok: false, error: `relay submit fail: ${submitResult?.error || 'no txId'}` });
+      }
+      return reply.send({
+        ok: true,
+        market_id: marketId,
+        bettor_pk: side.bettor_pk,
+        side_id: side.id,
+        signing_relay_id: signingRelay.id,
+        signing_relay_address: signingRelay.address,
+        refund_txid: submitResult.txId,
+        stake_sompi: stakeSompi.toString(),
+        fee_sompi: fee.toString(),
+        output_sompi: outAmount.toString(),
+        lock_time_ms: lockTime.toString(),
+        mass_estimate: massEst,
+      });
+    } catch (e) {
+      console.error(`[pool/bettor-refund-claim] fail market=${marketId.slice(0,12)} side=${side.id}: ${e.message}`);
+      return reply.code(500).send({ ok: false, error: `claim fail: ${e.message}` });
+    }
+  });
 }
