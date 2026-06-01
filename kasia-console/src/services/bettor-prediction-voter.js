@@ -662,12 +662,14 @@ async function deriveVote(offer) {
   }
 
   // Branch 2: kanet_native (= Phase 3a MVP Bettor r219 spec — LLM consensus).
-  // kanet_v05 / kanet_v06 are pool.js create-v05/create-v06 defaults — same LLM
-  // consensus path as kanet_native (only differ in spine ctor + committee model
-  // upstream, vote derivation logic is identical).
+  // kanet_v05 / kanet_v06 / kanet_v07 are pool.js create-vNN endpoints' defaults
+  // — same LLM consensus path as kanet_native (differ in spine ctor + committee
+  // model upstream, vote derivation logic identical; v0.7 adds sharding fields
+  // 不影响 vote derive 仅影响 settle TX scriptSig assembly downstream).
   if (offer.outcome_market_source === 'kanet_native'
       || offer.outcome_market_source === 'kanet_v05'
-      || offer.outcome_market_source === 'kanet_v06') {
+      || offer.outcome_market_source === 'kanet_v06'
+      || offer.outcome_market_source === 'kanet_v07') {
     return deriveKanetNativeVote(offer, spec);
   }
 
