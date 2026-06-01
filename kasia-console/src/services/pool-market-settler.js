@@ -1065,9 +1065,20 @@ async function computeMassAwareV07RefundFee({ market, makerStake, networkId, mak
   const placeholderOutputValue = BigInt(makerStake) - V07_MIN_FEE;
   const outSpk = payToAddressScript(new Address(makerAddress));
 
-  // KANet-UI r454 catch: kaspa-wasm calculateTransactionMass throws 'unreachable' WASM panic
-  // if Transaction.inputs[i].utxo missing (= storage mass needs prevout amount + scriptPK).
-  // Include the real UTXO entry data so mass calc has full input context.
+  // KANet-UI r454 + r455 sequential WASM panic 教训: kaspa-wasm Transaction.utxo 期望 the
+  // whole UtxoEntry shape (= outpoint + amount + scriptPublicKey + blockDaaScore + isCoinbase),
+  // not a partial. relay p2sh.mjs L228-236 直接 spread `utxo` (the whole entry from RPC).
+  // Build a clean utxo object preserving outpoint + numeric/bigint fields explicitly.
+  const utxoForMass = {
+    outpoint: {
+      transactionId: spineUtxo.outpoint.transactionId,
+      index: spineUtxo.outpoint.index,
+    },
+    amount: BigInt(spineUtxo.amount || spineUtxo.entry?.amount || 0),
+    scriptPublicKey: spineUtxo.scriptPublicKey || spineUtxo.entry?.scriptPublicKey,
+    blockDaaScore: BigInt(spineUtxo.blockDaaScore || spineUtxo.entry?.blockDaaScore || 0),
+    isCoinbase: spineUtxo.isCoinbase || spineUtxo.entry?.isCoinbase || false,
+  };
   const fakeSignedTx = new Transaction({
     version: 0,
     inputs: [{
@@ -1078,12 +1089,7 @@ async function computeMassAwareV07RefundFee({ market, makerStake, networkId, mak
       signatureScript: dummyScriptSigHex,
       sequence: 0n,
       sigOpCount: 1,
-      utxo: {
-        amount: BigInt(spineUtxo.amount || spineUtxo.entry?.amount || 0),
-        scriptPublicKey: spineUtxo.scriptPublicKey || spineUtxo.entry?.scriptPublicKey,
-        blockDaaScore: BigInt(spineUtxo.blockDaaScore || spineUtxo.entry?.blockDaaScore || 0),
-        isCoinbase: spineUtxo.isCoinbase || spineUtxo.entry?.isCoinbase || false,
-      },
+      utxo: utxoForMass,
     }],
     outputs: [new TransactionOutput(placeholderOutputValue, outSpk)],
     lockTime: BigInt(market.deadline) * 1000n,
