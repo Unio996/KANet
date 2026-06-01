@@ -120,6 +120,72 @@ export async function registerOraclePoolRoutes(fastify) {
     }
   });
 
+  // POST /api/oracle-pool/enroll — DoD §2.2 J2 step [2]: 自助 oracle enrollment.
+  // Body: { staker_pk_x: 64hex, lock_until_daa: int, source?: 'manual'|'chain_envelope' }.
+  // Server: derive P2SH via OracleStake_v1.sil (= same ctor → same P2SH 跨节点同源), INSERT
+  // oracle_stake_enrollments row (= 注册待 oracle transfer stake 到 P2SH addr). 后续 scanner
+  // 扫该 addr UTXO verify stake 实际锁链上.
+  //
+  // 用法: oracle CLI/UI 调此 → 拿 p2sh_addr → 自家 wallet 转 ≥1 KAS 到 p2sh_addr 锁 lockUntilDaa
+  // → 等 scanner verify → snapshotDaa 之后池中含此 oracle.
+  fastify.post('/api/oracle-pool/enroll', async (request, reply) => {
+    const b = request.body || {};
+    if (typeof b.staker_pk_x !== 'string' || !/^[0-9a-fA-F]{64}$/.test(b.staker_pk_x)) {
+      return reply.code(400).send({ ok: false, error: 'staker_pk_x must be 64 hex chars' });
+    }
+    const lockUntilDaa = parseInt(b.lock_until_daa, 10);
+    if (!Number.isFinite(lockUntilDaa) || lockUntilDaa <= 0) {
+      return reply.code(400).send({ ok: false, error: 'lock_until_daa must be positive integer' });
+    }
+    const stakerPkX = b.staker_pk_x.toLowerCase();
+    const source = b.source === 'chain_envelope' ? 'chain_envelope' : 'manual';
+    const network = process.env.KASPA_NETWORK || 'testnet-12';
+
+    try {
+      const { computeStakeP2SH_v1 } = await import('../lib/oracle-stake-v1.mjs');
+      const { p2shAddr, redeemScript, p2shHash } = await computeStakeP2SH_v1({
+        stakerPkX, lockUntilDaa, network,
+      });
+      // Existing enrollment idempotency: re-enroll same ctor returns same addr.
+      const existing = sqlite.prepare('SELECT staker_pk_x, p2sh_addr, lock_until_daa FROM oracle_stake_enrollments WHERE staker_pk_x = ?').get(stakerPkX);
+      if (existing) {
+        if (existing.lock_until_daa !== lockUntilDaa) {
+          return reply.code(409).send({
+            ok: false,
+            error: `enrollment exists with different lock_until_daa (existing=${existing.lock_until_daa}, requested=${lockUntilDaa}) — must unstake + re-enroll`,
+          });
+        }
+        return reply.send({
+          ok: true,
+          staker_pk_x: stakerPkX,
+          lock_until_daa: lockUntilDaa,
+          p2sh_addr: existing.p2sh_addr,
+          p2sh_hash: p2shHash,
+          status: 'already_enrolled',
+        });
+      }
+      sqlite.prepare(`
+        INSERT INTO oracle_stake_enrollments
+          (staker_pk_x, lock_until_daa, p2sh_addr, p2sh_hash, redeem_script_hex, source, active)
+        VALUES (?, ?, ?, ?, ?, ?, 1)
+      `).run(stakerPkX, lockUntilDaa, p2shAddr, p2shHash, redeemScript, source);
+      return reply.send({
+        ok: true,
+        staker_pk_x: stakerPkX,
+        lock_until_daa: lockUntilDaa,
+        p2sh_addr: p2shAddr,
+        p2sh_hash: p2shHash,
+        redeem_script_hex: redeemScript,
+        source,
+        status: 'enrolled',
+        next_step: `transfer ≥1 KAS to ${p2shAddr} with lockTime=${lockUntilDaa}; scanner 后续 verify UTXO + 入池`,
+      });
+    } catch (e) {
+      console.error(`[oracle-pool/enroll] fail: ${e.message}`);
+      return reply.code(500).send({ ok: false, error: `enroll fail: ${e.message}` });
+    }
+  });
+
   // GET /api/oracle-pool/chain-snapshot?daa=X — DoD §2.2 J2 step [2]:
   // chain-derived oracle pool snapshot at given DAA (= NWT verifier cross-host diff endpoint).
   // 协议不变量: any 2 nodes should return SAME merkleRoot for same daa, given same chain state.
