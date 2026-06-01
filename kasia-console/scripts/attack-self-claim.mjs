@@ -155,8 +155,22 @@ function staticAnalysis() {
     report.findings.push({
       severity: hardEqFee ? 'WARN' : 'INFO',
       msg: hardEqFee
-        ? 'PoolSpine v0.6 仍硬等 fee (= output == stake - X), G6 批2 红线 8 待 J1 改 output <= stake - MIN_FEE (qlfpv brick KI sediment)'
+        ? 'PoolSpine v0.6 仍硬等 fee (= output == stake - X), G6 批2 红线 8 待 J1 改 output <= stake - MIN_FEE (qlfpv brick KI sediment 永久 — v0.6 SS 不可改, v0.7 forward fix)'
         : 'PoolSpine v0.6 fee 灵活 ✓ (= 不硬等, G6 批2 红线 8 守)',
+    });
+  }
+  // a2) v0.7 fee range check (= J1 r238 0c0fc979 forward fix output <= stake - MIN_FEE + >= stake - MAX_FEE)
+  const spineV07ForFeeCheck = files.find(f => /Spine_v07$/i.test(f.name));
+  if (spineV07ForFeeCheck) {
+    const v07Src = fs.readFileSync(spineV07ForFeeCheck.path, 'utf8');
+    // v0.7 fee range: require(tx.outputs[i].value <= makerStakeAmount - 50000) + (>= - 100000000)
+    const hasFeeUpperBound = /tx\.outputs\[\d+\]\.value\s*<=\s*\w+\s*-\s*\d+/.test(v07Src);
+    const hasFeeLowerBound = /tx\.outputs\[\d+\]\.value\s*>=\s*\w+\s*-\s*\d+/.test(v07Src);
+    report.findings.push({
+      severity: (hasFeeUpperBound && hasFeeLowerBound) ? 'INFO' : 'WARN',
+      msg: (hasFeeUpperBound && hasFeeLowerBound)
+        ? 'PoolSpine v0.7 fee 范围 [stake-MAX, stake-MIN] ✓ (= J1 r238 forward fix 红线 8/9 ship)'
+        : `PoolSpine v0.7 fee 范围检查不全 (upper:${hasFeeUpperBound} lower:${hasFeeLowerBound}) — 红线 8 forward fix 未完整`,
     });
   }
   // b) p2sh.mjs _assertTxInvariants 是否含 mass-floor check (= 红线 7 fee >= mass × rate)
