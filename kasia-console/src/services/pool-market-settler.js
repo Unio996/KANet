@@ -121,9 +121,14 @@ export async function poolSettlerTick() {
           const isAnonymousPoolDoomed = market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7';
           if (isAnonymousPoolDoomed && !doomedMeta.refund_dispatched_at && market.protocol_status === 'verifying') {
             console.log(`[pool-settler] legacy needs_larger_pot doomed market=${market.id.slice(0,12)} pv=${market.protocol_version} → cancel-refund 自愈`);
-            // Status + audit
-            sqlite.prepare('UPDATE pool_markets SET protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-              .run('cancelled', market.id);
+            // Clear needs_larger_pot 标记 + Status. 防下次 tick L117 仍见 doomed=true + refund_dispatched_at 已设
+            // → guard false → 'doomed++; continue' 死循环 → handleRefunding 永轮不到 (Bettor r341 catch).
+            const cleanedMeta = { ...doomedMeta };
+            delete cleanedMeta.needs_larger_pot;
+            cleanedMeta.legacy_doomed_self_heal_at = new Date().toISOString();
+            cleanedMeta.legacy_est_storage_mass = doomedMeta.est_storage_mass;
+            sqlite.prepare('UPDATE pool_markets SET protocol_status = ?, metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+              .run('cancelled', JSON.stringify(cleanedMeta), market.id);
             const cancelEventPayload = JSON.stringify({
               market_id: market.id,
               reason: 'legacy_doomed_needs_larger_pot_self_heal',
