@@ -39,6 +39,12 @@ export const COMMAND_TYPES = Object.freeze({
   POOL_SETTLE_TX: 'pool_settle_tx',
   // B2 v0.5 area-4 7c — pool refund_disagreement TX submit (= spine-only, 4 inputs, 3 or 4 outputs).
   POOL_REFUND_DISAGREEMENT_TX: 'pool_refund_disagreement_tx',
+  // G2-B 二期 (Bettor r263) — PoolSpine_v06.sil entry 2 refund_maker_unjoined (maker single-sig
+  // 0-bet auto-refund). KI sediment 5/20 feedback_ipc_double_enforce_register_both_layers
+  // 真复刻 — relay.mjs L709 加 case 漏 register commands.mjs 三层 (COMMAND_TYPES + SCHEMA + FIELD_TYPES),
+  // validateCommandPayload reject silent → settler "invalid command type" log + refund 卡 refunding.
+  // qlfpv 100 KAS 实测 fire 一次 → 立补三处. 第 N 次复刻, KI 49 同款症状.
+  POOL_REFUND_MAKER_UNJOINED_TX: 'pool_refund_maker_unjoined_tx',
   // B2 v0.5 Phase 3 bug 7 fix — confirm transfer UTXO landed in accepted set.
   CHECK_UTXO_LANDED: 'check_utxo_landed',
   // ③ committee chainReader (Bettor r170 + J1 r204/649197d) — Console wraps as chainReader.
@@ -76,6 +82,7 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.PREDICTION_REFUND_TX]: ['p2sh_address', 'redeem_script_hex', 'branch'],
   [COMMAND_TYPES.POOL_SETTLE_TX]: ['spine_p2sh_address', 'side_p2sh_addresses', 'spine_redeem_script_hex', 'side_redeem_script_hexes', 'required_input_outpoints', 'outputs', 'spine_sigs_by_input', 'spine_input_count', 'winner'],
   [COMMAND_TYPES.POOL_REFUND_DISAGREEMENT_TX]: ['spine_p2sh_address', 'spine_redeem_script_hex', 'required_input_outpoints', 'outputs', 'spine_sigs_by_input', 'silent_oracle_index', 'signing_pair'],
+  [COMMAND_TYPES.POOL_REFUND_MAKER_UNJOINED_TX]: ['spine_p2sh_address', 'spine_redeem_script_hex', 'required_input_outpoint', 'output'],
   [COMMAND_TYPES.CHECK_UTXO_LANDED]: ['address', 'txid'],
   // ③ committee chainReader — get current DAA score 不需 payload field; get blocks 需 min_daa_score.
   [COMMAND_TYPES.CHAIN_GET_CURRENT_DAA_SCORE]: [],
@@ -112,6 +119,7 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.PREDICTION_REFUND_TX]: { p2sh_address: 'string', redeem_script_hex: 'string', branch: 'number' },
   [COMMAND_TYPES.POOL_SETTLE_TX]: { spine_p2sh_address: 'string', side_p2sh_addresses: 'array', spine_redeem_script_hex: 'string', side_redeem_script_hexes: 'array', required_input_outpoints: 'array', outputs: 'array', spine_sigs_by_input: 'array', spine_input_count: 'number', winner: 'number' },
   [COMMAND_TYPES.POOL_REFUND_DISAGREEMENT_TX]: { spine_p2sh_address: 'string', spine_redeem_script_hex: 'string', required_input_outpoints: 'array', outputs: 'array', spine_sigs_by_input: 'array', silent_oracle_index: 'number', signing_pair: 'number' },
+  [COMMAND_TYPES.POOL_REFUND_MAKER_UNJOINED_TX]: { spine_p2sh_address: 'string', spine_redeem_script_hex: 'string', required_input_outpoint: 'object', output: 'object' },
   [COMMAND_TYPES.CHECK_UTXO_LANDED]: { address: 'string', txid: 'string' },
 });
 
