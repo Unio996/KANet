@@ -144,6 +144,31 @@ function staticAnalysis() {
     });
   }
 
+  // Defense check 2d: G6 批2 红线 8 + 红线 7 — SS 不硬等 fee + helper mass-floor
+  // (Bettor r287 qlfpv 5 层实测 forward fix, audit doc §7 红线 8/9 + 红线 7)
+  // Reason: SS 硬编 fee/mass = mainnet brick (qlfpv 100 KAS 已 brick). 改 'output <= stake - MIN_FEE' 灵活 fee.
+  const spineV06File = files.find(f => /Spine_v06\.sil$/i.test(f.name));
+  if (spineV06File) {
+    const v06Src = fs.readFileSync(spineV06File.path, 'utf8');
+    // a) v0.6 refund_maker_unjoined 是否仍硬等 fee (= require output == stake - 50000 类) → mainnet brick risk
+    const hardEqFee = /require\s*\(\s*tx\.outputs\[\d+\]\.value\s*==\s*\w+\s*-\s*(\d+|minerFee)/.test(v06Src);
+    report.findings.push({
+      severity: hardEqFee ? 'WARN' : 'INFO',
+      msg: hardEqFee
+        ? 'PoolSpine v0.6 仍硬等 fee (= output == stake - X), G6 批2 红线 8 待 J1 改 output <= stake - MIN_FEE (qlfpv brick KI sediment)'
+        : 'PoolSpine v0.6 fee 灵活 ✓ (= 不硬等, G6 批2 红线 8 守)',
+    });
+  }
+  // b) p2sh.mjs _assertTxInvariants 是否含 mass-floor check (= 红线 7 fee >= mass × rate)
+  const p2shSrc = fs.readFileSync(path.join(REPO_ROOT, 'kasia-relay/src/lib/p2sh.mjs'), 'utf8');
+  const hasMassFloor = /fee\s*<\s*\w*[Mm]ass\s*\*|mass.*floor|fee\s*>=\s*mass/.test(p2shSrc);
+  report.findings.push({
+    severity: hasMassFloor ? 'INFO' : 'WARN',
+    msg: hasMassFloor
+      ? '_assertTxInvariants 含 mass-floor check ✓ (= 红线 7, G6 批2 ship)'
+      : '_assertTxInvariants 缺 mass-floor check (= 红线 7 待 J2 加 fee >= mass × mempool_floor_rate, qlfpv mass-fee 50k<442k brick KI)',
+  });
+
   // Defense check 2c: PoolSpine v0.7 G6 shard commit anchor (= Bettor r307 commit_v2 + J1 r236 ship efab03a9)
   // Reason: 跨分片 atomic, attacker forge globalYes/No → commit hash 变 → SS reject.
   const spineV07File = files.find(f => /Spine_v07/i.test(f.name));

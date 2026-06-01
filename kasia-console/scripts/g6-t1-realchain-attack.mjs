@@ -84,6 +84,15 @@ runCase('D 健康 (must NOT throw)', null,
   { outputs: [{ value: 90000n }, { value: 5000n }] }
 );
 
+// Attack E: fee-too-low (= G6 批2 红线 7 qlfpv brick KI 复刻)
+// 当前 _assertTxInvariants 不 cover mass-floor — 等 J2 r239 ship 后 expect throw 'fee.*mass'
+// 现行为: fee=50000 sompi for ~3000 byte mass TX = brick by mempool BUT pre-submit invariant 不拦 → ACCEPTED (= STUB pending J2 mass-floor ship)
+runCase('E 真攻 fee-too-low 50k sompi for ~3000 byte mass (G6 批2 红线 7 STUB pending J2)',
+  null,  // 现 invariant 不 cover, expect ACCEPTED. J2 r239 ship 后改 expected = 'mass' substring
+  [{ amount: 9000000n }],
+  { outputs: [{ value: 8950000n }] }  // fee = 50000, but mass×100=300000 (3000 byte) → mempool brick BUT pre-submit 不拦 (yet)
+);
+
 report.verdict = report.fail === 0 ? 'ALL PASS' : 'FAIL';
 report.summary = `${report.pass}/${report.pass + report.fail} cases PASS — verdict ${report.verdict}`;
 

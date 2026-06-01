@@ -1,6 +1,6 @@
 {
   "mode": "static",
-  "analyzed_at": "2026-06-01T03:41:58.637Z",
+  "analyzed_at": "2026-06-01T04:52:22.261Z",
   "files_scanned": [
     "PoolSide_v06",
     "PoolSpine_v06",
@@ -32,6 +32,10 @@
       "msg": "PoolSide v0.7 payout 用 tx.inputs[0].value ✓ (= 变量金额命门)"
     },
     {
+      "severity": "WARN",
+      "msg": "_assertTxInvariants 缺 mass-floor check (= 红线 7 待 J2 加 fee >= mass × mempool_floor_rate, qlfpv mass-fee 50k<442k brick KI)"
+    },
+    {
       "severity": "INFO",
       "msg": "PoolSpine v0.7 ctor 含 shard_id + shard_count ✓ (= 分片 commit identity)"
     },
@@ -52,5 +56,5 @@
       "msg": "PoolSide v06 ctor binding fields — spineP2shHash:true, poolMerkleRoot:true"
     }
   ],
-  "verdict": "DEFENSE_PRESENT"
+  "verdict": "INCOMPLETE_DEFENSE"
 }

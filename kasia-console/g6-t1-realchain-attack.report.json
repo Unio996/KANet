@@ -1,6 +1,6 @@
 {
   "test": "G6 T1 真链 attack",
-  "tested_at": "2026-06-01T04:25:31.225Z",
+  "tested_at": "2026-06-01T04:52:22.174Z",
   "source": "kasia-relay/src/lib/p2sh.mjs _assertTxInvariants (live runtime extract)",
   "source_first_100": "function _assertTxInvariants(matchedUtxos, signedTx, siteLabel = 'unknown') {\n  try {\n    const sumI",
   "min_dust_sompi": "1000",
@@ -28,10 +28,16 @@
       "expected_throw_substring": null,
       "result": "ACCEPTED (no throw)",
       "pass": true
+    },
+    {
+      "name": "E 真攻 fee-too-low 50k sompi for ~3000 byte mass (G6 批2 红线 7 STUB pending J2)",
+      "expected_throw_substring": null,
+      "result": "ACCEPTED (no throw)",
+      "pass": true
     }
   ],
-  "pass": 4,
+  "pass": 5,
   "fail": 0,
   "verdict": "ALL PASS",
-  "summary": "4/4 cases PASS — verdict ALL PASS"
+  "summary": "5/5 cases PASS — verdict ALL PASS"
 }
