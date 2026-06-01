@@ -138,6 +138,21 @@ export async function poolSettlerTick() {
           }
         }
 
+        // G6 批 3 段① T2 blocker3 (T2 9th attempt 实测): refunding state markets must skip
+        // committee sampling. After dispatchRefund transitions status='refunding', the next
+        // tick re-enters this loop. Without this early exit, sampling tries again (because
+        // oracle_relay_ids is still '[]' — 0-bet shortcut never populated it) → fails on
+        // missing pool_snapshot → continue → handleRefunding never reached. Move the
+        // refunding handler ABOVE sampling.
+        if (market.protocol_status === 'refunding') {
+          await handleRefunding(market);
+          continue;
+        }
+        if (market.protocol_status === 'collecting_sigs') {
+          await handleCollectingSigs(market);
+          continue;
+        }
+
         // Bettor r172/r174 + J1 r205 ③ wire — v0.6 path A committee sampling. Idempotent: skip
         // if already sampled. Requires pool_snapshots row (created at market create-v06 per F-S3
         // anti-grinding). chainReader uses maker_relay_id (= already running). F-S1 finality_depth
@@ -194,19 +209,7 @@ export async function poolSettlerTick() {
           }
         }
 
-        // Phase 2b: collecting_sigs status → handle sig aggregation + submit
-        if (market.protocol_status === 'collecting_sigs') {
-          await handleCollectingSigs(market);
-          continue;
-        }
-
-        // G2-B 二期 (Bettor r263 钦点): refunding status → maker single-sig refund TX submit.
-        // dispatchRefund stashed refund_tx_obj + transitioned to 'refunding'. This handler
-        // IPCs maker_relay to sign + submit + writes refund_txid + status='refunded'.
-        if (market.protocol_status === 'refunding') {
-          await handleRefunding(market);
-          continue;
-        }
+        // (refunding + collecting_sigs handlers moved above sampling — see T2 blocker3 comment)
 
         const decision = decideConsensus(market);
         // 7b — first-detection stash for refund_disagreement timing (= area-4 Gap 6 dual-track).
