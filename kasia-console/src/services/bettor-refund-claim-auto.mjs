@@ -106,6 +106,15 @@ export async function claimAutoDispatcherTick() {
           lock_time: lockTime.toString(),
         });
         if (!submitResult?.ok || !submitResult.txId) {
+          // Bettor r400 catch: 'No UTXOs at side P2SH' = 已花 (= 已领 但 DB claim_txid 没 set).
+          // 自愈 mark side as claimed via sentinel (= prevent forever retry).
+          const errStr = String(submitResult?.error || '').toLowerCase();
+          if (errStr.includes('no utxos at side p2sh')) {
+            console.log(`[claim-auto] side=${side.id} bettor=${side.bettor_pk.slice(0,12)} side UTXO already spent (= manually claimed off-band), mark side as claimed via sentinel.`);
+            sqlite.prepare("UPDATE pool_bettor_sides SET claim_txid = 'utxo_already_spent', refund_attempted_at = CURRENT_TIMESTAMP WHERE id = ?")
+              .run(side.id);
+            continue;
+          }
           console.warn(`[claim-auto] side=${side.id} relay submit fail: ${submitResult?.error || 'no txId'}`);
           errored++;
           continue;

@@ -1958,6 +1958,10 @@ export async function registerPoolRoutes(fastify) {
       if (!submitResult?.ok || !submitResult.txId) {
         return reply.code(500).send({ ok: false, error: `relay submit fail: ${submitResult?.error || 'no txId'}` });
       }
+      // Bettor r400 catch: 必 UPDATE claim_txid 防 cron 重试 (= ccvr9 实证 endpoint 无 UPDATE
+      // 链上 claimed 但 DB 空 → cron 看作未领每 tick 重试).
+      sqlite.prepare('UPDATE pool_bettor_sides SET claim_txid = ?, refund_attempted_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .run(submitResult.txId, side.id);
       return reply.send({
         ok: true,
         market_id: marketId,
