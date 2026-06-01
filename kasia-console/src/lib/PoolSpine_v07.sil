@@ -345,15 +345,32 @@ contract PoolSpine_v07(
         require(tx.outputs.length >= 1);
     }
 
-    // entry 2 — refund_maker_unjoined: maker recovers stake if no bettor joined.
+    // entry 2 — refund_maker_unjoined (v0.7 红线 8/9 Bettor G6批2): maker recovers stake if
+    // no bettor joined. Fee NOT hardcoded — settler picks fee dynamically based on real TX
+    // mass (= KIP-9 mass × mempool floor rate). SS守上下限防 maker 被宰 + cover 最坏 mass.
+    //
+    // qlfpv 教训 (2026-06-01): hardcoded minerFee=50000 < real mass-fee 442000 → mempool reject →
+    // 100 KAS effectively bricked. v0.7 fix: output 范围 [makerStake-MAX_FEE, makerStake-MIN_FEE]
+    // + inputs >= 1 (allow fee-UTXO append for under-funded refund).
+    //
+    // MIN_FEE = 50,000 sompi (= 0.0005 KAS, current ctor placeholder, settler picks >= this)
+    // MAX_FEE = 100,000,000 sompi (= 1 KAS, defense against maker-rob-self via excessive fee)
     entrypoint function refund_maker_unjoined(sig makerSig) {
         require(checkSig(makerSig, pubkey(makerPk)));
         require(tx.time >= deadline * 1000);  // bug 10d Path A: LOCK_TIME_THRESHOLD requires ms
-        require(tx.inputs.length == 1);
+
+        // v0.7 红线 9: inputs >= 1 (allow fee-UTXO append). Was inputs == 1 in v0.6.
+        require(tx.inputs.length >= 1);
         require(tx.outputs.length == 1);
 
         byte[34] makerLock = new ScriptPubKeyP2PK(pubkey(makerPk));
         require(tx.outputs[0].scriptPubKey == byte[](makerLock));
-        require(tx.outputs[0].value == makerStakeAmount - minerFee);
+
+        // v0.7 红线 8: fee 范围 [MIN_FEE, MAX_FEE] not hardcoded ctor minerFee.
+        // output value = makerStakeAmount - fee, where fee >= 50000 (MIN_FEE) + fee <= 100M (MAX_FEE).
+        // Equivalent: output <= makerStakeAmount - MIN_FEE AND output >= makerStakeAmount - MAX_FEE.
+        require(tx.outputs[0].value <= makerStakeAmount - 50000);
+        require(tx.outputs[0].value >= makerStakeAmount - 100000000);
+        require(tx.outputs[0].value >= 1000);  // dust floor (J2 d649f16)
     }
 }
