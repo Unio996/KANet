@@ -228,7 +228,7 @@ export async function registerPoolRoutes(fastify) {
       return reply.code(400).send({ ok: false, error: `outcome_end_date must be <= now + ${maxDeadlineDay} days (POOL_DEADLINE_MAX_DAY hard cap, area-8 E7)` });
     }
     const deadline = Math.floor(outcomeEndMs / 1000);
-    const minerFee = parseInt(b.miner_fee, 10) || 50_000;
+    const minerFee = parseInt(b.miner_fee, 10) || 5_000_000;  // G6 批2 R40 floor (qlfpv brick sediment): SS 焊死 fee, mass 4420+ → mempool floor ~442_000 sompi >> 50_000 → reject
     const brokerFeePct = parseInt(b.broker_fee_pct, 10);
     if (!Number.isFinite(brokerFeePct) || brokerFeePct < 0 || brokerFeePct >= 10000) {
       return reply.code(400).send({ ok: false, error: 'broker_fee_pct must be 0-9999 basis points' });
@@ -281,7 +281,7 @@ export async function registerPoolRoutes(fastify) {
     // small relative to fee floor), 3 oracle bond returns at oracleBondAmount. Storage mass
     // and losingPool ≥ fee-floor checks below mirror the runtime checks in dispatchPhase2
     // (settler L454) so a doomed config is rejected at create instead of locking maker stake.
-    const minerFee_L4 = parseInt(b.miner_fee, 10) || 50_000;
+    const minerFee_L4 = parseInt(b.miner_fee, 10) || 5_000_000;  // G6 批2 R40 same floor as L231
     // 5/28 Owner 钦定: testnet 0 limits. Skip L4 worst-case guards when KANET_TESTNET_NO_LIMITS=1.
     if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
       const worstLosingPool = makerStakeAmount;
@@ -445,7 +445,7 @@ export async function registerPoolRoutes(fastify) {
       return reply.code(400).send({ ok: false, error: `outcome_end_date must be <= now + ${maxDeadlineDay} days` });
     }
     const deadline = Math.floor(outcomeEndMs / 1000);
-    const minerFee = parseInt(b.miner_fee, 10) || 50_000;
+    const minerFee = parseInt(b.miner_fee, 10) || 5_000_000;  // G6 批2 R40 floor (qlfpv brick sediment): SS 焊死 fee, mass 4420+ → mempool floor ~442_000 sompi >> 50_000 → reject
     const brokerFeePct = parseInt(b.broker_fee_pct, 10);
     if (!Number.isFinite(brokerFeePct) || brokerFeePct < 0 || brokerFeePct >= 10000) {
       return reply.code(400).send({ ok: false, error: 'broker_fee_pct must be 0-9999 basis points' });
