@@ -632,6 +632,76 @@ export async function dispatchPhase2(market, decision) {
       ...sides.map((s, i) => ({ addr: sideAddrs[i], stake: parseInt(s.stake_amount, 10) || 0, direction: s.direction, isMaker: false })),
     ];
 
+    // min-pot 选项 A 落地 (Owner 2026-06-01 终裁, docs/2026-06-01-min-pot-thin-market-refund-decision.md):
+    // displayName=THIN-MARKET PRE-CHECK. 显式公式 boolean too_small, 禁 string-match throw catch.
+    //
+    // 真根因 (ccvr9 实证): 输方池 < N×oracleBondAmount + broker_floor + KIP-9 margin → settle TX
+    // payout outputs 小 → Σ(1/output_value) 爆 KIP-9 storage mass cap → mempool reject. v0.6+v0.7
+    // 都 anonymous-pool 5-committee 模式同 risk.
+    //
+    // Threshold = 5 × oracleBondAmount + MIN_BROKER_FEE_SOMPI + STORAGE_MASS_MARGIN.
+    //   = 5 × 1 KAS + 0.05 KAS + 0.01 KAS = ~5.06 KAS losing-side floor for default 1 KAS bond.
+    //
+    // Cancel path (= N+1 退款 by Owner+J1 r245 LOCK):
+    //   1. status='cancelled' + chain_event 'market_cancelled' (= audit trail)
+    //   2. dispatchRefund(maker) → spine refund_maker_unjoined (v0.7 mass-aware byte-size 已 ship)
+    //   3. emit 'bettor_refund_available' per bettor (= 通知 bettor client 自家 claim PoolSide
+    //      entry 2 refund_market_cancelled, settler 不 sign because no bettor privkey)
+    const isAnonymousPool0 = market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7';
+    if (isAnonymousPool0) {
+      const losingDirection = 1 - decision.winner;
+      const losingPool = participants
+        .filter(p => p.direction === losingDirection)
+        .reduce((s, p) => s + p.stake, 0);
+      const oracleBondAmount = parseInt(market.oracle_bond_amount, 10) || 100_000_000;
+      const N_COMMITTEE = 5;
+      const STORAGE_MASS_MARGIN = 1_000_000;  // 0.01 KAS headroom for KIP-9 numerical safety
+      const thinThreshold = N_COMMITTEE * oracleBondAmount + MIN_BROKER_FEE_SOMPI + STORAGE_MASS_MARGIN;
+      if (losingPool < thinThreshold) {
+        console.log(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} THIN MARKET losing_pool=${losingPool} < threshold=${thinThreshold} (5×bond=${5*oracleBondAmount} + broker=${MIN_BROKER_FEE_SOMPI} + margin=${STORAGE_MASS_MARGIN}) → cancel + N+1 refund`);
+        // 1. Status transition + audit event
+        sqlite.prepare('UPDATE pool_markets SET protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+          .run('cancelled', market.id);
+        const cancelEventPayload = JSON.stringify({
+          market_id: market.id,
+          reason: 'thin_losing_side',
+          losing_pool: losingPool,
+          threshold: thinThreshold,
+          losing_direction: losingDirection,
+          winner: decision.winner,
+          cancelled_at: new Date().toISOString(),
+        });
+        sqlite.prepare(`
+          INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+          VALUES (lower(hex(randomblob(16))), ?, 'market_cancelled', NULL, NULL, ?, 'pool-settler', CURRENT_TIMESTAMP)
+        `).run(`market_cancelled:${market.id.slice(0,12)}:${Date.now()}`, cancelEventPayload);
+        // 2. Auto maker refund (= spine refund_maker_unjoined via existing dispatchRefund path)
+        await dispatchRefund(market, {
+          action: 'refund',
+          reason: `thin-market cancel: losing_pool=${losingPool} < threshold=${thinThreshold}`,
+        });
+        // 3. Per-bettor cancel events for client-side self-claim. settler can't sign because no privkey.
+        for (const side of sides) {
+          const bettorRefundPayload = JSON.stringify({
+            market_id: market.id,
+            bettor_pk: side.bettor_pk,
+            side_p2sh: side.side_p2sh,
+            side_lock_tx: side.side_lock_tx,
+            stake: side.stake_amount,
+            direction: side.direction,
+            reason: 'market_cancelled_thin_losing_side',
+            claim_entry: 'PoolSide_v07 entry 2 refund_market_cancelled',
+          });
+          sqlite.prepare(`
+            INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+            VALUES (lower(hex(randomblob(16))), ?, 'bettor_refund_available', NULL, NULL, ?, 'pool-settler', CURRENT_TIMESTAMP)
+          `).run(`bettor_refund:${market.id.slice(0,12)}:${String(side.bettor_pk).slice(0,12)}:${Date.now()}`, bettorRefundPayload);
+        }
+        console.log(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} CANCELLED + maker_refund dispatched + ${sides.length} bettor_refund_available events emitted`);
+        return;
+      }
+    }
+
     let payouts;
     try {
       // Bettor r279 layer-20: v0.6 settle TX mass ~41430 needs fee >= 4143000 (100 sompi/mass).
