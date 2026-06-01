@@ -16,13 +16,17 @@
 //   - testnet-12 daa 当前 ~5e8, 远 < 500B → DAA score mode 安全
 //   - lockUntilDaa 必 ≥ max(参投 market resolutionDaa) + cooldown_N (caller 保证)
 //
-// v0.7 红线 8/9 应用 (Bettor r257 catch, v0.6 同款雷):
+// v0.7 红线 8 应用 (Bettor r257 catch, v0.6 同款雷):
 //   - 不烤 minerFee 进 ctor (= mempool min-fee 数月后涨过焊死值 → stake 永锁)
 //   - output 范围 [in − MAX_FEE, in − MIN_FEE], staker 动态选 fee by TX mass
-//   - inputs.length >= 1 允许 fee-UTXO append
 //   - MIN_FEE = 1000 sompi (允许任意大小 stake unstake)
 //   - MAX_FEE = 100_000_000 sompi = 1 KAS (防 over-fee 自损)
 //   - dust floor 1000 sompi
+//
+// 红线 9 (fee-UTXO append) NOT 应用 (Bettor r258/v2 review footgun catch):
+//   - e0 self-unstake stake >> fee, 永不需要 append
+//   - inputs.length >= 1 + output 卡 inputs[0]−fee → append UTXO 全烧 = footgun
+//   - 严格 inputs.length == 1 去 footgun, 不损 functionality
 //
 // 编译: silverc.exe OracleStake_v1.sil --ctor args.json
 //   args.json: { stakerPkX: <32B x-only>, lockUntilDaa: <int> }
@@ -35,14 +39,13 @@ contract OracleStake_v1(
 
     // e0 timeout_unlock — staker 自助 unstake, lockUntilDaa 过 + 自签
     //   触发: 所有参投 market 已 settled + cooldown 过, 安全退出
-    //   inputs.length >= 1, this.activeInputIndex == 0 (= stake UTXO 必在 index 0)
+    //   inputs.length == 1 (= 严格单 stake UTXO, 红线 9 不应用 footgun catch)
     //   outputs.length == 1 → P2PK(stakerPk), value 在 fee 范围内
     entrypoint function timeout_unlock(sig stakerSig) {
         require(checkSig(stakerSig, pubkey(stakerPkX)));
         require(tx.time >= lockUntilDaa);
 
-        // v0.7 红线 9: inputs >= 1 (allow fee-UTXO append). active 必 index 0.
-        require(tx.inputs.length >= 1);
+        require(tx.inputs.length == 1);
         require(this.activeInputIndex == 0);
         require(tx.outputs.length == 1);
 
