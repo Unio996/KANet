@@ -301,6 +301,17 @@ contract PoolSpine_v07(
         require(globalYesTotal_sompi < 1000000000000000000);  // 1e18 sanity upper
         require(globalNoTotal_sompi < 1000000000000000000);
 
+        // ⑦b min-pot LOSING-SIDE floor (Owner 终裁 6/1 min-pot option A, J1 r245/4 catch):
+        //    Thin losing-side pool causes KIP-9 dust on 5 committee bond_return outputs
+        //    (= ccvr9 教训: maker 100 YES + 2 NO bettor → losing pool 2 KAS < 5 × 1 KAS bond).
+        //    Force losingPool >= N_committee × oracleBondAmount (= 5 × 1 KAS = 5e8 sompi).
+        //    SS reject thin-loser settle → settler routes to refund (= G2-B 0-bet pattern).
+        //    Arithmetic trick (silverc no ternary): losingPool = globalYes*winner + globalNo*(1-winner)
+        //    winner==0 (YES wins): losingPool = globalNo. winner==1 (NO wins): losingPool = globalYes.
+        int oneMinusWinner = 1 - winner;
+        int losingPool = globalYesTotal_sompi * winner + globalNoTotal_sompi * oneMinusWinner;
+        require(losingPool >= 500000000);  // 5 × 1e8 sompi = 5 KAS = N_committee × oracleBondAmount
+
         // ⑧ shard identity (ctor): basic sanity.
         require(shard_id >= 0);
         require(shard_count >= 1);
