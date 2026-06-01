@@ -32,12 +32,10 @@ function intExpr(n) { return { kind: 'int', data: n }; }
 
 const STAKER_PK_X = 'a1b2c3d4e5f607182930415263748596a7b8c9d0e1f2031425364758697a8b9c';
 const LOCK_UNTIL_DAA = 600_000_000;
-const MINER_FEE = 10_000;
 
 const ctorJson = [
   bytes32Expr(STAKER_PK_X),
   intExpr(LOCK_UNTIL_DAA),
-  intExpr(MINER_FEE),
 ];
 
 const cacheDir = join(tmpdir(), 'kanet-ss-artifact-cache');
@@ -50,7 +48,7 @@ console.log('  SILVERC:', SILVERC);
 console.log('  SIL:', STAKE_SIL);
 console.log('  ctor.stakerPkX:', STAKER_PK_X);
 console.log('  ctor.lockUntilDaa:', LOCK_UNTIL_DAA, '(<500B threshold => DAA-mode lockTime)');
-console.log('  ctor.minerFee:', MINER_FEE);
+console.log('  (minerFee dropped — v0.7 红线 8/9 fee 范围 [MIN=1000, MAX=1e8] sompi)');
 console.log('');
 
 let stdout;
