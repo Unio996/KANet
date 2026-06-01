@@ -38,7 +38,10 @@ const DISAGREEMENT_TIMEOUT_MS = DISAGREEMENT_TIMEOUT_MIN * 60_000;
 // 0.5 KAS bettor stakes → broker_fee 500k sompi → storage_mass 1.99M > 500k cap).
 const KIP9_C = 1e12;                          // KIP-9 mass constant
 const STORAGE_MASS_CAP = 500_000;             // kaspad standardness cap
-const STORAGE_MASS_SAFE_THRESHOLD = 400_000;  // 20% buffer — settle aborts above this
+// Bettor r349 catch (3l06n 实证): 400k = 20% buffer 过保守, 厚池 100+100 KAS est=449975 < 500k
+// 实可 settle 但被 false cancel. Tune to 470k (= 6% margin) — est_storage_mass 估值通常偏保守
+// (KIP-9 公式 Σ(1/v) 单调 + 离散累积 round-up), 实实 mass 大概率更低. 6% margin 防估值偏差.
+const STORAGE_MASS_SAFE_THRESHOLD = 470_000;
 const MIN_BROKER_FEE_SOMPI = 5_000_000;       // 0.05 KAS broker_fee floor (Bettor r370)
 
 let timer = null;
