@@ -677,7 +677,11 @@ if (process.send) {
           const { unlockPoolSpineP2SH } = await import('./lib/p2sh.mjs');
           const wallet = getWallet();
           // J2 r192 Part B v0.6: forward committee_data when present (= cmd.protocol_version='v0.6').
-          const committee_data = cmd.protocol_version === 'v0.6' ? {
+          // Bettor r352: v0.6→v0.7 sweep gap. v0.7 settle_aggregate (PoolSpine_v07.sil entry 0)
+          // has the same 4-of-5 validSigs threshold as v0.6 → non-unanimous v0.7 also needs
+          // committee_data so isV06EarlyDetect bypasses the v0.5 unanimous-only guard (p2sh.mjs:753).
+          // qoyqv 4/5 实证: v0.6-only gate left committee_data=null → unanimous guard rejected settle.
+          const committee_data = (cmd.protocol_version === 'v0.6' || cmd.protocol_version === 'v0.7') ? {
             committee_pks: cmd.committee_pks,
             committee_indices: cmd.committee_indices,
             committee_merkle_proofs: cmd.committee_merkle_proofs,
