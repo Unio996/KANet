@@ -521,6 +521,15 @@ export async function dispatchPhase2(market, decision) {
       ORDER BY merkle_index ASC
     `).all(market.id);
 
+    // Bettor r293 Owner钦定: 0-bet shortcut. No bettor sides → no losing pool, no economics.
+    // Route directly to dispatchRefund (refund_maker_unjoined) regardless of which side maker is on.
+    // Avoids brittle error-string matching in catch (= ee92218 first attempt missed qlfpv case).
+    if (sides.length === 0) {
+      console.log(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} 0-bet shortcut → dispatchRefund`);
+      await dispatchRefund(market, { action: 'refund', reason: '0-bet market (sides=0), refund_maker_unjoined' });
+      return;
+    }
+
     // Per Bettor r339: maker is a bettor (= not a seeder). maker direction = outcome_side mapping.
     const makerDirection = market.outcome_side === 'YES' ? 0 : 1;
     const makerStake = parseInt(market.maker_stake_amount, 10) || 0;
