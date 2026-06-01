@@ -555,7 +555,21 @@ export function computePoolPayouts(args) {
   if (losingPool < brokerFee) {
     throw new Error(`losing pool (${losingPool}) less than broker_fee floor (${brokerFee}) — pot too small to settle`);
   }
-  const distributablePool = losingPool - brokerFee;
+  // Bettor r355 — committee bond-floor reservation (qoyqv 'script ran, but verification failed').
+  // PoolSpine_v0.6/v0.7 entry 0 require(output[1..N].value >= oracleBondAmount) — the SS demands
+  // each committee output >= oracleBond even though committee posts NO on-chain bond (committeeMode).
+  // The bond floor is paid FROM the losing pool; the min-pot LOCK (losingPool >= N×oracleBond +
+  // broker + margin, Owner 6/1) exists precisely to guarantee this is affordable. So reserve
+  // N×oracleBond off the distributable pool before computing winner shares. r230's bond=0 left
+  // committee outputs = fee-share only → < oracleBond when fee thin → SS reject. v0.5 (real bonds
+  // posted as inputs): no reservation, bond returned from the input UTXO.
+  const oracleCountForBonds = Number.isInteger(args.oracleCount) ? args.oracleCount : 3;
+  const committeeMode = !!args.committeeMode;
+  const committeeBondReserve = committeeMode ? oracleCountForBonds * oracleBond : 0;
+  const distributablePool = losingPool - brokerFee - committeeBondReserve;
+  if (distributablePool < 0) {
+    throw new Error(`distributable pool negative after committee bond reserve (losingPool=${losingPool} brokerFee=${brokerFee} committeeBond=${committeeBondReserve}) — min-pot guard should have prevented`);
+  }
 
   // Forfeit_1 50/25/25 split per v0.5 spec section 4.4
   // W3 (area-5/6): the 4 floor calls (winner / maker / oracle × 2) can each shed 0-1 sompi
@@ -586,18 +600,19 @@ export function computePoolPayouts(args) {
   const isMakerWinner = winners.some(w => w.isMaker);
   const makerExtraOutput = (!isMakerWinner && makerForfeitShare > 0) ? makerForfeitShare : null;
 
-  // Bettor r230 DECISION LOCK (4/4 consensus + Owner ack): A.1 testnet path.
-  // - v0.5: 3 oracle bond returns + oracleFee/3 share per existing flow
-  // - v0.6 A.1: 5 committee members get oracleFee/5 share BUT 0 bond return (= committee
-  //   has pool-level standing stake, no per-market bond posted on chain). oracleBondReturns
-  //   entries still allocated as position placeholders so dispatchPhase2 can merge fee shares.
-  //   Caller passes oracleCount + committeeMode (= bond=0).
-  const oracleCountForBonds = Number.isInteger(args.oracleCount) ? args.oracleCount : 3;
-  const committeeMode = !!args.committeeMode;
+  // Bettor r355 SUPERSEDES r230 (committeeMode bond=0): the deployed PoolSpine_v0.6/v0.7 entry 0
+  // requires output[1..N] >= oracleBondAmount, so committeeMode MUST pay each committee >= oracleBond
+  // (reserved off distributablePool above). qoyqv 实证: r230 bond=0 → committee fee-only 0.2 KAS <
+  // 1 KAS oracleBond floor → SS 'verification failed'. Now committeeMode bond = oracleBond, merged
+  // with oracleFee/N share in dispatchPhase2 → committee output = oracleBond + fee >= oracleBond ✓.
+  // - v0.5: 3 oracle bond returns (+ forfeit redistribution) from real posted bonds.
+  // - v0.6/v0.7: 5 committee members each get oracleBond (pool-funded) + oracleFee/5 share.
+  // committeeMode NEVER skips a member (SS checks all N committee outputs c0..cN-1); the v0.5
+  // forfeit_1 silent-skip applies only to non-committee markets.
   const oracleBondReturns = [];
   for (let i = 0; i < oracleCountForBonds; i++) {
-    if (!unanimous && silentOracleIndex === i) continue;
-    const bondReturnAmount = committeeMode ? 0 : (oracleBond + perOracleForfeitShare);
+    if (!committeeMode && !unanimous && silentOracleIndex === i) continue;
+    const bondReturnAmount = committeeMode ? oracleBond : (oracleBond + perOracleForfeitShare);
     oracleBondReturns.push({ oracleIndex: i, amount: bondReturnAmount });
   }
 
