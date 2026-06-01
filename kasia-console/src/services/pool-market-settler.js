@@ -101,7 +101,7 @@ export async function poolSettlerTick() {
              updated_at, maker_stake_amount, oracle_bond_amount, miner_fee, metadata,
              outcome_market_source, outcome_token_id, outcome_side, protocol_version, pool_merkle_root
       FROM pool_markets
-      WHERE protocol_status IN ('verifying', 'collecting_sigs')
+      WHERE protocol_status IN ('verifying', 'collecting_sigs', 'refunding')
         AND deadline <= ?
     `).all(Math.floor(Date.now() / 1000));
     if (!markets.length) return { ok: true, processed: 0 };
@@ -173,6 +173,14 @@ export async function poolSettlerTick() {
         // Phase 2b: collecting_sigs status → handle sig aggregation + submit
         if (market.protocol_status === 'collecting_sigs') {
           await handleCollectingSigs(market);
+          continue;
+        }
+
+        // G2-B 二期 (Bettor r263 钦点): refunding status → maker single-sig refund TX submit.
+        // dispatchRefund stashed refund_tx_obj + transitioned to 'refunding'. This handler
+        // IPCs maker_relay to sign + submit + writes refund_txid + status='refunded'.
+        if (market.protocol_status === 'refunding') {
+          await handleRefunding(market);
           continue;
         }
 
@@ -920,6 +928,79 @@ export async function dispatchRefund(market, decision) {
     console.log(`[pool-settler] DISPATCHED Refund market=${market.id.slice(0,12)} reason=${decision.reason} maker_refund=${makerRefundAmount} → refunding`);
   } catch (e) {
     console.error(`[pool-settler] dispatchRefund fail market=${market.id?.slice(0,12)}: ${e.message}`);
+  }
+}
+
+/**
+ * G2-B 二期 (Bettor r263 钦点): handle protocol_status='refunding' markets.
+ *
+ * dispatchRefund stashed:
+ *   meta.refund_tx_obj          — preimage TX object (1 input + 1 output, exact value)
+ *   meta.refund_amount          — makerStakeAmount - minerFee (BigInt-as-Number)
+ *   meta.spine_redeem_script_hex — PoolSpine_v06 compiled redeem (stashed at create-time)
+ *
+ * Steps:
+ *   1. Look up maker address (maker_relay_id must be local — refund signs with maker privkey)
+ *   2. IPC maker_relay 'pool_refund_maker_unjoined_tx' (= PoolSpine_v06.sil entry 2):
+ *        scriptSig = [makerSig push] + OP_2 (selector) + [redeemScript push]
+ *        lockTime = deadline * 1000 (ms, per SS L275 bug 10d sediment)
+ *   3. Write refund_txid + status='refunded'
+ *
+ * Cross-node ingested markets are skipped (= maker has no local key, refund must run on
+ * producer node — same pattern as dispatchRefund). qlfpv-shape markets refund here.
+ */
+async function handleRefunding(market) {
+  let meta = {};
+  try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+  if (!meta.refund_tx_obj) {
+    console.warn(`[pool-settler:refunding] market=${market.id.slice(0,12)} missing meta.refund_tx_obj, skip (= dispatchRefund did not stash)`);
+    return;
+  }
+  if (!meta.spine_redeem_script_hex) {
+    console.warn(`[pool-settler:refunding] market=${market.id.slice(0,12)} missing meta.spine_redeem_script_hex (pre-v135 market), cannot assemble scriptSig`);
+    return;
+  }
+  if (meta.refund_amount == null) {
+    console.warn(`[pool-settler:refunding] market=${market.id.slice(0,12)} missing meta.refund_amount, skip`);
+    return;
+  }
+
+  // Skip cross-node markets (maker_relay_id sentinel) — refund must run where maker key lives.
+  if (typeof market.maker_relay_id === 'string' && market.maker_relay_id.startsWith('cross-node:')) {
+    console.log(`[pool-settler:refunding] skip cross-node market ${market.id.slice(0,12)} (maker on remote host)`);
+    return;
+  }
+
+  const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
+  if (!makerRow?.address) {
+    console.warn(`[pool-settler:refunding] market=${market.id.slice(0,12)} no maker address (maker_relay_id=${market.maker_relay_id?.slice(0,12)})`);
+    return;
+  }
+
+  // PoolSpine_v06.sil L275 bug 10d: tx.time >= deadline * 1000 (ms semantics).
+  const lockTime = BigInt(market.deadline) * 1000n;
+
+  try {
+    const submitResult = await sendCommandAsync(market.maker_relay_id, {
+      type: 'pool_refund_maker_unjoined_tx',
+      spine_p2sh_address: market.spine_p2sh,
+      spine_redeem_script_hex: meta.spine_redeem_script_hex,
+      required_input_outpoint: { outpointTxid: market.spine_lock_tx, outpointIndex: 0 },
+      output: { address: makerRow.address, amountSompi: String(meta.refund_amount) },
+      lock_time: lockTime.toString(),
+      tx_obj_preimage: meta.refund_tx_obj,
+    });
+
+    if (!submitResult?.ok || !submitResult.txId) {
+      console.error(`[pool-settler:refunding] submit fail market=${market.id.slice(0,12)}: ${submitResult?.error}`);
+      return;
+    }
+
+    sqlite.prepare('UPDATE pool_markets SET refund_txid = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(submitResult.txId, 'refunded', market.id);
+    console.log(`[pool-settler:refunding] REFUNDED market=${market.id.slice(0,12)} refund_txid=${submitResult.txId.slice(0,16)} to=${makerRow.address.slice(0,20)} amount=${meta.refund_amount}`);
+  } catch (e) {
+    console.error(`[pool-settler:refunding] submit exception market=${market.id?.slice(0,12)}: ${e.message}`);
   }
 }
 

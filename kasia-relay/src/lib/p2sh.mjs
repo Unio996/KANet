@@ -1040,6 +1040,112 @@ export async function unlockPoolSpineRefundDisagreement(args) {
   }
 }
 
+// ── 7c — unlockPoolSpineRefundMakerUnjoined (G2-B 二期, Bettor r263 钦点) ──
+//
+// PoolSpine_v06.sil entry 2 refund_maker_unjoined (= 0-bet auto-refund single-sig path).
+// Spec L273-282:
+//   - 1 input (= spine UTXO holding maker stake)
+//   - 1 output (= P2PK to makerPk, value == makerStakeAmount - minerFee EXACT)
+//   - require(checkSig(makerSig, pubkey(makerPk))) → maker single sig only
+//   - require(tx.time >= deadline * 1000) → lockTime in ms (bug 10d Path A sediment)
+//
+// scriptSig: [makerSig push] + OP_2 (= selector entry 2) + [redeemScript push].
+//
+// Maker_relay 自家 wallet 签 (= makerPk privkey 在 maker_relay), inline 一步 sign+submit.
+// No DM/chain collection needed (single-sig vs settle 5-of-5 committee).
+export async function unlockPoolSpineRefundMakerUnjoined(args) {
+  const {
+    wallet, spineP2shAddress, spineRedeemScriptHex,
+    requiredInputOutpoint, output,
+    networkId, lockTime = 0n, txObjPreimage = null,
+  } = args;
+  if (!wallet) throw new Error('unlockPoolSpineRefundMakerUnjoined: wallet required (= maker_relay signer)');
+  if (!requiredInputOutpoint?.outpointTxid) throw new Error('requiredInputOutpoint.outpointTxid required');
+  if (!output?.address || (output.amountSompi == null)) throw new Error('output { address, amountSompi } required');
+
+  const txLockTime = BigInt(lockTime);
+  const rpc = await connectRpc(networkId);
+  try {
+    const { entries } = await rpc.getUtxosByAddresses([spineP2shAddress]);
+    if (!entries?.length) throw new Error(`No UTXOs at spine P2SH ${spineP2shAddress}`);
+    const hits = entries.filter(e => e.outpoint.transactionId === requiredInputOutpoint.outpointTxid);
+    if (hits.length === 0) throw new Error(`UTXO not found for lock tx: ${requiredInputOutpoint.outpointTxid}`);
+    if (hits.length > 1) throw new Error(`ambiguous: ${hits.length} UTXOs at spine from tx ${requiredInputOutpoint.outpointTxid}`);
+    const matched = [hits[0]];
+
+    const outAmount = typeof output.amountSompi === 'string' ? BigInt(output.amountSompi) : BigInt(output.amountSompi);
+    const outSpk = payToAddressScript(new Address(output.address));
+
+    // Rehydrate preimage if provided (= settler.dispatchRefund built via prediction_settle_build_preimage).
+    // Preimage owns the exact output amount that matches SS L281 require(value == makerStakeAmount - minerFee).
+    let unsignedTx;
+    if (txObjPreimage) {
+      const parsed = JSON.parse(JSON.stringify(txObjPreimage));
+      parsed.lockTime = BigInt(parsed.lockTime || 0);
+      parsed.gas = BigInt(parsed.gas || 0);
+      parsed.inputs = parsed.inputs.map(inp => ({
+        ...inp,
+        signatureScript: '',  // strip for sighash compute
+        sequence: BigInt(inp.sequence || 0),
+        sigOpCount: Number(inp.sigOpCount || 1),
+        utxo: inp.utxo ? {
+          ...inp.utxo,
+          amount: BigInt(inp.utxo.amount || 0),
+          blockDaaScore: BigInt(inp.utxo.blockDaaScore || 0),
+        } : undefined,
+      }));
+      parsed.outputs = parsed.outputs.map(o => ({ ...o, value: BigInt(o.value || 0) }));
+      unsignedTx = new Transaction(parsed);
+    } else {
+      unsignedTx = new Transaction({
+        version: 0,
+        inputs: [{
+          previousOutpoint: { transactionId: matched[0].outpoint.transactionId, index: matched[0].outpoint.index },
+          signatureScript: '',
+          sequence: 0n,
+          sigOpCount: 1,
+          utxo: matched[0],
+        }],
+        outputs: [new TransactionOutput(outAmount, outSpk)],
+        lockTime: txLockTime,
+        gas: 0n,
+        subnetworkId: '0000000000000000000000000000000000000000',
+        payload: '',
+      });
+    }
+
+    // Maker single-sig (= SS L274 require(checkSig(makerSig, pubkey(makerPk)))).
+    // createInputSignature returns push-encoded hex [0x41][64sig][0x01] (= 66 bytes / 132 hex chars).
+    const makerSigHex = createInputSignature(unsignedTx, 0, wallet.getPrivateKey(), SighashType.All);
+
+    // scriptSig: [makerSig push] + OP_2 (selector entry 2 refund_maker_unjoined) + [redeemScript push]
+    const spineRedeemBytes = Buffer.from(spineRedeemScriptHex, 'hex');
+    const spineRedeemPushHex = _encodePushDataHex(spineRedeemBytes);
+    const scriptSigHex = makerSigHex + '52' + spineRedeemPushHex;
+
+    const signedTx = new Transaction({
+      version: 0,
+      inputs: [{
+        previousOutpoint: { transactionId: matched[0].outpoint.transactionId, index: matched[0].outpoint.index },
+        signatureScript: scriptSigHex,
+        sequence: 0n,
+        sigOpCount: 1,
+      }],
+      outputs: [new TransactionOutput(outAmount, outSpk)],
+      lockTime: txLockTime,
+      gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000',
+      payload: '',
+    });
+
+    _assertTxInvariants(matched, signedTx, 'unlockPoolSpineRefundMakerUnjoined');
+    const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: result.transactionId };
+  } finally {
+    try { await rpc.disconnect(); } catch {}
+  }
+}
+
 // ── 8. checkUtxoLanded (B2 v0.5 Phase 3 bug 7 fix) ──
 
 /**

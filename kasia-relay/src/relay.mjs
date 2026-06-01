@@ -706,6 +706,27 @@ if (process.send) {
           return;
         }
 
+        case 'pool_refund_maker_unjoined_tx': {
+          // G2-B 二期 (Bettor r263 钦点) — PoolSpine_v06 entry 2 refund_maker_unjoined.
+          // Maker single-sig + 1 input + 1 output, inline sign+submit (no DM/chain collection).
+          const { unlockPoolSpineRefundMakerUnjoined } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockPoolSpineRefundMakerUnjoined({
+            wallet,
+            spineP2shAddress: cmd.spine_p2sh_address,
+            spineRedeemScriptHex: cmd.spine_redeem_script_hex,
+            requiredInputOutpoint: cmd.required_input_outpoint,
+            output: cmd.output,
+            networkId: wallet.getNetworkId(),
+            lockTime: BigInt(cmd.lock_time || 0),
+            txObjPreimage: cmd.tx_obj_preimage || null,
+          });
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+          }
+          return;
+        }
+
         case 'pool_refund_disagreement_tx': {
           // B2 v0.5 area-4 7c — pool refund_disagreement TX submit. Spine-only (4 inputs),
           // 3 (Gap 1B silent burn) or 4 (Gap 1A full) outputs per silentOracleIndex.
