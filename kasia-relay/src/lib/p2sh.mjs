@@ -702,7 +702,11 @@ export async function unlockPoolSpineP2SH(args) {
     unanimous, networkId, lockTime = 0n, txObjPreimage = null,
   } = args;
 
-  if (!unanimous) throw new Error('Phase 2c step 2a first ship supports unanimous only — forfeit_1 entry 1 deferred next step');
+  // Bettor r287 layer-21 G2-A relay: v0.6 settle_aggregate has validSigs counter (4-of-5
+  // threshold) → unanimous skip moot. v0.5 still requires unanimous (entry 0 only, entry 1
+  // forfeit_1 deferred). Detect v0.6 via committee_data presence (= same as scriptSig branch).
+  const isV06EarlyDetect = !!args.committee_data && Array.isArray(args.committee_data.committee_pks) && args.committee_data.committee_pks.length === 5;
+  if (!unanimous && !isV06EarlyDetect) throw new Error('Phase 2c step 2a first ship supports unanimous only (v0.5) — forfeit_1 entry 1 deferred next step');
   if (winner !== 0 && winner !== 1) throw new Error(`winner must be 0 or 1, got ${winner}`);
   if (!Array.isArray(sideP2shAddresses) || !Array.isArray(sideRedeemScriptHexes)) throw new Error('sideP2shAddresses and sideRedeemScriptHexes required arrays');
   if (sideP2shAddresses.length !== sideRedeemScriptHexes.length) throw new Error(`side count mismatch: ${sideP2shAddresses.length} addresses vs ${sideRedeemScriptHexes.length} redeem scripts`);
