@@ -637,7 +637,12 @@ export async function dispatchPhase2(market, decision) {
       // Bettor r279 layer-20: v0.6 settle TX mass ~41430 needs fee >= 4143000 (100 sompi/mass).
       // market.miner_fee 50000 way too low. Bump to 5000000 (0.05 KAS, ~21% margin over min).
       const baseMinerFee = parseInt(market.miner_fee, 10) || 20_000;
-      const minerFeeFinal = market.protocol_version === 'v0.6' ? Math.max(baseMinerFee, 5_000_000) : baseMinerFee;
+      // DoD #1.2 sweep: v0.6 + v0.7 都是 anonymous-pool 5-committee 模式 (J1 r240/1 实证
+      // 'v0.7 委员 sig + 阈值 4-of-5 + depth-8 merkle 同 v0.6 无差'). Settle minerFee floor /
+      // oracleCount / committeeMode 全 reuse v0.6 path. v0.7-specific 仅 SS bytecode + scriptSig
+      // sharding extras (commit_v2/globalYes/globalNo, J1 #1.4 ship), 不影响 settler 端这层逻辑.
+      const isAnonymousPool = market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7';
+      const minerFeeFinal = isAnonymousPool ? Math.max(baseMinerFee, 5_000_000) : baseMinerFee;
       payouts = computePoolPayouts({
         participants,
         winner: decision.winner,
@@ -646,10 +651,8 @@ export async function dispatchPhase2(market, decision) {
         minerFee: minerFeeFinal,
         unanimous: decision.unanimous,
         silentOracleIndex: decision.silentOracleIndex ?? null,
-        // Bettor r230 DECISION LOCK A.1: v0.6 = 5 committee members, NO per-market bond,
-        // oracleFee/5 share to each. v0.5 = 3 oracle bond+forfeit+fee/3.
-        oracleCount: market.protocol_version === 'v0.6' ? 5 : 3,
-        committeeMode: market.protocol_version === 'v0.6',
+        oracleCount: isAnonymousPool ? 5 : 3,
+        committeeMode: isAnonymousPool,
       });
     } catch (e) {
       // Bettor r291/r293 Owner钦定 auto-refund: 0-bet markets fail computePoolPayouts via
@@ -682,11 +685,12 @@ export async function dispatchPhase2(market, decision) {
     // computePoolPayouts didn't compute this; sub 5b adds explicitly.
     const totalLoserStake = participants.filter(p => p.direction !== decision.winner).reduce((s, p) => s + p.stake, 0);
     const baseMinerFeeSompi = parseInt(market.miner_fee, 10) || 20_000;
-    const minerFeeSompi = market.protocol_version === 'v0.6' ? Math.max(baseMinerFeeSompi, 5_000_000) : baseMinerFeeSompi;
+    // DoD #1.2 sweep: v0.6+v0.7 same Math.max floor + oracleFeeDivisor=5 (= committee size).
+    const isAnonymousPoolOutputs = market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7';
+    const minerFeeSompi = isAnonymousPoolOutputs ? Math.max(baseMinerFeeSompi, 5_000_000) : baseMinerFeeSompi;
     const oracleLosingPool = Math.max(0, totalLoserStake - minerFeeSompi);
     const oracleFeeTotal = Math.floor(oracleLosingPool * oracleFeePct / 10000);
-    // Bettor r230 A.1: v0.5 oracleFee/3, v0.6 oracleFee/5 (= committee size).
-    const oracleFeeDivisor = market.protocol_version === 'v0.6' ? 5 : 3;
+    const oracleFeeDivisor = isAnonymousPoolOutputs ? 5 : 3;
     const oracleFeePerSig = Math.floor(oracleFeeTotal / oracleFeeDivisor);
     // Spec note: oracleFeeTotal % 3 余数 (= 0-2 sompi) 留 brokerFee 端 (= 等同 W3 余数 maker pattern reuse).
     // Per J1 #4 fix: oracleFee deducted from broker pool? No — 跟 Bettor r17 truth matrix "brokerFeePct × losingPool" + "oracleFeePct × losingPool" 是 2 个独立 channel, 不 carved from broker.
@@ -696,12 +700,11 @@ export async function dispatchPhase2(market, decision) {
     if (payouts.brokerFee > 0) {
       outputs.push({ address: brokerRow.address, amountSompi: payouts.brokerFee.toString() });
     }
-    // Bettor r277 layer-19: v0.6 PoolSpine_v06.sil settle_aggregate fixed output layout:
+    // Bettor r277 layer-19: v0.6/v0.7 PoolSpine settle_aggregate fixed output layout:
     // [0]=broker, [1..5]=5 committee P2PKs (>= oracleBondAmount each), [6..]=winners.
     // v0.5 had [broker, winners, makerExtra, oracleBondReturns] — committee at end.
-    // Reorder for v0.6: insert oracleBondReturns (+ fee/N) BEFORE winners.
-    const isV06Outputs = market.protocol_version === 'v0.6';
-    if (isV06Outputs) {
+    // Reorder for v0.6/v0.7: insert oracleBondReturns (+ fee/N) BEFORE winners.
+    if (isAnonymousPoolOutputs) {
       for (const r of payouts.oracleBondReturns) {
         const mergedAmount = r.amount + oracleFeePerSig;
         outputs.push({ address: oracleRows[r.oracleIndex].address, amountSompi: mergedAmount.toString() });
@@ -777,7 +780,10 @@ export async function dispatchPhase2(market, decision) {
     // Bettor r271/r275 layer-16/18: budget formula 100k×N+9999. v0.6 used 510021,
     // sigOpCount=5 budget=509999 → 22 short. Bump 8 → 809999 (~59% margin).
     // sigOpCount IS in sighash → reset/re-collect on change.
-    const spineSigOpCount = market.protocol_version === 'v0.6' ? 8 : 3;
+    // DoD #1.2 sweep: v0.7 same as v0.6 sigOpCount budget (= same 5 committee sigs + selector args).
+    // v0.7 sharding adds 3 extra args (globalYes/No/commit_v2) but those are byte[]/int pushes,
+    // not checkSig opcodes — sigOpCount unchanged at 8.
+    const spineSigOpCount = (market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7') ? 8 : 3;
     const sigOpCounts = requiredInputOutpoints.map((_, i) => (i < spineInputCount ? spineSigOpCount : 0));
     const preimage = await sendCommandAsync(market.maker_relay_id, {
       type: 'prediction_settle_build_preimage',
@@ -812,7 +818,7 @@ export async function dispatchPhase2(market, decision) {
     // J1 r221 + Bettor r218 ③ Layer-12: v0.6 settle_aggregate needs committee data — fetch
     // 5 committee pks + their indices in pool_snapshots + 5×8 merkle proofs + committee_pk_hash,
     // persist into meta so relay can assemble scriptSig per PoolSpine_v06.sil entry 0 spec.
-    if (market.protocol_version === 'v0.6') {
+    if (market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7') {
       try {
         const committeeRow = sqlite.prepare('SELECT committee_pks, committee_pk_hash FROM pool_committee WHERE market_id = ?').get(market.id);
         if (!committeeRow) throw new Error('pool_committee row missing');
@@ -1442,14 +1448,19 @@ async function handleCollectingSigs(market) {
   console.log(`[pool-settler:collecting] market=${market.id.slice(0,12)} attempting settle TX submit (spine_inputs=${spineInputCount}, sides=${sides.length}, signers=${signingOracles.join(',')})`);
 
   try {
-    // J1 r221 + Bettor r218 ③ Layer-12: v0.6 committee data extras for settle_aggregate.
-    // Optional fields — only present for v0.6 markets where dispatchPhase2 baked them.
-    const v06Extras = market.protocol_version === 'v0.6' ? {
-      protocol_version: 'v0.6',
+    // J1 r221 + Bettor r218 ③ Layer-12 + DoD #1.2 sweep: v0.6/v0.7 committee data extras for
+    // settle_aggregate. v0.7 settle 仍需 J1 #1.4 ship sharding extras (shard_id/shard_count/
+    // global_yes/global_no/commit_v2 globalYes 全局赔率 anchor). Console 端 dispatchPhase2 已
+    // 写 phase2_committee_* fields supporting both. v0.7 sharding extras TODO when J1 specs.
+    const isAnonymousPoolSettle = market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7';
+    const v06Extras = isAnonymousPoolSettle ? {
+      protocol_version: market.protocol_version,
       committee_pks: meta.phase2_committee_pks,
       committee_indices: meta.phase2_committee_indices,
       committee_merkle_proofs: meta.phase2_committee_merkle_proofs,
       committee_pk_hash: meta.phase2_committee_pk_hash,
+      // TODO (J1 #1.4): v0.7 settle 仍需 shard_id/shard_count/global_yes/global_no/commit_v2.
+      // 此处先 placeholder, J1 ship 后 settler 加 phase2_sharding 字段 + 透传.
     } : {};
     const submitResult = await sendCommandAsync(market.maker_relay_id, {
       type: 'pool_settle_tx',
