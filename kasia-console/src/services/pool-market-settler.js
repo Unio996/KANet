@@ -1013,22 +1013,21 @@ async function computeMassAwareV07RefundFee({ market, makerStake, networkId, mak
   const kaspa = await import('kaspa-wasm');
   const { RpcClient, Encoding, Address, Transaction, TransactionOutput,
           payToAddressScript, calculateTransactionMass, kaspaToSompi } = kaspa;
-  const Resolver = kaspa.Resolver || null;
 
-  // RPC: use the standard system endpoint (= same as transferAndConfirm path in pool.js).
-  // We just need to fetch the spine UTXO to construct the fake TX.
+  // KANet-UI r452 catch: Resolver picks public Kaspa endpoint, NOT the patched local node.
+  // Use getWorkingRpc() to point at the LOCAL relaxed-mempool node (= same that pool.js
+  // L1067/L1225 path uses). KANet 铁律 feedback_use_system_rpc 5/12 sediment.
   //
-  // CRITICAL (Bettor r303 catch): rusty-kaspa node may be in IBD sync state (T2 G7 setup
-  // 涉及 kaspad rebuild + restart). RPC connect/getUtxos can hang indefinitely waiting for
-  // sync to complete → freezes settler daemon → no further ticks → silent stuck. Wrap in
-  // 15s timeout to fail-fast and let dispatchRefund catch + log gracefully. Next tick can
-  // retry; eventually IBD completes and the compute succeeds.
+  // CRITICAL (Bettor r303 catch): local node may be in IBD sync state → RPC hangs indefinitely
+  // → freezes settler daemon. Wrap in 15s timeout to fail-fast. Tick continues; next tick retries.
+  const { getWorkingRpc } = await import('./rpc-health.js');
+  const { url: rpcUrl } = await getWorkingRpc();
   const RPC_TIMEOUT_MS = 15_000;
   const withTimeout = (promise, ms, label) => Promise.race([
     promise,
     new Promise((_, reject) => setTimeout(() => reject(new Error(`RPC timeout ${ms}ms (${label}) — node likely IBD syncing`)), ms)),
   ]);
-  const rpc = new RpcClient({ resolver: Resolver ? new Resolver() : undefined, networkId });
+  const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId });
   await withTimeout(rpc.connect(), RPC_TIMEOUT_MS, 'rpc.connect');
   let spineUtxo;
   try {
