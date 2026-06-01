@@ -1009,23 +1009,29 @@ async function computeMassAwareV07RefundFee({ market, makerStake, networkId, mak
   const spineRedeemHex = meta.spine_redeem_script_hex;
   if (!spineRedeemHex) throw new Error('market.metadata missing spine_redeem_script_hex');
 
-  // G6 批 3 段① Bettor r311 钦定: Console 手搓 UtxoEntry 喂 calculateTransactionMass 多次
-  // WASM panic (unreachable / 'outpoint is not an object' 等 N+1 whack-a-mole). 转 relay IPC
-  // 算 mass — relay 端有 well-tested kaspa-wasm UtxoEntry pattern (p2sh.mjs unlockPoolSpineRefundMakerUnjoined
-  // 已 ship), 直接 reuse. Console 只 IPC 调用拿结果, 不在 Console 手搓.
-  const result = await sendCommandAsync(market.maker_relay_id, {
-    type: 'pool_v07_compute_refund_mass',
-    spine_p2sh: market.spine_p2sh,
-    spine_lock_tx: market.spine_lock_tx,
-    spine_redeem_script_hex: spineRedeemHex,
-    maker_address: makerAddress,
-    maker_stake: String(makerStake),
-    deadline: String(market.deadline),
-  });
-  if (!result?.ok || !result.mass) {
-    throw new Error(`relay mass compute fail: ${result?.error || 'no mass returned'}`);
-  }
-  const mass = BigInt(result.mass);
+  // G6 批 3 段① Bettor r311 hard-stop + r301 方案 (a): byte-size mass 估算, 完全绕开 WASM.
+  // calculateTransactionMass 在 Console 端 (4 次 panic: Resolver/unreachable/outpoint/scriptPK)
+  // 和 relay 端 (f4b74b0 仍 unreachable) 都失败. WASM 字段地狱无法稳, 退到 KIP-9 byte-size
+  // 估算 — refund TX 是固定形状 (1 in 1 out + ~1942 byte redeem), byte size 可静态计算.
+  //
+  // Byte size 分解:
+  //   input: 32 txid + 4 vout + sigScript_size + 8 seq + 1 sigOpCount ≈ 45 + sigScript
+  //   sigScript: 66 sig push + 1 OP_2 + 3 PUSHDATA2 header + redeem_size = 70 + redeem_size
+  //   output: ~50 (8 value + ~34 P2PK + headers)
+  //   tx overhead: ~80 (version, locktime, gas, subnetwork, payload)
+  //
+  // qlfpv 实测 mass=4420 for ~2200 byte refund TX = ratio ~2.0. 用 2.5 + 100 overhead
+  // 保守估算 cover variance + storage mass component.
+  const redeemBytes = Buffer.from(spineRedeemHex, 'hex');
+  const sigScriptSize = 70 + redeemBytes.length;  // 66 sig push + 1 OP_2 + 3 PUSHDATA2 header + redeem
+  const inputSize = 45 + sigScriptSize;
+  const outputSize = 50;
+  const txOverhead = 80;
+  const estimatedTxSize = inputSize + outputSize + txOverhead;
+  const MASS_RATIO_BYTES_TO_MASS = 25n;  // 2.5x as BigInt (× 10 for integer math)
+  const massEstimate = (BigInt(estimatedTxSize) * MASS_RATIO_BYTES_TO_MASS) / 10n;
+  const mass = massEstimate;
+  console.log(`[pool-settler] v0.7 byte-size mass estimate market=${market.id.slice(0,12)} txBytes≈${estimatedTxSize} mass≈${mass} (redeem ${redeemBytes.length}B, sigScript ${sigScriptSize}B, ratio 2.5)`);
   let dynamicFee = BigInt(mass) * SOMPI_PER_MASS;
   if (dynamicFee < V07_MIN_FEE) dynamicFee = V07_MIN_FEE;
   if (dynamicFee > V07_MAX_FEE) dynamicFee = V07_MAX_FEE;
