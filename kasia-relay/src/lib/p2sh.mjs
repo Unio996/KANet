@@ -32,8 +32,13 @@ const TMP_DIR = process.env.KANET_ROOT ? join(process.env.KANET_ROOT, 'tmp') : '
 // 5 call sites: unlockP2SH / unlockP2SHMultiSig / unlockP2SHConsensual / pool spine settle / pool refund.
 // Use this helper instead of ScriptBuilder.addData() for any data push > 75 bytes.
 // Bettor r263 G6 批1.5 sweep: balance + dust invariant for ALL manual P2SH spend paths.
-// Centralized so all 5 submit sites get the same defense. Called before rpc.submitTransaction.
-function _assertTxInvariants(matchedUtxos, signedTx, siteLabel = 'unknown') {
+// Centralized so all 7 submit sites get the same defense. Called before rpc.submitTransaction.
+// Bettor r239 G6 批2 红线 7 (qlfpv 实测 brick sediment): 加 mass-aware fee floor check.
+// qlfpv 第三面 root cause: SS 焊死 fee = makerStake-ctor_minerFee_50_000, 但实际 mass=4420
+// → mempool floor 442_000 sompi → mempool reject 'transaction is not standard'. Pre-submit
+// 拦下来比等 mempool reject 干净 — 立刻报 mass mismatch 不浪费 RPC roundtrip + log noise.
+const MIN_SOMPI_PER_MASS = 100n;  // Kaspa post-Toccata transient mass mempool floor 实测 qlfpv 442000/4420
+function _assertTxInvariants(matchedUtxos, signedTx, siteLabel = 'unknown', networkId = null) {
   try {
     const sumIn = matchedUtxos.reduce((acc, u) => acc + BigInt(u.amount), 0n);
     const sumOut = signedTx.outputs.reduce((acc, o) => acc + BigInt(typeof o.value === 'bigint' ? o.value : (o.value || 0)), 0n);
@@ -44,6 +49,22 @@ function _assertTxInvariants(matchedUtxos, signedTx, siteLabel = 'unknown') {
     for (let i = 0; i < signedTx.outputs.length; i++) {
       const v = BigInt(typeof signedTx.outputs[i].value === 'bigint' ? signedTx.outputs[i].value : (signedTx.outputs[i].value || 0));
       if (v < MIN_OUTPUT_DUST_SOMPI) throw new Error(`output[${i}] value=${v} < dust ${MIN_OUTPUT_DUST_SOMPI}`);
+    }
+    // 红线 7: mass-aware fee floor (skip if networkId not passed, = legacy callers protect).
+    if (networkId && typeof kaspa.calculateTransactionMass === 'function') {
+      let mass;
+      try { mass = kaspa.calculateTransactionMass(networkId, signedTx); } catch (massErr) {
+        // mass calc 不可用 → log warn 不 fail (= 让 mempool 拦截作 fallback).
+        console.warn(`[${siteLabel} invariant] mass calc skipped: ${massErr.message}`);
+        console.log(`[${siteLabel} invariant] Σin=${sumIn} Σout=${sumOut} fee=${fee}, ${signedTx.outputs.length} outputs all >= dust (mass-check skipped)`);
+        return;
+      }
+      const minFee = BigInt(mass) * MIN_SOMPI_PER_MASS;
+      if (fee < minFee) {
+        throw new Error(`fee ${fee} < mempool floor ${minFee} (mass=${mass} × ${MIN_SOMPI_PER_MASS} sompi/mass) — SS contract fee 焊死太低或 scriptSig 太大`);
+      }
+      console.log(`[${siteLabel} invariant] Σin=${sumIn} Σout=${sumOut} fee=${fee} (mass=${mass} minFee=${minFee} ✓), ${signedTx.outputs.length} outputs all >= dust`);
+      return;
     }
     console.log(`[${siteLabel} invariant] Σin=${sumIn} Σout=${sumOut} fee=${fee}, ${signedTx.outputs.length} outputs all >= dust`);
   } catch (e) {
@@ -269,7 +290,7 @@ export async function unlockP2SH(wallet, p2shAddress, redeemScript, branch, toAd
       payload: '',
     });
 
-    _assertTxInvariants([utxo], signedTx, 'unlockP2SH');
+    _assertTxInvariants([utxo], signedTx, 'unlockP2SH', wallet.getNetworkId());
     const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: result.transactionId, amount: outValue };
   } finally {
@@ -415,7 +436,7 @@ export async function unlockP2SHMultiSig(p2shAddress, redeemScript, requiredInpu
       });
     }
 
-    _assertTxInvariants(matched, signedTx, 'p2sh-submit');
+    _assertTxInvariants(matched, signedTx, 'p2sh-submit', networkId);
     const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: result.transactionId };
   } finally {
@@ -534,7 +555,7 @@ export async function unlockP2SHConsensual(p2shAddress, redeemScript, requiredIn
       });
     }
 
-    _assertTxInvariants(matched, signedTx, 'p2sh-submit');
+    _assertTxInvariants(matched, signedTx, 'p2sh-submit', networkId);
     const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: result.transactionId };
   } finally {
@@ -696,7 +717,7 @@ export async function unlockP2SHDual(wallet, p2shAddress, redeemScript, branch, 
       payload: '',
     });
 
-    _assertTxInvariants(matched, signedTx, 'unlockP2SHDual');
+    _assertTxInvariants(matched, signedTx, 'unlockP2SHDual', wallet.getNetworkId());
     const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: result.transactionId };
   } finally {
@@ -899,7 +920,7 @@ export async function unlockPoolSpineP2SH(args) {
       });
     }
 
-    _assertTxInvariants(matched, signedTx, 'unlockPoolSpineP2SH');
+    _assertTxInvariants(matched, signedTx, 'unlockPoolSpineP2SH', networkId);
     const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: result.transactionId };
   } finally {
@@ -1032,7 +1053,7 @@ export async function unlockPoolSpineRefundDisagreement(args) {
       });
     }
 
-    _assertTxInvariants(matched, signedTx, 'p2sh-submit');
+    _assertTxInvariants(matched, signedTx, 'p2sh-submit', networkId);
     const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: result.transactionId };
   } finally {
@@ -1148,7 +1169,7 @@ export async function unlockPoolSpineRefundMakerUnjoined(args) {
       payload: '',
     });
 
-    _assertTxInvariants(matched, signedTx, 'unlockPoolSpineRefundMakerUnjoined');
+    _assertTxInvariants(matched, signedTx, 'unlockPoolSpineRefundMakerUnjoined', networkId);
     const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: result.transactionId };
   } finally {
