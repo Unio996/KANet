@@ -1656,11 +1656,30 @@ async function handleCollectingSigs(market) {
 
   console.log(`[pool-settler:collecting] market=${market.id.slice(0,12)} attempting settle TX submit (spine_inputs=${spineInputCount}, sides=${sides.length}, signers=${signingOracles.join(',')})`);
 
+  // Bettor r354 — v0.7 settle_aggregate sharding globals, computed HERE (not just dispatchPhase2).
+  // qoyqv 实证: markets dispatched before r353 are stuck in collecting_sigs and never re-run
+  // dispatchPhase2, so meta.phase2_global_* is undefined → relay can't push globals → scriptSig
+  // short 3 → 'pick at invalid location'. Compute fresh from DB (prefer meta when present).
+  // direction 0=YES 1=NO (= same convention as dispatchPhase2 makerDirection/thin-check).
+  let globalYesSompi = meta.phase2_global_yes_sompi;
+  let globalNoSompi = meta.phase2_global_no_sompi;
+  let globalCommitId = meta.phase2_global_commit_id;
+  if (market.protocol_version === 'v0.7' && (globalYesSompi === undefined || globalYesSompi === null)) {
+    const makerDir = market.outcome_side === 'YES' ? 0 : 1;
+    const makerStk = parseInt(market.maker_stake_amount, 10) || 0;
+    const betRows = sqlite.prepare(`SELECT direction, stake_amount FROM pool_bettor_sides WHERE market_id = ? AND side_lock_tx IS NOT NULL`).all(market.id);
+    const allParts = [{ direction: makerDir, stake: makerStk }, ...betRows.map(b => ({ direction: b.direction, stake: parseInt(b.stake_amount, 10) || 0 }))];
+    globalYesSompi = allParts.filter(p => p.direction === 0).reduce((s, p) => s + p.stake, 0);
+    globalNoSompi = allParts.filter(p => p.direction === 1).reduce((s, p) => s + p.stake, 0);
+    const crypto = await import('crypto');
+    globalCommitId = crypto.createHash('sha256').update(market.id).digest('hex');
+    console.log(`[pool-settler:collecting] v0.7 globals computed (meta fallback) market=${market.id.slice(0,12)} globalYes=${globalYesSompi} globalNo=${globalNoSompi}`);
+  }
+
   try {
     // J1 r221 + Bettor r218 ③ Layer-12 + DoD #1.2 sweep: v0.6/v0.7 committee data extras for
-    // settle_aggregate. v0.7 settle 仍需 J1 #1.4 ship sharding extras (shard_id/shard_count/
-    // global_yes/global_no/commit_v2 globalYes 全局赔率 anchor). Console 端 dispatchPhase2 已
-    // 写 phase2_committee_* fields supporting both. v0.7 sharding extras TODO when J1 specs.
+    // settle_aggregate. v0.7 adds sharding globals (globalYes/No/commit) per PoolSpine_v07.sil
+    // L103-105 — computed above (dispatchPhase2-baked meta OR fresh DB fallback).
     const isAnonymousPoolSettle = market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7';
     const v06Extras = isAnonymousPoolSettle ? {
       protocol_version: market.protocol_version,
@@ -1668,12 +1687,11 @@ async function handleCollectingSigs(market) {
       committee_indices: meta.phase2_committee_indices,
       committee_merkle_proofs: meta.phase2_committee_merkle_proofs,
       committee_pk_hash: meta.phase2_committee_pk_hash,
-      // Bettor r353: v0.7 settle_aggregate sharding globals (baked in dispatchPhase2).
-      // v0.6 markets won't have these (meta.phase2_global_* undefined) → relay skips pushing
-      // them → v0.6 scriptSig stays byte-identical (46f8a-proven). v0.7 only.
-      global_yes_total_sompi: meta.phase2_global_yes_sompi,
-      global_no_total_sompi: meta.phase2_global_no_sompi,
-      global_commit_id: meta.phase2_global_commit_id,
+      // Bettor r353/r354: v0.7 sharding globals. v0.6 markets: globalYesSompi stays undefined
+      // (block above gated on v0.7) → relay skips pushing → v0.6 scriptSig byte-identical (46f8a).
+      global_yes_total_sompi: globalYesSompi,
+      global_no_total_sompi: globalNoSompi,
+      global_commit_id: globalCommitId,
     } : {};
     const submitResult = await sendCommandAsync(market.maker_relay_id, {
       type: 'pool_settle_tx',
