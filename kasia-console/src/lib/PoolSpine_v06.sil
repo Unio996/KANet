@@ -274,10 +274,14 @@ contract PoolSpine_v06(
         require(tx.outputs.length >= 1);
     }
 
-    // entry 2 — refund_maker_unjoined: maker recovers stake if no bettor joined.
+    // entry 2 — refund_maker_unjoined: maker recovers stake after deadline + grace.
+    // FRONT-RUN FIX (Bettor r388/r389 spec, 2026-06-02): name "unjoined" misleading —
+    // SS never verified "no bettor joined"; check was only `tx.time>=deadline*1000`.
+    // Losing maker could front-run settle to spend spine UTXO + brick settle_via_spine.
+    // REFUND_GRACE_SEC = 7200 (2h) > NWT committee 结算 SLA, pushes refund out of settle window.
     entrypoint function refund_maker_unjoined(sig makerSig) {
         require(checkSig(makerSig, pubkey(makerPk)));
-        require(tx.time >= deadline * 1000);  // bug 10d Path A: LOCK_TIME_THRESHOLD requires ms
+        require(tx.time >= (deadline + 7200) * 1000);  // grace 修, bug 10d Path A ms 模式
         require(tx.inputs.length == 1);
         require(tx.outputs.length == 1);
 
