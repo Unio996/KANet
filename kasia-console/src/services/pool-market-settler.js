@@ -861,38 +861,12 @@ export async function dispatchPhase2(market, decision) {
  */
 export async function dispatchRefund(market, decision) {
   try {
-    // 1. Compute maker output amount.
-    //    v0.5 PoolSpine.sil entry 2 refund_unanimous_silent: maker recovers stake + 3 bonds.
-    //    v0.6 PoolSpine_v06.sil entry 2 refund_maker_unjoined (J1 r230 + Bettor r283 G2-B):
-    //    maker single-sig, no committee bond inputs (A.1 standing stake model) → just stake - fee.
-    //    Use 5M floor minerFee for v0.6 (= same as settle, mass coverage).
     const makerStake = parseInt(market.maker_stake_amount, 10) || 0;
     const oracleBond = parseInt(market.oracle_bond_amount, 10) || 0;
-    const baseMinerFeeR = parseInt(market.miner_fee, 10) || 20_000;
-    // CRITICAL (G2-B 二期 qlfpv 实测): v0.6 refund_maker_unjoined SS contract requires
-    // tx.outputs[0].value == makerStakeAmount - minerFee EXACT (PoolSpine_v06.sil L281).
-    // The contract's `minerFee` ctor param comes from DB market.miner_fee at create-v06
-    // time (pool.js L448 + L495 computeSpineP2SH_v06). Settler MUST use the same value
-    // here — applying the v0.6 settle path's Math.max(_, 5M) floor causes value mismatch
-    // → SS reject. The 5M floor was specific to settle (spine 5+1+winners TX mass), not
-    // refund (1in+1out, mass tiny, 50_000 sompi sufficient).
-    const minerFee = baseMinerFeeR;
-    // v0.6 + v0.7: no oracle bond inputs (A.1 standing-stake committee), spine只锁 maker stake.
-    // v0.5 legacy: 3 oracle bonds locked in spine, refund recovers them too.
-    const isAnonymousPool = market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7';
-    const makerRefundAmount = isAnonymousPool
-      ? (makerStake - minerFee)
-      : (makerStake + oracleBond * 3 - minerFee);  // v0.5: 3 bonds in spine
-    if (makerRefundAmount <= 0) {
-      console.warn(`[pool-settler] dispatchRefund market=${market.id.slice(0,12)} makerRefundAmount=${makerRefundAmount} ≤ 0, skip`);
-      return;
-    }
 
-    // 2. Look up maker address
+    // Look up maker address (needed for both fee compute + preimage outputs)
     const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
     if (!makerRow?.address) {
-      // Cross-node ingested markets (maker_relay_id='cross-node:<pk>' sentinel) have no local
-      // maker → refund must dispatch on producer node where maker has privkey.
       if (typeof market.maker_relay_id === 'string' && market.maker_relay_id.startsWith('cross-node:')) {
         console.log(`[pool-settler] dispatchRefund skip cross-node market ${market.id.slice(0,12)} (maker on remote host, refund must dispatch from producer node)`);
       } else {
@@ -900,13 +874,45 @@ export async function dispatchRefund(market, decision) {
       }
       return;
     }
+    const networkId = makerRow.address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
 
-    // 3. Build refund TX preimage — reuse 'prediction_settle_build_preimage' IPC with single-p2sh + 1 output
-    //    Inputs: spine UTXO only (= maker stake + 3 bonds locked here)
-    //    Output: maker_refund_amount to maker_address
+    // Fee compute branches by protocol version:
+    //   v0.5: legacy fixed minerFee from market row (SS 焊死, can't change here).
+    //   v0.6: G2-B 二期 sediment — SS L281 require value==stake-ctor_minerFee, MUST use
+    //         baseMinerFeeR (= same as ctor). 47ff13d not floor (qlfpv 实测).
+    //   v0.7: G6 批3 段① — SS L372/373 fee 范围 [MIN_FEE=50_000, MAX_FEE=100M]. RED-LINE 2
+    //         (Bettor r297): fee MUST be mass-aware dynamic, 不 static 常数. Compute via
+    //         kaspa.calculateTransactionMass on a dummy signed-shape TX (= placeholder
+    //         scriptSig with same byte layout as real → mass identical to real signed TX).
+    const baseMinerFeeR = parseInt(market.miner_fee, 10) || 20_000;
+    let minerFee;
+    if (market.protocol_version === 'v0.7') {
+      try {
+        minerFee = await computeMassAwareV07RefundFee({
+          market, makerStake, networkId, makerAddress: makerRow.address,
+        });
+        console.log(`[pool-settler] dispatchRefund v0.7 mass-aware fee market=${market.id.slice(0,12)} fee=${minerFee} (= mass × 110 sompi/mass + cap [50000, 1e8])`);
+      } catch (massErr) {
+        console.error(`[pool-settler] dispatchRefund v0.7 mass compute fail market=${market.id.slice(0,12)}: ${massErr.message}`);
+        return;
+      }
+    } else {
+      minerFee = baseMinerFeeR;
+    }
+
+    const isAnonymousPool = market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7';
+    const makerRefundAmount = isAnonymousPool
+      ? (makerStake - Number(minerFee))
+      : (makerStake + oracleBond * 3 - Number(minerFee));  // v0.5: 3 bonds in spine
+    if (makerRefundAmount <= 0) {
+      console.warn(`[pool-settler] dispatchRefund market=${market.id.slice(0,12)} makerRefundAmount=${makerRefundAmount} ≤ 0, skip`);
+      return;
+    }
+
+    // Build refund TX preimage — reuse 'prediction_settle_build_preimage' IPC with single-p2sh + 1 output
     const preimage = await sendCommandAsync(market.maker_relay_id, {
       type: 'prediction_settle_build_preimage',
-      p2sh_address: market.spine_p2sh,  // single string for refund (= only spine, no sides)
+      p2sh_address: market.spine_p2sh,
       required_input_outpoints: [
         { outpointTxid: market.spine_lock_tx, outpointIndex: 0 },
       ],
@@ -939,6 +945,109 @@ export async function dispatchRefund(market, decision) {
   } catch (e) {
     console.error(`[pool-settler] dispatchRefund fail market=${market.id?.slice(0,12)}: ${e.message}`);
   }
+}
+
+/**
+ * G6 批 3 段① (Bettor r296/r297): compute v0.7 refund TX fee from real mass.
+ *
+ * Why mass-aware:
+ *   - v0.7 PoolSpine_v07.sil refund_maker_unjoined (L370-373) uses fee 范围 [MIN_FEE=50_000,
+ *     MAX_FEE=100M] NOT 焊死 ctor minerFee. SS accepts ANY fee in range; settler 必 pick
+ *     fee >= mempool floor (mass × 100 sompi/mass) but not wastefully high.
+ *   - Bettor 红线 2 (Bettor r239): fee = mass × rate, 禁静态常数. 5M floor (v0.6 sediment) 是
+ *     overpay (~11x) violation of 红线 2.
+ *
+ * Algorithm:
+ *   1. Build a fake signed TX with placeholder scriptSig (= same byte layout as real signed
+ *      TX). makerSig is 66 bytes (push-encoded), OP_2 selector 1 byte, OP_PUSHDATA2 redeem
+ *      push = 3 + redeem.length bytes. Total scriptSig size matches real TX.
+ *   2. kaspa.calculateTransactionMass(networkId, fakeTx) → real mass.
+ *   3. fee = max(mass × 110, MIN_FEE) (= 10% safety margin over mempool floor 100).
+ *   4. Cap fee at MAX_FEE (= prevent runaway, defense against maker-rob-self attack).
+ *
+ * Returns: BigInt fee (sompi).
+ */
+async function computeMassAwareV07RefundFee({ market, makerStake, networkId, makerAddress }) {
+  const V07_MIN_FEE = 50_000n;
+  const V07_MAX_FEE = 100_000_000n;
+  const SOMPI_PER_MASS = 110n;  // 10% margin over mempool floor 100 (qlfpv 实测 442000/4420=100)
+
+  // Read v0.7 spine redeem from market metadata (stashed at create-v07 time).
+  let meta = {};
+  try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+  const spineRedeemHex = meta.spine_redeem_script_hex;
+  if (!spineRedeemHex) throw new Error('market.metadata missing spine_redeem_script_hex');
+
+  // Look up the actual spine UTXO (needed for utxo.amount + scriptPublicKey in fake TX).
+  const kaspa = await import('kaspa-wasm');
+  const { RpcClient, Encoding, Address, Transaction, TransactionOutput,
+          payToAddressScript, calculateTransactionMass, kaspaToSompi } = kaspa;
+  const Resolver = kaspa.Resolver || null;
+
+  // RPC: use the standard system endpoint (= same as transferAndConfirm path in pool.js).
+  // We just need to fetch the spine UTXO to construct the fake TX.
+  const rpc = new RpcClient({ resolver: Resolver ? new Resolver() : undefined, networkId });
+  await rpc.connect();
+  let spineUtxo;
+  try {
+    const { entries } = await rpc.getUtxosByAddresses([market.spine_p2sh]);
+    if (!entries?.length) throw new Error(`no UTXOs at spine_p2sh ${market.spine_p2sh}`);
+    const hits = entries.filter(e => e.outpoint.transactionId === market.spine_lock_tx);
+    if (!hits.length) throw new Error(`spine_lock_tx ${market.spine_lock_tx?.slice(0,12)} UTXO not found at ${market.spine_p2sh}`);
+    spineUtxo = hits[0];
+  } finally {
+    try { await rpc.disconnect(); } catch {}
+  }
+
+  // Build placeholder scriptSig with same byte layout as real signed TX:
+  //   [push(66 byte makerSig)] + [OP_2 0x52] + [OP_PUSHDATA2 + 2-byte LE length + redeem bytes]
+  // _encodePushDataHex helper would be cleaner but it's inside p2sh.mjs; replicate logic here.
+  const redeemBytes = Buffer.from(spineRedeemHex, 'hex');
+  let redeemPushHex;
+  if (redeemBytes.length <= 75) {
+    redeemPushHex = redeemBytes.length.toString(16).padStart(2, '0') + redeemBytes.toString('hex');
+  } else if (redeemBytes.length <= 255) {
+    redeemPushHex = '4c' + redeemBytes.length.toString(16).padStart(2, '0') + redeemBytes.toString('hex');
+  } else if (redeemBytes.length <= 65535) {
+    // OP_PUSHDATA2 + 2-byte little-endian length
+    const lenLE = Buffer.alloc(2);
+    lenLE.writeUInt16LE(redeemBytes.length);
+    redeemPushHex = '4d' + lenLE.toString('hex') + redeemBytes.toString('hex');
+  } else {
+    throw new Error(`redeem too large: ${redeemBytes.length} byte`);
+  }
+  // makerSig push: 0x41 (push 65 byte) + 64-byte sig (use dummy 0x00...) + 0x01 (SighashType.All)
+  const dummySigHex = '41' + '00'.repeat(64) + '01';
+  const dummyScriptSigHex = dummySigHex + '52' + redeemPushHex;
+
+  // Output amount: use stake - MIN_FEE as placeholder (= mass independent of value, so 占位 OK).
+  const placeholderOutputValue = BigInt(makerStake) - V07_MIN_FEE;
+  const outSpk = payToAddressScript(new Address(makerAddress));
+
+  const fakeSignedTx = new Transaction({
+    version: 0,
+    inputs: [{
+      previousOutpoint: {
+        transactionId: spineUtxo.outpoint.transactionId,
+        index: spineUtxo.outpoint.index,
+      },
+      signatureScript: dummyScriptSigHex,
+      sequence: 0n,
+      sigOpCount: 1,
+    }],
+    outputs: [new TransactionOutput(placeholderOutputValue, outSpk)],
+    lockTime: BigInt(market.deadline) * 1000n,
+    gas: 0n,
+    subnetworkId: '0000000000000000000000000000000000000000',
+    payload: '',
+  });
+
+  const mass = calculateTransactionMass(networkId, fakeSignedTx);
+  let dynamicFee = BigInt(mass) * SOMPI_PER_MASS;
+  if (dynamicFee < V07_MIN_FEE) dynamicFee = V07_MIN_FEE;
+  if (dynamicFee > V07_MAX_FEE) dynamicFee = V07_MAX_FEE;
+  console.log(`[pool-settler] v0.7 mass-aware fee compute market=${market.id.slice(0,12)} mass=${mass} fee=${dynamicFee} (mass × ${SOMPI_PER_MASS} sompi/mass, cap [${V07_MIN_FEE}, ${V07_MAX_FEE}])`);
+  return dynamicFee;
 }
 
 /**
