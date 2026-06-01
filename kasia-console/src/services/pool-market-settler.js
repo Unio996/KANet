@@ -114,7 +114,59 @@ export async function poolSettlerTick() {
         // recomputes the same doomed mass every tick forever, starving healthy markets.
         let doomedMeta = {};
         try { doomedMeta = JSON.parse(market.metadata || '{}'); } catch {}
-        if (doomedMeta.needs_larger_pot) { doomed++; continue; }
+        if (doomedMeta.needs_larger_pot) {
+          // min-pot 选项 A (Bettor r339): v0.6/v0.7 anonymous-pool legacy needs_larger_pot markets
+          // (= 7446fba 之前 marked, ccvr9 / unmfw / 等) 不该永远 skip 卡死. 同 storage-mass cap
+          // 触发路径 → cancel-refund 全员 (= dispatchRefund maker + per-bettor 'bettor_refund_available').
+          const isAnonymousPoolDoomed = market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7';
+          if (isAnonymousPoolDoomed && !doomedMeta.refund_dispatched_at && market.protocol_status === 'verifying') {
+            console.log(`[pool-settler] legacy needs_larger_pot doomed market=${market.id.slice(0,12)} pv=${market.protocol_version} → cancel-refund 自愈`);
+            // Status + audit
+            sqlite.prepare('UPDATE pool_markets SET protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+              .run('cancelled', market.id);
+            const cancelEventPayload = JSON.stringify({
+              market_id: market.id,
+              reason: 'legacy_doomed_needs_larger_pot_self_heal',
+              est_storage_mass: doomedMeta.est_storage_mass,
+              cancelled_at: new Date().toISOString(),
+            });
+            sqlite.prepare(`
+              INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+              VALUES (lower(hex(randomblob(16))), ?, 'market_cancelled', NULL, NULL, ?, 'pool-settler', CURRENT_TIMESTAMP)
+            `).run(`market_cancelled:${market.id.slice(0,12)}:${Date.now()}`, cancelEventPayload);
+            // Auto maker refund
+            await dispatchRefund(market, {
+              action: 'refund',
+              reason: `legacy doomed self-heal: needs_larger_pot=true, est_mass=${doomedMeta.est_storage_mass}`,
+            });
+            // Per-bettor events
+            const sides = sqlite.prepare(`
+              SELECT bettor_pk, side_p2sh, side_lock_tx, stake_amount, direction
+              FROM pool_bettor_sides WHERE market_id = ? AND side_lock_tx IS NOT NULL
+            `).all(market.id);
+            for (const side of sides) {
+              const bettorRefundPayload = JSON.stringify({
+                market_id: market.id,
+                bettor_pk: side.bettor_pk,
+                side_p2sh: side.side_p2sh,
+                side_lock_tx: side.side_lock_tx,
+                stake: side.stake_amount,
+                direction: side.direction,
+                reason: 'market_cancelled_legacy_doomed_self_heal',
+                claim_entry: 'PoolSide_v07 entry 2 refund_market_cancelled',
+              });
+              sqlite.prepare(`
+                INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+                VALUES (lower(hex(randomblob(16))), ?, 'bettor_refund_available', NULL, NULL, ?, 'pool-settler', CURRENT_TIMESTAMP)
+              `).run(`bettor_refund:${market.id.slice(0,12)}:${String(side.bettor_pk).slice(0,12)}:${Date.now()}`, bettorRefundPayload);
+            }
+            console.log(`[pool-settler] legacy doomed self-heal market=${market.id.slice(0,12)} CANCELLED + maker_refund dispatched + ${sides.length} bettor_refund_available events`);
+            refund++;
+            continue;
+          }
+          doomed++;
+          continue;
+        }
 
         // G6 批 3 段① 0-bet PRE-sampling shortcut (Bettor r301 catch): committee sampling needs
         // pool_snapshot which may not exist (e.g. create-v07 ensurePoolSnapshot failed). 0-bet
