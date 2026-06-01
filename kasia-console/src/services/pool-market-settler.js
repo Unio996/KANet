@@ -834,7 +834,54 @@ export async function dispatchPhase2(market, decision) {
     const outputValues = outputs.map(o => parseInt(o.amountSompi, 10) || 0);
     const estMass = estimateStorageMass(inputValues, outputValues);
     if (estMass > STORAGE_MASS_SAFE_THRESHOLD) {
-      console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} estimated storage mass ${estMass} > ${STORAGE_MASS_SAFE_THRESHOLD} (cap ${STORAGE_MASS_CAP}) — pot too small, marking needs_larger_pot`);
+      // min-pot 选项 A (Bettor r337 实证 unmfw 50 KAS 输方仍触): storage-mass cap 是 KIP-9
+      // pool-dependent (≈ 1/pool); 单纯 5×oracleBond pre-check 不充分. 真根因 = 任何
+      // payout outputs 触 storage_mass > cap → 该走 cancel-refund 不是 needs_larger_pot
+      // 永久标记 (= 钱永远卡 verifying 状态, 用户无法取). 改: 触 storage-mass cap → 跟
+      // pre-check 同 cancel-refund 路径.
+      const isAnonymousPoolCancel = market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7';
+      if (isAnonymousPoolCancel) {
+        console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} estimated storage mass ${estMass} > ${STORAGE_MASS_SAFE_THRESHOLD} (cap ${STORAGE_MASS_CAP}) → THIN-MARKET cancel-refund (= KIP-9 storage-mass post-build floor)`);
+        sqlite.prepare('UPDATE pool_markets SET protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+          .run('cancelled', market.id);
+        const cancelEventPayload = JSON.stringify({
+          market_id: market.id,
+          reason: 'storage_mass_exceed_cap',
+          est_storage_mass: estMass,
+          cap: STORAGE_MASS_CAP,
+          threshold: STORAGE_MASS_SAFE_THRESHOLD,
+          winner: decision.winner,
+          cancelled_at: new Date().toISOString(),
+        });
+        sqlite.prepare(`
+          INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+          VALUES (lower(hex(randomblob(16))), ?, 'market_cancelled', NULL, NULL, ?, 'pool-settler', CURRENT_TIMESTAMP)
+        `).run(`market_cancelled:${market.id.slice(0,12)}:${Date.now()}`, cancelEventPayload);
+        await dispatchRefund(market, {
+          action: 'refund',
+          reason: `thin-market cancel: est_storage_mass=${estMass} > cap=${STORAGE_MASS_CAP}`,
+        });
+        for (const side of sides) {
+          const bettorRefundPayload = JSON.stringify({
+            market_id: market.id,
+            bettor_pk: side.bettor_pk,
+            side_p2sh: side.side_p2sh,
+            side_lock_tx: side.side_lock_tx,
+            stake: side.stake_amount,
+            direction: side.direction,
+            reason: 'market_cancelled_storage_mass_exceed_cap',
+            claim_entry: 'PoolSide_v07 entry 2 refund_market_cancelled',
+          });
+          sqlite.prepare(`
+            INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+            VALUES (lower(hex(randomblob(16))), ?, 'bettor_refund_available', NULL, NULL, ?, 'pool-settler', CURRENT_TIMESTAMP)
+          `).run(`bettor_refund:${market.id.slice(0,12)}:${String(side.bettor_pk).slice(0,12)}:${Date.now()}`, bettorRefundPayload);
+        }
+        console.log(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} CANCELLED storage-mass + maker_refund dispatched + ${sides.length} bettor_refund_available events emitted`);
+        return;
+      }
+      // v0.5 legacy 仍 mark needs_larger_pot (= 不变 legacy behavior, 待 owner spec).
+      console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} estimated storage mass ${estMass} > ${STORAGE_MASS_SAFE_THRESHOLD} (cap ${STORAGE_MASS_CAP}) — v0.5 legacy mark needs_larger_pot`);
       let prevM = {};
       try { prevM = JSON.parse(market.metadata || '{}'); } catch {}
       sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
