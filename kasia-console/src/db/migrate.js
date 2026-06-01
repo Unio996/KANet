@@ -4836,5 +4836,41 @@ export function runMigrations() {
     }
   }
 
+  // v162 — DoD §2.2 J2 step [2] (5-agent 共识乙路线锁定 2026-06-01): oracle pool 池 = 链上
+  // OracleStake_v1 P2SH UTXO 集合, 跨节点扫链派生.
+  // - oracle_stake_enrollments: 已知 enrollment 注册表 (来源: chain envelope OR API enroll).
+  //   每行 ctor 参数 (stakerPkX + lockUntilDaa) + 派生 p2sh + outpoint pointer 用于 scanner
+  //   RPC verify UTXO unspent + amount >= MIN_STAKE.
+  // - oracle_pool_chain_view: 每 snapshot_daa 一行 cache, scanner derived 结果; derivePoolMerkleRoot
+  //   读. 跨节点同 snapshotDaa 同 chain state 同结果 (= 协议不变量).
+  {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS oracle_stake_enrollments (
+        staker_pk_x       TEXT PRIMARY KEY,
+        lock_until_daa    INTEGER NOT NULL,
+        p2sh_addr         TEXT NOT NULL,
+        p2sh_hash         TEXT NOT NULL,
+        redeem_script_hex TEXT NOT NULL,
+        outpoint_txid     TEXT,
+        outpoint_index    INTEGER,
+        amount_sompi      TEXT,
+        enrolled_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_scanned_at   TIMESTAMP,
+        active            INTEGER NOT NULL DEFAULT 1,
+        source            TEXT DEFAULT 'manual'
+      );
+      CREATE INDEX IF NOT EXISTS idx_oracle_stake_enr_active ON oracle_stake_enrollments(active);
+
+      CREATE TABLE IF NOT EXISTS oracle_pool_chain_view (
+        snapshot_daa  INTEGER PRIMARY KEY,
+        leaves_json   TEXT NOT NULL,
+        merkle_root   TEXT NOT NULL,
+        pool_size     INTEGER NOT NULL,
+        derived_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('[migrate] v162: oracle_stake_enrollments + oracle_pool_chain_view tables created (DoD §2.2 chain-derived pool).');
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
