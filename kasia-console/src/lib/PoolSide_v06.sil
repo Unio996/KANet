@@ -252,12 +252,15 @@ contract PoolSide_v06(
         require(tx.outputs[0].value == payout);
     }
 
-    // entry 2 — refund_market_cancelled: bettor recovers stake after deadline.
+    // entry 2 — refund_market_cancelled: bettor recovers stake after deadline + grace.
     // bug 10d fix (v0.5 PoolSide L125-128): Kaspa Crescendo LOCK_TIME_THRESHOLD = 500B.
     // Multiply deadline by 1000 → operand ≥ 500B → ms interpretation matches tx.lockTime ms.
+    // FRONT-RUN FIX (Bettor r388/r389 spec, 2026-06-02): push refund window past
+    // settle-completion SLA. REFUND_GRACE_SEC = 7200 (2h) > NWT committee 结算 SLA.
+    // Prevents losing bettor from front-running settle to spend side UTXO + brick settle_via_spine.
     entrypoint function refund_market_cancelled(sig bettorSig) {
         require(checkSig(bettorSig, pubkey(bettorPk)));
-        require(tx.time >= deadline * 1000);
+        require(tx.time >= (deadline + 7200) * 1000);
 
         // v0.7 per-UTXO refund: spend exactly 1 UTXO, payout = its value - minerFee placeholder.
         require(tx.inputs.length == 1);
