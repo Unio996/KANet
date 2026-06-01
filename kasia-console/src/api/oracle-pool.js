@@ -120,6 +120,61 @@ export async function registerOraclePoolRoutes(fastify) {
     }
   });
 
+  // GET /api/oracle-pool/chain-snapshot?daa=X — DoD §2.2 J2 step [2]:
+  // chain-derived oracle pool snapshot at given DAA (= NWT verifier cross-host diff endpoint).
+  // 协议不变量: any 2 nodes should return SAME merkleRoot for same daa, given same chain state.
+  // Mismatch → relay reject settle TX whose ctor poolMerkleRoot != derive(snapshotDaa).
+  //
+  // Lazy: scan + derive on first request per daa, cache via oracle_pool_chain_view.
+  // Subsequent requests serve cached.
+  fastify.get('/api/oracle-pool/chain-snapshot', async (request, reply) => {
+    const requestedDaa = parseInt(request.query?.daa, 10);
+    if (!Number.isFinite(requestedDaa) || requestedDaa <= 0) {
+      // No daa specified → derive at currentDaa - FINALITY_N (= scan time).
+      try {
+        const { getWorkingRpc } = await import('../services/rpc-health.js');
+        const { url: rpcUrl } = await getWorkingRpc();
+        const { RpcClient, Encoding } = await import('kaspa-wasm');
+        const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: process.env.KASPA_NETWORK || 'testnet-12' });
+        await rpc.connect();
+        let currentDaa;
+        try { currentDaa = Number((await rpc.getCurrentBlockDaaScore()).daaScore || (await rpc.getCurrentDaaScore()).daaScore); }
+        catch { throw new Error('getCurrentDaaScore RPC unavailable'); }
+        finally { try { await rpc.disconnect(); } catch {} }
+        if (!Number.isFinite(currentDaa)) throw new Error(`currentDaa not finite: ${currentDaa}`);
+        // Re-connect for scan UTXO calls.
+        const rpc2 = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: process.env.KASPA_NETWORK || 'testnet-12' });
+        await rpc2.connect();
+        try {
+          const { scanAndDerivePool } = await import('../services/oracle-pool-chain-scanner.mjs');
+          const result = await scanAndDerivePool({ rpc: rpc2, networkId: process.env.KASPA_NETWORK || 'testnet-12', currentDaa });
+          return reply.send({ ok: true, ...result, currentDaa });
+        } finally { try { await rpc2.disconnect(); } catch {} }
+      } catch (e) {
+        return reply.code(500).send({ ok: false, error: e.message });
+      }
+    }
+    // Specific daa requested → check cache only (= scanner must've already scanned at that daa).
+    const cached = sqlite.prepare(
+      'SELECT snapshot_daa, leaves_json, merkle_root, pool_size, derived_at FROM oracle_pool_chain_view WHERE snapshot_daa = ?'
+    ).get(requestedDaa);
+    if (!cached) {
+      return reply.code(404).send({
+        ok: false,
+        error: `no snapshot cached at daa=${requestedDaa} (= scanner must run scanAndDerivePool first)`,
+      });
+    }
+    return reply.send({
+      ok: true,
+      snapshotDaa: cached.snapshot_daa,
+      leaves: JSON.parse(cached.leaves_json),
+      merkleRoot: cached.merkle_root,
+      poolSize: cached.pool_size,
+      derivedAt: cached.derived_at,
+      fromCache: true,
+    });
+  });
+
   // GET /api/oracle-pool/state — current pool snapshot for UI/diagnostics
   fastify.get('/api/oracle-pool/state', async (request, reply) => {
     const rows = sqlite.prepare(`
