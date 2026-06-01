@@ -1,6 +1,6 @@
 {
   "mode": "static",
-  "analyzed_at": "2026-06-01T04:52:22.261Z",
+  "analyzed_at": "2026-06-01T04:59:02.600Z",
   "files_scanned": [
     "PoolSide_v06",
     "PoolSpine_v06",
@@ -33,7 +33,11 @@
     },
     {
       "severity": "WARN",
-      "msg": "_assertTxInvariants 缺 mass-floor check (= 红线 7 待 J2 加 fee >= mass × mempool_floor_rate, qlfpv mass-fee 50k<442k brick KI)"
+      "msg": "PoolSpine v0.6 仍硬等 fee (= output == stake - X), G6 批2 红线 8 待 J1 改 output <= stake - MIN_FEE (qlfpv brick KI sediment)"
+    },
+    {
+      "severity": "INFO",
+      "msg": "_assertTxInvariants 含 mass-floor check ✓ (= 红线 7, G6 批2 ship)"
     },
     {
       "severity": "INFO",

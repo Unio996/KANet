@@ -147,7 +147,7 @@ function staticAnalysis() {
   // Defense check 2d: G6 批2 红线 8 + 红线 7 — SS 不硬等 fee + helper mass-floor
   // (Bettor r287 qlfpv 5 层实测 forward fix, audit doc §7 红线 8/9 + 红线 7)
   // Reason: SS 硬编 fee/mass = mainnet brick (qlfpv 100 KAS 已 brick). 改 'output <= stake - MIN_FEE' 灵活 fee.
-  const spineV06File = files.find(f => /Spine_v06\.sil$/i.test(f.name));
+  const spineV06File = files.find(f => /Spine_v06$/i.test(f.name));
   if (spineV06File) {
     const v06Src = fs.readFileSync(spineV06File.path, 'utf8');
     // a) v0.6 refund_maker_unjoined 是否仍硬等 fee (= require output == stake - 50000 类) → mainnet brick risk
