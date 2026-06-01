@@ -714,6 +714,30 @@ if (process.send) {
           return;
         }
 
+        case 'pool_side_refund_cancelled_tx': {
+          // DoD C 退款自取 (Bettor r261 钦点) — PoolSide_v06/v07 entry 2 refund_market_cancelled.
+          // Bettor single-sig + 1 input + 1 output, inline sign+submit (same pattern as spine
+          // refund_maker_unjoined). 7132ddd 第一轮漏 ship 此 handler (Bettor r386 catch), 补齐.
+          // Caller (Console claim endpoint) sends lock_time = (deadline + 7200) * 1000 ms post J1
+          // 5dd590cd0 grace fix to satisfy SS L260/270 require(tx.time >= (deadline+REFUND_GRACE_SEC)*1000).
+          const { unlockPoolSideRefundCancelled } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockPoolSideRefundCancelled({
+            wallet,
+            sideP2shAddress: cmd.side_p2sh_address,
+            sideRedeemScriptHex: cmd.side_redeem_script_hex,
+            requiredInputOutpoint: cmd.required_input_outpoint,
+            output: cmd.output,
+            networkId: wallet.getNetworkId(),
+            lockTime: BigInt(cmd.lock_time || 0),
+            txObjPreimage: cmd.tx_obj_preimage || null,
+          });
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+          }
+          return;
+        }
+
         case 'pool_v07_compute_refund_mass': {
           // G6 批 3 段① Bettor r311 钦定: Console 手搓 UtxoEntry 喂 calculateTransactionMass
           // 多次 WASM panic (unreachable / 'outpoint is not an object' / scriptPublicKey 格式).
