@@ -1,9 +1,10 @@
 {
   "mode": "static",
-  "analyzed_at": "2026-05-31T07:13:45.749Z",
+  "analyzed_at": "2026-06-01T03:41:58.637Z",
   "files_scanned": [
     "PoolSide_v06",
-    "PoolSpine_v06"
+    "PoolSpine_v06",
+    "PoolSpine_v07"
   ],
   "findings": [
     {
@@ -29,6 +30,18 @@
     {
       "severity": "INFO",
       "msg": "PoolSide v0.7 payout 用 tx.inputs[0].value ✓ (= 变量金额命门)"
+    },
+    {
+      "severity": "INFO",
+      "msg": "PoolSpine v0.7 ctor 含 shard_id + shard_count ✓ (= 分片 commit identity)"
+    },
+    {
+      "severity": "INFO",
+      "msg": "PoolSpine v0.7 含 globalYes/No totals args ✓ (= commit_v2 跨片承诺 anchor)"
+    },
+    {
+      "severity": "INFO",
+      "msg": "PoolSpine v0.7 含 min-bet (1 KAS) + min-pot floor require ✓ (= Bettor r261 forensic)"
     },
     {
       "severity": "INFO",

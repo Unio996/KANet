@@ -40,7 +40,7 @@ const attackerRelay = arg('attacker', null);
 function listV06SSFiles() {
   if (!fs.existsSync(SS_LIB_DIR)) return [];
   return fs.readdirSync(SS_LIB_DIR)
-    .filter(f => f.endsWith('.sil') && /^Pool/.test(f) && /_v06/.test(f))
+    .filter(f => f.endsWith('.sil') && /^Pool/.test(f) && /_v0[67]/.test(f))
     .map(f => ({ name: f.replace(/\.sil$/, ''), path: path.join(SS_LIB_DIR, f) }));
 }
 
@@ -141,6 +141,43 @@ function staticAnalysis() {
       msg: payoutVariable
         ? 'PoolSide v0.7 payout 用 tx.inputs[0].value ✓ (= 变量金额命门)'
         : 'PoolSide payout 未使用 tx.inputs[0].value (= 仍依烤死 stakeAmount, v0.6 旧版)',
+    });
+  }
+
+  // Defense check 2c: PoolSpine v0.7 G6 shard commit anchor (= Bettor r307 commit_v2 + J1 r236 ship efab03a9)
+  // Reason: 跨分片 atomic, attacker forge globalYes/No → commit hash 变 → SS reject.
+  const spineV07File = files.find(f => /Spine_v07/i.test(f.name));
+  if (spineV07File) {
+    const spineV07Src = fs.readFileSync(spineV07File.path, 'utf8');
+    // a) ctor 含 shard_id + shard_count
+    const hasShardCtor = /shard_id/.test(spineV07Src) && /shard_count/.test(spineV07Src);
+    report.findings.push({
+      severity: hasShardCtor ? 'INFO' : 'WARN',
+      msg: hasShardCtor
+        ? 'PoolSpine v0.7 ctor 含 shard_id + shard_count ✓ (= 分片 commit identity)'
+        : 'PoolSpine v0.7 ctor 缺 shard_id/shard_count (= G6 分片设计 break)',
+    });
+    // b) settle_aggregate 含 globalYesTotal_sompi + globalNoTotal_sompi + global_commit_id args
+    const hasGlobalArgs = /globalYesTotal_sompi/.test(spineV07Src) && /globalNoTotal_sompi/.test(spineV07Src);
+    report.findings.push({
+      severity: hasGlobalArgs ? 'INFO' : 'WARN',
+      msg: hasGlobalArgs
+        ? 'PoolSpine v0.7 含 globalYes/No totals args ✓ (= commit_v2 跨片承诺 anchor)'
+        : 'PoolSpine v0.7 缺 globalYes/No totals args (= G6 commit anchor 缺)',
+    });
+    // c) min-bet + min-pot floor require (= forensic 防最小赌注)
+    const hasMinBet = /makerStakeAmount\s*>=\s*100000000/.test(spineV07Src);
+    const hasMinPot = /globalYesTotal_sompi\s*>=\s*0|globalNoTotal_sompi\s*>=\s*0/.test(spineV07Src);
+    report.findings.push({
+      severity: (hasMinBet && hasMinPot) ? 'INFO' : 'WARN',
+      msg: (hasMinBet && hasMinPot)
+        ? 'PoolSpine v0.7 含 min-bet (1 KAS) + min-pot floor require ✓ (= Bettor r261 forensic)'
+        : `PoolSpine v0.7 forensic floor 不全 (= min-bet:${hasMinBet} min-pot:${hasMinPot})`,
+    });
+  } else {
+    report.findings.push({
+      severity: 'INFO',
+      msg: 'PoolSpine v0.7 SS file 不存在 (= G6 未 ship)',
     });
   }
 
