@@ -1088,11 +1088,16 @@ export async function unlockPoolSpineRefundMakerUnjoined(args) {
       // verification failed" reject. 用 caller 的 txLockTime override preimage.lockTime.
       parsed.lockTime = txLockTime;
       parsed.gas = BigInt(parsed.gas || 0);
+      // CRITICAL (2nd sighash bug, qlfpv 实测 2nd round): buildSettleTxPreimage default
+      // sigOpCount=5 (L596 default for 1V1 settle 5 sigs). PoolSpine_v06 entry 2 单 makerSig
+      // → scriptSig 实际 1 sigOp. Kaspa sighash 含 sig_op_counts_hash → unsignedTx sigOpCount
+      // 必须等于 signedTx sigOpCount (= 1 hardcoded below) 否则 sig 不匹 → script verify fail.
+      // 强制覆盖为 1 (= entry 2 SS body 唯一 checkSig).
       parsed.inputs = parsed.inputs.map(inp => ({
         ...inp,
         signatureScript: '',  // strip for sighash compute
         sequence: BigInt(inp.sequence || 0),
-        sigOpCount: Number(inp.sigOpCount || 1),
+        sigOpCount: 1,  // override preimage default (5) to match signedTx + SS entry 2 spec
         utxo: inp.utxo ? {
           ...inp.utxo,
           amount: BigInt(inp.utxo.amount || 0),
