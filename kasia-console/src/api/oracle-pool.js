@@ -106,6 +106,20 @@ export async function registerOraclePoolRoutes(fastify) {
     });
   });
 
+  // GET /api/oracle-pool/merkle-root — current depth-8 blake2b root from active pool members.
+  // DoD #1.1 (T2 sediment): KANet-UI calls before create-v06/v07 to fetch the "right now" root
+  // so caller can pass it through. Decouples derive (= read DB) from verify (= TOCTOU in
+  // ensurePoolSnapshot). For testnet zero-grinding 简单 path.
+  fastify.get('/api/oracle-pool/merkle-root', async (request, reply) => {
+    try {
+      const { derivePoolMerkleRoot } = await import('../services/pool-market-settler-v06.mjs');
+      const r = derivePoolMerkleRoot();
+      return reply.send({ ok: true, pool_merkle_root: r.pool_merkle_root, pool_size: r.pool_size });
+    } catch (e) {
+      return reply.code(500).send({ ok: false, error: e.message });
+    }
+  });
+
   // GET /api/oracle-pool/state — current pool snapshot for UI/diagnostics
   fastify.get('/api/oracle-pool/state', async (request, reply) => {
     const rows = sqlite.prepare(`

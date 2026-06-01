@@ -136,6 +136,37 @@ export async function fetchEndBlockHashCanonical(chainReader, deadlineDaaScore, 
  *
  * @returns {{ pool_size: number, pool_merkle_root: string, members: [{pk, stake_sompi}] }}
  */
+/**
+ * G6 批 3 段① T2 sediment (Owner DoD #1.1): derive pool_merkle_root from current DB state
+ * without comparing to expected. KANet-UI / caller uses this to fetch the "right now" root
+ * before create-v06/v07. Decouples derive (= read current pool) from verify (= TOCTOU defense
+ * in ensurePoolSnapshot). For mainnet caller passes the pinned root; for testnet caller can
+ * read this fresh + pass through (= no TOCTOU since solo-tester is the only writer).
+ *
+ * @returns {{ pool_merkle_root: string, pool_size: number, members: [{pk, stake_sompi}] }}
+ */
+export function derivePoolMerkleRoot() {
+  const rawMembers = sqlite.prepare(`
+    SELECT oracle_pk, stake_locked_kas
+    FROM oracle_pool_membership
+    WHERE active = 1
+  `).all();
+  if (rawMembers.length === 0) {
+    throw new Error('oracle_pool_membership empty (= no active members)');
+  }
+  const paired = rawMembers.map(m => ({
+    pk: m.oracle_pk.toLowerCase(),
+    stake_sompi: BigInt(Math.round(Number(m.stake_locked_kas) * 1e8)).toString(),
+  })).sort((a, b) => a.pk < b.pk ? -1 : (a.pk > b.pk ? 1 : 0));
+  const pks = paired.map(p => p.pk);
+  const tree = buildPoolMerkleTree(pks);
+  return {
+    pool_merkle_root: tree.root.toString('hex'),
+    pool_size: pks.length,
+    members: paired.map(p => ({ pk: p.pk, stake_sompi: p.stake_sompi })),
+  };
+}
+
 export function ensurePoolSnapshot(marketId, expectedPoolMerkleRoot) {
   if (!marketId || typeof marketId !== 'string') throw new Error('marketId required (string)');
   const cleanExpected = (expectedPoolMerkleRoot || '').toLowerCase();

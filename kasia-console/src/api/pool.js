@@ -586,9 +586,21 @@ export async function registerPoolRoutes(fastify) {
   // Body params identical to create-v06 + optional shard_id/shard_count (default 0/1 single-shard).
   fastify.post('/api/pool/market/create-v07', async (request, reply) => {
     const b = request.body || {};
-    const required = ['maker_relay_id', 'outcome_side', 'outcome_end_date', 'resolution_rule_spec', 'maker_stake_kas', 'pool_merkle_root'];
+    const required = ['maker_relay_id', 'outcome_side', 'outcome_end_date', 'resolution_rule_spec', 'maker_stake_kas'];
     for (const k of required) {
       if (b[k] === undefined || b[k] === null || b[k] === '') return reply.code(400).send({ ok: false, error: `missing ${k}` });
+    }
+    // DoD #1.1 (T2 sediment): pool_merkle_root optional / 'auto' / missing → server auto-derives
+    // from current pool state. testnet 简单 path. mainnet caller pins explicit root (= TOCTOU).
+    if (!b.pool_merkle_root || b.pool_merkle_root === 'auto') {
+      try {
+        const { derivePoolMerkleRoot } = await import('../services/pool-market-settler-v06.mjs');
+        const derived = derivePoolMerkleRoot();
+        b.pool_merkle_root = derived.pool_merkle_root;
+        console.log(`[pool/create-v07] auto-derived pool_merkle_root=${b.pool_merkle_root.slice(0,12)}.. from ${derived.pool_size} active members`);
+      } catch (e) {
+        return reply.code(503).send({ ok: false, error: `pool_merkle_root auto-derive fail: ${e.message}` });
+      }
     }
     if (b.broker_relay_id === undefined || b.broker_relay_id === null || b.broker_relay_id === '') b.broker_relay_id = b.maker_relay_id;
     if (b.broker_fee_pct === undefined || b.broker_fee_pct === null || b.broker_fee_pct === '') b.broker_fee_pct = 0;
