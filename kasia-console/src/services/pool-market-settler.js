@@ -1065,6 +1065,9 @@ async function computeMassAwareV07RefundFee({ market, makerStake, networkId, mak
   const placeholderOutputValue = BigInt(makerStake) - V07_MIN_FEE;
   const outSpk = payToAddressScript(new Address(makerAddress));
 
+  // KANet-UI r454 catch: kaspa-wasm calculateTransactionMass throws 'unreachable' WASM panic
+  // if Transaction.inputs[i].utxo missing (= storage mass needs prevout amount + scriptPK).
+  // Include the real UTXO entry data so mass calc has full input context.
   const fakeSignedTx = new Transaction({
     version: 0,
     inputs: [{
@@ -1075,6 +1078,12 @@ async function computeMassAwareV07RefundFee({ market, makerStake, networkId, mak
       signatureScript: dummyScriptSigHex,
       sequence: 0n,
       sigOpCount: 1,
+      utxo: {
+        amount: BigInt(spineUtxo.amount || spineUtxo.entry?.amount || 0),
+        scriptPublicKey: spineUtxo.scriptPublicKey || spineUtxo.entry?.scriptPublicKey,
+        blockDaaScore: BigInt(spineUtxo.blockDaaScore || spineUtxo.entry?.blockDaaScore || 0),
+        isCoinbase: spineUtxo.isCoinbase || spineUtxo.entry?.isCoinbase || false,
+      },
     }],
     outputs: [new TransactionOutput(placeholderOutputValue, outSpk)],
     lockTime: BigInt(market.deadline) * 1000n,
