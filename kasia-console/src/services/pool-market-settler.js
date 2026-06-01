@@ -1017,11 +1017,22 @@ async function computeMassAwareV07RefundFee({ market, makerStake, networkId, mak
 
   // RPC: use the standard system endpoint (= same as transferAndConfirm path in pool.js).
   // We just need to fetch the spine UTXO to construct the fake TX.
+  //
+  // CRITICAL (Bettor r303 catch): rusty-kaspa node may be in IBD sync state (T2 G7 setup
+  // 涉及 kaspad rebuild + restart). RPC connect/getUtxos can hang indefinitely waiting for
+  // sync to complete → freezes settler daemon → no further ticks → silent stuck. Wrap in
+  // 15s timeout to fail-fast and let dispatchRefund catch + log gracefully. Next tick can
+  // retry; eventually IBD completes and the compute succeeds.
+  const RPC_TIMEOUT_MS = 15_000;
+  const withTimeout = (promise, ms, label) => Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`RPC timeout ${ms}ms (${label}) — node likely IBD syncing`)), ms)),
+  ]);
   const rpc = new RpcClient({ resolver: Resolver ? new Resolver() : undefined, networkId });
-  await rpc.connect();
+  await withTimeout(rpc.connect(), RPC_TIMEOUT_MS, 'rpc.connect');
   let spineUtxo;
   try {
-    const { entries } = await rpc.getUtxosByAddresses([market.spine_p2sh]);
+    const { entries } = await withTimeout(rpc.getUtxosByAddresses([market.spine_p2sh]), RPC_TIMEOUT_MS, 'getUtxos');
     if (!entries?.length) throw new Error(`no UTXOs at spine_p2sh ${market.spine_p2sh}`);
     const hits = entries.filter(e => e.outpoint.transactionId === market.spine_lock_tx);
     if (!hits.length) throw new Error(`spine_lock_tx ${market.spine_lock_tx?.slice(0,12)} UTXO not found at ${market.spine_p2sh}`);
