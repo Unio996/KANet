@@ -310,7 +310,9 @@ contract PoolSpine_v07(
         //    winner==0 (YES wins): losingPool = globalNo. winner==1 (NO wins): losingPool = globalYes.
         int oneMinusWinner = 1 - winner;
         int losingPool = globalYesTotal_sompi * winner + globalNoTotal_sompi * oneMinusWinner;
-        require(losingPool >= 500000000);  // 5 × 1e8 sompi = 5 KAS = N_committee × oracleBondAmount
+        // Bettor r332 catch: dynamic threshold = N_committee (5) × oracleBondAmount (ctor-baked).
+        // Tracks oracleBondAmount changes automatically — no drift if bond param changes per market.
+        require(losingPool >= 5 * oracleBondAmount);
 
         // ⑧ shard identity (ctor): basic sanity.
         require(shard_id >= 0);
