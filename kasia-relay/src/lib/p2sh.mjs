@@ -1081,7 +1081,12 @@ export async function unlockPoolSpineRefundMakerUnjoined(args) {
     let unsignedTx;
     if (txObjPreimage) {
       const parsed = JSON.parse(JSON.stringify(txObjPreimage));
-      parsed.lockTime = BigInt(parsed.lockTime || 0);
+      // CRITICAL (qlfpv 实测 sighash mismatch bug): preimage 从 prediction_settle_build_preimage
+      // 来 默认 lockTime=0 (= dispatchRefund 不传 lock_time). 但 SS L275 require(tx.time >=
+      // deadline*1000) → final signedTx 必带 txLockTime. Kaspa sighash 含 lockTime →
+      // unsignedTx.lockTime 必须等于 signedTx.lockTime 否则 sig 不匹 → "script ran, but
+      // verification failed" reject. 用 caller 的 txLockTime override preimage.lockTime.
+      parsed.lockTime = txLockTime;
       parsed.gas = BigInt(parsed.gas || 0);
       parsed.inputs = parsed.inputs.map(inp => ({
         ...inp,
