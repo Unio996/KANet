@@ -573,6 +573,192 @@ export async function registerPoolRoutes(fastify) {
     });
   });
 
+  // ── POST /api/pool/market/create-v07 (G6 批 3 段① 最小单片 wire, Bettor r296) ──
+  //
+  // v0.7 differences from create-v06:
+  //   - Uses PoolSpine_v07.sil / PoolSide_v07.sil (= fee 范围 [MIN_FEE, MAX_FEE] not 焊死 ctor minerFee).
+  //   - Spine ctor adds 3 sharding params: shard_id (default 0) / shard_count (default 1 = single-shard) /
+  //     market_id (= blake2b(marketId string) for cross-shard binding in batch3 future).
+  //   - protocol_version='v0.7' marker in pool_markets row.
+  //   - Settler dispatchRefund/dispatchPhase2 will branch on protocol_version='v0.7' to use mass-aware
+  //     dynamic fee within SS range (= 47ff13d fixed minerFee 不适用 v0.7, refund 选 fee in [50_000, 1e8]).
+  //
+  // Body params identical to create-v06 + optional shard_id/shard_count (default 0/1 single-shard).
+  fastify.post('/api/pool/market/create-v07', async (request, reply) => {
+    const b = request.body || {};
+    const required = ['maker_relay_id', 'outcome_side', 'outcome_end_date', 'resolution_rule_spec', 'maker_stake_kas', 'pool_merkle_root'];
+    for (const k of required) {
+      if (b[k] === undefined || b[k] === null || b[k] === '') return reply.code(400).send({ ok: false, error: `missing ${k}` });
+    }
+    if (b.broker_relay_id === undefined || b.broker_relay_id === null || b.broker_relay_id === '') b.broker_relay_id = b.maker_relay_id;
+    if (b.broker_fee_pct === undefined || b.broker_fee_pct === null || b.broker_fee_pct === '') b.broker_fee_pct = 0;
+    if (b.oracle_bond_kas === undefined || b.oracle_bond_kas === null || b.oracle_bond_kas === '') b.oracle_bond_kas = 1;
+    if (b.oracle_fee_pct === undefined || b.oracle_fee_pct === null || b.oracle_fee_pct === '') b.oracle_fee_pct = 100;
+    if (b.outcome_market_source === undefined || b.outcome_market_source === null || b.outcome_market_source === '') b.outcome_market_source = 'kanet_v07';
+    if (b.outcome_token_id === undefined || b.outcome_token_id === null || b.outcome_token_id === '') b.outcome_token_id = 'KAS_native';
+    if (b.outcome_condition_id === undefined || b.outcome_condition_id === null || b.outcome_condition_id === '') {
+      b.outcome_condition_id = createHash('sha256').update(`${b.resolution_rule_spec}||${b.outcome_end_date}||${b.outcome_side}`).digest('hex').slice(0, 16);
+    }
+    if (b.category === undefined || b.category === null || b.category === '') {
+      b.category = categorizeMarket(b.resolution_rule_spec);
+    }
+
+    let poolMerkleRoot = String(b.pool_merkle_root).trim().replace(/^0x/, '');
+    if (!/^[0-9a-fA-F]{64}$/.test(poolMerkleRoot)) {
+      return reply.code(400).send({ ok: false, error: 'pool_merkle_root must be 64 hex chars (32-byte depth-8 blake2b root)' });
+    }
+    poolMerkleRoot = poolMerkleRoot.toLowerCase();
+
+    const makerRow = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(b.maker_relay_id);
+    const brokerRow = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(b.broker_relay_id);
+    if (!makerRow?.address || !brokerRow?.address) return reply.code(400).send({ ok: false, error: 'maker or broker relay has no resolvable address' });
+
+    const makerPk = await deriveXOnlyPubkey(makerRow.address);
+    const brokerPk = await deriveXOnlyPubkey(brokerRow.address);
+
+    const minDeadlineMin = parseInt(process.env.POOL_DEADLINE_MIN_OVERRIDE, 10) || 15;
+    const outcomeEndMs = new Date(b.outcome_end_date).getTime();
+    if (!Number.isFinite(outcomeEndMs) || outcomeEndMs < Date.now() + minDeadlineMin * 60_000) {
+      return reply.code(400).send({ ok: false, error: `outcome_end_date must be > now + ${minDeadlineMin} minutes` });
+    }
+    const maxDeadlineDay = parseInt(process.env.POOL_DEADLINE_MAX_DAY, 10) || 30;
+    if (outcomeEndMs > Date.now() + maxDeadlineDay * 86400_000) {
+      return reply.code(400).send({ ok: false, error: `outcome_end_date must be <= now + ${maxDeadlineDay} days` });
+    }
+    const deadline = Math.floor(outcomeEndMs / 1000);
+    // v0.7 SS refund_maker_unjoined L370-373 uses fee 范围 [MIN_FEE=50_000, MAX_FEE=100M]. ctor
+    // minerFee 仍 in ctor for backward compat / settle entry but refund 不读. 5M floor 仍 safe
+    // (= L284-285 ctor validate 0<minerFee<1e8, 5M 通过) + 不打架 (R241 verify, Bettor ack).
+    const minerFee = parseInt(b.miner_fee, 10) || 5_000_000;
+    const brokerFeePct = parseInt(b.broker_fee_pct, 10);
+    if (!Number.isFinite(brokerFeePct) || brokerFeePct < 0 || brokerFeePct >= 10000) {
+      return reply.code(400).send({ ok: false, error: 'broker_fee_pct must be 0-9999 basis points' });
+    }
+    const oracleFeePct = parseInt(b.oracle_fee_pct, 10);
+    if (!Number.isFinite(oracleFeePct) || oracleFeePct < 0 || oracleFeePct >= 10000) {
+      return reply.code(400).send({ ok: false, error: 'oracle_fee_pct must be 0-9999 basis points' });
+    }
+
+    // Sharding params (single-shard default: shard_id=0, shard_count=1). Multi-shard 批3 ship 后开放.
+    const shardId = parseInt(b.shard_id, 10);
+    const shardCount = parseInt(b.shard_count, 10);
+    const shard_id = Number.isFinite(shardId) && shardId >= 0 ? shardId : 0;
+    const shard_count = Number.isFinite(shardCount) && shardCount >= 1 ? shardCount : 1;
+    if (shard_id >= shard_count) return reply.code(400).send({ ok: false, error: `shard_id ${shard_id} >= shard_count ${shard_count}` });
+
+    const SS_MIN_SPENDABLE_FLOOR_KAS_V07 = 5;
+    const dynamicMinKas = oracleFeePct > 0 ? Math.ceil(12500 / oracleFeePct) : 0;
+    const minSpendableKas = Math.max(SS_MIN_SPENDABLE_FLOOR_KAS_V07, dynamicMinKas);
+    if (process.env.KANET_TESTNET_NO_LIMITS !== '1' && parseFloat(b.maker_stake_kas) < minSpendableKas) {
+      return reply.code(400).send({ ok: false, error: `maker_stake_kas ${b.maker_stake_kas} < min spendable ${minSpendableKas} KAS` });
+    }
+    const makerStakeKas = parseFloat(b.maker_stake_kas);
+    const oracleBondKas = parseFloat(b.oracle_bond_kas);
+    if (!Number.isFinite(makerStakeKas) || makerStakeKas <= 0) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be positive' });
+    if (!Number.isFinite(oracleBondKas) || oracleBondKas <= 0) return reply.code(400).send({ ok: false, error: 'oracle_bond_kas must be positive' });
+    if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
+      if (makerStakeKas < 100) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be >= 100 KAS (maker skin-in-game floor)' });
+      if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS` });
+    }
+    const makerStakeAmount = Math.round(makerStakeKas * 1e8);
+    const oracleBondAmount = Math.round(oracleBondKas * 1e8);
+    const makerStakeStr = (makerStakeAmount / 1e8).toFixed(8);
+
+    const metaInput = JSON.stringify({
+      source: b.outcome_market_source,
+      condition: b.outcome_condition_id,
+      token: b.outcome_token_id,
+      side: b.outcome_side,
+      end: deadline,
+      rule: b.resolution_rule_spec,
+    });
+    const marketMetadataHash = createHash('sha256').update(metaInput).digest('hex');
+
+    // Generate marketId FIRST so we can derive market_id hash for SS ctor.
+    const marketId = 'ext-pool-v07-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+    const network = makerRow.address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    const { computeSpineP2SH_v07, deriveMarketIdHash } = await import('../lib/pool-p2sh-v07.mjs');
+    const market_id_hash = deriveMarketIdHash(marketId);
+
+    let spineResult;
+    try {
+      spineResult = await computeSpineP2SH_v07({
+        makerPk, brokerPk, poolMerkleRoot,
+        deadline, minerFee, brokerFeePct, oracleFeePct,
+        oracleBondAmount, makerStakeAmount,
+        marketMetadataHash,
+        shard_id, shard_count, market_id: market_id_hash,
+        network,
+      });
+    } catch (e) {
+      return reply.code(500).send({ ok: false, error: `v0.7 spine SS compile fail: ${e.message}` });
+    }
+
+    let spineTxId = null;
+    try {
+      const r = await transferAndConfirm(b.maker_relay_id, spineResult.p2shAddr, makerStakeStr);
+      spineTxId = r.txId;
+    } catch (err) {
+      return reply.code(503).send({ ok: false, error: `maker stake lock failed: ${err.message} (spine_p2sh=${spineResult.p2shAddr})` });
+    }
+
+    try {
+      const initialMetadata = JSON.stringify({
+        spine_redeem_script_hex: spineResult.redeemScript,
+        v07_pool_merkle_root: poolMerkleRoot,
+        v07_shard_id: shard_id,
+        v07_shard_count: shard_count,
+        v07_market_id_hash: market_id_hash,
+      });
+      sqlite.prepare(`INSERT INTO pool_markets (
+        id, maker_relay_id, spine_p2sh, spine_lock_tx, market_metadata_hash,
+        oracle1_pk, oracle2_pk, oracle3_pk, broker_pk,
+        deadline, miner_fee, broker_fee_pct, oracle_bond_amount, maker_stake_amount,
+        outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side, resolution_rule_spec,
+        protocol_status, sides_merkle_root, oracle_relay_ids, broker_relay_id, metadata, category,
+        protocol_version, pool_merkle_root
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        marketId, b.maker_relay_id, spineResult.p2shAddr, spineTxId, marketMetadataHash,
+        null, null, null, brokerPk,
+        deadline, minerFee, brokerFeePct, oracleBondAmount, makerStakeAmount,
+        b.outcome_market_source, b.outcome_condition_id, b.outcome_token_id, b.outcome_side, b.resolution_rule_spec,
+        'pending_bettors', '', '[]', b.broker_relay_id, initialMetadata, b.category,
+        'v0.7', poolMerkleRoot,
+      );
+    } catch (e) {
+      console.error(`[pool/create-v07] DB insert fail: ${e.message}`);
+      return reply.code(500).send({ ok: false, error: `DB insert fail (spine TX done ${spineTxId}): ${e.message}` });
+    }
+
+    try {
+      const { ensurePoolSnapshot } = await import('../services/pool-market-settler-v06.mjs');
+      ensurePoolSnapshot(marketId, poolMerkleRoot);
+    } catch (snapErr) {
+      console.error(`[pool/create-v07] ensurePoolSnapshot fail market=${marketId.slice(0,12)}: ${snapErr.message}`);
+    }
+
+    const _mrowV07 = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
+    let _bcastV07 = null;
+    if (_mrowV07) _bcastV07 = await _broadcastMarketPublished(_mrowV07, b.maker_relay_id);
+
+    return reply.send({
+      ok: true,
+      market_id: marketId,
+      protocol_version: 'v0.7',
+      spine_p2sh: spineResult.p2shAddr,
+      spine_lock_tx: spineTxId,
+      pool_merkle_root: poolMerkleRoot,
+      maker_stake_locked_kas: makerStakeAmount / 1e8,
+      miner_fee_sompi: minerFee,
+      broker_fee_pct_bps: brokerFeePct,
+      shard_id, shard_count, market_id_hash,
+      cross_node_publish_tx: _bcastV07?.txId || null,
+      category: b.category,
+      status: 'pending_bettors',
+      next_step: 'bettors register directly via POST /api/pool/market/' + marketId + '/bettor/register-v07/{prep,confirm} (TODO 批3) OR reuse register-v06 endpoint for single-shard wire (= same flow, just different protocol_version branch in handler).',
+    });
+  });
+
   // GET /api/pool/config — static defaults for UI pre-submit preview (D4 wallet浮窗 estimate fee)
   fastify.get('/api/pool/config', async (request, reply) => {
     return reply.send({

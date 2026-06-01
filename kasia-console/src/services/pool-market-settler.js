@@ -877,8 +877,11 @@ export async function dispatchRefund(market, decision) {
     // → SS reject. The 5M floor was specific to settle (spine 5+1+winners TX mass), not
     // refund (1in+1out, mass tiny, 50_000 sompi sufficient).
     const minerFee = baseMinerFeeR;
-    const makerRefundAmount = market.protocol_version === 'v0.6'
-      ? (makerStake - minerFee)  // v0.6: no bond inputs (A.1)
+    // v0.6 + v0.7: no oracle bond inputs (A.1 standing-stake committee), spine只锁 maker stake.
+    // v0.5 legacy: 3 oracle bonds locked in spine, refund recovers them too.
+    const isAnonymousPool = market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7';
+    const makerRefundAmount = isAnonymousPool
+      ? (makerStake - minerFee)
       : (makerStake + oracleBond * 3 - minerFee);  // v0.5: 3 bonds in spine
     if (makerRefundAmount <= 0) {
       console.warn(`[pool-settler] dispatchRefund market=${market.id.slice(0,12)} makerRefundAmount=${makerRefundAmount} ≤ 0, skip`);
@@ -957,10 +960,12 @@ export async function dispatchRefund(market, decision) {
  * producer node — same pattern as dispatchRefund). qlfpv-shape markets refund here.
  */
 async function handleRefunding(market) {
-  // G2-B 二期 only covers PoolSpine_v06 entry 2. v0.5 markets use a different SS (3 oracle
-  // bonds in spine) — refund there is a separate handler not in scope.
-  if (market.protocol_version !== 'v0.6') {
-    console.log(`[pool-settler:refunding] skip non-v0.6 market ${market.id.slice(0,12)} (protocol_version=${market.protocol_version}) — v0.5 refund handler not implemented`);
+  // G2-B 二期 (v0.6) + G6 批3 段① (v0.7) cover PoolSpine entry 2 refund_maker_unjoined. v0.5
+  // markets use a different SS (3 oracle bonds in spine, fee 焊死) — separate handler not in
+  // scope. v0.6/v0.7 differ only at SS bytecode level (= different redeem), the IPC path is
+  // identical because scriptSig layout is same ([makerSig push] + OP_2 + [redeemScript push]).
+  if (market.protocol_version !== 'v0.6' && market.protocol_version !== 'v0.7') {
+    console.log(`[pool-settler:refunding] skip non-v0.6/v0.7 market ${market.id.slice(0,12)} (protocol_version=${market.protocol_version})`);
     return;
   }
   let meta = {};
