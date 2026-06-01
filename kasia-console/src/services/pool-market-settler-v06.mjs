@@ -146,6 +146,34 @@ export async function fetchEndBlockHashCanonical(chainReader, deadlineDaaScore, 
  * @returns {{ pool_merkle_root: string, pool_size: number, members: [{pk, stake_sompi}] }}
  */
 export function derivePoolMerkleRoot() {
+  // DoD §2.2 J2 step [2] dual-read (5-agent 共识 KANet-UI r484/3): chain_view 单一读源 +
+  // 7-day grace fallback to oracle_pool_membership. Priority: chain_view > legacy DB.
+  //
+  // chain_view 来源: oracle-pool-chain-scanner scanAndDerivePool() 写入. 协议不变量: 任意
+  // 节点对同 snapshot_daa 必同 root (= chain SoT).
+  //
+  // grace 期 (7d) 同节点旧 manual enrollments 仍 valid (legacy_origin marker); 期满后
+  // chain_view 必填否则 throw.
+  try {
+    const latest = sqlite.prepare(
+      'SELECT snapshot_daa, leaves_json, merkle_root, pool_size FROM oracle_pool_chain_view ORDER BY snapshot_daa DESC LIMIT 1'
+    ).get();
+    if (latest && latest.pool_size > 0) {
+      const leaves = JSON.parse(latest.leaves_json);
+      return {
+        pool_merkle_root: latest.merkle_root,
+        pool_size: latest.pool_size,
+        members: leaves.map(l => ({ pk: l.pk_x, stake_sompi: l.stake_sompi })),
+        source: 'chain_view',
+        snapshot_daa: latest.snapshot_daa,
+      };
+    }
+  } catch (e) {
+    // Table may not exist on pre-v162 DB. Fall through to legacy.
+    console.warn(`[derivePoolMerkleRoot] chain_view read fail, fallback legacy: ${e.message}`);
+  }
+
+  console.warn('[derivePoolMerkleRoot] LEGACY FALLBACK: oracle_pool_chain_view empty, reading oracle_pool_membership (7-day grace period, DoD §2.2 sediment).');
   const rawMembers = sqlite.prepare(`
     SELECT oracle_pk, stake_locked_kas
     FROM oracle_pool_membership
