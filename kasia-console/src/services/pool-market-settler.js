@@ -626,6 +626,17 @@ export async function dispatchPhase2(market, decision) {
     if (payouts.brokerFee > 0) {
       outputs.push({ address: brokerRow.address, amountSompi: payouts.brokerFee.toString() });
     }
+    // Bettor r277 layer-19: v0.6 PoolSpine_v06.sil settle_aggregate fixed output layout:
+    // [0]=broker, [1..5]=5 committee P2PKs (>= oracleBondAmount each), [6..]=winners.
+    // v0.5 had [broker, winners, makerExtra, oracleBondReturns] — committee at end.
+    // Reorder for v0.6: insert oracleBondReturns (+ fee/N) BEFORE winners.
+    const isV06Outputs = market.protocol_version === 'v0.6';
+    if (isV06Outputs) {
+      for (const r of payouts.oracleBondReturns) {
+        const mergedAmount = r.amount + oracleFeePerSig;
+        outputs.push({ address: oracleRows[r.oracleIndex].address, amountSompi: mergedAmount.toString() });
+      }
+    }
     // Winners reduced by oracleFeeTotal share — proportional to original share
     // (= 等同 W2 spec "distributablePool = losingPool − brokerFee" 加 minus oracleFeeTotal)
     let winnerOracleFeeDeducted = 0;
@@ -641,10 +652,12 @@ export async function dispatchPhase2(market, decision) {
     if (payouts.makerExtraOutput) {
       outputs.push({ address: makerRow.address, amountSompi: payouts.makerExtraOutput.toString() });
     }
-    // Oracle bond returns + oracleFee/3 merged per output (= NWT sub 4 PoolSpine spec)
-    for (const r of payouts.oracleBondReturns) {
-      const mergedAmount = r.amount + oracleFeePerSig;
-      outputs.push({ address: oracleRows[r.oracleIndex].address, amountSompi: mergedAmount.toString() });
+    if (!isV06Outputs) {
+      // v0.5 legacy layout: bond returns at end
+      for (const r of payouts.oracleBondReturns) {
+        const mergedAmount = r.amount + oracleFeePerSig;
+        outputs.push({ address: oracleRows[r.oracleIndex].address, amountSompi: mergedAmount.toString() });
+      }
     }
 
     // 5. Build input outpoints. Spine P2SH has MULTIPLE UTXOs: 1 maker stake (spine_lock_tx) +
