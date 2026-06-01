@@ -869,7 +869,14 @@ export async function dispatchRefund(market, decision) {
     const makerStake = parseInt(market.maker_stake_amount, 10) || 0;
     const oracleBond = parseInt(market.oracle_bond_amount, 10) || 0;
     const baseMinerFeeR = parseInt(market.miner_fee, 10) || 20_000;
-    const minerFee = market.protocol_version === 'v0.6' ? Math.max(baseMinerFeeR, 5_000_000) : baseMinerFeeR;
+    // CRITICAL (G2-B 二期 qlfpv 实测): v0.6 refund_maker_unjoined SS contract requires
+    // tx.outputs[0].value == makerStakeAmount - minerFee EXACT (PoolSpine_v06.sil L281).
+    // The contract's `minerFee` ctor param comes from DB market.miner_fee at create-v06
+    // time (pool.js L448 + L495 computeSpineP2SH_v06). Settler MUST use the same value
+    // here — applying the v0.6 settle path's Math.max(_, 5M) floor causes value mismatch
+    // → SS reject. The 5M floor was specific to settle (spine 5+1+winners TX mass), not
+    // refund (1in+1out, mass tiny, 50_000 sompi sufficient).
+    const minerFee = baseMinerFeeR;
     const makerRefundAmount = market.protocol_version === 'v0.6'
       ? (makerStake - minerFee)  // v0.6: no bond inputs (A.1)
       : (makerStake + oracleBond * 3 - minerFee);  // v0.5: 3 bonds in spine
