@@ -1203,6 +1203,114 @@ export async function unlockPoolSpineRefundMakerUnjoined(args) {
   }
 }
 
+// ── 7d — unlockPoolSideRefundCancelled (DoD C 退款自取, Bettor r261 钦点) ──
+//
+// PoolSide_v06/v07 entry 2 refund_market_cancelled (= bettor 自取 stake 走 cancel 退款路).
+// Spec PoolSide_v07 L268-281:
+//   - 1 input (= side UTXO holding bettor stake)
+//   - 1 output (= P2PK to bettorPk, value 在 fee 范围)
+//   - require(checkSig(bettorSig, pubkey(bettorPk))) → bettor 自签
+//   - require(tx.time >= deadline * 1000) → lockTime in ms (= 跟 spine refund 同款 grace 雷,
+//     待 J1 r261 v0.8 SS 改 (deadline + refundGraceSeconds)*1000 防 front-run)
+//
+// scriptSig: [bettorSig push] + OP_2 (= selector entry 2) + [redeemScript push].
+//
+// Bettor_relay 自家 wallet 签 (= bettorPk privkey 在 bettor_relay), inline 一步 sign+submit.
+// 同 unlockPoolSpineRefundMakerUnjoined 模式 (qlfpv 实证), 复用 byte-size mass-aware fee.
+export async function unlockPoolSideRefundCancelled(args) {
+  const {
+    wallet, sideP2shAddress, sideRedeemScriptHex,
+    requiredInputOutpoint, output,
+    networkId, lockTime = 0n, txObjPreimage = null,
+  } = args;
+  if (!wallet) throw new Error('unlockPoolSideRefundCancelled: wallet required (= bettor_relay signer)');
+  if (!requiredInputOutpoint?.outpointTxid) throw new Error('requiredInputOutpoint.outpointTxid required');
+  if (!output?.address || (output.amountSompi == null)) throw new Error('output { address, amountSompi } required');
+
+  const txLockTime = BigInt(lockTime);
+  const rpc = await connectRpc(networkId);
+  try {
+    const { entries } = await rpc.getUtxosByAddresses([sideP2shAddress]);
+    if (!entries?.length) throw new Error(`No UTXOs at side P2SH ${sideP2shAddress}`);
+    const hits = entries.filter(e => e.outpoint.transactionId === requiredInputOutpoint.outpointTxid);
+    if (hits.length === 0) throw new Error(`UTXO not found for side lock tx: ${requiredInputOutpoint.outpointTxid}`);
+    if (hits.length > 1) throw new Error(`ambiguous: ${hits.length} UTXOs at side from tx ${requiredInputOutpoint.outpointTxid}`);
+    const matched = [hits[0]];
+
+    const outAmount = typeof output.amountSompi === 'string' ? BigInt(output.amountSompi) : BigInt(output.amountSompi);
+    const outSpk = payToAddressScript(new Address(output.address));
+
+    // Same sighash field discipline as unlockPoolSpineRefundMakerUnjoined (qlfpv 4-bug sediment):
+    //   parsed.lockTime = txLockTime (= match signedTx, not preimage default 0)
+    //   parsed.inputs[i].sigOpCount = 1 (= match SS entry 2 single checkSig, not preimage default 5)
+    //   signatureScript stripped for sighash compute, scriptSig set on signedTx only.
+    let unsignedTx;
+    if (txObjPreimage) {
+      const parsed = JSON.parse(JSON.stringify(txObjPreimage));
+      parsed.lockTime = txLockTime;
+      parsed.gas = BigInt(parsed.gas || 0);
+      parsed.inputs = parsed.inputs.map(inp => ({
+        ...inp,
+        signatureScript: '',
+        sequence: BigInt(inp.sequence || 0),
+        sigOpCount: 1,
+        utxo: inp.utxo ? {
+          ...inp.utxo,
+          amount: BigInt(inp.utxo.amount || 0),
+          blockDaaScore: BigInt(inp.utxo.blockDaaScore || 0),
+        } : undefined,
+      }));
+      parsed.outputs = parsed.outputs.map(o => ({ ...o, value: BigInt(o.value || 0) }));
+      unsignedTx = new Transaction(parsed);
+    } else {
+      unsignedTx = new Transaction({
+        version: 0,
+        inputs: [{
+          previousOutpoint: { transactionId: matched[0].outpoint.transactionId, index: matched[0].outpoint.index },
+          signatureScript: '',
+          sequence: 0n,
+          sigOpCount: 1,
+          utxo: matched[0],
+        }],
+        outputs: [new TransactionOutput(outAmount, outSpk)],
+        lockTime: txLockTime,
+        gas: 0n,
+        subnetworkId: '0000000000000000000000000000000000000000',
+        payload: '',
+      });
+    }
+
+    // Bettor single-sig (= PoolSide_v07.sil L271 require(checkSig(bettorSig, pubkey(bettorPk)))).
+    const bettorSigHex = createInputSignature(unsignedTx, 0, wallet.getPrivateKey(), SighashType.All);
+
+    // scriptSig: [bettorSig push] + OP_2 (selector entry 2 refund_market_cancelled) + [redeemScript push]
+    const sideRedeemBytes = Buffer.from(sideRedeemScriptHex, 'hex');
+    const sideRedeemPushHex = _encodePushDataHex(sideRedeemBytes);
+    const scriptSigHex = bettorSigHex + '52' + sideRedeemPushHex;
+
+    const signedTx = new Transaction({
+      version: 0,
+      inputs: [{
+        previousOutpoint: { transactionId: matched[0].outpoint.transactionId, index: matched[0].outpoint.index },
+        signatureScript: scriptSigHex,
+        sequence: 0n,
+        sigOpCount: 1,
+      }],
+      outputs: [new TransactionOutput(outAmount, outSpk)],
+      lockTime: txLockTime,
+      gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000',
+      payload: '',
+    });
+
+    _assertTxInvariants(matched, signedTx, 'unlockPoolSideRefundCancelled', networkId);
+    const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: result.transactionId };
+  } finally {
+    try { await rpc.disconnect(); } catch {}
+  }
+}
+
 // ── 8. checkUtxoLanded (B2 v0.5 Phase 3 bug 7 fix) ──
 
 /**
