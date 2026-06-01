@@ -18,7 +18,7 @@
 // 协议不变量: settle TX ctor poolMerkleRoot == derive(snapshotDaa) — relay reject mismatch.
 // 跨节点验证: GET /api/oracle/pool-snapshot?daa=X fetch + diff across :3200/:3300 (NWT verifier).
 
-import sqlite from '../db/sqlite.js';
+import { sqlite } from '../db/client.js';
 import { createHash } from 'node:crypto';
 
 const FINALITY_N = parseInt(process.env.ORACLE_POOL_FINALITY_N, 10) || 600;

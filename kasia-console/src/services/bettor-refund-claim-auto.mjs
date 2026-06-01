@@ -8,7 +8,7 @@
 // + grace lockTime + IPC pool_side_refund_cancelled_tx). UPDATE pool_bettor_sides SET
 // claim_txid 防重复领.
 
-import sqlite from '../db/sqlite.js';
+import { sqlite } from '../db/client.js';
 import { sendCommandAsync } from './relay-manager.js';
 import { isRelayAlive } from './relay-manager.js';
 
