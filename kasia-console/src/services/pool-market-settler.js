@@ -850,7 +850,13 @@ export async function dispatchRefund(market, decision) {
     // 2. Look up maker address
     const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
     if (!makerRow?.address) {
-      console.warn(`[pool-settler] dispatchRefund market=${market.id.slice(0,12)} no maker address`);
+      // Cross-node ingested markets (maker_relay_id='cross-node:<pk>' sentinel) have no local
+      // maker → refund must dispatch on producer node where maker has privkey.
+      if (typeof market.maker_relay_id === 'string' && market.maker_relay_id.startsWith('cross-node:')) {
+        console.log(`[pool-settler] dispatchRefund skip cross-node market ${market.id.slice(0,12)} (maker on remote host, refund must dispatch from producer node)`);
+      } else {
+        console.warn(`[pool-settler] dispatchRefund market=${market.id.slice(0,12)} no maker address`);
+      }
       return;
     }
 
