@@ -282,9 +282,12 @@ async function _startBetImpl(tgUser) {
   const allMarkets = (r.json && r.json.markets) || [];
   // G4 防资损 A: 列表过滤掉 deadline 离现在 <10min 的 market — 给用户足够时间复核+开钱包+转账+register
   // (Bettor r283 LOCK; Owner 100 KAS 卡因: 选了 deadline 临界 market, 转账期间 deadline 过 confirm 拒, 钱卡 side_p2sh)
+  // DoD #1.3 (Bettor r316): v0.7 markets dual-handled by backend register-v06/{prep,confirm} endpoint
+  // (PoolSide_v07 ctor identical to v0.6, helper switches by version). v0.5 still excluded — needs
+  // separate register-external path. Markets without protocol_version are legacy v0.5.
   const nowSec = Math.floor(Date.now() / 1000);
   const markets = allMarkets.filter(m =>
-    m.protocol_version !== 'v0.6' &&
+    (m.protocol_version === 'v0.6' || m.protocol_version === 'v0.7') &&
     (!m.deadline || Number(m.deadline) - nowSec > DEADLINE_BUFFER_SEC)
   );
   if (!markets.length) { sessions.delete(tgUser); return '现在没有可押注的市场。稍后再来,或 /discover 看看。'; }

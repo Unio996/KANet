@@ -1180,7 +1180,41 @@ export async function registerPoolRoutes(fastify) {
     return { bettorPk, sideResult, network };
   }
 
-  // POST /api/pool/market/:id/bettor/register-v06/prep — v0.6 step 1: compute side P2SH + exact stake.
+  // DoD #1.3 (Bettor r316): v0.7 dual-handle for register-v06 endpoints. PoolSide_v07.sil ctor is
+  // identical to v0.6 (= 6 args, deadline last) per pool-p2sh-v07.mjs:90-94. Diff is entry bodies
+  // only (= claim_winner / refund_market_cancelled fee 范围). So same wire path works; just route
+  // to computeSideP2SH_v07 helper which uses PoolSide_v07.sil binary.
+  async function _extStakeDeriveSide_v07(market, linkedAddr, direction, stakeAmount) {
+    const bettorPk = await deriveXOnlyPubkey(linkedAddr);
+    const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
+    if (makerRow?.address && (await deriveXOnlyPubkey(makerRow.address)) === bettorPk) {
+      throw Object.assign(new Error('linked address is the market maker — maker bets implicitly via outcome_side (area-1)'), { code: 403 });
+    }
+    if (!market.pool_merkle_root) {
+      throw Object.assign(new Error('v0.7 market missing pool_merkle_root — corrupt market row'), { code: 500 });
+    }
+    const spineP2shHash = createHash('sha256').update(market.spine_p2sh).digest('hex');
+    const network = market.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    const { computeSideP2SH_v07 } = await import('../lib/pool-p2sh-v07.mjs');
+    const sideResult = await computeSideP2SH_v07({
+      bettorPk, spineP2shHash,
+      poolMerkleRoot: market.pool_merkle_root,
+      marketMetadataHash: market.market_metadata_hash,
+      direction, deadline: market.deadline, network,
+    });
+    return { bettorPk, sideResult, network };
+  }
+
+  // Branch helper by protocol_version. v0.6/v0.7 use same endpoint, different SIL binary.
+  async function _extStakeDeriveSide(market, linkedAddr, direction, stakeAmount) {
+    if (market.protocol_version === 'v0.7') {
+      return _extStakeDeriveSide_v07(market, linkedAddr, direction, stakeAmount);
+    }
+    return _extStakeDeriveSide_v06(market, linkedAddr, direction, stakeAmount);
+  }
+
+  // POST /api/pool/market/:id/bettor/register-v06/prep — v0.6+v0.7 step 1: compute side P2SH + exact stake.
+  // DoD #1.3: dual-handles v0.6 and v0.7 markets (PoolSide ctor identical, helper switches by version).
   fastify.post('/api/pool/market/:id/bettor/register-v06/prep', async (request, reply) => {
     const marketId = request.params.id;
     const b = request.body || {};
@@ -1188,19 +1222,19 @@ export async function registerPoolRoutes(fastify) {
     if (v.error) return reply.code(v.code).send({ ok: false, error: v.error });
     const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
     if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
-    if (market.protocol_version !== 'v0.6') return reply.code(400).send({ ok: false, error: `market protocol_version=${market.protocol_version || 'v0.5'}, use /register-external for v0.5` });
+    if (market.protocol_version !== 'v0.6' && market.protocol_version !== 'v0.7') return reply.code(400).send({ ok: false, error: `market protocol_version=${market.protocol_version || 'v0.5'}, use /register-external for v0.5` });
     if (market.protocol_status !== 'pending_bettors') {
       return reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, bettor registration closed` });
     }
     const bettorCount = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(marketId).c;
     if (bettorCount >= 50) return reply.code(409).send({ ok: false, error: 'market full — 50 bettors max per market' });
     let d;
-    try { d = await _extStakeDeriveSide_v06(market, b.linked_addr, v.direction, v.stakeAmount); }
+    try { d = await _extStakeDeriveSide(market, b.linked_addr, v.direction, v.stakeAmount); }
     catch (e) { return reply.code(e.code || 500).send({ ok: false, error: e.message }); }
     // Owner P0 (Bettor r23): "1 addr 1 mkt 1 pos" prep-guard stripped — see v0.5 prep above for full rationale.
     return reply.send({
       ok: true,
-      protocol_version: 'v0.6',
+      protocol_version: market.protocol_version,
       market_id: marketId,
       direction: v.direction,
       bettor_pk: d.bettorPk,
@@ -1223,12 +1257,12 @@ export async function registerPoolRoutes(fastify) {
     if (v.error) return reply.code(v.code).send({ ok: false, error: v.error });
     const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
     if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
-    if (market.protocol_version !== 'v0.6') return reply.code(400).send({ ok: false, error: `market protocol_version=${market.protocol_version || 'v0.5'}, use /register-external for v0.5` });
+    if (market.protocol_version !== 'v0.6' && market.protocol_version !== 'v0.7') return reply.code(400).send({ ok: false, error: `market protocol_version=${market.protocol_version || 'v0.5'}, use /register-external for v0.5` });
     if (market.protocol_status !== 'pending_bettors') {
       return reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, bettor registration closed` });
     }
     let d;
-    try { d = await _extStakeDeriveSide_v06(market, b.linked_addr, v.direction, v.stakeAmount); }
+    try { d = await _extStakeDeriveSide(market, b.linked_addr, v.direction, v.stakeAmount); }
     catch (e) { return reply.code(e.code || 500).send({ ok: false, error: e.message }); }
     const sideP2sh = d.sideResult.p2shAddr;
     // RPC UTXO query (indexer-independent per Bettor r283).
@@ -1294,12 +1328,12 @@ export async function registerPoolRoutes(fastify) {
     const _bcastBetV06 = await _broadcastBetRegistered({
       market_id: marketId, bettor_pk: d.bettorPk, direction: v.direction, stake_amount: stakeAmountInt,
       side_p2sh: sideP2sh, side_lock_tx: txId, merkle_index: merkleIndex,
-      protocol_version: 'v0.6',
+      protocol_version: market.protocol_version,
       broadcaster_relay_id: market.maker_relay_id,
     });
 
     return reply.send({
-      ok: true, registered: true, protocol_version: 'v0.6', market_id: marketId, bettor_pk: d.bettorPk, direction: v.direction,
+      ok: true, registered: true, protocol_version: market.protocol_version, market_id: marketId, bettor_pk: d.bettorPk, direction: v.direction,
       side_p2sh: sideP2sh, side_lock_tx: txId, merkle_index: merkleIndex, sides_merkle_root: tree.root,
       stake_sompi: stakeAmountInt, stake_kas: (stakeAmountInt / 1e8).toFixed(8),
       bettor_count: bettorCount + 1, external: true,
