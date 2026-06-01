@@ -1,0 +1,135 @@
+// bettor-refund-claim-auto.mjs — DoD C 收尾 (Bettor r393 钦点 自动领).
+//
+// 实用户不用手动调 endpoint: cron 扫 chain_events bettor_refund_available, 自动领未领的
+// sides via deriveXOnlyPubkey(relay.address)==bettor_pk + relay 本节点 running. 不在本节点
+// 的 skip 留给那节点 cron 自己 — 跨节点天然分担, 无需中心协调.
+//
+// 复用 POST /api/pool/market/:id/bettor-refund-claim 同 6 步逻辑 (= byte-size mass-aware fee
+// + grace lockTime + IPC pool_side_refund_cancelled_tx). UPDATE pool_bettor_sides SET
+// claim_txid 防重复领.
+
+import sqlite from '../db/sqlite.js';
+import { sendCommandAsync } from './relay-manager.js';
+import { isRelayAlive } from './relay-manager.js';
+
+const TICK_INTERVAL_MS = 5 * 60 * 1000;  // 5 min, 同 pool-market-settler
+const STARTUP_GRACE_MS = 60 * 1000;
+const REFUND_GRACE_SEC = 7200;            // J1 5dd590cd0 SS grace fix 同源
+
+let timer = null;
+let running = false;
+
+async function _deriveXOnlyPubkey(address) {
+  const kaspa = await import('kaspa-wasm');
+  return kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(address)).toString();
+}
+
+export async function claimAutoDispatcherTick() {
+  if (running) return { skipped: true };
+  running = true;
+  try {
+    // Unclaimed sides where market is cancelled (= bettor_refund_available emitted).
+    // Pre-filter on protocol_status='cancelled' AND claim_txid IS NULL for efficiency.
+    const sides = sqlite.prepare(`
+      SELECT s.id, s.market_id, s.bettor_pk, s.side_p2sh, s.side_lock_tx, s.side_redeem_script_hex,
+             s.stake_amount, s.direction, m.deadline, m.protocol_status
+      FROM pool_bettor_sides s
+      JOIN pool_markets m ON m.id = s.market_id
+      WHERE m.protocol_status = 'cancelled'
+        AND s.claim_txid IS NULL
+        AND s.side_lock_tx IS NOT NULL
+        AND s.side_redeem_script_hex IS NOT NULL
+    `).all();
+    if (sides.length === 0) return { ok: true, processed: 0 };
+
+    const relayCandidates = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE address IS NOT NULL').all();
+    let dispatched = 0, skippedRemote = 0, errored = 0;
+
+    for (const side of sides) {
+      try {
+        // Resolve signing relay (= deriveXOnlyPubkey match, 同 endpoint 逻辑).
+        let signingRelay = null;
+        for (const row of relayCandidates) {
+          try {
+            const pk = await _deriveXOnlyPubkey(row.address);
+            if (String(pk).toLowerCase() === String(side.bettor_pk).toLowerCase()) {
+              signingRelay = row;
+              break;
+            }
+          } catch {}
+        }
+        if (!signingRelay) {
+          // Bettor not on this node — skip, leave for the node that hosts this bettor relay.
+          skippedRemote++;
+          continue;
+        }
+        // Verify relay process alive (= IPC可达).
+        const aliveCheck = isRelayAlive(signingRelay.id);
+        if (!aliveCheck?.alive) {
+          console.warn(`[claim-auto] relay ${signingRelay.id.slice(0,8)} not alive (${aliveCheck?.reason || 'unknown'}), defer side=${side.id}`);
+          continue;
+        }
+
+        // Byte-size mass-aware fee (= 同 endpoint + 891c94d sediment).
+        const redeemBytes = Buffer.from(side.side_redeem_script_hex, 'hex');
+        const sigScriptSize = 70 + redeemBytes.length;
+        const txByteEstimate = 45 + sigScriptSize + 50 + 80;
+        const massEst = Math.ceil(txByteEstimate * 2.5);
+        const FEE_MIN = 1000;
+        const FEE_MAX = 100_000_000;
+        let fee = Math.max(FEE_MIN, massEst * 110);
+        if (fee > FEE_MAX) fee = FEE_MAX;
+
+        const stakeSompi = BigInt(side.stake_amount);
+        const outAmount = stakeSompi - BigInt(fee);
+        if (outAmount <= 1000n) {
+          console.warn(`[claim-auto] side=${side.id} output ${outAmount} <= dust, fee=${fee} too high vs stake ${stakeSompi}, skip`);
+          continue;
+        }
+
+        const lockTime = (BigInt(side.deadline) + BigInt(REFUND_GRACE_SEC)) * 1000n;
+
+        const submitResult = await sendCommandAsync(signingRelay.id, {
+          type: 'pool_side_refund_cancelled_tx',
+          side_p2sh_address: side.side_p2sh,
+          side_redeem_script_hex: side.side_redeem_script_hex,
+          required_input_outpoint: { outpointTxid: side.side_lock_tx, outpointIndex: 0 },
+          output: { address: signingRelay.address, amountSompi: outAmount.toString() },
+          lock_time: lockTime.toString(),
+        });
+        if (!submitResult?.ok || !submitResult.txId) {
+          console.warn(`[claim-auto] side=${side.id} relay submit fail: ${submitResult?.error || 'no txId'}`);
+          errored++;
+          continue;
+        }
+        sqlite.prepare('UPDATE pool_bettor_sides SET claim_txid = ?, refund_attempted_at = CURRENT_TIMESTAMP WHERE id = ?')
+          .run(submitResult.txId, side.id);
+        console.log(`[claim-auto] CLAIMED side=${side.id} bettor=${side.bettor_pk.slice(0,12)} claim_txid=${submitResult.txId.slice(0,16)} stake=${stakeSompi} fee=${fee} out=${outAmount}`);
+        dispatched++;
+      } catch (e) {
+        console.error(`[claim-auto] side=${side.id} exception: ${e.message}`);
+        errored++;
+      }
+    }
+
+    console.log(`[claim-auto] tick: ${sides.length} unclaimed, dispatched=${dispatched} skippedRemote=${skippedRemote} errored=${errored}`);
+    return { ok: true, processed: sides.length, dispatched, skippedRemote, errored };
+  } finally {
+    running = false;
+  }
+}
+
+export function startBettorRefundClaimAutoCron() {
+  if (timer) return;
+  console.log('[claim-auto] started — 5min cron, auto-dispatch unclaimed bettor refunds for cancelled markets (DoD C 收尾 Bettor r393).');
+  setTimeout(() => {
+    claimAutoDispatcherTick().catch(e => console.error('[claim-auto] startup tick:', e.message));
+  }, STARTUP_GRACE_MS);
+  timer = setInterval(() => {
+    claimAutoDispatcherTick().catch(e => console.error('[claim-auto] tick:', e.message));
+  }, TICK_INTERVAL_MS);
+}
+
+export function stopBettorRefundClaimAutoCron() {
+  if (timer) { clearInterval(timer); timer = null; }
+}
