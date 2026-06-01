@@ -2387,4 +2387,122 @@ expectThrow(() => KaspaWallet.fromPrivateKey('zz', 'testnet-12'));  // mutation:
 
 ---
 
+## 规则 43 · SS 硬编码 fee/mass = mainnet brick (qlfpv 第三面 5/31 实测)
+
+### Wrong
+```silver
+// PoolSpine_v06.sil entry 2 refund_maker_unjoined
+require(tx.outputs[0].value == makerStakeAmount - minerFee);  // 焊死 fee = ctor minerFee
+// → ctor minerFee 编进 bytecode, 创建时定下
+```
+
+```js
+// pool.js create-v06 — minerFee ctor 默认 50_000 sompi (0.0005 KAS)
+const minerFee = parseInt(b.miner_fee, 10) || 50_000;
+spineResult = await computeSpineP2SH_v06({minerFee, ...});  // 编进 SS
+```
+
+### Right
+SS 用 fee 范围不等式 (J1 PoolSpine_v07 红线 8):
+```silver
+require(tx.outputs[0].value >= makerStakeAmount - MAX_FEE);
+require(tx.outputs[0].value <= makerStakeAmount - MIN_FEE);
+require(tx.inputs.length >= 1);  // 允 fee-UTXO 追加
+```
+
+Console 创建期 floor (R40 lint):
+```js
+const minerFee = parseInt(b.miner_fee, 10) || 5_000_000;  // 至少 mempool floor 安全余量
+```
+
+Settler 提交期 mass-aware fee (J2 红线 7 _assertTxInvariants):
+```js
+const mass = kaspa.calculateTransactionMass(networkId, signedTx);
+const minFee = mass * 100n;  // 100 sompi/mass post-Toccata
+if (fee < minFee) throw new Error('fee 低于 mempool floor');
+```
+
+### Why
+SS bytecode 不可改, 创建期焊死的 fee 是死的, mass 是活的 (= 真链时 redeem 1942 byte 进 scriptSig → mass 4420+ → mempool floor 442_000 sompi). 焊死 50_000 sompi < 442_000 → mempool reject `transaction is not standard: transaction has 50000 fees which is under the required amount of 442000 for normalized transient mass 4420`.
+
+qlfpv 100 KAS 实测 brick: contract minerFee=50_000 焊死, refund/settle 都送同 SS 都拒. SS bytecode 不可更新, 那 100 KAS effectively burned. 这是 testnet 损失, mainnet 不可承受.
+
+**3 层防御**: ① SS 范围而非等式 (J1) ② 创建期 floor (Console R40 lint) ③ 提交期 mass-aware fee floor (relay helper).
+
+**前科**: r238 qlfpv 实测 5 层 brick 第三面 (= sighash 双 bug 修完才暴, 真链 attack 才 surface). 详见 `KANet-Knowledge-Base/sediment/2026-05-31-qlfpv-brick-postmortem.md`.
+
+---
+
+## 规则 44 · IPC 命令注册双层 enforce — relay.mjs case + commands.mjs whitelist 同 PR
+
+### Wrong
+```js
+// kasia-relay/src/relay.mjs — 加 case 不补 commands.mjs
+case 'pool_refund_maker_unjoined_tx': {
+  const r = await unlockPoolSpineRefundMakerUnjoined({...});
+  return;
+}
+// commands.mjs COMMAND_TYPES / COMMAND_PAYLOAD_SCHEMA / COMMAND_FIELD_TYPES 漏 register
+// → validateCommandPayload 拒 'unknown command type' silent → settler 死等不知为啥
+```
+
+### Right
+同 PR 同步加三处:
+```js
+// kasia-relay/src/lib/commands.mjs
+export const COMMAND_TYPES = Object.freeze({
+  ...,
+  POOL_REFUND_MAKER_UNJOINED_TX: 'pool_refund_maker_unjoined_tx',
+});
+
+export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
+  ...,
+  [COMMAND_TYPES.POOL_REFUND_MAKER_UNJOINED_TX]: ['spine_p2sh_address', 'spine_redeem_script_hex', 'required_input_outpoint', 'output'],
+});
+
+export const COMMAND_FIELD_TYPES = Object.freeze({
+  ...,
+  [COMMAND_TYPES.POOL_REFUND_MAKER_UNJOINED_TX]: { spine_p2sh_address: 'string', spine_redeem_script_hex: 'string', required_input_outpoint: 'object', output: 'object' },
+});
+```
+
+### Why
+KI-29 第 N 次复刻 (sediment from 5/20 feedback_ipc_double_enforce_register_both_layers). validateCommandPayload 在 relay 进程内 reject silent → relay log `INVALID COMMAND: unknown command type: X` + caller settler 收 `error: 'invalid command type'` → 不易定位实因 = case 加了 whitelist 漏.
+
+每次 relay 加新 IPC case 必走 checklist:
+1. ☑ relay.mjs `switch(cmd.type)` 加 case
+2. ☑ commands.mjs `COMMAND_TYPES` 加 enum
+3. ☑ commands.mjs `COMMAND_PAYLOAD_SCHEMA` 加 required fields
+4. ☑ commands.mjs `COMMAND_FIELD_TYPES` 加 typeof spec
+5. ☑ Console 端 caller (= settler/handler) 用 `COMMAND_TYPES.X` 不 string literal (= R40 CommandEnum 静态查)
+
+**前科**: r234 qlfpv refund handleRefunding 撞 KI-29, 我 ship 223e817 case 但漏 commands.mjs, 8307024 补三层. 已 sediment 多次, 仍复刻 = 流程需 lint 守.
+
+**Lint 守**: scripts/lint-kanet.mjs 加 R-IPC-DUAL-REGISTER 静态查 (TODO Bettor r239 sediment), 任何新 relay.mjs case 必 commands.mjs 三层都有.
+
+---
+
+## 规则 45 · 审过 ≠ 实过 — 花钱/上链动作必实链跑到 is_accepted, sighash field 一次性 audit 别 whack-a-mole
+
+### Wrong
+ship cycle "diff PASS / compile PASS / 单测 PASS / restart deploy PASS = 闭" 报 close. 真链 submit 撞 reject 才 surface 多层 sighash bug 单独修一个 ship 一次 sighash 仍不匹.
+
+### Right
+1. **闭环定义 = is_accepted 落链**: 写过/审过/编过/单测过/restart 完 都是 "审过", 不算闭. 必 chain TX is_accepted (kaspad block accept) 后才报闭. Owner 5/31 钦定铁律 (qlfpv 实测后总结).
+2. **Sighash 一次性 audit 不 whack-a-mole**: Kaspa sighash 含 多 field (lockTime / sigOpCount / sequence / utxo.amount / utxo.scriptPK / outputs.value / outputs.scriptPK / gas / subnetworkId / payload / version). unsignedTx (= sighash 算源) 跟 signedTx (= final submit) 任何 field 不一致 → sig 不匹 → 'script verify fail'. 修一个 field 后再 submit 才知道还有几个不匹 = 慢. Bettor r239 advice: 一次性 grep 全 field 对齐再 submit.
+
+### Why
+qlfpv 实测 5 层 brick:
+- 层 1 (KI-29 IPC 双层 enforce 漏): relay 'unknown command type' (commands.mjs 漏 register)
+- 层 2 (sighash bug 1 lockTime): unsignedTx.lockTime=0 (preimage default) vs signedTx.lockTime=deadline*1000 → sig 不匹
+- 层 3 (sighash bug 2 sigOpCount): unsignedTx.sigOpCount=5 (preimage default for 1V1 5 sigs) vs signedTx.sigOpCount=1 (entry 2 单 checkSig) → sig 不匹
+- 层 4 (SS contract fee 焊死): 修完 sighash 才暴 fee floor 不够
+- 层 5 (mempool floor): 442_000 sompi >> 50_000 焊死, contract bytecode 不可改 → brick
+
+5 层每层一次 restart + ship + 测, 浪费 5x cycle. 若 layer 2 时一次性 audit 全 sighash field, layer 3 同 PR 修完, 节省 1 cycle. 若 deploy 前 mass-aware fee check (= 红线 7), 直接预拒, 不会等到 mempool reject 才知道.
+
+**前科**: r235→r236→r237→r238 qlfpv 4 轮 ship + 4 次 'still fail' surface. Bettor r239 sediment "别 whack-a-mole" 钦点. Test framework 加 method-of-the-day check (= 审过 != 实过 + sighash 全 field audit).
+
+---
+
 *本档案在 v2 spec 第八章元教训基础上独立。spec 聚焦"这次怎么做"，本档案聚焦"下次别再犯"。*
