@@ -28,17 +28,25 @@ export async function claimAutoDispatcherTick() {
   if (running) return { skipped: true };
   running = true;
   try {
-    // Unclaimed sides where market is cancelled (= bettor_refund_available emitted).
-    // Pre-filter on protocol_status='cancelled' AND claim_txid IS NULL for efficiency.
+    // Bettor r394 catch: market.protocol_status='cancelled' 是 transient (= cancelled →
+    // refunding → refunded after maker 退款落链). 5min cron 跑时多半已 refunded → 永抓不到.
+    // 该按真实信号 bettor_refund_available chain_event 过滤 (= 一旦 emitted 永久 audit 不变).
+    // JOIN chain_events: event_type='bettor_refund_available' AND payload like '%"market_id":"X"%'
+    // AND payload like '%"bettor_pk":"P"%' → side claim_txid IS NULL.
     const sides = sqlite.prepare(`
       SELECT s.id, s.market_id, s.bettor_pk, s.side_p2sh, s.side_lock_tx, s.side_redeem_script_hex,
              s.stake_amount, s.direction, m.deadline, m.protocol_status
       FROM pool_bettor_sides s
       JOIN pool_markets m ON m.id = s.market_id
-      WHERE m.protocol_status = 'cancelled'
-        AND s.claim_txid IS NULL
+      WHERE s.claim_txid IS NULL
         AND s.side_lock_tx IS NOT NULL
         AND s.side_redeem_script_hex IS NOT NULL
+        AND EXISTS (
+          SELECT 1 FROM chain_events ce
+          WHERE ce.event_type = 'bettor_refund_available'
+            AND ce.payload LIKE '%"market_id":"' || s.market_id || '"%'
+            AND ce.payload LIKE '%"bettor_pk":"' || s.bettor_pk || '"%'
+        )
     `).all();
     if (sides.length === 0) return { ok: true, processed: 0 };
 
