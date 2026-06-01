@@ -116,6 +116,28 @@ export async function poolSettlerTick() {
         try { doomedMeta = JSON.parse(market.metadata || '{}'); } catch {}
         if (doomedMeta.needs_larger_pot) { doomed++; continue; }
 
+        // G6 批 3 段① 0-bet PRE-sampling shortcut (Bettor r301 catch): committee sampling needs
+        // pool_snapshot which may not exist (e.g. create-v07 ensurePoolSnapshot failed). 0-bet
+        // markets have no votes coming, no winners to settle — directly refund. Skip sampling +
+        // decideConsensus entirely. v0.6/v0.7 only (anonymous-pool committee model).
+        if (market.protocol_status === 'verifying' &&
+            (market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7')) {
+          const betCount = sqlite.prepare('SELECT COUNT(*) as c FROM pool_bettor_sides WHERE market_id = ?').get(market.id)?.c || 0;
+          if (betCount === 0) {
+            // Skip if already dispatched.
+            let meta0 = {};
+            try { meta0 = JSON.parse(market.metadata || '{}'); } catch {}
+            if (!meta0.refund_dispatched_at) {
+              console.log(`[pool-settler] 0-bet pre-sample shortcut market=${market.id.slice(0,12)} pv=${market.protocol_version} → dispatchRefund (skip committee sampling + voting)`);
+              await dispatchRefund(market, { action: 'refund', reason: '0-bet market, refund_maker_unjoined (pre-sample shortcut)' });
+              refund++;
+            } else {
+              pending++;  // already dispatched, wait handleRefunding tick
+            }
+            continue;
+          }
+        }
+
         // Bettor r172/r174 + J1 r205 ③ wire — v0.6 path A committee sampling. Idempotent: skip
         // if already sampled. Requires pool_snapshots row (created at market create-v06 per F-S3
         // anti-grinding). chainReader uses maker_relay_id (= already running). F-S1 finality_depth
