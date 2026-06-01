@@ -1146,10 +1146,21 @@ async function handleCollectingSigs(market) {
     return;
   }
 
-  // spineSigsByInput[i] = array of signatures for spine input i (= 3 sigs unanimous)
+  // Bettor r273 layer-17: sigs MUST be ordered to match committee_pks order so SS positional
+  // checkSig(c_iSig, c_iPk) binds correctly. handleCollectingSigs scans chain_events by
+  // observed_at → random order. Re-sort by oracle_relay_ids index (= committee order).
+  let oracleIdsForSort = [];
+  try { oracleIdsForSort = JSON.parse(market.oracle_relay_ids || '[]'); } catch {}
   const spineSigsByInput = [];
   for (let i = 0; i < spineInputCount; i++) {
-    spineSigsByInput.push(sigsByInput[i].map(s => s.signature));
+    const bySender = new Map(sigsByInput[i].map(s => [s.voter_relay_id, s.signature]));
+    const ordered = oracleIdsForSort.map(rid => bySender.get(rid)).filter(Boolean);
+    // Fallback to observed_at order if any committee member's sig missing (= safer than crash).
+    if (ordered.length === oracleIdsForSort.length && ordered.length > 0) {
+      spineSigsByInput.push(ordered);
+    } else {
+      spineSigsByInput.push(sigsByInput[i].map(s => s.signature));
+    }
   }
 
   // Phase 2c step 2c first ship: unanimous (entry 0) only. forfeit_1 entry 1 deferred next iteration.
