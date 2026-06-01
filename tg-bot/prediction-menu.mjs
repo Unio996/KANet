@@ -55,8 +55,11 @@ function persistNow() {
   try { _writeAtomic(); } catch (e) { console.warn(`[prediction-menu] state save fail (sync): ${e.message}`); }
 }
 
-const MIN_STAKE_KAS = 0.5;          // pool.js bettor/register 硬下限 (Bug 8: 更小 stake → settle TX 超 KIP-9 storage mass).
+const MIN_STAKE_KAS = 1.0;          // pool.js BETTOR_MIN_STAKE_POLICY (anti-bot product floor, Bettor r158 P2-3 LOCK).
 const SOMPI_PER_KAS = 1e8;
+// G4 防资损 (Bettor r283 LOCK A+/prep 双门): bot 不让用户碰 deadline 近的 market —
+// 列表只列 deadline>now+10min, /prep 出地址那步 deadline-now<10min 拒. Owner 100 KAS 卡因.
+const DEADLINE_BUFFER_SEC = 600;
 function sompiToKasStr(sompi) { return (Number(sompi) / SOMPI_PER_KAS).toFixed(8); }
 
 function fmtDeadline(unixSec) {
@@ -277,7 +280,13 @@ async function _startBetImpl(tgUser) {
   // bot 还没接. 不滤会拒 → 用户选中 v0.6 市场 register-external 拒 protocol mismatch = broken path.
   // 等 bot v0.6 wire 完成再删此过滤.
   const allMarkets = (r.json && r.json.markets) || [];
-  const markets = allMarkets.filter(m => m.protocol_version !== 'v0.6');
+  // G4 防资损 A: 列表过滤掉 deadline 离现在 <10min 的 market — 给用户足够时间复核+开钱包+转账+register
+  // (Bettor r283 LOCK; Owner 100 KAS 卡因: 选了 deadline 临界 market, 转账期间 deadline 过 confirm 拒, 钱卡 side_p2sh)
+  const nowSec = Math.floor(Date.now() / 1000);
+  const markets = allMarkets.filter(m =>
+    m.protocol_version !== 'v0.6' &&
+    (!m.deadline || Number(m.deadline) - nowSec > DEADLINE_BUFFER_SEC)
+  );
   if (!markets.length) { sessions.delete(tgUser); return '现在没有可押注的市场。稍后再来,或 /discover 看看。'; }
   const byCat = {};
   for (const m of markets) { const c = m.category || 'other'; (byCat[c] = byCat[c] || []).push(m); }
@@ -355,6 +364,13 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
       return '押注前需先绑定你的 Kaspa 地址: /link <你的 kaspatest 地址>。绑定后重新 /bet。';
     }
     s.amount = amt;
+    // G4 防资损 C (最后硬门, Bettor r283 LOCK): /prep 出地址前再 check deadline —
+    // 列表过滤后用户可能停留几分钟才输金额, 这步 deadline 仍可能近. <10min 直接拒, 钱不出钱包.
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (s.market.deadline && Number(s.market.deadline) - nowSec < DEADLINE_BUFFER_SEC) {
+      sessions.delete(tgUser);
+      return `⌛ 这个市场快截止了 (剩 <10 分钟), 转账+入账来不及。请 /bet 选别的市场。`;
+    }
     const direction = s.side === 'YES' ? 0 : 1;   // PoolSide ctor: 0=YES 1=NO
     const pr = await api.poolRegisterPrep(s.market.id, { linkedAddr, direction, stakeKas: amt });
     if (!pr.ok || !pr.json || !pr.json.side_p2sh || pr.json.exact_stake_sompi == null) {
@@ -392,12 +408,10 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
         `📲 或复制此 URI 粘到钱包 (一键填好地址+金额):`,
         `<code>${uri}</code>`,
         '',
-        '⚠ <b>现版本</b>合约把 stake 烤进了这个一次性地址, 所以建议按上面金额转 — 跟金额错位的后果:',
-        '· 转少 (含 0.001 KAS 小差) → 资金被合约锁死、退不回 (refund 也救不了)。',
-        '· 转多 → 超出部分被矿工吃掉、要不回。',
-        '建议: 用 tap-to-copy 复制金额, 钱包粘贴后核对再发。',
-        '',
-        '🔧 下版本规划 (Bettor r119/r122 收敛, J1 终审中): 改成"按你实际转入额自动建仓", 多/少都按真值押, 这个"精确"限制会消失。',
+        '⚠ 这地址是为你这一笔单子生成的, 用任意钱包付都行:',
+        '· 最低 <b>1 KAS</b>。低于 1 KAS 不入账, 钱会卡在地址里等 refund。',
+        '· 金额可以高于建议值 — 实际转多少, 仓位就按你转入的金额算。',
+        '建议: 用 tap-to-copy 复制地址, 钱包粘贴再发。',
         '',
         '· 任意钱包都能付; 但中奖要用你<b>绑定地址</b>的钥匙领取。',
         '',
@@ -436,8 +450,8 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
       `金额: ${kas} KAS  (= ${s.prep.exact_sompi} sompi)`,
       `地址: ${s.prep.side_p2sh}`,
       '',
-      '我在盯这个地址的链上到账, 检测到【精确金额】到账后通知你押注已入账。',
-      '再次提醒: 务必付精确金额到精确地址, 错额无法挽回。/start 取消等待 (若已付款, 取消不退款)。',
+      '我在盯这个地址的链上到账, 检测到 ≥1 KAS 到账后通知你押注已入账。',
+      '任意 ≥1 KAS 都接受 — 实际仓位按你转入额算。/start 取消等待 (若已付款, 取消不退款)。',
     ].join('\n');
   }
   return null;
