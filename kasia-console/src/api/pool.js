@@ -595,9 +595,28 @@ export async function registerPoolRoutes(fastify) {
     if (!b.pool_merkle_root || b.pool_merkle_root === 'auto') {
       try {
         const { derivePoolMerkleRoot } = await import('../services/pool-market-settler-v06.mjs');
-        const derived = derivePoolMerkleRoot();
+        // DoD #17 (Bettor r447 钦点 chain-derived 池活化): fetch currentDaa → snapshotDaa=
+        // currentDaa-FINALITY_N → ensure scanAndDerivePool 缓存 → derivePoolMerkleRoot(snapshotDaa)
+        // 走 chain_view 单一读源, 切掉 legacy null 路 (= 跨节点确定 ctor root==derive(snapshotDaa)).
+        const { getWorkingRpc } = await import('../services/rpc-health.js');
+        const { url: rpcUrl } = await getWorkingRpc();
+        const { RpcClient, Encoding } = await import('kaspa-wasm');
+        const network = process.env.KASPA_NETWORK || 'testnet-12';
+        const FINALITY_N = parseInt(process.env.ORACLE_POOL_FINALITY_N, 10) || 600;
+        const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: network });
+        await rpc.connect();
+        let snapshotDaa;
+        try {
+          const dag = await rpc.getBlockDagInfo();
+          const currentDaa = Number(dag.virtualDaaScore);
+          snapshotDaa = currentDaa - FINALITY_N;
+          const { scanAndDerivePool } = await import('../services/oracle-pool-chain-scanner.mjs');
+          await scanAndDerivePool({ rpc, networkId: network, currentDaa });
+        } finally { try { await rpc.disconnect(); } catch {} }
+        const derived = derivePoolMerkleRoot(snapshotDaa);
         b.pool_merkle_root = derived.pool_merkle_root;
-        console.log(`[pool/create-v07] auto-derived pool_merkle_root=${b.pool_merkle_root.slice(0,12)}.. from ${derived.pool_size} active members`);
+        b._snapshot_daa = snapshotDaa;
+        console.log(`[pool/create-v07] auto-derived pool_merkle_root=${b.pool_merkle_root.slice(0,12)}.. snapshotDaa=${snapshotDaa} pool_size=${derived.pool_size} source=${derived.source || 'chain_view'}`);
       } catch (e) {
         return reply.code(503).send({ ok: false, error: `pool_merkle_root auto-derive fail: ${e.message}` });
       }
