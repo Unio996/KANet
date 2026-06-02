@@ -33,7 +33,10 @@ export async function onBroadcastWritten(row) {
   // so widen prefix check. Adds ~1ns cost per non-matching broadcast vs prevents silent skip
   // of the entire new pool flow (= KI 49 silent skip pattern that bit voter ingest before).
   if (!row.content) return;
-  if (!row.content.startsWith('{"t":"kanet_') && !row.content.startsWith('{"t":"pool_')) return;
+  // J2-tn r301 Path A: add `oracle_` prefix for `oracle_stake_enroll_v1` envelope ingest.
+  if (!row.content.startsWith('{"t":"kanet_')
+      && !row.content.startsWith('{"t":"pool_')
+      && !row.content.startsWith('{"t":"oracle_')) return;
 
   let msg;
   try {
@@ -91,6 +94,8 @@ export async function onBroadcastWritten(row) {
         await handlePoolBetRegistered(msg); break;  // Bettor r113/r117/r120 ② consumer: bet_register
       case 'pool_market_chunk_v1':
         await handlePoolMarketChunk(msg); break;  // Bettor r128/r129 + J1 e67c9328 chunked v1
+      case 'oracle_stake_enroll_v1':
+        await handleOracleStakeEnroll(msg); break;  // J2-tn r301 Path A: cross-node enrollment ingest
     }
   } catch (err) {
     console.error(`[trade-filter] Error processing ${msg.t}: ${err.message}`);
@@ -182,6 +187,119 @@ async function handlePoolOracleVote(msg) {
     console.log(`[trade-filter:pool-vote] ingested market=${msg.market_id.slice(0,12)} outcome=${msg.outcome} voter=${msg.voter_pubkey.slice(0,12)} tx=${msg._tx?.slice(0,16)}`);
   } catch (e) {
     console.warn(`[trade-filter:pool-vote] insert fail (likely dedup, ok): ${e.message}`);
+  }
+}
+
+// J2-tn r301 Path A consumer half: cross-node oracle enrollment ingest.
+//
+// Producer (api/oracle-pool.js _broadcastOracleStakeEnroll): owner relay ecdsa_sign over
+// JSON.stringify({t, staker_pk_x, lock_until_daa, p2sh_addr, enrolled_at}) → sendBroadcastChunked
+// on kanet-prediction. Sig 是 staker_pk_x 自家 wallet 签 (= 防伪造 enrollment).
+//
+// Consumer (THIS handler): on ANY node receiving the broadcast:
+//   1. Recompute P2SH via computeStakeP2SH_v1(staker_pk_x, lock_until_daa) — must match
+//      msg.p2sh_addr (= ctor anchor 跨节点同源 invariant).
+//   2. Verify sig via kaspa.verifyMessage(message, signature, staker_pk_x).
+//   3. INSERT OR IGNORE chain_events (event_type='oracle_stake_enroll', txid UNIQUE).
+//   4. INSERT OR REPLACE oracle_stake_enrollments (source='chain_envelope'), preserve
+//      outpoint_txid/index/amount_sompi if already scanned locally (= scanner cache survives).
+//
+// Same-node case (producer + consumer on same Console): producer's local INSERT (source='manual')
+// 先写, broadcast 自己也 ingest, 这里 UPDATE source='chain_envelope' (= 表明已链上确权).
+// Cross-node case: consumer 这里 INSERT new row, scanner 后续 RPC verify UTXO 验真实 stake.
+//
+// 不在此处 RPC verify UTXO: 留给 scanner 在 snapshotDaa 时点 RPC finality verify (= 跨节点
+// 各自 RPC 同 finality 同结果). 这里只确权"声明" enrollment 存在 = chain_events 同步.
+async function handleOracleStakeEnroll(msg) {
+  const { randomUUID } = await import('crypto');
+  const kaspa = await import('kaspa-wasm');
+
+  const required = ['staker_pk_x', 'lock_until_daa', 'p2sh_addr', 'signature'];
+  for (const k of required) {
+    if (msg[k] === undefined || msg[k] === null) {
+      console.warn(`[trade-filter:oracle-enroll] missing ${k} staker=${msg.staker_pk_x?.slice(0,12)} — reject`);
+      return;
+    }
+  }
+
+  const stakerPkX = String(msg.staker_pk_x).toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(stakerPkX)) {
+    console.warn(`[trade-filter:oracle-enroll] staker_pk_x invalid format ${stakerPkX.slice(0,12)} — reject`);
+    return;
+  }
+  const lockUntilDaa = parseInt(msg.lock_until_daa, 10);
+  if (!Number.isFinite(lockUntilDaa) || lockUntilDaa <= 0) {
+    console.warn(`[trade-filter:oracle-enroll] lock_until_daa invalid ${msg.lock_until_daa} staker=${stakerPkX.slice(0,12)} — reject`);
+    return;
+  }
+
+  // 1. Recompute P2SH (= ctor anchor 跨节点同源 invariant). Mismatch = forgery / version skew.
+  const network = (msg.p2sh_addr || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+  let recomputed;
+  try {
+    const { computeStakeP2SH_v1 } = await import('../lib/oracle-stake-v1.mjs');
+    recomputed = await computeStakeP2SH_v1({ stakerPkX, lockUntilDaa, network });
+  } catch (e) {
+    console.warn(`[trade-filter:oracle-enroll] computeStakeP2SH_v1 exception staker=${stakerPkX.slice(0,12)}: ${e.message}`);
+    return;
+  }
+  if (recomputed.p2shAddr !== msg.p2sh_addr) {
+    console.warn(`[trade-filter:oracle-enroll] p2sh_addr mismatch staker=${stakerPkX.slice(0,12)} expected=${msg.p2sh_addr?.slice(0,32)} got=${recomputed.p2shAddr.slice(0,32)} — reject (ctor anchor break)`);
+    return;
+  }
+
+  // 2. Verify staker sig: rebuild unsignedPayload by stripping signature + meta (mirror producer).
+  const unsignedCopy = { ...msg };
+  delete unsignedCopy.signature;
+  delete unsignedCopy._tx; delete unsignedCopy._from; delete unsignedCopy._channel; delete unsignedCopy._at;
+  const messageToVerify = JSON.stringify(unsignedCopy);
+  let sigValid = false;
+  try {
+    sigValid = kaspa.verifyMessage({ message: messageToVerify, signature: msg.signature, publicKey: stakerPkX });
+  } catch (e) {
+    console.warn(`[trade-filter:oracle-enroll] verifyMessage exception staker=${stakerPkX.slice(0,12)}: ${e.message}`);
+    return;
+  }
+  if (!sigValid) {
+    console.warn(`[trade-filter:oracle-enroll] sig invalid staker=${stakerPkX.slice(0,12)} — reject`);
+    return;
+  }
+
+  // 3. Idempotent chain_events INSERT (UNIQUE on txid).
+  try {
+    const fromAddr = msg._from || null;
+    sqlite.prepare(`
+      INSERT OR IGNORE INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+      VALUES (?, ?, 'oracle_stake_enroll', ?, ?, ?, 'scout-ingest', CURRENT_TIMESTAMP)
+    `).run(randomUUID(), msg._tx, fromAddr, msg.p2sh_addr, JSON.stringify(msg));
+  } catch (e) {
+    console.warn(`[trade-filter:oracle-enroll] chain_events insert fail (likely dedup, ok): ${e.message}`);
+  }
+
+  // 4. UPSERT oracle_stake_enrollments — chain-confirmed enrollment registry.
+  //    Preserve outpoint/amount fields if scanner already populated (= 不洗 scanner cache).
+  try {
+    const existing = sqlite.prepare(
+      'SELECT outpoint_txid, outpoint_index, amount_sompi, last_scanned_at FROM oracle_stake_enrollments WHERE staker_pk_x = ?'
+    ).get(stakerPkX);
+    if (existing) {
+      // Already in local table — only flip source to chain_envelope (= 链上确权了).
+      sqlite.prepare(`
+        UPDATE oracle_stake_enrollments
+        SET lock_until_daa = ?, p2sh_addr = ?, p2sh_hash = ?, redeem_script_hex = ?,
+            source = 'chain_envelope', active = 1
+        WHERE staker_pk_x = ?
+      `).run(lockUntilDaa, recomputed.p2shAddr, recomputed.p2shHash, recomputed.redeemScript, stakerPkX);
+    } else {
+      sqlite.prepare(`
+        INSERT INTO oracle_stake_enrollments
+          (staker_pk_x, lock_until_daa, p2sh_addr, p2sh_hash, redeem_script_hex, source, active)
+        VALUES (?, ?, ?, ?, ?, 'chain_envelope', 1)
+      `).run(stakerPkX, lockUntilDaa, recomputed.p2shAddr, recomputed.p2shHash, recomputed.redeemScript);
+    }
+    console.log(`[trade-filter:oracle-enroll] ingested staker=${stakerPkX.slice(0,12)} lock=${lockUntilDaa} tx=${msg._tx?.slice(0,16)}`);
+  } catch (e) {
+    console.warn(`[trade-filter:oracle-enroll] enrollments upsert fail: ${e.message}`);
   }
 }
 

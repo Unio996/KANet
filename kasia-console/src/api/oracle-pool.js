@@ -17,6 +17,46 @@
 import { sqlite } from '../db/client.js';
 import { verifyIngestRequest } from '../services/ingest-auth.js';
 import { sendCommandAsync } from '../services/relay-manager.js';
+import { sendBroadcastChunked } from '../lib/pool-broadcast.mjs';
+
+// Path A enroll-via-broadcast (J2-tn r301 5-agent 共识): scanAndDerivePool 当前读
+// 本地 oracle_stake_enrollments 表 = 跨节点同 chain state 但表内容不同 → poolMerkleRoot 分歧.
+// 路 A 修法: 每笔 enrollment 上链广播 `oracle_stake_enroll_v1` envelope, trade-protocol-filter
+// 消费 → INSERT chain_events + UPSERT oracle_stake_enrollments source='chain_envelope'.
+// 跨节点同 chain state 同 chain_events 同表内容 → poolMerkleRoot 收敛.
+//
+// 签名: staker_pk_x 自家 wallet 签 envelope (= 防伪造 enrollment). signing_relay_id 必须 IPC
+// get_pubkey 返与 staker_pk_x 同值, 否则 endpoint reject.
+async function _broadcastOracleStakeEnroll({ stakerPkX, lockUntilDaa, p2shAddr, signingRelayId }) {
+  // 1. Verify signing relay's pubkey matches staker_pk_x (= owner sig 不能被代签).
+  const pkRes = await sendCommandAsync(signingRelayId, { type: 'get_pubkey' });
+  const signerPk = String(pkRes?.x_only_pubkey || '').toLowerCase();
+  if (!signerPk || signerPk.length !== 64) throw new Error(`signing relay get_pubkey invalid: ${signerPk}`);
+  if (signerPk !== stakerPkX.toLowerCase()) {
+    throw new Error(`signing_relay_id pubkey mismatch: signer=${signerPk.slice(0,12)} stakerPkX=${stakerPkX.slice(0,12)}`);
+  }
+
+  // 2. Build envelope (sig over JSON minus signature, mirror pool_market_published_v1 pattern).
+  const unsignedPayload = {
+    t: 'oracle_stake_enroll_v1',
+    staker_pk_x: stakerPkX.toLowerCase(),
+    lock_until_daa: lockUntilDaa,
+    p2sh_addr: p2shAddr,
+    enrolled_at: new Date().toISOString(),
+  };
+  const messageToSign = JSON.stringify(unsignedPayload);
+  const signResult = await sendCommandAsync(signingRelayId, { type: 'ecdsa_sign', message: messageToSign });
+  const signature = signResult?.signature;
+  if (!signature) throw new Error('ecdsa_sign returned empty');
+
+  // 3. Chunked broadcast on kanet-prediction channel (= same channel as market/vote envelopes).
+  const payloadStr = JSON.stringify({ ...unsignedPayload, signature });
+  const bcastResult = await sendBroadcastChunked(signingRelayId, 'kanet-prediction', payloadStr);
+  const txId = bcastResult?.txId;
+  if (!txId) throw new Error(`broadcast no txId: ${JSON.stringify(bcastResult).slice(0, 200)}`);
+  console.log(`[oracle-pool/broadcast] enroll staker=${stakerPkX.slice(0,12)} lock=${lockUntilDaa} txId=${txId.slice(0, 16)}...`);
+  return { ok: true, txId };
+}
 
 export async function registerOraclePoolRoutes(fastify) {
   // POST /api/oracle-pool/seed — testnet bootstrap: add is_oracle relays to pool with nominal stake.
@@ -140,6 +180,11 @@ export async function registerOraclePoolRoutes(fastify) {
     const stakerPkX = b.staker_pk_x.toLowerCase();
     const source = b.source === 'chain_envelope' ? 'chain_envelope' : 'manual';
     const network = process.env.KASPA_NETWORK || 'testnet-12';
+    // Path A J2-tn r301: caller optionally provides signing_relay_id 用于 envelope 上链签名.
+    // 不提供 = skip broadcast (= 与现有 manual 路径完全兼容, 已经存在 enrollments 借用 backfill 上链).
+    const signingRelayId = typeof b.signing_relay_id === 'string' ? b.signing_relay_id : null;
+    // skip_broadcast: testnet 默认 false (即 enroll 完自动广播). 显式 true 跳过仅本地 INSERT.
+    const skipBroadcast = b.skip_broadcast === true;
 
     try {
       const { computeStakeP2SH_v1 } = await import('../lib/oracle-stake-v1.mjs');
@@ -155,6 +200,19 @@ export async function registerOraclePoolRoutes(fastify) {
             error: `enrollment exists with different lock_until_daa (existing=${existing.lock_until_daa}, requested=${lockUntilDaa}) — must unstake + re-enroll`,
           });
         }
+        // Path A J2-tn r301: 'already_enrolled' 也广播 envelope (= backfill 用此重发, 同节点
+        // INSERT 早写新增 envelope 不变 DB; 跨节点 ingest 收敛 enrollments 表 source=chain_envelope).
+        let rebroadcastResult = null;
+        if (signingRelayId && !skipBroadcast) {
+          try {
+            rebroadcastResult = await _broadcastOracleStakeEnroll({
+              stakerPkX, lockUntilDaa, p2shAddr: existing.p2sh_addr, signingRelayId,
+            });
+          } catch (bcErr) {
+            console.warn(`[oracle-pool/enroll] rebroadcast fail staker=${stakerPkX.slice(0,12)}: ${bcErr.message}`);
+            rebroadcastResult = { ok: false, error: bcErr.message };
+          }
+        }
         return reply.send({
           ok: true,
           staker_pk_x: stakerPkX,
@@ -162,6 +220,7 @@ export async function registerOraclePoolRoutes(fastify) {
           p2sh_addr: existing.p2sh_addr,
           p2sh_hash: p2shHash,
           status: 'already_enrolled',
+          broadcast: rebroadcastResult,
         });
       }
       sqlite.prepare(`
@@ -169,6 +228,21 @@ export async function registerOraclePoolRoutes(fastify) {
           (staker_pk_x, lock_until_daa, p2sh_addr, p2sh_hash, redeem_script_hex, source, active)
         VALUES (?, ?, ?, ?, ?, ?, 1)
       `).run(stakerPkX, lockUntilDaa, p2shAddr, p2shHash, redeemScript, source);
+
+      // Path A: 上链广播 envelope (= 同节点 ingest no-op via UNIQUE, 跨节点 ingest 收敛).
+      // Best-effort: 失败 log warn 不 fail enroll (= 本地 INSERT 已写, backfill 可重试).
+      let broadcastResult = null;
+      if (signingRelayId && !skipBroadcast) {
+        try {
+          broadcastResult = await _broadcastOracleStakeEnroll({
+            stakerPkX, lockUntilDaa, p2shAddr, signingRelayId,
+          });
+        } catch (bcErr) {
+          console.warn(`[oracle-pool/enroll] broadcast fail (local INSERT done, retry via backfill): ${bcErr.message}`);
+          broadcastResult = { ok: false, error: bcErr.message };
+        }
+      }
+
       return reply.send({
         ok: true,
         staker_pk_x: stakerPkX,
@@ -178,6 +252,7 @@ export async function registerOraclePoolRoutes(fastify) {
         redeem_script_hex: redeemScript,
         source,
         status: 'enrolled',
+        broadcast: broadcastResult,
         next_step: `transfer ≥1 KAS to ${p2shAddr} with lockTime=${lockUntilDaa}; scanner 后续 verify UTXO + 入池`,
       });
     } catch (e) {

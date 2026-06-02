@@ -86,9 +86,20 @@ export async function scanAndDerivePool({ rpc, networkId, currentDaa }) {
 
   const { ORACLE_STAKE_MIN_SOMPI } = await import('../lib/oracle-stake-v1.mjs');
 
-  const enrollments = sqlite.prepare(
-    'SELECT staker_pk_x, lock_until_daa, p2sh_addr FROM oracle_stake_enrollments WHERE active = 1'
-  ).all();
+  // J2-tn r301 Path A: cross-node convergence by sourcing from chain-confirmed enrollments
+  // ONLY (= source='chain_envelope'). Local 'manual' enrollments waiting for backfill broadcast
+  // are excluded → pool 同 chain state 跨节点 same set 收敛.
+  //
+  // Strict mode: ORACLE_POOL_STRICT_CHAIN_SOURCE=1 (default) — only chain_envelope source counts.
+  // Set =0 to fall back to legacy (= include 'manual' rows; pre-Path A behavior, for debug).
+  const strictChainSource = process.env.ORACLE_POOL_STRICT_CHAIN_SOURCE !== '0';
+  const enrollments = strictChainSource
+    ? sqlite.prepare(
+        "SELECT staker_pk_x, lock_until_daa, p2sh_addr FROM oracle_stake_enrollments WHERE active = 1 AND source = 'chain_envelope'"
+      ).all()
+    : sqlite.prepare(
+        'SELECT staker_pk_x, lock_until_daa, p2sh_addr FROM oracle_stake_enrollments WHERE active = 1'
+      ).all();
 
   const valid = [];
   let rejected = 0;
