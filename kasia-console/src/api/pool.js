@@ -1393,7 +1393,7 @@ export async function registerPoolRoutes(fastify) {
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const rows = sqlite.prepare(`
       SELECT id, resolution_rule_spec, outcome_side, category, protocol_status,
-             deadline, maker_stake_amount, oracle_bond_amount,
+             protocol_version, deadline, maker_stake_amount, oracle_bond_amount,
              outcome_market_source, outcome_condition_id, created_at,
              (SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id) AS bettor_count,
              (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id AND s.direction = 0) AS yes_bettor_stake_sompi,
