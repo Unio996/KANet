@@ -12,6 +12,15 @@ if (missing.length) { console.error('[tg-bot] missing env:', missing.join(', '))
 
 const bot = new Bot(CONFIG.botToken);
 
+// Bettor 2026-06-03 止血 1-2 行: Telegram URL 预览图乱码 — 关掉所有 sendMessage 的 link preview.
+// 适用所有 ctx.reply / bot.api.sendMessage 不破 parse_mode 等其他选项 (transformer 仅注 link_preview_options).
+bot.api.config.use(async (prev, method, payload, signal) => {
+  if (method === 'sendMessage' && payload && typeof payload === 'object' && !payload.link_preview_options) {
+    payload.link_preview_options = { is_disabled: true };
+  }
+  return prev(method, payload, signal);
+});
+
 // broker X identity — resolved from UI/DB config (Owner sets in Console Settings, 0-restart),
 // refreshed periodically so a UI change takes effect live. env BROKER_RELAY_ID is fallback only.
 let brokerRelayId = await resolveBrokerRelayId();
