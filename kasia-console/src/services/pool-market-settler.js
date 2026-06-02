@@ -786,30 +786,49 @@ export async function dispatchPhase2(market, decision) {
     }
 
     let payouts;
-    // A批2 动态费 (Bettor r402 + Owner 钦定): replace static Math.max(fee, 5_000_000) with
-    // byte-mass-aware compute. Settle TX = 1 spine input (5-sig + selector + redeem ~2100B) +
-    // N side inputs (selector + redeem ~2000B each) + outputs + overhead. Mass × 2.5 × 110 sompi.
-    // 复用退款路 (891c94d / 086a908) byte-size 模式 + min floor 1M for settle (大 TX 起步).
+    // A批2 动态费 (Bettor r402 + r404 catch refinement): replace static Math.max(fee, 5_000_000) with
+    // byte-mass-aware compute. Bettor r404 实证: qoyqv 实 mass=17136, 我 v1 估 10795 = 低估 1.6x
+    // 因 spine scriptSig 实际 ~4KB (5sig+5pk+40siblings+redeem+selector OPs) NOT 2.5KB. 修正估算 +
+    // 多 multiplier 安全余量.
+    //
+    // Spine scriptSig 拆解 (PoolSpine_v07 settle_aggregate):
+    //   5 sigs push-encoded (66B each) = 330
+    //   5 committee_pks push (33B each) = 165
+    //   5 committee_indices push (small int ~2B each) = 10
+    //   40 merkle siblings push (33B each) = 1320
+    //   spine_redeem ~2100B (PoolSpine_v07 含 sharding)
+    //   selector OP_0 + winner OP + sidesMerkleRoot push (~36B)
+    //   v0.7 sharding extras (globalYes/No/commit_v2 ~60B)
+    //   subtotal ~4021B (= Bettor r404 confirmed shape)
     let metaForFee = {};
     try { metaForFee = JSON.parse(market.metadata || '{}'); } catch {}
     const spineRedeemHex = metaForFee.spine_redeem_script_hex || '';
     const spineRedeemSize = spineRedeemHex ? Buffer.from(spineRedeemHex, 'hex').length : 2100;
-    const SPINE_SCRIPTSIG_OVERHEAD = 66 * 5 + 5 + 3;  // 5 sigs push-encoded + winner+merkle OPs + PUSHDATA2 header
+    const SPINE_SIGS_PKS = 66 * 5 + 33 * 5;       // 5 sigs + 5 committee PKs push-encoded
+    const SPINE_INDICES = 2 * 5;                  // 5 small int indices
+    const SPINE_SIBLINGS = 33 * 40;                // 5 committee × 8 depth merkle siblings
+    const SPINE_SELECTOR_WINNER_MERKLE = 36;       // OP_0 + winner OP + sidesMerkleRoot push
+    const SPINE_V07_SHARDING = market.protocol_version === 'v0.7' ? 60 : 0;
+    const SPINE_SCRIPTSIG_OVERHEAD = SPINE_SIGS_PKS + SPINE_INDICES + SPINE_SIBLINGS + SPINE_SELECTOR_WINNER_MERKLE + SPINE_V07_SHARDING;
     const spineInputSize = 45 + SPINE_SCRIPTSIG_OVERHEAD + spineRedeemSize;
     let sidesInputSize = 0;
     for (const s of sides) {
       const sideRedeemSize = s.side_redeem_script_hex ? Buffer.from(s.side_redeem_script_hex, 'hex').length : 2000;
-      sidesInputSize += 45 + 5 + sideRedeemSize + 3;  // input overhead + OP_0 selector + redeem push
+      sidesInputSize += 45 + 4 + sideRedeemSize;  // input overhead + OP_0 selector + redeem (no PUSHDATA2 prefix needed for ≤520B but ~2KB → push prefix 3B included in 4)
     }
     const outputsCount = 1 + 5 + participants.filter(p => p.direction === decision.winner).length;  // broker + 5 committee + winners
     const outputsSize = outputsCount * 50;
     const txByteEstimate = spineInputSize + sidesInputSize + outputsSize + 80;
-    const massEst = Math.ceil(txByteEstimate * 2.5);
-    const SETTLE_FEE_MIN = 1_000_000;  // 0.01 KAS floor (= settle 大 TX 起步, refund 1in 1out 用 1000 不同)
+    // Bettor r404 catch: bump multiplier 2.5 → 3 for safety margin (= cover storage_mass component
+    // KIP-9 + estimation slack). Real qoyqv 17136/6545 ≈ 2.62 ratio + storage_mass for thin markets
+    // dominates → 3 covers both compute + storage portions.
+    const MASS_MULTIPLIER_X10 = 30;
+    const massEst = Math.ceil(txByteEstimate * MASS_MULTIPLIER_X10 / 10);
+    const SETTLE_FEE_MIN = 2_000_000;  // 0.02 KAS floor (= settle 大 TX 起步 + Bettor r404 安全余量)
     const SETTLE_FEE_MAX = 100_000_000;  // 1 KAS cap defense
     let dynamicFee = Math.max(SETTLE_FEE_MIN, massEst * 110);
     if (dynamicFee > SETTLE_FEE_MAX) dynamicFee = SETTLE_FEE_MAX;
-    console.log(`[pool-settler] settle mass-aware fee market=${market.id.slice(0,12)} txBytes≈${txByteEstimate} mass≈${massEst} fee=${dynamicFee} (sides=${sides.length}, winners=${outputsCount-6})`);
+    console.log(`[pool-settler] settle mass-aware fee market=${market.id.slice(0,12)} txBytes≈${txByteEstimate} mass≈${massEst} fee=${dynamicFee} (sides=${sides.length}, winners=${outputsCount-6}, spineRedeem=${spineRedeemSize}B)`);
     try {
       const baseMinerFee = parseInt(market.miner_fee, 10) || 20_000;
       // DoD #1.2 sweep: v0.6 + v0.7 都是 anonymous-pool 5-committee 模式. v0.5 legacy 路径 keep
