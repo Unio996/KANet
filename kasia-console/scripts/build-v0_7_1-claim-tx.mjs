@@ -21,9 +21,12 @@ const NETWORK_ID = 'testnet-12';
 const TESTER_PK = 'e72d8e7ea88a53d6d11e71d91e2a149dc8d4dc45f501b1651953997d1c731667';
 const KASPAD_URL = process.env.KASPAD_URL || 'ws://192.168.1.105:17210';
 
-// Funded UTXOs (per Bettor r431/432 ack)
-const WP_OUTPOINT = '7b1a599658976f36f91df6f07f21553eb48825e1a1bb0ec955a8468f83c95614:0';
-const PS_OUTPOINT = '22e0a69e80eb6a9f70a8fa7fc5277394f28527177ba3f5abdb21f8439ba33fa2:0';
+// Funded UTXOs — POOL_WP_OUTPOINT / POOL_PS_OUTPOINT env vars override defaults.
+// After WinningsPool SS bump (r433 KIP-9 fix → WP redeem 207B → new P2SH addr), Bettor must
+// re-fund NEW WP addr: kaspatest:pzhunh202xegmvue7vsghxsgsqrkhhzgafpua2pvn5pnd3es33rkqatvhmu8j
+// PoolSide addr unchanged: kaspatest:przr3xjgw36dtv7ql0lz4hcrwa39de4qhtfnczcg9hrjtl8ee8yy5u2mn4zhn
+const WP_OUTPOINT = process.env.POOL_WP_OUTPOINT || '7b1a599658976f36f91df6f07f21553eb48825e1a1bb0ec955a8468f83c95614:0';
+const PS_OUTPOINT = process.env.POOL_PS_OUTPOINT || '22e0a69e80eb6a9f70a8fa7fc5277394f28527177ba3f5abdb21f8439ba33fa2:0';
 const WP_AMOUNT = 500_000_000n;  // 5 KAS
 const PS_AMOUNT = 100_000_000n;  // 1 KAS
 
@@ -54,9 +57,10 @@ const winningPool = yesPool;
 const share = winnerStake * totalPool / winningPool;
 const poolShareTaken = share - winnerStake;
 const newPool = WP_AMOUNT - poolShareTaken;
-const minerFee = 50_000n;
-const continuationValue = newPool - minerFee;
-const brokerFee = 10_000n;  // dust placeholder
+// Bettor r433 storage_mass catch: broker out 必 ≥ 2e6 sompi (KIP-9 cap)
+const brokerFee = 5_000_000n;  // 0.05 KAS, KIP-9 mass safe
+const minerFee = 50_000n;       // miner takes leftover from fee budget
+const continuationValue = newPool - brokerFee - minerFee;  // 守 WP L83 上限 + ≥ WP L84 下限 (newPool - 1e8 = 450M-1e8 = 350M < 444.95M ✓)
 
 console.log('claim TX shape:');
 console.log('  in[0] WP:', WP_AMOUNT.toString(), 'sompi');
