@@ -4887,5 +4887,33 @@ export function runMigrations() {
     }
   }
 
+  // v164 — Bettor r213 钦点: 清理 nominal enrollment + legacy membership 死行.
+  //   5 实链上 staker 达成 (= J1 4 + 老 7212edc7) + chain_view 单一读源后, 4 旧 nominal enrollment
+  //   (= 6a9bc522 等 outpoint NULL rejected) + oracle_pool_membership 5 假 PK 行 (= v0.5 legacy seed)
+  //   无功能仅死行扰乱审计. derivePoolMerkleRoot legacy fallback 7d grace 期已过 + chain_view 活.
+  //   Idempotent: 已清后 0 行 DELETE 0 影响.
+  {
+    try {
+      const enrDel = sqlite.prepare(
+        "DELETE FROM oracle_stake_enrollments WHERE outpoint_txid IS NULL OR amount_sompi IS NULL"
+      ).run();
+      if (enrDel.changes > 0) {
+        console.log(`[migrate] v164: cleaned ${enrDel.changes} nominal enrollment 死行 (outpoint NULL).`);
+      }
+    } catch (e) {
+      console.warn(`[migrate] v164 enrollment cleanup fail: ${e.message}`);
+    }
+    try {
+      const memDel = sqlite.prepare(
+        "DELETE FROM oracle_pool_membership WHERE 1=1"
+      ).run();
+      if (memDel.changes > 0) {
+        console.log(`[migrate] v164: cleaned ${memDel.changes} oracle_pool_membership legacy seed 行 (chain_view 单一读源).`);
+      }
+    } catch (e) {
+      console.warn(`[migrate] v164 membership cleanup fail: ${e.message}`);
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
