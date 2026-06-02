@@ -763,7 +763,10 @@ export async function registerPoolRoutes(fastify) {
 
     try {
       const { ensurePoolSnapshot } = await import('../services/pool-market-settler-v06.mjs');
-      ensurePoolSnapshot(marketId, poolMerkleRoot);
+      // J2-tn r308 fix: 必传 snapshotDaa 走 chain_view 分支 (= 路 A 后 oracle_pool_membership 已
+      // v164 清空, legacy 分支必 throw "membership empty"). chain_view 路径读 oracle_pool_chain_view
+      // 缓存 (= L614 scanAndDerivePool 刚填充). 同 commit b213c676 chain-derived 池一致.
+      ensurePoolSnapshot(marketId, poolMerkleRoot, b._snapshot_daa || null);
     } catch (snapErr) {
       console.error(`[pool/create-v07] ensurePoolSnapshot fail market=${marketId.slice(0,12)}: ${snapErr.message}`);
     }
