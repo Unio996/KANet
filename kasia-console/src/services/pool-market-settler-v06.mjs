@@ -202,11 +202,42 @@ export function derivePoolMerkleRoot(snapshotDaa = null) {
   };
 }
 
-export function ensurePoolSnapshot(marketId, expectedPoolMerkleRoot) {
+export function ensurePoolSnapshot(marketId, expectedPoolMerkleRoot, snapshotDaa = null) {
   if (!marketId || typeof marketId !== 'string') throw new Error('marketId required (string)');
   const cleanExpected = (expectedPoolMerkleRoot || '').toLowerCase();
   if (!/^[0-9a-f]{64}$/.test(cleanExpected)) {
     throw new Error(`expectedPoolMerkleRoot must be 64-char hex (got ${cleanExpected.length} chars)`);
+  }
+  // Bettor r449 派工 (b): chain_view branch — settle 必同 daa 重派生守跨节点不变量.
+  // 若 caller 传 snapshotDaa, 从 oracle_pool_chain_view 读 leaves/root 比 expected, 落
+  // pool_snapshots 加 snapshot_daa 列持久化 (v163 migrate). 跳过 legacy oracle_pool_membership.
+  if (snapshotDaa !== null) {
+    const row = sqlite.prepare(
+      'SELECT snapshot_daa, leaves_json, merkle_root, pool_size FROM oracle_pool_chain_view WHERE snapshot_daa = ?'
+    ).get(snapshotDaa);
+    if (!row) throw new Error(`no chain_view cached at snapshot_daa=${snapshotDaa}; caller must call scanAndDerivePool first`);
+    if (row.merkle_root.toLowerCase() !== cleanExpected) {
+      throw new Error(`chain_view root mismatch at snapshot_daa=${snapshotDaa}: derived=${row.merkle_root} expected=${cleanExpected}`);
+    }
+    const leaves = JSON.parse(row.leaves_json);
+    const chainPks = leaves.map(l => String(l.pk_x).toLowerCase());
+    const chainStakes = leaves.map(l => String(l.stake_sompi));
+    sqlite.prepare(`
+      INSERT OR REPLACE INTO pool_snapshots
+        (market_id, pool_merkle_root, pool_size, pool_pks_json, pool_stakes_json, snapshot_at, protocol_version, snapshot_daa)
+      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'v0.7', ?)
+    `).run(
+      marketId, row.merkle_root, row.pool_size,
+      JSON.stringify(chainPks), JSON.stringify(chainStakes),
+      snapshotDaa
+    );
+    return {
+      pool_size: row.pool_size,
+      pool_merkle_root: row.merkle_root,
+      members: leaves.map(l => ({ pk: l.pk_x, stake_sompi: l.stake_sompi })),
+      source: 'chain_view',
+      snapshot_daa: snapshotDaa,
+    };
   }
   const rawMembers = sqlite.prepare(`
     SELECT oracle_pk, stake_locked_kas
