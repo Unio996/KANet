@@ -55,12 +55,14 @@ contract PoolSide_v0_7_1(
         require(totalYesPool > 0);
         require(totalNoPool > 0);
 
-        // ④ input shape: in[0]=self PoolSide, in[1]=WinningsPool UTXO
-        require(this.activeInputIndex == 0);
+        // ④ input shape (Bettor r424/r426/r428 critical fix 钦定):
+        // 统一 [WinningsPool=in[0], PoolSide=in[1]] — 两 SS 不能都 require ==0.
+        // PoolSide 在 in[1], WinningsPool 自身在 in[0] 不动.
+        require(this.activeInputIndex == 1);
         require(tx.inputs.length == 2);
 
-        // ⑤ share 公式 (= stakeAmount × totalPool / winningPool)
-        int winnerStake = tx.inputs[0].value;
+        // ⑤ share 公式 (= stakeAmount × totalPool / winningPool); winnerStake 读 in[1]=自家 PoolSide value
+        int winnerStake = tx.inputs[1].value;
         int oneMinusWinner = 1 - settlementWinner;
         int winningPool = settlementWinner * totalNoPool + oneMinusWinner * totalYesPool;
         // wait: settlementWinner==0 → YES wins → winning side = YES → winningPool = totalYesPool
