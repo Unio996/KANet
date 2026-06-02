@@ -1590,10 +1590,13 @@ export async function registerRelayRoutes(fastify) {
 
   // POST /api/relay/:id/send-command — unified command to Relay (Console transmits, Relay executes)
   fastify.post('/api/relay/:id/send-command', async (request, reply) => {
-    const { type, target, message, params, channel, amount } = request.body || {};
-    if (!type) return reply.code(400).send({ error: 'type is required' });
+    const body = request.body || {};
+    if (!body.type) return reply.code(400).send({ error: 'type is required' });
     try {
-      const result = await sendCommandAsync(request.params.id, { type, target, message, params, channel, amount });
+      // J2-tn r312: pass full body through (= 不丢字段, 支持 chain_get_blocks_from_daa_score
+      // 等 arbitrary-field IPC cmd via HTTP). Relay 端 COMMAND_FIELD_TYPES 自家 schema verify
+      // (= 同款 invalid-field check).
+      const result = await sendCommandAsync(request.params.id, body);
       return reply.send({ ok: true, ...result });
     } catch (err) {
       return reply.code(503).send({ ok: false, error: err.message || 'Relay command failed' });
