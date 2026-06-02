@@ -98,6 +98,30 @@ export async function poolSettlerTick() {
   if (running) { return { skipped: true }; }
   running = true;
   try {
+    // ── Deadline-watcher (Bettor P1 gap fix) ────────────────────────────────
+    // pending_bettors markets past deadline had NO auto-advance: the /settle endpoint
+    // (pool.js) was manual-only, never called by any cron/bot → markets stuck in
+    // pending_bettors forever (22 observed), real users' stakes frozen, no settle/refund.
+    // = root cause of "v0.6 unusable". Mirror the /settle transition here so every market
+    // auto-advances to verifying at deadline; the loop below then settles / refunds / cancels
+    // (0-bet → maker refund, thin → cancel-refund, healthy → committee settle).
+    // Scope: ONLY v0.6/v0.7 committee markets — this settler's dispatchPhase2 is committee logic.
+    // null/v0.5-version pending_bettors markets (legacy/other type) must NOT be force-advanced here
+    // (would mis-route through committee settle). They are a separate concern (flagged, not touched).
+    const nowSec = Math.floor(Date.now() / 1000);
+    const dueMarkets = sqlite.prepare(`
+      SELECT id FROM pool_markets
+      WHERE protocol_status = 'pending_bettors' AND deadline <= ?
+        AND protocol_version IN ('v0.6', 'v0.7')
+    `).all(nowSec);
+    if (dueMarkets.length) {
+      for (const dm of dueMarkets) {
+        sqlite.prepare('UPDATE pool_markets SET protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+          .run('verifying', dm.id);
+      }
+      console.log(`[pool-settler] deadline-watcher: advanced ${dueMarkets.length} pending_bettors → verifying (deadline passed): ${dueMarkets.map(m => m.id.slice(-5)).join(',')}`);
+    }
+
     const markets = sqlite.prepare(`
       SELECT id, maker_relay_id, spine_p2sh, spine_lock_tx, oracle1_pk, oracle2_pk, oracle3_pk,
              oracle_relay_ids, deadline, protocol_status, sides_merkle_root, broker_pk, broker_fee_pct, broker_relay_id,
