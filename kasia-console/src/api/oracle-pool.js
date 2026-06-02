@@ -204,8 +204,10 @@ export async function registerOraclePoolRoutes(fastify) {
         const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: process.env.KASPA_NETWORK || 'testnet-12' });
         await rpc.connect();
         let currentDaa;
-        try { currentDaa = Number((await rpc.getCurrentBlockDaaScore()).daaScore || (await rpc.getCurrentDaaScore()).daaScore); }
-        catch { throw new Error('getCurrentDaaScore RPC unavailable'); }
+        // Bettor r446 catch: kaspa-wasm 无 getCurrentBlockDaaScore/getCurrentDaaScore methods.
+        // 改用 getBlockDagInfo().virtualDaaScore (= rpc-health.js L74 实证可用).
+        try { const dag = await rpc.getBlockDagInfo(); currentDaa = Number(dag.virtualDaaScore); }
+        catch (e) { throw new Error(`getBlockDagInfo fail: ${e.message}`); }
         finally { try { await rpc.disconnect(); } catch {} }
         if (!Number.isFinite(currentDaa)) throw new Error(`currentDaa not finite: ${currentDaa}`);
         // Re-connect for scan UTXO calls.
