@@ -786,16 +786,36 @@ export async function dispatchPhase2(market, decision) {
     }
 
     let payouts;
+    // A批2 动态费 (Bettor r402 + Owner 钦定): replace static Math.max(fee, 5_000_000) with
+    // byte-mass-aware compute. Settle TX = 1 spine input (5-sig + selector + redeem ~2100B) +
+    // N side inputs (selector + redeem ~2000B each) + outputs + overhead. Mass × 2.5 × 110 sompi.
+    // 复用退款路 (891c94d / 086a908) byte-size 模式 + min floor 1M for settle (大 TX 起步).
+    let metaForFee = {};
+    try { metaForFee = JSON.parse(market.metadata || '{}'); } catch {}
+    const spineRedeemHex = metaForFee.spine_redeem_script_hex || '';
+    const spineRedeemSize = spineRedeemHex ? Buffer.from(spineRedeemHex, 'hex').length : 2100;
+    const SPINE_SCRIPTSIG_OVERHEAD = 66 * 5 + 5 + 3;  // 5 sigs push-encoded + winner+merkle OPs + PUSHDATA2 header
+    const spineInputSize = 45 + SPINE_SCRIPTSIG_OVERHEAD + spineRedeemSize;
+    let sidesInputSize = 0;
+    for (const s of sides) {
+      const sideRedeemSize = s.side_redeem_script_hex ? Buffer.from(s.side_redeem_script_hex, 'hex').length : 2000;
+      sidesInputSize += 45 + 5 + sideRedeemSize + 3;  // input overhead + OP_0 selector + redeem push
+    }
+    const outputsCount = 1 + 5 + participants.filter(p => p.direction === decision.winner).length;  // broker + 5 committee + winners
+    const outputsSize = outputsCount * 50;
+    const txByteEstimate = spineInputSize + sidesInputSize + outputsSize + 80;
+    const massEst = Math.ceil(txByteEstimate * 2.5);
+    const SETTLE_FEE_MIN = 1_000_000;  // 0.01 KAS floor (= settle 大 TX 起步, refund 1in 1out 用 1000 不同)
+    const SETTLE_FEE_MAX = 100_000_000;  // 1 KAS cap defense
+    let dynamicFee = Math.max(SETTLE_FEE_MIN, massEst * 110);
+    if (dynamicFee > SETTLE_FEE_MAX) dynamicFee = SETTLE_FEE_MAX;
+    console.log(`[pool-settler] settle mass-aware fee market=${market.id.slice(0,12)} txBytes≈${txByteEstimate} mass≈${massEst} fee=${dynamicFee} (sides=${sides.length}, winners=${outputsCount-6})`);
     try {
-      // Bettor r279 layer-20: v0.6 settle TX mass ~41430 needs fee >= 4143000 (100 sompi/mass).
-      // market.miner_fee 50000 way too low. Bump to 5000000 (0.05 KAS, ~21% margin over min).
       const baseMinerFee = parseInt(market.miner_fee, 10) || 20_000;
-      // DoD #1.2 sweep: v0.6 + v0.7 都是 anonymous-pool 5-committee 模式 (J1 r240/1 实证
-      // 'v0.7 委员 sig + 阈值 4-of-5 + depth-8 merkle 同 v0.6 无差'). Settle minerFee floor /
-      // oracleCount / committeeMode 全 reuse v0.6 path. v0.7-specific 仅 SS bytecode + scriptSig
-      // sharding extras (commit_v2/globalYes/globalNo, J1 #1.4 ship), 不影响 settler 端这层逻辑.
+      // DoD #1.2 sweep: v0.6 + v0.7 都是 anonymous-pool 5-committee 模式. v0.5 legacy 路径 keep
+      // baseMinerFee 不动 (= 改 v0.6/v0.7 为 byte-mass dynamicFee, v0.5 不在 scope).
       const isAnonymousPool = market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7';
-      const minerFeeFinal = isAnonymousPool ? Math.max(baseMinerFee, 5_000_000) : baseMinerFee;
+      const minerFeeFinal = isAnonymousPool ? dynamicFee : baseMinerFee;
       payouts = computePoolPayouts({
         participants,
         winner: decision.winner,
@@ -838,9 +858,9 @@ export async function dispatchPhase2(market, decision) {
     // computePoolPayouts didn't compute this; sub 5b adds explicitly.
     const totalLoserStake = participants.filter(p => p.direction !== decision.winner).reduce((s, p) => s + p.stake, 0);
     const baseMinerFeeSompi = parseInt(market.miner_fee, 10) || 20_000;
-    // DoD #1.2 sweep: v0.6+v0.7 same Math.max floor + oracleFeeDivisor=5 (= committee size).
+    // A批2 动态费 (Bettor r402 + Owner 钦定): v0.6+v0.7 用 dynamicFee 同 L798. v0.5 keep base.
     const isAnonymousPoolOutputs = market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7';
-    const minerFeeSompi = isAnonymousPoolOutputs ? Math.max(baseMinerFeeSompi, 5_000_000) : baseMinerFeeSompi;
+    const minerFeeSompi = isAnonymousPoolOutputs ? dynamicFee : baseMinerFeeSompi;
     const oracleLosingPool = Math.max(0, totalLoserStake - minerFeeSompi);
     const oracleFeeTotal = Math.floor(oracleLosingPool * oracleFeePct / 10000);
     const oracleFeeDivisor = isAnonymousPoolOutputs ? 5 : 3;
