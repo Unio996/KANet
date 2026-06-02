@@ -110,7 +110,7 @@ export async function tick() {
   if (!gm) { console.log('[pool-seeder] no eligible gamma market this tick'); return; }
 
   const stakeKas = parseFloat(process.env.POOL_SEED_STAKE_KAS) || 5;
-  const createRes = await fetch(`${BASE}/api/pool/market/create`, {
+  const createRes = await fetch(`${BASE}/api/pool/market/create-v07`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       maker_relay_id: maker,
@@ -121,13 +121,16 @@ export async function tick() {
       outcome_condition_id: gm.conditionId,
       outcome_market_source: 'polymarket',
       category: gm.category,
+      pool_merkle_root: 'auto',
     }),
   });
   const created = await createRes.json();
-  if (!created.ok) { console.warn(`[pool-seeder] create fail: ${created.error}`); return; }
+  if (!created.ok) { console.warn(`[pool-seeder] create-v07 fail: ${created.error}`); return; }
   const marketId = created.market_id;
-  console.log(`[pool-seeder] created ${marketId} [${gm.category}] vol=${Math.round(gm.volume24h)} "${gm.question.slice(0, 48)}" end=${gm.endDateIso}`);
-
+  console.log(`[pool-seeder] created ${marketId} [${gm.category}] vol=${Math.round(gm.volume24h)} "${gm.question.slice(0, 48)}" end=${gm.endDateIso} v0.7 → pending_bettors`);
+  return;
+  // v0.7 不需 oracle-deposit step (= committee VRF samples at settle 时, 非 create 时).
+  // 下面是 v0.5 path 留 reference 不跑.
   // read the 3 server-sampled oracle_relay_ids back
   const mres = await fetch(`${BASE}/api/pool/market/${marketId}`);
   const mj = await mres.json();

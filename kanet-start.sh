@@ -108,6 +108,12 @@ if [ -f "$ENV_FILE" ]; then
       # 5/29 KANet-UI — dev-channel faucet relay (clean relay#2 d9a8fffb; 原 FaucetRelay-tn 撞 relay-instance BUG1 弃用). 必 export 否则 case 未 match 静默忽略 (= line 100 同坑).
       FAUCET_RELAY_ID)         export FAUCET_RELAY_ID="$v" ;;
       FAUCET_AMOUNT_KAS)       export FAUCET_AMOUNT_KAS="$v" ;;
+      # Owner 派工 100 cases (2026-06-02): seed Polymarket hot markets via v0.7
+      POOL_SEEDER_ENABLED)     export POOL_SEEDER_ENABLED="$v" ;;
+      POOL_SEEDER_MAKER_RELAY) export POOL_SEEDER_MAKER_RELAY="$v" ;;
+      POOL_SEED_TARGET)        export POOL_SEED_TARGET="$v" ;;
+      POOL_SEED_STAKE_KAS)     export POOL_SEED_STAKE_KAS="$v" ;;
+      POOL_SEED_INTERVAL_MIN)  export POOL_SEED_INTERVAL_MIN="$v" ;;
     esac
   done < "$ENV_FILE"
   ok "已加载配置: $ENV_FILE"
