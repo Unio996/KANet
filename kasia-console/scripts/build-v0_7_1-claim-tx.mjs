@@ -145,18 +145,21 @@ const bettorSigHex = createInputSignature(unsignedTx, 1, privKeyObj, SighashType
 console.log('\nbettor sig (66B push-encoded):', bettorSigHex);
 
 // === Build scriptSigs ===
-// in[0] WinningsPool.claim(int share): [push share] + OP_0 (entry 0) + push(redeem)
-const wpScriptSig = opNHex(share) + '00' + pushData(wpRedeemBytes);
+// in[0] WinningsPool.claim(int share):
+//   WinningsPool 只 1 entry → silverc 单 entry NO selector (per TUTORIAL.md "Omits the selector for
+//   contracts with a single entrypoint"). scriptSig = [push share] + push(redeem)
+const wpScriptSig = opNHex(share) + pushData(wpRedeemBytes);
 console.log('in[0] WP scriptSig:', wpScriptSig.length/2, 'B');
 
 // in[1] PoolSide.claim_winner(sig, int winner, int yes, int no):
+// PoolSide 3 entries (settled_via_spine=0, claim_winner=1, refund_market_cancelled=2) → selector 必须
 // declaration order push: bettorSig, settlementWinner, totalYesPool, totalNoPool, then OP_1 (entry 1), then redeem
 const psScriptSig =
   bettorSigHex +
   '00' +  // winner=0 = OP_0
   opNHex(yesPool) +
   opNHex(noPool) +
-  '51' +  // OP_1 entry 1 selector
+  '51' +  // OP_1 entry 1 selector (= claim_winner)
   pushData(psRedeemBytes);
 console.log('in[1] PS scriptSig:', psScriptSig.length/2, 'B');
 
