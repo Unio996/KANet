@@ -1,0 +1,87 @@
+// WinningsPool_v1 — KANet predict market v0.7.1 trustless settle layer (pattern B + a)
+//
+// Decision: Bettor r415 + Owner 终裁 scope A (2026-06-02). per-PoolSide self-defense, spine
+// settle 产生 1 个 WinningsPool UTXO holding 全 winnings, 每赢方独立 claim TX 引此 UTXO 取自家 share.
+//
+// 4 死焊 (Bettor r415):
+//   ① Σ claim ≤ pool: silverc require(share <= input[0].value), 每次 claim 减少 WinningsPool value
+//   ② share = stakeAmount × (yesPool + noPool) / winningPool 精确 (= 公式整数除, 末轮 dust 归 broker fee)
+//   ③ 每 PoolSide 只领一次: bettor 自家 PoolSide UTXO 作 input[1] 一花就 gone (silverc 天然挡)
+//   ④ 池空不可超抽: require(share <= remaining)
+//
+// 状态 = UTXO value (= Mecenas 模式, 无显式 state struct, 自递归保持 scriptPubKey)
+//   value = remaining winnings KAS (= 初始 yesPool+noPool, 每 claim 减 share)
+//   claim TX:
+//     in[0] = WinningsPool UTXO (= 本合约 spend, this.activeInputIndex == 0)
+//     in[1] = winning PoolSide UTXO (= bettor 自家, 一花防重复)
+//     out[0] = P2PK(bettorPk) value = share
+//     out[1] (= continuation 除非最末): WinningsPool 同 ctor, value = remaining - share - minerFee
+//
+// PoolSide 验证 (= 防伪 PoolSide UTXO 输入): PoolSide_v0.7.1 spend 时自验 direction == outcome,
+//   readInputStateWithTemplate 读 WinningsPool ctor 的 outcome/yesPool/noPool → 算 share → 自验 output[0]
+//   = P2PK(bettorPk) value == share. WinningsPool 这边主要守 self-continuation + cap.
+//
+// ctor: (outcome, yesPool, noPool, brokerPk, marketCovenantId)
+//   outcome: 0 = YES 赢, 1 = NO 赢
+//   yesPool / noPool: total stake (sompi) per side, baked at spine settle time (spine 强制 ctor 值)
+//   brokerPk: 末轮 dust 归 broker
+//   marketCovenantId: KIP-20 covenant 锚 logical market (= 跨 shard 同 marketId 但 single-shard v0.7.1 仍 baked)
+//
+// 编译: silverc.exe WinningsPool_v1.sil --ctor args.json
+pragma silverscript ^0.1.0;
+
+contract WinningsPool_v1(
+    int outcome,             // 0 = YES, 1 = NO
+    int yesPool,             // sompi
+    int noPool,              // sompi
+    byte[32] brokerPk,
+    byte[32] marketCovenantId
+) {
+
+    // entry 0 — claim: bettor 拉自家 winning PoolSide UTXO + WinningsPool UTXO, 取 share, 续 WinningsPool.
+    //   PoolSide 在自家 entry 里验自己 direction == outcome + share 公式 (= 那是 PoolSide_v0.7.1 责任).
+    //   这里守: ① 自继续 ② share 上限 ③ value math sanity
+    entrypoint function claim(int share) {
+        // ① 本合约必在 in[0] (= 简化 activeInputIndex 校验)
+        require(this.activeInputIndex == 0);
+        require(tx.inputs.length == 2);  // [self, winning PoolSide]
+
+        // ② share <= remaining (= 本 UTXO value, ④ 池空不可超抽)
+        int remaining = tx.inputs[0].value;
+        require(share > 0);
+        require(share <= remaining);
+
+        // ③ share 公式 sanity: share <= stakeAmount × (yesPool + noPool) / winningPool
+        //    严格公式由 PoolSide_v0.7.1 算 + sighash 担保 (= scriptSig 含 share arg, sig 覆 sighash)
+        //    这里只做"不超过 total pool / winningPool" 上限防御:
+        int winningPool = outcome * noPool + (1 - outcome) * yesPool;
+        require(winningPool > 0);
+        int totalPool = yesPool + noPool;
+        // 单赢家最大可能 share = totalPool (= ratio 1, 不 over-claim)
+        require(share <= totalPool);
+
+        // ④ out[0] = P2PK 给某地址 (PoolSide_v0.7.1 自验 bettorPk match), value = share
+        require(tx.outputs[0].value == share);
+
+        // ⑤ self-continuation 或 末轮归 broker
+        int leftover = remaining - share;
+        byte[34] brokerLock = new ScriptPubKeyP2PK(pubkey(brokerPk));
+        if (leftover <= 10000) {
+            // 末轮: dust + minerFee 余 → broker (no continuation)
+            require(tx.outputs.length == 2);
+            require(tx.outputs[1].scriptPubKey == byte[](brokerLock));
+            require(tx.outputs[1].value <= leftover);
+            require(tx.outputs[1].value >= 1000);  // dust floor
+        } else {
+            // 续: out[1] = WinningsPool (= same scriptPubKey 自递归)
+            require(tx.outputs.length == 3);
+            byte[] selfSpk = tx.inputs[0].scriptPubKey;
+            require(tx.outputs[1].scriptPubKey == selfSpk);
+            require(tx.outputs[1].value <= leftover);
+            require(tx.outputs[1].value >= leftover - 100000);  // minerFee max 1 KAS
+            // out[2] = broker fee output (= minerFee margin, 防 maker-rob-self via 巨 fee)
+            require(tx.outputs[2].scriptPubKey == byte[](brokerLock));
+            require(tx.outputs[2].value >= 1000);
+        }
+    }
+}
