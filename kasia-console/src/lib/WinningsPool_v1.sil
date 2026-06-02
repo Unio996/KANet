@@ -69,22 +69,24 @@ contract WinningsPool_v1(
         // ⑤ self-continuation 或 末轮归 broker (= 守恒: pool 减 poolShareTaken)
         int newPoolValue = poolValue - poolShareTaken;
         byte[34] brokerLock = new ScriptPubKeyP2PK(pubkey(brokerPk));
-        if (newPoolValue <= 10000) {
-            // 末轮: pool dust 余 → broker
+        if (newPoolValue <= 10000000) {
+            // 末轮: pool dust 余 (≤ 0.1 KAS) → broker
             require(tx.outputs.length == 2);
             require(tx.outputs[1].scriptPubKey == byte[](brokerLock));
             require(tx.outputs[1].value <= newPoolValue);
-            require(tx.outputs[1].value >= 1000);
+            require(tx.outputs[1].value >= 2000000);  // KIP-9 mass cap: out_value >= 2e6 sompi → mass ≤ 500k
         } else {
             // 续: out[1] = WinningsPool 同 scriptPubKey (= self recursion)
             require(tx.outputs.length == 3);
             byte[] selfSpk = tx.inputs[0].scriptPubKey;
             require(tx.outputs[1].scriptPubKey == selfSpk);
             require(tx.outputs[1].value <= newPoolValue);
-            require(tx.outputs[1].value >= newPoolValue - 100000);  // minerFee max 1 KAS
-            // out[2] = broker fee (= minerFee margin 防 maker-rob-self 巨 fee)
+            // Bettor r433 实链 storage_mass catch: 100000 sompi fee budget 太小 → broker 必 ≥ 2e6 sompi
+            // (KIP-9: mass = 1e12/out_value, cap 500k → out_value ≥ 2e6). 改 1e8 (= 1 KAS) 留 broker 余地.
+            require(tx.outputs[1].value >= newPoolValue - 100000000);  // minerFee+broker max 1 KAS
+            // out[2] = broker fee (= minerFee margin 防 maker-rob-self 巨 fee, KIP-9 mass safe)
             require(tx.outputs[2].scriptPubKey == byte[](brokerLock));
-            require(tx.outputs[2].value >= 1000);
+            require(tx.outputs[2].value >= 2000000);  // KIP-9 storage_mass safe floor
         }
     }
 }
