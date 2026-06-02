@@ -4872,5 +4872,20 @@ export function runMigrations() {
     console.log('[migrate] v162: oracle_stake_enrollments + oracle_pool_chain_view tables created (DoD §2.2 chain-derived pool).');
   }
 
+  // v163 — Bettor r449 派工 (b): pool_snapshots 加 snapshot_daa 列持久化.
+  // settle 必同 daa 重派生守跨节点不变量: ctor root == derive(snapshotDaa). 不存 snapshot_daa
+  // 则 settle 后无从知道当时哪个 daa 算的, 跨节点无法 verify ctor root 一致.
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(pool_snapshots)").all();
+    if (!cols.some(c => c.name === 'snapshot_daa')) {
+      try {
+        sqlite.exec('ALTER TABLE pool_snapshots ADD COLUMN snapshot_daa INTEGER');
+        console.log('[migrate] v163: pool_snapshots 加 snapshot_daa (Bettor r449 跨节点不变量持久化).');
+      } catch (e) {
+        console.warn(`[migrate] v163 ALTER fail: ${e.message}`);
+      }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
