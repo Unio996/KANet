@@ -70,6 +70,32 @@ function fmtDeadline(unixSec) {
 
 // 列表里截短标题 (resolution_rule_spec 可能含完整结算规则全文, Bettor r256). 详情页给全文.
 function trunc(s, n) { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+
+// KANet-UI 2026-06-03 Bettor 钦点: 显示前 try JSON.parse(spec) — kanet 现有干净格式
+// = {title, data_source_canonical, source?}. 是 JSON 显 .title (干净题干). 非 JSON 显 raw.
+function specTitle(spec) {
+  if (!spec) return '';
+  const s = String(spec).trim();
+  if (s.startsWith('{')) {
+    try {
+      const obj = JSON.parse(s);
+      if (typeof obj.title === 'string' && obj.title.trim()) return obj.title.trim();
+    } catch {}
+  }
+  return s;
+}
+function specSource(spec) {
+  if (!spec) return null;
+  const s = String(spec).trim();
+  if (!s.startsWith('{')) return null;
+  try {
+    const obj = JSON.parse(s);
+    return obj.data_source_canonical || obj.source || null;
+  } catch { return null; }
+}
+// HTML escape: bot 发送 parse_mode='HTML' 时必 esc (< > &), 防 URL/HTML 渲染崩.
+function escHtml(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
 // Bettor r82 ② — 句子/词边界截断, 不破词中间. 优先句号/逗号/空格回退.
 function truncSmart(s, n) {
   s = String(s || '');
@@ -222,9 +248,11 @@ export async function startBetFromMarket(tgUser, marketId) {
   sessions.set(tgUser, { stage: 'detail', market });
   persist();
   const lines = [
-    `📊 ${market.resolution_rule_spec}`,
+    `📊 ${specTitle(market.resolution_rule_spec)}`,
     `${fmtDeadline(market.deadline)} · 已 ${market.bettor_count || 0} 人押 · maker stake ${market.maker_stake_kas ?? '?'} KAS`,
   ];
+  const _src = specSource(market.resolution_rule_spec);
+  if (_src) lines.push(`📡 source: ${_src}`);
   if (market.yes_pool_kas != null && market.no_pool_kas != null) {
     const yp = Number(market.yes_pool_kas).toFixed(4);
     const np = Number(market.no_pool_kas).toFixed(4);
@@ -320,7 +348,7 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
     if (!cat) return `请回复有效品类编号 (1-${s.categories.length})。`;
     s.stage = 'market'; s.category = cat; s.markets = s.byCat[cat];
     const lines = [`📂 ${cat} — 选市场(回复编号):`, ''];
-    s.markets.forEach((m, i) => lines.push(`${i + 1}. ${trunc(m.resolution_rule_spec, 64)}  · ${fmtDeadline(m.deadline)} · ${m.bettor_count || 0} 人已押`));
+    s.markets.forEach((m, i) => lines.push(`${i + 1}. ${trunc(specTitle(m.resolution_rule_spec), 64)}  · ${fmtDeadline(m.deadline)} · ${m.bettor_count || 0} 人已押`));
     lines.push('', '回复数字选市场(看完整结算规则)。');
     return lines.join('\n');
   }
@@ -334,9 +362,11 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
     const full = (dr.json && (dr.json.market || (dr.json.id ? dr.json : null))) || m;
     s.stage = 'detail'; s.market = full;
     const lines = [
-      `📊 ${full.resolution_rule_spec}`,
+      `📊 ${specTitle(full.resolution_rule_spec)}`,
       `${fmtDeadline(full.deadline)} · 已 ${full.bettor_count || 0} 人押 · maker stake ${full.maker_stake_kas ?? '?'} KAS`,
     ];
+    const _srcF = specSource(full.resolution_rule_spec);
+    if (_srcF) lines.push(`📡 source: ${_srcF}`);
     // Bettor r78 ②: 显示池子分布 + 隐含赔率 (= Bettor r70 A 数据底座). pari-mutuel.
     if (full.yes_pool_kas != null && full.no_pool_kas != null) {
       const yp = Number(full.yes_pool_kas).toFixed(4);
@@ -397,7 +427,7 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
     const uri = `${addr}?amount=${kas}`;
     return {
       text: [
-        `📝 押注复核 — ${esc(s.market.resolution_rule_spec)}`,
+        `📝 押注复核 — ${esc(specTitle(s.market.resolution_rule_spec))}`,
         `方向 ${s.side} · 金额 ${kas} KAS`,
         '',
         '下一步: <b>从你自己钱包</b>转 KAS 到下面地址 (bot 全程不持钥、不碰你的钱).',

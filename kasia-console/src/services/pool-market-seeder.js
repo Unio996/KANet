@@ -79,18 +79,22 @@ export async function pickGammaMarket() {
     const condStr = String(condId);
     const dup = sqlite.prepare('SELECT 1 FROM pool_markets WHERE outcome_condition_id = ? LIMIT 1').get(condStr);
     if (dup) continue;                                // r247 ③: dedup by conditionId
-    // Bettor r256 finding (Owner rigor): mirror the FULL resolution criteria, not just the title —
-    // bettors must see the precise settlement basis before staking. Compose question + gamma
-    // description + resolutionSource into resolution_rule_spec (capped for sane storage/display).
-    const description = String(m.description || '').trim();
-    const resolutionSource = String(m.resolutionSource || m.resolution_source || '').trim();
-    let rule = String(question).trim();
-    if (description) rule += `\n\nResolution criteria: ${description}`;
-    if (resolutionSource) rule += `\n\nResolution source: ${resolutionSource}`;
+    // Bettor 2026-06-03 钦定: 走 KANet 现有干净 JSON 格式 (= kanet_v07 markets 同 schema):
+    // {title: 干净题干, data_source_canonical: <polymarket URL>, resolution_criteria: 干净规则}.
+    // 用 sanitizeText strip URL/HTML/curly quotes 防 bot 显示乱码 (Owner 06-03 报).
+    const { sanitizeText } = await import('../lib/market-spec-sanitizer.js');
+    const cleanTitle = sanitizeText(String(question || '')).slice(0, 200);
+    const cleanCriteria = sanitizeText(String(m.description || '')).slice(0, 1500);
+    const cleanSource = String(m.resolutionSource || m.resolution_source || '').trim();
+    // data_source_canonical: 链上独立判定源, mirror-able 市场 = polymarket gamma 条件 ID.
+    const dataSource = `polymarket:${condStr}`;
+    const specObj = { title: cleanTitle, data_source_canonical: dataSource, source: 'polymarket' };
+    if (cleanCriteria) specObj.resolution_criteria = cleanCriteria;
+    if (cleanSource) specObj.resolution_source_url = cleanSource;
     return {
       conditionId: condStr,
-      question: String(question).slice(0, 200),       // short title (logging only)
-      resolutionRule: rule.slice(0, 2000),            // full rule → resolution_rule_spec (r256)
+      question: cleanTitle,                           // short title (logging only)
+      resolutionRule: JSON.stringify(specObj).slice(0, 2000),  // JSON spec → resolution_rule_spec
       endDateIso: new Date(endMs).toISOString(),
       category: categorizeMarket(question),           // r247①/r256: classify on TITLE only (desc false-matches country kw)
       volume24h: parseFloat(m.volume24hr || m.volume || 0),
