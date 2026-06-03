@@ -94,38 +94,15 @@ export async function fetchEndBlockHashCanonical(chainReader, deadlineDaaScore, 
   if (!Number.isInteger(finalityDepth) || finalityDepth < 0) {
     throw new Error(`finalityDepth must be non-negative integer, got ${finalityDepth}`);
   }
-  // J2-tn r327 (Bettor 钦定 SPC walk fix): 优先 chain_get_block_at_daa (= kaspad
-  // selected-parent-chain walk 共识 deterministic, 跨节点同 deadlineDaa 必同 block). 不靠
-  // ring buffer (= push-based 重启丢历史 各节点不同集 → minDaa 不同 fail). Legacy fallback:
-  // 若 J1 relay 端 IPC 未 ship (= chainReader.getBlockAtDaa undefined OR error), 走 ring buffer
-  // getBlocksFromDaaScore + minDaa 路径 (= partial-determinism partial-PASS).
-  let first;
-  if (typeof chainReader.getBlockAtDaa === 'function') {
-    try {
-      first = await chainReader.getBlockAtDaa(deadlineDaaScore);
-    } catch (e) {
-      // IPC not yet shipped or chain not progressed; fall back to legacy ring buffer.
-      console.warn(`[fetchEndBlockHashCanonical] getBlockAtDaa failed (${e.message}), falling back to ring buffer path`);
-    }
+  // J2-tn r332 (Bettor r... 正解): SPC-only fail-closed. 无 ring buffer fallback.
+  // committee endBlock 唯一实相 = SPC (共识). ring buffer = 本地态, 任何 fallback 到它 = 重新
+  // 引入分歧 (= J1 r306 + Bettor 抓 :3200 mismatch 真因). fail-closed 等同步, 不 fallback.
+  if (typeof chainReader.getBlockAtDaa !== 'function') {
+    throw new Error('chainReader.getBlockAtDaa(minDaa) → Promise<{hash,daaScore}> required (SPC-only, no fallback)');
   }
-  if (!first) {
-    if (typeof chainReader.getBlocksFromDaaScore !== 'function') {
-      throw new Error('chainReader requires getBlockAtDaa (SPC walk, Bettor 钦定) OR getBlocksFromDaaScore (legacy ring) fallback');
-    }
-    const blocks = await chainReader.getBlocksFromDaaScore(deadlineDaaScore);
-    if (!Array.isArray(blocks) || blocks.length === 0) {
-      throw new Error(`no blocks at daaScore >= ${deadlineDaaScore} (= deadline not reached on chain)`);
-    }
-    const past = blocks.filter(b => b.daaScore >= deadlineDaaScore);
-    if (past.length === 0) {
-      throw new Error(`chainReader returned blocks but none crossed daaScore ${deadlineDaaScore}`);
-    }
-    const minDaa = Math.min(...past.map(b => b.daaScore));
-    const candidates = past.filter(b => b.daaScore === minDaa);
-    const chainCandidates = candidates.filter(b => b.isChainBlock === true);
-    first = chainCandidates.length > 0
-      ? chainCandidates.sort((a, b) => a.hash < b.hash ? -1 : 1)[0]
-      : candidates.sort((a, b) => a.hash < b.hash ? -1 : 1)[0];
+  const first = await chainReader.getBlockAtDaa(deadlineDaaScore);
+  if (!first || !first.hash) {
+    throw new Error(`getBlockAtDaa returned no block at daaScore=${deadlineDaaScore} — SPC walk未达 deadlineDaa (chain not progressed OR walk cap). retry next tick.`);
   }
   if (!first.hash || typeof first.hash !== 'string' || first.hash.length !== 64) {
     throw new Error(`endBlock hash must be 64-char hex, got: ${first.hash}`);
