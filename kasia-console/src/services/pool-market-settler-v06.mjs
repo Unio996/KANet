@@ -101,10 +101,21 @@ export async function fetchEndBlockHashCanonical(chainReader, deadlineDaaScore, 
   if (!Array.isArray(blocks) || blocks.length === 0) {
     throw new Error(`no blocks at daaScore >= ${deadlineDaaScore} (= deadline not reached on chain)`);
   }
-  const first = blocks.find(b => b.daaScore >= deadlineDaaScore);
-  if (!first) {
+  // J2-tn r323 (J1 r298 spec v2 + Bettor 钦定): DAG 同 daa 多块 deterministic 选块.
+  // 1. 过滤 daaScore >= deadlineDaaScore
+  // 2. minDaa 集合中: 优先 isChainBlock=true (= kaspad selected-parent-chain 共识 deterministic)
+  // 3. fallback: ASCII-min hash (= 文字序最小, 跨节点同集合必同选)
+  const past = blocks.filter(b => b.daaScore >= deadlineDaaScore);
+  if (past.length === 0) {
     throw new Error(`chainReader returned blocks but none crossed daaScore ${deadlineDaaScore}`);
   }
+  const minDaa = Math.min(...past.map(b => b.daaScore));
+  const candidates = past.filter(b => b.daaScore === minDaa);
+  const chainCandidates = candidates.filter(b => b.isChainBlock === true);
+  // Prefer chain-block; if none has isChainBlock flag (= relay 未追踪该字段 / 全 false), fallback min-hash.
+  const first = chainCandidates.length > 0
+    ? chainCandidates.sort((a, b) => a.hash < b.hash ? -1 : 1)[0]
+    : candidates.sort((a, b) => a.hash < b.hash ? -1 : 1)[0];
   if (!first.hash || typeof first.hash !== 'string' || first.hash.length !== 64) {
     throw new Error(`endBlock hash must be 64-char hex, got: ${first.hash}`);
   }

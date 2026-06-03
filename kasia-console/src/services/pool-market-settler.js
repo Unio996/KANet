@@ -278,10 +278,18 @@ export async function poolSettlerTick() {
               }
               console.log(`[pool-settler] committee sample using relay=${chainReaderRelayId?.slice(0,8)} for market=${market.id.slice(0,12)}`);
               const chainReader = createRelayChainReader(chainReaderRelayId);
-              const currentDaa = await chainReader.getCurrentDaaScore();
-              const nowSec = Math.floor(Date.now() / 1000);
-              // Kaspa 10 BPS → 10 DAA per second. deadline (unix sec) → DAA score approximation.
-              const deadlineDaa = Math.max(1, currentDaa - Math.max(0, (nowSec - market.deadline) * 10));
+              // J2-tn r323 (Bettor 钦定 NWT+J1 合解): 优先 market.deadline_daa baked-at-create
+              // (= 跨节点 envelope propagate 同字段). Wallclock estimate fallback 仅 legacy markets
+              // 没 deadline_daa column (= 165 前 v0.6/v0.7 row). Anti-grinding: deadline_daa 是未来
+              // daa, maker create 时 endBlockHash 不可知.
+              let deadlineDaa = market.deadline_daa;
+              if (!deadlineDaa) {
+                // Legacy fallback: pre-v165 markets without deadline_daa column populated.
+                const currentDaa = await chainReader.getCurrentDaaScore();
+                const nowSec = Math.floor(Date.now() / 1000);
+                deadlineDaa = Math.max(1, currentDaa - Math.max(0, (nowSec - market.deadline) * 10));
+                console.log(`[pool-settler] market=${market.id.slice(0,12)} legacy fallback: estimate deadlineDaa=${deadlineDaa} (no deadline_daa col)`);
+              }
               const endBlock = await fetchEndBlockHashCanonical(chainReader, deadlineDaa);
               const committee = sampleAndStoreCommittee(market.id, endBlock.hash);
               // Wire committee_relay_ids → pool_markets.oracle_relay_ids so voter scan picks up.

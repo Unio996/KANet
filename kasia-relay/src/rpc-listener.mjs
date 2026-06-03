@@ -137,7 +137,13 @@ function _trackBlockForChainReader(block) {
   const hash = block?.verboseData?.hash || block?.header?.hash;
   const daa = Number(block?.header?.daaScore || 0);
   if (!hash || !daa || _recentBlockHashes.has(hash)) return;
-  _recentBlocks.push({ hash, daaScore: daa });
+  // J2-tn r323 (J1 r298 spec v2): add timestamp_ms + isChainBlock for deterministic
+  // endBlock selection. deadlineDaa 跨节点 wallclock 估算 mismatch (J1 r297 实证): 改 chain
+  // timestamp scan. DAG 同 daa 多 block 用 verboseData.isChainBlock (= kaspad selected-parent-chain
+  // 共识 deterministic) tiebreak; fallback min-hex-hash. NWT L5 lint baked verify.
+  const timestamp_ms = Number(block?.header?.timestamp || 0);
+  const isChainBlock = !!(block?.verboseData?.isChainBlock);
+  _recentBlocks.push({ hash, daaScore: daa, timestamp_ms, isChainBlock });
   _recentBlockHashes.add(hash);
   if (_recentBlocks.length > RECENT_BLOCKS_MAX) {
     const dropped = _recentBlocks.splice(0, _recentBlocks.length - RECENT_BLOCKS_MAX);

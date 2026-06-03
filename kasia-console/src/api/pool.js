@@ -98,6 +98,8 @@ async function _broadcastMarketPublished(marketRow, makerRelayId) {
       broker_pk: marketRow.broker_pk,
       protocol_version: marketRow.protocol_version || 'v0.5',
       pool_merkle_root: marketRow.pool_merkle_root || null,
+      // J2-tn r323: 跨节点 endBlock 确定性 anchor (Bettor 钦定 NWT+J1 合解).
+      deadline_daa: marketRow.deadline_daa || null,
       category: marketRow.category,
       published_at: new Date().toISOString(),
     };
@@ -606,9 +608,10 @@ export async function registerPoolRoutes(fastify) {
         const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: network });
         await rpc.connect();
         let snapshotDaa;
+        let currentDaa;
         try {
           const dag = await rpc.getBlockDagInfo();
-          const currentDaa = Number(dag.virtualDaaScore);
+          currentDaa = Number(dag.virtualDaaScore);
           snapshotDaa = currentDaa - FINALITY_N;
           const { scanAndDerivePool } = await import('../services/oracle-pool-chain-scanner.mjs');
           await scanAndDerivePool({ rpc, networkId: network, currentDaa });
@@ -616,7 +619,15 @@ export async function registerPoolRoutes(fastify) {
         const derived = derivePoolMerkleRoot(snapshotDaa);
         b.pool_merkle_root = derived.pool_merkle_root;
         b._snapshot_daa = snapshotDaa;
-        console.log(`[pool/create-v07] auto-derived pool_merkle_root=${b.pool_merkle_root.slice(0,12)}.. snapshotDaa=${snapshotDaa} pool_size=${derived.pool_size} source=${derived.source || 'chain_view'}`);
+        // J2-tn r323 (Bettor 钦定 NWT+J1 合解): 烤 deadline_daa 入 market row + envelope.
+        // 公式: currentDaa + (deadline_ms - now_ms) / 100ms BPS (= Kaspa 10 BPS). maker 在 create 时
+        // 拍未来 daa 不可知 endBlockHash (= 守 anti-grinding). 各节点跨节点同字段不重估, 消 settler:284
+        // wallclock estimate 偏移 (= #3 hash mismatch 命门).
+        const deadlineMs = new Date(b.outcome_end_date).getTime();
+        const nowMs = Date.now();
+        const daaDelta = Math.max(0, Math.floor((deadlineMs - nowMs) / 100));
+        b._deadline_daa = currentDaa + daaDelta;
+        console.log(`[pool/create-v07] auto-derived pool_merkle_root=${b.pool_merkle_root.slice(0,12)}.. snapshotDaa=${snapshotDaa} pool_size=${derived.pool_size} source=${derived.source || 'chain_view'} deadline_daa=${b._deadline_daa} (= currentDaa ${currentDaa} + ${daaDelta} 未来 DAA)`);
       } catch (e) {
         return reply.code(503).send({ ok: false, error: `pool_merkle_root auto-derive fail: ${e.message}` });
       }
@@ -747,14 +758,14 @@ export async function registerPoolRoutes(fastify) {
         deadline, miner_fee, broker_fee_pct, oracle_bond_amount, maker_stake_amount,
         outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side, resolution_rule_spec,
         protocol_status, sides_merkle_root, oracle_relay_ids, broker_relay_id, metadata, category,
-        protocol_version, pool_merkle_root
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        protocol_version, pool_merkle_root, deadline_daa
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
         marketId, b.maker_relay_id, spineResult.p2shAddr, spineTxId, marketMetadataHash,
         null, null, null, brokerPk,
         deadline, minerFee, brokerFeePct, oracleBondAmount, makerStakeAmount,
         b.outcome_market_source, b.outcome_condition_id, b.outcome_token_id, b.outcome_side, b.resolution_rule_spec,
         'pending_bettors', '', '[]', b.broker_relay_id, initialMetadata, b.category,
-        'v0.7', poolMerkleRoot,
+        'v0.7', poolMerkleRoot, b._deadline_daa || null,
       );
     } catch (e) {
       console.error(`[pool/create-v07] DB insert fail: ${e.message}`);

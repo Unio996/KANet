@@ -422,14 +422,15 @@ async function handlePoolMarketPublished(msg) {
       deadline, miner_fee, broker_fee_pct, oracle_bond_amount, maker_stake_amount,
       outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side, resolution_rule_spec,
       protocol_status, sides_merkle_root, oracle_relay_ids, broker_relay_id, metadata, category,
-      protocol_version, pool_merkle_root
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      protocol_version, pool_merkle_root, deadline_daa
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       msg.market_id, sentinelRelayId, msg.spine_p2sh, msg.spine_lock_tx, msg.market_metadata_hash,
       oraclePks[0] || null, oraclePks[1] || null, oraclePks[2] || null, msg.broker_pk,
       msg.deadline, msg.miner_fee, msg.broker_fee_pct, msg.oracle_bond_amount, msg.maker_stake_amount,
       msg.outcome_market_source, msg.outcome_condition_id, msg.outcome_token_id, msg.outcome_side, msg.resolution_rule_spec,
       'pending_bettors', '', '[]', sentinelRelayId, metadata, msg.category,
       msg.protocol_version || 'v0.5', msg.pool_merkle_root,
+      msg.deadline_daa || null,  // J2-tn r323: 跨节点 endBlock 锚, NWT+J1 合解.
     );
     // Bettor r135 close-gate #2: silent-skip guard — INSERT OR IGNORE returns changes=0 if
     // either dedup (= row existed, ok) or constraint violation (= bug). Distinguish via

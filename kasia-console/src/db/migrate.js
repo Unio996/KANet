@@ -4915,5 +4915,21 @@ export function runMigrations() {
     }
   }
 
+  // v165: pool_markets ADD COLUMN deadline_daa INTEGER (J2-tn r323, Bettor 钦定 NWT+J1 合解).
+  // create-v07 时 maker 估 deadline 对应未来 daa 写入 + 跨节点 envelope propagate, 各节点
+  // 不重估 → settler:284 wallclock estimate 偏移 (= #3 hash mismatch 命门) 消除.
+  // 守 anti-grinding: maker create 时 endBlockHash 不可知 (= 未来 block 未挖), 仅 daa 锚.
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(pool_markets)").all();
+    if (!cols.some(c => c.name === 'deadline_daa')) {
+      try {
+        sqlite.exec('ALTER TABLE pool_markets ADD COLUMN deadline_daa INTEGER');
+        console.log('[migrate] v165: pool_markets 加 deadline_daa INTEGER (NWT+J1 跨节点 endBlock 确定性 anchor).');
+      } catch (e) {
+        console.warn(`[migrate] v165 deadline_daa ALTER fail: ${e.message}`);
+      }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
