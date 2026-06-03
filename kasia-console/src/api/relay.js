@@ -1589,14 +1589,14 @@ export async function registerRelayRoutes(fastify) {
   });
 
   // POST /api/relay/:id/send-command — unified command to Relay (Console transmits, Relay executes)
+  // Forward full body so commands like chain_get_blocks_from_daa_score (= needs min_daa_score) work.
+  // J1tn r303: chain_get_block_at_daa SPC walk can take up to 60s for deep deadlines; bump timeout.
   fastify.post('/api/relay/:id/send-command', async (request, reply) => {
     const body = request.body || {};
     if (!body.type) return reply.code(400).send({ error: 'type is required' });
+    const timeoutMs = body.type === 'chain_get_block_at_daa' ? 120000 : 30000;
     try {
-      // J2-tn r312: pass full body through (= 不丢字段, 支持 chain_get_blocks_from_daa_score
-      // 等 arbitrary-field IPC cmd via HTTP). Relay 端 COMMAND_FIELD_TYPES 自家 schema verify
-      // (= 同款 invalid-field check).
-      const result = await sendCommandAsync(request.params.id, body);
+      const result = await sendCommandAsync(request.params.id, body, timeoutMs);
       return reply.send({ ok: true, ...result });
     } catch (err) {
       return reply.code(503).send({ ok: false, error: err.message || 'Relay command failed' });

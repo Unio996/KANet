@@ -133,6 +133,60 @@ export async function getCurrentDaaScore() {
   const info = await _rpc.getBlockDagInfo();
   return Number(info.virtualDaaScore);
 }
+
+// J1tn r303 (Bettor 钦定 SPC fix + J2 r327 split): chain-authoritative endBlock at deadlineDaa.
+// Walks kaspad selected-parent-chain backward from virtualSelectedParentHash via each block's
+// verboseData.selectedParentHash field until daa < deadlineDaa. Returns the LAST SPC block
+// where daa >= deadlineDaa — = the canonical first SPC block crossing the deadline. SPC is
+// consensus = all nodes converge byte-exact regardless of ring buffer state.
+//
+// Not ring-buffer-based — direct kaspad RPC. Caller pays ~O(currentDaa - deadlineDaa) getBlock
+// RPC calls (~5ms each on LAN node = 1000 blocks ≈ 5s). Acceptable for one-shot sample at
+// settle time. Future opt: cache walks past finality depth.
+export async function getBlockAtDaa(deadlineDaa) {
+  if (!_rpc) throw new Error('rpc not connected');
+  if (!Number.isFinite(deadlineDaa) || deadlineDaa <= 0) {
+    throw new Error(`deadlineDaa must be positive number, got ${deadlineDaa}`);
+  }
+  const info = await _rpc.getBlockDagInfo();
+  // info.sink = SPC tip (= virtual selected parent). NOT virtualParentHashes which can be
+  // any virtual parent including non-SPC. Walking selectedParentHash chain only well-defined
+  // from an SPC block — info.sink is the canonical start.
+  const startHash = info?.sink;
+  if (!startHash) throw new Error(`cannot resolve SPC tip from getBlockDagInfo (sink missing; got: ${JSON.stringify(Object.keys(info || {}))})`);
+  // Cap (= chain depth this walk can cover). 50000 steps × ~2 daa/step ≈ 100k daa ≈ 9h chain
+  // window. Beyond pruning we'd fail anyway. Each step is ~5ms LAN getBlock = ~250s worst-case,
+  // but typically deadlineDaa is within 5-30min finality so 300-1800 steps = 2-10s in practice.
+  const MAX_WALK = 50000;
+  let cursor = startHash;
+  let lastEligible = null; // last block where daa >= deadlineDaa during walk
+  let steps = 0;
+  for (let i = 0; i < MAX_WALK; i++) {
+    steps++;
+    const blkResp = await _rpc.getBlock({ hash: cursor, includeTransactions: false });
+    const blk = blkResp?.block || blkResp;
+    const hash = blk?.verboseData?.hash || blk?.header?.hash;
+    const daa = Number(blk?.header?.daaScore || 0);
+    const timestamp_ms = Number(blk?.header?.timestamp || 0);
+    const sp = blk?.verboseData?.selectedParentHash;
+    if (!hash || !daa) throw new Error(`getBlock returned malformed block at cursor ${cursor?.slice(0,16)}`);
+    if (daa >= deadlineDaa) {
+      lastEligible = { hash, daaScore: daa, timestamp_ms, isChainBlock: true };
+      if (!sp || sp === '0'.repeat(64)) break; // reached genesis
+      cursor = sp;
+      continue;
+    }
+    // daa < deadlineDaa — we passed the boundary. The previous lastEligible is the answer.
+    break;
+  }
+  if (steps >= MAX_WALK) {
+    log(`getBlockAtDaa: walk hit MAX_WALK=${MAX_WALK} cap without crossing deadlineDaa=${deadlineDaa} (returned daa=${lastEligible?.daaScore})`);
+  }
+  if (!lastEligible) {
+    throw new Error(`no SPC block crossing deadlineDaa ${deadlineDaa} found within ${MAX_WALK} walk steps (chain may not have reached deadline yet)`);
+  }
+  return lastEligible;
+}
 function _trackBlockForChainReader(block) {
   const hash = block?.verboseData?.hash || block?.header?.hash;
   const daa = Number(block?.header?.daaScore || 0);

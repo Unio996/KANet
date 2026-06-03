@@ -39,10 +39,12 @@ export function createRelayChainReader(relayId) {
     // walk (= 共识确定, 所有节点同 deadlineDaa 必同 block). 不依赖 ring buffer.
     async getBlockAtDaa(minDaa) {
       if (!Number.isFinite(minDaa) || minDaa < 0) throw new Error('getBlockAtDaa: minDaa must be non-negative number');
+      // J1tn r303: SPC walk can take up to ~60s for deep deadlines (= sampled well after deadline).
+      // Override default 30s sendCommandAsync timeout so settler retry doesn't fail on long walks.
       const r = await sendCommandAsync(relayId, {
         type: 'chain_get_block_at_daa',
         min_daa_score: minDaa,
-      });
+      }, 120000);
       if (!r?.ok) throw new Error(`chain_get_block_at_daa (relay ${relayId.slice(0,8)}) failed: ${r?.error || 'no response'}`);
       if (!r.hash || typeof r.hash !== 'string' || r.hash.length !== 64) {
         throw new Error(`chain_get_block_at_daa returned invalid hash: ${r.hash}`);

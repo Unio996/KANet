@@ -529,6 +529,28 @@ if (process.send) {
           return;
         }
 
+        case 'chain_get_block_at_daa': {
+          // J1tn r303 (Bettor 钦定 SPC fix + J2 r327 split): chain-authoritative endBlock at deadlineDaa.
+          // Walks kaspad selected-parent-chain via getBlock RPC (NOT ring buffer) — cross-node deterministic.
+          // Console wraps as chainReader.getBlockAtDaa; replaces ring buffer minDaa selection for endBlock.
+          // Response shape: flatten { ok, hash, daaScore, timestamp_ms, isChainBlock } to match
+          // J2-tn r327 relay-chain-reader.getBlockAtDaa wrapper contract (= reads r.hash/r.daaScore directly).
+          try {
+            const minDaa = Number(cmd.min_daa_score);
+            if (!Number.isFinite(minDaa) || minDaa < 0) throw new Error('min_daa_score must be non-negative number');
+            const { getBlockAtDaa } = await import('./rpc-listener.mjs');
+            const block = await getBlockAtDaa(minDaa);
+            if (cmd.requestId && process.send) {
+              process.send({ requestId: cmd.requestId, result: { ok: true, hash: block.hash, daaScore: block.daaScore, timestamp_ms: block.timestamp_ms, isChainBlock: block.isChainBlock } });
+            }
+          } catch (e) {
+            if (cmd.requestId && process.send) {
+              process.send({ requestId: cmd.requestId, result: { ok: false, error: e.message } });
+            }
+          }
+          return;
+        }
+
         case 'ecdsa_sign': {
           // Phase 4a r234/r235 Sub 6 — ECDSA sign a payload message (= voter daemon signs oracle vote).
           // 用 kaspa-wasm signMessage (= secp256k1 over message hash, returns hex sig).
