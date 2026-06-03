@@ -88,34 +88,45 @@ export function describeEndBlockRule(deadlineDaaScore) {
  */
 export async function fetchEndBlockHashCanonical(chainReader, deadlineDaaScore, finalityDepth = DEFAULT_FINALITY_DEPTH) {
   describeEndBlockRule(deadlineDaaScore); // validates input
-  if (!chainReader || typeof chainReader.getBlocksFromDaaScore !== 'function') {
-    throw new Error('chainReader.getBlocksFromDaaScore(minDaa) → Promise<[{hash,daaScore}]> required');
-  }
   if (typeof chainReader.getCurrentDaaScore !== 'function') {
     throw new Error('chainReader.getCurrentDaaScore() → Promise<number> required (F-S1 finality depth check)');
   }
   if (!Number.isInteger(finalityDepth) || finalityDepth < 0) {
     throw new Error(`finalityDepth must be non-negative integer, got ${finalityDepth}`);
   }
-  const blocks = await chainReader.getBlocksFromDaaScore(deadlineDaaScore);
-  if (!Array.isArray(blocks) || blocks.length === 0) {
-    throw new Error(`no blocks at daaScore >= ${deadlineDaaScore} (= deadline not reached on chain)`);
+  // J2-tn r327 (Bettor 钦定 SPC walk fix): 优先 chain_get_block_at_daa (= kaspad
+  // selected-parent-chain walk 共识 deterministic, 跨节点同 deadlineDaa 必同 block). 不靠
+  // ring buffer (= push-based 重启丢历史 各节点不同集 → minDaa 不同 fail). Legacy fallback:
+  // 若 J1 relay 端 IPC 未 ship (= chainReader.getBlockAtDaa undefined OR error), 走 ring buffer
+  // getBlocksFromDaaScore + minDaa 路径 (= partial-determinism partial-PASS).
+  let first;
+  if (typeof chainReader.getBlockAtDaa === 'function') {
+    try {
+      first = await chainReader.getBlockAtDaa(deadlineDaaScore);
+    } catch (e) {
+      // IPC not yet shipped or chain not progressed; fall back to legacy ring buffer.
+      console.warn(`[fetchEndBlockHashCanonical] getBlockAtDaa failed (${e.message}), falling back to ring buffer path`);
+    }
   }
-  // J2-tn r323 (J1 r298 spec v2 + Bettor 钦定): DAG 同 daa 多块 deterministic 选块.
-  // 1. 过滤 daaScore >= deadlineDaaScore
-  // 2. minDaa 集合中: 优先 isChainBlock=true (= kaspad selected-parent-chain 共识 deterministic)
-  // 3. fallback: ASCII-min hash (= 文字序最小, 跨节点同集合必同选)
-  const past = blocks.filter(b => b.daaScore >= deadlineDaaScore);
-  if (past.length === 0) {
-    throw new Error(`chainReader returned blocks but none crossed daaScore ${deadlineDaaScore}`);
+  if (!first) {
+    if (typeof chainReader.getBlocksFromDaaScore !== 'function') {
+      throw new Error('chainReader requires getBlockAtDaa (SPC walk, Bettor 钦定) OR getBlocksFromDaaScore (legacy ring) fallback');
+    }
+    const blocks = await chainReader.getBlocksFromDaaScore(deadlineDaaScore);
+    if (!Array.isArray(blocks) || blocks.length === 0) {
+      throw new Error(`no blocks at daaScore >= ${deadlineDaaScore} (= deadline not reached on chain)`);
+    }
+    const past = blocks.filter(b => b.daaScore >= deadlineDaaScore);
+    if (past.length === 0) {
+      throw new Error(`chainReader returned blocks but none crossed daaScore ${deadlineDaaScore}`);
+    }
+    const minDaa = Math.min(...past.map(b => b.daaScore));
+    const candidates = past.filter(b => b.daaScore === minDaa);
+    const chainCandidates = candidates.filter(b => b.isChainBlock === true);
+    first = chainCandidates.length > 0
+      ? chainCandidates.sort((a, b) => a.hash < b.hash ? -1 : 1)[0]
+      : candidates.sort((a, b) => a.hash < b.hash ? -1 : 1)[0];
   }
-  const minDaa = Math.min(...past.map(b => b.daaScore));
-  const candidates = past.filter(b => b.daaScore === minDaa);
-  const chainCandidates = candidates.filter(b => b.isChainBlock === true);
-  // Prefer chain-block; if none has isChainBlock flag (= relay 未追踪该字段 / 全 false), fallback min-hash.
-  const first = chainCandidates.length > 0
-    ? chainCandidates.sort((a, b) => a.hash < b.hash ? -1 : 1)[0]
-    : candidates.sort((a, b) => a.hash < b.hash ? -1 : 1)[0];
   if (!first.hash || typeof first.hash !== 'string' || first.hash.length !== 64) {
     throw new Error(`endBlock hash must be 64-char hex, got: ${first.hash}`);
   }

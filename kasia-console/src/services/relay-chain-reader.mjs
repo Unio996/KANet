@@ -32,7 +32,22 @@ export function createRelayChainReader(relayId) {
       if (!r?.ok) throw new Error(`chain_get_blocks_from_daa_score (relay ${relayId.slice(0,8)}) failed: ${r?.error || 'no response'}`);
       const blocks = Array.isArray(r.blocks) ? r.blocks : [];
       // Normalize daaScore to number (IPC may serialize bigint)
-      return blocks.map(b => ({ hash: String(b.hash), daaScore: Number(b.daaScore) }));
+      return blocks.map(b => ({ hash: String(b.hash), daaScore: Number(b.daaScore), isChainBlock: !!b.isChainBlock }));
+    },
+    // J2-tn r327 (Bettor 钦定 SPC walk fix, J1 r302 split): SPC-based authoritative endBlock.
+    // 区别 getBlocksFromDaaScore (= ring buffer 局部集 各节点不同) 本 API 走 kaspad selected-parent-chain
+    // walk (= 共识确定, 所有节点同 deadlineDaa 必同 block). 不依赖 ring buffer.
+    async getBlockAtDaa(minDaa) {
+      if (!Number.isFinite(minDaa) || minDaa < 0) throw new Error('getBlockAtDaa: minDaa must be non-negative number');
+      const r = await sendCommandAsync(relayId, {
+        type: 'chain_get_block_at_daa',
+        min_daa_score: minDaa,
+      });
+      if (!r?.ok) throw new Error(`chain_get_block_at_daa (relay ${relayId.slice(0,8)}) failed: ${r?.error || 'no response'}`);
+      if (!r.hash || typeof r.hash !== 'string' || r.hash.length !== 64) {
+        throw new Error(`chain_get_block_at_daa returned invalid hash: ${r.hash}`);
+      }
+      return { hash: String(r.hash), daaScore: Number(r.daaScore) };
     },
   };
 }
