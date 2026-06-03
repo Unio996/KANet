@@ -934,19 +934,43 @@ export async function registerPoolRoutes(fastify) {
       return reply.code(409).send({ ok: false, error: 'same (bettor_pk, direction, stake_amount) already registered — vary stake_kas to register an additional position' });
     }
 
-    // Compute side P2SH
-    const oraclePks = [market.oracle1_pk, market.oracle2_pk, market.oracle3_pk];
-    const spineP2shHash = createHash('sha256').update(market.spine_p2sh).digest('hex');  // placeholder, production uses actual P2SH script hash
+    // Compute side P2SH — J2-tn r316 (Bettor 总闸): branch by protocol_version.
+    // v0.5 uses oracle1/2/3_pk in ctor. v0.6/v0.7 uses pool_merkle_root (= per-event
+    // committee chosen at settle), oracle1/2/3_pk = NULL on row. 不分支 → v0.7 押注全死
+    // 'oracle1Pk must be hex string' (= NULL parse fail).
+    const spineP2shHash = createHash('sha256').update(market.spine_p2sh).digest('hex');
     const network = bettorRow.address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
 
     let sideResult;
     try {
-      sideResult = await computeSideP2SH({
-        bettorPk, spineP2shHash, oraclePks,
-        marketMetadataHash: market.market_metadata_hash,
-        direction, stakeAmount, deadline: market.deadline,
-        network,
-      });
+      if (market.protocol_version === 'v0.7') {
+        if (!market.pool_merkle_root) throw new Error('v0.7 market missing pool_merkle_root');
+        const { computeSideP2SH_v07 } = await import('../lib/pool-p2sh-v07.mjs');
+        sideResult = await computeSideP2SH_v07({
+          bettorPk, spineP2shHash,
+          poolMerkleRoot: market.pool_merkle_root,
+          marketMetadataHash: market.market_metadata_hash,
+          direction, deadline: market.deadline, network,
+        });
+      } else if (market.protocol_version === 'v0.6') {
+        if (!market.pool_merkle_root) throw new Error('v0.6 market missing pool_merkle_root');
+        const { computeSideP2SH_v06 } = await import('../lib/pool-p2sh-v06.mjs');
+        sideResult = await computeSideP2SH_v06({
+          bettorPk, spineP2shHash,
+          poolMerkleRoot: market.pool_merkle_root,
+          marketMetadataHash: market.market_metadata_hash,
+          direction, stakeAmount, deadline: market.deadline, network,
+        });
+      } else {
+        // v0.5 legacy (null protocol_version OR explicit 'v0.5')
+        const oraclePks = [market.oracle1_pk, market.oracle2_pk, market.oracle3_pk];
+        sideResult = await computeSideP2SH({
+          bettorPk, spineP2shHash, oraclePks,
+          marketMetadataHash: market.market_metadata_hash,
+          direction, stakeAmount, deadline: market.deadline,
+          network,
+        });
+      }
     } catch (e) {
       return reply.code(500).send({ ok: false, error: `side SS compile fail: ${e.message}` });
     }
