@@ -64,7 +64,10 @@ export async function pickGammaMarket() {
   const markets = await r.json();
   const now = Date.now();
   const minMs = now + 60 * 60_000;          // ≥1h lead so oracles + bettors have time
-  const maxMs = now + 30 * 86400_000;       // r246: ≤ now+30d (area-8 E7 cap, do not raise)
+  // Bettor 06-03 raise: r246 30day cap raised → POOL_SEED_MAX_DAY env (= seeder-specific).
+  // 默认 30 兼容; testnet demo 凑 100 markets + World Cup 2026 远 deadline 调 90 钦定.
+  const maxDay = parseInt(process.env.POOL_SEED_MAX_DAY, 10) || 30;
+  const maxMs = now + maxDay * 86400_000;
   const minVol = parseFloat(process.env.POOL_SEED_MIN_VOL24H) || 0;
   for (const m of (markets || [])) {
     const endRaw = m.endDate || m.end_date_iso || m.endDateIso;

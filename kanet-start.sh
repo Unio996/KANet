@@ -114,6 +114,7 @@ if [ -f "$ENV_FILE" ]; then
       POOL_SEED_TARGET)        export POOL_SEED_TARGET="$v" ;;
       POOL_SEED_STAKE_KAS)     export POOL_SEED_STAKE_KAS="$v" ;;
       POOL_SEED_INTERVAL_MIN)  export POOL_SEED_INTERVAL_MIN="$v" ;;
+      POOL_SEED_MAX_DAY)       export POOL_SEED_MAX_DAY="$v" ;;
     esac
   done < "$ENV_FILE"
   ok "已加载配置: $ENV_FILE"
