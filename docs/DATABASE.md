@@ -538,6 +538,45 @@
 
 ---
 
+## 预言机池层（v0.6+ chain-derived）
+
+> Bettor 2026-06-05 钦定 docs/2026-06-05-oracle-pool-single-source-enforcement.md：
+> **canonical 单一源** 焊死。`oracle_pool_membership` DEPRECATED (零新读零新写)。
+> 池成员/stake/lock 走 `oracle_pool_chain_view`，PK→relay_address 走 `oracle_stake_enrollments`。
+
+### oracle_stake_enrollments（v162+）
+**链上 stake 注册表：oracle 把 stake 锁进 OracleStake_v1 P2SH 的 envelope ingest 记录**
+
+**字段**：staker_pk_x (PK), lock_until_daa, p2sh_addr, p2sh_hash, outpoint_txid/index,
+amount_sompi, active, **source** (`chain_envelope` = path A 跨节点确权 / `manual` = 本地 INSERT 仅 debug),
+relay_address (v166 +, = oracle PK 绑定的 relay 接收 DM 地址).
+
+**写入方**：scout ingest `oracle_stake_enroll_v1` broadcast envelope (`pool-broadcast.mjs`) → trade-protocol-filter 路 A handler。
+**读取方**：`oracle-pool-chain-scanner.mjs` (派生 chain_view) / settler PK→relay_address 映射 / `/api/oracle-pool/chain-snapshot`。
+**陷阱**：`source != 'chain_envelope'` 行不算 path A 池成员 (= strict 模式过滤掉)。relay_address NULL 的旧行需 backfill 重广播 envelope v2。
+
+---
+
+### oracle_pool_chain_view（v162+）
+**池快照 cache：scanner 跑 finality_n 锚定的 (snapshot_daa, leaves, root) 派生结果**
+
+**字段**：snapshot_daa (PRIMARY KEY), leaves_json (JSON {pk_x, stake_sompi, lock_until_daa, p2sh, outpoint_txid, outpoint_index} 数组按 pkX 升序), merkle_root (64-hex), pool_size, derived_at。
+
+**写入方**：`oracle-pool-chain-scanner.mjs` `scanAndDerivePool()` (主)+ cron (`oracle-pool-chain-scanner-cron.mjs` 每 5min)。
+**读取方**：`derivePoolMerkleRoot(snapshotDaa)` → `pool-market-settler-v06.mjs` → `pool/create-v07`. UI 经 `/api/oracle-pool/chain-snapshot`. NWT verifier L5 跨节点 byte-exact diff。
+**陷阱**：snapshotDaa = currentDaa − FINALITY_N (= 600 默认)；必 take EXPLICIT snapshotDaa, 不能 latest (跨节点漂)。
+
+---
+
+### oracle_pool_membership — DEPRECATED（v159 legacy）
+**Bettor 2026-06-05: ZERO new reads, ZERO new writes. 用 chain_view + enrollments 替**
+
+旧 v159 v0.6 path A 真池表，关 1 行 = 1 active oracle，含 oracle_pk + stake_locked_kas + relay_id。
+**陷阱**：本地表跨节点必漂 (J1 r317 实证: :3300 缺 7212edc7 → settler L342 pkToRelay Map miss → committee 跳过 PK → poolSize=0 → 首 settle 卡 1hr)。
+**只剩 audit 用**：grep 看历史读者迁移进度。Bettor ⑥ DROP migrate 在所有读者迁完确认零读者后做。
+
+---
+
 ## 市场数据层
 
 ### chain_snapshots（1078 条）
