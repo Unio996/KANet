@@ -280,15 +280,18 @@ async function processPoolMarket(voter) {
     WHERE oracle_relay_ids LIKE ?
       AND protocol_status = 'verifying'
       AND deadline <= ?
-  `).all(`%"${voter.id}"%`, Math.floor(Date.now() / 1000));
+  `).all(`%"${voter.address}"%`, Math.floor(Date.now() / 1000));
   if (!markets.length) return { voted, skipped, errored };
 
   for (const market of markets) {
     try {
-      // Defense in depth: re-parse JSON to confirm match (LIKE may false-positive on prefix collision)
+      // Defense in depth: re-parse JSON to confirm match (LIKE may false-positive on prefix collision).
+      // Bettor 6/5: oracle_relay_ids stores ADDRESSES (J2-tn r337 relay_id→relay_address migration for
+      // cross-node DM). Match on voter.address NOT voter.id — id never appears in the address list →
+      // voter skipped all committee markets → voted=0 (same class as oracle_pool_membership half-migration).
       let oracleIds;
       try { oracleIds = JSON.parse(market.oracle_relay_ids || '[]'); } catch { oracleIds = []; }
-      if (!Array.isArray(oracleIds) || !oracleIds.includes(voter.id)) { skipped++; continue; }
+      if (!Array.isArray(oracleIds) || !oracleIds.includes(voter.address)) { skipped++; continue; }
 
       // Skip if already voted for this market
       const existing = sqlite.prepare(`
