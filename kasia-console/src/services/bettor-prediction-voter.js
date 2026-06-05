@@ -27,7 +27,9 @@ import { sqlite } from '../db/client.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { sendCommandAsync } from './relay-manager.js';
 
-const TICK_INTERVAL_MS = 5 * 60 * 1000;  // 5 min, 跟 settler 同
+// J2-tn r382 (Bettor 16:29 钦定): TICK_INTERVAL_MS env-configurable. Default 5min mainnet,
+// demo 期 .env 设 PREDICTION_VOTER_TICK_SEC=60 (= 1min) 提速 5x 流水. 与 settler 同 pattern.
+const TICK_INTERVAL_MS = (parseInt(process.env.PREDICTION_VOTER_TICK_SEC, 10) || 300) * 1000;
 const STARTUP_GRACE_MS = 45 * 1000;        // 45s grace (= settler 30s + 15s 错峰)
 
 let timer = null;

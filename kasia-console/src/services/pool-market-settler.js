@@ -19,7 +19,9 @@ import { sqlite } from '../db/client.js';
 import { sendCommandAsync } from './relay-manager.js';
 import { createHash } from 'node:crypto';
 
-const TICK_INTERVAL_MS = 5 * 60 * 1000;     // 5 min
+// J2-tn r382 (Bettor 16:29 钦定): TICK_INTERVAL_MS env-configurable. Default 5min mainnet,
+// demo 期 .env 设 POOL_SETTLER_TICK_SEC=60 (= 1min) 提速 5x 整条流水.
+const TICK_INTERVAL_MS = (parseInt(process.env.POOL_SETTLER_TICK_SEC, 10) || 300) * 1000;
 const STARTUP_GRACE_MS = 60 * 1000;         // 60s grace (= 错峰 voter daemon 45s startup)
 
 // Per Bettor r336 + v0.5 spec section 4.3: ORACLE_SILENT_TIMEOUT_MIN ENV var.

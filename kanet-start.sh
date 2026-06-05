@@ -115,6 +115,11 @@ if [ -f "$ENV_FILE" ]; then
       POOL_SEED_STAKE_KAS)     export POOL_SEED_STAKE_KAS="$v" ;;
       POOL_SEED_INTERVAL_MIN)  export POOL_SEED_INTERVAL_MIN="$v" ;;
       POOL_SEED_MAX_DAY)       export POOL_SEED_MAX_DAY="$v" ;;
+      # J2-tn r364 (Bettor 6/5 钦定 demo headroom): cross-node settler chain 25min, 30 太紧.
+      ORACLE_SILENT_TIMEOUT_MIN) export ORACLE_SILENT_TIMEOUT_MIN="$v" ;;
+      # J2-tn r382 (Bettor 6/5 16:29 钦定): demo 提速 cron 5min → 1min (5x). mainnet 不设默认 5min.
+      POOL_SETTLER_TICK_SEC) export POOL_SETTLER_TICK_SEC="$v" ;;
+      PREDICTION_VOTER_TICK_SEC) export PREDICTION_VOTER_TICK_SEC="$v" ;;
     esac
   done < "$ENV_FILE"
   ok "已加载配置: $ENV_FILE"
