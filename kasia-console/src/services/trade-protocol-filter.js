@@ -96,6 +96,8 @@ export async function onBroadcastWritten(row) {
         await handlePoolMarketChunk(msg); break;  // Bettor r128/r129 + J1 e67c9328 chunked v1
       case 'oracle_stake_enroll_v1':
         await handleOracleStakeEnroll(msg); break;  // J2-tn r301 Path A: cross-node enrollment ingest
+      case 'kanet_pool_oracle_tx_sign_resp_v1':
+        await handlePoolOracleTxSignResp(msg); break;  // J2-tn r374 (Bettor 15:02 catch): cross-node sign_resp ingest
     }
   } catch (err) {
     console.error(`[trade-filter] Error processing ${msg.t}: ${err.message}`);
@@ -325,6 +327,54 @@ async function handleOracleStakeEnroll(msg) {
     console.log(`[trade-filter:oracle-enroll] ingested staker=${stakerPkX.slice(0,12)} lock=${lockUntilDaa} addr=${relayAddress?.slice(-12) || 'NULL'} tx=${msg._tx?.slice(0,16)}`);
   } catch (e) {
     console.warn(`[trade-filter:oracle-enroll] enrollments upsert fail: ${e.message}`);
+  }
+}
+
+// J2-tn r374 (Bettor 15:02 catch): cross-node oracle TX sign_resp ingest.
+// Producer (J1 d5e2f26 pool-sign-handler OR voter bettor-prediction-voter.js L538): committee
+// oracle 收 sign_req → 签 spine input → 广播 kanet_pool_oracle_tx_sign_resp_v1 含 voter_pubkey
+// + signature + input_index. settler handleCollectingSigs L1640 读 chain_events
+// event_type='pool_oracle_tx_sig' 聚集. Consumer (THIS handler): 写 chain_events 让 settler
+// 读到跨节点 sig. Verification: voter_pubkey ∈ pool_committee.committee_pks (= 跨节点 canonical).
+// Same idempotency pattern as oracle vote (chain_events.txid UNIQUE).
+async function handlePoolOracleTxSignResp(msg) {
+  const { randomUUID } = await import('crypto');
+  const required = ['market_id', 'voter_pubkey', 'signature', 'input_index'];
+  for (const k of required) {
+    if (msg[k] === undefined || msg[k] === null) {
+      console.warn(`[trade-filter:sign-resp] missing ${k} market=${msg.market_id?.slice(0,12)} — reject`);
+      return;
+    }
+  }
+  const voterPkNorm = String(msg.voter_pubkey || '').toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(voterPkNorm)) {
+    console.warn(`[trade-filter:sign-resp] voter_pubkey invalid format market=${msg.market_id?.slice(0,12)} — reject`);
+    return;
+  }
+  // 1. Verify voter_pubkey ∈ committee_pks (= canonical 跨节点 anti-spoof).
+  let committeePks = [];
+  try {
+    const commRow = sqlite.prepare('SELECT committee_pks FROM pool_committee WHERE market_id = ?').get(msg.market_id);
+    committeePks = JSON.parse(commRow?.committee_pks || '[]').map(p => String(p).toLowerCase());
+  } catch {}
+  if (committeePks.length === 0) {
+    console.log(`[trade-filter:sign-resp] market=${msg.market_id?.slice(0,12)} committee not yet sampled (waiting), skip — settler per-tick re-scan will replay`);
+    return;
+  }
+  if (!committeePks.includes(voterPkNorm)) {
+    console.warn(`[trade-filter:sign-resp] voter_pubkey ${voterPkNorm.slice(0,12)} not in committee [${committeePks.map(p=>p.slice(0,8)).join(',')}] for market ${msg.market_id.slice(0,12)} — reject`);
+    return;
+  }
+  // 2. Idempotent INSERT chain_events 'pool_oracle_tx_sig'.
+  try {
+    const fromAddr = msg._from || null;
+    sqlite.prepare(`
+      INSERT OR IGNORE INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+      VALUES (?, ?, 'pool_oracle_tx_sig', ?, ?, ?, 'scout-ingest', CURRENT_TIMESTAMP)
+    `).run(randomUUID(), msg._tx, fromAddr, null, JSON.stringify(msg));
+    console.log(`[trade-filter:sign-resp] ingested market=${msg.market_id.slice(0,12)} voter=${voterPkNorm.slice(0,12)} input=${msg.input_index} tx=${msg._tx?.slice(0,16)}`);
+  } catch (e) {
+    console.warn(`[trade-filter:sign-resp] chain_events INSERT fail (likely dedup, ok): ${e.message}`);
   }
 }
 

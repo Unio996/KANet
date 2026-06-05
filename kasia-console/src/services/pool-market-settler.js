@@ -348,8 +348,9 @@ export async function poolSettlerTick() {
         // (= 不只 sample 那一刻). #9 12:36 votes broadcast at 13:57 sample (= 早于 924b6a2
         // filter fix) → broadcast_messages 有但 chain_events 没. 每 tick 扫 orphan vote
         // → replay → idempotent INSERT. 治存量 + 守未来.
+        // J2-tn r374 (Bettor 15:02 catch): 同款 sign_resp re-scan 加 (= 同 vote pattern).
         if ((market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7')
-            && market.protocol_status === 'verifying') {
+            && (market.protocol_status === 'verifying' || market.protocol_status === 'collecting_sigs')) {
           try {
             const { onBroadcastWritten } = await import('./trade-protocol-filter.js');
             const orphanVotes = sqlite.prepare(`
@@ -374,8 +375,31 @@ export async function poolSettlerTick() {
                 }
               }
             }
+            // r374: orphan sign_resp ingest (= same pattern as vote re-scan).
+            const orphanSigs = sqlite.prepare(`
+              SELECT tx_hash, sender_address, channel_name, content, created_at
+              FROM broadcast_messages
+              WHERE channel_name = 'kanet-prediction'
+                AND content LIKE '%kanet_pool_oracle_tx_sign_resp_v1%'
+                AND content LIKE ?
+                AND tx_hash NOT IN (SELECT txid FROM chain_events WHERE event_type = 'pool_oracle_tx_sig')
+              ORDER BY created_at ASC
+            `).all(`%"market_id":"${market.id}"%`);
+            if (orphanSigs.length > 0) {
+              console.log(`[pool-settler] per-tick sign_resp re-scan market=${market.id.slice(0,12)}: ${orphanSigs.length} orphan sig(s) — replaying`);
+              for (const row of orphanSigs) {
+                try {
+                  await onBroadcastWritten({
+                    tx_hash: row.tx_hash, content: row.content, sender_address: row.sender_address,
+                    channel_name: row.channel_name, created_at: row.created_at,
+                  });
+                } catch (replayErr) {
+                  console.warn(`[pool-settler] sig replay fail tx=${row.tx_hash.slice(0,16)}: ${replayErr.message}`);
+                }
+              }
+            }
           } catch (rescanErr) {
-            console.warn(`[pool-settler] per-tick vote re-scan fail market=${market.id.slice(0,12)}: ${rescanErr.message}`);
+            console.warn(`[pool-settler] per-tick re-scan fail market=${market.id.slice(0,12)}: ${rescanErr.message}`);
           }
         }
 
