@@ -273,6 +273,11 @@ async function processVoter(voter) {
 // Pool oracle Phase 2 (settle TX sig) deferred — depends on settler Sub 2d shape.
 async function processPoolMarket(voter) {
   let voted = 0, skipped = 0, errored = 0;
+  // J2-tn r357 (Owner 钦定 J2 implementer 域 + Bettor 撤她 708c16f → J2 canonical commit):
+  // r337 把 oracle_relay_ids 改存 addresses (= committee_addresses for cross-node DM). voter
+  // 之前 L283/L291 用 voter.id (UUID) 匹配 → 永不命中 → voted=0 settle 永卡. 改 voter.address
+  // 匹 oracle_relay_ids 数组 (= addresses). voter.id 保留给 IPC (get_pubkey/sendCommandAsync/
+  // ecdsa_sign). 同 r337 e1468f0 设计未传到所有 reader, 这是 r337 漏迁的 reader.
   const markets = sqlite.prepare(`
     SELECT id, maker_relay_id, outcome_market_source, outcome_token_id, outcome_condition_id, outcome_side,
            resolution_rule_spec, protocol_status, deadline, oracle_relay_ids
@@ -280,7 +285,7 @@ async function processPoolMarket(voter) {
     WHERE oracle_relay_ids LIKE ?
       AND protocol_status = 'verifying'
       AND deadline <= ?
-  `).all(`%"${voter.id}"%`, Math.floor(Date.now() / 1000));
+  `).all(`%"${voter.address}"%`, Math.floor(Date.now() / 1000));
   if (!markets.length) return { voted, skipped, errored };
 
   for (const market of markets) {
@@ -288,7 +293,7 @@ async function processPoolMarket(voter) {
       // Defense in depth: re-parse JSON to confirm match (LIKE may false-positive on prefix collision)
       let oracleIds;
       try { oracleIds = JSON.parse(market.oracle_relay_ids || '[]'); } catch { oracleIds = []; }
-      if (!Array.isArray(oracleIds) || !oracleIds.includes(voter.id)) { skipped++; continue; }
+      if (!Array.isArray(oracleIds) || !oracleIds.includes(voter.address)) { skipped++; continue; }
 
       // Skip if already voted for this market
       const existing = sqlite.prepare(`
@@ -459,19 +464,20 @@ async function processPoolMarket(voter) {
 // Phase 3 e2e caught: signing only input 0 left oracle bond UTXO inputs unsigned → kaspad reject.
 async function processPoolTxSign(voter) {
   let signed = 0, skipped = 0, errored = 0;
+  // J2-tn r357: 同 processPoolMarket — r337 后 oracle_relay_ids 存 addresses, 匹 voter.address.
   const markets = sqlite.prepare(`
     SELECT id, oracle_relay_ids, metadata
     FROM pool_markets
     WHERE protocol_status = 'collecting_sigs'
       AND oracle_relay_ids LIKE ?
-  `).all(`%"${voter.id}"%`);
+  `).all(`%"${voter.address}"%`);
   if (!markets.length) return { signed, skipped, errored };
 
   for (const market of markets) {
     try {
       let oracleIds;
       try { oracleIds = JSON.parse(market.oracle_relay_ids || '[]'); } catch { oracleIds = []; }
-      if (!Array.isArray(oracleIds) || !oracleIds.includes(voter.id)) { skipped++; continue; }
+      if (!Array.isArray(oracleIds) || !oracleIds.includes(voter.address)) { skipped++; continue; }
 
       let meta;
       try { meta = JSON.parse(market.metadata || '{}'); } catch { meta = {}; }
@@ -564,12 +570,13 @@ async function processPoolTxSign(voter) {
 // (= silent in Gap 1B, OR not-signing in Gap 1A's 0/1 default pair) skips.
 async function processPoolRefundDisagreementTxSign(voter) {
   let signed = 0, skipped = 0, errored = 0;
+  // J2-tn r357: 同 processPoolMarket / processPoolTxSign — r337 后 oracle_relay_ids 存 addresses.
   const markets = sqlite.prepare(`
     SELECT id, oracle_relay_ids, metadata
     FROM pool_markets
     WHERE protocol_status = 'collecting_sigs'
       AND oracle_relay_ids LIKE ?
-  `).all(`%"${voter.id}"%`);
+  `).all(`%"${voter.address}"%`);
   if (!markets.length) return { signed, skipped, errored };
 
   for (const market of markets) {
@@ -582,8 +589,9 @@ async function processPoolRefundDisagreementTxSign(voter) {
         continue;
       }
 
+      // J2-tn r357: oracle_relay_ids 存 addresses post-r337, 匹 voter.address.
       const oracleIds = JSON.parse(market.oracle_relay_ids || '[]');
-      if (!Array.isArray(oracleIds) || !oracleIds.includes(voter.id)) { skipped++; continue; }
+      if (!Array.isArray(oracleIds) || !oracleIds.includes(voter.address)) { skipped++; continue; }
 
       const myIndex = oracleIds.indexOf(voter.id);
       const signingPair = meta.refund_disagreement_signing_pair;
