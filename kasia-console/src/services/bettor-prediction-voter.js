@@ -748,9 +748,18 @@ export async function derivePolymarketVote(offer) {
 //   via pool.js vote endpoint before silent_timeout if they reach a determination.
 //   Qwen Rule 11: enable_thinking=false 必加 (= 漏会 60-120s timeout)
 export async function deriveKanetNativeVote(offer, spec) {
-  const url = spec?.data_source_canonical;
+  let url = spec?.data_source_canonical;
   if (!url || typeof url !== 'string') {
     return { ok: false, reason: 'kanet_native missing data_source_canonical URL in resolution_rule_spec' };
+  }
+
+  // J2-tn r353 (Bettor 6/5 11:58 catch + J1 r329 实证): cross-host voter 各节点 Console
+  // port 可能不同 (= :3200 vs :3300). 若 URL 含 localhost/127.0.0.1, 改用本地 Console 实际
+  // port (= process.env.PORT). 各节点 fetch own local test-oracle, 同 condition string 同
+  // outcome → 共识. mock test-oracle deterministic by condition suffix '_yes'/'_no'.
+  if (url.match(/^https?:\/\/(127\.0\.0\.1|localhost)/i)) {
+    const localPort = process.env.PORT || '3200';
+    url = url.replace(/(127\.0\.0\.1|localhost):\d+/i, `127.0.0.1:${localPort}`);
   }
 
   // Phase 3a MVP: 若 URL 不是 http(s) (= 是 free-text 描述 like "Phase 3a真 round-trip 测试"),
