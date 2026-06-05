@@ -60,22 +60,9 @@ export async function handleIngestMessage(payload) {
   await updateConversationTimestamps(convId, { lastMessageAt: timestamp || nowIso() });
   if (direction === 'inbound') await incrementUnread(convId);
 
-  // J1tn r311 (Owner verdict 2026-06-05 4-of-5 settle): detect inbound pool sign_req DM →
-  // route to pool-sign-handler. async; failures logged but do not block ingest path.
-  if (direction === 'inbound' && messageType === 'text' && contentText) {
-    try {
-      const { detectPoolSignReq, handlePoolSignReq } = await import('./pool-sign-handler.js');
-      const payload = detectPoolSignReq(contentText);
-      if (payload) {
-        // Fire-and-forget — caller doesn't need the resp txId here. Handler logs result.
-        handlePoolSignReq({ localAddress, remoteAddress, payload }).catch(err => {
-          console.warn(`[ingest] pool-sign-handler exception: ${err.message}`);
-        });
-      }
-    } catch (e) {
-      console.warn(`[ingest] pool-sign-handler dispatch err: ${e.message}`);
-    }
-  }
+  // J1tn r361 (Bettor 15:05 钦定): pool sign_req moved from DM → broadcast trigger
+  // (= handlePoolOracleTxSignReq in trade-protocol-filter.js, fires from onBroadcastWritten).
+  // Cross-node DM doesn't reach remote oracles; broadcast does. DM hook removed.
 
   // 链上事实归档（有 txid 的消息才记录）
   if (txid) {

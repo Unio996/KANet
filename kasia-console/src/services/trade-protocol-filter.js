@@ -98,6 +98,8 @@ export async function onBroadcastWritten(row) {
         await handleOracleStakeEnroll(msg); break;  // J2-tn r301 Path A: cross-node enrollment ingest
       case 'kanet_pool_oracle_tx_sign_resp_v1':
         await handlePoolOracleTxSignResp(msg); break;  // J2-tn r374 (Bettor 15:02 catch): cross-node sign_resp ingest
+      case 'kanet_pool_oracle_tx_sign_req_v1':
+        await handlePoolOracleTxSignReq(msg); break;  // J1tn r361 (Bettor 15:05 钦定): cross-node sign_req trigger
     }
   } catch (err) {
     console.error(`[trade-filter] Error processing ${msg.t}: ${err.message}`);
@@ -375,6 +377,132 @@ async function handlePoolOracleTxSignResp(msg) {
     console.log(`[trade-filter:sign-resp] ingested market=${msg.market_id.slice(0,12)} voter=${voterPkNorm.slice(0,12)} input=${msg.input_index} tx=${msg._tx?.slice(0,16)}`);
   } catch (e) {
     console.warn(`[trade-filter:sign-resp] chain_events INSERT fail (likely dedup, ok): ${e.message}`);
+  }
+}
+
+// J1tn r361 (Bettor 15:05 钦定): cross-node sign_req broadcast trigger.
+// Producer (J2 5a06b31 dispatchPhase2): organizer broadcasts kanet_pool_oracle_tx_sign_req_v1
+// containing {market_id, winner, unanimous, silent_oracle_index, input_count, spine_input_count}.
+// Consumer (THIS handler): for each local is_oracle relay whose pubkey ∈ committee_pks for this
+// market → call sign_input_for_settle IPC per spine input → broadcast kanet_pool_oracle_tx_sign_resp_v1.
+// Same broadcast-symmetric pattern as oracle vote (replaces obsolete DM-based pool-sign-handler.js).
+//
+// Requires local phase2_tx_obj in pool_markets.metadata (= produced by local dispatchPhase2).
+// If absent (= cross-node maker), settler's per-tick replay + cross-node market_publish ingest
+// must materialize phase2_tx_obj first. For now, skip with warning if missing.
+async function handlePoolOracleTxSignReq(msg) {
+  const required = ['market_id', 'winner', 'input_count', 'spine_input_count'];
+  for (const k of required) {
+    if (msg[k] === undefined || msg[k] === null) {
+      console.warn(`[trade-filter:sign-req] missing ${k} market=${msg.market_id?.slice(0,12)} — reject`);
+      return;
+    }
+  }
+  // 1. Load market + phase2_tx_obj (needed to sign).
+  const market = sqlite.prepare(
+    'SELECT id, protocol_status, metadata FROM pool_markets WHERE id = ?'
+  ).get(msg.market_id);
+  if (!market) {
+    console.log(`[trade-filter:sign-req] market ${msg.market_id?.slice(0,12)} not in local DB — skip`);
+    return;
+  }
+  let meta = {};
+  try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+  if (!meta.phase2_tx_obj) {
+    console.log(`[trade-filter:sign-req] market ${market.id.slice(0,12)} no phase2_tx_obj locally (cross-node materialize pending) — skip`);
+    return;
+  }
+  // 2. Load committee_pks (canonical cross-node identity).
+  let committeePks = [];
+  try {
+    const commRow = sqlite.prepare('SELECT committee_pks FROM pool_committee WHERE market_id = ?').get(msg.market_id);
+    committeePks = JSON.parse(commRow?.committee_pks || '[]').map(p => String(p).toLowerCase());
+  } catch {}
+  if (committeePks.length === 0) {
+    console.log(`[trade-filter:sign-req] market=${msg.market_id?.slice(0,12)} committee not sampled locally — skip`);
+    return;
+  }
+  // 3. Find local is_oracle relays whose pubkey ∈ committee_pks.
+  const localOracles = sqlite.prepare(
+    'SELECT id, name, address FROM relay_nodes WHERE is_oracle = 1'
+  ).all();
+  if (localOracles.length === 0) {
+    return; // no local oracles, nothing to sign
+  }
+  const { sendCommandAsync } = await import('./relay-manager.js');
+  const spineInputCount = Number(msg.spine_input_count) || 1;
+  // J1tn r361 (Bettor): forfeit_1 path — silent oracle does not sign.
+  const silentIdx = (msg.unanimous === false || msg.unanimous === 'false') && typeof msg.silent_oracle_index === 'number'
+    ? msg.silent_oracle_index : -1;
+  let signedTotal = 0;
+  for (const oracle of localOracles) {
+    // Get oracle's pubkey via IPC, check membership.
+    let voterPubkey;
+    try {
+      const pkRes = await sendCommandAsync(oracle.id, { type: 'get_pubkey' });
+      if (!pkRes?.x_only_pubkey) continue;
+      voterPubkey = String(pkRes.x_only_pubkey).toLowerCase();
+    } catch { continue; }
+    const myIdx = committeePks.indexOf(voterPubkey);
+    if (myIdx === -1) continue; // not in committee for this market
+    if (silentIdx === myIdx) {
+      console.log(`[trade-filter:sign-req] oracle=${oracle.name} forfeit_1 silent (idx=${myIdx}) — skip sign`);
+      continue;
+    }
+    // 4. Sign each spine input + broadcast sign_resp.
+    for (let inputIdx = 0; inputIdx < spineInputCount; inputIdx++) {
+      // Idempotent: skip if already signed (chain_events local)
+      const existing = sqlite.prepare(`
+        SELECT id FROM chain_events
+        WHERE event_type = 'pool_oracle_tx_sig'
+          AND payload LIKE ? AND payload LIKE ? AND payload LIKE ?
+        LIMIT 1
+      `).get(`%"market_id":"${market.id}"%`, `%"input_index":${inputIdx}%`, `%"voter_pubkey":"${voterPubkey}"%`);
+      if (existing) continue;
+
+      let signResult;
+      try {
+        signResult = await sendCommandAsync(oracle.id, {
+          type: 'sign_input_for_settle',
+          tx_hex: JSON.stringify(meta.phase2_tx_obj),
+          input_index: inputIdx,
+        });
+      } catch (e) {
+        console.warn(`[trade-filter:sign-req] sign IPC fail market=${market.id.slice(0,12)} oracle=${oracle.name} input=${inputIdx}: ${e.message}`);
+        continue;
+      }
+      if (!signResult?.ok || !signResult.signature) {
+        console.warn(`[trade-filter:sign-req] sign fail market=${market.id.slice(0,12)} oracle=${oracle.name} input=${inputIdx}: ${signResult?.error || 'no sig'}`);
+        continue;
+      }
+      const respPayload = {
+        t: 'kanet_pool_oracle_tx_sign_resp_v1',
+        market_id: market.id,
+        voter_pubkey: voterPubkey,
+        input_index: inputIdx,
+        winner: msg.winner,
+        signature: signResult.signature,
+        epoch: 1,
+      };
+      try {
+        const bcastRes = await sendCommandAsync(oracle.id, {
+          type: 'send_broadcast',
+          channel: 'kanet-prediction',
+          message: JSON.stringify(respPayload),
+        });
+        if (!bcastRes?.txId) {
+          console.warn(`[trade-filter:sign-req] broadcast no txId market=${market.id.slice(0,12)} oracle=${oracle.name} input=${inputIdx}`);
+          continue;
+        }
+        console.log(`[trade-filter:sign-req] SIGNED+BROADCAST market=${market.id.slice(0,12)} oracle=${oracle.name} input=${inputIdx} tx=${bcastRes.txId.slice(0,16)} voter_pubkey=${voterPubkey.slice(0,12)}`);
+        signedTotal++;
+      } catch (e) {
+        console.warn(`[trade-filter:sign-req] broadcast IPC fail market=${market.id.slice(0,12)} oracle=${oracle.name} input=${inputIdx}: ${e.message}`);
+      }
+    }
+  }
+  if (signedTotal > 0) {
+    console.log(`[trade-filter:sign-req] DONE market=${market.id.slice(0,12)} signed=${signedTotal} across local oracles`);
   }
 }
 
