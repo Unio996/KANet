@@ -33,9 +33,15 @@
 | **settle TX（裁决出账）** | `95c84f8aaad7ecd3c42ff77a82e65889fd58348bf1863165c31618c5ec6f6f09` |
 | **accepting block_hash** | `a85dacb038e7f711e4f375bdacadf67d3bcea4b234e07141be3240f9668e7c8a` |
 | block_time | 1780677341 |
+| **accepting block isChainBlock** | **TRUE**（在 selected-parent-chain 上，J1 r303 getBlock 实证）|
+| accepting block daaScore | 30647500（blueScore 30403819）|
+| **finality** | virtualDaaScore 30909222 时深度 ~261722 daa = **远过 finality，不可逆** |
 | network | testnet-12 |
 
-> ④ 验证方法：本节点嵌入式 indexer (`kaspa_tx_log`) 观测到 settle TX **进块**（block_hash 非空）= is_accepted，非仅 submit。settle TX 提交无 `script ran, but verification failed` = **SS 链上验签通过**。
+> ④ 验证方法（两段，由弱到强）：
+> 1. 本节点嵌入式 indexer (`kaspa_tx_log`) 观测到 settle TX **进块**（block_hash 非空）= 本地 is_accepted，非仅 submit。
+> 2. **SPC virtual acceptance（强证）**：J1 r303 直连 kaspad `getBlock(a85dacb)` → `isChainBlock=TRUE` = 该块在 selected-parent-chain 上 → settle TX 进 SPC mergeset accepted set = **共识级接受**，且深度远过 finality = **终局不可逆**。
+> 3. settle TX 提交无 `script ran, but verification failed` = **SS 链上验签通过**。
 
 ### settle TX 链上三方分账（10 输出实付）
 
@@ -109,7 +115,7 @@ SS 链上验签            PoolSpine_v07: validSigs≥4 + 每 pk ∈ pool_merkle
 1. **机制级闭环，非经济闭环**：金额是 testnet demo 值。我们证明的是「机制能跑」，不是「真金在流」。
 2. **本例 5/5 真签**；4-of-5 活性路（仅 4 签、1 委员静默仍能 settle）在本市场未单独触发验证 —— 协议支持，但需独立用例证。
 3. **seeder 真实用户 go-live 未开**：本闭环的赢家/委员是测试参与方，非公开匿名用户。
-4. settle TX 的 is_accepted 取自本节点 indexer 观测进块；如需更强可查 selected-parent-chain virtual acceptance。
+4. ~~settle TX 的 is_accepted 取自本节点 indexer 观测进块；如需更强可查 selected-parent-chain virtual acceptance。~~ **已闭（2026-06-06 J1 r303）**：getBlock(a85dacb).isChainBlock=TRUE，SPC virtual acceptance 已证，深度远过 finality 不可逆。is_accepted 从「本地进块」升到「SPC 共识接受 + 终局」。
 
 ---
 
