@@ -1778,31 +1778,34 @@ async function handleCollectingSigs(market) {
     if (Math.random() < 0.1) {
       console.log(`[pool-settler:collecting] market=${market.id.slice(0,12)} waiting spine sigs: ${spineMissing.join(' ')}`);
     }
-    // KANet-UI r387 layer-9 follow-up: re-DM missing oracle sign_req. Pre-hotfix dispatchPhase2
-    // may have sent to wrong subset (e.g. v0.5 [0,1,2] for a v0.6 market) and oracles never knew
-    // they should sign. Throttle 5min via meta.last_sign_req_redm_at to avoid spam.
+    // J2-tn r378 (Bettor 15:12 catch follow-up): re-broadcast missing oracle sign_req via
+    // chunked broadcast (= 不再 send_message DM, DM cross-host 不通 = r360 已证). 同时 inject
+    // 现在 meta.phase2_tx_obj 进 payload (= 治存量 #9 的 persisted phase2_request_payload
+    // 早于 r377 没 phase2_tx_obj). Throttle 90s (= 缩短: 之前 5min 慢, 跨 host 节奏需密).
     try {
       const lastReDMms = meta.last_sign_req_redm_at ? new Date(meta.last_sign_req_redm_at).getTime() : 0;
-      if (Date.now() - lastReDMms > 5 * 60_000 && meta.phase2_request_payload) {
-        // J2-tn r362: signedSet by voter_pubkey, missing 对比 committee_pks not oracleArr (= addrs).
+      if (Date.now() - lastReDMms > 90_000 && meta.phase2_request_payload) {
         const signedSet = new Set();
         for (const s of sigsByInput[0] || []) signedSet.add(s.voter_pubkey);
         const missingOracles = signingOracles.filter(i => !signedSet.has(committeePksForSort[i] || oracleArr[i]));
         if (missingOracles.length > 0) {
-          // J2-tn r337 C2: oracleArr 含 addresses (post-sampleAndStoreCommittee r337 改).
-          const oracleRows = oracleArr.map(addr => ({ id: null, address: addr }));
-          Promise.allSettled(missingOracles.map(i => oracleRows[i]?.address
-            ? sendCommandAsync(market.maker_relay_id, { type: 'send_message', target: oracleRows[i].address, message: JSON.stringify(meta.phase2_request_payload) })
-            : Promise.resolve()
-          )).catch(() => {});
+          // Inject phase2_tx_obj if persisted payload预先没有 (= 存量 #9). New payload (post-r377)
+          // 已含, 不影响 idempotent: 覆盖同字段同值.
+          const rebroadcastPayload = {
+            ...meta.phase2_request_payload,
+            phase2_tx_obj: meta.phase2_tx_obj,
+          };
+          const { sendBroadcastChunked } = await import('../lib/pool-broadcast.mjs');
+          await sendBroadcastChunked(market.maker_relay_id, 'kanet-prediction', JSON.stringify(rebroadcastPayload))
+            .catch(err => console.warn(`[pool-settler:collecting] re-broadcast fail market=${market.id.slice(0,12)}: ${err.message}`));
           const newMeta = { ...meta, last_sign_req_redm_at: new Date().toISOString() };
           sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
             .run(JSON.stringify(newMeta), market.id);
-          console.log(`[pool-settler:collecting] re-DM sign_req market=${market.id.slice(0,12)} missing=${missingOracles.length}`);
+          console.log(`[pool-settler:collecting] re-broadcast sign_req market=${market.id.slice(0,12)} missing=${missingOracles.length} chunked`);
         }
       }
     } catch (e) {
-      console.warn(`[pool-settler:collecting] re-DM fail market=${market.id.slice(0,12)}: ${e.message}`);
+      console.warn(`[pool-settler:collecting] re-broadcast fail market=${market.id.slice(0,12)}: ${e.message}`);
     }
     return;
   }
