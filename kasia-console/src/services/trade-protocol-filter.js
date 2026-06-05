@@ -589,11 +589,19 @@ async function handlePoolMarketChunk(msg) {
   inner._from = msg._from;
   inner._channel = msg._channel;
   inner._at = msg._at;
-  // Direct switch dispatch (mirror onBroadcastWritten switch path). Only the types that can be
-  // chunked land here — currently only pool_market_published_v1 per Bettor r128 scope.
+  // Direct switch dispatch (mirror onBroadcastWritten switch path). J2-tn r337 fix: 加
+  // oracle_stake_enroll_v1 (= v2 envelope 含 relay_address 后超 450 char SAFE_CHUNK_BUDGET,
+  // chunked broadcast 进 此 path. 之前只 dispatch pool_market_published_v1 → 我 v2 enroll
+  // envelope 静默 drop, 跨节点 settle DM 仍 NULL address).
   switch (inner.t) {
     case 'pool_market_published_v1':
       await handlePoolMarketPublished(inner); break;
+    case 'oracle_stake_enroll_v1':
+      await handleOracleStakeEnroll(inner); break;
+    case 'pool_oracle_vote_v1':
+      await handlePoolOracleVote(inner); break;
+    case 'pool_bet_registered_v1':
+      await handlePoolBetRegistered(inner); break;
     default:
       console.warn(`[trade-filter:chunk] reassembled unknown type t=${inner.t} hash=${msg.hash.slice(0,12)} — drop`);
   }

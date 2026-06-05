@@ -23,8 +23,10 @@ const CONSOLE_URL = process.env.CONSOLE_URL || 'http://127.0.0.1:3200';
 
 async function main() {
   const db = new Database(DB_PATH, { readonly: true });
+  // J2-tn r337 v2 backfill scope: 也包括 chain_envelope source 但 relay_address NULL 的
+  // (= pre-r337 历史 envelopes 无 address 字段, 需 v2 envelope 重广播 解锁 cross-node settle DM).
   const enrollments = db.prepare(
-    "SELECT staker_pk_x, lock_until_daa, p2sh_addr, source FROM oracle_stake_enrollments WHERE active = 1 AND source != 'chain_envelope'"
+    "SELECT staker_pk_x, lock_until_daa, p2sh_addr, source, relay_address FROM oracle_stake_enrollments WHERE active = 1 AND (source != 'chain_envelope' OR relay_address IS NULL)"
   ).all();
   const relays = db.prepare('SELECT id, name FROM relay_nodes').all();
   db.close();
