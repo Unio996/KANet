@@ -806,6 +806,10 @@ async function handlePoolMarketChunk(msg) {
       await handlePoolOracleVote(inner); break;
     case 'pool_bet_registered_v1':
       await handlePoolBetRegistered(inner); break;
+    case 'kanet_pool_oracle_tx_sign_req_v1':
+      await handlePoolOracleTxSignReq(inner); break;  // J2-tn r377: chunked sign_req (phase2_tx_obj 超 SAFE_CHUNK_BUDGET)
+    case 'kanet_pool_oracle_tx_sign_resp_v1':
+      await handlePoolOracleTxSignResp(inner); break;
     default:
       console.warn(`[trade-filter:chunk] reassembled unknown type t=${inner.t} hash=${msg.hash.slice(0,12)} — drop`);
   }

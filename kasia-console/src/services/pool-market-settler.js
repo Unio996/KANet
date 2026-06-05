@@ -1261,6 +1261,11 @@ export async function dispatchPhase2(market, decision) {
       silent_oracle_index: decision.silentOracleIndex ?? null,
       input_count: requiredInputOutpoints.length,
       spine_input_count: spineInputCount,
+      // J2-tn r377 (Bettor 15:12 catch): include phase2_tx_obj 跨节点 — :3300 委员收 sign_req
+      // 不在本地 metadata 找不到 phase2_tx_obj → skip. 嵌入广播 payload (= chunked broadcast
+      // SAFE_CHUNK_BUDGET 450 + sendBroadcastChunked 兜底). 各节点 handler 自取 phase2_tx_obj
+      // → sign_input_for_settle IPC → sign_resp broadcast.
+      phase2_tx_obj: newMeta.phase2_tx_obj,
     };
     const reqPayload = JSON.stringify(reqPayloadObj);
     // Persist payload for handleCollectingSigs re-DM (KANet-UI r387 follow-up).
@@ -1276,16 +1281,15 @@ export async function dispatchPhase2(market, decision) {
       ? allIdx
       : allIdx.filter(i => i !== decision.silentOracleIndex);
     // J2-tn r375 (Bettor 15:04 钦定): sign_req DM 改 broadcast (= 投票 proven pattern).
-    // DM cross-host 不通 (J1 r360 实证 0 inbound). 改 send_broadcast kanet-prediction →
-    // 所有委员节点 scout ingest → pool-sign-handler (J1 d5e2f26) 各家本地匹 → 签 + sign_resp
-    // broadcast. 单次广播覆盖所有委员, 不 N×N DM. Race 不破 (= idempotent committee_pks 验).
-    sendCommandAsync(market.maker_relay_id, {
-      type: 'send_broadcast',
-      channel: 'kanet-prediction',
-      message: reqPayload,
-    }).catch(err => {
+    // r377 (Bettor 15:12 catch): reqPayload 含 phase2_tx_obj 大概率 > SAFE_CHUNK_BUDGET →
+    // chunked broadcast (= 同 _broadcastMarketPublished pattern). 各节点 handler 取
+    // pool_market_chunk_v1 reassembly then dispatch sign_req.
+    try {
+      const { sendBroadcastChunked } = await import('../lib/pool-broadcast.mjs');
+      await sendBroadcastChunked(market.maker_relay_id, 'kanet-prediction', reqPayload);
+    } catch (err) {
       console.warn(`[pool-settler] sign_req broadcast fail market=${market.id.slice(0,12)}: ${err.message}`);
-    });
+    }
 
     console.log(`[pool-settler] DISPATCHED Phase 2 market=${market.id.slice(0,12)} winner=${decision.winner} unanimous=${decision.unanimous} inputs=${requiredInputOutpoints.length} outputs=${outputs.length} sign_req → broadcast → collecting_sigs`);
   } catch (e) {
