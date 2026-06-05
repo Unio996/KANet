@@ -298,6 +298,38 @@ export async function poolSettlerTick() {
                 .run(JSON.stringify(committee.committee_relay_ids), market.id);
               sampledCommittee++;
               console.log(`[pool-settler] committee sampled market=${market.id.slice(0,12)} pks=${committee.committee_pks.length} endBlock=${endBlock.hash.slice(0,16)} daa=${endBlock.block_daa}`);
+
+              // J2-tn r371 (Bettor 14:53 钦定): post-sample vote re-scan. broadcast_messages 含
+              // 委员抽样前 / handler fix 前 (= 924b6a2) 已上链的 pool_oracle_vote_v1, 当时被旧
+              // filter reject 或 race-skip → chain_events 没写. 现 committee 抽好 → replay via
+              // onBroadcastWritten → idempotent (= chain_events.txid UNIQUE). 同 L502 bet H2 pattern.
+              try {
+                const { onBroadcastWritten } = await import('./trade-protocol-filter.js');
+                const orphanVotes = sqlite.prepare(`
+                  SELECT tx_hash, sender_address, channel_name, content, created_at
+                  FROM broadcast_messages
+                  WHERE channel_name = 'kanet-prediction'
+                    AND content LIKE '%pool_oracle_vote_v1%'
+                    AND content LIKE ?
+                    AND tx_hash NOT IN (SELECT txid FROM chain_events WHERE event_type = 'pool_oracle_vote')
+                  ORDER BY created_at ASC
+                `).all(`%"market_id":"${market.id}"%`);
+                if (orphanVotes.length > 0) {
+                  console.log(`[pool-settler] post-sample vote re-scan market=${market.id.slice(0,12)}: ${orphanVotes.length} orphan vote(s) — replaying`);
+                  for (const row of orphanVotes) {
+                    try {
+                      await onBroadcastWritten({
+                        tx_hash: row.tx_hash, content: row.content, sender_address: row.sender_address,
+                        channel_name: row.channel_name, created_at: row.created_at,
+                      });
+                    } catch (replayErr) {
+                      console.warn(`[pool-settler] vote replay fail tx=${row.tx_hash.slice(0,16)}: ${replayErr.message}`);
+                    }
+                  }
+                }
+              } catch (rescanErr) {
+                console.warn(`[pool-settler] post-sample vote re-scan fail market=${market.id.slice(0,12)}: ${rescanErr.message}`);
+              }
             } catch (sampleErr) {
               // F-S1 finality not met / no blocks / snapshot missing → log + skip this tick.
               console.log(`[pool-settler] committee sample retry market=${market.id.slice(0,12)}: ${sampleErr.message}`);
