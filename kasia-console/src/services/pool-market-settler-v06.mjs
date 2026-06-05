@@ -24,6 +24,7 @@
 import { blake2b } from '@noble/hashes/blake2b';
 import { sqlite } from '../db/client.js';
 import { buildPoolMerkleTree, deriveCommitteePkHash } from './pool-merkle-v06.mjs';
+import * as poolSource from '../lib/oracle-pool-source.mjs';  // J2-tn r349 (Owner 钦定 oracle pool 单一源访问器).
 import {
   deriveCommitteeSeed,
   selectCommittee,
@@ -333,27 +334,14 @@ export function sampleAndStoreCommittee(marketId, endBlockHash) {
     snapshot.pool_pks.map((pk, i) => ({ pk_hex: pk, stake_sompi: BigInt(snapshot.pool_stakes[i]) })),
     seed
   );
-  // J2-tn r348 (Bettor 6/5 11:33 锁根因): pkToAddress 真源 = oracle_stake_enrollments
-  // (= chain envelope ingest 写, Path A 跨节点同源). 不是 oracle_pool_membership (= legacy
-  // 表, v164 cleanup 已清空 + backfill 5 笔, 但 chain_view 抽样从 enrollments 不 membership →
-  // mismatch). r337 迁 settler DM-by-address 但漏 migrate 这一查源.
-  const members = sqlite.prepare(`
-    SELECT staker_pk_x AS oracle_pk, relay_address
-    FROM oracle_stake_enrollments
-    WHERE active = 1 AND staker_pk_x IN (${snapshot.pool_pks.map(() => '?').join(',')})
-  `).all(...snapshot.pool_pks);
-  const pkToAddress = new Map(members.map(m => [m.oracle_pk.toLowerCase(), m.relay_address]));
-  // Fallback: 缺的去 membership 查 (= 防 enrollment 表丢数据).
-  const missing = snapshot.pool_pks.filter(pk => !pkToAddress.get(pk));
-  if (missing.length > 0) {
-    const fallback = sqlite.prepare(`
-      SELECT oracle_pk, relay_address FROM oracle_pool_membership
-      WHERE oracle_pk IN (${missing.map(() => '?').join(',')}) AND relay_address IS NOT NULL
-    `).all(...missing);
-    for (const m of fallback) pkToAddress.set(m.oracle_pk.toLowerCase(), m.relay_address);
-  }
+  // J2-tn r349 (Owner 6/5 钦定 oracle-pool-source 焊死): pkToAddress 走访问器
+  // (= canonical 单一源 oracle_stake_enrollments, fallback membership 防 stopgap).
+  // 任何 settler/pool/UI reader 必经访问器, 防 r348 同根因散落.
+  // 同步 import 因 sampleAndStoreCommittee 不是 async function (不能 await).
+  const { resolveOracleAddresses } = poolSource;
+  const pkToAddress = resolveOracleAddresses(snapshot.pool_pks);
   const committeeAddresses = sampling.selected.map(s => pkToAddress.get(s.pk_hex) || null);
-  if (committeeAddresses.some(a => !a)) throw new Error('sampling produced PK without relay_address (= enrollments AND membership 都缺, 需 re-enroll OR backfill)');
+  if (committeeAddresses.some(a => !a)) throw new Error('sampling produced PK without relay_address (= enrollments 缺, 需 re-enroll OR envelope v2 backfill)');
   const committeePks = sampling.selected.map(s => s.pk_hex);
   const committeePkHash = deriveCommitteePkHash(committeePks).toString('hex');
   // committee_relay_ids field 复用存 addresses (= dispatchPhase2 L697 适配读 addr).
