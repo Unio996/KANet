@@ -333,17 +333,22 @@ export function sampleAndStoreCommittee(marketId, endBlockHash) {
     snapshot.pool_pks.map((pk, i) => ({ pk_hex: pk, stake_sompi: BigInt(snapshot.pool_stakes[i]) })),
     seed
   );
-  // Resolve relay_ids from current membership (relay_id mapping doesn't affect anti-grinding)
+  // J2-tn r337 (Bettor 6/5 C2 实施): pkToRelay → pkToAddress. settler DM 跨节点必走 oracle 的
+  // Kaspa address (= chain envelope baked from enroll), 不靠本地 relay_id (= peer-owned 是
+  // synthetic placeholder DM 发不到, 命门 r335). committee_relay_ids 字段 reuse 存 addresses
+  // (= forward compat dispatchPhase2 oracleRows 适配 shim).
   const members = sqlite.prepare(`
-    SELECT relay_id, oracle_pk
+    SELECT relay_address, oracle_pk
     FROM oracle_pool_membership
     WHERE oracle_pk IN (${snapshot.pool_pks.map(() => '?').join(',')})
   `).all(...snapshot.pool_pks);
-  const pkToRelay = new Map(members.map(m => [m.oracle_pk.toLowerCase(), m.relay_id]));
-  const committeeRelayIds = sampling.selected.map(s => pkToRelay.get(s.pk_hex) || null);
-  if (committeeRelayIds.some(r => !r)) throw new Error('sampling produced PK not in membership snapshot');
+  const pkToAddress = new Map(members.map(m => [m.oracle_pk.toLowerCase(), m.relay_address]));
+  const committeeAddresses = sampling.selected.map(s => pkToAddress.get(s.pk_hex) || null);
+  if (committeeAddresses.some(a => !a)) throw new Error('sampling produced PK without relay_address in membership (= enroll envelope 缺 address backfill OR pre-r337 enrollment)');
   const committeePks = sampling.selected.map(s => s.pk_hex);
   const committeePkHash = deriveCommitteePkHash(committeePks).toString('hex');
+  // committee_relay_ids field 复用存 addresses (= dispatchPhase2 L697 适配读 addr).
+  const committeeRelayIds = committeeAddresses;
   // Persist (idempotent: replace if same market re-sampled)
   sqlite.prepare(`
     INSERT OR REPLACE INTO pool_committee

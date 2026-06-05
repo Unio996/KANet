@@ -214,6 +214,10 @@ async function handleOracleStakeEnroll(msg) {
   const { randomUUID } = await import('crypto');
   const kaspa = await import('kaspa-wasm');
 
+  // J2-tn r337 (Bettor 6/5 C1 终裁): relay_address required for cross-node settle DM.
+  // Pre-r337 envelopes (= 5/30~6/5 已上链历史 envelopes) 无 relay_address — backward compat:
+  // ingest 仍 accept, but relay_address null OK (= 后续 backfill 走 backfill script + new enroll
+  // 自动带 address).
   const required = ['staker_pk_x', 'lock_until_daa', 'p2sh_addr', 'signature'];
   for (const k of required) {
     if (msg[k] === undefined || msg[k] === null) {
@@ -278,6 +282,8 @@ async function handleOracleStakeEnroll(msg) {
 
   // 4. UPSERT oracle_stake_enrollments — chain-confirmed enrollment registry.
   //    Preserve outpoint/amount fields if scanner already populated (= 不洗 scanner cache).
+  //    J2-tn r337 C1: relay_address 写入 (= cross-node DM target).
+  const relayAddress = typeof msg.relay_address === 'string' && msg.relay_address.length > 0 ? msg.relay_address : null;
   try {
     const existing = sqlite.prepare(
       'SELECT outpoint_txid, outpoint_index, amount_sompi, last_scanned_at FROM oracle_stake_enrollments WHERE staker_pk_x = ?'
@@ -287,17 +293,17 @@ async function handleOracleStakeEnroll(msg) {
       sqlite.prepare(`
         UPDATE oracle_stake_enrollments
         SET lock_until_daa = ?, p2sh_addr = ?, p2sh_hash = ?, redeem_script_hex = ?,
-            source = 'chain_envelope', active = 1
+            source = 'chain_envelope', active = 1, relay_address = COALESCE(?, relay_address)
         WHERE staker_pk_x = ?
-      `).run(lockUntilDaa, recomputed.p2shAddr, recomputed.p2shHash, recomputed.redeemScript, stakerPkX);
+      `).run(lockUntilDaa, recomputed.p2shAddr, recomputed.p2shHash, recomputed.redeemScript, relayAddress, stakerPkX);
     } else {
       sqlite.prepare(`
         INSERT INTO oracle_stake_enrollments
-          (staker_pk_x, lock_until_daa, p2sh_addr, p2sh_hash, redeem_script_hex, source, active)
-        VALUES (?, ?, ?, ?, ?, 'chain_envelope', 1)
-      `).run(stakerPkX, lockUntilDaa, recomputed.p2shAddr, recomputed.p2shHash, recomputed.redeemScript);
+          (staker_pk_x, lock_until_daa, p2sh_addr, p2sh_hash, redeem_script_hex, source, active, relay_address)
+        VALUES (?, ?, ?, ?, ?, 'chain_envelope', 1, ?)
+      `).run(stakerPkX, lockUntilDaa, recomputed.p2shAddr, recomputed.p2shHash, recomputed.redeemScript, relayAddress);
     }
-    console.log(`[trade-filter:oracle-enroll] ingested staker=${stakerPkX.slice(0,12)} lock=${lockUntilDaa} tx=${msg._tx?.slice(0,16)}`);
+    console.log(`[trade-filter:oracle-enroll] ingested staker=${stakerPkX.slice(0,12)} lock=${lockUntilDaa} addr=${relayAddress?.slice(-12) || 'NULL'} tx=${msg._tx?.slice(0,16)}`);
   } catch (e) {
     console.warn(`[trade-filter:oracle-enroll] enrollments upsert fail: ${e.message}`);
   }

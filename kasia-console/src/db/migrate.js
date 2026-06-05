@@ -4931,5 +4931,30 @@ export function runMigrations() {
     }
   }
 
+  // v166: oracle_stake_enrollments + oracle_pool_membership ADD relay_address (J2-tn r337,
+  // Bettor 6/5 终裁 C1: 实 settle 跨节点 4-of-5 签名 需 PK→address 链路). enroll envelope 扩
+  // relay_address field, ingest 写入. settler pkToRelay→pkToRelayAddress (= settler.js L342-343)
+  // 改读这列, 替本地 relay_id snapshot 路径 (= 跨节点 peer-synthetic placeholder DM 发不到 问题).
+  {
+    const enrCols = sqlite.prepare("PRAGMA table_info(oracle_stake_enrollments)").all();
+    if (!enrCols.some(c => c.name === 'relay_address')) {
+      try {
+        sqlite.exec('ALTER TABLE oracle_stake_enrollments ADD COLUMN relay_address TEXT');
+        console.log('[migrate] v166: oracle_stake_enrollments 加 relay_address TEXT (Bettor 6/5 C1 跨节点 settle DM target).');
+      } catch (e) {
+        console.warn(`[migrate] v166 oracle_stake_enrollments relay_address ALTER fail: ${e.message}`);
+      }
+    }
+    const memCols = sqlite.prepare("PRAGMA table_info(oracle_pool_membership)").all();
+    if (!memCols.some(c => c.name === 'relay_address')) {
+      try {
+        sqlite.exec('ALTER TABLE oracle_pool_membership ADD COLUMN relay_address TEXT');
+        console.log('[migrate] v166: oracle_pool_membership 加 relay_address TEXT.');
+      } catch (e) {
+        console.warn(`[migrate] v166 oracle_pool_membership relay_address ALTER fail: ${e.message}`);
+      }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

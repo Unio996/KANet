@@ -693,8 +693,11 @@ export async function dispatchPhase2(market, decision) {
     const makerStake = parseInt(market.maker_stake_amount, 10) || 0;
 
     // 2. Look up addresses
+    // J2-tn r337 (Bettor 6/5 C2 实施): oracle_relay_ids field 复用存 addresses (= committee_addresses
+    // 写入 by sampleAndStoreCommittee post-r337). dispatchPhase2 直接以 address 调 DM, 不查
+    // relay_nodes (= peer-owned address 不在本地 relay_nodes 表).
     const oracleIds = JSON.parse(market.oracle_relay_ids || '[]');
-    const oracleRows = oracleIds.map(rid => sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(rid));
+    const oracleRows = oracleIds.map(addr => ({ id: null, address: addr }));
     if (oracleRows.some(r => !r?.address)) {
       console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} missing oracle addresses`);
       return;
@@ -1458,8 +1461,11 @@ export async function dispatchRefundDisagreement(market, decision) {
       return;
     }
 
+    // J2-tn r337 (Bettor 6/5 C2 实施): oracle_relay_ids field 复用存 addresses (= committee_addresses
+    // 写入 by sampleAndStoreCommittee post-r337). dispatchPhase2 直接以 address 调 DM, 不查
+    // relay_nodes (= peer-owned address 不在本地 relay_nodes 表).
     const oracleIds = JSON.parse(market.oracle_relay_ids || '[]');
-    const oracleRows = oracleIds.map(rid => sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(rid));
+    const oracleRows = oracleIds.map(addr => ({ id: null, address: addr }));
     if (oracleRows.some(r => !r?.address)) {
       console.warn(`[pool-settler] dispatchRefundDisagreement market=${market.id.slice(0,12)} missing oracle addresses`);
       return;
@@ -1661,7 +1667,8 @@ async function handleCollectingSigs(market) {
         for (const s of sigsByInput[0] || []) signedSet.add(s.voter_relay_id);
         const missingOracles = signingOracles.filter(i => !signedSet.has(oracleArr[i]));
         if (missingOracles.length > 0) {
-          const oracleRows = oracleArr.map(rid => sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(rid));
+          // J2-tn r337 C2: oracleArr 含 addresses (post-sampleAndStoreCommittee r337 改).
+          const oracleRows = oracleArr.map(addr => ({ id: null, address: addr }));
           Promise.allSettled(missingOracles.map(i => oracleRows[i]?.address
             ? sendCommandAsync(market.maker_relay_id, { type: 'send_message', target: oracleRows[i].address, message: JSON.stringify(meta.phase2_request_payload) })
             : Promise.resolve()

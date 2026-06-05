@@ -36,12 +36,20 @@ async function _broadcastOracleStakeEnroll({ stakerPkX, lockUntilDaa, p2shAddr, 
     throw new Error(`signing_relay_id pubkey mismatch: signer=${signerPk.slice(0,12)} stakerPkX=${stakerPkX.slice(0,12)}`);
   }
 
+  // J2-tn r337 (Bettor 6/5 终裁 C1 实施): envelope 扩 relay_address 字段 (= 跨节点 PK→address
+  // 单一链源, settler 替代本地 relay_id 路 DM sign_req). Staker 签名 over JSON 含 address
+  // → 防伪 address 冒充. NWT L12 lint 守.
+  const relayRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(signingRelayId);
+  const relayAddress = relayRow?.address;
+  if (!relayAddress) throw new Error(`signing_relay_id ${signingRelayId.slice(0,8)} has no resolvable address in relay_nodes`);
+
   // 2. Build envelope (sig over JSON minus signature, mirror pool_market_published_v1 pattern).
   const unsignedPayload = {
     t: 'oracle_stake_enroll_v1',
     staker_pk_x: stakerPkX.toLowerCase(),
     lock_until_daa: lockUntilDaa,
     p2sh_addr: p2shAddr,
+    relay_address: relayAddress,  // J2-tn r337: cross-node DM target
     enrolled_at: new Date().toISOString(),
   };
   const messageToSign = JSON.stringify(unsignedPayload);
