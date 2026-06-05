@@ -648,14 +648,26 @@ async function handlePoolBetRegistered(msg) {
     return;
   }
 
-  // 2. Recompute side_p2sh + verify == payload. Path differs v0.5 vs v0.6.
+  // 2. Recompute side_p2sh + verify == payload. Path differs v0.5/v0.6/v0.7.
+  // J2-tn r345 (J1 r320 catch): v0.7 path 漏 → 跨节点 bet ingest 全栈 silent skip → settle 路径
+  // 0 bettors visible 跨节点 → committee 抽样后 fund-lock 错 → settle 出账失败. fix mirror api/pool.js
+  // _extStakeDeriveSide_v07 (= 4 args: bettorPk + spineP2shHash + poolMerkleRoot + marketMetadataHash
+  // + direction + deadline, 无 stakeAmount).
   let recomputedSideP2sh, recomputedRedeem;
   try {
-    if ((msg.protocol_version || market.protocol_version) === 'v0.6') {
+    const ver = msg.protocol_version || market.protocol_version;
+    const spineP2shHash = createHash('sha256').update(market.spine_p2sh).digest('hex');
+    const network = market.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    if (ver === 'v0.7') {
+      const { computeSideP2SH_v07 } = await import('../lib/pool-p2sh-v07.mjs');
+      const r = await computeSideP2SH_v07({
+        bettorPk: msg.bettor_pk, spineP2shHash, poolMerkleRoot: market.pool_merkle_root,
+        marketMetadataHash: market.market_metadata_hash, direction: msg.direction,
+        deadline: market.deadline, network,
+      });
+      recomputedSideP2sh = r.p2shAddr; recomputedRedeem = r.redeemScript;
+    } else if (ver === 'v0.6') {
       const { computeSideP2SH_v06 } = await import('../lib/pool-p2sh-v06.mjs');
-      // Producer mirrors pool.js:811: spineP2shHash = sha256(market.spine_p2sh string) hex.
-      const spineP2shHash = createHash('sha256').update(market.spine_p2sh).digest('hex');
-      const network = market.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
       const r = await computeSideP2SH_v06({
         bettorPk: msg.bettor_pk, spineP2shHash, poolMerkleRoot: market.pool_merkle_root,
         marketMetadataHash: market.market_metadata_hash, direction: msg.direction,
