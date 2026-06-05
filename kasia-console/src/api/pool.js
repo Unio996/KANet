@@ -1702,6 +1702,108 @@ export async function registerPoolRoutes(fastify) {
     });
   });
 
+  // GET /api/pool/market/:id/settle-audit — Bettor 06-05 派工 settle 三方分账证据链.
+  // Returns: market + settle_txid + committee PKs→relay_addresses + chain_events 链证 +
+  // Kaspa explorer 深链。前端 NWT verifier 跨节点 fetch 双 host 对比 settle_txid + is_accepted 一致。
+  fastify.get('/api/pool/market/:id/settle-audit', async (request, reply) => {
+    const marketId = request.params.id;
+    const market = sqlite.prepare('SELECT id, protocol_version, protocol_status, spine_p2sh, settle_txid, refund_txid, pool_merkle_root, maker_relay_id, broker_relay_id, broker_pk, outcome_side, outcome_market_source, resolution_rule_spec, maker_stake_amount, oracle_bond_amount FROM pool_markets WHERE id = ?').get(marketId);
+    if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
+
+    const committee = sqlite.prepare('SELECT committee_pks, committee_pk_hash, threshold, sampled_at, vrf_seed FROM pool_committee WHERE market_id = ?').get(marketId);
+    let committeePks = null;
+    try { if (committee) committeePks = JSON.parse(committee.committee_pks); } catch {}
+
+    // PK → relay_address 映射 (= 当前 chain_view leaves, 兜底 oracle_pool_membership 旧 path).
+    const pkToAddress = {};
+    if (committeePks) {
+      for (const pk of committeePks) {
+        const pkLower = String(pk).toLowerCase();
+        const enrol = sqlite.prepare('SELECT p2sh_addr FROM oracle_stake_enrollments WHERE staker_pk_x = ?').get(pkLower);
+        if (enrol?.p2sh_addr) { pkToAddress[pkLower] = { stake_p2sh: enrol.p2sh_addr, source: 'chain_envelope' }; continue; }
+        const memb = sqlite.prepare('SELECT relay_id FROM oracle_pool_membership WHERE oracle_pk = ?').get(pkLower);
+        if (memb?.relay_id) {
+          const relay = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(memb.relay_id);
+          if (relay?.address) pkToAddress[pkLower] = { relay_address: relay.address, source: 'legacy_membership' };
+        }
+      }
+    }
+
+    // Maker/Broker relay address
+    const makerRelay = market.maker_relay_id ? sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id) : null;
+    const brokerRelay = market.broker_relay_id ? sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.broker_relay_id) : null;
+
+    // Chain events for this market (votes + payouts + settle reference).
+    const events = sqlite.prepare("SELECT id, event_type, txid, payload, observed_at FROM chain_events WHERE payload LIKE ? ORDER BY observed_at ASC LIMIT 100").all(`%${marketId}%`);
+    const eventsByType = {};
+    for (const ev of events) {
+      if (!eventsByType[ev.event_type]) eventsByType[ev.event_type] = [];
+      eventsByType[ev.event_type].push({ id: ev.id, txid: ev.txid, observed_at: ev.observed_at });
+    }
+
+    // Bettor sides (winner candidates).
+    const sides = sqlite.prepare('SELECT bettor_pk, direction, stake_amount, side_p2sh, side_lock_tx, claim_txid FROM pool_bettor_sides WHERE market_id = ? ORDER BY merkle_index').all(marketId);
+
+    // Kaspa explorer base (testnet-12 default).
+    const network = (market.spine_p2sh || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    const explorerBase = network === 'testnet-12' ? 'https://explorer-tn12.kaspa.org' : 'https://explorer.kaspa.org';
+    const txUrl = (txid) => txid ? `${explorerBase}/txs/${txid}` : null;
+    const addrUrl = (addr) => addr ? `${explorerBase}/addresses/${addr}` : null;
+
+    return reply.send({
+      ok: true,
+      market_id: marketId,
+      protocol_version: market.protocol_version || 'v0.5',
+      protocol_status: market.protocol_status,
+      settled: !!market.settle_txid,
+      refunded: !!market.refund_txid,
+      settle_txid: market.settle_txid || null,
+      settle_explorer_url: txUrl(market.settle_txid),
+      refund_txid: market.refund_txid || null,
+      refund_explorer_url: txUrl(market.refund_txid),
+      outcome_side: market.outcome_side,
+      outcome_market_source: market.outcome_market_source,
+      maker: {
+        relay_id: market.maker_relay_id,
+        address: makerRelay?.address || null,
+        explorer_url: addrUrl(makerRelay?.address),
+        stake_kas: market.maker_stake_amount != null ? market.maker_stake_amount / 1e8 : null,
+      },
+      broker: {
+        relay_id: market.broker_relay_id,
+        address: brokerRelay?.address || null,
+        explorer_url: addrUrl(brokerRelay?.address),
+        pk: market.broker_pk || null,
+      },
+      committee: {
+        threshold: committee?.threshold || 4,
+        committee_pk_hash: committee?.committee_pk_hash || null,
+        sampled_at: committee?.sampled_at || null,
+        vrf_seed: committee?.vrf_seed || null,
+        oracle_bond_kas: market.oracle_bond_amount != null ? market.oracle_bond_amount / 1e8 : null,
+        members: committeePks ? committeePks.map(pk => ({
+          pk_x: pk.toLowerCase(),
+          mapped: pkToAddress[pk.toLowerCase()] || null,
+        })) : null,
+      },
+      bettor_sides: sides.map(s => ({
+        bettor_pk: s.bettor_pk,
+        direction: s.direction === 0 ? 'YES' : 'NO',
+        stake_kas: s.stake_amount / 1e8,
+        side_p2sh: s.side_p2sh,
+        side_p2sh_explorer_url: addrUrl(s.side_p2sh),
+        side_lock_txid: s.side_lock_tx,
+        side_lock_explorer_url: txUrl(s.side_lock_tx),
+        claim_txid: s.claim_txid,
+        claim_explorer_url: txUrl(s.claim_txid),
+      })),
+      pool_merkle_root: market.pool_merkle_root,
+      chain_events: eventsByType,
+      network,
+      explorer_base: explorerBase,
+    });
+  });
+
   // GET /api/oracle/max-pot/:pk — per-oracle max-pot exposure (Gap 2 e bond/pot ratio panel).
   // = sum(oracleBondAmount) across active markets where this oracle is committee.
   fastify.get('/api/oracle/max-pot/:pk', async (request, reply) => {
