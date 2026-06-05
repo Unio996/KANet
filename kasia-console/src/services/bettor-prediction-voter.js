@@ -686,14 +686,13 @@ async function deriveVote(offer) {
   }
 
   // Branch 2: kanet_native (= Phase 3a MVP Bettor r219 spec — LLM consensus).
-  // kanet_v05 / kanet_v06 / kanet_v07 are pool.js create-vNN endpoints' defaults
-  // — same LLM consensus path as kanet_native (differ in spine ctor + committee
-  // model upstream, vote derivation logic identical; v0.7 adds sharding fields
-  // 不影响 vote derive 仅影响 settle TX scriptSig assembly downstream).
+  // J2-tn r381 (Bettor 16:16 catch — #10 voted=0 实因): widen to startsWith('kanet_')
+  // 接受 kanet_v07_test / kanet_v06_demo / 等变种. 所有 kanet_* 都走同 LLM consensus
+  // 路径 (= deriveKanetNativeVote 内部按 data_source_canonical URL 路由). 之前精确
+  // string match 漏未来变种 (= 这次 create-v07 用户传 outcome_market_source=kanet_v07_test
+  // 撞 unsupported → vote derive 拒 → 委员 0 投票 → settle 死循环).
   if (offer.outcome_market_source === 'kanet_native'
-      || offer.outcome_market_source === 'kanet_v05'
-      || offer.outcome_market_source === 'kanet_v06'
-      || offer.outcome_market_source === 'kanet_v07') {
+      || (typeof offer.outcome_market_source === 'string' && offer.outcome_market_source.startsWith('kanet_'))) {
     return deriveKanetNativeVote(offer, spec);
   }
 
