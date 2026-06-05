@@ -326,23 +326,38 @@ export async function registerOraclePoolRoutes(fastify) {
     });
   });
 
-  // GET /api/oracle-pool/state — current pool snapshot for UI/diagnostics
+  // GET /api/oracle-pool/state — current pool snapshot for UI/diagnostics.
+  // J2-tn r350 (Owner 钦定 oracle-pool-source 单一源): 切访问器, 不再裸读 membership.
+  // 真源 = chain_view (= scanAndDerivePool 写). UI/oracle-home 应改调 /chain-snapshot,
+  // 此 endpoint 退役但保持 forward compat (= 返回 chain_view 内容 mapped 到原 schema).
   fastify.get('/api/oracle-pool/state', async (request, reply) => {
-    const rows = sqlite.prepare(`
-      SELECT m.relay_id, m.oracle_pk, m.stake_locked_kas, m.joined_at, m.active,
-             m.stake_unlock_requested_at, r.name
-      FROM oracle_pool_membership m
-      LEFT JOIN relay_nodes r ON r.id = m.relay_id
-      ORDER BY m.stake_locked_kas DESC
-    `).all();
-    const activeRows = rows.filter(r => r.active === 1);
-    const totalStakeKas = activeRows.reduce((s, r) => s + Number(r.stake_locked_kas || 0), 0);
+    const { getActivePool, resolveOracleAddress } = await import('../lib/oracle-pool-source.mjs');
+    const pool = getActivePool();
+    if (!pool || !pool.leaves) {
+      return reply.send({ ok: true, total_members: 0, active_members: 0, total_active_stake_kas: '0.00000000', members: [] });
+    }
+    const members = pool.leaves.map(l => {
+      const pk = String(l.pk_x || '').toLowerCase();
+      const stakeKas = Number(l.stake_sompi || 0) / 1e8;
+      return {
+        relay_id: null,  // DEPRECATED field
+        oracle_pk: pk,
+        stake_locked_kas: stakeKas.toFixed(8),
+        joined_at: null,
+        active: 1,
+        stake_unlock_requested_at: null,
+        name: null,
+        relay_address: resolveOracleAddress(pk),
+      };
+    });
+    const totalStakeKas = members.reduce((s, m) => s + Number(m.stake_locked_kas || 0), 0);
     return reply.send({
       ok: true,
-      total_members: rows.length,
-      active_members: activeRows.length,
+      total_members: members.length,
+      active_members: members.length,
       total_active_stake_kas: totalStakeKas.toFixed(8),
-      members: rows,
+      members,
+      _note: 'r350 chain_view source. /chain-snapshot is canonical.',
     });
   });
 }

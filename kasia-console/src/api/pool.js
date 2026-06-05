@@ -1714,17 +1714,22 @@ export async function registerPoolRoutes(fastify) {
     let committeePks = null;
     try { if (committee) committeePks = JSON.parse(committee.committee_pks); } catch {}
 
-    // PK → relay_address 映射 (= 当前 chain_view leaves, 兜底 oracle_pool_membership 旧 path).
+    // J2-tn r350 (Owner 钦定 oracle-pool-source 单一源): pkToAddress 走访问器收敛.
+    // 访问器内部 fallback enrollments → membership stopgap, 此处不再裸 SQL.
     const pkToAddress = {};
     if (committeePks) {
+      const { resolveOracleAddresses } = await import('../lib/oracle-pool-source.mjs');
+      const addrMap = resolveOracleAddresses(committeePks);
       for (const pk of committeePks) {
         const pkLower = String(pk).toLowerCase();
         const enrol = sqlite.prepare('SELECT p2sh_addr FROM oracle_stake_enrollments WHERE staker_pk_x = ?').get(pkLower);
-        if (enrol?.p2sh_addr) { pkToAddress[pkLower] = { stake_p2sh: enrol.p2sh_addr, source: 'chain_envelope' }; continue; }
-        const memb = sqlite.prepare('SELECT relay_id FROM oracle_pool_membership WHERE oracle_pk = ?').get(pkLower);
-        if (memb?.relay_id) {
-          const relay = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(memb.relay_id);
-          if (relay?.address) pkToAddress[pkLower] = { relay_address: relay.address, source: 'legacy_membership' };
+        const relayAddr = addrMap.get(pkLower);
+        if (enrol?.p2sh_addr || relayAddr) {
+          pkToAddress[pkLower] = {
+            stake_p2sh: enrol?.p2sh_addr || null,
+            relay_address: relayAddr || null,
+            source: enrol?.p2sh_addr ? 'chain_envelope' : 'fallback_membership',
+          };
         }
       }
     }
@@ -1830,7 +1835,22 @@ export async function registerPoolRoutes(fastify) {
         perMarket.push({ market_id: r.market_id, bond_at_risk_sompi: bond, status: r.protocol_status });
       }
     }
-    const membership = sqlite.prepare('SELECT stake_locked_kas, active FROM oracle_pool_membership WHERE oracle_pk = ?').get(oraclePk);
+    // J2-tn r350: stake 真源 chain_view (= scanAndDerivePool 写). 不 fallback membership.
+    // 访问器 getActivePool() 取最新 chain_view, 找此 oracle PK 对应 stake.
+    let stakeLockedKas = null;
+    let active = false;
+    try {
+      const { getActivePool } = await import('../lib/oracle-pool-source.mjs');
+      const pool = getActivePool();
+      if (pool?.leaves) {
+        const leaf = pool.leaves.find(l => String(l.pk_x || '').toLowerCase() === oraclePk);
+        if (leaf?.stake_sompi) {
+          stakeLockedKas = Number(leaf.stake_sompi) / 1e8;
+          active = true;
+        }
+      }
+    } catch {}
+    const membership = { stake_locked_kas: stakeLockedKas, active };
 
     return reply.send({
       ok: true,
