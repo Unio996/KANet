@@ -1275,11 +1275,19 @@ export async function dispatchPhase2(market, decision) {
     const signingOracles = decision.unanimous
       ? allIdx
       : allIdx.filter(i => i !== decision.silentOracleIndex);
-    Promise.allSettled(signingOracles.map(i =>
-      sendCommandAsync(market.maker_relay_id, { type: 'send_message', target: oracleRows[i].address, message: reqPayload })
-    )).catch(() => {});
+    // J2-tn r375 (Bettor 15:04 钦定): sign_req DM 改 broadcast (= 投票 proven pattern).
+    // DM cross-host 不通 (J1 r360 实证 0 inbound). 改 send_broadcast kanet-prediction →
+    // 所有委员节点 scout ingest → pool-sign-handler (J1 d5e2f26) 各家本地匹 → 签 + sign_resp
+    // broadcast. 单次广播覆盖所有委员, 不 N×N DM. Race 不破 (= idempotent committee_pks 验).
+    sendCommandAsync(market.maker_relay_id, {
+      type: 'send_broadcast',
+      channel: 'kanet-prediction',
+      message: reqPayload,
+    }).catch(err => {
+      console.warn(`[pool-settler] sign_req broadcast fail market=${market.id.slice(0,12)}: ${err.message}`);
+    });
 
-    console.log(`[pool-settler] DISPATCHED Phase 2 market=${market.id.slice(0,12)} winner=${decision.winner} unanimous=${decision.unanimous} inputs=${requiredInputOutpoints.length} outputs=${outputs.length} → collecting_sigs`);
+    console.log(`[pool-settler] DISPATCHED Phase 2 market=${market.id.slice(0,12)} winner=${decision.winner} unanimous=${decision.unanimous} inputs=${requiredInputOutpoints.length} outputs=${outputs.length} sign_req → broadcast → collecting_sigs`);
   } catch (e) {
     console.error(`[pool-settler] dispatchPhase2 fail market=${market.id?.slice(0,12)}: ${e.message}`);
   }
