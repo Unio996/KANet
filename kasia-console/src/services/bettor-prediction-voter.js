@@ -430,10 +430,12 @@ async function processPoolMarket(voter) {
       // INSERT OR IGNORE for idempotent dedup (Scout ingest on this same node may also INSERT
       // an identical txid row; one wins, second no-ops). chain_events.txid UNIQUE constraint
       // is the dedup anchor.
+      // J2-tn r367 (J1 r354 catch): makerRow may be null for cross-node markets (= maker_relay_id
+      // 'cross-node:<pk>' sentinel). Use null to_address fallback so INSERT doesn't throw.
       sqlite.prepare(`
         INSERT OR IGNORE INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
         VALUES (?, ?, 'pool_oracle_vote', ?, ?, ?, 'prediction-voter', CURRENT_TIMESTAMP)
-      `).run(randomUUID(), voteTxid, voter.address, makerRow.address, JSON.stringify(votePayload));
+      `).run(randomUUID(), voteTxid, voter.address, makerRow?.address || null, JSON.stringify(votePayload));
 
       // sub 3 v2 (Oracle v0.3 R7): oracle_history row write per vote.
       // Tier determined via oracle_registry.tier (= sub 1 schema). audit_mode = tier1/tier2/tier3.
