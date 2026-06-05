@@ -134,7 +134,7 @@ async function handlePoolOracleVote(msg) {
   // code resolved relay_nodes WHERE id IN oracle_relay_ids (= local relay infra), which
   // fails on cross-node ingest when peer's relays unknown locally. relay_nodes is plumbing
   // not protocol membership. xpk recompute path obsoleted.
-  const market = sqlite.prepare('SELECT id, oracle1_pk, oracle2_pk, oracle3_pk FROM pool_markets WHERE id = ?').get(msg.market_id);
+  const market = sqlite.prepare('SELECT id, oracle1_pk, oracle2_pk, oracle3_pk, protocol_version FROM pool_markets WHERE id = ?').get(msg.market_id);
   if (!market) {
     // Cross-node case: vote for a market this node hasn't seen yet (market_publish broadcast
     // is a separate cross-node hardening sub — Bettor r88 b-class market gap). Log + skip.
@@ -143,13 +143,32 @@ async function handlePoolOracleVote(msg) {
   }
 
   // 2. voter_pubkey is one of assigned oracles? Direct pk compare, no relay_nodes hop.
-  // Case-normalize both sides — F-A1 (settler 5/29) found mixed-case oracle_pk historically;
-  // producer get_pubkey IPC returns lowercase kaspa-wasm canonical hex but defense-in-depth.
+  // J2-tn r369 (Bettor 14:41 catch — 精确根因 vote-ingest 漏 v0.7 path):
+  // v0.5: oracle1/2/3_pk on market row. v0.6/v0.7: NULL on market row (= committee
+  // sampled at settle time stored in pool_committee.committee_pks). 之前只读 v0.5 路径
+  // → v0.7 markets assignedPks=[] → 全 reject → chain_events 没写 → consensus 0 票.
   const voterPkNorm = String(msg.voter_pubkey || '').toLowerCase();
-  const assignedPks = [market.oracle1_pk, market.oracle2_pk, market.oracle3_pk]
-    .filter(Boolean).map(p => String(p).toLowerCase());
+  let assignedPks;
+  if (market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7') {
+    let committeePks = [];
+    try {
+      const commRow = sqlite.prepare('SELECT committee_pks FROM pool_committee WHERE market_id = ?').get(market.id);
+      committeePks = JSON.parse(commRow?.committee_pks || '[]');
+    } catch {}
+    assignedPks = committeePks.map(p => String(p).toLowerCase());
+    if (assignedPks.length === 0) {
+      // Committee not yet sampled on this node; vote arrives before committee sample finishes.
+      // chain_events.txid UNIQUE means a later replay (via on-chain TX) is safe. Skip-with-log.
+      console.log(`[trade-filter:pool-vote] market=${market.id.slice(0,12)} pv=${market.protocol_version} committee not yet sampled (waiting), skip — settler tick will trigger re-process`);
+      return;
+    }
+  } else {
+    // v0.5 legacy path — oracle1/2/3_pk on market row.
+    assignedPks = [market.oracle1_pk, market.oracle2_pk, market.oracle3_pk]
+      .filter(Boolean).map(p => String(p).toLowerCase());
+  }
   if (!assignedPks.includes(voterPkNorm)) {
-    console.warn(`[trade-filter:pool-vote] voter_pubkey ${voterPkNorm.slice(0,12)} not in assigned oracles [${assignedPks.map(p=>p.slice(0,8)).join(',')}] for market ${msg.market_id.slice(0,12)} — reject`);
+    console.warn(`[trade-filter:pool-vote] voter_pubkey ${voterPkNorm.slice(0,12)} not in assigned committee [${assignedPks.map(p=>p.slice(0,8)).join(',')}] for market ${msg.market_id.slice(0,12)} pv=${market.protocol_version} — reject`);
     return;
   }
 
