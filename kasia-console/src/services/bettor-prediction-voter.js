@@ -381,12 +381,12 @@ async function processPoolMarket(voter) {
       }
       const votePayload = { ...unsignedPayload, signature };
 
-      // DM maker_relay (= settler aggregator path)
+      // J2-tn r366 (J1 r350 catch): cross-node ingested markets have maker_relay_id='cross-node:<pk>'
+      // sentinel → lookup fails → previously errored++ → 投票被跳. 但 broadcast vote 走 voter.id
+      // 不依赖 maker address (= onchain path 不 DM aggregator). 仅 warn + 继续 broadcast.
       const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
       if (!makerRow?.address) {
-        console.warn(`[prediction-voter:pool] maker_relay ${market.maker_relay_id.slice(0,8)} has no address`);
-        errored++;
-        continue;
+        console.log(`[prediction-voter:pool] maker_relay ${market.maker_relay_id.slice(0,16)} no local address (cross-node ingest), proceed broadcast-only`);
       }
       // Bettor r95 cross-node hardening: broadcast vote ONCHAIN (= every node's Scout can ingest).
       // Producer side per spec: relay emits pool_oracle_vote_v1 protocol message to kanet-prediction
