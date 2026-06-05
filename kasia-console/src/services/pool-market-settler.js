@@ -512,16 +512,30 @@ function decideConsensusV06(market) {
     return { action: 'pending', reason: `v0.6/v0.7 invalid oracle_relay_ids (expected 5, got ${oracleIds?.length || 0})` };
   }
 
+  // J2-tn r361 (Bettor 12:55 catch + r337 漏迁 reader 第 5 次): voter envelope 写
+  // voter_relay_id=voter.id (UUID), 但 r337 后 oracle_relay_ids 存 addresses → 这 query
+  // 永不命中 → 0 vote counted → consensus 0/5 → 30min timeout refund. fix: 改读
+  // pool_committee.committee_pks (= 5 PKs, voter envelope 同样写 voter_pubkey 字段),
+  // 用 voter_pubkey 匹 (= PK 跨节点 canonical, 不受 r337 地址迁移影响).
+  let committeePks = [];
+  try {
+    const commRow = sqlite.prepare('SELECT committee_pks FROM pool_committee WHERE market_id = ?').get(market.id);
+    committeePks = JSON.parse(commRow?.committee_pks || '[]').map(p => String(p).toLowerCase());
+  } catch {}
+  if (committeePks.length !== 5) {
+    return { action: 'pending', reason: `v0.6/v0.7 pool_committee.committee_pks invalid (expected 5, got ${committeePks.length}) — committee not yet sampled` };
+  }
+
   const votes = [];
   for (let i = 0; i < 5; i++) {
-    const oracleRelayId = oracleIds[i];
+    const voterPk = committeePks[i];
     const row = sqlite.prepare(`
       SELECT payload, observed_at FROM chain_events
       WHERE event_type = 'pool_oracle_vote'
         AND payload LIKE ?
         AND payload LIKE ?
       ORDER BY observed_at ASC LIMIT 1
-    `).get(`%"market_id":"${market.id}"%`, `%"voter_relay_id":"${oracleRelayId}"%`);
+    `).get(`%"market_id":"${market.id}"%`, `%"voter_pubkey":"${voterPk}"%`);
     if (!row) continue;
     let payload;
     try { payload = JSON.parse(row.payload); } catch { continue; }
