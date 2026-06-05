@@ -19,7 +19,8 @@
 // 跨节点验证: GET /api/oracle/pool-snapshot?daa=X fetch + diff across :3200/:3300 (NWT verifier).
 
 import { sqlite } from '../db/client.js';
-import { createHash } from 'node:crypto';
+// J2-tn r380: createHash (sha256) removed — leaf hashing now uses pool-merkle-v06.buildPoolMerkleTree
+// internal blake2b to align with SS PoolSpine_v07 expectation.
 
 const FINALITY_N = parseInt(process.env.ORACLE_POOL_FINALITY_N, 10) || 600;
 
@@ -133,41 +134,20 @@ export async function scanAndDerivePool({ rpc, networkId, currentDaa }) {
   // Sort by pkX ascending — determinism across nodes (5-agent 共识 KANet-UI r484/2 锁公式).
   valid.sort((a, b) => a.pk_x < b.pk_x ? -1 : a.pk_x > b.pk_x ? 1 : 0);
 
-  // Leaf hashing (KANet-UI r484/2 锁公式): leaf_i = sha256(pkX || stake_sompi_be64).
-  const leafHashes = valid.map(v => {
-    const pkBytes = Buffer.from(v.pk_x, 'hex');
-    const stakeBytes = Buffer.alloc(8);
-    stakeBytes.writeBigUInt64BE(BigInt(v.stake_sompi));
-    return createHash('sha256').update(Buffer.concat([pkBytes, stakeBytes])).digest();
-  });
-
-  // Build depth-8 merkle (reuse pool-merkle-builder pattern — pad to next power-of-2 by repeating last).
-  const { buildPoolMerkleTreeFromLeaves } = await import('../services/pool-merkle-v06.mjs').then(m => ({
-    buildPoolMerkleTreeFromLeaves: m.buildPoolMerkleTreeFromLeaves,
-  })).catch(() => ({}));
-
-  let merkleRoot;
-  if (buildPoolMerkleTreeFromLeaves) {
-    const tree = buildPoolMerkleTreeFromLeaves(leafHashes);
-    merkleRoot = tree.root.toString('hex');
-  } else {
-    // Fallback inline: depth-8 blake2b merkle.
-    const { blake2b } = await import('@noble/hashes/blake2b');
-    const padded = [...leafHashes];
-    const target = Math.max(1, leafHashes.length);
-    while (padded.length < target) padded.push(padded[padded.length - 1] || Buffer.alloc(32));
-    let level = padded;
-    while (level.length > 1) {
-      const next = [];
-      for (let i = 0; i < level.length; i += 2) {
-        const left = level[i];
-        const right = i + 1 < level.length ? level[i + 1] : left;
-        next.push(Buffer.from(blake2b(Buffer.concat([left, right]), { dkLen: 32 })));
-      }
-      level = next;
-    }
-    merkleRoot = (level[0] || Buffer.alloc(32)).toString('hex');
-  }
+  // J2-tn r380 (Bettor 15:54 钦定 + J1 r371 实证 + NWT r300 L18 invariant — Task #133 SS verify final fix):
+  // OLD: leaf = sha256(pkX || stake_sompi_be64) + variable-depth inline merkle — KANet-UI r484/2
+  // 锁公式但 SS 不认 (= 算法+输入+深度三错).
+  // SS PoolSpine_v07 L138-160 + pool-merkle-v06.mjs buildPoolMerkleTree L52-86 一致:
+  //   - leaf = blake2b(pk_bytes 32B) — PK only, stake 不进 SS root
+  //   - sortedPks ascending hex lowercase
+  //   - pad to 256 leaves by repeating last
+  //   - 8-level blake2b cat tree
+  //   - climb: bit_i=(idx>>i)&1; 0→hash(cur||sib), 1→hash(sib||cur)
+  // 直接复用 buildPoolMerkleTree (= proof generation 同源, 保证 byte-exact root) →
+  // SS verify pass on next 新市场. #9 旧 sha256 root 已烤进 spine P2SH 救不活.
+  const { buildPoolMerkleTree } = await import('../services/pool-merkle-v06.mjs');
+  const tree = buildPoolMerkleTree(valid.map(v => v.pk_x));
+  const merkleRoot = tree.root.toString('hex');
 
   sqlite.prepare(`
     INSERT OR REPLACE INTO oracle_pool_chain_view (snapshot_daa, leaves_json, merkle_root, pool_size, derived_at)
