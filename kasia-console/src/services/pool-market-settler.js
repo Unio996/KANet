@@ -1723,6 +1723,15 @@ async function handleCollectingSigs(market) {
     console.warn(`[pool-settler:collecting] market=${market.id.slice(0,12)} missing phase2 metadata, skip`);
     return;
   }
+  // J2-tn r379 (TDZ fix from r378): hoist committeePksForSort lookup to top — re-broadcast
+  // gate at L1790 references it but its `let` was at L1844 (= TDZ ReferenceError, original
+  // 5min throttle masked this by usually finding signedSet via oracleArr fallback). r378
+  // 90s throttle + #9 NEVER 触发 L1790 first iteration → silent fail blocked re-broadcast.
+  let committeePksForSort = [];
+  try {
+    const commRow0 = sqlite.prepare('SELECT committee_pks FROM pool_committee WHERE market_id = ?').get(market.id);
+    committeePksForSort = JSON.parse(commRow0?.committee_pks || '[]').map(p => String(p).toLowerCase());
+  } catch {}
   const inputCount = meta.phase2_input_count;
   // Spine P2SH has MULTIPLE UTXOs (1 maker stake + N oracle bonds) — inputs 0..spineInputCount-1.
   // Each spine input needs PoolSpine settle_unanimous scriptSig (3 sigs unanimous / 2 forfeit_1).
@@ -1839,13 +1848,8 @@ async function handleCollectingSigs(market) {
   // sig 验失败 counter 不增, 但其他 4 sig PASS → counter=4 ≥ 4-of-5 threshold → SS accept.
   // Dummy sig 必 same byte format as real (= 41 + 00×64 + 01 push-encoded) 不破坏 sigOpCount/sighash.
   const DUMMY_SIG_PUSH_HEX = '41' + '00'.repeat(64) + '01';  // 66 byte push-encoded, validSigs 不增
-  // J2-tn r362: order sigs by committee_pks (= 5 PKs canonical 跨节点), 不 oracle_relay_ids
-  // (= addresses, can't match voter_pubkey UUID 历史 path). committee_pks 从 pool_committee 读.
-  let committeePksForSort = [];
-  try {
-    const commRow2 = sqlite.prepare('SELECT committee_pks FROM pool_committee WHERE market_id = ?').get(market.id);
-    committeePksForSort = JSON.parse(commRow2?.committee_pks || '[]').map(p => String(p).toLowerCase());
-  } catch {}
+  // J2-tn r362 (now hoisted to top of handleCollectingSigs in r379): committeePksForSort
+  // already loaded above for re-broadcast missing-oracle compare.
   const spineSigsByInput = [];
   for (let i = 0; i < spineInputCount; i++) {
     const bySender = new Map(sigsByInput[i].map(s => [s.voter_pubkey, s.signature]));
