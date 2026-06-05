@@ -456,18 +456,25 @@ async function handlePoolMarketPublished(msg) {
   }
 
   // Bettor §5.3 F-S3 cross-node snapshot bake: settler-tick committee sample requires
-  // pool_snapshots row. On producer node ensurePoolSnapshot is called at create-v06.
-  // On remote nodes we rebuild from LOCAL oracle_pool_membership + verify root matches
-  // broadcast's pool_merkle_root (= cross-node membership consistency check). v0.6 only.
-  if (msg.protocol_version === 'v0.6' && msg.pool_merkle_root) {
+  // pool_snapshots row. On producer node ensurePoolSnapshot is called at create-v0X.
+  // J2-tn r360 (J1 r337 catch + Bettor 12:41 锁定): v0.7 cross-node ingest 也必 bake snapshot
+  // (= 之前只 v0.6 → :3300 ingest q8m8t v0.7 后 snapshot 空 → settler sample 缺前置 → committee
+  // 永 [] → voter 0 match → settle 永卡). 真源 = chain_view row where merkle_root ==
+  // msg.pool_merkle_root (= 跨节点同步 by chain envelope), 取对应 snapshot_daa baked.
+  if ((msg.protocol_version === 'v0.6' || msg.protocol_version === 'v0.7') && msg.pool_merkle_root) {
     try {
       const { ensurePoolSnapshot } = await import('./pool-market-settler-v06.mjs');
-      ensurePoolSnapshot(msg.market_id, msg.pool_merkle_root);
-      console.log(`[trade-filter:market-pub] snapshot baked market=${msg.market_id.slice(0,12)}`);
+      // Find chain_view row matching the ctor pool_merkle_root (= envelope baked).
+      const cv = sqlite.prepare(
+        'SELECT snapshot_daa FROM oracle_pool_chain_view WHERE merkle_root = ? ORDER BY snapshot_daa DESC LIMIT 1'
+      ).get(msg.pool_merkle_root.toLowerCase());
+      const snapshotDaa = cv?.snapshot_daa || null;  // null fallback = legacy 7d grace path
+      ensurePoolSnapshot(msg.market_id, msg.pool_merkle_root, snapshotDaa);
+      console.log(`[trade-filter:market-pub] snapshot baked market=${msg.market_id.slice(0,12)} pv=${msg.protocol_version} snapshot_daa=${snapshotDaa || 'NULL_legacy'}`);
     } catch (snapErr) {
-      // Mismatch = remote membership differs from local (stub root in test fires, or
-      // different oracle pool composition between nodes). Market row still ingested
-      // but settler-tick will skip committee sampling — operator can backfill later.
+      // Mismatch = remote chain_view differs from envelope root (= shouldn't happen post-r337
+      // chain-derived consistency). Market row still ingested but settler-tick will skip
+      // committee sampling — operator can backfill later via scripts/_j2tn_backfill_snapshot_v2.mjs.
       console.warn(`[trade-filter:market-pub] snapshot bake skip market=${msg.market_id.slice(0,12)}: ${snapErr.message}`);
     }
   }
