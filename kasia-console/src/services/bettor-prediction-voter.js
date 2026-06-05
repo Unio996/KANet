@@ -510,6 +510,17 @@ async function processPoolTxSign(voter) {
 
       const spineInputCount = meta.phase2_spine_input_count || 1;
       let signedAny = false;
+      // J2-tn r362: Get voter pubkey once per market (= used in each sign_resp envelope).
+      let voterPk = null;
+      try {
+        const pkRes = await sendCommandAsync(voter.id, { type: 'get_pubkey' });
+        voterPk = String(pkRes?.x_only_pubkey || '').toLowerCase();
+      } catch {}
+      if (!voterPk || voterPk.length !== 64) {
+        console.warn(`[prediction-voter:pool-txsign] voter=${voter.name} get_pubkey fail, skip market=${market.id.slice(0,12)}`);
+        skipped++;
+        continue;
+      }
       // Sign each spine input (0..spineInputCount-1) — all locked by PoolSpine redeem
       for (let inputIdx = 0; inputIdx < spineInputCount; inputIdx++) {
         // Skip if already signed this input for this market
@@ -532,10 +543,13 @@ async function processPoolTxSign(voter) {
           continue;
         }
 
+        // J2-tn r362 (Bettor 13:16 钦定): voter_pubkey 字段 (= 跨节点 canonical), voter_relay_id
+        // 保留 transitional 双写 (= settler accepts either during migration window).
         const respPayload = JSON.stringify({
           t: 'kanet_pool_oracle_tx_sign_resp_v1',
           market_id: market.id,
-          voter_relay_id: voter.id,
+          voter_pubkey: voterPk,
+          voter_relay_id: voter.id,  // transitional, deprecated
           input_index: inputIdx,
           winner: meta.phase2_winner,
           signature: signResult.signature,

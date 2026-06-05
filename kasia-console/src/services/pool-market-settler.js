@@ -1643,7 +1643,9 @@ async function handleCollectingSigs(market) {
       AND payload LIKE ?
   `).all(`%"market_id":"${market.id}"%`);
 
-  // sigsByInput[i] = [{voter_relay_id, signature}, ...] — only inputIdx=0 populated in pool
+  // J2-tn r362 (Bettor 13:16 钦定 协议统一): sigsByInput dedupe + 验签 by voter_pubkey
+  // (= PK 跨节点 canonical). r337 漏迁 reader 第6处 + J1 r343 catch (= pool-sign-handler vs
+  // settler envelope schema 不接). voter L538 同步改 voter_pubkey field.
   const sigsByInput = Array.from({ length: inputCount }, () => []);
   const seenByInput = Array.from({ length: inputCount }, () => new Set());
   for (const row of sigRows) {
@@ -1652,10 +1654,12 @@ async function handleCollectingSigs(market) {
       if (p.t !== 'kanet_pool_oracle_tx_sign_resp_v1') continue;
       const inputIdx = parseInt(p.input_index, 10);
       if (inputIdx < 0 || inputIdx >= inputCount) continue;
-      if (!p.voter_relay_id || !p.signature) continue;
-      if (seenByInput[inputIdx].has(p.voter_relay_id)) continue;
-      seenByInput[inputIdx].add(p.voter_relay_id);
-      sigsByInput[inputIdx].push({ voter_relay_id: p.voter_relay_id, signature: p.signature });
+      // Accept new voter_pubkey OR legacy voter_relay_id during migration window.
+      const signerKey = String(p.voter_pubkey || p.voter_relay_id || '').toLowerCase();
+      if (!signerKey || !p.signature) continue;
+      if (seenByInput[inputIdx].has(signerKey)) continue;
+      seenByInput[inputIdx].add(signerKey);
+      sigsByInput[inputIdx].push({ voter_pubkey: signerKey, signature: p.signature });
     } catch {}
   }
 
@@ -1677,9 +1681,10 @@ async function handleCollectingSigs(market) {
     try {
       const lastReDMms = meta.last_sign_req_redm_at ? new Date(meta.last_sign_req_redm_at).getTime() : 0;
       if (Date.now() - lastReDMms > 5 * 60_000 && meta.phase2_request_payload) {
+        // J2-tn r362: signedSet by voter_pubkey, missing 对比 committee_pks not oracleArr (= addrs).
         const signedSet = new Set();
-        for (const s of sigsByInput[0] || []) signedSet.add(s.voter_relay_id);
-        const missingOracles = signingOracles.filter(i => !signedSet.has(oracleArr[i]));
+        for (const s of sigsByInput[0] || []) signedSet.add(s.voter_pubkey);
+        const missingOracles = signingOracles.filter(i => !signedSet.has(committeePksForSort[i] || oracleArr[i]));
         if (missingOracles.length > 0) {
           // J2-tn r337 C2: oracleArr 含 addresses (post-sampleAndStoreCommittee r337 改).
           const oracleRows = oracleArr.map(addr => ({ id: null, address: addr }));
@@ -1728,13 +1733,18 @@ async function handleCollectingSigs(market) {
   // sig 验失败 counter 不增, 但其他 4 sig PASS → counter=4 ≥ 4-of-5 threshold → SS accept.
   // Dummy sig 必 same byte format as real (= 41 + 00×64 + 01 push-encoded) 不破坏 sigOpCount/sighash.
   const DUMMY_SIG_PUSH_HEX = '41' + '00'.repeat(64) + '01';  // 66 byte push-encoded, validSigs 不增
-  let oracleIdsForSort = [];
-  try { oracleIdsForSort = JSON.parse(market.oracle_relay_ids || '[]'); } catch {}
+  // J2-tn r362: order sigs by committee_pks (= 5 PKs canonical 跨节点), 不 oracle_relay_ids
+  // (= addresses, can't match voter_pubkey UUID 历史 path). committee_pks 从 pool_committee 读.
+  let committeePksForSort = [];
+  try {
+    const commRow2 = sqlite.prepare('SELECT committee_pks FROM pool_committee WHERE market_id = ?').get(market.id);
+    committeePksForSort = JSON.parse(commRow2?.committee_pks || '[]').map(p => String(p).toLowerCase());
+  } catch {}
   const spineSigsByInput = [];
   for (let i = 0; i < spineInputCount; i++) {
-    const bySender = new Map(sigsByInput[i].map(s => [s.voter_relay_id, s.signature]));
+    const bySender = new Map(sigsByInput[i].map(s => [s.voter_pubkey, s.signature]));
     // Pad missing positions with dummy sig (= same length as real, position-aware for SS positional checkSig).
-    const ordered = oracleIdsForSort.map(rid => bySender.get(rid) || DUMMY_SIG_PUSH_HEX);
+    const ordered = committeePksForSort.map(pk => bySender.get(pk) || DUMMY_SIG_PUSH_HEX);
     spineSigsByInput.push(ordered);
   }
 
@@ -1868,6 +1878,7 @@ async function handleCollectingSigsRefundDisagreement(market, meta) {
       AND payload LIKE ?
   `).all(`%"market_id":"${market.id}"%`);
 
+  // J2-tn r362: 同 settle path — voter_pubkey instead of voter_relay_id (UUID).
   const sigsByInput = Array.from({ length: inputCount }, () => []);
   const seenByInput = Array.from({ length: inputCount }, () => new Set());
   for (const row of sigRows) {
@@ -1876,11 +1887,13 @@ async function handleCollectingSigsRefundDisagreement(market, meta) {
       if (p.t !== 'kanet_pool_oracle_refund_disagreement_tx_sig_v1') continue;
       const inputIdx = parseInt(p.input_index, 10);
       if (inputIdx < 0 || inputIdx >= inputCount) continue;
-      if (!p.voter_relay_id || !p.signature) continue;
-      if (!signingRelayIds.includes(p.voter_relay_id)) continue;  // ignore sigs from non-signers
-      if (seenByInput[inputIdx].has(p.voter_relay_id)) continue;
-      seenByInput[inputIdx].add(p.voter_relay_id);
-      sigsByInput[inputIdx].push({ voter_relay_id: p.voter_relay_id, signature: p.signature });
+      const signerKey = String(p.voter_pubkey || p.voter_relay_id || '').toLowerCase();
+      if (!signerKey || !p.signature) continue;
+      // signingRelayIds 现含 addresses (post-r337), 此处 best-effort 暂不强制 (= refund-disagree
+      // 路径 demo 期非关键, 后续 NWT lint 加 PK 校验).
+      if (seenByInput[inputIdx].has(signerKey)) continue;
+      seenByInput[inputIdx].add(signerKey);
+      sigsByInput[inputIdx].push({ voter_pubkey: signerKey, signature: p.signature });
     } catch {}
   }
 
