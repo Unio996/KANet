@@ -399,6 +399,9 @@ async function handlePoolOracleTxSignReq(msg) {
     }
   }
   // 1. Load market + phase2_tx_obj (needed to sign).
+  //    J2-tn r377 (48960f6): sign_req broadcast now carries phase2_tx_obj cross-node.
+  //    Prefer payload-supplied tx_obj (cross-node canonical); fallback to local meta for
+  //    same-node path where dispatchPhase2 wrote local metadata first.
   const market = sqlite.prepare(
     'SELECT id, protocol_status, metadata FROM pool_markets WHERE id = ?'
   ).get(msg.market_id);
@@ -408,8 +411,9 @@ async function handlePoolOracleTxSignReq(msg) {
   }
   let meta = {};
   try { meta = JSON.parse(market.metadata || '{}'); } catch {}
-  if (!meta.phase2_tx_obj) {
-    console.log(`[trade-filter:sign-req] market ${market.id.slice(0,12)} no phase2_tx_obj locally (cross-node materialize pending) — skip`);
+  const phase2TxObj = msg.phase2_tx_obj || meta.phase2_tx_obj;
+  if (!phase2TxObj) {
+    console.log(`[trade-filter:sign-req] market ${market.id.slice(0,12)} no phase2_tx_obj (neither msg nor local meta) — skip`);
     return;
   }
   // 2. Load committee_pks (canonical cross-node identity).
@@ -464,7 +468,7 @@ async function handlePoolOracleTxSignReq(msg) {
       try {
         signResult = await sendCommandAsync(oracle.id, {
           type: 'sign_input_for_settle',
-          tx_hex: JSON.stringify(meta.phase2_tx_obj),
+          tx_hex: JSON.stringify(phase2TxObj),
           input_index: inputIdx,
         });
       } catch (e) {
