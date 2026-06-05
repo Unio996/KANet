@@ -344,6 +344,41 @@ export async function poolSettlerTick() {
 
         // (refunding + collecting_sigs handlers moved above sampling — see T2 blocker3 comment)
 
+        // J2-tn r372 (Bettor 14:55 catch — 206b0a4 触发位置不对): vote re-scan 每 tick 跑
+        // (= 不只 sample 那一刻). #9 12:36 votes broadcast at 13:57 sample (= 早于 924b6a2
+        // filter fix) → broadcast_messages 有但 chain_events 没. 每 tick 扫 orphan vote
+        // → replay → idempotent INSERT. 治存量 + 守未来.
+        if ((market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7')
+            && market.protocol_status === 'verifying') {
+          try {
+            const { onBroadcastWritten } = await import('./trade-protocol-filter.js');
+            const orphanVotes = sqlite.prepare(`
+              SELECT tx_hash, sender_address, channel_name, content, created_at
+              FROM broadcast_messages
+              WHERE channel_name = 'kanet-prediction'
+                AND content LIKE '%pool_oracle_vote_v1%'
+                AND content LIKE ?
+                AND tx_hash NOT IN (SELECT txid FROM chain_events WHERE event_type = 'pool_oracle_vote')
+              ORDER BY created_at ASC
+            `).all(`%"market_id":"${market.id}"%`);
+            if (orphanVotes.length > 0) {
+              console.log(`[pool-settler] per-tick vote re-scan market=${market.id.slice(0,12)}: ${orphanVotes.length} orphan vote(s) — replaying`);
+              for (const row of orphanVotes) {
+                try {
+                  await onBroadcastWritten({
+                    tx_hash: row.tx_hash, content: row.content, sender_address: row.sender_address,
+                    channel_name: row.channel_name, created_at: row.created_at,
+                  });
+                } catch (replayErr) {
+                  console.warn(`[pool-settler] vote replay fail tx=${row.tx_hash.slice(0,16)}: ${replayErr.message}`);
+                }
+              }
+            }
+          } catch (rescanErr) {
+            console.warn(`[pool-settler] per-tick vote re-scan fail market=${market.id.slice(0,12)}: ${rescanErr.message}`);
+          }
+        }
+
         const decision = decideConsensus(market);
         // 7b — first-detection stash for refund_disagreement timing (= area-4 Gap 6 dual-track).
         // Pure-function decideConsensus signals via stashDisagreementDetected flag; the write
