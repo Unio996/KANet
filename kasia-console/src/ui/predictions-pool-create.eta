@@ -48,19 +48,21 @@
   <!-- 钱包状态栏 (= 复用 predictions.eta pattern) -->
   <!-- ============================================ -->
   <div class="card card-compact mb-5 flex items-center gap-4 flex-wrap">
-    <select x-model="selectedRelayId" @change="onAgentChange()"
-            class="rounded-lg border border-warm-300 px-3 py-1.5 text-sm bg-white font-medium">
-      <%
-        // #1 maker filter: oracle 不当 maker (= Q11 area-1 spec). 严格 maker eligibility 待 Bettor 定 (= prediction_maker_whitelist 等 mechanism).
-        const eligibleMakers = it.relayNodes.filter(r => !r.is_oracle);
-      %>
-      <% if (eligibleMakers.length === 0) { %>
-      <option value="">⚠ 无符合 maker 资格 agent (= 全 is_oracle=1)</option>
-      <% } %>
-      <% eligibleMakers.forEach(r => { %>
-      <option value="<%= r.id %>"><%= r.name %></option>
-      <% }) %>
-    </select>
+    <label class="flex items-center gap-2 text-sm">
+      <span class="text-ink-500">出单人:</span>
+      <select x-model="selectedRelayId" @change="onAgentChange()"
+              class="rounded-lg border border-warm-300 px-3 py-1.5 text-sm bg-white font-medium">
+        <%
+          const eligibleMakers = it.relayNodes.filter(r => !r.is_oracle);
+        %>
+        <% if (eligibleMakers.length === 0) { %>
+        <option value="">没有可用的出单人</option>
+        <% } %>
+        <% eligibleMakers.forEach(r => { %>
+        <option value="<%= r.id %>"><%= r.name %></option>
+        <% }) %>
+      </select>
+    </label>
     <template x-if="walletAddress">
       <div class="flex items-center gap-3 text-sm">
         <span class="font-mono text-xs text-ink-400 cursor-pointer"
