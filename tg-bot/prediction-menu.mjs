@@ -399,10 +399,29 @@ async function _startBetImpl(tgUser) {
   const byCat = {};
   for (const m of markets) { const c = m.category || 'other'; (byCat[c] = byCat[c] || []).push(m); }
   const categories = Object.keys(byCat).sort();
-  sessions.set(tgUser, { stage: 'category', categories, byCat });
-  const lines = ['🎲 押注预测市场 — 选品类(回复编号):', ''];
-  categories.forEach((c, i) => lines.push(`${i + 1}. ${c} (${byCat[c].length} 个市场)`));
-  lines.push('', '回复数字选品类。随时 /start 退出。');
+  // KANet-UI 2026-06-06 Owner P0 + Bettor ③ APPROVE r543: 加 🏆 世界杯专题 + 🔍 搜索 虚菜单, 置顶突出.
+  const worldCupMarkets = markets.filter(m => {
+    const s = String(m.resolution_rule_spec || '');
+    const lower = s.toLowerCase();
+    return lower.includes('fifa') || lower.includes('world cup') || s.includes('世界杯');
+  });
+  const menu = [];
+  // entries[i] = { type: 'worldcup'|'search'|'category', markets?, cat? }
+  const entries = [];
+  if (worldCupMarkets.length > 0) {
+    menu.push(`🏆 世界杯专题 (${worldCupMarkets.length} 个市场)`);
+    entries.push({ type: 'worldcup', markets: worldCupMarkets });
+  }
+  menu.push('🔍 搜索市场 (回复关键词找)');
+  entries.push({ type: 'search' });
+  for (const cat of categories) {
+    menu.push(`${cat} (${byCat[cat].length} 个市场)`);
+    entries.push({ type: 'category', cat, markets: byCat[cat] });
+  }
+  sessions.set(tgUser, { stage: 'category', entries });
+  const lines = ['🎲 押注预测市场 — 选(回复编号):', ''];
+  menu.forEach((label, i) => lines.push(`${i + 1}. ${label}`));
+  lines.push('', '回复数字选项。随时 /start 退出。');
   return lines.join('\n');
 }
 
@@ -421,11 +440,39 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
 
   if (s.stage === 'category') {
     const n = parseInt(raw, 10);
-    const cat = Number.isFinite(n) && s.categories[n - 1];
-    if (!cat) return `请回复有效品类编号 (1-${s.categories.length})。`;
-    s.stage = 'market'; s.category = cat; s.markets = s.byCat[cat];
-    const lines = [`📂 ${cat} — 选市场(回复编号):`, ''];
+    const entry = Number.isFinite(n) && s.entries && s.entries[n - 1];
+    if (!entry) return `请回复有效编号 (1-${s.entries ? s.entries.length : 0})。`;
+    if (entry.type === 'search') {
+      s.stage = 'search_input';
+      return '🔍 回复关键词 (= 题干含的字, 比如 "FIFA" / "Bitcoin" / "Mariners")。/start 退出。';
+    }
+    s.stage = 'market';
+    s.markets = entry.markets;
+    const head = entry.type === 'worldcup' ? '🏆 世界杯专题' : `📂 ${entry.cat}`;
+    const lines = [`${head} — 选市场(回复编号):`, ''];
     s.markets.forEach((m, i) => lines.push(`${i + 1}. ${trunc(specTitle(m.resolution_rule_spec), 64)}  · ${fmtDeadline(m.deadline)} · ${m.bettor_count || 0} 人已押`));
+    lines.push('', '回复数字选市场(看完整结算规则)。');
+    return lines.join('\n');
+  }
+
+  if (s.stage === 'search_input') {
+    const term = raw.trim();
+    if (!term) return '回复关键词 (至少 1 个字)。';
+    // 调 backend ?q= 全文 LIKE NOCASE + 客户端 specIsUsable filter (= Bettor 1要求一致性).
+    const r = await api.poolMarkets({ status: 'pending_bettors', limit: 50 });
+    const all = (r.json && r.json.markets) || [];
+    const nowSec = Math.floor(Date.now() / 1000);
+    const lowerTerm = term.toLowerCase();
+    const matches = all.filter(m =>
+      (m.protocol_version === 'v0.6' || m.protocol_version === 'v0.7') &&
+      (!m.deadline || Number(m.deadline) - nowSec > DEADLINE_BUFFER_SEC) &&
+      specIsUsable(m.resolution_rule_spec) &&
+      String(m.resolution_rule_spec || '').toLowerCase().includes(lowerTerm)
+    );
+    if (!matches.length) return `🔍 "${term}" 没找到符合的市场。回复别的关键词, 或 /start 退出后 /bet 看品类。`;
+    s.stage = 'market'; s.markets = matches;
+    const lines = [`🔍 搜 "${term}" — ${matches.length} 个市场(回复编号):`, ''];
+    matches.forEach((m, i) => lines.push(`${i + 1}. ${trunc(specTitle(m.resolution_rule_spec), 64)}  · ${fmtDeadline(m.deadline)} · ${m.bettor_count || 0} 人已押`));
     lines.push('', '回复数字选市场(看完整结算规则)。');
     return lines.join('\n');
   }

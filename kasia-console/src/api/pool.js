@@ -268,9 +268,11 @@ export async function registerPoolRoutes(fastify) {
     const oracleBondKas = parseFloat(b.oracle_bond_kas);
     if (!Number.isFinite(makerStakeKas) || makerStakeKas <= 0) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be positive' });
     if (!Number.isFinite(oracleBondKas) || oracleBondKas <= 0) return reply.code(400).send({ ok: false, error: 'oracle_bond_kas must be positive' });
-    // 5/28 Owner 钦定: testnet 0 limits. Skip 1 KAS min + softcap when KANET_TESTNET_NO_LIMITS=1.
+    // KANet-UI 2026-06-06 (Bettor ④ catch + 关 1 v2 APPROVE r544): 100 KAS 是 Owner 钦定 demo 实质押 policy,
+    // 概念独立于 KANET_TESTNET_NO_LIMITS (= testnet 限制宽松). 移出守卫块, 无条件强制.
+    if (makerStakeKas < POOL_MAKER_STAKE_MIN_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be >= ${POOL_MAKER_STAKE_MIN_KAS} KAS (Owner 钦定 demo 实质押 skin-in-game, 单一源 L33)` });
+    // 5/28 Owner 钦定: testnet 0 limits. Skip dynamic min spendable + softcap when KANET_TESTNET_NO_LIMITS=1.
     if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
-      if (makerStakeKas < POOL_MAKER_STAKE_MIN_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be >= ${POOL_MAKER_STAKE_MIN_KAS} KAS (Owner 钦定 demo 实质押, 单一源 L33)` });
       if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS (v0.5 testnet per-market softcap, Bettor r444 + Owner钦定 SS-baked)` });
     }
     const makerStakeAmount = Math.round(makerStakeKas * 1e8);
@@ -469,8 +471,9 @@ export async function registerPoolRoutes(fastify) {
     const oracleBondKas = parseFloat(b.oracle_bond_kas);
     if (!Number.isFinite(makerStakeKas) || makerStakeKas <= 0) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be positive' });
     if (!Number.isFinite(oracleBondKas) || oracleBondKas <= 0) return reply.code(400).send({ ok: false, error: 'oracle_bond_kas must be positive' });
+    // 100 KAS Owner 钦定 demo 实质押 — 移出 NO_LIMITS 守卫 (r544 v2 Bettor APPROVE).
+    if (makerStakeKas < POOL_MAKER_STAKE_MIN_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be >= ${POOL_MAKER_STAKE_MIN_KAS} KAS (Owner 钦定 demo 实质押 skin-in-game, 单一源 L33)` });
     if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
-      if (makerStakeKas < POOL_MAKER_STAKE_MIN_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be >= ${POOL_MAKER_STAKE_MIN_KAS} KAS (Owner 钦定 demo 实质押, 单一源 L33)` });
       if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS` });
     }
     const makerStakeAmount = Math.round(makerStakeKas * 1e8);
@@ -698,8 +701,9 @@ export async function registerPoolRoutes(fastify) {
     const oracleBondKas = parseFloat(b.oracle_bond_kas);
     if (!Number.isFinite(makerStakeKas) || makerStakeKas <= 0) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be positive' });
     if (!Number.isFinite(oracleBondKas) || oracleBondKas <= 0) return reply.code(400).send({ ok: false, error: 'oracle_bond_kas must be positive' });
+    // 100 KAS Owner 钦定 demo 实质押 — 移出 NO_LIMITS 守卫 (r544 v2 Bettor APPROVE).
+    if (makerStakeKas < POOL_MAKER_STAKE_MIN_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be >= ${POOL_MAKER_STAKE_MIN_KAS} KAS (Owner 钦定 demo 实质押 skin-in-game, 单一源 L33)` });
     if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
-      if (makerStakeKas < POOL_MAKER_STAKE_MIN_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be >= ${POOL_MAKER_STAKE_MIN_KAS} KAS (Owner 钦定 demo 实质押, 单一源 L33)` });
       if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS` });
     }
     const makerStakeAmount = Math.round(makerStakeKas * 1e8);
@@ -1436,15 +1440,30 @@ export async function registerPoolRoutes(fastify) {
   // GET /api/pool/market/:id — full row + computed status (= UI detail A.2b + cycle 5 poll-script fix)
   // Returns: { ok, market: {...all columns + parsed metadata}, sigs_collected, bettor_count }
   // GET /api/pool/markets — discovery list for the prediction-menu bot (S-C) + UI. S-B (Bettor r240).
-  // Read-only. Filters: ?status= (e.g. pending_bettors), ?category= (politics/economy/sports/crypto/other),
+  // Read-only. Filters: ?status= (e.g. pending_bettors), ?category=, ?q=<keyword> (LIKE NOCASE on
+  // resolution_rule_spec), ?tag= (= 内置专题: worldcup → LIKE %FIFA% OR %World Cup% OR %世界杯%).
   // ?limit= (default 50, cap 200), ?offset=. Newest first. Summary fields only + live bettor_count,
   // so the grammY menu can group by category without N round-trips.
+  //
+  // KANet-UI 2026-06-06 (Owner P0 世界杯+搜索, Bettor r... ③ APPROVE): q/tag 加新 filter, 不动现有
+  // status/category 模式. 复用 specIsUsable 一致性 (= Bettor 1要求): 搜索/专题结果也得是结构化有规则,
+  // 不把 21 个烂单推给用户. specIsUsable 在 bot 客户端 filter (= 现有 startBet L322 同模式),
+  // backend 仅 SQL filter 不再 specIsUsable, 由调用方 (bot) 负责一致性. 单一源是 specIsUsable JS helper.
   fastify.get('/api/pool/markets', async (request, reply) => {
     const q = request.query || {};
     const where = [];
     const params = [];
     if (q.status)   { where.push('protocol_status = ?'); params.push(String(q.status)); }
     if (q.category) { where.push('category = ?'); params.push(String(q.category)); }
+    if (q.q) {
+      where.push('LOWER(resolution_rule_spec) LIKE LOWER(?)');
+      params.push(`%${String(q.q).replace(/[%_]/g, ch => '\\' + ch)}%`);
+    }
+    if (q.tag === 'worldcup') {
+      // Owner 钦定专题: 2026 FIFA World Cup. patterns 涵盖 polymarket 灌入的常见命名 + 中文.
+      where.push('(LOWER(resolution_rule_spec) LIKE ? OR LOWER(resolution_rule_spec) LIKE ? OR resolution_rule_spec LIKE ?)');
+      params.push('%fifa%', '%world cup%', '%世界杯%');
+    }
     const limit = Math.min(Math.max(parseInt(q.limit, 10) || 50, 1), 200);
     const offset = Math.max(parseInt(q.offset, 10) || 0, 0);
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
