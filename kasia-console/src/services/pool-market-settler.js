@@ -105,19 +105,53 @@ export function stopPoolMarketSettlerCron() {
 async function legacyRefundBuilderTick() {
   try {
     const nowSec = Math.floor(Date.now() / 1000);
+    // J2-tn r392 #28 v4 (Bettor ③ 05:46 APPROVE + 05:48 trial 放行): 加入 pre-r380 sha256-baked
+    // v0.7 markets (= 通过 pool_snapshots self-consistency 判别器: stored != blake2b recompute).
+    // 不依赖时间窗 / canonical root, 只看自家 algo fingerprint (= r204 BLOCK 修, r207 trial 放).
+    //
+    // Step 1: legacy ver=null/v0.5 + 过期 + side_lock_tx + 未结算 (= 原 r391 scope).
+    // Step 2: v0.7 collecting_sigs + submit_fail_count > 5 + 判别器 mismatch (= sha256 baked 不可救).
+    const { buildPoolMerkleTree } = await import('./pool-merkle-v06.mjs');
+    // 候选 markets (= step 2 v0.7 unfixable detect).
+    const v07Cands = sqlite.prepare(`
+      SELECT id, pool_merkle_root, metadata FROM pool_markets
+      WHERE protocol_version = 'v0.7'
+        AND protocol_status = 'collecting_sigs'
+    `).all();
+    const unfixableIds = [];
+    for (const m of v07Cands) {
+      try {
+        const meta = JSON.parse(m.metadata || '{}');
+        if ((meta.submit_fail_count || 0) <= 5) continue;
+        const ps = sqlite.prepare('SELECT pool_pks_json FROM pool_snapshots WHERE market_id = ?').get(m.id);
+        if (!ps) continue;
+        const pks = JSON.parse(ps.pool_pks_json);
+        const recomputed = buildPoolMerkleTree(pks).root.toString('hex');
+        if (recomputed !== m.pool_merkle_root) {
+          unfixableIds.push(m.id);
+          // 大声日志 (= Bettor r202b a/b/c 三约束 #1: 别 silent)
+          console.warn(`[pool-settler:legacy-refund] UNFIXABLE PRE-r380 SHA256-BAKED ROOT market=${m.id.slice(0,16)} stored=${m.pool_merkle_root.slice(0,16)} blake2b_recomputed=${recomputed.slice(0,16)} submit_fails=${meta.submit_fail_count} — eligible for refund.`);
+        }
+      } catch {}
+    }
+
+    const unfixablePlaceholders = unfixableIds.length ? unfixableIds.map(() => '?').join(',') : "''";
     const sides = sqlite.prepare(`
       SELECT pbs.id AS side_id, pbs.market_id, pbs.bettor_pk, pbs.side_p2sh, pbs.side_lock_tx,
              pbs.side_redeem_script_hex, pbs.stake_amount, pm.deadline, pm.protocol_version
       FROM pool_bettor_sides pbs
       JOIN pool_markets pm ON pm.id = pbs.market_id
-      WHERE (pm.protocol_version IS NULL OR pm.protocol_version = 'v0.5')
+      WHERE (
+              (pm.protocol_version IS NULL OR pm.protocol_version = 'v0.5')
+              OR pm.id IN (${unfixablePlaceholders})
+            )
         AND pm.deadline <= ?
         AND pbs.side_lock_tx IS NOT NULL
         AND pbs.claim_txid IS NULL
         AND (pbs.refund_attempted_at IS NULL OR pbs.refund_attempted_at < datetime('now', '-1 hour'))
       ORDER BY pbs.stake_amount ASC
       LIMIT ?
-    `).all(nowSec, parseInt(process.env.LEGACY_REFUND_BATCH, 10) || 1);
+    `).all(...unfixableIds, nowSec, parseInt(process.env.LEGACY_REFUND_BATCH, 10) || 1);
     // J2-tn r391 关2 硬门: 默认 batch=1 trial 模式. Bettor ④ 验过最小 1 笔 chain accept + bettor 实收
     // 后 env LEGACY_REFUND_BATCH=5 bump 进 batch. 不接受未验 ramp.
     if (!sides.length) return { processed: 0 };
