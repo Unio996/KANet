@@ -1897,17 +1897,23 @@ async function handleCollectingSigs(market) {
   // zero-sig 占位. v0.6/v0.7 SS settle_aggregate checkSig 内 validSigs counter — dummy
   // sig 验失败 counter 不增, 但其他 4 sig PASS → counter=4 ≥ 4-of-5 threshold → SS accept.
   // Dummy sig 必 same byte format as real (= 41 + 00×64 + 01 push-encoded) 不破坏 sigOpCount/sighash.
-  // J2-tn r386 (Bettor 01:31 ③ 锁 suspect b): BIP340 schnorr verify on all-zero sig
-  // (r=0/s=0) → lift_x(0) ERROR (= x=0 不一定 secp256k1 曲线点) → checkSig 不返 false
-  // 而是直接 abort script → 'verification failed'. validSigs 计数器永远不增 c4 slot 也
-  // 永远没机会 ≥4. #12/#13 SS reject 实因.
+  // J2-tn r386→r387 (Bettor 01:31 方案2 fallback): r386 OP_0 实证 SS 仍 reject
+  // (scriptSig 3983B with `00` at c4 slot 实证, 但 'verification failed' 重现).
+  // = Kaspa OpCheckSig 对 empty sig 也 abort (= 不返 false), 同 all-zero r=0 命运.
   //
-  // Fix: c4 silent slot push OP_0 (= empty sig 1-byte 0x00). Kaspa OpCheckSig pops empty
-  // bytes → 直接返 false (parse fail, 不做 lift_x) → validSigs skip c4 slot → 4 实签
-  // valid → counter=4 ≥ threshold → SS accept settle TX.
+  // 方案 2: structurally-valid sig with r=G.x (= secp256k1 generator x-coord, 必 lift_x
+  // 成功 = G itself), s=arbitrary (= all 0x01). Sig 格式有效 → checkSig 算 verify →
+  // 不通过 (= sig 不匹 message) → 返 false → validSigs counter skip c4 → counter=4 →
+  // SS accept.
   //
-  // OP_0 = 0x00 pushes empty bytes. Replaces 66-byte all-zero push. scriptSig 整体短 65 bytes.
-  const DUMMY_SIG_PUSH_HEX = '00';  // OP_0 empty push, Kaspa checkSig 安全返 false 不 abort
+  // G.x BIP340: 0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798
+  // s: 0x0101...01 (32 bytes, < curve order, valid scalar)
+  // sighashType: 0x01
+  // Total push: 0x41 + 32B Gx + 32B 0x01... + 0x01 = 66 bytes (same length as real sig).
+  const DUMMY_SIG_PUSH_HEX = '41'
+    + '79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'  // r = G.x
+    + '0101010101010101010101010101010101010101010101010101010101010101'  // s = 0x01...01
+    + '01';  // sighashType SIGHASH_ALL
   // J2-tn r362 (now hoisted to top of handleCollectingSigs in r379): committeePksForSort
   // already loaded above for re-broadcast missing-oracle compare.
   const spineSigsByInput = [];
