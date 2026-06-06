@@ -2168,8 +2168,15 @@ export async function registerPoolRoutes(fastify) {
 
     // J1 5dd590cd0 grace fix: SS L260/270 require(tx.time >= (deadline + REFUND_GRACE_SEC) * 1000) ms.
     // J1tn r303 (Bettor 03:19 v3 approve): de-dup hardcode → import from lib/pool-refund-grace.mjs.
+    // J2-tn r391 (#28 Bettor ③ APPROVE v2 05:26): legacy v0.5 PoolSide locktime 无 grace (SS L121
+    // 严守 tx.time >= deadline*1000 ms), v06/v07 + REFUND_GRACE_SEC (L260/270 grace require).
+    // entry index: 3 for legacy (PoolSide.sil 4 entry refund=idx3), 2 for v06/v07 (PoolSide_v06/v07 3 entry refund=idx2).
+    const isLegacy = !market.protocol_version || market.protocol_version === 'v0.5';
     const { REFUND_GRACE_SEC } = await import('../lib/pool-refund-grace.mjs');
-    const lockTime = (BigInt(market.deadline) + BigInt(REFUND_GRACE_SEC)) * 1000n;
+    const lockTime = isLegacy
+      ? BigInt(market.deadline) * 1000n
+      : (BigInt(market.deadline) + BigInt(REFUND_GRACE_SEC)) * 1000n;
+    const entryIndex = isLegacy ? 3 : 2;
 
     try {
       const submitResult = await sendCommandAsync(signingRelay.id, {
@@ -2179,6 +2186,7 @@ export async function registerPoolRoutes(fastify) {
         required_input_outpoint: { outpointTxid: side.side_lock_tx, outpointIndex: 0 },
         output: { address: signingRelay.address, amountSompi: outAmount.toString() },
         lock_time: lockTime.toString(),
+        entry_index: entryIndex,
       });
       if (!submitResult?.ok || !submitResult.txId) {
         return reply.code(500).send({ ok: false, error: `relay submit fail: ${submitResult?.error || 'no txId'}` });

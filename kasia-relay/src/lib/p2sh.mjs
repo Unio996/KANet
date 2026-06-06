@@ -1298,6 +1298,10 @@ export async function unlockPoolSideRefundCancelled(args) {
     wallet, sideP2shAddress, sideRedeemScriptHex,
     requiredInputOutpoint, output,
     networkId, lockTime = 0n, txObjPreimage = null,
+    // J2-tn r391 (#28 Bettor ③ APPROVE v2 05:26): entryIndex 参数化 — legacy v0.5 PoolSide 4 entrypoint
+    // refund_market_cancelled=idx 3 (OP_3='53'); v06/v07 PoolSide 3 entrypoint refund=idx 2 (OP_2='52').
+    // 默认 2 (= v06/v07 backward-compat 现 caller 全 v06/v07). 调时显式传 3 for ver=null/v0.5.
+    entryIndex = 2,
   } = args;
   if (!wallet) throw new Error('unlockPoolSideRefundCancelled: wallet required (= bettor_relay signer)');
   if (!requiredInputOutpoint?.outpointTxid) throw new Error('requiredInputOutpoint.outpointTxid required');
@@ -1359,10 +1363,13 @@ export async function unlockPoolSideRefundCancelled(args) {
     // Bettor single-sig (= PoolSide_v07.sil L271 require(checkSig(bettorSig, pubkey(bettorPk)))).
     const bettorSigHex = createInputSignature(unsignedTx, 0, wallet.getPrivateKey(), SighashType.All);
 
-    // scriptSig: [bettorSig push] + OP_2 (selector entry 2 refund_market_cancelled) + [redeemScript push]
+    // scriptSig: [bettorSig push] + selector OP (= entry index) + [redeemScript push].
+    // J2-tn r391: entryIndex param decides selector — OP_2='52' for v06/v07, OP_3='53' for legacy v0.5.
     const sideRedeemBytes = Buffer.from(sideRedeemScriptHex, 'hex');
     const sideRedeemPushHex = _encodePushDataHex(sideRedeemBytes);
-    const scriptSigHex = bettorSigHex + '52' + sideRedeemPushHex;
+    if (entryIndex < 1 || entryIndex > 16) throw new Error(`entryIndex must be 1-16 (OP_N), got ${entryIndex}`);
+    const selectorOpHex = (0x50 + entryIndex).toString(16).padStart(2, '0');
+    const scriptSigHex = bettorSigHex + selectorOpHex + sideRedeemPushHex;
 
     const signedTx = new Transaction({
       version: 0,

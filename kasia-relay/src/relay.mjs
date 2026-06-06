@@ -753,6 +753,8 @@ if (process.send) {
             networkId: wallet.getNetworkId(),
             lockTime: BigInt(cmd.lock_time || 0),
             txObjPreimage: cmd.tx_obj_preimage || null,
+            // J2-tn r391 (#28 Bettor ③ APPROVE v2): entry_index 透传 — 2 for v06/v07, 3 for legacy v0.5.
+            entryIndex: Number.isInteger(cmd.entry_index) ? cmd.entry_index : 2,
           });
           if (cmd.requestId && process.send) {
             process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });

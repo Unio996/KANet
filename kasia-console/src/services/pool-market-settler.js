@@ -96,10 +96,79 @@ export function stopPoolMarketSettlerCron() {
   if (timer) { clearInterval(timer); timer = null; }
 }
 
+// J2-tn r391 (#28 Bettor ③ APPROVE v2 + Owner 终裁 修法 A 解冻):
+// legacy ver=null/v0.5 markets 卡死 (43c06c7 deadline-watcher 'separate concern flagged not touched').
+// 走 PoolSide.sil entry 3 refund_market_cancelled (= bettorSig + tx.time>=deadline*1000 ms, 无 grace).
+// 复用 /api/pool/market/:id/bettor-refund-claim 现有 endpoint (= POST 内 IPC pool_side_refund_cancelled_tx).
+// 不另立 endpoint, settler tick 集成. batch size 5/tick 控 RPC.
+// 关2 硬门: 第 1 笔最小 trial 必 ④ 链 accept + bettor 实收, 验过 batch 剩.
+async function legacyRefundBuilderTick() {
+  try {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const sides = sqlite.prepare(`
+      SELECT pbs.id AS side_id, pbs.market_id, pbs.bettor_pk, pbs.side_p2sh, pbs.side_lock_tx,
+             pbs.side_redeem_script_hex, pbs.stake_amount, pm.deadline, pm.protocol_version
+      FROM pool_bettor_sides pbs
+      JOIN pool_markets pm ON pm.id = pbs.market_id
+      WHERE (pm.protocol_version IS NULL OR pm.protocol_version = 'v0.5')
+        AND pm.deadline <= ?
+        AND pbs.side_lock_tx IS NOT NULL
+        AND pbs.claim_txid IS NULL
+        AND (pbs.refund_attempted_at IS NULL OR pbs.refund_attempted_at < datetime('now', '-1 hour'))
+      ORDER BY pbs.stake_amount ASC
+      LIMIT ?
+    `).all(nowSec, parseInt(process.env.LEGACY_REFUND_BATCH, 10) || 1);
+    // J2-tn r391 关2 硬门: 默认 batch=1 trial 模式. Bettor ④ 验过最小 1 笔 chain accept + bettor 实收
+    // 后 env LEGACY_REFUND_BATCH=5 bump 进 batch. 不接受未验 ramp.
+    if (!sides.length) return { processed: 0 };
+    let triggered = 0, failed = 0;
+    for (const side of sides) {
+      try {
+        // 复用 endpoint via HTTP localhost (= same-process re-entry safe, endpoint has full
+        // signing-relay resolve + IPC + UPDATE claim_txid logic).
+        const port = process.env.PORT || '3200';
+        const url = `http://127.0.0.1:${port}/api/pool/market/${side.market_id}/bettor-refund-claim`;
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ side_id: side.side_id }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (res.ok && j.refund_txid) {
+          triggered++;
+          console.log(`[pool-settler:legacy-refund] side_id=${side.side_id} market=${side.market_id.slice(0,16)} stake=${side.stake_amount} refund_txid=${j.refund_txid.slice(0,16)}`);
+        } else {
+          failed++;
+          // Surface bettor-key-cannot-sign errors per Bettor 05:24 确认点 (2) — not silent skip.
+          console.warn(`[pool-settler:legacy-refund] FAIL side_id=${side.side_id}: ${j.error || res.statusText}`);
+          // Mark refund_attempted_at to throttle retry (= 1h backoff applied via WHERE clause).
+          sqlite.prepare('UPDATE pool_bettor_sides SET refund_attempted_at = CURRENT_TIMESTAMP WHERE id = ?').run(side.side_id);
+        }
+      } catch (e) {
+        failed++;
+        console.warn(`[pool-settler:legacy-refund] exception side_id=${side.side_id}: ${e.message}`);
+        try {
+          sqlite.prepare('UPDATE pool_bettor_sides SET refund_attempted_at = CURRENT_TIMESTAMP WHERE id = ?').run(side.side_id);
+        } catch {}
+      }
+    }
+    return { processed: sides.length, triggered, failed };
+  } catch (e) {
+    console.error('[pool-settler:legacy-refund] tick exception:', e.message);
+    return { error: e.message };
+  }
+}
+
 export async function poolSettlerTick() {
   if (running) { return { skipped: true }; }
   running = true;
   try {
+    // J2-tn r391 #28: legacy-refund-builder before main tick. 解冻 ver=null/v0.5 卡单.
+    // 独立 path 不碰 committee 路 (= Bettor ③ 关1 护栏达标).
+    const legacyResult = await legacyRefundBuilderTick();
+    if (legacyResult.processed > 0) {
+      console.log(`[pool-settler:legacy-refund] tick: processed=${legacyResult.processed} triggered=${legacyResult.triggered} failed=${legacyResult.failed}`);
+    }
     // ── Deadline-watcher (Bettor P1 gap fix) ────────────────────────────────
     // pending_bettors markets past deadline had NO auto-advance: the /settle endpoint
     // (pool.js) was manual-only, never called by any cron/bot → markets stuck in
