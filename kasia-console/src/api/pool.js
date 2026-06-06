@@ -30,6 +30,8 @@ const MAX_BETTORS_L4 = 50;                       // PoolSpine.sil L13 cap
 // Per-market math guards (= storage mass / oracle fee floor) still enforce at L1 console + SS contract.
 // Env override 保留可 ops set finite cap if needed.
 const MAKER_STAKE_MAX_KAS = parseFloat(process.env.POOL_MAKER_STAKE_MAX_KAS) || Infinity;
+// Owner 2026-06-06 钦定: maker 发起市场最低 100 KAS (= demo 实质押 + 抗灌水). Bettor ③ APPROVE r541 单一源.
+const POOL_MAKER_STAKE_MIN_KAS = 100;
 
 function deriveXOnlyPubkey(address) {
   return import('kaspa-wasm').then(kaspa => {
@@ -268,8 +270,7 @@ export async function registerPoolRoutes(fastify) {
     if (!Number.isFinite(oracleBondKas) || oracleBondKas <= 0) return reply.code(400).send({ ok: false, error: 'oracle_bond_kas must be positive' });
     // 5/28 Owner 钦定: testnet 0 limits. Skip 1 KAS min + softcap when KANET_TESTNET_NO_LIMITS=1.
     if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
-      // Owner P0 + Bettor r25: maker min raised 1 → 100 KAS (= maker skin-in-game, prevents ghost markets).
-      if (makerStakeKas < 100) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be >= 100 KAS (maker skin-in-game floor per Owner P0, Bettor r25 — prevents ghost markets where maker has no real exposure)' });
+      if (makerStakeKas < POOL_MAKER_STAKE_MIN_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be >= ${POOL_MAKER_STAKE_MIN_KAS} KAS (Owner 钦定 demo 实质押, 单一源 L33)` });
       if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS (v0.5 testnet per-market softcap, Bettor r444 + Owner钦定 SS-baked)` });
     }
     const makerStakeAmount = Math.round(makerStakeKas * 1e8);
@@ -469,8 +470,7 @@ export async function registerPoolRoutes(fastify) {
     if (!Number.isFinite(makerStakeKas) || makerStakeKas <= 0) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be positive' });
     if (!Number.isFinite(oracleBondKas) || oracleBondKas <= 0) return reply.code(400).send({ ok: false, error: 'oracle_bond_kas must be positive' });
     if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
-      // Owner P0 + Bettor r25: maker min raised 1 → 100 KAS (skin-in-game; same rationale as v0.5 path).
-      if (makerStakeKas < 100) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be >= 100 KAS (maker skin-in-game floor)' });
+      if (makerStakeKas < POOL_MAKER_STAKE_MIN_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be >= ${POOL_MAKER_STAKE_MIN_KAS} KAS (Owner 钦定 demo 实质押, 单一源 L33)` });
       if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS` });
     }
     const makerStakeAmount = Math.round(makerStakeKas * 1e8);
@@ -699,7 +699,7 @@ export async function registerPoolRoutes(fastify) {
     if (!Number.isFinite(makerStakeKas) || makerStakeKas <= 0) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be positive' });
     if (!Number.isFinite(oracleBondKas) || oracleBondKas <= 0) return reply.code(400).send({ ok: false, error: 'oracle_bond_kas must be positive' });
     if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
-      if (makerStakeKas < 100) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be >= 100 KAS (maker skin-in-game floor)' });
+      if (makerStakeKas < POOL_MAKER_STAKE_MIN_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be >= ${POOL_MAKER_STAKE_MIN_KAS} KAS (Owner 钦定 demo 实质押, 单一源 L33)` });
       if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS` });
     }
     const makerStakeAmount = Math.round(makerStakeKas * 1e8);
@@ -809,7 +809,7 @@ export async function registerPoolRoutes(fastify) {
     return reply.send({
       ok: true,
       default_miner_fee_sompi: 50_000,
-      maker_stake_min_kas: 100,   // Owner 2026-06-06 钦定: 发起人最低 100 KAS (= demo 实质押 + 抗灌水)
+      maker_stake_min_kas: POOL_MAKER_STAKE_MIN_KAS,   // 单一源, 见 L33 const
       maker_stake_max_kas: MAKER_STAKE_MAX_KAS,
       bettor_stake_min_kas: 0.5,
       bettors_max: 50,

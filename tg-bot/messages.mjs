@@ -37,7 +37,6 @@ export function swapFlow(broker) {
     '2) broker 会问你 USDT 收哪条链 + 地址(回复 "用 bnb 0x..." 之类),然后链上回款。',
     '',
     '⚠ 钱全程你自己链上掌控:你从自己地址发起付款,bot 不经手、碰不到你的钱。',
-    `在网页操作/看汇率: ${CONFIG.consoleUrl}/exchange`,
   ].join('\n');
 }
 
@@ -51,7 +50,7 @@ export function betFlow(broker) {
     'broker 只撮合/引导,收协议内置的 broker 佣金(落 broker 链上地址)。',
     '',
     '⚠ 你自己链上锁定 + 签名,bot 不碰你的钱。',
-    `在网页操作: ${CONFIG.consoleUrl}/predictions`,
+    '直接 /bet 开始押注 (全 Telegram 菜单交互, 不跳网页)。',
   ].join('\n');
 }
 

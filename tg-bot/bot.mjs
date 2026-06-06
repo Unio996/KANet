@@ -72,7 +72,7 @@ bot.callbackQuery(/^mybet:addmore:(.+)$/, async (ctx) => {
   const reply = await PM.startBetFromMarket(String(ctx.from.id), marketId);
   await ctx.reply(reply);
 });
-bot.command('discover', (ctx) => ctx.reply('浏览:\n' + CONFIG.consoleUrl + '/exchange\n' + CONFIG.consoleUrl + '/predictions'));
+bot.command('discover', (ctx) => ctx.reply('浏览:\n· /bet — 押注预测市场 (全菜单选品类/市场)\n· /swap — 兑换 KAS ↔ USDT (经 broker)\n· /mybets — 看自己的押注 + 状态'));
 
 // S-C menu navigation — plain-text numeric replies advance the bet flow (commands handled above).
 bot.on('message:text', async (ctx) => {

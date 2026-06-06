@@ -144,7 +144,67 @@ export async function formatMyBets(linkedAddr) {
     byMarket.get(p.market_id).push(p);
   }
 
-  const lines = [`📋 你的押注 (${positions.length} 笔, ${byMarket.size} 个市场):`];
+  // KANet-UI 2026-06-06 Owner P0: 用户必须看清三个总数 (投入 / 返回 / 在押) + 明细分布.
+  // 投入总 = 所有押注 stake. 返回总 = 已赢实拿 actual_payout + 已退 refund stake. 在押总 = 未结算 stake.
+  const totals = {
+    stakeInTotal: 0,    // 投入总 = 所有押注 stake (永久不减, 历史输入)
+    payoutBackTotal: 0, // 返回总 = 赢实拿 + 退款拿回 (实际收到 KAS)
+    stakeOpenTotal: 0,  // 在押总 = 押注中 + 已截止等开奖 + 待入账 (= 还在系统里的钱)
+    wonKas: 0,
+    lostStakeKas: 0,
+    refundKas: 0,
+    settledPendingCnt: 0,
+    settledPendingStake: 0,
+    openCnt: 0,
+    openStake: 0,
+    awaitingResultCnt: 0,
+    awaitingResultStake: 0,
+  };
+  const nowSec = Math.floor(Date.now() / 1000);
+  for (const p of positions) {
+    const stake = Number(p.stake_kas) || 0;
+    totals.stakeInTotal += stake;
+    if (p.settle_txid && p.did_win === true) {
+      const payout = Number(p.actual_payout_kas) || 0;
+      totals.wonKas += payout;
+      totals.payoutBackTotal += payout;
+    } else if (p.settle_txid && p.did_win === false) {
+      totals.lostStakeKas += stake;
+    } else if (p.settle_txid) {
+      // settle_txid 有但 did_win 不明 — 链上 settle 了但本地状态未推进
+      totals.settledPendingCnt++;
+      totals.settledPendingStake += stake;
+      totals.stakeOpenTotal += stake;   // 还没拿回, 算在押
+    } else if (p.refund_txid) {
+      totals.refundKas += stake;
+      totals.payoutBackTotal += stake;
+    } else if (p.side_lock_tx) {
+      if (p.deadline_unix && Number(p.deadline_unix) < nowSec) {
+        totals.awaitingResultCnt++;
+        totals.awaitingResultStake += stake;
+      } else {
+        totals.openCnt++;
+        totals.openStake += stake;
+      }
+      totals.stakeOpenTotal += stake;
+    }
+  }
+  const netKas = totals.payoutBackTotal - totals.stakeInTotal;
+  const netSign = netKas >= 0 ? '+' : '';
+  const lines = [`📋 你的押注 (${positions.length} 笔, ${byMarket.size} 个市场)`];
+  // 三个核心数字 (永显):
+  lines.push(`💰 投入总: ${totals.stakeInTotal.toFixed(4)} KAS`);
+  lines.push(`🔁 返回总: ${totals.payoutBackTotal.toFixed(4)} KAS (赢实拿 ${totals.wonKas.toFixed(4)} + 退款 ${totals.refundKas.toFixed(4)})`);
+  lines.push(`📍 在押总: ${totals.stakeOpenTotal.toFixed(4)} KAS (还在系统里的钱)`);
+  lines.push(`📊 净 ${netSign}${netKas.toFixed(4)} KAS  ${netKas >= 0 ? '🎉' : '😞'}`);
+  // 明细分布 (按状态拆):
+  const detail = [];
+  if (totals.openCnt > 0)            detail.push(`押注中 ${totals.openCnt} 笔 (${totals.openStake.toFixed(4)} KAS)`);
+  if (totals.awaitingResultCnt > 0)  detail.push(`等开奖 ${totals.awaitingResultCnt} 笔 (${totals.awaitingResultStake.toFixed(4)} KAS)`);
+  if (totals.settledPendingCnt > 0)  detail.push(`待入账 ${totals.settledPendingCnt} 笔 (${totals.settledPendingStake.toFixed(4)} KAS)`);
+  if (totals.lostStakeKas > 0)       detail.push(`已输 ${totals.lostStakeKas.toFixed(4)} KAS`);
+  if (detail.length) lines.push(`明细: ${detail.join(' · ')}`);
+  lines.push('');
 
   for (const [marketId, group] of byMarket) {
     // 按 direction 二次聚合 (YES / NO 各加总 stake, 累计 count, 收集状态)
@@ -165,7 +225,8 @@ export async function formatMyBets(linkedAddr) {
 
     // shared metadata 取 group 第一笔 (question / odds / deadline 同市场共享)
     const sample = group[0];
-    const title = truncSmart(sample.question || marketId, 70);
+    // KANet-UI 2026-06-06 Owner P0: backend 的 question 可能是 raw JSON spec, specTitle 抽干净题干.
+    const title = truncSmart(specTitle(sample.question) || marketId, 70);
 
     lines.push('');
     lines.push(`📍 ${title}`);
@@ -183,11 +244,13 @@ export async function formatMyBets(linkedAddr) {
       const onlyLost = s.lost === a.count;
       const onlyRefund = s.refunded === a.count;
       let statusStr;
+      const onlySettledPending = s.settled_pending === a.count;
       if (onlyWon)        statusStr = `🎉 赢 +${a.actualPayoutSum.toFixed(4)} KAS`;
       else if (onlyLost)  statusStr = `😞 输 -${a.stakeSum.toFixed(4)} KAS`;
       else if (onlyRefund) statusStr = `💸 已退款`;
-      else if (onlyOpen)  statusStr = (sample.deadline_unix && Number(sample.deadline_unix) < Math.floor(Date.now() / 1000)) ? `🔒 押注已截止 · 等开奖结算` : `⏳ 已押注等开奖`;
-      else                statusStr = `📊 状态混合 (赢 ${s.won} · 输 ${s.lost} · 等 ${s.open} · 退 ${s.refunded})`;
+      else if (onlySettledPending) statusStr = `⚖ 已结算 · 待入账 (链上 settle TX 已上)`;
+      else if (onlyOpen)  statusStr = (sample.deadline_unix && Number(sample.deadline_unix) < Math.floor(Date.now() / 1000)) ? `⏳ 已截止 · 等委员投票出结果` : `📍 已押注 · 截止后开奖`;
+      else                statusStr = `📊 混合 (赢 ${s.won} · 输 ${s.lost} · 等 ${s.open} · 退 ${s.refunded} · 待入账 ${s.settled_pending})`;
       const cnt = a.count > 1 ? ` (${a.count} 笔)` : '';
       lines.push(`• ${dir} ${a.stakeSum.toFixed(4)} KAS${cnt} · ${statusStr}`);
       // 若赢可拿 = 直接加总每笔 payout_if_win_kas. 后端 endpoint 是 query-time 同池子快照统一算每笔
@@ -215,8 +278,8 @@ export async function formatMyBets(linkedAddr) {
         lines.push(`  截止 ${ymd} · 开奖后自动结算到账绑定地址`);
       }
     }
-    // KANet-UI #12 P1.1: 看怎么定的 — 链上证据链页 (跨节点 settle / 各 oracle 投了什么 / TX 可点 explorer).
-    lines.push(`  🔍 看怎么定的: ${CONFIG.consoleUrl}/predictions/pool/${marketId}`);
+    // KANet-UI 2026-06-06 Owner 实证: P1.1 ship 的"看怎么定的" URL = 127.0.0.1 局内网, 用户外部点不开
+    // = 我违 [[no-impl-jargon]] + Owner r250 全菜单交互 0 网页跳转纪律. 删 URL.
   }
   return lines.join('\n');
 }
