@@ -405,8 +405,7 @@ function oracleHome() {
     async loadTrust() {
       this.trustLoading = true; this.marketsLoading = true; this.trustError = '';
       try {
-        // KANet-UI 2026-06-05 派工: canonical 单一源 (Bettor docs/2026-06-05-oracle-pool-single-source-enforcement.md).
-        // chain_view (oracle_pool_chain_view) 主, oracle_pool_membership DEPRECATED 仅 last-resort 兜底。
+        // 数据源: /api/oracle-pool/chain-snapshot canonical chain_view 派生 (见 docs/DATABASE.md 预言机池层 + docs/2026-06-05-oracle-pool-single-source-enforcement.md).
         const [snapResp, mktResp] = await Promise.allSettled([
           fetch('/api/oracle-pool/chain-snapshot').then(r => r.json()),
           fetch('/api/pool/markets?limit=50').then(r => r.json()),
@@ -462,7 +461,7 @@ function oracleHome() {
 
     async loadMineAgents() {
       try {
-        // /api/oracles = list relays where is_oracle=1 (legacy registry; v0.6 真池在 /api/oracle-pool/state, 但 operator-self-view 用 legacy 注册即可)
+        // /api/oracles legacy is_oracle 兼容路径 (= operator-self-view 注册即可显). 新模型 oracle 身份 canonical = oracle_stake_enrollments, 见 docs/DATABASE.md 预言机池层.
         // (R-1 audit fix: /api/relays was 404 silent, oracle selector 跑空 — Owner UI audit 2026-05-30).
         const r = await fetch('/api/oracles');
         const j = await r.json();
