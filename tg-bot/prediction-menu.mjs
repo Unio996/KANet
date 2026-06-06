@@ -3,6 +3,7 @@
 // 0-key/0-custody (J1 S5): bot 只读 + 显; 价值步 (stage4-5: escrow 地址 + 用户自钱包付 + 链上检测)
 //   待 J2/J1 taker-stake-external backend, 此处先 stub + 错付预防文案.
 import * as api from './console-api.mjs';
+import { CONFIG } from './config.mjs';
 import { readFileSync, writeFileSync, existsSync, renameSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
@@ -207,6 +208,8 @@ export async function formatMyBets(linkedAddr) {
         lines.push(`  截止 ${ymd} · 开奖后自动结算到账绑定地址`);
       }
     }
+    // KANet-UI #12 P1.1: 看怎么定的 — 链上证据链页 (跨节点 settle / 各 oracle 投了什么 / TX 可点 explorer).
+    lines.push(`  🔍 看怎么定的: ${CONFIG.consoleUrl}/predictions/pool/${marketId}`);
   }
   return lines.join('\n');
 }
