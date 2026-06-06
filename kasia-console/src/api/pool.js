@@ -809,7 +809,7 @@ export async function registerPoolRoutes(fastify) {
     return reply.send({
       ok: true,
       default_miner_fee_sompi: 50_000,
-      maker_stake_min_kas: 1,
+      maker_stake_min_kas: 100,   // Owner 2026-06-06 钦定: 发起人最低 100 KAS (= demo 实质押 + 抗灌水)
       maker_stake_max_kas: MAKER_STAKE_MAX_KAS,
       bettor_stake_min_kas: 0.5,
       bettors_max: 50,
