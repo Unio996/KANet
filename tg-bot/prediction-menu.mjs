@@ -412,17 +412,18 @@ async function _startBetImpl(tgUser) {
   });
   const menu = [];
   // entries[i] = { type: 'worldcup'|'search'|'category', markets?, cat? }
+  // KANet-UI 2026-06-06 Owner 钦定: 顺序 1.🏆专题 → 2-N.categories (浏览) → 末.🔍搜索 (兜底).
   const entries = [];
   if (worldCupMarkets.length > 0) {
     menu.push(`🏆 世界杯专题 (${worldCupMarkets.length} 个市场)`);
     entries.push({ type: 'worldcup', markets: worldCupMarkets });
   }
-  menu.push('🔍 搜索市场 (回复关键词找)');
-  entries.push({ type: 'search' });
   for (const cat of categories) {
     menu.push(`${cat} (${byCat[cat].length} 个市场)`);
     entries.push({ type: 'category', cat, markets: byCat[cat] });
   }
+  menu.push('🔍 搜索市场 (回复关键词找)');
+  entries.push({ type: 'search' });
   sessions.set(tgUser, { stage: 'category', entries });
   const lines = ['🎲 押注预测市场 — 选(回复编号):', ''];
   menu.forEach((label, i) => lines.push(`${i + 1}. ${label}`));
