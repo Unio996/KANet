@@ -135,6 +135,9 @@ async function legacyRefundBuilderTick() {
       } catch {}
     }
 
+    // J2-tn r393 #25 Step 3 (Bettor r221 APPROVE): MIN_POT cancel markets 拉 bettor sides 同款
+    // legacyRefundBuilderTick 自取 (= entry 2 OP_2 + (deadline+7200)*1000 ms via pool.js
+    // bettor-refund-claim isLegacy 检 v0.7 path). maker stake 由 dispatchRefund 已 trigger 异步.
     const unfixablePlaceholders = unfixableIds.length ? unfixableIds.map(() => '?').join(',') : "''";
     const sides = sqlite.prepare(`
       SELECT pbs.id AS side_id, pbs.market_id, pbs.bettor_pk, pbs.side_p2sh, pbs.side_lock_tx,
@@ -144,6 +147,8 @@ async function legacyRefundBuilderTick() {
       WHERE (
               (pm.protocol_version IS NULL OR pm.protocol_version = 'v0.5')
               OR pm.id IN (${unfixablePlaceholders})
+              OR (pm.protocol_status = 'cancelled'
+                  AND json_extract(pm.metadata, '$.cancel_reason') = 'min_pot_undersize')
             )
         AND pm.deadline <= ?
         AND pbs.side_lock_tx IS NOT NULL
@@ -582,6 +587,31 @@ export async function poolSettlerTick() {
         if (decision.action === 'consensus') {
           consensus++;
           console.log(`[pool-settler] CONSENSUS market=${market.id.slice(0,12)} winner=${decision.winner} unanimous=${decision.unanimous} silent_oracle=${decision.silentOracleIndex ?? 'none'}`);
+          // J2-tn r393 #25 MIN_POT 前置守门 (Bettor r217 钦定 + r220 完整性 + r221 APPROVE):
+          // PoolSpine_v07.sil L300 require(globalYesTotal + globalNoTotal >= 1e10 sompi = 100KAS).
+          // 总池 = maker_stake + Σ bettor_sides.stake_amount. < 1e10 → dispatchPhase2 必 SS reject
+          // (= zc9jw/xejkf 7 KAS 实证). 不 dispatch 走死循环 + r389 backoff (= D9 违反留死单).
+          // 改 路由 cancel + 通知 legacyRefundBuilderTick Step 3 自取 (= maker dispatchRefund +
+          // bettor sides 各退). 大声 warn 不 silent.
+          if (market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7') {
+            const totalPool = BigInt(market.maker_stake_amount || 0) +
+              sqlite.prepare('SELECT COALESCE(SUM(CAST(stake_amount AS INTEGER)), 0) AS s FROM pool_bettor_sides WHERE market_id = ?').get(market.id).s;
+            const MIN_POT_SOMPI = 10_000_000_000n;  // 100 KAS = 1e10 sompi (= PoolSpine_v07.sil L300 钦定)
+            if (BigInt(totalPool) < MIN_POT_SOMPI) {
+              console.warn(`[pool-settler:min-pot] market=${market.id.slice(0,12)} pool=${(Number(totalPool)/1e8).toFixed(2)}KAS < 100KAS MIN_POT → cancel + refund route (D9 自愈, 不 dispatch死单)`);
+              const curMeta0 = JSON.parse(market.metadata || '{}');
+              curMeta0.cancel_reason = 'min_pot_undersize';
+              curMeta0.cancel_pool_sompi = totalPool.toString();
+              curMeta0.cancelled_at = new Date().toISOString();
+              sqlite.prepare("UPDATE pool_markets SET protocol_status = 'cancelled', metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+                .run(JSON.stringify(curMeta0), market.id);
+              // maker dispatchRefund (= 已有 pool_refund_maker_unjoined_tx 流) 异步, 不等待.
+              dispatchRefund(market, { action: 'refund', reason: 'min_pot_undersize cancel-refund' }).catch(e =>
+                console.warn(`[pool-settler:min-pot] maker dispatchRefund market=${market.id.slice(0,12)}: ${e.message}`));
+              refund++;
+              continue;
+            }
+          }
           // Phase 2a-2: skip if already dispatched (check metadata.phase2_dispatched_at)
           let meta = {};
           try { meta = JSON.parse(market.metadata || '{}'); } catch {}
