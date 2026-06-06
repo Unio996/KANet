@@ -124,6 +124,8 @@ export async function poolSettlerTick() {
       console.log(`[pool-settler] deadline-watcher: advanced ${dueMarkets.length} pending_bettors → verifying (deadline passed): ${dueMarkets.map(m => m.id.slice(-5)).join(',')}`);
     }
 
+    // J2-tn r388 (#24 settler 饥饿根治 — Bettor 02:18 钦定 自治闭环地基):
+    // ORDER BY updated_at DESC = 活跃市场优先 (= 新近活动 process 在前, stale markets 不阻塞 demo).
     const markets = sqlite.prepare(`
       SELECT id, maker_relay_id, spine_p2sh, spine_lock_tx, oracle1_pk, oracle2_pk, oracle3_pk,
              oracle_relay_ids, deadline, protocol_status, sides_merkle_root, broker_pk, broker_fee_pct, broker_relay_id,
@@ -133,11 +135,35 @@ export async function poolSettlerTick() {
       FROM pool_markets
       WHERE protocol_status IN ('verifying', 'collecting_sigs', 'refunding')
         AND deadline <= ?
+      ORDER BY updated_at DESC
     `).all(Math.floor(Date.now() / 1000));
     if (!markets.length) return { ok: true, processed: 0 };
 
+    // J2-tn r388 #24 time-box: settler tick max duration 30s. Stale 死单 retry chain 若爆 30s,
+    // break 让 active 市场下一 tick 仍有机会 process. log unprocessed count.
+    const TICK_TIMEBOX_MS = parseInt(process.env.POOL_SETTLER_TIMEBOX_MS, 10) || 30_000;
+    const tickStartMs = Date.now();
+
     let consensus = 0, pending = 0, refund = 0, errored = 0, doomed = 0, sampledCommittee = 0;
+    let processedCount = 0;
     for (const market of markets) {
+      // J2-tn r388 #24 time-box check: 处理超 30s 后 break (= 同 tick 内有 stale retry 不阻塞下个 tick).
+      if (Date.now() - tickStartMs > TICK_TIMEBOX_MS) {
+        const remaining = markets.length - processedCount;
+        console.warn(`[pool-settler] tick time-box ${TICK_TIMEBOX_MS}ms hit after ${processedCount}/${markets.length} markets, ${remaining} deferred to next tick`);
+        break;
+      }
+      processedCount++;
+      // J2-tn r388 #24 exponential backoff: meta.skip_until_ms (epoch ms) set after repeated
+      // sample failures. Skip if set + 未到. Active state (collecting_sigs / refunding +
+      // refund_dispatched_at) 仍走原 handler 不 skip (= 完成中状态优先).
+      let backoffMeta = {};
+      try { backoffMeta = JSON.parse(market.metadata || '{}'); } catch {}
+      if (backoffMeta.skip_until_ms && Date.now() < backoffMeta.skip_until_ms
+          && market.protocol_status === 'verifying') {
+        doomed++;
+        continue;
+      }
       try {
         // Phase 2b Ship #1 — doomed-market skip. A market marked needs_larger_pot can never
         // settle (settle TX storage mass exceeds the 500k cap). Without this skip dispatchPhase2
@@ -344,7 +370,18 @@ export async function poolSettlerTick() {
               }
             } catch (sampleErr) {
               // F-S1 finality not met / no blocks / snapshot missing → log + skip this tick.
-              console.log(`[pool-settler] committee sample retry market=${market.id.slice(0,12)}: ${sampleErr.message}`);
+              // J2-tn r388 #24 exp backoff: count failures + set skip_until_ms. After N
+              // failures, settler 跳过 N ticks. mainnet: stale 死单不再 starve active markets.
+              const cur = {};
+              try { Object.assign(cur, JSON.parse(market.metadata || '{}')); } catch {}
+              cur.sample_fail_count = (cur.sample_fail_count || 0) + 1;
+              cur.sample_last_err = sampleErr.message?.slice(0, 200);
+              // Exp backoff: 60s × 2^(N-1), cap 1h. After 10 fails (~17h cumulative) 退到 1h cap.
+              const backoffSec = Math.min(60 * Math.pow(2, Math.max(0, cur.sample_fail_count - 1)), 3600);
+              cur.skip_until_ms = Date.now() + backoffSec * 1000;
+              sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+                .run(JSON.stringify(cur), market.id);
+              console.log(`[pool-settler] committee sample retry market=${market.id.slice(0,12)} fail#${cur.sample_fail_count} backoff=${backoffSec}s: ${sampleErr.message}`);
               pending++;
               continue;
             }
