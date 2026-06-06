@@ -35,8 +35,13 @@ const POOL_MAKER_STAKE_MIN_KAS = 100;
 
 // KANet-UI 2026-06-06 (Bettor ③ APPROVE r546 + Bettor 钦定双层堵): 创建端结构化 spec 强制.
 // 配 bot specIsUsable (= 展示端 filter, tg-bot/prediction-menu.mjs) 形成双层守门:
-// 创建端拒 = 烂单源头堵; 展示端滤 = 历史烂单不显. Follow-up: 抽 lib/spec-validation
-// (= cross-dir 真单一源 import), 短期接受 pool.js + bot 两处同步漂移风险, 改时一起改.
+// 创建端拒 = 烂单源头堵; 展示端滤 = 历史烂单不显.
+// **绑死 voter deriveVote 依赖** (Bettor r243 加固): voter (bettor-prediction-voter.js)
+// kanet_native deriveVote 强制 obj.data_source_canonical URL non-empty (= 否则
+// 'kanet_native missing data_source_canonical URL' fail, qrv65 实证). isStructuredSpec
+// qualifications MUST == voter derivable. 漂移 = c06178c 类回归源, 改时三端 (pool.js
+// + bot specIsUsable + voter deriveVote) 必同步.
+// Follow-up: 抽 lib/spec-validation cross-dir 真单一源 import (= 不在 HALT 域).
 function isStructuredSpec(spec) {
   if (!spec) return false;
   const s = String(spec).trim();
@@ -45,7 +50,8 @@ function isStructuredSpec(spec) {
     const obj = JSON.parse(s);
     return (
       typeof obj.title === 'string' && obj.title.trim().length > 0 &&
-      typeof obj.resolution_criteria === 'string' && obj.resolution_criteria.trim().length > 0
+      typeof obj.resolution_criteria === 'string' && obj.resolution_criteria.trim().length > 0 &&
+      typeof obj.data_source_canonical === 'string' && obj.data_source_canonical.trim().length > 0
     );
   } catch { return false; }
 }

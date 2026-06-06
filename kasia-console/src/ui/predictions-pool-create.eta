@@ -207,6 +207,15 @@
             <p class="text-xs text-ink-400 mt-1">≤ 200 字 · 用户看到的标题, oracle 也用它定位.</p>
           </div>
 
+          <!-- 数据源 (Bettor r243 加固: voter deriveVote 强制 canonical URL) -->
+          <div>
+            <label class="block text-xs font-medium text-ink-500 mb-1.5">数据源 URL (oracle fetch 这条判 YES/NO)</label>
+            <input type="text" x-model="form.data_source_canonical" maxlength="500"
+                   placeholder="例: https://api.binance.com/.../klines OR polymarket:0x..."
+                   class="w-full text-sm px-4 py-2.5 rounded-lg border border-warm-300 focus:border-amber-400 focus:outline-none font-mono" />
+            <p class="text-xs text-ink-400 mt-1">委员预言机自动 fetch 该 URL 提取 outcome. 必填.</p>
+          </div>
+
           <!-- 规则 -->
           <div>
             <label class="block text-xs font-medium text-ink-500 mb-1.5">判定规则 (oracle 用这段判 YES/NO)</label>
@@ -334,6 +343,7 @@ function createPoolPage() {
       outcome_side: '',
       maker_stake_kas: 100,
       title: '',                        // KANet-UI 2026-06-06 #26 D1 (Bettor ③ APPROVE r559): server isStructuredSpec 强制必填
+      data_source_canonical: '',        // KANet-UI 2026-06-06 #25 (Bettor r243 加固): voter deriveVote 强制 URL 必填
       resolution_rule_spec: '',
       polymarketCondition: null,  // iteration 2: set when 选用 Polymarket result
       // Oracle v0.3 §8/O2/§9 fold sub #7 — 5/26 final lock
@@ -391,7 +401,8 @@ function createPoolPage() {
 
     get canSubmit() {
       return this.form.question.trim()
-        && this.form.title.trim()                    // KANet-UI #26 D1: title 必填 (server isStructuredSpec)
+        && this.form.title.trim()
+        && this.form.data_source_canonical.trim()    // KANet-UI #25 Bettor r243: voter 强制 URL 必填
         && this.form.outcome_end_date_local
         && this.form.outcome_side
         && this.form.maker_stake_kas > 0
@@ -507,6 +518,7 @@ function createPoolPage() {
         const structuredSpec = JSON.stringify({
           title: this.form.title.trim(),
           resolution_criteria: this.form.resolution_rule_spec.trim(),
+          data_source_canonical: this.form.data_source_canonical.trim(),
           source: 'manual',
         });
         const body = {

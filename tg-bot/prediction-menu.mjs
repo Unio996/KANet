@@ -95,11 +95,23 @@ function specCriteria(spec) {
     return (typeof obj.resolution_criteria === 'string' && obj.resolution_criteria.trim()) ? obj.resolution_criteria.trim() : null;
   } catch { return null; }
 }
-// 质量门槛: spec 必须是干净结构化 JSON 含 title + resolution_criteria. KANet-UI 2026-06-06 Owner 实证
-// market voo3z (JSON 缺 resolution_criteria) 被推给用户 → 详情只显光秃标题无规则 = 用户玩儿毛。
-// Bettor 钦定数据非破坏默认: 糊单不删 (= 留 DB 让自然过期), 只在 bot 入口 filter 掉不显示。
+// 质量门槛: spec 必须是干净结构化 JSON 含 title + resolution_criteria + data_source_canonical.
+// KANet-UI 2026-06-06 Owner P0 voo3z + qrv65 实证: 缺 resolution_criteria → 用户玩儿毛;
+// 缺 data_source_canonical URL → voter deriveVote fail → 市场卡死无法结算.
+// **绑死 pool.js isStructuredSpec + voter deriveVote 三端单一源** (Bettor r243 加固): 改时
+// pool.js isStructuredSpec + 此 specIsUsable + voter deriveVote kanet_native check 同步.
+// Bettor 钦定数据非破坏默认: 糊单不删 (= 留 DB 让自然过期), 只在 bot 入口 filter 掉不显示.
+function specDataSourceCanonical(spec) {
+  if (!spec) return null;
+  const s = String(spec).trim();
+  if (!s.startsWith('{')) return null;
+  try {
+    const obj = JSON.parse(s);
+    return (typeof obj.data_source_canonical === 'string' && obj.data_source_canonical.trim()) ? obj.data_source_canonical.trim() : null;
+  } catch { return null; }
+}
 function specIsUsable(spec) {
-  return specTitle(spec) && specCriteria(spec);
+  return specTitle(spec) && specCriteria(spec) && specDataSourceCanonical(spec);
 }
 // HTML escape: bot 发送 parse_mode='HTML' 时必 esc (< > &), 防 URL/HTML 渲染崩.
 function escHtml(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
