@@ -669,6 +669,36 @@ async function verifyV06(baselinePath) {
     check('L25 unit test (probe)', false, { err: e.message, note: 'import fail or export missing' }, 'soft');
   }
 
+  // L26 Bettor r256b/r258 件1 nav 基础: /predictions 归档 + sidebar 5 处中文 (= KANet-UI 43ebfdd ship)
+  // 3 sub baked: 302 redirect / legacy route / sidebar 中文字串
+  try {
+    const stocksPath = path.resolve(REPO_ROOT, 'kasia-console/src/api/stocks.js');
+    const sidebarPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/partials/sidebar.eta');
+    const stocksSrc = fs.readFileSync(stocksPath, 'utf8');
+    const sidebarSrc = fs.readFileSync(sidebarPath, 'utf8');
+    // sub-a: /predictions 302 → /legacy/polymarket-escrow
+    const has302Redirect = /fastify\.get\(['"]\/predictions['"]/.test(stocksSrc) && /reply\.redirect\(302,\s*['"]\/legacy\/polymarket-escrow['"]\)/.test(stocksSrc);
+    // sub-b: /legacy/polymarket-escrow route
+    const hasLegacyRoute = /fastify\.get\(['"]\/legacy\/polymarket-escrow['"]/.test(stocksSrc);
+    // sub-c: sidebar 5 处中文 (Bettor r256b 件1 范围 + KANet-UI 43ebfdd ship)
+    const zhStrings = ['聊天', '联系人', '资产', '总览', '设置'];
+    const sidebarMissing = zhStrings.filter(s => !sidebarSrc.includes(s));
+    const sidebarOk = sidebarMissing.length === 0;
+    const allOk = has302Redirect && hasLegacyRoute && sidebarOk;
+    check(
+      'L26 件1 nav 归档: /predictions 302→/legacy + sidebar 5 处中文 (Bettor r256b/r258, KANet-UI 43ebfdd)',
+      allOk,
+      {
+        stocks_has_302_redirect: has302Redirect,
+        stocks_has_legacy_route: hasLegacyRoute,
+        sidebar_zh_strings_missing: sidebarMissing,
+        note: allOk ? '件1 nav 基础守门完整' : '任一回归 → 漂回旧 Polymarket escrow 入口 / sidebar 中英混'
+      }
+    );
+  } catch (e) {
+    check('L26 件1 nav (probe)', false, { err: e.message }, 'soft');
+  }
+
   const total = report.pass + report.fail + report.deploy_pending;
   if (report.fail > 0) report.verdict = 'FAIL';
   else if (report.deploy_pending > 0) report.verdict = 'PASS_WITH_DEPLOY_PENDING';
