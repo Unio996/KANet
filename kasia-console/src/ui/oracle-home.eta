@@ -122,7 +122,12 @@
             <tbody>
               <template x-for="m in markets" :key="m.market.id">
                 <tr class="border-b border-warm-100 last:border-0">
-                  <td class="py-2 pr-3 font-mono text-ink-700 max-w-[160px] truncate" :title="m.market.id" x-text="m.market.id.slice(0,18) + '...'"></td>
+                  <td class="py-2 pr-3 max-w-[180px]">
+                    <a :href="`/predictions/pool/${encodeURIComponent(m.market.id)}`" class="font-mono text-ink-700 hover:text-brand-500 truncate block" :title="m.market.id" x-text="m.market.id.slice(0,18) + '...'"></a>
+                    <span x-show="m.market.protocol_version" class="inline-block mt-0.5 text-[9px] px-1.5 py-0.5 rounded font-medium"
+                          :class="m.market.protocol_version === 'v0.7' ? 'bg-emerald-100 text-emerald-700' : (m.market.protocol_version === 'v0.6' ? 'bg-sky-100 text-sky-700' : 'bg-warm-200 text-ink-500')"
+                          x-text="m.market.protocol_version"></span>
+                  </td>
                   <td class="py-2 pr-3">
                     <span class="rh-pill rh-pill-mute" x-text="m.market.protocol_status"></span>
                   </td>
