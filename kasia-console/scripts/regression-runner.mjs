@@ -676,23 +676,27 @@ async function verifyV06(baselinePath) {
     const sidebarPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/partials/sidebar.eta');
     const stocksSrc = fs.readFileSync(stocksPath, 'utf8');
     const sidebarSrc = fs.readFileSync(sidebarPath, 'utf8');
-    // sub-a: /predictions 302 → /legacy/polymarket-escrow
-    const has302Redirect = /fastify\.get\(['"]\/predictions['"]/.test(stocksSrc) && /reply\.redirect\(302,\s*['"]\/legacy\/polymarket-escrow['"]\)/.test(stocksSrc);
-    // sub-b: /legacy/polymarket-escrow route
+    // sub-a: /predictions 服新 predictions-list 页 (Bettor r265b 解 r265b 7 条, 替原 302→/legacy)
+    const stocksPredictionsServesNew = /fastify\.get\(['"]\/predictions['"][\s\S]{0,300}reply\.view\(['"]predictions-list['"]/.test(stocksSrc);
+    // sub-b: /legacy/polymarket-escrow route 仍存 (= 旧 1v1 保历史)
     const hasLegacyRoute = /fastify\.get\(['"]\/legacy\/polymarket-escrow['"]/.test(stocksSrc);
     // sub-c: sidebar 5 处中文 (Bettor r256b 件1 范围 + KANet-UI 43ebfdd ship)
     const zhStrings = ['聊天', '联系人', '资产', '总览', '设置'];
     const sidebarMissing = zhStrings.filter(s => !sidebarSrc.includes(s));
     const sidebarOk = sidebarMissing.length === 0;
-    const allOk = has302Redirect && hasLegacyRoute && sidebarOk;
+    // sub-d: predictions-list.eta 存在 (= Owner 6 条新页, b8f62f9 ship)
+    const predListPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/predictions-list.eta');
+    const predListExists = fs.existsSync(predListPath);
+    const allOk = stocksPredictionsServesNew && hasLegacyRoute && sidebarOk && predListExists;
     check(
-      'L26 件1 nav 归档: /predictions 302→/legacy + sidebar 5 处中文 (Bettor r256b/r258, KANet-UI 43ebfdd)',
+      'L26 件1 nav + 预测市场首页: /predictions 服新页 + sidebar 5 中文 + legacy 保 (Bettor r256b/r258/r265, KANet-UI 43ebfdd+b8f62f9)',
       allOk,
       {
-        stocks_has_302_redirect: has302Redirect,
+        stocks_predictions_serves_new: stocksPredictionsServesNew,
         stocks_has_legacy_route: hasLegacyRoute,
+        predictions_list_eta_exists: predListExists,
         sidebar_zh_strings_missing: sidebarMissing,
-        note: allOk ? '件1 nav 基础守门完整' : '任一回归 → 漂回旧 Polymarket escrow 入口 / sidebar 中英混'
+        note: allOk ? '件1 nav + 首页 守门完整' : '任一回归 → 漂回旧 1v1 入口 / sidebar 中英混 / 首页删'
       }
     );
   } catch (e) {
