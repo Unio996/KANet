@@ -267,6 +267,32 @@ export async function poolSettlerTick() {
       // refund_dispatched_at) 仍走原 handler 不 skip (= 完成中状态优先).
       let backoffMeta = {};
       try { backoffMeta = JSON.parse(market.metadata || '{}'); } catch {}
+      // J2-tn r396 #25 (Bettor r225 ④ catch + r224 #1 fix): MIN_POT pre-check 排 backoff 之前.
+      // 之前 r394 collecting_sigs MIN_POT gate 排 backoff skip 之后 → zc9jw 撞 skip_until_ms +27min
+      // backoff 跳过 → 永不到 MIN_POT gate → cancel 不触. 死循环.
+      // Fix: pre-skip MIN_POT check (= 凡 verifying/collecting_sigs + v0.6/v0.7 + pool < MIN_POT
+      // 直接 cancel + dispatchRefund, 无视 backoff = D9 优先级最高).
+      if ((market.protocol_status === 'verifying' || market.protocol_status === 'collecting_sigs')
+          && (market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7')) {
+        const bettorSumPre = sqlite.prepare('SELECT COALESCE(SUM(CAST(stake_amount AS INTEGER)), 0) AS s FROM pool_bettor_sides WHERE market_id = ?').get(market.id).s;
+        const totalPoolPre = BigInt(market.maker_stake_amount || 0) + BigInt(bettorSumPre || 0);
+        const MIN_POT_PRE = 10_000_000_000n;
+        if (totalPoolPre < MIN_POT_PRE && backoffMeta.cancel_reason !== 'min_pot_undersize') {
+          console.warn(`[pool-settler:min-pot] pre-backoff catch market=${market.id.slice(0,12)} pool=${(Number(totalPoolPre)/1e8).toFixed(2)}KAS < 100KAS → cancel (override backoff)`);
+          const curMetaPre = { ...backoffMeta };
+          curMetaPre.cancel_reason = 'min_pot_undersize';
+          curMetaPre.cancel_pool_sompi = totalPoolPre.toString();
+          curMetaPre.cancelled_at = new Date().toISOString();
+          delete curMetaPre.skip_until_ms;  // clear backoff so refund path 不被卡
+          sqlite.prepare("UPDATE pool_markets SET protocol_status = 'cancelled', metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+            .run(JSON.stringify(curMetaPre), market.id);
+          dispatchRefund(market, { action: 'refund', reason: 'min_pot_undersize cancel-refund (pre-backoff override)' }).catch(e =>
+            console.warn(`[pool-settler:min-pot] pre-backoff maker dispatchRefund market=${market.id.slice(0,12)}: ${e.message}`));
+          refund++;
+          continue;
+        }
+      }
+
       if (backoffMeta.skip_until_ms && Date.now() < backoffMeta.skip_until_ms
           && (market.protocol_status === 'verifying' || market.protocol_status === 'collecting_sigs')) {
         doomed++;
