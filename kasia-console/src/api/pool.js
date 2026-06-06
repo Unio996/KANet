@@ -151,6 +151,24 @@ async function _broadcastMarketPublished(marketRow, makerRelayId) {
 async function _broadcastBetRegistered(args) {
   const { market_id, bettor_pk, direction, stake_amount, side_p2sh, side_lock_tx, merkle_index, protocol_version, broadcaster_relay_id } = args;
   try {
+    // J2-tn r400 #29 D9 跨节点 bet ingest gap fix (Bettor r274 关1 PASS):
+    // 原 caller 传 market.maker_relay_id 当 broadcaster. :3300 上 maker_relay_id 是 cross-node
+    // sentinel (= 不是真本地 relay), _sendBroadcastChunked IPC silent fail → 0 broadcast →
+    // consumer 节点 0 ingest → D9 :3200 0 见 :3300 sides (78K stuck). 实证 broadcast_messages
+    // pool_bet_registered_v1 0 笔. 修: broadcaster 不可用时 fallback 任一本地 alive relay.
+    let broadcaster = broadcaster_relay_id;
+    const isCrossNode = typeof broadcaster === 'string' && broadcaster.startsWith('cross-node:');
+    if (!broadcaster || isCrossNode) {
+      try {
+        const { getStatus, isRelayAlive } = await import('../services/relay-manager.js');
+        const candidates = getStatus() || [];
+        const localAlive = candidates.find(r => r.pid && isRelayAlive(r.relayNodeId)?.alive);
+        if (!localAlive) throw new Error(`no locally-alive relay for broadcast (cross-node sentinel maker, ${candidates.length} relays checked)`);
+        broadcaster = localAlive.relayNodeId;
+      } catch (e) {
+        return { ok: false, error: `broadcaster fallback fail: ${e.message}` };
+      }
+    }
     const unsignedPayload = {
       t: 'pool_bet_registered_v1',
       market_id, bettor_pk, direction, stake_amount,
@@ -158,10 +176,10 @@ async function _broadcastBetRegistered(args) {
       protocol_version: protocol_version || 'v0.5',
       registered_at: new Date().toISOString(),
     };
-    const bcastResult = await _sendBroadcastChunked(broadcaster_relay_id, 'kanet-prediction', JSON.stringify(unsignedPayload));
+    const bcastResult = await _sendBroadcastChunked(broadcaster, 'kanet-prediction', JSON.stringify(unsignedPayload));
     const txId = bcastResult?.txId;
     if (!txId) throw new Error(`broadcast no txId: ${JSON.stringify(bcastResult).slice(0, 200)}`);
-    console.log(`[pool/broadcast] bet_registered ${market_id.slice(0, 12)}/${bettor_pk.slice(0, 8)} txId=${txId.slice(0, 16)}...`);
+    console.log(`[pool/broadcast] bet_registered ${market_id.slice(0, 12)}/${bettor_pk.slice(0, 8)} txId=${txId.slice(0, 16)}... via ${broadcaster?.slice(0,8)}`);
     return { ok: true, txId };
   } catch (e) {
     console.warn(`[pool/broadcast] bet_register fail ${args.market_id?.slice(0, 12)}/${args.bettor_pk?.slice(0, 8)}: ${e.message}`);
@@ -1046,6 +1064,17 @@ export async function registerPoolRoutes(fastify) {
     const tree = buildSidesMerkleTree(bettors.map(b => b.bettor_pk));
     sqlite.prepare('UPDATE pool_markets SET sides_merkle_root = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(tree.root, marketId);
 
+    // J2-tn r400 #29 D9 跨节点 bet ingest gap fix (Bettor r274 关1 PASS):
+    // 漏 _broadcastBetRegistered 调用 → :3200 testers 押注 D9 数据死在本地 DB, :3300 0 ingest.
+    // 对齐 /bettor/register-external/confirm L1230 + /bettor/register-v06/confirm L1418 模式.
+    // broadcaster_relay_id 用本机 bettor relay (= 100% local IPC alive 保证).
+    const _bcastBet = await _broadcastBetRegistered({
+      market_id: marketId, bettor_pk: bettorPk, direction, stake_amount: stakeAmount,
+      side_p2sh: sideResult.p2shAddr, side_lock_tx: sideTxId, merkle_index: merkleIndex,
+      protocol_version: market.protocol_version || 'v0.5',
+      broadcaster_relay_id: b.bettor_relay_id,
+    });
+
     return reply.send({
       ok: true,
       market_id: marketId,
@@ -1054,6 +1083,7 @@ export async function registerPoolRoutes(fastify) {
       side_lock_tx: sideTxId,
       merkle_index: merkleIndex,
       sides_merkle_root: tree.root,
+      cross_node_publish_tx: _bcastBet?.txId || null,
     });
   });
 
