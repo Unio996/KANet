@@ -215,21 +215,31 @@ export async function poolSettlerTick() {
         // pool_snapshot which may not exist (e.g. create-v07 ensurePoolSnapshot failed). 0-bet
         // markets have no votes coming, no winners to settle — directly refund. Skip sampling +
         // decideConsensus entirely. v0.6/v0.7 only (anonymous-pool committee model).
+        // J2-tn r384 (J1 r303 root cause + Bettor 钦定): skip 0-bet shortcut for cross-node
+        // markets where maker_relay_id is 'cross-node:<pk>' sentinel (= maker on remote host).
+        // 否则 dispatchRefund 走到 L1354 silently 跳过 (= cross-node refund 必 producer node 干),
+        // 既不 sample 又不 refund → 卡 status=verifying. #10 + #12 都撞这复发 bug.
+        // 对 cross-node maker, local betCount=0 不代表市场无 bet (= 本节点 bet ingest 可能 lag);
+        // 让市场继续 committee sample 路径, 委员 sample 不依赖 local bets (= 用 chain_view +
+        // VRF + endBlockHash 跨节点 deterministic).
         if (market.protocol_status === 'verifying' &&
             (market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7')) {
-          const betCount = sqlite.prepare('SELECT COUNT(*) as c FROM pool_bettor_sides WHERE market_id = ?').get(market.id)?.c || 0;
-          if (betCount === 0) {
-            // Skip if already dispatched.
-            let meta0 = {};
-            try { meta0 = JSON.parse(market.metadata || '{}'); } catch {}
-            if (!meta0.refund_dispatched_at) {
-              console.log(`[pool-settler] 0-bet pre-sample shortcut market=${market.id.slice(0,12)} pv=${market.protocol_version} → dispatchRefund (skip committee sampling + voting)`);
-              await dispatchRefund(market, { action: 'refund', reason: '0-bet market, refund_maker_unjoined (pre-sample shortcut)' });
-              refund++;
-            } else {
-              pending++;  // already dispatched, wait handleRefunding tick
+          const isCrossNode = typeof market.maker_relay_id === 'string' && market.maker_relay_id.startsWith('cross-node:');
+          if (!isCrossNode) {
+            const betCount = sqlite.prepare('SELECT COUNT(*) as c FROM pool_bettor_sides WHERE market_id = ?').get(market.id)?.c || 0;
+            if (betCount === 0) {
+              // Skip if already dispatched.
+              let meta0 = {};
+              try { meta0 = JSON.parse(market.metadata || '{}'); } catch {}
+              if (!meta0.refund_dispatched_at) {
+                console.log(`[pool-settler] 0-bet pre-sample shortcut market=${market.id.slice(0,12)} pv=${market.protocol_version} → dispatchRefund (skip committee sampling + voting)`);
+                await dispatchRefund(market, { action: 'refund', reason: '0-bet market, refund_maker_unjoined (pre-sample shortcut)' });
+                refund++;
+              } else {
+                pending++;  // already dispatched, wait handleRefunding tick
+              }
+              continue;
             }
-            continue;
           }
         }
 
