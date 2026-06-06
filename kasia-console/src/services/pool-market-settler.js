@@ -1897,7 +1897,17 @@ async function handleCollectingSigs(market) {
   // zero-sig 占位. v0.6/v0.7 SS settle_aggregate checkSig 内 validSigs counter — dummy
   // sig 验失败 counter 不增, 但其他 4 sig PASS → counter=4 ≥ 4-of-5 threshold → SS accept.
   // Dummy sig 必 same byte format as real (= 41 + 00×64 + 01 push-encoded) 不破坏 sigOpCount/sighash.
-  const DUMMY_SIG_PUSH_HEX = '41' + '00'.repeat(64) + '01';  // 66 byte push-encoded, validSigs 不增
+  // J2-tn r386 (Bettor 01:31 ③ 锁 suspect b): BIP340 schnorr verify on all-zero sig
+  // (r=0/s=0) → lift_x(0) ERROR (= x=0 不一定 secp256k1 曲线点) → checkSig 不返 false
+  // 而是直接 abort script → 'verification failed'. validSigs 计数器永远不增 c4 slot 也
+  // 永远没机会 ≥4. #12/#13 SS reject 实因.
+  //
+  // Fix: c4 silent slot push OP_0 (= empty sig 1-byte 0x00). Kaspa OpCheckSig pops empty
+  // bytes → 直接返 false (parse fail, 不做 lift_x) → validSigs skip c4 slot → 4 实签
+  // valid → counter=4 ≥ threshold → SS accept settle TX.
+  //
+  // OP_0 = 0x00 pushes empty bytes. Replaces 66-byte all-zero push. scriptSig 整体短 65 bytes.
+  const DUMMY_SIG_PUSH_HEX = '00';  // OP_0 empty push, Kaspa checkSig 安全返 false 不 abort
   // J2-tn r362 (now hoisted to top of handleCollectingSigs in r379): committeePksForSort
   // already loaded above for re-broadcast missing-oracle compare.
   const spineSigsByInput = [];
