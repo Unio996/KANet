@@ -638,9 +638,38 @@ function decideConsensusV06(market) {
 
   const yesCount = votes.filter(v => v.outcome === 'YES').length;
   const noCount = votes.filter(v => v.outcome === 'NO').length;
-  // 4-of-5 same direction → consensus.
-  if (yesCount >= 4) return { action: 'consensus', winner: 0, unanimous: yesCount === 5, vote_summary: `v0.6 ${yesCount}/5 YES` };
-  if (noCount >= 4) return { action: 'consensus', winner: 1, unanimous: noCount === 5, vote_summary: `v0.6 ${noCount}/5 NO` };
+  // J2-tn r383 (Bettor 23:59 + 6/6 00:00 钦定 4-of-5 活性路单验): forfeit_1 path needs
+  // silentOracleIndex set so dispatchPhase2 L1284 signingOracles 排除静默员, 否则全 5
+  // 派签 (= 4 real + 1 will never come) → handleCollectingSigs spineRequiredSigs=5 卡
+  // 永远不 settle. 静默 = 投票 ≠ winner direction OR 没投票的 committee_pks[i] 索引.
+  // Mirror v0.5 path L556 logic (= 3-oracle) to 5-oracle.
+  function _findSilentForWinner(winnerStr) {
+    for (let i = 0; i < 5; i++) {
+      const v = votes.find(vt => vt.oracleIndex === i);
+      if (!v || v.outcome !== winnerStr) return i;
+    }
+    return null;  // unreachable for 4-of-5 (= one committee member must be silent/dissent)
+  }
+  if (yesCount >= 4) {
+    const unanimous = yesCount === 5;
+    return {
+      action: 'consensus',
+      winner: 0,
+      unanimous,
+      silentOracleIndex: unanimous ? null : _findSilentForWinner('YES'),
+      vote_summary: `v0.6 ${yesCount}/5 YES`,
+    };
+  }
+  if (noCount >= 4) {
+    const unanimous = noCount === 5;
+    return {
+      action: 'consensus',
+      winner: 1,
+      unanimous,
+      silentOracleIndex: unanimous ? null : _findSilentForWinner('NO'),
+      vote_summary: `v0.6 ${noCount}/5 NO`,
+    };
+  }
 
   // Threshold not met → timeout → refund.
   const verifyingSinceMs = parseSqliteUtc(market.updated_at);
