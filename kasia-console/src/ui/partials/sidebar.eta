@@ -63,24 +63,23 @@
       </div>
     </div>
 
-    <!-- 5. Markets ▶ (= Exchange + Predictions only, 删 Overview/CEX/OTC/Stocks/More) -->
-    <% const _isMarket = ['exchange','predictions','predictions-pool-create','predictions-pool-detail','market','trading','stocks','hyperliquid','aevo','aave'].includes(it._page); %>
+    <!-- 5. 市场 ▶ (Owner 2026-06-06 钦定 sidebar 中文统一: Predictions → 预测市场, link /oracle pool 列表干净页) -->
+    <% const _isMarket = ['exchange','predictions','predictions-pool-create','predictions-pool-detail','oracle','market','trading','stocks','hyperliquid','aevo','aave'].includes(it._page); %>
     <div x-data="{ open: <%= _isMarket ? 'true' : 'false' %> }">
       <button @click="open = !open"
         class="flex items-center justify-between w-full px-3 py-2.5 rounded-lg text-sm transition-colors <%= _isMarket ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
-        <span>Markets</span>
+        <span>市场</span>
         <span class="text-[10px] transition-transform" :class="open ? 'rotate-90' : ''">›</span>
       </button>
       <div x-show="open" x-transition class="mt-1 space-y-0.5">
         <a href="/exchange"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'exchange' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          Exchange
+          兑换
         </a>
-        <a href="/predictions"
-          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= ['predictions','predictions-pool-detail'].includes(it._page) ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          Predictions
+        <a href="/oracle"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= ['oracle','predictions-pool-detail'].includes(it._page) ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          预测市场
         </a>
-        <!-- KANet-UI 2026-06-06 #26 D1 (Bettor ③ APPROVE r559 r203): 建市场入口 (= 用户能找到怎么发起市场, 守 #26 可演示). -->
         <a href="/predictions/pool/create"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'predictions-pool-create' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
           建市场
