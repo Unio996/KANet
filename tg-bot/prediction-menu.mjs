@@ -95,6 +95,12 @@ function specCriteria(spec) {
     return (typeof obj.resolution_criteria === 'string' && obj.resolution_criteria.trim()) ? obj.resolution_criteria.trim() : null;
   } catch { return null; }
 }
+// 质量门槛: spec 必须是干净结构化 JSON 含 title + resolution_criteria. KANet-UI 2026-06-06 Owner 实证
+// market voo3z (JSON 缺 resolution_criteria) 被推给用户 → 详情只显光秃标题无规则 = 用户玩儿毛。
+// Bettor 钦定数据非破坏默认: 糊单不删 (= 留 DB 让自然过期), 只在 bot 入口 filter 掉不显示。
+function specIsUsable(spec) {
+  return specTitle(spec) && specCriteria(spec);
+}
 // HTML escape: bot 发送 parse_mode='HTML' 时必 esc (< > &), 防 URL/HTML 渲染崩.
 function escHtml(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
@@ -248,6 +254,10 @@ export async function startBetFromMarket(tgUser, marketId) {
   const dr = await api.poolMarket(marketId);
   const market = (dr.json && (dr.json.market || (dr.json.id ? dr.json : null))) || null;
   if (!market) return '市场未找到。/bet 重选。';
+  // 质量防御: 同 list filter (2026-06-06 Owner 实证 voo3z) — 缺规则不让进押注流程, 不糊弄用户.
+  if (!specIsUsable(market.resolution_rule_spec)) {
+    return '这个市场缺完整结算规则, 不让押 (= 押了你不知道凭什么判输赢)。/bet 选别的。';
+  }
   // 直接进 detail 复用同 UI
   sessions.set(tgUser, { stage: 'detail', market });
   persist();
@@ -319,7 +329,8 @@ async function _startBetImpl(tgUser) {
   const nowSec = Math.floor(Date.now() / 1000);
   const markets = allMarkets.filter(m =>
     (m.protocol_version === 'v0.6' || m.protocol_version === 'v0.7') &&
-    (!m.deadline || Number(m.deadline) - nowSec > DEADLINE_BUFFER_SEC)
+    (!m.deadline || Number(m.deadline) - nowSec > DEADLINE_BUFFER_SEC) &&
+    specIsUsable(m.resolution_rule_spec)   // 2026-06-06 Owner 实证 voo3z 缺 criteria = 用户玩儿毛, 拦
   );
   if (!markets.length) { sessions.delete(tgUser); return '现在没有可押注的市场。稍后再来,或 /discover 看看。'; }
   const byCat = {};
