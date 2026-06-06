@@ -160,7 +160,7 @@ export async function poolSettlerTick() {
       let backoffMeta = {};
       try { backoffMeta = JSON.parse(market.metadata || '{}'); } catch {}
       if (backoffMeta.skip_until_ms && Date.now() < backoffMeta.skip_until_ms
-          && market.protocol_status === 'verifying') {
+          && (market.protocol_status === 'verifying' || market.protocol_status === 'collecting_sigs')) {
         doomed++;
         continue;
       }
@@ -2042,7 +2042,22 @@ async function handleCollectingSigs(market) {
     });
 
     if (!submitResult?.ok || !submitResult.txId) {
-      console.error(`[pool-settler:collecting] pool_settle_tx submit fail market=${market.id.slice(0,12)}: ${submitResult?.error}`);
+      // J2-tn r388 #24 (Bettor 02:25 follow-up): collecting_sigs submit-fail backoff. settle
+      // TX 同样 RPC error 永远 retry → 吃 tick time-box. 同 sample-fail 模式 exp backoff:
+      // meta.submit_fail_count + skip_until_ms. r388 main loop L162 skip_until_ms 检查只 gate
+      // verifying status; 这里加 collecting_sigs status 也 gate. retry chain 同源.
+      try {
+        const cur = JSON.parse(market.metadata || '{}');
+        cur.submit_fail_count = (cur.submit_fail_count || 0) + 1;
+        cur.submit_last_err = (submitResult?.error || '').slice(0, 200);
+        const submitBackoffSec = Math.min(60 * Math.pow(2, Math.max(0, cur.submit_fail_count - 1)), 3600);
+        cur.skip_until_ms = Date.now() + submitBackoffSec * 1000;
+        sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+          .run(JSON.stringify(cur), market.id);
+        console.error(`[pool-settler:collecting] pool_settle_tx submit fail#${cur.submit_fail_count} backoff=${submitBackoffSec}s market=${market.id.slice(0,12)}: ${submitResult?.error}`);
+      } catch (metaErr) {
+        console.error(`[pool-settler:collecting] pool_settle_tx submit fail market=${market.id.slice(0,12)}: ${submitResult?.error}`);
+      }
       return;
     }
 
