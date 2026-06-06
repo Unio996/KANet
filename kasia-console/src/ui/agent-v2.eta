@@ -181,6 +181,38 @@
           </div>
         </div>
 
+        <!-- Oracle 注册 modal (KANet-UI 2026-06-06 Owner P0 + Bettor ③ APPROVE r552): 注册 = 写链上 enrollment via /api/oracle-pool/enroll, 单源不双写. -->
+        <div x-show="registerOracleModal" x-cloak class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" @click.self="registerOracleModal = false">
+          <div class="bg-white rounded-lg shadow-xl max-w-md w-full p-6" @click.stop>
+            <h3 class="text-base font-bold text-ink-700 mb-3">注册成为 Oracle 仲裁人</h3>
+            <p class="text-xs text-ink-400 mb-3">把这个 agent 押 KAS 到链上锁仓 → 成为去中心化预言机池一员 → 抽中后给市场投票, 投对得报酬, 偏离共识扣 stake。</p>
+            <div class="space-y-3 text-xs">
+              <div>
+                <label class="block text-ink-500 mb-1">锁到 DAA 块号 (lock_until_daa)</label>
+                <input type="number" x-model.number="oracleEnrollDaa" class="w-full border border-warm-300 rounded px-3 py-2"
+                       :placeholder="oracleCurrentDaa ? `当前 DAA ${oracleCurrentDaa}, 建议 +60 块短期 / +10000 长期` : '加载中...'" />
+                <p class="text-ink-400 mt-1">锁仓到该 DAA 块号才能取回 stake (= 退池冷却期, 防 flash 撤池影响投票公正)。</p>
+              </div>
+              <template x-if="oracleEnrollResult">
+                <div class="bg-green-50 border border-green-200 rounded p-3 space-y-2 text-ink-600">
+                  <p class="font-semibold text-green-700">✓ 注册成功 — 下一步: 用自家钱包转 stake</p>
+                  <div>P2SH 锁仓地址 (= stake 转这里):</div>
+                  <code class="block bg-white p-2 rounded font-mono text-[10px] break-all" x-text="oracleEnrollResult.p2sh_addr"></code>
+                  <div>建议 stake: ≥ 1 KAS (越多权重越大, VRF 抽中概率高)。</div>
+                  <p class="text-ink-400">转账后 scanner 自动扫到 → 池视图刷新 → 你的 agent 进 oracle 池。</p>
+                </div>
+              </template>
+              <template x-if="oracleEnrollError">
+                <div class="bg-red-50 border border-red-200 rounded p-3 text-red-700" x-text="oracleEnrollError"></div>
+              </template>
+            </div>
+            <div class="mt-4 flex justify-end gap-2">
+              <button @click="registerOracleModal = false" class="text-sm px-3 py-1 rounded border border-warm-300" x-text="oracleEnrollResult ? '关闭' : '取消'"></button>
+              <button x-show="!oracleEnrollResult" @click="submitOracleEnroll()" :disabled="!oracleEnrollDaa || oracleEnrolling" class="text-sm px-3 py-1 rounded bg-brand-600 text-white disabled:opacity-50" x-text="oracleEnrolling ? '注册中...' : '注册'"></button>
+            </div>
+          </div>
+        </div>
+
         <!-- Stats Row -->
         <div class="grid grid-cols-4 divide-x divide-warm-200">
           <a :href="'/contacts?agent=' + (agent?.id || '')" class="px-5 py-4 text-center block hover:bg-warm-50 transition-colors rounded-lg cursor-pointer">
@@ -1179,7 +1211,7 @@
             <template x-if="!oracleStatus?.registered">
               <div class="text-xs text-ink-400">
                 此 agent 尚未注册 oracle role.
-                <button @click="registerOracleModal = true" class="ml-1 av-accent-gold hover:underline">注册 →</button>
+                <button @click="registerOracleModal = true; oracleEnrollResult = null; oracleEnrollError = ''; loadOracleCurrentDaa()" class="ml-1 av-accent-gold hover:underline">注册 →</button>
               </div>
             </template>
           </div>
@@ -1340,7 +1372,12 @@ function agentApp() {
     pendingApprovals: [],
     // Oracle v0.3 sub #7 expansion (r41) — Oracle subskill tab state
     oracleStatus: null,         // { registered, tier, trust_score, capabilities, total_votes, correct_votes, total_earnings_kas, announced_at, expires_at }
-    registerOracleModal: false, // future register flow
+    registerOracleModal: false, // 注册 modal (KANet-UI 2026-06-06 Bettor ③ APPROVE r552)
+    oracleEnrollDaa: null,      // 用户输入 lock_until_daa
+    oracleCurrentDaa: null,     // 加载: 当前 daa, 用于建议默认值
+    oracleEnrolling: false,
+    oracleEnrollResult: null,   // { staker_pk_x, p2sh_addr, lock_until_daa }
+    oracleEnrollError: '',
     isBrokerRelay: false,       // broker/oracle 互斥 warning trigger
 
     get agent() { return this.agents[this.selectedIdx] || null; },
@@ -1436,6 +1473,44 @@ function agentApp() {
       if (!this.agent) return; this.txLoading = true;
       try { const r = await fetch('/api/agent/tx-history?relay_node_id=' + this.agent.id + '&limit=20'); this.txHistory = await r.json(); }
       catch { this.txHistory = []; } this.txLoading = false;
+    },
+    // KANet-UI 2026-06-06 Owner P0 + Bettor ③ APPROVE r552: Oracle 注册 modal — 调 canonical
+    // /api/oracle-pool/enroll (= chain enrollment 单源, 不双写 is_oracle).
+    async submitOracleEnroll() {
+      if (!this.agent || !this.oracleEnrollDaa) return;
+      this.oracleEnrolling = true; this.oracleEnrollError = ''; this.oracleEnrollResult = null;
+      try {
+        const pkResp = await fetch('/api/relay/' + this.agent.id + '/pubkey').then(r => r.json());
+        if (!pkResp.ok || !pkResp.x_only_pubkey) {
+          this.oracleEnrollError = '取 agent 公钥失败: ' + (pkResp.error || '未知错误');
+          this.oracleEnrolling = false; return;
+        }
+        const body = {
+          staker_pk_x: pkResp.x_only_pubkey,
+          lock_until_daa: Number(this.oracleEnrollDaa),
+          signing_relay_id: this.agent.id,
+        };
+        const enrollResp = await fetch('/api/oracle-pool/enroll', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        }).then(r => r.json());
+        if (!enrollResp.ok) {
+          this.oracleEnrollError = '注册失败: ' + (enrollResp.error || '未知错误');
+        } else {
+          this.oracleEnrollResult = { staker_pk_x: enrollResp.staker_pk_x, p2sh_addr: enrollResp.p2sh_addr, lock_until_daa: enrollResp.lock_until_daa };
+        }
+      } catch (e) {
+        this.oracleEnrollError = '请求异常: ' + (e?.message || String(e));
+      }
+      this.oracleEnrolling = false;
+    },
+    async loadOracleCurrentDaa() {
+      try {
+        const r = await fetch('/api/oracle-pool/chain-snapshot').then(r => r.json());
+        if (r.ok && r.snapshotDaa) {
+          this.oracleCurrentDaa = r.snapshotDaa;
+          if (!this.oracleEnrollDaa) this.oracleEnrollDaa = r.snapshotDaa + 60;   // 默认建议 +60 块短期
+        }
+      } catch {}
     },
     async loadEpisodes() {
       if (!this.agent) return; this.episodesLoading = true;
