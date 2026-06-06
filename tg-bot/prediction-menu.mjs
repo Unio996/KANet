@@ -85,13 +85,14 @@ function specTitle(spec) {
   }
   return s;
 }
-function specSource(spec) {
+// 真规则 (resolution_criteria) — 押注前用户必须看到的判定依据。KANet 委员预言机按这条裁决。
+function specCriteria(spec) {
   if (!spec) return null;
   const s = String(spec).trim();
   if (!s.startsWith('{')) return null;
   try {
     const obj = JSON.parse(s);
-    return obj.data_source_canonical || obj.source || null;
+    return (typeof obj.resolution_criteria === 'string' && obj.resolution_criteria.trim()) ? obj.resolution_criteria.trim() : null;
   } catch { return null; }
 }
 // HTML escape: bot 发送 parse_mode='HTML' 时必 esc (< > &), 防 URL/HTML 渲染崩.
@@ -254,8 +255,8 @@ export async function startBetFromMarket(tgUser, marketId) {
     `📊 ${specTitle(market.resolution_rule_spec)}`,
     `${fmtDeadline(market.deadline)} · 已 ${market.bettor_count || 0} 人押 · maker stake ${market.maker_stake_kas ?? '?'} KAS`,
   ];
-  const _src = specSource(market.resolution_rule_spec);
-  if (_src) lines.push(`📡 source: ${_src}`);
+  const _crit = specCriteria(market.resolution_rule_spec);
+  if (_crit) lines.push('', '📋 结算规则:', _crit);
   if (market.yes_pool_kas != null && market.no_pool_kas != null) {
     const yp = Number(market.yes_pool_kas).toFixed(4);
     const np = Number(market.no_pool_kas).toFixed(4);
@@ -264,8 +265,7 @@ export async function startBetFromMarket(tgUser, marketId) {
     lines.push(`池子分布: YES ${yp} KAS (${ypp})  ·  NO ${np} KAS (${npp})`);
     lines.push('赔率 = 对方池 / 自方池 (押对越少人, 赢得越多)。');
   }
-  if (market.outcome_market_source) lines.push(`结算源: ${market.outcome_market_source}`);
-  lines.push('', '⚠ 押注前请看清上面【完整结算规则 + 结算源】— 这是判定输赢的唯一依据。', '你押哪边?  回复 1 = YES   ·   2 = NO');
+  lines.push('', '🔮 由 KANet 去中心化委员预言机按上述规则裁决、链上结算。', '⚠ 押注前请看清【完整结算规则】— 这是判定输赢的唯一依据。', '你押哪边?  回复 1 = YES   ·   2 = NO');
   return lines.join('\n');
 }
 
@@ -368,8 +368,8 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
       `📊 ${specTitle(full.resolution_rule_spec)}`,
       `${fmtDeadline(full.deadline)} · 已 ${full.bettor_count || 0} 人押 · maker stake ${full.maker_stake_kas ?? '?'} KAS`,
     ];
-    const _srcF = specSource(full.resolution_rule_spec);
-    if (_srcF) lines.push(`📡 source: ${_srcF}`);
+    const _critF = specCriteria(full.resolution_rule_spec);
+    if (_critF) lines.push('', '📋 结算规则:', _critF);
     // Bettor r78 ②: 显示池子分布 + 隐含赔率 (= Bettor r70 A 数据底座). pari-mutuel.
     if (full.yes_pool_kas != null && full.no_pool_kas != null) {
       const yp = Number(full.yes_pool_kas).toFixed(4);
@@ -379,8 +379,7 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
       lines.push(`池子分布: YES ${yp} KAS (${ypp})  ·  NO ${np} KAS (${npp})`);
       lines.push('赔率 = 对方池 / 自方池 (押对越少人, 赢得越多)。');
     }
-    if (full.outcome_market_source) lines.push(`结算源: ${full.outcome_market_source}`);
-    lines.push('', '⚠ 押注前请看清上面【完整结算规则 + 结算源】— 这是判定输赢的唯一依据。', '你押哪边?  回复 1 = YES   ·   2 = NO');
+    lines.push('', '🔮 由 KANet 去中心化委员预言机按上述规则裁决、链上结算。', '⚠ 押注前请看清【完整结算规则】— 这是判定输赢的唯一依据。', '你押哪边?  回复 1 = YES   ·   2 = NO');
     return lines.join('\n');
   }
 
