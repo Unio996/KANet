@@ -34,11 +34,16 @@ export async function registerStockRoutes(fastify) {
     return reply.view('stocks', { title: '股票市场', t, lang, dir: isRtl(lang) ? 'rtl' : 'ltr', langs: LANG_NAMES, _page: 'stocks', relayNodes });
   });
 
+  // KANet-UI 2026-06-06 件1 (Bettor ③ APPROVE r257+r258): /predictions 旧 Polymarket 1v1 SS escrow
+  // 归档到 /legacy/polymarket-escrow, 顶级 /predictions 302 → /legacy 不删历史.
   fastify.get('/predictions', async (request, reply) => {
+    return reply.redirect(302, '/legacy/polymarket-escrow');
+  });
+  fastify.get('/legacy/polymarket-escrow', async (request, reply) => {
     const lang = parseLang(request.headers.cookie);
     const t = getT(lang);
     const relayNodes = sqlite.prepare('SELECT id, name FROM relay_nodes ORDER BY name').all();
-    return reply.view('predictions', { title: '预测市场', t, lang, dir: isRtl(lang) ? 'rtl' : 'ltr', langs: LANG_NAMES, _page: 'predictions', relayNodes });
+    return reply.view('predictions', { title: 'Polymarket 1v1 SS escrow (旧版归档)', t, lang, dir: isRtl(lang) ? 'rtl' : 'ltr', langs: LANG_NAMES, _page: 'predictions', relayNodes });
   });
 
   // ── Watchlist CRUD ──

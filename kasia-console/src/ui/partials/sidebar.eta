@@ -11,19 +11,19 @@
     <!-- 1. Chat -->
     <a href="/chat"
       class="flex items-center px-3 py-2.5 rounded-lg text-sm transition-colors <%= it._page === 'chat' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
-      Chat
+      聊天
     </a>
 
     <!-- 2. Contacts (= 社交圈 + Discovery 合并) -->
     <a href="/contacts"
       class="flex items-center px-3 py-2.5 rounded-lg text-sm transition-colors <%= ['contacts','explore','discovered','network','handshakes'].includes(it._page) ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
-      Contacts
+      联系人
     </a>
 
     <!-- 3. Portfolio -->
     <a href="/portfolio"
       class="flex items-center px-3 py-2.5 rounded-lg text-sm transition-colors <%= ['portfolio','ledger'].includes(it._page) ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
-      Portfolio
+      资产
     </a>
 
     <!-- 4. Agents ▶ (Owner 2026-06-06 钦定: 删 Roles 层, Oracle/Broker 提到 Overview 后平级 — 这俩是系统关键) -->
@@ -37,7 +37,7 @@
       <div x-show="open" x-transition class="mt-1 space-y-0.5">
         <a href="/agent"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'agent' && !it._agentTab ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          Overview
+          总览
         </a>
         <a href="/oracle"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'oracle' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
@@ -92,7 +92,7 @@
     <div class="pt-4 mt-4 border-t border-warm-200" x-data="{ open: <%= _isSettings ? 'true' : 'false' %> }">
       <button @click="open = !open"
         class="flex items-center justify-between w-full px-3 py-2 rounded-lg text-sm transition-colors <%= _isSettings ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-        <span>Settings</span>
+        <span>设置</span>
         <span class="text-[10px] transition-transform" :class="open ? 'rotate-90' : ''">›</span>
       </button>
       <div x-show="open" x-transition class="mt-1 space-y-0.5">
