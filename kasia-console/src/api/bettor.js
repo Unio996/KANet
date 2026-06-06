@@ -1896,7 +1896,7 @@ export async function registerBettorRoutes(fastify) {
           p2sh_address: offer.escrow_p2sh,
           redeem_script_hex: redeemScriptHex,
           maker_address: offer.maker_kaspa_addr,
-          lock_time: deadlineSeconds,  // Sub 8.3 Bug 15: SS contract require(tx.time >= deadline)
+          lock_time: deadlineSeconds * 1000,  // J1tn r303 (Bettor 03:19 v3): *1000 → ms; PredictionEscrowUnanimous5 SS L146/167 require(tx.time >= deadline*1000), NO grace. 漏 *1000 致 kaspad DAA 模式 reject.
         });
       } else {
         // refund_both — caller pre-resolves both outpoints (= maker_lock_tx[0] + taker_lock_tx[0]).
@@ -1915,7 +1915,7 @@ export async function registerBettorRoutes(fastify) {
             { address: offer.maker_kaspa_addr, amountSompi: String((makerStakeSompi - halfFee).toString()) },
             { address: offer.taker, amountSompi: String((takerStakeSompi - halfFee).toString()) },
           ],
-          lock_time: deadlineSeconds,  // Sub 8.3 Bug 15: SS contract require(tx.time >= deadline)
+          lock_time: deadlineSeconds * 1000,  // J1tn r303 (Bettor 03:19 v3): *1000 → ms; PredictionEscrowUnanimous5 SS L146/167 require(tx.time >= deadline*1000), NO grace. 漏 *1000 致 kaspad DAA 模式 reject.
         });
       }
     } catch (err) {

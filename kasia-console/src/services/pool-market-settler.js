@@ -1602,8 +1602,10 @@ async function handleRefunding(market) {
     return;
   }
 
-  // PoolSpine_v06.sil L275 bug 10d: tx.time >= deadline * 1000 (ms semantics).
-  const lockTime = BigInt(market.deadline) * 1000n;
+  // PoolSpine_v06/v07/v0_7_1 SS L275/L376: tx.time >= (deadline + REFUND_GRACE_SEC) * 1000 (ms semantics).
+  // J1tn r303 (Bettor 03:19 v3 approve): 漏 +grace 致 kaspad 'Unsatisfied lock time' reject.
+  const { REFUND_GRACE_SEC } = await import('../lib/pool-refund-grace.mjs');
+  const lockTime = (BigInt(market.deadline) + BigInt(REFUND_GRACE_SEC)) * 1000n;
 
   try {
     const submitResult = await sendCommandAsync(market.maker_relay_id, {
@@ -1733,7 +1735,10 @@ export async function dispatchRefundDisagreement(market, decision) {
       console.error(`[pool-settler] dispatchRefundDisagreement market=${market.id.slice(0,12)} invalid deadline=${market.deadline}`);
       return;
     }
-    const refundLockTimeMs = (deadlineSec + 300) * 1000;
+    // J1tn r303 (Bettor 03:19 v3 approve): 漏 +grace 致 SS reject (+300 < 7200 require).
+    // 用共享 REFUND_GRACE_SEC, 同 settler L1606 / pool.js / claim-auto.mjs.
+    const { REFUND_GRACE_SEC } = await import('../lib/pool-refund-grace.mjs');
+    const refundLockTimeMs = (deadlineSec + REFUND_GRACE_SEC) * 1000;
 
     // Build preimage via maker_relay (single-p2sh refund TX on spine inputs only)
     const preimage = await sendCommandAsync(market.maker_relay_id, {

@@ -11,10 +11,11 @@
 import { sqlite } from '../db/client.js';
 import { sendCommandAsync } from './relay-manager.js';
 import { isRelayAlive } from './relay-manager.js';
+// J1tn r303 (Bettor 03:19 v3 approve): de-dup REFUND_GRACE_SEC hardcode → shared const.
+import { REFUND_GRACE_SEC } from '../lib/pool-refund-grace.mjs';
 
 const TICK_INTERVAL_MS = 5 * 60 * 1000;  // 5 min, 同 pool-market-settler
 const STARTUP_GRACE_MS = 60 * 1000;
-const REFUND_GRACE_SEC = 7200;            // J1 5dd590cd0 SS grace fix 同源
 
 let timer = null;
 let running = false;

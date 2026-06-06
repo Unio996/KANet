@@ -2121,8 +2121,9 @@ export async function registerPoolRoutes(fastify) {
       return reply.code(409).send({ ok: false, error: `output ${outAmount} <= dust 1000 (= fee ${fee} too high for stake ${stakeSompi})` });
     }
 
-    // J1 5dd590cd0 grace fix: SS L260/270 require(tx.time >= (deadline + 7200) * 1000) ms.
-    const REFUND_GRACE_SEC = 7200;
+    // J1 5dd590cd0 grace fix: SS L260/270 require(tx.time >= (deadline + REFUND_GRACE_SEC) * 1000) ms.
+    // J1tn r303 (Bettor 03:19 v3 approve): de-dup hardcode → import from lib/pool-refund-grace.mjs.
+    const { REFUND_GRACE_SEC } = await import('../lib/pool-refund-grace.mjs');
     const lockTime = (BigInt(market.deadline) + BigInt(REFUND_GRACE_SEC)) * 1000n;
 
     try {
