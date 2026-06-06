@@ -251,18 +251,13 @@
           <div>
             <label class="block text-xs font-medium text-ink-500 mb-1.5 flex items-baseline justify-between">
               <span>押 <span class="font-display text-base text-ink-700" x-text="form.maker_stake_kas"></span> KAS</span>
-              <span class="text-xs text-ink-400">(最低 <span x-text="poolConfig?.maker_stake_min_kas ?? 100"></span> / 上限 <span x-text="poolConfig?.maker_stake_max_kas ?? '无'"></span> KAS)</span>
+              <span class="text-xs text-ink-400">(最低 100 KAS)</span>
             </label>
             <input type="range" x-model.number="form.maker_stake_kas"
                    :min="poolConfig?.maker_stake_min_kas ?? 100"
                    :max="poolConfig?.maker_stake_max_kas ?? 10000"
                    step="0.5"
                    class="w-full stake-slider">
-            <p class="text-xs text-ink-400 mt-1">SS 合约 baked 数学锁定不可调</p>
-            <!-- KANet-UI 2026-06-06 #25/L23 Bettor ③ APPROVE r562 + r219 文案精化: MIN_POT 教学不许诺退款. -->
-            <p class="text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded-lg mt-2">
-              📐 SS 合约钦定: 总池 (= 你的 100 KAS + 各下注人加起来) 必须 ≥ 100 KAS 才能结算. 未达 deadline 后无法结算.
-            </p>
           </div>
 
           <!-- 成交费 (Oracle v0.3 §8 disclose mandatory + 1 input + 1:1:1 split) -->
