@@ -33,6 +33,23 @@ const MAKER_STAKE_MAX_KAS = parseFloat(process.env.POOL_MAKER_STAKE_MAX_KAS) || 
 // Owner 2026-06-06 钦定: maker 发起市场最低 100 KAS (= demo 实质押 + 抗灌水). Bettor ③ APPROVE r541 单一源.
 const POOL_MAKER_STAKE_MIN_KAS = 100;
 
+// KANet-UI 2026-06-06 (Bettor ③ APPROVE r546 + Bettor 钦定双层堵): 创建端结构化 spec 强制.
+// 配 bot specIsUsable (= 展示端 filter, tg-bot/prediction-menu.mjs) 形成双层守门:
+// 创建端拒 = 烂单源头堵; 展示端滤 = 历史烂单不显. Follow-up: 抽 lib/spec-validation
+// (= cross-dir 真单一源 import), 短期接受 pool.js + bot 两处同步漂移风险, 改时一起改.
+function isStructuredSpec(spec) {
+  if (!spec) return false;
+  const s = String(spec).trim();
+  if (!s.startsWith('{')) return false;
+  try {
+    const obj = JSON.parse(s);
+    return (
+      typeof obj.title === 'string' && obj.title.trim().length > 0 &&
+      typeof obj.resolution_criteria === 'string' && obj.resolution_criteria.trim().length > 0
+    );
+  } catch { return false; }
+}
+
 function deriveXOnlyPubkey(address) {
   return import('kaspa-wasm').then(kaspa => {
     return kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(address)).toString();
@@ -271,6 +288,8 @@ export async function registerPoolRoutes(fastify) {
     // KANet-UI 2026-06-06 (Bettor ④ catch + 关 1 v2 APPROVE r544): 100 KAS 是 Owner 钦定 demo 实质押 policy,
     // 概念独立于 KANET_TESTNET_NO_LIMITS (= testnet 限制宽松). 移出守卫块, 无条件强制.
     if (makerStakeKas < POOL_MAKER_STAKE_MIN_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be >= ${POOL_MAKER_STAKE_MIN_KAS} KAS (Owner 钦定 demo 实质押 skin-in-game, 单一源 L33)` });
+    // KANet-UI 2026-06-06 (Bettor ③ APPROVE r546): 创建端 spec 结构化强制 (= 配 bot 入口 filter 双层堵).
+    if (!isStructuredSpec(b.resolution_rule_spec)) return reply.code(400).send({ ok: false, error: 'resolution_rule_spec must be JSON with non-empty title + resolution_criteria fields (= 源头堵 voo3z 类烂单, 配 bot specIsUsable 双层守门)' });
     // 5/28 Owner 钦定: testnet 0 limits. Skip dynamic min spendable + softcap when KANET_TESTNET_NO_LIMITS=1.
     if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
       if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS (v0.5 testnet per-market softcap, Bettor r444 + Owner钦定 SS-baked)` });
@@ -473,6 +492,8 @@ export async function registerPoolRoutes(fastify) {
     if (!Number.isFinite(oracleBondKas) || oracleBondKas <= 0) return reply.code(400).send({ ok: false, error: 'oracle_bond_kas must be positive' });
     // 100 KAS Owner 钦定 demo 实质押 — 移出 NO_LIMITS 守卫 (r544 v2 Bettor APPROVE).
     if (makerStakeKas < POOL_MAKER_STAKE_MIN_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be >= ${POOL_MAKER_STAKE_MIN_KAS} KAS (Owner 钦定 demo 实质押 skin-in-game, 单一源 L33)` });
+    // KANet-UI 2026-06-06 (Bettor ③ APPROVE r546): 创建端 spec 结构化强制 (= 配 bot 入口 filter 双层堵).
+    if (!isStructuredSpec(b.resolution_rule_spec)) return reply.code(400).send({ ok: false, error: 'resolution_rule_spec must be JSON with non-empty title + resolution_criteria fields (= 源头堵 voo3z 类烂单, 配 bot specIsUsable 双层守门)' });
     if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
       if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS` });
     }
@@ -703,6 +724,8 @@ export async function registerPoolRoutes(fastify) {
     if (!Number.isFinite(oracleBondKas) || oracleBondKas <= 0) return reply.code(400).send({ ok: false, error: 'oracle_bond_kas must be positive' });
     // 100 KAS Owner 钦定 demo 实质押 — 移出 NO_LIMITS 守卫 (r544 v2 Bettor APPROVE).
     if (makerStakeKas < POOL_MAKER_STAKE_MIN_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be >= ${POOL_MAKER_STAKE_MIN_KAS} KAS (Owner 钦定 demo 实质押 skin-in-game, 单一源 L33)` });
+    // KANet-UI 2026-06-06 (Bettor ③ APPROVE r546): 创建端 spec 结构化强制 (= 配 bot 入口 filter 双层堵).
+    if (!isStructuredSpec(b.resolution_rule_spec)) return reply.code(400).send({ ok: false, error: 'resolution_rule_spec must be JSON with non-empty title + resolution_criteria fields (= 源头堵 voo3z 类烂单, 配 bot specIsUsable 双层守门)' });
     if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
       if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS` });
     }
