@@ -757,8 +757,17 @@ export function computePoolPayouts(args) {
   // total_allocated == oracleBond (matches the W2 formula spec). area-10 outstanding may
   // revisit whether maker share belongs to maker at all (same +EV pattern as Gap 1B burn),
   // but until that decision the remainder follows the same destination as the 25% share.
+  // J2-tn r385 (Bettor #3 设计问题 + #12 实证 overspend bug): v0.5 forfeit_1 redistribution
+  // (50/25/25 split of silent's bond) ONLY applies when silent oracle's bond is forfeited
+  // (= !committeeMode path). In committeeMode (v0.6/v0.7), L783-786 returns bond to ALL 5
+  // committee including silent (= Bettor r355 SS L138 require all N outputs >= oracleBond).
+  // Without committeeMode guard here, code: 5 × bond return + 50%+25%+25% redistribution =
+  // overspend silent's bond TWICE → settle TX Σout > Σin → kaspad reject pre-submit invariant.
+  // #12 实证: input 7 KAS, output 7.72 KAS (overspend 0.72 KAS) = redistribution adds up.
+  // 设计上 committeeMode 静默员仍拿 oracleBond (Bettor 23:59 红线: '不卡主线 settle 照样落,
+  // 主线证完起对抗讨论 KB 经济模型再定'). 此处守 settle 落链, 经济模型后续 retro.
   let winnerForfeitShare = 0, makerForfeitShare = 0, perOracleForfeitShare = 0;
-  if (!unanimous && typeof silentOracleIndex === 'number') {
+  if (!unanimous && typeof silentOracleIndex === 'number' && !committeeMode) {
     winnerForfeitShare = Math.floor(oracleBond * 50 / 100);
     makerForfeitShare = Math.floor(oracleBond * 25 / 100);
     perOracleForfeitShare = Math.floor(oracleBond * 25 / 100 / 2);
