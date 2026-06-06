@@ -1,0 +1,95 @@
+<%~ include('partials/page-open', { _page: 'my-markets', pageTitle: '我的市场', ...it }) %>
+
+<!-- KANet-UI 2026-06-06 件2 (Bettor ③ APPROVE r261c r580): maker 视角自家 markets list.
+     纯 client filter /api/pool/markets?maker_relay_id=<my agents 各 id>. 0 backend 改. -->
+<div class="p-6 max-w-5xl mx-auto" x-data="myMarketsPage()" x-init="init()">
+  <div class="flex items-center justify-between mb-5">
+    <div>
+      <h1 class="text-2xl font-display text-ink-800">我的市场</h1>
+      <p class="text-xs text-ink-400 mt-1">你自家 agent 发起过的预测市场, 含状态 + 详情链接.</p>
+    </div>
+    <a href="/predictions/pool/create" class="btn btn-primary btn-sm">发起新市场 →</a>
+  </div>
+
+  <div x-show="loading" class="text-center py-12 text-ink-400">载入中...</div>
+
+  <div x-show="!loading && markets.length === 0" class="text-center py-16 bg-warm-50 rounded-lg">
+    <div class="text-3xl mb-3">🪧</div>
+    <p class="text-ink-500">你还没有发起过预测市场。</p>
+    <a href="/predictions/pool/create" class="text-brand-500 hover:text-brand-700 text-sm mt-2 inline-block">发起第一个 →</a>
+  </div>
+
+  <div x-show="!loading && markets.length > 0" class="card overflow-hidden">
+    <table class="w-full text-sm">
+      <thead class="bg-warm-50 text-ink-500 text-xs">
+        <tr>
+          <th class="text-left py-2 px-3">题干</th>
+          <th class="text-left py-2 px-3">出单人</th>
+          <th class="text-center py-2 px-3">状态</th>
+          <th class="text-right py-2 px-3">押金 KAS</th>
+          <th class="text-right py-2 px-3">下注人</th>
+          <th class="text-right py-2 px-3">建市时间</th>
+          <th class="text-center py-2 px-3"></th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="m in markets" :key="m.id">
+          <tr class="border-t border-warm-100 hover:bg-warm-50">
+            <td class="py-2 px-3 max-w-[280px] truncate" :title="m.title" x-text="m.title || m.id.slice(0, 16)"></td>
+            <td class="py-2 px-3 text-ink-500 text-xs" x-text="m.maker_name || '?'"></td>
+            <td class="py-2 px-3 text-center">
+              <span class="text-[10px] px-1.5 py-0.5 rounded font-medium"
+                    :class="statusBadge(m.protocol_status)" x-text="m.protocol_status || '?'"></span>
+            </td>
+            <td class="py-2 px-3 text-right tabular-nums text-ink-600" x-text="m.maker_stake_kas || '?'"></td>
+            <td class="py-2 px-3 text-right tabular-nums text-ink-600" x-text="m.bettor_count || 0"></td>
+            <td class="py-2 px-3 text-right text-[11px] text-ink-400" x-text="(m.created_at || '').slice(0, 16)"></td>
+            <td class="py-2 px-3 text-center">
+              <a :href="`/predictions/pool/${encodeURIComponent(m.id)}`" class="text-brand-500 hover:text-brand-700 text-xs">详情 →</a>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+function myMarketsPage() {
+  return {
+    loading: true,
+    markets: [],
+    async init() {
+      try {
+        const relayResp = await fetch('/api/relays').then(r => r.json()).catch(() => ({}));
+        const relays = (relayResp.relays || relayResp || []).filter(r => !r.is_oracle);
+        if (!relays.length) { this.loading = false; return; }
+        const allMarkets = [];
+        for (const r of relays) {
+          try {
+            const mResp = await fetch(`/api/pool/markets?maker_relay_id=${encodeURIComponent(r.id)}&limit=200`).then(x => x.json());
+            for (const m of (mResp.markets || [])) {
+              let title = m.id;
+              try { const o = JSON.parse(m.resolution_rule_spec || ''); title = o.title || title; } catch {}
+              allMarkets.push({ ...m, title, maker_name: r.name });
+            }
+          } catch {}
+        }
+        allMarkets.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+        this.markets = allMarkets;
+      } catch (e) {
+        console.warn('my-markets load fail', e);
+      }
+      this.loading = false;
+    },
+    statusBadge(s) {
+      if (s === 'completed') return 'bg-emerald-100 text-emerald-700';
+      if (s === 'collecting_sigs' || s === 'verifying') return 'bg-amber-100 text-amber-700';
+      if (s === 'cancelled' || s === 'refunded') return 'bg-warm-200 text-ink-500';
+      return 'bg-warm-100 text-ink-500';
+    },
+  };
+}
+</script>
+
+<%~ include('partials/page-close', it) %>

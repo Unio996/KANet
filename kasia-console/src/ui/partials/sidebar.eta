@@ -84,6 +84,10 @@
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'predictions-pool-create' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
           建市场
         </a>
+        <a href="/my-markets"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'my-markets' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          我的市场
+        </a>
       </div>
     </div>
 

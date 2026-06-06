@@ -35,6 +35,16 @@ export async function registerConversationRoutes(fastify) {
     return reply.redirect(302, '/agent');
   });
 
+  // KANet-UI 2026-06-06 件2 (Bettor ③ APPROVE r261c r580): /my-markets — maker 视角自家 markets,
+  // 纯 client filter /api/pool/markets?maker_relay_id, 0 backend 0 数据破坏.
+  fastify.get('/my-markets', async (request, reply) => {
+    const lang = parseLang(request.headers.cookie);
+    const t = getT(lang);
+    const dir = isRtl(lang) ? 'rtl' : 'ltr';
+    const langs = LANG_NAMES;
+    return reply.view('my-markets', { title: '我的市场', t, lang, dir, langs, _page: 'my-markets' });
+  });
+
   // Page: /approvals — standalone pending approvals page
   fastify.get('/approvals', async (request, reply) => {
     const lang = parseLang(request.headers.cookie);
