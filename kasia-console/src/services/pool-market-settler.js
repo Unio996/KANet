@@ -147,8 +147,16 @@ async function legacyRefundBuilderTick() {
       WHERE (
               (pm.protocol_version IS NULL OR pm.protocol_version = 'v0.5')
               OR pm.id IN (${unfixablePlaceholders})
-              OR (pm.protocol_status = 'cancelled'
-                  AND json_extract(pm.metadata, '$.cancel_reason') = 'min_pot_undersize')
+              -- J2-tn r397 (Bettor r226 ④ catch): dispatchRefund 设 status='refunded' + 可能擦 cancel_reason
+              -- 不依赖 metadata, 直接 recompute totalPool < 1e10 for v0.6/v0.7 cancelled/refunded markets.
+              OR (
+                pm.protocol_status IN ('cancelled', 'refunded')
+                AND pm.protocol_version IN ('v0.6', 'v0.7')
+                AND (
+                  CAST(pm.maker_stake_amount AS INTEGER) +
+                  COALESCE((SELECT SUM(CAST(stake_amount AS INTEGER)) FROM pool_bettor_sides WHERE market_id = pm.id), 0)
+                ) < 10000000000
+              )
             )
         AND pm.deadline <= ?
         AND pbs.side_lock_tx IS NOT NULL
