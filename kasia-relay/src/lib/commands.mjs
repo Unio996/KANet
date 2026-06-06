@@ -45,6 +45,11 @@ export const COMMAND_TYPES = Object.freeze({
   // validateCommandPayload reject silent → settler "invalid command type" log + refund 卡 refunding.
   // qlfpv 100 KAS 实测 fire 一次 → 立补三处. 第 N 次复刻, KI 49 同款症状.
   POOL_REFUND_MAKER_UNJOINED_TX: 'pool_refund_maker_unjoined_tx',
+  // J2-tn r398 #25 (Bettor r227 ④ catch root cause): relay.mjs L739 case
+  // 'pool_side_refund_cancelled_tx' 7132ddd ship 但漏 register commands.mjs 三层 (= KI 49
+  // 第 N+2 次复刻同 L44 sediment). validateCommandPayload reject silent → 4 bettor side
+  // 12 KAS refund 卡死循环 (= xejkf+zc9jw min_pot refund 路).
+  POOL_SIDE_REFUND_CANCELLED_TX: 'pool_side_refund_cancelled_tx',
   // G6 批 3 段① Bettor r311 钦定: Console 手搓 UtxoEntry 喂 WASM panic 第 N+1 次, 转 relay 端
   // 算 mass — relay 用 p2sh.mjs 同 well-tested UtxoEntry pattern. Console 只 IPC 调用拿结果.
   POOL_V07_COMPUTE_REFUND_MASS: 'pool_v07_compute_refund_mass',
@@ -92,6 +97,7 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.POOL_SETTLE_TX]: ['spine_p2sh_address', 'side_p2sh_addresses', 'spine_redeem_script_hex', 'side_redeem_script_hexes', 'required_input_outpoints', 'outputs', 'spine_sigs_by_input', 'spine_input_count', 'winner'],
   [COMMAND_TYPES.POOL_REFUND_DISAGREEMENT_TX]: ['spine_p2sh_address', 'spine_redeem_script_hex', 'required_input_outpoints', 'outputs', 'spine_sigs_by_input', 'silent_oracle_index', 'signing_pair'],
   [COMMAND_TYPES.POOL_REFUND_MAKER_UNJOINED_TX]: ['spine_p2sh_address', 'spine_redeem_script_hex', 'required_input_outpoint', 'output'],
+  [COMMAND_TYPES.POOL_SIDE_REFUND_CANCELLED_TX]: ['side_p2sh_address', 'side_redeem_script_hex', 'required_input_outpoint', 'output'],
   [COMMAND_TYPES.POOL_V07_COMPUTE_REFUND_MASS]: ['spine_p2sh', 'spine_lock_tx', 'spine_redeem_script_hex', 'maker_address', 'maker_stake', 'deadline'],
   [COMMAND_TYPES.CHECK_UTXO_LANDED]: ['address', 'txid'],
   // ③ committee chainReader — get current DAA score 不需 payload field; get blocks 需 min_daa_score.
@@ -133,6 +139,7 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.POOL_SETTLE_TX]: { spine_p2sh_address: 'string', side_p2sh_addresses: 'array', spine_redeem_script_hex: 'string', side_redeem_script_hexes: 'array', required_input_outpoints: 'array', outputs: 'array', spine_sigs_by_input: 'array', spine_input_count: 'number', winner: 'number' },
   [COMMAND_TYPES.POOL_REFUND_DISAGREEMENT_TX]: { spine_p2sh_address: 'string', spine_redeem_script_hex: 'string', required_input_outpoints: 'array', outputs: 'array', spine_sigs_by_input: 'array', silent_oracle_index: 'number', signing_pair: 'number' },
   [COMMAND_TYPES.POOL_REFUND_MAKER_UNJOINED_TX]: { spine_p2sh_address: 'string', spine_redeem_script_hex: 'string', required_input_outpoint: 'object', output: 'object' },
+  [COMMAND_TYPES.POOL_SIDE_REFUND_CANCELLED_TX]: { side_p2sh_address: 'string', side_redeem_script_hex: 'string', required_input_outpoint: 'object', output: 'object' },
   [COMMAND_TYPES.POOL_V07_COMPUTE_REFUND_MASS]: { spine_p2sh: 'string', spine_lock_tx: 'string', spine_redeem_script_hex: 'string', maker_address: 'string', maker_stake: ['string','number'], deadline: ['string','number'] },
   [COMMAND_TYPES.CHECK_UTXO_LANDED]: { address: 'string', txid: 'string' },
   [COMMAND_TYPES.STAKE_UNLOCK_TX]: { p2sh_address: 'string', redeem_script_hex: 'string', to_address: 'string', lock_time: ['string', 'number'] },
