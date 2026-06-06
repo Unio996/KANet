@@ -965,6 +965,23 @@ if (process.send) {
           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result });
           return;
         }
+
+        case 'stake_unlock_tx': {
+          // #17 G1 (J1tn r303) — OracleStake_v1 timeout_unlock self-unstake on chain.
+          // Single-entry SS contract → scriptSig = [sigPush][redeemScriptPush] NO selector.
+          // Caller pass p2sh_address (= computed from stakerPkX+lockUntilDaa), redeem_script_hex,
+          // to_address (= staker P2PK), lock_time (= lockUntilDaa, must <= current daa).
+          // 红线 8 fee 范围 [1000, 1e8] enforced by SS, JS picks 0.001 KAS = 100000 sompi.
+          const { unlockP2SH_SingleEntry } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const redeemScript = new Uint8Array(Buffer.from(cmd.redeem_script_hex, 'hex'));
+          const lockTime = BigInt(cmd.lock_time || 0);
+          const r = await unlockP2SH_SingleEntry(wallet, cmd.p2sh_address, redeemScript, cmd.to_address, lockTime);
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId, amount: r.amount?.toString() } });
+          }
+          return;
+        }
       }
       // 如果有 requestId，回传执行结果给 Console
       if (cmd.requestId && process.send) {

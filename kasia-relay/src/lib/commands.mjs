@@ -57,6 +57,9 @@ export const COMMAND_TYPES = Object.freeze({
   // J1tn r303 (Bettor 钦定 SPC fix + J2 r327 split): SPC walk authoritative endBlock at deadlineDaa.
   // Goes direct to kaspad getBlock RPC via selectedParentHash chain (NOT ring buffer).
   CHAIN_GET_BLOCK_AT_DAA: 'chain_get_block_at_daa',
+  // #17 G1 (J1tn r303) — OracleStake_v1 timeout_unlock self-unstake.
+  // Single-entry SS contract → scriptSig NO selector (sediment feedback-silverc-single-entry-no-selector).
+  STAKE_UNLOCK_TX: 'stake_unlock_tx',
 });
 
 export const COMMAND_TYPE_SET = new Set(Object.values(COMMAND_TYPES));
@@ -95,6 +98,8 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.CHAIN_GET_CURRENT_DAA_SCORE]: [],
   [COMMAND_TYPES.CHAIN_GET_BLOCKS_FROM_DAA_SCORE]: ['min_daa_score'],
   [COMMAND_TYPES.CHAIN_GET_BLOCK_AT_DAA]: ['min_daa_score'],
+  // #17 G1 (J1tn r303) — stake_unlock_tx single-entry P2SH unlock for OracleStake_v1.
+  [COMMAND_TYPES.STAKE_UNLOCK_TX]: ['p2sh_address', 'redeem_script_hex', 'to_address', 'lock_time'],
 });
 
 // R38 (Z23 sediment): typeof spec per field. Bug-Z23 真根因 — broker enqueue amount: number,
@@ -130,6 +135,7 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.POOL_REFUND_MAKER_UNJOINED_TX]: { spine_p2sh_address: 'string', spine_redeem_script_hex: 'string', required_input_outpoint: 'object', output: 'object' },
   [COMMAND_TYPES.POOL_V07_COMPUTE_REFUND_MASS]: { spine_p2sh: 'string', spine_lock_tx: 'string', spine_redeem_script_hex: 'string', maker_address: 'string', maker_stake: ['string','number'], deadline: ['string','number'] },
   [COMMAND_TYPES.CHECK_UTXO_LANDED]: { address: 'string', txid: 'string' },
+  [COMMAND_TYPES.STAKE_UNLOCK_TX]: { p2sh_address: 'string', redeem_script_hex: 'string', to_address: 'string', lock_time: ['string', 'number'] },
 });
 
 export function validateCommandPayload(cmd) {

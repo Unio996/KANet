@@ -298,6 +298,82 @@ export async function unlockP2SH(wallet, p2shAddress, redeemScript, branch, toAd
   }
 }
 
+// ── 4b. unlockP2SH_SingleEntry — for single-entry SS contracts (no selector byte) ──
+
+/**
+ * Unlock funds from a single-entry P2SH contract (= OracleStake_v1 timeout_unlock).
+ *
+ * silverc single-entry contracts do NOT push a selector byte in scriptSig (sediment
+ * feedback-silverc-single-entry-no-selector 6/2). scriptSig = [sigPush] [redeemScriptPush] only.
+ * Adding OP_0 selector would be parsed as int 0 ctor arg → require fail.
+ *
+ * @param {import('./wallet.mjs').KaspaWallet} wallet - Signer wallet
+ * @param {string} p2shAddress - The P2SH address holding the locked funds
+ * @param {Uint8Array} redeemScript - The compiled contract bytecode
+ * @param {string} toAddress - Destination address for the released funds
+ * @param {bigint} lockTime - TX lockTime (must >= SS-required time)
+ * @returns {Promise<{ txId: string, amount: bigint }>}
+ */
+export async function unlockP2SH_SingleEntry(wallet, p2shAddress, redeemScript, toAddress, lockTime = 0n) {
+  const txLockTime = BigInt(lockTime);
+  const rpc = await connectRpc(wallet.getNetworkId());
+  try {
+    const { entries } = await rpc.getUtxosByAddresses([p2shAddress]);
+    if (!entries?.length) throw new Error(`No UTXOs at P2SH address ${p2shAddress}`);
+
+    const utxo = entries[0];
+    const lockedAmount = utxo.entry.amount;
+    const fee = kaspaToSompi('0.001');
+    const outValue = lockedAmount - fee;
+    if (outValue <= 0n) throw new Error('Locked amount too small to cover fee');
+
+    const toSpk = payToAddressScript(new Address(toAddress));
+
+    const unsignedTx = new Transaction({
+      version: 0,
+      inputs: [{
+        previousOutpoint: { transactionId: utxo.outpoint.transactionId, index: utxo.outpoint.index },
+        signatureScript: '',
+        sequence: 0n,
+        sigOpCount: 1,
+        utxo,
+      }],
+      outputs: [new TransactionOutput(outValue, toSpk)],
+      lockTime: txLockTime,
+      gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000',
+      payload: '',
+    });
+
+    const sigHex = createInputSignature(unsignedTx, 0, wallet.getPrivateKey(), SighashType.All);
+
+    // scriptSig: [sigPush][redeemScriptPush] — NO selector byte (single-entry contract)
+    const sb = ScriptBuilder.fromScript(redeemScript);
+    const scriptSigHex = sb.encodePayToScriptHashSignatureScript(sigHex);
+
+    const signedTx = new Transaction({
+      version: 0,
+      inputs: [{
+        previousOutpoint: { transactionId: utxo.outpoint.transactionId, index: utxo.outpoint.index },
+        signatureScript: scriptSigHex,
+        sequence: 0n,
+        sigOpCount: 1,
+      }],
+      outputs: [new TransactionOutput(outValue, toSpk)],
+      lockTime: txLockTime,
+      gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000',
+      payload: '',
+    });
+
+    _assertTxInvariants([utxo], signedTx, 'unlockP2SH_SingleEntry', wallet.getNetworkId());
+    const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: result.transactionId, amount: outValue };
+  } finally {
+    try { await rpc.disconnect(); } catch {}
+  }
+}
+
 // ── 5. unlockP2SHMultiSig (Phase 4a Sub 8 NEW, Bettor r242 adapt) ──
 
 /**
