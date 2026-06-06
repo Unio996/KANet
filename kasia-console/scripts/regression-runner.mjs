@@ -632,6 +632,43 @@ async function verifyV06(baselinePath) {
     check('L24 三端单一源 (probe)', false, { err: e.message }, 'soft');
   }
 
+  // L25 Bettor r250 ④ APPROVE 第4路 (= 单元测 isStructuredSpec 纯函数, 零 side effect):
+  // J2 af74509 export 后 dynamic import + 5 case 覆全分支 (= NWT r326 propose)
+  try {
+    // 防 pool.js 顶 import 链 rpc-health 抛 env-not-set: 占位 dummy
+    if (!process.env.KASPA_RPC_URL) process.env.KASPA_RPC_URL = 'http://lint-dummy';
+    if (!process.env.KASPA_NETWORK) process.env.KASPA_NETWORK = 'testnet-12';
+    const poolMod = await import('file://' + path.resolve(REPO_ROOT, 'kasia-console/src/api/pool.js').replace(/\\/g, '/'));
+    const isStructuredSpec = poolMod.isStructuredSpec;
+    if (typeof isStructuredSpec !== 'function') throw new Error('isStructuredSpec not exported as function');
+    const cases = [
+      { name: '漏 canonical', input: { title: 't', resolution_criteria: 'c' }, expect: false },
+      { name: '全字段 PASS', input: { title: 't', resolution_criteria: 'c', data_source_canonical: 'http://x' }, expect: true },
+      { name: '空 spec', input: {}, expect: false },
+      { name: '非对象 string', input: 'string', expect: false },
+      { name: '空 canonical', input: { title: 't', resolution_criteria: 'c', data_source_canonical: '' }, expect: false },
+    ];
+    const results = cases.map(c => {
+      let actual;
+      try {
+        if (typeof c.input === 'string') actual = isStructuredSpec(JSON.stringify(c.input));
+        else actual = isStructuredSpec(JSON.stringify(c.input));
+      } catch (_) { actual = false; }
+      return { name: c.name, expect: c.expect, actual, ok: actual === c.expect };
+    });
+    const allOk = results.every(r => r.ok);
+    check(
+      'L25 unit test: isStructuredSpec 5 case 覆全分支 (Bettor r250 第4路 / J2 af74509 export)',
+      allOk,
+      {
+        cases: results.map(r => `${r.name}: expect=${r.expect} actual=${r.actual} ${r.ok ? '✓' : '✗'}`),
+        note: allOk ? '5 case 全 PASS, 纯函数零 side effect' : '任一 case 不符 = isStructuredSpec 逻辑漂回 qrv65 病根'
+      }
+    );
+  } catch (e) {
+    check('L25 unit test (probe)', false, { err: e.message, note: 'import fail or export missing' }, 'soft');
+  }
+
   const total = report.pass + report.fail + report.deploy_pending;
   if (report.fail > 0) report.verdict = 'FAIL';
   else if (report.deploy_pending > 0) report.verdict = 'PASS_WITH_DEPLOY_PENDING';
