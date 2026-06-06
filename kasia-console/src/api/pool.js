@@ -42,7 +42,7 @@ const POOL_MAKER_STAKE_MIN_KAS = 100;
 // qualifications MUST == voter derivable. 漂移 = c06178c 类回归源, 改时三端 (pool.js
 // + bot specIsUsable + voter deriveVote) 必同步.
 // Follow-up: 抽 lib/spec-validation cross-dir 真单一源 import (= 不在 HALT 域).
-function isStructuredSpec(spec) {
+export function isStructuredSpec(spec) {
   if (!spec) return false;
   const s = String(spec).trim();
   if (!s.startsWith('{')) return false;
