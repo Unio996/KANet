@@ -60,18 +60,20 @@ function myMarketsPage() {
     loading: true,
     markets: [],
     async init() {
+      // KANet-UI 2026-06-06 (Bettor r270 ④ catch): /api/relays 404 不存在, 改 /api/agent/profile
+      // (= 现成 endpoint 返 agents list 含 id/name). 排除 is_dex_broker (= broker 不当 maker).
       try {
-        const relayResp = await fetch('/api/relays').then(r => r.json()).catch(() => ({}));
-        const relays = (relayResp.relays || relayResp || []).filter(r => !r.is_oracle);
-        if (!relays.length) { this.loading = false; return; }
+        const agResp = await fetch('/api/agent/profile').then(r => r.json()).catch(() => ({}));
+        const agents = (agResp.agents || agResp || []).filter(a => !a.is_dex_broker);
+        if (!agents.length) { this.loading = false; return; }
         const allMarkets = [];
-        for (const r of relays) {
+        for (const a of agents) {
           try {
-            const mResp = await fetch(`/api/pool/markets?maker_relay_id=${encodeURIComponent(r.id)}&limit=200`).then(x => x.json());
+            const mResp = await fetch(`/api/pool/markets?maker_relay_id=${encodeURIComponent(a.id)}&limit=200`).then(x => x.json());
             for (const m of (mResp.markets || [])) {
               let title = m.id;
               try { const o = JSON.parse(m.resolution_rule_spec || ''); title = o.title || title; } catch {}
-              allMarkets.push({ ...m, title, maker_name: r.name });
+              allMarkets.push({ ...m, title, maker_name: a.name });
             }
           } catch {}
         }
