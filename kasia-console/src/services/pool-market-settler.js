@@ -388,6 +388,28 @@ export async function poolSettlerTick() {
           continue;
         }
         if (market.protocol_status === 'collecting_sigs') {
+          // J2-tn r394 #25 (Bettor r223 ④ catch): collecting_sigs 入口同款 MIN_POT 守门.
+          // r393 只 gate consensus 入口, 但 zc9jw/xejkf 已 past dispatch → collecting_sigs
+          // 循环 handleCollectingSigs 永 submit fail (= pool 7 < 100). 加 gate 让已陷入
+          // collecting_sigs 的 < MIN_POT 单也走 cancel + refund 路 (= D9 自愈 retroactive).
+          if (market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7') {
+            const totalPool = BigInt(market.maker_stake_amount || 0) +
+              sqlite.prepare('SELECT COALESCE(SUM(CAST(stake_amount AS INTEGER)), 0) AS s FROM pool_bettor_sides WHERE market_id = ?').get(market.id).s;
+            const MIN_POT_SOMPI = 10_000_000_000n;
+            if (BigInt(totalPool) < MIN_POT_SOMPI) {
+              console.warn(`[pool-settler:min-pot] collecting_sigs market=${market.id.slice(0,12)} pool=${(Number(totalPool)/1e8).toFixed(2)}KAS < 100KAS → cancel + refund route (retroactive D9 自愈)`);
+              const curMeta1 = JSON.parse(market.metadata || '{}');
+              curMeta1.cancel_reason = 'min_pot_undersize';
+              curMeta1.cancel_pool_sompi = totalPool.toString();
+              curMeta1.cancelled_at = new Date().toISOString();
+              sqlite.prepare("UPDATE pool_markets SET protocol_status = 'cancelled', metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+                .run(JSON.stringify(curMeta1), market.id);
+              dispatchRefund(market, { action: 'refund', reason: 'min_pot_undersize cancel-refund (retroactive)' }).catch(e =>
+                console.warn(`[pool-settler:min-pot] retroactive maker dispatchRefund market=${market.id.slice(0,12)}: ${e.message}`));
+              refund++;
+              continue;
+            }
+          }
           await handleCollectingSigs(market);
           continue;
         }
