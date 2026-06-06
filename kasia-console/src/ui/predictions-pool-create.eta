@@ -197,6 +197,14 @@
             <p class="text-xs text-ink-400 mt-1">必 ≥ 现在 + <span x-text="minDeadlineMin"></span> 分钟 · ≤ <span x-text="maxDeadlineDay"></span> 天 (testnet)</p>
           </div>
 
+          <!-- 题干 (KANet-UI 2026-06-06 #26 D1 Bettor ③ APPROVE r559: 结构化 spec server 强制, 必填) -->
+          <div>
+            <label class="block text-xs font-medium text-ink-500 mb-1.5">题干 (一句话讲清这市场赌什么)</label>
+            <input type="text" x-model="form.title" maxlength="200" placeholder="例: BTC 2026-06-30 23:59 UTC Binance 收盘价 ≥ 80,000?"
+                   class="w-full text-sm px-4 py-2.5 rounded-lg border border-warm-300 focus:border-amber-400 focus:outline-none font-sans" />
+            <p class="text-xs text-ink-400 mt-1">≤ 200 字 · 用户看到的标题, oracle 也用它定位.</p>
+          </div>
+
           <!-- 规则 -->
           <div>
             <label class="block text-xs font-medium text-ink-500 mb-1.5">判定规则 (oracle 用这段判 YES/NO)</label>
@@ -353,6 +361,7 @@ function createPoolPage() {
       outcome_end_date_local: '',
       outcome_side: '',
       maker_stake_kas: 100,
+      title: '',                        // KANet-UI 2026-06-06 #26 D1 (Bettor ③ APPROVE r559): server isStructuredSpec 强制必填
       resolution_rule_spec: '',
       polymarketCondition: null,  // iteration 2: set when 选用 Polymarket result
       // Oracle v0.3 §8/O2/§9 fold sub #7 — 5/26 final lock
@@ -410,6 +419,7 @@ function createPoolPage() {
 
     get canSubmit() {
       return this.form.question.trim()
+        && this.form.title.trim()                    // KANet-UI #26 D1: title 必填 (server isStructuredSpec)
         && this.form.outcome_end_date_local
         && this.form.outcome_side
         && this.form.maker_stake_kas > 0
@@ -520,11 +530,18 @@ function createPoolPage() {
       this.submitError = '';
       try {
         const outcomeEndIso = new Date(this.form.outcome_end_date_local).toISOString();
+        // KANet-UI 2026-06-06 #26 D1 (Bettor ③ APPROVE r559 关1 条件): 序列化结构化 spec
+        // JSON {title, resolution_criteria} 满足 server isStructuredSpec 强制. 用户填的 2 字段拼成 1 spec.
+        const structuredSpec = JSON.stringify({
+          title: this.form.title.trim(),
+          resolution_criteria: this.form.resolution_rule_spec.trim(),
+          source: 'manual',
+        });
         const body = {
           maker_relay_id: this.selectedRelayId,
           outcome_side: this.form.outcome_side,
           outcome_end_date: outcomeEndIso,
-          resolution_rule_spec: this.form.resolution_rule_spec.trim(),
+          resolution_rule_spec: structuredSpec,
           maker_stake_kas: String(this.form.maker_stake_kas),
         };
         // backend r449 4 决策: 不传 oracle_relay_ids / broker_relay_id / broker_fee_pct / oracle_bond_kas
