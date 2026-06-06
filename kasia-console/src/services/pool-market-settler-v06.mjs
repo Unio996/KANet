@@ -180,26 +180,12 @@ export function derivePoolMerkleRoot(snapshotDaa = null) {
     }
   }
 
-  console.warn('[derivePoolMerkleRoot] LEGACY FALLBACK: oracle_pool_chain_view empty, reading oracle_pool_membership (7-day grace period, DoD §2.2 sediment).');
-  const rawMembers = sqlite.prepare(`
-    SELECT oracle_pk, stake_locked_kas
-    FROM oracle_pool_membership
-    WHERE active = 1
-  `).all();
-  if (rawMembers.length === 0) {
-    throw new Error('oracle_pool_membership empty (= no active members)');
-  }
-  const paired = rawMembers.map(m => ({
-    pk: m.oracle_pk.toLowerCase(),
-    stake_sompi: BigInt(Math.round(Number(m.stake_locked_kas) * 1e8)).toString(),
-  })).sort((a, b) => a.pk < b.pk ? -1 : (a.pk > b.pk ? 1 : 0));
-  const pks = paired.map(p => p.pk);
-  const tree = buildPoolMerkleTree(pks);
-  return {
-    pool_merkle_root: tree.root.toString('hex'),
-    pool_size: pks.length,
-    members: paired.map(p => ({ pk: p.pk, stake_sompi: p.stake_sompi })),
-  };
+  // J2-tn r390 (#21 B Bettor ③ APPROVE 04:33): 删 LEGACY FALLBACK 到 oracle_pool_membership.
+  // NWT canonical decision r315: chain_view (= scanner cache 派生自 enrollments) 是 canonical
+  // pool source. membership 是死表 v164 已清. 7-day grace period 早已过, 无 active rows.
+  // fail-fast 替代 silent return (= Bettor 03:09 别 silent 假绿 spirit). 若 chain_view 缺
+  // → 主路径已 throw 'no chain_view cached', 不需此 fallback.
+  throw new Error('chain_view empty + LEGACY FALLBACK removed (#21 B r390): canonical oracle pool source is oracle_pool_chain_view (derived from oracle_stake_enrollments). 若 chain_view 空 = scanner 异常 OR 链上无 enrollments, 需修主因 (= 重启 scanner OR 查 oracle_stake_enrollments).');
 }
 
 export function ensurePoolSnapshot(marketId, expectedPoolMerkleRoot, snapshotDaa = null) {
@@ -239,14 +225,12 @@ export function ensurePoolSnapshot(marketId, expectedPoolMerkleRoot, snapshotDaa
       snapshot_daa: snapshotDaa,
     };
   }
-  const rawMembers = sqlite.prepare(`
-    SELECT oracle_pk, stake_locked_kas
-    FROM oracle_pool_membership
-    WHERE active = 1
-  `).all();
-  if (rawMembers.length === 0) {
-    throw new Error('oracle_pool_membership empty (= no active members; run /api/oracle-pool/seed or wait for join-stake)');
-  }
+  // J2-tn r390 (#21 B Bettor ③ APPROVE 04:33): 删 ensurePoolSnapshot legacy fallback path.
+  // 主路径 chain_view 已 canonical. snapshotDaa=null 路径 (= legacy) 只该走 chain_view, 不
+  // 再 fallback 读废弃表. 同 derivePoolMerkleRoot fail-fast pattern.
+  throw new Error('chain_view path required (#21 B r390): ensurePoolSnapshot legacy oracle_pool_membership fallback removed. Use snapshotDaa-based path via chain_view (= canonical pool source).');
+  // unreachable below — left for context if 7-day grace branch resurrected
+  const rawMembers = [];
   // Bettor r55 F-A1 fix: pair (pk,stake) BEFORE sorting, so stake stays attached to its pk
   // regardless of DB storage case (= alignment robust against mixed-case oracle_pk inserts).
   // KAS float → sompi integer string (Bettor r52 (A) sompi-unit format) computed per-pair.

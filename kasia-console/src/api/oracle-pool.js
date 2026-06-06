@@ -124,21 +124,15 @@ export async function registerOraclePoolRoutes(fastify) {
       });
     }
 
-    const insertStmt = sqlite.prepare(`
-      INSERT OR REPLACE INTO oracle_pool_membership
-        (relay_id, oracle_pk, stake_locked_kas, joined_at, active)
-      VALUES (?, ?, ?, COALESCE((SELECT joined_at FROM oracle_pool_membership WHERE relay_id = ?), CURRENT_TIMESTAMP), 1)
-    `);
+    // J2-tn r390 (#21 B Bettor ③ APPROVE 04:32): 删 INSERT 写 oracle_pool_membership 废弃表
+    // (= NWT canonical decision r315: oracle_stake_enrollments is identity canonical, membership
+    // 是死表 v164 已清). seed endpoint 现路径: broadcast chain envelope (= path A r301)
+    // → trade-protocol-filter handleOracleStakeEnroll ingest → oracle_stake_enrollments. seed
+    // DB INSERT 是早期 v159 bootstrap 残留, 现 chain envelope 已是 canonical 入口, 此 DB
+    // write 是 dead writer + 双写漂移源. 删 INSERT 保 endpoint shell (= broadcast 走原路).
+    // Bettor 04:32 spec aligned with my 04:20 plan, 04:33 APPROVE.
     let inserted = 0;
     const errors = [];
-    for (const r of resolved) {
-      try {
-        insertStmt.run(r.relay_id, r.oracle_pk, stakeKas, r.relay_id);
-        inserted += 1;
-      } catch (e) {
-        errors.push({ relay_id: r.relay_id, name: r.name, reason: e.message });
-      }
-    }
 
     return reply.send({
       ok: true,

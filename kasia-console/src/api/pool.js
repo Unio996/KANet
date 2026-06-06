@@ -1703,8 +1703,11 @@ export async function registerPoolRoutes(fastify) {
   // Reads J2 v159 (oracle_pool_membership / pool_snapshots / pool_committee) + path A SS fingerprint.
   // All three gracefully degrade if v159 schema not yet migrated (= J2 branch not yet on this Console).
 
+  // J2-tn r390 (#21 B Bettor ③ APPROVE 04:33): 改 oracle_pool_membership → oracle_stake_enrollments
+  // (= NWT canonical r315: enrollments 是身份 canonical, membership 已死表 v164 清).
+  // pool_snapshots/pool_committee 保留 (= 同 #21 scope 内不动).
   function _v06TablesExist() {
-    const t = ['oracle_pool_membership', 'pool_snapshots', 'pool_committee'];
+    const t = ['oracle_stake_enrollments', 'pool_snapshots', 'pool_committee'];
     return t.every(n => sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(n));
   }
 
