@@ -26,10 +26,9 @@
       Portfolio
     </a>
 
-    <!-- 4. Agents ▶ (= Overview / Identity / Behavior / Roles ▶ Broker/Oracle) -->
-    <% const _isAgent = ['agent','agent-v2','agent-status','agent-history','story','graph','skills','approvals'].includes(it._page); %>
-    <% const _inRoles = ['broker','oracle'].includes(it._agentTab); %>
-    <div x-data="{ open: <%= _isAgent ? 'true' : 'false' %>, roles: <%= _inRoles ? 'true' : 'false' %> }">
+    <!-- 4. Agents ▶ (Owner 2026-06-06 钦定: 删 Roles 层, Oracle/Broker 提到 Overview 后平级 — 这俩是系统关键) -->
+    <% const _isAgent = ['agent','agent-v2','agent-status','agent-history','story','graph','skills','approvals','broker','oracle'].includes(it._page); %>
+    <div x-data="{ open: <%= _isAgent ? 'true' : 'false' %> }">
       <button @click="open = !open"
         class="flex items-center justify-between w-full px-3 py-2.5 rounded-lg text-sm transition-colors <%= _isAgent ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
         <span>Agents</span>
@@ -40,6 +39,14 @@
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'agent' && !it._agentTab ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
           Overview
         </a>
+        <a href="/oracle"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'oracle' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          Oracle
+        </a>
+        <a href="/broker"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'broker' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          Broker
+        </a>
         <a href="/agent?tab=card"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._agentTab === 'card' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
           Identity
@@ -48,22 +55,6 @@
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'skills' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
           Behavior
         </a>
-        <!-- Roles ▶ (Broker / Oracle) -->
-        <button @click="roles = !roles"
-          class="flex items-center justify-between w-full px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= _inRoles ? 'text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          <span>Roles</span>
-          <span class="text-[10px] transition-transform" :class="roles ? 'rotate-90' : ''">›</span>
-        </button>
-        <div x-show="roles" x-transition class="space-y-0.5">
-          <a href="/broker"
-            class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-7 <%= it._page === 'broker' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-            Broker
-          </a>
-          <a href="/oracle"
-            class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-7 <%= it._page === 'oracle' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-            Oracle
-          </a>
-        </div>
         <!-- Approvals badge (= 等审批入口) -->
         <a href="/approvals"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'approvals' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
