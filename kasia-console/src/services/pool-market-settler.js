@@ -78,6 +78,19 @@ export function parseSqliteUtc(ts) {
   return new Date(iso.endsWith('Z') ? iso : iso + 'Z').getTime();
 }
 
+/**
+ * Single source of truth: read Σ pool_bettor_sides.stake_amount as BigInt.
+ * J2-tn r399 #26 D7 (Bettor r253 关1 PASS): r395 (9fe19b6) BigInt mix bug fix 漏 L654
+ * consensus 路 (replace_all 模式没匹 inline .s). 抽 helper 三处统一 + JSDoc bigint
+ * 防再漂 (= 类型边界根治非 band-aid).
+ * @param {string} marketId
+ * @returns {bigint}
+ */
+function getBettorSumSompi(marketId) {
+  const r = sqlite.prepare('SELECT COALESCE(SUM(CAST(stake_amount AS INTEGER)), 0) AS s FROM pool_bettor_sides WHERE market_id = ?').get(marketId);
+  return BigInt(r?.s || 0);
+}
+
 export function startPoolMarketSettlerCron() {
   if (timer) return;
   console.log(`[pool-settler] started — 5min cron, aggregate 3 oracle votes + consensus check, silent_timeout=${ORACLE_SILENT_TIMEOUT_MIN}min (Sub 2d Phase 1)`);
@@ -282,8 +295,7 @@ export async function poolSettlerTick() {
       // 直接 cancel + dispatchRefund, 无视 backoff = D9 优先级最高).
       if ((market.protocol_status === 'verifying' || market.protocol_status === 'collecting_sigs')
           && (market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7')) {
-        const bettorSumPre = sqlite.prepare('SELECT COALESCE(SUM(CAST(stake_amount AS INTEGER)), 0) AS s FROM pool_bettor_sides WHERE market_id = ?').get(market.id).s;
-        const totalPoolPre = BigInt(market.maker_stake_amount || 0) + BigInt(bettorSumPre || 0);
+        const totalPoolPre = BigInt(market.maker_stake_amount || 0) + getBettorSumSompi(market.id);
         const MIN_POT_PRE = 10_000_000_000n;
         if (totalPoolPre < MIN_POT_PRE && backoffMeta.cancel_reason !== 'min_pot_undersize') {
           console.warn(`[pool-settler:min-pot] pre-backoff catch market=${market.id.slice(0,12)} pool=${(Number(totalPoolPre)/1e8).toFixed(2)}KAS < 100KAS → cancel (override backoff)`);
@@ -427,8 +439,7 @@ export async function poolSettlerTick() {
           // 循环 handleCollectingSigs 永 submit fail (= pool 7 < 100). 加 gate 让已陷入
           // collecting_sigs 的 < MIN_POT 单也走 cancel + refund 路 (= D9 自愈 retroactive).
           if (market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7') {
-            const bettorSum = sqlite.prepare('SELECT COALESCE(SUM(CAST(stake_amount AS INTEGER)), 0) AS s FROM pool_bettor_sides WHERE market_id = ?').get(market.id).s;
-            const totalPool = BigInt(market.maker_stake_amount || 0) + BigInt(bettorSum || 0);
+            const totalPool = BigInt(market.maker_stake_amount || 0) + getBettorSumSompi(market.id);
             const MIN_POT_SOMPI = 10_000_000_000n;
             if (totalPool < MIN_POT_SOMPI) {
               console.warn(`[pool-settler:min-pot] collecting_sigs market=${market.id.slice(0,12)} pool=${(Number(totalPool)/1e8).toFixed(2)}KAS < 100KAS → cancel + refund route (retroactive D9 自愈)`);
@@ -650,8 +661,7 @@ export async function poolSettlerTick() {
           // 改 路由 cancel + 通知 legacyRefundBuilderTick Step 3 自取 (= maker dispatchRefund +
           // bettor sides 各退). 大声 warn 不 silent.
           if (market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7') {
-            const totalPool = BigInt(market.maker_stake_amount || 0) +
-              sqlite.prepare('SELECT COALESCE(SUM(CAST(stake_amount AS INTEGER)), 0) AS s FROM pool_bettor_sides WHERE market_id = ?').get(market.id).s;
+            const totalPool = BigInt(market.maker_stake_amount || 0) + getBettorSumSompi(market.id);
             const MIN_POT_SOMPI = 10_000_000_000n;  // 100 KAS = 1e10 sompi (= PoolSpine_v07.sil L300 钦定)
             if (BigInt(totalPool) < MIN_POT_SOMPI) {
               console.warn(`[pool-settler:min-pot] market=${market.id.slice(0,12)} pool=${(Number(totalPool)/1e8).toFixed(2)}KAS < 100KAS MIN_POT → cancel + refund route (D9 自愈, 不 dispatch死单)`);
