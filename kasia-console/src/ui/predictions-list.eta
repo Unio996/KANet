@@ -1,0 +1,114 @@
+<%~ include('partials/page-open', { _page: 'predictions', pageTitle: '预测市场', ...it }) %>
+
+<!-- KANet-UI 2026-06-06 (Bettor 关1 派 r265+r265b 7 条): 预测市场首页. 干净 0 jargon. -->
+<div class="p-6 max-w-6xl mx-auto" x-data="predictionsListPage()" x-init="init()">
+
+  <div class="flex items-center justify-between mb-5">
+    <div>
+      <h1 class="text-2xl font-display text-ink-800">预测市场</h1>
+      <p class="text-xs text-ink-400 mt-1">看现在能押什么. 押对的人均分输家池子.</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <a href="/my-markets" class="btn btn-secondary btn-sm">看我建的</a>
+      <a href="/predictions/pool/create" class="btn btn-primary btn-sm">+ 发起预测</a>
+    </div>
+  </div>
+
+  <!-- filter -->
+  <div class="flex items-center gap-2 mb-4 text-xs">
+    <button @click="filterMode = 'all'" :class="filterMode === 'all' ? 'bg-brand-500 text-white' : 'bg-white border border-warm-300 text-ink-600 hover:bg-warm-50'" class="px-3 py-1.5 rounded-lg transition">全部 (<span x-text="counts.all"></span>)</button>
+    <button @click="filterMode = 'open'" :class="filterMode === 'open' ? 'bg-brand-500 text-white' : 'bg-white border border-warm-300 text-ink-600 hover:bg-warm-50'" class="px-3 py-1.5 rounded-lg transition">进行中 (<span x-text="counts.open"></span>)</button>
+    <button @click="filterMode = 'settled'" :class="filterMode === 'settled' ? 'bg-brand-500 text-white' : 'bg-white border border-warm-300 text-ink-600 hover:bg-warm-50'" class="px-3 py-1.5 rounded-lg transition">已结算 (<span x-text="counts.settled"></span>)</button>
+  </div>
+
+  <div x-show="loading" class="text-center py-16 text-ink-400">载入中...</div>
+
+  <div x-show="!loading && filtered().length === 0" class="text-center py-16 bg-warm-50 rounded-lg">
+    <div class="text-3xl mb-3">🪧</div>
+    <p class="text-ink-500" x-text="filterMode === 'open' ? '现在没有进行中的市场.' : (filterMode === 'settled' ? '还没有已结算的市场.' : '还没有市场.')"></p>
+    <a href="/predictions/pool/create" class="text-brand-500 hover:text-brand-700 text-sm mt-2 inline-block">发起第一个 →</a>
+  </div>
+
+  <div x-show="!loading && filtered().length > 0" class="space-y-2">
+    <template x-for="m in filtered()" :key="m.id">
+      <a :href="`/predictions/pool/${encodeURIComponent(m.id)}`"
+         class="block card p-4 hover:border-brand-300 hover:bg-warm-50 transition">
+        <div class="flex items-start gap-3">
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium text-ink-700 leading-snug" x-text="m.title || m.id.slice(0, 20)"></div>
+            <div class="flex items-center gap-3 mt-2 text-xs text-ink-500">
+              <span class="px-2 py-0.5 rounded font-medium" :class="statusBadge(m.statusKind)" x-text="statusLabel(m.statusKind)"></span>
+              <span x-show="m.deadlineDate" x-text="'截止 ' + m.deadlineDate"></span>
+            </div>
+          </div>
+          <div class="text-right text-xs text-ink-500 shrink-0 min-w-[140px]">
+            <div>YES <span class="font-medium text-ink-700" x-text="m.yes_pool_kas?.toFixed(2) ?? '?'"></span> KAS</div>
+            <div>NO <span class="font-medium text-ink-700" x-text="m.no_pool_kas?.toFixed(2) ?? '?'"></span> KAS</div>
+          </div>
+        </div>
+      </a>
+    </template>
+  </div>
+</div>
+
+<script>
+function predictionsListPage() {
+  return {
+    loading: true,
+    markets: [],
+    filterMode: 'open',
+    counts: { all: 0, open: 0, settled: 0 },
+
+    async init() {
+      try {
+        const r = await fetch('/api/pool/markets?limit=200').then(x => x.json());
+        const raw = (r.markets || []);
+        this.markets = raw.map(m => {
+          let title = m.id;
+          try { const o = JSON.parse(m.resolution_rule_spec || ''); title = o.title || title; } catch {}
+          const statusKind = this.classifyStatus(m.protocol_status);
+          let deadlineDate = '';
+          if (m.deadline) {
+            const d = new Date(Number(m.deadline) * 1000);
+            if (!Number.isNaN(+d)) {
+              const pad = n => n < 10 ? '0' + n : '' + n;
+              deadlineDate = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+            }
+          }
+          return { ...m, title, statusKind, deadlineDate };
+        });
+        this.counts.all = this.markets.length;
+        this.counts.open = this.markets.filter(m => m.statusKind === 'open' || m.statusKind === 'awaiting').length;
+        this.counts.settled = this.markets.filter(m => m.statusKind === 'settled').length;
+      } catch (e) { console.warn('predictions list load fail', e); }
+      this.loading = false;
+    },
+    classifyStatus(s) {
+      if (s === 'completed') return 'settled';
+      if (s === 'collecting_sigs' || s === 'verifying') return 'awaiting';
+      if (s === 'cancelled' || s === 'refunded') return 'closed';
+      if (s === 'pending_bettors') return 'open';
+      return 'open';
+    },
+    statusLabel(k) {
+      return ({ open: '押注中', awaiting: '等开奖', settled: '已结算', closed: '已取消' })[k] || k;
+    },
+    statusBadge(k) {
+      return ({
+        open: 'bg-emerald-100 text-emerald-700',
+        awaiting: 'bg-amber-100 text-amber-700',
+        settled: 'bg-brand-100 text-brand-700',
+        closed: 'bg-warm-200 text-ink-500',
+      })[k] || 'bg-warm-100 text-ink-500';
+    },
+    filtered() {
+      if (this.filterMode === 'all') return this.markets;
+      if (this.filterMode === 'open') return this.markets.filter(m => m.statusKind === 'open' || m.statusKind === 'awaiting');
+      if (this.filterMode === 'settled') return this.markets.filter(m => m.statusKind === 'settled');
+      return this.markets;
+    },
+  };
+}
+</script>
+
+<%~ include('partials/page-close', it) %>

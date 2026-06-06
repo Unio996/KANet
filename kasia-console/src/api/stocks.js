@@ -34,10 +34,12 @@ export async function registerStockRoutes(fastify) {
     return reply.view('stocks', { title: '股票市场', t, lang, dir: isRtl(lang) ? 'rtl' : 'ltr', langs: LANG_NAMES, _page: 'stocks', relayNodes });
   });
 
-  // KANet-UI 2026-06-06 件1 (Bettor ③ APPROVE r257+r258): /predictions 旧 Polymarket 1v1 SS escrow
-  // 归档到 /legacy/polymarket-escrow, 顶级 /predictions 302 → /legacy 不删历史.
+  // KANet-UI 2026-06-06 (Bettor 关1 派 r265+r265b 7 条): /predictions 服新预测市场首页
+  // predictions-list.eta. 旧 Polymarket 1v1 SS escrow 仍 /legacy/polymarket-escrow 保不动.
   fastify.get('/predictions', async (request, reply) => {
-    return reply.redirect(302, '/legacy/polymarket-escrow');
+    const lang = parseLang(request.headers.cookie);
+    const t = getT(lang);
+    return reply.view('predictions-list', { title: '预测市场', t, lang, dir: isRtl(lang) ? 'rtl' : 'ltr', langs: LANG_NAMES, _page: 'predictions' });
   });
   fastify.get('/legacy/polymarket-escrow', async (request, reply) => {
     const lang = parseLang(request.headers.cookie);

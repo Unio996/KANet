@@ -76,8 +76,8 @@
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'exchange' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
           兑换
         </a>
-        <a href="/oracle"
-          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= ['oracle','predictions-pool-detail'].includes(it._page) ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+        <a href="/predictions"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= ['predictions','predictions-pool-detail'].includes(it._page) ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
           预测市场
         </a>
         <a href="/predictions/pool/create"
