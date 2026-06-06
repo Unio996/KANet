@@ -337,6 +337,11 @@ export async function startBetFromMarket(tgUser, marketId) {
     const npp = market.no_implied_prob != null ? (market.no_implied_prob * 100).toFixed(1) + '%' : '?';
     lines.push(`池子分布: YES ${yp} KAS (${ypp})  ·  NO ${np} KAS (${npp})`);
     lines.push('赔率 = 对方池 / 自方池 (押对越少人, 赢得越多)。');
+    // KANet-UI 2026-06-06 #25/L23 Bettor ③ APPROVE r562: 同 detail stage MIN_POT 警告.
+    const totalPool = Number(market.yes_pool_kas) + Number(market.no_pool_kas);
+    if (totalPool < 100) {
+      lines.push(`⚠ 总池 ${totalPool.toFixed(2)} KAS < 100 KAS, 不到结算门, 押了 deadline 后无法结算。`);
+    }
   }
   lines.push('', '🔮 由 KANet 去中心化委员预言机按上述规则裁决、链上结算。', '⚠ 押注前请看清【完整结算规则】— 这是判定输赢的唯一依据。', '你押哪边?  回复 1 = YES   ·   2 = NO');
   return lines.join('\n');
@@ -499,6 +504,12 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
       const npp = full.no_implied_prob != null ? (full.no_implied_prob * 100).toFixed(1) + '%' : '?';
       lines.push(`池子分布: YES ${yp} KAS (${ypp})  ·  NO ${np} KAS (${npp})`);
       lines.push('赔率 = 对方池 / 自方池 (押对越少人, 赢得越多)。');
+      // KANet-UI 2026-06-06 #25/L23 (Bettor ③ APPROVE r562 + r219 文案精化): SS L300 钦定 MIN_POT 1e10 sompi
+      // = 100 KAS 总池才能结算. <100 = 卡死无法结算 (J2 refund 路由未 ship → 文案不说自动退款).
+      const totalPool = Number(full.yes_pool_kas) + Number(full.no_pool_kas);
+      if (totalPool < 100) {
+        lines.push(`⚠ 总池 ${totalPool.toFixed(2)} KAS < 100 KAS, 不到结算门, 押了 deadline 后无法结算。`);
+      }
     }
     lines.push('', '🔮 由 KANet 去中心化委员预言机按上述规则裁决、链上结算。', '⚠ 押注前请看清【完整结算规则】— 这是判定输赢的唯一依据。', '你押哪边?  回复 1 = YES   ·   2 = NO');
     return lines.join('\n');

@@ -259,6 +259,10 @@
                    step="0.5"
                    class="w-full stake-slider">
             <p class="text-xs text-ink-400 mt-1">SS 合约 baked 数学锁定不可调</p>
+            <!-- KANet-UI 2026-06-06 #25/L23 Bettor ③ APPROVE r562 + r219 文案精化: MIN_POT 教学不许诺退款. -->
+            <p class="text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded-lg mt-2">
+              📐 SS 合约钦定: 总池 (= 你的 100 KAS + 各下注人加起来) 必须 ≥ 100 KAS 才能结算. 未达 deadline 后无法结算.
+            </p>
           </div>
 
           <!-- 成交费 (Oracle v0.3 §8 disclose mandatory + 1 input + 1:1:1 split) -->
