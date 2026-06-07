@@ -2185,19 +2185,22 @@ export async function registerBettorRoutes(fastify) {
 
   // GET /api/oracle/registry — list active oracles (filter optional tier + status).
   fastify.get('/api/oracle/registry', async (request, reply) => {
-    const { tier, status } = request.query || {};
-    const where = ["expires_at > datetime('now')"];
+    const { tier, status, include_expired } = request.query || {};
+    // KANet-UI 2026-06-07 Track C r338 增强: ?include_expired=1 显过期 registry 行 (= /oracle 仲裁人中心
+    // 段 1 用真 tier+capabilities+licensed_domains 比 legacy is_oracle=1 全; Bettor r338 校准)
+    const where = include_expired === '1' ? [] : ["expires_at > datetime('now')"];
     const params = [];
     if (tier != null) {
       const tierNum = parseInt(tier, 10);
       if ([1, 2, 3].includes(tierNum)) { where.push('tier = ?'); params.push(tierNum); }
     }
     if (status) { where.push('status = ?'); params.push(status); }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const rows = sqlite.prepare(`
       SELECT relay_node_id, pubkey, tier, capabilities, announced_at, expires_at,
              bond_amount, status, epoch, updated_at, licensed_domains, frozen
       FROM oracle_registry
-      WHERE ${where.join(' AND ')}
+      ${whereSql}
       ORDER BY tier ASC, announced_at DESC
       LIMIT 200
     `).all(...params);

@@ -326,7 +326,7 @@ function arbiterHome() {
         // 主源改 /api/oracles (= legacy is_oracle=1, 5 个 active). 再尝试 fetch registry tier/caps (= 缺则默认).
         const [oraResp, regResp, snapResp] = await Promise.all([
           fetch('/api/oracles').then(x => x.json()).catch(() => ({ oracles: [] })),
-          fetch('/api/oracle/registry').then(x => x.json()).catch(() => ({ oracles: [] })),
+          fetch('/api/oracle/registry?include_expired=1').then(x => x.json()).catch(() => ({ oracles: [] })),
           fetch('/api/oracle-pool/chain-snapshot').then(x => x.json()).catch(() => ({ leaves: [] })),
         ]);
 
