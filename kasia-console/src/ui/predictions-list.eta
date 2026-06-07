@@ -41,10 +41,16 @@
               <span x-text="'出单人: ' + makerLabel(m)"></span>
             </div>
           </a>
-          <div class="text-right text-xs text-ink-500 shrink-0 min-w-[140px]">
-            <div>YES <span class="font-medium text-ink-700" x-text="m.yes_pool_kas?.toFixed(2) ?? '?'"></span> KAS</div>
-            <div>NO <span class="font-medium text-ink-700" x-text="m.no_pool_kas?.toFixed(2) ?? '?'"></span> KAS</div>
-            <!-- KANet-UI 2026-06-07 P0-#2 (Bettor r319 关 1 PASS): row 加 '押 →' button 跳详情 #bet panel -->
+          <div class="text-right text-xs text-ink-500 shrink-0 min-w-[180px]">
+            <!-- KANet-UI 2026-06-07 P1-#2 (Bettor r327 关 1 PASS): 隐含概率 + 赔率 tooltip
+                 注: pre-fee 毛值 (= 没扣 broker 3% 等), 当估算非保证 -->
+            <div :title="oddsTooltip(m, 'YES')">YES <span class="font-medium text-ink-700" x-text="m.yes_pool_kas?.toFixed(2) ?? '?'"></span> KAS
+              <span x-show="m.yes_implied_prob != null" class="text-ink-400" x-text="'(' + (m.yes_implied_prob * 100).toFixed(1) + '%)'"></span>
+            </div>
+            <div :title="oddsTooltip(m, 'NO')">NO <span class="font-medium text-ink-700" x-text="m.no_pool_kas?.toFixed(2) ?? '?'"></span> KAS
+              <span x-show="m.no_implied_prob != null" class="text-ink-400" x-text="'(' + (m.no_implied_prob * 100).toFixed(1) + '%)'"></span>
+            </div>
+            <div x-show="m.yes_implied_prob != null" class="text-[10px] text-ink-400 mt-0.5">赔率 估算 (扣费前)</div>
             <a x-show="m.statusKind === 'open'" :href="`/predictions/pool/${encodeURIComponent(m.id)}#bet`"
                class="inline-block mt-1.5 px-2.5 py-1 text-xs rounded bg-brand-500 hover:bg-brand-600 text-white font-medium">押 →</a>
           </div>
@@ -109,6 +115,18 @@ function predictionsListPage() {
       if (m.maker_name) return m.maker_name;
       if (m.maker_relay_id) return '跨节点 ' + String(m.maker_relay_id).slice(0, 8);
       return '?';
+    },
+    // KANet-UI 2026-06-07 P1-#2 (Bettor r327 关 1 PASS): 赔率 tooltip 估算
+    // pre-fee 毛值; 仅估算非保证 (Bettor 校准 r327)
+    oddsTooltip(m, side) {
+      const yes = Number(m.yes_pool_kas || 0);
+      const no = Number(m.no_pool_kas || 0);
+      if (yes + no <= 0) return '池子为空, 还没赔率';
+      const myPool = side === 'YES' ? yes : no;
+      const otherPool = side === 'YES' ? no : yes;
+      if (myPool <= 0) return '此边为空, 无法算赔率';
+      const mult = ((myPool + otherPool) / myPool).toFixed(2);
+      return `押 ${side} 估算赔率 ${mult}x (= 池子总额 / ${side} 池). 扣费前估算非保证.`;
     },
     filtered() {
       if (this.filterMode === 'all') return this.markets;

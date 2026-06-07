@@ -225,7 +225,7 @@
 
       <!-- bettor sides -->
       <div x-show="(audit?.bettor_sides||[]).length" class="mb-3">
-        <div class="text-[11px] text-ink-500 mb-1">② 下注人 (各自独立锁仓 TX) · <span x-text="(audit?.bettor_sides||[]).length"></span> 笔</div>
+        <div class="text-[11px] text-ink-500 mb-1">② 押注人 (各自独立锁仓 TX) · <span x-text="(audit?.bettor_sides||[]).length"></span> 笔</div>
         <div class="space-y-1">
           <template x-for="b in (audit?.bettor_sides||[])" :key="b.bettor_pk + b.side_lock_txid">
             <div class="bg-warm-50 rounded px-3 py-2 text-xs flex items-center gap-2">
