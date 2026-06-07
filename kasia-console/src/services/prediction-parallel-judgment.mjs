@@ -111,7 +111,9 @@ export async function scoreParallelJudgments(umaResolveFn) {
 
   let scored = 0, disagreements = 0, pendingFinal = 0, missingOffer = 0;
   for (const row of pending) {
-    const offer = sqlite.prepare(`SELECT * FROM exchange_offers WHERE id = ?`).get(row.offer_id);
+    // J2-tn r406 Track D: Phase B 同 UNION 路径 — pool_markets 也是 offer 源.
+    let offer = sqlite.prepare(`SELECT * FROM exchange_offers WHERE id = ?`).get(row.offer_id);
+    if (!offer) offer = sqlite.prepare(`SELECT * FROM pool_markets WHERE id = ?`).get(row.offer_id);
     if (!offer) { missingOffer++; continue; }
     const uma = await umaResolveFn(offer);
     if (!uma || !uma.ok) { pendingFinal++; continue; } // UMA 48h finalization gate not passed yet
