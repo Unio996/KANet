@@ -2283,10 +2283,16 @@ export async function registerPoolRoutes(fastify) {
 
     // Byte-size mass-aware fee: refund TX 1-in 1-out + side redeem ~1999B → ~2300B → mass ~5750 → fee ~632_500.
     // 跟 unlockPoolSpineRefundMakerUnjoined 同公式 (Bettor 891c94d sediment).
+    // J1tn r303 P0-#1 sweep (Bettor r341 钦定 bettor-side MARGINAL 防御性补强): 加 KIP-9 storage_mass
+    // 项. 单 output bettor refund ≈ side_stake - fee. 对 thin sides (= 接近 1 KAS) 防御性补.
     const redeemBytes = Buffer.from(side.side_redeem_script_hex, 'hex');
     const sigScriptSize = 70 + redeemBytes.length;
     const txByteEstimate = 45 + sigScriptSize + 50 + 80;
-    const massEst = Math.ceil(txByteEstimate * 2.5);
+    const computeMassEst = Math.ceil(txByteEstimate * 2.5);
+    const STORAGE_MASS_C_INT = 1_000_000_000_000;
+    const sideStakeInt = parseInt(side.stake_amount, 10) || 1_000_000_000;
+    const storageMassSide = Math.ceil(STORAGE_MASS_C_INT / Math.max(1000, sideStakeInt));
+    const massEst = computeMassEst + storageMassSide;
     const FEE_MIN = 1000;
     const FEE_MAX = 100_000_000;
     let fee = Math.max(FEE_MIN, massEst * 110);

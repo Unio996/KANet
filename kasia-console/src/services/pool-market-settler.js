@@ -1906,9 +1906,15 @@ async function computeMassAwareV07RefundFee({ market, makerStake, networkId, mak
   const txOverhead = 80;
   const estimatedTxSize = inputSize + outputSize + txOverhead;
   const MASS_RATIO_BYTES_TO_MASS = 25n;  // 2.5x as BigInt (× 10 for integer math)
-  const massEstimate = (BigInt(estimatedTxSize) * MASS_RATIO_BYTES_TO_MASS) / 10n;
-  const mass = massEstimate;
-  console.log(`[pool-settler] v0.7 byte-size mass estimate market=${market.id.slice(0,12)} txBytes≈${estimatedTxSize} mass≈${mass} (redeem ${redeemBytes.length}B, sigScript ${sigScriptSize}B, ratio 2.5)`);
+  const computeMassEstimate = (BigInt(estimatedTxSize) * MASS_RATIO_BYTES_TO_MASS) / 10n;
+  // J1tn r303 P0-#1 sweep (Bettor r341 钦定 maker_unjoined MARGINAL 防御性补强): 加 KIP-9
+  // storage_mass term. 单 output maker payout ≈ makerStake - fee, makerStake 是主导 (fee << stake).
+  // storage_mass(makerOutput) ≈ STORAGE_MASS_C / makerStake_sompi. 对 thin markets (= makerStake
+  // 接近 ctor MIN_BET_SOMPI 1e8) 防御性补 storage_mass.
+  const makerStakeBig = BigInt(makerStake || 100_000_000);
+  const storageMassMaker = BigInt(STORAGE_MASS_C) / (makerStakeBig > 1000n ? makerStakeBig : 1000n);
+  const mass = computeMassEstimate + storageMassMaker;
+  console.log(`[pool-settler] v0.7 byte-size mass estimate market=${market.id.slice(0,12)} txBytes≈${estimatedTxSize} computeMass≈${computeMassEstimate} storageMass(maker)≈${storageMassMaker} totalMass≈${mass} (redeem ${redeemBytes.length}B, sigScript ${sigScriptSize}B, makerStake=${makerStake})`);
   let dynamicFee = BigInt(mass) * SOMPI_PER_MASS;
   if (dynamicFee < V07_MIN_FEE) dynamicFee = V07_MIN_FEE;
   if (dynamicFee > V07_MAX_FEE) dynamicFee = V07_MAX_FEE;
@@ -2027,7 +2033,36 @@ export async function dispatchRefundDisagreement(market, decision) {
 
     const makerStake = parseInt(market.maker_stake_amount, 10) || 0;
     const oracleBond = parseInt(market.oracle_bond_amount, 10) || 0;
-    const minerFee = parseInt(market.miner_fee, 10) || 20_000;
+    // J1tn r303 P0-#1 sweep (Bettor r341 钦定 refund_disagreement HIGH risk 修): 老 ctor minerFee
+    // 20K sompi 是 KIP-9 mempool floor 下面的 25× 不足. refund_disagreement TX 4 outputs (maker
+    // refund + 3 oracle bonds 1 KAS each), oracle bond outputs storage_mass = 1e12/1e8 = 10K mass
+    // each, × 3 = 30K storage_mass. 加 compute_mass ~25K, total ~55K, minFee 5.5M sompi. 老 20K
+    // 死 KIP-9. 修: 动态 mass-aware fee (mirror dispatchPhase2 commit 6077ccd6e 公式).
+    let metaForFee = {};
+    try { metaForFee = JSON.parse(market.metadata || '{}'); } catch {}
+    const spineRedeemHex = metaForFee.spine_redeem_script_hex || '';
+    const spineRedeemSize = spineRedeemHex ? Buffer.from(spineRedeemHex, 'hex').length : 2100;
+    // refund_disagreement scriptSig per input: 2 sigs push (66B each = 132B) + 1B selector OP_N + PUSHDATA2(3B + redeem)
+    const sigsPerInputBytes = 132 + 1 + 3 + spineRedeemSize;
+    const inputCountForMass = 4;  // 1 spine + 3 oracle deposits
+    const inputSizeTotal = inputCountForMass * (45 + sigsPerInputBytes);
+    const outputCountForMass = (silentOracleIndex === -1 ? 4 : 3);  // maker + (3 OR 2) oracle bonds
+    const outputSizeTotal = outputCountForMass * 50;
+    const txByteEstimateRD = inputSizeTotal + outputSizeTotal + 80;
+    const computeMassEstRD = Math.ceil(txByteEstimateRD * 30 / 10);  // ×3 multiplier
+    // storage_mass: maker output 大 (~0 mass), oracle bonds 小 (= bond / 1e8 sompi each →
+    // mass STORAGE_MASS_C / bond_sompi). 3 (or 2) bond outputs 主导.
+    const oracleOutputCount = outputCountForMass - 1;  // exclude maker output
+    const storageMassBonds = oracleOutputCount * Math.ceil(STORAGE_MASS_C / Math.max(1000, oracleBond));
+    const totalMassEstRD = computeMassEstRD + storageMassBonds;
+    const RD_FEE_MIN = 2_000_000;   // 0.02 KAS floor
+    const RD_FEE_MAX = 100_000_000;  // 1 KAS cap
+    let dynamicMinerFeeRD = Math.max(RD_FEE_MIN, totalMassEstRD * 110);
+    if (dynamicMinerFeeRD > RD_FEE_MAX) dynamicMinerFeeRD = RD_FEE_MAX;
+    const isAnonymousPoolRD = market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7';
+    // v0.5 legacy: keep old static (per dispatchPhase2 L1406 sweep pattern).
+    const minerFee = isAnonymousPoolRD ? dynamicMinerFeeRD : (parseInt(market.miner_fee, 10) || 20_000);
+    console.log(`[pool-settler] refund_disagreement mass-aware fee market=${market.id.slice(0,12)} txBytes≈${txByteEstimateRD} computeMass≈${computeMassEstRD} storageMass(${oracleOutputCount} bonds)≈${storageMassBonds} totalMass≈${totalMassEstRD} fee=${minerFee} (oracleBond=${oracleBond}, version=${market.protocol_version})`);
 
     const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
     if (!makerRow?.address) {
