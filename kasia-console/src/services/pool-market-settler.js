@@ -44,7 +44,16 @@ const STORAGE_MASS_CAP = 500_000;             // kaspad standardness cap
 // 实可 settle 但被 false cancel. Tune to 470k (= 6% margin) — est_storage_mass 估值通常偏保守
 // (KIP-9 公式 Σ(1/v) 单调 + 离散累积 round-up), 实实 mass 大概率更低. 6% margin 防估值偏差.
 const STORAGE_MASS_SAFE_THRESHOLD = 470_000;
-const MIN_BROKER_FEE_SOMPI = 5_000_000;       // 0.05 KAS broker_fee floor (Bettor r370)
+// J1tn r303 P0-#1 fix (Bettor r298+r299+r300 钦定 升格 #6 G6 第三面 fee-too-low 红线): 旧 5M 焊死
+// floor 是 KIP-9 storage mass 主导根因 (= D11 ko421 实证 broker output 0.05 KAS → mass 1e12/5e6=200K
+// 单笔吃 fee budget 10×). 真修不焊死, 走动态 (= computeMinBrokerFeeForKIP9 + dynamicFee += storage_mass
+// 项, dispatchPhase2 内). 此 const 保留为 absolute floor (= 退路, 防 dynamic 算出过低).
+const MIN_BROKER_FEE_SOMPI = 5_000_000;       // 0.05 KAS absolute floor (dynamic 算大就用大, 算小落此底)
+
+// KIP-9 storage mass empirical constant (= ko421 实证 5M sompi output → mass 200K, 5e6 × 2e5 ≈ 1e12).
+// kaspad post-Toccata KIP-9 公式 mass(output) ≈ STORAGE_MASS_C / output_value 对 small outputs (< 0.1 KAS)
+// 主导. 用此 derive dynamic MIN_BROKER_FEE (= 让 storage_mass(broker) ≈ compute_mass, 不爆 fee budget).
+const STORAGE_MASS_C = 1_000_000_000_000;
 
 let timer = null;
 let running = false;
@@ -1392,12 +1401,26 @@ export async function dispatchPhase2(market, decision) {
     // KIP-9 + estimation slack). Real qoyqv 17136/6545 ≈ 2.62 ratio + storage_mass for thin markets
     // dominates → 3 covers both compute + storage portions.
     const MASS_MULTIPLIER_X10 = 30;
-    const massEst = Math.ceil(txByteEstimate * MASS_MULTIPLIER_X10 / 10);
+    const computeMassEst = Math.ceil(txByteEstimate * MASS_MULTIPLIER_X10 / 10);
     const SETTLE_FEE_MIN = 2_000_000;  // 0.02 KAS floor (= settle 大 TX 起步 + Bettor r404 安全余量)
     const SETTLE_FEE_MAX = 100_000_000;  // 1 KAS cap defense
-    let dynamicFee = Math.max(SETTLE_FEE_MIN, massEst * 110);
+    // J1tn r303 P0-#1 (Bettor r298+r299+r300 钦定): KIP-9 storage_mass aware dynamic fee.
+    // ko421 实证: brokerOutput 5M sompi → mass=1e12/5e6=200K 单笔吃 fee budget 10×. 原 dynamicFee
+    // 只算 computeMass (= byte mass) 漏 storage_mass → 真 mass 是 estimate 的 ~10×.
+    // 修: (1) derive dynamicMinBrokerFee = ceil(STORAGE_MASS_C / computeMass) (= 让 broker storage_mass
+    // ≈ compute_mass 自平衡, 不爆 fee budget); (2) dynamicFee += storage_mass(broker) 项, totalMass
+    // = compute + storage(broker), fee = totalMass × 100 + buffer. Floor 退路用 absolute MIN.
+    const dynamicMinBrokerFee = Math.max(
+      MIN_BROKER_FEE_SOMPI,                                      // absolute 5M floor
+      Math.ceil(STORAGE_MASS_C / Math.max(1000, computeMassEst))  // self-balance: storage = compute mass
+    );
+    const storageMassBroker = Math.ceil(STORAGE_MASS_C / dynamicMinBrokerFee);
+    const totalMassEst = computeMassEst + storageMassBroker;
+    let dynamicFee = Math.max(SETTLE_FEE_MIN, totalMassEst * 110);
     if (dynamicFee > SETTLE_FEE_MAX) dynamicFee = SETTLE_FEE_MAX;
-    console.log(`[pool-settler] settle mass-aware fee market=${market.id.slice(0,12)} txBytes≈${txByteEstimate} mass≈${massEst} fee=${dynamicFee} (sides=${sides.length}, winners=${outputsCount-6}, spineRedeem=${spineRedeemSize}B)`);
+    // legacy massEst alias (= some downstream code reads `massEst`, e.g. estimateStorageMass logging).
+    const massEst = totalMassEst;
+    console.log(`[pool-settler] settle mass-aware fee market=${market.id.slice(0,12)} txBytes≈${txByteEstimate} computeMass≈${computeMassEst} storageMass(broker)≈${storageMassBroker} totalMass≈${totalMassEst} fee=${dynamicFee} dynamicMinBrokerFee=${dynamicMinBrokerFee} (sides=${sides.length}, winners=${outputsCount-6}, spineRedeem=${spineRedeemSize}B)`);
     try {
       const baseMinerFee = parseInt(market.miner_fee, 10) || 20_000;
       // DoD #1.2 sweep: v0.6 + v0.7 都是 anonymous-pool 5-committee 模式. v0.5 legacy 路径 keep
@@ -1414,6 +1437,10 @@ export async function dispatchPhase2(market, decision) {
         silentOracleIndex: decision.silentOracleIndex ?? null,
         oracleCount: isAnonymousPool ? 5 : 3,
         committeeMode: isAnonymousPool,
+        // J1tn r303 P0-#1 (Bettor r300 动态): pass dynamicMinBrokerFee = KIP-9 storage-mass-aware
+        // 自平衡 broker floor (= 让 broker output 大到 storage_mass(broker) ≈ compute_mass 不爆 fee
+        // budget). 老 static 5M 焊死 → ko421 实证 fee 不够覆盖 KIP-9 mempool floor.
+        minBrokerFee: dynamicMinBrokerFee,
       });
     } catch (e) {
       // Bettor r291/r293 Owner钦定 auto-refund: 0-bet markets fail computePoolPayouts via

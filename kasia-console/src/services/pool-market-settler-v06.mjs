@@ -32,6 +32,9 @@ import {
 } from './pool-committee-sampler.mjs';
 
 const THRESHOLD = 4; // 4-of-5 (Bettor r19 + J2 r104 lock)
+// J1tn r303 P0-#1 fix (Bettor r299+r300 钦定 不焊死 动态): 此 const 仅 v06 unit test 用 (= production
+// runtime fee 走 pool-market-settler.js dispatchPhase2 KIP-9 storage-mass-aware 动态版). 保留 5M
+// absolute floor 同 pool-market-settler.js, 不焊死高值.
 const MIN_BROKER_FEE_SOMPI = 5_000_000; // 0.05 KAS (mirrors v0.5 MIN_BROKER_FEE_SOMPI in pool-market-settler.js:42)
 
 // Bettor r48 F-S1 residual: chain tip blocks can be reorged. Require finality_depth
