@@ -122,6 +122,60 @@ export async function onBroadcastWritten(row) {
 //
 // Same-node case (producer + consumer on same Console, broadcast fires onBroadcastWritten locally):
 // the producer's direct INSERT already wrote the row; this handler's INSERT OR IGNORE no-ops.
+// J2-tn r402 P0-#3 (Bettor r290b+r291b 关1 PASS): cross-node maker refund handler.
+// settler broadcasts pool_refund_request_v1 for 0-bet cross-node markets when local maker is sentinel.
+// Producer node (where real maker_relay_id lives) ingests this msg, verifies local maker_pk match,
+// and triggers dispatchRefund using real local relay. Idempotent: skip if refund_dispatched_at set.
+async function handlePoolRefundRequest(msg) {
+  if (!msg.market_id || !msg.maker_pk) {
+    console.warn(`[trade-filter:pool-refund-req] msg missing fields market=${msg.market_id?.slice(0,12)} maker_pk=${msg.maker_pk?.slice(0,12)}`);
+    return;
+  }
+  const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(msg.market_id);
+  if (!market) {
+    console.warn(`[trade-filter:pool-refund-req] unknown market=${msg.market_id?.slice(0,12)} — skip`);
+    return;
+  }
+  // Producer check: market.maker_relay_id must be real UUID (= local relay), not cross-node sentinel.
+  const isCrossNode = typeof market.maker_relay_id === 'string' && market.maker_relay_id.startsWith('cross-node:');
+  if (isCrossNode) {
+    // 我也是 consumer 节点 (= 不是 producer). 我不能 refund. Drop.
+    console.log(`[trade-filter:pool-refund-req] market=${msg.market_id.slice(0,12)} I am also cross-node consumer — drop`);
+    return;
+  }
+  let meta = {};
+  try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+  if (meta.refund_dispatched_at) {
+    console.log(`[trade-filter:pool-refund-req] market=${msg.market_id.slice(0,12)} already refund_dispatched_at=${meta.refund_dispatched_at} — skip idempotent`);
+    return;
+  }
+  // Verify msg.maker_pk matches local market's maker (= producer authority check).
+  try {
+    const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
+    if (makerRow?.address) {
+      const { deriveXOnlyPubkey } = await import('../api/pool.js').catch(() => ({}));
+      // deriveXOnlyPubkey is private; recompute inline via kaspa-wasm.
+      const kaspa = await import('kaspa-wasm');
+      const localMakerPk = kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(makerRow.address)).toString();
+      if (String(localMakerPk).toLowerCase() !== String(msg.maker_pk).toLowerCase()) {
+        console.warn(`[trade-filter:pool-refund-req] market=${msg.market_id.slice(0,12)} maker_pk mismatch local=${localMakerPk.slice(0,12)} msg=${String(msg.maker_pk).slice(0,12)} — drop`);
+        return;
+      }
+    }
+  } catch (e) {
+    console.warn(`[trade-filter:pool-refund-req] verify maker_pk fail market=${msg.market_id.slice(0,12)}: ${e.message}`);
+    return;
+  }
+  // Producer auth verified — dispatchRefund using real local maker_relay_id.
+  try {
+    const { dispatchRefund } = await import('./pool-market-settler.js');
+    console.log(`[trade-filter:pool-refund-req] market=${msg.market_id.slice(0,12)} dispatchRefund 触发 (cross-node consumer request)`);
+    await dispatchRefund(market, { action: 'refund', reason: 'cross-node consumer refund request (P0-#3)' });
+  } catch (e) {
+    console.warn(`[trade-filter:pool-refund-req] dispatchRefund fail market=${msg.market_id.slice(0,12)}: ${e.message}`);
+  }
+}
+
 // Idempotency = chain_events.txid UNIQUE.
 async function handlePoolOracleVote(msg) {
   const { randomUUID } = await import('crypto');
@@ -814,6 +868,8 @@ async function handlePoolMarketChunk(msg) {
       await handlePoolOracleTxSignReq(inner); break;  // J2-tn r377: chunked sign_req (phase2_tx_obj 超 SAFE_CHUNK_BUDGET)
     case 'kanet_pool_oracle_tx_sign_resp_v1':
       await handlePoolOracleTxSignResp(inner); break;
+    case 'pool_refund_request_v1':
+      await handlePoolRefundRequest(inner); break;  // J2-tn r402 P0-#3: cross-node maker refund
     default:
       console.warn(`[trade-filter:chunk] reassembled unknown type t=${inner.t} hash=${msg.hash.slice(0,12)} — drop`);
   }

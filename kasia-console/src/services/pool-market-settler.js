@@ -420,6 +420,65 @@ export async function poolSettlerTick() {
               }
               continue;
             }
+          } else {
+            // J2-tn r402 P0-#3 (Bettor r290b+r291b 关1 PASS): cross-node 0-bet maker refund 死路修.
+            // 之前: cross-node maker_relay_id sentinel, 本机不能 dispatchRefund (= 没真 relay IPC),
+            // settler 每 tick log 'dispatchRefund skip cross-node market' 但什么也不做 → 卡死.
+            // 修: 本节点 broadcast pool_refund_request_v1 上链 → producer 节点 (= 真 maker_relay_id
+            // 所在 host) 监听 → 本机 ingest 后 dispatchRefund 用真实 maker_relay_id. 仿 r400 模式.
+            // 仅 0-bet 0-side cross-node 触发 (= 双向无 stakeholder 卡, 经济无歧义).
+            const betCount = sqlite.prepare('SELECT COUNT(*) as c FROM pool_bettor_sides WHERE market_id = ?').get(market.id)?.c || 0;
+            if (betCount === 0) {
+              let meta0 = {};
+              try { meta0 = JSON.parse(market.metadata || '{}'); } catch {}
+              // Idempotent: 仅广播一次. consumer 端 trade-protocol-filter handle 后 dispatchRefund
+              // 真正修改 refund_dispatched_at, 不在本机标记 (= 跨节点信任 chain ingest).
+              const broadcastedAt = meta0.refund_request_broadcasted_at;
+              const REQUEST_REBROADCAST_MS = 60 * 60 * 1000; // 1h re-broadcast if no response
+              const needsBroadcast = !broadcastedAt || (Date.now() - new Date(broadcastedAt).getTime() > REQUEST_REBROADCAST_MS);
+              if (needsBroadcast && !meta0.refund_dispatched_at) {
+                try {
+                  // 提取 producer maker_pk (= 'cross-node:<pk>' sentinel 后半).
+                  const makerPk = market.maker_relay_id.replace(/^cross-node:/, '');
+                  const { getStatus, isRelayAlive } = await import('./relay-manager.js');
+                  const candidates = getStatus() || [];
+                  const localAlive = candidates.find(r => r.pid && isRelayAlive(r.relayNodeId)?.alive);
+                  if (!localAlive) {
+                    console.warn(`[pool-settler:xnode-refund] no local alive relay to broadcast market=${market.id.slice(0,12)}`);
+                  } else {
+                    const { _sendBroadcastChunked } = await import('../api/pool.js').catch(() => ({}));
+                    // _sendBroadcastChunked 在 pool.js 私函数; 此处直 import 不可. 改用 IPC send_broadcast.
+                    const { sendCommandAsync } = await import('./relay-manager.js');
+                    const payload = {
+                      t: 'pool_refund_request_v1',
+                      market_id: market.id,
+                      maker_pk: makerPk,
+                      protocol_version: market.protocol_version,
+                      reason: '0-bet cross-node maker refund (settler watchdog)',
+                      requested_at: new Date().toISOString(),
+                    };
+                    const bcastResult = await sendCommandAsync(localAlive.relayNodeId, {
+                      type: 'send_broadcast',
+                      channel: 'kanet-prediction',
+                      message: JSON.stringify(payload),
+                    });
+                    if (bcastResult?.ok && bcastResult.txId) {
+                      meta0.refund_request_broadcasted_at = new Date().toISOString();
+                      meta0.refund_request_txid = bcastResult.txId;
+                      sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+                        .run(JSON.stringify(meta0), market.id);
+                      console.log(`[pool-settler:xnode-refund] broadcast pool_refund_request_v1 market=${market.id.slice(0,12)} maker_pk=${makerPk.slice(0,12)} txId=${bcastResult.txId.slice(0,16)}`);
+                    } else {
+                      console.warn(`[pool-settler:xnode-refund] broadcast fail market=${market.id.slice(0,12)}: ${bcastResult?.error || 'no txId'}`);
+                    }
+                  }
+                } catch (e) {
+                  console.warn(`[pool-settler:xnode-refund] exception market=${market.id.slice(0,12)}: ${e.message}`);
+                }
+                pending++;
+                continue;
+              }
+            }
           }
         }
 
