@@ -196,7 +196,7 @@ export async function parallelJudgmentTick({ judgeFn, umaResolveFn, voterRelayId
            resolution_rule_spec, protocol_status
     FROM pool_markets
     WHERE outcome_condition_id IS NOT NULL
-      AND protocol_status IN ('verifying','collecting_sigs','completed','cancelled','refunded')
+      AND protocol_status IN ('pending_bettors','verifying','collecting_sigs','completed','cancelled','refunded')
   `).all();
 
   let recorded = 0, skipped = 0;
