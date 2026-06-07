@@ -823,6 +823,44 @@ async function verifyV06(baselinePath) {
     check('L30 mass-aware fee (probe)', false, { err: e.message }, 'soft');
   }
 
+  // L31 Bettor r332/r333 派 P2 全域 jargon 收尾 (KANet-UI 43945cd7+4a40dc40 ship):
+  // 4 sub: 3 UI 文件中文术语在 + 旧 jargon 缺 + statusLabel helper + fee 标签
+  try {
+    const detailPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/predictions-pool-detail.eta');
+    const listPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/predictions-list.eta');
+    const myMarketsPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/my-markets.eta');
+    const createPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/predictions-pool-create.eta');
+    const detailSrc = fs.readFileSync(detailPath, 'utf8');
+    const listSrc = fs.readFileSync(listPath, 'utf8');
+    const myMarketsSrc = fs.readFileSync(myMarketsPath, 'utf8');
+    const createSrc = fs.readFileSync(createPath, 'utf8');
+    // sub-a: 详情页 jargon → 中文术语 (= 押注池 / 仲裁人押金 / 押注人数 / 已签人数)
+    const detailHasZh = ['押注池', '仲裁人押金', '押注人数', '已签人数'].every(s => detailSrc.includes(s));
+    // sub-b: list+my-markets+detail 旧英 jargon 残留 0 hit (= oracle bond / sigs collected / 'bettor 数')
+    const oldJargon = /oracle bond|sigs collected|bettor 数/i;
+    const noOldJargon = !oldJargon.test(detailSrc) && !oldJargon.test(listSrc) && !oldJargon.test(myMarketsSrc);
+    // sub-c: statusLabel helper 在 list+my-markets (= raw 'pending_bettors' etc 替换)
+    const listHasStatusLabel = /statusLabel/.test(listSrc);
+    const myMarketsHasStatusLabel = /statusLabel/.test(myMarketsSrc);
+    // sub-d: create 页 fee 标签 主持费/仲裁费/中介费 (= 4a40dc40)
+    const createHasFeeLabels = /主持费/.test(createSrc) && /仲裁费/.test(createSrc) && /中介费/.test(createSrc);
+    const allOk = detailHasZh && noOldJargon && listHasStatusLabel && myMarketsHasStatusLabel && createHasFeeLabels;
+    check(
+      'L31 P2 全域 jargon 收尾: 3 UI 中文术语 + 0 旧 jargon + statusLabel + create 费标签 (Bettor r332/r333, KANet-UI 43945cd7+4a40dc40)',
+      allOk,
+      {
+        detail_has_zh_terms: detailHasZh,
+        no_old_jargon_3_files: noOldJargon,
+        list_has_statusLabel: listHasStatusLabel,
+        my_markets_has_statusLabel: myMarketsHasStatusLabel,
+        create_has_fee_zh_labels: createHasFeeLabels,
+        note: allOk ? 'P2 jargon 收尾守门完整' : '任一回归 → jargon 漂回 oracle/bettor 数/sigs'
+      }
+    );
+  } catch (e) {
+    check('L31 P2 jargon 收尾 (probe)', false, { err: e.message }, 'soft');
+  }
+
   const total = report.pass + report.fail + report.deploy_pending;
   if (report.fail > 0) report.verdict = 'FAIL';
   else if (report.deploy_pending > 0) report.verdict = 'PASS_WITH_DEPLOY_PENDING';
