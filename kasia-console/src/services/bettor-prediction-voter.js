@@ -795,7 +795,25 @@ export async function deriveKanetNativeVote(offer, spec) {
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
       if (!res.ok) return { ok: false, reason: `kanet_native source HTTP ${res.status}` };
-      evidence_text = (await res.text()).slice(0, 2000);  // 上限防 prompt context 撑爆
+      const rawText = await res.text();
+      // J2-tn r403 Track D Bettor r340 关1 PASS — 证据抽取器 (source-aware clean evidence).
+      // ESPN/BBC/etc structured 源 → extractEvidence 解析关键字段 (winner/score) → < 500 字符
+      // 喂 LLM 干净 prompt 而非截断 raw JSON. 抽取器返 null = 比赛未 final/抽取失败 → fallback
+      // raw slice(0,2000) 保 deriveKanetNativeVote 现 behavior (= 不破 free-text path).
+      try {
+        const { extractEvidence } = await import('../lib/oracle-evidence-extractors.mjs');
+        const clean = extractEvidence(url, rawText);
+        evidence_text = clean || rawText.slice(0, 2000);
+        if (clean === null && /espn\.com|bbc\.co|reuters\.com|apnews\.com/i.test(url)) {
+          // Bettor 条件 (1): known sports/news source 但抽取返 null = 结果未出/未 final.
+          // voter abstain (= 返 ok:false 让 LLM 不蒙).
+          return { ok: false, reason: `结果未出/未 final at known source ${url} (extractor returned null)` };
+        }
+      } catch (e) {
+        // Defensive: 抽取器异常 → fallback raw slice 不破现 path.
+        console.warn(`[deriveKanetNative] extractor exception ${e.message}, falling back to raw slice`);
+        evidence_text = rawText.slice(0, 2000);
+      }
     } catch (e) {
       return { ok: false, reason: `kanet_native fetch fail: ${e.message}` };
     }
