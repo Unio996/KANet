@@ -90,24 +90,25 @@ function myMarketsPage() {
       return '(无标题市场)';
     },
     async init() {
-      // KANet-UI 2026-06-07 r603 BUG FIX: 之前 /api/pool/markets?maker_relay_id=X 给每 agent fetch
-      // 但 backend 不支持该 query 参数 → 每次返同 519 单 → push 20 次重复 ('一个娃娃 20 个妈').
-      // 改: 1 次 fetch 全单 + 客户端 maker_relay_id 匹配 agent.id 过滤 (backend r308 已 LEFT JOIN
-      // 返 maker_name, 不需多次 fetch).
+      // KANet-UI 2026-06-07 r316 (Bettor 正解, r603 fetch-all 绕路退):
+      // backend /api/pool/markets 已加 maker_relay_id query filter → per-agent fetch 真返自家单, 不再 519 全拉.
       try {
         const agResp = await fetch('/api/agent/profile').then(r => r.json()).catch(() => ({}));
         const allAgents = (agResp.agents || agResp || []).filter(a => !a.is_dex_broker);
         if (!allAgents.length) { this.loading = false; return; }
-        const agentIds = new Set(allAgents.map(a => a.id));
-        const mResp = await fetch('/api/pool/markets?limit=500').then(x => x.json()).catch(() => ({ markets: [] }));
         const allMarkets = [];
         const countByAgent = {};
-        for (const m of (mResp.markets || [])) {
-          if (!agentIds.has(m.maker_relay_id)) continue;  // 仅自家 agent 建的市场
-          let title = '';
-          try { const o = JSON.parse(m.resolution_rule_spec || ''); title = o.title || ''; } catch {}
-          allMarkets.push({ ...m, title });
-          countByAgent[m.maker_relay_id] = (countByAgent[m.maker_relay_id] || 0) + 1;
+        for (const a of allAgents) {
+          try {
+            const mResp = await fetch(`/api/pool/markets?maker_relay_id=${encodeURIComponent(a.id)}&limit=200`).then(x => x.json());
+            const list = mResp.markets || [];
+            countByAgent[a.id] = list.length;
+            for (const m of list) {
+              let title = '';
+              try { const o = JSON.parse(m.resolution_rule_spec || ''); title = o.title || ''; } catch {}
+              allMarkets.push({ ...m, title });
+            }
+          } catch { countByAgent[a.id] = 0; }
         }
         allMarkets.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
         this.markets = allMarkets;

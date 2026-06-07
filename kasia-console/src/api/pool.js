@@ -1565,6 +1565,8 @@ export async function registerPoolRoutes(fastify) {
     // KANet-UI 2026-06-07 r308: LEFT JOIN relay_nodes 加 maker_name, 列名 fully-qualify 防 ambiguous
     if (q.status)   { where.push('pool_markets.protocol_status = ?'); params.push(String(q.status)); }
     if (q.category) { where.push('pool_markets.category = ?'); params.push(String(q.category)); }
+    /* KANet-UI 2026-06-07 r316 (Bettor 正解, my-markets r603 fetch-all-519 绕路退): API 诚实读 maker_relay_id */
+    if (q.maker_relay_id) { where.push('pool_markets.maker_relay_id = ?'); params.push(String(q.maker_relay_id)); }
     if (q.q) {
       where.push('LOWER(pool_markets.resolution_rule_spec) LIKE LOWER(?)');
       params.push(`%${String(q.q).replace(/[%_]/g, ch => '\\' + ch)}%`);
@@ -1574,7 +1576,7 @@ export async function registerPoolRoutes(fastify) {
       where.push('(LOWER(pool_markets.resolution_rule_spec) LIKE ? OR LOWER(pool_markets.resolution_rule_spec) LIKE ? OR pool_markets.resolution_rule_spec LIKE ?)');
       params.push('%fifa%', '%world cup%', '%世界杯%');
     }
-    const limit = Math.min(Math.max(parseInt(q.limit, 10) || 50, 1), 1000);  /* KANet-UI 2026-06-07 r603: 200→1000 cap (520+ 单, my-markets 1 次 fetch 全自家 agent 单 = 必须全) */
+    const limit = Math.min(Math.max(parseInt(q.limit, 10) || 50, 1), 200);  /* KANet-UI 2026-06-07 r316: cap 退 200 (= r316 backend maker_relay_id filter ship 后, per-agent fetch 单 agent <200 单足够, fetch-all 绕路退) */
     const offset = Math.max(parseInt(q.offset, 10) || 0, 0);
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const rows = sqlite.prepare(`
