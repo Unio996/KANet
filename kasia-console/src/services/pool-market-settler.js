@@ -703,6 +703,21 @@ export async function poolSettlerTick() {
           }
         } else {
           pending++;
+          // J2-tn r401 P0-#2 (Bettor r290b 钦点 trace 先证 不猜):
+          // qrv65 类奇案 — direct decideConsensus call 返 action=refund 但 tick 报 pending=1.
+          // 加 trace log 仅在 pending 时, 揭示 ageMs / updated_at_runtime / why-pending.
+          // 不修复, 只观察, 复现下次卡死时根因可见.
+          try {
+            const updated_at = market.updated_at;
+            const verifyingSinceMs = parseSqliteUtc(updated_at);
+            const ageMs = Date.now() - verifyingSinceMs;
+            const ageMin = Math.floor(ageMs / 60000);
+            const deadlineSec = market.deadline;
+            const ageSinceDeadlineMin = deadlineSec ? Math.floor((Math.floor(Date.now()/1000) - deadlineSec) / 60) : null;
+            console.log(`[pool-settler:trace] PENDING market=${market.id.slice(0,12)} status=${market.protocol_status} ver=${market.protocol_version} updated_at=${updated_at} ageMin=${ageMin} ageSinceDeadlineMin=${ageSinceDeadlineMin} decision_action=${decision.action} decision_reason=${decision.reason}`);
+          } catch (e) {
+            console.warn(`[pool-settler:trace] log fail market=${market.id?.slice(0,12)}: ${e.message}`);
+          }
         }
       } catch (e) {
         errored++;
@@ -710,6 +725,74 @@ export async function poolSettlerTick() {
       }
     }
     console.log(`[pool-settler] tick: ${markets.length} verifying markets, consensus=${consensus} refund=${refund} pending=${pending} doomed=${doomed} errored=${errored} sampledCommittee=${sampledCommittee}`);
+
+    // J2-tn r401 P0-#1 (Bettor r290+r291 关1 PASS): watchdog phase 加在主 loop 后.
+    // 2 watchdogs:
+    //  (a) verifying + phase2_dispatched_at NULL + ageSinceDeadlineMin > 30 → force re-decide
+    //      + dispatch per decision (Bettor r291 flag: 别硬码 refund, 按 decision 走 settle/refund).
+    //  (b) collecting_sigs + phase2_dispatched_at + age > 15min + sigs_collected < 4 → force cancel
+    //      + maker refund (配 J1 自然 silent 真测后场景).
+    let watchdogFired = 0;
+    try {
+      const nowSec2 = Math.floor(Date.now() / 1000);
+      const wmarkets = sqlite.prepare(`
+        SELECT id, maker_relay_id, spine_p2sh, spine_lock_tx, oracle1_pk, oracle2_pk, oracle3_pk,
+               oracle_relay_ids, deadline, protocol_status, sides_merkle_root, broker_pk, broker_fee_pct, broker_relay_id,
+               updated_at, maker_stake_amount, oracle_bond_amount, miner_fee, metadata,
+               outcome_market_source, outcome_token_id, outcome_side, protocol_version, pool_merkle_root,
+               deadline_daa
+        FROM pool_markets
+        WHERE protocol_status IN ('verifying', 'collecting_sigs')
+          AND deadline <= ?
+      `).all(nowSec2);
+      for (const wm of wmarkets) {
+        let meta = {};
+        try { meta = JSON.parse(wm.metadata || '{}'); } catch {}
+        const ageSinceDeadlineMin = Math.floor((nowSec2 - wm.deadline) / 60);
+        // (a) verifying + 无 phase2_dispatched_at + ageSinceDeadlineMin > 30
+        if (wm.protocol_status === 'verifying' && !meta.phase2_dispatched_at && ageSinceDeadlineMin > 30) {
+          try {
+            const decision = decideConsensus(wm);
+            console.log(`[pool-settler:watchdog-a] market=${wm.id.slice(0,12)} ageSinceDeadlineMin=${ageSinceDeadlineMin} verifying+no-phase2 → force decideConsensus=${decision.action} reason=${decision.reason}`);
+            if (decision.action === 'consensus' && !meta.phase2_dispatched_at) {
+              await dispatchPhase2(wm, decision);
+              watchdogFired++;
+            } else if (decision.action === 'refund' && !meta.refund_dispatched_at) {
+              await dispatchRefund(wm, decision);
+              watchdogFired++;
+            }
+          } catch (e) {
+            console.warn(`[pool-settler:watchdog-a] fail market=${wm.id.slice(0,12)}: ${e.message}`);
+          }
+        }
+        // (b) collecting_sigs + phase2_dispatched_at + age > 15min + sigs < 4 → force cancel
+        if (wm.protocol_status === 'collecting_sigs' && meta.phase2_dispatched_at) {
+          const phase2AgeMs = Date.now() - new Date(meta.phase2_dispatched_at).getTime();
+          if (phase2AgeMs > 15 * 60 * 1000) {
+            const sigCount = sqlite.prepare(`
+              SELECT COUNT(*) c FROM chain_events
+              WHERE event_type='pool_oracle_tx_sig' AND payload LIKE ?
+            `).get(`%"market_id":"${wm.id}"%`).c;
+            if (sigCount < 4 && !meta.refund_dispatched_at) {
+              console.warn(`[pool-settler:watchdog-b] market=${wm.id.slice(0,12)} collecting_sigs ageMin=${Math.floor(phase2AgeMs/60000)} sigs=${sigCount}/4 → force cancel + maker refund (silent stuck)`);
+              try {
+                meta.cancel_reason = 'collecting_sigs_silent_timeout';
+                meta.cancelled_at = new Date().toISOString();
+                sqlite.prepare("UPDATE pool_markets SET protocol_status='cancelled', metadata=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
+                  .run(JSON.stringify(meta), wm.id);
+                await dispatchRefund(wm, { action: 'refund', reason: 'watchdog-b: collecting_sigs silent timeout' });
+                watchdogFired++;
+              } catch (e) {
+                console.warn(`[pool-settler:watchdog-b] dispatchRefund fail market=${wm.id.slice(0,12)}: ${e.message}`);
+              }
+            }
+          }
+        }
+      }
+      if (watchdogFired > 0) console.log(`[pool-settler:watchdog] fired ${watchdogFired} market(s) this tick`);
+    } catch (e) {
+      console.warn(`[pool-settler:watchdog] phase fail: ${e.message}`);
+    }
     return { ok: true, processed: markets.length, consensus, refund, pending, doomed, errored };
   } finally {
     running = false;
