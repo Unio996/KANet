@@ -321,7 +321,7 @@
                    class="w-full stake-slider">
           </div>
 
-          <!-- 成交费 (Oracle v0.3 §8 disclose mandatory + 1 input + 1:1:1 split) -->
+          <!-- KANet-UI 2026-06-07 P1 末项 (Bettor r328 续 ship): advanced fee 文案 jargon → 中文一致 -->
           <div>
             <label class="block text-xs font-medium text-ink-500 mb-1.5 flex items-baseline justify-between">
               <span>成交费 <span class="font-display text-base text-ink-700" x-text="form.total_fee_pct"></span>%</span>
@@ -329,28 +329,28 @@
             </label>
             <input type="range" x-model.number="form.total_fee_pct" min="1" max="10" step="1"
                    class="w-full stake-slider">
-            <!-- §8 4 disclose mandatory -->
+            <!-- disclose: 三方分账 -->
             <div class="mt-1.5 text-[11px] text-ink-400 space-y-0.5">
-              <div>📋 <span class="text-ink-500">类型</span>: 预测市场 (pool)</div>
-              <div>💰 <span class="text-ink-500">分账</span>: maker <span x-text="(form.total_fee_pct / 3).toFixed(1)"></span>% / oracle <span x-text="(form.total_fee_pct / 3).toFixed(1)"></span>% / broker <span x-text="(form.total_fee_pct / 3).toFixed(1)"></span>%</div>
-              <div>⚖ <span class="text-ink-500">最大费</span>: 同 <span x-text="form.total_fee_pct"></span>% (= 无 dispute)</div>
+              <div>📋 <span class="text-ink-500">类型</span>: 预测市场</div>
+              <div>💰 <span class="text-ink-500">分账</span>: 主持费 <span x-text="(form.total_fee_pct / 3).toFixed(1)"></span>% / 仲裁费 <span x-text="(form.total_fee_pct / 3).toFixed(1)"></span>% / 中介费 <span x-text="(form.total_fee_pct / 3).toFixed(1)"></span>%</div>
+              <div>⚖ <span class="text-ink-500">最大费</span>: 同 <span x-text="form.total_fee_pct"></span>% (= 无争议)</div>
             </div>
             <button type="button" @click="form.showAdvancedFee = !form.showAdvancedFee"
                     class="text-[11px] text-amber-700 underline mt-1">
-              <span x-text="form.showAdvancedFee ? '收起 ↑' : '调整分配比例 →'"></span>
+              <span x-text="form.showAdvancedFee ? '收起 ↑' : '调整三方分账比例 →'"></span>
             </button>
-            <!-- Advanced collapse: 3 fee channel 分别调 -->
+            <!-- Advanced collapse: 主持/仲裁/中介 3 项分别调 (= 默认收, form.showAdvancedFee=false) -->
             <div x-show="form.showAdvancedFee" x-transition class="mt-2 space-y-2 bg-warm-50 p-2 rounded">
               <div>
-                <label class="text-[11px] text-ink-500">maker fee <span x-text="form.maker_fee_pct"></span>%</label>
+                <label class="text-[11px] text-ink-500">主持费 <span x-text="form.maker_fee_pct"></span>%</label>
                 <input type="range" x-model.number="form.maker_fee_pct" min="0" max="5" step="0.5" class="w-full">
               </div>
               <div>
-                <label class="text-[11px] text-ink-500">oracle fee <span x-text="form.oracle_fee_pct"></span>% (= range 5-20% spec lock)</label>
+                <label class="text-[11px] text-ink-500">仲裁费 <span x-text="form.oracle_fee_pct"></span>% (testnet 范围 5-20%)</label>
                 <input type="range" x-model.number="form.oracle_fee_pct" min="0" max="20" step="1" class="w-full">
               </div>
               <div>
-                <label class="text-[11px] text-ink-500">broker fee <span x-text="form.broker_fee_pct"></span>%</label>
+                <label class="text-[11px] text-ink-500">中介费 <span x-text="form.broker_fee_pct"></span>%</label>
                 <input type="range" x-model.number="form.broker_fee_pct" min="0" max="5" step="0.5" class="w-full">
               </div>
             </div>
