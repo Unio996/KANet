@@ -703,6 +703,66 @@ async function verifyV06(baselinePath) {
     check('L26 件1 nav (probe)', false, { err: e.message }, 'soft');
   }
 
+  // L27 Bettor R3 P0-#5 派 (KANet-UI 3c5fefe ship): source_kind 4 enum + backend derive canonical 守门
+  // = form 软化 (= UX 不强 user 填 URL), backend isStructuredSpec 仍 strict (= L24/L25 已守, derive 后 canonical 必填)
+  try {
+    const poolPath = path.resolve(REPO_ROOT, 'kasia-console/src/api/pool.js');
+    const poolSrc = fs.readFileSync(poolPath, 'utf8');
+    const expectedKinds = ['binance', 'polymarket', 'sport', 'kaspa-onchain'];
+    const hasDerivers = /const\s+SOURCE_KIND_DERIVERS\s*=/.test(poolSrc);
+    const missingKinds = expectedKinds.filter(k => !new RegExp(`['"]${k.replace('-', '\\-')}['"]\\s*:`).test(poolSrc) && !new RegExp(`\\b${k.replace('-', '\\-')}\\s*:`).test(poolSrc));
+    const hasDeriveFn = /export\s+function\s+deriveCanonicalFromSourceKind/.test(poolSrc);
+    const hasMaybeFn = /_maybeDeriveSpecFromSourceKind/.test(poolSrc);
+    const allOk = hasDerivers && missingKinds.length === 0 && hasDeriveFn && hasMaybeFn;
+    check(
+      'L27 P0-#5 source_kind 4 enum + backend derive canonical (Bettor R3, KANet-UI 3c5fefe)',
+      allOk,
+      {
+        has_SOURCE_KIND_DERIVERS: hasDerivers,
+        missing_kinds: missingKinds,
+        has_deriveCanonicalFromSourceKind_export: hasDeriveFn,
+        has_maybeDeriveSpec_fn: hasMaybeFn,
+        note: allOk ? 'form 软 + backend strict + derive 4 源齐' : '任一 enum 缺 / derive fn 缺 → form 软漂或新源没守'
+      }
+    );
+  } catch (e) {
+    check('L27 source_kind (probe)', false, { err: e.message }, 'soft');
+  }
+
+  // L28 Bettor R3 P0-#4 派 (KANet-UI 3c5fefe ship): chain_events 三阶段 event_type 实名守门
+  // = settler + voter + pool 写入 + UI detail page 显 timeline 必用实名 (= NWT r335 grep 实证: pool_oracle_vote / pool_oracle_tx_sig / pool_settle_consensual_dispatched)
+  try {
+    const poolSettlerPath = path.resolve(REPO_ROOT, 'kasia-console/src/services/pool-market-settler.js');
+    const bettorSettlerPath = path.resolve(REPO_ROOT, 'kasia-console/src/services/bettor-prediction-settler.js');
+    const voterPath = path.resolve(REPO_ROOT, 'kasia-console/src/services/bettor-prediction-voter.js');
+    const poolPath = path.resolve(REPO_ROOT, 'kasia-console/src/api/pool.js');
+    const uiDetailPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/predictions-pool-detail.eta');
+    const poolSettlerSrc = fs.readFileSync(poolSettlerPath, 'utf8');
+    const bettorSettlerSrc = fs.existsSync(bettorSettlerPath) ? fs.readFileSync(bettorSettlerPath, 'utf8') : '';
+    const voterSrc = fs.readFileSync(voterPath, 'utf8');
+    const poolSrc = fs.readFileSync(poolPath, 'utf8');
+    const uiSrc = fs.existsSync(uiDetailPath) ? fs.readFileSync(uiDetailPath, 'utf8') : '';
+    const types = ['pool_oracle_vote', 'pool_oracle_tx_sig', 'pool_settle_consensual_dispatched'];
+    const settlerCombined = poolSettlerSrc + '\n' + bettorSettlerSrc;
+    const settlerHasAll = types.every(t => settlerCombined.includes(t));
+    const uiHasAll = types.every(t => uiSrc.includes(t));
+    const hasEventsRoute = /\/api\/pool\/market\/:id\/events/.test(poolSrc);
+    const allOk = settlerHasAll && uiHasAll && hasEventsRoute;
+    check(
+      'L28 P0-#4 chain_events 三阶段 event_type 实名 + /events endpoint (Bettor R3, KANet-UI 3c5fefe)',
+      allOk,
+      {
+        settler_has_3_types: settlerHasAll,
+        ui_detail_has_3_types: uiHasAll,
+        events_endpoint_registered: hasEventsRoute,
+        types,
+        note: allOk ? 'timeline 三阶段实名 + /events 路存' : '任一 type 缺 / /events 删 → 前端 timeline 漏阶段或拉失败'
+      }
+    );
+  } catch (e) {
+    check('L28 timeline event_type (probe)', false, { err: e.message }, 'soft');
+  }
+
   const total = report.pass + report.fail + report.deploy_pending;
   if (report.fail > 0) report.verdict = 'FAIL';
   else if (report.deploy_pending > 0) report.verdict = 'PASS_WITH_DEPLOY_PENDING';
