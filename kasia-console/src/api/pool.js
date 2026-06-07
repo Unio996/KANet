@@ -1574,7 +1574,7 @@ export async function registerPoolRoutes(fastify) {
       where.push('(LOWER(pool_markets.resolution_rule_spec) LIKE ? OR LOWER(pool_markets.resolution_rule_spec) LIKE ? OR pool_markets.resolution_rule_spec LIKE ?)');
       params.push('%fifa%', '%world cup%', '%世界杯%');
     }
-    const limit = Math.min(Math.max(parseInt(q.limit, 10) || 50, 1), 200);
+    const limit = Math.min(Math.max(parseInt(q.limit, 10) || 50, 1), 1000);  /* KANet-UI 2026-06-07 r603: 200→1000 cap (520+ 单, my-markets 1 次 fetch 全自家 agent 单 = 必须全) */
     const offset = Math.max(parseInt(q.offset, 10) || 0, 0);
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const rows = sqlite.prepare(`

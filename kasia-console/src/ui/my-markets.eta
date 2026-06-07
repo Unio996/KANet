@@ -90,25 +90,24 @@ function myMarketsPage() {
       return '(无标题市场)';
     },
     async init() {
-      // KANet-UI 2026-06-06 (Bettor r270 ④ catch): /api/relays 404 不存在, 改 /api/agent/profile
-      // (= 现成 endpoint 返 agents list 含 id/name). 排除 is_dex_broker (= broker 不当 maker).
+      // KANet-UI 2026-06-07 r603 BUG FIX: 之前 /api/pool/markets?maker_relay_id=X 给每 agent fetch
+      // 但 backend 不支持该 query 参数 → 每次返同 519 单 → push 20 次重复 ('一个娃娃 20 个妈').
+      // 改: 1 次 fetch 全单 + 客户端 maker_relay_id 匹配 agent.id 过滤 (backend r308 已 LEFT JOIN
+      // 返 maker_name, 不需多次 fetch).
       try {
         const agResp = await fetch('/api/agent/profile').then(r => r.json()).catch(() => ({}));
         const allAgents = (agResp.agents || agResp || []).filter(a => !a.is_dex_broker);
         if (!allAgents.length) { this.loading = false; return; }
+        const agentIds = new Set(allAgents.map(a => a.id));
+        const mResp = await fetch('/api/pool/markets?limit=500').then(x => x.json()).catch(() => ({ markets: [] }));
         const allMarkets = [];
         const countByAgent = {};
-        for (const a of allAgents) {
-          try {
-            const mResp = await fetch(`/api/pool/markets?maker_relay_id=${encodeURIComponent(a.id)}&limit=200`).then(x => x.json());
-            const cnt = (mResp.markets || []).length;
-            countByAgent[a.id] = cnt;
-            for (const m of (mResp.markets || [])) {
-              let title = '';
-              try { const o = JSON.parse(m.resolution_rule_spec || ''); title = o.title || ''; } catch {}
-              allMarkets.push({ ...m, title, maker_name: a.name, maker_relay_id: a.id });
-            }
-          } catch { countByAgent[a.id] = 0; }
+        for (const m of (mResp.markets || [])) {
+          if (!agentIds.has(m.maker_relay_id)) continue;  // 仅自家 agent 建的市场
+          let title = '';
+          try { const o = JSON.parse(m.resolution_rule_spec || ''); title = o.title || ''; } catch {}
+          allMarkets.push({ ...m, title });
+          countByAgent[m.maker_relay_id] = (countByAgent[m.maker_relay_id] || 0) + 1;
         }
         allMarkets.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
         this.markets = allMarkets;
