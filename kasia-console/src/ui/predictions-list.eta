@@ -14,11 +14,20 @@
     </div>
   </div>
 
-  <!-- filter -->
-  <div class="flex items-center gap-2 mb-4 text-xs">
+  <!-- KANet-UI 2026-06-07 Track B (Bettor r335 关 1 PASS): filter + 排序 + 题目搜 -->
+  <div class="flex flex-wrap items-center gap-2 mb-4 text-xs">
     <button @click="filterMode = 'all'" :class="filterMode === 'all' ? 'bg-brand-500 text-white' : 'bg-white border border-warm-300 text-ink-600 hover:bg-warm-50'" class="px-3 py-1.5 rounded-lg transition">全部 (<span x-text="counts.all"></span>)</button>
     <button @click="filterMode = 'open'" :class="filterMode === 'open' ? 'bg-brand-500 text-white' : 'bg-white border border-warm-300 text-ink-600 hover:bg-warm-50'" class="px-3 py-1.5 rounded-lg transition">进行中 (<span x-text="counts.open"></span>)</button>
     <button @click="filterMode = 'settled'" :class="filterMode === 'settled' ? 'bg-brand-500 text-white' : 'bg-white border border-warm-300 text-ink-600 hover:bg-warm-50'" class="px-3 py-1.5 rounded-lg transition">已结算 (<span x-text="counts.settled"></span>)</button>
+    <div class="flex-1"></div>
+    <input type="text" x-model.debounce.300ms="searchQuery" placeholder="搜题目..." class="px-3 py-1.5 rounded-lg border border-warm-300 text-xs w-40 focus:outline-none focus:border-brand-400" />
+    <select x-model="sortMode" class="px-3 py-1.5 rounded-lg border border-warm-300 bg-white text-xs">
+      <option value="newest">最新建</option>
+      <option value="deadline">截止最近</option>
+      <option value="pool">押注池最大</option>
+      <option value="bettors">押注人最多</option>
+    </select>
+    <span class="text-[10px] text-ink-400" title="排序限当前加载页 (testnet 范围)">📌 排序限当前加载</span>
   </div>
 
   <div x-show="loading" class="text-center py-16 text-ink-400">载入中...</div>
@@ -67,6 +76,9 @@ function predictionsListPage() {
     markets: [],
     filterMode: 'open',
     counts: { all: 0, open: 0, settled: 0 },
+    // KANet-UI 2026-06-07 Track B (Bettor r335 关 1 PASS): 搜 + 排序 state
+    searchQuery: '',
+    sortMode: 'newest',
 
     async init() {
       try {
@@ -129,10 +141,19 @@ function predictionsListPage() {
       return `押 ${side} 估算赔率 ${mult}x (= 押注池总额 / ${side} 池). 扣费前估算非保证.`;
     },
     filtered() {
-      if (this.filterMode === 'all') return this.markets;
-      if (this.filterMode === 'open') return this.markets.filter(m => m.statusKind === 'open' || m.statusKind === 'awaiting');
-      if (this.filterMode === 'settled') return this.markets.filter(m => m.statusKind === 'settled');
-      return this.markets;
+      let arr = this.markets;
+      if (this.filterMode === 'open') arr = arr.filter(m => m.statusKind === 'open' || m.statusKind === 'awaiting');
+      else if (this.filterMode === 'settled') arr = arr.filter(m => m.statusKind === 'settled');
+      // KANet-UI 2026-06-07 Track B (Bettor r335): 题目搜 (= 客户端 includes, 复用现 m.title)
+      const q = (this.searchQuery || '').trim().toLowerCase();
+      if (q) arr = arr.filter(m => (m.title || m.id || '').toLowerCase().includes(q));
+      // 排序 (= 当前加载页, Bettor r335 校准: testnet demo 可接受, 标提示)
+      const sorted = [...arr];
+      if (this.sortMode === 'deadline') sorted.sort((a, b) => Number(a.deadline || 0) - Number(b.deadline || 0));
+      else if (this.sortMode === 'pool') sorted.sort((a, b) => Number(b.yes_pool_kas || 0) + Number(b.no_pool_kas || 0) - Number(a.yes_pool_kas || 0) - Number(a.no_pool_kas || 0));
+      else if (this.sortMode === 'bettors') sorted.sort((a, b) => Number(b.bettor_count || 0) - Number(a.bettor_count || 0));
+      // 'newest' default = 已 ORDER BY created_at DESC, 不排
+      return sorted;
     },
   };
 }

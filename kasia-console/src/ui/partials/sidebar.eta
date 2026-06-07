@@ -63,8 +63,9 @@
       </div>
     </div>
 
-    <!-- 5. 市场 ▶ (Owner 2026-06-06 钦定 sidebar 中文统一: Predictions → 预测市场, link /oracle pool 列表干净页) -->
-    <% const _isMarket = ['exchange','predictions','predictions-pool-create','predictions-pool-detail','oracle','market','trading','stocks','hyperliquid','aevo','aave'].includes(it._page); %>
+    <!-- KANet-UI 2026-06-07 Track B (Bettor r335 关 1 PASS): 市场 ▶ 内 '预测市场 ▶' 嵌套子菜单 (建市场/我的市场 收进) -->
+    <% const _isMarket = ['exchange','predictions','predictions-pool-create','predictions-pool-detail','my-markets','oracle','market','trading','stocks','hyperliquid','aevo','aave'].includes(it._page); %>
+    <% const _isPrediction = ['predictions','predictions-pool-create','predictions-pool-detail','my-markets'].includes(it._page); %>
     <div x-data="{ open: <%= _isMarket ? 'true' : 'false' %> }">
       <button @click="open = !open"
         class="flex items-center justify-between w-full px-3 py-2.5 rounded-lg text-sm transition-colors <%= _isMarket ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
@@ -76,18 +77,28 @@
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'exchange' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
           兑换
         </a>
-        <a href="/predictions"
-          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= ['predictions','predictions-pool-detail'].includes(it._page) ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          预测市场
-        </a>
-        <a href="/predictions/pool/create"
-          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'predictions-pool-create' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          建市场
-        </a>
-        <a href="/my-markets"
-          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'my-markets' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          我的市场
-        </a>
+        <!-- 预测市场 ▶ 嵌套 -->
+        <div x-data="{ pred: <%= _isPrediction ? 'true' : 'false' %> }">
+          <button @click="pred = !pred"
+            class="flex items-center justify-between w-full px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= _isPrediction ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+            <span>预测市场</span>
+            <span class="text-[9px] transition-transform" :class="pred ? 'rotate-90' : ''">›</span>
+          </button>
+          <div x-show="pred" x-transition class="mt-0.5 space-y-0.5">
+            <a href="/predictions"
+              class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-8 <%= ['predictions','predictions-pool-detail'].includes(it._page) ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+              看市场
+            </a>
+            <a href="/predictions/pool/create"
+              class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-8 <%= it._page === 'predictions-pool-create' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+              建市场
+            </a>
+            <a href="/my-markets"
+              class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-8 <%= it._page === 'my-markets' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+              我的市场
+            </a>
+          </div>
+        </div>
       </div>
     </div>
 
