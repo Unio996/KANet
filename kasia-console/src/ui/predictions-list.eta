@@ -121,12 +121,12 @@ function predictionsListPage() {
     oddsTooltip(m, side) {
       const yes = Number(m.yes_pool_kas || 0);
       const no = Number(m.no_pool_kas || 0);
-      if (yes + no <= 0) return '池子为空, 还没赔率';
+      if (yes + no <= 0) return '押注池为空, 还没赔率';
       const myPool = side === 'YES' ? yes : no;
       const otherPool = side === 'YES' ? no : yes;
       if (myPool <= 0) return '此边为空, 无法算赔率';
       const mult = ((myPool + otherPool) / myPool).toFixed(2);
-      return `押 ${side} 估算赔率 ${mult}x (= 池子总额 / ${side} 池). 扣费前估算非保证.`;
+      return `押 ${side} 估算赔率 ${mult}x (= 押注池总额 / ${side} 池). 扣费前估算非保证.`;
     },
     filtered() {
       if (this.filterMode === 'all') return this.markets;

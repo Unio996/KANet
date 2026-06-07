@@ -53,8 +53,9 @@
             <td class="py-2 px-3 max-w-[280px] truncate" :title="m.title || m.id" x-text="titleLabel(m)"></td>
             <td class="py-2 px-3 text-ink-500 text-xs" x-text="m.maker_name || '?'"></td>
             <td class="py-2 px-3 text-center">
+              <!-- KANet-UI 2026-06-07 P2 (Bettor r330 关 1 PASS): 状态 raw → 中文映射 -->
               <span class="text-[10px] px-1.5 py-0.5 rounded font-medium"
-                    :class="statusBadge(m.protocol_status)" x-text="m.protocol_status || '?'"></span>
+                    :class="statusBadge(m.protocol_status)" x-text="statusLabel(m.protocol_status)"></span>
             </td>
             <td class="py-2 px-3 text-right tabular-nums text-ink-600" x-text="m.maker_stake_kas || '?'"></td>
             <td class="py-2 px-3 text-right tabular-nums text-ink-600" x-text="m.bettor_count || 0"></td>
@@ -126,6 +127,21 @@ function myMarketsPage() {
       if (s === 'collecting_sigs' || s === 'verifying') return 'bg-amber-100 text-amber-700';
       if (s === 'cancelled' || s === 'refunded') return 'bg-warm-200 text-ink-500';
       return 'bg-warm-100 text-ink-500';
+    },
+    // KANet-UI 2026-06-07 P2 (Bettor r330): 状态 raw → 中文 (= 同详情页 currentStageHint 一致)
+    statusLabel(s) {
+      const m = {
+        pending_oracle_deposits: '等仲裁人接单',
+        pending_oracle_sampling: '抽仲裁人中',
+        pending_oracle_sample: '抽仲裁人中',
+        pending_bettors: '押注中',
+        verifying: '等仲裁人投票',
+        collecting_sigs: '收仲裁人签名',
+        completed: '已结算',
+        cancelled: '已取消',
+        refunded: '已退款',
+      };
+      return m[s] || s || '?';
     },
   };
 }

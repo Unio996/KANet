@@ -244,7 +244,7 @@
       <!-- committee -->
       <div x-show="audit?.committee?.members?.length" class="mb-3">
         <div class="text-[11px] text-ink-500 mb-1">
-          ③ 仲裁人 · 池子里随机抽 <span x-text="(audit?.committee?.members||[]).length"></span> 个 (阈值 <span x-text="audit?.committee?.threshold || '?'"></span>/<span x-text="(audit?.committee?.members||[]).length"></span>)
+          ③ 仲裁人 · 押注池里随机抽 <span x-text="(audit?.committee?.members||[]).length"></span> 个 (阈值 <span x-text="audit?.committee?.threshold || '?'"></span>/<span x-text="(audit?.committee?.members||[]).length"></span>)
         </div>
         <div class="text-[10px] text-ink-400 mb-1">
           抽样时间: <span x-text="audit?.committee?.sampled_at || '?'"></span>
@@ -273,10 +273,11 @@
 
     <!-- market meta -->
     <div class="card p-4 text-[11px] text-ink-500 space-y-1">
-      <div class="flex justify-between"><span>maker stake</span><span x-text="(market?.maker_stake_amount || '?') + ' KAS'"></span></div>
-      <div class="flex justify-between"><span>oracle bond (each)</span><span x-text="(market?.oracle_bond_amount || '?') + ' KAS'"></span></div>
-      <div class="flex justify-between"><span>bettor 数</span><span x-text="bettorCount"></span></div>
-      <div class="flex justify-between"><span>sigs collected</span><span x-text="sigsCollected"></span></div>
+      <!-- KANet-UI 2026-06-07 P2 (Bettor r330 关 1 PASS): market meta jargon → 中文 -->
+      <div class="flex justify-between"><span>主持人本金</span><span x-text="(market?.maker_stake_amount || '?') + ' KAS'"></span></div>
+      <div class="flex justify-between"><span>仲裁人押金 (每位)</span><span x-text="(market?.oracle_bond_amount || '?') + ' KAS'"></span></div>
+      <div class="flex justify-between"><span>押注人数</span><span x-text="bettorCount"></span></div>
+      <div class="flex justify-between"><span>已签人数</span><span x-text="sigsCollected"></span></div>
     </div>
   </div>
 
