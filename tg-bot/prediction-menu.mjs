@@ -72,6 +72,14 @@ function fmtDeadline(unixSec) {
 // 列表里截短标题 (resolution_rule_spec 可能含完整结算规则全文, Bettor r256). 详情页给全文.
 function trunc(s, n) { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
 
+// KANet-UI 2026-06-07 r308: market 出单人 label. backend /api/pool/markets LEFT JOIN relay_nodes
+// 返 maker_name; 跨节点 maker (= relay_nodes 本节点无 record) → name=null, fallback 短 id.
+function makerLabel(m) {
+  if (m && m.maker_name) return m.maker_name;
+  if (m && m.maker_relay_id) return '跨节点 ' + String(m.maker_relay_id).slice(0, 8);
+  return '?';
+}
+
 // KANet-UI 2026-06-03 Bettor 钦点: 显示前 try JSON.parse(spec) — kanet 现有干净格式
 // = {title, data_source_canonical, source?}. 是 JSON 显 .title (干净题干). 非 JSON 显 raw.
 function specTitle(spec) {
@@ -338,6 +346,7 @@ export async function startBetFromMarket(tgUser, marketId) {
   persist();
   const lines = [
     `📊 ${specTitle(market.resolution_rule_spec)}`,
+    `出单人: ${makerLabel(market)}`,
     `${fmtDeadline(market.deadline)} · 已 ${market.bettor_count || 0} 人押 · maker stake ${market.maker_stake_kas ?? '?'} KAS`,
   ];
   const _crit = specCriteria(market.resolution_rule_spec);
@@ -468,7 +477,7 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
     s.markets = entry.markets;
     const head = entry.type === 'worldcup' ? '🏆 世界杯专题' : `📂 ${entry.cat}`;
     const lines = [`${head} — 选市场(回复编号):`, ''];
-    s.markets.forEach((m, i) => lines.push(`${i + 1}. ${trunc(specTitle(m.resolution_rule_spec), 64)}  · ${fmtDeadline(m.deadline)} · ${m.bettor_count || 0} 人已押`));
+    s.markets.forEach((m, i) => lines.push(`${i + 1}. ${trunc(specTitle(m.resolution_rule_spec), 56)}  · 出单人 ${makerLabel(m)} · ${fmtDeadline(m.deadline)} · ${m.bettor_count || 0} 人已押`));
     lines.push('', '回复数字选市场(看完整结算规则)。');
     return lines.join('\n');
   }
@@ -490,7 +499,7 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
     if (!matches.length) return `🔍 "${term}" 没找到符合的市场。回复别的关键词, 或 /start 退出后 /bet 看品类。`;
     s.stage = 'market'; s.markets = matches;
     const lines = [`🔍 搜 "${term}" — ${matches.length} 个市场(回复编号):`, ''];
-    matches.forEach((m, i) => lines.push(`${i + 1}. ${trunc(specTitle(m.resolution_rule_spec), 64)}  · ${fmtDeadline(m.deadline)} · ${m.bettor_count || 0} 人已押`));
+    matches.forEach((m, i) => lines.push(`${i + 1}. ${trunc(specTitle(m.resolution_rule_spec), 56)}  · 出单人 ${makerLabel(m)} · ${fmtDeadline(m.deadline)} · ${m.bettor_count || 0} 人已押`));
     lines.push('', '回复数字选市场(看完整结算规则)。');
     return lines.join('\n');
   }
@@ -505,6 +514,7 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
     s.stage = 'detail'; s.market = full;
     const lines = [
       `📊 ${specTitle(full.resolution_rule_spec)}`,
+      `出单人: ${makerLabel(full)}`,
       `${fmtDeadline(full.deadline)} · 已 ${full.bettor_count || 0} 人押 · maker stake ${full.maker_stake_kas ?? '?'} KAS`,
     ];
     const _critF = specCriteria(full.resolution_rule_spec);

@@ -1562,32 +1562,38 @@ export async function registerPoolRoutes(fastify) {
     const q = request.query || {};
     const where = [];
     const params = [];
-    if (q.status)   { where.push('protocol_status = ?'); params.push(String(q.status)); }
-    if (q.category) { where.push('category = ?'); params.push(String(q.category)); }
+    // KANet-UI 2026-06-07 r308: LEFT JOIN relay_nodes 加 maker_name, 列名 fully-qualify 防 ambiguous
+    if (q.status)   { where.push('pool_markets.protocol_status = ?'); params.push(String(q.status)); }
+    if (q.category) { where.push('pool_markets.category = ?'); params.push(String(q.category)); }
     if (q.q) {
-      where.push('LOWER(resolution_rule_spec) LIKE LOWER(?)');
+      where.push('LOWER(pool_markets.resolution_rule_spec) LIKE LOWER(?)');
       params.push(`%${String(q.q).replace(/[%_]/g, ch => '\\' + ch)}%`);
     }
     if (q.tag === 'worldcup') {
       // Owner 钦定专题: 2026 FIFA World Cup. patterns 涵盖 polymarket 灌入的常见命名 + 中文.
-      where.push('(LOWER(resolution_rule_spec) LIKE ? OR LOWER(resolution_rule_spec) LIKE ? OR resolution_rule_spec LIKE ?)');
+      where.push('(LOWER(pool_markets.resolution_rule_spec) LIKE ? OR LOWER(pool_markets.resolution_rule_spec) LIKE ? OR pool_markets.resolution_rule_spec LIKE ?)');
       params.push('%fifa%', '%world cup%', '%世界杯%');
     }
     const limit = Math.min(Math.max(parseInt(q.limit, 10) || 50, 1), 200);
     const offset = Math.max(parseInt(q.offset, 10) || 0, 0);
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const rows = sqlite.prepare(`
-      SELECT id, resolution_rule_spec, outcome_side, category, protocol_status,
-             protocol_version, deadline, maker_stake_amount, oracle_bond_amount,
-             outcome_market_source, outcome_condition_id, created_at,
+      SELECT pool_markets.id, pool_markets.resolution_rule_spec, pool_markets.outcome_side,
+             pool_markets.category, pool_markets.protocol_status, pool_markets.protocol_version,
+             pool_markets.deadline, pool_markets.maker_stake_amount, pool_markets.oracle_bond_amount,
+             pool_markets.outcome_market_source, pool_markets.outcome_condition_id, pool_markets.created_at,
+             pool_markets.maker_relay_id,                       /* KANet-UI 2026-06-07 r308 maker 名显 */
+             rn_maker.name AS maker_name,                       /* LEFT JOIN: 跨节点 maker 不在本表 → NULL, 前端兜底 */
              (SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id) AS bettor_count,
              (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id AND s.direction = 0) AS yes_bettor_stake_sompi,
              (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id AND s.direction = 1) AS no_bettor_stake_sompi
       FROM pool_markets
+      LEFT JOIN relay_nodes rn_maker ON rn_maker.id = pool_markets.maker_relay_id
       ${whereSql}
-      ORDER BY created_at DESC
+      ORDER BY pool_markets.created_at DESC
       LIMIT ? OFFSET ?
     `).all(...params, limit, offset);
+    // total count 用 pool_markets 单表 + 同 whereSql (= 列名同已 fully-qualify, 不 ambiguous)
     const total = sqlite.prepare(`SELECT COUNT(*) c FROM pool_markets ${whereSql}`).get(...params).c;
     // Bettor r70 A: pool distribution (pari-mutuel 赔率来源).
     // maker is implicit bettor on outcome_side (= L535-541 area-1 invariant);
@@ -1614,6 +1620,11 @@ export async function registerPoolRoutes(fastify) {
     const marketId = request.params.id;
     const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
     if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
+    // KANet-UI 2026-06-07 r308 maker 名显: LEFT JOIN relay_nodes 取 maker_name (跨节点 NULL, 前端兜底)
+    const _makerRow = market.maker_relay_id
+      ? sqlite.prepare('SELECT name FROM relay_nodes WHERE id = ?').get(market.maker_relay_id)
+      : null;
+    market.maker_name = _makerRow?.name || null;
     let metaParsed = {};
     try { metaParsed = JSON.parse(market.metadata || '{}'); } catch {}
     const bettorCount = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(marketId).c;

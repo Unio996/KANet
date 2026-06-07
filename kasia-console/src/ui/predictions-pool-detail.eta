@@ -145,11 +145,12 @@
       <div class="text-sm font-medium text-ink-700 mb-1">证据链 · 全程可审计</div>
       <div class="text-[11px] text-ink-400 mb-3">每段都是链上真 TX, 点 🔗 看 explorer 验。</div>
 
-      <!-- maker 发市场 -->
+      <!-- maker 发市场 (KANet-UI 2026-06-07 r308: 加 maker_name 主显, address 退次) -->
       <div x-show="audit?.maker" class="mb-3">
         <div class="text-[11px] text-ink-500 mb-1">① 主持人 (出市场+赌池本金)</div>
         <div class="bg-warm-50 rounded px-3 py-2 text-xs flex items-center gap-2">
-          <span class="text-ink-500 font-mono truncate flex-1" x-text="(audit.maker?.address || '').slice(0, 24) + '…'"></span>
+          <span class="text-ink-700 font-medium flex-shrink-0" x-text="makerLabel()"></span>
+          <span class="text-ink-400 font-mono text-[10px] truncate flex-1" x-text="(audit.maker?.address || '').slice(0, 18) + '…'"></span>
           <span class="text-ink-600" x-text="(audit.maker?.stake_kas || 0) + ' KAS'"></span>
           <a x-show="audit.maker?.explorer_url" :href="audit.maker.explorer_url" target="_blank" class="text-brand-500">🔗</a>
         </div>
@@ -277,6 +278,12 @@ function poolDetailPage(marketId) {
     },
 
     // KANet-UI 2026-06-07 P0-#4: chain_events 大白话 label (NWT r335 实测 event_type).
+    // KANet-UI 2026-06-07 r308: maker_name 主持人显. 跨节点 fallback 短 id.
+    makerLabel() {
+      if (this.market?.maker_name) return this.market.maker_name;
+      if (this.market?.maker_relay_id) return '跨节点 ' + String(this.market.maker_relay_id).slice(0, 8);
+      return '?';
+    },
     eventLabel(t) {
       const map = {
         pool_oracle_deposit: '委员入金',
