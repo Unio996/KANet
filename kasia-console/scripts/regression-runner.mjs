@@ -861,6 +861,40 @@ async function verifyV06(baselinePath) {
     check('L31 P2 jargon 收尾 (probe)', false, { err: e.message }, 'soft');
   }
 
+  // L32 Bettor r334-r338 4 线并行 ship 守 Track A+B+C (= bot 去泄露 + sidebar 嵌套 + /oracle 仲裁人中心):
+  // 4 sub: specTitle helper 用 + sidebar 预测市场嵌套 + oracle 3 段中文 + 钉死无数据态
+  try {
+    const botPath = path.resolve(REPO_ROOT, 'tg-bot/bot.mjs');
+    const sidebarPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/partials/sidebar.eta');
+    const oracleHomePath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/oracle-home.eta');
+    const botSrc = fs.existsSync(botPath) ? fs.readFileSync(botPath, 'utf8') : '';
+    const sidebarSrc = fs.readFileSync(sidebarPath, 'utf8');
+    const oracleHomeSrc = fs.existsSync(oracleHomePath) ? fs.readFileSync(oracleHomePath, 'utf8') : '';
+    // sub-a: bot.mjs 用户消息用 specTitle (= 不 dump raw spec JSON 含 127.0.0.1)
+    const botUsesSpecTitle = (botSrc.match(/PM\.specTitle\(p\.question\)/g) || []).length >= 3;
+    const botNoRawLocalhost = !/['"]http:\/\/127\.0\.0\.1[^'"]*['"]/.test(botSrc.replace(/^\s*\/\/.*$/gm, '')) || /specTitle/.test(botSrc);
+    // sub-b: sidebar 预测市场嵌套 x-data pred
+    const sidebarHasPredictNest = /预测市场/.test(sidebarSrc) && /x-data\s*=\s*['"]?\{\s*pred/.test(sidebarSrc);
+    // sub-c: oracle-home.eta 中文术语 (= '暂无评分' / '暂无收益' / '级别待定')
+    const oracleHasZh = /暂无评分/.test(oracleHomeSrc) && /暂无收益/.test(oracleHomeSrc) && /级别待定/.test(oracleHomeSrc);
+    // sub-d: oracle-home.eta 0 旧 jargon (= VRF / stake-weighted / voter_misbehave)
+    const oracleNoJargon = !/VRF|stake-weighted|voter_misbehave|stake_locked_kas/.test(oracleHomeSrc);
+    const allOk = botUsesSpecTitle && sidebarHasPredictNest && oracleHasZh && oracleNoJargon;
+    check(
+      'L32 4 线并行 Track A+B+C: bot specTitle 用 + sidebar 预测市场嵌套 + oracle 中文 3 段 + 钉死无数据 (Bettor r334-r338, KANet-UI ac079464+e1c57d7f+c932cb19)',
+      allOk,
+      {
+        bot_uses_specTitle_3plus: botUsesSpecTitle,
+        sidebar_has_predict_nest: sidebarHasPredictNest,
+        oracle_has_zh_terms: oracleHasZh,
+        oracle_no_old_jargon: oracleNoJargon,
+        note: allOk ? '4 线并行守门完整' : '任一回归 → bot 漏 specTitle dump URL / sidebar 预测市场扁平 / oracle 漂回 jargon'
+      }
+    );
+  } catch (e) {
+    check('L32 4 线并行 (probe)', false, { err: e.message }, 'soft');
+  }
+
   const total = report.pass + report.fail + report.deploy_pending;
   if (report.fail > 0) report.verdict = 'FAIL';
   else if (report.deploy_pending > 0) report.verdict = 'PASS_WITH_DEPLOY_PENDING';
