@@ -134,7 +134,7 @@ async function pollPendingBets() {
     const j = r.json || {};
     if (r.ok && (j.registered || j.already_registered || j.side_lock_tx || j.merkle_index != null)) {
       PM.clearPendingPayment(p.tgUser);
-      try { await bot.api.sendMessage(p.tgUser, `✅ 押注已入账! ${p.side} · ${(p.exact_sompi / 1e8).toFixed(8)} KAS\n市场: ${p.question}\n链上到账检测成功, side 已锁仓。结算后用绑定地址领取。`); } catch {}
+      try { await bot.api.sendMessage(p.tgUser, `✅ 押注已入账! ${p.side} · ${(p.exact_sompi / 1e8).toFixed(8)} KAS\n市场: ${PM.specTitle(p.question) || p.market_id || ''}\n链上到账检测成功, side 已锁仓。结算后用绑定地址领取。`); } catch {}
     } else if (j.wrong_payment_detected) {
       // 错付被检测到 — 金额不符无法入账, 且少付会被合约永久锁死 (J2/Bettor 裁决). 诚实披露, 停止盯。
       PM.clearPendingPayment(p.tgUser);
@@ -170,15 +170,15 @@ async function pollSettleResults() {
           // Bettor r76 F-N1 fix: use server-derived did_win (= my_direction === outcome_winner)
           // instead of p.claim_txid (= empty for happy-path winners since settle_via_spine pays direct).
           if (p.did_win === true) {
-            msg = `🎉 [${p.question || p.market_id}]\n你赢了! 押 ${p.my_side} ${p.stake_kas} KAS → 应到账 ${p.actual_payout_kas} KAS (settle TX: ${p.settle_txid.slice(0,16)}...)\n钱已发到你的绑定地址 — 钱包查看到账.`;
+            msg = `🎉 [${PM.specTitle(p.question) || p.market_id}]\n你赢了! 押 ${p.my_side} ${p.stake_kas} KAS → 应到账 ${p.actual_payout_kas} KAS (settle TX: ${p.settle_txid.slice(0,16)}...)\n钱已发到你的绑定地址 — 钱包查看到账.`;
           } else if (p.did_win === false) {
-            msg = `😞 [${p.question || p.market_id}]\n你输了。\n开奖: ${p.outcome_side} (你押的是 ${p.my_side}) · 押 ${p.stake_kas} KAS\nsettle TX: ${p.settle_txid.slice(0,16)}...`;
+            msg = `😞 [${PM.specTitle(p.question) || p.market_id}]\n你输了。\n开奖: ${p.outcome_side} (你押的是 ${p.my_side}) · 押 ${p.stake_kas} KAS\nsettle TX: ${p.settle_txid.slice(0,16)}...`;
           } else {
             // outcome_winner 还没写入 metadata (= 还在收集签名/早) — 给中性话, 等下一轮 poll.
-            msg = `📊 [${p.question || p.market_id}] 已结算\n你的押注: ${p.my_side} · ${p.stake_kas} KAS · settle TX ${p.settle_txid.slice(0,16)}...\n等待最终开奖标注 (下次会推确切赢/输).`;
+            msg = `📊 [${PM.specTitle(p.question) || p.market_id}] 已结算\n你的押注: ${p.my_side} · ${p.stake_kas} KAS · settle TX ${p.settle_txid.slice(0,16)}...\n等待最终开奖标注 (下次会推确切赢/输).`;
           }
         } else if (p.refund_txid) {
-          msg = `💸 [${p.question || p.market_id}] 已退款\n市场取消/分歧, 退款 TX: ${p.refund_txid.slice(0,16)}...\n你的押注退回到绑定地址.`;
+          msg = `💸 [${PM.specTitle(p.question) || p.market_id}] 已退款\n市场取消/分歧, 退款 TX: ${p.refund_txid.slice(0,16)}...\n你的押注退回到绑定地址.`;
         }
         if (msg) { try { await bot.api.sendMessage(u.tgUser, msg); } catch {} }
       }

@@ -82,7 +82,9 @@ function makerLabel(m) {
 
 // KANet-UI 2026-06-03 Bettor 钦点: 显示前 try JSON.parse(spec) — kanet 现有干净格式
 // = {title, data_source_canonical, source?}. 是 JSON 显 .title (干净题干). 非 JSON 显 raw.
-function specTitle(spec) {
+// KANet-UI 2026-06-07 Track A (Bettor r335 关 1 PASS): fallback URL-strip 兜底
+// (= 用户文案绝不漏 127.0.0.1 / data_source_canonical 内部 URL; specTitle export 给 bot.mjs 用)
+export function specTitle(spec) {
   if (!spec) return '';
   const s = String(spec).trim();
   if (s.startsWith('{')) {
@@ -91,7 +93,8 @@ function specTitle(spec) {
       if (typeof obj.title === 'string' && obj.title.trim()) return obj.title.trim();
     } catch {}
   }
-  return s;
+  // fallback: 非 JSON 或解析失败 → strip 所有 http(s):// URL 防泄 (= Bettor r335 关 1 'URL-strip fallback' 校准)
+  return s.replace(/https?:\/\/\S+/g, '').trim();
 }
 // 真规则 (resolution_criteria) — 押注前用户必须看到的判定依据。KANet 委员预言机按这条裁决。
 function specCriteria(spec) {
