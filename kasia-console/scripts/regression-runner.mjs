@@ -763,6 +763,41 @@ async function verifyV06(baselinePath) {
     check('L28 timeline event_type (probe)', false, { err: e.message }, 'soft');
   }
 
+  // L29 Bettor R3 P0 5 件 UI 全 ship 守门 (KANet-UI partner 模式: 616d8f87 + 8f7718d2 + 9d0ba87 + c48786d + 0c863af + b8f62f9)
+  // 4 sub: 建市 form 合一 + web 押注 button + my-markets agent selector + backend maker_relay_id filter
+  try {
+    const createEtaPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/predictions-pool-create.eta');
+    const listEtaPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/predictions-list.eta');
+    const myMarketsEtaPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/my-markets.eta');
+    const poolPath = path.resolve(REPO_ROOT, 'kasia-console/src/api/pool.js');
+    const createSrc = fs.existsSync(createEtaPath) ? fs.readFileSync(createEtaPath, 'utf8') : '';
+    const listSrc = fs.existsSync(listEtaPath) ? fs.readFileSync(listEtaPath, 'utf8') : '';
+    const myMarketsSrc = fs.existsSync(myMarketsEtaPath) ? fs.readFileSync(myMarketsEtaPath, 'utf8') : '';
+    const poolSrc = fs.readFileSync(poolPath, 'utf8');
+    // sub-a: 建市 form 合一 '议题' label + '判定凭据' card
+    const createHasUnifiedLabel = /议题\s*<span[^>]*>\s*\*/.test(createSrc) && /判定凭据/.test(createSrc);
+    // sub-b: 押 → button 在 list
+    const listHasBetButton = /押\s*→|押→/.test(listSrc);
+    // sub-c: my-markets agent selector
+    const myMarketsHasSelector = /selectedAgentId/.test(myMarketsSrc) && /x-model[=\s]*['"]selectedAgentId/.test(myMarketsSrc);
+    // sub-d: backend filter
+    const backendHasMakerFilter = /q\.maker_relay_id\s*\)\s*\{\s*where\.push|pool_markets\.maker_relay_id\s*=\s*\?/.test(poolSrc);
+    const allOk = createHasUnifiedLabel && listHasBetButton && myMarketsHasSelector && backendHasMakerFilter;
+    check(
+      'L29 P0 5 件 UI ship (KANet-UI partner: 建市 form 合一 + web 押 button + my-markets selector + backend maker filter)',
+      allOk,
+      {
+        create_form_unified_label_judgement_card: createHasUnifiedLabel,
+        list_has_bet_button: listHasBetButton,
+        my_markets_has_selector: myMarketsHasSelector,
+        backend_has_maker_filter: backendHasMakerFilter,
+        note: allOk ? '5 件 P0 UI 守门完整 (Bettor r322 全 PASS)' : '任一回归 → P0 UI 漂回旧 raw ID / 无押注 button / 无 agent 选择器'
+      }
+    );
+  } catch (e) {
+    check('L29 P0 UI ship (probe)', false, { err: e.message }, 'soft');
+  }
+
   const total = report.pass + report.fail + report.deploy_pending;
   if (report.fail > 0) report.verdict = 'FAIL';
   else if (report.deploy_pending > 0) report.verdict = 'PASS_WITH_DEPLOY_PENDING';
