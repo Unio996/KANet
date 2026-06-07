@@ -80,7 +80,12 @@ export async function recordParallelJudgment(offer, oracleRelayId, judgeFn) {
   ).get(offer.id, oracleRelayId);
   if (exists) return { graded: false, reason: 'already_recorded' };
 
-  const verdict = await judgeFn(cfg.independentSource, offer);
+  // J2-tn r405 Track D fix: pool_markets path 无 outcome_oracle_relay_id field,
+  // deriveKanetNativeVote 内 LLM provider lookup 用 offer.outcome_oracle_relay_id,
+  // null 时 returns 'no LLM provider URL' → judge silent abstain → A.recorded=0.
+  // Inject voter relay id as outcome_oracle_relay_id (= 让 voter 的 adapter 跑 LLM).
+  const offerWithVoter = { ...offer, outcome_oracle_relay_id: oracleRelayId };
+  const verdict = await judgeFn(cfg.independentSource, offerWithVoter);
   if (!verdict || !verdict.outcome) return { graded: false, reason: 'judge_abstain' };
 
   const id = randomUUID();
