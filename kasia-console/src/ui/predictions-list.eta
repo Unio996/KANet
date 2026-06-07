@@ -31,24 +31,25 @@
 
   <div x-show="!loading && filtered().length > 0" class="space-y-2">
     <template x-for="m in filtered()" :key="m.id">
-      <a :href="`/predictions/pool/${encodeURIComponent(m.id)}`"
-         class="block card p-4 hover:border-brand-300 hover:bg-warm-50 transition">
+      <div class="card p-4 hover:border-brand-300 hover:bg-warm-50 transition">
         <div class="flex items-start gap-3">
-          <div class="flex-1 min-w-0">
+          <a :href="`/predictions/pool/${encodeURIComponent(m.id)}`" class="flex-1 min-w-0 cursor-pointer">
             <div class="text-sm font-medium text-ink-700 leading-snug" x-text="m.title || m.id.slice(0, 20)"></div>
             <div class="flex items-center gap-3 mt-2 text-xs text-ink-500">
               <span class="px-2 py-0.5 rounded font-medium" :class="statusBadge(m.statusKind)" x-text="statusLabel(m.statusKind)"></span>
               <span x-show="m.deadlineDate" x-text="'截止 ' + m.deadlineDate"></span>
-              <!-- KANet-UI 2026-06-07 r308 maker 名显: 跨节点 maker_name=null 时显短 id -->
               <span x-text="'出单人: ' + makerLabel(m)"></span>
             </div>
-          </div>
+          </a>
           <div class="text-right text-xs text-ink-500 shrink-0 min-w-[140px]">
             <div>YES <span class="font-medium text-ink-700" x-text="m.yes_pool_kas?.toFixed(2) ?? '?'"></span> KAS</div>
             <div>NO <span class="font-medium text-ink-700" x-text="m.no_pool_kas?.toFixed(2) ?? '?'"></span> KAS</div>
+            <!-- KANet-UI 2026-06-07 P0-#2 (Bettor r319 关 1 PASS): row 加 '押 →' button 跳详情 #bet panel -->
+            <a x-show="m.statusKind === 'open'" :href="`/predictions/pool/${encodeURIComponent(m.id)}#bet`"
+               class="inline-block mt-1.5 px-2.5 py-1 text-xs rounded bg-brand-500 hover:bg-brand-600 text-white font-medium">押 →</a>
           </div>
         </div>
-      </a>
+      </div>
     </template>
   </div>
 </div>

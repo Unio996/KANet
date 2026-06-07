@@ -70,6 +70,73 @@
       <div x-show="!isSettled()" class="mt-3 text-[11px] text-ink-500 bg-amber-50 rounded px-3 py-2" x-text="currentStageHint()"></div>
     </div>
 
+    <!-- KANet-UI 2026-06-07 P0-#2 (Bettor r319 关 1 PASS): web 押注 panel — 折叠默认收 -->
+    <div id="bet" x-show="canBet()" class="card p-4 mb-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="text-sm font-medium text-ink-700">我要押</div>
+          <div class="text-[11px] text-ink-400 mt-0.5">从你自家 agent 锁 KAS 押注. 押对均分输家池.</div>
+        </div>
+        <button @click="bet.open = !bet.open" class="px-3 py-1.5 rounded bg-brand-500 hover:bg-brand-600 text-white text-xs font-medium">
+          <span x-text="bet.open ? '收起 ↑' : '我要押 →'"></span>
+        </button>
+      </div>
+
+      <div x-show="bet.open" x-transition class="mt-4 space-y-3">
+        <!-- bettor agent 选 -->
+        <div>
+          <label class="block text-[11px] text-ink-500 mb-1">出押人 (你的 agent)</label>
+          <select x-model="bet.bettorRelayId" class="w-full px-3 py-2 rounded border border-warm-300 bg-white text-sm">
+            <option value="">选一个 agent</option>
+            <template x-for="a in bet.agents" :key="a.id">
+              <option :value="a.id" :disabled="isOracleAgent(a.id) || isMakerAgent(a.id)"
+                      x-text="a.name + (isOracleAgent(a.id) ? ' (本市场仲裁人, 不可押)' : '') + (isMakerAgent(a.id) ? ' (本市场出单人, 已押)' : '')"></option>
+            </template>
+          </select>
+        </div>
+
+        <!-- YES / NO -->
+        <div>
+          <label class="block text-[11px] text-ink-500 mb-1">押哪边</label>
+          <div class="grid grid-cols-2 gap-2">
+            <button @click="bet.direction = 0"
+                    class="py-2 rounded border-2 transition font-medium"
+                    :class="bet.direction === 0 ? 'bg-emerald-100 text-emerald-700 border-emerald-300' : 'border-warm-300 text-ink-500 hover:bg-warm-100'">YES</button>
+            <button @click="bet.direction = 1"
+                    class="py-2 rounded border-2 transition font-medium"
+                    :class="bet.direction === 1 ? 'bg-red-100 text-red-700 border-red-300' : 'border-warm-300 text-ink-500 hover:bg-warm-100'">NO</button>
+          </div>
+        </div>
+
+        <!-- stake KAS -->
+        <div>
+          <label class="block text-[11px] text-ink-500 mb-1">押多少 KAS</label>
+          <input type="number" x-model.number="bet.stakeKas" min="1" step="0.1"
+                 placeholder="例: 100"
+                 class="w-full px-3 py-2 rounded border border-warm-300 text-sm" />
+          <div class="text-[10px] text-ink-400 mt-1">最低 1 KAS · testnet 币零经济价值</div>
+        </div>
+
+        <!-- 提交 -->
+        <button @click="submitBet()" :disabled="!canSubmitBet() || bet.submitting"
+                class="w-full py-2.5 rounded font-medium text-sm transition"
+                :class="canSubmitBet() && !bet.submitting ? 'bg-brand-500 hover:bg-brand-600 text-white' : 'bg-warm-200 text-ink-400 cursor-not-allowed'">
+          <span x-text="bet.submitting ? '锁押金中...' : lockButtonLabel()"></span>
+        </button>
+
+        <!-- 成功 -->
+        <div x-show="bet.txResult" class="bg-emerald-50 rounded p-3 text-xs">
+          <div class="font-medium text-emerald-700">✓ 已锁 <span x-text="bet.stakeKas"></span> KAS 押 <span x-text="bet.direction === 0 ? 'YES' : 'NO'"></span></div>
+          <div class="mt-1 text-ink-500">side_lock TX:</div>
+          <a x-show="bet.txResult?.side_lock_tx" :href="explorerTxUrl(bet.txResult.side_lock_tx)" target="_blank"
+             class="font-mono text-[10px] text-brand-500 hover:underline break-all" x-text="bet.txResult?.side_lock_tx"></a>
+        </div>
+
+        <!-- 失败 -->
+        <div x-show="bet.error" class="bg-red-50 text-red-700 rounded p-3 text-xs" x-text="bet.error"></div>
+      </div>
+    </div>
+
     <!-- ===== UMA finalization 状态 (Phase 1 Sub6, Bettor r156 option A) — protocol_status 驱动 ===== -->
     <div x-show="umaFinalizationStatus()" class="mb-4 rounded-lg px-4 py-3 border text-xs font-medium"
          :class="umaFinalizationStatus()?.cls" x-text="umaFinalizationStatus()?.label"></div>
@@ -226,6 +293,17 @@ function poolDetailPage(marketId) {
     oracleList: [],
     auditHistory: [],
     events: [],             // KANet-UI 2026-06-07 P0-#4: chain_events 时间线 (ORDER ASC)
+    // KANet-UI 2026-06-07 P0-#2 (Bettor r319 关 1 PASS): web 押注 panel state
+    bet: {
+      open: false,
+      agents: [],
+      bettorRelayId: '',
+      direction: null,      // 0=YES, 1=NO
+      stakeKas: 100,
+      submitting: false,
+      txResult: null,
+      error: '',
+    },
     mapping: null,          // condition_id_mapping row (mirror_only / independent_source) OR null=未映射
     audit: null,            // /api/pool/market/:id/settle-audit (= 证据链 v0.7 全链路, KANet-UI #12 P0.1)
     explorerBase: 'https://explorer-tn12.kaspa.org',   // fallback, audit.explorer_base overrides
@@ -239,6 +317,16 @@ function poolDetailPage(marketId) {
 
     async init() {
       await this.load();
+      // KANet-UI 2026-06-07 P0-#2: 加载自家 agent list (= 同 create form 模式)
+      try {
+        const agResp = await fetch('/api/agent/profile').then(r => r.json()).catch(() => ({}));
+        this.bet.agents = (agResp.agents || agResp || []).filter(a => !a.is_dex_broker);
+      } catch {}
+      // 详情页 #bet 锚跳: /predictions 行点'押 →' 跳进来自动展开
+      if (window.location.hash === '#bet') {
+        this.bet.open = true;
+        this.$nextTick(() => document.getElementById('bet')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      }
     },
 
     async load() {
@@ -278,6 +366,64 @@ function poolDetailPage(marketId) {
     },
 
     // KANet-UI 2026-06-07 P0-#4: chain_events 大白话 label (NWT r335 实测 event_type).
+    // KANet-UI 2026-06-07 P0-#2 (Bettor r319): web 押注 helpers
+    canBet() {
+      // 仅 pending_bettors 阶段 + deadline 未过 (= 5min buffer 防截止前抢押)
+      const st = this.market?.protocol_status;
+      if (st !== 'pending_bettors') return false;
+      const dl = Number(this.market?.deadline || 0);
+      if (dl && dl * 1000 < Date.now() + 5 * 60_000) return false;
+      return true;
+    },
+    isOracleAgent(agentId) {
+      // Bettor r319 ② 校准: 用本市场 oracle_relay_ids 集 (= pool_markets.oracle_relay_ids JSON 列), 非全局 registry
+      try {
+        const ids = JSON.parse(this.market?.oracle_relay_ids || '[]');
+        return Array.isArray(ids) && ids.includes(agentId);
+      } catch { return false; }
+    },
+    isMakerAgent(agentId) {
+      return this.market?.maker_relay_id === agentId;
+    },
+    canSubmitBet() {
+      return this.bet.bettorRelayId
+        && this.bet.direction !== null
+        && Number(this.bet.stakeKas) >= 1
+        && !this.isOracleAgent(this.bet.bettorRelayId)
+        && !this.isMakerAgent(this.bet.bettorRelayId);
+    },
+    lockButtonLabel() {
+      // Bettor r319 ① 校准: '锁押金'按钮写清'从 [agent X] 锁 N KAS' 防误点
+      if (!this.canSubmitBet()) return '锁押金';
+      const a = (this.bet.agents || []).find(x => x.id === this.bet.bettorRelayId);
+      const name = a?.name || '?';
+      const side = this.bet.direction === 0 ? 'YES' : 'NO';
+      return `从 ${name} 锁 ${this.bet.stakeKas} KAS 押 ${side}`;
+    },
+    async submitBet() {
+      if (!this.canSubmitBet()) return;
+      this.bet.submitting = true;
+      this.bet.error = '';
+      this.bet.txResult = null;
+      try {
+        const r = await fetch(`/api/pool/market/${encodeURIComponent(this.marketId)}/bettor/register`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            bettor_relay_id: this.bet.bettorRelayId,
+            direction: this.bet.direction,
+            stake_kas: String(this.bet.stakeKas),
+          }),
+        });
+        const j = await r.json();
+        if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+        this.bet.txResult = j;
+        // 押后自动 reload market + events 看进度
+        setTimeout(() => this.load(), 1500);
+      } catch (e) {
+        this.bet.error = String(e.message || e);
+      }
+      this.bet.submitting = false;
+    },
     // KANet-UI 2026-06-07 r308: maker_name 主持人显. 跨节点 fallback 短 id.
     makerLabel() {
       if (this.market?.maker_name) return this.market.maker_name;
