@@ -180,12 +180,23 @@ export async function parallelJudgmentTick({ judgeFn, umaResolveFn, voterRelayId
   }
   // Phase A: active prediction offers (give_asset prediction share) past their outcome window,
   // restricted to gradable (mapped + independent_source) markets — recordParallelJudgment filters.
+  // J2-tn r404 Track D Bettor r348 关1 PASS — UNION pool_markets 接通两子系统.
+  // 之前: 引擎只查 exchange_offers (= OTC-style prediction_outcome_share). pool_markets v0.7
+  // 路径 (= 现 KANet 协议主路) 完全不在视图 → kutzj 类 mapping 永不 Phase A fire.
+  // 修: UNION ALL pool_markets, 映射列对齐 offer shape, NULL outcome_oracle_relay_id
+  // (= pool 用 5-committee, 不是单 oracle; recordParallelJudgment 不依赖该字段).
   const activeOffers = sqlite.prepare(`
     SELECT id, outcome_condition_id, outcome_market_source, outcome_token_id, outcome_side,
            resolution_rule_spec, protocol_status
     FROM exchange_offers
     WHERE (give_asset = 'prediction_outcome_share' OR want_asset = 'prediction_outcome_share')
       AND protocol_status IN ('matched','verifying','collecting_sigs','completed')
+    UNION ALL
+    SELECT id, outcome_condition_id, outcome_market_source, outcome_token_id, outcome_side,
+           resolution_rule_spec, protocol_status
+    FROM pool_markets
+    WHERE outcome_condition_id IS NOT NULL
+      AND protocol_status IN ('verifying','collecting_sigs','completed','cancelled','refunded')
   `).all();
 
   let recorded = 0, skipped = 0;
