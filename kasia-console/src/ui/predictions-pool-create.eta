@@ -81,9 +81,10 @@
   <!-- ============================================ -->
   <template x-if="shipped">
     <div class="card card-flush overflow-hidden mb-5 border border-warm-200">
+      <!-- KANet-UI 2026-06-07 P1-#1 (Bettor r324 关 1 PASS): jargon → 大白话 -->
       <div class="px-6 py-5 border-b border-warm-200">
         <h2 class="font-display text-2xl text-ink-700">押金 <span x-text="form.maker_stake_kas"></span> KAS 已锁</h2>
-        <p class="text-xs text-ink-400 mt-1">市场 ID: <span class="font-mono" x-text="result.market_id"></span></p>
+        <p class="text-xs text-ink-400 mt-1">议题编号: <span class="font-mono" x-text="result.market_id?.slice(-12)"></span></p>
       </div>
       <div class="px-6 py-5 space-y-1">
         <template x-for="(step, i) in timeline" :key="step.id">
@@ -96,14 +97,25 @@
       </div>
       <div class="px-6 py-4 bg-warm-50 border-t border-warm-200 space-y-2 text-xs">
         <div class="flex items-center gap-2">
-          <span class="text-ink-400 w-20">spine TX</span>
+          <span class="text-ink-500 w-24">本金锁单 TX</span>
           <a class="font-mono accent-gold hover:underline" target="_blank"
              :href="'https://explorer-tn12.kaspa.org/txs/' + result.spine_lock_tx"
              x-text="result.spine_lock_tx?.slice(0,16) + '...' + result.spine_lock_tx?.slice(-8)"></a>
         </div>
-        <div class="flex items-center gap-2">
-          <span class="text-ink-400 w-20">spine P2SH</span>
-          <span class="font-mono text-ink-500" x-text="result.spine_p2sh?.slice(0,18) + '...' + result.spine_p2sh?.slice(-12)"></span>
+        <!-- 高级 detail 折叠默认: market id 完整 + 本金锁地址 -->
+        <button type="button" @click="showAdvancedShipDetail = !showAdvancedShipDetail"
+                class="text-[11px] text-ink-400 hover:underline">
+          <span x-text="showAdvancedShipDetail ? '收起高级详情 ↑' : '看高级详情 (议题 ID 全 + 本金锁地址) →'"></span>
+        </button>
+        <div x-show="showAdvancedShipDetail" class="space-y-2 pt-1 border-t border-warm-200">
+          <div class="flex items-center gap-2">
+            <span class="text-ink-400 w-24">议题 ID 全</span>
+            <span class="font-mono text-ink-500 break-all" x-text="result.market_id"></span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-ink-400 w-24">本金锁地址</span>
+            <span class="font-mono text-ink-500" x-text="result.spine_p2sh?.slice(0,18) + '...' + result.spine_p2sh?.slice(-12)"></span>
+          </div>
         </div>
       </div>
       <div class="px-6 py-4 border-t border-warm-200 flex gap-3">
@@ -381,6 +393,8 @@ function createPoolPage() {
     maxDeadlineDay: 30,
     // KANet-UI 2026-06-07 P0-#1 B (Bettor r321): touched 状态 — 失焦才显红字, 防 init 就红
     touched: { title: false, deadline: false, rule: false, outcome_side: false },
+    // KANet-UI 2026-06-07 P1-#1 (Bettor r324): ship 后高级 detail 折叠 (议题 ID 全 / 本金锁地址 默认收)
+    showAdvancedShipDetail: false,
     form: {
       outcome_end_date_local: '',
       outcome_side: '',
@@ -634,13 +648,14 @@ function createPoolPage() {
     },
 
     initTimeline() {
+      // KANet-UI 2026-06-07 P1-#1 (Bettor r324): jargon → 大白话, 抽块 label 删, Oracle→仲裁人
       this.timeline = [
-        { id: 'broadcast',   label: '广播 TX',                                   state: 'done', note: '' },
-        { id: 'mined',       label: '上链确认',                                   state: 'active', note: '~5-15s' },
-        { id: 'sampling',    label: '等 Oracle 抽签 (k=100 block ≈ 10s)',          state: 'pending', note: '' },
-        { id: 'oracle_deps', label: 'Oracle 接单',                                 state: 'pending', note: '0/3' },
-        { id: 'deadline',    label: '等截止 + 投票',                                state: 'pending', note: '' },
-        { id: 'settle',      label: '结算',                                         state: 'pending', note: '' },
+        { id: 'broadcast',   label: '本金锁单 TX 广播',                              state: 'done', note: '' },
+        { id: 'mined',       label: '上链确认',                                       state: 'active', note: '约 5-15 秒' },
+        { id: 'sampling',    label: '抽委员',                                         state: 'pending', note: '约 10 秒' },
+        { id: 'oracle_deps', label: '仲裁人接单',                                     state: 'pending', note: '' },
+        { id: 'deadline',    label: '等截止 + 投票',                                  state: 'pending', note: '' },
+        { id: 'settle',      label: '结算',                                           state: 'pending', note: '' },
       ];
     },
 
@@ -667,6 +682,19 @@ function createPoolPage() {
       const m = data.market;
       const status = data.protocol_status || m.status;
       const oracleDeposited = data.oracle_deposits_count || 0;
+      // KANet-UI 2026-06-07 P1-#1 (Bettor r324 校准): 委员数动态取本市场, 非硬码 3 或 5
+      // 来源优先: audit.committee.members.length > committee_pks length > oracle_relay_ids length > 5 fallback
+      let total = 5;
+      try {
+        if (Array.isArray(data.audit?.committee?.members) && data.audit.committee.members.length) total = data.audit.committee.members.length;
+        else if (Array.isArray(m?.committee_pks) && m.committee_pks.length) total = m.committee_pks.length;
+        else if (m?.committee_pks && typeof m.committee_pks === 'string') {
+          try { const arr = JSON.parse(m.committee_pks); if (Array.isArray(arr) && arr.length) total = arr.length; } catch {}
+        }
+        else if (m?.oracle_relay_ids) {
+          try { const arr = JSON.parse(m.oracle_relay_ids); if (Array.isArray(arr) && arr.length) total = arr.length; } catch {}
+        }
+      } catch {}
       const set = (id, state, note) => {
         const t = this.timeline.find(x => x.id === id);
         if (t) { t.state = state; if (note !== undefined) t.note = note; }
@@ -677,10 +705,10 @@ function createPoolPage() {
       }
       if (status === 'pending_oracle_deposits' || status === 'pending_bettors' || status === 'verifying' || status === 'collecting_sigs' || status === 'completed' || status === 'refunded') {
         set('sampling', 'done', '');
-        set('oracle_deps', 'active', oracleDeposited + '/3');
+        set('oracle_deps', 'active', oracleDeposited + '/' + total);
       }
       if (status === 'pending_bettors' || status === 'verifying' || status === 'collecting_sigs' || status === 'completed' || status === 'refunded') {
-        set('oracle_deps', 'done', '3/3');
+        set('oracle_deps', 'done', total + '/' + total);
         set('deadline', 'active', '');
       }
       if (status === 'verifying' || status === 'collecting_sigs' || status === 'completed' || status === 'refunded') {
