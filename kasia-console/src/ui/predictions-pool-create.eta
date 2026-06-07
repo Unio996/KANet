@@ -235,7 +235,7 @@
                 <input type="text" x-model="form.source_params.symbol" maxlength="20"
                        placeholder="例: BTCUSDT / ETHUSDT / KASUSDT"
                        class="w-full text-sm px-3 py-2 rounded-lg border border-warm-300 focus:border-amber-400 focus:outline-none font-mono" />
-                <p class="text-[11px] text-ink-400 mt-1">填 Binance 交易对. 委员自动取日线收盘价判定.</p>
+                <p class="text-[11px] text-ink-400 mt-1">填 Binance 交易对. 仲裁人自动取日线收盘价判定.</p>
               </div>
               <div x-show="form.source_kind === 'polymarket'" class="mt-2">
                 <input type="text" x-model="form.source_params.condition_id" maxlength="200"
@@ -253,13 +253,13 @@
                 <input type="text" x-model="form.source_params.tx_hash" maxlength="80"
                        placeholder="64 hex TX hash"
                        class="w-full text-sm px-3 py-2 rounded-lg border border-warm-300 focus:border-amber-400 focus:outline-none font-mono" />
-                <p class="text-[11px] text-ink-400 mt-1">填 Kaspa 链上 TX hash. 委员查该 TX 状态判定.</p>
+                <p class="text-[11px] text-ink-400 mt-1">填 Kaspa 链上 TX hash. 仲裁人查该 TX 状态判定.</p>
               </div>
               <div x-show="form.source_kind === 'manual'" class="mt-2">
                 <input type="text" x-model="form.data_source_canonical" maxlength="500"
                        placeholder="例: https://api.example.com/.../outcome"
                        class="w-full text-sm px-3 py-2 rounded-lg border border-warm-300 focus:border-amber-400 focus:outline-none font-mono" />
-                <p class="text-[11px] text-ink-400 mt-1">高级: 自填可信公开 URL. 委员会自动 fetch 该 URL 提取 outcome.</p>
+                <p class="text-[11px] text-ink-400 mt-1">高级: 自填可信公开 URL. 仲裁人自动 fetch 该 URL 提取 outcome.</p>
               </div>
             </div>
 
@@ -652,7 +652,7 @@ function createPoolPage() {
       this.timeline = [
         { id: 'broadcast',   label: '本金锁单 TX 广播',                              state: 'done', note: '' },
         { id: 'mined',       label: '上链确认',                                       state: 'active', note: '约 5-15 秒' },
-        { id: 'sampling',    label: '抽委员',                                         state: 'pending', note: '约 10 秒' },
+        { id: 'sampling',    label: '抽仲裁人',                                       state: 'pending', note: '约 10 秒' },
         { id: 'oracle_deps', label: '仲裁人接单',                                     state: 'pending', note: '' },
         { id: 'deadline',    label: '等截止 + 投票',                                  state: 'pending', note: '' },
         { id: 'settle',      label: '结算',                                           state: 'pending', note: '' },

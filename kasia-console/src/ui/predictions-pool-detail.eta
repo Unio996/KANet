@@ -144,7 +144,7 @@
     <!-- ===== piece 1: live 投票进度 (未结算) ===== -->
     <div x-show="!isSettled()" class="card p-4 mb-4">
       <div class="flex items-center justify-between mb-3">
-        <span class="text-sm font-medium text-ink-700">预言机投票进度</span>
+        <span class="text-sm font-medium text-ink-700">仲裁人投票进度</span>
         <span class="text-xs text-ink-500" x-text="votedCount() + ' / ' + oracleList.length + ' 已投'"></span>
       </div>
       <!-- progress bar -->
@@ -180,7 +180,7 @@
         <div class="text-2xl font-display text-emerald-700" x-text="consensusOutcome() || '—'"></div>
       </div>
       <!-- 5 oracle 各投啥 -->
-      <div class="text-[11px] text-ink-500 mb-2">各预言机投票 (= 验证凭什么判这方赢)</div>
+      <div class="text-[11px] text-ink-500 mb-2">各仲裁人投票 (= 验证凭什么判这方赢)</div>
       <div class="space-y-1.5 mb-4">
         <template x-for="h in auditHistory" :key="h.id">
           <div class="flex items-center gap-2 text-xs bg-warm-50 rounded px-3 py-2">
@@ -307,11 +307,12 @@ function poolDetailPage(marketId) {
     mapping: null,          // condition_id_mapping row (mirror_only / independent_source) OR null=未映射
     audit: null,            // /api/pool/market/:id/settle-audit (= 证据链 v0.7 全链路, KANet-UI #12 P0.1)
     explorerBase: 'https://explorer-tn12.kaspa.org',   // fallback, audit.explorer_base overrides
+    // KANet-UI 2026-06-07 P1-#5 (Bettor r325 关 1 PASS + 一致性): 全'仲裁人'贯穿 (与 P0-#4 hint/eventLabel 一致)
     stateMachine: [
-      { key: 'pending_oracle_deposits', label: '等预言机' },
-      { key: 'pending_bettors', label: '等下注' },
-      { key: 'verifying', label: '验证中' },
-      { key: 'collecting_sigs', label: '收签名' },
+      { key: 'pending_oracle_deposits', label: '等仲裁人接单' },
+      { key: 'pending_bettors', label: '等用户押注' },
+      { key: 'verifying', label: '等仲裁人投票' },
+      { key: 'collecting_sigs', label: '收仲裁人签名' },
       { key: 'completed', label: '已结算' },
     ],
 
@@ -431,13 +432,14 @@ function poolDetailPage(marketId) {
       return '?';
     },
     eventLabel(t) {
+      // KANet-UI 2026-06-07 P1-#5 (Bettor r325): '委员' → '仲裁人' 贯穿
       const map = {
-        pool_oracle_deposit: '委员入金',
-        pool_oracle_vote: '委员投票',
-        pool_oracle_tx_sig: '委员签名',
-        pool_settle_consensual_dispatched: '结算分发 (赢家+委员+主持人)',
+        pool_oracle_deposit: '仲裁人入金',
+        pool_oracle_vote: '仲裁人投票',
+        pool_oracle_tx_sig: '仲裁人签名',
+        pool_settle_consensual_dispatched: '结算分发 (赢家+仲裁人+主持人)',
         pool_oracle_refund_disagreement_tx_sig: '争议退款签名',
-        pool_settle_silent_detected: '侦测静默员',
+        pool_settle_silent_detected: '侦测静默仲裁人',
         pool_refund_request: '申请退款',
         pool_market_published: '市场上链',
       };
@@ -455,11 +457,12 @@ function poolDetailPage(marketId) {
       const voted = this.votedCount?.() ?? 0;
       const sigs = this.sigsCollected || 0;
       if (!st) return '加载中...';
-      if (st === 'pending_oracle_deposits') return '等委员入金 (= 委员押 bond 接单).';
-      if (st === 'pending_oracle_sampling' || st === 'pending_oracle_sample') return '抽样委员中 (~10s 一个块).';
-      if (st === 'pending_bettors') return '等下注 (= 截止前任何人可押 YES/NO).';
-      if (st === 'verifying') return `等委员投票 (${voted}/${total} 已投).`;
-      if (st === 'collecting_sigs') return `等委员签名 (${sigs}/${total} 已签).`;
+      // KANet-UI 2026-06-07 P1-#5 (Bettor r325): '委员' → '仲裁人' 贯穿
+      if (st === 'pending_oracle_deposits') return '等仲裁人接单 (= 仲裁人押 bond 接单).';
+      if (st === 'pending_oracle_sampling' || st === 'pending_oracle_sample') return '抽仲裁人中 (约 10 秒).';
+      if (st === 'pending_bettors') return '等用户押注 (= 截止前任何人可押 YES/NO).';
+      if (st === 'verifying') return `等仲裁人投票 (${voted}/${total} 已投).`;
+      if (st === 'collecting_sigs') return `等仲裁人签名 (${sigs}/${total} 已签).`;
       if (st === 'completed') return '已结算. 链上 TX 见上面 🔗.';
       if (st === 'refunded' || st === 'cancelled') return '已退款.';
       return st;
