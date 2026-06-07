@@ -716,11 +716,20 @@ const UMA_FINALIZATION_WINDOW_MS = process.env.UMA_FINALIZATION_WINDOW_MS !== un
 // dependency. Any mainnet deployment that creates a real settlement dependency on UMA
 // contracts is the deploying party's responsibility, not the protocol author's.
 export async function derivePolymarketVote(offer) {
-  if (!offer.outcome_token_id) {
-    return { ok: false, reason: 'missing outcome_token_id' };
+  // J2-tn r407 Track D Phase B Bettor r357 关1 PASS — gamma query by condition_id 兜底.
+  // pool_markets 路径 outcome_token_id='KAS_native' 占位非真 clob token → 原走 clob_token_ids
+  // 查 gamma 永空. 改: 优先用 outcome_condition_id 查 gamma (condition_ids 字段, polymarket
+  // 接受), fallback outcome_token_id (= exchange_offers 路径仍兼容).
+  // 48h finalization gate 保留 (条件 1 Bettor r357), 仅查询 key 切换.
+  const hasRealTokenId = offer.outcome_token_id && offer.outcome_token_id !== 'KAS_native';
+  const hasConditionId = offer.outcome_condition_id;
+  if (!hasRealTokenId && !hasConditionId) {
+    return { ok: false, reason: 'missing outcome_token_id and outcome_condition_id' };
   }
   try {
-    const url = `https://gamma-api.polymarket.com/markets?clob_token_ids=${encodeURIComponent(offer.outcome_token_id)}&closed=true`;
+    const url = hasRealTokenId
+      ? `https://gamma-api.polymarket.com/markets?clob_token_ids=${encodeURIComponent(offer.outcome_token_id)}&closed=true`
+      : `https://gamma-api.polymarket.com/markets?condition_ids=${encodeURIComponent(offer.outcome_condition_id)}&closed=true`;
     const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
     if (!res.ok) return { ok: false, reason: `gamma HTTP ${res.status}` };
     const arr = await res.json();
