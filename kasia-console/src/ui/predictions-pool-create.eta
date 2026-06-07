@@ -207,13 +207,52 @@
             <p class="text-xs text-ink-400 mt-1">≤ 200 字 · 用户看到的标题, oracle 也用它定位.</p>
           </div>
 
-          <!-- 数据源 (Bettor r243 加固: voter deriveVote 强制 canonical URL) -->
+          <!-- 数据源 (KANet-UI 2026-06-07 P0-#5 软化, Bettor r291b 关1 PASS): 预设源下拉 -->
           <div>
-            <label class="block text-xs font-medium text-ink-500 mb-1.5">数据源 URL (oracle fetch 这条判 YES/NO)</label>
-            <input type="text" x-model="form.data_source_canonical" maxlength="500"
-                   placeholder="例: https://api.binance.com/.../klines OR polymarket:0x..."
-                   class="w-full text-sm px-4 py-2.5 rounded-lg border border-warm-300 focus:border-amber-400 focus:outline-none font-mono" />
-            <p class="text-xs text-ink-400 mt-1">委员预言机自动 fetch 该 URL 提取 outcome. 必填.</p>
+            <label class="block text-xs font-medium text-ink-500 mb-1.5">数据源</label>
+            <select x-model="form.source_kind" @change="onSourceKindChange()"
+                    class="w-full text-sm px-4 py-2.5 rounded-lg border border-warm-300 focus:border-amber-400 focus:outline-none bg-white">
+              <option value="binance">大所收盘价 (Binance 日线)</option>
+              <option value="polymarket">Polymarket 议题</option>
+              <option value="sport">体育/事件 (测试占位)</option>
+              <option value="kaspa-onchain">Kaspa 链上事件</option>
+              <option value="manual">我自己填 URL (高级)</option>
+            </select>
+            <!-- binance: symbol -->
+            <div x-show="form.source_kind === 'binance'" class="mt-2">
+              <input type="text" x-model="form.source_params.symbol" maxlength="20"
+                     placeholder="例: BTCUSDT / ETHUSDT / KASUSDT"
+                     class="w-full text-sm px-4 py-2.5 rounded-lg border border-warm-300 focus:border-amber-400 focus:outline-none font-mono" />
+              <p class="text-xs text-ink-400 mt-1">填 Binance 交易对. 委员自动取日线收盘价判定.</p>
+            </div>
+            <!-- polymarket: condition_id -->
+            <div x-show="form.source_kind === 'polymarket'" class="mt-2">
+              <input type="text" x-model="form.source_params.condition_id" maxlength="200"
+                     placeholder="Polymarket condition_id (= 上面议题搜索自动填)"
+                     class="w-full text-sm px-4 py-2.5 rounded-lg border border-warm-300 focus:border-amber-400 focus:outline-none font-mono" />
+              <p class="text-xs text-ink-400 mt-1">用上面"找现成议题"搜出来直接选, condition_id 自动填.</p>
+            </div>
+            <!-- sport: event_id -->
+            <div x-show="form.source_kind === 'sport'" class="mt-2">
+              <input type="text" x-model="form.source_params.event_id" maxlength="100"
+                     placeholder="例: world_cup_final_2026_yes"
+                     class="w-full text-sm px-4 py-2.5 rounded-lg border border-warm-300 focus:border-amber-400 focus:outline-none font-mono" />
+              <p class="text-xs text-ink-400 mt-1">测试网占位 (= 走 mock test-oracle 演示). 末尾 _yes / _no 决判定方向.</p>
+            </div>
+            <!-- kaspa-onchain: tx_hash -->
+            <div x-show="form.source_kind === 'kaspa-onchain'" class="mt-2">
+              <input type="text" x-model="form.source_params.tx_hash" maxlength="80"
+                     placeholder="64 hex TX hash"
+                     class="w-full text-sm px-4 py-2.5 rounded-lg border border-warm-300 focus:border-amber-400 focus:outline-none font-mono" />
+              <p class="text-xs text-ink-400 mt-1">填 Kaspa 链上 TX hash. 委员查该 TX 状态判定.</p>
+            </div>
+            <!-- manual: free URL -->
+            <div x-show="form.source_kind === 'manual'" class="mt-2">
+              <input type="text" x-model="form.data_source_canonical" maxlength="500"
+                     placeholder="例: https://api.example.com/.../outcome"
+                     class="w-full text-sm px-4 py-2.5 rounded-lg border border-warm-300 focus:border-amber-400 focus:outline-none font-mono" />
+              <p class="text-xs text-ink-400 mt-1">高级: 自填可信公开 URL. 委员会自动 fetch 该 URL 提取 outcome.</p>
+            </div>
           </div>
 
           <!-- 规则 -->
@@ -343,7 +382,11 @@ function createPoolPage() {
       outcome_side: '',
       maker_stake_kas: 100,
       title: '',                        // KANet-UI 2026-06-06 #26 D1 (Bettor ③ APPROVE r559): server isStructuredSpec 强制必填
-      data_source_canonical: '',        // KANet-UI 2026-06-06 #25 (Bettor r243 加固): voter deriveVote 强制 URL 必填
+      // KANet-UI 2026-06-07 P0-#5 form 软化 (Bettor r291b 关1 PASS):
+      // source_kind 下拉 + source_params 后端 derive canonical. data_source_canonical 仅 manual 模式.
+      source_kind: 'binance',           // default = Binance 大所收盘价 (= UMA 现可裁 + 用户最熟)
+      source_params: { symbol: '', condition_id: '', event_id: '', tx_hash: '' },
+      data_source_canonical: '',        // 仅 source_kind=manual 模式下用
       resolution_rule_spec: '',
       polymarketCondition: null,  // iteration 2: set when 选用 Polymarket result
       // Oracle v0.3 §8/O2/§9 fold sub #7 — 5/26 final lock
@@ -400,14 +443,28 @@ function createPoolPage() {
     },
 
     get canSubmit() {
-      return this.form.question.trim()
+      const base = this.form.question.trim()
         && this.form.title.trim()
-        && this.form.data_source_canonical.trim()    // KANet-UI #25 Bettor r243: voter 强制 URL 必填
         && this.form.outcome_end_date_local
         && this.form.outcome_side
         && this.form.maker_stake_kas > 0
         && this.form.resolution_rule_spec.trim()
         && this.acceptedDisclaimer;
+      if (!base) return false;
+      // KANet-UI 2026-06-07 P0-#5: source_kind 对应 params 必填 (= 后端 derive canonical 入参)
+      const sk = this.form.source_kind;
+      const p = this.form.source_params || {};
+      if (sk === 'binance') return !!(p.symbol || '').trim();
+      if (sk === 'polymarket') return !!(p.condition_id || '').trim();
+      if (sk === 'sport') return !!(p.event_id || '').trim();
+      if (sk === 'kaspa-onchain') return /^[0-9a-fA-F]{64}$/.test((p.tx_hash || '').trim());
+      if (sk === 'manual') return !!(this.form.data_source_canonical || '').trim();
+      return false;
+    },
+
+    onSourceKindChange() {
+      // 切换源时清自填 canonical (= 防上次残留漂回 manual 模式)
+      if (this.form.source_kind !== 'manual') this.form.data_source_canonical = '';
     },
 
     async onAgentChange() {
@@ -470,6 +527,9 @@ function createPoolPage() {
         this.form.resolution_rule_spec = `看 Polymarket 议题 "${r.question}" 的官方判定 (slug: ${r.slug || r.condition_id}).`;
       }
       this.form.polymarketCondition = r.condition_id;
+      // KANet-UI 2026-06-07 P0-#5: 选用 Polymarket 议题自动切 source_kind + condition_id
+      this.form.source_kind = 'polymarket';
+      this.form.source_params.condition_id = r.condition_id;
       this.searchResults = null;
       this.searchQuery = '';
       this.llmResult = null;
@@ -513,14 +573,18 @@ function createPoolPage() {
       this.submitError = '';
       try {
         const outcomeEndIso = new Date(this.form.outcome_end_date_local).toISOString();
-        // KANet-UI 2026-06-06 #26 D1 (Bettor ③ APPROVE r559 关1 条件): 序列化结构化 spec
-        // JSON {title, resolution_criteria} 满足 server isStructuredSpec 强制. 用户填的 2 字段拼成 1 spec.
-        const structuredSpec = JSON.stringify({
+        // KANet-UI 2026-06-07 P0-#5 form 软化 (Bettor r291b 关1 PASS):
+        // source_kind != manual: 只塞 title + resolution_criteria, backend derive canonical 后塞 spec.
+        // source_kind == manual: 同时塞自填 canonical.
+        const specObj = {
           title: this.form.title.trim(),
           resolution_criteria: this.form.resolution_rule_spec.trim(),
-          data_source_canonical: this.form.data_source_canonical.trim(),
-          source: 'manual',
-        });
+        };
+        if (this.form.source_kind === 'manual') {
+          specObj.data_source_canonical = this.form.data_source_canonical.trim();
+          specObj.source = 'manual';
+        }
+        const structuredSpec = JSON.stringify(specObj);
         const body = {
           maker_relay_id: this.selectedRelayId,
           outcome_side: this.form.outcome_side,
@@ -528,6 +592,11 @@ function createPoolPage() {
           resolution_rule_spec: structuredSpec,
           maker_stake_kas: String(this.form.maker_stake_kas),
         };
+        // source_kind 非 manual → 带 source_kind + source_params, backend derive canonical
+        if (this.form.source_kind !== 'manual') {
+          body.source_kind = this.form.source_kind;
+          body.source_params = { ...this.form.source_params };
+        }
         // backend r449 4 决策: 不传 oracle_relay_ids / broker_relay_id / broker_fee_pct / oracle_bond_kas
         // / outcome_market_source / outcome_condition_id / outcome_token_id — 全 backend defaults fill
         // iteration 2 (= r455 Polymarket): 如选 Polymarket 议题, 覆盖 outcome_market_source + condition_id 真链

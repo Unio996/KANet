@@ -56,6 +56,53 @@ export function isStructuredSpec(spec) {
   } catch { return false; }
 }
 
+// KANet-UI 2026-06-07 P0-#5 form 软化 (Bettor r291b 关1 PASS 条件):
+// 用户从 source_kind 下拉选预设源, 后端 derive canonical URL 塞回 spec.
+// 三端单一源守: voter deriveVote / bot specIsUsable / isStructuredSpec contract 不变
+// (= 入库 spec 永远含 data_source_canonical URL), 后端入口 derive 是唯一新增. r243 单一源.
+const SOURCE_KIND_DERIVERS = {
+  polymarket: (p) => {
+    const cond = p?.condition_id || p?.token_id;
+    if (!cond || typeof cond !== 'string') throw new Error('polymarket 需 condition_id 或 token_id');
+    return `https://gamma-api.polymarket.com/markets?clob_token_ids=${encodeURIComponent(cond)}&closed=true`;
+  },
+  binance: (p) => {
+    const sym = p?.symbol;
+    if (!sym || typeof sym !== 'string') throw new Error('binance 需 symbol (例 BTCUSDT)');
+    return `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(sym)}&interval=1d&limit=1`;
+  },
+  sport: (p) => {
+    // 测试网占位: 走 local mock test-oracle (deterministic by _yes/_no suffix). voter 真能 fetch.
+    const eid = p?.event_id;
+    if (!eid || typeof eid !== 'string') throw new Error('sport 需 event_id (含 _yes/_no 后缀决 mock outcome)');
+    const port = process.env.PORT || '3200';
+    return `http://localhost:${port}/api/test-oracle/${encodeURIComponent(eid)}`;
+  },
+  'kaspa-onchain': (p) => {
+    const tx = p?.tx_hash;
+    if (!tx || typeof tx !== 'string' || !/^[0-9a-fA-F]{64}$/.test(tx)) throw new Error('kaspa-onchain 需 tx_hash (64 hex)');
+    return `https://api-tn12.kaspa.org/transactions/${tx}`;
+  },
+};
+
+export function deriveCanonicalFromSourceKind(sourceKind, sourceParams) {
+  const fn = SOURCE_KIND_DERIVERS[sourceKind];
+  if (!fn) throw new Error(`未知 source_kind: ${sourceKind} (支持: ${Object.keys(SOURCE_KIND_DERIVERS).join('/')})`);
+  return fn(sourceParams || {});
+}
+
+function _maybeDeriveSpecFromSourceKind(b) {
+  if (!b.source_kind) return;
+  let spec = {};
+  try { spec = JSON.parse(b.resolution_rule_spec || '{}') || {}; } catch { spec = {}; }
+  if (!spec.data_source_canonical || !String(spec.data_source_canonical).trim()) {
+    spec.data_source_canonical = deriveCanonicalFromSourceKind(b.source_kind, b.source_params);
+  }
+  spec.source_kind = b.source_kind;
+  if (b.source_params && typeof b.source_params === 'object') spec.source_params = b.source_params;
+  b.resolution_rule_spec = JSON.stringify(spec);
+}
+
 function deriveXOnlyPubkey(address) {
   return import('kaspa-wasm').then(kaspa => {
     return kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(address)).toString();
@@ -313,7 +360,8 @@ export async function registerPoolRoutes(fastify) {
     // 概念独立于 KANET_TESTNET_NO_LIMITS (= testnet 限制宽松). 移出守卫块, 无条件强制.
     if (makerStakeKas < POOL_MAKER_STAKE_MIN_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be >= ${POOL_MAKER_STAKE_MIN_KAS} KAS (Owner 钦定 demo 实质押 skin-in-game, 单一源 L33)` });
     // KANet-UI 2026-06-06 (Bettor ③ APPROVE r546): 创建端 spec 结构化强制 (= 配 bot 入口 filter 双层堵).
-    if (!isStructuredSpec(b.resolution_rule_spec)) return reply.code(400).send({ ok: false, error: 'resolution_rule_spec must be JSON with non-empty title + resolution_criteria fields (= 源头堵 voo3z 类烂单, 配 bot specIsUsable 双层守门)' });
+    try { _maybeDeriveSpecFromSourceKind(b); } catch (e) { return reply.code(400).send({ ok: false, error: `source_kind derive fail: ${e.message}` }); }
+    if (!isStructuredSpec(b.resolution_rule_spec)) return reply.code(400).send({ ok: false, error: 'resolution_rule_spec must be JSON with non-empty title + resolution_criteria + data_source_canonical (= 可填可信源下拉 source_kind 自动 derive, 或自填 canonical URL)' });
     // 5/28 Owner 钦定: testnet 0 limits. Skip dynamic min spendable + softcap when KANET_TESTNET_NO_LIMITS=1.
     if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
       if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS (v0.5 testnet per-market softcap, Bettor r444 + Owner钦定 SS-baked)` });
@@ -517,7 +565,8 @@ export async function registerPoolRoutes(fastify) {
     // 100 KAS Owner 钦定 demo 实质押 — 移出 NO_LIMITS 守卫 (r544 v2 Bettor APPROVE).
     if (makerStakeKas < POOL_MAKER_STAKE_MIN_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be >= ${POOL_MAKER_STAKE_MIN_KAS} KAS (Owner 钦定 demo 实质押 skin-in-game, 单一源 L33)` });
     // KANet-UI 2026-06-06 (Bettor ③ APPROVE r546): 创建端 spec 结构化强制 (= 配 bot 入口 filter 双层堵).
-    if (!isStructuredSpec(b.resolution_rule_spec)) return reply.code(400).send({ ok: false, error: 'resolution_rule_spec must be JSON with non-empty title + resolution_criteria fields (= 源头堵 voo3z 类烂单, 配 bot specIsUsable 双层守门)' });
+    try { _maybeDeriveSpecFromSourceKind(b); } catch (e) { return reply.code(400).send({ ok: false, error: `source_kind derive fail: ${e.message}` }); }
+    if (!isStructuredSpec(b.resolution_rule_spec)) return reply.code(400).send({ ok: false, error: 'resolution_rule_spec must be JSON with non-empty title + resolution_criteria + data_source_canonical (= 可填可信源下拉 source_kind 自动 derive, 或自填 canonical URL)' });
     if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
       if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS` });
     }
@@ -749,7 +798,8 @@ export async function registerPoolRoutes(fastify) {
     // 100 KAS Owner 钦定 demo 实质押 — 移出 NO_LIMITS 守卫 (r544 v2 Bettor APPROVE).
     if (makerStakeKas < POOL_MAKER_STAKE_MIN_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be >= ${POOL_MAKER_STAKE_MIN_KAS} KAS (Owner 钦定 demo 实质押 skin-in-game, 单一源 L33)` });
     // KANet-UI 2026-06-06 (Bettor ③ APPROVE r546): 创建端 spec 结构化强制 (= 配 bot 入口 filter 双层堵).
-    if (!isStructuredSpec(b.resolution_rule_spec)) return reply.code(400).send({ ok: false, error: 'resolution_rule_spec must be JSON with non-empty title + resolution_criteria fields (= 源头堵 voo3z 类烂单, 配 bot specIsUsable 双层守门)' });
+    try { _maybeDeriveSpecFromSourceKind(b); } catch (e) { return reply.code(400).send({ ok: false, error: `source_kind derive fail: ${e.message}` }); }
+    if (!isStructuredSpec(b.resolution_rule_spec)) return reply.code(400).send({ ok: false, error: 'resolution_rule_spec must be JSON with non-empty title + resolution_criteria + data_source_canonical (= 可填可信源下拉 source_kind 自动 derive, 或自填 canonical URL)' });
     if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
       if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS` });
     }
@@ -1695,6 +1745,39 @@ export async function registerPoolRoutes(fastify) {
       });
     }
     return reply.send({ ok: true, linked_addr: linkedAddr, bettor_pk: bettorPk, count: out.length, positions: out });
+  });
+
+  // KANet-UI 2026-06-07 P0-#4 UX 实时进度 (Bettor r291b 关1 PASS):
+  // GET /api/pool/market/:id/events — 拉 chain_events ORDER BY observed_at ASC, 详情页 timeline 渲.
+  // NWT r335 实际 event_type 名 (= 非 _v1 后缀): pool_oracle_vote / pool_oracle_tx_sig /
+  // pool_settle_consensual_dispatched / pool_oracle_deposit / pool_oracle_refund_disagreement_tx_sig.
+  // 复用 settler/voter 已有 pattern: payload JSON 含 market_id, LIKE '%marketId%' 滤.
+  fastify.get('/api/pool/market/:id/events', async (request, reply) => {
+    const marketId = request.params.id;
+    if (!marketId) return reply.code(400).send({ ok: false, error: 'market id required' });
+    const rows = sqlite.prepare(`
+      SELECT id, txid, event_type, payload, observed_by, observed_at
+      FROM chain_events
+      WHERE payload LIKE ?
+      ORDER BY observed_at ASC
+      LIMIT 500
+    `).all(`%${marketId}%`);
+    const events = [];
+    for (const r of rows) {
+      let payload = null;
+      try { payload = JSON.parse(r.payload || '{}'); } catch {}
+      // 严过滤 — 仅含 market_id 字段对得上的 events (= 防 LIKE 偶 match 别市场)
+      if (!payload || payload.market_id !== marketId) continue;
+      events.push({
+        id: r.id,
+        txid: r.txid,
+        event_type: r.event_type,
+        observed_at: r.observed_at,
+        observed_by: r.observed_by,
+        payload,
+      });
+    }
+    return reply.send({ ok: true, market_id: marketId, count: events.length, events });
   });
 
   // GET /api/agent/roles?relay_id=X — returns {is_oracle, is_broker, is_maker} for UI role-conditional tabs (A.3)
