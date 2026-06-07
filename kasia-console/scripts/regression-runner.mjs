@@ -798,6 +798,31 @@ async function verifyV06(baselinePath) {
     check('L29 P0 UI ship (probe)', false, { err: e.message }, 'soft');
   }
 
+  // L30 P0-#6 G6 fee-adequacy 红线收口 (J1 6077ccd6 ship): mass-aware 动态 fee 公式
+  // = settler dispatchPhase2 fee 必按实际 storage_mass 算, 不 static (= 防 5M→50M 类 band-aid 回归)
+  try {
+    const settlerPath = path.resolve(REPO_ROOT, 'kasia-console/src/services/pool-market-settler.js');
+    const settlerSrc = fs.readFileSync(settlerPath, 'utf8');
+    const hasStorageMassConst = /const\s+STORAGE_MASS_C\s*=\s*1[_]?000[_]?000[_]?000[_]?000/.test(settlerSrc);
+    const hasDynamicMinBrokerFee = /dynamicMinBrokerFee\s*=\s*Math\.max/.test(settlerSrc);
+    const hasStorageMassDerivation = /Math\.ceil\(\s*STORAGE_MASS_C\s*\/\s*dynamicMinBrokerFee\s*\)/.test(settlerSrc);
+    const passesAsMinBrokerFee = /minBrokerFee:\s*dynamicMinBrokerFee/.test(settlerSrc);
+    const allOk = hasStorageMassConst && hasDynamicMinBrokerFee && hasStorageMassDerivation && passesAsMinBrokerFee;
+    check(
+      'L30 P0-#6 G6 mass-aware 动态 fee (J1 6077ccd6, Bettor r298-r303 红线收口)',
+      allOk,
+      {
+        has_storage_mass_const_1e12: hasStorageMassConst,
+        has_dynamic_min_broker_fee_max: hasDynamicMinBrokerFee,
+        has_storage_mass_derivation_ceil_div: hasStorageMassDerivation,
+        passes_dynamic_min_broker_fee: passesAsMinBrokerFee,
+        note: allOk ? 'KIP-9 storage_mass aware fee 完整守门' : '任一回归 → static fee bump 类 band-aid (= 5M→50M 又会撞 mass floor)'
+      }
+    );
+  } catch (e) {
+    check('L30 mass-aware fee (probe)', false, { err: e.message }, 'soft');
+  }
+
   const total = report.pass + report.fail + report.deploy_pending;
   if (report.fail > 0) report.verdict = 'FAIL';
   else if (report.deploy_pending > 0) report.verdict = 'PASS_WITH_DEPLOY_PENDING';
