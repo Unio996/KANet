@@ -1,531 +1,408 @@
-<%~ include('partials/page-open', { _page: 'oracle', pageTitle: 'Oracle', ...it }) %>
+<%~ include('partials/page-open', { _page: 'oracle', pageTitle: '仲裁人中心', ...it }) %>
 
 <!--
-  Oracle 系统 UI — Owner 钦定 ② 独立 oracle 系统 cohesive UI (v0.6 path A 经济安全展示).
-  Bettor r33 scope: 2 tab 设计
-    [信任系统] (default, view 2, bettor 视角, 批 1 优先 = b 池透明 + c 每市场信任 + g onboarding)
-    [我的 oracle] (view 1, operator 视角, 批 2, 5 块 role-home 模板)
-  数据源:
-    - /api/oracles (relay_nodes is_oracle=1 list) = b 池透明聚合源
-    - /api/pool/markets ?status= & per-market /api/pool/market/:id/v06-settle-decode = c 每市场信任
-    - /api/relay/:id/pubkey, /api/oracle/income/:pk, /api/oracle/max-pot/:pk = view 1 operator
+  KANet-UI 2026-06-07 Track C (Bettor r335b 设计 关 1 PASS):
+  弃旧 2 jargon tab (信任系统/我的 oracle), 改 3 段 (= 仲裁人中心):
+    段 1: 仲裁人名册 (observer 视角, Owner 5 维度 大白话)
+    段 2: 进行中裁决 (de-jargon 旧 ② 表格)
+    段 3: 我注册仲裁人 (operator 视角)
+  钉死 (Bettor 设计 §3): 0 shadow → '暂无评分' 不假分; licensed_domains 全 null → '未分领域执照'; testnet 测试币不报经济价值.
+  Endpoints (现有, 0 backend 改):
+    /api/oracle/registry             — 段 1 名册底
+    /api/oracle-pool/chain-snapshot  — 段 1 质押状态 (stake_locked)
+    /api/oracle/:id/reputation       — 段 1 工作/盈利 (total_reward; accuracy 永显'暂无')
+    /api/pool/markets?status=...     — 段 2 进行中
+    /api/agent/profile               — 段 3 我的 agent list
 -->
 
 <style>
-  .rh-display { font-family: 'Fraunces', Georgia, serif; font-feature-settings: 'opsz' 36; }
-  .rh-block { @apply bg-white rounded-lg border border-warm-200 p-5; }
-  .rh-block-title { @apply text-[10px] uppercase tracking-wider text-ink-400 mb-3 flex items-center gap-1.5; }
-  .rh-block-dot { @apply w-1.5 h-1.5 rounded-full; }
-  .rh-stat-label { @apply text-[10px] uppercase tracking-wider text-ink-400; }
-  .rh-stat-value { @apply text-lg font-semibold text-ink-700 tabular-nums; }
-  .rh-tab { @apply px-4 py-2 text-sm font-medium border-b-2 cursor-pointer transition-colors; }
-  .rh-tab-active { @apply border-brand-500 text-brand-600; }
-  .rh-tab-inactive { @apply border-transparent text-ink-400 hover:text-ink-600; }
-  .rh-pill { @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium; }
-  .rh-pill-good { @apply bg-green-50 text-green-700 border border-green-200; }
-  .rh-pill-warn { @apply bg-amber-50 text-amber-700 border border-amber-200; }
-  .rh-pill-mute { @apply bg-warm-50 text-ink-500 border border-warm-200; }
+  .ar-display { font-family: 'Fraunces', Georgia, serif; }
+  .ar-card { @apply bg-white rounded-lg border border-warm-200 p-4 hover:border-brand-300 transition; }
+  .ar-pill { @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium; }
+  .ar-pill-good { @apply bg-emerald-50 text-emerald-700 border border-emerald-200; }
+  .ar-pill-warn { @apply bg-amber-50 text-amber-700 border border-amber-200; }
+  .ar-pill-mute { @apply bg-warm-50 text-ink-500 border border-warm-200; }
+  .ar-section-title { @apply text-xs uppercase tracking-wider text-ink-500 font-semibold mb-3 flex items-center gap-2; }
+  .ar-section-dot { @apply w-2 h-2 rounded-full; }
+  .ar-stat-label { @apply text-[10px] text-ink-400 uppercase tracking-wider; }
+  .ar-stat-value { @apply text-sm font-medium text-ink-700 tabular-nums; }
+  .ar-empty-note { @apply text-[11px] text-ink-400 italic; }
 </style>
 
-<div class="p-6" x-data="oracleHome()" x-cloak>
+<div class="p-6 max-w-7xl mx-auto" x-data="arbiterHome()" x-init="init()" x-cloak>
 
-  <!-- TAB NAV -->
-  <div class="flex items-end gap-1 border-b border-warm-200 mb-5">
-    <div class="rh-tab" :class="tab === 'trust' ? 'rh-tab-active' : 'rh-tab-inactive'" @click="switchTab('trust')">
-      <span class="mr-1">信任系统</span><span class="text-[10px] text-ink-300">bettor 视角</span>
-    </div>
-    <div class="rh-tab" :class="tab === 'mine' ? 'rh-tab-active' : 'rh-tab-inactive'" @click="switchTab('mine')">
-      <span class="mr-1">我的 oracle</span><span class="text-[10px] text-ink-300">operator</span>
-    </div>
-    <div class="flex-1"></div>
-    <div class="text-[10px] text-ink-300 pb-2">v0.6 path A · 5 sig · t=4-of-5 · VRF stake-weighted</div>
+  <!-- HEADER -->
+  <div class="mb-6">
+    <h1 class="text-2xl ar-display text-ink-800">仲裁人中心</h1>
+    <p class="text-xs text-ink-400 mt-1">看哪些仲裁人在岗 · 哪些题在裁 · 我注册自家 agent 当仲裁人.</p>
   </div>
 
-  <!-- ════════════════ TAB 1: 信任系统 (默认, bettor 视角) ════════════════ -->
-  <div x-show="tab === 'trust'" class="space-y-5">
+  <!-- ============================================================ -->
+  <!-- 段 1: 仲裁人名册                                                  -->
+  <!-- ============================================================ -->
+  <section class="mb-8">
+    <div class="ar-section-title">
+      <span class="ar-section-dot bg-brand-500"></span>
+      <span>① 仲裁人名册</span>
+      <span class="text-ink-400 normal-case tracking-normal" x-show="!loading">· <span x-text="oracles.length"></span> 位</span>
+    </div>
 
-    <!-- ① 池透明 (= b panel) -->
-    <div class="rh-block">
-      <div class="rh-block-title"><span class="rh-block-dot bg-brand-500"></span>① 池透明 · oracle 池总览</div>
-      <div x-show="trustLoading" class="text-xs text-ink-300 py-2">加载中...</div>
-      <template x-if="!trustLoading && pool">
-        <div>
-          <div x-show="pool._source" class="text-[10px] text-ink-400 mb-2">数据源: <span class="font-mono" x-text="pool._source"></span> · 池空时表示等首批 oracle stake lock</div>
-          <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+    <div x-show="loading" class="text-xs text-ink-400 py-4">载入中...</div>
+
+    <div x-show="!loading && oracles.length === 0" class="ar-card text-center py-8">
+      <div class="text-3xl mb-2">📋</div>
+      <p class="text-sm text-ink-500">还没有注册仲裁人.</p>
+      <p class="ar-empty-note mt-1">下面段 3 注册自家 agent 当首批仲裁人.</p>
+    </div>
+
+    <div x-show="!loading && oracles.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+      <template x-for="o in oracles" :key="o.relay_node_id">
+        <div class="ar-card">
+          <!-- 谁 -->
+          <div class="flex items-center justify-between mb-2">
             <div>
-              <div class="rh-stat-label">真池 active oracle 数</div>
-              <div class="rh-stat-value rh-display" x-text="pool.count"></div>
-              <div class="text-[10px] text-ink-400 mt-0.5">stake locked 进真池 (= 可被 VRF 抽签)</div>
+              <div class="text-sm font-medium text-ink-700" x-text="o.name || '(未命名)'"></div>
+              <div class="text-[10px] text-ink-400 mt-0.5" x-text="tierLabel(o.tier)"></div>
             </div>
             <div>
-              <div class="rh-stat-label">总锁仓 KAS</div>
-              <div class="rh-stat-value rh-display" x-text="fmtKas(pool.totalStake)"></div>
-              <div class="text-[10px] text-ink-400 mt-0.5">stake_locked_kas sum (real 经济安全)</div>
-            </div>
-            <div>
-              <div class="rh-stat-label">前 5 集中度</div>
-              <div class="rh-stat-value rh-display" :class="pool.top5Pct > 60 ? 'text-amber-700' : ''" x-text="pool.top5Pct.toFixed(1) + '%'"></div>
-              <div class="text-[10px] text-ink-400 mt-0.5">越低 = 越分散 = 越抗共谋</div>
-            </div>
-            <div>
-              <div class="rh-stat-label">活跃率</div>
-              <div class="rh-stat-value rh-display text-green-700" x-text="pool.cleanPct.toFixed(1) + '%'"></div>
-              <div class="text-[10px] text-ink-400 mt-0.5">active / total membership</div>
+              <span x-show="o.frozen" class="ar-pill ar-pill-warn">⛔ 已冻结</span>
+              <span x-show="!o.frozen && o.status === 'active'" class="ar-pill ar-pill-good">在岗</span>
+              <span x-show="!o.frozen && o.status !== 'active'" class="ar-pill ar-pill-mute" x-text="o.status || '?'"></span>
             </div>
           </div>
-          <div class="mt-3">
-            <div class="text-[10px] uppercase tracking-wider text-ink-400 mb-2">stake 分布 (top 10)</div>
-            <div class="space-y-1">
-              <template x-for="(o, i) in pool.top10" :key="o.id">
-                <div class="flex items-center gap-2 text-xs">
-                  <div class="w-5 text-ink-300 text-[10px]" x-text="'#' + (i+1)"></div>
-                  <div class="w-40 truncate text-ink-600" :title="o.name" x-text="o.name || '—'"></div>
-                  <div class="flex-1 bg-warm-100 rounded-full h-1.5 overflow-hidden">
-                    <div class="bg-brand-400 h-full" :style="`width:${pool.totalStake > 0 ? ((o.oracle_stake_locked_kas || 0) / pool.totalStake * 100) : 0}%`"></div>
-                  </div>
-                  <div class="w-24 text-right tabular-nums text-ink-600" x-text="fmtKas(o.oracle_stake_locked_kas) + ' KAS'"></div>
-                  <div class="w-12 text-right tabular-nums text-ink-400" x-text="pool.totalStake > 0 ? ((o.oracle_stake_locked_kas || 0) / pool.totalStake * 100).toFixed(1) + '%' : '—'"></div>
-                  <div class="w-10 text-right">
-                    <span x-show="(o.voter_misbehave_count || 0) === 0" class="rh-pill rh-pill-good">OK</span>
-                    <span x-show="(o.voter_misbehave_count || 0) > 0" class="rh-pill rh-pill-warn">⚠</span>
-                  </div>
-                </div>
-              </template>
+
+          <!-- 能裁什么 -->
+          <div class="mb-2 pb-2 border-b border-warm-100">
+            <div class="ar-stat-label">能裁什么</div>
+            <div class="text-xs text-ink-600 mt-1" x-text="capabilitiesLabel(o.capabilities)"></div>
+            <div class="text-[11px] text-ink-500 mt-0.5">
+              <span x-show="(o.licensed_domains || []).length === 0">通用 · 未分领域执照</span>
+              <span x-show="(o.licensed_domains || []).length > 0" x-text="(o.licensed_domains || []).join(' · ')"></span>
+            </div>
+          </div>
+
+          <!-- 工作状态 -->
+          <div class="mb-2 pb-2 border-b border-warm-100">
+            <div class="ar-stat-label">工作状态</div>
+            <div class="flex items-center justify-between mt-1">
+              <span class="text-xs text-ink-600">近期裁决 <span class="ar-stat-value" x-text="o._stats?.total_votes ?? '—'"></span> 次</span>
+              <!-- KANet-UI 2026-06-07 Track C 钉死 (Bettor r335b §3): 0 shadow → '暂无评分' 不造假 -->
+              <span class="ar-pill ar-pill-mute" title="并行判定攒分中, 等 Track D 产出对照 UMA 的 shadow 分">暂无评分</span>
+            </div>
+          </div>
+
+          <!-- 盈利状态 -->
+          <div class="mb-2 pb-2 border-b border-warm-100">
+            <div class="ar-stat-label">盈利状态 (测试币)</div>
+            <div class="text-xs text-ink-600 mt-1">
+              <span x-show="(o._stats?.total_reward ?? 0) > 0">
+                累计仲裁收益 <span class="ar-stat-value" x-text="fmtKas((o._stats.total_reward || 0) / 1e8)"></span> KAS
+              </span>
+              <span x-show="!o._stats || (o._stats.total_reward ?? 0) === 0" class="ar-empty-note">暂无收益</span>
+            </div>
+          </div>
+
+          <!-- 质押状态 -->
+          <div>
+            <div class="ar-stat-label">质押状态</div>
+            <div class="text-xs text-ink-600 mt-1">
+              <span x-show="o._stakeKas > 0">
+                已质押 <span class="ar-stat-value" x-text="fmtKas(o._stakeKas)"></span> KAS
+              </span>
+              <span x-show="!(o._stakeKas > 0)" class="ar-empty-note">未质押</span>
             </div>
           </div>
         </div>
       </template>
-      <div x-show="trustError" class="text-xs text-red-500 mt-2" x-text="trustError"></div>
+    </div>
+    <div x-show="oraclesError" class="text-xs text-red-500 mt-3" x-text="oraclesError"></div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- 段 2: 进行中裁决                                                  -->
+  <!-- ============================================================ -->
+  <section class="mb-8">
+    <div class="ar-section-title">
+      <span class="ar-section-dot bg-amber-500"></span>
+      <span>② 进行中裁决</span>
+      <span class="text-ink-400 normal-case tracking-normal" x-show="!marketsLoading">· <span x-text="activeMarkets.length"></span> 题</span>
     </div>
 
-    <!-- ② 每市场信任读数 (= c panel) -->
-    <div class="rh-block">
-      <div class="rh-block-title"><span class="rh-block-dot bg-blue-500"></span>② 每市场信任读数 · v0.6 path A 池/委员会绑定</div>
-      <div x-show="marketsLoading" class="text-xs text-ink-300 py-2">加载中...</div>
-      <template x-if="!marketsLoading && markets.length === 0">
-        <div class="text-xs text-ink-300 py-3">还没有 v0.6 池市场.</div>
-      </template>
-      <template x-if="!marketsLoading && markets.length > 0">
-        <div class="overflow-x-auto">
-          <table class="w-full text-xs">
-            <thead class="text-[10px] uppercase tracking-wider text-ink-400 border-b border-warm-200">
-              <tr>
-                <th class="text-left py-2 pr-3">market</th>
-                <th class="text-left py-2 pr-3">状态</th>
-                <th class="text-right py-2 pr-3">pool size</th>
-                <th class="text-center py-2 pr-3">阈值</th>
-                <th class="text-center py-2 pr-3">委员会</th>
-                <th class="text-right py-2 pr-3">bond KAS</th>
-                <th class="text-left py-2">链上证据</th>
-              </tr>
-            </thead>
-            <tbody>
-              <template x-for="m in markets" :key="m.market.id">
-                <tr class="border-b border-warm-100 last:border-0">
-                  <td class="py-2 pr-3 max-w-[180px]">
-                    <a :href="`/predictions/pool/${encodeURIComponent(m.market.id)}`" class="font-mono text-ink-700 hover:text-brand-500 truncate block" :title="m.market.id" x-text="m.market.id.slice(0,18) + '...'"></a>
-                    <span x-show="m.market.protocol_version" class="inline-block mt-0.5 text-[9px] px-1.5 py-0.5 rounded font-medium"
-                          :class="m.market.protocol_version === 'v0.7' ? 'bg-emerald-100 text-emerald-700' : (m.market.protocol_version === 'v0.6' ? 'bg-sky-100 text-sky-700' : 'bg-warm-200 text-ink-500')"
-                          x-text="m.market.protocol_version"></span>
-                  </td>
-                  <td class="py-2 pr-3">
-                    <span class="rh-pill rh-pill-mute" x-text="m.market.protocol_status"></span>
-                  </td>
-                  <td class="py-2 pr-3 text-right tabular-nums text-ink-600" x-text="m.decode?.pool_size ?? '—'"></td>
-                  <td class="py-2 pr-3 text-center text-ink-600" x-text="m.decode?.threshold_t_of_n || '4-of-5'"></td>
-                  <td class="py-2 pr-3 text-center">
-                    <span x-show="m.decode?.committee_pre_settle" class="rh-pill rh-pill-mute" title="VRF 抽签后,签名前匿名">🔒 匿名</span>
-                    <span x-show="m.decode && !m.decode.committee_pre_settle && m.decode.committee_pks" class="rh-pill rh-pill-good" :title="(m.decode.committee_pks || []).map(p => p.slice(0,8)).join(', ')">✓ 已暴露 (5 PK)</span>
-                    <span x-show="!m.decode" class="rh-pill rh-pill-warn">—</span>
-                  </td>
-                  <td class="py-2 pr-3 text-right tabular-nums text-ink-600" x-text="fmtKas((m.market.oracle_bond_amount || 0) / 1e8)"></td>
-                  <td class="py-2">
-                    <a x-show="m.decode?.settle_txid"
-                       :href="`/event?txid=${m.decode.settle_txid}`"
-                       class="font-mono text-[10px] text-brand-500 hover:text-brand-700"
-                       :title="m.decode.settle_txid"
-                       x-text="m.decode?.settle_txid ? (m.decode.settle_txid.slice(0,10) + '...') : '—'"></a>
-                    <span x-show="!m.decode?.settle_txid" class="text-ink-300 text-[10px]">—</span>
-                  </td>
-                </tr>
-              </template>
-            </tbody>
-          </table>
-        </div>
-      </template>
+    <div x-show="marketsLoading" class="text-xs text-ink-400 py-4">载入中...</div>
+
+    <div x-show="!marketsLoading && activeMarkets.length === 0" class="ar-card text-center py-6">
+      <p class="ar-empty-note">现在没有进行中的裁决.</p>
     </div>
 
-    <!-- ③ onboarding (= g panel) -->
-    <div class="rh-block">
-      <div class="rh-block-title"><span class="rh-block-dot bg-purple-500"></span>③ onboarding · 信任范式转换教学</div>
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 text-xs">
-        <div>
-          <div class="text-ink-700 font-semibold mb-1">为什么不用单一 oracle?</div>
-          <div class="text-ink-500 leading-relaxed">
-            单一 oracle = 单点信任 = 单点贿赂可破. v0.6 path A 用 5-of-N 委员会:
-            VRF stake-weighted 随机抽 5 个 oracle, 投票前匿名 (防定向贿赂),
-            t=4 阈值 (4 票即结算, 1 票偏离不阻塞). 共谋成本 = 同时贿赂 ≥4 个匿名委员.
-          </div>
-        </div>
-        <div>
-          <div class="text-ink-700 font-semibold mb-1">stake 怎么保护我?</div>
-          <div class="text-ink-500 leading-relaxed">
-            每个 oracle 都锁仓 KAS. 票偏离共识 ≥ slash 锁仓
-            (bond × misbehave_count). 退出池需 ≥ 7 天延期, 跑路也罚得到.
-            上表 ① 看池规模 + 集中度 + 无违规率 = 判断池健康度.
-          </div>
-        </div>
-        <div>
-          <div class="text-ink-700 font-semibold mb-1">每个市场怎么验?</div>
-          <div class="text-ink-500 leading-relaxed">
-            上表 ② 看每市场的 pool size + 阈值 + 委员会暴露状态 + 链上 settle TX.
-            未结算时委员会 PK 隐藏 (匿名), 结算后 5 个 PK 公开 + 链上 TX 可独立验证 (≥4 sig 才能出钱).
-            点 TX hash 链接看 explorer.
-          </div>
-        </div>
-      </div>
-      <div class="mt-4 pt-3 border-t border-warm-100 text-[10px] text-ink-400">
-        参考: Bettor r19 path A spec / Owner 钦定 ② cohesive oracle 系统 UI / v0.6 = path A 5 individual sig + position-aware merkle.
-      </div>
-    </div>
-
-  </div>
-
-  <!-- ════════════════ TAB 2: 我的 oracle (operator 视角) ════════════════ -->
-  <div x-show="tab === 'mine'" class="space-y-5">
-
-    <!-- LOADING SKELETON -->
-    <div x-show="mineLoading" class="space-y-4">
-      <div class="skeleton" style="width:200px;height:36px;border-radius:8px;"></div>
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div class="skeleton" style="height:140px;border-radius:8px;"></div>
-        <div class="skeleton" style="height:140px;border-radius:8px;"></div>
-      </div>
-    </div>
-
-    <!-- EMPTY -->
-    <div x-show="!mineLoading && agents.length === 0" class="rh-block text-center py-10">
-      <div class="text-sm text-ink-500 mb-2">还没有 oracle 角色的 agent.</div>
-      <a href="/agent" class="text-xs text-brand-500 hover:text-brand-700">→ 去 /agent 把某个 relay 改成 oracle 角色</a>
-    </div>
-
-    <template x-if="!mineLoading && agents.length > 0">
-      <div class="space-y-5">
-
-        <!-- AGENT SELECTOR -->
-        <div class="flex items-center justify-between mb-2">
-          <div class="flex items-center gap-3">
-            <select x-model.number="selectedIdx" @change="loadMine()"
-              class="px-4 py-2 border border-warm-300 rounded-lg text-sm font-medium text-ink-600 bg-white focus:ring-2 focus:ring-brand-200 focus:border-brand-400 focus:outline-none">
-              <template x-for="(a, idx) in agents" :key="a.id">
-                <option :value="idx" x-text="a.name"></option>
-              </template>
-            </select>
-            <span class="text-[10px] uppercase tracking-wider text-ink-400">Oracle</span>
-          </div>
-          <div x-show="agent" class="flex items-center gap-3">
-            <button class="text-[11px] font-mono text-ink-400 hover:text-brand-500 cursor-pointer"
-              @click="copyAddr()" x-text="shortAddr(agent?.address)" :title="agent?.address"></button>
-            <span class="text-sm font-bold text-ink-700 tabular-nums" x-text="agent?.kasBalance != null ? agent.kasBalance.toFixed(4) + ' KAS' : '--'"></span>
-          </div>
-        </div>
-
-        <!-- ① 角色身份 -->
-        <div class="rh-block">
-          <div class="rh-block-title"><span class="rh-block-dot bg-brand-500"></span>角色身份</div>
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <div class="rh-stat-label">名称</div>
-              <div class="rh-stat-value" x-text="agent?.name"></div>
-            </div>
-            <div>
-              <div class="rh-stat-label">角色</div>
-              <div class="rh-stat-value">Oracle</div>
-              <div class="text-[10px] text-ink-400 mt-0.5" x-show="agent?.role">role: <span x-text="agent.role"></span></div>
-            </div>
-            <div>
-              <div class="rh-stat-label">投票地址 (公钥派生)</div>
-              <div class="font-mono text-xs text-ink-600 break-all mt-1" x-text="agent?.address"></div>
-              <div class="text-[10px] text-ink-400 mt-0.5" x-show="oraclePk">PK: <span class="font-mono" x-text="oraclePk.slice(0,16) + '...'"></span></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- ② 收入 -->
-        <div class="rh-block">
-          <div class="rh-block-title"><span class="rh-block-dot bg-green-500"></span>收入</div>
-          <div x-show="incomeLoading" class="text-xs text-ink-300">加载中...</div>
-          <template x-if="!incomeLoading && income">
-            <div>
-              <div class="grid grid-cols-2 gap-4">
-                <div>
-                  <div class="rh-stat-label">v0.6 已结算市场累计收入</div>
-                  <div class="rh-stat-value rh-display" x-text="fmtKas(income.total_income_kas)"></div>
-                  <div class="text-[10px] text-ink-400 mt-0.5">KAS · 委员会 settle TX outputs sum</div>
-                </div>
-                <div>
-                  <div class="rh-stat-label">本人参与的委员会次数</div>
-                  <div class="rh-stat-value" x-text="income.per_market?.length ?? 0"></div>
-                  <div class="text-[10px] text-ink-400 mt-0.5">market 数 · 各市场 1 次出席</div>
-                </div>
-              </div>
-              <div x-show="income.pending_tx_count > 0" class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-3">
-                <span x-text="income.pending_tx_count"></span> 笔 settle TX 还在等链上索引,显示值可能偏低
-              </div>
-            </div>
+    <div x-show="!marketsLoading && activeMarkets.length > 0" class="card overflow-hidden">
+      <table class="w-full text-xs">
+        <thead class="bg-warm-50 text-ink-500 text-[11px]">
+          <tr>
+            <th class="text-left py-2 px-3">题目</th>
+            <th class="text-left py-2 px-3">现在哪步</th>
+            <th class="text-left py-2 px-3">谁在裁</th>
+            <th class="text-right py-2 px-3">抵押 (每位)</th>
+            <th class="text-left py-2 px-3">链上 TX</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="m in activeMarkets" :key="m.id">
+            <tr class="border-t border-warm-100 hover:bg-warm-50">
+              <td class="py-2 px-3 max-w-[260px] truncate">
+                <a :href="`/predictions/pool/${encodeURIComponent(m.id)}`" :title="m.title" class="text-ink-700 hover:text-brand-500" x-text="m.title || m.id.slice(0, 16)"></a>
+              </td>
+              <td class="py-2 px-3"><span class="ar-pill ar-pill-mute" x-text="statusLabel(m.protocol_status)"></span></td>
+              <td class="py-2 px-3 text-ink-500 text-[11px]" x-text="committeeLabel(m)"></td>
+              <td class="py-2 px-3 text-right tabular-nums text-ink-600" x-text="fmtKas((m.oracle_bond_amount || 0) / 1e8) + ' KAS'"></td>
+              <td class="py-2 px-3">
+                <a x-show="m.settle_txid" :href="`https://explorer-tn12.kaspa.org/txs/${m.settle_txid}`" target="_blank"
+                   class="font-mono text-[10px] text-brand-500 hover:underline" x-text="(m.settle_txid || '').slice(0, 10) + '...'"></a>
+                <span x-show="!m.settle_txid" class="text-ink-300 text-[10px]">未结算</span>
+              </td>
+            </tr>
           </template>
-          <div x-show="incomeError" class="text-xs text-red-500 mt-2" x-text="incomeError"></div>
-        </div>
+        </tbody>
+      </table>
+    </div>
+  </section>
 
-        <!-- ③ 状态 -->
-        <div class="rh-block">
-          <div class="rh-block-title"><span class="rh-block-dot bg-blue-500"></span>状态</div>
-          <div x-show="maxPotLoading" class="text-xs text-ink-300">加载中...</div>
-          <template x-if="!maxPotLoading && maxPot">
-            <div>
-              <div class="grid grid-cols-2 gap-4">
-                <div>
-                  <div class="rh-stat-label">当前 active 委员会</div>
-                  <div class="rh-stat-value" x-text="maxPot.per_market?.length ?? 0"></div>
-                  <div class="text-[10px] text-ink-400 mt-0.5">市场数 · 我被 VRF 抽中且未 settle</div>
-                </div>
-                <div>
-                  <div class="rh-stat-label">最大暴露 (bond × 抽中市场 oracle_bond)</div>
-                  <div class="rh-stat-value rh-display text-amber-700" x-text="fmtKas(maxPot.total_pot_at_risk_kas)"></div>
-                  <div class="text-[10px] text-ink-400 mt-0.5">KAS · 若全部 dispute 输败的最大被罚总额</div>
-                </div>
-              </div>
-            </div>
-          </template>
-          <div x-show="maxPotError" class="text-xs text-red-500 mt-2" x-text="maxPotError"></div>
-        </div>
+  <!-- ============================================================ -->
+  <!-- 段 3: 我注册仲裁人                                                -->
+  <!-- ============================================================ -->
+  <section class="mb-4">
+    <div class="ar-section-title">
+      <span class="ar-section-dot bg-purple-500"></span>
+      <span>③ 我注册仲裁人</span>
+    </div>
 
-        <!-- ④ 配置 -->
-        <div class="rh-block">
-          <div class="rh-block-title"><span class="rh-block-dot bg-purple-500"></span>配置</div>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-            <div>
-              <div class="rh-stat-label">投票方式</div>
-              <div class="text-ink-600 mt-1">
-                事前匿名: 市场创建时 VRF stake-weighted 随机抽 5-of-N 委员, 投票前不公开身份 (防定向贿赂).
-                结算时暴露 5 个签名者 PK + 阈值 ≥4 of 5 必达.
-              </div>
-            </div>
-            <div>
-              <div class="rh-stat-label">stake 解锁延期</div>
-              <div class="text-ink-600 mt-1">
-                退出 oracle 池需 ≥7 天延期 (护栏 #4, Bettor r19 path A spec §2).
-                巨鲸跑路也罚得到, 防 dispute 期 stake 已撤.
-              </div>
-            </div>
-          </div>
-        </div>
+    <div x-show="agentsLoading" class="text-xs text-ink-400 py-4">载入中...</div>
 
-        <!-- ⑤ 历史 -->
-        <div class="rh-block">
-          <div class="rh-block-title"><span class="rh-block-dot bg-ink-400"></span>历史</div>
-          <div x-show="incomeLoading" class="text-xs text-ink-300">加载中...</div>
-          <template x-if="!incomeLoading && income">
-            <div>
-              <div x-show="(income.per_market || []).length === 0" class="text-xs text-ink-300 py-3">
-                此 oracle 尚未参与任何已结算市场.
-              </div>
-              <div class="space-y-1.5">
-                <template x-for="m in (income.per_market || []).slice(0, 20)" :key="m.market_id">
-                  <div class="flex items-center justify-between text-xs py-1.5 border-b border-warm-100 last:border-0">
-                    <div class="flex-1 min-w-0">
-                      <div class="font-mono text-ink-700 truncate" :title="m.market_id" x-text="m.market_id"></div>
-                      <div class="text-[10px] text-ink-400 mt-0.5">
-                        <span x-show="m.status">status: <span x-text="m.status"></span></span>
-                        <span x-show="m.position != null" class="ml-2">committee 位置 #<span x-text="m.position"></span></span>
-                      </div>
+    <div x-show="!agentsLoading && myAgents.length === 0" class="ar-card text-center py-6">
+      <p class="text-sm text-ink-500 mb-1">还没有 agent 可注册.</p>
+      <a href="/agent" class="text-xs text-brand-500 hover:underline">去 /agent 建一个 →</a>
+    </div>
+
+    <template x-if="!agentsLoading && myAgents.length > 0">
+      <div class="space-y-3">
+        <div class="ar-card">
+          <div class="text-xs text-ink-500 mb-2">从自家 agent 选一个注册为仲裁人:</div>
+          <select x-model="selectedAgentId" @change="onAgentChange()" class="w-full text-sm px-3 py-2 rounded border border-warm-300 bg-white">
+            <option value="">选一个 agent</option>
+            <template x-for="a in myAgents" :key="a.id">
+              <option :value="a.id" x-text="a.name + (isOracleRegistered(a.id) ? ' (已注册仲裁人)' : '')"></option>
+            </template>
+          </select>
+
+          <template x-if="selectedAgent">
+            <div class="mt-4 pt-3 border-t border-warm-200 space-y-3">
+              <!-- 已注册: 显其状态 + 5 维度 (= 同段 1 卡片) -->
+              <div x-show="myOracleRecord">
+                <div class="text-xs font-medium text-ink-700 mb-2">已注册状态</div>
+                <div class="grid grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <div class="ar-stat-label">级别</div>
+                    <div class="text-ink-600" x-text="tierLabel(myOracleRecord?.tier)"></div>
+                  </div>
+                  <div>
+                    <div class="ar-stat-label">状态</div>
+                    <div class="text-ink-600" x-text="(myOracleRecord?.frozen ? '已冻结' : (myOracleRecord?.status === 'active' ? '在岗' : (myOracleRecord?.status || '?')))"></div>
+                  </div>
+                  <div>
+                    <div class="ar-stat-label">能裁什么</div>
+                    <div class="text-ink-600" x-text="capabilitiesLabel(myOracleRecord?.capabilities)"></div>
+                  </div>
+                  <div>
+                    <div class="ar-stat-label">执照域</div>
+                    <div class="text-ink-600">
+                      <span x-show="(myOracleRecord?.licensed_domains || []).length === 0">通用 · 未分领域执照</span>
+                      <span x-show="(myOracleRecord?.licensed_domains || []).length > 0" x-text="(myOracleRecord.licensed_domains || []).join(' · ')"></span>
                     </div>
-                    <div class="text-right tabular-nums text-ink-700 ml-3" x-text="fmtKas(m.income_kas)"></div>
                   </div>
-                </template>
+                </div>
+                <p class="ar-empty-note mt-3">提交申请改配置 + 执照域: Phase2 上线后开放. 当前 Phase1 走通用执照.</p>
+              </div>
+
+              <!-- 未注册: 注册按钮 -->
+              <div x-show="!myOracleRecord">
+                <p class="text-xs text-ink-500 mb-2">该 agent 尚未注册为仲裁人. 注册流程包含 stake 锁仓 + 链上声明.</p>
+                <a href="/agent?tab=oracle" class="inline-block px-3 py-1.5 rounded bg-brand-500 hover:bg-brand-600 text-white text-xs font-medium">去 /agent 注册仲裁人 →</a>
+                <p class="ar-empty-note mt-2">注册成功后此处显 5 维度状态 + 工作记录.</p>
               </div>
             </div>
           </template>
         </div>
-
       </div>
     </template>
-  </div>
+  </section>
 
+  <!-- 诚实边界声明 (Bettor 设计 §3 钉死) -->
+  <div class="mt-6 pt-4 border-t border-warm-200 text-[11px] text-ink-400 space-y-1">
+    <div>📌 <strong>准确率</strong>: 现 0 shadow 记录 (= 并行判定攒分中), 等 Track D 产出后才显真分. 严禁占位假分.</div>
+    <div>📌 <strong>执照域</strong>: Phase2 硬 gate 未解, 现全 '通用 · 未分领域执照', 不显 '已毕业 / 可裁长尾'.</div>
+    <div>📌 <strong>测试币</strong>: testnet 仲裁收益是测试币, 不报经济价值.</div>
+  </div>
 </div>
 
 <script>
-function oracleHome() {
+function arbiterHome() {
   return {
-    tab: 'trust',                                // default = view 2 信任系统 (Bettor r33 priority)
-
-    // ─── trust tab state (view 2 = b + c + g) ───
-    trustLoading: true, trustError: '',
-    pool: null,                                  // { count, totalStake, top5Pct, cleanPct, top10[] }
+    loading: true,
+    oracles: [],
+    oraclesError: '',
     marketsLoading: true,
-    markets: [],                                 // [{ market, decode }]
+    activeMarkets: [],
+    agentsLoading: true,
+    myAgents: [],
+    selectedAgentId: '',
+    chainSnapshot: null,    // { leaves: [{pk_x, stake_sompi, ...}] }
 
-    // ─── mine tab state (view 1 = operator) ───
-    mineLoading: true,
-    agents: [], selectedIdx: 0, oraclePk: '',
-    income: null, incomeLoading: false, incomeError: '',
-    maxPot: null, maxPotLoading: false, maxPotError: '',
-    get agent() { return this.agents[this.selectedIdx] || null; },
+    get selectedAgent() {
+      return this.myAgents.find(a => a.id === this.selectedAgentId) || null;
+    },
+    get myOracleRecord() {
+      if (!this.selectedAgentId) return null;
+      return this.oracles.find(o => o.relay_node_id === this.selectedAgentId) || null;
+    },
 
     fmtKas(n) {
       const x = parseFloat(n);
       if (!Number.isFinite(x)) return '0';
       return x.toFixed(4);
     },
-    shortAddr(a) {
-      if (!a) return '';
-      return a.slice(0, 14) + '...' + a.slice(-6);
+    tierLabel(t) {
+      if (t === 1) return '1 级仲裁人';
+      if (t === 2) return '2 级仲裁人';
+      if (t === 3) return '3 级仲裁人';
+      return '(级别待定 · 未走 registry 注册)';
     },
-    copyAddr() {
-      if (!this.agent?.address) return;
-      navigator.clipboard.writeText(this.agent.address).catch(() => {});
+    capabilitiesLabel(caps) {
+      const arr = Array.isArray(caps) ? caps : [];
+      if (arr.length === 0) return '二元 YES/NO 判定';
+      // 已知 capability → 中文
+      const map = { binary_outcome: '二元 YES/NO 判定', multi_outcome: '多选项判定', numeric: '数值判定' };
+      return arr.map(c => map[c] || c).join(' · ');
+    },
+    statusLabel(s) {
+      const m = {
+        pending_oracle_deposits: '等仲裁人接单',
+        pending_oracle_sampling: '抽仲裁人中',
+        pending_oracle_sample: '抽仲裁人中',
+        pending_bettors: '押注中',
+        verifying: '等仲裁人投票',
+        collecting_sigs: '收仲裁人签名',
+        completed: '已结算',
+        cancelled: '已取消',
+        refunded: '已退款',
+      };
+      return m[s] || s || '?';
+    },
+    committeeLabel(m) {
+      // m.committee_pks 是 PK 集 — 抽样后才有; 之前显 '等抽签'
+      if (!m.committee_pks) return '等抽签';
+      try {
+        const arr = typeof m.committee_pks === 'string' ? JSON.parse(m.committee_pks) : m.committee_pks;
+        if (Array.isArray(arr) && arr.length) return arr.length + ' 位 (匿名)';
+      } catch {}
+      return '等抽签';
+    },
+    isOracleRegistered(agentId) {
+      return this.oracles.some(o => o.relay_node_id === agentId);
     },
 
     async init() {
-      // Trust tab loads first (default view); mine tab loads on switch.
-      await this.loadTrust();
-      // Pre-load mine agents but don't fetch per-agent data until tab switch.
-      await this.loadMineAgents();
+      // 并行拉 3 数据源
+      await Promise.all([
+        this.loadOracles(),
+        this.loadActiveMarkets(),
+        this.loadAgents(),
+      ]);
     },
 
-    switchTab(t) {
-      this.tab = t;
-      if (t === 'mine' && this.agents.length > 0 && !this.income && !this.maxPot) {
-        this.loadMine();
-      }
-    },
-
-    // ─── TRUST TAB (b 池透明 + c 每市场信任) ───
-
-    async loadTrust() {
-      this.trustLoading = true; this.marketsLoading = true; this.trustError = '';
+    async loadOracles() {
+      this.loading = true;
+      this.oraclesError = '';
       try {
-        // 数据源: /api/oracle-pool/chain-snapshot canonical chain_view 派生 (见 docs/DATABASE.md 预言机池层 + docs/2026-06-05-oracle-pool-single-source-enforcement.md).
-        const [snapResp, mktResp] = await Promise.allSettled([
-          fetch('/api/oracle-pool/chain-snapshot').then(r => r.json()),
-          fetch('/api/pool/markets?limit=50').then(r => r.json()),
+        // KANet-UI 2026-06-07 Track C catch: oracle_registry 实空 (= count=0, Bettor 设计 doc Sec1 估算误).
+        // 主源改 /api/oracles (= legacy is_oracle=1, 5 个 active). 再尝试 fetch registry tier/caps (= 缺则默认).
+        const [oraResp, regResp, snapResp] = await Promise.all([
+          fetch('/api/oracles').then(x => x.json()).catch(() => ({ oracles: [] })),
+          fetch('/api/oracle/registry').then(x => x.json()).catch(() => ({ oracles: [] })),
+          fetch('/api/oracle-pool/chain-snapshot').then(x => x.json()).catch(() => ({ leaves: [] })),
         ]);
 
-        // chain_view 派生数据 → 池透明 (= path A 单一源)。leaves[] = sort pkX asc.
-        // 字段: pk_x, stake_sompi, lock_until_daa, p2sh, outpoint_txid/index.
-        if (snapResp.status === 'fulfilled' && snapResp.value?.ok && Array.isArray(snapResp.value.leaves)) {
-          const leaves = snapResp.value.leaves;
-          const stakes = leaves.map(l => Number(l.stake_sompi || 0) / 1e8);
-          const totalStake = stakes.reduce((a, b) => a + b, 0);
-          const sorted = [...leaves].sort((a, b) => (Number(b.stake_sompi) || 0) - (Number(a.stake_sompi) || 0));
-          const top5Sum = sorted.slice(0, 5).reduce((s, m) => s + Number(m.stake_sompi || 0) / 1e8, 0);
-          this.pool = {
-            count: leaves.length,
-            totalStake,
-            top5Pct: totalStake > 0 ? (top5Sum / totalStake * 100) : 0,
-            // chain_view 无 active 概念 — 所有 leaves 都是 valid (= scanner pre-filter lock_until_daa > snapshot_daa + 实 UTXO)。
-            cleanPct: 100,
-            top10: sorted.slice(0, 10).map(m => ({
-              id: (m.outpoint_txid || '').slice(0, 8) || (m.pk_x || '').slice(0, 8),  // pseudo-id for UI
-              name: (m.pk_x || '').slice(0, 12) + '..',
-              oracle_stake_locked_kas: (Number(m.stake_sompi) || 0) / 1e8,
-              voter_misbehave_count: 0,
-            })),
-            _source: `chain_view canonical (snapshot_daa=${snapResp.value.snapshotDaa || '?'}, root=${(snapResp.value.merkleRoot || '').slice(0, 12)}..)`,
+        const baseList = (oraResp.oracles || []);
+        const regList = (regResp.oracles || []);
+        const regById = {};
+        for (const r of regList) regById[r.relay_node_id] = r;
+
+        const stakeByPk = {};
+        if (snapResp?.leaves && Array.isArray(snapResp.leaves)) {
+          for (const l of snapResp.leaves) stakeByPk[l.pk_x] = Number(l.stake_sompi || 0) / 1e8;
+        }
+
+        const oracles = baseList.map(o => {
+          const reg = regById[o.id] || null;
+          return {
+            relay_node_id: o.id,
+            name: o.name,
+            pubkey: reg?.pubkey || null,
+            tier: reg?.tier || null,                  // null = '(级别待定)' 不假分
+            capabilities: reg?.capabilities || [],    // [] → 默认 '二元 YES/NO 判定'
+            licensed_domains: reg?.licensed_domains || [],
+            frozen: reg?.frozen || false,
+            status: reg?.status || 'active',          // 缺则默认 active (= legacy is_oracle=1)
+            _stats: null,
+            _stakeKas: 0,
           };
-        } else {
-          this.trustError = '池数据接口异常: /api/oracle-pool/chain-snapshot (canonical 单一源)';
-        }
-        this.trustLoading = false;
+        });
 
-        // c 每市场信任 — only v0.6 markets, fetch decode in parallel (cap 20 to avoid spam)
-        if (mktResp.status === 'fulfilled' && mktResp.value?.ok) {
-          const raw = (mktResp.value.markets || []).slice(0, 20);
-          const decoded = await Promise.allSettled(raw.map(m =>
-            fetch(`/api/pool/market/${m.id}/v06-settle-decode`).then(r => r.ok ? r.json() : null).catch(() => null)
-          ));
-          this.markets = raw.map((m, i) => ({
-            market: m,
-            decode: decoded[i].status === 'fulfilled' && decoded[i].value?.ok ? decoded[i].value : null,
-          })).filter(x => x.decode);   // only show v0.6 (decode returns 400 for v0.5, filtered)
+        // 并行拉每 oracle reputation (= 工作 + 盈利)
+        const repResults = await Promise.all(
+          oracles.map(o => fetch(`/api/oracle/${encodeURIComponent(o.relay_node_id)}/reputation`).then(x => x.json()).catch(() => null))
+        );
+        for (let i = 0; i < oracles.length; i++) {
+          const o = oracles[i];
+          const rep = repResults[i];
+          o._stats = rep?.history || null;
+          // 质押: pubkey 在则查 chain_snapshot; 不在 (= registry 空) 则 0
+          o._stakeKas = (o.pubkey && stakeByPk[o.pubkey]) ? stakeByPk[o.pubkey] : 0;
         }
-        this.marketsLoading = false;
+        this.oracles = oracles;
       } catch (e) {
-        this.trustError = '加载信任系统失败: ' + e.message;
-        this.trustLoading = false;
-        this.marketsLoading = false;
+        this.oraclesError = '加载仲裁人名册失败: ' + (e.message || e);
       }
+      this.loading = false;
     },
 
-    // ─── MINE TAB (view 1 operator, 5 块) ───
-
-    async loadMineAgents() {
+    async loadActiveMarkets() {
+      this.marketsLoading = true;
       try {
-        // /api/oracles legacy is_oracle 兼容路径 (= operator-self-view 注册即可显). 新模型 oracle 身份 canonical = oracle_stake_enrollments, 见 docs/DATABASE.md 预言机池层.
-        // (R-1 audit fix: /api/relays was 404 silent, oracle selector 跑空 — Owner UI audit 2026-05-30).
-        const r = await fetch('/api/oracles');
-        const j = await r.json();
-        this.agents = ((j && j.oracles) || [])
-          .map(x => ({ ...x, kasBalance: null }));
-      } catch (e) {
-        console.error('load oracle agents fail:', e);
-      } finally {
-        this.mineLoading = false;
-      }
+        // 进行中 = pending_oracle_deposits / pending_bettors / verifying / collecting_sigs
+        const r = await fetch('/api/pool/markets?limit=200').then(x => x.json());
+        const all = (r?.markets || []);
+        const activeStatus = new Set(['pending_oracle_deposits', 'pending_oracle_sampling', 'pending_bettors', 'verifying', 'collecting_sigs']);
+        const list = all.filter(m => activeStatus.has(m.protocol_status)).map(m => {
+          let title = m.id;
+          try { const o = JSON.parse(m.resolution_rule_spec || ''); title = o.title || title; } catch {}
+          return { ...m, title };
+        });
+        this.activeMarkets = list;
+      } catch {}
+      this.marketsLoading = false;
     },
 
-    async loadMine() {
-      const a = this.agent;
-      if (!a) return;
-      this.income = null; this.maxPot = null;
-      this.incomeError = ''; this.maxPotError = '';
-      this.oraclePk = '';
-
-      const fetchJson = async (url) => {
-        const r = await fetch(url);
-        if (!r.ok) {
-          const txt = await r.text().catch(() => '');
-          throw new Error('HTTP ' + r.status + (txt ? (' ' + txt.slice(0,80)) : ''));
-        }
-        return r.json();
-      };
-
-      // step 1: derive PK
-      let pk = '';
+    async loadAgents() {
+      this.agentsLoading = true;
       try {
-        const pkResp = await fetchJson(`/api/relay/${a.id}/pubkey`);
-        pk = (pkResp.pubkey || pkResp.pk || '').toLowerCase();
-        this.oraclePk = pk;
-      } catch (e) {
-        this.incomeError = 'pubkey 获取失败: ' + e.message;
-        this.maxPotError = this.incomeError;
-        return;
-      }
+        const r = await fetch('/api/agent/profile').then(x => x.json());
+        const list = Array.isArray(r) ? r : (r.agents || []);
+        this.myAgents = list.filter(a => !a.is_dex_broker);
+      } catch {}
+      this.agentsLoading = false;
+    },
 
-      // step 2: parallel fetch
-      this.incomeLoading = true; this.maxPotLoading = true;
-      try {
-        const [bal, inc, mp] = await Promise.allSettled([
-          fetchJson(`/api/relay/${a.id}/balance`),
-          fetchJson(`/api/oracle/income/${pk}`),
-          fetchJson(`/api/oracle/max-pot/${pk}`),
-        ]);
-        if (bal.status === 'fulfilled') {
-          a.kasBalance = (typeof bal.value === 'number') ? bal.value : (bal.value?.balance ?? null);
-        }
-        if (inc.status === 'fulfilled') {
-          this.income = inc.value;
-        } else {
-          this.incomeError = '收入接口报错: ' + (inc.reason?.message || 'unknown');
-        }
-        if (mp.status === 'fulfilled') {
-          this.maxPot = mp.value;
-        } else {
-          this.maxPotError = '最大暴露接口报错: ' + (mp.reason?.message || 'unknown');
-        }
-      } finally {
-        this.incomeLoading = false; this.maxPotLoading = false;
-      }
+    onAgentChange() {
+      // selectedAgent + myOracleRecord 是 getter, 切换自动 render
     },
   };
 }
