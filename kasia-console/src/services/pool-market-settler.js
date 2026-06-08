@@ -899,7 +899,57 @@ export async function poolSettlerTick() {
     } catch (e) {
       console.warn(`[pool-settler:watchdog] phase fail: ${e.message}`);
     }
-    return { ok: true, processed: markets.length, consensus, refund, pending, doomed, errored };
+
+    // r419 (Bettor r429 关2 推进 Path B): re-derive from chain — authoritative 收敛.
+    // 防 Path A push broadcast 丢失. settler tick 扫 verifying cross-node markets, 查
+    // kaspa_tx_log 是否有 TX spend spine UTXO (= from_address = spine_p2sh). 找到即终态:
+    // - outputs ≥ 2 → settle (settle_aggregate 多输出: maker+bettors+oracles)
+    // - outputs = 1 → refund (refund_maker_unjoined 单输出)
+    // 仅 cross-node (= maker_relay_id 'cross-node:...') 走此路径 — local maker 由 settler 主线驱.
+    let pathBReconciled = 0;
+    try {
+      const stuckMarkets = sqlite.prepare(`
+        SELECT id, spine_p2sh, maker_relay_id, protocol_status, protocol_version
+        FROM pool_markets
+        WHERE protocol_status IN ('verifying', 'collecting_sigs')
+          AND maker_relay_id LIKE 'cross-node:%'
+          AND settle_txid IS NULL
+          AND refund_txid IS NULL
+      `).all();
+      for (const sm of stuckMarkets) {
+        const chainTx = sqlite.prepare(`
+          SELECT tx_id, outputs_json, block_time
+          FROM kaspa_tx_log
+          WHERE from_address = ?
+          ORDER BY block_time DESC
+          LIMIT 1
+        `).get(sm.spine_p2sh);
+        if (!chainTx) continue;
+        let outputCount = 0;
+        try {
+          const outs = JSON.parse(chainTx.outputs_json || '[]');
+          outputCount = Array.isArray(outs) ? outs.length : 0;
+        } catch {}
+        if (outputCount >= 2) {
+          // Settle: many outputs (maker+bettors+oracles).
+          sqlite.prepare('UPDATE pool_markets SET settle_txid = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+            .run(chainTx.tx_id, 'completed', sm.id);
+          console.log(`[pool-settler:path-b] re-derive cross-node SETTLED market=${sm.id.slice(0,12)} settle_txid=${chainTx.tx_id.slice(0,16)} outputs=${outputCount} (was ${sm.protocol_status})`);
+          pathBReconciled++;
+        } else if (outputCount === 1) {
+          // Refund: single output (maker).
+          sqlite.prepare('UPDATE pool_markets SET refund_txid = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+            .run(chainTx.tx_id, 'refunded', sm.id);
+          console.log(`[pool-settler:path-b] re-derive cross-node REFUNDED market=${sm.id.slice(0,12)} refund_txid=${chainTx.tx_id.slice(0,16)} (was ${sm.protocol_status})`);
+          pathBReconciled++;
+        }
+      }
+      if (pathBReconciled > 0) console.log(`[pool-settler:path-b] reconciled ${pathBReconciled} cross-node market(s) from chain this tick`);
+    } catch (e) {
+      console.warn(`[pool-settler:path-b] phase fail: ${e.message}`);
+    }
+
+    return { ok: true, processed: markets.length, consensus, refund, pending, doomed, errored, pathBReconciled };
   } finally {
     running = false;
   }
