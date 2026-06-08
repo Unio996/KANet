@@ -621,6 +621,19 @@ export async function poolSettlerTick() {
               try { Object.assign(cur, JSON.parse(market.metadata || '{}')); } catch {}
               cur.sample_fail_count = (cur.sample_fail_count || 0) + 1;
               cur.sample_last_err = sampleErr.message?.slice(0, 200);
+              // r416 (Bettor r412 提议 + r413 催执行): MAX_SAMPLE_FAIL=20 → 'unsettlable, committee_unformed'
+              // refund. 防 7un1d 类委员从未 sample 成功 + 永 backoff 1h cap 卡资金死循环.
+              // 20 次 ≈ 17h 累计 backoff (1+2+4+...+1+1...+1h cap), 已属 'fundamentally unsettlable'.
+              const MAX_SAMPLE_FAIL = 20;
+              if (cur.sample_fail_count >= MAX_SAMPLE_FAIL) {
+                console.warn(`[pool-settler] committee_unformed market=${market.id.slice(0,12)} sample_fail_count=${cur.sample_fail_count} >= MAX_SAMPLE_FAIL(${MAX_SAMPLE_FAIL}) → dispatchRefund (committee_unformed)`);
+                sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+                  .run(JSON.stringify(cur), market.id);
+                // Trigger refund; if cross-node, dispatchRefund 内 skip 自家 log (r402 broadcast path)
+                await dispatchRefund(market, { action: 'refund', reason: `committee_unformed (sample_fail=${cur.sample_fail_count}, last=${cur.sample_last_err?.slice(0,80) || 'n/a'})` });
+                refund++;
+                continue;
+              }
               // Exp backoff: 60s × 2^(N-1), cap 1h. After 10 fails (~17h cumulative) 退到 1h cap.
               const backoffSec = Math.min(60 * Math.pow(2, Math.max(0, cur.sample_fail_count - 1)), 3600);
               cur.skip_until_ms = Date.now() + backoffSec * 1000;
