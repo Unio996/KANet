@@ -317,9 +317,26 @@ export function sampleAndStoreCommittee(marketId, endBlockHash) {
   // current stake @ sample (= seed-aware grinding window opens after endBlockHash visible).
   // pool_pks + pool_stakes are aligned arrays in sortedPks order.
   const seed = deriveCommitteeSeed(marketId, endBlockHash, snapshot.pool_merkle_root);
+  // J1tn r303 P0-#1 sweep (Bettor r365b 问2 钦定): 同市场 broker∉oracle + maker∉oracle. derive
+  // excludePks from market row (公开链上字段 maker_pk + broker_pk, 跨节点 verifier 可重算).
+  // 防同 PK 双角色直接操纵 (= 收 broker fee + 当 oracle 投自家方向). Sybil 多 PK P2+ deferred.
+  const marketRow = sqlite.prepare('SELECT m.id, mr.address AS maker_address, br.address AS broker_address FROM pool_markets m LEFT JOIN relay_nodes mr ON mr.id = m.maker_relay_id LEFT JOIN relay_nodes br ON br.id = m.broker_relay_id WHERE m.id = ?').get(marketId);
+  const excludePks = [];
+  // maker_pk / broker_pk derive from address via x-only (= async needed but here sync, so look
+  // up from oracle_stake_enrollments where relay_address matches; or derive sync if WASM available).
+  // Simplest: look up x-only via stake_enrollments (already canonicalized).
+  if (marketRow?.maker_address) {
+    const mp = sqlite.prepare('SELECT staker_pk_x FROM oracle_stake_enrollments WHERE relay_address = ? LIMIT 1').get(marketRow.maker_address);
+    if (mp?.staker_pk_x) excludePks.push(String(mp.staker_pk_x).toLowerCase());
+  }
+  if (marketRow?.broker_address && marketRow.broker_address !== marketRow.maker_address) {
+    const bp = sqlite.prepare('SELECT staker_pk_x FROM oracle_stake_enrollments WHERE relay_address = ? LIMIT 1').get(marketRow.broker_address);
+    if (bp?.staker_pk_x) excludePks.push(String(bp.staker_pk_x).toLowerCase());
+  }
   const sampling = selectCommittee(
     snapshot.pool_pks.map((pk, i) => ({ pk_hex: pk, stake_sompi: BigInt(snapshot.pool_stakes[i]) })),
-    seed
+    seed,
+    { excludePks }
   );
   // J2-tn r349 (Owner 6/5 钦定 oracle-pool-source 焊死): pkToAddress 走访问器
   // (= canonical 单一源 oracle_stake_enrollments, fallback membership 防 stopgap).

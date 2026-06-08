@@ -72,9 +72,16 @@ export function deriveCommitteeSeed(marketId, endBlockHashHex, poolMerkleRootHex
  *       remove hit member, record draw_index
  *   - Reproducible: same (seed, members) → same selected (positional sort first for determinism)
  */
-export function selectCommittee(members, seed) {
-  if (!Array.isArray(members) || members.length < COMMITTEE_SIZE) {
-    throw new Error(`pool must have >= ${COMMITTEE_SIZE} members (got ${members?.length || 0})`);
+export function selectCommittee(members, seed, options = {}) {
+  // J1tn r303 P0-#1 sweep (Bettor r365b 问2 钦定 同市场 broker∉oracle, r367 sybil 框正 PK-level
+  // 隔离): excludePks 参数硬过滤 maker_pk + broker_pk 防同 PK 双角色操纵 (= 自家收 broker fee +
+  // 自家当 oracle 投票自家方向). 跨节点可验 (= excludePks 来自市场公开 maker_pk + broker_pk).
+  // Sybil 多 PK 共谋是 P2+ deferred 议题, 此 PK-level 隔离不防 sybil 但防 same-PK 直接操纵.
+  const excludePks = Array.isArray(options.excludePks)
+    ? new Set(options.excludePks.map(pk => String(pk || '').toLowerCase()))
+    : new Set();
+  if (!Array.isArray(members)) {
+    throw new Error(`pool members must be array (got ${typeof members})`);
   }
   if (!Buffer.isBuffer(seed) || seed.length !== 32) {
     throw new Error('seed must be 32-byte Buffer');
@@ -83,7 +90,11 @@ export function selectCommittee(members, seed) {
   const sorted = [...members].map(m => ({
     pk_hex: (m.pk_hex || m.pubkey).toLowerCase(),
     stake_sompi: BigInt(m.stake_sompi || m.stake || 0),
-  })).sort((a, b) => a.pk_hex < b.pk_hex ? -1 : (a.pk_hex > b.pk_hex ? 1 : 0));
+  })).filter(m => !excludePks.has(m.pk_hex))
+    .sort((a, b) => a.pk_hex < b.pk_hex ? -1 : (a.pk_hex > b.pk_hex ? 1 : 0));
+  if (sorted.length < COMMITTEE_SIZE) {
+    throw new Error(`pool must have >= ${COMMITTEE_SIZE} members after excludePks filter (got ${sorted.length}, excluded ${excludePks.size})`);
+  }
 
   for (const m of sorted) {
     if (m.stake_sompi <= 0n) throw new Error(`pool member ${m.pk_hex.slice(0, 12)}.. has non-positive stake`);
