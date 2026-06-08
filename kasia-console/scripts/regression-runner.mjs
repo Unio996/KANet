@@ -1026,16 +1026,15 @@ async function verifyV06(baselinePath) {
     const hasExtractorKindUsed = /extractor_kind_used/.test(voterSrc);
     // sub-e: settler 独立 abstainCount + trueSilentSet + abstainSet + malformedSet 全分 (= 不混)
     const settlerHasAllSets = /trueSilentSet/.test(settlerSrc) && /abstainSet/.test(settlerSrc) && /malformedSet/.test(settlerSrc);
-    // sub-f: _findSilentForWinner 函数体内 abstainSet 检查位置 AFTER malformedSet (= 优先级 ABSTAIN 最后, Bettor r408 真覆盖)
+    // sub-f: _findSilentForWinner 函数体不含 abstainSet 检查 (= ABSTAIN 永不被选为 forfeit, J2 r414 修)
     let findSilentBody = '';
     const fsfwMatch = settlerSrc.match(/function\s+_findSilentForWinner[\s\S]*?(?=\n\s*function|\n\s*if\s*\(\s*yesCount\s*>=)/);
     if (fsfwMatch) findSilentBody = fsfwMatch[0];
-    const malformedPos = findSilentBody.indexOf('malformedSet.has');
-    const abstainPos = findSilentBody.indexOf('abstainSet.has');
-    const settlerAbstainLastPriority = findSilentBody && malformedPos > 0 && abstainPos > malformedPos;
-    const allOk = !hasGuessFallback && hasAbstainReturn && hasOutcomeEnum && hasExtractorKindUsed && settlerHasAllSets && settlerAbstainLastPriority;
+    // 强守: function body 必含 malformedSet.has (= 仍 priority 2) 且 不含 abstainSet.has (= ABSTAIN 永不当 forfeit, spec 5.5)
+    const settlerAbstainNotInFindSilent = findSilentBody && findSilentBody.includes('malformedSet.has') && !findSilentBody.includes('abstainSet.has');
+    const allOk = !hasGuessFallback && hasAbstainReturn && hasOutcomeEnum && hasExtractorKindUsed && settlerHasAllSets && settlerAbstainNotInFindSilent;
     check(
-      'L37 Oracle 判断框架: ABSTAIN-not-guess + 三态 enum + ABSTAIN forfeit 优先级最后 (Bettor r401-r408, J2 b5113af5+r413)',
+      'L37 Oracle 判断框架: ABSTAIN-not-guess + 三态 enum + ABSTAIN 永不当 forfeit (Bettor r401-r414, J2 b5113af5+r413+r414)',
       allOk,
       {
         voter_no_guess_fallback: !hasGuessFallback,
@@ -1043,12 +1042,41 @@ async function verifyV06(baselinePath) {
         voter_has_outcome_enum_abstain: hasOutcomeEnum,
         voter_broadcasts_extractor_kind: hasExtractorKindUsed,
         settler_has_all_three_sets: settlerHasAllSets,
-        settler_abstain_last_priority_in_findSilent: settlerAbstainLastPriority,
-        note: allOk ? 'ABSTAIN-not-guess + 4 优先级 (silent>malformed>dissent>ABSTAIN) 守门完整' : '任一回归 → guess fallback 重生 / 三 set 混 / abstain 抢 forfeit 立 hard FAIL'
+        settler_abstain_not_in_findSilent: settlerAbstainNotInFindSilent,
+        note: allOk ? 'ABSTAIN-not-guess + ABSTAIN 永不当 forfeit (J2 r414 修) 守门完整' : '任一回归 → guess fallback 重生 / 三 set 混 / abstain 被选 forfeit 立 hard FAIL'
       }
     );
   } catch (e) {
     check('L37 ABSTAIN framework (probe)', false, { err: e.message }, 'soft');
+  }
+
+  // L38 Bettor r416 三桶 UI 渲染守 (KANet-UI c5ece2c1, spec §7.2)
+  // = predictions-pool-detail.eta 三桶 judged/abstain/silent 分明 + 不混
+  try {
+    const detailPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/predictions-pool-detail.eta');
+    const src = fs.readFileSync(detailPath, 'utf8');
+    // sub-a: 三桶 count 函数都在 (= judgedCount + abstainCount + silentCount)
+    const hasAllCounts = /judgedCount\s*\(/.test(src) && /abstainCount\s*\(/.test(src) && /silentCount\s*\(/.test(src);
+    // sub-b: 三态 文案 '判定 / 弃权 / 未响应'
+    const hasZhTerms = /判定/.test(src) && /弃权/.test(src) && /未响应/.test(src);
+    // sub-c: ABSTAIN 视觉独立 silent (= tooltip '不计 4-of-5' or '不损 stake' 类)
+    const hasAbstainTooltip = /不计\s*4-of-5|不损\s*stake|看了但判不了/.test(src);
+    // sub-d: vote === 'ABSTAIN' 分支独立 vote === 'silent' 分支 (= 不归 silent forfeit)
+    const distinguishedAbstainSilent = /vote\s*===\s*['"]ABSTAIN['"]/.test(src) && /vote\s*===\s*['"]silent['"]/.test(src);
+    const allOk = hasAllCounts && hasZhTerms && hasAbstainTooltip && distinguishedAbstainSilent;
+    check(
+      'L38 三桶 UI 渲染: judged/abstain/silent 分明 + ABSTAIN 不混 silent (Bettor r416, KANet-UI c5ece2c1, spec §7.2)',
+      allOk,
+      {
+        ui_has_all_three_counts: hasAllCounts,
+        ui_has_zh_terms: hasZhTerms,
+        ui_has_abstain_tooltip: hasAbstainTooltip,
+        ui_distinguishes_abstain_silent: distinguishedAbstainSilent,
+        note: allOk ? '三桶 UI 守门完整 守 spec 5.5 弃权 reputation 中性' : '任一回归 → abstain 混入 voted / silent 错算 / tooltip 文案漂'
+      }
+    );
+  } catch (e) {
+    check('L38 三桶 UI (probe)', false, { err: e.message }, 'soft');
   }
 
   const total = report.pass + report.fail + report.deploy_pending;
