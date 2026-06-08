@@ -895,6 +895,37 @@ async function verifyV06(baselinePath) {
     check('L32 4 线并行 (probe)', false, { err: e.message }, 'soft');
   }
 
+  // L33 Bettor r361 P0-A MVP 锁契约: /api/pool/prevet 守门 (J2 c13bba63 + KANet-UI 36937d5d+81cac7fa+be9202cb ship)
+  // 4 sub: 0 残留旧 URL + UI 用新 URL + 0 false confidence 词 + backend route 注册
+  try {
+    const createEtaPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/predictions-pool-create.eta');
+    const poolApiPath = path.resolve(REPO_ROOT, 'kasia-console/src/api/pool.js');
+    const createSrc = fs.readFileSync(createEtaPath, 'utf8');
+    const poolSrc = fs.readFileSync(poolApiPath, 'utf8');
+    // sub-a: UI 0 hit '/api/oracle/prevet' (= 守 URL 锁修不漂回)
+    const oldUrlInUi = createSrc.includes('/api/oracle/prevet');
+    // sub-b: UI 有 '/api/pool/prevet' (= 守新 URL 在用)
+    const newUrlInUi = /\/api\/pool\/prevet/.test(createSrc);
+    // sub-c: UI 0 hit 'certified/verified/guaranteed' (= 防 false confidence, Bettor r361b/KANet-UI r633 钉死)
+    const hasBadWords = /\bcertified\b|\bverified\b|\bguaranteed\b/i.test(createSrc);
+    // sub-d: backend pool.js 注册 POST /api/pool/prevet route
+    const backendRouteRegistered = /fastify\.post\(['"]\/api\/pool\/prevet['"]/.test(poolSrc);
+    const allOk = !oldUrlInUi && newUrlInUi && !hasBadWords && backendRouteRegistered;
+    check(
+      'L33 P0-A MVP /api/pool/prevet 锁契约 + 0 false confidence (Bettor r361/r363/r364, J2 c13bba63, KANet-UI 36937d5d+be9202cb)',
+      allOk,
+      {
+        ui_no_old_oracle_url: !oldUrlInUi,
+        ui_has_new_pool_url: newUrlInUi,
+        ui_no_certified_verified_guaranteed: !hasBadWords,
+        backend_route_registered: backendRouteRegistered,
+        note: allOk ? 'P0-A MVP 锁契约守门完整' : '任一回归 → URL 漂回 oracle / false confidence 串入 / route 删'
+      }
+    );
+  } catch (e) {
+    check('L33 P0-A 锁契约 (probe)', false, { err: e.message }, 'soft');
+  }
+
   const total = report.pass + report.fail + report.deploy_pending;
   if (report.fail > 0) report.verdict = 'FAIL';
   else if (report.deploy_pending > 0) report.verdict = 'PASS_WITH_DEPLOY_PENDING';
